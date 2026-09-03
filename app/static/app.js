@@ -205,7 +205,7 @@
           <td><input type="checkbox" value="${t.id}" ${state.selected.has(t.id) ? 'checked' : ''}></td>
           <td>${fmtDate(t.txn_date)}${t.txn_time ? '<br><small>' + t.txn_time.slice(0, 5) + '</small>' : ''}</td>
           <td class="desc">${esc(t.description)}${t.bank_ref ? `<br><small class="tag">${esc(t.bank_ref)}</small>` : ''}${t.labeled_by && t.labeled_by.startsWith('rule') ? '<span class="tag" title="Gán bởi quy tắc">auto</span>' : ''}</td>
-          <td>${esc(t.counterparty)}</td>
+          <td class="cp">${esc(t.counterparty)}</td>
           <td class="num pos">${t.amount > 0 ? money(t.amount) : ''}</td>
           <td class="num neg">${t.amount < 0 ? money(-t.amount) : ''}</td>
           <td><select class="cat">${categoryOptions(t.category_code || 'CHUA_PHAN_LOAI')}</select>
@@ -236,10 +236,13 @@
     }
     if (e.target.matches('button.mkrule')) {
       const desc = tr.querySelector('td.desc').childNodes[0].textContent.trim();
-      const kw = prompt('Từ khoá để nhận diện các giao dịch tương tự (có thể sửa):', desc.split(/\s+/).slice(0, 3).join(' '));
+      const cp = tr.querySelector('td.cp').textContent.trim();
+      const suggestion = cp || desc.replace(/^customer\s+/i, '').split(/\s+/).slice(0, 3).join(' ');
+      const kw = prompt('Từ khoá để nhận diện các giao dịch tương tự (có thể sửa):', suggestion);
       if (!kw) return;
       const out = tr.querySelector('td.neg').textContent.trim() !== '';
       $('#ruleId').value = ''; $('#ruleName').value = kw; $('#rulePattern').value = kw; $('#ruleMatch').value = 'contains';
+      $('#ruleField').value = cp && kw === cp ? 'counterparty' : 'all';
       $('#ruleDirection').value = out ? 'out' : 'in'; $('#rulePriority').value = 50; $('#ruleCategory').value = tr.querySelector('select.cat').value; $('#ruleEnabled').checked = true;
       showTab('rules'); $('#rulePattern').focus();
     }
@@ -267,6 +270,7 @@
       const r = await api('/api/import?dry_run=' + dryRun, { method: 'POST', body: fd });
       $('#importResult').className = 'note ok';
       $('#importResult').innerHTML = `${dryRun ? 'Xem trước' : 'Đã nhập'}: đọc được <b>${r.parsed}</b> giao dịch · ${dryRun ? 'sẽ nhập' : 'đã nhập'} <b>${r.imported}</b> · trùng bỏ qua <b>${r.skipped_duplicates}</b> · tự gán nhãn <b>${r.auto_labeled}</b> · chưa phân loại <b>${r.unlabeled}</b>` +
+        (r.meta && (r.meta.owner_name || r.meta.account_no) ? `<br>Sao kê của <b>${esc(r.meta.owner_name || '')}</b> ${r.meta.account_no ? 'STK ' + esc(r.meta.account_no) : ''}${r.meta.opening_balance != null ? ' · số dư đầu kỳ ' + money(r.meta.opening_balance) : ''}${r.meta.closing_balance != null ? ' · cuối kỳ ' + money(r.meta.closing_balance) : ''}` : '') +
         (r.errors.length ? `<br><span class="neg">${r.errors.length} dòng lỗi: ${r.errors.slice(0, 5).map((x) => `dòng ${x.row}: ${esc(x.error)}`).join('; ')}</span>` : '');
       if (dryRun) {
         $('#importCommit').disabled = r.imported === 0;
@@ -282,7 +286,7 @@
   async function loadRules() {
     try {
       const rules = await api('/api/rules');
-      $('#rulesTable tbody').innerHTML = rules.map((r) => `<tr data-id="${r.id}"><td>${r.priority}</td><td>${esc(r.name)}${r.is_system ? '<span class="tag">mặc định</span>' : ''}</td><td><code>${esc(r.pattern)}</code></td><td>${r.match_type}</td><td>${{ in: 'vào', out: 'ra', any: 'cả hai' }[r.direction]}</td><td>${esc(r.category_name || r.category_code)}</td><td>${r.enabled ? '✓' : '—'}</td><td><button class="icon edit" title="Sửa">✎</button><button class="icon del" title="Xoá">✕</button></td></tr>`).join('');
+      $('#rulesTable tbody').innerHTML = rules.map((r) => `<tr data-id="${r.id}"><td>${r.priority}</td><td>${esc(r.name)}${r.is_system ? '<span class="tag">mặc định</span>' : ''}</td><td><code>${esc(r.pattern)}</code></td><td>${r.match_type}</td><td>${{ in: 'vào', out: 'ra', any: 'cả hai' }[r.direction]}</td><td>${{ all: 'ND + đối tác', description: 'nội dung', counterparty: 'đối tác' }[r.field || 'all']}</td><td>${esc(r.category_name || r.category_code)}</td><td>${r.enabled ? '✓' : '—'}</td><td><button class="icon edit" title="Sửa">✎</button><button class="icon del" title="Xoá">✕</button></td></tr>`).join('');
       state.rules = rules;
     } catch (e) { onErr(e); }
   }
@@ -290,12 +294,12 @@
     const tr = e.target.closest('tr'); if (!tr) return; const id = +tr.dataset.id; const r = state.rules.find((x) => x.id === id);
     if (e.target.matches('.edit')) {
       $('#ruleFormTitle').textContent = 'Sửa quy tắc #' + id; $('#ruleCancel').hidden = false;
-      $('#ruleId').value = id; $('#ruleName').value = r.name; $('#rulePattern').value = r.pattern; $('#ruleMatch').value = r.match_type; $('#ruleDirection').value = r.direction; $('#rulePriority').value = r.priority; $('#ruleCategory').value = r.category_code; $('#ruleEnabled').checked = !!r.enabled;
+      $('#ruleId').value = id; $('#ruleName').value = r.name; $('#rulePattern').value = r.pattern; $('#ruleMatch').value = r.match_type; $('#ruleDirection').value = r.direction; $('#ruleField').value = r.field || 'all'; $('#rulePriority').value = r.priority; $('#ruleCategory').value = r.category_code; $('#ruleEnabled').checked = !!r.enabled;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
     if (e.target.matches('.del')) { if (!confirm('Xoá quy tắc này?')) return; try { await api('/api/rules/' + id, { method: 'DELETE' }); toast('Đã xoá'); loadRules(); } catch (err) { onErr(err); } }
   });
-  const ruleBody = () => ({ name: $('#ruleName').value, pattern: $('#rulePattern').value, match_type: $('#ruleMatch').value, direction: $('#ruleDirection').value, category_code: $('#ruleCategory').value, priority: +$('#rulePriority').value, enabled: $('#ruleEnabled').checked });
+  const ruleBody = () => ({ name: $('#ruleName').value, pattern: $('#rulePattern').value, match_type: $('#ruleMatch').value, direction: $('#ruleDirection').value, field: $('#ruleField').value, category_code: $('#ruleCategory').value, priority: +$('#rulePriority').value, enabled: $('#ruleEnabled').checked });
   function resetRuleForm() { $('#ruleForm').reset(); $('#ruleId').value = ''; $('#rulePriority').value = 50; $('#ruleFormTitle').textContent = 'Thêm quy tắc'; $('#ruleCancel').hidden = true; $('#ruleTestResult').innerHTML = ''; }
   $('#ruleCancel').addEventListener('click', resetRuleForm);
   $('#ruleForm').addEventListener('submit', async (e) => {
@@ -304,7 +308,7 @@
   });
   $('#ruleTest').addEventListener('click', async () => {
     const b = ruleBody();
-    try { const r = await api(`/api/rules/test?pattern=${encodeURIComponent(b.pattern)}&match_type=${b.match_type}&direction=${b.direction}`);
+    try { const r = await api(`/api/rules/test?pattern=${encodeURIComponent(b.pattern)}&match_type=${b.match_type}&direction=${b.direction}&field=${b.field}`);
       $('#ruleTestResult').innerHTML = `Khớp <b>${r.count}</b> giao dịch hiện có.` + (r.items.length ? '<ul>' + r.items.slice(0, 8).map((t) => `<li>${fmtDate(t.txn_date)} · ${signed(t.amount)} · ${esc(t.description)}</li>`).join('') + '</ul>' : '');
     } catch (err) { onErr(err); }
   });
@@ -336,11 +340,11 @@
 
   // -------------------------------------------------------------- Settings
   async function loadSettings() {
-    try { const s = await api('/api/settings'); $('#setShopName').value = s.shop_name; $('#setBankName').value = s.bank_name; $('#setAccountNo').value = s.account_no; $('#setVat').value = s.tax_vat_rate; $('#setPit').value = s.tax_pit_rate; $('#setThreshold').value = s.tax_threshold_year; $('#shopName').textContent = s.shop_name || 'HKT'; } catch (e) { onErr(e); }
+    try { const s = await api('/api/settings'); $('#setShopName').value = s.shop_name; $('#setBankName').value = s.bank_name; $('#setAccountNo').value = s.account_no; $('#setOwnerName').value = s.owner_name || ''; $('#setVat').value = s.tax_vat_rate; $('#setPit').value = s.tax_pit_rate; $('#setThreshold').value = s.tax_threshold_year; $('#shopName').textContent = s.shop_name || 'HKT'; } catch (e) { onErr(e); }
   }
   $('#settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await api('/api/settings', { method: 'PUT', body: { values: { shop_name: $('#setShopName').value, bank_name: $('#setBankName').value, account_no: $('#setAccountNo').value, tax_vat_rate: $('#setVat').value, tax_pit_rate: $('#setPit').value, tax_threshold_year: $('#setThreshold').value } } }); toast('Đã lưu cài đặt'); loadSettings(); } catch (err) { onErr(err); }
+    try { await api('/api/settings', { method: 'PUT', body: { values: { shop_name: $('#setShopName').value, bank_name: $('#setBankName').value, account_no: $('#setAccountNo').value, owner_name: $('#setOwnerName').value, tax_vat_rate: $('#setVat').value, tax_pit_rate: $('#setPit').value, tax_threshold_year: $('#setThreshold').value } } }); toast('Đã lưu cài đặt'); loadSettings(); } catch (err) { onErr(err); }
   });
   $('#deleteAll').addEventListener('click', async () => {
     if (prompt('Gõ XOA để xác nhận xoá toàn bộ giao dịch:') !== 'XOA') return;

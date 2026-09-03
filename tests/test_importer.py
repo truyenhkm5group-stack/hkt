@@ -108,3 +108,41 @@ def test_fingerprint_prefers_bank_ref():
     b = importer.fingerprint("2026-08-01", 100, "khac", "REF1")
     c = importer.fingerprint("2026-08-01", 100, "abc", None)
     assert a == b and a != c
+
+
+def _mb_so_phu_xlsx():
+    """Mô phỏng file 'Sổ phụ chi tiết kiêm báo nợ/báo có' xuất từ MBBank (tên/số TK giả)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([None, "SỔ PHỤ CHI TIẾT KIÊM BÁO NỢ/BÁO CÓ", None, None, None, None, "NGÂN HÀNG TMCP QUÂN ĐỘI"])
+    ws.append([None, "Từ ngày / From: 01/08/2026 Đến ngày / To: 31/08/2026"])
+    ws.append(["Tên khách hàng/ Customer name: NGUYEN VAN A", None, None, None, None, None, None,
+               "Tài khoản/ Account No: 1234567890"])
+    ws.append(["Số dư đầu kỳ/ Opening Balance: 2,154 VND"])
+    ws.append(["Ngày giao dịch", "Ngày hạch toán", "Số bút toán", "Phát sinh nợ", "Phát sinh có", "Số dư lũy kế",
+               "Nội dung", "Đơn vị thụ hưởng/ Đơn vị chuyển", "Tài khoản", "Ngân hàng đối tác"])
+    ws.append(["Transaction date", "Accounting Date", "Transaction No", "Debit", "Credit", "Accumulated balance",
+               "Details", "Beneficiary/Applicant", "Account", "Remitter Bank"])
+    ws.append(["05/08/2026 14:08:08", "05/08/2026", "FT26217021601512", "", "3,122,361", "3,124,515",
+               "Tong cong ty co phan Buu chinh Viet VTP GLMTQY05", "TONG CONG TY CO PHAN BUU CHINH VIETTEL", "0001", "MB"])
+    ws.append(["10/08/2026 09:45:51", "10/08/2026", "FT26222139215282", "500,000", "", "2,624,515",
+               "CUSTOMER NGUYEN VAN A chuyen tien. DEN: NGUYEN VAN A", "NGUYEN VAN A", "0002", "MB"])
+    ws.append(["Tổng phát sinh trong kỳ / Total", None, None, "500,000", "3,122,361"])
+    ws.append(["Số dư cuối kỳ / Closing Balance: 2,624,515 VND (Bằng chữ / In Words: Hai triệu ...)"])
+    ws.append(["Chứng từ này được xuất tự động từ hệ thống của Ngân hàng TMCP Quân đội."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_parse_mb_so_phu_layout():
+    r = importer.parse_statement_full("SAO_KE_TAI_KHOAN.xlsx", _mb_so_phu_xlsx())
+    assert r["errors"] == []
+    txns = r["transactions"]
+    assert len(txns) == 2  # bỏ dòng tiêu đề tiếng Anh, dòng tổng, dòng số dư cuối kỳ
+    assert txns[0]["amount"] == 3_122_361 and txns[0]["balance_after"] == 3_124_515
+    assert txns[0]["bank_ref"] == "FT26217021601512"
+    assert txns[0]["counterparty"] == "TONG CONG TY CO PHAN BUU CHINH VIETTEL"  # không phải cột "Ngân hàng đối tác"
+    assert txns[1]["amount"] == -500_000 and txns[1]["txn_time"] == "09:45:51"
+    assert r["meta"] == {"owner_name": "NGUYEN VAN A", "account_no": "1234567890",
+                         "opening_balance": 2154, "closing_balance": 2_624_515}

@@ -157,6 +157,9 @@
           <label>Chiều tiền
             <select id="ruleDirection"><option value="any">Vào + ra</option><option value="in">Tiền vào</option><option value="out">Tiền ra</option></select>
           </label>
+          <label>So khớp trên
+            <select id="ruleField"><option value="all">Nội dung + đối tác</option><option value="description">Chỉ nội dung</option><option value="counterparty">Chỉ tên đối tác</option></select>
+          </label>
           <label>Ưu tiên <input type="number" id="rulePriority" value="50" title="Nhỏ hơn = xét trước"></label>
         </div>
         <label>Gán vào danh mục <select id="ruleCategory" required></select></label>
@@ -168,7 +171,8 @@
         </div>
       </form>
       <div class="note" id="ruleTestResult"></div>
-      <p class="hint">Từ khoá so khớp <b>không phân biệt hoa thường và dấu</b> trên nội dung + đối tác. Quy tắc ưu tiên nhỏ được xét trước; quy tắc đầu tiên khớp sẽ thắng.</p>
+      <p class="hint">Từ khoá so khớp <b>không phân biệt hoa thường và dấu</b>. Quy tắc ưu tiên nhỏ được xét trước; quy tắc đầu tiên khớp sẽ thắng.
+        Chuỗi <code>{owner}</code> được thay bằng tên chủ tài khoản trong Cài đặt (dùng để nhận diện chuyển tiền cho chính mình).</p>
     </div>
     <div class="card">
       <h3>Chạy lại quy tắc</h3>
@@ -184,7 +188,7 @@
     <h3>Danh sách quy tắc</h3>
     <div class="tablewrap">
     <table class="rules" id="rulesTable">
-      <thead><tr><th>Ưu tiên</th><th>Tên</th><th>Từ khoá</th><th>Kiểu</th><th>Chiều</th><th>Danh mục</th><th>Bật</th><th></th></tr></thead>
+      <thead><tr><th>Ưu tiên</th><th>Tên</th><th>Từ khoá</th><th>Kiểu</th><th>Chiều</th><th>Khớp trên</th><th>Danh mục</th><th>Bật</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     </div>
@@ -232,6 +236,8 @@
         <label>Tên shop <input id="setShopName"></label>
         <label>Ngân hàng <input id="setBankName"></label>
         <label>Số tài khoản <input id="setAccountNo"></label>
+        <label>Tên chủ tài khoản (như trên sao kê, VD: NGUYEN VAN A) <input id="setOwnerName"></label>
+        <p class="hint">Tên chủ tài khoản dùng để nhận diện giao dịch chuyển tiền giữa các tài khoản của chính bạn. Tự điền khi nhập sao kê nếu còn trống.</p>
         <h4>Thuế hộ kinh doanh (ước tính)</h4>
         <div class="row">
           <label>Thuế GTGT (% doanh thu) <input type="number" step="0.1" id="setVat"></label>

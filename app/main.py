@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import categories as cat
 from . import db, importer, reports
-from .rules import load_rules, suggest, normalize
+from .rules import expand_owner, load_rules, rule_matches, suggest
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -92,6 +92,7 @@ class RuleIn(BaseModel):
     category_code: str
     priority: int = 100
     enabled: bool = True
+    field: str = "all"
 
 
 class ApplyRules(BaseModel):
@@ -295,10 +296,18 @@ async def import_statement(file: UploadFile = File(...), dry_run: bool = False):
     if not data:
         raise HTTPException(400, "File rỗng")
     try:
-        txns, errors = importer.parse_statement(file.filename, data)
+        parsed = importer.parse_statement_full(file.filename, data)
     except importer.ImportError_ as e:
         raise HTTPException(400, str(e))
+    txns, errors, meta = parsed["transactions"], parsed["errors"], parsed["meta"]
     with db.get_conn() as conn:
+        # Tự điền tên chủ tài khoản / số tài khoản từ sao kê nếu Cài đặt còn trống
+        if not dry_run:
+            current = db.get_settings(conn)
+            for key in ("owner_name", "account_no"):
+                if meta.get(key) and not current.get(key):
+                    conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                                 (key, meta[key]))
         rules = load_rules(conn)
         cats = {r["code"]: r["name"] for r in conn.execute("SELECT code, name FROM categories")}
         existing = {r[0] for r in conn.execute("SELECT fingerprint FROM transactions WHERE fingerprint IS NOT NULL")}
@@ -326,7 +335,7 @@ async def import_statement(file: UploadFile = File(...), dry_run: bool = False):
                      t["balance_after"], code, f"rule:{rule_id}" if rule_id else None, t["fingerprint"]))
             imported += 1
     return {"dry_run": dry_run, "parsed": len(txns), "imported": imported, "skipped_duplicates": skipped,
-            "auto_labeled": labeled, "unlabeled": imported - labeled, "errors": errors, "preview": preview}
+            "auto_labeled": labeled, "unlabeled": imported - labeled, "errors": errors, "meta": meta, "preview": preview}
 
 
 # ------------------------------------------------------------------ rules
@@ -345,6 +354,8 @@ def _validate_rule(conn, body: RuleIn):
         raise HTTPException(400, "match_type phải là contains/regex")
     if body.direction not in ("in", "out", "any"):
         raise HTTPException(400, "direction phải là in/out/any")
+    if body.field not in ("all", "description", "counterparty"):
+        raise HTTPException(400, "field phải là all/description/counterparty")
     if not body.pattern.strip():
         raise HTTPException(400, "pattern không được rỗng")
     if body.match_type == "regex":
@@ -361,9 +372,9 @@ def create_rule(body: RuleIn):
     with db.get_conn() as conn:
         _validate_rule(conn, body)
         cur = conn.execute(
-            "INSERT INTO rules(name, pattern, match_type, direction, category_code, priority, enabled) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO rules(name, pattern, match_type, direction, category_code, priority, enabled, field) VALUES(?,?,?,?,?,?,?,?)",
             (body.name, body.pattern.strip(), body.match_type, body.direction, body.category_code, body.priority,
-             int(body.enabled)))
+             int(body.enabled), body.field))
         return _row(conn.execute("SELECT * FROM rules WHERE id=?", (cur.lastrowid,)).fetchone())
 
 
@@ -374,9 +385,9 @@ def update_rule(rule_id: int, body: RuleIn):
             raise HTTPException(404, "Không tìm thấy quy tắc")
         _validate_rule(conn, body)
         conn.execute(
-            "UPDATE rules SET name=?, pattern=?, match_type=?, direction=?, category_code=?, priority=?, enabled=? WHERE id=?",
+            "UPDATE rules SET name=?, pattern=?, match_type=?, direction=?, category_code=?, priority=?, enabled=?, field=? WHERE id=?",
             (body.name, body.pattern.strip(), body.match_type, body.direction, body.category_code, body.priority,
-             int(body.enabled), rule_id))
+             int(body.enabled), body.field, rule_id))
         return _row(conn.execute("SELECT * FROM rules WHERE id=?", (rule_id,)).fetchone())
 
 
@@ -418,12 +429,14 @@ def apply_rules(body: ApplyRules):
 
 
 @app.get("/api/rules/test")
-def test_rule(pattern: str, match_type: str = "contains", direction: str = "any", limit: int = 50):
+def test_rule(pattern: str, match_type: str = "contains", direction: str = "any", field: str = "all", limit: int = 50):
     """Xem trước: quy tắc này sẽ khớp những giao dịch nào."""
-    rule = {"id": 0, "pattern": pattern, "match_type": match_type, "direction": direction, "enabled": 1,
-            "category_code": "", "priority": 0}
-    from .rules import rule_matches
     with db.get_conn() as conn:
+        pattern = expand_owner(pattern, db.get_settings(conn).get("owner_name", ""), match_type)
+        if pattern is None:
+            raise HTTPException(400, "Quy tắc dùng {owner} nhưng chưa có tên chủ tài khoản trong Cài đặt")
+        rule = {"id": 0, "pattern": pattern, "match_type": match_type, "direction": direction, "enabled": 1,
+                "category_code": "", "priority": 0, "field": field}
         rows = conn.execute("SELECT id, txn_date, amount, description, counterparty, category_code FROM transactions "
                             "ORDER BY txn_date DESC LIMIT 5000").fetchall()
     matched = [dict(r) for r in rows if rule_matches(rule, r["description"], r["counterparty"], r["amount"])]

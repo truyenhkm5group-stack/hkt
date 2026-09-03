@@ -89,3 +89,49 @@ def test_settings_and_delete_all(client):
     assert client.delete("/api/transactions").status_code == 400
     assert client.delete("/api/transactions?confirm=XOA").json()["deleted"] == 1
     assert client.get("/").status_code == 200
+
+
+def test_import_fills_owner_and_owner_rule_applies(client):
+    from tests.test_importer import _mb_so_phu_xlsx
+    r = client.post("/api/import", files={"file": ("sao_ke.xlsx", _mb_so_phu_xlsx(), "application/octet-stream")})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["meta"]["owner_name"] == "NGUYEN VAN A"
+    s = client.get("/api/settings").json()
+    assert s["owner_name"] == "NGUYEN VAN A" and s["account_no"] == "1234567890"
+    tx = {t["description"]: t for t in client.get("/api/transactions").json()["items"]}
+    assert tx["CUSTOMER NGUYEN VAN A chuyen tien. DEN: NGUYEN VAN A"]["category_code"] == "CHUYEN_NOI_BO"
+    assert tx["Tong cong ty co phan Buu chinh Viet VTP GLMTQY05"]["category_code"] == "DT_BAN_HANG"
+    # quy tắc theo tên đối tác
+    r = client.post("/api/rules", json={"name": "NCC Viettel", "pattern": "buu chinh viettel", "field": "counterparty",
+                                        "direction": "in", "category_code": "DT_DICH_VU", "priority": 1})
+    assert r.status_code == 201 and r.json()["field"] == "counterparty"
+    assert client.get("/api/rules/test?pattern=buu chinh viettel&field=counterparty").json()["count"] == 1
+    assert client.get("/api/rules/test?pattern=buu chinh viettel&field=description").json()["count"] == 0
+    assert client.post("/api/rules", json={"pattern": "x", "field": "bogus", "category_code": "DT_DICH_VU"}).status_code == 400
+    r = client.post("/api/rules/apply", json={"only_unclassified": False}).json()
+    assert r["updated"] == 1
+
+
+def test_schema_migration_adds_field_column(tmp_path, monkeypatch):
+    import sqlite3
+    from app import db
+    path = str(tmp_path / "old.sqlite3")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE categories (code TEXT PRIMARY KEY, name TEXT NOT NULL, grp TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'any',
+            description TEXT NOT NULL DEFAULT '', is_system INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE rules (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', pattern TEXT NOT NULL,
+            match_type TEXT NOT NULL DEFAULT 'contains', direction TEXT NOT NULL DEFAULT 'any', category_code TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 100, enabled INTEGER NOT NULL DEFAULT 1, is_system INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO categories(code,name,grp) VALUES('DT_BAN_HANG','x','REVENUE');
+        INSERT INTO rules(name, pattern, category_code, is_system) VALUES('Lãi tiền gửi','lai tien gui','DT_BAN_HANG',1);
+    """)
+    conn.commit(); conn.close()
+    db.init_db(path)
+    with db.get_conn(path) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(rules)")}
+        assert "field" in cols
+        names = [r[0] for r in conn.execute("SELECT name FROM rules ORDER BY id")]
+        assert names.count("Lãi tiền gửi") == 1          # không nhân đôi quy tắc đã có
+        assert "Chuyển tiền cho chính mình" in names     # quy tắc mới được bổ sung

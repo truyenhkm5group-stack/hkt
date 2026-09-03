@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS rules (
     category_code TEXT NOT NULL REFERENCES categories(code) ON DELETE CASCADE,
     priority      INTEGER NOT NULL DEFAULT 100,
     enabled       INTEGER NOT NULL DEFAULT 1,
-    is_system     INTEGER NOT NULL DEFAULT 0
+    is_system     INTEGER NOT NULL DEFAULT 0,
+    field         TEXT NOT NULL DEFAULT 'all'          -- 'all' | 'description' | 'counterparty'
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -84,6 +85,7 @@ def get_conn(path=None):
 def init_db(path=None):
     with get_conn(path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         # Danh mục hệ thống
         for i, (code, name, grp, kind, desc) in enumerate(cat.CATEGORIES):
             conn.execute(
@@ -93,16 +95,21 @@ def init_db(path=None):
                 "description=excluded.description, sort_order=excluded.sort_order",
                 (code, name, grp, kind, desc, i),
             )
-        # Quy tắc mặc định (chỉ thêm lần đầu)
-        n_rules = conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0]
-        if n_rules == 0:
-            conn.executemany(
-                "INSERT INTO rules(name, pattern, match_type, direction, category_code, priority, enabled, is_system) "
-                "VALUES(?,?,?,?,?,?,1,1)",
-                cat.DEFAULT_RULES,
-            )
+        # Quy tắc mặc định: thêm những quy tắc hệ thống chưa có (theo tên)
+        existing = {r[0] for r in conn.execute("SELECT name FROM rules WHERE is_system = 1")}
+        for name, pattern, mt, direction, code, prio, field in cat.DEFAULT_RULES:
+            if name not in existing:
+                conn.execute(
+                    "INSERT INTO rules(name, pattern, match_type, direction, category_code, priority, enabled, is_system, field) "
+                    "VALUES(?,?,?,?,?,?,1,1,?)", (name, pattern, mt, direction, code, prio, field))
         for k, v in cat.DEFAULT_SETTINGS.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?,?)", (k, v))
+
+
+def _migrate(conn):
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(rules)")}
+    if "field" not in cols:
+        conn.execute("ALTER TABLE rules ADD COLUMN field TEXT NOT NULL DEFAULT 'all'")
 
 
 def get_settings(conn):

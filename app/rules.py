@@ -37,13 +37,34 @@ def _pattern_matches(rule, text_norm):
     return False
 
 
+def _rule_text(rule, description, counterparty):
+    field = rule.get("field") or "all"
+    if field == "description":
+        return normalize(description)
+    if field == "counterparty":
+        return normalize(counterparty)
+    return normalize(f"{description} {counterparty}")
+
+
 def rule_matches(rule, description, counterparty, amount):
     if not rule.get("enabled", 1):
         return False
     if not _direction_ok(rule.get("direction", "any"), amount):
         return False
-    text_norm = normalize(f"{description} {counterparty}")
-    return _pattern_matches(rule, text_norm)
+    return _pattern_matches(rule, _rule_text(rule, description, counterparty))
+
+
+OWNER_PLACEHOLDER = "{owner}"
+
+
+def expand_owner(pattern, owner_name, match_type="contains"):
+    """Thay {owner} bằng tên chủ tài khoản (đã bỏ dấu). Trả None nếu cần owner mà chưa có."""
+    if OWNER_PLACEHOLDER not in (pattern or ""):
+        return pattern
+    owner = normalize(owner_name)
+    if not owner:
+        return None
+    return pattern.replace(OWNER_PLACEHOLDER, re.escape(owner) if match_type == "regex" else owner)
 
 
 def suggest(rules, description, counterparty, amount):
@@ -55,8 +76,20 @@ def suggest(rules, description, counterparty, amount):
 
 
 def load_rules(conn, enabled_only=True):
+    """Đọc quy tắc từ DB, thay {owner} bằng tên chủ tài khoản trong settings.
+    Quy tắc cần {owner} mà settings chưa có tên thì bị bỏ qua."""
     q = "SELECT * FROM rules"
     if enabled_only:
         q += " WHERE enabled = 1"
     q += " ORDER BY priority, id"
-    return [dict(r) for r in conn.execute(q)]
+    owner = conn.execute("SELECT value FROM settings WHERE key = 'owner_name'").fetchone()
+    owner = owner[0] if owner else ""
+    out = []
+    for r in conn.execute(q):
+        d = dict(r)
+        pattern = expand_owner(d["pattern"], owner, d.get("match_type", "contains"))
+        if pattern is None:
+            continue
+        d["pattern"] = pattern
+        out.append(d)
+    return out

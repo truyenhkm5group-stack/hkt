@@ -18,6 +18,8 @@ from datetime import date, datetime
 from .rules import normalize
 
 COLUMN_KEYWORDS = {
+    # thứ tự quan trọng: cột "Ngân hàng đối tác" phải bắt trước "đối tác"
+    "partner_bank": ["ngan hang doi tac", "ngan hang thu huong", "remitter bank", "beneficiary bank"],
     "date": ["ngay giao dich", "ngay gd", "ngay hieu luc", "ngay hach toan", "ngay", "transaction date", "trans date", "date"],
     "debit": ["so tien ghi no", "phat sinh no", "ghi no", "tien ra", "debit", "withdrawal", "rut"],
     "credit": ["so tien ghi co", "phat sinh co", "ghi co", "tien vao", "credit", "deposit", "nop"],
@@ -26,7 +28,8 @@ COLUMN_KEYWORDS = {
     "description": ["noi dung chi tiet", "noi dung", "dien giai", "mo ta", "description", "remark", "narrative", "chi tiet"],
     "ref": ["so tham chieu", "ma giao dich", "so but toan", "so giao dich", "reference", "transaction id", "ma gd", "ref"],
     "counterparty": ["ten doi tac", "doi tac", "tai khoan doi ung", "tk doi ung", "nguoi thu huong", "ben thu huong",
-                     "ten nguoi", "counterparty", "beneficiary", "doi ung"],
+                     "don vi thu huong", "thu huong", "don vi chuyen", "nguoi chuyen", "ten nguoi", "counterparty",
+                     "beneficiary", "applicant", "doi ung"],
 }
 
 DATE_FORMATS = [
@@ -190,8 +193,50 @@ def detect_header(rows, max_scan=40):
     )
 
 
+META_KEYWORDS = {
+    "owner_name": ["ten khach hang", "customer name", "chu tai khoan", "account holder", "ten tai khoan"],
+    "account_no": ["so tai khoan", "account no", "tai khoan/", "account number"],
+    "opening_balance": ["so du dau ky", "opening balance", "so du dau"],
+    "closing_balance": ["so du cuoi ky", "closing balance", "so du cuoi"],
+}
+
+
+def extract_meta(rows):
+    """Đọc thông tin đầu/cuối sao kê: chủ tài khoản, số tài khoản, số dư đầu/cuối kỳ."""
+    meta = {}
+    for row in rows:
+        for c in row or []:
+            if not isinstance(c, str) or ":" not in c:
+                continue
+            cn = normalize(c)
+            for key, kws in META_KEYWORDS.items():
+                if key in meta or not any(k in cn for k in kws):
+                    continue
+                value = c.split(":", 1)[1].strip()
+                if key in ("opening_balance", "closing_balance"):
+                    m = re.search(r"[\d][\d.,]*", value)
+                    if m:
+                        try:
+                            meta[key] = parse_amount(m.group(0))
+                        except ValueError:
+                            pass
+                elif key == "account_no":
+                    m = re.search(r"\d{6,}", value)
+                    if m:
+                        meta[key] = m.group(0)
+                elif value:
+                    meta[key] = value.split("(")[0].strip()
+    return meta
+
+
 def parse_statement(filename: str, data: bytes):
     """Trả về (list giao dịch đã chuẩn hoá, list lỗi theo dòng)."""
+    result = parse_statement_full(filename, data)
+    return result["transactions"], result["errors"]
+
+
+def parse_statement_full(filename: str, data: bytes):
+    """Như parse_statement nhưng kèm 'meta' (chủ tài khoản, số TK, số dư đầu/cuối kỳ)."""
     rows = read_rows(filename, data)
     header_idx, mapping = detect_header(rows)
     txns, errors = [], []
@@ -210,7 +255,14 @@ def parse_statement(filename: str, data: bytes):
             raw_date = cell(row, "date")
             if raw_date is None or not re.search(r"\d", str(raw_date)):
                 continue  # dòng trống hoặc dòng "Tổng cộng" không có ngày
-            txn_date, txn_time = parse_date(raw_date)
+            try:
+                txn_date, txn_time = parse_date(raw_date)
+            except ValueError:
+                # dòng chân trang kiểu "Số dư cuối kỳ: 6,494,320 VND" - không có số tiền phát sinh thì bỏ qua
+                has_money = any(cell(row, f) not in (None, "") for f in ("debit", "credit", "amount"))
+                if not has_money:
+                    continue
+                raise
 
             amount = None
             if "debit" in mapping or "credit" in mapping:
@@ -247,4 +299,4 @@ def parse_statement(filename: str, data: bytes):
             })
         except Exception as e:  # noqa: BLE001
             errors.append({"row": rn, "error": str(e)})
-    return txns, errors
+    return {"transactions": txns, "errors": errors, "meta": extract_meta(rows)}

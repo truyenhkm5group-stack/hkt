@@ -125,48 +125,54 @@ CATEGORIES = [
 UNCLASSIFIED_CODE = "CHUA_PHAN_LOAI"
 
 # Các quy tắc gán nhãn tự động mặc định.
-# (name, pattern, match_type, direction, category_code, priority)
+# (name, pattern, match_type, direction, category_code, priority, field)
 # pattern với match_type='contains': các từ khoá cách nhau bởi '|', so khớp
-# trên chuỗi đã bỏ dấu + viết thường của (nội dung + đối tác).
+# trên chuỗi đã bỏ dấu + viết thường. field = 'all' (nội dung + đối tác),
+# 'description' hoặc 'counterparty'. Chuỗi "{owner}" trong pattern được thay
+# bằng tên chủ tài khoản trong Cài đặt (tự điền khi nhập sao kê).
 # priority nhỏ hơn = xét trước.
 DEFAULT_RULES = [
+    # Chủ tài khoản chuyển cho chính mình (tài khoản/ví khác) - không phải doanh thu/chi phí
+    ("Chuyển tiền cho chính mình", "{owner}", "contains", "any", "CHUYEN_NOI_BO", 5, "counterparty"),
+    ("Trả nợ thẻ tín dụng", "thu no the tin dung|tra no the tin dung|the tin dung|credit card", "contains", "out", "TRA_NO_GOC", 8, "all"),
     # Ngân hàng
-    ("Lãi tiền gửi", "lai tien gui|tra lai|lai nhap goc|lai suat|interest", "contains", "in", "LAI_NGAN_HANG", 10),
-    ("Phí ngân hàng", "phi sms|sms banking|phi chuyen tien|phi chuyen khoan|phi quan ly tai khoan|phi thuong nien|phi duy tri|phi giao dich|phi dich vu ngan hang|phi dv nh|phi ck|phi tin nhan", "contains", "out", "PHI_NGAN_HANG", 10),
-    ("Nộp thuế", "nop thue|kho bac|thue gtgt|thue tncn|thue khoan|tong cuc thue|cuc thue|chi cuc thue", "contains", "out", "THUE_KHOAN", 10),
-    ("Lệ phí môn bài", "mon bai|le phi", "contains", "out", "LE_PHI_MON_BAI", 12),
+    ("Lãi tiền gửi", "lai tien gui|tra lai|lai nhap goc|lai suat|interest", "contains", "in", "LAI_NGAN_HANG", 10, "all"),
+    ("Phí ngân hàng", "phi sms|sms banking|phi chuyen tien|phi chuyen khoan|phi quan ly tai khoan|phi thuong nien|phi duy tri|phi giao dich|phi dich vu ngan hang|phi dv nh|phi ck|phi tin nhan", "contains", "out", "PHI_NGAN_HANG", 10, "all"),
+    ("Nộp thuế", "nop thue|kho bac|thue gtgt|thue tncn|thue khoan|tong cuc thue|cuc thue|chi cuc thue", "contains", "out", "THUE_KHOAN", 10, "all"),
+    ("Lệ phí môn bài", "mon bai|le phi", "contains", "out", "LE_PHI_MON_BAI", 12, "all"),
     # Hoàn tiền
-    ("Hoàn tiền khách", "hoan tien|hoan lai|refund|tra lai tien|huy don|tra hang", "contains", "out", "HOAN_TIEN", 20),
+    ("Hoàn tiền khách", "hoan tien|hoan lai|refund|tra lai tien|huy don|tra hang", "contains", "out", "HOAN_TIEN", 20, "all"),
     # Quảng cáo
-    ("Quảng cáo", "facebook|fb ads|meta platforms|metaplatforms|google ads|google*|tiktok ads|shopee ads|quang cao|ads", "contains", "out", "QUANG_CAO", 30),
+    ("Quảng cáo", "facebook|fb ads|meta platforms|metaplatforms|google ads|google*|tiktok ads|shopee ads|quang cao|ads", "contains", "out", "QUANG_CAO", 30, "all"),
     # Sàn TMĐT trả tiền cho shop
-    ("Sàn TMĐT thanh toán", "shopee|lazada|tiktok shop|tiktokshop|sendo|tiki|ecommerce|payout", "contains", "in", "DT_BAN_HANG", 40),
-    ("Phí sàn", "shopee|lazada|tiktok shop|sendo|tiki|phi san|phi dich vu san", "contains", "out", "PHI_SAN", 41),
+    ("Sàn TMĐT thanh toán", "shopee|lazada|tiktok shop|tiktokshop|sendo|tiki|ecommerce|payout", "contains", "in", "DT_BAN_HANG", 40, "all"),
+    ("Phí sàn", "shopee|lazada|tiktok shop|sendo|tiki|phi san|phi dich vu san", "contains", "out", "PHI_SAN", 41, "all"),
     # Đơn vị vận chuyển: tiền vào = COD thu hộ, tiền ra = phí ship
-    ("Vận chuyển COD về", "ghn|giao hang nhanh|ghtk|giao hang tiet kiem|viettel post|viettelpost|vtp|j&t|jt express|jnt|ninja van|ninjavan|best express|ahamoke|ahamove|grab|cod", "contains", "in", "DT_BAN_HANG", 50),
-    ("Phí ship", "ghn|giao hang nhanh|ghtk|giao hang tiet kiem|viettel post|viettelpost|vtp|j&t|jt express|jnt|ninja van|ninjavan|best express|ahamove|grab|phi ship|phi van chuyen|giao hang", "contains", "out", "VAN_CHUYEN_BAN", 51),
+    ("Vận chuyển COD về", "ghn|giao hang nhanh|ghtk|giao hang tiet kiem|viettel post|viettelpost|vtp|j&t|jt express|jnt|ninja van|ninjavan|best express|ahamoke|ahamove|grab|cod", "contains", "in", "DT_BAN_HANG", 50, "all"),
+    ("Phí ship", "ghn|giao hang nhanh|ghtk|giao hang tiet kiem|viettel post|viettelpost|vtp|j&t|jt express|jnt|ninja van|ninjavan|best express|ahamove|grab|phi ship|phi van chuyen|giao hang", "contains", "out", "VAN_CHUYEN_BAN", 51, "all"),
     # Nhập hàng
-    ("Nhập hàng", "nhap hang|mua hang|lay hang|tien hang|thanh toan hang|tt hang|don hang ncc|nha cung cap|xuong|1688|taobao|alibaba", "contains", "out", "MUA_HANG", 60),
-    ("Đóng gói", "thung carton|bao bi|tui zip|bang keo|dong goi|tem nhan|hop giay", "contains", "out", "DONG_GOI", 61),
+    ("Nhập hàng", "nhap hang|mua hang|lay hang|tien hang|thanh toan hang|tt hang|don hang ncc|nha cung cap|xuong|1688|taobao|alibaba", "contains", "out", "MUA_HANG", 60, "all"),
+    ("Đóng gói", "thung carton|bao bi|tui zip|bang keo|dong goi|tem nhan|hop giay", "contains", "out", "DONG_GOI", 61, "all"),
     # Quản lý
-    ("Điện nước internet", "dien luc|evn|tien dien|tien nuoc|cap nuoc|internet|fpt telecom|vnpt|viettel telecom|cuoc dien thoai|nap tien dien thoai|wifi", "contains", "out", "DIEN_NUOC_INTERNET", 55),
-    ("Thuê mặt bằng", "thue nha|tien nha|mat bang|thue kho|tien kho|tien phong", "contains", "out", "THUE_MAT_BANG", 55),
-    ("Lương", "luong|tra luong|tien cong|thuong tet", "contains", "out", "LUONG", 55),
-    ("Phần mềm", "phan mem|subscription|canva|openai|chatgpt|kiotviet|sapo|haravan|nhanh.vn|pancake|hosting|ten mien|domain|google workspace|microsoft", "contains", "out", "PHAN_MEM", 70),
+    ("Điện nước internet", "dien luc|evn|tien dien|tien nuoc|cap nuoc|internet|fpt telecom|vnpt|viettel telecom|cuoc dien thoai|nap tien dien thoai|wifi", "contains", "out", "DIEN_NUOC_INTERNET", 55, "all"),
+    ("Thuê mặt bằng", "thue nha|tien nha|mat bang|thue kho|tien kho|tien phong", "contains", "out", "THUE_MAT_BANG", 55, "all"),
+    ("Lương", "luong|tra luong|tien cong|thuong tet", "contains", "out", "LUONG", 55, "all"),
+    ("Phần mềm", "phan mem|subscription|canva|openai|chatgpt|kiotviet|sapo|haravan|nhanh.vn|pancake|hosting|ten mien|domain|google workspace|microsoft", "contains", "out", "PHAN_MEM", 70, "all"),
     # Vốn / vay / nội bộ
-    ("Góp vốn", "gop von|bo von|von kinh doanh", "contains", "in", "VON_GOP", 80),
-    ("Rút vốn", "rut von|chi tieu ca nhan|tieu ca nhan", "contains", "out", "RUT_VON", 80),
-    ("Nhận vay", "vay|giai ngan", "contains", "in", "VAY_NHAN", 81),
-    ("Trả nợ gốc", "tra no|tra goc|tra tien vay|thanh toan khoan vay", "contains", "out", "TRA_NO_GOC", 81),
-    ("Chuyển nội bộ", "chuyen noi bo|tiet kiem|momo|zalopay|vnpay vi|shopeepay|nap vi|rut tien mat|atm", "contains", "any", "CHUYEN_NOI_BO", 85),
+    ("Góp vốn", "gop von|bo von|von kinh doanh", "contains", "in", "VON_GOP", 80, "all"),
+    ("Rút vốn", "rut von|chi tieu ca nhan|tieu ca nhan", "contains", "out", "RUT_VON", 80, "all"),
+    ("Nhận vay", "vay|giai ngan", "contains", "in", "VAY_NHAN", 81, "all"),
+    ("Trả nợ gốc", "tra no|tra goc|tra tien vay|thanh toan khoan vay", "contains", "out", "TRA_NO_GOC", 81, "all"),
+    ("Chuyển nội bộ", "chuyen noi bo|tiet kiem|momo|zalopay|vnpay vi|shopeepay|nap vi|rut tien mat|atm", "contains", "any", "CHUYEN_NOI_BO", 85, "all"),
     # Khách chuyển khoản mua hàng (chung nhất - xét cuối)
-    ("Khách thanh toán", "thanh toan|tt don|don hang|mua|ck|chuyen khoan|chuyen tien|tien hang", "contains", "in", "DT_BAN_HANG", 90),
+    ("Khách thanh toán", "thanh toan|tt don|don hang|mua|ck|chuyen khoan|chuyen tien|tien hang", "contains", "in", "DT_BAN_HANG", 90, "all"),
 ]
 
 DEFAULT_SETTINGS = {
     "shop_name": "Shop của tôi",
     "bank_name": "MB Bank",
     "account_no": "",
+    "owner_name": "",
     # Thuế hộ kinh doanh (ngành phân phối, cung cấp hàng hoá): GTGT 1%, TNCN 0,5% trên doanh thu
     "tax_vat_rate": "1.0",
     "tax_pit_rate": "0.5",

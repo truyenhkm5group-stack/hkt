@@ -1,10 +1,16 @@
-from app.rules import normalize, suggest, rule_matches
+from app.rules import expand_owner, normalize, suggest, rule_matches
 from app.categories import DEFAULT_RULES
 
 
-def _rules():
-    return [{"id": i + 1, "name": n, "pattern": p, "match_type": mt, "direction": d, "category_code": c,
-             "priority": pr, "enabled": 1} for i, (n, p, mt, d, c, pr) in enumerate(DEFAULT_RULES)]
+def _rules(owner="NGUYEN VAN A"):
+    out = []
+    for i, (n, p, mt, d, c, pr, f) in enumerate(DEFAULT_RULES):
+        p = expand_owner(p, owner, mt)
+        if p is None:
+            continue
+        out.append({"id": i + 1, "name": n, "pattern": p, "match_type": mt, "direction": d, "category_code": c,
+                    "priority": pr, "enabled": 1, "field": f})
+    return out
 
 
 def test_normalize_strips_diacritics():
@@ -52,3 +58,35 @@ def test_default_rules_cover_common_cases():
 def test_no_match_returns_none():
     code, rule_id = suggest(_rules(), "Mua may in tem nhiet", "", -890000)
     assert code is None and rule_id is None
+
+
+def test_field_scoped_rule_only_looks_at_counterparty():
+    rule = {"pattern": "nguyen van a", "match_type": "contains", "direction": "any", "enabled": 1, "field": "counterparty"}
+    assert rule_matches(rule, "chuyen tien", "NGUYỄN VĂN A", -100)
+    # tên chủ TK xuất hiện trong nội dung ("CUSTOMER NGUYEN VAN A chuyen tien") nhưng đối tác là người khác
+    assert not rule_matches(rule, "CUSTOMER NGUYEN VAN A chuyen tien", "TRAN ANH QUAN", -100)
+
+
+def test_owner_rule_real_mb_layout():
+    rules = _rules("HO KHAC TRUYEN")
+    # chuyển cho chính mình -> nội bộ, dù nội dung giống khách chuyển khoản
+    code, _ = suggest(rules, "CUSTOMER HO KHAC TRUYEN chuyen tien. DEN: HO KHAC TRUYEN", "HO KHAC TRUYEN", -1_000_000)
+    assert code == "CHUYEN_NOI_BO"
+    code, _ = suggest(rules, "HO KHAC TRUYEN Chuyen tien- Ma GD", "HO KHAC TRUYEN", 15_000_000)
+    assert code == "CHUYEN_NOI_BO"
+    # chuyển cho người khác, nội dung vẫn chứa tên chủ TK -> không phải nội bộ
+    code, _ = suggest(rules, "CUSTOMER HO KHAC TRUYEN chuyen tien", "TRAN ANH QUAN", -6_000_000)
+    assert code is None
+    # COD Viettel Post về -> doanh thu ; trả nợ thẻ tín dụng -> không tính lãi lỗ
+    code, _ = suggest(rules, "Tong cong ty co phan Buu chinh Viet VTP GLMTQY05 050826", "TONG CONG TY CO PHAN BUU CHINH VIETTEL", 3_122_361)
+    assert code == "DT_BAN_HANG"
+    code, _ = suggest(rules, "CUSTOMER THU NO THE TIN DUNG THANG 08.2026", "", -2_366_200)
+    assert code == "TRA_NO_GOC"
+
+
+def test_owner_placeholder_skipped_without_owner():
+    assert expand_owner("{owner}", "") is None
+    assert expand_owner("{owner}", "Hồ Khắc Truyền") == "ho khac truyen"
+    assert expand_owner("^{owner}$", "A.B", "regex") == "^a\\.b$"
+    assert expand_owner("ghtk", "") == "ghtk"
+    assert all(r["pattern"] != "{owner}" for r in _rules(owner=""))
