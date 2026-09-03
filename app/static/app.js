@@ -28,6 +28,9 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), err ? 6000 : 3000);
   }
   const onErr = (e) => toast(e.message || String(e), true);
+  async function refreshBadge() {
+    try { const st = await api('/api/stats'); const b = $('#badgeUnclassified'); b.hidden = !st.unclassified; b.textContent = st.unclassified; } catch (_) {}
+  }
 
   // -------------------------------------------------------------- Tabs
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -188,7 +191,7 @@
   $('#bulkClear').addEventListener('click', () => { state.selected.clear(); $('#txCheckAll').checked = false; loadTransactions(); });
   $('#bulkApply').addEventListener('click', async () => {
     try { const r = await api('/api/transactions/bulk-categorize', { method: 'POST', body: { ids: [...state.selected], category_code: $('#bulkCategory').value } });
-      toast(`Đã gán ${r.updated} giao dịch`); state.selected.clear(); loadTransactions(); } catch (e) { onErr(e); }
+      toast(`Đã gán ${r.updated} giao dịch`); state.selected.clear(); loadTransactions(); refreshBadge(); } catch (e) { onErr(e); }
   });
   function toggleSel(id, on) { on ? state.selected.add(id) : state.selected.delete(id); const bar = $('#bulkBar'); bar.hidden = !state.selected.size; $('#bulkCount').textContent = state.selected.size; }
 
@@ -212,8 +215,8 @@
           <td class="cp">${esc(t.counterparty)}</td>
           <td class="num pos">${t.amount > 0 ? money(t.amount) : ''}</td>
           <td class="num neg">${t.amount < 0 ? money(-t.amount) : ''}</td>
-          <td><select class="cat">${categoryOptions(t.category_code || 'CHUA_PHAN_LOAI')}</select>
-              <button class="icon mkrule" title="Tạo quy tắc từ giao dịch này">⚙</button></td>
+          <td><div class="catcell"><select class="cat" title="Chọn danh mục – lưu ngay khi đổi">${categoryOptions(t.category_code || 'CHUA_PHAN_LOAI')}</select>
+              <button class="icon mkrule" title="Tạo quy tắc tự gán cho các giao dịch giống thế này">+ quy tắc</button></div></td>
           <td><input class="note" value="${esc(t.note)}" placeholder="ghi chú"></td>
           <td><button class="icon del" title="Xoá">✕</button></td>
         </tr>`).join('') || '<tr><td colspan="9">Không có giao dịch.</td></tr>';
@@ -228,7 +231,7 @@
     const tr = e.target.closest('tr'); if (!tr) return; const id = +tr.dataset.id;
     try {
       if (e.target.matches('input[type=checkbox]')) { toggleSel(id, e.target.checked); return; }
-      if (e.target.matches('select.cat')) { await api(`/api/transactions/${id}`, { method: 'PATCH', body: { category_code: e.target.value } }); tr.classList.toggle('uncl', e.target.value === 'CHUA_PHAN_LOAI'); toast('Đã gán nhãn'); }
+      if (e.target.matches('select.cat')) { await api(`/api/transactions/${id}`, { method: 'PATCH', body: { category_code: e.target.value } }); tr.classList.toggle('uncl', e.target.value === 'CHUA_PHAN_LOAI'); toast('Đã gán nhãn'); refreshBadge(); }
       if (e.target.matches('input.note')) { await api(`/api/transactions/${id}`, { method: 'PATCH', body: { note: e.target.value } }); toast('Đã lưu ghi chú'); }
     } catch (err) { onErr(err); }
   });
@@ -280,7 +283,7 @@
         $('#importCommit').disabled = r.imported === 0;
         $('#importPreviewCard').hidden = false; $('#importPreviewInfo').textContent = `(${r.preview.length} dòng đầu)`;
         $('#importPreviewTable tbody').innerHTML = r.preview.map((t) => `<tr class="${t.duplicate ? 'dup' : (t.category_code === 'CHUA_PHAN_LOAI' ? 'uncl' : '')}"><td>${fmtDate(t.txn_date)}</td><td class="desc">${esc(t.description)}</td><td>${esc(t.counterparty)}</td><td class="num pos">${t.amount > 0 ? money(t.amount) : ''}</td><td class="num neg">${t.amount < 0 ? money(-t.amount) : ''}</td><td class="num">${t.balance_after != null ? money(t.balance_after) : ''}</td><td>${esc(t.category_name)}</td><td>${t.duplicate ? 'Trùng – bỏ qua' : 'Mới'}</td></tr>`).join('');
-      } else { $('#importCommit').disabled = true; $('#importPreviewCard').hidden = true; loadCategories(); }
+      } else { $('#importCommit').disabled = true; $('#importPreviewCard').hidden = true; loadCategories(); refreshBadge(); }
     } catch (e) { $('#importResult').className = 'note err'; $('#importResult').textContent = e.message; }
   }
   $('#importPreview').addEventListener('click', () => doImport(true));
@@ -317,7 +320,7 @@
     } catch (err) { onErr(err); }
   });
   async function applyRules(onlyUnclassified) {
-    try { const r = await api('/api/rules/apply', { method: 'POST', body: { only_unclassified: onlyUnclassified } }); $('#applyRulesResult').className = 'note ok'; $('#applyRulesResult').textContent = `Đã quét ${r.scanned} giao dịch, gán nhãn mới cho ${r.updated}.`; loadCategories(); } catch (e) { onErr(e); }
+    try { const r = await api('/api/rules/apply', { method: 'POST', body: { only_unclassified: onlyUnclassified } }); $('#applyRulesResult').className = 'note ok'; $('#applyRulesResult').textContent = `Đã quét ${r.scanned} giao dịch, gán nhãn mới cho ${r.updated}.`; loadCategories(); refreshBadge(); } catch (e) { onErr(e); }
   }
   $('#applyRulesUnclassified').addEventListener('click', () => applyRules(true));
   $('#applyRulesAll').addEventListener('click', () => applyRules(false));
@@ -357,7 +360,12 @@
 
   // -------------------------------------------------------------- Init
   (async () => {
-    const [f, t] = periodRange('this-month');
+    let [f, t] = periodRange('this-month');
+    try {
+      const st = await api('/api/stats');
+      if (st.last_date && st.last_date < f) { const ym = st.last_date.slice(0, 7); const [y, m] = ym.split('-').map(Number); f = `${ym}-01`; t = iso(new Date(Date.UTC(y, m, 0))); }
+      const b = $('#badgeUnclassified'); b.hidden = !st.unclassified; b.textContent = st.unclassified;
+    } catch (_) {}
     $('#dashFrom').value = f; $('#dashTo').value = t; $('#txFrom').value = f; $('#txTo').value = t;
     try { await loadCategories(); await loadSettings(); } catch (e) { onErr(e); }
     const tab = location.hash.replace('#', '');
