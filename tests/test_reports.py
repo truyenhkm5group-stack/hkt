@@ -66,6 +66,24 @@ def test_tax_threshold(fresh_db):
         assert r["tax_estimate"]["total"] == 750_000
 
 
+def test_tax_threshold_per_year_for_multi_year_period(fresh_db):
+    """Kỳ 'Tất cả' (2000-01-01 → nay) phải xét ngưỡng theo từng năm, không lấy năm 2000."""
+    with db.get_conn(fresh_db) as conn:
+        _add(conn, "2025-06-01", 50_000_000, "DT_BAN_HANG")    # 2025 dưới ngưỡng
+        _add(conn, "2026-02-01", 250_000_000, "DT_BAN_HANG")   # 2026 vượt ngưỡng
+        settings = {"tax_vat_rate": "1.0", "tax_pit_rate": "0.5", "tax_threshold_year": "200000000"}
+        r = reports.pnl(conn, "2000-01-01", "2027-12-31", settings)
+        te = r["tax_estimate"]
+        assert te["below_threshold"] is False
+        assert te["total"] == 3_750_000  # chỉ 1,5% của 250tr năm 2026
+        assert [y["year"] for y in te["years"]] == ["2025", "2026"]
+        assert te["years"][0]["below_threshold"] is True and te["years"][1]["total"] == 3_750_000
+        assert te["profit_after_tax_est"] == 300_000_000 - 3_750_000
+        # kỳ chỉ nằm trong quý 1/2026 nhưng ngưỡng vẫn xét theo cả năm 2026
+        r = reports.pnl(conn, "2026-01-01", "2026-03-31", settings)
+        assert r["tax_estimate"]["total"] == 3_750_000
+
+
 def test_category_breakdown_and_monthly(fresh_db):
     with db.get_conn(fresh_db) as conn:
         _add(conn, "2026-08-01", 1_000_000, "DT_BAN_HANG")

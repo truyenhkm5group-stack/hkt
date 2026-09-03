@@ -85,6 +85,24 @@ def test_semicolon_csv_and_utf8_bom():
     assert [t["amount"] for t in txns] == [500000, -20000]
 
 
+def test_same_day_identical_transfers_without_ref_are_kept():
+    csv_text = ("Ngày giao dịch,Số tiền,Nội dung\n"
+                "05/08/2026 09:00:00,-35000,GHTK phi ship\n"
+                "05/08/2026 15:30:00,-35000,GHTK phi ship\n")
+    txns, errors = importer.parse_statement("mb.csv", csv_text.encode("utf-8"))
+    assert errors == [] and len(txns) == 2
+    assert txns[0]["fingerprint"] != txns[1]["fingerprint"]
+    # không có giờ nhưng có số dư khác nhau cũng phân biệt được
+    csv_text = ("Ngày giao dịch,Số tiền,Số dư,Nội dung\n"
+                "05/08/2026,-35000,965000,GHTK phi ship\n"
+                "05/08/2026,-35000,930000,GHTK phi ship\n")
+    txns, _ = importer.parse_statement("mb.csv", csv_text.encode("utf-8"))
+    assert txns[0]["fingerprint"] != txns[1]["fingerprint"]
+    # cùng file nhập lại vẫn ra vân tay y hệt (khử trùng giữa các lần nhập)
+    txns2, _ = importer.parse_statement("mb.csv", csv_text.encode("utf-8"))
+    assert [t["fingerprint"] for t in txns] == [t["fingerprint"] for t in txns2]
+
+
 def test_fingerprint_prefers_bank_ref():
     a = importer.fingerprint("2026-08-01", 100, "abc", "REF1")
     b = importer.fingerprint("2026-08-01", 100, "khac", "REF1")

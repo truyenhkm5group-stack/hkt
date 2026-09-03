@@ -61,6 +61,46 @@ def estimate_tax(revenue_net, settings, year_revenue=None):
             "vat_rate": vat, "pit_rate": pit, "threshold": threshold}
 
 
+def _net_revenue(conn, date_from, date_to):
+    """Doanh thu thuần (doanh thu - giảm trừ) trong khoảng ngày."""
+    return conn.execute(
+        """SELECT COALESCE(SUM(t.amount),0) FROM transactions t
+           JOIN categories c ON c.code = t.category_code
+           WHERE c.grp IN ('REVENUE','REVENUE_DEDUCTION') AND t.txn_date BETWEEN ? AND ?""",
+        (date_from, date_to),
+    ).fetchone()[0]
+
+
+def tax_estimate_for_period(conn, date_from, date_to, settings):
+    """Ước tính thuế cho kỳ, tính riêng từng năm dương lịch mà kỳ đi qua.
+
+    Ngưỡng miễn thuế áp dụng theo doanh thu cả năm, nên với kỳ trải nhiều năm
+    (ví dụ "Tất cả") phải xét từng năm: thuế của phần doanh thu thuộc năm Y
+    chỉ phát sinh nếu tổng doanh thu năm Y vượt ngưỡng."""
+    years = range(int(date_from[:4]), int(date_to[:4]) + 1)
+    per_year = []
+    for y in years:
+        f = max(date_from, f"{y}-01-01")
+        t = min(date_to, f"{y}-12-31")
+        period_rev = _net_revenue(conn, f, t)
+        year_rev = _net_revenue(conn, f"{y}-01-01", f"{y}-12-31")
+        est = estimate_tax(period_rev, settings, year_revenue=year_rev)
+        per_year.append({"year": str(y), "period_net_revenue": period_rev, "year_net_revenue": year_rev, **est})
+    active = [p for p in per_year if p["period_net_revenue"] or p["year_net_revenue"]] or per_year[-1:]
+    total = {
+        "vat": sum(p["vat"] for p in per_year),
+        "pit": sum(p["pit"] for p in per_year),
+        "total": sum(p["total"] for p in per_year),
+        "below_threshold": all(p["below_threshold"] for p in active),
+        "vat_rate": per_year[0]["vat_rate"], "pit_rate": per_year[0]["pit_rate"], "threshold": per_year[0]["threshold"],
+        "years": active,
+        # tương thích: năm và doanh thu năm của năm cuối có phát sinh
+        "year": active[-1]["year"],
+        "year_net_revenue": active[-1]["year_net_revenue"],
+    }
+    return total
+
+
 def pnl(conn, date_from, date_to, settings):
     g = _group_totals(conn, date_from, date_to)
 
@@ -81,16 +121,7 @@ def pnl(conn, date_from, date_to, settings):
     tax_paid = -g["TAX"]["net"]                      # 51 (thực nộp trong kỳ)
     profit_after_tax = profit_before_tax - tax_paid  # 60
 
-    # Ước tính thuế theo doanh thu thuần cả năm của kỳ đang xem
-    year = date_from[:4]
-    year_rev_row = conn.execute(
-        """SELECT COALESCE(SUM(t.amount),0) FROM transactions t
-           JOIN categories c ON c.code = t.category_code
-           WHERE c.grp IN ('REVENUE','REVENUE_DEDUCTION') AND t.txn_date BETWEEN ? AND ?""",
-        (f"{year}-01-01", f"{year}-12-31"),
-    ).fetchone()
-    year_revenue = year_rev_row[0] if year_rev_row else 0
-    tax_est = estimate_tax(net_revenue, settings, year_revenue=year_revenue)
+    tax_est = tax_estimate_for_period(conn, date_from, date_to, settings)
     profit_after_tax_est = profit_before_tax - tax_est["total"]
 
     total_expenses = cogs + selling + admin + fin_expense + other_expense
@@ -161,12 +192,7 @@ def pnl(conn, date_from, date_to, settings):
             "unclassified_in": g["UNCLASSIFIED"]["cash_in"],
             "unclassified_out": g["UNCLASSIFIED"]["cash_out"],
         },
-        "tax_estimate": {
-            **tax_est,
-            "year": year,
-            "year_net_revenue": year_revenue,
-            "profit_after_tax_est": profit_after_tax_est,
-        },
+        "tax_estimate": {**tax_est, "profit_after_tax_est": profit_after_tax_est},
         "groups": g,
     }
 
@@ -188,10 +214,7 @@ def category_breakdown(conn, date_from, date_to):
     ).fetchall()
     gm = cat.group_map()
     order = {g: i for i, g in enumerate(cat.GROUP_ORDER)}
-    net_rev = conn.execute(
-        """SELECT COALESCE(SUM(t.amount),0) FROM transactions t JOIN categories c ON c.code=t.category_code
-           WHERE c.grp IN ('REVENUE','REVENUE_DEDUCTION') AND t.txn_date BETWEEN ? AND ?""",
-        (date_from, date_to)).fetchone()[0]
+    net_rev = _net_revenue(conn, date_from, date_to)
     items = []
     for r in rows:
         grp = r["grp"] or "UNCLASSIFIED"

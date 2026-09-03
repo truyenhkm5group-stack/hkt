@@ -106,11 +106,15 @@ def parse_date(value):
     raise ValueError(f"Không đọc được ngày: {value!r}")
 
 
-def fingerprint(txn_date, amount, description, bank_ref=None, counterparty=""):
+def fingerprint(txn_date, amount, description, bank_ref=None, counterparty="", txn_time=None, balance_after=None):
+    """Khoá khử trùng. Ưu tiên số tham chiếu của ngân hàng; nếu sao kê không có
+    thì dùng ngày + giờ + số tiền + nội dung + đối tác + số dư sau giao dịch,
+    để hai lần chuyển giống hệt nhau trong cùng ngày không bị gộp làm một."""
     if bank_ref:
         key = f"ref|{str(bank_ref).strip()}|{txn_date}|{amount}"
     else:
-        key = f"raw|{txn_date}|{amount}|{normalize(description)}|{normalize(counterparty)}"
+        key = "|".join(["raw", txn_date, txn_time or "", str(amount), normalize(description), normalize(counterparty),
+                        "" if balance_after is None else str(balance_after)])
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
@@ -238,7 +242,8 @@ def parse_statement(filename: str, data: bytes):
                 "counterparty": counterparty,
                 "bank_ref": bank_ref,
                 "balance_after": balance_after,
-                "fingerprint": fingerprint(txn_date, int(amount), description, bank_ref, counterparty),
+                "fingerprint": fingerprint(txn_date, int(amount), description, bank_ref, counterparty,
+                                           txn_time, balance_after),
             })
         except Exception as e:  # noqa: BLE001
             errors.append({"row": rn, "error": str(e)})

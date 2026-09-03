@@ -120,9 +120,11 @@
   function renderPnl(pnl) {
     $('#pnlTable').innerHTML = pnl.lines.map((l) => `<tr class="l${l.level} ${l.highlight ? 'hl' : ''}"><td class="code">${l.code}</td><td>${esc(l.label)}</td><td class="num ${l.negative ? 'neg-line' : ''}">${l.negative && l.value ? '(' + money(l.value) + ')' : money(l.value)}</td></tr>`).join('');
     const te = pnl.tax_estimate; const s = pnl.summary;
-    let txt = '';
-    if (te.below_threshold) txt = `Doanh thu thuần luỹ kế năm ${te.year}: <b>${money(te.year_net_revenue)}</b> – dưới ngưỡng ${money(te.threshold)}/năm nên tạm thời chưa phải nộp thuế GTGT/TNCN.`;
-    else txt = `Thuế ước tính kỳ này theo doanh thu thuần: GTGT ${te.vat_rate}% = <b>${money(te.vat)}</b>, TNCN ${te.pit_rate}% = <b>${money(te.pit)}</b>, tổng <b>${money(te.total)}</b> → lợi nhuận sau thuế ước tính <b>${money(te.profit_after_tax_est)}</b>. (Đã nộp thực tế trong kỳ: ${money(s.tax_paid)}.)`;
+    const yearNote = (y) => y.below_threshold
+      ? `Năm ${y.year}: doanh thu thuần luỹ kế <b>${money(y.year_net_revenue)}</b> – dưới ngưỡng ${money(te.threshold)}/năm nên chưa phải nộp thuế GTGT/TNCN.`
+      : `Năm ${y.year}: doanh thu thuần trong kỳ ${money(y.period_net_revenue)} → GTGT ${te.vat_rate}% = <b>${money(y.vat)}</b>, TNCN ${te.pit_rate}% = <b>${money(y.pit)}</b>.`;
+    let txt = te.years.map(yearNote).join('<br>');
+    if (!te.below_threshold) txt += `<br>Tổng thuế ước tính kỳ này <b>${money(te.total)}</b> → lợi nhuận sau thuế ước tính <b>${money(te.profit_after_tax_est)}</b>. (Đã nộp thực tế trong kỳ: ${money(s.tax_paid)}.)`;
     txt += `<br>Các khoản không tính vào lãi/lỗ trong kỳ: vào ${money(s.non_pl_in)} · ra ${money(s.non_pl_out)} (góp/rút vốn, vay, chuyển nội bộ, mua tài sản...).`;
     $('#taxNote').innerHTML = txt;
   }

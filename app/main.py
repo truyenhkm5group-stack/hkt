@@ -218,7 +218,7 @@ def create_transaction(body: TxnIn):
             code, rule_id = suggest(load_rules(conn), body.description, body.counterparty, body.amount)
             labeled_by = f"rule:{rule_id}" if rule_id else None
             code = code or cat.UNCLASSIFIED_CODE
-        fp = importer.fingerprint(txn_date, body.amount, body.description, body.bank_ref, body.counterparty)
+        fp = importer.fingerprint(txn_date, body.amount, body.description, body.bank_ref, body.counterparty, body.txn_time)
         if conn.execute("SELECT 1 FROM transactions WHERE fingerprint=?", (fp,)).fetchone():
             fp = None  # cho phép nhập tay trùng, chỉ chặn trùng khi import
         cur = conn.execute(
