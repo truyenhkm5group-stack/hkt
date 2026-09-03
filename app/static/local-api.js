@@ -154,8 +154,8 @@
     }
     if (name.endsWith('.xls')) throw new ApiError(400, 'Định dạng .xls cũ chưa hỗ trợ - hãy mở bằng Excel và lưu lại thành .xlsx hoặc .csv');
     let text = new TextDecoder('utf-8').decode(buf);
-    if (text.includes('�')) { for (const enc of ['utf-16', 'windows-1258']) { try { text = new TextDecoder(enc).decode(buf); if (!text.includes('�')) break; } catch (_) {} } }
-    return parseCsv(text.replace(/^﻿/, ''));
+    if (text.includes('\uFFFD')) { for (const enc of ['utf-16', 'windows-1258']) { try { text = new TextDecoder(enc).decode(buf); if (!text.includes('\uFFFD')) break; } catch (_) {} } }
+    return parseCsv(text.replace(/^\uFEFF/, ''));
   }
   function parseStatement(rows) {
     const [hi, mapping] = detectHeader(rows);
@@ -191,6 +191,7 @@
   // ------------------------------------------------------------ reports
   const inRange = (f, t) => S.transactions.filter((x) => x.txn_date >= f && x.txn_date <= t);
   const grpOf = (t) => { const c = cm()[t.category_code]; return c ? c.grp : 'UNCLASSIFIED'; };
+  const neg = (v) => 0 - v;
   const pct = (a, b) => (b ? Math.round((a * 100 / b) * 10) / 10 : null);
   function groupTotals(f, t) {
     const g = Object.fromEntries(GROUP_ORDER.map((k) => [k, { net: 0, cash_in: 0, cash_out: 0, n: 0 }]));
@@ -214,11 +215,11 @@
   }
   function pnl(f, t) {
     const g = groupTotals(f, t);
-    const revenue = g.REVENUE.net, deductions = -g.REVENUE_DEDUCTION.net, net_revenue = revenue - deductions, cogs = -g.COGS.net;
-    const gross_profit = net_revenue - cogs, fin_income = g.FIN_INCOME.net, fin_expense = -g.FIN_EXPENSE.net, selling = -g.SELLING.net, admin = -g.ADMIN.net;
+    const revenue = g.REVENUE.net, deductions = neg(g.REVENUE_DEDUCTION.net), net_revenue = revenue - deductions, cogs = neg(g.COGS.net);
+    const gross_profit = net_revenue - cogs, fin_income = g.FIN_INCOME.net, fin_expense = neg(g.FIN_EXPENSE.net), selling = neg(g.SELLING.net), admin = neg(g.ADMIN.net);
     const operating_profit = gross_profit + fin_income - fin_expense - selling - admin;
-    const other_income = g.OTHER_INCOME.net, other_expense = -g.OTHER_EXPENSE.net, other_profit = other_income - other_expense;
-    const profit_before_tax = operating_profit + other_profit, tax_paid = -g.TAX.net, profit_after_tax = profit_before_tax - tax_paid;
+    const other_income = g.OTHER_INCOME.net, other_expense = neg(g.OTHER_EXPENSE.net), other_profit = other_income - other_expense;
+    const profit_before_tax = operating_profit + other_profit, tax_paid = neg(g.TAX.net), profit_after_tax = profit_before_tax - tax_paid;
     const te = taxForPeriod(f, t);
     const total_expenses = cogs + selling + admin + fin_expense + other_expense;
     const cash_in = Object.values(g).reduce((a, v) => a + v.cash_in, 0), cash_out = Object.values(g).reduce((a, v) => a + v.cash_out, 0);
@@ -256,7 +257,7 @@
       a.net += x.amount; if (x.amount > 0) a.cash_in += x.amount; else a.cash_out -= x.amount; a.n++;
     }
     const nr = netRevenue(f, t);
-    const items = Object.values(acc).map((a) => { const g = G[a.grp]; const value = g.kind === 'out' ? -a.net : a.net; return { ...a, grp_name: g.name, account: g.account, value, count: a.n, pct_of_revenue: ['NON_PL', 'UNCLASSIFIED'].includes(a.grp) ? null : pct(value, nr) }; });
+    const items = Object.values(acc).map((a) => { const g = G[a.grp]; const value = g.kind === 'out' ? neg(a.net) : a.net; return { ...a, grp_name: g.name, account: g.account, value, count: a.n, pct_of_revenue: ['NON_PL', 'UNCLASSIFIED'].includes(a.grp) ? null : pct(value, nr) }; });
     items.sort((a, b) => GROUP_ORDER.indexOf(a.grp) - GROUP_ORDER.indexOf(b.grp) || Math.abs(b.value) - Math.abs(a.value));
     return { period: { from: f, to: t }, net_revenue: nr, items };
   }
@@ -292,7 +293,7 @@
       const c = C[r.category_code]; const g = G[c ? c.grp : 'UNCLASSIFIED'];
       rows.push([r.txn_date, r.txn_time || '', r.amount > 0 ? r.amount : '', r.amount < 0 ? -r.amount : '', r.description, r.counterparty, r.bank_ref || '', r.balance_after ?? '', r.category_code || '', c ? c.name : 'Chưa phân loại', g.name, g.account, r.note || '', r.source]);
     }
-    return '﻿' + rows.map((r) => r.map((v) => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\r\n');
+    return '\uFEFF' + rows.map((r) => r.map((v) => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\r\n');
   }
 
   // ------------------------------------------------------------ router

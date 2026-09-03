@@ -3,7 +3,7 @@
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const fmt = new Intl.NumberFormat('vi-VN');
-  const money = (n) => (n == null ? '—' : fmt.format(Math.round(n)) + ' ₫');
+  const money = (n) => (n == null ? '—' : fmt.format(Math.round(n) || 0) + ' ₫');
   const signed = (n) => (n > 0 ? '+' : '') + money(n);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const iso = (d) => d.toISOString().slice(0, 10);
