@@ -179,7 +179,11 @@
   $('#txSearch').addEventListener('click', () => { state.txPage = 1; loadTransactions(); });
   $('#txQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') { state.txPage = 1; loadTransactions(); } });
   $('#txUnclassified').addEventListener('change', () => { state.txPage = 1; loadTransactions(); });
-  $('#txExport').addEventListener('click', () => { window.location = `/api/export.csv?date_from=${$('#txFrom').value}&date_to=${$('#txTo').value}`; });
+  $('#txExport').addEventListener('click', () => {
+    const f = $('#txFrom').value || '2000-01-01', t = $('#txTo').value || '2099-12-31';
+    if (window.HKT_LOCAL) { window.HKT_LOCAL.exportCsv(f, t); toast('Đã tạo file CSV'); return; }
+    window.location = `/api/export.csv?date_from=${f}&date_to=${t}`;
+  });
   $('#txCheckAll').addEventListener('change', (e) => { $$('#txTable tbody input[type=checkbox]').forEach((c) => { c.checked = e.target.checked; toggleSel(+c.value, c.checked); }); });
   $('#bulkClear').addEventListener('click', () => { state.selected.clear(); $('#txCheckAll').checked = false; loadTransactions(); });
   $('#bulkApply').addEventListener('click', async () => {
