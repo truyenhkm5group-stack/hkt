@@ -13,7 +13,24 @@ import { normalize } from "@/lib/text";
 
 export async function loadCsRules(): Promise<CsRules> {
   const cfg = await getSettingJson<CsRules>(CS_RULES_KEY, DEFAULT_CS_RULES);
-  return { ...DEFAULT_CS_RULES, ...cfg, tagRules: cfg.tagRules?.length ? cfg.tagRules : DEFAULT_CS_RULES.tagRules, noteRules: cfg.noteRules?.length ? cfg.noteRules : DEFAULT_CS_RULES.noteRules };
+  return {
+    ...DEFAULT_CS_RULES,
+    ...cfg,
+    tagRules: cfg.tagRules?.length ? cfg.tagRules : DEFAULT_CS_RULES.tagRules,
+    noteRules: cfg.noteRules?.length ? cfg.noteRules : DEFAULT_CS_RULES.noteRules,
+    chatRules: cfg.chatRules?.length ? cfg.chatRules : DEFAULT_CS_RULES.chatRules,
+    ignorePatterns: cfg.ignorePatterns?.length ? cfg.ignorePatterns : DEFAULT_CS_RULES.ignorePatterns,
+  };
+}
+
+/** Bỏ các đoạn ghi chú tự động (vd "[🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG …]") trước khi nhận diện */
+export function stripIgnored(text: string, patterns: string[]) {
+  let out = text;
+  // xoá từng khối [...] chứa cụm bỏ qua
+  out = out.replace(/\[[^\]]*\]/g, (block) => (patterns.some((p) => normalize(block).includes(` ${normalize(p).trim()} `) || normalize(block).includes(normalize(p).trim())) ? " " : block));
+  const n = normalize(out);
+  if (patterns.some((p) => n.includes(normalize(p).trim()))) return "";
+  return out.trim();
 }
 
 type Candidate = { dedupeKey: string; orderId: string | null; customerId: string | null; kind: CsKind; source: string; title: string; detail: string; customerName: string; customerPhone: string };
@@ -41,10 +58,11 @@ export async function collectCsCandidates(): Promise<Candidate[]> {
   for (const r of orders) {
     const label = `#${r.systemId ?? r.id} · ${r.name || "Khách"}${r.phone ? ` · ${r.phone}` : ""}`;
     for (const tag of r.tags ?? []) {
+      if (!stripIgnored(tag, rules.ignorePatterns)) continue;
       const kind = matchKind(tag, rules.tagRules);
       if (kind) out.push({ dedupeKey: `pk-tag:${r.id}:${kind}`, orderId: r.id, customerId: r.customerId, kind, source: "PANCAKE_TAG", title: `${CS_KIND_LABEL[kind]} · ${label}`, detail: `Thẻ đơn Pancake: "${tag}"`, customerName: r.name ?? "", customerPhone: r.phone ?? "" });
     }
-    const noteText = [r.note, r.notePrint].filter(Boolean).join(" | ");
+    const noteText = stripIgnored([r.note, r.notePrint].filter(Boolean).join(" | "), rules.ignorePatterns);
     if (noteText) {
       const kind = matchKind(noteText, rules.noteRules);
       if (kind) out.push({ dedupeKey: `pk-note:${r.id}:${kind}`, orderId: r.id, customerId: r.customerId, kind, source: "PANCAKE_NOTE", title: `${CS_KIND_LABEL[kind]} · ${label}`, detail: `Ghi chú đơn: ${noteText.slice(0, 300)}`, customerName: r.name ?? "", customerPhone: r.phone ?? "" });

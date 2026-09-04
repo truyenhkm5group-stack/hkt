@@ -5,7 +5,7 @@
 import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
-import { loadCsRules } from "@/lib/cs/detect";
+import { loadCsRules, stripIgnored } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { normalize } from "@/lib/text";
@@ -13,12 +13,14 @@ import { normalize } from "@/lib/text";
 export type ChatHit = { kind: CsKind; keyword: string; message: string };
 
 /** Tìm loại case trong danh sách tin nhắn khách (ưu tiên từ khoá dài, mỗi loại lấy tin đầu tiên khớp) */
-export function detectFromMessages(messages: { text: string; fromPage: boolean }[], rules: { keyword: string; kind: CsKind }[]): ChatHit[] {
+export function detectFromMessages(messages: { text: string; fromPage: boolean }[], rules: { keyword: string; kind: CsKind }[], ignore: string[] = []): ChatHit[] {
   const sorted = [...rules].sort((a, b) => b.keyword.length - a.keyword.length);
   const hits = new Map<CsKind, ChatHit>();
   for (const m of messages) {
     if (m.fromPage || !m.text) continue;
-    const n = normalize(m.text);
+    const cleaned = stripIgnored(m.text, ignore);
+    if (!cleaned) continue;
+    const n = normalize(cleaned);
     for (const r of sorted) {
       const k = normalize(r.keyword).trim();
       if (!k) continue;
@@ -88,7 +90,7 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         }
       }
       const recent = messages.filter((m) => !m.insertedAt || m.insertedAt >= since);
-      const msgHits = detectFromMessages(recent, rules.chatRules);
+      const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns);
       const hits = [...tagHits, ...msgHits.filter((h) => !tagHits.some((t) => t.kind === h.kind))];
       if (!hits.length) continue;
       withHits += 1;

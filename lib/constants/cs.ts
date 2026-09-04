@@ -47,6 +47,8 @@ export type CsRules = {
   chatLookbackHours: number;
   /** Chỉ quét các page này (id); rỗng = mọi page có quyền */
   chatPageIds: string[];
+  /** Ghi chú / thẻ chứa các cụm này thì bỏ qua (vd ghi chú tự động của bot Pancake) */
+  ignorePatterns: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -137,4 +139,5 @@ export const DEFAULT_CS_RULES: CsRules = {
   ],
   chatLookbackHours: 48,
   chatPageIds: [],
+  ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
 };

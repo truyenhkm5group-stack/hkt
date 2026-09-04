@@ -17,6 +17,7 @@ import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { detectFromMessages } from "@/lib/cs/chat-detect";
+import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
 import { computePlan } from "@/lib/constants/planning";
@@ -357,6 +358,10 @@ async function main() {
   const picker2 = await listVariantsForReceipt();
   assert.equal(rrPlan.stock, picker2.find((v) => v.id === "rr-var")?.currentStock, "tồn ERP trong kế hoạch khớp bảng tồn kho (cùng công thức)");
   console.log(`✓ Kế hoạch đặt hàng: đề xuất ${plan1.suggested} (tình trạng ${plan1.status}), RR-var tồn ${rrPlan.stock} · bán 30 ngày ${rrPlan.sold30}`);
+
+  assert.equal(stripIgnored("[🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG HÀ NỘI]", DEFAULT_CS_RULES.ignorePatterns), "", "ghi chú bot bị bỏ qua");
+  assert.equal(stripIgnored("khách báo sai địa chỉ [🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG HÀ NỘI]", DEFAULT_CS_RULES.ignorePatterns), "khách báo sai địa chỉ");
+  console.log("✓ Bỏ qua ghi chú tự động của bot Pancake");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
