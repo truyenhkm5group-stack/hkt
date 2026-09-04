@@ -472,6 +472,42 @@ export const shipmentEvents = pgTable(
   (t) => [uniqueIndex("shipment_events_uq").on(t.shipmentId, t.source, t.status, t.occurredAt), index("shipment_events_shipment_idx").on(t.shipmentId, t.occurredAt)],
 );
 
+// ───────────────────────── Nhập hàng & kiểm kê (ERP tự quản lý tồn) ─────────────────────────
+
+export const stockReceipts = pgTable(
+  "stock_receipts",
+  {
+    id: id(),
+    kind: text("kind").notNull().default("RECEIPT"), // RECEIPT (nhập hàng) | ADJUSTMENT (điều chỉnh sau kiểm kê)
+    receivedAt: ts("received_at").notNull(),
+    reference: text("reference").notNull().default(""),
+    supplier: text("supplier").notNull().default(""),
+    note: text("note").notNull().default(""),
+    totalQuantity: integer("total_quantity").notNull().default(0),
+    totalCost: money("total_cost"),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("stock_receipts_received_idx").on(t.receivedAt)],
+);
+
+export const stockReceiptItems = pgTable(
+  "stock_receipt_items",
+  {
+    id: id(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => stockReceipts.id, { onDelete: "cascade" }),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(), // âm khi điều chỉnh giảm
+    unitCost: money("unit_cost"),
+  },
+  (t) => [index("stock_receipt_items_receipt_idx").on(t.receiptId), index("stock_receipt_items_variant_idx").on(t.variantId)],
+);
+
 // ───────────────────────── Chi phí & marketing ─────────────────────────
 
 export const expenses = pgTable(
@@ -583,6 +619,12 @@ export const productVariantsRelations = relations(productVariants, ({ one, many 
   stocks: many(variantStocks),
   orderItems: many(orderItems),
   inventoryHistories: many(inventoryHistories),
+  receiptItems: many(stockReceiptItems),
+}));
+export const stockReceiptsRelations = relations(stockReceipts, ({ many }) => ({ items: many(stockReceiptItems) }));
+export const stockReceiptItemsRelations = relations(stockReceiptItems, ({ one }) => ({
+  receipt: one(stockReceipts, { fields: [stockReceiptItems.receiptId], references: [stockReceipts.id] }),
+  variant: one(productVariants, { fields: [stockReceiptItems.variantId], references: [productVariants.id] }),
 }));
 export const variantStocksRelations = relations(variantStocks, ({ one }) => ({
   variant: one(productVariants, { fields: [variantStocks.variantId], references: [productVariants.id] }),

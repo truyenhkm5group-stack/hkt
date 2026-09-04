@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   });
   const params = parseListParams(sp, { defaultSort: "sku", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all" });
   const [{ rows }, warehouses] = await Promise.all([listProducts(params, 20000), listWarehouses()]);
-  const header = ["Sản phẩm", "Mã SP", "SKU", "Barcode", "Màu", "Size", "Danh mục", "Trạng thái", "Giá bán", "Giá nhập gần nhất", "Giá vốn TB", "Tồn khả dụng", "Tồn thực tế", ...warehouses.map((w) => `Tồn ${w.name}`), "Bán 30 ngày", "Giá trị tồn", "Cập nhật Pancake"];
+  const header = ["Sản phẩm", "Mã SP", "SKU", "Barcode", "Màu", "Size", "Danh mục", "Trạng thái", "Giá bán", "Giá vốn (ERP)", "Giá nhập Pancake", "Giá vốn TB Pancake", "Nhập (ERP)", "Giao thành công thật", "Hoàn", "Đang giao", "Chờ gửi", "Tồn khả dụng (ERP)", "Tồn Pancake", "Tồn thực tế Pancake", ...warehouses.map((w) => `Tồn ${w.name} (Pancake)`), "Bán 30 ngày", "Giá trị tồn (ERP)", "Cập nhật Pancake"];
   const lines = [header.map(csvCell).join(",")];
   for (const r of rows) {
     lines.push(
@@ -35,8 +35,15 @@ export async function GET(request: NextRequest) {
         r.categories.join(" | "),
         r.selling ? "Đang bán" : "Ẩn/khoá",
         r.retailPrice,
+        r.unitCost,
         r.lastImportedPrice,
         Math.round(r.avgImportedPrice),
+        r.received,
+        r.delivered,
+        r.returned,
+        r.inTransit,
+        r.pending,
+        r.erpStock,
         r.remainQuantity,
         r.actualRemainQuantity,
         ...warehouses.map((w) => r.stocks.find((s) => s.warehouseId === w.id)?.remainQuantity ?? ""),

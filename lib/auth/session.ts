@@ -84,6 +84,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "orders:read": ["ADMIN", "MANAGER", "ACCOUNTANT", "WAREHOUSE", "CS", "MARKETING", "VIEWER"],
   "cod:write": ["ADMIN", "MANAGER", "ACCOUNTANT"],
   "expenses:write": ["ADMIN", "MANAGER", "ACCOUNTANT", "MARKETING"],
+  "inventory:write": ["ADMIN", "MANAGER", "WAREHOUSE"],
   "sync:run": ["ADMIN", "MANAGER"],
   "users:manage": ["ADMIN"],
   "settings:manage": ["ADMIN"],

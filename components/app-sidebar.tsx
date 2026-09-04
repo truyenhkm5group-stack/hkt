@@ -10,7 +10,9 @@ import {
   PackageCheck,
   PlugZap,
   ReceiptText,
+  PackagePlus,
   RotateCcw,
+  Undo2,
   ScrollText,
   Shirt,
   ShoppingBag,
@@ -52,9 +54,11 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt },
       { href: "/inventory", label: "Nhật ký kho", icon: Boxes },
+      { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, roles: ["ADMIN", "MANAGER", "ACCOUNTANT", "VIEWER", "CS"] },
       { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3 },
+      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2 },
     ],
   },
   {
@@ -90,7 +94,10 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
               <SidebarGroupContent>
                 <SidebarMenu className="gap-0.5">
                   {items.map((item) => {
-                    const active = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                    const matches = (href: string) => (href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`));
+                    // mục có đường dẫn dài nhất khớp với trang hiện tại mới được tô sáng (/reports/returns không tô cả /reports)
+                    const best = groups.flatMap((g) => g.items).filter((i) => matches(i.href)).sort((a, b) => b.href.length - a.href.length)[0];
+                    const active = best?.href === item.href;
                     return (
                       <SidebarMenuItem key={item.href}>
                         <SidebarMenuButton asChild isActive={active} tooltip={item.label} className="h-9 rounded-lg text-[13.5px] text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground">

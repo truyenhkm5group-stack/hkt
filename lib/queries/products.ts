@@ -2,12 +2,23 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or,
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { erpStockExpr, LAST_RECEIPT_COST, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
-export const PRODUCT_SORTABLE = ["remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue"];
+export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue", "received", "delivered", "returned", "inTransit"];
 
 const pv = schema.productVariants;
 const p = schema.products;
+
+/** Tồn khả dụng ERP theo mẫu mã (subquery dùng trong điều kiện lọc): Nhập − Giao thật − Đang giao */
+const ERP_STOCK_SUB = sql<number>`(
+  coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = ${pv.id}), 0)
+  - coalesce((select sum(${schema.orderItems.quantity}) from ${schema.orderItems}
+      join ${schema.orders} on ${schema.orders.id} = ${schema.orderItems.orderId}
+      left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
+      where ${schema.orderItems.variantId} = ${pv.id} and ${ORDER_OUTCOME} in ('DELIVERED','IN_TRANSIT')), 0)
+)`;
 
 /** Mẫu mã đang bán: không ẩn / khoá / xoá ở cả cấp mẫu mã lẫn sản phẩm */
 export function sellingCondition(): SQL {
@@ -26,9 +37,9 @@ export function productListWhere(params: ListParams, skip: string[] = []) {
   const conds: (SQL | undefined)[] = [];
   const { filters, q } = params;
   const stock = skip.includes("stock") ? undefined : filters.stock?.[0];
-  if (stock === "low") conds.push(sql`${pv.remainQuantity} <= 5`);
-  else if (stock === "out") conds.push(sql`${pv.remainQuantity} <= 0`);
-  else if (stock === "in") conds.push(sql`${pv.remainQuantity} > 0`);
+  if (stock === "low") conds.push(sql`${ERP_STOCK_SUB} between 1 and 5`);
+  else if (stock === "out") conds.push(sql`${ERP_STOCK_SUB} <= 0`);
+  else if (stock === "in") conds.push(sql`${ERP_STOCK_SUB} > 0`);
   const status = skip.includes("status") ? undefined : filters.status?.[0];
   if (status === "selling") conds.push(sellingCondition());
   else if (status === "hidden") conds.push(sql`not (${sellingCondition()})`);
@@ -79,6 +90,16 @@ export type ProductListRow = {
   sold30: number;
   stockValue: number;
   stocks: VariantStockCell[];
+  /** Tồn kho do ERP tính: Nhập − Giao thật − Đang giao */
+  received: number;
+  delivered: number;
+  returned: number;
+  inTransit: number;
+  pending: number;
+  erpStock: number;
+  /** Giá vốn dùng để tính giá trị tồn: giá nhập trên phiếu gần nhất, không có thì giá nhập Pancake */
+  unitCost: number;
+  receiptCount: number;
 };
 
 export async function listWarehouses() {
@@ -90,17 +111,31 @@ export async function listProducts(params: ListParams, limit?: number) {
   const db = await getDb();
   const where = productListWhere(params);
   const sold = sold30Subquery(db);
+  const sales = variantSalesSubquery(db);
+  const receipts = variantReceiptsSubquery(db);
   const soldQty = sql<number>`coalesce(${sold.qty}, 0)`;
-  const stockValue = sql<number>`greatest(${pv.remainQuantity}, 0) * ${pv.lastImportedPrice}`;
+  const erpStock = erpStockExpr(sales, receipts);
+  const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
+  const stockValue = sql<number>`greatest(${erpStock}, 0) * ${unitCost}`;
+  const received = sql<number>`coalesce(${receipts.received}, 0)`;
+  const delivered = sql<number>`coalesce(${sales.delivered}, 0)`;
+  const returned = sql<number>`coalesce(${sales.returned}, 0)`;
+  const inTransit = sql<number>`coalesce(${sales.inTransit}, 0)`;
+  const pending = sql<number>`coalesce(${sales.pending}, 0)`;
   const sortMap: Record<string, SQL | AnyPgColumn> = {
+    erpStock,
     remainQuantity: pv.remainQuantity,
     retailPrice: pv.retailPrice,
     sku: pv.sku,
     updatedAtExternal: pv.updatedAtExternal,
     sold30: soldQty,
     stockValue,
+    received,
+    delivered,
+    returned,
+    inTransit,
   };
-  const sortExpr = sortMap[params.sort] ?? pv.remainQuantity;
+  const sortExpr = sortMap[params.sort] ?? erpStock;
   const orderBy = params.dir === "asc" ? asc(sortExpr) : desc(sortExpr);
   const pageSize = limit ?? params.pageSize;
 
@@ -127,10 +162,20 @@ export async function listProducts(params: ListParams, limit?: number) {
         updatedAtExternal: pv.updatedAtExternal,
         sold30: soldQty,
         stockValue,
+        received,
+        delivered,
+        returned,
+        inTransit,
+        pending,
+        erpStock,
+        unitCost,
+        receiptCount: sql<number>`coalesce(${receipts.receiptCount}, 0)`,
       })
       .from(pv)
       .innerJoin(p, eq(pv.productId, p.id))
       .leftJoin(sold, eq(sold.variantId, pv.id))
+      .leftJoin(sales, eq(sales.variantId, pv.id))
+      .leftJoin(receipts, eq(receipts.variantId, pv.id))
       .where(where)
       .orderBy(orderBy, asc(p.name), asc(pv.sku))
       .limit(pageSize)
@@ -169,6 +214,14 @@ export async function listProducts(params: ListParams, limit?: number) {
     stockValue: Number(r.stockValue ?? 0),
     updatedAtExternal: toDate(r.updatedAtExternal),
     stocks: stockMap.get(r.id) ?? [],
+    received: Number(r.received ?? 0),
+    delivered: Number(r.delivered ?? 0),
+    returned: Number(r.returned ?? 0),
+    inTransit: Number(r.inTransit ?? 0),
+    pending: Number(r.pending ?? 0),
+    erpStock: Number(r.erpStock ?? 0),
+    unitCost: Number(r.unitCost ?? 0),
+    receiptCount: Number(r.receiptCount ?? 0),
   }));
 
   return { rows: mapped, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
@@ -198,9 +251,9 @@ export async function productFacets(params: ListParams) {
     listWarehouses(),
     db
       .select({
-        low: sql<number>`count(*) filter (where ${pv.remainQuantity} <= 5)`,
-        out: sql<number>`count(*) filter (where ${pv.remainQuantity} <= 0)`,
-        available: sql<number>`count(*) filter (where ${pv.remainQuantity} > 0)`,
+        low: sql<number>`count(*) filter (where ${ERP_STOCK_SUB} between 1 and 5)`,
+        out: sql<number>`count(*) filter (where ${ERP_STOCK_SUB} <= 0)`,
+        available: sql<number>`count(*) filter (where ${ERP_STOCK_SUB} > 0)`,
       })
       .from(pv)
       .innerJoin(p, eq(pv.productId, p.id))
@@ -236,19 +289,30 @@ export async function productSummary(params: ListParams) {
   const where = productListWhere(params, ["stock", "status"]);
   const selling = sellingCondition();
   const sold = sold30Subquery(db);
+  const sales = variantSalesSubquery(db);
+  const receipts = variantReceiptsSubquery(db);
+  const erpStock = erpStockExpr(sales, receipts);
+  const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
   const [row] = await db
     .select({
       selling: sql<number>`count(*) filter (where ${selling})`,
-      low: sql<number>`count(*) filter (where ${selling} and ${pv.remainQuantity} between 1 and 5)`,
-      out: sql<number>`count(*) filter (where ${selling} and ${pv.remainQuantity} <= 0)`,
-      stockValue: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${pv.remainQuantity} > 0 then ${pv.remainQuantity}::bigint * ${pv.lastImportedPrice} else 0 end), 0)`,
-      stockUnits: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${pv.remainQuantity} > 0 then ${pv.remainQuantity} else 0 end), 0)`,
+      low: sql<number>`count(*) filter (where ${selling} and ${erpStock} between 1 and 5)`,
+      out: sql<number>`count(*) filter (where ${selling} and ${erpStock} <= 0)`,
+      stockValue: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${erpStock} > 0 then (${erpStock})::bigint * ${unitCost} else 0 end), 0)`,
+      stockUnits: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${erpStock} > 0 then ${erpStock} else 0 end), 0)`,
+      received: sql<number>`coalesce(sum(${receipts.received}), 0)`,
+      delivered: sql<number>`coalesce(sum(${sales.delivered}), 0)`,
+      returned: sql<number>`coalesce(sum(${sales.returned}), 0)`,
+      inTransit: sql<number>`coalesce(sum(${sales.inTransit}), 0)`,
+      noReceipt: sql<number>`count(*) filter (where ${selling} and coalesce(${receipts.received}, 0) = 0)`,
       sold30: sql<number>`coalesce(sum(${sold.qty}), 0)`,
       products: sql<number>`count(distinct ${pv.productId})`,
     })
     .from(pv)
     .innerJoin(p, eq(pv.productId, p.id))
     .leftJoin(sold, eq(sold.variantId, pv.id))
+    .leftJoin(sales, eq(sales.variantId, pv.id))
+    .leftJoin(receipts, eq(receipts.variantId, pv.id))
     .where(where);
   return {
     selling: Number(row?.selling ?? 0),
@@ -256,6 +320,11 @@ export async function productSummary(params: ListParams) {
     out: Number(row?.out ?? 0),
     stockValue: Number(row?.stockValue ?? 0),
     stockUnits: Number(row?.stockUnits ?? 0),
+    received: Number(row?.received ?? 0),
+    delivered: Number(row?.delivered ?? 0),
+    returned: Number(row?.returned ?? 0),
+    inTransit: Number(row?.inTransit ?? 0),
+    noReceipt: Number(row?.noReceipt ?? 0),
     sold30: Number(row?.sold30 ?? 0),
     products: Number(row?.products ?? 0),
   };

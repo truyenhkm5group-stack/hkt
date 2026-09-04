@@ -15,6 +15,9 @@ import { upsertOrder, upsertProduct } from "@/lib/integrations/pancake/sync";
 import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
+import { listVariantsForReceipt } from "@/lib/queries/stock";
+import type { Period } from "@/lib/search-params";
 
 async function main() {
   await ensureMigrated();
@@ -139,6 +142,54 @@ async function main() {
   const created = await applyVtpTracking(orphan, "VTP_IMPORT", { allowCreate: true });
   assert.ok(created?.created);
   console.log("✓ Vận đơn Viettel Post ngoài Pancake được tạo riêng");
+
+
+  // 8. Tỷ lệ hoàn theo mã hàng + tồn kho ERP (quy tắc: giao thành công nhưng COD 0 & cước < 10K = hoàn)
+  await db.insert(schema.products).values({ id: "rr-prod", name: "Đầm kiểm thử" }).onConflictDoNothing();
+  await db.insert(schema.productVariants).values({ id: "rr-var", productId: "rr-prod", sku: "RR-001", color: "Đỏ", size: "M", retailPrice: 499000 }).onConflictDoNothing();
+  const now = new Date();
+  const mkOrder = async (id: string, stage: (typeof schema.orders.$inferInsert)["stage"], ship?: Partial<typeof schema.shipments.$inferInsert>) => {
+    await db.insert(schema.orders).values({ id, systemId: Number(id.replace(/\D/g, "")), stage, status: 0, insertedAt: now, cod: ship?.codAmount ?? 0, partnerFee: ship?.shippingFee ?? 0 });
+    await db.insert(schema.orderItems).values({ id: `${id}-i`, orderId: id, variantId: "rr-var", productId: "rr-prod", productName: "Đầm kiểm thử", sku: "RR-001", quantity: 1, unitPrice: 499000, lineTotal: 499000 });
+    if (ship) await db.insert(schema.shipments).values({ orderId: id, carrier: "Viettel Post", ...ship });
+  };
+  await mkOrder("rr-9001", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000001" }); // giao thật
+  await mkOrder("rr-9002", "DELIVERED", { stage: "DELIVERED", codAmount: 0, shippingFee: 8501, vtpOrderNumber: "PKE1509000002" }); // hoàn theo quy tắc COD/cước
+  await mkOrder("rr-9003", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000003" }); // có vận đơn hoàn P1 riêng
+  await db.insert(schema.shipments).values({ carrier: "Viettel Post", vtpOrderNumber: "PKE15090000031P1", trackingCode: "PKE15090000031P1", orderReference: "PKE1509000003", stage: "DELIVERED", codAmount: 0, shippingFee: 8501 });
+  await mkOrder("rr-9004", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000004" }); // đang giao
+  await mkOrder("rr-9005", "RETURNED", { stage: "RETURNED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000005" }); // hoàn theo trạng thái
+  await mkOrder("rr-9006", "CANCELLED"); // huỷ, không tính
+  const all: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+  const rr = await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 });
+  const row = rr.rows.find((r) => r.variantId === "rr-var");
+  assert.ok(row, "có dòng RR-001");
+  assert.equal(row.shipped, 5, "đã gửi 5");
+  assert.equal(row.delivered, 1, "giao thật 1");
+  assert.equal(row.returned, 3, "hoàn 3 (1 trạng thái + 2 quy tắc)");
+  assert.equal(row.returnedByRule, 2, "2 đơn hoàn theo quy tắc COD/cước");
+  assert.equal(row.inTransit, 1, "đang giao 1");
+  assert.equal(row.cancelled, 1, "huỷ 1");
+  assert.equal(row.rate, 75, "tỷ lệ hoàn 3/(1+3) = 75%");
+  const summary = await getReturnRateSummary(all, "RR-001");
+  assert.equal(summary.returned, 3);
+  assert.equal(summary.delivered, 1);
+  const detail = await listOrdersForVariant(row.key, all);
+  assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED_BY_RULE");
+  assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "RETURNED_BY_RULE");
+  assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "DELIVERED");
+  assert.equal(detail.find((d) => d.id === "rr-9004")?.outcome, "IN_TRANSIT");
+  console.log(`✓ Tỷ lệ hoàn RR-001: gửi ${row.shipped} · giao thật ${row.delivered} · hoàn ${row.returned} (quy tắc ${row.returnedByRule}) · ${row.rate}%`);
+
+  // Tồn kho ERP = Nhập − Giao thật − Đang giao
+  const [receipt] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: now, totalQuantity: 10, totalCost: 2_000_000, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
+  await db.insert(schema.stockReceiptItems).values({ receiptId: receipt.id, variantId: "rr-var", quantity: 10, unitCost: 200000 });
+  const picker = await listVariantsForReceipt();
+  const stock = picker.find((v) => v.id === "rr-var");
+  assert.ok(stock, "có mẫu mã trong danh sách nhập");
+  assert.equal(stock.currentStock, 8, "tồn = 10 nhập − 1 giao thật − 1 đang giao = 8 (hoàn coi như về kho)");
+  assert.equal(stock.lastCost, 200000, "giá nhập gần nhất lấy từ phiếu");
+  console.log(`✓ Tồn kho ERP RR-001: ${stock.currentStock} (nhập 10, giao thật 1, đang giao 1) · giá nhập ${stock.lastCost}`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

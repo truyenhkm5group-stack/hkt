@@ -16,28 +16,8 @@ export function stockTone(remain: number) {
 
 /** Tạo cột cho bảng mẫu mã; mỗi kho là một cột riêng (danh sách kho lấy từ server) */
 export function buildProductColumns(warehouses: { id: string; name: string }[]): ColumnDef<ProductListRow, unknown>[] {
-  const warehouseColumns: ColumnDef<ProductListRow, unknown>[] = warehouses.map((w) => ({
-    id: `wh_${w.id}`,
-    header: w.name,
-    enableSorting: false,
-    meta: { align: "right" },
-    cell: ({ row }) => {
-      const stock = row.original.stocks.find((s) => s.warehouseId === w.id);
-      if (!stock) return <span className="text-xs text-muted-foreground">—</span>;
-      return (
-        <div className="text-right">
-          <span className={cn("numeric font-semibold", stockTone(stock.remainQuantity))}>{formatNumber(stock.remainQuantity)}</span>
-          {stock.pendingQuantity > 0 || stock.returningQuantity > 0 ? (
-            <div className="text-[10.5px] text-muted-foreground">
-              {stock.pendingQuantity > 0 ? `chờ giao ${stock.pendingQuantity}` : ""}
-              {stock.pendingQuantity > 0 && stock.returningQuantity > 0 ? " · " : ""}
-              {stock.returningQuantity > 0 ? `đang hoàn ${stock.returningQuantity}` : ""}
-            </div>
-          ) : null}
-        </div>
-      );
-    },
-  }));
+  // Tồn theo từng kho Pancake không hiển thị trong bảng (số Pancake không phản ánh tồn thật); vẫn có trong CSV.
+  void warehouses;
 
   return [
     {
@@ -87,30 +67,61 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
-          <Money value={row.original.lastImportedPrice} />
-          {row.original.avgImportedPrice > 0 ? (
+          <Money value={row.original.unitCost} className={row.original.unitCost ? "" : "text-muted-foreground"} />
+          {row.original.unitCost !== row.original.lastImportedPrice && row.original.lastImportedPrice > 0 ? (
             <div className="text-[10.5px] text-muted-foreground">
-              TB <Money value={Math.round(row.original.avgImportedPrice)} />
+              Pancake <Money value={row.original.lastImportedPrice} />
             </div>
           ) : null}
         </div>
       ),
     },
     {
-      id: "remainQuantity",
-      accessorKey: "remainQuantity",
-      header: "Tồn khả dụng",
+      id: "received",
+      header: "Nhập",
       meta: { align: "right" },
-      cell: ({ row }) => <span className={cn("numeric text-base font-bold", stockTone(row.original.remainQuantity))}>{formatNumber(row.original.remainQuantity)}</span>,
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric font-medium", row.original.received === 0 && "text-muted-foreground")}>{formatNumber(row.original.received)}</span>
+          {row.original.receiptCount ? <div className="text-[10.5px] text-muted-foreground">{row.original.receiptCount} phiếu</div> : null}
+        </div>
+      ),
     },
     {
-      id: "actualRemainQuantity",
-      header: "Tồn thực tế",
-      enableSorting: false,
+      id: "delivered",
+      header: "Giao thật",
       meta: { align: "right" },
-      cell: ({ row }) => <span className="numeric text-muted-foreground">{formatNumber(row.original.actualRemainQuantity)}</span>,
+      cell: ({ row }) => <span className="numeric text-emerald-700 dark:text-emerald-400">{formatNumber(row.original.delivered)}</span>,
     },
-    ...warehouseColumns,
+    {
+      id: "returned",
+      header: "Hoàn",
+      meta: { align: "right" },
+      cell: ({ row }) => <span className={cn("numeric", row.original.returned ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{formatNumber(row.original.returned)}</span>,
+    },
+    {
+      id: "inTransit",
+      header: "Đang giao",
+      meta: { align: "right" },
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric", row.original.inTransit ? "text-sky-700 dark:text-sky-400" : "text-muted-foreground")}>{formatNumber(row.original.inTransit)}</span>
+          {row.original.pending ? <div className="text-[10.5px] text-muted-foreground">chờ gửi {formatNumber(row.original.pending)}</div> : null}
+        </div>
+      ),
+    },
+    {
+      id: "erpStock",
+      accessorKey: "erpStock",
+      header: "Tồn khả dụng",
+      meta: { align: "right" },
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric text-base font-bold", stockTone(row.original.erpStock))}>{formatNumber(row.original.erpStock)}</span>
+          <div className="text-[10.5px] text-muted-foreground">Pancake {formatNumber(row.original.remainQuantity)}</div>
+        </div>
+      ),
+    },
     {
       id: "sold30",
       accessorKey: "sold30",

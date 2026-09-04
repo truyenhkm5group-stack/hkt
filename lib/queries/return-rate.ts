@@ -1,0 +1,252 @@
+import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { RETURN_RULE, type OrderOutcome } from "@/lib/constants/returns";
+import type { Period } from "@/lib/search-params";
+
+const o = schema.orders;
+const s = schema.shipments;
+const i = schema.orderItems;
+const MAX_FEE = RETURN_RULE.maxFeeForFakeDelivery;
+
+/** Cước ĐVVC của đơn: ưu tiên số trên vận đơn, không có thì lấy phí đối tác Pancake ghi trên đơn */
+const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
+/** COD của đơn: ưu tiên vận đơn, không có thì lấy COD trên đơn Pancake */
+const COD = sql`coalesce(nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
+
+/** Quy tắc 1: chính vận đơn của đơn "giao thành công" nhưng COD = 0 và cước < 10K */
+const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})`;
+
+/**
+ * Quy tắc 2: tồn tại một vận đơn Viettel Post khác (vận đơn hoàn / thu tiền ship, ví dụ PKE…1P1)
+ * tham chiếu tới vận đơn gốc, ở trạng thái giao thành công, COD = 0, cước < 10K.
+ */
+const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
+  select 1 from shipments rl
+  where rl.id <> ${s.id}
+    and rl.stage = 'DELIVERED' and rl.cod_amount = 0 and rl.shipping_fee > 0 and rl.shipping_fee < ${MAX_FEE}
+    and (rl.order_reference = ${s.vtpOrderNumber} or rl.vtp_order_number ~ ('^' || ${s.vtpOrderNumber} || '[0-9]?P[0-9]+$'))
+))`;
+
+/** Kết quả cuối cùng của một đơn (dùng chung cho báo cáo tỷ lệ hoàn). Yêu cầu FROM orders LEFT JOIN shipments. */
+export const ORDER_OUTCOME = sql<OrderOutcome>`case
+  when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
+  when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') or ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when ${FEE_RULE} or ${LEG_RULE} then 'RETURNED_BY_RULE'
+  when ${o.stage} in ('DELIVERED','PAID') or ${s.stage} = 'DELIVERED' then 'DELIVERED'
+  when ${o.stage} = 'SHIPPED' or ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') then 'IN_TRANSIT'
+  else 'NOT_SHIPPED' end`;
+
+const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+
+/** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
+const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
+
+export type ReturnRateQuery = {
+  period: Period;
+  q: string;
+  minShipped: number;
+  sort: string;
+  dir: "asc" | "desc";
+  page: number;
+  pageSize: number;
+};
+
+export type ReturnRateRow = {
+  key: string;
+  variantId: string | null;
+  sku: string;
+  productName: string;
+  variationDetail: string;
+  image: string | null;
+  shipped: number;
+  delivered: number;
+  returned: number;
+  returnedByRule: number;
+  inTransit: number;
+  cancelled: number;
+  returnedQty: number;
+  lostRevenue: number;
+  deliveredRevenue: number;
+  /** % hoàn trên các đơn đã có kết quả (giao thật + hoàn); null nếu chưa có đơn nào kết thúc */
+  rate: number | null;
+};
+
+export const RETURN_RATE_SORTABLE = ["rate", "returned", "delivered", "shipped", "inTransit", "lostRevenue", "sku"];
+
+function baseWhere(period: Period, q: string): SQL | undefined {
+  const conds: SQL[] = [eq(i.isBonus, false)];
+  if (period.from) conds.push(gte(o.insertedAt, period.from));
+  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const term = q.trim();
+  if (term) {
+    const like = `%${term}%`;
+    conds.push(sql`(${i.sku} ilike ${like} or ${i.productName} ilike ${like} or ${i.variationDetail} ilike ${like})`);
+  }
+  return and(...conds);
+}
+
+/** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
+export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[] }> {
+  const db = await getDb();
+  const raw = await db
+    .select({
+      key: VARIANT_KEY,
+      variantId: sql<string | null>`max(${i.variantId})`,
+      sku: sql<string>`max(${i.sku})`,
+      productName: sql<string>`max(${i.productName})`,
+      variationDetail: sql<string>`max(${i.variationDetail})`,
+      image: sql<string | null>`max(${i.image})`,
+      shipped: sql<number>`count(distinct ${o.id}) filter (where ${IS_SHIPPED})`,
+      delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
+      returnedByRule: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
+      returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${IS_RETURNED}), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+    })
+    .from(i)
+    .innerJoin(o, eq(o.id, i.orderId))
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(baseWhere(query.period, query.q))
+    .groupBy(VARIANT_KEY);
+
+  const all: ReturnRateRow[] = raw
+    .map((r) => {
+      const delivered = Number(r.delivered);
+      const returned = Number(r.returned);
+      const finished = delivered + returned;
+      return {
+        key: r.key,
+        variantId: r.variantId,
+        sku: r.sku ?? "",
+        productName: r.productName ?? "",
+        variationDetail: r.variationDetail ?? "",
+        image: r.image,
+        shipped: Number(r.shipped),
+        delivered,
+        returned,
+        returnedByRule: Number(r.returnedByRule),
+        inTransit: Number(r.inTransit),
+        cancelled: Number(r.cancelled),
+        returnedQty: Number(r.returnedQty),
+        lostRevenue: Number(r.lostRevenue),
+        deliveredRevenue: Number(r.deliveredRevenue),
+        rate: finished ? (returned / finished) * 100 : null,
+      };
+    })
+    .filter((r) => r.shipped >= query.minShipped);
+
+  const sortKey = RETURN_RATE_SORTABLE.includes(query.sort) ? query.sort : "rate";
+  const sign = query.dir === "asc" ? 1 : -1;
+  all.sort((a, b) => {
+    if (sortKey === "sku") return sign * (a.sku || a.productName).localeCompare(b.sku || b.productName, "vi");
+    const av = a[sortKey as keyof ReturnRateRow] as number | null;
+    const bv = b[sortKey as keyof ReturnRateRow] as number | null;
+    if (av === null && bv === null) return b.shipped - a.shipped;
+    if (av === null) return 1; // chưa có kết quả xếp cuối
+    if (bv === null) return -1;
+    return sign * (av - bv) || b.returned - a.returned || b.shipped - a.shipped;
+  });
+
+  const total = all.length;
+  const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
+  const start = (query.page - 1) * query.pageSize;
+  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all };
+}
+
+export type ReturnRateSummary = { orders: number; shipped: number; delivered: number; returned: number; returnedByRule: number; inTransit: number; cancelled: number; lostRevenue: number; rate: number | null };
+
+/** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
+export async function getReturnRateSummary(period: Period, q: string): Promise<ReturnRateSummary> {
+  const db = await getDb();
+  const conds: SQL[] = [];
+  if (period.from) conds.push(gte(o.insertedAt, period.from));
+  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const term = q.trim();
+  if (term) {
+    const like = `%${term}%`;
+    conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
+  }
+  const [row] = await db
+    .select({
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
+      returnedByRule: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
+      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
+    })
+    .from(o)
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(conds.length ? and(...conds) : undefined);
+  const delivered = Number(row?.delivered ?? 0);
+  const returned = Number(row?.returned ?? 0);
+  return {
+    orders: Number(row?.orders ?? 0),
+    shipped: Number(row?.shipped ?? 0),
+    delivered,
+    returned,
+    returnedByRule: Number(row?.returnedByRule ?? 0),
+    inTransit: Number(row?.inTransit ?? 0),
+    cancelled: Number(row?.cancelled ?? 0),
+    lostRevenue: Number(row?.lostRevenue ?? 0),
+    rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
+  };
+}
+
+export type VariantOrderRow = {
+  id: string;
+  systemId: number | null;
+  insertedAt: Date;
+  stage: (typeof schema.orders.$inferSelect)["stage"];
+  outcome: OrderOutcome;
+  billFullName: string;
+  billPhone: string;
+  shipProvince: string;
+  quantity: number;
+  lineTotal: number;
+  cod: number;
+  fee: number;
+  vtpOrderNumber: string | null;
+  shipmentStage: (typeof schema.shipments.$inferSelect)["stage"] | null;
+  returnedReason: string | null;
+};
+
+/** Danh sách đơn của một mẫu mã trong kỳ kèm kết quả, để đối chiếu (tối đa 300 đơn, hoàn xếp trước) */
+export async function listOrdersForVariant(key: string, period: Period): Promise<VariantOrderRow[]> {
+  const db = await getDb();
+  const conds: SQL[] = [eq(VARIANT_KEY, key), eq(i.isBonus, false)];
+  if (period.from) conds.push(gte(o.insertedAt, period.from));
+  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const rows = await db
+    .select({
+      id: o.id,
+      systemId: o.systemId,
+      insertedAt: o.insertedAt,
+      stage: o.stage,
+      outcome: ORDER_OUTCOME,
+      billFullName: o.billFullName,
+      billPhone: o.billPhone,
+      shipProvince: o.shipProvince,
+      quantity: sql<number>`sum(${i.quantity})`,
+      lineTotal: sql<number>`sum(${i.lineTotal})`,
+      cod: sql<number>`${COD}`,
+      fee: sql<number>`${FEE}`,
+      vtpOrderNumber: s.vtpOrderNumber,
+      shipmentStage: s.stage,
+      returnedReason: o.returnedReason,
+    })
+    .from(i)
+    .innerJoin(o, eq(o.id, i.orderId))
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(and(...conds))
+    .groupBy(o.id, s.id)
+    .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
+    .limit(300);
+  return rows.map((r) => ({ ...r, quantity: Number(r.quantity), lineTotal: Number(r.lineTotal), cod: Number(r.cod), fee: Number(r.fee) }));
+}

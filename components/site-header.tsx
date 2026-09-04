@@ -13,7 +13,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
   const first = segments.length ? `/${segments[0]}` : "/";
-  const firstTitle = NAV_TITLES[first] ?? NAV_TITLES[`/${segments.slice(0, 2).join("/")}`] ?? "Trang";
+  const firstTitle = NAV_TITLES[`/${segments.slice(0, 2).join("/")}`] ?? NAV_TITLES[first] ?? "Trang";
   const detail = segments.length > 1 && !NAV_TITLES[`/${segments.slice(0, 2).join("/")}`] ? segments.slice(1).join(" / ") : null;
 
   return (

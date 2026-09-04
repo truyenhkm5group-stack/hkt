@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { FAILED_STAGES, SUCCESS_STAGES } from "@/lib/constants/pancake";
 import { vnDateKey } from "@/lib/format";
@@ -126,7 +127,14 @@ export async function getDashboardData(period: Period) {
 
   // Cần xử lý
   const [failedDelivery] = await db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"]));
-  const [lowStock] = await db.select({ count: count() }).from(schema.productVariants).where(and(lte(schema.productVariants.remainQuantity, 5), eq(schema.productVariants.isRemoved, false), eq(schema.productVariants.isHidden, false)));
+  const lowStockSales = variantSalesSubquery(db);
+  const lowStockReceipts = variantReceiptsSubquery(db);
+  const [lowStock] = await db
+    .select({ count: count() })
+    .from(schema.productVariants)
+    .leftJoin(lowStockSales, eq(lowStockSales.variantId, schema.productVariants.id))
+    .leftJoin(lowStockReceipts, eq(lowStockReceipts.variantId, schema.productVariants.id))
+    .where(and(lte(erpStockExpr(lowStockSales, lowStockReceipts), 5), eq(schema.productVariants.isRemoved, false), eq(schema.productVariants.isHidden, false)));
   const [stale] = await db
     .select({ count: count() })
     .from(schema.shipments)
