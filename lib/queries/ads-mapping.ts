@@ -12,6 +12,9 @@ export type CampaignMappingRow = {
   productId: string | null;
   excluded: boolean;
   manual: boolean;
+  testCost: boolean;
+  marketerId: string | null;
+  marketerManual: boolean;
 };
 
 /** Danh sách chiến dịch Facebook (N ngày) kèm trạng thái ghép để chỉnh tay */
@@ -29,6 +32,7 @@ export async function listCampaignsForMapping(days = 90): Promise<CampaignMappin
       lastDate: sql<string | null>`max(${schema.adSpends.spendDate})`,
       productId: sql<string | null>`max(${schema.adSpends.productId})`,
       excluded: sql<boolean>`bool_or(${schema.adSpends.excluded})`,
+      marketerId: sql<string | null>`max(${schema.adSpends.marketerId})`,
     })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.platform, "Facebook"), sql`${schema.adSpends.campaignId} is not null`, gte(schema.adSpends.spendDate, since)))
@@ -45,7 +49,10 @@ export async function listCampaignsForMapping(days = 90): Promise<CampaignMappin
       lastDate: r.lastDate ? new Date(r.lastDate) : null,
       productId: r.productId,
       excluded: Boolean(r.excluded),
-      manual: Boolean(campaignMap[r.campaignId as string]),
+      manual: Boolean(campaignMap[r.campaignId as string] && (campaignMap[r.campaignId as string].productId || campaignMap[r.campaignId as string].exclude || campaignMap[r.campaignId as string].testCost)),
+      testCost: Boolean(campaignMap[r.campaignId as string]?.testCost),
+      marketerId: r.marketerId,
+      marketerManual: campaignMap[r.campaignId as string]?.marketerId !== undefined,
     }));
 }
 

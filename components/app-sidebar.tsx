@@ -10,6 +10,7 @@ import {
   PackageCheck,
   PlugZap,
   ReceiptText,
+  HandCoins,
   PackagePlus,
   RotateCcw,
   Undo2,
@@ -59,6 +60,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3 },
       { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2 },
+      { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, roles: ["ADMIN", "MANAGER", "ACCOUNTANT"] },
     ],
   },
   {

@@ -552,10 +552,12 @@ export const adSpends = pgTable(
     currency: text("currency"),
     /** Không tính vào chi phí (chiến dịch của shop khác trong cùng Business Manager) */
     excluded: boolean("excluded").notNull().default(false),
+    /** Marketer phụ trách chiến dịch (id nhân sự trong cấu hình lương) */
+    marketerId: text("marketer_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate), uniqueIndex("ad_spends_external_key_uq").on(t.externalKey), index("ad_spends_product_idx").on(t.productId)],
+  (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate), uniqueIndex("ad_spends_external_key_uq").on(t.externalKey), index("ad_spends_product_idx").on(t.productId), index("ad_spends_marketer_idx").on(t.marketerId)],
 );
 
 // ───────────────────────── Đồng bộ & tích hợp ─────────────────────────

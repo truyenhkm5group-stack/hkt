@@ -4,6 +4,7 @@ import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
 import { SyncButton } from "@/components/sync-button";
 import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listCampaignsForMapping, listProductsForMapping } from "@/lib/queries/ads-mapping";
+import { listEmployees } from "@/lib/queries/payroll";
 import { integrationStatus } from "@/lib/env";
 import { AdsChart } from "@/components/charts/ads-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -20,7 +21,7 @@ function change(current: number, previous: number | null | undefined) {
 
 export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; period: Period; canWrite: boolean }) {
   const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period), adDailyByPlatform(period), listCampaignsForMapping(90), listProductsForMapping(), loadAdsMapping()]);
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period), adDailyByPlatform(period), listCampaignsForMapping(90), listProductsForMapping(), loadAdsMapping(), listEmployees()]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
 
@@ -54,10 +55,10 @@ export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; per
 
       <SectionCard
         title="Ghép chiến dịch Facebook → mã hàng"
-        description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng để tính lợi nhuận theo mã; chiến dịch của shop khác chọn “Không tính”." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
+        description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng và marketer để tính lợi nhuận theo mã / theo người; chiến dịch không thuộc mã nào = chi phí test; chiến dịch của shop khác chọn “Không tính”." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
         actions={fb ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
       >
-        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} canWrite={canWrite} />
+        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={employees.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} />
       </SectionCard>
 
       <DataTableToolbar

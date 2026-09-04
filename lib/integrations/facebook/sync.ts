@@ -33,7 +33,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
   return runSyncJob({ source: "FACEBOOK", job: "ads_insights", trigger: options.trigger, actor: options.actor }, async (ctx) => {
     const db = await getDb();
     const client = getFacebookAdsClient();
-    const days = Math.min(Math.max(options.days ?? 3, 1), 400);
+    const days = Math.min(Math.max(options.days ?? 3, 1), 1100);
     const until = dayKey(new Date());
     const since = dayKey(new Date(Date.now() - (days - 1) * 86_400_000));
     const [index, mapping] = await Promise.all([loadProductCodeIndex(), loadAdsMapping()]);
@@ -48,7 +48,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         const rate = account.currency && account.currency !== "VND" ? (account.currency === "USD" ? env.facebook.usdToVnd : 1) : 1;
         for (const row of insights) {
           if (!row.date) continue;
-          const resolved = resolveCampaign(row.campaignId, row.campaignName, mapping, index);
+          const resolved = resolveCampaign(row.campaignId, row.campaignName, mapping, index, account.accountId);
           if (resolved.productId) matched += 1;
           const spend = Math.round(row.spend * rate);
           const values = {
@@ -71,6 +71,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
             messages: row.messages,
             currency: account.currency,
             excluded: resolved.excluded,
+            marketerId: resolved.marketerId,
           };
           const [r] = await db
             .insert(schema.adSpends)
