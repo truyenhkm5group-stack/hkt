@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import type { ExpenseCategory } from "@/db/schema";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type ListParams, type Period } from "@/lib/search-params";
 
 export const EXPENSE_SORTABLE = ["occurredAt", "amount", "category", "createdAt"];
@@ -218,10 +219,11 @@ export async function adOrdersFromErp(from: Date | null, to: Date | null) {
       revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`,
       adOrders: sql<number>`count(*) filter (where ${hasAd})`,
       adRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${hasAd}), 0)`,
-      delivered: sql<number>`count(*) filter (where ${o.stage} in ('DELIVERED','PAID'))`,
-      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} in ('DELIVERED','PAID')), 0)`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
     })
     .from(o)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
     .where(and(inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(o.insertedAt, from, to)));
   return {
     orders: Number(row?.orders ?? 0),

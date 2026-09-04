@@ -2,10 +2,10 @@ import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from
 import { getDb, schema } from "@/db";
 import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
-import { FAILED_STAGES, SUCCESS_STAGES } from "@/lib/constants/pancake";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { ORDER_COGS } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
   const conds = [];
@@ -28,33 +28,30 @@ export type OrderKpis = {
 async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
   const db = await getDb();
   const where = inPeriod(schema.orders.insertedAt, from, to);
-  const rows = await db
+  // Kết quả đơn theo trạng thái vận đơn Viettel Post kết hợp Pancake (ORDER_OUTCOME)
+  const [row] = await db
     .select({
-      stage: schema.orders.stage,
-      count: count(),
-      revenue: sum(schema.orders.totalPriceAfterDiscount),
-      cogs: sql<number>`coalesce(sum(${ORDER_COGS}), 0)`,
+      orders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} <> 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
+      cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
+      successOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      successRevenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      failedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('CANCELLED','RETURNED','RETURNED_BY_RULE'))`,
+      activeOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED'))`,
     })
     .from(schema.orders)
-    .where(where)
-    .groupBy(schema.orders.stage);
-  const kpi: OrderKpis = { orders: 0, revenue: 0, cogs: 0, successOrders: 0, successRevenue: 0, failedOrders: 0, activeOrders: 0, aov: 0 };
-  for (const row of rows) {
-    const n = Number(row.count);
-    const rev = Number(row.revenue ?? 0);
-    if (row.stage === "CANCELLED" || row.stage === "DELETED") {
-      kpi.failedOrders += n;
-      continue;
-    }
-    kpi.orders += n;
-    kpi.revenue += rev;
-    kpi.cogs += Number(row.cogs ?? 0);
-    if (SUCCESS_STAGES.includes(row.stage)) {
-      kpi.successOrders += n;
-      kpi.successRevenue += rev;
-    } else if (FAILED_STAGES.includes(row.stage)) kpi.failedOrders += n;
-    else kpi.activeOrders += n;
-  }
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    .where(where);
+  const kpi: OrderKpis = {
+    orders: Number(row?.orders ?? 0),
+    revenue: Number(row?.revenue ?? 0),
+    cogs: Number(row?.cogs ?? 0),
+    successOrders: Number(row?.successOrders ?? 0),
+    successRevenue: Number(row?.successRevenue ?? 0),
+    failedOrders: Number(row?.failedOrders ?? 0),
+    activeOrders: Number(row?.activeOrders ?? 0),
+    aov: 0,
+  };
   kpi.aov = kpi.orders ? Math.round(kpi.revenue / kpi.orders) : 0;
   return kpi;
 }
@@ -80,10 +77,11 @@ export async function getDashboardData(period: Period) {
       day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
       orders: count(),
       revenue: sum(schema.orders.totalPriceAfterDiscount),
-      success: sql<number>`sum(case when ${schema.orders.stage} in ('DELIVERED','PAID') then 1 else 0 end)`,
-      successRevenue: sql<number>`sum(case when ${schema.orders.stage} in ('DELIVERED','PAID') then ${schema.orders.totalPriceAfterDiscount} else 0 end)`,
+      success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
+      successRevenue: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then ${schema.orders.totalPriceAfterDiscount} else 0 end)`,
     })
     .from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
     .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")))
     .groupBy(sql`1`)
     .orderBy(sql`1`);
@@ -91,8 +89,9 @@ export async function getDashboardData(period: Period) {
 
   // Theo kênh bán
   const channelRows = await db
-    .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${schema.orders.stage} in ('DELIVERED','PAID') then 1 else 0 end)` })
+    .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
     .from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
     .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")))
     .groupBy(schema.orders.source)
     .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount)));
@@ -177,7 +176,8 @@ export async function getDashboardData(period: Period) {
       await db
         .select({ cogs: sql<number>`coalesce(sum(${ORDER_COGS}), 0)` })
         .from(schema.orders)
-        .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, SUCCESS_STAGES)))
+        .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+        .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), sql`${ORDER_OUTCOME} = 'DELIVERED'`))
     )[0]?.cogs ?? 0,
   );
   const estimatedProfit = netRevenue - successCogs - shipping - returnFee - adSpend - expenses;

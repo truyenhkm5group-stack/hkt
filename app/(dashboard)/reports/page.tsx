@@ -237,7 +237,7 @@ export default async function ReportsPage({
             resultLabel={
               basis === "delivered"
                 ? "Đơn được gán vào kỳ theo ngày Viettel Post phát thành công (đơn chưa giao tính theo ngày lên đơn)."
-                : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake."
+                : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake. “Giao thành công” tính theo trạng thái vận đơn Viettel Post (webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake; đơn giao thành công nhưng COD = 0 và cước < 10.000đ được coi là hoàn."
             }
           />
 

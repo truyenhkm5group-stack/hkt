@@ -1,8 +1,8 @@
 import { and, count, desc, eq, inArray, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { SUCCESS_STAGES } from "@/lib/constants/pancake";
 import { LINE_UNIT_COST, ORDER_COGS } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type Period } from "@/lib/search-params";
 
 export type ReportBasis = "created" | "delivered";
@@ -28,10 +28,11 @@ function between(column: SQL | AnyPgColumn, from: Date | null, to: Date | null):
   return conds.length ? and(...conds) : undefined;
 }
 
-const SUCCESS = sql`${schema.orders.stage} in ('DELIVERED','PAID')`;
+// Kết quả đơn theo trạng thái VẬN ĐƠN (Viettel Post: webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake — xem ORDER_OUTCOME
+const SUCCESS = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
 const NOT_CANCELLED = sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`;
-const SHIPPED = sql`${schema.orders.stage} in ('SHIPPED','DELIVERED','PAID','RETURNING','PARTIAL_RETURN','RETURNED')`;
-const RETURNED = sql`${schema.orders.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED')`;
+const SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+const RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
 const CANCELLED = sql`${schema.orders.stage} in ('CANCELLED','DELETED')`;
 
 export type PnlLines = {
@@ -244,7 +245,7 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
       .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
       .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderItems.variantId))
       .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-      .where(and(inPeriod, inArray(schema.orders.stage, SUCCESS_STAGES)))
+      .where(and(inPeriod, SUCCESS))
       .groupBy(schema.orderItems.productName)
       .orderBy(desc(sql`coalesce(sum(${schema.orderItems.lineTotal}), 0) - coalesce(sum(${LINE_UNIT_COST} * ${schema.orderItems.quantity}), 0)`))
       .limit(15),
