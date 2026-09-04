@@ -81,6 +81,11 @@ export class ViettelPostClient {
     };
   }
 
+  /** Gọi API thô (dùng cho chẩn đoán) */
+  debugCall(path: string, options: { method?: string; body?: unknown; token?: string | null; query?: Record<string, unknown> } = {}) {
+    return this.rawCall(path, options);
+  }
+
   /** Lấy token đối tác: ưu tiên loginVTP (token bí mật từ viettelpost.vn), fallback Login → ownerconnect */
   private async authenticate(): Promise<{ token: string; expiresAt: Date | null; method: string }> {
     const errors: string[] = [];

@@ -16,6 +16,7 @@
     "scheduler": "node scripts/scheduler.mjs",
     "sync": "tsx --tsconfig tsconfig.json scripts/sync.ts",
     "check:integrations": "tsx --tsconfig tsconfig.json scripts/check-integrations.ts",
+    "vtp:debug": "tsx --tsconfig tsconfig.json scripts/vtp-debug.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
     "db:generate": "drizzle-kit generate"
   },

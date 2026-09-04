@@ -18,6 +18,7 @@ on:
           - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
           - sync-vtp-import     # nhập vận đơn từ tài khoản Viettel Post (30 ngày)
           - check-integrations  # kiểm tra API key
+          - vtp-debug           # in phản hồi thô API Viettel Post cho mã vận đơn (nhập ở ô "arg")
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -25,6 +26,10 @@ on:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
         default: "365"
+      arg:
+        description: "Tham số thêm (vtp-debug: mã vận đơn)"
+        type: string
+        default: ""
 
 concurrency:
   group: ops-vps
@@ -39,6 +44,7 @@ jobs:
         env:
           ACTION: ${{ inputs.action }}
           DAYS: ${{ inputs.days }}
+          ARG: ${{ inputs.arg }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -46,7 +52,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS
+          envs: ACTION,DAYS,ARG
           script: |
             set -e
             cd /root/erp
@@ -67,6 +73,8 @@ jobs:
                 docker exec erp-app npm run --silent sync -- vtp-import --days="$DAYS" ;;
               check-integrations)
                 docker exec erp-app npm run --silent check:integrations ;;
+              vtp-debug)
+                docker exec erp-app npm run --silent vtp:debug -- "$ARG" ;;
               backup)
                 mkdir -p /root/backups
                 $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
