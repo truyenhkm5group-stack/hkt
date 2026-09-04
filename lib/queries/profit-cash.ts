@@ -56,7 +56,7 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
     db
       .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
       .from(schema.adSpends)
-      .where(between(schema.adSpends.spendDate, period.from, period.to)),
+      .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to))),
     db
       .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
       .from(schema.expenses)

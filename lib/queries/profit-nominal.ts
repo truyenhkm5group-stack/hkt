@@ -128,7 +128,7 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
   const db = await getDb();
   const assumptions = await resolveAssumptions();
   const history = await productReturnHistory(assumptions.returnRateWindowDays);
-  const adConds: SQL[] = [];
+  const adConds: SQL[] = [eq(ads.excluded, false)];
   if (period.from) adConds.push(gte(ads.spendDate, period.from));
   if (period.to) adConds.push(lte(ads.spendDate, period.to));
 
@@ -159,7 +159,7 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
     db
       .select({ productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
       .from(ads)
-      .where(adConds.length ? and(...adConds) : undefined)
+      .where(and(...adConds))
       .groupBy(ads.productId),
   ]);
   const adByProduct = new Map<string, number>();
@@ -255,7 +255,7 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
   const db = await getDb();
   const day = sql<string>`to_char(${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
   const adDay = sql<string>`to_char(${ads.spendDate} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
-  const adConds: SQL[] = [eq(ads.productId, productId)];
+  const adConds: SQL[] = [eq(ads.productId, productId), eq(ads.excluded, false)];
   if (period.from) adConds.push(gte(ads.spendDate, period.from));
   if (period.to) adConds.push(lte(ads.spendDate, period.to));
   const [salesRows, adRows] = await Promise.all([

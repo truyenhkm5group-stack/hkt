@@ -550,6 +550,8 @@ export const adSpends = pgTable(
     clicks: integer("clicks").notNull().default(0),
     messages: integer("messages").notNull().default(0),
     currency: text("currency"),
+    /** Không tính vào chi phí (chiến dịch của shop khác trong cùng Business Manager) */
+    excluded: boolean("excluded").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

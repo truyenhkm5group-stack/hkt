@@ -119,7 +119,7 @@ export async function getDashboardData(period: Period) {
   const [ads] = await db
     .select({ amount: sum(schema.adSpends.spend) })
     .from(schema.adSpends)
-    .where(and(period.from ? gte(schema.adSpends.spendDate, period.from) : undefined, period.to ? lte(schema.adSpends.spendDate, period.to) : undefined));
+    .where(and(eq(schema.adSpends.excluded, false), period.from ? gte(schema.adSpends.spendDate, period.from) : undefined, period.to ? lte(schema.adSpends.spendDate, period.to) : undefined));
   const [shippingFees] = await db
     .select({ fee: sum(schema.orders.partnerFee), returnFee: sum(schema.orders.returnFee) })
     .from(schema.orders)

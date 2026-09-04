@@ -1,8 +1,9 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
-import { buildProductCodeIndex, matchCampaignToProduct, type ProductCodeEntry } from "@/lib/integrations/facebook/match";
+import { buildProductCodeIndex, type ProductCodeEntry } from "@/lib/integrations/facebook/match";
+import { loadAdsMapping, reapplyAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
@@ -35,7 +36,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
     const days = Math.min(Math.max(options.days ?? 3, 1), 400);
     const until = dayKey(new Date());
     const since = dayKey(new Date(Date.now() - (days - 1) * 86_400_000));
-    const index = await loadProductCodeIndex();
+    const [index, mapping] = await Promise.all([loadProductCodeIndex(), loadAdsMapping()]);
     const accounts = await client.listAdAccounts();
     ctx.summary.detail = `${accounts.length} tài khoản · ${since} → ${until}`;
     await ctx.progress();
@@ -47,8 +48,8 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         const rate = account.currency && account.currency !== "VND" ? (account.currency === "USD" ? env.facebook.usdToVnd : 1) : 1;
         for (const row of insights) {
           if (!row.date) continue;
-          const productId = matchCampaignToProduct(row.campaignName, index);
-          if (productId) matched += 1;
+          const resolved = resolveCampaign(row.campaignId, row.campaignName, mapping, index);
+          if (resolved.productId) matched += 1;
           const spend = Math.round(row.spend * rate);
           const values = {
             platform: PLATFORM,
@@ -64,19 +65,19 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
             accountId: account.accountId,
             accountName: account.name,
             campaignId: row.campaignId,
-            productId,
+            productId: resolved.productId,
             impressions: row.impressions,
             clicks: row.clicks,
             messages: row.messages,
             currency: account.currency,
+            excluded: resolved.excluded,
           };
-          const result = await db
+          const [r] = await db
             .insert(schema.adSpends)
             .values(values)
             .onConflictDoUpdate({ target: schema.adSpends.externalKey, set: { ...values, updatedAt: new Date() } })
             .returning({ createdAt: schema.adSpends.createdAt, updatedAt: schema.adSpends.updatedAt });
-          const r = result[0];
-          if (r && r.createdAt.getTime() >= Date.now() - 5000 && r.updatedAt.getTime() - r.createdAt.getTime() < 2000) ctx.summary.imported += 1;
+          if (r && r.updatedAt.getTime() - r.createdAt.getTime() < 2000) ctx.summary.imported += 1;
           else ctx.summary.updated += 1;
           rows += 1;
         }
@@ -87,12 +88,9 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       }
       await ctx.progress();
     }
-    // Ghép lại sản phẩm cho các dòng cũ chưa ghép (khi có sản phẩm mới)
-    const unmatched = await db.select({ id: schema.adSpends.id, campaign: schema.adSpends.campaign }).from(schema.adSpends).where(and(eq(schema.adSpends.platform, PLATFORM), isNull(schema.adSpends.productId)));
-    for (const row of unmatched) {
-      const productId = matchCampaignToProduct(row.campaign, index);
-      if (productId) await db.update(schema.adSpends).set({ productId }).where(eq(schema.adSpends.id, row.id));
-    }
+    // Áp lại bảng ghép / bí danh cho các dòng cũ (khi có sản phẩm hoặc ghép tay mới)
+    const reapplied = await reapplyAdsMapping();
+    if (reapplied.changed) ctx.log(`Áp lại ghép mã hàng: ${reapplied.changed} dòng thay đổi`);
     ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng ngày×chiến dịch (${since} → ${until}) · ghép được mã hàng ${matched}/${rows}`;
     publish({ type: "ads" });
     return { accounts: accounts.length, rows, matched };

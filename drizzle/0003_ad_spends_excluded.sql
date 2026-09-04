@@ -1,0 +1,1 @@
+ALTER TABLE "ad_spends" ADD COLUMN "excluded" boolean DEFAULT false NOT NULL;

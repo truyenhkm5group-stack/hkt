@@ -1,11 +1,14 @@
 import { CircleDollarSign, Megaphone, ShoppingBag, Target, TrendingUp } from "lucide-react";
+import { CampaignMapping } from "@/app/(dashboard)/expenses/campaign-mapping";
 import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
+import { SyncButton } from "@/components/sync-button";
+import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
+import { listCampaignsForMapping, listProductsForMapping } from "@/lib/queries/ads-mapping";
+import { integrationStatus } from "@/lib/env";
 import { AdsChart } from "@/components/charts/ads-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
-import { SyncButton } from "@/components/sync-button";
 import { SectionCard } from "@/components/ui-bits";
-import { integrationStatus } from "@/lib/env";
 import { formatNumber, formatVND } from "@/lib/format";
 import { AD_SORTABLE, adDailyByPlatform, adFacets, adSummary, listAdSpends } from "@/lib/queries/expenses";
 import { parseListParams, type Period, type SearchParams } from "@/lib/search-params";
@@ -17,8 +20,9 @@ function change(current: number, previous: number | null | undefined) {
 
 export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; period: Period; canWrite: boolean }) {
   const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period), adDailyByPlatform(period)]);
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period), adDailyByPlatform(period), listCampaignsForMapping(90), listProductsForMapping(), loadAdsMapping()]);
   const prev = summary.previous;
+  const fb = integrationStatus().facebook;
 
   return (
     <div className="space-y-5">
@@ -42,11 +46,18 @@ export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; per
             </>
           )}
         </div>
-        {canWrite && integrationStatus().facebook ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
       </div>
 
       <SectionCard title="Chi tiêu theo ngày" description="Cột chồng theo nền tảng quảng cáo" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
         <AdsChart data={daily.data} platforms={daily.platforms} />
+      </SectionCard>
+
+      <SectionCard
+        title="Ghép chiến dịch Facebook → mã hàng"
+        description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng để tính lợi nhuận theo mã; chiến dịch của shop khác chọn “Không tính”." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
+        actions={fb ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
+      >
+        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} canWrite={canWrite} />
       </SectionCard>
 
       <DataTableToolbar

@@ -22,6 +22,13 @@
       "when": 1788529782173,
       "tag": "0002_ad_spends_facebook",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788533081800,
+      "tag": "0003_ad_spends_excluded",
+      "breakpoints": true
     }
   ]
 }

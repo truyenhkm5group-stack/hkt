@@ -77,7 +77,7 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
   const [ads] = await db
     .select({ spend: sum(schema.adSpends.spend), orders: sum(schema.adSpends.orders), revenue: sum(schema.adSpends.revenue) })
     .from(schema.adSpends)
-    .where(between(schema.adSpends.spendDate, from, to));
+    .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, from, to)));
   const expenseRows = await db
     .select({ category: schema.expenses.category, amount: sum(schema.expenses.amount) })
     .from(schema.expenses)
@@ -156,7 +156,7 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     db
       .select({ day: dayOf(schema.adSpends.spendDate), spend: sum(schema.adSpends.spend) })
       .from(schema.adSpends)
-      .where(between(schema.adSpends.spendDate, period.from, period.to))
+      .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)))
       .groupBy(sql`1`),
     db
       .select({ day: dayOf(schema.expenses.occurredAt), ads: sql<number>`coalesce(sum(${schema.expenses.amount}) filter (where ${schema.expenses.category} = 'ADS'), 0)`, other: sql<number>`coalesce(sum(${schema.expenses.amount}) filter (where ${schema.expenses.category} <> 'ADS'), 0)` })
