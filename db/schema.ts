@@ -67,6 +67,35 @@ export const users = pgTable("users", {
   updatedAt: updatedAt(),
 });
 
+/** Case chăm sóc khách hàng: đổi size / đổi màu / sai địa chỉ / sai SĐT / trả hàng / khiếu nại… */
+export const csCases = pgTable(
+  "cs_cases",
+  {
+    id: id(),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    customerId: text("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    /** EXCHANGE_SIZE · EXCHANGE_COLOR · WRONG_ADDRESS · WRONG_PHONE · RETURN · COMPLAINT · OTHER */
+    kind: text("kind").notNull().default("OTHER"),
+    /** OPEN · IN_PROGRESS · DONE · CANCELLED */
+    status: text("status").notNull().default("OPEN"),
+    /** PANCAKE_TAG · PANCAKE_NOTE · PANCAKE_RETURN · PANCAKE_CHAT · MANUAL */
+    source: text("source").notNull().default("MANUAL"),
+    title: text("title").notNull(),
+    detail: text("detail").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    customerPhone: text("customer_phone").notNull().default(""),
+    assignee: text("assignee").notNull().default(""),
+    resolution: text("resolution").notNull().default(""),
+    /** Khoá chống tạo trùng khi tự phát hiện */
+    dedupeKey: text("dedupe_key").unique(),
+    createdBy: text("created_by").notNull().default(""),
+    resolvedAt: ts("resolved_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId)],
+);
+
 /** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
 export const notifications = pgTable(
   "notifications",
@@ -310,6 +339,8 @@ export const orders = pgTable(
     accountName: text("account_name").notNull().default(""),
     pageId: text("page_id"),
     postId: text("post_id"),
+    /** Hội thoại Pancake (để mở chat: https://pancake.vn/<page_id>?c_id=<conversation_id>) */
+    conversationId: text("conversation_id"),
     adId: text("ad_id"),
     marketplaceId: text("marketplace_id"),
     sellerName: text("seller_name").notNull().default(""),
@@ -700,6 +731,11 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
 }));
 export const orderStatusHistoryRelations = relations(orderStatusHistory, ({ one }) => ({ order: one(orders, { fields: [orderStatusHistory.orderId], references: [orders.id] }) }));
 export const orderReturnsRelations = relations(orderReturns, ({ one }) => ({ order: one(orders, { fields: [orderReturns.orderId], references: [orders.id] }) }));
+
+export const csCasesRelations = relations(csCases, ({ one }) => ({
+  order: one(orders, { fields: [csCases.orderId], references: [orders.id] }),
+  customer: one(customers, { fields: [csCases.customerId], references: [customers.id] }),
+}));
 
 export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
   order: one(orders, { fields: [shipments.orderId], references: [orders.id] }),

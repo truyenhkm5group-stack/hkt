@@ -2,6 +2,10 @@
 export type AlertConfig = {
   telegramBotToken: string;
   telegramChatId: string;
+  /** Lark Suite: webhook của Custom Bot trong nhóm nhân viên vận đơn */
+  larkWebhookUrl: string;
+  /** Lark Suite: khoá ký (Signature) nếu bật */
+  larkSecret: string;
   /** Đơn đã lên nhưng chưa xác nhận / chưa giao ĐVVC quá N giờ → cảnh báo "chờ xử lý" */
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
@@ -9,7 +13,7 @@ export type AlertConfig = {
   /** Chỉ xét đơn / vận đơn phát sinh trong N ngày gần đây (bỏ qua đơn cũ đã bỏ) */
   lookbackDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -17,10 +21,12 @@ export const ALERT_CONFIG_KEY = "alerts.config";
 export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   telegramBotToken: "",
   telegramChatId: "",
+  larkWebhookUrl: "",
+  larkSecret: "",
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,
-  enabled: { failed: true, pending: true, stale: true, returning: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -28,10 +34,11 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   ORDER_PENDING: "Đơn chờ xử lý quá hạn",
   SHIPMENT_STALE: "Vận đơn treo lâu",
   SHIPMENT_RETURNING: "Đang chuyển hoàn",
+  CS_CASE: "Case CSKH mới",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",

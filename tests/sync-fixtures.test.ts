@@ -16,6 +16,7 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { detectCsCases } from "@/lib/cs/detect";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
 import { parseStatementDetail, parseStatementSummaryText } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail } from "@/lib/integrations/viettelpost/statement-db";
@@ -280,6 +281,20 @@ async function main() {
   const closed = await db.query.notifications.findFirst({ where: eq(schema.notifications.id, openFailed!.id) });
   assert.ok(closed?.resolvedAt, "tự đóng khi đã giao");
   console.log(`✓ Cảnh báo: giao thất bại → thông báo (${run1.created} mới), giao xong → tự đóng`);
+
+  // Case CSKH tự phát hiện từ thẻ / ghi chú đơn Pancake
+  await db.update(schema.orders).set({ tags: ["Trả hàng"], note: "khách nhận sai size, đổi size L cho khách" }).where(eq(schema.orders.id, "rr-9001"));
+  const cs1 = await detectCsCases();
+  assert.ok(cs1.created >= 2, "tạo case trả hàng + đổi size");
+  const cases = await db.select().from(schema.csCases).where(eq(schema.csCases.orderId, "rr-9001"));
+  assert.ok(cases.some((c) => c.kind === "RETURN" && c.source === "PANCAKE_TAG"), "case trả hàng từ thẻ");
+  assert.ok(cases.some((c) => c.kind === "EXCHANGE_SIZE" && c.source === "PANCAKE_NOTE"), "case đổi size từ ghi chú");
+  const cs2 = await detectCsCases();
+  assert.equal(cs2.created, 0, "quét lại không tạo trùng");
+  const alertsWithCs = await evaluateAlerts();
+  const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE"));
+  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo");
+  console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

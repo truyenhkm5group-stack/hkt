@@ -15,5 +15,7 @@ export async function loadAlertConfig(): Promise<AlertConfig> {
     enabled: { ...DEFAULT_ALERT_CONFIG.enabled, ...(cfg.enabled ?? {}) },
     telegramBotToken: cfg.telegramBotToken || read("TELEGRAM_BOT_TOKEN"),
     telegramChatId: cfg.telegramChatId || read("TELEGRAM_CHAT_ID"),
+    larkWebhookUrl: cfg.larkWebhookUrl || read("LARK_WEBHOOK_URL"),
+    larkSecret: cfg.larkSecret || read("LARK_WEBHOOK_SECRET"),
   };
 }

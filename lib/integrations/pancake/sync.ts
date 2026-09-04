@@ -251,6 +251,7 @@ export async function upsertOrder(mapped: MappedOrder, options: { force?: boolea
     source: mapped.source,
     accountName: mapped.accountName,
     pageId: mapped.pageId,
+    conversationId: mapped.conversationId,
     postId: mapped.postId,
     adId: mapped.adId,
     marketplaceId: mapped.marketplaceId,

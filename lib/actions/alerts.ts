@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { loadAlertConfig } from "@/lib/alerts/config";
+import { sendLark } from "@/lib/alerts/lark";
 import { sendTelegram } from "@/lib/alerts/telegram";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -15,10 +16,12 @@ import { setSettingJson } from "@/lib/settings";
 const configSchema = z.object({
   telegramBotToken: z.string().trim().max(200),
   telegramChatId: z.string().trim().max(100),
+  larkWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…"),
+  larkSecret: z.string().trim().max(200),
   pendingHours: z.number().int().min(1).max(720),
   staleDays: z.number().int().min(1).max(60),
   lookbackDays: z.number().int().min(1).max(365).default(14),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean() }),
+  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true) }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {
@@ -27,7 +30,7 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   await setSettingJson(ALERT_CONFIG_KEY, parsed.data);
-  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...parsed.data, telegramBotToken: parsed.data.telegramBotToken ? "***" : "" } });
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...parsed.data, telegramBotToken: parsed.data.telegramBotToken ? "***" : "", larkSecret: parsed.data.larkSecret ? "***" : "" } });
   revalidatePath("/integrations");
   return { ok: true };
 }
@@ -40,13 +43,21 @@ export async function sendTestTelegram(): Promise<{ ok: true } | { error: string
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
+export async function sendTestLark(): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  const cfg = await loadAlertConfig();
+  const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ Shop Control ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
+  return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
+}
+
 /** Chạy quy tắc cảnh báo ngay */
-export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; open: number; telegramError?: string } | { error: string }> {
+export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; open: number; telegramError?: string; larkError?: string } | { error: string }> {
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const r = await evaluateAlerts();
   revalidatePath("/alerts");
-  return { ok: true, created: r.created, resolved: r.resolved, open: r.open, telegramError: r.telegram.error };
+  return { ok: true, created: r.created, resolved: r.resolved, open: r.open, telegramError: r.telegram.error, larkError: r.lark.error };
 }
 
 /** Đánh dấu đã đọc (ids rỗng = tất cả đang mở) */

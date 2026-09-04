@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestTelegram } from "@/lib/actions/alerts";
+import { markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestTelegram } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
 
 export function RunAlertsButton() {
@@ -24,7 +24,7 @@ export function RunAlertsButton() {
           const r = await runAlertsNow();
           if ("error" in r) toast.error(r.error);
           else {
-            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}`);
+            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
             router.refresh();
           }
         })
@@ -78,13 +78,13 @@ export function ResolveButton({ id }: { id: string }) {
 }
 
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
-export function AlertConfigForm({ config, hasToken }: { config: AlertConfig; hasToken: boolean }) {
-  const [form, setForm] = useState({ ...config, telegramBotToken: "" });
+export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: AlertConfig; hasToken: boolean; hasLarkSecret?: boolean }) {
+  const [form, setForm] = useState({ ...config, telegramBotToken: "", larkSecret: "" });
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const save = () =>
     startTransition(async () => {
-      const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken });
+      const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken, larkSecret: form.larkSecret || config.larkSecret });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success("Đã lưu cấu hình cảnh báo");
@@ -97,11 +97,26 @@ export function AlertConfigForm({ config, hasToken }: { config: AlertConfig; has
       if ("error" in r) toast.error(`Telegram: ${r.error}`);
       else toast.success("Đã gửi tin thử lên Telegram");
     });
+  const testLark = () =>
+    startTransition(async () => {
+      const r = await sendTestLark();
+      if ("error" in r) toast.error(`Lark: ${r.error}`);
+      else toast.success("Đã gửi tin thử vào nhóm Lark");
+    });
   const toggle = (key: keyof AlertConfig["enabled"], v: boolean) => setForm({ ...form, enabled: { ...form.enabled, [key]: v } });
 
   return (
     <div className="space-y-4 text-sm">
       <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1 sm:col-span-2">
+          <Label>Lark Suite · Webhook Custom Bot của nhóm vận đơn</Label>
+          <Input value={form.larkWebhookUrl} onChange={(e) => setForm({ ...form, larkWebhookUrl: e.target.value })} placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/xxxxxxxx" />
+          <p className="text-[11px] text-muted-foreground">Trong Lark: mở nhóm → Settings → Bots → Add Bot → Custom Bot → sao chép Webhook URL. Nếu bật “Signature verification” thì dán khoá ở ô bên dưới.</p>
+        </div>
+        <div className="space-y-1">
+          <Label>Lark · Signature secret (tuỳ chọn)</Label>
+          <Input type="password" value={form.larkSecret} onChange={(e) => setForm({ ...form, larkSecret: e.target.value })} placeholder={hasLarkSecret ? "Đã lưu — nhập để thay" : "Để trống nếu không bật ký"} />
+        </div>
         <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
           <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — nhập để thay" : "123456:ABC… (tạo bot qua @BotFather)"} />
@@ -136,10 +151,16 @@ export function AlertConfigForm({ config, hasToken }: { config: AlertConfig; has
         <label className="flex items-center gap-2">
           <Checkbox checked={form.enabled.returning} onCheckedChange={(v) => toggle("returning", v === true)} /> Đang chuyển hoàn
         </label>
+        <label className="flex items-center gap-2">
+          <Checkbox checked={form.enabled.cs} onCheckedChange={(v) => toggle("cs", v === true)} /> Case CSKH mới (đổi size / màu, sai địa chỉ / SĐT, trả hàng)
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Lưu
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={testLark} disabled={pending}>
+          <Send className="size-4" /> Gửi thử Lark
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={test} disabled={pending}>
           <Send className="size-4" /> Gửi thử Telegram

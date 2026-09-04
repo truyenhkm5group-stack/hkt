@@ -26,7 +26,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Vận hành"
         title="Cần xử lý"
-        description="Đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, đang chuyển hoàn — nhân viên vận đơn theo dõi và xử lý tại đây; có thể nhận qua Telegram."
+        description="Đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn, case CSKH mới — nhân viên vận đơn theo dõi tại đây và nhận tin qua nhóm Lark Suite (hoặc Telegram)."
         actions={
           <>
             <MarkAllReadButton />
@@ -34,7 +34,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {NOTIFICATION_KIND_ORDER.filter((k) => k !== "SYSTEM").map((kind) => (
           <Link key={kind} href={kindFilter === kind ? "/alerts" : `/alerts?kind=${kind}`} className={cn("block rounded-xl", kindFilter === kind && "ring-2 ring-primary/40")}>
             <MetricCard label={NOTIFICATION_KIND_LABEL[kind]} value={formatNumber(counts[kind] ?? 0)} note={kindFilter === kind ? "Đang lọc · bấm để bỏ lọc" : "Bấm để lọc"} icon={BellRing} tone={(counts[kind] ?? 0) > 0 ? (kind === "SHIPMENT_RETURNING" ? "blue" : "amber") : "slate"} />
@@ -71,8 +71,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       </SectionCard>
 
       {canConfig ? (
-        <SectionCard title="Cấu hình cảnh báo & Telegram" description="Tạo bot qua @BotFather, thêm bot vào nhóm nhân viên vận đơn, dán token và chat ID. Ngưỡng thời gian chỉnh theo quy trình của shop.">
-          <AlertConfigForm config={{ ...config, telegramBotToken: "" }} hasToken={Boolean(config.telegramBotToken)} />
+        <SectionCard title="Cấu hình cảnh báo · Lark Suite / Telegram" description="Lark: thêm Custom Bot vào nhóm nhân viên vận đơn rồi dán Webhook URL. Telegram: tạo bot qua @BotFather. Ngưỡng thời gian chỉnh theo quy trình của shop.">
+          <AlertConfigForm config={{ ...config, telegramBotToken: "", larkSecret: "" }} hasToken={Boolean(config.telegramBotToken)} hasLarkSecret={Boolean(config.larkSecret)} />
         </SectionCard>
       ) : null}
     </div>

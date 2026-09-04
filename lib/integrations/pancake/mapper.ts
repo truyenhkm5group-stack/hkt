@@ -133,6 +133,7 @@ export type MappedOrder = {
   source: string;
   accountName: string;
   pageId: string | null;
+  conversationId: string | null;
   postId: string | null;
   adId: string | null;
   marketplaceId: string | null;
@@ -454,6 +455,7 @@ export function mapOrder(value: unknown): MappedOrder | null {
     source: resolveSource(order),
     accountName: str(order.account_name, asRecord(order.page).name),
     pageId: str(order.page_id) || null,
+    conversationId: str(order.conversation_id) || null,
     postId: str(order.post_id) || null,
     adId: str(order.ad_id) || null,
     marketplaceId: str(order.marketplace_id) || null,

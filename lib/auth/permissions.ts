@@ -15,6 +15,7 @@ export const PERMISSION_GROUPS = [
       { key: "shipments:view", label: "Vận đơn", hint: "Vận đơn, hành trình, cập nhật từ Viettel Post" },
       { key: "returns:view", label: "Đổi / trả hàng" },
       { key: "customers:view", label: "Khách hàng" },
+      { key: "cs:manage", label: "CSKH: xử lý case", hint: "Tạo / cập nhật case đổi size, đổi màu, sai địa chỉ, sai SĐT, trả hàng" },
     ],
   },
   {
@@ -57,7 +58,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
   ACCOUNTANT: [...VIEW_ALL, "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:view", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write"],
-  CS: [...VIEW_ALL, "cod:view"],
+  CS: [...VIEW_ALL, "cod:view", "cs:manage"],
   MARKETING: [...VIEW_ALL, "expenses:view", "expenses:write", "reports:view"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:view"],
 };

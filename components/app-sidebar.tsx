@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BellRing,
+  Headset,
   Boxes,
   CircleDollarSign,
   LayoutDashboard,
@@ -49,6 +50,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
       { href: "/shipments", label: "Vận đơn", icon: Truck, permission: "shipments:view" },
       { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "shipments:view" },
+      { href: "/cs", label: "CSKH", icon: Headset, permission: "orders:read" },
       { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
     ],

@@ -6,7 +6,11 @@
 import { and, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
+import { sendLark } from "@/lib/alerts/lark";
 import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
+import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
+import { detectCsCases } from "@/lib/cs/detect";
+import { openCsCases } from "@/lib/queries/cs";
 import { NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
@@ -126,15 +130,33 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       });
     }
   }
+  if (cfg.enabled.cs) {
+    activeKinds.push("CS_CASE");
+    const cases = await openCsCases();
+    for (const c of cases) {
+      candidates.push({
+        kind: "CS_CASE",
+        severity: c.kind === "WRONG_ADDRESS" || c.kind === "WRONG_PHONE" ? "warning" : "info",
+        title: `${CS_KIND_LABEL[c.kind as CsKind] ?? c.kind} · ${c.customerName || "Khách"}${c.customerPhone ? ` · ${c.customerPhone}` : ""}`,
+        body: `${c.title}${c.detail ? ` — ${c.detail}` : ""}`.slice(0, 500),
+        href: `/cs?q=${encodeURIComponent(c.customerPhone || c.title.slice(0, 30))}`,
+        entityType: "CS_CASE",
+        entityId: c.id,
+        dedupeKey: `cs-case:${c.id}`,
+      });
+    }
+  }
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; open: number; telegram: { sent: number; error?: string } };
+export type AlertRunResult = { created: number; resolved: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
   const db = await getDb();
   const cfg = await loadAlertConfig();
+  // phát hiện case CSKH mới từ thẻ / ghi chú / phiếu đổi trả Pancake trước khi quét
+  if (cfg.enabled.cs) await detectCsCases().catch(() => undefined);
   const { candidates, activeKinds } = await collectCandidates();
   const n = schema.notifications;
   const keys = candidates.map((c) => c.dedupeKey);
@@ -176,8 +198,23 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
       } else telegram.error = result.error;
     }
   }
+  // Lark Suite cho thông báo mới
+  const lark = { sent: 0, error: undefined as string | undefined };
+  if (created.length && cfg.larkWebhookUrl) {
+    const groups = new Map<string, typeof created>();
+    for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
+    for (const [kind, list] of groups) {
+      const lines = list.slice(0, 15).map((c) => [{ text: `• ${c.title}`, href: `${env.appUrl}${c.href}` }, { text: c.body ? `  ${c.body}` : "" }]);
+      if (list.length > 15) lines.push([{ text: `… và ${list.length - 15} mục nữa` }]);
+      const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, `⚠️ ${NOTIFICATION_KIND_LABEL[kind] ?? kind} (${list.length})`, lines);
+      if (result.ok) {
+        lark.sent += list.length;
+        await db.update(n).set({ notifiedAt: new Date() }).where(inArray(n.id, list.map((c) => c.id)));
+      } else lark.error = result.error;
+    }
+  }
   if (created.length || resolved) publish({ type: "notification", open: Number(open) });
-  return { created: created.length, resolved, open: Number(open), telegram };
+  return { created: created.length, resolved, open: Number(open), telegram, lark };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };
