@@ -37,7 +37,7 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
         { key: "product", label: "Mã hàng", options: [...products.map((p) => ({ value: p.id, label: p.code ? `${p.code} · ${p.name}` : p.name })), { value: AD_FILTER_TEST, label: "Chi phí test (không thuộc mã)" }] },
         { key: "platform", label: "Nền tảng", options: facets.platforms },
       ]}
-      resultLabel={`${period.label} · ${formatNumber(total)} dòng chi tiêu phù hợp${hasFilter ? " · KPI, biểu đồ và bảng ghép chiến dịch bên dưới đang tính theo bộ lọc" : ""}`}
+      resultLabel={`${period.label} · ${formatNumber(total)} dòng chi tiêu phù hợp${hasFilter ? " · Chi tiêu, biểu đồ và bảng ghép chiến dịch tính theo bộ lọc; đơn & doanh thu từ QC (ERP) chỉ theo kỳ" : ""}`}
     />
   );
 
@@ -45,11 +45,38 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
     <div className="space-y-5">
       {toolbar}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label={`Tổng chi QC · ${period.label.toLowerCase()}`} value={formatVND(summary.spend, { compact: true })} change={change(summary.spend, prev?.spend)} note={`${formatNumber(summary.rows)} dòng · ${formatNumber(summary.leads)} leads`} icon={Megaphone} tone="rose" />
-        <MetricCard label="Đơn từ quảng cáo" value={formatNumber(summary.orders)} change={change(summary.orders, prev?.orders)} note={summary.leads ? `Tỷ lệ chốt ${((summary.orders / summary.leads) * 100).toFixed(1)}% trên lead` : "Chưa ghi nhận lead"} icon={ShoppingBag} tone="blue" />
-        <MetricCard label="Doanh thu ghi nhận" value={formatVND(summary.revenue, { compact: true })} change={change(summary.revenue, prev?.revenue)} note="Doanh thu do nền tảng quảng cáo báo cáo" icon={CircleDollarSign} tone="green" />
-        <MetricCard label="ROAS" value={summary.roas ? `${summary.roas.toFixed(2)}×` : "—"} change={prev && prev.roas ? change(summary.roas, prev.roas) : null} note="Doanh thu ÷ chi tiêu" icon={TrendingUp} tone={summary.roas >= 3 ? "green" : summary.roas >= 1.5 || !summary.roas ? "primary" : "rose"} />
-        <MetricCard label="CPO (chi phí / đơn)" value={summary.cpo ? formatVND(summary.cpo, { compact: true }) : "—"} note={summary.orders ? `${formatVND(summary.cpo)} mỗi đơn${prev?.cpo ? ` · kỳ trước ${formatVND(prev.cpo, { compact: true })}` : ""}` : "Chi tiêu ÷ số đơn · chưa có đơn"} icon={Target} tone="amber" />
+        <MetricCard label={`Tổng chi QC · ${period.label.toLowerCase()}`} value={formatVND(summary.spend, { compact: true })} change={change(summary.spend, prev?.spend)} note={`${formatNumber(summary.rows)} dòng · ${formatNumber(summary.leads)} tin nhắn/lead (Facebook báo)`} icon={Megaphone} tone="rose" />
+        <MetricCard
+          label="Đơn từ quảng cáo (ERP)"
+          value={formatNumber(summary.orders)}
+          change={change(summary.orders, prev?.orders)}
+          note={`Đơn Pancake có ad_id, không huỷ · giao TC ${formatNumber(summary.delivered)} · Facebook báo ${formatNumber(summary.fbOrders)} lượt mua`}
+          icon={ShoppingBag}
+          tone="blue"
+        />
+        <MetricCard
+          label="Doanh thu giao TC từ QC"
+          value={formatVND(summary.revenue, { compact: true })}
+          change={change(summary.revenue, prev?.revenue)}
+          note={`Đơn từ quảng cáo đã giao thành công (ERP) · Facebook báo ${formatVND(summary.fbRevenue, { compact: true })}`}
+          icon={CircleDollarSign}
+          tone="green"
+        />
+        <MetricCard
+          label="ROAS thực"
+          value={summary.roas ? `${summary.roas.toFixed(2)}×` : "—"}
+          change={prev && prev.roas ? change(summary.roas, prev.roas) : null}
+          note="Doanh thu giao TC từ QC ÷ chi tiêu"
+          icon={TrendingUp}
+          tone={summary.roas >= 3 ? "green" : summary.roas >= 1.5 || !summary.roas ? "primary" : "rose"}
+        />
+        <MetricCard
+          label="CPO (chi phí / đơn)"
+          value={summary.cpo ? formatVND(summary.cpo, { compact: true }) : "—"}
+          note={summary.orders ? `${formatVND(summary.cpo)} mỗi đơn từ QC${prev?.cpo ? ` · kỳ trước ${formatVND(prev.cpo, { compact: true })}` : ""}${summary.delivered ? ` · ${formatVND(Math.round(summary.spend / summary.delivered))} mỗi đơn giao TC` : ""}` : "Chi tiêu ÷ số đơn · chưa có đơn"}
+          icon={Target}
+          tone="amber"
+        />
       </section>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-[13px]">

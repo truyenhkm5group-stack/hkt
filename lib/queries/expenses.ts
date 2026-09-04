@@ -172,13 +172,48 @@ export async function adSummary(period: Period, filters?: AdFilters) {
           .where(and(...periodCond(schema.adSpends.spendDate, prev.from, prev.to), ...extra))
       : Promise.resolve([null]),
   ]);
-  const toKpi = (r: typeof current | null) => {
+  // Đơn thật từ quảng cáo theo ERP: đơn Pancake có ad_id (khách đến từ quảng cáo), không huỷ; doanh thu = đơn giao thành công
+  const [erpNow, erpPrev] = await Promise.all([adOrdersFromErp(period.from, period.to), prev.from ? adOrdersFromErp(prev.from, prev.to) : Promise.resolve(null)]);
+  const toKpi = (r: typeof current | null, erp: Awaited<ReturnType<typeof adOrdersFromErp>> | null) => {
     const spend = Number(r?.spend ?? 0);
-    const orders = Number(r?.orders ?? 0);
-    const revenue = Number(r?.revenue ?? 0);
-    return { spend, leads: Number(r?.leads ?? 0), orders, revenue, rows: Number(r?.rows ?? 0), roas: spend ? revenue / spend : 0, cpo: orders ? Math.round(spend / orders) : 0 };
+    const fbOrders = Number(r?.orders ?? 0);
+    const fbRevenue = Number(r?.revenue ?? 0);
+    const orders = erp?.orders ?? 0;
+    const delivered = erp?.delivered ?? 0;
+    const revenue = erp?.revenue ?? 0;
+    return {
+      spend,
+      leads: Number(r?.leads ?? 0),
+      rows: Number(r?.rows ?? 0),
+      /** Đơn ERP có ad_id (không huỷ) */
+      orders,
+      /** Trong đó giao thành công */
+      delivered,
+      /** Doanh thu giao thành công của đơn từ quảng cáo (ERP) */
+      revenue,
+      /** Số liệu Facebook tự báo (pixel/attribution) — chỉ để tham khảo */
+      fbOrders,
+      fbRevenue,
+      roas: spend ? revenue / spend : 0,
+      cpo: orders ? Math.round(spend / orders) : 0,
+    };
   };
-  return { ...toKpi(current), previous: prev.from ? toKpi(previous) : null };
+  return { ...toKpi(current, erpNow), previous: prev.from ? toKpi(previous, erpPrev) : null };
+}
+
+/** Đơn Pancake gắn quảng cáo (ad_id) trong kỳ: tổng đơn không huỷ, đơn giao thành công và doanh thu giao thành công */
+export async function adOrdersFromErp(from: Date | null, to: Date | null) {
+  const db = await getDb();
+  const o = schema.orders;
+  const [row] = await db
+    .select({
+      orders: sql<number>`count(*) filter (where ${o.stage} not in ('CANCELLED','DELETED'))`,
+      delivered: sql<number>`count(*) filter (where ${o.stage} in ('DELIVERED','PAID'))`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} in ('DELIVERED','PAID')), 0)`,
+    })
+    .from(o)
+    .where(and(sql`${o.adId} is not null and ${o.adId} <> ''`, ...periodCond(o.insertedAt, from, to)));
+  return { orders: Number(row?.orders ?? 0), delivered: Number(row?.delivered ?? 0), revenue: Number(row?.revenue ?? 0) };
 }
 
 /** Chi tiêu theo ngày × nền tảng cho biểu đồ */

@@ -121,7 +121,18 @@ export class FacebookAdsClient {
     for await (const item of this.paginate(`act_${accountId}/insights`, params)) {
       const actions = asArray(item.actions).map(asRecord);
       const values = asArray(item.action_values).map(asRecord);
-      const sumActions = (list: Record<string, unknown>[], test: (type: string) => boolean) => list.filter((a) => test(str(a.action_type))).reduce((s, a) => s + num(a.value), 0);
+      // Facebook trả nhiều action_type chồng nhau cho cùng một sự kiện (omni_purchase, purchase, offsite_conversion.fb_pixel_purchase…):
+      // chỉ lấy MỘT loại theo thứ tự ưu tiên, không cộng dồn để khỏi nhân đôi/nhân ba.
+      const pick = (list: Record<string, unknown>[], patterns: RegExp[]) => {
+        for (const pattern of patterns) {
+          const found = list.filter((a) => pattern.test(str(a.action_type)));
+          if (found.length) return found.reduce((s, a) => s + num(a.value), 0);
+        }
+        return 0;
+      };
+      const PURCHASE = [/^omni_purchase$/, /^purchase$/, /^offsite_conversion\.fb_pixel_purchase$/, /^onsite_web_purchase$/, /^onsite_conversion\.purchase$/];
+      const MESSAGE = [/messaging_conversation_started_7d$/, /messaging_conversation_started/, /total_messaging_connection$/, /messaging_first_reply$/];
+      const LEAD = [/^onsite_conversion\.lead_grouped$/, /^lead$/, /^offsite_conversion\.fb_pixel_lead$/];
       rows.push({
         accountId,
         campaignId: str(item.campaign_id),
@@ -130,10 +141,10 @@ export class FacebookAdsClient {
         spend: num(item.spend),
         impressions: Math.round(num(item.impressions)),
         clicks: Math.round(num(item.clicks)),
-        messages: Math.round(sumActions(actions, (t) => /messaging_conversation_started|total_messaging_connection|messaging_first_reply/.test(t))),
-        leads: Math.round(sumActions(actions, (t) => t === "lead" || t === "onsite_conversion.lead_grouped" || /^offsite_conversion\.fb_pixel_lead$/.test(t))),
-        purchases: Math.round(sumActions(actions, (t) => /^(omni_purchase|purchase|onsite_web_purchase|offsite_conversion\.fb_pixel_purchase|onsite_conversion\.purchase)$/.test(t))),
-        purchaseValue: sumActions(values, (t) => /^(omni_purchase|purchase|onsite_web_purchase|offsite_conversion\.fb_pixel_purchase|onsite_conversion\.purchase)$/.test(t)),
+        messages: Math.round(pick(actions, MESSAGE)),
+        leads: Math.round(pick(actions, LEAD)),
+        purchases: Math.round(pick(actions, PURCHASE)),
+        purchaseValue: pick(values, PURCHASE),
         raw: item,
       });
     }
