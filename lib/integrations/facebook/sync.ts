@@ -20,26 +20,49 @@ function addDays(key: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+function isRateLimit(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /request limit reached|\(mã (4|17|32|613)\)|too many calls|rate limit/i.test(message);
+}
+
+async function withRateLimitRetry<T>(fn: () => Promise<T>, log: (m: string) => void, label: string): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isRateLimit(error) || attempt >= 6) throw error;
+      const wait = Math.min(300_000, 60_000 * attempt);
+      log(`${label}: Facebook giới hạn tần suất, chờ ${Math.round(wait / 1000)}s rồi thử lại (${attempt}/5)`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 /**
  * Facebook từ chối khoảng thời gian quá dài với time_increment=1 ("reduce the amount of data").
- * Chia thành cửa sổ 31 ngày; cửa sổ nào lỗi thì chia tiếp 7 ngày rồi mới báo lỗi.
+ * Thử cửa sổ 92 ngày; lỗi thì chia 31 ngày; vẫn lỗi thì 7 ngày. Gặp giới hạn tần suất (mã 4/17/32/613) thì chờ và thử lại.
  */
 async function fetchInsightsChunked(client: ReturnType<typeof getFacebookAdsClient>, accountId: string, since: string, until: string, log: (m: string) => void) {
   const out: Awaited<ReturnType<typeof client.campaignInsights>> = [];
-  let start = since;
-  while (start <= until) {
-    const end = addDays(start, 30) < until ? addDays(start, 30) : until;
+  const fetchWindow = async (s: string, e: string, sizes: number[]): Promise<void> => {
     try {
-      out.push(...(await client.campaignInsights(accountId, start, end)));
+      out.push(...(await withRateLimitRetry(() => client.campaignInsights(accountId, s, e), log, `act_${accountId} ${s}→${e}`)));
     } catch (error) {
-      log(`act_${accountId} ${start}→${end}: ${error instanceof Error ? error.message : String(error)} — thử cửa sổ 7 ngày`);
-      let s2 = start;
-      while (s2 <= end) {
-        const e2 = addDays(s2, 6) < end ? addDays(s2, 6) : end;
-        out.push(...(await client.campaignInsights(accountId, s2, e2)));
-        s2 = addDays(e2, 1);
+      if (!sizes.length || isRateLimit(error)) throw error;
+      const [size, ...rest] = sizes;
+      log(`act_${accountId} ${s}→${e}: ${error instanceof Error ? error.message : String(error)} — chia cửa sổ ${size} ngày`);
+      let cur = s;
+      while (cur <= e) {
+        const stop = addDays(cur, size - 1) < e ? addDays(cur, size - 1) : e;
+        await fetchWindow(cur, stop, rest);
+        cur = addDays(stop, 1);
       }
     }
+  };
+  let start = since;
+  while (start <= until) {
+    const end = addDays(start, 91) < until ? addDays(start, 91) : until;
+    await fetchWindow(start, end, [31, 7]);
     start = addDays(end, 1);
   }
   return out;
