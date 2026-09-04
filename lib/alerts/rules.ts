@@ -30,6 +30,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   const o = schema.orders;
   const candidates: Candidate[] = [];
   const activeKinds: string[] = [];
+  const lookback = new Date(Date.now() - Math.max(1, cfg.lookbackDays || 14) * 86_400_000);
   const orderCols = { id: o.id, systemId: o.systemId, billFullName: o.billFullName, billPhone: o.billPhone, totalPriceAfterDiscount: o.totalPriceAfterDiscount, insertedAt: o.insertedAt, stage: o.stage };
 
   if (cfg.enabled.failed) {
@@ -38,7 +39,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, statusName: s.vtpStatusName, note: s.vtpNote, location: s.vtpLocation, statusDate: s.vtpStatusDate, updatedAt: s.updatedAt })
       .from(s)
       .leftJoin(o, eq(o.id, s.orderId))
-      .where(and(eq(s.stage, "DELIVERY_FAILED"), eq(s.isFinal, false)));
+      .where(and(eq(s.stage, "DELIVERY_FAILED"), eq(s.isFinal, false), sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt}) >= ${lookback.toISOString()}::timestamptz`));
     for (const r of rows) {
       const code = r.vtp || r.tracking || r.shipmentId;
       candidates.push({
@@ -61,7 +62,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .select({ ...orderCols, shipmentStage: s.stage })
       .from(o)
       .leftJoin(s, eq(s.orderId, o.id))
-      .where(and(inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), lte(o.insertedAt, cutoff), sql`(${s.id} is null or ${s.stage} = 'PENDING')`))
+      .where(and(inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), lte(o.insertedAt, cutoff), sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`, sql`(${s.id} is null or ${s.stage} = 'PENDING')`))
       .limit(500);
     for (const r of rows) {
       const hours = Math.floor((Date.now() - new Date(r.insertedAt).getTime()) / 3_600_000);
@@ -85,7 +86,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, stage2: s.stage, statusName: s.vtpStatusName, updatedAt: s.updatedAt, statusDate: s.vtpStatusDate })
       .from(s)
       .leftJoin(o, eq(o.id, s.orderId))
-      .where(and(inArray(s.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, cutoff)))
+      .where(and(inArray(s.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, cutoff), sql`${s.createdAt} >= ${lookback.toISOString()}::timestamptz`))
       .limit(500);
     for (const r of rows) {
       const code = r.vtp || r.tracking || r.shipmentId;
@@ -109,7 +110,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, statusName: s.vtpStatusName })
       .from(s)
       .leftJoin(o, eq(o.id, s.orderId))
-      .where(eq(s.stage, "RETURNING"))
+      .where(and(eq(s.stage, "RETURNING"), sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt}) >= ${lookback.toISOString()}::timestamptz`))
       .limit(500);
     for (const r of rows) {
       const code = r.vtp || r.tracking || r.shipmentId;

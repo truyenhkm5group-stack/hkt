@@ -118,6 +118,10 @@ export function AlertConfigForm({ config, hasToken }: { config: AlertConfig; has
           <Label>Vận đơn treo không cập nhật quá (ngày)</Label>
           <Input type="number" min={1} value={form.staleDays} onChange={(e) => setForm({ ...form, staleDays: Number(e.target.value) || 4 })} />
         </div>
+        <div className="space-y-1">
+          <Label>Chỉ xét đơn phát sinh trong (ngày)</Label>
+          <Input type="number" min={1} value={form.lookbackDays} onChange={(e) => setForm({ ...form, lookbackDays: Number(e.target.value) || 14 })} />
+        </div>
       </div>
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2">

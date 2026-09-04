@@ -6,6 +6,8 @@ export type AlertConfig = {
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
   staleDays: number;
+  /** Chỉ xét đơn / vận đơn phát sinh trong N ngày gần đây (bỏ qua đơn cũ đã bỏ) */
+  lookbackDays: number;
   /** Bật/tắt từng loại */
   enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean };
 };
@@ -17,6 +19,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   telegramChatId: "",
   pendingHours: 24,
   staleDays: 4,
+  lookbackDays: 14,
   enabled: { failed: true, pending: true, stale: true, returning: true },
 };
 

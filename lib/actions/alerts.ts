@@ -17,6 +17,7 @@ const configSchema = z.object({
   telegramChatId: z.string().trim().max(100),
   pendingHours: z.number().int().min(1).max(720),
   staleDays: z.number().int().min(1).max(60),
+  lookbackDays: z.number().int().min(1).max(365).default(14),
   enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean() }),
 });
 
