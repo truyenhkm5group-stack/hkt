@@ -14,6 +14,7 @@ warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
 ask()  { # ask VAR "Câu hỏi" "mặc định" — đọc từ /dev/tty để dùng được cả khi chạy qua curl | bash
   local var="$1" prompt="$2" def="${3:-}" val
   if [ -n "${!var:-}" ]; then return; fi
+  if [ "${ERP_NONINTERACTIVE:-0}" = "1" ] || ! { : </dev/tty; } 2>/dev/null; then printf -v "$var" '%s' "$def"; return; fi
   if [ -n "$def" ]; then read -r -p "$prompt [$def]: " val </dev/tty; val="${val:-$def}"; else read -r -p "$prompt: " val </dev/tty; fi
   printf -v "$var" '%s' "$val"
 }
@@ -50,9 +51,10 @@ else
   ask PANCAKE_SHOP_ID     "Shop ID Pancake"                    "408063069"
   ask VIETTELPOST_API_KEY "Token bí mật Viettel Post (Enter nếu không có)" ""
   ask VIETTELPOST_USERNAME "Tài khoản đối tác Viettel Post (SĐT, Enter nếu không dùng)" ""
-  if [ -n "${VIETTELPOST_USERNAME:-}" ] && [ -z "${VIETTELPOST_PASSWORD:-}" ]; then
+  if [ -n "${VIETTELPOST_USERNAME:-}" ] && [ -z "${VIETTELPOST_PASSWORD:-}" ] && [ "${ERP_NONINTERACTIVE:-0}" != "1" ] && { : </dev/tty; } 2>/dev/null; then
     read -r -s -p "Mật khẩu đối tác Viettel Post: " VIETTELPOST_PASSWORD </dev/tty; echo
   fi
+  if [ -z "${PANCAKE_API_KEY:-}" ]; then warn "Chưa có PANCAKE_API_KEY — ERP vẫn chạy nhưng không đồng bộ được Pancake, sửa .env sau."; fi
   ask ADMIN_EMAIL         "Email quản trị ERP"                 "admin@vnxcommerce.com"
   ask ADMIN_PASSWORD      "Mật khẩu quản trị ERP"              "$(rand 6)"
   ask PANCAKE_BACKFILL_DAYS "Số ngày lịch sử đơn cần kéo lần đầu" "365"

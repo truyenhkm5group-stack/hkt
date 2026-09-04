@@ -45,6 +45,23 @@ export ERP_DOMAIN=erp.vnxcommerce.com PANCAKE_API_KEY=... PANCAKE_SHOP_ID=408063
 curl -fsSL https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/claude/fashion-erp-poscake-viettelpost-u97pgx/scripts/bootstrap.sh | bash
 ```
 
+## 2b. Cách khác: triển khai bằng GitHub Actions (không cần mở console VPS)
+
+Workflow `.github/workflows/deploy-vps.yml` để máy chạy của GitHub SSH vào VPS và chạy `bootstrap.sh`. Thiết lập một lần tại GitHub → repo `hkt` → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | Giá trị |
+|---|---|
+| `VPS_HOST` | `14.225.198.146` |
+| `VPS_PASSWORD` | mật khẩu root của VPS (Vietnix gửi qua email; hoặc đặt lại trong trang quản lý VPS) — hoặc dùng `VPS_SSH_KEY` |
+| `PANCAKE_API_KEY` | API key Pancake |
+| `VIETTELPOST_API_KEY` | token bí mật Viettel Post |
+| `VIETTELPOST_USERNAME` / `VIETTELPOST_PASSWORD` | tài khoản đối tác Viettel Post |
+| `ADMIN_PASSWORD` | mật khẩu đăng nhập ERP ban đầu |
+
+Tuỳ chọn ở tab **Variables**: `ERP_DOMAIN` (mặc định `erp.vnxcommerce.com`), `ADMIN_EMAIL` (mặc định `admin@vnxcommerce.com`), `VPS_USER`, `VPS_PORT`.
+
+Chạy: tab **Actions → Deploy ERP to VPS → Run workflow**. Chạy lại bất cứ lúc nào để cập nhật phiên bản; tick `reset_env` nếu muốn tạo lại `.env` từ Secrets.
+
 ## 3. Sau khi lên
 
 1. Mở https://erp.vnxcommerce.com → đăng nhập → *Người dùng* đổi mật khẩu, tạo tài khoản nhân viên theo vai trò.
