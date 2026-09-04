@@ -20,6 +20,7 @@ on:
           - check-integrations  # kiểm tra API key
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
+          - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -55,7 +56,7 @@ jobs:
                 $C ps
                 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
               logs)
-                $C logs --tail=200 app scheduler caddy ;;
+                $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
               sync-pancake-all)
                 docker exec erp-app npm run --silent sync -- pancake-all --backfill --days="$DAYS" ;;
               sync-pancake-orders)
@@ -70,6 +71,12 @@ jobs:
                 mkdir -p /root/backups
                 $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
                 ls -lh /root/backups | tail -5 ;;
+              rotate-webhook-secrets)
+                NEW_PK="pk_$(openssl rand -hex 16)"; NEW_VTP="vtp_$(openssl rand -hex 16)"
+                sed -i -E "s|^PANCAKE_WEBHOOK_SECRET=.*|PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"|; s|^VIETTELPOST_WEBHOOK_SECRET=.*|VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"|" .env
+                grep -qE "^PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"" .env && grep -qE "^VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"" .env && echo "Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)."
+                $C up -d app scheduler
+                sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;

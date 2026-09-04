@@ -127,14 +127,24 @@ docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | gre
 say "Kiểm tra API key Pancake / Viettel Post"
 docker exec erp-app npm run --silent check:integrations || warn "Có mục ✗ ở trên — sửa .env rồi chạy: $COMPOSE up -d"
 
+# Khi chạy không tương tác (log GitHub Actions có thể công khai) thì che các secret webhook
+if [ "${ERP_NONINTERACTIVE:-0}" = "1" ]; then
+  PANCAKE_WEBHOOK_SECRET_SHOWN="${PANCAKE_WEBHOOK_SECRET:0:6}••••••••"
+  VIETTELPOST_WEBHOOK_SECRET_SHOWN="${VIETTELPOST_WEBHOOK_SECRET:0:6}••••••••"
+else
+  PANCAKE_WEBHOOK_SECRET_SHOWN="$PANCAKE_WEBHOOK_SECRET"
+  VIETTELPOST_WEBHOOK_SECRET_SHOWN="$VIETTELPOST_WEBHOOK_SECRET"
+fi
+
 cat <<INFO
 
 ════════════════════════════════════════════════════════════════
  ERP:                 https://${ERP_DOMAIN}
  Đăng nhập:           ${ADMIN_EMAIL}  (mật khẩu trong .env → ADMIN_PASSWORD)
- Webhook Pancake:     https://${ERP_DOMAIN}/api/webhooks/pancake/${PANCAKE_WEBHOOK_SECRET}
+ Webhook Pancake:     https://${ERP_DOMAIN}/api/webhooks/pancake/${PANCAKE_WEBHOOK_SECRET_SHOWN}
  Webhook Viettel Post: https://${ERP_DOMAIN}/api/webhooks/viettelpost
-   Tham số bí mật:    ${VIETTELPOST_WEBHOOK_SECRET}
+   Tham số bí mật:    ${VIETTELPOST_WEBHOOK_SECRET_SHOWN}
+   (giá trị đầy đủ: đăng nhập ERP → Kết nối dữ liệu, hoặc xem file .env trên VPS)
 
  Bước tiếp theo:
   1. Đăng nhập → Kết nối dữ liệu → "Đồng bộ toàn bộ Pancake (lịch sử)".
