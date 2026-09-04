@@ -1,0 +1,77 @@
+# Thao tác vận hành ERP trên VPS từ GitHub (không cần mở console).
+# Actions → "Vận hành ERP trên VPS" → Run workflow → chọn thao tác.
+name: Vận hành ERP trên VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Thao tác"
+        type: choice
+        required: true
+        default: status
+        options:
+          - status              # trạng thái container + health
+          - logs                # 200 dòng log gần nhất của app/scheduler/caddy
+          - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
+          - sync-pancake-orders # đơn thay đổi gần đây
+          - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
+          - sync-vtp-import     # nhập vận đơn từ tài khoản Viettel Post (30 ngày)
+          - check-integrations  # kiểm tra API key
+          - backup              # pg_dump vào /root/backups
+          - restart             # khởi động lại app + scheduler
+      days:
+        description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
+        type: string
+        default: "365"
+
+concurrency:
+  group: ops-vps
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: appleboy/ssh-action@v1
+        env:
+          ACTION: ${{ inputs.action }}
+          DAYS: ${{ inputs.days }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ vars.VPS_USER || 'root' }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ vars.VPS_PORT || 22 }}
+          command_timeout: 110m
+          envs: ACTION,DAYS
+          script: |
+            set -e
+            cd /root/erp
+            C="docker compose -f docker-compose.prod.yml"
+            case "$ACTION" in
+              status)
+                $C ps
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              logs)
+                $C logs --tail=200 app scheduler caddy ;;
+              sync-pancake-all)
+                docker exec erp-app npm run --silent sync -- pancake-all --backfill --days="$DAYS" ;;
+              sync-pancake-orders)
+                docker exec erp-app npm run --silent sync -- pancake-orders ;;
+              sync-vtp-tracking)
+                docker exec erp-app npm run --silent sync -- vtp-tracking --all --limit=2000 ;;
+              sync-vtp-import)
+                docker exec erp-app npm run --silent sync -- vtp-import --days="$DAYS" ;;
+              check-integrations)
+                docker exec erp-app npm run --silent check:integrations ;;
+              backup)
+                mkdir -p /root/backups
+                $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
+                ls -lh /root/backups | tail -5 ;;
+              restart)
+                $C restart app scheduler
+                sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              *) echo "Thao tác không hợp lệ: $ACTION"; exit 1 ;;
+            esac

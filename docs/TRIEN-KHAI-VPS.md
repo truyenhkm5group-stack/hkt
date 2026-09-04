@@ -62,6 +62,8 @@ Tuỳ chọn ở tab **Variables**: `ERP_DOMAIN` (mặc định `erp.vnxcommerce
 
 Chạy: tab **Actions → Deploy ERP to VPS → Run workflow**. Chạy lại bất cứ lúc nào để cập nhật phiên bản; tick `reset_env` nếu muốn tạo lại `.env` từ Secrets.
 
+Ngoài ra workflow **Vận hành ERP trên VPS** (`.github/workflows/ops-vps.yml`) cho phép chạy từ GitHub các thao tác: xem trạng thái, xem log, đồng bộ toàn bộ Pancake, tra cứu / nhập vận đơn Viettel Post, kiểm tra API key, sao lưu, khởi động lại.
+
 ## 3. Sau khi lên
 
 1. Mở https://erp.vnxcommerce.com → đăng nhập → *Người dùng* đổi mật khẩu, tạo tài khoản nhân viên theo vai trò.
