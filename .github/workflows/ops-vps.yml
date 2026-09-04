@@ -18,11 +18,11 @@ on:
           - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
           - sync-vtp-import     # nhập vận đơn từ tài khoản Viettel Post (30 ngày)
           - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày (days)
-          - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày
           - check-integrations  # kiểm tra API key
           - vtp-debug           # in phản hồi thô API Viettel Post cho mã vận đơn (nhập ở ô "arg")
           - db-query            # chạy một câu SQL CHỈ ĐỌC trên CSDL ERP (nhập SQL ở ô "arg")
           - seed-employees      # khai báo nhân sự & cơ chế lương từ JSON (ô "arg")
+          - import-bank-ledger  # nhập sao kê MB Bank (JSON/CSV ở ô "arg") thành chi phí
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -83,6 +83,10 @@ jobs:
                 docker exec erp-app npm run --silent check:integrations ;;
               seed-employees)
                 docker exec erp-app npm run --silent seed:employees -- "$ARG" ;;
+              import-bank-ledger)
+                # luôn dùng bản script mới nhất trên GitHub; dữ liệu đi qua stdin, không in ra log
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-bank-ledger.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
+                printf '%s' "$ARG" | docker exec -i erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --stdin ;;
               db-query)
                 printf '%s\n' "$ARG" | PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000' $C exec -T db psql -U erp -d erp -v ON_ERROR_STOP=1 -P pager=off ;;
               vtp-debug)

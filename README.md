@@ -20,7 +20,7 @@ Pancake POS ──(API + webhook)──▶  ERP  ◀──(API + webhook)── 
 | **Sản phẩm & tồn kho** | Mẫu mã (màu/size), giá bán, giá vốn, tồn khả dụng/thực tế **theo từng kho**, bán 30 ngày, giá trị tồn, sắp hết/hết hàng; chi tiết sản phẩm + nhật ký xuất nhập kho. |
 | **Khách hàng** | Hồ sơ khách từ Pancake, số đơn/thành công/hoàn, lịch sử mua. |
 | **Đổi / trả** | Phiếu đổi trả từ Pancake. |
-| **Chi phí & quảng cáo** | Chi phí vận hành theo nhóm, chi tiêu quảng cáo theo nền tảng (ROAS, CPO). |
+| **Chi phí & quảng cáo** | Chi phí vận hành theo nhóm, chi tiêu quảng cáo theo nền tảng (ROAS, CPO). **Nhập sao kê MB Bank** (JSON/CSV xuất từ app “Quản lý giao dịch”): xem trước, tự đoán nhóm chi phí (nhãn sao kê → tên nhân sự → từ khoá → ≥ 5 triệu = nhập hàng), bỏ qua tiền vào/chuyển nội bộ/trả nợ gốc, chống trùng theo mã giao dịch; hoặc `npm run import:bank -- file.csv` / ops `import-bank-ledger`. |
 | **Tỷ lệ hoàn theo mã hàng** | Tỷ lệ hoàn từng SKU theo quy tắc: vận đơn giao thành công nhưng COD = 0 và cước < 10.000đ = đơn hoàn; bấm mã xem danh sách đơn; xuất CSV. |
 | **Nhập hàng & kiểm kê** | Phiếu nhập hàng / điều chỉnh kiểm kê theo mẫu mã; tồn khả dụng ERP = Nhập − Giao thật − Đang giao (hoàn coi như về kho); giá nhập cập nhật giá vốn. |
 | **Facebook Ads** | Tự kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (token System User), ghép mã hàng theo tên chiến dịch. |

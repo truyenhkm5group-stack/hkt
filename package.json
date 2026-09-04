@@ -18,6 +18,7 @@
     "check:integrations": "tsx --tsconfig tsconfig.json scripts/check-integrations.ts",
     "vtp:debug": "tsx --tsconfig tsconfig.json scripts/vtp-debug.ts",
     "seed:employees": "tsx --tsconfig tsconfig.json scripts/seed-employees.ts",
+    "import:bank": "tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
     "db:generate": "drizzle-kit generate"
   },

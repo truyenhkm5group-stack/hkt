@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Megaphone, ReceiptText } from "lucide-react";
 import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
 import { AdsTab } from "@/app/(dashboard)/expenses/ads-tab";
+import { BankImportDialog } from "@/app/(dashboard)/expenses/bank-import-dialog";
 import { ExpenseDialog } from "@/app/(dashboard)/expenses/expense-dialog";
 import { ExpensesTab } from "@/app/(dashboard)/expenses/expenses-tab";
 import { PageHeader } from "@/components/page-header";
@@ -25,7 +26,18 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         eyebrow="Kho & tài chính"
         title="Chi phí & quảng cáo"
         description={tab === "ads" ? "Chi tiêu quảng cáo theo ngày và nền tảng · ROAS, CPO và đơn từ quảng cáo" : "Chi phí vận hành ngoài Pancake: lương, mặt bằng, phần mềm, đóng gói, nhập hàng…"}
-        actions={canWrite ? tab === "ads" ? <AdSpendDialog /> : <ExpenseDialog /> : null}
+        actions={
+          canWrite ? (
+            tab === "ads" ? (
+              <AdSpendDialog />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <BankImportDialog />
+                <ExpenseDialog />
+              </div>
+            )
+          ) : null
+        }
       />
 
       <Tabs value={tab}>

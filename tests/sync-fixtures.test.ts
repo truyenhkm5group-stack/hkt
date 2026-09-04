@@ -15,6 +15,8 @@ import { upsertOrder, upsertProduct } from "@/lib/integrations/pancake/sync";
 import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
+import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
@@ -190,6 +192,48 @@ async function main() {
   assert.equal(stock.currentStock, 8, "tồn = 10 nhập − 1 giao thật − 1 đang giao = 8 (hoàn coi như về kho)");
   assert.equal(stock.lastCost, 200000, "giá nhập gần nhất lấy từ phiếu");
   console.log(`✓ Tồn kho ERP RR-001: ${stock.currentStock} (nhập 10, giao thật 1, đang giao 1) · giá nhập ${stock.lastCost}`);
+
+  // Nhập sao kê MB Bank → chi phí
+  const ledgerJson = JSON.stringify({
+    transactions: [
+      { txn_date: "2026-08-25", amount: -600000, description: "CUSTOMER MBCT W7R9K7", counterparty: "CTY TNHH PANCAKE VIET NAM", bank_ref: "FT1", category_code: "PHAN_MEM" },
+      { txn_date: "2026-08-18", amount: -27600000, description: "CUSTOMER Mr T chuyen khoan nhanh qua Zalo", counterparty: "NGUYEN THI MINH HUONG", bank_ref: "FT2", category_code: "CHUA_PHAN_LOAI" },
+      { txn_date: "2026-08-16", amount: -1340000, description: "CUSTOMER HO KHAC TRUYEN chuyen tien", counterparty: "TRAN ANH QUAN", bank_ref: "FT3", category_code: "CHUA_PHAN_LOAI" },
+      { txn_date: "2026-08-12", amount: -250000, description: "CUSTOMER MBCT Mr T chuyen khoan nhanh qua Za lo", counterparty: "NGUYEN THI TUYET TRINH", bank_ref: "FT4", category_code: "CHUA_PHAN_LOAI" },
+      { txn_date: "2026-08-10", amount: -500000, description: "CUSTOMER HO KHAC TRUYEN chuyen tien. DEN: HO KHAC TRUYEN", counterparty: "HO KHAC TRUYEN", bank_ref: "FT5", category_code: "CHUYEN_NOI_BO" },
+      { txn_date: "2026-08-07", amount: 10909264, description: "Tong cong ty co phan Buu chinh Viet VTP", counterparty: "TONG CONG TY CO PHAN BUU CHINH VIETTEL", bank_ref: "FT6", category_code: "DT_BAN_HANG" },
+    ],
+  });
+  const ledgerCsv = "\uFEFFNgày,Giờ,Tiền vào,Tiền ra,Nội dung,Đối tác,Mã GD,Số dư,Mã danh mục,Danh mục\r\n2026-08-25,10:00,,600000,\"CUSTOMER MBCT, W7R9K7\",CTY TNHH PANCAKE VIET NAM,FT1,1,PHAN_MEM,Phần mềm\r\n2026-09-01,,,2366200,THU NO THE TIN DUNG,,FT7,1,TRA_NO_GOC,Trả nợ gốc\r\n";
+  const txns = parseLedger(ledgerJson);
+  assert.equal(txns.length, 6);
+  const employees = [{ name: "Trần Anh Quân", shortName: "Quân TA" }];
+  const plan = planImport(txns, await existingLedgerReferences(txns.map(referenceFor)), employees);
+  const byRef = (ref: string) => plan.find((r) => r.bankRef === ref)!;
+  assert.equal(byRef("FT1").category, "SOFTWARE", "PHAN_MEM → SOFTWARE");
+  assert.equal(byRef("FT2").category, "PURCHASE", "≥5 triệu chưa phân loại → nhập hàng");
+  assert.equal(byRef("FT3").category, "SALARY", "trùng tên nhân sự → lương");
+  assert.equal(byRef("FT3").categorySource, "employee");
+  assert.equal(byRef("FT4").category, "OTHER");
+  assert.equal(byRef("FT5").status, "non_pl", "chuyển nội bộ bị bỏ qua");
+  assert.equal(byRef("FT6").status, "inflow", "tiền vào bị bỏ qua");
+  assert.equal(byRef("FT1").description, "CTY TNHH PANCAKE VIET NAM · W7R9K7");
+  const fresh = plan.filter((r) => r.status === "new");
+  assert.equal(fresh.length, 4);
+  const imported = await insertLedgerExpenses(fresh.map((r) => ({ reference: r.reference, date: r.date, amount: r.amount, category: r.category, description: r.description })), "test");
+  assert.equal(imported.inserted, 4);
+  const again = planImport(txns, await existingLedgerReferences(txns.map(referenceFor)), employees);
+  assert.equal(again.filter((r) => r.status === "duplicate").length, 4, "nhập lại → toàn bộ trùng");
+  const csvTxns = parseLedger(ledgerCsv);
+  assert.equal(csvTxns.length, 2);
+  assert.equal(csvTxns[0].amount, -600000);
+  assert.equal(csvTxns[0].description, "CUSTOMER MBCT, W7R9K7", "CSV có dấu phẩy trong ngoặc kép");
+  const csvPlan = planImport(csvTxns, await existingLedgerReferences(csvTxns.map(referenceFor)));
+  assert.equal(csvPlan.find((r) => r.bankRef === "FT1")?.status, "duplicate", "CSV cùng mã GD → trùng với JSON đã nhập");
+  assert.equal(csvPlan.find((r) => r.bankRef === "FT7")?.status, "non_pl");
+  const ledgerRows = await db.select().from(schema.expenses).where(eq(schema.expenses.reference, "MB FT3"));
+  assert.equal(ledgerRows[0]?.amount, 1340000);
+  console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi, bỏ qua tiền vào/nội bộ, chống trùng theo mã GD`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
