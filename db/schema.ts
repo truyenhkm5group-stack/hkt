@@ -539,10 +539,21 @@ export const adSpends = pgTable(
     spendDate: ts("spend_date").notNull(),
     note: text("note").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
+    /** Khoá đồng bộ tự động (vd fb:<account>:<campaign>:<ngày>); null với dòng nhập tay */
+    externalKey: text("external_key"),
+    accountId: text("account_id"),
+    accountName: text("account_name"),
+    campaignId: text("campaign_id"),
+    /** Sản phẩm (mã hàng) được ghép từ tên chiến dịch, dùng cho báo cáo lợi nhuận theo mã */
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    impressions: integer("impressions").notNull().default(0),
+    clicks: integer("clicks").notNull().default(0),
+    messages: integer("messages").notNull().default(0),
+    currency: text("currency"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate)],
+  (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate), uniqueIndex("ad_spends_external_key_uq").on(t.externalKey), index("ad_spends_product_idx").on(t.productId)],
 );
 
 // ───────────────────────── Đồng bộ & tích hợp ─────────────────────────

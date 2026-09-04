@@ -40,6 +40,14 @@ Kiểm tra: mở `https://erp.vnxcommerce.com/api/health` trả về `{"ok":true
 4. Trong lúc chờ duyệt, ERP vẫn cập nhật trạng thái mỗi 10 phút qua job `vtp-tracking` (scheduler). Có thể bấm *Cập nhật từ Viettel Post* trên từng vận đơn.
 5. Kiểm tra sau khi duyệt: vận đơn → *Lịch sử đẩy webhook* có bản ghi; *Webhook đã nhận* có nguồn VIETTELPOST.
 
+## 4b. Kết nối Facebook Ads (tự động lấy chi phí quảng cáo)
+
+1. Vào https://business.facebook.com → Business Settings → Users → **System Users** → Add (loại Admin).
+2. Chọn System User → **Assign Assets** → Ad Accounts → tick tất cả tài khoản quảng cáo của BM.
+3. **Generate New Token** → chọn app (tạo app nếu chưa có) → quyền `ads_read`, `business_management` → thời hạn *Never expire* → copy token.
+4. Thêm Secret `FACEBOOK_ACCESS_TOKEN` trên GitHub (Settings → Secrets → Actions) rồi chạy workflow *Deploy ERP to VPS*; hoặc thêm vào `.env` trên VPS và `docker compose -f docker-compose.prod.yml up -d`.
+5. Kiểm tra: Kết nối dữ liệu → thẻ Facebook Ads → *Kiểm tra kết nối* → chạy job *Chi tiêu quảng cáo Facebook* (days=90 để kéo lịch sử). Đặt tên chiến dịch có mã hàng (VD “Q002 – Đầm …”) để ERP ghép vào báo cáo lợi nhuận theo mã.
+
 ## 5. Vận hành hằng ngày
 
 - Scheduler tự chạy: đơn mới mỗi 3 phút, Viettel Post mỗi 10 phút, sản phẩm/tồn kho 30 phút, khách hàng & sổ kho 60 phút, đối chiếu lại 3 ngày gần nhất lúc 02:15.

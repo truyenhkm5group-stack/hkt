@@ -17,12 +17,14 @@ const JOBS = [
   { job: "pancake-returns", every: minutes("SYNC_RETURNS_EVERY_MINUTES", 30), offset: 4 },
   { job: "pancake-customers", every: minutes("SYNC_CUSTOMERS_EVERY_MINUTES", 60), offset: 6 },
   { job: "pancake-inventory", every: minutes("SYNC_INVENTORY_EVERY_MINUTES", 60), offset: 8 },
+  { job: "facebook-ads", every: minutes("SYNC_ADS_EVERY_MINUTES", 60), offset: 10 },
 ];
 
 const DAILY = [
   { job: "pancake-reconcile", hour: 2, minute: 15 }, // 02:15 giờ Việt Nam
   { job: "vtp-tracking", hour: 3, minute: 0, query: "all=1&limit=2000" },
   { job: "pancake-warehouses", hour: 3, minute: 30 },
+  { job: "facebook-ads", hour: 4, minute: 0, query: "days=30" }, // đối chiếu lại 30 ngày (Facebook có thể điều chỉnh số liệu muộn)
 ];
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);

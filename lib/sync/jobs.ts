@@ -9,12 +9,13 @@ import {
   syncProducts,
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
+import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import type { SyncTrigger } from "@/lib/sync/runner";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
-export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
   "pancake-orders": {
     label: "Đơn hàng mới cập nhật",
     source: "PANCAKE",
@@ -81,6 +82,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description: "Kéo danh sách vận đơn trong N ngày từ tài khoản Viettel Post (kể cả đơn không lên từ Pancake).",
     run: (o) => importViettelPostOrders({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
   },
+  "facebook-ads": {
+    label: "Chi tiêu quảng cáo Facebook",
+    source: "FACEBOOK",
+    description: "Kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (days=N để kéo lùi N ngày, mặc định 3).",
+    run: (o) => syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
   all: {
     label: "Đồng bộ tất cả",
     source: "ALL",
@@ -88,7 +95,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     run: async (o) => {
       const pancake = await syncPancakeAll({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
       const vtp = await syncViettelPostShipments({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
-      return { pancake, vtp };
+      const ads = await syncFacebookAds({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
+      return { pancake, vtp, ads };
     },
   },
 };

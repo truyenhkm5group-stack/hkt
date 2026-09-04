@@ -3,7 +3,9 @@ import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
 import { AdsChart } from "@/components/charts/ads-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { SyncButton } from "@/components/sync-button";
 import { SectionCard } from "@/components/ui-bits";
+import { integrationStatus } from "@/lib/env";
 import { formatNumber, formatVND } from "@/lib/format";
 import { AD_SORTABLE, adDailyByPlatform, adFacets, adSummary, listAdSpends } from "@/lib/queries/expenses";
 import { parseListParams, type Period, type SearchParams } from "@/lib/search-params";
@@ -27,6 +29,21 @@ export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; per
         <MetricCard label="ROAS" value={summary.roas ? `${summary.roas.toFixed(2)}×` : "—"} change={prev && prev.roas ? change(summary.roas, prev.roas) : null} note="Doanh thu ÷ chi tiêu" icon={TrendingUp} tone={summary.roas >= 3 ? "green" : summary.roas >= 1.5 || !summary.roas ? "primary" : "rose"} />
         <MetricCard label="CPO (chi phí / đơn)" value={summary.cpo ? formatVND(summary.cpo, { compact: true }) : "—"} note={summary.orders ? `${formatVND(summary.cpo)} mỗi đơn${prev?.cpo ? ` · kỳ trước ${formatVND(prev.cpo, { compact: true })}` : ""}` : "Chi tiêu ÷ số đơn · chưa có đơn"} icon={Target} tone="amber" />
       </section>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-[13px]">
+        <div className="flex-1 text-muted-foreground">
+          {integrationStatus().facebook ? (
+            <>
+              <b className="text-foreground">Facebook Ads tự động:</b> chi tiêu theo ngày × chiến dịch của mọi tài khoản trong Business Manager được kéo mỗi giờ và đối chiếu lại 30 ngày lúc 04:00. Tên chiến dịch chứa mã hàng (VD “Q002”) sẽ được ghép vào báo cáo lợi nhuận theo mã.
+            </>
+          ) : (
+            <>
+              <b className="text-foreground">Chưa kết nối Facebook Ads.</b> Thêm <code>FACEBOOK_ACCESS_TOKEN</code> (token System User của Business Manager, quyền ads_read + business_management) vào cấu hình để tự động kéo chi tiêu. Trong lúc chờ, nhập tay bằng nút “Thêm chi tiêu”.
+            </>
+          )}
+        </div>
+        {canWrite && integrationStatus().facebook ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
+      </div>
 
       <SectionCard title="Chi tiêu theo ngày" description="Cột chồng theo nền tảng quảng cáo" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
         <AdsChart data={daily.data} platforms={daily.platforms} />

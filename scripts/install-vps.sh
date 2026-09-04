@@ -44,6 +44,18 @@ fi
 # ───────── 3. File .env ─────────
 if [ -f .env ]; then
   say "Đã có .env, giữ nguyên (xoá file này nếu muốn tạo lại)"
+  # Bổ sung / cập nhật các biến mới nếu được truyền qua môi trường (không đụng các giá trị khác)
+  upsert_env() { # upsert_env TÊN GIÁ_TRỊ
+    [ -n "$2" ] || return 0
+    if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi
+  }
+  upsert_env FACEBOOK_ACCESS_TOKEN "${FACEBOOK_ACCESS_TOKEN:-}"
+  upsert_env FACEBOOK_BUSINESS_ID "${FACEBOOK_BUSINESS_ID:-}"
+  upsert_env VIETTELPOST_API_KEY "${VIETTELPOST_API_KEY:-}"
+  upsert_env VIETTELPOST_USERNAME "${VIETTELPOST_USERNAME:-}"
+  upsert_env VIETTELPOST_PASSWORD "${VIETTELPOST_PASSWORD:-}"
+  upsert_env PANCAKE_API_KEY "${PANCAKE_API_KEY:-}"
+  grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
   ask ERP_DOMAIN          "Tên miền ERP"                       "erp.vnxcommerce.com"
@@ -55,6 +67,8 @@ else
     read -r -s -p "Mật khẩu đối tác Viettel Post: " VIETTELPOST_PASSWORD </dev/tty; echo
   fi
   if [ -z "${PANCAKE_API_KEY:-}" ]; then warn "Chưa có PANCAKE_API_KEY — ERP vẫn chạy nhưng không đồng bộ được Pancake, sửa .env sau."; fi
+  ask FACEBOOK_ACCESS_TOKEN "Token Facebook Ads (System User, Enter nếu chưa có)" ""
+  ask FACEBOOK_BUSINESS_ID "ID Business Manager Facebook"      "336423739082347"
   ask ADMIN_EMAIL         "Email quản trị ERP"                 "admin@vnxcommerce.com"
   ask ADMIN_PASSWORD      "Mật khẩu quản trị ERP"              "$(rand 6)"
   ask PANCAKE_BACKFILL_DAYS "Số ngày lịch sử đơn cần kéo lần đầu" "365"
@@ -84,6 +98,11 @@ VIETTELPOST_PASSWORD="${VIETTELPOST_PASSWORD:-}"
 VIETTELPOST_BASE_URL="https://partner.viettelpost.vn/v2"
 VIETTELPOST_WEBHOOK_SECRET="vtp_$(rand 16)"
 
+FACEBOOK_ACCESS_TOKEN="${FACEBOOK_ACCESS_TOKEN:-}"
+FACEBOOK_BUSINESS_ID="${FACEBOOK_BUSINESS_ID:-336423739082347}"
+FACEBOOK_API_VERSION="v21.0"
+FACEBOOK_USD_VND="25500"
+
 ERP_INTERNAL_URL="http://app:3000"
 SYNC_ORDERS_EVERY_MINUTES="3"
 SYNC_VTP_EVERY_MINUTES="10"
@@ -91,6 +110,7 @@ SYNC_PRODUCTS_EVERY_MINUTES="30"
 SYNC_CUSTOMERS_EVERY_MINUTES="60"
 SYNC_INVENTORY_EVERY_MINUTES="60"
 SYNC_RETURNS_EVERY_MINUTES="30"
+SYNC_ADS_EVERY_MINUTES="60"
 ENV
   chmod 600 .env
   say "Đã ghi .env (chmod 600)"

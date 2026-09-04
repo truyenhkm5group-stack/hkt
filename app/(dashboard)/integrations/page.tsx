@@ -75,6 +75,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
     { job: "pancake-returns", every: minutesEnv("SYNC_RETURNS_EVERY_MINUTES", 30), envName: "SYNC_RETURNS_EVERY_MINUTES" },
     { job: "pancake-customers", every: minutesEnv("SYNC_CUSTOMERS_EVERY_MINUTES", 60), envName: "SYNC_CUSTOMERS_EVERY_MINUTES" },
     { job: "pancake-inventory", every: minutesEnv("SYNC_INVENTORY_EVERY_MINUTES", 60), envName: "SYNC_INVENTORY_EVERY_MINUTES" },
+    { job: "facebook-ads", every: minutesEnv("SYNC_ADS_EVERY_MINUTES", 60), envName: "SYNC_ADS_EVERY_MINUTES" },
   ];
 
   return (
@@ -143,6 +144,25 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             { label: "Tham số bí mật webhook", value: status.viettelPostWebhook ? <span className="font-mono">{maskKey(env.viettelPost.webhookSecret)}</span> : <span className="text-muted-foreground">Chưa đặt VIETTELPOST_WEBHOOK_SECRET</span> },
           ]}
           footer={<TestConnectionButton provider="viettelpost" disabled={!status.viettelPost} />}
+        />
+        <ConnectionCard
+          initials="FB"
+          tone="bg-blue-600"
+          title="Facebook Ads"
+          description="Chi tiêu quảng cáo theo ngày × chiến dịch của mọi tài khoản trong Business Manager"
+          configured={status.facebook}
+          items={[
+            { label: "Token System User", value: status.facebook ? <span className="font-mono">{maskKey(env.facebook.accessToken)}</span> : <span className="text-muted-foreground">Chưa cấu hình FACEBOOK_ACCESS_TOKEN</span> },
+            { label: "Business Manager", value: <span className="font-mono">{env.facebook.businessId}</span> },
+            { label: "Phiên bản API", value: <span className="font-mono text-xs">{env.facebook.apiVersion}</span> },
+            { label: "Lịch", value: `Mỗi ${minutesEnv("SYNC_ADS_EVERY_MINUTES", 60)} phút · đối chiếu lại 30 ngày lúc 04:00` },
+            {
+              label: "Cách lấy token",
+              value: <span className="text-xs text-muted-foreground">business.facebook.com → Business Settings → Users → System Users → Add (Admin) → Assign Assets: chọn tất cả tài khoản quảng cáo → Generate New Token: quyền ads_read, business_management, thời hạn Never expire.</span>,
+              span: true,
+            },
+          ]}
+          footer={<TestConnectionButton provider="facebook" disabled={!status.facebook} />}
         />
       </section>
 

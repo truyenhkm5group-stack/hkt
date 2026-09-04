@@ -8,6 +8,7 @@ import { asRecord, str } from "@/lib/integrations/http";
 import { PancakeClient } from "@/lib/integrations/pancake/client";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
+import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
 
 const ok = (msg: string) => console.log(`  ✓ ${msg}`);
 const bad = (msg: string) => console.log(`  ✗ ${msg}`);
@@ -118,10 +119,36 @@ async function checkViettelPost(sampleOrderNumber: string | null) {
   }
 }
 
+async function checkFacebook() {
+  console.log("\n▶ Facebook Ads");
+  if (!env.facebook.accessToken) {
+    bad("Chưa có FACEBOOK_ACCESS_TOKEN trong .env (Business Settings → System Users → Generate token, quyền ads_read + business_management)");
+    return;
+  }
+  try {
+    const client = new FacebookAdsClient();
+    const result = await client.testConnection();
+    ok(`Token hợp lệ · ${result.userName || result.userId}${result.businessName ? ` · BM "${result.businessName}"` : ""} (${env.facebook.businessId})`);
+    if (result.accounts.length) ok(`Tài khoản quảng cáo: ${result.accounts.map((a) => `${a.name} (${a.accountId}, ${a.currency}${a.relation === "client" ? ", client" : ""})`).join(", ")}`);
+    else bad("BM không có tài khoản quảng cáo nào mà token nhìn thấy — gán System User vào các tài khoản quảng cáo (Business Settings → Ad Accounts → Add People/Partners).");
+    const first = result.accounts[0];
+    if (first) {
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());
+      const since = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(Date.now() - 6 * 86_400_000));
+      const rows = await client.campaignInsights(first.accountId, since, today);
+      ok(`Insights 7 ngày của "${first.name}": ${rows.length} dòng ngày×chiến dịch · chi ${rows.reduce((s, r) => s + r.spend, 0).toLocaleString("vi-VN")} ${first.currency}`);
+    }
+  } catch (error) {
+    bad(`Facebook lỗi: ${error instanceof Error ? error.message : String(error)}`);
+    info("Token hết hạn (mã 190) → tạo token System User mới, không đặt thời hạn. Thiếu quyền → thêm ads_read, business_management.");
+  }
+}
+
 async function main() {
   console.log("Kiểm tra kết nối API — Shop Control ERP");
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
+  await checkFacebook();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
   process.exit(0);
 }

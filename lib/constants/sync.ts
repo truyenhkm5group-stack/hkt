@@ -12,6 +12,7 @@ export const SYNC_JOB_LABEL: Record<string, string> = {
   tracking_poll: "Trạng thái vận đơn Viettel Post",
   tracking_selected: "Cập nhật vận đơn được chọn",
   orders_import: "Nhập vận đơn từ Viettel Post",
+  ads_insights: "Chi tiêu quảng cáo Facebook",
 };
 
 export function syncJobLabel(job: string) {
@@ -31,11 +32,13 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
   "pancake-all": ["PANCAKE:warehouses", "PANCAKE:products", "PANCAKE:orders_backfill", "PANCAKE:orders_incremental", "PANCAKE:customers", "PANCAKE:order_returns", "PANCAKE:inventory_histories"],
   "vtp-tracking": ["VIETTELPOST:tracking_poll", "VIETTELPOST:tracking_selected"],
   "vtp-import": ["VIETTELPOST:orders_import"],
+  "facebook-ads": ["FACEBOOK:ads_insights"],
 };
 
 export const SYNC_SOURCE_LABEL: Record<string, string> = {
   PANCAKE: "Pancake POS",
   VIETTELPOST: "Viettel Post",
+  FACEBOOK: "Facebook Ads",
   ALL: "Tất cả",
 };
 

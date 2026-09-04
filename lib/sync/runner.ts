@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { publish } from "@/lib/realtime/bus";
 
-export type SyncSource = "PANCAKE" | "VIETTELPOST";
+export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK";
 export type SyncTrigger = "MANUAL" | "CRON" | "WEBHOOK";
 
 export type SyncSummary = {

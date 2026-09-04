@@ -21,7 +21,10 @@ Pancake POS ──(API + webhook)──▶  ERP  ◀──(API + webhook)── 
 | **Khách hàng** | Hồ sơ khách từ Pancake, số đơn/thành công/hoàn, lịch sử mua. |
 | **Đổi / trả** | Phiếu đổi trả từ Pancake. |
 | **Chi phí & quảng cáo** | Chi phí vận hành theo nhóm, chi tiêu quảng cáo theo nền tảng (ROAS, CPO). |
-| **Báo cáo lợi nhuận** | Bảng kết quả kinh doanh (doanh thu giao thành công − giá vốn − phí ship − phí hoàn − phí sàn − quảng cáo − vận hành), so sánh kỳ trước, tiền thực về, theo kênh/nhân viên/sản phẩm/ngày, tỷ lệ hoàn huỷ, xuất CSV. |
+| **Tỷ lệ hoàn theo mã hàng** | Tỷ lệ hoàn từng SKU theo quy tắc: vận đơn giao thành công nhưng COD = 0 và cước < 10.000đ = đơn hoàn; bấm mã xem danh sách đơn; xuất CSV. |
+| **Nhập hàng & kiểm kê** | Phiếu nhập hàng / điều chỉnh kiểm kê theo mẫu mã; tồn khả dụng ERP = Nhập − Giao thật − Đang giao (hoàn coi như về kho); giá nhập cập nhật giá vốn. |
+| **Facebook Ads** | Tự kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (token System User), ghép mã hàng theo tên chiến dịch. |
+| **Báo cáo lợi nhuận** | 3 tab: theo đơn giao thành công; dòng tiền thực (COD về ngân hàng, tiền nhập hàng, cước, QC, vận hành); danh nghĩa theo mã hàng (đơn lên × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − CPQC, bảng theo ngày từng mã, giả định chỉnh được). Bảng kết quả kinh doanh (doanh thu giao thành công − giá vốn − phí ship − phí hoàn − phí sàn − quảng cáo − vận hành), so sánh kỳ trước, tiền thực về, theo kênh/nhân viên/sản phẩm/ngày, tỷ lệ hoàn huỷ, xuất CSV. |
 | **Kết nối dữ liệu** | Trạng thái kết nối, kiểm tra API key, URL webhook + hướng dẫn cấu hình, chạy từng job đồng bộ, lịch sử đồng bộ, webhook đã nhận, lịch tự động. |
 | **Người dùng & nhật ký** | Đăng nhập, phân quyền (Quản trị / Quản lý / Kế toán / Kho / CSKH / Marketing / Chỉ xem), nhật ký thao tác. |
 
@@ -91,6 +94,7 @@ Chi tiết (trỏ DNS trên name.com, sao lưu, cập nhật): `docs/TRIEN-KHAI-
 | `VIETTELPOST_API_KEY` | Token bí mật tạo tại https://viettelpost.vn/cau-hinh-tai-khoan → *Thêm mới token* → *Sao chép token* (xác thực OTP). ERP đổi token này lấy token đối tác qua API `loginVTP` và tự làm mới khi hết hạn. |
 | `VIETTELPOST_USERNAME`, `VIETTELPOST_PASSWORD` | Tài khoản đối tác Viettel Post (SĐT + mật khẩu đăng nhập partner.viettelpost.vn) để lấy token dài hạn 1 năm (`Login` → `ownerconnect`). Nên điền cả hai cách; ERP tự chọn cách nào hoạt động. |
 | `VIETTELPOST_WEBHOOK_SECRET` | "Tham số bí mật" bạn khai báo trong phần webhook của Viettel Post |
+| `FACEBOOK_ACCESS_TOKEN`, `FACEBOOK_BUSINESS_ID` | Token System User của Business Manager (quyền `ads_read`, `business_management`, không hết hạn) và ID BM chứa các tài khoản quảng cáo |
 | `SYNC_*_EVERY_MINUTES` | Chu kỳ đồng bộ tự động của scheduler |
 
 Kiểm tra API key trước khi đồng bộ:

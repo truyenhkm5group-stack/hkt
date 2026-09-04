@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { env, integrationStatus } from "@/lib/env";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
+import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export const maxDuration = 120;
 /** Che các khoá bí mật nếu vô tình lọt vào thông báo lỗi */
 function scrub(message: string) {
   let out = message;
-  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret]) {
+  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret, env.facebook.accessToken]) {
     if (secret && secret.length >= 6) out = out.split(secret).join("***");
   }
   return out;
@@ -54,7 +55,20 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost)" }, { status: 400 });
+    if (provider === "facebook") {
+      if (!status.facebook) return NextResponse.json({ ok: false, error: "Chưa cấu hình FACEBOOK_ACCESS_TOKEN trong .env" });
+      const result = await getFacebookAdsClient().testConnection();
+      return NextResponse.json({
+        ok: true,
+        detail: {
+          userName: result.userName,
+          businessName: result.businessName,
+          accounts: result.accounts.map((a) => ({ id: a.accountId, name: a.name, currency: a.currency })),
+          message: `Token hợp lệ · ${result.accounts.length} tài khoản quảng cáo${result.businessName ? ` trong BM "${result.businessName}"` : ""}${result.accounts.length ? `: ${result.accounts.map((a) => a.name).join(", ")}` : " (chưa gán System User vào tài khoản nào)"}`,
+        },
+      });
+    }
+    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook)" }, { status: 400 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ ok: false, error: scrub(message) });
