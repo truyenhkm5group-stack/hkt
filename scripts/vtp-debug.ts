@@ -3,6 +3,7 @@
  *   npm run vtp:debug -- <mã vận đơn>
  */
 import "dotenv/config";
+import { env } from "@/lib/env";
 import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
 
 function show(label: string, value: unknown) {
@@ -30,6 +31,30 @@ async function main() {
     ["order/listOrder GET (7 ngày)", () => client.debugCall("order/listOrder", { token, query: { page: 1, size: 5 } })],
     ["order/list-data-push-his", () => client.debugCall("order/list-data-push-his", { token, query: { orderNumber } })],
   ];
+  if (env.viettelPost.username && env.viettelPost.password) {
+    const creds = { USERNAME: env.viettelPost.username, PASSWORD: env.viettelPost.password };
+    const variants: [string, () => Promise<unknown>][] = [
+      ["user/Login {USERNAME,PASSWORD}", () => client.debugCall("user/Login", { method: "POST", body: creds })],
+      ["user/login (thường) {USERNAME,PASSWORD}", () => client.debugCall("user/login", { method: "POST", body: creds })],
+      ["user/Login {username,password}", () => client.debugCall("user/Login", { method: "POST", body: { username: creds.USERNAME, password: creds.PASSWORD } })],
+      ["user/Login kèm header Token", () => client.debugCall("user/Login", { method: "POST", body: creds, token: env.viettelPost.apiKey })],
+      ["user/ownerconnect với token hiện tại", () => client.debugCall("user/ownerconnect", { method: "POST", body: creds, token })],
+    ];
+    for (const [label, fn] of variants) {
+      try {
+        const res = (await fn()) as { data?: unknown; message?: string; status?: number; error?: boolean };
+        const d = (res && typeof res === "object" && res.data && typeof res.data === "object" ? (res.data as Record<string, unknown>) : {}) as Record<string, unknown>;
+        show(label, { status: res?.status, error: res?.error, message: res?.message, tokenLength: typeof d.token === "string" ? d.token.length : 0, keys: Object.keys(d).slice(0, 12) });
+        if (typeof d.token === "string" && d.token) {
+          const t2 = d.token;
+          show(`${label} → getOrderDetailV3`, await client.debugCall("order/getOrderDetailV3", { token: t2, query: { OrderNumber: orderNumber } }));
+          show(`${label} → user/listInventory (số kho)`, { count: ((await client.debugCall("user/listInventory", { token: t2 })).data as unknown[])?.length });
+        }
+      } catch (error) {
+        show(label, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
   for (const [label, fn] of tries) {
     try {
       show(label, await fn());
@@ -54,7 +79,7 @@ async function main() {
   }
 
   // Thử cách đăng nhập bằng tài khoản đối tác (Login → ownerconnect) rồi tra cứu lại
-  const { env } = await import("@/lib/env");
+  // env đã import ở đầu file
   if (env.viettelPost.username && env.viettelPost.password) {
     const credentials = { USERNAME: env.viettelPost.username, PASSWORD: env.viettelPost.password };
     try {
