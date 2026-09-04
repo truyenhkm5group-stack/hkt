@@ -106,6 +106,7 @@ FACEBOOK_USD_VND="25500"
 
 # Pancake Pages (chat): access token người dùng để đọc hội thoại → case CSKH
 PANCAKE_ACCESS_TOKEN="${PANCAKE_ACCESS_TOKEN:-}"
+PANCAKE_PAGES_BASE_URL="https://pages.fm/api/v1"
 
 ERP_INTERNAL_URL="http://app:3000"
 SYNC_ORDERS_EVERY_MINUTES="3"

@@ -1,7 +1,7 @@
 /**
  * Pancake Pages (chat) public API — đọc hội thoại, thẻ hội thoại và tin nhắn.
- * Tài liệu: https://pages.fm/api/public_api/v1 · cần access token người dùng (PANCAKE_ACCESS_TOKEN);
- * mỗi page cần page_access_token (tự sinh qua generate_page_access_token và cache trong tiến trình).
+ * Base: https://pages.fm/api/v1 (bản public_api/v1 trả 406/HTML) · cần access token người dùng (PANCAKE_ACCESS_TOKEN);
+ * mỗi page dùng page_access_token (sinh qua generate_page_access_token, cache trong tiến trình); nếu không sinh được thì dùng access_token trực tiếp.
  */
 import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, int, str } from "@/lib/integrations/http";
@@ -28,10 +28,11 @@ export class PancakePagesClient {
   private async call(path: string, query: Record<string, string | number | undefined>, method = "GET"): Promise<Record<string, unknown>> {
     const url = new URL(`${this.baseUrl}/${path.replace(/^\//, "")}`);
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
-    const { body, status } = await fetchJson(url, { method, serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 2 });
+    const { body, status, text } = await fetchJson(url, { method, headers: { accept: "*/*" }, serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 2 });
     const rec = asRecord(body);
+    if (!body || typeof body !== "object") throw new IntegrationError(`Pancake Pages: phản hồi không phải JSON (HTTP ${status}) — kiểm tra PANCAKE_PAGES_BASE_URL`, status, false, text.slice(0, 200));
     if (status >= 400 || rec.success === false) {
-      throw new IntegrationError(`Pancake Pages: ${str(rec.message, rec.error, rec.reason) || `HTTP ${status}`}`, status === 401 || status === 403 ? 401 : status, false, body);
+      throw new IntegrationError(`Pancake Pages: ${str(rec.message, rec.error, rec.reason) || `HTTP ${status}`}${rec.error_code ? ` (mã ${str(rec.error_code)})` : ""}`, status === 401 || status === 403 ? 401 : status, false, body);
     }
     return rec;
   }
@@ -50,14 +51,20 @@ export class PancakePagesClient {
   }
 
   /** page_access_token cho một page (sinh mới nếu chưa có) */
-  async pageToken(pageId: string): Promise<string> {
+  async pageToken(pageId: string): Promise<{ key: "page_access_token" | "access_token"; value: string }> {
     const cached = this.pageTokens.get(pageId);
-    if (cached) return cached;
-    const rec = await this.call(`pages/${pageId}/generate_page_access_token`, { access_token: this.accessToken }, "POST");
-    const token = str(rec.page_access_token, asRecord(rec.data).page_access_token);
-    if (!token) throw new IntegrationError(`Pancake Pages: không lấy được page_access_token cho page ${pageId}`, 500, false, rec);
-    this.pageTokens.set(pageId, token);
-    return token;
+    if (cached) return { key: "page_access_token", value: cached };
+    try {
+      const rec = await this.call(`pages/${pageId}/generate_page_access_token`, { access_token: this.accessToken }, "POST");
+      const token = str(rec.page_access_token, asRecord(rec.data).page_access_token);
+      if (token) {
+        this.pageTokens.set(pageId, token);
+        return { key: "page_access_token", value: token };
+      }
+    } catch {
+      // không sinh được page token → dùng access_token người dùng
+    }
+    return { key: "access_token", value: this.accessToken };
   }
 
   /** Hội thoại cập nhật trong khoảng thời gian (mới nhất trước), tối đa `limit` */
@@ -66,7 +73,7 @@ export class PancakePagesClient {
     const out: PancakeConversation[] = [];
     for (let pageNumber = 1; pageNumber <= 20 && out.length < limit; pageNumber++) {
       const rec = await this.call(`pages/${pageId}/conversations`, {
-        page_access_token: token,
+        [token.key]: token.value,
         since: Math.floor(since.getTime() / 1000),
         until: Math.floor(until.getTime() / 1000),
         page_number: pageNumber,
@@ -99,7 +106,7 @@ export class PancakePagesClient {
   /** Tin nhắn gần nhất của một hội thoại (tối đa ~50) */
   async listMessages(pageId: string, conversationId: string, count = 50): Promise<PancakeMessage[]> {
     const token = await this.pageToken(pageId);
-    const rec = await this.call(`pages/${pageId}/conversations/${conversationId}/messages`, { page_access_token: token, current_count: 0, page_size: count });
+    const rec = await this.call(`pages/${pageId}/conversations/${conversationId}/messages`, { [token.key]: token.value, current_count: 0, page_size: count });
     const list = asArray(rec.messages ?? asRecord(rec.data).messages).map(asRecord);
     return list.map((m) => {
       const from = asRecord(m.from);

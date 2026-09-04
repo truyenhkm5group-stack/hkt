@@ -39,7 +39,7 @@ export const env = {
       return read("PANCAKE_ACCESS_TOKEN");
     },
     get pagesBaseUrl() {
-      return read("PANCAKE_PAGES_BASE_URL", "https://pages.fm/api/public_api/v1").replace(/\/$/, "");
+      return read("PANCAKE_PAGES_BASE_URL", "https://pages.fm/api/v1").replace(/\/$/, "");
     },
   },
   facebook: {
