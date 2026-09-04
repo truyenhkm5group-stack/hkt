@@ -22,6 +22,7 @@ on:
           - check-integrations  # kiểm tra API key
           - vtp-debug           # in phản hồi thô API Viettel Post cho mã vận đơn (nhập ở ô "arg")
           - db-query            # chạy một câu SQL CHỈ ĐỌC trên CSDL ERP (nhập SQL ở ô "arg")
+          - seed-employees      # khai báo nhân sự & cơ chế lương từ JSON (ô "arg")
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -80,6 +81,8 @@ jobs:
                 docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
               check-integrations)
                 docker exec erp-app npm run --silent check:integrations ;;
+              seed-employees)
+                docker exec erp-app npm run --silent seed:employees -- "$ARG" ;;
               db-query)
                 printf '%s\n' "$ARG" | PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000' $C exec -T db psql -U erp -d erp -v ON_ERROR_STOP=1 -P pager=off ;;
               vtp-debug)

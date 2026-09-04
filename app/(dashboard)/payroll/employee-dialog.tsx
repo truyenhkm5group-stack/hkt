@@ -48,14 +48,21 @@ import { deleteEmployee, saveEmployee } from "@/lib/actions/payroll";
 import { DEPARTMENTS, type Employee } from "@/lib/constants/payroll";
 import { employeeSchema, type EmployeeInput } from "@/lib/validation/payroll";
 
-function toForm(e?: Employee | null): EmployeeInput {
+export type EmployeePreset = {
+  name?: string;
+  shortName?: string;
+  aliases?: string[];
+  accountIds?: string[];
+};
+
+function toForm(e?: Employee | null, preset?: EmployeePreset): EmployeeInput {
   return {
     id: e?.id,
-    name: e?.name ?? "",
-    shortName: e?.shortName ?? "",
+    name: e?.name ?? preset?.name ?? "",
+    shortName: e?.shortName ?? preset?.shortName ?? "",
     department: (e?.department as EmployeeInput["department"]) ?? "Marketing",
-    aliases: (e?.aliases ?? []).join(", "),
-    accountIds: (e?.accountIds ?? []).join(", "),
+    aliases: (e?.aliases ?? preset?.aliases ?? []).join(", "),
+    accountIds: (e?.accountIds ?? preset?.accountIds ?? []).join(", "),
     fixed: e?.fixed ?? 0,
     percentTotal: e?.percentTotal ?? 0,
     percentPersonal: e?.percentPersonal ?? 0,
@@ -118,9 +125,13 @@ function NumberField({
 export function EmployeeDialog({
   employee,
   accounts,
+  preset,
+  triggerLabel,
 }: {
   employee?: Employee | null;
   accounts: { id: string; name: string }[];
+  preset?: EmployeePreset;
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -158,8 +169,8 @@ export function EmployeeDialog({
             <Pencil className="size-4" />
           </Button>
         ) : (
-          <Button size="sm">
-            <Plus className="size-4" /> Thêm nhân sự
+          <Button size="sm" variant={preset ? "outline" : "default"}>
+            <Plus className="size-4" /> {triggerLabel ?? "Thêm nhân sự"}
           </Button>
         )}
       </DialogTrigger>

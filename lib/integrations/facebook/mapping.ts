@@ -32,8 +32,15 @@ export async function saveProductAliases(aliases: ProductAliases) {
   await setSettingJson(ADS_ALIASES_KEY, aliases);
 }
 
-function normalize(text: string) {
-  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ")} `;
+/** Chữ thường, bỏ dấu tiếng Việt, đ→d, mọi ký tự khác chữ/số thành khoảng trắng */
+export function normalize(text: string) {
+  return ` ${text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()} `;
 }
 
 /** Marketer của chiến dịch: ghép tay → bí danh trong tên chiến dịch → tài khoản quảng cáo mặc định của marketer */
