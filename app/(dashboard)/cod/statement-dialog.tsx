@@ -12,10 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { importVtpStatementDetail, parseVtpStatementText, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
+import { importVtpOrderList, importVtpStatementDetail, parseVtpStatementText, previewVtpOrderList, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
 import { formatVND, todayVN } from "@/lib/format";
 import type { StatementSummary } from "@/lib/integrations/viettelpost/statement";
-import type { DetailMatch } from "@/lib/integrations/viettelpost/statement-db";
+import type { DetailMatch, OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
+import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 
 function fmtDate(key: string) {
   const [y, m, d] = key.split("-");
@@ -38,15 +39,24 @@ export function StatementDialog() {
         <DialogHeader>
           <DialogTitle>Bảng kê tiền COD Viettel Post</DialogTitle>
           <DialogDescription>
-            Lấy từ viettelpost.vn → Thống kê tiền hàng → Tiền hàng đã trả. Tổng hợp: bôi đen bảng và dán vào ô bên dưới (mỗi dòng một bảng kê) → ERP ghi nhận tiền COD, cước và tiền thu về theo ngày đối soát vào báo cáo dòng tiền. Chi tiết: mở một bảng kê, xuất Excel và tải lên → ERP
-            ghép từng vận đơn, đánh dấu đã về ngân hàng và ghi cước thực tế.
+            Cách nhanh nhất: viettelpost.vn → Quản lý vận đơn → chọn khoảng ngày → Xuất Excel → tải lên ở tab đầu. ERP cập nhật trạng thái thật của từng vận đơn (Đã trả = COD đã về ngân hàng, Giao thành công, Chờ phát lại, Chuyển hoàn…) và cước. Hai tab còn lại dùng cho bảng kê “Tiền hàng đã trả”
+            (tổng hợp theo ngày đối soát cho dòng tiền; chi tiết từng bảng kê để gắn vận đơn vào đợt).
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="summary">
+        <Tabs defaultValue="orders">
           <TabsList>
-            <TabsTrigger value="summary">Tổng hợp (dán bảng)</TabsTrigger>
+            <TabsTrigger value="orders">Danh sách vận đơn (khuyên dùng)</TabsTrigger>
+            <TabsTrigger value="summary">Bảng kê tổng hợp (dán bảng)</TabsTrigger>
             <TabsTrigger value="detail">Chi tiết một bảng kê (file)</TabsTrigger>
           </TabsList>
+          <TabsContent value="orders">
+            <OrderListImport
+              onDone={() => {
+                setOpen(false);
+                router.refresh();
+              }}
+            />
+          </TabsContent>
           <TabsContent value="summary">
             <SummaryImport
               onDone={() => {
@@ -258,6 +268,107 @@ function DetailImport({ onDone }: { onDone: () => void }) {
           <DialogFooter>
             <Button type="button" onClick={submit} disabled={pending || !summary.matched}>
               {pending ? <Loader2 className="size-4 animate-spin" /> : null} Ghi bảng kê & đánh dấu {summary.matched} vận đơn đã về
+            </Button>
+          </DialogFooter>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+async function fileToBase64(file: File) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < buf.length; i += 0x8000) binary += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function OrderListImport({ onDone }: { onDone: () => void }) {
+  const [rows, setRows] = useState<OrderListMatch[] | null>(null);
+  const [pending, startTransition] = useTransition();
+  const summary = useMemo(() => {
+    const list = rows ?? [];
+    const matched = list.filter((r) => r.shipmentId);
+    const byStatus = new Map<string, number>();
+    for (const r of matched) byStatus.set(r.statusText || "?", (byStatus.get(r.statusText || "?") ?? 0) + 1);
+    return { matched: matched.length, unmatched: list.length - matched.length, paid: matched.filter((r) => r.mapped.cod === "PAID_TO_BANK").length, unknown: matched.filter((r) => r.mapped.stage === "UNKNOWN").length, byStatus: [...byStatus.entries()].sort((a, b) => b[1] - a[1]) };
+  }, [rows]);
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+    startTransition(async () => {
+      const result = await previewVtpOrderList({ base64, filename: file.name });
+      if ("error" in result) toast.error(result.error);
+      else {
+        setRows(result.rows);
+        toast.success(`Đã đọc ${result.rows.length} vận đơn`);
+      }
+    });
+  };
+  const submit = () =>
+    startTransition(async () => {
+      if (!rows?.length) return;
+      const result = await importVtpOrderList(rows.filter((r) => r.shipmentId).map((r) => ({ trackingCode: r.trackingCode, statusText: r.statusText, cod: r.cod, fee: r.fee, statusDate: r.statusDate })));
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success(`Đã cập nhật ${result.updated} vận đơn · ${result.paid} đánh dấu COD đã về ngân hàng${result.unknown ? ` · ${result.unknown} trạng thái chưa nhận ra` : ""}`);
+        onDone();
+      }
+    });
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="space-y-1">
+        <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn)</Label>
+        <Input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFile(e.target.files?.[0])} disabled={pending} />
+        <p className="text-[11px] text-muted-foreground">Cần có cột Mã vận đơn và Trạng thái; nếu có Tiền thu hộ, Cước, Ngày cập nhật thì ERP ghi thêm. Chỉ nâng trạng thái COD, không hạ vận đơn đã về ngân hàng.</p>
+      </div>
+      {rows ? (
+        <>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <Badge variant="secondary">Ghép được {summary.matched}/{rows.length} vận đơn</Badge>
+            <Badge variant="outline">Đã trả (COD về NH): {summary.paid}</Badge>
+            {summary.unknown ? <Badge variant="outline">Trạng thái chưa nhận ra: {summary.unknown}</Badge> : null}
+            {summary.unmatched ? <Badge variant="outline">{summary.unmatched} mã không có trong ERP</Badge> : null}
+          </div>
+          <div className="flex flex-wrap gap-1 text-[11px] text-muted-foreground">
+            {summary.byStatus.slice(0, 12).map(([st, n]) => (
+              <span key={st} className="rounded bg-muted px-1.5 py-0.5">{st}: {n}</span>
+            ))}
+          </div>
+          <div className="max-h-[40vh] overflow-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Mã vận đơn</TableHead>
+                  <TableHead>Đơn ERP</TableHead>
+                  <TableHead>Trạng thái VTP</TableHead>
+                  <TableHead>→ ERP</TableHead>
+                  <TableHead className="text-right">COD</TableHead>
+                  <TableHead className="text-right">Cước</TableHead>
+                  <TableHead>Ngày</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.slice(0, 300).map((r, i) => (
+                  <TableRow key={`${r.trackingCode}-${i}`} className={r.shipmentId ? "" : "opacity-60"}>
+                    <TableCell className="font-mono text-xs">{r.trackingCode}</TableCell>
+                    <TableCell className="text-sm">{r.orderLabel || <span className="text-muted-foreground">Không có trong ERP</span>}</TableCell>
+                    <TableCell className="text-sm">{r.statusText}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.mapped.stage === "UNKNOWN" ? "?" : `${SHIPMENT_STAGE_LABEL[r.mapped.stage]}${r.mapped.cod === "PAID_TO_BANK" ? " · COD về NH" : ""}`}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatVND(r.cod)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatVND(r.fee)}</TableCell>
+                    <TableCell className="text-xs">{r.statusDate ? fmtDate(r.statusDate) : "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {rows.length > 300 ? <p className="px-3 py-2 text-xs text-muted-foreground">… và {rows.length - 300} dòng nữa</p> : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={submit} disabled={pending || !summary.matched}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : null} Cập nhật {summary.matched} vận đơn
             </Button>
           </DialogFooter>
         </>

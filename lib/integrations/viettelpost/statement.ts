@@ -101,3 +101,66 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
   if (!rows.length) throw new Error("File không có dòng vận đơn nào");
   return rows;
 }
+
+// ───────── Danh sách vận đơn xuất từ viettelpost.vn → Quản lý vận đơn ─────────
+
+export type VtpOrderListRow = { trackingCode: string; statusText: string; cod: number; fee: number; statusDate: string; raw: string };
+
+const LIST_COL = {
+  status: ["trang thai", "status"],
+  date: ["ngay cap nhat", "ngay trang thai", "thoi gian cap nhat", "ngay tra", "ngay giao", "ngay gui", "ngay tao", "ngay"],
+};
+
+/** Đọc file danh sách vận đơn (xlsx/csv): mã vận đơn, trạng thái, tiền thu hộ, cước, ngày */
+export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
+  let matrix: unknown[][];
+  if (typeof input === "string") matrix = parseCsv(input.replace(/^﻿/, ""));
+  else {
+    const wb = XLSX.read(input, { type: "buffer", cellDates: true });
+    matrix = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: "" });
+  }
+  let headerIdx = -1;
+  let headers: string[] = [];
+  for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+    const row = (matrix[i] ?? []).map((c) => normalize(String(c ?? "")));
+    if (findCol(row, COL.tracking) >= 0 && findCol(row, LIST_COL.status) >= 0) {
+      headerIdx = i;
+      headers = row;
+      break;
+    }
+  }
+  if (headerIdx < 0) throw new Error("Không tìm thấy cột Mã vận đơn và Trạng thái trong file");
+  const cTrack = findCol(headers, COL.tracking);
+  const cStatus = findCol(headers, LIST_COL.status);
+  const cCod = findCol(headers, COL.cod, ["cuoc", "phi"]);
+  const cFee = findCol(headers, COL.fee, ["cod", "thu ho"]);
+  const cDate = findCol(headers, LIST_COL.date);
+  const rows: VtpOrderListRow[] = [];
+  for (const row of matrix.slice(headerIdx + 1)) {
+    const cell = (i: number) => (i >= 0 ? String(row[i] ?? "").trim() : "");
+    const trackingCode = cell(cTrack).toUpperCase().replace(/\s+/g, "");
+    if (!/^[A-Z0-9][A-Z0-9_-]{4,}$/.test(trackingCode)) continue;
+    rows.push({ trackingCode, statusText: cell(cStatus), cod: parseMoney(cell(cCod)), fee: parseMoney(cell(cFee)), statusDate: toDateKey(cell(cDate)), raw: row.map((c) => String(c ?? "")).join(" | ").slice(0, 200) });
+  }
+  if (!rows.length) throw new Error("File không có dòng vận đơn nào");
+  return rows;
+}
+
+export type VtpStatusMap = { stage: "PENDING" | "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED" | "CANCELLED" | "UNKNOWN"; cod: "PAID_TO_BANK" | "COLLECTED" | "PENDING" | "NOT_APPLICABLE" | null; final: boolean };
+
+/** Trạng thái chữ trên viettelpost.vn → giai đoạn & trạng thái COD trong ERP */
+export function mapVtpStatusText(text: string): VtpStatusMap {
+  const n = normalize(text);
+  const has = (...keys: string[]) => keys.some((k) => n.includes(` ${k} `) || n.includes(k));
+  if (has("da tra", "da thanh toan cod")) return { stage: "DELIVERED", cod: "PAID_TO_BANK", final: true };
+  if (has("giao thanh cong", "phat thanh cong")) return { stage: "DELIVERED", cod: "COLLECTED", final: true };
+  if (has("cho phat lai", "phat that bai", "giao that bai")) return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
+  if (has("dang giao hang", "phat tiep", "dang phat")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
+  if (has("dang van chuyen", "dang trung chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
+  if (has("da lay hang", "da nhan hang")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
+  if (has("da tra hang", "hoan thanh cong", "da hoan")) return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+  if (has("chuyen hoan", "duyet hoan", "yeu cau hoan")) return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
+  if (has("huy")) return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
+  if (has("cho xu ly", "cho lay hang", "moi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
+  return { stage: "UNKNOWN", cod: null, final: false };
+}

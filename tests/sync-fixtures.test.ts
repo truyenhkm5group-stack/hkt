@@ -18,8 +18,8 @@ import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { detectCsCases } from "@/lib/cs/detect";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
-import { parseStatementDetail, parseStatementSummaryText } from "@/lib/integrations/viettelpost/statement";
-import { applyStatementDetail } from "@/lib/integrations/viettelpost/statement-db";
+import { mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
@@ -295,6 +295,25 @@ async function main() {
   const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE"));
   assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo");
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
+
+  // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD
+  assert.equal(mapVtpStatusText("Đã trả").cod, "PAID_TO_BANK");
+  assert.equal(mapVtpStatusText("Chờ phát lại").stage, "DELIVERY_FAILED");
+  assert.equal(mapVtpStatusText("Đang chuyển hoàn").stage, "RETURNING");
+  const listCsv = "STT,Mã vận đơn,Người nhận,Trạng thái,Tiền thu hộ,Cước,Ngày cập nhật\n1,PKE-RR-9001,A,Đã trả,\"500.000\",\"15.000\",03/09/2026\n2,PKE-RR-9002,B,Chờ phát lại,\"300.000\",\"12.000\",04/09/2026\n";
+  const listRows = parseVtpOrderList(listCsv);
+  assert.equal(listRows.length, 2);
+  assert.equal(listRows[1].statusDate, "2026-09-04");
+  const rr2 = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9002") });
+  await db.update(schema.shipments).set({ trackingCode: "PKE-RR-9002" }).where(eq(schema.shipments.id, rr2!.id));
+  const applied2 = await applyVtpOrderList(listRows);
+  assert.equal(applied2.matched, 2);
+  const rr2After = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, rr2!.id) });
+  assert.equal(rr2After?.stage, "DELIVERY_FAILED");
+  assert.equal(rr2After?.vtpStatusName, "Chờ phát lại");
+  const rr1After = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9001") });
+  assert.equal(rr1After?.codStatus, "PAID_TO_BANK", "đã trả giữ nguyên đã về ngân hàng");
+  console.log(`✓ Danh sách vận đơn VTP: ${applied2.updated} vận đơn cập nhật, ${applied2.paid} COD về NH`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

@@ -1,7 +1,7 @@
 import { eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import type { StatementDetailRow, StatementSummary } from "@/lib/integrations/viettelpost/statement";
+import { mapVtpStatusText, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
 export async function upsertStatementBatches(rows: StatementSummary[], createdBy: string) {
@@ -85,4 +85,62 @@ export async function applyStatementDetail(summary: StatementSummary, rows: Stat
     updatedShipments += 1;
   }
   return { batchId: batch.id, matched: matched.length, unmatched: matches.length - matched.length, updatedShipments, codGross, feeTotal, net };
+}
+
+// ───────── Danh sách vận đơn (Quản lý vận đơn → xuất Excel) ─────────
+
+export type OrderListMatch = VtpOrderListRow & { shipmentId: string | null; orderLabel: string; currentStage: string | null; currentCod: string | null; mapped: ReturnType<typeof mapVtpStatusText> };
+
+export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderListMatch[]> {
+  const db = await getDb();
+  const codes = [...new Set(rows.map((r) => r.trackingCode))];
+  const found = codes.length
+    ? await db
+        .select({ id: schema.shipments.id, vtp: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
+        .from(schema.shipments)
+        .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+        .where(or(inArray(sql`upper(${schema.shipments.vtpOrderNumber})`, codes), inArray(sql`upper(${schema.shipments.trackingCode})`, codes)))
+    : [];
+  const byCode = new Map<string, (typeof found)[number]>();
+  for (const f of found) {
+    if (f.vtp) byCode.set(f.vtp.toUpperCase(), f);
+    if (f.tracking) byCode.set(f.tracking.toUpperCase(), f);
+  }
+  return rows.map((r) => {
+    const f = byCode.get(r.trackingCode);
+    return { ...r, shipmentId: f?.id ?? null, orderLabel: f ? `#${f.systemId ?? ""} ${f.name ?? ""}`.trim() : "", currentStage: f?.stage ?? null, currentCod: f?.codStatus ?? null, mapped: mapVtpStatusText(r.statusText) };
+  });
+}
+
+const COD_RANK: Record<string, number> = { NOT_APPLICABLE: 0, PENDING: 1, COLLECTED: 2, RECONCILED: 3, PAID_TO_BANK: 4, DISPUTED: 2 };
+
+/** Áp trạng thái Viettel Post (chữ) lên vận đơn ERP: giai đoạn, tên trạng thái, COD (không hạ COD đã về ngân hàng), cước thực tế */
+export async function applyVtpOrderList(rows: VtpOrderListRow[]) {
+  const db = await getDb();
+  const matches = await matchVtpOrderList(rows);
+  const now = new Date();
+  let updated = 0;
+  let paid = 0;
+  for (const m of matches) {
+    if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
+    const statusDate = m.statusDate ? vnStartOfDay(m.statusDate) : null;
+    const set: Record<string, unknown> = { stage: m.mapped.stage, vtpStatusName: m.statusText, isFinal: m.mapped.final, lastVtpSyncAt: now, updatedAt: now };
+    if (statusDate) set.vtpStatusDate = statusDate;
+    if (m.fee > 0) set.shippingFee = m.fee;
+    if (m.mapped.stage === "DELIVERED" && statusDate) set.deliveredAt = statusDate;
+    if (m.mapped.stage === "RETURNED" && statusDate) set.returnedAt = statusDate;
+    if (m.mapped.cod && (COD_RANK[m.mapped.cod] ?? 0) > (COD_RANK[m.currentCod ?? "PENDING"] ?? 0)) {
+      set.codStatus = m.mapped.cod;
+      if (m.mapped.cod === "PAID_TO_BANK") {
+        set.codPaidToBankAt = statusDate ?? now;
+        set.codReconciledAt = statusDate ?? now;
+        set.codCollected = m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`;
+        paid += 1;
+      }
+      if (m.mapped.cod === "COLLECTED") set.codCollected = m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`;
+    } else if (m.mapped.cod === "NOT_APPLICABLE" && m.currentCod !== "PAID_TO_BANK") set.codStatus = "NOT_APPLICABLE";
+    await db.update(schema.shipments).set(set as Partial<typeof schema.shipments.$inferInsert>).where(eq(schema.shipments.id, m.shipmentId));
+    updated += 1;
+  }
+  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
 }
