@@ -1,0 +1,77 @@
+# Triển khai ERP lên VPS qua SSH (máy chạy của GitHub sẽ SSH vào VPS và chạy scripts/bootstrap.sh).
+# Cần các Secrets trong repo: VPS_HOST, VPS_PASSWORD (hoặc VPS_SSH_KEY), PANCAKE_API_KEY,
+# VIETTELPOST_API_KEY, VIETTELPOST_USERNAME, VIETTELPOST_PASSWORD, ADMIN_PASSWORD.
+# Tuỳ chọn Variables: ERP_DOMAIN (mặc định erp.vnxcommerce.com), ADMIN_EMAIL, VPS_USER.
+name: Deploy ERP to VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      reset_env:
+        description: "Tạo lại file .env trên VPS từ Secrets (xoá .env cũ)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Kiểm tra Secrets bắt buộc
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+          FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
+        run: |
+          echo "FACEBOOK_ACCESS_TOKEN: $([ -n "$FACEBOOK_ACCESS_TOKEN" ] && echo 'có' || echo 'chưa có')"
+          missing=""
+          [ -n "$VPS_HOST" ] || missing="$missing VPS_HOST"
+          [ -n "$VPS_PASSWORD$VPS_SSH_KEY" ] || missing="$missing VPS_PASSWORD(hoặc VPS_SSH_KEY)"
+          [ -n "$PANCAKE_API_KEY" ] || missing="$missing PANCAKE_API_KEY"
+          if [ -n "$missing" ]; then echo "::error::Thiếu Secrets:$missing — vào Settings → Secrets and variables → Actions để thêm."; exit 1; fi
+
+      - name: SSH vào VPS và chạy bootstrap
+        uses: appleboy/ssh-action@v1
+        env:
+          ERP_BRANCH: ${{ github.ref_name }}
+          ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
+          ERP_NONINTERACTIVE: "1"
+          ERP_RESET_ENV: ${{ inputs.reset_env && '1' || '0' }}
+          PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+          PANCAKE_SHOP_ID: ${{ vars.PANCAKE_SHOP_ID || '408063069' }}
+          VIETTELPOST_API_KEY: ${{ secrets.VIETTELPOST_API_KEY }}
+          VIETTELPOST_USERNAME: ${{ secrets.VIETTELPOST_USERNAME }}
+          VIETTELPOST_PASSWORD: ${{ secrets.VIETTELPOST_PASSWORD }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL || 'admin@vnxcommerce.com' }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
+          FACEBOOK_BUSINESS_ID: ${{ vars.FACEBOOK_BUSINESS_ID || '336423739082347' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ vars.VPS_USER || 'root' }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ vars.VPS_PORT || 22 }}
+          command_timeout: 35m
+          envs: ERP_BRANCH,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID
+          script: |
+            set -e
+            export ERP_BRANCH ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID
+            if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ERP_BRANCH}/scripts/bootstrap.sh" | bash
+
+      - name: Kiểm tra HTTPS từ bên ngoài
+        env:
+          ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS -m 15 "https://$ERP_DOMAIN/api/health" | grep -q '"ok":true'; then echo "✓ https://$ERP_DOMAIN đang chạy"; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::https://$ERP_DOMAIN chưa phản hồi — thường do DNS chưa trỏ về IP VPS hoặc chứng chỉ đang được cấp. ERP vẫn chạy trên VPS; kiểm tra lại sau vài phút."

@@ -1,0 +1,68 @@
+# Triển khai thật trên VPS: PostgreSQL + ERP + scheduler + Caddy (HTTPS tự động Let's Encrypt).
+# Chạy:  docker compose -f docker-compose.prod.yml up -d --build
+# Biến ERP_DOMAIN và POSTGRES_PASSWORD đọc từ file .env cùng thư mục.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: erp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_secret}
+      POSTGRES_DB: erp
+    volumes:
+      - erp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    container_name: erp-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD:-erp_secret}@db:5432/erp?schema=public
+      APP_URL: https://${ERP_DOMAIN:-erp.vnxcommerce.com}
+      PORT: "3000"
+    expose:
+      - "3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  scheduler:
+    build: .
+    container_name: erp-scheduler
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD:-erp_secret}@db:5432/erp?schema=public
+      ERP_INTERNAL_URL: http://app:3000
+    command: ["node", "scripts/scheduler.mjs"]
+    depends_on:
+      - app
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: erp-caddy
+    restart: unless-stopped
+    environment:
+      ERP_DOMAIN: ${ERP_DOMAIN:-erp.vnxcommerce.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  erp_pgdata:
+  caddy_data:
+  caddy_config:

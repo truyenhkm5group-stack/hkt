@@ -1,0 +1,100 @@
+# Thao tác vận hành ERP trên VPS từ GitHub (không cần mở console).
+# Actions → "Vận hành ERP trên VPS" → Run workflow → chọn thao tác.
+name: Vận hành ERP trên VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Thao tác"
+        type: choice
+        required: true
+        default: status
+        options:
+          - status              # trạng thái container + health
+          - logs                # 200 dòng log gần nhất của app/scheduler/caddy
+          - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
+          - sync-pancake-orders # đơn thay đổi gần đây
+          - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
+          - sync-vtp-import     # nhập vận đơn từ tài khoản Viettel Post (30 ngày)
+          - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày (days)
+          - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày
+          - check-integrations  # kiểm tra API key
+          - vtp-debug           # in phản hồi thô API Viettel Post cho mã vận đơn (nhập ở ô "arg")
+          - backup              # pg_dump vào /root/backups
+          - restart             # khởi động lại app + scheduler
+          - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
+      days:
+        description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
+        type: string
+        default: "365"
+      arg:
+        description: "Tham số thêm (vtp-debug: mã vận đơn)"
+        type: string
+        default: ""
+
+concurrency:
+  group: ops-vps
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: appleboy/ssh-action@v1
+        env:
+          ACTION: ${{ inputs.action }}
+          DAYS: ${{ inputs.days }}
+          ARG: ${{ inputs.arg }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ vars.VPS_USER || 'root' }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ vars.VPS_PORT || 22 }}
+          command_timeout: 110m
+          envs: ACTION,DAYS,ARG
+          script: |
+            set -e
+            cd /root/erp
+            C="docker compose -f docker-compose.prod.yml"
+            case "$ACTION" in
+              status)
+                $C ps
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              logs)
+                $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
+              sync-pancake-all)
+                docker exec erp-app npm run --silent sync -- pancake-all --backfill --days="$DAYS" ;;
+              sync-pancake-orders)
+                docker exec erp-app npm run --silent sync -- pancake-orders ;;
+              sync-vtp-tracking)
+                docker exec erp-app npm run --silent sync -- vtp-tracking --all --limit=2000 ;;
+              sync-vtp-import)
+                docker exec erp-app npm run --silent sync -- vtp-import --days="$DAYS" ;;
+              sync-facebook-ads)
+                docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
+              sync-facebook-ads)
+                docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
+              check-integrations)
+                docker exec erp-app npm run --silent check:integrations ;;
+              vtp-debug)
+                # luôn dùng bản script mới nhất trên GitHub, không cần build lại image
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-debug.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-debug.ts "$ARG" ;;
+              backup)
+                mkdir -p /root/backups
+                $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
+                ls -lh /root/backups | tail -5 ;;
+              rotate-webhook-secrets)
+                NEW_PK="pk_$(openssl rand -hex 16)"; NEW_VTP="vtp_$(openssl rand -hex 16)"
+                sed -i -E "s|^PANCAKE_WEBHOOK_SECRET=.*|PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"|; s|^VIETTELPOST_WEBHOOK_SECRET=.*|VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"|" .env
+                grep -qE "^PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"" .env && grep -qE "^VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"" .env && echo "Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)."
+                $C up -d app scheduler
+                sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              restart)
+                $C restart app scheduler
+                sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              *) echo "Thao tác không hợp lệ: $ACTION"; exit 1 ;;
+            esac
