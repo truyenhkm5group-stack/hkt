@@ -26,7 +26,7 @@ Pancake POS ──(API + webhook)──▶  ERP  ◀──(API + webhook)── 
 | **Facebook Ads** | Tự kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (token System User), ghép mã hàng theo tên chiến dịch. Bộ lọc kỳ / tài khoản QC / marketer / mã hàng áp dụng cho KPI, biểu đồ, bảng ghép chiến dịch và danh sách chi tiêu; tích chọn nhiều chiến dịch để gán mã hàng & marketer hàng loạt; thêm marketer ngay tại chỗ. |
 | **Báo cáo lợi nhuận** | 3 tab: theo đơn giao thành công; dòng tiền thực (COD về ngân hàng, tiền nhập hàng, cước, QC, vận hành); danh nghĩa theo mã hàng (đơn lên × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − CPQC, bảng theo ngày từng mã, giả định chỉnh được). Bảng kết quả kinh doanh (doanh thu giao thành công − giá vốn − phí ship − phí hoàn − phí sàn − quảng cáo − vận hành), so sánh kỳ trước, tiền thực về, theo kênh/nhân viên/sản phẩm/ngày, tỷ lệ hoàn huỷ, xuất CSV. |
 | **Kết nối dữ liệu** | Trạng thái kết nối, kiểm tra API key, URL webhook + hướng dẫn cấu hình, chạy từng job đồng bộ, lịch sử đồng bộ, webhook đã nhận, lịch tự động. |
-| **Người dùng & nhật ký** | Đăng nhập, phân quyền (Quản trị / Quản lý / Kế toán / Kho / CSKH / Marketing / Chỉ xem), nhật ký thao tác. |
+| **Người dùng & nhật ký** | Đăng nhập, vai trò (Quản trị / Quản lý / Kế toán / Kho / CSKH / Marketing / Chỉ xem) là mẫu quyền khởi điểm; ma trận quyền × vai trò chỉnh được; phân quyền riêng từng người theo 19 quyền chia theo module (xem/sửa); menu và trang gác theo quyền; nhật ký thao tác. |
 
 Công nghệ: Next.js 15 · React 19 · TypeScript · Tailwind CSS v4 · shadcn/ui · Drizzle ORM · PostgreSQL 16 (hoặc PGlite nhúng để chạy thử không cần cài Postgres).
 
