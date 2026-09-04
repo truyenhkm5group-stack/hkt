@@ -64,6 +64,13 @@
       "when": 1788544891816,
       "tag": "0008_cs_cases",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788547083803,
+      "tag": "0009_cs_cases_chat_url",
+      "breakpoints": true
     }
   ]
 }

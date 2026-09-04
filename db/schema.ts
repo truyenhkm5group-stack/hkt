@@ -88,6 +88,8 @@ export const csCases = pgTable(
     resolution: text("resolution").notNull().default(""),
     /** Khoá chống tạo trùng khi tự phát hiện */
     dedupeKey: text("dedupe_key").unique(),
+    /** Link hội thoại Pancake (case từ chat) */
+    chatUrl: text("chat_url").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),

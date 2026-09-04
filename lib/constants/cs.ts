@@ -1,5 +1,5 @@
 /** Case chăm sóc khách hàng (CSKH) */
-export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "OTHER"] as const;
+export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
@@ -9,6 +9,9 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
   WRONG_PHONE: "Sai số điện thoại",
   RETURN: "Trả hàng / hoàn",
   COMPLAINT: "Khiếu nại chất lượng",
+  SIZE_ADVICE: "Tư vấn size chưa đúng",
+  WRONG_PRICE: "Chốt sai giá tiền",
+  URGE_DELIVERY: "Khách giục giao hàng",
   OTHER: "Khác",
 };
 
@@ -38,6 +41,12 @@ export type CsRules = {
   tagRules: { keyword: string; kind: CsKind }[];
   /** Từ khoá trong ghi chú đơn → loại case */
   noteRules: { keyword: string; kind: CsKind }[];
+  /** Từ khoá trong tin nhắn KHÁCH gửi (Pancake chat) → loại case */
+  chatRules: { keyword: string; kind: CsKind }[];
+  /** Số giờ quét lùi hội thoại Pancake */
+  chatLookbackHours: number;
+  /** Chỉ quét các page này (id); rỗng = mọi page có quyền */
+  chatPageIds: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -72,4 +81,60 @@ export const DEFAULT_CS_RULES: CsRules = {
     { keyword: "khieu nai", kind: "COMPLAINT" },
     { keyword: "hang loi", kind: "COMPLAINT" },
   ],
+  chatRules: [
+    { keyword: "chat qua", kind: "SIZE_ADVICE" },
+    { keyword: "rong qua", kind: "SIZE_ADVICE" },
+    { keyword: "khong vua", kind: "SIZE_ADVICE" },
+    { keyword: "ko vua", kind: "SIZE_ADVICE" },
+    { keyword: "sai size", kind: "SIZE_ADVICE" },
+    { keyword: "size khong dung", kind: "SIZE_ADVICE" },
+    { keyword: "tu van sai size", kind: "SIZE_ADVICE" },
+    { keyword: "bao lay", kind: "SIZE_ADVICE" },
+    { keyword: "doi size", kind: "EXCHANGE_SIZE" },
+    { keyword: "doi sz", kind: "EXCHANGE_SIZE" },
+    { keyword: "doi mau", kind: "EXCHANGE_COLOR" },
+    { keyword: "sai mau", kind: "EXCHANGE_COLOR" },
+    { keyword: "mau khac", kind: "EXCHANGE_COLOR" },
+    { keyword: "sai gia", kind: "WRONG_PRICE" },
+    { keyword: "gia khac", kind: "WRONG_PRICE" },
+    { keyword: "tinh sai", kind: "WRONG_PRICE" },
+    { keyword: "thu sai", kind: "WRONG_PRICE" },
+    { keyword: "so tien khong dung", kind: "WRONG_PRICE" },
+    { keyword: "sao lai", kind: "WRONG_PRICE" },
+    { keyword: "dat coc", kind: "WRONG_PRICE" },
+    { keyword: "bao gio nhan", kind: "URGE_DELIVERY" },
+    { keyword: "bao gio giao", kind: "URGE_DELIVERY" },
+    { keyword: "khi nao giao", kind: "URGE_DELIVERY" },
+    { keyword: "khi nao nhan", kind: "URGE_DELIVERY" },
+    { keyword: "sao chua nhan", kind: "URGE_DELIVERY" },
+    { keyword: "chua nhan duoc", kind: "URGE_DELIVERY" },
+    { keyword: "chua thay hang", kind: "URGE_DELIVERY" },
+    { keyword: "mai chua", kind: "URGE_DELIVERY" },
+    { keyword: "lau qua", kind: "URGE_DELIVERY" },
+    { keyword: "giao chua", kind: "URGE_DELIVERY" },
+    { keyword: "den chua", kind: "URGE_DELIVERY" },
+    { keyword: "gui chua", kind: "URGE_DELIVERY" },
+    { keyword: "sai dia chi", kind: "WRONG_ADDRESS" },
+    { keyword: "doi dia chi", kind: "WRONG_ADDRESS" },
+    { keyword: "dia chi moi", kind: "WRONG_ADDRESS" },
+    { keyword: "sai sdt", kind: "WRONG_PHONE" },
+    { keyword: "doi sdt", kind: "WRONG_PHONE" },
+    { keyword: "doi so dien thoai", kind: "WRONG_PHONE" },
+    { keyword: "tra hang", kind: "RETURN" },
+    { keyword: "hoan hang", kind: "RETURN" },
+    { keyword: "khong nhan", kind: "RETURN" },
+    { keyword: "ko nhan", kind: "RETURN" },
+    { keyword: "khong lay nua", kind: "RETURN" },
+    { keyword: "huy don", kind: "RETURN" },
+    { keyword: "hang loi", kind: "COMPLAINT" },
+    { keyword: "bi rach", kind: "COMPLAINT" },
+    { keyword: "bi ban", kind: "COMPLAINT" },
+    { keyword: "khac hinh", kind: "COMPLAINT" },
+    { keyword: "khong giong", kind: "COMPLAINT" },
+    { keyword: "ko giong", kind: "COMPLAINT" },
+    { keyword: "chat luong", kind: "COMPLAINT" },
+    { keyword: "that vong", kind: "COMPLAINT" },
+  ],
+  chatLookbackHours: 48,
+  chatPageIds: [],
 };

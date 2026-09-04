@@ -57,7 +57,7 @@ export function CsTable({ rows, assignees, canWrite }: { rows: CsCaseRow[]; assi
           {rows.length === 0 ? (
             <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">Chưa có case nào. Bấm “Quét từ Pancake” hoặc “Thêm case”.</TableCell></TableRow>
           ) : rows.map((r) => {
-            const chatHref = r.order?.pageId && r.order?.conversationId ? `https://pancake.vn/${r.order.pageId}?c_id=${r.order.conversationId}` : null;
+            const chatHref = r.chatUrl || (r.order?.pageId && r.order?.conversationId ? `https://pancake.vn/${r.order.pageId}?c_id=${r.order.conversationId}` : null);
             return (
               <TableRow key={r.id} className={cn(r.status === "DONE" || r.status === "CANCELLED" ? "opacity-70" : "")}>
                 <TableCell className="max-w-[360px]">
@@ -69,9 +69,9 @@ export function CsTable({ rows, assignees, canWrite }: { rows: CsCaseRow[]; assi
                 <TableCell className="text-sm">
                   <div>{r.customerName || "—"}</div>
                   <div className="font-mono text-xs text-muted-foreground">{r.customerPhone}</div>
-                  {r.order ? (
+                  {r.order || chatHref ? (
                     <div className="mt-0.5 flex flex-wrap gap-2 text-xs">
-                      <Link href={`/orders/${r.order.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="size-3" /> Đơn #{r.order.systemId ?? r.order.id}</Link>
+                      {r.order ? <Link href={`/orders/${r.order.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="size-3" /> Đơn #{r.order.systemId ?? r.order.id}</Link> : null}
                       {chatHref ? <a href={chatHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline"><MessageCircle className="size-3" /> Chat Pancake</a> : null}
                     </div>
                   ) : null}

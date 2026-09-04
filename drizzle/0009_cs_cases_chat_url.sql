@@ -1,0 +1,1 @@
+ALTER TABLE "cs_cases" ADD COLUMN "chat_url" text DEFAULT '' NOT NULL;

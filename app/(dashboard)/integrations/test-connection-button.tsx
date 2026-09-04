@@ -10,7 +10,7 @@ type TestResult =
   | { ok: false; error: string };
 
 /** Nút “Kiểm tra kết nối” gọi POST /api/integrations/test và hiện kết quả ngay bên dưới */
-export function TestConnectionButton({ provider, disabled }: { provider: "pancake" | "viettelpost" | "facebook"; disabled?: boolean }) {
+export function TestConnectionButton({ provider, disabled }: { provider: "pancake" | "viettelpost" | "facebook" | "pancake-pages"; disabled?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);

@@ -9,6 +9,7 @@ import { PancakeClient } from "@/lib/integrations/pancake/client";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
+import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
 
 const ok = (msg: string) => console.log(`  ✓ ${msg}`);
 const bad = (msg: string) => console.log(`  ✗ ${msg}`);
@@ -119,6 +120,30 @@ async function checkViettelPost(sampleOrderNumber: string | null) {
   }
 }
 
+async function checkPancakePages() {
+  console.log("\n▶ Pancake Pages (chat)");
+  if (!env.pancake.pagesAccessToken) {
+    bad("Chưa có PANCAKE_ACCESS_TOKEN trong .env");
+    return;
+  }
+  try {
+    const client = new PancakePagesClient();
+    const pages = await client.listPages();
+    ok(`Token hợp lệ · ${pages.length} page: ${pages.map((p) => `${p.name} (${p.id})`).join(", ") || "không có"}`);
+    const first = pages[0];
+    if (first) {
+      const convs = await client.listConversations(first.id, new Date(Date.now() - 48 * 3_600_000), new Date(), 5);
+      ok(`Page "${first.name}": ${convs.length} hội thoại 48h gần nhất (thử 5)`);
+      for (const c of convs.slice(0, 2)) {
+        const msgs = await client.listMessages(first.id, c.id, 10);
+        info(`- ${c.customerName || c.id} · thẻ [${c.tags.join(", ")}] · ${msgs.length} tin nhắn · khách gửi: ${msgs.filter((m) => !m.fromPage).length}`);
+      }
+    }
+  } catch (error) {
+    bad(`Pancake Pages lỗi: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function checkFacebook() {
   console.log("\n▶ Facebook Ads");
   if (!env.facebook.accessToken) {
@@ -149,6 +174,7 @@ async function main() {
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
   await checkFacebook();
+  await checkPancakePages();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
   process.exit(0);
 }

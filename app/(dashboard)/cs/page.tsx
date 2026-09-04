@@ -29,14 +29,14 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
       <PageHeader
         eyebrow="Vận hành"
         title="CSKH · Case chăm sóc khách hàng"
-        description="Đổi size, đổi màu, sai địa chỉ, sai SĐT, trả hàng, khiếu nại. Tự phát hiện từ thẻ đơn, ghi chú đơn và phiếu đổi/trả trên Pancake (mỗi 10 phút và sau webhook), hoặc nhập tay. Case mới được đưa lên chuông và nhóm Lark."
+        description="Đổi size, đổi màu, sai địa chỉ, sai SĐT, trả hàng, khiếu nại, tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng. Tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay. Case mới được đưa lên chuông và nhóm Lark."
         actions={canWrite ? (<><DetectButton /><CaseDialog assignees={assignees} /></>) : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Đang mở" value={formatNumber(summary.open)} note={`${formatNumber(summary.new)} case mới chưa ai nhận`} icon={Inbox} tone={summary.new ? "rose" : "slate"} />
         <MetricCard label="Đổi size / màu" value={formatNumber((summary.byKind.EXCHANGE_SIZE ?? 0) + (summary.byKind.EXCHANGE_COLOR ?? 0))} note="Đang mở" icon={Ruler} tone="amber" />
         <MetricCard label="Sai địa chỉ / SĐT" value={formatNumber((summary.byKind.WRONG_ADDRESS ?? 0) + (summary.byKind.WRONG_PHONE ?? 0))} note="Cần sửa trên Pancake trước khi giao" icon={MapPinOff} tone="amber" />
-        <MetricCard label="Trả hàng / khiếu nại" value={formatNumber((summary.byKind.RETURN ?? 0) + (summary.byKind.COMPLAINT ?? 0))} note="Đang mở" icon={Headset} tone="blue" />
+        <MetricCard label="Trả hàng / khiếu nại / giục giao / sai giá" value={formatNumber((summary.byKind.RETURN ?? 0) + (summary.byKind.COMPLAINT ?? 0) + (summary.byKind.URGE_DELIVERY ?? 0) + (summary.byKind.WRONG_PRICE ?? 0) + (summary.byKind.SIZE_ADVICE ?? 0))} note="Đang mở" icon={Headset} tone="blue" />
       </section>
       <DataTableToolbar
         searchPlaceholder="Tên khách, SĐT, nội dung…"

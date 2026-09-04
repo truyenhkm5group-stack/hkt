@@ -164,6 +164,25 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           ]}
           footer={<TestConnectionButton provider="facebook" disabled={!status.facebook} />}
         />
+        <ConnectionCard
+          initials="PG"
+          tone="bg-pink-600"
+          title="Pancake Pages (chat)"
+          description="Đọc hội thoại & thẻ chat để tự tạo case CSKH: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT…"
+          configured={status.pancakePages}
+          items={[
+            { label: "Access token", value: status.pancakePages ? <span className="font-mono">{maskKey(env.pancake.pagesAccessToken)}</span> : <span className="text-muted-foreground">Chưa cấu hình PANCAKE_ACCESS_TOKEN</span> },
+            { label: "Base URL", value: <span className="font-mono text-xs">{env.pancake.pagesBaseUrl}</span> },
+            { label: "Lịch", value: `Mỗi ${minutesEnv("SYNC_CHAT_EVERY_MINUTES", 15)} phút · đọc hội thoại 48 giờ gần nhất` },
+            { label: "Cách lấy token", value: <span className="text-xs text-muted-foreground">pancake.vn → Cài đặt → Công cụ (Tools) → API / Access token → sao chép token người dùng có quyền trên các page bán hàng.</span>, span: true },
+          ]}
+          footer={
+            <div className="flex flex-wrap gap-2">
+              <TestConnectionButton provider="pancake-pages" disabled={!status.pancakePages} />
+              <SyncButton job="cs-chat" label="Quét hội thoại ngay" />
+            </div>
+          }
+        />
       </section>
 
       {/* ───────── Webhook ───────── */}

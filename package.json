@@ -20,6 +20,7 @@
     "seed:employees": "tsx --tsconfig tsconfig.json scripts/seed-employees.ts",
     "import:bank": "tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts",
     "import:vtp-statements": "tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts",
+    "set:setting": "tsx --tsconfig tsconfig.json scripts/set-setting.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
     "db:generate": "drizzle-kit generate"
   },

@@ -34,6 +34,13 @@ export const env = {
     get backfillDays() {
       return readInt("PANCAKE_BACKFILL_DAYS", 365);
     },
+    /** Access token người dùng Pancake (pancake.vn → Cài đặt → Công cụ / API) để đọc hội thoại & thẻ chat */
+    get pagesAccessToken() {
+      return read("PANCAKE_ACCESS_TOKEN");
+    },
+    get pagesBaseUrl() {
+      return read("PANCAKE_PAGES_BASE_URL", "https://pages.fm/api/public_api/v1").replace(/\/$/, "");
+    },
   },
   facebook: {
     get accessToken() {
@@ -73,6 +80,7 @@ export const env = {
 export function integrationStatus() {
   return {
     pancake: Boolean(env.pancake.apiKey && env.pancake.shopId),
+    pancakePages: Boolean(env.pancake.pagesAccessToken),
     viettelPost: Boolean(env.viettelPost.apiKey || (env.viettelPost.username && env.viettelPost.password)),
     facebook: Boolean(env.facebook.accessToken),
     pancakeWebhook: Boolean(env.pancake.webhookSecret),

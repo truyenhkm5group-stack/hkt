@@ -16,7 +16,9 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { detectFromMessages } from "@/lib/cs/chat-detect";
 import { detectCsCases } from "@/lib/cs/detect";
+import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
 import { mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
@@ -314,6 +316,23 @@ async function main() {
   const rr1After = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9001") });
   assert.equal(rr1After?.codStatus, "PAID_TO_BANK", "đã trả giữ nguyên đã về ngân hàng");
   console.log(`✓ Danh sách vận đơn VTP: ${applied2.updated} vận đơn cập nhật, ${applied2.paid} COD về NH`);
+
+  // Phát hiện case từ tin nhắn chat khách
+  const chatHits = detectFromMessages(
+    [
+      { text: "Shop ơi bao giờ nhận được hàng vậy, đặt lâu quá rồi", fromPage: false },
+      { text: "Dạ chị chờ em kiểm tra ạ", fromPage: true },
+      { text: "em ơi chị bảo lấy hai chiếc đều size L mà sao lại có XL?!", fromPage: false },
+      { text: "sao lại thu 800k, chốt với em 700k mà", fromPage: false },
+    ],
+    DEFAULT_CS_RULES.chatRules,
+  );
+  const kinds = chatHits.map((h) => h.kind);
+  assert.ok(kinds.includes("URGE_DELIVERY"), "giục giao hàng");
+  assert.ok(kinds.includes("SIZE_ADVICE"), "tư vấn size chưa đúng");
+  assert.ok(kinds.includes("WRONG_PRICE"), "chốt sai giá");
+  assert.ok(!chatHits.some((h) => h.message.includes("chị chờ em")), "bỏ qua tin nhắn của page");
+  console.log(`✓ Chat Pancake: nhận diện ${kinds.join(", ")}`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

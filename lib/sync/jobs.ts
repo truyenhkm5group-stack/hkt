@@ -10,6 +10,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import type { SyncTrigger } from "@/lib/sync/runner";
@@ -94,6 +95,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description: "Quét đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn → tạo thông báo và gửi Telegram (chạy mỗi 10 phút và sau mỗi webhook).",
     run: () => evaluateAlerts(),
+  },
+  "cs-chat": {
+    label: "Case CSKH từ hội thoại Pancake",
+    source: "PANCAKE",
+    description: "Đọc hội thoại & thẻ chat Pancake (PANCAKE_ACCESS_TOKEN) trong N giờ gần nhất (hours=48) → tạo case: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng…",
+    run: async (o) => {
+      const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
+      await evaluateAlerts().catch(() => undefined);
+      return r;
+    },
   },
   all: {
     label: "Đồng bộ tất cả",

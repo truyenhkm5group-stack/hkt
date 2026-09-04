@@ -4,6 +4,7 @@ import { env, integrationStatus } from "@/lib/env";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
+import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -68,7 +69,15 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook)" }, { status: 400 });
+    if (provider === "pancake-pages") {
+      if (!status.pancakePages) return NextResponse.json({ ok: false, error: "Chưa cấu hình PANCAKE_ACCESS_TOKEN trong .env" });
+      const result = await getPancakePagesClient().testConnection();
+      return NextResponse.json({
+        ok: true,
+        detail: { pages: result.pages, message: `Token hợp lệ · ${result.pages.length} page: ${result.pages.map((p) => `${p.name} (${p.id})`).join(", ") || "không có page nào"}` },
+      });
+    }
+    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages)" }, { status: 400 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ ok: false, error: scrub(message) });
