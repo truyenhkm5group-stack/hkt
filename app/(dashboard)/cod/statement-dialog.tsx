@@ -294,15 +294,33 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
     return { matched: matched.length, unmatched: list.length - matched.length, paid: matched.filter((r) => r.mapped.cod === "PAID_TO_BANK").length, unknown: matched.filter((r) => r.mapped.stage === "UNKNOWN").length, byStatus: [...byStatus.entries()].sort((a, b) => b[1] - a[1]) };
   }, [rows]);
 
-  const onFile = async (file: File | undefined) => {
-    if (!file) return;
-    const base64 = await fileToBase64(file);
+  const [fileNames, setFileNames] = useState<string[]>([]);
+  const onFiles = async (list: FileList | null) => {
+    const files = list ? Array.from(list) : [];
+    if (!files.length) return;
+    const payloads = await Promise.all(files.map(async (f) => ({ base64: await fileToBase64(f), filename: f.name })));
     startTransition(async () => {
-      const result = await previewVtpOrderList({ base64, filename: file.name });
-      if ("error" in result) toast.error(result.error);
-      else {
-        setRows(result.rows);
-        toast.success(`Đã đọc ${result.rows.length} vận đơn`);
+      const merged = new Map<string, OrderListMatch>();
+      const errors: string[] = [];
+      let total = 0;
+      for (const p of payloads) {
+        const result = await previewVtpOrderList(p);
+        if ("error" in result) {
+          errors.push(`${p.filename}: ${result.error}`);
+          continue;
+        }
+        total += result.rows.length;
+        // cùng mã vận đơn ở nhiều tệp → lấy dòng có ngày cập nhật mới nhất (tệp sau ghi đè nếu không có ngày)
+        for (const r of result.rows) {
+          const prev = merged.get(r.trackingCode);
+          if (!prev || !prev.statusDate || (r.statusDate && r.statusDate >= prev.statusDate)) merged.set(r.trackingCode, r);
+        }
+      }
+      for (const e of errors) toast.error(e);
+      if (merged.size) {
+        setRows([...merged.values()]);
+        setFileNames(files.map((f) => f.name));
+        toast.success(`Đã đọc ${total} dòng từ ${files.length} tệp · ${merged.size} vận đơn (gộp trùng)`);
       }
     });
   };
@@ -320,9 +338,10 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-3 pt-2">
       <div className="space-y-1">
-        <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn)</Label>
-        <Input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFile(e.target.files?.[0])} disabled={pending} />
-        <p className="text-[11px] text-muted-foreground">Cần có cột Mã vận đơn và Trạng thái; nếu có Tiền thu hộ, Cước, Ngày cập nhật thì ERP ghi thêm. Chỉ nâng trạng thái COD, không hạ vận đơn đã về ngân hàng.</p>
+        <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn) — chọn được nhiều tệp</Label>
+        <Input type="file" multiple accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFiles(e.target.files)} disabled={pending} />
+        <p className="text-[11px] text-muted-foreground">Chọn nhiều tệp (nhiều khoảng ngày) cùng lúc; cùng một mã vận đơn ở nhiều tệp sẽ lấy dòng có ngày cập nhật mới nhất. Cần có cột Mã vận đơn và Trạng thái; nếu có Tiền thu hộ, Cước, Ngày cập nhật thì ERP ghi thêm. Chỉ nâng trạng thái COD, không hạ vận đơn đã về ngân hàng.</p>
+        {fileNames.length ? <p className="text-[11px] text-muted-foreground">Đã chọn: {fileNames.join(", ")}</p> : null}
       </div>
       {rows ? (
         <>

@@ -47,7 +47,7 @@ export function parseStatementSummaryText(text: string): StatementSummary[] {
 }
 
 const COL = {
-  tracking: ["ma van don", "ma buu gui", "ma don hang", "ma don", "ma phieu gui", "order number", "order_number", "tracking", "so hieu", "ma vd"],
+  tracking: ["ma van don", "ma buu gui", "ma don hang", "ma don", "ma phieu gui", "order number", "order_number", "tracking", "so hieu", "ma vd", "ma bill", "so van don", "ma phieu"],
   cod: ["tien cod", "tien thu ho", "cod", "money collection", "tien hang", "thu ho"],
   fee: ["cuoc", "phi", "du no", "fee", "tong cuoc"],
   net: ["thuc nhan", "thu ve", "thuc tra", "con lai", "thanh toan", "net"],
@@ -107,7 +107,7 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
 export type VtpOrderListRow = { trackingCode: string; statusText: string; cod: number; fee: number; statusDate: string; raw: string };
 
 const LIST_COL = {
-  status: ["trang thai", "status"],
+  status: ["trang thai don hang", "trang thai van don", "trang thai", "status"],
   date: ["ngay cap nhat", "ngay trang thai", "thoi gian cap nhat", "ngay tra", "ngay giao", "ngay gui", "ngay tao", "ngay"],
 };
 
@@ -129,7 +129,10 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
       break;
     }
   }
-  if (headerIdx < 0) throw new Error("Không tìm thấy cột Mã vận đơn và Trạng thái trong file");
+  if (headerIdx < 0) {
+    const sample = matrix.slice(0, 3).map((r) => (r ?? []).map((c) => String(c ?? "").trim()).filter(Boolean).slice(0, 12).join(" | ")).filter(Boolean).join(" ‖ ");
+    throw new Error(`Không tìm thấy cột Mã vận đơn và Trạng thái trong file. Các cột đọc được: ${sample || "(trống)"}`);
+  }
   const cTrack = findCol(headers, COL.tracking);
   const cStatus = findCol(headers, LIST_COL.status);
   const cCod = findCol(headers, COL.cod, ["cuoc", "phi"]);
