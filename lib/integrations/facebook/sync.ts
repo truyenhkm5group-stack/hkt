@@ -14,6 +14,37 @@ function dayKey(d: Date) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
 
+function addDays(key: string, days: number) {
+  const d = new Date(`${key}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Facebook từ chối khoảng thời gian quá dài với time_increment=1 ("reduce the amount of data").
+ * Chia thành cửa sổ 31 ngày; cửa sổ nào lỗi thì chia tiếp 7 ngày rồi mới báo lỗi.
+ */
+async function fetchInsightsChunked(client: ReturnType<typeof getFacebookAdsClient>, accountId: string, since: string, until: string, log: (m: string) => void) {
+  const out: Awaited<ReturnType<typeof client.campaignInsights>> = [];
+  let start = since;
+  while (start <= until) {
+    const end = addDays(start, 30) < until ? addDays(start, 30) : until;
+    try {
+      out.push(...(await client.campaignInsights(accountId, start, end)));
+    } catch (error) {
+      log(`act_${accountId} ${start}→${end}: ${error instanceof Error ? error.message : String(error)} — thử cửa sổ 7 ngày`);
+      let s2 = start;
+      while (s2 <= end) {
+        const e2 = addDays(s2, 6) < end ? addDays(s2, 6) : end;
+        out.push(...(await client.campaignInsights(accountId, s2, e2)));
+        s2 = addDays(e2, 1);
+      }
+    }
+    start = addDays(end, 1);
+  }
+  return out;
+}
+
 export async function loadProductCodeIndex(): Promise<ProductCodeEntry[]> {
   const db = await getDb();
   const rows = await db
@@ -42,9 +73,10 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
     await ctx.progress();
     let rows = 0;
     let matched = 0;
+    const errors: string[] = [];
     for (const account of accounts) {
       try {
-        const insights = await client.campaignInsights(account.accountId, since, until);
+        const insights = await fetchInsightsChunked(client, account.accountId, since, until, ctx.log);
         const rate = account.currency && account.currency !== "VND" ? (account.currency === "USD" ? env.facebook.usdToVnd : 1) : 1;
         for (const row of insights) {
           if (!row.date) continue;
@@ -85,14 +117,16 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         ctx.log(`${account.name} (${account.accountId}): ${insights.length} dòng`);
       } catch (error) {
         ctx.summary.failed += 1;
-        ctx.log(`${account.name} (${account.accountId}): ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`${account.name}: ${message.slice(0, 160)}`);
+        ctx.log(`${account.name} (${account.accountId}): ${message}`);
       }
       await ctx.progress();
     }
     // Áp lại bảng ghép / bí danh cho các dòng cũ (khi có sản phẩm hoặc ghép tay mới)
     const reapplied = await reapplyAdsMapping();
     if (reapplied.changed) ctx.log(`Áp lại ghép mã hàng: ${reapplied.changed} dòng thay đổi`);
-    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng ngày×chiến dịch (${since} → ${until}) · ghép được mã hàng ${matched}/${rows}`;
+    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng ngày×chiến dịch (${since} → ${until}) · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}`;
     publish({ type: "ads" });
     return { accounts: accounts.length, rows, matched };
   });
