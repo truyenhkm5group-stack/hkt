@@ -1,0 +1,20 @@
+# Caddy tự xin và gia hạn chứng chỉ Let's Encrypt cho {$ERP_DOMAIN}
+{$ERP_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy app:3000 {
+		# SSE realtime (/api/events) cần giữ kết nối lâu
+		flush_interval -1
+		transport http {
+			read_timeout 0
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+	}
+	log {
+		output stdout
+		format console
+	}
+}

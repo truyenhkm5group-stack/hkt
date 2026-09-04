@@ -20,10 +20,10 @@ Làm theo thứ tự. Mỗi bước có cách kiểm tra để biết đã xong.
 
 Pancake và Viettel Post chỉ gửi webhook tới địa chỉ **HTTPS công khai**. Localhost không nhận được.
 
-- Cách nhanh để thử: `cloudflared tunnel --url http://localhost:3000` → lấy `https://xxxx.trycloudflare.com` đặt vào `APP_URL`.
-- Cách dùng thật: VPS + tên miền + Docker Compose (xem `docs/TRIEN-KHAI-VPS.md`). `docker compose up -d --build` chạy đủ 3 dịch vụ: `db`, `app`, `scheduler`.
+- Dùng thật với `erp.vnxcommerce.com`: mua VPS Ubuntu, trỏ bản ghi A `erp` trên name.com về IP VPS, rồi chạy `sudo bash scripts/install-vps.sh` (chi tiết: `docs/TRIEN-KHAI-VPS.md`). Script tự cài Docker, tạo `.env`, bật HTTPS và in 2 URL webhook.
+- Thử nhanh trên máy cá nhân: `cloudflared tunnel --url http://localhost:3000` → lấy `https://xxxx.trycloudflare.com` đặt vào `APP_URL`.
 
-Kiểm tra: mở `https://<domain>/api/health` trả về `{"ok":true}`.
+Kiểm tra: mở `https://erp.vnxcommerce.com/api/health` trả về `{"ok":true}`.
 
 ## 3. Bật webhook Pancake POS
 
@@ -51,7 +51,7 @@ Kiểm tra: mở `https://<domain>/api/health` trả về `{"ok":true}`.
 
 | Cần gì | Vì sao |
 |---|---|
-| Tên miền + VPS (hoặc tunnel) | Webhook chỉ gửi tới HTTPS công khai |
+| VPS (tên miền vnxcommerce.com đã có) | Webhook chỉ gửi tới HTTPS công khai; ERP cần một máy chủ chạy 24/7 |
 | Viettel Post duyệt webhook | Chính sách của Viettel Post, không tự bật được |
 | Tài khoản đối tác Viettel Post (username/password) | Chỉ khi token bí mật không đổi được token API |
 | Giá vốn trên Pancake | Lợi nhuận tính từ giá nhập gần nhất của mẫu mã; chưa nhập giá vốn thì lợi nhuận = doanh thu |

@@ -65,6 +65,17 @@ npm run demo:clear       # xoá dữ liệu mẫu (giữ nguyên dữ liệu th�
 
 ---
 
+### Cách C — Triển khai thật lên VPS + tên miền (HTTPS tự động)
+
+```bash
+git clone <repo> erp && cd erp
+sudo bash scripts/install-vps.sh     # cài Docker, tạo .env, chạy db + app + scheduler + Caddy (Let's Encrypt)
+```
+
+Chi tiết (trỏ DNS trên name.com, sao lưu, cập nhật): `docs/TRIEN-KHAI-VPS.md`.
+
+---
+
 ## 2. Cấu hình `.env`
 
 | Biến | Ý nghĩa |
@@ -78,7 +89,7 @@ npm run demo:clear       # xoá dữ liệu mẫu (giữ nguyên dữ liệu th�
 | `PANCAKE_WEBHOOK_SECRET` | Chuỗi bí mật gắn vào URL webhook Pancake |
 | `PANCAKE_BACKFILL_DAYS` | Số ngày lịch sử đơn cần kéo lần đầu (mặc định 365) |
 | `VIETTELPOST_API_KEY` | Token bí mật tạo tại https://viettelpost.vn/cau-hinh-tai-khoan → *Thêm mới token* → *Sao chép token* (xác thực OTP). ERP đổi token này lấy token đối tác qua API `loginVTP` và tự làm mới khi hết hạn. |
-| `VIETTELPOST_USERNAME`, `VIETTELPOST_PASSWORD` | (Tuỳ chọn) tài khoản đối tác Viettel Post để lấy token dài hạn 1 năm (`Login` → `ownerconnect`) nếu cách trên không dùng được |
+| `VIETTELPOST_USERNAME`, `VIETTELPOST_PASSWORD` | Tài khoản đối tác Viettel Post (SĐT + mật khẩu đăng nhập partner.viettelpost.vn) để lấy token dài hạn 1 năm (`Login` → `ownerconnect`). Nên điền cả hai cách; ERP tự chọn cách nào hoạt động. |
 | `VIETTELPOST_WEBHOOK_SECRET` | "Tham số bí mật" bạn khai báo trong phần webhook của Viettel Post |
 | `SYNC_*_EVERY_MINUTES` | Chu kỳ đồng bộ tự động của scheduler |
 
