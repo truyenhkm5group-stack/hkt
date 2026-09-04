@@ -208,6 +208,10 @@ export type PayrollLine = {
 export type PayrollReport = {
   basis: PayrollBasis;
   totalProfit: number;
+  /** LN danh nghĩa tổng (để đối chiếu) */
+  nominalTotal: number;
+  /** Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi cơ sở danh nghĩa) */
+  cashRatio: number;
   lines: PayrollLine[];
   totalSalary: number;
   marketers: MarketerReport;
@@ -223,15 +227,16 @@ export async function getPayrollReport(
     listEmployees(),
     basis === "cash" ? getCashProfitReport(period) : Promise.resolve(null),
   ]);
-  const totalProfit =
-    basis === "cash" && cash
-      ? cash.net
-      : marketers.nominal.totals.expectedProfit;
+  const nominalTotal = marketers.nominal.totals.expectedProfit;
+  const totalProfit = basis === "cash" && cash ? cash.net : nominalTotal;
+  // Cơ sở dòng tiền: lợi nhuận cá nhân = LN danh nghĩa cá nhân × (LN dòng tiền thực ÷ LN danh nghĩa tổng),
+  // tức chia lợi nhuận tiền thật theo đúng tỷ trọng đóng góp của từng marketer (tiền COD về theo bảng kê không tách được theo mã / người)
+  const cashRatio = basis === "cash" && cash ? (nominalTotal > 0 ? cash.net / nominalTotal : 0) : 1;
   const lines: PayrollLine[] = employees
     .filter((e) => e.active)
     .map((e) => {
       const m = marketers.marketers.find((x) => x.marketerId === e.id);
-      const personalProfit = m ? m.personalProfit : null;
+      const personalProfit = m ? Math.round(m.personalProfit * cashRatio) : null;
       const personalRevenue = m ? m.attributedRevenue : null;
       const bonusTotal = Math.round(
         Math.max(totalProfit, 0) * (e.percentTotal / 100),
@@ -257,6 +262,8 @@ export async function getPayrollReport(
   return {
     basis,
     totalProfit,
+    nominalTotal,
+    cashRatio,
     lines,
     totalSalary: lines.reduce((s, l) => s + l.salary, 0),
     marketers,

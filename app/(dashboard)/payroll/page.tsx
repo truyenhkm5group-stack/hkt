@@ -51,7 +51,7 @@ export default async function PayrollPage({
   const canManage = can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis =
-    param(raw, "basis") === "cash" ? "cash" : "nominal";
+    param(raw, "basis") === "nominal" ? "nominal" : "cash";
   const selected = param(raw, "marketer");
   const [report, unassigned, accounts] = await Promise.all([
     getPayrollReport(period, basis),
@@ -92,7 +92,7 @@ export default async function PayrollPage({
             single: true,
           },
         ]}
-        resultLabel="Lợi nhuận cá nhân của marketer luôn tính theo danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính); cơ sở chỉ đổi cách tính lợi nhuận tổng."
+        resultLabel={basis === "cash" ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê Viettel Post + trả trước) − tiền ra (nhập hàng, QC, vận hành…) trong kỳ; LN cá nhân = LN danh nghĩa cá nhân × ${report.cashRatio.toFixed(2)} (tỷ lệ LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN danh nghĩa ${formatVND(report.nominalTotal, { compact: true })}).` : "Danh nghĩa: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."}
       />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

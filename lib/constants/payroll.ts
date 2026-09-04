@@ -27,4 +27,4 @@ export const DEPARTMENTS = ["Marketing", "Sale / CSKH", "Kho / Đóng gói", "K�
 
 /** Lợi nhuận dùng để tính lương: danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính) hay dòng tiền thực */
 export type PayrollBasis = "nominal" | "cash";
-export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = { nominal: "Lợi nhuận danh nghĩa (theo đơn lên trong kỳ)", cash: "Lợi nhuận dòng tiền thực" };
+export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = { nominal: "Lợi nhuận danh nghĩa (theo đơn lên trong kỳ)", cash: "Lợi nhuận dòng tiền thực (tiền vào − tiền ra trong kỳ)" };
