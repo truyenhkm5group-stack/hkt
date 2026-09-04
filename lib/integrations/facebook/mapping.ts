@@ -1,3 +1,4 @@
+import { normalize } from "@/lib/text";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
@@ -33,15 +34,7 @@ export async function saveProductAliases(aliases: ProductAliases) {
 }
 
 /** Chữ thường, bỏ dấu tiếng Việt, đ→d, mọi ký tự khác chữ/số thành khoảng trắng */
-export function normalize(text: string) {
-  return ` ${text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()} `;
-}
+export { normalize };
 
 /** Marketer của chiến dịch: ghép tay → bí danh trong tên chiến dịch → tài khoản quảng cáo mặc định của marketer */
 export function resolveMarketer(campaignId: string, campaignName: string, accountId: string | null, mapping: AdsMapping): string | null {

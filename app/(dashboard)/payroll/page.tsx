@@ -32,29 +32,13 @@ import {
 import { formatNumber, formatVND } from "@/lib/format";
 import {
   getPayrollReport,
+  listAdAccounts,
   unassignedMarketerSpend,
 } from "@/lib/queries/payroll";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
-import { getDb, schema } from "@/db";
-import { sql } from "drizzle-orm";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Lương & hoa hồng" };
-
-async function listAdAccounts() {
-  const db = await getDb();
-  const rows = await db
-    .select({
-      id: schema.adSpends.accountId,
-      name: sql<string>`max(${schema.adSpends.accountName})`,
-    })
-    .from(schema.adSpends)
-    .where(sql`${schema.adSpends.accountId} is not null`)
-    .groupBy(schema.adSpends.accountId);
-  return rows
-    .filter((r) => r.id)
-    .map((r) => ({ id: r.id as string, name: r.name ?? (r.id as string) }));
-}
 
 export default async function PayrollPage({
   searchParams,

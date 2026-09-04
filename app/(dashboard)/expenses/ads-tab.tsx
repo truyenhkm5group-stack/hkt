@@ -1,17 +1,18 @@
 import { CircleDollarSign, Megaphone, ShoppingBag, Target, TrendingUp } from "lucide-react";
 import { CampaignMapping } from "@/app/(dashboard)/expenses/campaign-mapping";
+import { EmployeeDialog } from "@/app/(dashboard)/payroll/employee-dialog";
 import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
 import { SyncButton } from "@/components/sync-button";
 import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listCampaignsForMapping, listProductsForMapping } from "@/lib/queries/ads-mapping";
-import { listEmployees } from "@/lib/queries/payroll";
+import { listAdAccounts, listEmployees } from "@/lib/queries/payroll";
 import { integrationStatus } from "@/lib/env";
 import { AdsChart } from "@/components/charts/ads-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatVND } from "@/lib/format";
-import { AD_SORTABLE, adDailyByPlatform, adFacets, adSummary, listAdSpends } from "@/lib/queries/expenses";
+import { AD_FILTER_NONE, AD_FILTER_TEST, AD_SORTABLE, adDailyByPlatform, adFacets, adSummary, listAdSpends } from "@/lib/queries/expenses";
 import { parseListParams, type Period, type SearchParams } from "@/lib/search-params";
 
 function change(current: number, previous: number | null | undefined) {
@@ -19,14 +20,30 @@ function change(current: number, previous: number | null | undefined) {
   return ((current - previous) / previous) * 100;
 }
 
-export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; period: Period; canWrite: boolean }) {
-  const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period), adDailyByPlatform(period), listCampaignsForMapping(90), listProductsForMapping(), loadAdsMapping(), listEmployees()]);
+export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { raw: SearchParams; period: Period; canWrite: boolean; canManageEmployees: boolean }) {
+  const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform", "account", "marketer", "product"], sortable: AD_SORTABLE, defaultPeriod: "month" });
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts()]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
+  const activeMarketers = employees.filter((e) => e.active);
+  const hasFilter = Object.values(params.filters).some((v) => v.length) || Boolean(params.q);
+  const toolbar = (
+    <DataTableToolbar
+      searchPlaceholder="Chiến dịch, ghi chú, nền tảng…"
+      period={{ defaultKey: "month" }}
+      facets={[
+        { key: "account", label: "Tài khoản QC", options: accounts.map((a) => ({ value: a.id, label: a.name })) },
+        { key: "marketer", label: "Marketer", options: [...activeMarketers.map((e) => ({ value: e.id, label: e.shortName || e.name })), { value: AD_FILTER_NONE, label: "Chưa gán marketer" }] },
+        { key: "product", label: "Mã hàng", options: [...products.map((p) => ({ value: p.id, label: p.code ? `${p.code} · ${p.name}` : p.name })), { value: AD_FILTER_TEST, label: "Chi phí test (không thuộc mã)" }] },
+        { key: "platform", label: "Nền tảng", options: facets.platforms },
+      ]}
+      resultLabel={`${period.label} · ${formatNumber(total)} dòng chi tiêu phù hợp${hasFilter ? " · KPI, biểu đồ và bảng ghép chiến dịch bên dưới đang tính theo bộ lọc" : ""}`}
+    />
+  );
 
   return (
     <div className="space-y-5">
+      {toolbar}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label={`Tổng chi QC · ${period.label.toLowerCase()}`} value={formatVND(summary.spend, { compact: true })} change={change(summary.spend, prev?.spend)} note={`${formatNumber(summary.rows)} dòng · ${formatNumber(summary.leads)} leads`} icon={Megaphone} tone="rose" />
         <MetricCard label="Đơn từ quảng cáo" value={formatNumber(summary.orders)} change={change(summary.orders, prev?.orders)} note={summary.leads ? `Tỷ lệ chốt ${((summary.orders / summary.leads) * 100).toFixed(1)}% trên lead` : "Chưa ghi nhận lead"} icon={ShoppingBag} tone="blue" />
@@ -56,17 +73,16 @@ export async function AdsTab({ raw, period, canWrite }: { raw: SearchParams; per
       <SectionCard
         title="Ghép chiến dịch Facebook → mã hàng"
         description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng và marketer để tính lợi nhuận theo mã / theo người; chiến dịch không thuộc mã nào = chi phí test; chiến dịch của shop khác chọn “Không tính”." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
-        actions={fb ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {canManageEmployees ? <EmployeeDialog accounts={accounts} preset={{}} triggerLabel="Thêm marketer" /> : null}
+            {fb ? <SyncButton job="facebook-ads" label="Đồng bộ Facebook Ads" /> : null}
+          </div>
+        }
       >
-        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={employees.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} />
+        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={activeMarketers.map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} periodLabel={period.label} />
       </SectionCard>
 
-      <DataTableToolbar
-        searchPlaceholder="Chiến dịch, ghi chú, nền tảng…"
-        period={{ defaultKey: "month" }}
-        facets={[{ key: "platform", label: "Nền tảng", options: facets.platforms }]}
-        resultLabel={`${formatNumber(total)} dòng chi tiêu phù hợp`}
-      />
       <AdSpendsTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
     </div>
   );

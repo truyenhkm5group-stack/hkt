@@ -1,4 +1,4 @@
-import { and, asc, count, desc, gte, ilike, inArray, lte, or, sql, sum, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import type { ExpenseCategory } from "@/db/schema";
@@ -85,9 +85,33 @@ export async function expenseSummary(period: Period) {
 
 // ───────────────────────── Quảng cáo ─────────────────────────
 
+export type AdFilters = Record<string, string[]>;
+
+/** Giá trị đặc biệt trong bộ lọc: chưa gán marketer / chi phí test (không thuộc mã) */
+export const AD_FILTER_NONE = "__none__";
+export const AD_FILTER_TEST = "__test__";
+
+/** Điều kiện lọc chi tiêu QC theo nền tảng, tài khoản QC, marketer, mã hàng (dùng chung cho KPI, biểu đồ, bảng, ghép chiến dịch) */
+export function adFilterCond(filters: AdFilters | undefined): SQL[] {
+  const conds: SQL[] = [];
+  if (!filters) return conds;
+  if (filters.platform?.length) conds.push(inArray(schema.adSpends.platform, filters.platform));
+  if (filters.account?.length) conds.push(inArray(schema.adSpends.accountId, filters.account));
+  const oneOf = (column: AnyPgColumn, values: string[], noneValue: string, noneCond: SQL) => {
+    const ids = values.filter((v) => v !== noneValue);
+    const parts: SQL[] = [];
+    if (ids.length) parts.push(inArray(column, ids));
+    if (values.includes(noneValue)) parts.push(noneCond);
+    const combined = parts.length > 1 ? or(...parts) : parts[0];
+    if (combined) conds.push(combined);
+  };
+  if (filters.marketer?.length) oneOf(schema.adSpends.marketerId, filters.marketer, AD_FILTER_NONE, isNull(schema.adSpends.marketerId));
+  if (filters.product?.length) oneOf(schema.adSpends.productId, filters.product, AD_FILTER_TEST, and(isNull(schema.adSpends.productId), eq(schema.adSpends.excluded, false)) as SQL);
+  return conds;
+}
+
 export function adListWhere(params: ListParams) {
-  const conds: (SQL | undefined)[] = periodCond(schema.adSpends.spendDate, params.period.from, params.period.to);
-  if (params.filters.platform?.length) conds.push(inArray(schema.adSpends.platform, params.filters.platform));
+  const conds: (SQL | undefined)[] = [...periodCond(schema.adSpends.spendDate, params.period.from, params.period.to), ...adFilterCond(params.filters)];
   const term = params.q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -130,21 +154,22 @@ export async function adFacets(params: ListParams) {
   return { platforms: options.sort((a, b) => (known.has(a.value) === known.has(b.value) ? b.count - a.count : known.has(a.value) ? -1 : 1)) };
 }
 
-/** KPI quảng cáo trong kỳ (không phụ thuộc bộ lọc) */
-export async function adSummary(period: Period) {
+/** KPI quảng cáo trong kỳ (theo bộ lọc tài khoản / marketer / mã hàng nếu có) */
+export async function adSummary(period: Period, filters?: AdFilters) {
   const db = await getDb();
   const prev = previousPeriod(period);
+  const extra = adFilterCond(filters);
   const select = { spend: sum(schema.adSpends.spend), leads: sum(schema.adSpends.leads), orders: sum(schema.adSpends.orders), revenue: sum(schema.adSpends.revenue), rows: count() };
   const [[current], [previous]] = await Promise.all([
     db
       .select(select)
       .from(schema.adSpends)
-      .where(and(...periodCond(schema.adSpends.spendDate, period.from, period.to))),
+      .where(and(...periodCond(schema.adSpends.spendDate, period.from, period.to), ...extra)),
     prev.from
       ? db
           .select(select)
           .from(schema.adSpends)
-          .where(and(...periodCond(schema.adSpends.spendDate, prev.from, prev.to)))
+          .where(and(...periodCond(schema.adSpends.spendDate, prev.from, prev.to), ...extra))
       : Promise.resolve([null]),
   ]);
   const toKpi = (r: typeof current | null) => {
@@ -157,7 +182,7 @@ export async function adSummary(period: Period) {
 }
 
 /** Chi tiêu theo ngày × nền tảng cho biểu đồ */
-export async function adDailyByPlatform(period: Period) {
+export async function adDailyByPlatform(period: Period, filters?: AdFilters) {
   const db = await getDb();
   const rows = await db
     .select({
@@ -166,7 +191,7 @@ export async function adDailyByPlatform(period: Period) {
       spend: sum(schema.adSpends.spend),
     })
     .from(schema.adSpends)
-    .where(and(...periodCond(schema.adSpends.spendDate, period.from, period.to)))
+    .where(and(...periodCond(schema.adSpends.spendDate, period.from, period.to), ...adFilterCond(filters)))
     .groupBy(sql`1`, schema.adSpends.platform)
     .orderBy(sql`1`);
   const totals = new Map<string, number>();

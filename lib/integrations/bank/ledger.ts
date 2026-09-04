@@ -7,7 +7,7 @@
  * (chuyển nội bộ, trả nợ gốc, rút vốn…) được bỏ qua và báo lại cho người dùng.
  */
 import type { ExpenseCategory } from "@/db/schema";
-import { normalize } from "@/lib/integrations/facebook/mapping";
+import { normalize } from "@/lib/text";
 
 export type LedgerTxn = {
   date: string; // YYYY-MM-DD

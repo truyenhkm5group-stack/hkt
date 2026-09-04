@@ -1,6 +1,8 @@
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
+import { adFilterCond, type AdFilters } from "@/lib/queries/expenses";
+import type { Period } from "@/lib/search-params";
 
 export type CampaignMappingRow = {
   campaignId: string;
@@ -17,10 +19,15 @@ export type CampaignMappingRow = {
   marketerManual: boolean;
 };
 
-/** Danh sách chiến dịch Facebook (N ngày) kèm trạng thái ghép để chỉnh tay */
-export async function listCampaignsForMapping(days = 90): Promise<CampaignMappingRow[]> {
+/** Danh sách chiến dịch Facebook trong kỳ (số ngày hoặc Period; mặc định 90 ngày) kèm trạng thái ghép để chỉnh tay */
+export async function listCampaignsForMapping(range: number | Period = 90, filters?: AdFilters): Promise<CampaignMappingRow[]> {
   const db = await getDb();
-  const since = new Date(Date.now() - days * 86_400_000);
+  const conds: SQL[] = adFilterCond(filters);
+  if (typeof range === "number") conds.push(gte(schema.adSpends.spendDate, new Date(Date.now() - range * 86_400_000)));
+  else {
+    if (range.from) conds.push(gte(schema.adSpends.spendDate, range.from));
+    if (range.to) conds.push(lte(schema.adSpends.spendDate, range.to));
+  }
   const { campaignMap } = await loadAdsMapping();
   const rows = await db
     .select({
@@ -35,7 +42,7 @@ export async function listCampaignsForMapping(days = 90): Promise<CampaignMappin
       marketerId: sql<string | null>`max(${schema.adSpends.marketerId})`,
     })
     .from(schema.adSpends)
-    .where(and(eq(schema.adSpends.platform, "Facebook"), sql`${schema.adSpends.campaignId} is not null`, gte(schema.adSpends.spendDate, since)))
+    .where(and(eq(schema.adSpends.platform, "Facebook"), sql`${schema.adSpends.campaignId} is not null`, ...conds))
     .groupBy(schema.adSpends.campaignId)
     .orderBy(desc(sql`coalesce(sum(${schema.adSpends.spend}), 0)`));
   return rows

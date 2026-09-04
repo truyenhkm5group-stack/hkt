@@ -16,6 +16,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const raw = await searchParams;
   const user = await requireUser();
   const canWrite = can(user.role, "expenses:write");
+  const canManageEmployees = can(user.role, "payroll:manage");
   const tab = param(raw, "tab") === "ads" ? "ads" : "expenses";
   const period = resolvePeriod(raw, "month");
   const periodQuery = period.key === "month" ? "" : `&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey}&to=${period.toKey}` : ""}`;
@@ -55,7 +56,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
         </TabsList>
       </Tabs>
 
-      {tab === "ads" ? <AdsTab raw={raw} period={period} canWrite={canWrite} /> : <ExpensesTab raw={raw} period={period} canWrite={canWrite} />}
+      {tab === "ads" ? <AdsTab raw={raw} period={period} canWrite={canWrite} canManageEmployees={canManageEmployees} /> : <ExpensesTab raw={raw} period={period} canWrite={canWrite} />}
     </div>
   );
 }

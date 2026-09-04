@@ -354,3 +354,14 @@ export async function detectMarketerPrefixes(
     }))
     .sort((a, b) => b.spend - a.spend);
 }
+
+/** Các tài khoản quảng cáo đã có dữ liệu chi tiêu (để chọn tài khoản mặc định cho marketer) */
+export async function listAdAccounts() {
+  const db = await getDb();
+  const rows = await db
+    .select({ id: schema.adSpends.accountId, name: sql<string>`max(${schema.adSpends.accountName})` })
+    .from(schema.adSpends)
+    .where(sql`${schema.adSpends.accountId} is not null`)
+    .groupBy(schema.adSpends.accountId);
+  return rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? (r.id as string) }));
+}
