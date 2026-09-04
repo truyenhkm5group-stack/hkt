@@ -111,6 +111,7 @@ const baseColumns: ColumnDef<CodListRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="text-right">
         <Money value={row.original.shippingFee} className="text-muted-foreground" />
+        {row.original.feeSource === "pancake" ? <div className="text-[10px] text-muted-foreground">ước tính Pancake</div> : null}
         {row.original.codFee ? <div className="text-[10.5px] text-muted-foreground">phí COD <Money value={row.original.codFee} compact /></div> : null}
       </div>
     ),

@@ -75,13 +75,18 @@ export async function listCodShipments(params: ListParams) {
         createdAt: true,
       },
       with: {
-        order: { columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, totalPriceAfterDiscount: true } },
+        order: { columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, totalPriceAfterDiscount: true, partnerFee: true } },
         codBatch: { columns: { id: true, reference: true, receivedAt: true } },
       },
     }),
     db.select({ total: count() }).from(schema.shipments).where(where),
   ]);
-  return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
+  // Phí ship: cước thực tế từ Viettel Post (bảng kê / tra cứu) → nếu chưa có thì cước Pancake ghi trên đơn (ước tính)
+  const withFee = rows.map((r) => {
+    const feeSource: "vtp" | "pancake" | "none" = r.shippingFee > 0 ? "vtp" : (r.order?.partnerFee ?? 0) > 0 ? "pancake" : "none";
+    return { ...r, shippingFee: r.shippingFee > 0 ? r.shippingFee : (r.order?.partnerFee ?? 0), feeSource };
+  });
+  return { rows: withFee, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 
 export type CodListRow = Awaited<ReturnType<typeof listCodShipments>>["rows"][number];
@@ -90,8 +95,14 @@ export type CodListRow = Awaited<ReturnType<typeof listCodShipments>>["rows"][nu
 export async function codSummary(params: ListParams) {
   const db = await getDb();
   const [row] = await db
-    .select({ total: count(), codAmount: sum(schema.shipments.codAmount), codCollected: sum(schema.shipments.codCollected), shippingFee: sum(schema.shipments.shippingFee) })
+    .select({
+      total: count(),
+      codAmount: sum(schema.shipments.codAmount),
+      codCollected: sum(schema.shipments.codCollected),
+      shippingFee: sql<number>`coalesce(sum(coalesce(nullif(${schema.shipments.shippingFee}, 0), ${schema.orders.partnerFee}, 0)), 0)`,
+    })
     .from(schema.shipments)
+    .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
     .where(codListWhere(params));
   return { total: Number(row?.total ?? 0), codAmount: Number(row?.codAmount ?? 0), codCollected: Number(row?.codCollected ?? 0), shippingFee: Number(row?.shippingFee ?? 0) };
 }
