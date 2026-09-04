@@ -17,6 +17,7 @@ on:
           - sync-pancake-orders # đơn thay đổi gần đây
           - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
           - sync-vtp-import     # nhập vận đơn từ tài khoản Viettel Post (30 ngày)
+          - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày (days)
           - sync-facebook-ads   # kéo chi tiêu quảng cáo Facebook N ngày
           - check-integrations  # kiểm tra API key
           - vtp-debug           # in phản hồi thô API Viettel Post cho mã vận đơn (nhập ở ô "arg")
@@ -72,6 +73,8 @@ jobs:
                 docker exec erp-app npm run --silent sync -- vtp-tracking --all --limit=2000 ;;
               sync-vtp-import)
                 docker exec erp-app npm run --silent sync -- vtp-import --days="$DAYS" ;;
+              sync-facebook-ads)
+                docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
               sync-facebook-ads)
                 docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
               check-integrations)
