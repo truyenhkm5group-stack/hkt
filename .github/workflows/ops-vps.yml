@@ -74,7 +74,9 @@ jobs:
               check-integrations)
                 docker exec erp-app npm run --silent check:integrations ;;
               vtp-debug)
-                docker exec erp-app npm run --silent vtp:debug -- "$ARG" ;;
+                # luôn dùng bản script mới nhất trên GitHub, không cần build lại image
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-debug.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-debug.ts "$ARG" ;;
               backup)
                 mkdir -p /root/backups
                 $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
