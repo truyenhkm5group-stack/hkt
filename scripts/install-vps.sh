@@ -11,10 +11,10 @@ COMPOSE="docker compose -f docker-compose.prod.yml"
 
 say()  { printf '\033[1;32m▶ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*"; }
-ask()  { # ask VAR "Câu hỏi" "mặc định"
+ask()  { # ask VAR "Câu hỏi" "mặc định" — đọc từ /dev/tty để dùng được cả khi chạy qua curl | bash
   local var="$1" prompt="$2" def="${3:-}" val
   if [ -n "${!var:-}" ]; then return; fi
-  if [ -n "$def" ]; then read -r -p "$prompt [$def]: " val; val="${val:-$def}"; else read -r -p "$prompt: " val; fi
+  if [ -n "$def" ]; then read -r -p "$prompt [$def]: " val </dev/tty; val="${val:-$def}"; else read -r -p "$prompt: " val </dev/tty; fi
   printf -v "$var" '%s' "$val"
 }
 rand() { openssl rand -hex "${1:-24}"; }
@@ -26,15 +26,18 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 if ! docker compose version >/dev/null 2>&1; then
   say "Cài Docker Compose plugin"
-  apt-get update -qq && apt-get install -y -qq docker-compose-plugin
+  if command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq docker-compose-plugin; else (dnf install -y -q docker-compose-plugin || yum install -y -q docker-compose-plugin); fi
 fi
-command -v openssl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq openssl; }
+command -v openssl >/dev/null 2>&1 || { (apt-get update -qq && apt-get install -y -qq openssl) || dnf install -y -q openssl || yum install -y -q openssl; }
 systemctl enable --now docker >/dev/null 2>&1 || true
 
 # ───────── 2. Tường lửa ─────────
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
   say "Mở cổng 80/443 trên ufw"
   ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 443/udp >/dev/null
+elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  say "Mở cổng 80/443 trên firewalld"
+  firewall-cmd --permanent --add-service=http >/dev/null; firewall-cmd --permanent --add-service=https >/dev/null; firewall-cmd --reload >/dev/null
 fi
 
 # ───────── 3. File .env ─────────
@@ -48,7 +51,7 @@ else
   ask VIETTELPOST_API_KEY "Token bí mật Viettel Post (Enter nếu không có)" ""
   ask VIETTELPOST_USERNAME "Tài khoản đối tác Viettel Post (SĐT, Enter nếu không dùng)" ""
   if [ -n "${VIETTELPOST_USERNAME:-}" ] && [ -z "${VIETTELPOST_PASSWORD:-}" ]; then
-    read -r -s -p "Mật khẩu đối tác Viettel Post: " VIETTELPOST_PASSWORD; echo
+    read -r -s -p "Mật khẩu đối tác Viettel Post: " VIETTELPOST_PASSWORD </dev/tty; echo
   fi
   ask ADMIN_EMAIL         "Email quản trị ERP"                 "admin@vnxcommerce.com"
   ask ADMIN_PASSWORD      "Mật khẩu quản trị ERP"              "$(rand 6)"

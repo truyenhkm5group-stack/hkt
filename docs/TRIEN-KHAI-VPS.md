@@ -6,29 +6,27 @@ Bộ triển khai gồm `docker-compose.prod.yml` (PostgreSQL, ERP, scheduler, C
 
 | Thứ cần | Ghi chú |
 |---|---|
-| VPS Ubuntu 22.04/24.04 | 2 vCPU · 2 GB RAM · 20 GB SSD là đủ. Gợi ý: Vultr/DigitalOcean (Singapore) hoặc Viettel IDC, VNPT, AZDIGI, Vietnix. Khi tạo chọn "Ubuntu 22.04", lấy **IP public** và mật khẩu root/SSH. |
+| VPS | Đang dùng Vietnix `mr.truyen-vpscode`, IP `14.225.198.146`, 2 vCPU · 2 GB RAM · 40 GB. Cần mật khẩu root (email Vietnix gửi khi tạo VPS) hoặc dùng Console trên trang Vietnix. |
 | Tên miền `vnxcommerce.com` (name.com) | Sẽ dùng tên miền con `erp.vnxcommerce.com`. |
 | API key Pancake, token bí mật Viettel Post | Và tài khoản đối tác Viettel Post (SĐT + mật khẩu) để dự phòng. |
 
 ## 1. Trỏ DNS trên name.com (làm trước, DNS cần vài phút để lan)
 
 1. Đăng nhập https://www.name.com → **My Domains** → `vnxcommerce.com` → **DNS Records**.
-2. **Add Record**: Type `A` · Host `erp` · Answer `<IP public của VPS>` · TTL `300` → Add Record.
-3. Kiểm tra: trên máy bất kỳ chạy `nslookup erp.vnxcommerce.com` phải ra IP VPS.
+2. **Add Record**: Type `A` · Host `erp` · Answer `14.225.198.146` · TTL `300` → Add Record.
+3. Kiểm tra: trên máy bất kỳ chạy `nslookup erp.vnxcommerce.com` phải ra `14.225.198.146` (hoặc mở https://dnschecker.org, gõ `erp.vnxcommerce.com`).
 
 Nếu name.com đang bật "Name.com Nameservers" mặc định thì làm như trên là đủ. Nếu tên miền đang dùng nameserver khác (Cloudflare…), thêm bản ghi A ở nơi đó.
 
 ## 2. Cài đặt bằng một lệnh
 
-SSH vào VPS (`ssh root@<IP>`), rồi:
+Mở **Console** của VPS trên trang Vietnix (hoặc SSH `ssh root@14.225.198.146`), rồi dán:
 
 ```bash
-apt-get update && apt-get install -y git
-git clone https://github.com/truyenhkm5group-stack/hkt.git erp && cd erp
-sudo bash scripts/install-vps.sh
+curl -fsSL https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/claude/fashion-erp-poscake-viettelpost-u97pgx/scripts/bootstrap.sh | bash
 ```
 
-(Repo riêng tư: dùng `git clone https://<token-github>@github.com/truyenhkm5group-stack/hkt.git erp`, hoặc tải zip mã nguồn và giải nén vào `~/erp`.)
+Lệnh này tải mã nguồn về `/root/erp` rồi chạy `scripts/install-vps.sh`. Chạy lại cùng lệnh sau này = cập nhật phiên bản mới.
 
 Script sẽ:
 
@@ -41,11 +39,10 @@ Script sẽ:
 Muốn chạy không cần nhập tay:
 
 ```bash
-ERP_DOMAIN=erp.vnxcommerce.com \
-PANCAKE_API_KEY=... PANCAKE_SHOP_ID=408063069 \
-VIETTELPOST_API_KEY=... VIETTELPOST_USERNAME=0886833448 VIETTELPOST_PASSWORD='...' \
-ADMIN_EMAIL=admin@vnxcommerce.com ADMIN_PASSWORD='...' \
-sudo -E bash scripts/install-vps.sh
+export ERP_DOMAIN=erp.vnxcommerce.com PANCAKE_API_KEY=... PANCAKE_SHOP_ID=408063069 \
+  VIETTELPOST_API_KEY=... VIETTELPOST_USERNAME=0886833448 VIETTELPOST_PASSWORD='...' \
+  ADMIN_EMAIL=admin@vnxcommerce.com ADMIN_PASSWORD='...'
+curl -fsSL https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/claude/fashion-erp-poscake-viettelpost-u97pgx/scripts/bootstrap.sh | bash
 ```
 
 ## 3. Sau khi lên
