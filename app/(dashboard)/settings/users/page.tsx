@@ -6,16 +6,17 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
-import { requireUser } from "@/lib/auth/session";
-import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
+import { RoleMatrix } from "@/app/(dashboard)/settings/users/role-matrix";
+import { loadRoleTemplates, requirePermission } from "@/lib/auth/session";
+import { ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
 import { formatNumber } from "@/lib/format";
 import { listUsers } from "@/lib/queries/users";
 
 export const metadata = { title: "Người dùng" };
 
 export default async function UsersPage() {
-  const user = await requireUser(["ADMIN"]);
-  const { rows, activeAdmins } = await listUsers();
+  const user = await requirePermission("users:manage");
+  const [{ rows, activeAdmins }, templates] = await Promise.all([listUsers(), loadRoleTemplates()]);
   const active = rows.filter((u) => u.active).length;
   const byRole = ROLE_ORDER.map((role) => ({ role, count: rows.filter((u) => u.role === role && u.active).length })).filter((r) => r.count > 0);
 
@@ -24,7 +25,7 @@ export default async function UsersPage() {
       <PageHeader
         eyebrow="Hệ thống"
         title="Người dùng"
-        description="Tài khoản đăng nhập nội bộ và vai trò truy cập. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
+        description="Tài khoản đăng nhập nội bộ, vai trò và quyền truy cập theo từng module. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -43,19 +44,12 @@ export default async function UsersPage() {
         <MetricCard label="Quản trị viên" value={formatNumber(activeAdmins)} note={activeAdmins <= 1 ? "Nên có ít nhất 2 quản trị viên để dự phòng" : "Có thể quản lý người dùng và cấu hình"} icon={ShieldCheck} tone={activeAdmins <= 1 ? "amber" : "primary"} />
       </section>
 
-      <SectionCard title="Danh sách người dùng" description="Sửa tên / vai trò, đặt lại mật khẩu hoặc khoá tài khoản từ menu ở cuối dòng" padded={false}>
-        <UsersTable users={rows} currentUserId={user.id} activeAdmins={activeAdmins} />
+      <SectionCard title="Danh sách người dùng" description="Sửa tên / vai trò, phân quyền riêng từng người, đặt lại mật khẩu hoặc khoá tài khoản từ menu ở cuối dòng" padded={false}>
+        <UsersTable users={rows} currentUserId={user.id} activeAdmins={activeAdmins} templates={templates} />
       </SectionCard>
 
-      <SectionCard title="Vai trò & quyền" description="Quản trị viên luôn có toàn quyền; các vai trò khác giới hạn theo module">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {ROLE_ORDER.map((role) => (
-            <div key={role} className="rounded-lg border bg-background p-3">
-              <p className="text-sm font-semibold">{ROLE_LABEL[role]}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{ROLE_HINT[role]}</p>
-            </div>
-          ))}
-        </div>
+      <SectionCard title="Vai trò & quyền" description="Vai trò là mẫu quyền khởi điểm: tích/bỏ tích để đổi quyền mặc định của từng vai trò. Muốn khác biệt cho một người cụ thể, dùng “Phân quyền” ở menu cuối dòng.">
+        <RoleMatrix templates={templates} canEdit />
       </SectionCard>
     </div>
   );

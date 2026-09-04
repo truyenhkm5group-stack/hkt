@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listOrders, orderFacets, orderSummary, ORDER_SORTABLE } from "@/lib/queries/orders";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Đơn hàng" };
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("orders:read");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params)]);

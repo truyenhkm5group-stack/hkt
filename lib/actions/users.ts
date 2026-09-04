@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { can, requireUser } from "@/lib/auth/session";
-import { changePasswordSchema, createUserSchema, resetPasswordSchema, setUserActiveSchema, updateUserSchema } from "@/lib/validation/users";
+import { can, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
+import { setSettingJson } from "@/lib/settings";
+import { changePasswordSchema, createUserSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
 
 export type ActionResult = { ok: true; id?: string } | { error: string };
 
@@ -26,7 +27,7 @@ async function otherActiveAdmins(exceptId: string) {
 
 export async function createUser(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "users:manage")) return { error: "Không có quyền" };
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
   const parsed = createUserSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
@@ -44,7 +45,7 @@ export async function createUser(input: unknown): Promise<ActionResult> {
 
 export async function updateUser(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "users:manage")) return { error: "Không có quyền" };
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
   const parsed = updateUserSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
@@ -63,7 +64,7 @@ export async function updateUser(input: unknown): Promise<ActionResult> {
 
 export async function setUserActive(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "users:manage")) return { error: "Không có quyền" };
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
   const parsed = setUserActiveSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const { id, active } = parsed.data;
@@ -81,7 +82,7 @@ export async function setUserActive(input: unknown): Promise<ActionResult> {
 
 export async function resetUserPassword(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "users:manage")) return { error: "Không có quyền" };
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
   const parsed = resetPasswordSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const { id, password } = parsed.data;
@@ -110,4 +111,37 @@ export async function changeMyPassword(input: unknown): Promise<ActionResult> {
   await db.update(schema.users).set({ passwordHash: await hashPassword(newPassword) }).where(eq(schema.users.id, user.id));
   await audit({ userId: user.id, userEmail: user.email, action: "PASSWORD_CHANGE", entity: "USER", entityId: user.id });
   return { ok: true, id: user.id };
+}
+
+/** Tuỳ chỉnh quyền riêng cho một người dùng (null = quay về mẫu quyền của vai trò) */
+export async function updateUserPermissions(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
+  const parsed = userPermissionsSchema.safeParse(input);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const { id, permissions } = parsed.data;
+  const db = await getDb();
+  const target = await db.query.users.findFirst({ where: eq(schema.users.id, id), columns: { id: true, email: true, role: true, permissions: true } });
+  if (!target) return { error: "Không tìm thấy người dùng" };
+  if (target.role === "ADMIN") return { error: "Quản trị viên luôn có toàn quyền; đổi vai trò nếu muốn giới hạn" };
+  const next = permissions ? [...new Set(permissions)].sort() : null;
+  await db.update(schema.users).set({ permissions: next }).where(eq(schema.users.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "USER_PERMISSIONS", entity: "USER", entityId: id, detail: { email: target.email, before: target.permissions ?? null, after: next } });
+  revalidatePath("/settings/users");
+  revalidatePath("/", "layout");
+  return { ok: true, id };
+}
+
+/** Lưu mẫu quyền của các vai trò (áp dụng cho mọi người dùng chưa tuỳ chỉnh riêng) */
+export async function saveRolePermissions(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "users:manage")) return { error: "Không có quyền" };
+  const parsed = rolePermissionsSchema.safeParse(input);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const map = Object.fromEntries(Object.entries(parsed.data).map(([role, list]) => [role, [...new Set(list)].sort()]));
+  await setSettingJson(ROLE_PERMISSIONS_KEY, map);
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ROLE_PERMISSIONS_KEY, detail: map });
+  revalidatePath("/settings/users");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

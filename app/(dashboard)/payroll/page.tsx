@@ -47,8 +47,8 @@ export default async function PayrollPage({
 }) {
   const raw = await searchParams;
   const user = await requireUser();
-  if (!can(user.role, "payroll:view")) redirect("/?forbidden=1");
-  const canManage = can(user.role, "payroll:manage");
+  if (!can(user, "payroll:view")) redirect("/?forbidden=1");
+  const canManage = can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis =
     param(raw, "basis") === "cash" ? "cash" : "nominal";

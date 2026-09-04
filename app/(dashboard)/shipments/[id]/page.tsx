@@ -15,6 +15,7 @@ import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail } from "@/lib/queries/shipments";
+import { requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,6 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function ShipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePermission("shipments:view");
   const { id } = await params;
   const s = await getShipmentDetail(id);
   if (!s) notFound();

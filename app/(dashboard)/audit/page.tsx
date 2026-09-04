@@ -1,7 +1,7 @@
 import { AuditTable } from "@/app/(dashboard)/audit/audit-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
-import { requireUser } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { formatNumber } from "@/lib/format";
 import { AUDIT_SORTABLE, auditFacets, listAuditLogs } from "@/lib/queries/audit";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -10,7 +10,7 @@ export const metadata = { title: "Nhật ký hệ thống" };
 
 export default async function AuditPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  await requireUser(["ADMIN", "MANAGER"]);
+  await requirePermission("audit:view");
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["action", "entity"], sortable: AUDIT_SORTABLE, defaultPeriod: "7d" });
   const [{ rows, total, pageCount }, facets] = await Promise.all([listAuditLogs(params), auditFacets(params)]);
 

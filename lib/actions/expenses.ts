@@ -18,7 +18,7 @@ function firstIssue(error: { issues: { message: string }[] }) {
 
 export async function createExpense(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
@@ -36,7 +36,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
 
 export async function updateExpense(id: string, input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   if (!id) return { error: "Thiếu mã chi phí" };
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -57,7 +57,7 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
 
 export async function deleteExpense(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   if (!id) return { error: "Thiếu mã chi phí" };
   const db = await getDb();
   const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
@@ -74,7 +74,7 @@ export async function deleteExpense(id: string): Promise<ActionResult> {
 
 export async function createAdSpend(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   const parsed = adSpendSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
@@ -92,7 +92,7 @@ export async function createAdSpend(input: unknown): Promise<ActionResult> {
 
 export async function updateAdSpend(id: string, input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   if (!id) return { error: "Thiếu mã chi tiêu" };
   const parsed = adSpendSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -113,7 +113,7 @@ export async function updateAdSpend(id: string, input: unknown): Promise<ActionR
 
 export async function deleteAdSpend(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   if (!id) return { error: "Thiếu mã chi tiêu" };
   const db = await getDb();
   const existing = await db.query.adSpends.findFirst({ where: eq(schema.adSpends.id, id) });

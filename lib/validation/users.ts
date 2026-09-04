@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
 import { ROLE_ORDER } from "@/lib/constants/roles";
 
 const name = z.string().trim().min(2, "Tên tối thiểu 2 ký tự").max(100, "Tên tối đa 100 ký tự");
@@ -41,3 +42,16 @@ export const changePasswordSchema = z
   .refine((v) => v.newPassword === v.confirmPassword, { path: ["confirmPassword"], message: "Mật khẩu nhập lại không khớp" })
   .refine((v) => v.newPassword !== v.currentPassword, { path: ["newPassword"], message: "Mật khẩu mới phải khác mật khẩu hiện tại" });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+const permissionList = z.array(z.enum(ALL_PERMISSIONS as [string, ...string[]])).max(100);
+
+/** Quyền tuỳ chỉnh của một người dùng; null = dùng mẫu quyền của vai trò */
+export const userPermissionsSchema = z.object({
+  id: z.string().min(1),
+  permissions: permissionList.nullable(),
+});
+export type UserPermissionsInput = z.infer<typeof userPermissionsSchema>;
+
+/** Mẫu quyền của các vai trò (không gồm ADMIN) */
+export const rolePermissionsSchema = z.record(z.enum(ROLE_ORDER.filter((r) => r !== "ADMIN") as [string, ...string[]]), permissionList);
+export type RolePermissionsInput = z.infer<typeof rolePermissionsSchema>;

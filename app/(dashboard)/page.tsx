@@ -14,6 +14,7 @@ import { integrationStatus } from "@/lib/env";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Tổng quan" };
 
@@ -23,6 +24,7 @@ function change(current: number, previous: number | null | undefined) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("dashboard:view");
   const params = await searchParams;
   const period = resolvePeriod(params, "30d");
   const data = await getDashboardData(period);

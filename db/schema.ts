@@ -59,6 +59,8 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   passwordHash: text("password_hash").notNull(),
   role: roleEnum("role").notNull().default("VIEWER"),
+  /** Quyền tuỳ chỉnh riêng (danh sách khoá quyền); null = dùng mẫu quyền của vai trò */
+  permissions: jsonb("permissions").$type<string[] | null>(),
   active: boolean("active").notNull().default(true),
   lastLoginAt: ts("last_login_at"),
   createdAt: createdAt(),

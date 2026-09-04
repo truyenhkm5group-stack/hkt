@@ -7,16 +7,16 @@ import { ExpenseDialog } from "@/app/(dashboard)/expenses/expense-dialog";
 import { ExpensesTab } from "@/app/(dashboard)/expenses/expenses-tab";
 import { PageHeader } from "@/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Chi phí & quảng cáo" };
 
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requireUser();
-  const canWrite = can(user.role, "expenses:write");
-  const canManageEmployees = can(user.role, "payroll:manage");
+  const user = await requirePermission("expenses:view");
+  const canWrite = can(user, "expenses:write");
+  const canManageEmployees = can(user, "payroll:manage");
   const tab = param(raw, "tab") === "ads" ? "ads" : "expenses";
   const period = resolvePeriod(raw, "month");
   const periodQuery = period.key === "month" ? "" : `&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey}&to=${period.toKey}` : ""}`;

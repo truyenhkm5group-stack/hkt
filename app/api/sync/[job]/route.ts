@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { can, getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { JOB_DEFINITIONS, runJob } from "@/lib/sync/jobs";
 import { isJobRunning } from "@/lib/sync/runner";
@@ -10,8 +10,8 @@ export const maxDuration = 300;
 async function authorize(request: NextRequest) {
   const header = request.headers.get("x-cron-secret") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? request.nextUrl.searchParams.get("secret");
   if (env.cronSecret && header && header === env.cronSecret) return { actor: "scheduler", trigger: "CRON" as const };
-  const session = await getSession();
-  if (session && can(session.role, "sync:run")) return { actor: session.email, trigger: "MANUAL" as const };
+  const session = await getCurrentUser();
+  if (session && can(session, "sync:run")) return { actor: session.email, trigger: "MANUAL" as const };
   return null;
 }
 

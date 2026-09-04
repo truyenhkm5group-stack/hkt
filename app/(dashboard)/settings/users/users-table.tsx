@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2, Lock, LockOpen, MoreHorizontal, Pencil } from "lucide-react";
+import { KeyRound, Loader2, Lock, LockOpen, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import { PermissionsDialog } from "@/app/(dashboard)/settings/users/permissions-dialog";
 import { EditUserDialog, ResetPasswordDialog } from "@/app/(dashboard)/settings/users/user-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { setUserActive } from "@/lib/actions/users";
+import { PERMISSION_LABEL, type RolePermissionMap } from "@/lib/auth/permissions";
 import { ROLE_LABEL, ROLE_TONE } from "@/lib/constants/roles";
 import { formatDateTime, formatTimeAgo, initials } from "@/lib/format";
 import type { UserRow } from "@/lib/queries/users";
@@ -18,8 +20,9 @@ import { cn } from "@/lib/utils";
 
 const badge = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
 
-function UserRowActions({ user, isSelf, isLastAdmin }: { user: UserRow; isSelf: boolean; isLastAdmin: boolean }) {
+function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRow; isSelf: boolean; isLastAdmin: boolean; templates: RolePermissionMap }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [permOpen, setPermOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -51,6 +54,9 @@ function UserRowActions({ user, isSelf, isLastAdmin }: { user: UserRow; isSelf: 
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>
             <Pencil className="size-4" /> Sửa
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setPermOpen(true)}>
+            <ShieldCheck className="size-4" /> Phân quyền
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setResetOpen(true)}>
             <KeyRound className="size-4" /> Đặt lại mật khẩu
           </DropdownMenuItem>
@@ -62,6 +68,7 @@ function UserRowActions({ user, isSelf, isLastAdmin }: { user: UserRow; isSelf: 
         </DropdownMenuContent>
       </DropdownMenu>
       <EditUserDialog user={user} open={editOpen} onOpenChange={setEditOpen} isSelf={isSelf} />
+      <PermissionsDialog user={user} templates={templates} open={permOpen} onOpenChange={setPermOpen} />
       <ResetPasswordDialog user={user} open={resetOpen} onOpenChange={setResetOpen} />
       <AlertDialog open={lockOpen} onOpenChange={setLockOpen}>
         <AlertDialogContent>
@@ -99,7 +106,7 @@ function UserRowActions({ user, isSelf, isLastAdmin }: { user: UserRow; isSelf: 
   );
 }
 
-export function UsersTable({ users, currentUserId, activeAdmins }: { users: UserRow[]; currentUserId: string; activeAdmins: number }) {
+export function UsersTable({ users, currentUserId, activeAdmins, templates }: { users: UserRow[]; currentUserId: string; activeAdmins: number; templates: RolePermissionMap }) {
   return (
     <div className="overflow-x-auto">
       <Table className="min-w-[820px]">
@@ -135,6 +142,11 @@ export function UsersTable({ users, currentUserId, activeAdmins }: { users: User
                 <TableCell className="text-sm">{u.email}</TableCell>
                 <TableCell>
                   <span className={cn(badge, ROLE_TONE[u.role])}>{ROLE_LABEL[u.role]}</span>
+                  {Array.isArray(u.permissions) ? (
+                    <div className="mt-1 max-w-[260px] truncate text-[10.5px] text-muted-foreground" title={u.permissions.map((p) => PERMISSION_LABEL[p] ?? p).join(", ")}>
+                      Tuỳ chỉnh · {u.permissions.length} quyền
+                    </div>
+                  ) : null}
                 </TableCell>
                 <TableCell>
                   {u.active ? (
@@ -159,7 +171,7 @@ export function UsersTable({ users, currentUserId, activeAdmins }: { users: User
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(u.createdAt)}</TableCell>
                 <TableCell className="text-right">
-                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} />
+                  <UserRowActions user={u} isSelf={isSelf} isLastAdmin={isLastAdmin} templates={templates} />
                 </TableCell>
               </TableRow>
             );

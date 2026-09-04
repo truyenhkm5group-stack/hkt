@@ -32,6 +32,7 @@ import {
 } from "@/lib/queries/return-rate";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Tỷ lệ hoàn theo mã hàng" };
 
@@ -47,6 +48,7 @@ export default async function ReturnRatePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  await requirePermission("reports:view");
   const raw = await searchParams;
   const params = parseListParams(raw, {
     defaultSort: "rate",

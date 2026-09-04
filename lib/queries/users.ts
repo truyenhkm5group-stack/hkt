@@ -6,7 +6,7 @@ export async function listUsers() {
   const db = await getDb();
   const [rows, [admins]] = await Promise.all([
     db.query.users.findMany({
-      columns: { id: true, email: true, name: true, role: true, active: true, lastLoginAt: true, createdAt: true, updatedAt: true },
+      columns: { id: true, email: true, name: true, role: true, permissions: true, active: true, lastLoginAt: true, createdAt: true, updatedAt: true },
       orderBy: [asc(schema.users.createdAt), asc(schema.users.email)],
     }),
     db

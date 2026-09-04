@@ -9,7 +9,7 @@ import { SyncButton } from "@/components/sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { activeCodTab, COD_TABS, codStatusesFromFilter } from "@/lib/constants/cod";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { codFacets, codKpis, codPeriodColumn, codSummary, COD_SORTABLE, getCodBatch, listCodShipments, recentCodBatches } from "@/lib/queries/cod";
@@ -18,8 +18,8 @@ import { parseListParams, type SearchParams } from "@/lib/search-params";
 export const metadata = { title: "Đối soát COD" };
 
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requireUser();
-  const canWrite = can(user.role, "cod:write");
+  const user = await requirePermission("cod:view");
+  const canWrite = can(user, "cod:write");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "deliveredAt", filterKeys: ["cod", "carrier", "batch"], sortable: COD_SORTABLE, defaultPeriod: "all" });
   const batchId = params.filters.batch?.[0];

@@ -7,10 +7,12 @@ import { SyncButton } from "@/components/sync-button";
 import { formatNumber } from "@/lib/format";
 import { inventoryFacets, inventorySummary, INVENTORY_SORTABLE, listInventory } from "@/lib/queries/inventory";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Nhật ký kho" };
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("products:view");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["warehouse", "table", "direction"], sortable: INVENTORY_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listInventory(params), inventoryFacets(params), inventorySummary(params)]);

@@ -7,10 +7,12 @@ import { SyncButton } from "@/components/sync-button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listReturns, returnFacets, returnSummary, RETURN_SORTABLE } from "@/lib/queries/returns";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Đổi / trả hàng" };
 
 export default async function ReturnsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("returns:view");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["type"], sortable: RETURN_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listReturns(params), returnFacets(params), returnSummary(params)]);

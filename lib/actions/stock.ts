@@ -22,7 +22,7 @@ function revalidate() {
 /** Tạo phiếu nhập hàng / điều chỉnh kiểm kê. Giá nhập > 0 sẽ cập nhật giá vốn gần nhất của mẫu mã. */
 export async function createStockReceipt(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "inventory:write")) return { error: "Không có quyền nhập kho" };
+  if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
   const parsed = stockReceiptSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
@@ -53,7 +53,7 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
 
 export async function deleteStockReceipt(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "inventory:write")) return { error: "Không có quyền nhập kho" };
+  if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
   if (!id) return { error: "Thiếu mã phiếu" };
   const db = await getDb();
   const existing = await db.query.stockReceipts.findFirst({ where: eq(schema.stockReceipts.id, id), with: { items: true } });

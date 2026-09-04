@@ -14,6 +14,7 @@ import { COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getOrderDetail } from "@/lib/queries/orders";
+import { requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,6 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePermission("orders:read");
   const { id } = await params;
   const order = await getOrderDetail(id);
   if (!order) notFound();

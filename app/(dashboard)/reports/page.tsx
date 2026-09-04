@@ -13,7 +13,7 @@ import {
 import { CashTab } from "@/app/(dashboard)/reports/cash-tab";
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -131,8 +131,8 @@ export default async function ReportsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const raw = await searchParams;
-  const user = await requireUser();
-  const canWrite = can(user.role, "expenses:write");
+  const user = await requirePermission("reports:view");
+  const canWrite = can(user, "expenses:write");
   const tabParam = param(raw, "tab");
   const tab: "pnl" | "cash" | "nominal" =
     tabParam === "cash" ? "cash" : tabParam === "nominal" ? "nominal" : "pnl";

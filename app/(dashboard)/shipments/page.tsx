@@ -5,10 +5,12 @@ import { SyncButton } from "@/components/sync-button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Vận đơn" };
 
 export default async function ShipmentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("shipments:view");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["stage", "carrier", "cod", "final", "linked"], sortable: SHIPMENT_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listShipments(params), shipmentFacets(params), shipmentSummary(params)]);

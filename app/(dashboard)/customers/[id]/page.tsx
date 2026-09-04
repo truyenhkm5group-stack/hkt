@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { cn } from "@/lib/utils";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -29,6 +30,7 @@ function addressText(a: AddressRecord) {
 }
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePermission("customers:view");
   const { id } = await params;
   const customer = await getCustomerDetail(id);
   if (!customer) notFound();

@@ -35,7 +35,7 @@ function revalidate() {
 
 async function authorize() {
   const user = await requireUser();
-  if (!can(user.role, "cod:write")) return { user, error: "Bạn không có quyền đối soát COD" as const };
+  if (!can(user, "cod:write")) return { user, error: "Bạn không có quyền đối soát COD" as const };
   return { user, error: null };
 }
 

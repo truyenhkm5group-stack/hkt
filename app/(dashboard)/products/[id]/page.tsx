@@ -14,6 +14,7 @@ import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
 
@@ -24,6 +25,7 @@ function stockTone(remain: number) {
 }
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePermission("products:view");
   const { id } = await params;
   const product = await getProductDetail(id);
   if (!product) {

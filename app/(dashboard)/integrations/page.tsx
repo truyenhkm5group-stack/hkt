@@ -11,7 +11,7 @@ import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
@@ -38,8 +38,8 @@ type BackfillState = { nextStart?: string; days?: number; done?: boolean; finish
 
 export default async function IntegrationsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requireUser();
-  const canSync = can(user.role, "sync:run");
+  const user = await requirePermission("integrations:view");
+  const canSync = can(user, "sync:run");
   const status = integrationStatus();
   const running = runningJobKeys();
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });

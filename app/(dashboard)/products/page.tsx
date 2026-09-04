@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listProducts, listWarehouses, productFacets, productSummary, PRODUCT_SORTABLE } from "@/lib/queries/products";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { requirePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Sản phẩm & tồn kho" };
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  await requirePermission("products:view");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "erpStock", defaultDir: "asc", filterKeys: ["stock", "category", "warehouse", "status"], sortable: PRODUCT_SORTABLE, defaultPeriod: "all" });
   const [{ rows, total, pageCount }, facets, summary, warehouses] = await Promise.all([listProducts(params), productFacets(params), productSummary(params), listWarehouses()]);

@@ -36,44 +36,45 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { hasPermission, type Permission } from "@/lib/auth/permissions";
 
-type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; roles?: Role[] };
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission };
 
 const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "Vận hành",
     items: [
-      { href: "/", label: "Tổng quan", icon: LayoutDashboard },
-      { href: "/orders", label: "Đơn hàng", icon: ShoppingBag },
-      { href: "/shipments", label: "Vận đơn", icon: Truck },
-      { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw },
-      { href: "/customers", label: "Khách hàng", icon: Users },
+      { href: "/", label: "Tổng quan", icon: LayoutDashboard, permission: "dashboard:view" },
+      { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
+      { href: "/shipments", label: "Vận đơn", icon: Truck, permission: "shipments:view" },
+      { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
+      { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
     ],
   },
   {
     label: "Kho & tài chính",
     items: [
-      { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt },
-      { href: "/inventory", label: "Nhật ký kho", icon: Boxes },
-      { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus },
-      { href: "/cod", label: "Đối soát COD", icon: PackageCheck, roles: ["ADMIN", "MANAGER", "ACCOUNTANT", "VIEWER", "CS"] },
-      { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText },
-      { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3 },
-      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2 },
-      { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, roles: ["ADMIN", "MANAGER", "ACCOUNTANT"] },
+      { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
+      { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
+      { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
+      { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
+      { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText, permission: "expenses:view" },
+      { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:view" },
+      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2, permission: "reports:view" },
+      { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view" },
     ],
   },
   {
     label: "Hệ thống",
     items: [
-      { href: "/integrations", label: "Kết nối dữ liệu", icon: PlugZap },
-      { href: "/settings/users", label: "Người dùng", icon: UserCog, roles: ["ADMIN"] },
-      { href: "/audit", label: "Nhật ký hệ thống", icon: ScrollText, roles: ["ADMIN", "MANAGER"] },
+      { href: "/integrations", label: "Kết nối dữ liệu", icon: PlugZap, permission: "integrations:view" },
+      { href: "/settings/users", label: "Người dùng", icon: UserCog, permission: "users:manage" },
+      { href: "/audit", label: "Nhật ký hệ thống", icon: ScrollText, permission: "audit:view" },
     ],
   },
 ];
 
-export function AppSidebar({ user }: { user: { name: string; email: string; role: Role } }) {
+export function AppSidebar({ user }: { user: { name: string; email: string; role: Role; permissions: string[] } }) {
   const pathname = usePathname();
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -88,7 +89,7 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
       </SidebarHeader>
       <SidebarContent className="px-2 py-2">
         {groups.map((group) => {
-          const items = group.items.filter((item) => !item.roles || item.roles.includes(user.role) || user.role === "ADMIN");
+          const items = group.items.filter((item) => !item.permission || user.role === "ADMIN" || hasPermission(user.permissions, item.permission));
           if (!items.length) return null;
           return (
             <SidebarGroup key={group.label} className="p-0 pt-2">

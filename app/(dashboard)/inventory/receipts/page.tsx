@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { listStockReceipts, listVariantsForReceipt, stockReceiptSummary } from "@/lib/queries/stock";
 import { param, type SearchParams } from "@/lib/search-params";
@@ -18,8 +18,8 @@ export const metadata = { title: "Nhập hàng & kiểm kê" };
 
 export default async function StockReceiptsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requireUser();
-  const canWrite = can(user.role, "inventory:write");
+  const user = await requirePermission("products:view");
+  const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
   const [receipts, summary, variants] = await Promise.all([listStockReceipts(200), stockReceiptSummary(), canWrite ? listVariantsForReceipt() : Promise.resolve([])]);
   const selected = selectedId ? receipts.find((r) => r.id === selectedId) : null;

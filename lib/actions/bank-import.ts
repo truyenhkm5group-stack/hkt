@@ -14,7 +14,7 @@ const MAX_TEXT = 5_000_000;
 /** Đọc file sao kê (JSON/CSV) và trả về kế hoạch nhập để người dùng duyệt */
 export async function previewBankLedger(text: string): Promise<{ rows: PlannedRow[] } | { error: string }> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   if (typeof text !== "string" || text.length > MAX_TEXT) return { error: "File quá lớn (tối đa 5MB)" };
   try {
     const txns = parseLedger(text);
@@ -36,7 +36,7 @@ const rowSchema = z.object({
 
 export async function importBankLedger(input: unknown): Promise<{ ok: true; inserted: number; skipped: number } | { error: string }> {
   const user = await requireUser();
-  if (!can(user.role, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
   const parsed = z.array(rowSchema).min(1, "Chưa chọn dòng nào").max(5000, "Tối đa 5000 dòng mỗi lần").safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const result = await insertLedgerExpenses(parsed.data, user.email);

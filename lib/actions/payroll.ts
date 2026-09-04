@@ -21,7 +21,7 @@ function revalidate() {
 
 export async function saveEmployee(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "payroll:manage")) return { error: "Chỉ Quản trị mới được sửa nhân sự và cơ chế lương" };
+  if (!can(user, "payroll:manage")) return { error: "Chỉ Quản trị mới được sửa nhân sự và cơ chế lương" };
   const parsed = employeeSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const data = parsed.data;
@@ -51,7 +51,7 @@ export async function saveEmployee(input: unknown): Promise<ActionResult> {
 
 export async function deleteEmployee(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user.role, "payroll:manage")) return { error: "Chỉ Quản trị mới được xoá nhân sự" };
+  if (!can(user, "payroll:manage")) return { error: "Chỉ Quản trị mới được xoá nhân sự" };
   const list = await listEmployees();
   if (!list.some((e) => e.id === id)) return { error: "Không tìm thấy nhân sự" };
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: list.filter((e) => e.id !== id) });
