@@ -44,7 +44,19 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
   const until = new Date();
   const log = options.log ?? (() => undefined);
 
-  const pages = (await client.listPages()).filter((p) => !rules.chatPageIds?.length || rules.chatPageIds.includes(p.id));
+  // Chỉ quét các page thuộc shop: cấu hình chatPageIds, nếu trống thì lấy các page có đơn Pancake trong 90 ngày
+  let allowed = new Set(rules.chatPageIds ?? []);
+  if (!allowed.size) {
+    const rows = await db
+      .select({ pageId: schema.orders.pageId })
+      .from(schema.orders)
+      .where(sql`${schema.orders.pageId} is not null and ${schema.orders.insertedAt} >= now() - interval '90 days'`)
+      .groupBy(schema.orders.pageId);
+    allowed = new Set(rows.map((r) => r.pageId).filter((x): x is string => Boolean(x)));
+  }
+  const allPages = await client.listPages();
+  const pages = allowed.size ? allPages.filter((p) => allowed.has(p.id)) : allPages;
+  log(`Quét ${pages.length}/${allPages.length} page: ${pages.map((p) => p.name).join(", ")}`);
   let scanned = 0;
   let withHits = 0;
   let created = 0;
