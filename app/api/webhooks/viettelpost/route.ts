@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { asRecord, parseJsonSafeInts, str } from "@/lib/integrations/http";
 import { markWebhook, storeWebhook } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
+import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
     try {
       const result = await applyVtpTracking(record, "VTP_WEBHOOK", { allowCreate: true });
       await markWebhook(eventId, result ? "PROCESSED" : "IGNORED", result ? null : "Không tìm thấy vận đơn tương ứng");
+      if (result) scheduleAlertEvaluation();
     } catch (error) {
       await markWebhook(eventId, "FAILED", error instanceof Error ? error.message : String(error));
     }

@@ -9,6 +9,7 @@ import {
   syncProducts,
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
+import { evaluateAlerts } from "@/lib/alerts/rules";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import type { SyncTrigger } from "@/lib/sync/runner";
@@ -87,6 +88,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "FACEBOOK",
     description: "Kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (days=N để kéo lùi N ngày, mặc định 3).",
     run: (o) => syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+  },
+  alerts: {
+    label: "Cảnh báo vận hành",
+    source: "ALL",
+    description: "Quét đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn → tạo thông báo và gửi Telegram (chạy mỗi 10 phút và sau mỗi webhook).",
+    run: () => evaluateAlerts(),
   },
   all: {
     label: "Đồng bộ tất cả",

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { after } from "next/server";
+import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { env } from "@/lib/env";
 import { str } from "@/lib/integrations/http";
 import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook } from "@/lib/integrations/pancake/webhook";
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
   const eventId = await storeWebhook("PANCAKE", kind, externalId, payload, headers);
   after(async () => {
     await processPancakeWebhook(eventId);
+    scheduleAlertEvaluation();
   });
   return NextResponse.json({ ok: true, received: kind, id: eventId });
 }

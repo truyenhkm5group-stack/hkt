@@ -43,6 +43,20 @@
       "when": 1788539821215,
       "tag": "0005_user_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788542767448,
+      "tag": "0006_cod_batches_statement",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788543066368,
+      "tag": "0007_notifications",
+      "breakpoints": true
     }
   ]
 }

@@ -28,8 +28,10 @@ export async function CashTab({ period }: { period: Period }) {
     kind: "in" | "out" | "total";
   }[] = [
     {
-      label: "COD Viettel Post đã về ngân hàng",
-      note: `${formatNumber(r.cashIn.codPaidCount)} vận đơn đánh dấu đã về trong kỳ (Đối soát COD)`,
+      label: "COD Viettel Post đã về ngân hàng (thực nhận)",
+      note: r.statements.count
+        ? `${formatNumber(r.statements.count)} bảng kê đối soát trong kỳ: tiền COD ${formatVND(r.statements.codGross)} − cước/dư nợ ${formatVND(r.statements.feeTotal)} · ${formatNumber(r.statements.shipmentsLinked)} vận đơn đã ghép chi tiết (Đối soát COD → Bảng kê Viettel Post)`
+        : "Chưa có bảng kê / đợt nhận tiền nào trong kỳ — nhập ở Đối soát COD → Bảng kê Viettel Post",
       value: r.cashIn.codPaidToBank,
       kind: "in",
     },
@@ -46,18 +48,29 @@ export async function CashTab({ period }: { period: Period }) {
       value: r.cashOut.purchases,
       kind: "out",
     },
-    {
-      label: "(–) Cước ship đơn giao thành công thật",
-      note: `${formatNumber(r.finished.delivered)} đơn kết thúc giao thật trong kỳ`,
-      value: r.cashOut.shippingDelivered,
-      kind: "out",
-    },
-    {
-      label: "(–) Cước ship + phí hoàn của đơn hoàn",
-      note: `${formatNumber(r.finished.returned)} đơn hoàn trong kỳ (cước đi ${formatVND(r.cashOut.shippingReturned)} + phí hoàn ${formatVND(r.cashOut.returnFees)})`,
-      value: r.cashOut.shippingReturned + r.cashOut.returnFees,
-      kind: "out",
-    },
+    ...(r.cashOut.shippingMode === "statement"
+      ? [
+          {
+            label: "(–) Cước ship + phí hoàn: đã trừ trên bảng kê Viettel Post",
+            note: `${formatVND(r.cashOut.shippingStatement)} cước/dư nợ COD đã bị trừ trước khi tiền về (tiền vào ở trên là số thực nhận) · ước tính theo đơn kết thúc trong kỳ: giao thật ${formatVND(r.cashOut.shippingDelivered)}, hoàn ${formatVND(r.cashOut.shippingReturned + r.cashOut.returnFees)} — không trừ lần nữa`,
+            value: 0,
+            kind: "out" as const,
+          },
+        ]
+      : [
+          {
+            label: "(–) Cước ship đơn giao thành công thật (ước tính)",
+            note: `${formatNumber(r.finished.delivered)} đơn kết thúc giao thật trong kỳ · kỳ này chưa có bảng kê Viettel Post nên dùng cước ghi trên đơn`,
+            value: r.cashOut.shippingDelivered,
+            kind: "out" as const,
+          },
+          {
+            label: "(–) Cước ship + phí hoàn của đơn hoàn (ước tính)",
+            note: `${formatNumber(r.finished.returned)} đơn hoàn trong kỳ (cước đi ${formatVND(r.cashOut.shippingReturned)} + phí hoàn ${formatVND(r.cashOut.returnFees)})`,
+            value: r.cashOut.shippingReturned + r.cashOut.returnFees,
+            kind: "out" as const,
+          },
+        ]),
     {
       label: "(–) Chi phí quảng cáo",
       note: "Facebook Ads tự động + nhập tay, theo ngày chi",
@@ -91,7 +104,7 @@ export async function CashTab({ period }: { period: Period }) {
         <MetricCard
           label="Tiền ra"
           value={formatVND(r.cashOut.total, { compact: true })}
-          note={`Nhập hàng ${formatVND(r.cashOut.purchases, { compact: true })} · ship ${formatVND(r.cashOut.shippingDelivered + r.cashOut.shippingReturned + r.cashOut.returnFees, { compact: true })} · QC ${formatVND(r.cashOut.adSpend, { compact: true })}`}
+          note={`Nhập hàng ${formatVND(r.cashOut.purchases, { compact: true })} · ship ${r.cashOut.shippingMode === "statement" ? `${formatVND(r.cashOut.shippingStatement, { compact: true })} (đã trừ trên bảng kê)` : formatVND(r.cashOut.shippingDelivered + r.cashOut.shippingReturned + r.cashOut.returnFees, { compact: true })} · QC ${formatVND(r.cashOut.adSpend, { compact: true })}`}
           icon={ArrowUpFromLine}
           tone="rose"
         />

@@ -55,13 +55,15 @@ export function resolveMarketer(campaignId: string, campaignName: string, accoun
 }
 
 /** Thứ tự ưu tiên: ghép tay theo chiến dịch → bí danh → mã tự nhận diện trong tên. Không thuộc mã nào = chi phí test. */
-export function resolveCampaign(campaignId: string, campaignName: string, mapping: AdsMapping, index: ProductCodeEntry[], accountId: string | null = null): { productId: string | null; excluded: boolean; marketerId: string | null; source: "manual" | "alias" | "auto" | "none" } {
+export function resolveCampaign(campaignId: string, campaignName: string, mapping: AdsMapping, index: ProductCodeEntry[], accountId: string | null = null): { productId: string | null; excluded: boolean; marketerId: string | null; source: "manual" | "alias" | "auto" | "test" | "none" } {
   const marketerId = resolveMarketer(campaignId, campaignName, accountId, mapping);
   const manual = mapping.campaignMap[campaignId];
   if (manual && (manual.exclude || manual.productId !== undefined && (manual.productId || manual.testCost))) {
     return { productId: manual.exclude ? null : manual.productId, excluded: manual.exclude, marketerId, source: "manual" };
   }
   const name = normalize(campaignName);
+  // Tên chiến dịch có chữ TEST → chi phí test (không thuộc mã), kể cả khi có mã hàng trong tên
+  if (/ test /.test(name) || /_test_|_test$|^test_/.test(campaignName.toLowerCase())) return { productId: null, excluded: false, marketerId, source: "test" };
   const aliasHits = Object.entries(mapping.aliases)
     .flatMap(([productId, list]) => list.map((alias) => ({ productId, alias: alias.trim().toLowerCase() })))
     .filter((a) => a.alias && (name.includes(` ${a.alias} `) || (a.alias.length >= 3 && name.includes(a.alias))))

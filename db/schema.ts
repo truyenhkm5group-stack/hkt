@@ -67,6 +67,33 @@ export const users = pgTable("users", {
   updatedAt: updatedAt(),
 });
 
+/** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    /** Loại: SHIPMENT_FAILED · ORDER_PENDING · SHIPMENT_STALE · SHIPMENT_RETURNING · SYSTEM */
+    kind: text("kind").notNull(),
+    /** info · warning · critical */
+    severity: text("severity").notNull().default("info"),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    href: text("href").notNull().default(""),
+    entityType: text("entity_type").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Khoá chống tạo trùng (vd ship-failed:<id>:<mốc>) */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    /** Danh sách userId đã đọc */
+    readBy: jsonb("read_by").$type<string[]>().notNull().default([]),
+    /** Tự đóng khi điều kiện không còn (đơn đã giao / đã xử lý) */
+    resolvedAt: ts("resolved_at"),
+    /** Đã gửi Telegram lúc */
+    notifiedAt: ts("notified_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("notifications_open_idx").on(t.resolvedAt, t.createdAt), index("notifications_kind_idx").on(t.kind)],
+);
+
 export const auditLogs = pgTable(
   "audit_logs",
   {
@@ -392,12 +419,19 @@ export const codBatches = pgTable(
     reference: text("reference").notNull(),
     carrier: text("carrier").notNull().default("Viettel Post"),
     receivedAt: ts("received_at").notNull(),
+    /** Tiền thực nhận về tài khoản (tiền thu về sau khi trừ cước) */
     totalAmount: money("total_amount"),
+    /** Tiền COD gộp trên bảng kê ĐVVC (trước khi trừ cước / dư nợ) */
+    codGross: money("cod_gross"),
+    /** Cước / dư nợ COD ĐVVC đã trừ trên bảng kê */
+    feeTotal: money("fee_total"),
+    /** MANUAL (đánh dấu tay) · VTP_STATEMENT (bảng kê Viettel Post) */
+    source: text("source").notNull().default("MANUAL"),
     note: text("note").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [index("cod_batches_received_idx").on(t.receivedAt)],
+  (t) => [index("cod_batches_received_idx").on(t.receivedAt), uniqueIndex("cod_batches_reference_uq").on(t.reference)],
 );
 
 export const shipments = pgTable(

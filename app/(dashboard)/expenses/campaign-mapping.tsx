@@ -19,7 +19,8 @@ type Marketer = { id: string; name: string };
 function valueOf(row: CampaignMappingRow) {
   if (row.excluded) return "__exclude__";
   if (row.productId) return row.productId;
-  return row.testCost ? "__test__" : "__auto__";
+  // không ghép được mã (hoặc tên có chữ TEST) → hiển thị thẳng là chi phí test; chọn "Tự nhận diện" để thử ghép lại
+  return "__test__";
 }
 
 /** Bảng ghép chiến dịch Facebook → mã hàng, kèm bí danh cho từng mã */
@@ -84,7 +85,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
   const visible = rows.filter((r) => {
     const term = search.trim().toLowerCase();
     if (term && !`${r.campaign} ${r.accountName} ${productName(r.productId)}`.toLowerCase().includes(term)) return false;
-    if (onlyUnmapped && ((r.productId || r.excluded) && r.marketerId)) return false;
+    if (onlyUnmapped && !(!r.marketerId && !r.excluded) && !(!r.productId && !r.excluded && !r.testCost && !/test/i.test(r.campaign))) return false;
     return true;
   });
   const testSpend = rows.filter((r) => !r.productId && !r.excluded).reduce((s, r) => s + r.spend, 0);
@@ -114,7 +115,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm chiến dịch, tài khoản…" className="pl-8" />
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} /> Chỉ chiến dịch chưa ghép mã / marketer
+          <input type="checkbox" checked={onlyUnmapped} onChange={(e) => setOnlyUnmapped(e.target.checked)} /> Chỉ chiến dịch chưa gán marketer hoặc chưa ghép mã (không có chữ TEST)
         </label>
         <span className="text-xs text-muted-foreground">
           {formatNumber(visible.length)}/{formatNumber(rows.length)} chiến dịch · chi phí test (chưa thuộc mã) {formatVND(testSpend, { compact: true })} · chưa gán marketer {formatVND(noMarketerSpend, { compact: true })}
@@ -207,7 +208,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
                     {r.campaign || r.campaignId}
                   </div>
                   <div className="text-[10.5px] text-muted-foreground">
-                    {r.excluded ? "không tính" : r.productId ? (r.manual ? "ghép tay" : "tự động") : r.testCost ? "chi phí test (ghép tay)" : "chi phí test (chưa thuộc mã)"} · gần nhất {formatDate(r.lastDate)}
+                    {r.excluded ? "không tính" : r.productId ? (r.manual ? "ghép tay" : "tự động") : r.testCost ? "chi phí test (ghép tay)" : /test/i.test(r.campaign) ? "chi phí test (tên có TEST)" : "chi phí test (không nhận ra mã)"} · gần nhất {formatDate(r.lastDate)}
                   </div>
                 </td>
                 <td className="px-3 py-1.5 text-xs text-muted-foreground">{r.accountName}</td>
@@ -221,8 +222,8 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
                           <SelectValue placeholder="Chọn mã hàng" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__auto__">Tự nhận diện</SelectItem>
                           <SelectItem value="__test__">Chi phí test (không thuộc mã)</SelectItem>
+                          <SelectItem value="__auto__">Tự nhận diện lại theo tên</SelectItem>
                           {products.map((p) => (
                             <SelectItem key={p.id} value={p.id}>
                               {p.code ? `${p.code} · ` : ""}

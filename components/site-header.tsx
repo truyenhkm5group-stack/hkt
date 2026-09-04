@@ -8,6 +8,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { GlobalSearch } from "@/components/global-search";
+import { NotificationBell } from "@/components/notification-bell";
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -49,6 +50,7 @@ export function SiteHeader() {
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
         <GlobalSearch />
+        <NotificationBell />
         <RealtimeIndicator />
       </div>
     </header>

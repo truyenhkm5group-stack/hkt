@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  BellRing,
   Boxes,
   CircleDollarSign,
   LayoutDashboard,
@@ -47,6 +48,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/", label: "Tổng quan", icon: LayoutDashboard, permission: "dashboard:view" },
       { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
       { href: "/shipments", label: "Vận đơn", icon: Truck, permission: "shipments:view" },
+      { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "shipments:view" },
       { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
     ],

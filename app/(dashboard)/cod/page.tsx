@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, Banknote, CheckCheck, Clock, Download, Landmark, X } from "lucide-react";
 import { CodTable } from "@/app/(dashboard)/cod/cod-table";
 import { CodTabs, type CodTabItem } from "@/app/(dashboard)/cod/cod-tabs";
+import { StatementDialog } from "@/app/(dashboard)/cod/statement-dialog";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -50,6 +51,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         description={`${formatVND(waiting, { compact: true })} đã giao chờ tiền về · ${formatVND(kpis.byStatus.PENDING.amount, { compact: true })} chưa thu · ${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn chênh lệch`}
         actions={
           <>
+            {canWrite ? <StatementDialog /> : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/cod?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV
@@ -98,7 +100,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
       />
       <CodTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
 
-      <SectionCard title="Đợt nhận tiền gần đây" description="Bảng kê tiền COD đơn vị vận chuyển đã chuyển về tài khoản" padded={false}>
+      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Bảng kê tiền COD Viettel Post (tiền COD − cước/dư nợ = tiền thu về) và các đợt đánh dấu tay · số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát" padded={false}>
         {batches.length ? (
           <div className="overflow-x-auto">
             <Table className="min-w-[720px]">
@@ -107,7 +109,9 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
                   <TableHead>Mã bảng kê</TableHead>
                   <TableHead>ĐVVC</TableHead>
                   <TableHead>Ngày nhận</TableHead>
-                  <TableHead className="text-right">Số tiền</TableHead>
+                  <TableHead className="text-right">Tiền COD</TableHead>
+                  <TableHead className="text-right">Cước / dư nợ</TableHead>
+                  <TableHead className="text-right">Thu về</TableHead>
                   <TableHead className="text-right">Vận đơn</TableHead>
                   <TableHead>Ghi chú</TableHead>
                   <TableHead>Người tạo</TableHead>
@@ -124,8 +128,14 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
                     <TableCell className="text-sm">{b.carrier}</TableCell>
                     <TableCell className="text-sm">{formatDate(b.receivedAt)}</TableCell>
                     <TableCell className="text-right">
+                      <Money value={b.codGross || b.totalAmount} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Money value={b.feeTotal} className="text-muted-foreground" />
+                    </TableCell>
+                    <TableCell className="text-right">
                       <Money value={b.totalAmount} className="font-semibold" />
-                      {b.collected !== b.totalAmount ? <div className="text-[10.5px] text-muted-foreground">đã thu <Money value={b.collected} compact /></div> : null}
+                      {b.shipments && b.collected !== b.totalAmount ? <div className="text-[10.5px] text-muted-foreground">đã thu <Money value={b.collected} compact /></div> : null}
                     </TableCell>
                     <TableCell className="text-right text-sm">{formatNumber(b.shipments)}</TableCell>
                     <TableCell className="max-w-[240px] truncate text-xs text-muted-foreground">{b.note || "—"}</TableCell>

@@ -172,25 +172,28 @@ export async function adSummary(period: Period, filters?: AdFilters) {
           .where(and(...periodCond(schema.adSpends.spendDate, prev.from, prev.to), ...extra))
       : Promise.resolve([null]),
   ]);
-  // Đơn thật từ quảng cáo theo ERP: đơn Pancake có ad_id (khách đến từ quảng cáo), không huỷ; doanh thu = đơn giao thành công
+  // Đơn & doanh số theo đơn ĐÃ XÁC NHẬN trên Pancake trong kỳ (không tính đơn mới/chờ/huỷ); ghi chú thêm đơn có ad_id và giao thành công
   const [erpNow, erpPrev] = await Promise.all([adOrdersFromErp(period.from, period.to), prev.from ? adOrdersFromErp(prev.from, prev.to) : Promise.resolve(null)]);
   const toKpi = (r: typeof current | null, erp: Awaited<ReturnType<typeof adOrdersFromErp>> | null) => {
     const spend = Number(r?.spend ?? 0);
     const fbOrders = Number(r?.orders ?? 0);
     const fbRevenue = Number(r?.revenue ?? 0);
     const orders = erp?.orders ?? 0;
-    const delivered = erp?.delivered ?? 0;
     const revenue = erp?.revenue ?? 0;
     return {
       spend,
       leads: Number(r?.leads ?? 0),
       rows: Number(r?.rows ?? 0),
-      /** Đơn ERP có ad_id (không huỷ) */
+      /** Đơn Pancake đã xác nhận trong kỳ */
       orders,
-      /** Trong đó giao thành công */
-      delivered,
-      /** Doanh thu giao thành công của đơn từ quảng cáo (ERP) */
+      /** Doanh số (tổng tiền sau giảm) của đơn đã xác nhận */
       revenue,
+      /** Trong đó: đơn có ad_id (khách đến từ quảng cáo) */
+      adOrders: erp?.adOrders ?? 0,
+      adRevenue: erp?.adRevenue ?? 0,
+      /** Đã giao thành công & doanh thu giao thành công */
+      delivered: erp?.delivered ?? 0,
+      deliveredRevenue: erp?.deliveredRevenue ?? 0,
       /** Số liệu Facebook tự báo (pixel/attribution) — chỉ để tham khảo */
       fbOrders,
       fbRevenue,
@@ -201,19 +204,33 @@ export async function adSummary(period: Period, filters?: AdFilters) {
   return { ...toKpi(current, erpNow), previous: prev.from ? toKpi(previous, erpPrev) : null };
 }
 
-/** Đơn Pancake gắn quảng cáo (ad_id) trong kỳ: tổng đơn không huỷ, đơn giao thành công và doanh thu giao thành công */
+/** Các trạng thái Pancake được coi là "đã xác nhận" (không tính đơn mới, chờ xử lý, huỷ, xoá) */
+export const CONFIRMED_STAGES = ["CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"] as const;
+
+/** Đơn Pancake đã xác nhận trong kỳ (theo ngày lên đơn): số đơn, doanh số; đơn có ad_id; giao thành công */
 export async function adOrdersFromErp(from: Date | null, to: Date | null) {
   const db = await getDb();
   const o = schema.orders;
+  const hasAd = sql`${o.adId} is not null and ${o.adId} <> ''`;
   const [row] = await db
     .select({
-      orders: sql<number>`count(*) filter (where ${o.stage} not in ('CANCELLED','DELETED'))`,
+      orders: sql<number>`count(*)`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`,
+      adOrders: sql<number>`count(*) filter (where ${hasAd})`,
+      adRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${hasAd}), 0)`,
       delivered: sql<number>`count(*) filter (where ${o.stage} in ('DELIVERED','PAID'))`,
-      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} in ('DELIVERED','PAID')), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} in ('DELIVERED','PAID')), 0)`,
     })
     .from(o)
-    .where(and(sql`${o.adId} is not null and ${o.adId} <> ''`, ...periodCond(o.insertedAt, from, to)));
-  return { orders: Number(row?.orders ?? 0), delivered: Number(row?.delivered ?? 0), revenue: Number(row?.revenue ?? 0) };
+    .where(and(inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(o.insertedAt, from, to)));
+  return {
+    orders: Number(row?.orders ?? 0),
+    revenue: Number(row?.revenue ?? 0),
+    adOrders: Number(row?.adOrders ?? 0),
+    adRevenue: Number(row?.adRevenue ?? 0),
+    delivered: Number(row?.delivered ?? 0),
+    deliveredRevenue: Number(row?.deliveredRevenue ?? 0),
+  };
 }
 
 /** Chi tiêu theo ngày × nền tảng cho biểu đồ */

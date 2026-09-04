@@ -15,7 +15,10 @@ import { upsertOrder, upsertProduct } from "@/lib/integrations/pancake/sync";
 import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { evaluateAlerts } from "@/lib/alerts/rules";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
+import { parseStatementDetail, parseStatementSummaryText } from "@/lib/integrations/viettelpost/statement";
+import { applyStatementDetail } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
@@ -235,6 +238,48 @@ async function main() {
   const ledgerRows = await db.select().from(schema.expenses).where(eq(schema.expenses.reference, "MB FT3"));
   assert.equal(ledgerRows[0]?.amount, 1340000);
   console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi vận hành, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
+
+  // Bảng kê tiền COD Viettel Post
+  const summaries = parseStatementSummaryText("PCOD-A-GLMTQY04-2609-55\t04/09/2026 01:00:29\t24.059.000 ₫\t563.757 ₫\t23.495.243 ₫\nPCOD-A-GLMTQY03-2609-44 03/09/2026 08:47:32 58.136.001 ₫ 6.806.381 ₫ 51.329.620 ₫\ndòng rác\n");
+  assert.equal(summaries.length, 2);
+  assert.deepEqual(summaries[0], { reference: "PCOD-A-GLMTQY04-2609-55", receivedAt: "2026-09-04", codGross: 24059000, feeTotal: 563757, netAmount: 23495243 });
+  const detailCsv = "Bảng kê PCOD-A-TEST\nSTT,Mã vận đơn,Người nhận,Tiền COD,Tổng cước,Thực nhận\n1,PKE-RR-9001,Khách A,\"500.000\",\"15.000\",\"485.000\"\n2,PKEKHONGCO,Khách B,\"200.000\",\"10.000\",\"190.000\"\n";
+  const stmtRows = parseStatementDetail(detailCsv, "bang-ke.csv");
+  assert.equal(stmtRows.length, 2);
+  assert.equal(stmtRows[0].trackingCode, "PKE-RR-9001");
+  assert.equal(stmtRows[0].cod, 500000);
+  assert.equal(stmtRows[0].fee, 15000);
+  const rrShipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9001") });
+  assert.ok(rrShipment, "có vận đơn RR-9001");
+  await db.update(schema.shipments).set({ trackingCode: "PKE-RR-9001" }).where(eq(schema.shipments.id, rrShipment.id));
+  const stmtApplied = await applyStatementDetail({ reference: "PCOD-A-TEST", receivedAt: "2026-09-04", codGross: 0, feeTotal: 0, netAmount: 0 }, stmtRows, "test");
+  assert.equal(stmtApplied.matched, 1);
+  assert.equal(stmtApplied.unmatched, 1);
+  const paidShipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, rrShipment.id) });
+  assert.equal(paidShipment?.codStatus, "PAID_TO_BANK");
+  assert.equal(paidShipment?.codCollected, 500000);
+  assert.equal(paidShipment?.shippingFee, 15000);
+  const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, "PCOD-A-TEST") });
+  assert.equal(batch?.codGross, 700000, "tổng COD trên bảng kê (kể cả dòng không ghép được)");
+  assert.equal(batch?.totalAmount, 675000, "tiền thu về = COD − cước");
+  console.log(`✓ Bảng kê Viettel Post: ${summaries.length} dòng tổng hợp, chi tiết ghép ${stmtApplied.matched}/${stmtRows.length} vận đơn, đợt ${batch?.reference} thu về ${batch?.totalAmount}`);
+
+  // Cảnh báo vận hành: giao thất bại → thông báo; giao thành công → tự đóng
+  const failedShipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9004") });
+  assert.ok(failedShipment, "có vận đơn đang giao RR-9004");
+  await db.update(schema.shipments).set({ stage: "DELIVERY_FAILED", vtpStatusName: "Phát thất bại - khách nghỉ, không có nhà", isFinal: false }).where(eq(schema.shipments.id, failedShipment.id));
+  const run1 = await evaluateAlerts();
+  assert.ok(run1.created >= 1, "tạo thông báo giao thất bại");
+  const openFailed = await db.query.notifications.findFirst({ where: eq(schema.notifications.entityId, failedShipment.id) });
+  assert.equal(openFailed?.kind, "SHIPMENT_FAILED");
+  assert.equal(openFailed?.resolvedAt, null);
+  const run1b = await evaluateAlerts();
+  assert.equal(run1b.created, 0, "chạy lại không tạo trùng");
+  await db.update(schema.shipments).set({ stage: "DELIVERED", isFinal: true }).where(eq(schema.shipments.id, failedShipment.id));
+  await evaluateAlerts();
+  const closed = await db.query.notifications.findFirst({ where: eq(schema.notifications.id, openFailed!.id) });
+  assert.ok(closed?.resolvedAt, "tự đóng khi đã giao");
+  console.log(`✓ Cảnh báo: giao thất bại → thông báo (${run1.created} mới), giao xong → tự đóng`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

@@ -18,6 +18,7 @@ const JOBS = [
   { job: "pancake-customers", every: minutes("SYNC_CUSTOMERS_EVERY_MINUTES", 60), offset: 6 },
   { job: "pancake-inventory", every: minutes("SYNC_INVENTORY_EVERY_MINUTES", 60), offset: 8 },
   { job: "facebook-ads", every: minutes("SYNC_ADS_EVERY_MINUTES", 60), offset: 10 },
+  { job: "alerts", every: minutes("ALERTS_EVERY_MINUTES", 10), offset: 3 },
 ];
 
 const DAILY = [

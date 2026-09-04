@@ -6,6 +6,7 @@ export type RealtimeEvent =
   | { type: "shipment"; shipmentId: string; status?: string }
   | { type: "stock"; variantId: string }
   | { type: "ads" }
+  | { type: "notification"; open: number }
   | { type: "ping" };
 
 const globalForBus = globalThis as unknown as { erpBus?: EventEmitter };
