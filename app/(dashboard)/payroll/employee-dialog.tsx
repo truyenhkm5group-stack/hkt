@@ -138,11 +138,11 @@ export function EmployeeDialog({
   const router = useRouter();
   const form = useForm<EmployeeInput>({
     resolver: zodResolver(employeeSchema),
-    defaultValues: toForm(employee),
+    defaultValues: toForm(employee, preset),
   });
   useEffect(() => {
-    if (open) form.reset(toForm(employee));
-  }, [open, employee, form]);
+    if (open) form.reset(toForm(employee, preset));
+  }, [open, employee, preset, form]);
 
   const submit = (values: EmployeeInput) =>
     startTransition(async () => {
