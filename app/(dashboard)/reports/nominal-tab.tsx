@@ -4,6 +4,7 @@ import {
   PackageCheck,
   Percent,
   TrendingUp,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -82,7 +83,7 @@ export async function NominalTab({
     <div className="space-y-5">
       <AssumptionsForm assumptions={report.assumptions} canWrite={canWrite} />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <MetricCard
           label="Doanh số POS (đơn lên)"
           value={formatVND(t.grossSales, { compact: true })}
@@ -121,11 +122,24 @@ export async function NominalTab({
           }
           note={
             t.margin !== null
-              ? `Margin ${t.margin.toFixed(1)}% trên doanh thu GTC ước tính`
+              ? `Margin ${t.margin.toFixed(1)}% · chưa trừ vận hành & rủi ro tồn kho`
               : "—"
           }
           icon={TrendingUp}
           tone={t.expectedProfit >= 0 ? "green" : "rose"}
+        />
+        <MetricCard
+          label="LN ròng ước tính"
+          value={
+            <span
+              className={t.netProfit >= 0 ? "text-success" : "text-destructive"}
+            >
+              {formatVND(t.netProfit, { compact: true })}
+            </span>
+          }
+          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản: lương, mặt bằng, phần mềm…) và rủi ro tồn kho ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 5}% giá vốn)`}
+          icon={Wallet}
+          tone={t.netProfit >= 0 ? "green" : "rose"}
         />
         <MetricCard
           label="Tỷ lệ hoàn ước tính"
@@ -162,13 +176,18 @@ export async function NominalTab({
                 <TableHead className="text-right">DT/đơn</TableHead>
                 <TableHead className="text-right">LN ước tính</TableHead>
                 <TableHead className="text-right">Margin</TableHead>
+                <TableHead className="text-right" title="Chi phí vận hành trong kỳ phân bổ theo tỷ trọng doanh số POS + dự phòng rủi ro tồn kho">
+                  VH + rủi ro TK
+                </TableHead>
+                <TableHead className="text-right">LN ròng</TableHead>
+                <TableHead className="text-right">Margin ròng</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={13}
+                    colSpan={16}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -296,6 +315,28 @@ export async function NominalTab({
                     <TableCell className="text-right">
                       <Pct value={r.margin} />
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Money
+                        value={r.operatingAlloc + r.inventoryRisk}
+                        className="text-muted-foreground"
+                      />
+                      <div className="text-[10px] text-muted-foreground">
+                        VH {formatVND(r.operatingAlloc, { compact: true })} · RR{" "}
+                        {formatVND(r.inventoryRisk, { compact: true })}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Money
+                        value={r.netProfit}
+                        className={cn(
+                          "font-bold",
+                          r.netProfit >= 0 ? "text-success" : "text-destructive",
+                        )}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Pct value={r.netMargin} />
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -358,6 +399,24 @@ export async function NominalTab({
                   <TableCell className="text-right">
                     <Pct value={t.margin} />
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Money value={t.operatingExpenses + t.inventoryRisk} />
+                    <div className="text-[10px] font-normal text-muted-foreground">
+                      VH {formatVND(t.operatingExpenses, { compact: true })} · RR{" "}
+                      {formatVND(t.inventoryRisk, { compact: true })}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Money
+                      value={t.netProfit}
+                      className={
+                        t.netProfit >= 0 ? "text-success" : "text-destructive"
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Pct value={t.netMargin} />
+                  </TableCell>
                 </TableRow>
               ) : null}
             </TableBody>
@@ -366,10 +425,13 @@ export async function NominalTab({
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
           Công thức mỗi mã: DT GTC ước tính = Doanh số POS × (1 − TL hoàn); Giá
           vốn = SP × giá nhập × (1 − TL hoàn); Vận chuyển = Đơn × [(1 − TL hoàn)
-          × cước giao thật + TL hoàn × chi phí đơn hoàn]; LN = DT − giá vốn −
-          vận chuyển − CPQC. Đơn chưa giao vẫn được tính theo tỷ lệ ước tính,
-          nên số này là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực”
-          khi tiền về.
+          × cước giao thật + TL hoàn × chi phí đơn hoàn]; LN ước tính (lợi nhuận
+          gộp sau QC) = DT − giá vốn − vận chuyển − CPQC. LN ròng = LN ước tính −
+          chi phí vận hành trong kỳ (bảng Chi phí, trừ QC & nhập hàng, phân bổ
+          theo tỷ trọng doanh số) − dự phòng rủi ro tồn kho (% giá vốn, sửa ở
+          Giả định). Đơn chưa giao vẫn được tính theo tỷ lệ ước tính, nên đây
+          là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực” khi tiền
+          về.
         </div>
       </SectionCard>
 

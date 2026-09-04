@@ -103,13 +103,43 @@ export type NominalRow = {
   inTransit: number;
   pending: number;
   actualRevenue: number;
+  /** Chi phí vận hành trong kỳ phân bổ theo tỷ trọng doanh số POS */
+  operatingAlloc: number;
+  /** Dự phòng rủi ro tồn kho = giá vốn ước tính × % giả định */
+  inventoryRisk: number;
+  /** LN ròng ước tính = LN danh nghĩa − vận hành phân bổ − rủi ro tồn kho */
+  netProfit: number;
+  netMargin: number | null;
 };
 
 export type NominalReport = {
   assumptions: ResolvedAssumptions;
   rows: NominalRow[];
   unmatchedAdSpend: number;
-  totals: { orders: number; items: number; grossSales: number; adSpend: number; expectedRevenue: number; expectedCogs: number; shipCost: number; expectedProfit: number; margin: number | null; delivered: number; returned: number; inTransit: number; actualRevenue: number; weightedReturnRate: number | null };
+  /** Chi phí vận hành trong kỳ (bảng Chi phí, trừ Quảng cáo & Nhập hàng): lương, mặt bằng, phần mềm, đóng gói… */
+  operatingExpenses: number;
+  /** Số khoản chi vận hành trong kỳ */
+  operatingCount: number;
+  totals: {
+    orders: number;
+    items: number;
+    grossSales: number;
+    adSpend: number;
+    expectedRevenue: number;
+    expectedCogs: number;
+    shipCost: number;
+    expectedProfit: number;
+    margin: number | null;
+    delivered: number;
+    returned: number;
+    inTransit: number;
+    actualRevenue: number;
+    weightedReturnRate: number | null;
+    operatingExpenses: number;
+    inventoryRisk: number;
+    netProfit: number;
+    netMargin: number | null;
+  };
 };
 
 function applyAssumptions(base: { orders: number; items: number; grossSales: number; cogsFull: number; adSpend: number }, rate: number, a: ResolvedAssumptions) {
@@ -130,7 +160,11 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
   if (period.from) adConds.push(gte(ads.spendDate, period.from));
   if (period.to) adConds.push(lte(ads.spendDate, period.to));
 
-  const [sales, adRows] = await Promise.all([
+  const expConds: SQL[] = [sql`${schema.expenses.category} not in ('ADS','PURCHASE')`];
+  if (period.from) expConds.push(gte(schema.expenses.occurredAt, period.from));
+  if (period.to) expConds.push(lte(schema.expenses.occurredAt, period.to));
+
+  const [sales, adRows, [expRow]] = await Promise.all([
     db
       .select({
         productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
@@ -159,7 +193,14 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
       .from(ads)
       .where(and(...adConds))
       .groupBy(ads.productId),
+    db
+      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)`, count: sql<number>`count(*)` })
+      .from(schema.expenses)
+      .where(and(...expConds)),
   ]);
+  const operatingExpenses = Number(expRow?.amount ?? 0);
+  const operatingCount = Number(expRow?.count ?? 0);
+  const riskPct = Math.min(Math.max(Number(assumptions.inventoryRiskPercent ?? 0), 0), 100) / 100;
   const adByProduct = new Map<string, number>();
   let unmatchedAdSpend = 0;
   for (const r of adRows) {
@@ -199,9 +240,20 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
         inTransit: Number(r.inTransit),
         pending: Number(r.pending),
         actualRevenue: Number(r.actualRevenue),
+        operatingAlloc: 0,
+        inventoryRisk: Math.round(calc.expectedCogs * riskPct),
+        netProfit: 0,
+        netMargin: null,
       };
     })
     .sort((a, b) => b.expectedProfit - a.expectedProfit);
+  // phân bổ chi phí vận hành theo tỷ trọng doanh số POS, rồi tính LN ròng từng mã
+  const grossAll = rows.reduce((t, r) => t + r.grossSales, 0);
+  for (const r of rows) {
+    r.operatingAlloc = grossAll ? Math.round((operatingExpenses * r.grossSales) / grossAll) : 0;
+    r.netProfit = r.expectedProfit - r.operatingAlloc - r.inventoryRisk;
+    r.netMargin = r.expectedRevenue ? (r.netProfit / r.expectedRevenue) * 100 : null;
+  }
 
   const totals = rows.reduce(
     (t, r) => ({
@@ -218,15 +270,19 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
       inTransit: t.inTransit + r.inTransit,
       actualRevenue: t.actualRevenue + r.actualRevenue,
       weightedReturn: t.weightedReturn + r.returnRate * r.orders,
+      inventoryRisk: t.inventoryRisk + r.inventoryRisk,
     }),
-    { orders: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0 },
+    { orders: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, inventoryRisk: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const expectedProfitAll = totals.expectedProfit - unmatchedAdSpend;
+  const netProfit = expectedProfitAll - operatingExpenses - totals.inventoryRisk;
   return {
     assumptions,
     rows,
     unmatchedAdSpend,
+    operatingExpenses,
+    operatingCount,
     totals: {
       orders: totals.orders,
       items: totals.items,
@@ -242,6 +298,10 @@ export async function getNominalProfitReport(period: Period): Promise<NominalRep
       inTransit: totals.inTransit,
       actualRevenue: totals.actualRevenue,
       weightedReturnRate: totals.orders ? totals.weightedReturn / totals.orders : null,
+      operatingExpenses,
+      inventoryRisk: totals.inventoryRisk,
+      netProfit,
+      netMargin: totals.expectedRevenue ? (netProfit / totals.expectedRevenue) * 100 : null,
     },
   };
 }

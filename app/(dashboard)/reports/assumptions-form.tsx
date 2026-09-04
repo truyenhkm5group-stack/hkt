@@ -28,6 +28,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     defaultReturnRate: String(assumptions.defaultReturnRate),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
+    inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 5),
   });
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -43,6 +44,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
         overrides: assumptions.overrides,
+        inventoryRiskPercent: num(form.inventoryRiskPercent, 5),
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -87,6 +89,11 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             {assumptions.returnRateWindowDays} ngày
           </span>
         </span>
+        <span>
+          Rủi ro tồn kho{" "}
+          <b className="numeric">{assumptions.inventoryRiskPercent ?? 5}%</b>
+          <span className="text-muted-foreground"> giá vốn hàng bán</span>
+        </span>
         {canWrite ? (
           <Button
             type="button"
@@ -100,7 +107,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         ) : null}
       </div>
       {open ? (
-        <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-5">
+        <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-6">
           <div className="space-y-1">
             <Label>Cước đơn giao thật (₫)</Label>
             <Input
@@ -168,11 +175,26 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
               }
             />
           </div>
-          <div className="sm:col-span-5 flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <Label>Rủi ro tồn kho (% giá vốn)</Label>
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              step={0.5}
+              value={form.inventoryRiskPercent}
+              onChange={(e) =>
+                setForm({ ...form, inventoryRiskPercent: e.target.value })
+              }
+            />
+          </div>
+          <div className="sm:col-span-6 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
               Để trống cước để ERP tự lấy bình quân 90 ngày từ dữ liệu vận đơn.
               Tỷ lệ hoàn từng mã lấy theo lịch sử; có thể ghi đè ở phần chi tiết
-              mã hàng.
+              mã hàng. Rủi ro tồn kho: dự phòng hàng lỗi / tồn lâu phải xả /
+              thất thoát, tính theo % giá vốn hàng bán ước tính.
             </p>
             <Button type="button" size="sm" onClick={submit} disabled={pending}>
               {pending ? (

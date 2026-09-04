@@ -12,6 +12,8 @@ export type ProfitAssumptions = {
   minFinishedOrders: number;
   /** Ghi đè tỷ lệ hoàn (%) theo productId */
   overrides: Record<string, number>;
+  /** Dự phòng rủi ro tồn kho (% trên giá vốn hàng bán ước tính): hàng lỗi, tồn lâu phải xả, thất thoát */
+  inventoryRiskPercent: number;
 };
 
 export const PROFIT_ASSUMPTIONS_KEY = "profit.assumptions";
@@ -23,6 +25,7 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   defaultReturnRate: 30,
   minFinishedOrders: 10,
   overrides: {},
+  inventoryRiskPercent: 5,
 };
 
 export const FALLBACK_SHIP_FEE_DELIVERED = 22_000;
