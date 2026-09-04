@@ -2,7 +2,7 @@ import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, FALLBACK_SHIP_FEE_RETURNED, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
-import { LAST_RECEIPT_COST } from "@/lib/queries/stock";
+import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -15,8 +15,6 @@ const ads = schema.adSpends;
 
 const NOT_CANCELLED = sql`${o.stage} not in ('CANCELLED','DELETED')`;
 const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
-/** Giá vốn một sản phẩm trên dòng đơn: giá nhập trên phiếu gần nhất → giá vốn Pancake ghi trên đơn → giá nhập mẫu mã */
-const LINE_UNIT_COST = sql<number>`coalesce(${LAST_RECEIPT_COST}, nullif(${i.unitCost}, 0), ${pv.lastImportedPrice}, 0)`;
 
 function periodCond(from: Date | null, to: Date | null): SQL[] {
   const conds: SQL[] = [];

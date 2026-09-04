@@ -147,13 +147,28 @@ export async function getOrderDetail(id: string) {
     with: {
       customer: true,
       warehouse: true,
-      items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true } } } },
+      items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true, lastImportedPrice: true } } } },
       statusHistory: { orderBy: [desc(schema.orderStatusHistory.updatedAt)] },
       shipment: { with: { events: { orderBy: [desc(schema.shipmentEvents.occurredAt)] }, codBatch: true } },
       returns: true,
     },
   });
-  return order ?? null;
+  if (!order) return null;
+  // Giá vốn "sống": giá nhập trên phiếu ERP gần nhất → giá vốn Pancake ghi trên đơn → giá nhập mẫu mã
+  const variantIds = order.items.map((it) => it.variantId).filter((v): v is string => Boolean(v));
+  const receiptCosts = variantIds.length
+    ? await db
+        .select({ variantId: schema.stockReceiptItems.variantId, unitCost: schema.stockReceiptItems.unitCost })
+        .from(schema.stockReceiptItems)
+        .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+        .where(and(inArray(schema.stockReceiptItems.variantId, variantIds), sql`${schema.stockReceiptItems.unitCost} > 0`))
+        .orderBy(desc(schema.stockReceipts.receivedAt), desc(schema.stockReceipts.createdAt))
+    : [];
+  const lastCost = new Map<string, number>();
+  for (const rc of receiptCosts) if (rc.variantId && !lastCost.has(rc.variantId)) lastCost.set(rc.variantId, Number(rc.unitCost));
+  const items = order.items.map((it) => ({ ...it, liveUnitCost: (it.variantId && lastCost.get(it.variantId)) || it.unitCost || it.variant?.lastImportedPrice || 0 }));
+  const liveCogs = items.reduce((sum, it) => sum + it.liveUnitCost * it.quantity, 0);
+  return { ...order, items, liveCogs };
 }
 
 export type OrderDetail = NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;

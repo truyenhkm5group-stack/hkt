@@ -29,7 +29,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const s = order.shipment;
   const paid = order.prepaid + order.transferMoney + order.cash;
   const pancakeUrl = order.shopId ? `https://pos.pancake.vn/shop/${order.shopId}/orders?id=${order.id}` : `https://pos.pancake.vn/shop/${env.pancake.shopId}/orders`;
-  const grossProfit = order.totalPriceAfterDiscount - order.cogs - order.partnerFee - order.returnFee;
+  const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
 
   return (
     <div className="space-y-5">
@@ -98,7 +98,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       <TableCell className="text-right"><Money value={item.unitPrice} /></TableCell>
                       <TableCell className="text-right text-muted-foreground"><Money value={item.totalDiscount} /></TableCell>
                       <TableCell className="text-right font-semibold"><Money value={item.lineTotal} /></TableCell>
-                      <TableCell className="text-right text-muted-foreground"><Money value={item.unitCost * item.quantity} /></TableCell>
+                      <TableCell className="text-right text-muted-foreground"><Money value={item.liveUnitCost * item.quantity} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -115,7 +115,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <Row label={<span className="font-bold">Thu hộ (COD)</span>} value={<Money value={order.moneyToCollect} className="text-base font-bold text-primary" />} />
             </div>
             <div className="grid gap-x-8 gap-y-1.5 border-t bg-muted/30 px-5 py-4 text-sm sm:grid-cols-2">
-              <Row label="Giá vốn" value={<Money value={order.cogs} />} />
+              <Row label="Giá vốn" value={<Money value={order.liveCogs} />} />
               <Row label="Phí ĐVVC" value={<Money value={order.partnerFee} />} />
               <Row label="Phí hoàn" value={<Money value={order.returnFee} />} />
               <Row label={<span className="font-bold">Lãi gộp ước tính</span>} value={<Money value={grossProfit} className={`font-bold ${grossProfit >= 0 ? "text-success" : "text-destructive"}`} />} />

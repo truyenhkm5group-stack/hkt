@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { SUCCESS_STAGES } from "@/lib/constants/pancake";
+import { LINE_UNIT_COST, ORDER_COGS } from "@/lib/queries/cogs";
 import { previousPeriod, type Period } from "@/lib/search-params";
 
 export type ReportBasis = "created" | "delivered";
@@ -62,7 +63,7 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
       orders: sql<number>`count(*) filter (where ${NOT_CANCELLED})`,
       successOrders: sql<number>`count(*) filter (where ${SUCCESS})`,
       revenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${SUCCESS}), 0)`,
-      cogs: sql<number>`coalesce(sum(${schema.orders.cogs}) filter (where ${SUCCESS}), 0)`,
+      cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${SUCCESS}), 0)`,
       shipping: sql<number>`coalesce(sum(${schema.orders.partnerFee}) filter (where ${SHIPPED}), 0)`,
       returnFee: sql<number>`coalesce(sum(${schema.orders.returnFee}) filter (where ${NOT_CANCELLED}), 0)`,
       marketplaceFee: sql<number>`coalesce(sum(${schema.orders.feeMarketplace}) filter (where ${NOT_CANCELLED}), 0)`,
@@ -85,7 +86,7 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
     .groupBy(schema.expenses.category);
 
   const adsExpense = expenseRows.filter((r) => r.category === "ADS").reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const operating = expenseRows.filter((r) => r.category !== "ADS").reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const operating = expenseRows.filter((r) => r.category !== "ADS" && r.category !== "PURCHASE").reduce((s, r) => s + Number(r.amount ?? 0), 0);
   const revenue = Number(o?.revenue ?? 0);
   const cogs = Number(o?.cogs ?? 0);
   const shipping = Number(o?.shipping ?? 0);
@@ -143,7 +144,7 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
         orders: sql<number>`count(*) filter (where ${NOT_CANCELLED})`,
         success: sql<number>`count(*) filter (where ${SUCCESS})`,
         revenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${SUCCESS}), 0)`,
-        cogs: sql<number>`coalesce(sum(${schema.orders.cogs}) filter (where ${SUCCESS}), 0)`,
+        cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${SUCCESS}), 0)`,
         shipping: sql<number>`coalesce(sum(${schema.orders.partnerFee}) filter (where ${SHIPPED}), 0)`,
         returnFee: sql<number>`coalesce(sum(${schema.orders.returnFee}) filter (where ${NOT_CANCELLED}), 0)`,
         marketplaceFee: sql<number>`coalesce(sum(${schema.orders.feeMarketplace}) filter (where ${NOT_CANCELLED}), 0)`,
@@ -208,7 +209,7 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
     orders: sql<number>`count(*) filter (where ${NOT_CANCELLED})`,
     success: sql<number>`count(*) filter (where ${SUCCESS})`,
     revenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${SUCCESS}), 0)`,
-    cogs: sql<number>`coalesce(sum(${schema.orders.cogs}) filter (where ${SUCCESS}), 0)`,
+    cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${SUCCESS}), 0)`,
   };
 
   const [current, previous, channels, sellers, products, daily, codPaid, codWaiting] = await Promise.all([
@@ -236,15 +237,16 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
         orders: sql<number>`count(distinct ${schema.orders.id})`,
         quantity: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)`,
         revenue: sql<number>`coalesce(sum(${schema.orderItems.lineTotal}), 0)`,
-        cogs: sql<number>`coalesce(sum(${schema.orderItems.unitCost} * ${schema.orderItems.quantity}), 0)`,
+        cogs: sql<number>`coalesce(sum(${LINE_UNIT_COST} * ${schema.orderItems.quantity}), 0)`,
         image: sql<string | null>`max(${schema.orderItems.image})`,
       })
       .from(schema.orderItems)
       .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+      .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderItems.variantId))
       .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
       .where(and(inPeriod, inArray(schema.orders.stage, SUCCESS_STAGES)))
       .groupBy(schema.orderItems.productName)
-      .orderBy(desc(sql`coalesce(sum(${schema.orderItems.lineTotal}), 0) - coalesce(sum(${schema.orderItems.unitCost} * ${schema.orderItems.quantity}), 0)`))
+      .orderBy(desc(sql`coalesce(sum(${schema.orderItems.lineTotal}), 0) - coalesce(sum(${LINE_UNIT_COST} * ${schema.orderItems.quantity}), 0)`))
       .limit(15),
     getDailyBreakdown(period, basis),
     db

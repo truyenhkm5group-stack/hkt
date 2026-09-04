@@ -5,6 +5,7 @@ import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { FAILED_STAGES, SUCCESS_STAGES } from "@/lib/constants/pancake";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
+import { ORDER_COGS } from "@/lib/queries/cogs";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
   const conds = [];
@@ -32,7 +33,7 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
       stage: schema.orders.stage,
       count: count(),
       revenue: sum(schema.orders.totalPriceAfterDiscount),
-      cogs: sum(schema.orders.cogs),
+      cogs: sql<number>`coalesce(sum(${ORDER_COGS}), 0)`,
     })
     .from(schema.orders)
     .where(where)
@@ -115,7 +116,8 @@ export async function getDashboardData(period: Period) {
   const [expense] = await db
     .select({ amount: sum(schema.expenses.amount) })
     .from(schema.expenses)
-    .where(and(period.from ? gte(schema.expenses.occurredAt, period.from) : undefined, period.to ? lte(schema.expenses.occurredAt, period.to) : undefined));
+    // chi phí vận hành: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
+    .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, period.from ? gte(schema.expenses.occurredAt, period.from) : undefined, period.to ? lte(schema.expenses.occurredAt, period.to) : undefined));
   const [ads] = await db
     .select({ amount: sum(schema.adSpends.spend) })
     .from(schema.adSpends)
@@ -173,7 +175,7 @@ export async function getDashboardData(period: Period) {
   const successCogs = Number(
     (
       await db
-        .select({ cogs: sum(schema.orders.cogs) })
+        .select({ cogs: sql<number>`coalesce(sum(${ORDER_COGS}), 0)` })
         .from(schema.orders)
         .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, SUCCESS_STAGES)))
     )[0]?.cogs ?? 0,

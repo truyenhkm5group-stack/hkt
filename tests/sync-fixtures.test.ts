@@ -212,6 +212,7 @@ async function main() {
   const byRef = (ref: string) => plan.find((r) => r.bankRef === ref)!;
   assert.equal(byRef("FT1").category, "SOFTWARE", "PHAN_MEM → SOFTWARE");
   assert.equal(byRef("FT2").category, "PURCHASE", "≥5 triệu chưa phân loại → nhập hàng");
+  assert.equal(byRef("FT2").status, "not_operating", "nhập hàng không nhập từ sao kê (đã nằm trong giá vốn)");
   assert.equal(byRef("FT3").category, "SALARY", "trùng tên nhân sự → lương");
   assert.equal(byRef("FT3").categorySource, "employee");
   assert.equal(byRef("FT4").category, "OTHER");
@@ -219,11 +220,11 @@ async function main() {
   assert.equal(byRef("FT6").status, "inflow", "tiền vào bị bỏ qua");
   assert.equal(byRef("FT1").description, "CTY TNHH PANCAKE VIET NAM · W7R9K7");
   const fresh = plan.filter((r) => r.status === "new");
-  assert.equal(fresh.length, 4);
+  assert.equal(fresh.length, 3);
   const imported = await insertLedgerExpenses(fresh.map((r) => ({ reference: r.reference, date: r.date, amount: r.amount, category: r.category, description: r.description })), "test");
-  assert.equal(imported.inserted, 4);
+  assert.equal(imported.inserted, 3);
   const again = planImport(txns, await existingLedgerReferences(txns.map(referenceFor)), employees);
-  assert.equal(again.filter((r) => r.status === "duplicate").length, 4, "nhập lại → toàn bộ trùng");
+  assert.equal(again.filter((r) => r.status === "duplicate").length, 3, "nhập lại → toàn bộ trùng");
   const csvTxns = parseLedger(ledgerCsv);
   assert.equal(csvTxns.length, 2);
   assert.equal(csvTxns[0].amount, -600000);
@@ -233,7 +234,7 @@ async function main() {
   assert.equal(csvPlan.find((r) => r.bankRef === "FT7")?.status, "non_pl");
   const ledgerRows = await db.select().from(schema.expenses).where(eq(schema.expenses.reference, "MB FT3"));
   assert.equal(ledgerRows[0]?.amount, 1340000);
-  console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi, bỏ qua tiền vào/nội bộ, chống trùng theo mã GD`);
+  console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi vận hành, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

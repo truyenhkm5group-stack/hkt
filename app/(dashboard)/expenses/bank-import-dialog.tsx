@@ -37,6 +37,7 @@ export function BankImportDialog() {
   const [rows, setRows] = useState<PlannedRow[] | null>(null);
   const [category, setCategory] = useState<Record<string, ExpenseCategory>>({});
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [included, setIncluded] = useState<Set<string>>(new Set()); // dòng CPQC / nhập hàng được bật thủ công
   const [showSkipped, setShowSkipped] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -46,20 +47,22 @@ export function BankImportDialog() {
     setRows(null);
     setCategory({});
     setExcluded(new Set());
+    setIncluded(new Set());
   };
 
   const summary = useMemo(() => {
     if (!rows) return null;
     const by = (s: PlannedRow["status"]) => rows.filter((r) => r.status === s);
-    const selected = by("new").filter((r) => !excluded.has(r.key));
+    const selected = [...by("new").filter((r) => !excluded.has(r.key)), ...by("not_operating").filter((r) => included.has(r.key))];
     return {
       selected,
       selectedTotal: selected.reduce((a, r) => a + r.amount, 0),
       duplicate: by("duplicate").length,
       inflow: by("inflow"),
       nonPl: by("non_pl"),
+      notOperating: by("not_operating"),
     };
-  }, [rows, excluded]);
+  }, [rows, excluded, included]);
 
   const preview = (source: string) =>
     startTransition(async () => {
@@ -71,6 +74,7 @@ export function BankImportDialog() {
       setRows(result.rows);
       setCategory({});
       setExcluded(new Set());
+      setIncluded(new Set());
       toast.success(`Đã đọc ${result.rows.length} giao dịch`);
     });
 
@@ -99,7 +103,7 @@ export function BankImportDialog() {
       router.refresh();
     });
 
-  const visible = rows ? (showSkipped ? rows : rows.filter((r) => r.status === "new" || r.status === "duplicate")) : [];
+  const visible = rows ? (showSkipped ? rows : rows.filter((r) => r.status === "new" || r.status === "duplicate" || r.status === "not_operating")) : [];
 
   return (
     <Dialog
@@ -118,8 +122,8 @@ export function BankImportDialog() {
         <DialogHeader>
           <DialogTitle>Nhập sao kê ngân hàng vào chi phí</DialogTitle>
           <DialogDescription>
-            Chọn file JSON hoặc CSV xuất từ app “Quản lý giao dịch MB Bank” (hoặc dán nội dung). Chỉ tiền ra được ghi thành chi phí; tiền vào, chuyển nội bộ, trả nợ gốc… được bỏ qua. Dòng đã nhập trước đó
-            (trùng mã giao dịch) không bị nhập lại. Bạn có thể sửa nhóm chi phí từng dòng trước khi nhập.
+            Chọn file JSON hoặc CSV xuất từ app “Quản lý giao dịch MB Bank” (hoặc dán nội dung). Chỉ tiền ra thuộc chi phí vận hành được ghi; tiền vào, chuyển nội bộ, trả nợ gốc… được bỏ qua. Quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm
+            trong giá vốn) mặc định không nhập — tích chọn nếu muốn nhập với nhóm khác. Dòng đã nhập trước đó (trùng mã giao dịch) không bị nhập lại. Bạn có thể sửa nhóm chi phí từng dòng trước khi nhập.
           </DialogDescription>
         </DialogHeader>
 
@@ -161,6 +165,11 @@ export function BankImportDialog() {
                     Không tính lãi/lỗ: {summary.nonPl.length} · {formatVND(summary.nonPl.reduce((a, r) => a + r.amount, 0))}
                   </Badge>
                 ) : null}
+                {summary.notOperating.length ? (
+                  <Badge variant="outline">
+                    CPQC / nhập hàng (không nhập): {summary.notOperating.length} · {formatVND(summary.notOperating.reduce((a, r) => a + r.amount, 0))}
+                  </Badge>
+                ) : null}
                 <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox checked={showSkipped} onCheckedChange={(v) => setShowSkipped(v === true)} /> Hiện cả dòng bỏ qua
                 </label>
@@ -180,12 +189,13 @@ export function BankImportDialog() {
                 </TableHeader>
                 <TableBody>
                   {visible.map((r) => {
-                    const isNew = r.status === "new";
+                    const optional = r.status === "not_operating";
+                    const isNew = r.status === "new" || (optional && included.has(r.key));
                     const cat = category[r.key] ?? r.category;
                     return (
                       <TableRow key={r.key} className={isNew ? "" : "opacity-60"}>
                         <TableCell>
-                          {isNew ? (
+                          {r.status === "new" ? (
                             <Checkbox
                               checked={!excluded.has(r.key)}
                               onCheckedChange={(v) =>
@@ -193,6 +203,18 @@ export function BankImportDialog() {
                                   const next = new Set(prev);
                                   if (v === true) next.delete(r.key);
                                   else next.add(r.key);
+                                  return next;
+                                })
+                              }
+                            />
+                          ) : optional ? (
+                            <Checkbox
+                              checked={included.has(r.key)}
+                              onCheckedChange={(v) =>
+                                setIncluded((prev) => {
+                                  const next = new Set(prev);
+                                  if (v === true) next.add(r.key);
+                                  else next.delete(r.key);
                                   return next;
                                 })
                               }

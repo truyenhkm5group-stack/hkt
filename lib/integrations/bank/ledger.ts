@@ -3,8 +3,9 @@
  * Hỗ trợ:
  *  - JSON: `{ transactions: [...] }` (window.HKT_SEED / bản sao lưu) hoặc mảng giao dịch
  *  - CSV "Xuất CSV" của app: Ngày, Giờ, Tiền vào, Tiền ra, Nội dung, Đối tác, Mã GD, Số dư, Mã danh mục, …
- * Chỉ tiền RA thuộc nhóm lãi/lỗ mới thành chi phí; tiền vào và các khoản không tính lãi/lỗ
- * (chuyển nội bộ, trả nợ gốc, rút vốn…) được bỏ qua và báo lại cho người dùng.
+ * Chỉ tiền RA thuộc nhóm chi phí VẬN HÀNH mới thành chi phí; tiền vào, các khoản không tính lãi/lỗ
+ * (chuyển nội bộ, trả nợ gốc, rút vốn…), quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
+ * được bỏ qua và báo lại cho người dùng.
  */
 import type { ExpenseCategory } from "@/db/schema";
 import { normalize } from "@/lib/text";
@@ -20,7 +21,10 @@ export type LedgerTxn = {
   note: string;
 };
 
-export type PlanStatus = "new" | "duplicate" | "inflow" | "non_pl";
+export type PlanStatus = "new" | "duplicate" | "inflow" | "non_pl" | "not_operating";
+
+/** Nhóm không nhập từ sao kê: quảng cáo đã lấy từ tài khoản QC, nhập hàng đã nằm trong giá vốn / phiếu nhập */
+export const NON_OPERATING_CATEGORIES: ExpenseCategory[] = ["ADS", "PURCHASE"];
 
 export type PlannedRow = {
   key: string;
@@ -276,6 +280,7 @@ export function planImport(txns: LedgerTxn[], existingReferences: Iterable<strin
     else if (existing.has(reference) || seen.has(reference)) status = "duplicate";
     seen.add(reference);
     const guess = txn.amount < 0 ? suggestCategory(txn, employees) : { category: "OTHER" as ExpenseCategory, source: "default" as const };
+    if (status === "new" && NON_OPERATING_CATEGORIES.includes(guess.category)) status = "not_operating";
     rows.push({
       key: reference,
       bankRef: txn.bankRef,
@@ -299,4 +304,5 @@ export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = {
   duplicate: "Đã có trong ERP",
   inflow: "Tiền vào (bỏ qua)",
   non_pl: "Không tính lãi/lỗ (bỏ qua)",
+  not_operating: "CPQC / nhập hàng (không nhập, đã lấy từ nguồn khác)",
 };
