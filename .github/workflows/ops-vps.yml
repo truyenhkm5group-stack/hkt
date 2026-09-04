@@ -28,6 +28,7 @@ on:
           - vtp-statements-autolink # tự ghép vận đơn vào bảng kê theo ngày giao (arg: "--dry-run --lag=1")
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
+          - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -103,6 +104,9 @@ jobs:
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;
               run-job)
                 docker exec erp-app sh -c "npm run --silent sync -- $ARG" ;;
+              pages-debug)
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/pages-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
               bank-ledger-prune)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-bank-ledger.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --prune-non-operating ;;
