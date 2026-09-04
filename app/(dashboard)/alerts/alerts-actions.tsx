@@ -154,6 +154,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2">
           <Checkbox checked={form.enabled.cs} onCheckedChange={(v) => toggle("cs", v === true)} /> Case CSKH mới (đổi size / màu, sai địa chỉ / SĐT, trả hàng)
         </label>
+        <label className="flex items-center gap-2">
+          <Checkbox checked={form.enabled.stock} onCheckedChange={(v) => toggle("stock", v === true)} /> Thiếu hàng cần sản xuất (hết / hết trước khi SX xong)
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>

@@ -11,6 +11,8 @@ import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
 import { openCsCases } from "@/lib/queries/cs";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
@@ -144,6 +146,29 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityId: c.id,
         dedupeKey: `cs-case:${c.id}`,
       });
+    }
+  }
+  if (cfg.enabled.stock) {
+    activeKinds.push("STOCK_LOW");
+    try {
+      const plan = await getReplenishmentPlan();
+      const week = new Date().toISOString().slice(0, 10);
+      for (const r of plan.rows) {
+        if (r.status !== "OUT" && r.status !== "CRITICAL") continue;
+        const name = `${r.productCode ? `${r.productCode} ` : ""}${r.productName} · ${[r.color, r.size].filter(Boolean).join("/") || r.sku}`;
+        candidates.push({
+          kind: "STOCK_LOW",
+          severity: r.status === "OUT" ? "critical" : "warning",
+          title: `${PLAN_STATUS_LABEL[r.status]} · ${name}`,
+          body: `Khả dụng ${r.available} (tồn ${r.stock}, đã chốt ${r.committed}) · bán ${r.velocity.toFixed(1)}/ngày · ${r.daysOfCover === null ? "không còn hàng" : `còn ${Math.floor(r.daysOfCover)} ngày`} · SX ${r.leadTimeDays} ngày → đề xuất đặt ${r.suggested}`,
+          href: "/inventory/planning",
+          entityType: "VARIANT",
+          entityId: r.variantId,
+          dedupeKey: `stock-low:${r.variantId}:${r.status}:${week.slice(0, 7)}`,
+        });
+      }
+    } catch {
+      // bỏ qua nếu chưa có dữ liệu tồn
     }
   }
   return { candidates, activeKinds };

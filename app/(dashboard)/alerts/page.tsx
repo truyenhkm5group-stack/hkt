@@ -34,7 +34,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {NOTIFICATION_KIND_ORDER.filter((k) => k !== "SYSTEM").map((kind) => (
           <Link key={kind} href={kindFilter === kind ? "/alerts" : `/alerts?kind=${kind}`} className={cn("block rounded-xl", kindFilter === kind && "ring-2 ring-primary/40")}>
             <MetricCard label={NOTIFICATION_KIND_LABEL[kind]} value={formatNumber(counts[kind] ?? 0)} note={kindFilter === kind ? "Đang lọc · bấm để bỏ lọc" : "Bấm để lọc"} icon={BellRing} tone={(counts[kind] ?? 0) > 0 ? (kind === "SHIPMENT_RETURNING" ? "blue" : "amber") : "slate"} />

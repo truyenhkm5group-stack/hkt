@@ -19,6 +19,8 @@ import { evaluateAlerts } from "@/lib/alerts/rules";
 import { detectFromMessages } from "@/lib/cs/chat-detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
+import { computePlan } from "@/lib/constants/planning";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
 import { mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
@@ -333,6 +335,28 @@ async function main() {
   assert.ok(kinds.includes("WRONG_PRICE"), "chốt sai giá");
   assert.ok(!chatHits.some((h) => h.message.includes("chị chờ em")), "bỏ qua tin nhắn của page");
   console.log(`✓ Chat Pancake: nhận diện ${kinds.join(", ")}`);
+
+  // Kế hoạch đặt hàng sản xuất
+  const plan1 = computePlan({ stock: 10, committed: 4, soldInWindow: 28, windowDays: 14, leadTimeDays: 7, coverDays: 14, safetyDays: 3, roundTo: 10 });
+  assert.equal(plan1.available, 6);
+  assert.equal(plan1.velocity, 2);
+  assert.equal(plan1.leadTimeDemand, 14);
+  assert.equal(plan1.safetyStock, 6);
+  assert.equal(plan1.target, 48, "2/ngày × 21 ngày + 6 an toàn");
+  assert.equal(plan1.suggested, 50, "48 − 6 = 42 → làm tròn bội 10");
+  assert.equal(plan1.status, "CRITICAL", "còn 3 ngày < SX 7 ngày");
+  const plan2 = computePlan({ stock: 100, committed: 0, soldInWindow: 14, windowDays: 14, leadTimeDays: 7, coverDays: 14, safetyDays: 3, roundTo: 1 });
+  assert.equal(plan2.status, "OK");
+  assert.equal(plan2.suggested, 0);
+  const plan3 = computePlan({ stock: 0, committed: 2, soldInWindow: 5, windowDays: 14, leadTimeDays: 7, coverDays: 14, safetyDays: 3, roundTo: 1 });
+  assert.equal(plan3.status, "OUT");
+  assert.equal(plan3.shortage, 2);
+  const report = await getReplenishmentPlan();
+  const rrPlan = report.rows.find((r) => r.variantId === "rr-var");
+  assert.ok(rrPlan, "có mẫu mã RR trong kế hoạch");
+  const picker2 = await listVariantsForReceipt();
+  assert.equal(rrPlan.stock, picker2.find((v) => v.id === "rr-var")?.currentStock, "tồn ERP trong kế hoạch khớp bảng tồn kho (cùng công thức)");
+  console.log(`✓ Kế hoạch đặt hàng: đề xuất ${plan1.suggested} (tình trạng ${plan1.status}), RR-var tồn ${rrPlan.stock} · bán 30 ngày ${rrPlan.sold30}`);
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

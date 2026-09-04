@@ -21,7 +21,7 @@ const configSchema = z.object({
   pendingHours: z.number().int().min(1).max(720),
   staleDays: z.number().int().min(1).max(60),
   lookbackDays: z.number().int().min(1).max(365).default(14),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true) }),
+  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true) }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {

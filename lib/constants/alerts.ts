@@ -13,7 +13,7 @@ export type AlertConfig = {
   /** Chỉ xét đơn / vận đơn phát sinh trong N ngày gần đây (bỏ qua đơn cũ đã bỏ) */
   lookbackDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -26,7 +26,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -35,10 +35,11 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   SHIPMENT_STALE: "Vận đơn treo lâu",
   SHIPMENT_RETURNING: "Đang chuyển hoàn",
   CS_CASE: "Case CSKH mới",
+  STOCK_LOW: "Thiếu hàng · cần sản xuất",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
