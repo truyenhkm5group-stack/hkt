@@ -135,7 +135,7 @@ async function checkPancakePages() {
       const convs = await client.listConversations(first.id, new Date(Date.now() - 48 * 3_600_000), new Date(), 5);
       ok(`Page "${first.name}": ${convs.length} hội thoại 48h gần nhất (thử 5)`);
       for (const c of convs.slice(0, 2)) {
-        const msgs = await client.listMessages(first.id, c.id, 10);
+        const msgs = await client.listMessages(first.id, c.id, c.customerId, 10);
         info(`- ${c.customerName || c.id} · thẻ [${c.tags.join(", ")}] · ${msgs.length} tin nhắn · khách gửi: ${msgs.filter((m) => !m.fromPage).length}`);
       }
     }

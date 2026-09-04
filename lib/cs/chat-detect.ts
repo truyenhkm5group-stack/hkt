@@ -80,10 +80,12 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         if (rule && !tagHits.some((h) => h.kind === rule.kind)) tagHits.push({ kind: rule.kind, keyword: tag, message: `Thẻ hội thoại: ${tag}` });
       }
       let messages: PancakeMessage[] = [];
-      try {
-        messages = await client.listMessages(page.id, conv.id, 50);
-      } catch (e) {
-        errors.push(`${conv.id}: ${e instanceof Error ? e.message : String(e)}`);
+      if (conv.customerId) {
+        try {
+          messages = await client.listMessages(page.id, conv.id, conv.customerId, 50);
+        } catch (e) {
+          if (errors.length < 20) errors.push(`${conv.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       const recent = messages.filter((m) => !m.insertedAt || m.insertedAt >= since);
       const msgHits = detectFromMessages(recent, rules.chatRules);
@@ -116,5 +118,5 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
       created += inserted.length;
     }
   }
-  return { pages: pages.length, scanned, withHits, created, errors };
+  return { pages: pages.length, scanned, withHits, created, errors: errors.slice(0, 20), errorCount: errors.length };
 }

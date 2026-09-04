@@ -103,10 +103,10 @@ export class PancakePagesClient {
     return out.slice(0, limit);
   }
 
-  /** Tin nhắn gần nhất của một hội thoại (tối đa ~50) */
-  async listMessages(pageId: string, conversationId: string, count = 50): Promise<PancakeMessage[]> {
+  /** Tin nhắn gần nhất của một hội thoại (tối đa ~50). API yêu cầu customer_id của khách trong hội thoại. */
+  async listMessages(pageId: string, conversationId: string, customerId: string, count = 50): Promise<PancakeMessage[]> {
     const token = await this.pageToken(pageId);
-    const rec = await this.call(`pages/${pageId}/conversations/${conversationId}/messages`, { [token.key]: token.value, current_count: 0, page_size: count });
+    const rec = await this.call(`pages/${pageId}/conversations/${conversationId}/messages`, { [token.key]: token.value, customer_id: customerId, current_count: 0, page_size: count });
     const list = asArray(rec.messages ?? asRecord(rec.data).messages).map(asRecord);
     return list.map((m) => {
       const from = asRecord(m.from);
