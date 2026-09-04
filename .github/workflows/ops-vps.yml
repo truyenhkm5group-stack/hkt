@@ -25,6 +25,7 @@ on:
           - import-bank-ledger  # nhập sao kê MB Bank (JSON/CSV ở ô "arg") thành chi phí vận hành
           - bank-ledger-prune   # xoá các dòng sao kê đã nhập thuộc nhóm Quảng cáo / Nhập hàng
           - import-vtp-statements # nhập bảng kê tiền COD Viettel Post (dán bảng hoặc JSON ở ô "arg")
+          - vtp-statements-autolink # tự ghép vận đơn vào bảng kê theo ngày giao (arg: "--dry-run --lag=1")
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -92,6 +93,9 @@ jobs:
               import-vtp-statements)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-vtp-statements.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-vtp-statements.ts'
                 printf '%s' "$ARG" | docker exec -i erp-app npx tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts --stdin ;;
+              vtp-statements-autolink)
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-statement-autolink.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-autolink.ts $ARG ;;
               bank-ledger-prune)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-bank-ledger.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --prune-non-operating ;;
