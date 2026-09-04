@@ -1,0 +1,28 @@
+# Ghi chú kỹ thuật: API Pancake POS & Viettel Post (đã dùng trong ERP)
+
+Tổng hợp từ tài liệu chính thức (OpenAPI của Pancake, Swagger + tài liệu đối tác của Viettel Post) và các tích hợp mã nguồn mở đang chạy thật. Chi tiết đầy đủ kèm nguồn nằm trong tài liệu nghiên cứu của Project "Code ERP".
+
+## Pancake POS Open API
+
+- Base URL: `https://pos.pages.fm/api/v1` (cũng chạy được tại `https://pos.pancake.vn/api/v1`). Xác thực bằng query `api_key=...` trên mọi request.
+- Tạo API key: *Cấu hình → Nâng cao → Kết nối bên thứ 3 → Webhook/API → API Key → Thêm mới*. Shop ID là số trong URL `pos.pancake.vn/shop/<ID>/...`.
+- Danh sách đơn: `GET /shops/{SHOP_ID}/orders` với `page_size` (≤ 200), `page_number`, `updateStatus=inserted_at|updated_at|...`, `startDateTime`/`endDateTime` (unix giây), `filter_status[]`, `include_removed=1`, `option_sort`, `search`. Trả về `{data[], page_number, page_size, total_entries, total_pages, success}`; mỗi phần tử là **toàn bộ** object đơn (giống `GET /orders/{id}`).
+- Giới hạn thực tế: phân trang tối đa ~10.000 dòng/truy vấn → ERP chia cửa sổ thời gian và tự chia đôi khi `total_entries > 10000`. `updated_at` không phải bộ đếm phiên bản tuyệt đối (phí sàn có thể đổi mà không đổi `updated_at`) → job đối chiếu hằng đêm ép ghi đè 3 ngày gần nhất.
+- ID có thể vượt 2^53 (đơn từ sàn) → ERP parse JSON giữ số lớn dạng chuỗi. Thời gian là ISO không múi giờ nhưng là **UTC**.
+- Trạng thái đơn (`status`): 0 Mới · 17 Chờ xác nhận · 11 Chờ hàng · 20 Đã đặt hàng · 1 Đã xác nhận · 12 Chờ in · 13 Đã in · 8 Đang đóng hàng · 9 Chờ chuyển hàng · 2 Đã gửi hàng · 3 Đã nhận · 16 Đã thu tiền · 4 Đang hoàn · 15 Hoàn một phần · 5 Đã hoàn · 6 Đã hủy · 7 Đã xóa.
+- Mã vận đơn: `partner.order_number_vtp` (Viettel Post), `partner.extend_code` (ĐVVC khác); tên ĐVVC `partner.partner_name`; trạng thái ĐVVC `partner.partner_status` (waiting … delivered, delivered_cod, returning, returned, returned_cod, canceled); `partner.paid_at` = ĐVVC đã đối soát COD; `partner.total_fee` = phí ship ĐVVC.
+- Sản phẩm: `GET /shops/{id}/products` (kèm `variations[]` và `variations_warehouses[]` tồn theo kho: `remain_quantity` = khả dụng, `actual_remain_quantity` = thực tế), `GET /shops/{id}/products/variations` (danh sách mẫu mã phẳng), `GET /shops/{id}/warehouses`, `GET /shops/{id}/inventory_histories` (sổ kho), `GET /shops/{id}/customers` (lọc `start_time_updated_at`/`end_time_updated_at`), `GET /shops/{id}/orders_returned` (đổi/trả).
+- Webhook: cấu hình trong UI (Webhook URL + tick Đơn hàng/Khách hàng/Tồn kho). Pancake **không ký** payload; body là chính object (đơn/khách/sản phẩm) với trường `type` = `orders | customers | products | variations_warehouses`; Pancake có thể **nối thêm loại sự kiện vào cuối URL** (`/hook/orders`). ERP nhận mọi hậu tố, xác thực bằng secret trong URL, lưu vào hộp thư `webhook_events`, trả 200 ngay rồi tải lại đơn từ API để lấy dữ liệu chuẩn; webhook cũ hơn không ghi đè dữ liệu mới hơn.
+- Không có rate limit công bố; có gặp HTTP 429 → ERP retry với backoff và giãn ~250 ms giữa các trang.
+
+## Viettel Post Partner API
+
+- Base URL: `https://partner.viettelpost.vn/v2` (sandbox `https://partnerdev.viettelpost.vn/v2`). Mọi API nghiệp vụ dùng header `Token: <token đối tác>`.
+- Lấy token:
+  - **Cách 1 (dùng token bí mật từ web viettelpost.vn)**: tạo tại *viettelpost.vn/cau-hinh-tai-khoan → Thêm mới token → Sao chép token (OTP)*; gọi `POST /v2/user/loginVTP` body `{"token": "<token bí mật>"}` (ERP gửi cả header `Token`) → `data.token` là JWT đối tác. ERP lưu token vào bảng `integration_tokens`, đọc `exp` trong JWT và tự đổi lại trước khi hết hạn.
+  - **Cách 2**: `POST /v2/user/Login {USERNAME, PASSWORD}` → token ngắn hạn → `POST /v2/user/ownerconnect` (header Token = token ngắn hạn, body giống) → token dài hạn 1 năm.
+- Phong bì phản hồi: `{"status": <mã>, "error": true|false, "message", "data"}` — **HTTP status không phản ánh lỗi**, phải xem `error`/`status` (202 = lỗi token, 203/207 = đơn không tồn tại).
+- Tra cứu: `GET /v2/order/getOrderDetailV3?OrderNumber=<mã vận đơn>`; danh sách: `POST /v2/order/order-filter?page=N` body `{filter, from_date "dd/MM/yyyy", to_date, list_inventory[], list_status[]}`; lịch sử đẩy webhook `GET /v2/order/list-data-push-his?orderNumber=`; gửi lại webhook `POST /v2/order/re-push-message?orderNumber=&isAll=`.
+- Webhook: cấu hình tại *partner.viettelpost.vn → Cấu hình tài khoản → Thông tin nhận hành trình* (API URL + Tham số bí mật), **cần Viettel Post duyệt**. Payload `POST {"DATA": {ORDER_NUMBER, ORDER_REFERENCE, ORDER_STATUS, STATUS_NAME, ORDER_STATUSDATE "dd/MM/yyyy HH:mm:ss", LOCALION_CURRENTLY/LOCATION_CURRENTLY, NOTE, MONEY_COLLECTION, MONEY_TOTAL, MONEY_TOTALFEE, MONEY_FEECOD, PRODUCT_WEIGHT, ORDER_SERVICE, REASON_CODE, ...}, "TOKEN": "<tham số bí mật>"}`. Yêu cầu trả HTTP 200 trong < 1 giây, có thể gửi trùng (ERP idempotent theo mã vận đơn + trạng thái + thời điểm), tối đa 5 lần thử lại; trạng thái kết thúc: 101, 107, 201, 501, 503, 504.
+- Bảng mã trạng thái (rút gọn): −100 mới tạo · 100 tiếp nhận · 101 VTP hủy lấy · 102 lấy hàng thất bại · 103/104 điều phối lấy · 105 bưu tá đã nhận · 107 đối tác hủy qua API · 200 lấy hàng thành công · 201 VTP hủy đơn · 300 đóng tải đi · 400 nhận bàn giao đến bưu cục phát · 500 phân công phát · **501 phát thành công** · 502 chuyển hoàn bưu cục gốc · 503 hủy theo yêu cầu KH · **504 chuyển hoàn thành công** · 505 yêu cầu chuyển hoàn · 506 phát thất bại (khách nghỉ) · 507 phát thất bại (khách đến bưu cục) · 508 phát tiếp · 509 chuyển tiếp bưu cục · 515 duyệt hoàn · 550 KH yêu cầu phát tiếp. Bảng đầy đủ + lý do phát thất bại (REASON_CODE 1–17) trong `lib/constants/viettelpost.ts`.
+- Thời gian Viettel Post là giờ Việt Nam (UTC+7); tiền VND; cân nặng gram.
