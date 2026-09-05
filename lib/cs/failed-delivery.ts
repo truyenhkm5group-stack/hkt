@@ -50,7 +50,7 @@ export async function handleFailedDeliveries(options: { lookbackDays?: number; l
   const log = options.log ?? (() => undefined);
   const result = { scanned: 0, messaged: 0, manual: 0, skipped: 0, errors: [] as string[] };
   if (!rules.failedDeliveryAuto) return result;
-  const since = new Date(Date.now() - (options.lookbackDays ?? 14) * 86_400_000);
+  const since = new Date(Date.now() - (options.lookbackDays ?? 3) * 86_400_000);
   const s = schema.shipments;
   const o = schema.orders;
   const rows = await db
