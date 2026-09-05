@@ -23,6 +23,7 @@ import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
 import { DEFAULT_NURTURE_STEPS, isDue, normalizeOutreachConfig, renderTemplate, shortName } from "@/lib/constants/outreach";
 import { effectiveThreshold, isBillingBlocked, learnThreshold } from "@/lib/integrations/facebook/billing";
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
+import { assessCustomerRisk } from "@/lib/alerts/risk";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { clearMemo } from "@/lib/cache";
@@ -430,6 +431,15 @@ async function main() {
   assert.equal(isBillingBlocked({ accountStatus: 2, disableReason: 0 }), true);
   assert.equal(isBillingBlocked({ accountStatus: 1, disableReason: 0 }), false);
   console.log("✓ Ngưỡng thanh toán tài khoản quảng cáo: offset tiền tệ, học ngưỡng, trạng thái khoá");
+
+  // Đơn rủi ro: khách hoàn nhiều → xin cọc
+  const riskCfg = { riskMinReturned: 2, riskReturnRatePct: 40 };
+  const riskHigh = assessCustomerRisk({ succeed: 6, returned: 44, isBlock: false }, riskCfg);
+  assert.ok(riskHigh.risky && riskHigh.severity === "critical" && Math.round(riskHigh.rate * 100) === 88, "GTC 6 / hoàn 44 → rủi ro nghiêm trọng");
+  assert.equal(assessCustomerRisk({ succeed: 20, returned: 1, isBlock: false }, riskCfg).risky, false, "khách tốt không cảnh báo");
+  assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: true }, riskCfg).risky, "bị chặn trên Pancake → rủi ro");
+  assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: false, erpDelivered: 1, erpReturned: 3 }, riskCfg).risky, "lịch sử ERP cùng SĐT hoàn 3/4 → rủi ro");
+  console.log("✓ Đơn rủi ro: chấm điểm khách theo GTC / hoàn / chặn");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

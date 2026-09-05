@@ -136,6 +136,14 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
           <Input type="number" min={10} max={100} value={form.billingWarnPercent} onChange={(e) => setForm({ ...form, billingWarnPercent: Number(e.target.value) || 80 })} />
         </div>
         <div className="space-y-1">
+          <Label>Đơn rủi ro: khách đã hoàn từ (đơn)</Label>
+          <Input type="number" min={1} value={form.riskMinReturned} onChange={(e) => setForm({ ...form, riskMinReturned: Number(e.target.value) || 2 })} />
+        </div>
+        <div className="space-y-1">
+          <Label>và tỷ lệ hoàn từ (%)</Label>
+          <Input type="number" min={1} max={100} value={form.riskReturnRatePct} onChange={(e) => setForm({ ...form, riskReturnRatePct: Number(e.target.value) || 40 })} />
+        </div>
+        <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
           <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — nhập để thay" : "123456:ABC… (tạo bot qua @BotFather)"} />
         </div>
@@ -177,6 +185,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.billing} onCheckedChange={(v) => toggle("billing", v === true)} /> Tài khoản quảng cáo sắp tới ngưỡng thanh toán / bị vô hiệu hoá
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.risk} onCheckedChange={(v) => toggle("risk", v === true)} /> Đơn của khách rủi ro (hoàn nhiều / bị chặn) → CSKH xin cọc trước khi gửi
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">

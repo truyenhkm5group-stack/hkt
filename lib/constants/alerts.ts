@@ -11,6 +11,9 @@ export type AlertConfig = {
   larkBillingSecret: string;
   /** Cảnh báo khi dư nợ đạt N% ngưỡng thanh toán */
   billingWarnPercent: number;
+  /** Đơn rủi ro: khách đã hoàn ≥ N đơn và tỷ lệ hoàn ≥ M% (theo Pancake hoặc lịch sử ERP) → báo CSKH xin cọc */
+  riskMinReturned: number;
+  riskReturnRatePct: number;
   /** Đơn đã lên nhưng chưa xác nhận / chưa giao ĐVVC quá N giờ → cảnh báo "chờ xử lý" */
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
@@ -18,7 +21,7 @@ export type AlertConfig = {
   /** Chỉ xét đơn / vận đơn phát sinh trong N ngày gần đây (bỏ qua đơn cũ đã bỏ) */
   lookbackDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -31,10 +34,12 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   larkBillingWebhookUrl: "",
   larkBillingSecret: "",
   billingWarnPercent: 80,
+  riskMinReturned: 2,
+  riskReturnRatePct: 40,
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -45,10 +50,11 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   CS_CASE: "Case CSKH mới",
   STOCK_LOW: "Thiếu hàng · cần sản xuất",
   ADS_BILLING: "Tài khoản QC · ngưỡng thanh toán",
+  RISKY_ORDER: "Đơn rủi ro · xin cọc",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "ADS_BILLING", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "ADS_BILLING", "RISKY_ORDER", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",

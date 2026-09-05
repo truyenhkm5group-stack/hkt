@@ -25,7 +25,9 @@ const configSchema = z.object({
   larkBillingWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
   larkBillingSecret: z.string().trim().max(200).default(""),
   billingWarnPercent: z.number().int().min(10).max(100).default(80),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true), billing: z.boolean().default(true) }),
+  riskMinReturned: z.number().int().min(1).max(50).default(2),
+  riskReturnRatePct: z.number().int().min(1).max(100).default(40),
+  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true), billing: z.boolean().default(true), risk: z.boolean().default(true) }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {

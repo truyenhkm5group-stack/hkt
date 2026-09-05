@@ -15,6 +15,7 @@ import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
+import { riskyOrderCandidates } from "@/lib/alerts/risk";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
@@ -212,6 +213,26 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       }
     } catch {
       // chưa có dữ liệu thanh toán
+    }
+  }
+  if (cfg.enabled.risk) {
+    activeKinds.push("RISKY_ORDER");
+    try {
+      const risky = await riskyOrderCandidates({ riskMinReturned: cfg.riskMinReturned, riskReturnRatePct: cfg.riskReturnRatePct }, lookback);
+      for (const { order, risk } of risky) {
+        candidates.push({
+          kind: "RISKY_ORDER",
+          severity: risk.severity,
+          title: `Đơn #${order.systemId ?? ""} · ${order.name || "Khách"}${order.phone ? ` · ${order.phone}` : ""} · khách rủi ro`,
+          body: `GTC ${risk.succeed} · hoàn ${risk.returned}${risk.rate ? ` (${Math.round(risk.rate * 100)}%)` : ""} · ${risk.reasons.join(", ")} · giá trị ${formatVND(order.total ?? 0)} → xin cọc / xác nhận kỹ trước khi gửi ĐVVC`,
+          href: `/orders/${order.id}`,
+          entityType: "ORDER",
+          entityId: order.id,
+          dedupeKey: `risky-order:${order.id}`,
+        });
+      }
+    } catch {
+      // bỏ qua nếu chưa có dữ liệu khách
     }
   }
   return { candidates, activeKinds };
