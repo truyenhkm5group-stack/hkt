@@ -24,7 +24,7 @@ import { DEFAULT_NURTURE_STEPS, isDue, normalizeOutreachConfig, renderTemplate, 
 import { effectiveThreshold, isBillingBlocked, learnThreshold } from "@/lib/integrations/facebook/billing";
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
-import { classifyFailedReason, failedMode, parseAppointment, parsePostman, renderFailedTemplate } from "@/lib/cs/failed-delivery";
+import { classifyFailedReason, failedMode, isReturningNote, isShopAddressIssue, parseAppointment, parsePostman, renderFailedTemplate } from "@/lib/cs/failed-delivery";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { clearMemo } from "@/lib/cache";
@@ -457,7 +457,11 @@ async function main() {
   assert.ok(msg.includes("0971170052") && msg.includes("PKE1508897551") && msg.includes("16:06 ngày 04/09/2026"), "tin hẹn phát lại có giờ hẹn, SĐT bưu tá & mã vận đơn");
   const msg2 = renderFailedTemplate(DEFAULT_CS_RULES.failedDeliveryTemplates.NO_CONTACT, { ten: "chị Ngọc", ma_van_don: "PKE1508909081", buu_ta: "Đinh Lệnh Dũng", sdt_buu_ta: "0396928659", shop: "Hải An", san_pham: "Đầm Q003" });
   assert.notEqual(msg, msg2, "mỗi lý do một nội dung khác nhau");
-  console.log("✓ Giao không thành: phân loại lý do bưu tá, giờ hẹn, SĐT bưu tá, tin riêng theo lý do");
+  assert.equal(isReturningNote(["Đóng bảng kê - Bưu tá: Đặng Việt Cường - 0385372311"]), true, "đóng bảng kê = đang hoàn, không hỏi lý do");
+  assert.equal(isReturningNote(["Người nhận hẹn phát lại"]), false);
+  assert.equal(isShopAddressIssue("[🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG QUẢNG NINH]", []), true, "ghi chú bot sửa địa chỉ = lỗi shop");
+  assert.equal(isShopAddressIssue("khách dặn giao giờ hành chính", ["Giao không thành"]), false);
+  console.log("✓ Giao không thành: phân loại lý do bưu tá, giờ hẹn, SĐT bưu tá, tin riêng theo lý do, bỏ qua khi đang hoàn / lỗi địa chỉ của shop");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

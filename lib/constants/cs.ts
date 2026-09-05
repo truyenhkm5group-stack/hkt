@@ -37,7 +37,7 @@ export const CS_SOURCE_LABEL: Record<string, string> = {
 
 /** Quy tắc nhận diện: từ khoá (không dấu, chữ thường) trong thẻ / ghi chú đơn → loại case. Chỉnh trong settings "cs.rules". */
 /** Lý do giao không thành, đọc từ ghi chú bưu tá / trạng thái Viettel Post */
-export const FAILED_REASONS = ["RESCHEDULED", "NO_CONTACT", "NOT_HOME", "REFUSED", "WRONG_ADDRESS", "COD_ISSUE", "OTHER"] as const;
+export const FAILED_REASONS = ["RESCHEDULED", "NO_CONTACT", "NOT_HOME", "REFUSED", "WRONG_ADDRESS", "SHOP_ADDRESS", "COD_ISSUE", "OTHER"] as const;
 export type FailedReason = (typeof FAILED_REASONS)[number];
 export const FAILED_REASON_LABEL: Record<FailedReason, string> = {
   RESCHEDULED: "Khách hẹn phát lại",
@@ -45,6 +45,7 @@ export const FAILED_REASON_LABEL: Record<FailedReason, string> = {
   NOT_HOME: "Khách đi vắng / không có nhà",
   REFUSED: "Khách từ chối nhận",
   WRONG_ADDRESS: "Sai / không tìm thấy địa chỉ",
+  SHOP_ADDRESS: "Shop lên sai địa chỉ / SĐT",
   COD_ISSUE: "Vấn đề tiền COD / muốn kiểm hàng",
   OTHER: "Lý do khác",
 };
@@ -173,6 +174,8 @@ export const DEFAULT_CS_RULES: CsRules = {
       "Dạ chào {ten} ơi, bưu tá báo đơn {san_pham} (mã {ma_van_don}) mình chưa nhận ạ. Mình cho shop hỏi lý do được không ạ — mình đổi ý, đặt nhầm mẫu/size, chờ lâu hay còn băn khoăn điểm nào? Nếu mình vẫn muốn nhận, shop báo bưu tá giao lại ngay; mình được kiểm hàng thoải mái trước khi thanh toán ạ 💛",
     WRONG_ADDRESS:
       "Dạ chào {ten} ơi, bưu tá chưa tìm được địa chỉ giao đơn {san_pham} (mã {ma_van_don}) ạ. Mình gửi giúp shop địa chỉ chi tiết (số nhà, ngõ, mốc dễ tìm) hoặc gọi bưu tá {buu_ta} – {sdt_buu_ta} chỉ đường giúp nhé. Shop cảm ơn mình nhiều ạ 💛",
+    SHOP_ADDRESS:
+      "Dạ chào {ten} ơi, shop xin lỗi vì đơn {san_pham} (mã {ma_van_don}) bị lên sai địa chỉ / số điện thoại nên bưu tá chưa giao được ạ 🙏 Mình xác nhận giúp shop địa chỉ và SĐT nhận chính xác, shop chuyển ngay cho bưu tá {buu_ta} – {sdt_buu_ta} hoặc gửi lại đơn mới sớm nhất ạ 💛",
     COD_ISSUE:
       "Dạ chào {ten} ơi, bưu tá báo đơn {san_pham} (mã {ma_van_don}) chưa nhận được ạ. Mình yên tâm là được xem và kiểm tra hàng trước khi thanh toán, chưa ưng có thể trả lại bưu tá tại chỗ. Mình muốn shop hẹn bưu tá giao lại lúc nào tiện ạ? Bưu tá: {buu_ta} – {sdt_buu_ta} 💛",
     OTHER:
