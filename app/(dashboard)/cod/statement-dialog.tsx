@@ -39,7 +39,7 @@ export function StatementDialog({ defaultOpen = false }: { defaultOpen?: boolean
         <DialogHeader>
           <DialogTitle>Bảng kê tiền COD Viettel Post</DialogTitle>
           <DialogDescription>
-            Cách nhanh nhất: viettelpost.vn → Quản lý vận đơn → chọn khoảng ngày → Xuất Excel → tải lên ở tab đầu. ERP cập nhật trạng thái thật của từng vận đơn (Đã trả = COD đã về ngân hàng, Giao thành công, Chờ phát lại, Chuyển hoàn…) và cước. Hai tab còn lại dùng cho bảng kê “Tiền hàng đã trả”
+            Cách nhanh nhất: viettelpost.vn → Quản lý vận đơn → chọn khoảng ngày → Xuất Excel → tải lên ở tab đầu. ERP cập nhật trạng thái thật của từng vận đơn: Giao thành công, Đã trả / Đang chuyển hoàn / Đã duyệt hoàn (đơn hoàn), Chờ phát lại, Đang giao… và cước. Tỷ lệ hoàn tính lại theo trạng thái Viettel Post (GTC = giao thành công & COD &gt; 100K; hoàn = các trạng thái hoàn hoặc giao thành công nhưng COD &lt; 50K). Hai tab còn lại dùng cho bảng kê “Tiền hàng đã trả”
             (tổng hợp theo ngày đối soát cho dòng tiền; chi tiết từng bảng kê để gắn vận đơn vào đợt).
           </DialogDescription>
         </DialogHeader>
