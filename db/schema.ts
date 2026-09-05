@@ -98,6 +98,38 @@ export const csCases = pgTable(
   (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId)],
 );
 
+/** Danh sách khách cần nhắn: chăm sóc khách băn khoăn chưa mua (NURTURE) / bán chéo cho khách đã nhận hàng (CROSS_SELL) */
+export const outreachTargets = pgTable(
+  "outreach_targets",
+  {
+    id: id(),
+    segment: text("segment").notNull(),
+    pageId: text("page_id").notNull().default(""),
+    conversationId: text("conversation_id").notNull().default(""),
+    pancakeCustomerId: text("pancake_customer_id").notNull().default(""),
+    customerId: text("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    customerName: text("customer_name").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    /** Sản phẩm đã mua (bán chéo) hoặc tin nhắn cuối của khách (băn khoăn) */
+    context: text("context").notNull().default(""),
+    /** Gợi ý sản phẩm bán chéo (tên, cách nhau bằng dấu phẩy) */
+    suggestions: text("suggestions").notNull().default(""),
+    /** Nội dung đã dựng sẵn từ mẫu */
+    message: text("message").notNull().default(""),
+    /** PENDING · SENT · FAILED · SKIPPED */
+    status: text("status").notNull().default("PENDING"),
+    error: text("error").notNull().default(""),
+    lastActivityAt: ts("last_activity_at"),
+    sentAt: ts("sent_at"),
+    sentBy: text("sent_by").notNull().default(""),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("outreach_segment_status_idx").on(t.segment, t.status, t.createdAt)],
+);
+
 /** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
 export const notifications = pgTable(
   "notifications",
@@ -737,6 +769,11 @@ export const orderReturnsRelations = relations(orderReturns, ({ one }) => ({ ord
 export const csCasesRelations = relations(csCases, ({ one }) => ({
   order: one(orders, { fields: [csCases.orderId], references: [orders.id] }),
   customer: one(customers, { fields: [csCases.customerId], references: [customers.id] }),
+}));
+
+export const outreachTargetsRelations = relations(outreachTargets, ({ one }) => ({
+  order: one(orders, { fields: [outreachTargets.orderId], references: [orders.id] }),
+  customer: one(customers, { fields: [outreachTargets.customerId], references: [customers.id] }),
 }));
 
 export const shipmentsRelations = relations(shipments, ({ one, many }) => ({

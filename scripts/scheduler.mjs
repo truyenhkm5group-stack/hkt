@@ -26,7 +26,8 @@ const DAILY = [
   { job: "pancake-reconcile", hour: 2, minute: 15 }, // 02:15 giờ Việt Nam
   { job: "vtp-tracking", hour: 3, minute: 0, query: "all=1&limit=2000" },
   { job: "pancake-warehouses", hour: 3, minute: 30 },
-  { job: "facebook-ads", hour: 4, minute: 0, query: "days=30" }, // đối chiếu lại 30 ngày (Facebook có thể điều chỉnh số liệu muộn)
+  { job: "facebook-ads", hour: 4, minute: 0, query: "days=30" },
+  { job: "outreach-build", hour: 8, minute: 30 }, // lập danh sách chăm sóc khách & bán chéo mỗi sáng // đối chiếu lại 30 ngày (Facebook có thể điều chỉnh số liệu muộn)
 ];
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);

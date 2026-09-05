@@ -123,6 +123,23 @@ export class PancakePagesClient {
     });
   }
 
+  /** Gửi tin nhắn inbox vào hội thoại (Pancake Pages API action reply_inbox). Facebook giới hạn cửa sổ 24h → có thể bị từ chối. */
+  async sendMessage(pageId: string, conversationId: string, customerId: string, text: string): Promise<{ ok: boolean; error?: string; id?: string }> {
+    const token = await this.pageToken(pageId);
+    const url = new URL(`${this.baseUrl}/pages/${pageId}/conversations/${conversationId}/messages`);
+    url.searchParams.set(token.key, token.value);
+    if (customerId) url.searchParams.set("customer_id", customerId);
+    try {
+      const { body, status } = await fetchJson(url, { method: "POST", headers: { accept: "*/*" }, body: JSON.stringify({ action: "reply_inbox", message: text }), serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 0 });
+      const rec = asRecord(body);
+      if (status >= 400 || rec.success === false) return { ok: false, error: str(rec.message, rec.error, rec.reason) || `HTTP ${status}` };
+      return { ok: true, id: str(rec.id, asRecord(rec.message).id) };
+    } catch (e) {
+      const body = e instanceof IntegrationError ? asRecord(e.body) : {};
+      return { ok: false, error: str(body.message, body.error) || (e instanceof Error ? e.message : String(e)) };
+    }
+  }
+
   async testConnection() {
     const pages = await this.listPages();
     return { pages, tokenLength: this.accessToken.length, pageCount: int(pages.length) };

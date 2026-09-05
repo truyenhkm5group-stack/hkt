@@ -20,6 +20,7 @@ import { detectFromMessages } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
+import { renderTemplate, shortName } from "@/lib/constants/outreach";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
@@ -363,8 +364,19 @@ async function main() {
   assert.equal(stripIgnored("khách báo sai địa chỉ [🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG HÀ NỘI]", DEFAULT_CS_RULES.ignorePatterns), "khách báo sai địa chỉ");
   console.log("✓ Bỏ qua ghi chú tự động của bot Pancake");
 
+  // Mẫu tin chăm sóc khách & bán chéo
+  assert.equal(shortName("Nguyễn Thị Lan"), "chị Lan");
+  assert.equal(shortName("Khách hàng 123"), "chị");
+  assert.equal(shortName(""), "chị");
+  const tpl = "Chào {ten}, cảm ơn đã mua {san_pham} tại {shop}. Gợi ý: {goi_y}.{uu_dai}";
+  assert.equal(renderTemplate(tpl, { ten: "chị Lan", san_pham: "Đầm Q003", goi_y: "Q004", shop: "Hải An", discountCode: "" }), "Chào chị Lan, cảm ơn đã mua Đầm Q003 tại Hải An. Gợi ý: Q004.");
+  assert.ok(renderTemplate(tpl, { ten: "", san_pham: "", goi_y: "", shop: "", discountCode: "CAMON10" }).includes("mã CAMON10"));
+  assert.ok(renderTemplate(tpl, { ten: "", san_pham: "", goi_y: "", shop: "", discountCode: "" }).startsWith("Chào chị,"));
+  console.log("✓ Mẫu tin chăm sóc khách & bán chéo");
+
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
+
 }
 
 main().catch((error) => {

@@ -30,6 +30,11 @@ Cập nhật: 05/09/2026. Mục tiêu: số liệu ra quyết định (lợi nhu
 - Chi phí vận hành trùng nhập hàng / quảng cáo → loại khỏi tính toán.
 - Chiến dịch có chữ TEST hoặc không có mã → chi phí test.
 
+## 2b. Bổ sung sau đợt rà soát
+
+- **Chăm sóc khách băn khoăn & bán chéo** (`/outreach`, job `outreach-build` 08:30): danh sách khách chưa mua sau khi nhắn Pancake và khách đã nhận hàng 3–14 ngày; gửi qua Pancake Pages API (`reply_inbox`). Lưu ý Facebook chỉ cho page nhắn chủ động trong 24 giờ kể từ tin cuối của khách → tin bán chéo có thể bị từ chối; khi đó dùng CSV để nhắn Zalo/SMS hoặc gửi kèm khi khách nhắn lại.
+- **Hiệu quả quảng cáo theo Marketer & mã hàng** (tab Chi phí & quảng cáo): cùng công thức phân bổ với Lương; cần ghép đủ chiến dịch → mã / marketer để số liệu đúng.
+
 ## 3. Lộ trình hoàn thiện
 
 ### Giai đoạn 1 — Số liệu nền đúng (1–2 tuần, cần cả người vận hành)

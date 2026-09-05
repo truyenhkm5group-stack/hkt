@@ -2,6 +2,8 @@ import { CircleDollarSign, Megaphone, ShoppingBag, Target, TrendingUp } from "lu
 import { CampaignMapping } from "@/app/(dashboard)/expenses/campaign-mapping";
 import { EmployeeDialog } from "@/app/(dashboard)/payroll/employee-dialog";
 import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
+import { AdsPerformancePanel } from "@/app/(dashboard)/expenses/ads-performance";
+import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { SyncButton } from "@/components/sync-button";
 import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listCampaignsForMapping, listProductsForMapping } from "@/lib/queries/ads-mapping";
@@ -22,7 +24,7 @@ function change(current: number, previous: number | null | undefined) {
 
 export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { raw: SearchParams; period: Period; canWrite: boolean; canManageEmployees: boolean }) {
   const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform", "account", "marketer", "product"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts()]);
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period)]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
   const activeMarketers = employees.filter((e) => e.active);
@@ -92,6 +94,8 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
           )}
         </div>
       </div>
+
+      <AdsPerformancePanel perf={perf} periodLabel={period.label} />
 
       <SectionCard title="Chi tiêu theo ngày" description="Cột chồng theo nền tảng quảng cáo" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
         <AdsChart data={daily.data} platforms={daily.platforms} />

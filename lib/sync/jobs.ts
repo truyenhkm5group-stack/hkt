@@ -10,6 +10,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -105,6 +106,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       await evaluateAlerts().catch(() => undefined);
       return r;
     },
+  },
+  "outreach-build": {
+    label: "Lập danh sách chăm sóc khách & bán chéo",
+    source: "PANCAKE",
+    description: "Khách nhắn Pancake chưa đặt đơn (băn khoăn) và khách đã nhận hàng 3–14 ngày (bán chéo) → danh sách chờ gửi ở trang Chăm sóc & bán chéo (chỉ lập danh sách, không tự gửi).",
+    run: () => buildOutreachTargets(),
   },
   all: {
     label: "Đồng bộ tất cả",
