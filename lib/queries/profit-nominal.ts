@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, FALLBACK_SHIP_FEE_RETURNED, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -152,7 +153,7 @@ function applyAssumptions(base: { orders: number; items: number; grossSales: num
 }
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-export async function getNominalProfitReport(period: Period): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
   const history = await productReturnHistory(assumptions.returnRateWindowDays);
@@ -351,4 +352,8 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
       const calc = applyAssumptions(base, returnRate, assumptions);
       return { day: d, ...base, ...calc, cpo: base.orders ? base.adSpend / base.orders : null, delivered: Number(sr?.delivered ?? 0), returned: Number(sr?.returned ?? 0) };
     });
+}
+
+export async function getNominalProfitReport(period: Period) : Promise<NominalReport> {
+  return memo(`getNominalProfitReport:${periodKey(period)}`, 120000, () => getNominalProfitReportUncached(period));
 }

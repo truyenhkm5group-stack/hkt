@@ -7,6 +7,7 @@
  */
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { getMarketerReport } from "@/lib/queries/payroll";
 import type { Period } from "@/lib/search-params";
 
@@ -58,7 +59,7 @@ function rate(rowRoas: number | null, avgRoas: number | null, profit: number, sp
   return { rating: "AVERAGE", reason: "Quanh mức trung bình" };
 }
 
-export async function getAdsPerformance(period: Period): Promise<AdsPerformance> {
+async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance> {
   const db = await getDb();
   const report = await getMarketerReport(period);
   const ads = schema.adSpends;
@@ -195,4 +196,8 @@ export async function getAdsPerformance(period: Period): Promise<AdsPerformance>
     bestProduct: rp[0] ?? null,
     worstProduct: rp.length > 1 ? rp[rp.length - 1] : null,
   };
+}
+
+export async function getAdsPerformance(period: Period) : Promise<AdsPerformance> {
+  return memo(`getAdsPerformance:${periodKey(period)}`, 120000, () => getAdsPerformanceUncached(period));
 }

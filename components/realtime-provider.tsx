@@ -12,7 +12,7 @@ const RealtimeContext = createContext<RealtimeState>({ connected: false, lastEve
 
 /**
  * Kết nối SSE tới /api/events và làm mới dữ liệu trang (router.refresh) khi có thay đổi.
- * Có debounce để tránh refresh dồn dập; fallback tự làm mới mỗi 60 giây khi tab đang mở.
+ * Gộp sự kiện, tối thiểu 20 giây giữa hai lần làm mới; chỉ tự làm mới định kỳ (5 phút) khi mất kết nối SSE.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -25,17 +25,19 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     let closed = false;
     let retry = 1000;
 
+    const MIN_GAP = 20_000; // không làm mới trang dày hơn 20 giây/lần dù có nhiều sự kiện
     const scheduleRefresh = () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) return; // đã có lịch làm mới, gộp sự kiện
       const since = Date.now() - lastRefresh.current;
       timer.current = setTimeout(
         () => {
+          timer.current = null;
           if (document.visibilityState === "visible") {
             lastRefresh.current = Date.now();
             router.refresh();
           }
         },
-        since > 5000 ? 800 : 4000,
+        since > MIN_GAP ? 1500 : MIN_GAP - since,
       );
     };
 
@@ -53,6 +55,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           setState((s) => ({ ...s, lastEventAt: Date.now(), events: s.events + 1 }));
           if (event.type === "sync" && event.status === "FAILED") toast.error(`Đồng bộ ${event.job} thất bại`);
           if (event.type === "order" && event.action === "created") toast.success("Có đơn hàng mới từ Pancake", { id: "new-order", duration: 4000 });
+          // chỉ làm mới khi dữ liệu thực sự đổi: đơn / vận đơn / tồn / quảng cáo / thông báo, hoặc job đồng bộ kết thúc
+          if (event.type === "sync" && event.status !== "SUCCESS" && event.status !== "FAILED") return;
           scheduleRefresh();
         } catch {
           // bỏ qua
@@ -69,12 +73,14 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     };
     connect();
 
+    // Dự phòng khi mất kết nối SSE: làm mới mỗi 5 phút (đã kết nối thì chỉ làm mới theo sự kiện)
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible" && Date.now() - lastRefresh.current > 60_000) {
+      const disconnected = !source || source.readyState !== EventSource.OPEN;
+      if (disconnected && document.visibilityState === "visible" && Date.now() - lastRefresh.current > 300_000) {
         lastRefresh.current = Date.now();
         router.refresh();
       }
-    }, 30_000);
+    }, 60_000);
 
     return () => {
       closed = true;

@@ -1,5 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
 import { LAST_RECEIPT_COST, erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
@@ -62,7 +63,7 @@ function demandSubquery(db: Awaited<ReturnType<typeof getDb>>, days: number, ali
     .as(`demand_${alias}`);
 }
 
-export async function getReplenishmentPlan(): Promise<PlanReport> {
+async function getReplenishmentPlanUncached(): Promise<PlanReport> {
   const db = await getDb();
   const a = await loadPlanningAssumptions();
   const sales = variantSalesSubquery(db);
@@ -148,4 +149,8 @@ export async function getReplenishmentPlan(): Promise<PlanReport> {
     products,
     summary: { variants: active.length, out: byStatus.OUT, critical: byStatus.CRITICAL, low: byStatus.LOW, suggestedUnits: active.reduce((t, r) => t + r.suggested, 0), orderCost: active.reduce((t, r) => t + r.orderCost, 0), byStatus },
   };
+}
+
+export async function getReplenishmentPlan() {
+  return memo(`getReplenishmentPlan:${"all"}`, 120000, () => getReplenishmentPlanUncached());
 }

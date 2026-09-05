@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { clearMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
 
 export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK";
@@ -94,6 +95,7 @@ export async function runSyncJob<T>(
       publish({ type: "sync", source: options.source, job: options.job, status: "FAILED" });
       throw error;
     } finally {
+      clearMemo();
       runningJobs.delete(key);
     }
   })();

@@ -1,5 +1,6 @@
 import { and, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import {
   PAYROLL_EMPLOYEES_KEY,
   type Employee,
@@ -72,7 +73,7 @@ export type MarketerReport = {
  * Lợi nhuận cá nhân theo marketer: lợi nhuận danh nghĩa của từng mã (trước chi phí QC) được chia cho các marketer
  * theo tỷ trọng tiền QC mỗi người chạy cho mã đó, rồi trừ tiền QC mã hàng và tiền QC test của chính người đó.
  */
-export async function getMarketerReport(
+async function getMarketerReportUncached(
   period: Period,
 ): Promise<MarketerReport> {
   const db = await getDb();
@@ -371,4 +372,10 @@ export async function listAdAccounts() {
     .where(sql`${schema.adSpends.accountId} is not null`)
     .groupBy(schema.adSpends.accountId);
   return rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? (r.id as string) }));
+}
+
+export async function getMarketerReport(
+  period: Period,
+) : Promise<MarketerReport> {
+  return memo(`getMarketerReport:${periodKey(period)}`, 120000, () => getMarketerReportUncached(period));
 }

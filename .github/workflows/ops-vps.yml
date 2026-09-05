@@ -12,6 +12,7 @@ on:
         default: status
         options:
           - status              # trạng thái container + health
+          - perf                # tài nguyên VPS (CPU/RAM từng container) và thời gian phản hồi vài trang
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
@@ -72,6 +73,15 @@ jobs:
               status)
                 $C ps
                 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              perf)
+                nproc; free -m; uptime
+                docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+                for path in /api/health /login /api/notifications; do
+                  docker exec erp-app sh -c "wget -qO /dev/null -S http://127.0.0.1:3000$path 2>&1 | head -1; echo" >/dev/null 2>&1
+                  t=$(docker exec erp-app sh -c "start=\$(date +%s%N); wget -qO /dev/null http://127.0.0.1:3000$path 2>/dev/null; end=\$(date +%s%N); echo \$(( (end-start)/1000000 ))")
+                  echo "$path: ${t} ms"
+                done
+                $C exec -T db psql -U erp -d erp -P pager=off -c "select count(*) as active, count(*) filter (where state='active') running from pg_stat_activity where datname='erp';" -c "select relname, n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 8;" ;;
               logs)
                 $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
               sync-pancake-all)

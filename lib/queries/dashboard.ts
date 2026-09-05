@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
@@ -56,7 +57,7 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
   return kpi;
 }
 
-export async function getDashboardData(period: Period) {
+async function getDashboardDataUncached(period: Period) {
   const db = await getDb();
   const [current, previous] = await Promise.all([orderKpis(period.from, period.to), (() => {
     const prev = previousPeriod(period);
@@ -209,3 +210,7 @@ export async function getDashboardData(period: Period) {
 }
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
+
+export async function getDashboardData(period: Period) {
+  return memo(`getDashboardData:${periodKey(period)}`, 60000, () => getDashboardDataUncached(period));
+}

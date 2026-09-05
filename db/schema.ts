@@ -471,7 +471,7 @@ export const orderItems = pgTable(
     weight: integer("weight").notNull().default(0),
     image: text("image"),
   },
-  (t) => [index("order_items_order_idx").on(t.orderId), index("order_items_variant_idx").on(t.variantId)],
+  (t) => [index("order_items_order_idx").on(t.orderId), index("order_items_variant_idx").on(t.variantId), index("order_items_product_idx").on(t.productId)],
 );
 
 export const orderStatusHistory = pgTable(
@@ -583,6 +583,8 @@ export const shipments = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    index("shipments_order_idx").on(t.orderId),
+    index("shipments_vtp_number_idx").on(t.vtpOrderNumber),
     index("shipments_stage_idx").on(t.stage),
     index("shipments_cod_status_idx").on(t.codStatus),
     index("shipments_carrier_idx").on(t.carrier),
