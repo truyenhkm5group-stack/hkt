@@ -39,8 +39,10 @@ export const LANDING_COLUMN_LABEL: Record<LandingColumnKey, string> = {
 export type LandingConfig = {
   /** Link Google Sheet (chia sẻ "Bất kỳ ai có liên kết" – xem) hoặc link CSV */
   sheetUrl: string;
-  /** gid của tab; rỗng = tab đầu */
+  /** gid của tab; rỗng = tab đầu (dùng khi không khai tabs) */
   gid: string;
+  /** Tên các tab cần đọc, cách nhau bằng dấu phẩy (vd "Q003, Q002"); mỗi tab một mã hàng / bố cục riêng, ERP dò cột từng tab */
+  tabs: string;
   /** Ghi đè cột: khoá → tiêu đề cột trong sheet, hoặc "#n" = cột thứ n (đếm từ 1) khi sheet không có tiêu đề */
   columns: Partial<Record<LandingColumnKey, string>>;
   /** Sheet có dòng tiêu đề không: auto (tự nhận), yes, no */
@@ -57,7 +59,7 @@ export type LandingConfig = {
   warehouseId: string;
 };
 export const LANDING_CONFIG_KEY = "landing.config";
-export const DEFAULT_LANDING_CONFIG: LandingConfig = { sheetUrl: "", gid: "", columns: {}, hasHeader: "auto", dedupeDays: 7, autoPush: false, shippingFee: 25_000, posNote: "Đơn landing page", warehouseId: "" };
+export const DEFAULT_LANDING_CONFIG: LandingConfig = { sheetUrl: "", gid: "", tabs: "", columns: {}, hasHeader: "auto", dedupeDays: 7, autoPush: false, shippingFee: 25_000, posNote: "Đơn landing page", warehouseId: "" };
 
 /** Bí danh tiêu đề (không dấu, thường) cho từng cột */
 const HEADER_ALIASES: Record<LandingColumnKey, string[]> = {
@@ -181,6 +183,9 @@ export function parseMoney(v: string | null | undefined): number {
 export function parseSheetTime(v: string | null | undefined, fallback: Date | null = null): Date | null {
   const s = String(v ?? "").trim();
   if (!s) return fallback;
+  // "06:15:01 2/9/2026" (giờ trước ngày)
+  const tf = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (tf) return new Date(`${tf[6]}-${tf[5].padStart(2, "0")}-${tf[4].padStart(2, "0")}T${tf[1].padStart(2, "0")}:${tf[2]}:${tf[3] ?? "00"}+07:00`);
   let m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
   if (m) {
     let d = Number(m[1]);
@@ -194,7 +199,7 @@ export function parseSheetTime(v: string | null | undefined, fallback: Date | nu
   return Number.isNaN(t.getTime()) ? fallback : t;
 }
 
-const DATE_RE = /^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})/;
+const DATE_RE = /^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}(:\d{2})?\s+\d{1,2}\/\d{1,2}\/\d{4})/;
 const PHONE_RE = /^(\+?84|0)?\d{9,10}$/;
 const VARIANT_RE = /(size|màu|mau|color)/i;
 const OFFER_RE = /(\d+)\s*(sản phẩm|san pham|sp|cái|cai|chiếc|chiec)?[^\d]*?(\d{2,3})\s*k\b|(\d+)\s*(sản phẩm|san pham).*?(\d[\d.,]{4,})/i;
@@ -271,11 +276,18 @@ export function detectColumnsByContent(rows: string[][]): Partial<Record<Landing
     if (score(i, (v) => /\d/.test(v) || v.split(" ").length >= 3) >= 0.5 && avg > addrLen && avg >= 12) { addrLen = avg; addr = i; }
   }
   if (addr >= 0) { out.address = addr; used.add(addr); }
-  // ghi chú: cột chữ thưa (nhiều ô trống) không phải các cột trên, nằm giữa địa chỉ và mẫu mã
-  for (let i = (out.address ?? 0) + 1; i < (out.variant ?? width); i++) {
+  // ghi chú: cột chữ thưa (nhiều ô trống, không phải cột luôn có dữ liệu như nhóm / tên quảng cáo), ưu tiên cột gần địa chỉ / mẫu mã
+  const noteCandidates: number[] = [];
+  for (let i = 0; i < width; i++) {
     if (used.has(i)) continue;
     const filled = sample.filter((r) => (r[i] ?? "").trim()).length;
-    if (filled > 0 && filled < sample.length && score(i, (v) => /[a-zà-ỹ]/i.test(v) && !/việt nam/i.test(v)) >= 0.8) { out.note = i; used.add(i); break; }
+    if (filled > 0 && filled < Math.max(1, Math.ceil(sample.length * 0.8)) && score(i, (v) => /[a-zà-ỹ]/i.test(v) && !/việt nam/i.test(v) && !AD_ID_RE.test(v)) >= 0.8) noteCandidates.push(i);
+  }
+  if (noteCandidates.length) {
+    const anchor = out.variant ?? out.address ?? 0;
+    noteCandidates.sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor));
+    out.note = noteCandidates[0];
+    used.add(noteCandidates[0]);
   }
   return out;
 }
@@ -352,12 +364,26 @@ export function rowToLanding(headers: string[], cells: string[], cols: Partial<R
   return { rowIndex, time: parseSheetTime(get("time")), name, phone, address, province: get("province"), product, variant: variantText, size, color, quantity, price, total, note: get("note"), source: campaign || get("source"), campaign, adId, sheetStatus: get("status"), raw };
 }
 
-/** Link Google Sheet → link CSV export (giữ nguyên nếu đã là link CSV / link khác) */
-export function sheetCsvUrl(url: string, gid = ""): string {
+/** Link Google Sheet → link CSV export theo gid, hoặc theo TÊN tab (gviz); giữ nguyên nếu đã là link CSV / link khác */
+export function sheetCsvUrl(url: string, gid = "", tabName = ""): string {
   const m = /docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(url);
   if (!m) return url;
+  if (tabName) return `https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
   const g = gid || (/[#&?]gid=(\d+)/.exec(url)?.[1] ?? "");
   return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv${g ? `&gid=${g}` : ""}`;
+}
+
+/** Danh sách tab cần đọc: theo tên (gviz) nếu khai tabs, không thì theo gid */
+export function sheetTabs(cfg: { sheetUrl: string; gid: string; tabs: string }): { key: string; label: string; url: string }[] {
+  const names = cfg.tabs.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean);
+  if (names.length) return names.map((n) => ({ key: `tab:${n}`, label: n, url: sheetCsvUrl(cfg.sheetUrl, "", n) }));
+  const gid = cfg.gid || /[#&?]gid=(\d+)/.exec(cfg.sheetUrl)?.[1] || "0";
+  return [{ key: gid, label: `gid ${gid}`, url: sheetCsvUrl(cfg.sheetUrl, gid) }];
+}
+
+/** Dòng tiêu đề "rỗng" hoặc chỉ A, B, C… (gviz sinh ra khi sheet không có tiêu đề) */
+export function isGenericHeader(headers: string[]): boolean {
+  return headers.every((h) => !h.trim() || /^[A-Z]{1,2}$/.test(h.trim()));
 }
 
 export type VariantCandidate = { id: string; productId: string; productName: string; productCode: string; sku: string; size: string; color: string };

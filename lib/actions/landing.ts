@@ -75,7 +75,7 @@ export async function runLandingImport(): Promise<ActionResult<{ summary: string
   try {
     const r = await importLandingSheet();
     revalidate();
-    return { ok: true, summary: `${r.rows} dòng · mới ${r.inserted} · cập nhật ${r.updated} · ghép mẫu mã ${r.matchedVariants} · trùng ${r.duplicates} · rủi ro ${r.risky} · ghép đơn Pancake ${r.linked}${r.errors.length ? ` · lỗi: ${r.errors.join("; ")}` : ""}` };
+    return { ok: true, summary: `${r.tabs.map((t) => `${t.label} ${t.rows} dòng${t.error ? ` (lỗi: ${t.error})` : ""}`).join(", ")} · mới ${r.inserted} · cập nhật ${r.updated} · ghép mẫu mã ${r.matchedVariants} · trùng ${r.duplicates} · rủi ro ${r.risky} · ghép đơn Pancake ${r.linked}${r.errors.length ? ` · lỗi: ${r.errors.join("; ")}` : ""}` };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
@@ -84,6 +84,7 @@ export async function runLandingImport(): Promise<ActionResult<{ summary: string
 const configSchema = z.object({
   sheetUrl: z.string().trim().max(500),
   gid: z.string().trim().max(20),
+  tabs: z.string().trim().max(300).default(""),
   columns: z.record(z.string(), z.string().trim().max(120)).default({}),
   hasHeader: z.enum(["auto", "yes", "no"]).default("auto"),
   dedupeDays: z.number().int().min(1).max(90).default(7),
@@ -107,9 +108,7 @@ export async function saveLandingConfig(input: unknown): Promise<ActionResult<{ 
   if (next.sheetUrl) {
     try {
       const pv = await previewSheet(next);
-      preview = `${pv.rows} dòng · ${pv.hasHeader ? "có tiêu đề" : "không tiêu đề, dò theo nội dung"} · cột đã dò: ${Object.entries(pv.detected)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(", ")}${!pv.detected.phone ? " · CHƯA dò được cột SĐT" : ""}`;
+      preview = pv.tabs.map((t) => (t.error ? `${t.label}: ${t.error}` : `${t.label}: ${t.rows} dòng, ${Object.keys(t.detected).length} cột dò được${!t.detected.phone ? " (CHƯA có cột SĐT)" : ""}`)).join(" · ");
     } catch (e) {
       preview = `Không đọc được sheet: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -117,12 +116,13 @@ export async function saveLandingConfig(input: unknown): Promise<ActionResult<{ 
   return { ok: true, preview };
 }
 
-export async function previewLandingSheet(): Promise<ActionResult<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number; hasHeader: boolean }>> {
+export type TabPreviewDto = { label: string; headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number; hasHeader: boolean; error?: string };
+export async function previewLandingSheet(): Promise<ActionResult<{ tabs: TabPreviewDto[] }>> {
   const user = await requireUser();
   if (!can(user, "landing:config")) return { error: "Không có quyền" };
   try {
     const pv = await previewSheet();
-    return { ok: true, headers: pv.headers, detected: pv.detected as Record<string, string>, sample: pv.sample, rows: pv.rows, hasHeader: pv.hasHeader };
+    return { ok: true, tabs: pv.tabs.map((t) => ({ label: t.label, headers: t.headers, detected: t.detected as Record<string, string>, sample: t.sample, rows: t.rows, hasHeader: t.hasHeader, error: t.error })) };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { previewLandingSheet, saveLandingConfig } from "@/lib/actions/landing";
+import { previewLandingSheet, saveLandingConfig, type TabPreviewDto } from "@/lib/actions/landing";
 import { LANDING_COLUMN_LABEL, type LandingColumnKey, type LandingConfig } from "@/lib/constants/landing";
 
 const COLUMN_KEYS = Object.keys(LANDING_COLUMN_LABEL) as LandingColumnKey[];
@@ -15,7 +15,7 @@ const COLUMN_KEYS = Object.keys(LANDING_COLUMN_LABEL) as LandingColumnKey[];
 export function LandingConfigForm({ config, canWrite }: { config: LandingConfig; canWrite: boolean }) {
   const [open, setOpen] = useState(!config.sheetUrl && canWrite);
   const [form, setForm] = useState({ ...config, columns: { ...config.columns } });
-  const [preview, setPreview] = useState<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number; hasHeader: boolean } | null>(null);
+  const [preview, setPreview] = useState<TabPreviewDto[] | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const save = () =>
@@ -31,13 +31,13 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
     start(async () => {
       const r = await previewLandingSheet();
       if ("error" in r) toast.error(r.error);
-      else setPreview(r);
+      else setPreview(r.tabs);
     });
   return (
     <div className="rounded-xl border bg-card p-4 text-[13px] shadow-xs">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <span className="font-semibold">Nguồn dữ liệu:</span>
-        <span className="truncate">{config.sheetUrl ? <a href={config.sheetUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Google Sheet{config.gid ? ` · gid ${config.gid}` : ""}</a> : <span className="text-amber-700">chưa cấu hình</span>}</span>
+        <span className="truncate">{config.sheetUrl ? <a href={config.sheetUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Google Sheet{config.tabs ? ` · tab ${config.tabs}` : config.gid ? ` · gid ${config.gid}` : ""}</a> : <span className="text-amber-700">chưa cấu hình</span>}</span>
         <span className="text-muted-foreground">Trùng SĐT trong {config.dedupeDays} ngày · phí ship đơn nháp {config.shippingFee.toLocaleString("vi-VN")} ₫{Object.keys(config.columns).length ? ` · ${Object.keys(config.columns).length} cột khai tay` : " · tự dò cột theo tiêu đề"}</span>
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
@@ -53,7 +53,11 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
               <Input value={form.sheetUrl} onChange={(e) => setForm({ ...form, sheetUrl: e.target.value })} placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…" />
             </div>
             <div className="space-y-1">
-              <Label>gid tab (tuỳ chọn)</Label>
+              <Label>Tên các tab (cách nhau dấu phẩy)</Label>
+              <Input value={form.tabs} onChange={(e) => setForm({ ...form, tabs: e.target.value })} placeholder="Q003, Q002 · để trống = tab theo gid trong link" />
+            </div>
+            <div className="space-y-1">
+              <Label>gid tab (khi không khai tên tab)</Label>
               <Input value={form.gid} onChange={(e) => setForm({ ...form, gid: e.target.value })} placeholder="tự lấy từ link" />
             </div>
             <div className="space-y-1">
@@ -87,22 +91,28 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
               {COLUMN_KEYS.map((k) => (
                 <div key={k} className="flex items-center gap-2">
                   <span className="w-28 shrink-0 truncate text-xs" title={LANDING_COLUMN_LABEL[k]}>{LANDING_COLUMN_LABEL[k]}</span>
-                  <Input className="h-8" value={form.columns[k] ?? ""} placeholder={preview?.detected[k] ? `dò: ${preview.detected[k]}` : "tự dò"} onChange={(e) => setForm({ ...form, columns: { ...form.columns, [k]: e.target.value } })} />
+                  <Input className="h-8" value={form.columns[k] ?? ""} placeholder={preview?.[0]?.detected[k] ? `dò: ${preview[0].detected[k]}` : "tự dò"} onChange={(e) => setForm({ ...form, columns: { ...form.columns, [k]: e.target.value } })} />
                 </div>
               ))}
             </div>
           </div>
-          {preview ? (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="min-w-full text-xs">
-                <thead className="bg-muted/50">
-                  <tr>{preview.headers.map((h, i) => <th key={i} className="whitespace-nowrap px-2 py-1 text-left font-semibold">{h || `(cột ${i + 1})`}{Object.entries(preview.detected).find(([, v]) => v === h) ? <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-800">{Object.entries(preview.detected).find(([, v]) => v === h)?.[0]}</span> : null}</th>)}</tr>
-                </thead>
-                <tbody>{preview.sample.map((r, i) => <tr key={i} className="border-t">{r.map((c, j) => <td key={j} className="max-w-[220px] truncate px-2 py-1" title={c}>{c}</td>)}</tr>)}</tbody>
-              </table>
-              <div className="px-2 py-1 text-[11px] text-muted-foreground">{preview.rows} dòng dữ liệu · {preview.hasHeader ? "sheet có tiêu đề" : "sheet không có tiêu đề → dò cột theo nội dung"} · SĐT đã che bớt</div>
-            </div>
-          ) : null}
+          {preview
+            ? preview.map((t) => (
+                <div key={t.label} className="overflow-x-auto rounded-lg border">
+                  <div className="flex items-center gap-2 border-b bg-muted/40 px-2 py-1 text-xs font-semibold">
+                    Tab {t.label} · {t.rows} dòng · {t.error ? <span className="text-rose-700">{t.error}</span> : t.hasHeader ? "có tiêu đề" : "không tiêu đề → dò cột theo nội dung"}
+                  </div>
+                  {!t.error ? (
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-muted/30">
+                        <tr>{t.headers.map((h, i) => { const key = Object.entries(t.detected).find(([, v]) => v === h || v === `#${i + 1}`)?.[0]; return <th key={i} className="whitespace-nowrap px-2 py-1 text-left font-semibold">{h || `(cột ${i + 1})`}{key ? <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-800">{LANDING_COLUMN_LABEL[key as LandingColumnKey] ?? key}</span> : null}</th>; })}</tr>
+                      </thead>
+                      <tbody>{t.sample.map((r, i) => <tr key={i} className="border-t">{r.map((c, j) => <td key={j} className="max-w-[220px] truncate px-2 py-1" title={c}>{c}</td>)}</tr>)}</tbody>
+                    </table>
+                  ) : null}
+                </div>
+              ))
+            : null}
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" onClick={save} disabled={pending}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Lưu cấu hình</Button>
             <Button type="button" size="sm" variant="outline" onClick={doPreview} disabled={pending || !config.sheetUrl} title="Đọc thử sheet đã lưu để xem cột dò được"><Eye className="size-4" /> Xem thử sheet đã lưu</Button>
