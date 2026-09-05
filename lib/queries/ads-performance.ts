@@ -2,7 +2,9 @@
  * Hiệu quả quảng cáo theo Marketer và theo mã hàng (thay vì liệt kê từng chiến dịch).
  * Nguồn số liệu thống nhất với Báo cáo lợi nhuận & Lương:
  *  - Chi QC, tin nhắn/lead, lượt mua Facebook báo: bảng ad_spends (đã ghép mã hàng / marketer, bỏ dòng "Không tính").
- *  - Đơn, doanh số, lợi nhuận theo mã: báo cáo lợi nhuận danh nghĩa (đơn Pancake trong kỳ, trừ giá vốn, ship, tỷ lệ hoàn dự kiến).
+ *  - Đơn, doanh số, lợi nhuận theo mã: báo cáo lợi nhuận danh nghĩa — LN = LN ròng ước tính (đã trừ giá vốn, ship, QC, đóng hàng,
+ *    NV vận đơn, chi phí vận hành & cố định phân bổ, rủi ro tồn kho, thuế, chi phí khác); tỷ lệ hoàn theo kết quả Viettel Post.
+ *  Lưu ý đơn vị: báo cáo danh nghĩa trả % (0–100); ở đây quy về phân số (0–1) để hiển thị thống nhất.
  *  - Theo marketer: doanh số / lợi nhuận của mã được chia theo tỷ trọng tiền QC mỗi người chạy cho mã đó (cùng công thức với Lương).
  */
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
@@ -29,8 +31,9 @@ export type PerfRow = {
   roas: number | null;
   profit: number;
   margin: number | null;
-  /** Mã hàng: tỷ lệ hoàn dự kiến / đã giao / đã hoàn */
+  /** Mã hàng: tỷ lệ hoàn dự kiến (phân số 0–1, đã trộn đơn chưa kết thúc) / đã giao / đã hoàn / tỷ lệ hoàn thực tế trên đơn đã kết thúc */
   returnRate?: number;
+  actualReturnRate?: number | null;
   delivered?: number;
   returned?: number;
   /** Marketer: tiền QC test không thuộc mã */
@@ -98,19 +101,70 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
   const totalSpend = report.marketers.reduce((s, m) => s + m.totalSpend, 0);
   const totalRevenue = report.nominal.totals.expectedRevenue;
   const totalOrders = report.nominal.totals.orders;
-  const totalProfit = report.nominal.totals.expectedProfit;
+  const totalProfit = report.nominal.totals.netProfit;
   const avgRoas = totalSpend ? totalRevenue / totalSpend : null;
   const totalMessages = [...fbByMarketer.values()].reduce((s, e) => s + e.messages, 0);
   const minSpend = Math.max(200_000, totalSpend * 0.02);
 
-  const marketers: PerfRow[] = report.marketers.map((m) => {
-    const f = fbByMarketer.get(m.marketerId ?? "__none__");
+  // Đơn & doanh số theo marketer: chia ĐƠN ĐÃ XÁC NHẬN và DT GTC ước tính của từng mã (báo cáo danh nghĩa — cùng cơ sở với
+  // thẻ "Đơn đã xác nhận" và bảng theo mã) theo tỷ trọng ghi nhận của Lương (ad_id → fanpage → tiền QC → chủ mã).
+  // Bảng Lương chỉ chia đơn GIAO THÀNH CÔNG (vì trả lương theo tiền về) nên dùng số đó ở đây sẽ thiếu đơn.
+  // Phần không chia được cho ai (mã không chạy QC / không có fanpage, ad_id) dồn vào "Chưa gán marketer" để tổng luôn khớp.
+  const shareByProduct = new Map<string, Map<string, number>>();
+  for (const m of report.marketers) {
+    const key = m.marketerId ?? "__none__";
+    for (const line of m.products) {
+      if (!(line.share > 0)) continue;
+      const e = shareByProduct.get(line.productId) ?? new Map<string, number>();
+      e.set(key, (e.get(key) ?? 0) + line.share);
+      shareByProduct.set(line.productId, e);
+    }
+  }
+  const adShareByProduct = new Map<string, Map<string, number>>();
+  for (const r of fb) {
+    if (!r.productId) continue;
+    const e = adShareByProduct.get(r.productId) ?? new Map<string, number>();
+    e.set(r.marketerId ?? "__none__", (e.get(r.marketerId ?? "__none__") ?? 0) + Number(r.spend));
+    adShareByProduct.set(r.productId, e);
+  }
+  const attributed = new Map<string, { orders: number; revenue: number }>();
+  const add = (key: string, orders: number, revenue: number) => {
+    const e = attributed.get(key) ?? { orders: 0, revenue: 0 };
+    e.orders += orders;
+    e.revenue += revenue;
+    attributed.set(key, e);
+  };
+  for (const r of report.nominal.rows) {
+    if (!r.orders && !r.expectedRevenue) continue;
+    let shares = shareByProduct.get(r.productId);
+    if (!shares || !shares.size) {
+      // mã chưa có đơn giao thành công (Lương chưa chia) → chia tạm theo tiền QC từng người chạy cho mã
+      const ad = adShareByProduct.get(r.productId);
+      const total = ad ? [...ad.values()].reduce((t, v) => t + v, 0) : 0;
+      shares = new Map();
+      if (ad && total > 0) for (const [k, v] of ad) shares.set(k, v / total);
+    }
+    let used = 0;
+    for (const [k, sh] of shares) {
+      const s = Math.min(Math.max(sh, 0), 1);
+      used += s;
+      add(k, r.orders * s, r.expectedRevenue * s);
+    }
+    const rest = Math.max(0, 1 - used);
+    if (rest > 1e-6) add("__none__", r.orders * rest, r.expectedRevenue * rest);
+  }
+
+  const marketerRow = (id: string, name: string, m: { totalSpend: number; personalProfit: number; testSpend: number }): PerfRow => {
+    const f = fbByMarketer.get(id);
+    const a = attributed.get(id) ?? { orders: 0, revenue: 0 };
+    const orders = Math.round(a.orders);
+    const revenue = Math.round(a.revenue);
     const spend = m.totalSpend;
-    const roas = spend ? m.attributedRevenue / spend : null;
+    const roas = spend ? revenue / spend : null;
     const { rating, reason } = rate(roas, avgRoas, m.personalProfit, spend, minSpend);
     return {
-      id: m.marketerId ?? "__none__",
-      name: m.name,
+      id,
+      name,
       code: "",
       spend,
       spendShare: totalSpend ? spend / totalSpend : 0,
@@ -118,24 +172,33 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       messages: f?.messages ?? 0,
       costPerMessage: f?.messages ? Math.round(spend / f.messages) : null,
       fbOrders: f?.fbOrders ?? 0,
-      orders: m.attributedOrders,
-      cpo: m.attributedOrders ? Math.round(spend / m.attributedOrders) : null,
-      revenue: m.attributedRevenue,
+      orders,
+      cpo: orders && spend ? Math.round(spend / orders) : null,
+      revenue,
       roas,
       profit: m.personalProfit,
-      margin: m.attributedRevenue ? m.personalProfit / m.attributedRevenue : null,
+      margin: revenue ? m.personalProfit / revenue : null,
       testSpend: m.testSpend,
-      rating,
-      reason: m.testSpend && spend && m.testSpend / spend > 0.3 && rating !== "GOOD" ? `${reason} · ${Math.round((m.testSpend / spend) * 100)}% tiền là QC test` : reason,
+      rating: spend ? rating : "NONE",
+      reason: !spend ? "Đơn không gắn được QC / fanpage / ad_id của marketer nào" : m.testSpend && spend && m.testSpend / spend > 0.3 && rating !== "GOOD" ? `${reason} · ${Math.round((m.testSpend / spend) * 100)}% tiền là QC test` : reason,
     };
-  });
+  };
+  const marketers: PerfRow[] = report.marketers.map((m) => marketerRow(m.marketerId ?? "__none__", m.name, m));
+  const noneAttr = attributed.get("__none__");
+  if (noneAttr && (noneAttr.orders >= 0.5 || noneAttr.revenue >= 1) && !marketers.some((m) => m.id === "__none__")) {
+    marketers.push(marketerRow("__none__", "Chưa gán marketer", { totalSpend: 0, personalProfit: 0, testSpend: 0 }));
+  }
 
   const products: PerfRow[] = report.nominal.rows
     .filter((r) => r.adSpend > 0 || r.orders > 0)
     .map((r) => {
       const f = fbByProduct.get(r.productId);
       const roas = r.adSpend ? r.expectedRevenue / r.adSpend : null;
-      const { rating, reason } = rate(roas, avgRoas, r.expectedProfit, r.adSpend, minSpend);
+      const { rating, reason } = rate(roas, avgRoas, r.netProfit, r.adSpend, minSpend);
+      const finished = r.delivered + r.returned;
+      const actualReturnRate = finished ? r.returned / finished : null;
+      const returnRate = Math.min(Math.max(r.returnRate, 0), 100) / 100; // báo cáo danh nghĩa trả %, quy về phân số
+      const highReturn = (actualReturnRate ?? returnRate) >= 0.35;
       return {
         id: r.productId,
         name: r.productName,
@@ -150,13 +213,14 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
         cpo: r.orders && r.adSpend ? Math.round(r.adSpend / r.orders) : null,
         revenue: r.expectedRevenue,
         roas,
-        profit: r.expectedProfit,
-        margin: r.margin,
-        returnRate: r.returnRate,
+        profit: r.netProfit,
+        margin: r.netMargin === null ? null : r.netMargin / 100,
+        returnRate,
+        actualReturnRate,
         delivered: r.delivered,
         returned: r.returned,
         rating: r.adSpend ? rating : "NONE",
-        reason: r.adSpend ? (r.returnRate >= 0.35 && rating !== "GOOD" ? `${reason} · tỷ lệ hoàn ${Math.round(r.returnRate * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
+        reason: r.adSpend ? (highReturn && rating !== "GOOD" ? `${reason} · tỷ lệ hoàn ${Math.round((actualReturnRate ?? returnRate) * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
       };
     });
   if (report.nominal.unmatchedAdSpend > 0) {

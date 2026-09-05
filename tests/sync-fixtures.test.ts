@@ -43,6 +43,7 @@ import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/pe
 import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
+import { getAdsPerformance } from "@/lib/queries/ads-performance";
 
 async function main() {
   await ensureMigrated();
@@ -512,7 +513,18 @@ async function main() {
     const sum = m.products.reduce((t, p) => t + p.personalNet, 0) - m.testSpend - Math.round(m.testSpend * ((nominal.assumptions.otherCostPercentOfAds ?? 0) / 100));
     assert.ok(Math.abs(sum - m.personalNet) <= m.products.length + 1, `tổng chi tiết mã ≈ LN cá nhân của ${m.name}`);
   }
-  console.log("✓ Báo cáo danh nghĩa / lương / LN theo marketer chạy trên CSDL, chi tiết mã khớp tổng");
+  // Hiệu quả QC: đơn theo marketer (kể cả "Chưa gán") khớp tổng đơn đã xác nhận; tỷ lệ hoàn & biên là phân số 0–1; LN mã = LN ròng
+  const perf = await getAdsPerformance(all);
+  const perfOrders = perf.marketers.reduce((t, m) => t + m.orders, 0);
+  assert.ok(Math.abs(perfOrders - nominal.totals.orders) <= perf.marketers.length, `đơn theo marketer ${perfOrders} ≈ đơn xác nhận ${nominal.totals.orders}`);
+  for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
+    assert.ok(p.returnRate !== undefined && p.returnRate >= 0 && p.returnRate <= 1, "tỷ lệ hoàn dự kiến là phân số");
+    if (p.actualReturnRate !== null && p.actualReturnRate !== undefined) assert.ok(p.actualReturnRate >= 0 && p.actualReturnRate <= 1);
+    if (p.margin !== null) assert.ok(Math.abs(p.margin) <= 50, "biên là phân số");
+    const n = nominal.rows.find((r) => r.productId === p.id);
+    if (n) assert.equal(p.profit, n.netProfit, "LN sau QC = LN ròng ước tính");
+  }
+  console.log("✓ Báo cáo danh nghĩa / lương / LN theo marketer chạy trên CSDL, chi tiết mã khớp tổng; hiệu quả QC khớp đơn xác nhận");
 
   // SĐT mới (Pancake tô xanh) → xác nhận số & xin số phụ
   assert.equal(isNewPhone({ phone: "0939748540", succeed: 0, returned: 0, erpOtherOrders: 0 }), true, "chưa GTC, chưa hoàn, không đơn khác = SĐT mới");
