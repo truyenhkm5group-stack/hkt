@@ -63,10 +63,20 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
       />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Chưa thu" value={formatVND(kpis.byStatus.PENDING.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.PENDING.count)} vận đơn đang giao`} icon={Clock} tone="amber" />
+        <MetricCard label="Chưa thu" value={formatVND(kpis.byStatus.PENDING.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.PENDING.count)} vận đơn đang giao (không tính hoàn / huỷ)`} icon={Clock} tone="amber" />
         <MetricCard label="Đã thu, chờ đối soát" value={formatVND(kpis.byStatus.COLLECTED.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.COLLECTED.count)} vận đơn giao thành công`} icon={Banknote} tone="blue" />
         <MetricCard label="ĐVVC đã đối soát" value={formatVND(kpis.byStatus.RECONCILED.collected, { compact: true })} note={`${formatNumber(kpis.byStatus.RECONCILED.count)} vận đơn chờ chuyển khoản`} icon={CheckCheck} tone="primary" />
-        <MetricCard label="Đã về ngân hàng trong kỳ" value={formatVND(kpis.paidInPeriod.amount, { compact: true })} note={`${formatNumber(kpis.paidInPeriod.count)} vận đơn · ${params.period.label.toLowerCase()}`} icon={Landmark} tone="green" />
+        <MetricCard
+          label="Đã về ngân hàng trong kỳ"
+          value={formatVND(Math.max(kpis.paidInPeriod.amount, kpis.batchesInPeriod.gross), { compact: true })}
+          note={
+            kpis.batchesInPeriod.count
+              ? `${formatNumber(kpis.batchesInPeriod.count)} bảng kê Viettel Post · COD ${formatVND(kpis.batchesInPeriod.gross, { compact: true })} − cước ${formatVND(kpis.batchesInPeriod.fee, { compact: true })} = thực nhận ${formatVND(kpis.batchesInPeriod.net, { compact: true })} · ${formatNumber(kpis.paidInPeriod.count)} vận đơn đã gắn`
+              : `${formatNumber(kpis.paidInPeriod.count)} vận đơn · ${params.period.label.toLowerCase()} · chưa có bảng kê trong kỳ`
+          }
+          icon={Landmark}
+          tone="green"
+        />
         <MetricCard label="Có chênh lệch" value={formatVND(kpis.byStatus.DISPUTED.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn cần đối chiếu`} icon={AlertTriangle} tone={kpis.byStatus.DISPUTED.count ? "rose" : "slate"} />
       </section>
 

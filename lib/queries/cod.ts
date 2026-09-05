@@ -8,6 +8,9 @@ import type { ListParams, Period } from "@/lib/search-params";
 
 export const COD_SORTABLE = ["deliveredAt", "codAmount", "codCollected", "codPaidToBankAt", "createdAt"];
 
+/** Vận đơn chưa hoàn / huỷ (chỉ các vận đơn này mới còn tiền COD để thu) */
+const NOT_RETURNED = sql`${schema.shipments.stage} not in ('RETURNED', 'CANCELLED')`;
+
 /** Cột ngày mà bộ lọc kỳ áp dụng, tuỳ tab đang xem */
 export function codPeriodColumn(statuses: CodStatus[] | "all"): { column: AnyPgColumn; label: string } {
   if (statuses === "all") return { column: schema.shipments.createdAt, label: "ngày tạo vận đơn" };
@@ -25,6 +28,8 @@ export function codListWhere(params: ListParams) {
     conds.push(inArray(schema.shipments.codBatchId, filters.batch));
   } else {
     conds.push(statuses === "all" ? ne(schema.shipments.codStatus, "NOT_APPLICABLE") : inArray(schema.shipments.codStatus, statuses));
+    // Vận đơn đã hoàn / huỷ không còn tiền COD để thu dù trạng thái COD chưa được cập nhật
+    if (statuses === "all" || statuses.some((st) => st === "PENDING" || st === "COLLECTED")) conds.push(NOT_RETURNED);
     const { column } = codPeriodColumn(statuses);
     if (period.from) conds.push(gte(column, period.from));
     if (period.to) conds.push(lte(column, period.to));
@@ -120,17 +125,32 @@ export type CodKpi = { count: number; amount: number; collected: number };
 export async function codKpis(period: Period) {
   const db = await getDb();
   const s = schema.shipments;
-  const [rows, [paid]] = await Promise.all([
-    db.select({ status: s.codStatus, count: count(), amount: sum(s.codAmount), collected: sum(s.codCollected) }).from(s).where(ne(s.codStatus, "NOT_APPLICABLE")).groupBy(s.codStatus),
+  const b = schema.codBatches;
+  const [rows, [paid], [batches]] = await Promise.all([
+    // Chưa thu / đã thu chỉ tính vận đơn chưa hoàn, chưa huỷ; PAID_TO_BANK / RECONCILED / DISPUTED tính theo trạng thái COD
+    db
+      .select({ status: s.codStatus, count: count(), amount: sum(s.codAmount), collected: sum(s.codCollected) })
+      .from(s)
+      .where(and(ne(s.codStatus, "NOT_APPLICABLE"), sql`(${s.codStatus} not in ('PENDING', 'COLLECTED') or ${NOT_RETURNED})`))
+      .groupBy(s.codStatus),
     db
       .select({ count: count(), amount: sum(s.codCollected) })
       .from(s)
       .where(and(eq(s.codStatus, "PAID_TO_BANK"), period.from ? gte(s.codPaidToBankAt, period.from) : undefined, period.to ? lte(s.codPaidToBankAt, period.to) : undefined)),
+    // Bảng kê Viettel Post (đợt nhận tiền) trong kỳ — nguồn "tiền đã về ngân hàng" kể cả khi chưa gắn được từng vận đơn
+    db
+      .select({ count: count(), gross: sql<number>`coalesce(sum(coalesce(nullif(${b.codGross}, 0), ${b.totalAmount})), 0)`, fee: sql<number>`coalesce(sum(${b.feeTotal}), 0)`, net: sql<number>`coalesce(sum(${b.totalAmount}), 0)` })
+      .from(b)
+      .where(and(period.from ? gte(b.receivedAt, period.from) : undefined, period.to ? lte(b.receivedAt, period.to) : undefined)),
   ]);
   const empty = (): CodKpi => ({ count: 0, amount: 0, collected: 0 });
   const byStatus: Record<CodStatus, CodKpi> = { NOT_APPLICABLE: empty(), PENDING: empty(), COLLECTED: empty(), RECONCILED: empty(), PAID_TO_BANK: empty(), DISPUTED: empty() };
   for (const r of rows) byStatus[r.status] = { count: Number(r.count), amount: Number(r.amount ?? 0), collected: Number(r.collected ?? 0) };
-  return { byStatus, paidInPeriod: { count: Number(paid?.count ?? 0), amount: Number(paid?.amount ?? 0) } };
+  return {
+    byStatus,
+    paidInPeriod: { count: Number(paid?.count ?? 0), amount: Number(paid?.amount ?? 0) },
+    batchesInPeriod: { count: Number(batches?.count ?? 0), gross: Number(batches?.gross ?? 0), fee: Number(batches?.fee ?? 0), net: Number(batches?.net ?? 0) },
+  };
 }
 
 /** Các đợt nhận tiền COD gần nhất kèm số vận đơn */
