@@ -194,3 +194,15 @@ Lệnh hữu ích: `npm run typecheck`, `npm run lint`, `npm test` (kiểm thử
 | Tồn kho lệch với Pancake | Chạy job *Sản phẩm & tồn kho*; webhook tồn kho chỉ cập nhật mẫu mã đã có trong ERP. |
 | PGlite báo "đang được tiến trình khác sử dụng" | Dừng server trước khi chạy lệnh CLI, hoặc chuyển sang PostgreSQL. |
 | Cổng 3000 bận | Đổi `ports` trong `docker-compose.yml` hoặc `PORT`. |
+
+---
+
+## Sổ thu chi MB Bank (HKT)
+
+Ứng dụng nhỏ, độc lập với ERP, nằm trong thư mục [`hkt/`](hkt/): nhập sao kê MB Bank (CSV/XLSX), gán nhãn thu chi tự động theo quy tắc, và lập báo cáo kết quả kinh doanh theo chuẩn kế toán cho shop cá nhân. Xem hướng dẫn chạy và logic kế toán tại [`hkt/README.md`](hkt/README.md).
+
+```bash
+cd hkt
+pip install -r requirements.txt
+python run.py      # http://127.0.0.1:8000
+```
