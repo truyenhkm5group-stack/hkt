@@ -16,7 +16,7 @@ import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
-import { importLandingSheet, previewSheet } from "@/lib/landing/sheet";
+import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -105,8 +105,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "landing-sheet": {
     label: "Đơn landing page từ Google Sheet",
     source: "ALL",
-    description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới.",
-    run: async (o) => (o.params?.preview === "1" ? previewSheet() : importLandingSheet({ onlyNew: o.params?.new === "1" })),
+    description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới; recheck=1 tính lại trùng / rủi ro cho mọi dòng.",
+    run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? { rechecked: await recheckAllLanding(num(o.params?.days) ?? 60) } : importLandingSheet({ onlyNew: o.params?.new === "1" })),
   },
   "facebook-ad-index": {
     label: "Tra ad_id đơn Pancake → chiến dịch Facebook",

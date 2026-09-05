@@ -215,8 +215,10 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
         continue;
       }
       result.inserted += 1;
-      const [dups, risk] = await Promise.all([duplicatesForPhone(parsed.phone, at, config.dedupeDays, row.id), riskForPhone(parsed.phone)]);
-      const linked = dups.find((d) => d.kind === "PANCAKE" && d.at && d.at.getTime() >= at.getTime() - 3_600_000);
+      const [hits, risk] = await Promise.all([duplicatesForPhone(parsed.phone, at, config.dedupeDays, row.id), riskForPhone(parsed.phone)]);
+      // đơn Pancake lên ngay sau khi khách điền form = chính đơn này (ghép để theo dõi), không phải trùng
+      const linked = hits.filter((d) => d.kind === "PANCAKE" && d.at && d.at.getTime() >= at.getTime() - 3_600_000).sort((a, b) => (a.at as Date).getTime() - (b.at as Date).getTime())[0];
+      const dups = hits.filter((d) => !linked || d.id !== linked.id);
       if (dups.length) result.duplicates += 1;
       if (risk.risky) result.risky += 1;
       if (linked) result.linked += 1;
@@ -242,6 +244,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       .limit(1);
     if (o) {
       await db.update(schema.landingOrders).set({ orderId: o.id, updatedAt: new Date() }).where(eq(schema.landingOrders.id, l.id));
+      await refreshLandingChecks(l.id);
       result.linked += 1;
     }
   }
@@ -256,7 +259,17 @@ export async function refreshLandingChecks(id: string) {
   const row = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.id, id) });
   if (!row) return null;
   const at = row.submittedAt ?? row.createdAt;
-  const [dups, risk] = await Promise.all([duplicatesForPhone(row.phone, at, config.dedupeDays, row.id), riskForPhone(row.phone, row.orderId ?? undefined)]);
+  const [hits, risk] = await Promise.all([duplicatesForPhone(row.phone, at, config.dedupeDays, row.id), riskForPhone(row.phone, row.orderId ?? undefined)]);
+  const dups = hits.filter((d) => d.id !== row.orderId);
   await db.update(schema.landingOrders).set({ duplicates: dups, risk, updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
   return { duplicates: dups, risk };
+}
+
+/** Tính lại trùng / rủi ro cho mọi dòng landing N ngày gần đây (sau khi đổi quy tắc) */
+export async function recheckAllLanding(days = 60): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select({ id: schema.landingOrders.id }).from(schema.landingOrders).where(gte(schema.landingOrders.createdAt, new Date(Date.now() - days * 86_400_000)));
+  for (const r of rows) await refreshLandingChecks(r.id);
+  clearMemo();
+  return rows.length;
 }
