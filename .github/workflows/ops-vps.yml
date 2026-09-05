@@ -122,7 +122,7 @@ jobs:
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-web-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts ;;
               vtp-probe)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-probe.ts?run=${GITHUB_RUN_ID:-$(date +%s)}" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-probe.ts "$ARG" ;;
               phone-probe)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/phone-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
