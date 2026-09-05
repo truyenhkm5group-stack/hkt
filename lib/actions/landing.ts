@@ -85,6 +85,7 @@ const configSchema = z.object({
   sheetUrl: z.string().trim().max(500),
   gid: z.string().trim().max(20),
   columns: z.record(z.string(), z.string().trim().max(120)).default({}),
+  hasHeader: z.enum(["auto", "yes", "no"]).default("auto"),
   dedupeDays: z.number().int().min(1).max(90).default(7),
   autoPush: z.boolean().default(false),
   shippingFee: z.number().int().min(0).max(1_000_000).default(25_000),
@@ -106,7 +107,7 @@ export async function saveLandingConfig(input: unknown): Promise<ActionResult<{ 
   if (next.sheetUrl) {
     try {
       const pv = await previewSheet(next);
-      preview = `${pv.rows} dòng · cột đã dò: ${Object.entries(pv.detected)
+      preview = `${pv.rows} dòng · ${pv.hasHeader ? "có tiêu đề" : "không tiêu đề, dò theo nội dung"} · cột đã dò: ${Object.entries(pv.detected)
         .map(([k, v]) => `${k}=${v}`)
         .join(", ")}${!pv.detected.phone ? " · CHƯA dò được cột SĐT" : ""}`;
     } catch (e) {
@@ -116,12 +117,12 @@ export async function saveLandingConfig(input: unknown): Promise<ActionResult<{ 
   return { ok: true, preview };
 }
 
-export async function previewLandingSheet(): Promise<ActionResult<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number }>> {
+export async function previewLandingSheet(): Promise<ActionResult<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number; hasHeader: boolean }>> {
   const user = await requireUser();
   if (!can(user, "landing:config")) return { error: "Không có quyền" };
   try {
     const pv = await previewSheet();
-    return { ok: true, headers: pv.headers, detected: pv.detected as Record<string, string>, sample: pv.sample, rows: pv.rows };
+    return { ok: true, headers: pv.headers, detected: pv.detected as Record<string, string>, sample: pv.sample, rows: pv.rows, hasHeader: pv.hasHeader };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }

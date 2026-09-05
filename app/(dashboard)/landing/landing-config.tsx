@@ -15,7 +15,7 @@ const COLUMN_KEYS = Object.keys(LANDING_COLUMN_LABEL) as LandingColumnKey[];
 export function LandingConfigForm({ config, canWrite }: { config: LandingConfig; canWrite: boolean }) {
   const [open, setOpen] = useState(!config.sheetUrl && canWrite);
   const [form, setForm] = useState({ ...config, columns: { ...config.columns } });
-  const [preview, setPreview] = useState<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number } | null>(null);
+  const [preview, setPreview] = useState<{ headers: string[]; detected: Record<string, string>; sample: string[][]; rows: number; hasHeader: boolean } | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const save = () =>
@@ -57,6 +57,14 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
               <Input value={form.gid} onChange={(e) => setForm({ ...form, gid: e.target.value })} placeholder="tự lấy từ link" />
             </div>
             <div className="space-y-1">
+              <Label>Dòng tiêu đề</Label>
+              <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={form.hasHeader} onChange={(e) => setForm({ ...form, hasHeader: e.target.value as "auto" | "yes" | "no" })}>
+                <option value="auto">Tự nhận</option>
+                <option value="yes">Có tiêu đề</option>
+                <option value="no">Không (dò theo nội dung)</option>
+              </select>
+            </div>
+            <div className="space-y-1">
               <Label>Trùng SĐT trong (ngày)</Label>
               <Input type="number" min={1} max={90} value={form.dedupeDays} onChange={(e) => setForm({ ...form, dedupeDays: Number(e.target.value) })} />
             </div>
@@ -74,7 +82,7 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
             </div>
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold text-muted-foreground">Ghi đè tên cột (chỉ điền khi ERP dò sai; tiêu đề đúng như trên sheet)</div>
+            <div className="mb-1 text-xs font-semibold text-muted-foreground">Ghi đè cột (chỉ điền khi ERP dò sai): tiêu đề đúng như trên sheet, hoặc “#3” = cột thứ 3 khi sheet không có tiêu đề</div>
             <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-5">
               {COLUMN_KEYS.map((k) => (
                 <div key={k} className="flex items-center gap-2">
@@ -92,7 +100,7 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
                 </thead>
                 <tbody>{preview.sample.map((r, i) => <tr key={i} className="border-t">{r.map((c, j) => <td key={j} className="max-w-[220px] truncate px-2 py-1" title={c}>{c}</td>)}</tr>)}</tbody>
               </table>
-              <div className="px-2 py-1 text-[11px] text-muted-foreground">{preview.rows} dòng dữ liệu · SĐT đã che bớt</div>
+              <div className="px-2 py-1 text-[11px] text-muted-foreground">{preview.rows} dòng dữ liệu · {preview.hasHeader ? "sheet có tiêu đề" : "sheet không có tiêu đề → dò cột theo nội dung"} · SĐT đã che bớt</div>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">

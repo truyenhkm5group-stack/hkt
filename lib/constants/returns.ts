@@ -6,10 +6,11 @@ export const RETURN_RULE = {
    */
   maxFeeForFakeDelivery: 10_000,
   /**
-   * Vận đơn Viettel Post "Giao thành công" nhưng COD thu < ngưỡng này (khách không nhận hàng, chỉ trả tiền ship / phí xem hàng
-   * 20–30K) → tính là đơn HOÀN trên mọi báo cáo; trừ đơn khách đã chuyển khoản trước (prepaid ≥ ngưỡng).
+   * Vận đơn Viettel Post "Giao thành công" chỉ là GIAO THẬT khi COD thu > ngưỡng này (đơn hàng thật ≥ 499K). COD ≤ ngưỡng
+   * (khách không nhận, chỉ trả tiền ship / phí xem hàng 20–50K) → tính là đơn HOÀN trên mọi báo cáo; trừ đơn khách đã chuyển
+   * khoản trước (prepaid > ngưỡng).
    */
-  maxCodForFakeDelivery: 50_000,
+  maxCodForFakeDelivery: 100_000,
 };
 
 export type OrderOutcome = "NOT_SHIPPED" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
@@ -19,7 +20,7 @@ export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công thật",
   RETURNED: "Hoàn (theo trạng thái)",
-  RETURNED_BY_RULE: "Hoàn (giao nhưng COD < 50K)",
+  RETURNED_BY_RULE: "Hoàn (giao nhưng COD ≤ 100K)",
   CANCELLED: "Huỷ",
 };
 

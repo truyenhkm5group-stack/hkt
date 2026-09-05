@@ -54,7 +54,7 @@ export const returnRateColumns: ColumnDef<ReturnRateRow, unknown>[] = [
     cell: ({ row }) => (
       <div className="text-right">
         <span className="numeric font-semibold text-rose-600 dark:text-rose-400">{formatNumber(row.original.returned)}</span>
-        {row.original.returnedByRule ? <div className="text-[10.5px] text-muted-foreground">{formatNumber(row.original.returnedByRule)} theo quy tắc COD/cước</div> : null}
+        {row.original.returnedByRule ? <div className="text-[10.5px] text-muted-foreground">{formatNumber(row.original.returnedByRule)} giao nhưng COD ≤ 100K</div> : null}
       </div>
     ),
   },

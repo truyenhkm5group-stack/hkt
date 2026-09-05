@@ -40,7 +40,7 @@ import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
-import { detectColumns, matchVariant, normalizePhone, parseCsv, parseSheetTime, rowToLanding, sheetCsvUrl } from "@/lib/constants/landing";
+import { detectColumns, detectColumnsByContent, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
@@ -579,7 +579,7 @@ async function main() {
   const table = parseCsv(csv);
   assert.equal(table.length, 3, "2 dòng dữ liệu + tiêu đề");
   const cols = detectColumns(table[0]);
-  assert.deepEqual({ time: cols.time, name: cols.name, phone: cols.phone, address: cols.address, product: cols.product, size: cols.size, color: cols.color, quantity: cols.quantity, note: cols.note, source: cols.source }, { time: 0, name: 1, phone: 2, address: 3, product: 4, size: 5, color: 6, quantity: 7, note: 8, source: 9 }, "dò đúng cột theo tiêu đề tiếng Việt / utm");
+  assert.deepEqual({ time: cols.time, name: cols.name, phone: cols.phone, address: cols.address, product: cols.product, size: cols.size, color: cols.color, quantity: cols.quantity, note: cols.note, campaign: cols.campaign }, { time: 0, name: 1, phone: 2, address: 3, product: 4, size: 5, color: 6, quantity: 7, note: 8, campaign: 9 }, "dò đúng cột theo tiêu đề tiếng Việt / utm_campaign");
   const lr1 = rowToLanding(table[0], table[1], cols, 1)!;
   assert.equal(lr1.phone, "0788281828", "SĐT bỏ khoảng trắng");
   assert.equal(rowToLanding(table[0], table[2], cols, 2)!.phone, "0939748540", "+84 → 0");
@@ -597,7 +597,35 @@ async function main() {
   assert.equal(matchVariant({ product: lr1.product, variant: lr1.variant, size: lr1.size, color: lr1.color }, cands)?.variant.id, "v1", "Q004 XL Nâu → đúng mẫu");
   assert.equal(matchVariant({ product: "Đầm Q002 đỏ đô", variant: "", size: "L", color: "" }, cands)?.variant.id, "v3", "màu nằm trong tên sản phẩm, size L");
   assert.equal(matchVariant({ product: "Áo sơ mi", variant: "", size: "L", color: "" }, cands), null, "không khớp mã / tên → null");
-  console.log("✓ Đơn landing page: CSV, dò cột, SĐT, thời gian, link CSV, ghép mẫu mã");
+  // Sheet KHÔNG có tiêu đề (form landing đổ thẳng dữ liệu, cột theo vị trí) → dò theo nội dung
+  const noHeader: string[][] = [
+    ["2026-08-05 06:42:42", "Bùi thị thuận", "933421665", "47 phù đổng thiên vương f lâm viên Đà Lạt lâm đồng", "Lâm Đồng", "Thành phố Đà Lạt", "Phường 8", "Việt Nam", "", "Size XL,Màu  Đỏ Đô", "1 Sản phẩm 499k", "https://www.japanitems.store/w2n?utm_source=QA4_C%C4%90_05%2F08_Q002_V2&utm_term=120247521093950618", "QA4_CĐ_05/08_Q002_V2", "Nhóm quảng cáo Doanh số mới", "Quảng cáo Doanh số mới TXT", "120247521093950618", "120247521093940618", "27.70.235.1", "FORM1", ""],
+    ["2026-08-05 07:00:32", "Lê Bạch ", "988993583", "223 đồng khởi khóm 1 phường 9 TP Trà vinh ", "Trà Vinh", "Thành phố Trà Vinh", "Phường 9", "Việt Nam", "Gọi điện trước ", "Size XL,Màu  Đỏ Đô", "1 Sản phẩm 499k", "https://www.japanitems.store/w2n?utm_source=QA4_C%C4%90_05%2", "QA4_CĐ_05/08_Q002_V4", "Nhóm quảng cáo Doanh số mới", "Quảng cáo Doanh số mới TXT", "120247521114350618", "120247521114340618", "27.71.98.118", "FORM1", ""],
+    ["2026-08-05 09:52:41", "Bùi nhâm", "338133343", "Thôn 5 Quang Trung Bỉm Sơn Thanh Hóa", "Thanh Hóa", "Thị xã Bỉm Sơn", "Xã Quang Trung", "Việt Nam", "Tôi muốn được tư vấn", "Size L,Màu  Đỏ Đô", "2 Sản phẩm 849k", "https://www.japanitems.store/w2n?utm_source=QA4_C%C4%90_05%2", "QA4_CĐ_05/08_Q002_V2", "Nhóm quảng cáo Doanh số mới - Bản sao 3", "Quảng cáo Doanh số mới TXT", "120247528386900618", "120247528386890618", "222.255.255.147", "FORM1", ""],
+  ];
+  assert.equal(looksLikeHeader(noHeader[0]), false, "dòng đầu có ngày giờ / SĐT → không phải tiêu đề");
+  assert.equal(looksLikeHeader(table[0]), true, "dòng tiêu đề chữ → tiêu đề");
+  const cc = detectColumnsByContent(noHeader);
+  assert.deepEqual({ time: cc.time, name: cc.name, phone: cc.phone, address: cc.address, province: cc.province, district: cc.district, ward: cc.ward, note: cc.note, variant: cc.variant, offer: cc.offer, source: cc.source, campaign: cc.campaign, adId: cc.adId }, { time: 0, name: 1, phone: 2, address: 3, province: 4, district: 5, ward: 6, note: 8, variant: 9, offer: 10, source: 11, campaign: 12, adId: 15 }, "dò theo nội dung đúng 13 cột của sheet landing");
+  const gh = Array.from({ length: 20 }, (_, i) => `Cột ${i + 1}`);
+  const n1 = rowToLanding(gh, noHeader[0], cc, 1)!;
+  assert.equal(n1.phone, "0933421665", "SĐT mất số 0 đầu (Sheets định dạng số) → thêm lại");
+  assert.deepEqual({ size: n1.size, color: n1.color }, { size: "XL", color: "Đỏ Đô" }, "tách size / màu từ “Size XL,Màu  Đỏ Đô”");
+  assert.deepEqual({ q: n1.quantity, total: n1.total, price: n1.price }, { q: 1, total: 499_000, price: 499_000 }, "“1 Sản phẩm 499k”");
+  assert.equal(n1.product, "Q002", "mã hàng lấy từ tên chiến dịch QA4_CĐ_05/08_Q002_V2");
+  assert.equal(n1.adId, "120247521093950618");
+  assert.equal(n1.campaign, "QA4_CĐ_05/08_Q002_V2");
+  assert.equal(n1.address, "47 phù đổng thiên vương f lâm viên Đà Lạt lâm đồng, Phường 8, Thành phố Đà Lạt", "địa chỉ ghép phường / quận");
+  assert.equal(n1.province, "Lâm Đồng");
+  const n3 = rowToLanding(gh, noHeader[2], cc, 3)!;
+  assert.deepEqual({ q: n3.quantity, total: n3.total, note: n3.note, size: n3.size }, { q: 2, total: 849_000, note: "Tôi muốn được tư vấn", size: "L" }, "gói 2 sản phẩm 849k, ghi chú, size L");
+  assert.deepEqual(parseOfferText("1 Sản phẩm 499k"), { quantity: 1, total: 499_000 });
+  assert.deepEqual(parseVariantText("Size M, Màu Nâu"), { size: "M", color: "Nâu" });
+  assert.equal(productCodeFromText("https://x.vn/w2n?utm_source=QA4_C%C4%90_05%2F08_Q004_V2"), "Q004", "mã hàng trong utm_source đã mã hoá URL");
+  const candsPlus = [...cands, { id: "v5", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "Q002DOXL", size: "XL", color: "Đỏ đô" }];
+  assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, candsPlus)?.variant.id, "v5", "Q002 XL Đỏ Đô → mẫu Q002 XL Đỏ đô");
+  assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, cands), null, "không có size XL của Q002 → chưa ghép, chọn tay");
+  console.log("✓ Đơn landing page: CSV có / không tiêu đề, dò cột theo nội dung, SĐT, size/màu, gói giá, mã hàng từ chiến dịch, ad_id, ghép mẫu mã");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

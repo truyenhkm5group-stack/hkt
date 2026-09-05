@@ -723,6 +723,8 @@ export const landingOrders = pgTable(
     note: text("note").notNull().default(""),
     source: text("source").notNull().default(""),
     sheetStatus: text("sheet_status").notNull().default(""),
+    /** ad_id Facebook (utm_term) → chiến dịch → marketer */
+    adId: text("ad_id"),
     /** NEW · CONFIRMED · PUSHED · CANCELLED (ERP quản lý) */
     status: text("status").notNull().default("NEW"),
     /** Mẫu mã Pancake đã ghép (tự dò hoặc chọn tay) */

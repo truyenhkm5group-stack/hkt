@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { clearMemo } from "@/lib/cache";
-import { DEFAULT_LANDING_CONFIG, detectColumns, LANDING_CONFIG_KEY, matchVariant, parseCsv, rowToLanding, sheetCsvUrl, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
+import { DEFAULT_LANDING_CONFIG, detectColumns, detectColumnsByContent, LANDING_CONFIG_KEY, looksLikeHeader, matchVariant, parseCsv, rowToLanding, sheetCsvUrl, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
 import { fetchJson } from "@/lib/integrations/http";
 import { getSettingJson } from "@/lib/settings";
 
@@ -20,12 +20,13 @@ export async function loadLandingConfig(): Promise<LandingConfig> {
     ...DEFAULT_LANDING_CONFIG,
     ...cfg,
     columns: cfg.columns && typeof cfg.columns === "object" ? cfg.columns : {},
+    hasHeader: cfg.hasHeader === "yes" || cfg.hasHeader === "no" ? cfg.hasHeader : "auto",
     dedupeDays: Number(cfg.dedupeDays) > 0 ? Number(cfg.dedupeDays) : 7,
     shippingFee: Number.isFinite(Number(cfg.shippingFee)) ? Number(cfg.shippingFee) : 25_000,
   };
 }
 
-export type SheetPreview = { url: string; headers: string[]; detected: Partial<Record<LandingColumnKey, string>>; sample: string[][]; rows: number };
+export type SheetPreview = { url: string; headers: string[]; detected: Partial<Record<LandingColumnKey, string>>; sample: string[][]; rows: number; hasHeader: boolean };
 
 /** Tải CSV và trả về tiêu đề + cột đã dò + vài dòng mẫu (SĐT che bớt) — để kiểm tra cấu hình */
 export async function previewSheet(cfg?: LandingConfig): Promise<SheetPreview> {
@@ -41,13 +42,26 @@ export async function previewSheet(cfg?: LandingConfig): Promise<SheetPreview> {
   if (/<html/i.test(text.slice(0, 200))) throw new Error("Google trả về trang HTML thay vì CSV: sheet chưa chia sẻ công khai (Bất kỳ ai có liên kết – Người xem) hoặc link sai.");
   const rows = parseCsv(text);
   if (!rows.length) throw new Error("Sheet rỗng");
-  const headers = rows[0].map((h) => h.trim());
-  const cols = detectColumns(headers, config.columns);
+  const { headers, cols, dataStart, hasHeader } = resolveColumns(rows, config);
   const detected: Partial<Record<LandingColumnKey, string>> = {};
-  for (const [k, idx] of Object.entries(cols) as [LandingColumnKey, number][]) detected[k] = headers[idx];
+  for (const [k, idx] of Object.entries(cols) as [LandingColumnKey, number][]) detected[k] = hasHeader ? headers[idx] : `#${idx + 1}`;
   const phoneIdx = cols.phone;
-  const sample = rows.slice(1, 6).map((r) => r.map((v, i) => (i === phoneIdx ? v.replace(/(\d{3})\d{4}(\d{2,3})/, "$1****$2") : v.slice(0, 60))));
-  return { url, headers, detected, sample, rows: rows.length - 1 };
+  const sample = rows.slice(dataStart, dataStart + 5).map((r) => r.map((v, i) => (i === phoneIdx ? v.replace(/(\d{2})\d{4}(\d{2,3})/, "$1****$2") : v.slice(0, 60))));
+  return { url, headers, detected, sample, rows: rows.length - dataStart, hasHeader };
+}
+
+/** Xác định tiêu đề (có / không) và bản đồ cột: tiêu đề → theo tên; không tiêu đề → theo nội dung; ghi đè "#n" luôn thắng */
+export function resolveColumns(rows: string[][], config: LandingConfig) {
+  const hasHeader = config.hasHeader === "yes" ? true : config.hasHeader === "no" ? false : looksLikeHeader(rows[0]);
+  const width = Math.max(...rows.slice(0, 20).map((r) => r.length));
+  const headers = hasHeader ? rows[0].map((h) => h.trim()) : Array.from({ length: width }, (_, i) => `Cột ${i + 1}`);
+  const dataStart = hasHeader ? 1 : 0;
+  const base = hasHeader ? detectColumns(headers, config.columns) : detectColumnsByContent(rows);
+  // ghi đè trong cấu hình áp cho cả hai trường hợp
+  const overrides = detectColumns(headers, config.columns);
+  const cols: Partial<Record<LandingColumnKey, number>> = { ...base };
+  for (const [k, idx] of Object.entries(overrides) as [LandingColumnKey, number][]) if (config.columns[k]) cols[k] = idx;
+  return { headers, cols, dataStart, hasHeader };
 }
 
 async function variantCandidates(): Promise<VariantCandidate[]> {
@@ -109,23 +123,22 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
   const preview = await previewSheet(config);
   const text = await (await fetch(preview.url, { signal: AbortSignal.timeout(60_000), redirect: "follow" })).text();
   const rows = parseCsv(text);
-  const headers = rows[0].map((h) => h.trim());
-  const cols = detectColumns(headers, config.columns);
+  const { headers, cols, dataStart } = resolveColumns(rows, config);
   const gid = config.gid || /[#&?]gid=(\d+)/.exec(config.sheetUrl)?.[1] || "0";
-  const result: LandingImportResult = { url: preview.url, rows: rows.length - 1, inserted: 0, updated: 0, skipped: 0, matchedVariants: 0, duplicates: 0, risky: 0, linked: 0, errors: [] };
+  const result: LandingImportResult = { url: preview.url, rows: rows.length - dataStart, inserted: 0, updated: 0, skipped: 0, matchedVariants: 0, duplicates: 0, risky: 0, linked: 0, errors: [] };
   if (cols.phone === undefined && cols.name === undefined) {
     result.errors.push(`Không dò được cột SĐT / tên khách. Tiêu đề sheet: ${headers.join(" | ")}. Khai báo tên cột ở Cấu hình.`);
     return result;
   }
   const candidates = await variantCandidates();
   const existing = new Map((await db.select({ id: schema.landingOrders.id, rowKey: schema.landingOrders.rowKey, raw: schema.landingOrders.raw, status: schema.landingOrders.status, variantId: schema.landingOrders.variantId, orderId: schema.landingOrders.orderId, phone: schema.landingOrders.phone }).from(schema.landingOrders).where(eq(schema.landingOrders.sheetGid, gid))).map((r) => [r.rowKey, r]));
-  for (let i = 1; i < rows.length; i++) {
-    const parsed = rowToLanding(headers, rows[i], cols, i);
+  for (let i = dataStart; i < rows.length; i++) {
+    const parsed = rowToLanding(headers, rows[i], cols, i + (dataStart ? 0 : 1));
     if (!parsed) {
       result.skipped += 1;
       continue;
     }
-    const rowKey = `${gid}:${i}`;
+    const rowKey = `${gid}:${i + (dataStart ? 0 : 1)}`;
     const prev = existing.get(rowKey);
     if (prev && options.onlyNew) {
       result.skipped += 1;
@@ -140,7 +153,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
     const at = parsed.time ?? new Date();
     const base = {
       sheetGid: gid,
-      rowIndex: i,
+      rowIndex: parsed.rowIndex,
       submittedAt: parsed.time,
       customerName: parsed.name,
       phone: parsed.phone,
@@ -155,6 +168,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       total: parsed.total,
       note: parsed.note,
       source: parsed.source,
+      adId: parsed.adId || null,
       sheetStatus: parsed.sheetStatus,
       raw: parsed.raw,
       updatedAt: new Date(),
@@ -187,7 +201,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       .update(schema.landingOrders)
       .set({ duplicates: dups, risk, ...(linked ? { orderId: linked.id } : {}) })
       .where(eq(schema.landingOrders.id, row.id));
-    log(`Dòng ${i}: ${parsed.name} ${parsed.phone} · ${parsed.product} → ${match ? `mẫu ${match.variant.productCode} ${match.variant.size} ${match.variant.color}` : "chưa ghép mẫu mã"}${dups.length ? ` · trùng ${dups.length}` : ""}${risk.risky ? " · RỦI RO" : ""}`);
+    log(`Dòng ${parsed.rowIndex}: ${parsed.name} ${parsed.phone} · ${parsed.product} → ${match ? `mẫu ${match.variant.productCode} ${match.variant.size} ${match.variant.color}` : "chưa ghép mẫu mã"}${dups.length ? ` · trùng ${dups.length}` : ""}${risk.risky ? " · RỦI RO" : ""}`);
   }
   // các dòng chưa gắn đơn Pancake: thử ghép lại theo SĐT (khách được lên đơn sau khi nhân viên gọi chốt)
   const unlinked = await db

@@ -19,10 +19,10 @@ const MAX_COD = RETURN_RULE.maxCodForFakeDelivery;
 const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0))`;
 
 /**
- * Quy tắc 1: vận đơn "giao thành công" nhưng COD thu < 50K (khách không nhận, chỉ trả tiền ship / phí xem hàng) và khách chưa
- * chuyển khoản trước → hoàn. Giữ thêm nhánh cũ: COD = 0 và cước < 10K (vận đơn thu ship).
+ * Quy tắc 1: vận đơn "giao thành công" chỉ là giao thật khi COD thu > 100K (hoặc khách đã chuyển khoản trước > 100K).
+ * COD ≤ 100K (khách không nhận, chỉ trả tiền ship / phí xem hàng) → hoàn. Giữ thêm nhánh cũ: COD = 0 và cước < 10K.
  */
-const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} < ${MAX_COD} and (${COD} < ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
+const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} <= ${MAX_COD} and (${COD} <= ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
 
 /**
  * Quy tắc 2: tồn tại một vận đơn Viettel Post khác (vận đơn hoàn / thu tiền ship, ví dụ PKE…1P1)

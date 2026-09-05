@@ -1,0 +1,1 @@
+ALTER TABLE "landing_orders" ADD COLUMN "ad_id" text;

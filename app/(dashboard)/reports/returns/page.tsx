@@ -123,14 +123,14 @@ export default async function ReturnRatePage({
         <MetricCard
           label="Giao thành công thật"
           value={formatNumber(summary.delivered)}
-          note={`Cước ≥ ${formatVND(RETURN_RULE.maxFeeForFakeDelivery)} hoặc có COD`}
+          note={`Vận đơn giao thành công có COD thu > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (hoặc đã chuyển khoản trước)`}
           icon={PackageCheck}
           tone="green"
         />
         <MetricCard
           label="Đơn hoàn"
           value={formatNumber(summary.returned)}
-          note={`${formatNumber(summary.returnedByRule)} nhận diện theo quy tắc COD 0 & cước < ${formatVND(RETURN_RULE.maxFeeForFakeDelivery, { compact: true })} · mất ${formatVND(summary.lostRevenue, { compact: true })}`}
+          note={`${formatNumber(summary.returnedByRule)} vận đơn “giao thành công” nhưng COD ≤ ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (khách chỉ trả tiền ship) · mất ${formatVND(summary.lostRevenue, { compact: true })}`}
           icon={Undo2}
           tone="rose"
         />
@@ -150,12 +150,15 @@ export default async function ReturnRatePage({
       <div className="flex items-start gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3.5 text-[13px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b>Cách tính.</b> Đơn <b>hoàn</b> = đơn Pancake ở trạng thái đang hoàn
-          / đã hoàn, <b>hoặc</b> vận đơn &ldquo;giao thành công&rdquo; nhưng COD
-          thu hộ = 0 và cước &lt; {formatVND(RETURN_RULE.maxFeeForFakeDelivery)}{" "}
-          (khách không nhận, chỉ trả tiền ship), kể cả khi vận đơn hoàn PKE…P1
-          nằm riêng trên Viettel Post. Đơn <b>giao thật</b> = giao thành công có
-          cước ≥ {formatVND(RETURN_RULE.maxFeeForFakeDelivery)} hoặc có COD. Tỷ
+          <b>Cách tính.</b> Kết quả đơn ưu tiên trạng thái vận đơn Viettel Post.
+          Đơn <b>hoàn</b> = vận đơn đang hoàn / đã hoàn, <b>hoặc</b> vận đơn
+          &ldquo;giao thành công&rdquo; nhưng COD thu hộ ≤{" "}
+          {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (khách không nhận, chỉ
+          trả tiền ship / phí xem hàng; trừ đơn đã chuyển khoản trước), kể cả khi
+          vận đơn hoàn PKE…P1 nằm riêng trên Viettel Post; chưa có vận đơn thì theo
+          trạng thái Pancake. Đơn <b>giao thật</b> = vận đơn giao thành công có COD
+          &gt; {formatVND(RETURN_RULE.maxCodForFakeDelivery)}. Bảng gom mẫu mã theo
+          mã hàng: bấm mũi tên ở dòng mã (vd Q003) để xổ từng SKU. Tỷ
           lệ hoàn = hoàn / (giao thật + hoàn), chỉ tính đơn <b>đã kết thúc</b>: đơn chờ xử lý (chưa gửi ĐVVC), đơn đang giao và đơn huỷ không nằm trong tử số lẫn mẫu số. Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng thêm số đơn chờ phát lại nhân xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào cả tử số và mẫu số. Một đơn có nhiều mã hàng được tính cho từng mã.
         </div>
       </div>
