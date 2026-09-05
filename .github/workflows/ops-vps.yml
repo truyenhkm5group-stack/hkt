@@ -32,6 +32,7 @@ on:
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
+          - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
@@ -117,6 +118,9 @@ jobs:
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;
               run-job)
                 docker exec erp-app sh -c "npm run --silent sync -- $ARG" ;;
+              vtp-web-probe)
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-web-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts ;;
               vtp-probe)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-probe.ts "$ARG" ;;
