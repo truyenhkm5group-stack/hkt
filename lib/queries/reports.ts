@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, sql, sum, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lte, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { LINE_UNIT_COST, ORDER_COGS } from "@/lib/queries/cogs";
@@ -213,7 +213,7 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
     cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${SUCCESS}), 0)`,
   };
 
-  const [current, previous, channels, sellers, products, daily, codPaid, codWaiting] = await Promise.all([
+  const [current, previous, channels, sellers, products, daily, codPaid, codWaiting, batchesInPeriod, batchesToDate, linkedPaidToDate] = await Promise.all([
     pnl(period.from, period.to, basis),
     prev.from ? pnl(prev.from, prev.to, basis) : Promise.resolve(null),
     db
@@ -258,6 +258,21 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
       .select({ amount: sum(schema.shipments.codAmount), count: count() })
       .from(schema.shipments)
       .where(inArray(schema.shipments.codStatus, ["COLLECTED", "RECONCILED"])),
+    // Bảng kê tiền COD Viettel Post (đợt nhận tiền) trong kỳ — nguồn "tiền đã về" kể cả khi chưa gắn từng vận đơn
+    db
+      .select({ count: count(), gross: sql<number>`coalesce(sum(coalesce(nullif(${schema.codBatches.codGross}, 0), ${schema.codBatches.totalAmount})), 0)`, fee: sql<number>`coalesce(sum(${schema.codBatches.feeTotal}), 0)`, net: sql<number>`coalesce(sum(${schema.codBatches.totalAmount}), 0)` })
+      .from(schema.codBatches)
+      .where(and(period.from ? gte(schema.codBatches.receivedAt, period.from) : undefined, period.to ? lte(schema.codBatches.receivedAt, period.to) : undefined)),
+    // Toàn bộ bảng kê đến cuối kỳ (để trừ khỏi phần "đã thu, chờ về")
+    db
+      .select({ gross: sql<number>`coalesce(sum(coalesce(nullif(${schema.codBatches.codGross}, 0), ${schema.codBatches.totalAmount})), 0)` })
+      .from(schema.codBatches)
+      .where(period.to ? lte(schema.codBatches.receivedAt, period.to) : undefined),
+    // Vận đơn đã gắn vào bảng kê (đã đánh dấu về ngân hàng) đến cuối kỳ — tránh trừ hai lần
+    db
+      .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codCollected}), 0)` })
+      .from(schema.shipments)
+      .where(and(eq(schema.shipments.codStatus, "PAID_TO_BANK"), period.to ? lte(schema.shipments.codPaidToBankAt, period.to) : undefined)),
   ]);
 
   const toGroup = (r: { key: string; orders: number; success: number; revenue: number; cogs: number }) => {
@@ -279,11 +294,22 @@ export async function getProfitReport(period: Period, basis: ReportBasis) {
       return { productName: p.productName, skus: Number(p.skus), orders: Number(p.orders), quantity: Number(p.quantity), revenue, cogs, profit: revenue - cogs, margin: revenue ? ((revenue - cogs) / revenue) * 100 : 0, image: p.image };
     }),
     daily,
-    cash: {
-      codPaid: { amount: Number(codPaid[0]?.amount ?? 0), count: Number(codPaid[0]?.count ?? 0) },
-      codWaiting: { amount: Number(codWaiting[0]?.amount ?? 0), count: Number(codWaiting[0]?.count ?? 0) },
-      prepaid: current.prepaid,
-    },
+    cash: (() => {
+      const shipPaid = Number(codPaid[0]?.amount ?? 0);
+      const b = { count: Number(batchesInPeriod[0]?.count ?? 0), gross: Number(batchesInPeriod[0]?.gross ?? 0), fee: Number(batchesInPeriod[0]?.fee ?? 0), net: Number(batchesInPeriod[0]?.net ?? 0) };
+      // bảng kê chưa gắn được vào vận đơn nào: tổng bảng kê đến cuối kỳ − phần đã gắn
+      const unlinkedToDate = Math.max(0, Number(batchesToDate[0]?.gross ?? 0) - Number(linkedPaidToDate[0]?.amount ?? 0));
+      const collected = Number(codWaiting[0]?.amount ?? 0);
+      return {
+        /** Tiền COD đã về trong kỳ: theo bảng kê Viettel Post (COD gộp) nếu có, nếu không theo vận đơn đã đánh dấu về ngân hàng */
+        codPaid: { amount: Math.max(shipPaid, b.gross), count: Number(codPaid[0]?.count ?? 0), batches: b, source: b.gross > shipPaid ? ("statements" as const) : ("shipments" as const) },
+        /** Đã thu chờ về = COD các vận đơn đã thu / đã đối soát − phần bảng kê đã về nhưng chưa gắn vận đơn */
+        codWaiting: { amount: Math.max(0, collected - unlinkedToDate), count: Number(codWaiting[0]?.count ?? 0), collected, deductedByStatements: Math.min(collected, unlinkedToDate) },
+        prepaid: current.prepaid,
+        /** Tiền thực về trong kỳ = COD thực nhận (sau cước theo bảng kê) + trả trước */
+        cashIn: (b.gross > shipPaid ? b.net : shipPaid) + current.prepaid,
+      };
+    })(),
   };
 }
 

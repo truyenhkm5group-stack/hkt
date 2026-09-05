@@ -269,7 +269,7 @@ export default async function ReportsPage({
             <MetricCard
               label="COD đã về ngân hàng"
               value={formatVND(cash.codPaid.amount, { compact: true })}
-              note={`${formatNumber(cash.codPaid.count)} vận đơn trong kỳ · chờ về ${formatVND(cash.codWaiting.amount, { compact: true })}`}
+              note={cash.codPaid.source === "statements" ? `${formatNumber(cash.codPaid.batches.count)} bảng kê VTP · thực nhận ${formatVND(cash.codPaid.batches.net, { compact: true })} sau cước · chờ về ${formatVND(cash.codWaiting.amount, { compact: true })}` : `${formatNumber(cash.codPaid.count)} vận đơn trong kỳ · chờ về ${formatVND(cash.codWaiting.amount, { compact: true })}`}
               icon={Banknote}
               tone="amber"
             />
@@ -405,14 +405,14 @@ export default async function ReportsPage({
                     icon={Banknote}
                     tone="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
                     title="COD đã về ngân hàng trong kỳ"
-                    note={`${formatNumber(cash.codPaid.count)} vận đơn · theo ngày ghi nhận tiền về`}
+                    note={cash.codPaid.source === "statements" ? `${formatNumber(cash.codPaid.batches.count)} bảng kê Viettel Post · COD ${formatVND(cash.codPaid.batches.gross, { compact: true })} − cước ${formatVND(cash.codPaid.batches.fee, { compact: true })} = thực nhận ${formatVND(cash.codPaid.batches.net, { compact: true })} · ${formatNumber(cash.codPaid.count)} vận đơn đã gắn` : `${formatNumber(cash.codPaid.count)} vận đơn · theo ngày ghi nhận tiền về`}
                     amount={cash.codPaid.amount}
                   />
                   <CashRow
                     icon={Wallet}
                     tone="bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
                     title="COD đã thu, chờ về tài khoản"
-                    note={`${formatNumber(cash.codWaiting.count)} vận đơn ĐVVC đã thu / đã đối soát (toàn bộ)`}
+                    note={`${formatNumber(cash.codWaiting.count)} vận đơn đã thu ${formatVND(cash.codWaiting.collected, { compact: true })}${cash.codWaiting.deductedByStatements ? ` − ${formatVND(cash.codWaiting.deductedByStatements, { compact: true })} đã về theo bảng kê (chưa gắn vận đơn)` : ""} · toàn bộ đến cuối kỳ`}
                     amount={cash.codWaiting.amount}
                   />
                   <CashRow
@@ -424,9 +424,9 @@ export default async function ReportsPage({
                   />
                 </div>
                 <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-                  Tổng tiền thực về trong kỳ:{" "}
+                  Tổng tiền thực về trong kỳ (COD thực nhận sau cước + trả trước):{" "}
                   <strong className="text-foreground">
-                    {formatVND(cash.codPaid.amount + cash.prepaid)}
+                    {formatVND(cash.cashIn)}
                   </strong>
                 </div>
               </SectionCard>
