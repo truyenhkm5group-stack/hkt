@@ -11,13 +11,30 @@ export const dynamic = "force-dynamic";
 
 function extractSecret(request: NextRequest, body: Record<string, unknown>) {
   const auth = request.headers.get("authorization") ?? "";
+  const h = (name: string) => request.headers.get(name) ?? "";
+  const q = (name: string) => request.nextUrl.searchParams.get(name) ?? "";
   return [
-    str(body.TOKEN, body.token),
-    request.headers.get("token") ?? "",
-    auth.replace(/^Bearer\s+/i, ""),
-    request.nextUrl.searchParams.get("access_token") ?? "",
-    request.nextUrl.searchParams.get("token") ?? "",
+    str(body.TOKEN, body.token, body.secret, body.SECRET),
+    h("token"), h("x-token"), h("secret"), h("x-secret"), h("x-webhook-secret"), h("x-api-key"),
+    auth.replace(/^(Bearer|Token)\s+/i, ""),
+    q("access_token"), q("token"), q("secret"),
   ].filter(Boolean);
+}
+
+/** Tìm bản ghi hành trình Viettel Post trong body: trực tiếp {DATA}, hoặc bọc trong gói chuyển tiếp của Pancake / bên thứ ba (tối đa 4 tầng) */
+function findVtpData(body: Record<string, unknown>): Record<string, unknown> {
+  const isTracking = (r: Record<string, unknown>) => ["ORDER_NUMBER", "order_number", "ORDER_STATUS", "order_status"].some((k) => k in r);
+  const queue: { rec: Record<string, unknown>; depth: number }[] = [{ rec: body, depth: 0 }];
+  while (queue.length) {
+    const { rec, depth } = queue.shift() as { rec: Record<string, unknown>; depth: number };
+    if (isTracking(rec)) return rec;
+    if (depth >= 4) continue;
+    for (const value of Object.values(rec)) {
+      if (Array.isArray(value)) for (const v of value.slice(0, 20)) if (v && typeof v === "object") queue.push({ rec: v as Record<string, unknown>, depth: depth + 1 });
+      else if (value && typeof value === "object") queue.push({ rec: value as Record<string, unknown>, depth: depth + 1 });
+    }
+  }
+  return asRecord(body.DATA ?? body.data ?? body);
 }
 
 export async function POST(request: NextRequest) {
@@ -34,9 +51,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 401, error: true, message: "Sai tham số bí mật" }, { status: 401 });
   }
 
-  const data = asRecord(body.DATA ?? body.data ?? body);
+  const data = findVtpData(body);
   const record = normalizeTracking(data);
-  const eventId = await storeWebhook("VIETTELPOST", "tracking", record.orderNumber || null, { DATA: data }, { "user-agent": request.headers.get("user-agent") ?? "" });
+  // lưu cả body gốc để soi định dạng khi gói tin đi qua trung gian (Pancake chuyển tiếp)
+  const eventId = await storeWebhook("VIETTELPOST", "tracking", record.orderNumber || null, data === body ? { DATA: data } : { DATA: data, RAW: body }, { "user-agent": request.headers.get("user-agent") ?? "", "content-type": request.headers.get("content-type") ?? "" });
 
   after(async () => {
     try {
@@ -53,5 +71,5 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({ status: 200, error: false, message: "Webhook Viettel Post sẵn sàng. Viettel Post sẽ POST {DATA, TOKEN} vào URL này." });
+  return NextResponse.json({ status: 200, error: false, message: "Webhook Viettel Post sẵn sàng. Viettel Post (hoặc Pancake chuyển tiếp) POST {DATA, TOKEN} vào URL này; có thể truyền secret qua ?token=… nếu bên gửi không cho nhập tham số bí mật." });
 }

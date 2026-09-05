@@ -224,7 +224,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             received={webhookCount("VIETTELPOST")}
             warning={!status.viettelPostWebhook ? "Đặt VIETTELPOST_WEBHOOK_SECRET trong .env — giá trị này chính là “Tham số bí mật” bạn khai báo với Viettel Post." : null}
             steps={[
-              "Đăng nhập partner.viettelpost.vn bằng ĐÚNG tài khoản Viettel Post đang tạo vận đơn cho shop (tài khoản kết nối trong Pancake — mã khách hàng in trên bảng kê COD), không phải tài khoản khác cùng chủ.",
+              "Cách nhanh nhất khi vận đơn do Pancake tạo: Pancake → Cấu hình → Giao vận → Đối tác vận chuyển → VTP → “Cấu hình chuyển tiếp Webhook”, nhập URL bên trên kèm ?token=<Tham số bí mật> (Pancake không có ô secret riêng). Pancake sẽ chuyển tiếp mọi hành trình Viettel Post về ERP.",
+              "Cách trực tiếp (khi tài khoản partner2 đã được Viettel Post cấp Mã đối tác và gắn mã khách hàng): đăng nhập partner2.viettelpost.vn bằng tài khoản đang tạo vận đơn.",
               "Vào Bảng điều khiển → Thông tin tài khoản → Cấu hình webhook: Webhook Endpoints = URL bên trên; Secret parameter = Tham số bí mật bên trên (sao chép nguyên văn). Bấm Kiểm tra kết nối (ERP trả HTTP 200 khi secret đúng) rồi Lưu.",
               "Gửi yêu cầu duyệt webhook cho Viettel Post (b2b@viettelpost.com.vn / 0862 235 888), kèm mã khách hàng và URL. Viettel Post chỉ đẩy dữ liệu sau khi duyệt.",
               "Kiểm tra: mở một vận đơn trong ERP → “Lịch sử đẩy webhook” / “Gửi lại webhook”, hoặc đợi vận đơn mới thay đổi trạng thái rồi xem bảng “Webhook đã nhận” bên dưới. ERP trả HTTP 200 ngay và xử lý nền theo yêu cầu của Viettel Post.",
