@@ -122,7 +122,7 @@ jobs:
                 docker exec erp-app sh -c "npm run --silent sync -- $ARG" ;;
               vtp-web-probe)
                 fetch_script vtp-web-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
-                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts ;;
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts "$ARG" ;;
               vtp-probe)
                 fetch_script vtp-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-probe.ts "$ARG" ;;
