@@ -10,8 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { buildOutreach, sendOutreach, skipOutreach, updateOutreachMessage } from "@/lib/actions/outreach";
-import { isDue, NURTURE_WINDOWS, OUTREACH_STATUS_LABEL, OUTREACH_STATUS_TONE } from "@/lib/constants/outreach";
+import { buildOutreach, sendOutreach, skipOutreach, updateOutreachMedia, updateOutreachMessage } from "@/lib/actions/outreach";
+import { isDue, isVideoUrl, NURTURE_WINDOWS, OFFER_LABEL, OUTREACH_STATUS_LABEL, OUTREACH_STATUS_TONE } from "@/lib/constants/outreach";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { OutreachRow } from "@/lib/queries/outreach";
@@ -60,6 +60,7 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<OutreachRow | null>(null);
   const [draft, setDraft] = useState("");
+  const [mediaDraft, setMediaDraft] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const pendingRows = useMemo(() => rows.filter((r) => isDue(r)), [rows]);
@@ -97,7 +98,9 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
     startTransition(async () => {
       if (!editing) return;
       const r = await updateOutreachMessage(editing.id, draft);
-      if ("error" in r) toast.error(r.error);
+      if ("error" in r) { toast.error(r.error); return; }
+      const m = await updateOutreachMedia(editing.id, mediaDraft.split(/[\n,]/));
+      if ("error" in m) toast.error(m.error);
       else { setEditing(null); router.refresh(); }
     });
 
@@ -145,10 +148,21 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
                   <TableCell className="max-w-[260px] text-xs">
                     <div className="line-clamp-3" title={r.context}>{r.context || "—"}</div>
                     {r.suggestions ? <div className="mt-1 text-primary">→ {r.suggestions}</div> : null}
+                    {r.offer ? <span className={cn("mt-1 inline-block rounded px-1.5 py-0.5 text-[11px] font-medium", r.offer === "CLEARANCE" ? "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" : "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300")}>{OFFER_LABEL[r.offer] ?? r.offer}</span> : null}
                   </TableCell>
                   <TableCell className="text-xs">
                     {segment === "NURTURE" ? <div className="mb-1 text-[11px] font-semibold text-muted-foreground">Bước {r.step + 1}{r.status === "PENDING" && r.nextAt && new Date(r.nextAt).getTime() > Date.now() ? ` · đến hạn ${formatDateTime(r.nextAt)}` : r.status === "PENDING" ? " · đến hạn gửi" : ""}{r.sentCount ? ` · đã gửi ${r.sentCount} tin` : ""}</div> : null}
                     <div className="line-clamp-4 whitespace-pre-wrap" title={r.message}>{r.message}</div>
+                    {Array.isArray(r.mediaUrls) && r.mediaUrls.length ? (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {r.mediaUrls.map((u) => isVideoUrl(u) ? (
+                          <a key={u} href={u} target="_blank" rel="noreferrer" className="flex size-12 items-center justify-center rounded border bg-muted text-[10px] text-muted-foreground" title={u}>▶ video</a>
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <a key={u} href={u} target="_blank" rel="noreferrer"><img src={u} alt="" className="size-12 rounded border object-cover" /></a>
+                        ))}
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <span className={cn("rounded px-1.5 py-0.5 text-xs", OUTREACH_STATUS_TONE[r.status])}>{OUTREACH_STATUS_LABEL[r.status] ?? r.status}</span>
@@ -156,7 +170,7 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
                     {r.sentAt ? <div className="mt-1 text-[11px] text-muted-foreground">{formatDateTime(r.sentAt)}{r.sentBy ? ` · ${r.sentBy}` : ""}</div> : null}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground" title={formatDateTime(r.lastActivityAt)}>{formatTimeAgo(r.lastActivityAt)}</TableCell>
-                  <TableCell>{canWrite && r.status === "PENDING" ? <Button variant="ghost" size="icon" className="size-8" aria-label="Sửa nội dung" onClick={() => { setEditing(r); setDraft(r.message); }}><Pencil className="size-4" /></Button> : null}</TableCell>
+                  <TableCell>{canWrite && r.status === "PENDING" ? <Button variant="ghost" size="icon" className="size-8" aria-label="Sửa nội dung" onClick={() => { setEditing(r); setDraft(r.message); setMediaDraft(Array.isArray(r.mediaUrls) ? r.mediaUrls.join("\n") : ""); }}><Pencil className="size-4" /></Button> : null}</TableCell>
                 </TableRow>
               );
             })}
@@ -170,6 +184,10 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
             <DialogDescription>Nội dung này sẽ được gửi vào inbox Pancake của khách khi bấm “Gửi qua Pancake”.</DialogDescription>
           </DialogHeader>
           <Textarea rows={7} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div className="space-y-1">
+            <div className="text-xs font-medium">Ảnh / video gửi kèm (mỗi dòng một URL, tối đa 6)</div>
+            <Textarea rows={3} className="text-xs" value={mediaDraft} onChange={(e) => setMediaDraft(e.target.value)} placeholder="https://…/anh.jpg" />
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>Huỷ</Button>
             <Button onClick={saveDraft} disabled={pending}>Lưu</Button>

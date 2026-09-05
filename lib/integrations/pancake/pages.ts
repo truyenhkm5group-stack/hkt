@@ -140,6 +140,32 @@ export class PancakePagesClient {
     }
   }
 
+  /** Gửi ảnh / video kèm theo URL công khai. Thử lần lượt các tên tham số Pancake chấp nhận; trả về lỗi cuối nếu đều thất bại. */
+  async sendAttachment(pageId: string, conversationId: string, customerId: string, mediaUrl: string, caption = ""): Promise<{ ok: boolean; error?: string; param?: string }> {
+    const token = await this.pageToken(pageId);
+    const url = new URL(`${this.baseUrl}/pages/${pageId}/conversations/${conversationId}/messages`);
+    url.searchParams.set(token.key, token.value);
+    if (customerId) url.searchParams.set("customer_id", customerId);
+    const attempts: Record<string, unknown>[] = [
+      { action: "reply_inbox", message: caption, attachment_url: mediaUrl },
+      { action: "reply_inbox", message: caption, content_url: mediaUrl },
+      { action: "reply_inbox", message: caption, attachments: [{ type: /\.(mp4|mov|m4v|webm)(\?|$)/i.test(mediaUrl) ? "video" : "image", url: mediaUrl }] },
+    ];
+    let lastError = "";
+    for (const body of attempts) {
+      try {
+        const { body: res, status } = await fetchJson(url, { method: "POST", headers: { accept: "*/*" }, body: JSON.stringify(body), serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 0 });
+        const rec = asRecord(res);
+        if (status < 400 && rec.success !== false) return { ok: true, param: Object.keys(body).find((k) => k !== "action" && k !== "message") };
+        lastError = str(rec.message, rec.error, rec.reason) || `HTTP ${status}`;
+      } catch (e) {
+        const b = e instanceof IntegrationError ? asRecord(e.body) : {};
+        lastError = str(b.message, b.error) || (e instanceof Error ? e.message : String(e));
+      }
+    }
+    return { ok: false, error: lastError || "Không gửi được tệp đính kèm" };
+  }
+
   async testConnection() {
     const pages = await this.listPages();
     return { pages, tokenLength: this.accessToken.length, pageCount: int(pages.length) };

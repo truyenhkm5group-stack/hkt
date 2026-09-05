@@ -117,6 +117,10 @@ export const outreachTargets = pgTable(
     suggestions: text("suggestions").notNull().default(""),
     /** Nội dung đã dựng sẵn từ mẫu */
     message: text("message").notNull().default(""),
+    /** Ảnh / video gửi kèm sau tin chữ (URL công khai) */
+    mediaUrls: jsonb("media_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Ưu đãi áp dụng cho khách này: STANDARD (khách cũ giảm 50K) · CLEARANCE (mã hoàn cao / tồn nhiều, giảm 100K) · '' */
+    offer: text("offer").notNull().default(""),
     /** PENDING · SENT · FAILED · SKIPPED */
     /** PENDING · SENT (đã gửi hết kịch bản) · FAILED · SKIPPED · CONVERTED (khách đã đặt đơn) · REPLIED (khách trả lời, nhân viên tiếp quản) */
     status: text("status").notNull().default("PENDING"),

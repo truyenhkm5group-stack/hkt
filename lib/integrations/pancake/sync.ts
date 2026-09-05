@@ -336,7 +336,14 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
 
   // Nếu Viettel Post đã cập nhật mới hơn dữ liệu Pancake thì giữ trạng thái của Viettel Post
   const pancakeStamp = s.partnerUpdatedAt ?? mapped.updatedAtExternal ?? mapped.insertedAt;
-  const keepVtpStage = Boolean(existing?.vtpStatusDate && existing.vtpStatusDate.getTime() > pancakeStamp.getTime() && existing.stage !== "UNKNOWN");
+  // Dữ liệu Viettel Post (webhook / nhập danh sách vận đơn / bảng kê) là nguồn gốc; Pancake chỉ là bản sao có thể trễ.
+  // Giữ trạng thái VTP nếu đã có, trừ khi VTP chưa kết thúc mà Pancake báo trạng thái kết thúc mới hơn.
+  const FINAL_STAGES = new Set(["DELIVERED", "RETURNED", "CANCELLED"]);
+  const keepVtpStage = Boolean(
+    existing?.vtpStatusDate &&
+      existing.stage !== "UNKNOWN" &&
+      (FINAL_STAGES.has(existing.stage) || !FINAL_STAGES.has(s.stage) || existing.vtpStatusDate.getTime() > pancakeStamp.getTime()),
+  );
   const stage: ShipmentStage = keepVtpStage && existing ? existing.stage : s.stage;
 
   let codStatus: CodStatus = s.codStatus;

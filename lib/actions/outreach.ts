@@ -30,6 +30,15 @@ const configSchema = z.object({
   cooldownDays: z.number().int().min(1).max(365),
   dailyLimit: z.number().int().min(1).max(5000),
   crossSellMap: z.record(z.string(), z.array(z.string())).default({}),
+  crossSellMedia: z.record(z.string(), z.array(z.string().trim().url("URL ảnh/video phải là đường dẫn https công khai").max(500))).default({}),
+  attachProductImages: z.boolean().default(true),
+  maxMediaPerMessage: z.number().int().min(1).max(6).default(3),
+  crossSellDiscount: z.string().trim().max(40).default("50K"),
+  clearanceDiscount: z.string().trim().max(40).default("100K"),
+  clearanceReturnRatePct: z.number().min(0).max(100).default(35),
+  clearanceStockDays: z.number().int().min(0).max(365).default(45),
+  clearanceProductIds: z.array(z.string()).default([]),
+  crossSellClearanceTemplate: z.string().trim().min(10).max(1500),
   crossSellTemplate: z.string().trim().min(10).max(1500),
 });
 
@@ -93,5 +102,17 @@ export async function previewOutreachTemplate(segment: "NURTURE" | "CROSS_SELL",
   const { error } = await authorize();
   if (error) return { error };
   const cfg = await loadOutreachConfig();
-  return { ok: true, text: renderTemplate(template, { ten: "chị Lan", san_pham: segment === "NURTURE" ? "Đầm Q002" : "Đầm Q003 màu đỏ", goi_y: "Đầm Q004, Quần định hình", shop: cfg.shopName, discountCode: cfg.discountCode, giam: cfg.nurtureDiscount }) };
+  return { ok: true, text: renderTemplate(template, { ten: "chị Lan", san_pham: segment === "NURTURE" ? "Đầm Q002" : "Đầm Q003 màu đỏ", goi_y: "Đầm Q004, Quần định hình", shop: cfg.shopName, discountCode: cfg.discountCode, giam: segment === "NURTURE" ? cfg.nurtureDiscount : /siêu hời/.test(template) ? cfg.clearanceDiscount : cfg.crossSellDiscount }) };
+}
+
+/** Sửa danh sách ảnh/video gửi kèm của một mục trước khi gửi */
+export async function updateOutreachMedia(id: string, urls: string[]): Promise<Result> {
+  const { error } = await authorize();
+  if (error) return { error };
+  const parsed = z.array(z.string().trim().url("URL ảnh/video không hợp lệ").max(500)).max(6, "Tối đa 6 tệp").safeParse(urls.map((u) => u.trim()).filter(Boolean));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const db = await getDb();
+  await db.update(schema.outreachTargets).set({ mediaUrls: parsed.data, updatedAt: new Date() }).where(and(eq(schema.outreachTargets.id, id), eq(schema.outreachTargets.status, "PENDING")));
+  revalidatePath("/outreach");
+  return { ok: true };
 }

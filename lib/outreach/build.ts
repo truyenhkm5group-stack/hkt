@@ -10,6 +10,8 @@ import { getDb, schema } from "@/db";
 import { normalizeOutreachConfig, OUTREACH_KEY, renderTemplate, shortName, type OutreachConfig, type TemplateVars } from "@/lib/constants/outreach";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { productReturnHistory } from "@/lib/queries/profit-nominal";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { getSettingJson } from "@/lib/settings";
 
 export async function loadOutreachConfig(): Promise<OutreachConfig> {
@@ -23,6 +25,27 @@ function periodKey(cooldownDays: number) {
 
 export function nurtureVars(cfg: OutreachConfig, ten: string, goiY: string): TemplateVars {
   return { ten, san_pham: "", goi_y: goiY, shop: cfg.shopName, discountCode: cfg.discountCode, giam: cfg.nurtureDiscount };
+}
+
+/** Mã cần xả: tỷ lệ hoàn ≥ N% VÀ tồn đủ bán ≥ M ngày (theo tốc độ bán 30 ngày), hoặc chọn tay trong cấu hình */
+export async function clearanceProducts(cfg: OutreachConfig): Promise<Set<string>> {
+  const out = new Set<string>(cfg.clearanceProductIds);
+  const [history, plan] = await Promise.all([productReturnHistory(90), getReplenishmentPlan()]);
+  const stockByProduct = new Map<string, { stock: number; sold30: number }>();
+  for (const r of plan.rows) {
+    const e = stockByProduct.get(r.productId) ?? { stock: 0, sold30: 0 };
+    e.stock += Math.max(0, r.stock);
+    e.sold30 += Math.max(0, r.sold30);
+    stockByProduct.set(r.productId, e);
+  }
+  for (const [productId, h] of history) {
+    if (h.rate === null || h.finished < 10) continue;
+    const st = stockByProduct.get(productId);
+    if (!st || st.stock <= 0) continue;
+    const daysOfCover = st.sold30 > 0 ? st.stock / (st.sold30 / 30) : Number.POSITIVE_INFINITY;
+    if (h.rate * 100 >= cfg.clearanceReturnRatePct && daysOfCover >= cfg.clearanceStockDays) out.add(productId);
+  }
+  return out;
 }
 
 /** Top sản phẩm bán chạy 30 ngày (để gợi ý bán chéo khi chưa cấu hình) */
@@ -93,10 +116,26 @@ export async function buildOutreachTargets(options: { segments?: ("NURTURE" | "C
   const log = options.log ?? (() => undefined);
   const cycle = periodKey(cfg.cooldownDays);
   const result = { nurture: 0, crossSell: 0, scanned: 0, converted: 0, replied: 0, windowHours: options.windowHours ?? cfg.nurtureWindowHours, errors: [] as string[] };
-  const productNames = new Map((await db.select({ id: schema.products.id, name: schema.products.name }).from(schema.products)).map((p) => [p.id, p.name]));
+  const productRows = await db.select({ id: schema.products.id, name: schema.products.name, image: schema.products.image }).from(schema.products);
+  const productNames = new Map(productRows.map((p) => [p.id, p.name]));
+  const productImages = new Map(productRows.map((p) => [p.id, p.image ?? ""]));
   const top = await bestSellers();
+  const clearance = await clearanceProducts(cfg).catch(() => new Set<string>());
+  /** Ảnh/video gửi kèm cho danh sách mã gợi ý: URL cấu hình theo mã → ảnh sản phẩm Pancake */
+  const mediaFor = (productIds: string[]) => {
+    if (!cfg.attachProductImages) return [] as string[];
+    const out: string[] = [];
+    for (const pid of productIds) {
+      const custom = (cfg.crossSellMedia[pid] ?? []).filter(Boolean);
+      const list = custom.length ? custom : [productImages.get(pid) ?? ""].filter(Boolean);
+      for (const u of list) if (u && !out.includes(u)) out.push(u);
+    }
+    return out.slice(0, cfg.maxMediaPerMessage);
+  };
 
   if (segments.includes("CROSS_SELL")) {
+    // mục bán chéo tạo trước khi có ưu đãi/ảnh (offer trống) và chưa gửi → tạo lại theo mẫu mới
+    await db.delete(schema.outreachTargets).where(and(eq(schema.outreachTargets.segment, "CROSS_SELL"), eq(schema.outreachTargets.status, "PENDING"), eq(schema.outreachTargets.offer, "")));
     const from = new Date(Date.now() - cfg.crossSellToDays * 86_400_000);
     const to = new Date(Date.now() - cfg.crossSellFromDays * 86_400_000);
     const o = schema.orders;
@@ -118,19 +157,38 @@ export async function buildOutreachTargets(options: { segments?: ("NURTURE" | "C
       const everBought = ord.customerId
         ? new Set((await db.select({ productId: schema.orderItems.productId }).from(schema.orderItems).innerJoin(o, eq(o.id, schema.orderItems.orderId)).where(eq(o.customerId, ord.customerId))).map((r) => r.productId).filter(Boolean) as string[])
         : boughtIds;
-      let suggestions: string[] = [];
-      for (const pid of boughtIds) for (const sid of cfg.crossSellMap[pid] ?? []) if (!everBought.has(sid) && productNames.get(sid)) suggestions.push(productNames.get(sid) as string);
-      if (!suggestions.length) suggestions = top.filter((t) => !everBought.has(t.id)).slice(0, 2).map((t) => t.name);
-      suggestions = [...new Set(suggestions)].slice(0, 3);
+      let suggestedIds: string[] = [];
+      for (const pid of boughtIds) for (const sid of cfg.crossSellMap[pid] ?? []) if (!everBought.has(sid) && productNames.get(sid)) suggestedIds.push(sid);
+      // ưu tiên mã cần xả (hoàn cao & tồn nhiều) khách chưa mua, rồi tới top bán chạy
+      const clearanceCandidates = [...clearance].filter((id) => !everBought.has(id) && productNames.get(id));
+      if (!suggestedIds.length) suggestedIds = [...clearanceCandidates.slice(0, 2), ...top.filter((t) => !everBought.has(t.id)).map((t) => t.id)];
+      suggestedIds = [...new Set(suggestedIds)].slice(0, 3);
+      const isClearance = suggestedIds.some((id) => clearance.has(id));
+      if (isClearance) suggestedIds = [...suggestedIds.filter((id) => clearance.has(id)), ...suggestedIds.filter((id) => !clearance.has(id))];
+      const suggestions = suggestedIds.map((id) => productNames.get(id) ?? "").filter(Boolean);
+      const mediaUrls = mediaFor(suggestedIds);
       const sanPham = [...new Set(items.map((i) => i.productName).filter(Boolean))].slice(0, 2).join(", ");
       const ten = shortName(ord.name ?? "");
-      const message = renderTemplate(cfg.crossSellTemplate, { ten, san_pham: sanPham, goi_y: suggestions.join(", "), shop: cfg.shopName, discountCode: cfg.discountCode });
+      const offer = isClearance ? "CLEARANCE" : "STANDARD";
+      const goiY = isClearance ? suggestedIds.filter((id) => clearance.has(id)).map((id) => productNames.get(id) ?? "").join(", ") : suggestions.join(", ");
+      const message = renderTemplate(isClearance ? cfg.crossSellClearanceTemplate : cfg.crossSellTemplate, { ten, san_pham: sanPham, goi_y: goiY, shop: cfg.shopName, discountCode: cfg.discountCode, giam: isClearance ? cfg.clearanceDiscount : cfg.crossSellDiscount });
       const inserted = await db
         .insert(schema.outreachTargets)
-        .values({ segment: "CROSS_SELL", pageId: ord.pageId ?? "", conversationId: ord.conversationId ?? "", pancakeCustomerId: "", customerId: ord.customerId, orderId: ord.id, customerName: ord.name ?? "", phone: ord.phone ?? "", context: sanPham, suggestions: suggestions.join(", "), message, lastActivityAt: ord.deliveredAt ? new Date(ord.deliveredAt) : null, dedupeKey: `cross:${key}:${cycle}` })
+        .values({ segment: "CROSS_SELL", pageId: ord.pageId ?? "", conversationId: ord.conversationId ?? "", pancakeCustomerId: "", customerId: ord.customerId, orderId: ord.id, customerName: ord.name ?? "", phone: ord.phone ?? "", context: sanPham, suggestions: suggestions.join(", "), message, mediaUrls, offer, lastActivityAt: ord.deliveredAt ? new Date(ord.deliveredAt) : null, dedupeKey: `cross:${key}:${cycle}` })
         .onConflictDoNothing({ target: schema.outreachTargets.dedupeKey })
         .returning({ id: schema.outreachTargets.id });
       result.crossSell += inserted.length;
+    }
+  }
+
+  if (segments.includes("CROSS_SELL") && cfg.attachProductImages) {
+    // bổ sung ảnh cho các mục bán chéo đang chờ mà chưa có media (tạo trước khi có tính năng)
+    const nameToId = new Map(productRows.map((p) => [p.name, p.id]));
+    const pendingNoMedia = await db.select({ id: schema.outreachTargets.id, suggestions: schema.outreachTargets.suggestions }).from(schema.outreachTargets).where(and(eq(schema.outreachTargets.segment, "CROSS_SELL"), eq(schema.outreachTargets.status, "PENDING"), sql`jsonb_array_length(${schema.outreachTargets.mediaUrls}) = 0`));
+    for (const row of pendingNoMedia) {
+      const ids = row.suggestions.split(",").map((x) => nameToId.get(x.trim())).filter((x): x is string => Boolean(x));
+      const media = mediaFor(ids);
+      if (media.length) await db.update(schema.outreachTargets).set({ mediaUrls: media, updatedAt: new Date() }).where(eq(schema.outreachTargets.id, row.id));
     }
   }
 

@@ -36,14 +36,24 @@ export async function sendOutreachTargets(ids: string[], actor: string, options:
     }
     const r = options.dryRun ? { ok: true as const } : await client.sendMessage(row.pageId, row.conversationId, row.pancakeCustomerId, row.message);
     const now = new Date();
+    let mediaNote = "";
+    if (r.ok && !options.dryRun && Array.isArray(row.mediaUrls) && row.mediaUrls.length) {
+      const failures: string[] = [];
+      for (const url of row.mediaUrls.slice(0, cfg.maxMediaPerMessage)) {
+        await new Promise((res) => setTimeout(res, 800));
+        const a = await client.sendAttachment(row.pageId, row.conversationId, row.pancakeCustomerId, url);
+        if (!a.ok) failures.push(a.error ?? "lỗi");
+      }
+      if (failures.length) mediaNote = `Ảnh/video: ${failures.length}/${row.mediaUrls.length} gửi lỗi (${failures[0].slice(0, 120)})`;
+    }
     if (r.ok) {
       const steps = row.segment === "NURTURE" ? cfg.nurtureSteps : [row.message];
       const nextStep = row.step + 1;
       if (nextStep < steps.length) {
         const nextMessage = renderTemplate(steps[nextStep], nurtureVars(cfg, shortName(row.customerName), row.suggestions));
-        await db.update(t).set({ status: "PENDING", step: nextStep, message: nextMessage, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt: new Date(now.getTime() + cfg.nurtureStepGapDays * 86_400_000), error: "", updatedAt: now }).where(eq(t.id, row.id));
+        await db.update(t).set({ status: "PENDING", step: nextStep, message: nextMessage, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt: new Date(now.getTime() + cfg.nurtureStepGapDays * 86_400_000), error: mediaNote, updatedAt: now }).where(eq(t.id, row.id));
       } else {
-        await db.update(t).set({ status: "SENT", step: nextStep, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt: null, error: "", updatedAt: now }).where(eq(t.id, row.id));
+        await db.update(t).set({ status: "SENT", step: nextStep, sentCount: row.sentCount + 1, sentAt: now, sentBy: actor, nextAt: null, error: mediaNote, updatedAt: now }).where(eq(t.id, row.id));
       }
       sent += 1;
       remaining -= 1;

@@ -21,6 +21,22 @@ export type OutreachConfig = {
   dailyLimit: number;
   /** Gợi ý bán chéo theo mã hàng đã mua (productId → productIds); trống = lấy top bán chạy chưa mua */
   crossSellMap: Record<string, string[]>;
+  /** Ảnh / video gửi kèm theo mã hàng gợi ý (productId → URL công khai); trống = dùng ảnh sản phẩm từ Pancake */
+  crossSellMedia: Record<string, string[]>;
+  /** Gửi kèm ảnh sản phẩm gợi ý trong tin bán chéo */
+  attachProductImages: boolean;
+  /** Số ảnh/video tối đa gửi kèm mỗi khách */
+  maxMediaPerMessage: number;
+  /** Ưu đãi khách cũ mua thêm mẫu khác (biến {giam}) */
+  crossSellDiscount: string;
+  /** Ưu đãi "giá siêu hời" cho mã hoàn cao & tồn nhiều (biến {giam}) */
+  clearanceDiscount: string;
+  /** Mã được coi là cần xả: tỷ lệ hoàn ≥ N% VÀ tồn đủ bán ≥ M ngày (hoặc nằm trong danh sách chọn tay) */
+  clearanceReturnRatePct: number;
+  clearanceStockDays: number;
+  clearanceProductIds: string[];
+  /** Mẫu tin bán chéo khi gợi ý là mã xả (giá siêu hời) */
+  crossSellClearanceTemplate: string;
   /** @deprecated bước 1 cũ; giữ để đọc cấu hình cũ */
   nurtureTemplate?: string;
   crossSellTemplate: string;
@@ -51,14 +67,26 @@ export const DEFAULT_OUTREACH: OutreachConfig = {
   cooldownDays: 14,
   dailyLimit: 200,
   crossSellMap: {},
+  crossSellMedia: {},
+  attachProductImages: true,
+  maxMediaPerMessage: 3,
+  crossSellDiscount: "50K",
+  clearanceDiscount: "100K",
+  clearanceReturnRatePct: 35,
+  clearanceStockDays: 45,
+  clearanceProductIds: [],
   crossSellTemplate:
-    "Chào {ten} ơi, {shop} cảm ơn mình đã tin tưởng đặt {san_pham} ạ 💛 Mình mặc có vừa và ưng ý không ạ? Mẫu này đang được nhiều chị kết hợp cùng {goi_y}. Mình nhắn em để giữ size sớm nhé.{uu_dai}",
+    "Chào {ten} ơi, {shop} cảm ơn mình đã tin tưởng đặt {san_pham} ạ 💛 Mình mặc có vừa và ưng ý không ạ?\nKhách cũ của shop mua thêm mẫu khác được giảm ngay {giam} ạ. Mẫu {goi_y} đang được nhiều chị kết hợp cùng {san_pham}, em gửi ảnh thật bên dưới mình xem nhé. Mình chốt em giữ size sớm ạ 💛{uu_dai}",
+  crossSellClearanceTemplate:
+    "Chào {ten} ơi, {shop} cảm ơn mình đã tin tưởng đặt {san_pham} ạ 💛 Mình mặc có vừa và ưng ý không ạ?\nShop đang có mẫu {goi_y} giá siêu hời, riêng khách cũ như mình được giảm thêm {giam} ạ. Em gửi ảnh/video thật bên dưới, mình xem ưng thì báo em giữ size ngay nhé, số lượng có hạn ạ 🔥{uu_dai}",
 };
 
 export const NURTURE_WINDOWS = [
   { hours: 24, label: "24 giờ" },
   { hours: 168, label: "7 ngày" },
 ] as const;
+
+export const OFFER_LABEL: Record<string, string> = { STANDARD: "Khách cũ giảm", CLEARANCE: "Giá siêu hời · xả" };
 
 export const SEGMENT_LABEL: Record<string, string> = { NURTURE: "Băn khoăn chưa mua", CROSS_SELL: "Bán chéo sau nhận hàng" };
 export const OUTREACH_STATUSES = ["PENDING", "SENT", "FAILED", "SKIPPED", "CONVERTED", "REPLIED"] as const;
@@ -108,6 +136,20 @@ export function normalizeOutreachConfig(raw: Partial<OutreachConfig> | null | un
   cfg.nurtureSteps = cfg.nurtureSteps.map((s) => s.trim()).filter(Boolean);
   if (!cfg.nurtureSteps.length) cfg.nurtureSteps = DEFAULT_NURTURE_STEPS;
   cfg.crossSellMap = cfg.crossSellMap ?? {};
+  cfg.crossSellMedia = cfg.crossSellMedia ?? {};
+  cfg.attachProductImages = cfg.attachProductImages !== false;
+  cfg.maxMediaPerMessage = Math.min(6, Math.max(1, Number(cfg.maxMediaPerMessage) || 3));
+  cfg.clearanceProductIds = Array.isArray(cfg.clearanceProductIds) ? cfg.clearanceProductIds : [];
+  cfg.crossSellDiscount = cfg.crossSellDiscount || "50K";
+  cfg.clearanceDiscount = cfg.clearanceDiscount || "100K";
+  if (!cfg.crossSellClearanceTemplate) cfg.crossSellClearanceTemplate = DEFAULT_OUTREACH.crossSellClearanceTemplate;
+  // mẫu bán chéo cũ (trước khi có ưu đãi khách cũ) → thay bằng mẫu mới có {giam}
+  if (cfg.crossSellTemplate && !/\{giam\}/.test(cfg.crossSellTemplate) && /Mẫu này đang được nhiều chị kết hợp cùng/.test(cfg.crossSellTemplate)) cfg.crossSellTemplate = DEFAULT_OUTREACH.crossSellTemplate;
   cfg.nurtureStepGapDays = Math.max(1, Number(cfg.nurtureStepGapDays) || 1);
   return cfg;
+}
+
+/** URL có phải video (để hiển thị đúng và gửi đúng kiểu) */
+export function isVideoUrl(url: string) {
+  return /\.(mp4|mov|m4v|webm)(\?|$)/i.test(url) || /youtube\.com|youtu\.be|facebook\.com\/.*\/videos|fb\.watch|tiktok\.com/i.test(url);
 }
