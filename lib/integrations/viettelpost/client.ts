@@ -45,6 +45,16 @@ function decodeJwtExp(token: string): Date | null {
   }
 }
 
+/** Mã thao tác UpdateOrder của Viettel Post */
+export type VtpOrderActionType = 1 | 2 | 3 | 4 | 5 | 11;
+export const VTP_ORDER_ACTIONS: { type: VtpOrderActionType; key: string; label: string; hint: string; confirm: string; tone: "default" | "destructive" | "secondary" }[] = [
+  { type: 3, key: "redeliver", label: "Phát tiếp", hint: "Yêu cầu bưu tá giao lại cho khách", confirm: "Yêu cầu Viettel Post phát tiếp vận đơn này?", tone: "default" },
+  { type: 2, key: "approve-return", label: "Duyệt hoàn", hint: "Đồng ý chuyển hoàn về kho", confirm: "Duyệt chuyển hoàn vận đơn này về kho?", tone: "secondary" },
+  { type: 5, key: "resend", label: "Gửi lại", hint: "Lấy lại đơn để gửi lại (đơn đã huỷ / hoàn)", confirm: "Lấy lại đơn để gửi lại?", tone: "secondary" },
+  { type: 1, key: "approve", label: "Duyệt đơn", hint: "Duyệt đơn chờ duyệt", confirm: "Duyệt đơn hàng này?", tone: "secondary" },
+  { type: 4, key: "cancel", label: "Huỷ vận đơn", hint: "Huỷ đơn trên Viettel Post (chưa phát)", confirm: "HUỶ vận đơn này trên Viettel Post?", tone: "destructive" },
+];
+
 export class ViettelPostClient {
   private token: string | null = null;
   private tokenExpiresAt: Date | null = null;
@@ -202,6 +212,30 @@ export class ViettelPostClient {
     const list = Array.isArray(res.data) ? res.data : asArray(root.LIST_ORDER ?? root.list_order ?? root.data ?? root.content ?? root.items ?? root.orders);
     const total = int(root.TOTAL, root.total, root.totalElements, root.total_entries) || list.length;
     return { orders: list.map((o) => normalizeTracking(asRecord(o))), total, raw: res.data };
+  }
+
+  /**
+   * Thao tác trên vận đơn (API v2/order/UpdateOrder): TYPE 1 duyệt đơn · 2 duyệt chuyển hoàn · 3 phát tiếp · 4 huỷ đơn ·
+   * 5 lấy lại / gửi lại · 11 xoá đơn đã huỷ. Tài khoản đối tác phải là chủ vận đơn (cùng mã khách hàng).
+   */
+  async updateOrder(orderNumber: string, type: VtpOrderActionType, note = "", date?: string) {
+    const res = await this.call("order/UpdateOrder", { method: "POST", body: { TYPE: type, ORDER_NUMBER: orderNumber, NOTE: note, DATE: date ?? new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Ho_Chi_Minh" }) } });
+    if (res.error) throw new IntegrationError(`ViettelPost: ${res.message || `mã ${res.status}`}`, 400, false, res);
+    return res;
+  }
+
+  /** Sửa thông tin người nhận / tiền thu hộ / ghi chú của vận đơn chưa phát (API v2/order/edit) */
+  async editOrder(orderNumber: string, fields: { receiverName?: string; receiverPhone?: string; receiverAddress?: string; moneyCollection?: number; note?: string; productName?: string }) {
+    const body: Record<string, unknown> = { ORDER_NUMBER: orderNumber };
+    if (fields.receiverName !== undefined) body.RECEIVER_FULLNAME = fields.receiverName;
+    if (fields.receiverPhone !== undefined) body.RECEIVER_PHONE = fields.receiverPhone;
+    if (fields.receiverAddress !== undefined) body.RECEIVER_ADDRESS = fields.receiverAddress;
+    if (fields.moneyCollection !== undefined) body.MONEY_COLLECTION = fields.moneyCollection;
+    if (fields.note !== undefined) body.ORDER_NOTE = fields.note;
+    if (fields.productName !== undefined) body.PRODUCT_NAME = fields.productName;
+    const res = await this.call("order/edit", { method: "POST", body });
+    if (res.error) throw new IntegrationError(`ViettelPost: ${res.message || `mã ${res.status}`}`, 400, false, res);
+    return res;
   }
 
   /** Lịch sử đẩy webhook của một vận đơn */

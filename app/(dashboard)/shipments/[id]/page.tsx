@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink, MapPin, Phone, ShoppingBag, User } from "lucide-react";
 import { PushHistoryPanel } from "@/app/(dashboard)/shipments/[id]/push-history";
 import { RepushButton } from "@/app/(dashboard)/shipments/[id]/repush-button";
+import { VtpActions } from "@/app/(dashboard)/shipments/[id]/vtp-actions";
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
@@ -15,7 +16,7 @@ import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail } from "@/lib/queries/shipments";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,7 +25,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function ShipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("shipments:view");
+  const user = await requirePermission("shipments:view");
+  const canManage = can(user, "shipments:manage");
   const { id } = await params;
   const s = await getShipmentDetail(id);
   if (!s) notFound();
@@ -55,6 +57,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <>
             {isVtp ? <SyncOrderButton shipmentId={s.id} label="Cập nhật từ Viettel Post" /> : null}
             {isVtp ? <RepushButton shipmentId={s.id} /> : null}
+            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
             {vtpUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={vtpUrl} target="_blank" rel="noreferrer">

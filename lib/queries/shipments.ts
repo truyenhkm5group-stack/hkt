@@ -180,7 +180,7 @@ export async function getShipmentDetail(id: string) {
     where: or(eq(schema.shipments.id, id), eq(schema.shipments.vtpOrderNumber, id), eq(schema.shipments.trackingCode, id)),
     with: {
       order: {
-        columns: { ...orderColumns, shipFullAddress: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true, statusName: true },
+        columns: { ...orderColumns, shipFullAddress: true, shipFullName: true, shipPhone: true, shipAddress: true, cod: true, note: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true, statusName: true },
         with: { items: { columns: { id: true, productName: true, variationDetail: true, sku: true, quantity: true, unitPrice: true, lineTotal: true, image: true, returnQuantity: true } } },
       },
       codBatch: true,
