@@ -23,7 +23,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Kho"
         title="Sản phẩm & tồn kho"
         description={`${formatNumber(summary.products)} sản phẩm · ${formatNumber(summary.selling)} mẫu mã đang bán · ${formatNumber(summary.stockUnits)} sản phẩm trong kho · ${warehouses.length} kho`}
         actions={

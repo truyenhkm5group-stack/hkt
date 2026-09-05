@@ -17,7 +17,7 @@ function splitList(text: string) {
 }
 
 function revalidate() {
-  for (const path of ["/payroll", "/expenses", "/reports"]) revalidatePath(path);
+  for (const path of ["/payroll", "/ads", "/expenses", "/reports"]) revalidatePath(path);
 }
 
 export async function saveEmployee(input: unknown): Promise<ActionResult> {

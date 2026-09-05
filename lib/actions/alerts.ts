@@ -97,7 +97,7 @@ export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: str
   const cfg = await loadAlertConfig();
   const url = cfg.larkBillingWebhookUrl || cfg.larkWebhookUrl;
   if (!url) return { error: "Chưa cấu hình webhook Lark" };
-  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 Shop Control ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/expenses?tab=ads` }]]);
+  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 Shop Control ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/ads` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
@@ -109,6 +109,6 @@ export async function saveAdAccountThreshold(accountId: string, threshold: numbe
   const value = threshold && Number.isFinite(threshold) && threshold > 0 ? Math.round(threshold) : null;
   await setAdAccountThreshold(accountId, value);
   await audit({ userId: user.id, userEmail: user.email, action: "AD_ACCOUNT_THRESHOLD", entity: "AD_ACCOUNT", entityId: accountId, detail: { threshold: value } });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   return { ok: true };
 }

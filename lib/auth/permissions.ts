@@ -44,8 +44,8 @@ export const PERMISSION_GROUPS = [
     items: [
       { key: "cod:view", label: "Đối soát COD: xem" },
       { key: "cod:write", label: "Đối soát COD: cập nhật", hint: "Đánh dấu đã thu / đã về ngân hàng, nhập bảng kê, tạo đợt nhận tiền" },
-      { key: "expenses:view", label: "Chi phí & quảng cáo: xem", hint: "Chi phí, chi tiêu QC, hiệu quả marketer, ngưỡng thanh toán" },
-      { key: "expenses:write", label: "Chi phí & quảng cáo: sửa", hint: "Thêm chi phí, nhập sao kê, ghép chiến dịch, gán marketer" },
+      { key: "expenses:view", label: "Chi phí vận hành & Quảng cáo: xem", hint: "Module Chi phí (kê khai chi phí) và module Quảng cáo (hiệu suất theo mã / marketer, ngưỡng thanh toán)" },
+      { key: "expenses:write", label: "Chi phí vận hành & Quảng cáo: sửa", hint: "Thêm chi phí, nhập sao kê, thêm chi tiêu QC, ghép chiến dịch, gán marketer" },
     ],
   },
   {

@@ -27,7 +27,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Kho"
         title="Nhập hàng & kiểm kê"
         description={`Số liệu nhập kho do shop tự ghi nhận trên ERP · ${formatNumber(summary.receipts)} phiếu nhập · ${formatNumber(summary.adjustments)} phiếu điều chỉnh${summary.lastAt ? ` · gần nhất ${formatDate(summary.lastAt)}` : ""}`}
         actions={

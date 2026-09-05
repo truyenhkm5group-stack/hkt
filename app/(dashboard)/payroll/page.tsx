@@ -87,7 +87,7 @@ export default async function PayrollPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Tài chính"
         title="Lương & hoa hồng"
         description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         actions={canManage ? <EmployeeDialog accounts={accounts} /> : null}
@@ -157,7 +157,7 @@ export default async function PayrollPage({
           value={formatVND(unassigned.spend, { compact: true })}
           note={
             unassigned.spend
-              ? `${formatNumber(unassigned.campaigns)} chiến dịch — gán ở Chi phí & quảng cáo → tab Quảng cáo`
+              ? `${formatNumber(unassigned.campaigns)} chiến dịch — gán ở module Quảng cáo (cuối trang)`
               : "Tất cả chiến dịch đã có marketer"
           }
           icon={AlertTriangle}

@@ -15,7 +15,7 @@ export default async function ProductionOrdersPage() {
   const rows = await listProductionOrders();
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="Kho & tài chính" title="Bảng chốt đặt hàng sản xuất" description="Các bảng đặt hàng đã chốt theo mã (màu × size) để gửi xưởng may. Tạo bảng mới từ trang Kế hoạch đặt hàng SX." actions={<Link href="/inventory/planning" className="text-sm font-medium text-primary hover:underline">← Kế hoạch đặt hàng</Link>} />
+      <PageHeader eyebrow="Kho" title="Bảng chốt đặt hàng sản xuất" description="Các bảng đặt hàng đã chốt theo mã (màu × size) để gửi xưởng may. Tạo bảng mới từ trang Kế hoạch đặt hàng SX." actions={<Link href="/inventory/planning" className="text-sm font-medium text-primary hover:underline">← Kế hoạch đặt hàng</Link>} />
       <SectionCard padded={false}>
         <Table>
           <TableHeader>

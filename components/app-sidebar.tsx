@@ -12,6 +12,7 @@ import {
   Boxes,
   CircleDollarSign,
   LayoutDashboard,
+  Megaphone,
   PackageCheck,
   PlugZap,
   ReceiptText,
@@ -61,14 +62,20 @@ const groups: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
-    label: "Kho & tài chính",
+    label: "Kho",
     items: [
       { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
       { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
       { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
       { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
+    ],
+  },
+  {
+    label: "Tài chính",
+    items: [
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
-      { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText, permission: "expenses:view" },
+      { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
+      { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
       { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2, permission: "reports:returns" },
       { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },

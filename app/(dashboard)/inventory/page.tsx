@@ -20,7 +20,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Kho"
         title="Nhật ký kho"
         description={`Lịch sử xuất / nhập / chuyển kho ghi nhận từ Pancake POS · ${params.period.label.toLowerCase()} · ${formatNumber(summary.variants)} mẫu mã có biến động`}
         actions={<SyncButton job="pancake-inventory" label="Đồng bộ nhật ký kho" />}

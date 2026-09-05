@@ -179,7 +179,7 @@ export default async function ReportsPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Tài chính"
         title="Báo cáo lợi nhuận"
         description={`${period.label} · ${REPORT_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(current.orders)} đơn · ${formatNumber(current.successOrders)} giao thành công (${pct(current.successOrders, current.orders).toFixed(1)}%)`}
         actions={

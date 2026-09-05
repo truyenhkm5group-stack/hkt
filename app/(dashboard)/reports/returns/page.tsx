@@ -100,7 +100,7 @@ export default async function ReturnRatePage({
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Tài chính"
         title="Tỷ lệ hoàn theo mã hàng"
         description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.returned)} đơn hoàn · tính trên đơn lên trong kỳ`}
         actions={

@@ -8,7 +8,7 @@ import { type CampaignMap, loadAdsMapping, reapplyAdsMapping, saveCampaignMap, s
 type Result = { ok: true; changed: number } | { error: string };
 
 function revalidate() {
-  for (const path of ["/expenses", "/reports", "/"]) revalidatePath(path);
+  for (const path of ["/ads", "/expenses", "/reports", "/"]) revalidatePath(path);
 }
 
 function applyProduct(campaignMap: CampaignMap, campaignId: string, value: string) {

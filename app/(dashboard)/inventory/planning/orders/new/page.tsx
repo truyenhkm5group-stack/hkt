@@ -16,7 +16,7 @@ export default async function NewProductionOrderPage({ searchParams }: { searchP
   const due = new Date(Date.now() + m.leadTimeDays * 86_400_000).toISOString().slice(0, 10);
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="Kho & tài chính" title={`Bảng chốt đặt hàng · ${m.product.code ? `${m.product.code} · ` : ""}${m.product.name}`} description="Số lượng khởi tạo theo đề xuất của ERP (tồn khả dụng, tốc độ bán, thời gian sản xuất). Sửa từng ô rồi bấm Chốt để lưu và in / gửi xưởng." />
+      <PageHeader eyebrow="Kho" title={`Bảng chốt đặt hàng · ${m.product.code ? `${m.product.code} · ` : ""}${m.product.name}`} description="Số lượng khởi tạo theo đề xuất của ERP (tồn khả dụng, tốc độ bán, thời gian sản xuất). Sửa từng ô rồi bấm Chốt để lưu và in / gửi xưởng." />
       <ProductionEditor init={{ product: m.product, colors: m.colors, sizes: m.sizes, cells: m.cells, detail: m.detail, images: m.images, unitCost: m.unitCost, supplier: "", note: "", dueDate: due }} />
     </div>
   );

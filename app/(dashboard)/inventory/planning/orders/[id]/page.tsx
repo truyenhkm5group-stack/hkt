@@ -18,7 +18,7 @@ export default async function ProductionOrderPage({ params }: { params: Promise<
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Kho & tài chính"
+        eyebrow="Kho"
         title={`${o.code} · ${o.productCode ? `${o.productCode} · ` : ""}${o.productName}`}
         description={`${formatNumber(o.totalQty)} sản phẩm${o.unitCost ? ` · ~${formatVND(o.totalQty * o.unitCost)}` : ""} · tạo ${formatDateTime(o.createdAt)} bởi ${o.createdBy}${o.sentAt ? ` · gửi xưởng ${formatDateTime(o.sentAt)}` : ""}`}
         actions={<div className="flex items-center gap-2"><span className={cn("rounded px-2 py-0.5 text-xs font-semibold", PRODUCTION_STATUS_TONE[o.status])}>{PRODUCTION_STATUS_LABEL[o.status]}</span><Link href="/inventory/planning/orders" className="text-sm text-primary hover:underline">Danh sách</Link></div>}

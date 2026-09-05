@@ -62,7 +62,7 @@ export function auditEntityHref(entity: string, entityId: string): string | null
     case "EXPENSE":
       return "/expenses?period=all";
     case "AD_SPEND":
-      return "/expenses?tab=ads&period=all";
+      return "/ads?period=all";
     default:
       return null;
   }

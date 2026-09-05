@@ -28,7 +28,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
     .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, createdBy: user.email })
     .returning({ id: schema.expenses.id });
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_CREATE", entity: "EXPENSE", entityId: row.id, detail: data });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true, id: row.id };
@@ -49,7 +49,7 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
     .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference })
     .where(eq(schema.expenses.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_UPDATE", entity: "EXPENSE", entityId: id, detail: { before: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, reference: existing.reference }, after: data } });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true, id };
@@ -64,7 +64,7 @@ export async function deleteExpense(id: string): Promise<ActionResult> {
   if (!existing) return { error: "Không tìm thấy khoản chi phí" };
   await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt } });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true };
@@ -84,7 +84,7 @@ export async function createAdSpend(input: unknown): Promise<ActionResult> {
     .values({ platform: data.platform, campaign: data.campaign, spend: data.spend, leads: data.leads, orders: data.orders, revenue: data.revenue, spendDate: vnStartOfDay(data.spendDate), note: data.note, createdBy: user.email })
     .returning({ id: schema.adSpends.id });
   await audit({ userId: user.id, userEmail: user.email, action: "AD_SPEND_CREATE", entity: "AD_SPEND", entityId: row.id, detail: data });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true, id: row.id };
@@ -105,7 +105,7 @@ export async function updateAdSpend(id: string, input: unknown): Promise<ActionR
     .set({ platform: data.platform, campaign: data.campaign, spend: data.spend, leads: data.leads, orders: data.orders, revenue: data.revenue, spendDate: vnStartOfDay(data.spendDate), note: data.note })
     .where(eq(schema.adSpends.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "AD_SPEND_UPDATE", entity: "AD_SPEND", entityId: id, detail: { before: { platform: existing.platform, campaign: existing.campaign, spend: existing.spend, leads: existing.leads, orders: existing.orders, revenue: existing.revenue, spendDate: existing.spendDate }, after: data } });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true, id };
@@ -120,7 +120,7 @@ export async function deleteAdSpend(id: string): Promise<ActionResult> {
   if (!existing) return { error: "Không tìm thấy dòng chi tiêu quảng cáo" };
   await db.delete(schema.adSpends).where(eq(schema.adSpends.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "AD_SPEND_DELETE", entity: "AD_SPEND", entityId: id, detail: { platform: existing.platform, campaign: existing.campaign, spend: existing.spend, spendDate: existing.spendDate } });
-  revalidatePath("/expenses");
+  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
   return { ok: true };
