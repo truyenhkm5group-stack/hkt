@@ -13,6 +13,7 @@ const schema = z.object({
   packingFeePerOrder: z.number().int().min(0).max(1_000_000).default(5_000),
   opsStaffPerOrder: z.number().int().min(0).max(1_000_000).default(2_000),
   opsStaffPerRescued: z.number().int().min(0).max(1_000_000).default(10_000),
+  rescueRatePercent: z.number().min(0).max(100).default(10),
   fixedCostMonthly: z.number().int().min(0).max(10_000_000_000).default(5_000_000),
   returnRateWindowDays: z.number().int().min(7).max(730),
   defaultReturnRate: z.number().min(0).max(100),

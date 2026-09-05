@@ -35,7 +35,7 @@ import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/l
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
-import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
+import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
@@ -480,6 +480,8 @@ async function main() {
   assert.equal(fixedCostForPeriod(5_000_000, 0.5), 2_500_000);
   assert.equal(fixedCostForPeriod(5_000_000, 0), 0, "kỳ không có đơn thì không tính cố định");
   assert.equal(periodMonths(null, new Date()), 0);
+  assert.equal(rescuedFromRate(937, 10), 94, "đơn cứu ước 10% số đơn gửi");
+  assert.equal(rescuedFromRate(0, 10), 0);
   console.log("✓ Giả định vận hành: đóng hàng/đơn, NV vận đơn (đơn + đơn cứu GTC), chi phí cố định theo số tháng của kỳ");
 
   // Các báo cáo lợi nhuận / lương chạy được trên CSDL thật (bắt lỗi SQL: enum, cột, join)
@@ -490,6 +492,8 @@ async function main() {
     assert.equal(r.opexTotal, r.operatingAlloc + r.packingCost + r.opsStaffCost + r.fixedAlloc, `vận hành từng mã ${r.code}`);
     assert.equal(r.netProfit, r.expectedProfit - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN ròng ${r.code}`);
     assert.ok(r.rescued <= r.orders, "đơn cứu ≤ đơn");
+    assert.equal(r.otherCostsTotal, r.opexTotal + r.inventoryRisk + r.tax + r.otherCost, `chi phí ngoài hàng-QC-VC ${r.code}`);
+    if (r.orders) assert.equal(r.opexPerOrder, Math.round(r.otherCostsTotal / r.orders), `CP vận hành/đơn trước hoàn ${r.code}`);
   }
   assert.ok(nominal.assumptions.shipFeeReturnedUsed >= nominal.assumptions.shipFeeDeliveredUsed, "cước đơn hoàn ≥ cước gửi");
   for (const basis of ["profit1", "profit2", "nominal", "cash"] as const) {

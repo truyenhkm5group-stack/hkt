@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
-import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
+import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
 import { failedToReturnRate, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
@@ -172,9 +172,11 @@ export type NominalRow = {
   fixedAlloc: number;
   /** Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + cố định */
   opexTotal: number;
-  /** Tổng vận hành / đơn lên (trước hoàn huỷ) */
+  /** Mọi chi phí ngoài tiền hàng / QC / vận chuyển = tổng vận hành + rủi ro tồn kho + thuế + CP khác */
+  otherCostsTotal: number;
+  /** Chi phí ngoài hàng-QC-VC / đơn lên (trước hoàn huỷ) */
   opexPerOrder: number | null;
-  /** Tổng vận hành / đơn giao thành công ước tính (sau hoàn huỷ) */
+  /** Chi phí ngoài hàng-QC-VC / đơn giao thành công ước tính (sau hoàn huỷ) */
   opexPerDelivered: number | null;
   /** Hàng nhập trong kỳ theo phiếu nhập (số lượng, giá trị) */
   purchaseQty: number;
@@ -226,6 +228,7 @@ export type NominalReport = {
     opsStaffCost: number;
     fixedCost: number;
     opexTotal: number;
+    otherCostsTotal: number;
     inventoryRisk: number;
     netProfit: number;
     failed: number;
@@ -273,7 +276,8 @@ export async function purchaseByProduct(period: Period): Promise<Map<string, { q
 async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
-  const [history, failedProb, purchases, rescuedMap] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period), rescuedOrdersByProduct(period)]);
+  const [history, failedProb, purchases] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period)]);
+  const rescueRate = Number(assumptions.rescueRatePercent ?? 10);
   const pFail = assumptions.failedToReturnPercent > 0 ? Math.min(1, assumptions.failedToReturnPercent / 100) : failedProb.rate;
   const taxPct = Math.max(0, Number(assumptions.taxPercent ?? 0)) / 100;
   const otherPct = Math.max(0, Number(assumptions.otherCostPercentOfAds ?? 0)) / 100;
@@ -385,10 +389,11 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         pending: Number(r.pending),
         actualRevenue: Number(r.actualRevenue),
         operatingAlloc: 0,
-        rescued: Math.min(rescuedMap.get(r.productId) ?? 0, base.orders),
-        ...opsCosts({ orders: base.orders, rescued: rescuedMap.get(r.productId) ?? 0 }, assumptions),
+        rescued: rescuedFromRate(base.orders, rescueRate),
+        ...opsCosts({ orders: base.orders, rescued: rescuedFromRate(base.orders, rescueRate) }, assumptions),
         fixedAlloc: 0,
         opexTotal: 0,
+        otherCostsTotal: 0,
         opexPerOrder: null,
         opexPerDelivered: null,
         purchaseQty: purchases.get(r.productId)?.qty ?? 0,
@@ -409,7 +414,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     rows.push({
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, items: 0, grossSales: 0, adSpend: adByProduct.get(pid) ?? 0,
       returnRate: 0, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
-      delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, opexPerOrder: null, opexPerDelivered: null,
+      delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: Math.round(pur.cost * riskPct), profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
     });
   }
@@ -421,9 +426,10 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     r.opexTotal = r.operatingAlloc + r.packingCost + r.opsStaffCost + r.fixedAlloc;
     r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost;
     r.marginOnPurchase = r.expectedRevenue ? (r.profitOnPurchase / r.expectedRevenue) * 100 : null;
-    r.opexPerOrder = r.orders ? Math.round(r.opexTotal / r.orders) : null;
+    r.otherCostsTotal = r.opexTotal + r.inventoryRisk + r.tax + r.otherCost;
+    r.opexPerOrder = r.orders ? Math.round(r.otherCostsTotal / r.orders) : null;
     const expectedDelivered = r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100);
-    r.opexPerDelivered = expectedDelivered > 0 ? Math.round(r.opexTotal / expectedDelivered) : null;
+    r.opexPerDelivered = expectedDelivered > 0 ? Math.round(r.otherCostsTotal / expectedDelivered) : null;
     r.netProfit = r.expectedProfit - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost;
     r.netMargin = r.expectedRevenue ? (r.netProfit / r.expectedRevenue) * 100 : null;
   }
@@ -460,6 +466,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
   const expectedProfitAll = totals.expectedProfit - unmatchedAdSpend;
   const opexTotal = operatingExpenses + totals.packingCost + totals.opsStaffCost + fixedCost;
+  const otherCostsTotal = opexTotal + totals.inventoryRisk + totals.tax + otherCostAll;
   const netProfit = expectedProfitAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   const expectedDeliveredAll = rows.reduce((t, r) => t + r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100), 0);
@@ -492,6 +499,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       opsStaffCost: totals.opsStaffCost,
       fixedCost,
       opexTotal,
+      otherCostsTotal,
       inventoryRisk: totals.inventoryRisk,
       netProfit,
       netMargin: totals.expectedRevenue ? (netProfit / totals.expectedRevenue) * 100 : null,
@@ -499,8 +507,8 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       pending: totals.pending,
       tax: totals.tax,
       otherCost: otherCostAll,
-      opexPerOrder: totals.orders ? Math.round(opexTotal / totals.orders) : null,
-      opexPerDelivered: expectedDeliveredAll > 0 ? Math.round(opexTotal / expectedDeliveredAll) : null,
+      opexPerOrder: totals.orders ? Math.round(otherCostsTotal / totals.orders) : null,
+      opexPerDelivered: expectedDeliveredAll > 0 ? Math.round(otherCostsTotal / expectedDeliveredAll) : null,
       failedToReturnPct: Math.round(pFail * 100),
       purchaseQty: totals.purchaseQty,
       purchaseCost: totals.purchaseCost,

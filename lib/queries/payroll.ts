@@ -10,11 +10,10 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import {
   getNominalProfitReport,
-  rescuedOrdersByProduct,
   resolveAssumptions,
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
-import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
+import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -207,7 +206,7 @@ async function productEconomics(period: Period) {
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
   // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
   const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
-  const [sales, receipts, [exp], assumptions, rescued] = await Promise.all([
+  const [sales, receipts, [exp], assumptions] = await Promise.all([
     db
       .select({
         productId: productKey,
@@ -241,7 +240,6 @@ async function productEconomics(period: Period) {
       .from(schema.expenses)
       .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, ...periodConds(schema.expenses.occurredAt, period))),
     resolveAssumptions(),
-    rescuedOrdersByProduct(period),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
   const operatingEntered = Number(exp?.amount ?? 0);
@@ -255,8 +253,9 @@ async function productEconomics(period: Period) {
   const fixedCost = fixedCostForPeriod(Number(assumptions.fixedCostMonthly ?? 0), months);
   const rows = sales.filter((r) => r.productId).map((r) => {
     const sentOrders = Number(r.sentOrders);
-    const ops = opsCosts({ orders: sentOrders, rescued: rescued.get(r.productId) ?? 0 }, assumptions);
-    return { productId: r.productId, productName: r.productName ?? "", code: r.code ?? "", deliveredOrders: Number(r.deliveredOrders), sentOrders, rescued: Math.min(rescued.get(r.productId) ?? 0, sentOrders), revenue: Number(r.revenue), cogsDelivered: Math.round(Number(r.cogsDelivered)), shipping: Math.round(Number(r.shipping)), purchaseCost: purchase.get(r.productId) ?? 0, ...ops };
+    const rescued = rescuedFromRate(sentOrders, Number(assumptions.rescueRatePercent ?? 10));
+    const ops = opsCosts({ orders: sentOrders, rescued }, assumptions);
+    return { productId: r.productId, productName: r.productName ?? "", code: r.code ?? "", deliveredOrders: Number(r.deliveredOrders), sentOrders, rescued, revenue: Number(r.revenue), cogsDelivered: Math.round(Number(r.cogsDelivered)), shipping: Math.round(Number(r.shipping)), purchaseCost: purchase.get(r.productId) ?? 0, ...ops };
   });
   const revenueTotal = rows.reduce((a, r) => a + r.revenue, 0);
   // mã có nhập hàng nhưng chưa có đơn trong kỳ vẫn cần hiện (LN2 trừ giá vốn hàng nhập)

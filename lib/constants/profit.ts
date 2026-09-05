@@ -10,6 +10,8 @@ export type ProfitAssumptions = {
   opsStaffPerOrder: number;
   /** Thưởng nhân viên vận đơn cho mỗi đơn giao thất bại được cứu thành giao thành công (đ) */
   opsStaffPerRescued: number;
+  /** Tỷ lệ đơn cứu được ước tính (% số đơn gửi) — thực tế của shop khoảng 10% */
+  rescueRatePercent: number;
   /** Chi phí cố định mỗi tháng: văn phòng, điện nước, internet… (đ), phân bổ theo số ngày trong kỳ và tỷ trọng doanh số */
   fixedCostMonthly: number;
   /** Số ngày lịch sử dùng để ước tính tỷ lệ hoàn của từng mã */
@@ -38,6 +40,7 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   packingFeePerOrder: 5_000,
   opsStaffPerOrder: 2_000,
   opsStaffPerRescued: 10_000,
+  rescueRatePercent: 10,
   fixedCostMonthly: 5_000_000,
   returnRateWindowDays: 90,
   defaultReturnRate: 30,
@@ -76,6 +79,11 @@ export function opsCosts(input: OpsCostInput, a: Pick<ProfitAssumptions, "packin
   const packingCost = Math.round(orders * Math.max(0, a.packingFeePerOrder || 0));
   const opsStaffCost = Math.round(orders * Math.max(0, a.opsStaffPerOrder || 0) + rescued * Math.max(0, a.opsStaffPerRescued || 0));
   return { packingCost, opsStaffCost };
+}
+
+/** Số đơn cứu được ước tính = đơn gửi × tỷ lệ cứu (%) */
+export function rescuedFromRate(orders: number, ratePct: number): number {
+  return Math.round(Math.max(0, orders) * (Math.min(100, Math.max(0, ratePct || 0)) / 100));
 }
 
 /** Chi phí cố định của kỳ = chi phí tháng × số tháng trong kỳ */

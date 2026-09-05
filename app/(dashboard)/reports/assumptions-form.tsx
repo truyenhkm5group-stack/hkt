@@ -30,6 +30,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     packingFeePerOrder: String(assumptions.packingFeePerOrder ?? 5000),
     opsStaffPerOrder: String(assumptions.opsStaffPerOrder ?? 2000),
     opsStaffPerRescued: String(assumptions.opsStaffPerRescued ?? 10000),
+    rescueRatePercent: String(assumptions.rescueRatePercent ?? 10),
     fixedCostMonthly: String(assumptions.fixedCostMonthly ?? 5000000),
     defaultReturnRate: String(assumptions.defaultReturnRate),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
@@ -52,6 +53,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         packingFeePerOrder: Math.round(num(form.packingFeePerOrder, 5000)),
         opsStaffPerOrder: Math.round(num(form.opsStaffPerOrder, 2000)),
         opsStaffPerRescued: Math.round(num(form.opsStaffPerRescued, 10000)),
+        rescueRatePercent: num(form.rescueRatePercent, 10),
         fixedCostMonthly: Math.round(num(form.fixedCostMonthly, 5000000)),
         defaultReturnRate: num(form.defaultReturnRate, 30),
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
@@ -104,7 +106,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           NV vận đơn <b className="numeric">{(assumptions.opsStaffPerOrder ?? 2000).toLocaleString("vi-VN")} ₫</b>
           <span className="text-muted-foreground">/đơn + </span>
           <b className="numeric">{(assumptions.opsStaffPerRescued ?? 10000).toLocaleString("vi-VN")} ₫</b>
-          <span className="text-muted-foreground">/đơn cứu GTC</span>
+          <span className="text-muted-foreground">/đơn cứu GTC (ước {assumptions.rescueRatePercent ?? 10}% số đơn)</span>
         </span>
         <span title="Văn phòng, điện nước, internet… quy đổi theo số ngày của kỳ và phân bổ theo tỷ trọng doanh số">
           Cố định <b className="numeric">{(assumptions.fixedCostMonthly ?? 5000000).toLocaleString("vi-VN")} ₫</b>
@@ -191,6 +193,10 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             <Input type="number" inputMode="numeric" min={0} step={1000} value={form.opsStaffPerRescued} onChange={(e) => setForm({ ...form, opsStaffPerRescued: e.target.value })} />
           </div>
           <div className="space-y-1">
+            <Label>Tỷ lệ đơn cứu được (% số đơn gửi)</Label>
+            <Input type="number" inputMode="decimal" min={0} max={100} step={1} value={form.rescueRatePercent} onChange={(e) => setForm({ ...form, rescueRatePercent: e.target.value })} />
+          </div>
+          <div className="space-y-1">
             <Label>Chi phí cố định / tháng: văn phòng, điện nước (₫)</Label>
             <Input type="number" inputMode="numeric" min={0} step={100000} value={form.fixedCostMonthly} onChange={(e) => setForm({ ...form, fixedCostMonthly: e.target.value })} />
           </div>
@@ -264,7 +270,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
               Cước gửi tính cho MỌI đơn gửi đi; đơn hoàn tốn thêm phí hoàn về (để trống
               = cước gửi + phí hoàn bình quân nếu có dữ liệu, không thì gấp đôi cước gửi).
               Đóng hàng và nhân viên vận đơn tính theo số đơn đã xác nhận gửi đi; đơn
-              &ldquo;cứu được&rdquo; là đơn từng phát không thành rồi giao thành công. Chi phí
+              &ldquo;cứu được&rdquo; (phát không thành rồi giao thành công) ước theo % số đơn gửi. Chi phí
               cố định quy đổi theo số ngày của kỳ — nếu đã nhập tiền văn phòng / điện nước
               vào bảng Chi phí thì đặt 0 để khỏi tính hai lần. Rủi ro tồn kho: % tổng giá
               trị hàng nhập trong kỳ.
