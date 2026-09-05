@@ -9,6 +9,8 @@ export type Employee = {
   aliases: string[];
   /** Tài khoản quảng cáo (account_id) mặc định thuộc marketer này */
   accountIds: string[];
+  /** Email đăng nhập ERP của nhân sự này — để người chỉ có quyền "Lương: xem của mình" thấy đúng dòng của mình */
+  userEmail?: string;
   /** Lương cứng mỗi tháng (đ) */
   fixed: number;
   /** % lợi nhuận tổng của shop trong kỳ */

@@ -15,7 +15,7 @@ type Result<T = object> = ({ ok: true } & T) | { error: string };
 
 async function authorize() {
   const user = await requireUser();
-  return { user, error: can(user, "cs:manage") ? null : "Bạn không có quyền chăm sóc khách hàng" };
+  return { user, error: can(user, "outreach:send") ? null : "Bạn không có quyền chăm sóc khách hàng" };
 }
 
 const configSchema = z.object({
@@ -44,7 +44,7 @@ const configSchema = z.object({
 
 export async function saveOutreachConfig(input: unknown): Promise<Result> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "outreach:config")) return { error: "Không có quyền" };
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   await setSettingJson(OUTREACH_KEY, parsed.data);

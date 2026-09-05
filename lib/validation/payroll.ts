@@ -10,6 +10,7 @@ export const employeeSchema = z.object({
   department: z.enum(DEPARTMENTS, { error: "Chọn bộ phận" }),
   aliases: z.string().trim().max(500),
   accountIds: z.string().trim().max(500),
+  userEmail: z.string().trim().max(160).refine((v) => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Email không hợp lệ"),
   fixed: z.number({ error: "Nhập lương cứng" }).int().min(0).max(1_000_000_000),
   percentTotal: pct("% lợi nhuận tổng"),
   percentPersonal: pct("% lợi nhuận cá nhân"),

@@ -48,7 +48,7 @@ export default async function ReturnRatePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requirePermission("reports:view");
+  await requirePermission("reports:returns");
   const raw = await searchParams;
   const params = parseListParams(raw, {
     defaultSort: "rate",

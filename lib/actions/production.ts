@@ -33,7 +33,7 @@ async function nextCode() {
 
 export async function saveProductionOrder(input: unknown, id?: string): Promise<Result<{ id: string; code: string }>> {
   const user = await requireUser();
-  if (!can(user, "inventory:write")) return { error: "Không có quyền tạo bảng đặt hàng" };
+  if (!can(user, "planning:write")) return { error: "Không có quyền tạo bảng đặt hàng" };
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const d = parsed.data;
@@ -76,7 +76,7 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
 
 export async function setProductionStatus(id: string, status: string): Promise<Result> {
   const user = await requireUser();
-  if (!can(user, "inventory:write")) return { error: "Không có quyền" };
+  if (!can(user, "planning:write")) return { error: "Không có quyền" };
   if (!(PRODUCTION_STATUS as readonly string[]).includes(status)) return { error: "Trạng thái không hợp lệ" };
   const db = await getDb();
   await db.update(schema.productionOrders).set({ status, sentAt: status === "SENT" ? new Date() : undefined, updatedAt: new Date() }).where(eq(schema.productionOrders.id, id));
@@ -88,7 +88,7 @@ export async function setProductionStatus(id: string, status: string): Promise<R
 
 export async function deleteProductionOrder(id: string): Promise<Result> {
   const user = await requireUser();
-  if (!can(user, "inventory:write")) return { error: "Không có quyền" };
+  if (!can(user, "planning:write")) return { error: "Không có quyền" };
   const db = await getDb();
   await db.delete(schema.productionOrders).where(and(eq(schema.productionOrders.id, id), eq(schema.productionOrders.status, "DRAFT")));
   await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_ORDER_DELETE", entity: "PRODUCTION_ORDER", entityId: id });

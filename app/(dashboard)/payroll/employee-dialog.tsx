@@ -63,6 +63,7 @@ function toForm(e?: Employee | null, preset?: EmployeePreset): EmployeeInput {
     department: (e?.department as EmployeeInput["department"]) ?? "Marketing",
     aliases: (e?.aliases ?? preset?.aliases ?? []).join(", "),
     accountIds: (e?.accountIds ?? preset?.accountIds ?? []).join(", "),
+    userEmail: e?.userEmail ?? "",
     fixed: e?.fixed ?? 0,
     percentTotal: e?.percentTotal ?? 0,
     percentPersonal: e?.percentPersonal ?? 0,
@@ -252,6 +253,22 @@ export function EmployeeDialog({
                     </FormControl>
                     <p className="text-[11px] text-muted-foreground">
                       Cách nhau bằng dấu phẩy
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="userEmail"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email đăng nhập ERP</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="ten@shop.vn" {...field} />
+                    </FormControl>
+                    <p className="text-[11px] text-muted-foreground">
+                      Để người này (quyền “Lương: xem của mình”) chỉ thấy dòng lương của chính mình
                     </p>
                     <FormMessage />
                   </FormItem>

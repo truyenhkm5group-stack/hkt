@@ -39,6 +39,7 @@ import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/l
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
+import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
@@ -559,6 +560,18 @@ async function main() {
   assert.deepEqual(splitProfit(-200_000, "cross", shCustom), { keep: -200_000, toOwner: 0, toShop: 0 }, "LN âm người tạo đơn chịu");
   assert.deepEqual(splitProfit(1_000_000, "cross", shDefault), { keep: 950_000, toOwner: 50_000, toShop: 0 }, "mặc định 5% về chủ mã như quy tắc cũ");
   console.log("✓ Ghi nhận theo fanpage (page → marketer, phần chưa gán theo QC / chủ mã) & chia % LN chủ mã / chạy cùng");
+
+  // Phân quyền chi tiết: quyền cũ đã lưu suy ra quyền mới; vai trò Trưởng nhóm
+  const legacyPerms = resolvePermissions("MARKETING", ["orders:read", "reports:view", "payroll:view"], null);
+  assert.ok(["cs:view", "outreach:view", "orders:export", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own"].every((k) => legacyPerms.includes(k)), "quyền cũ reports:view / orders:read / payroll:view mở đúng quyền mới");
+  assert.ok(!legacyPerms.includes("payroll:manage") && !legacyPerms.includes("reports:assumptions"), "không tự mở quyền quản lý");
+  assert.deepEqual(expandLegacy(["reports:nominal"]), ["reports:nominal"], "quyền mới giữ nguyên");
+  const leader = rolePermissions("LEADER", null);
+  assert.ok(leader.includes("payroll:view") && leader.includes("reports:nominal") && !leader.includes("reports:cash") && !leader.includes("users:manage"), "Trưởng nhóm: xem lương cả nhóm, BCLN danh nghĩa, không xem dòng tiền thực");
+  const custom = resolvePermissions("LEADER", ["reports:cash"], { LEADER: ["reports:nominal"] });
+  assert.deepEqual(custom, ["reports:cash"], "quyền riêng từng người thắng mẫu vai trò");
+  assert.ok(resolvePermissions("ADMIN", ["reports:cash"], null).includes("users:manage"), "ADMIN luôn toàn quyền");
+  console.log("✓ Phân quyền chi tiết: suy ra từ quyền cũ, mẫu vai trò Trưởng nhóm, quyền riêng từng người");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

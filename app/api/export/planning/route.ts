@@ -12,7 +12,7 @@ function cell(v: unknown) {
 
 export async function GET() {
   const user = await getCurrentUser();
-  if (!user || !can(user, "products:view")) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
+  if (!user || !can(user, "planning:view")) return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
   const report = await getReplenishmentPlan();
   const lines = [["Mã hàng", "Sản phẩm", "SKU", "Màu", "Size", "Tồn ERP", "Tồn Pancake", "Đã chốt chưa gửi", "Khả dụng", "Bán 7 ngày", `Bán ${report.assumptions.velocityWindowDays} ngày`, "Bán 30 ngày", "Tốc độ/ngày", "Còn bán được (ngày)", "Dự kiến hết", "Thời gian SX", "Bán trong lúc SX", "Tồn an toàn", "Mục tiêu", "Đề xuất đặt", "Giá nhập", "Tiền hàng", "Tình trạng"].join(",")];
   for (const r of report.rows) lines.push([r.productCode, r.productName, r.sku, r.color, r.size, r.stock, r.pancakeStock, r.committed, r.available, r.sold7, r.soldInWindow, r.sold30, r.velocity.toFixed(2), r.daysOfCover === null ? "" : Math.floor(r.daysOfCover), r.stockOutDate ?? "", r.leadTimeDays, r.leadTimeDemand, r.safetyStock, r.target, r.suggested, r.unitCost, r.orderCost, PLAN_STATUS_LABEL[r.status]].map(cell).join(","));

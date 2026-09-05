@@ -102,6 +102,7 @@ export async function requirePermission(permission: Permission): Promise<Session
 export const ROLE_LABEL: Record<Role, string> = {
   ADMIN: "Quản trị",
   MANAGER: "Quản lý",
+  LEADER: "Trưởng nhóm",
   ACCOUNTANT: "Kế toán",
   WAREHOUSE: "Kho",
   CS: "CSKH",

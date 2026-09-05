@@ -123,7 +123,7 @@ const rulesSchema = z.object({
 
 export async function saveCsRules(input: unknown): Promise<Result> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "cs:config")) return { error: "Không có quyền" };
   const parsed = rulesSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   await setSettingJson(CS_RULES_KEY, parsed.data);

@@ -11,7 +11,7 @@ const money = (name: string) => integer(name).notNull().default(0);
 
 // ───────────────────────── Enums ─────────────────────────
 
-export const roleEnum = pgEnum("role", ["ADMIN", "MANAGER", "ACCOUNTANT", "WAREHOUSE", "CS", "MARKETING", "VIEWER"]);
+export const roleEnum = pgEnum("role", ["ADMIN", "MANAGER", "LEADER", "ACCOUNTANT", "WAREHOUSE", "CS", "MARKETING", "VIEWER"]);
 export type Role = (typeof roleEnum.enumValues)[number];
 
 export const orderStageEnum = pgEnum("order_stage", [

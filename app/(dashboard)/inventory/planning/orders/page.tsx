@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Bảng đặt hàng sản xuất" };
 
 export default async function ProductionOrdersPage() {
-  await requirePermission("products:view");
+  await requirePermission("planning:view");
   const rows = await listProductionOrders();
   return (
     <div className="space-y-5">

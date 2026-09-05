@@ -20,9 +20,9 @@ export const metadata = { title: "Chăm sóc & bán chéo" };
 
 
 export default async function OutreachPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("orders:read");
-  const canWrite = can(user, "cs:manage");
-  const canConfig = can(user, "settings:manage");
+  const user = await requirePermission("outreach:view");
+  const canWrite = can(user, "outreach:send");
+  const canConfig = can(user, "outreach:config");
   const raw = await searchParams;
   const segment = raw.segment === "CROSS_SELL" ? "CROSS_SELL" : "NURTURE";
   const params = parseListParams(raw, { defaultSort: "nextAt", defaultDir: "asc", filterKeys: ["status"], sortable: OUTREACH_SORTABLE, defaultPeriod: "all" });

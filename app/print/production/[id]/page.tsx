@@ -8,7 +8,7 @@ import type { SearchParams } from "@/lib/search-params";
 export const dynamic = "force-dynamic";
 
 export default async function PrintProductionOrder({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
-  await requirePermission("products:view");
+  await requirePermission("planning:view");
   const { id } = await params;
   const raw = await searchParams;
   const o = await getProductionOrder(id);

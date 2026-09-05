@@ -8,7 +8,7 @@ import type { SearchParams } from "@/lib/search-params";
 export const metadata = { title: "Bảng chốt đặt hàng" };
 
 export default async function NewProductionOrderPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("inventory:write");
+  await requirePermission("planning:write");
   const raw = await searchParams;
   const productId = typeof raw.product === "string" ? raw.product : "";
   const m = productId ? await buildMatrixForProduct(productId) : null;

@@ -17,7 +17,7 @@ import { parseListParams, type SearchParams } from "@/lib/search-params";
 export const metadata = { title: "CSKH" };
 
 export default async function CsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("orders:read");
+  const user = await requirePermission("cs:view");
   const canWrite = can(user, "cs:manage");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee"], sortable: CS_SORTABLE, defaultPeriod: "all" });

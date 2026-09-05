@@ -5,7 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { buildMatrixForProduct, getProductionOrder } from "@/lib/queries/production";
 
 export default async function EditProductionOrderPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("inventory:write");
+  await requirePermission("planning:write");
   const { id } = await params;
   const o = await getProductionOrder(id);
   if (!o) notFound();

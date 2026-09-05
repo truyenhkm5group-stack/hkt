@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/sidebar";
 import { hasPermission, type Permission } from "@/lib/auth/permissions";
 
-type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission };
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission; /** đủ một trong các quyền này là hiện */ anyOf?: Permission[] };
 
 const groups: { label: string; items: NavItem[] }[] = [
   {
@@ -51,9 +51,9 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/", label: "Tổng quan", icon: LayoutDashboard, permission: "dashboard:view" },
       { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
       { href: "/shipments", label: "Vận đơn", icon: Truck, permission: "shipments:view" },
-      { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "shipments:view" },
-      { href: "/cs", label: "CSKH", icon: Headset, permission: "orders:read" },
-      { href: "/outreach", label: "Chăm sóc & bán chéo", icon: HeartHandshake, permission: "orders:read" },
+      { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "alerts:view" },
+      { href: "/cs", label: "CSKH", icon: Headset, permission: "cs:view" },
+      { href: "/outreach", label: "Chăm sóc & bán chéo", icon: HeartHandshake, permission: "outreach:view" },
       { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
     ],
@@ -64,12 +64,12 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
       { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
       { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
-      { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "products:view" },
+      { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/expenses", label: "Chi phí & quảng cáo", icon: ReceiptText, permission: "expenses:view" },
-      { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:view" },
-      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2, permission: "reports:view" },
-      { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view" },
+      { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
+      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2, permission: "reports:returns" },
+      { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },
     ],
   },
   {
@@ -97,7 +97,7 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
       </SidebarHeader>
       <SidebarContent className="px-2 py-2">
         {groups.map((group) => {
-          const items = group.items.filter((item) => !item.permission || user.role === "ADMIN" || hasPermission(user.permissions, item.permission));
+          const items = group.items.filter((item) => user.role === "ADMIN" || (item.anyOf ? item.anyOf.some((p) => hasPermission(user.permissions, p)) : !item.permission || hasPermission(user.permissions, item.permission)));
           if (!items.length) return null;
           return (
             <SidebarGroup key={group.label} className="p-0 pt-2">

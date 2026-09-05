@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   Banknote,
   Boxes,
@@ -13,7 +14,7 @@ import {
 import { CashTab } from "@/app/(dashboard)/reports/cash-tab";
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can, requireUser } from "@/lib/auth/session";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -131,11 +132,21 @@ export default async function ReportsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const raw = await searchParams;
-  const user = await requirePermission("reports:view");
-  const canWrite = can(user, "expenses:write");
+  const user = await requireUser();
+  const allowed = {
+    pnl: can(user, "reports:delivered"),
+    cash: can(user, "reports:cash"),
+    nominal: can(user, "reports:nominal"),
+  };
+  const canWrite = can(user, "reports:assumptions");
   const tabParam = param(raw, "tab");
-  const tab: "pnl" | "cash" | "nominal" =
+  const wanted: "pnl" | "cash" | "nominal" =
     tabParam === "cash" ? "cash" : tabParam === "nominal" ? "nominal" : "pnl";
+  // không có quyền tab đang xin → chuyển sang tab đầu tiên được phép; không được tab nào → về trang chủ
+  const firstAllowed = (["pnl", "cash", "nominal"] as const).find((t) => allowed[t]);
+  if (!firstAllowed) redirect("/?forbidden=1");
+  const tab: "pnl" | "cash" | "nominal" = allowed[wanted] ? wanted : firstAllowed;
+  if (tab !== wanted && tabParam) redirect(`/reports?tab=${tab}`);
   const productParam = param(raw, "product");
   const period = resolvePeriod(raw, "month");
   const periodQuery =
@@ -182,21 +193,27 @@ export default async function ReportsPage({
 
       <Tabs value={tab}>
         <TabsList>
-          <TabsTrigger value="pnl" asChild>
-            <Link href={`/reports?tab=pnl${periodQuery}`} className="px-3">
-              <Boxes /> Theo đơn giao thành công
-            </Link>
-          </TabsTrigger>
-          <TabsTrigger value="cash" asChild>
-            <Link href={`/reports?tab=cash${periodQuery}`} className="px-3">
-              <WalletCards /> Dòng tiền thực
-            </Link>
-          </TabsTrigger>
-          <TabsTrigger value="nominal" asChild>
-            <Link href={`/reports?tab=nominal${periodQuery}`} className="px-3">
-              <Calculator /> Danh nghĩa theo mã hàng
-            </Link>
-          </TabsTrigger>
+          {allowed.pnl ? (
+            <TabsTrigger value="pnl" asChild>
+              <Link href={`/reports?tab=pnl${periodQuery}`} className="px-3">
+                <Boxes /> Theo đơn giao thành công
+              </Link>
+            </TabsTrigger>
+          ) : null}
+          {allowed.cash ? (
+            <TabsTrigger value="cash" asChild>
+              <Link href={`/reports?tab=cash${periodQuery}`} className="px-3">
+                <WalletCards /> Dòng tiền thực
+              </Link>
+            </TabsTrigger>
+          ) : null}
+          {allowed.nominal ? (
+            <TabsTrigger value="nominal" asChild>
+              <Link href={`/reports?tab=nominal${periodQuery}`} className="px-3">
+                <Calculator /> Danh nghĩa theo mã hàng
+              </Link>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
       </Tabs>
 

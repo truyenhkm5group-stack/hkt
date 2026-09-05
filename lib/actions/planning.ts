@@ -18,7 +18,7 @@ const schema = z.object({
 
 export async function savePlanningAssumptions(input: unknown): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "inventory:write")) return { error: "Không có quyền" };
+  if (!can(user, "planning:write")) return { error: "Không có quyền" };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   await setSettingJson(PLANNING_KEY, parsed.data);

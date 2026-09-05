@@ -15,16 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
+import { ROLE_LABEL } from "@/lib/constants/roles";
 
-const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: "Quản trị",
-  MANAGER: "Quản lý",
-  ACCOUNTANT: "Kế toán",
-  WAREHOUSE: "Kho",
-  CS: "CSKH",
-  MARKETING: "Marketing",
-  VIEWER: "Chỉ xem",
-};
 
 export function NavUser({ user }: { user: { name: string; email: string; role: Role } }) {
   const { isMobile } = useSidebar();

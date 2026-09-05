@@ -27,7 +27,7 @@ const schema = z.object({
 
 export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+  if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const before = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);

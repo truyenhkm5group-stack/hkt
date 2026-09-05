@@ -32,7 +32,7 @@ const configSchema = z.object({
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   await setSettingJson(ALERT_CONFIG_KEY, parsed.data);
@@ -43,7 +43,7 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
 
 export async function sendTestTelegram(): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
   const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `✅ <b>Shop Control ERP</b>: kết nối Telegram thành công. Cảnh báo đơn chờ xử lý / giao thất bại sẽ gửi vào đây.`);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
@@ -51,7 +51,7 @@ export async function sendTestTelegram(): Promise<{ ok: true } | { error: string
 
 export async function sendTestLark(): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
   const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ Shop Control ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
@@ -93,7 +93,7 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
 /** Gửi tin thử vào nhóm Lark nhận cảnh báo ngưỡng thanh toán QC */
 export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
   const url = cfg.larkBillingWebhookUrl || cfg.larkWebhookUrl;
   if (!url) return { error: "Chưa cấu hình webhook Lark" };

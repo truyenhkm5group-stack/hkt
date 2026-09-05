@@ -28,13 +28,23 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
     and (rl.order_reference = ${s.vtpOrderNumber} or rl.vtp_order_number ~ ('^' || ${s.vtpOrderNumber} || '[0-9]?P[0-9]+$'))
 ))`;
 
-/** Kết quả cuối cùng của một đơn (dùng chung cho báo cáo tỷ lệ hoàn). Yêu cầu FROM orders LEFT JOIN shipments. */
+/**
+ * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ hoàn, lương, COD).
+ * Ưu tiên trạng thái VẬN ĐƠN Viettel Post (đầu cuối giao hàng) trước trạng thái đơn Pancake:
+ *  1. vận đơn đang hoàn / đã hoàn → hoàn; vận đơn đã giao → giao thành công (trừ quy tắc phát hiện hoàn: COD = 0 & cước nhỏ, vận đơn chiều về);
+ *  2. vận đơn đang đi (lấy hàng, đang giao, giao thất bại chờ phát lại) → đang giao;
+ *  3. chưa có trạng thái vận đơn mới xét theo Pancake: huỷ / hoàn / đã giao / đã gửi / chưa gửi.
+ * Yêu cầu FROM orders LEFT JOIN shipments.
+ */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
+  when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when ${s.stage} = 'DELIVERED' and (${FEE_RULE} or ${LEG_RULE}) then 'RETURNED_BY_RULE'
+  when ${s.stage} = 'DELIVERED' then 'DELIVERED'
+  when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
-  when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') or ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
-  when ${FEE_RULE} or ${LEG_RULE} then 'RETURNED_BY_RULE'
-  when ${o.stage} in ('DELIVERED','PAID') or ${s.stage} = 'DELIVERED' then 'DELIVERED'
-  when ${o.stage} = 'SHIPPED' or ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') then 'IN_TRANSIT'
+  when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
+  when ${o.stage} in ('DELIVERED','PAID') then 'DELIVERED'
+  when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
   else 'NOT_SHIPPED' end`;
 
 const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;

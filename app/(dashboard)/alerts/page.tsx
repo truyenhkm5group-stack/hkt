@@ -14,12 +14,12 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Cần xử lý" };
 
 export default async function AlertsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const user = await requirePermission("shipments:view");
+  const user = await requirePermission("alerts:view");
   const raw = await searchParams;
   const kindFilter = typeof raw.kind === "string" ? raw.kind : "";
   const [items, counts, config] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig()]);
   const visible = kindFilter ? items.filter((n) => n.kind === kindFilter) : items;
-  const canConfig = can(user, "settings:manage");
+  const canConfig = can(user, "alerts:manage");
 
   return (
     <div className="space-y-5">

@@ -55,7 +55,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   ]);
 
   const appUrl = env.appUrl;
-  const canManageSettings = can(user, "settings:manage");
+  const canManageSettings = can(user, "integrations:manage");
   const webhookCount = (source: string) => webhooks.facets.sources.find((s) => s.value === source)?.count ?? 0;
   const pancakeWebhookUrl = `${appUrl}/api/webhooks/pancake/${env.pancake.webhookSecret || "<PANCAKE_WEBHOOK_SECRET>"}`;
   const vtpWebhookUrl = `${appUrl}/api/webhooks/viettelpost`;

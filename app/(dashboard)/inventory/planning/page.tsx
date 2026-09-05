@@ -22,8 +22,8 @@ function fmtDate(key: string | null) {
 }
 
 export default async function PlanningPage() {
-  const user = await requirePermission("products:view");
-  const canWrite = can(user, "inventory:write");
+  const user = await requirePermission("planning:view");
+  const canWrite = can(user, "planning:write");
   const [report, products] = await Promise.all([getReplenishmentPlan(), listProductsForMapping()]);
   const sm = report.summary;
 

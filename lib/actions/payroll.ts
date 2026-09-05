@@ -35,6 +35,7 @@ export async function saveEmployee(input: unknown): Promise<ActionResult> {
     department: data.department,
     aliases: splitList(data.aliases),
     accountIds: splitList(data.accountIds).map((a) => a.replace(/^act_/, "")),
+    userEmail: (data.userEmail ?? "").trim().toLowerCase(),
     fixed: data.fixed,
     percentTotal: data.percentTotal,
     percentPersonal: data.percentPersonal,

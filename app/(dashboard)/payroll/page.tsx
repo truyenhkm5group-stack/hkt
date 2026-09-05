@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { can, requireUser } from "@/lib/auth/session";
+import { employeeMatchesUser } from "@/lib/queries/payroll";
 import {
   PAYROLL_BASIS_LABEL,
   type PayrollBasis,
@@ -53,8 +54,9 @@ export default async function PayrollPage({
 }) {
   const raw = await searchParams;
   const user = await requireUser();
-  if (!can(user, "payroll:view")) redirect("/?forbidden=1");
-  const canManage = can(user, "payroll:manage");
+  const viewAll = can(user, "payroll:view");
+  if (!viewAll && !can(user, "payroll:view-own")) redirect("/?forbidden=1");
+  const canManage = viewAll && can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
@@ -73,16 +75,21 @@ export default async function PayrollPage({
       : {}),
   }).toString();
   const m = report.marketers;
+  // Quyền "xem của mình": chỉ dòng lương / marketer khớp email hoặc tên người đăng nhập
+  const ownIds = new Set(report.lines.filter((l) => employeeMatchesUser(l.employee, user)).map((l) => l.employee.id));
+  const lines = viewAll ? report.lines : report.lines.filter((l) => ownIds.has(l.employee.id));
+  const marketersVisible = viewAll ? m.marketers : m.marketers.filter((x) => x.marketerId && ownIds.has(x.marketerId));
   const selectedMarketer = selected
-    ? m.marketers.find((x) => (x.marketerId ?? "none") === selected)
+    ? marketersVisible.find((x) => (x.marketerId ?? "none") === selected)
     : null;
+  const totalSalary = viewAll ? report.totalSalary : lines.reduce((t, l) => t + l.salary, 0);
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Kho & tài chính"
         title="Lương & hoa hồng"
-        description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(report.lines.length)} nhân sự đang làm việc`}
+        description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         actions={canManage ? <EmployeeDialog accounts={accounts} /> : null}
       />
 
@@ -105,7 +112,12 @@ export default async function PayrollPage({
         }
       />
 
-      <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={report.lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} />
+      {!viewAll ? (
+        <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+          Bạn đang xem <b>lương & lợi nhuận của riêng mình</b>{lines.length ? ` (${lines.map((l) => l.employee.shortName || l.employee.name).join(", ")})` : ""}. {lines.length ? "" : "Chưa khớp được nhân sự nào với tài khoản của bạn — nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự."}
+        </div>
+      ) : null}
+      {viewAll ? <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} /> : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -125,9 +137,9 @@ export default async function PayrollPage({
         />
         <MetricCard
           label="Tổng lương kỳ"
-          value={formatVND(report.totalSalary, { compact: true })}
-          note={`${formatNumber(report.lines.length)} người · lương cứng ${formatVND(
-            report.lines.reduce((s, l) => s + l.fixed, 0),
+          value={formatVND(totalSalary, { compact: true })}
+          note={`${formatNumber(lines.length)} người · lương cứng ${formatVND(
+            lines.reduce((s, l) => s + l.fixed, 0),
             { compact: true },
           )}`}
           icon={HandCoins}
@@ -175,7 +187,7 @@ export default async function PayrollPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {report.lines.length === 0 ? (
+              {lines.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={10}
@@ -187,7 +199,7 @@ export default async function PayrollPage({
                   </TableCell>
                 </TableRow>
               ) : (
-                report.lines.map((l) => (
+                lines.map((l) => (
                   <TableRow key={l.employee.id}>
                     <TableCell>
                       <div className="font-semibold">{l.employee.name}</div>
@@ -293,22 +305,22 @@ export default async function PayrollPage({
                   </TableRow>
                 ))
               )}
-              {report.lines.length ? (
+              {lines.length ? (
                 <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
                   <TableCell colSpan={4}>Tổng</TableCell>
                   <TableCell className="text-right">
                     <Money
-                      value={report.lines.reduce((s, l) => s + l.fixed, 0)}
+                      value={lines.reduce((s, l) => s + l.fixed, 0)}
                     />
                   </TableCell>
                   <TableCell className="text-right">
                     <Money
-                      value={report.lines.reduce((s, l) => s + l.bonusTotal, 0)}
+                      value={lines.reduce((s, l) => s + l.bonusTotal, 0)}
                     />
                   </TableCell>
                   <TableCell className="text-right">
                     <Money
-                      value={report.lines.reduce(
+                      value={lines.reduce(
                         (s, l) => s + l.bonusPersonal,
                         0,
                       )}
@@ -316,14 +328,14 @@ export default async function PayrollPage({
                   </TableCell>
                   <TableCell className="text-right">
                     <Money
-                      value={report.lines.reduce(
+                      value={lines.reduce(
                         (s, l) => s + l.bonusRevenue,
                         0,
                       )}
                     />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Money value={report.totalSalary} className="text-base" />
+                    <Money value={totalSalary} className="text-base" />
                   </TableCell>
                   {canManage ? <TableCell /> : null}
                 </TableRow>
@@ -403,7 +415,7 @@ export default async function PayrollPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {m.marketers.map((x) => (
+              {marketersVisible.map((x) => (
                 <TableRow
                   key={x.marketerId ?? "none"}
                   className={cn(

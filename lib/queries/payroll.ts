@@ -25,6 +25,7 @@ export async function listEmployees(): Promise<Employee[]> {
   const defaults = (): Omit<Employee, "id" | "name"> => ({
     aliases: [],
     accountIds: [],
+    userEmail: "",
     fixed: 0,
     percentTotal: 0,
     percentPersonal: 0,
@@ -425,6 +426,15 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
   products.sort((a, b) => b.profit - a.profit);
   return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained };
+}
+
+/** Nhân sự có phải là người dùng đang đăng nhập không (email khai báo, hoặc trùng tên đầy đủ / tên ngắn) */
+export function employeeMatchesUser(e: Pick<Employee, "name" | "shortName" | "userEmail">, user: { email: string; name: string }): boolean {
+  const email = (e.userEmail ?? "").trim().toLowerCase();
+  if (email && email === user.email.trim().toLowerCase()) return true;
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/\s+/g, " ").trim();
+  const u = norm(user.name || "");
+  return Boolean(u) && (norm(e.name) === u || (Boolean(e.shortName) && norm(e.shortName) === u));
 }
 
 export type PayrollLine = {
