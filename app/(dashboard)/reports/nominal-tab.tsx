@@ -138,7 +138,7 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản), rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })}, thuế ${formatVND(t.tax, { compact: true })}, CP khác ${formatVND(t.otherCost, { compact: true })}`}
+          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản), rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập ${formatVND(t.purchaseCost, { compact: true })}), thuế ${formatVND(t.tax, { compact: true })}, CP khác ${formatVND(t.otherCost, { compact: true })}`}
           icon={Wallet}
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
@@ -180,7 +180,7 @@ export async function NominalTab({
                 <TableHead className="text-right" title="Chi phí vận hành trong kỳ (lương, mặt bằng, phần mềm, đóng gói, khác) phân bổ theo tỷ trọng doanh số POS">CP vận hành</TableHead>
                 <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn lên (trước hoàn huỷ)">VH/đơn trước hoàn</TableHead>
                 <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">VH/đơn sau hoàn huỷ</TableHead>
-                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho = giá vốn ước tính × % giả định">Rủi ro TK</TableHead>
+                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho = tổng giá trị hàng nhập trong kỳ (phiếu nhập) × % giả định">Rủi ro TK {report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập</TableHead>
                 <TableHead className="text-right" title="Dự trù thuế = DT GTC ước tính × %">Thuế {report.assumptions.taxPercent ?? 1.5}%</TableHead>
                 <TableHead className="text-right" title="Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền)">CP khác {report.assumptions.otherCostPercentOfAds ?? 1.1}% QC</TableHead>
                 <TableHead className="text-right">LN ròng</TableHead>
@@ -557,6 +557,71 @@ export async function NominalTab({
           </SectionCard>
         </div>
       ) : null}
+
+      <SectionCard
+        title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
+        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − vận hành − rủi ro TK − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1200px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã hàng</TableHead>
+                <TableHead className="text-right">SL nhập</TableHead>
+                <TableHead className="text-right">Giá trị hàng nhập</TableHead>
+                <TableHead className="text-right">Đơn</TableHead>
+                <TableHead className="text-right">DT GTC ƯT</TableHead>
+                <TableHead className="text-right">CPQC</TableHead>
+                <TableHead className="text-right">Vận chuyển</TableHead>
+                <TableHead className="text-right">CP vận hành</TableHead>
+                <TableHead className="text-right">Rủi ro TK</TableHead>
+                <TableHead className="text-right">Thuế</TableHead>
+                <TableHead className="text-right">CP khác</TableHead>
+                <TableHead className="text-right">LN theo hàng nhập</TableHead>
+                <TableHead className="text-right">Margin</TableHead>
+                <TableHead className="text-right" title="Giá vốn hàng giao ước tính (bảng trên) để đối chiếu: hàng nhập − giá vốn ước tính ≈ giá trị còn tồn / chưa bán">Giá vốn ƯT (đối chiếu)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...report.rows].sort((a, b) => b.profitOnPurchase - a.profitOnPurchase).map((r) => (
+                <TableRow key={`pur-${r.productId}`} className={cn(!r.orders && "text-muted-foreground")}>
+                  <TableCell className="font-medium">{r.code ? `${r.code} · ` : ""}{r.productName}{!r.orders ? <span className="ml-1 text-[11px]">(chưa có đơn)</span> : null}</TableCell>
+                  <TableCell className="numeric text-right">{formatNumber(r.purchaseQty)}</TableCell>
+                  <TableCell className="text-right"><Money value={r.purchaseCost} className={r.purchaseCost ? "text-rose-600" : "text-muted-foreground"} /></TableCell>
+                  <TableCell className="numeric text-right">{formatNumber(r.orders)}</TableCell>
+                  <TableCell className="text-right"><Money value={r.expectedRevenue} /></TableCell>
+                  <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.operatingAlloc} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} /></TableCell>
+                  <TableCell className="text-right"><Pct value={r.marginOnPurchase} /></TableCell>
+                  <TableCell className="text-right"><Money value={r.expectedCogs} className="text-muted-foreground" /></TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
+                <TableCell>Tổng{report.unmatchedAdSpend ? <div className="text-[10.5px] font-normal text-muted-foreground">gồm {formatVND(report.unmatchedAdSpend)} QC chưa ghép mã</div> : null}</TableCell>
+                <TableCell className="numeric text-right">{formatNumber(t.purchaseQty)}</TableCell>
+                <TableCell className="text-right"><Money value={t.purchaseCost} className="text-rose-600" /></TableCell>
+                <TableCell className="numeric text-right">{formatNumber(t.orders)}</TableCell>
+                <TableCell className="text-right"><Money value={t.expectedRevenue} /></TableCell>
+                <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
+                <TableCell className="text-right"><Money value={t.operatingExpenses} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                <TableCell className="text-right"><Money value={t.tax} /></TableCell>
+                <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
+                <TableCell className="text-right"><Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} /></TableCell>
+                <TableCell className="text-right"><Pct value={t.marginOnPurchase} /></TableCell>
+                <TableCell className="text-right"><Money value={t.expectedCogs} /></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo Marketer"

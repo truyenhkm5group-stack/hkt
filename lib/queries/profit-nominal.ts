@@ -116,8 +116,14 @@ export type NominalRow = {
   opexPerOrder: number | null;
   /** Chi phí vận hành / đơn giao thành công ước tính (sau hoàn huỷ) */
   opexPerDelivered: number | null;
-  /** Dự phòng rủi ro tồn kho = giá vốn ước tính × % giả định */
+  /** Hàng nhập trong kỳ theo phiếu nhập (số lượng, giá trị) */
+  purchaseQty: number;
+  purchaseCost: number;
+  /** Dự phòng rủi ro tồn kho = tổng giá trị hàng nhập trong kỳ × % giả định */
   inventoryRisk: number;
+  /** LN theo tổng giá trị hàng nhập = DT GTC ƯT − CPQC − hàng nhập − VC − vận hành − rủi ro TK − thuế − CP khác */
+  profitOnPurchase: number;
+  marginOnPurchase: number | null;
   /** Dự trù thuế = DT GTC ước tính × % */
   tax: number;
   /** Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ…) */
@@ -160,6 +166,10 @@ export type NominalReport = {
     opexPerOrder: number | null;
     opexPerDelivered: number | null;
     failedToReturnPct: number;
+    purchaseQty: number;
+    purchaseCost: number;
+    profitOnPurchase: number;
+    marginOnPurchase: number | null;
     netMargin: number | null;
   };
 };
@@ -173,11 +183,28 @@ function applyAssumptions(base: { orders: number; items: number; grossSales: num
   return { expectedRevenue, expectedCogs, shipCost, expectedProfit, margin: expectedRevenue ? (expectedProfit / expectedRevenue) * 100 : null };
 }
 
+/** Hàng nhập trong kỳ theo phiếu nhập (kind RECEIPT, số lượng dương) gộp theo mã */
+export async function purchaseByProduct(period: Period): Promise<Map<string, { qty: number; cost: number; name: string; code: string }>> {
+  const db = await getDb();
+  const conds: SQL[] = [eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`];
+  if (period.from) conds.push(gte(schema.stockReceipts.receivedAt, period.from));
+  if (period.to) conds.push(lte(schema.stockReceipts.receivedAt, period.to));
+  const rows = await db
+    .select({ productId: pv.productId, name: sql<string>`max(${p.name})`, code: sql<string>`max(coalesce(${p.customId}, ''))`, qty: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity}), 0)`, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
+    .from(schema.stockReceiptItems)
+    .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+    .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
+    .leftJoin(p, eq(p.id, pv.productId))
+    .where(and(...conds))
+    .groupBy(pv.productId);
+  return new Map(rows.filter((r) => r.productId).map((r) => [r.productId as string, { qty: Number(r.qty), cost: Number(r.cost), name: r.name ?? "", code: r.code ?? "" }]));
+}
+
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
 async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
-  const [history, failedProb] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate()]);
+  const [history, failedProb, purchases] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period)]);
   const pFail = assumptions.failedToReturnPercent > 0 ? Math.min(1, assumptions.failedToReturnPercent / 100) : failedProb.rate;
   const taxPct = Math.max(0, Number(assumptions.taxPercent ?? 0)) / 100;
   const otherPct = Math.max(0, Number(assumptions.otherCostPercentOfAds ?? 0)) / 100;
@@ -280,7 +307,11 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         operatingAlloc: 0,
         opexPerOrder: null,
         opexPerDelivered: null,
-        inventoryRisk: Math.round(calc.expectedCogs * riskPct),
+        purchaseQty: purchases.get(r.productId)?.qty ?? 0,
+        purchaseCost: purchases.get(r.productId)?.cost ?? 0,
+        inventoryRisk: Math.round((purchases.get(r.productId)?.cost ?? 0) * riskPct),
+        profitOnPurchase: 0,
+        marginOnPurchase: null,
         tax: Math.round(calc.expectedRevenue * taxPct),
         otherCost: Math.round(base.adSpend * otherPct),
         netProfit: 0,
@@ -288,10 +319,22 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       };
     })
     .sort((a, b) => b.expectedProfit - a.expectedProfit);
+  // mã có nhập hàng trong kỳ nhưng chưa có đơn → vẫn hiện để tính lợi nhuận theo hàng nhập
+  for (const [pid, pur] of purchases) {
+    if (rows.some((r) => r.productId === pid)) continue;
+    rows.push({
+      productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, items: 0, grossSales: 0, adSpend: adByProduct.get(pid) ?? 0,
+      returnRate: 0, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, opexPerOrder: null, opexPerDelivered: null,
+      purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: Math.round(pur.cost * riskPct), profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
+    });
+  }
   // phân bổ chi phí vận hành theo tỷ trọng doanh số POS, rồi tính LN ròng từng mã
   const grossAll = rows.reduce((t, r) => t + r.grossSales, 0);
   for (const r of rows) {
     r.operatingAlloc = grossAll ? Math.round((operatingExpenses * r.grossSales) / grossAll) : 0;
+    r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.operatingAlloc - r.inventoryRisk - r.tax - r.otherCost;
+    r.marginOnPurchase = r.expectedRevenue ? (r.profitOnPurchase / r.expectedRevenue) * 100 : null;
     r.opexPerOrder = r.orders ? Math.round(r.operatingAlloc / r.orders) : null;
     const expectedDelivered = r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100);
     r.opexPerDelivered = expectedDelivered > 0 ? Math.round(r.operatingAlloc / expectedDelivered) : null;
@@ -319,13 +362,16 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       pending: t.pending + r.pending,
       tax: t.tax + r.tax,
       otherCost: t.otherCost + r.otherCost,
+      purchaseQty: t.purchaseQty + r.purchaseQty,
+      purchaseCost: t.purchaseCost + r.purchaseCost,
     }),
-    { orders: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, inventoryRisk: 0, failed: 0, pending: 0, tax: 0, otherCost: 0 },
+    { orders: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, inventoryRisk: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
   const expectedProfitAll = totals.expectedProfit - unmatchedAdSpend;
   const netProfit = expectedProfitAll - operatingExpenses - totals.inventoryRisk - totals.tax - otherCostAll;
+  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - operatingExpenses - totals.inventoryRisk - totals.tax - otherCostAll;
   const expectedDeliveredAll = rows.reduce((t, r) => t + r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100), 0);
   return {
     assumptions,
@@ -359,6 +405,10 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       opexPerOrder: totals.orders ? Math.round(operatingExpenses / totals.orders) : null,
       opexPerDelivered: expectedDeliveredAll > 0 ? Math.round(operatingExpenses / expectedDeliveredAll) : null,
       failedToReturnPct: Math.round(pFail * 100),
+      purchaseQty: totals.purchaseQty,
+      purchaseCost: totals.purchaseCost,
+      profitOnPurchase,
+      marginOnPurchase: totals.expectedRevenue ? (profitOnPurchase / totals.expectedRevenue) * 100 : null,
     },
   };
 }

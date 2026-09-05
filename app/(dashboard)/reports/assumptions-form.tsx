@@ -28,7 +28,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     defaultReturnRate: String(assumptions.defaultReturnRate),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
-    inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 5),
+    inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 10),
     taxPercent: String(assumptions.taxPercent ?? 1.5),
     otherCostPercentOfAds: String(assumptions.otherCostPercentOfAds ?? 1.1),
     failedToReturnPercent: String(assumptions.failedToReturnPercent ?? 0),
@@ -47,7 +47,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
         overrides: assumptions.overrides,
-        inventoryRiskPercent: num(form.inventoryRiskPercent, 5),
+        inventoryRiskPercent: num(form.inventoryRiskPercent, 10),
         taxPercent: num(form.taxPercent, 1.5),
         otherCostPercentOfAds: num(form.otherCostPercentOfAds, 1.1),
         failedToReturnPercent: num(form.failedToReturnPercent, 0),
@@ -97,8 +97,8 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         </span>
         <span>
           Rủi ro tồn kho{" "}
-          <b className="numeric">{assumptions.inventoryRiskPercent ?? 5}%</b>
-          <span className="text-muted-foreground"> giá vốn hàng bán</span>
+          <b className="numeric">{assumptions.inventoryRiskPercent ?? 10}%</b>
+          <span className="text-muted-foreground"> tổng giá trị hàng nhập trong kỳ</span>
         </span>
         <span>
           Thuế <b className="numeric">{assumptions.taxPercent ?? 1.5}%</b>
