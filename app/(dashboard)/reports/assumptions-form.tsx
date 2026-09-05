@@ -194,7 +194,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             />
           </div>
           <div className="space-y-1">
-            <Label>Rủi ro tồn kho (% giá vốn)</Label>
+            <Label>Rủi ro tồn kho (% tổng giá trị hàng nhập trong kỳ)</Label>
             <Input
               type="number"
               inputMode="decimal"
