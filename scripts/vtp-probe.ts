@@ -44,6 +44,8 @@ async function main() {
     show("openid-configuration lỗi", e instanceof Error ? e.message : String(e));
   }
   // 1) OIDC password grant trên id.viettelpost.vn (client vtp.web) – thử nhiều dạng username
+  let loginEmail = "";
+  let loginUserId = "";
   const userVariants = Array.from(new Set([user, user.replace(/^0/, "84"), user.replace(/^0/, "+84")].filter(Boolean)));
   if (user && pass) {
     outer: for (const u of userVariants) {
@@ -76,6 +78,8 @@ async function main() {
         const data = (j.data ?? {}) as Record<string, unknown>;
         const pick = (o: Record<string, unknown>) => [o.TokenKey, o.tokenKey, o.token, o.Token, o.access_token, o.accessToken].find((x): x is string => typeof x === "string" && x.length > 20) ?? "";
         const tok = pick(j) || pick(data);
+        if (typeof j.Email === "string") loginEmail = j.Email;
+        if (j.UserId != null) loginUserId = String(j.UserId);
         if (tok) secrets.push(tok);
         show(`${url.split("/api/")[1]} HTTP ${r.status}`, tok ? `OK token ${tok.length} ký tự, keys=${Object.keys(j).join(",")}` : r.text.slice(0, 220));
         if (tok) { tokens.push({ label: `web login ${url.split("/api/")[1]} Token`, token: tok }, { label: `web login ${url.split("/api/")[1]} Bearer`, bearer: tok }); break; }
@@ -84,7 +88,28 @@ async function main() {
       }
     }
   } else show("OIDC", "thiếu VIETTELPOST_USERNAME / PASSWORD");
+  // 1c) Thử lại OIDC với username = email / UserId (SSO id.viettelpost.vn có thể dùng email thay vì SĐT)
+  if (pass) {
+    const extraUsers = Array.from(new Set([loginEmail, loginUserId].filter((x) => x && x.length > 2)));
+    for (const u of extraUsers) {
+      try {
+        const body = new URLSearchParams({ grant_type: "password", username: u, password: pass, client_id: "vtp.web", client_secret: "vtp-web", scope: "openid profile web-api offline_access" });
+        const res = await fetch("https://id.viettelpost.vn/connect/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body, signal: AbortSignal.timeout(25_000) });
+        const text = await res.text();
+        let j: Record<string, unknown> = {};
+        try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* ignore */ }
+        const at = typeof j.access_token === "string" ? j.access_token : "";
+        if (at) secrets.push(at);
+        const uMask = u.includes("@") ? `${u.slice(0, 2)}…@${u.split("@")[1] ?? ""}` : `${u.slice(0, 2)}…${u.slice(-2)}`;
+        show(`connect/token(email/id) user=${uMask} HTTP ${res.status}`, at ? `OK access_token ${at.length} ký tự` : text.slice(0, 200));
+        if (at) { tokens.unshift({ label: "OIDC(email) Token header", token: at }, { label: "OIDC(email) Bearer", bearer: at }); break; }
+      } catch (e) {
+        show("connect/token(email/id) lỗi", e instanceof Error ? e.message : String(e));
+      }
+    }
+  }
   if (!tokens.length) tokens.push({ label: "partner Token header", token: partnerToken });
+  // đảm bảo luôn thử token web-login đã lấy được, kể cả khi có OIDC
   // 2) Thử các endpoint web
   const bodies: Record<string, unknown>[] = [
     { status: -1, pageIndex: 1, pageSize: 20, fromDate: fmtVN(from), toDate: fmtVN(to) },
@@ -92,7 +117,7 @@ async function main() {
     { page: 1, limit: 20, from_date: fmtVN(from), to_date: fmtVN(to) },
     { status: "-1", page: 1, size: 20, fromDate: from.toISOString(), toDate: to.toISOString() },
   ];
-  const endpoints = ["https://api.viettelpost.vn/api/supperapp/total-order-by-status", "https://api.viettelpost.vn/api/supperapp/get-list-order-by-status-v2", "https://api.viettelpost.vn/api/supperapp/orderByStatusWeb", "https://api.viettelpost.vn/api/supperapp/orderByStatusSummary", "https://api.viettelpost.vn/api/orderOperate/search-list-order"];
+  const endpoints = ["https://api.viettelpost.vn/api/supperapp/total-order-by-status", "https://api.viettelpost.vn/api/supperapp/get-list-order-by-status-v2", "https://api.viettelpost.vn/api/supperapp/orderByStatusWeb", "https://api.viettelpost.vn/api/supperapp/orderByStatusSummary", "https://api.viettelpost.vn/api/orderOperate/search-list-order", "https://api.viettelpost.vn/api/v2/order/getOrderByStatus", "https://api.viettelpost.vn/api/order/getOrderByStatus", "https://api.viettelpost.vn/api/v2/order/getListOrder", "https://api.viettelpost.vn/api/v1.0/order/getOrderByStatus", "https://api.viettelpost.vn/api/order/getListOrderByStatus", "https://api.viettelpost.vn/api/v2/order/list"];
   for (const t of tokens) {
     console.log(`## ${t.label}`);
     for (const ep of endpoints) {
