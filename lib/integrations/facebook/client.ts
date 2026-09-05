@@ -128,12 +128,26 @@ export class FacebookAdsClient {
 
   /** Dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo (để cảnh báo ngưỡng thanh toán) */
   async listAdAccountsBilling(): Promise<FbAdAccountBilling[]> {
-    const fields = "id,account_id,name,currency,account_status,disable_reason,balance,amount_spent,spend_cap,funding_source_details,is_prepay_account,next_bill_date";
+    // Một số trường có thể không tồn tại ở phiên bản API / loại tài khoản → bỏ trường bị báo lỗi (#100) rồi thử lại
+    let fieldList = ["id", "account_id", "name", "currency", "account_status", "disable_reason", "balance", "amount_spent", "spend_cap", "funding_source_details", "is_prepay_account", "next_bill_date"];
     const out = new Map<string, FbAdAccountBilling>();
     for (const relation of ["owned", "client"] as const) {
       const edge = relation === "owned" ? "owned_ad_accounts" : "client_ad_accounts";
       try {
-        for await (const item of this.paginate(`${this.businessId}/${edge}`, { fields, limit: 100 })) {
+        const items: Record<string, unknown>[] = [];
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            for await (const item of this.paginate(`${this.businessId}/${edge}`, { fields: fieldList.join(","), limit: 100 })) items.push(item);
+            break;
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            const bad = /nonexisting field \(([a-z_]+)\)/i.exec(msg)?.[1];
+            if (!bad || !fieldList.includes(bad) || ["id", "account_id", "balance"].includes(bad)) throw error;
+            fieldList = fieldList.filter((f) => f !== bad);
+            items.length = 0;
+          }
+        }
+        for (const item of items) {
           const accountId = str(item.account_id) || str(item.id).replace(/^act_/, "");
           if (!accountId || out.has(accountId)) continue;
           const currency = str(item.currency) || "VND";
