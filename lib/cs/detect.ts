@@ -24,6 +24,9 @@ export async function loadCsRules(): Promise<CsRules> {
     phoneVerifyAuto: cfg.phoneVerifyAuto !== false,
     phoneVerifyLookbackDays: Number(cfg.phoneVerifyLookbackDays) > 0 ? Number(cfg.phoneVerifyLookbackDays) : DEFAULT_CS_RULES.phoneVerifyLookbackDays,
     phoneVerifyTemplate: typeof cfg.phoneVerifyTemplate === "string" && cfg.phoneVerifyTemplate.trim() ? cfg.phoneVerifyTemplate : DEFAULT_CS_RULES.phoneVerifyTemplate,
+    phoneVerifyNewPhone: cfg.phoneVerifyNewPhone === true,
+    phoneVerifyRisky: cfg.phoneVerifyRisky !== false,
+    phoneVerifyTags: Array.isArray(cfg.phoneVerifyTags) && cfg.phoneVerifyTags.length ? cfg.phoneVerifyTags.filter((t) => typeof t === "string" && t.trim()) : DEFAULT_CS_RULES.phoneVerifyTags,
     failedDeliveryShopName: cfg.failedDeliveryShopName || DEFAULT_CS_RULES.failedDeliveryShopName,
     failedDeliveryTemplates: { ...DEFAULT_CS_RULES.failedDeliveryTemplates, ...Object.fromEntries(Object.entries(cfg.failedDeliveryTemplates ?? {}).filter(([k, v]) => k in DEFAULT_CS_RULES.failedDeliveryTemplates && typeof v === "string" && v.trim())) },
   };

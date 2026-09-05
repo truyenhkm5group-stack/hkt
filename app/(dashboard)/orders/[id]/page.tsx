@@ -193,8 +193,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           ) : null}
           {newPhone ? (
             <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-              <div className="font-semibold">📱 SĐT mới, chưa có lịch sử mua (Pancake tô xanh)</div>
-              <div className="mt-0.5 text-xs">Hỏi khách xác nhận SĐT {order.billPhone} đã đúng chưa và xin thêm số phụ (người thân) trước khi gửi hàng để bưu tá liên hệ được. Bot ERP tự nhắn qua Pancake nếu đơn có hội thoại; xem case ở CSKH.</div>
+              <div className="font-semibold">📱 Khách mới tại shop — chưa có đơn nào khác cùng SĐT</div>
+              <div className="mt-0.5 text-xs">Kiểm tra lịch sử SĐT toàn Pancake cạnh số điện thoại trên Pancake: nếu SĐT màu xanh (chưa từng mua ở đâu) thì hỏi khách xác nhận số {order.billPhone} đã đúng chưa và xin số phụ trước khi gửi hàng. Gắn thẻ “SĐT mới” cho đơn trên Pancake để bot ERP tự nhắn.</div>
             </div>
           ) : null}
           <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>

@@ -39,7 +39,7 @@ import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/prof
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
-import { phoneChatState, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
+import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
 async function main() {
@@ -524,7 +524,14 @@ async function main() {
   assert.equal(phoneChatState([...chat2, { text: "Áo đầm cũ chị gửi chưa", fromPage: false, insertedAt: at(3) }], "0939748540"), "SHOP_ASKED", "khách nhắn việc khác, vẫn chờ xác nhận");
   const pv = renderPhoneVerifyTemplate(DEFAULT_CS_RULES.phoneVerifyTemplate, { ten: "chị Loan", sdt: "0939748540", san_pham: "Đầm Q002", shop: "Hải An" });
   assert.ok(pv.includes("0939748540") && pv.includes("Đầm Q002") && /số phụ/.test(pv), "tin xác nhận có SĐT, sản phẩm và xin số phụ");
-  console.log("✓ SĐT mới: nhận diện, đọc chat (shop đã hỏi / khách đã xác nhận), mẫu tin xác nhận SĐT & xin số phụ");
+  const pvRules = { phoneVerifyTags: ["sdt moi", "xac nhan sdt"], phoneVerifyRisky: true, phoneVerifyNewPhone: false };
+  const pvRisk = { riskMinReturned: 2, riskReturnRatePct: 40 };
+  assert.equal(phoneVerifyTrigger({ tags: [], risk: assessCustomerRisk({ succeed: 20, returned: 3, isBlock: false }, pvRisk), newPhone: false }, pvRules), null, "khách 20 GTC / 3 hoàn: KHÔNG hỏi lại");
+  assert.equal(phoneVerifyTrigger({ tags: [], risk: assessCustomerRisk({ succeed: 0, returned: 0, isBlock: false }, pvRisk), newPhone: true }, pvRules), null, "SĐT mới tại shop: mặc định không nhắn (thiếu lịch sử toàn Pancake)");
+  assert.equal(phoneVerifyTrigger({ tags: [], risk: assessCustomerRisk({ succeed: 0, returned: 0, isBlock: false }, pvRisk), newPhone: true }, { ...pvRules, phoneVerifyNewPhone: true })?.kind, "NEW_PHONE", "bật cờ thì SĐT mới tại shop mới được nhắn");
+  assert.equal(phoneVerifyTrigger({ tags: [], risk: assessCustomerRisk({ succeed: 6, returned: 44, isBlock: false }, pvRisk), newPhone: false }, pvRules)?.kind, "RISKY", "hoàn 44/50 → hỏi xác nhận SĐT");
+  assert.equal(phoneVerifyTrigger({ tags: ["Trang", "SĐT mới"], risk: null, newPhone: false }, pvRules)?.kind, "TAG", "nhân viên gắn thẻ SĐT mới → nhắn");
+  console.log("✓ SĐT mới: nhận diện, đọc chat (shop đã hỏi / khách đã xác nhận), mẫu tin xác nhận SĐT & xin số phụ; chỉ nhắn khi gắn thẻ / khách rủi ro / bật cờ SĐT mới");
 
   // Ghi nhận đơn theo fanpage & chia % LN chủ mã / người chạy cùng
   const pm = { P1: "A", P2: "B" };

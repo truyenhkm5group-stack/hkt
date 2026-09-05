@@ -5,7 +5,8 @@
  */
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
+import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone, type RiskAssessment } from "@/lib/alerts/risk";
+import { loadAlertConfig } from "@/lib/alerts/config";
 import { shortName } from "@/lib/constants/outreach";
 import { loadCsRules } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
@@ -38,6 +39,17 @@ export function phoneChatState(messages: ChatMsg[], orderPhone: string): PhoneCh
   return askedAt ? "SHOP_ASKED" : null;
 }
 
+export type PhoneVerifyTrigger = { kind: "TAG" | "RISKY" | "NEW_PHONE"; label: string } | null;
+
+/** Vì sao cần xác nhận SĐT: nhân viên gắn thẻ > khách rủi ro (hoàn / cảnh báo cao) > SĐT mới tại shop (chỉ khi bật) */
+export function phoneVerifyTrigger(input: { tags: string[]; risk: RiskAssessment | null; newPhone: boolean }, rules: { phoneVerifyTags: string[]; phoneVerifyRisky: boolean; phoneVerifyNewPhone: boolean }): PhoneVerifyTrigger {
+  const tagHit = input.tags.map((t) => normalize(t)).find((t) => rules.phoneVerifyTags.some((k) => t.includes(normalize(k).trim())));
+  if (tagHit) return { kind: "TAG", label: `thẻ “${tagHit.trim()}”` };
+  if (rules.phoneVerifyRisky && input.risk?.risky) return { kind: "RISKY", label: `khách rủi ro · GTC ${input.risk.succeed} · hoàn ${input.risk.returned}${input.risk.rate ? ` (${Math.round(input.risk.rate * 100)}%)` : ""} · ${input.risk.reasons.join(", ")}` };
+  if (rules.phoneVerifyNewPhone && input.newPhone) return { kind: "NEW_PHONE", label: "SĐT chưa có lịch sử tại shop" };
+  return null;
+}
+
 export function renderPhoneVerifyTemplate(template: string, v: { ten: string; sdt: string; san_pham: string; shop: string }) {
   return template
     .replace(/\{ten\}/g, v.ten || "mình")
@@ -50,8 +62,20 @@ export function renderPhoneVerifyTemplate(template: string, v: { ten: string; sd
 
 export type PhoneVerifyResult = { scanned: number; newPhones: number; messaged: number; manual: number; skipped: number; byState: Record<string, number>; errors: string[] };
 
-export async function verifyNewPhones(options: { lookbackDays?: number; log?: (m: string) => void } = {}): Promise<PhoneVerifyResult> {
-  const result: PhoneVerifyResult = { scanned: 0, newPhones: 0, messaged: 0, manual: 0, skipped: 0, byState: {}, errors: [] };
+/** Huỷ các case "SĐT mới" do bot tạo còn mở (dùng khi đổi quy tắc nhận diện) */
+export async function cancelPhoneVerifyCases(reason: string): Promise<number> {
+  const db = await getDb();
+  const rows = await db
+    .update(schema.csCases)
+    .set({ status: "CANCELLED", resolution: reason, resolvedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(schema.csCases.kind, "PHONE_VERIFY"), eq(schema.csCases.source, "AUTO_PHONE_VERIFY"), inArray(schema.csCases.status, ["OPEN", "IN_PROGRESS"])))
+    .returning({ id: schema.csCases.id });
+  return rows.length;
+}
+
+export async function verifyNewPhones(options: { lookbackDays?: number; cancelExisting?: boolean; log?: (m: string) => void } = {}): Promise<PhoneVerifyResult & { cancelled?: number }> {
+  const result: PhoneVerifyResult & { cancelled?: number } = { scanned: 0, newPhones: 0, messaged: 0, manual: 0, skipped: 0, byState: {}, errors: [] };
+  if (options.cancelExisting) result.cancelled = await cancelPhoneVerifyCases("Huỷ hàng loạt: quy tắc nhận diện SĐT mới được sửa lại (lịch sử tại shop khác lịch sử SĐT toàn Pancake).");
   if (lock.__erpPhoneVerifyRunning) {
     result.errors.push("Đang có lần chạy khác");
     return result;
@@ -72,8 +96,10 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
   const since = new Date(Date.now() - (options.lookbackDays ?? rules.phoneVerifyLookbackDays ?? 3) * 86_400_000);
   const o = schema.orders;
   const c = schema.customers;
+  const alertCfg = await loadAlertConfig();
+  const riskCfg = { riskMinReturned: alertCfg.riskMinReturned, riskReturnRatePct: alertCfg.riskReturnRatePct };
   const rows = await db
-    .select({ id: o.id, systemId: o.systemId, customerId: o.customerId, name: o.billFullName, phone: o.billPhone, pageId: o.pageId, conversationId: o.conversationId, insertedAt: o.insertedAt, succeed: c.succeedOrderCount, returned: c.returnedOrderCount, fbId: c.fbId })
+    .select({ id: o.id, systemId: o.systemId, customerId: o.customerId, name: o.billFullName, phone: o.billPhone, pageId: o.pageId, conversationId: o.conversationId, insertedAt: o.insertedAt, tags: o.tags, succeed: c.succeedOrderCount, returned: c.returnedOrderCount, isBlock: c.isBlock, fbId: c.fbId })
     .from(o)
     .leftJoin(c, eq(c.id, o.customerId))
     // chỉ đơn ĐÃ XÁC NHẬN nhưng chưa gửi ĐVVC (đơn mới chưa chốt thì nhân viên còn đang trao đổi, không nhắn)
@@ -82,14 +108,19 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
   const client = canSend ? getPancakePagesClient() : null;
   for (const r of rows) {
     result.scanned += 1;
-    const erpOther = await erpOrderCountByPhone([r.phone ?? ""], r.id);
-    if (!isNewPhone({ phone: r.phone, succeed: r.succeed ?? 0, returned: r.returned ?? 0, erpOtherOrders: erpOther })) continue;
+    const tags = Array.isArray(r.tags) ? (r.tags as unknown[]).map((t) => (typeof t === "string" ? t : typeof t === "object" && t && "name" in t ? String((t as { name: unknown }).name ?? "") : String(t))) : [];
+    const [erpOther, erpHist] = await Promise.all([erpOrderCountByPhone([r.phone ?? ""], r.id), erpHistoryByPhone([r.phone ?? ""], r.id)]);
+    const risk = assessCustomerRisk({ succeed: r.succeed ?? 0, returned: r.returned ?? 0, isBlock: Boolean(r.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
+    const newPhone = isNewPhone({ phone: r.phone, succeed: r.succeed ?? 0, returned: r.returned ?? 0, erpOtherOrders: erpOther });
+    const trigger = phoneVerifyTrigger({ tags, risk, newPhone }, rules);
+    if (!trigger) continue;
     result.newPhones += 1;
+    result.byState[`TRIGGER_${trigger.kind}`] = (result.byState[`TRIGGER_${trigger.kind}`] ?? 0) + 1;
     const key = `phone-verify:${r.id}`;
     const chatUrl = r.pageId && r.conversationId ? `https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : "";
     const claimed = await db
       .insert(schema.csCases)
-      .values({ dedupeKey: key, orderId: r.id, customerId: r.customerId ?? null, kind: "PHONE_VERIFY", status: "OPEN", source: "AUTO_PHONE_VERIFY", title: `⏳ Đang xử lý · SĐT mới · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`, detail: `SĐT ${r.phone} chưa có lịch sử mua (Pancake tô xanh)`, customerName: r.name ?? "", customerPhone: r.phone ?? "", chatUrl, createdBy: "phone-verify-bot" })
+      .values({ dedupeKey: key, orderId: r.id, customerId: r.customerId ?? null, kind: "PHONE_VERIFY", status: "OPEN", source: "AUTO_PHONE_VERIFY", title: `⏳ Đang xử lý · Xác nhận SĐT · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`, detail: `SĐT ${r.phone} · ${trigger.label}`, customerName: r.name ?? "", customerPhone: r.phone ?? "", chatUrl, createdBy: "phone-verify-bot" })
       .onConflictDoNothing({ target: schema.csCases.dedupeKey })
       .returning({ id: schema.csCases.id });
     if (!claimed.length) {
@@ -118,7 +149,7 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     }
     const now = new Date();
     const at = now.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
-    const base = `SĐT ${phone} chưa có lịch sử mua (Pancake tô xanh, ERP không có đơn khác cùng số)`;
+    const base = `SĐT ${phone} · ${trigger.label}`;
     if (state === "CUSTOMER_CONFIRMED") {
       await db.update(schema.csCases).set({ title: `✅ Khách đã xác nhận SĐT · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`, detail: `${base}. Khách đã trả lời trong chat: “${snippet}” → kiểm tra số trên đơn khớp chưa.`, status: "DONE", assignee: "Bot ERP", resolution: "Khách đã xác nhận / gửi SĐT trong chat Pancake, không nhắn lại.", resolvedAt: now, updatedAt: now }).where(eq(schema.csCases.id, caseId));
       result.byState.CUSTOMER_CONFIRMED = (result.byState.CUSTOMER_CONFIRMED ?? 0) + 1;

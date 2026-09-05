@@ -77,6 +77,15 @@ export type CsRules = {
   phoneVerifyLookbackDays: number;
   /** Mẫu tin xác nhận SĐT. Biến: {ten} {sdt} {san_pham} {shop} */
   phoneVerifyTemplate: string;
+  /**
+   * Nhắn khách "SĐT mới" theo lịch sử TẠI SHOP (Pancake customers + ERP). Mặc định TẮT vì số GTC/hoàn Pancake hiển thị cạnh SĐT là lịch sử
+   * toàn hệ thống Pancake (nhiều shop) mà Open API không trả về → khách quen nơi khác vẫn bị coi là mới.
+   */
+  phoneVerifyNewPhone: boolean;
+  /** Nhắn xác nhận SĐT & xin số phụ với khách rủi ro (tỷ lệ hoàn / cảnh báo cao theo ngưỡng ở Cảnh báo) */
+  phoneVerifyRisky: boolean;
+  /** Thẻ đơn Pancake (không dấu, thường) để nhân viên đánh dấu cần xác nhận SĐT → bot nhắn */
+  phoneVerifyTags: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -172,6 +181,9 @@ export const DEFAULT_CS_RULES: CsRules = {
   failedDeliveryShopName: "Shop",
   phoneVerifyAuto: true,
   phoneVerifyLookbackDays: 3,
+  phoneVerifyNewPhone: false,
+  phoneVerifyRisky: true,
+  phoneVerifyTags: ["sdt moi", "xac nhan sdt", "kiem tra sdt", "check sdt"],
   phoneVerifyTemplate:
     "Dạ {ten} ơi, shop đã lên đơn {san_pham} cho mình rồi ạ. Mình xem giúp shop số điện thoại nhận hàng {sdt} đã đúng chưa nhé? Nếu mình có số khác hoặc số phụ (người thân) thì gửi thêm để bưu tá dễ liên hệ lúc giao ạ. Hàng được kiểm tra trước khi thanh toán, shop cảm ơn mình 💛",
   failedDeliveryTemplates: {

@@ -131,7 +131,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Xác nhận SĐT mới trước khi gửi hàng",
     source: "PANCAKE",
     description: "Đơn chưa gửi ĐVVC có SĐT chưa từng mua (Pancake tô xanh) → nhắn khách qua Pancake xác nhận SĐT đúng chưa và xin số phụ; đọc chat trước (khách đã gửi số / shop đã hỏi thì không nhắn); mở case CSKH → Lark. Chạy cùng job cảnh báo mỗi 10 phút; days=N số ngày quét lùi.",
-    run: (o) => verifyNewPhones({ lookbackDays: num(o.params?.days) }),
+    run: (o) => verifyNewPhones({ lookbackDays: num(o.params?.days), cancelExisting: o.params?.cancel === "1" }),
   },
   "data-check": {
     label: "Kiểm tra nhất quán vận đơn & COD",
