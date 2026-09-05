@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { vtpEditOrder, vtpOrderAction } from "@/lib/actions/shipments-vtp";
-import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/integrations/viettelpost/client";
+import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viettelpost";
 
 type Receiver = { name: string; phone: string; address: string; cod: number; note: string };
 

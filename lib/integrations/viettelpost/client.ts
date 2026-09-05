@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viettelpost";
 import { asArray, asRecord, fetchJson, int, IntegrationError, num, sleep, str, vtpDate } from "@/lib/integrations/http";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -45,15 +46,7 @@ function decodeJwtExp(token: string): Date | null {
   }
 }
 
-/** Mã thao tác UpdateOrder của Viettel Post */
-export type VtpOrderActionType = 1 | 2 | 3 | 4 | 5 | 11;
-export const VTP_ORDER_ACTIONS: { type: VtpOrderActionType; key: string; label: string; hint: string; confirm: string; tone: "default" | "destructive" | "secondary" }[] = [
-  { type: 3, key: "redeliver", label: "Phát tiếp", hint: "Yêu cầu bưu tá giao lại cho khách", confirm: "Yêu cầu Viettel Post phát tiếp vận đơn này?", tone: "default" },
-  { type: 2, key: "approve-return", label: "Duyệt hoàn", hint: "Đồng ý chuyển hoàn về kho", confirm: "Duyệt chuyển hoàn vận đơn này về kho?", tone: "secondary" },
-  { type: 5, key: "resend", label: "Gửi lại", hint: "Lấy lại đơn để gửi lại (đơn đã huỷ / hoàn)", confirm: "Lấy lại đơn để gửi lại?", tone: "secondary" },
-  { type: 1, key: "approve", label: "Duyệt đơn", hint: "Duyệt đơn chờ duyệt", confirm: "Duyệt đơn hàng này?", tone: "secondary" },
-  { type: 4, key: "cancel", label: "Huỷ vận đơn", hint: "Huỷ đơn trên Viettel Post (chưa phát)", confirm: "HUỶ vận đơn này trên Viettel Post?", tone: "destructive" },
-];
+export { VTP_ORDER_ACTIONS, type VtpOrderActionType };
 
 export class ViettelPostClient {
   private token: string | null = null;
