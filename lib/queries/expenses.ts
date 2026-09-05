@@ -165,12 +165,12 @@ export async function adSummary(period: Period, filters?: AdFilters) {
     db
       .select(select)
       .from(schema.adSpends)
-      .where(and(...periodCond(schema.adSpends.spendDate, period.from, period.to), ...extra)),
+      .where(and(eq(schema.adSpends.excluded, false), ...periodCond(schema.adSpends.spendDate, period.from, period.to), ...extra)),
     prev.from
       ? db
           .select(select)
           .from(schema.adSpends)
-          .where(and(...periodCond(schema.adSpends.spendDate, prev.from, prev.to), ...extra))
+          .where(and(eq(schema.adSpends.excluded, false), ...periodCond(schema.adSpends.spendDate, prev.from, prev.to), ...extra))
       : Promise.resolve([null]),
   ]);
   // Đơn & doanh số theo đơn ĐÃ XÁC NHẬN trên Pancake trong kỳ (không tính đơn mới/chờ/huỷ); ghi chú thêm đơn có ad_id và giao thành công

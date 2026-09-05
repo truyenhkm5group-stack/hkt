@@ -50,7 +50,7 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
     <div className="space-y-5">
       {toolbar}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label={`Tổng chi QC · ${period.label.toLowerCase()}`} value={formatVND(summary.spend, { compact: true })} change={change(summary.spend, prev?.spend)} note={`${formatNumber(summary.rows)} dòng · ${formatNumber(summary.leads)} tin nhắn/lead (Facebook báo)`} icon={Megaphone} tone="rose" />
+        <MetricCard label={`Tổng chi QC · ${period.label.toLowerCase()}`} value={formatVND(summary.spend, { compact: true })} change={change(summary.spend, prev?.spend)} note={`${formatNumber(summary.rows)} dòng · ${formatNumber(summary.leads)} tin nhắn/lead (Facebook báo) · không tính chiến dịch “Không tính”`} icon={Megaphone} tone="rose" />
         <MetricCard
           label="Đơn đã xác nhận (Pancake)"
           value={formatNumber(summary.orders)}

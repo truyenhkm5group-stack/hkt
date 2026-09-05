@@ -526,6 +526,17 @@ async function main() {
   const perf = await getAdsPerformance(all);
   const perfOrders = perf.marketers.reduce((t, m) => t + m.orders, 0);
   assert.ok(Math.abs(perfOrders - nominal.totals.orders) <= perf.marketers.length, `đơn theo marketer ${perfOrders} ≈ đơn xác nhận ${nominal.totals.orders}`);
+  const perfProfit = perf.marketers.reduce((t, m) => t + m.profit, 0);
+  assert.ok(Math.abs(perfProfit - nominal.totals.netProfit) <= 2 * (perf.marketers.length + nominal.rows.length), `LN sau QC theo marketer ${perfProfit} ≈ LN ròng toàn shop ${nominal.totals.netProfit}`);
+  const perfRevenue = perf.marketers.reduce((t, m) => t + m.revenue, 0);
+  assert.ok(Math.abs(perfRevenue - nominal.totals.expectedRevenue) <= perf.marketers.length + nominal.rows.length, "doanh số phân bổ khớp DT GTC ước tính");
+  // đơn & doanh số xác nhận theo marketer khớp thẻ KPI (đơn đếm 1 lần, tổng tiền sau giảm)
+  assert.ok(Math.abs(nominal.totals.ordersWeighted - nominal.totals.ordersDistinct) < 1e-6, "Σ đơn chia 1/N = số đơn đếm 1 lần");
+  assert.ok(Math.abs(perfOrders - nominal.totals.ordersDistinct) <= perf.marketers.length, `đơn theo marketer ${perfOrders} ≈ đơn xác nhận đếm 1 lần ${nominal.totals.ordersDistinct}`);
+  const perfSales = perf.marketers.reduce((t, m) => t + m.confirmedSales, 0);
+  assert.ok(Math.abs(perfSales - nominal.totals.salesAfterDiscount) <= perf.marketers.length + nominal.rows.length, `doanh số xác nhận theo marketer ${perfSales} ≈ ${nominal.totals.salesAfterDiscount}`);
+  assert.equal(perf.totals.orders, nominal.totals.ordersDistinct);
+  assert.equal(perf.totals.confirmedSales, nominal.totals.salesAfterDiscount);
   for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
     assert.ok(p.returnRate !== undefined && p.returnRate >= 0 && p.returnRate <= 1, "tỷ lệ hoàn dự kiến là phân số");
     assert.ok(p.expectedSuccessRate !== undefined && Math.abs(p.expectedSuccessRate - (1 - (p.returnRate ?? 0))) < 1e-9, "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");

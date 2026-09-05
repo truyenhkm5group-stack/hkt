@@ -27,8 +27,12 @@ export type PerfRow = {
   fbOrders: number;
   orders: number;
   cpo: number | null;
+  /** Doanh số GTC ước tính (DT sau tỷ lệ giao thành công) */
   revenue: number;
   roas: number | null;
+  /** Doanh số ĐƠN ĐÃ XÁC NHẬN (tổng tiền sau giảm giá) — cùng cơ sở với thẻ KPI; ROAS xác nhận = doanh số này ÷ chi QC */
+  confirmedSales: number;
+  roasConfirmed: number | null;
   profit: number;
   margin: number | null;
   /** Mã hàng: tỷ lệ hoàn dự kiến (phân số 0–1, đã trộn đơn chưa kết thúc) / đã giao / đã hoàn / tỷ lệ hoàn thực tế trên đơn đã kết thúc */
@@ -48,7 +52,7 @@ export type PerfRow = {
 export type AdsPerformance = {
   marketers: PerfRow[];
   products: PerfRow[];
-  totals: { spend: number; orders: number; revenue: number; profit: number; roas: number | null; cpo: number | null; messages: number };
+  totals: { spend: number; orders: number; revenue: number; confirmedSales: number; roasConfirmed: number | null; profit: number; roas: number | null; cpo: number | null; messages: number };
   bestMarketer: PerfRow | null;
   worstMarketer: PerfRow | null;
   bestProduct: PerfRow | null;
@@ -103,7 +107,8 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
 
   const totalSpend = report.marketers.reduce((s, m) => s + m.totalSpend, 0);
   const totalRevenue = report.nominal.totals.expectedRevenue;
-  const totalOrders = report.nominal.totals.orders;
+  const totalConfirmedSales = report.nominal.totals.salesAfterDiscount;
+  const totalOrders = report.nominal.totals.ordersDistinct; // đơn đếm 1 lần, khớp thẻ "Đơn đã xác nhận"
   const totalProfit = report.nominal.totals.netProfit;
   const avgRoas = totalSpend ? totalRevenue / totalSpend : null;
   const totalMessages = [...fbByMarketer.values()].reduce((s, e) => s + e.messages, 0);
@@ -130,15 +135,29 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
     e.set(r.marketerId ?? "__none__", (e.get(r.marketerId ?? "__none__") ?? 0) + Number(r.spend));
     adShareByProduct.set(r.productId, e);
   }
-  const attributed = new Map<string, { orders: number; revenue: number }>();
-  const add = (key: string, orders: number, revenue: number) => {
-    const e = attributed.get(key) ?? { orders: 0, revenue: 0 };
+  // LN sau QC của marketer = Σ mã [ (LN ròng ước tính của mã + QC của mã) × tỷ trọng − QC chính mình chạy cho mã ] − QC test của mình.
+  // Cộng mọi marketer (kể cả "Chưa gán") = LN ròng ước tính toàn shop (đã trừ QC test) — cùng cơ sở với bảng theo mã hàng.
+  // (LN cá nhân theo Lương — chỉ tính đơn giao thành công và chia X% / Y% chủ mã / chạy cùng — xem ở trang Lương & hoa hồng.)
+  // Đơn chia theo ordersWeighted (đơn nhiều mã chia 1/N) và doanh số xác nhận theo salesAfterDiscount → cộng mọi marketer = thẻ KPI.
+  const attributed = new Map<string, { orders: number; revenue: number; sales: number; profitBeforeOwnAds: number }>();
+  const add = (key: string, orders: number, revenue: number, sales: number, profitBeforeOwnAds: number) => {
+    const e = attributed.get(key) ?? { orders: 0, revenue: 0, sales: 0, profitBeforeOwnAds: 0 };
     e.orders += orders;
     e.revenue += revenue;
+    e.sales += sales;
+    e.profitBeforeOwnAds += profitBeforeOwnAds;
     attributed.set(key, e);
   };
+  const ownAdSpend = new Map<string, number>(); // marketer → tổng QC đã chạy cho các mã (không tính test)
+  const testSpendBy = new Map<string, number>(); // marketer → QC test (không thuộc mã)
+  for (const r of fb) {
+    const key = r.marketerId ?? "__none__";
+    if (r.productId) ownAdSpend.set(key, (ownAdSpend.get(key) ?? 0) + Number(r.spend));
+    else testSpendBy.set(key, (testSpendBy.get(key) ?? 0) + Number(r.spend));
+  }
   for (const r of report.nominal.rows) {
-    if (!r.orders && !r.expectedRevenue) continue;
+    const profitBeforeAds = r.netProfit + r.adSpend; // LN ròng ước tính trước khi trừ QC của mã
+    if (!r.orders && !r.expectedRevenue && !r.adSpend && !profitBeforeAds) continue;
     let shares = shareByProduct.get(r.productId);
     if (!shares || !shares.size) {
       // mã chưa có đơn giao thành công (Lương chưa chia) → chia tạm theo tiền QC từng người chạy cho mã
@@ -151,20 +170,23 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
     for (const [k, sh] of shares) {
       const s = Math.min(Math.max(sh, 0), 1);
       used += s;
-      add(k, r.orders * s, r.expectedRevenue * s);
+      add(k, r.ordersWeighted * s, r.expectedRevenue * s, r.salesAfterDiscount * s, profitBeforeAds * s);
     }
     const rest = Math.max(0, 1 - used);
-    if (rest > 1e-6) add("__none__", r.orders * rest, r.expectedRevenue * rest);
+    if (rest > 1e-6) add("__none__", r.ordersWeighted * rest, r.expectedRevenue * rest, r.salesAfterDiscount * rest, profitBeforeAds * rest);
   }
 
-  const marketerRow = (id: string, name: string, m: { totalSpend: number; personalProfit: number; testSpend: number }): PerfRow => {
+  const marketerRow = (id: string, name: string): PerfRow => {
     const f = fbByMarketer.get(id);
-    const a = attributed.get(id) ?? { orders: 0, revenue: 0 };
+    const a = attributed.get(id) ?? { orders: 0, revenue: 0, sales: 0, profitBeforeOwnAds: 0 };
     const orders = Math.round(a.orders);
     const revenue = Math.round(a.revenue);
-    const spend = m.totalSpend;
+    const confirmedSales = Math.round(a.sales);
+    const testSpend = testSpendBy.get(id) ?? 0;
+    const spend = (ownAdSpend.get(id) ?? 0) + testSpend; // = tổng QC người đó chạy (mã + test), khớp bảng Lương
+    const profit = Math.round(a.profitBeforeOwnAds - (ownAdSpend.get(id) ?? 0) - testSpend);
     const roas = spend ? revenue / spend : null;
-    const { rating, reason } = rate(roas, avgRoas, m.personalProfit, spend, minSpend);
+    const { rating, reason } = rate(roas, avgRoas, profit, spend, minSpend);
     return {
       id,
       name,
@@ -179,17 +201,19 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       cpo: orders && spend ? Math.round(spend / orders) : null,
       revenue,
       roas,
-      profit: m.personalProfit,
-      margin: revenue ? m.personalProfit / revenue : null,
-      testSpend: m.testSpend,
+      confirmedSales,
+      roasConfirmed: spend ? confirmedSales / spend : null,
+      profit,
+      margin: revenue ? profit / revenue : null,
+      testSpend,
       rating: spend ? rating : "NONE",
-      reason: !spend ? "Đơn không gắn được QC / fanpage / ad_id của marketer nào" : m.testSpend && spend && m.testSpend / spend > 0.3 && rating !== "GOOD" ? `${reason} · ${Math.round((m.testSpend / spend) * 100)}% tiền là QC test` : reason,
+      reason: !spend ? "Đơn không gắn được QC / fanpage / ad_id của marketer nào" : testSpend && spend && testSpend / spend > 0.3 && rating !== "GOOD" ? `${reason} · ${Math.round((testSpend / spend) * 100)}% tiền là QC test` : reason,
     };
   };
-  const marketers: PerfRow[] = report.marketers.map((m) => marketerRow(m.marketerId ?? "__none__", m.name, m));
+  const marketers: PerfRow[] = report.marketers.map((m) => marketerRow(m.marketerId ?? "__none__", m.name));
   const noneAttr = attributed.get("__none__");
-  if (noneAttr && (noneAttr.orders >= 0.5 || noneAttr.revenue >= 1) && !marketers.some((m) => m.id === "__none__")) {
-    marketers.push(marketerRow("__none__", "Chưa gán marketer", { totalSpend: 0, personalProfit: 0, testSpend: 0 }));
+  if ((noneAttr && (noneAttr.orders >= 0.5 || Math.abs(noneAttr.profitBeforeOwnAds) >= 1)) || ownAdSpend.has("__none__") || testSpendBy.has("__none__")) {
+    if (!marketers.some((m) => m.id === "__none__")) marketers.push(marketerRow("__none__", "Chưa gán marketer"));
   }
 
   const products: PerfRow[] = report.nominal.rows
@@ -218,6 +242,8 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
         cpo: r.orders && r.adSpend ? Math.round(r.adSpend / r.orders) : null,
         revenue: r.expectedRevenue,
         roas,
+        confirmedSales: r.salesAfterDiscount,
+        roasConfirmed: r.adSpend ? r.salesAfterDiscount / r.adSpend : null,
         profit: r.netProfit,
         margin: r.netMargin === null ? null : r.netMargin / 100,
         returnRate,
@@ -246,6 +272,8 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       cpo: null,
       revenue: 0,
       roas: null,
+      confirmedSales: 0,
+      roasConfirmed: null,
       profit: -report.nominal.unmatchedAdSpend,
       margin: null,
       rating: "NONE",
@@ -261,7 +289,7 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
   return {
     marketers,
     products,
-    totals: { spend: totalSpend, orders: totalOrders, revenue: totalRevenue, profit: totalProfit, roas: avgRoas, cpo: totalOrders ? Math.round(totalSpend / totalOrders) : null, messages: totalMessages },
+    totals: { spend: totalSpend, orders: totalOrders, revenue: totalRevenue, confirmedSales: totalConfirmedSales, roasConfirmed: totalSpend ? totalConfirmedSales / totalSpend : null, profit: totalProfit, roas: avgRoas, cpo: totalOrders ? Math.round(totalSpend / totalOrders) : null, messages: totalMessages },
     bestMarketer: rm[0] ?? null,
     worstMarketer: rm.length > 1 ? rm[rm.length - 1] : null,
     bestProduct: rp[0] ?? null,

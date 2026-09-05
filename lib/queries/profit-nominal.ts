@@ -136,8 +136,12 @@ export type NominalRow = {
   code: string;
   image: string | null;
   orders: number;
+  /** Đơn đã xác nhận chia đều cho các mã trong đơn (1/N) — cộng mọi mã = số đơn đếm 1 lần (khớp thẻ "Đơn đã xác nhận") */
+  ordersWeighted: number;
   items: number;
   grossSales: number;
+  /** Doanh số ĐƠN sau giảm giá phân bổ cho mã theo tỷ trọng tiền hàng — cộng mọi mã = thẻ "Doanh số đơn đã xác nhận" */
+  salesAfterDiscount: number;
   adSpend: number;
   /** Tỷ lệ hoàn ước tính (%) đã trộn: đơn đã hoàn + đơn chờ xử lý / chờ phát lại × xác suất thành hoàn + đơn đang giao / chưa gửi × tỷ lệ lịch sử */
   returnRate: number;
@@ -210,7 +214,13 @@ export type NominalReport = {
   /** Chi phí cố định của kỳ = chi phí tháng × số tháng */
   fixedCost: number;
   totals: {
+    /** Σ đơn theo mã (đơn nhiều mã đếm nhiều lần) */
     orders: number;
+    /** Đơn đã xác nhận đếm 1 lần (khớp thẻ "Đơn đã xác nhận") — bằng Σ ordersWeighted các mã */
+    ordersDistinct: number;
+    ordersWeighted: number;
+    /** Tổng tiền sau giảm giá của đơn đã xác nhận (khớp thẻ "Doanh số đơn đã xác nhận") */
+    salesAfterDiscount: number;
     items: number;
     grossSales: number;
     adSpend: number;
@@ -293,10 +303,11 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   if (period.from) expConds.push(gte(schema.expenses.occurredAt, period.from));
   if (period.to) expConds.push(lte(schema.expenses.occurredAt, period.to));
 
-  const [sales, adRows, [expRow]] = await Promise.all([
+  const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
+  const [sales, adRows, perOrder, [expRow]] = await Promise.all([
     db
       .select({
-        productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
+        productId: PID,
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
         code: sql<string>`max(coalesce(${p.customId}, ''))`,
         image: sql<string | null>`max(coalesce(${p.image}, ${i.image}))`,
@@ -326,6 +337,15 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .from(ads)
       .where(and(...adConds))
       .groupBy(ads.productId),
+    // từng (đơn, mã): tiền hàng của mã trong đơn & tổng đơn sau giảm — để chia ĐƠN (1/N mã) và DOANH SỐ SAU GIẢM theo tỷ trọng tiền hàng,
+    // sao cho cộng mọi mã = số đơn đã xác nhận (đếm 1 lần) và = tổng tiền sau giảm giá của thẻ "Doanh số đơn đã xác nhận"
+    db
+      .select({ orderId: o.id, productId: PID, lineSales: sql<number>`coalesce(sum(${i.lineTotal}), 0)`, orderTotal: sql<number>`max(coalesce(${o.totalPriceAfterDiscount}, 0))` })
+      .from(i)
+      .innerJoin(o, eq(o.id, i.orderId))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_CANCELLED, ...periodCond(period.from, period.to)))
+      .groupBy(o.id, PID),
     db
       .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)`, count: sql<number>`count(*)` })
       .from(schema.expenses)
@@ -343,6 +363,25 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const monthsTo = period.to ? (period.to.getTime() > now.getTime() ? now : period.to) : lastAt && lastAt.getTime() > now.getTime() ? lastAt : now;
   const months = monthsFrom ? Math.round(periodMonths(monthsFrom, monthsTo) * 100) / 100 : 0;
   const fixedCost = fixedCostForPeriod(Number(assumptions.fixedCostMonthly ?? 0), months);
+  // chia từng đơn cho các mã trong đơn: đơn = 1/N mã, doanh số sau giảm = tổng đơn × tiền hàng của mã / tiền hàng cả đơn
+  const perOrderByOrder = new Map<string, { productId: string; lineSales: number; orderTotal: number }[]>();
+  for (const r of perOrder) {
+    const list = perOrderByOrder.get(r.orderId) ?? [];
+    list.push({ productId: r.productId, lineSales: Number(r.lineSales), orderTotal: Number(r.orderTotal) });
+    perOrderByOrder.set(r.orderId, list);
+  }
+  const allocByProduct = new Map<string, { ordersWeighted: number; salesAfterDiscount: number }>();
+  for (const list of perOrderByOrder.values()) {
+    const n = list.length;
+    const lineSum = list.reduce((t, x) => t + Math.max(0, x.lineSales), 0);
+    for (const x of list) {
+      const e = allocByProduct.get(x.productId) ?? { ordersWeighted: 0, salesAfterDiscount: 0 };
+      e.ordersWeighted += 1 / n;
+      e.salesAfterDiscount += lineSum > 0 ? (x.orderTotal * Math.max(0, x.lineSales)) / lineSum : x.orderTotal / n;
+      allocByProduct.set(x.productId, e);
+    }
+  }
+  const ordersDistinct = perOrderByOrder.size;
   const adByProduct = new Map<string, number>();
   let unmatchedAdSpend = 0;
   for (const r of adRows) {
@@ -353,7 +392,8 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const rows: NominalRow[] = sales
     .filter((r) => r.productId)
     .map((r) => {
-      const base = { orders: Number(r.orders), items: Number(r.items), grossSales: Number(r.grossSales), cogsFull: Number(r.cogsFull), adSpend: adByProduct.get(r.productId) ?? 0 };
+      const alloc = allocByProduct.get(r.productId) ?? { ordersWeighted: 0, salesAfterDiscount: 0 };
+      const base = { orders: Number(r.orders), items: Number(r.items), grossSales: Number(r.grossSales), cogsFull: Number(r.cogsFull), adSpend: adByProduct.get(r.productId) ?? 0, ordersWeighted: alloc.ordersWeighted, salesAfterDiscount: Math.round(alloc.salesAfterDiscount) };
       const h = history.get(r.productId);
       let returnRate = assumptions.defaultReturnRate;
       let returnRateSource: NominalRow["returnRateSource"] = "default";
@@ -417,7 +457,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   for (const [pid, pur] of purchases) {
     if (rows.some((r) => r.productId === pid)) continue;
     rows.push({
-      productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, items: 0, grossSales: 0, adSpend: adByProduct.get(pid) ?? 0,
+      productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
       returnRate: 0, deliveryRate: 100, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: Math.round(pur.cost * riskPct), profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
@@ -442,6 +482,8 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const totals = rows.reduce(
     (t, r) => ({
       orders: t.orders + r.orders,
+      ordersWeighted: t.ordersWeighted + r.ordersWeighted,
+      salesAfterDiscount: t.salesAfterDiscount + r.salesAfterDiscount,
       items: t.items + r.items,
       grossSales: t.grossSales + r.grossSales,
       adSpend: t.adSpend + r.adSpend,
@@ -465,7 +507,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       purchaseQty: t.purchaseQty + r.purchaseQty,
       purchaseCost: t.purchaseCost + r.purchaseCost,
     }),
-    { orders: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
+    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
@@ -485,6 +527,9 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     fixedCost,
     totals: {
       orders: totals.orders,
+      ordersDistinct,
+      ordersWeighted: totals.ordersWeighted,
+      salesAfterDiscount: totals.salesAfterDiscount,
       items: totals.items,
       grossSales: totals.grossSales,
       adSpend: adSpendAll,
