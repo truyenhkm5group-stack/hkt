@@ -54,3 +54,28 @@ export function colorSwatch(name: string): { bg: string; fg: string } {
 }
 
 export const cellKey = (color: string, size: string) => `${color}|${size}`;
+
+export function matrixTotals(colors: string[], sizes: string[], cells: Record<string, number>) {
+  const byColor: Record<string, number> = {};
+  const bySize: Record<string, number> = {};
+  let total = 0;
+  for (const c of colors) for (const s of sizes) {
+    const q = Math.max(0, Number(cells[cellKey(c, s)] ?? 0));
+    byColor[c] = (byColor[c] ?? 0) + q;
+    bySize[s] = (bySize[s] ?? 0) + q;
+    total += q;
+  }
+  return { byColor, bySize, total };
+}
+
+/** Văn bản thuần để gửi Zalo / dán vào tin nhắn cho xưởng */
+export function matrixAsText(o: { productCode: string; productName: string; code: string; colors: string[]; sizes: string[]; cells: Record<string, number>; note: string; dueDate: Date | null }) {
+  const t = matrixTotals(o.colors, o.sizes, o.cells);
+  const lines = [`BẢNG CHỐT SL ĐẶT HÀNG ${o.code} · ${o.productCode ? `${o.productCode} ` : ""}${o.productName}`];
+  lines.push(["Size", ...o.colors, "Tổng"].join("\t"));
+  for (const s of o.sizes) lines.push([s, ...o.colors.map((c) => String(o.cells[cellKey(c, s)] ?? 0)), String(t.bySize[s] ?? 0)].join("\t"));
+  lines.push(["Tổng", ...o.colors.map((c) => String(t.byColor[c] ?? 0)), String(t.total)].join("\t"));
+  if (o.dueDate) lines.push(`Ngày cần hàng: ${new Date(o.dueDate).toLocaleDateString("vi-VN")}`);
+  if (o.note) lines.push(`Ghi chú: ${o.note}`);
+  return lines.join("\n");
+}

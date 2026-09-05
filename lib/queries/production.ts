@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { cellKey, sizeRank } from "@/lib/constants/production";
+export { matrixTotals, matrixAsText } from "@/lib/constants/production";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 
 export type ProductionOrderRow = typeof schema.productionOrders.$inferSelect;
@@ -40,29 +41,4 @@ export async function listProductionOrders(limit = 100) {
 export async function getProductionOrder(id: string) {
   const db = await getDb();
   return db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id) });
-}
-
-export function matrixTotals(colors: string[], sizes: string[], cells: Record<string, number>) {
-  const byColor: Record<string, number> = {};
-  const bySize: Record<string, number> = {};
-  let total = 0;
-  for (const c of colors) for (const s of sizes) {
-    const q = Math.max(0, Number(cells[cellKey(c, s)] ?? 0));
-    byColor[c] = (byColor[c] ?? 0) + q;
-    bySize[s] = (bySize[s] ?? 0) + q;
-    total += q;
-  }
-  return { byColor, bySize, total };
-}
-
-/** Văn bản thuần để gửi Zalo / dán vào tin nhắn cho xưởng */
-export function matrixAsText(o: { productCode: string; productName: string; code: string; colors: string[]; sizes: string[]; cells: Record<string, number>; note: string; dueDate: Date | null }) {
-  const t = matrixTotals(o.colors, o.sizes, o.cells);
-  const lines = [`BẢNG CHỐT SL ĐẶT HÀNG ${o.code} · ${o.productCode ? `${o.productCode} ` : ""}${o.productName}`];
-  lines.push(["Size", ...o.colors, "Tổng"].join("\t"));
-  for (const s of o.sizes) lines.push([s, ...o.colors.map((c) => String(o.cells[cellKey(c, s)] ?? 0)), String(t.bySize[s] ?? 0)].join("\t"));
-  lines.push(["Tổng", ...o.colors.map((c) => String(t.byColor[c] ?? 0)), String(t.total)].join("\t"));
-  if (o.dueDate) lines.push(`Ngày cần hàng: ${new Date(o.dueDate).toLocaleDateString("vi-VN")}`);
-  if (o.note) lines.push(`Ghi chú: ${o.note}`);
-  return lines.join("\n");
 }

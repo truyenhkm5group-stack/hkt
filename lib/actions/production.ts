@@ -6,8 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { PRODUCTION_STATUS } from "@/lib/constants/production";
-import { matrixTotals } from "@/lib/queries/production";
+import { matrixTotals, PRODUCTION_STATUS } from "@/lib/constants/production";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 

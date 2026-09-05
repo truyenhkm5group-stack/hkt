@@ -1,5 +1,4 @@
-import { cellKey, colorSwatch } from "@/lib/constants/production";
-import { matrixTotals } from "@/lib/queries/production";
+import { cellKey, colorSwatch, matrixTotals } from "@/lib/constants/production";
 import { cn } from "@/lib/utils";
 
 export type SheetData = { code: string; productCode: string; productName: string; colors: string[]; sizes: string[]; cells: Record<string, number>; images: { color: string; url: string }[]; note: string; dueDate: Date | null; supplier: string };

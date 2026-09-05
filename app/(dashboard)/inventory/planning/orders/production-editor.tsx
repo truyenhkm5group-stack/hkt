@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { saveProductionOrder } from "@/lib/actions/production";
-import { cellKey, colorSwatch } from "@/lib/constants/production";
+import { cellKey, colorSwatch, matrixTotals } from "@/lib/constants/production";
 import { formatNumber, formatVND } from "@/lib/format";
 
 export type EditorInit = {
