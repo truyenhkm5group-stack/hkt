@@ -14,7 +14,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { activeCodTab, COD_TABS, codStatusesFromFilter } from "@/lib/constants/cod";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { codFacets, codKpis, codPeriodColumn, codSummary, COD_SORTABLE, getCodBatch, listCodShipments, recentCodBatches } from "@/lib/queries/cod";
-import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Đối soát COD" };
 
