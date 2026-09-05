@@ -70,6 +70,44 @@ export class PancakeClient {
     return record;
   }
 
+  /** Gọi POST (tạo / sửa dữ liệu trên Pancake POS) */
+  async post(path: string, body: unknown, params: Record<string, unknown> = {}) {
+    const wait = THROTTLE_MS - (Date.now() - lastCallAt);
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+    const { body: res } = await fetchJson(this.buildUrl(path, params), { serviceName: "Pancake", timeoutMs: 90_000, method: "POST", body: JSON.stringify(body), retries: 0 });
+    const record = asRecord(res);
+    if (record.success === false) {
+      const message = str(record.message) || "API từ chối yêu cầu";
+      const code = int(record.error_code);
+      throw new IntegrationError(`Pancake: ${message}${code ? ` (mã ${code})` : ""}`, code === 101 ? 401 : 400, false, res);
+    }
+    return record;
+  }
+
+  /**
+   * Tạo đơn trên Pancake POS (trạng thái Mới = đơn nháp để nhân viên chốt).
+   * Body theo API POS: bill_full_name, bill_phone_number, shipping_address{...}, items[{variation_id, quantity}], note, status 0.
+   */
+  async createOrder(input: { name: string; phone: string; address: string; province?: string; note?: string; items: { variationId: string; quantity: number; price?: number }[]; shippingFee?: number; warehouseId?: string; source?: string }) {
+    const body: Record<string, unknown> = {
+      shop_id: Number(this.shopId) || this.shopId,
+      bill_full_name: input.name,
+      bill_phone_number: input.phone,
+      note: input.note ?? "",
+      status: 0,
+      is_free_shipping: false,
+      shipping_fee: input.shippingFee ?? 0,
+      shipping_address: { full_name: input.name, phone_number: input.phone, address: input.address, full_address: [input.address, input.province].filter(Boolean).join(", ") },
+      items: input.items.map((i) => ({ variation_id: i.variationId, quantity: i.quantity, ...(i.price ? { retail_price: i.price } : {}) })),
+      ...(input.warehouseId ? { warehouse_id: input.warehouseId } : {}),
+      ...(input.source ? { order_sources_name: input.source } : {}),
+    };
+    const res = await this.post(`shops/${this.shopId}/orders`, body);
+    const data = asRecord(res.data);
+    return { id: str(data.id), systemId: int(data.system_id), raw: res };
+  }
+
   private toList<T = Record<string, unknown>>(record: Record<string, unknown>): PancakeListResponse<T> {
     return {
       data: asArray(record.data) as T[],

@@ -22,6 +22,9 @@ export const PERMISSION_GROUPS = [
       { key: "outreach:view", label: "Chăm sóc & bán chéo: xem" },
       { key: "outreach:send", label: "Chăm sóc & bán chéo: gửi tin / cập nhật" },
       { key: "outreach:config", label: "Chăm sóc & bán chéo: kịch bản", hint: "Mẫu tin, bước chăm sóc, ưu đãi, ảnh/video" },
+      { key: "landing:view", label: "Đơn landing page: xem", hint: "Đơn từ Google Sheet, trạng thái, cảnh báo trùng / rủi ro" },
+      { key: "landing:manage", label: "Đơn landing page: xử lý", hint: "Xác nhận / huỷ, chọn mẫu mã, gửi đơn nháp lên POS, nhập lại sheet" },
+      { key: "landing:config", label: "Đơn landing page: cấu hình sheet", hint: "Link Google Sheet, cột, phí ship, kho mặc định" },
       { key: "returns:view", label: "Đổi / trả hàng" },
       { key: "customers:view", label: "Khách hàng" },
     ],
@@ -81,10 +84,10 @@ export const PERMISSION_GROUPS = [
  */
 export const LEGACY_IMPLIES: Record<string, string[]> = {
   "reports:view": ["reports:delivered", "reports:cash", "reports:nominal", "reports:returns"],
-  "orders:read": ["orders:export", "cs:view", "outreach:view"],
+  "orders:read": ["orders:export", "cs:view", "outreach:view", "landing:view"],
   "shipments:view": ["alerts:view"],
-  "cs:manage": ["cs:view", "outreach:send"],
-  "settings:manage": ["cs:config", "outreach:config", "alerts:manage", "integrations:manage"],
+  "cs:manage": ["cs:view", "outreach:send", "landing:manage"],
+  "settings:manage": ["cs:config", "outreach:config", "alerts:manage", "integrations:manage", "landing:config"],
   "expenses:write": ["reports:assumptions"],
   "products:view": ["planning:view"],
   "inventory:write": ["planning:write"],
@@ -97,17 +100,17 @@ export const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap((g) => g.
 
 export const PERMISSION_LABEL: Record<string, string> = Object.fromEntries(PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label])));
 
-const VIEW_ALL: Permission[] = ["dashboard:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "returns:view", "customers:view", "products:view", "planning:view"];
+const VIEW_ALL: Permission[] = ["dashboard:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view"];
 
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
   // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ hoàn / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
-  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
+  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send"],
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage"],
   MARKETING: [...VIEW_ALL, "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

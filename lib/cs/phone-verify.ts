@@ -172,7 +172,7 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
       error = `Không đọc được hội thoại Pancake (${chatError})`;
     } else if (client && r.pageId && r.conversationId) {
       try {
-        const res = await client.sendMessage(r.pageId, r.conversationId, "", text);
+        const res = await client.sendMessageWithFallback(r.pageId, r.conversationId, "", text);
         sent = res.ok;
         error = res.ok ? "" : res.error ?? "Gửi thất bại";
       } catch (e) {

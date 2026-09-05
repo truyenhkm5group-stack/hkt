@@ -40,6 +40,7 @@ import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
+import { detectColumns, matchVariant, normalizePhone, parseCsv, parseSheetTime, rowToLanding, sheetCsvUrl } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
@@ -572,6 +573,31 @@ async function main() {
   assert.deepEqual(custom, ["reports:cash"], "quyền riêng từng người thắng mẫu vai trò");
   assert.ok(resolvePermissions("ADMIN", ["reports:cash"], null).includes("users:manage"), "ADMIN luôn toàn quyền");
   console.log("✓ Phân quyền chi tiết: suy ra từ quyền cũ, mẫu vai trò Trưởng nhóm, quyền riêng từng người");
+
+  // Đơn landing page: đọc CSV Google Sheet, dò cột, ghép mẫu mã
+  const csv = 'Dấu thời gian,Họ và tên,Số điện thoại,Địa chỉ nhận hàng,Sản phẩm,Size,Màu sắc,Số lượng,Ghi chú,utm_campaign\n"05/09/2026 09:45:12","Huân Mai","0788 281 828","xóm đầu đồng, xã An Hưng, Hải Phòng","Đầm Q004","XL","Nâu","1","giao giờ hành chính","q004_landing"\n"9/5/2026 10:01:00","Loan Nguyen","+84939748540","Ấp Thạnh Thới, Kiên Giang","Đầm Q002 đỏ đô","L","","2","",""\n';
+  const table = parseCsv(csv);
+  assert.equal(table.length, 3, "2 dòng dữ liệu + tiêu đề");
+  const cols = detectColumns(table[0]);
+  assert.deepEqual({ time: cols.time, name: cols.name, phone: cols.phone, address: cols.address, product: cols.product, size: cols.size, color: cols.color, quantity: cols.quantity, note: cols.note, source: cols.source }, { time: 0, name: 1, phone: 2, address: 3, product: 4, size: 5, color: 6, quantity: 7, note: 8, source: 9 }, "dò đúng cột theo tiêu đề tiếng Việt / utm");
+  const lr1 = rowToLanding(table[0], table[1], cols, 1)!;
+  assert.equal(lr1.phone, "0788281828", "SĐT bỏ khoảng trắng");
+  assert.equal(rowToLanding(table[0], table[2], cols, 2)!.phone, "0939748540", "+84 → 0");
+  assert.equal(lr1.time?.toISOString(), new Date("2026-09-05T09:45:12+07:00").toISOString(), "dd/mm/yyyy hh:mm:ss giờ VN");
+  assert.equal(parseSheetTime("9/13/2026 10:01:00")?.toISOString(), new Date("2026-09-13T10:01:00+07:00").toISOString(), "m/d/yyyy (Google Forms tiếng Anh) tự đảo khi ngày > 12");
+  assert.equal(parseSheetTime("2026-09-05 08:00")?.toISOString(), new Date("2026-09-05T08:00:00+07:00").toISOString(), "yyyy-mm-dd hh:mm giờ VN");
+  assert.equal(normalizePhone("84 93 974 8540"), "0939748540");
+  assert.equal(sheetCsvUrl("https://docs.google.com/spreadsheets/d/ABC123/edit?pli=1&gid=571194026#gid=571194026"), "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=571194026", "link sheet → link CSV giữ gid");
+  const cands = [
+    { id: "v1", productId: "p4", productName: "Đầm Q004", productCode: "Q004", sku: "Q004NAUXL", size: "XL", color: "Nâu" },
+    { id: "v2", productId: "p4", productName: "Đầm Q004", productCode: "Q004", sku: "Q004DOXL", size: "XL", color: "Đỏ" },
+    { id: "v3", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "Q002DOL", size: "L", color: "Đỏ đô" },
+    { id: "v4", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "Q002DOM", size: "M", color: "Đỏ đô" },
+  ];
+  assert.equal(matchVariant({ product: lr1.product, variant: lr1.variant, size: lr1.size, color: lr1.color }, cands)?.variant.id, "v1", "Q004 XL Nâu → đúng mẫu");
+  assert.equal(matchVariant({ product: "Đầm Q002 đỏ đô", variant: "", size: "L", color: "" }, cands)?.variant.id, "v3", "màu nằm trong tên sản phẩm, size L");
+  assert.equal(matchVariant({ product: "Áo sơ mi", variant: "", size: "L", color: "" }, cands), null, "không khớp mã / tên → null");
+  console.log("✓ Đơn landing page: CSV, dò cột, SĐT, thời gian, link CSV, ghép mẫu mã");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

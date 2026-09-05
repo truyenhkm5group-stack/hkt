@@ -16,6 +16,7 @@ import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
+import { importLandingSheet, previewSheet } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -100,6 +101,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const adIndex = await syncFacebookAdIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
       return { ...r, adIndex };
     },
+  },
+  "landing-sheet": {
+    label: "Đơn landing page từ Google Sheet",
+    source: "ALL",
+    description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới.",
+    run: async (o) => (o.params?.preview === "1" ? previewSheet() : importLandingSheet({ onlyNew: o.params?.new === "1" })),
   },
   "facebook-ad-index": {
     label: "Tra ad_id đơn Pancake → chiến dịch Facebook",

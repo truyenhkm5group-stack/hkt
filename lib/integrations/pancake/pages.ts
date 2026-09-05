@@ -124,13 +124,19 @@ export class PancakePagesClient {
   }
 
   /** Gửi tin nhắn inbox vào hội thoại (Pancake Pages API action reply_inbox). Facebook giới hạn cửa sổ 24h → có thể bị từ chối. */
-  async sendMessage(pageId: string, conversationId: string, customerId: string, text: string): Promise<{ ok: boolean; error?: string; id?: string }> {
+  /**
+   * Gửi tin nhắn. options.tag = thẻ tin nhắn Facebook (vd POST_PURCHASE_UPDATE) để gửi ngoài cửa sổ 24h cho khách đã mua —
+   * dùng khi lần gửi thường bị từ chối "(#10) ngoài khoảng thời gian cho phép".
+   */
+  async sendMessage(pageId: string, conversationId: string, customerId: string, text: string, options: { tag?: string } = {}): Promise<{ ok: boolean; error?: string; id?: string }> {
     const token = await this.pageToken(pageId);
     const url = new URL(`${this.baseUrl}/pages/${pageId}/conversations/${conversationId}/messages`);
     url.searchParams.set(token.key, token.value);
     if (customerId) url.searchParams.set("customer_id", customerId);
     try {
-      const { body, status } = await fetchJson(url, { method: "POST", headers: { accept: "*/*" }, body: JSON.stringify({ action: "reply_inbox", message: text }), serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 0 });
+      const payload: Record<string, unknown> = { action: "reply_inbox", message: text };
+      if (options.tag) Object.assign(payload, { message_tag: options.tag, tag: options.tag, messaging_type: "MESSAGE_TAG" });
+      const { body, status } = await fetchJson(url, { method: "POST", headers: { accept: "*/*" }, body: JSON.stringify(payload), serviceName: "Pancake Pages", timeoutMs: 30_000, retries: 0 });
       const rec = asRecord(body);
       if (status >= 400 || rec.success === false) return { ok: false, error: str(rec.message, rec.error, rec.reason) || `HTTP ${status}` };
       return { ok: true, id: str(rec.id, asRecord(rec.message).id) };
@@ -138,6 +144,15 @@ export class PancakePagesClient {
       const body = e instanceof IntegrationError ? asRecord(e.body) : {};
       return { ok: false, error: str(body.message, body.error) || (e instanceof Error ? e.message : String(e)) };
     }
+  }
+
+  /** Gửi tin; nếu Facebook từ chối vì quá 24h (#10) thì thử lại với thẻ POST_PURCHASE_UPDATE (cập nhật đơn cho khách đã mua) */
+  async sendMessageWithFallback(pageId: string, conversationId: string, customerId: string, text: string): Promise<{ ok: boolean; error?: string; id?: string; usedTag?: boolean }> {
+    const first = await this.sendMessage(pageId, conversationId, customerId, text);
+    if (first.ok) return first;
+    if (!/#10\b|ngoai khoang thoi gian|outside.*window|24 ?h/i.test((first.error ?? "").normalize("NFD").replace(/[̀-ͯ]/g, ""))) return first;
+    const second = await this.sendMessage(pageId, conversationId, customerId, text, { tag: "POST_PURCHASE_UPDATE" });
+    return second.ok ? { ...second, usedTag: true } : { ok: false, error: `${first.error} · thử thẻ POST_PURCHASE_UPDATE: ${second.error}` };
   }
 
   /** Gửi ảnh / video kèm theo URL công khai. Thử lần lượt các tên tham số Pancake chấp nhận; trả về lỗi cuối nếu đều thất bại. */

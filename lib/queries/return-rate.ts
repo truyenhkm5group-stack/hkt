@@ -14,8 +14,15 @@ const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
 /** COD của đơn: ưu tiên vận đơn, không có thì lấy COD trên đơn Pancake */
 const COD = sql`coalesce(nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
 
-/** Quy tắc 1: chính vận đơn của đơn "giao thành công" nhưng COD = 0 và cước < 10K */
-const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})`;
+const MAX_COD = RETURN_RULE.maxCodForFakeDelivery;
+/** Khách đã trả trước (chuyển khoản / ví) — đơn COD 0 nhưng giao thật */
+const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0))`;
+
+/**
+ * Quy tắc 1: vận đơn "giao thành công" nhưng COD thu < 50K (khách không nhận, chỉ trả tiền ship / phí xem hàng) và khách chưa
+ * chuyển khoản trước → hoàn. Giữ thêm nhánh cũ: COD = 0 và cước < 10K (vận đơn thu ship).
+ */
+const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} < ${MAX_COD} and (${COD} < ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
 
 /**
  * Quy tắc 2: tồn tại một vận đơn Viettel Post khác (vận đơn hoàn / thu tiền ship, ví dụ PKE…1P1)

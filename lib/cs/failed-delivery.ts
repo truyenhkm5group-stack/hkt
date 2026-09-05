@@ -160,7 +160,17 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     const events = await db.select({ statusName: schema.shipmentEvents.statusName, note: schema.shipmentEvents.note }).from(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, r.shipmentId)).orderBy(desc(schema.shipmentEvents.occurredAt)).limit(6);
     const latest = [r.note, r.statusName, events[0]?.note, events[0]?.statusName];
     const texts = [...latest, ...events.slice(1).flatMap((e) => [e.note, e.statusName])];
+    // lý do: lấy từ mốc hành trình mới nhất có nội dung nhận diện được (ghi chú mới nhất thường chỉ là "chờ xử lý")
     let reason = classifyFailedReason(latest);
+    if (reason === "OTHER") {
+      for (const e of events) {
+        const rr = classifyFailedReason([e.note, e.statusName]);
+        if (rr !== "OTHER") {
+          reason = rr;
+          break;
+        }
+      }
+    }
     const postman = parsePostman(texts);
     // ── Đọc ngữ cảnh trước khi nhắn: chuyển hoàn / đã gửi lại / shop lên sai địa chỉ / đã trao đổi trong chat ──
     let skip: { title: string; resolution: string; status: "OPEN" | "DONE" } | null = null;
@@ -203,7 +213,8 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
       continue;
     }
     const appointment = parseAppointment(latest);
-    const reasonText = cleanReason(r.note || events[0]?.note || r.statusName || events[0]?.statusName || "");
+    const reasonEvent = events.find((e) => classifyFailedReason([e.note, e.statusName]) === reason);
+    const reasonText = cleanReason(r.note || reasonEvent?.note || reasonEvent?.statusName || events[0]?.note || r.statusName || events[0]?.statusName || "");
     const items = await db.select({ name: schema.orderItems.productName }).from(schema.orderItems).where(eq(schema.orderItems.orderId, r.orderId)).limit(2);
     const sanPham = [...new Set(items.map((i) => i.name).filter(Boolean))].join(", ");
     const text = renderFailedTemplate(rules.failedDeliveryTemplates[reason] ?? rules.failedDeliveryTemplates.OTHER, {
@@ -220,9 +231,10 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     let error = "";
     if (client && r.pageId && r.conversationId) {
       try {
-        const res = await client.sendMessage(r.pageId, r.conversationId, "", text);
+        const res = await client.sendMessageWithFallback(r.pageId, r.conversationId, "", text);
         sent = res.ok;
         error = res.ok ? "" : res.error ?? "Gửi thất bại";
+        if (!res.ok && /#10\b|24 ?h|ngo[àa]i kho[ảa]ng/i.test(error)) error = `Facebook chặn vì khách chưa nhắn trong 24h (${error})`;
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
       }

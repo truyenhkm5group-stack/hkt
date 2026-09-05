@@ -698,6 +698,56 @@ export const expenses = pgTable(
   (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt)],
 );
 
+/** Đơn landing page (khách điền form → Google Sheet → ERP): theo dõi trạng thái, lọc trùng, gửi đơn nháp lên Pancake POS */
+export const landingOrders = pgTable(
+  "landing_orders",
+  {
+    id: id(),
+    /** Khoá dòng trong sheet: <gid>:<số dòng dữ liệu> */
+    rowKey: text("row_key").notNull().unique(),
+    sheetGid: text("sheet_gid").notNull().default(""),
+    rowIndex: integer("row_index").notNull().default(0),
+    /** Thời gian khách đặt (trên sheet) */
+    submittedAt: ts("submitted_at"),
+    customerName: text("customer_name").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    address: text("address").notNull().default(""),
+    province: text("province").notNull().default(""),
+    productText: text("product_text").notNull().default(""),
+    variantText: text("variant_text").notNull().default(""),
+    sizeText: text("size_text").notNull().default(""),
+    colorText: text("color_text").notNull().default(""),
+    quantity: integer("quantity").notNull().default(1),
+    price: money("price"),
+    total: money("total"),
+    note: text("note").notNull().default(""),
+    source: text("source").notNull().default(""),
+    sheetStatus: text("sheet_status").notNull().default(""),
+    /** NEW · CONFIRMED · PUSHED · CANCELLED (ERP quản lý) */
+    status: text("status").notNull().default("NEW"),
+    /** Mẫu mã Pancake đã ghép (tự dò hoặc chọn tay) */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    variantMatchScore: integer("variant_match_score").notNull().default(0),
+    /** Đơn Pancake tương ứng (sau khi gửi POS hoặc tự ghép theo SĐT) */
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    pancakeOrderId: text("pancake_order_id"),
+    pancakeSystemId: integer("pancake_system_id"),
+    pushedAt: ts("pushed_at"),
+    pushError: text("push_error").notNull().default(""),
+    /** Trùng với: [{kind, id, label, at}] */
+    duplicates: jsonb("duplicates"),
+    /** Đánh giá rủi ro hoàn theo lịch sử khách (Pancake + ERP) */
+    risk: jsonb("risk"),
+    assignee: text("assignee").notNull().default(""),
+    internalNote: text("internal_note").notNull().default(""),
+    raw: jsonb("raw"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("landing_orders_phone_idx").on(t.phone), index("landing_orders_status_idx").on(t.status, t.submittedAt), index("landing_orders_order_idx").on(t.orderId)],
+);
+export type LandingOrder = typeof landingOrders.$inferSelect;
+
 /** Danh mục quảng cáo Facebook (ad_id → adset / chiến dịch / tài khoản) để ghi nhận đơn Pancake có ad_id cho đúng marketer */
 export const fbAds = pgTable(
   "fb_ads",
@@ -823,6 +873,11 @@ export const customersRelations = relations(customers, ({ many }) => ({ orders: 
 export const warehousesRelations = relations(warehouses, ({ many }) => ({ stocks: many(variantStocks), orders: many(orders) }));
 
 export const productsRelations = relations(products, ({ many }) => ({ variants: many(productVariants) }));
+export const landingOrdersRelations = relations(landingOrders, ({ one }) => ({
+  variant: one(productVariants, { fields: [landingOrders.variantId], references: [productVariants.id] }),
+  order: one(orders, { fields: [landingOrders.orderId], references: [orders.id] }),
+}));
+
 export const productVariantsRelations = relations(productVariants, ({ one, many }) => ({
   product: one(products, { fields: [productVariants.productId], references: [products.id] }),
   stocks: many(variantStocks),
