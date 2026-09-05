@@ -25,6 +25,26 @@ export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
 
 export const DEPARTMENTS = ["Marketing", "Sale / CSKH", "Kho / Đóng gói", "Kế toán", "Quản lý", "Khác"] as const;
 
-/** Lợi nhuận dùng để tính lương: danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính) hay dòng tiền thực */
-export type PayrollBasis = "nominal" | "cash";
-export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = { nominal: "Lợi nhuận danh nghĩa (theo đơn lên trong kỳ)", cash: "Lợi nhuận dòng tiền thực (tiền vào − tiền ra trong kỳ)" };
+/** Lợi nhuận dùng để tính lương */
+export type PayrollBasis = "profit1" | "profit2" | "cash" | "nominal";
+export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = {
+  profit1: "LN1 · doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển − chi phí cố định/vận hành/khác",
+  profit2: "LN2 · doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ − vận chuyển − chi phí cố định/vận hành/khác",
+  cash: "Dòng tiền thực (tiền vào − tiền ra trong kỳ), chia theo tỷ trọng LN1",
+  nominal: "Danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính), tham khảo",
+};
+export const PAYROLL_BASIS_SHORT: Record<PayrollBasis, string> = { profit1: "LN1 · giá vốn hàng giao TC", profit2: "LN2 · giá vốn hàng nhập", cash: "Dòng tiền thực", nominal: "Danh nghĩa" };
+export const PAYROLL_BASES: PayrollBasis[] = ["profit1", "profit2", "cash", "nominal"];
+export function parsePayrollBasis(v: string | null | undefined): PayrollBasis {
+  return v === "profit2" || v === "cash" || v === "nominal" ? v : "profit1";
+}
+
+/** Cấu hình chia lợi nhuận theo mã hàng (settings "payroll.config") */
+export type PayrollConfig = {
+  /** Marketer phụ trách chính từng mã (productId → employeeId): chịu tồn kho & giá vốn mã đó, hưởng ownerSharePct từ đơn người khác đẩy chéo */
+  productOwners: Record<string, string>;
+  /** % lợi nhuận chủ mã nhận từ đơn của marketer khác chạy trên mã của mình */
+  ownerSharePct: number;
+};
+export const PAYROLL_CONFIG_KEY = "payroll.config";
+export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = { productOwners: {}, ownerSharePct: 5 };

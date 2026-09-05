@@ -1,11 +1,10 @@
 import { and, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import {
-  PAYROLL_EMPLOYEES_KEY,
-  type Employee,
-  type PayrollBasis,
-} from "@/lib/constants/payroll";
+import { DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, type Employee, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
+import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import {
   getNominalProfitReport,
@@ -40,10 +39,16 @@ export type MarketerProductLine = {
   productId: string;
   productName: string;
   code: string;
+  /** owner: mã mình phụ trách · cross: đẩy chéo mã của người khác */
+  role: "owner" | "cross";
   adSpend: number;
   share: number;
   attributedRevenue: number;
   attributedProfitBeforeAds: number;
+  /** Giá vốn bị trừ trên dòng này (LN1: theo hàng giao TC × tỷ trọng; LN2: toàn bộ hàng nhập, chỉ chủ mã) */
+  cogsCharged: number;
+  /** % chủ mã: dương = nhận từ người đẩy chéo, âm = chia cho chủ mã */
+  ownerBonus: number;
   personalProfit: number;
   orders: number;
 };
@@ -57,141 +62,252 @@ export type MarketerProfit = {
   attributedRevenue: number;
   attributedOrders: number;
   attributedProfitBeforeAds: number;
-  personalProfit: number; // = lợi nhuận phân bổ trước QC − QC mã hàng − QC test
+  cogsCharged: number;
+  ownerBonusReceived: number;
+  ownerBonusPaid: number;
+  ownedProducts: string[];
+  personalProfit: number; // = LN phân bổ − QC của mình − giá vốn chịu trách nhiệm ± % chủ mã − QC test
   products: MarketerProductLine[];
 };
 
+/** Kinh tế từng mã trong kỳ theo công thức đang chọn */
+export type ProductProfitLine = {
+  productId: string;
+  productName: string;
+  code: string;
+  ownerId: string | null;
+  ownerName: string;
+  deliveredOrders: number;
+  revenue: number;
+  adSpend: number;
+  cogsDelivered: number;
+  purchaseCost: number;
+  cogs: number;
+  shipping: number;
+  operatingAlloc: number;
+  profit: number;
+};
+
 export type MarketerReport = {
+  basis: PayrollBasis;
+  config: PayrollConfig;
   nominal: NominalReport;
+  products: ProductProfitLine[];
+  totals: { revenue: number; adSpend: number; cogs: number; shipping: number; operating: number; testSpend: number; profit: number };
   marketers: MarketerProfit[];
-  /** Lợi nhuận mã hàng không có quảng cáo (không phân bổ cho ai) */
+  /** Lợi nhuận mã hàng không có quảng cáo và không có người phụ trách (không phân bổ cho ai) */
   unattributedProfit: number;
   unattributedRevenue: number;
 };
 
+export async function loadPayrollConfig(): Promise<PayrollConfig> {
+  const cfg = await getSettingJson<Partial<PayrollConfig>>(PAYROLL_CONFIG_KEY, DEFAULT_PAYROLL_CONFIG);
+  return { productOwners: cfg.productOwners ?? {}, ownerSharePct: Number.isFinite(Number(cfg.ownerSharePct)) ? Number(cfg.ownerSharePct) : 5 };
+}
+
+function periodConds(column: AnyPgColumn, period: Period): SQL[] {
+  const conds: SQL[] = [];
+  if (period.from) conds.push(gte(column, period.from));
+  if (period.to) conds.push(lte(column, period.to));
+  return conds;
+}
+
 /**
- * Lợi nhuận cá nhân theo marketer: lợi nhuận danh nghĩa của từng mã (trước chi phí QC) được chia cho các marketer
- * theo tỷ trọng tiền QC mỗi người chạy cho mã đó, rồi trừ tiền QC mã hàng và tiền QC test của chính người đó.
+ * Kinh tế từng mã trong kỳ (theo ngày lên đơn): doanh thu giao thành công, giá vốn hàng giao TC, cước vận chuyển phân bổ theo dòng đơn,
+ * giá vốn hàng nhập trong kỳ (phiếu nhập), chi phí cố định/vận hành/khác phân bổ theo tỷ trọng doanh thu.
  */
-async function getMarketerReportUncached(
-  period: Period,
-): Promise<MarketerReport> {
+async function productEconomics(period: Period) {
   const db = await getDb();
-  const [nominal, employees] = await Promise.all([
-    getNominalProfitReport(period),
-    listEmployees(),
+  const i = schema.orderItems;
+  const o = schema.orders;
+  const s = schema.shipments;
+  const pv = schema.productVariants;
+  const p = schema.products;
+  const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
+  const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
+  const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
+  const [sales, receipts, [exp]] = await Promise.all([
+    db
+      .select({
+        productId: productKey,
+        productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
+        code: sql<string>`max(coalesce(${p.customId}, ''))`,
+        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+        shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
+      })
+      .from(i)
+      .innerJoin(o, eq(o.id, i.orderId))
+      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
+      .where(and(eq(i.isBonus, false), ...periodConds(o.insertedAt, period)))
+      .groupBy(sql`1`),
+    db
+      .select({ productId: pv.productId, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
+      .from(schema.stockReceiptItems)
+      .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+      .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
+      .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
+      .groupBy(pv.productId),
+    db
+      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
+      .from(schema.expenses)
+      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, ...periodConds(schema.expenses.occurredAt, period))),
   ]);
+  const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
+  const operating = Number(exp?.amount ?? 0);
+  const rows = sales.filter((r) => r.productId).map((r) => ({ productId: r.productId, productName: r.productName ?? "", code: r.code ?? "", deliveredOrders: Number(r.deliveredOrders), revenue: Number(r.revenue), cogsDelivered: Math.round(Number(r.cogsDelivered)), shipping: Math.round(Number(r.shipping)), purchaseCost: purchase.get(r.productId) ?? 0 }));
+  const revenueTotal = rows.reduce((a, r) => a + r.revenue, 0);
+  // mã có nhập hàng nhưng chưa có đơn trong kỳ vẫn cần hiện (LN2 trừ giá vốn hàng nhập)
+  for (const [pid, cost] of purchase) if (!rows.some((r) => r.productId === pid)) rows.push({ productId: pid, productName: "", code: "", deliveredOrders: 0, revenue: 0, cogsDelivered: 0, shipping: 0, purchaseCost: cost });
+  return { rows: rows.map((r) => ({ ...r, operatingAlloc: revenueTotal ? Math.round((operating * r.revenue) / revenueTotal) : 0 })), operating, revenueTotal };
+}
+
+/**
+ * Lợi nhuận cá nhân theo marketer:
+ *  - Mỗi mã có marketer phụ trách chính (chủ mã): chịu tồn kho & giá vốn mã đó; người khác đẩy chéo được chia doanh thu theo tỷ trọng tiền QC.
+ *  - LN1: giá vốn hàng giao thành công đi theo đơn (chia theo tỷ trọng QC). LN2: toàn bộ giá vốn hàng nhập trong kỳ tính cho chủ mã.
+ *  - Chủ mã nhận ownerSharePct % lợi nhuận (dương) từ đơn của marketer khác trên mã của mình.
+ *  - QC test (không thuộc mã) trừ vào chính người chạy.
+ */
+export async function getMarketerReport(period: Period, basis: PayrollBasis = "profit1"): Promise<MarketerReport> {
+  return memo(`getMarketerReport:${periodKey(period)}:${basis}`, 120_000, () => getMarketerReportUncached(period, basis));
+}
+
+async function getMarketerReportUncached(period: Period, basis: PayrollBasis): Promise<MarketerReport> {
+  const db = await getDb();
+  const [nominal, employees, config, econ] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), productEconomics(period)]);
   const ads = schema.adSpends;
-  const conds: SQL[] = [eq(ads.excluded, false)];
-  if (period.from) conds.push(gte(ads.spendDate, period.from));
-  if (period.to) conds.push(lte(ads.spendDate, period.to));
   const spendRows = await db
-    .select({
-      marketerId: ads.marketerId,
-      productId: ads.productId,
-      spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
-    })
+    .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
     .from(ads)
-    .where(and(...conds))
+    .where(and(eq(ads.excluded, false), ...periodConds(ads.spendDate, period)))
     .groupBy(ads.marketerId, ads.productId);
 
-  const byProduct = new Map<
-    string,
-    { total: number; byMarketer: Map<string | null, number> }
-  >();
+  const byProduct = new Map<string, { total: number; byMarketer: Map<string | null, number> }>();
   const testByMarketer = new Map<string | null, number>();
   for (const r of spendRows) {
     const spend = Number(r.spend);
     if (!r.productId) {
-      testByMarketer.set(
-        r.marketerId,
-        (testByMarketer.get(r.marketerId) ?? 0) + spend,
-      );
+      testByMarketer.set(r.marketerId, (testByMarketer.get(r.marketerId) ?? 0) + spend);
       continue;
     }
-    const entry = byProduct.get(r.productId) ?? {
-      total: 0,
-      byMarketer: new Map(),
-    };
+    const entry = byProduct.get(r.productId) ?? { total: 0, byMarketer: new Map() };
     entry.total += spend;
-    entry.byMarketer.set(
-      r.marketerId,
-      (entry.byMarketer.get(r.marketerId) ?? 0) + spend,
-    );
+    entry.byMarketer.set(r.marketerId, (entry.byMarketer.get(r.marketerId) ?? 0) + spend);
     byProduct.set(r.productId, entry);
   }
-
+  const useDeliveredCogs = basis !== "profit2";
+  const nameOf = (id: string | null) => (id ? employees.find((e) => e.id === id) : null);
   const marketers = new Map<string | null, MarketerProfit>();
   const ensure = (id: string | null) => {
     let m = marketers.get(id);
     if (!m) {
-      const emp = id ? employees.find((e) => e.id === id) : null;
-      m = {
-        marketerId: id,
-        name: emp ? emp.shortName || emp.name : "Chưa gán marketer",
-        adSpend: 0,
-        testSpend: 0,
-        totalSpend: 0,
-        attributedRevenue: 0,
-        attributedOrders: 0,
-        attributedProfitBeforeAds: 0,
-        personalProfit: 0,
-        products: [],
-      };
+      const emp = nameOf(id);
+      m = { marketerId: id, name: emp ? emp.shortName || emp.name : "Chưa gán marketer", adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
       marketers.set(id, m);
     }
     return m;
   };
+  const pct = Math.max(0, config.ownerSharePct) / 100;
+  const products: ProductProfitLine[] = [];
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, testSpend: 0, profit: 0 };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
-  for (const row of nominal.rows) {
-    const profitBeforeAds = row.expectedProfit + row.adSpend;
+
+  for (const row of econ.rows) {
     const spend = byProduct.get(row.productId);
-    if (!spend || spend.total <= 0) {
-      unattributedProfit += profitBeforeAds;
-      unattributedRevenue += row.expectedRevenue;
+    const adSpend = spend?.total ?? 0;
+    const cogs = useDeliveredCogs ? row.cogsDelivered : row.purchaseCost;
+    const profit = row.revenue - adSpend - cogs - row.shipping - row.operatingAlloc;
+    const ownerId = config.productOwners[row.productId] ?? null;
+    const owner = nameOf(ownerId);
+    products.push({ productId: row.productId, productName: row.productName || nominal.rows.find((n) => n.productId === row.productId)?.productName || row.productId, code: row.code, ownerId, ownerName: owner ? owner.shortName || owner.name : "", deliveredOrders: row.deliveredOrders, revenue: row.revenue, adSpend, cogsDelivered: row.cogsDelivered, purchaseCost: row.purchaseCost, cogs, shipping: row.shipping, operatingAlloc: row.operatingAlloc, profit });
+    totals.revenue += row.revenue;
+    totals.adSpend += adSpend;
+    totals.cogs += cogs;
+    totals.shipping += row.shipping;
+    totals.profit += profit;
+
+    // phần biến đổi đi theo đơn: doanh thu − vận chuyển − chi phí phân bổ − (LN1: giá vốn hàng giao TC)
+    const variable = row.revenue - row.shipping - row.operatingAlloc - (useDeliveredCogs ? row.cogsDelivered : 0);
+    const shares = new Map<string | null, number>();
+    if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) shares.set(mid, amount / spend.total);
+    else if (ownerId) shares.set(ownerId, 1);
+    if (!shares.size) {
+      unattributedProfit += profit;
+      unattributedRevenue += row.revenue;
       continue;
     }
-    for (const [marketerId, amount] of spend.byMarketer) {
-      const share = amount / spend.total;
-      const m = ensure(marketerId);
+    if (ownerId) ensure(ownerId).ownedProducts.push(row.code || row.productName);
+    let ownerBonusTotal = 0;
+    for (const [mid, share] of shares) {
+      const m = ensure(mid);
+      const mySpend = spend?.byMarketer.get(mid) ?? 0;
+      const isOwner = ownerId !== null && mid === ownerId;
+      const cogsCharged = useDeliveredCogs ? Math.round(row.cogsDelivered * share) : isOwner ? row.purchaseCost : 0;
+      const base = Math.round(variable * share) - mySpend - (useDeliveredCogs ? 0 : cogsCharged);
+      const bonus = !isOwner && ownerId ? Math.round(Math.max(base, 0) * pct) : 0;
+      ownerBonusTotal += bonus;
       const line: MarketerProductLine = {
         productId: row.productId,
         productName: row.productName,
         code: row.code,
-        adSpend: amount,
+        role: isOwner ? "owner" : "cross",
+        adSpend: mySpend,
         share,
-        attributedRevenue: Math.round(row.expectedRevenue * share),
-        attributedProfitBeforeAds: Math.round(profitBeforeAds * share),
-        personalProfit: Math.round(profitBeforeAds * share - amount),
-        orders: Math.round(row.orders * share),
+        attributedRevenue: Math.round(row.revenue * share),
+        attributedProfitBeforeAds: Math.round(variable * share),
+        cogsCharged,
+        ownerBonus: -bonus,
+        personalProfit: base - bonus,
+        orders: Math.round(row.deliveredOrders * share),
       };
       m.products.push(line);
-      m.adSpend += amount;
+      m.adSpend += mySpend;
       m.attributedRevenue += line.attributedRevenue;
       m.attributedOrders += line.orders;
       m.attributedProfitBeforeAds += line.attributedProfitBeforeAds;
+      m.cogsCharged += cogsCharged;
+      m.ownerBonusPaid += bonus;
+      m.personalProfit += line.personalProfit;
+    }
+    if (ownerId) {
+      const o = ensure(ownerId);
+      if (!shares.has(ownerId)) {
+        // chủ mã không chạy QC trong kỳ: vẫn chịu giá vốn hàng nhập (LN2) và nhận % chéo
+        const cogsCharged = useDeliveredCogs ? 0 : row.purchaseCost;
+        o.products.push({ productId: row.productId, productName: row.productName, code: row.code, role: "owner", adSpend: 0, share: 0, attributedRevenue: 0, attributedProfitBeforeAds: 0, cogsCharged, ownerBonus: ownerBonusTotal, personalProfit: ownerBonusTotal - cogsCharged, orders: 0 });
+        o.cogsCharged += cogsCharged;
+        o.personalProfit += ownerBonusTotal - cogsCharged;
+      } else {
+        const line = o.products.find((l) => l.productId === row.productId && l.role === "owner");
+        if (line) {
+          line.ownerBonus = ownerBonusTotal;
+          line.personalProfit += ownerBonusTotal;
+        }
+        o.personalProfit += ownerBonusTotal;
+      }
+      o.ownerBonusReceived += ownerBonusTotal;
     }
   }
-  for (const [marketerId, amount] of testByMarketer)
-    ensure(marketerId).testSpend += amount;
+  for (const [marketerId, amount] of testByMarketer) {
+    const m = ensure(marketerId);
+    m.testSpend += amount;
+    m.personalProfit -= amount;
+    totals.testSpend += amount;
+  }
+  totals.profit -= totals.testSpend;
   for (const m of marketers.values()) {
     m.totalSpend = m.adSpend + m.testSpend;
-    m.personalProfit = m.attributedProfitBeforeAds - m.adSpend - m.testSpend;
     m.products.sort((a, b) => b.personalProfit - a.personalProfit);
   }
-  // Hiển thị cả nhân sự marketing chưa có chi tiêu trong kỳ
-  for (const e of employees)
-    if (e.active && e.department === "Marketing" && !marketers.has(e.id))
-      ensure(e.id);
-  const list = [...marketers.values()].sort((a, b) =>
-    a.marketerId === null
-      ? 1
-      : b.marketerId === null
-        ? -1
-        : b.personalProfit - a.personalProfit,
-  );
-  return { nominal, marketers: list, unattributedProfit, unattributedRevenue };
+  for (const e of employees) if (e.active && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
+  const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
+  products.sort((a, b) => b.profit - a.profit);
+  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue };
 }
 
 export type PayrollLine = {
@@ -224,15 +340,15 @@ export async function getPayrollReport(
   basis: PayrollBasis,
 ): Promise<PayrollReport> {
   const [marketers, employees, cash] = await Promise.all([
-    getMarketerReport(period),
+    getMarketerReport(period, basis),
     listEmployees(),
     basis === "cash" ? getCashProfitReport(period) : Promise.resolve(null),
   ]);
   const nominalTotal = marketers.nominal.totals.expectedProfit;
-  const totalProfit = basis === "cash" && cash ? cash.net : nominalTotal;
-  // Cơ sở dòng tiền: lợi nhuận cá nhân = LN danh nghĩa cá nhân × (LN dòng tiền thực ÷ LN danh nghĩa tổng),
-  // tức chia lợi nhuận tiền thật theo đúng tỷ trọng đóng góp của từng marketer (tiền COD về theo bảng kê không tách được theo mã / người)
-  const cashRatio = basis === "cash" && cash ? (nominalTotal > 0 ? cash.net / nominalTotal : 0) : 1;
+  const modelTotal = marketers.totals.profit;
+  const totalProfit = basis === "cash" && cash ? cash.net : basis === "nominal" ? nominalTotal : modelTotal;
+  // Cơ sở dòng tiền: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng) — tiền COD về theo bảng kê không tách được theo mã / người
+  const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : 0) : 1;
   const lines: PayrollLine[] = employees
     .filter((e) => e.active)
     .map((e) => {
@@ -372,10 +488,4 @@ export async function listAdAccounts() {
     .where(sql`${schema.adSpends.accountId} is not null`)
     .groupBy(schema.adSpends.accountId);
   return rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? (r.id as string) }));
-}
-
-export async function getMarketerReport(
-  period: Period,
-) : Promise<MarketerReport> {
-  return memo(`getMarketerReport:${periodKey(period)}`, 120000, () => getMarketerReportUncached(period));
 }

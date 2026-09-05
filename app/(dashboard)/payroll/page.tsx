@@ -28,6 +28,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import {
   PAYROLL_BASIS_LABEL,
   type PayrollBasis,
+  PAYROLL_BASES,
+  PAYROLL_BASIS_SHORT,
+  parsePayrollBasis,
 } from "@/lib/constants/payroll";
 import { formatNumber, formatVND } from "@/lib/format";
 import {
@@ -36,6 +39,8 @@ import {
   unassignedMarketerSpend,
 } from "@/lib/queries/payroll";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { ProductOwnersForm } from "@/app/(dashboard)/payroll/product-owners-form";
+import { listProductsForMapping } from "@/lib/queries/ads-mapping";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Lương & hoa hồng" };
@@ -50,13 +55,13 @@ export default async function PayrollPage({
   if (!can(user, "payroll:view")) redirect("/?forbidden=1");
   const canManage = can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
-  const basis: PayrollBasis =
-    param(raw, "basis") === "nominal" ? "nominal" : "cash";
+  const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
-  const [report, unassigned, accounts] = await Promise.all([
+  const [report, unassigned, accounts, products] = await Promise.all([
     getPayrollReport(period, basis),
     unassignedMarketerSpend(period),
     listAdAccounts(),
+    listProductsForMapping(),
   ]);
   const qs = new URLSearchParams({
     period: period.key,
@@ -85,15 +90,20 @@ export default async function PayrollPage({
           {
             key: "basis",
             label: "Cơ sở lợi nhuận",
-            options: [
-              { value: "nominal", label: PAYROLL_BASIS_LABEL.nominal },
-              { value: "cash", label: PAYROLL_BASIS_LABEL.cash },
-            ],
+            options: PAYROLL_BASES.map((b) => ({ value: b, label: PAYROLL_BASIS_SHORT[b] })),
             single: true,
           },
         ]}
-        resultLabel={basis === "cash" ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê Viettel Post + trả trước) − tiền ra (nhập hàng, QC, vận hành…) trong kỳ; LN cá nhân = LN danh nghĩa cá nhân × ${report.cashRatio.toFixed(2)} (tỷ lệ LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN danh nghĩa ${formatVND(report.nominalTotal, { compact: true })}).` : "Danh nghĩa: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."}
+        resultLabel={
+          basis === "cash"
+            ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}).`
+            : basis === "nominal"
+              ? "Danh nghĩa: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
+              : `${PAYROLL_BASIS_LABEL[basis]}. Mỗi mã có marketer phụ trách chính chịu tồn kho & giá vốn; người khác đẩy chéo được chia theo tỷ trọng QC và trích ${report.marketers.config.ownerSharePct}% lợi nhuận cho chủ mã. Chi phí cố định / vận hành / khác phân bổ theo tỷ trọng doanh thu GTC.`
+        }
       />
+
+      <ProductOwnersForm config={report.marketers.config} products={products} marketers={report.lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -107,7 +117,7 @@ export default async function PayrollPage({
               {formatVND(report.totalProfit, { compact: true })}
             </span>
           }
-          note={PAYROLL_BASIS_LABEL[basis]}
+          note={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − CP khác ${formatVND(m.totals.operating, { compact: true })}`}
           icon={TrendingUp}
           tone={report.totalProfit >= 0 ? "green" : "rose"}
         />
@@ -322,8 +332,56 @@ export default async function PayrollPage({
       </SectionCard>
 
       <SectionCard
+        title={`Lợi nhuận theo mã hàng · ${PAYROLL_BASIS_SHORT[basis]}`}
+        description={basis === "profit2" ? "Doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ (phiếu nhập) − vận chuyển − chi phí cố định/vận hành/khác phân bổ theo doanh thu. Chủ mã chịu toàn bộ giá vốn hàng nhập." : "Doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển (kể cả đơn hoàn) − chi phí cố định/vận hành/khác phân bổ theo doanh thu."}
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1000px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã hàng</TableHead>
+                <TableHead>Phụ trách</TableHead>
+                <TableHead className="text-right">Đơn GTC</TableHead>
+                <TableHead className="text-right">Doanh thu GTC</TableHead>
+                <TableHead className="text-right">QC</TableHead>
+                <TableHead className="text-right">{basis === "profit2" ? "Giá vốn hàng nhập" : "Giá vốn hàng giao"}</TableHead>
+                <TableHead className="text-right">Vận chuyển</TableHead>
+                <TableHead className="text-right">CP phân bổ</TableHead>
+                <TableHead className="text-right">Lợi nhuận</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {m.products.map((p) => (
+                <TableRow key={p.productId}>
+                  <TableCell className="font-medium">{p.code ? `${p.code} · ` : ""}{p.productName}</TableCell>
+                  <TableCell className={cn("text-sm", !p.ownerName && "text-amber-700")}>{p.ownerName || "Chưa gán"}</TableCell>
+                  <TableCell className="numeric text-right">{formatNumber(p.deliveredOrders)}</TableCell>
+                  <TableCell className="text-right"><Money value={p.revenue} /></TableCell>
+                  <TableCell className="text-right"><Money value={p.adSpend} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Money value={p.cogs} className="text-rose-600" />{basis === "profit2" && p.cogsDelivered ? <div className="text-[11px] text-muted-foreground">hàng giao {formatVND(p.cogsDelivered, { compact: true })}</div> : null}</TableCell>
+                  <TableCell className="text-right"><Money value={p.shipping} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Money value={p.operatingAlloc} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Money value={p.profit} className={cn("font-bold", p.profit >= 0 ? "text-success" : "text-destructive")} /></TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/40 font-semibold">
+                <TableCell colSpan={3}>Tổng{m.totals.testSpend ? ` · QC test ${formatVND(m.totals.testSpend, { compact: true })} trừ riêng` : ""}</TableCell>
+                <TableCell className="text-right"><Money value={m.totals.revenue} /></TableCell>
+                <TableCell className="text-right"><Money value={m.totals.adSpend} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Money value={m.totals.cogs} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Money value={m.totals.shipping} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Money value={m.totals.operating} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Money value={m.totals.profit} className={cn("font-bold", m.totals.profit >= 0 ? "text-success" : "text-destructive")} /></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
+
+      <SectionCard
         title="Lợi nhuận cá nhân theo marketer"
-        description="Lợi nhuận danh nghĩa mỗi mã (trước QC) chia cho các marketer theo tỷ trọng tiền QC họ chạy cho mã đó, trừ QC mã hàng và QC test của chính họ. Bấm tên để xem theo mã."
+        description={`Doanh thu GTC − vận chuyển − chi phí phân bổ${basis === "profit2" ? "" : " − giá vốn hàng giao TC"} của mỗi mã chia theo tỷ trọng tiền QC; trừ QC của chính mình${basis === "profit2" ? " và toàn bộ giá vốn hàng nhập của mã mình phụ trách" : ""}; người đẩy chéo trích ${m.config.ownerSharePct}% lợi nhuận cho chủ mã; QC test trừ vào người chạy. Bấm tên để xem theo mã.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -336,6 +394,8 @@ export default async function PayrollPage({
                 <TableHead className="text-right">Đơn phân bổ</TableHead>
                 <TableHead className="text-right">DT GTC phân bổ</TableHead>
                 <TableHead className="text-right">LN trước QC</TableHead>
+                <TableHead className="text-right">Giá vốn chịu</TableHead>
+                <TableHead className="text-right">% chủ mã</TableHead>
                 <TableHead className="text-right">LN cá nhân</TableHead>
                 <TableHead className="text-right">CPQC/đơn</TableHead>
               </TableRow>
@@ -361,6 +421,7 @@ export default async function PayrollPage({
                     >
                       {x.name}
                     </Link>
+                    {x.ownedProducts.length ? <div className="text-[11px] text-muted-foreground">Phụ trách: {x.ownedProducts.join(", ")}</div> : null}
                   </TableCell>
                   <TableCell className="text-right">
                     <Money value={x.adSpend} className="text-rose-600" />
@@ -384,6 +445,14 @@ export default async function PayrollPage({
                       value={x.attributedProfitBeforeAds}
                       className="text-muted-foreground"
                     />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Money value={x.cogsCharged} className={x.cogsCharged ? "text-rose-600" : "text-muted-foreground"} />
+                  </TableCell>
+                  <TableCell className="text-right text-xs">
+                    {x.ownerBonusReceived ? <div className="text-emerald-700">+{formatVND(x.ownerBonusReceived)}</div> : null}
+                    {x.ownerBonusPaid ? <div className="text-rose-600">−{formatVND(x.ownerBonusPaid)}</div> : null}
+                    {!x.ownerBonusReceived && !x.ownerBonusPaid ? <span className="text-muted-foreground">—</span> : null}
                   </TableCell>
                   <TableCell className="text-right">
                     <Money
@@ -437,7 +506,7 @@ export default async function PayrollPage({
         <div id="marketer">
           <SectionCard
             title={`${selectedMarketer.name} · theo mã hàng`}
-            description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − QC test ${formatVND(selectedMarketer.testSpend)}`}
+            description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − giá vốn chịu ${formatVND(selectedMarketer.cogsCharged)} + % chủ mã nhận ${formatVND(selectedMarketer.ownerBonusReceived)} − % chia cho chủ mã ${formatVND(selectedMarketer.ownerBonusPaid)} − QC test ${formatVND(selectedMarketer.testSpend)}`}
             actions={
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/payroll?${qs}`}>Đóng</Link>
@@ -454,6 +523,8 @@ export default async function PayrollPage({
                   <TableHead className="text-right">Đơn phân bổ</TableHead>
                   <TableHead className="text-right">DT GTC phân bổ</TableHead>
                   <TableHead className="text-right">LN trước QC</TableHead>
+                  <TableHead className="text-right">Giá vốn chịu</TableHead>
+                  <TableHead className="text-right">% chủ mã</TableHead>
                   <TableHead className="text-right">LN cá nhân</TableHead>
                 </TableRow>
               </TableHeader>
@@ -482,6 +553,8 @@ export default async function PayrollPage({
                         className="text-muted-foreground"
                       />
                     </TableCell>
+                    <TableCell className="text-right"><Money value={p.cogsCharged} className={p.cogsCharged ? "text-rose-600" : "text-muted-foreground"} /></TableCell>
+                    <TableCell className="text-right text-xs">{p.ownerBonus ? <span className={p.ownerBonus > 0 ? "text-emerald-700" : "text-rose-600"}>{p.ownerBonus > 0 ? "+" : "−"}{formatVND(Math.abs(p.ownerBonus))}</span> : <span className="text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-right">
                       <Money
                         value={p.personalProfit}
