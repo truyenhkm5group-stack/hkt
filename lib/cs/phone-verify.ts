@@ -76,7 +76,8 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     .select({ id: o.id, systemId: o.systemId, customerId: o.customerId, name: o.billFullName, phone: o.billPhone, pageId: o.pageId, conversationId: o.conversationId, insertedAt: o.insertedAt, succeed: c.succeedOrderCount, returned: c.returnedOrderCount, fbId: c.fbId })
     .from(o)
     .leftJoin(c, eq(c.id, o.customerId))
-    .where(and(inArray(o.stage, ["NEW", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), gte(o.insertedAt, since), sql`coalesce(${o.billPhone}, '') <> ''`));
+    // chỉ đơn ĐÃ XÁC NHẬN nhưng chưa gửi ĐVVC (đơn mới chưa chốt thì nhân viên còn đang trao đổi, không nhắn)
+    .where(and(inArray(o.stage, ["CONFIRMED", "PACKING", "READY_TO_SHIP"]), gte(o.insertedAt, since), sql`coalesce(${o.billPhone}, '') <> ''`));
   const canSend = Boolean(env.pancake.pagesAccessToken);
   const client = canSend ? getPancakePagesClient() : null;
   for (const r of rows) {
@@ -101,6 +102,7 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     const phone = r.phone ?? "";
     let state: PhoneChatState = null;
     let snippet = "";
+    let chatError = "";
     if (client && r.pageId && r.conversationId) {
       const customerId = r.fbId || (r.conversationId.includes("_") ? r.conversationId.split("_").pop() ?? "" : "");
       try {
@@ -110,7 +112,8 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
         const last = recent[recent.length - 1];
         snippet = (last?.text || "").slice(0, 160);
       } catch (e) {
-        if (result.errors.length < 10) result.errors.push(`#${r.systemId}: không đọc được chat (${e instanceof Error ? e.message : String(e)})`);
+        chatError = e instanceof Error ? e.message : String(e);
+        if (result.errors.length < 10) result.errors.push(`#${r.systemId}: không đọc được chat (${chatError})`);
       }
     }
     const now = new Date();
@@ -133,7 +136,10 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
     const text = renderPhoneVerifyTemplate(rules.phoneVerifyTemplate, { ten: shortName(r.name ?? ""), sdt: phone, san_pham: sanPham, shop: rules.failedDeliveryShopName });
     let sent = false;
     let error = "";
-    if (client && r.pageId && r.conversationId) {
+    if (chatError) {
+      // không đọc được chat thì không nhắn mù (có thể nhân viên đã hỏi) → để CSKH tự kiểm tra
+      error = `Không đọc được hội thoại Pancake (${chatError})`;
+    } else if (client && r.pageId && r.conversationId) {
       try {
         const res = await client.sendMessage(r.pageId, r.conversationId, "", text);
         sent = res.ok;
