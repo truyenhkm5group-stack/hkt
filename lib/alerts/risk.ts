@@ -58,3 +58,27 @@ export async function riskyOrderCandidates(cfg: RiskConfig, lookback: Date) {
   }
   return out;
 }
+
+/** Số đơn khác trong ERP (mọi trạng thái trừ huỷ) cùng SĐT — 0 = SĐT mới, chưa từng lên đơn */
+export async function erpOrderCountByPhone(phones: string[], excludeOrderId?: string): Promise<number> {
+  const db = await getDb();
+  const clean = [...new Set(phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9))];
+  if (!clean.length) return 0;
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.orders)
+    .where(and(inArray(schema.orders.billPhone, clean), sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`, excludeOrderId ? ne(schema.orders.id, excludeOrderId) : sql`true`));
+  return Number(row?.n ?? 0);
+}
+
+export type NewPhoneInput = { phone: string | null | undefined; succeed: number; returned: number; erpOtherOrders: number };
+
+/**
+ * SĐT mới = Pancake tô xanh: khách chưa có đơn giao thành công / hoàn nào và ERP không có đơn nào khác cùng số
+ * → CSKH cần hỏi khách xác nhận SĐT đúng chưa và xin số phụ trước khi gửi hàng (tránh giao không thành vì sai số).
+ */
+export function isNewPhone(input: NewPhoneInput): boolean {
+  const digits = (input.phone ?? "").replace(/\D/g, "");
+  if (digits.length < 9) return false;
+  return (input.succeed ?? 0) === 0 && (input.returned ?? 0) === 0 && (input.erpOtherOrders ?? 0) === 0;
+}

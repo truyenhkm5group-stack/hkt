@@ -37,6 +37,8 @@ import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { isNewPhone } from "@/lib/alerts/risk";
+import { phoneChatState, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
 async function main() {
@@ -501,6 +503,27 @@ async function main() {
     assert.ok(Math.abs(sum - m.personalNet) <= m.products.length + 1, `tổng chi tiết mã ≈ LN cá nhân của ${m.name}`);
   }
   console.log("✓ Báo cáo danh nghĩa / lương / LN theo marketer chạy trên CSDL, chi tiết mã khớp tổng");
+
+  // SĐT mới (Pancake tô xanh) → xác nhận số & xin số phụ
+  assert.equal(isNewPhone({ phone: "0939748540", succeed: 0, returned: 0, erpOtherOrders: 0 }), true, "chưa GTC, chưa hoàn, không đơn khác = SĐT mới");
+  assert.equal(isNewPhone({ phone: "0939748540", succeed: 0, returned: 0, erpOtherOrders: 1 }), false, "có đơn khác cùng số trong ERP");
+  assert.equal(isNewPhone({ phone: "0939748540", succeed: 2, returned: 0, erpOtherOrders: 0 }), false, "khách đã mua");
+  assert.equal(isNewPhone({ phone: "", succeed: 0, returned: 0, erpOtherOrders: 0 }), false, "không có SĐT thì không xét");
+  const pvT0 = new Date("2026-09-01T08:00:00Z");
+  const at = (m: number) => new Date(pvT0.getTime() + m * 60_000);
+  const chat1 = [
+    { text: "Cao 1 m 6 nặng 50 kg", fromPage: false, insertedAt: at(0) },
+    { text: "Dạ chị cao 1m6 mặc size L nhé", fromPage: true, insertedAt: at(1) },
+  ];
+  assert.equal(phoneChatState(chat1, "0939748540"), null, "shop chưa hỏi SĐT → sẽ nhắn");
+  const chat2 = [...chat1, { text: "Chị ơi, SĐT của mình đúng ko ạ? 0939748540", fromPage: true, insertedAt: at(2) }];
+  assert.equal(phoneChatState(chat2, "0939748540"), "SHOP_ASKED", "shop đã hỏi, khách chưa trả lời → không nhắn lại");
+  assert.equal(phoneChatState([...chat2, { text: "Đúng rồi em", fromPage: false, insertedAt: at(3) }], "0939748540"), "CUSTOMER_CONFIRMED", "khách xác nhận đúng");
+  assert.equal(phoneChatState([...chat2, { text: "số này nè 0912 345 678", fromPage: false, insertedAt: at(3) }], "0939748540"), "CUSTOMER_CONFIRMED", "khách gửi số khác = đã trả lời");
+  assert.equal(phoneChatState([...chat2, { text: "Áo đầm cũ chị gửi chưa", fromPage: false, insertedAt: at(3) }], "0939748540"), "SHOP_ASKED", "khách nhắn việc khác, vẫn chờ xác nhận");
+  const pv = renderPhoneVerifyTemplate(DEFAULT_CS_RULES.phoneVerifyTemplate, { ten: "chị Loan", sdt: "0939748540", san_pham: "Đầm Q002", shop: "Hải An" });
+  assert.ok(pv.includes("0939748540") && pv.includes("Đầm Q002") && /số phụ/.test(pv), "tin xác nhận có SĐT, sản phẩm và xin số phụ");
+  console.log("✓ SĐT mới: nhận diện, đọc chat (shop đã hỏi / khách đã xác nhận), mẫu tin xác nhận SĐT & xin số phụ");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

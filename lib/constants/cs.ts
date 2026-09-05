@@ -1,5 +1,5 @@
 /** Case chăm sóc khách hàng (CSKH) */
-export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "OTHER"] as const;
+export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "PHONE_VERIFY", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
@@ -13,6 +13,7 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
   WRONG_PRICE: "Chốt sai giá tiền",
   URGE_DELIVERY: "Khách giục giao hàng",
   DELIVERY_FAILED: "Giao không thành · liên hệ khách",
+  PHONE_VERIFY: "SĐT mới · xác nhận số & xin số phụ",
   OTHER: "Khác",
 };
 
@@ -70,6 +71,12 @@ export type CsRules = {
   /** Mẫu tin theo LÝ DO bưu tá ghi. Biến: {ten} {ma_van_don} {san_pham} {buu_ta} {sdt_buu_ta} {ly_do} {gio_hen} {shop} */
   failedDeliveryTemplates: Record<FailedReason, string>;
   failedDeliveryShopName: string;
+  /** SĐT mới (Pancake tô xanh: chưa có lịch sử mua) → tự nhắn khách xác nhận SĐT và xin số phụ trước khi gửi hàng */
+  phoneVerifyAuto: boolean;
+  /** Số ngày quét lùi đơn mới lên chưa gửi ĐVVC */
+  phoneVerifyLookbackDays: number;
+  /** Mẫu tin xác nhận SĐT. Biến: {ten} {sdt} {san_pham} {shop} */
+  phoneVerifyTemplate: string;
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -163,6 +170,10 @@ export const DEFAULT_CS_RULES: CsRules = {
   ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
   failedDeliveryAuto: true,
   failedDeliveryShopName: "Shop",
+  phoneVerifyAuto: true,
+  phoneVerifyLookbackDays: 3,
+  phoneVerifyTemplate:
+    "Dạ {ten} ơi, shop đã lên đơn {san_pham} cho mình rồi ạ. Mình xem giúp shop số điện thoại nhận hàng {sdt} đã đúng chưa nhé? Nếu mình có số khác hoặc số phụ (người thân) thì gửi thêm để bưu tá dễ liên hệ lúc giao ạ. Hàng được kiểm tra trước khi thanh toán, shop cảm ơn mình 💛",
   failedDeliveryTemplates: {
     RESCHEDULED:
       "Dạ chào {ten} ơi, bưu tá báo mình hẹn nhận đơn {san_pham} (mã {ma_van_don}) lúc {gio_hen} ạ. Shop nhắn để mình nhớ giữ máy giúp bưu tá nhé. Bưu tá phụ trách: {buu_ta} – {sdt_buu_ta}, nếu mình muốn đổi giờ thì gọi trực tiếp bưu tá cho nhanh ạ. Hàng được kiểm tra thoải mái trước khi thanh toán 💛",

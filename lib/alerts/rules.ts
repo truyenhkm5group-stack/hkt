@@ -11,6 +11,7 @@ import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
+import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { openCsCases } from "@/lib/queries/cs";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
@@ -151,7 +152,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     for (const c of cases) {
       candidates.push({
         kind: "CS_CASE",
-        severity: c.kind === "WRONG_ADDRESS" || c.kind === "WRONG_PHONE" ? "warning" : "info",
+        severity: c.kind === "WRONG_ADDRESS" || c.kind === "WRONG_PHONE" || (c.kind === "PHONE_VERIFY" && c.title.startsWith("⛔")) ? "warning" : "info",
         title: `${CS_KIND_LABEL[c.kind as CsKind] ?? c.kind} · ${c.customerName || "Khách"}${c.customerPhone ? ` · ${c.customerPhone}` : ""}`,
         body: `${c.title}${c.detail ? ` — ${c.detail}` : ""}`.slice(0, 500),
         href: `/cs?q=${encodeURIComponent(c.customerPhone || c.title.slice(0, 30))}`,
@@ -265,6 +266,8 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     await detectCsCases().catch(() => undefined);
     // giao không thành → tự nhắn khách qua Pancake và mở case (đã nhắn / chưa xử lý được)
     await handleFailedDeliveries().catch(() => undefined);
+    // SĐT mới chưa có lịch sử mua (Pancake tô xanh) → nhắn khách xác nhận SĐT & xin số phụ trước khi gửi hàng
+    await verifyNewPhones().catch(() => undefined);
   }
   const { candidates, activeKinds } = await collectCandidates();
   const n = schema.notifications;

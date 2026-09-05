@@ -21,6 +21,9 @@ export async function loadCsRules(): Promise<CsRules> {
     chatRules: cfg.chatRules?.length ? cfg.chatRules : DEFAULT_CS_RULES.chatRules,
     ignorePatterns: cfg.ignorePatterns?.length ? cfg.ignorePatterns : DEFAULT_CS_RULES.ignorePatterns,
     failedDeliveryAuto: cfg.failedDeliveryAuto !== false,
+    phoneVerifyAuto: cfg.phoneVerifyAuto !== false,
+    phoneVerifyLookbackDays: Number(cfg.phoneVerifyLookbackDays) > 0 ? Number(cfg.phoneVerifyLookbackDays) : DEFAULT_CS_RULES.phoneVerifyLookbackDays,
+    phoneVerifyTemplate: typeof cfg.phoneVerifyTemplate === "string" && cfg.phoneVerifyTemplate.trim() ? cfg.phoneVerifyTemplate : DEFAULT_CS_RULES.phoneVerifyTemplate,
     failedDeliveryShopName: cfg.failedDeliveryShopName || DEFAULT_CS_RULES.failedDeliveryShopName,
     failedDeliveryTemplates: { ...DEFAULT_CS_RULES.failedDeliveryTemplates, ...Object.fromEntries(Object.entries(cfg.failedDeliveryTemplates ?? {}).filter(([k, v]) => k in DEFAULT_CS_RULES.failedDeliveryTemplates && typeof v === "string" && v.trim())) },
   };

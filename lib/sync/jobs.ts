@@ -14,6 +14,7 @@ import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
+import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -125,6 +126,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "PANCAKE",
     description: "Vận đơn Viettel Post giao không thành (chờ xử lý / hẹn phát lại) → nhắn khách qua Pancake hỏi lý do, gửi SĐT bưu tá khi hẹn phát lại; mở case CSKH đã nhắn / chưa xử lý được (đơn landing page, sheet) → Lark. Chạy cùng job cảnh báo mỗi 10 phút.",
     run: (o) => handleFailedDeliveries({ lookbackDays: num(o.params?.days) }),
+  },
+  "phone-verify": {
+    label: "Xác nhận SĐT mới trước khi gửi hàng",
+    source: "PANCAKE",
+    description: "Đơn chưa gửi ĐVVC có SĐT chưa từng mua (Pancake tô xanh) → nhắn khách qua Pancake xác nhận SĐT đúng chưa và xin số phụ; đọc chat trước (khách đã gửi số / shop đã hỏi thì không nhắn); mở case CSKH → Lark. Chạy cùng job cảnh báo mỗi 10 phút; days=N số ngày quét lùi.",
+    run: (o) => verifyNewPhones({ lookbackDays: num(o.params?.days) }),
   },
   "data-check": {
     label: "Kiểm tra nhất quán vận đơn & COD",

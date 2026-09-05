@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { assessCustomerRisk, erpHistoryByPhone } from "@/lib/alerts/risk";
+import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { notFound } from "next/navigation";
 import { ExternalLink, MapPin, Phone, ShoppingBag, Truck, User } from "lucide-react";
@@ -31,6 +31,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const riskCfg = await loadAlertConfig();
   const erpHist = order ? await erpHistoryByPhone([order.billPhone ?? ""], order.id) : { delivered: 0, returned: 0 };
   const risk = order ? assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg) : null;
+  const erpOther = order ? await erpOrderCountByPhone([order.billPhone ?? ""], order.id) : 0;
+  const newPhone = order ? isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther }) : false;
   if (!order) notFound();
   const s = order.shipment;
   const paid = order.prepaid + order.transferMoney + order.cash;
@@ -187,6 +189,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <div className={cn("rounded-xl border p-3 text-sm", risk.severity === "critical" ? "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100" : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100")}>
               <div className="font-semibold">⚠ Khách rủi ro — nên xin cọc / xác nhận kỹ trước khi gửi ĐVVC</div>
               <div className="mt-0.5 text-xs">Giao thành công {risk.succeed} · hoàn {risk.returned}{risk.rate ? ` (${Math.round(risk.rate * 100)}%)` : ""} · {risk.reasons.join(", ")} (theo Pancake và lịch sử vận đơn cùng SĐT trong ERP)</div>
+            </div>
+          ) : null}
+          {newPhone ? (
+            <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+              <div className="font-semibold">📱 SĐT mới, chưa có lịch sử mua (Pancake tô xanh)</div>
+              <div className="mt-0.5 text-xs">Hỏi khách xác nhận SĐT {order.billPhone} đã đúng chưa và xin thêm số phụ (người thân) trước khi gửi hàng để bưu tá liên hệ được. Bot ERP tự nhắn qua Pancake nếu đơn có hội thoại; xem case ở CSKH.</div>
             </div>
           ) : null}
           <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
