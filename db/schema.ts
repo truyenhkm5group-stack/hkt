@@ -167,6 +167,36 @@ export const adAccountBilling = pgTable("ad_account_billing", {
   updatedAt: updatedAt(),
 });
 
+/** Bảng chốt số lượng đặt hàng sản xuất theo mã (ma trận màu × size) gửi xưởng may */
+export const productionOrders = pgTable(
+  "production_orders",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    productCode: text("product_code").notNull().default(""),
+    productName: text("product_name").notNull().default(""),
+    /** DRAFT · SENT (đã gửi xưởng) · RECEIVED (đã nhận hàng) · CANCELLED */
+    status: text("status").notNull().default("DRAFT"),
+    colors: jsonb("colors").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    sizes: jsonb("sizes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Số lượng theo ô "màu|size" */
+    cells: jsonb("cells").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+    /** Ảnh mẫu theo màu: { color, url } */
+    images: jsonb("images").$type<{ color: string; url: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    totalQty: integer("total_qty").notNull().default(0),
+    unitCost: integer("unit_cost").notNull().default(0),
+    supplier: text("supplier").notNull().default(""),
+    note: text("note").notNull().default(""),
+    dueDate: ts("due_date"),
+    sentAt: ts("sent_at"),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("production_orders_product_idx").on(t.productId, t.createdAt)],
+);
+
 /** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
 export const notifications = pgTable(
   "notifications",

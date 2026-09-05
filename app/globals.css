@@ -133,3 +133,8 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+@media print {
+  [data-slot="sidebar"], [data-slot="sidebar-rail"], header, .print\:hidden { display: none !important; }
+  main { padding: 0 !important; }
+}

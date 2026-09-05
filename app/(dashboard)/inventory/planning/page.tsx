@@ -1,4 +1,5 @@
-import { AlertTriangle, Download, Factory, PackageSearch, ShoppingCart } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart } from "lucide-react";
 import { PlanningForm } from "@/app/(dashboard)/inventory/planning/planning-form";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -33,9 +34,14 @@ export default async function PlanningPage() {
         title="Kế hoạch đặt hàng sản xuất"
         description="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã: dựa trên tồn khả dụng ERP, đơn đã chốt chưa gửi, tốc độ bán gần đây, thời gian sản xuất và số ngày muốn đủ bán sau khi hàng về. Mẫu mã hết hàng trước khi sản xuất xong sẽ lên chuông cảnh báo và nhóm Lark."
         actions={
-          <Button asChild variant="outline" size="sm">
-            <a href="/api/export/planning"><Download className="size-4" /> Xuất CSV</a>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/inventory/planning/orders"><ClipboardList className="size-4" /> Bảng đặt hàng đã chốt</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a href="/api/export/planning"><Download className="size-4" /> Xuất CSV</a>
+            </Button>
+          </div>
         }
       />
       <PlanningForm assumptions={report.assumptions} products={products} canWrite={canWrite} />
@@ -51,7 +57,16 @@ export default async function PlanningPage() {
           key={g.productId}
           title={`${g.productCode ? `${g.productCode} · ` : ""}${g.productName}`}
           description={`${g.rows.length} mẫu mã · đề xuất đặt ${formatNumber(g.suggested)} sp · ${formatVND(g.orderCost)}`}
-          actions={<span className={cn("rounded-md px-2 py-0.5 text-xs font-semibold", PLAN_STATUS_TONE[g.worst])}>{PLAN_STATUS_LABEL[g.worst]}</span>}
+          actions={
+            <div className="flex items-center gap-2">
+              {canWrite ? (
+                <Button asChild size="sm">
+                  <Link href={`/inventory/planning/orders/new?product=${g.productId}`}><ClipboardList className="size-4" /> Tạo bảng chốt đặt hàng</Link>
+                </Button>
+              ) : null}
+              <span className={cn("rounded-md px-2 py-0.5 text-xs font-semibold", PLAN_STATUS_TONE[g.worst])}>{PLAN_STATUS_LABEL[g.worst]}</span>
+            </div>
+          }
           padded={false}
         >
           <div className="overflow-x-auto">
