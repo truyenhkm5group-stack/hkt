@@ -77,7 +77,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
       { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
-      { href: "/reports/returns", label: "Tỷ lệ hoàn theo mã hàng", icon: Undo2, permission: "reports:returns" },
+      { href: "/reports/returns", label: "Tỷ lệ giao thành công", icon: Undo2, permission: "reports:returns" },
       { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },
     ],
   },

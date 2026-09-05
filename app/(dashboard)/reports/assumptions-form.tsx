@@ -21,7 +21,7 @@ type Props = {
   canWrite: boolean;
 };
 
-/** Form giả định cho báo cáo lợi nhuận danh nghĩa (cước ship, tỷ lệ hoàn mặc định, cửa sổ lịch sử) */
+/** Form giả định cho báo cáo lợi nhuận danh nghĩa (cước ship, tỷ lệ giao thành công mặc định, cửa sổ lịch sử). Người dùng nhập TỶ LỆ GIAO THÀNH CÔNG; settings vẫn lưu returnRate = 100 − GTC để không đổi khoá dữ liệu. */
 export function AssumptionsForm({ assumptions, canWrite }: Props) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -32,7 +32,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     opsStaffPerRescued: String(assumptions.opsStaffPerRescued ?? 10000),
     rescueRatePercent: String(assumptions.rescueRatePercent ?? 10),
     fixedCostMonthly: String(assumptions.fixedCostMonthly ?? 5000000),
-    defaultReturnRate: String(assumptions.defaultReturnRate),
+    defaultDeliveryRate: String(Math.round((100 - assumptions.defaultReturnRate) * 10) / 10),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
     inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 10),
@@ -55,7 +55,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         opsStaffPerRescued: Math.round(num(form.opsStaffPerRescued, 10000)),
         rescueRatePercent: num(form.rescueRatePercent, 10),
         fixedCostMonthly: Math.round(num(form.fixedCostMonthly, 5000000)),
-        defaultReturnRate: num(form.defaultReturnRate, 30),
+        defaultReturnRate: Math.min(100, Math.max(0, 100 - num(form.defaultDeliveryRate, 70))),
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
         overrides: assumptions.overrides,
@@ -113,8 +113,8 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           <span className="text-muted-foreground">/tháng</span>
         </span>
         <span>
-          Tỷ lệ hoàn mặc định{" "}
-          <b className="numeric">{assumptions.defaultReturnRate}%</b>
+          Tỷ lệ giao thành công mặc định{" "}
+          <b className="numeric">{Math.round((100 - assumptions.defaultReturnRate) * 10) / 10}%</b>
           <span className="text-muted-foreground">
             {" "}
             khi mã có dưới {assumptions.minFinishedOrders} đơn kết thúc trong{" "}
@@ -201,16 +201,16 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             <Input type="number" inputMode="numeric" min={0} step={100000} value={form.fixedCostMonthly} onChange={(e) => setForm({ ...form, fixedCostMonthly: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <Label>Tỷ lệ hoàn mặc định (%)</Label>
+            <Label>Tỷ lệ giao thành công mặc định (%)</Label>
             <Input
               type="number"
               inputMode="decimal"
               min={0}
               max={100}
               step={1}
-              value={form.defaultReturnRate}
+              value={form.defaultDeliveryRate}
               onChange={(e) =>
-                setForm({ ...form, defaultReturnRate: e.target.value })
+                setForm({ ...form, defaultDeliveryRate: e.target.value })
               }
             />
           </div>
@@ -290,7 +290,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
   );
 }
 
-/** Ghi đè tỷ lệ hoàn ước tính cho một mã hàng */
+/** Ghi đè tỷ lệ GIAO THÀNH CÔNG ước tính cho một mã hàng (lưu dưới dạng tỷ lệ hoàn = 100 − GTC) */
 export function ReturnRateOverride({
   productId,
   assumptions,
@@ -306,7 +306,7 @@ export function ReturnRateOverride({
 }) {
   const [value, setValue] = useState(
     assumptions.overrides[productId] !== undefined
-      ? String(assumptions.overrides[productId])
+      ? String(Math.round((100 - assumptions.overrides[productId]) * 10) / 10)
       : "",
   );
   const [pending, startTransition] = useTransition();
@@ -325,7 +325,7 @@ export function ReturnRateOverride({
     startTransition(async () => {
       const overrides = { ...assumptions.overrides };
       if (override.trim() === "") delete overrides[productId];
-      else overrides[productId] = Number(override);
+      else overrides[productId] = Math.min(100, Math.max(0, 100 - Number(override)));
       const {
         shipFeeDelivered,
         shipFeeReturned,
@@ -346,14 +346,14 @@ export function ReturnRateOverride({
         toast.success(
           override.trim() === ""
             ? "Đã bỏ ghi đè, dùng tỷ lệ lịch sử"
-            : `Đã đặt tỷ lệ hoàn ${override}%`,
+            : `Đã đặt tỷ lệ giao thành công ${override}%`,
         );
         router.refresh();
       }
     });
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="text-muted-foreground">Ghi đè tỷ lệ hoàn (%)</span>
+      <span className="text-muted-foreground">Ghi đè tỷ lệ giao thành công (%)</span>
       <Input
         type="number"
         inputMode="decimal"

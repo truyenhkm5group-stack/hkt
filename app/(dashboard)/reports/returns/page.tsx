@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { OUTCOME_LABEL, OUTCOME_TONE, rateTone, RETURN_RULE } from "@/lib/constants/returns";
+import { OUTCOME_LABEL, OUTCOME_TONE, RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
   getReturnRateByVariant,
@@ -34,7 +34,7 @@ import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { requirePermission } from "@/lib/auth/session";
 
-export const metadata = { title: "Tỷ lệ hoàn theo mã hàng" };
+export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
 
 const MIN_OPTIONS = [
   { value: "1", label: "≥ 1 đơn đã gửi" },
@@ -51,8 +51,8 @@ export default async function ReturnRatePage({
   await requirePermission("reports:returns");
   const raw = await searchParams;
   const params = parseListParams(raw, {
-    defaultSort: "rate",
-    defaultDir: "desc",
+    defaultSort: "successRate",
+    defaultDir: "asc",
     filterKeys: ["min"],
     sortable: RETURN_RATE_SORTABLE,
     defaultPeriod: "90d",
@@ -94,15 +94,15 @@ export default async function ReturnRatePage({
       : {}),
   }).toString();
   const worst = all
-    .filter((r) => r.rate !== null && r.shipped >= 5)
-    .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0))[0];
+    .filter((r) => r.successRate !== null && r.shipped >= 5)
+    .sort((a, b) => (a.successRate ?? 0) - (b.successRate ?? 0))[0];
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Tài chính"
-        title="Tỷ lệ hoàn theo mã hàng"
-        description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.returned)} đơn hoàn · tính trên đơn lên trong kỳ`}
+        title="Tỷ lệ giao thành công theo mã hàng"
+        description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.delivered)} giao thành công (COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })}) · ${formatNumber(summary.returned)} không thành công · tính trên đơn lên trong kỳ`}
         actions={
           <Button asChild variant="outline" size="sm">
             <a href={`/api/export/return-rate?${exportQuery}`}>
@@ -121,29 +121,29 @@ export default async function ReturnRatePage({
           tone="blue"
         />
         <MetricCard
-          label="Giao thành công thật"
+          label="Giao thành công"
           value={formatNumber(summary.delivered)}
-          note={`Vận đơn giao thành công có COD thu > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (hoặc đã chuyển khoản trước)`}
+          note={`Đơn có doanh thu COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (tiền thực thu / đã về; hoặc đã chuyển khoản trước)`}
           icon={PackageCheck}
           tone="green"
         />
         <MetricCard
-          label="Đơn hoàn"
+          label="Không thành công (hoàn)"
           value={formatNumber(summary.returned)}
           note={`${formatNumber(summary.returnedByRule)} vận đơn “giao thành công” nhưng COD ≤ ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (khách chỉ trả tiền ship) · mất ${formatVND(summary.lostRevenue, { compact: true })}`}
           icon={Undo2}
           tone="rose"
         />
         <MetricCard
-          label="Tỷ lệ hoàn chung"
+          label="Tỷ lệ giao thành công"
           value={
-            <span className={rateTone(summary.rate)}>
-              {summary.rate === null ? "—" : `${summary.rate.toFixed(1)}%`}
+            <span className={successTone(summary.successRate)}>
+              {summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}
             </span>
           }
-          note={`${summary.expectedRate !== null ? `Dự kiến ${summary.expectedRate.toFixed(1)}% khi ${formatNumber(summary.failed)} đơn chờ phát lại kết thúc (xác suất thành hoàn ${summary.failedToReturnPct}%${summary.failedSample >= 15 ? `, học từ ${formatNumber(summary.failedSample)} vận đơn` : ", mặc định"})` : "Hoàn / (giao thật + hoàn)"}${worst ? ` · cao nhất ${worst.sku || worst.productName} ${(worst.rate ?? 0).toFixed(1)}%` : ""}`}
+          note={`${summary.expectedSuccessRate !== null ? `Dự kiến ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(summary.failed)} đơn chờ phát lại kết thúc (xác suất thành hoàn ${summary.failedToReturnPct}%${summary.failedSample >= 15 ? `, học từ ${formatNumber(summary.failedSample)} vận đơn` : ", mặc định"})` : "Giao TC / (giao TC + không TC)"}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
           icon={Percent}
-          tone={summary.rate !== null && summary.rate >= 20 ? "rose" : "slate"}
+          tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
       </section>
 
@@ -151,7 +151,7 @@ export default async function ReturnRatePage({
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
           <AlertTriangle className="size-4 shrink-0" />
           <span>
-            <b>{formatNumber(summary.finishedNoVtp)}</b> / {formatNumber(summary.delivered + summary.returned)} đơn giao / hoàn trong kỳ <b>chưa có trạng thái Viettel Post thật</b> (đang tính theo trạng thái Pancake vì webhook mới nối và tài khoản API Viettel Post không tra được vận đơn tạo qua Pancake). Để tỷ lệ hoàn đúng định nghĩa (GTC = VTP giao thành công & COD &gt; 100K), tải danh sách vận đơn từ viettelpost.vn → Quản lý vận đơn → Xuất Excel rồi nhập vào ERP.
+            <b>{formatNumber(summary.finishedNoVtp)}</b> / {formatNumber(summary.delivered + summary.returned)} đơn giao / hoàn trong kỳ <b>chưa có trạng thái Viettel Post thật</b> (đang tính theo trạng thái Pancake vì tài khoản API Viettel Post không tra được vận đơn tạo qua Pancake). Đơn giao thành công đã được tính theo <b>COD thực thu &gt; 100K</b> nên không phụ thuộc trạng thái này; để phần <b>không thành công</b> cũng chính xác, nhập bảng kê COD hoặc danh sách vận đơn từ viettelpost.vn → Quản lý vận đơn → Xuất Excel.
           </span>
           <Button asChild size="sm" variant="outline" className="ml-auto">
             <Link href="/cod?import=orders">Nhập danh sách vận đơn VTP</Link>
@@ -162,16 +162,9 @@ export default async function ReturnRatePage({
       <div className="flex items-start gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3.5 text-[13px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b>Cách tính.</b> Kết quả đơn ưu tiên trạng thái vận đơn Viettel Post.
-          Đơn <b>hoàn</b> = vận đơn đang hoàn / đã hoàn, <b>hoặc</b> vận đơn
-          &ldquo;giao thành công&rdquo; nhưng COD thu hộ ≤{" "}
-          {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (khách không nhận, chỉ
-          trả tiền ship / phí xem hàng; trừ đơn đã chuyển khoản trước), kể cả khi
-          vận đơn hoàn PKE…P1 nằm riêng trên Viettel Post; chưa có vận đơn thì theo
-          trạng thái Pancake. Đơn <b>giao thật</b> = vận đơn giao thành công có COD
-          &gt; {formatVND(RETURN_RULE.maxCodForFakeDelivery)}. Bảng gom mẫu mã theo
-          mã hàng: bấm mũi tên ở dòng mã (vd Q003) để xổ từng SKU. Tỷ
-          lệ hoàn = hoàn / (giao thật + hoàn), chỉ tính đơn <b>đã kết thúc</b>: đơn chờ xử lý (chưa gửi ĐVVC), đơn đang giao và đơn huỷ không nằm trong tử số lẫn mẫu số. Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng thêm số đơn chờ phát lại nhân xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào cả tử số và mẫu số. Một đơn có nhiều mã hàng được tính cho từng mã.
+          <b>Cách tính.</b> Chỉ số chính là <b>tỷ lệ giao thành công</b>. Đơn{" "}
+          <b>giao thành công</b> = đơn có <b>doanh thu COD thực</b> &gt;{" "}
+          {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (tiền thu hộ thực thu theo webhook giao thành công / bảng kê / danh sách vận đơn; chưa có số thực thu thì lấy COD vận đơn khi Viettel Post báo giao thành công; đơn đã chuyển khoản trước &gt; {formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} cũng tính). Đơn <b>không thành công</b> = vận đơn đang hoàn / đã hoàn, <b>hoặc</b> vận đơn “giao thành công” nhưng COD ≤ {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (khách không nhận, chỉ trả tiền ship / phí xem hàng), kể cả khi vận đơn hoàn PKE…P1 nằm riêng; chưa có vận đơn thì theo trạng thái Pancake. Tỷ lệ giao thành công = giao TC / (giao TC + không TC), chỉ tính đơn <b>đã kết thúc</b>: đơn chờ xử lý, đang giao và huỷ không nằm trong tử số lẫn mẫu số. Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng số đơn chờ phát lại × xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào mẫu số. Bảng gom mẫu mã theo mã hàng: bấm mũi tên ở dòng mã (vd Q003) để xổ từng SKU. Một đơn có nhiều mã hàng được tính cho từng mã.
         </div>
       </div>
 
@@ -205,7 +198,7 @@ export default async function ReturnRatePage({
             }
             description={
               selected
-                ? `${formatNumber(selected.returned)} hoàn · ${formatNumber(selected.delivered)} giao thật · ${formatNumber(selected.inTransit)} đang giao · ${params.period.label.toLowerCase()} (tối đa 300 đơn, đơn hoàn xếp trước)`
+                ? `${formatNumber(selected.delivered)} giao thành công · ${formatNumber(selected.returned)} không thành công · ${formatNumber(selected.inTransit)} đang giao · ${params.period.label.toLowerCase()} (tối đa 300 đơn, đơn không thành công xếp trước)`
                 : undefined
             }
             actions={

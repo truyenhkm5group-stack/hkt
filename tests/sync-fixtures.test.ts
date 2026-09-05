@@ -170,7 +170,7 @@ async function main() {
   console.log("✓ Vận đơn Viettel Post ngoài Pancake được tạo riêng");
 
 
-  // 8. Tỷ lệ hoàn theo mã hàng + tồn kho ERP (quy tắc: giao thành công nhưng COD 0 & cước < 10K = hoàn)
+  // 8. Tỷ lệ giao thành công theo mã hàng + tồn kho ERP (GTC = COD thực > 100K; giao thành công nhưng COD 0 & cước < 10K = không thành công)
   await db.insert(schema.products).values({ id: "rr-prod", name: "Đầm kiểm thử" }).onConflictDoNothing();
   await db.insert(schema.productVariants).values({ id: "rr-var", productId: "rr-prod", sku: "RR-001", color: "Đỏ", size: "M", retailPrice: 499000 }).onConflictDoNothing();
   const now = new Date();
@@ -186,26 +186,35 @@ async function main() {
   await mkOrder("rr-9004", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000004" }); // đang giao
   await mkOrder("rr-9005", "RETURNED", { stage: "RETURNED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1509000005" }); // hoàn theo trạng thái
   await mkOrder("rr-9006", "CANCELLED"); // huỷ, không tính
+  // đơn giao thành công theo TIỀN THỰC THU: vận đơn chưa có trạng thái giao nhưng COD đã về theo bảng kê > 100K
+  await mkOrder("rr-9007", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, codCollected: 499000, codStatus: "PAID_TO_BANK", shippingFee: 17000, vtpOrderNumber: "PKE1509000007" });
+  // vận đơn "giao thành công" COD vận đơn 0 (trông như không TC) nhưng thực thu 499K → giao thành công
+  await mkOrder("rr-9008", "DELIVERED", { stage: "DELIVERED", codAmount: 0, codCollected: 499000, codStatus: "COLLECTED", shippingFee: 8501, vtpOrderNumber: "PKE1509000008" });
   const all: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
   const rr = await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 });
   const row = rr.rows.find((r) => r.variantId === "rr-var");
   assert.ok(row, "có dòng RR-001");
-  assert.equal(row.shipped, 5, "đã gửi 5");
-  assert.equal(row.delivered, 1, "giao thật 1");
-  assert.equal(row.returned, 3, "hoàn 3 (1 trạng thái + 2 quy tắc)");
-  assert.equal(row.returnedByRule, 2, "2 đơn hoàn theo quy tắc COD/cước");
+  assert.equal(row.shipped, 7, "đã gửi 7");
+  assert.equal(row.delivered, 3, "giao thành công 3 (1 theo trạng thái + 2 theo COD thực thu > 100K)");
+  assert.equal(row.returned, 3, "không thành công 3 (1 trạng thái + 2 quy tắc)");
+  assert.equal(row.returnedByRule, 2, "2 đơn không TC theo quy tắc COD/cước");
   assert.equal(row.inTransit, 1, "đang giao 1");
   assert.equal(row.cancelled, 1, "huỷ 1");
-  assert.equal(row.rate, 75, "tỷ lệ hoàn 3/(1+3) = 75%");
+  assert.equal(row.rate, 50, "tỷ lệ hoàn 3/(3+3) = 50%");
+  assert.equal(row.successRate, 50, "tỷ lệ giao thành công 3/(3+3) = 50%");
+  assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
   const summary = await getReturnRateSummary(all, "RR-001");
   assert.equal(summary.returned, 3);
-  assert.equal(summary.delivered, 1);
+  assert.equal(summary.delivered, 3);
+  assert.equal(summary.successRate, 50);
   const detail = await listOrdersForVariant(row.key, all);
   assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED_BY_RULE");
   assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "RETURNED_BY_RULE");
   assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "DELIVERED");
   assert.equal(detail.find((d) => d.id === "rr-9004")?.outcome, "IN_TRANSIT");
-  console.log(`✓ Tỷ lệ hoàn RR-001: gửi ${row.shipped} · giao thật ${row.delivered} · hoàn ${row.returned} (quy tắc ${row.returnedByRule}) · ${row.rate}%`);
+  assert.equal(detail.find((d) => d.id === "rr-9007")?.outcome, "DELIVERED", "COD đã về > 100K → giao thành công dù vận đơn chưa báo giao");
+  assert.equal(detail.find((d) => d.id === "rr-9008")?.outcome, "DELIVERED", "thực thu 499K → giao thành công dù COD vận đơn = 0");
+  console.log(`✓ Tỷ lệ giao thành công RR-001: gửi ${row.shipped} · giao TC ${row.delivered} · không TC ${row.returned} (quy tắc ${row.returnedByRule}) · GTC ${row.successRate}%`);
 
   // Tồn kho ERP = Nhập − Giao thật − Đang giao
   const [receipt] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: now, totalQuantity: 10, totalCost: 2_000_000, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
@@ -213,9 +222,9 @@ async function main() {
   const picker = await listVariantsForReceipt();
   const stock = picker.find((v) => v.id === "rr-var");
   assert.ok(stock, "có mẫu mã trong danh sách nhập");
-  assert.equal(stock.currentStock, 8, "tồn = 10 nhập − 1 giao thật − 1 đang giao = 8 (hoàn coi như về kho)");
+  assert.equal(stock.currentStock, 6, "tồn = 10 nhập − 3 giao thành công (COD thực > 100K) − 1 đang giao = 6 (không thành công coi như về kho)");
   assert.equal(stock.lastCost, 200000, "giá nhập gần nhất lấy từ phiếu");
-  console.log(`✓ Tồn kho ERP RR-001: ${stock.currentStock} (nhập 10, giao thật 1, đang giao 1) · giá nhập ${stock.lastCost}`);
+  console.log(`✓ Tồn kho ERP RR-001: ${stock.currentStock} (nhập 10, giao thành công 3, đang giao 1) · giá nhập ${stock.lastCost}`);
 
   // Nhập sao kê MB Bank → chi phí
   const ledgerJson = JSON.stringify({
@@ -519,6 +528,8 @@ async function main() {
   assert.ok(Math.abs(perfOrders - nominal.totals.orders) <= perf.marketers.length, `đơn theo marketer ${perfOrders} ≈ đơn xác nhận ${nominal.totals.orders}`);
   for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
     assert.ok(p.returnRate !== undefined && p.returnRate >= 0 && p.returnRate <= 1, "tỷ lệ hoàn dự kiến là phân số");
+    assert.ok(p.expectedSuccessRate !== undefined && Math.abs(p.expectedSuccessRate - (1 - (p.returnRate ?? 0))) < 1e-9, "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
+    if (p.successRate !== null && p.successRate !== undefined) assert.ok(p.successRate >= 0 && p.successRate <= 1);
     if (p.actualReturnRate !== null && p.actualReturnRate !== undefined) assert.ok(p.actualReturnRate >= 0 && p.actualReturnRate <= 1);
     if (p.margin !== null) assert.ok(Math.abs(p.margin) <= 50, "biên là phân số");
     const n = nominal.rows.find((r) => r.productId === p.id);

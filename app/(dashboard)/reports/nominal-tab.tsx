@@ -96,7 +96,7 @@ export async function NominalTab({
         <MetricCard
           label="Doanh thu GTC ước tính"
           value={formatVND(t.expectedRevenue, { compact: true })}
-          note={`Doanh số × (1 − tỷ lệ hoàn) · thực tế đã giao ${formatVND(t.actualRevenue, { compact: true })}`}
+          note={`Doanh số × tỷ lệ giao thành công ước tính · thực tế đã giao ${formatVND(t.actualRevenue, { compact: true })}`}
           icon={Calculator}
           tone="primary"
         />
@@ -132,21 +132,21 @@ export async function NominalTab({
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
         <MetricCard
-          label="Tỷ lệ hoàn ước tính"
+          label="Tỷ lệ giao thành công ước tính"
           value={
-            t.weightedReturnRate !== null
-              ? `${t.weightedReturnRate.toFixed(1)}%`
+            t.weightedDeliveryRate !== null
+              ? `${t.weightedDeliveryRate.toFixed(1)}%`
               : "—"
           }
-          note={`Bình quân theo số đơn · thực tế: ${formatNumber(t.delivered)} giao thật, ${formatNumber(t.returned)} hoàn, ${formatNumber(t.inTransit)} đang giao`}
+          note={`Bình quân theo số đơn · thực tế: ${formatNumber(t.delivered)} giao thành công (COD thực > 100K), ${formatNumber(t.returned)} không thành công, ${formatNumber(t.inTransit)} đang giao`}
           icon={Percent}
-          tone="amber"
+          tone={t.weightedDeliveryRate !== null && t.weightedDeliveryRate < 55 ? "rose" : "green"}
         />
       </section>
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
-        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ hoàn ước tính trộn theo trạng thái thật: đã hoàn 100%, đã giao 0%, chờ xử lý / chờ phát lại ${t.failedToReturnPct}% (học từ lịch sử), còn lại theo tỷ lệ ${report.assumptions.returnRateWindowDays} ngày của mã. Bấm mã để xem theo ngày.`}
+        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K) trộn theo trạng thái thật: đã giao TC 100%, không thành công 0%, chờ xử lý / chờ phát lại ${100 - t.failedToReturnPct}% (học từ lịch sử), còn lại theo tỷ lệ ${report.assumptions.returnRateWindowDays} ngày của mã. Bấm mã để xem theo ngày.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -158,7 +158,7 @@ export async function NominalTab({
                 <TableHead className="text-right">SP</TableHead>
                 <TableHead className="text-right">Doanh số POS</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
-                <TableHead className="text-right">TL hoàn ƯT</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K)">TL GTC ƯT</TableHead>
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">Giá vốn</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
@@ -244,14 +244,14 @@ export async function NominalTab({
                       <span
                         className={cn(
                           "numeric font-semibold",
-                          r.returnRate >= 40
+                          r.deliveryRate < 60
                             ? "text-destructive"
-                            : r.returnRate >= 25
+                            : r.deliveryRate < 75
                               ? "text-amber-600"
-                              : "",
+                              : "text-emerald-700",
                         )}
                       >
-                        <span title={`Đã hoàn ${r.returned} · chờ xử lý / phát lại ${r.failed} (×${t.failedToReturnPct}%) · chưa có kết quả ${Math.max(0, r.orders - r.delivered - r.returned - r.failed)} (×${r.baseReturnRate.toFixed(0)}% lịch sử) · đã giao ${r.delivered}`}>{r.returnRate.toFixed(1)}%</span>
+                        <span title={`Đã giao TC ${r.delivered} · không thành công ${r.returned} · chờ xử lý / phát lại ${r.failed} (×${100 - t.failedToReturnPct}% thành công) · chưa có kết quả ${Math.max(0, r.orders - r.delivered - r.returned - r.failed)} (×${(100 - r.baseReturnRate).toFixed(0)}% lịch sử)`}>{r.deliveryRate.toFixed(1)}%</span>
                       </span>
                       <div className="text-[10.5px] text-muted-foreground">
                         {r.returnRateSource === "override"
@@ -345,7 +345,7 @@ export async function NominalTab({
                     <Money value={t.adSpend} className="text-rose-600" />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Pct value={t.weightedReturnRate} tone={false} />
+                    <Pct value={t.weightedDeliveryRate} tone={false} />
                   </TableCell>
                   <TableCell className="text-right">
                     <Money value={t.expectedRevenue} />
@@ -397,9 +397,9 @@ export async function NominalTab({
           </Table>
         </div>
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-          Công thức mỗi mã: DT GTC ước tính = Doanh số POS × (1 − TL hoàn); Giá
-          vốn = SP × giá nhập × (1 − TL hoàn); Vận chuyển = Đơn × cước gửi + Đơn
-          × TL hoàn × phí hoàn về (tức Đơn × [(1 − TL hoàn) × cước gửi + TL hoàn
+          Công thức mỗi mã (TL GTC = tỷ lệ giao thành công ước tính, đơn GTC = COD thực &gt; 100K): DT GTC ước tính = Doanh số POS × TL GTC; Giá
+          vốn = SP × giá nhập × TL GTC; Vận chuyển = Đơn × cước gửi + Đơn
+          × (1 − TL GTC) × phí hoàn về (tức Đơn × [TL GTC × cước gửi + (1 − TL GTC)
           × cước đơn hoàn đi + về]). LN danh nghĩa = DT − giá vốn − vận chuyển
           − CPQC − CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân
           bổ theo doanh số) − đóng hàng (đơn × đơn giá) − nhân viên vận đơn (đơn
@@ -417,13 +417,13 @@ export async function NominalTab({
         <div id="ma-hang">
           <SectionCard
             title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`Tỷ lệ hoàn ước tính ${selected.returnRate.toFixed(1)}% (${selected.returnRateSource === "override" ? "ghi đè" : selected.returnRateSource === "history" ? `lịch sử ${selected.historyFinished} đơn kết thúc` : "mặc định"}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
+            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate.toFixed(1)}% (${selected.returnRateSource === "override" ? "ghi đè" : selected.returnRateSource === "history" ? `lịch sử ${selected.historyFinished} đơn kết thúc` : "mặc định"}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
             actions={
               <div className="flex items-center gap-3">
                 <ReturnRateOverride
                   productId={selected.productId}
                   assumptions={report.assumptions}
-                  current={selected.returnRate}
+                  current={selected.deliveryRate}
                   source={selected.returnRateSource}
                   canWrite={canWrite}
                 />

@@ -223,7 +223,7 @@ export default async function ReportsPage({
           resultLabel={
             tab === "cash"
               ? "Tiền vào / tiền ra được gán vào kỳ theo ngày thực nhận / thực chi."
-              : "Đơn được gán vào kỳ theo ngày lên đơn; tỷ lệ hoàn ước tính theo lịch sử từng mã."
+              : "Đơn được gán vào kỳ theo ngày lên đơn; tỷ lệ giao thành công ước tính theo lịch sử từng mã (đơn GTC = COD thực > 100K)."
           }
         />
       ) : null}
@@ -254,7 +254,7 @@ export default async function ReportsPage({
             resultLabel={
               basis === "delivered"
                 ? "Đơn được gán vào kỳ theo ngày Viettel Post phát thành công (đơn chưa giao tính theo ngày lên đơn)."
-                : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake. “Giao thành công” tính theo trạng thái vận đơn Viettel Post (webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake; vận đơn giao thành công chỉ tính giao thật khi COD thu > 100.000đ; COD ≤ 100.000đ (khách chỉ trả tiền ship / phí xem hàng) được coi là hoàn."
+                : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake. “Giao thành công” tính theo trạng thái vận đơn Viettel Post (webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake; đơn giao thành công = đơn có doanh thu COD thực > 100.000đ (tiền thực thu / đã về), kể cả khi chưa có trạng thái Viettel Post; COD ≤ 100.000đ (khách chỉ trả tiền ship / phí xem hàng) được coi là không thành công."
             }
           />
 
@@ -449,8 +449,8 @@ export default async function ReportsPage({
               </SectionCard>
 
               <SectionCard
-                title="Tỷ lệ hoàn / huỷ"
-                description="Đơn hoàn và huỷ trong kỳ, kèm phí ship mất trắng"
+                title="Không thành công / huỷ"
+                description="Đơn không giao thành công (hoàn) và huỷ trong kỳ, kèm phí ship mất trắng"
               >
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg border bg-background p-3">

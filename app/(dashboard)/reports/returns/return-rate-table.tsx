@@ -43,6 +43,8 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
             deliveredRevenue: sum((r) => r.deliveredRevenue),
             rate: finished ? (returned / finished) * 100 : null,
             expectedRate: finished + failed ? ((returned + failed * pFail) / (finished + failed)) * 100 : null,
+            successRate: finished ? (delivered / finished) * 100 : null,
+            expectedSuccessRate: finished + failed ? 100 - ((returned + failed * pFail) / (finished + failed)) * 100 : null,
           };
         },
       }}

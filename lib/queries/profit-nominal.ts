@@ -141,6 +141,8 @@ export type NominalRow = {
   adSpend: number;
   /** Tỷ lệ hoàn ước tính (%) đã trộn: đơn đã hoàn + đơn chờ xử lý / chờ phát lại × xác suất thành hoàn + đơn đang giao / chưa gửi × tỷ lệ lịch sử */
   returnRate: number;
+  /** TỶ LỆ GIAO THÀNH CÔNG ước tính (%) = 100 − tỷ lệ hoàn ước tính — chỉ số hiển thị chính */
+  deliveryRate: number;
   returnRateSource: "override" | "history" | "default";
   /** Tỷ lệ hoàn lịch sử / mặc định dùng cho phần đơn chưa có kết quả (%) */
   baseReturnRate: number;
@@ -222,6 +224,8 @@ export type NominalReport = {
     inTransit: number;
     actualRevenue: number;
     weightedReturnRate: number | null;
+    /** Tỷ lệ giao thành công ước tính bình quân theo đơn (%) = 100 − weightedReturnRate */
+    weightedDeliveryRate: number | null;
     operatingExpenses: number;
     rescued: number;
     packingCost: number;
@@ -376,6 +380,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         image: r.image,
         ...base,
         returnRate,
+        deliveryRate: Math.round((100 - returnRate) * 10) / 10,
         returnRateSource,
         baseReturnRate,
         historyFinished: h?.finished ?? 0,
@@ -413,7 +418,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     if (rows.some((r) => r.productId === pid)) continue;
     rows.push({
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, items: 0, grossSales: 0, adSpend: adByProduct.get(pid) ?? 0,
-      returnRate: 0, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      returnRate: 0, deliveryRate: 100, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: Math.round(pur.cost * riskPct), profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
     });
@@ -493,6 +498,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       inTransit: totals.inTransit,
       actualRevenue: totals.actualRevenue,
       weightedReturnRate: totals.orders ? totals.weightedReturn / totals.orders : null,
+      weightedDeliveryRate: totals.orders ? 100 - totals.weightedReturn / totals.orders : null,
       operatingExpenses,
       rescued: totals.rescued,
       packingCost: totals.packingCost,

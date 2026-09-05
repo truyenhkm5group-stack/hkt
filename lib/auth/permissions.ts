@@ -54,7 +54,7 @@ export const PERMISSION_GROUPS = [
       { key: "reports:delivered", label: "BCLN theo đơn giao thành công" },
       { key: "reports:cash", label: "BCLN theo dòng tiền thực", hint: "Tiền COD về, tiền ra, lợi nhuận tiền mặt" },
       { key: "reports:nominal", label: "BCLN danh nghĩa theo mã hàng & marketer" },
-      { key: "reports:returns", label: "Tỷ lệ hoàn theo mã hàng" },
+      { key: "reports:returns", label: "Tỷ lệ giao thành công theo mã hàng" },
       { key: "reports:assumptions", label: "Sửa giả định báo cáo", hint: "Cước, đóng hàng, NV vận đơn, cố định, rủi ro tồn kho, thuế…" },
     ],
   },
@@ -107,7 +107,7 @@ const VIEW_ALL: Permission[] = ["dashboard:view", "orders:read", "shipments:view
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
-  // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ hoàn / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
+  // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
   LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],

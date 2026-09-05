@@ -6,9 +6,10 @@ export const RETURN_RULE = {
    */
   maxFeeForFakeDelivery: 10_000,
   /**
-   * Vận đơn Viettel Post "Giao thành công" chỉ là GIAO THẬT khi COD thu > ngưỡng này (đơn hàng thật ≥ 499K). COD ≤ ngưỡng
-   * (khách không nhận, chỉ trả tiền ship / phí xem hàng 20–50K) → tính là đơn HOÀN trên mọi báo cáo; trừ đơn khách đã chuyển
-   * khoản trước (prepaid > ngưỡng).
+   * ĐƠN GIAO THÀNH CÔNG = đơn có doanh thu COD THỰC (tiền thu hộ thực thu / đã về theo bảng kê) > ngưỡng này; chưa có số thực thu
+   * thì lấy COD trên vận đơn / đơn khi vận đơn báo giao thành công. COD ≤ ngưỡng (khách không nhận, chỉ trả tiền ship / phí xem
+   * hàng 20–50K) → KHÔNG thành công (tính như hoàn) trên mọi báo cáo; trừ đơn khách đã chuyển khoản trước (prepaid > ngưỡng).
+   * Tỷ lệ giao thành công = giao thành công / (giao thành công + không thành công) trên đơn đã kết thúc.
    */
   maxCodForFakeDelivery: 100_000,
 };
@@ -18,9 +19,9 @@ export type OrderOutcome = "NOT_SHIPPED" | "IN_TRANSIT" | "DELIVERED" | "RETURNE
 export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "Chưa gửi",
   IN_TRANSIT: "Đang giao",
-  DELIVERED: "Giao thành công thật",
-  RETURNED: "Hoàn (theo trạng thái)",
-  RETURNED_BY_RULE: "Hoàn (giao nhưng COD ≤ 100K)",
+  DELIVERED: "Giao thành công (COD thực > 100K)",
+  RETURNED: "Không thành công · hoàn (theo trạng thái)",
+  RETURNED_BY_RULE: "Không thành công (giao nhưng COD ≤ 100K)",
   CANCELLED: "Huỷ",
 };
 
@@ -34,6 +35,18 @@ export const OUTCOME_TONE: Record<OrderOutcome, string> = {
 };
 
 export const RETURNED_OUTCOMES: OrderOutcome[] = ["RETURNED", "RETURNED_BY_RULE"];
+
+/** Ngưỡng tỷ lệ giao thành công (%): ≥ tốt = xanh, ≥ khá = vàng, dưới = đỏ */
+export const SUCCESS_RATE_GOOD = 70;
+export const SUCCESS_RATE_OK = 55;
+
+/** Màu chữ theo mức tỷ lệ GIAO THÀNH CÔNG (dùng chung server/client) */
+export function successTone(rate: number | null) {
+  if (rate === null) return "text-muted-foreground";
+  if (rate >= SUCCESS_RATE_GOOD) return "text-emerald-600 dark:text-emerald-400";
+  if (rate >= SUCCESS_RATE_OK) return "text-amber-600 dark:text-amber-400";
+  return "text-rose-600 dark:text-rose-400";
+}
 
 /** Màu chữ theo mức tỷ lệ hoàn (dùng chung server/client) */
 export function rateTone(rate: number | null) {

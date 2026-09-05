@@ -34,6 +34,9 @@ export type PerfRow = {
   /** Mã hàng: tỷ lệ hoàn dự kiến (phân số 0–1, đã trộn đơn chưa kết thúc) / đã giao / đã hoàn / tỷ lệ hoàn thực tế trên đơn đã kết thúc */
   returnRate?: number;
   actualReturnRate?: number | null;
+  /** Tỷ lệ GIAO THÀNH CÔNG (phân số 0–1): thực tế trên đơn đã kết thúc (GTC = COD thực > 100K) và dự kiến (= 1 − tỷ lệ hoàn dự kiến) */
+  successRate?: number | null;
+  expectedSuccessRate?: number;
   delivered?: number;
   returned?: number;
   /** Marketer: tiền QC test không thuộc mã */
@@ -198,7 +201,9 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       const finished = r.delivered + r.returned;
       const actualReturnRate = finished ? r.returned / finished : null;
       const returnRate = Math.min(Math.max(r.returnRate, 0), 100) / 100; // báo cáo danh nghĩa trả %, quy về phân số
-      const highReturn = (actualReturnRate ?? returnRate) >= 0.35;
+      const successRate = finished ? r.delivered / finished : null;
+      const expectedSuccessRate = 1 - returnRate;
+      const lowSuccess = (successRate ?? expectedSuccessRate) < 0.65;
       return {
         id: r.productId,
         name: r.productName,
@@ -217,10 +222,12 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
         margin: r.netMargin === null ? null : r.netMargin / 100,
         returnRate,
         actualReturnRate,
+        successRate,
+        expectedSuccessRate,
         delivered: r.delivered,
         returned: r.returned,
         rating: r.adSpend ? rating : "NONE",
-        reason: r.adSpend ? (highReturn && rating !== "GOOD" ? `${reason} · tỷ lệ hoàn ${Math.round((actualReturnRate ?? returnRate) * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
+        reason: r.adSpend ? (lowSuccess && rating !== "GOOD" ? `${reason} · tỷ lệ giao thành công ${Math.round((successRate ?? expectedSuccessRate) * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
       };
     });
   if (report.nominal.unmatchedAdSpend > 0) {

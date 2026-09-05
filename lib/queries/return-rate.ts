@@ -11,16 +11,18 @@ const MAX_FEE = RETURN_RULE.maxFeeForFakeDelivery;
 
 /** Cước ĐVVC của đơn: ưu tiên số trên vận đơn, không có thì lấy phí đối tác Pancake ghi trên đơn */
 const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
-/** COD của đơn: ưu tiên vận đơn, không có thì lấy COD trên đơn Pancake */
-const COD = sql`coalesce(nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
+/** COD THỰC THU (webhook giao thành công / bảng kê / danh sách vận đơn) */
+const COD_COLLECTED = sql`coalesce(${s.codCollected}, 0)`;
+/** Doanh thu COD của đơn: ưu tiên số THỰC THU trên vận đơn, chưa có thì COD vận đơn, rồi COD trên đơn Pancake */
+const COD = sql`coalesce(nullif(${s.codCollected}, 0), nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
 
 const MAX_COD = RETURN_RULE.maxCodForFakeDelivery;
 /** Khách đã trả trước (chuyển khoản / ví) — đơn COD 0 nhưng giao thật */
 const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0))`;
 
 /**
- * Quy tắc 1: vận đơn "giao thành công" chỉ là giao thật khi COD thu > 100K (hoặc khách đã chuyển khoản trước > 100K).
- * COD ≤ 100K (khách không nhận, chỉ trả tiền ship / phí xem hàng) → hoàn. Giữ thêm nhánh cũ: COD = 0 và cước < 10K.
+ * Quy tắc 1: vận đơn "giao thành công" chỉ là GIAO THÀNH CÔNG khi doanh thu COD thực > 100K (hoặc khách đã chuyển khoản trước > 100K).
+ * COD ≤ 100K (khách không nhận, chỉ trả tiền ship / phí xem hàng) → không thành công. Giữ thêm nhánh cũ: COD = 0 và cước < 10K.
  */
 const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} <= ${MAX_COD} and (${COD} <= ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
 
@@ -36,15 +38,19 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
 ))`;
 
 /**
- * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ hoàn, lương, COD).
+ * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ giao thành công, lương, COD).
+ * ĐƠN GIAO THÀNH CÔNG = đơn có doanh thu COD THỰC > 100K (tiền thực thu / đã về), không phụ thuộc vào việc có trạng thái Viettel Post hay không.
  * Ưu tiên trạng thái VẬN ĐƠN Viettel Post (đầu cuối giao hàng) trước trạng thái đơn Pancake:
- *  1. vận đơn đang hoàn / đã hoàn → hoàn; vận đơn đã giao → giao thành công (trừ quy tắc phát hiện hoàn: COD = 0 & cước nhỏ, vận đơn chiều về);
- *  2. vận đơn đang đi (lấy hàng, đang giao, giao thất bại chờ phát lại) → đang giao;
- *  3. chưa có trạng thái vận đơn mới xét theo Pancake: huỷ / hoàn / đã giao / đã gửi / chưa gửi.
+ *  1. vận đơn đang hoàn / đã hoàn → không thành công (hoàn);
+ *  2. COD thực thu > 100K (webhook / bảng kê / danh sách vận đơn) → giao thành công, kể cả khi trạng thái vận đơn chưa cập nhật;
+ *  3. vận đơn đã giao → giao thành công, trừ quy tắc phát hiện không thành công (COD ≤ 100K, COD = 0 & cước nhỏ, vận đơn chiều về);
+ *  4. vận đơn đang đi (lấy hàng, đang giao, giao thất bại chờ phát lại) → đang giao;
+ *  5. chưa có trạng thái vận đơn mới xét theo Pancake: huỷ / hoàn / đã giao / đã gửi / chưa gửi.
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when ${COD_COLLECTED} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and (${FEE_RULE} or ${LEG_RULE}) then 'RETURNED_BY_RULE'
   when ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
@@ -89,6 +95,10 @@ export type ReturnRateRow = {
   failed: number;
   /** Tỷ lệ hoàn dự kiến (%) = (hoàn + chờ phát lại × xác suất thành hoàn) ÷ (giao thật + hoàn + chờ phát lại) */
   expectedRate: number | null;
+  /** TỶ LỆ GIAO THÀNH CÔNG (%) = giao thành công (COD thực > 100K) ÷ (giao thành công + không thành công) trên đơn đã kết thúc; null nếu chưa có đơn kết thúc */
+  successRate: number | null;
+  /** Tỷ lệ giao thành công dự kiến (%) khi các đơn chờ phát lại kết thúc = 100 − tỷ lệ hoàn dự kiến */
+  expectedSuccessRate: number | null;
   cancelled: number;
   returnedQty: number;
   lostRevenue: number;
@@ -97,7 +107,7 @@ export type ReturnRateRow = {
   rate: number | null;
 };
 
-export const RETURN_RATE_SORTABLE = ["rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
+export const RETURN_RATE_SORTABLE = ["successRate", "expectedSuccessRate", "rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
 
 function baseWhere(period: Period, q: string): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false)];
@@ -145,6 +155,8 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       const delivered = Number(r.delivered);
       const returned = Number(r.returned);
       const finished = delivered + returned;
+      const failedN = Number(r.failed);
+      const expectedRate = finished + failedN ? ((returned + failedN * p.rate) / (finished + failedN)) * 100 : null;
       return {
         key: r.key,
         variantId: r.variantId,
@@ -158,7 +170,9 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         returnedByRule: Number(r.returnedByRule),
         inTransit: Number(r.inTransit),
         failed: Number(r.failed),
-        expectedRate: delivered + returned + Number(r.failed) ? ((returned + Number(r.failed) * p.rate) / (delivered + returned + Number(r.failed))) * 100 : null,
+        expectedRate,
+        successRate: finished ? (delivered / finished) * 100 : null,
+        expectedSuccessRate: expectedRate === null ? null : 100 - expectedRate,
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
         lostRevenue: Number(r.lostRevenue),
@@ -168,7 +182,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     })
     .filter((r) => r.shipped >= query.minShipped);
 
-  const sortKey = RETURN_RATE_SORTABLE.includes(query.sort) ? query.sort : "rate";
+  const sortKey = RETURN_RATE_SORTABLE.includes(query.sort) ? query.sort : "successRate";
   const sign = query.dir === "asc" ? 1 : -1;
   all.sort((a, b) => {
     if (sortKey === "sku") return sign * (a.sku || a.productName).localeCompare(b.sku || b.productName, "vi");
@@ -202,6 +216,10 @@ export type ReturnRateSummary = {
   rate: number | null;
   /** Tỷ lệ hoàn dự kiến khi các đơn chờ phát lại kết thúc (theo xác suất lịch sử) */
   expectedRate: number | null;
+  /** TỶ LỆ GIAO THÀNH CÔNG chung (%) = giao thành công ÷ (giao thành công + không thành công) */
+  successRate: number | null;
+  /** Tỷ lệ giao thành công dự kiến (%) khi đơn chờ phát lại kết thúc */
+  expectedSuccessRate: number | null;
   /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
   failedToReturnPct: number;
   failedSample: number;
@@ -273,6 +291,8 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     lostRevenue: Number(row?.lostRevenue ?? 0),
     rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
     expectedRate: delivered + returned + failed ? ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
+    successRate: delivered + returned ? (delivered / (delivered + returned)) * 100 : null,
+    expectedSuccessRate: delivered + returned + failed ? 100 - ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
     failedToReturnPct: Math.round(p.rate * 100),
     failedSample: p.sample,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),

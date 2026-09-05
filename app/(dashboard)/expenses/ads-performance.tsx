@@ -46,7 +46,7 @@ function PerfTable({ rows, kind, avgRoas, spendTotal }: { rows: PerfRow[]; kind:
             <TableHead className="text-right">Đơn · CPO</TableHead>
             <TableHead className="text-right">Doanh số · ROAS</TableHead>
             <TableHead className="text-right">{kind === "marketer" ? "LN cá nhân · biên" : "LN sau QC · biên"}</TableHead>
-            {kind === "product" ? <TableHead className="text-right">Giao / hoàn · TL hoàn</TableHead> : <TableHead className="text-right">QC test</TableHead>}
+            {kind === "product" ? <TableHead className="text-right" title="Giao thành công (COD thực > 100K) / không thành công · tỷ lệ giao thành công trên đơn đã kết thúc · dự kiến">Giao TC / không TC · TL GTC</TableHead> : <TableHead className="text-right">QC test</TableHead>}
             <TableHead>Đánh giá</TableHead>
           </TableRow>
         </TableHeader>
@@ -90,8 +90,8 @@ function PerfTable({ rows, kind, avgRoas, spendTotal }: { rows: PerfRow[]; kind:
                 {kind === "product" ? (
                   <TableCell className="text-right tabular-nums text-xs">
                     {r.delivered !== undefined ? <div>{formatNumber(r.delivered)} / {formatNumber(r.returned ?? 0)}</div> : <div>—</div>}
-                    <div className={cn((r.actualReturnRate ?? r.returnRate ?? 0) >= 0.35 ? "text-rose-600" : "text-muted-foreground")} title="Tỷ lệ hoàn thực tế trên đơn đã kết thúc · tỷ lệ hoàn dự kiến (đã trộn đơn chưa kết thúc)">
-                      {r.actualReturnRate !== null && r.actualReturnRate !== undefined ? pct(r.actualReturnRate) : "—"}{r.returnRate !== undefined ? <span className="text-muted-foreground"> · dự kiến {pct(r.returnRate)}</span> : null}
+                    <div className={cn((r.successRate ?? r.expectedSuccessRate ?? 1) < 0.65 ? "text-rose-600" : "text-emerald-700")} title="Tỷ lệ giao thành công thực tế trên đơn đã kết thúc · dự kiến (đã trộn đơn chưa kết thúc)">
+                      {r.successRate !== null && r.successRate !== undefined ? pct(r.successRate) : "—"}{r.expectedSuccessRate !== undefined ? <span className="text-muted-foreground"> · dự kiến {pct(r.expectedSuccessRate)}</span> : null}
                     </div>
                   </TableCell>
                 ) : (
@@ -146,7 +146,7 @@ export function AdsPerformancePanel({ perf, periodLabel }: { perf: AdsPerformanc
       <SectionCard
         padded={false}
         title="Hiệu quả theo mã hàng"
-        description="Đơn Pancake đã xác nhận trong kỳ theo mã. Doanh số = DT giao thành công ước tính (đã trừ tỷ lệ hoàn dự kiến). LN sau QC = LN ròng ước tính của Báo cáo lợi nhuận danh nghĩa: đã trừ giá vốn, ship (đơn giao & đơn hoàn), QC, đóng hàng, nhân viên vận đơn, chi phí vận hành & cố định phân bổ, rủi ro tồn kho, thuế, chi phí khác. Giao / hoàn theo kết quả Viettel Post (GTC = COD > 100K; giao nhưng COD < 50K tính hoàn); tỷ lệ hoàn = hoàn / (giao + hoàn) trên đơn đã kết thúc, kèm tỷ lệ dự kiến cho đơn chưa kết thúc. Mã có tỷ lệ hoàn ≥ 35% được cảnh báo dù ROAS tốt."
+        description="Đơn Pancake đã xác nhận trong kỳ theo mã. Doanh số = DT giao thành công ước tính (đã trừ tỷ lệ hoàn dự kiến). LN sau QC = LN ròng ước tính của Báo cáo lợi nhuận danh nghĩa: đã trừ giá vốn, ship (đơn giao & đơn hoàn), QC, đóng hàng, nhân viên vận đơn, chi phí vận hành & cố định phân bổ, rủi ro tồn kho, thuế, chi phí khác. Giao thành công = đơn có doanh thu COD thực > 100K (không phụ thuộc trạng thái Viettel Post); không thành công = hoàn hoặc giao nhưng COD ≤ 100K. Tỷ lệ giao thành công = giao TC / (giao TC + không TC) trên đơn đã kết thúc, kèm tỷ lệ dự kiến cho đơn chưa kết thúc. Mã có tỷ lệ giao thành công < 65% được cảnh báo dù ROAS tốt."
         actions={<Link href="/reports" className="text-xs font-medium text-primary hover:underline">Xem báo cáo lợi nhuận →</Link>}
       >
         <PerfTable rows={perf.products} kind="product" avgRoas={perf.totals.roas} spendTotal={perf.totals.spend} />

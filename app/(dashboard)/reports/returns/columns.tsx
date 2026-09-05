@@ -2,20 +2,21 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { Money } from "@/components/ui-bits";
-import { rateTone } from "@/lib/constants/returns";
+import { SUCCESS_RATE_GOOD, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatNumber } from "@/lib/format";
 import type { ReturnRateRow } from "@/lib/queries/return-rate";
 import { cn } from "@/lib/utils";
 
+/** Thanh tỷ lệ GIAO THÀNH CÔNG: xanh ≥ 70%, vàng ≥ 55%, đỏ dưới 55% */
 function RateBar({ rate }: { rate: number | null }) {
   if (rate === null) return <span className="text-xs text-muted-foreground">chưa có kết quả</span>;
   const width = Math.max(2, Math.min(100, rate));
   return (
     <div className="flex min-w-[140px] items-center gap-2">
       <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", rate >= 30 ? "bg-rose-500" : rate >= 15 ? "bg-amber-500" : "bg-emerald-500")} style={{ width: `${width}%` }} />
+        <div className={cn("h-full rounded-full", rate >= SUCCESS_RATE_GOOD ? "bg-emerald-500" : rate >= SUCCESS_RATE_OK ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${width}%` }} />
       </div>
-      <span className={cn("numeric w-14 text-right text-sm font-bold", rateTone(rate))}>{rate.toFixed(1)}%</span>
+      <span className={cn("numeric w-14 text-right text-sm font-bold", successTone(rate))}>{rate.toFixed(1)}%</span>
     </div>
   );
 }
@@ -46,10 +47,10 @@ export const returnRateColumns: ColumnDef<ReturnRateRow, unknown>[] = [
     },
   },
   { id: "shipped", header: "Đã gửi", meta: { align: "right" }, cell: ({ row }) => <span className="numeric">{formatNumber(row.original.shipped)}</span> },
-  { id: "delivered", header: "Giao thật", meta: { align: "right" }, cell: ({ row }) => <span className="numeric font-medium text-emerald-700 dark:text-emerald-400">{formatNumber(row.original.delivered)}</span> },
+  { id: "delivered", header: "Giao thành công (COD > 100K)", meta: { align: "right" }, cell: ({ row }) => <span className="numeric font-semibold text-emerald-700 dark:text-emerald-400">{formatNumber(row.original.delivered)}</span> },
   {
     id: "returned",
-    header: "Hoàn",
+    header: "Không thành công (hoàn)",
     meta: { align: "right" },
     cell: ({ row }) => (
       <div className="text-right">
@@ -69,25 +70,25 @@ export const returnRateColumns: ColumnDef<ReturnRateRow, unknown>[] = [
       </span>
     ),
   },
-  { id: "rate", header: "Tỷ lệ hoàn (đã kết thúc)", cell: ({ row }) => <RateBar rate={row.original.rate} /> },
+  { id: "successRate", header: "Tỷ lệ giao thành công (đã kết thúc)", cell: ({ row }) => <RateBar rate={row.original.successRate} /> },
   {
-    id: "expectedRate",
+    id: "expectedSuccessRate",
     header: "Dự kiến (tính cả chờ phát lại)",
     meta: { align: "right" },
     cell: ({ row }) => {
       const r = row.original;
-      if (r.expectedRate === null) return <span className="text-xs text-muted-foreground">—</span>;
-      const up = r.rate !== null && r.expectedRate > r.rate + 0.05;
+      if (r.expectedSuccessRate === null) return <span className="text-xs text-muted-foreground">—</span>;
+      const down = r.successRate !== null && r.expectedSuccessRate < r.successRate - 0.05;
       return (
-        <span className={cn("numeric text-sm font-semibold", rateTone(r.expectedRate))} title={`(${r.returned} hoàn + ${r.failed} chờ phát lại × xác suất) ÷ (${r.delivered} giao thật + ${r.returned} hoàn + ${r.failed} chờ phát lại)`}>
-          {r.expectedRate.toFixed(1)}%{up ? " ↑" : ""}
+        <span className={cn("numeric text-sm font-semibold", successTone(r.expectedSuccessRate))} title={`${r.delivered} giao thành công ÷ (${r.delivered} giao TC + ${r.returned} không TC + ${r.failed} chờ phát lại × xác suất thành hoàn)`}>
+          {r.expectedSuccessRate.toFixed(1)}%{down ? " ↓" : ""}
         </span>
       );
     },
   },
   {
     id: "lostRevenue",
-    header: "Doanh thu hoàn",
+    header: "Doanh thu không thành công",
     meta: { align: "right" },
     cell: ({ row }) => (
       <div className="text-right">

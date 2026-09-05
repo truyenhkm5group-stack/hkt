@@ -17,7 +17,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const ROLE_HINT: Record<Role, string> = {
   ADMIN: "Toàn quyền: quản lý người dùng, cấu hình, đồng bộ",
   MANAGER: "Vận hành, đối soát COD, chi phí, chạy đồng bộ, xem nhật ký",
-  LEADER: "Xem lương & lợi nhuận cả nhóm, BCLN danh nghĩa / giao thành công / tỷ lệ hoàn; không xem dòng tiền thực, không sửa cấu hình",
+  LEADER: "Xem lương & lợi nhuận cả nhóm, BCLN danh nghĩa / theo đơn giao / tỷ lệ giao thành công; không xem dòng tiền thực, không sửa cấu hình",
   ACCOUNTANT: "Đối soát COD, chi phí, báo cáo",
   WAREHOUSE: "Kho, tồn kho, vận đơn",
   CS: "Đơn hàng, khách hàng, xem đối soát COD",
