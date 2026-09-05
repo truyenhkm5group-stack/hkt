@@ -72,6 +72,8 @@ jobs:
             set -e
             cd /root/erp
             C="docker compose -f docker-compose.prod.yml"
+            # lấy script mới nhất trên main qua GitHub API (không bị CDN raw.githubusercontent cache 5 phút)
+            fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=main"; }
             case "$ACTION" in
               status)
                 $C ps
@@ -105,42 +107,42 @@ jobs:
                 docker exec erp-app npm run --silent seed:employees -- "$ARG" ;;
               import-bank-ledger)
                 # luôn dùng bản script mới nhất trên GitHub; dữ liệu đi qua stdin, không in ra log
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-bank-ledger.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
+                fetch_script import-bank-ledger.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 printf '%s' "$ARG" | docker exec -i erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --stdin ;;
               import-vtp-statements)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-vtp-statements.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-vtp-statements.ts'
+                fetch_script import-vtp-statements.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-vtp-statements.ts'
                 printf '%s' "$ARG" | docker exec -i erp-app npx tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts --stdin ;;
               vtp-statements-autolink)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-statement-autolink.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
+                fetch_script vtp-statement-autolink.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-autolink.ts $ARG ;;
               set-setting)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/set-setting.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/set-setting.ts'
+                fetch_script set-setting.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/set-setting.ts'
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;
               run-job)
                 docker exec erp-app sh -c "npm run --silent sync -- $ARG" ;;
               vtp-web-probe)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-web-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
+                fetch_script vtp-web-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts ;;
               vtp-probe)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-probe.ts?run=${GITHUB_RUN_ID:-$(date +%s)}" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
+                fetch_script vtp-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-probe.ts "$ARG" ;;
               phone-probe)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/phone-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
+                fetch_script phone-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/phone-probe.ts "$ARG" ;;
               pages-debug)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/pages-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
+                fetch_script pages-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
               cs-cleanup)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/cs-cleanup.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
+                fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;
               bank-ledger-prune)
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/import-bank-ledger.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
+                fetch_script import-bank-ledger.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --prune-non-operating ;;
               db-query)
                 printf '%s\n' "$ARG" | PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000' $C exec -T db psql -U erp -d erp -v ON_ERROR_STOP=1 -P pager=off ;;
               vtp-debug)
                 # luôn dùng bản script mới nhất trên GitHub, không cần build lại image
-                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/vtp-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-debug.ts'
+                fetch_script vtp-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-debug.ts "$ARG" ;;
               backup)
                 mkdir -p /root/backups
