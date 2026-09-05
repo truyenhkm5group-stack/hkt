@@ -55,6 +55,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   ]);
 
   const appUrl = env.appUrl;
+  const canManageSettings = can(user, "settings:manage");
+  const webhookCount = (source: string) => webhooks.facets.sources.find((s) => s.value === source)?.count ?? 0;
   const pancakeWebhookUrl = `${appUrl}/api/webhooks/pancake/${env.pancake.webhookSecret || "<PANCAKE_WEBHOOK_SECRET>"}`;
   const vtpWebhookUrl = `${appUrl}/api/webhooks/viettelpost`;
   const isLocal = /localhost|127\.0\.0\.1|^http:\/\//.test(appUrl);
@@ -204,6 +206,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             title="Pancake POS"
             url={pancakeWebhookUrl}
             configured={status.pancakeWebhook}
+            received={webhookCount("PANCAKE")}
             warning={!status.pancakeWebhook ? "Đặt PANCAKE_WEBHOOK_SECRET trong .env (chuỗi ngẫu nhiên) rồi thay vào cuối URL." : null}
             steps={[
               "Đăng nhập Pancake POS → Cấu hình → Nâng cao → Kết nối bên thứ 3.",
@@ -217,13 +220,15 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             title="Viettel Post"
             url={vtpWebhookUrl}
             configured={status.viettelPostWebhook}
+            secret={{ value: canManageSettings ? env.viettelPost.webhookSecret : maskKey(env.viettelPost.webhookSecret), masked: !canManageSettings }}
+            received={webhookCount("VIETTELPOST")}
             warning={!status.viettelPostWebhook ? "Đặt VIETTELPOST_WEBHOOK_SECRET trong .env — giá trị này chính là “Tham số bí mật” bạn khai báo với Viettel Post." : null}
             steps={[
-              "Đăng nhập partner.viettelpost.vn → Cấu hình tài khoản → Thông tin nhận hành trình.",
-              "Nhập API URL = URL bên trên.",
-              "Nhập Tham số bí mật = VIETTELPOST_WEBHOOK_SECRET trong .env (ERP dùng giá trị này để xác thực mỗi lần Viettel Post gọi tới).",
-              "Bấm Cập nhật.",
-              "Liên hệ Viettel Post (b2b@viettelpost.com.vn / 0862 235 888) để duyệt webhook cho tài khoản; sau khi duyệt, mọi thay đổi hành trình sẽ được đẩy về ERP.",
+              "Đăng nhập partner.viettelpost.vn bằng ĐÚNG tài khoản Viettel Post đang tạo vận đơn cho shop (tài khoản kết nối trong Pancake — mã khách hàng in trên bảng kê COD), không phải tài khoản khác cùng chủ.",
+              "Vào Cấu hình tài khoản → Thông tin nhận hành trình (Webhook): API URL = URL bên trên; Tham số bí mật = chuỗi bên trên (sao chép nguyên văn). Bấm Cập nhật.",
+              "Gửi yêu cầu duyệt webhook cho Viettel Post (b2b@viettelpost.com.vn / 0862 235 888), kèm mã khách hàng và URL. Viettel Post chỉ đẩy dữ liệu sau khi duyệt.",
+              "Kiểm tra: mở một vận đơn trong ERP → “Lịch sử đẩy webhook” / “Gửi lại webhook”, hoặc đợi vận đơn mới thay đổi trạng thái rồi xem bảng “Webhook đã nhận” bên dưới. ERP trả HTTP 200 ngay và xử lý nền theo yêu cầu của Viettel Post.",
+              "Mỗi lần Viettel Post gọi tới, ERP cập nhật trạng thái vận đơn (mã ORDER_STATUS 100–515), tiền thu hộ, cước, lý do phát thất bại, tự tạo vận đơn chưa có, rồi chạy cảnh báo và cập nhật đơn Pancake liên quan.",
             ]}
           />
         </div>
@@ -451,17 +456,27 @@ function ConnectionCard({ initials, tone, title, description, configured, items,
   );
 }
 
-function WebhookGuide({ title, url, configured, warning, steps }: { title: string; url: string; configured: boolean; warning: string | null; steps: string[] }) {
+function WebhookGuide({ title, url, configured, warning, steps, secret, received }: { title: string; url: string; configured: boolean; warning: string | null; steps: string[]; secret?: { value: string; masked: boolean } | null; received?: number }) {
   return (
     <div className="rounded-xl border bg-background p-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-bold">{title}</p>
-        {configured ? <span className="text-[11px] font-semibold text-success">Secret đã cấu hình</span> : <span className="text-[11px] font-semibold text-amber-600">Thiếu secret</span>}
+        <div className="flex items-center gap-2">
+          {received === undefined ? null : received > 0 ? <span className="text-[11px] font-semibold text-success">Đã nhận {received} webhook</span> : <span className="text-[11px] font-semibold text-amber-600">Chưa nhận webhook nào</span>}
+          {configured ? <span className="text-[11px] font-semibold text-success">Secret đã cấu hình</span> : <span className="text-[11px] font-semibold text-amber-600">Thiếu secret</span>}
+        </div>
       </div>
       <div className="mt-2 flex items-center gap-1 rounded-lg border bg-muted/40 pl-3">
         <code className="min-w-0 flex-1 truncate py-2 font-mono text-[11.5px]">{url}</code>
         <CopyButton value={url} />
       </div>
+      {secret ? (
+        <div className="mt-2 flex items-center gap-1 rounded-lg border bg-muted/40 pl-3">
+          <span className="shrink-0 text-[11px] text-muted-foreground">Tham số bí mật:</span>
+          <code className="min-w-0 flex-1 truncate py-2 font-mono text-[11.5px]">{secret.value || "—"}</code>
+          {secret.masked || !secret.value ? <span className="pr-2 text-[10.5px] text-muted-foreground">{secret.value ? "cần quyền Quản trị để xem đủ" : ""}</span> : <CopyButton value={secret.value} />}
+        </div>
+      ) : null}
       {warning ? <p className="mt-2 text-[11px] text-amber-600">{warning}</p> : null}
       <ol className="mt-3 space-y-1.5 text-xs leading-5 text-muted-foreground">
         {steps.map((step, i) => (
