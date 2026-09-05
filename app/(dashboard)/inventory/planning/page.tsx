@@ -115,6 +115,36 @@ export default async function PlanningPage() {
                     <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[r.status])}>{PLAN_STATUS_LABEL[r.status]}</span></TableCell>
                   </TableRow>
                 ))}
+                {g.rows.length ? (() => {
+                  const sum = (f: (r: (typeof g.rows)[number]) => number) => g.rows.reduce((t, r) => t + f(r), 0);
+                  const stock = sum((r) => r.stock);
+                  const velocity = sum((r) => r.velocity);
+                  const available = sum((r) => r.available);
+                  const cover = velocity > 0 ? Math.max(0, available) / velocity : null;
+                  const outCount = g.rows.filter((r) => r.status === "OUT").length;
+                  const critCount = g.rows.filter((r) => r.status === "CRITICAL").length;
+                  const lowCount = g.rows.filter((r) => r.status === "LOW").length;
+                  return (
+                    <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
+                      <TableCell>Tổng {g.productCode || g.productName} · {g.rows.length} mẫu mã</TableCell>
+                      <TableCell className={cn("text-right tabular-nums", stock < 0 && "text-rose-600")}>{formatNumber(stock)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(sum((r) => r.pancakeStock))}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.committed))}</TableCell>
+                      <TableCell className={cn("text-right tabular-nums", available <= 0 && "text-rose-600")}>{formatNumber(available)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.sold7))}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.soldInWindow))}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.sold30))}</TableCell>
+                      <TableCell className="text-right tabular-nums">{velocity.toFixed(1)}</TableCell>
+                      <TableCell className="text-right tabular-nums" title="Khả dụng cả mã ÷ tốc độ bán cả mã (bình quân, từng mẫu mã có thể hết sớm hơn)">{cover === null ? "—" : `~${Math.floor(cover)} ngày`}</TableCell>
+                      <TableCell className="text-xs font-normal text-muted-foreground">{outCount ? `${outCount} hết` : ""}{critCount ? `${outCount ? " · " : ""}${critCount} hết trước SX` : ""}{lowCount ? `${outCount || critCount ? " · " : ""}${lowCount} sắp thiếu` : ""}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.leadTimeDemand))}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.target))}</TableCell>
+                      <TableCell className="text-right tabular-nums text-base">{formatNumber(g.suggested)}</TableCell>
+                      <TableCell className="text-right"><Money value={g.orderCost} /></TableCell>
+                      <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[g.worst])}>{PLAN_STATUS_LABEL[g.worst]}</span></TableCell>
+                    </TableRow>
+                  );
+                })() : null}
               </TableBody>
             </Table>
           </div>
