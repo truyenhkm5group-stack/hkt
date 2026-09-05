@@ -155,15 +155,29 @@ export type VtpStatusMap = { stage: "PENDING" | "PICKED_UP" | "IN_TRANSIT" | "OU
 export function mapVtpStatusText(text: string): VtpStatusMap {
   const n = normalize(text);
   const has = (...keys: string[]) => keys.some((k) => n.includes(` ${k} `) || n.includes(k));
-  if (has("da tra", "da thanh toan cod")) return { stage: "DELIVERED", cod: "PAID_TO_BANK", final: true };
+  // Trên viettelpost.vn (Quản lý vận đơn) cột "Trạng thái" là trạng thái GIAO/HOÀN của vận đơn,
+  // không phải trạng thái tiền COD. "Đã trả" = đã trả hàng về người gửi (đơn hoàn), không phải "đã trả tiền".
+  // Vì vậy phải xét các trạng thái hoàn TRƯỚC khi xét giao thành công.
+  if (has("da huy", "huy don", "huy van don", "huy bo", "don huy", "cancel")) return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
+  // Hoàn đã hoàn tất (đã trả hàng về người gửi)
+  if (has("da tra hang", "tra hang thanh cong", "hoan thanh cong", "da hoan", "hoan tat hoan", "tra thanh cong"))
+    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+  // Đang trong quá trình hoàn: đã duyệt hoàn / đang chuyển hoàn / yêu cầu hoàn / chờ hoàn
+  if (has("chuyen hoan", "duyet hoan", "yeu cau hoan", "dang hoan", "cho hoan", "hoan hang", "chuyen tra"))
+    return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
+  // "Đã trả" đứng riêng (không phải "đã trả tiền/đã thanh toán") = đơn hoàn đã trả về người gửi
+  if (has("da tra") && !has("da tra tien", "da thanh toan", "tra tien", "tra cod"))
+    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+  // Giao không thành công / chờ phát lại (chưa kết thúc)
+  if (has("giao khong thanh cong", "phat khong thanh cong", "cho phat lai", "phat that bai", "giao that bai", "khong gap", "delivery fail"))
+    return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
+  // Giao thành công
   if (has("giao thanh cong", "phat thanh cong")) return { stage: "DELIVERED", cod: "COLLECTED", final: true };
-  if (has("cho phat lai", "phat that bai", "giao that bai")) return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
-  if (has("dang giao hang", "phat tiep", "dang phat")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
-  if (has("dang van chuyen", "dang trung chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
-  if (has("da lay hang", "da nhan hang")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
-  if (has("da tra hang", "hoan thanh cong", "da hoan")) return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
-  if (has("chuyen hoan", "duyet hoan", "yeu cau hoan")) return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
-  if (has("huy")) return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
-  if (has("cho xu ly", "cho lay hang", "moi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
+  // Đã thanh toán COD cho đơn giao thành công (nếu xuất hiện trong cột trạng thái)
+  if (has("da thanh toan cod", "da tra tien cod")) return { stage: "DELIVERED", cod: "PAID_TO_BANK", final: true };
+  if (has("dang giao hang", "phat tiep", "dang phat", "di giao")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
+  if (has("dang van chuyen", "dang trung chuyen", "trung chuyen", "dang luan chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
+  if (has("da lay hang", "da nhan hang", "lay hang thanh cong")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
+  if (has("cho xu ly", "cho lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
   return { stage: "UNKNOWN", cod: null, final: false };
 }

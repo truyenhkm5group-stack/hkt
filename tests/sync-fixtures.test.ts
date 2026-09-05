@@ -316,7 +316,9 @@ async function main() {
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD
-  assert.equal(mapVtpStatusText("Đã trả").cod, "PAID_TO_BANK");
+  assert.equal(mapVtpStatusText("Đã trả").stage, "RETURNED", "\"Đã trả\" = đơn hoàn trả về người gửi");
+  assert.equal(mapVtpStatusText("Đã duyệt hoàn").stage, "RETURNING");
+  assert.equal(mapVtpStatusText("Giao thành công").stage, "DELIVERED");
   assert.equal(mapVtpStatusText("Chờ phát lại").stage, "DELIVERY_FAILED");
   assert.equal(mapVtpStatusText("Đang chuyển hoàn").stage, "RETURNING");
   const listCsv = "STT,Mã vận đơn,Người nhận,Trạng thái,Tiền thu hộ,Cước,Ngày cập nhật\n1,PKE-RR-9001,A,Đã trả,\"500.000\",\"15.000\",03/09/2026\n2,PKE-RR-9002,B,Chờ phát lại,\"300.000\",\"12.000\",04/09/2026\n";
@@ -331,7 +333,8 @@ async function main() {
   assert.equal(rr2After?.stage, "DELIVERY_FAILED");
   assert.equal(rr2After?.vtpStatusName, "Chờ phát lại");
   const rr1After = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9001") });
-  assert.equal(rr1After?.codStatus, "PAID_TO_BANK", "đã trả giữ nguyên đã về ngân hàng");
+  assert.equal(rr1After?.stage, "RETURNED", "\"Đã trả\" → đơn hoàn");
+  assert.equal(rr1After?.codStatus, "PAID_TO_BANK", "không hạ COD đã về ngân hàng");
   console.log(`✓ Danh sách vận đơn VTP: ${applied2.updated} vận đơn cập nhật, ${applied2.paid} COD về NH`);
 
   // Phát hiện case từ tin nhắn chat khách
