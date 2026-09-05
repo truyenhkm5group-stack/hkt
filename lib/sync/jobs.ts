@@ -13,6 +13,7 @@ import { evaluateAlerts } from "@/lib/alerts/rules";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
+import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -118,6 +119,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const alerts = await evaluateAlerts().catch(() => undefined);
       return { ...r, alerts };
     },
+  },
+  "failed-delivery": {
+    label: "Nhắn khách đơn giao không thành",
+    source: "PANCAKE",
+    description: "Vận đơn Viettel Post giao không thành (chờ xử lý / hẹn phát lại) → nhắn khách qua Pancake hỏi lý do, gửi SĐT bưu tá khi hẹn phát lại; mở case CSKH đã nhắn / chưa xử lý được (đơn landing page, sheet) → Lark. Chạy cùng job cảnh báo mỗi 10 phút.",
+    run: (o) => handleFailedDeliveries({ lookbackDays: num(o.params?.days) }),
   },
   "data-check": {
     label: "Kiểm tra nhất quán vận đơn & COD",

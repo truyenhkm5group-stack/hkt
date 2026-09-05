@@ -10,6 +10,7 @@ import { sendLark } from "@/lib/alerts/lark";
 import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
+import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { openCsCases } from "@/lib/queries/cs";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
@@ -260,7 +261,11 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   const db = await getDb();
   const cfg = await loadAlertConfig();
   // phát hiện case CSKH mới từ thẻ / ghi chú / phiếu đổi trả Pancake trước khi quét
-  if (cfg.enabled.cs) await detectCsCases().catch(() => undefined);
+  if (cfg.enabled.cs) {
+    await detectCsCases().catch(() => undefined);
+    // giao không thành → tự nhắn khách qua Pancake và mở case (đã nhắn / chưa xử lý được)
+    await handleFailedDeliveries().catch(() => undefined);
+  }
   const { candidates, activeKinds } = await collectCandidates();
   const n = schema.notifications;
   const keys = candidates.map((c) => c.dedupeKey);

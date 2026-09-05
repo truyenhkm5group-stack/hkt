@@ -1,5 +1,5 @@
 /** Case chăm sóc khách hàng (CSKH) */
-export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "OTHER"] as const;
+export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
@@ -12,6 +12,7 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
   SIZE_ADVICE: "Tư vấn size chưa đúng",
   WRONG_PRICE: "Chốt sai giá tiền",
   URGE_DELIVERY: "Khách giục giao hàng",
+  DELIVERY_FAILED: "Giao không thành · liên hệ khách",
   OTHER: "Khác",
 };
 
@@ -30,6 +31,7 @@ export const CS_SOURCE_LABEL: Record<string, string> = {
   PANCAKE_NOTE: "Ghi chú đơn Pancake",
   PANCAKE_RETURN: "Phiếu đổi/trả Pancake",
   PANCAKE_CHAT: "Thẻ hội thoại Pancake",
+  AUTO_FAILED_DELIVERY: "Tự động · giao không thành",
   MANUAL: "Nhập tay",
 };
 
@@ -49,6 +51,11 @@ export type CsRules = {
   chatPageIds: string[];
   /** Ghi chú / thẻ chứa các cụm này thì bỏ qua (vd ghi chú tự động của bot Pancake) */
   ignorePatterns: string[];
+  /** Tự nhắn khách qua Pancake khi vận đơn giao không thành (chờ xử lý / hẹn phát lại) */
+  failedDeliveryAuto: boolean;
+  /** Mẫu tin: biến {ten} {ma_van_don} {buu_ta} {sdt_buu_ta} {shop} {san_pham} */
+  failedDeliveryTemplates: { pending: string; retry: string };
+  failedDeliveryShopName: string;
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -140,4 +147,12 @@ export const DEFAULT_CS_RULES: CsRules = {
   chatLookbackHours: 48,
   chatPageIds: [],
   ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
+  failedDeliveryAuto: true,
+  failedDeliveryShopName: "Shop",
+  failedDeliveryTemplates: {
+    pending:
+      "Dạ chào {ten} ơi, {shop} thấy đơn {san_pham} (mã vận đơn {ma_van_don}) bưu tá đã giao tới nhưng mình chưa nhận được ạ 😢 Mình cho shop hỏi lý do chưa nhận hàng được không ạ (mình bận, chưa có nhà hay cần đổi thông tin)? Shop sẽ hỗ trợ giao lại hoặc điều chỉnh ngay cho mình, hàng được kiểm tra trước khi thanh toán ạ 💛",
+    retry:
+      "Dạ chào {ten} ơi, đơn {san_pham} (mã vận đơn {ma_van_don}) bưu tá đã giao tới nhưng chưa gặp được mình nên đang hẹn phát lại ạ. Mình cho shop hỏi lý do chưa nhận được không ạ? Bưu tá phụ trách: {buu_ta} – {sdt_buu_ta}. Mình chủ động gọi bưu tá hẹn giờ nhận hàng giúp shop nhé, hàng được kiểm tra thoải mái trước khi thanh toán ạ 💛",
+  },
 };

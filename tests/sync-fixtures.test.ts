@@ -24,6 +24,7 @@ import { DEFAULT_NURTURE_STEPS, isDue, normalizeOutreachConfig, renderTemplate, 
 import { effectiveThreshold, isBillingBlocked, learnThreshold } from "@/lib/integrations/facebook/billing";
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import { assessCustomerRisk } from "@/lib/alerts/risk";
+import { failedMode, parsePostman, renderFailedTemplate } from "@/lib/cs/failed-delivery";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { clearMemo } from "@/lib/cache";
@@ -440,6 +441,14 @@ async function main() {
   assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: true }, riskCfg).risky, "bị chặn trên Pancake → rủi ro");
   assert.ok(assessCustomerRisk({ succeed: 0, returned: 0, isBlock: false, erpDelivered: 1, erpReturned: 3 }, riskCfg).risky, "lịch sử ERP cùng SĐT hoàn 3/4 → rủi ro");
   console.log("✓ Đơn rủi ro: chấm điểm khách theo GTC / hoàn / chặn");
+
+  // Giao không thành → nhắn khách, kèm SĐT bưu tá khi hẹn phát lại
+  assert.equal(failedMode(["Người nhận hẹn phát lại ( 16:06 - 04/09/2026 ) - Bưu tá: Châu Thanh Hồng - 0971170052"]), "RETRY");
+  assert.equal(failedMode(["Tồn - Khách hàng nghỉ, không có nhà", "Không liên lạc được khách hàng nhận"]), "PENDING");
+  assert.deepEqual(parsePostman(["Người nhận hẹn phát lại ( 16:06 - 04/09/2026 ) - Bưu tá: Châu Thanh Hồng - 0971170052"]), { name: "Châu Thanh Hồng", phone: "0971170052" });
+  const msg = renderFailedTemplate(DEFAULT_CS_RULES.failedDeliveryTemplates.retry, { ten: "chị Quyên", ma_van_don: "PKE1508897551", buu_ta: "Châu Thanh Hồng", sdt_buu_ta: "0971170052", shop: "Hải An", san_pham: "Đầm Q002" });
+  assert.ok(msg.includes("0971170052") && msg.includes("PKE1508897551") && msg.includes("chị Quyên"), "tin hẹn phát lại có SĐT bưu tá & mã vận đơn");
+  console.log("✓ Giao không thành: phân loại chờ xử lý / hẹn phát lại, tách SĐT bưu tá, dựng tin nhắn");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

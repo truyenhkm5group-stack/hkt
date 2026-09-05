@@ -20,6 +20,9 @@ export async function loadCsRules(): Promise<CsRules> {
     noteRules: cfg.noteRules?.length ? cfg.noteRules : DEFAULT_CS_RULES.noteRules,
     chatRules: cfg.chatRules?.length ? cfg.chatRules : DEFAULT_CS_RULES.chatRules,
     ignorePatterns: cfg.ignorePatterns?.length ? cfg.ignorePatterns : DEFAULT_CS_RULES.ignorePatterns,
+    failedDeliveryAuto: cfg.failedDeliveryAuto !== false,
+    failedDeliveryShopName: cfg.failedDeliveryShopName || DEFAULT_CS_RULES.failedDeliveryShopName,
+    failedDeliveryTemplates: { ...DEFAULT_CS_RULES.failedDeliveryTemplates, ...(cfg.failedDeliveryTemplates ?? {}) },
   };
 }
 
