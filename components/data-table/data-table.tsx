@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
 import {
   type ColumnDef,
+  type Row,
   type RowSelectionState,
   type SortingState,
   type VisibilityState,
@@ -13,7 +14,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Inbox } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -34,6 +35,11 @@ export type DataTableProps<T> = {
   className?: string;
   dense?: boolean;
   footer?: React.ReactNode;
+  /**
+   * Gom nhóm cha – con (vd mã hàng → mẫu mã): key(row) là khoá nhóm; parent(rows) tạo dòng cha (tổng hợp) hiển thị bằng chính
+   * các cột; defaultExpanded mở sẵn (mặc định đóng, bấm mũi tên để xổ). Nhóm chỉ có 1 dòng thì hiện thẳng dòng đó.
+   */
+  group?: { key: (row: T) => string; parent: (rows: T[], key: string) => T; defaultExpanded?: boolean; parentHref?: (parent: T, rows: T[]) => string | undefined };
 };
 
 export const tableParsers = {
@@ -43,8 +49,23 @@ export const tableParsers = {
   dir: parseAsString.withDefault("desc"),
 };
 
-export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group }: DataTableProps<T>) {
   const router = useRouter();
+  const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
+  // gom nhóm theo thứ tự xuất hiện; dòng cha là bản tổng hợp do trang cung cấp
+  const groups = React.useMemo(() => {
+    if (!group) return null;
+    const map = new Map<string, T[]>();
+    for (const row of data) {
+      const k = group.key(row);
+      const list = map.get(k) ?? [];
+      list.push(row);
+      map.set(k, list);
+    }
+    return [...map.entries()].map(([key, rows]) => ({ key, rows, parent: rows.length > 1 ? group.parent(rows, key) : null }));
+  }, [data, group]);
+  const isOpen = (key: string) => (expanded[key] !== undefined ? expanded[key] : allOpen !== null ? allOpen : Boolean(group?.defaultExpanded));
   const [params, setParams] = useQueryStates(tableParsers, { shallow: false, history: "push" });
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -110,6 +131,13 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
           </Button>
         </div>
       ) : null}
+      {groups && groups.some((g) => g.parent) ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{groups.length} nhóm · bấm mũi tên hoặc dòng cha để xổ chi tiết</span>
+          <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => { setAllOpen(true); setExpanded({}); }}>Mở tất cả</button>
+          <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => { setAllOpen(false); setExpanded({}); }}>Thu gọn tất cả</button>
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded-xl border bg-card">
         <div className="overflow-x-auto">
           <Table className={cn(dense && "[&_td]:py-1.5")}>
@@ -138,32 +166,86 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
             </TableHeader>
             <TableBody>
               {table.getRowModel().rows.length ? (
-                table.getRowModel().rows.map((row) => {
-                  const href = rowHref?.(row.original);
-                  return (
-                    <TableRow
-                      key={row.id}
-                      data-state={row.getIsSelected() && "selected"}
-                      className={cn(href && "cursor-pointer")}
-                      onClick={(e) => {
-                        if (!href) return;
-                        const target = e.target as HTMLElement;
-                        if (target.closest("a,button,input,[role=checkbox],[data-no-row-link]")) return;
-                        if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
-                        else router.push(href);
-                      }}
-                    >
-                      {row.getVisibleCells().map((cell) => {
-                        const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align;
-                        return (
-                          <TableCell key={cell.id} className={cn("align-middle", align === "right" && "text-right")}>
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  );
-                })
+                (() => {
+                  const rowsById = new Map(table.getRowModel().rows.map((r) => [r.id, r]));
+                  const renderRow = (row: Row<T>, opts: { child?: boolean; parentKey?: string } = {}) => {
+                    const href = rowHref?.(row.original);
+                    return (
+                      <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                        className={cn(href && "cursor-pointer", opts.child && "bg-muted/20 text-[12.5px]")}
+                        onClick={(e) => {
+                          if (!href) return;
+                          const target = e.target as HTMLElement;
+                          if (target.closest("a,button,input,[role=checkbox],[data-no-row-link]")) return;
+                          if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
+                          else router.push(href);
+                        }}
+                      >
+                        {row.getVisibleCells().map((cell, idx) => {
+                          const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align;
+                          return (
+                            <TableCell key={cell.id} className={cn("align-middle", align === "right" && "text-right", opts.child && idx === (selectable ? 1 : 0) && "pl-10")}>
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    );
+                  };
+                  if (!groups) return table.getRowModel().rows.map((row) => renderRow(row));
+                  const rowId = (r: T) => (getRowId ? getRowId(r) : "");
+                  return groups.flatMap((g) => {
+                    if (!g.parent) {
+                      const r = rowsById.get(rowId(g.rows[0]));
+                      return r ? [renderRow(r)] : [];
+                    }
+                    const open = isOpen(g.key);
+                    // dòng cha: render qua react-table tạm (không nằm trong data) bằng cách tạo row ảo
+                    const parentRow = table.getRowModel().rows[0];
+                    const parentHref = group?.parentHref?.(g.parent, g.rows);
+                    const parentCells = parentRow.getVisibleCells().map((cell, idx) => {
+                      const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align;
+                      const ctx = { ...cell.getContext(), row: { ...cell.row, original: g.parent as T, getValue: (id: string) => (g.parent as Record<string, unknown>)[id] } };
+                      const content = flexRender(cell.column.columnDef.cell, ctx as never);
+                      const first = idx === (selectable ? 1 : 0);
+                      return (
+                        <TableCell key={`${g.key}-${cell.column.id}`} className={cn("align-middle font-semibold", align === "right" && "text-right")}>
+                          {first ? (
+                            <span className="flex items-center gap-1.5">
+                              <button type="button" className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [g.key]: !open })); }} aria-label={open ? "Thu gọn" : "Xổ chi tiết"}>
+                                {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                              </button>
+                              <span className="min-w-0 flex-1">{content}</span>
+                              <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10.5px] font-medium text-muted-foreground">{g.rows.length}</span>
+                            </span>
+                          ) : (
+                            content
+                          )}
+                        </TableCell>
+                      );
+                    });
+                    const parentEl = (
+                      <TableRow
+                        key={`group-${g.key}`}
+                        className={cn("bg-muted/40 hover:bg-muted/50", parentHref && "cursor-pointer")}
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (target.closest("a,button,input,[role=checkbox],[data-no-row-link]")) return;
+                          if (parentHref) {
+                            if (e.metaKey || e.ctrlKey) window.open(parentHref, "_blank");
+                            else router.push(parentHref);
+                          } else setExpanded((x) => ({ ...x, [g.key]: !open }));
+                        }}
+                      >
+                        {parentCells}
+                      </TableRow>
+                    );
+                    if (!open) return [parentEl];
+                    return [parentEl, ...g.rows.map((r) => rowsById.get(rowId(r))).filter((r): r is NonNullable<typeof r> => Boolean(r)).map((r) => renderRow(r, { child: true, parentKey: g.key }))];
+                  });
+                })()
               ) : (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={allColumns.length} className="h-40">
