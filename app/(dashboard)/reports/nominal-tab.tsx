@@ -644,7 +644,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo Marketer"
-        description={`Cách ghi nhận: đơn & DT GTC ước tính của mỗi mã chia cho các marketer theo TỶ TRỌNG TIỀN QC trên mã trong kỳ (không QC → tính hết cho chủ mã). LN ròng trước QC của mã (đã trừ giá vốn, vận chuyển, vận hành gồm đóng hàng / NV vận đơn / cố định, rủi ro TK, thuế) × tỷ trọng − QC của chính mình − CP khác theo QC − QC test = LN ròng cá nhân; người đẩy chéo trích ${byMarketer.ownerSharePct}% LN dương cho chủ mã (cấu hình ở Lương & hoa hồng). Bấm tên marketer để xem chi tiết từng mã hàng có phát sinh số liệu.`}
+        description={`Cách ghi nhận: đơn & DT GTC ước tính của mỗi mã ghi cho marketer theo FANPAGE phát sinh đơn (khai báo ở Lương & hoa hồng: ${byMarketer.pagesMapped}/${byMarketer.pagesTotal} page có đơn đã gán); đơn trên page chưa gán chia theo tỷ trọng tiền QC trên mã, không QC → về chủ mã. LN ròng trước QC của mã (đã trừ giá vốn, vận chuyển, vận hành gồm đóng hàng / NV vận đơn / cố định, rủi ro TK, thuế) × tỷ trọng − QC của chính mình − CP khác theo QC − QC test = LN ròng cá nhân; chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo và (100 − Y)% về chủ mã (mặc định Y = ${100 - byMarketer.ownerSharePct}%, khai riêng từng mã ở Lương & hoa hồng). Bấm tên marketer để xem chi tiết từng mã hàng có phát sinh số liệu.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -671,6 +671,13 @@ export async function NominalTab({
                 <TableRow className="text-muted-foreground">
                   <TableCell colSpan={8}>Mã không có quảng cáo và chưa gán người phụ trách (không phân bổ cho ai)</TableCell>
                   <TableCell className="text-right"><Money value={byMarketer.unattributed} /></TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : null}
+              {byMarketer.shopRetained ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={8}>Shop giữ lại (chủ mã chỉ hưởng X% &lt; 100% LN đơn của mình)</TableCell>
+                  <TableCell className="text-right"><Money value={byMarketer.shopRetained} /></TableCell>
                   <TableCell />
                 </TableRow>
               ) : null}

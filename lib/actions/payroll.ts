@@ -65,6 +65,8 @@ export async function deleteEmployee(id: string): Promise<ActionResult> {
 const payrollConfigSchema = z.object({
   ownerSharePct: z.number().min(0).max(100),
   productOwners: z.record(z.string(), z.string()).default({}),
+  pageMarketers: z.record(z.string(), z.string()).default({}),
+  productShares: z.record(z.string(), z.object({ ownerPct: z.number().min(0).max(100), crossPct: z.number().min(0).max(100) })).default({}),
 });
 
 /** Lưu người phụ trách chính từng mã và % chủ mã nhận từ đơn đẩy chéo */
@@ -74,9 +76,10 @@ export async function savePayrollConfig(input: unknown): Promise<ActionResult> {
   const parsed = payrollConfigSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const productOwners = Object.fromEntries(Object.entries(parsed.data.productOwners).filter(([, v]) => Boolean(v)));
-  await setSettingJson(PAYROLL_CONFIG_KEY, { ownerSharePct: parsed.data.ownerSharePct, productOwners });
-  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PAYROLL_CONFIG_KEY, detail: { ownerSharePct: parsed.data.ownerSharePct, owners: Object.keys(productOwners).length } });
-  revalidatePath("/payroll");
-  revalidatePath("/expenses");
+  const pageMarketers = Object.fromEntries(Object.entries(parsed.data.pageMarketers).filter(([k, v]) => Boolean(k) && Boolean(v)));
+  const next = { ownerSharePct: parsed.data.ownerSharePct, productOwners, pageMarketers, productShares: parsed.data.productShares };
+  await setSettingJson(PAYROLL_CONFIG_KEY, next);
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PAYROLL_CONFIG_KEY, detail: { ownerSharePct: parsed.data.ownerSharePct, owners: Object.keys(productOwners).length, pages: Object.keys(pageMarketers).length, shares: Object.keys(parsed.data.productShares).length } });
+  revalidate();
   return { ok: true };
 }

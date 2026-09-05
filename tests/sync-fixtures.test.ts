@@ -38,6 +38,7 @@ import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
+import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { phoneChatState, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
@@ -524,6 +525,27 @@ async function main() {
   const pv = renderPhoneVerifyTemplate(DEFAULT_CS_RULES.phoneVerifyTemplate, { ten: "chị Loan", sdt: "0939748540", san_pham: "Đầm Q002", shop: "Hải An" });
   assert.ok(pv.includes("0939748540") && pv.includes("Đầm Q002") && /số phụ/.test(pv), "tin xác nhận có SĐT, sản phẩm và xin số phụ");
   console.log("✓ SĐT mới: nhận diện, đọc chat (shop đã hỏi / khách đã xác nhận), mẫu tin xác nhận SĐT & xin số phụ");
+
+  // Ghi nhận đơn theo fanpage & chia % LN chủ mã / người chạy cùng
+  const pm = { P1: "A", P2: "B" };
+  const a1 = attributionShares({ byPage: [{ pageId: "P1", value: 700 }, { pageId: "P2", value: 300 }], pageMarketers: pm, adShares: new Map([["A", 0.5], ["B", 0.5]]), ownerId: "A" });
+  assert.equal(a1.mode, "page");
+  assert.ok(Math.abs((a1.shares.get("A") ?? 0) - 0.7) < 1e-9 && Math.abs((a1.shares.get("B") ?? 0) - 0.3) < 1e-9, "theo fanpage: A 70%, B 30% dù QC 50/50");
+  const a2 = attributionShares({ byPage: [{ pageId: "P1", value: 600 }, { pageId: "P9", value: 200 }, { pageId: null, value: 200 }], pageMarketers: pm, adShares: new Map([["B", 1]]), ownerId: "A" });
+  assert.ok(Math.abs((a2.shares.get("A") ?? 0) - 0.6) < 1e-9 && Math.abs((a2.shares.get("B") ?? 0) - 0.4) < 1e-9, "page chưa gán / không page (40%) chia theo QC → B");
+  assert.equal(a2.unmappedValue, 400);
+  const a3 = attributionShares({ byPage: [{ pageId: "P9", value: 500 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
+  assert.equal(a3.mode, "owner", "không page gán, không QC → về chủ mã");
+  assert.equal(attributionShares({ byPage: [], pageMarketers: pm, adShares: new Map([["A", 0.2], ["B", 0.8]]), ownerId: null }).shares.get("B"), 0.8, "không có page → theo QC như cũ");
+  assert.equal(attributionShares({ byPage: [], pageMarketers: {}, adShares: new Map(), ownerId: null }).mode, "none");
+  const shDefault = shareFor({ productShares: {}, ownerSharePct: 5 }, "X");
+  assert.deepEqual(shDefault, { ownerPct: 100, crossPct: 95 }, "mặc định: chủ mã 100%, chạy cùng 95% (5% về chủ mã)");
+  const shCustom = shareFor({ productShares: { X: { ownerPct: 40, crossPct: 30 } }, ownerSharePct: 5 }, "X");
+  assert.deepEqual(splitProfit(1_000_000, "owner", shCustom), { keep: 400_000, toOwner: 0, toShop: 600_000 }, "chủ mã 40%, shop giữ 60%");
+  assert.deepEqual(splitProfit(1_000_000, "cross", shCustom), { keep: 300_000, toOwner: 700_000, toShop: 0 }, "chạy cùng 30%, 70% về chủ mã");
+  assert.deepEqual(splitProfit(-200_000, "cross", shCustom), { keep: -200_000, toOwner: 0, toShop: 0 }, "LN âm người tạo đơn chịu");
+  assert.deepEqual(splitProfit(1_000_000, "cross", shDefault), { keep: 950_000, toOwner: 50_000, toShop: 0 }, "mặc định 5% về chủ mã như quy tắc cũ");
+  console.log("✓ Ghi nhận theo fanpage (page → marketer, phần chưa gán theo QC / chủ mã) & chia % LN chủ mã / chạy cùng");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

@@ -30,6 +30,7 @@ on:
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
+          - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
@@ -115,6 +116,9 @@ jobs:
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;
               run-job)
                 docker exec erp-app sh -c "npm run --silent sync -- $ARG" ;;
+              phone-probe)
+                curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/phone-probe.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/phone-probe.ts "$ARG" ;;
               pages-debug)
                 curl -fsSL "https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/main/scripts/pages-debug.ts" | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;

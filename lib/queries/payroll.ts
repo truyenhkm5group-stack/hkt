@@ -1,7 +1,8 @@
-import { and, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, type Employee, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
+import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
+import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -46,12 +47,16 @@ export type MarketerProductLine = {
   role: "owner" | "cross";
   adSpend: number;
   share: number;
+  /** Cách ghi nhận đơn / doanh thu: page = theo fanpage phát sinh đơn, ads = theo tỷ trọng QC, owner = về chủ mã */
+  attributionMode: AttributionMode;
   attributedRevenue: number;
   attributedProfitBeforeAds: number;
   /** Giá vốn bị trừ trên dòng này (LN1: theo hàng giao TC × tỷ trọng; LN2: toàn bộ hàng nhập, chỉ chủ mã) */
   cogsCharged: number;
   /** % chủ mã: dương = nhận từ người đẩy chéo, âm = chia cho chủ mã */
   ownerBonus: number;
+  /** Phần shop giữ lại khi chủ mã chỉ hưởng < 100% LN đơn của mình */
+  shopRetained: number;
   personalProfit: number;
   orders: number;
 };
@@ -101,11 +106,80 @@ export type MarketerReport = {
   /** Lợi nhuận mã hàng không có quảng cáo và không có người phụ trách (không phân bổ cho ai) */
   unattributedProfit: number;
   unattributedRevenue: number;
+  /** Phần LN shop giữ lại khi chủ mã chỉ hưởng ownerPct < 100% đơn của mình */
+  shopRetained: number;
 };
 
 export async function loadPayrollConfig(): Promise<PayrollConfig> {
   const cfg = await getSettingJson<Partial<PayrollConfig>>(PAYROLL_CONFIG_KEY, DEFAULT_PAYROLL_CONFIG);
-  return { productOwners: cfg.productOwners ?? {}, ownerSharePct: Number.isFinite(Number(cfg.ownerSharePct)) ? Number(cfg.ownerSharePct) : 5 };
+  const productShares: PayrollConfig["productShares"] = {};
+  for (const [pid, v] of Object.entries(cfg.productShares ?? {})) {
+    if (!v || typeof v !== "object") continue;
+    const ownerPct = Number((v as { ownerPct?: unknown }).ownerPct);
+    const crossPct = Number((v as { crossPct?: unknown }).crossPct);
+    productShares[pid] = { ownerPct: Number.isFinite(ownerPct) ? ownerPct : 100, crossPct: Number.isFinite(crossPct) ? crossPct : 95 };
+  }
+  return {
+    productOwners: cfg.productOwners ?? {},
+    ownerSharePct: Number.isFinite(Number(cfg.ownerSharePct)) ? Number(cfg.ownerSharePct) : 5,
+    pageMarketers: Object.fromEntries(Object.entries(cfg.pageMarketers ?? {}).filter(([k, v]) => k && typeof v === "string" && v)),
+    productShares,
+  };
+}
+
+/** Doanh số (đơn đã xác nhận, không huỷ) hoặc doanh thu giao thành công của từng mã theo fanpage phát sinh đơn */
+export async function salesByProductPage(period: Period, mode: "confirmed" | "delivered"): Promise<Map<string, PageBucket[]>> {
+  return memo(`salesByProductPage:${periodKey(period)}:${mode}`, 120_000, async () => {
+    const db = await getDb();
+    const i = schema.orderItems;
+    const o = schema.orders;
+    const s = schema.shipments;
+    const pv = schema.productVariants;
+    const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
+    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
+    const rows = await db
+      .select({ productId: productKey, pageId: o.pageId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
+      .from(i)
+      .innerJoin(o, eq(o.id, i.orderId))
+      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
+      .groupBy(sql`1`, o.pageId);
+    const map = new Map<string, PageBucket[]>();
+    for (const r of rows) {
+      if (!r.productId) continue;
+      const list = map.get(r.productId) ?? [];
+      list.push({ pageId: r.pageId || null, value: Number(r.value) });
+      map.set(r.productId, list);
+    }
+    return map;
+  });
+}
+
+export type PageOption = { pageId: string; name: string; orders: number; sales: number; lastAt: Date | null };
+
+/** Fanpage có đơn trong 90 ngày (để gán page → marketer), kèm tên page từ Pancake nếu có token */
+export async function listPagesForConfig(): Promise<PageOption[]> {
+  return memo("listPagesForConfig", 300_000, async () => {
+    const db = await getDb();
+    const o = schema.orders;
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    const rows = await db
+      .select({ pageId: o.pageId, orders: sql<number>`count(*)`, sales: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`, lastAt: sql<string | null>`max(${o.insertedAt})` })
+      .from(o)
+      .where(and(gte(o.insertedAt, since), sql`coalesce(${o.pageId}, '') <> ''`, sql`${o.stage} not in ('CANCELLED','DELETED')`))
+      .groupBy(o.pageId)
+      .orderBy(sql`2 desc`);
+    let names = new Map<string, string>();
+    try {
+      const { getPancakePagesClient } = await import("@/lib/integrations/pancake/pages");
+      const pages = await getPancakePagesClient().listPages();
+      names = new Map(pages.map((p) => [p.id, p.name]));
+    } catch {
+      // không có token / lỗi API → chỉ hiện page_id
+    }
+    return rows.filter((r) => r.pageId).map((r) => ({ pageId: r.pageId as string, name: names.get(r.pageId as string) ?? "", orders: Number(r.orders), sales: Number(r.sales), lastAt: r.lastAt ? new Date(r.lastAt) : null }));
+  });
 }
 
 function periodConds(column: AnyPgColumn, period: Period): SQL[] {
@@ -211,7 +285,7 @@ export async function getMarketerReport(period: Period, basis: PayrollBasis = "p
 
 async function getMarketerReportUncached(period: Period, basis: PayrollBasis): Promise<MarketerReport> {
   const db = await getDb();
-  const [nominal, employees, config, econ] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), productEconomics(period)]);
+  const [nominal, employees, config, econ, byPage] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), productEconomics(period), salesByProductPage(period, "delivered")]);
   const ads = schema.adSpends;
   const spendRows = await db
     .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -244,8 +318,8 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     }
     return m;
   };
-  const pct = Math.max(0, config.ownerSharePct) / 100;
   const products: ProductProfitLine[] = [];
+  let shopRetained = 0;
   const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, months: econ.months, testSpend: 0, profit: 0 };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
@@ -266,14 +340,16 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
 
     // phần biến đổi đi theo đơn: doanh thu − vận chuyển − chi phí phân bổ − (LN1: giá vốn hàng giao TC)
     const variable = row.revenue - row.shipping - row.operatingAlloc - (useDeliveredCogs ? row.cogsDelivered : 0);
-    const shares = new Map<string | null, number>();
-    if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) shares.set(mid, amount / spend.total);
-    else if (ownerId) shares.set(ownerId, 1);
+    const adShares = new Map<string | null, number>();
+    if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
+    const attribution = attributionShares({ byPage: byPage.get(row.productId) ?? [], pageMarketers: config.pageMarketers, adShares, ownerId });
+    const shares = attribution.shares;
     if (!shares.size) {
       unattributedProfit += profit;
       unattributedRevenue += row.revenue;
       continue;
     }
+    const pctShare = shareFor(config, row.productId);
     if (ownerId) ensure(ownerId).ownedProducts.push(row.code || row.productName);
     let ownerBonusTotal = 0;
     for (const [mid, share] of shares) {
@@ -282,8 +358,12 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       const isOwner = ownerId !== null && mid === ownerId;
       const cogsCharged = useDeliveredCogs ? Math.round(row.cogsDelivered * share) : isOwner ? row.purchaseCost : 0;
       const base = Math.round(variable * share) - mySpend - (useDeliveredCogs ? 0 : cogsCharged);
-      const bonus = !isOwner && ownerId ? Math.round(Math.max(base, 0) * pct) : 0;
+      // chủ mã giữ ownerPct % LN đơn của mình (còn lại shop giữ); người chạy cùng giữ crossPct %, phần còn lại về chủ mã
+      const split = splitProfit(base, isOwner || !ownerId ? "owner" : "cross", isOwner || !ownerId ? pctShare : pctShare);
+      const bonus = !isOwner && ownerId ? split.toOwner : 0;
+      const toShop = isOwner || !ownerId ? split.toShop : 0;
       ownerBonusTotal += bonus;
+      shopRetained += toShop;
       const line: MarketerProductLine = {
         productId: row.productId,
         productName: row.productName,
@@ -291,11 +371,13 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
         role: isOwner ? "owner" : "cross",
         adSpend: mySpend,
         share,
+        attributionMode: attribution.mode,
         attributedRevenue: Math.round(row.revenue * share),
         attributedProfitBeforeAds: Math.round(variable * share),
         cogsCharged,
         ownerBonus: -bonus,
-        personalProfit: base - bonus,
+        shopRetained: toShop,
+        personalProfit: base - bonus - toShop,
         orders: Math.round(row.deliveredOrders * share),
       };
       m.products.push(line);
@@ -312,7 +394,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       if (!shares.has(ownerId)) {
         // chủ mã không chạy QC trong kỳ: vẫn chịu giá vốn hàng nhập (LN2) và nhận % chéo
         const cogsCharged = useDeliveredCogs ? 0 : row.purchaseCost;
-        o.products.push({ productId: row.productId, productName: row.productName, code: row.code, role: "owner", adSpend: 0, share: 0, attributedRevenue: 0, attributedProfitBeforeAds: 0, cogsCharged, ownerBonus: ownerBonusTotal, personalProfit: ownerBonusTotal - cogsCharged, orders: 0 });
+        o.products.push({ productId: row.productId, productName: row.productName, code: row.code, role: "owner", adSpend: 0, share: 0, attributionMode: attribution.mode, attributedRevenue: 0, attributedProfitBeforeAds: 0, cogsCharged, ownerBonus: ownerBonusTotal, shopRetained: 0, personalProfit: ownerBonusTotal - cogsCharged, orders: 0 });
         o.cogsCharged += cogsCharged;
         o.personalProfit += ownerBonusTotal - cogsCharged;
       } else {
@@ -340,7 +422,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   for (const e of employees) if (e.active && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
   const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
   products.sort((a, b) => b.profit - a.profit);
-  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue };
+  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained };
 }
 
 export type PayrollLine = {
@@ -560,15 +642,19 @@ export type NominalMarketerProduct = {
   otherCost: number;
   /** % chủ mã: dương = nhận từ người đẩy chéo (chủ mã), âm = trích cho chủ mã (đẩy chéo) */
   ownerBonus: number;
-  /** LN ròng cá nhân từ mã = profitBeforeAds − adSpend − otherCost ± ownerBonus */
+  /** Phần shop giữ lại khi chủ mã hưởng < 100% */
+  shopRetained: number;
+  /** Cách ghi nhận đơn: theo fanpage / theo QC / về chủ mã */
+  attributionMode: AttributionMode;
+  /** LN ròng cá nhân từ mã = profitBeforeAds − adSpend − otherCost ± ownerBonus − shopRetained */
   personalNet: number;
 };
 
 /** Lợi nhuận danh nghĩa (ước tính theo đơn lên trong kỳ) chia theo marketer — cùng quy tắc chủ mã / đẩy chéo với bảng lương */
-export async function getNominalMarketerBreakdown(period: Period): Promise<{ rows: NominalMarketerRow[]; unattributed: number; ownerSharePct: number }> {
+export async function getNominalMarketerBreakdown(period: Period): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
   return memo(`nominalByMarketer:${periodKey(period)}`, 120_000, async () => {
     const db = await getDb();
-    const [nominal, employees, config] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig()]);
+    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
     const ads = schema.adSpends;
     const spendRows = await db
       .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -599,20 +685,26 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
       }
       return m;
     };
-    const pct = Math.max(0, config.ownerSharePct) / 100;
     let unattributed = 0;
+    let shopRetained = 0;
+    const pagesSeen = new Set<string>();
+    const pagesMappedSet = new Set<string>();
     for (const r of nominal.rows) {
       const spend = byProduct.get(r.productId);
       const ownerId = config.productOwners[r.productId] ?? null;
       // LN ròng danh nghĩa trước QC của mã = LN ròng + QC + chi phí khác theo QC
       const netBeforeAds = r.netProfit + r.adSpend + r.otherCost;
-      const shares = new Map<string | null, number>();
-      if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) shares.set(mid, amount / spend.total);
-      else if (ownerId) shares.set(ownerId, 1);
+      const adShares = new Map<string | null, number>();
+      if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
+      const buckets = byPage.get(r.productId) ?? [];
+      for (const b of buckets) if (b.pageId) { pagesSeen.add(b.pageId); if (config.pageMarketers[b.pageId]) pagesMappedSet.add(b.pageId); }
+      const attribution = attributionShares({ byPage: buckets, pageMarketers: config.pageMarketers, adShares, ownerId });
+      const shares = attribution.shares;
       if (!shares.size) {
         unattributed += netBeforeAds;
         continue;
       }
+      const pctShare = shareFor(config, r.productId);
       if (ownerId) ensure(ownerId).ownedProducts.push(r.code || r.productName);
       let bonusTotal = 0;
       for (const [mid, share] of shares) {
@@ -621,16 +713,19 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
         const other = Math.round(mySpend * otherPct);
         const isOwner = ownerId !== null && mid === ownerId;
         const base = Math.round(netBeforeAds * share) - mySpend - other;
-        const bonus = !isOwner && ownerId ? Math.round(Math.max(base, 0) * pct) : 0;
+        const split = splitProfit(base, isOwner || !ownerId ? "owner" : "cross", pctShare);
+        const bonus = !isOwner && ownerId ? split.toOwner : 0;
+        const toShop = isOwner || !ownerId ? split.toShop : 0;
         bonusTotal += bonus;
+        shopRetained += toShop;
         m.adSpend += mySpend;
         m.otherCost += other;
         m.attributedOrders += Math.round(r.orders * share);
         m.attributedRevenue += Math.round(r.expectedRevenue * share);
         m.profitBeforeAds += Math.round(netBeforeAds * share);
         m.ownerBonusPaid += bonus;
-        m.personalNet += base - bonus;
-        m.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: isOwner ? "owner" : "cross", share, orders: Math.round(r.orders * share), revenue: Math.round(r.expectedRevenue * share), profitBeforeAds: Math.round(netBeforeAds * share), adSpend: mySpend, otherCost: other, ownerBonus: -bonus, personalNet: base - bonus });
+        m.personalNet += base - bonus - toShop;
+        m.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: isOwner ? "owner" : "cross", share, attributionMode: attribution.mode, orders: Math.round(r.orders * share), revenue: Math.round(r.expectedRevenue * share), profitBeforeAds: Math.round(netBeforeAds * share), adSpend: mySpend, otherCost: other, ownerBonus: -bonus, shopRetained: toShop, personalNet: base - bonus - toShop });
       }
       if (ownerId) {
         const o = ensure(ownerId);
@@ -641,7 +736,7 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
           if (line) {
             line.ownerBonus += bonusTotal;
             line.personalNet += bonusTotal;
-          } else o.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: "owner", share: 0, orders: 0, revenue: 0, profitBeforeAds: 0, adSpend: 0, otherCost: 0, ownerBonus: bonusTotal, personalNet: bonusTotal });
+          } else o.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: "owner", share: 0, attributionMode: attribution.mode, orders: 0, revenue: 0, profitBeforeAds: 0, adSpend: 0, otherCost: 0, ownerBonus: bonusTotal, shopRetained: 0, personalNet: bonusTotal });
         }
       }
     }
@@ -654,6 +749,6 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
     for (const e of employees) if (e.active && e.department === "Marketing" && !rows.has(e.id)) ensure(e.id);
     const list = [...rows.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalNet - a.personalNet));
     for (const m of list) m.products = m.products.filter((x) => x.adSpend || x.orders || x.revenue || x.ownerBonus || x.personalNet).sort((a, b) => b.personalNet - a.personalNet);
-    return { rows: list, unattributed, ownerSharePct: config.ownerSharePct };
+    return { rows: list, unattributed, shopRetained, ownerSharePct: config.ownerSharePct, pagesMapped: pagesMappedSet.size, pagesTotal: pagesSeen.size };
   });
 }

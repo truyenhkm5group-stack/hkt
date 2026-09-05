@@ -36,6 +36,7 @@ import { formatNumber, formatVND } from "@/lib/format";
 import {
   getPayrollReport,
   listAdAccounts,
+  listPagesForConfig,
   unassignedMarketerSpend,
 } from "@/lib/queries/payroll";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -57,6 +58,7 @@ export default async function PayrollPage({
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
+  const pagesForConfig = listPagesForConfig().catch(() => []);
   const [report, unassigned, accounts, products] = await Promise.all([
     getPayrollReport(period, basis),
     unassignedMarketerSpend(period),
@@ -99,11 +101,11 @@ export default async function PayrollPage({
             ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}).`
             : basis === "nominal"
               ? "Danh nghĩa: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
-              : `${PAYROLL_BASIS_LABEL[basis]}. Mỗi mã có marketer phụ trách chính chịu tồn kho & giá vốn; người khác đẩy chéo được chia theo tỷ trọng QC và trích ${report.marketers.config.ownerSharePct}% lợi nhuận cho chủ mã. Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
+              : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
         }
       />
 
-      <ProductOwnersForm config={report.marketers.config} products={products} marketers={report.lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} />
+      <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={report.lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard

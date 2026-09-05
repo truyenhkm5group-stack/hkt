@@ -61,7 +61,8 @@ export function MarketerNominalRows({ row, ownerSharePct }: { row: NominalMarket
                 </div>
                 <div className="text-[11px] text-muted-foreground">
                   {p.role === "owner" ? "Mã mình phụ trách" : "Đẩy chéo"}
-                  {p.share > 0 ? ` · ghi nhận ${(p.share * 100).toFixed(0)}% đơn & DT theo tỷ trọng QC` : " · không chạy QC, chỉ nhận % chủ mã"}
+                  {p.share > 0 ? ` · ghi nhận ${(p.share * 100).toFixed(0)}% đơn & DT ${p.attributionMode === "page" ? "theo fanpage" : p.attributionMode === "ads" ? "theo tỷ trọng QC (page chưa gán)" : "về chủ mã"}` : " · không có đơn ghi nhận, chỉ nhận % chủ mã"}
+                  {p.shopRetained ? ` · shop giữ ${formatVND(p.shopRetained)}` : ""}
                 </div>
               </TableCell>
               <TableCell className="text-right"><Money value={p.adSpend} className="text-rose-600" /></TableCell>
