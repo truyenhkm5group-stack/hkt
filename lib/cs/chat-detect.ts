@@ -2,31 +2,72 @@
  * Đọc hội thoại Pancake (Pages API) → phát hiện case CSKH từ tin nhắn KHÁCH gửi và thẻ hội thoại:
  * tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng, khiếu nại.
  */
-import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { loadCsRules, stripIgnored } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
-import { normalize } from "@/lib/text";
+import { normalize, stripHtml } from "@/lib/text";
 
 export type ChatHit = { kind: CsKind; keyword: string; message: string };
 
+/** Loại case chỉ có nghĩa SAU khi khách đã đặt đơn (trước đó chỉ là câu hỏi tư vấn, không phải việc cần xử lý) */
+export const POST_PURCHASE_KINDS = new Set<CsKind>(["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "COMPLAINT"]);
+
+/** Cụm phủ định theo loại: khớp từ khoá nhưng ngữ cảnh là câu hỏi chính sách / còn hàng → không phải case */
+const NEGATIVE: Partial<Record<CsKind, RegExp[]>> = {
+  RETURN: [/kiem tra/, /kiem hang/, /nhan duoc/, /chinh sach/, /(co|duoc|dc) (doi )?tra/, /tra hang (khong|ko|k|dc|duoc)/, /doi tra (khong|ko|k|the nao|sao)/],
+  EXCHANGE_COLOR: [/(co|con) mau/, /mau khac (khong|ko|k|ha|hem|a|ak|hok|hong)/, /mau (nao|gi|ntn|the nao)/, /may mau/, /nhung mau/],
+  EXCHANGE_SIZE: [/(co|con) size/, /size (nao|gi|ntn|the nao|bao nhieu)/, /bang size/, /size khac (khong|ko|k)/],
+  SIZE_ADVICE: [/(co|con) size/, /size (nao|gi|ntn|the nao|bao nhieu)/, /bang size/, /cao .* nang/, /nang .* cao/, /(m|kg) (thi )?(mac|lay) size/],
+  URGE_DELIVERY: [/bao lau (thi )?(nhan|giao|toi|ve)/, /may ngay (thi )?(nhan|giao|toi|ve)/, /ship (bao lau|may ngay)/, /dat (bay gio|hom nay|gio)/],
+  WRONG_PRICE: [/gia bao nhieu/, /bao nhieu (tien|1|mot)/, /gia (the nao|sao|ntn)/, /co giam/, /freeship/, /free ship/],
+  COMPLAINT: [/chat luong (the nao|sao|ok|tot|co tot|ntn)/, /co tot (khong|ko|k)/, /vai gi/, /chat vai/],
+};
+
+/** Câu hỏi tư vấn / chính sách trước khi mua (không có ý muốn đổi, trả, khiếu nại) */
+export function isInquiry(normalized: string) {
+  const n = normalized;
+  const intent = /\b(muon|xin|cho (em|chi|minh|toi|e|c|a|anh)|lam on|giup (em|chi|minh|toi)|tra lai|gui tra|hoan lai|doi giup|doi cho|khong nhan nua|ko nhan nua|khong lay nua|huy (don|giup|cho))\b/;
+  if (intent.test(n)) return false;
+  const question = /\b(co duoc|duoc (khong|ko|k|hong|hem|hok)|dc (khong|ko|k)|(co|con) (mau|size|hang|san|mau nao|size nao)|mau khac (khong|ko|k|ha|hem|a)|(khong|ko) (a|ak|shop|em|chi)?\s*\?|bao nhieu|the nao|nhu the nao|ntn|(co|duoc) kiem (tra|hang))\b/;
+  return question.test(n) || /\?\s*$/.test(n.trim());
+}
+
+export type DetectOptions = {
+  /** Đơn gần nhất của khách: chỉ tạo case sau mua khi có đơn và tin nhắn gửi sau lúc lên đơn */
+  orderInsertedAt?: Date | null;
+  /** Giai đoạn đơn: giục giao chỉ có nghĩa khi đơn chưa kết thúc */
+  orderStage?: string | null;
+  /** Bật gác theo đơn (mặc định tắt để giữ tương thích) */
+  requireOrder?: boolean;
+};
+
+const FINAL_ORDER_STAGES = new Set(["DELIVERED", "PAID", "RETURNED", "CANCELLED", "DELETED", "PARTIAL_RETURN"]);
+
 /** Tìm loại case trong danh sách tin nhắn khách (ưu tiên từ khoá dài, mỗi loại lấy tin đầu tiên khớp) */
-export function detectFromMessages(messages: { text: string; fromPage: boolean }[], rules: { keyword: string; kind: CsKind }[], ignore: string[] = []): ChatHit[] {
+export function detectFromMessages(messages: { text: string; fromPage: boolean; insertedAt?: Date | null }[], rules: { keyword: string; kind: CsKind }[], ignore: string[] = [], options: DetectOptions = {}): ChatHit[] {
   const sorted = [...rules].sort((a, b) => b.keyword.length - a.keyword.length);
   const hits = new Map<CsKind, ChatHit>();
+  const hasOrder = Boolean(options.orderInsertedAt);
   for (const m of messages) {
     if (m.fromPage || !m.text) continue;
-    const cleaned = stripIgnored(m.text, ignore);
+    const plain = stripHtml(m.text);
+    const cleaned = stripIgnored(plain, ignore);
     if (!cleaned) continue;
     const n = normalize(cleaned);
+    const inquiry = isInquiry(n);
+    const afterOrder = !options.orderInsertedAt || !m.insertedAt || m.insertedAt >= options.orderInsertedAt;
     for (const r of sorted) {
       const k = normalize(r.keyword).trim();
-      if (!k) continue;
-      if (n.includes(` ${k} `) || (k.length >= 7 && n.includes(k))) {
-        if (!hits.has(r.kind)) hits.set(r.kind, { kind: r.kind, keyword: r.keyword, message: m.text.slice(0, 300) });
-      }
+      if (!k || hits.has(r.kind)) continue;
+      if (!(n.includes(` ${k} `) || (k.length >= 7 && n.includes(k)))) continue;
+      if ((NEGATIVE[r.kind] ?? []).some((re) => re.test(n))) continue;
+      if (inquiry && POST_PURCHASE_KINDS.has(r.kind)) continue;
+      if (options.requireOrder && POST_PURCHASE_KINDS.has(r.kind) && (!hasOrder || !afterOrder)) continue;
+      if (r.kind === "URGE_DELIVERY" && options.requireOrder && options.orderStage && FINAL_ORDER_STAGES.has(options.orderStage)) continue;
+      hits.set(r.kind, { kind: r.kind, keyword: r.keyword, message: plain.slice(0, 300) });
     }
   }
   return [...hits.values()];
@@ -90,17 +131,18 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         }
       }
       const recent = messages.filter((m) => !m.insertedAt || m.insertedAt >= since);
-      const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns);
+      // gắn đơn: theo conversation_id, nếu không thì theo SĐT gần nhất (đơn chưa huỷ/xoá)
+      const phones = conv.phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
+      const order = await db.query.orders.findFirst({
+        where: and(or(eq(schema.orders.conversationId, conv.id), phones.length ? inArray(schema.orders.billPhone, phones) : sql`false`), sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`),
+        orderBy: [desc(schema.orders.insertedAt)],
+        columns: { id: true, customerId: true, billFullName: true, billPhone: true, systemId: true, insertedAt: true, stage: true },
+      });
+      // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case
+      const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns, { requireOrder: true, orderInsertedAt: order?.insertedAt ?? null, orderStage: order?.stage ?? null });
       const hits = [...tagHits, ...msgHits.filter((h) => !tagHits.some((t) => t.kind === h.kind))];
       if (!hits.length) continue;
       withHits += 1;
-      // gắn đơn: theo conversation_id, nếu không thì theo SĐT gần nhất
-      const phones = conv.phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
-      const order = await db.query.orders.findFirst({
-        where: or(eq(schema.orders.conversationId, conv.id), phones.length ? inArray(schema.orders.billPhone, phones) : sql`false`),
-        orderBy: [desc(schema.orders.insertedAt)],
-        columns: { id: true, customerId: true, billFullName: true, billPhone: true, systemId: true },
-      });
       const weekKey = new Date().toISOString().slice(0, 10);
       const values = hits.map((h) => ({
         dedupeKey: `pk-chat:${conv.id}:${h.kind}:${weekKey.slice(0, 7)}`,

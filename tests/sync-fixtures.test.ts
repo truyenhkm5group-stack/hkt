@@ -339,6 +339,39 @@ async function main() {
   assert.ok(kinds.includes("WRONG_PRICE"), "chốt sai giá");
   assert.ok(!chatHits.some((h) => h.message.includes("chị chờ em")), "bỏ qua tin nhắn của page");
   console.log(`✓ Chat Pancake: nhận diện ${kinds.join(", ")}`);
+  // Câu hỏi trước mua / hỏi chính sách không phải case; sau khi có đơn mới tính
+  const t0 = new Date("2026-09-01T00:00:00Z");
+  const preSale = detectFromMessages(
+    [
+      { text: "<div>Có được kiểm tra hàng không</div>", fromPage: false, insertedAt: new Date("2026-09-02T00:00:00Z") },
+      { text: "<div>Đầm có màu khác không?</div>", fromPage: false, insertedAt: new Date("2026-09-02T00:00:00Z") },
+      { text: "Kiểm tra hàng chất vải ko đẹp ko nhận hàng", fromPage: false, insertedAt: new Date("2026-09-02T00:00:00Z") },
+      { text: "ship bao lâu thì nhận được ạ", fromPage: false, insertedAt: new Date("2026-09-02T00:00:00Z") },
+      { text: "lâu quá", fromPage: false, insertedAt: new Date("2026-08-20T00:00:00Z") },
+    ],
+    DEFAULT_CS_RULES.chatRules,
+    [],
+    { requireOrder: true, orderInsertedAt: t0, orderStage: "SHIPPED" },
+  );
+  assert.deepEqual(preSale, [], `câu hỏi trước mua không tạo case: ${JSON.stringify(preSale.map((h) => h.kind))}`);
+  const noOrder = detectFromMessages([{ text: "sao mãi chưa nhận được hàng, lâu quá", fromPage: false, insertedAt: new Date() }], DEFAULT_CS_RULES.chatRules, [], { requireOrder: true, orderInsertedAt: null });
+  assert.deepEqual(noOrder, [], "khách chưa có đơn → không tạo case giục giao");
+  const real = detectFromMessages(
+    [
+      { text: "<div>cho em trả hàng nhé, mặc không vừa</div>", fromPage: false, insertedAt: new Date("2026-09-03T00:00:00Z") },
+      { text: "chị muốn đổi màu đen sang màu đỏ", fromPage: false, insertedAt: new Date("2026-09-03T00:00:00Z") },
+      { text: "sao mãi chưa nhận được hàng vậy em", fromPage: false, insertedAt: new Date("2026-09-03T00:00:00Z") },
+    ],
+    DEFAULT_CS_RULES.chatRules,
+    [],
+    { requireOrder: true, orderInsertedAt: t0, orderStage: "SHIPPED" },
+  );
+  const realKinds = real.map((h) => h.kind).sort();
+  assert.ok(realKinds.includes("RETURN") && realKinds.includes("EXCHANGE_COLOR") && realKinds.includes("URGE_DELIVERY"), `case thật sau mua: ${realKinds.join(",")}`);
+  assert.ok(!real.some((h) => h.message.includes("<div>")), "bỏ thẻ HTML trong nội dung");
+  const afterDelivered = detectFromMessages([{ text: "sao mãi chưa nhận được hàng", fromPage: false, insertedAt: new Date("2026-09-03T00:00:00Z") }], DEFAULT_CS_RULES.chatRules, [], { requireOrder: true, orderInsertedAt: t0, orderStage: "DELIVERED" });
+  assert.deepEqual(afterDelivered, [], "đơn đã giao xong → không còn là giục giao");
+  console.log("✓ Chat Pancake: bỏ câu hỏi trước mua / chính sách, chỉ tạo case sau khi có đơn");
 
   // Kế hoạch đặt hàng sản xuất
   const plan1 = computePlan({ stock: 10, committed: 4, soldInWindow: 28, windowDays: 14, leadTimeDays: 7, coverDays: 14, safetyDays: 3, roundTo: 10 });
