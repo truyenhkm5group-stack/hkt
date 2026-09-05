@@ -1,8 +1,8 @@
-import { and, count, desc, eq, gte, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { ListParams } from "@/lib/search-params";
 
-export const OUTREACH_SORTABLE = ["createdAt", "lastActivityAt", "sentAt"];
+export const OUTREACH_SORTABLE = ["createdAt", "lastActivityAt", "sentAt", "nextAt"];
 
 function whereOf(params: ListParams, segment: string) {
   const t = schema.outreachTargets;
@@ -17,7 +17,7 @@ export async function listOutreachTargets(params: ListParams, segment: string) {
   const db = await getDb();
   const t = schema.outreachTargets;
   const where = whereOf(params, segment);
-  const sortCol = params.sort === "lastActivityAt" ? t.lastActivityAt : params.sort === "sentAt" ? t.sentAt : t.createdAt;
+  const sortCol = params.sort === "lastActivityAt" ? t.lastActivityAt : params.sort === "sentAt" ? t.sentAt : params.sort === "nextAt" ? t.nextAt : t.createdAt;
   const [rows, [{ total }]] = await Promise.all([
     db.query.outreachTargets.findMany({ where, orderBy: [params.dir === "asc" ? sql`${sortCol} asc nulls last` : sql`${sortCol} desc nulls last`], limit: params.pageSize, offset: (params.page - 1) * params.pageSize, with: { order: { columns: { id: true, systemId: true } } } }),
     db.select({ total: count() }).from(t).where(where),
@@ -30,11 +30,15 @@ export async function outreachSummary() {
   const db = await getDb();
   const t = schema.outreachTargets;
   const rows = await db.select({ segment: t.segment, status: t.status, count: count() }).from(t).groupBy(t.segment, t.status);
-  const [today] = await db.select({ count: count() }).from(t).where(and(eq(t.status, "SENT"), gte(t.sentAt, new Date(Date.now() - 86_400_000))));
+  const [[today], [dueN], [dueC]] = await Promise.all([
+    db.select({ count: count() }).from(t).where(gte(t.sentAt, new Date(Date.now() - 86_400_000))),
+    db.select({ count: count() }).from(t).where(and(eq(t.segment, "NURTURE"), eq(t.status, "PENDING"), or(isNull(t.nextAt), lte(t.nextAt, new Date())))),
+    db.select({ count: count() }).from(t).where(and(eq(t.segment, "CROSS_SELL"), eq(t.status, "PENDING"), or(isNull(t.nextAt), lte(t.nextAt, new Date())))),
+  ]);
   const get = (seg: string, st: string) => Number(rows.find((r) => r.segment === seg && r.status === st)?.count ?? 0);
   return {
-    nurture: { pending: get("NURTURE", "PENDING"), sent: get("NURTURE", "SENT"), failed: get("NURTURE", "FAILED") },
-    crossSell: { pending: get("CROSS_SELL", "PENDING"), sent: get("CROSS_SELL", "SENT"), failed: get("CROSS_SELL", "FAILED") },
+    nurture: { pending: get("NURTURE", "PENDING"), due: Number(dueN?.count ?? 0), sent: get("NURTURE", "SENT"), failed: get("NURTURE", "FAILED"), converted: get("NURTURE", "CONVERTED"), replied: get("NURTURE", "REPLIED") },
+    crossSell: { pending: get("CROSS_SELL", "PENDING"), due: Number(dueC?.count ?? 0), sent: get("CROSS_SELL", "SENT"), failed: get("CROSS_SELL", "FAILED") },
     sentToday: Number(today?.count ?? 0),
   };
 }

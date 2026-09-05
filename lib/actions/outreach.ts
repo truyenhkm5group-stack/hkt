@@ -21,13 +21,15 @@ async function authorize() {
 const configSchema = z.object({
   shopName: z.string().trim().max(100),
   discountCode: z.string().trim().max(50),
-  nurtureDays: z.number().int().min(1).max(30),
+  nurtureDiscount: z.string().trim().max(60),
+  nurtureWindowHours: z.number().int().min(1).max(24 * 30),
+  nurtureSteps: z.array(z.string().trim().min(10).max(1500)).min(1, "Cần ít nhất một bước").max(15),
+  nurtureStepGapDays: z.number().int().min(1).max(14),
   crossSellFromDays: z.number().int().min(0).max(60),
   crossSellToDays: z.number().int().min(1).max(120),
   cooldownDays: z.number().int().min(1).max(365),
   dailyLimit: z.number().int().min(1).max(5000),
   crossSellMap: z.record(z.string(), z.array(z.string())).default({}),
-  nurtureTemplate: z.string().trim().min(10).max(1500),
   crossSellTemplate: z.string().trim().min(10).max(1500),
 });
 
@@ -42,16 +44,17 @@ export async function saveOutreachConfig(input: unknown): Promise<Result> {
   return { ok: true };
 }
 
-export async function buildOutreach(segment?: "NURTURE" | "CROSS_SELL"): Promise<Result<{ nurture: number; crossSell: number; scanned: number; errors: string[] }>> {
+export async function buildOutreach(segment?: "NURTURE" | "CROSS_SELL", windowHours?: number): Promise<Result<{ nurture: number; crossSell: number; scanned: number; converted: number; replied: number; errors: string[] }>> {
   const { user, error } = await authorize();
   if (error) return { error };
-  const r = await buildOutreachTargets({ segments: segment ? [segment] : undefined });
+  const hours = windowHours && Number.isFinite(windowHours) ? Math.min(24 * 30, Math.max(1, Math.round(windowHours))) : undefined;
+  const r = await buildOutreachTargets({ segments: segment ? [segment] : undefined, windowHours: hours });
   await audit({ userId: user.id, userEmail: user.email, action: "OUTREACH_BUILD", entity: "OUTREACH", detail: r });
   revalidatePath("/outreach");
   return { ok: true, ...r };
 }
 
-export async function sendOutreach(ids: string[]): Promise<Result<{ sent: number; failed: number; skipped: number; remainingToday: number }>> {
+export async function sendOutreach(ids: string[]): Promise<Result<{ sent: number; failed: number; skipped: number; notDue: number; remainingToday: number }>> {
   const { user, error } = await authorize();
   if (error) return { error };
   const list = z.array(z.string().min(1)).min(1, "Chưa chọn khách nào").max(500, "Tối đa 500 mỗi lần").safeParse(ids);
@@ -90,5 +93,5 @@ export async function previewOutreachTemplate(segment: "NURTURE" | "CROSS_SELL",
   const { error } = await authorize();
   if (error) return { error };
   const cfg = await loadOutreachConfig();
-  return { ok: true, text: renderTemplate(template, { ten: "chị Lan", san_pham: segment === "NURTURE" ? "Đầm Q002" : "Đầm Q003 màu đỏ", goi_y: "Đầm Q004, Quần định hình", shop: cfg.shopName, discountCode: cfg.discountCode }) };
+  return { ok: true, text: renderTemplate(template, { ten: "chị Lan", san_pham: segment === "NURTURE" ? "Đầm Q002" : "Đầm Q003 màu đỏ", goi_y: "Đầm Q004, Quần định hình", shop: cfg.shopName, discountCode: cfg.discountCode, giam: cfg.nurtureDiscount }) };
 }

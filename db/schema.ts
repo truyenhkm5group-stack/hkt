@@ -118,8 +118,15 @@ export const outreachTargets = pgTable(
     /** Nội dung đã dựng sẵn từ mẫu */
     message: text("message").notNull().default(""),
     /** PENDING · SENT · FAILED · SKIPPED */
+    /** PENDING · SENT (đã gửi hết kịch bản) · FAILED · SKIPPED · CONVERTED (khách đã đặt đơn) · REPLIED (khách trả lời, nhân viên tiếp quản) */
     status: text("status").notNull().default("PENDING"),
     error: text("error").notNull().default(""),
+    /** Bước kịch bản tiếp theo sẽ gửi (0-based); băn khoăn nhiều bước, bán chéo một bước */
+    step: integer("step").notNull().default(0),
+    /** Số tin đã gửi cho khách này */
+    sentCount: integer("sent_count").notNull().default(0),
+    /** Thời điểm sớm nhất được gửi bước tiếp theo (null = gửi được ngay) */
+    nextAt: ts("next_at"),
     lastActivityAt: ts("last_activity_at"),
     sentAt: ts("sent_at"),
     sentBy: text("sent_by").notNull().default(""),

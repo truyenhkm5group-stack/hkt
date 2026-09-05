@@ -8,7 +8,7 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { OUTREACH_STATUS_LABEL, SEGMENT_LABEL } from "@/lib/constants/outreach";
+import { NURTURE_WINDOWS, OUTREACH_STATUS_LABEL, OUTREACH_STATUSES, SEGMENT_LABEL } from "@/lib/constants/outreach";
 import { formatNumber } from "@/lib/format";
 import { loadOutreachConfig } from "@/lib/outreach/build";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Chăm sóc & bán chéo" };
 
-const STATUSES = ["PENDING", "SENT", "FAILED", "SKIPPED"];
 
 export default async function OutreachPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("orders:read");
@@ -26,7 +25,7 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
   const canConfig = can(user, "settings:manage");
   const raw = await searchParams;
   const segment = raw.segment === "CROSS_SELL" ? "CROSS_SELL" : "NURTURE";
-  const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["status"], sortable: OUTREACH_SORTABLE, defaultPeriod: "all" });
+  const params = parseListParams(raw, { defaultSort: "nextAt", defaultDir: "asc", filterKeys: ["status"], sortable: OUTREACH_SORTABLE, defaultPeriod: "all" });
   const [{ rows, total, pageCount }, facet, summary, config, products] = await Promise.all([listOutreachTargets(params, segment), outreachStatusFacet(segment), outreachSummary(), loadOutreachConfig(), listProductsForMapping()]);
   const segHref = (seg: string) => {
     const q = new URLSearchParams();
@@ -39,27 +38,27 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Vận hành"
         title="Chăm sóc khách băn khoăn & bán chéo"
-        description="Tự lập danh sách hằng ngày: (1) khách đã nhắn Pancake nhưng chưa đặt đơn → tin hỏi thăm, tư vấn thêm; (2) khách đã nhận hàng thành công 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
-        actions={canWrite ? <BuildButton segment={segment} /> : null}
+        description="(1) Khách đã nhắn Pancake trong 24 giờ hoặc 7 ngày nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, mỗi ngày một tin (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại); tự dừng khi khách đặt đơn hoặc trả lời để nhân viên tiếp quản. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
+        actions={canWrite ? <BuildButton segment={segment} defaultHours={config.nurtureWindowHours} /> : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Băn khoăn chưa mua · chờ gửi" value={formatNumber(summary.nurture.pending)} note={`${formatNumber(summary.nurture.sent)} đã gửi · ${formatNumber(summary.nurture.failed)} lỗi`} icon={MessageSquareHeart} tone={summary.nurture.pending ? "amber" : "slate"} />
-        <MetricCard label="Bán chéo sau nhận hàng · chờ gửi" value={formatNumber(summary.crossSell.pending)} note={`${formatNumber(summary.crossSell.sent)} đã gửi · ${formatNumber(summary.crossSell.failed)} lỗi`} icon={ShoppingBag} tone={summary.crossSell.pending ? "amber" : "slate"} />
+        <MetricCard label="Băn khoăn chưa mua · đến hạn gửi" value={formatNumber(summary.nurture.due)} note={`${formatNumber(summary.nurture.pending)} đang trong kịch bản · ${formatNumber(summary.nurture.converted)} đã mua · ${formatNumber(summary.nurture.replied)} khách trả lời · ${formatNumber(summary.nurture.failed)} lỗi`} icon={MessageSquareHeart} tone={summary.nurture.due ? "amber" : "slate"} />
+        <MetricCard label="Bán chéo sau nhận hàng · chờ gửi" value={formatNumber(summary.crossSell.due)} note={`${formatNumber(summary.crossSell.sent)} đã gửi · ${formatNumber(summary.crossSell.failed)} lỗi`} icon={ShoppingBag} tone={summary.crossSell.pending ? "amber" : "slate"} />
         <MetricCard label="Đã gửi 24 giờ qua" value={formatNumber(summary.sentToday)} note={`Giới hạn ${formatNumber(config.dailyLimit)} tin/ngày`} icon={Send} tone="green" />
-        <MetricCard label="Cửa sổ" value={`${config.nurtureDays} ngày · ${config.crossSellFromDays}–${config.crossSellToDays} ngày`} note={`Không nhắn lại cùng khách trong ${config.cooldownDays} ngày`} icon={HeartHandshake} tone="blue" />
+        <MetricCard label="Kịch bản băn khoăn" value={`${config.nurtureSteps.length} bước · ${NURTURE_WINDOWS.find((w) => w.hours === config.nurtureWindowHours)?.label ?? `${config.nurtureWindowHours} giờ`}`} note={`Mỗi bước cách ${config.nurtureStepGapDays} ngày · bán chéo ${config.crossSellFromDays}–${config.crossSellToDays} ngày sau nhận · không nhắn lại trong ${config.cooldownDays} ngày`} icon={HeartHandshake} tone="blue" />
       </section>
       <OutreachConfigForm config={config} products={products} canWrite={canConfig} />
       <div className="flex flex-wrap gap-2">
         {(["NURTURE", "CROSS_SELL"] as const).map((seg) => (
           <Link key={seg} href={segHref(seg)} className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition", seg === segment ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted")}>
-            {SEGMENT_LABEL[seg]} · {formatNumber(seg === "NURTURE" ? summary.nurture.pending : summary.crossSell.pending)} chờ gửi
+            {SEGMENT_LABEL[seg]} · {formatNumber(seg === "NURTURE" ? summary.nurture.due : summary.crossSell.due)} đến hạn
           </Link>
         ))}
       </div>
       <DataTableToolbar
         searchPlaceholder="Tên khách, SĐT, nội dung…"
         period={false}
-        facets={[{ key: "status", label: "Trạng thái", options: STATUSES.map((s) => ({ value: s, label: OUTREACH_STATUS_LABEL[s], count: facet.find((x) => x.value === s)?.count ?? 0 })) }]}
+        facets={[{ key: "status", label: "Trạng thái", options: OUTREACH_STATUSES.map((s) => ({ value: s, label: OUTREACH_STATUS_LABEL[s], count: facet.find((x) => x.value === s)?.count ?? 0 })) }]}
         resultLabel={`${formatNumber(total)} khách`}
       />
       <SectionCard padded={false}>

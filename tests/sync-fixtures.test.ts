@@ -20,7 +20,7 @@ import { detectFromMessages } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
-import { renderTemplate, shortName } from "@/lib/constants/outreach";
+import { DEFAULT_NURTURE_STEPS, isDue, normalizeOutreachConfig, renderTemplate, shortName } from "@/lib/constants/outreach";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
@@ -372,7 +372,15 @@ async function main() {
   assert.equal(renderTemplate(tpl, { ten: "chị Lan", san_pham: "Đầm Q003", goi_y: "Q004", shop: "Hải An", discountCode: "" }), "Chào chị Lan, cảm ơn đã mua Đầm Q003 tại Hải An. Gợi ý: Q004.");
   assert.ok(renderTemplate(tpl, { ten: "", san_pham: "", goi_y: "", shop: "", discountCode: "CAMON10" }).includes("mã CAMON10"));
   assert.ok(renderTemplate(tpl, { ten: "", san_pham: "", goi_y: "", shop: "", discountCode: "" }).startsWith("Chào chị,"));
-  console.log("✓ Mẫu tin chăm sóc khách & bán chéo");
+  assert.ok(renderTemplate(DEFAULT_NURTURE_STEPS[0], { ten: "chị Lan", san_pham: "", goi_y: "", shop: "Hải An", discountCode: "", giam: "50k/váy" }).includes("giảm ngay 50k/váy"));
+  const legacy = normalizeOutreachConfig({ nurtureDays: 2, nurtureTemplate: "Chào {ten}, shop hỗ trợ tư vấn thêm ạ" });
+  assert.equal(legacy.nurtureWindowHours, 48, "cấu hình cũ nurtureDays → giờ");
+  assert.equal(legacy.nurtureSteps.length, DEFAULT_NURTURE_STEPS.length, "mẫu cũ thành bước 1, các bước sau dùng kịch bản mẫu");
+  assert.equal(normalizeOutreachConfig(null).nurtureWindowHours, 168);
+  assert.equal(isDue({ status: "PENDING", nextAt: null }), true);
+  assert.equal(isDue({ status: "PENDING", nextAt: new Date(Date.now() + 3_600_000) }), false, "chưa đến hạn bước tiếp theo");
+  assert.equal(isDue({ status: "SENT", nextAt: null }), false);
+  console.log("✓ Mẫu tin chăm sóc khách & kịch bản băn khoăn nhiều bước");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

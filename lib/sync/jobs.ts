@@ -110,8 +110,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",
     source: "PANCAKE",
-    description: "Khách nhắn Pancake chưa đặt đơn (băn khoăn) và khách đã nhận hàng 3–14 ngày (bán chéo) → danh sách chờ gửi ở trang Chăm sóc & bán chéo (chỉ lập danh sách, không tự gửi).",
-    run: () => buildOutreachTargets(),
+    description: "Khách nhắn Pancake chưa đặt đơn (băn khoăn, cửa sổ 24h/7 ngày theo cấu hình; hours=N để ghi đè) và khách đã nhận hàng 3–14 ngày (bán chéo) → danh sách chờ gửi ở trang Chăm sóc & bán chéo; đồng thời rà kịch bản đang chạy (đã mua / khách trả lời). Chỉ lập danh sách, không tự gửi.",
+    run: (o) => buildOutreachTargets({ windowHours: num(o.params?.hours) }),
   },
   all: {
     label: "Đồng bộ tất cả",
