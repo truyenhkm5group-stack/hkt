@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const minShipped = Math.max(1, Number(param(sp, "min", "1")) || 1);
   const { all } = await getReturnRateByVariant({ period, q, minShipped, sort: "rate", dir: "desc", page: 1, pageSize: 1 });
 
-  const header = ["SKU", "Sản phẩm", "Mẫu mã", "Đã gửi", "Giao thành công thật", "Hoàn", "Hoàn theo quy tắc COD/cước", "Đang giao", "Chờ phát lại", "Huỷ", "Tỷ lệ hoàn %", "Số lượng hoàn", "Doanh thu hoàn", "Doanh thu giao thật"];
+  const header = ["SKU", "Sản phẩm", "Mẫu mã", "Đã gửi", "Giao thành công thật", "Hoàn", "Hoàn theo quy tắc COD/cước", "Đang giao", "Chờ phát lại", "Huỷ", "Tỷ lệ hoàn %", "Dự kiến %", "Số lượng hoàn", "Doanh thu hoàn", "Doanh thu giao thật"];
   const lines = [header.map(csvCell).join(",")];
   for (const r of all) {
     lines.push([r.sku, r.productName, r.variationDetail, r.shipped, r.delivered, r.returned, r.returnedByRule, r.inTransit, r.failed, r.cancelled, r.rate === null ? "" : r.rate.toFixed(1), r.expectedRate === null ? "" : r.expectedRate.toFixed(1), r.returnedQty, r.lostRevenue, r.deliveredRevenue].map(csvCell).join(","));
