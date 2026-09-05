@@ -1,79 +1,95 @@
 /**
- * Dò các API liệt kê vận đơn của Viettel Post (đối tác v2 và cổng khách hàng viettelpost.vn) bằng token hiện có,
- * để tìm endpoint trả về các vận đơn tạo qua Pancake. In mã HTTP / status + đoạn đầu phản hồi, KHÔNG in token / mật khẩu.
+ * Dò API cổng khách hàng Viettel Post (api.viettelpost.vn, đăng nhập qua id.viettelpost.vn / token đối tác) để liệt kê vận đơn
+ * tạo qua Pancake. In status + đoạn đầu phản hồi, che token / mật khẩu.
  *   npx tsx scripts/vtp-probe.ts [mã vận đơn]
  */
 import "dotenv/config";
 import { env } from "@/lib/env";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 
-const orderNumber = process.argv[2] || "PKE1508909088";
+const orderNumber = process.argv[2] || "PKE1512546011";
 const fmtVN = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
-const fmtISO = (d: Date) => d.toISOString().slice(0, 10);
 const to = new Date();
 const from = new Date(Date.now() - 30 * 86_400_000);
+const secrets: string[] = [];
+const mask = (t: string) => secrets.reduce((o, s) => (s ? o.split(s).join("***") : o), t);
+const show = (label: string, v: unknown) => console.log(`- ${label}: ${mask(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 380).replace(/\s+/g, " ")}`);
 
-function mask(t: string, secrets: string[]) {
-  let out = t;
-  for (const s of secrets) if (s) out = out.split(s).join("***");
-  return out;
+async function call(url: string, init: RequestInit & { token?: string; bearer?: string } = {}) {
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/plain, */*", "user-agent": "Mozilla/5.0", origin: "https://viettelpost.vn", referer: "https://viettelpost.vn/" };
+  if (init.token) headers.Token = init.token;
+  if (init.bearer) headers.Authorization = `Bearer ${init.bearer}`;
+  const res = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(25_000) });
+  const text = await res.text();
+  return { status: res.status, text };
 }
 
 async function main() {
   const client = getViettelPostClient();
-  const token = await client.getToken();
-  const secrets = [token, env.viettelPost.apiKey ?? "", env.viettelPost.password ?? ""].filter(Boolean) as string[];
-  const show = (label: string, v: unknown) => {
-    const text = typeof v === "string" ? v : JSON.stringify(v);
-    console.log(`- ${label}: ${mask(text, secrets).slice(0, 420).replace(/\s+/g, " ")}`);
-  };
-  const tries: [string, () => Promise<unknown>][] = [
-    ["order-filter body VN 30 ngày + list_status all", () => client.debugCall("order/order-filter", { token, method: "POST", query: { page: 1 }, body: { filter: "", from_date: fmtVN(from), to_date: fmtVN(to), list_inventory: [], list_status: [] } })],
-    ["order-filter body ISO", () => client.debugCall("order/order-filter", { token, method: "POST", query: { page: 1 }, body: { filter: "", from_date: fmtISO(from), to_date: fmtISO(to), list_inventory: [], list_status: [] } })],
-    ["order-filter UPPER keys", () => client.debugCall("order/order-filter", { token, method: "POST", body: { FILTER: "", FROM_DATE: fmtVN(from), TO_DATE: fmtVN(to), LIST_INVENTORY: [], LIST_STATUS: [], PAGE: 1, PAGE_SIZE: 20 } })],
-    ["order-filter filter=mã vận đơn", () => client.debugCall("order/order-filter", { token, method: "POST", query: { page: 1 }, body: { filter: orderNumber, from_date: fmtVN(new Date(Date.now() - 90 * 86_400_000)), to_date: fmtVN(to), list_inventory: [], list_status: [] } })],
-    ["order/listOrder POST {page,size}", () => client.debugCall("order/listOrder", { token, method: "POST", body: { page: 1, size: 20 } })],
-    ["order/listOrder POST {PAGE_INDEX,PAGE_SIZE,FROM_DATE,TO_DATE}", () => client.debugCall("order/listOrder", { token, method: "POST", body: { PAGE_INDEX: 1, PAGE_SIZE: 20, FROM_DATE: fmtVN(from), TO_DATE: fmtVN(to) } })],
-    ["order/getListOrder POST", () => client.debugCall("order/getListOrder", { token, method: "POST", body: { PAGE_INDEX: 1, PAGE_SIZE: 20, FROM_DATE: fmtVN(from), TO_DATE: fmtVN(to) } })],
-    ["order/getListOrder GET", () => client.debugCall("order/getListOrder", { token, query: { page: 1, size: 20, fromDate: fmtVN(from), toDate: fmtVN(to) } })],
-    ["order/list POST", () => client.debugCall("order/list", { token, method: "POST", body: { page: 1, size: 20, fromDate: fmtVN(from), toDate: fmtVN(to) } })],
-    ["order/order-list POST", () => client.debugCall("order/order-list", { token, method: "POST", body: { page: 1, size: 20 } })],
-    ["order/getOrderList POST", () => client.debugCall("order/getOrderList", { token, method: "POST", body: { PAGE: 1, PAGE_SIZE: 20, FROM_DATE: fmtVN(from), TO_DATE: fmtVN(to) } })],
-    ["order/search POST", () => client.debugCall("order/search", { token, method: "POST", body: { keyword: orderNumber } })],
-    ["order/getOrderByToken GET", () => client.debugCall("order/getOrderByToken", { token, query: { orderNumber } })],
-    ["order/order-report POST", () => client.debugCall("order/order-report", { token, method: "POST", body: { from_date: fmtVN(from), to_date: fmtVN(to) } })],
-    ["order/statistical POST", () => client.debugCall("order/statistical", { token, method: "POST", body: { from_date: fmtVN(from), to_date: fmtVN(to) } })],
-    ["order/order-filter-v2 POST", () => client.debugCall("order/order-filter-v2", { token, method: "POST", query: { page: 1 }, body: { filter: "", from_date: fmtVN(from), to_date: fmtVN(to), list_inventory: [], list_status: [] } })],
-    ["user/info", () => client.debugCall("user/info", { token })],
-    ["user/getInfoUser", () => client.debugCall("user/getInfoUser", { token })],
-    ["user/listInventory count", async () => ({ count: ((await client.debugCall("user/listInventory", { token })).data as unknown[])?.length })],
-  ];
-  for (const [label, fn] of tries) {
-    try {
-      show(label, await fn());
-    } catch (e) {
-      show(label, `lỗi ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`);
+  const partnerToken = await client.getToken();
+  secrets.push(partnerToken, env.viettelPost.apiKey ?? "", env.viettelPost.password ?? "");
+  const user = env.viettelPost.username ?? "";
+  const pass = env.viettelPost.password ?? "";
+  // 1) OIDC password grant trên id.viettelpost.vn (client vtp.web)
+  const tokens: { label: string; token?: string; bearer?: string }[] = [{ label: "partner Token header", token: partnerToken }, { label: "partner Bearer", bearer: partnerToken }];
+  if (user && pass) {
+    for (const scope of ["openid profile offline_access", "openid"]) {
+      try {
+        const body = new URLSearchParams({ grant_type: "password", username: user, password: pass, client_id: "vtp.web", client_secret: "vtp-web", scope });
+        const res = await fetch("https://id.viettelpost.vn/connect/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body, signal: AbortSignal.timeout(25_000) });
+        const text = await res.text();
+        let j: Record<string, unknown> = {};
+        try { j = JSON.parse(text) as Record<string, unknown>; } catch { /* ignore */ }
+        const at = typeof j.access_token === "string" ? j.access_token : "";
+        const idt = typeof j.id_token === "string" ? j.id_token : "";
+        if (at) secrets.push(at);
+        if (idt) secrets.push(idt);
+        show(`id.viettelpost.vn connect/token (${scope}) HTTP ${res.status}`, at ? `OK access_token ${at.length} ký tự, id_token ${idt.length}, keys=${Object.keys(j).join(",")}` : text.slice(0, 200));
+        if (at) { tokens.push({ label: "OIDC Bearer", bearer: at }); tokens.push({ label: "OIDC Token header", token: at }); break; }
+      } catch (e) {
+        show("connect/token lỗi", e instanceof Error ? e.message : String(e));
+      }
     }
-  }
-  // Cổng khách hàng viettelpost.vn (web) — thử vài host / đường dẫn với cùng token
-  const webTries: [string, string, RequestInit][] = [
-    ["web api order-filter", "https://viettelpost.vn/api/v2/order/order-filter?page=1", { method: "POST", body: JSON.stringify({ filter: "", from_date: fmtVN(from), to_date: fmtVN(to), list_inventory: [], list_status: [] }) }],
-    ["api.viettelpost.vn v2 order-filter", "https://api.viettelpost.vn/v2/order/order-filter?page=1", { method: "POST", body: JSON.stringify({ filter: "", from_date: fmtVN(from), to_date: fmtVN(to), list_inventory: [], list_status: [] }) }],
-    ["partner v2 getOrderDetailV3 (đối chiếu)", `https://partner.viettelpost.vn/v2/order/getOrderDetailV3?OrderNumber=${orderNumber}`, { method: "GET" }],
-    ["partner v2 categories/listProvince (sanity)", "https://partner.viettelpost.vn/v2/categories/listProvince", { method: "GET" }],
+  } else show("OIDC", "thiếu VIETTELPOST_USERNAME / PASSWORD");
+  // 2) Thử các endpoint web
+  const bodies: Record<string, unknown>[] = [
+    { status: -1, pageIndex: 1, pageSize: 20, fromDate: fmtVN(from), toDate: fmtVN(to) },
+    { STATUS: -1, PAGE_INDEX: 1, PAGE_SIZE: 20, FROM_DATE: fmtVN(from), TO_DATE: fmtVN(to) },
+    { page: 1, limit: 20, from_date: fmtVN(from), to_date: fmtVN(to) },
+    { status: "-1", page: 1, size: 20, fromDate: from.toISOString(), toDate: to.toISOString() },
   ];
-  for (const [label, url, init] of webTries) {
-    try {
-      const res = await fetch(url, { ...init, headers: { "content-type": "application/json", accept: "application/json", Token: token }, signal: AbortSignal.timeout(20_000) });
-      const text = await res.text();
-      show(`${label} HTTP ${res.status}`, text.slice(0, 300));
-    } catch (e) {
-      show(label, `lỗi ${e instanceof Error ? e.message : String(e)}`);
+  const endpoints = ["https://api.viettelpost.vn/api/supperapp/total-order-by-status", "https://api.viettelpost.vn/api/supperapp/get-list-order-by-status-v2", "https://api.viettelpost.vn/api/supperapp/orderByStatusWeb", "https://api.viettelpost.vn/api/supperapp/orderByStatusSummary", "https://api.viettelpost.vn/api/orderOperate/search-list-order"];
+  for (const t of tokens) {
+    console.log(`## ${t.label}`);
+    for (const ep of endpoints) {
+      for (const [i, body] of bodies.entries()) {
+        try {
+          const r = await call(ep, { method: "POST", body: JSON.stringify(body), token: t.token, bearer: t.bearer });
+          show(`${ep.split("/api/")[1]} body#${i + 1} HTTP ${r.status}`, r.text.slice(0, 260));
+          if (r.status === 200 && r.text.length > 50 && !/error":true/.test(r.text)) break;
+        } catch (e) {
+          show(ep, e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    for (const [label, url, init] of [
+      ["2.0/order/status/{no} GET", `https://api.viettelpost.vn/api/2.0/order/status/${orderNumber}`, { method: "GET" }],
+      ["2.0/order/get_detail POST", "https://api.viettelpost.vn/api/2.0/order/get_detail", { method: "POST", body: JSON.stringify({ ORDER_NUMBER: orderNumber, orderNumber }) }],
+      ["orders/orderStatus POST", "https://api.viettelpost.vn/api/orders/orderStatus", { method: "POST", body: JSON.stringify({ orderNumber, ORDER_NUMBER: orderNumber }) }],
+      ["supperapp/selectOrderInfo POST", "https://api.viettelpost.vn/api/supperapp/selectOrderInfo", { method: "POST", body: JSON.stringify({ orderNumber, ORDER_NUMBER: orderNumber }) }],
+      ["user/getSettingTabOrderWeb GET", "https://api.viettelpost.vn/api/user/getSettingTabOrderWeb", { method: "GET" }],
+    ] as const) {
+      try {
+        const r = await call(url, { ...init, token: t.token, bearer: t.bearer });
+        show(`${label} HTTP ${r.status}`, r.text.slice(0, 260));
+      } catch (e) {
+        show(label, e instanceof Error ? e.message : String(e));
+      }
     }
   }
 }
 
 main().catch((e) => {
-  console.error(e instanceof Error ? e.message : e);
+  console.error(mask(e instanceof Error ? e.message : String(e)));
   process.exit(1);
 });
