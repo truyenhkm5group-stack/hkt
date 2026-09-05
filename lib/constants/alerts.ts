@@ -69,3 +69,20 @@ export const FB_ACCOUNT_STATUS_LABEL: Record<number, string> = {
   201: "Bất kỳ hoạt động",
   202: "Bất kỳ đã đóng",
 };
+
+/** Lý do Meta vô hiệu hoá tài khoản (disable_reason) */
+export const FB_DISABLE_REASON_LABEL: Record<number, string> = {
+  0: "",
+  1: "Vi phạm chính sách quảng cáo",
+  2: "Đang xét duyệt IP",
+  3: "Rủi ro thanh toán / thẻ bị từ chối",
+  4: "Tài khoản xám bị đóng",
+  5: "Xét duyệt AFC",
+  6: "Vi phạm tính toàn vẹn doanh nghiệp",
+  7: "Đóng vĩnh viễn",
+  8: "Tài khoản đại lý không dùng",
+  9: "Tài khoản không dùng",
+  10: "Tài khoản ô",
+  11: "Vi phạm chính sách Business Manager",
+  12: "Khai báo sai tài khoản",
+};

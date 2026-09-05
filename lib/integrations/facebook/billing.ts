@@ -21,9 +21,14 @@ export function effectiveThreshold(row: { threshold: number | null; learnedThres
   return row.threshold && row.threshold > 0 ? row.threshold : row.learnedThreshold && row.learnedThreshold > 0 ? row.learnedThreshold : null;
 }
 
-/** Tài khoản đang bị chặn chạy quảng cáo vì thanh toán? */
+/** Tài khoản đang bị chặn chạy quảng cáo (vì thanh toán hoặc lý do khác)? */
 export function isBillingBlocked(row: { accountStatus: number; disableReason: number }) {
   return [2, 3, 8, 9].includes(row.accountStatus) || row.disableReason > 0;
+}
+
+/** Bị chặn vì thanh toán (chưa thanh toán / ân hạn / rủi ro thanh toán) chứ không phải vì chính sách */
+export function isPaymentIssue(row: { accountStatus: number; disableReason: number }) {
+  return [3, 8, 9].includes(row.accountStatus) || row.disableReason === 3;
 }
 
 export async function syncAdAccountBilling() {

@@ -13,8 +13,8 @@ import { detectCsCases } from "@/lib/cs/detect";
 import { openCsCases } from "@/lib/queries/cs";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
-import { FB_ACCOUNT_STATUS_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
-import { effectiveThreshold, isBillingBlocked, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
+import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
+import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
@@ -180,11 +180,13 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       for (const r of rows) {
         const money = (v: number) => (r.currency === "VND" ? formatVND(v) : `${v.toLocaleString("vi-VN")} ${r.currency}`);
         if (isBillingBlocked(r)) {
+          const payment = isPaymentIssue(r);
+          const reason = FB_DISABLE_REASON_LABEL[r.disableReason] || "";
           candidates.push({
             kind: "ADS_BILLING",
-            severity: "critical",
-            title: `${r.name} · ${FB_ACCOUNT_STATUS_LABEL[r.accountStatus] ?? `trạng thái ${r.accountStatus}`}`,
-            body: `Dư nợ ${money(r.balance)} · thanh toán ngay để chạy lại quảng cáo${r.fundingSource ? ` · ${r.fundingSource}` : ""}`,
+            severity: payment ? "critical" : "warning",
+            title: `${r.name} · ${FB_ACCOUNT_STATUS_LABEL[r.accountStatus] ?? `trạng thái ${r.accountStatus}`}${reason ? ` · ${reason}` : ""}`,
+            body: payment ? `Dư nợ ${money(r.balance)} · thanh toán ngay để chạy lại quảng cáo${r.fundingSource ? ` · ${r.fundingSource}` : ""}` : `Dư nợ ${money(r.balance)} · tài khoản bị khoá không phải vì thanh toán, kiểm tra trong Trình quản lý quảng cáo`,
             href: "/expenses?tab=ads",
             entityType: "AD_ACCOUNT",
             entityId: r.accountId,

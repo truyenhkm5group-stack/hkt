@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { saveAdAccountThreshold } from "@/lib/actions/alerts";
-import { FB_ACCOUNT_STATUS_LABEL } from "@/lib/constants/alerts";
+import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL } from "@/lib/constants/alerts";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import type { BillingRow } from "@/lib/integrations/facebook/billing";
 import { cn } from "@/lib/utils";
@@ -67,7 +67,7 @@ export function AdsBillingTable({ rows, warnPercent, canWrite }: { rows: Billing
                 </TableCell>
                 <TableCell>
                   <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", blocked ? "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300")}>{FB_ACCOUNT_STATUS_LABEL[r.accountStatus] ?? `Mã ${r.accountStatus}`}</span>
-                  {r.disableReason ? <div className="mt-1 text-[11px] text-rose-600">Lý do khoá: {r.disableReason}</div> : null}
+                  {r.disableReason ? <div className="mt-1 text-[11px] text-rose-600">{FB_DISABLE_REASON_LABEL[r.disableReason] || `Lý do khoá ${r.disableReason}`}</div> : null}
                 </TableCell>
                 <TableCell className={cn("text-right font-semibold tabular-nums", blocked && "text-rose-600")}>{money(r.balance, r.currency)}</TableCell>
                 <TableCell className="text-right"><div className="flex justify-end"><ThresholdInput row={r} canWrite={canWrite} /></div></TableCell>
