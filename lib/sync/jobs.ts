@@ -106,7 +106,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Đơn landing page từ Google Sheet",
     source: "ALL",
     description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới; recheck=1 tính lại trùng / rủi ro cho mọi dòng.",
-    run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? { rechecked: await recheckAllLanding(num(o.params?.days) ?? 60) } : importLandingSheet({ onlyNew: o.params?.new === "1" })),
+    run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? recheckAllLanding(num(o.params?.days) ?? 60) : importLandingSheet({ onlyNew: o.params?.new === "1" })),
   },
   "facebook-ad-index": {
     label: "Tra ad_id đơn Pancake → chiến dịch Facebook",

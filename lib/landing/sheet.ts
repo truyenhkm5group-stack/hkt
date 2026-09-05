@@ -172,6 +172,8 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
         result.skipped += 1;
         continue;
       }
+      // tab đặt tên theo mã hàng (Q003, Q002) → dòng không có mã trong chiến dịch vẫn biết mã
+      if (!parsed.product && /^[A-Z]{1,2}\d{3}$/i.test(tab.label)) parsed.product = tab.label.toUpperCase();
       const match = matchVariant({ product: parsed.product, variant: parsed.variant, size: parsed.size, color: parsed.color }, candidates);
       if (match) result.matchedVariants += 1;
       const at = parsed.time ?? new Date();
@@ -265,11 +267,27 @@ export async function refreshLandingChecks(id: string) {
   return { duplicates: dups, risk };
 }
 
-/** Tính lại trùng / rủi ro cho mọi dòng landing N ngày gần đây (sau khi đổi quy tắc) */
-export async function recheckAllLanding(days = 60): Promise<number> {
+/** Tính lại trùng / rủi ro (và ghép lại mẫu mã cho dòng chưa ghép) cho mọi dòng landing N ngày gần đây */
+export async function recheckAllLanding(days = 60): Promise<{ rechecked: number; variantsMatched: number }> {
   const db = await getDb();
-  const rows = await db.select({ id: schema.landingOrders.id }).from(schema.landingOrders).where(gte(schema.landingOrders.createdAt, new Date(Date.now() - days * 86_400_000)));
-  for (const r of rows) await refreshLandingChecks(r.id);
+  const candidates = await variantCandidates();
+  const rows = await db
+    .select({ id: schema.landingOrders.id, variantId: schema.landingOrders.variantId, product: schema.landingOrders.productText, variant: schema.landingOrders.variantText, size: schema.landingOrders.sizeText, color: schema.landingOrders.colorText, tab: schema.landingOrders.sheetGid })
+    .from(schema.landingOrders)
+    .where(gte(schema.landingOrders.createdAt, new Date(Date.now() - days * 86_400_000)));
+  let variantsMatched = 0;
+  for (const r of rows) {
+    if (!r.variantId) {
+      const label = r.tab.replace(/^tab:/, "");
+      const product = r.product || (/^[A-Z]{1,2}\d{3}$/i.test(label) ? label.toUpperCase() : "");
+      const match = matchVariant({ product, variant: r.variant, size: r.size, color: r.color }, candidates);
+      if (match) {
+        await db.update(schema.landingOrders).set({ variantId: match.variant.id, variantMatchScore: match.score, productText: product, updatedAt: new Date() }).where(eq(schema.landingOrders.id, r.id));
+        variantsMatched += 1;
+      }
+    }
+    await refreshLandingChecks(r.id);
+  }
   clearMemo();
-  return rows.length;
+  return { rechecked: rows.length, variantsMatched };
 }
