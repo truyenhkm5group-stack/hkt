@@ -698,6 +698,28 @@ export const expenses = pgTable(
   (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt)],
 );
 
+/** Danh mục quảng cáo Facebook (ad_id → adset / chiến dịch / tài khoản) để ghi nhận đơn Pancake có ad_id cho đúng marketer */
+export const fbAds = pgTable(
+  "fb_ads",
+  {
+    /** ad_id Facebook (khớp orders.ad_id) */
+    id: text("id").primaryKey(),
+    name: text("name").notNull().default(""),
+    adsetId: text("adset_id"),
+    campaignId: text("campaign_id"),
+    campaignName: text("campaign_name").notNull().default(""),
+    accountId: text("account_id"),
+    status: text("status").notNull().default(""),
+    /** Không tra được trên Facebook (đã xoá / không có quyền) */
+    missing: boolean("missing").notNull().default(false),
+    fetchedAt: ts("fetched_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("fb_ads_campaign_idx").on(t.campaignId)],
+);
+export type FbAd = typeof fbAds.$inferSelect;
+
 export const adSpends = pgTable(
   "ad_spends",
   {

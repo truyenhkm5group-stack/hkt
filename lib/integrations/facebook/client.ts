@@ -40,6 +40,8 @@ const THROTTLE_MS = 150;
 let lastCallAt = 0;
 
 /** Client Facebook Marketing API (chỉ đọc): tài khoản quảng cáo trong Business Manager và insights theo ngày × chiến dịch */
+export type FbAdInfo = { id: string; name: string; adsetId: string | null; campaignId: string | null; campaignName: string; accountId: string | null; status: string; missing: boolean; error?: string };
+
 export class FacebookAdsClient {
   constructor(
     private readonly accessToken = env.facebook.accessToken,
@@ -124,6 +126,41 @@ export class FacebookAdsClient {
       }
     }
     return [...out.values()];
+  }
+
+  /**
+   * Tra thông tin quảng cáo theo ad_id (đơn Pancake ghi ad_id): adset, chiến dịch, tài khoản. Tối đa 50 id / lần gọi;
+   * id không tra được (đã xoá / không có quyền) trả về missing.
+   */
+  async getAdsByIds(ids: string[]): Promise<FbAdInfo[]> {
+    const out: FbAdInfo[] = [];
+    const clean = [...new Set(ids.map((x) => x.trim()).filter((x) => /^\d{5,}$/.test(x)))];
+    for (let i = 0; i < clean.length; i += 50) {
+      const chunk = clean.slice(i, i + 50);
+      let record: Record<string, unknown> = {};
+      try {
+        record = await this.get("", { ids: chunk.join(","), fields: "id,name,adset_id,campaign_id,account_id,status,campaign{id,name}" });
+      } catch (error) {
+        // một id lỗi làm hỏng cả lô → tra từng id
+        if (chunk.length > 1) {
+          for (const id of chunk) out.push(...(await this.getAdsByIds([id])));
+          continue;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        out.push({ id: chunk[0], name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true, error: message });
+        continue;
+      }
+      for (const id of chunk) {
+        const item = asRecord(record[id]);
+        if (!str(item.id)) {
+          out.push({ id, name: "", adsetId: null, campaignId: null, campaignName: "", accountId: null, status: "", missing: true });
+          continue;
+        }
+        const campaign = asRecord(item.campaign);
+        out.push({ id, name: str(item.name), adsetId: str(item.adset_id) || null, campaignId: str(item.campaign_id) || str(campaign.id) || null, campaignName: str(campaign.name), accountId: str(item.account_id).replace(/^act_/, "") || null, status: str(item.status), missing: false });
+      }
+    }
+    return out;
   }
 
   /** Dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo (để cảnh báo ngưỡng thanh toán) */

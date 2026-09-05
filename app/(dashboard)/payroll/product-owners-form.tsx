@@ -49,7 +49,7 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
         <span>
           Fanpage <b>{pagesMapped}/{pages.length}</b> đã gán marketer · mã hàng <b>{assigned}/{products.length}</b> đã có chủ mã
         </span>
-        <span className="text-muted-foreground">Đơn & doanh thu ghi nhận theo fanpage phát sinh đơn; page chưa gán thì chia theo tỷ trọng QC. Chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã.</span>
+        <span className="text-muted-foreground">Đơn & doanh thu ghi nhận theo thứ tự: ad_id của đơn (quảng cáo tạo ra đơn → chiến dịch → marketer, đúng từng đơn kể cả chạy chung page) → fanpage phát sinh đơn → tỷ trọng QC. Chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã.</span>
         {pages.length - pagesMapped > 0 ? <span className="text-amber-700">{pages.length - pagesMapped} fanpage chưa gán → đơn trên page đó đang chia theo QC</span> : null}
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
@@ -61,7 +61,7 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
         <div className="mt-4 space-y-5 border-t pt-4">
           <section className="space-y-2">
             <div className="font-semibold">1. Fanpage → marketer (đơn trong 90 ngày)</div>
-            <p className="text-xs text-muted-foreground">Mỗi fanpage một marketer: mọi đơn lên từ page được ghi nhận đơn, doanh thu, lợi nhuận cho người đó. Gán theo người chạy quảng cáo & ra đơn nhiều nhất trên page.</p>
+            <p className="text-xs text-muted-foreground">Mỗi fanpage một marketer: đơn lên từ page mà không nhận diện được qua ad_id sẽ ghi nhận cho người này. Gán theo người chạy quảng cáo & ra đơn nhiều nhất trên page.</p>
             {pages.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có đơn nào kèm page_id.</p> : null}
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {pages.map((p) => (

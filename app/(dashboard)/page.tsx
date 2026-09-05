@@ -75,9 +75,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Doanh thu lên đơn" value={formatVND(data.kpi.revenue, { compact: true })} change={change(data.kpi.revenue, data.previous?.revenue)} note={`${formatNumber(data.kpi.orders)} đơn · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`} icon={ShoppingBag} tone="blue" />
+        <MetricCard label="Doanh thu lên đơn" value={formatVND(data.kpi.revenue, { compact: true })} change={change(data.kpi.revenue, data.previous?.revenue)} note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`} icon={ShoppingBag} tone="blue" />
         <MetricCard label="Giao thành công" value={formatVND(data.kpi.successRevenue, { compact: true })} change={change(data.kpi.successRevenue, data.previous?.successRevenue)} note={`${formatNumber(data.kpi.successOrders)} đơn · tỷ lệ ${successRate.toFixed(1)}%`} icon={PackageCheck} tone="green" />
-        <MetricCard label="COD đã thu, chờ về tài khoản" value={formatVND(data.attention.codWaiting.amount, { compact: true })} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn · đã về ngân hàng trong kỳ ${formatVND(data.realized.amount, { compact: true })}`} icon={Banknote} tone="amber" />
+        <MetricCard label="COD đã thu, chờ về tài khoản" value={formatVND(data.attention.codWaiting.amount, { compact: true })} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn đã giao${data.attention.codWaiting.deductedByStatements ? ` − ${formatVND(data.attention.codWaiting.deductedByStatements, { compact: true })} đã về theo bảng kê` : ""} · đã về ngân hàng trong kỳ ${formatVND(data.realized.amount, { compact: true })}${data.realized.source === "statements" ? ` (${formatNumber(data.realized.count)} bảng kê VTP, thực nhận ${formatVND(data.realized.net, { compact: true })})` : ""}`} icon={Banknote} tone="amber" />
         <MetricCard label="Lợi nhuận ước tính" value={formatVND(data.finance.estimatedProfit, { compact: true })} note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`} icon={TrendingUp} tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"} />
       </section>
 

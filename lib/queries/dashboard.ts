@@ -1,5 +1,7 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
+import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
 import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
@@ -28,7 +30,8 @@ export type OrderKpis = {
 
 async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
   const db = await getDb();
-  const where = inPeriod(schema.orders.insertedAt, from, to);
+  // Chỉ đơn ĐÃ XÁC NHẬN trên Pancake (bỏ đơn Mới chưa chốt, huỷ, xoá) — khớp báo cáo lợi nhuận
+  const where = and(inPeriod(schema.orders.insertedAt, from, to), inArray(schema.orders.stage, [...CONFIRMED_STAGES]));
   // Kết quả đơn theo trạng thái vận đơn Viettel Post kết hợp Pancake (ORDER_OUTCOME)
   const [row] = await db
     .select({
@@ -83,7 +86,7 @@ async function getDashboardDataUncached(period: Period) {
     })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")))
+    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
     .groupBy(sql`1`)
     .orderBy(sql`1`);
   const daily = dailyRows.map((r) => ({ day: r.day, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0), successRevenue: Number(r.successRevenue ?? 0) }));
@@ -93,7 +96,7 @@ async function getDashboardDataUncached(period: Period) {
     .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")))
+    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
     .groupBy(schema.orders.source)
     .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount)));
   const channels = channelRows.map((r) => ({ source: r.source, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0) }));
@@ -106,11 +109,6 @@ async function getDashboardDataUncached(period: Period) {
   const codRows = await db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus);
   const cod = Object.fromEntries(codRows.map((r) => [r.status, { count: Number(r.count), amount: Number(r.amount ?? 0) }]));
 
-  // Tiền thực về trong kỳ (COD về ngân hàng theo ngày ghi nhận)
-  const [paid] = await db
-    .select({ amount: sum(schema.shipments.codCollected), count: count() })
-    .from(schema.shipments)
-    .where(and(eq(schema.shipments.codStatus, "PAID_TO_BANK"), period.from ? gte(schema.shipments.codPaidToBankAt, period.from) : undefined, period.to ? lte(schema.shipments.codPaidToBankAt, period.to) : undefined));
 
   // Chi phí trong kỳ
   const [expense] = await db
@@ -142,7 +140,8 @@ async function getDashboardDataUncached(period: Period) {
     .from(schema.shipments)
     .where(and(inArray(schema.shipments.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(schema.shipments.updatedAt, new Date(Date.now() - 4 * 86_400_000))));
   const [newOrders] = await db.select({ count: count() }).from(schema.orders).where(eq(schema.orders.stage, "NEW"));
-  const [codWaiting] = await db.select({ count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(inArray(schema.shipments.codStatus, ["COLLECTED", "RECONCILED"]));
+  // COD đã thu chờ về / đã về ngân hàng: cùng cách tính với Báo cáo lợi nhuận & Đối soát COD (bảng kê Viettel Post gộp theo đợt)
+  const codCash = await codCashSummary(period);
 
   // Đơn mới nhất
   const recentOrders = await db.query.orders.findMany({
@@ -157,7 +156,7 @@ async function getDashboardDataUncached(period: Period) {
     .select({ productName: schema.orderItems.productName, sku: schema.orderItems.sku, quantity: sum(schema.orderItems.quantity), revenue: sum(schema.orderItems.lineTotal), image: sql<string | null>`max(${schema.orderItems.image})` })
     .from(schema.orderItems)
     .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")))
+    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
     .groupBy(schema.orderItems.productName, schema.orderItems.sku)
     .orderBy(desc(sum(schema.orderItems.quantity)))
     .limit(6);
@@ -167,7 +166,7 @@ async function getDashboardDataUncached(period: Period) {
   const [orderTotal] = await db.select({ count: count() }).from(schema.orders);
 
   const netRevenue = current.successRevenue;
-  const realized = Number(paid?.amount ?? 0);
+  const realized = codCash.codPaid.amount;
   const expenses = Number(expense?.amount ?? 0);
   const adSpend = Number(ads?.amount ?? 0);
   const shipping = Number(shippingFees?.fee ?? 0);
@@ -192,14 +191,14 @@ async function getDashboardDataUncached(period: Period) {
     channels,
     shipmentsByStage,
     cod,
-    realized: { amount: realized, count: Number(paid?.count ?? 0) },
+    realized: { amount: realized, count: codCash.codPaid.source === "statements" ? codCash.codPaid.batches.count : codCash.codPaid.count, source: codCash.codPaid.source, net: codCash.cashInCod },
     finance: { netRevenue, successCogs, shipping, returnFee, adSpend, expenses, estimatedProfit },
     attention: {
       newOrders: Number(newOrders?.count ?? 0),
       failedDelivery: Number(failedDelivery?.count ?? 0),
       lowStock: Number(lowStock?.count ?? 0),
       staleShipments: Number(stale?.count ?? 0),
-      codWaiting: { count: Number(codWaiting?.count ?? 0), amount: Number(codWaiting?.amount ?? 0) },
+      codWaiting: { count: codCash.codWaiting.count, amount: codCash.codWaiting.amount, collected: codCash.codWaiting.collected, deductedByStatements: codCash.codWaiting.deductedByStatements },
     },
     recentOrders,
     topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0) })),

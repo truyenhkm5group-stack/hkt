@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
+import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -138,18 +139,20 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
     const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
     const cond = mode === "delivered" ? sql`${ORDER_OUTCOME} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
     const rows = await db
-      .select({ productId: productKey, pageId: o.pageId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
+      .select({ productId: productKey, pageId: o.pageId, adId: o.adId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
       .leftJoin(s, eq(s.orderId, o.id))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
-      .groupBy(sql`1`, o.pageId);
+      .groupBy(sql`1`, o.pageId, o.adId);
+    // ad_id → marketer (chiến dịch tạo ra đơn); đơn không có / chưa tra được ad_id thì để fanpage quyết định
+    const adMap = await adMarketerMap(rows.map((r) => r.adId).filter((x): x is string => Boolean(x)));
     const map = new Map<string, PageBucket[]>();
     for (const r of rows) {
       if (!r.productId) continue;
       const list = map.get(r.productId) ?? [];
-      list.push({ pageId: r.pageId || null, value: Number(r.value) });
+      list.push({ pageId: r.pageId || null, value: Number(r.value), adMarketerId: r.adId ? (adMap.get(r.adId) ?? null) : null });
       map.set(r.productId, list);
     }
     return map;

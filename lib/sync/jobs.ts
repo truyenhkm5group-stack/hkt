@@ -15,6 +15,7 @@ import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
+import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -93,7 +94,18 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Chi tiêu quảng cáo Facebook",
     source: "FACEBOOK",
     description: "Kéo chi tiêu theo ngày × chiến dịch của mọi tài khoản quảng cáo trong Business Manager (days=N để kéo lùi N ngày, mặc định 3).",
-    run: (o) => syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) }),
+    run: async (o) => {
+      const r = await syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) });
+      // tra ad_id của đơn Pancake → chiến dịch → marketer (ghi nhận đơn đúng người chạy)
+      const adIndex = await syncFacebookAdIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
+      return { ...r, adIndex };
+    },
+  },
+  "facebook-ad-index": {
+    label: "Tra ad_id đơn Pancake → chiến dịch Facebook",
+    source: "FACEBOOK",
+    description: "Đơn Pancake có ad_id (quảng cáo tạo ra đơn) → tra Facebook lấy chiến dịch / tài khoản → ghi nhận đơn, doanh thu cho đúng marketer kể cả khi chạy chung fanpage. days=N số ngày đơn quét lùi (mặc định 120).",
+    run: (o) => syncFacebookAdIndex({ days: num(o.params?.days) }),
   },
   alerts: {
     label: "Cảnh báo vận hành",

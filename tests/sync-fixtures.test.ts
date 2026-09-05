@@ -541,6 +541,8 @@ async function main() {
   const a2 = attributionShares({ byPage: [{ pageId: "P1", value: 600 }, { pageId: "P9", value: 200 }, { pageId: null, value: 200 }], pageMarketers: pm, adShares: new Map([["B", 1]]), ownerId: "A" });
   assert.ok(Math.abs((a2.shares.get("A") ?? 0) - 0.6) < 1e-9 && Math.abs((a2.shares.get("B") ?? 0) - 0.4) < 1e-9, "page chưa gán / không page (40%) chia theo QC → B");
   assert.equal(a2.unmappedValue, 400);
+  const a4 = attributionShares({ byPage: [{ pageId: "P1", value: 400, adMarketerId: "B" }, { pageId: "P1", value: 600 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
+  assert.ok(Math.abs((a4.shares.get("B") ?? 0) - 0.4) < 1e-9 && Math.abs((a4.shares.get("A") ?? 0) - 0.6) < 1e-9, "ad_id của đơn thắng fanpage: B chạy chung page của A vẫn được ghi nhận đúng 40%");
   const a3 = attributionShares({ byPage: [{ pageId: "P9", value: 500 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
   assert.equal(a3.mode, "owner", "không page gán, không QC → về chủ mã");
   assert.equal(attributionShares({ byPage: [], pageMarketers: pm, adShares: new Map([["A", 0.2], ["B", 0.8]]), ownerId: null }).shares.get("B"), 0.8, "không có page → theo QC như cũ");

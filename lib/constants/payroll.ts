@@ -73,7 +73,8 @@ export function shareFor(config: Pick<PayrollConfig, "productShares" | "ownerSha
   return { ownerPct: clampPct(s?.ownerPct, 100), crossPct: clampPct(s?.crossPct, defaultCross) };
 }
 
-export type PageBucket = { pageId: string | null; value: number };
+/** Một phần doanh số của mã đã gán được (hoặc chưa) cho marketer: theo ad_id → chiến dịch, hoặc theo fanpage */
+export type PageBucket = { pageId: string | null; value: number; /** marketer đã nhận diện từ ad_id của đơn (ưu tiên hơn fanpage) */ adMarketerId?: string | null };
 export type AttributionMode = "page" | "ads" | "owner" | "none";
 export type Attribution = {
   /** marketerId → tỷ trọng (0–1), tổng = 1 khi có người nhận */
@@ -87,6 +88,7 @@ export type Attribution = {
 
 /**
  * Ghi nhận đơn & doanh thu của một mã cho marketer:
+ *  0. theo AD_ID của đơn (quảng cáo tạo ra đơn → chiến dịch → marketer) — chính xác từng đơn, kể cả chạy chung fanpage;
  *  1. theo FANPAGE phát sinh đơn (pageMarketers) — mỗi page thuộc một marketer;
  *  2. đơn trên page chưa gán / không có page: chia theo tỷ trọng tiền QC trên mã, không có QC thì về chủ mã,
  *     không có chủ mã thì chia theo tỷ trọng đã ghi nhận theo page;
@@ -99,7 +101,8 @@ export function attributionShares(input: { byPage: PageBucket[]; pageMarketers: 
   let unmappedValue = 0;
   for (const b of input.byPage) {
     const v = Math.max(0, b.value);
-    const mid = b.pageId ? input.pageMarketers[b.pageId] : undefined;
+    // ưu tiên marketer nhận diện từ ad_id (chiến dịch tạo ra đơn), rồi tới fanpage
+    const mid = b.adMarketerId || (b.pageId ? input.pageMarketers[b.pageId] : undefined);
     if (mid) {
       mapped.set(mid, (mapped.get(mid) ?? 0) + v);
       mappedValue += v;
