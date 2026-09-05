@@ -2,6 +2,7 @@ import { AlertTriangle, CopyX, FileSpreadsheet, PackageCheck, Send, Undo2 } from
 import { LandingConfigForm } from "@/app/(dashboard)/landing/landing-config";
 import { LandingTable } from "@/app/(dashboard)/landing/landing-table";
 import { ImportButton } from "@/app/(dashboard)/landing/import-button";
+import { AutoRefresh } from "@/app/(dashboard)/landing/auto-refresh";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -45,10 +46,11 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-5">
+      <AutoRefresh seconds={30} />
       <PageHeader
         eyebrow="Vận hành"
         title="Đơn landing page"
-        description={`${period.label} · ${formatNumber(summary.total)} đơn từ Google Sheet · đọc sheet 10 phút/lần${summary.lastImportAt ? ` · dòng mới nhất ${summary.lastImportAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}` : ""}. Trạng thái giao / hoàn / huỷ lấy từ đơn Pancake đã ghép (theo SĐT hoặc sau khi gửi POS), kết quả đơn ưu tiên Viettel Post.`}
+        description={`${period.label} · ${formatNumber(summary.total)} đơn từ Google Sheet · đồng bộ gần như tức thời (đọc sheet mỗi phút, tự làm mới trang)${summary.lastImportAt ? ` · dòng mới nhất ${summary.lastImportAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}` : ""}. Trạng thái giao / hoàn / huỷ lấy từ đơn Pancake đã ghép (theo SĐT hoặc sau khi gửi POS), kết quả đơn ưu tiên Viettel Post.`}
         actions={canManage ? <ImportButton configured={Boolean(config.sheetUrl)} /> : null}
       />
 
@@ -76,7 +78,7 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
       {!config.sheetUrl ? (
         <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
           <CopyX className="mt-0.5 size-4 shrink-0" />
-          <span>Chưa cấu hình link Google Sheet. Bấm “Cấu hình sheet” ở trên, dán link sheet (đã chia sẻ “Bất kỳ ai có liên kết – Người xem”), ERP sẽ tự dò cột và đọc mỗi 10 phút.</span>
+          <span>Chưa cấu hình link Google Sheet. Bấm “Cấu hình sheet” ở trên, dán link sheet (đã chia sẻ “Bất kỳ ai có liên kết – Người xem”), ERP sẽ tự dò cột và đọc mỗi phút.</span>
         </div>
       ) : null}
 

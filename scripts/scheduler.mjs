@@ -21,7 +21,8 @@ const JOBS = [
   { job: "alerts", every: minutes("ALERTS_EVERY_MINUTES", 10), offset: 3 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
-  { job: "landing-sheet", every: minutes("SYNC_LANDING_EVERY_MINUTES", 10), offset: 7 },
+  { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới
+  { job: "landing-sheet", every: minutes("SYNC_LANDING_EVERY_MINUTES", 10), offset: 8.5 }, // đầy đủ: ghép lại theo SĐT, cập nhật dòng đã sửa
 ];
 
 const DAILY = [
@@ -71,8 +72,8 @@ async function main() {
 
   for (const item of JOBS) {
     setTimeout(() => {
-      trigger(item.job);
-      setInterval(() => trigger(item.job), item.every * 60_000);
+      trigger(item.job, item.query);
+      setInterval(() => trigger(item.job, item.query), item.every * 60_000);
     }, item.offset * 60_000);
   }
   log("Lịch chạy:", JOBS.map((j) => `${j.job}/${j.every}p`).join(", "));

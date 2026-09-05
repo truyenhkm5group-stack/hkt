@@ -231,6 +231,11 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       log(`${tab.label} dòng ${rowNo}: ${parsed.name} ${parsed.phone} · ${parsed.product} → ${match ? `mẫu ${match.variant.productCode} ${match.variant.size} ${match.variant.color}` : "chưa ghép mẫu mã"}${dups.length ? ` · trùng ${dups.length}` : ""}${risk.risky ? " · RỦI RO" : ""}`);
     }
   }
+  // Chạy nhanh (near-realtime, mỗi phút): chỉ nạp dòng mới, bỏ qua bước ghép lại toàn bộ cho nhẹ
+  if (options.onlyNew) {
+    clearMemo();
+    return result;
+  }
   // các dòng chưa gắn đơn Pancake: thử ghép lại theo SĐT (khách được lên đơn sau khi nhân viên gọi chốt)
   const unlinked = await db
     .select({ id: schema.landingOrders.id, phone: schema.landingOrders.phone, at: schema.landingOrders.submittedAt, createdAt: schema.landingOrders.createdAt })
