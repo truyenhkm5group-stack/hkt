@@ -110,7 +110,7 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
         const last = recent[recent.length - 1];
         snippet = (last?.text || "").slice(0, 160);
       } catch (e) {
-        result.errors.length < 10 && result.errors.push(`#${r.systemId}: không đọc được chat (${e instanceof Error ? e.message : String(e)})`);
+        if (result.errors.length < 10) result.errors.push(`#${r.systemId}: không đọc được chat (${e instanceof Error ? e.message : String(e)})`);
       }
     }
     const now = new Date();
