@@ -1,21 +1,46 @@
 /**
- * Vận đơn giao không thành (Viettel Post: chờ xử lý / hẹn phát lại) → tự nhắn khách qua Pancake hỏi lý do,
- * kèm SĐT bưu tá khi hẹn phát lại; mở case CSKH ghi rõ ĐÃ NHẮN hay CHƯA XỬ LÝ ĐƯỢC (đơn từ landing page / sheet không có hội thoại)
- * để nhân viên gọi / nhắn Zalo tay. Case mới lên chuông + Lark theo kênh CS_CASE.
+ * Vận đơn giao không thành (Viettel Post) → đọc ghi chú bưu tá để biết LÝ DO, soạn tin riêng theo lý do và nhắn khách qua Pancake
+ * (kèm giờ hẹn, tên & SĐT bưu tá). Mỗi vận đơn / mỗi lần thất bại chỉ nhắn một lần: case CSKH được "giữ chỗ" (insert trước, khoá duy nhất)
+ * trước khi gửi nên hai lần chạy chồng nhau không thể gửi trùng. Case ghi rõ ✅ đã nhắn / ⛔ chưa xử lý được (không có hội thoại Pancake).
  */
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { FAILED_REASON_LABEL, type FailedReason } from "@/lib/constants/cs";
 import { loadCsRules } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { shortName } from "@/lib/constants/outreach";
+import { normalize } from "@/lib/text";
 
 export type FailedMode = "RETRY" | "PENDING";
 
-/** Hẹn phát lại (khách hẹn / bưu tá phát tiếp) hay chờ xử lý (không liên lạc được, khách từ chối, tồn) */
+/** Hẹn phát lại hay chờ xử lý (giữ để tương thích) */
 export function failedMode(texts: (string | null | undefined)[]): FailedMode {
-  const t = texts.filter(Boolean).join(" ").toLowerCase();
-  return /ph[aá]t l[aạ]i|ph[aá]t ti[eế]p|h[eẹ]n/.test(t) ? "RETRY" : "PENDING";
+  return classifyFailedReason(texts) === "RESCHEDULED" ? "RETRY" : "PENDING";
+}
+
+/** Phân loại lý do từ ghi chú bưu tá / tên trạng thái (ưu tiên ghi chú mới nhất) */
+export function classifyFailedReason(texts: (string | null | undefined)[]): FailedReason {
+  const n = normalize(texts.filter(Boolean).join(" | "));
+  if (/hen phat lai|hen giao|hen lai|khach hen|phat lai luc|giao lai luc/.test(n)) return "RESCHEDULED";
+  if (/tu choi|khong nhan|ko nhan|khong lay|khong dat|khong mua|doi y|huy don|boom|bom hang|khong dong y/.test(n)) return "REFUSED";
+  if (/khong lien lac|ko lien lac|khong nghe may|ko nghe may|thue bao|khong bat may|sai so|so dien thoai sai|khong goi duoc/.test(n)) return "NO_CONTACT";
+  if (/sai dia chi|khong tim thay dia chi|dia chi khong|khong ro dia chi|khong dung dia chi|dia chi sai|khong tim duoc/.test(n)) return "WRONG_ADDRESS";
+  if (/khong co nha|di vang|khong co nguoi nhan|khach nghi|vang nha|khong co mat|di lam|di cong tac/.test(n)) return "NOT_HOME";
+  if (/khong du tien|chua co tien|khong co tien|tien cod|kiem hang|dong kiem|xem hang|phi ship|cuoc/.test(n)) return "COD_ISSUE";
+  return "OTHER";
+}
+
+/** Giờ hẹn trong ghi chú "hẹn phát lại ( 16:06 - 04/09/2026 )" */
+export function parseAppointment(texts: (string | null | undefined)[]): string {
+  for (const t of texts) {
+    if (!t) continue;
+    const m = /\(\s*(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*\)/.exec(t) ?? /(\d{1,2}:\d{2})\s*(?:ngay|ngày)?\s*(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/i.exec(t);
+    if (m) return `${m[1]} ngày ${m[2]}`;
+    const d = /hẹn[^0-9]*(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/i.exec(t);
+    if (d) return `ngày ${d[1]}`;
+  }
+  return "";
 }
 
 /** Tách tên & SĐT bưu tá từ ghi chú hành trình: "… - Bưu tá: Châu Thanh Hồng - 0971170052" */
@@ -30,7 +55,16 @@ export function parsePostman(texts: (string | null | undefined)[]): { name: stri
   return null;
 }
 
-export function renderFailedTemplate(template: string, v: { ten: string; ma_van_don: string; buu_ta: string; sdt_buu_ta: string; shop: string; san_pham: string }) {
+/** Ghi chú bưu tá gọn (bỏ phần "Bưu tá: … - SĐT") để chèn vào tin / case */
+export function cleanReason(text: string | null | undefined) {
+  if (!text) return "";
+  return text
+    .replace(/[-–—]?\s*b[uư]u\s*t[aá]\s*:?[^|]*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function renderFailedTemplate(template: string, v: { ten: string; ma_van_don: string; buu_ta: string; sdt_buu_ta: string; shop: string; san_pham: string; ly_do?: string; gio_hen?: string }) {
   return template
     .replace(/\{ten\}/g, v.ten || "chị")
     .replace(/\{ma_van_don\}/g, v.ma_van_don)
@@ -38,17 +72,33 @@ export function renderFailedTemplate(template: string, v: { ten: string; ma_van_
     .replace(/\{sdt_buu_ta\}/g, v.sdt_buu_ta || "(shop sẽ gửi số bưu tá ngay)")
     .replace(/\{shop\}/g, v.shop || "Shop")
     .replace(/\{san_pham\}/g, v.san_pham || "hàng")
+    .replace(/\{ly_do\}/g, v.ly_do || "chưa gặp được khách")
+    .replace(/\{gio_hen\}/g, v.gio_hen || "giờ đã hẹn với bưu tá")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
 }
 
 const dayKey = (d: Date | null) => (d ?? new Date()).toISOString().slice(0, 10);
+const lock = globalThis as unknown as { __erpFailedDeliveryRunning?: boolean };
 
 export async function handleFailedDeliveries(options: { lookbackDays?: number; log?: (m: string) => void } = {}) {
+  const result = { scanned: 0, messaged: 0, manual: 0, skipped: 0, byReason: {} as Record<string, number>, errors: [] as string[] };
+  if (lock.__erpFailedDeliveryRunning) {
+    result.errors.push("Đang có lần chạy khác");
+    return result;
+  }
+  lock.__erpFailedDeliveryRunning = true;
+  try {
+    return await run(options, result);
+  } finally {
+    lock.__erpFailedDeliveryRunning = false;
+  }
+}
+
+async function run(options: { lookbackDays?: number; log?: (m: string) => void }, result: { scanned: number; messaged: number; manual: number; skipped: number; byReason: Record<string, number>; errors: string[] }) {
   const db = await getDb();
   const rules = await loadCsRules();
   const log = options.log ?? (() => undefined);
-  const result = { scanned: 0, messaged: 0, manual: 0, skipped: 0, errors: [] as string[] };
   if (!rules.failedDeliveryAuto) return result;
   const since = new Date(Date.now() - (options.lookbackDays ?? 3) * 86_400_000);
   const s = schema.shipments;
@@ -73,33 +123,41 @@ export async function handleFailedDeliveries(options: { lookbackDays?: number; l
     .innerJoin(o, eq(o.id, s.orderId))
     .where(and(eq(s.stage, "DELIVERY_FAILED"), eq(s.isFinal, false), gte(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, since)));
   if (!rows.length) return result;
-  const keys = rows.map((r) => `failed-delivery:${r.shipmentId}:${dayKey(r.statusDate ?? r.updatedAt)}`);
-  const existing = new Set((await db.select({ k: schema.csCases.dedupeKey }).from(schema.csCases).where(inArray(schema.csCases.dedupeKey, keys))).map((r) => r.k));
   const canSend = Boolean(env.pancake.pagesAccessToken);
   const client = canSend ? getPancakePagesClient() : null;
-  const now = new Date();
-  const at = now.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
 
   for (const r of rows) {
     const key = `failed-delivery:${r.shipmentId}:${dayKey(r.statusDate ?? r.updatedAt)}`;
-    if (existing.has(key)) {
+    // Giữ chỗ trước khi gửi: chỉ lần chạy nào chèn được case (khoá duy nhất) mới được nhắn → không thể gửi trùng
+    const claimed = await db
+      .insert(schema.csCases)
+      .values({ dedupeKey: key, orderId: r.orderId, customerId: r.customerId ?? null, kind: "DELIVERY_FAILED", status: "OPEN", source: "AUTO_FAILED_DELIVERY", title: `⏳ Đang xử lý · Giao không thành · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`, detail: `${r.tracking} · ${r.statusName ?? ""}`, customerName: r.name ?? "", customerPhone: r.phone ?? "", chatUrl: r.pageId && r.conversationId ? `https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : "", createdBy: "failed-delivery-bot" })
+      .onConflictDoNothing({ target: schema.csCases.dedupeKey })
+      .returning({ id: schema.csCases.id });
+    if (!claimed.length) {
       result.skipped += 1;
       continue;
     }
+    const caseId = claimed[0].id;
     result.scanned += 1;
     const events = await db.select({ statusName: schema.shipmentEvents.statusName, note: schema.shipmentEvents.note }).from(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, r.shipmentId)).orderBy(desc(schema.shipmentEvents.occurredAt)).limit(6);
-    const texts = [r.statusName, r.note, ...events.flatMap((e) => [e.statusName, e.note])];
-    const mode = failedMode([r.statusName, r.note, events[0]?.statusName, events[0]?.note]);
+    const latest = [r.note, r.statusName, events[0]?.note, events[0]?.statusName];
+    const texts = [...latest, ...events.slice(1).flatMap((e) => [e.note, e.statusName])];
+    const reason = classifyFailedReason(latest);
     const postman = parsePostman(texts);
+    const appointment = parseAppointment(latest);
+    const reasonText = cleanReason(r.note || events[0]?.note || r.statusName || events[0]?.statusName || "");
     const items = await db.select({ name: schema.orderItems.productName }).from(schema.orderItems).where(eq(schema.orderItems.orderId, r.orderId)).limit(2);
     const sanPham = [...new Set(items.map((i) => i.name).filter(Boolean))].join(", ");
-    const text = renderFailedTemplate(mode === "RETRY" ? rules.failedDeliveryTemplates.retry : rules.failedDeliveryTemplates.pending, {
+    const text = renderFailedTemplate(rules.failedDeliveryTemplates[reason] ?? rules.failedDeliveryTemplates.OTHER, {
       ten: shortName(r.name ?? ""),
       ma_van_don: r.tracking,
       buu_ta: postman?.name ?? "",
       sdt_buu_ta: postman?.phone ?? "",
       shop: rules.failedDeliveryShopName,
       san_pham: sanPham,
+      ly_do: reasonText,
+      gio_hen: appointment,
     });
     let sent = false;
     let error = "";
@@ -114,32 +172,18 @@ export async function handleFailedDeliveries(options: { lookbackDays?: number; l
     } else {
       error = canSend ? "Đơn không có hội thoại Pancake (landing page / sheet)" : "Chưa cấu hình PANCAKE_ACCESS_TOKEN";
     }
-    const modeLabel = mode === "RETRY" ? "hẹn phát lại" : "chờ xử lý";
+    const at = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
     const postmanText = postman ? ` · bưu tá ${postman.name}${postman.phone ? ` ${postman.phone}` : ""}` : "";
-    const title = `${sent ? "✅ Đã nhắn khách" : "⛔ Chưa xử lý"} · Giao không thành (${modeLabel}) · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`;
-    const detail = `${r.tracking} · ${r.statusName ?? ""}${postmanText}${sent ? ` · đã gửi tin Pancake lúc ${at}` : ` · ${error} → gọi điện / nhắn Zalo ${r.phone ?? ""} thủ công`}\n— Nội dung: ${text}`;
+    const title = `${sent ? "✅ Đã nhắn khách" : "⛔ Chưa xử lý"} · ${FAILED_REASON_LABEL[reason]} · ${r.name || "Khách"} · đơn #${r.systemId ?? ""}`;
+    const detail = `${r.tracking} · bưu tá ghi: ${reasonText || r.statusName || "—"}${appointment ? ` · hẹn ${appointment}` : ""}${postmanText}${sent ? ` · đã gửi tin Pancake lúc ${at}` : ` · ${error} → gọi điện / nhắn Zalo ${r.phone ?? ""} thủ công`}\n— Nội dung: ${text}`;
     await db
-      .insert(schema.csCases)
-      .values({
-        dedupeKey: key,
-        orderId: r.orderId,
-        customerId: r.customerId ?? null,
-        kind: "DELIVERY_FAILED",
-        status: sent ? "IN_PROGRESS" : "OPEN",
-        source: "AUTO_FAILED_DELIVERY",
-        title,
-        detail: detail.slice(0, 1500),
-        customerName: r.name ?? "",
-        customerPhone: r.phone ?? "",
-        assignee: sent ? "Bot ERP" : "",
-        resolution: sent ? `Đã nhắn khách qua Pancake lúc ${at}${postman?.phone ? ` · đã gửi SĐT bưu tá ${postman.phone}` : ""}` : "",
-        chatUrl: r.pageId && r.conversationId ? `https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : "",
-        createdBy: "failed-delivery-bot",
-      })
-      .onConflictDoNothing({ target: schema.csCases.dedupeKey });
+      .update(schema.csCases)
+      .set({ title, detail: detail.slice(0, 1500), status: sent ? "IN_PROGRESS" : "OPEN", assignee: sent ? "Bot ERP" : "", resolution: sent ? `Đã nhắn khách qua Pancake lúc ${at} (${FAILED_REASON_LABEL[reason]})${postman?.phone ? ` · đã gửi SĐT bưu tá ${postman.phone}` : ""}` : "", updatedAt: new Date() })
+      .where(eq(schema.csCases.id, caseId));
+    result.byReason[reason] = (result.byReason[reason] ?? 0) + 1;
     if (sent) result.messaged += 1;
     else result.manual += 1;
-    log(`${r.tracking} ${modeLabel} → ${sent ? "đã nhắn" : `chưa xử lý (${error})`}`);
+    log(`${r.tracking} ${FAILED_REASON_LABEL[reason]} → ${sent ? "đã nhắn" : `chưa xử lý (${error})`}`);
     if (sent) await new Promise((res) => setTimeout(res, 1200));
   }
   return result;

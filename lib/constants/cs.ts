@@ -36,6 +36,19 @@ export const CS_SOURCE_LABEL: Record<string, string> = {
 };
 
 /** Quy tắc nhận diện: từ khoá (không dấu, chữ thường) trong thẻ / ghi chú đơn → loại case. Chỉnh trong settings "cs.rules". */
+/** Lý do giao không thành, đọc từ ghi chú bưu tá / trạng thái Viettel Post */
+export const FAILED_REASONS = ["RESCHEDULED", "NO_CONTACT", "NOT_HOME", "REFUSED", "WRONG_ADDRESS", "COD_ISSUE", "OTHER"] as const;
+export type FailedReason = (typeof FAILED_REASONS)[number];
+export const FAILED_REASON_LABEL: Record<FailedReason, string> = {
+  RESCHEDULED: "Khách hẹn phát lại",
+  NO_CONTACT: "Không liên lạc được",
+  NOT_HOME: "Khách đi vắng / không có nhà",
+  REFUSED: "Khách từ chối nhận",
+  WRONG_ADDRESS: "Sai / không tìm thấy địa chỉ",
+  COD_ISSUE: "Vấn đề tiền COD / muốn kiểm hàng",
+  OTHER: "Lý do khác",
+};
+
 export type CsRules = {
   /** Số ngày quét lùi các đơn mới cập nhật */
   lookbackDays: number;
@@ -53,8 +66,8 @@ export type CsRules = {
   ignorePatterns: string[];
   /** Tự nhắn khách qua Pancake khi vận đơn giao không thành (chờ xử lý / hẹn phát lại) */
   failedDeliveryAuto: boolean;
-  /** Mẫu tin: biến {ten} {ma_van_don} {buu_ta} {sdt_buu_ta} {shop} {san_pham} */
-  failedDeliveryTemplates: { pending: string; retry: string };
+  /** Mẫu tin theo LÝ DO bưu tá ghi. Biến: {ten} {ma_van_don} {san_pham} {buu_ta} {sdt_buu_ta} {ly_do} {gio_hen} {shop} */
+  failedDeliveryTemplates: Record<FailedReason, string>;
   failedDeliveryShopName: string;
 };
 
@@ -150,9 +163,19 @@ export const DEFAULT_CS_RULES: CsRules = {
   failedDeliveryAuto: true,
   failedDeliveryShopName: "Shop",
   failedDeliveryTemplates: {
-    pending:
-      "Dạ chào {ten} ơi, {shop} thấy đơn {san_pham} (mã vận đơn {ma_van_don}) bưu tá đã giao tới nhưng mình chưa nhận được ạ 😢 Mình cho shop hỏi lý do chưa nhận hàng được không ạ (mình bận, chưa có nhà hay cần đổi thông tin)? Shop sẽ hỗ trợ giao lại hoặc điều chỉnh ngay cho mình, hàng được kiểm tra trước khi thanh toán ạ 💛",
-    retry:
-      "Dạ chào {ten} ơi, đơn {san_pham} (mã vận đơn {ma_van_don}) bưu tá đã giao tới nhưng chưa gặp được mình nên đang hẹn phát lại ạ. Mình cho shop hỏi lý do chưa nhận được không ạ? Bưu tá phụ trách: {buu_ta} – {sdt_buu_ta}. Mình chủ động gọi bưu tá hẹn giờ nhận hàng giúp shop nhé, hàng được kiểm tra thoải mái trước khi thanh toán ạ 💛",
+    RESCHEDULED:
+      "Dạ chào {ten} ơi, bưu tá báo mình hẹn nhận đơn {san_pham} (mã {ma_van_don}) lúc {gio_hen} ạ. Shop nhắn để mình nhớ giữ máy giúp bưu tá nhé. Bưu tá phụ trách: {buu_ta} – {sdt_buu_ta}, nếu mình muốn đổi giờ thì gọi trực tiếp bưu tá cho nhanh ạ. Hàng được kiểm tra thoải mái trước khi thanh toán 💛",
+    NO_CONTACT:
+      "Dạ chào {ten} ơi, bưu tá mang đơn {san_pham} (mã {ma_van_don}) tới nhưng gọi chưa liên lạc được với mình ạ 😢 Mình để ý điện thoại giúp shop, hoặc gọi lại bưu tá {buu_ta} – {sdt_buu_ta} để hẹn giờ nhận nhé. Nếu số này không tiện nghe, mình cho shop số khác để shop báo bưu tá ạ 💛",
+    NOT_HOME:
+      "Dạ chào {ten} ơi, bưu tá ghé giao đơn {san_pham} (mã {ma_van_don}) nhưng mình không có nhà ạ. Mình cho shop khung giờ thuận tiện, hoặc gọi bưu tá {buu_ta} – {sdt_buu_ta} hẹn giao lại giúp shop nhé. Hàng được kiểm tra trước khi thanh toán ạ 💛",
+    REFUSED:
+      "Dạ chào {ten} ơi, bưu tá báo đơn {san_pham} (mã {ma_van_don}) mình chưa nhận ạ. Mình cho shop hỏi lý do được không ạ — mình đổi ý, đặt nhầm mẫu/size, chờ lâu hay còn băn khoăn điểm nào? Nếu mình vẫn muốn nhận, shop báo bưu tá giao lại ngay; mình được kiểm hàng thoải mái trước khi thanh toán ạ 💛",
+    WRONG_ADDRESS:
+      "Dạ chào {ten} ơi, bưu tá chưa tìm được địa chỉ giao đơn {san_pham} (mã {ma_van_don}) ạ. Mình gửi giúp shop địa chỉ chi tiết (số nhà, ngõ, mốc dễ tìm) hoặc gọi bưu tá {buu_ta} – {sdt_buu_ta} chỉ đường giúp nhé. Shop cảm ơn mình nhiều ạ 💛",
+    COD_ISSUE:
+      "Dạ chào {ten} ơi, bưu tá báo đơn {san_pham} (mã {ma_van_don}) chưa nhận được ạ. Mình yên tâm là được xem và kiểm tra hàng trước khi thanh toán, chưa ưng có thể trả lại bưu tá tại chỗ. Mình muốn shop hẹn bưu tá giao lại lúc nào tiện ạ? Bưu tá: {buu_ta} – {sdt_buu_ta} 💛",
+    OTHER:
+      "Dạ chào {ten} ơi, đơn {san_pham} (mã {ma_van_don}) bưu tá giao tới nhưng chưa thành công ạ (bưu tá ghi: {ly_do}). Mình cho shop hỏi lý do và giờ thuận tiện để bưu tá {buu_ta} – {sdt_buu_ta} giao lại nhé. Hàng được kiểm tra trước khi thanh toán ạ 💛",
   },
 };

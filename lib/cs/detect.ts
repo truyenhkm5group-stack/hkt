@@ -22,7 +22,7 @@ export async function loadCsRules(): Promise<CsRules> {
     ignorePatterns: cfg.ignorePatterns?.length ? cfg.ignorePatterns : DEFAULT_CS_RULES.ignorePatterns,
     failedDeliveryAuto: cfg.failedDeliveryAuto !== false,
     failedDeliveryShopName: cfg.failedDeliveryShopName || DEFAULT_CS_RULES.failedDeliveryShopName,
-    failedDeliveryTemplates: { ...DEFAULT_CS_RULES.failedDeliveryTemplates, ...(cfg.failedDeliveryTemplates ?? {}) },
+    failedDeliveryTemplates: { ...DEFAULT_CS_RULES.failedDeliveryTemplates, ...Object.fromEntries(Object.entries(cfg.failedDeliveryTemplates ?? {}).filter(([k, v]) => k in DEFAULT_CS_RULES.failedDeliveryTemplates && typeof v === "string" && v.trim())) },
   };
 }
 
