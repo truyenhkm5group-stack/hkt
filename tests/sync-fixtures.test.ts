@@ -36,6 +36,8 @@ import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } fr
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 
 async function main() {
   await ensureMigrated();
@@ -476,6 +478,29 @@ async function main() {
   assert.equal(fixedCostForPeriod(5_000_000, 0), 0, "kỳ không có đơn thì không tính cố định");
   assert.equal(periodMonths(null, new Date()), 0);
   console.log("✓ Giả định vận hành: đóng hàng/đơn, NV vận đơn (đơn + đơn cứu GTC), chi phí cố định theo số tháng của kỳ");
+
+  // Các báo cáo lợi nhuận / lương chạy được trên CSDL thật (bắt lỗi SQL: enum, cột, join)
+  const nominal = await getNominalProfitReport(all);
+  assert.ok(nominal.totals.orders >= 0 && Number.isFinite(nominal.totals.opexTotal), "báo cáo danh nghĩa có tổng vận hành");
+  assert.equal(nominal.totals.opexTotal, nominal.operatingExpenses + nominal.totals.packingCost + nominal.totals.opsStaffCost + nominal.fixedCost, "tổng vận hành = đã nhập + đóng hàng + NV vận đơn + cố định");
+  for (const r of nominal.rows) {
+    assert.equal(r.opexTotal, r.operatingAlloc + r.packingCost + r.opsStaffCost + r.fixedAlloc, `vận hành từng mã ${r.code}`);
+    assert.equal(r.netProfit, r.expectedProfit - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN ròng ${r.code}`);
+    assert.ok(r.rescued <= r.orders, "đơn cứu ≤ đơn");
+  }
+  assert.ok(nominal.assumptions.shipFeeReturnedUsed >= nominal.assumptions.shipFeeDeliveredUsed, "cước đơn hoàn ≥ cước gửi");
+  for (const basis of ["profit1", "profit2", "nominal", "cash"] as const) {
+    const mk = await getMarketerReport(all, basis);
+    assert.equal(mk.totals.operating, mk.totals.operatingEntered + mk.totals.fixedCost + mk.totals.perOrderOps, `vận hành lương (${basis})`);
+    await getPayrollReport(all, basis);
+  }
+  const nb = await getNominalMarketerBreakdown(all);
+  for (const m of nb.rows) {
+    for (const p of m.products) assert.ok(p.adSpend || p.orders || p.revenue || p.ownerBonus || p.personalNet, "chi tiết chỉ gồm mã có số liệu");
+    const sum = m.products.reduce((t, p) => t + p.personalNet, 0) - m.testSpend - Math.round(m.testSpend * ((nominal.assumptions.otherCostPercentOfAds ?? 0) / 100));
+    assert.ok(Math.abs(sum - m.personalNet) <= m.products.length + 1, `tổng chi tiết mã ≈ LN cá nhân của ${m.name}`);
+  }
+  console.log("✓ Báo cáo danh nghĩa / lương / LN theo marketer chạy trên CSDL, chi tiết mã khớp tổng");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

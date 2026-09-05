@@ -128,7 +128,8 @@ async function productEconomics(period: Period) {
   const p = schema.products;
   const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
-  const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
+  // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
+  const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
   const [sales, receipts, [exp], assumptions, rescued] = await Promise.all([
     db
       .select({
@@ -136,7 +137,7 @@ async function productEconomics(period: Period) {
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
         code: sql<string>`max(coalesce(${p.customId}, ''))`,
         // đơn đã gửi đi (có vận đơn, không huỷ) — cơ sở tính đóng hàng & nhân viên vận đơn
-        sentOrders: sql<number>`count(distinct ${o.id}) filter (where ${s.id} is not null and ${o.stage} not in ('CANCELLED','DELETED') and coalesce(${s.stage}, '') not in ('CANCELLED','PENDING'))`,
+        sentOrders: sql<number>`count(distinct ${o.id}) filter (where ${s.id} is not null and ${o.stage} not in ('CANCELLED','DELETED') and ${s.stage} not in ('CANCELLED','PENDING'))`,
         firstAt: sql<string | null>`min(${o.insertedAt})`,
         lastAt: sql<string | null>`max(${o.insertedAt})`,
         deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
