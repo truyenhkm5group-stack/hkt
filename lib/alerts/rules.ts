@@ -13,7 +13,8 @@ import { detectCsCases } from "@/lib/cs/detect";
 import { openCsCases } from "@/lib/queries/cs";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
-import { NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
+import { FB_ACCOUNT_STATUS_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
+import { effectiveThreshold, isBillingBlocked, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
@@ -171,6 +172,46 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       // bỏ qua nếu chưa có dữ liệu tồn
     }
   }
+  if (cfg.enabled.billing) {
+    activeKinds.push("ADS_BILLING");
+    try {
+      const rows = await listAdAccountBilling();
+      const warnPct = Math.min(100, Math.max(10, Number(cfg.billingWarnPercent) || 80));
+      for (const r of rows) {
+        const money = (v: number) => (r.currency === "VND" ? formatVND(v) : `${v.toLocaleString("vi-VN")} ${r.currency}`);
+        if (isBillingBlocked(r)) {
+          candidates.push({
+            kind: "ADS_BILLING",
+            severity: "critical",
+            title: `${r.name} · ${FB_ACCOUNT_STATUS_LABEL[r.accountStatus] ?? `trạng thái ${r.accountStatus}`}`,
+            body: `Dư nợ ${money(r.balance)} · thanh toán ngay để chạy lại quảng cáo${r.fundingSource ? ` · ${r.fundingSource}` : ""}`,
+            href: "/expenses?tab=ads",
+            entityType: "AD_ACCOUNT",
+            entityId: r.accountId,
+            dedupeKey: `ads-blocked:${r.accountId}:${r.accountStatus}:${r.disableReason}`,
+          });
+          continue;
+        }
+        const threshold = effectiveThreshold(r);
+        if (!threshold || r.balance <= 0) continue;
+        const pct = (r.balance / threshold) * 100;
+        if (pct < warnPct) continue;
+        const bucket = pct >= 100 ? "100" : pct >= 90 ? "90" : String(warnPct);
+        candidates.push({
+          kind: "ADS_BILLING",
+          severity: pct >= 100 ? "critical" : "warning",
+          title: `${r.name} · dư nợ ${money(r.balance)} = ${Math.round(pct)}% ngưỡng ${money(threshold)}`,
+          body: `${pct >= 100 ? "Đã chạm ngưỡng, Meta sẽ thu tiền" : "Sắp tới ngưỡng thanh toán"} · kiểm tra số dư thẻ${r.fundingSource ? ` ${r.fundingSource}` : ""}${r.nextBillDate ? ` · kỳ hoá đơn ${r.nextBillDate}` : ""}${r.threshold ? "" : " · ngưỡng tự học, nhập ngưỡng đúng ở tab Quảng cáo"}`,
+          href: "/expenses?tab=ads",
+          entityType: "AD_ACCOUNT",
+          entityId: r.accountId,
+          dedupeKey: `ads-billing:${r.accountId}:${bucket}:${r.lastPaidAt ? new Date(r.lastPaidAt).toISOString().slice(0, 10) : "0"}`,
+        });
+      }
+    } catch {
+      // chưa có dữ liệu thanh toán
+    }
+  }
   return { candidates, activeKinds };
 }
 
@@ -225,13 +266,15 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   }
   // Lark Suite cho thông báo mới
   const lark = { sent: 0, error: undefined as string | undefined };
-  if (created.length && cfg.larkWebhookUrl) {
+  if (created.length && (cfg.larkWebhookUrl || cfg.larkBillingWebhookUrl)) {
     const groups = new Map<string, typeof created>();
     for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
     for (const [kind, list] of groups) {
       const lines = list.slice(0, 15).map((c) => [{ text: `• ${c.title}`, href: `${env.appUrl}${c.href}` }, { text: c.body ? `  ${c.body}` : "" }]);
       if (list.length > 15) lines.push([{ text: `… và ${list.length - 15} mục nữa` }]);
-      const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, `⚠️ ${NOTIFICATION_KIND_LABEL[kind] ?? kind} (${list.length})`, lines);
+      // cảnh báo ngưỡng thanh toán QC đi vào nhóm riêng (nếu cấu hình)
+      const useBilling = kind === "ADS_BILLING" && cfg.larkBillingWebhookUrl;
+      const result = await sendLark(useBilling ? cfg.larkBillingWebhookUrl : cfg.larkWebhookUrl, useBilling ? cfg.larkBillingSecret : cfg.larkSecret, `${kind === "ADS_BILLING" ? "💳" : "⚠️"} ${NOTIFICATION_KIND_LABEL[kind] ?? kind} (${list.length})`, lines);
       if (result.ok) {
         lark.sent += list.length;
         await db.update(n).set({ notifiedAt: new Date() }).where(inArray(n.id, list.map((c) => c.id)));

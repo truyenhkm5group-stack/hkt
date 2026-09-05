@@ -11,6 +11,7 @@ import {
 } from "@/lib/integrations/pancake/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { buildOutreachTargets } from "@/lib/outreach/build";
+import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -105,6 +106,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
       return r;
+    },
+  },
+  "ads-billing": {
+    label: "Dư nợ & ngưỡng thanh toán tài khoản QC",
+    source: "FACEBOOK",
+    description: "Đọc dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo trong Business Manager; học ngưỡng thanh toán; cảnh báo Lark khi sắp tới ngưỡng hoặc tài khoản bị vô hiệu hoá (30 phút/lần).",
+    run: async () => {
+      const r = await syncAdAccountBilling();
+      const alerts = await evaluateAlerts().catch(() => undefined);
+      return { ...r, alerts };
     },
   },
   "outreach-build": {

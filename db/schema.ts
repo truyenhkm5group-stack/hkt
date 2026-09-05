@@ -1,7 +1,7 @@
 // Shop Control ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -136,6 +136,32 @@ export const outreachTargets = pgTable(
   },
   (t) => [index("outreach_segment_status_idx").on(t.segment, t.status, t.createdAt)],
 );
+
+/** Dư nợ & ngưỡng thanh toán của từng tài khoản quảng cáo Facebook (cập nhật từ Marketing API, cảnh báo Lark khi sắp tới ngưỡng) */
+export const adAccountBilling = pgTable("ad_account_billing", {
+  accountId: text("account_id").primaryKey(),
+  name: text("name").notNull().default(""),
+  currency: text("currency").notNull().default("VND"),
+  relation: text("relation").notNull().default("owned"),
+  /** 1 hoạt động · 2 vô hiệu hoá · 3 chưa thanh toán · 7 chờ xét duyệt · 9 ân hạn · 100 chờ đóng · 101 đã đóng */
+  accountStatus: integer("account_status").notNull().default(0),
+  disableReason: integer("disable_reason").notNull().default(0),
+  /** Dư nợ hiện tại (đơn vị tiền tệ tài khoản, đã quy đổi khỏi minor unit) */
+  balance: bigint("balance", { mode: "number" }).notNull().default(0),
+  amountSpent: bigint("amount_spent", { mode: "number" }).notNull().default(0),
+  spendCap: bigint("spend_cap", { mode: "number" }).notNull().default(0),
+  fundingSource: text("funding_source").notNull().default(""),
+  isPrepay: boolean("is_prepay").notNull().default(false),
+  nextBillDate: text("next_bill_date").notNull().default(""),
+  /** Ngưỡng thanh toán do người dùng nhập (từ Trung tâm thanh toán Meta) */
+  threshold: bigint("threshold", { mode: "number" }),
+  /** Ngưỡng tự học: dư nợ ngay trước lần Meta thu tiền gần nhất */
+  learnedThreshold: bigint("learned_threshold", { mode: "number" }),
+  prevBalance: bigint("prev_balance", { mode: "number" }).notNull().default(0),
+  lastPaidAt: ts("last_paid_at"),
+  fetchedAt: ts("fetched_at"),
+  updatedAt: updatedAt(),
+});
 
 /** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
 export const notifications = pgTable(

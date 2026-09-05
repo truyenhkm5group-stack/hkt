@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestTelegram } from "@/lib/actions/alerts";
+import { markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
 
 export function RunAlertsButton() {
@@ -79,12 +79,12 @@ export function ResolveButton({ id }: { id: string }) {
 
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
 export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: AlertConfig; hasToken: boolean; hasLarkSecret?: boolean }) {
-  const [form, setForm] = useState({ ...config, telegramBotToken: "", larkSecret: "" });
+  const [form, setForm] = useState({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "" });
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const save = () =>
     startTransition(async () => {
-      const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken, larkSecret: form.larkSecret || config.larkSecret });
+      const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken, larkSecret: form.larkSecret || config.larkSecret, larkBillingSecret: form.larkBillingSecret || config.larkBillingSecret });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success("Đã lưu cấu hình cảnh báo");
@@ -96,6 +96,12 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
       const r = await sendTestTelegram();
       if ("error" in r) toast.error(`Telegram: ${r.error}`);
       else toast.success("Đã gửi tin thử lên Telegram");
+    });
+  const testLarkBilling = () =>
+    startTransition(async () => {
+      const r = await sendTestLarkBilling();
+      if ("error" in r) toast.error(r.error);
+      else toast.success("Đã gửi tin thử vào nhóm Lark thanh toán");
     });
   const testLark = () =>
     startTransition(async () => {
@@ -116,6 +122,18 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <div className="space-y-1">
           <Label>Lark · Signature secret (tuỳ chọn)</Label>
           <Input type="password" value={form.larkSecret} onChange={(e) => setForm({ ...form, larkSecret: e.target.value })} placeholder={hasLarkSecret ? "Đã lưu — nhập để thay" : "Để trống nếu không bật ký"} />
+        </div>
+        <div className="space-y-1">
+          <Label>Lark · Webhook nhóm nhận cảnh báo ngưỡng thanh toán QC (trống = dùng nhóm trên)</Label>
+          <Input value={form.larkBillingWebhookUrl} onChange={(e) => setForm({ ...form, larkBillingWebhookUrl: e.target.value })} placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/xxxxxxxx" />
+        </div>
+        <div className="space-y-1">
+          <Label>Lark · Signature secret nhóm thanh toán (tuỳ chọn)</Label>
+          <Input type="password" value={form.larkBillingSecret} onChange={(e) => setForm({ ...form, larkBillingSecret: e.target.value })} placeholder={config.larkBillingSecret ? "Đã lưu — nhập để thay" : "Để trống nếu không bật ký"} />
+        </div>
+        <div className="space-y-1">
+          <Label>Cảnh báo khi dư nợ đạt (% ngưỡng thanh toán)</Label>
+          <Input type="number" min={10} max={100} value={form.billingWarnPercent} onChange={(e) => setForm({ ...form, billingWarnPercent: Number(e.target.value) || 80 })} />
         </div>
         <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
@@ -157,6 +175,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2">
           <Checkbox checked={form.enabled.stock} onCheckedChange={(v) => toggle("stock", v === true)} /> Thiếu hàng cần sản xuất (hết / hết trước khi SX xong)
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.billing} onCheckedChange={(v) => toggle("billing", v === true)} /> Tài khoản quảng cáo sắp tới ngưỡng thanh toán / bị vô hiệu hoá
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>
@@ -164,6 +185,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={testLark} disabled={pending}>
           <Send className="size-4" /> Gửi thử Lark
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={testLarkBilling} disabled={pending}>
+          <Send className="size-4" /> Gửi thử Lark · nhóm thanh toán
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={test} disabled={pending}>
           <Send className="size-4" /> Gửi thử Telegram

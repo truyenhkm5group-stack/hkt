@@ -20,6 +20,7 @@ const JOBS = [
   { job: "facebook-ads", every: minutes("SYNC_ADS_EVERY_MINUTES", 60), offset: 10 },
   { job: "alerts", every: minutes("ALERTS_EVERY_MINUTES", 10), offset: 3 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
+  { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
 ];
 
 const DAILY = [

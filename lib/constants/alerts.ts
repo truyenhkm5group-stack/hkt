@@ -6,6 +6,11 @@ export type AlertConfig = {
   larkWebhookUrl: string;
   /** Lark Suite: khoá ký (Signature) nếu bật */
   larkSecret: string;
+  /** Lark Suite: webhook nhóm nhận cảnh báo ngưỡng thanh toán tài khoản quảng cáo (trống = dùng webhook chính) */
+  larkBillingWebhookUrl: string;
+  larkBillingSecret: string;
+  /** Cảnh báo khi dư nợ đạt N% ngưỡng thanh toán */
+  billingWarnPercent: number;
   /** Đơn đã lên nhưng chưa xác nhận / chưa giao ĐVVC quá N giờ → cảnh báo "chờ xử lý" */
   pendingHours: number;
   /** Vận đơn đang giao không cập nhật quá N ngày → cảnh báo "treo lâu" */
@@ -13,7 +18,7 @@ export type AlertConfig = {
   /** Chỉ xét đơn / vận đơn phát sinh trong N ngày gần đây (bỏ qua đơn cũ đã bỏ) */
   lookbackDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -23,10 +28,13 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   telegramChatId: "",
   larkWebhookUrl: "",
   larkSecret: "",
+  larkBillingWebhookUrl: "",
+  larkBillingSecret: "",
+  billingWarnPercent: 80,
   pendingHours: 24,
   staleDays: 4,
   lookbackDays: 14,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -36,13 +44,28 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   SHIPMENT_RETURNING: "Đang chuyển hoàn",
   CS_CASE: "Case CSKH mới",
   STOCK_LOW: "Thiếu hàng · cần sản xuất",
+  ADS_BILLING: "Tài khoản QC · ngưỡng thanh toán",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "ADS_BILLING", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
   warning: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
   info: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+};
+
+/** Trạng thái tài khoản quảng cáo Facebook (account_status) */
+export const FB_ACCOUNT_STATUS_LABEL: Record<number, string> = {
+  1: "Hoạt động",
+  2: "Bị vô hiệu hoá",
+  3: "Chưa thanh toán",
+  7: "Chờ xét duyệt rủi ro",
+  8: "Chờ thanh toán",
+  9: "Ân hạn",
+  100: "Chờ đóng",
+  101: "Đã đóng",
+  201: "Bất kỳ hoạt động",
+  202: "Bất kỳ đã đóng",
 };

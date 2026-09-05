@@ -21,6 +21,8 @@ import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
 import { DEFAULT_NURTURE_STEPS, isDue, normalizeOutreachConfig, renderTemplate, shortName } from "@/lib/constants/outreach";
+import { effectiveThreshold, isBillingBlocked, learnThreshold } from "@/lib/integrations/facebook/billing";
+import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
@@ -381,6 +383,18 @@ async function main() {
   assert.equal(isDue({ status: "PENDING", nextAt: new Date(Date.now() + 3_600_000) }), false, "chưa đến hạn bước tiếp theo");
   assert.equal(isDue({ status: "SENT", nextAt: null }), false);
   console.log("✓ Mẫu tin chăm sóc khách & kịch bản băn khoăn nhiều bước");
+
+  // Ngưỡng thanh toán tài khoản quảng cáo
+  assert.equal(fbMinorOffset("VND"), 1);
+  assert.equal(fbMinorOffset("USD"), 100);
+  assert.deepEqual(learnThreshold({ balance: 1_353_666, learnedThreshold: null }, 120_000), { learnedThreshold: 1_353_666, paid: true }, "dư nợ giảm mạnh → học ngưỡng = dư nợ trước khi thu");
+  assert.deepEqual(learnThreshold({ balance: 900_000, learnedThreshold: 1_353_666 }, 1_100_000), { learnedThreshold: 1_353_666, paid: false }, "dư nợ tăng → giữ ngưỡng cũ");
+  assert.deepEqual(learnThreshold({ balance: 50_000, learnedThreshold: null }, 0), { learnedThreshold: null, paid: false }, "số nhỏ không học");
+  assert.equal(effectiveThreshold({ threshold: 2_000_000, learnedThreshold: 1_353_666 }), 2_000_000, "ngưỡng nhập tay ưu tiên");
+  assert.equal(effectiveThreshold({ threshold: null, learnedThreshold: 1_353_666 }), 1_353_666);
+  assert.equal(isBillingBlocked({ accountStatus: 2, disableReason: 0 }), true);
+  assert.equal(isBillingBlocked({ accountStatus: 1, disableReason: 0 }), false);
+  console.log("✓ Ngưỡng thanh toán tài khoản quảng cáo: offset tiền tệ, học ngưỡng, trạng thái khoá");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

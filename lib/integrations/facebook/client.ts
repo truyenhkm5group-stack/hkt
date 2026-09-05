@@ -3,6 +3,24 @@ import { asArray, asRecord, fetchJson, IntegrationError, num, sleep, str } from 
 
 export type FbAdAccount = { id: string; accountId: string; name: string; currency: string; status: number; relation: "owned" | "client" };
 
+export type FbAdAccountBilling = FbAdAccount & {
+  disableReason: number;
+  /** Dư nợ hiện tại theo đơn vị tiền tệ (đã chia offset minor unit) */
+  balance: number;
+  amountSpent: number;
+  spendCap: number;
+  fundingSource: string;
+  isPrepay: boolean;
+  nextBillDate: string;
+  raw: Record<string, unknown>;
+};
+
+/** Tiền tệ không có đơn vị lẻ: Marketing API trả balance/amount_spent theo đơn vị nguyên (offset 1); còn lại theo cent (offset 100) */
+const ZERO_DECIMAL_CURRENCIES = new Set(["VND", "JPY", "KRW", "CLP", "ISK", "PYG", "UGX", "XAF", "XOF", "RWF", "GNF", "KMF", "BIF", "DJF", "VUV", "XPF", "MGA"]);
+export function fbMinorOffset(currency: string) {
+  return ZERO_DECIMAL_CURRENCIES.has((currency || "").toUpperCase()) ? 1 : 100;
+}
+
 export type FbCampaignInsight = {
   accountId: string;
   campaignId: string;
@@ -101,6 +119,44 @@ export class FacebookAdsClient {
         }
       } catch (error) {
         // Thiếu quyền business_management với một edge thì vẫn tiếp tục edge còn lại
+        if (relation === "client" && out.size) continue;
+        throw error;
+      }
+    }
+    return [...out.values()];
+  }
+
+  /** Dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo (để cảnh báo ngưỡng thanh toán) */
+  async listAdAccountsBilling(): Promise<FbAdAccountBilling[]> {
+    const fields = "id,account_id,name,currency,account_status,disable_reason,balance,amount_spent,spend_cap,funding_source_details,is_prepay_account,next_bill_date";
+    const out = new Map<string, FbAdAccountBilling>();
+    for (const relation of ["owned", "client"] as const) {
+      const edge = relation === "owned" ? "owned_ad_accounts" : "client_ad_accounts";
+      try {
+        for await (const item of this.paginate(`${this.businessId}/${edge}`, { fields, limit: 100 })) {
+          const accountId = str(item.account_id) || str(item.id).replace(/^act_/, "");
+          if (!accountId || out.has(accountId)) continue;
+          const currency = str(item.currency) || "VND";
+          const offset = fbMinorOffset(currency);
+          const fs = asRecord(item.funding_source_details);
+          out.set(accountId, {
+            id: str(item.id) || `act_${accountId}`,
+            accountId,
+            name: str(item.name) || `act_${accountId}`,
+            currency,
+            status: num(item.account_status),
+            relation,
+            disableReason: num(item.disable_reason),
+            balance: Math.round(num(item.balance) / offset),
+            amountSpent: Math.round(num(item.amount_spent) / offset),
+            spendCap: Math.round(num(item.spend_cap) / offset),
+            fundingSource: str(fs.display_string, fs.type),
+            isPrepay: Boolean(item.is_prepay_account),
+            nextBillDate: str(item.next_bill_date),
+            raw: item,
+          });
+        }
+      } catch (error) {
         if (relation === "client" && out.size) continue;
         throw error;
       }

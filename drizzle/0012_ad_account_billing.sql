@@ -1,0 +1,20 @@
+CREATE TABLE "ad_account_billing" (
+	"account_id" text PRIMARY KEY NOT NULL,
+	"name" text DEFAULT '' NOT NULL,
+	"currency" text DEFAULT 'VND' NOT NULL,
+	"relation" text DEFAULT 'owned' NOT NULL,
+	"account_status" integer DEFAULT 0 NOT NULL,
+	"disable_reason" integer DEFAULT 0 NOT NULL,
+	"balance" bigint DEFAULT 0 NOT NULL,
+	"amount_spent" bigint DEFAULT 0 NOT NULL,
+	"spend_cap" bigint DEFAULT 0 NOT NULL,
+	"funding_source" text DEFAULT '' NOT NULL,
+	"is_prepay" boolean DEFAULT false NOT NULL,
+	"next_bill_date" text DEFAULT '' NOT NULL,
+	"threshold" bigint,
+	"learned_threshold" bigint,
+	"prev_balance" bigint DEFAULT 0 NOT NULL,
+	"last_paid_at" timestamp with time zone,
+	"fetched_at" timestamp with time zone,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);

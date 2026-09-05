@@ -7,6 +7,7 @@ import { getDb, schema } from "@/db";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
+import { setAdAccountThreshold } from "@/lib/integrations/facebook/billing";
 import { sendTelegram } from "@/lib/alerts/telegram";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -21,7 +22,10 @@ const configSchema = z.object({
   pendingHours: z.number().int().min(1).max(720),
   staleDays: z.number().int().min(1).max(60),
   lookbackDays: z.number().int().min(1).max(365).default(14),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true) }),
+  larkBillingWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
+  larkBillingSecret: z.string().trim().max(200).default(""),
+  billingWarnPercent: z.number().int().min(10).max(100).default(80),
+  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true), billing: z.boolean().default(true) }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {
@@ -81,5 +85,28 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   const db = await getDb();
   await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(inArray(schema.notifications.id, [id]));
   revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/** Gửi tin thử vào nhóm Lark nhận cảnh báo ngưỡng thanh toán QC */
+export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "settings:manage")) return { error: "Không có quyền" };
+  const cfg = await loadAlertConfig();
+  const url = cfg.larkBillingWebhookUrl || cfg.larkWebhookUrl;
+  if (!url) return { error: "Chưa cấu hình webhook Lark" };
+  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 Shop Control ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/expenses?tab=ads` }]]);
+  return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
+}
+
+/** Nhập ngưỡng thanh toán của một tài khoản quảng cáo (0 / trống = dùng ngưỡng tự học) */
+export async function saveAdAccountThreshold(accountId: string, threshold: number | null): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+  if (!accountId) return { error: "Thiếu tài khoản" };
+  const value = threshold && Number.isFinite(threshold) && threshold > 0 ? Math.round(threshold) : null;
+  await setAdAccountThreshold(accountId, value);
+  await audit({ userId: user.id, userEmail: user.email, action: "AD_ACCOUNT_THRESHOLD", entity: "AD_ACCOUNT", entityId: accountId, detail: { threshold: value } });
+  revalidatePath("/expenses");
   return { ok: true };
 }

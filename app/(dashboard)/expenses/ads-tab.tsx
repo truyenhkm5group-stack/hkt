@@ -4,6 +4,9 @@ import { EmployeeDialog } from "@/app/(dashboard)/payroll/employee-dialog";
 import { AdSpendsTable } from "@/app/(dashboard)/expenses/expenses-table";
 import { AdsPerformancePanel } from "@/app/(dashboard)/expenses/ads-performance";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
+import { AdsBillingTable } from "@/app/(dashboard)/expenses/ads-billing";
+import { listAdAccountBilling } from "@/lib/integrations/facebook/billing";
+import { loadAlertConfig } from "@/lib/alerts/config";
 import { SyncButton } from "@/components/sync-button";
 import { loadAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listCampaignsForMapping, listProductsForMapping } from "@/lib/queries/ads-mapping";
@@ -24,7 +27,7 @@ function change(current: number, previous: number | null | undefined) {
 
 export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { raw: SearchParams; period: Period; canWrite: boolean; canManageEmployees: boolean }) {
   const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform", "account", "marketer", "product"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period)]);
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf, billing, alertCfg] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period), listAdAccountBilling(), loadAlertConfig()]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
   const activeMarketers = employees.filter((e) => e.active);
@@ -96,6 +99,15 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
       </div>
 
       <AdsPerformancePanel perf={perf} periodLabel={period.label} />
+
+      <SectionCard
+        padded={false}
+        title="Dư nợ & ngưỡng thanh toán tài khoản QC"
+        description={`Đọc từ Meta mỗi 30 phút. Meta thu tiền khi dư nợ chạm ngưỡng thanh toán; API không trả ngưỡng nên hãy nhập ngưỡng của từng tài khoản (Trung tâm thanh toán → “Số dư của bạn đạt …”), ERP cũng tự học từ lần thu gần nhất. Cảnh báo Lark khi dư nợ ≥ ${alertCfg.billingWarnPercent}% ngưỡng hoặc tài khoản bị vô hiệu hoá / chưa thanh toán${alertCfg.larkBillingWebhookUrl ? " → nhóm Lark thanh toán" : alertCfg.larkWebhookUrl ? " → nhóm Lark vận hành (chưa đặt nhóm riêng)" : " (chưa cấu hình Lark)"}.`}
+        actions={fb ? <SyncButton job="ads-billing" label="Cập nhật dư nợ" /> : null}
+      >
+        <AdsBillingTable rows={billing} warnPercent={alertCfg.billingWarnPercent} canWrite={canWrite} />
+      </SectionCard>
 
       <SectionCard title="Chi tiêu theo ngày" description="Cột chồng theo nền tảng quảng cáo" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
         <AdsChart data={daily.data} platforms={daily.platforms} />
