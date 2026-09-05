@@ -58,8 +58,33 @@ export const returnRateColumns: ColumnDef<ReturnRateRow, unknown>[] = [
       </div>
     ),
   },
-  { id: "inTransit", header: "Đang giao", meta: { align: "right" }, cell: ({ row }) => <span className="numeric text-muted-foreground">{formatNumber(row.original.inTransit)}</span> },
-  { id: "rate", header: "Tỷ lệ hoàn", cell: ({ row }) => <RateBar rate={row.original.rate} /> },
+  {
+    id: "inTransit",
+    header: "Đang giao",
+    meta: { align: "right" },
+    cell: ({ row }) => (
+      <span className="numeric text-muted-foreground">
+        {formatNumber(row.original.inTransit)}
+        {row.original.failed ? <span className="ml-1 rounded bg-amber-50 px-1 text-[10.5px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title="Giao thất bại, chờ phát lại">↻ {formatNumber(row.original.failed)}</span> : null}
+      </span>
+    ),
+  },
+  { id: "rate", header: "Tỷ lệ hoàn (đã kết thúc)", cell: ({ row }) => <RateBar rate={row.original.rate} /> },
+  {
+    id: "expectedRate",
+    header: "Dự kiến (tính cả chờ phát lại)",
+    meta: { align: "right" },
+    cell: ({ row }) => {
+      const r = row.original;
+      if (r.expectedRate === null) return <span className="text-xs text-muted-foreground">—</span>;
+      const up = r.rate !== null && r.expectedRate > r.rate + 0.05;
+      return (
+        <span className={cn("numeric text-sm font-semibold", rateTone(r.expectedRate))} title={`(${r.returned} hoàn + ${r.failed} chờ phát lại × xác suất) ÷ (${r.delivered} giao thật + ${r.returned} hoàn + ${r.failed} chờ phát lại)`}>
+          {r.expectedRate.toFixed(1)}%{up ? " ↑" : ""}
+        </span>
+      );
+    },
+  },
   {
     id: "lostRevenue",
     header: "Doanh thu hoàn",

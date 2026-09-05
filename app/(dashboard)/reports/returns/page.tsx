@@ -116,7 +116,7 @@ export default async function ReturnRatePage({
         <MetricCard
           label="Đơn đã gửi"
           value={formatNumber(summary.shipped)}
-          note={`${formatNumber(summary.inTransit)} đang giao · ${formatNumber(summary.cancelled)} huỷ (không tính)`}
+          note={`${formatNumber(summary.inTransit)} đang giao (trong đó ${formatNumber(summary.failed)} chờ phát lại) · ${formatNumber(summary.pending)} chờ xử lý chưa gửi · ${formatNumber(summary.cancelled)} huỷ (không tính)`}
           icon={Truck}
           tone="blue"
         />
@@ -141,11 +141,7 @@ export default async function ReturnRatePage({
               {summary.rate === null ? "—" : `${summary.rate.toFixed(1)}%`}
             </span>
           }
-          note={
-            worst
-              ? `Cao nhất: ${worst.sku || worst.productName} · ${(worst.rate ?? 0).toFixed(1)}% (${worst.returned}/${worst.delivered + worst.returned})`
-              : "Hoàn / (giao thật + hoàn)"
-          }
+          note={`${summary.expectedRate !== null ? `Dự kiến ${summary.expectedRate.toFixed(1)}% khi ${formatNumber(summary.failed)} đơn chờ phát lại kết thúc (xác suất thành hoàn ${summary.failedToReturnPct}%${summary.failedSample >= 15 ? `, học từ ${formatNumber(summary.failedSample)} vận đơn` : ", mặc định"})` : "Hoàn / (giao thật + hoàn)"}${worst ? ` · cao nhất ${worst.sku || worst.productName} ${(worst.rate ?? 0).toFixed(1)}%` : ""}`}
           icon={Percent}
           tone={summary.rate !== null && summary.rate >= 20 ? "rose" : "slate"}
         />
@@ -160,8 +156,7 @@ export default async function ReturnRatePage({
           (khách không nhận, chỉ trả tiền ship), kể cả khi vận đơn hoàn PKE…P1
           nằm riêng trên Viettel Post. Đơn <b>giao thật</b> = giao thành công có
           cước ≥ {formatVND(RETURN_RULE.maxFeeForFakeDelivery)} hoặc có COD. Tỷ
-          lệ hoàn = hoàn / (giao thật + hoàn); đơn đang giao và đơn huỷ không
-          tính vào mẫu số. Một đơn có nhiều mã hàng được tính cho từng mã.
+          lệ hoàn = hoàn / (giao thật + hoàn), chỉ tính đơn <b>đã kết thúc</b>: đơn chờ xử lý (chưa gửi ĐVVC), đơn đang giao và đơn huỷ không nằm trong tử số lẫn mẫu số. Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng thêm số đơn chờ phát lại nhân xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào cả tử số và mẫu số. Một đơn có nhiều mã hàng được tính cho từng mã.
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { memo } from "@/lib/cache";
 import { RETURN_RULE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 
@@ -37,6 +38,9 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   else 'NOT_SHIPPED' end`;
 
 const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
+/** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
+const IS_FAILED = sql`${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
+const IS_PENDING = sql`${ORDER_OUTCOME} = 'NOT_SHIPPED'`;
 const IS_SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
@@ -64,6 +68,10 @@ export type ReturnRateRow = {
   returned: number;
   returnedByRule: number;
   inTransit: number;
+  /** Đang chờ phát lại (giao thất bại chưa kết thúc) */
+  failed: number;
+  /** Tỷ lệ hoàn dự kiến (%) = (hoàn + chờ phát lại × xác suất thành hoàn) ÷ (giao thật + hoàn + chờ phát lại) */
+  expectedRate: number | null;
   cancelled: number;
   returnedQty: number;
   lostRevenue: number;
@@ -72,7 +80,7 @@ export type ReturnRateRow = {
   rate: number | null;
 };
 
-export const RETURN_RATE_SORTABLE = ["rate", "returned", "delivered", "shipped", "inTransit", "lostRevenue", "sku"];
+export const RETURN_RATE_SORTABLE = ["rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
 
 function baseWhere(period: Period, q: string): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false)];
@@ -102,6 +110,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
       returnedByRule: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
       inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(distinct ${o.id}) filter (where ${IS_FAILED})`,
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
       returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${IS_RETURNED}), 0)`,
@@ -113,6 +122,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     .where(baseWhere(query.period, query.q))
     .groupBy(VARIANT_KEY);
 
+  const p = await failedToReturnRate();
   const all: ReturnRateRow[] = raw
     .map((r) => {
       const delivered = Number(r.delivered);
@@ -130,6 +140,8 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         returned,
         returnedByRule: Number(r.returnedByRule),
         inTransit: Number(r.inTransit),
+        failed: Number(r.failed),
+        expectedRate: delivered + returned + Number(r.failed) ? ((returned + Number(r.failed) * p.rate) / (delivered + returned + Number(r.failed))) * 100 : null,
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
         lostRevenue: Number(r.lostRevenue),
@@ -157,7 +169,44 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
   return { rows: all.slice(start, start + query.pageSize), total, pageCount, all };
 }
 
-export type ReturnRateSummary = { orders: number; shipped: number; delivered: number; returned: number; returnedByRule: number; inTransit: number; cancelled: number; lostRevenue: number; rate: number | null };
+export type ReturnRateSummary = {
+  orders: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+  returnedByRule: number;
+  inTransit: number;
+  /** Chờ phát lại (giao thất bại chưa kết thúc) */
+  failed: number;
+  /** Chờ xử lý, chưa gửi ĐVVC (không tính vào tỷ lệ) */
+  pending: number;
+  cancelled: number;
+  lostRevenue: number;
+  rate: number | null;
+  /** Tỷ lệ hoàn dự kiến khi các đơn chờ phát lại kết thúc (theo xác suất lịch sử) */
+  expectedRate: number | null;
+  /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
+  failedToReturnPct: number;
+  failedSample: number;
+};
+
+/** Xác suất một vận đơn đã từng giao thất bại cuối cùng thành hoàn (180 ngày gần nhất); dưới 15 mẫu dùng 60% */
+export async function failedToReturnRate(): Promise<{ rate: number; sample: number }> {
+  return memo("failedToReturnRate", 300_000, async () => {
+    const db = await getDb();
+    const [row] = await db
+      .select({
+        returned: sql<number>`count(*) filter (where sh.stage = 'RETURNED')`,
+        delivered: sql<number>`count(*) filter (where sh.stage = 'DELIVERED')`,
+      })
+      .from(sql`(select distinct e.shipment_id from shipment_events e where e.occurred_at >= now() - interval '180 days' and (e.status in ('505','506','507','510') or e.status_name ilike '%thất bại%' or e.status_name ilike '%hẹn%' or e.status_name ilike '%không liên lạc%')) f`)
+      .innerJoin(sql`shipments sh`, sql`sh.id = f.shipment_id`);
+    const returned = Number(row?.returned ?? 0);
+    const delivered = Number(row?.delivered ?? 0);
+    const sample = returned + delivered;
+    return { rate: sample >= 15 ? returned / sample : 0.6, sample };
+  });
+}
 
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
 export async function getReturnRateSummary(period: Period, q: string): Promise<ReturnRateSummary> {
@@ -178,6 +227,8 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
       returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
       returnedByRule: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
       inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
+      pending: sql<number>`count(*) filter (where ${IS_PENDING})`,
       cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
     })
@@ -186,6 +237,8 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     .where(conds.length ? and(...conds) : undefined);
   const delivered = Number(row?.delivered ?? 0);
   const returned = Number(row?.returned ?? 0);
+  const failed = Number(row?.failed ?? 0);
+  const p = await failedToReturnRate();
   return {
     orders: Number(row?.orders ?? 0),
     shipped: Number(row?.shipped ?? 0),
@@ -193,9 +246,14 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     returned,
     returnedByRule: Number(row?.returnedByRule ?? 0),
     inTransit: Number(row?.inTransit ?? 0),
+    failed,
+    pending: Number(row?.pending ?? 0),
     cancelled: Number(row?.cancelled ?? 0),
     lostRevenue: Number(row?.lostRevenue ?? 0),
     rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
+    expectedRate: delivered + returned + failed ? ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
+    failedToReturnPct: Math.round(p.rate * 100),
+    failedSample: p.sample,
   };
 }
 
