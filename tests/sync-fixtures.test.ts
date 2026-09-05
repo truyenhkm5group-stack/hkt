@@ -25,6 +25,7 @@ import { effectiveThreshold, isBillingBlocked, learnThreshold } from "@/lib/inte
 import { fbMinorOffset } from "@/lib/integrations/facebook/client";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { clearMemo } from "@/lib/cache";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
 import { mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
@@ -388,6 +389,7 @@ async function main() {
   const plan3 = computePlan({ stock: 0, committed: 2, soldInWindow: 5, windowDays: 14, leadTimeDays: 7, coverDays: 14, safetyDays: 3, roundTo: 1 });
   assert.equal(plan3.status, "OUT");
   assert.equal(plan3.shortage, 2);
+  clearMemo();
   const report = await getReplenishmentPlan();
   const rrPlan = report.rows.find((r) => r.variantId === "rr-var");
   assert.ok(rrPlan, "có mẫu mã RR trong kế hoạch");
