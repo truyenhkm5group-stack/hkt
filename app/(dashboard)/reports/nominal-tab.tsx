@@ -28,6 +28,7 @@ import {
   getNominalProfitReport,
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
+import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
 import { cn } from "@/lib/utils";
 
 function Pct({
@@ -65,7 +66,7 @@ export async function NominalTab({
   tabQuery: string;
   canWrite: boolean;
 }) {
-  const report = await getNominalProfitReport(period);
+  const [report, byMarketer] = await Promise.all([getNominalProfitReport(period), getNominalMarketerBreakdown(period)]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
     : null;
@@ -137,7 +138,7 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản: lương, mặt bằng, phần mềm…) và rủi ro tồn kho ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 5}% giá vốn)`}
+          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản), rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })}, thuế ${formatVND(t.tax, { compact: true })}, CP khác ${formatVND(t.otherCost, { compact: true })}`}
           icon={Wallet}
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
@@ -156,7 +157,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
-        description={`${period.label} · mỗi mã: đơn lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch, tỷ lệ hoàn ước tính từ lịch sử ${report.assumptions.returnRateWindowDays} ngày · bấm mã để xem theo ngày`}
+        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ hoàn ước tính trộn theo trạng thái thật: đã hoàn 100%, đã giao 0%, chờ xử lý / chờ phát lại ${t.failedToReturnPct}% (học từ lịch sử), còn lại theo tỷ lệ ${report.assumptions.returnRateWindowDays} ngày của mã. Bấm mã để xem theo ngày.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -176,9 +177,12 @@ export async function NominalTab({
                 <TableHead className="text-right">DT/đơn</TableHead>
                 <TableHead className="text-right">LN ước tính</TableHead>
                 <TableHead className="text-right">Margin</TableHead>
-                <TableHead className="text-right" title="Chi phí vận hành trong kỳ phân bổ theo tỷ trọng doanh số POS + dự phòng rủi ro tồn kho">
-                  VH + rủi ro TK
-                </TableHead>
+                <TableHead className="text-right" title="Chi phí vận hành trong kỳ (lương, mặt bằng, phần mềm, đóng gói, khác) phân bổ theo tỷ trọng doanh số POS">CP vận hành</TableHead>
+                <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn lên (trước hoàn huỷ)">VH/đơn trước hoàn</TableHead>
+                <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">VH/đơn sau hoàn huỷ</TableHead>
+                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho = giá vốn ước tính × % giả định">Rủi ro TK</TableHead>
+                <TableHead className="text-right" title="Dự trù thuế = DT GTC ước tính × %">Thuế {report.assumptions.taxPercent ?? 1.5}%</TableHead>
+                <TableHead className="text-right" title="Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền)">CP khác {report.assumptions.otherCostPercentOfAds ?? 1.1}% QC</TableHead>
                 <TableHead className="text-right">LN ròng</TableHead>
                 <TableHead className="text-right">Margin ròng</TableHead>
               </TableRow>
@@ -187,7 +191,7 @@ export async function NominalTab({
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={16}
+                    colSpan={21}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -257,7 +261,7 @@ export async function NominalTab({
                               : "",
                         )}
                       >
-                        {r.returnRate.toFixed(1)}%
+                        <span title={`Đã hoàn ${r.returned} · chờ xử lý / phát lại ${r.failed} (×${t.failedToReturnPct}%) · chưa có kết quả ${Math.max(0, r.orders - r.delivered - r.returned - r.failed)} (×${r.baseReturnRate.toFixed(0)}% lịch sử) · đã giao ${r.delivered}`}>{r.returnRate.toFixed(1)}%</span>
                       </span>
                       <div className="text-[10.5px] text-muted-foreground">
                         {r.returnRateSource === "override"
@@ -315,16 +319,12 @@ export async function NominalTab({
                     <TableCell className="text-right">
                       <Pct value={r.margin} />
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={r.operatingAlloc + r.inventoryRisk}
-                        className="text-muted-foreground"
-                      />
-                      <div className="text-[10px] text-muted-foreground">
-                        VH {formatVND(r.operatingAlloc, { compact: true })} · RR{" "}
-                        {formatVND(r.inventoryRisk, { compact: true })}
-                      </div>
-                    </TableCell>
+                    <TableCell className="text-right"><Money value={r.operatingAlloc} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.opexPerDelivered ?? 0} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right">
                       <Money
                         value={r.netProfit}
@@ -399,13 +399,12 @@ export async function NominalTab({
                   <TableCell className="text-right">
                     <Pct value={t.margin} />
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Money value={t.operatingExpenses + t.inventoryRisk} />
-                    <div className="text-[10px] font-normal text-muted-foreground">
-                      VH {formatVND(t.operatingExpenses, { compact: true })} · RR{" "}
-                      {formatVND(t.inventoryRisk, { compact: true })}
-                    </div>
-                  </TableCell>
+                  <TableCell className="text-right"><Money value={t.operatingExpenses} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.opexPerOrder ?? 0} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.opexPerDelivered ?? 0} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.tax} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
                   <TableCell className="text-right">
                     <Money
                       value={t.netProfit}
@@ -558,6 +557,62 @@ export async function NominalTab({
           </SectionCard>
         </div>
       ) : null}
+
+      <SectionCard
+        title="Lợi nhuận danh nghĩa theo Marketer"
+        description={`LN ròng danh nghĩa của từng mã (đã trừ giá vốn, vận chuyển, vận hành, rủi ro TK, thuế) chia cho marketer theo tỷ trọng tiền QC trên mã; trừ QC và chi phí khác của chính mình, QC test; người đẩy chéo trích ${byMarketer.ownerSharePct}% cho chủ mã (cấu hình ở Lương & hoa hồng).`}
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1000px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Marketer</TableHead>
+                <TableHead className="text-right">QC mã hàng</TableHead>
+                <TableHead className="text-right">QC test</TableHead>
+                <TableHead className="text-right">CP khác</TableHead>
+                <TableHead className="text-right">Đơn phân bổ</TableHead>
+                <TableHead className="text-right">DT GTC ƯT phân bổ</TableHead>
+                <TableHead className="text-right">LN ròng trước QC</TableHead>
+                <TableHead className="text-right">% chủ mã</TableHead>
+                <TableHead className="text-right">LN ròng cá nhân</TableHead>
+                <TableHead className="text-right">CPQC/đơn</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {byMarketer.rows.map((x) => (
+                <TableRow key={x.marketerId ?? "none"}>
+                  <TableCell>
+                    <div className={cn("font-semibold", !x.marketerId && "text-amber-700")}>{x.name}</div>
+                    {x.ownedProducts.length ? <div className="text-[11px] text-muted-foreground">Phụ trách: {x.ownedProducts.join(", ")}</div> : null}
+                    {x.products.filter((p) => p.role === "cross").length ? <div className="text-[11px] text-muted-foreground">Đẩy chéo: {x.products.filter((p) => p.role === "cross").map((p) => `${p.code || p.productName} ${(p.share * 100).toFixed(0)}%`).join(", ")}</div> : null}
+                  </TableCell>
+                  <TableCell className="text-right"><Money value={x.adSpend} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Money value={x.testSpend} className={x.testSpend ? "text-amber-600" : "text-muted-foreground"} /></TableCell>
+                  <TableCell className="text-right"><Money value={x.otherCost} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="numeric text-right">{formatNumber(x.attributedOrders)}</TableCell>
+                  <TableCell className="text-right"><Money value={x.attributedRevenue} /></TableCell>
+                  <TableCell className="text-right"><Money value={x.profitBeforeAds} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right text-xs">
+                    {x.ownerBonusReceived ? <div className="text-emerald-700">+{formatVND(x.ownerBonusReceived)}</div> : null}
+                    {x.ownerBonusPaid ? <div className="text-rose-600">−{formatVND(x.ownerBonusPaid)}</div> : null}
+                    {!x.ownerBonusReceived && !x.ownerBonusPaid ? <span className="text-muted-foreground">—</span> : null}
+                  </TableCell>
+                  <TableCell className="text-right"><Money value={x.personalNet} className={cn("font-bold", x.personalNet >= 0 ? "text-success" : "text-destructive")} /></TableCell>
+                  <TableCell className="text-right"><Money value={x.attributedOrders ? Math.round((x.adSpend + x.testSpend) / x.attributedOrders) : 0} className="text-muted-foreground" /></TableCell>
+                </TableRow>
+              ))}
+              {byMarketer.unattributed ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={8}>Mã không có quảng cáo và chưa gán người phụ trách (không phân bổ cho ai)</TableCell>
+                  <TableCell className="text-right"><Money value={byMarketer.unattributed} /></TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
     </div>
   );
 }

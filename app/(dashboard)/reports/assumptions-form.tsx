@@ -29,6 +29,9 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
     inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 5),
+    taxPercent: String(assumptions.taxPercent ?? 1.5),
+    otherCostPercentOfAds: String(assumptions.otherCostPercentOfAds ?? 1.1),
+    failedToReturnPercent: String(assumptions.failedToReturnPercent ?? 0),
   });
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -45,6 +48,9 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
         overrides: assumptions.overrides,
         inventoryRiskPercent: num(form.inventoryRiskPercent, 5),
+        taxPercent: num(form.taxPercent, 1.5),
+        otherCostPercentOfAds: num(form.otherCostPercentOfAds, 1.1),
+        failedToReturnPercent: num(form.failedToReturnPercent, 0),
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -93,6 +99,18 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           Rủi ro tồn kho{" "}
           <b className="numeric">{assumptions.inventoryRiskPercent ?? 5}%</b>
           <span className="text-muted-foreground"> giá vốn hàng bán</span>
+        </span>
+        <span>
+          Thuế <b className="numeric">{assumptions.taxPercent ?? 1.5}%</b>
+          <span className="text-muted-foreground"> doanh thu</span>
+        </span>
+        <span>
+          Chi phí khác <b className="numeric">{assumptions.otherCostPercentOfAds ?? 1.1}%</b>
+          <span className="text-muted-foreground"> CPQC (phí thẻ ngoại tệ)</span>
+        </span>
+        <span>
+          Đơn chờ phát lại thành hoàn{" "}
+          <b className="numeric">{assumptions.failedToReturnPercent ? `${assumptions.failedToReturnPercent}%` : "tự học"}</b>
         </span>
         {canWrite ? (
           <Button
@@ -188,6 +206,18 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
                 setForm({ ...form, inventoryRiskPercent: e.target.value })
               }
             />
+          </div>
+          <div className="space-y-1">
+            <Label>Dự trù thuế (% DT GTC ước tính)</Label>
+            <Input type="number" min={0} max={50} step={0.1} value={form.taxPercent} onChange={(e) => setForm({ ...form, taxPercent: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label>Chi phí khác (% CPQC, phí thẻ ngoại tệ)</Label>
+            <Input type="number" min={0} max={50} step={0.1} value={form.otherCostPercentOfAds} onChange={(e) => setForm({ ...form, otherCostPercentOfAds: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label>Đơn chờ xử lý / phát lại thành hoàn (%) · 0 = tự học</Label>
+            <Input type="number" min={0} max={100} step={1} value={form.failedToReturnPercent} onChange={(e) => setForm({ ...form, failedToReturnPercent: e.target.value })} />
           </div>
           <div className="sm:col-span-6 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">

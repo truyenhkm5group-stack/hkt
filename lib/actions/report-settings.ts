@@ -15,6 +15,9 @@ const schema = z.object({
   minFinishedOrders: z.number().int().min(1).max(10_000),
   overrides: z.record(z.string(), z.number().min(0).max(100)),
   inventoryRiskPercent: z.number().min(0).max(100).default(5),
+  taxPercent: z.number().min(0).max(50).default(1.5),
+  otherCostPercentOfAds: z.number().min(0).max(50).default(1.1),
+  failedToReturnPercent: z.number().min(0).max(100).default(0),
 });
 
 export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true } | { error: string }> {

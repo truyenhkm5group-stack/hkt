@@ -489,3 +489,107 @@ export async function listAdAccounts() {
     .groupBy(schema.adSpends.accountId);
   return rows.filter((r) => r.id).map((r) => ({ id: r.id as string, name: r.name ?? (r.id as string) }));
 }
+
+export type NominalMarketerRow = {
+  marketerId: string | null;
+  name: string;
+  ownedProducts: string[];
+  adSpend: number;
+  testSpend: number;
+  otherCost: number;
+  attributedOrders: number;
+  attributedRevenue: number;
+  /** LN danh nghĩa ròng phân bổ trước QC (đã trừ giá vốn, VC, vận hành, rủi ro TK, thuế) */
+  profitBeforeAds: number;
+  ownerBonusReceived: number;
+  ownerBonusPaid: number;
+  /** LN danh nghĩa ròng cá nhân = phân bổ − QC của mình − CP khác − QC test ± % chủ mã */
+  personalNet: number;
+  products: { productId: string; code: string; productName: string; role: "owner" | "cross"; share: number; adSpend: number; personalNet: number }[];
+};
+
+/** Lợi nhuận danh nghĩa (ước tính theo đơn lên trong kỳ) chia theo marketer — cùng quy tắc chủ mã / đẩy chéo với bảng lương */
+export async function getNominalMarketerBreakdown(period: Period): Promise<{ rows: NominalMarketerRow[]; unattributed: number; ownerSharePct: number }> {
+  return memo(`nominalByMarketer:${periodKey(period)}`, 120_000, async () => {
+    const db = await getDb();
+    const [nominal, employees, config] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig()]);
+    const ads = schema.adSpends;
+    const spendRows = await db
+      .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
+      .from(ads)
+      .where(and(eq(ads.excluded, false), ...periodConds(ads.spendDate, period)))
+      .groupBy(ads.marketerId, ads.productId);
+    const otherPct = Math.max(0, Number(nominal.assumptions.otherCostPercentOfAds ?? 0)) / 100;
+    const byProduct = new Map<string, { total: number; byMarketer: Map<string | null, number> }>();
+    const testByMarketer = new Map<string | null, number>();
+    for (const r of spendRows) {
+      const spend = Number(r.spend);
+      if (!r.productId) {
+        testByMarketer.set(r.marketerId, (testByMarketer.get(r.marketerId) ?? 0) + spend);
+        continue;
+      }
+      const e = byProduct.get(r.productId) ?? { total: 0, byMarketer: new Map() };
+      e.total += spend;
+      e.byMarketer.set(r.marketerId, (e.byMarketer.get(r.marketerId) ?? 0) + spend);
+      byProduct.set(r.productId, e);
+    }
+    const rows = new Map<string | null, NominalMarketerRow>();
+    const ensure = (id: string | null) => {
+      let m = rows.get(id);
+      if (!m) {
+        const emp = id ? employees.find((e) => e.id === id) : null;
+        m = { marketerId: id, name: emp ? emp.shortName || emp.name : "Chưa gán marketer", ownedProducts: [], adSpend: 0, testSpend: 0, otherCost: 0, attributedOrders: 0, attributedRevenue: 0, profitBeforeAds: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, personalNet: 0, products: [] };
+        rows.set(id, m);
+      }
+      return m;
+    };
+    const pct = Math.max(0, config.ownerSharePct) / 100;
+    let unattributed = 0;
+    for (const r of nominal.rows) {
+      const spend = byProduct.get(r.productId);
+      const ownerId = config.productOwners[r.productId] ?? null;
+      // LN ròng danh nghĩa trước QC của mã = LN ròng + QC + chi phí khác theo QC
+      const netBeforeAds = r.netProfit + r.adSpend + r.otherCost;
+      const shares = new Map<string | null, number>();
+      if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) shares.set(mid, amount / spend.total);
+      else if (ownerId) shares.set(ownerId, 1);
+      if (!shares.size) {
+        unattributed += netBeforeAds;
+        continue;
+      }
+      if (ownerId) ensure(ownerId).ownedProducts.push(r.code || r.productName);
+      let bonusTotal = 0;
+      for (const [mid, share] of shares) {
+        const m = ensure(mid);
+        const mySpend = spend?.byMarketer.get(mid) ?? 0;
+        const other = Math.round(mySpend * otherPct);
+        const isOwner = ownerId !== null && mid === ownerId;
+        const base = Math.round(netBeforeAds * share) - mySpend - other;
+        const bonus = !isOwner && ownerId ? Math.round(Math.max(base, 0) * pct) : 0;
+        bonusTotal += bonus;
+        m.adSpend += mySpend;
+        m.otherCost += other;
+        m.attributedOrders += Math.round(r.orders * share);
+        m.attributedRevenue += Math.round(r.expectedRevenue * share);
+        m.profitBeforeAds += Math.round(netBeforeAds * share);
+        m.ownerBonusPaid += bonus;
+        m.personalNet += base - bonus;
+        m.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: isOwner ? "owner" : "cross", share, adSpend: mySpend, personalNet: base - bonus });
+      }
+      if (ownerId) {
+        const o = ensure(ownerId);
+        o.ownerBonusReceived += bonusTotal;
+        o.personalNet += bonusTotal;
+      }
+    }
+    for (const [mid, amount] of testByMarketer) {
+      const m = ensure(mid);
+      m.testSpend += amount;
+      m.otherCost += Math.round(amount * otherPct);
+      m.personalNet -= amount + Math.round(amount * otherPct);
+    }
+    for (const e of employees) if (e.active && e.department === "Marketing" && !rows.has(e.id)) ensure(e.id);
+    const list = [...rows.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalNet - a.personalNet));
+    return { rows: list, unattributed, ownerSharePct: config.ownerSharePct };
+  });
+}
