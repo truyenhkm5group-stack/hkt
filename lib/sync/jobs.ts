@@ -12,6 +12,7 @@ import {
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
+import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
@@ -117,6 +118,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const alerts = await evaluateAlerts().catch(() => undefined);
       return { ...r, alerts };
     },
+  },
+  "data-check": {
+    label: "Kiểm tra nhất quán vận đơn & COD",
+    source: "ALL",
+    description: "Báo cáo lệch dữ liệu giữa Pancake / Viettel Post / bảng kê (COD đã về mà chưa giao, hoàn mà còn COD, vận đơn treo lâu, giao xong chưa có bảng kê). fix=1 để tự sửa các lỗi hiển nhiên; days=N ngưỡng treo.",
+    run: (o) => checkShipmentConsistency({ fix: o.params?.fix === "1", staleDays: num(o.params?.days) }),
   },
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",
