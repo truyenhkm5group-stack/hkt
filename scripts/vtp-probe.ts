@@ -13,7 +13,7 @@ const to = new Date();
 const from = new Date(Date.now() - 30 * 86_400_000);
 const secrets: string[] = [];
 const mask = (t: string) => secrets.reduce((o, s) => (s ? o.split(s).join("***") : o), t);
-const show = (label: string, v: unknown) => console.log(`- ${label}: ${mask(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 380).replace(/\s+/g, " ")}`);
+const show = (label: string, v: unknown) => console.log(`- ${label}: ${mask(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 900).replace(/\s+/g, " ")}`);
 
 async function call(url: string, init: RequestInit & { token?: string; bearer?: string } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/plain, */*", "user-agent": "Mozilla/5.0", origin: "https://viettelpost.vn", referer: "https://viettelpost.vn/" };
@@ -74,10 +74,11 @@ async function main() {
         let j: Record<string, unknown> = {};
         try { j = JSON.parse(r.text) as Record<string, unknown>; } catch { /* ignore */ }
         const data = (j.data ?? {}) as Record<string, unknown>;
-        const tok = [data.token, data.Token, data.access_token, j.token, j.access_token].find((x): x is string => typeof x === "string" && x.length > 20) ?? "";
+        const pick = (o: Record<string, unknown>) => [o.TokenKey, o.tokenKey, o.token, o.Token, o.access_token, o.accessToken].find((x): x is string => typeof x === "string" && x.length > 20) ?? "";
+        const tok = pick(j) || pick(data);
         if (tok) secrets.push(tok);
-        show(`${url.split("/api/")[1]} HTTP ${r.status}`, tok ? `OK token ${tok.length} ký tự, keys=${Object.keys(data).join(",")}` : r.text.slice(0, 220));
-        if (tok) { tokens.push({ label: `web login ${url.split("/api/")[1]} Token header`, token: tok }); break; }
+        show(`${url.split("/api/")[1]} HTTP ${r.status}`, tok ? `OK token ${tok.length} ký tự, keys=${Object.keys(j).join(",")}` : r.text.slice(0, 220));
+        if (tok) { tokens.push({ label: `web login ${url.split("/api/")[1]} Token`, token: tok }, { label: `web login ${url.split("/api/")[1]} Bearer`, bearer: tok }); break; }
       } catch (e) {
         show(url, e instanceof Error ? e.message : String(e));
       }
@@ -98,7 +99,7 @@ async function main() {
       for (const [i, body] of bodies.entries()) {
         try {
           const r = await call(ep, { method: "POST", body: JSON.stringify(body), token: t.token, bearer: t.bearer });
-          show(`${ep.split("/api/")[1]} body#${i + 1} HTTP ${r.status}`, r.text.slice(0, 260));
+          show(`${ep.split("/api/")[1]} body#${i + 1} HTTP ${r.status}`, r.text.slice(0, 700));
           if (r.status === 200 && r.text.length > 50 && !/error":true/.test(r.text)) break;
         } catch (e) {
           show(ep, e instanceof Error ? e.message : String(e));
@@ -115,7 +116,7 @@ async function main() {
     ] as const) {
       try {
         const r = await call(url, { ...init, token: t.token, bearer: t.bearer });
-        show(`${label} HTTP ${r.status}`, r.text.slice(0, 260));
+        show(`${label} HTTP ${r.status}`, r.text.slice(0, 700));
       } catch (e) {
         show(label, e instanceof Error ? e.message : String(e));
       }
