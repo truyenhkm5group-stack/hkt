@@ -627,6 +627,36 @@ export async function NominalTab({
               {byMarketer.rows.map((x) => (
                 <MarketerNominalRows key={x.marketerId ?? "none"} row={x} ownerSharePct={byMarketer.ownerSharePct} />
               ))}
+              {byMarketer.rows.length ? (() => {
+                const sum = (f: (x: (typeof byMarketer.rows)[number]) => number) => byMarketer.rows.reduce((t, x) => t + f(x), 0);
+                const adSpend = sum((x) => x.adSpend);
+                const testSpend = sum((x) => x.testSpend);
+                const orders = sum((x) => x.attributedOrders);
+                const received = sum((x) => x.ownerBonusReceived);
+                const paid = sum((x) => x.ownerBonusPaid);
+                const personal = sum((x) => x.personalNet);
+                return (
+                  <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
+                    <TableCell>
+                      Tổng · {formatNumber(byMarketer.rows.length)} marketer
+                      {byMarketer.unattributed || byMarketer.shopRetained ? <div className="text-[10.5px] font-normal text-muted-foreground">chưa gồm phần không phân bổ / shop giữ lại ở các dòng dưới</div> : null}
+                    </TableCell>
+                    <TableCell className="text-right"><Money value={adSpend} className="text-rose-600" /></TableCell>
+                    <TableCell className="text-right"><Money value={testSpend} className={testSpend ? "text-amber-600" : "text-muted-foreground"} /></TableCell>
+                    <TableCell className="text-right"><Money value={sum((x) => x.otherCost)} /></TableCell>
+                    <TableCell className="numeric text-right">{formatNumber(orders)}</TableCell>
+                    <TableCell className="text-right"><Money value={sum((x) => x.attributedRevenue)} /></TableCell>
+                    <TableCell className="text-right"><Money value={sum((x) => x.profitBeforeAds)} /></TableCell>
+                    <TableCell className="text-right text-xs font-normal">
+                      {received ? <div className="text-emerald-700">+{formatVND(received)}</div> : null}
+                      {paid ? <div className="text-rose-600">−{formatVND(paid)}</div> : null}
+                      {!received && !paid ? <span className="text-muted-foreground">—</span> : null}
+                    </TableCell>
+                    <TableCell className="text-right"><Money value={personal} className={personal >= 0 ? "text-success" : "text-destructive"} /></TableCell>
+                    <TableCell className="text-right"><Money value={orders ? Math.round((adSpend + testSpend) / orders) : 0} /></TableCell>
+                  </TableRow>
+                );
+              })() : null}
               {byMarketer.unattributed ? (
                 <TableRow className="text-muted-foreground">
                   <TableCell colSpan={8}>Mã không có quảng cáo và chưa gán người phụ trách (không phân bổ cho ai)</TableCell>
