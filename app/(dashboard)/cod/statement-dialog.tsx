@@ -24,8 +24,8 @@ function fmtDate(key: string) {
 }
 
 /** Nhập bảng kê tiền COD Viettel Post: tổng hợp (dán bảng) hoặc chi tiết (file Excel/CSV từng vận đơn) */
-export function StatementDialog() {
-  const [open, setOpen] = useState(false);
+export function StatementDialog({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
+  const [open, setOpen] = useState(defaultOpen);
   const router = useRouter();
 
   return (

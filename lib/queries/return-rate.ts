@@ -205,6 +205,8 @@ export type ReturnRateSummary = {
   /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
   failedToReturnPct: number;
   failedSample: number;
+  /** Đơn đã kết thúc (giao / hoàn) mà vận đơn chưa có trạng thái Viettel Post thật — đang tính theo trạng thái Pancake */
+  finishedNoVtp: number;
 };
 
 /** Xác suất một vận đơn đã từng giao thất bại cuối cùng thành hoàn (180 ngày gần nhất); dưới 15 mẫu dùng 60% */
@@ -248,6 +250,8 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
       pending: sql<number>`count(*) filter (where ${IS_PENDING})`,
       cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
+      // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
+      finishedNoVtp: sql<number>`count(*) filter (where ${s.id} is not null and ${s.vtpStatusDate} is null and ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))
@@ -271,6 +275,7 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     expectedRate: delivered + returned + failed ? ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
     failedToReturnPct: Math.round(p.rate * 100),
     failedSample: p.sample,
+    finishedNoVtp: Number(row?.finishedNoVtp ?? 0),
   };
 }
 

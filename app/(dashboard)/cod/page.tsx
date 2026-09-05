@@ -51,7 +51,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         description={`${formatVND(waiting, { compact: true })} đã giao chờ tiền về · ${formatVND(kpis.byStatus.PENDING.amount, { compact: true })} chưa thu · ${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn chênh lệch`}
         actions={
           <>
-            {canWrite ? <StatementDialog /> : null}
+            {canWrite ? <StatementDialog defaultOpen={param(raw, "import") === "orders"} /> : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/cod?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV

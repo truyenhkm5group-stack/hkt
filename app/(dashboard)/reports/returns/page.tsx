@@ -147,6 +147,18 @@ export default async function ReturnRatePage({
         />
       </section>
 
+      {summary.finishedNoVtp > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>
+            <b>{formatNumber(summary.finishedNoVtp)}</b> / {formatNumber(summary.delivered + summary.returned)} đơn giao / hoàn trong kỳ <b>chưa có trạng thái Viettel Post thật</b> (đang tính theo trạng thái Pancake vì webhook mới nối và tài khoản API Viettel Post không tra được vận đơn tạo qua Pancake). Để tỷ lệ hoàn đúng định nghĩa (GTC = VTP giao thành công & COD &gt; 100K), tải danh sách vận đơn từ viettelpost.vn → Quản lý vận đơn → Xuất Excel rồi nhập vào ERP.
+          </span>
+          <Button asChild size="sm" variant="outline" className="ml-auto">
+            <Link href="/cod?import=orders">Nhập danh sách vận đơn VTP</Link>
+          </Button>
+        </div>
+      ) : null}
+
       <div className="flex items-start gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3.5 text-[13px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <div>
