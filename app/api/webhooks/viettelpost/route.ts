@@ -30,8 +30,11 @@ function findVtpData(body: Record<string, unknown>): Record<string, unknown> {
     if (isTracking(rec)) return rec;
     if (depth >= 4) continue;
     for (const value of Object.values(rec)) {
-      if (Array.isArray(value)) for (const v of value.slice(0, 20)) if (v && typeof v === "object") queue.push({ rec: v as Record<string, unknown>, depth: depth + 1 });
-      else if (value && typeof value === "object") queue.push({ rec: value as Record<string, unknown>, depth: depth + 1 });
+      if (Array.isArray(value)) {
+        for (const v of value.slice(0, 20)) if (v && typeof v === "object") queue.push({ rec: v as Record<string, unknown>, depth: depth + 1 });
+      } else if (value && typeof value === "object") {
+        queue.push({ rec: value as Record<string, unknown>, depth: depth + 1 });
+      }
     }
   }
   return asRecord(body.DATA ?? body.data ?? body);
