@@ -57,8 +57,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                       {n.title}
                     </Link>
                     <div className="text-xs text-muted-foreground">{n.body}</div>
-                    <div className="text-[10.5px] text-muted-foreground" title={formatDateTime(n.createdAt)}>
-                      {formatTimeAgo(n.createdAt)}
+                    <div className="text-[10.5px] text-muted-foreground" title={`Cảnh báo lúc ${formatDateTime(n.createdAt)}${n.occurredAt ? ` · cập nhật gần nhất ${formatDateTime(n.occurredAt)}` : ""}`}>
+                      {formatTimeAgo(n.createdAt)}{n.occurredAt ? ` · cập nhật ${formatDateTime(n.occurredAt)}` : ""}
                       {n.notifiedAt ? " · đã gửi Telegram" : ""}
                     </div>
                   </div>

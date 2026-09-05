@@ -46,7 +46,7 @@ export async function riskyOrderCandidates(cfg: RiskConfig, lookback: Date) {
   const o = schema.orders;
   const c = schema.customers;
   const rows = await db
-    .select({ id: o.id, systemId: o.systemId, name: o.billFullName, phone: o.billPhone, total: o.totalPriceAfterDiscount, stage: o.stage, succeed: c.succeedOrderCount, returned: c.returnedOrderCount, isBlock: c.isBlock })
+    .select({ id: o.id, systemId: o.systemId, name: o.billFullName, phone: o.billPhone, total: o.totalPriceAfterDiscount, stage: o.stage, insertedAt: o.insertedAt, succeed: c.succeedOrderCount, returned: c.returnedOrderCount, isBlock: c.isBlock })
     .from(o)
     .leftJoin(c, eq(c.id, o.customerId))
     .where(and(inArray(o.stage, ["NEW", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), gte(o.insertedAt, lookback)));

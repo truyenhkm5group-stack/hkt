@@ -219,6 +219,8 @@ export const notifications = pgTable(
     resolvedAt: ts("resolved_at"),
     /** Đã gửi Telegram lúc */
     notifiedAt: ts("notified_at"),
+    /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
+    occurredAt: ts("occurred_at"),
     createdAt: createdAt(),
   },
   (t) => [index("notifications_open_idx").on(t.resolvedAt, t.createdAt), index("notifications_kind_idx").on(t.kind)],

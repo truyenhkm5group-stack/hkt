@@ -21,7 +21,13 @@ import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
 
-type Candidate = { kind: string; severity: "info" | "warning" | "critical"; title: string; body: string; href: string; entityType: string; entityId: string; dedupeKey: string };
+type Candidate = { kind: string; severity: "info" | "warning" | "critical"; title: string; body: string; href: string; entityType: string; entityId: string; dedupeKey: string; occurredAt?: Date | null };
+
+/** Định dạng thời điểm ngắn gọn cho tin Lark/Telegram (giờ Việt Nam) */
+function fmtAt(d: Date | string | null | undefined) {
+  if (!d) return "";
+  return new Date(d).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+}
 
 function orderLabel(o: { systemId: number | null; billFullName: string | null; billPhone: string | null; totalPriceAfterDiscount: number | null }) {
   return `#${o.systemId ?? "?"} · ${o.billFullName || "Khách"}${o.billPhone ? ` · ${o.billPhone}` : ""} · ${formatVND(o.totalPriceAfterDiscount ?? 0)}`;
@@ -59,6 +65,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "SHIPMENT",
         entityId: r.shipmentId,
         dedupeKey: `ship-failed:${r.shipmentId}:${dayKey(r.statusDate ?? r.updatedAt)}`,
+        occurredAt: r.statusDate ?? r.updatedAt,
       });
     }
   }
@@ -83,6 +90,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "ORDER",
         entityId: r.id,
         dedupeKey: `order-pending:${r.id}`,
+        occurredAt: r.insertedAt,
       });
     }
   }
@@ -108,6 +116,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "SHIPMENT",
         entityId: r.shipmentId,
         dedupeKey: `ship-stale:${r.shipmentId}`,
+        occurredAt: r.statusDate ?? r.updatedAt,
       });
     }
   }
@@ -115,7 +124,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   if (cfg.enabled.returning) {
     activeKinds.push("SHIPMENT_RETURNING");
     const rows = await db
-      .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, statusName: s.vtpStatusName })
+      .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, statusName: s.vtpStatusName, statusDate: s.vtpStatusDate, updatedAt: s.updatedAt })
       .from(s)
       .leftJoin(o, eq(o.id, s.orderId))
       .where(and(eq(s.stage, "RETURNING"), sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt}) >= ${lookback.toISOString()}::timestamptz`))
@@ -131,6 +140,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "SHIPMENT",
         entityId: r.shipmentId,
         dedupeKey: `ship-returning:${r.shipmentId}`,
+        occurredAt: r.statusDate ?? r.updatedAt,
       });
     }
   }
@@ -147,6 +157,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "CS_CASE",
         entityId: c.id,
         dedupeKey: `cs-case:${c.id}`,
+        occurredAt: c.updatedAt ?? c.createdAt,
       });
     }
   }
@@ -167,6 +178,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           entityType: "VARIANT",
           entityId: r.variantId,
           dedupeKey: `stock-low:${r.variantId}:${r.status}:${week.slice(0, 7)}`,
+          occurredAt: new Date(),
         });
       }
     } catch {
@@ -192,6 +204,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
             entityType: "AD_ACCOUNT",
             entityId: r.accountId,
             dedupeKey: `ads-blocked:${r.accountId}:${r.accountStatus}:${r.disableReason}`,
+            occurredAt: r.fetchedAt,
           });
           continue;
         }
@@ -209,6 +222,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           entityType: "AD_ACCOUNT",
           entityId: r.accountId,
           dedupeKey: `ads-billing:${r.accountId}:${bucket}:${r.lastPaidAt ? new Date(r.lastPaidAt).toISOString().slice(0, 10) : "0"}`,
+          occurredAt: r.fetchedAt,
         });
       }
     } catch {
@@ -229,6 +243,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           entityType: "ORDER",
           entityId: order.id,
           dedupeKey: `risky-order:${order.id}`,
+          occurredAt: order.insertedAt,
         });
       }
     } catch {
@@ -278,7 +293,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     const groups = new Map<string, typeof created>();
     for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
     for (const [kind, list] of groups) {
-      const lines = list.slice(0, 15).map((c) => `• <b>${escapeHtml(c.title)}</b>\n  ${escapeHtml(c.body)}\n  ${env.appUrl}${c.href}`);
+      const lines = list.slice(0, 15).map((c) => `• <b>${escapeHtml(c.title)}</b>\n  ${escapeHtml(c.body)}${c.occurredAt ? ` · ⏱ ${fmtAt(c.occurredAt)}` : ""}\n  ${env.appUrl}${c.href}`);
       const more = list.length > 15 ? `\n… và ${list.length - 15} mục nữa` : "";
       const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `⚠️ <b>${escapeHtml(NOTIFICATION_KIND_LABEL[kind] ?? kind)}</b> (${list.length})\n${lines.join("\n")}${more}`);
       if (result.ok) {
@@ -293,7 +308,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     const groups = new Map<string, typeof created>();
     for (const c of created) groups.set(c.kind, [...(groups.get(c.kind) ?? []), c]);
     for (const [kind, list] of groups) {
-      const lines = list.slice(0, 15).map((c) => [{ text: `• ${c.title}`, href: `${env.appUrl}${c.href}` }, { text: c.body ? `  ${c.body}` : "" }]);
+      const lines = list.slice(0, 15).map((c) => [{ text: `• ${c.title}`, href: `${env.appUrl}${c.href}` }, { text: `${c.body ? `  ${c.body}` : ""}${c.occurredAt ? ` · ⏱ cập nhật ${fmtAt(c.occurredAt)}` : ""}` }]);
       if (list.length > 15) lines.push([{ text: `… và ${list.length - 15} mục nữa` }]);
       // cảnh báo ngưỡng thanh toán QC đi vào nhóm riêng (nếu cấu hình)
       const useBilling = kind === "ADS_BILLING" && cfg.larkBillingWebhookUrl;
