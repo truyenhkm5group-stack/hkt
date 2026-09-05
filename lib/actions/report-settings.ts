@@ -10,6 +10,10 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 const schema = z.object({
   shipFeeDelivered: z.number().int().min(0).max(1_000_000),
   shipFeeReturned: z.number().int().min(0).max(1_000_000),
+  packingFeePerOrder: z.number().int().min(0).max(1_000_000).default(5_000),
+  opsStaffPerOrder: z.number().int().min(0).max(1_000_000).default(2_000),
+  opsStaffPerRescued: z.number().int().min(0).max(1_000_000).default(10_000),
+  fixedCostMonthly: z.number().int().min(0).max(10_000_000_000).default(5_000_000),
   returnRateWindowDays: z.number().int().min(7).max(730),
   defaultReturnRate: z.number().min(0).max(100),
   minFinishedOrders: z.number().int().min(1).max(10_000),

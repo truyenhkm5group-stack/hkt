@@ -15,6 +15,8 @@ type Props = {
     shipFeeDeliveredUsed: number;
     shipFeeReturnedUsed: number;
     shipFeeSource: string;
+    returnFeeFromData?: number;
+    returnFeeSample?: number;
   };
   canWrite: boolean;
 };
@@ -25,6 +27,10 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
   const [form, setForm] = useState({
     shipFeeDelivered: String(assumptions.shipFeeDelivered || ""),
     shipFeeReturned: String(assumptions.shipFeeReturned || ""),
+    packingFeePerOrder: String(assumptions.packingFeePerOrder ?? 5000),
+    opsStaffPerOrder: String(assumptions.opsStaffPerOrder ?? 2000),
+    opsStaffPerRescued: String(assumptions.opsStaffPerRescued ?? 10000),
+    fixedCostMonthly: String(assumptions.fixedCostMonthly ?? 5000000),
     defaultReturnRate: String(assumptions.defaultReturnRate),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
@@ -43,6 +49,10 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
       const result = await saveProfitAssumptions({
         shipFeeDelivered: Math.round(num(form.shipFeeDelivered)),
         shipFeeReturned: Math.round(num(form.shipFeeReturned)),
+        packingFeePerOrder: Math.round(num(form.packingFeePerOrder, 5000)),
+        opsStaffPerOrder: Math.round(num(form.opsStaffPerOrder, 2000)),
+        opsStaffPerRescued: Math.round(num(form.opsStaffPerRescued, 10000)),
+        fixedCostMonthly: Math.round(num(form.fixedCostMonthly, 5000000)),
         defaultReturnRate: num(form.defaultReturnRate, 30),
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
@@ -64,14 +74,14 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     <div className="rounded-xl border bg-card p-4 text-[13px] shadow-xs">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <span className="font-semibold">Giả định:</span>
-        <span>
-          Cước đơn giao thật{" "}
+        <span title="Cước ĐVVC cho mọi đơn gửi đi, kể cả đơn sau đó hoàn">
+          Cước gửi/đơn{" "}
           <b className="numeric">
             {assumptions.shipFeeDeliveredUsed.toLocaleString("vi-VN")} ₫
           </b>
         </span>
-        <span>
-          Chi phí đơn hoàn{" "}
+        <span title={`Cước gửi + phí hoàn về. Pancake / webhook Viettel Post không đẩy phí hoàn (${assumptions.returnFeeSample ?? 0} đơn hoàn 90 ngày có ghi phí hoàn), nên khi để trống ERP lấy phí hoàn về = cước gửi.`}>
+          Cước đơn hoàn (đi + về){" "}
           <b className="numeric">
             {assumptions.shipFeeReturnedUsed.toLocaleString("vi-VN")} ₫
           </b>
@@ -82,9 +92,23 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
               ? "đặt tay"
               : assumptions.shipFeeSource === "data"
                 ? "bình quân 90 ngày"
-                : "mặc định"}
+                : "mặc định: phí hoàn về = cước gửi"}
             )
           </span>
+        </span>
+        <span>
+          Đóng hàng <b className="numeric">{(assumptions.packingFeePerOrder ?? 5000).toLocaleString("vi-VN")} ₫</b>
+          <span className="text-muted-foreground">/đơn gửi</span>
+        </span>
+        <span title="Chi phí nhân viên vận đơn = số đơn xử lý × đơn giá + số đơn giao thất bại cứu được thành giao thành công × thưởng">
+          NV vận đơn <b className="numeric">{(assumptions.opsStaffPerOrder ?? 2000).toLocaleString("vi-VN")} ₫</b>
+          <span className="text-muted-foreground">/đơn + </span>
+          <b className="numeric">{(assumptions.opsStaffPerRescued ?? 10000).toLocaleString("vi-VN")} ₫</b>
+          <span className="text-muted-foreground">/đơn cứu GTC</span>
+        </span>
+        <span title="Văn phòng, điện nước, internet… quy đổi theo số ngày của kỳ và phân bổ theo tỷ trọng doanh số">
+          Cố định <b className="numeric">{(assumptions.fixedCostMonthly ?? 5000000).toLocaleString("vi-VN")} ₫</b>
+          <span className="text-muted-foreground">/tháng</span>
         </span>
         <span>
           Tỷ lệ hoàn mặc định{" "}
@@ -127,7 +151,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
       {open ? (
         <div className="mt-4 grid gap-3 border-t pt-4 sm:grid-cols-6">
           <div className="space-y-1">
-            <Label>Cước đơn giao thật (₫)</Label>
+            <Label>Cước gửi mỗi đơn (₫)</Label>
             <Input
               type="number"
               inputMode="numeric"
@@ -141,7 +165,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             />
           </div>
           <div className="space-y-1">
-            <Label>Chi phí đơn hoàn (₫)</Label>
+            <Label>Cước 1 đơn hoàn: đi + về (₫)</Label>
             <Input
               type="number"
               inputMode="numeric"
@@ -153,6 +177,22 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
                 setForm({ ...form, shipFeeReturned: e.target.value })
               }
             />
+          </div>
+          <div className="space-y-1">
+            <Label>Đóng hàng / đơn gửi (₫)</Label>
+            <Input type="number" inputMode="numeric" min={0} step={500} value={form.packingFeePerOrder} onChange={(e) => setForm({ ...form, packingFeePerOrder: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label>NV vận đơn / đơn xử lý (₫)</Label>
+            <Input type="number" inputMode="numeric" min={0} step={500} value={form.opsStaffPerOrder} onChange={(e) => setForm({ ...form, opsStaffPerOrder: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label>NV vận đơn / đơn cứu được GTC (₫)</Label>
+            <Input type="number" inputMode="numeric" min={0} step={1000} value={form.opsStaffPerRescued} onChange={(e) => setForm({ ...form, opsStaffPerRescued: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label>Chi phí cố định / tháng: văn phòng, điện nước (₫)</Label>
+            <Input type="number" inputMode="numeric" min={0} step={100000} value={form.fixedCostMonthly} onChange={(e) => setForm({ ...form, fixedCostMonthly: e.target.value })} />
           </div>
           <div className="space-y-1">
             <Label>Tỷ lệ hoàn mặc định (%)</Label>
@@ -221,10 +261,13 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           </div>
           <div className="sm:col-span-6 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              Để trống cước để ERP tự lấy bình quân 90 ngày từ dữ liệu vận đơn.
-              Tỷ lệ hoàn từng mã lấy theo lịch sử; có thể ghi đè ở phần chi tiết
-              mã hàng. Rủi ro tồn kho: dự phòng hàng lỗi / tồn lâu phải xả /
-              thất thoát, tính theo % giá vốn hàng bán ước tính.
+              Cước gửi tính cho MỌI đơn gửi đi; đơn hoàn tốn thêm phí hoàn về (để trống
+              = cước gửi + phí hoàn bình quân nếu có dữ liệu, không thì gấp đôi cước gửi).
+              Đóng hàng và nhân viên vận đơn tính theo số đơn đã xác nhận gửi đi; đơn
+              &ldquo;cứu được&rdquo; là đơn từng phát không thành rồi giao thành công. Chi phí
+              cố định quy đổi theo số ngày của kỳ — nếu đã nhập tiền văn phòng / điện nước
+              vào bảng Chi phí thì đặt 0 để khỏi tính hai lần. Rủi ro tồn kho: % tổng giá
+              trị hàng nhập trong kỳ.
             </p>
             <Button type="button" size="sm" onClick={submit} disabled={pending}>
               {pending ? (

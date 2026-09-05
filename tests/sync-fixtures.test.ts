@@ -35,6 +35,7 @@ import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/l
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
+import { fixedCostForPeriod, opsCosts, periodMonths } from "@/lib/constants/profit";
 
 async function main() {
   await ensureMigrated();
@@ -462,6 +463,19 @@ async function main() {
   assert.equal(isShopAddressIssue("[🤖 BOT ĐÃ TỰ ĐỘNG SỬA LẠI ĐỊA CHỈ SAI SANG QUẢNG NINH]", []), true, "ghi chú bot sửa địa chỉ = lỗi shop");
   assert.equal(isShopAddressIssue("khách dặn giao giờ hành chính", ["Giao không thành"]), false);
   console.log("✓ Giao không thành: phân loại lý do bưu tá, giờ hẹn, SĐT bưu tá, tin riêng theo lý do, bỏ qua khi đang hoàn / lỗi địa chỉ của shop");
+
+  // Giả định chi phí vận hành theo đơn (đóng hàng, nhân viên vận đơn, cố định theo kỳ)
+  const opsA = { packingFeePerOrder: 5_000, opsStaffPerOrder: 2_000, opsStaffPerRescued: 10_000 };
+  assert.deepEqual(opsCosts({ orders: 100, rescued: 7 }, opsA), { packingCost: 500_000, opsStaffCost: 270_000 }, "đóng hàng 100×5K, NV vận đơn 100×2K + 7×10K");
+  assert.deepEqual(opsCosts({ orders: 3, rescued: 9 }, opsA), { packingCost: 15_000, opsStaffCost: 36_000 }, "đơn cứu không vượt số đơn");
+  assert.deepEqual(opsCosts({ orders: 0, rescued: 0 }, opsA), { packingCost: 0, opsStaffCost: 0 });
+  const m30 = periodMonths(new Date("2026-08-01T00:00:00Z"), new Date("2026-08-31T00:00:00Z"));
+  assert.ok(Math.abs(m30 - 30 / (365 / 12)) < 1e-9, "30 ngày ≈ 0,986 tháng");
+  assert.equal(fixedCostForPeriod(5_000_000, 1), 5_000_000);
+  assert.equal(fixedCostForPeriod(5_000_000, 0.5), 2_500_000);
+  assert.equal(fixedCostForPeriod(5_000_000, 0), 0, "kỳ không có đơn thì không tính cố định");
+  assert.equal(periodMonths(null, new Date()), 0);
+  console.log("✓ Giả định vận hành: đóng hàng/đơn, NV vận đơn (đơn + đơn cứu GTC), chi phí cố định theo số tháng của kỳ");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

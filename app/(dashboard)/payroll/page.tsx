@@ -99,7 +99,7 @@ export default async function PayrollPage({
             ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}).`
             : basis === "nominal"
               ? "Danh nghĩa: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
-              : `${PAYROLL_BASIS_LABEL[basis]}. Mỗi mã có marketer phụ trách chính chịu tồn kho & giá vốn; người khác đẩy chéo được chia theo tỷ trọng QC và trích ${report.marketers.config.ownerSharePct}% lợi nhuận cho chủ mã. Chi phí cố định / vận hành / khác phân bổ theo tỷ trọng doanh thu GTC.`
+              : `${PAYROLL_BASIS_LABEL[basis]}. Mỗi mã có marketer phụ trách chính chịu tồn kho & giá vốn; người khác đẩy chéo được chia theo tỷ trọng QC và trích ${report.marketers.config.ownerSharePct}% lợi nhuận cho chủ mã. Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
         }
       />
 
@@ -117,7 +117,7 @@ export default async function PayrollPage({
               {formatVND(report.totalProfit, { compact: true })}
             </span>
           }
-          note={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − CP khác ${formatVND(m.totals.operating, { compact: true })}`}
+          note={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − vận hành ${formatVND(m.totals.operating, { compact: true })} (đã nhập ${formatVND(m.totals.operatingEntered, { compact: true })} + cố định ${formatVND(m.totals.fixedCost, { compact: true })} · ${m.totals.months} tháng + đóng hàng & NV vận đơn ${formatVND(m.totals.perOrderOps, { compact: true })})`}
           icon={TrendingUp}
           tone={report.totalProfit >= 0 ? "green" : "rose"}
         />
@@ -333,7 +333,7 @@ export default async function PayrollPage({
 
       <SectionCard
         title={`Lợi nhuận theo mã hàng · ${PAYROLL_BASIS_SHORT[basis]}`}
-        description={basis === "profit2" ? "Doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ (phiếu nhập) − vận chuyển − chi phí cố định/vận hành/khác phân bổ theo doanh thu. Chủ mã chịu toàn bộ giá vốn hàng nhập." : "Doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển (kể cả đơn hoàn) − chi phí cố định/vận hành/khác phân bổ theo doanh thu."}
+        description={basis === "profit2" ? "Doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ (phiếu nhập) − vận chuyển − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi). Chủ mã chịu toàn bộ giá vốn hàng nhập." : "Doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển (kể cả đơn hoàn) − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi)."}
         padded={false}
       >
         <div className="overflow-x-auto">

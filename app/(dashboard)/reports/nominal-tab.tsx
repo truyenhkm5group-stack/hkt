@@ -12,6 +12,7 @@ import {
   ReturnRateOverride,
 } from "@/app/(dashboard)/reports/assumptions-form";
 import { MetricCard } from "@/components/metric-card";
+import { MarketerNominalRows } from "./marketer-nominal-rows";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import {
@@ -138,7 +139,7 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.operatingExpenses, { compact: true })} (${formatNumber(report.operatingCount)} khoản), rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập ${formatVND(t.purchaseCost, { compact: true })}), thuế ${formatVND(t.tax, { compact: true })}, CP khác ${formatVND(t.otherCost, { compact: true })}`}
+          note={`Margin ròng ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · trừ vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng), rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập ${formatVND(t.purchaseCost, { compact: true })}), thuế ${formatVND(t.tax, { compact: true })}, CP khác ${formatVND(t.otherCost, { compact: true })}`}
           icon={Wallet}
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
@@ -161,7 +162,7 @@ export async function NominalTab({
         padded={false}
       >
         <div className="overflow-x-auto">
-          <Table className="min-w-[1180px]">
+          <Table className="min-w-[1500px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Mã hàng</TableHead>
@@ -177,9 +178,12 @@ export async function NominalTab({
                 <TableHead className="text-right">DT/đơn</TableHead>
                 <TableHead className="text-right">LN ước tính</TableHead>
                 <TableHead className="text-right">Margin</TableHead>
-                <TableHead className="text-right" title="Chi phí vận hành trong kỳ (lương, mặt bằng, phần mềm, đóng gói, khác) phân bổ theo tỷ trọng doanh số POS">CP vận hành</TableHead>
-                <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn lên (trước hoàn huỷ)">VH/đơn trước hoàn</TableHead>
-                <TableHead className="text-right" title="Chi phí vận hành ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">VH/đơn sau hoàn huỷ</TableHead>
+                <TableHead className="text-right" title="Chi phí vận hành đã nhập ở bảng Chi phí trong kỳ (lương, phần mềm, khác; trừ QC & nhập hàng) phân bổ theo tỷ trọng doanh số POS">CP vận hành đã nhập</TableHead>
+                <TableHead className="text-right" title={`Đóng hàng = đơn gửi × ${(report.assumptions.packingFeePerOrder ?? 0).toLocaleString("vi-VN")} ₫`}>Đóng hàng</TableHead>
+                <TableHead className="text-right" title={`Nhân viên vận đơn = đơn × ${(report.assumptions.opsStaffPerOrder ?? 0).toLocaleString("vi-VN")} ₫ + đơn giao thất bại cứu được thành GTC × ${(report.assumptions.opsStaffPerRescued ?? 0).toLocaleString("vi-VN")} ₫`}>NV vận đơn</TableHead>
+                <TableHead className="text-right" title={`Chi phí cố định (văn phòng, điện nước…) ${(report.assumptions.fixedCostMonthly ?? 0).toLocaleString("vi-VN")} ₫/tháng × ${report.periodMonths} tháng của kỳ, phân bổ theo tỷ trọng doanh số POS`}>CP cố định</TableHead>
+                <TableHead className="text-right" title="Tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) ÷ số đơn lên (trước hoàn huỷ)">VH/đơn trước hoàn</TableHead>
+                <TableHead className="text-right" title="Tổng vận hành ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">VH/đơn sau hoàn huỷ</TableHead>
                 <TableHead className="text-right" title="Dự phòng rủi ro tồn kho = tổng giá trị hàng nhập trong kỳ (phiếu nhập) × % giả định">Rủi ro TK {report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập</TableHead>
                 <TableHead className="text-right" title="Dự trù thuế = DT GTC ước tính × %">Thuế {report.assumptions.taxPercent ?? 1.5}%</TableHead>
                 <TableHead className="text-right" title="Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền)">CP khác {report.assumptions.otherCostPercentOfAds ?? 1.1}% QC</TableHead>
@@ -191,7 +195,7 @@ export async function NominalTab({
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={21}
+                    colSpan={24}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -320,6 +324,12 @@ export async function NominalTab({
                       <Pct value={r.margin} />
                     </TableCell>
                     <TableCell className="text-right"><Money value={r.operatingAlloc} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={r.packingCost} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right">
+                      <Money value={r.opsStaffCost} className="text-muted-foreground" />
+                      {r.rescued ? <div className="text-[10.5px] text-muted-foreground">cứu {formatNumber(r.rescued)} đơn</div> : null}
+                    </TableCell>
+                    <TableCell className="text-right"><Money value={r.fixedAlloc} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.opexPerDelivered ?? 0} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
@@ -400,6 +410,12 @@ export async function NominalTab({
                     <Pct value={t.margin} />
                   </TableCell>
                   <TableCell className="text-right"><Money value={t.operatingExpenses} /></TableCell>
+                  <TableCell className="text-right"><Money value={t.packingCost} /></TableCell>
+                  <TableCell className="text-right">
+                    <Money value={t.opsStaffCost} />
+                    {t.rescued ? <div className="text-[10.5px] font-normal text-muted-foreground">cứu {formatNumber(t.rescued)} đơn</div> : null}
+                  </TableCell>
+                  <TableCell className="text-right"><Money value={t.fixedCost} /></TableCell>
                   <TableCell className="text-right"><Money value={t.opexPerOrder ?? 0} /></TableCell>
                   <TableCell className="text-right"><Money value={t.opexPerDelivered ?? 0} /></TableCell>
                   <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
@@ -423,14 +439,17 @@ export async function NominalTab({
         </div>
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
           Công thức mỗi mã: DT GTC ước tính = Doanh số POS × (1 − TL hoàn); Giá
-          vốn = SP × giá nhập × (1 − TL hoàn); Vận chuyển = Đơn × [(1 − TL hoàn)
-          × cước giao thật + TL hoàn × chi phí đơn hoàn]; LN ước tính (lợi nhuận
-          gộp sau QC) = DT − giá vốn − vận chuyển − CPQC. LN ròng = LN ước tính −
-          chi phí vận hành trong kỳ (bảng Chi phí, trừ QC & nhập hàng, phân bổ
-          theo tỷ trọng doanh số) − dự phòng rủi ro tồn kho (% giá vốn, sửa ở
-          Giả định). Đơn chưa giao vẫn được tính theo tỷ lệ ước tính, nên đây
-          là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực” khi tiền
-          về.
+          vốn = SP × giá nhập × (1 − TL hoàn); Vận chuyển = Đơn × cước gửi + Đơn
+          × TL hoàn × phí hoàn về (tức Đơn × [(1 − TL hoàn) × cước gửi + TL hoàn
+          × cước đơn hoàn đi + về]); LN ước tính (lợi nhuận gộp sau QC) = DT −
+          giá vốn − vận chuyển − CPQC. LN ròng = LN ước tính − CP vận hành đã
+          nhập (bảng Chi phí, trừ QC & nhập hàng, phân bổ theo doanh số) − đóng
+          hàng (đơn × đơn giá) − nhân viên vận đơn (đơn × đơn giá + đơn cứu được
+          GTC × thưởng) − CP cố định (tháng × số tháng của kỳ, phân bổ theo doanh
+          số) − dự phòng rủi ro tồn kho (% hàng nhập) − thuế − CP khác; sửa đơn
+          giá ở Giả định. Đơn chưa giao vẫn được tính theo tỷ lệ ước tính, nên
+          đây là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực” khi
+          tiền về.
         </div>
       </SectionCard>
 
@@ -560,7 +579,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
-        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − vận hành − rủi ro TK − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − rủi ro TK − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -574,7 +593,7 @@ export async function NominalTab({
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
-                <TableHead className="text-right">CP vận hành</TableHead>
+                <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
                 <TableHead className="text-right">Rủi ro TK</TableHead>
                 <TableHead className="text-right">Thuế</TableHead>
                 <TableHead className="text-right">CP khác</TableHead>
@@ -593,7 +612,7 @@ export async function NominalTab({
                   <TableCell className="text-right"><Money value={r.expectedRevenue} /></TableCell>
                   <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
                   <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.operatingAlloc} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
@@ -610,7 +629,7 @@ export async function NominalTab({
                 <TableCell className="text-right"><Money value={t.expectedRevenue} /></TableCell>
                 <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
                 <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
-                <TableCell className="text-right"><Money value={t.operatingExpenses} /></TableCell>
+                <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
                 <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
                 <TableCell className="text-right"><Money value={t.tax} /></TableCell>
                 <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
@@ -625,7 +644,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo Marketer"
-        description={`LN ròng danh nghĩa của từng mã (đã trừ giá vốn, vận chuyển, vận hành, rủi ro TK, thuế) chia cho marketer theo tỷ trọng tiền QC trên mã; trừ QC và chi phí khác của chính mình, QC test; người đẩy chéo trích ${byMarketer.ownerSharePct}% cho chủ mã (cấu hình ở Lương & hoa hồng).`}
+        description={`Cách ghi nhận: đơn & DT GTC ước tính của mỗi mã chia cho các marketer theo TỶ TRỌNG TIỀN QC trên mã trong kỳ (không QC → tính hết cho chủ mã). LN ròng trước QC của mã (đã trừ giá vốn, vận chuyển, vận hành gồm đóng hàng / NV vận đơn / cố định, rủi ro TK, thuế) × tỷ trọng − QC của chính mình − CP khác theo QC − QC test = LN ròng cá nhân; người đẩy chéo trích ${byMarketer.ownerSharePct}% LN dương cho chủ mã (cấu hình ở Lương & hoa hồng). Bấm tên marketer để xem chi tiết từng mã hàng có phát sinh số liệu.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -646,26 +665,7 @@ export async function NominalTab({
             </TableHeader>
             <TableBody>
               {byMarketer.rows.map((x) => (
-                <TableRow key={x.marketerId ?? "none"}>
-                  <TableCell>
-                    <div className={cn("font-semibold", !x.marketerId && "text-amber-700")}>{x.name}</div>
-                    {x.ownedProducts.length ? <div className="text-[11px] text-muted-foreground">Phụ trách: {x.ownedProducts.join(", ")}</div> : null}
-                    {x.products.filter((p) => p.role === "cross").length ? <div className="text-[11px] text-muted-foreground">Đẩy chéo: {x.products.filter((p) => p.role === "cross").map((p) => `${p.code || p.productName} ${(p.share * 100).toFixed(0)}%`).join(", ")}</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right"><Money value={x.adSpend} className="text-rose-600" /></TableCell>
-                  <TableCell className="text-right"><Money value={x.testSpend} className={x.testSpend ? "text-amber-600" : "text-muted-foreground"} /></TableCell>
-                  <TableCell className="text-right"><Money value={x.otherCost} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="numeric text-right">{formatNumber(x.attributedOrders)}</TableCell>
-                  <TableCell className="text-right"><Money value={x.attributedRevenue} /></TableCell>
-                  <TableCell className="text-right"><Money value={x.profitBeforeAds} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right text-xs">
-                    {x.ownerBonusReceived ? <div className="text-emerald-700">+{formatVND(x.ownerBonusReceived)}</div> : null}
-                    {x.ownerBonusPaid ? <div className="text-rose-600">−{formatVND(x.ownerBonusPaid)}</div> : null}
-                    {!x.ownerBonusReceived && !x.ownerBonusPaid ? <span className="text-muted-foreground">—</span> : null}
-                  </TableCell>
-                  <TableCell className="text-right"><Money value={x.personalNet} className={cn("font-bold", x.personalNet >= 0 ? "text-success" : "text-destructive")} /></TableCell>
-                  <TableCell className="text-right"><Money value={x.attributedOrders ? Math.round((x.adSpend + x.testSpend) / x.attributedOrders) : 0} className="text-muted-foreground" /></TableCell>
-                </TableRow>
+                <MarketerNominalRows key={x.marketerId ?? "none"} row={x} ownerSharePct={byMarketer.ownerSharePct} />
               ))}
               {byMarketer.unattributed ? (
                 <TableRow className="text-muted-foreground">
