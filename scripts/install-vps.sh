@@ -140,6 +140,31 @@ fi
 
 # ───────── 5. Khởi chạy ─────────
 say "Build và khởi chạy (lần đầu mất 3–6 phút)"
+
+# CSDL lên trước, rồi ĐỒNG BỘ mật khẩu role với .env.
+# Vì sao bắt buộc: POSTGRES_PASSWORD chỉ có tác dụng lúc initdb — lần đầu tạo volume erp_pgdata.
+# Về sau .env có thể được tạo lại với mật khẩu ngẫu nhiên mới, nhưng volume vẫn giữ mật khẩu cũ,
+# nên app báo "password authentication failed for user erp" và crash-loop vĩnh viễn
+# (pg_isready vẫn xanh vì không cần đăng nhập, nên nhìn bên ngoài tưởng CSDL vẫn tốt).
+# ALTER USER ở đây không đụng dữ liệu, chạy lại nhiều lần vẫn đúng, và chạy được qua socket
+# nội bộ của container (pg_hba mặc định của image postgres cho phép "local all all trust").
+$COMPOSE up -d --build db
+for _ in $(seq 1 60); do
+  $COMPOSE exec -T db pg_isready -U erp -d erp >/dev/null 2>&1 && break
+  sleep 2
+done
+DB_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' .env | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
+if [ -n "${DB_PASSWORD:-}" ]; then
+  DB_PASSWORD_SQL="$(printf '%s' "$DB_PASSWORD" | sed "s/'/''/g")"
+  if $COMPOSE exec -T db psql -U erp -d erp -v ON_ERROR_STOP=1 -q -c "ALTER USER erp WITH PASSWORD '$DB_PASSWORD_SQL';" >/dev/null 2>&1; then
+    say "Đã đồng bộ mật khẩu CSDL với .env"
+  else
+    warn "KHÔNG đồng bộ được mật khẩu CSDL — app sẽ không kết nối được. Kiểm tra container erp-db."
+  fi
+else
+  warn "Không đọc được POSTGRES_PASSWORD trong .env — bỏ qua bước đồng bộ mật khẩu CSDL."
+fi
+
 $COMPOSE up -d --build
 
 say "Chờ ERP sẵn sàng"
