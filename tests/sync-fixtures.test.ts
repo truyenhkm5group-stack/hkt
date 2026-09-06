@@ -33,7 +33,8 @@ import { expandSheetRange, legBaseCode, mapVtpStatusText, parseStatementDetail, 
 import XLSX from "xlsx";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
-import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
+import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import type { OrderOutcome } from "@/lib/constants/returns";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
@@ -854,6 +855,73 @@ async function main() {
     const lai = await listOrdersForVariant((await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key, all);
     assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "RETURNED_BY_RULE", "đơn có vận đơn chiều về đã giao → tính là hoàn");
     console.log(`✓ Danh sách vận đơn VTP: ghép ${applied.matched}/${applied.total} (${applied.legs} chiều về → đơn gốc thành đơn hoàn)`);
+  }
+
+  // P0: khóa HÀNH VI HIỆN TẠI của SQL thật, không coi các fallback đang sai là quy tắc được duyệt.
+  // Đặt cuối bộ test, ID riêng và không thêm order_items để không đổi fixture rr-var của các báo cáo phía trên.
+  // ERP_TEST_OUTCOME_CONTRACT=1 chạy thêm yêu cầu đã rõ của chủ shop; hiện phải FAIL ở các fallback COD/Pancake.
+  // Các trường hợp đang giao/hoàn có tiền chỉ khóa hiện trạng, chưa tự chọn kết quả nghiệp vụ mới.
+  {
+    type OutcomeCase = {
+      id: string;
+      shipmentStage: (typeof schema.shipments.$inferInsert)["stage"] | null;
+      orderStage: (typeof schema.orders.$inferInsert)["stage"];
+      codStatus: (typeof schema.shipments.$inferInsert)["codStatus"];
+      collected: number;
+      amount: number;
+      orderCod: number;
+      prepaid: number;
+      transfer: number;
+      current: OrderOutcome;
+      proposed?: OrderOutcome | "NOT_DELIVERED";
+    };
+    const base: Omit<OutcomeCase, "id" | "current"> = {
+      shipmentStage: "DELIVERED", orderStage: "DELIVERED", codStatus: "PENDING",
+      collected: 0, amount: 499_000, orderCod: 499_000, prepaid: 0, transfer: 0,
+    };
+    const cases: OutcomeCase[] = [
+      { ...base, id: "declared-only", current: "DELIVERED", proposed: "NOT_DELIVERED" },
+      { ...base, id: "order-declared-only", amount: 0, current: "DELIVERED", proposed: "NOT_DELIVERED" },
+      { ...base, id: "collected-30000", collected: 30_000, current: "RETURNED", proposed: "RETURNED" },
+      { ...base, id: "collected-50000", collected: 50_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
+      { ...base, id: "collected-100000", collected: 100_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
+      { ...base, id: "collected-100001", collected: 100_001, current: "DELIVERED", proposed: "DELIVERED" },
+      { ...base, id: "no-shipment-delivered", shipmentStage: null, current: "DELIVERED", proposed: "NOT_DELIVERED" },
+      { ...base, id: "no-shipment-paid", shipmentStage: null, orderStage: "PAID", current: "DELIVERED", proposed: "NOT_DELIVERED" },
+      ...(["PENDING", "COLLECTED", "RECONCILED", "PAID_TO_BANK", "DISPUTED"] as const).map((codStatus): OutcomeCase => ({
+        ...base, id: `transit-${codStatus}`, shipmentStage: "IN_TRANSIT", orderStage: "SHIPPED", codStatus, collected: 100_001,
+        current: codStatus === "PENDING" || codStatus === "DISPUTED" ? "IN_TRANSIT" : "DELIVERED",
+      })),
+      ...(["RETURNING", "RETURNED"] as const).map((shipmentStage): OutcomeCase => ({
+        ...base, id: `return-${shipmentStage}`, shipmentStage, orderStage: "SHIPPED", codStatus: "PAID_TO_BANK", collected: 100_001,
+        current: "RETURNED",
+      })),
+      ...([{ prepaid: 100_001, transfer: 0 }, { prepaid: 0, transfer: 100_001 }, { prepaid: 60_000, transfer: 60_000 }]).map((payment, index): OutcomeCase => ({
+        ...base, ...payment, id: `transit-prepaid-${index}`, shipmentStage: "IN_TRANSIT", orderStage: "SHIPPED", amount: 0, orderCod: 0,
+        current: "IN_TRANSIT", proposed: "NOT_DELIVERED",
+      })),
+    ];
+    const differences: string[] = [];
+    for (const c of cases) {
+      const id = `p0-outcome-${c.id}`;
+      await db.insert(schema.orders).values({ id, stage: c.orderStage, cod: c.orderCod, prepaid: c.prepaid, transferMoney: c.transfer, insertedAt: now });
+      if (c.shipmentStage) {
+        await db.insert(schema.shipments).values({ orderId: id, stage: c.shipmentStage, codStatus: c.codStatus, codCollected: c.collected, codAmount: c.amount });
+      }
+      const [result] = await db.select({ outcome: ORDER_OUTCOME }).from(schema.orders)
+        .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id)).where(eq(schema.orders.id, id));
+      assert.ok(result, `${c.id}: có kết quả SQL`);
+      assert.equal(result.outcome, c.current, `${c.id}: characterization b5d7088; không phải phê duyệt nghiệp vụ`);
+      if (c.proposed && (c.proposed === "NOT_DELIVERED" ? result.outcome === "DELIVERED" : result.outcome !== c.proposed)) {
+        differences.push(`${c.id}: hiện tại ${result.outcome}; yêu cầu ${c.proposed}`);
+      }
+    }
+    assert.deepEqual(differences.map((d) => d.split(":")[0]), ["declared-only", "order-declared-only", "no-shipment-delivered", "no-shipment-paid"], "khóa chính xác 4 chênh lệch đã biết; không bỏ sót lỗi mới");
+    console.log(`✓ P0 ORDER_OUTCOME: ${cases.length} tình huống khóa hiện trạng; ${differences.length} chênh lệch với yêu cầu mới`);
+    for (const difference of differences) console.log(`  CHÊNH LỆCH ĐÃ BIẾT: ${difference}`);
+    if (process.env.ERP_TEST_OUTCOME_CONTRACT === "1") {
+      assert.equal(differences.length, 0, `Yêu cầu P0 chưa được implementation đáp ứng:\n${differences.join("\n")}`);
+    }
   }
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
