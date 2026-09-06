@@ -49,6 +49,13 @@ export default async function PlanningPage() {
         <MetricCard label="Hết hàng / âm tồn" value={formatNumber(sm.out)} note="Tồn khả dụng ≤ đơn đã chốt — cần sản xuất gấp" icon={AlertTriangle} tone={sm.out ? "rose" : "slate"} />
         <MetricCard label="Hết trước khi SX xong" value={formatNumber(sm.critical)} note={`Số ngày còn bán được < thời gian SX (${report.assumptions.leadTimeDays} ngày)`} icon={Factory} tone={sm.critical ? "amber" : "slate"} />
         <MetricCard label="Sắp thiếu" value={formatNumber(sm.low)} note="Còn bán được dưới thời gian SX + tồn an toàn" icon={PackageSearch} tone={sm.low ? "amber" : "slate"} />
+        <MetricCard
+          label="Chưa tính được tồn"
+          value={formatNumber(sm.unknown)}
+          note="Chưa có phiếu nhập trong ERP — KHÔNG đề xuất đặt cho các mẫu mã này"
+          icon={PackageSearch}
+          tone={sm.unknown ? "amber" : "slate"}
+        />
         <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất · ${formatNumber(sm.variants)} mẫu mã đang theo dõi`} icon={ShoppingCart} tone="blue" />
       </section>
 

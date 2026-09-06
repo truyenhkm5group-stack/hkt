@@ -5,6 +5,7 @@
 import "./setup-env";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
+import { testInventory } from "./inventory.test";
 import { testPaymentVerification } from "./payment-verification.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -944,6 +945,7 @@ async function main() {
 
   await testDataQuality(db);
   await testConsistency(db);
+  await testInventory(db);
   await testPaymentVerification(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

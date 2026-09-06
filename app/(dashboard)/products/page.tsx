@@ -46,9 +46,15 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Mẫu mã đang bán" value={formatNumber(summary.selling)} note={`${formatNumber(summary.products)} sản phẩm`} icon={Boxes} tone="blue" />
         <MetricCard label="Sắp hết hàng" value={formatNumber(summary.low)} note="Tồn khả dụng ERP từ 1 đến 5" icon={AlertTriangle} tone="amber" />
-        <MetricCard label="Hết hàng" value={formatNumber(summary.out)} note={`Tồn ≤ 0, vẫn đang bán · ${formatNumber(summary.noReceipt)} mẫu mã chưa nhập phiếu`} icon={PackageX} tone={summary.out > 0 ? "rose" : "slate"} />
+        <MetricCard
+          label="Hết hàng"
+          value={formatNumber(summary.out)}
+          note={summary.unknownStock ? `Tồn ≤ 0, vẫn đang bán · ${formatNumber(summary.unknownStock)} mẫu mã CHƯA tính được tồn (chưa có phiếu nhập)` : "Tồn ≤ 0, vẫn đang bán"}
+          icon={PackageX}
+          tone={summary.out > 0 ? "rose" : "slate"}
+        />
         <MetricCard label="Giá trị tồn kho" value={formatVND(summary.stockValue, { compact: true })} note={`${formatNumber(summary.stockUnits)} sản phẩm × giá nhập gần nhất`} icon={Warehouse} tone="primary" />
-        <MetricCard label="Đã bán 30 ngày" value={formatNumber(summary.sold30)} note={`Đã nhập ${formatNumber(summary.received)} · giao thật ${formatNumber(summary.delivered)} · hoàn ${formatNumber(summary.returned)} · đang giao ${formatNumber(summary.inTransit)}`} icon={ShoppingBag} tone="green" />
+        <MetricCard label="Đã bán 30 ngày" value={formatNumber(summary.sold30)} note={`Đã nhập ${formatNumber(summary.received)} · giao thật ${formatNumber(summary.delivered)} · đang giao ${formatNumber(summary.inTransit)} · hoàn ${formatNumber(summary.returned)} (chờ về kho ${formatNumber(summary.returnedPending)}, đã nhận ${formatNumber(summary.returnedReceived)})`} icon={ShoppingBag} tone="green" />
       </section>
 
       <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">

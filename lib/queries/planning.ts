@@ -2,7 +2,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
-import { LAST_RECEIPT_COST, erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { getSettingJson } from "@/lib/settings";
 
@@ -19,6 +19,8 @@ export async function loadPlanningAssumptions(): Promise<PlanningAssumptions> {
 
 export type PlanRow = PlanOutput & {
   variantId: string;
+  /** false = chưa có phiếu nhập nào ⇒ tồn không tính được, không đề xuất đặt hàng */
+  stockKnown: boolean;
   productId: string;
   productName: string;
   productCode: string;
@@ -43,10 +45,10 @@ export type PlanReport = {
   assumptions: PlanningAssumptions;
   rows: PlanRow[];
   products: { productId: string; productName: string; productCode: string; image: string | null; rows: PlanRow[]; suggested: number; orderCost: number; worst: PlanStatus }[];
-  summary: { variants: number; out: number; critical: number; low: number; suggestedUnits: number; orderCost: number; byStatus: Record<PlanStatus, number> };
+  summary: { variants: number; out: number; critical: number; low: number; unknown: number; suggestedUnits: number; orderCost: number; byStatus: Record<PlanStatus, number> };
 };
 
-const STATUS_RANK: Record<PlanStatus, number> = { OUT: 0, CRITICAL: 1, LOW: 2, OK: 3, IDLE: 4 };
+const STATUS_RANK: Record<PlanStatus, number> = { OUT: 0, UNKNOWN: 1, CRITICAL: 2, LOW: 3, OK: 4, IDLE: 5 };
 
 /** Nhu cầu ròng (không huỷ, không hoàn) theo mẫu mã trong N ngày theo ngày lên đơn */
 function demandSubquery(db: Awaited<ReturnType<typeof getDb>>, days: number, alias: string) {
@@ -82,6 +84,7 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
       color: pv.color,
       size: pv.size,
       stock: erpStockExpr(sales, receipts),
+      stockKnown: stockKnownExpr(receipts),
       pancakeStock: pv.remainQuantity,
       committed: sql<number>`coalesce(${sales.pending}, 0)`,
       inTransit: sql<number>`coalesce(${sales.inTransit}, 0)`,
@@ -103,7 +106,7 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
 
   const planRows: PlanRow[] = rows.map((r) => {
     const leadTimeDays = a.leadTimeOverrides[r.productId] ?? a.leadTimeDays;
-    const plan = computePlan({ stock: Number(r.stock ?? 0), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo) });
+    const plan = computePlan({ stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo) });
     const unitCost = Number(r.unitCost ?? 0);
     return {
       ...plan,
@@ -116,6 +119,7 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
       color: r.color,
       size: r.size,
       stock: Number(r.stock ?? 0),
+      stockKnown: Boolean(r.stockKnown),
       pancakeStock: Number(r.pancakeStock ?? 0),
       committed: Number(r.committed ?? 0),
       inTransit: Number(r.inTransit ?? 0),
@@ -129,7 +133,7 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
     };
   });
   // bỏ mẫu mã không bán, không tồn, không đặt
-  const active = planRows.filter((r) => r.sold30 > 0 || r.stock !== 0 || r.committed > 0 || r.suggested > 0);
+  const active = planRows.filter((r) => r.sold30 > 0 || r.stock !== 0 || r.committed > 0 || r.suggested > 0 || r.status === "UNKNOWN");
   const byProduct = new Map<string, PlanReport["products"][number]>();
   for (const r of active) {
     const g = byProduct.get(r.productId) ?? { productId: r.productId, productName: r.productName, productCode: r.productCode, image: r.image, rows: [], suggested: 0, orderCost: 0, worst: "IDLE" as PlanStatus };
@@ -141,13 +145,13 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
   }
   const products = [...byProduct.values()].sort((x, y) => STATUS_RANK[x.worst] - STATUS_RANK[y.worst] || y.suggested - x.suggested);
   for (const g of products) g.rows.sort((x, y) => STATUS_RANK[x.status] - STATUS_RANK[y.status] || y.suggested - x.suggested);
-  const byStatus: Record<PlanStatus, number> = { OUT: 0, CRITICAL: 0, LOW: 0, OK: 0, IDLE: 0 };
+  const byStatus: Record<PlanStatus, number> = { OUT: 0, UNKNOWN: 0, CRITICAL: 0, LOW: 0, OK: 0, IDLE: 0 };
   for (const r of active) byStatus[r.status] += 1;
   return {
     assumptions: a,
     rows: active,
     products,
-    summary: { variants: active.length, out: byStatus.OUT, critical: byStatus.CRITICAL, low: byStatus.LOW, suggestedUnits: active.reduce((t, r) => t + r.suggested, 0), orderCost: active.reduce((t, r) => t + r.orderCost, 0), byStatus },
+    summary: { variants: active.length, out: byStatus.OUT, critical: byStatus.CRITICAL, low: byStatus.LOW, unknown: byStatus.UNKNOWN, suggestedUnits: active.reduce((t, r) => t + r.suggested, 0), orderCost: active.reduce((t, r) => t + r.orderCost, 0), byStatus },
   };
 }
 

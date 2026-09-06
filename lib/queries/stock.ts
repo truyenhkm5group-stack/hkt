@@ -21,8 +21,10 @@ export function variantSalesSubquery(db: Db) {
       returned: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
       inTransit: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT'), 0)`.as("sold_in_transit"),
       pending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED' and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP')), 0)`.as("sold_pending"),
-      /** Hàng hoàn kho CHƯA xác nhận nhận về — vẫn đang ở ngoài, không được tính vào tồn. */
+      /** Hàng hoàn kho CHƯA xác nhận nhận về — vẫn đang ở ngoài, KHÔNG được tính vào tồn. */
       returnedPending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${RETURN_PENDING_WAREHOUSE}), 0)`.as("sold_returned_pending"),
+      /** Hàng hoàn kho ĐÃ xác nhận nhận về — đã nằm trong tồn trở lại. Tách riêng để không trộn hai trạng thái. */
+      returnedReceived: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is not null), 0)`.as("sold_returned_received"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
@@ -49,6 +51,16 @@ export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_re
 
 export type StockAggregates = ReturnType<typeof variantSalesSubquery>;
 export type ReceiptAggregates = ReturnType<typeof variantReceiptsSubquery>;
+
+/**
+ * Tồn ERP có ĐÁNG TIN hay không: chỉ khi mẫu mã đã có ít nhất một phiếu nhập trong ERP.
+ * Chưa có phiếu nhập nào thì "nhập = 0" là THIẾU DỮ LIỆU, không phải "nhập 0 cái";
+ * lấy 0 trừ đi số đã bán sẽ ra tồn âm bịa ra và đẩy kế hoạch sản xuất đặt thừa.
+ * Những mẫu mã này phải hiển thị "Chưa có phiếu nhập", không hiển thị số.
+ */
+export function stockKnownExpr(receipts: ReceiptAggregates) {
+  return sql<boolean>`coalesce(${receipts.receiptCount}, 0) > 0`;
+}
 
 /** Tồn khả dụng ERP = Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
  *  Hàng hoàn chỉ được cộng lại tồn khi có `shipments.return_received_at`; ĐVVC báo "đã hoàn" là chưa đủ. */

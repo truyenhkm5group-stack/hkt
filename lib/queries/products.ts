@@ -3,7 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
 import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
-import { erpStockExpr, LAST_RECEIPT_COST, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
 export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue", "received", "delivered", "returned", "inTransit"];
@@ -97,13 +97,20 @@ export type ProductListRow = {
   sold30: number;
   stockValue: number;
   stocks: VariantStockCell[];
-  /** Tồn kho do ERP tính: Nhập − Giao thật − Đang giao */
+  /** Tồn kho do ERP tính: Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA nhận */
   received: number;
   delivered: number;
+  /** Tổng hàng hoàn (= returnedPending + returnedReceived) */
   returned: number;
+  /** Hoàn nhưng kho CHƯA xác nhận nhận về — đang bị trừ khỏi tồn */
+  returnedPending: number;
+  /** Hoàn và kho ĐÃ xác nhận nhận về — đã nằm trong tồn */
+  returnedReceived: number;
   inTransit: number;
   pending: number;
   erpStock: number;
+  /** false = chưa có phiếu nhập nào ⇒ erpStock KHÔNG có nghĩa, phải hiện "Chưa có phiếu nhập" */
+  stockKnown: boolean;
   /** Giá vốn dùng để tính giá trị tồn: giá nhập trên phiếu gần nhất, không có thì giá nhập Pancake */
   unitCost: number;
   receiptCount: number;
@@ -127,8 +134,12 @@ export async function listProducts(params: ListParams, limit?: number) {
   const received = sql<number>`coalesce(${receipts.received}, 0)`;
   const delivered = sql<number>`coalesce(${sales.delivered}, 0)`;
   const returned = sql<number>`coalesce(${sales.returned}, 0)`;
+  // Tách hai trạng thái hàng hoàn: chỉ "đã nhận" mới nằm trong tồn.
+  const returnedPending = sql<number>`coalesce(${sales.returnedPending}, 0)`;
+  const returnedReceived = sql<number>`coalesce(${sales.returnedReceived}, 0)`;
   const inTransit = sql<number>`coalesce(${sales.inTransit}, 0)`;
   const pending = sql<number>`coalesce(${sales.pending}, 0)`;
+  const stockKnown = stockKnownExpr(receipts);
   const sortMap: Record<string, SQL | AnyPgColumn> = {
     erpStock,
     remainQuantity: pv.remainQuantity,
@@ -172,9 +183,12 @@ export async function listProducts(params: ListParams, limit?: number) {
         received,
         delivered,
         returned,
+        returnedPending,
+        returnedReceived,
         inTransit,
         pending,
         erpStock,
+        stockKnown,
         unitCost,
         receiptCount: sql<number>`coalesce(${receipts.receiptCount}, 0)`,
       })
@@ -224,9 +238,12 @@ export async function listProducts(params: ListParams, limit?: number) {
     received: Number(r.received ?? 0),
     delivered: Number(r.delivered ?? 0),
     returned: Number(r.returned ?? 0),
+    returnedPending: Number(r.returnedPending ?? 0),
+    returnedReceived: Number(r.returnedReceived ?? 0),
     inTransit: Number(r.inTransit ?? 0),
     pending: Number(r.pending ?? 0),
     erpStock: Number(r.erpStock ?? 0),
+    stockKnown: Boolean(r.stockKnown),
     unitCost: Number(r.unitCost ?? 0),
     receiptCount: Number(r.receiptCount ?? 0),
   }));
@@ -299,17 +316,23 @@ export async function productSummary(params: ListParams) {
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
   const erpStock = erpStockExpr(sales, receipts);
+  const stockKnown = stockKnownExpr(receipts);
   const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
   const [row] = await db
     .select({
       selling: sql<number>`count(*) filter (where ${selling})`,
-      low: sql<number>`count(*) filter (where ${selling} and ${erpStock} between 1 and 5)`,
-      out: sql<number>`count(*) filter (where ${selling} and ${erpStock} <= 0)`,
-      stockValue: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${erpStock} > 0 then (${erpStock})::bigint * ${unitCost} else 0 end), 0)`,
-      stockUnits: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${erpStock} > 0 then ${erpStock} else 0 end), 0)`,
+      // "Sắp hết" / "Hết hàng" chỉ đếm mẫu mã TÍNH ĐƯỢC tồn. Mẫu mã chưa có phiếu nhập
+      // trước đây bị tính là hết hàng dù thực tế chỉ là thiếu dữ liệu.
+      low: sql<number>`count(*) filter (where ${selling} and ${stockKnown} and ${erpStock} between 1 and 5)`,
+      out: sql<number>`count(*) filter (where ${selling} and ${stockKnown} and ${erpStock} <= 0)`,
+      unknownStock: sql<number>`count(*) filter (where ${selling} and not ${stockKnown})`,
+      stockValue: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${stockKnown} and ${erpStock} > 0 then (${erpStock})::bigint * ${unitCost} else 0 end), 0)`,
+      stockUnits: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${stockKnown} and ${erpStock} > 0 then ${erpStock} else 0 end), 0)`,
       received: sql<number>`coalesce(sum(${receipts.received}), 0)`,
       delivered: sql<number>`coalesce(sum(${sales.delivered}), 0)`,
       returned: sql<number>`coalesce(sum(${sales.returned}), 0)`,
+      returnedPending: sql<number>`coalesce(sum(${sales.returnedPending}), 0)`,
+      returnedReceived: sql<number>`coalesce(sum(${sales.returnedReceived}), 0)`,
       inTransit: sql<number>`coalesce(sum(${sales.inTransit}), 0)`,
       noReceipt: sql<number>`count(*) filter (where ${selling} and coalesce(${receipts.received}, 0) = 0)`,
       sold30: sql<number>`coalesce(sum(${sold.qty}), 0)`,
@@ -330,8 +353,11 @@ export async function productSummary(params: ListParams) {
     received: Number(row?.received ?? 0),
     delivered: Number(row?.delivered ?? 0),
     returned: Number(row?.returned ?? 0),
+    returnedPending: Number(row?.returnedPending ?? 0),
+    returnedReceived: Number(row?.returnedReceived ?? 0),
     inTransit: Number(row?.inTransit ?? 0),
     noReceipt: Number(row?.noReceipt ?? 0),
+    unknownStock: Number(row?.unknownStock ?? 0),
     sold30: Number(row?.sold30 ?? 0),
     products: Number(row?.products ?? 0),
   };

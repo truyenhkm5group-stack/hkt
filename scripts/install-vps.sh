@@ -174,6 +174,14 @@ for i in $(seq 1 60); do
 done
 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true' && say "ERP đã chạy" || warn "ERP chưa phản hồi, xem log: $COMPOSE logs -f app"
 
+say "Smoke test các màn hình chính (đăng nhập thật, không chỉ /api/health)"
+# /api/health chỉ chứng minh tiến trình sống + CSDL kết nối được; nó KHÔNG bắt được
+# trang lỗi runtime (truy vấn hỏng, thiếu cột). Smoke test mở thật từng màn hình.
+if ! docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/smoke.ts; then
+  warn "SMOKE TEST THẤT BẠI — có màn hình không mở được. Xem danh sách ở trên."
+  SMOKE_FAILED=1
+fi
+
 say "Kiểm tra API key Pancake / Viettel Post"
 docker exec erp-app npm run --silent check:integrations || warn "Có mục ✗ ở trên — sửa .env rồi chạy: $COMPOSE up -d"
 
@@ -209,3 +217,10 @@ cat <<INFO
    $COMPOSE exec -T db pg_dump -U erp erp | gzip > backup-\$(date +%F).sql.gz
 ════════════════════════════════════════════════════════════════
 INFO
+
+# Smoke test hỏng => deploy phải BÁO ĐỎ. Trước đây workflow chỉ cảnh báo nên một lần
+# deploy làm ERP crash-loop vẫn được ghi là thành công và không ai biết production đang sập.
+if [ "${SMOKE_FAILED:-0}" = "1" ]; then
+  warn "Deploy KHÔNG đạt: smoke test có màn hình lỗi."
+  exit 1
+fi

@@ -98,9 +98,21 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
     {
       id: "returned",
       accessorKey: "returned",
+      // Tách rõ hai trạng thái: hàng hoàn chỉ được cộng lại tồn khi KHO ĐÃ XÁC NHẬN nhận về.
       header: "Hoàn",
       meta: { align: "right" },
-      cell: ({ row }) => <span className={cn("numeric", row.original.returned ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{formatNumber(row.original.returned)}</span>,
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric", row.original.returned ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{formatNumber(row.original.returned)}</span>
+          {row.original.returnedPending || row.original.returnedReceived ? (
+            <div className="text-[10.5px] text-muted-foreground">
+              {row.original.returnedPending ? <span className="text-amber-600 dark:text-amber-400">chờ về kho {formatNumber(row.original.returnedPending)}</span> : null}
+              {row.original.returnedPending && row.original.returnedReceived ? " · " : null}
+              {row.original.returnedReceived ? <span>đã nhận {formatNumber(row.original.returnedReceived)}</span> : null}
+            </div>
+          ) : null}
+        </div>
+      ),
     },
     {
       id: "inTransit",
@@ -121,7 +133,12 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
-          <span className={cn("numeric text-base font-bold", stockTone(row.original.erpStock))}>{formatNumber(row.original.erpStock)}</span>
+          {row.original.stockKnown ? (
+            <span className={cn("numeric text-base font-bold", stockTone(row.original.erpStock))}>{formatNumber(row.original.erpStock)}</span>
+          ) : (
+            // Chưa có phiếu nhập nào ⇒ KHÔNG biết tồn. Hiện số âm bịa ra còn tệ hơn nói thẳng là chưa biết.
+            <span className="text-[11px] font-semibold text-muted-foreground">Chưa có phiếu nhập</span>
+          )}
           <div className="text-[10.5px] text-muted-foreground">Pancake {formatNumber(row.original.remainQuantity)}</div>
         </div>
       ),
