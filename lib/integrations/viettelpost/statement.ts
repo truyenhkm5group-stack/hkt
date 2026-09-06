@@ -149,6 +149,8 @@ export type VtpOrderListRow = {
   cod: number | null; fee: number | null; statusDate: string; raw: string;
   statusAt?: string | null; createdAt?: string | null;
   codReconciliationText?: string; paymentText?: string; returnFlag?: boolean; forwardFlag?: boolean;
+  /** Người nhận trên file VTP — bằng chứng duy nhất để gắn vận đơn tạo thẳng trên web VTP vào đơn ERP. */
+  receiverName?: string; receiverPhone?: string; receiverAddress?: string;
   sourceHash?: string; sourceRow?: number;
 };
 
@@ -210,6 +212,10 @@ const LIST_COL = {
   /** Cột "Mã đơn hàng" của file VTP: với vận đơn chiều về thì đây chính là mã vận đơn gốc */
   order: ["ma don hang", "ma tham chieu", "ma don"],
   date: ["ngay chuyen trang thai", "ngay cap nhat", "ngay trang thai", "thoi gian cap nhat", "ngay tra", "ngay giao"],
+  /** Loại trừ "khi" để không bắt nhầm cột "Tên người nhận KHI phát hàng" ở cuối file. */
+  receiver: ["nguoi nhan"],
+  receiverPhone: ["dt nhan", "dien thoai nhan", "sdt nhan"],
+  receiverAddress: ["dia chi nhan"],
 };
 
 /** Đọc file danh sách vận đơn (xlsx/csv): mã vận đơn, trạng thái, tiền thu hộ, cước, ngày */
@@ -255,6 +261,9 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   const cPayment = findCol(headers, ["trang thai thanh toan"]);
   const cReturn = findCol(headers, ["don chuyen hoan"]);
   const cForward = findCol(headers, ["don chuyen tiep"]);
+  const cReceiver = findCol(headers, LIST_COL.receiver, ["khi", "gui"]);
+  const cReceiverPhone = findCol(headers, LIST_COL.receiverPhone, ["khi", "gui"]);
+  const cReceiverAddress = findCol(headers, LIST_COL.receiverAddress, ["gui"]);
   const cOrderRaw = findCol(headers, LIST_COL.order, ["van don"]);
   const cOrder = cOrderRaw === cTrack ? -1 : cOrderRaw;
   const rows: VtpOrderListRow[] = [];
@@ -270,6 +279,7 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
       statusDate: statusAt ? new Date(new Date(statusAt).getTime() + 7 * 3600_000).toISOString().slice(0, 10) : "", statusAt,
       createdAt: parseVtpListTimestamp(cCreated >= 0 ? row[cCreated] : null),
       codReconciliationText: cell(cReconciliation), paymentText: cell(cPayment), returnFlag: cell(cReturn).toLowerCase() === "x", forwardFlag: cell(cForward).toLowerCase() === "x",
+      receiverName: cell(cReceiver), receiverPhone: cell(cReceiverPhone), receiverAddress: cell(cReceiverAddress),
       sourceHash, sourceRow: headerIdx + offset + 2 };
     rows.push({ ...parsed, raw: JSON.stringify(parsed) });
   }
