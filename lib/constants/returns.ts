@@ -74,7 +74,7 @@ export function rateTone(rate: number | null) {
  *  - đang hoàn / đã hoàn → hoàn.
  */
 export function shipmentOutcome(
-  s: { stage: string; codAmount?: number | null; codCollected?: number | null; codStatementRef?: string | null },
+  s: { stage: string; codAmount?: number | null; codCollected?: number | null; codStatementRef?: string | null; codStatus?: string | null },
   prepaid = 0,
 ): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
   if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
@@ -83,7 +83,8 @@ export function shipmentOutcome(
   // vận đơn "giao thành công" mà khách chỉ trả tiền ship thực chất là đơn hoàn.
   // Cùng quy tắc với ORDER_OUTCOME: có bằng chứng thì dùng tiền thực thu,
   // chưa có thì TẠM dùng COD khai báo (tiền có thể về ở bảng kê kỳ sau).
-  const hasEvidence = Number(s.codCollected) > 0 || Boolean(s.codStatementRef);
+  // "Không thu hộ" = ĐVVC không thu tiền cho vận đơn này ⇒ COD khai báo sẽ không bao giờ về.
+  const hasEvidence = Number(s.codCollected) > 0 || Boolean(s.codStatementRef) || s.codStatus === "NOT_APPLICABLE";
   const money = (hasEvidence ? Number(s.codCollected) || 0 : Number(s.codAmount) || 0) + prepaid;
   if (money > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
   return money < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";

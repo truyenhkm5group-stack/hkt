@@ -49,7 +49,9 @@ export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
  * trên chi tiết bảng kê tải từ Viettel Post (kể cả bảng kê ghi thu 0 — đó vẫn là bằng chứng
  * KHÔNG thu được đồng nào).
  */
-const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0 or ${s.codStatementRef} is not null)`;
+const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0
+  or ${s.codStatementRef} is not null
+  or ${s.codStatus} = 'NOT_APPLICABLE')`;
 
 /**
  * SỐ TIỀN DÙNG ĐỂ KẾT LUẬN.

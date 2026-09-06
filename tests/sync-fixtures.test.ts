@@ -907,6 +907,11 @@ async function main() {
       { ...base, id: "order-declared-only", amount: 0, current: "DELIVERED" },
       // Tình huống chủ shop chỉ ra: VTP báo giao thành công nhưng khách chỉ trả tiền ship.
       { ...base, id: "chi-tra-tien-ship", collected: 25_000, current: "RETURNED", proposed: "RETURNED" },
+      // "Không thu hộ": ĐVVC không thu tiền cho vận đơn này nên COD khai báo không bao giờ về.
+      // Dù ĐVVC ghi "phát thành công" và COD khai báo 849K thì thực chất vẫn là đơn hoàn.
+      { ...base, id: "khong-thu-ho", codStatus: "NOT_APPLICABLE", amount: 849_000, orderCod: 849_000, current: "RETURNED", proposed: "RETURNED" },
+      // Nhưng khách đã chuyển khoản trước thì "không thu hộ" là bình thường và đơn vẫn thành công.
+      { ...base, id: "khong-thu-ho-tra-truoc", codStatus: "NOT_APPLICABLE", amount: 0, orderCod: 0, prepaid: 499_000, current: "DELIVERED", proposed: "DELIVERED" },
       { ...base, id: "collected-30000", collected: 30_000, current: "RETURNED", proposed: "RETURNED" },
       { ...base, id: "collected-50000", collected: 50_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
       { ...base, id: "collected-100000", collected: 100_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
