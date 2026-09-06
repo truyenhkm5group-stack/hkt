@@ -1,7 +1,7 @@
-import { eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import { legBaseCode, mapVtpStatusText, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mapVtpStatusText, mergeVtpOrderLists, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
 export async function upsertStatementBatches(rows: StatementSummary[], createdBy: string) {
@@ -99,6 +99,7 @@ export type OrderListMatch = VtpOrderListRow & {
   matchKind: "direct" | "leg" | null;
   /** Mã vận đơn gốc khi đây là vận đơn chiều về */
   legOf: string | null;
+  matchIssue?: string;
 };
 
 export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderListMatch[]> {
@@ -113,18 +114,25 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
         .where(or(inArray(sql`upper(${schema.shipments.vtpOrderNumber})`, codes), inArray(sql`upper(${schema.shipments.trackingCode})`, codes)))
     : [];
   const byCode = new Map<string, (typeof found)[number]>();
+  const ambiguous = new Set<string>();
   for (const f of found) {
-    if (f.vtp) byCode.set(f.vtp.toUpperCase(), f);
-    if (f.tracking) byCode.set(f.tracking.toUpperCase(), f);
+    for (const code of [f.vtp, f.tracking].filter((c): c is string => Boolean(c))) {
+      const key = code.toUpperCase();
+      if (byCode.has(key) && byCode.get(key)!.id !== f.id) ambiguous.add(key);
+      byCode.set(key, f);
+    }
   }
   return rows.map((r) => {
     // Mã có đuôi P (…1P1) là vận đơn CHIỀU VỀ: cột "Mã đơn hàng" của file chính là mã gốc, tin hơn suy từ chuỗi.
     // Phải xét chiều về TRƯỚC, nếu không mã gốc ở cột "Mã đơn hàng" sẽ bị coi là khớp trực tiếp và đè trạng thái đơn gốc.
     const isLeg = Boolean(legBaseCode(r.trackingCode));
     const base = isLeg ? r.orderCode || legBaseCode(r.trackingCode) : "";
-    const direct = isLeg ? undefined : (byCode.get(r.trackingCode) ?? (r.orderCode ? byCode.get(r.orderCode) : undefined));
+    const direct = isLeg ? undefined : byCode.get(r.trackingCode);
     const leg = isLeg && base ? byCode.get(base) : undefined;
-    const f = direct ?? leg;
+    const usedCode = isLeg ? base : r.trackingCode;
+    const conflictingReferences = !isLeg && byCode.has(r.trackingCode) && byCode.has(r.orderCode) && byCode.get(r.trackingCode)!.id !== byCode.get(r.orderCode)!.id;
+    const matchIssue = ambiguous.has(usedCode) || conflictingReferences ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
+    const f = matchIssue ? undefined : direct ?? leg;
     return {
       ...r,
       shipmentId: f?.id ?? null,
@@ -134,65 +142,73 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       mapped: mapVtpStatusText(r.statusText),
       matchKind: f ? (direct ? "direct" : "leg") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
+      matchIssue,
     };
   });
 }
 
-const COD_RANK: Record<string, number> = { NOT_APPLICABLE: 0, PENDING: 1, COLLECTED: 2, RECONCILED: 3, PAID_TO_BANK: 4, DISPUTED: 2 };
-
-/** Áp trạng thái Viettel Post (chữ) lên vận đơn ERP: giai đoạn, tên trạng thái, COD (không hạ COD đã về ngân hàng), cước thực tế */
-export async function applyVtpOrderList(rows: VtpOrderListRow[]) {
+/** Danh sách vận đơn cập nhật logistics/COD khai báo; không chứng minh tiền thực thu hay ngân hàng. */
+export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IMPORT") {
   const db = await getDb();
-  const matches = await matchVtpOrderList(rows);
+  const matches = await matchVtpOrderList(mergeVtpOrderLists(rows));
   const now = new Date();
   let updated = 0;
-  let paid = 0;
   let legs = 0;
-  for (const m of matches) {
+  let stale = 0;
+  let duplicate = 0;
+  let missingDate = 0;
+  let conflicts = matches.filter((m) => m.matchIssue).length;
+  for (const m of [...matches].sort((a, b) => a.trackingCode.localeCompare(b.trackingCode))) {
     if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
-    // Vận đơn chiều về (mã gốc + "1P1"): ghi thành vận đơn RIÊNG trỏ về mã gốc, không đè trạng thái vận đơn gốc.
-    // Quy tắc tính hoàn (LEG_RULE) thấy vận đơn chiều về đã giao, COD 0, cước nhỏ → đơn gốc là đơn hoàn.
-    if (m.matchKind === "leg") {
-      const statusDateLeg = m.statusDate ? vnStartOfDay(m.statusDate) : null;
-      const values = {
-        carrier: "Viettel Post",
-        vtpOrderNumber: m.trackingCode,
-        trackingCode: m.trackingCode,
-        orderReference: m.legOf ?? null,
-        stage: m.mapped.stage,
-        vtpStatusName: m.statusText,
-        isFinal: m.mapped.final,
-        codAmount: m.cod,
-        shippingFee: m.fee,
-        codStatus: "NOT_APPLICABLE" as const,
-        lastVtpSyncAt: now,
-        ...(statusDateLeg ? { vtpStatusDate: statusDateLeg } : {}),
-      };
-      await db
-        .insert(schema.shipments)
-        .values(values)
-        .onConflictDoUpdate({ target: schema.shipments.vtpOrderNumber, set: { ...values, updatedAt: now } });
-      legs += 1;
-      continue;
-    }
-    const statusDate = m.statusDate ? vnStartOfDay(m.statusDate) : null;
-    const set: Record<string, unknown> = { stage: m.mapped.stage, vtpStatusName: m.statusText, isFinal: m.mapped.final, lastVtpSyncAt: now, updatedAt: now };
-    if (statusDate) set.vtpStatusDate = statusDate;
-    if (m.fee > 0) set.shippingFee = m.fee;
-    if (m.mapped.stage === "DELIVERED" && statusDate) set.deliveredAt = statusDate;
-    if (m.mapped.stage === "RETURNED" && statusDate) set.returnedAt = statusDate;
-    if (m.mapped.cod && (COD_RANK[m.mapped.cod] ?? 0) > (COD_RANK[m.currentCod ?? "PENDING"] ?? 0)) {
-      set.codStatus = m.mapped.cod;
-      if (m.mapped.cod === "PAID_TO_BANK") {
-        set.codPaidToBankAt = statusDate ?? now;
-        set.codReconciledAt = statusDate ?? now;
-        set.codCollected = m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`;
-        paid += 1;
+    const occurredAt = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
+    if (!occurredAt || !Number.isFinite(occurredAt.getTime())) { missingDate++; continue; }
+    const result = await db.transaction(async (tx) => {
+      const isLeg = m.matchKind === "leg";
+      if (isLeg) {
+        // Không sinh số 0 thay cho ô chưa biết trong schema shipments legacy NOT NULL.
+        if (m.cod === null || m.fee === null) return "conflict";
+        await tx.insert(schema.shipments).values({ carrier: "Viettel Post", vtpOrderNumber: m.trackingCode,
+          trackingCode: m.trackingCode, orderReference: m.legOf, codAmount: m.cod, shippingFee: m.fee,
+          codStatus: "NOT_APPLICABLE" }).onConflictDoNothing({ target: schema.shipments.vtpOrderNumber });
       }
-      if (m.mapped.cod === "COLLECTED") set.codCollected = m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`;
-    } else if (m.mapped.cod === "NOT_APPLICABLE" && m.currentCod !== "PAID_TO_BANK") set.codStatus = "NOT_APPLICABLE";
-    await db.update(schema.shipments).set(set as Partial<typeof schema.shipments.$inferInsert>).where(eq(schema.shipments.id, m.shipmentId));
-    updated += 1;
+      const [current] = await tx.select().from(schema.shipments)
+        .where(isLeg ? eq(schema.shipments.vtpOrderNumber, m.trackingCode) : eq(schema.shipments.id, m.shipmentId!)).for("update");
+      if (!current || (isLeg && (current.orderId !== null || current.orderReference !== m.legOf))) return "conflict";
+      const snapshot = { trackingCode: m.trackingCode, orderCode: m.orderCode, statusText: m.statusText,
+        cod: m.cod, fee: m.fee, codReconciliationText: m.codReconciliationText ?? "", paymentText: m.paymentText ?? "",
+        returnFlag: m.returnFlag ?? false, forwardFlag: m.forwardFlag ?? false };
+      const [existing] = await tx.select().from(schema.shipmentEvents).where(and(eq(schema.shipmentEvents.shipmentId, current.id),
+        eq(schema.shipmentEvents.source, "VTP_IMPORT"), eq(schema.shipmentEvents.status, m.statusText), eq(schema.shipmentEvents.occurredAt, occurredAt)));
+      if (existing) {
+        const previous = existing.raw as { snapshot?: typeof snapshot } | null;
+        return previous?.snapshot && Object.keys(snapshot).every((key) => previous.snapshot![key as keyof typeof snapshot] === snapshot[key as keyof typeof snapshot]) ? "duplicate" : "conflict";
+      }
+      const older = current.vtpStatusDate !== null && current.vtpStatusDate > occurredAt;
+      const sameTimeConflict = current.vtpStatusDate?.getTime() === occurredAt.getTime() && current.stage !== m.mapped.stage;
+      const before = { stage: current.stage, codAmount: current.codAmount, shippingFee: current.shippingFee, vtpStatusDate: current.vtpStatusDate };
+      if (!older && !sameTimeConflict) {
+        await tx.update(schema.shipments).set({ stage: m.mapped.stage, vtpStatusName: m.statusText,
+          isFinal: m.mapped.final, vtpStatusDate: occurredAt, lastVtpSyncAt: now, updatedAt: now,
+          ...(m.cod !== null ? { codAmount: m.cod } : {}), ...(m.fee !== null ? { shippingFee: m.fee } : {}),
+          ...(m.mapped.stage === "DELIVERED" ? { deliveredAt: occurredAt } : {}),
+          ...(m.mapped.stage === "RETURNED" ? { returnedAt: occurredAt } : {}),
+        }).where(eq(schema.shipments.id, current.id));
+      }
+      const disposition = older ? "stale" : sameTimeConflict ? "conflict" : "applied";
+      await tx.insert(schema.shipmentEvents).values({ shipmentId: current.id, source: "VTP_IMPORT", status: m.statusText,
+        statusName: m.statusText, occurredAt, normalizedStage: m.mapped.stage, legType: isLeg ? "RETURN" : "OUTBOUND",
+        verificationStatus: "PENDING", sourceReference: m.sourceHash ? `${m.sourceHash}:row:${m.sourceRow}` : null,
+        raw: { snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, importedBy: actor } });
+      await tx.insert(schema.auditLogs).values({ userEmail: actor, action: "VTP_ORDER_LIST_ROW", entity: "SHIPMENT", entityId: current.id,
+        detail: { before, snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null } });
+      return disposition === "applied" ? isLeg ? "leg" : "updated" : disposition;
+    });
+    if (result === "updated") updated++;
+    else if (result === "leg") legs++;
+    else if (result === "stale") stale++;
+    else if (result === "duplicate") duplicate++;
+    else conflicts++;
   }
-  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid, legs, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
+  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid: 0, legs, stale, duplicate, conflicts, missingDate,
+    unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
 }

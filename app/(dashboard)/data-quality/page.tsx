@@ -5,7 +5,6 @@ import {
   Link2Off,
   PackageCheck,
   Percent,
-  ShieldCheck,
   ShoppingBag,
   Truck,
   Undo2,
@@ -77,16 +76,19 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       <PageHeader
         eyebrow="Data Truth"
         title="Chất lượng dữ liệu"
-        description={`Đối chiếu số liệu ERP đang chạy với quy tắc tiền thật: giao thành công = thực thu > ${formatVND(rule.maxCodForFakeDelivery)}, dưới ${formatVND(rule.maxCodForReturn)} là đơn hoàn. Thiếu bằng chứng tiền thì ghi "Chưa xác minh", không đoán và không quy về 0.`}
+        description="Phát hiện chênh lệch trong dữ liệu đơn hàng, vận đơn và tiền đã ghi nhận. Các phép đối chiếu dưới đây vẫn dựa trên dữ liệu legacy."
       />
+      <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+        Các số đối chiếu vẫn có COD khai báo/fallback và prepaid chưa kiểm chứng chứng từ. Chúng chưa phải tiền thực thu đã xác minh và chưa đủ để chốt doanh thu, lương hoặc đối soát ngân hàng. Cần đối chiếu bảng kê COD, chứng từ thanh toán và chiều giao/hoàn.
+      </div>
 
       <DataTableToolbar period={{ defaultKey: "90d" }} searchPlaceholder={issue ? "Tìm mã đơn, mã vận đơn, tên, SĐT…" : undefined} resultLabel={`Kỳ: ${params.period.label}`} />
 
       {/* ───────── KPI vận hành theo quy tắc thực tế ───────── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng đơn (không tính huỷ)" value={formatNumber(summary.total)} icon={ShoppingBag} tone="primary" note={`${formatNumber(summary.cancelled)} đơn huỷ không tính`} />
-        <MetricCard label="Đơn giao thành công thực tế" value={formatNumber(summary.delivered)} icon={PackageCheck} tone="green" note={`Có tiền thực thu > ${formatVND(rule.maxCodForFakeDelivery)}`} />
-        <MetricCard label="Đơn hoàn thực tế" value={formatNumber(summary.returned)} icon={Undo2} tone="rose" note="Gồm cả đơn thu 50K–100K" />
+        <MetricCard label="Giao thành công — đối chiếu tạm" value={formatNumber(summary.delivered)} icon={PackageCheck} tone="amber" note="Chưa xác minh theo chứng từ" />
+        <MetricCard label="Đơn hoàn — đối chiếu tạm" value={formatNumber(summary.returned)} icon={Undo2} tone="rose" note="Không đồng nghĩa kho đã nhận hàng" />
         <MetricCard label="Đơn đang giao" value={formatNumber(summary.inTransit)} icon={Truck} tone="blue" note="Chưa kết luận được kết quả" />
         <MetricCard
           label="Đơn chưa đủ dữ liệu xác minh"
@@ -95,8 +97,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           tone="amber"
           note={<Link className="underline underline-offset-2" href={drillHref("unverified")}>Xem danh sách →</Link>}
         />
-        <MetricCard label="Tỷ lệ giao thành công thực tế" value={<Rate value={summary.successRate} />} icon={Percent} tone="green" note="Trên các đơn đã có kết quả" />
-        <MetricCard label="Thực thu có bằng chứng" value={<Money value={summary.provenCash} />} icon={ShieldCheck} tone="green" note="COD đã thu + khách chuyển trước" />
+        <MetricCard label="Tỷ lệ giao — đối chiếu tạm" value={<Rate value={summary.successRate} />} icon={Percent} tone="amber" note="Chưa phải tỷ lệ đã xác minh" />
+        <MetricCard label="Tiền legacy — ước tính" value={<Money value={summary.provenCash} />} icon={CircleHelp} tone="amber" note="Có COD fallback và trả trước chưa kiểm chứng" />
         <MetricCard
           label="Giá trị COD chưa xác minh"
           value={summary.unverified ? <Money value={summary.unverifiedCod} /> : <Unknown>—</Unknown>}
@@ -113,7 +115,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
             ["unlinked-shipment", summary.unlinkedShipments, Link2Off, `${formatNumber(summary.unlinkedOpen)} vận đơn chưa kết thúc · COD khai báo ${formatVND(summary.unlinkedCod)}`],
             ["status-conflict", summary.statusConflict, AlertTriangle, "Pancake và Viettel Post nói khác nhau"],
             ["pancake-declared", summary.pancakeDeclared, ShoppingBag, "Pancake báo giao nhưng không có tiền"],
-            ["vtp-low-cash", summary.vtpLowCash, Truck, `Thực thu < ${formatVND(rule.maxCodForReturn)}`],
+            ["vtp-low-cash", summary.vtpLowCash, Truck, `Số tiền legacy < ${formatVND(rule.maxCodForReturn)}`],
             ["return-not-received", summary.returnRiskShipments, Boxes, `${formatNumber(summary.returnRiskUnits)} sản phẩm chưa xác nhận về kho`],
             ["unverified", summary.unverified, CircleHelp, "Không có số tiền nào để kết luận"],
           ] as const).map(([key, value, Icon, note]) => (
@@ -132,7 +134,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       {/* ───────── Ảnh hưởng đến quyết định ───────── */}
       <SectionCard
         title="Ảnh hưởng đến quyết định"
-        description="So sánh số liệu ERP đang dùng (legacy) với số liệu theo quy tắc tiền thật. Chênh lệch càng lớn thì rủi ro ra quyết định sai càng cao."
+        description="So sánh hai cách phân loại dữ liệu legacy để tìm vấn đề. Chênh lệch này chưa phải số điều chỉnh kế toán đã xác minh."
       >
         <div className="overflow-x-auto">
           <Table>
@@ -140,7 +142,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
               <TableRow>
                 <TableHead>Chỉ số</TableHead>
                 <TableHead className="text-right">ERP đang hiển thị</TableHead>
-                <TableHead className="text-right">Theo quy tắc thực tế</TableHead>
+                <TableHead className="text-right">Đối chiếu tạm</TableHead>
                 <TableHead className="text-right">Chênh lệch</TableHead>
                 <TableHead>Xem chi tiết</TableHead>
               </TableRow>
@@ -154,11 +156,14 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                 <TableCell><Link className="text-primary underline underline-offset-2" href={drillHref("unverified")}>Đơn chưa xác minh</Link></TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Tiền thực thu CÓ BẰNG CHỨNG</TableCell>
+                <TableCell>Tiền theo legacy (ước tính)</TableCell>
                 <TableCell className="text-right"><Unknown>Chưa có chỉ số này</Unknown></TableCell>
                 <TableCell className="numeric text-right">{formatVND(summary.provenCash)}</TableCell>
                 <TableCell className="text-right">—</TableCell>
-                <TableCell className="text-muted-foreground">COD đã thu + chuyển khoản trước</TableCell>
+                <TableCell>
+                  <Link className="text-primary underline underline-offset-2" href="/cod">Đối soát COD → bảng kê Viettel Post</Link>
+                  <span className="block text-[11px] text-muted-foreground">Truy về từng đợt tiền về tài khoản và phần còn treo</span>
+                </TableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Giá trị đang chờ xác minh</TableCell>
@@ -266,7 +271,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                         <TableHead>Khách</TableHead>
                         <TableHead>Pancake / Vận đơn</TableHead>
                         <TableHead className="text-right">Doanh thu khai báo</TableHead>
-                        <TableHead className="text-right">Tiền có bằng chứng</TableHead>
+                        <TableHead className="text-right">Tiền legacy (ước tính)</TableHead>
                         <TableHead>ERP đang xếp</TableHead>
                         <TableHead>Thực tế</TableHead>
                       </TableRow>

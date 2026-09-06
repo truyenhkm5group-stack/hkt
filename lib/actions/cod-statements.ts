@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
+import { mergeVtpOrderLists, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
@@ -84,31 +84,31 @@ export async function importVtpStatementDetail(input: unknown): Promise<Result<{
   return { ok: true, matched: result.matched, unmatched: result.unmatched, batchId: result.batchId };
 }
 
-/** Đọc file danh sách vận đơn (Quản lý vận đơn → xuất Excel) và ghép với ERP (chưa ghi) */
-export async function previewVtpOrderList(input: { base64: string; filename: string }): Promise<Result<{ rows: OrderListMatch[] }>> {
-  const { error } = await authorize();
-  if (error) return { error };
-  if (!input?.base64 || input.base64.length > 20_000_000) return { error: "File trống hoặc quá lớn (tối đa ~15MB)" };
-  try {
-    const buffer = Buffer.from(input.base64, "base64");
-    const isText = /\.(csv|txt|tsv)$/i.test(input.filename ?? "");
-    const rows = parseVtpOrderList(isText ? buffer.toString("utf8") : buffer);
-    return { ok: true, rows: await matchVtpOrderList(rows) };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Không đọc được file" };
-  }
+const listFilesSchema = z.array(z.object({ filename: z.string().min(1).max(250), base64: z.string().min(1) })).min(1).max(10)
+  .refine((files) => files.reduce((sum, file) => sum + file.base64.length, 0) <= 3_500_000, "Tổng file quá lớn; hãy chia thành các lượt dưới 2,5 MB");
+
+function readOrderListFiles(input: unknown) {
+  const files = listFilesSchema.parse(input);
+  return mergeVtpOrderLists(files.flatMap((file) => {
+    const buffer = Buffer.from(file.base64, "base64");
+    return parseVtpOrderList(/\.(csv|txt|tsv)$/i.test(file.filename) ? buffer.toString("utf8") : buffer);
+  }));
 }
 
-const listSchema = z.array(z.object({ trackingCode: z.string().trim().min(5).max(60), orderCode: z.string().trim().max(60).optional(), statusText: z.string().max(200), cod: z.number().int().min(0), fee: z.number().int().min(0), statusDate: z.string().max(10) })).min(1).max(20000);
+/** Preview và nhập đều đọc lại file gốc trên server, tránh mất mã tham chiếu/cột nguồn khi gửi từ UI. */
+export async function previewVtpOrderListFiles(input: unknown): Promise<Result<{ rows: OrderListMatch[] }>> {
+  const { error } = await authorize();
+  if (error) return { error };
+  try { return { ok: true, rows: await matchVtpOrderList(readOrderListFiles(input)) }; }
+  catch (e) { return { error: e instanceof Error ? e.message : "Không đọc được file" }; }
+}
 
-/** Ghi trạng thái Viettel Post từ danh sách vận đơn: giai đoạn, COD (Đã trả → đã về ngân hàng), cước */
-export async function importVtpOrderList(input: unknown): Promise<Result<{ total: number; matched: number; updated: number; paid: number; unknown: number; legs: number }>> {
+export async function importVtpOrderListFiles(input: unknown): Promise<Result<Awaited<ReturnType<typeof applyVtpOrderList>>>> {
   const { user, error } = await authorize();
   if (error) return { error };
-  const parsed = listSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const result = await applyVtpOrderList(parsed.data.map((r) => ({ ...r, trackingCode: r.trackingCode.toUpperCase(), orderCode: (r.orderCode ?? "").toUpperCase(), raw: "" })));
-  await audit({ userId: user.id, userEmail: user.email, action: "VTP_ORDER_LIST_IMPORT", entity: "SHIPMENT", detail: result });
-  revalidate();
-  return { ok: true, ...result };
+  try {
+    const result = await applyVtpOrderList(readOrderListFiles(input), user.email);
+    revalidate();
+    return { ok: true, ...result };
+  } catch (e) { return { error: e instanceof Error ? e.message : "Không nhập được file; hãy xem nhật ký các dòng đã xử lý trước khi thử lại" }; }
 }

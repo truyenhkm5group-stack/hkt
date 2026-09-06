@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, gte, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_COLLECTABLE } from "@/lib/queries/return-rate";

@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { importVtpOrderList, importVtpStatementDetail, parseVtpStatementText, previewVtpOrderList, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
+import { importVtpOrderListFiles, importVtpStatementDetail, parseVtpStatementText, previewVtpOrderListFiles, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
 import { formatVND, todayVN } from "@/lib/format";
 import type { StatementSummary } from "@/lib/integrations/viettelpost/statement";
 import type { DetailMatch, OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
@@ -295,43 +295,35 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
   }, [rows]);
 
   const [fileNames, setFileNames] = useState<string[]>([]);
+  const [sourceFiles, setSourceFiles] = useState<{ base64: string; filename: string }[]>([]);
   const onFiles = async (list: FileList | null) => {
     const files = list ? Array.from(list) : [];
     if (!files.length) return;
+    setRows(null);
+    setSourceFiles([]);
+    if (files.reduce((sum, f) => sum + f.size, 0) > 2_500_000) { toast.error("Tổng file quá lớn; hãy chia thành các lượt dưới 2,5 MB"); return; }
     const payloads = await Promise.all(files.map(async (f) => ({ base64: await fileToBase64(f), filename: f.name })));
     startTransition(async () => {
-      const merged = new Map<string, OrderListMatch>();
-      const errors: string[] = [];
-      let total = 0;
-      for (const p of payloads) {
-        const result = await previewVtpOrderList(p);
-        if ("error" in result) {
-          errors.push(`${p.filename}: ${result.error}`);
-          continue;
-        }
-        total += result.rows.length;
-        // cùng mã vận đơn ở nhiều tệp → lấy dòng có ngày cập nhật mới nhất (tệp sau ghi đè nếu không có ngày)
-        for (const r of result.rows) {
-          const prev = merged.get(r.trackingCode);
-          if (!prev || !prev.statusDate || (r.statusDate && r.statusDate >= prev.statusDate)) merged.set(r.trackingCode, r);
-        }
-      }
-      for (const e of errors) toast.error(e);
-      if (merged.size) {
-        setRows([...merged.values()]);
+      const result = await previewVtpOrderListFiles(payloads);
+      if ("error" in result) { toast.error(result.error); return; }
+      if (result.rows.length) {
+        setRows(result.rows);
+        setSourceFiles(payloads);
         setFileNames(files.map((f) => f.name));
-        toast.success(`Đã đọc ${total} dòng từ ${files.length} tệp · ${merged.size} vận đơn (gộp trùng)`);
+        toast.success(`Đã đọc ${result.rows.length} vận đơn từ ${files.length} tệp`);
       }
     });
   };
   const submit = () =>
     startTransition(async () => {
       if (!rows?.length) return;
-      const result = await importVtpOrderList(rows.filter((r) => r.shipmentId).map((r) => ({ trackingCode: r.trackingCode, statusText: r.statusText, cod: r.cod, fee: r.fee, statusDate: r.statusDate })));
+      const result = await importVtpOrderListFiles(sourceFiles);
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(`Đã cập nhật ${result.updated} vận đơn · ${result.paid} đánh dấu COD đã về ngân hàng${result.unknown ? ` · ${result.unknown} trạng thái chưa nhận ra` : ""}`);
-        onDone();
+        toast.success(`Đã cập nhật ${result.updated} vận đơn, ${result.legs} chiều hoàn · ${result.duplicate} dòng đã có · ${result.stale} dòng cũ bỏ qua`);
+        if (result.conflicts || result.missingDate || result.unmatched || result.unknown) {
+          toast.warning(`Cần đối chiếu: ${result.conflicts} xung đột, ${result.missingDate} thiếu ngày, ${result.unmatched} chưa ghép, ${result.unknown} trạng thái lạ`);
+        } else onDone();
       }
     });
 
@@ -340,7 +332,7 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
       <div className="space-y-1">
         <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn) — chọn được nhiều tệp</Label>
         <Input type="file" multiple accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFiles(e.target.files)} disabled={pending} />
-        <p className="text-[11px] text-muted-foreground">Chọn nhiều tệp (nhiều khoảng ngày) cùng lúc; cùng một mã vận đơn ở nhiều tệp sẽ lấy dòng có ngày cập nhật mới nhất. Cần có cột Mã vận đơn và Trạng thái; nếu có Tiền thu hộ, Cước, Ngày cập nhật thì ERP ghi thêm. Chỉ nâng trạng thái COD, không hạ vận đơn đã về ngân hàng.</p>
+        <p className="text-[11px] text-muted-foreground">ERP đọc Ngày chuyển trạng thái và Tổng phí, giữ riêng chiều hoàn. File cũ không đè trạng thái mới; thiếu ngày hoặc xung đột cần đối chiếu. Tiền thu hộ là COD khai báo. File này không tự xác minh thực thu hay tiền về ngân hàng; cần bảng kê COD và chứng từ thanh toán.</p>
         {fileNames.length ? <p className="text-[11px] text-muted-foreground">Đã chọn: {fileNames.join(", ")}</p> : null}
 
       </div>
@@ -348,8 +340,8 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
         <>
           <div className="flex flex-wrap gap-2 text-sm">
             <Badge variant="secondary">Ghép được {summary.matched}/{rows.length} vận đơn</Badge>
-            {summary.legs ? <Badge variant="outline" title="Vận đơn chiều về (mã gốc + 1P1) — ghi thành vận đơn riêng, đơn gốc được tính là đơn hoàn">{summary.legs} vận đơn chiều về → đơn hoàn</Badge> : null}
-            <Badge variant="outline">Đã trả (COD về NH): {summary.paid}</Badge>
+            {summary.legs ? <Badge variant="outline">{summary.legs} vận đơn chiều hoàn riêng</Badge> : null}
+            <Badge variant="outline">Tiền thực thu: chưa xác minh</Badge>
             {summary.unknown ? <Badge variant="outline">Trạng thái chưa nhận ra: {summary.unknown}</Badge> : null}
             {summary.unmatched ? <Badge variant="outline">{summary.unmatched} mã không có trong ERP</Badge> : null}
           </div>
@@ -366,21 +358,23 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
                   <TableHead>Đơn ERP</TableHead>
                   <TableHead>Trạng thái VTP</TableHead>
                   <TableHead>→ ERP</TableHead>
-                  <TableHead className="text-right">COD</TableHead>
-                  <TableHead className="text-right">Cước</TableHead>
-                  <TableHead>Ngày</TableHead>
+                  <TableHead className="text-right">COD khai báo</TableHead>
+                  <TableHead className="text-right">Tổng phí</TableHead>
+                  <TableHead>Ngày trạng thái</TableHead>
+                  <TableHead>Đối soát COD / thanh toán VTP</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.slice(0, 300).map((r, i) => (
                   <TableRow key={`${r.trackingCode}-${i}`} className={r.shipmentId ? "" : "opacity-60"}>
                     <TableCell className="font-mono text-xs">{r.trackingCode}</TableCell>
-                    <TableCell className="text-sm">{r.orderLabel || <span className="text-muted-foreground">Không có trong ERP</span>}</TableCell>
+                    <TableCell className="text-sm">{r.orderLabel || <span className="text-muted-foreground">{r.matchIssue || "Chưa ghép được trong ERP"}</span>}</TableCell>
                     <TableCell className="text-sm">{r.statusText}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{r.mapped.stage === "UNKNOWN" ? "?" : `${SHIPMENT_STAGE_LABEL[r.mapped.stage]}${r.mapped.cod === "PAID_TO_BANK" ? " · COD về NH" : ""}`}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatVND(r.cod)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatVND(r.fee)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.mapped.stage === "UNKNOWN" ? "?" : SHIPMENT_STAGE_LABEL[r.mapped.stage]}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.cod === null ? "Chưa biết" : formatVND(r.cod)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.fee === null ? "Chưa biết" : formatVND(r.fee)}</TableCell>
                     <TableCell className="text-xs">{r.statusDate ? fmtDate(r.statusDate) : "—"}</TableCell>
+                    <TableCell className="text-xs">{r.codReconciliationText || "—"} / {r.paymentText || "—"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
