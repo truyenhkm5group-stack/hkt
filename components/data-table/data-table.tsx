@@ -59,6 +59,21 @@ export const tableParsers = {
   dir: parseAsString.withDefault("desc").withOptions({ clearOnDefault: false }),
 };
 
+/** So sánh hai ô để sắp xếp phía trình duyệt: số theo giá trị, ngày theo mốc thời gian, còn lại so chuỗi tiếng Việt; ô trống xuống cuối */
+function compareValues(a: unknown, b: unknown): number {
+  const empty = (v: unknown) => v === null || v === undefined || v === "";
+  if (empty(a) && empty(b)) return 0;
+  if (empty(a)) return 1;
+  if (empty(b)) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (a instanceof Date || b instanceof Date) return new Date(a as string).getTime() - new Date(b as string).getTime();
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  const na = Number(a);
+  const nb = Number(b);
+  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  return String(a).localeCompare(String(b), "vi");
+}
+
 /** Parser theo mặc định sắp xếp của TỪNG trang để mũi tên trên tiêu đề khớp với thứ tự máy chủ đang trả về */
 function sortParsers(defaultSort: string, defaultDir: "asc" | "desc") {
   return {
@@ -73,7 +88,11 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   const router = useRouter();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
-  // gom nhóm theo thứ tự xuất hiện; dòng cha là bản tổng hợp do trang cung cấp
+  const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
+  const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push" });
+  // Gom nhóm; dòng cha là bản tổng hợp do trang cung cấp. Thứ tự NHÓM phải theo chính cột đang sắp xếp:
+  // máy chủ chỉ sắp xếp được từng mẫu mã, còn dòng cha là số TỔNG HỢP, nên nếu giữ thứ tự xuất hiện thì
+  // bảng đang gom nhóm (Sản phẩm & tồn kho, Tỷ lệ giao thành công…) trông như không sắp xếp gì cả.
   const groups = React.useMemo(() => {
     if (!group) return null;
     const map = new Map<string, T[]>();
@@ -83,11 +102,15 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
       list.push(row);
       map.set(k, list);
     }
-    return [...map.entries()].map(([key, rows]) => ({ key, rows, parent: rows.length > 1 ? group.parent(rows, key) : null }));
-  }, [data, group]);
+    const list = [...map.entries()].map(([key, rows]) => ({ key, rows, parent: rows.length > 1 ? group.parent(rows, key) : null }));
+    if (params.sort) {
+      const sign = params.dir === "asc" ? 1 : -1;
+      const pick = (g: (typeof list)[number]) => ((g.parent ?? g.rows[0]) as Record<string, unknown>)[params.sort];
+      list.sort((a, b) => sign * compareValues(pick(a), pick(b)));
+    }
+    return list;
+  }, [data, group, params.sort, params.dir]);
   const isOpen = (key: string) => (expanded[key] !== undefined ? expanded[key] : allOpen !== null ? allOpen : Boolean(group?.defaultExpanded));
-  const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
-  const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push" });
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const sorting: SortingState = params.sort ? [{ id: params.sort, desc: params.dir !== "asc" }] : [];
