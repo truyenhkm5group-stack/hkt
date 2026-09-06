@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { clearMemo } from "@/lib/cache";
-import { DEFAULT_LANDING_CONFIG, detectColumns, detectColumnsByContent, isGenericHeader, LANDING_CONFIG_KEY, looksLikeHeader, matchVariant, parseCsv, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
+import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, parseCsv, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
 import { fetchJson } from "@/lib/integrations/http";
 import { getSettingJson } from "@/lib/settings";
 
@@ -157,7 +157,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
     const existing = new Map((await db.select({ id: schema.landingOrders.id, rowKey: schema.landingOrders.rowKey, raw: schema.landingOrders.raw, status: schema.landingOrders.status, variantId: schema.landingOrders.variantId, orderId: schema.landingOrders.orderId, phone: schema.landingOrders.phone }).from(schema.landingOrders).where(eq(schema.landingOrders.sheetGid, tabKey))).map((r) => [r.rowKey, r]));
     for (let i = dataStart; i < rows.length; i++) {
       const rowNo = i + 1; // số dòng trên sheet (1-based, kể cả tiêu đề)
-      const parsed = rowToLanding(headers, rows[i], cols, rowNo);
+      const parsed = rowToLanding(headers, rows[i], cols, rowNo, { singlePrice: config.singlePrice });
       if (!parsed) {
         result.skipped += 1;
         continue;
@@ -277,11 +277,34 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
   const db = await getDb();
   const candidates = await variantCandidates();
   const rows = await db
-    .select({ id: schema.landingOrders.id, variantId: schema.landingOrders.variantId, product: schema.landingOrders.productText, variant: schema.landingOrders.variantText, size: schema.landingOrders.sizeText, color: schema.landingOrders.colorText, tab: schema.landingOrders.sheetGid })
+    .select({ id: schema.landingOrders.id, variantId: schema.landingOrders.variantId, score: schema.landingOrders.variantMatchScore, product: schema.landingOrders.productText, variant: schema.landingOrders.variantText, size: schema.landingOrders.sizeText, color: schema.landingOrders.colorText, tab: schema.landingOrders.sheetGid, address: schema.landingOrders.address, price: schema.landingOrders.price, total: schema.landingOrders.total, quantity: schema.landingOrders.quantity, raw: schema.landingOrders.raw, status: schema.landingOrders.status, orderId: schema.landingOrders.orderId, pancakeOrderId: schema.landingOrders.pancakeOrderId })
     .from(schema.landingOrders)
     .where(gte(schema.landingOrders.createdAt, new Date(Date.now() - days * 86_400_000)));
+  const config = await loadLandingConfig();
   let variantsMatched = 0;
   for (const r of rows) {
+    // suy lại từ các ô gốc: dòng nhập trước đây theo cột dò sai (bố cục form đổi) nên thiếu size / màu / địa chỉ / giá
+    const cells = r.raw && typeof r.raw === "object" ? Object.values(r.raw as Record<string, string>).map((v) => String(v ?? "")) : [];
+    const fix: Record<string, unknown> = {};
+    if (cells.length) {
+      if (!r.size && !r.color) {
+        const vt = r.variant || findVariantCell(cells);
+        if (vt) {
+          const pv = parseVariantText(vt);
+          if (pv.size || pv.color) Object.assign(fix, { variantText: vt, sizeText: pv.size, colorText: pv.color });
+          r.variant = vt; r.size = pv.size; r.color = pv.color;
+        }
+      }
+      if (!r.address) {
+        const addr = findAddressCell(cells);
+        if (addr) { fix.address = addr; r.address = addr; }
+      }
+      if (!Number(r.price) && !Number(r.total) && r.quantity === 1 && config.singlePrice) Object.assign(fix, { price: config.singlePrice, total: config.singlePrice });
+    }
+    // ghép tự động chỉ theo mã (điểm ≤ 5) khi chưa gửi POS / chưa có đơn → bỏ để ghép lại theo size / màu thật
+    const autoWeak = r.variantId && Number(r.score) <= 5 && !r.orderId && !r.pancakeOrderId && r.status !== "PUSHED";
+    if (autoWeak) { fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null; }
+    if (Object.keys(fix).length) await db.update(schema.landingOrders).set({ ...fix, updatedAt: new Date() } as Partial<typeof schema.landingOrders.$inferInsert>).where(eq(schema.landingOrders.id, r.id));
     if (!r.variantId) {
       const label = r.tab.replace(/^tab:/, "");
       const product = r.product || (/^[A-Z]{1,2}\d{3}$/i.test(label) ? label.toUpperCase() : "");

@@ -20,7 +20,7 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
   const router = useRouter();
   const save = () =>
     start(async () => {
-      const r = await saveLandingConfig({ ...form, dedupeDays: Number(form.dedupeDays) || 7, shippingFee: Number(form.shippingFee) || 0 });
+      const r = await saveLandingConfig({ ...form, dedupeDays: Number(form.dedupeDays) || 7, shippingFee: Number(form.shippingFee) || 0, singlePrice: Number(form.singlePrice) || 0 });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.preview ? `Đã lưu · ${r.preview}` : "Đã lưu cấu hình");
@@ -38,7 +38,7 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <span className="font-semibold">Nguồn dữ liệu:</span>
         <span className="truncate">{config.sheetUrl ? <a href={config.sheetUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Google Sheet{config.tabs ? ` · tab ${config.tabs}` : config.gid ? ` · gid ${config.gid}` : ""}</a> : <span className="text-amber-700">chưa cấu hình</span>}</span>
-        <span className="text-muted-foreground">Trùng SĐT trong {config.dedupeDays} ngày · phí ship đơn nháp {config.shippingFee.toLocaleString("vi-VN")} ₫{Object.keys(config.columns).length ? ` · ${Object.keys(config.columns).length} cột khai tay` : " · tự dò cột theo tiêu đề"}</span>
+        <span className="text-muted-foreground">Trùng SĐT trong {config.dedupeDays} ngày · 1 sp = {(config.singlePrice ?? 499000).toLocaleString("vi-VN")} ₫ + ship {config.shippingFee.toLocaleString("vi-VN")} ₫ · gói ≥ 2 sp free ship{Object.keys(config.columns).length ? ` · ${Object.keys(config.columns).length} cột khai tay` : " · tự dò cột theo tiêu đề"}</span>
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
             <Settings2 className="size-4" /> {open ? "Đóng" : "Cấu hình sheet"}
@@ -75,6 +75,11 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
             <div className="space-y-1">
               <Label>Phí ship đơn nháp (₫)</Label>
               <Input type="number" min={0} step={1000} value={form.shippingFee} onChange={(e) => setForm({ ...form, shippingFee: Number(e.target.value) })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Giá 1 sản phẩm mặc định (₫) · khi form không ghi giá / gói</Label>
+              <Input type="number" min={0} step={1000} value={form.singlePrice ?? 499000} onChange={(e) => setForm({ ...form, singlePrice: Number(e.target.value) })} />
+              <p className="text-[11px] text-muted-foreground">Khách chọn 1 màu 1 size → đơn = giá này + phí ship ở trên; gói từ 2 sản phẩm (849k…) lấy giá gói và free ship.</p>
             </div>
             <div className="space-y-1 sm:col-span-2">
               <Label>Ghi chú thêm vào đơn POS</Label>

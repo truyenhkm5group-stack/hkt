@@ -51,15 +51,22 @@ export type LandingConfig = {
   dedupeDays: number;
   /** Tự gửi đơn nháp lên POS ngay khi nhập (mặc định tắt: nhân viên xác nhận rồi bấm gửi) */
   autoPush: boolean;
-  /** Phí ship mặc định khi tạo đơn nháp (đ) */
+  /** Phí ship cho đơn 1 sản phẩm khi tạo đơn nháp (đ); gói từ 2 sản phẩm = free ship */
   shippingFee: number;
+  /** Giá 1 sản phẩm khi khách chọn 1 màu 1 size mà form không ghi giá / gói (đ) → đơn = giá này + phí ship */
+  singlePrice: number;
   /** Ghi chú thêm vào đơn POS */
   posNote: string;
   /** Kho Pancake mặc định (warehouse_id) khi tạo đơn nháp; rỗng = để Pancake tự chọn */
   warehouseId: string;
 };
 export const LANDING_CONFIG_KEY = "landing.config";
-export const DEFAULT_LANDING_CONFIG: LandingConfig = { sheetUrl: "", gid: "", tabs: "", columns: {}, hasHeader: "auto", dedupeDays: 7, autoPush: false, shippingFee: 25_000, posNote: "Đơn landing page", warehouseId: "" };
+export const DEFAULT_LANDING_CONFIG: LandingConfig = { sheetUrl: "", gid: "", tabs: "", columns: {}, hasHeader: "auto", dedupeDays: 7, autoPush: false, shippingFee: 25_000, singlePrice: 499_000, posNote: "Đơn landing page", warehouseId: "" };
+
+/** Phí ship của một dòng landing: 1 sản phẩm chịu phí ship, gói từ 2 sản phẩm free ship */
+export function landingShippingFee(quantity: number, shippingFee: number): number {
+  return quantity >= 2 ? 0 : Math.max(0, shippingFee || 0);
+}
 
 /** Bí danh tiêu đề (không dấu, thường) cho từng cột */
 const HEADER_ALIASES: Record<LandingColumnKey, string[]> = {
@@ -335,19 +342,47 @@ export type LandingRowInput = {
   raw: Record<string, string>;
 };
 
-/** Một dòng sheet → bản ghi landing (rowIndex tính từ 1 cho dòng dữ liệu đầu tiên) */
-export function rowToLanding(headers: string[], cells: string[], cols: Partial<Record<LandingColumnKey, number>>, rowIndex: number): LandingRowInput | null {
+/** Tìm ô "Size …/Màu …" trong cả dòng (khi bố cục cột đổi giữa các đợt form, cột dò được có thể trống) */
+export function findVariantCell(cells: string[]): string {
+  const hits = cells.map((c) => (c ?? "").trim()).filter((c) => c && VARIANT_RE.test(c) && c.length <= 80);
+  return hits.sort((a, b) => Number(/size/i.test(b)) - Number(/size/i.test(a)))[0] ?? "";
+}
+/** Tìm ô gói mua "1 Sản phẩm 499k" trong cả dòng */
+export function findOfferCell(cells: string[]): string {
+  return cells.map((c) => (c ?? "").trim()).find((c) => c && OFFER_RE.test(c)) ?? "";
+}
+/** Tìm ô địa chỉ trong cả dòng: chuỗi dài có số / ≥ 3 từ, không phải link / mã / gói / biến thể / tỉnh */
+export function findAddressCell(cells: string[], skip: Set<number> = new Set()): string {
+  let best = "";
+  cells.forEach((raw, i) => {
+    const c = (raw ?? "").trim();
+    if (!c || skip.has(i) || c.length < 8 || /^https?:\/\//i.test(c) || AD_ID_RE.test(c) || OFFER_RE.test(c) || VARIANT_RE.test(c) || DATE_RE.test(c) || PHONE_RE.test(c.replace(/[\s.]/g, "")) || isProvince(c) || /^[A-Z0-9]{2,6}_/.test(c)) return;
+    if ((/\d/.test(c) || c.split(/\s+/).length >= 3) && c.length > best.length) best = c;
+  });
+  return best;
+}
+
+export type RowToLandingOptions = { singlePrice?: number };
+
+/** Một dòng sheet → bản ghi landing (rowIndex tính từ 1 cho dòng dữ liệu đầu tiên). Cột dò được trống thì quét cả dòng (biến thể, gói, địa chỉ). */
+export function rowToLanding(headers: string[], cells: string[], cols: Partial<Record<LandingColumnKey, number>>, rowIndex: number, options: RowToLandingOptions = {}): LandingRowInput | null {
   const get = (k: LandingColumnKey) => (cols[k] !== undefined ? (cells[cols[k] as number] ?? "").trim() : "");
   const phone = normalizePhone(get("phone"));
   const name = get("name");
   if (!phone && !name) return null;
-  const offer = parseOfferText(get("offer") || get("product"));
+  const offerText = get("offer") || (parseOfferText(get("product")) ? get("product") : "") || findOfferCell(cells);
+  const offer = parseOfferText(offerText);
   let quantity = Math.max(1, Number(String(get("quantity")).replace(/\D/g, "")) || offer?.quantity || 1);
   let price = parseMoney(get("price"));
-  const total = parseMoney(get("total")) || (offer?.total ?? 0) || price * quantity;
+  let total = parseMoney(get("total")) || (offer?.total ?? 0) || price * quantity;
   if (!price && total && quantity) price = Math.round(total / quantity);
   if (!quantity) quantity = 1;
-  const variantText = get("variant");
+  // khách chọn 1 màu 1 size mà form không ghi giá / gói → giá 1 sản phẩm mặc định (499k), phí ship cộng khi lên đơn POS
+  if (!price && !total && quantity === 1 && options.singlePrice) {
+    price = options.singlePrice;
+    total = options.singlePrice;
+  }
+  const variantText = get("variant") || findVariantCell(cells);
   const parsedVariant = variantText ? parseVariantText(variantText) : { size: "", color: "" };
   const size = get("size") || parsedVariant.size;
   const color = get("color") || parsedVariant.color;
@@ -355,7 +390,9 @@ export function rowToLanding(headers: string[], cells: string[], cols: Partial<R
   const adId = get("adId") || (() => { try { return new URL(get("source")).searchParams.get("utm_term") ?? ""; } catch { return ""; } })();
   let product = get("product");
   if (!product || parseOfferText(product)) product = productCodeFromText(campaign) || productCodeFromText(get("source")) || product;
-  const address = [get("address"), get("ward"), get("district")].filter(Boolean).join(", ");
+  const usedIdx = new Set<number>(Object.values(cols).filter((v): v is number => typeof v === "number"));
+  const addressMain = get("address") || findAddressCell(cells, usedIdx);
+  const address = [addressMain, get("ward"), get("district")].filter(Boolean).join(", ");
   const raw: Record<string, string> = {};
   headers.forEach((h, i) => {
     const key = h.trim() || `Cột ${i + 1}`;
@@ -398,6 +435,17 @@ export function matchVariant(input: { product: string; variant: string; size: st
   const text = norm(`${input.product} ${input.variant} ${input.size} ${input.color}`);
   const sizeText = norm(`${input.size} ${input.variant}`);
   const colorText = norm(`${input.color} ${input.variant} ${input.product}`);
+  const hasSizeSignal = /(^| )(size )?(xs|s|m|l|xl|xxl|xxxl|[2-5]xl|\d{2})( |$)/.test(sizeText);
+  const hasColorSignal = /(den|trang|do|nau|xanh|vang|hong|tim|be|kem|xam|cam|ghi|reu|navy)/.test(colorText);
+  // Không có size lẫn màu → không đoán mẫu mã (trước đây chọn bừa mẫu đầu tiên của mã, điểm 5); trừ khi mã chỉ có 1 mẫu
+  if (!hasSizeSignal && !hasColorSignal) {
+    const sameProduct = candidates.filter((c) => {
+      const code = norm(c.productCode);
+      const name = norm(c.productName);
+      return (code && new RegExp(`(^| )${code}( |$)`).test(text)) || (name && text.includes(name));
+    });
+    return sameProduct.length === 1 ? { variant: sameProduct[0], score: 5 } : null;
+  }
   let best: { variant: VariantCandidate; score: number } | null = null;
   for (const c of candidates) {
     let score = 0;

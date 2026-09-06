@@ -2,6 +2,7 @@
  * Gửi đơn landing lên Pancake POS làm đơn nháp (trạng thái Mới) để nhân viên chốt trên POS; lưu id đơn để ERP theo dõi
  * trạng thái giao / hoàn / huỷ qua đồng bộ đơn Pancake. Chấm rủi ro trước khi gửi và ghi vào đơn.
  */
+import { landingShippingFee } from "@/lib/constants/landing";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
@@ -28,8 +29,9 @@ export async function pushLandingToPos(id: string, actor: string): Promise<{ ok:
       address: row.address,
       province: row.province,
       note,
-      items: [{ variationId: row.variantId, quantity: row.quantity, price: row.price || undefined }],
-      shippingFee: config.shippingFee,
+      // 1 sản phẩm không có giá trên form → giá mặc định (499k) + phí ship; gói ≥ 2 sản phẩm → giá gói / sp, free ship
+      items: [{ variationId: row.variantId, quantity: row.quantity, price: Number(row.price) || (row.quantity === 1 ? config.singlePrice : undefined) }],
+      shippingFee: landingShippingFee(row.quantity, config.shippingFee),
       warehouseId: config.warehouseId || undefined,
       source: "Landing page",
     });

@@ -22,6 +22,7 @@ const FLAGS = [
   { value: "RISK", label: "Khách rủi ro" },
   { value: "NO_VARIANT", label: "Chưa ghép mẫu mã" },
   { value: "PUSH_ERROR", label: "Gửi POS lỗi" },
+  { value: "MISSING_INFO", label: "Thiếu địa chỉ / size (cần chăm sóc)" },
 ];
 
 const split = <T extends string>(v: string | null, allowed: readonly T[]): T[] => (v ? (v.split(",").filter((x) => (allowed as readonly string[]).includes(x)) as T[]) : []);
@@ -36,7 +37,7 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
     q: param(raw, "q") ?? undefined,
     status: split(param(raw, "status"), LANDING_STATUSES),
     outcome: split(param(raw, "outcome"), OUTCOMES),
-    flag: split(param(raw, "flag"), ["DUP", "RISK", "NO_VARIANT", "PUSH_ERROR"] as const),
+    flag: split(param(raw, "flag"), ["DUP", "RISK", "NO_VARIANT", "PUSH_ERROR", "MISSING_INFO"] as const),
     pos: split(param(raw, "pos"), ["HAS", "DRAFT", "NONE"] as const) as LandingPosState[],
     product: (param(raw, "product") ?? "").split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
     period,
@@ -63,7 +64,7 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
         <MetricCard label="Đã gửi POS / có đơn Pancake" value={formatNumber(summary.total - summary.byOutcome.NONE)} note={`gửi POS ${formatNumber(summary.byStatus.PUSHED)} · chưa gửi ĐVVC ${formatNumber(summary.byOutcome.NOT_SHIPPED)} · đang giao ${formatNumber(summary.byOutcome.IN_TRANSIT)}`} icon={Send} tone="primary" />
         <MetricCard label="Giao thành công" value={formatNumber(delivered)} note={finished ? `${((delivered / finished) * 100).toFixed(1)}% số đơn đã kết thúc` : "chưa có đơn kết thúc"} icon={PackageCheck} tone="green" />
         <MetricCard label="Hoàn / huỷ" value={`${formatNumber(returned)} / ${formatNumber(summary.byOutcome.CANCELLED)}`} note={finished ? `tỷ lệ hoàn ${((returned / finished) * 100).toFixed(1)}%` : "—"} icon={Undo2} tone="rose" />
-        <MetricCard label="Cần chú ý" value={formatNumber(summary.duplicates + summary.risky)} note={`trùng SĐT ${formatNumber(summary.duplicates)} · khách rủi ro ${formatNumber(summary.risky)} · chưa ghép mẫu mã ${formatNumber(summary.noVariant)} · gửi POS lỗi ${formatNumber(summary.pushErrors)}`} icon={AlertTriangle} tone="amber" />
+        <MetricCard label="Cần chú ý" value={formatNumber(summary.duplicates + summary.risky + summary.missingInfo)} note={`thiếu địa chỉ / size ${formatNumber(summary.missingInfo)} · trùng SĐT ${formatNumber(summary.duplicates)} · khách rủi ro ${formatNumber(summary.risky)} · chưa ghép mẫu mã ${formatNumber(summary.noVariant)} · gửi POS lỗi ${formatNumber(summary.pushErrors)}`} icon={AlertTriangle} tone="amber" />
       </section>
 
       <DataTableToolbar

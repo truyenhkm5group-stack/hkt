@@ -58,10 +58,12 @@ export type LandingRow = {
 /** Trạng thái đơn trên POS của một dòng landing: HAS = đã có đơn Pancake (ghép theo SĐT hoặc do ERP gửi), DRAFT = đã gửi POS nhưng chưa đồng bộ về, NONE = chưa lên POS */
 export type LandingPosState = "HAS" | "DRAFT" | "NONE";
 export const LANDING_POS_LABEL: Record<LandingPosState, string> = { HAS: "Đã có đơn POS", DRAFT: "Đơn nháp POS · chờ đồng bộ", NONE: "Chưa lên POS" };
-export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR")[]; pos?: LandingPosState[]; product?: string[]; period: Period };
+export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR" | "MISSING_INFO")[]; pos?: LandingPosState[]; product?: string[]; period: Period };
 
 /** Mã hàng của dòng landing: cột sản phẩm trên sheet (Q003…) hoặc tên tab (tab:Q003 → Q003) */
 const PRODUCT_CODE = sql<string>`upper(coalesce(nullif(regexp_replace(${l.productText}, '^.*?([A-Za-z]{1,2}[0-9]{3}).*$', '\\1'), ''), nullif(regexp_replace(${l.sheetGid}, '^tab:', ''), ''), ''))`;
+/** Thiếu thông tin để lên đơn: không có địa chỉ, hoặc không rõ size (chưa ghép mẫu mã và không đọc được size) */
+const MISSING_INFO = sql`(${l.status} <> 'CANCELLED' and (${l.address} = '' or (${l.variantId} is null and ${l.sizeText} = '')))`;
 const POS_STATE = sql<LandingPosState>`case when ${l.orderId} is not null then 'HAS' when ${l.pancakeSystemId} is not null then 'DRAFT' else 'NONE' end`;
 
 function conds(f: LandingFilters): SQL[] {
@@ -87,6 +89,7 @@ function conds(f: LandingFilters): SQL[] {
     if (fl === "RISK") out.push(sql`coalesce((${l.risk}->>'risky')::boolean, false)`);
     if (fl === "NO_VARIANT") out.push(isNull(l.variantId));
     if (fl === "PUSH_ERROR") out.push(sql`${l.pushError} <> ''`);
+    if (fl === "MISSING_INFO") out.push(MISSING_INFO);
   }
   return out;
 }
@@ -153,7 +156,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
   }));
 }
 
-export type LandingSummary = { total: number; byStatus: Record<LandingStatus, number>; byOutcome: Record<OrderOutcome | "NONE", number>; duplicates: number; risky: number; noVariant: number; pushErrors: number; lastImportAt: Date | null };
+export type LandingSummary = { total: number; byStatus: Record<LandingStatus, number>; byOutcome: Record<OrderOutcome | "NONE", number>; duplicates: number; risky: number; noVariant: number; pushErrors: number; missingInfo: number; lastImportAt: Date | null };
 
 export async function landingSummary(period: Period): Promise<LandingSummary> {
   return memo(`landingSummary:${periodKey(period)}`, 60_000, async () => {
@@ -167,6 +170,7 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
         risky: sql<number>`count(*) filter (where coalesce((${l.risk}->>'risky')::boolean, false))`,
         noVariant: sql<number>`count(*) filter (where ${l.variantId} is null and ${l.status} <> 'CANCELLED')`,
         pushErrors: sql<number>`count(*) filter (where ${l.pushError} <> '')`,
+        missingInfo: sql<number>`count(*) filter (where ${MISSING_INFO})`,
         lastImportAt: sql<string | null>`max(${l.createdAt})`,
       })
       .from(l)
@@ -183,7 +187,8 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
     for (const r of statusRows) byStatus[r.status as LandingStatus] = Number(r.n);
     const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };
     for (const r of outcomeRows) byOutcome[r.oc as OrderOutcome | "NONE"] = Number(r.n);
-    return { total: Number(row?.total ?? 0), byStatus, byOutcome, duplicates: Number(row?.duplicates ?? 0), risky: Number(row?.risky ?? 0), noVariant: Number(row?.noVariant ?? 0), pushErrors: Number(row?.pushErrors ?? 0), lastImportAt: row?.lastImportAt ? new Date(row.lastImportAt) : null };
+    return { total: Number(row?.total ?? 0), byStatus, byOutcome, duplicates: Number(row?.duplicates ?? 0), risky: Number(row?.risky ?? 0), noVariant: Number(row?.noVariant ?? 0), pushErrors: Number(row?.pushErrors ?? 0),
+      missingInfo: Number(row?.missingInfo ?? 0), lastImportAt: row?.lastImportAt ? new Date(row.lastImportAt) : null };
   });
 }
 

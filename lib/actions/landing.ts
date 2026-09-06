@@ -90,6 +90,7 @@ const configSchema = z.object({
   dedupeDays: z.number().int().min(1).max(90).default(7),
   autoPush: z.boolean().default(false),
   shippingFee: z.number().int().min(0).max(1_000_000).default(25_000),
+  singlePrice: z.number().int().min(0).max(100_000_000).default(499_000),
   posNote: z.string().trim().max(200).default("Đơn landing page"),
   warehouseId: z.string().trim().max(80).default(""),
 });

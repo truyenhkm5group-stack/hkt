@@ -40,7 +40,7 @@ import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
-import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs } from "@/lib/constants/landing";
+import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs, landingShippingFee } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
@@ -682,6 +682,17 @@ async function main() {
   const candsPlus = [...cands, { id: "v5", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "Q002DOXL", size: "XL", color: "Đỏ đô" }];
   assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, candsPlus)?.variant.id, "v5", "Q002 XL Đỏ Đô → mẫu Q002 XL Đỏ đô");
   assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, cands), null, "không có size XL của Q002 → chưa ghép, chọn tay");
+  // Không có size lẫn màu → KHÔNG đoán mẫu (trước đây chọn bừa mẫu đầu của mã, điểm 5); mã chỉ có 1 mẫu thì vẫn ghép
+  assert.equal(matchVariant({ product: "Q002", variant: "", size: "", color: "" }, cands), null, "Q002 không rõ size / màu → null");
+  assert.equal(matchVariant({ product: "Q004", variant: "", size: "", color: "" }, [cands[0]])?.variant.id, "v1", "mã chỉ có 1 mẫu → ghép");
+  // Bố cục form đổi: cột biến thể / gói / địa chỉ dò được bị trống → quét cả dòng
+  const shifted = ["2026-09-06 08:10:46", "Nguyễn thị chiến", "0915435436", "", "Việt Nam", "", "", "", "Size M,Màu  Đỏ Đô", "", "", "Thôn 3, xã Tân Lập, huyện Đan Phượng, Hà Nội", "QA4_CĐ_06/09_Q003_Hải An Fashion_2"];
+  const shiftedCols = { time: 0, name: 1, phone: 2, address: 3, variant: 5, offer: 6, campaign: 12 } as const;
+  const sr = rowToLanding(Array.from({ length: 13 }, (_, i) => `Cột ${i + 1}`), shifted, shiftedCols, 84, { singlePrice: 499_000 })!;
+  assert.deepEqual({ size: sr.size, color: sr.color, address: sr.address, price: sr.price, total: sr.total, q: sr.quantity, p: sr.product }, { size: "M", color: "Đỏ Đô", address: "Thôn 3, xã Tân Lập, huyện Đan Phượng, Hà Nội", price: 499_000, total: 499_000, q: 1, p: "Q003" }, "quét cả dòng: size M / màu, địa chỉ, 1 sp không ghi giá → 499k");
+  const missing = rowToLanding(Array.from({ length: 13 }, (_, i) => `Cột ${i + 1}`), ["2026-09-06 08:10:46", "Hang", "0979116115", "", "Việt Nam", "", "", "", "", "", "", "", ""], shiftedCols, 82, { singlePrice: 499_000 })!;
+  assert.deepEqual({ size: missing.size, address: missing.address, total: missing.total }, { size: "", address: "", total: 499_000 }, "thiếu size & địa chỉ → giữ trống để báo đỏ; giá vẫn 499k");
+  assert.deepEqual([landingShippingFee(1, 25_000), landingShippingFee(2, 25_000)], [25_000, 0], "1 sp +25k ship, gói ≥ 2 sp free ship");
   {
     // Bộ lọc mới trên trang landing: theo mã hàng (Q002 / Q003…) và theo trạng thái đơn POS (đã có / nháp / chưa lên)
     const allP: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };

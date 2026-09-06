@@ -120,6 +120,8 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                       ) : (
                         <div className="text-muted-foreground">Khách mới tại shop</div>
                       )}
+                      {r.status !== "CANCELLED" && !r.address ? <div className="flex items-start gap-1 font-semibold text-rose-700"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>Thiếu địa chỉ → gọi khách xin địa chỉ</span></div> : null}
+                      {r.status !== "CANCELLED" && !r.variantId && !r.sizeText ? <div className="flex items-start gap-1 font-semibold text-rose-700"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>Thiếu size → hỏi khách rồi chọn mẫu mã</span></div> : null}
                       {r.pushError ? <div className="text-rose-700" title={r.pushError}>Gửi POS lỗi: {r.pushError.slice(0, 80)}</div> : null}
                     </TableCell>
                     <TableCell>
