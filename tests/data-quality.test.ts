@@ -38,7 +38,7 @@ export async function testDataQuality(db: Db) {
   // Legacy tính là doanh thu; quy tắc thực tế phải nói "chưa xác minh", không được đoán.
   await mk(db, "dq-901", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "DQ901" });
   const declared = await outcomes(db, "dq-901");
-  assert.equal(declared.legacy, "RETURNED", "quy tắc tiền thực thu: VTP báo giao mà bảng kê không về đồng nào thì KHÔNG phải giao thành công");
+  assert.equal(declared.legacy, "DELIVERED", "chưa có chứng từ tiền → tạm tính theo COD khai báo (chủ shop chốt)");
   assert.equal(declared.verified, "UNVERIFIED", "VTP báo giao nhưng chưa có đồng thực thu nào → chưa xác minh");
 
   // COD đã thực thu 499K và đã về ngân hàng: tiền trao tay tại cửa → giao thành công thật,
@@ -80,7 +80,7 @@ export async function testDataQuality(db: Db) {
   // Pancake khai "đã thanh toán" mà không có vận đơn và không có tiền → chưa xác minh, KHÔNG phải doanh thu.
   await db.insert(schema.orders).values({ id: "dq-declared-only", systemId: 970003, stage: "PAID", status: 0, insertedAt: new Date(), cod: 499000, totalPriceAfterDiscount: 499000 });
   const declaredOnly = await outcomes(db, "dq-declared-only");
-  assert.equal(declaredOnly.legacy, "RETURNED", "Pancake khai \"đã thanh toán\" mà không có tiền thực thu cũng không phải giao thành công");
+  assert.equal(declaredOnly.legacy, "DELIVERED", "Pancake khai đã thanh toán + COD khai báo > 100K → tạm tính là giao thành công");
   assert.equal(declaredOnly.verified, "UNVERIFIED", "Pancake khai suông không phải bằng chứng tiền");
 
   // ───────── 3. KPI tổng hợp + không bao giờ đổi UNKNOWN thành 0 ─────────

@@ -6,6 +6,7 @@ import { clearMemo } from "@/lib/cache";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProducts, productSummary } from "@/lib/queries/products";
+import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import { parseListParams } from "@/lib/search-params";
 
@@ -46,12 +47,14 @@ export async function testInventory(db: Db) {
   assert.ok(rr.erpStock <= rr.received, "tồn ERP không thể lớn hơn tổng đã nhập");
 
   // ───────── 3. Kho xác nhận nhận hoàn → tồn tăng ĐÚNG số lượng, không nhân đôi ─────────
+  // Phải chọn đúng vận đơn ĐANG THUỘC DIỆN HOÀN chờ kho nhận; vận đơn giao thành công
+  // dù chưa đánh dấu nhận hoàn cũng không nằm trong tồn nên đánh dấu sẽ không đổi gì.
   const pending = await db
     .select({ id: schema.shipments.id })
     .from(schema.shipments)
     .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
     .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
-    .where(and(eq(schema.orderItems.variantId, "rr-var"), isNull(schema.shipments.returnReceivedAt)));
+    .where(and(eq(schema.orderItems.variantId, "rr-var"), isNull(schema.shipments.returnReceivedAt), RETURN_PENDING_WAREHOUSE));
   if (pending.length) {
     const target = pending[0].id;
     const [{ qty }] = await db

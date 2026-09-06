@@ -25,9 +25,9 @@ export type OrderOutcome = "NOT_SHIPPED" | "IN_TRANSIT" | "DELIVERED" | "RETURNE
 export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "Chưa gửi",
   IN_TRANSIT: "Đang giao",
-  DELIVERED: "Giao thành công (COD thực > 100K)",
-  RETURNED: "Hoàn · hàng về kho (COD thực < 50K)",
-  RETURNED_BY_RULE: "Không thành công (giao nhưng COD ≤ 100K)",
+  DELIVERED: "Giao thành công (thu > 100K)",
+  RETURNED: "Hoàn · hàng về kho (thu < 50K)",
+  RETURNED_BY_RULE: "Không thành công (thu 50K–100K)",
   CANCELLED: "Huỷ",
 };
 
@@ -74,14 +74,17 @@ export function rateTone(rate: number | null) {
  *  - đang hoàn / đã hoàn → hoàn.
  */
 export function shipmentOutcome(
-  s: { stage: string; codAmount?: number | null; codCollected?: number | null },
+  s: { stage: string; codAmount?: number | null; codCollected?: number | null; codStatementRef?: string | null },
   prepaid = 0,
 ): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
   if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
   if (s.stage !== "DELIVERED") return null;
   // TIỀN THỰC THU về tài khoản, KHÔNG lấy COD khai báo (cod_amount) làm số đã thu:
   // vận đơn "giao thành công" mà khách chỉ trả tiền ship thực chất là đơn hoàn.
-  const cash = (Number(s.codCollected) || 0) + prepaid;
-  if (cash > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
-  return cash < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
+  // Cùng quy tắc với ORDER_OUTCOME: có bằng chứng thì dùng tiền thực thu,
+  // chưa có thì TẠM dùng COD khai báo (tiền có thể về ở bảng kê kỳ sau).
+  const hasEvidence = Number(s.codCollected) > 0 || Boolean(s.codStatementRef);
+  const money = (hasEvidence ? Number(s.codCollected) || 0 : Number(s.codAmount) || 0) + prepaid;
+  if (money > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
+  return money < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
 }

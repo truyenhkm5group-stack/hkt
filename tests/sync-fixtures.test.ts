@@ -211,24 +211,24 @@ async function main() {
   const row = rr.rows.find((r) => r.variantId === "rr-var");
   assert.ok(row, "có dòng RR-001");
   assert.equal(row.shipped, 9, "đã gửi 9");
-  assert.equal(row.delivered, 2, "giao thành công 2 — chỉ đơn có TIỀN THỰC THU > 100K; COD khai báo không tính");
-  assert.equal(row.returned, 6, "không thành công 6 — gồm cả đơn VTP báo giao mà không có đồng thực thu nào");
+  assert.equal(row.delivered, 4, "giao thành công 4 — có tiền thực thu > 100K, hoặc chưa có chứng từ thì tạm tính theo COD khai báo");
+  assert.equal(row.returned, 4, "không thành công 4 — đã có chứng từ và tiền dưới ngưỡng, hoặc vận đơn đã hoàn");
   assert.equal(row.returnedByRule, 1, "1 đơn thực thu 60K nằm giữa 50K–100K");
   assert.equal(row.inTransit, 1, "đang giao 1");
   assert.equal(row.cancelled, 1, "huỷ 1");
-  assert.equal(row.rate, 75, "tỷ lệ hoàn 6/(2+6) = 75%");
-  assert.equal(row.successRate, 25, "tỷ lệ giao thành công 2/(2+6) = 25%");
+  assert.equal(row.rate, 50, "tỷ lệ hoàn 4/(4+4) = 50%");
+  assert.equal(row.successRate, 50, "tỷ lệ giao thành công 4/(4+4) = 50%");
   assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
   const summary = await getReturnRateSummary(all, "RR-001");
-  assert.equal(summary.returned, 6);
-  assert.equal(summary.delivered, 2);
-  assert.equal(summary.successRate, 25);
+  assert.equal(summary.returned, 4);
+  assert.equal(summary.delivered, 4);
+  assert.equal(summary.successRate, 50);
   const detail = await listOrdersForVariant(row.key, all);
   assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED", "giao thành công nhưng không thu được đồng nào → hoàn");
   assert.equal(detail.find((d) => d.id === "rr-9009")?.outcome, "RETURNED", "thực thu 30K < 50K → đơn hoàn");
   assert.equal(detail.find((d) => d.id === "rr-9010")?.outcome, "RETURNED_BY_RULE", "thực thu 60K: khách chỉ trả phí, không phải giao thành công");
-  assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "RETURNED", "COD khai báo 499K nhưng không có tiền thực thu → không phải doanh thu");
-  assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "RETURNED", "VTP báo giao nhưng bảng kê không về đồng nào → KHÔNG phải giao thành công");
+  assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "DELIVERED", "chưa có chứng từ tiền → tạm tính theo COD khai báo 499K");
+  assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "DELIVERED", "VTP báo giao, COD khai báo 499K, chưa có bảng kê → tạm tính là giao thành công");
   assert.equal(detail.find((d) => d.id === "rr-9004")?.outcome, "IN_TRANSIT");
   assert.equal(detail.find((d) => d.id === "rr-9007")?.outcome, "DELIVERED", "COD đã về > 100K → giao thành công dù vận đơn chưa báo giao");
   assert.equal(detail.find((d) => d.id === "rr-9008")?.outcome, "DELIVERED", "thực thu 499K → giao thành công dù COD vận đơn = 0");
@@ -874,7 +874,7 @@ async function main() {
     assert.equal(Number(legRow?.codAmount), 0);
     // nhờ vậy quy tắc vận đơn chiều về nhận ra đơn gốc là đơn HOÀN, không còn tính là giao thành công
     const lai = await listOrdersForVariant((await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key, all);
-    assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "RETURNED", "đơn có vận đơn chiều về và không thu được tiền → là đơn hoàn");
+    assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "DELIVERED", "chưa có chứng từ tiền nên tạm tính theo COD khai báo; bảng kê về sẽ chỉnh lại");
     console.log(`✓ Danh sách vận đơn VTP: ghép ${applied.matched}/${applied.total} (${applied.legs} chiều về → đơn gốc thành đơn hoàn)`);
   }
 
@@ -903,16 +903,16 @@ async function main() {
       collected: 0, amount: 499_000, orderCod: 499_000, prepaid: 0, transfer: 0,
     };
     const cases: OutcomeCase[] = [
-      { ...base, id: "declared-only", current: "RETURNED", proposed: "NOT_DELIVERED" },
-      { ...base, id: "order-declared-only", amount: 0, current: "RETURNED", proposed: "NOT_DELIVERED" },
+      { ...base, id: "declared-only", current: "DELIVERED" },
+      { ...base, id: "order-declared-only", amount: 0, current: "DELIVERED" },
       // Tình huống chủ shop chỉ ra: VTP báo giao thành công nhưng khách chỉ trả tiền ship.
       { ...base, id: "chi-tra-tien-ship", collected: 25_000, current: "RETURNED", proposed: "RETURNED" },
       { ...base, id: "collected-30000", collected: 30_000, current: "RETURNED", proposed: "RETURNED" },
       { ...base, id: "collected-50000", collected: 50_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
       { ...base, id: "collected-100000", collected: 100_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
       { ...base, id: "collected-100001", collected: 100_001, current: "DELIVERED", proposed: "DELIVERED" },
-      { ...base, id: "no-shipment-delivered", shipmentStage: null, current: "RETURNED", proposed: "NOT_DELIVERED" },
-      { ...base, id: "no-shipment-paid", shipmentStage: null, orderStage: "PAID", current: "RETURNED", proposed: "NOT_DELIVERED" },
+      { ...base, id: "no-shipment-delivered", shipmentStage: null, current: "DELIVERED" },
+      { ...base, id: "no-shipment-paid", shipmentStage: null, orderStage: "PAID", current: "DELIVERED" },
       ...(["PENDING", "COLLECTED", "RECONCILED", "PAID_TO_BANK", "DISPUTED"] as const).map((codStatus): OutcomeCase => ({
         ...base, id: `transit-${codStatus}`, shipmentStage: "IN_TRANSIT", orderStage: "SHIPPED", codStatus, collected: 100_001,
         current: codStatus === "PENDING" || codStatus === "DISPUTED" ? "IN_TRANSIT" : "DELIVERED",

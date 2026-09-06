@@ -45,40 +45,55 @@ const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)
 export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
 
 /**
- * TIỀN THỰC THU của đơn: COD đã thu thật (bảng kê Viettel Post / webhook) cộng tiền khách
- * chuyển trước. CỐ Ý KHÔNG có fallback sang COD khai báo (`cod_amount`, `orders.cod`) —
- * COD khai báo là số shop MUỐN thu, không phải số ĐÃ thu.
+ * ĐÃ CÓ BẰNG CHỨNG TIỀN cho vận đơn này hay chưa: có số thực thu, hoặc vận đơn đã xuất hiện
+ * trên chi tiết bảng kê tải từ Viettel Post (kể cả bảng kê ghi thu 0 — đó vẫn là bằng chứng
+ * KHÔNG thu được đồng nào).
  */
-const REAL_CASH = sql`(coalesce(${s.codCollected}, 0) + ${PREPAID})`;
+const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0 or ${s.codStatementRef} is not null)`;
 
 /**
- * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, GTC, lương, COD).
+ * SỐ TIỀN DÙNG ĐỂ KẾT LUẬN.
  *
- * QUY TẮC NGHIỆP VỤ (chủ shop chốt): kết luận CHỈ dựa trên TIỀN THỰC THU VỀ TÀI KHOẢN theo
- * bảng kê Viettel Post, tuyệt đối không dựa trên COD khai báo. Viettel Post ghi "giao thành công"
- * cho cả chiều hoàn và cho đơn khách chỉ trả tiền ship; đơn "giao thành công" mà tiền thực thu
- * dưới 100K bản chất là đơn hoàn và phải tính là giao hàng KHÔNG thành công.
+ * Quy tắc do chủ shop chốt:
+ *  · ĐÃ có bằng chứng  → dùng TIỀN THỰC THU. Bảng kê ghi 25K trên đơn khai báo 499K thì
+ *    đơn đó là đơn hoàn, bất kể Viettel Post ghi "giao thành công".
+ *  · CHƯA có bằng chứng → TẠM dùng COD khai báo. Tiền của kỳ này có thể về ở bảng kê kỳ sau,
+ *    nên không được coi "chưa có số" là "thu được 0đ" rồi kết luận đơn hoàn.
  *
- *  1. vận đơn đang hoàn / đã hoàn → HOÀN, dù đã từng thu tiền;
- *  2. tiền thực thu > 100K → GIAO THÀNH CÔNG, kể cả khi trạng thái vận đơn chưa cập nhật;
- *  3. vận đơn đã giao nhưng thực thu < 50K → HOÀN (khách trả hàng, chỉ trả phí);
- *  4. vận đơn đã giao mà thực thu 50K–100K, hoặc chưa có đồng thực thu nào → KHÔNG THÀNH CÔNG;
- *  5. vận đơn đang đi → đang giao;
- *  6. chưa có vận đơn thì mới xét trạng thái Pancake, và Pancake khai "đã giao/đã thanh toán"
- *     mà không có tiền thực thu cũng KHÔNG được tính là giao thành công.
+ * Cả hai nhánh đều cộng tiền khách chuyển trước.
+ */
+const OUTCOME_MONEY = sql`(case when ${HAS_CASH_EVIDENCE}
+  then coalesce(${s.codCollected}, 0)
+  else greatest(coalesce(${s.codAmount}, 0), coalesce(${o.cod}, 0)) end + ${PREPAID})`;
+
+/**
+ * Đơn đang được kết luận bằng số TẠM TÍNH (chưa có chứng từ tiền). Dùng để hiển thị riêng,
+ * vì con số của nhóm này còn thay đổi khi bảng kê kỳ sau về.
+ */
+export const IS_PROVISIONAL = sql`(${s.id} is not null and ${s.stage} = 'DELIVERED' and not ${HAS_CASH_EVIDENCE})`;
+
+/**
+ * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo.
+ *
+ *  1. đang/đã hoàn → HOÀN, dù đã từng thu tiền;
+ *  2. tiền > 100K → GIAO THÀNH CÔNG;
+ *  3. đã giao mà tiền < 50K → HOÀN (khách chỉ trả phí, hoặc bảng kê xác nhận không thu được);
+ *  4. đã giao mà tiền 50K–100K → KHÔNG THÀNH CÔNG;
+ *  5. đang đi → ĐANG GIAO;
+ *  6. chưa có vận đơn thì mới xét trạng thái Pancake, cũng theo đúng ngưỡng tiền trên.
  *
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
-  when ${REAL_CASH} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
-  when ${s.stage} = 'DELIVERED' and ${REAL_CASH} < ${RETURN_COD} then 'RETURNED'
+  when ${OUTCOME_MONEY} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
-  when ${o.stage} in ('DELIVERED','PAID') and ${REAL_CASH} > ${MAX_COD} then 'DELIVERED'
-  when ${o.stage} in ('DELIVERED','PAID') and ${REAL_CASH} < ${RETURN_COD} then 'RETURNED'
+  when ${o.stage} in ('DELIVERED','PAID') and ${OUTCOME_MONEY} > ${MAX_COD} then 'DELIVERED'
+  when ${o.stage} in ('DELIVERED','PAID') and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${o.stage} in ('DELIVERED','PAID') then 'RETURNED_BY_RULE'
   when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
   else 'NOT_SHIPPED' end`;
@@ -334,6 +349,8 @@ export type ReturnRateSummary = {
   failedSample: number;
   /** Đơn đã kết thúc (giao / hoàn) mà vận đơn chưa có trạng thái Viettel Post thật — đang tính theo trạng thái Pancake */
   finishedNoVtp: number;
+  /** Đơn đang kết luận bằng số TẠM TÍNH: chưa có chứng từ tiền, số sẽ đổi khi bảng kê về. */
+  provisional: number;
 };
 
 /** Xác suất một vận đơn đã từng giao thất bại cuối cùng thành hoàn (180 ngày gần nhất); dưới 15 mẫu dùng 60% */
@@ -385,6 +402,7 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
       // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
       finishedNoVtp: sql<number>`count(*) filter (where ${s.id} is not null and ${s.vtpStatusDate} is null and ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      provisional: sql<number>`count(*) filter (where ${IS_PROVISIONAL})`,
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))
@@ -411,6 +429,7 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     failedToReturnPct: Math.round(p.rate * 100),
     failedSample: p.sample,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),
+    provisional: Number(row?.provisional ?? 0),
   };
 }
 

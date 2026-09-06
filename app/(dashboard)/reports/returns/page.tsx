@@ -168,6 +168,14 @@ export default async function ReturnRatePage({
         </div>
       </div>
 
+      {summary.provisional ? (
+        <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          {formatNumber(summary.provisional)} đơn đang được xếp loại bằng <strong>số tạm tính</strong> (Viettel Post báo đã giao nhưng chưa có
+          chứng từ bảng kê). Tiền của các đơn này có thể về ở kỳ bảng kê sau; số sẽ tự chính xác khi anh nhập bảng kê ở{" "}
+          <Link className="underline underline-offset-2" href="/import-vtp">Nhập dữ liệu Viettel Post</Link>.
+        </div>
+      ) : null}
+
       <DataTableToolbar
         searchPlaceholder="SKU, tên sản phẩm, màu/size…"
         period={{ defaultKey: "90d" }}

@@ -95,6 +95,7 @@ export async function listShipments(params: ListParams) {
         vtpLocation: true,
         codAmount: true,
         codCollected: true,
+        codStatementRef: true,
         shippingFee: true,
         codStatus: true,
         receiverName: true,
