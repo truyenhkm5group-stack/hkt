@@ -29,7 +29,8 @@ import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { clearMemo } from "@/lib/cache";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
-import { legBaseCode, mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import { expandSheetRange, legBaseCode, mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import XLSX from "xlsx";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
@@ -808,6 +809,13 @@ async function main() {
 
   // File "Danh sách vận đơn" của viettelpost.vn: cột Mã Vận Đơn là vận đơn CHIỀU VỀ (mã gốc + 1P1), cột Mã đơn hàng mới là mã gốc ERP lưu
   {
+    // File VTP khai báo sai vùng dữ liệu (<dimension ref="A1:AU23"/> cho sheet 1448 dòng): Excel bỏ qua, thư viện thì tin theo
+    // nên chỉ đọc được 23 dòng đầu → phải tính lại vùng dữ liệu từ các ô có thật.
+    const wsBig = XLSX.utils.aoa_to_sheet([["Mã Vận Đơn", "Trạng thái"], ...Array.from({ length: 999 }, (_, i) => [`PKE${1600000000 + i}`, "Giao thành công"])]);
+    assert.equal(XLSX.utils.sheet_to_json(wsBig, { header: 1 }).length, 1000, "sheet gốc có 1000 dòng");
+    wsBig["!ref"] = "A1:B23"; // giả lập khai báo sai của viettelpost.vn
+    assert.equal(XLSX.utils.sheet_to_json(wsBig, { header: 1 }).length, 23, "tin theo khai báo sai thì mất dữ liệu");
+    assert.equal(XLSX.utils.sheet_to_json(expandSheetRange(wsBig), { header: 1 }).length, 1000, "tính lại vùng dữ liệu → đọc đủ dòng");
     assert.equal(legBaseCode("PKE15089090051P1"), "PKE1508909005", "cắt đuôi 1P1 ra đúng mã gốc");
     assert.equal(legBaseCode("PKE15066977671P1"), "PKE1506697767");
     assert.equal(legBaseCode("PKE1512546011"), "", "vận đơn thường không phải chiều về");

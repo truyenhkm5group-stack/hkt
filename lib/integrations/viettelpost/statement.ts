@@ -53,6 +53,35 @@ const COL = {
   net: ["thuc nhan", "thu ve", "thuc tra", "con lai", "thanh toan", "net"],
 };
 
+/**
+ * Đọc sheet đầu tiên thành ma trận. File "Danh sách vận đơn" của viettelpost.vn khai báo sai vùng dữ liệu
+ * (<dimension ref="A1:AU23"/> trong khi sheet có hàng nghìn dòng): Excel bỏ qua khai báo này còn thư viện thì tin theo
+ * nên chỉ đọc được 23 dòng đầu. Vì vậy luôn tính lại vùng dữ liệu từ các ô có thật.
+ */
+export function expandSheetRange(ws: XLSX.WorkSheet): XLSX.WorkSheet {
+  let maxRow = -1;
+  let maxCol = -1;
+  for (const key of Object.keys(ws)) {
+    if (key.startsWith("!")) continue;
+    const cell = XLSX.utils.decode_cell(key);
+    if (cell.r > maxRow) maxRow = cell.r;
+    if (cell.c > maxCol) maxCol = cell.c;
+  }
+  if (maxRow < 0) return ws;
+  const declared = typeof ws["!ref"] === "string" ? XLSX.utils.decode_range(ws["!ref"] as string) : null;
+  if (!declared || declared.e.r < maxRow || declared.e.c < maxCol) {
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: Math.max(maxCol, declared?.e.c ?? 0) } });
+  }
+  return ws;
+}
+
+function sheetMatrix(input: Buffer, cellDates: boolean, raw: boolean): unknown[][] {
+  const wb = XLSX.read(input, { type: "buffer", cellDates });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+  return XLSX.utils.sheet_to_json<unknown[]>(expandSheetRange(ws), { header: 1, raw, defval: "" });
+}
+
 function findCol(headers: string[], keys: string[], exclude: string[] = []) {
   for (const key of keys) {
     const i = headers.findIndex((h) => h.includes(` ${key} `) && !exclude.some((x) => h.includes(` ${x} `)));
@@ -68,8 +97,7 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
     // CSV: tự tách để giữ nguyên chuỗi "500.000" (SheetJS sẽ hiểu nhầm thành số 500)
     matrix = parseCsv(input.replace(/^\uFEFF/, ""));
   } else {
-    const wb = XLSX.read(input, { type: "buffer", cellDates: false });
-    matrix = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: "" });
+    matrix = sheetMatrix(input, false, true);
   }
   void filename;
   // tìm dòng tiêu đề trong 15 dòng đầu
@@ -127,8 +155,7 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   let matrix: unknown[][];
   if (typeof input === "string") matrix = parseCsv(input.replace(/^﻿/, ""));
   else {
-    const wb = XLSX.read(input, { type: "buffer", cellDates: true });
-    matrix = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: "" });
+    matrix = sheetMatrix(input, true, false);
   }
   let headerIdx = -1;
   let headers: string[] = [];

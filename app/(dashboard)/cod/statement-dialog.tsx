@@ -342,11 +342,7 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
         <Input type="file" multiple accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFiles(e.target.files)} disabled={pending} />
         <p className="text-[11px] text-muted-foreground">Chọn nhiều tệp (nhiều khoảng ngày) cùng lúc; cùng một mã vận đơn ở nhiều tệp sẽ lấy dòng có ngày cập nhật mới nhất. Cần có cột Mã vận đơn và Trạng thái; nếu có Tiền thu hộ, Cước, Ngày cập nhật thì ERP ghi thêm. Chỉ nâng trạng thái COD, không hạ vận đơn đã về ngân hàng.</p>
         {fileNames.length ? <p className="text-[11px] text-muted-foreground">Đã chọn: {fileNames.join(", ")}</p> : null}
-        {rows && rows.length > 0 && rows.length <= 60 ? (
-          <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            File chỉ có <b>{rows.length} vận đơn</b> — viettelpost.vn chỉ xuất Excel <b>trang đang xem</b>. Trước khi bấm Xuất Excel, kéo xuống cuối bảng chọn số dòng/trang lớn nhất (hoặc tick “Chọn tất cả”), hoặc xuất theo từng khoảng ngày ngắn rồi tải lên nhiều tệp cùng lúc.
-          </p>
-        ) : null}
+
       </div>
       {rows ? (
         <>
