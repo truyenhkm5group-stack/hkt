@@ -58,3 +58,20 @@
 - Xoá / hạ trạng thái dữ liệu production; chạy job ghi hàng loạt (`data-check` với `fix=1`, `bank-ledger-prune`).
 - Thêm dịch vụ bên ngoài mới, đổi lịch scheduler, đổi quyền/vai trò.
 - Bất kỳ việc gì làm thay đổi số lợi nhuận/lương đã chốt kỳ trước.
+
+## 8. Độ tin cậy của KPI phục vụ ra quyết định
+
+Mọi KPI dùng để ra quyết định phải có:
+
+1. Source of truth rõ ràng.
+2. Grain rõ ràng: order / shipment / SKU / payment.
+3. Định nghĩa công thức duy nhất.
+4. Không dùng trạng thái hệ thống ngoài làm proxy cho tiền thật.
+5. Unknown phải là UNKNOWN, không đổi thành 0.
+6. Dữ liệu suy đoán phải có nhãn estimated.
+7. Dữ liệu xác minh phải truy nguyên được về chứng từ.
+8. Không silent backfill.
+9. Không silent correction kỳ đã chốt.
+10. Có test cho boundary và tình huống xung đột.
+11. Một KPI phải cho biết cả giá trị và mức độ completeness khi cần.
+12. Logic chung không được copy sang từng page.
