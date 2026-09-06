@@ -45,6 +45,7 @@ import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
+import { recheckAllLanding } from "@/lib/landing/sheet";
 
 async function main() {
   await ensureMigrated();
@@ -719,6 +720,17 @@ async function main() {
       const draft = await listLandingOrders({ period: allP, pos: ["DRAFT"] });
       assert.equal(noPos.length + hasPos.length + draft.length, every.length, "3 trạng thái POS phủ hết");
       console.log(`✓ Lọc landing: mã ${code} ${byCode.length} dòng · POS đã có ${hasPos.length} / nháp ${draft.length} / chưa ${noPos.length}`);
+      // Ghép yếu (điểm 5, chỉ theo tên mã) trên dòng ĐÃ có đơn POS, nhưng ô gốc có "Size M,Màu Đỏ" → recheck ghép lại đúng mẫu RR-001 (M · Đỏ)
+      await db.insert(schema.productVariants).values({ id: "rr-var-l", productId: "rr-prod", sku: "RR-001-L", color: "Đỏ", size: "L", retailPrice: 499000 }).onConflictDoNothing();
+      await db
+        .insert(schema.landingOrders)
+        .values({ rowKey: "tab:RR:9", sheetGid: "tab:RR", rowIndex: 9, submittedAt: new Date(), phone: "0900000009", status: "PUSHED", orderId: "rr-9001", ...landBase, productText: "Đầm kiểm thử", variantId: "rr-var-l", variantMatchScore: 5, raw: { "Cột 1": "Khách", "Cột 2": "Size M,Màu  Đỏ", "Cột 3": "" } })
+        .onConflictDoNothing();
+      const rc = await recheckAllLanding(30);
+      const fixed = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.rowKey, "tab:RR:9") });
+      assert.equal(fixed?.variantId, "rr-var", `ghép yếu có size thật → ghép lại đúng mẫu M Đỏ (recheck ${rc.rechecked} dòng)`);
+      assert.equal(fixed?.sizeText, "M");
+      assert.ok(Number(fixed?.variantMatchScore) > 5, "điểm ghép mới cao hơn ghép yếu");
     }
   }
   console.log("✓ Đơn landing page: CSV có / không tiêu đề, dò cột theo nội dung, SĐT, size/màu, gói giá, mã hàng từ chiến dịch, ad_id, ghép mẫu mã");

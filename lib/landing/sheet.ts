@@ -286,6 +286,7 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
     // suy lại từ các ô gốc: dòng nhập trước đây theo cột dò sai (bố cục form đổi) nên thiếu size / màu / địa chỉ / giá
     const cells = r.raw && typeof r.raw === "object" ? Object.values(r.raw as Record<string, string>).map((v) => String(v ?? "")) : [];
     const fix: Record<string, unknown> = {};
+    const weak = Boolean(r.variantId) && Number(r.score) <= 5; // ghép tự động chỉ theo mã (chưa từng nhìn size / màu); chọn tay = 99
     if (cells.length) {
       if (!r.size && !r.color) {
         const vt = r.variant || findVariantCell(cells);
@@ -301,9 +302,13 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
       }
       if (!Number(r.price) && !Number(r.total) && r.quantity === 1 && config.singlePrice) Object.assign(fix, { price: config.singlePrice, total: config.singlePrice });
     }
-    // ghép tự động chỉ theo mã (điểm ≤ 5) khi chưa gửi POS / chưa có đơn → bỏ để ghép lại theo size / màu thật
-    const autoWeak = r.variantId && Number(r.score) <= 5 && !r.orderId && !r.pancakeOrderId && r.status !== "PUSHED";
-    if (autoWeak) { fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null; }
+    // Ghép yếu (điểm ≤ 5): đã có size / màu thật từ sheet → ghép lại và ghi đè (kể cả dòng đã có đơn POS — đơn POS không bị đụng,
+    // chỉ sửa nhãn mẫu mã trên ERP cho đúng với khách); không có size lẫn màu → dòng chưa lên POS thì bỏ ghép để báo "Thiếu size",
+    // dòng đã có đơn POS thì giữ nguyên (không có gì tốt hơn để thay).
+    const linked = Boolean(r.orderId || r.pancakeOrderId || r.status === "PUSHED");
+    if (weak) {
+      if (r.size || r.color || !linked) { fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null; }
+    }
     if (Object.keys(fix).length) await db.update(schema.landingOrders).set({ ...fix, updatedAt: new Date() } as Partial<typeof schema.landingOrders.$inferInsert>).where(eq(schema.landingOrders.id, r.id));
     if (!r.variantId) {
       const label = r.tab.replace(/^tab:/, "");
