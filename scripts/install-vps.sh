@@ -139,6 +139,16 @@ else
 fi
 
 # ───────── 5. Khởi chạy ─────────
+# Ghi commit đang chạy vào .env để /api/health nói được Production đang chạy đúng bản nào.
+# Không có mốc này thì "deploy xanh" vẫn không chứng minh được máy chủ khớp Git.
+ERP_COMMIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+ERP_COMMIT_REF="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if grep -qE "^ERP_COMMIT=" .env; then sed -i -E "s|^ERP_COMMIT=.*|ERP_COMMIT=\"$ERP_COMMIT_SHA\"|" .env; else printf 'ERP_COMMIT="%s"
+' "$ERP_COMMIT_SHA" >> .env; fi
+if grep -qE "^ERP_BRANCH_NAME=" .env; then sed -i -E "s|^ERP_BRANCH_NAME=.*|ERP_BRANCH_NAME=\"$ERP_COMMIT_REF\"|" .env; else printf 'ERP_BRANCH_NAME="%s"
+' "$ERP_COMMIT_REF" >> .env; fi
+say "Phiên bản triển khai: $ERP_COMMIT_REF @ $ERP_COMMIT_SHA"
+
 say "Build và khởi chạy (lần đầu mất 3–6 phút)"
 
 # CSDL lên trước, rồi ĐỒNG BỘ mật khẩu role với .env.

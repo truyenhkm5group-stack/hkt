@@ -18,6 +18,17 @@ async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const lagDays = Number(args.find((a) => a.startsWith("--lag="))?.slice(6) ?? "1") || 0;
+  // CHẶN GHI NHẦM: cách ghép này chỉ là SUY ĐOÁN theo cửa sổ ngày giao, không phải chứng từ.
+  // Ghi thật sẽ đóng dấu PAID_TO_BANK cho hàng trăm vận đơn và làm hỏng bảng đối soát COD
+  // (bậc "có bảng kê" sẽ đầy số suy đoán, không truy nguyên được).
+  // Cách đúng: Đối soát COD → Bảng kê Viettel Post → tab "Chi tiết một bảng kê (file)",
+  // ERP ghép theo MÃ VẬN ĐƠN trên chứng từ và tự khớp đợt bằng số tiền.
+  if (!dryRun && !args.includes("--force-guess")) {
+    throw new Error(
+      "Ghép theo ngày là SUY ĐOÁN, không phải đối soát. Hãy nhập chi tiết bảng kê ở trang Đối soát COD " +
+        "(ghép theo mã vận đơn). Nếu vẫn muốn chạy, thêm --force-guess và tự chịu trách nhiệm về số liệu.",
+    );
+  }
   const db = await getDb();
   const b = schema.codBatches;
   const s = schema.shipments;

@@ -22,7 +22,11 @@ command -v openssl >/dev/null 2>&1 || install_pkg openssl
 
 if [ -d "$DIR/.git" ]; then
   echo "▶ Cập nhật mã nguồn tại $DIR"
-  git -C "$DIR" fetch --quiet origin "$BRANCH" && git -C "$DIR" checkout --quiet "$BRANCH" && git -C "$DIR" pull --quiet --ff-only origin "$BRANCH"
+  # Đặt thẳng về đúng commit của nhánh trên remote. Dùng "checkout -B" thay cho checkout+pull
+  # để ĐỔI NHÁNH được (ví dụ từ nhánh phát triển sang main) kể cả khi máy chủ chưa có nhánh đó,
+  # và để trạng thái máy chủ luôn khớp Git thay vì phụ thuộc trạng thái cũ trên máy.
+  git -C "$DIR" fetch --quiet --prune origin
+  git -C "$DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 else
   echo "▶ Tải mã nguồn về $DIR"
   git clone --quiet --branch "$BRANCH" "$REPO_URL" "$DIR"
