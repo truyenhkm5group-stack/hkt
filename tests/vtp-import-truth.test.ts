@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { auditLogs, codBatches, orders, paymentTransactions, shipmentEvents, shipments } from "@/db/schema";
 import { mergeVtpOrderLists, parseStatementDetail, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
-import { applyVtpOrderList, linkStatementDetailToBatch, matchStatementFileToBatch, matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
+import { applyVtpOrderList, applyStatementDetailRows, matchStatementFileToBatch, matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 
 /** Bố cục thật của VTP, dữ liệu tổng hợp để không đưa thông tin khách hàng vào repo public. */
 export async function testVtpImportTruth(db: Db) {
@@ -157,10 +157,49 @@ export async function testStatementDetailMatching(db: Db) {
   assert.ok((noMatch.issue ?? "").length > 0, "phải nêu lý do không ghép được để chủ shop biết xử lý");
 
   // 4. Gắn vận đơn KHÔNG được sửa số hay ngày của đợt (số của đợt là chứng từ gốc).
-  await linkStatementDetailToBatch("batch-match-test", rows);
+  await applyStatementDetailRows(rows, "test.csv", "batch-match-test");
   const after = await db.query.codBatches.findFirst({ where: eq(codBatches.id, "batch-match-test") });
   assert.equal(Number(after?.totalAmount), netAmount, "không đè tổng tiền của đợt");
   assert.equal(new Date(after!.receivedAt).getTime(), receivedAt.getTime(), "không đè ngày về của đợt");
 
   console.log(`✓ Chi tiết bảng kê: đọc đúng 3 cột tiền, ghép đợt bằng số tiền (${netAmount}), không đè số/ngày của đợt`);
+}
+
+/**
+ * MỘT CHỖ NHẬP: ERP phải tự nhận loại từng tệp Viettel Post. Nhập nhầm loại rất nguy hiểm
+ * vì một bên là trạng thái giao, một bên là tiền — nên phải nhận đúng, không đoán theo tên tệp.
+ */
+export async function testVtpFileDetection() {
+  const { detectVtpFile, VtpFileError } = await import("@/lib/integrations/viettelpost/import-files");
+
+  const statement = [
+    "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)",
+    "PKE9900000201,GLMTQY214,A,0900000001,X,31/08/2026 18:37:53,01/09/2026 11:14:09,424000,17000,407000",
+  ].join("\n");
+
+  const orderList = [
+    "STT,Mã Vận Đơn,Mã đơn hàng,Ngày tạo,Trạng Thái,Tiền thu hộ (4),Tổng phí (9),Ngày chuyển trạng thái",
+    "1,PKE9900000202,PKE_REF_02,01/08/2026 12:00:00,Giao thành công,499000,17000,05/09/2026 15:50:44",
+  ].join("\n");
+
+  const a = detectVtpFile(statement, "Bao_cao_chi_tiet_bang_ke_1.xlsx");
+  assert.equal(a.kind, "STATEMENT_DETAIL", "tệp có Tiền thu về, không có Trạng thái → chi tiết bảng kê");
+  assert.equal(a.rows.length, 1);
+
+  const b = detectVtpFile(orderList, "VTP_danh_sach_van_don_T8.xlsx");
+  assert.equal(b.kind, "ORDER_LIST", "tệp có cột Trạng thái → danh sách vận đơn");
+  assert.equal(b.rows.length, 1);
+
+  // Nhận loại theo NỘI DUNG, không theo tên tệp: đổi chéo tên vẫn phải nhận đúng.
+  assert.equal(detectVtpFile(statement, "VTP_danh_sach_van_don.xlsx").kind, "STATEMENT_DETAIL", "không tin tên tệp");
+  assert.equal(detectVtpFile(orderList, "Bao_cao_chi_tiet_bang_ke.xlsx").kind, "ORDER_LIST", "không tin tên tệp");
+
+  // Tệp lạ phải báo lỗi kèm TÊN TỆP để chủ shop biết bỏ tệp nào ra.
+  assert.throws(
+    () => detectVtpFile("cot1,cot2\na,b", "linh_tinh.csv"),
+    (e: unknown) => e instanceof VtpFileError && String(e.message).includes("linh_tinh.csv"),
+    "tệp không đọc được phải nêu rõ tên tệp",
+  );
+
+  console.log("✓ Nhận loại tệp VTP: đúng theo nội dung, không theo tên tệp; tệp lỗi nêu rõ tên");
 }

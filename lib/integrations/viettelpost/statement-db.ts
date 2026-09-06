@@ -319,26 +319,47 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
  * Gắn vận đơn của file chi tiết vào ĐÚNG đợt đã có. Không tạo đợt mới, không sửa số của đợt:
  * số tiền của đợt là số trên chứng từ gốc.
  */
-export async function linkStatementDetailToBatch(batchId: string, rows: StatementDetailRow[]) {
+/**
+ * Ghi CHỨNG TỪ GỐC từ file chi tiết bảng kê Viettel Post.
+ *
+ * File chi tiết là chứng từ thật của ĐVVC nên luôn được ghi, KHÔNG cần có "đợt tiền về" trước.
+ * Đợt chỉ là số tổng do shop nhập tay; bắt file phải khớp đợt mới cho nhập là ngược: chứng từ
+ * đứng trước bản tổng hợp. Nếu có đợt khớp số tiền thì gắn thêm để biết tiền về tài khoản nào.
+ *
+ * Ghi cho từng vận đơn khớp mã: tiền THỰC THU, cước thật, và mốc chứng từ.
+ * Không đụng vận đơn không có trong file.
+ */
+export async function applyStatementDetailRows(rows: StatementDetailRow[], sourceRef: string, batchId: string | null) {
   const db = await getDb();
-  const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.id, batchId), columns: { id: true, receivedAt: true } });
-  if (!batch) throw new Error("Không tìm thấy đợt nhận tiền");
+  const batch = batchId
+    ? await db.query.codBatches.findFirst({ where: eq(schema.codBatches.id, batchId), columns: { id: true, receivedAt: true } })
+    : null;
   const matches = (await matchStatementRows(rows)).filter((m) => m.shipmentId);
   const now = new Date();
+  // Mốc chứng từ: ngày phát thành công muộn nhất trong file, không có thì lấy ngày đợt.
+  const dates = rows.map((r) => r.paidDate).filter((d): d is string => Boolean(d)).sort();
+  const statementAt = dates.length ? new Date(`${dates[dates.length - 1]}T00:00:00Z`) : (batch?.receivedAt ?? now);
+
+  let withCash = 0;
   for (const m of matches) {
     await db
       .update(schema.shipments)
       .set({
-        codStatus: "PAID_TO_BANK",
-        codPaidToBankAt: batch.receivedAt,
-        codBatchId: batch.id,
-        codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${now})`,
-        codCollected: m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`,
+        // Tiền THỰC THU theo chứng từ. cod = 0 trên bảng kê nghĩa là KHÔNG thu được đồng nào
+        // (thường là dòng chỉ có cước của chiều hoàn) — phải ghi đúng 0, không giữ số cũ.
+        codCollected: m.cod,
         shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
+        codStatus: m.cod > 0 ? "PAID_TO_BANK" : "NOT_APPLICABLE",
+        codPaidToBankAt: m.cod > 0 ? (batch?.receivedAt ?? statementAt) : null,
+        codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${statementAt})`,
+        codStatementRef: sourceRef,
+        codStatementAt: statementAt,
+        ...(batch ? { codBatchId: batch.id } : {}),
         updatedAt: now,
       })
       .where(eq(schema.shipments.id, m.shipmentId as string));
     if (m.orderId && m.fee > 0) await db.update(schema.orders).set({ partnerFee: m.fee }).where(eq(schema.orders.id, m.orderId));
+    if (m.cod > 0) withCash += 1;
   }
-  return { linked: matches.length };
+  return { linked: matches.length, withCash, statementAt };
 }

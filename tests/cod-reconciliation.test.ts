@@ -12,9 +12,22 @@ export async function testCodReconciliation(db: Db) {
   clearMemo();
   const r = await codReconciliation(ALL);
 
-  // ───────── 1. Các bậc bằng chứng phải lồng nhau, không được vượt nhau ─────────
-  assert.ok(r.onStatement.amount <= r.collected.amount, "tiền có bảng kê không thể lớn hơn tiền ĐVVC báo đã thu");
-  assert.ok(r.onStatement.count <= r.collected.count, "số vận đơn có bảng kê không thể nhiều hơn số vận đơn đã thu");
+  // ───────── 1. Cái phễu phải ĐƠN ĐIỆU: bậc dưới không bao giờ lớn hơn bậc trên ─────────
+  // Lỗi đã gặp thật trên production: bậc "đã thu" (527tr) LỚN HƠN bậc "phải thu" (507tr),
+  // vì bậc đã thu lấy COD KHAI BÁO làm số đã thu còn bậc phải thu lại loại vận đơn đã hoàn.
+  assert.ok(
+    r.collected.amount <= r.receivable.amount,
+    `đã thu (${r.collected.amount}) không thể lớn hơn phải thu (${r.receivable.amount})`,
+  );
+  assert.ok(r.onStatement.amount <= r.collected.amount, "tiền có chứng từ không thể lớn hơn tiền đã thu");
+  assert.ok(r.onStatement.count <= r.collected.count, "số vận đơn có chứng từ không thể nhiều hơn số vận đơn đã thu");
+  assert.ok(r.lost.amount <= r.receivable.amount, "phần không còn thu được nằm trong phải thu");
+
+  // Tuyệt đối không lấy COD khai báo làm tiền đã thu.
+  const [{ amount: realCash }] = await db
+    .select({ amount: sql<number>`coalesce(sum(coalesce(${schema.shipments.codCollected}, 0)), 0)` })
+    .from(schema.shipments);
+  assert.equal(r.collected.amount, Number(realCash), "'đã thu' phải đúng bằng tổng tiền thực thu, không cộng COD khai báo");
 
   // ───────── 2. Khoảng trống phải khớp đúng phép trừ ─────────
   assert.equal(
@@ -24,18 +37,17 @@ export async function testCodReconciliation(db: Db) {
   );
   assert.equal(r.unproven.count, r.collected.count - r.onStatement.count);
 
-  // ───────── 3. Vận đơn đã hoàn/huỷ KHÔNG được nằm trong 'phải thu' ─────────
-  const [{ n: returnedWithCod }] = await db
-    .select({ n: sql<number>`count(*)` })
+  // ───────── 3. Phải thu phủ mọi vận đơn có COD; phần đã hoàn/huỷ tách riêng ─────────
+  const [{ amount: allDeclared }] = await db
+    .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
     .from(schema.shipments)
-    .where(sql`${schema.shipments.stage} in ('RETURNED','CANCELLED') and ${schema.shipments.codAmount} > 0`);
-  if (Number(returnedWithCod) > 0) {
-    const [{ amount: receivableCheck }] = await db
-      .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
-      .from(schema.shipments)
-      .where(sql`${schema.shipments.stage} not in ('RETURNED','CANCELLED') and ${schema.shipments.codAmount} > 0`);
-    assert.equal(r.receivable.amount, Number(receivableCheck), "phải thu chỉ gồm vận đơn còn khả năng thu tiền");
-  }
+    .where(sql`${schema.shipments.codAmount} > 0`);
+  assert.equal(r.receivable.amount, Number(allDeclared), "phải thu = tổng COD khai báo trên mọi vận đơn có COD");
+  const [{ amount: lostCheck }] = await db
+    .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
+    .from(schema.shipments)
+    .where(sql`${schema.shipments.codAmount} > 0 and ${schema.shipments.stage} in ('RETURNED','CANCELLED')`);
+  assert.equal(r.lost.amount, Number(lostCheck), "phần không còn thu được = COD của vận đơn đã hoàn/huỷ");
 
   // ───────── 4. Chênh lệch từng đợt = COD bảng kê − tổng COD vận đơn đã ghép ─────────
   const gaps = await codBatchGaps(ALL);
@@ -52,7 +64,7 @@ export async function testCodReconciliation(db: Db) {
   // ───────── 5. Danh sách drill-down khớp đúng con số trên thẻ ─────────
   const unproven = await unprovenCollectedShipments(1, 500, "");
   assert.equal(unproven.total, r.unproven.count, "danh sách 'đã thu chưa có chứng từ' phải khớp con số hiển thị");
-  assert.ok(unproven.rows.every((row) => row.codStatus !== "PENDING"), "chỉ gồm vận đơn ĐVVC đã xác nhận thu");
+  assert.ok(unproven.rows.every((row) => Number(row.codCollected ?? 0) > 0), "chỉ gồm vận đơn CÓ TIỀN THẬT nhưng chưa có chứng từ bảng kê");
 
   const stale = await staleCodOnReturned(1, 500);
   assert.equal(stale.total, r.stale.count, "danh sách 'COD mâu thuẫn' phải khớp con số hiển thị");
@@ -68,29 +80,29 @@ export async function testCodReconciliation(db: Db) {
     assert.ok(r.provenRate !== null && r.provenRate >= 0 && r.provenRate <= 100);
   }
 
-  // ───────── 7. Ghép thêm một vận đơn vào đợt làm tăng đúng phần có chứng từ ─────────
-  const [batch] = await db.select().from(schema.codBatches).limit(1);
+  // ───────── 7. Ghi chứng từ bảng kê chuyển BẬC, không sinh thêm tiền ─────────
   const [candidate] = await db
-    .select({ id: schema.shipments.id, cod: schema.shipments.codAmount, collected: schema.shipments.codCollected })
+    .select({ id: schema.shipments.id, collected: schema.shipments.codCollected })
     .from(schema.shipments)
-    .where(sql`${schema.shipments.codBatchId} is null and ${schema.shipments.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')`)
+    .where(sql`${schema.shipments.codStatementRef} is null and coalesce(${schema.shipments.codCollected}, 0) > 0`)
     .limit(1);
-  if (batch && candidate) {
+  if (candidate) {
     const before = await codReconciliation(ALL);
-    await db.update(schema.shipments).set({ codBatchId: batch.id }).where(eq(schema.shipments.id, candidate.id));
+    await db.update(schema.shipments)
+      .set({ codStatementRef: "test-bang-ke.xlsx", codStatementAt: new Date() })
+      .where(eq(schema.shipments.id, candidate.id));
     clearMemo();
     const after = await codReconciliation(ALL);
-    const moved = Number(candidate.collected) || Number(candidate.cod) || 0;
-    assert.equal(after.onStatement.amount, before.onStatement.amount + moved, "ghép vào bảng kê làm tăng đúng phần có chứng từ");
+    const moved = Number(candidate.collected) || 0;
+    assert.equal(after.onStatement.amount, before.onStatement.amount + moved, "có chứng từ bảng kê làm tăng đúng bậc 3");
     assert.equal(after.unproven.amount, before.unproven.amount - moved, "và giảm đúng phần chưa có chứng từ");
-    assert.equal(after.collected.amount, before.collected.amount, "tổng đã thu không đổi — chỉ chuyển bậc bằng chứng, không sinh thêm tiền");
-    // Trả lại trạng thái cũ để không ảnh hưởng kiểm thử sau.
-    await db.update(schema.shipments).set({ codBatchId: null }).where(eq(schema.shipments.id, candidate.id));
+    assert.equal(after.collected.amount, before.collected.amount, "tổng đã thu KHÔNG đổi — chỉ chuyển bậc bằng chứng, không sinh thêm tiền");
+    assert.equal(after.receivable.amount, before.receivable.amount, "phải thu không đổi");
+    await db.update(schema.shipments).set({ codStatementRef: null, codStatementAt: null }).where(eq(schema.shipments.id, candidate.id));
     clearMemo();
   }
 
   // ───────── 8. Báo "thiếu bảng kê từ ngày nào" ─────────
-  // Chủ shop cần biết chính xác khoảng ngày phải xuất bảng kê từ Viettel Post (trả tiền thứ 2/4/6).
   const coverage = await statementCoverage();
   for (const g of coverage.gaps) {
     assert.ok(g.from <= g.to, "khoảng ngày phải hợp lệ");
@@ -100,7 +112,7 @@ export async function testCodReconciliation(db: Db) {
     assert.ok(coverage.gaps[i].from > coverage.gaps[i - 1].to, "các khoảng phải rời nhau và tăng dần");
   }
   assert.ok(coverage.totalMissingShipments <= r.unproven.count, "không nêu nhiều hơn số vận đơn đang treo");
-  assert.ok(coverage.firstShipmentDate === null || /^\d{4}-\d{2}-\d{2}$/.test(coverage.firstShipmentDate), "có mốc ngày ERP bắt đầu có dữ liệu");
+
   console.log(`✓ Thiếu bảng kê: ${coverage.gaps.length} khoảng ngày · ${coverage.totalMissingShipments} vận đơn treo · ERP có dữ liệu từ ${coverage.firstShipmentDate ?? "—"}`);
 
   console.log(

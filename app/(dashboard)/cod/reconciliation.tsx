@@ -76,24 +76,24 @@ export async function CodReconciliation({ period, drill, page }: { period: Perio
           <Step
             label="1 · Phải thu"
             amount={recon.receivable.amount}
-            count={`${formatNumber(recon.receivable.count)} vận đơn còn thu được`}
-            evidence="COD ghi trên vận đơn. Đây là con số KHAI BÁO, chưa phải tiền."
+            count={`${formatNumber(recon.receivable.count)} vận đơn có COD`}
+            evidence={`COD ghi trên vận đơn — con số KHAI BÁO, chưa phải tiền. Trong đó ${formatVND(recon.lost.amount)} không còn thu được vì đã hoàn/huỷ.`}
             tone="muted"
             icon={ReceiptText}
           />
           <Step
-            label="2 · Viettel Post báo đã thu"
+            label="2 · Đã thu thực tế"
             amount={recon.collected.amount}
-            count={`${formatNumber(recon.collected.count)} vận đơn`}
-            evidence="ĐVVC nói đã thu của khách. Shop CHƯA có chứng từ tiền cho phần này."
+            count={`${formatNumber(recon.collected.count)} vận đơn có tiền về`}
+            evidence="Tiền thu được thật theo Viettel Post. KHÔNG lấy COD khai báo làm số đã thu."
             tone="info"
             icon={Banknote}
           />
           <Step
-            label="3 · Có trên bảng kê"
+            label="3 · Có chứng từ bảng kê"
             amount={recon.onStatement.amount}
-            count={`${formatNumber(recon.onStatement.count)} vận đơn ghép được`}
-            evidence="Đã ghép vào một đợt tiền về — truy ngược được tới chứng từ."
+            count={`${formatNumber(recon.onStatement.count)} vận đơn có trên bảng kê`}
+            evidence="Có mặt trên file chi tiết bảng kê tải từ Viettel Post — chứng từ gốc, truy ngược được."
             tone={recon.onStatement.amount > 0 ? "good" : "warn"}
             icon={FileWarning}
           />
@@ -113,13 +113,13 @@ export async function CodReconciliation({ period, drill, page }: { period: Perio
             <p className="text-[13px] font-medium text-muted-foreground">Đã thu nhưng CHƯA có chứng từ</p>
             <p className="numeric mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{formatVND(recon.unproven.amount)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {formatNumber(recon.unproven.count)} vận đơn · bậc 2 trừ bậc 3. Cần nhập bảng kê chi tiết để đối soát.
+              {formatNumber(recon.unproven.count)} vận đơn · bậc 2 trừ bậc 3. Cần tải bảng kê chi tiết của giai đoạn tương ứng về nhập.
             </p>
           </Link>
           <Link href={href("pending")} className={cn("rounded-xl border p-4 transition hover:border-primary hover:bg-accent/40", drill === "pending" && "border-primary bg-accent/40")}>
             <p className="text-[13px] font-medium text-muted-foreground">Chưa thu được</p>
             <p className="numeric mt-1 text-2xl font-bold">{formatVND(recon.pending.amount)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{formatNumber(recon.pending.count)} vận đơn còn thu được nhưng ĐVVC chưa xác nhận thu.</p>
+            <p className="mt-1 text-xs text-muted-foreground">{formatNumber(recon.pending.count)} vận đơn còn khả năng thu nhưng chưa về đồng nào.</p>
           </Link>
           <Link href={href("stale")} className={cn("rounded-xl border p-4 transition hover:border-primary hover:bg-accent/40", drill === "stale" && "border-primary bg-accent/40")}>
             <p className="text-[13px] font-medium text-muted-foreground">Trạng thái COD mâu thuẫn</p>
@@ -136,7 +136,7 @@ export async function CodReconciliation({ period, drill, page }: { period: Perio
           ) : (
             <>
               Mới <span className={cn("font-semibold", recon.provenRate >= 80 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>{recon.provenRate}%</span> số tiền
-              ĐVVC báo đã thu là truy ngược được tới bảng kê. Phần còn lại chỉ có lời của ĐVVC.
+              tiền đã thu là có chứng từ bảng kê. Phần còn lại chưa truy ngược được tới file nào.
             </>
           )}
           {recon.bank.unlinkedAmount > 0 ? (

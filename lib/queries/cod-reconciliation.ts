@@ -21,9 +21,15 @@ const b = schema.codBatches;
  * Khoảng cách giữa bậc 2 và bậc 3 chính là phần "ĐVVC bảo đã thu nhưng shop chưa có chứng từ".
  */
 
+/** CÓ CHỨNG TỪ: vận đơn xuất hiện trên file chi tiết bảng kê tải từ Viettel Post. */
+const HAS_STATEMENT = sql`${s.codStatementRef} is not null`;
 const COLLECTED_STATUSES = sql`${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')`;
-/** Tiền COD đã thu theo ĐVVC: ưu tiên số thực thu, chưa có thì lấy COD khai báo khi trạng thái đã xác nhận thu. */
-const COLLECTED_AMOUNT = sql<number>`coalesce(nullif(${s.codCollected}, 0), ${s.codAmount}, 0)`;
+/**
+ * TIỀN THỰC THU — chỉ số đã thu thật, KHÔNG fallback sang COD khai báo.
+ * COD khai báo là số shop MUỐN thu; lấy nó làm "đã thu" sẽ thổi phồng mọi bậc bên dưới
+ * (trước đây bậc "đã thu" còn LỚN HƠN bậc "phải thu", điều không thể xảy ra).
+ */
+const COLLECTED_AMOUNT = sql<number>`coalesce(${s.codCollected}, 0)`;
 
 function batchPeriod(period: Period): SQL[] {
   const conds: SQL[] = [];
@@ -39,25 +45,30 @@ export async function codReconciliation(period: Period) {
   return memo(`cod-reconciliation:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90, async () => {
     const [shipmentRow] = await db
       .select({
-        // 1. PHẢI THU: vận đơn còn khả năng thu tiền (chưa hoàn / chưa huỷ), theo COD khai báo.
-        receivableAmount: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${COD_COLLECTABLE} and ${s.codAmount} > 0), 0)`,
-        receivableCount: sql<number>`count(*) filter (where ${COD_COLLECTABLE} and ${s.codAmount} > 0)`,
+        // 1. PHẢI THU — COD KHAI BÁO trên mọi vận đơn có COD. Cùng một tập hợp với các bậc dưới
+        //    để cái phễu không bao giờ phình ra: đã thu không thể lớn hơn phải thu.
+        receivableAmount: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${s.codAmount} > 0), 0)`,
+        receivableCount: sql<number>`count(*) filter (where ${s.codAmount} > 0)`,
+        // Trong đó phần không còn thu được nữa vì vận đơn đã hoàn / huỷ.
+        lostAmount: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${s.codAmount} > 0 and not ${COD_COLLECTABLE}), 0)`,
+        lostCount: sql<number>`count(*) filter (where ${s.codAmount} > 0 and not ${COD_COLLECTABLE})`,
 
-        // 2. ĐVVC BÁO ĐÃ THU
-        collectedAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}) filter (where ${COLLECTED_STATUSES}), 0)`,
-        collectedCount: sql<number>`count(*) filter (where ${COLLECTED_STATUSES})`,
+        // 2. ĐÃ THU THỰC TẾ — chỉ tiền thật, không lấy COD khai báo.
+        collectedAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}), 0)`,
+        collectedCount: sql<number>`count(*) filter (where ${COLLECTED_AMOUNT} > 0)`,
 
-        // 3. CÓ BẢNG KÊ: đã ghép được vào một đợt tiền về
-        onStatementAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}) filter (where ${s.codBatchId} is not null), 0)`,
-        onStatementCount: sql<number>`count(*) filter (where ${s.codBatchId} is not null)`,
+        // 3. CÓ CHỨNG TỪ BẢNG KÊ — vận đơn nằm trên file chi tiết tải từ Viettel Post.
+        //    Không còn phụ thuộc "đợt tiền về" (số tổng nhập tay); chứng từ đứng trước bản tổng hợp.
+        onStatementAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}) filter (where ${HAS_STATEMENT}), 0)`,
+        onStatementCount: sql<number>`count(*) filter (where ${HAS_STATEMENT} and ${COLLECTED_AMOUNT} > 0)`,
 
-        // ĐÃ THU NHƯNG CHƯA CÓ CHỨNG TỪ — phần cần đối soát
-        unprovenAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}) filter (where ${COLLECTED_STATUSES} and ${s.codBatchId} is null), 0)`,
-        unprovenCount: sql<number>`count(*) filter (where ${COLLECTED_STATUSES} and ${s.codBatchId} is null)`,
+        // ĐÃ THU NHƯNG CHƯA CÓ CHỨNG TỪ — phần cần tải bảng kê về đối soát.
+        unprovenAmount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}) filter (where ${COLLECTED_AMOUNT} > 0 and not ${HAS_STATEMENT}), 0)`,
+        unprovenCount: sql<number>`count(*) filter (where ${COLLECTED_AMOUNT} > 0 and not ${HAS_STATEMENT})`,
 
-        // CHƯA THU: đã giao xong nhưng ĐVVC chưa xác nhận thu
-        pendingAmount: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${s.codStatus} = 'PENDING' and ${COD_COLLECTABLE} and ${s.codAmount} > 0), 0)`,
-        pendingCount: sql<number>`count(*) filter (where ${s.codStatus} = 'PENDING' and ${COD_COLLECTABLE} and ${s.codAmount} > 0)`,
+        // CHƯA THU: còn khả năng thu nhưng chưa về đồng nào.
+        pendingAmount: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${COD_COLLECTABLE} and ${s.codAmount} > 0 and ${COLLECTED_AMOUNT} = 0), 0)`,
+        pendingCount: sql<number>`count(*) filter (where ${COD_COLLECTABLE} and ${s.codAmount} > 0 and ${COLLECTED_AMOUNT} = 0)`,
 
         // Vận đơn đã hoàn/huỷ mà trạng thái COD vẫn treo "còn thu được" → dữ liệu mâu thuẫn
         staleOnReturned: sql<number>`count(*) filter (where not ${COD_COLLECTABLE} and ${s.codStatus} in ('PENDING','COLLECTED'))`,
@@ -86,6 +97,8 @@ export async function codReconciliation(period: Period) {
     return {
       // 1 — phải thu
       receivable: { amount: n(shipmentRow?.receivableAmount), count: n(shipmentRow?.receivableCount) },
+      /** Trong phần phải thu, phần không còn thu được vì vận đơn đã hoàn / huỷ. */
+      lost: { amount: n(shipmentRow?.lostAmount), count: n(shipmentRow?.lostCount) },
       // 2 — ĐVVC báo đã thu
       collected: { amount: collectedAmount, count: n(shipmentRow?.collectedCount) },
       // 3 — có bảng kê (truy được về chứng từ)
@@ -158,7 +171,7 @@ export async function codBatchGaps(period: Period): Promise<CodBatchGap[]> {
 /** Vận đơn ĐVVC báo đã thu nhưng chưa ghép được vào bảng kê nào — danh sách cần đối soát. */
 export async function unprovenCollectedShipments(page: number, pageSize: number, q: string) {
   const db = await getDb();
-  const conds: SQL[] = [COLLECTED_STATUSES as SQL, isNull(s.codBatchId)];
+  const conds: SQL[] = [sql`${COLLECTED_AMOUNT} > 0`, sql`${s.codStatementRef} is null`];
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;

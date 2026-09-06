@@ -7,6 +7,7 @@ import {
   BellRing,
   Factory,
   FileSpreadsheet,
+  FileUp,
   Headset,
   HeartHandshake,
   Boxes,
@@ -74,6 +75,7 @@ const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "Tài chính",
     items: [
+      { href: "/import-vtp", label: "Nhập dữ liệu Viettel Post", icon: FileUp, permission: "cod:write" },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
       { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },

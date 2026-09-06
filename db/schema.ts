@@ -599,6 +599,13 @@ export const shipments = pgTable(
     codReconciledAt: ts("cod_reconciled_at"),
     codPaidToBankAt: ts("cod_paid_to_bank_at"),
     codBatchId: text("cod_batch_id").references(() => codBatches.id, { onDelete: "set null" }),
+    /**
+     * CHỨNG TỪ GỐC: vận đơn này có mặt trên file chi tiết bảng kê tải từ Viettel Post.
+     * Đây mới là bằng chứng tiền, độc lập với việc đã ghép được vào "đợt tiền về" hay chưa —
+     * đợt là số tổng do shop nhập tay, còn file chi tiết là chứng từ thật của ĐVVC.
+     */
+    codStatementRef: text("cod_statement_ref"),
+    codStatementAt: ts("cod_statement_at"),
     receiverName: text("receiver_name").notNull().default(""),
     receiverPhone: text("receiver_phone").notNull().default(""),
     receiverAddress: text("receiver_address").notNull().default(""),
@@ -628,6 +635,7 @@ export const shipments = pgTable(
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
+    index("shipments_cod_statement_idx").on(t.codStatementRef),
     // Vận đơn CHIỀU VỀ (quy tắc 2 của ORDER_OUTCOME) được dò bằng một truy vấn con tương quan
     // chạy cho từng dòng; không có index này thì mỗi dòng quét toàn bảng shipments → O(n²).
     // Điều kiện lọc cố ý KHÔNG chứa ngưỡng nghiệp vụ (10K) để index không phải sửa khi shop đổi ngưỡng.

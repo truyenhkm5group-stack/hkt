@@ -6,7 +6,8 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { mergeVtpOrderLists, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
-import { applyStatementDetail, applyVtpOrderList, linkStatementDetailToBatch, matchStatementFileToBatch, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch, type StatementFileMatch } from "@/lib/integrations/viettelpost/statement-db";
+import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
+import { applyStatementDetail, applyVtpOrderList, applyStatementDetailRows, matchStatementFileToBatch, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch, type StatementFileMatch } from "@/lib/integrations/viettelpost/statement-db";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -159,39 +160,130 @@ export async function previewVtpStatementDetailFiles(input: unknown): Promise<Re
 }
 
 /**
- * Nhập nhiều file chi tiết cùng lúc. Chỉ gắn file nào ghép được ĐÚNG MỘT đợt theo số tiền;
- * file chưa đủ căn cứ được bỏ qua và báo lại lý do, không đoán bừa.
+ * Nhập nhiều file chi tiết cùng lúc. File chi tiết là CHỨNG TỪ GỐC nên LUÔN được ghi,
+ * kể cả khi chưa có "đợt tiền về" nào khớp số tiền — đợt chỉ là bản tổng hợp nhập tay.
+ * Nếu có đợt khớp thì gắn thêm để biết tiền đã về tài khoản theo đợt nào.
  */
-export async function importVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[]; linked: number; skipped: number }>> {
+export async function importVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[]; linked: number; withCash: number }>> {
   const { user, error } = await authorize();
   if (error) return { error };
   try {
     const parsed = readDetailFiles(input);
     const files: StatementFileMatch[] = [];
     let linked = 0;
-    let skipped = 0;
+    let withCash = 0;
     for (const file of parsed) {
       const match = await matchStatementFileToBatch(file.filename, file.rows);
-      if (!match.batchId) {
-        skipped += 1;
-        files.push(match);
-        continue;
-      }
-      const result = await linkStatementDetailToBatch(match.batchId, file.rows);
+      const result = await applyStatementDetailRows(file.rows, file.filename, match.batchId);
       linked += result.linked;
+      withCash += result.withCash;
       files.push({ ...match, matchedShipments: result.linked });
       await audit({
         userId: user.id,
         userEmail: user.email,
         action: "COD_STATEMENT_DETAIL",
         entity: "COD_BATCH",
-        entityId: match.batchId,
-        detail: { filename: file.filename, reference: match.batchReference, linked: result.linked, unmatchedCodes: match.unmatchedCodes },
+        entityId: match.batchId ?? file.filename,
+        detail: { filename: file.filename, reference: match.batchReference, linked: result.linked, withCash: result.withCash, period: [match.periodFrom, match.periodTo], unmatchedCodes: match.unmatchedCodes },
       });
     }
     revalidate();
-    return { ok: true, files, linked, skipped };
+    return { ok: true, files, linked, withCash };
   } catch (e) {
     return { error: readableError(e, "Không nhập được file") };
   }
+}
+
+export type VtpImportFileResult = {
+  filename: string;
+  kind: "ORDER_LIST" | "STATEMENT_DETAIL" | "ERROR";
+  rows: number;
+  periodFrom: string | null;
+  periodTo: string | null;
+  /** Danh sách vận đơn: số vận đơn được cập nhật. Bảng kê: số vận đơn ghi được chứng từ. */
+  applied: number;
+  withCash: number;
+  matchedBatch: string | null;
+  note: string;
+};
+
+/**
+ * MỘT CHỖ NHẬP DUY NHẤT cho cả hai loại tệp Viettel Post.
+ *
+ * Viettel Post chia nhỏ tệp theo khoảng ngày nên chủ shop luôn có nhiều tệp mỗi lần tải.
+ * ERP tự nhận loại từng tệp (danh sách vận đơn hay chi tiết bảng kê) rồi đưa vào đúng luồng,
+ * để không phải chọn tab và không nhập nhầm loại — một bên là trạng thái giao, một bên là tiền.
+ *
+ * Thứ tự xử lý cố ý: DANH SÁCH VẬN ĐƠN trước, CHI TIẾT BẢNG KÊ sau. Danh sách tạo/cập nhật
+ * vận đơn, bảng kê mới có cái để ghi tiền thực thu lên.
+ */
+export async function importVtpDataFiles(input: unknown): Promise<Result<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }>> {
+  const { user, error } = await authorize();
+  if (error) return { error };
+  let files: { filename: string; base64: string }[];
+  try {
+    files = listFilesSchema.parse(input);
+  } catch (e) {
+    return { error: readableError(e, "Không đọc được danh sách tệp") };
+  }
+
+  const detected: DetectedVtpFile[] = [];
+  const results: VtpImportFileResult[] = [];
+  for (const file of files) {
+    const buffer = Buffer.from(file.base64, "base64");
+    const isText = /\.(csv|txt|tsv)$/i.test(file.filename);
+    try {
+      detected.push(detectVtpFile(isText ? buffer.toString("utf8") : buffer, file.filename));
+    } catch (e) {
+      results.push({ filename: file.filename, kind: "ERROR", rows: 0, periodFrom: null, periodTo: null, applied: 0, withCash: 0, matchedBatch: null, note: readableError(e, "Không đọc được tệp") });
+    }
+  }
+
+  // 1) Danh sách vận đơn — gộp mọi tệp rồi ghi một lần để xử lý trùng/xung đột giữa các tệp.
+  const orderFiles = detected.filter((d) => d.kind === "ORDER_LIST");
+  let orderRows = 0;
+  if (orderFiles.length) {
+    const merged = mergeDetectedOrderLists(detected);
+    orderRows = merged.length;
+    const applied = await applyVtpOrderList(merged, user.email);
+    const dates = merged.map((r) => r.statusDate).filter(Boolean).sort();
+    for (const f of orderFiles) {
+      results.push({
+        filename: f.filename,
+        kind: "ORDER_LIST",
+        rows: f.rows.length,
+        periodFrom: dates[0] ?? null,
+        periodTo: dates[dates.length - 1] ?? null,
+        applied: applied.updated,
+        withCash: 0,
+        matchedBatch: null,
+        note: `Toàn bộ tệp danh sách gộp lại: cập nhật ${applied.updated} vận đơn, ${applied.legs} chiều hoàn, bỏ qua ${applied.stale} dòng cũ, ${applied.conflicts} xung đột cần đối chiếu`,
+      });
+    }
+    await audit({ userId: user.id, userEmail: user.email, action: "VTP_ORDER_LIST_IMPORT", entity: "SHIPMENT", detail: { files: orderFiles.map((f) => f.filename), ...applied } });
+  }
+
+  // 2) Chi tiết bảng kê — ghi tiền thực thu, luôn ghi kể cả chưa có đợt tiền về khớp.
+  let statementRows = 0;
+  for (const f of detected) {
+    if (f.kind !== "STATEMENT_DETAIL") continue;
+    statementRows += f.rows.length;
+    const match = await matchStatementFileToBatch(f.filename, f.rows);
+    const applied = await applyStatementDetailRows(f.rows, f.filename, match.batchId);
+    results.push({
+      filename: f.filename,
+      kind: "STATEMENT_DETAIL",
+      rows: f.rows.length,
+      periodFrom: match.periodFrom,
+      periodTo: match.periodTo,
+      applied: applied.linked,
+      withCash: applied.withCash,
+      matchedBatch: match.batchReference,
+      note: applied.linked === 0 ? (match.issue ?? "Không vận đơn nào trong tệp có trong ERP") : `Ghi chứng từ cho ${applied.linked} vận đơn, ${applied.withCash} vận đơn có tiền thực thu`,
+    });
+    await audit({ userId: user.id, userEmail: user.email, action: "COD_STATEMENT_DETAIL", entity: "COD_BATCH", entityId: match.batchId ?? f.filename, detail: { filename: f.filename, ...applied, period: [match.periodFrom, match.periodTo] } });
+  }
+
+  revalidate();
+  return { ok: true, files: results, orderRows, statementRows };
 }

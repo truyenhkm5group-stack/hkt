@@ -206,13 +206,15 @@ function DetailImport({ onDone }: { onDone: () => void }) {
       if (!sourceFiles.length) return;
       const result = await importVtpStatementDetailFiles(sourceFiles);
       if ("error" in result) { toast.error(result.error); return; }
-      toast.success(`Đã gắn ${result.linked} vận đơn vào đợt tiền về`);
-      if (result.skipped) toast.warning(`${result.skipped} tệp chưa ghép được đợt — xem lý do trong bảng`);
+      toast.success(`Đã ghi chứng từ cho ${result.linked} vận đơn · ${result.withCash} vận đơn có tiền thực thu`);
+      const noBatch = result.files.filter((f) => !f.batchId).length;
       setFiles(result.files);
-      if (!result.skipped) onDone();
+      if (noBatch) toast.warning(`${noBatch} tệp chưa khớp đợt tiền về — chứng từ vẫn được ghi, xem lý do trong bảng`);
+      else onDone();
     });
 
   const ready = (files ?? []).filter((f) => f.batchId).length;
+  const total = (files ?? []).length;
 
   return (
     <div className="space-y-3 pt-2">
@@ -227,7 +229,7 @@ function DetailImport({ onDone }: { onDone: () => void }) {
       {files ? (
         <>
           <div className="flex flex-wrap gap-2 text-sm">
-            <Badge variant="secondary">{ready}/{files.length} tệp ghép được đợt</Badge>
+            <Badge variant="secondary">{files.length} tệp · {ready} khớp đợt tiền về</Badge>
             <Badge variant="outline">Thu về {formatVND(files.reduce((a, f) => a + f.netAmount, 0))}</Badge>
             <Badge variant="outline">{files.reduce((a, f) => a + f.matchedShipments, 0)} vận đơn có trong ERP</Badge>
           </div>
@@ -267,8 +269,8 @@ function DetailImport({ onDone }: { onDone: () => void }) {
             </Table>
           </div>
           <div className="flex justify-end">
-            <Button onClick={submit} disabled={pending || !ready}>
-              Gắn {ready} tệp vào đợt tiền về
+            <Button onClick={submit} disabled={pending || !total}>
+              Nhập chứng từ {total} tệp{ready ? ` (${ready} tệp khớp đợt tiền về)` : ""}
             </Button>
           </div>
         </>

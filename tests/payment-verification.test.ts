@@ -41,7 +41,7 @@ async function testAdditiveMigration() {
       // Cột do P0.1/P0.2 thêm vào bảng cũ: phải là NULL cho dữ liệu legacy, nên loại khỏi phép so sánh nguyên trạng.
       const ADDED: Record<string, string[]> = {
         shipment_events: ["normalized_stage", "leg_type", "verification_status", "source_reference", "verified_at", "verified_by"],
-        shipments: ["return_received_at", "return_received_by", "return_received_note"],
+        shipments: ["return_received_at", "return_received_by", "return_received_note", "cod_statement_ref", "cod_statement_at"],
       };
       const added = ADDED[table];
       const expr = added ? `to_jsonb(t) - ARRAY[${added.map((c) => `'${c}'`).join(",")}]` : "to_jsonb(t)";
@@ -51,7 +51,7 @@ async function testAdditiveMigration() {
     const { rows: events } = await local.query<Record<string, unknown>>("SELECT normalized_stage, leg_type, verification_status, source_reference, verified_at, verified_by FROM shipment_events");
     assert.ok(Object.values(events[0]).every((v) => v === null));
     // Hàng hoàn legacy KHÔNG được tự coi là đã về kho: migration không backfill return_received_at.
-    const { rows: legacyShipments } = await local.query<Record<string, unknown>>("SELECT return_received_at, return_received_by, return_received_note FROM shipments");
+    const { rows: legacyShipments } = await local.query<Record<string, unknown>>("SELECT return_received_at, return_received_by, return_received_note, cod_statement_ref, cod_statement_at FROM shipments");
     assert.ok(legacyShipments.every((r) => Object.values(r).every((v) => v === null)), "Không tự đánh dấu hàng hoàn đã về kho");
     for (const table of ["payment_transactions", "payment_evidence", "payment_reviews"]) {
       assert.equal((await local.query(`SELECT * FROM ${table}`)).rows.length, 0, "Không backfill");

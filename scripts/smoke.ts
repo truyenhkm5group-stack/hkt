@@ -19,6 +19,7 @@ const ROUTES = [
   "/",
   "/orders",
   "/shipments",
+  "/import-vtp",
   "/cod",
   "/cod?recon=unproven",
   "/cod?recon=stale",
