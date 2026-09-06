@@ -113,8 +113,37 @@ export async function listShipments(params: ListParams) {
     db.select({ total: count() }).from(schema.shipments).where(where),
   ]);
 
+  // Doanh thu bị NHẬP LẠI sau mốc giao ⇒ khách chỉ trả tiền xem hàng ⇒ đơn hoàn.
+  // Cùng điều kiện với REVENUE_EDITED_AFTER_DELIVERY trong lib/queries/return-rate.ts; chỉ hỏi
+  // các vận đơn của trang đang xem nên không làm chậm danh sách.
+  const deliveredIds = rows.filter((r) => r.stage === "DELIVERED").map((r) => r.id);
+  const editedAfterDelivery = new Set(
+    deliveredIds.length
+      ? (
+          await db
+            .select({ id: schema.shipmentEvents.shipmentId })
+            .from(schema.shipmentEvents)
+            .innerJoin(schema.shipments, eq(schema.shipments.id, schema.shipmentEvents.shipmentId))
+            .where(
+              and(
+                inArray(schema.shipmentEvents.shipmentId, deliveredIds),
+                ilike(schema.shipmentEvents.statusName, "Nhập doanh thu%"),
+                sql`${schema.shipmentEvents.occurredAt} >= coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate}) - interval '2 minute'`,
+              ),
+            )
+        ).map((r) => r.id)
+      : [],
+  );
+
   // Kết quả thật của vận đơn theo doanh thu COD: vận đơn chiều về / khách trả hàng vẫn được VTP ghi "Giao thành công"
-  const withOutcome = rows.map((r) => ({ ...r, outcome: shipmentOutcome(r, (r.order?.prepaid ?? 0) + (r.order?.transferMoney ?? 0)) }));
+  const withOutcome = rows.map((r) => {
+    const revenueEditedAfterDelivery = editedAfterDelivery.has(r.id);
+    return {
+      ...r,
+      revenueEditedAfterDelivery,
+      outcome: shipmentOutcome({ ...r, revenueEditedAfterDelivery }, (r.order?.prepaid ?? 0) + (r.order?.transferMoney ?? 0)),
+    };
+  });
   return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 

@@ -1,0 +1,2 @@
+-- IDEMPOTENT: chi them index rieng phan cho quy tac "sua doanh thu sau khi giao".
+CREATE INDEX IF NOT EXISTS "shipment_events_revenue_edit_idx" ON "shipment_events" USING btree ("shipment_id","occurred_at") WHERE "shipment_events"."status_name" like 'Nhập doanh thu%';

@@ -74,18 +74,27 @@ export function rateTone(rate: number | null) {
  *  - đang hoàn / đã hoàn → hoàn.
  */
 export function shipmentOutcome(
-  s: { stage: string; codAmount?: number | null; codCollected?: number | null; codStatementRef?: string | null; codStatus?: string | null },
+  s: {
+    stage: string;
+    codAmount?: number | null;
+    codCollected?: number | null;
+    codStatementRef?: string | null;
+    revenueEditedAfterDelivery?: boolean | null;
+  },
   prepaid = 0,
 ): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
   if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
   if (s.stage !== "DELIVERED") return null;
-  // TIỀN THỰC THU về tài khoản, KHÔNG lấy COD khai báo (cod_amount) làm số đã thu:
-  // vận đơn "giao thành công" mà khách chỉ trả tiền ship thực chất là đơn hoàn.
-  // Cùng quy tắc với ORDER_OUTCOME: có bằng chứng thì dùng tiền thực thu,
-  // chưa có thì TẠM dùng COD khai báo (tiền có thể về ở bảng kê kỳ sau).
-  // "Không thu hộ" = ĐVVC không thu tiền cho vận đơn này ⇒ COD khai báo sẽ không bao giờ về.
-  const hasEvidence = Number(s.codCollected) > 0 || Boolean(s.codStatementRef) || s.codStatus === "NOT_APPLICABLE";
-  const money = (hasEvidence ? Number(s.codCollected) || 0 : Number(s.codAmount) || 0) + prepaid;
+  // Giữ ĐÚNG thứ tự của ORDER_OUTCOME trong lib/queries/return-rate.ts.
+  const collected = Number(s.codCollected) || 0;
+  // 1. Tiền thật đã về thì thắng mọi suy luận khác.
+  if (collected + prepaid > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
+  // 2. Doanh thu bị nhập lại SAU khi giao ⇒ khách chỉ trả tiền xem hàng ⇒ đơn hoàn.
+  if (s.revenueEditedAfterDelivery) return "RETURNED";
+  // 3. Chưa có chứng từ tiền thì TẠM dùng COD khai báo — tiền có thể về ở bảng kê kỳ sau,
+  //    không được coi "chưa có số" là "thu được 0đ". Có chứng từ thì chỉ dùng tiền thực thu.
+  const hasEvidence = collected > 0 || Boolean(s.codStatementRef);
+  const money = (hasEvidence ? collected : Number(s.codAmount) || 0) + prepaid;
   if (money > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
   return money < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
 }

@@ -907,10 +907,11 @@ async function main() {
       { ...base, id: "order-declared-only", amount: 0, current: "DELIVERED" },
       // Tình huống chủ shop chỉ ra: VTP báo giao thành công nhưng khách chỉ trả tiền ship.
       { ...base, id: "chi-tra-tien-ship", collected: 25_000, current: "RETURNED", proposed: "RETURNED" },
-      // "Không thu hộ": ĐVVC không thu tiền cho vận đơn này nên COD khai báo không bao giờ về.
-      // Dù ĐVVC ghi "phát thành công" và COD khai báo 849K thì thực chất vẫn là đơn hoàn.
-      { ...base, id: "khong-thu-ho", codStatus: "NOT_APPLICABLE", amount: 849_000, orderCod: 849_000, current: "RETURNED", proposed: "RETURNED" },
-      // Nhưng khách đã chuyển khoản trước thì "không thu hộ" là bình thường và đơn vẫn thành công.
+      // "Không thu hộ" KHÔNG phải bằng chứng đơn hoàn: dấu này có ở cả đơn hoàn lẫn đơn giao
+      // thành công chưa tới kỳ bảng kê. Không có bước sửa doanh thu sau khi giao ⇒ giao thành
+      // công, tạm tính theo COD khai báo cho tới khi bảng kê về (ca thật PKE1508909090).
+      { ...base, id: "khong-thu-ho", codStatus: "NOT_APPLICABLE", amount: 849_000, orderCod: 849_000, current: "DELIVERED", proposed: "DELIVERED" },
+      // Khách đã chuyển khoản trước thì "không thu hộ" là bình thường và đơn vẫn thành công.
       { ...base, id: "khong-thu-ho-tra-truoc", codStatus: "NOT_APPLICABLE", amount: 0, orderCod: 0, prepaid: 499_000, current: "DELIVERED", proposed: "DELIVERED" },
       { ...base, id: "collected-30000", collected: 30_000, current: "RETURNED", proposed: "RETURNED" },
       { ...base, id: "collected-50000", collected: 50_000, current: "RETURNED_BY_RULE", proposed: "RETURNED_BY_RULE" },
@@ -931,6 +932,28 @@ async function main() {
         current: "IN_TRANSIT", proposed: "NOT_DELIVERED",
       })),
     ];
+    // Đối chứng thật: doanh thu bị sửa NGAY SAU khi giao = đơn hoàn; sửa lúc lấy hàng thì không.
+    {
+      const mk = async (id: string, editOffsetMs: number | null) => {
+        const giao = new Date("2026-09-06T09:26:34Z");
+        await db.insert(schema.orders).values({ id, stage: "DELIVERED", cod: 849_000, insertedAt: now, status: 0 });
+        const [sp] = await db.insert(schema.shipments).values({ orderId: id, stage: "DELIVERED", codStatus: "NOT_APPLICABLE",
+          codAmount: 849_000, codCollected: 0, deliveredAt: giao, vtpStatusDate: giao, vtpOrderNumber: `SUA-${id}` }).returning({ id: schema.shipments.id });
+        await db.insert(schema.shipmentEvents).values({ shipmentId: sp.id, source: "VTP_WEBHOOK", status: "501",
+          statusName: "Thành công - Phát thành công", occurredAt: giao });
+        if (editOffsetMs !== null) {
+          await db.insert(schema.shipmentEvents).values({ shipmentId: sp.id, source: "PANCAKE", status: "edit",
+            statusName: "Nhập doanh thu", occurredAt: new Date(giao.getTime() + editOffsetMs) });
+        }
+        const [r] = await db.select({ outcome: ORDER_OUTCOME }).from(schema.orders)
+          .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id)).where(eq(schema.orders.id, id));
+        return r.outcome;
+      };
+      assert.equal(await mk("sua-sau-giao", 32_000), "RETURNED", "sửa doanh thu 32 giây sau khi giao → đơn hoàn (ca PKE1508909058)");
+      assert.equal(await mk("sua-luc-lay-hang", -4 * 86_400_000), "DELIVERED", "chỉ sửa lúc lấy hàng → giao thành công (ca PKE1508909090)");
+      assert.equal(await mk("khong-sua-dt", null), "DELIVERED", "không có bước sửa doanh thu → giao thành công");
+    }
+
     const differences: string[] = [];
     for (const c of cases) {
       const id = `p0-outcome-${c.id}`;

@@ -48,10 +48,12 @@ export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
  * ĐÃ CÓ BẰNG CHỨNG TIỀN cho vận đơn này hay chưa: có số thực thu, hoặc vận đơn đã xuất hiện
  * trên chi tiết bảng kê tải từ Viettel Post (kể cả bảng kê ghi thu 0 — đó vẫn là bằng chứng
  * KHÔNG thu được đồng nào).
+ *
+ * CỐ Ý KHÔNG coi cod_status = 'NOT_APPLICABLE' ("Không thu hộ") là bằng chứng: dấu này có ở CẢ
+ * đơn hoàn (PKE1508909058) lẫn đơn giao thành công chưa tới kỳ bảng kê (PKE1508909090), nên nó
+ * không phân biệt được gì. Dấu hiệu phân biệt thật là REVENUE_EDITED_AFTER_DELIVERY bên dưới.
  */
-const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0
-  or ${s.codStatementRef} is not null
-  or ${s.codStatus} = 'NOT_APPLICABLE')`;
+const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0 or ${s.codStatementRef} is not null)`;
 
 /**
  * SỐ TIỀN DÙNG ĐỂ KẾT LUẬN.
@@ -69,6 +71,28 @@ const OUTCOME_MONEY = sql`(case when ${HAS_CASH_EVIDENCE}
   else greatest(coalesce(${s.codAmount}, 0), coalesce(${o.cod}, 0)) end + ${PREPAID})`;
 
 /**
+ * DOANH THU BỊ SỬA SAU KHI ĐÃ GIAO — dấu hiệu đơn thực tế HOÀN.
+ *
+ * Cơ chế thật ngoài hiện trường (chủ shop mô tả): khách không muốn nhận hàng, chỉ trả tiền ship
+ * để được xem hàng (<100K), nên bưu tá phải NHẬP LẠI doanh thu bằng đúng số khách đưa — số đó
+ * là tiền xem hàng, không phải doanh thu của đơn. Khách trả đủ COD thì bưu tá không phải sửa gì.
+ * Vì vậy: có bước "Nhập doanh thu" SAU mốc phát thành công ⇒ đơn hoàn, dù ĐVVC vẫn ghi
+ * "Thành công - Phát thành công" và COD khai báo vẫn lớn.
+ *
+ * Bước "Nhập doanh thu" lúc LẤY HÀNG là bình thường (bưu tá khai doanh thu của bưu gửi) nên chỉ
+ * xét các bước xảy ra từ mốc giao trở đi. Nới 2 phút vì hai mốc lệch nhau vài chục giây.
+ *
+ * Đối chứng thật: PKE1508909058 giao 09:26:34 rồi sửa doanh thu 09:27:06 → đơn hoàn;
+ * PKE1508909090 chỉ sửa lúc lấy hàng (trước khi giao 4 ngày) → giao thành công.
+ */
+const REVENUE_EDITED_AFTER_DELIVERY = sql`exists (
+  select 1 from shipment_events ev
+  where ev.shipment_id = ${s.id}
+    and ev.status_name like 'Nhập doanh thu%'
+    and ev.occurred_at >= coalesce(${s.deliveredAt}, ${s.vtpStatusDate}) - interval '2 minute'
+)`;
+
+/**
  * Đơn đang được kết luận bằng số TẠM TÍNH (chưa có chứng từ tiền). Dùng để hiển thị riêng,
  * vì con số của nhóm này còn thay đổi khi bảng kê kỳ sau về.
  */
@@ -78,16 +102,20 @@ export const IS_PROVISIONAL = sql`(${s.id} is not null and ${s.stage} = 'DELIVER
  * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo.
  *
  *  1. đang/đã hoàn → HOÀN, dù đã từng thu tiền;
- *  2. tiền > 100K → GIAO THÀNH CÔNG;
- *  3. đã giao mà tiền < 50K → HOÀN (khách chỉ trả phí, hoặc bảng kê xác nhận không thu được);
- *  4. đã giao mà tiền 50K–100K → KHÔNG THÀNH CÔNG;
- *  5. đang đi → ĐANG GIAO;
- *  6. chưa có vận đơn thì mới xét trạng thái Pancake, cũng theo đúng ngưỡng tiền trên.
+ *  2. TIỀN THẬT đã về > 100K → GIAO THÀNH CÔNG (bằng chứng tiền thắng mọi suy luận khác);
+ *  3. đã giao mà doanh thu bị sửa SAU khi giao → HOÀN, dù COD khai báo lớn;
+ *  4. tiền (thật, hoặc tạm theo COD khai báo khi bảng kê chưa về) > 100K → GIAO THÀNH CÔNG;
+ *  5. đã giao mà tiền < 50K → HOÀN (khách chỉ trả phí, hoặc bảng kê xác nhận không thu được);
+ *  6. đã giao mà tiền 50K–100K → KHÔNG THÀNH CÔNG;
+ *  7. đang đi → ĐANG GIAO;
+ *  8. chưa có vận đơn thì mới xét trạng thái Pancake, cũng theo đúng ngưỡng tiền trên.
  *
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${s.stage} = 'DELIVERED' and ${REVENUE_EDITED_AFTER_DELIVERY} then 'RETURNED'
   when ${OUTCOME_MONEY} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
