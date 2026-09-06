@@ -24,8 +24,11 @@ export type OrderKpis = {
   successOrders: number;
   successRevenue: number;
   failedOrders: number;
+  returnedOrders: number;
   activeOrders: number;
   aov: number;
+  /** GTC (%) = giao TC ÷ (giao TC + hoàn). null khi chưa có đơn nào kết thúc — hiển thị "—", không phải 0%. */
+  successRate: number | null;
 };
 
 async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
@@ -41,6 +44,9 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
       successOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
       successRevenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
       failedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('CANCELLED','RETURNED','RETURNED_BY_RULE'))`,
+      // Riêng đơn HOÀN (không gồm huỷ) — mẫu số của tỷ lệ giao thành công, phải cùng định nghĩa
+      // với báo cáo Tỷ lệ giao thành công: GTC = giao TC ÷ (giao TC + hoàn), KHÔNG chia cho tổng đơn.
+      returnedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`,
       activeOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED'))`,
     })
     .from(schema.orders)
@@ -53,10 +59,14 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
     successOrders: Number(row?.successOrders ?? 0),
     successRevenue: Number(row?.successRevenue ?? 0),
     failedOrders: Number(row?.failedOrders ?? 0),
+    returnedOrders: Number(row?.returnedOrders ?? 0),
     activeOrders: Number(row?.activeOrders ?? 0),
     aov: 0,
+    successRate: null,
   };
   kpi.aov = kpi.orders ? Math.round(kpi.revenue / kpi.orders) : 0;
+  const finished = kpi.successOrders + kpi.returnedOrders;
+  kpi.successRate = finished ? Math.round((kpi.successOrders / finished) * 1000) / 10 : null;
   return kpi;
 }
 

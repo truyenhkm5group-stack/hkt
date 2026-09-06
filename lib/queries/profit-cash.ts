@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { COD_COLLECTABLE, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const o = schema.orders;
@@ -71,9 +71,11 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       .from(schema.expenses)
       .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, between(schema.expenses.occurredAt, period.from, period.to))),
     db
+      // COD_COLLECTABLE: vận đơn đã hoàn / huỷ thì tiền không bao giờ về, dù trạng thái COD chưa cập nhật.
+      // Trang Đối soát COD đã lọc điều kiện này; trước đây báo cáo dòng tiền thì không nên hai trang lệch nhau.
       .select({ amount: sql<number>`coalesce(sum(${s.codAmount}), 0)`, count: sql<number>`count(*)` })
       .from(s)
-      .where(inArray(s.codStatus, ["COLLECTED", "RECONCILED"])),
+      .where(and(inArray(s.codStatus, ["COLLECTED", "RECONCILED"]), COD_COLLECTABLE)),
     db
       .select({ amount: sql<number>`coalesce(sum(${s.codAmount}), 0)`, count: sql<number>`count(*)` })
       .from(s)

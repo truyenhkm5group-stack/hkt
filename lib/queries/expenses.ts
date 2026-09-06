@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, s
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import type { ExpenseCategory } from "@/db/schema";
+import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type ListParams, type Period } from "@/lib/search-params";
@@ -205,8 +206,8 @@ export async function adSummary(period: Period, filters?: AdFilters) {
   return { ...toKpi(current, erpNow), previous: prev.from ? toKpi(previous, erpPrev) : null };
 }
 
-/** Các trạng thái Pancake được coi là "đã xác nhận" (không tính đơn mới, chờ xử lý, huỷ, xoá) */
-export const CONFIRMED_STAGES = ["CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"] as const;
+/** Phạm vi đơn dùng chung — định nghĩa gốc ở lib/constants/pancake.ts, giữ export này cho các import cũ. */
+export { CONFIRMED_STAGES };
 
 /** Đơn Pancake đã xác nhận trong kỳ (theo ngày lên đơn): số đơn, doanh số; đơn có ad_id; giao thành công */
 export async function adOrdersFromErp(from: Date | null, to: Date | null) {

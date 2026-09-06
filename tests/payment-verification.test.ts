@@ -56,7 +56,21 @@ async function testAdditiveMigration() {
     for (const table of ["payment_transactions", "payment_evidence", "payment_reviews"]) {
       assert.equal((await local.query(`SELECT * FROM ${table}`)).rows.length, 0, "Không backfill");
     }
-    console.log("✓ P0.1 migration: giữ nguyên toàn bộ bảng legacy, trường xác minh cũ NULL, ledger rỗng");
+
+    // Chạy LẠI toàn bộ migration mới: bắt buộc phải thành công.
+    // docker-entrypoint.sh chạy `drizzle-kit migrate` với `set -e`; nếu một migration lỗi giữa chừng
+    // thì journal không được ghi, lần khởi động sau chạy lại từ đầu — không idempotent nghĩa là
+    // container restart vô hạn và production sập, không bao giờ tự phục hồi.
+    for (const entry of journal.entries.filter((e) => e.idx > 20)) {
+      await local.exec(readFileSync(`drizzle/${entry.tag}.sql`, "utf8"));
+    }
+    const afterRerun = (await local.query("SELECT count(*)::int AS n FROM shipments")).rows as { n: number }[];
+    assert.equal(afterRerun[0].n, 1, "chạy lại migration không nhân bản hay xoá dữ liệu");
+    assert.equal((await local.query("SELECT * FROM payment_transactions")).rows.length, 0, "chạy lại vẫn không backfill");
+    // Trigger vẫn còn hiệu lực sau khi chạy lại (DROP TRIGGER IF EXISTS + CREATE lại).
+    const trg = (await local.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname = 'payment_transactions_guard'")).rows as { n: number }[];
+    assert.equal(trg[0].n, 1, "trigger còn đúng một bản sau khi chạy lại migration");
+    console.log("✓ P0.1 migration: giữ nguyên bảng legacy, ledger rỗng, và chạy lại được (idempotent)");
   } finally { await local.close(); }
 }
 

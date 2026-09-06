@@ -53,6 +53,14 @@ export const ORDER_STAGE_ORDER: OrderStage[] = [
   "DELETED",
 ];
 
+/**
+ * PHẠM VI ĐƠN DÙNG CHUNG cho mọi KPI quản trị: các trạng thái Pancake đã được chốt
+ * (bỏ đơn Mới chưa xác nhận, đơn huỷ, đơn xoá). Tổng quan, Báo cáo lợi nhuận, Lương,
+ * Quảng cáo và Chất lượng dữ liệu phải dùng CHUNG danh sách này, nếu không thì cùng một
+ * kỳ sẽ ra số đơn khác nhau ở mỗi màn hình.
+ */
+export const CONFIRMED_STAGES = ["CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"] as const;
+
 /** Các giai đoạn tính là "đơn thành công" (đã giao/đã thu tiền) */
 export const SUCCESS_STAGES: OrderStage[] = ["DELIVERED", "PAID"];
 /** Các giai đoạn tính là "đơn thất bại" */

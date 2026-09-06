@@ -71,8 +71,13 @@ jobs:
         env:
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
         run: |
-          for i in $(seq 1 12); do
+          for i in $(seq 1 18); do
             if curl -fsS -m 15 "https://$ERP_DOMAIN/api/health" | grep -q '"ok":true'; then echo "✓ https://$ERP_DOMAIN đang chạy"; exit 0; fi
             sleep 10
           done
-          echo "::warning::https://$ERP_DOMAIN chưa phản hồi — thường do DNS chưa trỏ về IP VPS hoặc chứng chỉ đang được cấp. ERP vẫn chạy trên VPS; kiểm tra lại sau vài phút."
+          # Deploy KHÔNG được báo thành công khi ERP không phản hồi: lần trước container app
+          # restart vô hạn vì migration lỗi, workflow chỉ cảnh báo nên coi như deploy đã xong
+          # và không ai biết production đang sập. Fail ở đây để lỗi hiện ra ngay.
+          echo "::error::https://$ERP_DOMAIN không phản hồi /api/health sau 3 phút — ERP đang lỗi."
+          echo "Xem log để biết nguyên nhân: Actions → Vận hành ERP trên VPS → action = logs"
+          exit 1

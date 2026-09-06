@@ -169,6 +169,13 @@
       "when": 1788691816143,
       "tag": "0023_return_received",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788694812316,
+      "tag": "0024_return_leg_index",
+      "breakpoints": true
     }
   ]
 }

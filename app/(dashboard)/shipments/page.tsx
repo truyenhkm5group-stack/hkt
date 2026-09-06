@@ -38,7 +38,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           { key: "final", label: "Theo dõi", options: facets.finals, single: true },
           { key: "linked", label: "Nguồn đơn", options: facets.linked, single: true },
         ]}
-        resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} giao thành công (COD thực > 100K) · ${formatNumber(summary.returning)} hoàn / không thu được tiền`}
+        resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} vận đơn giao thành công · ${formatNumber(summary.returning)} vận đơn hoàn / không thu được tiền — đếm theo VẬN ĐƠN nên có thể thấp hơn số ĐƠN ở Tổng quan (đơn chưa đẩy sang ĐVVC không có vận đơn)`}
       />
       <ShipmentsTable rows={rows} pageCount={pageCount} total={total} />
     </div>

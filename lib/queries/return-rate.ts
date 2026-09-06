@@ -57,6 +57,16 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
  *  5. chưa có trạng thái vận đơn mới xét theo Pancake: huỷ / hoàn / đã giao / đã gửi / chưa gửi.
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
+/**
+ * PHẠM VI ĐƠN VÀO BÁO CÁO: đơn đã xác nhận trên Pancake, cộng đơn huỷ/xoá để các trang còn
+ * đếm được số đơn huỷ. Chỉ loại đơn "Mới" chưa chốt — đơn chưa xác nhận thì chưa phải nghiệp vụ bán hàng.
+ *
+ * Vì sao cần: Tổng quan / Lợi nhuận / Lương / Quảng cáo lọc theo CONFIRMED_STAGES, còn trang
+ * Tỷ lệ giao thành công trước đây không lọc gì cả, nên cùng một kỳ hai trang ra hai tổng đơn khác nhau.
+ * ORDER_OUTCOME xếp đơn huỷ vào 'CANCELLED' nên việc giữ chúng KHÔNG ảnh hưởng giao thành công / hoàn.
+ */
+export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
+
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${COD_COLLECTED} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
@@ -206,7 +216,7 @@ export type ReturnRateRow = {
 export { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 
 function baseWhere(period: Period, q: string): SQL | undefined {
-  const conds: SQL[] = [eq(i.isBonus, false)];
+  const conds: SQL[] = [eq(i.isBonus, false), REPORTABLE_ORDER];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
   if (period.to) conds.push(lte(o.insertedAt, period.to));
   const term = q.trim();
@@ -329,11 +339,15 @@ export async function failedToReturnRate(): Promise<{ rate: number; sample: numb
     const db = await getDb();
     const [row] = await db
       .select({
-        returned: sql<number>`count(*) filter (where sh.stage = 'RETURNED')`,
-        delivered: sql<number>`count(*) filter (where sh.stage = 'DELIVERED')`,
+        // Theo DOANH THU chứ không theo trạng thái: Viettel Post ghi "giao thành công" cho cả
+        // chiều hoàn, nên đếm bằng stage thô sẽ làm tỷ lệ "giao thất bại → hoàn" thấp giả tạo
+        // và khiến báo cáo lợi nhuận / kế hoạch sản xuất lạc quan quá mức.
+        returned: sql<number>`count(*) filter (where ${SHIPMENT_RETURNED})`,
+        delivered: sql<number>`count(*) filter (where ${SHIPMENT_DELIVERED})`,
       })
       .from(sql`(select distinct e.shipment_id from shipment_events e where e.occurred_at >= now() - interval '180 days' and (e.status in ('505','506','507','510') or e.status_name ilike '%thất bại%' or e.status_name ilike '%hẹn%' or e.status_name ilike '%không liên lạc%')) f`)
-      .innerJoin(sql`shipments sh`, sql`sh.id = f.shipment_id`);
+      .innerJoin(s, sql`${s.id} = f.shipment_id`)
+      .leftJoin(o, eq(o.id, s.orderId));
     const returned = Number(row?.returned ?? 0);
     const delivered = Number(row?.delivered ?? 0);
     const sample = returned + delivered;
@@ -344,7 +358,9 @@ export async function failedToReturnRate(): Promise<{ rate: number; sample: numb
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
 export async function getReturnRateSummary(period: Period, q: string): Promise<ReturnRateSummary> {
   const db = await getDb();
-  const conds: SQL[] = [];
+  // Phạm vi đơn dùng chung — nếu thiếu, trang Tỷ lệ giao thành công sẽ đếm cả đơn "Mới"
+  // và ra tổng đơn khác Tổng quan trong cùng một kỳ.
+  const conds: SQL[] = [REPORTABLE_ORDER];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
   if (period.to) conds.push(lte(o.insertedAt, period.to));
   const term = q.trim();
@@ -416,7 +432,7 @@ export type VariantOrderRow = {
 /** Danh sách đơn của một mẫu mã trong kỳ kèm kết quả, để đối chiếu (tối đa 300 đơn, hoàn xếp trước) */
 export async function listOrdersForVariant(key: string, period: Period): Promise<VariantOrderRow[]> {
   const db = await getDb();
-  const conds: SQL[] = [eq(VARIANT_KEY, key), eq(i.isBonus, false)];
+  const conds: SQL[] = [eq(VARIANT_KEY, key), eq(i.isBonus, false), REPORTABLE_ORDER];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
   if (period.to) conds.push(lte(o.insertedAt, period.to));
   const rows = await db
@@ -454,7 +470,25 @@ export async function listOrdersForVariant(key: string, period: Period): Promise
 
 /** Doanh thu COD của một vận đơn: ưu tiên tiền thực thu, chưa có thì tiền thu hộ khai trên vận đơn */
 export const SHIPMENT_COD = sql`coalesce(nullif(${s.codCollected}, 0), ${s.codAmount}, 0)`;
-/** Vận đơn GIAO THÀNH CÔNG THẬT = đã giao và doanh thu COD > 100K (hoặc khách đã chuyển khoản trước > 100K) */
-export const SHIPMENT_DELIVERED = sql`(${s.stage} = 'DELIVERED' and (${SHIPMENT_COD} > ${MAX_COD} or ${PREPAID} > ${MAX_COD}))`;
-/** Vận đơn KHÔNG THÀNH CÔNG = đang hoàn / đã hoàn, hoặc "giao thành công" nhưng doanh thu ≤ 100K (gồm cả vận đơn chiều về COD 0) */
-export const SHIPMENT_RETURNED = sql`(${s.stage} in ('RETURNING','RETURNED') or (${s.stage} = 'DELIVERED' and not (${SHIPMENT_COD} > ${MAX_COD} or ${PREPAID} > ${MAX_COD})))`;
+
+/**
+ * Kết quả vận đơn = ĐÚNG một định nghĩa với ORDER_OUTCOME, không phải bản rút gọn riêng.
+ *
+ * Trước đây hai chỗ này tự tính (`stage = 'DELIVERED' and COD > 100K`) nên trang Vận đơn
+ * ĐẾM THIẾU so với Tổng quan: vận đơn đã thực thu > 100K theo bảng kê nhưng trạng thái VTP
+ * chưa kịp cập nhật thì Tổng quan tính là giao thành công còn trang Vận đơn thì không.
+ * Chúng cũng bỏ qua quy tắc cước < 10K và quy tắc vận đơn chiều về.
+ *
+ * ORDER_OUTCOME chạy được ở grain vận đơn: mọi tham chiếu tới `orders` đều qua coalesce,
+ * nên vận đơn chưa ghép đơn (order NULL) vẫn cho kết quả đúng theo dữ liệu của chính nó.
+ * Yêu cầu FROM shipments LEFT JOIN orders.
+ */
+export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME} = 'DELIVERED')`;
+export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`;
+
+/**
+ * Vận đơn CÒN TIỀN COD ĐỂ THU. Vận đơn đã hoàn / huỷ thì khoản COD khai báo không bao giờ về nữa,
+ * dù trạng thái COD chưa được cập nhật. Trước đây chỉ trang Đối soát COD lọc điều kiện này còn
+ * Báo cáo dòng tiền thì không, nên hai trang báo "COD đã thu chờ về" khác nhau.
+ */
+export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNED', 'CANCELLED'))`;

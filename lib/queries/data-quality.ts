@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gte, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import type { DqIssue, VerifiedOutcome } from "@/lib/constants/data-quality";
+import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
 import {
   HAS_CASH_PROOF,
@@ -23,8 +24,13 @@ const oi = schema.orderItems;
 const DECLARED_COD = sql<number>`coalesce(nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
 const DECLARED_REVENUE = sql<number>`coalesce(${o.totalPriceAfterDiscount}, 0)`;
 
+/**
+ * Phạm vi đơn: dùng CHUNG `CONFIRMED_STAGES` với Tổng quan / Báo cáo lợi nhuận / Lương / Quảng cáo.
+ * Nếu trang này đếm cả đơn "Mới" chưa xác nhận thì cùng một kỳ sẽ ra tổng đơn khác Tổng quan,
+ * và bảng "Ảnh hưởng đến quyết định" sẽ so hai phạm vi khác nhau — vô nghĩa.
+ */
 function periodWhere(period: Period): SQL[] {
-  const conds: SQL[] = [];
+  const conds: SQL[] = [inArray(o.stage, [...CONFIRMED_STAGES])];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
   if (period.to) conds.push(lte(o.insertedAt, period.to));
   return conds;

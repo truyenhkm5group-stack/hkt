@@ -3,13 +3,15 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import type { CodStatus } from "@/db/schema";
 import { codStatusesFromFilter } from "@/lib/constants/cod";
+import { COD_COLLECTABLE } from "@/lib/queries/return-rate";
 import { orderByNullsLast, shipmentSearchCondition } from "@/lib/queries/shipments";
 import type { ListParams, Period } from "@/lib/search-params";
 
 export const COD_SORTABLE = ["deliveredAt", "codAmount", "codCollected", "codPaidToBankAt", "createdAt"];
 
 /** Vận đơn chưa hoàn / huỷ (chỉ các vận đơn này mới còn tiền COD để thu) */
-const NOT_RETURNED = sql`${schema.shipments.stage} not in ('RETURNED', 'CANCELLED')`;
+/** Dùng chung với Báo cáo dòng tiền — định nghĩa gốc ở lib/queries/return-rate.ts */
+const NOT_RETURNED = COD_COLLECTABLE;
 
 /** Cột ngày mà bộ lọc kỳ áp dụng, tuỳ tab đang xem */
 export function codPeriodColumn(statuses: CodStatus[] | "all"): { column: AnyPgColumn; label: string } {

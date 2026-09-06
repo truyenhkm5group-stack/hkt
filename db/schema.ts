@@ -628,6 +628,10 @@ export const shipments = pgTable(
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
+    // Vận đơn CHIỀU VỀ (quy tắc 2 của ORDER_OUTCOME) được dò bằng một truy vấn con tương quan
+    // chạy cho từng dòng; không có index này thì mỗi dòng quét toàn bảng shipments → O(n²).
+    // Điều kiện lọc cố ý KHÔNG chứa ngưỡng nghiệp vụ (10K) để index không phải sửa khi shop đổi ngưỡng.
+    index("shipments_return_leg_idx").on(t.orderReference, t.vtpOrderNumber).where(sql`${t.stage} = 'DELIVERED' and ${t.codAmount} = 0`),
   ],
 );
 
