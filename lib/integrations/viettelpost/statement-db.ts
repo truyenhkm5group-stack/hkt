@@ -115,12 +115,22 @@ export type OrderListMatch = VtpOrderListRow & {
   currentStage: string | null;
   currentCod: string | null;
   mapped: ReturnType<typeof mapVtpStatusText>;
-  /** direct = đúng vận đơn trong ERP; leg = vận đơn chiều về của vận đơn gốc (ghi thành vận đơn riêng, không đè trạng thái đơn gốc) */
-  matchKind: "direct" | "leg" | null;
+  /**
+   * direct = khớp mã vận đơn trong ERP;
+   * leg    = vận đơn chiều về của vận đơn gốc (ghi thành vận đơn riêng, không đè trạng thái đơn gốc);
+   * phone  = ERP có đơn nhưng vận đơn CHƯA có mã (shop tạo đơn thẳng trên web VTP), khớp theo SĐT người nhận.
+   */
+  matchKind: "direct" | "leg" | "phone" | null;
   /** Mã vận đơn gốc khi đây là vận đơn chiều về */
   legOf: string | null;
   matchIssue?: string;
 };
+
+/** 9 số cuối: đủ phân biệt thuê bao mà không lệ thuộc 0/84/+84 hay khoảng trắng. */
+function phoneKey(value: string | null | undefined): string {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.length >= 9 ? digits.slice(-9) : "";
+}
 
 export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderListMatch[]> {
   const db = await getDb();
@@ -142,6 +152,32 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       byCode.set(key, f);
     }
   }
+  // Shop tạo đơn thẳng trên web Viettel Post: ERP có đơn (từ Pancake/POS) nhưng vận đơn CHƯA có mã,
+  // còn cột "Mã đơn hàng" của file là mã VTP tự sinh nên không tra ngược được. Bằng chứng còn lại là
+  // SĐT người nhận — dùng nó để gắn mã vào đúng vận đơn thay vì bỏ rơi cả dòng.
+  const needPhone = new Set(
+    rows
+      .filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(r.trackingCode) && !byCode.has(r.orderCode))
+      .map((r) => phoneKey(r.receiverPhone))
+      .filter(Boolean),
+  );
+  const NO_CODE = sql`coalesce(nullif(${schema.shipments.vtpOrderNumber}, ''), nullif(${schema.shipments.trackingCode}, '')) is null`;
+  const SHIPMENT_PHONE = sql<string>`right(regexp_replace(coalesce(nullif(${schema.shipments.receiverPhone}, ''), nullif(${schema.orders.shipPhone}, ''), ${schema.orders.billPhone}, ''), '[^0-9]', '', 'g'), 9)`;
+  const codeless = needPhone.size
+    ? await db
+        .select({ id: schema.shipments.id, cod: schema.shipments.codAmount, phone: SHIPMENT_PHONE,
+          stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
+        .from(schema.shipments)
+        .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+        .where(and(NO_CODE, inArray(SHIPMENT_PHONE, [...needPhone])))
+    : [];
+  const byPhone = new Map<string, typeof codeless>();
+  for (const c of codeless) {
+    const list = byPhone.get(c.phone) ?? [];
+    list.push(c);
+    byPhone.set(c.phone, list);
+  }
+
   return rows.map((r) => {
     // Mã có đuôi P (…1P1) là vận đơn CHIỀU VỀ: cột "Mã đơn hàng" của file chính là mã gốc, tin hơn suy từ chuỗi.
     // Phải xét chiều về TRƯỚC, nếu không mã gốc ở cột "Mã đơn hàng" sẽ bị coi là khớp trực tiếp và đè trạng thái đơn gốc.
@@ -151,8 +187,19 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
     const leg = isLeg && base ? byCode.get(base) : undefined;
     const usedCode = isLeg ? base : r.trackingCode;
     const conflictingReferences = !isLeg && byCode.has(r.trackingCode) && byCode.has(r.orderCode) && byCode.get(r.trackingCode)!.id !== byCode.get(r.orderCode)!.id;
-    const matchIssue = ambiguous.has(usedCode) || conflictingReferences ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
-    const f = matchIssue ? undefined : direct ?? leg;
+    let matchIssue = ambiguous.has(usedCode) || conflictingReferences ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
+    // Chỉ xét SĐT khi mã không ghép được — mã vẫn là bằng chứng mạnh hơn.
+    let byPhoneMatch: (typeof codeless)[number] | undefined;
+    if (!matchIssue && !direct && !leg && !isLeg) {
+      const key = phoneKey(r.receiverPhone);
+      const all = key ? byPhone.get(key) ?? [] : [];
+      // Nhiều đơn cùng SĐT thì lấy đúng đơn có COD khai báo trùng khít; vẫn nhập nhằng thì không đoán.
+      const exact = r.cod === null ? [] : all.filter((c) => Number(c.cod) === r.cod);
+      const narrowed = exact.length ? exact : all;
+      if (narrowed.length === 1) byPhoneMatch = narrowed[0];
+      else if (narrowed.length > 1) matchIssue = `SĐT ${r.receiverPhone} có ${narrowed.length} vận đơn chưa có mã; cần đối chiếu`;
+    }
+    const f = matchIssue ? undefined : direct ?? leg ?? byPhoneMatch;
     return {
       ...r,
       shipmentId: f?.id ?? null,
@@ -160,7 +207,7 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       currentStage: f?.stage ?? null,
       currentCod: f?.codStatus ?? null,
       mapped: mapVtpStatusText(r.statusText),
-      matchKind: f ? (direct ? "direct" : "leg") : null,
+      matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
     };
@@ -174,6 +221,8 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   const now = new Date();
   let updated = 0;
   let legs = 0;
+  /** Vận đơn ERP chưa có mã, nay được gắn mã nhờ SĐT người nhận trên file. */
+  let linked = 0;
   let stale = 0;
   let duplicate = 0;
   let missingDate = 0;
@@ -194,6 +243,21 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
       const [current] = await tx.select().from(schema.shipments)
         .where(isLeg ? eq(schema.shipments.vtpOrderNumber, m.trackingCode) : eq(schema.shipments.id, m.shipmentId!)).for("update");
       if (!current || (isLeg && (current.orderId !== null || current.orderReference !== m.legOf))) return "conflict";
+      if (m.matchKind === "phone") {
+        // Gắn mã vận đơn vào vận đơn ERP chưa có mã. Kiểm tra lại trong transaction: nếu mã đã
+        // thuộc vận đơn khác (hoặc vận đơn này vừa có mã) thì dừng, không đụng ràng buộc duy nhất.
+        if (current.vtpOrderNumber || current.trackingCode) return "conflict";
+        const [taken] = await tx.select({ id: schema.shipments.id }).from(schema.shipments)
+          .where(or(eq(schema.shipments.vtpOrderNumber, m.trackingCode), eq(schema.shipments.trackingCode, m.trackingCode)));
+        if (taken) return "conflict";
+        await tx.update(schema.shipments).set({
+          carrier: "Viettel Post", vtpOrderNumber: m.trackingCode, trackingCode: m.trackingCode, updatedAt: now,
+          ...(m.orderCode && !current.orderReference ? { orderReference: m.orderCode } : {}),
+          ...(current.receiverName || !m.receiverName ? {} : { receiverName: m.receiverName }),
+          ...(current.receiverPhone || !m.receiverPhone ? {} : { receiverPhone: m.receiverPhone }),
+          ...(current.receiverAddress || !m.receiverAddress ? {} : { receiverAddress: m.receiverAddress }),
+        }).where(eq(schema.shipments.id, current.id));
+      }
       const snapshot = { trackingCode: m.trackingCode, orderCode: m.orderCode, statusText: m.statusText,
         cod: m.cod, fee: m.fee, codReconciliationText: m.codReconciliationText ?? "", paymentText: m.paymentText ?? "",
         returnFlag: m.returnFlag ?? false, forwardFlag: m.forwardFlag ?? false };
@@ -221,15 +285,17 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         raw: { snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, importedBy: actor } });
       await tx.insert(schema.auditLogs).values({ userEmail: actor, action: "VTP_ORDER_LIST_ROW", entity: "SHIPMENT", entityId: current.id,
         detail: { before, snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null } });
-      return disposition === "applied" ? isLeg ? "leg" : "updated" : disposition;
+      if (disposition !== "applied") return disposition;
+      return isLeg ? "leg" : m.matchKind === "phone" ? "linked" : "updated";
     });
     if (result === "updated") updated++;
+    else if (result === "linked") { linked++; updated++; }
     else if (result === "leg") legs++;
     else if (result === "stale") stale++;
     else if (result === "duplicate") duplicate++;
     else conflicts++;
   }
-  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid: 0, legs, stale, duplicate, conflicts, missingDate,
+  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, linked, paid: 0, legs, stale, duplicate, conflicts, missingDate,
     unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
 }
 

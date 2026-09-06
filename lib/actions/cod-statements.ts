@@ -257,7 +257,10 @@ export async function importVtpDataFiles(input: unknown): Promise<Result<{ files
         applied: applied.updated,
         withCash: 0,
         matchedBatch: null,
-        note: `Toàn bộ tệp danh sách gộp lại: cập nhật ${applied.updated} vận đơn, ${applied.legs} chiều hoàn, bỏ qua ${applied.stale} dòng cũ, ${applied.conflicts} xung đột cần đối chiếu`,
+        note: `Toàn bộ tệp danh sách gộp lại: cập nhật ${applied.updated} vận đơn`
+          + (applied.linked ? ` (${applied.linked} vận đơn được gắn mã theo SĐT người nhận)` : "")
+          + `, ${applied.legs} chiều hoàn, bỏ qua ${applied.stale} dòng cũ, ${applied.conflicts} xung đột cần đối chiếu`
+          + (applied.unmatched ? `, ${applied.unmatched} vận đơn của VTP chưa có trong ERP` : ""),
       });
     }
     await audit({ userId: user.id, userEmail: user.email, action: "VTP_ORDER_LIST_IMPORT", entity: "SHIPMENT", detail: { files: orderFiles.map((f) => f.filename), ...applied } });

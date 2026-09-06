@@ -71,7 +71,37 @@ export async function testVtpImportTruth(db: Db) {
   assert.ok(ambiguous.matchIssue);
   const [referenceOnly] = await matchVtpOrderList([{ ...rows[0], trackingCode: "PKE_UNMATCHED", orderCode: "PKE9900000001" }]);
   assert.equal(referenceOnly.shipmentId, null, "Không ghi đè vận đơn khác qua mã đơn tham chiếu");
-  console.log("✓ VTP Data Truth: đúng cột/ngày/giờ, unknown, nguồn, chống trùng/cũ/xung đột, không tự xác minh tiền");
+  // Ca thật: shop tạo đơn THẲNG trên web Viettel Post nên ERP có đơn (từ Pancake) mà vận đơn CHƯA
+  // có mã; cột "Mã đơn hàng" của file là mã VTP tự sinh nên tra ngược không ra. Bằng chứng còn lại
+  // là SĐT người nhận — thiếu bước này thì mã vận đơn và phí vận chuyển không bao giờ vào ERP.
+  const webHeader = `${header},Người nhận,ĐT Nhận,Địa chỉ nhận`;
+  const webLine = "PKE9900000777,PKE10000000777,02/08/2026 19:51:00,15741,1259,17000,749000,Giao thành công,Đã nhận COD,Đã thanh toán,,06/08/2026 14:46:16,Khách Thử,0969444900,Số 128 Khu phố 3";
+  const webRows = parseVtpOrderList(`${webHeader}
+${webLine}`);
+  assert.equal(webRows[0].receiverPhone, "0969444900", "Đọc được SĐT người nhận từ file danh sách");
+  assert.equal(webRows[0].receiverName, "Khách Thử");
+  await db.insert(orders).values({ id: "vtp-web-order", insertedAt: new Date(), billPhone: "0969444900" });
+  await db.insert(shipments).values({ id: "vtp-web-shipment", orderId: "vtp-web-order", codAmount: 749000,
+    stage: "IN_TRANSIT", receiverPhone: "0969.444.900" });
+  assert.equal((await applyVtpOrderList(webRows, "fixture-importer")).linked, 1, "Gắn mã vào vận đơn chưa có mã theo SĐT");
+  const [web] = await db.select().from(shipments).where(eq(shipments.id, "vtp-web-shipment"));
+  assert.equal(web.trackingCode, "PKE9900000777");
+  assert.equal(web.vtpOrderNumber, "PKE9900000777");
+  assert.equal(web.carrier, "Viettel Post");
+  assert.equal(web.shippingFee, 17000, "Phí vận chuyển lấy từ file VTP");
+  assert.equal(web.stage, "DELIVERED");
+  assert.equal((await applyVtpOrderList(webRows)).duplicate, 1, "Nhập lại ghép thẳng theo mã, không sinh thêm");
+
+  // Hai vận đơn chưa có mã cùng SĐT và cùng COD: không đoán, báo để chủ shop đối chiếu.
+  await db.insert(shipments).values([
+    { id: "vtp-web-2a", codAmount: 333000, receiverPhone: "0912345678" },
+    { id: "vtp-web-2b", codAmount: 333000, receiverPhone: "0912345678" },
+  ]);
+  const [ambiguousPhone] = await matchVtpOrderList([{ ...webRows[0], trackingCode: "PKE9900000888", cod: 333000, receiverPhone: "0912345678" }]);
+  assert.equal(ambiguousPhone.shipmentId, null, "Nhập nhằng thì không gắn bừa");
+  assert.match(ambiguousPhone.matchIssue ?? "", /SĐT/);
+
+  console.log("✓ VTP Data Truth: đúng cột/ngày/giờ, unknown, nguồn, chống trùng/cũ/xung đột, gắn mã theo SĐT, không tự xác minh tiền");
 }
 
 /**
