@@ -4,6 +4,7 @@
  */
 import { and, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 
 export type RiskInput = { succeed: number; returned: number; isBlock: boolean; erpDelivered?: number; erpReturned?: number };
 export type RiskConfig = { riskMinReturned: number; riskReturnRatePct: number };
@@ -31,8 +32,8 @@ export async function erpHistoryByPhone(phones: string[], excludeOrderId?: strin
   if (!clean.length) return { delivered: 0, returned: 0 };
   const [row] = await db
     .select({
-      delivered: sql<number>`count(*) filter (where ${schema.shipments.stage} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${schema.shipments.stage} = 'RETURNED')`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`,
     })
     .from(schema.shipments)
     .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))

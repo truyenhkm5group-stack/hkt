@@ -606,6 +606,11 @@ export const shipments = pgTable(
     firstDeliveryAt: ts("first_delivery_at"),
     deliveredAt: ts("delivered_at"),
     returnedAt: ts("returned_at"),
+    // Kho THỰC NHẬN hàng hoàn: chỉ khi có mốc này hàng mới được cộng lại tồn ERP.
+    // ĐVVC báo "đã hoàn" không đồng nghĩa hàng đã về kho.
+    returnReceivedAt: ts("return_received_at"),
+    returnReceivedBy: text("return_received_by"),
+    returnReceivedNote: text("return_received_note"),
     cancelledAt: ts("cancelled_at"),
     isFinal: boolean("is_final").notNull().default(false),
     lastVtpSyncAt: ts("last_vtp_sync_at"),
@@ -622,6 +627,7 @@ export const shipments = pgTable(
     index("shipments_carrier_idx").on(t.carrier),
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
+    index("shipments_return_received_idx").on(t.returnReceivedAt),
   ],
 );
 

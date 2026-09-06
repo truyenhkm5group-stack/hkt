@@ -38,14 +38,21 @@ async function testAdditiveMigration() {
       await local.exec(migration);
     }
     for (const { table_name: table } of tables) {
-      const expr = table === "shipment_events"
-        ? "to_jsonb(t) - ARRAY['normalized_stage','leg_type','verification_status','source_reference','verified_at','verified_by']"
-        : "to_jsonb(t)";
+      // Cột do P0.1/P0.2 thêm vào bảng cũ: phải là NULL cho dữ liệu legacy, nên loại khỏi phép so sánh nguyên trạng.
+      const ADDED: Record<string, string[]> = {
+        shipment_events: ["normalized_stage", "leg_type", "verification_status", "source_reference", "verified_at", "verified_by"],
+        shipments: ["return_received_at", "return_received_by", "return_received_note"],
+      };
+      const added = ADDED[table];
+      const expr = added ? `to_jsonb(t) - ARRAY[${added.map((c) => `'${c}'`).join(",")}]` : "to_jsonb(t)";
       const after = (await local.query(`SELECT ${expr} AS row FROM "${table}" t ORDER BY to_jsonb(t)::text`)).rows;
       assert.deepEqual(after, before.get(table), `Migration giữ nguyên mọi dòng/cột cũ: ${table}`);
     }
     const { rows: events } = await local.query<Record<string, unknown>>("SELECT normalized_stage, leg_type, verification_status, source_reference, verified_at, verified_by FROM shipment_events");
     assert.ok(Object.values(events[0]).every((v) => v === null));
+    // Hàng hoàn legacy KHÔNG được tự coi là đã về kho: migration không backfill return_received_at.
+    const { rows: legacyShipments } = await local.query<Record<string, unknown>>("SELECT return_received_at, return_received_by, return_received_note FROM shipments");
+    assert.ok(legacyShipments.every((r) => Object.values(r).every((v) => v === null)), "Không tự đánh dấu hàng hoàn đã về kho");
     for (const table of ["payment_transactions", "payment_evidence", "payment_reviews"]) {
       assert.equal((await local.query(`SELECT * FROM ${table}`)).rows.length, 0, "Không backfill");
     }

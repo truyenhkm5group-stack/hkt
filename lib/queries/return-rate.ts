@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
+import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 
@@ -68,6 +69,92 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${o.stage} in ('DELIVERED','PAID') then 'DELIVERED'
   when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
   else 'NOT_SHIPPED' end`;
+
+/**
+ * ───────── Quy tắc THỰC TẾ (Data Truth) — dùng cho trang Chất lượng dữ liệu ─────────
+ * Khác ORDER_OUTCOME legacy ở đúng một điểm: trạng thái Pancake/Viettel Post KHÔNG được
+ * coi là bằng chứng doanh thu. Không có số tiền thực thu → UNVERIFIED ("Chưa xác minh"),
+ * tuyệt đối không quy về 0 và không đoán.
+ */
+
+/**
+ * TIỀN COD ĐÃ THỰC THU. Ưu tiên số thực thu; nếu chưa có số nhưng Viettel Post đã xác nhận
+ * trạng thái thu tiền thì lấy COD khai báo trên vận đơn. COD khai báo đơn thuần KHÔNG phải bằng chứng.
+ */
+export const CASH_COLLECTED = sql<number>`coalesce(nullif(${s.codCollected}, 0),
+  case when ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK') then nullif(${s.codAmount}, 0) end, 0)`;
+
+/** Tổng tiền CÓ BẰNG CHỨNG của đơn: COD đã thu + tiền khách chuyển trước đã ghi nhận. */
+export const VERIFIED_CASH = sql<number>`(${CASH_COLLECTED} + ${PREPAID})`;
+
+/**
+ * TRẦN tiền mà đơn này có thể thu được (COD đã thu / COD khai báo trên vận đơn / COD trên đơn Pancake, cộng trả trước).
+ * Dùng để kết luận CHẮC CHẮN theo hướng bất lợi: nếu trần vẫn dưới ngưỡng thì đơn không thể là giao thành công,
+ * kể cả khi chưa có số thực thu. Đây là suy luận từ giới hạn trên, không phải phỏng đoán.
+ */
+const MAX_POSSIBLE_CASH = sql<number>`(greatest(${CASH_COLLECTED}, coalesce(${s.codAmount}, 0), coalesce(${o.cod}, 0)) + ${PREPAID})`;
+
+/**
+ * CÓ ĐỌC ĐƯỢC SỐ TIỀN hay không. Có bằng chứng khi: đã thu được tiền, khách đã chuyển trước,
+ * hoặc vận đơn giao xong với COD khai báo = 0 (không có gì để thu — bản thân nó là một kết luận).
+ */
+export const HAS_CASH_PROOF = sql`(${CASH_COLLECTED} > 0 or ${PREPAID} > 0
+  or (${s.id} is not null and ${s.stage} = 'DELIVERED' and coalesce(${s.codAmount}, 0) = 0))`;
+
+/** Có tín hiệu "đã giao xong" từ bất kỳ nguồn nào (chưa chứng minh được tiền). */
+const DELIVERY_SIGNAL = sql`(${s.stage} = 'DELIVERED' or ${o.stage} in ('DELIVERED','PAID'))`;
+
+/**
+ * Kết quả đơn theo quy tắc THỰC TẾ (Data Truth) — dùng cho trang Chất lượng dữ liệu.
+ * Khác ORDER_OUTCOME legacy ở đúng một điểm: trạng thái Pancake/Viettel Post KHÔNG phải bằng chứng doanh thu.
+ *  1. Huỷ vẫn là huỷ.
+ *  2. Đang/đã hoàn vẫn là HOÀN dù đã từng thu tiền.
+ *  3. COD đã THỰC THU > 100K → giao thành công: tiền đã trao tay tại cửa, dù trạng thái vận đơn chưa cập nhật.
+ *  4. Đang giao vẫn là ĐANG GIAO dù khách đã trả trước.
+ *  5. Có tín hiệu giao xong thì xét tiền:
+ *     · trần tiền < 50K → HOÀN (chắc chắn, không cần số thực thu);
+ *     · trần tiền ≤ 100K → KHÔNG THÀNH CÔNG (chắc chắn);
+ *     · trần tiền > 100K nhưng không đọc được đồng nào → CHƯA XÁC MINH (không đoán, không quy về 0);
+ *     · có bằng chứng → so tiền thật với hai ngưỡng.
+ */
+export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
+  when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
+  when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when ${CASH_COLLECTED} > ${MAX_COD} then 'DELIVERED'
+  when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') then 'IN_TRANSIT'
+  when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
+  when ${DELIVERY_SIGNAL} then (case
+    when ${MAX_POSSIBLE_CASH} < ${RETURN_COD} then 'RETURNED'
+    when ${MAX_POSSIBLE_CASH} <= ${MAX_COD} then 'RETURNED_BY_RULE'
+    when not ${HAS_CASH_PROOF} then 'UNVERIFIED'
+    when ${VERIFIED_CASH} > ${MAX_COD} then 'DELIVERED'
+    when ${VERIFIED_CASH} < ${RETURN_COD} then 'RETURNED'
+    else 'RETURNED_BY_RULE' end)
+  when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
+  else 'NOT_SHIPPED' end`;
+
+/** Pancake báo đã giao/đã thanh toán nhưng không có vận đơn giao thành công và cũng không có tiền thực thu. */
+export const IS_PANCAKE_DECLARED_ONLY = sql`(${o.stage} in ('DELIVERED','PAID')
+  and (${s.stage} is null or ${s.stage} <> 'DELIVERED') and not ${HAS_CASH_PROOF})`;
+
+/** Viettel Post ghi "giao thành công" (kể cả chiều hoàn) nhưng tiền thực thu < 50K. */
+export const IS_VTP_LOW_CASH = sql`(${s.stage} = 'DELIVERED' and ${HAS_CASH_PROOF} and ${VERIFIED_CASH} < ${RETURN_COD})`;
+
+/** Pancake và Viettel Post nói hai điều khác nhau về cùng một đơn. */
+export const IS_STATUS_CONFLICT = sql`(${s.id} is not null and (
+  (${o.stage} in ('DELIVERED','PAID') and ${s.stage} in ('RETURNING','RETURNED'))
+  or (${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') and ${s.stage} = 'DELIVERED')
+  or (${o.stage} in ('CANCELLED','DELETED') and ${s.stage} in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))))`;
+
+/** Hàng hoàn kho CHƯA xác nhận nhận về — không được cộng lại tồn kho. */
+export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
+
+/**
+ * Hàng hoàn ở GRAIN ĐƠN (cần orders LEFT JOIN shipments) — dùng cho tồn kho.
+ * Rộng hơn IS_RETURN_NOT_RECEIVED vì phủ cả RETURNED_BY_RULE (vận đơn báo "giao thành công"
+ * nhưng khách chỉ trả phí, hàng vẫn quay về). Kho chưa xác nhận nhận → hàng CHƯA có trong tồn.
+ */
+export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
 
 const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */

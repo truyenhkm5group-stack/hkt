@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import type { ListParams } from "@/lib/search-params";
@@ -132,10 +133,11 @@ export async function orderSummary(params: ListParams) {
       orders: count(),
       revenue: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalPriceAfterDiscount} else 0 end), 0)`,
       cod: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.moneyToCollect} else 0 end), 0)`,
-      success: sql<number>`sum(case when ${schema.orders.stage} in ('DELIVERED','PAID') then 1 else 0 end)`,
+      success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
       quantity: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalQuantity} else 0 end), 0)`,
     })
     .from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
     .where(where);
   return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0) };
 }

@@ -94,7 +94,7 @@ export async function rescuedOrdersByProduct(period: Period): Promise<Map<string
       and(
         eq(i.isBonus, false),
         inArray(o.stage, [...CONFIRMED_STAGES]),
-        eq(s.stage, "DELIVERED"),
+        sql`${ORDER_OUTCOME} = 'DELIVERED'`,
         sql`exists (select 1 from ${schema.shipmentEvents} where ${schema.shipmentEvents.shipmentId} = ${s.id} and ${FAILED_EVENT})`,
         ...periodCond(period.from, period.to),
       ),

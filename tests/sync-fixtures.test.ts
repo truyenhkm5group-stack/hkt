@@ -3,13 +3,15 @@
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
 import "./setup-env";
+import { testDataQuality } from "./data-quality.test";
 import { testPaymentVerification } from "./payment-verification.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { markReturnReceived } from "@/lib/returns/warehouse";
 import { parseJsonSafeInts } from "@/lib/integrations/http";
 import { mapOrder, mapProduct } from "@/lib/integrations/pancake/mapper";
 import { upsertOrder, upsertProduct } from "@/lib/integrations/pancake/sync";
@@ -228,15 +230,29 @@ async function main() {
   assert.equal(detail.find((d) => d.id === "rr-9008")?.outcome, "DELIVERED", "thực thu 499K → giao thành công dù COD vận đơn = 0");
   console.log(`✓ Tỷ lệ giao thành công RR-001: gửi ${row.shipped} · giao TC ${row.delivered} · không TC ${row.returned} (quy tắc ${row.returnedByRule}) · GTC ${row.successRate}%`);
 
-  // Tồn kho ERP = Nhập − Giao thật − Đang giao
+  // Tồn kho ERP = Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
+  // ĐVVC báo "đã hoàn" KHÔNG đồng nghĩa hàng đã về kho: 5 đơn hoàn vẫn đang ở ngoài.
   const [receipt] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: now, totalQuantity: 10, totalCost: 2_000_000, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
   await db.insert(schema.stockReceiptItems).values({ receiptId: receipt.id, variantId: "rr-var", quantity: 10, unitCost: 200000 });
   const picker = await listVariantsForReceipt();
   const stock = picker.find((v) => v.id === "rr-var");
   assert.ok(stock, "có mẫu mã trong danh sách nhập");
-  assert.equal(stock.currentStock, 6, "tồn = 10 nhập − 3 giao thành công (COD thực > 100K) − 1 đang giao = 6 (không thành công coi như về kho)");
+  assert.equal(stock.currentStock, 1, "tồn = 10 nhập − 3 giao thành công − 1 đang giao − 5 hoàn chưa về kho = 1");
   assert.equal(stock.lastCost, 200000, "giá nhập gần nhất lấy từ phiếu");
-  console.log(`✓ Tồn kho ERP RR-001: ${stock.currentStock} (nhập 10, giao thành công 3, đang giao 1) · giá nhập ${stock.lastCost}`);
+
+  // Kho xác nhận nhận 2 kiện hoàn → đúng 2 đơn vị được cộng lại tồn, không hơn.
+  const pendingReturns = await db.select({ id: schema.shipments.id }).from(schema.shipments)
+    .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+    .where(and(inArray(schema.orders.id, ["rr-9002", "rr-9009"]), isNull(schema.shipments.returnReceivedAt)));
+  assert.equal(pendingReturns.length, 2, "hai vận đơn hoàn đang chờ kho nhận");
+  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Kho đếm đủ 2 kiện");
+  const afterReceive = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
+  assert.equal(afterReceive?.currentStock, 3, "kho nhận 2 kiện hoàn → tồn 1 + 2 = 3");
+  // Xác nhận lần hai không được cộng thêm lần nữa (chống đếm trùng).
+  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Bấm nhầm lần hai");
+  const afterTwice = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
+  assert.equal(afterTwice?.currentStock, 3, "xác nhận lại không cộng trùng tồn");
+  console.log(`✓ Tồn kho ERP RR-001: 1 khi 5 đơn hoàn chưa về kho → 3 sau khi kho nhận 2 kiện (chống cộng trùng)`);
 
   // Nhập sao kê MB Bank → chi phí
   const ledgerJson = JSON.stringify({
@@ -925,6 +941,7 @@ async function main() {
     }
   }
 
+  await testDataQuality(db);
   await testPaymentVerification(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

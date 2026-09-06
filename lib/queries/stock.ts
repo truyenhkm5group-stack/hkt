@@ -1,6 +1,6 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -21,6 +21,8 @@ export function variantSalesSubquery(db: Db) {
       returned: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
       inTransit: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT'), 0)`.as("sold_in_transit"),
       pending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED' and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP')), 0)`.as("sold_pending"),
+      /** Hàng hoàn kho CHƯA xác nhận nhận về — vẫn đang ở ngoài, không được tính vào tồn. */
+      returnedPending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${RETURN_PENDING_WAREHOUSE}), 0)`.as("sold_returned_pending"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
@@ -48,9 +50,10 @@ export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_re
 export type StockAggregates = ReturnType<typeof variantSalesSubquery>;
 export type ReceiptAggregates = ReturnType<typeof variantReceiptsSubquery>;
 
-/** Biểu thức tồn khả dụng ERP = Nhập − Giao thật − Đang giao (hàng hoàn coi như đã về kho) */
+/** Tồn khả dụng ERP = Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
+ *  Hàng hoàn chỉ được cộng lại tồn khi có `shipments.return_received_at`; ĐVVC báo "đã hoàn" là chưa đủ. */
 export function erpStockExpr(sales: StockAggregates, receipts: ReceiptAggregates) {
-  return sql<number>`coalesce(${receipts.received}, 0) - coalesce(${sales.delivered}, 0) - coalesce(${sales.inTransit}, 0)`;
+  return sql<number>`coalesce(${receipts.received}, 0) - coalesce(${sales.delivered}, 0) - coalesce(${sales.inTransit}, 0) - coalesce(${sales.returnedPending}, 0)`;
 }
 
 export type VariantPickerRow = {

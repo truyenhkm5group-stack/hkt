@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or,
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { erpStockExpr, LAST_RECEIPT_COST, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -11,13 +11,18 @@ export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "s
 const pv = schema.productVariants;
 const p = schema.products;
 
-/** Tồn khả dụng ERP theo mẫu mã (subquery dùng trong điều kiện lọc): Nhập − Giao thật − Đang giao */
+/**
+ * Tồn khả dụng ERP theo mẫu mã (subquery dùng trong điều kiện lọc):
+ * Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
+ * Phải khớp với `erpStockExpr` trong lib/queries/stock.ts.
+ */
 const ERP_STOCK_SUB = sql<number>`(
   coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = ${pv.id}), 0)
   - coalesce((select sum(${schema.orderItems.quantity}) from ${schema.orderItems}
       join ${schema.orders} on ${schema.orders.id} = ${schema.orderItems.orderId}
       left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
-      where ${schema.orderItems.variantId} = ${pv.id} and ${ORDER_OUTCOME} in ('DELIVERED','IN_TRANSIT')), 0)
+      where ${schema.orderItems.variantId} = ${pv.id}
+        and (${ORDER_OUTCOME} in ('DELIVERED','IN_TRANSIT') or ${RETURN_PENDING_WAREHOUSE})), 0)
 )`;
 
 /** Mẫu mã đang bán: không ẩn / khoá / xoá ở cả cấp mẫu mã lẫn sản phẩm */
