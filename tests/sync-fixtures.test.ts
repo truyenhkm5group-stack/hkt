@@ -3,6 +3,7 @@
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
 import "./setup-env";
+import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
@@ -946,6 +947,7 @@ async function main() {
   await testDataQuality(db);
   await testConsistency(db);
   await testInventory(db);
+  await testCodReconciliation(db);
   await testPaymentVerification(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

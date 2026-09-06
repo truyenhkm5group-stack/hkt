@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, Banknote, CheckCheck, Clock, Download, Landmark, X } from "lucide-react";
 import { CodTable } from "@/app/(dashboard)/cod/cod-table";
 import { CodTabs, type CodTabItem } from "@/app/(dashboard)/cod/cod-tabs";
+import { CodReconciliation } from "@/app/(dashboard)/cod/reconciliation";
 import { StatementDialog } from "@/app/(dashboard)/cod/statement-dialog";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -24,6 +25,9 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "deliveredAt", filterKeys: ["cod", "carrier", "batch"], sortable: COD_SORTABLE, defaultPeriod: "all" });
   const batchId = params.filters.batch?.[0];
+  const reconValues = ["unproven", "pending", "stale"];
+  const reconDrill = reconValues.includes(param(raw, "recon")) ? param(raw, "recon") : null;
+  const reconPage = Math.max(1, Number(param(raw, "rpage", "1")) || 1);
   const [{ rows, total, pageCount }, kpis, facets, summary, batches, activeBatch] = await Promise.all([
     listCodShipments(params),
     codKpis(params.period),
@@ -61,6 +65,8 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           </>
         }
       />
+
+      <CodReconciliation period={params.period} drill={reconDrill} page={reconPage} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Chưa thu" value={formatVND(kpis.byStatus.PENDING.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.PENDING.count)} vận đơn đang giao (không tính hoàn / huỷ)`} icon={Clock} tone="amber" />
