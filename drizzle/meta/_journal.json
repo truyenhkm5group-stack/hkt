@@ -148,6 +148,20 @@
       "when": 1788603274525,
       "tag": "0020_landing_ad_id",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788688225481,
+      "tag": "0021_payment_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788688242060,
+      "tag": "0022_payment_guards",
+      "breakpoints": true
     }
   ]
 }

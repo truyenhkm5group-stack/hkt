@@ -1,7 +1,7 @@
 // Shop Control ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -639,10 +639,105 @@ export const shipmentEvents = pgTable(
     note: text("note").notNull().default(""),
     occurredAt: ts("occurred_at").notNull(),
     raw: jsonb("raw"),
+    normalizedStage: shipmentStageEnum("normalized_stage"),
+    legType: text("leg_type"),
+    verificationStatus: text("verification_status"),
+    sourceReference: text("source_reference"),
+    verifiedAt: ts("verified_at"),
+    verifiedBy: text("verified_by"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("shipment_events_uq").on(t.shipmentId, t.source, t.status, t.occurredAt), index("shipment_events_shipment_idx").on(t.shipmentId, t.occurredAt)],
+  (t) => [uniqueIndex("shipment_events_uq").on(t.shipmentId, t.source, t.status, t.occurredAt), index("shipment_events_shipment_idx").on(t.shipmentId, t.occurredAt),
+    check("shipment_events_leg_check", sql`${t.legType} IN ('OUTBOUND', 'RETURN', 'UNKNOWN')`),
+    check("shipment_events_verification_check", sql`${t.verificationStatus} IN ('PENDING', 'VERIFIED', 'REJECTED', 'DISPUTED')`),
+    check("shipment_events_verified_check", sql`${t.verificationStatus} IS DISTINCT FROM 'VERIFIED' OR (
+      ${t.normalizedStage} IS NOT NULL AND ${t.normalizedStage} <> 'UNKNOWN'
+      AND ${t.legType} IS NOT NULL AND ${t.legType} IN ('OUTBOUND', 'RETURN')
+      AND ${t.source} IN ('VTP_WEBHOOK', 'VTP_POLL', 'VTP_IMPORT', 'MANUAL')
+      AND ${t.sourceReference} IS NOT NULL AND length(trim(${t.sourceReference})) > 0
+      AND ${t.verifiedAt} IS NOT NULL AND ${t.verifiedBy} IS NOT NULL AND length(trim(${t.verifiedBy})) > 0)`),
+  ],
 );
+
+// P0.1: độc lập với COD và KPI legacy. Ràng buộc chéo bảng/audit ở migration mới.
+export const paymentTransactions = pgTable("payment_transactions", {
+  id: id(),
+  orderId: text("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "restrict" }),
+  transactionType: text("transaction_type").notNull(),
+  amount: bigint("amount", { mode: "bigint" }), // NULL chưa biết; 0 chỉ xác minh khi có chứng từ.
+  currency: text("currency").notNull().default("VND"),
+  direction: text("direction").notNull(),
+  verificationStatus: text("verification_status").notNull().default("PENDING"),
+  source: text("source").notNull(),
+  sourceNamespace: text("source_namespace").notNull(),
+  sourceReference: text("source_reference").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestHash: text("request_hash").notNull(),
+  occurredAt: ts("occurred_at").notNull(),
+  verifiedAt: ts("verified_at"),
+  verifiedBy: text("verified_by"),
+  reversesTransactionId: text("reverses_transaction_id"),
+  reason: text("reason"),
+  createdBy: text("created_by").notNull(),
+  createdAt: createdAt(),
+  metadata: jsonb("metadata").notNull().default({}),
+}, (t) => [
+  index("payment_transactions_order_idx").on(t.orderId),
+  index("payment_transactions_shipment_idx").on(t.shipmentId),
+  uniqueIndex("payment_transactions_idempotency_uq").on(t.idempotencyKey),
+  uniqueIndex("payment_transactions_reversal_uq").on(t.reversesTransactionId),
+  foreignKey({ columns: [t.reversesTransactionId], foreignColumns: [t.id], name: "payment_transactions_reversal_fk" }).onDelete("restrict"),
+  check("payment_transactions_target_check", sql`${t.orderId} IS NOT NULL OR ${t.shipmentId} IS NOT NULL`),
+  check("payment_transactions_amount_check", sql`${t.amount} >= 0`),
+  check("payment_transactions_currency_check", sql`${t.currency} = 'VND'`),
+  check("payment_transactions_type_check", sql`${t.transactionType} IN ('COD_RECEIVED', 'PREPAID', 'BANK_TRANSFER', 'REFUND', 'ADJUSTMENT', 'REVERSAL')`),
+  check("payment_transactions_direction_check", sql`${t.direction} IN ('INFLOW', 'OUTFLOW') AND (${t.transactionType} <> 'REFUND' OR ${t.direction} = 'OUTFLOW') AND (${t.transactionType} NOT IN ('COD_RECEIVED', 'PREPAID', 'BANK_TRANSFER') OR ${t.direction} = 'INFLOW')`),
+  check("payment_transactions_status_check", sql`${t.verificationStatus} IN ('PENDING', 'VERIFIED', 'REJECTED', 'DISPUTED')`),
+  check("payment_transactions_verified_check", sql`${t.verificationStatus} <> 'VERIFIED' OR (${t.amount} IS NOT NULL AND ${t.verifiedAt} IS NOT NULL AND ${t.verifiedBy} IS NOT NULL AND length(trim(${t.verifiedBy})) > 0)`),
+  check("payment_transactions_reversal_check", sql`(${t.transactionType} = 'REVERSAL') = (${t.reversesTransactionId} IS NOT NULL) AND ${t.reversesTransactionId} IS DISTINCT FROM ${t.id}`),
+  check("payment_transactions_reason_check", sql`(${t.transactionType} NOT IN ('REFUND', 'ADJUSTMENT', 'REVERSAL') AND ${t.verificationStatus} <> 'DISPUTED') OR (${t.reason} IS NOT NULL AND length(trim(${t.reason})) > 0)`),
+  check("payment_transactions_identity_check", sql`length(trim(${t.source})) > 0 AND length(trim(${t.sourceNamespace})) > 0 AND length(trim(${t.sourceReference})) > 0 AND length(trim(${t.idempotencyKey})) > 0 AND length(trim(${t.createdBy})) > 0 AND ${t.requestHash} ~ '^[a-f0-9]{64}$'`),
+]);
+
+export const paymentEvidence = pgTable("payment_evidence", {
+  id: id(),
+  transactionId: text("transaction_id").notNull().references(() => paymentTransactions.id, { onDelete: "restrict" }),
+  source: text("source").notNull(),
+  sourceNamespace: text("source_namespace").notNull(),
+  sourceReference: text("source_reference").notNull(),
+  sourceLineKey: text("source_line_key").notNull(),
+  documentLocator: text("document_locator").notNull(),
+  documentHash: text("document_hash").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: createdAt(),
+}, (t) => [
+  index("payment_evidence_transaction_idx").on(t.transactionId),
+  uniqueIndex("payment_evidence_source_uq").on(t.source, t.sourceNamespace, t.sourceReference, t.sourceLineKey),
+  uniqueIndex("payment_evidence_document_uq").on(t.documentHash, t.sourceLineKey),
+  check("payment_evidence_source_check", sql`${t.source} IN ('BANK_STATEMENT', 'VTP_COD_STATEMENT', 'MANUAL_DOCUMENT')`),
+  check("payment_evidence_identity_check", sql`length(trim(${t.sourceNamespace})) > 0 AND length(trim(${t.sourceReference})) > 0 AND length(trim(${t.sourceLineKey})) > 0 AND length(trim(${t.documentLocator})) > 0 AND length(trim(${t.createdBy})) > 0 AND ${t.documentHash} ~ '^[a-f0-9]{64}$' AND jsonb_typeof(${t.payload}) = 'object'`),
+]);
+
+export const paymentReviews = pgTable("payment_reviews", {
+  id: id(),
+  orderId: text("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "restrict" }),
+  coverage: text("coverage").notNull(),
+  coveredThrough: ts("covered_through").notNull(),
+  ledgerFingerprint: text("ledger_fingerprint").notNull(),
+  evidenceReference: text("evidence_reference").notNull(),
+  reviewedBy: text("reviewed_by").notNull(),
+  reviewedAt: ts("reviewed_at").notNull().defaultNow(),
+  note: text("note").notNull(),
+}, (t) => [
+  index("payment_reviews_order_idx").on(t.orderId, t.reviewedAt),
+  index("payment_reviews_shipment_idx").on(t.shipmentId, t.reviewedAt),
+  check("payment_reviews_target_check", sql`${t.orderId} IS NOT NULL OR ${t.shipmentId} IS NOT NULL`),
+  check("payment_reviews_coverage_check", sql`${t.coverage} IN ('PARTIAL', 'COMPLETE', 'DISPUTED')`),
+  check("payment_reviews_identity_check", sql`length(trim(${t.evidenceReference})) > 0 AND length(trim(${t.reviewedBy})) > 0 AND length(trim(${t.note})) > 0 AND ${t.ledgerFingerprint} ~ '^[a-f0-9]{64}$'`),
+]);
 
 // ───────────────────────── Nhập hàng & kiểm kê (ERP tự quản lý tồn) ─────────────────────────
 

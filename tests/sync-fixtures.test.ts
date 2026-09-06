@@ -3,6 +3,7 @@
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
 import "./setup-env";
+import { testPaymentVerification } from "./payment-verification.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -924,6 +925,7 @@ async function main() {
     }
   }
 
+  await testPaymentVerification(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
