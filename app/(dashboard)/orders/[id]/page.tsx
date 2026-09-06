@@ -17,6 +17,7 @@ import { COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getOrderDetail } from "@/lib/queries/orders";
+import { previousOrderHint } from "@/lib/queries/order-hints";
 import { requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +33,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const erpHist = order ? await erpHistoryByPhone([order.billPhone ?? ""], order.id) : { delivered: 0, returned: 0 };
   const risk = order ? assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg) : null;
   const erpOther = order ? await erpOrderCountByPhone([order.billPhone ?? ""], order.id) : 0;
+  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
+  const thieuThongTin = Boolean(order && (!order.billPhone || !(order.shipFullAddress || order.shipAddress)));
+  const prev = order && thieuThongTin ? await previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : null;
   const newPhone = order ? isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther }) : false;
   if (!order) notFound();
   const s = order.shipment;
@@ -202,6 +206,30 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{order.billFullName || order.shipFullName || "—"}</p>
               <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} /></p>
               <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{order.shipFullAddress || order.shipAddress || "—"}</span></p>
+              {thieuThongTin ? (
+                <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-2.5 text-xs leading-relaxed text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                  <p className="font-semibold">Đơn thiếu {[order.billPhone ? "" : "SĐT", order.shipFullAddress || order.shipAddress ? "" : "địa chỉ"].filter(Boolean).join(" và ")} · chưa gửi được đơn vị vận chuyển</p>
+                  {prev ? (
+                    <>
+                      <p className="mt-1">
+                        Khách cũ, lấy lại từ đơn{" "}
+                        <Link href={`/orders/${prev.orderId}`} className="font-semibold underline">#{prev.systemId ?? ""}</Link> ngày {formatDateTime(prev.insertedAt)}
+                        {prev.matchedBy === "customer" ? " (cùng khách Pancake)" : prev.matchedBy === "conversation" ? " (cùng hội thoại)" : " (trùng SĐT)"}:
+                      </p>
+                      <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} /></p>
+                      <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} /></p>
+                      <p className="mt-1.5 opacity-80">Hỏi khách xác nhận còn đúng địa chỉ này không rồi điền vào đơn trên Pancake (khách có thể đã chuyển nhà).</p>
+                    </>
+                  ) : (
+                    <p className="mt-1 opacity-80">Không tìm thấy đơn cũ của khách để lấy lại thông tin. Nhắn hỏi khách SĐT và địa chỉ trước khi gửi hàng.</p>
+                  )}
+                  {order.pageId && order.conversationId ? (
+                    <a href={`https://pancake.vn/${order.pageId}?c_id=${order.conversationId}`} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 font-semibold underline">
+                      <ExternalLink className="size-3.5" /> Mở hội thoại Pancake
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
               {order.customer ? (
                 <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center">
                   <div><p className="numeric text-lg font-bold">{order.customer.orderCount}</p><p className="text-[11px] text-muted-foreground">Đơn</p></div>

@@ -1,8 +1,9 @@
 /** Case chăm sóc khách hàng (CSKH) */
-export const CS_KINDS = ["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "PHONE_VERIFY", "OTHER"] as const;
+export const CS_KINDS = ["ORDER_NOT_CREATED", "EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "PHONE_VERIFY", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
+  ORDER_NOT_CREATED: "Đã chốt trong chat · chưa tạo đơn",
   EXCHANGE_SIZE: "Đổi size",
   EXCHANGE_COLOR: "Đổi màu / mẫu",
   WRONG_ADDRESS: "Sai địa chỉ",
@@ -86,6 +87,11 @@ export type CsRules = {
   phoneVerifyRisky: boolean;
   /** Thẻ đơn Pancake (không dấu, thường) để nhân viên đánh dấu cần xác nhận SĐT → bot nhắn */
   phoneVerifyTags: string[];
+  /**
+   * Cụm trong tin nhắn của SHOP nghĩa là đã chốt đơn với khách (không dấu, thường). Nếu hội thoại có cụm này mà chưa
+   * thấy đơn mới thì mở case "đã chốt chưa tạo đơn" — hay gặp với khách cũ mua lại, chỉ nhắn "gửi địa chỉ cũ".
+   */
+  closingKeywords: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -176,6 +182,7 @@ export const DEFAULT_CS_RULES: CsRules = {
   ],
   chatLookbackHours: 48,
   chatPageIds: [],
+  closingKeywords: ["em chot", "chot don", "chot cho minh", "chot them", "da chot", "em len don", "len don cho", "gui ve dia chi cu", "dia chi cu"],
   ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
   failedDeliveryAuto: true,
   failedDeliveryShopName: "Shop",

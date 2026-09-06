@@ -18,6 +18,7 @@ import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
+import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
@@ -92,6 +93,45 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityType: "ORDER",
         entityId: r.id,
         dedupeKey: `order-pending:${r.id}`,
+        occurredAt: r.insertedAt,
+      });
+    }
+  }
+
+  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại "gửi địa chỉ cũ", đơn nháp từ landing…): không gửi ĐVVC được, báo ngay chứ không chờ quá hạn
+  if (cfg.enabled.incomplete) {
+    activeKinds.push("ORDER_INCOMPLETE");
+    const rows = await db
+      .select({ ...orderCols, shipAddress: o.shipAddress, customerId: o.customerId, conversationId: o.conversationId, pageId: o.pageId })
+      .from(o)
+      .leftJoin(s, eq(s.orderId, o.id))
+      .where(
+        and(
+          inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]),
+          sql`(${o.billPhone} = '' or ${o.shipAddress} = '')`,
+          isNull(s.id),
+          sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`,
+        ),
+      )
+      .limit(500);
+    const hints = await previousOrderHints(rows);
+    for (const r of rows) {
+      const missing = [r.billPhone ? "" : "SĐT", r.shipAddress ? "" : "địa chỉ"].filter(Boolean).join(" và ");
+      const hours = Math.floor((Date.now() - new Date(r.insertedAt).getTime()) / 3_600_000);
+      const chat = r.pageId && r.conversationId ? ` · Chat: https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : "";
+      const hint = hints.get(r.id);
+      const hintText = hint
+        ? ` Khách cũ — đơn #${hint.systemId ?? ""} ngày ${fmtAt(hint.insertedAt)}: SĐT ${hint.phone} · ${hint.address}. Hỏi khách xác nhận rồi điền vào đơn trên Pancake.`
+        : " Không tìm thấy đơn cũ của khách để lấy lại thông tin, cần hỏi khách.";
+      candidates.push({
+        kind: "ORDER_INCOMPLETE",
+        severity: hours >= cfg.pendingHours ? "critical" : "warning",
+        title: `Đơn thiếu ${missing} · ${orderLabel(r)}`,
+        body: `Thiếu ${missing} nên chưa gửi được đơn vị vận chuyển (lên đơn ${fmtAt(r.insertedAt)}).${hintText}${chat}`,
+        href: `/orders/${r.id}`,
+        entityType: "ORDER",
+        entityId: r.id,
+        dedupeKey: `order-incomplete:${r.id}`,
         occurredAt: r.insertedAt,
       });
     }

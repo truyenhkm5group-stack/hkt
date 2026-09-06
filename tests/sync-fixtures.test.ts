@@ -16,7 +16,7 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
-import { detectFromMessages } from "@/lib/cs/chat-detect";
+import { detectFromMessages, findClosingMessage } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
@@ -46,6 +46,7 @@ import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
 import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
+import { previousOrderHint } from "@/lib/queries/order-hints";
 
 async function main() {
   await ensureMigrated();
@@ -769,6 +770,41 @@ async function main() {
     }
   }
   console.log("✓ Đơn landing page: CSV có / không tiêu đề, dò cột theo nội dung, SĐT, size/màu, gói giá, mã hàng từ chiến dịch, ad_id, ghép mẫu mã");
+
+  // Khách cũ mua lại qua chat: không nhắn lại SĐT / địa chỉ ("gửi về địa chỉ cũ") → đơn mới thiếu thông tin, không được để sót
+  {
+    const t0 = new Date();
+    const before = (ms: number) => new Date(t0.getTime() - ms);
+    await db.insert(schema.customers).values({ id: "cust-cu", name: "Chị Sương", phone: "0949947123", phones: ["0949947123"] }).onConflictDoNothing();
+    await db
+      .insert(schema.orders)
+      .values([
+        { id: "don-cu", systemId: 3210, stage: "DELIVERED", status: 0, insertedAt: before(7 * 86_400_000), customerId: "cust-cu", billFullName: "Chị Sương", billPhone: "0949947123", shipAddress: "Ấp 2, Bình Phong Thạnh", shipFullAddress: "Ấp 2, Xã Bình Phong Thạnh, Huyện Mộc Hóa, Long An", shipProvince: "Long An", conversationId: "conv-suong" },
+        { id: "don-moi", systemId: 3400, stage: "NEW", status: 0, insertedAt: t0, customerId: "cust-cu", billFullName: "Chị Sương", billPhone: "", shipAddress: "", conversationId: "conv-suong" },
+      ])
+      .onConflictDoNothing();
+    const hint = await previousOrderHint({ id: "don-moi", customerId: "cust-cu", conversationId: "conv-suong", billPhone: "", insertedAt: t0 });
+    assert.equal(hint?.orderId, "don-cu", "đơn mới trống SĐT vẫn truy ra đơn cũ của chính khách");
+    assert.equal(hint?.matchedBy, "customer", "nhận ra khách cũ qua mã khách Pancake, không cần SĐT");
+    assert.equal(hint?.phone, "0949947123");
+    assert.ok(hint?.address.includes("Long An"), "lấy đúng địa chỉ cũ");
+    const byConv = await previousOrderHint({ id: "don-khac", customerId: null, conversationId: "conv-suong", billPhone: "", insertedAt: t0 });
+    assert.equal(byConv?.matchedBy, "conversation", "không có mã khách thì khớp theo hội thoại");
+    assert.equal(await previousOrderHint({ id: "don-cu", customerId: "cust-cu", conversationId: "conv-suong", billPhone: "0949947123", insertedAt: before(7 * 86_400_000) }), null, "không lấy ngược đơn mới hơn làm gợi ý");
+
+    const msg = (id: string, text: string, fromPage: boolean, at: Date) => ({ id, text, fromId: fromPage ? "page" : "cus", fromName: fromPage ? "Shop" : "Khách", fromPage, insertedAt: at, hasAttachment: false });
+    const msgs = [
+      msg("m1", "Chị lấy thêm 1 đầm màu đen nữa em giảm giá cho chị nhe", true, before(3_600_000)),
+      msg("m2", "Q002 L", false, before(1_800_000)),
+      msg("m3", "Dạ em chốt thêm 1 đầm Q002 màu Đen, size L giá 470k freeship gửi về địa chỉ cũ ạ", true, t0),
+    ];
+    const close = findClosingMessage(msgs, DEFAULT_CS_RULES.closingKeywords);
+    assert.equal(close?.at?.getTime(), t0.getTime(), "bắt tin chốt mới nhất của shop");
+    assert.ok(close?.text.includes("chốt thêm"));
+    assert.equal(findClosingMessage(msgs.filter((m) => !m.fromPage), DEFAULT_CS_RULES.closingKeywords), null, "tin của khách không tính là shop đã chốt");
+    assert.equal(findClosingMessage(msgs, []), null, "không khai từ khoá thì không bắt");
+    console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; bắt tin shop đã chốt để không sót đơn`);
+  }
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

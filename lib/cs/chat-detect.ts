@@ -12,6 +12,26 @@ import { normalize, stripHtml } from "@/lib/text";
 
 export type ChatHit = { kind: CsKind; keyword: string; message: string };
 
+/**
+ * Tin nhắn MỚI NHẤT của shop báo đã chốt đơn ("em chốt thêm 1 đầm Q002 size L, gửi về địa chỉ cũ").
+ * Chỉ xét tin của shop (fromPage) để không nhầm với khách hỏi "chốt giúp em".
+ */
+export function findClosingMessage(messages: PancakeMessage[], keywords: string[]): { at: Date | null; text: string; keyword: string } | null {
+  const keys = keywords.map((k) => normalize(k).trim()).filter(Boolean);
+  if (!keys.length) return null;
+  let best: { at: Date | null; text: string; keyword: string } | null = null;
+  for (const m of messages) {
+    if (!m.fromPage || !m.text) continue;
+    const plain = stripHtml(m.text);
+    const n = normalize(plain);
+    const hit = keys.find((k) => n.includes(k));
+    if (!hit) continue;
+    const newer = !best || (m.insertedAt && (!best.at || m.insertedAt > best.at));
+    if (newer) best = { at: m.insertedAt, text: plain.slice(0, 240), keyword: hit };
+  }
+  return best;
+}
+
 /** Loại case chỉ có nghĩa SAU khi khách đã đặt đơn (trước đó chỉ là câu hỏi tư vấn, không phải việc cần xử lý) */
 export const POST_PURCHASE_KINDS = new Set<CsKind>(["EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "COMPLAINT"]);
 
@@ -140,12 +160,29 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
       });
       // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case
       const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns, { requireOrder: true, orderInsertedAt: order?.insertedAt ?? null, orderStage: order?.stage ?? null });
-      const hits = [...tagHits, ...msgHits.filter((h) => !tagHits.some((t) => t.kind === h.kind))];
+      // Shop đã chốt trong chat mà chưa thấy đơn mới → dễ sót đơn nhất (khách cũ mua lại thường không nhắn lại SĐT / địa chỉ)
+      const closeHits: ChatHit[] = [];
+      const closing = findClosingMessage(recent, rules.closingKeywords ?? []);
+      if (closing) {
+        // đơn tạo trước lúc chốt 30 phút trở về trước = đơn của lần mua CŨ, không phải lần này
+        const from = closing.at ? new Date(closing.at.getTime() - 30 * 60_000) : null;
+        const hasNewOrder = Boolean(order?.insertedAt && from && new Date(order.insertedAt) >= from);
+        if (!hasNewOrder) {
+          const cuLabel = order?.systemId ? ` Đơn gần nhất #${order.systemId} là của lần mua trước.` : "";
+          closeHits.push({
+            kind: "ORDER_NOT_CREATED",
+            keyword: closing.keyword,
+            message: `Shop đã chốt trong chat${closing.at ? ` lúc ${closing.at.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}` : ""} nhưng chưa thấy đơn mới trên Pancake: “${closing.text}”.${cuLabel} Tạo đơn ngay để không sót.`,
+          });
+        }
+      }
+      const hits = [...closeHits, ...tagHits.filter((t) => !closeHits.some((c) => c.kind === t.kind)), ...msgHits.filter((h) => ![...tagHits, ...closeHits].some((t) => t.kind === h.kind))];
       if (!hits.length) continue;
       withHits += 1;
       const weekKey = new Date().toISOString().slice(0, 10);
       const values = hits.map((h) => ({
-        dedupeKey: `pk-chat:${conv.id}:${h.kind}:${weekKey.slice(0, 7)}`,
+        // "chưa tạo đơn" là việc gấp: mở lại case mỗi ngày nếu vẫn chưa có đơn; các loại khác gom theo tháng
+        dedupeKey: `pk-chat:${conv.id}:${h.kind}:${h.kind === "ORDER_NOT_CREATED" ? weekKey : weekKey.slice(0, 7)}`,
         orderId: order?.id ?? null,
         customerId: order?.customerId ?? null,
         kind: h.kind,
