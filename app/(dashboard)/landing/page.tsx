@@ -11,7 +11,7 @@ import { LANDING_STATUS_LABEL, LANDING_STATUSES, type LandingStatus } from "@/li
 import { OUTCOME_LABEL, type OrderOutcome } from "@/lib/constants/returns";
 import { formatNumber } from "@/lib/format";
 import { loadLandingConfig } from "@/lib/landing/sheet";
-import { landingSummary, listLandingOrders, listVariantOptions } from "@/lib/queries/landing";
+import { LANDING_POS_LABEL, landingSummary, listLandingOrders, listLandingProductOptions, listVariantOptions, type LandingPosState } from "@/lib/queries/landing";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
@@ -37,9 +37,11 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
     status: split(param(raw, "status"), LANDING_STATUSES),
     outcome: split(param(raw, "outcome"), OUTCOMES),
     flag: split(param(raw, "flag"), ["DUP", "RISK", "NO_VARIANT", "PUSH_ERROR"] as const),
+    pos: split(param(raw, "pos"), ["HAS", "DRAFT", "NONE"] as const) as LandingPosState[],
+    product: (param(raw, "product") ?? "").split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
     period,
   };
-  const [rows, summary, variants, config] = await Promise.all([listLandingOrders(filters), landingSummary(period), canManage ? listVariantOptions() : Promise.resolve([]), loadLandingConfig()]);
+  const [rows, summary, variants, config, productOptions] = await Promise.all([listLandingOrders(filters), landingSummary(period), canManage ? listVariantOptions() : Promise.resolve([]), loadLandingConfig(), listLandingProductOptions(period)]);
   const delivered = summary.byOutcome.DELIVERED;
   const returned = summary.byOutcome.RETURNED + summary.byOutcome.RETURNED_BY_RULE;
   const finished = delivered + returned;
@@ -68,6 +70,8 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
         searchPlaceholder="Tên, SĐT, sản phẩm, địa chỉ…"
         period={{ defaultKey: "30d" }}
         facets={[
+          { key: "product", label: "Mã hàng", options: productOptions.map((p) => ({ value: p.code, label: `${p.code} · ${formatNumber(p.count)} đơn (POS ${formatNumber(p.withPos)})` })) },
+          { key: "pos", label: "Đơn POS", options: (["HAS", "DRAFT", "NONE"] as LandingPosState[]).map((v) => ({ value: v, label: LANDING_POS_LABEL[v] })) },
           { key: "status", label: "Trạng thái ERP", options: LANDING_STATUSES.map((s) => ({ value: s, label: LANDING_STATUS_LABEL[s as LandingStatus] })) },
           { key: "outcome", label: "Kết quả đơn", options: OUTCOMES.map((v) => ({ value: v, label: v === "NONE" ? "Chưa có đơn Pancake" : OUTCOME_LABEL[v] })) },
           { key: "flag", label: "Cảnh báo", options: FLAGS },

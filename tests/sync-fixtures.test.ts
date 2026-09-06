@@ -44,6 +44,7 @@ import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
+import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
 
 async function main() {
   await ensureMigrated();
@@ -681,6 +682,34 @@ async function main() {
   const candsPlus = [...cands, { id: "v5", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "Q002DOXL", size: "XL", color: "Đỏ đô" }];
   assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, candsPlus)?.variant.id, "v5", "Q002 XL Đỏ Đô → mẫu Q002 XL Đỏ đô");
   assert.equal(matchVariant({ product: n1.product, variant: n1.variant, size: n1.size, color: n1.color }, cands), null, "không có size XL của Q002 → chưa ghép, chọn tay");
+  {
+    // Bộ lọc mới trên trang landing: theo mã hàng (Q002 / Q003…) và theo trạng thái đơn POS (đã có / nháp / chưa lên)
+    const allP: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+    const landBase = { customerName: "Khách landing", address: "Q1", province: "HCM", productText: "", variantText: "", sizeText: "", colorText: "", quantity: 1, price: 499000, total: 499000, note: "", source: "", adId: null, sheetStatus: "", raw: {}, variantId: null, variantMatchScore: 0 };
+    await db
+      .insert(schema.landingOrders)
+      .values([
+        { rowKey: "tab:Q003:2", sheetGid: "tab:Q003", rowIndex: 2, submittedAt: new Date(), phone: "0900000001", status: "PUSHED", orderId: "rr-9001", ...landBase, productText: "Q003" },
+        { rowKey: "tab:Q002:2", sheetGid: "tab:Q002", rowIndex: 2, submittedAt: new Date(), phone: "0900000002", status: "NEW", ...landBase, productText: "" },
+      ])
+      .onConflictDoNothing();
+    const every = await listLandingOrders({ period: allP });
+    assert.ok(every.some((r) => r.landingProductCode === "Q003" && r.posState === "HAS") && every.some((r) => r.landingProductCode === "Q002" && r.posState === "NONE"), "mã hàng suy ra từ cột sản phẩm hoặc tên tab; trạng thái POS theo đơn đã ghép");
+    if (every.length) {
+      const opts = await listLandingProductOptions(allP);
+      assert.ok(opts.length >= 1, "có danh sách mã hàng để lọc");
+      const code = opts[0].code;
+      const byCode = await listLandingOrders({ period: allP, product: [code] });
+      assert.ok(byCode.length === opts[0].count && byCode.every((r) => r.landingProductCode === code), `lọc mã ${code}: ${byCode.length} dòng`);
+      const noPos = await listLandingOrders({ period: allP, pos: ["NONE"] });
+      assert.ok(noPos.every((r) => !r.orderId && !r.pancakeSystemId && r.posState === "NONE"), "lọc Chưa lên POS đúng");
+      const hasPos = await listLandingOrders({ period: allP, pos: ["HAS"] });
+      assert.ok(hasPos.every((r) => r.orderId && r.posState === "HAS"), "lọc Đã có đơn POS đúng");
+      const draft = await listLandingOrders({ period: allP, pos: ["DRAFT"] });
+      assert.equal(noPos.length + hasPos.length + draft.length, every.length, "3 trạng thái POS phủ hết");
+      console.log(`✓ Lọc landing: mã ${code} ${byCode.length} dòng · POS đã có ${hasPos.length} / nháp ${draft.length} / chưa ${noPos.length}`);
+    }
+  }
   console.log("✓ Đơn landing page: CSV có / không tiêu đề, dò cột theo nội dung, SĐT, size/màu, gói giá, mã hàng từ chiến dịch, ad_id, ghép mẫu mã");
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");

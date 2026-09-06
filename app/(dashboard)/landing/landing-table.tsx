@@ -52,7 +52,7 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
               <TableHead className="text-right">SL · tiền</TableHead>
               <TableHead>Cảnh báo</TableHead>
               <TableHead>Trạng thái ERP</TableHead>
-              <TableHead>Đơn Pancake · kết quả</TableHead>
+              <TableHead>Đơn POS · kết quả</TableHead>
               <TableHead>Nguồn · ghi chú</TableHead>
               {canManage ? <TableHead className="w-40" /> : null}
             </TableRow>
@@ -142,14 +142,16 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                     <TableCell className="text-xs">
                       {r.orderId ? (
                         <>
+                          <span className="mb-0.5 inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">✓ Đã có đơn POS</span>
+                          <br />
                           <Link href={`/orders/${r.orderId}`} className="font-medium text-primary hover:underline">Đơn #{r.orderSystemId ?? ""}</Link>
                           {r.outcome ? <div className={cn("mt-0.5 inline-block rounded px-1.5 py-0.5 text-[11px] font-medium", OUTCOME_TONE[r.outcome])}>{OUTCOME_LABEL[r.outcome]}</div> : null}
                           {r.tracking ? <div className="font-mono text-[10.5px] text-muted-foreground">{r.tracking}{r.shipmentStage ? ` · ${r.shipmentStage}` : ""}</div> : null}
                         </>
                       ) : r.pancakeSystemId ? (
-                        <span className="text-muted-foreground">Đơn nháp POS #{r.pancakeSystemId} · chờ đồng bộ</span>
+                        <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title="ERP đã tạo đơn nháp trên Pancake, đang chờ đồng bộ về">Đơn nháp POS #{r.pancakeSystemId} · chờ đồng bộ</span>
                       ) : (
-                        <span className="text-muted-foreground">Chưa có đơn Pancake</span>
+                        <span className="inline-flex items-center rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" title="Chưa có đơn Pancake nào cùng SĐT và ERP chưa gửi POS">Chưa lên POS</span>
                       )}
                     </TableCell>
                     <TableCell className="max-w-[200px] text-xs">

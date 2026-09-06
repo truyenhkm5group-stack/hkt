@@ -43,6 +43,10 @@ export type LandingRow = {
   shipmentStage: string | null;
   tracking: string | null;
   pancakeSystemId: number | null;
+  /** Đã có đơn trên POS chưa (HAS / DRAFT / NONE) */
+  posState: LandingPosState;
+  /** Mã hàng suy ra từ sheet (Q002, Q003…) */
+  landingProductCode: string;
   pushedAt: Date | null;
   pushError: string;
   duplicates: DuplicateHit[];
@@ -51,7 +55,14 @@ export type LandingRow = {
   internalNote: string;
 };
 
-export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR")[]; period: Period };
+/** Trạng thái đơn trên POS của một dòng landing: HAS = đã có đơn Pancake (ghép theo SĐT hoặc do ERP gửi), DRAFT = đã gửi POS nhưng chưa đồng bộ về, NONE = chưa lên POS */
+export type LandingPosState = "HAS" | "DRAFT" | "NONE";
+export const LANDING_POS_LABEL: Record<LandingPosState, string> = { HAS: "Đã có đơn POS", DRAFT: "Đơn nháp POS · chờ đồng bộ", NONE: "Chưa lên POS" };
+export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR")[]; pos?: LandingPosState[]; product?: string[]; period: Period };
+
+/** Mã hàng của dòng landing: cột sản phẩm trên sheet (Q003…) hoặc tên tab (tab:Q003 → Q003) */
+const PRODUCT_CODE = sql<string>`upper(coalesce(nullif(regexp_replace(${l.productText}, '^.*?([A-Za-z]{1,2}[0-9]{3}).*$', '\\1'), ''), nullif(regexp_replace(${l.sheetGid}, '^tab:', ''), ''), ''))`;
+const POS_STATE = sql<LandingPosState>`case when ${l.orderId} is not null then 'HAS' when ${l.pancakeSystemId} is not null then 'DRAFT' else 'NONE' end`;
 
 function conds(f: LandingFilters): SQL[] {
   const out: SQL[] = [];
@@ -69,6 +80,8 @@ function conds(f: LandingFilters): SQL[] {
     for (const oc of f.outcome) parts.push(oc === "NONE" ? isNull(l.orderId) : sql`(${l.orderId} is not null and ${ORDER_OUTCOME} = ${oc})`);
     out.push(or(...parts) as SQL);
   }
+  if (f.pos?.length) out.push(inArray(POS_STATE, f.pos));
+  if (f.product?.length) out.push(inArray(PRODUCT_CODE, f.product.map((c) => c.toUpperCase())));
   for (const fl of f.flag ?? []) {
     if (fl === "DUP") out.push(sql`jsonb_array_length(coalesce(${l.duplicates}, '[]'::jsonb)) > 0`);
     if (fl === "RISK") out.push(sql`coalesce((${l.risk}->>'risky')::boolean, false)`);
@@ -114,6 +127,8 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
       shipmentStage: s.stage,
       tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${s.trackingCode})`,
       pancakeSystemId: l.pancakeSystemId,
+      posState: POS_STATE,
+      landingProductCode: PRODUCT_CODE,
       pushedAt: l.pushedAt,
       pushError: l.pushError,
       duplicates: l.duplicates,
@@ -170,6 +185,18 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
     for (const r of outcomeRows) byOutcome[r.oc as OrderOutcome | "NONE"] = Number(r.n);
     return { total: Number(row?.total ?? 0), byStatus, byOutcome, duplicates: Number(row?.duplicates ?? 0), risky: Number(row?.risky ?? 0), noVariant: Number(row?.noVariant ?? 0), pushErrors: Number(row?.pushErrors ?? 0), lastImportAt: row?.lastImportAt ? new Date(row.lastImportAt) : null };
   });
+}
+
+/** Các mã hàng có đơn landing trong kỳ (để lọc Q002 / Q003…) kèm số dòng và số đã có đơn POS */
+export async function listLandingProductOptions(period: Period): Promise<{ code: string; count: number; withPos: number }[]> {
+  const db = await getDb();
+  const rows = await db
+    .select({ code: PRODUCT_CODE, count: sql<number>`count(*)`, withPos: sql<number>`count(*) filter (where ${l.orderId} is not null)` })
+    .from(l)
+    .where(and(...conds({ period })))
+    .groupBy(PRODUCT_CODE)
+    .orderBy(desc(sql`count(*)`));
+  return rows.filter((r) => r.code).map((r) => ({ code: r.code, count: Number(r.count), withPos: Number(r.withPos) }));
 }
 
 export type VariantOption = { id: string; label: string; productId: string };
