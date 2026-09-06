@@ -8,12 +8,9 @@ import type { Period } from "@/lib/search-params";
 const o = schema.orders;
 const s = schema.shipments;
 const i = schema.orderItems;
-const MAX_FEE = RETURN_RULE.maxFeeForFakeDelivery;
 
 /** Cước ĐVVC của đơn: ưu tiên số trên vận đơn, không có thì lấy phí đối tác Pancake ghi trên đơn */
 const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
-/** COD THỰC THU (webhook giao thành công / bảng kê / danh sách vận đơn) */
-const COD_COLLECTED = sql`coalesce(${s.codCollected}, 0)`;
 /** Doanh thu COD của đơn: ưu tiên số THỰC THU trên vận đơn, chưa có thì COD vận đơn, rồi COD trên đơn Pancake */
 const COD = sql`coalesce(nullif(${s.codCollected}, 0), nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
 
@@ -22,28 +19,8 @@ const RETURN_COD = RETURN_RULE.maxCodForReturn;
 /** Khách đã trả trước (chuyển khoản / ví) — đơn COD 0 nhưng giao thật */
 const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0))`;
 
-/**
- * Quy tắc 1: vận đơn "giao thành công" chỉ là GIAO THÀNH CÔNG khi doanh thu COD thực > 100K (hoặc khách đã chuyển khoản trước > 100K).
- * COD ≤ 100K (khách không nhận, chỉ trả tiền ship / phí xem hàng) → không thành công. Giữ thêm nhánh cũ: COD = 0 và cước < 10K.
- */
-const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} <= ${MAX_COD} and (${COD} <= ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
 
-/**
- * Quy tắc 1b (ĐƠN HOÀN): vận đơn báo "giao thành công" nhưng doanh thu COD thực < 50K → khách trả hàng, shop không thu được tiền.
- * Viettel Post vẫn ghi nhận "giao thành công" cho chiều hoàn nên phải tự nhận diện bằng doanh thu.
- */
-const RETURN_COD_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} < ${RETURN_COD} and ${COD} < ${RETURN_COD})`;
 
-/**
- * Quy tắc 2: tồn tại một vận đơn Viettel Post khác (vận đơn hoàn / thu tiền ship, ví dụ PKE…1P1)
- * tham chiếu tới vận đơn gốc, ở trạng thái giao thành công, COD = 0, cước < 10K.
- */
-const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
-  select 1 from shipments rl
-  where rl.id <> ${s.id}
-    and rl.stage = 'DELIVERED' and rl.cod_amount = 0 and rl.shipping_fee > 0 and rl.shipping_fee < ${MAX_FEE}
-    and (rl.order_reference = ${s.vtpOrderNumber} or rl.vtp_order_number ~ ('^' || ${s.vtpOrderNumber} || '[0-9]?P[0-9]+$'))
-))`;
 
 /**
  * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ giao thành công, lương, COD).
@@ -67,16 +44,42 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
  */
 export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
 
+/**
+ * TIỀN THỰC THU của đơn: COD đã thu thật (bảng kê Viettel Post / webhook) cộng tiền khách
+ * chuyển trước. CỐ Ý KHÔNG có fallback sang COD khai báo (`cod_amount`, `orders.cod`) —
+ * COD khai báo là số shop MUỐN thu, không phải số ĐÃ thu.
+ */
+const REAL_CASH = sql`(coalesce(${s.codCollected}, 0) + ${PREPAID})`;
+
+/**
+ * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, GTC, lương, COD).
+ *
+ * QUY TẮC NGHIỆP VỤ (chủ shop chốt): kết luận CHỈ dựa trên TIỀN THỰC THU VỀ TÀI KHOẢN theo
+ * bảng kê Viettel Post, tuyệt đối không dựa trên COD khai báo. Viettel Post ghi "giao thành công"
+ * cho cả chiều hoàn và cho đơn khách chỉ trả tiền ship; đơn "giao thành công" mà tiền thực thu
+ * dưới 100K bản chất là đơn hoàn và phải tính là giao hàng KHÔNG thành công.
+ *
+ *  1. vận đơn đang hoàn / đã hoàn → HOÀN, dù đã từng thu tiền;
+ *  2. tiền thực thu > 100K → GIAO THÀNH CÔNG, kể cả khi trạng thái vận đơn chưa cập nhật;
+ *  3. vận đơn đã giao nhưng thực thu < 50K → HOÀN (khách trả hàng, chỉ trả phí);
+ *  4. vận đơn đã giao mà thực thu 50K–100K, hoặc chưa có đồng thực thu nào → KHÔNG THÀNH CÔNG;
+ *  5. vận đơn đang đi → đang giao;
+ *  6. chưa có vận đơn thì mới xét trạng thái Pancake, và Pancake khai "đã giao/đã thanh toán"
+ *     mà không có tiền thực thu cũng KHÔNG được tính là giao thành công.
+ *
+ * Yêu cầu FROM orders LEFT JOIN shipments.
+ */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
-  when ${COD_COLLECTED} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
-  when ${RETURN_COD_RULE} then 'RETURNED'
-  when ${s.stage} = 'DELIVERED' and (${FEE_RULE} or ${LEG_RULE}) then 'RETURNED_BY_RULE'
-  when ${s.stage} = 'DELIVERED' then 'DELIVERED'
+  when ${REAL_CASH} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${s.stage} = 'DELIVERED' and ${REAL_CASH} < ${RETURN_COD} then 'RETURNED'
+  when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
-  when ${o.stage} in ('DELIVERED','PAID') then 'DELIVERED'
+  when ${o.stage} in ('DELIVERED','PAID') and ${REAL_CASH} > ${MAX_COD} then 'DELIVERED'
+  when ${o.stage} in ('DELIVERED','PAID') and ${REAL_CASH} < ${RETURN_COD} then 'RETURNED'
+  when ${o.stage} in ('DELIVERED','PAID') then 'RETURNED_BY_RULE'
   when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
   else 'NOT_SHIPPED' end`;
 

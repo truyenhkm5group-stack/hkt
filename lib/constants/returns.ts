@@ -79,7 +79,9 @@ export function shipmentOutcome(
 ): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
   if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
   if (s.stage !== "DELIVERED") return null;
-  const cod = Number(s.codCollected) || Number(s.codAmount) || 0;
-  if (cod > RETURN_RULE.maxCodForFakeDelivery || prepaid > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
-  return cod < RETURN_RULE.maxCodForReturn && prepaid < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
+  // TIỀN THỰC THU về tài khoản, KHÔNG lấy COD khai báo (cod_amount) làm số đã thu:
+  // vận đơn "giao thành công" mà khách chỉ trả tiền ship thực chất là đơn hoàn.
+  const cash = (Number(s.codCollected) || 0) + prepaid;
+  if (cash > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
+  return cash < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
 }

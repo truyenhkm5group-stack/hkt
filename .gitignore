@@ -45,3 +45,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# file tạm khi theo dõi deploy
+runid.txt
