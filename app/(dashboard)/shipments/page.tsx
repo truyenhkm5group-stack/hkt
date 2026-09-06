@@ -38,7 +38,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           { key: "final", label: "Theo dõi", options: facets.finals, single: true },
           { key: "linked", label: "Nguồn đơn", options: facets.linked, single: true },
         ]}
-        resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} giao thành công · ${formatNumber(summary.returning)} hoàn`}
+        resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} giao thành công (COD thực > 100K) · ${formatNumber(summary.returning)} hoàn / không thu được tiền`}
       />
       <ShipmentsTable rows={rows} pageCount={pageCount} total={total} />
     </div>

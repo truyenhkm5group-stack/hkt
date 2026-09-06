@@ -17,6 +17,7 @@ const COD_COLLECTED = sql`coalesce(${s.codCollected}, 0)`;
 const COD = sql`coalesce(nullif(${s.codCollected}, 0), nullif(${s.codAmount}, 0), ${o.cod}, 0)`;
 
 const MAX_COD = RETURN_RULE.maxCodForFakeDelivery;
+const RETURN_COD = RETURN_RULE.maxCodForReturn;
 /** Khách đã trả trước (chuyển khoản / ví) — đơn COD 0 nhưng giao thật */
 const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0))`;
 
@@ -25,6 +26,12 @@ const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)
  * COD ≤ 100K (khách không nhận, chỉ trả tiền ship / phí xem hàng) → không thành công. Giữ thêm nhánh cũ: COD = 0 và cước < 10K.
  */
 const FEE_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} <= ${MAX_COD} and (${COD} <= ${MAX_COD} or (${COD} = 0 and ${FEE} > 0 and ${FEE} < ${MAX_FEE})))`;
+
+/**
+ * Quy tắc 1b (ĐƠN HOÀN): vận đơn báo "giao thành công" nhưng doanh thu COD thực < 50K → khách trả hàng, shop không thu được tiền.
+ * Viettel Post vẫn ghi nhận "giao thành công" cho chiều hoàn nên phải tự nhận diện bằng doanh thu.
+ */
+const RETURN_COD_RULE = sql`(${s.stage} = 'DELIVERED' and ${PREPAID} < ${RETURN_COD} and ${COD} < ${RETURN_COD})`;
 
 /**
  * Quy tắc 2: tồn tại một vận đơn Viettel Post khác (vận đơn hoàn / thu tiền ship, ví dụ PKE…1P1)
@@ -43,6 +50,7 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
  * Ưu tiên trạng thái VẬN ĐƠN Viettel Post (đầu cuối giao hàng) trước trạng thái đơn Pancake:
  *  1. vận đơn đang hoàn / đã hoàn → không thành công (hoàn);
  *  2. COD thực thu > 100K (webhook / bảng kê / danh sách vận đơn) → giao thành công, kể cả khi trạng thái vận đơn chưa cập nhật;
+ *  2b. vận đơn "giao thành công" nhưng doanh thu COD < 50K → ĐƠN HOÀN (khách trả hàng, VTP vẫn báo giao thành công chiều hoàn);
  *  3. vận đơn đã giao → giao thành công, trừ quy tắc phát hiện không thành công (COD ≤ 100K, COD = 0 & cước nhỏ, vận đơn chiều về);
  *  4. vận đơn đang đi (lấy hàng, đang giao, giao thất bại chờ phát lại) → đang giao;
  *  5. chưa có trạng thái vận đơn mới xét theo Pancake: huỷ / hoàn / đã giao / đã gửi / chưa gửi.
@@ -51,6 +59,7 @@ const LEG_RULE = sql`(${s.vtpOrderNumber} is not null and exists (
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${COD_COLLECTED} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${RETURN_COD_RULE} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' and (${FEE_RULE} or ${LEG_RULE}) then 'RETURNED_BY_RULE'
   when ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
@@ -350,3 +359,15 @@ export async function listOrdersForVariant(key: string, period: Period): Promise
     .limit(300);
   return rows.map((r) => ({ ...r, quantity: Number(r.quantity), lineTotal: Number(r.lineTotal), cod: Number(r.cod), fee: Number(r.fee) }));
 }
+
+/* ------------------------------------------------------------------ *
+ * Kết quả ở mức VẬN ĐƠN (trang Vận đơn, đối soát COD) — cùng ngưỡng doanh thu với ORDER_OUTCOME.
+ * Dùng khi chỉ truy vấn bảng shipments (có thể LEFT JOIN orders để lấy tiền khách chuyển trước).
+ * ------------------------------------------------------------------ */
+
+/** Doanh thu COD của một vận đơn: ưu tiên tiền thực thu, chưa có thì tiền thu hộ khai trên vận đơn */
+export const SHIPMENT_COD = sql`coalesce(nullif(${s.codCollected}, 0), ${s.codAmount}, 0)`;
+/** Vận đơn GIAO THÀNH CÔNG THẬT = đã giao và doanh thu COD > 100K (hoặc khách đã chuyển khoản trước > 100K) */
+export const SHIPMENT_DELIVERED = sql`(${s.stage} = 'DELIVERED' and (${SHIPMENT_COD} > ${MAX_COD} or ${PREPAID} > ${MAX_COD}))`;
+/** Vận đơn KHÔNG THÀNH CÔNG = đang hoàn / đã hoàn, hoặc "giao thành công" nhưng doanh thu ≤ 100K (gồm cả vận đơn chiều về COD 0) */
+export const SHIPMENT_RETURNED = sql`(${s.stage} in ('RETURNING','RETURNED') or (${s.stage} = 'DELIVERED' and not (${SHIPMENT_COD} > ${MAX_COD} or ${PREPAID} > ${MAX_COD})))`;

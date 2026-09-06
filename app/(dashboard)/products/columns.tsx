@@ -125,7 +125,8 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
     {
       id: "sold30",
       accessorKey: "sold30",
-      header: "Bán 30 ngày",
+      // Bán ròng: đã bỏ đơn huỷ và đơn hoàn (gồm đơn VTP báo giao thành công nhưng doanh thu COD ≤ 100K)
+      header: "Bán ròng 30 ngày",
       meta: { align: "right" },
       cell: ({ row }) => <span className={cn("numeric font-semibold", row.original.sold30 === 0 && "text-muted-foreground")}>{formatNumber(row.original.sold30)}</span>,
     },

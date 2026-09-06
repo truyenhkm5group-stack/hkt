@@ -12,6 +12,12 @@ export const RETURN_RULE = {
    * Tỷ lệ giao thành công = giao thành công / (giao thành công + không thành công) trên đơn đã kết thúc.
    */
   maxCodForFakeDelivery: 100_000,
+  /**
+   * ĐƠN HOÀN: vận đơn báo "giao thành công" nhưng doanh thu COD thực < ngưỡng này thực chất là ĐƠN HOÀN — khách trả hàng,
+   * shop không thu được tiền, Viettel Post vẫn ghi nhận "giao thành công" cho chiều hoàn (giao thành công hàng hoàn).
+   * Khoảng giữa hai ngưỡng (50K–100K) là đơn thu thiếu / chỉ thu phí: cũng KHÔNG tính là giao thành công.
+   */
+  maxCodForReturn: 50_000,
 };
 
 export type OrderOutcome = "NOT_SHIPPED" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
@@ -20,7 +26,7 @@ export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "Chưa gửi",
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công (COD thực > 100K)",
-  RETURNED: "Không thành công · hoàn (theo trạng thái)",
+  RETURNED: "Hoàn · hàng về kho (COD thực < 50K)",
   RETURNED_BY_RULE: "Không thành công (giao nhưng COD ≤ 100K)",
   CANCELLED: "Huỷ",
 };
@@ -54,4 +60,23 @@ export function rateTone(rate: number | null) {
   if (rate >= 30) return "text-rose-600 dark:text-rose-400";
   if (rate >= 15) return "text-amber-600 dark:text-amber-400";
   return "text-emerald-600 dark:text-emerald-400";
+}
+
+/**
+ * Kết quả THẬT của một vận đơn theo doanh thu COD (dùng cho danh sách vận đơn, chạy phía client).
+ * Cùng ngưỡng với SHIPMENT_DELIVERED / SHIPMENT_RETURNED trong SQL:
+ *  - đã giao & COD thực > 100K (hoặc khách chuyển khoản trước > 100K) → giao thành công;
+ *  - đã giao & COD thực < 50K → hoàn (khách trả hàng, VTP vẫn báo "giao thành công");
+ *  - đã giao & COD thực 50K–100K → không thành công (chỉ thu phí / thu thiếu);
+ *  - đang hoàn / đã hoàn → hoàn.
+ */
+export function shipmentOutcome(
+  s: { stage: string; codAmount?: number | null; codCollected?: number | null },
+  prepaid = 0,
+): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
+  if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
+  if (s.stage !== "DELIVERED") return null;
+  const cod = Number(s.codCollected) || Number(s.codAmount) || 0;
+  if (cod > RETURN_RULE.maxCodForFakeDelivery || prepaid > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
+  return cod < RETURN_RULE.maxCodForReturn && prepaid < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
 }

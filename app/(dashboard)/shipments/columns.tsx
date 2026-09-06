@@ -87,9 +87,17 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       const s = row.original;
       const label = s.vtpStatusName ?? undefined;
       const short = label && label.length > 34 ? `${label.slice(0, 32).trimEnd()}…` : label;
+      // Viettel Post ghi "Giao thành công" cho cả vận đơn chiều về và đơn khách trả hàng (không thu được tiền):
+      // hiện thêm kết quả thật theo doanh thu COD để không bị đếm nhầm là đơn thành công.
+      const fake = s.stage === "DELIVERED" && s.outcome && s.outcome !== "DELIVERED";
       return (
         <div className="min-w-[140px] space-y-1" title={label}>
           <ShipmentStageBadge stage={s.stage} label={short} />
+          {fake ? (
+            <div className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400">
+              {s.outcome === "RETURNED" ? "Thực tế: hoàn (không thu được tiền)" : "Thực tế: không thành công (COD ≤ 100K)"}
+            </div>
+          ) : null}
           <div className="text-[10.5px] text-muted-foreground" suppressHydrationWarning>
             {s.vtpStatusDate ? formatTimeAgo(s.vtpStatusDate) : "—"}
             {s.vtpLocation ? ` · ${s.vtpLocation}` : ""}

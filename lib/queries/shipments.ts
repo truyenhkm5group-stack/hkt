@@ -1,7 +1,9 @@
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
+import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
+import { shipmentOutcome } from "@/lib/constants/returns";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import type { ListParams } from "@/lib/search-params";
 
@@ -61,7 +63,7 @@ export function shipmentListWhere(params: ListParams) {
   return defined.length ? and(...defined) : undefined;
 }
 
-const orderColumns = { id: true, systemId: true, billFullName: true, billPhone: true, source: true, totalPriceAfterDiscount: true, stage: true } as const;
+const orderColumns = { id: true, systemId: true, billFullName: true, billPhone: true, source: true, totalPriceAfterDiscount: true, stage: true, prepaid: true, transferMoney: true } as const;
 
 export async function listShipments(params: ListParams) {
   const db = await getDb();
@@ -110,7 +112,9 @@ export async function listShipments(params: ListParams) {
     db.select({ total: count() }).from(schema.shipments).where(where),
   ]);
 
-  return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
+  // Kết quả thật của vận đơn theo doanh thu COD: vận đơn chiều về / khách trả hàng vẫn được VTP ghi "Giao thành công"
+  const withOutcome = rows.map((r) => ({ ...r, outcome: shipmentOutcome(r, (r.order?.prepaid ?? 0) + (r.order?.transferMoney ?? 0)) }));
+  return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 
 export type ShipmentListRow = Awaited<ReturnType<typeof listShipments>>["rows"][number];
@@ -156,11 +160,14 @@ export async function shipmentSummary(params: ListParams) {
       codPending: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then ${s.codAmount} else 0 end), 0)`,
       codPendingCount: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then 1 else 0 end), 0)`,
       delivering: sql<number>`coalesce(sum(case when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY') then 1 else 0 end), 0)`,
-      delivered: sql<number>`coalesce(sum(case when ${s.stage} = 'DELIVERED' then 1 else 0 end), 0)`,
+      // Giao thành công / hoàn tính theo DOANH THU COD (>100K là thành công, ≤100K là hàng hoàn) chứ không chỉ theo trạng thái VTP:
+      // vận đơn chiều về và đơn khách trả hàng đều được Viettel Post ghi "Giao thành công" nhưng không thu được tiền.
+      delivered: sql<number>`coalesce(sum(case when ${SHIPMENT_DELIVERED} then 1 else 0 end), 0)`,
       failed: sql<number>`coalesce(sum(case when ${s.stage} = 'DELIVERY_FAILED' then 1 else 0 end), 0)`,
-      returning: sql<number>`coalesce(sum(case when ${s.stage} in ('RETURNING','RETURNED') then 1 else 0 end), 0)`,
+      returning: sql<number>`coalesce(sum(case when ${SHIPMENT_RETURNED} then 1 else 0 end), 0)`,
     })
     .from(s)
+    .leftJoin(schema.orders, eq(schema.orders.id, s.orderId))
     .where(where);
   return {
     total: Number(row?.total ?? 0),

@@ -57,11 +57,13 @@ export function productListWhere(params: ListParams, skip: string[] = []) {
 /** Số lượng bán trong 30 ngày gần nhất theo mẫu mã (không tính đơn huỷ/xoá) */
 function sold30Subquery(db: Db) {
   const since = new Date(Date.now() - 30 * 86_400_000);
+  // Chỉ tính hàng THỰC SỰ bán được: bỏ đơn huỷ và đơn hoàn (gồm cả đơn VTP báo "giao thành công" nhưng doanh thu COD ≤ 100K)
   return db
     .select({ variantId: schema.orderItems.variantId, qty: sql<number>`sum(${schema.orderItems.quantity})`.as("qty") })
     .from(schema.orderItems)
     .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
-    .where(and(gte(schema.orders.insertedAt, since), notInArray(schema.orders.stage, ["CANCELLED", "DELETED"])))
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    .where(and(gte(schema.orders.insertedAt, since), notInArray(schema.orders.stage, ["CANCELLED", "DELETED"]), sql`${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`))
     .groupBy(schema.orderItems.variantId)
     .as("sold30");
 }

@@ -194,25 +194,31 @@ async function main() {
   await mkOrder("rr-9007", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, codCollected: 499000, codStatus: "PAID_TO_BANK", shippingFee: 17000, vtpOrderNumber: "PKE1509000007" });
   // vận đơn "giao thành công" COD vận đơn 0 (trông như không TC) nhưng thực thu 499K → giao thành công
   await mkOrder("rr-9008", "DELIVERED", { stage: "DELIVERED", codAmount: 0, codCollected: 499000, codStatus: "COLLECTED", shippingFee: 8501, vtpOrderNumber: "PKE1509000008" });
+  // ĐƠN HOÀN theo doanh thu: VTP báo "giao thành công" (giao hàng hoàn) nhưng chỉ thu 30K < 50K → tính là hoàn
+  await mkOrder("rr-9009", "DELIVERED", { stage: "DELIVERED", codAmount: 30000, shippingFee: 17000, vtpOrderNumber: "PKE1509000009" });
+  // Thu thiếu 60K (nằm giữa 50K và 100K): không phải hoàn hẳn nhưng cũng KHÔNG tính là giao thành công
+  await mkOrder("rr-9010", "DELIVERED", { stage: "DELIVERED", codAmount: 60000, shippingFee: 17000, vtpOrderNumber: "PKE1509000010" });
   const all: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
   const rr = await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 });
   const row = rr.rows.find((r) => r.variantId === "rr-var");
   assert.ok(row, "có dòng RR-001");
-  assert.equal(row.shipped, 7, "đã gửi 7");
+  assert.equal(row.shipped, 9, "đã gửi 9");
   assert.equal(row.delivered, 3, "giao thành công 3 (1 theo trạng thái + 2 theo COD thực thu > 100K)");
-  assert.equal(row.returned, 3, "không thành công 3 (1 trạng thái + 2 quy tắc)");
-  assert.equal(row.returnedByRule, 2, "2 đơn không TC theo quy tắc COD/cước");
+  assert.equal(row.returned, 5, "không thành công 5 (1 trạng thái + 2 doanh thu < 50K + 2 quy tắc)");
+  assert.equal(row.returnedByRule, 2, "2 đơn không TC theo quy tắc COD/cước (vận đơn chiều về + thu thiếu 60K)");
   assert.equal(row.inTransit, 1, "đang giao 1");
   assert.equal(row.cancelled, 1, "huỷ 1");
-  assert.equal(row.rate, 50, "tỷ lệ hoàn 3/(3+3) = 50%");
-  assert.equal(row.successRate, 50, "tỷ lệ giao thành công 3/(3+3) = 50%");
+  assert.equal(row.rate, 62.5, "tỷ lệ hoàn 5/(3+5) = 62,5%");
+  assert.equal(row.successRate, 37.5, "tỷ lệ giao thành công 3/(3+5) = 37,5%");
   assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
   const summary = await getReturnRateSummary(all, "RR-001");
-  assert.equal(summary.returned, 3);
+  assert.equal(summary.returned, 5);
   assert.equal(summary.delivered, 3);
-  assert.equal(summary.successRate, 50);
+  assert.equal(summary.successRate, 37.5);
   const detail = await listOrdersForVariant(row.key, all);
-  assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED_BY_RULE");
+  assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED", "giao thành công nhưng COD 0 → hoàn");
+  assert.equal(detail.find((d) => d.id === "rr-9009")?.outcome, "RETURNED", "doanh thu 30K < 50K → đơn hoàn");
+  assert.equal(detail.find((d) => d.id === "rr-9010")?.outcome, "RETURNED_BY_RULE", "thu 60K: không hoàn hẳn nhưng cũng không phải giao thành công");
   assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "RETURNED_BY_RULE");
   assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "DELIVERED");
   assert.equal(detail.find((d) => d.id === "rr-9004")?.outcome, "IN_TRANSIT");
