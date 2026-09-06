@@ -29,7 +29,7 @@ import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { clearMemo } from "@/lib/cache";
 import { existingLedgerReferences, insertLedgerExpenses } from "@/lib/integrations/bank/import";
-import { mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mapVtpStatusText, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant } from "@/lib/queries/return-rate";
@@ -804,6 +804,42 @@ async function main() {
     assert.equal(findClosingMessage(msgs.filter((m) => !m.fromPage), DEFAULT_CS_RULES.closingKeywords), null, "tin của khách không tính là shop đã chốt");
     assert.equal(findClosingMessage(msgs, []), null, "không khai từ khoá thì không bắt");
     console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; bắt tin shop đã chốt để không sót đơn`);
+  }
+
+  // File "Danh sách vận đơn" của viettelpost.vn: cột Mã Vận Đơn là vận đơn CHIỀU VỀ (mã gốc + 1P1), cột Mã đơn hàng mới là mã gốc ERP lưu
+  {
+    assert.equal(legBaseCode("PKE15089090051P1"), "PKE1508909005", "cắt đuôi 1P1 ra đúng mã gốc");
+    assert.equal(legBaseCode("PKE15066977671P1"), "PKE1506697767");
+    assert.equal(legBaseCode("PKE1512546011"), "", "vận đơn thường không phải chiều về");
+    // đúng bố cục file VTP: 8 dòng tiêu đề phụ rồi mới tới dòng tiêu đề cột
+    const vtpCsv = [
+      "TỔNG CÔNG TY BƯU CHÍNH VIETTEL,,,,",
+      ",,DANH SÁCH ĐƠN HÀNG,,",
+      ",,,,",
+      "STT,Mã Vận Đơn,Mã đơn hàng,Trạng thái,Tiền thu hộ,Tổng cước,Ngày cập nhật",
+      "1,PKE15090000011P1,PKE1509000001,Giao thành công,0,8501,03/09/2026",
+      "2,PKE1509000009,PKE90085126120642,Giao thành công,499000,15741,03/09/2026",
+    ].join("\n");
+    const vtpRows = parseVtpOrderList(vtpCsv);
+    assert.equal(vtpRows.length, 2);
+    assert.deepEqual({ t: vtpRows[0].trackingCode, o: vtpRows[0].orderCode }, { t: "PKE15090000011P1", o: "PKE1509000001" }, "đọc được cả Mã Vận Đơn và Mã đơn hàng");
+    assert.equal(vtpRows[1].orderCode, "PKE90085126120642");
+
+    // đơn giao thành công thu đủ 499k, khách sau đó từ chối nhận nên VTP tạo vận đơn chiều về
+    await mkOrder("lg-9101", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1600000001" });
+    const truoc = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, "PKE1600000001") });
+    assert.equal(truoc?.stage, "DELIVERED", "đơn gốc trước khi nhập đang là giao thành công");
+    const applied = await applyVtpOrderList(parseVtpOrderList(vtpCsv.replace(/PKE15090000011P1/, "PKE16000000011P1").replace(/,PKE1509000001,/, ",PKE1600000001,")));
+    assert.equal(applied.legs, 1, "1 vận đơn chiều về được ghi thành vận đơn riêng");
+    const sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, "PKE1600000001") });
+    assert.equal(sau?.stage, "DELIVERED", "KHÔNG đè trạng thái vận đơn gốc bằng trạng thái chiều về");
+    const legRow = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, "PKE16000000011P1") });
+    assert.equal(legRow?.orderReference, "PKE1600000001", "vận đơn chiều về trỏ về mã gốc");
+    assert.equal(Number(legRow?.codAmount), 0);
+    // nhờ vậy quy tắc vận đơn chiều về nhận ra đơn gốc là đơn HOÀN, không còn tính là giao thành công
+    const lai = await listOrdersForVariant((await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key, all);
+    assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "RETURNED_BY_RULE", "đơn có vận đơn chiều về đã giao → tính là hoàn");
+    console.log(`✓ Danh sách vận đơn VTP: ghép ${applied.matched}/${applied.total} (${applied.legs} chiều về → đơn gốc thành đơn hoàn)`);
   }
 
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");

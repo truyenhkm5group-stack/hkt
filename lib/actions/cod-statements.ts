@@ -99,15 +99,15 @@ export async function previewVtpOrderList(input: { base64: string; filename: str
   }
 }
 
-const listSchema = z.array(z.object({ trackingCode: z.string().trim().min(5).max(60), statusText: z.string().max(200), cod: z.number().int().min(0), fee: z.number().int().min(0), statusDate: z.string().max(10) })).min(1).max(20000);
+const listSchema = z.array(z.object({ trackingCode: z.string().trim().min(5).max(60), orderCode: z.string().trim().max(60).optional(), statusText: z.string().max(200), cod: z.number().int().min(0), fee: z.number().int().min(0), statusDate: z.string().max(10) })).min(1).max(20000);
 
 /** Ghi trạng thái Viettel Post từ danh sách vận đơn: giai đoạn, COD (Đã trả → đã về ngân hàng), cước */
-export async function importVtpOrderList(input: unknown): Promise<Result<{ total: number; matched: number; updated: number; paid: number; unknown: number }>> {
+export async function importVtpOrderList(input: unknown): Promise<Result<{ total: number; matched: number; updated: number; paid: number; unknown: number; legs: number }>> {
   const { user, error } = await authorize();
   if (error) return { error };
   const parsed = listSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const result = await applyVtpOrderList(parsed.data.map((r) => ({ ...r, trackingCode: r.trackingCode.toUpperCase(), raw: "" })));
+  const result = await applyVtpOrderList(parsed.data.map((r) => ({ ...r, trackingCode: r.trackingCode.toUpperCase(), orderCode: (r.orderCode ?? "").toUpperCase(), raw: "" })));
   await audit({ userId: user.id, userEmail: user.email, action: "VTP_ORDER_LIST_IMPORT", entity: "SHIPMENT", detail: result });
   revalidate();
   return { ok: true, ...result };

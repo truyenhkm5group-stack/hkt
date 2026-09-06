@@ -104,10 +104,21 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
 
 // ───────── Danh sách vận đơn xuất từ viettelpost.vn → Quản lý vận đơn ─────────
 
-export type VtpOrderListRow = { trackingCode: string; statusText: string; cod: number; fee: number; statusDate: string; raw: string };
+export type VtpOrderListRow = { trackingCode: string; orderCode: string; statusText: string; cod: number; fee: number; statusDate: string; raw: string };
+
+/**
+ * Vận đơn chiều về / thu tiền ship do Viettel Post tạo từ vận đơn gốc: mã = mã gốc + [số] + P + số (vd PKE1506697767 → PKE15066977671P1).
+ * File "Danh sách vận đơn" để mã này ở cột "Mã Vận Đơn", còn cột "Mã đơn hàng" mới là mã gốc ERP đang lưu.
+ */
+export function legBaseCode(code: string): string {
+  const m = /^([A-Z0-9]{8,}?)[0-9]?P[0-9]+$/i.exec(code.trim()); // lười để "PKE15089090051P1" ra gốc PKE1508909005, không phải PKE15089090051
+  return m ? m[1].toUpperCase() : "";
+}
 
 const LIST_COL = {
   status: ["trang thai don hang", "trang thai van don", "trang thai", "status"],
+  /** Cột "Mã đơn hàng" của file VTP: với vận đơn chiều về thì đây chính là mã vận đơn gốc */
+  order: ["ma don hang", "ma tham chieu", "ma don"],
   date: ["ngay cap nhat", "ngay trang thai", "thoi gian cap nhat", "ngay tra", "ngay giao", "ngay gui", "ngay tao", "ngay"],
 };
 
@@ -138,12 +149,15 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   const cCod = findCol(headers, COL.cod, ["cuoc", "phi"]);
   const cFee = findCol(headers, COL.fee, ["cod", "thu ho"]);
   const cDate = findCol(headers, LIST_COL.date);
+  const cOrderRaw = findCol(headers, LIST_COL.order, ["van don"]);
+  const cOrder = cOrderRaw === cTrack ? -1 : cOrderRaw;
   const rows: VtpOrderListRow[] = [];
   for (const row of matrix.slice(headerIdx + 1)) {
     const cell = (i: number) => (i >= 0 ? String(row[i] ?? "").trim() : "");
     const trackingCode = cell(cTrack).toUpperCase().replace(/\s+/g, "");
     if (!/^[A-Z0-9][A-Z0-9_-]{4,}$/.test(trackingCode)) continue;
-    rows.push({ trackingCode, statusText: cell(cStatus), cod: parseMoney(cell(cCod)), fee: parseMoney(cell(cFee)), statusDate: toDateKey(cell(cDate)), raw: row.map((c) => String(c ?? "")).join(" | ").slice(0, 200) });
+    const orderCode = cell(cOrder).toUpperCase().replace(/\s+/g, "");
+    rows.push({ trackingCode, orderCode: /^[A-Z0-9][A-Z0-9_-]{4,}$/.test(orderCode) ? orderCode : "", statusText: cell(cStatus), cod: parseMoney(cell(cCod)), fee: parseMoney(cell(cFee)), statusDate: toDateKey(cell(cDate)), raw: row.map((c) => String(c ?? "")).join(" | ").slice(0, 200) });
   }
   if (!rows.length) throw new Error("File không có dòng vận đơn nào");
   return rows;

@@ -1,7 +1,7 @@
 import { eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import { mapVtpStatusText, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mapVtpStatusText, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
 export async function upsertStatementBatches(rows: StatementSummary[], createdBy: string) {
@@ -89,11 +89,22 @@ export async function applyStatementDetail(summary: StatementSummary, rows: Stat
 
 // ───────── Danh sách vận đơn (Quản lý vận đơn → xuất Excel) ─────────
 
-export type OrderListMatch = VtpOrderListRow & { shipmentId: string | null; orderLabel: string; currentStage: string | null; currentCod: string | null; mapped: ReturnType<typeof mapVtpStatusText> };
+export type OrderListMatch = VtpOrderListRow & {
+  shipmentId: string | null;
+  orderLabel: string;
+  currentStage: string | null;
+  currentCod: string | null;
+  mapped: ReturnType<typeof mapVtpStatusText>;
+  /** direct = đúng vận đơn trong ERP; leg = vận đơn chiều về của vận đơn gốc (ghi thành vận đơn riêng, không đè trạng thái đơn gốc) */
+  matchKind: "direct" | "leg" | null;
+  /** Mã vận đơn gốc khi đây là vận đơn chiều về */
+  legOf: string | null;
+};
 
 export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderListMatch[]> {
   const db = await getDb();
-  const codes = [...new Set(rows.map((r) => r.trackingCode))];
+  // File VTP để mã vận đơn chiều về ("…1P1") ở cột Mã Vận Đơn, mã gốc ở cột Mã đơn hàng → tra cả ba dạng
+  const codes = [...new Set(rows.flatMap((r) => [r.trackingCode, r.orderCode, legBaseCode(r.trackingCode)]).filter(Boolean))];
   const found = codes.length
     ? await db
         .select({ id: schema.shipments.id, vtp: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
@@ -107,8 +118,23 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
     if (f.tracking) byCode.set(f.tracking.toUpperCase(), f);
   }
   return rows.map((r) => {
-    const f = byCode.get(r.trackingCode);
-    return { ...r, shipmentId: f?.id ?? null, orderLabel: f ? `#${f.systemId ?? ""} ${f.name ?? ""}`.trim() : "", currentStage: f?.stage ?? null, currentCod: f?.codStatus ?? null, mapped: mapVtpStatusText(r.statusText) };
+    // Mã có đuôi P (…1P1) là vận đơn CHIỀU VỀ: cột "Mã đơn hàng" của file chính là mã gốc, tin hơn suy từ chuỗi.
+    // Phải xét chiều về TRƯỚC, nếu không mã gốc ở cột "Mã đơn hàng" sẽ bị coi là khớp trực tiếp và đè trạng thái đơn gốc.
+    const isLeg = Boolean(legBaseCode(r.trackingCode));
+    const base = isLeg ? r.orderCode || legBaseCode(r.trackingCode) : "";
+    const direct = isLeg ? undefined : (byCode.get(r.trackingCode) ?? (r.orderCode ? byCode.get(r.orderCode) : undefined));
+    const leg = isLeg && base ? byCode.get(base) : undefined;
+    const f = direct ?? leg;
+    return {
+      ...r,
+      shipmentId: f?.id ?? null,
+      orderLabel: f ? `#${f.systemId ?? ""} ${f.name ?? ""}`.trim() : "",
+      currentStage: f?.stage ?? null,
+      currentCod: f?.codStatus ?? null,
+      mapped: mapVtpStatusText(r.statusText),
+      matchKind: f ? (direct ? "direct" : "leg") : null,
+      legOf: leg ? (leg.vtp ?? base) : null,
+    };
   });
 }
 
@@ -121,8 +147,34 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[]) {
   const now = new Date();
   let updated = 0;
   let paid = 0;
+  let legs = 0;
   for (const m of matches) {
     if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
+    // Vận đơn chiều về (mã gốc + "1P1"): ghi thành vận đơn RIÊNG trỏ về mã gốc, không đè trạng thái vận đơn gốc.
+    // Quy tắc tính hoàn (LEG_RULE) thấy vận đơn chiều về đã giao, COD 0, cước nhỏ → đơn gốc là đơn hoàn.
+    if (m.matchKind === "leg") {
+      const statusDateLeg = m.statusDate ? vnStartOfDay(m.statusDate) : null;
+      const values = {
+        carrier: "Viettel Post",
+        vtpOrderNumber: m.trackingCode,
+        trackingCode: m.trackingCode,
+        orderReference: m.legOf ?? null,
+        stage: m.mapped.stage,
+        vtpStatusName: m.statusText,
+        isFinal: m.mapped.final,
+        codAmount: m.cod,
+        shippingFee: m.fee,
+        codStatus: "NOT_APPLICABLE" as const,
+        lastVtpSyncAt: now,
+        ...(statusDateLeg ? { vtpStatusDate: statusDateLeg } : {}),
+      };
+      await db
+        .insert(schema.shipments)
+        .values(values)
+        .onConflictDoUpdate({ target: schema.shipments.vtpOrderNumber, set: { ...values, updatedAt: now } });
+      legs += 1;
+      continue;
+    }
     const statusDate = m.statusDate ? vnStartOfDay(m.statusDate) : null;
     const set: Record<string, unknown> = { stage: m.mapped.stage, vtpStatusName: m.statusText, isFinal: m.mapped.final, lastVtpSyncAt: now, updatedAt: now };
     if (statusDate) set.vtpStatusDate = statusDate;
@@ -142,5 +194,5 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[]) {
     await db.update(schema.shipments).set(set as Partial<typeof schema.shipments.$inferInsert>).where(eq(schema.shipments.id, m.shipmentId));
     updated += 1;
   }
-  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
+  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid, legs, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
 }
