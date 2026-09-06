@@ -694,6 +694,18 @@ async function main() {
   const missing = rowToLanding(Array.from({ length: 13 }, (_, i) => `Cột ${i + 1}`), ["2026-09-06 08:10:46", "Hang", "0979116115", "", "Việt Nam", "", "", "", "", "", "", "", ""], shiftedCols, 82, { singlePrice: 499_000 })!;
   assert.deepEqual({ size: missing.size, address: missing.address, total: missing.total }, { size: "", address: "", total: 499_000 }, "thiếu size & địa chỉ → giữ trống để báo đỏ; giá vẫn 499k");
   assert.deepEqual([landingShippingFee(1, 25_000), landingShippingFee(2, 25_000)], [25_000, 0], "1 sp +25k ship, gói ≥ 2 sp free ship");
+  // Tab khai kèm gid → đọc bằng export theo gid (gviz làm trống SĐT '0963… / giờ dạng chữ trong cột số / ngày)
+  const gidTabs = sheetTabs({ sheetUrl: "https://docs.google.com/spreadsheets/d/ABC/edit#gid=5", gid: "", tabs: "Q003=1293871758, Q002=571194026" });
+  assert.deepEqual(gidTabs.map((t) => [t.key, t.label, t.url]), [["tab:Q003", "Q003", "https://docs.google.com/spreadsheets/d/ABC/export?format=csv&gid=1293871758"], ["tab:Q002", "Q002", "https://docs.google.com/spreadsheets/d/ABC/export?format=csv&gid=571194026"]], "tên=gid → export?format=csv&gid, khoá tab giữ theo tên");
+  // SĐT có dấu ' đầu ô, hoặc cột SĐT trống nhưng SĐT nằm ở ô khác; ô phường / quận không đúng dạng thì không ghép vào địa chỉ
+  const q2new = ["", "Nhà hàng Sơn hà", "'0963564193", "Xã Phúc Trạch, Huyện Hương Khê, Hà Tĩnh", "1 Sản phẩm 555k", "555.000đ (+25k ship)", "Size XL | Màu Đen", "", "QA4_CĐ_06/09_Q002_ĐEN_Linh Tây Luxury_4", "Nhóm quảng cáo Chuyển đổi mới", "Quảng cáo Lượt tương tác mới TXT", "120248121230150618", "120248121229960618"];
+  const q2cols = { time: 0, name: 1, phone: 2, address: 3, province: 4, district: 5, ward: 6, note: 8, variant: 9, offer: 10, source: 11, campaign: 12 } as const; // bố cục cũ của tab Q002 áp lên dòng mới
+  const q2row = rowToLanding(Array.from({ length: 13 }, (_, i) => `Cột ${i + 1}`), q2new, q2cols, 194, { singlePrice: 499_000 })!;
+  assert.deepEqual({ phone: q2row.phone, address: q2row.address, size: q2row.size, color: q2row.color, total: q2row.total, q: q2row.quantity, p: q2row.product }, { phone: "0963564193", address: "Xã Phúc Trạch, Huyện Hương Khê, Hà Tĩnh", size: "XL", color: "Đen", total: 555_000, q: 1, p: "Q002" }, "dòng Q002 bố cục mới: SĐT có dấu ', địa chỉ không dính size / giá, gói 555k, mã từ chiến dịch");
+  const q2blank = rowToLanding(Array.from({ length: 13 }, (_, i) => `Cột ${i + 1}`), ["", "Nguyễn thị Nguyệt", "", "806/04 Quang Trung tt phù mỹ", "1 Sản phẩm 555k", "555.000đ (+25k ship)", "Màu Đen", "", "QA4_CĐ_06/09_Q002_ĐỎ_Linh Tây Luxury_3", "", "", "120248121219310618", "'0978044732"], q2cols, 195)!;
+  assert.deepEqual({ phone: q2blank.phone, size: q2blank.size, color: q2blank.color }, { phone: "0978044732", size: "", color: "Đen" }, "cột SĐT trống → tìm SĐT ở ô khác (không nhầm ad_id); chỉ có màu → size trống để báo đỏ");
+  const q2detect = detectColumnsByContent([["06:15:01 2/9/2026", "A", "'0912020372", "x y z 1"], ["06:16:01 2/9/2026", "B", "'0379154475", "x y z 2"], ["06:17:01 2/9/2026", "C", "'0905774678", "x y z 3"]]);
+  assert.equal(q2detect.phone, 2, "dò cột SĐT dù ô có dấu ' đầu");
   {
     // Bộ lọc mới trên trang landing: theo mã hàng (Q002 / Q003…) và theo trạng thái đơn POS (đã có / nháp / chưa lên)
     const allP: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };

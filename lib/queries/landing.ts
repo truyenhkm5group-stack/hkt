@@ -39,6 +39,13 @@ export type LandingRow = {
   orderId: string | null;
   orderSystemId: number | null;
   orderStage: string | null;
+  /** Đơn POS đặt gì: "Đầm Q003 · Đỏ XL ×1, …" */
+  orderItemsText: string | null;
+  /** Tổng tiền đơn POS sau giảm giá */
+  orderTotal: number | null;
+  /** Trạng thái ở đơn vị vận chuyển: tên trạng thái Viettel Post (nếu có) và thời điểm */
+  shipmentStatusName: string | null;
+  shipmentStatusAt: Date | null;
   outcome: OrderOutcome | null;
   shipmentStage: string | null;
   tracking: string | null;
@@ -126,6 +133,10 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
       orderId: l.orderId,
       orderSystemId: o.systemId,
       orderStage: o.stage,
+      orderItemsText: sql<string | null>`(select string_agg(trim(concat(oi.product_name, case when coalesce(oi.variation_detail,'') <> '' then ' · ' || oi.variation_detail else '' end, ' ×', oi.quantity)), ', ' order by oi.quantity desc) from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false)`,
+      orderTotal: o.totalPriceAfterDiscount,
+      shipmentStatusName: s.vtpStatusName,
+      shipmentStatusAt: sql<Date | null>`coalesce(${s.vtpStatusDate}, ${s.lastVtpSyncAt}, ${s.updatedAt})`,
       outcome: sql<OrderOutcome | null>`case when ${l.orderId} is null then null else ${ORDER_OUTCOME} end`,
       shipmentStage: s.stage,
       tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${s.trackingCode})`,

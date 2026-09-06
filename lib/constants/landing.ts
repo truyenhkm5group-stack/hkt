@@ -262,7 +262,7 @@ export function detectColumnsByContent(rows: string[][]): Partial<Record<Landing
     }
   };
   pick("time", (v) => DATE_RE.test(v));
-  pick("phone", (v) => PHONE_RE.test(v.replace(/[\s.]/g, "")));
+  pick("phone", (v) => PHONE_RE.test(v.replace(/^['"‘’`]+/, "").replace(/[\s.\-()]/g, "")));
   pick("adId", (v) => AD_ID_RE.test(v), 0.8); // cột id đầu tiên = ad_id (utm_term); cột id kế tiếp là adset
   pick("source", (v) => /^https?:\/\//i.test(v));
   pick("variant", (v) => VARIANT_RE.test(v));
@@ -347,6 +347,15 @@ export function findVariantCell(cells: string[]): string {
   const hits = cells.map((c) => (c ?? "").trim()).filter((c) => c && VARIANT_RE.test(c) && c.length <= 80);
   return hits.sort((a, b) => Number(/size/i.test(b)) - Number(/size/i.test(a)))[0] ?? "";
 }
+/** Tìm ô SĐT trong cả dòng (khi cột SĐT dò được bị trống): 9–11 chữ số sau khi bỏ ' " khoảng trắng, không phải ad_id 15–20 số */
+export function findPhoneCell(cells: string[], skip: Set<number> = new Set()): string {
+  for (let i = 0; i < cells.length; i++) {
+    if (skip.has(i)) continue;
+    const c = (cells[i] ?? "").trim().replace(/^['"‘’`]+/, "").replace(/[\s.\-()]/g, "");
+    if (c && !AD_ID_RE.test(c) && PHONE_RE.test(c)) return c;
+  }
+  return "";
+}
 /** Tìm ô gói mua "1 Sản phẩm 499k" trong cả dòng */
 export function findOfferCell(cells: string[]): string {
   return cells.map((c) => (c ?? "").trim()).find((c) => c && OFFER_RE.test(c)) ?? "";
@@ -367,10 +376,12 @@ export type RowToLandingOptions = { singlePrice?: number };
 /** Một dòng sheet → bản ghi landing (rowIndex tính từ 1 cho dòng dữ liệu đầu tiên). Cột dò được trống thì quét cả dòng (biến thể, gói, địa chỉ). */
 export function rowToLanding(headers: string[], cells: string[], cols: Partial<Record<LandingColumnKey, number>>, rowIndex: number, options: RowToLandingOptions = {}): LandingRowInput | null {
   const get = (k: LandingColumnKey) => (cols[k] !== undefined ? (cells[cols[k] as number] ?? "").trim() : "");
-  const phone = normalizePhone(get("phone"));
+  const usedIdx = new Set<number>(Object.values(cols).filter((v): v is number => typeof v === "number"));
+  const phone = normalizePhone(get("phone")) || normalizePhone(findPhoneCell(cells)); // ad_id 15–20 số đã bị loại, cột khác không sinh ra 9–11 chữ số
   const name = get("name");
   if (!phone && !name) return null;
-  const offerText = get("offer") || (parseOfferText(get("product")) ? get("product") : "") || findOfferCell(cells);
+  // cột dò được có thể chứa chữ khác (bố cục đổi giữa các đợt form) → chỉ dùng khi đúng dạng, không thì quét cả dòng
+  const offerText = [get("offer"), get("product")].find((x) => x && parseOfferText(x)) ?? findOfferCell(cells);
   const offer = parseOfferText(offerText);
   let quantity = Math.max(1, Number(String(get("quantity")).replace(/\D/g, "")) || offer?.quantity || 1);
   let price = parseMoney(get("price"));
@@ -382,7 +393,7 @@ export function rowToLanding(headers: string[], cells: string[], cols: Partial<R
     price = options.singlePrice;
     total = options.singlePrice;
   }
-  const variantText = get("variant") || findVariantCell(cells);
+  const variantText = VARIANT_RE.test(get("variant")) ? get("variant") : findVariantCell(cells);
   const parsedVariant = variantText ? parseVariantText(variantText) : { size: "", color: "" };
   const size = get("size") || parsedVariant.size;
   const color = get("color") || parsedVariant.color;
@@ -390,15 +401,21 @@ export function rowToLanding(headers: string[], cells: string[], cols: Partial<R
   const adId = get("adId") || (() => { try { return new URL(get("source")).searchParams.get("utm_term") ?? ""; } catch { return ""; } })();
   let product = get("product");
   if (!product || parseOfferText(product)) product = productCodeFromText(campaign) || productCodeFromText(get("source")) || product;
-  const usedIdx = new Set<number>(Object.values(cols).filter((v): v is number => typeof v === "number"));
+  // cột chiến dịch bị lệch (bố cục đổi) → tìm mã hàng (Q002…) trong bất kỳ ô nào của dòng
+  if (!product) product = cells.map((c) => productCodeFromText(c ?? "")).find(Boolean) ?? "";
   const addressMain = get("address") || findAddressCell(cells, usedIdx);
-  const address = [addressMain, get("ward"), get("district")].filter(Boolean).join(", ");
+  // chỉ ghép ô phường / quận khi đúng là phường / quận (bố cục đổi thì ô đó có thể là "Size XL | Màu Đen" hay giá)
+  const wardCell = get("ward");
+  const districtCell = get("district");
+  const address = [addressMain, WARD_RE.test(wardCell) ? wardCell : "", DISTRICT_RE.test(districtCell) ? districtCell : ""].filter(Boolean).join(", ");
   const raw: Record<string, string> = {};
   headers.forEach((h, i) => {
     const key = h.trim() || `Cột ${i + 1}`;
     raw[key] = (cells[i] ?? "").trim();
   });
-  return { rowIndex, time: parseSheetTime(get("time")), name, phone, address, province: get("province"), product, variant: variantText, size, color, quantity, price, total, note: get("note"), source: campaign || get("source"), campaign, adId, sheetStatus: get("status"), raw };
+  const provinceCell = get("province");
+  const province = isProvince(provinceCell) ? provinceCell : (cells.map((c) => (c ?? "").trim()).find((c) => c && isProvince(c)) ?? "");
+  return { rowIndex, time: parseSheetTime(get("time")), name, phone, address, province, product, variant: variantText, size, color, quantity, price, total, note: get("note"), source: campaign || get("source"), campaign, adId, sheetStatus: get("status"), raw };
 }
 
 /** Link Google Sheet → link CSV export theo gid, hoặc theo TÊN tab (gviz); giữ nguyên nếu đã là link CSV / link khác */
@@ -410,10 +427,19 @@ export function sheetCsvUrl(url: string, gid = "", tabName = ""): string {
   return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv${g ? `&gid=${g}` : ""}`;
 }
 
-/** Danh sách tab cần đọc: theo tên (gviz) nếu khai tabs, không thì theo gid */
+/**
+ * Danh sách tab cần đọc. Khai "Q003=1293871758, Q002=571194026" (tên=gid) → đọc bằng export?format=csv&gid= : trả đúng giá trị
+ * hiển thị (SĐT có dấu ' đầu, giờ dạng chữ). Khai chỉ tên → đọc qua gviz theo tên tab, nhưng gviz suy kiểu cột theo đa số nên ô
+ * chữ trong cột số / ngày (SĐT '0963…, "07:34:53 6/9/2026") bị trả về RỖNG → ưu tiên khai kèm gid.
+ */
 export function sheetTabs(cfg: { sheetUrl: string; gid: string; tabs: string }): { key: string; label: string; url: string }[] {
   const names = cfg.tabs.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean);
-  if (names.length) return names.map((n) => ({ key: `tab:${n}`, label: n, url: sheetCsvUrl(cfg.sheetUrl, "", n) }));
+  if (names.length)
+    return names.map((entry) => {
+      const m = /^(.*?)\s*[=:]\s*(\d{3,})$/.exec(entry);
+      const n = (m ? m[1] : entry).trim();
+      return { key: `tab:${n}`, label: n, url: m ? sheetCsvUrl(cfg.sheetUrl, m[2], "") : sheetCsvUrl(cfg.sheetUrl, "", n) };
+    });
   const gid = cfg.gid || /[#&?]gid=(\d+)/.exec(cfg.sheetUrl)?.[1] || "0";
   return [{ key: gid, label: `gid ${gid}`, url: sheetCsvUrl(cfg.sheetUrl, gid) }];
 }

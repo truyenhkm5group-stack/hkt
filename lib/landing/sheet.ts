@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { clearMemo } from "@/lib/cache";
-import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, parseCsv, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
+import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findOfferCell, findPhoneCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
 import { fetchJson } from "@/lib/integrations/http";
 import { getSettingJson } from "@/lib/settings";
 
@@ -277,7 +277,7 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
   const db = await getDb();
   const candidates = await variantCandidates();
   const rows = await db
-    .select({ id: schema.landingOrders.id, variantId: schema.landingOrders.variantId, score: schema.landingOrders.variantMatchScore, product: schema.landingOrders.productText, variant: schema.landingOrders.variantText, size: schema.landingOrders.sizeText, color: schema.landingOrders.colorText, tab: schema.landingOrders.sheetGid, address: schema.landingOrders.address, price: schema.landingOrders.price, total: schema.landingOrders.total, quantity: schema.landingOrders.quantity, raw: schema.landingOrders.raw, status: schema.landingOrders.status, orderId: schema.landingOrders.orderId, pancakeOrderId: schema.landingOrders.pancakeOrderId })
+    .select({ id: schema.landingOrders.id, variantId: schema.landingOrders.variantId, score: schema.landingOrders.variantMatchScore, product: schema.landingOrders.productText, variant: schema.landingOrders.variantText, size: schema.landingOrders.sizeText, color: schema.landingOrders.colorText, tab: schema.landingOrders.sheetGid, address: schema.landingOrders.address, phone: schema.landingOrders.phone, price: schema.landingOrders.price, total: schema.landingOrders.total, quantity: schema.landingOrders.quantity, raw: schema.landingOrders.raw, status: schema.landingOrders.status, orderId: schema.landingOrders.orderId, pancakeOrderId: schema.landingOrders.pancakeOrderId })
     .from(schema.landingOrders)
     .where(gte(schema.landingOrders.createdAt, new Date(Date.now() - days * 86_400_000)));
   const config = await loadLandingConfig();
@@ -288,6 +288,21 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
     const fix: Record<string, unknown> = {};
     const weak = Boolean(r.variantId) && Number(r.score) <= 5; // ghép tự động chỉ theo mã (chưa từng nhìn size / màu); chọn tay = 99
     if (cells.length) {
+      if (!r.phone) {
+        const ph = normalizePhone(findPhoneCell(cells));
+        if (ph) { fix.phone = ph; r.phone = ph; }
+      }
+      // gói mua trên form ("1 Sản phẩm 555k") là giá thật → ghi đè giá mặc định / giá trống
+      const offer = parseOfferText(findOfferCell(cells));
+      if (offer && offer.total > 0 && (Number(r.total) !== offer.total || r.quantity !== offer.quantity)) {
+        Object.assign(fix, { quantity: offer.quantity, total: offer.total, price: Math.round(offer.total / Math.max(1, offer.quantity)) });
+        r.quantity = offer.quantity; r.total = offer.total; r.price = fix.price as number;
+      }
+      // địa chỉ bị ghép nhầm ô size / giá (bố cục đổi) → lấy lại ô địa chỉ sạch
+      if (r.address && /(size|màu|mau|color|\dk\b|ship)/i.test(r.address)) {
+        const clean = findAddressCell(cells);
+        if (clean && clean.length < r.address.length) { fix.address = clean; r.address = clean; }
+      }
       if (!r.size && !r.color) {
         const vt = r.variant || findVariantCell(cells);
         if (vt) {
