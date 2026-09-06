@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { mergeVtpOrderLists, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
 import { applyStatementDetail, applyVtpOrderList, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
 
@@ -84,8 +85,29 @@ export async function importVtpStatementDetail(input: unknown): Promise<Result<{
   return { ok: true, matched: result.matched, unmatched: result.unmatched, batchId: result.batchId };
 }
 
-const listFilesSchema = z.array(z.object({ filename: z.string().min(1).max(250), base64: z.string().min(1) })).min(1).max(10)
-  .refine((files) => files.reduce((sum, file) => sum + file.base64.length, 0) <= 3_500_000, "Tổng file quá lớn; hãy chia thành các lượt dưới 2,5 MB");
+/**
+ * Giới hạn một lượt nhập. Bảng kê Viettel Post xuất theo từng đợt đối soát nên một lần nhập
+ * vài chục tệp là bình thường; giới hạn 10 tệp trước đây chặn nhầm việc dùng thật.
+ * Trần dung lượng phải nằm dưới serverActions.bodySizeLimit trong next.config.ts.
+ */
+
+const listFilesSchema = z
+  .array(z.object({ filename: z.string().min(1).max(250), base64: z.string().min(1) }))
+  .min(1, "Chưa chọn tệp nào")
+  .max(MAX_LIST_FILES, `Tối đa ${MAX_LIST_FILES} tệp mỗi lượt — hãy chia thành nhiều lượt`)
+  .refine(
+    (files) => files.reduce((sum, file) => sum + file.base64.length, 0) <= MAX_LIST_BASE64,
+    `Tổng dung lượng vượt ${Math.round(MAX_LIST_BASE64 / 1_000_000)} MB — hãy chia thành nhiều lượt`,
+  );
+
+/**
+ * Lỗi hiển thị cho người dùng. Trước đây lỗi Zod lọt thẳng ra giao diện dưới dạng JSON thô
+ * ("too_big: expected array to have <=10 items"), chủ shop không hiểu và không biết phải làm gì.
+ */
+function readableError(error: unknown, fallback: string) {
+  if (error instanceof z.ZodError) return error.issues[0]?.message ?? fallback;
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 function readOrderListFiles(input: unknown) {
   const files = listFilesSchema.parse(input);
@@ -100,7 +122,7 @@ export async function previewVtpOrderListFiles(input: unknown): Promise<Result<{
   const { error } = await authorize();
   if (error) return { error };
   try { return { ok: true, rows: await matchVtpOrderList(readOrderListFiles(input)) }; }
-  catch (e) { return { error: e instanceof Error ? e.message : "Không đọc được file" }; }
+  catch (e) { return { error: readableError(e, "Không đọc được file") }; }
 }
 
 export async function importVtpOrderListFiles(input: unknown): Promise<Result<Awaited<ReturnType<typeof applyVtpOrderList>>>> {
@@ -110,5 +132,5 @@ export async function importVtpOrderListFiles(input: unknown): Promise<Result<Aw
     const result = await applyVtpOrderList(readOrderListFiles(input), user.email);
     revalidate();
     return { ok: true, ...result };
-  } catch (e) { return { error: e instanceof Error ? e.message : "Không nhập được file; hãy xem nhật ký các dòng đã xử lý trước khi thử lại" }; }
+  } catch (e) { return { error: readableError(e, "Không nhập được file; hãy xem nhật ký các dòng đã xử lý trước khi thử lại") }; }
 }

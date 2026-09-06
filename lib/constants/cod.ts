@@ -31,3 +31,15 @@ export function activeCodTab(values: string[] | undefined): CodTab | null {
   const key = statuses === "all" ? "all" : [...statuses].sort().join(",");
   return COD_TABS.find((t) => (t.statuses === "all" ? key === "all" : [...t.statuses].sort().join(",") === key)) ?? null;
 }
+
+/**
+ * Giới hạn một lượt nhập danh sách vận đơn / bảng kê Viettel Post.
+ * Bảng kê xuất theo từng đợt đối soát nên một lần nhập vài chục tệp là bình thường;
+ * giới hạn 10 tệp trước đây chặn nhầm việc dùng thật (chủ shop có 11 tệp).
+ * Trần dung lượng phải nằm dưới serverActions.bodySizeLimit trong next.config.ts.
+ */
+export const MAX_LIST_FILES = 40;
+/** Tổng base64 tối đa (base64 ≈ 4/3 dung lượng gốc). 6 MB base64 ≈ 4,5 MB tệp gốc. */
+export const MAX_LIST_BASE64 = 6_000_000;
+/** Dung lượng gốc tương ứng, dùng cho kiểm tra phía trình duyệt trước khi gửi. */
+export const MAX_LIST_RAW_BYTES = Math.floor(MAX_LIST_BASE64 * 3 / 4);

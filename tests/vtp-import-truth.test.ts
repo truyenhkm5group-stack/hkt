@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { auditLogs, orders, paymentTransactions, shipmentEvents, shipments } from "@/db/schema";
@@ -70,4 +72,39 @@ export async function testVtpImportTruth(db: Db) {
   const [referenceOnly] = await matchVtpOrderList([{ ...rows[0], trackingCode: "PKE_UNMATCHED", orderCode: "PKE9900000001" }]);
   assert.equal(referenceOnly.shipmentId, null, "Không ghi đè vận đơn khác qua mã đơn tham chiếu");
   console.log("✓ VTP Data Truth: đúng cột/ngày/giờ, unknown, nguồn, chống trùng/cũ/xung đột, không tự xác minh tiền");
+}
+
+/**
+ * Chủ shop xuất 11 tệp bảng kê từ Viettel Post và ERP báo lỗi Zod thô
+ * ("too_big: expected array to have <=10 items"). Khoá lại cả hai lỗi:
+ * giới hạn phải đủ cho việc dùng thật, và thông báo phải đọc được.
+ */
+export async function testVtpImportLimits() {
+  const { MAX_LIST_FILES, MAX_LIST_BASE64, MAX_LIST_RAW_BYTES } = await import("@/lib/constants/cod");
+
+  assert.ok(MAX_LIST_FILES >= 20, `Phải nhập được ít nhất 20 tệp mỗi lượt, đang là ${MAX_LIST_FILES}`);
+  assert.ok(MAX_LIST_FILES >= 11, "Trường hợp thật của chủ shop: 11 tệp bảng kê");
+
+  // Trần dung lượng phải nằm dưới serverActions.bodySizeLimit, nếu không sẽ lỗi ở tầng Next.
+  const config = readFileSync("next.config.ts", "utf8");
+  const limit = /bodySizeLimit:\s*"(\d+)mb"/.exec(config);
+  assert.ok(limit, "next.config.ts phải khai báo serverActions.bodySizeLimit");
+  assert.ok(
+    Number(limit[1]) * 1_000_000 > MAX_LIST_BASE64,
+    `bodySizeLimit (${limit[1]}MB) phải lớn hơn MAX_LIST_BASE64 (${MAX_LIST_BASE64}) để không lỗi ở tầng Next`,
+  );
+  assert.equal(MAX_LIST_RAW_BYTES, Math.floor((MAX_LIST_BASE64 * 3) / 4), "trần dung lượng gốc phải quy đổi đúng từ base64");
+
+  // Lỗi vượt giới hạn phải là câu tiếng Việt, không phải JSON thô của Zod.
+  const schema = z
+    .array(z.object({ filename: z.string(), base64: z.string() }))
+    .max(MAX_LIST_FILES, `Tối đa ${MAX_LIST_FILES} tệp mỗi lượt — hãy chia thành nhiều lượt`);
+  const tooMany = Array.from({ length: MAX_LIST_FILES + 1 }, (_, i) => ({ filename: `f${i}.xlsx`, base64: "AA==" }));
+  const result = schema.safeParse(tooMany);
+  assert.equal(result.success, false);
+  const message = result.success ? "" : result.error.issues[0].message;
+  assert.match(message, /Tối đa .* tệp mỗi lượt/, "thông báo phải nói rõ giới hạn bằng tiếng Việt");
+  assert.doesNotMatch(message, /too_big|expected array|origin/, "không được để lộ JSON thô của Zod ra giao diện");
+
+  console.log(`✓ Nhập bảng kê: cho phép ${MAX_LIST_FILES} tệp/lượt, thông báo vượt giới hạn bằng tiếng Việt`);
 }

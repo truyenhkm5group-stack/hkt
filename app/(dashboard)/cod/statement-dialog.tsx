@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { importVtpOrderListFiles, importVtpStatementDetail, parseVtpStatementText, previewVtpOrderListFiles, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
+import { MAX_LIST_FILES, MAX_LIST_RAW_BYTES } from "@/lib/constants/cod";
 import { formatVND, todayVN } from "@/lib/format";
 import type { StatementSummary } from "@/lib/integrations/viettelpost/statement";
 import type { DetailMatch, OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
@@ -301,7 +302,13 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
     if (!files.length) return;
     setRows(null);
     setSourceFiles([]);
-    if (files.reduce((sum, f) => sum + f.size, 0) > 2_500_000) { toast.error("Tổng file quá lớn; hãy chia thành các lượt dưới 2,5 MB"); return; }
+    // Kiểm tra ngay tại trình duyệt để chủ shop biết phải chia mấy lượt, không phải gửi lên rồi mới báo lỗi.
+    if (files.length > MAX_LIST_FILES) { toast.error(`Đang chọn ${files.length} tệp, tối đa ${MAX_LIST_FILES} tệp mỗi lượt — hãy chia thành nhiều lượt`); return; }
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > MAX_LIST_RAW_BYTES) {
+      toast.error(`Tổng ${(totalBytes / 1_000_000).toFixed(1)} MB, tối đa ${(MAX_LIST_RAW_BYTES / 1_000_000).toFixed(1)} MB mỗi lượt — hãy chia thành nhiều lượt`);
+      return;
+    }
     const payloads = await Promise.all(files.map(async (f) => ({ base64: await fileToBase64(f), filename: f.name })));
     startTransition(async () => {
       const result = await previewVtpOrderListFiles(payloads);
@@ -330,7 +337,7 @@ function OrderListImport({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-3 pt-2">
       <div className="space-y-1">
-        <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn) — chọn được nhiều tệp</Label>
+        <Label>File Excel/CSV xuất từ Quản lý vận đơn (viettelpost.vn) — chọn được nhiều tệp (tối đa {MAX_LIST_FILES})</Label>
         <Input type="file" multiple accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFiles(e.target.files)} disabled={pending} />
         <p className="text-[11px] text-muted-foreground">ERP đọc Ngày chuyển trạng thái và Tổng phí, giữ riêng chiều hoàn. File cũ không đè trạng thái mới; thiếu ngày hoặc xung đột cần đối chiếu. Tiền thu hộ là COD khai báo. File này không tự xác minh thực thu hay tiền về ngân hàng; cần bảng kê COD và chứng từ thanh toán.</p>
         {fileNames.length ? <p className="text-[11px] text-muted-foreground">Đã chọn: {fileNames.join(", ")}</p> : null}
