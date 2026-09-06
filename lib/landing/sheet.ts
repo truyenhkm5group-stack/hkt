@@ -154,7 +154,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       result.errors.push(`${tab.label}: không dò được cột SĐT / tên khách (${headers.slice(0, 8).join(" | ")}…). Khai báo cột "#n" ở Cấu hình.`);
       continue;
     }
-    const existing = new Map((await db.select({ id: schema.landingOrders.id, rowKey: schema.landingOrders.rowKey, raw: schema.landingOrders.raw, status: schema.landingOrders.status, variantId: schema.landingOrders.variantId, orderId: schema.landingOrders.orderId, phone: schema.landingOrders.phone }).from(schema.landingOrders).where(eq(schema.landingOrders.sheetGid, tabKey))).map((r) => [r.rowKey, r]));
+    const existing = new Map((await db.select({ id: schema.landingOrders.id, rowKey: schema.landingOrders.rowKey, raw: schema.landingOrders.raw, status: schema.landingOrders.status, variantId: schema.landingOrders.variantId, variantMatchScore: schema.landingOrders.variantMatchScore, orderId: schema.landingOrders.orderId, phone: schema.landingOrders.phone }).from(schema.landingOrders).where(eq(schema.landingOrders.sheetGid, tabKey))).map((r) => [r.rowKey, r]));
     for (let i = dataStart; i < rows.length; i++) {
       const rowNo = i + 1; // số dòng trên sheet (1-based, kể cả tiêu đề)
       const parsed = rowToLanding(headers, rows[i], cols, rowNo, { singlePrice: config.singlePrice });
@@ -202,7 +202,8 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       if (prev) {
         await db
           .update(schema.landingOrders)
-          .set({ ...base, ...(prev.variantId ? {} : { variantId: match?.variant.id ?? null, variantMatchScore: match?.score ?? 0 }) })
+          // chọn tay (99) giữ nguyên; ghép tự động thì lấy kết quả mới nếu tốt hơn / bằng, không ghép được mà cũ chỉ theo mã (≤ 7) thì bỏ để báo "Thiếu size"
+          .set({ ...base, ...(Number(prev.variantMatchScore ?? 0) >= 99 ? {} : match && match.score >= Number(prev.variantMatchScore ?? 0) ? { variantId: match.variant.id, variantMatchScore: match.score } : !match && Number(prev.variantMatchScore ?? 0) <= 7 ? { variantId: null, variantMatchScore: 0 } : {}) })
           .where(eq(schema.landingOrders.id, prev.id));
         result.updated += 1;
         continue;
@@ -273,6 +274,8 @@ export async function refreshLandingChecks(id: string) {
 }
 
 /** Tính lại trùng / rủi ro (và ghép lại mẫu mã cho dòng chưa ghép) cho mọi dòng landing N ngày gần đây */
+const VARIANT_RE_TEST = (v: string) => /(size|màu|mau|color)/i.test(v ?? "");
+
 export async function recheckAllLanding(days = 60): Promise<{ rechecked: number; variantsMatched: number }> {
   const db = await getDb();
   const candidates = await variantCandidates();
@@ -286,7 +289,7 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
     // suy lại từ các ô gốc: dòng nhập trước đây theo cột dò sai (bố cục form đổi) nên thiếu size / màu / địa chỉ / giá
     const cells = r.raw && typeof r.raw === "object" ? Object.values(r.raw as Record<string, string>).map((v) => String(v ?? "")) : [];
     const fix: Record<string, unknown> = {};
-    const weak = Boolean(r.variantId) && Number(r.score) <= 5; // ghép tự động chỉ theo mã (chưa từng nhìn size / màu); chọn tay = 99
+    const auto = Boolean(r.variantId) && Number(r.score) < 99; // ghép tự động (chọn tay = 99 giữ nguyên)
     if (cells.length) {
       if (!r.phone) {
         const ph = normalizePhone(findPhoneCell(cells));
@@ -304,7 +307,7 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
         if (clean && clean.length < r.address.length) { fix.address = clean; r.address = clean; }
       }
       if (!r.size && !r.color) {
-        const vt = r.variant || findVariantCell(cells);
+        const vt = VARIANT_RE_TEST(r.variant) ? r.variant : findVariantCell(cells);
         if (vt) {
           const pv = parseVariantText(vt);
           if (pv.size || pv.color) Object.assign(fix, { variantText: vt, sizeText: pv.size, colorText: pv.color });
@@ -321,8 +324,16 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
     // chỉ sửa nhãn mẫu mã trên ERP cho đúng với khách); không có size lẫn màu → dòng chưa lên POS thì bỏ ghép để báo "Thiếu size",
     // dòng đã có đơn POS thì giữ nguyên (không có gì tốt hơn để thay).
     const linked = Boolean(r.orderId || r.pancakeOrderId || r.status === "PUSHED");
-    if (weak) {
-      if (r.size || r.color || !linked) { fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null; }
+    if (auto) {
+      // chấm lại theo size / màu hiện có: kết quả mới khác & điểm ≥ cũ → thay; không ghép được mà cũ chỉ theo mã / thiếu màu (≤ 7) → bỏ (dòng chưa lên POS) để báo "Thiếu size"
+      const label = r.tab.replace(/^tab:/, "");
+      const product = r.product || (/^[A-Z]{1,2}\d{3}$/i.test(label) ? label.toUpperCase() : "");
+      const again = matchVariant({ product, variant: r.variant, size: r.size, color: r.color }, candidates);
+      if (again && again.score >= Number(r.score) && again.variant.id !== r.variantId) {
+        fix.variantId = again.variant.id; fix.variantMatchScore = again.score; r.variantId = again.variant.id; variantsMatched += 1;
+      } else if (!again && Number(r.score) <= 7 && !linked) {
+        fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null;
+      }
     }
     if (Object.keys(fix).length) await db.update(schema.landingOrders).set({ ...fix, updatedAt: new Date() } as Partial<typeof schema.landingOrders.$inferInsert>).where(eq(schema.landingOrders.id, r.id));
     if (!r.variantId) {

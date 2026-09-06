@@ -462,7 +462,10 @@ export function matchVariant(input: { product: string; variant: string; size: st
   const sizeText = norm(`${input.size} ${input.variant}`);
   const colorText = norm(`${input.color} ${input.variant} ${input.product}`);
   const hasSizeSignal = /(^| )(size )?(xs|s|m|l|xl|xxl|xxxl|[2-5]xl|\d{2})( |$)/.test(sizeText);
-  const hasColorSignal = /(den|trang|do|nau|xanh|vang|hong|tim|be|kem|xam|cam|ghi|reu|navy)/.test(colorText);
+  // màu so theo TỪ: "chuyển đổi" không phải "đỏ", "mới" không phải "m"
+  const COLOR_WORDS = /(^| )(den|trang|do|nau|xanh|vang|hong|tim|be|kem|xam|cam|ghi|reu|navy)( |$)/;
+  const hasColorSignal = COLOR_WORDS.test(colorText);
+  const hasColorWord = (c: string) => c.split(" ").filter(Boolean).every((w) => new RegExp(`(^| )${w}( |$)`).test(colorText));
   // Không có size lẫn màu → không đoán mẫu mã (trước đây chọn bừa mẫu đầu tiên của mã, điểm 5); trừ khi mã chỉ có 1 mẫu
   if (!hasSizeSignal && !hasColorSignal) {
     const sameProduct = candidates.filter((c) => {
@@ -473,6 +476,7 @@ export function matchVariant(input: { product: string; variant: string; size: st
     return sameProduct.length === 1 ? { variant: sameProduct[0], score: 5 } : null;
   }
   let best: { variant: VariantCandidate; score: number } | null = null;
+  let ties = 0;
   for (const c of candidates) {
     let score = 0;
     const code = norm(c.productCode);
@@ -485,11 +489,13 @@ export function matchVariant(input: { product: string; variant: string; size: st
     else if (size && !/(^| )(s|m|l|xl|xxl|xxxl|\d{2})( |$)/.test(sizeText || "")) score += 0;
     else if (size) continue;
     const color = norm(c.color);
-    if (color && colorText.includes(color)) score += 2;
-    else if (color && /(den|trang|do|nau|xanh|vang|hong|tim|be|kem|xam)/.test(colorText)) continue;
-    if (!best || score > best.score) best = { variant: c, score };
+    if (color && hasColorWord(color)) score += 2;
+    else if (color && hasColorSignal) continue;
+    if (!best || score > best.score) { best = { variant: c, score }; ties = 1; }
+    else if (score === best.score) ties += 1;
   }
-  return best;
+  // hai mẫu bằng điểm (vd chỉ biết màu, còn 2 size) → không đoán, để nhân viên hỏi khách rồi chọn tay
+  return best && ties > 1 ? null : best;
 }
 
 export type DuplicateHit = { kind: "LANDING" | "PANCAKE"; id: string; label: string; at: Date | null };

@@ -706,6 +706,17 @@ async function main() {
   assert.deepEqual({ phone: q2blank.phone, size: q2blank.size, color: q2blank.color }, { phone: "0978044732", size: "", color: "Đen" }, "cột SĐT trống → tìm SĐT ở ô khác (không nhầm ad_id); chỉ có màu → size trống để báo đỏ");
   const q2detect = detectColumnsByContent([["06:15:01 2/9/2026", "A", "'0912020372", "x y z 1"], ["06:16:01 2/9/2026", "B", "'0379154475", "x y z 2"], ["06:17:01 2/9/2026", "C", "'0905774678", "x y z 3"]]);
   assert.equal(q2detect.phone, 2, "dò cột SĐT dù ô có dấu ' đầu");
+  // Màu so theo từ: "Chuyển đổi mới" không được coi là "đỏ" (từng ghép nhầm M Đỏ điểm 7); Q002 có mẫu Đen → L Đen
+  const q2cands = [
+    { id: "q2-m-do", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "002 DO M", size: "M", color: "Đỏ" },
+    { id: "q2-l-do", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "002 DO L", size: "L", color: "Đỏ" },
+    { id: "q2-l-den", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "002 DEN L", size: "L", color: "Đen" },
+    { id: "q2-xl-den", productId: "p2", productName: "Đầm Q002", productCode: "Q002", sku: "002 DEN XL", size: "XL", color: "Đen" },
+  ];
+  assert.equal(matchVariant({ product: "Q002", variant: "Nhóm quảng cáo Chuyển đổi mới", size: "", color: "" }, q2cands), null, "chữ rác không phải tín hiệu màu / size → không ghép");
+  assert.equal(matchVariant({ product: "Q002", variant: "Size L | Màu Đen", size: "L", color: "Đen" }, q2cands)?.variant.id, "q2-l-den", "L Đen → đúng mẫu Đen, không phải Đỏ");
+  assert.equal(matchVariant({ product: "Q002", variant: "Size XL | Màu Đen", size: "XL", color: "Đen" }, q2cands)?.variant.id, "q2-xl-den");
+  assert.equal(matchVariant({ product: "Q002", variant: "Màu Đen", size: "", color: "Đen" }, q2cands), null, "chỉ có màu, 2 size Đen → chưa ghép, hỏi khách size");
   {
     // Bộ lọc mới trên trang landing: theo mã hàng (Q002 / Q003…) và theo trạng thái đơn POS (đã có / nháp / chưa lên)
     const allP: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
