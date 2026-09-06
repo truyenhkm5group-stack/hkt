@@ -165,8 +165,15 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                       ) : r.pancakeSystemId ? (
                         <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title="ERP đã tạo đơn nháp trên Pancake, đang chờ đồng bộ về">Đơn nháp POS #{r.pancakeSystemId} · chờ đồng bộ</span>
                       ) : (
-                        <span className="inline-flex items-center rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" title="Chưa có đơn Pancake nào cùng SĐT và ERP chưa gửi POS">Chưa lên POS</span>
+                        <span className="inline-flex items-center rounded-md bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" title="Chưa có đơn Pancake nào cùng SĐT quanh ngày điền form và ERP chưa gửi POS">Chưa lên POS</span>
                       )}
+                      {r.lastPos ? (
+                        <div className="mt-1 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-1.5 py-1 text-[11px] leading-snug text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100" title="Đơn POS gần nhất của SĐT này trong 90 ngày (không phải đơn của lượt điền form này)">
+                          <div className="font-semibold">SĐT đã có đơn POS <Link href={`/orders/${r.lastPos.orderId}`} className="underline">#{r.lastPos.systemId ?? ""}</Link> · {fmt(r.lastPos.at)} <OrderStageBadge stage={r.lastPos.stage as Parameters<typeof OrderStageBadge>[0]["stage"]} className="ml-1 align-middle" /></div>
+                          {r.lastPos.items ? <div>Đặt: {r.lastPos.items}{r.lastPos.total ? ` · ${formatVND(Number(r.lastPos.total))}` : ""}</div> : null}
+                          {r.lastPos.tracking ? <div><span className="font-medium">ĐVVC:</span> {r.lastPos.vtpStatus || (r.lastPos.shipStage ? <ShipmentStageBadge stage={r.lastPos.shipStage as Parameters<typeof ShipmentStageBadge>[0]["stage"]} /> : "—")} <span className="font-mono text-[10.5px] opacity-80">{r.lastPos.tracking}</span></div> : <div className="opacity-80">Chưa gửi đơn vị vận chuyển</div>}
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell className="max-w-[200px] text-xs">
                       {r.source ? <div className="truncate" title={r.source}>{r.source}</div> : null}

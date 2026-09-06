@@ -126,6 +126,43 @@ export async function duplicatesForPhone(phone: string, at: Date, days: number, 
   ];
 }
 
+/** SĐT khớp theo 9 số cuối (Pancake có thể lưu +84 / 84 / có khoảng trắng) */
+const PHONE_TAIL = (col: unknown) => sql`right(regexp_replace(${col}, '\\D', '', 'g'), 9)`;
+
+/**
+ * Đơn Pancake CỦA CHÍNH lượt điền form này: cùng SĐT, lên đơn trong ±days quanh thời điểm điền (kể cả lên TRƯỚC khi điền,
+ * vì nhân viên có thể lên đơn rồi khách mới bấm form), chọn đơn gần thời điểm điền nhất.
+ */
+export async function findPosOrderForLanding(phone: string, at: Date, days: number): Promise<{ id: string } | null> {
+  if (!phone) return null;
+  const db = await getDb();
+  const [o] = await db
+    .select({ id: schema.orders.id })
+    .from(schema.orders)
+    .where(and(sql`${PHONE_TAIL(schema.orders.billPhone)} = ${phone.slice(-9)}`, gte(schema.orders.insertedAt, new Date(at.getTime() - days * 86_400_000)), lte(schema.orders.insertedAt, new Date(at.getTime() + days * 86_400_000)), sql`${schema.orders.stage} not in ('DELETED')`))
+    .orderBy(sql`abs(extract(epoch from (${schema.orders.insertedAt} - ${at}::timestamptz)))`)
+    .limit(1);
+  return o ?? null;
+}
+
+/** Mẫu mã theo đơn POS đã ghép = đúng thứ khách đặt (ưu tiên mẫu cùng mã hàng của dòng landing); ghi đè ghép tự động, không ghi đè chọn tay (99) */
+export async function syncVariantFromPos(landingId: string, orderId: string): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.id, landingId), columns: { productText: true, variantMatchScore: true, variantId: true } });
+  if (!row || Number(row.variantMatchScore ?? 0) >= 99) return false;
+  const items = await db
+    .select({ variantId: schema.orderItems.variantId, size: schema.productVariants.size, color: schema.productVariants.color, code: schema.products.customId })
+    .from(schema.orderItems)
+    .innerJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderItems.variantId))
+    .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+    .where(and(eq(schema.orderItems.orderId, orderId), eq(schema.orderItems.isBonus, false)));
+  const code = (row.productText || "").toUpperCase();
+  const pick = items.find((i) => code && (i.code ?? "").toUpperCase() === code) ?? items[0];
+  if (!pick?.variantId || pick.variantId === row.variantId) return false;
+  await db.update(schema.landingOrders).set({ variantId: pick.variantId, variantMatchScore: 98, sizeText: pick.size ?? "", colorText: pick.color ?? "", updatedAt: new Date() }).where(eq(schema.landingOrders.id, landingId));
+  return true;
+}
+
 export type LandingImportResult = { tabs: { label: string; rows: number; error?: string }[]; rows: number; inserted: number; updated: number; skipped: number; matchedVariants: number; duplicates: number; risky: number; linked: number; errors: string[] };
 
 /** Nhập / cập nhật từ mọi tab đã khai. onlyNew: chỉ xử lý dòng chưa có trong ERP (mặc định cập nhật cả dòng cũ nếu nội dung đổi) */
@@ -219,8 +256,9 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       }
       result.inserted += 1;
       const [hits, risk] = await Promise.all([duplicatesForPhone(parsed.phone, at, config.dedupeDays, row.id), riskForPhone(parsed.phone)]);
-      // đơn Pancake lên ngay sau khi khách điền form = chính đơn này (ghép để theo dõi), không phải trùng
-      const linked = hits.filter((d) => d.kind === "PANCAKE" && d.at && d.at.getTime() >= at.getTime() - 3_600_000).sort((a, b) => (a.at as Date).getTime() - (b.at as Date).getTime())[0];
+      // đơn Pancake cùng SĐT gần thời điểm điền form nhất (trong ±dedupeDays, kể cả lên trước) = chính đơn này (ghép để theo dõi), không phải trùng
+      const linkedOrder = await findPosOrderForLanding(parsed.phone, at, config.dedupeDays);
+      const linked = linkedOrder ? { id: linkedOrder.id } : undefined;
       const dups = hits.filter((d) => !linked || d.id !== linked.id);
       if (dups.length) result.duplicates += 1;
       if (risk.risky) result.risky += 1;
@@ -229,6 +267,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
         .update(schema.landingOrders)
         .set({ duplicates: dups, risk, ...(linked ? { orderId: linked.id } : {}) })
         .where(eq(schema.landingOrders.id, row.id));
+      if (linked) await syncVariantFromPos(row.id, linked.id);
       log(`${tab.label} dòng ${rowNo}: ${parsed.name} ${parsed.phone} · ${parsed.product} → ${match ? `mẫu ${match.variant.productCode} ${match.variant.size} ${match.variant.color}` : "chưa ghép mẫu mã"}${dups.length ? ` · trùng ${dups.length}` : ""}${risk.risky ? " · RỦI RO" : ""}`);
     }
   }
@@ -244,14 +283,10 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
     .where(and(isNull(schema.landingOrders.orderId), inArray(schema.landingOrders.status, ["NEW", "CONFIRMED", "PUSHED"]), sql`${schema.landingOrders.phone} <> ''`, gte(schema.landingOrders.createdAt, new Date(Date.now() - 30 * 86_400_000))));
   for (const l of unlinked) {
     const at = l.at ?? l.createdAt;
-    const [o] = await db
-      .select({ id: schema.orders.id })
-      .from(schema.orders)
-      .where(and(eq(schema.orders.billPhone, l.phone), gte(schema.orders.insertedAt, new Date(at.getTime() - 3_600_000)), lte(schema.orders.insertedAt, new Date(at.getTime() + config.dedupeDays * 86_400_000)), sql`${schema.orders.stage} not in ('DELETED')`))
-      .orderBy(schema.orders.insertedAt)
-      .limit(1);
+    const o = await findPosOrderForLanding(l.phone, at, config.dedupeDays);
     if (o) {
       await db.update(schema.landingOrders).set({ orderId: o.id, updatedAt: new Date() }).where(eq(schema.landingOrders.id, l.id));
+      await syncVariantFromPos(l.id, o.id);
       await refreshLandingChecks(l.id);
       result.linked += 1;
     }
@@ -264,9 +299,17 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
 export async function refreshLandingChecks(id: string) {
   const db = await getDb();
   const config = await loadLandingConfig();
-  const row = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.id, id) });
+  let row = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.id, id) });
   if (!row) return null;
   const at = row.submittedAt ?? row.createdAt;
+  if (!row.orderId && row.phone && row.status !== "CANCELLED") {
+    const o = await findPosOrderForLanding(row.phone, at, config.dedupeDays);
+    if (o) {
+      await db.update(schema.landingOrders).set({ orderId: o.id, updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
+      await syncVariantFromPos(id, o.id);
+      row = { ...row, orderId: o.id };
+    }
+  }
   const [hits, risk] = await Promise.all([duplicatesForPhone(row.phone, at, config.dedupeDays, row.id), riskForPhone(row.phone, row.orderId ?? undefined)]);
   const dups = hits.filter((d) => d.id !== row.orderId);
   await db.update(schema.landingOrders).set({ duplicates: dups, risk, updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
@@ -331,7 +374,8 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
       const again = matchVariant({ product, variant: r.variant, size: r.size, color: r.color }, candidates);
       if (again && again.score >= Number(r.score) && again.variant.id !== r.variantId) {
         fix.variantId = again.variant.id; fix.variantMatchScore = again.score; r.variantId = again.variant.id; variantsMatched += 1;
-      } else if (!again && Number(r.score) <= 7 && !linked) {
+      } else if (!again && !linked) {
+        // không xác định được (thiếu size / màu hoặc hai mẫu bằng điểm) → bỏ đoán cũ để báo đỏ hỏi khách
         fix.variantId = null; fix.variantMatchScore = 0; r.variantId = null;
       }
     }
@@ -346,6 +390,7 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
       }
     }
     await refreshLandingChecks(r.id);
+    if (r.orderId && (await syncVariantFromPos(r.id, r.orderId))) variantsMatched += 1;
   }
   clearMemo();
   return { rechecked: rows.length, variantsMatched };

@@ -45,7 +45,7 @@ import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
-import { recheckAllLanding } from "@/lib/landing/sheet";
+import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
 
 async function main() {
   await ensureMigrated();
@@ -754,6 +754,18 @@ async function main() {
       assert.equal(fixed?.variantId, "rr-var", `ghép yếu có size thật → ghép lại đúng mẫu M Đỏ (recheck ${rc.rechecked} dòng)`);
       assert.equal(fixed?.sizeText, "M");
       assert.ok(Number(fixed?.variantMatchScore) > 5, "điểm ghép mới cao hơn ghép yếu");
+      // Ghép đơn POS cùng SĐT lên TRƯỚC khi điền form (2 ngày) và lấy mẫu mã theo đơn; đơn cũ hơn (20 ngày) chỉ hiện là lịch sử SĐT
+      await db.update(schema.orders).set({ billPhone: "0900000002", insertedAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(schema.orders.id, "rr-9001"));
+      await db.update(schema.orders).set({ billPhone: "+84 900000001", insertedAt: new Date(Date.now() - 20 * 86_400_000) }).where(eq(schema.orders.id, "rr-9005"));
+      const q2land = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.rowKey, "tab:Q002:2") });
+      await refreshLandingChecks(q2land!.id);
+      const q2after = await db.query.landingOrders.findFirst({ where: eq(schema.landingOrders.rowKey, "tab:Q002:2") });
+      assert.equal(q2after?.orderId, "rr-9001", "đơn POS cùng SĐT lên trước form 2 ngày → ghép");
+      assert.equal(q2after?.variantId, "rr-var", "mẫu mã lấy theo đơn POS");
+      assert.equal(Number(q2after?.variantMatchScore), 98);
+      const q3row = (await listLandingOrders({ period: allP })).find((r) => r.phone === "0900000001" && r.orderId === "rr-9001");
+      assert.ok(q3row?.lastPos && q3row.lastPos.orderId === "rr-9005", "SĐT có đơn POS cũ (20 ngày, +84) → hiện lịch sử đơn POS gần nhất ngoài đơn đã ghép");
+      assert.equal(q3row?.lastPos?.stage, "RETURNED");
     }
   }
   console.log("✓ Đơn landing page: CSV có / không tiêu đề, dò cột theo nội dung, SĐT, size/màu, gói giá, mã hàng từ chiến dịch, ad_id, ghép mẫu mã");

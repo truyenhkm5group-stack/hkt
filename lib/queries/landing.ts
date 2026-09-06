@@ -46,6 +46,8 @@ export type LandingRow = {
   /** Trạng thái ở đơn vị vận chuyển: tên trạng thái Viettel Post (nếu có) và thời điểm */
   shipmentStatusName: string | null;
   shipmentStatusAt: Date | null;
+  /** Đơn POS gần nhất của SĐT trong 90 ngày (ngoài đơn đã ghép) — lịch sử khách: đặt gì, trạng thái đơn & ĐVVC */
+  lastPos: { orderId: string; systemId: number | null; at: Date; stage: string; items: string | null; total: number | null; shipStage: string | null; vtpStatus: string | null; tracking: string | null } | null;
   outcome: OrderOutcome | null;
   shipmentStage: string | null;
   tracking: string | null;
@@ -137,6 +139,16 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
       orderTotal: o.totalPriceAfterDiscount,
       shipmentStatusName: s.vtpStatusName,
       shipmentStatusAt: sql<Date | null>`coalesce(${s.vtpStatusDate}, ${s.lastVtpSyncAt}, ${s.updatedAt})`,
+      lastPos: sql<LandingRow["lastPos"]>`(
+        select jsonb_build_object(
+          'orderId', o2.id, 'systemId', o2.system_id, 'at', o2.inserted_at, 'stage', o2.stage, 'total', o2.total_price_after_discount,
+          'items', (select string_agg(trim(concat(oi.product_name, case when coalesce(oi.variation_detail,'') <> '' then ' · ' || oi.variation_detail else '' end, ' ×', oi.quantity)), ', ') from order_items oi where oi.order_id = o2.id and oi.is_bonus = false),
+          'shipStage', s2.stage, 'vtpStatus', s2.vtp_status_name, 'tracking', coalesce(s2.vtp_order_number, s2.tracking_code))
+        from orders o2 left join shipments s2 on s2.order_id = o2.id
+        where ${l.phone} <> '' and right(regexp_replace(o2.bill_phone, '\\D', '', 'g'), 9) = right(${l.phone}, 9)
+          and o2.stage not in ('DELETED') and (${l.orderId} is null or o2.id <> ${l.orderId})
+          and o2.inserted_at >= now() - interval '90 days'
+        order by o2.inserted_at desc limit 1)`,
       outcome: sql<OrderOutcome | null>`case when ${l.orderId} is null then null else ${ORDER_OUTCOME} end`,
       shipmentStage: s.stage,
       tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${s.trackingCode})`,
@@ -164,6 +176,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
     variantLabel: r.variantId ? `${r.productCode ? `${r.productCode} · ` : ""}${r.productName ?? ""}${r.vSize || r.vColor ? ` · ${[r.vColor, r.vSize].filter(Boolean).join(" ")}` : ""}` : "",
     duplicates: Array.isArray(r.duplicates) ? (r.duplicates as DuplicateHit[]).map((d) => ({ ...d, at: d.at ? new Date(d.at) : null })) : [],
     risk: (r.risk as RiskAssessment | null) ?? null,
+    lastPos: r.lastPos ? { ...(r.lastPos as NonNullable<LandingRow["lastPos"]>), at: new Date((r.lastPos as unknown as { at: string }).at) } : null,
   }));
 }
 
