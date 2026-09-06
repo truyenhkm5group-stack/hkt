@@ -51,7 +51,8 @@ const COL = {
   tracking: ["ma van don", "ma buu gui", "ma don hang", "ma don", "ma phieu gui", "order number", "order_number", "tracking", "so hieu", "ma vd", "ma bill", "so van don", "ma phieu"],
   cod: ["tien cod", "tien thu ho", "cod", "money collection", "tien hang", "thu ho"],
   fee: ["cuoc", "phi", "du no", "fee", "tong cuoc"],
-  net: ["thuc nhan", "thu ve", "thuc tra", "con lai", "thanh toan", "net"],
+  // "tien ve" là tên cột thật trên chi tiết bảng kê Viettel Post; thiếu nó ERP phải tự suy cod - fee.
+  net: ["tien ve", "thuc nhan", "thu ve", "thuc tra", "con lai", "thanh toan", "net"],
 };
 
 /**
@@ -223,6 +224,18 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
     }
   }
   if (headerIdx < 0) {
+    // Chi tiết bảng kê tiền COD có mã vận đơn + tiền nhưng KHÔNG có cột trạng thái.
+    // Chỉ thẳng sang đúng tab thay vì bắt chủ shop tự suy từ danh sách cột.
+    const looksLikeStatement = matrix.slice(0, 15).some((r) => {
+      const row = (r ?? []).map((c) => normalize(String(c ?? "")));
+      return findCol(row, COL.tracking) >= 0 && (findCol(row, COL.net) >= 0 || findCol(row, COL.cod, ["cuoc", "phi"]) >= 0);
+    });
+    if (looksLikeStatement) {
+      throw new Error(
+        'Đây là CHI TIẾT BẢNG KÊ tiền COD (có Tiền thu hộ / Tiền về nhưng không có cột Trạng thái). ' +
+          'Hãy nhập ở tab "Chi tiết một bảng kê (file)" để gắn vận đơn vào đợt tiền về.',
+      );
+    }
     const sample = matrix.slice(0, 3).map((r) => (r ?? []).map((c) => String(c ?? "").trim()).filter(Boolean).slice(0, 12).join(" | ")).filter(Boolean).join(" ‖ ");
     throw new Error(`Không tìm thấy cột Mã vận đơn và Trạng thái trong file. Các cột đọc được: ${sample || "(trống)"}`);
   }

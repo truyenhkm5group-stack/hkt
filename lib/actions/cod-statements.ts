@@ -6,7 +6,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { mergeVtpOrderLists, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
-import { applyStatementDetail, applyVtpOrderList, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
+import { applyStatementDetail, applyVtpOrderList, linkStatementDetailToBatch, matchStatementFileToBatch, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch, type StatementFileMatch } from "@/lib/integrations/viettelpost/statement-db";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -133,4 +133,65 @@ export async function importVtpOrderListFiles(input: unknown): Promise<Result<Aw
     revalidate();
     return { ok: true, ...result };
   } catch (e) { return { error: readableError(e, "Không nhập được file; hãy xem nhật ký các dòng đã xử lý trước khi thử lại") }; }
+}
+
+/** Đọc nhiều file chi tiết bảng kê; mỗi file được ghép với đợt tiền về bằng SỐ TIỀN. */
+function readDetailFiles(input: unknown) {
+  const files = listFilesSchema.parse(input);
+  return files.map((file) => {
+    const buffer = Buffer.from(file.base64, "base64");
+    const isText = /\.(csv|txt|tsv)$/i.test(file.filename);
+    return { filename: file.filename, rows: parseStatementDetail(isText ? buffer.toString("utf8") : buffer, file.filename) };
+  });
+}
+
+export async function previewVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[] }>> {
+  const { error } = await authorize();
+  if (error) return { error };
+  try {
+    const parsed = readDetailFiles(input);
+    const files: StatementFileMatch[] = [];
+    for (const file of parsed) files.push(await matchStatementFileToBatch(file.filename, file.rows));
+    return { ok: true, files };
+  } catch (e) {
+    return { error: readableError(e, "Không đọc được file") };
+  }
+}
+
+/**
+ * Nhập nhiều file chi tiết cùng lúc. Chỉ gắn file nào ghép được ĐÚNG MỘT đợt theo số tiền;
+ * file chưa đủ căn cứ được bỏ qua và báo lại lý do, không đoán bừa.
+ */
+export async function importVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[]; linked: number; skipped: number }>> {
+  const { user, error } = await authorize();
+  if (error) return { error };
+  try {
+    const parsed = readDetailFiles(input);
+    const files: StatementFileMatch[] = [];
+    let linked = 0;
+    let skipped = 0;
+    for (const file of parsed) {
+      const match = await matchStatementFileToBatch(file.filename, file.rows);
+      if (!match.batchId) {
+        skipped += 1;
+        files.push(match);
+        continue;
+      }
+      const result = await linkStatementDetailToBatch(match.batchId, file.rows);
+      linked += result.linked;
+      files.push({ ...match, matchedShipments: result.linked });
+      await audit({
+        userId: user.id,
+        userEmail: user.email,
+        action: "COD_STATEMENT_DETAIL",
+        entity: "COD_BATCH",
+        entityId: match.batchId,
+        detail: { filename: file.filename, reference: match.batchReference, linked: result.linked, unmatchedCodes: match.unmatchedCodes },
+      });
+    }
+    revalidate();
+    return { ok: true, files, linked, skipped };
+  } catch (e) {
+    return { error: readableError(e, "Không nhập được file") };
+  }
 }

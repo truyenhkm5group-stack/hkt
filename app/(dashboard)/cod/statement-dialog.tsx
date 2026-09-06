@@ -12,11 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { importVtpOrderListFiles, importVtpStatementDetail, parseVtpStatementText, previewVtpOrderListFiles, previewVtpStatementDetail, saveVtpStatements } from "@/lib/actions/cod-statements";
+import { importVtpOrderListFiles, importVtpStatementDetailFiles, parseVtpStatementText, previewVtpOrderListFiles, previewVtpStatementDetailFiles, saveVtpStatements } from "@/lib/actions/cod-statements";
 import { MAX_LIST_FILES, MAX_LIST_RAW_BYTES } from "@/lib/constants/cod";
-import { formatVND, todayVN } from "@/lib/format";
+import { formatVND } from "@/lib/format";
 import type { StatementSummary } from "@/lib/integrations/viettelpost/statement";
-import type { DetailMatch, OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
+import type { OrderListMatch, StatementFileMatch } from "@/lib/integrations/viettelpost/statement-db";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 
 function fmtDate(key: string) {
@@ -166,111 +166,111 @@ function SummaryImport({ onDone }: { onDone: () => void }) {
   );
 }
 
+/**
+ * Nhập CHI TIẾT bảng kê — nhiều file một lượt.
+ *
+ * File chi tiết Viettel Post không chứa mã bảng kê, nên trước đây chủ shop phải gõ tay mã đợt và
+ * ngày cho từng file (11 file = 11 lượt), và ngày mặc định "hôm nay" còn ghi đè mất ngày về thật.
+ * Nay ERP ghép file với đợt bằng SỐ TIỀN (tổng thu hộ + tổng thu về trùng khít đúng một đợt),
+ * không đoán theo ngày và không sửa số của đợt.
+ */
 function DetailImport({ onDone }: { onDone: () => void }) {
-  const [reference, setReference] = useState("");
-  const [receivedAt, setReceivedAt] = useState(todayVN());
-  const [rows, setRows] = useState<DetailMatch[] | null>(null);
+  const [files, setFiles] = useState<StatementFileMatch[] | null>(null);
+  const [sourceFiles, setSourceFiles] = useState<{ base64: string; filename: string }[]>([]);
   const [pending, startTransition] = useTransition();
-  const summary = useMemo(() => {
-    const list = rows ?? [];
-    const matched = list.filter((r) => r.shipmentId);
-    return { matched: matched.length, unmatched: list.length - matched.length, cod: list.reduce((a, r) => a + r.cod, 0), fee: list.reduce((a, r) => a + r.fee, 0), net: list.reduce((a, r) => a + r.net, 0) };
-  }, [rows]);
 
-  const onFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (!reference) {
-      const m = file.name.match(/[A-Z]{2,}[A-Z0-9]*(?:-[A-Z0-9]+){2,}/i);
-      if (m) setReference(m[0].toUpperCase());
+  const onFiles = async (list: FileList | null) => {
+    const picked = list ? Array.from(list) : [];
+    if (!picked.length) return;
+    setFiles(null);
+    setSourceFiles([]);
+    if (picked.length > MAX_LIST_FILES) { toast.error(`Đang chọn ${picked.length} tệp, tối đa ${MAX_LIST_FILES} tệp mỗi lượt`); return; }
+    const totalBytes = picked.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > MAX_LIST_RAW_BYTES) {
+      toast.error(`Tổng ${(totalBytes / 1_000_000).toFixed(1)} MB, tối đa ${(MAX_LIST_RAW_BYTES / 1_000_000).toFixed(1)} MB mỗi lượt`);
+      return;
     }
-    const buf = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < buf.length; i += 0x8000) binary += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    const base64 = btoa(binary);
+    const payloads = await Promise.all(picked.map(async (f) => ({ base64: await fileToBase64(f), filename: f.name })));
     startTransition(async () => {
-      const result = await previewVtpStatementDetail({ base64, filename: file.name });
-      if ("error" in result) toast.error(result.error);
-      else {
-        setRows(result.rows);
-        toast.success(`Đã đọc ${result.rows.length} vận đơn`);
-      }
+      const result = await previewVtpStatementDetailFiles(payloads);
+      if ("error" in result) { toast.error(result.error); return; }
+      setFiles(result.files);
+      setSourceFiles(payloads);
+      const ready = result.files.filter((f) => f.batchId).length;
+      toast.success(`Đọc ${result.files.length} tệp · ${ready} tệp ghép được đợt tiền về`);
     });
   };
 
   const submit = () =>
     startTransition(async () => {
-      if (!rows?.length) return;
-      if (!reference.trim()) {
-        toast.error("Nhập mã bảng kê");
-        return;
-      }
-      const result = await importVtpStatementDetail({
-        summary: { reference: reference.trim(), receivedAt, codGross: summary.cod, feeTotal: summary.fee, netAmount: summary.net },
-        rows: rows.map((r) => ({ trackingCode: r.trackingCode, cod: r.cod, fee: r.fee, net: r.net })),
-      });
-      if ("error" in result) toast.error(result.error);
-      else {
-        toast.success(`Đã ghép ${result.matched} vận đơn vào bảng kê${result.unmatched ? ` · ${result.unmatched} mã không có trong ERP` : ""}`);
-        onDone();
-      }
+      if (!sourceFiles.length) return;
+      const result = await importVtpStatementDetailFiles(sourceFiles);
+      if ("error" in result) { toast.error(result.error); return; }
+      toast.success(`Đã gắn ${result.linked} vận đơn vào đợt tiền về`);
+      if (result.skipped) toast.warning(`${result.skipped} tệp chưa ghép được đợt — xem lý do trong bảng`);
+      setFiles(result.files);
+      if (!result.skipped) onDone();
     });
+
+  const ready = (files ?? []).filter((f) => f.batchId).length;
 
   return (
     <div className="space-y-3 pt-2">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="space-y-1">
-          <Label>Mã bảng kê</Label>
-          <Input value={reference} onChange={(e) => setReference(e.target.value.toUpperCase())} placeholder="PCOD-A-GLMTQY04-2609-55" />
-        </div>
-        <div className="space-y-1">
-          <Label>Ngày đối soát</Label>
-          <Input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label>File chi tiết (.xlsx / .csv)</Label>
-          <Input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFile(e.target.files?.[0])} disabled={pending} />
-        </div>
+      <div className="space-y-1">
+        <Label>File chi tiết bảng kê (.xlsx / .csv) — chọn được nhiều tệp (tối đa {MAX_LIST_FILES})</Label>
+        <Input type="file" multiple accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFiles(e.target.files)} disabled={pending} />
+        <p className="text-[11px] text-muted-foreground">
+          ERP tự ghép mỗi tệp với đúng đợt tiền về bằng cách so tổng Tiền thu hộ và Tiền thu về với số trên bảng kê —
+          không đoán theo ngày. Tệp không khớp đợt nào sẽ được bỏ qua kèm lý do; số tiền của đợt giữ nguyên theo chứng từ gốc.
+        </p>
       </div>
-      {rows ? (
+      {files ? (
         <>
           <div className="flex flex-wrap gap-2 text-sm">
-            <Badge variant="secondary">Ghép được {summary.matched}/{rows.length} vận đơn</Badge>
-            {summary.unmatched ? <Badge variant="outline">{summary.unmatched} mã không có trong ERP</Badge> : null}
-            <Badge variant="outline">COD {formatVND(summary.cod)}</Badge>
-            <Badge variant="outline">Cước {formatVND(summary.fee)}</Badge>
-            <Badge variant="outline">Thu về {formatVND(summary.net)}</Badge>
+            <Badge variant="secondary">{ready}/{files.length} tệp ghép được đợt</Badge>
+            <Badge variant="outline">Thu về {formatVND(files.reduce((a, f) => a + f.netAmount, 0))}</Badge>
+            <Badge variant="outline">{files.reduce((a, f) => a + f.matchedShipments, 0)} vận đơn có trong ERP</Badge>
           </div>
           <div className="max-h-[45vh] overflow-auto rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Mã vận đơn</TableHead>
-                  <TableHead>Đơn ERP</TableHead>
+                  <TableHead>Tệp</TableHead>
+                  <TableHead>Đợt tiền về</TableHead>
                   <TableHead className="text-right">COD</TableHead>
                   <TableHead className="text-right">Cước</TableHead>
                   <TableHead className="text-right">Thu về</TableHead>
-                  <TableHead>Trạng thái COD</TableHead>
+                  <TableHead className="text-right">Vận đơn ghép</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r, i) => (
-                  <TableRow key={`${r.trackingCode}-${i}`} className={r.shipmentId ? "" : "opacity-60"}>
-                    <TableCell className="font-mono text-xs">{r.trackingCode}</TableCell>
-                    <TableCell className="text-sm">{r.orderLabel || <span className="text-muted-foreground">Không có trong ERP</span>}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatVND(r.cod)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatVND(r.fee)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatVND(r.net)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{r.codStatus === "PAID_TO_BANK" ? "Đã về ngân hàng (sẽ ghi lại)" : (r.codStatus ?? "—")}</TableCell>
+                {files.map((f) => (
+                  <TableRow key={f.filename} className={f.batchId ? "" : "opacity-70"}>
+                    <TableCell className="max-w-[220px] truncate text-xs">{f.filename}</TableCell>
+                    <TableCell className="text-sm">
+                      {f.batchReference ? (
+                        <span className="font-medium">{f.batchReference}</span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400">{f.issue}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatVND(f.codGross)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatVND(f.feeTotal)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatVND(f.netAmount)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {f.matchedShipments}/{f.rows}
+                      {f.unmatchedCodes ? <span className="block text-[10.5px] text-muted-foreground">{f.unmatchedCodes} mã không có trong ERP</span> : null}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-          <DialogFooter>
-            <Button type="button" onClick={submit} disabled={pending || !summary.matched}>
-              {pending ? <Loader2 className="size-4 animate-spin" /> : null} Ghi bảng kê & đánh dấu {summary.matched} vận đơn đã về
+          <div className="flex justify-end">
+            <Button onClick={submit} disabled={pending || !ready}>
+              Gắn {ready} tệp vào đợt tiền về
             </Button>
-          </DialogFooter>
+          </div>
         </>
       ) : null}
     </div>

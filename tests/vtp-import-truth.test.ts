@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
-import { auditLogs, orders, paymentTransactions, shipmentEvents, shipments } from "@/db/schema";
+import { auditLogs, codBatches, orders, paymentTransactions, shipmentEvents, shipments } from "@/db/schema";
 import { mergeVtpOrderLists, parseStatementDetail, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
-import { applyVtpOrderList, matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
+import { applyVtpOrderList, linkStatementDetailToBatch, matchStatementFileToBatch, matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 
 /** Bố cục thật của VTP, dữ liệu tổng hợp để không đưa thông tin khách hàng vào repo public. */
 export async function testVtpImportTruth(db: Db) {
@@ -107,4 +107,60 @@ export async function testVtpImportLimits() {
   assert.doesNotMatch(message, /too_big|expected array|origin/, "không được để lộ JSON thô của Zod ra giao diện");
 
   console.log(`✓ Nhập bảng kê: cho phép ${MAX_LIST_FILES} tệp/lượt, thông báo vượt giới hạn bằng tiếng Việt`);
+}
+
+/**
+ * Chi tiết bảng kê Viettel Post: bố cục thật của file "Bao_cao_chi_tiet_bang_ke_N.xlsx".
+ * File KHÔNG có cột Trạng thái và KHÔNG chứa mã bảng kê, nên ERP phải (1) chỉ đúng tab,
+ * (2) ghép file với đợt tiền về bằng SỐ TIỀN chứ không đoán theo ngày.
+ * Số liệu dưới đây là số tổng hợp, không có thông tin khách hàng.
+ */
+export async function testStatementDetailMatching(db: Db) {
+  const header = "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)";
+  const body = [
+    "PKE9900000101,GLMTQY214,A,0900000001,X,31/08/2026 18:37:53,01/09/2026 11:14:09,424000,17000,407000",
+    "CHPKE9900000102,GLMTQY214,B,,Y,02/09/2026 15:19:25,,0,5000,-5000",
+    "PKE99000001031P1,GLMTQY214,C,0900000003,Z,03/09/2026 20:06:37,,0,8501,-8501",
+  ].join("\n");
+  const file = `${header}\n${body}`;
+
+  // 1. Đọc đúng ba cột tiền, kể cả số âm của chiều hoàn.
+  const rows = parseStatementDetail(file, "Bao_cao_chi_tiet_bang_ke_9.csv");
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].cod, 424000);
+  assert.equal(rows[0].fee, 17000);
+  assert.equal(rows[0].net, 407000, "phải đọc cột 'Tiền thu về', không tự suy");
+  assert.equal(rows[1].net, -5000, "chiều hoàn có tiền về âm");
+  const codGross = rows.reduce((a, r) => a + r.cod, 0);
+  const feeTotal = rows.reduce((a, r) => a + r.fee, 0);
+  const netAmount = rows.reduce((a, r) => a + r.net, 0);
+  assert.equal(netAmount, codGross - feeTotal, "thu về = thu hộ − cước");
+
+  // 2. Nhập nhầm sang tab Danh sách vận đơn phải được chỉ sang đúng tab.
+  assert.throws(() => parseVtpOrderList(file), /CHI TIẾT BẢNG KÊ/, "phải chỉ rõ tab đúng thay vì chỉ liệt kê cột");
+
+  // 3. Ghép file với đợt bằng số tiền, không đoán ngày.
+  const receivedAt = new Date("2026-09-04T00:00:00Z");
+  await db.insert(codBatches).values({
+    id: "batch-match-test", reference: "PCOD-A-TEST-MATCH", carrier: "Viettel Post",
+    receivedAt, totalAmount: netAmount, codGross, feeTotal, source: "VTP_STATEMENT", createdBy: "test",
+  });
+  const match = await matchStatementFileToBatch("Bao_cao_chi_tiet_bang_ke_9.csv", rows);
+  assert.equal(match.batchReference, "PCOD-A-TEST-MATCH", "ghép được đúng đợt theo số tiền");
+  assert.equal(match.issue, null);
+  assert.equal(match.netAmount, netAmount);
+
+  // Số tiền lệch một đồng thì KHÔNG được ghép bừa.
+  const off = rows.map((r, i) => (i === 0 ? { ...r, net: r.net + 1 } : r));
+  const noMatch = await matchStatementFileToBatch("khac.csv", off);
+  assert.equal(noMatch.batchId, null, "lệch số tiền thì không ghép");
+  assert.match(noMatch.issue ?? "", /Không có đợt nào khớp/);
+
+  // 4. Gắn vận đơn KHÔNG được sửa số hay ngày của đợt (số của đợt là chứng từ gốc).
+  await linkStatementDetailToBatch("batch-match-test", rows);
+  const after = await db.query.codBatches.findFirst({ where: eq(codBatches.id, "batch-match-test") });
+  assert.equal(Number(after?.totalAmount), netAmount, "không đè tổng tiền của đợt");
+  assert.equal(new Date(after!.receivedAt).getTime(), receivedAt.getTime(), "không đè ngày về của đợt");
+
+  console.log(`✓ Chi tiết bảng kê: đọc đúng 3 cột tiền, ghép đợt bằng số tiền (${netAmount}), không đè số/ngày của đợt`);
 }

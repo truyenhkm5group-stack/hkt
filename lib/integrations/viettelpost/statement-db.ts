@@ -4,7 +4,15 @@ import { vnStartOfDay } from "@/lib/format";
 import { legBaseCode, mapVtpStatusText, mergeVtpOrderLists, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
-export async function upsertStatementBatches(rows: StatementSummary[], createdBy: string) {
+/**
+ * Ghi đợt nhận tiền từ bảng kê.
+ *
+ * `preserveExisting` dùng cho luồng nhập CHI TIẾT: khi đợt đã tồn tại (nhập từ bảng kê tổng hợp)
+ * thì số của đợt là số trên chứng từ gốc, KHÔNG được ghi đè bằng số cộng từ file chi tiết hay
+ * bằng ngày mặc định của form. Trước đây nhập chi tiết đè cả ngày về lẫn tổng tiền của đợt,
+ * tức xoá mất số thật đang hiển thị ở bảng đối soát.
+ */
+export async function upsertStatementBatches(rows: StatementSummary[], createdBy: string, options: { preserveExisting?: boolean } = {}) {
   const db = await getDb();
   let created = 0;
   let updated = 0;
@@ -21,7 +29,19 @@ export async function upsertStatementBatches(rows: StatementSummary[], createdBy
     };
     const existing = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, r.reference), columns: { id: true } });
     if (existing) {
+      if (options.preserveExisting) {
+        // Chỉ điền ô còn trống; không đụng ngày về và các số đã có từ chứng từ gốc.
+        await db
+          .update(schema.codBatches)
+          .set({
+            totalAmount: sql`case when ${schema.codBatches.totalAmount} = 0 then ${values.totalAmount} else ${schema.codBatches.totalAmount} end`,
+            codGross: sql`case when ${schema.codBatches.codGross} = 0 then ${values.codGross} else ${schema.codBatches.codGross} end`,
+            feeTotal: sql`case when ${schema.codBatches.feeTotal} = 0 then ${values.feeTotal} else ${schema.codBatches.feeTotal} end`,
+          })
+          .where(eq(schema.codBatches.id, existing.id));
+      } else {
       await db.update(schema.codBatches).set({ receivedAt: values.receivedAt, totalAmount: values.totalAmount, codGross: values.codGross, feeTotal: values.feeTotal, source: values.source }).where(eq(schema.codBatches.id, existing.id));
+      }
       updated += 1;
     } else {
       await db.insert(schema.codBatches).values({ ...values, note: "Bảng kê Viettel Post" });
@@ -63,7 +83,7 @@ export async function applyStatementDetail(summary: StatementSummary, rows: Stat
   const codGross = summary.codGross || rows.reduce((a, r) => a + r.cod, 0);
   const feeTotal = summary.feeTotal || rows.reduce((a, r) => a + r.fee, 0);
   const net = summary.netAmount || codGross - feeTotal;
-  await upsertStatementBatches([{ ...summary, codGross, feeTotal, netAmount: net }], createdBy);
+  await upsertStatementBatches([{ ...summary, codGross, feeTotal, netAmount: net }], createdBy, { preserveExisting: true });
   const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, summary.reference), columns: { id: true, receivedAt: true } });
   if (!batch) throw new Error("Không tạo được đợt nhận tiền");
   const now = new Date();
@@ -211,4 +231,91 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   }
   return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, paid: 0, legs, stale, duplicate, conflicts, missingDate,
     unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
+}
+
+export type StatementFileMatch = {
+  filename: string;
+  rows: number;
+  codGross: number;
+  feeTotal: number;
+  netAmount: number;
+  /** Đợt khớp CHÍNH XÁC theo số tiền; null nghĩa là chưa đủ căn cứ để gắn. */
+  batchId: string | null;
+  batchReference: string | null;
+  batchReceivedAt: Date | null;
+  /** Vì sao không gắn được — hiển thị thẳng cho người dùng. */
+  issue: string | null;
+  matchedShipments: number;
+  unmatchedCodes: number;
+};
+
+/**
+ * Ghép FILE CHI TIẾT với ĐỢT TIỀN VỀ bằng SỐ TIỀN, không đoán theo ngày.
+ *
+ * File chi tiết Viettel Post không chứa mã bảng kê, còn tên file chỉ là "Bao_cao_chi_tiet_bang_ke_8".
+ * Nhưng tổng "Tiền thu hộ" và tổng "Tiền thu về" của file trùng khít với codGross/totalAmount của
+ * đúng một đợt đã nhập từ bảng kê tổng hợp — đó là bằng chứng đủ mạnh để gắn tự động.
+ * Chỉ gắn khi khớp DUY NHẤT một đợt; khớp nhiều hoặc không khớp thì báo để người dùng tự chọn.
+ */
+export async function matchStatementFileToBatch(filename: string, rows: StatementDetailRow[]): Promise<StatementFileMatch> {
+  const db = await getDb();
+  const codGross = rows.reduce((a, r) => a + r.cod, 0);
+  const feeTotal = rows.reduce((a, r) => a + r.fee, 0);
+  const netAmount = rows.reduce((a, r) => a + r.net, 0);
+  const matches = await matchStatementRows(rows);
+  const base = {
+    filename,
+    rows: rows.length,
+    codGross,
+    feeTotal,
+    netAmount,
+    matchedShipments: matches.filter((m) => m.shipmentId).length,
+    unmatchedCodes: matches.filter((m) => !m.shipmentId).length,
+  };
+
+  const candidates = await db
+    .select({ id: schema.codBatches.id, reference: schema.codBatches.reference, receivedAt: schema.codBatches.receivedAt })
+    .from(schema.codBatches)
+    .where(
+      and(
+        eq(schema.codBatches.totalAmount, netAmount),
+        sql`coalesce(nullif(${schema.codBatches.codGross}, 0), ${schema.codBatches.totalAmount} + ${schema.codBatches.feeTotal}) = ${codGross}`,
+      ),
+    );
+
+  if (candidates.length === 1) {
+    return { ...base, batchId: candidates[0].id, batchReference: candidates[0].reference, batchReceivedAt: candidates[0].receivedAt, issue: null };
+  }
+  const issue = candidates.length > 1
+    ? `Khớp ${candidates.length} đợt cùng số tiền (${candidates.map((c) => c.reference).join(", ")}) — hãy nhập riêng từng đợt`
+    : "Không có đợt nào khớp số tiền của file — hãy nhập bảng kê tổng hợp cho đợt này trước";
+  return { ...base, batchId: null, batchReference: null, batchReceivedAt: null, issue };
+}
+
+/**
+ * Gắn vận đơn của file chi tiết vào ĐÚNG đợt đã có. Không tạo đợt mới, không sửa số của đợt:
+ * số tiền của đợt là số trên chứng từ gốc.
+ */
+export async function linkStatementDetailToBatch(batchId: string, rows: StatementDetailRow[]) {
+  const db = await getDb();
+  const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.id, batchId), columns: { id: true, receivedAt: true } });
+  if (!batch) throw new Error("Không tìm thấy đợt nhận tiền");
+  const matches = (await matchStatementRows(rows)).filter((m) => m.shipmentId);
+  const now = new Date();
+  for (const m of matches) {
+    await db
+      .update(schema.shipments)
+      .set({
+        codStatus: "PAID_TO_BANK",
+        codPaidToBankAt: batch.receivedAt,
+        codBatchId: batch.id,
+        codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${now})`,
+        codCollected: m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`,
+        shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
+        updatedAt: now,
+      })
+      .where(eq(schema.shipments.id, m.shipmentId as string));
+    if (m.orderId && m.fee > 0) await db.update(schema.orders).set({ partnerFee: m.fee }).where(eq(schema.orders.id, m.orderId));
+  }
+  return { linked: matches.length };
 }
