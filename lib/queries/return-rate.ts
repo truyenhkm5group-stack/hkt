@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { RETURN_RULE, type OrderOutcome } from "@/lib/constants/returns";
+import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 
 const o = schema.orders;
@@ -116,7 +116,7 @@ export type ReturnRateRow = {
   rate: number | null;
 };
 
-export const RETURN_RATE_SORTABLE = ["successRate", "expectedSuccessRate", "rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
+export { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 
 function baseWhere(period: Period, q: string): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false)];

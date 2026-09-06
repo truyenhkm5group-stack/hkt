@@ -78,6 +78,7 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
     },
     {
       id: "received",
+      accessorKey: "received",
       header: "Nhập",
       meta: { align: "right" },
       cell: ({ row }) => (
@@ -89,18 +90,21 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
     },
     {
       id: "delivered",
+      accessorKey: "delivered",
       header: "Giao thật",
       meta: { align: "right" },
       cell: ({ row }) => <span className="numeric text-emerald-700 dark:text-emerald-400">{formatNumber(row.original.delivered)}</span>,
     },
     {
       id: "returned",
+      accessorKey: "returned",
       header: "Hoàn",
       meta: { align: "right" },
       cell: ({ row }) => <span className={cn("numeric", row.original.returned ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{formatNumber(row.original.returned)}</span>,
     },
     {
       id: "inTransit",
+      accessorKey: "inTransit",
       header: "Đang giao",
       meta: { align: "right" },
       cell: ({ row }) => (

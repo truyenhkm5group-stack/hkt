@@ -40,16 +40,36 @@ export type DataTableProps<T> = {
    * các cột; defaultExpanded mở sẵn (mặc định đóng, bấm mũi tên để xổ). Nhóm chỉ có 1 dòng thì hiện thẳng dòng đó.
    */
   group?: { key: (row: T) => string; parent: (rows: T[], key: string) => T; defaultExpanded?: boolean; parentHref?: (parent: T, rows: T[]) => string | undefined };
+  /** Cột và chiều sắp xếp mặc định của trang (khớp với parseListParams ở phía máy chủ) để mũi tên hiển thị đúng thứ tự thật */
+  defaultSort?: string;
+  defaultDir?: "asc" | "desc";
+  /**
+   * Các mã cột được phép sắp xếp (chính là danh sách *_SORTABLE của truy vấn). Cần cho các cột chỉ hiển thị
+   * (không có accessorKey) vì TanStack không cho sắp xếp cột loại này, dù máy chủ vẫn sắp xếp được.
+   */
+  sortable?: string[];
 };
 
 export const tableParsers = {
   page: parseAsInteger.withDefault(1),
   pageSize: parseAsInteger.withDefault(25),
-  sort: parseAsString.withDefault(""),
-  dir: parseAsString.withDefault("desc"),
+  // clearOnDefault: false — nuqs mặc định XOÁ tham số khi giá trị bằng mặc định. Nếu để mặc định, bấm sắp xếp giảm dần
+  // sẽ xoá "dir=desc" khỏi URL, máy chủ lại lấy mặc định riêng của trang (có trang là "asc") → sắp xếp không có tác dụng.
+  sort: parseAsString.withDefault("").withOptions({ clearOnDefault: false }),
+  dir: parseAsString.withDefault("desc").withOptions({ clearOnDefault: false }),
 };
 
-export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group }: DataTableProps<T>) {
+/** Parser theo mặc định sắp xếp của TỪNG trang để mũi tên trên tiêu đề khớp với thứ tự máy chủ đang trả về */
+function sortParsers(defaultSort: string, defaultDir: "asc" | "desc") {
+  return {
+    page: parseAsInteger.withDefault(1),
+    pageSize: parseAsInteger.withDefault(25),
+    sort: parseAsString.withDefault(defaultSort).withOptions({ clearOnDefault: false }),
+    dir: parseAsString.withDefault(defaultDir).withOptions({ clearOnDefault: false }),
+  };
+}
+
+export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowId, emptyTitle = "Không có dữ liệu", emptyDescription, selectable, bulkActions, className, dense, footer, group, defaultSort = "", defaultDir = "desc", sortable }: DataTableProps<T>) {
   const router = useRouter();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
@@ -66,7 +86,8 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
     return [...map.entries()].map(([key, rows]) => ({ key, rows, parent: rows.length > 1 ? group.parent(rows, key) : null }));
   }, [data, group]);
   const isOpen = (key: string) => (expanded[key] !== undefined ? expanded[key] : allOpen !== null ? allOpen : Boolean(group?.defaultExpanded));
-  const [params, setParams] = useQueryStates(tableParsers, { shallow: false, history: "push" });
+  const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
+  const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push" });
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const sorting: SortingState = params.sort ? [{ id: params.sort, desc: params.dir !== "asc" }] : [];
@@ -106,7 +127,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
     onSortingChange: (updater) => {
       const next = typeof updater === "function" ? updater(sorting) : updater;
       const first = next[0];
-      void setParams({ sort: first?.id ?? "", dir: first ? (first.desc ? "desc" : "asc") : "desc", page: 1 });
+      void setParams({ sort: first?.id ?? "", dir: first ? (first.desc ? "desc" : "asc") : defaultDir, page: 1 });
     },
     onPaginationChange: (updater) => {
       const current = { pageIndex: params.page - 1, pageSize: params.pageSize };
@@ -116,6 +137,15 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
     getCoreRowModel: getCoreRowModel(),
     getRowId: getRowId ? (row) => getRowId(row) : undefined,
   });
+
+  const sortableSet = React.useMemo(() => new Set(sortable ?? []), [sortable]);
+  // Tự xử lý bấm sắp xếp thay vì dùng TanStack: sắp xếp chạy ở máy chủ, và cột chỉ hiển thị (không accessorKey)
+  // cũng phải bấm được. Vòng lặp: chưa sắp xếp → giảm dần → tăng dần → trở về mặc định của trang.
+  const toggleSort = (id: string) => {
+    const current = params.sort === id ? (params.dir === "asc" ? "asc" : "desc") : null;
+    const next = current === null ? "desc" : current === "desc" ? "asc" : null;
+    void setParams({ sort: next ? id : defaultSort, dir: next ?? defaultDir, page: 1 });
+  };
 
   const selectedRows = table.getSelectedRowModel().rows.map((r) => r.original);
   const clearSelection = () => setRowSelection({});
@@ -145,13 +175,13 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">
                   {headerGroup.headers.map((header) => {
-                    const canSort = header.column.getCanSort() && header.column.id !== "__select";
-                    const sorted = header.column.getIsSorted();
+                    const canSort = header.column.id !== "__select" && (header.column.getCanSort() || sortableSet.has(header.column.id));
+                    const sorted: false | "asc" | "desc" = params.sort === header.column.id ? (params.dir === "asc" ? "asc" : "desc") : false;
                     const align = (header.column.columnDef.meta as { align?: string } | undefined)?.align;
                     return (
                       <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }} className={cn("h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground", align === "right" && "text-right")}>
                         {header.isPlaceholder ? null : canSort ? (
-                          <button type="button" className={cn("inline-flex items-center gap-1 uppercase hover:text-foreground", align === "right" && "flex-row-reverse")} onClick={header.column.getToggleSortingHandler()}>
+                          <button type="button" className={cn("inline-flex items-center gap-1 uppercase hover:text-foreground", align === "right" && "flex-row-reverse")} onClick={() => toggleSort(header.column.id)}>
                             {flexRender(header.column.columnDef.header, header.getContext())}
                             {sorted === "asc" ? <ArrowUp className="size-3" /> : sorted === "desc" ? <ArrowDown className="size-3" /> : <ChevronsUpDown className="size-3 opacity-50" />}
                           </button>

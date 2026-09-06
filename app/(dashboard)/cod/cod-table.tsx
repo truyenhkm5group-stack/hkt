@@ -61,6 +61,7 @@ export function CodTable({ rows, pageCount, total, canWrite }: { rows: CodListRo
   return (
     <>
       <DataTable
+        defaultSort="deliveredAt"
         columns={columns}
         data={rows}
         pageCount={pageCount}

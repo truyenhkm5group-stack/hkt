@@ -7,6 +7,7 @@ import type { ReturnListRow } from "@/lib/queries/returns";
 export function ReturnsTable({ rows, pageCount, total }: { rows: ReturnListRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="insertedAt"
       columns={returnColumns}
       data={rows}
       pageCount={pageCount}

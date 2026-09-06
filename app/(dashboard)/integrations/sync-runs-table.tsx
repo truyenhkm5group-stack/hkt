@@ -7,6 +7,7 @@ import type { SyncRunRow } from "@/lib/queries/integrations";
 export function SyncRunsTable({ rows, pageCount, total }: { rows: SyncRunRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="startedAt"
       columns={syncRunColumns}
       data={rows}
       pageCount={pageCount}

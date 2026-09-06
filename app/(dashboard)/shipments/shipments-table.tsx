@@ -45,6 +45,7 @@ function RefreshShipmentsButton({ ids, onDone }: { ids: string[]; onDone: () => 
 export function ShipmentsTable({ rows, pageCount, total }: { rows: ShipmentListRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="createdAt"
       columns={shipmentColumns}
       data={rows}
       pageCount={pageCount}

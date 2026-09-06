@@ -42,6 +42,9 @@ export const OUTCOME_TONE: Record<OrderOutcome, string> = {
 
 export const RETURNED_OUTCOMES: OrderOutcome[] = ["RETURNED", "RETURNED_BY_RULE"];
 
+/** Các cột bảng tỷ lệ giao thành công được phép sắp xếp (dùng chung máy chủ + bảng phía trình duyệt) */
+export const RETURN_RATE_SORTABLE = ["successRate", "expectedSuccessRate", "rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
+
 /** Ngưỡng tỷ lệ giao thành công (%): ≥ tốt = xanh, ≥ khá = vàng, dưới = đỏ */
 export const SUCCESS_RATE_GOOD = 70;
 export const SUCCESS_RATE_OK = 55;

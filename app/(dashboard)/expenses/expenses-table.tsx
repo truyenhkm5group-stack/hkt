@@ -9,6 +9,7 @@ export function ExpensesTable({ rows, pageCount, total, canWrite }: { rows: Expe
   const columns = useMemo(() => buildExpenseColumns({ canWrite }), [canWrite]);
   return (
     <DataTable
+      defaultSort="occurredAt"
       columns={columns}
       data={rows}
       pageCount={pageCount}

@@ -13,6 +13,8 @@ export function ProductsTable({ rows, pageCount, total, warehouses }: { rows: Pr
       data={rows}
       pageCount={pageCount}
       total={total}
+      defaultSort="erpStock"
+      defaultDir="asc"
       rowHref={(row) => `/products/${row.productId}`}
       getRowId={(row) => row.id}
       group={{

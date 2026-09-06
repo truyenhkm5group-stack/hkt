@@ -7,6 +7,7 @@ import type { CustomerListRow } from "@/lib/queries/customers";
 export function CustomersTable({ rows, pageCount, total }: { rows: CustomerListRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="lastOrderAt"
       columns={customerColumns}
       data={rows}
       pageCount={pageCount}

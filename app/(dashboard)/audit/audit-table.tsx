@@ -7,6 +7,7 @@ import type { AuditLogRow } from "@/lib/queries/audit";
 export function AuditTable({ rows, pageCount, total }: { rows: AuditLogRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="createdAt"
       columns={auditColumns}
       data={rows}
       pageCount={pageCount}

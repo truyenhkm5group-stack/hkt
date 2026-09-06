@@ -7,6 +7,7 @@ import type { OrderListRow } from "@/lib/queries/orders";
 export function OrdersTable({ rows, pageCount, total }: { rows: OrderListRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="insertedAt"
       columns={orderColumns}
       data={rows}
       pageCount={pageCount}

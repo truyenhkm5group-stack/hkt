@@ -7,6 +7,7 @@ import type { InventoryListRow } from "@/lib/queries/inventory";
 export function InventoryTable({ rows, pageCount, total }: { rows: InventoryListRow[]; pageCount: number; total: number }) {
   return (
     <DataTable
+      defaultSort="insertedAt"
       columns={inventoryColumns}
       data={rows}
       pageCount={pageCount}

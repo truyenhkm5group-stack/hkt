@@ -2,6 +2,7 @@
 
 import { returnRateColumns } from "@/app/(dashboard)/reports/returns/columns";
 import { DataTable } from "@/components/data-table/data-table";
+import { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 import type { ReturnRateRow } from "@/lib/queries/return-rate";
 
 export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: ReturnRateRow[]; pageCount: number; total: number; baseQuery: string }) {
@@ -11,6 +12,9 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
       data={rows}
       pageCount={pageCount}
       total={total}
+      defaultSort="successRate"
+      defaultDir="asc"
+      sortable={RETURN_RATE_SORTABLE}
       getRowId={(row) => row.key}
       rowHref={(row) => `/reports/returns?${baseQuery}${baseQuery ? "&" : ""}variant=${encodeURIComponent(row.key)}#chi-tiet`}
       group={{
