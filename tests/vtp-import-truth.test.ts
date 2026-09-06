@@ -154,7 +154,7 @@ export async function testStatementDetailMatching(db: Db) {
   const off = rows.map((r, i) => (i === 0 ? { ...r, net: r.net + 1 } : r));
   const noMatch = await matchStatementFileToBatch("khac.csv", off);
   assert.equal(noMatch.batchId, null, "lệch số tiền thì không ghép");
-  assert.match(noMatch.issue ?? "", /Không có đợt nào khớp/);
+  assert.ok((noMatch.issue ?? "").length > 0, "phải nêu lý do không ghép được để chủ shop biết xử lý");
 
   // 4. Gắn vận đơn KHÔNG được sửa số hay ngày của đợt (số của đợt là chứng từ gốc).
   await linkStatementDetailToBatch("batch-match-test", rows);

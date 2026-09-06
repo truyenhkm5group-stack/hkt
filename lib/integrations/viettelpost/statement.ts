@@ -10,7 +10,7 @@ import { parseCsv } from "@/lib/integrations/bank/ledger";
 import { normalize } from "@/lib/text";
 
 export type StatementSummary = { reference: string; receivedAt: string; codGross: number; feeTotal: number; netAmount: number };
-export type StatementDetailRow = { trackingCode: string; cod: number; fee: number; net: number; raw: string };
+export type StatementDetailRow = { trackingCode: string; cod: number; fee: number; net: number; raw: string; /** Ngày phát thành công (YYYY-MM-DD) — dùng để biết bảng kê phủ giai đoạn nào. */ paidDate?: string };
 
 const MONEY_RE = /-?\d{1,3}(?:[.,]\d{3})+|-?\d+/g;
 
@@ -121,6 +121,9 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
   const cCod = findCol(headers, COL.cod, ["cuoc", "phi"]);
   const cFee = findCol(headers, COL.fee, ["cod", "thu ho"]);
   const cNet = findCol(headers, COL.net);
+  // Ngày trên chi tiết bảng kê cho biết đợt này phủ giai đoạn nào — cần để báo "thiếu bảng kê từ ngày nào".
+  const cPaid = findCol(headers, ["ngay phat thanh cong", "ngay phat"]);
+  const cCreated2 = findCol(headers, ["ngay tao buu pham", "ngay tao"]);
   const rows: StatementDetailRow[] = [];
   for (const row of matrix.slice(headerIdx + 1)) {
     const cell = (i: number) => (i >= 0 ? String(row[i] ?? "").trim() : "");
@@ -129,7 +132,10 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
     const cod = parseMoney(cell(cCod));
     const fee = parseMoney(cell(cFee));
     const net = cNet >= 0 ? parseMoney(cell(cNet)) : cod - fee;
-    rows.push({ trackingCode, cod, fee, net, raw: row.map((c) => String(c ?? "")).join(" | ").slice(0, 200) });
+    const dateText = cell(cPaid) || cell(cCreated2);
+    const dm = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(dateText);
+    const paidDate = dm ? `${dm[3]}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}` : undefined;
+    rows.push({ trackingCode, cod, fee, net, paidDate, raw: row.map((c) => String(c ?? "")).join(" | ").slice(0, 200) });
   }
   if (!rows.length) throw new Error("File không có dòng vận đơn nào");
   return rows;

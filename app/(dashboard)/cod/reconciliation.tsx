@@ -9,6 +9,7 @@ import {
   codBatchGaps,
   codReconciliation,
   staleCodOnReturned,
+  statementCoverage,
   unprovenCollectedShipments,
 } from "@/lib/queries/cod-reconciliation";
 import type { Period } from "@/lib/search-params";
@@ -56,7 +57,7 @@ function Step({
 }
 
 export async function CodReconciliation({ period, drill, page }: { period: Period; drill: string | null; page: number }) {
-  const [recon, gaps] = await Promise.all([codReconciliation(period), codBatchGaps(period)]);
+  const [recon, gaps, coverage] = await Promise.all([codReconciliation(period), codBatchGaps(period), statementCoverage()]);
   const href = (key: string) => `/cod?recon=${key}&period=${period.key}`;
   const close = `/cod?period=${period.key}`;
 
@@ -145,6 +146,48 @@ export async function CodReconciliation({ period, drill, page }: { period: Perio
           ) : null}
         </p>
       </SectionCard>
+
+      {/* ── Bảng kê còn thiếu: cần xuất giai đoạn nào ── */}
+      {coverage.gaps.length ? (
+        <SectionCard
+          title="Bảng kê còn thiếu — cần xuất giai đoạn nào"
+          description="Suy từ dữ liệu thật: vận đơn đã thu được tiền nhưng chưa nằm trong đợt nào. Xuất bảng kê đúng các khoảng ngày dưới đây rồi nhập ở nút Bảng kê Viettel Post."
+        >
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cần xuất bảng kê từ ngày</TableHead>
+                  <TableHead>Đến ngày</TableHead>
+                  <TableHead className="text-right">Vận đơn</TableHead>
+                  <TableHead className="text-right">Tiền đang treo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {coverage.gaps.map((g) => (
+                  <TableRow key={`${g.from}-${g.to}`}>
+                    <TableCell className="numeric font-medium">{formatDate(g.from)}</TableCell>
+                    <TableCell className="numeric font-medium">{formatDate(g.to)}</TableCell>
+                    <TableCell className="numeric text-right">{formatNumber(g.shipments)}</TableCell>
+                    <TableCell className="numeric text-right font-semibold text-amber-600 dark:text-amber-400">{formatVND(g.amount)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Đã nhập {formatNumber(coverage.batches)} đợt
+            {coverage.firstBatch && coverage.lastBatch ? ` (${formatDate(coverage.firstBatch)} → ${formatDate(coverage.lastBatch)})` : ""}.
+            Tổng đang treo {formatVND(coverage.totalMissingAmount)} trên {formatNumber(coverage.totalMissingShipments)} vận đơn.
+            {coverage.firstShipmentDate ? (
+              <>
+                {" "}Lưu ý: ERP chỉ có dữ liệu vận đơn từ <strong>{formatDate(coverage.firstShipmentDate)}</strong> — bảng kê của giai đoạn
+                trước ngày này sẽ không ghép được vận đơn nào cho tới khi đồng bộ Pancake lùi về trước.
+              </>
+            ) : null}
+          </p>
+        </SectionCard>
+      ) : null}
 
       {/* ── Chênh lệch theo từng đợt tiền về ── */}
       {gaps.length ? (

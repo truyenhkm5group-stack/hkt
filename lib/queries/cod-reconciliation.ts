@@ -227,3 +227,87 @@ export async function unlinkedBatches() {
 
 /** Dùng cho kiểm thử/khai báo: điều kiện vận đơn còn khả năng thu tiền. */
 export { COD_COLLECTABLE, COLLECTED_STATUSES, COLLECTED_AMOUNT };
+
+export type StatementGap = {
+  /** Ngày giao có tiền đã thu nhưng chưa đợt nào nhận. */
+  from: string;
+  to: string;
+  shipments: number;
+  amount: number;
+};
+
+export type StatementCoverage = {
+  batches: number;
+  firstBatch: string | null;
+  lastBatch: string | null;
+  /** Ngày mới nhất ERP có dữ liệu vận đơn — bảng kê sau ngày này chưa có gì để ghép. */
+  lastShipmentDate: string | null;
+  /** Ngày cũ nhất ERP có dữ liệu — bảng kê trước ngày này không ghép được vì thiếu đơn. */
+  firstShipmentDate: string | null;
+  gaps: StatementGap[];
+  totalMissingAmount: number;
+  totalMissingShipments: number;
+};
+
+/**
+ * BẢNG KÊ CÒN THIẾU — trả lời "cần xuất bảng kê giai đoạn nào".
+ *
+ * Không suy từ lịch trả tiền của Viettel Post (thứ 2/4/6) mà suy từ DỮ LIỆU: vận đơn đã thu
+ * được tiền nhưng chưa nằm trong đợt nào. Gom các ngày giao liền nhau thành từng khoảng để
+ * chủ shop biết chính xác cần xuất bảng kê từ ngày nào tới ngày nào.
+ */
+export async function statementCoverage(): Promise<StatementCoverage> {
+  const db = await getDb();
+  const [batchRow] = await db
+    .select({
+      batches: sql<number>`count(*)`,
+      first: sql<string | null>`min(${b.receivedAt})::date::text`,
+      last: sql<string | null>`max(${b.receivedAt})::date::text`,
+    })
+    .from(b);
+
+  const [shipRow] = await db
+    .select({
+      first: sql<string | null>`min(coalesce(${s.deliveredAt}, ${s.vtpStatusDate}))::date::text`,
+      last: sql<string | null>`max(coalesce(${s.deliveredAt}, ${s.vtpStatusDate}))::date::text`,
+    })
+    .from(s);
+
+  // Ngày giao của vận đơn đã thu tiền nhưng chưa gắn đợt nào.
+  const days = await db
+    .select({
+      day: sql<string>`coalesce(${s.deliveredAt}, ${s.vtpStatusDate})::date::text`,
+      n: sql<number>`count(*)`,
+      amount: sql<number>`coalesce(sum(${COLLECTED_AMOUNT}), 0)`,
+    })
+    .from(s)
+    .where(and(COLLECTED_STATUSES, isNull(s.codBatchId), sql`coalesce(${s.deliveredAt}, ${s.vtpStatusDate}) is not null`))
+    .groupBy(sql`coalesce(${s.deliveredAt}, ${s.vtpStatusDate})::date`)
+    .orderBy(sql`coalesce(${s.deliveredAt}, ${s.vtpStatusDate})::date`);
+
+  // Gom ngày liền nhau (cách nhau ≤ 3 ngày, đúng nhịp trả tiền thứ 2/4/6) thành một khoảng.
+  const gaps: StatementGap[] = [];
+  for (const d of days) {
+    const day = String(d.day);
+    const last = gaps[gaps.length - 1];
+    const gapDays = last ? (Date.parse(day) - Date.parse(last.to)) / 86_400_000 : Infinity;
+    if (last && gapDays <= 3) {
+      last.to = day;
+      last.shipments += Number(d.n);
+      last.amount += Number(d.amount);
+    } else {
+      gaps.push({ from: day, to: day, shipments: Number(d.n), amount: Number(d.amount) });
+    }
+  }
+
+  return {
+    batches: Number(batchRow?.batches ?? 0),
+    firstBatch: batchRow?.first ?? null,
+    lastBatch: batchRow?.last ?? null,
+    firstShipmentDate: shipRow?.first ?? null,
+    lastShipmentDate: shipRow?.last ?? null,
+    gaps,
+    totalMissingShipments: gaps.reduce((a, g) => a + g.shipments, 0),
+    totalMissingAmount: gaps.reduce((a, g) => a + g.amount, 0),
+  };
+}

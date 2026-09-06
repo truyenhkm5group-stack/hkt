@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { codBatchGaps, codReconciliation, staleCodOnReturned, unprovenCollectedShipments } from "@/lib/queries/cod-reconciliation";
+import { codBatchGaps, codReconciliation, staleCodOnReturned, statementCoverage, unprovenCollectedShipments } from "@/lib/queries/cod-reconciliation";
 import type { Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -88,6 +88,20 @@ export async function testCodReconciliation(db: Db) {
     await db.update(schema.shipments).set({ codBatchId: null }).where(eq(schema.shipments.id, candidate.id));
     clearMemo();
   }
+
+  // ───────── 8. Báo "thiếu bảng kê từ ngày nào" ─────────
+  // Chủ shop cần biết chính xác khoảng ngày phải xuất bảng kê từ Viettel Post (trả tiền thứ 2/4/6).
+  const coverage = await statementCoverage();
+  for (const g of coverage.gaps) {
+    assert.ok(g.from <= g.to, "khoảng ngày phải hợp lệ");
+    assert.ok(g.shipments > 0, "chỉ nêu khoảng thật sự có vận đơn treo");
+  }
+  for (let i = 1; i < coverage.gaps.length; i++) {
+    assert.ok(coverage.gaps[i].from > coverage.gaps[i - 1].to, "các khoảng phải rời nhau và tăng dần");
+  }
+  assert.ok(coverage.totalMissingShipments <= r.unproven.count, "không nêu nhiều hơn số vận đơn đang treo");
+  assert.ok(coverage.firstShipmentDate === null || /^\d{4}-\d{2}-\d{2}$/.test(coverage.firstShipmentDate), "có mốc ngày ERP bắt đầu có dữ liệu");
+  console.log(`✓ Thiếu bảng kê: ${coverage.gaps.length} khoảng ngày · ${coverage.totalMissingShipments} vận đơn treo · ERP có dữ liệu từ ${coverage.firstShipmentDate ?? "—"}`);
 
   console.log(
     `✓ Đối soát COD: phải thu ${r.receivable.amount} · ĐVVC báo thu ${r.collected.amount} · có bảng kê ${r.onStatement.amount} · về TK ${r.bank.net} · treo ${r.unproven.amount} (${r.provenRate === null ? "—" : r.provenRate + "%"} có chứng từ)`,

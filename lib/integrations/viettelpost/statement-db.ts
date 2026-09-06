@@ -247,6 +247,9 @@ export type StatementFileMatch = {
   issue: string | null;
   matchedShipments: number;
   unmatchedCodes: number;
+  /** Giai đoạn file phủ, lấy từ cột Ngày phát thành công. */
+  periodFrom: string | null;
+  periodTo: string | null;
 };
 
 /**
@@ -263,6 +266,7 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
   const feeTotal = rows.reduce((a, r) => a + r.fee, 0);
   const netAmount = rows.reduce((a, r) => a + r.net, 0);
   const matches = await matchStatementRows(rows);
+  const dates = rows.map((r) => r.paidDate).filter((d): d is string => Boolean(d)).sort();
   const base = {
     filename,
     rows: rows.length,
@@ -271,6 +275,8 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
     netAmount,
     matchedShipments: matches.filter((m) => m.shipmentId).length,
     unmatchedCodes: matches.filter((m) => !m.shipmentId).length,
+    periodFrom: dates[0] ?? null,
+    periodTo: dates[dates.length - 1] ?? null,
   };
 
   const candidates = await db
@@ -286,9 +292,26 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
   if (candidates.length === 1) {
     return { ...base, batchId: candidates[0].id, batchReference: candidates[0].reference, batchReceivedAt: candidates[0].receivedAt, issue: null };
   }
-  const issue = candidates.length > 1
-    ? `Khớp ${candidates.length} đợt cùng số tiền (${candidates.map((c) => c.reference).join(", ")}) — hãy nhập riêng từng đợt`
-    : "Không có đợt nào khớp số tiền của file — hãy nhập bảng kê tổng hợp cho đợt này trước";
+  if (candidates.length > 1) {
+    const many = `Khớp ${candidates.length} đợt cùng số tiền (${candidates.map((c) => c.reference).join(", ")}) — hãy nhập riêng từng đợt`;
+    return { ...base, batchId: null, batchReference: null, batchReceivedAt: null, issue: many };
+  }
+
+  // Không khớp đợt nào. Phân biệt hai nguyên nhân rất khác nhau vì cách xử lý khác hẳn:
+  //   (a) ERP CHƯA CÓ vận đơn của giai đoạn này → nhập bảng kê cũng không ghép được gì,
+  //       phải đồng bộ Pancake lùi về trước đã;
+  //   (b) chỉ thiếu dòng tổng của đợt → nhập bảng kê tổng hợp rồi nhập lại chi tiết.
+  const [range] = await db
+    .select({ first: sql<string | null>`min(coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate}))::date::text` })
+    .from(schema.shipments);
+  const erpFrom = range?.first ?? null;
+  const beforeErpData = Boolean(base.periodTo && erpFrom && base.periodTo < erpFrom);
+  const issue =
+    base.matchedShipments === 0 && beforeErpData
+      ? `ERP chưa có vận đơn nào của giai đoạn ${base.periodFrom} → ${base.periodTo} (dữ liệu ERP bắt đầu từ ${erpFrom}). Cần đồng bộ Pancake lùi về trước ${erpFrom} rồi nhập lại bảng kê này.`
+      : base.matchedShipments === 0
+        ? "Không mã vận đơn nào trong file có trong ERP — kiểm tra đúng tài khoản Viettel Post, hoặc đồng bộ vận đơn trước."
+        : "Không có đợt nào khớp số tiền của file — hãy nhập bảng kê tổng hợp cho đợt này trước";
   return { ...base, batchId: null, batchReference: null, batchReceivedAt: null, issue };
 }
 
