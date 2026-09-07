@@ -1,4 +1,5 @@
-import { AlertTriangle, CheckCircle2, Clock3, Globe, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { InfoHint } from "@/components/info-hint";
+import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { BackfillForm } from "@/app/(dashboard)/integrations/backfill-form";
 import { SyncRunsTable } from "@/app/(dashboard)/integrations/sync-runs-table";
 import { TestConnectionButton } from "@/app/(dashboard)/integrations/test-connection-button";
@@ -284,19 +285,18 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
       </SectionCard>
 
       {/* ───────── Webhook ───────── */}
-      <SectionCard title="Webhook — cập nhật thời gian thực" description="Dán các URL dưới đây vào Pancake và Viettel Post để ERP nhận thay đổi ngay lập tức, không cần chờ lịch đồng bộ">
-        <div className="mb-4 flex items-start gap-3 rounded-lg border border-info/30 bg-info/5 p-3 text-sm">
-          <Globe className="mt-0.5 size-4 shrink-0 text-info" />
-          <div className="text-xs leading-5 text-muted-foreground">
-            <p>
-              Webhook chỉ hoạt động khi ERP có <strong className="text-foreground">tên miền công khai HTTPS</strong> (APP_URL hiện tại: <span className="font-mono">{appUrl}</span>
-              {isLocal ? <span className="text-amber-600"> — đang là localhost / http, Pancake và Viettel Post sẽ không gọi tới được</span> : null}).
-            </p>
-            <p>
-              Khi chạy thử trên máy cá nhân, mở tunnel bằng ngrok hoặc cloudflared: <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">cloudflared tunnel --url http://localhost:3000</code> rồi đặt APP_URL bằng địa chỉ https nhận được.
-            </p>
-          </div>
-        </div>
+      <SectionCard
+        title="Webhook — cập nhật thời gian thực"
+        description="Dán URL dưới đây vào Pancake và Viettel Post"
+        hint={
+          <>
+            Webhook giúp ERP nhận thay đổi ngay thay vì chờ lịch đồng bộ. Chỉ hoạt động khi ERP có tên miền công khai
+            HTTPS — hiện tại <span className="font-mono">{appUrl}</span>
+            {isLocal ? <span className="text-amber-600"> (đang là localhost/http nên Pancake và Viettel Post không gọi tới được)</span> : null}.
+            Chạy thử trên máy cá nhân thì mở tunnel: <code className="rounded bg-muted px-1 py-0.5 font-mono">cloudflared tunnel --url http://localhost:3000</code> rồi đặt APP_URL bằng địa chỉ https nhận được.
+          </>
+        }
+      >
         <div className="grid gap-5 lg:grid-cols-2">
           <WebhookGuide
             title="Pancake POS"
@@ -575,14 +575,21 @@ function WebhookGuide({ title, url, configured, warning, steps, secret, received
         </div>
       ) : null}
       {warning ? <p className="mt-2 text-[11px] text-amber-600">{warning}</p> : null}
-      <ol className="mt-3 space-y-1.5 text-xs leading-5 text-muted-foreground">
-        {steps.map((step, i) => (
-          <li key={i} className="flex gap-2">
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10.5px] font-bold text-foreground">{i + 1}</span>
-            <span>{step}</span>
-          </li>
-        ))}
-      </ol>
+      {/* Hướng dẫn cấu hình là việc làm MỘT LẦN — cất sau dấu ⓘ để màn hình vận hành hằng ngày
+          không bị lấp bởi sáu đoạn chữ. */}
+      <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        Hướng dẫn cấu hình ({steps.length} bước)
+        <InfoHint label={`Hướng dẫn cấu hình webhook ${title}`}>
+          <ol className="space-y-2">
+            {steps.map((step, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10.5px] font-bold text-foreground">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </InfoHint>
+      </p>
     </div>
   );
 }

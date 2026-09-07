@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/info-hint";
 import {
   AlertTriangle,
   Coins,
@@ -130,7 +131,10 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           ] as const).map(([key, value, Icon, note]) => (
             <Link key={key} href={drillHref(key)} className={cn("rounded-xl border p-4 transition hover:border-primary hover:bg-accent/40", issue === key && "border-primary bg-accent/40")}>
               <div className="flex items-start justify-between gap-3">
-                <p className="text-[13px] font-medium text-muted-foreground">{DQ_ISSUE_LABEL[key]}</p>
+                <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+                  {DQ_ISSUE_LABEL[key]}
+                  <InfoHint>{DQ_ISSUE_HINT[key]}</InfoHint>
+                </p>
                 <Icon className="size-[18px] shrink-0 text-muted-foreground" />
               </div>
               <p className="numeric mt-2 text-2xl font-bold">{formatNumber(value)}</p>
@@ -223,7 +227,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       {issue && drill ? (
         <SectionCard
           title={DQ_ISSUE_LABEL[issue]}
-          description={DQ_ISSUE_HINT[issue]}
+          hint={DQ_ISSUE_HINT[issue]}
           actions={<Button asChild variant="outline" size="sm"><Link href={`/data-quality?period=${params.period.key}`}>Đóng danh sách</Link></Button>}
         >
           {drill.total === 0 ? (
