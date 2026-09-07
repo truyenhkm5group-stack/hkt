@@ -91,7 +91,7 @@ export function expandSheetRange(ws: XLSX.WorkSheet): XLSX.WorkSheet {
   return ws;
 }
 
-function sheetMatrix(input: Buffer, cellDates: boolean, raw: boolean): unknown[][] {
+export function sheetMatrix(input: Buffer, cellDates: boolean, raw: boolean): unknown[][] {
   const wb = XLSX.read(input, { type: "buffer", cellDates });
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return [];
