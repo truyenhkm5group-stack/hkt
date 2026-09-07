@@ -5,6 +5,8 @@ import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
 import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { publish } from "@/lib/realtime/bus";
 import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/sync/runner";
+import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 /**
  * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
@@ -78,7 +80,8 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     created = true;
   }
 
-  const meta = vtpStatusMeta(record.status, record.statusName);
+  // Cùng bộ dịch với luồng nhập tệp — xem lib/integrations/viettelpost/status.ts.
+  const meta = resolveVtpStatus({ code: record.status, text: record.statusName });
   const statusDate = record.statusDate ?? new Date();
   const isNewer = !shipment.vtpStatusDate || statusDate.getTime() >= shipment.vtpStatusDate.getTime();
 
@@ -100,6 +103,10 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     // Cùng mốc thời gian và cùng trạng thái ⇒ đúng là gói tin lặp. Khác đi ⇒ sự kiện đến muộn,
     // ERP giữ trạng thái mới hơn nhưng phải nói ra để không ai tưởng webhook đã được áp dụng.
     const duplicate = shipment.vtpStatusDate?.getTime() === statusDate.getTime() && shipment.stage === meta.stage;
+    // Sự kiện đã được ghi vào lịch sử ở trên; dựng lại trạng thái để ảnh chụp luôn khớp lịch sử,
+    // kể cả khi vận đơn trước đó bị một luồng khác ghi sai.
+    const fixed = await materializeShipmentState(db, shipment.id);
+    if (fixed.changed) return { shipmentId: shipment.id, changed: true, created, stage: fixed.after as typeof shipment.stage, reason: "applied" };
     return { shipmentId: shipment.id, changed: false, created, stage: shipment.stage, reason: duplicate ? "duplicate" : "stale" };
   }
 
@@ -148,8 +155,22 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     })
     .where(eq(schema.shipments.id, shipment.id));
 
-  publish({ type: "shipment", shipmentId: shipment.id, status: stage });
-  return { shipmentId: shipment.id, changed: true, created, stage, reason: created ? "created" : "applied" };
+  // Ảnh chụp cuối cùng luôn được dựng từ lịch sử: một chỗ duy nhất quyết định trạng thái.
+  const finalState = await materializeShipmentState(db, shipment.id);
+  const stageNow = (finalState.after as typeof stage) ?? stage;
+  // "Đã áp dụng" chỉ đúng khi trạng thái thực sự tiến triển. Gói tin lặp đi qua nhánh này (cùng
+  // mốc thời gian nên vẫn được coi là không cũ hơn) nhưng không được đếm như một lần cập nhật.
+  // So với ảnh chụp TRƯỚC khi ghi, vì đến lúc này bản ghi đã bị cập nhật rồi.
+  const wasDuplicate = !created && shipment.vtpStatusDate?.getTime() === statusDate.getTime() && shipment.stage === meta.stage;
+  const advanced = !wasDuplicate;
+  if (advanced) publish({ type: "shipment", shipmentId: shipment.id, status: stageNow });
+  return {
+    shipmentId: shipment.id,
+    changed: advanced,
+    created,
+    stage: stageNow,
+    reason: created ? "created" : advanced ? "applied" : "duplicate",
+  };
 }
 
 /**

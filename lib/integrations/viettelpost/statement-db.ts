@@ -1,7 +1,9 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import { legBaseCode, mapVtpStatusText, mergeVtpOrderLists, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mergeVtpOrderLists, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
 /**
@@ -114,7 +116,7 @@ export type OrderListMatch = VtpOrderListRow & {
   orderLabel: string;
   currentStage: string | null;
   currentCod: string | null;
-  mapped: ReturnType<typeof mapVtpStatusText>;
+  mapped: ReturnType<typeof resolveVtpStatus>;
   /**
    * direct = khớp mã vận đơn trong ERP;
    * leg    = vận đơn chiều về của vận đơn gốc (ghi thành vận đơn riêng, không đè trạng thái đơn gốc);
@@ -206,7 +208,9 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       orderLabel: f ? `#${f.systemId ?? ""} ${f.name ?? ""}`.trim() : "",
       currentStage: f?.stage ?? null,
       currentCod: f?.codStatus ?? null,
-      mapped: mapVtpStatusText(r.statusText),
+      // Tệp xuất từ viettelpost.vn không có mã số trạng thái, chỉ có chữ — nhưng vẫn đi qua ĐÚNG
+      // bộ dịch mà webhook dùng, để cùng một trạng thái của ĐVVC không cho ra hai kết luận.
+      mapped: resolveVtpStatus({ code: null, text: r.statusText }),
       matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
@@ -285,6 +289,9 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         raw: { snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, importedBy: actor } });
       await tx.insert(schema.auditLogs).values({ userEmail: actor, action: "VTP_ORDER_LIST_ROW", entity: "SHIPMENT", entityId: current.id,
         detail: { before, snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null } });
+      // Trạng thái cuối cùng luôn do lịch sử sự kiện quyết định, không phụ thuộc luồng nào ghi sau.
+      // Nhờ vậy dòng tệp đến muộn không kéo lùi trạng thái mà vẫn được lưu vào hành trình.
+      await materializeShipmentState(tx as unknown as Parameters<typeof materializeShipmentState>[0], current.id);
       if (disposition !== "applied") return disposition;
       return isLeg ? "leg" : m.matchKind === "phone" ? "linked" : "updated";
     });
