@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/info-hint";
 import { cn } from "@/lib/utils";
 
 /** Khối thông tin nhãn/giá trị dùng trong trang chi tiết */
@@ -14,13 +15,20 @@ export function DescriptionList({ items, className, columns = 2 }: { items: { la
   );
 }
 
-export function SectionCard({ title, description, actions, children, className, contentClassName, padded = true }: { title?: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
+/**
+ * `description` là một câu ngắn nói mục này là gì. Phần giải thích dài (cách tính, hướng dẫn thao
+ * tác, cảnh báo nghiệp vụ) đưa vào `hint` để hiện trong dấu ⓘ — màn hình còn lại là số liệu.
+ */
+export function SectionCard({ title, description, hint, actions, children, className, contentClassName, padded = true }: { title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
   return (
     <section className={cn("overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs", className)}>
       {title ? (
         <div className="flex items-start justify-between gap-3 border-b px-5 py-3.5">
           <div>
-            <h2 className="text-sm font-bold">{title}</h2>
+            <h2 className="flex items-center gap-1.5 text-sm font-bold">
+              {title}
+              {hint ? <InfoHint>{hint}</InfoHint> : null}
+            </h2>
             {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}

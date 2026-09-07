@@ -20,16 +20,17 @@ export default async function ImportVtpPage() {
       <PageHeader
         eyebrow="Dữ liệu gốc"
         title="Nhập dữ liệu Viettel Post"
-        description="Một chỗ duy nhất để nạp hai loại tệp tải từ Viettel Post. Đây là nguồn dữ liệu gốc cho trạng thái giao hàng và tiền COD của mọi báo cáo."
+        description="Nguồn dữ liệu gốc cho trạng thái giao hàng và tiền COD."
       />
 
-      <SectionCard title="Nạp tệp" description="Chọn cả hai loại tệp cùng lúc — ERP tự nhận loại từng tệp.">
+      <SectionCard title="Nạp tệp" description="ERP tự nhận loại từng tệp" hint="Chọn nhiều tệp cùng lúc, cả danh sách vận đơn lẫn bảng kê COD. ERP nhận loại theo NỘI DUNG tệp chứ không theo tên. Nạp lại cùng một tệp không làm số liệu nhân đôi: dòng cũ hơn bị bỏ qua, dòng trùng không ghi lại.">
         <VtpImportForm />
       </SectionCard>
 
       <SectionCard
         title="Cần nhập thêm gì"
-        description="Suy từ dữ liệu thật trong ERP, không suy từ lịch trả tiền của Viettel Post."
+        description="Khoảng ngày còn thiếu bảng kê"
+        hint="Suy từ dữ liệu thật trong ERP — vận đơn đã giao mà chưa có chứng từ tiền — chứ không suy từ lịch trả tiền của Viettel Post. Bảng kê COD nay tự về qua email nên phần này thường tự đầy."
       >
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border p-4">
@@ -83,7 +84,8 @@ export default async function ImportVtpPage() {
 
       <SectionCard
         title="Cần xuất Danh sách vận đơn cho khoảng ngày nào"
-        description="Tệp trạng thái giao hàng, khác với bảng kê tiền. Đối chiếu qua API không thay được vì tài khoản API của shop không sở hữu các vận đơn này."
+        description="Khoảng ngày cần xuất danh sách vận đơn"
+        hint="Tệp danh sách vận đơn mang TRẠNG THÁI GIAO HÀNG, khác bảng kê mang tiền. Không có luồng tự động nào cho tệp này: Viettel Post không gửi qua email, còn API partner không thấy được vận đơn do Pancake tạo. Gom các ngày cách nhau tối đa 3 ngày thành một khoảng để xuất một tệp."
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border p-4">

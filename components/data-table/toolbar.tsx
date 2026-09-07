@@ -18,6 +18,15 @@ export type FacetDef = { key: string; label: string; options: FacetOption[]; sin
 
 const shallowOff = { shallow: false as const, history: "push" as const };
 
+/**
+ * Mọi thay đổi bộ lọc / tìm kiếm đều đi vòng lên máy chủ. Bọc trong transition để React biết đang
+ * chờ, nhờ đó nút vừa bấm hiện trạng thái chờ thay vì đứng im.
+ */
+function useShallowOff() {
+  const [pending, startTransition] = React.useTransition();
+  return { options: { ...shallowOff, startTransition }, pending };
+}
+
 export function SearchInput({ placeholder = "Tìm kiếm…", className }: { placeholder?: string; className?: string }) {
   const [q, setQ] = useQueryState("q", parseAsString.withDefault("").withOptions(shallowOff));
   const [, setPage] = useQueryState("page", parseAsString.withOptions(shallowOff));
@@ -161,7 +170,8 @@ export function PeriodFilter({ defaultKey = "all", options = PERIOD_OPTIONS }: {
 }
 
 export function ResetFilters({ keys }: { keys: string[] }) {
-  const [state, setState] = useQueryStates(Object.fromEntries(keys.map((k) => [k, parseAsString])), shallowOff);
+  const { options: shallowOffTx } = useShallowOff();
+  const [state, setState] = useQueryStates(Object.fromEntries(keys.map((k) => [k, parseAsString])), shallowOffTx);
   const active = Object.values(state).some((v) => v);
   if (!active) return null;
   return (

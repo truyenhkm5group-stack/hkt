@@ -89,7 +89,10 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [allOpen, setAllOpen] = React.useState<boolean | null>(null);
   const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
-  const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push" });
+  // Sắp xếp / phân trang đều đi vòng lên máy chủ. Không bắt trạng thái chờ thì bảng đứng im vài
+  // trăm mili-giây sau khi bấm và người dùng tưởng không ăn.
+  const [dangTai, startTransition] = React.useTransition();
+  const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push", startTransition });
   // Gom nhóm; dòng cha là bản tổng hợp do trang cung cấp. Thứ tự NHÓM phải theo chính cột đang sắp xếp:
   // máy chủ chỉ sắp xếp được từng mẫu mã, còn dòng cha là số TỔNG HỢP, nên nếu giữ thứ tự xuất hiện thì
   // bảng đang gom nhóm (Sản phẩm & tồn kho, Tỷ lệ giao thành công…) trông như không sắp xếp gì cả.
@@ -191,7 +194,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
           <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => { setAllOpen(false); setExpanded({}); }}>Thu gọn tất cả</button>
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-xl border bg-card">
+      <div className={cn("overflow-hidden rounded-xl border bg-card transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
         <div className="overflow-x-auto">
           <Table className={cn(dense && "[&_td]:py-1.5")}>
             <TableHeader className="bg-muted/50">
