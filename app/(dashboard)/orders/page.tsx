@@ -14,7 +14,7 @@ export const metadata = { title: "Đơn hàng" };
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("orders:read");
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
+  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params)]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
@@ -43,6 +43,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           { key: "source", label: "Kênh bán", options: facets.sources },
           { key: "carrier", label: "ĐVVC", options: facets.carriers },
           { key: "payment", label: "Thanh toán", options: [{ value: "cod", label: "Thu hộ COD" }, { value: "prepaid", label: "Đã thanh toán trước" }], single: true },
+          { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}
         resultLabel={`${formatNumber(total)} đơn phù hợp · ${formatNumber(summary.quantity)} sản phẩm`}
