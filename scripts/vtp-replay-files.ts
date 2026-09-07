@@ -14,6 +14,13 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
 
+/** `db.execute` trả mảng (PGlite) hoặc `{ rows }` (node-postgres) tuỳ trình điều khiển. */
+function rowsOf(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) return result as Record<string, unknown>[];
+  const rows = (result as { rows?: unknown })?.rows;
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const like = process.argv.find((a) => a.startsWith("--like="))?.slice(7) ?? "";
@@ -52,11 +59,12 @@ async function main() {
       ketQua.push({ ten: f.filename, loi: e instanceof Error ? e.message : String(e) });
     }
   }
-  const [tong] = (await db.execute(sql`
+  const [tong] = rowsOf(await db.execute(sql`
     select count(*) dong_so, count(*) filter (where shipment_id is not null) dong_ghep_duoc,
-           coalesce(sum(cod) filter (where shipment_id is not null), 0) cod_ghep_duoc
+           coalesce(sum(cod) filter (where shipment_id is not null), 0) cod_ghep_duoc,
+           count(distinct statement_key) so_bang_ke
     from cod_statement_lines
-  `)) as unknown as Record<string, unknown>[];
+  `));
   console.log(JSON.stringify({ da_phat_lai: ketQua, so_chung_tu: tong }, null, 2));
 }
 
