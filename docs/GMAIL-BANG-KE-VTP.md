@@ -19,7 +19,11 @@ Lần chạy đầu quét **toàn bộ** thư Viettel Post trong hộp (kể c�
 
 **Nếu thư đã bị gắn nhãn `ERP-da-nhap` mà ERP chưa nhập được** (xảy ra khi bộ đọc chưa hỗ trợ bố cục tệp): vào Gmail, tìm `label:ERP-da-nhap`, chọn tất cả rồi **gỡ nhãn** — chu kỳ kế tiếp sẽ gửi lại toàn bộ. Từ nay ERP trả HTTP 422 khi không nhập được tệp nào nên script sẽ tự giữ lại thư để thử lần sau.
 
-Gửi lại cùng một tệp **không** làm số liệu nhân đôi: ERP chống trùng theo mã vận đơn và mã bảng kê, và chỉ nâng trạng thái COD chứ không hạ.
+Gửi lại cùng một tệp **không** làm số liệu nhân đôi, và gửi lại theo thứ tự nào cũng ra đúng một kết quả: mỗi dòng của mỗi tệp được ghi vào **sổ chứng từ** `cod_statement_lines` (một dòng cho mỗi cặp *tệp × mã vận đơn*), còn số tiền trên vận đơn chỉ là kết quả dựng lại từ sổ.
+
+> **Vì sao có sổ này.** Trước đây mỗi tệp ghi thẳng lên vận đơn nên tệp nhập sau đè mất tệp nhập trước. Một vận đơn có mặt ở nhiều bảng kê (chiều đi có tiền, chiều hoàn chỉ có cước) mà script lại xử lý từ thư mới về thư cũ, nên bảng kê cũ xoá mất tiền của bảng kê mới: 334 vận đơn giao thành công bị đưa tiền về 0 và 79.774.116đ biến mất khỏi đối soát. Quy tắc dựng lại: ưu tiên dòng **có tiền**, trong đó lấy dòng có mốc chứng từ **muộn nhất**; dòng chỉ có cước không được hạ số đã có về 0.
+
+Cần chạy lại toàn bộ (ví dụ sau khi nâng cấp cách đọc tệp): Gmail → tìm `label:ERP-da-nhap` → chọn tất cả → **gỡ nhãn**. Chu kỳ 15 phút kế tiếp sẽ gửi lại mọi bảng kê và ERP dựng lại tiền từ đầu.
 
 ## Đoạn script
 
