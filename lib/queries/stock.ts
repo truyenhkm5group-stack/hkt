@@ -1,30 +1,77 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 
 const oi = schema.orderItems;
 const o = schema.orders;
 const s = schema.shipments;
 const ri = schema.stockReceiptItems;
+const r = schema.stockReceipts;
 const pv = schema.productVariants;
 const p = schema.products;
 
 /**
- * Số lượng đã bán / hoàn / đang giao / chờ gửi theo mẫu mã, tính từ kết quả cuối cùng của từng đơn
- * (cùng quy tắc với báo cáo tỷ lệ hoàn: giao thật = giao thành công có cước ≥ 10K hoặc có COD).
+ * SỔ KHO — mọi con số tồn của ERP đều ra từ một phương trình duy nhất:
+ *
+ *   Tồn thực tế   = (tổng phiếu kho) − (đã xuất qua ĐVVC)
+ *   Tồn khả dụng  = Tồn thực tế − (đã chốt đơn nhưng chưa xuất)
+ *
+ * Phiếu kho quy ước DƯƠNG = vào kho (nhập mới, tái nhập hàng hoàn, điều chỉnh tăng),
+ * ÂM = ra kho (xuất tay không qua ĐVVC, điều chỉnh giảm).
+ *
+ * ĐÃ XUẤT đếm theo VẬN ĐƠN, không theo tiền: hàng rời kho lúc bưu tá lấy hàng, không phải lúc
+ * khách trả tiền. Vì vậy tồn kho KHÔNG dùng ORDER_OUTCOME (định nghĩa theo COD thực thu, dành cho
+ * doanh thu / lợi nhuận). Hàng hoàn vẫn nằm trong "đã xuất" cho tới khi kho lập phiếu tái nhập —
+ * ĐVVC báo "đã hoàn" chỉ là hàng đang trên đường về, không phải hàng đã có trong kho.
+ *
+ * Hàng tặng kèm (is_bonus) vẫn trừ tồn như hàng bán: lên đơn 0đ nhưng vẫn rời kho.
+ */
+
+/** Số món của một dòng đơn — hàng tặng tính như hàng bán vì cũng rời kho. */
+const QTY = sql<number>`${oi.quantity}`;
+
+/**
+ * Đã chốt đơn nhưng CHƯA rời kho: hàng còn trong kho nhưng đã hứa cho khách.
+ * Gồm đơn đã xác nhận/đang đóng/chờ chuyển và cả vận đơn đã tạo mã mà bưu tá chưa lấy.
+ */
+const RESERVED_IN_WAREHOUSE = sql`(not ${SHIPMENT_LEFT_WAREHOUSE}
+  and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP','SHIPPED'))`;
+
+/** Hàng đã rời kho và đang trên đường (chưa kết thúc) — nằm ngoài kho, chưa biết về hay không. */
+const OUT_IN_TRANSIT = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED'))`;
+
+/**
+ * Hàng phải quay về kho mà kho CHƯA lập phiếu tái nhập.
+ * Gồm đơn hoàn (theo kết quả đơn) và đơn huỷ sau khi đã xuất — chủ shop yêu cầu xử lý như hàng hoàn.
+ */
+const OUT_AWAITING_RETURN = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is null
+  and (${RETURN_PENDING_WAREHOUSE} or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED')))`;
+
+/** Hàng hoàn kho ĐÃ xử lý (đã có phiếu tái nhập) — dùng để đối chiếu với số thực nhập, ra phần hụt. */
+const OUT_RETURN_HANDLED = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is not null)`;
+
+/**
+ * Số lượng theo mẫu mã ở phía ĐƠN HÀNG (grain: dòng đơn × vận đơn của đơn đó).
+ * `shipped` là số THỰC SỰ RỜI KHO — trụ cột của phương trình tồn kho.
  */
 export function variantSalesSubquery(db: Db) {
   return db
     .select({
       variantId: oi.variantId,
-      delivered: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`.as("sold_delivered"),
-      returned: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
-      inTransit: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT'), 0)`.as("sold_in_transit"),
-      pending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED' and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP')), 0)`.as("sold_pending"),
-      /** Hàng hoàn kho CHƯA xác nhận nhận về — vẫn đang ở ngoài, KHÔNG được tính vào tồn. */
-      returnedPending: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${RETURN_PENDING_WAREHOUSE}), 0)`.as("sold_returned_pending"),
-      /** Hàng hoàn kho ĐÃ xác nhận nhận về — đã nằm trong tồn trở lại. Tách riêng để không trộn hai trạng thái. */
-      returnedReceived: sql<number>`coalesce(sum(${oi.quantity}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is not null), 0)`.as("sold_returned_received"),
+      /** ĐÃ XUẤT KHO qua ĐVVC — căn cứ trạng thái vận đơn dựng từ sự kiện Viettel Post. */
+      shipped: sql<number>`coalesce(sum(${QTY}) filter (where ${SHIPMENT_LEFT_WAREHOUSE}), 0)`.as("out_shipped"),
+      /** Đã xuất, đang trên đường, chưa kết thúc. */
+      inTransit: sql<number>`coalesce(sum(${QTY}) filter (where ${OUT_IN_TRANSIT}), 0)`.as("out_in_transit"),
+      /** Đã xuất, phải quay về, kho chưa lập phiếu tái nhập. */
+      awaitingReturn: sql<number>`coalesce(sum(${QTY}) filter (where ${OUT_AWAITING_RETURN}), 0)`.as("out_awaiting_return"),
+      /** Đã xuất và đã lập phiếu tái nhập — đối chiếu với số thực nhập để ra phần hụt. */
+      returnHandled: sql<number>`coalesce(sum(${QTY}) filter (where ${OUT_RETURN_HANDLED}), 0)`.as("out_return_handled"),
+      /** Đã chốt đơn, hàng còn trong kho — trừ khỏi tồn KHẢ DỤNG, không trừ khỏi tồn thực tế. */
+      reserved: sql<number>`coalesce(sum(${QTY}) filter (where ${RESERVED_IN_WAREHOUSE}), 0)`.as("out_reserved"),
+      /** Giao thành công theo TIỀN (ORDER_OUTCOME) — chỉ để đối chiếu, KHÔNG dùng tính tồn. */
+      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`.as("sold_delivered"),
+      /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
+      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
@@ -33,39 +80,63 @@ export function variantSalesSubquery(db: Db) {
     .as("vsales");
 }
 
-/** Tổng nhập (phiếu nhập + điều chỉnh) theo mẫu mã */
+/** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. */
 export function variantReceiptsSubquery(db: Db) {
   return db
     .select({
       variantId: ri.variantId,
+      /** Tổng ròng mọi phiếu (đã tính dấu) — vế "vào kho" của phương trình tồn. */
       received: sql<number>`coalesce(sum(${ri.quantity}), 0)`.as("received"),
+      /** Nhập hàng mới từ xưởng / NCC. */
+      receiptIn: sql<number>`coalesce(sum(${ri.quantity}) filter (where ${r.kind} = 'RECEIPT'), 0)`.as("receipt_in"),
+      /** Tái nhập hàng hoàn — số kho ĐẾM THỰC TẾ, không phải số suy ra từ vận đơn. */
+      returnIn: sql<number>`coalesce(sum(${ri.quantity}) filter (where ${r.kind} = 'RETURN'), 0)`.as("return_in"),
+      /** Điều chỉnh sau kiểm kê (âm hoặc dương). */
+      adjust: sql<number>`coalesce(sum(${ri.quantity}) filter (where ${r.kind} = 'ADJUSTMENT'), 0)`.as("adjust_qty"),
+      /** Xuất kho tay không qua ĐVVC (khách tới lấy, ship nội thành) — lưu số âm, đổi dấu để hiển thị. */
+      manualOut: sql<number>`coalesce(-sum(${ri.quantity}) filter (where ${r.kind} = 'ISSUE'), 0)`.as("manual_out"),
       receiptCount: sql<number>`count(distinct ${ri.receiptId})`.as("receipt_count"),
+      /** Số phiếu NHẬP HÀNG — mẫu mã chưa có phiếu nào thì tồn là THIẾU DỮ LIỆU, không phải 0. */
+      receiptDocs: sql<number>`count(distinct ${ri.receiptId}) filter (where ${r.kind} = 'RECEIPT')`.as("receipt_docs"),
     })
     .from(ri)
+    .innerJoin(r, eq(r.id, ri.receiptId))
     .groupBy(ri.variantId)
     .as("vreceipts");
 }
 
 /** Giá nhập gần nhất ghi trên phiếu (nếu có), dùng thay giá vốn Pancake khi Pancake = 0 */
-export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id where ri2.variant_id = ${pv.id} and ri2.unit_cost > 0 order by r2.received_at desc, r2.created_at desc limit 1)`;
+export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id where ri2.variant_id = ${pv.id} and ri2.unit_cost > 0 and r2.kind = 'RECEIPT' order by r2.received_at desc, r2.created_at desc limit 1)`;
 
 export type StockAggregates = ReturnType<typeof variantSalesSubquery>;
 export type ReceiptAggregates = ReturnType<typeof variantReceiptsSubquery>;
 
 /**
- * Tồn ERP có ĐÁNG TIN hay không: chỉ khi mẫu mã đã có ít nhất một phiếu nhập trong ERP.
+ * Tồn ERP có ĐÁNG TIN hay không: chỉ khi mẫu mã đã có ít nhất một PHIẾU NHẬP HÀNG.
  * Chưa có phiếu nhập nào thì "nhập = 0" là THIẾU DỮ LIỆU, không phải "nhập 0 cái";
- * lấy 0 trừ đi số đã bán sẽ ra tồn âm bịa ra và đẩy kế hoạch sản xuất đặt thừa.
+ * lấy 0 trừ đi số đã xuất sẽ ra tồn âm bịa ra và đẩy kế hoạch sản xuất đặt thừa.
  * Những mẫu mã này phải hiển thị "Chưa có phiếu nhập", không hiển thị số.
  */
 export function stockKnownExpr(receipts: ReceiptAggregates) {
-  return sql<boolean>`coalesce(${receipts.receiptCount}, 0) > 0`;
+  return sql<boolean>`coalesce(${receipts.receiptDocs}, 0) > 0`;
 }
 
-/** Tồn khả dụng ERP = Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
- *  Hàng hoàn chỉ được cộng lại tồn khi có `shipments.return_received_at`; ĐVVC báo "đã hoàn" là chưa đủ. */
+/**
+ * TỒN THỰC TẾ = tổng phiếu kho (nhập mới + tái nhập + điều chỉnh − xuất tay) − đã xuất qua ĐVVC.
+ * Hàng hoàn chỉ quay lại tồn khi kho lập PHIẾU TÁI NHẬP với số đếm thực tế.
+ */
 export function erpStockExpr(sales: StockAggregates, receipts: ReceiptAggregates) {
-  return sql<number>`coalesce(${receipts.received}, 0) - coalesce(${sales.delivered}, 0) - coalesce(${sales.inTransit}, 0) - coalesce(${sales.returnedPending}, 0)`;
+  return sql<number>`coalesce(${receipts.received}, 0) - coalesce(${sales.shipped}, 0)`;
+}
+
+/** TỒN KHẢ DỤNG để bán = tồn thực tế − hàng đã chốt đơn còn nằm trong kho chờ xuất. */
+export function availableStockExpr(sales: StockAggregates, receipts: ReceiptAggregates) {
+  return sql<number>`coalesce(${receipts.received}, 0) - coalesce(${sales.shipped}, 0) - coalesce(${sales.reserved}, 0)`;
+}
+
+/** Hàng hoàn đã lập phiếu nhưng đếm thiếu so với số đã xuất = hàng hụt / hỏng không nhập lại được. */
+export function stockShrinkageExpr(sales: StockAggregates, receipts: ReceiptAggregates) {
+  return sql<number>`greatest(coalesce(${sales.returnHandled}, 0) - coalesce(${receipts.returnIn}, 0), 0)`;
 }
 
 export type VariantPickerRow = {

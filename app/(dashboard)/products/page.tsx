@@ -54,14 +54,13 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           tone={summary.out > 0 ? "rose" : "slate"}
         />
         <MetricCard label="Giá trị tồn kho" value={formatVND(summary.stockValue, { compact: true })} note={`${formatNumber(summary.stockUnits)} sản phẩm × giá nhập gần nhất`} icon={Warehouse} tone="primary" />
-        <MetricCard label="Đã bán 30 ngày" value={formatNumber(summary.sold30)} note={`Đã nhập ${formatNumber(summary.received)} · giao thật ${formatNumber(summary.delivered)} · đang giao ${formatNumber(summary.inTransit)} · hoàn ${formatNumber(summary.returned)} (chờ về kho ${formatNumber(summary.returnedPending)}, đã nhận ${formatNumber(summary.returnedReceived)})`} icon={ShoppingBag} tone="green" />
+        <MetricCard label="Đã xuất kho" value={formatNumber(summary.shipped)} note={`Nhập mới ${formatNumber(summary.receiptIn)} · tái nhập ${formatNumber(summary.returnIn)} · hoàn chờ nhận ${formatNumber(summary.awaitingReturn)}${summary.shrinkage ? ` · hụt ${formatNumber(summary.shrinkage)}` : ""}`} icon={ShoppingBag} tone="green" />
       </section>
 
       <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b className="text-foreground">Tồn khả dụng</b> do ERP tự tính = <b className="text-foreground">Nhập</b> (phiếu nhập hàng / điều chỉnh kiểm kê trên ERP) − <b className="text-foreground">Giao thành công thật</b> − <b className="text-foreground">Đang giao</b>. Hàng hoàn được coi là đã về kho nên không bị trừ. Số tồn của Pancake chỉ hiển thị để tham khảo. Chưa nhập phiếu thì tồn sẽ âm: vào <Link href="/inventory/receipts" className="font-semibold text-primary hover:underline">Nhập hàng &amp; kiểm kê</Link> để nhập số lượng ban đầu.
-        </div>
+          <b className="text-foreground">Sổ kho</b>: <b className="text-foreground">Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay − <b className="text-foreground">Đã xuất</b>; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chờ xuất. “Đã xuất” đếm theo xác nhận <b className="text-foreground">lấy hàng của Viettel Post</b>, không theo trạng thái Pancake và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập <Link href="/inventory/receipts" className="font-semibold text-primary hover:underline">phiếu tái nhập</Link> với số đếm thực tế — ĐVVC báo “đã hoàn” mới chỉ là hàng đang trên đường về. Mẫu mã chưa có phiếu nhập thì ERP báo “Chưa có phiếu nhập” thay vì hiện số bịa.</div>
       </div>
 
       <DataTableToolbar

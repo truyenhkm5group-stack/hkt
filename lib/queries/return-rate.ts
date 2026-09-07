@@ -204,6 +204,19 @@ export const IS_STATUS_CONFLICT = sql`(${s.id} is not null and (
   or (${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') and ${s.stage} = 'DELIVERED')
   or (${o.stage} in ('CANCELLED','DELETED') and ${s.stage} in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))))`;
 
+/**
+ * HÀNG ĐÃ RỜI KHO — mốc vật lý, dùng cho SỔ KHO (không dùng cho doanh thu).
+ *
+ * Căn cứ trạng thái vận đơn do sự kiện Viettel Post dựng ra (`viettelpost/state.ts` chỉ nhận sự
+ * kiện đến thẳng từ ĐVVC), hoặc mốc "Lấy hàng thành công" (mã 200 / 105). Vận đơn mới tạo mã mà
+ * bưu tá chưa lấy (PENDING) thì hàng VẪN CÒN trong kho.
+ *
+ * Cố ý KHÔNG dùng trạng thái Pancake: nhân viên cập nhật tay, đo trên production lệch 76 món so
+ * với xác nhận của ĐVVC. Cũng KHÔNG dùng ORDER_OUTCOME: đó là định nghĩa theo tiền thực thu.
+ */
+export const SHIPMENT_LEFT_WAREHOUSE = sql`(${s.pickedUpAt} is not null
+  or ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED'))`;
+
 /** Hàng hoàn kho CHƯA xác nhận nhận về — không được cộng lại tồn kho. */
 export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
 

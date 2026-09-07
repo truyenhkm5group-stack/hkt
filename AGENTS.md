@@ -25,7 +25,7 @@
 7. Vận đơn chiều về (mã gốc + `[số]P[số]`) là dòng `shipments` **riêng** (`order_id NULL`, `order_reference` = mã gốc). Không đè lên vận đơn gốc. Không đổi regex lười trong `legBaseCode`.
 8. `expandSheetRange()` bắt buộc khi đọc Excel Viettel Post (file khai báo sai vùng dữ liệu).
 9. Marketer report: tổng đơn/doanh số của các marketer + "Chưa gán marketer" phải **bằng** số đơn xác nhận Pancake trong kỳ.
-10. Tồn kho ERP = Nhập − giao thật − đang giao; hàng hoàn coi như về kho. Không trừ đơn hoàn khỏi tồn.
+10. **SỔ KHO** (`lib/queries/stock.ts`): `Tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC`; `Khả dụng bán = Tồn thực tế − đã chốt đơn chưa xuất`. Phiếu kho quy ước DƯƠNG = vào kho (RECEIPT nhập mới, RETURN tái nhập hàng hoàn, ADJUSTMENT tăng), ÂM = ra kho (ISSUE xuất tay, ADJUSTMENT giảm). "Đã xuất" đếm theo `SHIPMENT_LEFT_WAREHOUSE` (mốc lấy hàng / trạng thái vận đơn dựng từ sự kiện Viettel Post) — **không** dùng `ORDER_OUTCOME` (đó là định nghĩa theo tiền) và **không** dùng trạng thái Pancake. Hàng hoàn CHỈ quay lại tồn khi kho lập phiếu RETURN với số đếm thực tế; ĐVVC báo "đã hoàn" là chưa đủ. Hàng tặng (`is_bonus`) vẫn trừ tồn như hàng bán. Mẫu mã chưa có phiếu RECEIPT nào ⇒ `stockKnown = false`, hiện "Chưa có phiếu nhập", không hiện số.
 11. Landing: 1 sản phẩm không ghi giá = 499K + 25K ship; gói ≥ 2 = giá gói, free ship; không đoán mẫu mã khi thiếu cả size lẫn màu; không ghi ngược vào Pancake (API không có update-order).
 12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
 13. Giá vốn tính "sống" theo phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập mẫu mã.

@@ -146,9 +146,42 @@ Trang Vận đơn (`shipmentSummary`) đếm giao thành công / hoàn bằng ha
 - Báo cáo danh nghĩa (`profit-nominal.ts`): đơn ĐÃ XÁC NHẬN lên trong kỳ × tỷ lệ GTC ước tính; đơn nhiều mã chia 1/N (`ordersWeighted`), doanh số phân bổ theo tiền hàng (`salesAfterDiscount`) — tổng các mã = thẻ KPI.
 - Marketer (`ads-performance.ts`): đơn xác nhận gán theo `ad_id → fanpage → tiền QC → chủ mã`, phần không gán được vào "Chưa gán marketer" để **tổng luôn khớp** số đơn xác nhận Pancake; LN sau QC = (LN ròng + QC) × tỷ trọng − QC riêng − QC test.
 - Giá vốn tính "sống": giá nhập phiếu ERP gần nhất → giá vốn Pancake trên đơn → giá nhập mẫu mã.
-- Tồn kho ERP = Nhập − giao thật (`ORDER_OUTCOME='DELIVERED'`) − đang giao; hàng hoàn coi như đã về kho. Cột "Bán ròng 30 ngày" (`products.ts::sold30Subquery`) **loại đơn huỷ và đơn hoàn**.
+- **Tồn kho theo SỔ KHO** (xem 6.7). Cột "Bán ròng 30 ngày" (`products.ts::sold30Subquery`) **loại đơn huỷ và đơn hoàn**.
 - Kế hoạch đặt hàng SX (`planning.ts::demandSubquery`): nhu cầu = đơn không huỷ, không hoàn (`ORDER_OUTCOME NOT IN ('CANCELLED','RETURNED','RETURNED_BY_RULE')`) trong cửa sổ N ngày.
 - Lương: mặc định trên lợi nhuận dòng tiền thực; marketer nhận diện theo tên chiến dịch / tài khoản QC / fanpage.
+
+### 6.7 Sổ kho (Sản phẩm & tồn kho) — chốt 07/09/2026
+
+```
+Tồn thực tế  = tổng phiếu kho − đã xuất qua ĐVVC
+Khả dụng bán = Tồn thực tế − đã chốt đơn chưa xuất
+```
+
+**Phiếu kho** (`stock_receipts.kind`, quy ước DƯƠNG = vào kho / ÂM = ra kho):
+
+| kind | Nghĩa | Dấu |
+|---|---|---|
+| `RECEIPT` | Nhập hàng mới từ xưởng / NCC (giá nhập > 0 cập nhật giá vốn) | + |
+| `RETURN` | Tái nhập hàng hoàn — số kho **ĐẾM THỰC TẾ**, `stock_receipt_items.shipment_id` truy nguyên vận đơn | + |
+| `ISSUE` | Xuất kho tay không qua ĐVVC (khách tới lấy, ship nội thành) — người dùng nhập số dương, ERP lưu âm | − |
+| `ADJUSTMENT` | Điều chỉnh sau kiểm kê | ± |
+
+**"Đã xuất" = `SHIPMENT_LEFT_WAREHOUSE`** (`lib/queries/return-rate.ts`):
+```sql
+shipments.picked_up_at is not null
+  or shipments.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')
+```
+Nguồn theo thứ tự tin cậy: sự kiện Viettel Post mã 200/105 "Lấy hàng thành công" → webhook/tra cứu VTP → file Danh sách vận đơn. Trạng thái Pancake **chỉ để đối chiếu** (đo trên production lệch ~77 món). Vận đơn `PENDING` (đã tạo mã, bưu tá chưa lấy) thì hàng **vẫn còn trong kho**.
+
+Quy tắc kèm theo (chủ shop chốt 07/09/2026):
+- Hàng hoàn **chỉ** quay lại tồn khi kho lập phiếu `RETURN`; ĐVVC báo "đã hoàn" mới là hàng đang trên đường về. Phần đếm thiếu so với số đã xuất = **hàng hụt** (`stockShrinkageExpr`), hiện thành cột riêng chứ không giấu.
+- **Đơn huỷ sau khi đã xuất** xử lý y như hàng hoàn.
+- **Hàng tặng** (`is_bonus`) lên đơn 0đ nhưng **vẫn trừ tồn**.
+- Chỉ vận hành **một kho** — phiếu kho không cần trường kho.
+- Xác nhận nhanh hàng loạt (`markReturnReceived`) nay **tự lập phiếu `RETURN` "nhận đủ"**; nếu không, hàng vừa xác nhận sẽ biến mất khỏi sổ kho.
+- Mẫu mã chưa có phiếu `RECEIPT` nào ⇒ `stockKnown = false`, hiện "Chưa có phiếu nhập", không hiện số, và kế hoạch SX không đề xuất đặt.
+
+Số thật khi triển khai (07/09/2026): tổng phiếu kho **1.948** · đã xuất qua ĐVVC **1.501** · **tồn thực tế 447** · hoàn chờ nhận **576** · chờ xuất 30 · 28 mẫu mã có phiếu / 10 chưa có phiếu / **4 mẫu mã tồn âm** (cần kiểm kê) · 0 đơn có nhiều vận đơn (không có nguy cơ đếm trùng).
 
 ### 6.4 Nhập dữ liệu Viettel Post
 

@@ -1,12 +1,13 @@
 "use server";
 
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
+import { settleReturnsForVariants } from "@/lib/returns/warehouse";
 import { stockReceiptSchema } from "@/lib/validation/stock";
 
 export type ActionResult = { ok: true; id?: string } | { error: string };
@@ -19,15 +20,20 @@ function revalidate() {
   for (const path of ["/inventory/receipts", "/products", "/inventory", "/"]) revalidatePath(path);
 }
 
-/** Tạo phiếu nhập hàng / điều chỉnh kiểm kê. Giá nhập > 0 sẽ cập nhật giá vốn gần nhất của mẫu mã. */
+/** Tạo phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê). Giá nhập > 0 trên phiếu NHẬP MỚI sẽ cập nhật giá vốn gần nhất của mẫu mã. */
 export async function createStockReceipt(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
   const parsed = stockReceiptSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
-  const items = data.items.filter((i) => i.quantity !== 0);
-  if (data.kind === "RECEIPT" && items.some((i) => i.quantity < 0)) return { error: "Phiếu nhập hàng không được có số lượng âm — dùng “Điều chỉnh kiểm kê” để giảm tồn" };
+  const raw = data.items.filter((i) => i.quantity !== 0);
+  if (data.kind === "RECEIPT" && raw.some((i) => i.quantity < 0)) return { error: "Phiếu nhập hàng không được có số lượng âm — dùng “Điều chỉnh kiểm kê” để giảm tồn" };
+  if (data.kind === "RETURN" && raw.some((i) => i.quantity < 0)) return { error: "Phiếu tái nhập hàng hoàn chỉ ghi số lượng thực nhận (số dương)" };
+  if (data.kind === "ISSUE" && raw.some((i) => i.quantity < 0)) return { error: "Phiếu xuất kho tay nhập số lượng dương — ERP tự trừ kho" };
+  // Sổ kho quy ước DƯƠNG = vào kho, ÂM = ra kho. Người dùng luôn nhập số dương cho phiếu xuất tay
+  // rồi ERP đổi dấu, để không ai phải nhớ quy ước dấu khi ghi phiếu.
+  const items = data.kind === "ISSUE" ? raw.map((i) => ({ ...i, quantity: -Math.abs(i.quantity) })) : raw;
   const db = await getDb();
   const variantIds = [...new Set(items.map((i) => i.variantId))];
   const known = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantIds));
@@ -39,13 +45,26 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     .insert(schema.stockReceipts)
     .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: data.supplier, note: data.note, totalQuantity, totalCost, createdBy: user.email })
     .returning({ id: schema.stockReceipts.id });
-  await db.insert(schema.stockReceiptItems).values(items.map((i) => ({ receiptId: receipt.id, variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost })));
+  await db
+    .insert(schema.stockReceiptItems)
+    .values(items.map((i) => ({ receiptId: receipt.id, variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost, shipmentId: i.shipmentId?.trim() || null })));
+  if (data.kind === "RETURN") {
+    // Đóng các vận đơn hoàn đang chờ theo đúng số vừa đếm được: hàng thôi nằm ở "hoàn chờ nhận",
+    // phần đếm thiếu so với số đã xuất hiện ra thành hàng hụt thay vì treo mãi ở danh sách chờ.
+    const settled = await settleReturnsForVariants(items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })), user.email, data.note);
+    for (const [variantId, shipmentId] of settled.firstByVariant) {
+      await db
+        .update(schema.stockReceiptItems)
+        .set({ shipmentId })
+        .where(and(eq(schema.stockReceiptItems.receiptId, receipt.id), eq(schema.stockReceiptItems.variantId, variantId)));
+    }
+  }
   if (data.kind === "RECEIPT") {
     for (const item of items) {
       if (item.unitCost > 0) await db.update(schema.productVariants).set({ lastImportedPrice: item.unitCost, updatedAt: new Date() }).where(eq(schema.productVariants.id, item.variantId));
     }
   }
-  await audit({ userId: user.id, userEmail: user.email, action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : "STOCK_ADJUST_CREATE", entity: "STOCK_RECEIPT", entityId: receipt.id, detail: { ...data, items, totalQuantity, totalCost } });
+  await audit({ userId: user.id, userEmail: user.email, action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : data.kind === "RETURN" ? "STOCK_RETURN_CREATE" : data.kind === "ISSUE" ? "STOCK_ISSUE_CREATE" : "STOCK_ADJUST_CREATE", entity: "STOCK_RECEIPT", entityId: receipt.id, detail: { ...data, items, totalQuantity, totalCost } });
   for (const id of variantIds) publish({ type: "stock", variantId: id });
   revalidate();
   return { ok: true, id: receipt.id };

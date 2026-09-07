@@ -86,7 +86,7 @@ async function getReplenishmentPlanUncached(): Promise<PlanReport> {
       stock: erpStockExpr(sales, receipts),
       stockKnown: stockKnownExpr(receipts),
       pancakeStock: pv.remainQuantity,
-      committed: sql<number>`coalesce(${sales.pending}, 0)`,
+      committed: sql<number>`coalesce(${sales.reserved}, 0)`,
       inTransit: sql<number>`coalesce(${sales.inTransit}, 0)`,
       sold7: sql<number>`coalesce(${d7.qty}, 0)`,
       sold30: sql<number>`coalesce(${d30.qty}, 0)`,

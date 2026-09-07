@@ -766,7 +766,9 @@ export const stockReceipts = pgTable(
   "stock_receipts",
   {
     id: id(),
-    kind: text("kind").notNull().default("RECEIPT"), // RECEIPT (nhập hàng) | ADJUSTMENT (điều chỉnh sau kiểm kê)
+    // RECEIPT (nhập hàng mới) | RETURN (tái nhập hàng hoàn) | ISSUE (xuất kho tay, không qua ĐVVC) | ADJUSTMENT (điều chỉnh sau kiểm kê).
+    // Quy ước dấu của stock_receipt_items.quantity: DƯƠNG = vào kho, ÂM = ra kho. Tồn = tổng quantity − hàng đã xuất qua ĐVVC.
+    kind: text("kind").notNull().default("RECEIPT"),
     receivedAt: ts("received_at").notNull(),
     reference: text("reference").notNull().default(""),
     supplier: text("supplier").notNull().default(""),
@@ -790,10 +792,16 @@ export const stockReceiptItems = pgTable(
     variantId: text("variant_id")
       .notNull()
       .references(() => productVariants.id, { onDelete: "cascade" }),
-    quantity: integer("quantity").notNull(), // âm khi điều chỉnh giảm
+    quantity: integer("quantity").notNull(), // DƯƠNG = vào kho; ÂM = ra kho (xuất tay / điều chỉnh giảm)
     unitCost: money("unit_cost"),
+    /** Vận đơn được tái nhập (chỉ phiếu RETURN) — để truy nguyên hàng hoàn nào đã thực sự về kho. */
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "set null" }),
   },
-  (t) => [index("stock_receipt_items_receipt_idx").on(t.receiptId), index("stock_receipt_items_variant_idx").on(t.variantId)],
+  (t) => [
+    index("stock_receipt_items_receipt_idx").on(t.receiptId),
+    index("stock_receipt_items_variant_idx").on(t.variantId),
+    index("stock_receipt_items_shipment_idx").on(t.shipmentId),
+  ],
 );
 
 // ───────────────────────── Chi phí & marketing ─────────────────────────

@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createStockReceipt } from "@/lib/actions/stock";
 import { formatNumber, formatVND, todayVN } from "@/lib/format";
 import type { VariantPickerRow } from "@/lib/queries/stock";
-import { STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
+import { STOCK_RECEIPT_KIND_HINT, STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
 import { cn } from "@/lib/utils";
 
 type RowInput = { qty: string; cost: string; counted: string };
@@ -23,8 +23,8 @@ function toInt(value: string) {
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
-/** Dialog lập phiếu nhập hàng hoặc điều chỉnh kiểm kê cho nhiều mẫu mã cùng lúc */
-export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind }) {
+/** Dialog lập phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê) cho nhiều mẫu mã cùng lúc */
+export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {} }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number> }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());
@@ -50,9 +50,9 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
       const input = inputs[v.id];
       if (!input) continue;
       const unitCost = input.cost === "" ? v.lastCost : toInt(input.cost);
-      if (kind === "RECEIPT") {
+      if (kind !== "ADJUSTMENT") {
         const quantity = toInt(input.qty);
-        if (quantity > 0) list.push({ variantId: v.id, quantity, unitCost, name: `${v.sku || v.productName}` });
+        if (quantity > 0) list.push({ variantId: v.id, quantity, unitCost: kind === "RECEIPT" ? unitCost : 0, name: `${v.sku || v.productName}` });
       } else if (input.counted !== "") {
         const quantity = toInt(input.counted) - v.currentStock;
         if (quantity !== 0) list.push({ variantId: v.id, quantity, unitCost: 0, name: `${v.sku || v.productName}` });
@@ -75,7 +75,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
 
   const submit = () => {
     if (!items.length) {
-      toast.error(kind === "RECEIPT" ? "Nhập số lượng cho ít nhất một mẫu mã" : "Nhập số đếm thực tế khác với tồn hiện tại cho ít nhất một mẫu mã");
+      toast.error(kind === "ADJUSTMENT" ? "Nhập số đếm thực tế khác với tồn hiện tại cho ít nhất một mẫu mã" : "Nhập số lượng cho ít nhất một mẫu mã");
       return;
     }
     startTransition(async () => {
@@ -84,7 +84,12 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
         toast.error(result.error);
         return;
       }
-      toast.success(kind === "RECEIPT" ? `Đã nhập ${formatNumber(totalQty)} sản phẩm (${items.length} mẫu mã)` : `Đã điều chỉnh ${items.length} mẫu mã`);
+      const done =
+        kind === "RECEIPT" ? `Đã nhập ${formatNumber(totalQty)} sản phẩm (${items.length} mẫu mã)`
+        : kind === "RETURN" ? `Đã tái nhập ${formatNumber(totalQty)} sản phẩm hàng hoàn (${items.length} mẫu mã)`
+        : kind === "ISSUE" ? `Đã xuất tay ${formatNumber(totalQty)} sản phẩm (${items.length} mẫu mã)`
+        : `Đã điều chỉnh ${items.length} mẫu mã`;
+      toast.success(done);
       setOpen(false);
       reset();
       router.refresh();
@@ -102,14 +107,14 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
       <DialogTrigger asChild>
         <Button size="sm" variant={defaultKind === "RECEIPT" ? "default" : "outline"}>
           {defaultKind === "RECEIPT" ? <PackagePlus className="size-4" /> : <ClipboardCheck className="size-4" />}
-          {defaultKind === "RECEIPT" ? "Nhập hàng" : "Kiểm kê"}
+          {defaultKind === "RECEIPT" ? "Nhập hàng" : defaultKind === "RETURN" ? "Tái nhập hàng hoàn" : "Kiểm kê"}
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[92vh] flex-col gap-0 p-0 sm:max-w-4xl">
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle>{STOCK_RECEIPT_KIND_LABEL[kind]}</DialogTitle>
           <DialogDescription>
-            {kind === "RECEIPT" ? "Nhập số lượng hàng về kho cho từng mẫu mã. Giá nhập > 0 sẽ được dùng làm giá vốn gần nhất." : "Nhập số đếm thực tế trong kho; ERP tự tạo phiếu điều chỉnh (+/−) để tồn khả dụng bằng số đếm."}
+{STOCK_RECEIPT_KIND_HINT[kind]}
           </DialogDescription>
         </DialogHeader>
 
@@ -134,8 +139,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
             <Input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>{kind === "RECEIPT" ? "Nhà cung cấp" : "Người kiểm"}</Label>
-            <Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={kind === "RECEIPT" ? "Xưởng / chợ / NCC" : "Tên người kiểm kê"} />
+<Label>{kind === "RECEIPT" ? "Nhà cung cấp" : kind === "ISSUE" ? "Người nhận" : "Người kiểm"}</Label>
+            <Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={kind === "RECEIPT" ? "Xưởng / chợ / NCC" : kind === "ISSUE" ? "Khách / shipper nội thành" : "Tên người kiểm kê"} />
           </div>
           <div className="space-y-1">
             <Label>Tham chiếu</Label>
@@ -163,11 +168,12 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
               <tr>
                 <th className="px-5 py-2 text-left">Mẫu mã</th>
                 <th className="px-3 py-2 text-right">Tồn hiện tại</th>
-                {kind === "RECEIPT" ? (
+                {kind !== "ADJUSTMENT" ? (
                   <>
-                    <th className="w-28 px-3 py-2 text-right">Số lượng nhập</th>
-                    <th className="w-36 px-3 py-2 text-right">Giá nhập (₫)</th>
-                    <th className="px-3 py-2 text-right">Tồn sau nhập</th>
+                    {kind === "RETURN" ? <th className="w-28 px-3 py-2 text-right">Hoàn chờ nhận</th> : null}
+                    <th className="w-28 px-3 py-2 text-right">{kind === "RECEIPT" ? "Số lượng nhập" : kind === "RETURN" ? "Thực nhận" : "Số lượng xuất"}</th>
+                    {kind === "RECEIPT" ? <th className="w-36 px-3 py-2 text-right">Giá nhập (₫)</th> : null}
+                    <th className="px-3 py-2 text-right">Tồn sau phiếu</th>
                   </>
                 ) : (
                   <>
@@ -183,8 +189,9 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
                 const qty = toInt(input.qty);
                 const counted = input.counted === "" ? null : toInt(input.counted);
                 const diff = counted === null ? 0 : counted - v.currentStock;
+                const waiting = pendingReturns[v.id] ?? 0;
                 return (
-                  <tr key={v.id} className={cn("border-b last:border-0", (kind === "RECEIPT" ? qty > 0 : counted !== null && diff !== 0) && "bg-primary/5")}>
+                  <tr key={v.id} className={cn("border-b last:border-0", (kind !== "ADJUSTMENT" ? qty > 0 : counted !== null && diff !== 0) && "bg-primary/5")}>
                     <td className="px-5 py-1.5">
                       <div className="flex items-center gap-2.5">
                         {v.image ? (
@@ -206,15 +213,22 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
                       </div>
                     </td>
                     <td className={cn("numeric px-3 py-1.5 text-right font-semibold", v.currentStock <= 0 ? "text-destructive" : v.currentStock <= 5 ? "text-amber-600" : "")}>{formatNumber(v.currentStock)}</td>
-                    {kind === "RECEIPT" ? (
+                    {kind !== "ADJUSTMENT" ? (
                       <>
+                        {kind === "RETURN" ? (
+                          <td className="numeric px-3 py-1.5 text-right text-amber-600 dark:text-amber-400">{waiting ? formatNumber(waiting) : <span className="text-muted-foreground">—</span>}</td>
+                        ) : null}
                         <td className="px-3 py-1.5">
-                          <Input type="number" inputMode="numeric" min={0} className="numeric h-8 text-right" placeholder="0" value={input.qty} onChange={(e) => setField(v.id, "qty", e.target.value)} />
+                          <Input type="number" inputMode="numeric" min={0} className="numeric h-8 text-right" placeholder={kind === "RETURN" && waiting ? String(waiting) : "0"} value={input.qty} onChange={(e) => setField(v.id, "qty", e.target.value)} />
                         </td>
-                        <td className="px-3 py-1.5">
-                          <Input type="number" inputMode="numeric" min={0} step={1000} className="numeric h-8 text-right" placeholder={String(v.lastCost || 0)} value={input.cost} onChange={(e) => setField(v.id, "cost", e.target.value)} />
+                        {kind === "RECEIPT" ? (
+                          <td className="px-3 py-1.5">
+                            <Input type="number" inputMode="numeric" min={0} step={1000} className="numeric h-8 text-right" placeholder={String(v.lastCost || 0)} value={input.cost} onChange={(e) => setField(v.id, "cost", e.target.value)} />
+                          </td>
+                        ) : null}
+                        <td className="numeric px-3 py-1.5 text-right text-muted-foreground">
+                          {qty > 0 ? <span className="font-semibold text-foreground">{formatNumber(v.currentStock + (kind === "ISSUE" ? -qty : qty))}</span> : "—"}
                         </td>
-                        <td className="numeric px-3 py-1.5 text-right text-muted-foreground">{qty > 0 ? <span className="font-semibold text-foreground">{formatNumber(v.currentStock + qty)}</span> : "—"}</td>
                       </>
                     ) : (
                       <>
@@ -244,6 +258,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
               <>
                 <b className="text-foreground">{items.length}</b> mẫu mã · <b className={cn("numeric", totalQty < 0 ? "text-rose-600" : "text-foreground")}>{totalQty > 0 ? "+" : ""}{formatNumber(totalQty)}</b> sản phẩm
                 {kind === "RECEIPT" && totalCost ? <> · giá trị <b className="text-foreground">{formatVND(totalCost)}</b></> : null}
+                {kind === "ISSUE" ? <> · <span className="text-rose-600">trừ khỏi tồn</span></> : null}
               </>
             ) : (
               "Chưa nhập số lượng"
@@ -255,7 +270,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT" }: { variants:
             </Button>
             <Button type="button" onClick={submit} disabled={pending || !items.length}>
               {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-              {kind === "RECEIPT" ? "Lưu phiếu nhập" : "Lưu điều chỉnh"}
+              {kind === "RECEIPT" ? "Lưu phiếu nhập" : kind === "RETURN" ? "Lưu phiếu tái nhập" : kind === "ISSUE" ? "Lưu phiếu xuất" : "Lưu điều chỉnh"}
             </Button>
           </div>
         </DialogFooter>

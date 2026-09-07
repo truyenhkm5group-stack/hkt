@@ -3,7 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
 import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
-import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
 export const PRODUCT_SORTABLE = ["erpStock", "remainQuantity", "retailPrice", "sold30", "sku", "updatedAtExternal", "stockValue", "received", "delivered", "returned", "inTransit"];
@@ -97,18 +97,34 @@ export type ProductListRow = {
   sold30: number;
   stockValue: number;
   stocks: VariantStockCell[];
-  /** Tồn kho do ERP tính: Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA nhận */
+  /** Tổng ròng mọi phiếu kho (nhập mới + tái nhập + điều chỉnh − xuất tay) */
   received: number;
-  delivered: number;
-  /** Tổng hàng hoàn (= returnedPending + returnedReceived) */
-  returned: number;
-  /** Hoàn nhưng kho CHƯA xác nhận nhận về — đang bị trừ khỏi tồn */
-  returnedPending: number;
-  /** Hoàn và kho ĐÃ xác nhận nhận về — đã nằm trong tồn */
-  returnedReceived: number;
+  /** Nhập hàng mới từ xưởng / NCC */
+  receiptIn: number;
+  /** Tái nhập hàng hoàn — số kho ĐẾM THỰC TẾ trên phiếu */
+  returnIn: number;
+  /** Điều chỉnh sau kiểm kê (âm hoặc dương) */
+  adjust: number;
+  /** Xuất kho tay, không qua ĐVVC (số dương = số đã xuất) */
+  manualOut: number;
+  /** ĐÃ XUẤT qua ĐVVC — hàng rời kho theo xác nhận lấy hàng của Viettel Post */
+  shipped: number;
+  /** Đã xuất, đang trên đường, chưa kết thúc */
   inTransit: number;
-  pending: number;
+  /** Đã xuất, phải quay về kho, chưa có phiếu tái nhập */
+  awaitingReturn: number;
+  /** Hàng hoàn đã lập phiếu nhưng đếm thiếu so với số đã xuất = hụt / hỏng */
+  shrinkage: number;
+  /** Đã chốt đơn, hàng còn trong kho chờ xuất */
+  reserved: number;
+  /** Giao thành công theo TIỀN (đối chiếu, không dùng tính tồn) */
+  delivered: number;
+  /** Hoàn theo kết quả đơn (đối chiếu, không dùng tính tồn) */
+  returned: number;
+  /** TỒN THỰC TẾ = tổng phiếu kho − đã xuất */
   erpStock: number;
+  /** TỒN KHẢ DỤNG = tồn thực tế − đã chốt đơn chưa xuất */
+  available: number;
   /** false = chưa có phiếu nhập nào ⇒ erpStock KHÔNG có nghĩa, phải hiện "Chưa có phiếu nhập" */
   stockKnown: boolean;
   /** Giá vốn dùng để tính giá trị tồn: giá nhập trên phiếu gần nhất, không có thì giá nhập Pancake */
@@ -132,13 +148,18 @@ export async function listProducts(params: ListParams, limit?: number) {
   const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
   const stockValue = sql<number>`greatest(${erpStock}, 0) * ${unitCost}`;
   const received = sql<number>`coalesce(${receipts.received}, 0)`;
+  const receiptIn = sql<number>`coalesce(${receipts.receiptIn}, 0)`;
+  const returnIn = sql<number>`coalesce(${receipts.returnIn}, 0)`;
+  const adjust = sql<number>`coalesce(${receipts.adjust}, 0)`;
+  const manualOut = sql<number>`coalesce(${receipts.manualOut}, 0)`;
+  const shipped = sql<number>`coalesce(${sales.shipped}, 0)`;
+  const inTransit = sql<number>`coalesce(${sales.inTransit}, 0)`;
+  const awaitingReturn = sql<number>`coalesce(${sales.awaitingReturn}, 0)`;
+  const shrinkage = stockShrinkageExpr(sales, receipts);
+  const reserved = sql<number>`coalesce(${sales.reserved}, 0)`;
   const delivered = sql<number>`coalesce(${sales.delivered}, 0)`;
   const returned = sql<number>`coalesce(${sales.returned}, 0)`;
-  // Tách hai trạng thái hàng hoàn: chỉ "đã nhận" mới nằm trong tồn.
-  const returnedPending = sql<number>`coalesce(${sales.returnedPending}, 0)`;
-  const returnedReceived = sql<number>`coalesce(${sales.returnedReceived}, 0)`;
-  const inTransit = sql<number>`coalesce(${sales.inTransit}, 0)`;
-  const pending = sql<number>`coalesce(${sales.pending}, 0)`;
+  const available = availableStockExpr(sales, receipts);
   const stockKnown = stockKnownExpr(receipts);
   const sortMap: Record<string, SQL | AnyPgColumn> = {
     erpStock,
@@ -181,13 +202,19 @@ export async function listProducts(params: ListParams, limit?: number) {
         sold30: soldQty,
         stockValue,
         received,
+        receiptIn,
+        returnIn,
+        adjust,
+        manualOut,
+        shipped,
+        inTransit,
+        awaitingReturn,
+        shrinkage,
+        reserved,
         delivered,
         returned,
-        returnedPending,
-        returnedReceived,
-        inTransit,
-        pending,
         erpStock,
+        available,
         stockKnown,
         unitCost,
         receiptCount: sql<number>`coalesce(${receipts.receiptCount}, 0)`,
@@ -236,13 +263,19 @@ export async function listProducts(params: ListParams, limit?: number) {
     updatedAtExternal: toDate(r.updatedAtExternal),
     stocks: stockMap.get(r.id) ?? [],
     received: Number(r.received ?? 0),
+    receiptIn: Number(r.receiptIn ?? 0),
+    returnIn: Number(r.returnIn ?? 0),
+    adjust: Number(r.adjust ?? 0),
+    manualOut: Number(r.manualOut ?? 0),
+    shipped: Number(r.shipped ?? 0),
+    inTransit: Number(r.inTransit ?? 0),
+    awaitingReturn: Number(r.awaitingReturn ?? 0),
+    shrinkage: Number(r.shrinkage ?? 0),
+    reserved: Number(r.reserved ?? 0),
     delivered: Number(r.delivered ?? 0),
     returned: Number(r.returned ?? 0),
-    returnedPending: Number(r.returnedPending ?? 0),
-    returnedReceived: Number(r.returnedReceived ?? 0),
-    inTransit: Number(r.inTransit ?? 0),
-    pending: Number(r.pending ?? 0),
     erpStock: Number(r.erpStock ?? 0),
+    available: Number(r.available ?? 0),
     stockKnown: Boolean(r.stockKnown),
     unitCost: Number(r.unitCost ?? 0),
     receiptCount: Number(r.receiptCount ?? 0),
@@ -329,12 +362,17 @@ export async function productSummary(params: ListParams) {
       stockValue: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${stockKnown} and ${erpStock} > 0 then (${erpStock})::bigint * ${unitCost} else 0 end), 0)`,
       stockUnits: sql<number>`coalesce(sum(case when ${pv.isRemoved} = false and ${stockKnown} and ${erpStock} > 0 then ${erpStock} else 0 end), 0)`,
       received: sql<number>`coalesce(sum(${receipts.received}), 0)`,
+      receiptIn: sql<number>`coalesce(sum(${receipts.receiptIn}), 0)`,
+      returnIn: sql<number>`coalesce(sum(${receipts.returnIn}), 0)`,
+      manualOut: sql<number>`coalesce(sum(${receipts.manualOut}), 0)`,
+      shipped: sql<number>`coalesce(sum(${sales.shipped}), 0)`,
+      awaitingReturn: sql<number>`coalesce(sum(${sales.awaitingReturn}), 0)`,
+      shrinkage: sql<number>`coalesce(sum(${stockShrinkageExpr(sales, receipts)}), 0)`,
+      reserved: sql<number>`coalesce(sum(${sales.reserved}), 0)`,
       delivered: sql<number>`coalesce(sum(${sales.delivered}), 0)`,
       returned: sql<number>`coalesce(sum(${sales.returned}), 0)`,
-      returnedPending: sql<number>`coalesce(sum(${sales.returnedPending}), 0)`,
-      returnedReceived: sql<number>`coalesce(sum(${sales.returnedReceived}), 0)`,
       inTransit: sql<number>`coalesce(sum(${sales.inTransit}), 0)`,
-      noReceipt: sql<number>`count(*) filter (where ${selling} and coalesce(${receipts.received}, 0) = 0)`,
+      noReceipt: sql<number>`count(*) filter (where ${selling} and not ${stockKnown})`,
       sold30: sql<number>`coalesce(sum(${sold.qty}), 0)`,
       products: sql<number>`count(distinct ${pv.productId})`,
     })
@@ -351,10 +389,15 @@ export async function productSummary(params: ListParams) {
     stockValue: Number(row?.stockValue ?? 0),
     stockUnits: Number(row?.stockUnits ?? 0),
     received: Number(row?.received ?? 0),
+    receiptIn: Number(row?.receiptIn ?? 0),
+    returnIn: Number(row?.returnIn ?? 0),
+    manualOut: Number(row?.manualOut ?? 0),
+    shipped: Number(row?.shipped ?? 0),
+    awaitingReturn: Number(row?.awaitingReturn ?? 0),
+    shrinkage: Number(row?.shrinkage ?? 0),
+    reserved: Number(row?.reserved ?? 0),
     delivered: Number(row?.delivered ?? 0),
     returned: Number(row?.returned ?? 0),
-    returnedPending: Number(row?.returnedPending ?? 0),
-    returnedReceived: Number(row?.returnedReceived ?? 0),
     inTransit: Number(row?.inTransit ?? 0),
     noReceipt: Number(row?.noReceipt ?? 0),
     unknownStock: Number(row?.unknownStock ?? 0),

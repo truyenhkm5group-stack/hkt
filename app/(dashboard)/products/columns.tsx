@@ -77,59 +77,78 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
       ),
     },
     {
-      id: "received",
-      accessorKey: "received",
-      header: "Nhập",
+      id: "receiptIn",
+      accessorKey: "receiptIn",
+      header: "Nhập mới",
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
-          <span className={cn("numeric font-medium", row.original.received === 0 && "text-muted-foreground")}>{formatNumber(row.original.received)}</span>
+          <span className={cn("numeric font-medium", row.original.receiptIn === 0 && "text-muted-foreground")}>{formatNumber(row.original.receiptIn)}</span>
           {row.original.receiptCount ? <div className="text-[10.5px] text-muted-foreground">{row.original.receiptCount} phiếu</div> : null}
         </div>
       ),
     },
     {
-      id: "delivered",
-      accessorKey: "delivered",
-      header: "Giao thật",
-      meta: { align: "right" },
-      cell: ({ row }) => <span className="numeric text-emerald-700 dark:text-emerald-400">{formatNumber(row.original.delivered)}</span>,
-    },
-    {
-      id: "returned",
-      accessorKey: "returned",
-      // Tách rõ hai trạng thái: hàng hoàn chỉ được cộng lại tồn khi KHO ĐÃ XÁC NHẬN nhận về.
-      header: "Hoàn",
+      id: "returnIn",
+      accessorKey: "returnIn",
+      // Số kho ĐẾM THỰC TẾ khi nhận hàng hoàn về, không phải số suy ra từ vận đơn.
+      header: "Tái nhập",
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
-          <span className={cn("numeric", row.original.returned ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{formatNumber(row.original.returned)}</span>
-          {row.original.returnedPending || row.original.returnedReceived ? (
-            <div className="text-[10.5px] text-muted-foreground">
-              {row.original.returnedPending ? <span className="text-amber-600 dark:text-amber-400">chờ về kho {formatNumber(row.original.returnedPending)}</span> : null}
-              {row.original.returnedPending && row.original.returnedReceived ? " · " : null}
-              {row.original.returnedReceived ? <span>đã nhận {formatNumber(row.original.returnedReceived)}</span> : null}
-            </div>
-          ) : null}
+          <span className={cn("numeric", row.original.returnIn ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground")}>{formatNumber(row.original.returnIn)}</span>
+          {row.original.shrinkage ? <div className="text-[10.5px] text-rose-600 dark:text-rose-400">hụt {formatNumber(row.original.shrinkage)}</div> : null}
+        </div>
+      ),
+    },
+    {
+      id: "adjust",
+      accessorKey: "adjust",
+      header: "Điều chỉnh",
+      meta: { align: "right" },
+      cell: ({ row }) => {
+        const v = row.original.adjust;
+        return (
+          <div className="text-right">
+            <span className={cn("numeric", v > 0 && "text-emerald-700 dark:text-emerald-400", v < 0 && "text-amber-600 dark:text-amber-400", v === 0 && "text-muted-foreground")}>
+              {v > 0 ? `+${formatNumber(v)}` : formatNumber(v)}
+            </span>
+            {row.original.manualOut ? <div className="text-[10.5px] text-muted-foreground">xuất tay {formatNumber(row.original.manualOut)}</div> : null}
+          </div>
+        );
+      },
+    },
+    {
+      id: "shipped",
+      accessorKey: "shipped",
+      // Hàng rời kho theo xác nhận LẤY HÀNG của Viettel Post, không theo trạng thái Pancake và không theo tiền.
+      header: "Đã xuất",
+      meta: { align: "right" },
+      cell: ({ row }) => (
+        <div className="text-right">
+          <span className={cn("numeric font-medium", row.original.shipped === 0 && "text-muted-foreground")}>{formatNumber(row.original.shipped)}</span>
+          {row.original.reserved ? <div className="text-[10.5px] text-muted-foreground">chờ xuất {formatNumber(row.original.reserved)}</div> : null}
         </div>
       ),
     },
     {
       id: "inTransit",
       accessorKey: "inTransit",
-      header: "Đang giao",
+      header: "Đang ở ngoài",
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
           <span className={cn("numeric", row.original.inTransit ? "text-sky-700 dark:text-sky-400" : "text-muted-foreground")}>{formatNumber(row.original.inTransit)}</span>
-          {row.original.pending ? <div className="text-[10.5px] text-muted-foreground">chờ gửi {formatNumber(row.original.pending)}</div> : null}
+          {row.original.awaitingReturn ? (
+            <div className="text-[10.5px] text-amber-600 dark:text-amber-400">hoàn chờ nhận {formatNumber(row.original.awaitingReturn)}</div>
+          ) : null}
         </div>
       ),
     },
     {
       id: "erpStock",
       accessorKey: "erpStock",
-      header: "Tồn khả dụng",
+      header: "Tồn thực tế",
       meta: { align: "right" },
       cell: ({ row }) => (
         <div className="text-right">
@@ -142,6 +161,18 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
           <div className="text-[10.5px] text-muted-foreground">Pancake {formatNumber(row.original.remainQuantity)}</div>
         </div>
       ),
+    },
+    {
+      id: "available",
+      accessorKey: "available",
+      header: "Khả dụng bán",
+      meta: { align: "right" },
+      cell: ({ row }) =>
+        row.original.stockKnown ? (
+          <span className={cn("numeric font-semibold", stockTone(row.original.available))}>{formatNumber(row.original.available)}</span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">—</span>
+        ),
     },
     {
       id: "sold30",
