@@ -1,156 +1,115 @@
 import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
-import type { Db } from "@/db";
-import { schema } from "@/db";
+import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { codBatchGaps, codReconciliation, staleCodOnReturned, statementCoverage, unprovenCollectedShipments } from "@/lib/queries/cod-reconciliation";
-import { orderListCoverage } from "@/lib/queries/shipments";
-import type { Period } from "@/lib/search-params";
+import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
+import { codSettlementCounts, codSettlementSummary, listCodSettlement, listStatementPayments, statementGapDays } from "@/lib/queries/cod-settlement";
 
-const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
-export async function testCodReconciliation(db: Db) {
-  clearMemo();
-  const r = await codReconciliation(ALL);
+/**
+ * ĐỐI SOÁT COD THEO TỪNG ĐƠN.
+ *
+ * Câu hỏi nghiệp vụ: Viettel Post đã trả tiền cho đơn đã phát thành công chưa, trả đủ hay thiếu,
+ * đơn nào quá hạn. Mọi con số phải truy được về DÒNG BẢNG KÊ thật, không suy từ trạng thái giao
+ * hàng và không lấy tiền thu hộ khai báo làm tiền đã trả.
+ */
+export async function testCodReconciliation() {
+  const db = await getDb();
+  const ngay = (lech: number) => new Date(Date.now() + lech * 86_400_000);
 
-  // ───────── 1. Cái phễu phải ĐƠN ĐIỆU: bậc dưới không bao giờ lớn hơn bậc trên ─────────
-  // Lỗi đã gặp thật trên production: bậc "đã thu" (527tr) LỚN HƠN bậc "phải thu" (507tr),
-  // vì bậc đã thu lấy COD KHAI BÁO làm số đã thu còn bậc phải thu lại loại vận đơn đã hoàn.
-  assert.ok(
-    r.collected.amount <= r.receivable.amount,
-    `đã thu (${r.collected.amount}) không thể lớn hơn phải thu (${r.receivable.amount})`,
-  );
-  assert.ok(r.onStatement.amount <= r.collected.amount, "tiền có chứng từ không thể lớn hơn tiền đã thu");
-  assert.ok(r.onStatement.count <= r.collected.count, "số vận đơn có chứng từ không thể nhiều hơn số vận đơn đã thu");
-  assert.ok(r.lost.amount <= r.receivable.amount, "phần không còn thu được nằm trong phải thu");
-
-  // Tuyệt đối không lấy COD khai báo làm tiền đã thu.
-  const [{ amount: realCash }] = await db
-    .select({ amount: sql<number>`coalesce(sum(coalesce(${schema.shipments.codCollected}, 0)), 0)` })
-    .from(schema.shipments);
-  assert.equal(r.collected.amount, Number(realCash), "'đã thu' phải đúng bằng tổng tiền thực thu, không cộng COD khai báo");
-
-  // ───────── 2. Khoảng trống phải khớp đúng phép trừ ─────────
-  assert.equal(
-    r.unproven.amount,
-    r.collected.amount - r.onStatement.amount,
-    "'đã thu nhưng chưa có chứng từ' phải đúng bằng bậc 2 trừ bậc 3",
-  );
-  assert.equal(r.unproven.count, r.collected.count - r.onStatement.count);
-
-  // ───────── 3. Phải thu phủ mọi vận đơn có COD; phần đã hoàn/huỷ tách riêng ─────────
-  const [{ amount: allDeclared }] = await db
-    .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
-    .from(schema.shipments)
-    .where(sql`${schema.shipments.codAmount} > 0`);
-  assert.equal(r.receivable.amount, Number(allDeclared), "phải thu = tổng COD khai báo trên mọi vận đơn có COD");
-  const [{ amount: lostCheck }] = await db
-    .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
-    .from(schema.shipments)
-    .where(sql`${schema.shipments.codAmount} > 0 and ${schema.shipments.stage} in ('RETURNED','CANCELLED')`);
-  assert.equal(r.lost.amount, Number(lostCheck), "phần không còn thu được = COD của vận đơn đã hoàn/huỷ");
-
-  // ───────── 4. Chênh lệch từng đợt = COD bảng kê − tổng COD vận đơn đã ghép ─────────
-  const gaps = await codBatchGaps(ALL);
-  for (const g of gaps) {
-    assert.equal(g.gap, g.gross - g.linkedAmount, `chênh lệch đợt ${g.reference} phải là phép trừ, không phải ước lượng`);
-    assert.ok(g.linkedShipments >= 0);
-  }
-  const totalGross = gaps.reduce((t, g) => t + g.gross, 0);
-  const totalLinked = gaps.reduce((t, g) => t + g.linkedAmount, 0);
-  assert.equal(r.bank.gross, totalGross, "tổng COD bảng kê phải khớp tổng từng đợt");
-  assert.equal(r.bank.unlinkedAmount, Math.max(0, totalGross - totalLinked), "tiền bảng kê chưa ghép được phải khớp");
-  assert.equal(r.bank.batches, gaps.length);
-
-  // ───────── 5. Danh sách drill-down khớp đúng con số trên thẻ ─────────
-  const unproven = await unprovenCollectedShipments(1, 500, "");
-  assert.equal(unproven.total, r.unproven.count, "danh sách 'đã thu chưa có chứng từ' phải khớp con số hiển thị");
-  assert.ok(unproven.rows.every((row) => Number(row.codCollected ?? 0) > 0), "chỉ gồm vận đơn CÓ TIỀN THẬT nhưng chưa có chứng từ bảng kê");
-
-  const stale = await staleCodOnReturned(1, 500);
-  assert.equal(stale.total, r.stale.count, "danh sách 'COD mâu thuẫn' phải khớp con số hiển thị");
-  assert.ok(
-    stale.rows.every((row) => row.stage === "RETURNED" || row.stage === "CANCELLED"),
-    "chỉ gồm vận đơn đã hoàn hoặc huỷ",
-  );
-
-  // ───────── 6. Tỷ lệ có chứng từ: null khi chưa thu đồng nào, không phải 0% ─────────
-  if (r.collected.amount === 0) {
-    assert.equal(r.provenRate, null, "chưa thu đồng nào thì tỷ lệ là 'chưa xác minh', không phải 0%");
-  } else {
-    assert.ok(r.provenRate !== null && r.provenRate >= 0 && r.provenRate <= 100);
-  }
-
-  // ───────── 7. Ghi chứng từ bảng kê chuyển BẬC, không sinh thêm tiền ─────────
-  const [candidate] = await db
-    .select({ id: schema.shipments.id, collected: schema.shipments.codCollected })
-    .from(schema.shipments)
-    .where(sql`${schema.shipments.codStatementRef} is null and coalesce(${schema.shipments.codCollected}, 0) > 0`)
-    .limit(1);
-  if (candidate) {
-    const before = await codReconciliation(ALL);
-    // Bằng chứng là DÒNG trong sổ chi tiết bảng kê, không phải cái tên file trên vận đơn:
-    // tên file suông từng khiến vận đơn không còn số tiền nào vẫn bị coi là đã xác minh.
-    await db.update(schema.shipments)
-      .set({ codStatementRef: "test-bang-ke.xlsx", codStatementAt: new Date() })
-      .where(eq(schema.shipments.id, candidate.id));
-    await db.insert(schema.codStatementLines).values({
-      sourceFile: "test-bang-ke.xlsx", trackingCode: `TEST-${candidate.id}`, cod: Number(candidate.collected) || 0,
-      fee: 0, net: Number(candidate.collected) || 0, codReported: true, statementAt: new Date(), shipmentId: candidate.id,
-    });
-    clearMemo();
-    const after = await codReconciliation(ALL);
-    const moved = Number(candidate.collected) || 0;
-    assert.equal(after.onStatement.amount, before.onStatement.amount + moved, "có chứng từ bảng kê làm tăng đúng bậc 3");
-    assert.equal(after.unproven.amount, before.unproven.amount - moved, "và giảm đúng phần chưa có chứng từ");
-    assert.equal(after.collected.amount, before.collected.amount, "tổng đã thu KHÔNG đổi — chỉ chuyển bậc bằng chứng, không sinh thêm tiền");
-    assert.equal(after.receivable.amount, before.receivable.amount, "phải thu không đổi");
-    await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.shipmentId, candidate.id));
-    await db.update(schema.shipments).set({ codStatementRef: null, codStatementAt: null }).where(eq(schema.shipments.id, candidate.id));
-    clearMemo();
-  }
-
-  // ───────── 8. Báo "thiếu bảng kê từ ngày nào" ─────────
-  const coverage = await statementCoverage();
-  for (const g of coverage.gaps) {
-    assert.ok(g.from <= g.to, "khoảng ngày phải hợp lệ");
-    assert.ok(g.shipments > 0, "chỉ nêu khoảng thật sự có vận đơn treo");
-  }
-  for (let i = 1; i < coverage.gaps.length; i++) {
-    assert.ok(coverage.gaps[i].from > coverage.gaps[i - 1].to, "các khoảng phải rời nhau và tăng dần");
-  }
-  assert.ok(coverage.totalMissingShipments <= r.unproven.count, "không nêu nhiều hơn số vận đơn đang treo");
-
-  console.log(`✓ Thiếu bảng kê: ${coverage.gaps.length} khoảng ngày · ${coverage.totalMissingShipments} vận đơn treo · ERP có dữ liệu từ ${coverage.firstShipmentDate ?? "—"}`);
-
-  // ───────── 9. Báo "cần xuất Danh sách vận đơn cho khoảng ngày nào" ─────────
-  // Khác bảng kê (tiền): tệp này mang TRẠNG THÁI, và là cách duy nhất chữa hai nhóm vận đơn
-  // dưới đây khi tài khoản API Viettel Post không sở hữu vận đơn của shop.
-  await db.insert(schema.orders).values([
-    { id: "cov-thieu-trang-thai", stage: "SHIPPED", insertedAt: new Date() },
-    { id: "cov-thieu-ma", stage: "SHIPPED", insertedAt: new Date() },
-    { id: "cov-du-thong-tin", stage: "SHIPPED", insertedAt: new Date() },
-  ]);
+  // ───────── Dựng bốn tình huống đối soát tách bạch ─────────
   await db.insert(schema.shipments).values([
-    { id: "cov-1", orderId: "cov-thieu-trang-thai", vtpOrderNumber: "PKE-COV-1", stage: "IN_TRANSIT", isFinal: false, vtpStatus: null, codAmount: 250_000, vtpStatusDate: new Date("2026-07-02T00:00:00Z") },
-    { id: "cov-2", orderId: "cov-thieu-ma", stage: "IN_TRANSIT", isFinal: false, vtpStatus: 300, codAmount: 150_000, vtpStatusDate: new Date("2026-07-03T00:00:00Z") },
-    { id: "cov-3", orderId: "cov-du-thong-tin", vtpOrderNumber: "PKE-COV-3", stage: "IN_TRANSIT", isFinal: false, vtpStatus: 300, codAmount: 999_000, vtpStatusDate: new Date("2026-07-02T00:00:00Z") },
-  ]);
+    // 1. Giao thành công, bảng kê trả đủ.
+    { id: "ds-du", vtpOrderNumber: "PKE7700000001", trackingCode: "PKE7700000001", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 499000, deliveredAt: ngay(-10) },
+    // 2. Giao thành công, bảng kê chỉ trả 30.000 (khách chỉ trả tiền ship).
+    { id: "ds-thieu", vtpOrderNumber: "PKE7700000002", trackingCode: "PKE7700000002", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 499000, deliveredAt: ngay(-10) },
+    // 3. Giao thành công đã lâu, chưa dòng bảng kê nào ⇒ quá hạn.
+    { id: "ds-quahan", vtpOrderNumber: "PKE7700000003", trackingCode: "PKE7700000003", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 600000, deliveredAt: ngay(-(COD_OVERDUE_DAYS + 3)) },
+    // 4. Giao thành công hôm qua, chưa có bảng kê ⇒ còn trong hạn.
+    { id: "ds-cho", vtpOrderNumber: "PKE7700000004", trackingCode: "PKE7700000004", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 700000, deliveredAt: ngay(-1) },
+    // 5. Đơn hoàn ⇒ Viettel Post không thu được tiền nên không phải trả.
+    { id: "ds-hoan", vtpOrderNumber: "PKE7700000005", trackingCode: "PKE7700000005", carrier: "Viettel Post", stage: "RETURNED", codAmount: 800000, returnedAt: ngay(-6) },
+  ]).onConflictDoNothing();
 
-  const list = await orderListCoverage();
-  const khoang = list.ranges.find((x) => x.from <= "2026-07-03" && x.to >= "2026-07-02");
-  assert.ok(khoang, "hai ngày cách nhau 1 ngày phải gộp thành một khoảng để xuất một tệp");
-  assert.ok(khoang.noStatus >= 1, "vận đơn chưa có trạng thái Viettel Post phải được nêu");
-  assert.ok(khoang.noCode >= 1, "vận đơn chưa có mã phải được nêu");
-  assert.ok(khoang.cod >= 400_000, "nêu COD khai báo để chủ shop biết khoảng nào đáng ưu tiên");
-  // Vận đơn đã đủ mã và trạng thái không được lôi vào danh sách cần xuất.
-  assert.ok(khoang.cod < 999_000 + 400_000, "vận đơn đã đủ thông tin không được tính vào khoảng cần xuất");
-  for (let i = 1; i < list.ranges.length; i++) {
-    assert.ok(list.ranges[i].from > list.ranges[i - 1].to, "các khoảng phải rời nhau và tăng dần");
-  }
-  console.log(`✓ Cần xuất danh sách vận đơn: ${list.ranges.length} khoảng ngày · ${list.totalNoStatus} thiếu trạng thái · ${list.totalNoCode} thiếu mã`);
+  await db.insert(schema.codStatementLines).values([
+    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000001", cod: 499000, fee: 17000, net: 482000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-du" },
+    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000002", cod: 30000, fee: 17000, net: 13000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-thieu" },
+    // Dòng bảng kê có mã vận đơn mà ERP không có ⇒ tiền có thật nhưng chưa truy nguyên được.
+    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7799999999", cod: 250000, fee: 0, net: 250000, codReported: true, statementAt: ngay(-8), shipmentId: null },
+  ]).onConflictDoNothing();
+  clearMemo();
 
-  console.log(
-    `✓ Đối soát COD: phải thu ${r.receivable.amount} · ĐVVC báo thu ${r.collected.amount} · có bảng kê ${r.onStatement.amount} · về TK ${r.bank.net} · treo ${r.unproven.amount} (${r.provenRate === null ? "—" : r.provenRate + "%"} có chứng từ)`,
+  // ───────── 1. Phân loại từng đơn ─────────
+  const theoDon = new Map<string, (typeof rows)[number]>();
+  const { rows } = await listCodSettlement({ period: ALL, status: "ALL", pageSize: 200 });
+  for (const r of rows) theoDon.set(r.id, r);
+
+  assert.equal(theoDon.get("ds-du")?.status, "DA_TRA_DU", "bảng kê trả đủ tiền thu hộ ⇒ đã trả đủ");
+  assert.equal(theoDon.get("ds-du")?.codPaid, 499000, "tiền trả lấy từ dòng bảng kê");
+  assert.equal(theoDon.get("ds-du")?.fee, 17000, "cước lấy từ dòng bảng kê, không ước lượng");
+
+  assert.equal(theoDon.get("ds-thieu")?.status, "TRA_THIEU");
+  assert.equal(theoDon.get("ds-thieu")?.gap, 469000, "chênh lệch = thu hộ khai báo − tiền bảng kê trả");
+
+  assert.equal(theoDon.get("ds-quahan")?.status, "QUA_HAN", `đã phát quá ${COD_OVERDUE_DAYS} ngày mà chưa có bảng kê ⇒ quá hạn`);
+  assert.equal(theoDon.get("ds-quahan")?.codPaid, 0, "không có chứng từ thì tiền đã trả là 0, không lấy COD khai báo");
+
+  assert.equal(theoDon.get("ds-cho")?.status, "CHUA_TRA", "mới phát hôm qua thì còn trong hạn, không được báo quá hạn");
+  assert.equal(theoDon.get("ds-hoan")?.status, "KHONG_PHAI_TRA", "đơn hoàn thì Viettel Post không thu được tiền nên không phải trả");
+
+  // ───────── 2. Tổng hợp phải khớp với chi tiết ─────────
+  const tong = await codSettlementSummary(ALL);
+  const daGiaoCoThuHo = rows.filter((r) => r.stage === "DELIVERED" && r.codDeclared > 0);
+  assert.equal(tong.phaiThu.count, daGiaoCoThuHo.length, "phải thu chỉ gồm đơn đã phát thành công có thu hộ");
+  assert.equal(tong.phaiThu.amount, daGiaoCoThuHo.reduce((t, r) => t + r.codDeclared, 0), "tổng phải thu = cộng từng đơn");
+  assert.equal(tong.daTra.amount, daGiaoCoThuHo.reduce((t, r) => t + r.codPaid, 0), "tổng đã trả = cộng tiền bảng kê từng đơn");
+  assert.ok(tong.daTra.amount <= tong.phaiThu.amount, "đã trả không bao giờ lớn hơn phải trả");
+  assert.equal(tong.conThieu, tong.phaiThu.amount - tong.daTra.amount, "còn thiếu = phải thu − đã trả");
+  assert.ok(tong.quaHan.amount >= 600000, "tiền quá hạn phải gồm đơn ds-quahan");
+  assert.ok(tong.traThieu.gap >= 469000, "chênh lệch trả thiếu phải gồm đơn ds-thieu");
+  assert.ok(tong.chuaGhep.amount >= 250000, "phải nêu được phần tiền bảng kê chưa ghép về vận đơn nào");
+  assert.equal(tong.overdueDays, COD_OVERDUE_DAYS);
+
+  // Đơn hoàn KHÔNG được nằm trong phải thu — đó là lý do phễu không phình.
+  const hoanTrongPhaiThu = daGiaoCoThuHo.some((r) => r.id === "ds-hoan");
+  assert.equal(hoanTrongPhaiThu, false, "đơn hoàn không được tính vào tiền Viettel Post phải trả");
+
+  // ───────── 3. Đếm theo tab phải cộng lại đúng bằng tổng ─────────
+  const dem = await codSettlementCounts(ALL);
+  const cong = (["DA_TRA_DU", "TRA_THIEU", "CHUA_TRA", "QUA_HAN", "CHUA_GIAO", "KHONG_PHAI_TRA"] as const).reduce((t, k) => t + dem[k], 0);
+  assert.equal(cong, dem.ALL, "cộng các nhóm phải bằng tổng — không đơn nào rơi ra ngoài hoặc bị đếm hai lần");
+
+  // Lọc theo một nhóm phải ra đúng số của nhóm đó.
+  const chiQuaHan = await listCodSettlement({ period: ALL, status: "QUA_HAN", pageSize: 200 });
+  assert.equal(chiQuaHan.total, dem.QUA_HAN, "lọc theo nhóm phải khớp số trên tab");
+  assert.ok(chiQuaHan.rows.every((r) => r.status === "QUA_HAN"));
+
+  // ───────── 4. Ngày phát chưa được bảng kê nào chi trả ─────────
+  const thieu = await statementGapDays();
+  const ngayQuaHan = theoDon.get("ds-quahan")?.deliveredAt;
+  assert.ok(
+    thieu.some((g) => ngayQuaHan !== null && ngayQuaHan !== undefined && g.from <= ngayQuaHan && ngayQuaHan <= g.to),
+    "ngày phát của đơn chưa được trả phải hiện ra để biết còn thiếu bảng kê kỳ nào",
   );
+  assert.ok(
+    thieu.every((g) => g.amount >= 0 && g.shipments > 0),
+    "mỗi khoảng thiếu phải có đơn thật, không dựng khoảng rỗng",
+  );
+
+  // ───────── 5. Từng bảng kê = một lần trả tiền ─────────
+  const bangKe = await listStatementPayments(50);
+  const test1 = bangKe.find((f) => f.filename === "BK-test-1.xlsx");
+  assert.ok(test1, "bảng kê vừa nạp phải hiện trong danh sách lần trả tiền");
+  assert.equal(test1.lines, 3, "đếm đủ mọi dòng của bảng kê");
+  assert.equal(test1.matched, 2, "hai dòng ghép được vận đơn");
+  assert.equal(test1.codMatched, 529000, "tiền đã truy nguyên = 499.000 + 30.000");
+  assert.equal(test1.codUnmatched, 250000, "phần chưa truy nguyên giữ nguyên, không giấu đi");
+
+  // ───────── 6. Dọn dẹp để không ảnh hưởng phần kiểm thử khác ─────────
+  await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.sourceFile, "BK-test-1.xlsx"));
+  await db.delete(schema.shipments).where(sql`${schema.shipments.id} like 'ds-%'`);
+  clearMemo();
+
+  console.log(`✓ Đối soát COD theo đơn: phải trả ${tong.phaiThu.amount} · đã trả ${tong.daTra.amount} · quá hạn ${tong.quaHan.count} đơn · trả thiếu ${tong.traThieu.gap}đ · chưa ghép ${tong.chuaGhep.amount}đ`);
 }

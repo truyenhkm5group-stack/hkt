@@ -1,4 +1,4 @@
-import { parseCodPaymentStatement, parseStatementDetail, parseVtpOrderList, mergeVtpOrderLists, type StatementDetailRow, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { parseCodPaymentStatement, parseCodPaymentSummary, parseStatementDetail, parseVtpOrderList, mergeVtpOrderLists, type CodPaymentSummary, type StatementDetailRow, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /**
  * Hai loại tệp tải trực tiếp từ Viettel Post, dùng làm DỮ LIỆU GỐC cho ERP:
@@ -13,7 +13,13 @@ export type VtpFileKind = "ORDER_LIST" | "STATEMENT_DETAIL";
 
 export type DetectedVtpFile =
   | { kind: "ORDER_LIST"; filename: string; rows: VtpOrderListRow[] }
-  | { kind: "STATEMENT_DETAIL"; filename: string; rows: StatementDetailRow[] };
+  | {
+      kind: "STATEMENT_DETAIL";
+      filename: string;
+      rows: StatementDetailRow[];
+      /** Phần "KẾT LUẬN ĐỐI SOÁT" của bảng kê gửi qua email — có thì ERP tự lập đợt tiền về. */
+      summary?: CodPaymentSummary | null;
+    };
 
 /** Lỗi đọc tệp kèm tên tệp để chủ shop biết bỏ tệp nào ra. */
 export class VtpFileError extends Error {
@@ -35,7 +41,7 @@ export function detectVtpFile(input: Buffer | string, filename: string): Detecte
   // Bảng kê đối soát thanh toán Viettel Post GỬI QUA EMAIL có hai phần (COD và cước) nên phải
   // thử trước: hai trình đọc kia chỉ tìm được một dòng tiêu đề duy nhất nên sẽ đọc thiếu.
   try {
-    return { kind: "STATEMENT_DETAIL", filename, rows: parseCodPaymentStatement(input, filename) };
+    return { kind: "STATEMENT_DETAIL", filename, rows: parseCodPaymentStatement(input, filename), summary: parseCodPaymentSummary(input) };
   } catch {
     // không phải bảng kê đối soát thanh toán — thử hai kiểu tệp tải tay
   }

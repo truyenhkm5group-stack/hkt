@@ -473,3 +473,63 @@ export function parseCodPaymentStatement(input: Buffer | string, filename = ""):
   if (!rows.length) throw new Error("Bảng kê đối soát thanh toán không có dòng vận đơn nào");
   return rows;
 }
+
+/**
+ * PHẦN KẾT LUẬN của bảng kê đối soát thanh toán Viettel Post gửi qua email.
+ *
+ * Cuối tệp có sẵn ba số chốt và ngày lập:
+ *   III: KẾT LUẬN ĐỐI SOÁT
+ *   1. Số tiền COD phải trả khách hàng        24,059,000
+ *   2. Số tiền cước CPN phải thu của khách    563,757
+ *   3. Số tiền còn lại phải thanh toán        23,495,243
+ *   … Ngày 04 tháng 09 năm 2026
+ *
+ * Đọc được ba số này thì ERP tự lập "đợt tiền về" từ chính chứng từ, không cần ai gõ tay số tổng
+ * rồi ghép với file bằng cách so tiền — cách cũ vừa thủ công vừa ghép nhầm khi hai đợt trùng số.
+ */
+export type CodPaymentSummary = { statementDate: string | null; codTotal: number; feeTotal: number; netTotal: number };
+
+export function parseCodPaymentSummary(input: Buffer | string): CodPaymentSummary | null {
+  const matrix = typeof input === "string" ? parseCsv(input.replace(/^﻿/, "")) : sheetMatrix(input, false, true);
+  let codTotal = 0;
+  let feeTotal = 0;
+  let netTotal = 0;
+  let statementDate: string | null = null;
+  let found = 0;
+
+  /** Số tiền của một dòng kết luận: lấy số cuối cùng trên dòng, bỏ qua số thứ tự "1." "2." "3." */
+  const lastMoney = (cells: unknown[]) => {
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const text = String(cells[i] ?? "").trim();
+      if (!text) continue;
+      if (/^\d{1,2}[.)]?$/.test(text)) continue;
+      const n = parseMoney(text);
+      if (n !== 0 || /^0+$/.test(text.replace(/[.,\s]/g, ""))) return n;
+    }
+    return null;
+  };
+
+  for (const row of matrix) {
+    const line = normalize(row.map((c) => String(c ?? "")).join(" "));
+    if (!line.trim()) continue;
+    if (line.includes("so tien cod phai tra")) {
+      const n = lastMoney(row);
+      if (n !== null) { codTotal = n; found += 1; }
+    } else if (line.includes("so tien cuoc") && line.includes("phai thu")) {
+      const n = lastMoney(row);
+      if (n !== null) { feeTotal = n; found += 1; }
+    } else if (line.includes("so tien con lai phai thanh toan")) {
+      const n = lastMoney(row);
+      if (n !== null) { netTotal = n; found += 1; }
+    }
+    // "Ngày 04 tháng 09 năm 2026" — ngày lập bảng kê, tức ngày Viettel Post chốt trả tiền.
+    const d = line.match(/ngay\s+(\d{1,2})\s+thang\s+(\d{1,2})\s+nam\s+(\d{4})/);
+    if (d) statementDate = `${d[3]}-${d[2].padStart(2, "0")}-${d[1].padStart(2, "0")}`;
+  }
+
+  if (found < 2) return null;
+  // Tệp chỉ ghi hai trong ba số thì suy số còn lại — quan hệ COD − cước = thực nhận là cố định.
+  if (!netTotal && codTotal) netTotal = codTotal - feeTotal;
+  if (!codTotal && netTotal) codTotal = netTotal + feeTotal;
+  return { statementDate, codTotal, feeTotal, netTotal };
+}

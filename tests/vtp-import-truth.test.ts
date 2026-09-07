@@ -409,11 +409,11 @@ export async function testStatementLedgerOrderIndependent() {
   assert.equal(treo[0].shipmentId, null, "chưa ghép được thì để trống, không gán bừa");
   assert.equal(Number(treo[0].cod), 300000, "giữ nguyên số tiền để biết còn bao nhiêu chưa truy nguyên");
 
-  const { statementLedgerSummary } = await import("@/lib/queries/cod-reconciliation");
-  const tong = await statementLedgerSummary();
-  assert.ok(tong.codUnmatched >= 300000, "đối soát phải nêu được phần tiền chưa ghép được vận đơn");
+  const { codSettlementSummary } = await import("@/lib/queries/cod-settlement");
+  const tong = await codSettlementSummary({ key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null });
+  assert.ok(tong.chuaGhep.amount >= 300000, "đối soát phải nêu được phần tiền chưa ghép được vận đơn");
 
-  console.log(`✓ Sổ chứng từ bảng kê: bảng kê cũ không đè bảng kê mới, nhập lại không nhân đôi, ${tong.codUnmatched}đ chưa ghép được vẫn hiện ra`);
+  console.log(`✓ Sổ chứng từ bảng kê: bảng kê cũ không đè bảng kê mới, nhập lại không nhân đôi, ${tong.chuaGhep.amount}đ chưa ghép được vẫn hiện ra`);
 }
 
 /**

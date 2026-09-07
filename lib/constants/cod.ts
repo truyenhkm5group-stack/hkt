@@ -64,3 +64,47 @@ export const MAX_LIST_FILES = 40;
 export const MAX_LIST_BASE64 = 6_000_000;
 /** Dung lượng gốc tương ứng, dùng cho kiểm tra phía trình duyệt trước khi gửi. */
 export const MAX_LIST_RAW_BYTES = Math.floor(MAX_LIST_BASE64 * 3 / 4);
+
+/**
+ * TÌNH TRẠNG THANH TOÁN CỦA MỘT VẬN ĐƠN — Viettel Post đã trả tiền thu hộ của đơn đó chưa.
+ *
+ * Khác `CodStatus` (ảnh chụp trạng thái tiền trên vận đơn): đây là kết quả ĐỐI SOÁT, tính bằng
+ * cách so tiền thu hộ khai báo với các dòng bảng kê thật đã nhận.
+ */
+export type SettlementStatus = "DA_TRA_DU" | "TRA_THIEU" | "CHUA_TRA" | "QUA_HAN" | "CHUA_GIAO" | "KHONG_PHAI_TRA";
+
+export const SETTLEMENT_LABEL: Record<SettlementStatus, string> = {
+  DA_TRA_DU: "Đã trả đủ",
+  TRA_THIEU: "Trả thiếu",
+  CHUA_TRA: "Chờ trả",
+  QUA_HAN: "Quá hạn chưa trả",
+  CHUA_GIAO: "Chưa giao xong",
+  KHONG_PHAI_TRA: "Không phải trả",
+};
+
+export const SETTLEMENT_TONE: Record<SettlementStatus, string> = {
+  DA_TRA_DU: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  TRA_THIEU: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  CHUA_TRA: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+  QUA_HAN: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  CHUA_GIAO: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+  KHONG_PHAI_TRA: "bg-muted text-muted-foreground",
+};
+
+export const SETTLEMENT_HINT: Record<SettlementStatus, string> = {
+  DA_TRA_DU: "Bảng kê đã trả đủ tiền thu hộ khai báo.",
+  TRA_THIEU: "Bảng kê có trả nhưng ít hơn tiền thu hộ khai báo — thường là đơn khách chỉ trả một phần, hoặc bưu tá sửa doanh thu lúc phát.",
+  CHUA_TRA: "Đã phát thành công, chưa thấy trên bảng kê nào — còn trong hạn trả tiền.",
+  QUA_HAN: "Đã phát thành công quá hạn mà chưa đồng nào về theo bảng kê — cần đòi Viettel Post.",
+  CHUA_GIAO: "Vận đơn chưa kết thúc nên chưa tới lượt đối soát.",
+  KHONG_PHAI_TRA: "Đơn hoàn / huỷ hoặc đơn không thu hộ — Viettel Post không thu được tiền của khách nên không phải trả.",
+};
+
+/**
+ * Số ngày kể từ khi phát thành công mà chưa thấy tiền trên bảng kê thì coi là QUÁ HẠN.
+ *
+ * Đo trên dữ liệu thật của shop: bảng kê chốt ngày 04/09 chi trả cho đơn phát 03/09, bảng kê chốt
+ * 03/09 chi trả cho đơn phát 28/08–02/09 — tức Viettel Post trả trong vòng vài ngày. Để 5 ngày
+ * cho rộng rãi; đổi ở đây, không rải số ra nơi khác.
+ */
+export const COD_OVERDUE_DAYS = 5;

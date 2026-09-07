@@ -1,7 +1,7 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type CodPaymentSummary, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
@@ -51,6 +51,53 @@ export async function upsertStatementBatches(rows: StatementSummary[], createdBy
     }
   }
   return { created, updated };
+}
+
+/**
+ * ĐỢT TIỀN VỀ LẬP TỪ CHÍNH BẢNG KÊ.
+ *
+ * Trước đây chủ shop phải gõ tay số tổng của từng đợt rồi ERP ghép file với đợt BẰNG CÁCH SO TIỀN
+ * — thủ công, và ghép nhầm ngay khi hai đợt trùng số. Nay phần "KẾT LUẬN ĐỐI SOÁT" in sẵn trong
+ * tệp cho đủ ba số và ngày chốt, nên mỗi tệp bảng kê tự là một đợt tiền về.
+ *
+ * Khoá tự nhiên là NGÀY CHỐT của bảng kê: Viettel Post mỗi ngày chốt trả một lần. Nếu đã có đợt
+ * gõ tay đúng ngày và đúng số tiền thì nhận lại đợt đó thay vì tạo bản trùng.
+ */
+export async function upsertBatchFromStatementFile(filename: string, summary: CodPaymentSummary, actor: string) {
+  const db = await getDb();
+  const ngay = summary.statementDate;
+  if (!ngay || summary.netTotal <= 0) return null;
+  const receivedAt = vnStartOfDay(ngay);
+  const reference = `BK-${ngay}`;
+
+  // Đợt gõ tay cùng ngày & cùng số tiền chính là đợt này — nhận lại, không tạo bản trùng.
+  const [trung] = await db
+    .select({ id: schema.codBatches.id, reference: schema.codBatches.reference })
+    .from(schema.codBatches)
+    .where(and(eq(schema.codBatches.receivedAt, receivedAt), eq(schema.codBatches.totalAmount, summary.netTotal)))
+    .limit(1);
+
+  const values = {
+    carrier: "Viettel Post" as const,
+    receivedAt,
+    totalAmount: summary.netTotal,
+    codGross: summary.codTotal,
+    feeTotal: summary.feeTotal,
+    source: "VTP_STATEMENT_MAIL",
+    note: filename,
+    createdBy: actor,
+  };
+  if (trung) {
+    await db.update(schema.codBatches).set(values).where(eq(schema.codBatches.id, trung.id));
+    return { id: trung.id, reference: trung.reference, created: false };
+  }
+  const [moi] = await db
+    .insert(schema.codBatches)
+    .values({ ...values, reference })
+    .onConflictDoUpdate({ target: schema.codBatches.reference, set: values })
+    .returning({ id: schema.codBatches.id, reference: schema.codBatches.reference });
+  const row = moi ?? (await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, reference), columns: { id: true, reference: true } }));
+  return row ? { id: row.id, reference: row.reference, created: true } : null;
 }
 
 export type DetailMatch = StatementDetailRow & { shipmentId: string | null; orderId: string | null; orderLabel: string; codStatus: string | null; codAmount: number };

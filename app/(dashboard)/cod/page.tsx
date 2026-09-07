@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { AlertTriangle, Banknote, CheckCheck, Clock, Download, Landmark, X } from "lucide-react";
-import { CodTable } from "@/app/(dashboard)/cod/cod-table";
-import { CodTabs, type CodTabItem } from "@/app/(dashboard)/cod/cod-tabs";
-import { CodReconciliation } from "@/app/(dashboard)/cod/reconciliation";
+import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, Landmark, Receipt } from "lucide-react";
+import { SettlementTabs } from "@/app/(dashboard)/cod/settlement-tabs";
+import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -11,50 +10,56 @@ import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
-import { activeCodTab, COD_TABS, codStatusesFromFilter } from "@/lib/constants/cod";
-import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { codFacets, codKpis, codPeriodColumn, codSummary, COD_SORTABLE, getCodBatch, listCodShipments, recentCodBatches } from "@/lib/queries/cod";
-import { statementFileAudit, statementLedgerSummary } from "@/lib/queries/cod-reconciliation";
+import { SETTLEMENT_HINT, SETTLEMENT_LABEL, SETTLEMENT_TONE, type SettlementStatus } from "@/lib/constants/cod";
+import { formatDate, formatNumber, formatVND } from "@/lib/format";
+import {
+  codSettlementCounts,
+  codSettlementSummary,
+  listCodSettlement,
+  listStatementPayments,
+  statementGapDays,
+} from "@/lib/queries/cod-settlement";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Đối soát COD" };
 
+const TINH_TRANG_HOP_LE = new Set<string>(["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "KHONG_PHAI_TRA", "ALL"]);
+
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("cod:view");
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "deliveredAt", filterKeys: ["cod", "carrier", "batch"], sortable: COD_SORTABLE, defaultPeriod: "all" });
-  const batchId = params.filters.batch?.[0];
-  const reconValues = ["unproven", "pending", "stale"];
-  const reconDrill = reconValues.includes(param(raw, "recon")) ? param(raw, "recon") : null;
-  const reconPage = Math.max(1, Number(param(raw, "rpage", "1")) || 1);
-  const [{ rows, total, pageCount }, kpis, facets, summary, batches, activeBatch, ledger, fileAudit] = await Promise.all([
-    listCodShipments(params),
-    codKpis(params.period),
-    codFacets(params),
-    codSummary(params),
-    recentCodBatches(10),
-    batchId ? getCodBatch(batchId) : Promise.resolve(null),
-    statementLedgerSummary(),
-    statementFileAudit(20),
+  const params = parseListParams(raw, { defaultSort: "deliveredAt", sortable: [], defaultPeriod: "all" });
+  const tt = param(raw, "tt");
+  const tinhTrang = TINH_TRANG_HOP_LE.has(tt) ? tt : "QUA_HAN";
+
+  const [tong, dem, danhSach, bangKe, thieu] = await Promise.all([
+    codSettlementSummary(params.period),
+    codSettlementCounts(params.period),
+    listCodSettlement({ period: params.period, status: tinhTrang as SettlementStatus | "ALL", q: params.q, page: params.page, pageSize: params.pageSize }),
+    listStatementPayments(40),
+    statementGapDays(),
   ]);
-  const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
-  const tab = activeCodTab(params.filters.cod);
-  const statuses = codStatusesFromFilter(params.filters.cod);
-  const periodLabel = codPeriodColumn(statuses).label;
-  const tabs: CodTabItem[] = COD_TABS.map((t) => ({
-    value: t.value,
-    label: t.label,
-    count: t.statuses === "all" ? null : t.statuses.reduce((sum, s) => sum + kpis.byStatus[s].count, 0),
-  }));
-  const waiting = kpis.byStatus.COLLECTED.amount + kpis.byStatus.RECONCILED.amount;
+
+  const exportQuery = new URLSearchParams(
+    Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : [])),
+  ).toString();
+  const tyLeTra = tong.phaiThu.amount > 0 ? Math.round((tong.daTra.amount / tong.phaiThu.amount) * 1000) / 10 : null;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Tài chính"
         title="Đối soát COD"
-        description={`${formatVND(waiting, { compact: true })} đã giao chờ tiền về · ${formatVND(kpis.byStatus.PENDING.amount, { compact: true })} chưa thu · ${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn chênh lệch`}
+        description={`${formatVND(tong.conThieu, { compact: true })} Viettel Post chưa trả · ${formatNumber(tong.quaHan.count)} đơn quá hạn`}
+        hint={
+          <>
+            So từng <b>đơn đã phát thành công</b> với các dòng bảng kê Viettel Post gửi qua email:
+            đơn nào đã được trả tiền, trả ngày nào, trả đủ hay thiếu, cước bị trừ bao nhiêu, đơn nào
+            quá {tong.overdueDays} ngày vẫn chưa thấy đồng nào. Tiền chỉ tính theo dòng bảng kê thật;
+            không suy từ trạng thái giao hàng hay từ tiền thu hộ khai báo.
+          </>
+        }
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -67,173 +72,209 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         }
       />
 
-      <CodReconciliation period={params.period} drill={reconDrill} page={reconPage} />
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Chưa thu" value={formatVND(kpis.byStatus.PENDING.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.PENDING.count)} vận đơn đang giao (không tính hoàn / huỷ)`} icon={Clock} tone="amber" />
-        <MetricCard label="Đã thu, chờ đối soát" value={formatVND(kpis.byStatus.COLLECTED.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.COLLECTED.count)} vận đơn giao thành công`} icon={Banknote} tone="blue" />
-        <MetricCard label="ĐVVC đã đối soát" value={formatVND(kpis.byStatus.RECONCILED.collected, { compact: true })} note={`${formatNumber(kpis.byStatus.RECONCILED.count)} vận đơn chờ chuyển khoản`} icon={CheckCheck} tone="primary" />
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <MetricCard
-          label="Đã về ngân hàng trong kỳ"
-          value={formatVND(Math.max(kpis.paidInPeriod.amount, kpis.batchesInPeriod.gross), { compact: true })}
-          note={
-            kpis.batchesInPeriod.count
-              ? `${formatNumber(kpis.batchesInPeriod.count)} bảng kê Viettel Post · COD ${formatVND(kpis.batchesInPeriod.gross, { compact: true })} − cước ${formatVND(kpis.batchesInPeriod.fee, { compact: true })} = thực nhận ${formatVND(kpis.batchesInPeriod.net, { compact: true })} · ${formatNumber(kpis.paidInPeriod.count)} vận đơn đã gắn`
-              : `${formatNumber(kpis.paidInPeriod.count)} vận đơn · ${params.period.label.toLowerCase()} · chưa có bảng kê trong kỳ`
-          }
-          icon={Landmark}
+          label="Viettel Post phải trả"
+          value={formatVND(tong.phaiThu.amount, { compact: true })}
+          note={`${formatNumber(tong.phaiThu.count)} đơn đã phát thành công có thu hộ`}
+          hint="Tổng tiền thu hộ khai báo của những vận đơn Viettel Post đã phát thành công. Đơn hoàn / huỷ không nằm ở đây vì không thu được tiền của khách."
+          icon={CircleDollarSign}
+          tone="slate"
+        />
+        <MetricCard
+          label="Đã trả theo bảng kê"
+          value={formatVND(tong.daTra.amount, { compact: true })}
+          note={`${formatNumber(tong.daTra.count)} đơn · ${tyLeTra === null ? "—" : `${tyLeTra}%`} số phải trả${tong.soNgayTraTB === null ? "" : ` · thường trả sau ${tong.soNgayTraTB} ngày`}`}
+          hint="Cộng số tiền COD ghi cho từng vận đơn trên các bảng kê đã nhận. Đây là tiền có chứng từ, không phải suy đoán."
+          icon={Banknote}
           tone="green"
         />
-        <MetricCard label="Có chênh lệch" value={formatVND(kpis.byStatus.DISPUTED.amount, { compact: true })} note={`${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn cần đối chiếu`} icon={AlertTriangle} tone={kpis.byStatus.DISPUTED.count ? "rose" : "slate"} />
+        <MetricCard
+          label="Chưa trả"
+          value={formatVND(tong.conThieu, { compact: true })}
+          note={`${formatNumber((dem.CHUA_TRA ?? 0) + (dem.QUA_HAN ?? 0))} đơn chưa thấy trên bảng kê nào`}
+          hint="Phải trả trừ đi đã trả. Gồm cả đơn còn trong hạn lẫn đơn đã quá hạn."
+          icon={Clock}
+          tone={tong.conThieu ? "amber" : "slate"}
+        />
+        <MetricCard
+          label={`Quá hạn > ${tong.overdueDays} ngày`}
+          value={formatVND(tong.quaHan.amount, { compact: true })}
+          note={`${formatNumber(tong.quaHan.count)} đơn đã phát thành công mà chưa có đồng nào`}
+          hint={`Đơn phát thành công quá ${tong.overdueDays} ngày mà không dòng bảng kê nào nhắc tới. Đây là tiền cần đòi Viettel Post. Ngưỡng đo trên dữ liệu thật: bảng kê thường chốt trả trong vài ngày sau khi phát.`}
+          icon={AlertTriangle}
+          tone={tong.quaHan.count ? "rose" : "slate"}
+        />
+        <MetricCard
+          label="Trả thiếu so với khai báo"
+          value={formatVND(tong.traThieu.gap, { compact: true })}
+          note={`${formatNumber(tong.traThieu.count)} đơn bảng kê trả ít hơn tiền thu hộ`}
+          hint="Bảng kê có trả nhưng ít hơn tiền thu hộ khai báo. Thường là khách chỉ trả một phần, hoặc bưu tá sửa doanh thu lúc phát — mở từng đơn để xem chênh bao nhiêu."
+          icon={Receipt}
+          tone={tong.traThieu.count ? "amber" : "slate"}
+        />
+        <MetricCard
+          label="Thực nhận về tài khoản"
+          value={formatVND(tong.thucNhan, { compact: true })}
+          note={`đã trừ cước ${formatVND(tong.cuoc, { compact: true })}${tong.chuaGhep.count ? ` · ${formatVND(tong.chuaGhep.amount, { compact: true })} chưa truy nguyên` : ""}`}
+          hint="Số tiền còn lại phải thanh toán ghi ở phần KẾT LUẬN ĐỐI SOÁT của các bảng kê: tiền COD trừ cước. Đây là số khớp với tiền về tài khoản ngân hàng."
+          icon={Landmark}
+          tone="primary"
+        />
       </section>
 
-      <CodTabs tabs={tabs} active={activeBatch ? "PAID_TO_BANK" : (tab?.value ?? "")} />
-
-      {activeBatch ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
-          <Landmark className="size-4 text-primary" />
-          <span>
-            Đợt nhận tiền <span className="font-mono font-semibold">{activeBatch.reference}</span> · {activeBatch.carrier} · nhận {formatDate(activeBatch.receivedAt)} · tổng <Money value={activeBatch.totalAmount} className="font-semibold" />
-            {activeBatch.note ? <span className="text-muted-foreground"> · {activeBatch.note}</span> : null}
-          </span>
-          <Button asChild variant="ghost" size="sm" className="ml-auto h-7">
-            <Link href="/cod?cod=PAID_TO_BANK">
-              <X className="size-3.5" /> Bỏ lọc đợt
-            </Link>
-          </Button>
-        </div>
-      ) : null}
+      <SettlementTabs counts={dem} active={tinhTrang} />
 
       <DataTableToolbar
-        searchPlaceholder="Mã vận đơn, SĐT, tên khách, mã đơn…"
+        searchPlaceholder="Mã vận đơn, SĐT, tên khách…"
         period={{ defaultKey: "all" }}
-        facets={[{ key: "carrier", label: "ĐVVC", options: facets.carriers }]}
         resultLabel={
           <>
-            {formatNumber(total)} vận đơn {activeBatch ? "trong đợt" : `· ${tab?.description ?? "lọc theo trạng thái COD"}`} · COD {formatVND(summary.codAmount)} · đã thu {formatVND(summary.codCollected)} · phí ship {formatVND(summary.shippingFee)}
-            {!activeBatch && params.period.from ? ` · kỳ tính theo ${periodLabel}` : ""}
+            {formatNumber(danhSach.total)} vận đơn · {SETTLEMENT_HINT[tinhTrang as SettlementStatus] ?? "toàn bộ vận đơn có thu hộ"}
           </>
         }
       />
-      <CodTable rows={rows} pageCount={pageCount} total={total} />
 
-      <SectionCard
-        title="Bảng kê Viettel Post đã nhận qua email"
-        description={ledger.files ? `${formatNumber(ledger.files)} file · ${formatNumber(ledger.lines)} dòng chi tiết · ghép được ${formatNumber(ledger.matched)} vận đơn` : "Chưa nhận được file bảng kê nào"}
-        hint={<>Bảng kê đối soát thanh toán do Viettel Post gửi về hòm thư của shop được đẩy thẳng vào ERP. Mỗi dòng chi tiết được giữ nguyên làm chứng từ; số tiền trên vận đơn là kết quả dựng lại từ các dòng đó nên nhập lại bao nhiêu lần cũng ra một kết quả. <b>Chưa ghép được</b> = bảng kê có dòng đó nhưng ERP chưa có vận đơn tương ứng, tiền có thật nhưng chưa truy nguyên được.</>}
-        padded={false}
-      >
-        {ledger.files ? (
-          <>
-            <div className="grid gap-px border-y bg-border sm:grid-cols-4">
-              <div className="bg-card px-5 py-4">
-                <p className="text-[13px] text-muted-foreground">COD trên bảng kê</p>
-                <p className="numeric mt-1 text-xl font-bold">{formatVND(ledger.batchCodTotal || ledger.codTotal)}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">cước {formatVND(ledger.feeTotal, { compact: true })} · thực nhận {formatVND(ledger.netTotal, { compact: true })}</p>
-              </div>
-              <div className="bg-card px-5 py-4">
-                <p className="text-[13px] text-muted-foreground">Đã truy nguyên về vận đơn</p>
-                <p className="numeric mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">{formatVND(ledger.codMatched)}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{formatNumber(ledger.matched)} dòng</p>
-              </div>
-              <div className="bg-card px-5 py-4">
-                <p className="text-[13px] text-muted-foreground">Chưa ghép được vận đơn</p>
-                <p className={cn("numeric mt-1 text-xl font-bold", ledger.codUnmatched ? "text-amber-600 dark:text-amber-400" : "")}>{formatVND(ledger.codUnmatched)}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{formatNumber(ledger.unmatched)} dòng bảng kê chưa có vận đơn trong ERP</p>
-              </div>
-              <div className="bg-card px-5 py-4">
-                <p className="text-[13px] text-muted-foreground">Bảng kê mới nhất</p>
-                <p className="numeric mt-1 text-xl font-bold">{ledger.lastStatementAt ? formatDate(ledger.lastStatementAt) : "—"}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">tự nhận qua email, không nhập tay</p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <Table className="min-w-[860px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>File bảng kê</TableHead>
-                    <TableHead>Đợt</TableHead>
-                    <TableHead>Giai đoạn</TableHead>
-                    <TableHead className="text-right">Dòng</TableHead>
-                    <TableHead className="text-right">Ghép được</TableHead>
-                    <TableHead className="text-right">COD đã truy nguyên</TableHead>
-                    <TableHead className="text-right">Chưa ghép</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {fileAudit.map((f) => (
-                    <TableRow key={f.sourceFile}>
-                      <TableCell className="max-w-[280px] truncate font-mono text-[11.5px]" title={f.sourceFile}>{f.sourceFile}</TableCell>
-                      <TableCell className="font-mono text-[11.5px]">{f.batchReference ?? <span className="text-amber-600">chưa khớp đợt</span>}</TableCell>
-                      <TableCell className="text-xs">{f.periodFrom ? `${formatDate(f.periodFrom)} → ${formatDate(f.periodTo ?? f.periodFrom)}` : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatNumber(f.lines)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatNumber(f.matched)}</TableCell>
-                      <TableCell className="text-right"><Money value={f.codMatched} /></TableCell>
-                      <TableCell className="text-right">{f.unmatched ? <div><Money value={f.codUnmatched} className="text-amber-600 dark:text-amber-400" /><div className="text-[10.5px] text-muted-foreground">{formatNumber(f.unmatched)} dòng</div></div> : <span className="text-muted-foreground">—</span>}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </>
-        ) : (
-          <p className="px-5 py-6 text-sm text-muted-foreground">
-            Chưa có dòng chi tiết bảng kê nào trong sổ chứng từ. Bảng kê Viettel Post gửi qua email sẽ tự chảy vào đây; nếu đã có thư mà chưa thấy số, gỡ nhãn đã xử lý trong hòm thư để hệ thống đọc lại.
-          </p>
-        )}
+      <SectionCard padded={false}>
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1080px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vận đơn</TableHead>
+                <TableHead>Khách</TableHead>
+                <TableHead>Ngày phát</TableHead>
+                <TableHead className="text-right">Thu hộ khai báo</TableHead>
+                <TableHead className="text-right">Bảng kê trả</TableHead>
+                <TableHead className="text-right">Chênh lệch</TableHead>
+                <TableHead className="text-right">Cước ĐVVC</TableHead>
+                <TableHead>Ngày trả</TableHead>
+                <TableHead className="text-right">Chờ</TableHead>
+                <TableHead>Tình trạng</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {danhSach.rows.map((r) => (
+                <TableRow key={r.id} className={cn(r.status === "QUA_HAN" && "bg-rose-50/40 dark:bg-rose-950/10")}>
+                  <TableCell>
+                    <Link href={`/shipments/${r.id}`} className="font-mono text-[12px] font-semibold hover:text-primary hover:underline">
+                      {r.vtpOrderNumber ?? "—"}
+                    </Link>
+                    {r.systemId ? <div className="text-[11px] text-muted-foreground">#{r.systemId}</div> : null}
+                  </TableCell>
+                  <TableCell className="max-w-[180px] truncate text-sm">{r.customer || "—"}</TableCell>
+                  <TableCell className="text-xs">{r.deliveredAt ? formatDate(r.deliveredAt) : "—"}</TableCell>
+                  <TableCell className="text-right"><Money value={r.codDeclared} /></TableCell>
+                  <TableCell className="text-right">
+                    {r.codPaid > 0 ? <Money value={r.codPaid} className="font-semibold text-emerald-700 dark:text-emerald-400" /> : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {r.status === "TRA_THIEU" ? <Money value={r.gap} className="font-semibold text-amber-700 dark:text-amber-400" /> : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="text-right">{r.fee > 0 ? <Money value={r.fee} className="text-muted-foreground" /> : <span className="text-muted-foreground">—</span>}</TableCell>
+                  <TableCell className="text-xs" title={r.statementFile ?? ""}>{r.paidAt ? formatDate(r.paidAt) : "—"}</TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">
+                    {r.waitingDays === null ? "—" : <span className={cn(r.status === "QUA_HAN" && "font-semibold text-rose-600")}>{formatNumber(r.waitingDays)} ngày</span>}
+                  </TableCell>
+                  <TableCell>
+                    <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", SETTLEMENT_TONE[r.status])}>{SETTLEMENT_LABEL[r.status]}</span>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {danhSach.rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">Không có vận đơn nào trong nhóm này.</TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="border-t px-4 py-3">
+          <UrlPagination pageCount={danhSach.pageCount} total={danhSach.total} />
+        </div>
       </SectionCard>
 
-      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Từng đợt tiền Viettel Post chuyển về tài khoản."
- hint="Mỗi đợt là một bảng kê Viettel Post: tiền COD − cước/dư nợ = tiền thu về. Số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát. Đợt tạo tự động từ thư bảng kê, không nhập tay." padded={false}>
-        {batches.length ? (
+      {thieu.length ? (
+        <SectionCard
+          title="Ngày phát chưa được bảng kê nào chi trả"
+          description="Có đơn phát thành công trong khoảng ngày này mà không dòng bảng kê nào nhắc tới."
+          hint="Suy từ dữ liệu thật chứ không từ lịch trả tiền của Viettel Post. Hoặc Viettel Post chưa trả kỳ đó, hoặc thư bảng kê của kỳ đó chưa về ERP — đối chiếu với bảng bên dưới để biết kỳ nào còn thiếu."
+          padded={false}
+        >
           <div className="overflow-x-auto">
-            <Table className="min-w-[720px]">
+            <Table className="min-w-[520px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Mã bảng kê</TableHead>
-                  <TableHead>ĐVVC</TableHead>
-                  <TableHead>Ngày nhận</TableHead>
-                  <TableHead className="text-right">Tiền COD</TableHead>
-                  <TableHead className="text-right">Cước / dư nợ</TableHead>
-                  <TableHead className="text-right">Thu về</TableHead>
-                  <TableHead className="text-right">Vận đơn</TableHead>
-                  <TableHead>Ghi chú</TableHead>
-                  <TableHead>Người tạo</TableHead>
+                  <TableHead>Từ ngày</TableHead>
+                  <TableHead>Đến ngày</TableHead>
+                  <TableHead className="text-right">Đơn</TableHead>
+                  <TableHead className="text-right">Tiền đang treo</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {batches.map((b) => (
-                  <TableRow key={b.id} className={b.id === batchId ? "bg-primary/5" : undefined}>
-                    <TableCell>
-                      <Link href={`/cod?batch=${b.id}`} className="font-mono text-sm font-semibold text-foreground hover:text-primary hover:underline">
-                        {b.reference}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-sm">{b.carrier}</TableCell>
-                    <TableCell className="text-sm">{formatDate(b.receivedAt)}</TableCell>
+                {thieu.map((g) => (
+                  <TableRow key={`${g.from}-${g.to}`}>
+                    <TableCell className="text-sm font-medium">{formatDate(g.from)}</TableCell>
+                    <TableCell className="text-sm font-medium">{formatDate(g.to)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(g.shipments)}</TableCell>
+                    <TableCell className="text-right"><Money value={g.amount} className="font-semibold text-amber-700 dark:text-amber-400" /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
+      ) : null}
+
+      <SectionCard
+        title="Bảng kê Viettel Post nhận qua email"
+        description={`${formatNumber(bangKe.length)} bảng kê · mỗi bảng kê là một lần Viettel Post chuyển tiền`}
+        hint={
+          <>
+            Thư “BẢNG KÊ ĐỐI SOÁT THANH TOÁN” về hòm thư shop được đẩy thẳng vào ERP. Ba số tổng lấy
+            từ phần <b>KẾT LUẬN ĐỐI SOÁT</b> in trong chính tệp: tiền COD phải trả − cước phải thu =
+            còn lại phải thanh toán. <b>Chưa ghép</b> là dòng bảng kê có mã vận đơn mà ERP chưa có
+            vận đơn đó — tiền có thật nhưng chưa truy nguyên được về đơn nào.
+          </>
+        }
+        padded={false}
+      >
+        {bangKe.length ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[900px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Ngày chốt trả</TableHead>
+                  <TableHead>Chi trả cho ngày phát</TableHead>
+                  <TableHead className="text-right">Tiền COD</TableHead>
+                  <TableHead className="text-right">Cước</TableHead>
+                  <TableHead className="text-right">Thực nhận</TableHead>
+                  <TableHead className="text-right">Dòng</TableHead>
+                  <TableHead className="text-right">Chưa ghép</TableHead>
+                  <TableHead>Tệp</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bangKe.map((f) => (
+                  <TableRow key={f.filename}>
+                    <TableCell className="text-sm font-semibold">{f.paidOn ? formatDate(f.paidOn) : <span className="text-amber-600">chưa rõ</span>}</TableCell>
+                    <TableCell className="text-xs">{f.periodFrom ? `${formatDate(f.periodFrom)} → ${formatDate(f.periodTo ?? f.periodFrom)}` : "—"}</TableCell>
+                    <TableCell className="text-right"><Money value={f.codTotal || f.codMatched} /></TableCell>
+                    <TableCell className="text-right"><Money value={f.feeTotal} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right"><Money value={f.netTotal} className="font-semibold" /></TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{formatNumber(f.matched)}/{formatNumber(f.lines)}</TableCell>
                     <TableCell className="text-right">
-                      <Money value={b.codGross || b.totalAmount} />
+                      {f.codUnmatched ? <Money value={f.codUnmatched} className="text-amber-700 dark:text-amber-400" /> : <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Money value={b.feeTotal} className="text-muted-foreground" />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Money value={b.totalAmount} className="font-semibold" />
-                      {b.shipments && b.collected !== b.totalAmount ? <div className="text-[10.5px] text-muted-foreground">đã thu <Money value={b.collected} compact /></div> : null}
-                    </TableCell>
-                    <TableCell className="text-right text-sm">{formatNumber(b.shipments)}</TableCell>
-                    <TableCell className="max-w-[240px] truncate text-xs text-muted-foreground">{b.note || "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      <div>{b.createdBy || "—"}</div>
-                      <div>{formatDateTime(b.createdAt)}</div>
-                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate font-mono text-[11px] text-muted-foreground" title={f.filename}>{f.filename}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
         ) : (
-          <p className="px-5 py-6 text-sm text-muted-foreground">Chưa có đợt nhận tiền nào. Đợt được tạo tự động khi Viettel Post gửi bảng kê đối soát về email của shop.</p>
+          <p className="px-5 py-6 text-sm text-muted-foreground">
+            Chưa có bảng kê nào trong sổ chứng từ. Bảng kê Viettel Post gửi qua email sẽ tự chảy vào đây.
+          </p>
         )}
       </SectionCard>
     </div>

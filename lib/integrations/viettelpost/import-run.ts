@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
-import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch } from "@/lib/integrations/viettelpost/statement-db";
+import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch, upsertBatchFromStatementFile } from "@/lib/integrations/viettelpost/statement-db";
 
 
 /** Lỗi hiển thị cho chủ shop, không phải JSON thô của Zod. */
@@ -110,14 +110,19 @@ export async function runVtpDataFileImport(files: { filename: string; base64: st
   for (const f of detected) {
     if (f.kind !== "STATEMENT_DETAIL") continue;
     statementRows += f.rows.length;
-    const match = await matchStatementFileToBatch(f.filename, f.rows);
+    // Đợt tiền về lấy từ phần KẾT LUẬN ĐỐI SOÁT in trong chính tệp. Chỉ khi tệp không có phần đó
+    // (tệp "Chi tiết bảng kê" tải tay) mới quay về cách cũ là ghép với đợt đã có bằng số tiền.
+    const tuTep = f.summary ? await upsertBatchFromStatementFile(f.filename, f.summary, actor) : null;
+    const match = tuTep
+      ? { batchId: tuTep.id, batchReference: tuTep.reference, periodFrom: null as string | null, periodTo: null as string | null, issue: null as string | null }
+      : await matchStatementFileToBatch(f.filename, f.rows);
     const applied = await applyStatementDetailRows(f.rows, f.filename, match.batchId);
     results.push({
       filename: f.filename,
       kind: "STATEMENT_DETAIL",
       rows: f.rows.length,
-      periodFrom: match.periodFrom,
-      periodTo: match.periodTo,
+      periodFrom: match.periodFrom ?? f.rows.map((r) => r.paidDate).filter(Boolean).sort()[0] ?? null,
+      periodTo: match.periodTo ?? f.rows.map((r) => r.paidDate).filter(Boolean).sort().at(-1) ?? null,
       applied: applied.linked,
       withCash: applied.withCash,
       matchedBatch: match.batchReference,

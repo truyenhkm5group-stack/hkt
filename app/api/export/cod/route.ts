@@ -1,12 +1,8 @@
-import { desc } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { getDb, schema } from "@/db";
 import { getSession } from "@/lib/auth/session";
-import { COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
-import { formatDate, formatDateTime } from "@/lib/format";
-import { codListWhere, COD_SORTABLE } from "@/lib/queries/cod";
-import { orderByNullsLast } from "@/lib/queries/shipments";
-import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { SETTLEMENT_LABEL, type SettlementStatus } from "@/lib/constants/cod";
+import { listCodSettlement } from "@/lib/queries/cod-settlement";
+import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
@@ -15,60 +11,46 @@ function csvCell(value: unknown) {
   return /[",\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-/** Xuất CSV danh sách đối soát COD theo bộ lọc hiện tại của trang /cod */
+/**
+ * Xuất CSV đúng bảng đối soát đang xem: mỗi dòng là một vận đơn, kèm tiền thu hộ khai báo, tiền
+ * bảng kê Viettel Post đã trả, chênh lệch, cước bị trừ và số ngày chờ.
+ */
 export async function GET(request: NextRequest) {
   const session = await getSession();
-  if (!session) return new Response("Unauthorized", { status: 401 });
-  const sp: SearchParams = {};
-  request.nextUrl.searchParams.forEach((value, key) => {
-    const existing = sp[key];
-    sp[key] = existing ? [...(Array.isArray(existing) ? existing : [existing]), value] : value;
+  if (!session) return new Response("Chưa đăng nhập", { status: 401 });
+  const raw = Object.fromEntries(request.nextUrl.searchParams.entries()) as SearchParams;
+  const params = parseListParams(raw, { defaultSort: "deliveredAt", sortable: [], defaultPeriod: "all" });
+  const tt = param(raw, "tt");
+  const { rows } = await listCodSettlement({
+    period: params.period,
+    status: (tt || "ALL") as SettlementStatus | "ALL",
+    q: params.q,
+    page: 1,
+    pageSize: 200,
   });
-  const params = parseListParams(sp, { defaultSort: "deliveredAt", filterKeys: ["cod", "carrier", "batch"], sortable: COD_SORTABLE, defaultPeriod: "all" });
-  const sortMap = {
-    deliveredAt: schema.shipments.deliveredAt,
-    codAmount: schema.shipments.codAmount,
-    codCollected: schema.shipments.codCollected,
-    codPaidToBankAt: schema.shipments.codPaidToBankAt,
-    createdAt: schema.shipments.createdAt,
-  } as const;
-  const sortColumn = sortMap[params.sort as keyof typeof sortMap] ?? schema.shipments.deliveredAt;
-  const db = await getDb();
-  const rows = await db.query.shipments.findMany({
-    where: codListWhere(params),
-    orderBy: [orderByNullsLast(sortColumn, params.dir), desc(schema.shipments.id)],
-    limit: 20000,
-    with: {
-      order: { columns: { id: true, systemId: true, billFullName: true, billPhone: true } },
-      codBatch: { columns: { reference: true } },
-    },
-  });
-  const header = ["Mã vận đơn", "ĐVVC", "Mã đơn", "Khách hàng", "SĐT", "Ngày giao", "COD", "Đã thu", "Phí ship", "Phí COD", "Trạng thái COD", "Đợt tiền", "Ngày về NH", "ĐVVC đối soát"];
-  const lines = [header.map(csvCell).join(",")];
-  for (const s of rows) {
-    lines.push(
-      [
-        s.vtpOrderNumber ?? s.trackingCode ?? "",
-        s.carrier,
-        s.order ? (s.order.systemId ?? s.order.id) : s.orderReference ?? "",
-        s.receiverName || s.order?.billFullName || "",
-        s.receiverPhone || s.order?.billPhone || "",
-        formatDateTime(s.deliveredAt),
-        s.codAmount,
-        s.codCollected,
-        s.shippingFee,
-        s.codFee,
-        COD_STATUS_LABEL[s.codStatus],
-        s.codBatch?.reference ?? "",
-        s.codPaidToBankAt ? formatDate(s.codPaidToBankAt) : "",
-        s.codReconciledAt ? formatDate(s.codReconciledAt) : "",
-      ]
-        .map(csvCell)
-        .join(","),
-    );
+
+  const header = ["Mã vận đơn", "Mã đơn", "Khách", "Ngày phát", "Thu hộ khai báo", "Bảng kê trả", "Chênh lệch", "Cước ĐVVC", "Ngày trả", "Số ngày chờ", "Tình trạng", "Tệp bảng kê"];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push([
+      r.vtpOrderNumber ?? "",
+      r.systemId ?? "",
+      r.customer,
+      r.deliveredAt ?? "",
+      r.codDeclared,
+      r.codPaid,
+      r.status === "TRA_THIEU" ? r.gap : 0,
+      r.fee,
+      r.paidAt ?? "",
+      r.waitingDays ?? "",
+      SETTLEMENT_LABEL[r.status],
+      r.statementFile ?? "",
+    ].map(csvCell).join(","));
   }
-  const body = `﻿${lines.join("\r\n")}`;
-  return new Response(body, {
-    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="doi-soat-cod-${new Date().toISOString().slice(0, 10)}.csv"` },
+  return new Response(`﻿${lines.join("\r\n")}`, {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="doi-soat-cod-${new Date().toISOString().slice(0, 10)}.csv"`,
+    },
   });
 }

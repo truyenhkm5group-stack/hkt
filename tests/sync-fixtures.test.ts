@@ -1069,7 +1069,7 @@ async function main() {
   await testDataQuality(db);
   await testConsistency(db);
   await testInventory(db);
-  await testCodReconciliation(db);
+  await testCodReconciliation();
   await testVtpImportTruth(db);
   await testVtpState(db);
   await testLogisticsPerformance(db);
