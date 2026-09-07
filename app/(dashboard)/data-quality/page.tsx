@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
+import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -67,6 +68,12 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       : issue
         ? { kind: "order" as const, ...(await dataQualityOrders(issue, params.period, page, PAGE_SIZE, params.q)) }
         : null;
+
+  // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
+  const backlog = issue === "return-not-received" ? await pendingReturnedForWarehouse() : null;
+  const warehouseBacklog = backlog
+    ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
+    : undefined;
 
   const drillHref = (key: DqIssue) => `/data-quality?issue=${key}&period=${params.period.key}`;
   const rule = summary.rule;
@@ -227,6 +234,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
 
               {issue === "return-not-received" && drill.kind === "shipment" ? (
                 <ReceiveReturns
+                  bulk={warehouseBacklog}
                   rows={drill.rows.map((r) => ({
                     id: r.id,
                     label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,

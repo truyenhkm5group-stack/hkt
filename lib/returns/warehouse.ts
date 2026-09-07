@@ -1,4 +1,4 @@
-import { and, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 
 const s = schema.shipments;
@@ -37,4 +37,41 @@ export async function undoReturnReceived(ids: string[]) {
     .where(and(inArray(s.id, unique), sql`${s.returnReceivedAt} is not null`))
     .returning({ id: s.id });
   return { count: rows.length };
+}
+
+/**
+ * Hàng hoàn ĐÃ VỀ TỚI SHOP mà kho chưa xác nhận.
+ *
+ * Chỉ tính vận đơn ở trạng thái RETURNED — tức Viettel Post đã trả hàng xong cho người gửi
+ * (mã 504). Vận đơn RETURNING vẫn đang trên đường về, xác nhận nhận hàng lúc đó là bịa dữ liệu.
+ *
+ * Đây là phần tồn kho đang bị hụt: hàng có thật trong kho nhưng ERP chưa cộng lại, nên kế hoạch
+ * đặt hàng sẽ đặt thừa.
+ *
+ * Đếm CẢ hàng tặng: chúng cũng nằm trong kiện hàng quay về và cách tính tồn của ERP đã tính,
+ * nên số món ở đây phải khớp với mức tồn tăng lên sau khi xác nhận.
+ */
+export async function pendingReturnedForWarehouse() {
+  const db = await getDb();
+  const [row] = await db
+    .select({
+      count: sql<number>`count(*)`,
+      items: sql<number>`coalesce(sum((select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})), 0)`,
+      oldestAt: sql<Date | null>`min(${s.returnedAt})`,
+    })
+    .from(s)
+    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt)));
+  return { count: Number(row?.count ?? 0), items: Number(row?.items ?? 0), oldestAt: row?.oldestAt ?? null };
+}
+
+/** Danh sách vận đơn hoàn đã về tới shop, cũ nhất trước — dùng cho thao tác xác nhận hàng loạt. */
+export async function listPendingReturnedIds(limit: number) {
+  const db = await getDb();
+  const rows = await db
+    .select({ id: s.id })
+    .from(s)
+    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt)))
+    .orderBy(asc(s.returnedAt))
+    .limit(limit);
+  return rows.map((r) => r.id);
 }
