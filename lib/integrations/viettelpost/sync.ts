@@ -93,7 +93,11 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   if (record.status !== null || record.statusName) {
     // Ghi kèm trạng thái đã chuẩn hoá: có nó thì dựng lại được trạng thái vận đơn từ lịch sử và
     // đối chiếu được ERP với ĐVVC. Thiếu nó (như trước đây) thì mọi sự kiện webhook đều vô danh.
-    eventRows.push({ shipmentId: shipment.id, source, status: String(record.status ?? record.statusName), statusName: meta.name, location: record.location, note: record.note, occurredAt: statusDate, normalizedStage: meta.stage, raw: record.raw });
+    // legType lấy từ cờ IS_RETURNING của ĐVVC: chỉ có nó mới phân biệt được "501 phát tới khách"
+    // với "501 phát thành công CHIỀU HOÀN về shop" — hai việc trái ngược nhau mà VTP gọi chung là
+    // "Thành công". Không có cờ thì để UNKNOWN, không đoán.
+    const legType = record.isReturning === null ? null : record.isReturning ? "RETURN" : "OUTBOUND";
+    eventRows.push({ shipmentId: shipment.id, source, status: String(record.status ?? record.statusName), statusName: meta.name, location: record.location, note: record.note, occurredAt: statusDate, normalizedStage: meta.stage, legType, raw: record.raw });
   }
   for (const step of record.journey) {
     if (!step.occurredAt) continue;

@@ -7,7 +7,7 @@ import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProducts, productSummary } from "@/lib/queries/products";
 import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
-import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
+import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { parseListParams } from "@/lib/search-params";
 
 function allParams() {
@@ -24,31 +24,24 @@ async function productRow(variantId: string) {
 export async function testInventory(db: Db) {
   clearMemo();
 
-  // ───────── 1. Bốn trạng thái KHÔNG được trộn vào nhau ─────────
+  // ───────── 1. SỔ KHO: tồn phải ra đúng từ một phương trình duy nhất ─────────
   const rr = await productRow("rr-var");
   assert.equal(
-    rr.returned,
-    rr.returnedPending + rr.returnedReceived,
-    "tổng hàng hoàn phải bằng đúng (chờ về kho + đã nhận) — không được đếm trùng hay bỏ sót",
+    rr.received,
+    rr.receiptIn + rr.returnIn + rr.adjust - rr.manualOut,
+    "tổng phiếu kho = nhập mới + tái nhập + điều chỉnh − xuất tay",
   );
-  assert.equal(
-    rr.erpStock,
-    rr.received - rr.delivered - rr.inTransit - rr.returnedPending,
-    "tồn khả dụng = nhập − giao thật − đang giao − hàng hoàn chưa về kho",
-  );
-  assert.ok(rr.returnedPending >= 0 && rr.returnedReceived >= 0);
-  // Hàng ĐÃ nhận hoàn nằm trong tồn, KHÔNG bị trừ lần nữa.
-  assert.ok(
-    rr.erpStock >= rr.received - rr.delivered - rr.inTransit - rr.returned,
-    "hàng hoàn đã nhận không được trừ khỏi tồn",
-  );
+  assert.equal(rr.erpStock, rr.received - rr.shipped, "tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC");
+  assert.equal(rr.available, rr.erpStock - rr.reserved, "khả dụng bán = tồn thực tế − hàng đã chốt đơn chờ xuất");
+  assert.ok(rr.shipped >= rr.inTransit, "đang ở ngoài là tập con của đã xuất");
+  assert.ok(rr.shipped >= rr.awaitingReturn, "hoàn chờ nhận là tập con của đã xuất");
 
-  // ───────── 2. Tồn không bao giờ vượt tổng nhập ─────────
-  assert.ok(rr.erpStock <= rr.received, "tồn ERP không thể lớn hơn tổng đã nhập");
+  // ───────── 2. Hàng hoàn KHÔNG tự quay lại tồn khi chưa có phiếu tái nhập ─────────
+  // Đây là điểm khác cốt lõi: ĐVVC báo "đã hoàn" chỉ nghĩa là hàng đang trên đường / đã tới shop,
+  // không nghĩa là hàng đã nằm trong kho. Chỉ phiếu tái nhập mới cộng tồn.
+  assert.ok(rr.erpStock <= rr.received, "tồn không thể lớn hơn tổng phiếu kho");
 
-  // ───────── 3. Kho xác nhận nhận hoàn → tồn tăng ĐÚNG số lượng, không nhân đôi ─────────
-  // Phải chọn đúng vận đơn ĐANG THUỘC DIỆN HOÀN chờ kho nhận; vận đơn giao thành công
-  // dù chưa đánh dấu nhận hoàn cũng không nằm trong tồn nên đánh dấu sẽ không đổi gì.
+  // ───────── 3. Kho nhận hoàn → ERP lập phiếu tái nhập → tồn tăng ĐÚNG số lượng ─────────
   const pending = await db
     .select({ id: schema.shipments.id })
     .from(schema.shipments)
@@ -68,10 +61,10 @@ export async function testInventory(db: Db) {
     await markReturnReceived([target], "test-kho-inventory");
     clearMemo();
     const after = await productRow("rr-var");
+    assert.equal(after.returnIn, before.returnIn + Number(qty), "phiếu tái nhập ghi đúng số món kho nhận về");
     assert.equal(after.erpStock, before.erpStock + Number(qty), "tồn tăng đúng số lượng kho vừa nhận");
-    assert.equal(after.returnedPending, before.returnedPending - Number(qty), "số chờ về kho giảm đúng bằng số đã nhận");
-    assert.equal(after.returnedReceived, before.returnedReceived + Number(qty), "số đã nhận tăng đúng bằng số vừa nhận");
-    assert.equal(after.returned, before.returned, "tổng hàng hoàn không đổi — chỉ chuyển trạng thái, không sinh thêm");
+    assert.equal(after.awaitingReturn, before.awaitingReturn - Number(qty), "hoàn chờ nhận giảm đúng bằng số đã nhận");
+    assert.equal(after.shipped, before.shipped, "đã xuất không đổi — nhận hoàn không phải là xuất thêm");
 
     // Bấm lại lần hai không được cộng tồn thêm lần nữa.
     await markReturnReceived([target], "test-kho-inventory-2");
@@ -90,10 +83,9 @@ export async function testInventory(db: Db) {
   assert.equal(dq.stockKnown, false, "mẫu mã chưa có phiếu nhập phải bị đánh dấu là chưa tính được tồn");
   assert.equal(rr.stockKnown, true, "mẫu mã đã có phiếu nhập thì tính được tồn");
 
-  // Không được đếm mẫu mã chưa biết tồn vào "hết hàng".
   const summary = await productSummary(allParams());
   assert.ok(summary.unknownStock >= 1, "phải đếm được mẫu mã chưa tính được tồn");
-  assert.equal(summary.returned, summary.returnedPending + summary.returnedReceived, "tổng hoàn = chờ về kho + đã nhận");
+  assert.ok(summary.shipped >= summary.awaitingReturn, "tổng hợp: hoàn chờ nhận là tập con của đã xuất");
 
   // ───────── 5. Kế hoạch SX KHÔNG đề xuất đặt khi chưa biết tồn ─────────
   clearMemo();
@@ -105,7 +97,6 @@ export async function testInventory(db: Db) {
   assert.equal(unknownRow.stockKnown, false);
   assert.ok(plan.summary.unknown >= 1, "tổng hợp kế hoạch phải nêu số mẫu mã chưa tính được tồn");
 
-  // Không mẫu mã UNKNOWN nào được cộng vào tổng đề xuất đặt.
   const suggestedFromUnknown = plan.rows.filter((r) => !r.stockKnown).reduce((t, r) => t + r.suggested, 0);
   assert.equal(suggestedFromUnknown, 0, "tổng đề xuất không được chứa mẫu mã chưa biết tồn");
 
@@ -126,8 +117,6 @@ export async function testInventory(db: Db) {
   }
 
   // ───────── 8. Xác nhận hàng loạt chỉ đụng hàng ĐÃ VỀ TỚI SHOP ─────────
-  // Production tồn đọng hàng trăm kiện vì chỉ tick được từng trang. Thao tác hàng loạt phải
-  // tuyệt đối không đụng vận đơn còn đang trên đường về — xác nhận lúc đó là bịa dữ liệu.
   await db.insert(schema.orders).values([
     { id: "bulk-da-ve", stage: "RETURNED", insertedAt: new Date() },
     { id: "bulk-dang-ve", stage: "SHIPPED", insertedAt: new Date() },
@@ -150,12 +139,18 @@ export async function testInventory(db: Db) {
   assert.ok(cho.items >= 5, "số món phải khớp cách tính tồn của ERP, gồm cả hàng tặng");
   assert.ok(cho.oldestAt && Date.now() - new Date(cho.oldestAt).getTime() >= 19 * 86_400_000, "phải nêu được kiện chờ lâu nhất");
 
+  // Hai kiện trên đều đã rời kho nên đều nằm trong "hoàn chờ nhận" của mẫu mã.
+  clearMemo();
+  const choTheoMauMa = await pendingReturnsByVariant();
+  assert.ok((choTheoMauMa.get("rr-var") ?? 0) >= 12, "hoàn chờ nhận theo mẫu mã phải gồm cả kiện đã về (5) và kiện đang về (7)");
+
   clearMemo();
   const truoc = await productRow("rr-var");
   await markReturnReceived(["bulk-ship-da-ve"], "test-kho-hang-loat");
   clearMemo();
   const sau = await productRow("rr-var");
   assert.equal(sau.erpStock, truoc.erpStock + 5, "kiện đã về cộng đúng 5 món (3 bán + 2 tặng) — hàng tặng cũng nằm trong kiện quay về");
+  assert.equal(sau.returnIn, truoc.returnIn + 5, "phiếu tái nhập ghi đúng 5 món");
 
   // Kiện đang trên đường về vẫn nằm ngoài tồn cho tới khi Viettel Post trả hàng xong.
   await markReturnReceived(ids, "test-kho-hang-loat-2");
@@ -165,5 +160,21 @@ export async function testInventory(db: Db) {
   assert.equal((await listPendingReturnedIds(500)).length, 0, "xác nhận hàng loạt xong thì không còn kiện nào chờ");
   assert.equal((await markReturnReceived(ids, "test-lap-lai")).count, 0, "bấm lại lần hai không cộng trùng tồn");
 
-  console.log(`✓ Tồn kho: 4 trạng thái tách bạch · ${summary.unknownStock} mẫu mã chưa có phiếu nhập không bị coi là hết hàng · kế hoạch SX không đặt theo tồn bịa`);
+  // ───────── 9. Hàng xuất tay (không qua ĐVVC) trừ tồn như hàng gửi ĐVVC ─────────
+  clearMemo();
+  const truocXuatTay = await productRow("rr-var");
+  const [issue] = await db
+    .insert(schema.stockReceipts)
+    .values({ kind: "ISSUE", receivedAt: new Date(), reference: "test-xuat-tay", totalQuantity: -4, totalCost: 0, createdBy: "test" })
+    .returning({ id: schema.stockReceipts.id });
+  await db.insert(schema.stockReceiptItems).values({ receiptId: issue.id, variantId: "rr-var", quantity: -4, unitCost: 0 });
+  clearMemo();
+  const sauXuatTay = await productRow("rr-var");
+  assert.equal(sauXuatTay.manualOut, truocXuatTay.manualOut + 4, "phiếu xuất tay ghi nhận 4 món đã ra khỏi kho");
+  assert.equal(sauXuatTay.erpStock, truocXuatTay.erpStock - 4, "xuất tay trừ tồn đúng 4 món");
+  assert.equal(sauXuatTay.shipped, truocXuatTay.shipped, "xuất tay không được cộng vào 'đã xuất qua ĐVVC'");
+
+  console.log(
+    `✓ Sổ kho: tồn = phiếu kho − đã xuất (ĐVVC) · hàng hoàn chỉ về tồn qua phiếu tái nhập · xuất tay trừ tồn · ${summary.unknownStock} mẫu mã chưa có phiếu nhập không bị coi là hết hàng`,
+  );
 }

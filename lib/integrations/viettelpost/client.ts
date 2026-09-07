@@ -19,7 +19,11 @@ export type VtpTrackingRecord = {
   location: string;
   note: string;
   reasonCode: number | null;
+  /** IS_RETURNING của VTP: true = gói tin thuộc chiều hoàn; null = ĐVVC không gửi cờ này */
+  isReturning: boolean | null;
   moneyCollection: number;
+  /** MONEY_COLLECTION_ORIGIN: tiền thu hộ ban đầu trước khi điều chỉnh (null khi ORDER_STATUS < 200) */
+  moneyCollectionOrigin: number | null;
   moneyTotal: number;
   moneyTotalFee: number;
   moneyFeeCod: number;
@@ -271,7 +275,19 @@ export function normalizeTracking(data: Record<string, unknown>, fallbackOrderNu
     location: str(data.LOCATION_CURRENTLY, data.LOCALION_CURRENTLY, data.location),
     note: str(data.NOTE, data.note),
     reasonCode: data.REASON_CODE === null || data.REASON_CODE === undefined ? null : int(data.REASON_CODE),
+    /**
+     * Cờ CHÍNH THỨC của Viettel Post cho biết gói tin thuộc CHIỀU HOÀN hay chiều đi.
+     * Đây là lời giải cho việc VTP đặt tên cả 501 (phát tới khách) lẫn 504 (trả về người gửi) là
+     * "Thành công": 501 + IS_RETURNING = true nghĩa là phát thành công CHIỀU HOÀN về shop, tức đơn
+     * hoàn — không phải giao cho khách. Trước đây ERP phải suy đoán bằng mã "…1P1" và bằng tiền.
+     */
+    isReturning: data.IS_RETURNING === null || data.IS_RETURNING === undefined ? null : Boolean(data.IS_RETURNING),
     moneyCollection: int(data.MONEY_COLLECTION, data.money_collection),
+    /**
+     * Tiền thu hộ BAN ĐẦU trước khi điều chỉnh. Tài liệu VTP lưu ý: khi ORDER_STATUS < 200 luôn
+     * null nên không dùng. Khác MONEY_COLLECTION ⇒ đơn đã bị sửa tiền thu hộ giữa chừng.
+     */
+    moneyCollectionOrigin: data.MONEY_COLLECTION_ORIGIN === null || data.MONEY_COLLECTION_ORIGIN === undefined ? null : int(data.MONEY_COLLECTION_ORIGIN),
     moneyTotal: int(data.MONEY_TOTAL, data.money_total),
     moneyTotalFee: int(data.MONEY_TOTALFEE, data.MONEY_TOTAL_FEE, data.money_totalfee),
     moneyFeeCod: int(data.MONEY_FEECOD, data.money_feecod),

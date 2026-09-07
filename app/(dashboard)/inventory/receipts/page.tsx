@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { listStockReceipts, listVariantsForReceipt, stockReceiptSummary } from "@/lib/queries/stock";
 import { param, type SearchParams } from "@/lib/search-params";
 import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
@@ -21,7 +22,14 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   const user = await requirePermission("products:view");
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
-  const [receipts, summary, variants] = await Promise.all([listStockReceipts(200), stockReceiptSummary(), canWrite ? listVariantsForReceipt() : Promise.resolve([])]);
+  const [receipts, summary, variants, pendingMap] = await Promise.all([
+    listStockReceipts(200),
+    stockReceiptSummary(),
+    canWrite ? listVariantsForReceipt() : Promise.resolve([]),
+    canWrite ? pendingReturnsByVariant() : Promise.resolve(new Map<string, number>()),
+  ]);
+  const pendingReturns = Object.fromEntries(pendingMap);
+  const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
   const selected = selectedId ? receipts.find((r) => r.id === selectedId) : null;
 
   return (
@@ -29,12 +37,13 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       <PageHeader
         eyebrow="Kho"
         title="Nhập hàng & kiểm kê"
-        description={`Số liệu nhập kho do shop tự ghi nhận trên ERP · ${formatNumber(summary.receipts)} phiếu nhập · ${formatNumber(summary.adjustments)} phiếu điều chỉnh${summary.lastAt ? ` · gần nhất ${formatDate(summary.lastAt)}` : ""}`}
+        description={`Sổ kho do shop tự ghi nhận trên ERP · ${formatNumber(summary.receipts)} phiếu nhập · ${formatNumber(summary.adjustments)} phiếu điều chỉnh${pendingReturnTotal ? ` · ${formatNumber(pendingReturnTotal)} sản phẩm hàng hoàn đang chờ kho nhận` : ""}${summary.lastAt ? ` · gần nhất ${formatDate(summary.lastAt)}` : ""}`}
         actions={
           canWrite ? (
             <>
-              <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" />
+              <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
+              <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} />
             </>
           ) : null
         }
