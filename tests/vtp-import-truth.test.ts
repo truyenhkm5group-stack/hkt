@@ -173,7 +173,13 @@ export function testCodPaymentStatement() {
   assert.equal(detected.kind, "STATEMENT_DETAIL", "tự nhận đúng loại, không cần chọn tab");
   assert.equal(detected.rows.length, 5);
 
-  const tongCod = rows.reduce((a, r) => a + r.cod, 0);
+  // Phân biệt "bảng kê ghi thu 0" với "bảng kê không nhắc tới COD": dòng chỉ có cước không được
+  // phép hạ số tiền đã ghi nhận từ kỳ trước về 0.
+  assert.equal(caHai.codReported, true, "vận đơn nằm ở phần COD thì bảng kê CÓ nói về tiền");
+  assert.equal(chiCoCuoc.codReported, false, "vận đơn chỉ nằm ở phần cước thì bảng kê KHÔNG nói về tiền");
+  assert.equal(by("PKE1508909085")?.codReported, true);
+
+    const tongCod = rows.reduce((a, r) => a + r.cod, 0);
   const tongCuoc = rows.reduce((a, r) => a + r.fee, 0);
   console.log(`✓ Bảng kê đối soát thanh toán qua email: ${rows.length} vận đơn · COD ${tongCod} · cước ${tongCuoc} · thực về ${tongCod - tongCuoc}`);
 }
