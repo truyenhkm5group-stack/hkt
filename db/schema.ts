@@ -587,6 +587,8 @@ export const vtpStatementFiles = pgTable(
     bytes: integer("bytes").notNull().default(0),
     /** ORDER_LIST | STATEMENT_DETAIL | ERROR — loại ERP nhận ra khi nhập. */
     kind: text("kind").notNull().default(""),
+    /** Danh tính bảng kê (xem `codStatementLines.statementKey`) — hai tệp cùng khoá là cùng một bảng kê. */
+    statementKey: text("statement_key").notNull().default(""),
     /** Ai/luồng nào đưa tệp vào (GMAIL:… hoặc email người bấm nhập tay). */
     actor: text("actor").notNull().default(""),
     rows: integer("rows").notNull().default(0),
@@ -611,7 +613,16 @@ export const codStatementLines = pgTable(
   "cod_statement_lines",
   {
     id: id(),
-    /** Tên file bảng kê — chứng từ gốc của dòng này. */
+    /**
+     * DANH TÍNH BẢNG KÊ — khoá chống trùng thật sự, KHÔNG dùng tên file.
+     *
+     * Cùng một bảng kê tải tay từ web Viettel Post và nhận qua email có tên file khác nhau; khoá
+     * theo tên file thì hai bản đó thành hai chứng từ và tiền bị cộng hai lần. Khoá là "BK-<ngày
+     * chốt>" lấy từ phần KẾT LUẬN ĐỐI SOÁT in trong tệp, hoặc vân tay nội dung khi tệp không có
+     * phần đó — cả hai đều không đổi theo tên file.
+     */
+    statementKey: text("statement_key").notNull(),
+    /** Tên file bảng kê — chỉ để truy nguyên, không dùng làm khoá. */
     sourceFile: text("source_file").notNull(),
     batchId: text("batch_id").references(() => codBatches.id, { onDelete: "set null" }),
     /** Mã vận đơn ghi trên bảng kê (đã viết hoa). */
@@ -638,7 +649,8 @@ export const codStatementLines = pgTable(
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("cod_statement_lines_file_code_uq").on(t.sourceFile, t.trackingCode),
+    uniqueIndex("cod_statement_lines_key_code_uq").on(t.statementKey, t.trackingCode),
+    index("cod_statement_lines_file_idx").on(t.sourceFile),
     index("cod_statement_lines_shipment_idx").on(t.shipmentId),
     index("cod_statement_lines_batch_idx").on(t.batchId),
     index("cod_statement_lines_code_idx").on(t.trackingCode),

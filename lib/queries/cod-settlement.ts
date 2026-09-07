@@ -296,7 +296,8 @@ export type StatementPayment = {
 export async function listStatementPayments(limit = 40): Promise<StatementPayment[]> {
   const db = await getDb();
   const list = rowsOf(await db.execute(sql`
-    select l.source_file filename,
+    select max(l.source_file) filename,
+           l.statement_key,
            max(b.reference) batch_reference,
            max(b.received_at)::date::text paid_on,
            min(l.paid_date) period_from,
@@ -310,7 +311,7 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
            coalesce(sum(l.cod) filter (where l.shipment_id is null), 0) cod_unmatched
     from cod_statement_lines l
     left join cod_batches b on b.id = l.batch_id
-    group by l.source_file
+    group by l.statement_key, l.source_file
     order by max(coalesce(b.received_at, l.statement_at)) desc
     limit ${limit}
   `));
@@ -350,6 +351,62 @@ export async function statementGapDays(): Promise<{ from: string; to: string; sh
     group by 1 order by 1
   `));
   const out: { from: string; to: string; shipments: number; amount: number }[] = [];
+  for (const d of list) {
+    const day = String(d.ngay);
+    const last = out[out.length - 1];
+    const cach = last ? (Date.parse(day) - Date.parse(last.to)) / 86_400_000 : Infinity;
+    if (last && cach <= 2) {
+      last.to = day;
+      last.shipments += Number(d.n ?? 0);
+      last.amount += Number(d.tien ?? 0);
+    } else {
+      out.push({ from: day, to: day, shipments: Number(d.n ?? 0), amount: Number(d.tien ?? 0) });
+    }
+  }
+  return out;
+}
+
+export type MissingStatement = {
+  from: string;
+  to: string;
+  /** Đơn giao thành công trong khoảng này chưa được bảng kê nào chi trả. */
+  shipments: number;
+  amount: number;
+};
+
+/**
+ * KHOẢNG NGÀY THIẾU BẢNG KÊ.
+ *
+ * Các bảng kê đã nhận phủ liên tục các ngày phát thành công; chỗ nào hụt ở GIỮA hai bảng kê là
+ * Viettel Post gửi thiếu thư (hoặc thư chưa về ERP). Chỉ xét trong khoảng đã có bảng kê — ngày mới
+ * nhất chưa tới kỳ chốt thì không phải là thiếu, đó là "chờ trả".
+ *
+ * Trả lời đúng câu hỏi vận hành: cần lên Viettel Post tải bảng kê của những ngày nào về bổ sung.
+ */
+export async function missingStatementPeriods(): Promise<MissingStatement[]> {
+  const db = await getDb();
+  const list = rowsOf(await db.execute(sql`
+    with phu as (
+      select distinct paid_date::date ngay from cod_statement_lines where paid_date is not null
+    ), bien as (
+      select min(ngay) tu, max(ngay) den from phu
+    ), don as (
+      select coalesce(shipments.delivered_at, shipments.vtp_status_date)::date ngay,
+             count(*) n, coalesce(sum(shipments.cod_amount), 0) tien
+      from shipments
+        left join orders on orders.id = shipments.order_id
+        left join (${SO_CHUNG_TU}) t on t.shipment_id = shipments.id
+      where ${PHAI_TRA} and t.cod_tra is null
+        and coalesce(shipments.delivered_at, shipments.vtp_status_date) is not null
+      group by 1
+    )
+    select don.ngay::text ngay, don.n, don.tien
+    from don, bien
+    where don.ngay between bien.tu and bien.den
+      and not exists (select 1 from phu where phu.ngay = don.ngay)
+    order by 1
+  `));
+  const out: MissingStatement[] = [];
   for (const d of list) {
     const day = String(d.ngay);
     const last = out[out.length - 1];

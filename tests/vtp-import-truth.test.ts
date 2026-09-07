@@ -497,3 +497,52 @@ export async function testVtpCodPaymentColumn() {
 
   console.log("✓ Cột 'Thanh toán COD' của Viettel Post: ERP đọc và nâng đúng một bậc, không thổi thành tiền đã về");
 }
+
+/**
+ * CÙNG MỘT BẢNG KÊ, HAI TÊN TỆP — KHÔNG ĐƯỢC TÍNH HAI LẦN.
+ *
+ * Bảng kê thiếu kỳ được tải tay từ web Viettel Post (tên tệp do trình duyệt đặt), rồi sau đó thư
+ * của chính kỳ đó về qua email với tên khác. Sổ chứng từ khoá theo NGÀY CHỐT của bảng kê, không
+ * theo tên tệp, nên bản thứ hai chỉ ghi đè bản thứ nhất.
+ */
+export async function testStatementDedupAcrossFilenames() {
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { statementKeyOf } = await import("@/lib/integrations/viettelpost/statement-db");
+  const { getDb, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+
+  await db
+    .insert(schema.shipments)
+    .values({ id: "trung-ship-1", vtpOrderNumber: "PKE9966660001", trackingCode: "PKE9966660001", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 620000 })
+    .onConflictDoNothing();
+
+  const head = "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)";
+  const noiDung = `${head}\nPKE9966660001,GLMTQY214,K,0900000096,X,01/09/2026 09:00:00,05/09/2026 10:00:00,620000,17000,603000`;
+  const tep = (name: string) => ({ filename: name, base64: Buffer.from(noiDung, "utf8").toString("base64") });
+
+  // Lần 1: tải tay từ web Viettel Post.
+  await runVtpDataFileImport([tep("BangKe_taitay (1).csv")], "nguoi-dung@shop");
+  // Lần 2: cùng bảng kê đó về qua email, tên tệp khác hẳn.
+  await runVtpDataFileImport([tep("BangKeChiCOD_31000000_1789000000000.csv")], "GMAIL:viettelpost");
+
+  const dong = await db.select().from(schema.codStatementLines).where(eq(schema.codStatementLines.trackingCode, "PKE9966660001"));
+  assert.equal(dong.length, 1, "cùng một bảng kê với hai tên tệp chỉ được có MỘT dòng trong sổ");
+  assert.equal(Number(dong[0].cod), 620000, "tiền không bị cộng dồn thành 1.240.000");
+  assert.equal(dong[0].sourceFile, "BangKeChiCOD_31000000_1789000000000.csv", "giữ tên tệp mới nhất để truy nguyên");
+
+  const sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "trung-ship-1") });
+  assert.equal(Number(sau?.codCollected), 620000, "tiền thực thu trên vận đơn cũng không bị nhân đôi");
+
+  // Khoá phải suy từ NỘI DUNG, không từ tên tệp.
+  const rows = [{ trackingCode: "PKE1", cod: 100, fee: 10, net: 90, raw: "" }];
+  assert.equal(statementKeyOf(rows, "2026-09-05"), "BK-2026-09-05", "có ngày chốt thì khoá theo ngày chốt");
+  assert.equal(statementKeyOf(rows), statementKeyOf([...rows]), "không có ngày chốt thì khoá là vân tay nội dung, ổn định");
+  assert.notEqual(statementKeyOf(rows), statementKeyOf([{ ...rows[0], cod: 200 }]), "nội dung khác thì khoá phải khác");
+
+  // Cả hai lần nạp đều được giữ tệp gốc để về sau nhập lại không cần xin lại thư.
+  const tepGoc = await db.select().from(schema.vtpStatementFiles);
+  assert.ok(tepGoc.some((f) => f.filename === "BangKe_taitay (1).csv"), "tệp tải tay phải được lưu lại vĩnh viễn");
+
+  console.log("✓ Chống trùng bảng kê: cùng ngày chốt với hai tên tệp chỉ tính một lần, tệp tải tay được lưu lại");
+}

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
@@ -463,7 +464,23 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
  * để file cũ đè mất số của file mới — 334 vận đơn giao thành công bị đưa tiền về 0. Ghi vào sổ
  * rồi dựng lại thì nhập bao nhiêu lần, theo thứ tự nào cũng ra đúng một kết quả.
  */
-export async function applyStatementDetailRows(rows: StatementDetailRow[], sourceRef: string, batchId: string | null) {
+/**
+ * DANH TÍNH của một bảng kê — dùng làm khoá chống trùng thay cho tên file.
+ *
+ * Ưu tiên ngày chốt in trong phần KẾT LUẬN ĐỐI SOÁT: Viettel Post mỗi ngày chốt trả một lần nên
+ * "BK-<ngày>" là khoá tự nhiên. Tệp không có phần đó (bản "Chi tiết bảng kê" tải tay kiểu cũ) thì
+ * lấy vân tay nội dung: cùng tập mã vận đơn và số tiền là cùng một bảng kê, dù đặt tên gì.
+ */
+export function statementKeyOf(rows: StatementDetailRow[], statementDate?: string | null) {
+  if (statementDate) return `BK-${statementDate}`;
+  const van = rows
+    .map((r) => `${r.trackingCode}:${r.cod}:${r.fee}`)
+    .sort()
+    .join("|");
+  return `SHA-${createHash("sha256").update(van).digest("hex").slice(0, 20)}`;
+}
+
+export async function applyStatementDetailRows(rows: StatementDetailRow[], sourceRef: string, batchId: string | null, statementKey?: string) {
   const db = await getDb();
   const batch = batchId
     ? await db.query.codBatches.findFirst({ where: eq(schema.codBatches.id, batchId), columns: { id: true, receivedAt: true } })
@@ -475,10 +492,16 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
   const statementAt = dates.length ? new Date(`${dates[dates.length - 1]}T00:00:00Z`) : (batch?.receivedAt ?? now);
 
   // 1) Ghi sổ — mỗi (file, mã vận đơn) một dòng, nhập lại thì cập nhật đúng dòng đó.
+  const khoa = statementKey || statementKeyOf(rows, dates[dates.length - 1] ?? null);
+  // Dòng cũ của CHÍNH tệp này nhưng mang khoá khác (nhập từ thời còn khoá theo tên file, hoặc tệp
+  // đổi khoá sau khi đọc được phần kết luận) phải bỏ đi, nếu không cùng một bảng kê nằm hai chỗ.
+  await db.delete(schema.codStatementLines).where(and(eq(schema.codStatementLines.sourceFile, sourceRef), sql`${schema.codStatementLines.statementKey} <> ${khoa}`));
+
   const seen = new Set<string>();
   const values = matches
     .filter((m) => m.trackingCode && !seen.has(m.trackingCode) && seen.add(m.trackingCode))
     .map((m) => ({
+      statementKey: khoa,
       sourceFile: sourceRef,
       batchId: batch?.id ?? null,
       trackingCode: m.trackingCode,
@@ -497,8 +520,9 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
       .insert(schema.codStatementLines)
       .values(values.slice(i, i + 200))
       .onConflictDoUpdate({
-        target: [schema.codStatementLines.sourceFile, schema.codStatementLines.trackingCode],
+        target: [schema.codStatementLines.statementKey, schema.codStatementLines.trackingCode],
         set: {
+          sourceFile: sql`excluded.source_file`,
           batchId: sql`excluded.batch_id`,
           cod: sql`excluded.cod`,
           fee: sql`excluded.fee`,
@@ -523,8 +547,9 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
   }
 
   const linked = shipmentIds.length;
+  void khoa;
   const withCash = matches.filter((m) => m.shipmentId && m.cod > 0).length;
-  return { linked, withCash, statementAt, rows: values.length, unmatched: matches.length - linked };
+  return { linked, withCash, statementAt, rows: values.length, unmatched: matches.length - linked, statementKey: khoa };
 }
 
 /**

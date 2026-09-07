@@ -39,11 +39,11 @@ export async function testCodReconciliation() {
   ]).onConflictDoNothing();
 
   await db.insert(schema.codStatementLines).values([
-    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000001", cod: 499000, fee: 17000, net: 482000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-du" },
-    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000002", cod: 400000, fee: 17000, net: 383000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-thieu" },
-    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000003", cod: 30000, fee: 17000, net: 13000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-giao-hoan" },
+    { statementKey: "BK-test-1", sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000001", cod: 499000, fee: 17000, net: 482000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-du" },
+    { statementKey: "BK-test-1", sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000002", cod: 400000, fee: 17000, net: 383000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-thieu" },
+    { statementKey: "BK-test-1", sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7700000003", cod: 30000, fee: 17000, net: 13000, codReported: true, statementAt: ngay(-8), shipmentId: "ds-giao-hoan" },
     // Dòng bảng kê có mã vận đơn mà ERP không có ⇒ tiền có thật nhưng chưa truy nguyên được.
-    { sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7799999999", cod: 250000, fee: 0, net: 250000, codReported: true, statementAt: ngay(-8), shipmentId: null },
+    { statementKey: "BK-test-1", sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7799999999", cod: 250000, fee: 0, net: 250000, codReported: true, statementAt: ngay(-8), shipmentId: null },
   ]).onConflictDoNothing();
   // Đúng như bản chạy thật: số tiền trên vận đơn là kết quả dựng lại từ sổ chứng từ.
   await materializeCodFromStatementLines(["ds-du", "ds-thieu", "ds-giao-hoan"]);
@@ -124,7 +124,7 @@ export async function testCodReconciliation() {
   assert.equal(test1.codUnmatched, 250000, "phần chưa truy nguyên giữ nguyên, không giấu đi");
 
   // ───────── 6. Dọn dẹp ─────────
-  await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.sourceFile, "BK-test-1.xlsx"));
+  await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.statementKey, "BK-test-1"));
   await db.delete(schema.shipments).where(sql`${schema.shipments.id} like 'ds-%'`);
   clearMemo();
 

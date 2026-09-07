@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, Landmark, Receipt, Undo2 } from "lucide-react";
 import { SettlementTabs } from "@/app/(dashboard)/cod/settlement-tabs";
+import { StatementUploadDialog } from "@/app/(dashboard)/cod/statement-upload";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -17,6 +18,7 @@ import {
   codSettlementSummary,
   listCodSettlement,
   listStatementPayments,
+  missingStatementPeriods,
   statementGapDays,
 } from "@/lib/queries/cod-settlement";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -33,12 +35,13 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
   const tt = param(raw, "tt");
   const tinhTrang = TINH_TRANG_HOP_LE.has(tt) ? tt : "QUA_HAN";
 
-  const [tong, dem, danhSach, bangKe, thieu] = await Promise.all([
+  const [tong, dem, danhSach, bangKe, thieu, thieuBangKe] = await Promise.all([
     codSettlementSummary(params.period),
     codSettlementCounts(params.period),
     listCodSettlement({ period: params.period, status: tinhTrang as SettlementStatus | "ALL", q: params.q, page: params.page, pageSize: params.pageSize }),
     listStatementPayments(40),
     statementGapDays(),
+    missingStatementPeriods(),
   ]);
 
   const exportQuery = new URLSearchParams(
@@ -67,6 +70,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
                 <Download className="size-4" /> Xuất CSV
               </a>
             </Button>
+            <StatementUploadDialog />
             <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
           </>
         }
@@ -138,6 +142,39 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           tone="primary"
         />
       </section>
+
+      {thieuBangKe.length ? (
+        <SectionCard
+          title="Thiếu bảng kê — cần tải bổ sung từ Viettel Post"
+          description={`${formatNumber(thieuBangKe.length)} kỳ nằm giữa các bảng kê đã nhận mà không có bảng kê nào`}
+          hint="Các bảng kê đã nhận phủ liên tục các ngày phát thành công; chỗ hụt ở GIỮA nghĩa là Viettel Post gửi thiếu thư kỳ đó. Tải đúng bảng kê của những ngày dưới đây từ web Viettel Post rồi bấm “Bổ sung bảng kê thiếu”. Chỉ phải làm một lần: ERP giữ tệp gốc, và nếu thư cùng kỳ về sau qua email cũng không bị tính lặp vì sổ khoá theo ngày chốt của bảng kê chứ không theo tên tệp."
+          actions={<StatementUploadDialog label="Bổ sung bảng kê thiếu" />}
+          padded={false}
+        >
+          <div className="overflow-x-auto">
+            <Table className="min-w-[560px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cần tải bảng kê của ngày phát</TableHead>
+                  <TableHead>Đến ngày</TableHead>
+                  <TableHead className="text-right">Đơn chưa được trả</TableHead>
+                  <TableHead className="text-right">Tiền đang treo</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {thieuBangKe.map((g) => (
+                  <TableRow key={`${g.from}-${g.to}`} className="bg-amber-50/40 dark:bg-amber-950/10">
+                    <TableCell className="text-sm font-semibold">{formatDate(g.from)}</TableCell>
+                    <TableCell className="text-sm font-semibold">{formatDate(g.to)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(g.shipments)}</TableCell>
+                    <TableCell className="text-right"><Money value={g.amount} className="font-semibold text-amber-700 dark:text-amber-400" /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SettlementTabs counts={dem} active={tinhTrang} />
 
