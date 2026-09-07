@@ -386,10 +386,14 @@ export type MissingStatement = {
 export async function missingStatementPeriods(): Promise<MissingStatement[]> {
   const db = await getDb();
   const list = rowsOf(await db.execute(sql`
-    with phu as (
-      select distinct paid_date::date ngay from cod_statement_lines where paid_date is not null
+    with ky as (
+      -- Mỗi bảng kê phủ MỘT KHOẢNG ngày phát, không phải từng ngày rời rạc: trong khoảng đó có thể
+      -- có ngày không đơn nào được chi trả, đó là Viettel Post chưa trả (xem nhóm "Quá hạn"), chứ
+      -- không phải thiếu bảng kê.
+      select statement_key, min(paid_date::date) tu, max(paid_date::date) den
+      from cod_statement_lines where paid_date is not null group by statement_key
     ), bien as (
-      select min(ngay) tu, max(ngay) den from phu
+      select min(tu) tu, max(den) den from ky
     ), don as (
       select coalesce(shipments.delivered_at, shipments.vtp_status_date)::date ngay,
              count(*) n, coalesce(sum(shipments.cod_amount), 0) tien
@@ -403,7 +407,7 @@ export async function missingStatementPeriods(): Promise<MissingStatement[]> {
     select don.ngay::text ngay, don.n, don.tien
     from don, bien
     where don.ngay between bien.tu and bien.den
-      and not exists (select 1 from phu where phu.ngay = don.ngay)
+      and not exists (select 1 from ky where don.ngay between ky.tu and ky.den)
     order by 1
   `));
   const out: MissingStatement[] = [];
