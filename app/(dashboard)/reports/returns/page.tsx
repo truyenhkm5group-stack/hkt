@@ -30,6 +30,7 @@ import {
   listOrdersForVariant,
   RETURN_RATE_SORTABLE,
 } from "@/lib/queries/return-rate";
+import { logisticsPerformance } from "@/lib/queries/logistics";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { requirePermission } from "@/lib/auth/session";
@@ -93,6 +94,7 @@ export default async function ReturnRatePage({
       ? { from: params.period.fromKey ?? "", to: params.period.toKey ?? "" }
       : {}),
   }).toString();
+  const logistics = await logisticsPerformance(params.period);
   const worst = all
     .filter((r) => r.successRate !== null && r.shipped >= 5)
     .sort((a, b) => (a.successRate ?? 0) - (b.successRate ?? 0))[0];
@@ -146,6 +148,63 @@ export default async function ReturnRatePage({
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
       </section>
+
+      {/* ───────── Hiệu suất giao vận tính từ hành trình Viettel Post ───────── */}
+      <SectionCard
+        title="Hiệu suất giao vận"
+        description="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Tỷ lệ giao thành công</p>
+            <p className="numeric mt-1 text-2xl font-bold">{logistics.successRateTerminal === null ? "—" : `${logistics.successRateTerminal}%`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              trên {formatNumber(logistics.terminal)} vận đơn ĐÃ KẾT THÚC · {logistics.successRateAll === null ? "—" : `${logistics.successRateAll}%`} nếu tính trên cả{" "}
+              {formatNumber(logistics.tracked)} vận đơn có hành trình ({formatNumber(logistics.inFlight)} còn đang đi)
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Phát thành công ngay lần đầu</p>
+            <p className="numeric mt-1 text-2xl font-bold">{logistics.firstAttemptRate === null ? "—" : `${logistics.firstAttemptRate}%`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              trên {formatNumber(logistics.firstAttemptSample)} vận đơn đã giao
+              {logistics.failureEvidence < logistics.firstAttemptSample * 0.05 ? (
+                <span className="block text-warning">
+                  Chỉ {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại trong hành trình — tệp danh sách vận đơn chỉ mang trạng
+                  thái CUỐI nên con số này đang cao hơn thực tế. Cần webhook phủ đủ kỳ mới tin được.
+                </span>
+              ) : (
+                <span> · {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại</span>
+              )}
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Thời gian lấy hàng</p>
+            <p className="numeric mt-1 text-2xl font-bold">{logistics.pickupHours.p50 === null ? "—" : `${logistics.pickupHours.p50}h`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              trung vị · chậm nhất trong 10% xấu nhất {logistics.pickupHours.p90 === null ? "—" : `${logistics.pickupHours.p90}h`} · {formatNumber(logistics.pickupHours.sample)} vận đơn
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Thời gian giao</p>
+            <p className="numeric mt-1 text-2xl font-bold">{logistics.deliveryHours.p50 === null ? "—" : `${logistics.deliveryHours.p50}h`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              từ lúc lấy hàng · chậm nhất trong 10% xấu nhất {logistics.deliveryHours.p90 === null ? "—" : `${logistics.deliveryHours.p90}h`} · {formatNumber(logistics.deliveryHours.sample)} vận đơn
+            </p>
+          </div>
+        </div>
+
+        {logistics.stuck24h > 0 ? (
+          <div className="mt-4 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-[13px]">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+            <div>
+              <b>Vận đơn kẹt</b> — chưa kết thúc và đã lâu không có tin mới từ Viettel Post:{" "}
+              <b>{formatNumber(logistics.stuck24h)}</b> quá 24h · <b>{formatNumber(logistics.stuck48h)}</b> quá 48h · <b>{formatNumber(logistics.stuck72h)}</b> quá 72h.
+              <Link className="ml-2 text-primary underline underline-offset-2" href="/shipments?final=open">Xem vận đơn chưa kết thúc</Link>
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
 
       {summary.finishedNoVtp > 0 ? (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">

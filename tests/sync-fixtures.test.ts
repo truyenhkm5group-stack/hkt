@@ -10,7 +10,7 @@ import { testInventory } from "./inventory.test";
 import { testPaymentVerification } from "./payment-verification.test";
 import { testStatementDetailMatching, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
-import { testVtpState } from "./vtp-state.test";
+import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1033,6 +1033,7 @@ async function main() {
   await testPaymentVerification(db);
   await testVtpImportTruth(db);
   await testVtpState(db);
+  await testLogisticsPerformance(db);
   await testVtpHealth(db);
   await testVtpImportLimits();
   await testVtpFileDetection();

@@ -54,6 +54,11 @@ export async function undoReturnReceived(ids: string[]) {
  *
  * Đếm CẢ hàng tặng: chúng cũng nằm trong kiện hàng quay về và cách tính tồn của ERP đã tính,
  * nên số món ở đây phải khớp với mức tồn tăng lên sau khi xác nhận.
+ *
+ * Chỉ tính vận đơn CÓ GẮN ĐƠN. Viettel Post tạo vận đơn riêng cho chiều hoàn (mã ...1P1) và khi
+ * nó phát thành công về shop thì vận đơn đó cũng ở trạng thái RETURNED — nhưng nó không có đơn
+ * nào, không có món hàng nào, nên đưa vào hàng chờ kho chỉ tạo ra hàng trăm dòng rỗng. Hàng hoàn
+ * của đơn đã nằm ở chính vận đơn gốc.
  */
 export async function pendingReturnedForWarehouse() {
   const db = await getDb();
@@ -64,7 +69,7 @@ export async function pendingReturnedForWarehouse() {
       oldestAt: sql<Date | null>`min(${s.returnedAt})`,
     })
     .from(s)
-    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt)));
+    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), isNotNull(s.orderId)));
   return { count: Number(row?.count ?? 0), items: Number(row?.items ?? 0), oldestAt: row?.oldestAt ?? null };
 }
 
@@ -74,7 +79,7 @@ export async function listPendingReturnedIds(limit: number) {
   const rows = await db
     .select({ id: s.id })
     .from(s)
-    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt)))
+    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), isNotNull(s.orderId)))
     .orderBy(asc(s.returnedAt))
     .limit(limit);
   return rows.map((r) => r.id);
