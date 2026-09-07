@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart } from "lucide-react";
+import { CoverPicker } from "@/app/(dashboard)/inventory/planning/cover-picker";
 import { PlanningForm } from "@/app/(dashboard)/inventory/planning/planning-form";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -21,11 +22,19 @@ function fmtDate(key: string | null) {
   return `${d}/${m}/${y}`;
 }
 
-export default async function PlanningPage() {
+export default async function PlanningPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("planning:view");
   const canWrite = can(user, "planning:write");
-  const [report, products] = await Promise.all([getReplenishmentPlan(), listProductsForMapping()]);
+  const sp = await searchParams;
+  const soNgay = Number(Array.isArray(sp.ngay) ? sp.ngay[0] : sp.ngay);
+  const countIncoming = (Array.isArray(sp.hoan) ? sp.hoan[0] : sp.hoan) !== "0";
+  const [report, products] = await Promise.all([
+    getReplenishmentPlan({ coverDays: Number.isFinite(soNgay) && soNgay >= 0 ? soNgay : undefined, countIncoming }),
+    listProductsForMapping(),
+  ]);
   const sm = report.summary;
+  const used = report.used;
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 
   return (
     <div className="space-y-5">
@@ -33,19 +42,20 @@ export default async function PlanningPage() {
         eyebrow="Kho"
         title="Kế hoạch đặt hàng sản xuất"
         description="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã"
-        hint="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã: dựa trên tồn khả dụng ERP, đơn đã chốt chưa gửi, tốc độ bán gần đây, thời gian sản xuất và số ngày muốn đủ bán sau khi hàng về. Mẫu mã hết hàng trước khi sản xuất xong sẽ lên chuông cảnh báo và nhóm Lark."
+        hint={<>Lượng cần đặt = tốc độ bán × (thời gian sản xuất + số ngày muốn đủ bán) + tồn an toàn − nguồn cung. <b>Nguồn cung</b> gồm tồn khả dụng ERP (đã trừ đơn đã chốt chưa gửi) và hàng sắp quay lại kho: đơn chờ hoàn về cộng phần hàng đang ở ngoài ước bị hoàn, nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho. Số ngày muốn đủ bán chọn ngay dưới đây. Mẫu mã hết hàng trước khi sản xuất xong lên chuông cảnh báo và nhóm Lark.</>}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" size="sm">
               <Link href="/inventory/planning/orders"><ClipboardList className="size-4" /> Bảng đặt hàng đã chốt</Link>
             </Button>
             <Button asChild variant="outline" size="sm">
-              <a href="/api/export/planning"><Download className="size-4" /> Xuất CSV</a>
+              <a href={`/api/export/planning?ngay=${used.coverDays}${used.countIncoming ? "" : "&hoan=0"}`}><Download className="size-4" /> Xuất CSV</a>
             </Button>
           </div>
         }
       />
       <PlanningForm assumptions={report.assumptions} products={products} canWrite={canWrite} />
+      <CoverPicker coverDays={used.coverDays} macDinh={report.assumptions.coverDays} countIncoming={used.countIncoming} />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Hết hàng / âm tồn" value={formatNumber(sm.out)} note="Tồn khả dụng ≤ đơn đã chốt — cần sản xuất gấp" icon={AlertTriangle} tone={sm.out ? "rose" : "slate"} />
         <MetricCard label="Hết trước khi SX xong" value={formatNumber(sm.critical)} note={`Số ngày còn bán được < thời gian SX (${report.assumptions.leadTimeDays} ngày)`} icon={Factory} tone={sm.critical ? "amber" : "slate"} />
@@ -57,7 +67,16 @@ export default async function PlanningPage() {
           icon={PackageSearch}
           tone={sm.unknown ? "amber" : "slate"}
         />
-        <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất · ${formatNumber(sm.variants)} mẫu mã đang theo dõi`} icon={ShoppingCart} tone="blue" />
+        <MetricCard
+          label="Sắp quay về kho"
+          value={formatNumber(sm.incomingUnits)}
+          note={used.countIncoming ? `Đã trừ khỏi lượng cần đặt · nhập lại được ${pct(used.returnRecoveryRate)} · tỷ lệ hoàn ${pct(used.shopReturnRate)}` : "Đang KHÔNG trừ khỏi lượng cần đặt"}
+          hint={<>Hàng đã rời kho nhưng sẽ quay lại: <b>đơn chờ hoàn về</b> (đã xác định hoàn, kho chưa lập phiếu tái nhập) cộng phần <b>hàng đang ở ngoài</b> ước bị hoàn theo tỷ lệ hoàn thực tế, cả hai nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho ({pct(used.returnRecoveryRate)}, tính từ phiếu tái nhập đã đếm so với số đã xuất phải về).</>}
+          icon={PackageSearch}
+          tone={sm.incomingUnits ? "blue" : "slate"}
+        />
+        <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất · đủ bán ${used.coverDays} ngày sau khi hàng về`} icon={ShoppingCart} tone="blue"
+          hint={<>Tốc độ bán × (thời gian sản xuất + {used.coverDays} ngày muốn đủ bán) + tồn an toàn − nguồn cung, trong đó nguồn cung = tồn khả dụng {used.countIncoming ? "+ hàng sắp quay về kho" : "(không tính hàng sắp về)"}. {formatNumber(sm.variants)} mẫu mã đang theo dõi; mẫu mã chưa có phiếu nhập không được đề xuất.</>} />
       </section>
 
       {report.products.map((g) => (
@@ -69,7 +88,7 @@ export default async function PlanningPage() {
             <div className="flex items-center gap-2">
               {canWrite ? (
                 <Button asChild size="sm">
-                  <Link href={`/inventory/planning/orders/new?product=${g.productId}`}><ClipboardList className="size-4" /> Tạo bảng chốt đặt hàng</Link>
+                  <Link href={`/inventory/planning/orders/new?product=${g.productId}&ngay=${used.coverDays}${used.countIncoming ? "" : "&hoan=0"}`}><ClipboardList className="size-4" /> Tạo bảng chốt đặt hàng</Link>
                 </Button>
               ) : null}
               <span className={cn("rounded-md px-2 py-0.5 text-xs font-semibold", PLAN_STATUS_TONE[g.worst])}>{PLAN_STATUS_LABEL[g.worst]}</span>
@@ -78,7 +97,7 @@ export default async function PlanningPage() {
           padded={false}
         >
           <div className="overflow-x-auto">
-            <Table className="min-w-[1180px]">
+            <Table className="min-w-[1340px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Mẫu mã</TableHead>
@@ -86,6 +105,8 @@ export default async function PlanningPage() {
                   <TableHead className="text-right">Tồn Pancake</TableHead>
                   <TableHead className="text-right">Đã chốt chưa gửi</TableHead>
                   <TableHead className="text-right">Khả dụng</TableHead>
+                  <TableHead className="text-right">Ngoài kho</TableHead>
+                  <TableHead className="text-right">Sắp về</TableHead>
                   <TableHead className="text-right">Bán 7 ngày</TableHead>
                   <TableHead className="text-right">Bán {report.assumptions.velocityWindowDays} ngày</TableHead>
                   <TableHead className="text-right">Bán 30 ngày</TableHead>
@@ -110,6 +131,11 @@ export default async function PlanningPage() {
                     <TableCell className={cn("text-right tabular-nums text-muted-foreground", r.pancakeStock !== r.stock && "text-amber-700")} title="Tồn trên Pancake — lệch với ERP thì kiểm tra phiếu nhập / kiểm kê">{formatNumber(r.pancakeStock)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.committed)}</TableCell>
                     <TableCell className={cn("text-right tabular-nums font-semibold", r.available <= 0 && "text-rose-600")}>{formatNumber(r.available)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground" title="Đang ở ngoài (vận đơn chưa kết thúc) · chờ hoàn về (đã xác định hoàn, kho chưa nhận)">
+                      {formatNumber(r.inTransit)}
+                      {r.awaitingReturn ? <div className="text-[11px] text-amber-700">hoàn chờ nhận {formatNumber(r.awaitingReturn)}</div> : null}
+                    </TableCell>
+                    <TableCell className={cn("text-right tabular-nums", r.incoming ? "font-semibold text-sky-700 dark:text-sky-300" : "text-muted-foreground")} title="Ước lượng hàng quay lại kho, đã trừ khỏi lượng cần đặt">{formatNumber(r.incoming)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.sold7)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.soldInWindow)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.sold30)}</TableCell>
@@ -139,6 +165,8 @@ export default async function PlanningPage() {
                       <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(sum((r) => r.pancakeStock))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.committed))}</TableCell>
                       <TableCell className={cn("text-right tabular-nums", available <= 0 && "text-rose-600")}>{formatNumber(available)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(sum((r) => r.inTransit))}{sum((r) => r.awaitingReturn) ? <div className="text-[11px] font-normal text-amber-700">hoàn chờ nhận {formatNumber(sum((r) => r.awaitingReturn))}</div> : null}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.incoming))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.sold7))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.soldInWindow))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.sold30))}</TableCell>
@@ -160,7 +188,7 @@ export default async function PlanningPage() {
       ))}
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
       <p className="text-xs text-muted-foreground">
-        Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu. Cột “Tồn Pancake” để đối chiếu — lệch nhiều nghĩa là phiếu nhập trên ERP chưa khớp kho thực tế.
+        Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu. Cột “Tồn Pancake” để đối chiếu — lệch nhiều nghĩa là phiếu nhập trên ERP chưa khớp kho thực tế.
       </p>
     </div>
   );

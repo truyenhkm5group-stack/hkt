@@ -107,6 +107,39 @@ export async function testInventory(db: Db) {
   assert.ok(computePlan({ ...base, stock: 0, stockKnown: true }).suggested > 0, "biết tồn và hết hàng thì phải đề xuất");
   assert.equal(computePlan({ ...base, stock: 0, stockKnown: true }).status, "OUT");
 
+  // ───────── 6b. Hàng đang ở ngoài & chờ hoàn về là NGUỒN CUNG, phải trừ khỏi lượng đặt ─────────
+  const goc = computePlan({ ...base, stock: 0, stockKnown: true });
+  const coHoanVe = computePlan({ ...base, stock: 0, stockKnown: true, awaitingReturn: 10 });
+  assert.equal(coHoanVe.incomingFromReturns, 10, "hàng chờ hoàn về nhập lại đủ thì tính đủ 10");
+  assert.equal(coHoanVe.suggested, goc.suggested - 10, "10 sp chờ hoàn về phải giảm đúng 10 sp phải đặt");
+  assert.equal(coHoanVe.status, "OUT", "hàng còn trên đường về không được che mất mẫu mã đang đứt hàng");
+
+  const hutMotNua = computePlan({ ...base, stock: 0, stockKnown: true, awaitingReturn: 10, returnRecoveryRate: 0.5 });
+  assert.equal(hutMotNua.incomingFromReturns, 5, "chỉ nhập lại được nửa thì chỉ được tính nửa");
+
+  // Hàng đang ở ngoài chỉ tính phần ƯỚC sẽ bị hoàn, không tính toàn bộ: hàng giao được thì không về.
+  const dangGiao = computePlan({ ...base, stock: 0, stockKnown: true, inTransit: 100, returnRate: 0.3 });
+  assert.equal(dangGiao.incomingFromTransit, 30, "100 sp đang ở ngoài với tỷ lệ hoàn 30% ⇒ ước 30 sp quay về");
+  assert.equal(computePlan({ ...base, stock: 0, stockKnown: true, inTransit: 100 }).incomingFromTransit, 0,
+    "không có tỷ lệ hoàn thì KHÔNG được tự cho là hàng sẽ quay về");
+
+  // Bỏ tích 'trừ hàng sắp về' thì quay lại cách tính cũ.
+  const khongTru = computePlan({ ...base, stock: 0, stockKnown: true, awaitingReturn: 10, countIncoming: false });
+  assert.equal(khongTru.incoming, 0);
+  assert.equal(khongTru.suggested, goc.suggested, "bỏ tích thì đặt đúng như khi không có hàng sắp về");
+
+  // Không biết tồn thì vẫn KHÔNG đề xuất, dù có bao nhiêu hàng sắp về.
+  assert.equal(computePlan({ ...base, stock: 0, stockKnown: false, awaitingReturn: 50 }).suggested, 0,
+    "chưa có phiếu nhập thì không đề xuất, kể cả khi có hàng sắp về");
+
+  // ───────── 6c. Số ngày muốn đủ bán do người dùng chọn, đổi ngày thì đổi lượng đặt ─────────
+  const banMotNgay = { ...base, stock: 0, stockKnown: true, soldInWindow: 14, windowDays: 14 }; // 1 sp/ngày
+  const cover7 = computePlan({ ...banMotNgay, coverDays: 7 });
+  const cover30 = computePlan({ ...banMotNgay, coverDays: 30 });
+  assert.equal(cover7.target, 7 + 7 + 3, "mục tiêu = tốc độ × (SX + số ngày đủ bán) + tồn an toàn");
+  assert.equal(cover30.target, 7 + 30 + 3);
+  assert.equal(cover30.suggested - cover7.suggested, 23, "chọn thêm 23 ngày bán thì đặt thêm đúng 23 sp");
+
   // ───────── 7. Sản phẩm và Kế hoạch SX không được cho hai số tồn khác nhau ─────────
   for (const row of plan.rows) {
     const product = (await listProducts(allParams(), 200)).rows.find((p) => p.id === row.variantId);

@@ -2,20 +2,20 @@ import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { cellKey, sizeRank } from "@/lib/constants/production";
 export { matrixTotals, matrixAsText } from "@/lib/constants/production";
-import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { getReplenishmentPlan, type PlanOptions } from "@/lib/queries/planning";
 
 export type ProductionOrderRow = typeof schema.productionOrders.$inferSelect;
 
 /** Ma trận màu × size cho một mã từ kế hoạch đặt hàng: số lượng đề xuất, ảnh theo màu, giá nhập */
-export async function buildMatrixForProduct(productId: string) {
+export async function buildMatrixForProduct(productId: string, plan: PlanOptions = {}) {
   const db = await getDb();
-  const [plan, product, variants] = await Promise.all([
-    getReplenishmentPlan(),
+  const [plan_, product, variants] = await Promise.all([
+    getReplenishmentPlan(plan),
     db.query.products.findFirst({ where: eq(schema.products.id, productId), columns: { id: true, name: true, customId: true, image: true } }),
     db.select({ id: schema.productVariants.id, color: schema.productVariants.color, size: schema.productVariants.size, images: schema.productVariants.images, sku: schema.productVariants.sku }).from(schema.productVariants).where(eq(schema.productVariants.productId, productId)),
   ]);
   if (!product) return null;
-  const rows = plan.rows.filter((r) => r.productId === productId);
+  const rows = plan_.rows.filter((r) => r.productId === productId);
   const colors = [...new Set([...rows.map((r) => r.color), ...variants.map((v) => v.color)].map((c) => c.trim()).filter(Boolean))];
   const sizes = [...new Set([...rows.map((r) => r.size), ...variants.map((v) => v.size)].map((c) => c.trim()).filter(Boolean))].sort((a, b) => sizeRank(a) - sizeRank(b));
   const cells: Record<string, number> = {};
@@ -30,7 +30,7 @@ export async function buildMatrixForProduct(productId: string) {
     return { color, url: v?.images?.[0] ?? product.image ?? "" };
   }).filter((i) => i.url);
   const unitCost = Math.round(rows.reduce((s, r) => s + r.unitCost, 0) / Math.max(1, rows.length));
-  return { product: { id: product.id, name: product.name, code: product.customId ?? "" }, colors, sizes, cells, detail, images, unitCost, leadTimeDays: rows[0]?.leadTimeDays ?? plan.assumptions.leadTimeDays };
+  return { product: { id: product.id, name: product.name, code: product.customId ?? "" }, colors, sizes, cells, detail, images, unitCost, leadTimeDays: rows[0]?.leadTimeDays ?? plan_.assumptions.leadTimeDays, coverDays: plan_.used.coverDays, countIncoming: plan_.used.countIncoming };
 }
 
 export async function listProductionOrders(limit = 100) {
