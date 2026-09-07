@@ -145,7 +145,23 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               ),
             },
             { label: "Base URL", value: <span className="font-mono text-xs">{env.viettelPost.baseUrl}</span>, span: true },
-            { label: "Tham số bí mật webhook", value: status.viettelPostWebhook ? <span className="font-mono">{maskKey(env.viettelPost.webhookSecret)}</span> : <span className="text-muted-foreground">Chưa đặt VIETTELPOST_WEBHOOK_SECRET</span> },
+            {
+              // Hiện ĐẦY ĐỦ để dán sang partner2.viettelpost.vn → Cấu hình webhook → Secret parameter.
+              // Che đi thì không ai lấy được giá trị (ops rotate-webhook-secrets cố ý không in ra log
+              // vì kho mã nguồn là công khai), mà sai một ký tự là Viettel Post báo "Thất bại" (401).
+              // Trang này đã sau đăng nhập và cần quyền xem kết nối; URL webhook Pancake bên trên cũng
+              // hiện nguyên secret trong đường dẫn nên mức lộ là như nhau.
+              label: "Tham số bí mật webhook (Secret parameter)",
+              value: status.viettelPostWebhook ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="font-mono break-all">{env.viettelPost.webhookSecret}</span>
+                  <CopyButton value={env.viettelPost.webhookSecret} />
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Chưa đặt VIETTELPOST_WEBHOOK_SECRET</span>
+              ),
+              span: true,
+            },
             {
               label: "Bảng kê COD tự lấy từ Gmail",
               value: (
