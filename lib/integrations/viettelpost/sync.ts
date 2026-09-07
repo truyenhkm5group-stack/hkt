@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
+import { codStatusForAmount } from "@/lib/constants/cod";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
 import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
 import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
@@ -120,8 +121,13 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   const isFinal = record.status !== null && VTP_FINAL_STATUSES.has(record.status);
   const codAmount = record.moneyCollection > 0 ? record.moneyCollection : shipment.codAmount;
   let codStatus: CodStatus = shipment.codStatus;
+  // ĐVVC báo đã giao ⇒ tiền đang ở ĐVVC (COLLECTED). Đây là lời khai của ĐVVC, chưa phải chứng từ.
   if (meta.stage === "DELIVERED" && codAmount > 0 && ["PENDING", "NOT_APPLICABLE"].includes(codStatus)) codStatus = "COLLECTED";
-  if ((meta.stage === "RETURNED" || meta.stage === "CANCELLED") && ["PENDING", "COLLECTED"].includes(codStatus)) codStatus = "NOT_APPLICABLE";
+  // Hoàn / huỷ KHÔNG được hạ về "không thu hộ": vận đơn vẫn có thu hộ, chỉ là không thu được.
+  // Trước đây hạ như vậy nên ERP hiện "Không thu hộ" cho đơn Viettel Post vẫn ghi COD 849.000đ.
+  if ((meta.stage === "RETURNED" || meta.stage === "CANCELLED") && codStatus === "COLLECTED") codStatus = "PENDING";
+  // "Không thu hộ" chỉ đúng khi vận đơn không có tiền thu hộ.
+  codStatus = codStatusForAmount(codAmount, codStatus);
   const stage = meta.stage === "UNKNOWN" ? shipment.stage : meta.stage;
   const existingRaw = shipment.raw && typeof shipment.raw === "object" ? (shipment.raw as Record<string, unknown>) : {};
 
@@ -143,7 +149,10 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
       weight: record.productWeight || shipment.weight,
       expectedDelivery: record.expectedDelivery || shipment.expectedDelivery,
       codAmount,
-      codCollected: ["COLLECTED", "RECONCILED", "PAID_TO_BANK"].includes(codStatus) ? Math.max(shipment.codCollected, codAmount) : shipment.codCollected,
+      // KHÔNG suy tiền từ việc giao hàng. Trước đây "đã giao" tự ghi tiền thực thu = COD khai báo,
+      // tức bịa ra chứng từ: đơn khách trả lại tiền ship hay đơn sửa doanh thu vẫn được tính đủ tiền.
+      // Tiền thực thu chỉ đến từ bảng kê đối soát (sổ cod_statement_lines).
+      codCollected: shipment.codCollected,
       codFee: record.moneyFeeCod || shipment.codFee,
       shippingFee: record.moneyTotal || record.moneyTotalFee || shipment.shippingFee,
       codStatus,

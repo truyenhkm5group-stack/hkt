@@ -1,5 +1,26 @@
 import type { CodStatus } from "@/db/schema";
 
+/**
+ * Ý NGHĨA TRẠNG THÁI COD — chiều TIỀN của vận đơn, tách hẳn khỏi chiều giao hàng.
+ *
+ *   NOT_APPLICABLE  Vận đơn KHÔNG THU HỘ. Đây là thuộc tính của vận đơn (COD khai báo = 0),
+ *                   KHÔNG phải kết luận "sẽ không thu được tiền". Chỉ được đặt khi cod_amount = 0.
+ *   PENDING         Có thu hộ, ERP chưa có chứng từ tiền nào. Đây là CHƯA BIẾT, không phải thu 0đ.
+ *   COLLECTED       ĐVVC báo đã giao tới khách ⇒ tiền đang nằm ở ĐVVC. Chưa phải tiền về tài khoản.
+ *   RECONCILED      ĐVVC xác nhận số tiền, chờ chuyển khoản.
+ *   PAID_TO_BANK    Có dòng bảng kê chứng minh tiền đã về tài khoản.
+ *   DISPUTED        Chứng từ lệch với số ERP ghi nhận, cần đối chiếu.
+ *
+ * Đơn hoàn / huỷ KHÔNG được hạ về NOT_APPLICABLE: vận đơn đó vẫn có thu hộ, chỉ là không thu
+ * được. Việc "không còn khả năng thu" đọc từ trạng thái giao hàng (COD_COLLECTABLE), không phải
+ * bằng cách xoá dấu vết thu hộ — làm thế thì ERP hiện "Không thu hộ" trong khi Viettel Post vẫn
+ * ghi số tiền cần thu, đúng kiểu số liệu không dùng để vận hành được.
+ */
+export function codStatusForAmount(codAmount: number, current: CodStatus): CodStatus {
+  if (codAmount > 0) return current === "NOT_APPLICABLE" ? "PENDING" : current;
+  return "NOT_APPLICABLE";
+}
+
 /** Tab trên trang đối soát COD — `value` là tham số `cod` trên URL ("waiting" = mặc định, không cần ghi lên URL) */
 export type CodTab = { value: string; label: string; statuses: CodStatus[] | "all"; description: string };
 

@@ -307,6 +307,11 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   return rows;
 }
 
+/**
+ * Trạng thái giao hàng KHÔNG kết luận gì về tiền: `cod: null` nghĩa là "trạng thái này không nói
+ * gì về COD". Trước đây các trạng thái hoàn/huỷ trả về NOT_APPLICABLE ("không thu hộ") khiến ERP
+ * hiện "Không thu hộ" cho vận đơn mà Viettel Post vẫn ghi số tiền cần thu.
+ */
 export type VtpStatusMap = { stage: "PENDING" | "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED" | "CANCELLED" | "UNKNOWN"; cod: "PAID_TO_BANK" | "COLLECTED" | "PENDING" | "NOT_APPLICABLE" | null; final: boolean };
 
 /** Trạng thái chữ trên viettelpost.vn → giai đoạn & trạng thái COD trong ERP */
@@ -317,21 +322,21 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   // không phải trạng thái tiền COD. "Đã trả" = đã trả hàng về người gửi (đơn hoàn), không phải "đã trả tiền".
   // Vì vậy phải xét các trạng thái hoàn TRƯỚC khi xét giao thành công.
   if (has("da huy", "huy don", "huy van don", "huy bo", "don huy", "cancel", "shop huy lay", "huy lay"))
-    return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
+    return { stage: "CANCELLED", cod: null, final: true };
   // Hoàn đã hoàn tất (đã trả hàng về người gửi).
   // "Thành công - Chuyển trả người gửi" là mã 504 = HOÀN XONG. Phải xét TRƯỚC nhánh "chuyển trả"
   // bên dưới, nếu không nó bị đọc thành ĐANG hoàn và kéo lùi vận đơn đã kết thúc — đúng lỗi đo
   // được khi chạy thử dựng lại trạng thái (31 vận đơn bị hạ RETURNED về RETURNING).
   if (has("chuyen tra nguoi gui", "tra nguoi gui", "hoan thanh cong nguoi gui"))
-    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+    return { stage: "RETURNED", cod: null, final: true };
   if (has("da tra hang", "tra hang thanh cong", "hoan thanh cong", "da hoan", "hoan tat hoan", "tra thanh cong"))
-    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+    return { stage: "RETURNED", cod: null, final: true };
   // Đang trong quá trình hoàn: đã duyệt hoàn / đang chuyển hoàn / yêu cầu hoàn / chờ hoàn
   if (has("chuyen hoan", "duyet hoan", "yeu cau hoan", "dang hoan", "cho hoan", "hoan hang", "chuyen tra"))
-    return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
+    return { stage: "RETURNING", cod: null, final: false };
   // "Đã trả" đứng riêng (không phải "đã trả tiền/đã thanh toán") = đơn hoàn đã trả về người gửi
   if (has("da tra") && !has("da tra tien", "da thanh toan", "tra tien", "tra cod"))
-    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
+    return { stage: "RETURNED", cod: null, final: true };
   // Giao không thành công / chờ phát lại (chưa kết thúc)
   if (has("giao khong thanh cong", "phat khong thanh cong", "cho phat lai", "phat that bai", "giao that bai", "khong gap", "delivery fail"))
     return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
@@ -347,7 +352,7 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   // ───── Từ vựng của CHÍNH ĐVVC (STATUS_NAME trong webhook và bản sao hành trình từ Pancake) ─────
   // Khác hẳn từ vựng cột "Trạng Thái" của tệp Excel. Thiếu nhóm này thì 17.881/19.362 sự kiện
   // trong lịch sử không dịch được, và trạng thái dựng từ lịch sử chỉ nhìn thấy một phần sự thật.
-  if (has("thong bao chuyen hoan", "duyet hoan", "yeu cau chuyen hoan")) return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
+  if (has("thong bao chuyen hoan", "duyet hoan", "yeu cau chuyen hoan")) return { stage: "RETURNING", cod: null, final: false };
   if (has("khach hang nghi", "khong co nha", "den buu cuc nhan", "khach tu choi", "hen phat lai", "khong lien lac"))
     return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
   if (has("buu ta di phat", "phan cong buu ta di giao", "di phat", "phat tiep")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };

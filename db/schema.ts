@@ -569,6 +569,34 @@ export const codBatches = pgTable(
 );
 
 /**
+ * TỆP BẢNG KÊ GỐC — giữ nguyên nội dung tệp Viettel Post gửi qua email.
+ *
+ * Vì sao cần: Apps Script trong Gmail chỉ gửi thư CHƯA gắn nhãn "đã nhập", nên khi ERP đọc sai
+ * một lần thì muốn đọc lại phải vào Gmail gỡ nhãn thủ công — ERP không tự chữa được. Giữ lại tệp
+ * gốc ở đây thì mọi lần sửa cách đọc chỉ cần chạy lại trên dữ liệu đã có, không phải xin lại thư.
+ *
+ * Nội dung lưu dạng base64 đúng như lúc nhận; tệp trùng tên ghi đè bằng bản mới nhất.
+ */
+export const vtpStatementFiles = pgTable(
+  "vtp_statement_files",
+  {
+    id: id(),
+    filename: text("filename").notNull(),
+    /** Nội dung tệp, base64 — nguyên vẹn như lúc Apps Script gửi sang. */
+    content: text("content").notNull(),
+    bytes: integer("bytes").notNull().default(0),
+    /** ORDER_LIST | STATEMENT_DETAIL | ERROR — loại ERP nhận ra khi nhập. */
+    kind: text("kind").notNull().default(""),
+    /** Ai/luồng nào đưa tệp vào (GMAIL:… hoặc email người bấm nhập tay). */
+    actor: text("actor").notNull().default(""),
+    rows: integer("rows").notNull().default(0),
+    receivedAt: createdAt(),
+    lastImportedAt: ts("last_imported_at"),
+  },
+  (t) => [uniqueIndex("vtp_statement_files_name_uq").on(t.filename), index("vtp_statement_files_received_idx").on(t.receivedAt)],
+);
+
+/**
  * SỔ CHI TIẾT BẢNG KÊ — mỗi dòng của mỗi file bảng kê Viettel Post được giữ nguyên ở đây.
  *
  * Vì sao cần: trước đây tiền thực thu được ghi thẳng lên `shipments` theo từng file, không có
@@ -1132,5 +1160,6 @@ export type SyncRun = typeof syncRuns.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type CodBatch = typeof codBatches.$inferSelect;
 export type CodStatementLine = typeof codStatementLines.$inferSelect;
+export type VtpStatementFile = typeof vtpStatementFiles.$inferSelect;
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;

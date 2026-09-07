@@ -502,7 +502,11 @@ export async function materializeCodFromStatementLines(shipmentIds: string[] = [
     )
     update shipments s set
       cod_collected = c.cod,
-      cod_status = case when c.cod > 0 then 'PAID_TO_BANK'::cod_status else 'NOT_APPLICABLE'::cod_status end,
+      -- Bảng kê báo 0đ KHÔNG phải là "vận đơn không thu hộ": vận đơn vẫn có tiền thu hộ, chỉ là
+      -- kỳ này ĐVVC không chi trả đồng nào cho nó. "Không thu hộ" chỉ đúng khi COD khai báo = 0.
+      cod_status = case when c.cod > 0 then 'PAID_TO_BANK'::cod_status
+                        when s.cod_amount > 0 then 'PENDING'::cod_status
+                        else 'NOT_APPLICABLE'::cod_status end,
       cod_paid_to_bank_at = case when c.cod > 0 then coalesce(b.received_at, c.statement_at) else null end,
       cod_batch_id = c.batch_id,
       cod_statement_ref = c.source_file,
