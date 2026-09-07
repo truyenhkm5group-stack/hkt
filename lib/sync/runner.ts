@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
@@ -12,6 +12,11 @@ export type SyncSummary = {
   skipped: number;
   failed: number;
   detail: string;
+  /**
+   * Job chạy trót lọt về kỹ thuật nhưng KHÔNG đạt mục đích (ví dụ đối chiếu không tra được vận
+   * đơn nào). Có cảnh báo thì lần chạy ghi PARTIAL để hiện cảnh báo, không phải SUCCESS.
+   */
+  warning?: string;
 };
 
 export type SyncContext = {
@@ -23,6 +28,13 @@ export type SyncContext = {
 };
 
 const runningJobs = new Map<string, Promise<unknown>>();
+
+/**
+ * Bản ghi RUNNING mồ côi: `runningJobs` chỉ nằm trong bộ nhớ tiến trình, nên deploy hay khởi động
+ * lại container giữa chừng để lại dòng RUNNING vĩnh viễn — vừa hiện sai là "đang chạy", vừa che
+ * mất lần chạy hỏng. Đóng chúng lại mỗi khi bắt đầu một lần chạy mới.
+ */
+const ORPHAN_RUN_AFTER_MS = 30 * 60_000;
 
 export function isJobRunning(key: string) {
   return runningJobs.has(key);
@@ -50,6 +62,11 @@ export async function runSyncJob<T>(
   }
 
   const db = await getDb();
+  await db
+    .update(schema.syncRuns)
+    .set({ status: "FAILED", error: "Không kết thúc — tiến trình bị dừng giữa chừng (deploy hoặc khởi động lại).", finishedAt: new Date() })
+    .where(and(eq(schema.syncRuns.status, "RUNNING"), lt(schema.syncRuns.startedAt, new Date(Date.now() - ORPHAN_RUN_AFTER_MS))))
+    .catch(() => undefined);
   const summary: SyncSummary = { imported: 0, updated: 0, skipped: 0, failed: 0, detail: "" };
   const logs: string[] = [];
   const [run] = await db
@@ -79,10 +96,11 @@ export async function runSyncJob<T>(
   const promise = (async () => {
     try {
       const result = await fn(ctx);
-      const status = summary.failed > 0 ? "PARTIAL" : "SUCCESS";
+      const status = summary.failed > 0 || summary.warning ? "PARTIAL" : "SUCCESS";
+      const errorText = [summary.warning, logs.length ? logs.slice(-5).join("\n") : ""].filter(Boolean).join("\n") || null;
       await db
         .update(schema.syncRuns)
-        .set({ status, imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed, detail: summary.detail || logs.at(-1) || "", error: logs.length ? logs.slice(-5).join("\n").slice(0, 2000) : null, finishedAt: new Date() })
+        .set({ status, imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed, detail: summary.detail || logs.at(-1) || "", error: errorText?.slice(0, 2000) ?? null, finishedAt: new Date() })
         .where(eq(schema.syncRuns.id, run.id));
       publish({ type: "sync", source: options.source, job: options.job, status });
       return { run: { id: run.id, status }, summary, result };

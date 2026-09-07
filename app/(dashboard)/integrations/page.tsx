@@ -15,7 +15,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
-import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets } from "@/lib/queries/integrations";
+import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
 import { paramList, parseListParams, type SearchParams } from "@/lib/search-params";
 import { JOB_DEFINITIONS } from "@/lib/sync/jobs";
 import { getSyncState, runningJobKeys } from "@/lib/sync/runner";
@@ -45,13 +45,14 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
 
-  const [vtpToken, cursor, backfill, runs, runFacets, webhooks] = await Promise.all([
+  const [vtpToken, cursor, backfill, runs, runFacets, webhooks, vtpHealth] = await Promise.all([
     getIntegrationTokenInfo("viettelpost"),
     getSyncState<{ cursor: string }>("pancake.orders.updated_at.cursor"),
     getSyncState<BackfillState>("pancake.orders.backfill"),
     listSyncRuns(runParams),
     syncRunFacets(runParams),
     listRecentWebhooks(webhookFilters, 30),
+    viettelPostHealth(),
   ]);
 
   const appUrl = env.appUrl;
@@ -186,6 +187,69 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           }
         />
       </section>
+
+      {/* ───────── Sức khoẻ Viettel Post ───────── */}
+      <SectionCard
+        title="Viettel Post đang chảy dữ liệu thế nào"
+        description="Hai nguồn tách bạch: webhook là dữ liệu ERP thực sự nhận được; đối chiếu là ERP chủ động tra lại qua API để vá webhook rơi."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Webhook gần nhất</p>
+            <p className="mt-1 text-2xl font-bold">{vtpHealth.lastWebhook ? formatTimeAgo(vtpHealth.lastWebhook.at) : "—"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {vtpHealth.lastWebhook ? (
+                <>
+                  <span className="font-mono">{vtpHealth.lastWebhook.orderNumber || "(không có mã)"}</span>
+                  {vtpHealth.lastWebhook.statusName ? ` · ${vtpHealth.lastWebhook.statusName}` : ""}
+                </>
+              ) : (
+                "Chưa nhận webhook nào từ Viettel Post"
+              )}
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Webhook đã nhận</p>
+            <p className="numeric mt-1 text-2xl font-bold">{formatNumber(vtpHealth.webhooks.last24h)}<span className="text-base font-normal text-muted-foreground"> / 24h</span></p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {formatNumber(vtpHealth.webhooks.last7d)} trong 7 ngày · tổng {formatNumber(vtpHealth.webhooks.total)}
+              {vtpHealth.webhooks.failed ? <span className="text-destructive"> · {formatNumber(vtpHealth.webhooks.failed)} xử lý lỗi</span> : null}
+              {vtpHealth.webhooks.ignored ? <span className="text-warning"> · {formatNumber(vtpHealth.webhooks.ignored)} không khớp vận đơn</span> : null}
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Đối chiếu qua API</p>
+            <p className={cn("mt-1 text-2xl font-bold", vtpHealth.apiBlind && "text-destructive")}>{vtpHealth.apiBlind ? "Không dùng được" : vtpHealth.lastPoll ? formatTimeAgo(vtpHealth.lastPoll.finishedAt) : "—"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {vtpHealth.apiBlind
+                ? "Tài khoản API không sở hữu các vận đơn này — xem cảnh báo bên dưới."
+                : vtpHealth.lastPoll?.detail || "Chưa chạy đối chiếu lần nào"}
+            </p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Vận đơn chưa kết thúc</p>
+            <p className="numeric mt-1 text-2xl font-bold">{formatNumber(vtpHealth.openShipments.total)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {vtpHealth.openShipments.stale48h ? <span className="text-warning">{formatNumber(vtpHealth.openShipments.stale48h)} vận đơn đã hơn 48h không có tin mới</span> : "Tất cả đều có tin trong 48h"}
+              {vtpHealth.stageMismatch ? <span className="text-destructive"> · {formatNumber(vtpHealth.stageMismatch)} lệch trạng thái</span> : null}
+            </p>
+          </div>
+        </div>
+
+        {vtpHealth.apiBlind || vtpHealth.lastPoll?.error ? (
+          <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+            <div className="text-xs leading-5">
+              <p className="font-medium text-foreground">Đối chiếu qua API Viettel Post không chạy được</p>
+              <p className="mt-1 text-muted-foreground">{vtpHealth.lastPoll?.error || "Tài khoản API không thấy vận đơn nào của shop."}</p>
+              <p className="mt-1 text-muted-foreground">
+                Trong lúc chờ Viettel Post gắn mã khách hàng vào tài khoản API, nguồn thật là <strong className="text-foreground">webhook</strong> (thời gian thực) và{" "}
+                <strong className="text-foreground">file bảng kê / danh sách vận đơn</strong> tải từ viettelpost.vn. ERP đã tự giảm nhịp gọi API và sẽ chạy lại đầy đủ ngay khi API thấy vận đơn.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
 
       {/* ───────── Webhook ───────── */}
       <SectionCard title="Webhook — cập nhật thời gian thực" description="Dán các URL dưới đây vào Pancake và Viettel Post để ERP nhận thay đổi ngay lập tức, không cần chờ lịch đồng bộ">

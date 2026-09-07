@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, lte, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { RUN_STATUS_LABEL, SYNC_SOURCE_LABEL, SYNC_STATUS_ORDER, WEBHOOK_EVENT_LABEL, WEBHOOK_STATUS_ORDER } from "@/lib/constants/sync";
 import type { ListParams } from "@/lib/search-params";
@@ -77,3 +77,87 @@ export async function getIntegrationTokenInfo(provider: string) {
   const row = await db.query.integrationTokens.findFirst({ where: eq(schema.integrationTokens.provider, provider), columns: { expiresAt: true, meta: true, updatedAt: true } });
   return row ?? null;
 }
+
+/**
+ * SỨC KHOẺ TÍCH HỢP VIETTEL POST — trả lời đúng một câu hỏi: dữ liệu vận đơn của ERP hiện đang
+ * đến từ đâu và có còn chảy không.
+ *
+ * Hai nguồn có bản chất khác nhau, không được trộn:
+ *  · webhook — dữ liệu ERP THỰC SỰ nhận được (thời gian thực);
+ *  · đối chiếu qua API — ERP chủ động tra lại, dùng để vá webhook rơi.
+ * Khi tài khoản API không sở hữu vận đơn thì nhánh đối chiếu vô hiệu; số liệu dưới đây phải nói
+ * thẳng điều đó thay vì hiện "đồng bộ thành công".
+ */
+export async function viettelPostHealth() {
+  const db = await getDb();
+  const now = Date.now();
+  const since = (hours: number) => new Date(now - hours * 3600_000);
+
+  const [latest, counts, lastPoll, scope, pending, mismatch] = await Promise.all([
+    db.query.webhookEvents.findFirst({
+      where: eq(schema.webhookEvents.source, "VIETTELPOST"),
+      orderBy: [desc(schema.webhookEvents.receivedAt)],
+      columns: { externalId: true, receivedAt: true, status: true, payload: true },
+    }),
+    db
+      .select({
+        h24: sql<number>`count(*) filter (where ${schema.webhookEvents.receivedAt} >= ${since(24)})`,
+        d7: sql<number>`count(*) filter (where ${schema.webhookEvents.receivedAt} >= ${since(24 * 7)})`,
+        failed: sql<number>`count(*) filter (where ${schema.webhookEvents.status} = 'FAILED')`,
+        ignored: sql<number>`count(*) filter (where ${schema.webhookEvents.status} = 'IGNORED')`,
+        total: sql<number>`count(*)`,
+      })
+      .from(schema.webhookEvents)
+      .where(eq(schema.webhookEvents.source, "VIETTELPOST")),
+    db.query.syncRuns.findFirst({
+      where: and(eq(schema.syncRuns.source, "VIETTELPOST"), eq(schema.syncRuns.job, "tracking_poll"), isNotNull(schema.syncRuns.finishedAt)),
+      orderBy: [desc(schema.syncRuns.finishedAt)],
+      columns: { status: true, detail: true, error: true, updated: true, finishedAt: true },
+    }),
+    db.query.syncState.findFirst({ where: eq(schema.syncState.key, "viettelpost:api-scope") }),
+    // Vận đơn chưa kết thúc mà đã lâu không có tin mới từ Viettel Post: đây là phần đang chờ
+    // được đối chiếu, cũng là phần rủi ro nhất nếu webhook rơi.
+    db
+      .select({
+        n: sql<number>`count(*)`,
+        stale48: sql<number>`count(*) filter (where coalesce(${schema.shipments.vtpStatusDate}, ${schema.shipments.createdAt}) < ${since(48)})`,
+      })
+      .from(schema.shipments)
+      .where(and(eq(schema.shipments.isFinal, false), isNotNull(schema.shipments.vtpOrderNumber))),
+    // ERP ↔ VTP lệch: trạng thái vận đơn khác trạng thái của sự kiện Viettel Post mới nhất.
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.shipments)
+      .where(
+        sql`exists (
+          select 1 from shipment_events ev
+          where ev.shipment_id = ${schema.shipments.id}
+            and ev.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT')
+            and ev.normalized_stage is not null
+            and ev.occurred_at = (
+              select max(e2.occurred_at) from shipment_events e2
+              where e2.shipment_id = ${schema.shipments.id} and e2.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT') and e2.normalized_stage is not null
+            )
+            and ev.normalized_stage <> ${schema.shipments.stage}
+        )`,
+      ),
+  ]);
+
+  const data = latest?.payload && typeof latest.payload === "object" ? ((latest.payload as Record<string, unknown>).DATA as Record<string, unknown> | undefined) : undefined;
+  const apiScope = (scope?.value ?? null) as { missingStreak: number; lastFoundAt: string | null; lastCheckedAt: string | null } | null;
+
+  return {
+    lastWebhook: latest
+      ? { at: latest.receivedAt, orderNumber: latest.externalId ?? "", status: latest.status, statusName: String(data?.STATUS_NAME ?? "") }
+      : null,
+    webhooks: { last24h: Number(counts[0].h24), last7d: Number(counts[0].d7), failed: Number(counts[0].failed), ignored: Number(counts[0].ignored), total: Number(counts[0].total) },
+    lastPoll: lastPoll ?? null,
+    apiScope,
+    /** API đang KHÔNG thấy vận đơn nào của shop — đối chiếu qua API coi như không có. */
+    apiBlind: (apiScope?.missingStreak ?? 0) >= 3,
+    openShipments: { total: Number(pending[0].n), stale48h: Number(pending[0].stale48) },
+    stageMismatch: Number(mismatch[0].n),
+  };
+}
+
+export type ViettelPostHealth = Awaited<ReturnType<typeof viettelPostHealth>>;
