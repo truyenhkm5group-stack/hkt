@@ -2,7 +2,7 @@ import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, ty
 import { getDb, schema } from "@/db";
 import type { RiskAssessment } from "@/lib/alerts/risk";
 import { memo, periodKey } from "@/lib/cache";
-import type { DuplicateHit, LandingStatus } from "@/lib/constants/landing";
+import { pushBlockOf, type DuplicateHit, type LandingStatus, type PushBlock } from "@/lib/constants/landing";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
@@ -36,6 +36,8 @@ export type LandingRow = {
   variantId: string | null;
   variantLabel: string;
   variantMatchScore: number;
+  /** Lý do chưa gửi POS được (null = bấm Gửi POS được ngay) */
+  pushBlock: PushBlock | null;
   orderId: string | null;
   orderSystemId: number | null;
   orderStage: string | null;
@@ -67,11 +69,22 @@ export type LandingRow = {
 /** Trạng thái đơn trên POS của một dòng landing: HAS = đã có đơn Pancake (ghép theo SĐT hoặc do ERP gửi), DRAFT = đã gửi POS nhưng chưa đồng bộ về, NONE = chưa lên POS */
 export type LandingPosState = "HAS" | "DRAFT" | "NONE";
 export const LANDING_POS_LABEL: Record<LandingPosState, string> = { HAS: "Đã có đơn POS", DRAFT: "Đơn nháp POS · chờ đồng bộ", NONE: "Chưa lên POS" };
-export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR" | "MISSING_INFO")[]; pos?: LandingPosState[]; product?: string[]; period: Period };
+export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (OrderOutcome | "NONE")[]; flag?: ("DUP" | "RISK" | "NO_VARIANT" | "PUSH_ERROR" | "MISSING_INFO" | "NOT_READY" | "READY")[]; pos?: LandingPosState[]; product?: string[]; period: Period };
 
 /** Mã hàng của dòng landing: cột sản phẩm trên sheet (Q003…) hoặc tên tab (tab:Q003 → Q003) */
 const PRODUCT_CODE = sql<string>`upper(coalesce(nullif(regexp_replace(${l.productText}, '^.*?([A-Za-z]{1,2}[0-9]{3}).*$', '\\1'), ''), nullif(regexp_replace(${l.sheetGid}, '^tab:', ''), ''), ''))`;
 /** Thiếu thông tin để lên đơn: không có địa chỉ, hoặc không rõ size (chưa ghép mẫu mã và không đọc được size) */
+/**
+ * Dòng CHƯA gửi POS được. Cố ý KHÔNG chỉ đọc cột `push_block`: cột đó do lần rà soát gần nhất ghi,
+ * dòng cũ chưa được rà lại thì cột trống và sẽ bị xếp nhầm vào "đủ thông tin" rồi gửi POS lỗi.
+ * Nên kiểm luôn ba thứ tra được thẳng trong CSDL; riêng "địa chỉ thiếu tỉnh/thành" cần danh sách
+ * tỉnh nên vẫn dựa vào cột đã tính sẵn.
+ */
+const BLOCKED = sql`(${l.pushBlock} is not null or ${l.variantId} is null or coalesce(${l.phone}, '') = '' or coalesce(${l.address}, '') = '')`;
+
+/** Dòng CHƯA lên POS (chưa ghép đơn, chưa gửi nháp) và chưa huỷ — phạm vi của hai bộ lọc dưới. */
+const NOT_ON_POS_YET = (extra: SQL) => sql`(${l.orderId} is null and ${l.pancakeSystemId} is null and ${l.status} <> 'CANCELLED' and ${extra})`;
+
 const MISSING_INFO = sql`(${l.status} <> 'CANCELLED' and (${l.address} = '' or (${l.variantId} is null and ${l.sizeText} = '')))`;
 const POS_STATE = sql<LandingPosState>`case when ${l.orderId} is not null then 'HAS' when ${l.pancakeSystemId} is not null then 'DRAFT' else 'NONE' end`;
 
@@ -99,6 +112,9 @@ function conds(f: LandingFilters): SQL[] {
     if (fl === "NO_VARIANT") out.push(isNull(l.variantId));
     if (fl === "PUSH_ERROR") out.push(sql`${l.pushError} <> ''`);
     if (fl === "MISSING_INFO") out.push(MISSING_INFO);
+    // Hai nhóm việc của nhân viên landing: đơn bấm gửi được ngay, và đơn phải hỏi lại khách.
+    if (fl === "NOT_READY") out.push(NOT_ON_POS_YET(BLOCKED));
+    if (fl === "READY") out.push(NOT_ON_POS_YET(sql`not ${BLOCKED}`));
   }
   return out;
 }
@@ -128,6 +144,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
       status: l.status,
       variantId: l.variantId,
       variantMatchScore: l.variantMatchScore,
+      pushBlock: sql<PushBlock | null>`${l.pushBlock}`,
       productName: p.name,
       productCode: p.customId,
       vSize: pv.size,
@@ -173,6 +190,9 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
   return rows.map((r) => ({
     ...r,
     status: r.status as LandingStatus,
+    // Cột push_block do lần rà soát gần nhất ghi; dòng chưa được rà lại thì tính ngay tại đây để
+    // dòng trên bảng và bộ lọc luôn nói cùng một điều.
+    pushBlock: r.posState === "NONE" && r.status !== "CANCELLED" ? (r.pushBlock ?? pushBlockOf({ variantId: r.variantId, phone: r.phone, address: r.address, province: r.province })) : null,
     variantLabel: r.variantId ? `${r.productCode ? `${r.productCode} · ` : ""}${r.productName ?? ""}${r.vSize || r.vColor ? ` · ${[r.vColor, r.vSize].filter(Boolean).join(" ")}` : ""}` : "",
     duplicates: Array.isArray(r.duplicates) ? (r.duplicates as DuplicateHit[]).map((d) => ({ ...d, at: d.at ? new Date(d.at) : null })) : [],
     risk: (r.risk as RiskAssessment | null) ?? null,

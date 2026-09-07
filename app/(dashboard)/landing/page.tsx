@@ -23,6 +23,9 @@ const FLAGS = [
   { value: "NO_VARIANT", label: "Chưa ghép mẫu mã" },
   { value: "PUSH_ERROR", label: "Gửi POS lỗi" },
   { value: "MISSING_INFO", label: "Thiếu địa chỉ / size (cần chăm sóc)" },
+  // Hai nhóm việc hằng ngày: bấm gửi được ngay, và phải hỏi lại khách trước khi gửi.
+  { value: "READY", label: "Đủ thông tin · chưa lên POS" },
+  { value: "NOT_READY", label: "Chưa đủ thông tin · cần xử lý" },
 ];
 
 const split = <T extends string>(v: string | null, allowed: readonly T[]): T[] => (v ? (v.split(",").filter((x) => (allowed as readonly string[]).includes(x)) as T[]) : []);
@@ -37,7 +40,7 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
     q: param(raw, "q") ?? undefined,
     status: split(param(raw, "status"), LANDING_STATUSES),
     outcome: split(param(raw, "outcome"), OUTCOMES),
-    flag: split(param(raw, "flag"), ["DUP", "RISK", "NO_VARIANT", "PUSH_ERROR", "MISSING_INFO"] as const),
+    flag: split(param(raw, "flag"), ["DUP", "RISK", "NO_VARIANT", "PUSH_ERROR", "MISSING_INFO", "READY", "NOT_READY"] as const),
     pos: split(param(raw, "pos"), ["HAS", "DRAFT", "NONE"] as const) as LandingPosState[],
     product: (param(raw, "product") ?? "").split(",").map((x) => x.trim().toUpperCase()).filter(Boolean),
     period,

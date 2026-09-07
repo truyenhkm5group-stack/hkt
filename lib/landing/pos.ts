@@ -2,7 +2,7 @@
  * Gửi đơn landing lên Pancake POS làm đơn nháp (trạng thái Mới) để nhân viên chốt trên POS; lưu id đơn để ERP theo dõi
  * trạng thái giao / hoàn / huỷ qua đồng bộ đơn Pancake. Chấm rủi ro trước khi gửi và ghi vào đơn.
  */
-import { landingShippingFee } from "@/lib/constants/landing";
+import { ADDRESS_ISSUE_LABEL, addressIssue, landingShippingFee } from "@/lib/constants/landing";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
@@ -16,6 +16,11 @@ export async function pushLandingToPos(id: string, actor: string): Promise<{ ok:
   if (row.pancakeOrderId) return { error: `Đã gửi POS trước đó (#${row.pancakeSystemId ?? row.pancakeOrderId})` };
   if (!row.phone) return { error: "Thiếu số điện thoại" };
   if (!row.variantId || !row.variant) return { error: "Chưa chọn mẫu mã Pancake cho đơn này" };
+  // Địa chỉ phải đủ để Viettel Post định tuyến. Gửi đơn thiếu tỉnh/thành lên POS chỉ đẩy việc sang
+  // khâu sau: đơn tạo ra rồi lại không gửi được ĐVVC, hoặc gửi đi rồi hoàn. Chặn ngay tại đây nên
+  // gửi lẻ và gửi hàng loạt dùng chung một tiêu chuẩn.
+  const addr = addressIssue(row.address, row.province);
+  if (addr) return { error: ADDRESS_ISSUE_LABEL[addr] };
   const config = await loadLandingConfig();
   const checks = await refreshLandingChecks(id);
   const riskNote = checks?.risk?.risky ? ` ⚠ Khách rủi ro: GTC ${checks.risk.succeed} · hoàn ${checks.risk.returned} · ${checks.risk.reasons.join(", ")} → xin cọc / xác nhận kỹ.` : "";

@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money, SectionCard } from "@/components/ui-bits";
-import { pushLanding, recheckLanding, setLandingStatus, setLandingVariant } from "@/lib/actions/landing";
+import { pushLanding, pushLandingBatch, recheckLanding, setLandingStatus, setLandingVariant } from "@/lib/actions/landing";
+import { PUSH_BLOCK_LABEL } from "@/lib/constants/landing";
 import { LANDING_STATUS_LABEL, LANDING_STATUSES, type LandingStatus } from "@/lib/constants/landing";
 import { OUTCOME_LABEL, OUTCOME_TONE } from "@/lib/constants/returns";
 import { OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
@@ -41,8 +42,32 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
       }
     });
   };
+  // Đơn đủ thông tin, chưa lên POS — bấm một nút gửi hết thay vì mở từng dòng.
+  const readyIds = rows.filter((r) => r.posState === "NONE" && r.status !== "CANCELLED" && !r.pushBlock).map((r) => r.id);
+  const [batching, startBatch] = useTransition();
+  const sendAll = () =>
+    startBatch(async () => {
+      const res = await pushLandingBatch(readyIds);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      if (res.failed.length) toast.warning(`Đã gửi ${res.failed.length ? res.pushed : res.pushed} đơn · ${res.failed.length} đơn lỗi: ${res.failed[0]?.error ?? ""}`);
+      else toast.success(`Đã tạo ${res.pushed} đơn nháp trên Pancake POS`);
+      router.refresh();
+    });
+
   return (
-    <SectionCard title="Danh sách đơn landing" description="Mỗi dòng = một lượt khách điền form. Xác nhận với khách → chọn mẫu mã (nếu ERP chưa ghép) → Gửi POS tạo đơn nháp trên Pancake; sau đó trạng thái giao / hoàn theo đơn Pancake. Cảnh báo trùng SĐT và khách rủi ro hoàn hiện ngay trên dòng." padded={false}>
+    <SectionCard
+      actions={
+        canManage && readyIds.length ? (
+          <Button size="sm" disabled={batching} onClick={sendAll} title="Chỉ gửi những đơn đã đủ mẫu mã, SĐT và địa chỉ có tỉnh/thành">
+            {batching ? <Loader2 className="size-4 animate-spin" /> : null}
+            Gửi POS {readyIds.length} đơn đủ thông tin
+          </Button>
+        ) : undefined
+      }
+      title="Danh sách đơn landing" description="Mỗi dòng = một lượt khách điền form. Xác nhận với khách → chọn mẫu mã (nếu ERP chưa ghép) → Gửi POS tạo đơn nháp trên Pancake; sau đó trạng thái giao / hoàn theo đơn Pancake. Cảnh báo trùng SĐT và khách rủi ro hoàn hiện ngay trên dòng." padded={false}>
       <div className="overflow-x-auto">
         <Table className="min-w-[1500px]">
           <TableHeader>
@@ -125,6 +150,12 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                       {r.status !== "CANCELLED" && !r.address ? <div className="flex items-start gap-1 font-semibold text-rose-700"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>Thiếu địa chỉ → gọi khách xin địa chỉ</span></div> : null}
                       {r.status !== "CANCELLED" && !r.variantId && !r.sizeText ? <div className="flex items-start gap-1 font-semibold text-rose-700"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /><span>Thiếu size → hỏi khách rồi chọn mẫu mã</span></div> : null}
                       {r.pushError ? <div className="text-rose-700" title={r.pushError}>Gửi POS lỗi: {r.pushError.slice(0, 80)}</div> : null}
+                      {r.pushBlock && r.posState === "NONE" && r.status !== "CANCELLED" ? (
+                        <div className="flex items-start gap-1 font-semibold text-amber-700 dark:text-amber-400">
+                          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                          <span>{PUSH_BLOCK_LABEL[r.pushBlock]}</span>
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       {canManage ? (

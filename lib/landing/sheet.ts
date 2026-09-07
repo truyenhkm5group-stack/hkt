@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { clearMemo } from "@/lib/cache";
-import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findOfferCell, findPhoneCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate } from "@/lib/constants/landing";
+import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findOfferCell, findPhoneCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate, pushBlockOf } from "@/lib/constants/landing";
 import { fetchJson } from "@/lib/integrations/http";
 import { getSettingJson } from "@/lib/settings";
 
@@ -312,8 +312,11 @@ export async function refreshLandingChecks(id: string) {
   }
   const [hits, risk] = await Promise.all([duplicatesForPhone(row.phone, at, config.dedupeDays, row.id), riskForPhone(row.phone, row.orderId ?? undefined)]);
   const dups = hits.filter((d) => d.id !== row.orderId);
-  await db.update(schema.landingOrders).set({ duplicates: dups, risk, updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
-  return { duplicates: dups, risk };
+  // Lý do chưa gửi POS được tính ở đây để bộ lọc (đọc cột) và dòng trên bảng (đọc cùng cột) không
+  // bao giờ lệch nhau. Dòng đã lên POS rồi thì không còn gì để chặn.
+  const block = row.orderId || row.pancakeOrderId || row.status === "CANCELLED" ? null : pushBlockOf(row);
+  await db.update(schema.landingOrders).set({ duplicates: dups, risk, pushBlock: block, updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
+  return { duplicates: dups, risk, pushBlock: block };
 }
 
 /** Tính lại trùng / rủi ro (và ghép lại mẫu mã cho dòng chưa ghép) cho mọi dòng landing N ngày gần đây */

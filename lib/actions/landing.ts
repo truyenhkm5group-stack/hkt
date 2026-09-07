@@ -61,6 +61,36 @@ export async function pushLanding(id: string): Promise<ActionResult<{ systemId: 
   return { ok: true, systemId: r.systemId };
 }
 
+/**
+ * Gửi POS HÀNG LOẠT cho các đơn đã đủ thông tin.
+ *
+ * Trên production có 102 đơn landing chưa lên POS mà 80 đơn không vướng gì — chỉ là chưa ai bấm
+ * từng nút. Gửi tuần tự (không song song) để không đập vào giới hạn tần suất của Pancake, và
+ * KHÔNG dừng giữa chừng khi một đơn lỗi: trả về danh sách lỗi để nhân viên xử lý tiếp.
+ *
+ * Mỗi đơn vẫn đi qua đúng `pushLandingToPos` nên các cổng kiểm tra (mẫu mã, SĐT, địa chỉ đủ
+ * tỉnh/thành, đã gửi rồi thì thôi) áp dụng y như bấm từng nút.
+ */
+export async function pushLandingBatch(ids: string[]): Promise<ActionResult<{ pushed: number; failed: { id: string; error: string }[] }>> {
+  const user = await requireUser();
+  if (!can(user, "landing:manage")) return { error: "Không có quyền" };
+  const unique = [...new Set((ids ?? []).filter((id) => typeof id === "string" && id.trim()))].slice(0, 200);
+  if (!unique.length) return { error: "Không có đơn nào để gửi" };
+  const failed: { id: string; error: string }[] = [];
+  let pushed = 0;
+  for (const id of unique) {
+    const r = await pushLandingToPos(id, user.name || user.email);
+    if ("error" in r) {
+      failed.push({ id, error: r.error });
+      continue;
+    }
+    pushed += 1;
+    await audit({ userId: user.id, userEmail: user.email, action: "LANDING_PUSH_POS", entity: "LANDING_ORDER", entityId: id, detail: { pancakeOrderId: r.pancakeOrderId, systemId: r.systemId, batch: true } });
+  }
+  revalidate();
+  return { ok: true, pushed, failed };
+}
+
 export async function recheckLanding(id: string): Promise<ActionResult> {
   const user = await requireUser();
   if (!can(user, "landing:manage")) return { error: "Không có quyền" };
