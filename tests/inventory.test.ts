@@ -7,7 +7,7 @@ import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProducts, productSummary } from "@/lib/queries/products";
 import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
-import { markReturnReceived } from "@/lib/returns/warehouse";
+import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { parseListParams } from "@/lib/search-params";
 
 function allParams() {
@@ -124,6 +124,46 @@ export async function testInventory(db: Db) {
       assert.equal(row.stockKnown, product.stockKnown, `cờ 'tính được tồn' lệch giữa hai trang: ${row.variantId}`);
     }
   }
+
+  // ───────── 8. Xác nhận hàng loạt chỉ đụng hàng ĐÃ VỀ TỚI SHOP ─────────
+  // Production tồn đọng hàng trăm kiện vì chỉ tick được từng trang. Thao tác hàng loạt phải
+  // tuyệt đối không đụng vận đơn còn đang trên đường về — xác nhận lúc đó là bịa dữ liệu.
+  await db.insert(schema.orders).values([
+    { id: "bulk-da-ve", stage: "RETURNED", insertedAt: new Date() },
+    { id: "bulk-dang-ve", stage: "SHIPPED", insertedAt: new Date() },
+  ]);
+  await db.insert(schema.orderItems).values([
+    { id: "bulk-i1", orderId: "bulk-da-ve", variantId: "rr-var", quantity: 3 },
+    { id: "bulk-i2", orderId: "bulk-da-ve", variantId: "rr-var", quantity: 2, isBonus: true },
+    { id: "bulk-i3", orderId: "bulk-dang-ve", variantId: "rr-var", quantity: 7 },
+  ]);
+  await db.insert(schema.shipments).values([
+    { id: "bulk-ship-da-ve", orderId: "bulk-da-ve", stage: "RETURNED", returnedAt: new Date(Date.now() - 20 * 86_400_000) },
+    { id: "bulk-ship-dang-ve", orderId: "bulk-dang-ve", stage: "RETURNING" },
+  ]);
+
+  const cho = await pendingReturnedForWarehouse();
+  const ids = await listPendingReturnedIds(500);
+  assert.ok(ids.includes("bulk-ship-da-ve"), "vận đơn Viettel Post đã trả xong phải nằm trong danh sách chờ kho");
+  assert.ok(!ids.includes("bulk-ship-dang-ve"), "vận đơn còn đang trên đường về KHÔNG được xác nhận hàng loạt");
+  assert.ok(cho.count >= 1);
+  assert.ok(cho.items >= 5, "số món phải khớp cách tính tồn của ERP, gồm cả hàng tặng");
+  assert.ok(cho.oldestAt && Date.now() - new Date(cho.oldestAt).getTime() >= 19 * 86_400_000, "phải nêu được kiện chờ lâu nhất");
+
+  clearMemo();
+  const truoc = await productRow("rr-var");
+  await markReturnReceived(["bulk-ship-da-ve"], "test-kho-hang-loat");
+  clearMemo();
+  const sau = await productRow("rr-var");
+  assert.equal(sau.erpStock, truoc.erpStock + 5, "kiện đã về cộng đúng 5 món (3 bán + 2 tặng) — hàng tặng cũng nằm trong kiện quay về");
+
+  // Kiện đang trên đường về vẫn nằm ngoài tồn cho tới khi Viettel Post trả hàng xong.
+  await markReturnReceived(ids, "test-kho-hang-loat-2");
+  clearMemo();
+  const sauTatCa = await productRow("rr-var");
+  assert.ok(sauTatCa.erpStock < truoc.erpStock + 5 + 7, "7 món của kiện đang trên đường về không được cộng vào tồn");
+  assert.equal((await listPendingReturnedIds(500)).length, 0, "xác nhận hàng loạt xong thì không còn kiện nào chờ");
+  assert.equal((await markReturnReceived(ids, "test-lap-lai")).count, 0, "bấm lại lần hai không cộng trùng tồn");
 
   console.log(`✓ Tồn kho: 4 trạng thái tách bạch · ${summary.unknownStock} mẫu mã chưa có phiếu nhập không bị coi là hết hàng · kế hoạch SX không đặt theo tồn bịa`);
 }

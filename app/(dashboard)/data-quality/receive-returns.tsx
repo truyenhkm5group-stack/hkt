@@ -6,13 +6,24 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { cancelReturnReceived, confirmReturnReceived } from "@/lib/actions/returns-warehouse";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { cancelReturnReceived, confirmAllReturnedReceived, confirmReturnReceived } from "@/lib/actions/returns-warehouse";
 
 /**
  * Xác nhận kho đã nhận hàng hoàn. Chỉ sau thao tác này hàng mới được cộng lại tồn ERP.
  * Cố ý giữ đơn giản: chọn dòng → bấm xác nhận, không có quy trình phiếu nhập hoàn đầy đủ.
  */
-export function ReceiveReturns({ rows }: { rows: { id: string; label: string; receivedAt: string | null }[] }) {
+export function ReceiveReturns({
+  rows,
+  bulk,
+}: {
+  rows: { id: string; label: string; receivedAt: string | null }[];
+  /** Toàn bộ hàng hoàn ĐÃ VỀ TỚI SHOP còn chờ kho xác nhận — không giới hạn ở trang đang xem. */
+  bulk?: { count: number; items: number; waitingDays: number | null };
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -62,6 +73,47 @@ export function ReceiveReturns({ rows }: { rows: { id: string; label: string; re
         >
           {allChecked ? "Bỏ chọn tất cả" : "Chọn tất cả chưa nhận"}
         </Button>
+
+        {bulk && bulk.count > rows.length ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="secondary" disabled={pending}>
+                Xác nhận toàn bộ {bulk.count} kiện đã về tới shop
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Xác nhận kho đã nhận {bulk.count} kiện hàng hoàn?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Gồm {bulk.items} món, {bulk.waitingDays !== null ? `kiện chờ lâu nhất đã ${bulk.waitingDays} ngày` : "trên toàn bộ danh sách"}. Chỉ tính vận đơn Viettel Post
+                  đã trả hàng xong cho người gửi — vận đơn đang trên đường về không bị đụng tới.
+                  <br />
+                  <br />
+                  Sau khi xác nhận, số hàng này được <strong>cộng lại vào tồn kho</strong> và kế hoạch đặt hàng sẽ tính theo tồn mới.
+                  Chỉ làm khi kho đã thực sự nhận được hàng. Bấm nhầm thì dùng “Huỷ xác nhận” để trả lại như cũ.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Để sau</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() =>
+                    start(async () => {
+                      const result = await confirmAllReturnedReceived({});
+                      if ("error" in result) toast.error(result.error);
+                      else {
+                        toast.success(result.message);
+                        setSelected(new Set());
+                        router.refresh();
+                      }
+                    })
+                  }
+                >
+                  Kho đã nhận đủ
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
       </div>
       <ul className="divide-y rounded-lg border">
         {rows.map((row) => (
