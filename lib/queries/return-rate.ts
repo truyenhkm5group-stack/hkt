@@ -193,10 +193,18 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${VTP_RETURNED} then 'RETURNED'
   when ${VTP_CANCELLED} then 'CANCELLED'
   when ${s.stage} = 'DELIVERED' and ${GOODS_CAME_BACK} then 'RETURNED'
-  -- ĐÃ GIAO và ĐÃ CÓ CHỨNG TỪ TIỀN thì áp ngưỡng: dưới 50K là hoàn, 50K–100K là không thành công.
-  -- Chưa có chứng từ thì KHÔNG hạ kết luận (xem nhánh dưới) — thiếu số không phải thu 0đ.
-  when ${s.stage} = 'DELIVERED' and ${HAS_CASH_EVIDENCE} and coalesce(${s.codCollected}, 0) + ${PREPAID} < ${RETURN_COD} then 'RETURNED'
-  when ${s.stage} = 'DELIVERED' and ${HAS_CASH_EVIDENCE} and coalesce(${s.codCollected}, 0) + ${PREPAID} <= ${MAX_COD} then 'RETURNED_BY_RULE'
+  -- ĐÃ GIAO và BIẾT CHẮC SỐ TIỀN thì áp ngưỡng: dưới 50K là hoàn, 50K–100K là không thành công.
+  --
+  -- "Biết chắc" nghĩa là CÓ SỐ DƯƠNG. Chỉ vì vận đơn xuất hiện trên một bảng kê nào đó thì KHÔNG
+  -- suy ra được "thu 0đ": bảng kê gửi qua email tách phần COD và phần cước, một vận đơn nằm ở
+  -- phần cước cũng có mã bảng kê mà không hề nói gì về COD. Coi số 0 đó là sự thật chính là biến
+  -- CHƯA BIẾT thành 0 — điều đặc tả cấm.
+  -- Ca thật PKE1508909064: Viettel Post ghi giao thành công, thu hộ 849.000, không sửa doanh thu,
+  -- không có vận đơn chiều hoàn; ERP từng kết luận HOÀN chỉ vì cod_collected = 0 + có mã bảng kê.
+  when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > 0
+       and coalesce(${s.codCollected}, 0) + ${PREPAID} < ${RETURN_COD} then 'RETURNED'
+  when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > 0
+       and coalesce(${s.codCollected}, 0) + ${PREPAID} <= ${MAX_COD} then 'RETURNED_BY_RULE'
   when ${VTP_DELIVERED} then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
