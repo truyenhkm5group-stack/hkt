@@ -33,6 +33,26 @@ export async function testVtpState(db: Db) {
   assert.equal(resolveVtpStatus({ code: 9999, text: "" }).stage, "UNKNOWN", "mã lạ ngoài mọi nhóm vẫn là KHÔNG RÕ");
   assert.equal(resolveVtpStatus({ code: 553, text: "" }).stage, "OUT_FOR_DELIVERY", "mã lạ trong nhóm 5xx suy theo nhóm");
 
+  // Bản sao hành trình từ Pancake và STATUS_NAME của webhook KHÔNG có mã số, và dùng từ vựng khác
+  // hẳn cột "Trạng Thái" của tệp Excel. Thiếu nhóm này thì lịch sử gần như không đọc được.
+  const theoChu = (text: string) => resolveVtpStatus({ code: null, text }).stage;
+  assert.equal(theoChu("Thành công - Chuyển trả người gửi"), "RETURNED", "hoàn XONG, không được đọc thành đang hoàn");
+  assert.equal(theoChu("Tồn - Thông báo chuyển hoàn bưu cục gốc"), "RETURNING");
+  assert.equal(theoChu("Tồn - Khách hàng nghỉ, không có nhà"), "DELIVERY_FAILED");
+  assert.equal(theoChu("Tồn - Khách hàng đến bưu cục nhận"), "DELIVERY_FAILED");
+  assert.equal(theoChu("Giao bưu tá đi phát"), "OUT_FOR_DELIVERY");
+  assert.equal(theoChu("Nhận bảng kê đến"), "IN_TRANSIT");
+  assert.equal(theoChu("Đóng bảng kê đi"), "IN_TRANSIT");
+  assert.equal(theoChu("Giao cho Bưu tá đi nhận"), "PENDING");
+  assert.equal(theoChu("Đơn hàng chờ xử lý"), "PENDING");
+  assert.equal(theoChu("Giao cho bưu cục"), "PENDING");
+  assert.equal(theoChu("Sửa phiếu gửi"), "PICKED_UP");
+  assert.equal(theoChu("Thành công - Phát thành công"), "DELIVERED");
+  // Từ vựng của tệp Excel vẫn phải giữ nguyên nghĩa cũ.
+  assert.equal(theoChu("Giao thành công"), "DELIVERED");
+  assert.equal(theoChu("Shop hủy lấy"), "CANCELLED");
+  assert.equal(theoChu("Chờ phát lại"), "DELIVERY_FAILED");
+
   // ───────── 2. Sự kiện đến MUỘN không được kéo lùi trạng thái ─────────
   const A = "PKE-STATE-A";
   await applyVtpTracking(track(A, 501, "Thành công - Phát thành công", "2026-09-05T10:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });

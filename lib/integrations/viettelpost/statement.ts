@@ -296,8 +296,14 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   // Trên viettelpost.vn (Quản lý vận đơn) cột "Trạng thái" là trạng thái GIAO/HOÀN của vận đơn,
   // không phải trạng thái tiền COD. "Đã trả" = đã trả hàng về người gửi (đơn hoàn), không phải "đã trả tiền".
   // Vì vậy phải xét các trạng thái hoàn TRƯỚC khi xét giao thành công.
-  if (has("da huy", "huy don", "huy van don", "huy bo", "don huy", "cancel")) return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
-  // Hoàn đã hoàn tất (đã trả hàng về người gửi)
+  if (has("da huy", "huy don", "huy van don", "huy bo", "don huy", "cancel", "shop huy lay", "huy lay"))
+    return { stage: "CANCELLED", cod: "NOT_APPLICABLE", final: true };
+  // Hoàn đã hoàn tất (đã trả hàng về người gửi).
+  // "Thành công - Chuyển trả người gửi" là mã 504 = HOÀN XONG. Phải xét TRƯỚC nhánh "chuyển trả"
+  // bên dưới, nếu không nó bị đọc thành ĐANG hoàn và kéo lùi vận đơn đã kết thúc — đúng lỗi đo
+  // được khi chạy thử dựng lại trạng thái (31 vận đơn bị hạ RETURNED về RETURNING).
+  if (has("chuyen tra nguoi gui", "tra nguoi gui", "hoan thanh cong nguoi gui"))
+    return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
   if (has("da tra hang", "tra hang thanh cong", "hoan thanh cong", "da hoan", "hoan tat hoan", "tra thanh cong"))
     return { stage: "RETURNED", cod: "NOT_APPLICABLE", final: true };
   // Đang trong quá trình hoàn: đã duyệt hoàn / đang chuyển hoàn / yêu cầu hoàn / chờ hoàn
@@ -317,5 +323,19 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   if (has("dang van chuyen", "dang trung chuyen", "trung chuyen", "dang luan chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
   if (has("da lay hang", "da nhan hang", "lay hang thanh cong")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
   if (has("cho xu ly", "cho lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
+
+  // ───── Từ vựng của CHÍNH ĐVVC (STATUS_NAME trong webhook và bản sao hành trình từ Pancake) ─────
+  // Khác hẳn từ vựng cột "Trạng Thái" của tệp Excel. Thiếu nhóm này thì 17.881/19.362 sự kiện
+  // trong lịch sử không dịch được, và trạng thái dựng từ lịch sử chỉ nhìn thấy một phần sự thật.
+  if (has("thong bao chuyen hoan", "duyet hoan", "yeu cau chuyen hoan")) return { stage: "RETURNING", cod: "NOT_APPLICABLE", final: false };
+  if (has("khach hang nghi", "khong co nha", "den buu cuc nhan", "khach tu choi", "hen phat lai", "khong lien lac"))
+    return { stage: "DELIVERY_FAILED", cod: "PENDING", final: false };
+  if (has("buu ta di phat", "phan cong buu ta di giao", "di phat", "phat tiep")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
+  if (has("nhan bang ke den", "dong bang ke", "nhan tai", "van chuyen di", "dong tai", "dong tui goi", "chuyen tuyen", "nhan chuyen thu"))
+    return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
+  if (has("buu ta da nhan hang", "lay hang thanh cong", "nhap buu cuc goc", "sua phieu gui", "sua phieu gui")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
+  if (has("giao cho buu ta di nhan", "dieu phoi buu ta", "dieu phoi buu cuc", "giao cho buu cuc", "don hang cho xu ly", "tiep nhan don"))
+    return { stage: "PENDING", cod: "PENDING", final: false };
+
   return { stage: "UNKNOWN", cod: null, final: false };
 }
