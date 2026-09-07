@@ -345,3 +345,90 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
 
   return { stage: "UNKNOWN", cod: null, final: false };
 }
+
+/**
+ * BẢNG KÊ ĐỐI SOÁT THANH TOÁN — tệp `BangKeChiCOD_*.xlsx` Viettel Post GỬI QUA EMAIL.
+ *
+ * Khác hẳn tệp tải tay từ web: một tệp có HAI phần, mỗi phần một bảng riêng với tiêu đề riêng,
+ * và trước chúng là tiêu đề thư dài (tên tổng công ty, phòng tài chính, mã khách hàng…).
+ *
+ *   I:  CHI TIẾT SỐ TIỀN COD
+ *       STT · Số BILL · Ngày gửi · Dịch vụ · Ngày phát thành công · Số tiền COD · Ghi chú
+ *   II: CHI TIẾT TIỀN CƯỚC CHUYỂN PHÁT VÀ PHÍ COD
+ *       STT · Số BILL · Ngày gửi · Dịch vụ · Trọng lượng · Cước phí · Cước đã thu · Giảm giá ·
+ *       Tổng số tiền · Ghi chú
+ *
+ * Một vận đơn có thể chỉ nằm ở phần I (thu được COD), chỉ nằm ở phần II (chỉ có cước — thường là
+ * vận đơn chiều hoàn CHPKE… hoặc …1P1), hoặc nằm ở cả hai. Tiền Viettel Post thực trả về tài
+ * khoản = tổng COD phần I − tổng cước phần II, nên gộp hai phần theo mã vận đơn rồi tính
+ * `net = cod − fee` cho từng mã.
+ *
+ * Vận đơn chỉ có ở phần II với COD = 0 là BẰNG CHỨNG THẬT rằng đơn đó không thu được đồng nào,
+ * không phải "chưa biết" — đúng thứ ERP cần để kết luận tiền.
+ */
+export function parseCodPaymentStatement(input: Buffer | string, filename = ""): StatementDetailRow[] {
+  const matrix = typeof input === "string" ? parseCsv(input.replace(/^﻿/, "")) : sheetMatrix(input, false, true);
+  const norm = (i: number) => (matrix[i] ?? []).map((c) => normalize(String(c ?? "")));
+
+  /** Tìm dòng tiêu đề của một phần: phải có cột Số BILL và cột tiền đặc trưng của phần đó. */
+  const findHeader = (moneyKeys: string[], from = 0) => {
+    for (let i = from; i < matrix.length; i++) {
+      const row = norm(i);
+      if (findCol(row, ["so bill", ...COL.tracking]) >= 0 && findCol(row, moneyKeys) >= 0) return { index: i, headers: row };
+    }
+    return null;
+  };
+
+  const secCod = findHeader(["so tien cod"]);
+  const secFee = findHeader(["tong so tien"], secCod ? secCod.index + 1 : 0);
+  if (!secCod && !secFee) {
+    throw new Error("Không tìm thấy phần 'CHI TIẾT SỐ TIỀN COD' hay 'CHI TIẾT TIỀN CƯỚC' trong bảng kê đối soát thanh toán");
+  }
+
+  /** Đọc các dòng dữ liệu ngay dưới một tiêu đề, dừng khi hết mã vận đơn hợp lệ. */
+  const readRows = (header: { index: number; headers: string[] } | null, moneyKeys: string[], dateKeys: string[], until = matrix.length) => {
+    const out = new Map<string, { amount: number; date?: string }>();
+    if (!header) return out;
+    const cTrack = findCol(header.headers, ["so bill", ...COL.tracking]);
+    const cMoney = findCol(header.headers, moneyKeys);
+    const cDate = dateKeys.length ? findCol(header.headers, dateKeys) : -1;
+    let blanks = 0;
+    // `until` là ranh giới phần sau: thiếu nó thì phần I đọc lấn sang bảng cước của phần II và
+    // lấy nhầm cột "Cước phí" làm "Số tiền COD" (cùng nằm ở cột F).
+    for (let i = header.index + 1; i < until; i++) {
+      const row = matrix[i] ?? [];
+      const code = String(row[cTrack] ?? "").trim().toUpperCase().replace(/\s+/g, "");
+      if (!/^[A-Z0-9][A-Z0-9_-]{4,}$/.test(code)) {
+        // Vài dòng trống ngăn cách hai phần là bình thường; trống nhiều liên tiếp nghĩa là hết bảng.
+        if (++blanks > 5) break;
+        continue;
+      }
+      blanks = 0;
+      const amount = cMoney >= 0 ? parseMoney(String(row[cMoney] ?? "")) : 0;
+      const date = cDate >= 0 ? toDateKey(String(row[cDate] ?? "")) : "";
+      const prev = out.get(code);
+      // Cùng một mã xuất hiện nhiều dòng trong một phần thì cộng dồn, không ghi đè.
+      out.set(code, { amount: (prev?.amount ?? 0) + amount, date: prev?.date || date || undefined });
+    }
+    return out;
+  };
+
+  const cod = readRows(secCod, ["so tien cod"], ["ngay phat thanh cong"], secFee ? secFee.index : matrix.length);
+  const fee = readRows(secFee, ["tong so tien"], []);
+
+  const rows: StatementDetailRow[] = [];
+  for (const code of new Set([...cod.keys(), ...fee.keys()])) {
+    const c = cod.get(code)?.amount ?? 0;
+    const f = fee.get(code)?.amount ?? 0;
+    rows.push({
+      trackingCode: code,
+      cod: c,
+      fee: f,
+      net: c - f,
+      paidDate: cod.get(code)?.date,
+      raw: JSON.stringify({ trackingCode: code, cod: c, fee: f, source: filename }),
+    });
+  }
+  if (!rows.length) throw new Error("Bảng kê đối soát thanh toán không có dòng vận đơn nào");
+  return rows;
+}

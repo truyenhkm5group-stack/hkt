@@ -1,4 +1,4 @@
-import { parseStatementDetail, parseVtpOrderList, mergeVtpOrderLists, type StatementDetailRow, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { parseCodPaymentStatement, parseStatementDetail, parseVtpOrderList, mergeVtpOrderLists, type StatementDetailRow, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 
 /**
  * Hai loại tệp tải trực tiếp từ Viettel Post, dùng làm DỮ LIỆU GỐC cho ERP:
@@ -32,6 +32,13 @@ function message(error: unknown) {
  * tệp nào cả hai đều không đọc được thì báo nguyên văn lỗi của trình đọc phù hợp nhất.
  */
 export function detectVtpFile(input: Buffer | string, filename: string): DetectedVtpFile {
+  // Bảng kê đối soát thanh toán Viettel Post GỬI QUA EMAIL có hai phần (COD và cước) nên phải
+  // thử trước: hai trình đọc kia chỉ tìm được một dòng tiêu đề duy nhất nên sẽ đọc thiếu.
+  try {
+    return { kind: "STATEMENT_DETAIL", filename, rows: parseCodPaymentStatement(input, filename) };
+  } catch {
+    // không phải bảng kê đối soát thanh toán — thử hai kiểu tệp tải tay
+  }
   let orderError = "";
   try {
     return { kind: "ORDER_LIST", filename, rows: parseVtpOrderList(input) };
