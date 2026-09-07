@@ -2,6 +2,28 @@
 
 Đọc `HANDOFF.md` trước khi bắt đầu bất kỳ việc gì. File này là **luật**, HANDOFF là **bối cảnh**.
 
+## 0. LUẬT NGHIỆP VỤ KHÔNG ĐƯỢC THƯƠNG LƯỢNG
+
+**Bất kỳ việc nào chạm tới đơn hàng, vận đơn, COD, thanh toán, doanh thu, tỷ lệ giao thành công,
+hàng hoàn, tồn kho, marketing, lương hay báo cáo — PHẢI đọc `docs/business-rules/ORDER_OUTCOME.md`
+trước khi sửa code.** Không được đổi các quy tắc đó trừ khi chính đặc tả trong kho mã được chủ sở
+hữu sửa một cách tường minh.
+
+Bốn điều tối thiểu phải nhớ (chi tiết và bảng chân lý nằm trong đặc tả):
+
+1. **Logistics, tiền và tồn kho là ba chiều riêng, không suy ra lẫn nhau.** Tuyệt đối không kết luận
+   "giao thành công" từ tiền, COD, `cod_status`, settlement hay trạng thái Pancake.
+2. **Chỉ có MỘT công thức kết quả đơn**: `ORDER_OUTCOME` trong `lib/queries/return-rate.ts`. Mọi
+   dashboard / báo cáo / lương / marketing / tồn kho / kế hoạch phải dùng lại nó, không tự tính.
+3. **`NULL` là CHƯA BIẾT, không phải 0.** Chưa có chứng từ tiền thì là *chưa xác minh*, không phải
+   *thu được 0đ*.
+4. **Hàng hoàn không tự vào tồn** cho tới khi kho xác nhận thực nhận.
+
+Contract test khoá các luật này ở `tests/contract-order-outcome.test.ts`, chạy trong `npm test`.
+**Không được sửa giá trị kỳ vọng của chúng để CI xanh** — nếu chúng đỏ thì code sai, không phải test sai.
+Workflow deploy chạy `tsc --noEmit` và `npm test` TRƯỚC khi đụng tới máy chủ: contract test đỏ thì
+deploy dừng, không phải cảnh báo.
+
 ## 1. Ngôn ngữ & giao tiếp
 - Giao diện, chú thích code, commit message, tài liệu: **tiếng Việt có dấu**. Tên biến/hàm/kiểu: tiếng Anh (không dùng ký tự có dấu trong identifier — TS2304 đã từng xảy ra với `gợiÝ`).
 - Tiền: số nguyên VND; thời gian hiển thị theo giờ Việt Nam (`lib/format.ts`). Không hiển thị số thập phân cho VND.

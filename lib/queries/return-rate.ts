@@ -184,28 +184,36 @@ const HAS_RETURN_LEG = sql`(${s.vtpOrderNumber} is not null and exists (
 ))`;
 const GOODS_CAME_BACK = sql`(${HAS_RETURN_LEG} or ${REVENUE_EDITED_AFTER_DELIVERY})`;
 
+/**
+ * NGUỒN CHÂN LÝ DUY NHẤT của kết quả đơn hàng cho toàn bộ ERP.
+ * Đặc tả bắt buộc: docs/business-rules/ORDER_OUTCOME.md — đọc trước khi sửa.
+ * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
+ */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${VTP_RETURNED} then 'RETURNED'
   when ${VTP_CANCELLED} then 'CANCELLED'
   when ${s.stage} = 'DELIVERED' and ${GOODS_CAME_BACK} then 'RETURNED'
+  -- ĐÃ GIAO và ĐÃ CÓ CHỨNG TỪ TIỀN thì áp ngưỡng: dưới 50K là hoàn, 50K–100K là không thành công.
+  -- Chưa có chứng từ thì KHÔNG hạ kết luận (xem nhánh dưới) — thiếu số không phải thu 0đ.
+  when ${s.stage} = 'DELIVERED' and ${HAS_CASH_EVIDENCE} and coalesce(${s.codCollected}, 0) + ${PREPAID} < ${RETURN_COD} then 'RETURNED'
+  when ${s.stage} = 'DELIVERED' and ${HAS_CASH_EVIDENCE} and coalesce(${s.codCollected}, 0) + ${PREPAID} <= ${MAX_COD} then 'RETURNED_BY_RULE'
   when ${VTP_DELIVERED} then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'CANCELLED' then 'CANCELLED'
   when ${HAS_VTP_EVIDENCE} and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
-  when coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${REVENUE_EDITED_AFTER_DELIVERY} then 'RETURNED'
-  when ${OUTCOME_MONEY} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
+  when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} > ${MAX_COD} then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
-  when ${o.stage} in ('DELIVERED','PAID') and ${OUTCOME_MONEY} > ${MAX_COD} then 'DELIVERED'
-  when ${o.stage} in ('DELIVERED','PAID') and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
-  when ${o.stage} in ('DELIVERED','PAID') then 'RETURNED_BY_RULE'
-  when ${o.stage} = 'SHIPPED' then 'IN_TRANSIT'
+  -- Pancake báo "đã giao" / "đã thanh toán" KHÔNG phải chứng từ giao hàng: đó là trạng thái bán
+  -- hàng, không phải trạng thái vận chuyển. Không có chứng từ ĐVVC thì cao nhất chỉ là ĐANG GIAO.
+  when ${o.stage} in ('DELIVERED','PAID','SHIPPED') then 'IN_TRANSIT'
   else 'NOT_SHIPPED' end`;
 
 /**
@@ -258,8 +266,10 @@ const DELIVERY_SIGNAL = sql`(${s.stage} = 'DELIVERED' or ${o.stage} in ('DELIVER
 export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
-  when ${CASH_COLLECTED} > ${MAX_COD} then 'DELIVERED'
+  -- Tiền KHÔNG BAO GIỜ được suy ra trạng thái giao hàng: vận đơn còn đang đi vẫn là ĐANG GIAO
+  -- dù đã thu đủ tiền. Xem docs/business-rules/ORDER_OUTCOME.md.
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') then 'IN_TRANSIT'
+  when ${s.stage} = 'DELIVERED' and ${CASH_COLLECTED} > ${MAX_COD} then 'DELIVERED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
   when ${DELIVERY_SIGNAL} then (case
     when ${MAX_POSSIBLE_CASH} < ${RETURN_COD} then 'RETURNED'

@@ -21,6 +21,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
+      # (docs/business-rules/ORDER_OUTCOME.md) phải xanh thì mới được deploy.
+      # Đây là điều kiện CHẶN, không phải cảnh báo — đỏ là dừng, không deploy.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
+      - name: Kiểm tra kiểu dữ liệu
+        run: npx tsc --noEmit
+      - name: Kiểm thử (gồm contract test luật nghiệp vụ)
+        run: npm test
+
       - name: Kiểm tra Secrets bắt buộc
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
