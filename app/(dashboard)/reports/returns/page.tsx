@@ -221,9 +221,18 @@ export default async function ReturnRatePage({
       <div className="flex items-start gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3.5 text-[13px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <div>
-          <b>Cách tính.</b> Chỉ số chính là <b>tỷ lệ giao thành công</b>. Đơn{" "}
-          <b>giao thành công</b> = đơn có <b>doanh thu COD thực</b> &gt;{" "}
-          {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (tiền thu hộ thực thu theo webhook giao thành công / bảng kê / danh sách vận đơn; chưa có số thực thu thì lấy COD vận đơn khi Viettel Post báo giao thành công; đơn đã chuyển khoản trước &gt; {formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} cũng tính). Đơn <b>không thành công</b> = vận đơn đang hoàn / đã hoàn, <b>hoặc</b> vận đơn “giao thành công” nhưng COD ≤ {formatVND(RETURN_RULE.maxCodForFakeDelivery)} (khách không nhận, chỉ trả tiền ship / phí xem hàng), kể cả khi vận đơn hoàn PKE…P1 nằm riêng; chưa có vận đơn thì theo trạng thái Pancake. Tỷ lệ giao thành công = giao TC / (giao TC + không TC), chỉ tính đơn <b>đã kết thúc</b>: đơn chờ xử lý, đang giao và huỷ không nằm trong tử số lẫn mẫu số. Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng số đơn chờ phát lại × xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào mẫu số. Bảng gom mẫu mã theo mã hàng: bấm mũi tên ở dòng mã (vd Q003) để xổ từng SKU. Một đơn có nhiều mã hàng được tính cho từng mã.
+          <b>Cách tính.</b> Kết quả đơn lấy theo <b>trạng thái Viettel Post</b>, đúng bảng mã trong tài liệu webhook chính thức.
+          Sáu mã là trạng thái cuối: <b>501</b> phát thành công (cờ <i>IS_RETURNING = false</i>) → <b>giao thành công</b>;
+          <b>501</b> của <b>chiều hoàn</b>, <b>504</b> chuyển trả người gửi, <b>503</b> tiêu huỷ → <b>không thành công</b>;
+          <b>101 / 107 / 201</b> → huỷ. Chưa có mã cuối thì lấy trạng thái mới nhất theo <b>mốc thời gian của Viettel Post</b>
+          (sự kiện đến muộn không kéo lùi trạng thái); vận đơn <b>đang đi</b> không nằm trong tử số lẫn mẫu số.
+          Chỉ {formatNumber(summary.finishedNoVtp)} đơn chưa có chứng từ Viettel Post mới rơi về quy tắc cũ suy theo tiền.
+          Tỷ lệ giao thành công = giao TC / (giao TC + không TC), chỉ tính đơn <b>đã kết thúc</b>.
+          Vì đơn <b>giao thất bại chờ phát lại</b> phần lớn sẽ thành hoàn, cột <b>Dự kiến</b> cộng số đơn chờ phát lại ×
+          xác suất thành hoàn học từ lịch sử 180 ngày (hiện {summary.failedToReturnPct}%) vào mẫu số.
+          {" "}<b>Lưu ý về tiền:</b> giao thành công là kết luận GIAO HÀNG, không có nghĩa tiền đã về tài khoản —
+          tiền vẫn chỉ được ghi nhận khi có chứng từ ở <b>Đối soát COD</b>.
+          Bảng gom mẫu mã theo mã hàng: bấm mũi tên ở dòng mã (vd Q003) để xổ từng SKU. Một đơn có nhiều mã hàng được tính cho từng mã.
         </div>
       </div>
 
