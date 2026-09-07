@@ -11,9 +11,10 @@
  *   · vận đơn có COD khai báo > 0 mà đang "không thu hộ" → đưa về đúng chiều tiền:
  *       - ĐVVC đã báo giao tới khách  ⇒ COLLECTED ("ĐVVC đã thu, chưa có chứng từ tiền về")
  *       - còn lại                      ⇒ PENDING   ("có thu hộ, ERP chưa có chứng từ")
- *   · vận đơn nào bị lần nhập bảng kê hỏng gán chứng từ nhưng tiền = 0 thì XOÁ dấu vết chứng từ đó
- *     (mã bảng kê / mốc chứng từ / đợt tiền), vì dòng chứng từ tương ứng đã không còn: để lại thì
- *     ERP tưởng đã xác minh trong khi không có gì để xác minh. Nhập lại bảng kê sẽ gắn lại đúng.
+ *   · xoá lời khẳng định sai "tiền đã về tài khoản ngày X" ở những vận đơn chưa có đồng nào.
+ *
+ * KHÔNG xoá `cod_statement_ref`: cái tên file là dấu vết truy nguyên, giữ lại để còn lần theo. Nó
+ * không còn được coi là bằng chứng tiền nữa — bằng chứng là DÒNG trong sổ `cod_statement_lines`.
  *
  * KHÔNG đụng tới `cod_collected`: tiền thực thu chỉ đến từ sổ chi tiết bảng kê.
  *
@@ -33,9 +34,8 @@ function rowsOf(result: unknown): Record<string, unknown>[] {
 /** Vận đơn nói "không thu hộ" trong khi vẫn có tiền thu hộ khai báo. */
 const SAI = sql`cod_status = 'NOT_APPLICABLE' and cod_amount > 0`;
 
-/** Chứng từ bảng kê còn ghi tên file nhưng không có dòng nào trong sổ và tiền = 0 ⇒ chứng từ rỗng. */
-const CHUNG_TU_RONG = sql`cod_statement_ref is not null and coalesce(cod_collected, 0) = 0 and cod_amount > 0
-  and not exists (select 1 from cod_statement_lines l where l.shipment_id = shipments.id)`;
+/** Ghi "tiền về tài khoản ngày X" trong khi chưa nhận được đồng nào — lời khẳng định sai. */
+const VE_TK_MA_KHONG_CO_TIEN = sql`cod_paid_to_bank_at is not null and coalesce(cod_collected, 0) = 0`;
 
 async function main() {
   const apply = process.argv.includes("--apply");
@@ -46,14 +46,14 @@ async function main() {
     from shipments where ${SAI} group by stage order by 2 desc
   `));
   const [rong] = rowsOf(await db.execute(sql`
-    select count(*) so_van_don from shipments where ${CHUNG_TU_RONG}
+    select count(*) so_van_don from shipments where ${VE_TK_MA_KHONG_CO_TIEN}
   `));
 
   console.log(JSON.stringify({
     che_do: apply ? "GHI THAT" : "CHAY THU",
     gan_sai_khong_thu_ho: truoc,
     tong_van_don_sai: truoc.reduce((t, r) => t + Number(r.so_van_don ?? 0), 0),
-    chung_tu_rong_se_go: Number(rong?.so_van_don ?? 0),
+    ghi_ve_tk_ma_khong_co_tien: Number(rong?.so_van_don ?? 0),
   }, null, 2));
 
   if (!apply) {
@@ -68,13 +68,8 @@ async function main() {
     where ${SAI}
   `);
   const goChungTu = await db.execute(sql`
-    update shipments set
-      cod_statement_ref = null,
-      cod_statement_at = null,
-      cod_batch_id = null,
-      cod_paid_to_bank_at = null,
-      updated_at = now()
-    where ${CHUNG_TU_RONG}
+    update shipments set cod_paid_to_bank_at = null, updated_at = now()
+    where ${VE_TK_MA_KHONG_CO_TIEN}
   `);
   const sau = rowsOf(await db.execute(sql`
     select cod_status::text trang_thai, count(*) so_van_don, sum(cod_amount) cod_khai_bao
@@ -82,7 +77,7 @@ async function main() {
   `));
   console.log(JSON.stringify({
     da_sua_trang_thai: Number((sua as unknown as { rowCount?: number }).rowCount ?? 0),
-    da_go_chung_tu_rong: Number((goChungTu as unknown as { rowCount?: number }).rowCount ?? 0),
+    da_go_ghi_ve_tk_sai: Number((goChungTu as unknown as { rowCount?: number }).rowCount ?? 0),
     sau_khi_sua: sau,
   }, null, 2));
 }

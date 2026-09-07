@@ -89,9 +89,15 @@ export async function testCodReconciliation(db: Db) {
     .limit(1);
   if (candidate) {
     const before = await codReconciliation(ALL);
+    // Bằng chứng là DÒNG trong sổ chi tiết bảng kê, không phải cái tên file trên vận đơn:
+    // tên file suông từng khiến vận đơn không còn số tiền nào vẫn bị coi là đã xác minh.
     await db.update(schema.shipments)
       .set({ codStatementRef: "test-bang-ke.xlsx", codStatementAt: new Date() })
       .where(eq(schema.shipments.id, candidate.id));
+    await db.insert(schema.codStatementLines).values({
+      sourceFile: "test-bang-ke.xlsx", trackingCode: `TEST-${candidate.id}`, cod: Number(candidate.collected) || 0,
+      fee: 0, net: Number(candidate.collected) || 0, codReported: true, statementAt: new Date(), shipmentId: candidate.id,
+    });
     clearMemo();
     const after = await codReconciliation(ALL);
     const moved = Number(candidate.collected) || 0;
@@ -99,6 +105,7 @@ export async function testCodReconciliation(db: Db) {
     assert.equal(after.unproven.amount, before.unproven.amount - moved, "và giảm đúng phần chưa có chứng từ");
     assert.equal(after.collected.amount, before.collected.amount, "tổng đã thu KHÔNG đổi — chỉ chuyển bậc bằng chứng, không sinh thêm tiền");
     assert.equal(after.receivable.amount, before.receivable.amount, "phải thu không đổi");
+    await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.shipmentId, candidate.id));
     await db.update(schema.shipments).set({ codStatementRef: null, codStatementAt: null }).where(eq(schema.shipments.id, candidate.id));
     clearMemo();
   }

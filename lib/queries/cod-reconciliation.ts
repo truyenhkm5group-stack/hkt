@@ -22,7 +22,8 @@ const b = schema.codBatches;
  */
 
 /** CÓ CHỨNG TỪ: vận đơn xuất hiện trên file chi tiết bảng kê tải từ Viettel Post. */
-const HAS_STATEMENT = sql`${s.codStatementRef} is not null`;
+/** Có dòng chứng từ thật trong sổ chi tiết bảng kê — không tính cái tên file suông. */
+const HAS_STATEMENT = sql`exists (select 1 from cod_statement_lines l where l.shipment_id = ${s.id} and l.cod_reported)`;
 const COLLECTED_STATUSES = sql`${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')`;
 /**
  * TIỀN THỰC THU — chỉ số đã thu thật, KHÔNG fallback sang COD khai báo.
@@ -171,7 +172,7 @@ export async function codBatchGaps(period: Period): Promise<CodBatchGap[]> {
 /** Vận đơn ĐVVC báo đã thu nhưng chưa ghép được vào bảng kê nào — danh sách cần đối soát. */
 export async function unprovenCollectedShipments(page: number, pageSize: number, q: string) {
   const db = await getDb();
-  const conds: SQL[] = [sql`${COLLECTED_AMOUNT} > 0`, sql`${s.codStatementRef} is null`];
+  const conds: SQL[] = [sql`${COLLECTED_AMOUNT} > 0`, sql`not ${HAS_STATEMENT}`];
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;

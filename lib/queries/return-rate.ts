@@ -92,11 +92,16 @@ export const REPORTABLE_ORDER = sql`${o.stage} <> 'NEW'`;
  * trên chi tiết bảng kê tải từ Viettel Post (kể cả bảng kê ghi thu 0 — đó vẫn là bằng chứng
  * KHÔNG thu được đồng nào).
  *
+ * Bằng chứng là DÒNG CHỨNG TỪ trong sổ chi tiết bảng kê, không phải cái tên file. Trước đây chỉ
+ * cần vận đơn có `cod_statement_ref` là coi như đã xác minh; một lần nhập hỏng để lại tên file mà
+ * không còn số tiền nào khiến 334 vận đơn giao thành công bị tính là "thu 0đ" ⇒ đơn hoàn.
+ *
  * CỐ Ý KHÔNG coi cod_status = 'NOT_APPLICABLE' ("Không thu hộ") là bằng chứng: dấu này có ở CẢ
  * đơn hoàn (PKE1508909058) lẫn đơn giao thành công chưa tới kỳ bảng kê (PKE1508909090), nên nó
  * không phân biệt được gì. Dấu hiệu phân biệt thật là REVENUE_EDITED_AFTER_DELIVERY bên dưới.
  */
-const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0 or ${s.codStatementRef} is not null)`;
+const HAS_CASH_EVIDENCE = sql`(coalesce(${s.codCollected}, 0) > 0
+  or exists (select 1 from cod_statement_lines l where l.shipment_id = ${s.id} and l.cod_reported))`;
 
 /**
  * SỐ TIỀN DÙNG ĐỂ KẾT LUẬN.
