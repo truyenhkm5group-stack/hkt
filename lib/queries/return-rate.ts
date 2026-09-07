@@ -155,10 +155,26 @@ export const IS_PROVISIONAL = sql`(${s.id} is not null and ${s.stage} = 'DELIVER
  *
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
+/**
+ * Vận đơn có chứng từ đến THẲNG TỪ VIETTEL POST (webhook, tệp danh sách vận đơn, tra API).
+ * Chỉ khi có nó thì trạng thái vận đơn mới được coi là kết luận của ĐVVC; không có thì rơi về
+ * quy tắc suy theo tiền bên dưới.
+ */
+const HAS_VTP_EVIDENCE = sql`exists (
+  select 1 from shipment_events ev
+  where ev.shipment_id = ${s.id}
+    and ev.source in ('VTP_WEBHOOK','VTP_IMPORT','VTP_POLL','MANUAL')
+    and ev.normalized_stage is not null
+)`;
+
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${VTP_RETURNED} then 'RETURNED'
   when ${VTP_CANCELLED} then 'CANCELLED'
   when ${VTP_DELIVERED} then 'DELIVERED'
+  when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
+  when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
+  when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'CANCELLED' then 'CANCELLED'
+  when ${HAS_VTP_EVIDENCE} and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${REVENUE_EDITED_AFTER_DELIVERY} then 'RETURNED'
