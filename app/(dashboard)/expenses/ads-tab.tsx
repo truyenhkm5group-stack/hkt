@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import { CircleDollarSign, Megaphone, ShoppingBag, Target, TrendingUp } from "lucide-react";
 import { CampaignMapping } from "@/app/(dashboard)/expenses/campaign-mapping";
 import { EmployeeDialog } from "@/app/(dashboard)/payroll/employee-dialog";
@@ -27,7 +29,14 @@ function change(current: number, previous: number | null | undefined) {
 
 export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { raw: SearchParams; period: Period; canWrite: boolean; canManageEmployees: boolean }) {
   const params = parseListParams(raw, { defaultSort: "spendDate", filterKeys: ["platform", "account", "marketer", "product"], sortable: AD_SORTABLE, defaultPeriod: "month" });
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf, billing, alertCfg] = await Promise.all([listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters), listCampaignsForMapping(period, params.filters), listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period), listAdAccountBilling(), loadAlertConfig()]);
+  // Bảng ghép chiến dịch render MỌI chiến dịch trong kỳ nên nặng nhất trang (đo được 1,86 MB HTML).
+  // Đây là việc thỉnh thoảng mới làm, không phải thứ nhìn mỗi lần vào trang — chỉ nạp khi mở.
+  const moGhep = raw.ghep === "1";
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf, billing, alertCfg] = await Promise.all([
+    listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters),
+    moGhep ? listCampaignsForMapping(period, params.filters) : Promise.resolve([]),
+    listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period), listAdAccountBilling(), loadAlertConfig(),
+  ]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
   const activeMarketers = employees.filter((e) => e.active);
@@ -123,7 +132,13 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
           </div>
         }
       >
-        <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={activeMarketers.map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} periodLabel={period.label} />
+        {moGhep ? (
+          <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={activeMarketers.map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} periodLabel={period.label} />
+        ) : (
+          <Button asChild variant="outline" size="sm">
+            <Link href="?ghep=1">Mở bảng ghép chiến dịch</Link>
+          </Button>
+        )}
       </SectionCard>
 
       <AdSpendsTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
