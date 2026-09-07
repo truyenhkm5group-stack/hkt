@@ -44,7 +44,10 @@ export function detectVtpFile(input: Buffer | string, filename: string): Detecte
     // Nếu trình đọc danh sách vận đơn đã khẳng định đây là chi tiết bảng kê thì lỗi của
     // trình đọc bảng kê mới là lỗi thật; ngược lại giữ lỗi của trình đọc danh sách.
     const statementError = message(error);
-    throw new VtpFileError(filename, orderError.includes("CHI TIẾT BẢNG KÊ") ? statementError : orderError);
+    // Trước đây chỉ nêu lỗi của MỘT trình đọc nên tệp lạ (ví dụ bảng kê Viettel Post gửi qua
+    // email) chỉ báo "không tìm thấy cột Mã vận đơn" mà giấu mất lý do thật của trình đọc kia.
+    if (orderError.includes("CHI TIẾT BẢNG KÊ")) throw new VtpFileError(filename, statementError);
+    throw new VtpFileError(filename, `${orderError} — Đọc theo kiểu chi tiết bảng kê cũng không được: ${statementError}`);
   }
 }
 
