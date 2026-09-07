@@ -7,6 +7,7 @@ import { applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { clearMemo } from "@/lib/cache";
 
 const track = (orderNumber: string, status: number, statusName: string, at: string) => ({
   orderNumber, orderReference: "", status, statusName,
@@ -126,4 +127,57 @@ export async function testVtpState(db: Db) {
   assert.equal(derived.deliveredAt?.toISOString(), "2026-09-05T10:00:00.000Z", "mốc giao lấy lần ĐẦU đạt tới, theo giờ của ĐVVC");
 
   console.log("✓ Trạng thái vận đơn dựng từ lịch sử: một bộ dịch chung, sự kiện muộn không kéo lùi, gói tin lặp vô hại, trạng thái lạ không ghi đè");
+}
+
+/**
+ * Hiệu suất giao vận phải tính từ hành trình, và tuyệt đối không được coi vận đơn đang đi là
+ * giao thất bại — đó là cách các báo cáo logistics hay nói dối nhất.
+ */
+export async function testLogisticsPerformance(db: Db) {
+  const { logisticsPerformance } = await import("@/lib/queries/logistics");
+  const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+
+  const mk = async (id: string, steps: { stage: "PICKED_UP" | "OUT_FOR_DELIVERY" | "DELIVERED" | "DELIVERY_FAILED" | "RETURNED"; at: string }[], isFinal: boolean) => {
+    await db.insert(schema.shipments).values({ id, vtpOrderNumber: `LOG-${id}`, stage: steps[steps.length - 1].stage, isFinal, createdAt: new Date("2026-07-01T00:00:00Z") });
+    for (const [i, st] of steps.entries()) {
+      await db.insert(schema.shipmentEvents).values({
+        shipmentId: id, source: "VTP_WEBHOOK", status: `log-${i}`, statusName: st.stage,
+        occurredAt: new Date(st.at), normalizedStage: st.stage,
+      });
+    }
+  };
+
+  const before = await logisticsPerformance(ALL);
+
+  // Giao ngay lần đầu: lấy hàng sau 2h, giao sau 24h nữa.
+  await mk("log-ok", [
+    { stage: "PICKED_UP", at: "2026-07-01T02:00:00Z" },
+    { stage: "DELIVERED", at: "2026-07-02T02:00:00Z" },
+  ], true);
+  // Phát hụt một lần rồi mới giao được → không tính vào "thành công ngay lần đầu".
+  await mk("log-retry", [
+    { stage: "PICKED_UP", at: "2026-07-01T02:00:00Z" },
+    { stage: "DELIVERY_FAILED", at: "2026-07-02T02:00:00Z" },
+    { stage: "DELIVERED", at: "2026-07-03T02:00:00Z" },
+  ], true);
+  // Đang trên đường, chưa kết thúc → KHÔNG được tính là thất bại.
+  await mk("log-flying", [{ stage: "OUT_FOR_DELIVERY", at: "2026-07-01T02:00:00Z" }], false);
+
+  clearMemo();
+  const after = await logisticsPerformance(ALL);
+  assert.equal(after.delivered, before.delivered + 2, "đếm đúng số vận đơn đã giao");
+  assert.equal(after.inFlight, before.inFlight + 1, "vận đơn đang đi được đếm riêng");
+  assert.ok(after.terminal < after.tracked, "mẫu số 'đã kết thúc' phải nhỏ hơn 'có hành trình'");
+  assert.ok(
+    after.successRateAll !== null && after.successRateTerminal !== null && after.successRateAll < after.successRateTerminal,
+    "tính trên mọi vận đơn thì tỷ lệ phải thấp hơn tính trên đơn đã kết thúc — hai mẫu số khác nhau, phải nêu rõ cả hai",
+  );
+  assert.ok(after.firstAttemptRate !== null && after.firstAttemptRate < 100, "đơn phải phát lại không được tính là thành công ngay lần đầu");
+  assert.ok(after.pickupHours.p50 !== null && after.pickupHours.p50 > 0, "đo được thời gian lấy hàng");
+  assert.ok(after.deliveryHours.p50 !== null && after.deliveryHours.p50 > 0, "đo được thời gian giao từ lúc lấy hàng");
+  assert.ok(after.deliveryHours.sample >= before.deliveryHours.sample + 2, "hai vận đơn vừa thêm phải vào mẫu đo thời gian giao");
+  assert.ok(after.stuck72h >= 1, "vận đơn chưa kết thúc và lâu không có tin phải bị nêu là kẹt");
+  assert.ok(after.stuck24h >= after.stuck48h && after.stuck48h >= after.stuck72h, "ngưỡng kẹt phải lồng nhau");
+
+  console.log(`✓ Hiệu suất giao vận: GTC ${after.successRateTerminal}% trên đơn đã kết thúc (${after.successRateAll}% trên mọi vận đơn) · lần đầu ${after.firstAttemptRate}% · lấy hàng p50 ${after.pickupHours.p50}h · giao p50 ${after.deliveryHours.p50}h · kẹt >24h ${after.stuck24h}`);
 }
