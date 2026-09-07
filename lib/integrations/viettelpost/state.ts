@@ -62,6 +62,23 @@ const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, V
 const REACHED_PICKUP: ShipmentStage[] = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];
 const REACHED_DELIVERY_ATTEMPT: ShipmentStage[] = ["OUT_FOR_DELIVERY", "DELIVERED"];
 
+/**
+ * CÙNG MỘT MÃ, HAI Ý NGHĨA TRÁI NGƯỢC — tuỳ chiều đi hay chiều hoàn.
+ *
+ * Viettel Post đặt mã 501 tên là "Thành công - Phát thành công" cho CẢ hai việc: phát tới khách
+ * (giao thành công) và phát hàng hoàn về lại shop (đơn hoàn). Cờ IS_RETURNING trong webhook mới
+ * là thứ phân biệt, và nó được ghi vào `shipment_events.leg_type`.
+ *
+ * Thiếu bước quy đổi này thì một gói tin 501 của CHIỀU HOÀN sẽ làm vận đơn thành "giao thành
+ * công" — đúng cái bẫy khiến doanh thu bị thổi lên.
+ */
+function onReturnLeg(legType: string | null, stage: ShipmentStage): ShipmentStage {
+  if (legType !== "RETURN") return stage;
+  if (stage === "DELIVERED") return "RETURNED";
+  if (stage === "PICKED_UP" || stage === "IN_TRANSIT" || stage === "OUT_FOR_DELIVERY" || stage === "DELIVERY_FAILED") return "RETURNING";
+  return stage;
+}
+
 function firstAt(rows: { stage: ShipmentStage; occurredAt: Date }[], stages: ShipmentStage[]): Date | null {
   const hit = rows.filter((r) => stages.includes(r.stage)).map((r) => r.occurredAt.getTime());
   return hit.length ? new Date(Math.min(...hit)) : null;
@@ -70,7 +87,7 @@ function firstAt(rows: { stage: ShipmentStage; occurredAt: Date }[], stages: Shi
 /** Tính trạng thái từ lịch sử. Trả null khi chưa có sự kiện nào đủ căn cứ. */
 export async function deriveShipmentState(db: Db, shipmentId: string): Promise<DerivedState | null> {
   const rows = await db
-    .select({ source: e.source, status: e.status, statusName: e.statusName, location: e.location, note: e.note, occurredAt: e.occurredAt, normalizedStage: e.normalizedStage, createdAt: e.createdAt })
+    .select({ source: e.source, status: e.status, statusName: e.statusName, location: e.location, note: e.note, occurredAt: e.occurredAt, normalizedStage: e.normalizedStage, legType: e.legType, createdAt: e.createdAt })
     .from(e)
     .where(and(eq(e.shipmentId, shipmentId), isNotNull(e.occurredAt)));
 
@@ -79,7 +96,7 @@ export async function deriveShipmentState(db: Db, shipmentId: string): Promise<D
   const usable = rows
     .map((r) => {
       const resolved = resolveVtpStatus({ code: eventStatusCode(r.status), text: r.statusName || r.status });
-      const stage = (r.normalizedStage ?? resolved.stage) as ShipmentStage;
+      const stage = onReturnLeg(r.legType, (r.normalizedStage ?? resolved.stage) as ShipmentStage);
       return { ...r, stage, resolved };
     })
     .filter((r) => CARRIER_SOURCES.has(r.source) && r.stage !== "UNKNOWN" && r.occurredAt instanceof Date && Number.isFinite(r.occurredAt.getTime()));
@@ -95,9 +112,12 @@ export async function deriveShipmentState(db: Db, shipmentId: string): Promise<D
   })[0];
 
   const code = eventStatusCode(winner.status);
+  // Mã kết thúc của chiều đi không có nghĩa là chiều hoàn đã xong: 501 trên chiều hoàn nghĩa là
+  // hàng đã về tới shop (kết thúc), nhưng 500/506 trên chiều hoàn thì vẫn đang trên đường về.
+  const finalByCode = code !== null ? VTP_FINAL_STATUSES.has(code) : winner.resolved.final;
   return {
     stage: winner.stage,
-    isFinal: code !== null ? VTP_FINAL_STATUSES.has(code) : winner.resolved.final,
+    isFinal: winner.legType === "RETURN" ? winner.stage === "RETURNED" : finalByCode,
     vtpStatus: code,
     vtpStatusName: winner.statusName || winner.resolved.name,
     vtpStatusDate: winner.occurredAt,

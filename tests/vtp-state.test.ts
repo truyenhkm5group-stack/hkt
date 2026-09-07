@@ -105,6 +105,34 @@ export async function testVtpState(db: Db) {
   assert.ok(huge, "mã tham chiếu quá lớn vẫn phải xử lý được, không được ném lỗi");
   assert.equal(huge?.stage, "OUT_FOR_DELIVERY");
 
+  // ───────── 4c. Mã 501 của CHIỀU HOÀN không phải là giao thành công ─────────
+  // Viettel Post đặt mã 501 tên "Thành công - Phát thành công" cho cả phát tới khách lẫn phát
+  // hàng hoàn về shop. Cờ IS_RETURNING (ghi vào leg_type) là thứ duy nhất phân biệt.
+  await db.insert(schema.orders).values({ id: "leg-order", insertedAt: new Date() });
+  const [legShip] = await db.insert(schema.shipments)
+    .values({ orderId: "leg-order", vtpOrderNumber: "PKE-LEG-501", stage: "RETURNING" })
+    .returning({ id: schema.shipments.id });
+  await db.insert(schema.shipmentEvents).values([
+    { shipmentId: legShip.id, source: "VTP_WEBHOOK", status: "505", statusName: "Tồn - Thông báo chuyển hoàn bưu cục gốc",
+      occurredAt: new Date("2026-09-08T01:00:00Z"), normalizedStage: "RETURNING", legType: "OUTBOUND" },
+    { shipmentId: legShip.id, source: "VTP_WEBHOOK", status: "501", statusName: "Thành công - Phát thành công",
+      occurredAt: new Date("2026-09-09T01:00:00Z"), normalizedStage: "DELIVERED", legType: "RETURN" },
+  ]);
+  await materializeShipmentState(db, legShip.id);
+  const [legAfter] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, legShip.id));
+  assert.equal(legAfter.stage, "RETURNED", "501 của chiều hoàn là hàng ĐÃ VỀ SHOP, tuyệt đối không phải giao thành công");
+  assert.equal(legAfter.isFinal, true, "hàng hoàn đã về tới shop là trạng thái kết thúc");
+
+  // Còn 500 (đi phát) trên chiều hoàn thì hàng vẫn đang trên đường về, chưa kết thúc.
+  await db.insert(schema.shipmentEvents).values({
+    shipmentId: legShip.id, source: "VTP_WEBHOOK", status: "500", statusName: "Giao bưu tá đi phát",
+    occurredAt: new Date("2026-09-10T01:00:00Z"), normalizedStage: "OUT_FOR_DELIVERY", legType: "RETURN",
+  });
+  await materializeShipmentState(db, legShip.id);
+  const [legMoving] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, legShip.id));
+  assert.equal(legMoving.stage, "RETURNING", "đang phát trên chiều hoàn = hàng vẫn đang về, không phải đang giao cho khách");
+  assert.equal(legMoving.isFinal, false);
+
   // ───────── 5. Bản sao hành trình từ Pancake không được quyền kết luận ─────────
   // Mốc của sự kiện Pancake là giờ Pancake ghi nhận, không phải giờ sự kiện của ĐVVC. Trộn vào
   // thì vận đơn đã giao xong bị kéo ngược về "đang đi phát" (đo được 122 ca trên production).
