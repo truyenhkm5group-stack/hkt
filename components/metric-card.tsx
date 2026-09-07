@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/info-hint";
 import type { LucideIcon } from "lucide-react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -16,6 +17,7 @@ export function MetricCard({
   label,
   value,
   note,
+  hint,
   change,
   changeLabel = "so với kỳ trước",
   icon: Icon,
@@ -25,6 +27,8 @@ export function MetricCard({
   label: string;
   value: React.ReactNode;
   note?: React.ReactNode;
+  /** Ý nghĩa và cách tính — hiện trong dấu ⓘ cạnh nhãn, không in thẳng ra màn hình. */
+  hint?: React.ReactNode;
   change?: number | null;
   changeLabel?: string;
   icon?: LucideIcon;
@@ -35,7 +39,10 @@ export function MetricCard({
   return (
     <Card className={cn("gap-0 p-5", className)}>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
+        <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+          {label}
+          {hint ? <InfoHint>{hint}</InfoHint> : null}
+        </p>
         {Icon ? (
           <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-xl", tones[tone])}>
             <Icon className="size-[18px]" />
