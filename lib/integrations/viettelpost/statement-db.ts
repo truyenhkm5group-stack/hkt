@@ -420,10 +420,12 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
       .set({
         // Tiền THỰC THU theo chứng từ. cod = 0 trên bảng kê nghĩa là KHÔNG thu được đồng nào
         // (thường là dòng chỉ có cước của chiều hoàn) — phải ghi đúng 0, không giữ số cũ.
-        codCollected: m.cod,
+        // Chỉ ghi tiền khi bảng kê thực sự nói về COD của vận đơn này. Dòng chỉ có cước không
+        // được phép hạ số đã ghi nhận trước đó về 0.
+        ...(m.codReported === false ? {} : { codCollected: m.cod }),
         shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
-        codStatus: m.cod > 0 ? "PAID_TO_BANK" : "NOT_APPLICABLE",
-        codPaidToBankAt: m.cod > 0 ? (batch?.receivedAt ?? statementAt) : null,
+        ...(m.codReported === false ? {} : { codStatus: m.cod > 0 ? ("PAID_TO_BANK" as const) : ("NOT_APPLICABLE" as const) }),
+        ...(m.codReported === false ? {} : { codPaidToBankAt: m.cod > 0 ? (batch?.receivedAt ?? statementAt) : null }),
         codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${statementAt})`,
         codStatementRef: sourceRef,
         codStatementAt: statementAt,

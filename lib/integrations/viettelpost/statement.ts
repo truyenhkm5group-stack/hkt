@@ -10,7 +10,21 @@ import { parseCsv } from "@/lib/integrations/bank/ledger";
 import { normalize } from "@/lib/text";
 
 export type StatementSummary = { reference: string; receivedAt: string; codGross: number; feeTotal: number; netAmount: number };
-export type StatementDetailRow = { trackingCode: string; cod: number; fee: number; net: number; raw: string; /** Ngày phát thành công (YYYY-MM-DD) — dùng để biết bảng kê phủ giai đoạn nào. */ paidDate?: string };
+export type StatementDetailRow = {
+  trackingCode: string; cod: number; fee: number; net: number; raw: string;
+  /** Ngày phát thành công (YYYY-MM-DD) — dùng để biết bảng kê phủ giai đoạn nào. */
+  paidDate?: string;
+  /**
+   * Bảng kê này CÓ NÓI về tiền COD của vận đơn hay không.
+   *
+   * Khác nhau một trời một vực: "bảng kê ghi thu 0" là bằng chứng không thu được đồng nào, còn
+   * "bảng kê không nhắc tới" chỉ nghĩa là kỳ này không chi trả COD cho vận đơn đó — tiền có thể
+   * đã về ở kỳ trước. Bảng kê gửi qua email tách riêng phần COD và phần cước, nên một vận đơn
+   * chỉ nằm ở phần cước sẽ có cod = 0 mà KHÔNG được phép hạ số tiền đã ghi nhận trước đó.
+   * Mặc định coi là có nói (tệp tải tay luôn có cột tiền thu hộ).
+   */
+  codReported?: boolean;
+};
 
 const MONEY_RE = /-?\d{1,3}(?:[.,]\d{3})+|-?\d+/g;
 
@@ -425,6 +439,7 @@ export function parseCodPaymentStatement(input: Buffer | string, filename = ""):
       cod: c,
       fee: f,
       net: c - f,
+      codReported: cod.has(code),
       paidDate: cod.get(code)?.date,
       raw: JSON.stringify({ trackingCode: code, cod: c, fee: f, source: filename }),
     });
