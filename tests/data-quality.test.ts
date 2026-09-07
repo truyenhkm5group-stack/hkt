@@ -41,10 +41,10 @@ export async function testDataQuality(db: Db) {
   assert.equal(declared.legacy, "DELIVERED", "chưa có chứng từ tiền → tạm tính theo COD khai báo (chủ shop chốt)");
   assert.equal(declared.verified, "UNVERIFIED", "VTP báo giao nhưng chưa có đồng thực thu nào → chưa xác minh");
 
-  // COD đã thực thu 499K và đã về ngân hàng: tiền trao tay tại cửa → giao thành công thật,
-  // dù trạng thái vận đơn vẫn là IN_TRANSIT.
+  // COD đã thực thu 499K và đã về ngân hàng, NHƯNG vận đơn còn đang đi: tiền không bao giờ suy
+  // ra trạng thái giao hàng. Xem docs/business-rules/ORDER_OUTCOME.md.
   await mk(db, "dq-902", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, codCollected: 499000, codStatus: "PAID_TO_BANK", shippingFee: 17000, vtpOrderNumber: "DQ902" });
-  assert.equal((await outcomes(db, "dq-902")).verified, "DELIVERED", "COD thực thu > 100K → giao thành công dù vận đơn chưa cập nhật");
+  assert.equal((await outcomes(db, "dq-902")).verified, "IN_TRANSIT", "đã thu đủ tiền nhưng vận đơn chưa giao → vẫn ĐANG GIAO");
 
   // Trần tiền dưới ngưỡng → kết luận CHẮC CHẮN, không cần số thực thu và không được coi là UNKNOWN.
   await mk(db, "dq-903", "DELIVERED", { stage: "DELIVERED", codAmount: 30000, shippingFee: 17000, vtpOrderNumber: "DQ903" });
@@ -80,7 +80,7 @@ export async function testDataQuality(db: Db) {
   // Pancake khai "đã thanh toán" mà không có vận đơn và không có tiền → chưa xác minh, KHÔNG phải doanh thu.
   await db.insert(schema.orders).values({ id: "dq-declared-only", systemId: 970003, stage: "PAID", status: 0, insertedAt: new Date(), cod: 499000, totalPriceAfterDiscount: 499000 });
   const declaredOnly = await outcomes(db, "dq-declared-only");
-  assert.equal(declaredOnly.legacy, "DELIVERED", "Pancake khai đã thanh toán + COD khai báo > 100K → tạm tính là giao thành công");
+  assert.equal(declaredOnly.legacy, "IN_TRANSIT", "Pancake khai đã thanh toán KHÔNG phải chứng từ giao hàng — không có vận đơn thì cao nhất là ĐANG GIAO");
   assert.equal(declaredOnly.verified, "UNVERIFIED", "Pancake khai suông không phải bằng chứng tiền");
 
   // ───────── 3. KPI tổng hợp + không bao giờ đổi UNKNOWN thành 0 ─────────
