@@ -568,6 +568,55 @@ export const codBatches = pgTable(
   (t) => [index("cod_batches_received_idx").on(t.receivedAt), uniqueIndex("cod_batches_reference_uq").on(t.reference)],
 );
 
+/**
+ * SỔ CHI TIẾT BẢNG KÊ — mỗi dòng của mỗi file bảng kê Viettel Post được giữ nguyên ở đây.
+ *
+ * Vì sao cần: trước đây tiền thực thu được ghi thẳng lên `shipments` theo từng file, không có
+ * thứ tự nào bảo vệ. Cùng một vận đơn xuất hiện ở nhiều bảng kê (chiều đi có tiền, chiều hoàn chỉ
+ * có cước) nên file nhập SAU — mà luồng email lại xử lý từ thư mới về thư cũ — ghi đè mất số của
+ * file mới hơn: 334 vận đơn giao thành công bị đưa tiền về 0 và gần 80 triệu biến mất khỏi đối soát.
+ *
+ * Sổ này là chứng từ, không bị ghi đè: một dòng cho mỗi (file, mã vận đơn). Số trên `shipments`
+ * chỉ là kết quả DỰNG LẠI từ sổ, nên nhập lại bao nhiêu lần, theo thứ tự nào cũng ra một kết quả.
+ */
+export const codStatementLines = pgTable(
+  "cod_statement_lines",
+  {
+    id: id(),
+    /** Tên file bảng kê — chứng từ gốc của dòng này. */
+    sourceFile: text("source_file").notNull(),
+    batchId: text("batch_id").references(() => codBatches.id, { onDelete: "set null" }),
+    /** Mã vận đơn ghi trên bảng kê (đã viết hoa). */
+    trackingCode: text("tracking_code").notNull(),
+    /** Tiền COD ĐVVC báo đã thu cho dòng này. */
+    cod: money("cod"),
+    /** Cước / dư nợ trừ trên dòng này. */
+    fee: money("fee"),
+    /** Thực nhận của dòng = COD − cước. */
+    net: money("net"),
+    /**
+     * Dòng này có nói về COD của vận đơn không. Dòng chỉ liệt kê cước (thường là chiều hoàn)
+     * KHÔNG phải bằng chứng "thu được 0 đồng" nên không được hạ số đã có về 0.
+     */
+    codReported: boolean("cod_reported").notNull().default(true),
+    /** Ngày phát thành công / ngày ghi trên bảng kê. */
+    paidDate: text("paid_date"),
+    /** Mốc chứng từ của cả file — dùng để chọn dòng mới nhất khi một vận đơn có nhiều dòng. */
+    statementAt: ts("statement_at").notNull(),
+    statusText: text("status_text").notNull().default(""),
+    /** Vận đơn ghép được trong ERP; null = bảng kê có dòng này mà ERP chưa có vận đơn. */
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("cod_statement_lines_file_code_uq").on(t.sourceFile, t.trackingCode),
+    index("cod_statement_lines_shipment_idx").on(t.shipmentId),
+    index("cod_statement_lines_batch_idx").on(t.batchId),
+    index("cod_statement_lines_code_idx").on(t.trackingCode),
+  ],
+);
+
 export const shipments = pgTable(
   "shipments",
   {
@@ -1059,7 +1108,12 @@ export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
   events: many(shipmentEvents),
 }));
 export const shipmentEventsRelations = relations(shipmentEvents, ({ one }) => ({ shipment: one(shipments, { fields: [shipmentEvents.shipmentId], references: [shipments.id] }) }));
-export const codBatchesRelations = relations(codBatches, ({ many }) => ({ shipments: many(shipments) }));
+export const codBatchesRelations = relations(codBatches, ({ many }) => ({ shipments: many(shipments), statementLines: many(codStatementLines) }));
+
+export const codStatementLinesRelations = relations(codStatementLines, ({ one }) => ({
+  batch: one(codBatches, { fields: [codStatementLines.batchId], references: [codBatches.id] }),
+  shipment: one(shipments, { fields: [codStatementLines.shipmentId], references: [shipments.id] }),
+}));
 
 // ───────────────────────── Types ─────────────────────────
 
@@ -1077,5 +1131,6 @@ export type AdSpend = typeof adSpends.$inferSelect;
 export type SyncRun = typeof syncRuns.$inferSelect;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type CodBatch = typeof codBatches.$inferSelect;
+export type CodStatementLine = typeof codStatementLines.$inferSelect;
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;

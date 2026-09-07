@@ -10,30 +10,33 @@ import { SyncButton } from "@/components/sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requirePermission } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { activeCodTab, COD_TABS, codStatusesFromFilter } from "@/lib/constants/cod";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { codFacets, codKpis, codPeriodColumn, codSummary, COD_SORTABLE, getCodBatch, listCodShipments, recentCodBatches } from "@/lib/queries/cod";
+import { statementFileAudit, statementLedgerSummary } from "@/lib/queries/cod-reconciliation";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Đối soát COD" };
 
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("cod:view");
-  const canWrite = can(user, "cod:write");
+  await requirePermission("cod:view");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "deliveredAt", filterKeys: ["cod", "carrier", "batch"], sortable: COD_SORTABLE, defaultPeriod: "all" });
   const batchId = params.filters.batch?.[0];
   const reconValues = ["unproven", "pending", "stale"];
   const reconDrill = reconValues.includes(param(raw, "recon")) ? param(raw, "recon") : null;
   const reconPage = Math.max(1, Number(param(raw, "rpage", "1")) || 1);
-  const [{ rows, total, pageCount }, kpis, facets, summary, batches, activeBatch] = await Promise.all([
+  const [{ rows, total, pageCount }, kpis, facets, summary, batches, activeBatch, ledger, fileAudit] = await Promise.all([
     listCodShipments(params),
     codKpis(params.period),
     codFacets(params),
     codSummary(params),
     recentCodBatches(10),
     batchId ? getCodBatch(batchId) : Promise.resolve(null),
+    statementLedgerSummary(),
+    statementFileAudit(20),
   ]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
   const tab = activeCodTab(params.filters.cod);
@@ -54,11 +57,6 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         description={`${formatVND(waiting, { compact: true })} đã giao chờ tiền về · ${formatVND(kpis.byStatus.PENDING.amount, { compact: true })} chưa thu · ${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn chênh lệch`}
         actions={
           <>
-            {canWrite ? (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/import-vtp">Nhập dữ liệu Viettel Post</Link>
-              </Button>
-            ) : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/cod?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV
@@ -117,10 +115,76 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           </>
         }
       />
-      <CodTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
+      <CodTable rows={rows} pageCount={pageCount} total={total} />
 
-      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Bảng kê tiền COD Viettel Post và các đợt đánh dấu tay."
- hint="Bảng kê tiền COD Viettel Post (tiền COD − cước/dư nợ = tiền thu về) và các đợt đánh dấu tay · số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát" padded={false}>
+      <SectionCard
+        title="Bảng kê Viettel Post đã nhận qua email"
+        description={ledger.files ? `${formatNumber(ledger.files)} file · ${formatNumber(ledger.lines)} dòng chi tiết · ghép được ${formatNumber(ledger.matched)} vận đơn` : "Chưa nhận được file bảng kê nào"}
+        hint={<>Bảng kê đối soát thanh toán do Viettel Post gửi về hòm thư của shop được đẩy thẳng vào ERP. Mỗi dòng chi tiết được giữ nguyên làm chứng từ; số tiền trên vận đơn là kết quả dựng lại từ các dòng đó nên nhập lại bao nhiêu lần cũng ra một kết quả. <b>Chưa ghép được</b> = bảng kê có dòng đó nhưng ERP chưa có vận đơn tương ứng, tiền có thật nhưng chưa truy nguyên được.</>}
+        padded={false}
+      >
+        {ledger.files ? (
+          <>
+            <div className="grid gap-px border-y bg-border sm:grid-cols-4">
+              <div className="bg-card px-5 py-4">
+                <p className="text-[13px] text-muted-foreground">COD trên bảng kê</p>
+                <p className="numeric mt-1 text-xl font-bold">{formatVND(ledger.batchCodTotal || ledger.codTotal)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">cước {formatVND(ledger.feeTotal, { compact: true })} · thực nhận {formatVND(ledger.netTotal, { compact: true })}</p>
+              </div>
+              <div className="bg-card px-5 py-4">
+                <p className="text-[13px] text-muted-foreground">Đã truy nguyên về vận đơn</p>
+                <p className="numeric mt-1 text-xl font-bold text-emerald-600 dark:text-emerald-400">{formatVND(ledger.codMatched)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{formatNumber(ledger.matched)} dòng</p>
+              </div>
+              <div className="bg-card px-5 py-4">
+                <p className="text-[13px] text-muted-foreground">Chưa ghép được vận đơn</p>
+                <p className={cn("numeric mt-1 text-xl font-bold", ledger.codUnmatched ? "text-amber-600 dark:text-amber-400" : "")}>{formatVND(ledger.codUnmatched)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{formatNumber(ledger.unmatched)} dòng bảng kê chưa có vận đơn trong ERP</p>
+              </div>
+              <div className="bg-card px-5 py-4">
+                <p className="text-[13px] text-muted-foreground">Bảng kê mới nhất</p>
+                <p className="numeric mt-1 text-xl font-bold">{ledger.lastStatementAt ? formatDate(ledger.lastStatementAt) : "—"}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">tự nhận qua email, không nhập tay</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>File bảng kê</TableHead>
+                    <TableHead>Đợt</TableHead>
+                    <TableHead>Giai đoạn</TableHead>
+                    <TableHead className="text-right">Dòng</TableHead>
+                    <TableHead className="text-right">Ghép được</TableHead>
+                    <TableHead className="text-right">COD đã truy nguyên</TableHead>
+                    <TableHead className="text-right">Chưa ghép</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {fileAudit.map((f) => (
+                    <TableRow key={f.sourceFile}>
+                      <TableCell className="max-w-[280px] truncate font-mono text-[11.5px]" title={f.sourceFile}>{f.sourceFile}</TableCell>
+                      <TableCell className="font-mono text-[11.5px]">{f.batchReference ?? <span className="text-amber-600">chưa khớp đợt</span>}</TableCell>
+                      <TableCell className="text-xs">{f.periodFrom ? `${formatDate(f.periodFrom)} → ${formatDate(f.periodTo ?? f.periodFrom)}` : "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(f.lines)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(f.matched)}</TableCell>
+                      <TableCell className="text-right"><Money value={f.codMatched} /></TableCell>
+                      <TableCell className="text-right">{f.unmatched ? <div><Money value={f.codUnmatched} className="text-amber-600 dark:text-amber-400" /><div className="text-[10.5px] text-muted-foreground">{formatNumber(f.unmatched)} dòng</div></div> : <span className="text-muted-foreground">—</span>}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        ) : (
+          <p className="px-5 py-6 text-sm text-muted-foreground">
+            Chưa có dòng chi tiết bảng kê nào trong sổ chứng từ. Bảng kê Viettel Post gửi qua email sẽ tự chảy vào đây; nếu đã có thư mà chưa thấy số, gỡ nhãn đã xử lý trong hòm thư để hệ thống đọc lại.
+          </p>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Từng đợt tiền Viettel Post chuyển về tài khoản."
+ hint="Mỗi đợt là một bảng kê Viettel Post: tiền COD − cước/dư nợ = tiền thu về. Số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát. Đợt tạo tự động từ thư bảng kê, không nhập tay." padded={false}>
         {batches.length ? (
           <div className="overflow-x-auto">
             <Table className="min-w-[720px]">
@@ -169,7 +233,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
             </Table>
           </div>
         ) : (
-          <p className="px-5 py-6 text-sm text-muted-foreground">Chưa có đợt nhận tiền nào. Chọn các vận đơn đã giao rồi bấm “Đánh dấu đã về ngân hàng” để tạo đợt đầu tiên.</p>
+          <p className="px-5 py-6 text-sm text-muted-foreground">Chưa có đợt nhận tiền nào. Đợt được tạo tự động khi Viettel Post gửi bảng kê đối soát về email của shop.</p>
         )}
       </SectionCard>
     </div>

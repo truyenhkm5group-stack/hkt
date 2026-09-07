@@ -1,23 +1,14 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlertTriangle, Banknote, CheckCheck, MoreHorizontal, Truck, Undo2 } from "lucide-react";
+import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
 import { Money } from "@/components/ui-bits";
-import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { CodListRow } from "@/lib/queries/cod";
 
-export type CodActionType = "RECONCILED" | "PAID" | "DISPUTED" | "COLLECTED";
 
-export const COD_ACTION_LABEL: Record<CodActionType, string> = {
-  RECONCILED: "Đánh dấu ĐVVC đã đối soát",
-  PAID: "Đánh dấu đã về ngân hàng",
-  DISPUTED: "Đánh dấu chênh lệch",
-  COLLECTED: "Quay về Đã thu",
-};
 
 const baseColumns: ColumnDef<CodListRow, unknown>[] = [
   {
@@ -149,45 +140,10 @@ const baseColumns: ColumnDef<CodListRow, unknown>[] = [
   },
 ];
 
-/** Cột bảng đối soát; khi có quyền ghi thêm menu thao tác từng dòng */
-export function codColumns({ canWrite, onAction }: { canWrite: boolean; onAction: (type: CodActionType, row: CodListRow) => void }): ColumnDef<CodListRow, unknown>[] {
-  if (!canWrite) return baseColumns;
-  return [
-    ...baseColumns,
-    {
-      id: "actions",
-      header: "",
-      enableSorting: false,
-      size: 44,
-      cell: ({ row }) => {
-        const s = row.original;
-        const status = s.codStatus;
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Thao tác" className="text-muted-foreground">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" data-no-row-link>
-              <DropdownMenuLabel className="text-xs text-muted-foreground">Vận đơn {s.vtpOrderNumber ?? s.trackingCode ?? ""}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem disabled={!["PENDING", "COLLECTED", "DISPUTED"].includes(status)} onSelect={() => onAction("RECONCILED", s)}>
-                <CheckCheck className="size-4" /> {COD_ACTION_LABEL.RECONCILED}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={status === "PAID_TO_BANK" || status === "NOT_APPLICABLE"} onSelect={() => onAction("PAID", s)}>
-                <Banknote className="size-4" /> {COD_ACTION_LABEL.PAID}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={status === "DISPUTED" || status === "NOT_APPLICABLE"} onSelect={() => onAction("DISPUTED", s)}>
-                <AlertTriangle className="size-4" /> {COD_ACTION_LABEL.DISPUTED}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={!["RECONCILED", "PAID_TO_BANK", "DISPUTED"].includes(status)} onSelect={() => onAction("COLLECTED", s)}>
-                <Undo2 className="size-4" /> {COD_ACTION_LABEL.COLLECTED}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        );
-      },
-    },
-  ];
+/**
+ * Cột bảng đối soát COD — chỉ đọc. Tiền chỉ đến từ bảng kê Viettel Post qua email nên không còn
+ * menu thao tác đánh dấu tay trên từng dòng.
+ */
+export function codColumns(): ColumnDef<CodListRow, unknown>[] {
+  return baseColumns;
 }

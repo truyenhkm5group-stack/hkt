@@ -402,39 +402,122 @@ export async function matchStatementFileToBatch(filename: string, rows: Statemen
  * Ghi cho từng vận đơn khớp mã: tiền THỰC THU, cước thật, và mốc chứng từ.
  * Không đụng vận đơn không có trong file.
  */
+/**
+ * Ghi chi tiết bảng kê vào SỔ CHỨNG TỪ rồi dựng lại số tiền trên vận đơn từ sổ.
+ *
+ * Không ghi thẳng lên vận đơn nữa. Lý do: cùng một vận đơn xuất hiện ở nhiều bảng kê (chiều đi
+ * có tiền, chiều hoàn chỉ có cước), mà luồng email xử lý từ thư mới về thư cũ, nên cách ghi thẳng
+ * để file cũ đè mất số của file mới — 334 vận đơn giao thành công bị đưa tiền về 0. Ghi vào sổ
+ * rồi dựng lại thì nhập bao nhiêu lần, theo thứ tự nào cũng ra đúng một kết quả.
+ */
 export async function applyStatementDetailRows(rows: StatementDetailRow[], sourceRef: string, batchId: string | null) {
   const db = await getDb();
   const batch = batchId
     ? await db.query.codBatches.findFirst({ where: eq(schema.codBatches.id, batchId), columns: { id: true, receivedAt: true } })
     : null;
-  const matches = (await matchStatementRows(rows)).filter((m) => m.shipmentId);
+  const matches = await matchStatementRows(rows);
   const now = new Date();
   // Mốc chứng từ: ngày phát thành công muộn nhất trong file, không có thì lấy ngày đợt.
   const dates = rows.map((r) => r.paidDate).filter((d): d is string => Boolean(d)).sort();
   const statementAt = dates.length ? new Date(`${dates[dates.length - 1]}T00:00:00Z`) : (batch?.receivedAt ?? now);
 
-  let withCash = 0;
-  for (const m of matches) {
+  // 1) Ghi sổ — mỗi (file, mã vận đơn) một dòng, nhập lại thì cập nhật đúng dòng đó.
+  const seen = new Set<string>();
+  const values = matches
+    .filter((m) => m.trackingCode && !seen.has(m.trackingCode) && seen.add(m.trackingCode))
+    .map((m) => ({
+      sourceFile: sourceRef,
+      batchId: batch?.id ?? null,
+      trackingCode: m.trackingCode,
+      cod: m.cod,
+      fee: m.fee,
+      net: m.net,
+      codReported: m.codReported !== false,
+      paidDate: m.paidDate ?? null,
+      statementAt,
+      statusText: m.raw ? m.raw.slice(0, 200) : "",
+      shipmentId: m.shipmentId,
+      updatedAt: now,
+    }));
+  for (let i = 0; i < values.length; i += 200) {
     await db
-      .update(schema.shipments)
-      .set({
-        // Tiền THỰC THU theo chứng từ. cod = 0 trên bảng kê nghĩa là KHÔNG thu được đồng nào
-        // (thường là dòng chỉ có cước của chiều hoàn) — phải ghi đúng 0, không giữ số cũ.
-        // Chỉ ghi tiền khi bảng kê thực sự nói về COD của vận đơn này. Dòng chỉ có cước không
-        // được phép hạ số đã ghi nhận trước đó về 0.
-        ...(m.codReported === false ? {} : { codCollected: m.cod }),
-        shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
-        ...(m.codReported === false ? {} : { codStatus: m.cod > 0 ? ("PAID_TO_BANK" as const) : ("NOT_APPLICABLE" as const) }),
-        ...(m.codReported === false ? {} : { codPaidToBankAt: m.cod > 0 ? (batch?.receivedAt ?? statementAt) : null }),
-        codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${statementAt})`,
-        codStatementRef: sourceRef,
-        codStatementAt: statementAt,
-        ...(batch ? { codBatchId: batch.id } : {}),
-        updatedAt: now,
-      })
-      .where(eq(schema.shipments.id, m.shipmentId as string));
-    if (m.orderId && m.fee > 0) await db.update(schema.orders).set({ partnerFee: m.fee }).where(eq(schema.orders.id, m.orderId));
-    if (m.cod > 0) withCash += 1;
+      .insert(schema.codStatementLines)
+      .values(values.slice(i, i + 200))
+      .onConflictDoUpdate({
+        target: [schema.codStatementLines.sourceFile, schema.codStatementLines.trackingCode],
+        set: {
+          batchId: sql`excluded.batch_id`,
+          cod: sql`excluded.cod`,
+          fee: sql`excluded.fee`,
+          net: sql`excluded.net`,
+          codReported: sql`excluded.cod_reported`,
+          paidDate: sql`excluded.paid_date`,
+          statementAt: sql`excluded.statement_at`,
+          statusText: sql`excluded.status_text`,
+          shipmentId: sql`coalesce(excluded.shipment_id, cod_statement_lines.shipment_id)`,
+          updatedAt: now,
+        },
+      });
   }
-  return { linked: matches.length, withCash, statementAt };
+
+  // 2) Dựng lại tiền trên các vận đơn có dòng trong sổ.
+  const shipmentIds = [...new Set(matches.map((m) => m.shipmentId).filter((v): v is string => Boolean(v)))];
+  await materializeCodFromStatementLines(shipmentIds);
+
+  // 3) Cước ĐVVC ghi ngược về đơn để báo cáo lợi nhuận dùng số thật.
+  for (const m of matches) {
+    if (m.orderId && m.fee > 0) await db.update(schema.orders).set({ partnerFee: m.fee }).where(eq(schema.orders.id, m.orderId));
+  }
+
+  const linked = shipmentIds.length;
+  const withCash = matches.filter((m) => m.shipmentId && m.cod > 0).length;
+  return { linked, withCash, statementAt, rows: values.length, unmatched: matches.length - linked };
+}
+
+/**
+ * DỰNG LẠI tiền COD của vận đơn từ sổ chi tiết bảng kê. Đây là chỗ DUY NHẤT được ghi
+ * `cod_collected` / `cod_status` / `cod_batch_id` từ chứng từ bảng kê.
+ *
+ * Chọn dòng đại diện cho mỗi vận đơn: ưu tiên dòng CÓ TIỀN, trong đó lấy dòng có mốc chứng từ
+ * muộn nhất. Dòng chỉ có cước (không nói về COD) không được chọn và không hạ số đã có về 0.
+ * Cước lấy dòng cao nhất chứ không cộng dồn — cùng một khoản cước có thể lặp ở hai file.
+ *
+ * `shipmentIds` rỗng = dựng lại toàn bộ. Vận đơn KHÔNG có dòng nào trong sổ thì không bị đụng tới.
+ */
+export async function materializeCodFromStatementLines(shipmentIds: string[] = []) {
+  const db = await getDb();
+  const loc = shipmentIds.length ? sql`and l.shipment_id in (${sql.join(shipmentIds.map((v) => sql`${v}`), sql`, `)})` : sql``;
+  const result = await db.execute(sql`
+    with chon as (
+      select distinct on (l.shipment_id)
+        l.shipment_id, l.cod, l.source_file, l.statement_at, l.batch_id
+      from cod_statement_lines l
+      where l.shipment_id is not null and l.cod_reported ${loc}
+      order by l.shipment_id, (l.cod > 0) desc, l.statement_at desc, l.created_at desc
+    ), cuoc as (
+      select l.shipment_id, max(l.fee) fee
+      from cod_statement_lines l
+      where l.shipment_id is not null ${loc}
+      group by l.shipment_id
+    )
+    update shipments s set
+      cod_collected = c.cod,
+      cod_status = case when c.cod > 0 then 'PAID_TO_BANK'::cod_status else 'NOT_APPLICABLE'::cod_status end,
+      cod_paid_to_bank_at = case when c.cod > 0 then coalesce(b.received_at, c.statement_at) else null end,
+      cod_batch_id = c.batch_id,
+      cod_statement_ref = c.source_file,
+      cod_statement_at = c.statement_at,
+      cod_reconciled_at = coalesce(s.cod_reconciled_at, c.statement_at),
+      shipping_fee = case when coalesce(f.fee, 0) > 0 then f.fee else s.shipping_fee end,
+      updated_at = now()
+    from chon c
+      left join cuoc f on f.shipment_id = c.shipment_id
+      left join cod_batches b on b.id = c.batch_id
+    where s.id = c.shipment_id
+      and (s.cod_collected is distinct from c.cod
+        or s.cod_batch_id is distinct from c.batch_id
+        or s.cod_statement_ref is distinct from c.source_file
+        or (coalesce(f.fee, 0) > 0 and s.shipping_fee is distinct from f.fee))
+  `);
+  return { updated: Number((result as unknown as { rowCount?: number }).rowCount ?? 0) };
 }

@@ -345,3 +345,72 @@ export async function testVtpStatementFromMail() {
 
   console.log("✓ Bảng kê COD từ Gmail: lõi nhập chạy không cần đăng nhập, ghi đúng tiền thực thu, gửi lại không nhân đôi");
 }
+
+/**
+ * BẢNG KÊ NHẬP SAU KHÔNG ĐƯỢC ĐÈ MẤT SỐ CỦA BẢNG KÊ MỚI HƠN.
+ *
+ * Đây là lỗi đã xảy ra thật trên production: luồng email xử lý từ thư mới về thư cũ, mỗi file ghi
+ * thẳng lên vận đơn nên file cũ ghi đè lên file mới — 334 vận đơn giao thành công bị đưa tiền về 0
+ * và 79.774.116đ biến mất khỏi đối soát. Từ nay chi tiết bảng kê vào SỔ CHỨNG TỪ, số trên vận đơn
+ * chỉ là kết quả dựng lại, nên thứ tự nhập không còn ảnh hưởng.
+ */
+export async function testStatementLedgerOrderIndependent() {
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { getDb, schema } = await import("@/db");
+  const { eq, and } = await import("drizzle-orm");
+  const db = await getDb();
+
+  await db
+    .insert(schema.shipments)
+    .values({ id: "so-ship-1", vtpOrderNumber: "PKE9922220001", trackingCode: "PKE9922220001", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 500000 })
+    .onConflictDoNothing();
+
+  const head = "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)";
+  const tep = (name: string, ngay: string, cod: number, fee: number) => ({
+    filename: name,
+    base64: Buffer.from(`${head}\nPKE9922220001,GLMTQY214,K,0900000092,X,01/08/2026 09:00:00,${ngay},${cod},${fee},${cod - fee}`, "utf8").toString("base64"),
+  });
+
+  // Bảng kê MỚI (05/09) nói thu được 500.000; bảng kê CŨ (25/08) chỉ có dòng cước, thu 0.
+  const moi = tep("BangKeChiCOD_moi.csv", "05/09/2026 10:00:00", 500000, 20000);
+  const cu = tep("BangKeChiCOD_cu.csv", "25/08/2026 10:00:00", 0, 12000);
+
+  await runVtpDataFileImport([moi], "GMAIL:viettelpost");
+  await runVtpDataFileImport([cu], "GMAIL:viettelpost"); // nhập SAU nhưng chứng từ CŨ hơn
+
+  const sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "so-ship-1") });
+  assert.equal(Number(sau?.codCollected), 500000, "bảng kê cũ hơn KHÔNG được xoá tiền của bảng kê mới");
+  assert.equal(sau?.codStatus, "PAID_TO_BANK", "vẫn phải là tiền đã về ngân hàng");
+  assert.equal(sau?.codStatementRef, "BangKeChiCOD_moi.csv", "chứng từ đại diện là bảng kê có tiền, mới nhất");
+
+  // Sổ giữ đủ cả hai dòng: chứng từ không bị mất, kiểm tra lại được bất cứ lúc nào.
+  const lines = await db.select().from(schema.codStatementLines).where(eq(schema.codStatementLines.trackingCode, "PKE9922220001"));
+  assert.equal(lines.length, 2, "mỗi file một dòng trong sổ, không đè nhau");
+
+  // Nhập lại đúng file cũ lần nữa cũng không đổi kết quả (đúng một dòng cho mỗi file × mã).
+  await runVtpDataFileImport([cu], "GMAIL:viettelpost");
+  const lines2 = await db.select().from(schema.codStatementLines).where(eq(schema.codStatementLines.trackingCode, "PKE9922220001"));
+  assert.equal(lines2.length, 2, "nhập lại không nhân đôi dòng sổ");
+  const sau2 = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "so-ship-1") });
+  assert.equal(Number(sau2?.codCollected), 500000, "nhập lại vẫn ra đúng một kết quả");
+
+  // Dòng bảng kê không ghép được vận đơn vẫn phải nằm trong sổ để đối soát thấy tiền còn treo.
+  const la = {
+    filename: "BangKeChiCOD_la.csv",
+    base64: Buffer.from(`${head}\nPKE9933330001,GLMTQY214,L,0900000093,Y,01/08/2026 09:00:00,06/09/2026 10:00:00,300000,15000,285000`, "utf8").toString("base64"),
+  };
+  await runVtpDataFileImport([la], "GMAIL:viettelpost");
+  const treo = await db
+    .select()
+    .from(schema.codStatementLines)
+    .where(and(eq(schema.codStatementLines.trackingCode, "PKE9933330001")));
+  assert.equal(treo.length, 1, "dòng bảng kê chưa có vận đơn vẫn được ghi sổ");
+  assert.equal(treo[0].shipmentId, null, "chưa ghép được thì để trống, không gán bừa");
+  assert.equal(Number(treo[0].cod), 300000, "giữ nguyên số tiền để biết còn bao nhiêu chưa truy nguyên");
+
+  const { statementLedgerSummary } = await import("@/lib/queries/cod-reconciliation");
+  const tong = await statementLedgerSummary();
+  assert.ok(tong.codUnmatched >= 300000, "đối soát phải nêu được phần tiền chưa ghép được vận đơn");
+
+  console.log(`✓ Sổ chứng từ bảng kê: bảng kê cũ không đè bảng kê mới, nhập lại không nhân đôi, ${tong.codUnmatched}đ chưa ghép được vẫn hiện ra`);
+}
