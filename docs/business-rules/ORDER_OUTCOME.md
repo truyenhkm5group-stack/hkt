@@ -79,6 +79,13 @@ Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 5
 
 ## 7. UNKNOWN không phải 0
 
+**Ngưỡng tiền chỉ được áp khi BIẾT CHẮC số tiền, tức có số DƯƠNG.** Việc vận đơn xuất hiện trên
+một bảng kê nào đó KHÔNG chứng minh "thu 0đ": bảng kê gửi qua email tách phần COD và phần cước,
+một vận đơn nằm ở phần cước cũng có mã bảng kê mà không hề nói gì về COD. `cod_collected = 0` là
+*chưa biết*, không phải *thu được 0đ* — không được dùng để kết luận đơn hoàn.
+
+
+
 `NULL` nghĩa là **chưa biết**, không phải "bằng 0". Chưa có số thực thu thì kết luận là *chưa xác
 minh*, không phải *thu được 0đ*. `ORDER_OUTCOME_VERIFIED` giữ riêng giá trị `UNVERIFIED` cho việc này.
 

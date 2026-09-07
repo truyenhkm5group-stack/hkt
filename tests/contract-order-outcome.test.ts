@@ -145,6 +145,25 @@ export async function testOrderOutcomeContract(db: Db) {
     "RETURNED",
   );
 
+  // ───────── HAI CA THẬT chủ shop đã chỉ ra hai lần — không được ghi nhận giống nhau ─────────
+  // PKE1508909064: VTP ghi giao thành công, thu hộ 849.000, KHÔNG sửa doanh thu, KHÔNG có vận đơn
+  // chiều hoàn. Vận đơn có mã bảng kê nhưng cod_collected = 0 vì bảng kê chỉ nhắc tới phần cước.
+  // "Có mã bảng kê" KHÔNG phải bằng chứng "thu 0đ" — coi vậy là biến CHƯA BIẾT thành 0.
+  await check(
+    "ca PKE1508909064: có mã bảng kê nhưng chưa có số thực thu thì KHÔNG được kết luận hoàn",
+    { shipmentStage: "DELIVERED", codAmount: 849_000, codCollected: 0, codStatus: "NOT_APPLICABLE", statementRef: "BK-FEE-ONLY",
+      vtpEvents: [{ status: "501", stage: "DELIVERED", leg: "OUTBOUND" }] },
+    "DELIVERED",
+  );
+  // PKE1508909058: cùng mã 501, cùng COD khai báo, cùng cod_collected = 0 — nhưng Viettel Post đã
+  // tạo vận đơn ...1P1 mang hàng về shop. Hai đơn này PHẢI cho kết quả khác nhau.
+  await check(
+    "ca PKE1508909058: cùng dữ liệu tiền nhưng có vận đơn chiều hoàn thì là ĐƠN HOÀN",
+    { shipmentStage: "DELIVERED", codAmount: 849_000, codCollected: 0, codStatus: "NOT_APPLICABLE", statementRef: "BK-FEE-ONLY", returnLeg: true,
+      vtpEvents: [{ status: "501", stage: "DELIVERED", leg: "OUTBOUND" }] },
+    "RETURNED",
+  );
+
   // ───────── UNKNOWN không phải 0 ─────────
   const chuaCoChungTu = await build(db, {
     shipmentStage: "DELIVERED",
