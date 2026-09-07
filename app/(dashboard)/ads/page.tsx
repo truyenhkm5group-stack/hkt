@@ -18,7 +18,8 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       <PageHeader
         eyebrow="Tài chính"
         title="Quảng cáo"
-        description="Hiệu suất quảng cáo theo mã hàng và theo marketer: chi tiêu, đơn đã xác nhận, ROAS, CPO, lợi nhuận sau QC. Chi tiêu Facebook tự kéo mỗi giờ; ghép chiến dịch → mã hàng / marketer ở cuối trang."
+        description="Hiệu suất quảng cáo theo mã hàng và theo marketer"
+        hint="Hiệu suất quảng cáo theo mã hàng và theo marketer: chi tiêu, đơn đã xác nhận, ROAS, CPO, lợi nhuận sau QC. Chi tiêu Facebook tự kéo mỗi giờ; ghép chiến dịch → mã hàng / marketer ở cuối trang."
         actions={canWrite ? <AdSpendDialog /> : null}
       />
       <AdsTab raw={raw} period={period} canWrite={canWrite} canManageEmployees={canManageEmployees} />

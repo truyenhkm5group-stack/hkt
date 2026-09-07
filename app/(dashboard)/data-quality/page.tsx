@@ -85,7 +85,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       <PageHeader
         eyebrow="Data Truth"
         title="Chất lượng dữ liệu"
-        description="Phát hiện chênh lệch trong dữ liệu đơn hàng, vận đơn và tiền đã ghi nhận. Các phép đối chiếu dưới đây vẫn dựa trên dữ liệu legacy."
+        description="Phát hiện chênh lệch giữa đơn hàng, vận đơn và tiền đã ghi nhận."
+        hint="Phát hiện chênh lệch trong dữ liệu đơn hàng, vận đơn và tiền đã ghi nhận. Các phép đối chiếu dưới đây vẫn dựa trên dữ liệu legacy."
       />
       <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
         Các số đối chiếu vẫn có COD khai báo/fallback và prepaid chưa kiểm chứng chứng từ. Chúng chưa phải tiền thực thu đã xác minh và chưa đủ để chốt doanh thu, lương hoặc đối soát ngân hàng. Cần đối chiếu bảng kê COD, chứng từ thanh toán và chiều giao/hoàn.
@@ -147,7 +148,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       {/* ───────── Ảnh hưởng đến quyết định ───────── */}
       <SectionCard
         title="Ảnh hưởng đến quyết định"
-        description="So sánh hai cách phân loại dữ liệu legacy để tìm vấn đề. Chênh lệch này chưa phải số điều chỉnh kế toán đã xác minh."
+        description="So sánh hai cách phân loại dữ liệu legacy để tìm vấn đề."
+        hint="So sánh hai cách phân loại dữ liệu legacy để tìm vấn đề. Chênh lệch này chưa phải số điều chỉnh kế toán đã xác minh."
       >
         <div className="overflow-x-auto">
           <Table>

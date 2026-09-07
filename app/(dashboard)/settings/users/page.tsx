@@ -25,7 +25,8 @@ export default async function UsersPage() {
       <PageHeader
         eyebrow="Hệ thống"
         title="Người dùng"
-        description="Tài khoản đăng nhập nội bộ, vai trò và quyền truy cập theo từng module. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
+        description="Tài khoản đăng nhập nội bộ, vai trò và quyền theo từng module."
+        hint="Tài khoản đăng nhập nội bộ, vai trò và quyền truy cập theo từng module. Mỗi thao tác quan trọng được ghi vào Nhật ký hệ thống."
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -48,7 +49,8 @@ export default async function UsersPage() {
         <UsersTable users={rows} currentUserId={user.id} activeAdmins={activeAdmins} templates={templates} />
       </SectionCard>
 
-      <SectionCard title="Vai trò & quyền" description="Vai trò là mẫu quyền khởi điểm: tích/bỏ tích để đổi quyền mặc định của từng vai trò. Muốn khác biệt cho một người cụ thể, dùng “Phân quyền” ở menu cuối dòng.">
+      <SectionCard title="Vai trò & quyền" description="Vai trò là mẫu quyền khởi điểm cho người dùng."
+ hint="Vai trò là mẫu quyền khởi điểm: tích/bỏ tích để đổi quyền mặc định của từng vai trò. Muốn khác biệt cho một người cụ thể, dùng “Phân quyền” ở menu cuối dòng.">
         <RoleMatrix templates={templates} canEdit />
       </SectionCard>
     </div>

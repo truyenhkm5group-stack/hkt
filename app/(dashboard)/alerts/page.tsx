@@ -26,7 +26,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Vận hành"
         title="Cần xử lý"
-        description="Đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn, case CSKH mới — nhân viên vận đơn theo dõi tại đây và nhận tin qua nhóm Lark Suite (hoặc Telegram)."
+        description="Việc cần làm hôm nay: đơn quá hạn, vận đơn treo, chuyển hoàn, case CSKH."
+        hint="Đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn, case CSKH mới — nhân viên vận đơn theo dõi tại đây và nhận tin qua nhóm Lark Suite (hoặc Telegram)."
         actions={
           <>
             <MarkAllReadButton />
@@ -71,7 +72,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       </SectionCard>
 
       {canConfig ? (
-        <SectionCard title="Cấu hình cảnh báo · Lark Suite / Telegram" description="Lark: thêm Custom Bot vào nhóm nhân viên vận đơn rồi dán Webhook URL. Telegram: tạo bot qua @BotFather. Ngưỡng thời gian chỉnh theo quy trình của shop.">
+        <SectionCard title="Cấu hình cảnh báo · Lark Suite / Telegram" description="Nơi nhận cảnh báo và ngưỡng thời gian coi là quá hạn."
+ hint="Lark: thêm Custom Bot vào nhóm nhân viên vận đơn rồi dán Webhook URL. Telegram: tạo bot qua @BotFather. Ngưỡng thời gian chỉnh theo quy trình của shop.">
           <AlertConfigForm config={{ ...config, telegramBotToken: "", larkSecret: "" }} hasToken={Boolean(config.telegramBotToken)} hasLarkSecret={Boolean(config.larkSecret)} />
         </SectionCard>
       ) : null}

@@ -29,7 +29,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Tài chính"
         title="Chi phí vận hành"
-        description="Kê khai chi phí vận hành kinh doanh ngoài Pancake: lương, mặt bằng, điện nước, phần mềm, đóng gói, nhập hàng… Nhập tay hoặc từ sao kê ngân hàng; số liệu đưa vào Báo cáo lợi nhuận (dòng tiền & danh nghĩa)."
+        description="Kê khai chi phí vận hành kinh doanh ngoài Pancake"
+        hint="Kê khai chi phí vận hành kinh doanh ngoài Pancake: lương, mặt bằng, điện nước, phần mềm, đóng gói, nhập hàng… Nhập tay hoặc từ sao kê ngân hàng; số liệu đưa vào Báo cáo lợi nhuận (dòng tiền & danh nghĩa)."
         actions={
           canWrite ? (
             <div className="flex flex-wrap gap-2">
