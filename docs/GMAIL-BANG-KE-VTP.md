@@ -17,6 +17,8 @@ Viettel Post tự gửi thư **"BẢNG KÊ ĐỐI SOÁT THANH TOÁN"** kèm tệ
 
 Lần chạy đầu quét **toàn bộ** thư Viettel Post trong hộp (kể cả thư cũ) nên lấp luôn phần bảng kê lịch sử còn thiếu. Những lần sau chỉ lấy thư chưa có nhãn `ERP-da-nhap`.
 
+**Nếu thư đã bị gắn nhãn `ERP-da-nhap` mà ERP chưa nhập được** (xảy ra khi bộ đọc chưa hỗ trợ bố cục tệp): vào Gmail, tìm `label:ERP-da-nhap`, chọn tất cả rồi **gỡ nhãn** — chu kỳ kế tiếp sẽ gửi lại toàn bộ. Từ nay ERP trả HTTP 422 khi không nhập được tệp nào nên script sẽ tự giữ lại thư để thử lần sau.
+
 Gửi lại cùng một tệp **không** làm số liệu nhân đôi: ERP chống trùng theo mã vận đơn và mã bảng kê, và chỉ nâng trạng thái COD chứ không hạ.
 
 ## Đoạn script

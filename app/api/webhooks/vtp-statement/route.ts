@@ -95,7 +95,11 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(schema.syncRuns.id, run.id));
     clearMemo();
-    return NextResponse.json({ ok: true, files: result.files.map((f) => ({ filename: f.filename, kind: f.kind, rows: f.rows, applied: f.applied, note: f.note })) });
+    const body = { ok: imported > 0, imported, failed: failed.length, files: result.files.map((f) => ({ filename: f.filename, kind: f.kind, rows: f.rows, applied: f.applied, note: f.note })) };
+    // KHÔNG được trả 200 khi không nhập được tệp nào. Script trong Gmail chỉ gắn nhãn
+    // "đã nhập" khi nhận HTTP 200; trả 200 cho một lượt hỏng sạch khiến thư bị đánh dấu xong
+    // và KHÔNG BAO GIỜ gửi lại — đúng chuyện đã xảy ra: 11 lượt hỏng mà không lượt nào thử lại.
+    return NextResponse.json(body, { status: imported > 0 ? 200 : 422 });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Lỗi không rõ";
     await db.update(schema.syncRuns).set({ status: "FAILED", error: message.slice(0, 900), finishedAt: new Date() }).where(eq(schema.syncRuns.id, run.id));
