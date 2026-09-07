@@ -105,7 +105,9 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
   // tìm dòng tiêu đề trong 15 dòng đầu
   let headerIdx = -1;
   let headers: string[] = [];
-  for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+  // Tệp Viettel Post gửi qua email (BangKeChiCOD_*.xlsx) có tiêu đề thư và phần ký nhận dài
+  // trước dòng tiêu đề bảng, nên phải quét sâu hơn 15 dòng.
+  for (let i = 0; i < Math.min(matrix.length, 40); i++) {
     const row = (matrix[i] ?? []).map((c) => normalize(String(c ?? "")));
     if (findCol(row, COL.tracking) >= 0) {
       headerIdx = i;
@@ -227,7 +229,7 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   }
   let headerIdx = -1;
   let headers: string[] = [];
-  for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+  for (let i = 0; i < Math.min(matrix.length, 40); i++) {
     const row = (matrix[i] ?? []).map((c) => normalize(String(c ?? "")));
     if (findCol(row, COL.tracking) >= 0 && findCol(row, LIST_COL.status) >= 0) {
       headerIdx = i;
@@ -248,7 +250,11 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
           'Hãy nhập ở tab "Chi tiết một bảng kê (file)" để gắn vận đơn vào đợt tiền về.',
       );
     }
-    const sample = matrix.slice(0, 3).map((r) => (r ?? []).map((c) => String(c ?? "").trim()).filter(Boolean).slice(0, 12).join(" | ")).filter(Boolean).join(" ‖ ");
+    // Liệt kê nhiều dòng đầu để lần sau nhìn thông báo là biết bố cục tệp, không phải xin lại tệp.
+    const sample = matrix.slice(0, 24).map((r, i) => {
+      const cells = (r ?? []).map((c) => String(c ?? "").trim()).filter(Boolean).slice(0, 14);
+      return cells.length ? `[${i}] ${cells.join(" | ")}` : "";
+    }).filter(Boolean).slice(0, 12).join(" ‖ ");
     throw new Error(`Không tìm thấy cột Mã vận đơn và Trạng thái trong file. Các cột đọc được: ${sample || "(trống)"}`);
   }
   const cTrack = findCol(headers, COL.tracking);
