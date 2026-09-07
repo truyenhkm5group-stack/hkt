@@ -52,6 +52,10 @@ export async function POST(request: NextRequest) {
 
   const expected = env.viettelPost.webhookSecret;
   if (expected && !extractSecret(request, body).includes(expected)) {
+    // Gói tin bị chặn KHÔNG được ghi vào webhook_events (ai cũng POST được thì bảng sẽ phình vô
+    // hạn). Nhưng im lặng hoàn toàn thì cấu hình sai secret sẽ làm mất sạch dữ liệu mà không ai
+    // biết — nên để lại một dòng log tra được bằng `docker logs`.
+    console.warn(`[vtp-webhook] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"} · vận đơn=${str(asRecord(body.DATA ?? body).ORDER_NUMBER) || "?"}`);
     return NextResponse.json({ status: 401, error: true, message: "Sai tham số bí mật" }, { status: 401 });
   }
 
