@@ -60,6 +60,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const webhookCount = (source: string) => webhooks.facets.sources.find((s) => s.value === source)?.count ?? 0;
   const pancakeWebhookUrl = `${appUrl}/api/webhooks/pancake/${env.pancake.webhookSecret || "<PANCAKE_WEBHOOK_SECRET>"}`;
   const vtpWebhookUrl = `${appUrl}/api/webhooks/viettelpost`;
+  const vtpStatementMailUrl = `${appUrl}/api/webhooks/vtp-statement`;
   const isLocal = /localhost|127\.0\.0\.1|^http:\/\//.test(appUrl);
   const backfillDays = backfill?.days ?? env.pancake.backfillDays;
   const backfillProgress = (() => {
@@ -145,6 +146,19 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             },
             { label: "Base URL", value: <span className="font-mono text-xs">{env.viettelPost.baseUrl}</span>, span: true },
             { label: "Tham số bí mật webhook", value: status.viettelPostWebhook ? <span className="font-mono">{maskKey(env.viettelPost.webhookSecret)}</span> : <span className="text-muted-foreground">Chưa đặt VIETTELPOST_WEBHOOK_SECRET</span> },
+            {
+              label: "Bảng kê COD tự lấy từ Gmail",
+              value: (
+                <span className="text-xs text-muted-foreground">
+                  Viettel Post gửi thư “BẢNG KÊ ĐỐI SOÁT THANH TOÁN” kèm tệp BangKeChiCOD….xlsx về hộp thư shop. Đoạn Apps Script chạy trong chính Gmail
+                  (hướng dẫn: <span className="font-mono">docs/GMAIL-BANG-KE-VTP.md</span>) gửi tệp sang{" "}
+                  <span className="font-mono break-all">{vtpStatementMailUrl}</span> <CopyButton value={vtpStatementMailUrl} /> — ERP xử lý y như tải tay lên trang Nhập dữ liệu
+                  Viettel Post. ERP KHÔNG giữ mật khẩu hộp thư. Lần chạy hiện ở bảng lịch sử đồng bộ với job{" "}
+                  <span className="font-mono">vtp-statement-mail</span>.
+                </span>
+              ),
+              span: true,
+            },
           ]}
           footer={<TestConnectionButton provider="viettelpost" disabled={!status.viettelPost} />}
         />

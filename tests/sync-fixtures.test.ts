@@ -8,7 +8,7 @@ import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
 import { testPaymentVerification } from "./payment-verification.test";
-import { testStatementDetailMatching, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth } from "./vtp-import-truth.test";
+import { testStatementDetailMatching, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpState } from "./vtp-state.test";
 import assert from "node:assert/strict";
@@ -1036,6 +1036,7 @@ async function main() {
   await testVtpHealth(db);
   await testVtpImportLimits();
   await testVtpFileDetection();
+  await testVtpStatementFromMail();
   await testStatementDetailMatching(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

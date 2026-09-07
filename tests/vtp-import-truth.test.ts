@@ -233,3 +233,40 @@ export async function testVtpFileDetection() {
 
   console.log("✓ Nhận loại tệp VTP: đúng theo nội dung, không theo tên tệp; tệp lỗi nêu rõ tên");
 }
+
+/**
+ * Bảng kê COD tự lấy từ Gmail: lõi nhập phải chạy được KHÔNG cần phiên đăng nhập (webhook gọi),
+ * và gửi lại cùng một tệp không được nhân đôi số liệu — Apps Script có thể gửi lại khi ERP lỗi.
+ */
+export async function testVtpStatementFromMail() {
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { getDb, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+
+  await db.insert(schema.shipments).values({ id: "mail-ship-1", vtpOrderNumber: "PKE9911110001", trackingCode: "PKE9911110001", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 424000 }).onConflictDoNothing();
+
+  const csv = [
+    "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)",
+    "PKE9911110001,GLMTQY214,Khach mail,0900000091,X,31/08/2026 18:37:53,01/09/2026 11:14:09,424000,17000,407000",
+  ].join("\n");
+  const file = { filename: "BangKeChiCOD_thu_gmail.csv", base64: Buffer.from(csv, "utf8").toString("base64") };
+
+  const lan1 = await runVtpDataFileImport([file], "GMAIL:viettelpost");
+  assert.equal(lan1.files[0]?.kind, "STATEMENT_DETAIL", "nhận đúng loại tệp bảng kê từ thư");
+  assert.equal(lan1.statementRows, 1);
+  const sau1 = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "mail-ship-1") });
+  // Bảng kê có 3 cột tiền: thu hộ 424.000 (thu của khách) − cước 17.000 = thu về 407.000.
+  // codCollected là tiền THU CỦA KHÁCH, cước ghi riêng để báo cáo lợi nhuận trừ đúng chỗ.
+  assert.equal(Number(sau1?.codCollected), 424000, "ghi đúng tiền thực thu của khách theo bảng kê");
+  assert.equal(Number(sau1?.shippingFee), 17000, "ghi cước thật từ bảng kê thay cho ước lượng");
+  assert.equal(sau1?.codStatus, "PAID_TO_BANK", "có chứng từ bảng kê ⇒ tiền đã về ngân hàng");
+
+  // Apps Script gửi lại (ERP từng trả lỗi, hoặc thư bị gắn nhãn hụt) → không được cộng dồn.
+  const lan2 = await runVtpDataFileImport([file], "GMAIL:viettelpost");
+  assert.equal(lan2.files[0]?.kind, "STATEMENT_DETAIL");
+  const sau2 = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "mail-ship-1") });
+  assert.equal(Number(sau2?.codCollected), 424000, "gửi lại cùng tệp không nhân đôi tiền thực thu");
+
+  console.log("✓ Bảng kê COD từ Gmail: lõi nhập chạy không cần đăng nhập, ghi đúng tiền thực thu, gửi lại không nhân đôi");
+}

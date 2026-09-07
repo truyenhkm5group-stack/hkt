@@ -150,6 +150,12 @@ Trang Vận đơn (`shipmentSummary`) đếm giao thành công / hoàn bằng ha
 - Kế hoạch đặt hàng SX (`planning.ts::demandSubquery`): nhu cầu = đơn không huỷ, không hoàn (`ORDER_OUTCOME NOT IN ('CANCELLED','RETURNED','RETURNED_BY_RULE')`) trong cửa sổ N ngày.
 - Lương: mặc định trên lợi nhuận dòng tiền thực; marketer nhận diện theo tên chiến dịch / tài khoản QC / fanpage.
 
+### 6.8 Bảng kê COD tự lấy từ Gmail
+
+Viettel Post gửi thư "BẢNG KÊ ĐỐI SOÁT THANH TOÁN" kèm `BangKeChiCOD….xlsx`. Apps Script chạy trong Gmail của chủ shop (hướng dẫn + mã: `docs/GMAIL-BANG-KE-VTP.md`) POST tệp sang `POST /api/webhooks/vtp-statement`, xác thực bằng **chính tham số bí mật webhook Viettel Post** (không thêm khoá mới). ERP **không** giữ mật khẩu hộp thư.
+
+Lõi nhập tệp nằm ở `lib/integrations/viettelpost/import-run.ts::runVtpDataFileImport(files, actor)` — dùng chung cho cả giao diện (`importVtpDataFiles`) lẫn webhook, nên chỉ có MỘT cách xử lý tệp. Mỗi lần nhận ghi một `sync_runs` job `vtp-statement-mail` (xem ở trang Kết nối dữ liệu). Idempotent: gửi lại cùng tệp không nhân đôi (chống trùng theo mã vận đơn / mã bảng kê, chỉ nâng `cod_status`).
+
 ### 6.7 Sổ kho (Sản phẩm & tồn kho) — chốt 07/09/2026
 
 ```
