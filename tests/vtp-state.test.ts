@@ -154,7 +154,36 @@ export async function testVtpState(db: Db) {
   assert.equal(derived.decidedBy.source, "VTP_WEBHOOK", "phải giải thích được sự kiện nào quyết định trạng thái");
   assert.equal(derived.deliveredAt?.toISOString(), "2026-09-05T10:00:00.000Z", "mốc giao lấy lần ĐẦU đạt tới, theo giờ của ĐVVC");
 
-  console.log("✓ Trạng thái vận đơn dựng từ lịch sử: một bộ dịch chung, sự kiện muộn không kéo lùi, gói tin lặp vô hại, trạng thái lạ không ghi đè");
+  // ───────── 6. Hàng quay về thì không phải giao thành công, dù ĐVVC ghi 501 ─────────
+  // Hai ca thật chủ shop chỉ ra: cùng mã 501 nhưng kết quả trái ngược nhau.
+  const { ORDER_OUTCOME } = await import("@/lib/queries/return-rate");
+  const ketQua = async (id: string) => {
+    const [r] = await db.select({ v: ORDER_OUTCOME }).from(schema.orders)
+      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+      .where(eq(schema.orders.id, id));
+    return r?.v;
+  };
+  const giao = new Date("2026-09-06T09:26:34Z");
+  const dungMa501 = async (id: string, code: string) => {
+    await db.insert(schema.orders).values({ id, stage: "DELIVERED", cod: 849_000, insertedAt: new Date() });
+    const [sp] = await db.insert(schema.shipments).values({ orderId: id, vtpOrderNumber: code, trackingCode: code,
+      stage: "DELIVERED", vtpStatus: 501, codAmount: 849_000, deliveredAt: giao, vtpStatusDate: giao }).returning({ id: schema.shipments.id });
+    await db.insert(schema.shipmentEvents).values({ shipmentId: sp.id, source: "VTP_WEBHOOK", status: "501",
+      statusName: "Thành công - Phát thành công", occurredAt: giao, normalizedStage: "DELIVERED", legType: "OUTBOUND" });
+    return sp.id;
+  };
+
+  // Ca PKE1508909064: 501, không vận đơn chiều hoàn, không sửa doanh thu → GIAO THÀNH CÔNG.
+  await dungMa501("ca-giao-that", "PKE-OK-501");
+  assert.equal(await ketQua("ca-giao-that"), "DELIVERED", "501 sạch thì là giao thành công, không được suy theo tiền");
+
+  // Ca PKE1508909058: 501 nhưng Viettel Post tạo vận đơn chiều hoàn mang hàng về shop → ĐƠN HOÀN.
+  await dungMa501("ca-hang-quay-ve", "PKE-BACK-501");
+  await db.insert(schema.shipments).values({ vtpOrderNumber: "PKE-BACK-5011P1", trackingCode: "PKE-BACK-5011P1",
+    orderReference: "PKE-BACK-501", stage: "RETURNING", codAmount: 0 });
+  assert.equal(await ketQua("ca-hang-quay-ve"), "RETURNED", "có vận đơn chiều hoàn thì hàng đã về shop, không phải giao thành công");
+
+    console.log("✓ Trạng thái vận đơn dựng từ lịch sử: một bộ dịch chung, sự kiện muộn không kéo lùi, gói tin lặp vô hại, trạng thái lạ không ghi đè");
 }
 
 /**

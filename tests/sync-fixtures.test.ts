@@ -213,23 +213,25 @@ async function main() {
   const row = rr.rows.find((r) => r.variantId === "rr-var");
   assert.ok(row, "có dòng RR-001");
   assert.equal(row.shipped, 9, "đã gửi 9");
-  assert.equal(row.delivered, 4, "giao thành công 4 — có tiền thực thu > 100K, hoặc chưa có chứng từ thì tạm tính theo COD khai báo");
-  assert.equal(row.returned, 4, "không thành công 4 — đã có chứng từ và tiền dưới ngưỡng, hoặc vận đơn đã hoàn");
+  assert.equal(row.delivered, 3, "giao thành công 3 — rr-9003 có vận đơn hoàn ...1P1 nên hàng đã quay về, không tính là giao thành công");
+  assert.equal(row.returned, 5, "không thành công 5 — gồm rr-9003 vì Viettel Post đã tạo vận đơn mang hàng về shop");
   assert.equal(row.returnedByRule, 1, "1 đơn thực thu 60K nằm giữa 50K–100K");
   assert.equal(row.inTransit, 1, "đang giao 1");
   assert.equal(row.cancelled, 1, "huỷ 1");
-  assert.equal(row.rate, 50, "tỷ lệ hoàn 4/(4+4) = 50%");
-  assert.equal(row.successRate, 50, "tỷ lệ giao thành công 4/(4+4) = 50%");
+  assert.equal(row.rate, 62.5, "tỷ lệ hoàn 5/(3+5)");
+  assert.equal(row.successRate, 37.5, "tỷ lệ giao thành công 3/(3+5)");
   assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
   const summary = await getReturnRateSummary(all, "RR-001");
-  assert.equal(summary.returned, 4);
-  assert.equal(summary.delivered, 4);
-  assert.equal(summary.successRate, 50);
+  assert.equal(summary.returned, 5);
+  assert.equal(summary.delivered, 3);
+  assert.equal(summary.successRate, 37.5);
   const detail = await listOrdersForVariant(row.key, all);
   assert.equal(detail.find((d) => d.id === "rr-9002")?.outcome, "RETURNED", "giao thành công nhưng không thu được đồng nào → hoàn");
   assert.equal(detail.find((d) => d.id === "rr-9009")?.outcome, "RETURNED", "thực thu 30K < 50K → đơn hoàn");
   assert.equal(detail.find((d) => d.id === "rr-9010")?.outcome, "RETURNED_BY_RULE", "thực thu 60K: khách chỉ trả phí, không phải giao thành công");
-  assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "DELIVERED", "chưa có chứng từ tiền → tạm tính theo COD khai báo 499K");
+  // Ca thật PKE1508909058: Viettel Post ghi "phát thành công" nhưng đã tạo vận đơn ...1P1 mang
+  // hàng về shop. Hàng đã quay về thì không thể là giao thành công, dù COD khai báo lớn.
+  assert.equal(detail.find((d) => d.id === "rr-9003")?.outcome, "RETURNED", "có vận đơn chiều hoàn ...1P1 → hàng đã quay về shop");
   assert.equal(detail.find((d) => d.id === "rr-9001")?.outcome, "DELIVERED", "VTP báo giao, COD khai báo 499K, chưa có bảng kê → tạm tính là giao thành công");
   assert.equal(detail.find((d) => d.id === "rr-9004")?.outcome, "IN_TRANSIT");
   assert.equal(detail.find((d) => d.id === "rr-9007")?.outcome, "DELIVERED", "COD đã về > 100K → giao thành công dù vận đơn chưa báo giao");
@@ -908,7 +910,7 @@ async function main() {
     assert.equal(Number(legRow?.codAmount), 0);
     // nhờ vậy quy tắc vận đơn chiều về nhận ra đơn gốc là đơn HOÀN, không còn tính là giao thành công
     const lai = await listOrdersForVariant((await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key, all);
-    assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "DELIVERED", "chưa có chứng từ tiền nên tạm tính theo COD khai báo; bảng kê về sẽ chỉnh lại");
+    assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "RETURNED", "Viettel Post đã tạo vận đơn mang hàng về shop → đơn gốc là đơn hoàn, dù COD khai báo 499K");
     console.log(`✓ Danh sách vận đơn VTP: ghép ${applied.matched}/${applied.total} (${applied.legs} chiều về → đơn gốc thành đơn hoàn)`);
   }
 

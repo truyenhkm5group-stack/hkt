@@ -1,9 +1,8 @@
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
-import { shipmentOutcome } from "@/lib/constants/returns";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import type { ListParams } from "@/lib/search-params";
 
@@ -113,37 +112,19 @@ export async function listShipments(params: ListParams) {
     db.select({ total: count() }).from(schema.shipments).where(where),
   ]);
 
-  // Doanh thu bị NHẬP LẠI sau mốc giao ⇒ khách chỉ trả tiền xem hàng ⇒ đơn hoàn.
-  // Cùng điều kiện với REVENUE_EDITED_AFTER_DELIVERY trong lib/queries/return-rate.ts; chỉ hỏi
-  // các vận đơn của trang đang xem nên không làm chậm danh sách.
-  const deliveredIds = rows.filter((r) => r.stage === "DELIVERED").map((r) => r.id);
-  const editedAfterDelivery = new Set(
-    deliveredIds.length
-      ? (
-          await db
-            .select({ id: schema.shipmentEvents.shipmentId })
-            .from(schema.shipmentEvents)
-            .innerJoin(schema.shipments, eq(schema.shipments.id, schema.shipmentEvents.shipmentId))
-            .where(
-              and(
-                inArray(schema.shipmentEvents.shipmentId, deliveredIds),
-                ilike(schema.shipmentEvents.statusName, "Nhập doanh thu%"),
-                sql`${schema.shipmentEvents.occurredAt} >= coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate}) - interval '2 minute'`,
-              ),
-            )
-        ).map((r) => r.id)
-      : [],
-  );
-
-  // Kết quả thật của vận đơn theo doanh thu COD: vận đơn chiều về / khách trả hàng vẫn được VTP ghi "Giao thành công"
-  const withOutcome = rows.map((r) => {
-    const revenueEditedAfterDelivery = editedAfterDelivery.has(r.id);
-    return {
-      ...r,
-      revenueEditedAfterDelivery,
-      outcome: shipmentOutcome({ ...r, revenueEditedAfterDelivery }, (r.order?.prepaid ?? 0) + (r.order?.transferMoney ?? 0)),
-    };
-  });
+  // MỘT nguồn kết luận duy nhất: dùng đúng biểu thức ORDER_OUTCOME mà mọi báo cáo dùng, thay vì
+  // tính lại theo tiền ở phía trình duyệt. Trước đây trang Vận đơn có bộ luật riêng nên cùng một
+  // vận đơn hiện "hoàn" ở đây mà "giao thành công" ở báo cáo (ca thật PKE1508909064).
+  const ids = rows.map((r) => r.id);
+  const outcomeRows = ids.length
+    ? await db
+        .select({ id: schema.shipments.id, outcome: ORDER_OUTCOME })
+        .from(schema.shipments)
+        .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+        .where(inArray(schema.shipments.id, ids))
+    : [];
+  const outcomeById = new Map(outcomeRows.map((r) => [r.id, r.outcome]));
+  const withOutcome = rows.map((r) => ({ ...r, outcome: outcomeById.get(r.id) ?? null }));
   return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 
