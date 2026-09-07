@@ -28,6 +28,7 @@ on:
           - import-vtp-statements # nhập bảng kê tiền COD Viettel Post (dán bảng hoặc JSON ở ô "arg")
           - vtp-statements-autolink # tự ghép vận đơn vào bảng kê theo ngày giao (arg: "--dry-run --lag=1")
           - vtp-rebuild-state    # dựng lại trạng thái vận đơn từ lịch sử sự kiện (mặc định CHẠY THỬ; arg "--apply" mới ghi)
+          - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
@@ -119,6 +120,9 @@ jobs:
               vtp-rebuild-state)
                 fetch_script vtp-rebuild-state.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-rebuild-state.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-rebuild-state.ts $ARG ;;
+              vtp-retry-webhooks)
+                fetch_script vtp-retry-webhooks.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-retry-webhooks.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-retry-webhooks.ts $ARG ;;
               set-setting)
                 fetch_script set-setting.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/set-setting.ts'
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;

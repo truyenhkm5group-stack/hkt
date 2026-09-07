@@ -93,7 +93,7 @@ export async function viettelPostHealth() {
   const now = Date.now();
   const since = (hours: number) => new Date(now - hours * 3600_000);
 
-  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied] = await Promise.all([
+  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved] = await Promise.all([
     db.query.webhookEvents.findFirst({
       where: eq(schema.webhookEvents.source, "VIETTELPOST"),
       orderBy: [desc(schema.webhookEvents.receivedAt)],
@@ -153,6 +153,17 @@ export async function viettelPostHealth() {
             and (${schema.shipments.vtpStatusDate} is null or ev.occurred_at > ${schema.shipments.vtpStatusDate})
         )`,
       ),
+    // Sự kiện Viettel Post gửi tới mà ERP chưa xử lý được: hỏng lúc xử lý, hoặc không tìm ra vận
+    // đơn tương ứng. Không bao giờ bị xoá — giữ nguyên gói tin gốc để xử lý lại khi đơn đã về ERP.
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.webhookEvents)
+      .where(
+        and(
+          eq(schema.webhookEvents.source, "VIETTELPOST"),
+          sql`(${schema.webhookEvents.status} = 'FAILED' or (${schema.webhookEvents.status} = 'IGNORED' and ${schema.webhookEvents.error} ilike '%không tìm thấy%'))`,
+        ),
+      ),
   ]);
 
   const data = latest?.payload && typeof latest.payload === "object" ? ((latest.payload as Record<string, unknown>).DATA as Record<string, unknown> | undefined) : undefined;
@@ -171,6 +182,8 @@ export async function viettelPostHealth() {
     stageMismatch: Number(mismatch[0].n),
     /** Vận đơn có webhook mới hơn trạng thái đang lưu — webhook về nhưng không được áp dụng. */
     webhookNotApplied: Number(notApplied[0].n),
+    /** Gói tin chưa xử lý được, đang chờ xử lý lại. */
+    unresolvedWebhooks: Number(unresolved[0].n),
   };
 }
 
