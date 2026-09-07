@@ -167,9 +167,27 @@ const HAS_VTP_EVIDENCE = sql`exists (
     and ev.normalized_stage is not null
 )`;
 
+/**
+ * HÀNG ĐÃ QUAY VỀ SHOP dù Viettel Post ghi "phát thành công".
+ *
+ * Hai bằng chứng, đều từ chính Viettel Post:
+ *  · CÓ VẬN ĐƠN CHIỀU HOÀN — VTP tạo vận đơn riêng (mã gốc + "1P1", hoặc CHPKE…) để mang hàng về
+ *    shop, và ghi mã gốc vào `order_reference`. Có nó nghĩa là hàng không ở lại chỗ khách.
+ *  · DOANH THU BỊ SỬA SAU KHI GIAO — bưu tá nhập lại doanh thu bằng đúng số khách đưa để xem hàng.
+ *
+ * Phải xét TRƯỚC mã 501: đối chứng thật PKE1508909058 mang mã 501 "phát thành công", COD khai báo
+ * 849.000, nhưng thu hộ thật chỉ 30.000 và có vận đơn PKE15089090581P1 mang hàng về — đơn hoàn.
+ * Ngược lại PKE1508909064 cũng 501, không vận đơn chiều hoàn, không sửa doanh thu — giao thành công.
+ */
+const HAS_RETURN_LEG = sql`(${s.vtpOrderNumber} is not null and exists (
+  select 1 from shipments leg where leg.order_reference = ${s.vtpOrderNumber} and leg.id <> ${s.id}
+))`;
+const GOODS_CAME_BACK = sql`(${HAS_RETURN_LEG} or ${REVENUE_EDITED_AFTER_DELIVERY})`;
+
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${VTP_RETURNED} then 'RETURNED'
   when ${VTP_CANCELLED} then 'CANCELLED'
+  when ${s.stage} = 'DELIVERED' and ${GOODS_CAME_BACK} then 'RETURNED'
   when ${VTP_DELIVERED} then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'

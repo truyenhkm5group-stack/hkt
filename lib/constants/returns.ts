@@ -65,36 +65,3 @@ export function rateTone(rate: number | null) {
   return "text-emerald-600 dark:text-emerald-400";
 }
 
-/**
- * Kết quả THẬT của một vận đơn theo doanh thu COD (dùng cho danh sách vận đơn, chạy phía client).
- * Cùng ngưỡng với SHIPMENT_DELIVERED / SHIPMENT_RETURNED trong SQL:
- *  - đã giao & COD thực > 100K (hoặc khách chuyển khoản trước > 100K) → giao thành công;
- *  - đã giao & COD thực < 50K → hoàn (khách trả hàng, VTP vẫn báo "giao thành công");
- *  - đã giao & COD thực 50K–100K → không thành công (chỉ thu phí / thu thiếu);
- *  - đang hoàn / đã hoàn → hoàn.
- */
-export function shipmentOutcome(
-  s: {
-    stage: string;
-    codAmount?: number | null;
-    codCollected?: number | null;
-    codStatementRef?: string | null;
-    revenueEditedAfterDelivery?: boolean | null;
-  },
-  prepaid = 0,
-): "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | null {
-  if (s.stage === "RETURNING" || s.stage === "RETURNED") return "RETURNED";
-  if (s.stage !== "DELIVERED") return null;
-  // Giữ ĐÚNG thứ tự của ORDER_OUTCOME trong lib/queries/return-rate.ts.
-  const collected = Number(s.codCollected) || 0;
-  // 1. Tiền thật đã về thì thắng mọi suy luận khác.
-  if (collected + prepaid > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
-  // 2. Doanh thu bị nhập lại SAU khi giao ⇒ khách chỉ trả tiền xem hàng ⇒ đơn hoàn.
-  if (s.revenueEditedAfterDelivery) return "RETURNED";
-  // 3. Chưa có chứng từ tiền thì TẠM dùng COD khai báo — tiền có thể về ở bảng kê kỳ sau,
-  //    không được coi "chưa có số" là "thu được 0đ". Có chứng từ thì chỉ dùng tiền thực thu.
-  const hasEvidence = collected > 0 || Boolean(s.codStatementRef);
-  const money = (hasEvidence ? collected : Number(s.codAmount) || 0) + prepaid;
-  if (money > RETURN_RULE.maxCodForFakeDelivery) return "DELIVERED";
-  return money < RETURN_RULE.maxCodForReturn ? "RETURNED" : "RETURNED_BY_RULE";
-}
