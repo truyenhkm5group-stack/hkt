@@ -4,6 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { codBatchGaps, codReconciliation, staleCodOnReturned, statementCoverage, unprovenCollectedShipments } from "@/lib/queries/cod-reconciliation";
+import { orderListCoverage } from "@/lib/queries/shipments";
 import type { Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -114,6 +115,33 @@ export async function testCodReconciliation(db: Db) {
   assert.ok(coverage.totalMissingShipments <= r.unproven.count, "không nêu nhiều hơn số vận đơn đang treo");
 
   console.log(`✓ Thiếu bảng kê: ${coverage.gaps.length} khoảng ngày · ${coverage.totalMissingShipments} vận đơn treo · ERP có dữ liệu từ ${coverage.firstShipmentDate ?? "—"}`);
+
+  // ───────── 9. Báo "cần xuất Danh sách vận đơn cho khoảng ngày nào" ─────────
+  // Khác bảng kê (tiền): tệp này mang TRẠNG THÁI, và là cách duy nhất chữa hai nhóm vận đơn
+  // dưới đây khi tài khoản API Viettel Post không sở hữu vận đơn của shop.
+  await db.insert(schema.orders).values([
+    { id: "cov-thieu-trang-thai", stage: "SHIPPED", insertedAt: new Date() },
+    { id: "cov-thieu-ma", stage: "SHIPPED", insertedAt: new Date() },
+    { id: "cov-du-thong-tin", stage: "SHIPPED", insertedAt: new Date() },
+  ]);
+  await db.insert(schema.shipments).values([
+    { id: "cov-1", orderId: "cov-thieu-trang-thai", vtpOrderNumber: "PKE-COV-1", stage: "IN_TRANSIT", isFinal: false, vtpStatus: null, codAmount: 250_000, vtpStatusDate: new Date("2026-07-02T00:00:00Z") },
+    { id: "cov-2", orderId: "cov-thieu-ma", stage: "IN_TRANSIT", isFinal: false, vtpStatus: 300, codAmount: 150_000, vtpStatusDate: new Date("2026-07-03T00:00:00Z") },
+    { id: "cov-3", orderId: "cov-du-thong-tin", vtpOrderNumber: "PKE-COV-3", stage: "IN_TRANSIT", isFinal: false, vtpStatus: 300, codAmount: 999_000, vtpStatusDate: new Date("2026-07-02T00:00:00Z") },
+  ]);
+
+  const list = await orderListCoverage();
+  const khoang = list.ranges.find((x) => x.from <= "2026-07-03" && x.to >= "2026-07-02");
+  assert.ok(khoang, "hai ngày cách nhau 1 ngày phải gộp thành một khoảng để xuất một tệp");
+  assert.ok(khoang.noStatus >= 1, "vận đơn chưa có trạng thái Viettel Post phải được nêu");
+  assert.ok(khoang.noCode >= 1, "vận đơn chưa có mã phải được nêu");
+  assert.ok(khoang.cod >= 400_000, "nêu COD khai báo để chủ shop biết khoảng nào đáng ưu tiên");
+  // Vận đơn đã đủ mã và trạng thái không được lôi vào danh sách cần xuất.
+  assert.ok(khoang.cod < 999_000 + 400_000, "vận đơn đã đủ thông tin không được tính vào khoảng cần xuất");
+  for (let i = 1; i < list.ranges.length; i++) {
+    assert.ok(list.ranges[i].from > list.ranges[i - 1].to, "các khoảng phải rời nhau và tăng dần");
+  }
+  console.log(`✓ Cần xuất danh sách vận đơn: ${list.ranges.length} khoảng ngày · ${list.totalNoStatus} thiếu trạng thái · ${list.totalNoCode} thiếu mã`);
 
   console.log(
     `✓ Đối soát COD: phải thu ${r.receivable.amount} · ĐVVC báo thu ${r.collected.amount} · có bảng kê ${r.onStatement.amount} · về TK ${r.bank.net} · treo ${r.unproven.amount} (${r.provenRate === null ? "—" : r.provenRate + "%"} có chứng từ)`,

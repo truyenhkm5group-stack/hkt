@@ -228,3 +228,59 @@ export async function getShipmentDetail(id: string) {
 }
 
 export type ShipmentDetail = NonNullable<Awaited<ReturnType<typeof getShipmentDetail>>>;
+
+export type OrderListGap = { from: string; to: string; noStatus: number; noCode: number; cod: number };
+
+/**
+ * KHOẢNG NGÀY CẦN XUẤT "DANH SÁCH VẬN ĐƠN" TỪ VIETTEL POST.
+ *
+ * Khác với bảng kê (tiền), tệp này mang TRẠNG THÁI GIAO HÀNG. ERP cần nó cho hai nhóm vận đơn:
+ *  · chưa có trạng thái thật từ Viettel Post — trạng thái hiện tại chỉ suy từ Pancake, mà quy tắc
+ *    của shop là xung đột thì tính theo Viettel Post;
+ *  · chưa có mã vận đơn — đơn tạo thẳng trên web Viettel Post, ERP ghép mã theo SĐT người nhận
+ *    khi nạp tệp.
+ *
+ * Đối chiếu qua API không thay thế được: tài khoản API của shop không sở hữu các vận đơn này.
+ * Vì vậy màn hình nhập liệu phải nói thẳng cần xuất tệp cho khoảng ngày nào thay vì để chủ shop
+ * tự đoán.
+ */
+export async function orderListCoverage(): Promise<{ ranges: OrderListGap[]; totalNoStatus: number; totalNoCode: number }> {
+  const db = await getDb();
+  const s = schema.shipments;
+  const NO_CODE = sql`coalesce(nullif(${s.vtpOrderNumber}, ''), nullif(${s.trackingCode}, '')) is null`;
+  const NO_STATUS = sql`(${s.isFinal} = false and ${s.vtpStatus} is null)`;
+  const DAY = sql`coalesce(${s.vtpStatusDate}, ${s.createdAt})::date`;
+
+  const days = await db
+    .select({
+      day: sql<string>`${DAY}::text`,
+      noStatus: sql<number>`count(*) filter (where ${NO_STATUS})`,
+      noCode: sql<number>`count(*) filter (where ${NO_CODE})`,
+      cod: sql<number>`coalesce(sum(${s.codAmount}), 0)`,
+    })
+    .from(s)
+    .where(sql`(${NO_STATUS} or ${NO_CODE})`)
+    .groupBy(DAY)
+    .orderBy(DAY);
+
+  // Gom ngày liền nhau (cách nhau ≤ 3 ngày) để chủ shop xuất một tệp cho cả khoảng.
+  const ranges: OrderListGap[] = [];
+  for (const d of days) {
+    const day = String(d.day);
+    const last = ranges[ranges.length - 1];
+    if (last && (Date.parse(day) - Date.parse(last.to)) / 86_400_000 <= 3) {
+      last.to = day;
+      last.noStatus += Number(d.noStatus);
+      last.noCode += Number(d.noCode);
+      last.cod += Number(d.cod);
+    } else {
+      ranges.push({ from: day, to: day, noStatus: Number(d.noStatus), noCode: Number(d.noCode), cod: Number(d.cod) });
+    }
+  }
+
+  return {
+    ranges,
+    totalNoStatus: ranges.reduce((a, r) => a + r.noStatus, 0),
+    totalNoCode: ranges.reduce((a, r) => a + r.noCode, 0),
+  };
+}

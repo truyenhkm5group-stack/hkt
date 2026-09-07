@@ -5,6 +5,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { codReconciliation, statementCoverage } from "@/lib/queries/cod-reconciliation";
+import { orderListCoverage } from "@/lib/queries/shipments";
 
 export const metadata = { title: "Nhập dữ liệu Viettel Post" };
 
@@ -12,7 +13,7 @@ const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fr
 
 export default async function ImportVtpPage() {
   await requirePermission("cod:write");
-  const [coverage, recon] = await Promise.all([statementCoverage(), codReconciliation(ALL)]);
+  const [coverage, recon, listCoverage] = await Promise.all([statementCoverage(), codReconciliation(ALL), orderListCoverage()]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -77,6 +78,53 @@ export default async function ImportVtpPage() {
           </div>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">Không còn khoảng ngày nào thiếu bảng kê.</p>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Cần xuất Danh sách vận đơn cho khoảng ngày nào"
+        description="Tệp trạng thái giao hàng, khác với bảng kê tiền. Đối chiếu qua API không thay được vì tài khoản API của shop không sở hữu các vận đơn này."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Chưa có trạng thái từ Viettel Post</p>
+            <p className="numeric mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{formatNumber(listCoverage.totalNoStatus)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Vận đơn chưa kết thúc, trạng thái hiện tại chỉ suy từ Pancake.</p>
+          </div>
+          <div className="rounded-xl border p-4">
+            <p className="text-[13px] font-medium text-muted-foreground">Chưa có mã vận đơn</p>
+            <p className="numeric mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{formatNumber(listCoverage.totalNoCode)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Đơn tạo thẳng trên web Viettel Post — ERP ghép mã theo SĐT người nhận khi nạp tệp.</p>
+          </div>
+        </div>
+
+        {listCoverage.ranges.length ? (
+          <div className="mt-4 overflow-x-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  <th className="p-2 font-medium">Xuất danh sách vận đơn từ ngày</th>
+                  <th className="p-2 font-medium">Đến ngày</th>
+                  <th className="p-2 text-right font-medium">Thiếu trạng thái</th>
+                  <th className="p-2 text-right font-medium">Thiếu mã vận đơn</th>
+                  <th className="p-2 text-right font-medium">COD khai báo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listCoverage.ranges.map((r) => (
+                  <tr key={`${r.from}-${r.to}`} className="border-t">
+                    <td className="numeric p-2 font-medium">{formatDate(r.from)}</td>
+                    <td className="numeric p-2 font-medium">{formatDate(r.to)}</td>
+                    <td className="numeric p-2 text-right">{r.noStatus ? formatNumber(r.noStatus) : <span className="text-muted-foreground">—</span>}</td>
+                    <td className="numeric p-2 text-right">{r.noCode ? formatNumber(r.noCode) : <span className="text-muted-foreground">—</span>}</td>
+                    <td className="numeric p-2 text-right">{formatVND(r.cod)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">Mọi vận đơn đều đã có mã và trạng thái từ Viettel Post.</p>
         )}
       </SectionCard>
 
