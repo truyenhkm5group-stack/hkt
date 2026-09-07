@@ -93,6 +93,17 @@ export async function testVtpState(db: Db) {
   assert.equal(fileSide.stage, webhookSide.stage, "cùng 'giao thành công' thì webhook và tệp phải ra cùng trạng thái");
   assert.equal(fileSide.isFinal, webhookSide.isFinal, "và cùng kết luận đã kết thúc hay chưa");
 
+  // ───────── 4b. Mã tham chiếu dài hơn int4 không được làm hỏng cả gói tin ─────────
+  // Webhook THỬ của Viettel Post gửi ORDER_REFERENCE = 123456789101112; so thẳng với
+  // orders.system_id (int4) làm Postgres báo "value out of range for type integer".
+  const huge = await applyVtpTracking(
+    { ...track("PKE-STATE-HUGE", 500, "Giao bưu tá đi phát", "2026-09-05T11:00:00Z"), orderReference: "123456789101112" },
+    "VTP_WEBHOOK",
+    { allowCreate: true },
+  );
+  assert.ok(huge, "mã tham chiếu quá lớn vẫn phải xử lý được, không được ném lỗi");
+  assert.equal(huge?.stage, "OUT_FOR_DELIVERY");
+
   // ───────── 5. Bản sao hành trình từ Pancake không được quyền kết luận ─────────
   // Mốc của sự kiện Pancake là giờ Pancake ghi nhận, không phải giờ sự kiện của ĐVVC. Trộn vào
   // thì vận đơn đã giao xong bị kéo ngược về "đang đi phát" (đo được 122 ca trên production).
