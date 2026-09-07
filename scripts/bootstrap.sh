@@ -20,16 +20,32 @@ command -v git >/dev/null 2>&1 || install_pkg git
 command -v curl >/dev/null 2>&1 || install_pkg curl
 command -v openssl >/dev/null 2>&1 || install_pkg openssl
 
+# Mạng từ VPS ra github.com chập chờn: 2 trong 3 lần deploy gần đây hỏng vì "Failed to connect
+# to github.com port 443 after 130s". Không phải lỗi mã nguồn, nhưng làm deploy trượt và người
+# vận hành phải tự bấm lại. Thử lại vài lần với thời gian chờ tăng dần, và đặt timeout để không
+# treo hơn hai phút mỗi lần.
+git_retry() {
+  attempt=1
+  while [ "$attempt" -le 4 ]; do
+    if timeout 120 git "$@"; then return 0; fi
+    echo "  ⚠ git $1 hỏng (lần $attempt/4) — thử lại sau $((attempt * 10))s"
+    sleep $((attempt * 10))
+    attempt=$((attempt + 1))
+  done
+  echo "::error::Không kết nối được github.com sau 4 lần thử. Kiểm tra mạng của VPS rồi chạy lại."
+  return 1
+}
+
 if [ -d "$DIR/.git" ]; then
   echo "▶ Cập nhật mã nguồn tại $DIR"
   # Đặt thẳng về đúng commit của nhánh trên remote. Dùng "checkout -B" thay cho checkout+pull
   # để ĐỔI NHÁNH được (ví dụ từ nhánh phát triển sang main) kể cả khi máy chủ chưa có nhánh đó,
   # và để trạng thái máy chủ luôn khớp Git thay vì phụ thuộc trạng thái cũ trên máy.
-  git -C "$DIR" fetch --quiet --prune origin
+  git_retry -C "$DIR" fetch --quiet --prune origin
   git -C "$DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 else
   echo "▶ Tải mã nguồn về $DIR"
-  git clone --quiet --branch "$BRANCH" "$REPO_URL" "$DIR"
+  git_retry clone --quiet --branch "$BRANCH" "$REPO_URL" "$DIR"
 fi
 
 cd "$DIR"
