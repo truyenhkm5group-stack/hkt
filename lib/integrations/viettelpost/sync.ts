@@ -30,7 +30,10 @@ export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Pro
   if (ref) {
     const systemId = Number(ref.replace(/\D/g, ""));
     const conditions = [eq(schema.orders.id, ref), eq(schema.orders.customId, ref)];
-    if (Number.isFinite(systemId) && systemId > 0) conditions.push(eq(schema.orders.systemId, systemId));
+    // orders.system_id là int4. Mã tham chiếu của Viettel Post có thể dài hơn (webhook thử của
+    // họ gửi ORDER_REFERENCE = 123456789101112), so sánh thẳng sẽ làm Postgres báo lỗi "value out
+    // of range for type integer" và cả gói tin hỏng. Chỉ so khi số nằm trong phạm vi.
+    if (Number.isSafeInteger(systemId) && systemId > 0 && systemId <= 2_147_483_647) conditions.push(eq(schema.orders.systemId, systemId));
     const order = await db.query.orders.findFirst({ where: or(...conditions), with: { shipment: true } });
     if (order?.shipment) return order.shipment;
     if (order) {
