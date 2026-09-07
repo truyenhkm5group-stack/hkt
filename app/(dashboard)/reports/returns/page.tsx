@@ -167,7 +167,15 @@ export default async function ReturnRatePage({
             <p className="text-[13px] font-medium text-muted-foreground">Phát thành công ngay lần đầu</p>
             <p className="numeric mt-1 text-2xl font-bold">{logistics.firstAttemptRate === null ? "—" : `${logistics.firstAttemptRate}%`}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              trên {formatNumber(logistics.firstAttemptSample)} vận đơn đã giao — phần còn lại phải phát lại ít nhất một lần
+              trên {formatNumber(logistics.firstAttemptSample)} vận đơn đã giao
+              {logistics.failureEvidence < logistics.firstAttemptSample * 0.05 ? (
+                <span className="block text-warning">
+                  Chỉ {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại trong hành trình — tệp danh sách vận đơn chỉ mang trạng
+                  thái CUỐI nên con số này đang cao hơn thực tế. Cần webhook phủ đủ kỳ mới tin được.
+                </span>
+              ) : (
+                <span> · {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại</span>
+              )}
             </p>
           </div>
           <div className="rounded-xl border p-4">
