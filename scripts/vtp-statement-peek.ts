@@ -11,7 +11,28 @@
  */
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { sheetMatrix } from "@/lib/integrations/viettelpost/statement";
+import * as XLSX from "xlsx";
+
+/**
+ * Đọc bảng tính thành ma trận. Cố ý KHÔNG dùng lại hàm trong lib: script vận hành được tải mới
+ * từ GitHub còn lib thì nằm trong bản dựng đang chạy, nên phụ thuộc vào lib sẽ hỏng mỗi khi hai
+ * bên lệch phiên bản. Viettel Post khai sai vùng dữ liệu nên phải mở rộng vùng trước khi đọc.
+ */
+function docBang(input: Buffer): unknown[][] {
+  const wb = XLSX.read(input, { type: "buffer", cellDates: false });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return [];
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const key of Object.keys(ws)) {
+    if (key.startsWith("!")) continue;
+    const cell = XLSX.utils.decode_cell(key);
+    maxRow = Math.max(maxRow, cell.r);
+    maxCol = Math.max(maxCol, cell.c);
+  }
+  ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } });
+  return XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" });
+}
 
 async function main() {
   const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
@@ -38,7 +59,7 @@ async function main() {
   }
 
   const buffer = Buffer.from(file.content, "base64");
-  const matrix = sheetMatrix(buffer, false, true);
+  const matrix = docBang(buffer);
   console.log(`Tệp: ${file.filename} · ${matrix.length} dòng`);
   for (const [i, row] of matrix.slice(0, soDong).entries()) {
     const cells = (row as unknown[]).map((c) => String(c ?? "").trim()).map((c: string) => (c.length > 34 ? `${c.slice(0, 34)}…` : c));
