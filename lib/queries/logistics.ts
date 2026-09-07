@@ -29,9 +29,18 @@ export type LogisticsPerformance = {
   successRateTerminal: number | null;
   /** Giao thành công ÷ tất cả vận đơn có hành trình (%) — mẫu số rộng hơn, luôn thấp hơn. */
   successRateAll: number | null;
-  /** Phát thành công ngay lần đầu ÷ tổng đơn đã giao (%) — không có bước phát thất bại nào trước đó. */
+  /**
+   * Phát thành công ngay lần đầu ÷ tổng đơn đã giao (%) — không có bước phát thất bại nào trước đó.
+   *
+   * CHỈ ĐÁNG TIN KHI HÀNH TRÌNH ĐẦY ĐỦ. Tệp danh sách vận đơn chỉ mang TRẠNG THÁI CUỐI của mỗi
+   * vận đơn, nên vận đơn nào chỉ có dữ liệu từ tệp sẽ không có bước "phát thất bại" trong lịch sử
+   * và bị tính nhầm là thành công ngay lần đầu. Vì vậy luôn kèm `failureEvidence` — số vận đơn
+   * thực sự có ghi nhận phát thất bại — để người đọc biết con số dựa trên bao nhiêu bằng chứng.
+   */
   firstAttemptRate: number | null;
   firstAttemptSample: number;
+  /** Số vận đơn có ít nhất một bước phát thất bại trong hành trình. */
+  failureEvidence: number;
   /** Giờ từ lúc tạo vận đơn tới lúc ĐVVC lấy hàng. */
   pickupHours: { p50: number | null; p90: number | null; sample: number };
   /** Giờ từ lúc lấy hàng tới lúc phát thành công. */
@@ -50,7 +59,7 @@ export async function logisticsPerformance(period: Period): Promise<LogisticsPer
 
     const result = await db.execute<{
       tracked: number; delivered: number; returned: number; in_flight: number;
-      first_attempt: number; first_attempt_sample: number;
+      first_attempt: number; first_attempt_sample: number; failure_evidence: number;
       pickup_p50: number | null; pickup_p90: number | null; pickup_sample: number;
       delivery_p50: number | null; delivery_p90: number | null; delivery_sample: number;
       stuck24: number; stuck48: number; stuck72: number;
@@ -81,6 +90,7 @@ export async function logisticsPerformance(period: Period): Promise<LogisticsPer
         count(*) filter (where is_final = false)::int as in_flight,
         count(*) filter (where delivered_at is not null and (first_failed_at is null or first_failed_at > delivered_at))::int as first_attempt,
         count(*) filter (where delivered_at is not null)::int as first_attempt_sample,
+        count(*) filter (where first_failed_at is not null)::int as failure_evidence,
         percentile_cont(0.5) within group (order by pickup_hours) filter (where pickup_hours > 0) as pickup_p50,
         percentile_cont(0.9) within group (order by pickup_hours) filter (where pickup_hours > 0) as pickup_p90,
         count(*) filter (where pickup_hours > 0)::int as pickup_sample,
@@ -113,6 +123,7 @@ export async function logisticsPerformance(period: Period): Promise<LogisticsPer
       successRateAll: pct(delivered, tracked),
       firstAttemptRate: pct(firstAttempt, firstAttemptSample),
       firstAttemptSample,
+      failureEvidence: Number(row?.failure_evidence ?? 0),
       pickupHours: { p50: round1(n(row?.pickup_p50)), p90: round1(n(row?.pickup_p90)), sample: Number(row?.pickup_sample ?? 0) },
       deliveryHours: { p50: round1(n(row?.delivery_p50)), p90: round1(n(row?.delivery_p90)), sample: Number(row?.delivery_sample ?? 0) },
       stuck24h: Number(row?.stuck24 ?? 0),
