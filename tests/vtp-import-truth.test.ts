@@ -414,3 +414,47 @@ export async function testStatementLedgerOrderIndependent() {
 
   console.log(`✓ Sổ chứng từ bảng kê: bảng kê cũ không đè bảng kê mới, nhập lại không nhân đôi, ${tong.codUnmatched}đ chưa ghép được vẫn hiện ra`);
 }
+
+/**
+ * "KHÔNG THU HỘ" LÀ THUỘC TÍNH CỦA VẬN ĐƠN, KHÔNG PHẢI KẾT LUẬN VỀ TIỀN.
+ *
+ * Lỗi đã xảy ra thật: Viettel Post ghi "Thu hộ 849.000đ · Đã nhận COD · Giao thành công" mà ERP
+ * hiện "Không thu hộ" cho 975 vận đơn (464 triệu COD khai báo). Hai luồng cũ cùng dùng sai:
+ * đồng bộ VTP hạ đơn hoàn/huỷ về "không thu hộ", và dòng bảng kê báo 0đ bị hiểu là "vận đơn này
+ * không thu hộ". ERP nói một đằng ĐVVC nói một nẻo thì không dùng để vận hành được.
+ */
+export async function testCodStatusMeaning() {
+  const { codStatusForAmount } = await import("@/lib/constants/cod");
+  const { mapVtpStatusText } = await import("@/lib/integrations/viettelpost/statement");
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { getDb, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+
+  // 1. Có tiền thu hộ thì KHÔNG bao giờ là "không thu hộ".
+  assert.equal(codStatusForAmount(849000, "NOT_APPLICABLE"), "PENDING", "có COD khai báo thì phải là 'chưa thu', không phải 'không thu hộ'");
+  assert.equal(codStatusForAmount(849000, "PAID_TO_BANK"), "PAID_TO_BANK", "không được hạ trạng thái đã có chứng từ");
+  assert.equal(codStatusForAmount(0, "PENDING"), "NOT_APPLICABLE", "không có tiền thu hộ mới là 'không thu hộ'");
+
+  // 2. Trạng thái GIAO HÀNG không được kết luận gì về tiền.
+  for (const text of ["Chuyển hoàn", "Đã trả hàng", "Huỷ đơn", "Thành công - Chuyển trả người gửi"]) {
+    assert.equal(mapVtpStatusText(text).cod, null, `trạng thái "${text}" không được kết luận về COD`);
+  }
+
+  // 3. Dòng bảng kê báo 0đ cho vận đơn CÓ thu hộ ⇒ "chưa có chứng từ", không phải "không thu hộ".
+  await db
+    .insert(schema.shipments)
+    .values({ id: "cod-nghia-1", vtpOrderNumber: "PKE9944440001", trackingCode: "PKE9944440001", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 849000, codStatus: "PENDING" })
+    .onConflictDoNothing();
+  const head = "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)";
+  await runVtpDataFileImport(
+    [{ filename: "BangKeChiCOD_khong_tra.csv", base64: Buffer.from(`${head}\nPKE9944440001,GLMTQY214,K,0900000094,X,01/09/2026 09:00:00,03/09/2026 10:00:00,0,17000,-17000`, "utf8").toString("base64") }],
+    "GMAIL:viettelpost",
+  );
+  const sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "cod-nghia-1") });
+  assert.equal(sau?.codStatus, "PENDING", "bảng kê chưa chi trả đồng nào KHÔNG biến vận đơn 849.000đ thành 'không thu hộ'");
+  assert.equal(Number(sau?.codAmount), 849000, "không được xoá số tiền thu hộ Viettel Post đang ghi");
+  assert.equal(Number(sau?.codCollected), 0, "chưa có chứng từ thì tiền thực thu vẫn là chưa biết, không tự điền");
+
+  console.log("✓ Ý nghĩa trạng thái COD: 'không thu hộ' chỉ khi COD khai báo = 0; hoàn/huỷ và bảng kê 0đ không xoá dấu vết thu hộ");
+}

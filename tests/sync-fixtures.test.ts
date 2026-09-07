@@ -7,7 +7,7 @@ import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
-import { testCodPaymentStatement, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
+import { testCodPaymentStatement, testCodStatusMeaning, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
@@ -1079,6 +1079,7 @@ async function main() {
   await testVtpFileDetection();
   await testVtpStatementFromMail();
   await testStatementLedgerOrderIndependent();
+  await testCodStatusMeaning();
   await testStatementDetailMatching(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);

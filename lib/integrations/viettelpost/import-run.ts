@@ -1,3 +1,5 @@
+import { sql } from "drizzle-orm";
+import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
 import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch } from "@/lib/integrations/viettelpost/statement-db";
@@ -35,9 +37,37 @@ export type VtpImportFileResult = {
  * Thứ tự xử lý cố ý: DANH SÁCH VẬN ĐƠN trước, CHI TIẾT BẢNG KÊ sau. Danh sách tạo/cập nhật
  * vận đơn, bảng kê mới có cái để ghi tiền thực thu lên.
  */
+/** Giới hạn 8 MB base64 mỗi tệp: đủ cho bảng kê lớn nhất từng gặp, không để một tệp lạ làm phình CSDL. */
+const MAX_LUU_BASE64 = 8_000_000;
+
+/**
+ * Lưu tệp gốc để phát lại. Trùng tên thì ghi đè bằng bản mới nhất — Viettel Post đặt tên tệp kèm
+ * mã và mốc thời gian nên trùng tên nghĩa là đúng tệp đó được gửi lại.
+ */
+async function luuTepGoc(files: { filename: string; base64: string }[], actor: string) {
+  const giu = files.filter((f) => f.base64.length <= MAX_LUU_BASE64);
+  if (!giu.length) return;
+  try {
+    const db = await getDb();
+    await db
+      .insert(schema.vtpStatementFiles)
+      .values(giu.map((f) => ({ filename: f.filename, content: f.base64, bytes: Math.round((f.base64.length * 3) / 4), actor })))
+      .onConflictDoUpdate({
+        target: schema.vtpStatementFiles.filename,
+        set: { content: sql`excluded.content`, bytes: sql`excluded.bytes`, actor: sql`excluded.actor` },
+      });
+  } catch (e) {
+    // Không giữ được tệp thì vẫn phải nhập: mất bản sao còn hơn mất luôn lần nhập.
+    console.warn(`[vtp-import] không lưu được tệp gốc: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 export async function runVtpDataFileImport(files: { filename: string; base64: string }[], actor: string): Promise<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }> {
   const detected: DetectedVtpFile[] = [];
   const results: VtpImportFileResult[] = [];
+  // Giữ tệp gốc TRƯỚC khi đọc. Apps Script chỉ gửi thư chưa gắn nhãn nên nếu ERP đọc sai mà không
+  // giữ tệp thì muốn đọc lại phải vào Gmail gỡ nhãn tay — giữ ở đây để ERP tự phát lại được.
+  await luuTepGoc(files, actor);
   for (const file of files) {
     const buffer = Buffer.from(file.base64, "base64");
     const isText = /\.(csv|txt|tsv)$/i.test(file.filename);
@@ -94,6 +124,20 @@ export async function runVtpDataFileImport(files: { filename: string; base64: st
       note: applied.linked === 0 ? (match.issue ?? "Không vận đơn nào trong tệp có trong ERP") : `Ghi chứng từ cho ${applied.linked} vận đơn, ${applied.withCash} vận đơn có tiền thực thu`,
     });
     await audit({ userId: null, userEmail: actor, action: "COD_STATEMENT_DETAIL", entity: "COD_BATCH", entityId: match.batchId ?? f.filename, detail: { filename: f.filename, ...applied, period: [match.periodFrom, match.periodTo] } });
+  }
+
+  // Ghi lại loại tệp và số dòng đọc được để trang vận hành nhìn thấy tệp nào đọc được gì.
+  try {
+    const db = await getDb();
+    const now = new Date();
+    for (const r of results) {
+      await db
+        .update(schema.vtpStatementFiles)
+        .set({ kind: r.kind, rows: r.rows, lastImportedAt: now })
+        .where(sql`${schema.vtpStatementFiles.filename} = ${r.filename}`);
+    }
+  } catch {
+    // chỉ là siêu dữ liệu, không được làm hỏng lần nhập
   }
 
   return { files: results, orderRows, statementRows };
