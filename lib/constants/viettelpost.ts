@@ -31,7 +31,7 @@ export const VTP_STATUS: Record<number, VtpStatusMeta> = {
   500: { name: "Phân công bưu tá đi giao hàng", stage: "OUT_FOR_DELIVERY" },
   501: { name: "Phát thành công", stage: "DELIVERED", final: true },
   502: { name: "Chuyển hoàn bưu cục gốc", stage: "RETURNING" },
-  503: { name: "Hủy theo yêu cầu khách hàng", stage: "CANCELLED", final: true },
+  503: { name: "Tiêu huỷ theo yêu cầu khách hàng", stage: "CANCELLED", final: true },
   504: { name: "Chuyển hoàn thành công cho người gửi", stage: "RETURNED", final: true },
   505: { name: "Yêu cầu chuyển hoàn", stage: "RETURNING" },
   506: { name: "Phát thất bại - khách nghỉ, không có nhà", stage: "DELIVERY_FAILED" },
@@ -45,7 +45,33 @@ export const VTP_STATUS: Record<number, VtpStatusMeta> = {
 
 export const VTP_FINAL_STATUSES = new Set([101, 107, 201, 501, 503, 504]);
 
+/**
+ * Mã lý do giao thất bại. Tài liệu webhook chính thức (partner2.viettelpost.vn/document/webhook)
+ * dùng dải 20–47; bản đối tác V2 cũ dùng dải 1–17. Hai dải KHÔNG trùng nhau nên giữ cả hai:
+ * vận đơn cũ tra được bằng bảng cũ, webhook hiện tại tra bằng bảng mới.
+ * Trước đây ERP chỉ có bảng 1–17 nên mọi mã lý do webhook gửi về đều hiển thị "Mã lý do (20)".
+ */
 export const VTP_REASON_CODES: Record<number, string> = {
+  // ── Bảng chính thức theo tài liệu webhook ──
+  20: "Khách từ chối nhận - sai màu sắc",
+  21: "Khách từ chối nhận - sai kích thước",
+  22: "Khách từ chối nhận - sai kiểu dáng",
+  23: "Khách từ chối nhận - chất lượng kém",
+  24: "Khách từ chối nhận - không cho xem hàng",
+  25: "Khách từ chối nhận - sai số lượng",
+  26: "Khách từ chối nhận - sai tiền thu hộ",
+  27: "Khách từ chối nhận - sai định dạng số điện thoại người nhận",
+  30: "Khách hàng không có nhu cầu nhận hàng",
+  31: "Khách hàng không đặt đơn",
+  32: "Khách từ chối nhận - sai địa chỉ",
+  35: "Người nhận hẹn phát lại",
+  36: "Không liên lạc được khách hàng nhận",
+  37: "Bưu tá hẹn phát lại",
+  38: "Khách hàng đến bưu cục nhận",
+  43: "Người gửi yêu cầu chuyển hoàn",
+  46: "Phát thất bại nhiều lần - người nhận hẹn phát lại",
+  47: "Phát thất bại nhiều lần - không liên lạc được khách nhận",
+  // ── Bảng đối tác V2 cũ (giữ để tra vận đơn lịch sử) ──
   1: "Người nhận hẹn phát lại",
   2: "Không liên lạc được khách nhận",
   3: "Khách nhận đến bưu cục nhận",
@@ -64,6 +90,9 @@ export const VTP_REASON_CODES: Record<number, string> = {
   16: "Phát thất bại nhiều lần",
   17: "Người gửi yêu cầu chuyển hoàn",
 };
+
+/** Mã lý do nghĩa là KHÁCH TỪ CHỐI / không nhận — đơn gần như chắc chắn hoàn, không phải hẹn lại. */
+export const VTP_REFUSED_REASONS = new Set([20, 21, 22, 23, 24, 25, 26, 27, 30, 31, 43, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 17]);
 
 export function vtpStatusMeta(code: number | null | undefined, fallbackName = ""): VtpStatusMeta {
   if (code === null || code === undefined) return { name: fallbackName || "Chưa có trạng thái", stage: "UNKNOWN" };

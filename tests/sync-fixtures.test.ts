@@ -43,6 +43,7 @@ import XLSX from "xlsx";
 import { applyStatementDetail, applyVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 import { parseLedger, planImport, referenceFor } from "@/lib/integrations/bank/ledger";
 import { getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { VTP_REASON_CODES, VTP_REFUSED_REASONS } from "@/lib/constants/viettelpost";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
@@ -878,6 +879,52 @@ async function main() {
     const lai = await listOrdersForVariant((await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key, all);
     assert.equal(lai.find((d) => d.id === "lg-9101")?.outcome, "DELIVERED", "chưa có chứng từ tiền nên tạm tính theo COD khai báo; bảng kê về sẽ chỉnh lại");
     console.log(`✓ Danh sách vận đơn VTP: ghép ${applied.matched}/${applied.total} (${applied.legs} chiều về → đơn gốc thành đơn hoàn)`);
+  }
+
+  // ───── CHỨNG TỪ ĐVVC quyết định kết quả đơn (chủ shop chốt 07/09/2026 — phương án B) ─────
+  // Tài liệu webhook VTP gọi CẢ 501 (phát tới khách) lẫn 504 (trả về người gửi) là "Thành công".
+  // Cờ IS_RETURNING của chính ĐVVC mới phân biệt được, ERP lưu ở shipment_events.leg_type.
+  {
+    const evt = async (shipmentId: string, status: string, leg: "OUTBOUND" | "RETURN" | null) =>
+      db.insert(schema.shipmentEvents).values({
+        shipmentId, source: "VTP_WEBHOOK", status, statusName: `mã ${status}`,
+        occurredAt: new Date(), normalizedStage: status === "501" ? "DELIVERED" : status === "504" ? "RETURNED" : "CANCELLED", legType: leg,
+      }).onConflictDoNothing();
+    const shipOf = async (orderId: string) =>
+      (await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, orderId) }))!.id;
+    const outcomeOf = async (orderId: string) => {
+      clearMemo();
+      const key = (await getReturnRateByVariant({ period: all, q: "RR-001", minShipped: 1, sort: "rate", dir: "desc", page: 1, pageSize: 10 })).rows.find((r) => r.variantId === "rr-var")!.key;
+      return (await listOrdersForVariant(key, all)).find((d) => d.id === orderId)?.outcome;
+    };
+
+    // 501 chiều ĐI: hàng tới tay khách → GIAO THÀNH CÔNG, kể cả khi chưa có chứng từ tiền.
+    await mkOrder("vtp-501", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 0, shippingFee: 17000, vtpOrderNumber: "PKE1700000001" });
+    await evt(await shipOf("vtp-501"), "501", "OUTBOUND");
+    assert.equal(await outcomeOf("vtp-501"), "DELIVERED", "mã 501 chiều đi = giao tới khách, chứng từ ĐVVC thắng suy luận theo tiền");
+
+    // 501 chiều HOÀN: phát thành công VỀ SHOP → là ĐƠN HOÀN, dù VTP cũng gọi là "Thành công".
+    await mkOrder("vtp-501r", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1700000002" });
+    await evt(await shipOf("vtp-501r"), "501", "RETURN");
+    assert.equal(await outcomeOf("vtp-501r"), "RETURNED", "501 + IS_RETURNING = phát thành công chiều hoàn → đơn hoàn, không phải giao thành công");
+
+    // 504: đã trả về người gửi.
+    await mkOrder("vtp-504", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, codCollected: 499000, codStatus: "COLLECTED", shippingFee: 17000, vtpOrderNumber: "PKE1700000003" });
+    await evt(await shipOf("vtp-504"), "504", null);
+    assert.equal(await outcomeOf("vtp-504"), "RETURNED", "mã 504 thắng cả chứng từ tiền: hàng đã quay về người gửi");
+
+    // 503 tiêu huỷ: không thành công VÀ hàng không bao giờ quay về kho.
+    await mkOrder("vtp-503", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, shippingFee: 17000, vtpOrderNumber: "PKE1700000004" });
+    await evt(await shipOf("vtp-503"), "503", null);
+    assert.equal(await outcomeOf("vtp-503"), "RETURNED", "mã 503 tiêu huỷ = không thành công");
+
+    // Bảng mã lý do phải theo tài liệu webhook chính thức (dải 20–47), không phải bảng V2 cũ.
+    assert.equal(VTP_REASON_CODES[35], "Người nhận hẹn phát lại");
+    assert.equal(VTP_REASON_CODES[26], "Khách từ chối nhận - sai tiền thu hộ");
+    assert.equal(VTP_REASON_CODES[43], "Người gửi yêu cầu chuyển hoàn");
+    assert.ok(VTP_REFUSED_REASONS.has(31) && !VTP_REFUSED_REASONS.has(35), "khách không đặt đơn = từ chối; hẹn phát lại thì chưa");
+
+    console.log("✓ Chứng từ ĐVVC quyết định kết quả đơn: 501 chiều đi = giao TC · 501 chiều hoàn & 504 & 503 = không TC · mã lý do theo tài liệu chính thức");
   }
 
   // Khóa QUY TẮC NGHIỆP VỤ do chủ shop chốt: kết luận chỉ theo TIỀN THỰC THU về tài khoản

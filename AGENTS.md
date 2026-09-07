@@ -17,8 +17,8 @@
 
 ## 3. Business rules KHÔNG ĐƯỢC PHÁ
 1. **`ORDER_OUTCOME`** (`lib/queries/return-rate.ts`) là nguồn sự thật duy nhất cho kết quả đơn. Báo cáo mới phải `LEFT JOIN shipments` và lọc bằng nó; không viết lại điều kiện `stage`.
-2. **Đơn giao thành công = doanh thu COD thực > 100.000đ** (hoặc khách chuyển khoản trước > 100K). **Không bao giờ** coi `shipments.stage = 'DELIVERED'` hay trạng thái Pancake "Đã nhận" là giao thành công.
-3. **Doanh thu < 50.000đ = đơn hoàn** (`RETURNED`). Viettel Post ghi "Giao thành công" cho cả chiều hoàn / giao một phần. 50K–100K = không thành công (`RETURNED_BY_RULE`). Hai giá trị này luôn được gộp là "hoàn" trong tổng hợp.
+2. **Thứ tự căn cứ kết luận đơn** (chủ shop chốt 07/09/2026): (a) **CHỨNG TỪ ĐVVC** trước — sự kiện đến thẳng từ Viettel Post mang mã cuối 501/503/504/101/107/201, phân biệt chiều đi / chiều hoàn bằng cờ `IS_RETURNING` lưu ở `shipment_events.leg_type`: `501 + OUTBOUND` = giao tới khách; `501 + RETURN` = phát thành công **chiều hoàn về shop** = đơn hoàn; `504` = hoàn; `503` = tiêu huỷ (không thành công, hàng KHÔNG quay về kho); `101/107/201` = huỷ. (b) Chưa có mã cuối mới xét **doanh thu COD thực > 100.000đ** (hoặc chuyển khoản trước > 100K) = giao thành công. **Không bao giờ** coi `shipments.stage = 'DELIVERED'` hay trạng thái Pancake "Đã nhận" là giao thành công.
+3. **Doanh thu < 50.000đ = đơn hoàn** (`RETURNED`) — áp dụng khi chưa có mã cuối của ĐVVC. Viettel Post ghi "Giao thành công" cho cả chiều hoàn / giao một phần. 50K–100K = không thành công (`RETURNED_BY_RULE`). Hai giá trị này luôn được gộp là "hoàn" trong tổng hợp.
 4. Ngưỡng chỉ sửa tại `lib/constants/returns.ts::RETURN_RULE` và chỉ khi chủ shop yêu cầu. Không hard-code 50000/100000 ở nơi khác.
 5. Logic doanh thu/thực thu COD trên áp dụng cho **mọi** báo cáo: doanh thu, lợi nhuận (danh nghĩa + tiền thật), quảng cáo/marketer, lương, tỷ lệ GTC, tồn kho (`variantSalesSubquery`, `sold30Subquery`), kế hoạch sản xuất (`demandSubquery`), landing, đối soát COD, trang Vận đơn (`SHIPMENT_DELIVERED/RETURNED`, `shipmentOutcome`).
 6. Dữ liệu Viettel Post (webhook → bảng kê → danh sách vận đơn) **ưu tiên hơn** Pancake. Import chỉ **nâng** `cod_status`, không hạ; `cod_collected` chỉ ghi khi có số thực thu > 0.
@@ -40,7 +40,7 @@
 ## 5. Tích hợp API
 - **Secrets** chỉ nằm ở `.env` trên VPS / GitHub Actions Secrets / bảng `settings`. Repo là **PUBLIC**: không commit `.env`, token, URL webhook Lark/Telegram, mật khẩu; không `console.log` token; script probe phải che token trước khi in.
 - Pancake: tôn trọng 429 (retry + backoff sẵn trong `lib/integrations/http.ts`); webhook không ký → xác thực bằng secret trong URL; webhook cũ không đè dữ liệu mới. Không dùng tài khoản Facebook cá nhân; Facebook chỉ qua System User token.
-- Viettel Post: đọc `error`/`status` trong phong bì phản hồi, không tin HTTP status. Không tái thử hướng tự động đăng nhập web viettelpost.vn (đã loại bỏ).
+- Viettel Post: đọc `error`/`status` trong phong bì phản hồi, không tin HTTP status. Webhook phải trả HTTP 200 trong < 1 giây, có thể trùng/thừa và VTP thử lại tối đa 5 lần → luôn idempotent. Mã lý do theo tài liệu webhook chính thức (dải 20–47), bảng V2 cũ (1–17) chỉ để tra lịch sử. Không tái thử hướng tự động đăng nhập web viettelpost.vn (đã loại bỏ).
 - Google Sheet: chỉ CSV export công khai, không thêm Google API key.
 - Mọi tích hợp mới phải có: hàm `testConnection`, ghi `sync_runs`, xử lý lỗi không làm sập job khác, và mục trong trang Kết nối dữ liệu.
 

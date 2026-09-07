@@ -1,6 +1,6 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -45,7 +45,8 @@ const OUT_IN_TRANSIT = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.stage} in ('PICKE
  * Gồm đơn hoàn (theo kết quả đơn) và đơn huỷ sau khi đã xuất — chủ shop yêu cầu xử lý như hàng hoàn.
  */
 const OUT_AWAITING_RETURN = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is null
-  and (${RETURN_PENDING_WAREHOUSE} or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED')))`;
+  and (${RETURN_PENDING_WAREHOUSE} or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
+  and not ${VTP_DESTROYED})`;
 
 /** Hàng hoàn kho ĐÃ xử lý (đã có phiếu tái nhập) — dùng để đối chiếu với số thực nhập, ra phần hụt. */
 const OUT_RETURN_HANDLED = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is not null)`;

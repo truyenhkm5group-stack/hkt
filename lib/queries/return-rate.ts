@@ -23,9 +23,52 @@ const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)
 
 
 /**
+ * KẾT QUẢ THEO CHỨNG TỪ CỦA ĐVVC — bằng chứng mạnh nhất, đứng trước mọi suy luận theo tiền.
+ *
+ * Tài liệu webhook Viettel Post: chỉ 6 mã là TRẠNG THÁI CUỐI — 101/107/201 (huỷ), 501 (phát thành
+ * công), 503 (tiêu huỷ), 504 (chuyển trả người gửi = đơn hoàn). Sau khi đạt trạng thái cuối, đơn
+ * không phát sinh hành trình nào nữa.
+ *
+ * Cái bẫy: VTP gọi CẢ 501 lẫn 504 là "Thành công". Phân biệt bằng cờ IS_RETURNING của chính ĐVVC,
+ * ERP lưu vào `shipment_events.leg_type`:
+ *  · 501 + OUTBOUND → hàng tới tay khách  → GIAO THÀNH CÔNG;
+ *  · 501 + RETURN   → phát thành công CHIỀU HOÀN về shop → ĐƠN HOÀN;
+ *  · 504            → đã trả về người gửi → ĐƠN HOÀN;
+ *  · 503            → hàng bị tiêu huỷ, không thu tiền và KHÔNG quay về kho → không thành công;
+ *  · 101/107/201    → huỷ.
+ *
+ * Chỉ nhận sự kiện đến THẲNG từ ĐVVC (không nhận bản sao Pancake). Đơn chưa có mã kết thúc thì
+ * rơi xuống quy tắc theo tiền bên dưới — webhook mới bật 05/09/2026 nên phần lớn lịch sử vẫn
+ * phải suy theo tiền.
+ */
+const VTP_FINAL_EVENT = (codes: string, leg?: "OUTBOUND" | "RETURN") => sql`exists (
+  select 1 from shipment_events fe
+  where fe.shipment_id = ${s.id}
+    and fe.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT')
+    and fe.status in (${sql.raw(codes)})
+    ${leg ? sql`and fe.leg_type = ${leg}` : sql``}
+)`;
+
+/** Vận đơn đã có kết luận từ ĐVVC (một trong 6 mã cuối) — dùng để biết có được phép bỏ qua suy luận tiền không. */
+export const HAS_VTP_FINAL = sql`(${VTP_FINAL_EVENT("'501','503','504','101','107','201'")})`;
+/** Giao tới tay khách theo chứng từ ĐVVC: mã 501 của CHIỀU ĐI. */
+const VTP_DELIVERED = sql`(${VTP_FINAL_EVENT("'501'", "OUTBOUND")})`;
+/** Hoàn theo chứng từ ĐVVC: 504, hoặc 501 của chiều hoàn (phát thành công về shop), hoặc 503 tiêu huỷ. */
+const VTP_RETURNED = sql`(${VTP_FINAL_EVENT("'504','503'")} or ${VTP_FINAL_EVENT("'501'", "RETURN")})`;
+/**
+ * Mã 503 = TIÊU HUỶ theo yêu cầu khách hàng. Hàng bị tiêu huỷ nên KHÔNG BAO GIỜ quay về kho —
+ * sổ kho phải loại khỏi "hoàn chờ nhận", nếu không con số này treo vĩnh viễn và tồn kho thiếu.
+ */
+export const VTP_DESTROYED = sql`(${VTP_FINAL_EVENT("'503'")})`;
+
+/** Huỷ theo chứng từ ĐVVC. */
+const VTP_CANCELLED = sql`(${VTP_FINAL_EVENT("'101','107','201'")})`;
+
+/**
  * Kết quả cuối cùng của một đơn — dùng chung cho MỌI báo cáo (tổng quan, lợi nhuận, tỷ lệ giao thành công, lương, COD).
  * ĐƠN GIAO THÀNH CÔNG = đơn có doanh thu COD THỰC > 100K (tiền thực thu / đã về), không phụ thuộc vào việc có trạng thái Viettel Post hay không.
  * Ưu tiên trạng thái VẬN ĐƠN Viettel Post (đầu cuối giao hàng) trước trạng thái đơn Pancake:
+ *  0. CHỨNG TỪ ĐVVC (mã cuối 501/503/504/101/107/201 + cờ IS_RETURNING) — chắc chắn nhất, xét trước;
  *  1. vận đơn đang hoàn / đã hoàn → không thành công (hoàn);
  *  2. COD thực thu > 100K (webhook / bảng kê / danh sách vận đơn) → giao thành công, kể cả khi trạng thái vận đơn chưa cập nhật;
  *  2b. vận đơn "giao thành công" nhưng doanh thu COD < 50K → ĐƠN HOÀN (khách trả hàng, VTP vẫn báo giao thành công chiều hoàn);
@@ -113,6 +156,9 @@ export const IS_PROVISIONAL = sql`(${s.id} is not null and ${s.stage} = 'DELIVER
  * Yêu cầu FROM orders LEFT JOIN shipments.
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
+  when ${VTP_RETURNED} then 'RETURNED'
+  when ${VTP_CANCELLED} then 'CANCELLED'
+  when ${VTP_DELIVERED} then 'DELIVERED'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} and (${s.stage} = 'DELIVERED' or ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK')) then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${REVENUE_EDITED_AFTER_DELIVERY} then 'RETURNED'

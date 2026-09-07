@@ -10,7 +10,7 @@ import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 
 const track = (orderNumber: string, status: number, statusName: string, at: string) => ({
   orderNumber, orderReference: "", status, statusName,
-  statusDate: new Date(at), location: "", note: "", reasonCode: null,
+  statusDate: new Date(at), location: "", note: "", reasonCode: null, isReturning: null, moneyCollectionOrigin: null,
   moneyCollection: 0, moneyTotal: 0, moneyTotalFee: 0, moneyFeeCod: 0, productWeight: 0,
   service: "", expectedDelivery: "", receiverName: "", receiverPhone: "", receiverAddress: "",
   employeeName: "", employeePhone: "", journey: [], raw: {},
