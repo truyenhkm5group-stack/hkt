@@ -131,12 +131,16 @@ export const SHIPMENT_STAGE_ORDER: ShipmentStage[] = [
   "UNKNOWN",
 ];
 
+/**
+ * Nhãn phải nói rõ TIỀN ĐANG Ở ĐÂU, đừng để đọc nhầm thành tiền đã về tài khoản shop.
+ * Ý nghĩa đầy đủ của từng trạng thái ghi ở `lib/constants/cod.ts`.
+ */
 export const COD_STATUS_LABEL: Record<CodStatus, string> = {
   NOT_APPLICABLE: "Không thu hộ",
   PENDING: "Chưa thu",
-  COLLECTED: "Đã thu",
+  COLLECTED: "ĐVVC đã thu",
   RECONCILED: "ĐVVC đã đối soát",
-  PAID_TO_BANK: "Đã về ngân hàng",
+  PAID_TO_BANK: "Đã về tài khoản",
   DISPUTED: "Có chênh lệch",
 };
 
