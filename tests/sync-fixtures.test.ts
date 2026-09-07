@@ -7,7 +7,7 @@ import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
-import { testStatementDetailMatching, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
+import { testCodPaymentStatement, testStatementDetailMatching, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import assert from "node:assert/strict";
@@ -1033,6 +1033,7 @@ async function main() {
   await testVtpState(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
+  testCodPaymentStatement();
   await testVtpImportLimits();
   await testVtpFileDetection();
   await testVtpStatementFromMail();

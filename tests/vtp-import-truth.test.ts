@@ -4,7 +4,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { auditLogs, codBatches, orders, paymentTransactions, shipmentEvents, shipments } from "@/db/schema";
-import { mergeVtpOrderLists, parseStatementDetail, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import { mergeVtpOrderLists, parseCodPaymentStatement, parseStatementDetail, parseVtpOrderList } from "@/lib/integrations/viettelpost/statement";
+import { detectVtpFile } from "@/lib/integrations/viettelpost/import-files";
 import { applyVtpOrderList, applyStatementDetailRows, matchStatementFileToBatch, matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 
 /** Bố cục thật của VTP, dữ liệu tổng hợp để không đưa thông tin khách hàng vào repo public. */
@@ -109,6 +110,74 @@ ${webLine}`);
  * ("too_big: expected array to have <=10 items"). Khoá lại cả hai lỗi:
  * giới hạn phải đủ cho việc dùng thật, và thông báo phải đọc được.
  */
+/**
+ * Bảng kê đối soát thanh toán Viettel Post GỬI QUA EMAIL (BangKeChiCOD_*.xlsx).
+ * Bố cục thật do chủ shop cung cấp; dữ liệu tổng hợp để không đưa thông tin khách vào repo public.
+ *
+ * Gmail đã đẩy đều đặn 11 lần nhưng ERP không đọc được lần nào vì tệp này có tiêu đề thư dài và
+ * HAI phần bảng, trong khi hai trình đọc cũ chỉ tìm một dòng tiêu đề duy nhất.
+ */
+export function testCodPaymentStatement() {
+  const csv = [
+    "TỔNG CÔNG TY CỔ PHẦN BƯU CHÍNH VIETTEL",
+    "PHÒNG TÀI CHÍNH",
+    "",
+    "",
+    ",,,BẢNG KÊ ĐỐI SOÁT THANH TOÁN",
+    "",
+    "",
+    "Mã khách hàng: GLMTQY214,,,,Tên khách hàng: HMT shop",
+    "Địa chỉ: Hà Nội,,,,Mã số thuế:",
+    "Số điện thoại: 0886833448",
+    "",
+    "I: CHI TIẾT SỐ TIỀN COD",
+    "STT,Số BILL,Ngày gửi,Dịch vụ,Ngày phát thành công,Số tiền COD,Ghi chú",
+    "1,PKE1511614351,04/09/2026,VSL7,06/09/2026,\"524,000\",",
+    "2,PKE1508909085,31/08/2026,VSL7,04/09/2026,\"20,000\",",
+    "3,PKE1508909058,30/08/2026,VSL7,06/09/2026,\"30,000\",",
+    "",
+    "",
+    "II:CHI TIẾT TIỀN CƯỚC CHUYỂN PHÁT VÀ PHÍ COD",
+    "STT,Số BILL,Ngày gửi,Dịch vụ,Trọng lượng,Cước phí,Cước đã thu,Giảm giá,Tổng số tiền,Ghi chú",
+    "1,PKE1511614351,04/09/2026,VSL7,50,\"16,500\",0,0,\"16,500\",",
+    "2,CHPKE1508897990,04/09/2026,GCH,1000,\"5,000\",0,0,\"5,000\",",
+    "3,PKE15089090851P1,04/09/2026,VSL7,50,\"8,501\",0,0,\"8,501\",",
+  ].join("\n");
+
+  const rows = parseCodPaymentStatement(csv, "BangKeChiCOD_30484111_1788741309880.xlsx");
+  const by = (code: string) => rows.find((r) => r.trackingCode === code);
+
+  assert.equal(rows.length, 5, "gộp hai phần theo mã vận đơn: 3 mã có COD + 2 mã chỉ có cước");
+  const caHai = by("PKE1511614351");
+  assert.ok(caHai, "vận đơn nằm ở cả hai phần phải gộp thành một dòng");
+  assert.equal(caHai.cod, 524_000);
+  assert.equal(caHai.fee, 16_500);
+  assert.equal(caHai.net, 507_500, "tiền thực về = COD trừ cước, đúng cách Viettel Post trả tiền");
+  assert.equal(caHai.paidDate, "2026-09-06", "lấy ngày phát thành công để biết bảng kê phủ giai đoạn nào");
+
+  const chiCoCod = by("PKE1508909085");
+  assert.ok(chiCoCod && chiCoCod.cod === 20_000 && chiCoCod.fee === 0, "vận đơn chỉ có ở phần COD");
+
+  // Vận đơn chiều hoàn chỉ nằm ở phần cước: COD = 0 là BẰNG CHỨNG không thu được đồng nào,
+  // không phải "chưa biết" — đây chính là thứ ERP cần để kết luận tiền.
+  const chiCoCuoc = by("CHPKE1508897990");
+  assert.ok(chiCoCuoc, "vận đơn chỉ có cước vẫn phải được ghi nhận");
+  assert.equal(chiCoCuoc.cod, 0);
+  assert.equal(chiCoCuoc.fee, 5_000);
+  assert.equal(chiCoCuoc.net, -5_000, "chỉ mất cước thì tiền về âm");
+  assert.ok(by("PKE15089090851P1"), "vận đơn chiều hoàn dạng ...1P1 cũng phải đọc được");
+
+  // Không được nhầm sang hai kiểu tệp tải tay.
+  assert.throws(() => parseVtpOrderList(csv), /Không tìm thấy cột|không có dòng/i);
+  const detected = detectVtpFile(csv, "BangKeChiCOD_30484111_1788741309880.xlsx");
+  assert.equal(detected.kind, "STATEMENT_DETAIL", "tự nhận đúng loại, không cần chọn tab");
+  assert.equal(detected.rows.length, 5);
+
+  const tongCod = rows.reduce((a, r) => a + r.cod, 0);
+  const tongCuoc = rows.reduce((a, r) => a + r.fee, 0);
+  console.log(`✓ Bảng kê đối soát thanh toán qua email: ${rows.length} vận đơn · COD ${tongCod} · cước ${tongCuoc} · thực về ${tongCod - tongCuoc}`);
+}
+
 export async function testVtpImportLimits() {
   const { MAX_LIST_FILES, MAX_LIST_BASE64, MAX_LIST_RAW_BYTES } = await import("@/lib/constants/cod");
 
