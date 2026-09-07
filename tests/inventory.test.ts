@@ -131,10 +131,16 @@ export async function testInventory(db: Db) {
     { id: "bulk-ship-dang-ve", orderId: "bulk-dang-ve", stage: "RETURNING" },
   ]);
 
+  // Vận đơn chiều hoàn do Viettel Post tự tạo (mã ...1P1) cũng ở trạng thái RETURNED khi phát
+  // thành công về shop, nhưng không gắn đơn và không có món hàng nào — không được lọt vào hàng
+  // chờ kho, nếu không danh sách sẽ đầy dòng rỗng.
+  await db.insert(schema.shipments).values({ id: "bulk-ship-chieu-hoan", orderReference: "PKE-GOC", stage: "RETURNED", returnedAt: new Date() });
+
   const cho = await pendingReturnedForWarehouse();
   const ids = await listPendingReturnedIds(500);
   assert.ok(ids.includes("bulk-ship-da-ve"), "vận đơn Viettel Post đã trả xong phải nằm trong danh sách chờ kho");
   assert.ok(!ids.includes("bulk-ship-dang-ve"), "vận đơn còn đang trên đường về KHÔNG được xác nhận hàng loạt");
+  assert.ok(!ids.includes("bulk-ship-chieu-hoan"), "vận đơn chiều hoàn không gắn đơn không được vào hàng chờ kho");
   assert.ok(cho.count >= 1);
   assert.ok(cho.items >= 5, "số món phải khớp cách tính tồn của ERP, gồm cả hàng tặng");
   assert.ok(cho.oldestAt && Date.now() - new Date(cho.oldestAt).getTime() >= 19 * 86_400_000, "phải nêu được kiện chờ lâu nhất");
