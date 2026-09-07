@@ -31,6 +31,7 @@ on:
           - cod-rebuild          # dựng lại tiền COD từ sổ chi tiết bảng kê (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - cod-status-repair    # sửa vận đơn bị gắn sai "không thu hộ" (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - vtp-replay-files     # nhập lại các tệp Viettel Post đã lưu (mặc định CHỈ LIỆT KÊ; arg "--apply")
+          - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
@@ -133,6 +134,9 @@ jobs:
               vtp-replay-files)
                 fetch_script vtp-replay-files.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-replay-files.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-replay-files.ts $ARG ;;
+              vtp-statement-peek)
+                fetch_script vtp-statement-peek.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-peek.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-peek.ts $ARG ;;
               vtp-retry-webhooks)
                 fetch_script vtp-retry-webhooks.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-retry-webhooks.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-retry-webhooks.ts $ARG ;;
