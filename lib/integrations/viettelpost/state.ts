@@ -40,8 +40,21 @@ export type DerivedState = {
   decidedBy: { source: string; status: string; occurredAt: Date };
 };
 
+/**
+ * CHỈ sự kiện đến thẳng từ Viettel Post mới được dùng để kết luận trạng thái.
+ *
+ * Bản sao hành trình do Pancake cung cấp KHÔNG dùng được để so thời gian: mốc của chúng là giờ
+ * PANCAKE GHI NHẬN (có mili-giây, ví dụ 2026-08-30T01:06:27.816Z), không phải giờ sự kiện của
+ * ĐVVC. Chạy thử trên production cho thấy nếu trộn vào thì 122 vận đơn đã giao thành công bị kéo
+ * ngược về "đang đi phát" chỉ vì bản sao Pancake được ghi sau. Đúng quy tắc của shop: xung đột
+ * thì tính theo Viettel Post.
+ *
+ * Sự kiện Pancake vẫn được giữ nguyên trong lịch sử để tra cứu, chỉ không được quyền kết luận.
+ */
+const CARRIER_SOURCES = new Set(["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL"]);
+
 /** Nguồn nào đáng tin hơn khi hai sự kiện cùng mốc thời gian. Cao hơn = thắng. */
-const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15, PANCAKE: 10 };
+const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15 };
 
 /** Các mốc "lần đầu đạt tới" — giữ nguyên kể cả khi sau đó vận đơn chuyển sang trạng thái khác. */
 const REACHED_PICKUP: ShipmentStage[] = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];
@@ -67,7 +80,7 @@ export async function deriveShipmentState(db: Db, shipmentId: string): Promise<D
       const stage = (r.normalizedStage ?? resolved.stage) as ShipmentStage;
       return { ...r, stage, resolved };
     })
-    .filter((r) => r.stage !== "UNKNOWN" && r.occurredAt instanceof Date && Number.isFinite(r.occurredAt.getTime()));
+    .filter((r) => CARRIER_SOURCES.has(r.source) && r.stage !== "UNKNOWN" && r.occurredAt instanceof Date && Number.isFinite(r.occurredAt.getTime()));
 
   if (!usable.length) return null;
 

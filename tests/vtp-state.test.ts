@@ -93,6 +93,18 @@ export async function testVtpState(db: Db) {
   assert.equal(fileSide.stage, webhookSide.stage, "cùng 'giao thành công' thì webhook và tệp phải ra cùng trạng thái");
   assert.equal(fileSide.isFinal, webhookSide.isFinal, "và cùng kết luận đã kết thúc hay chưa");
 
+  // ───────── 5. Bản sao hành trình từ Pancake không được quyền kết luận ─────────
+  // Mốc của sự kiện Pancake là giờ Pancake ghi nhận, không phải giờ sự kiện của ĐVVC. Trộn vào
+  // thì vận đơn đã giao xong bị kéo ngược về "đang đi phát" (đo được 122 ca trên production).
+  await db.insert(schema.shipmentEvents).values({
+    shipmentId: afterLate[0].id, source: "PANCAKE", status: "Giao bưu tá đi phát",
+    statusName: "Giao bưu tá đi phát", occurredAt: new Date("2026-09-09T00:00:00Z"), normalizedStage: "OUT_FOR_DELIVERY",
+  });
+  const sauPancake = await materializeShipmentState(db, afterLate[0].id);
+  assert.equal(sauPancake.changed, false, "bản sao Pancake mới hơn không được đổi trạng thái");
+  const [vanConGiao] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, afterLate[0].id));
+  assert.equal(vanConGiao.stage, "DELIVERED", "trạng thái vẫn theo Viettel Post");
+
   // ───────── 5. Dựng lại nhiều lần cho cùng kết quả (idempotent) ─────────
   const again = await materializeShipmentState(db, fileSide.id);
   assert.equal(again.changed, false, "dựng lại trên cùng tập sự kiện không được báo thay đổi");
