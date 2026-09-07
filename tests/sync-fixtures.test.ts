@@ -51,7 +51,7 @@ import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
-import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs, landingShippingFee } from "@/lib/constants/landing";
+import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs, landingShippingFee, addressIssue, pushBlockOf } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
@@ -775,6 +775,38 @@ async function main() {
       const draft = await listLandingOrders({ period: allP, pos: ["DRAFT"] });
       assert.equal(noPos.length + hasPos.length + draft.length, every.length, "3 trạng thái POS phủ hết");
       console.log(`✓ Lọc landing: mã ${code} ${byCode.length} dòng · POS đã có ${hasPos.length} / nháp ${draft.length} / chưa ${noPos.length}`);
+
+      // ───── Đủ / chưa đủ thông tin để gửi POS ─────
+      // 80/102 đơn chưa lên POS trên production không vướng gì, chỉ là chưa ai bấm nút; 22 đơn
+      // vướng mẫu mã. Địa chỉ thiếu tỉnh/thành cũng phải chặn: gửi lên POS rồi vẫn không giao được.
+      assert.equal(addressIssue(""), "EMPTY");
+      assert.equal(addressIssue("Nhà số 5"), "TOO_SHORT");
+      assert.equal(addressIssue("Thôn 3, xã Tam Dị, huyện Lục Nam"), "NO_PROVINCE", "thiếu tỉnh thì phải hỏi lại khách");
+      assert.equal(addressIssue("Thôn 3, xã Tam Dị, huyện Lục Nam, Bắc Giang"), null, "có tỉnh là đủ để gửi");
+      assert.equal(addressIssue("Cổng chợ mới thanh giã tam dị lục nam bac giang"), null, "không dấu / không dấu phẩy vẫn nhận ra tỉnh");
+      assert.equal(addressIssue("Thôn 3, xã Tam Dị", "Bắc Giang"), null, "đã tách sẵn cột tỉnh thì không cần tìm trong địa chỉ");
+
+      assert.equal(pushBlockOf({ variantId: null, phone: "0900000001", address: "Số 1, Cầu Giấy, Hà Nội" }), "NO_VARIANT");
+      assert.equal(pushBlockOf({ variantId: "rr-var", phone: "", address: "Số 1, Cầu Giấy, Hà Nội" }), "NO_PHONE");
+      assert.equal(pushBlockOf({ variantId: "rr-var", phone: "0900000001", address: "Thôn 3, xã Tam Dị" }), "NO_PROVINCE");
+      assert.equal(pushBlockOf({ variantId: "rr-var", phone: "0900000001", address: "Số 1, Cầu Giấy, Hà Nội" }), null, "đủ ba thứ thì gửi được");
+
+      // Dòng chưa ghép mẫu mã: phải rơi vào "chưa đủ thông tin" NGAY, không cần chờ rà soát lại —
+      // 301 dòng trên production đều chưa có cột push_block, chỉ đọc cột đó là xếp nhầm hết.
+      await db
+        .insert(schema.landingOrders)
+        .values({ rowKey: "tab:RD:1", sheetGid: "tab:RD", rowIndex: 1, submittedAt: new Date(), phone: "0900000077", status: "NEW", ...landBase, productText: "Q002", address: "Số 1, Cầu Giấy, Hà Nội", variantId: null })
+        .onConflictDoNothing();
+
+      const ready = await listLandingOrders({ period: allP, flag: ["READY"] });
+      const notReady = await listLandingOrders({ period: allP, flag: ["NOT_READY"] });
+      assert.ok(ready.every((r) => r.posState === "NONE" && !r.pushBlock), "bộ lọc Đủ thông tin chỉ chứa đơn chưa lên POS và không vướng gì");
+      assert.ok(notReady.every((r) => r.posState === "NONE" && r.pushBlock), "bộ lọc Chưa đủ thông tin chỉ chứa đơn còn vướng, kèm lý do");
+      assert.ok(notReady.some((r) => r.phone === "0900000077"), "dòng thiếu mẫu mã vào nhóm chưa đủ thông tin dù chưa rà soát lại");
+      assert.ok(!ready.some((r) => r.phone === "0900000077"), "và KHÔNG lọt vào nhóm gửi POS hàng loạt");
+      const noPos2 = await listLandingOrders({ period: allP, pos: ["NONE"] });
+      assert.equal(ready.length + notReady.length, noPos2.length, "hai bộ lọc chia đôi đúng nhóm chưa lên POS, không sót không trùng");
+      console.log(`✓ Landing gửi POS: ${ready.length} đơn đủ thông tin · ${notReady.length} đơn còn vướng (kèm lý do)`);
       // Ghép yếu (điểm 5, chỉ theo tên mã) trên dòng ĐÃ có đơn POS, nhưng ô gốc có "Size M,Màu Đỏ" → recheck ghép lại đúng mẫu RR-001 (M · Đỏ)
       await db.insert(schema.productVariants).values({ id: "rr-var-l", productId: "rr-prod", sku: "RR-001-L", color: "Đỏ", size: "L", retailPrice: 499000 }).onConflictDoNothing();
       await db

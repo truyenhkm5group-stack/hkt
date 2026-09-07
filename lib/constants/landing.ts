@@ -499,3 +499,46 @@ export function matchVariant(input: { product: string; variant: string; size: st
 }
 
 export type DuplicateHit = { kind: "LANDING" | "PANCAKE"; id: string; label: string; at: Date | null };
+
+/**
+ * KIỂM TRA ĐỊA CHỈ TRƯỚC KHI GỬI POS.
+ *
+ * Đơn landing do khách tự gõ nên địa chỉ hay thiếu tỉnh/thành — phần quyết định Viettel Post có
+ * định tuyến được hay không. Đo trên 102 đơn chưa lên POS: không đơn nào quá ngắn (ngắn nhất 22
+ * ký tự) nhưng 39 đơn có dưới 2 dấu phẩy, nên đếm ký tự hay đếm dấu phẩy đều không đủ căn cứ.
+ * Cách chắc chắn là tìm TÊN TỈNH/THÀNH — dùng lại đúng danh sách `VN_PROVINCES` đang dùng để dò
+ * cột tỉnh, không lập danh sách thứ hai để hai chỗ khỏi lệch nhau.
+ */
+export type AddressIssue = "EMPTY" | "TOO_SHORT" | "NO_PROVINCE";
+
+export const ADDRESS_ISSUE_LABEL: Record<AddressIssue, string> = {
+  EMPTY: "Chưa có địa chỉ",
+  TOO_SHORT: "Địa chỉ quá ngắn, không đủ để giao",
+  NO_PROVINCE: "Địa chỉ không thấy tỉnh/thành — hỏi lại khách trước khi gửi",
+};
+
+/** Địa chỉ đã đủ để gửi ĐVVC chưa? Trả null nếu đạt, hoặc mã lỗi để nhân viên biết phải hỏi gì. */
+export function addressIssue(address: string, province = ""): AddressIssue | null {
+  const full = String(address ?? "").trim().replace(/\s+/g, " ");
+  if (!full) return "EMPTY";
+  if (full.length < 15) return "TOO_SHORT";
+  if (String(province ?? "").trim()) return null;
+  const flat = normalizeHeader(full);
+  for (const name of VN_PROVINCES) if (flat.includes(name)) return null;
+  return "NO_PROVINCE";
+}
+
+/** Lý do một dòng landing CHƯA gửi POS được — dùng chung cho bộ lọc, cảnh báo và nút gửi. */
+export type PushBlock = "NO_VARIANT" | "NO_PHONE" | AddressIssue;
+
+export const PUSH_BLOCK_LABEL: Record<PushBlock, string> = {
+  NO_VARIANT: "Chưa chọn mẫu mã",
+  NO_PHONE: "Thiếu số điện thoại",
+  ...ADDRESS_ISSUE_LABEL,
+};
+
+export function pushBlockOf(row: { variantId: string | null; phone: string; address: string; province?: string }): PushBlock | null {
+  if (!row.variantId) return "NO_VARIANT";
+  if (!String(row.phone ?? "").trim()) return "NO_PHONE";
+  return addressIssue(row.address, row.province ?? "");
+}

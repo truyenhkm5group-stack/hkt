@@ -854,6 +854,9 @@ export const landingOrders = pgTable(
     /** Mẫu mã Pancake đã ghép (tự dò hoặc chọn tay) */
     variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
     variantMatchScore: integer("variant_match_score").notNull().default(0),
+    /** Lý do dòng này CHƯA gửi POS được (thiếu mẫu mã / SĐT / địa chỉ không đủ). Tính lại mỗi lần
+     *  rà soát để bộ lọc "Chưa gửi POS được" và cảnh báo trên dòng luôn khớp nhau. */
+    pushBlock: text("push_block"),
     /** Đơn Pancake tương ứng (sau khi gửi POS hoặc tự ghép theo SĐT) */
     orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
     pancakeOrderId: text("pancake_order_id"),
