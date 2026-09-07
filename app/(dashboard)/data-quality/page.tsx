@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Coins,
   Boxes,
   CircleHelp,
   Link2Off,
@@ -124,6 +125,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
             ["pancake-declared", summary.pancakeDeclared, ShoppingBag, "Pancake báo giao nhưng không có tiền"],
             ["vtp-low-cash", summary.vtpLowCash, Truck, `Số tiền legacy < ${formatVND(rule.maxCodForReturn)}`],
             ["return-not-received", summary.returnRiskShipments, Boxes, `${formatNumber(summary.returnRiskUnits)} sản phẩm chưa xác nhận về kho`],
+            ["missing-cogs", summary.missingCogs, Coins, `Doanh thu ${formatVND(summary.missingCogsRevenue)} đang tính lãi mà không trừ vốn`],
             ["unverified", summary.unverified, CircleHelp, "Không có số tiền nào để kết luận"],
           ] as const).map(([key, value, Icon, note]) => (
             <Link key={key} href={drillHref(key)} className={cn("rounded-xl border p-4 transition hover:border-primary hover:bg-accent/40", issue === key && "border-primary bg-accent/40")}>

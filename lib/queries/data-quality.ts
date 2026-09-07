@@ -4,6 +4,7 @@ import { memo } from "@/lib/cache";
 import type { DqIssue, VerifiedOutcome } from "@/lib/constants/data-quality";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
+import { ORDER_COGS } from "@/lib/queries/cogs";
 import {
   HAS_CASH_PROOF,
   IS_PANCAKE_DECLARED_ONLY,
@@ -73,6 +74,8 @@ export async function dataQualitySummary(period: Period) {
         pancakeDeclared: sql<number>`count(*) filter (where ${IS_PANCAKE_DECLARED_ONLY})`,
         vtpLowCash: sql<number>`count(*) filter (where ${IS_VTP_LOW_CASH})`,
         statusConflict: sql<number>`count(*) filter (where ${IS_STATUS_CONFLICT})`,
+        missingCogs: sql<number>`count(*) filter (where ${IS_MISSING_COGS})`,
+        missingCogsRevenue: sql<number>`coalesce(sum(${DECLARED_REVENUE}) filter (where ${IS_MISSING_COGS}), 0)`,
 
         mismatch: sql<number>`count(*) filter (where ${L} <> ${V})`,
         legacyDelivered: sql<number>`count(*) filter (where ${L} = 'DELIVERED')`,
@@ -135,6 +138,8 @@ export async function dataQualitySummary(period: Period) {
       pancakeDeclared: num(row?.pancakeDeclared),
       vtpLowCash: num(row?.vtpLowCash),
       statusConflict: num(row?.statusConflict),
+      missingCogs: num(row?.missingCogs),
+      missingCogsRevenue: num(row?.missingCogsRevenue),
       mismatch: num(row?.mismatch),
       legacyDelivered,
       marketingRiskRevenue: num(row?.marketingRiskRevenue),
@@ -150,6 +155,18 @@ export async function dataQualitySummary(period: Period) {
   });
 }
 
+/**
+ * ĐƠN ĐANG TÍNH GIÁ VỐN BẰNG 0.
+ *
+ * `ORDER_COGS` tra giá nhập theo thứ tự: phiếu nhập kho gần nhất → giá vốn Pancake ghi trên đơn →
+ * giá nhập mẫu mã trên Pancake. Hết cả ba mà vẫn không có số thì kết quả là 0 — và 0 ở đây nghĩa
+ * là KHÔNG BIẾT, không phải "hàng không tốn tiền vốn". Lợi nhuận của những đơn này đang cao hơn
+ * thực tế, nên phải hiện ra thay vì im lặng cộng vào lãi.
+ *
+ * Chỉ xét đơn thực sự vào doanh thu (giao thành công) — đơn huỷ hay chưa gửi không sai.
+ */
+export const IS_MISSING_COGS = sql`(${ORDER_OUTCOME} = 'DELIVERED' and ${DECLARED_REVENUE} > 0 and ${ORDER_COGS} = 0)`;
+
 /** Điều kiện SQL cho từng nhóm vấn đề (drill-down theo đơn hàng). */
 function issueCondition(issue: DqIssue): SQL {
   switch (issue) {
@@ -161,6 +178,8 @@ function issueCondition(issue: DqIssue): SQL {
       return IS_STATUS_CONFLICT as SQL;
     case "return-not-received":
       return IS_RETURN_NOT_RECEIVED as SQL;
+    case "missing-cogs":
+      return IS_MISSING_COGS as SQL;
     default:
       return sql`${ORDER_OUTCOME_VERIFIED} = 'UNVERIFIED'`;
   }

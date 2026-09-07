@@ -137,6 +137,21 @@ export async function testDataQuality(db: Db) {
   const [after] = await db.select({ by: schema.shipments.returnReceivedBy }).from(schema.shipments).where(eq(schema.shipments.id, target.id));
   assert.equal(after.by, "test-kho", "giữ nguyên người xác nhận lần đầu");
   assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đã nhận thì rời khỏi danh sách chờ");
+
+  // ───────── Giá vốn KHÔNG BIẾT không được coi là 0 ─────────
+  // ORDER_COGS tra phiếu nhập → giá vốn Pancake → giá nhập mẫu mã. Hết cả ba mà ra 0 nghĩa là
+  // chưa biết, không phải hàng không tốn vốn — lợi nhuận của những đơn này đang cao hơn thực tế.
+  const cogsSummary = await dataQualitySummary(ALL);
+  const dsCogs = await dataQualityOrders("missing-cogs", ALL, 1, 200, "");
+  assert.equal(dsCogs.total, cogsSummary.missingCogs, "số ô tổng hợp phải khớp đúng danh sách drill-down");
+  for (const row of dsCogs.rows) {
+    assert.equal(row.legacyOutcome, "DELIVERED", "chỉ nêu đơn đang được tính vào doanh thu");
+    assert.ok(row.declaredRevenue > 0, "đơn 0 đồng không phải vấn đề giá vốn");
+  }
+  assert.ok(cogsSummary.missingCogsRevenue >= 0);
+  if (dsCogs.total > 0) {
+    assert.ok(cogsSummary.missingCogsRevenue > 0, "phải nêu được doanh thu đang tính lãi mà không trừ vốn");
+  }
 
   console.log(`✓ Chất lượng dữ liệu: ${summary.unverified} đơn chưa xác minh · ${summary.mismatch} đơn lệch legacy · ${summary.unlinkedShipments} vận đơn chưa đối soát · ${summary.returnRiskUnits} SP hoàn chưa về kho`);
   console.log(`✓ Doanh thu legacy ${summary.legacyRevenue} → có bằng chứng ${summary.verifiedRevenue}; GTC legacy ${summary.legacySuccessRate}% → thực tế ${summary.successRate}%`);
