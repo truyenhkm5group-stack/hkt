@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, Landmark, Receipt } from "lucide-react";
+import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, Landmark, Receipt, Undo2 } from "lucide-react";
 import { SettlementTabs } from "@/app/(dashboard)/cod/settlement-tabs";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Đối soát COD" };
 
-const TINH_TRANG_HOP_LE = new Set<string>(["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "KHONG_PHAI_TRA", "ALL"]);
+const TINH_TRANG_HOP_LE = new Set<string>(["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "GIAO_NHUNG_HOAN", "KHONG_PHAI_TRA", "ALL"]);
 
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("cod:view");
@@ -72,12 +72,20 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Viettel Post phải trả"
           value={formatVND(tong.phaiThu.amount, { compact: true })}
-          note={`${formatNumber(tong.phaiThu.count)} đơn đã phát thành công có thu hộ`}
-          hint="Tổng tiền thu hộ khai báo của những vận đơn Viettel Post đã phát thành công. Đơn hoàn / huỷ không nằm ở đây vì không thu được tiền của khách."
+          note={`${formatNumber(tong.phaiThu.count)} đơn giao thành công${tong.uocTinh.count ? ` · ${formatVND(tong.uocTinh.amount, { compact: true })} còn tạm tính` : ""}`}
+          hint={
+            <>
+              Chỉ gồm đơn <b>giao thành công theo kết quả đơn</b> — đã trừ đơn hoàn, đơn huỷ và cả
+              đơn Viettel Post báo &ldquo;giao thành công&rdquo; nhưng khách chỉ trả tiền ship.
+              Đơn đã có bảng kê thì lấy đúng số trên bảng kê (Viettel Post chỉ nợ phần thực thu của
+              khách); đơn chưa có bảng kê thì <b>tạm tính</b> theo tiền thu hộ khai báo
+              {tong.uocTinh.count ? ` — hiện ${formatNumber(tong.uocTinh.count)} đơn, ${formatVND(tong.uocTinh.amount)}` : ""}.
+            </>
+          }
           icon={CircleDollarSign}
           tone="slate"
         />
@@ -109,9 +117,17 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           label="Trả thiếu so với khai báo"
           value={formatVND(tong.traThieu.gap, { compact: true })}
           note={`${formatNumber(tong.traThieu.count)} đơn bảng kê trả ít hơn tiền thu hộ`}
-          hint="Bảng kê có trả nhưng ít hơn tiền thu hộ khai báo. Thường là khách chỉ trả một phần, hoặc bưu tá sửa doanh thu lúc phát — mở từng đơn để xem chênh bao nhiêu."
+          hint="Đơn VẪN là giao thành công mà bảng kê trả ít hơn tiền thu hộ khai báo — phần chênh này Viettel Post còn nợ. Đơn khách chỉ trả tiền ship không nằm ở đây: chúng là đơn hoàn, xem ở thẻ bên cạnh."
           icon={Receipt}
           tone={tong.traThieu.count ? "amber" : "slate"}
+        />
+        <MetricCard
+          label="Giao nhưng thu không đủ"
+          value={formatNumber(tong.giaoNhungHoan.count)}
+          note={`khai báo ${formatVND(tong.giaoNhungHoan.khaiBao, { compact: true })} · bảng kê chỉ trả ${formatVND(tong.giaoNhungHoan.thucThu, { compact: true })}`}
+          hint="Viettel Post báo phát thành công nhưng bảng kê chỉ trả một phần nhỏ — khách không nhận hàng, chỉ trả tiền ship để xem. Theo quy tắc của shop đây là ĐƠN HOÀN nên KHÔNG tính vào tiền Viettel Post phải trả; tách riêng ra đây để thấy hàng đã đi rồi quay về."
+          icon={Undo2}
+          tone={tong.giaoNhungHoan.count ? "amber" : "slate"}
         />
         <MetricCard
           label="Thực nhận về tài khoản"
@@ -196,7 +212,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
       {thieu.length ? (
         <SectionCard
           title="Ngày phát chưa được bảng kê nào chi trả"
-          description="Có đơn phát thành công trong khoảng ngày này mà không dòng bảng kê nào nhắc tới."
+          description="Đơn giao thành công trong khoảng ngày này mà không dòng bảng kê nào nhắc tới."
           hint="Suy từ dữ liệu thật chứ không từ lịch trả tiền của Viettel Post. Hoặc Viettel Post chưa trả kỳ đó, hoặc thư bảng kê của kỳ đó chưa về ERP — đối chiếu với bảng bên dưới để biết kỳ nào còn thiếu."
           padded={false}
         >

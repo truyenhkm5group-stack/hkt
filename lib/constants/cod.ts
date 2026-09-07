@@ -71,7 +71,7 @@ export const MAX_LIST_RAW_BYTES = Math.floor(MAX_LIST_BASE64 * 3 / 4);
  * Khác `CodStatus` (ảnh chụp trạng thái tiền trên vận đơn): đây là kết quả ĐỐI SOÁT, tính bằng
  * cách so tiền thu hộ khai báo với các dòng bảng kê thật đã nhận.
  */
-export type SettlementStatus = "DA_TRA_DU" | "TRA_THIEU" | "CHUA_TRA" | "QUA_HAN" | "CHUA_GIAO" | "KHONG_PHAI_TRA";
+export type SettlementStatus = "DA_TRA_DU" | "TRA_THIEU" | "CHUA_TRA" | "QUA_HAN" | "CHUA_GIAO" | "GIAO_NHUNG_HOAN" | "KHONG_PHAI_TRA";
 
 export const SETTLEMENT_LABEL: Record<SettlementStatus, string> = {
   DA_TRA_DU: "Đã trả đủ",
@@ -79,6 +79,7 @@ export const SETTLEMENT_LABEL: Record<SettlementStatus, string> = {
   CHUA_TRA: "Chờ trả",
   QUA_HAN: "Quá hạn chưa trả",
   CHUA_GIAO: "Chưa giao xong",
+  GIAO_NHUNG_HOAN: "Giao nhưng thu không đủ",
   KHONG_PHAI_TRA: "Không phải trả",
 };
 
@@ -88,6 +89,7 @@ export const SETTLEMENT_TONE: Record<SettlementStatus, string> = {
   CHUA_TRA: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   QUA_HAN: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
   CHUA_GIAO: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+  GIAO_NHUNG_HOAN: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300",
   KHONG_PHAI_TRA: "bg-muted text-muted-foreground",
 };
 
@@ -97,6 +99,7 @@ export const SETTLEMENT_HINT: Record<SettlementStatus, string> = {
   CHUA_TRA: "Đã phát thành công, chưa thấy trên bảng kê nào — còn trong hạn trả tiền.",
   QUA_HAN: "Đã phát thành công quá hạn mà chưa đồng nào về theo bảng kê — cần đòi Viettel Post.",
   CHUA_GIAO: "Vận đơn chưa kết thúc nên chưa tới lượt đối soát.",
+  GIAO_NHUNG_HOAN: "Viettel Post báo phát thành công nhưng bảng kê chỉ trả một phần nhỏ — khách không nhận hàng, chỉ trả tiền ship để xem. Theo quy tắc của shop đây là ĐƠN HOÀN, không phải Viettel Post còn nợ.",
   KHONG_PHAI_TRA: "Đơn hoàn / huỷ hoặc đơn không thu hộ — Viettel Post không thu được tiền của khách nên không phải trả.",
 };
 

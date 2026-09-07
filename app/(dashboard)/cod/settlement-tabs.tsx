@@ -7,7 +7,7 @@ import { SETTLEMENT_LABEL, type SettlementStatus } from "@/lib/constants/cod";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const THU_TU: (SettlementStatus | "ALL")[] = ["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "KHONG_PHAI_TRA", "ALL"];
+const THU_TU: (SettlementStatus | "ALL")[] = ["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "GIAO_NHUNG_HOAN", "DA_TRA_DU", "CHUA_GIAO", "KHONG_PHAI_TRA", "ALL"];
 
 /** Thanh lọc theo tình trạng thanh toán của Viettel Post cho từng vận đơn. */
 export function SettlementTabs({ counts, active }: { counts: Record<string, number>; active: string }) {

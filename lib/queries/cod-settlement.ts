@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS, type SettlementStatus } from "@/lib/constants/cod";
+import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -16,6 +17,16 @@ import type { Period } from "@/lib/search-params";
  * Nguồn: SỔ CHỨNG TỪ `cod_statement_lines` (từng dòng của từng bảng kê) ghép với vận đơn. Không
  * đọc các cột tiền trên `shipments` vì đó chỉ là ảnh chụp dựng lại từ sổ.
  */
+
+/**
+ * `db.execute` trả mảng (PGlite) hoặc `{ rows }` (node-postgres) tuỳ trình điều khiển — đọc thống
+ * nhất một chỗ để truy vấn SQL thô chạy đúng ở cả bản chạy thật lẫn bản kiểm thử.
+ */
+function rowsOf(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) return result as Record<string, unknown>[];
+  const rows = (result as { rows?: unknown })?.rows;
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+}
 
 /** Tiền và chứng từ của từng vận đơn, gom từ mọi bảng kê đã nhận. */
 const SO_CHUNG_TU = sql`
@@ -32,38 +43,61 @@ const SO_CHUNG_TU = sql`
 /**
  * Phân loại tình trạng thanh toán của một vận đơn.
  *
- * "Không phải trả" dành cho đơn hoàn / huỷ: Viettel Post không thu được tiền của khách nên không
- * có gì để trả — đây là kết quả đúng, không phải nợ. Ngược lại, đơn ĐÃ PHÁT THÀNH CÔNG mà chưa
- * thấy đồng nào trên bảng kê nào thì là tiền đang treo, quá hạn thì phải đòi.
+ * ĐI TỪ KẾT QUẢ ĐƠN (`ORDER_OUTCOME`), KHÔNG đi từ trạng thái Viettel Post báo. Viettel Post ghi
+ * "Giao thành công" cho cả những đơn khách không nhận hàng, chỉ trả tiền ship để xem hàng — bưu tá
+ * nhập lại doanh thu bằng đúng số khách đưa. Lấy `stage = DELIVERED` làm căn cứ thì 230 vận đơn
+ * kiểu này bị tính là Viettel Post còn nợ 15,9 triệu, trong khi thực thu chỉ 6 triệu và theo quy
+ * tắc của shop chúng là ĐƠN HOÀN. Số nợ ảo gần 10 triệu.
+ *
+ * `GIAO_NHUNG_HOAN` tách riêng chính nhóm đó: Viettel Post báo phát thành công nhưng tiền thực thu
+ * dưới ngưỡng nên kết quả đơn là hoàn. Không phải nợ, nhưng phải nhìn thấy được vì đó là hàng đi
+ * rồi quay về.
  */
 const TINH_TRANG = sql<SettlementStatus>`case
-  when coalesce(s.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
-  when s.stage in ('RETURNED','CANCELLED') and coalesce(t.cod_tra, 0) = 0 then 'KHONG_PHAI_TRA'
-  when coalesce(t.cod_tra, 0) >= coalesce(s.cod_amount, 0) then 'DA_TRA_DU'
+  when coalesce(shipments.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
+  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
+  when ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
+  when coalesce(t.cod_tra, 0) >= coalesce(shipments.cod_amount, 0) then 'DA_TRA_DU'
   when coalesce(t.cod_tra, 0) > 0 then 'TRA_THIEU'
-  when s.stage <> 'DELIVERED' then 'CHUA_GIAO'
-  when coalesce(s.delivered_at, s.vtp_status_date) < now() - (${COD_OVERDUE_DAYS} || ' days')::interval then 'QUA_HAN'
+  when shipments.stage <> 'DELIVERED' then 'CHUA_GIAO'
+  when coalesce(shipments.delivered_at, shipments.vtp_status_date) < now() - (${COD_OVERDUE_DAYS} || ' days')::interval then 'QUA_HAN'
   else 'CHUA_TRA' end`;
 
+/** Vận đơn Viettel Post phải trả tiền: kết quả đơn là GIAO THÀNH CÔNG và có thu hộ. */
+const PHAI_TRA = sql`(coalesce(shipments.cod_amount, 0) > 0 and ${ORDER_OUTCOME} = 'DELIVERED')`;
+
+/**
+ * SỐ TIỀN VIETTEL POST PHẢI TRẢ CHO MỘT ĐƠN.
+ *
+ * Có dòng bảng kê ⇒ chính là số trên bảng kê: Viettel Post chỉ nợ đúng phần đã thu của khách.
+ * Chưa có bảng kê ⇒ TẠM TÍNH theo tiền thu hộ khai báo và phải gắn nhãn ước tính — chưa biết
+ * không được biến thành 0, cũng không được coi là con số đã xác minh.
+ */
+const SO_PHAI_TRA = sql`(case when t.cod_tra is not null then t.cod_tra else coalesce(shipments.cod_amount, 0) end)`;
+
 /** Chỉ xét vận đơn có tiền thu hộ — đơn không thu hộ không có gì để đối soát. */
-const CO_THU_HO = sql`coalesce(s.cod_amount, 0) > 0`;
+const CO_THU_HO = sql`coalesce(shipments.cod_amount, 0) > 0`;
 
 function loc(period: Period) {
   if (!period.from || !period.to) return sql`true`;
-  return sql`coalesce(s.delivered_at, s.vtp_status_date, s.created_at) between ${period.from} and ${period.to}`;
+  return sql`coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.created_at) between ${period.from} and ${period.to}`;
 }
 
 export type CodSettlementSummary = {
-  /** Đơn đã phát thành công, có thu hộ — Viettel Post phải trả tiền cho những đơn này. */
+  /** Đơn giao thành công có thu hộ — Viettel Post phải trả tiền cho những đơn này. */
   phaiThu: { count: number; amount: number };
+  /** Phần của "phải trả" chưa có bảng kê nên đang TẠM TÍNH theo tiền thu hộ khai báo. */
+  uocTinh: { count: number; amount: number };
   /** Trong đó bảng kê đã trả bao nhiêu. */
   daTra: { count: number; amount: number };
   /** Phần còn lại chưa thấy trên bảng kê nào. */
   conThieu: number;
   /** Đơn đã giao quá hạn mà chưa có đồng nào trên bảng kê. */
   quaHan: { count: number; amount: number };
-  /** Đơn bảng kê có trả nhưng ít hơn tiền thu hộ khai báo. */
+  /** Đơn giao thành công mà bảng kê trả ít hơn tiền thu hộ khai báo. */
   traThieu: { count: number; gap: number };
+  /** Viettel Post báo phát thành công nhưng tiền thu dưới ngưỡng ⇒ kết quả đơn là hoàn. */
+  giaoNhungHoan: { count: number; khaiBao: number; thucThu: number };
   /** Cước Viettel Post trừ trên bảng kê (gồm cả cước chiều hoàn). */
   cuoc: number;
   /** Tiền thực nhận về tài khoản theo phần kết luận của các bảng kê. */
@@ -78,46 +112,53 @@ export type CodSettlementSummary = {
 export async function codSettlementSummary(period: Period): Promise<CodSettlementSummary> {
   return memo(`cod-settlement:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90, async () => {
     const db = await getDb();
-    const rows = (await db.execute(sql`
+    const rows = rowsOf(await db.execute(sql`
       with t as (${SO_CHUNG_TU})
       select
-        count(*) filter (where s.stage = 'DELIVERED' and ${CO_THU_HO}) phai_thu_count,
-        coalesce(sum(s.cod_amount) filter (where s.stage = 'DELIVERED' and ${CO_THU_HO}), 0) phai_thu,
-        count(*) filter (where s.stage = 'DELIVERED' and coalesce(t.cod_tra, 0) > 0) da_tra_count,
-        coalesce(sum(t.cod_tra) filter (where s.stage = 'DELIVERED'), 0) da_tra,
+        count(*) filter (where ${PHAI_TRA}) phai_thu_count,
+        coalesce(sum(${SO_PHAI_TRA}) filter (where ${PHAI_TRA}), 0) phai_thu,
+        count(*) filter (where ${PHAI_TRA} and t.cod_tra is null) uoc_tinh_count,
+        coalesce(sum(shipments.cod_amount) filter (where ${PHAI_TRA} and t.cod_tra is null), 0) uoc_tinh,
+        count(*) filter (where ${PHAI_TRA} and coalesce(t.cod_tra, 0) > 0) da_tra_count,
+        coalesce(sum(t.cod_tra) filter (where ${PHAI_TRA}), 0) da_tra,
         count(*) filter (where ${TINH_TRANG} = 'QUA_HAN') qua_han_count,
-        coalesce(sum(s.cod_amount) filter (where ${TINH_TRANG} = 'QUA_HAN'), 0) qua_han,
+        coalesce(sum(shipments.cod_amount) filter (where ${TINH_TRANG} = 'QUA_HAN'), 0) qua_han,
         count(*) filter (where ${TINH_TRANG} = 'TRA_THIEU') tra_thieu_count,
-        coalesce(sum(s.cod_amount - coalesce(t.cod_tra, 0)) filter (where ${TINH_TRANG} = 'TRA_THIEU'), 0) tra_thieu_gap,
+        coalesce(sum(shipments.cod_amount - coalesce(t.cod_tra, 0)) filter (where ${TINH_TRANG} = 'TRA_THIEU'), 0) tra_thieu_gap,
+        count(*) filter (where ${TINH_TRANG} = 'GIAO_NHUNG_HOAN') gnh_count,
+        coalesce(sum(shipments.cod_amount) filter (where ${TINH_TRANG} = 'GIAO_NHUNG_HOAN'), 0) gnh_khai_bao,
+        coalesce(sum(t.cod_tra) filter (where ${TINH_TRANG} = 'GIAO_NHUNG_HOAN'), 0) gnh_thuc_thu,
         coalesce(sum(t.cuoc), 0) cuoc,
         percentile_cont(0.5) within group (
-          order by extract(epoch from (t.ngay_tra - coalesce(s.delivered_at, s.vtp_status_date))) / 86400
-        ) filter (where t.ngay_tra is not null and coalesce(s.delivered_at, s.vtp_status_date) is not null) so_ngay_tra
-      from shipments s left join t on t.shipment_id = s.id
+          order by extract(epoch from (t.ngay_tra - coalesce(shipments.delivered_at, shipments.vtp_status_date))) / 86400
+        ) filter (where t.ngay_tra is not null and coalesce(shipments.delivered_at, shipments.vtp_status_date) is not null) so_ngay_tra
+      from shipments
+        left join orders on orders.id = shipments.order_id
+        left join t on t.shipment_id = shipments.id
       where ${loc(period)}
-    `)) as unknown as Record<string, unknown>[];
-    const r = (Array.isArray(rows) ? rows[0] : (rows as { rows?: Record<string, unknown>[] }).rows?.[0]) ?? {};
+    `));
+    const r = rows[0] ?? {};
 
-    const chuaGhepRows = (await db.execute(sql`
+    const cg = rowsOf(await db.execute(sql`
       select count(*) n, coalesce(sum(cod), 0) tien from cod_statement_lines where shipment_id is null and cod > 0
-    `)) as unknown as Record<string, unknown>[];
-    const cg = (Array.isArray(chuaGhepRows) ? chuaGhepRows[0] : (chuaGhepRows as { rows?: Record<string, unknown>[] }).rows?.[0]) ?? {};
+    `))[0] ?? {};
 
-    const thucNhanRows = (await db.execute(sql`
+    const tn = rowsOf(await db.execute(sql`
       select coalesce(sum(total_amount), 0) tien from cod_batches
       ${period.from && period.to ? sql`where received_at between ${period.from} and ${period.to}` : sql``}
-    `)) as unknown as Record<string, unknown>[];
-    const tn = (Array.isArray(thucNhanRows) ? thucNhanRows[0] : (thucNhanRows as { rows?: Record<string, unknown>[] }).rows?.[0]) ?? {};
+    `))[0] ?? {};
 
     const n = (v: unknown) => Number(v ?? 0);
     const phaiThu = n(r.phai_thu);
     const daTra = n(r.da_tra);
     return {
       phaiThu: { count: n(r.phai_thu_count), amount: phaiThu },
+      uocTinh: { count: n(r.uoc_tinh_count), amount: n(r.uoc_tinh) },
       daTra: { count: n(r.da_tra_count), amount: daTra },
       conThieu: Math.max(0, phaiThu - daTra),
       quaHan: { count: n(r.qua_han_count), amount: n(r.qua_han) },
       traThieu: { count: n(r.tra_thieu_count), gap: n(r.tra_thieu_gap) },
+      giaoNhungHoan: { count: n(r.gnh_count), khaiBao: n(r.gnh_khai_bao), thucThu: n(r.gnh_thuc_thu) },
       cuoc: n(r.cuoc),
       thucNhan: n(tn.tien),
       chuaGhep: { count: n(cg.n), amount: n(cg.tien) },
@@ -153,40 +194,39 @@ export async function listCodSettlement(opts: { period: Period; status?: Settlem
   const status = opts.status && opts.status !== "ALL" ? opts.status : null;
   const q = (opts.q ?? "").trim();
   const tim = q
-    ? sql`and (upper(s.vtp_order_number) like ${`%${q.toUpperCase()}%`}
-        or upper(s.tracking_code) like ${`%${q.toUpperCase()}%`}
-        or s.receiver_phone like ${`%${q}%`}
-        or upper(coalesce(o.bill_full_name, '')) like ${`%${q.toUpperCase()}%`})`
+    ? sql`and (upper(shipments.vtp_order_number) like ${`%${q.toUpperCase()}%`}
+        or upper(shipments.tracking_code) like ${`%${q.toUpperCase()}%`}
+        or shipments.receiver_phone like ${`%${q}%`}
+        or upper(coalesce(orders.bill_full_name, '')) like ${`%${q.toUpperCase()}%`})`
     : sql``;
   const theoTinhTrang = status ? sql`and ${TINH_TRANG} = ${status}` : sql``;
 
-  const rows = (await db.execute(sql`
+  const list = rowsOf(await db.execute(sql`
     with t as (${SO_CHUNG_TU})
-    select s.id, s.vtp_order_number, s.order_id, o.system_id, coalesce(o.bill_full_name, s.receiver_name, '') customer,
-           s.stage::text stage, coalesce(s.delivered_at, s.vtp_status_date)::date::text delivered_at,
-           coalesce(s.cod_amount, 0) cod_declared, coalesce(t.cod_tra, 0) cod_paid, coalesce(t.cuoc, 0) fee,
+    select shipments.id, shipments.vtp_order_number, shipments.order_id, orders.system_id,
+           coalesce(orders.bill_full_name, shipments.receiver_name, '') customer,
+           shipments.stage::text stage, coalesce(shipments.delivered_at, shipments.vtp_status_date)::date::text delivered_at,
+           coalesce(shipments.cod_amount, 0) cod_declared, coalesce(t.cod_tra, 0) cod_paid, coalesce(t.cuoc, 0) fee,
            t.ngay_tra::date::text paid_at, t.bang_ke statement_file,
-           coalesce(s.cod_amount, 0) - coalesce(t.cod_tra, 0) gap,
-           case when coalesce(s.delivered_at, s.vtp_status_date) is null then null
-                else round(extract(epoch from (coalesce(t.ngay_tra, now()) - coalesce(s.delivered_at, s.vtp_status_date))) / 86400) end waiting_days,
+           coalesce(shipments.cod_amount, 0) - coalesce(t.cod_tra, 0) gap,
+           case when coalesce(shipments.delivered_at, shipments.vtp_status_date) is null then null
+                else round(extract(epoch from (coalesce(t.ngay_tra, now()) - coalesce(shipments.delivered_at, shipments.vtp_status_date))) / 86400) end waiting_days,
            ${TINH_TRANG} status
-    from shipments s
-      left join orders o on o.id = s.order_id
-      left join t on t.shipment_id = s.id
+    from shipments
+      left join orders on orders.id = shipments.order_id
+      left join t on t.shipment_id = shipments.id
     where ${CO_THU_HO} and ${loc(opts.period)} ${theoTinhTrang} ${tim}
-    order by (${TINH_TRANG} = 'QUA_HAN') desc, coalesce(s.delivered_at, s.vtp_status_date) desc nulls last
+    order by (${TINH_TRANG} = 'QUA_HAN') desc, coalesce(shipments.delivered_at, shipments.vtp_status_date) desc nulls last
     limit ${pageSize} offset ${(page - 1) * pageSize}
-  `)) as unknown as Record<string, unknown>[];
+  `));
 
-  const totalRows = (await db.execute(sql`
+  const total = Number(rowsOf(await db.execute(sql`
     with t as (${SO_CHUNG_TU})
-    select count(*) n from shipments s left join orders o on o.id = s.order_id left join t on t.shipment_id = s.id
+    select count(*) n from shipments
+      left join orders on orders.id = shipments.order_id
+      left join t on t.shipment_id = shipments.id
     where ${CO_THU_HO} and ${loc(opts.period)} ${theoTinhTrang} ${tim}
-  `)) as unknown as Record<string, unknown>[];
-
-  const list = Array.isArray(rows) ? rows : ((rows as { rows?: Record<string, unknown>[] }).rows ?? []);
-  const totalList = Array.isArray(totalRows) ? totalRows : ((totalRows as { rows?: Record<string, unknown>[] }).rows ?? []);
-  const total = Number(totalList[0]?.n ?? 0);
+  `))[0]?.n ?? 0);
 
   return {
     rows: list.map((r): CodSettlementRow => ({
@@ -214,15 +254,16 @@ export async function listCodSettlement(opts: { period: Period; status?: Settlem
 /** Đếm theo từng tình trạng để hiện số trên tab. */
 export async function codSettlementCounts(period: Period): Promise<Record<SettlementStatus, number> & { ALL: number }> {
   const db = await getDb();
-  const rows = (await db.execute(sql`
+  const list = rowsOf(await db.execute(sql`
     with t as (${SO_CHUNG_TU})
     select ${TINH_TRANG} status, count(*) n
-    from shipments s left join t on t.shipment_id = s.id
+    from shipments
+      left join orders on orders.id = shipments.order_id
+      left join t on t.shipment_id = shipments.id
     where ${CO_THU_HO} and ${loc(period)}
     group by 1
-  `)) as unknown as Record<string, unknown>[];
-  const list = Array.isArray(rows) ? rows : ((rows as { rows?: Record<string, unknown>[] }).rows ?? []);
-  const out = { ALL: 0, DA_TRA_DU: 0, TRA_THIEU: 0, CHUA_TRA: 0, QUA_HAN: 0, CHUA_GIAO: 0, KHONG_PHAI_TRA: 0 } as Record<SettlementStatus, number> & { ALL: number };
+  `));
+  const out = { ALL: 0, DA_TRA_DU: 0, TRA_THIEU: 0, CHUA_TRA: 0, QUA_HAN: 0, CHUA_GIAO: 0, GIAO_NHUNG_HOAN: 0, KHONG_PHAI_TRA: 0 } as Record<SettlementStatus, number> & { ALL: number };
   for (const r of list) {
     const key = String(r.status) as SettlementStatus;
     if (key in out) out[key] = Number(r.n ?? 0);
@@ -254,7 +295,7 @@ export type StatementPayment = {
  */
 export async function listStatementPayments(limit = 40): Promise<StatementPayment[]> {
   const db = await getDb();
-  const rows = (await db.execute(sql`
+  const list = rowsOf(await db.execute(sql`
     select l.source_file filename,
            max(b.reference) batch_reference,
            max(b.received_at)::date::text paid_on,
@@ -272,8 +313,7 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
     group by l.source_file
     order by max(coalesce(b.received_at, l.statement_at)) desc
     limit ${limit}
-  `)) as unknown as Record<string, unknown>[];
-  const list = Array.isArray(rows) ? rows : ((rows as { rows?: Record<string, unknown>[] }).rows ?? []);
+  `));
   return list.map((r) => ({
     filename: String(r.filename ?? ""),
     batchReference: (r.batch_reference as string | null) ?? null,
@@ -298,16 +338,17 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
  */
 export async function statementGapDays(): Promise<{ from: string; to: string; shipments: number; amount: number }[]> {
   const db = await getDb();
-  const rows = (await db.execute(sql`
+  const list = rowsOf(await db.execute(sql`
     with t as (${SO_CHUNG_TU})
-    select coalesce(s.delivered_at, s.vtp_status_date)::date::text ngay,
-           count(*) n, coalesce(sum(s.cod_amount), 0) tien
-    from shipments s left join t on t.shipment_id = s.id
-    where s.stage = 'DELIVERED' and coalesce(s.cod_amount, 0) > 0 and coalesce(t.cod_tra, 0) = 0
-      and coalesce(s.delivered_at, s.vtp_status_date) is not null
+    select coalesce(shipments.delivered_at, shipments.vtp_status_date)::date::text ngay,
+           count(*) n, coalesce(sum(shipments.cod_amount), 0) tien
+    from shipments
+      left join orders on orders.id = shipments.order_id
+      left join t on t.shipment_id = shipments.id
+    where ${PHAI_TRA} and t.cod_tra is null
+      and coalesce(shipments.delivered_at, shipments.vtp_status_date) is not null
     group by 1 order by 1
-  `)) as unknown as Record<string, unknown>[];
-  const list = Array.isArray(rows) ? rows : ((rows as { rows?: Record<string, unknown>[] }).rows ?? []);
+  `));
   const out: { from: string; to: string; shipments: number; amount: number }[] = [];
   for (const d of list) {
     const day = String(d.ngay);
