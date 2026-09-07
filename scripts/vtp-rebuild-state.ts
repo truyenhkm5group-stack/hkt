@@ -13,9 +13,9 @@
  *
  * Dùng: npx tsx scripts/vtp-rebuild-state.ts [--apply] [--limit=N]
  */
-import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { CARRIER_EVENT_SOURCES, deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { eventStatusCode, resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 const apply = process.argv.includes("--apply");
@@ -28,10 +28,12 @@ async function main() {
   const s = schema.shipments;
 
   // ── Bước 1: điền `normalized_stage` còn trống bằng bộ dịch dùng chung ──
+  // Chỉ chuẩn hoá sự kiện ĐẾN THẲNG TỪ ĐVVC. Bản sao hành trình của Pancake không được quyền kết
+  // luận trạng thái, nên gắn nhãn chuẩn hoá cho chúng chỉ làm chỉ số "lệch trạng thái" nhiễu.
   const blank = await db
     .select({ id: e.id, status: e.status, statusName: e.statusName })
     .from(e)
-    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt)));
+    .where(and(isNull(e.normalizedStage), isNotNull(e.occurredAt), inArray(e.source, CARRIER_EVENT_SOURCES)));
   let filled = 0;
   let unknownEvents = 0;
   for (const row of blank) {

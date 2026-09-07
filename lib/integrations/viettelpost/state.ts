@@ -53,6 +53,8 @@ export type DerivedState = {
  */
 const CARRIER_SOURCES = new Set(["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL"]);
 
+export const CARRIER_EVENT_SOURCES = [...CARRIER_SOURCES];
+
 /** Nguồn nào đáng tin hơn khi hai sự kiện cùng mốc thời gian. Cao hơn = thắng. */
 const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15 };
 
