@@ -93,7 +93,7 @@ export async function viettelPostHealth() {
   const now = Date.now();
   const since = (hours: number) => new Date(now - hours * 3600_000);
 
-  const [latest, counts, lastPoll, scope, pending, mismatch] = await Promise.all([
+  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied] = await Promise.all([
     db.query.webhookEvents.findFirst({
       where: eq(schema.webhookEvents.source, "VIETTELPOST"),
       orderBy: [desc(schema.webhookEvents.receivedAt)],
@@ -141,6 +141,18 @@ export async function viettelPostHealth() {
             and ev.normalized_stage <> ${schema.shipments.stage}
         )`,
       ),
+    // Webhook đã nhận nhưng trạng thái vận đơn vẫn CŨ HƠN sự kiện đó — webhook về mà không đổi
+    // được gì. Đây là chỗ mất dữ liệu thật sự, khác hẳn "đã nhận bao nhiêu gói tin".
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.shipments)
+      .where(
+        sql`exists (
+          select 1 from shipment_events ev
+          where ev.shipment_id = ${schema.shipments.id} and ev.source = 'VTP_WEBHOOK'
+            and (${schema.shipments.vtpStatusDate} is null or ev.occurred_at > ${schema.shipments.vtpStatusDate})
+        )`,
+      ),
   ]);
 
   const data = latest?.payload && typeof latest.payload === "object" ? ((latest.payload as Record<string, unknown>).DATA as Record<string, unknown> | undefined) : undefined;
@@ -157,6 +169,8 @@ export async function viettelPostHealth() {
     apiBlind: (apiScope?.missingStreak ?? 0) >= 3,
     openShipments: { total: Number(pending[0].n), stale48h: Number(pending[0].stale48) },
     stageMismatch: Number(mismatch[0].n),
+    /** Vận đơn có webhook mới hơn trạng thái đang lưu — webhook về nhưng không được áp dụng. */
+    webhookNotApplied: Number(notApplied[0].n),
   };
 }
 
