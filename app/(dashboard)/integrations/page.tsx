@@ -233,6 +233,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               {vtpHealth.openShipments.stale48h ? <span className="text-warning">{formatNumber(vtpHealth.openShipments.stale48h)} vận đơn đã hơn 48h không có tin mới</span> : "Tất cả đều có tin trong 48h"}
               {vtpHealth.stageMismatch ? <span className="text-destructive"> · {formatNumber(vtpHealth.stageMismatch)} lệch trạng thái</span> : null}
               {vtpHealth.webhookNotApplied ? <span className="block text-destructive">{formatNumber(vtpHealth.webhookNotApplied)} vận đơn có webhook mới hơn trạng thái đang lưu</span> : null}
+              {vtpHealth.unresolvedWebhooks ? <span className="block text-warning">{formatNumber(vtpHealth.unresolvedWebhooks)} gói tin chưa xử lý được — chờ xử lý lại</span> : null}
             </p>
           </div>
         </div>
