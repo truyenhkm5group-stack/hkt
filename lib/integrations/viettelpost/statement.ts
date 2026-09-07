@@ -159,12 +159,29 @@ export function parseStatementDetail(input: Buffer | string, filename = ""): Sta
 
 // ───────── Danh sách vận đơn xuất từ viettelpost.vn → Quản lý vận đơn ─────────
 
+/**
+ * ĐVVC tự khai đã nhận tiền THU HỘ của vận đơn — đọc riêng cột "Thanh toán COD".
+ *
+ * Không dùng cột "Trạng thái thanh toán": cột đó nói về thanh toán CƯỚC, "Đã thanh toán" ở đó chỉ
+ * nghĩa là đã trả tiền vận chuyển, không nói gì về tiền hàng.
+ */
+export function vtpSaysCodReceived(codPaymentText: string | undefined | null): boolean {
+  const n = normalize(String(codPaymentText ?? ""));
+  if (!n || n.includes("chua")) return false;
+  return ["da nhan cod", "da tra cod", "da thanh toan cod"].some((k) => n.includes(k));
+}
+
 export type VtpOrderListRow = {
   trackingCode: string; orderCode: string; statusText: string;
   /** Số trên danh sách vận đơn là COD khai báo, không tự coi là tiền đã xác minh. */
   cod: number | null; fee: number | null; statusDate: string; raw: string;
   statusAt?: string | null; createdAt?: string | null;
-  codReconciliationText?: string; paymentText?: string; returnFlag?: boolean; forwardFlag?: boolean;
+  codReconciliationText?: string;
+  /** Cột "Trạng thái thanh toán" — thanh toán CƯỚC, không liên quan tới tiền thu hộ. */
+  paymentText?: string;
+  /** Cột "Thanh toán COD" — ĐVVC tự khai đã nhận tiền thu hộ hay chưa. */
+  codPaymentText?: string;
+  returnFlag?: boolean; forwardFlag?: boolean;
   /** Người nhận trên file VTP — bằng chứng duy nhất để gắn vận đơn tạo thẳng trên web VTP vào đơn ERP. */
   receiverName?: string; receiverPhone?: string; receiverAddress?: string;
   sourceHash?: string; sourceRow?: number;
@@ -207,7 +224,7 @@ export function mergeVtpOrderLists(rows: VtpOrderListRow[]): VtpOrderListRow[] {
     const before = previous.statusAt ?? previous.statusDate;
     const after = row.statusAt ?? row.statusDate;
     if (!before || !after || before === after) {
-      const payload = (r: VtpOrderListRow) => JSON.stringify([r.orderCode, r.statusText, r.cod, r.fee, r.codReconciliationText ?? "", r.paymentText ?? "", r.returnFlag ?? false, r.forwardFlag ?? false]);
+      const payload = (r: VtpOrderListRow) => JSON.stringify([r.orderCode, r.statusText, r.cod, r.fee, r.codReconciliationText ?? "", r.paymentText ?? "", r.codPaymentText ?? "", r.returnFlag ?? false, r.forwardFlag ?? false]);
       if (payload(previous) !== payload(row)) throw new Error(`Vận đơn ${row.trackingCode}: các tệp có dữ liệu xung đột, chưa thể chọn bản mới nhất`);
     } else if (after > before) merged.set(row.trackingCode, row);
   }
@@ -278,7 +295,11 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
   const cDate = findCol(headers, LIST_COL.date);
   const cCreated = findCol(headers, ["ngay tao"]);
   const cReconciliation = findCol(headers, ["trang thai doi soat cod"]);
-  const cPayment = findCol(headers, ["trang thai thanh toan"]);
+  const cPayment = findCol(headers, ["trang thai thanh toan"], ["cod"]);
+  // Cột "THANH TOÁN COD" trên trang Quản lý vận đơn (giá trị "Đã nhận COD") nói về TIỀN THU HỘ.
+  // Khác hẳn cột "Trạng thái thanh toán" ở trên — đó là thanh toán CƯỚC. Trộn hai cột này là
+  // biến việc trả cước thành bằng chứng đã thu tiền hàng, nên phải đọc riêng.
+  const cCodPayment = findCol(headers, ["thanh toan cod", "trang thai thanh toan cod"]);
   const cReturn = findCol(headers, ["don chuyen hoan"]);
   const cForward = findCol(headers, ["don chuyen tiep"]);
   const cReceiver = findCol(headers, LIST_COL.receiver, ["khi", "gui"]);
@@ -298,7 +319,7 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
       cod: listMoney(cCod >= 0 ? row[cCod] : null, `${trackingCode} COD khai báo`), fee: listMoney(cFee >= 0 ? row[cFee] : null, `${trackingCode} Tổng phí`),
       statusDate: statusAt ? new Date(new Date(statusAt).getTime() + 7 * 3600_000).toISOString().slice(0, 10) : "", statusAt,
       createdAt: parseVtpListTimestamp(cCreated >= 0 ? row[cCreated] : null),
-      codReconciliationText: cell(cReconciliation), paymentText: cell(cPayment), returnFlag: cell(cReturn).toLowerCase() === "x", forwardFlag: cell(cForward).toLowerCase() === "x",
+      codReconciliationText: cell(cReconciliation), paymentText: cell(cPayment), codPaymentText: cell(cCodPayment), returnFlag: cell(cReturn).toLowerCase() === "x", forwardFlag: cell(cForward).toLowerCase() === "x",
       receiverName: cell(cReceiver), receiverPhone: cell(cReceiverPhone), receiverAddress: cell(cReceiverAddress),
       sourceHash, sourceRow: headerIdx + offset + 2 };
     rows.push({ ...parsed, raw: JSON.stringify(parsed) });

@@ -1,7 +1,7 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
-import { legBaseCode, mergeVtpOrderLists, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
@@ -263,7 +263,7 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         }).where(eq(schema.shipments.id, current.id));
       }
       const snapshot = { trackingCode: m.trackingCode, orderCode: m.orderCode, statusText: m.statusText,
-        cod: m.cod, fee: m.fee, codReconciliationText: m.codReconciliationText ?? "", paymentText: m.paymentText ?? "",
+        cod: m.cod, fee: m.fee, codReconciliationText: m.codReconciliationText ?? "", paymentText: m.paymentText ?? "", codPaymentText: m.codPaymentText ?? "",
         returnFlag: m.returnFlag ?? false, forwardFlag: m.forwardFlag ?? false };
       const [existing] = await tx.select().from(schema.shipmentEvents).where(and(eq(schema.shipmentEvents.shipmentId, current.id),
         eq(schema.shipmentEvents.source, "VTP_IMPORT"), eq(schema.shipmentEvents.status, m.statusText), eq(schema.shipmentEvents.occurredAt, occurredAt)));
@@ -275,8 +275,14 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
       const sameTimeConflict = current.vtpStatusDate?.getTime() === occurredAt.getTime() && current.stage !== m.mapped.stage;
       const before = { stage: current.stage, codAmount: current.codAmount, shippingFee: current.shippingFee, vtpStatusDate: current.vtpStatusDate };
       if (!older && !sameTimeConflict) {
+        // ĐVVC tự khai "Đã nhận COD" ⇒ nâng chiều tiền lên COLLECTED (tiền đang ở ĐVVC). Không
+        // nâng thẳng lên "đã về ngân hàng": chỉ bảng kê đối soát mới chứng minh tiền về tài khoản.
+        // Cũng không bao giờ HẠ trạng thái đã có chứng từ mạnh hơn.
+        const codKhaiBao = m.cod !== null ? m.cod : current.codAmount;
+        const nangCod = vtpSaysCodReceived(m.codPaymentText) && codKhaiBao > 0 && ["PENDING", "NOT_APPLICABLE"].includes(current.codStatus);
         await tx.update(schema.shipments).set({ stage: m.mapped.stage, vtpStatusName: m.statusText,
           isFinal: m.mapped.final, vtpStatusDate: occurredAt, lastVtpSyncAt: now, updatedAt: now,
+          ...(nangCod ? { codStatus: "COLLECTED" as const } : {}),
           ...(m.cod !== null ? { codAmount: m.cod } : {}), ...(m.fee !== null ? { shippingFee: m.fee } : {}),
           ...(m.mapped.stage === "DELIVERED" ? { deliveredAt: occurredAt } : {}),
           ...(m.mapped.stage === "RETURNED" ? { returnedAt: occurredAt } : {}),

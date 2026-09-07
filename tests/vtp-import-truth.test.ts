@@ -19,6 +19,7 @@ export async function testVtpImportTruth(db: Db) {
   assert.equal(rows[0].createdAt, "2026-08-01T05:00:00.000Z");
   assert.equal(rows[0].codReconciliationText, "Chưa đối soát COD");
   assert.equal(rows[0].paymentText, "Đã thanh toán", "Hai cột khác nghĩa vẫn được giữ riêng");
+  assert.ok(!rows[0].codPaymentText, "File này không có cột 'Thanh toán COD' nên không được suy ra từ cột thanh toán cước");
   assert.equal(rows[0].sourceRow, 2);
   assert.equal(rows[0].sourceHash?.length, 64);
   const blank = parseVtpOrderList("Mã vận đơn,Trạng thái,Tiền thu hộ,Cước,Ngày tạo\nPKE9900000099,Giao thành công,,,01/09/2026")[0];
@@ -457,4 +458,42 @@ export async function testCodStatusMeaning() {
   assert.equal(Number(sau?.codCollected), 0, "chưa có chứng từ thì tiền thực thu vẫn là chưa biết, không tự điền");
 
   console.log("✓ Ý nghĩa trạng thái COD: 'không thu hộ' chỉ khi COD khai báo = 0; hoàn/huỷ và bảng kê 0đ không xoá dấu vết thu hộ");
+}
+
+/**
+ * ERP phải phản ánh đúng cột "THANH TOÁN COD" trên trang Quản lý vận đơn của Viettel Post.
+ * Đây là lời khai của chính ĐVVC về chiều tiền — không được bỏ qua, cũng không được thổi lên
+ * thành "tiền đã về ngân hàng" (chỉ bảng kê đối soát mới chứng minh được điều đó).
+ */
+export async function testVtpCodPaymentColumn() {
+  const { vtpSaysCodReceived } = await import("@/lib/integrations/viettelpost/statement");
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { getDb, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+
+  assert.equal(vtpSaysCodReceived("Đã nhận COD"), true);
+  assert.equal(vtpSaysCodReceived("Đã thanh toán"), false, "thanh toán CƯỚC không phải bằng chứng đã thu tiền hàng");
+  assert.equal(vtpSaysCodReceived("Chưa nhận COD"), false, "'Chưa nhận' không được đọc thành 'đã nhận'");
+  assert.equal(vtpSaysCodReceived(""), false, "ô trống là CHƯA BIẾT, không phải đã nhận");
+
+  await db
+    .insert(schema.shipments)
+    .values({ id: "vtp-cod-1", vtpOrderNumber: "PKE9955550001", trackingCode: "PKE9955550001", carrier: "Viettel Post", stage: "IN_TRANSIT", codAmount: 849000, codStatus: "PENDING" })
+    .onConflictDoNothing();
+
+  const csv = [
+    "STT,Mã Vận Đơn,Mã đơn hàng,Ngày tạo,Trạng Thái,Thanh toán COD,Tiền thu hộ (4),Tổng phí (9),Ngày chuyển trạng thái",
+    "1,PKE9955550001,PKE_REF_55,30/08/2026 17:12:33,Giao thành công,Đã nhận COD,849000,17000,03/09/2026 12:08:00",
+  ].join("\n");
+  await runVtpDataFileImport([{ filename: "VTP_danh_sach_van_don_cod.csv", base64: Buffer.from(csv, "utf8").toString("base64") }], "test");
+
+  const sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "vtp-cod-1") });
+  assert.equal(sau?.stage, "DELIVERED", "trạng thái giao đọc từ cột Trạng Thái");
+  assert.equal(Number(sau?.codAmount), 849000, "COD khai báo lấy đúng số Viettel Post ghi");
+  assert.equal(sau?.codStatus, "COLLECTED", "ĐVVC khai đã nhận COD ⇒ tiền đang ở ĐVVC");
+  assert.notEqual(sau?.codStatus, "PAID_TO_BANK", "lời khai của ĐVVC KHÔNG phải bằng chứng tiền đã về tài khoản");
+  assert.equal(Number(sau?.codCollected), 0, "chưa có bảng kê thì tiền thực thu vẫn là chưa biết");
+
+  console.log("✓ Cột 'Thanh toán COD' của Viettel Post: ERP đọc và nâng đúng một bậc, không thổi thành tiền đã về");
 }
