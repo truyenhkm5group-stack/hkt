@@ -3,7 +3,6 @@ import { AlertTriangle, Banknote, CheckCheck, Clock, Download, Landmark, X } fro
 import { CodTable } from "@/app/(dashboard)/cod/cod-table";
 import { CodTabs, type CodTabItem } from "@/app/(dashboard)/cod/cod-tabs";
 import { CodReconciliation } from "@/app/(dashboard)/cod/reconciliation";
-import { StatementDialog } from "@/app/(dashboard)/cod/statement-dialog";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -55,7 +54,11 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         description={`${formatVND(waiting, { compact: true })} đã giao chờ tiền về · ${formatVND(kpis.byStatus.PENDING.amount, { compact: true })} chưa thu · ${formatNumber(kpis.byStatus.DISPUTED.count)} vận đơn chênh lệch`}
         actions={
           <>
-            {canWrite ? <StatementDialog defaultOpen={param(raw, "import") === "orders"} /> : null}
+            {canWrite ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/import-vtp">Nhập dữ liệu Viettel Post</Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/cod?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV
