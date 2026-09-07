@@ -75,10 +75,10 @@ export type LandingFilters = { q?: string; status?: LandingStatus[]; outcome?: (
 const PRODUCT_CODE = sql<string>`upper(coalesce(nullif(regexp_replace(${l.productText}, '^.*?([A-Za-z]{1,2}[0-9]{3}).*$', '\\1'), ''), nullif(regexp_replace(${l.sheetGid}, '^tab:', ''), ''), ''))`;
 /** Thiếu thông tin để lên đơn: không có địa chỉ, hoặc không rõ size (chưa ghép mẫu mã và không đọc được size) */
 /**
- * Dòng CHƯA gửi POS được. Cố ý KHÔNG chỉ đọc cột `push_block`: cột đó do lần rà soát gần nhất ghi,
- * dòng cũ chưa được rà lại thì cột trống và sẽ bị xếp nhầm vào "đủ thông tin" rồi gửi POS lỗi.
- * Nên kiểm luôn ba thứ tra được thẳng trong CSDL; riêng "địa chỉ thiếu tỉnh/thành" cần danh sách
- * tỉnh nên vẫn dựa vào cột đã tính sẵn.
+ * Dòng CHƯA gửi POS được. Cố ý KHÔNG chỉ đọc cột `push_block`: cột đó do lần rà soát gần nhất ghi
+ * (job `landing-sheet` → refreshPushBlocks), dòng chưa được rà thì cột trống và sẽ bị xếp nhầm vào
+ * "đủ thông tin" rồi gửi POS lỗi. Nên kiểm luôn ba thứ tra được thẳng trong CSDL; riêng "địa chỉ
+ * thiếu tỉnh/thành" cần danh sách tỉnh không dấu nên vẫn phải dựa vào cột đã rà.
  */
 const BLOCKED = sql`(${l.pushBlock} is not null or ${l.variantId} is null or coalesce(${l.phone}, '') = '' or coalesce(${l.address}, '') = '')`;
 

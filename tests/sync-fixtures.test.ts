@@ -57,6 +57,7 @@ import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
+import { refreshPushBlocks } from "@/lib/landing/push-block";
 import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 
@@ -798,6 +799,21 @@ async function main() {
         .insert(schema.landingOrders)
         .values({ rowKey: "tab:RD:1", sheetGid: "tab:RD", rowIndex: 1, submittedAt: new Date(), phone: "0900000077", status: "NEW", ...landBase, productText: "Q002", address: "Số 1, Cầu Giấy, Hà Nội", variantId: null })
         .onConflictDoNothing();
+
+      // Dòng đủ mẫu mã + SĐT nhưng địa chỉ thiếu tỉnh/thành, cột push_block còn trống: SQL không tự
+      // nhận ra (cần danh sách tỉnh) nên trước đây bị xếp vào "đủ thông tin" rồi bấm gửi mới lỗi.
+      await db
+        .insert(schema.landingOrders)
+        .values({ rowKey: "tab:RD:2", sheetGid: "tab:RD", rowIndex: 2, submittedAt: new Date(), phone: "0900000078", status: "NEW", ...landBase, productText: "Q002", address: "Thôn 3, xã Tam Dị, huyện Lục Nam", province: "", variantId: "rr-var" })
+        .onConflictDoNothing();
+
+      // Cột push_block do lần rà soát gần nhất ghi. Dòng vừa chèn chưa được rà: badge trên bảng vẫn
+      // đúng nhờ tính lại lúc đọc, nhưng bộ lọc chạy bằng SQL thì phải rà xong mới xếp đúng chỗ —
+      // nên job đồng bộ landing gọi refreshPushBlocks() sau mỗi lần chạy.
+      const chuaRa = (await listLandingOrders({ period: allP })).find((r) => r.phone === "0900000078");
+      assert.equal(chuaRa?.pushBlock, "NO_PROVINCE", "badge trên bảng đúng ngay cả khi cột chưa rà");
+      assert.ok((await refreshPushBlocks()) >= 1, "rà soát ghi lý do vướng vào cột");
+      assert.equal(await refreshPushBlocks(), 0, "rà lại lần nữa không ghi thừa");
 
       const ready = await listLandingOrders({ period: allP, flag: ["READY"] });
       const notReady = await listLandingOrders({ period: allP, flag: ["NOT_READY"] });

@@ -17,6 +17,7 @@ import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
+import { refreshPushBlocks } from "@/lib/landing/push-block";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
@@ -107,7 +108,14 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Đơn landing page từ Google Sheet",
     source: "ALL",
     description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới; recheck=1 tính lại trùng / rủi ro cho mọi dòng.",
-    run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? recheckAllLanding(num(o.params?.days) ?? 60) : importLandingSheet({ onlyNew: o.params?.new === "1" })),
+    run: async (o) => {
+      if (o.params?.preview === "1") return previewSheet();
+      const res = o.params?.recheck === "1" ? await recheckAllLanding(num(o.params?.days) ?? 60) : await importLandingSheet({ onlyNew: o.params?.new === "1" });
+      // Rà lại lý do vướng cho MỌI đơn chưa lên POS, không chỉ dòng vừa đọc: khách sửa địa chỉ hay
+      // nhân viên ghép mẫu mã xong thì đơn phải tự rời nhóm "chưa đủ thông tin" ở lần đồng bộ sau.
+      const daRaSoat = await refreshPushBlocks();
+      return { ...res, daRaSoatChuaDuThongTin: daRaSoat };
+    },
   },
   "landing-push": {
     label: "Gửi POS các đơn landing đã đủ thông tin",
