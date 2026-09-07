@@ -6,7 +6,16 @@ import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations
 import { publish } from "@/lib/realtime/bus";
 import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/sync/runner";
 
-export type ApplyResult = { shipmentId: string; changed: boolean; created: boolean; stage: ShipmentStage };
+/**
+ * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
+ *  · "duplicate" — đúng sự kiện đã áp rồi, bỏ qua là đúng;
+ *  · "stale"     — sự kiện của ĐVVC cũ hơn trạng thái đang lưu, ERP cố tình không lùi trạng thái.
+ * Trước đây cả hai đều được đánh dấu PROCESSED nên "485 webhook đã xử lý" che mất số webhook
+ * thực sự không đổi được gì. Trả lý do ra ngoài để lớp gọi ghi đúng.
+ */
+export type ApplyReason = "applied" | "created" | "duplicate" | "stale";
+
+export type ApplyResult = { shipmentId: string; changed: boolean; created: boolean; stage: ShipmentStage; reason: ApplyReason };
 
 /** Tìm vận đơn trong ERP theo mã VTP / mã vận đơn / mã tham chiếu */
 export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Promise<Shipment | null> {
@@ -76,17 +85,22 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   // Ghi sự kiện hành trình (idempotent theo shipment + source + status + thời điểm)
   const eventRows: (typeof schema.shipmentEvents.$inferInsert)[] = [];
   if (record.status !== null || record.statusName) {
-    eventRows.push({ shipmentId: shipment.id, source, status: String(record.status ?? record.statusName), statusName: meta.name, location: record.location, note: record.note, occurredAt: statusDate, raw: record.raw });
+    // Ghi kèm trạng thái đã chuẩn hoá: có nó thì dựng lại được trạng thái vận đơn từ lịch sử và
+    // đối chiếu được ERP với ĐVVC. Thiếu nó (như trước đây) thì mọi sự kiện webhook đều vô danh.
+    eventRows.push({ shipmentId: shipment.id, source, status: String(record.status ?? record.statusName), statusName: meta.name, location: record.location, note: record.note, occurredAt: statusDate, normalizedStage: meta.stage, raw: record.raw });
   }
   for (const step of record.journey) {
     if (!step.occurredAt) continue;
-    eventRows.push({ shipmentId: shipment.id, source, status: String(step.status ?? step.statusName), statusName: step.statusName || vtpStatusMeta(step.status).name, location: step.location, note: step.note, occurredAt: step.occurredAt, raw: step.raw });
+    eventRows.push({ shipmentId: shipment.id, source, status: String(step.status ?? step.statusName), statusName: step.statusName || vtpStatusMeta(step.status).name, location: step.location, note: step.note, occurredAt: step.occurredAt, normalizedStage: vtpStatusMeta(step.status).stage, raw: step.raw });
   }
   if (eventRows.length) await db.insert(schema.shipmentEvents).values(eventRows).onConflictDoNothing();
 
   if (!isNewer && !created) {
     await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id));
-    return { shipmentId: shipment.id, changed: false, created, stage: shipment.stage };
+    // Cùng mốc thời gian và cùng trạng thái ⇒ đúng là gói tin lặp. Khác đi ⇒ sự kiện đến muộn,
+    // ERP giữ trạng thái mới hơn nhưng phải nói ra để không ai tưởng webhook đã được áp dụng.
+    const duplicate = shipment.vtpStatusDate?.getTime() === statusDate.getTime() && shipment.stage === meta.stage;
+    return { shipmentId: shipment.id, changed: false, created, stage: shipment.stage, reason: duplicate ? "duplicate" : "stale" };
   }
 
   const isFinal = record.status !== null && VTP_FINAL_STATUSES.has(record.status);
@@ -135,7 +149,7 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     .where(eq(schema.shipments.id, shipment.id));
 
   publish({ type: "shipment", shipmentId: shipment.id, status: stage });
-  return { shipmentId: shipment.id, changed: true, created, stage };
+  return { shipmentId: shipment.id, changed: true, created, stage, reason: created ? "created" : "applied" };
 }
 
 /**

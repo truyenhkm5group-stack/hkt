@@ -67,8 +67,16 @@ export async function POST(request: NextRequest) {
   after(async () => {
     try {
       const result = await applyVtpTracking(record, "VTP_WEBHOOK", { allowCreate: true });
-      await markWebhook(eventId, result ? "PROCESSED" : "IGNORED", result ? null : "Không tìm thấy vận đơn tương ứng");
-      if (result) {
+      // PROCESSED phải có nghĩa là ĐÃ ÁP DỤNG. Gói tin lặp hay gói tin đến muộn vẫn được lưu và
+      // vẫn vào lịch sử hành trình, nhưng không được đếm như đã cập nhật trạng thái — nếu không
+      // thì con số "đã xử lý" trên trang Kết nối dữ liệu che mất webhook không đổi được gì.
+      const note =
+        !result ? "Không tìm thấy vận đơn tương ứng"
+        : result.reason === "duplicate" ? "Gói tin lặp — trạng thái đã đúng, không cần cập nhật"
+        : result.reason === "stale" ? "Sự kiện của Viettel Post cũ hơn trạng thái đang lưu — giữ trạng thái mới hơn, đã ghi vào lịch sử"
+        : null;
+      await markWebhook(eventId, result?.changed ? "PROCESSED" : "IGNORED", note);
+      if (result?.changed) {
         clearMemo();
         scheduleAlertEvaluation();
       }

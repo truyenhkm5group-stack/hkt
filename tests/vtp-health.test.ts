@@ -69,7 +69,22 @@ export async function testVtpHealth(db: Db) {
   const after = await viettelPostHealth();
   assert.equal(after.stageMismatch, before + 1, "phải phát hiện ERP nói khác Viettel Post");
 
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.syncRuns)
+  // ───────── 4. Webhook về mà không đổi được gì phải hiện ra ─────────
+  // Ca thật trên production (PKE1511633408): hai webhook 05/09 đều ghi PROCESSED nhưng trạng thái
+  // vận đơn vẫn mang mốc từ 02/09 — 30/228 vận đơn ở tình trạng này mà không có chỗ nào báo.
+  const truocKhiLech = (await viettelPostHealth()).webhookNotApplied;
+  await db.insert(schema.orders).values({ id: "vtp-chua-ap-dung", insertedAt: new Date() });
+  const [cham] = await db.insert(schema.shipments)
+    .values({ orderId: "vtp-chua-ap-dung", vtpOrderNumber: "PKE-CHUA-AP-DUNG", stage: "PENDING", vtpStatusDate: new Date("2026-09-02T17:00:00Z") })
+    .returning({ id: schema.shipments.id });
+  await db.insert(schema.shipmentEvents).values({
+    shipmentId: cham.id, source: "VTP_WEBHOOK", status: "500", statusName: "Giao bưu tá đi phát",
+    occurredAt: new Date("2026-09-05T03:48:44Z"), normalizedStage: "OUT_FOR_DELIVERY",
+  });
+  const sauKhiLech = await viettelPostHealth();
+  assert.equal(sauKhiLech.webhookNotApplied, truocKhiLech + 1, "webhook mới hơn trạng thái đang lưu phải được đếm ra");
+
+    const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.syncRuns)
     .where(and(eq(schema.syncRuns.source, "VIETTELPOST"), eq(schema.syncRuns.status, "RUNNING")));
   console.log(`✓ Sức khoẻ Viettel Post: đóng lần chạy mồ côi (còn ${Number(n)} đang chạy thật) · đối chiếu không đạt ghi PARTIAL · phát hiện ${after.stageMismatch} vận đơn lệch trạng thái`);
 }
