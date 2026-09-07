@@ -167,7 +167,8 @@ export default async function PayrollPage({
 
       <SectionCard
         title="Bảng lương"
-        description="Lương = lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân · thưởng chỉ tính khi lợi nhuận dương"
+        description="Lương cứng cộng thưởng theo lợi nhuận và doanh thu."
+        hint="Lương = lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân · thưởng chỉ tính khi lợi nhuận dương"
         padded={false}
       >
         <div className="overflow-x-auto">

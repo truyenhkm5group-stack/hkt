@@ -9,14 +9,6 @@ export type { VtpImportFileResult };
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
-const summarySchema = z.object({
-  reference: z.string().trim().min(3).max(120).transform((v) => v.toUpperCase()),
-  receivedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  codGross: z.number().int().min(0).max(50_000_000_000),
-  feeTotal: z.number().int().min(0).max(50_000_000_000),
-  netAmount: z.number().int().min(0).max(50_000_000_000),
-});
-
 function revalidate() {
   for (const p of ["/cod", "/reports", "/", "/shipments"]) revalidatePath(p);
 }

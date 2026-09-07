@@ -29,7 +29,8 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
       <PageHeader
         eyebrow="Vận hành"
         title="CSKH · Case chăm sóc khách hàng"
-        description="Đổi size, đổi màu, sai địa chỉ, sai SĐT, trả hàng, khiếu nại, tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng. Tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay. Case mới được đưa lên chuông và nhóm Lark."
+        description="Case đổi/trả, sai thông tin, khiếu nại — tự phát hiện hoặc nhập tay."
+        hint="Đổi size, đổi màu, sai địa chỉ, sai SĐT, trả hàng, khiếu nại, tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng. Tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay. Case mới được đưa lên chuông và nhóm Lark."
         actions={canWrite ? (<><DetectButton /><CaseDialog assignees={assignees} /></>) : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

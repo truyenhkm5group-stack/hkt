@@ -151,7 +151,8 @@ export async function CodReconciliation({ period, drill, page }: { period: Perio
       {coverage.gaps.length ? (
         <SectionCard
           title="Bảng kê còn thiếu — cần xuất giai đoạn nào"
-          description="Suy từ dữ liệu thật: vận đơn đã thu được tiền nhưng chưa nằm trong đợt nào. Xuất bảng kê đúng các khoảng ngày dưới đây rồi nhập ở nút Bảng kê Viettel Post."
+          description="Vận đơn đã thu được tiền nhưng chưa nằm trong đợt bảng kê nào."
+          hint="Suy từ dữ liệu thật: vận đơn đã thu được tiền nhưng chưa nằm trong đợt nào. Xuất bảng kê đúng các khoảng ngày dưới đây rồi nhập ở nút Bảng kê Viettel Post."
         >
           <div className="overflow-x-auto">
             <Table>

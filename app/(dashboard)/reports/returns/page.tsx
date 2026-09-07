@@ -165,7 +165,8 @@ export default async function ReturnRatePage({
       {/* ───────── Hiệu suất giao vận tính từ hành trình Viettel Post ───────── */}
       <SectionCard
         title="Hiệu suất giao vận"
-        description="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại."
+        description="Tính theo mốc thời gian của từng sự kiện Viettel Post."
+        hint="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại."
       >
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border p-4">

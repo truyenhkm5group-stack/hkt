@@ -67,7 +67,8 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
           </Button>
         ) : undefined
       }
-      title="Danh sách đơn landing" description="Mỗi dòng = một lượt khách điền form. Xác nhận với khách → chọn mẫu mã (nếu ERP chưa ghép) → Gửi POS tạo đơn nháp trên Pancake; sau đó trạng thái giao / hoàn theo đơn Pancake. Cảnh báo trùng SĐT và khách rủi ro hoàn hiện ngay trên dòng." padded={false}>
+      title="Danh sách đơn landing" description="Mỗi dòng là một lượt khách điền form landing page."
+ hint="Mỗi dòng = một lượt khách điền form. Xác nhận với khách → chọn mẫu mã (nếu ERP chưa ghép) → Gửi POS tạo đơn nháp trên Pancake; sau đó trạng thái giao / hoàn theo đơn Pancake. Cảnh báo trùng SĐT và khách rủi ro hoàn hiện ngay trên dòng." padded={false}>
       <div className="overflow-x-auto">
         <Table className="min-w-[1500px]">
           <TableHeader>

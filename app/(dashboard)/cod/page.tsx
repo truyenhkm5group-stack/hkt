@@ -119,7 +119,8 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
       />
       <CodTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
 
-      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Bảng kê tiền COD Viettel Post (tiền COD − cước/dư nợ = tiền thu về) và các đợt đánh dấu tay · số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát" padded={false}>
+      <SectionCard title="Đợt nhận tiền / bảng kê gần đây" description="Bảng kê tiền COD Viettel Post và các đợt đánh dấu tay."
+ hint="Bảng kê tiền COD Viettel Post (tiền COD − cước/dư nợ = tiền thu về) và các đợt đánh dấu tay · số thu về được tính vào báo cáo Dòng tiền thực theo ngày đối soát" padded={false}>
         {batches.length ? (
           <div className="overflow-x-auto">
             <Table className="min-w-[720px]">

@@ -202,7 +202,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           initials="PG"
           tone="bg-pink-600"
           title="Pancake Pages (chat)"
-          description="Đọc hội thoại & thẻ chat để tự tạo case CSKH: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT…"
+          description="Đọc hội thoại và thẻ chat Pancake để tự tạo case CSKH."
+          hint="Đọc hội thoại & thẻ chat để tự tạo case CSKH: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT…"
           configured={status.pancakePages}
           items={[
             { label: "Access token", value: status.pancakePages ? <span className="font-mono">{maskKey(env.pancake.pagesAccessToken)}</span> : <span className="text-muted-foreground">Chưa cấu hình PANCAKE_ACCESS_TOKEN</span> },
@@ -222,7 +223,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
       {/* ───────── Sức khoẻ Viettel Post ───────── */}
       <SectionCard
         title="Viettel Post đang chảy dữ liệu thế nào"
-        description="Hai nguồn tách bạch: webhook là dữ liệu ERP thực sự nhận được; đối chiếu là ERP chủ động tra lại qua API để vá webhook rơi."
+        description="Hai nguồn tách bạch: webhook nhận được và đối chiếu chủ động."
+        hint="Hai nguồn tách bạch: webhook là dữ liệu ERP thực sự nhận được; đối chiếu là ERP chủ động tra lại qua API để vá webhook rơi."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border p-4">
@@ -334,7 +336,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
       {/* ───────── Đồng bộ thủ công ───────── */}
       <SectionCard
         title="Đồng bộ dữ liệu"
-        description="Chạy từng job hoặc kéo toàn bộ lịch sử. Mỗi job chỉ chạy một tiến trình tại một thời điểm; kết quả ghi vào Lịch sử đồng bộ."
+        description="Chạy từng job hoặc kéo toàn bộ lịch sử."
+        hint="Chạy từng job hoặc kéo toàn bộ lịch sử. Mỗi job chỉ chạy một tiến trình tại một thời điểm; kết quả ghi vào Lịch sử đồng bộ."
         padded={false}
       >
         <div className="grid gap-4 border-b p-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
@@ -459,7 +462,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
       </SectionCard>
 
       {/* ───────── Scheduler ───────── */}
-      <SectionCard title="Lịch đồng bộ tự động (scheduler)" description="Service “scheduler” (scripts/scheduler.mjs) chạy như một tiến trình riêng và gọi các API /api/sync/<job> theo chu kỳ cấu hình trong .env">
+      <SectionCard title="Lịch đồng bộ tự động (scheduler)" description="Tiến trình chạy nền gọi các API đồng bộ theo chu kỳ."
+ hint="Service “scheduler” (scripts/scheduler.mjs) chạy như một tiến trình riêng và gọi các API /api/sync/<job> theo chu kỳ cấu hình trong .env">
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
           <div className="overflow-x-auto rounded-lg border">
             <Table>
@@ -524,7 +528,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   );
 }
 
-function ConnectionCard({ initials, tone, title, description, configured, items, footer }: { initials: string; tone: string; title: string; description: string; configured: boolean; items: { label: string; value: React.ReactNode; span?: boolean }[]; footer: React.ReactNode }) {
+function ConnectionCard({ initials, tone, title, description, hint, configured, items, footer }: { initials: string; tone: string; title: string; description: string; hint?: React.ReactNode; configured: boolean; items: { label: string; value: React.ReactNode; span?: boolean }[]; footer: React.ReactNode }) {
   return (
     <SectionCard padded={false}>
       <div className="flex items-start gap-3 border-b px-5 py-4">
@@ -532,6 +536,7 @@ function ConnectionCard({ initials, tone, title, description, configured, items,
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-bold">{title}</h2>
+            {hint ? <InfoHint>{hint}</InfoHint> : null}
             {configured ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11.5px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
                 <CheckCircle2 className="size-3" /> Đã cấu hình

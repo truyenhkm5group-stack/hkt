@@ -38,7 +38,8 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Vận hành"
         title="Chăm sóc khách băn khoăn & bán chéo"
-        description="(1) Khách đã nhắn Pancake trong 24 giờ hoặc 7 ngày nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, mỗi ngày một tin (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại); tự dừng khi khách đặt đơn hoặc trả lời để nhân viên tiếp quản. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
+        description="Nhắc khách còn băn khoăn và gợi ý bán chéo sau khi khách nhận hàng."
+        hint="(1) Khách đã nhắn Pancake trong 24 giờ hoặc 7 ngày nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, mỗi ngày một tin (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại); tự dừng khi khách đặt đơn hoặc trả lời để nhân viên tiếp quản. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
         actions={canWrite ? <BuildButton segment={segment} defaultHours={config.nurtureWindowHours} /> : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

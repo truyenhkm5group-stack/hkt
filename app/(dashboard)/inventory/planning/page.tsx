@@ -32,7 +32,8 @@ export default async function PlanningPage() {
       <PageHeader
         eyebrow="Kho"
         title="Kế hoạch đặt hàng sản xuất"
-        description="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã: dựa trên tồn khả dụng ERP, đơn đã chốt chưa gửi, tốc độ bán gần đây, thời gian sản xuất và số ngày muốn đủ bán sau khi hàng về. Mẫu mã hết hàng trước khi sản xuất xong sẽ lên chuông cảnh báo và nhóm Lark."
+        description="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã"
+        hint="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã: dựa trên tồn khả dụng ERP, đơn đã chốt chưa gửi, tốc độ bán gần đây, thời gian sản xuất và số ngày muốn đủ bán sau khi hàng về. Mẫu mã hết hàng trước khi sản xuất xong sẽ lên chuông cảnh báo và nhóm Lark."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" size="sm">
