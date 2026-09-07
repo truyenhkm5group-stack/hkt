@@ -4,82 +4,25 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
-import { codReconciliation, statementCoverage } from "@/lib/queries/cod-reconciliation";
 import { orderListCoverage } from "@/lib/queries/shipments";
 
-export const metadata = { title: "Nhập dữ liệu Viettel Post" };
-
-const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+export const metadata = { title: "Bổ sung danh sách vận đơn" };
 
 export default async function ImportVtpPage() {
   await requirePermission("cod:write");
-  const [coverage, recon, listCoverage] = await Promise.all([statementCoverage(), codReconciliation(ALL), orderListCoverage()]);
+  const listCoverage = await orderListCoverage();
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         eyebrow="Dữ liệu gốc"
-        title="Nhập dữ liệu Viettel Post"
-        description="Nguồn dữ liệu gốc cho trạng thái giao hàng và tiền COD."
+        title="Bổ sung danh sách vận đơn"
+        description="Chỉ dùng để vá trạng thái giao hàng còn thiếu."
+        hint={<>Tiền COD <b>không</b> nhập ở đây nữa: bảng kê đối soát thanh toán Viettel Post gửi về hòm thư của shop được đẩy thẳng vào ERP và tự đối soát, xem ở trang Đối soát COD. Trang này còn lại một việc: nạp tệp <b>Danh sách vận đơn</b> xuất từ trang Quản lý vận đơn của Viettel Post cho những giai đoạn ERP chưa có trạng thái hoặc chưa có mã vận đơn — tệp này Viettel Post không gửi qua email và API đối tác cũng không thấy được vận đơn do Pancake tạo.</>}
       />
 
-      <SectionCard title="Nạp tệp" description="ERP tự nhận loại từng tệp" hint="Chọn nhiều tệp cùng lúc, cả danh sách vận đơn lẫn bảng kê COD. ERP nhận loại theo NỘI DUNG tệp chứ không theo tên. Nạp lại cùng một tệp không làm số liệu nhân đôi: dòng cũ hơn bị bỏ qua, dòng trùng không ghi lại.">
+      <SectionCard title="Nạp tệp" description="ERP tự nhận loại từng tệp" hint="Chọn nhiều tệp cùng lúc. ERP nhận loại theo NỘI DUNG tệp chứ không theo tên. Nạp lại cùng một tệp không làm số liệu nhân đôi: dòng cũ hơn bị bỏ qua, dòng trùng không ghi lại. Nếu lỡ chọn cả tệp bảng kê COD thì vẫn nhận được, nhưng bảng kê đã tự về qua email nên không cần nạp tay.">
         <VtpImportForm />
-      </SectionCard>
-
-      <SectionCard
-        title="Cần nhập thêm gì"
-        description="Khoảng ngày còn thiếu bảng kê"
-        hint="Suy từ dữ liệu thật trong ERP — vận đơn đã giao mà chưa có chứng từ tiền — chứ không suy từ lịch trả tiền của Viettel Post. Bảng kê COD nay tự về qua email nên phần này thường tự đầy."
-      >
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border p-4">
-            <p className="text-[13px] font-medium text-muted-foreground">Tiền đã thu chưa có chứng từ</p>
-            <p className="numeric mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{formatVND(recon.unproven.amount)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{formatNumber(recon.unproven.count)} vận đơn — cần chi tiết bảng kê của giai đoạn tương ứng.</p>
-          </div>
-          <div className="rounded-xl border p-4">
-            <p className="text-[13px] font-medium text-muted-foreground">ERP có dữ liệu vận đơn từ</p>
-            <p className="numeric mt-1 text-2xl font-bold">{coverage.firstShipmentDate ? formatDate(coverage.firstShipmentDate) : "—"}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Bảng kê của giai đoạn trước ngày này sẽ không ghép được vận đơn nào — nạp Danh sách vận đơn của giai đoạn đó trước.
-            </p>
-          </div>
-          <div className="rounded-xl border p-4">
-            <p className="text-[13px] font-medium text-muted-foreground">Đã nhập</p>
-            <p className="numeric mt-1 text-2xl font-bold">{formatNumber(coverage.batches)} đợt tiền về</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {coverage.firstBatch && coverage.lastBatch ? `${formatDate(coverage.firstBatch)} → ${formatDate(coverage.lastBatch)}` : "chưa có đợt nào"}
-            </p>
-          </div>
-        </div>
-
-        {coverage.gaps.length ? (
-          <div className="mt-4 overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left">
-                <tr>
-                  <th className="p-2 font-medium">Cần xuất bảng kê từ ngày</th>
-                  <th className="p-2 font-medium">Đến ngày</th>
-                  <th className="p-2 text-right font-medium">Vận đơn</th>
-                  <th className="p-2 text-right font-medium">Tiền đang treo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {coverage.gaps.map((g) => (
-                  <tr key={`${g.from}-${g.to}`} className="border-t">
-                    <td className="numeric p-2 font-medium">{formatDate(g.from)}</td>
-                    <td className="numeric p-2 font-medium">{formatDate(g.to)}</td>
-                    <td className="numeric p-2 text-right">{formatNumber(g.shipments)}</td>
-                    <td className="numeric p-2 text-right font-semibold text-amber-600 dark:text-amber-400">{formatVND(g.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">Không còn khoảng ngày nào thiếu bảng kê.</p>
-        )}
       </SectionCard>
 
       <SectionCard

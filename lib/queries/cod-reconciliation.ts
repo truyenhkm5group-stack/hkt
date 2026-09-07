@@ -324,3 +324,129 @@ export async function statementCoverage(): Promise<StatementCoverage> {
     totalMissingAmount: gaps.reduce((a, g) => a + g.amount, 0),
   };
 }
+
+/**
+ * `db.execute` trả mảng (PGlite) hoặc `{ rows }` (node-postgres) tuỳ trình điều khiển — đọc thống
+ * nhất một chỗ để truy vấn SQL thô chạy đúng ở cả bản chạy thật lẫn bản kiểm thử.
+ */
+function rowsOf(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) return result as Record<string, unknown>[];
+  const rows = (result as { rows?: unknown })?.rows;
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+}
+
+export type StatementFileAudit = {
+  sourceFile: string;
+  batchReference: string | null;
+  receivedAt: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  /** Số dòng chi tiết đọc được từ file. */
+  lines: number;
+  /** Dòng ghép được vận đơn trong ERP. */
+  matched: number;
+  /** Dòng bảng kê có mà ERP không có vận đơn — tiền có thật nhưng chưa truy nguyên được. */
+  unmatched: number;
+  /** Tiền COD của các dòng ghép được / chưa ghép được. */
+  codMatched: number;
+  codUnmatched: number;
+  /** Tổng COD của đợt theo chứng từ tổng hợp (phần I của bảng kê). */
+  batchCod: number;
+  /** batchCod − (codMatched + codUnmatched): phần chi tiết chưa giải thích được. */
+  diff: number;
+};
+
+/**
+ * ĐỐI SOÁT TỰ ĐỘNG THEO BẢNG KÊ — đọc từ SỔ CHI TIẾT (`cod_statement_lines`), không đọc từ
+ * các cột tiền trên vận đơn. Trả lời đúng ba câu hỏi:
+ *   (1) ERP đã nhận đủ file bảng kê chưa;
+ *   (2) từng file có được đọc hết dòng không;
+ *   (3) tiền trên bảng kê đã truy nguyên về vận đơn nào chưa, còn bao nhiêu chưa ghép được.
+ */
+export async function statementFileAudit(limit = 30): Promise<StatementFileAudit[]> {
+  const db = await getDb();
+  const rows = await db.execute(sql`
+    select l.source_file,
+           max(b.reference) batch_reference,
+           max(b.received_at)::date::text received_at,
+           min(l.paid_date) period_from,
+           max(l.paid_date) period_to,
+           count(*) lines,
+           count(*) filter (where l.shipment_id is not null) matched,
+           count(*) filter (where l.shipment_id is null) unmatched,
+           coalesce(sum(l.cod) filter (where l.shipment_id is not null), 0) cod_matched,
+           coalesce(sum(l.cod) filter (where l.shipment_id is null), 0) cod_unmatched,
+           coalesce(max(b.cod_gross), 0) batch_cod
+    from cod_statement_lines l
+    left join cod_batches b on b.id = l.batch_id
+    group by l.source_file
+    order by max(l.statement_at) desc
+    limit ${limit}
+  `);
+  return rowsOf(rows).map((r) => {
+    const codMatched = Number(r.cod_matched ?? 0);
+    const codUnmatched = Number(r.cod_unmatched ?? 0);
+    const batchCod = Number(r.batch_cod ?? 0);
+    return {
+      sourceFile: String(r.source_file ?? ""),
+      batchReference: (r.batch_reference as string | null) ?? null,
+      receivedAt: (r.received_at as string | null) ?? null,
+      periodFrom: (r.period_from as string | null) ?? null,
+      periodTo: (r.period_to as string | null) ?? null,
+      lines: Number(r.lines ?? 0),
+      matched: Number(r.matched ?? 0),
+      unmatched: Number(r.unmatched ?? 0),
+      codMatched,
+      codUnmatched,
+      batchCod,
+      diff: batchCod ? batchCod - (codMatched + codUnmatched) : 0,
+    };
+  });
+}
+
+export type StatementLedgerSummary = {
+  files: number;
+  lines: number;
+  matched: number;
+  unmatched: number;
+  codTotal: number;
+  codMatched: number;
+  codUnmatched: number;
+  /** Tổng COD trên chứng từ tổng hợp của các đợt đã nhận. */
+  batchCodTotal: number;
+  feeTotal: number;
+  netTotal: number;
+  lastStatementAt: string | null;
+};
+
+/** Tổng quan sổ chứng từ bảng kê — dùng cho thẻ "Đối soát theo bảng kê" trên trang COD. */
+export async function statementLedgerSummary(): Promise<StatementLedgerSummary> {
+  const db = await getDb();
+  const [row] = rowsOf(await db.execute(sql`
+    select count(distinct l.source_file) files,
+           count(*) lines,
+           count(*) filter (where l.shipment_id is not null) matched,
+           count(*) filter (where l.shipment_id is null) unmatched,
+           coalesce(sum(l.cod), 0) cod_total,
+           coalesce(sum(l.cod) filter (where l.shipment_id is not null), 0) cod_matched,
+           coalesce(sum(l.cod) filter (where l.shipment_id is null), 0) cod_unmatched,
+           max(l.statement_at)::date::text last_statement_at
+    from cod_statement_lines l
+  `));
+  const [batchRow] = await db
+    .select({ cod: sql<number>`coalesce(sum(${b.codGross}), 0)`, fee: sql<number>`coalesce(sum(${b.feeTotal}), 0)`, net: sql<number>`coalesce(sum(${b.totalAmount}), 0)` })
+    .from(b);
+  return {
+    files: Number(row?.files ?? 0),
+    lines: Number(row?.lines ?? 0),
+    matched: Number(row?.matched ?? 0),
+    unmatched: Number(row?.unmatched ?? 0),
+    codTotal: Number(row?.cod_total ?? 0),
+    codMatched: Number(row?.cod_matched ?? 0),
+    codUnmatched: Number(row?.cod_unmatched ?? 0),
+    batchCodTotal: Number(batchRow?.cod ?? 0),
+    feeTotal: Number(batchRow?.fee ?? 0),
+    netTotal: Number(batchRow?.net ?? 0),
+    lastStatementAt: (row?.last_statement_at as string | null) ?? null,
+  };
+}
