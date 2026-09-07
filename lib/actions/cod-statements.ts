@@ -2,13 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
-import { mergeVtpOrderLists, parseStatementDetail, parseStatementSummaryText, parseVtpOrderList, type StatementSummary } from "@/lib/integrations/viettelpost/statement";
 import { runVtpDataFileImport, type VtpImportFileResult } from "@/lib/integrations/viettelpost/import-run";
 export type { VtpImportFileResult };
-import { applyStatementDetail, applyVtpOrderList, applyStatementDetailRows, matchStatementFileToBatch, matchStatementRows, matchVtpOrderList, upsertStatementBatches, type DetailMatch, type OrderListMatch, type StatementFileMatch } from "@/lib/integrations/viettelpost/statement-db";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -27,64 +24,6 @@ function revalidate() {
 async function authorize() {
   const user = await requireUser();
   return { user, error: can(user, "cod:write") ? null : "Bạn không có quyền đối soát COD" };
-}
-
-/** Phân tích bảng dán từ viettelpost.vn (chưa ghi) */
-export async function parseVtpStatementText(text: string): Promise<Result<{ rows: StatementSummary[] }>> {
-  const { error } = await authorize();
-  if (error) return { error };
-  if (typeof text !== "string" || text.length > 200_000) return { error: "Nội dung quá dài" };
-  const rows = parseStatementSummaryText(text);
-  if (!rows.length) return { error: "Không nhận ra dòng bảng kê nào (cần mã bảng kê, ngày đối soát và các số tiền)" };
-  return { ok: true, rows };
-}
-
-/** Lưu các bảng kê tổng hợp (mã, ngày, COD, cước, thu về) thành đợt nhận tiền */
-export async function saveVtpStatements(input: unknown): Promise<Result<{ created: number; updated: number }>> {
-  const { user, error } = await authorize();
-  if (error) return { error };
-  const parsed = z.array(summarySchema).min(1).max(500).safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const result = await upsertStatementBatches(parsed.data, user.email);
-  await audit({ userId: user.id, userEmail: user.email, action: "COD_STATEMENTS_IMPORT", entity: "COD_BATCH", detail: { count: parsed.data.length, references: parsed.data.map((r) => r.reference), ...result } });
-  revalidate();
-  return { ok: true, ...result };
-}
-
-/** Đọc file chi tiết bảng kê (base64) và ghép với vận đơn ERP (chưa ghi) */
-export async function previewVtpStatementDetail(input: { base64: string; filename: string }): Promise<Result<{ rows: DetailMatch[] }>> {
-  const { error } = await authorize();
-  if (error) return { error };
-  if (!input?.base64 || input.base64.length > 15_000_000) return { error: "File trống hoặc quá lớn (tối đa ~10MB)" };
-  try {
-    const buffer = Buffer.from(input.base64, "base64");
-    const isText = /\.(csv|txt|tsv)$/i.test(input.filename ?? "");
-    const rows = parseStatementDetail(isText ? buffer.toString("utf8") : buffer, input.filename);
-    return { ok: true, rows: await matchStatementRows(rows) };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Không đọc được file" };
-  }
-}
-
-const detailSchema = z.object({
-  summary: summarySchema,
-  rows: z
-    .array(z.object({ trackingCode: z.string().trim().min(6).max(60), cod: z.number().int().min(0), fee: z.number().int().min(0), net: z.number().int() }))
-    .min(1)
-    .max(5000),
-});
-
-/** Ghi chi tiết bảng kê: tạo/cập nhật đợt, gắn vận đơn, đánh dấu đã về ngân hàng */
-export async function importVtpStatementDetail(input: unknown): Promise<Result<{ matched: number; unmatched: number; batchId: string }>> {
-  const { user, error } = await authorize();
-  if (error) return { error };
-  const parsed = detailSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const rows = parsed.data.rows.map((r) => ({ ...r, trackingCode: r.trackingCode.toUpperCase(), raw: "" }));
-  const result = await applyStatementDetail(parsed.data.summary, rows, user.email);
-  await audit({ userId: user.id, userEmail: user.email, action: "COD_STATEMENT_DETAIL", entity: "COD_BATCH", entityId: result.batchId, detail: { reference: parsed.data.summary.reference, ...result } });
-  revalidate();
-  return { ok: true, matched: result.matched, unmatched: result.unmatched, batchId: result.batchId };
 }
 
 /**
@@ -109,90 +48,6 @@ const listFilesSchema = z
 function readableError(error: unknown, fallback: string) {
   if (error instanceof z.ZodError) return error.issues[0]?.message ?? fallback;
   return error instanceof Error && error.message ? error.message : fallback;
-}
-
-function readOrderListFiles(input: unknown) {
-  const files = listFilesSchema.parse(input);
-  return mergeVtpOrderLists(files.flatMap((file) => {
-    const buffer = Buffer.from(file.base64, "base64");
-    return parseVtpOrderList(/\.(csv|txt|tsv)$/i.test(file.filename) ? buffer.toString("utf8") : buffer);
-  }));
-}
-
-/** Preview và nhập đều đọc lại file gốc trên server, tránh mất mã tham chiếu/cột nguồn khi gửi từ UI. */
-export async function previewVtpOrderListFiles(input: unknown): Promise<Result<{ rows: OrderListMatch[] }>> {
-  const { error } = await authorize();
-  if (error) return { error };
-  try { return { ok: true, rows: await matchVtpOrderList(readOrderListFiles(input)) }; }
-  catch (e) { return { error: readableError(e, "Không đọc được file") }; }
-}
-
-export async function importVtpOrderListFiles(input: unknown): Promise<Result<Awaited<ReturnType<typeof applyVtpOrderList>>>> {
-  const { user, error } = await authorize();
-  if (error) return { error };
-  try {
-    const result = await applyVtpOrderList(readOrderListFiles(input), user.email);
-    revalidate();
-    return { ok: true, ...result };
-  } catch (e) { return { error: readableError(e, "Không nhập được file; hãy xem nhật ký các dòng đã xử lý trước khi thử lại") }; }
-}
-
-/** Đọc nhiều file chi tiết bảng kê; mỗi file được ghép với đợt tiền về bằng SỐ TIỀN. */
-function readDetailFiles(input: unknown) {
-  const files = listFilesSchema.parse(input);
-  return files.map((file) => {
-    const buffer = Buffer.from(file.base64, "base64");
-    const isText = /\.(csv|txt|tsv)$/i.test(file.filename);
-    return { filename: file.filename, rows: parseStatementDetail(isText ? buffer.toString("utf8") : buffer, file.filename) };
-  });
-}
-
-export async function previewVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[] }>> {
-  const { error } = await authorize();
-  if (error) return { error };
-  try {
-    const parsed = readDetailFiles(input);
-    const files: StatementFileMatch[] = [];
-    for (const file of parsed) files.push(await matchStatementFileToBatch(file.filename, file.rows));
-    return { ok: true, files };
-  } catch (e) {
-    return { error: readableError(e, "Không đọc được file") };
-  }
-}
-
-/**
- * Nhập nhiều file chi tiết cùng lúc. File chi tiết là CHỨNG TỪ GỐC nên LUÔN được ghi,
- * kể cả khi chưa có "đợt tiền về" nào khớp số tiền — đợt chỉ là bản tổng hợp nhập tay.
- * Nếu có đợt khớp thì gắn thêm để biết tiền đã về tài khoản theo đợt nào.
- */
-export async function importVtpStatementDetailFiles(input: unknown): Promise<Result<{ files: StatementFileMatch[]; linked: number; withCash: number }>> {
-  const { user, error } = await authorize();
-  if (error) return { error };
-  try {
-    const parsed = readDetailFiles(input);
-    const files: StatementFileMatch[] = [];
-    let linked = 0;
-    let withCash = 0;
-    for (const file of parsed) {
-      const match = await matchStatementFileToBatch(file.filename, file.rows);
-      const result = await applyStatementDetailRows(file.rows, file.filename, match.batchId);
-      linked += result.linked;
-      withCash += result.withCash;
-      files.push({ ...match, matchedShipments: result.linked });
-      await audit({
-        userId: user.id,
-        userEmail: user.email,
-        action: "COD_STATEMENT_DETAIL",
-        entity: "COD_BATCH",
-        entityId: match.batchId ?? file.filename,
-        detail: { filename: file.filename, reference: match.batchReference, linked: result.linked, withCash: result.withCash, period: [match.periodFrom, match.periodTo], unmatchedCodes: match.unmatchedCodes },
-      });
-    }
-    revalidate();
-    return { ok: true, files, linked, withCash };
-  } catch (e) {
-    return { error: readableError(e, "Không nhập được file") };
-  }
 }
 
 /** Nhập tệp Viettel Post từ giao diện. Lõi nằm ở `viettelpost/import-run.ts` để luồng tự động
