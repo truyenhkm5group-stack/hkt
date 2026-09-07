@@ -24,6 +24,7 @@ export const DQ_ISSUES = [
   "status-conflict",
   "unlinked-shipment",
   "return-not-received",
+  "missing-cogs",
 ] as const;
 export type DqIssue = (typeof DQ_ISSUES)[number];
 
@@ -34,6 +35,7 @@ export const DQ_ISSUE_LABEL: Record<DqIssue, string> = {
   "status-conflict": "Đơn có xung đột trạng thái",
   "unlinked-shipment": "Vận đơn chưa ghép được với đơn ERP",
   "return-not-received": "Hàng hoàn chưa xác nhận về kho",
+  "missing-cogs": "Đơn tính giá vốn bằng 0",
 };
 
 export const DQ_ISSUE_HINT: Record<DqIssue, string> = {
@@ -43,6 +45,7 @@ export const DQ_ISSUE_HINT: Record<DqIssue, string> = {
   "status-conflict": "Trạng thái đơn Pancake và trạng thái vận đơn Viettel Post nói hai điều khác nhau.",
   "unlinked-shipment": "Vận đơn có trên Viettel Post nhưng chưa ghép được với đơn nào trong ERP. Không tính vào doanh thu, lợi nhuận, tồn kho, marketing.",
   "return-not-received": "Vận đơn đã hoàn nhưng kho chưa xác nhận nhận được hàng. Số lượng này chưa được cộng lại tồn kho.",
+  "missing-cogs": "Đơn có doanh thu nhưng không mẫu mã nào tra được giá nhập, nên ERP đang tính giá vốn = 0 và lợi nhuận của những đơn này đang cao hơn thực tế. Chữa bằng cách nhập phiếu nhập kho có đơn giá cho các mẫu mã liên quan.",
 };
 
 export const DQ_SHIPMENT_SORTABLE = ["vtpOrderNumber", "stage", "codAmount", "codCollected", "updatedAt"];
