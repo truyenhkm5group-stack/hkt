@@ -2,8 +2,8 @@
  * Gửi đơn landing lên Pancake POS làm đơn nháp (trạng thái Mới) để nhân viên chốt trên POS; lưu id đơn để ERP theo dõi
  * trạng thái giao / hoàn / huỷ qua đồng bộ đơn Pancake. Chấm rủi ro trước khi gửi và ghi vào đơn.
  */
-import { ADDRESS_ISSUE_LABEL, addressIssue, landingShippingFee } from "@/lib/constants/landing";
-import { eq } from "drizzle-orm";
+import { ADDRESS_ISSUE_LABEL, addressIssue, landingShippingFee, pushBlockOf } from "@/lib/constants/landing";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
 import { loadLandingConfig, refreshLandingChecks } from "@/lib/landing/sheet";
@@ -51,4 +51,43 @@ export async function pushLandingToPos(id: string, actor: string): Promise<{ ok:
     await db.update(schema.landingOrders).set({ pushError: message.slice(0, 500), updatedAt: new Date() }).where(eq(schema.landingOrders.id, id));
     return { error: message };
   }
+}
+
+/**
+ * Gửi POS cho MỌI đơn landing đã đủ thông tin mà chưa lên POS.
+ *
+ * Dùng cho job `landing-push` (chạy từ xa) và cho nút gửi hàng loạt trên giao diện — cùng một lối
+ * đi để hai đường không bao giờ áp tiêu chuẩn khác nhau.
+ *
+ * An toàn khi chạy lại: `pushLandingToPos` từ chối đơn đã có `pancakeOrderId`, nên chạy hai lần
+ * không tạo đơn trùng cho khách. Chạy TUẦN TỰ, nghỉ giữa các đơn để không đập vào giới hạn tần
+ * suất của Pancake; một đơn lỗi không làm dừng cả lô.
+ */
+export async function pushAllReadyLanding(actor: string, limit = 200) {
+  const db = await getDb();
+  const rows = await db.query.landingOrders.findMany({
+    where: and(isNull(schema.landingOrders.orderId), isNull(schema.landingOrders.pancakeOrderId), ne(schema.landingOrders.status, "CANCELLED")),
+    columns: { id: true, variantId: true, phone: true, address: true, province: true },
+    orderBy: [asc(schema.landingOrders.submittedAt)],
+    limit: 1000,
+  });
+  const ready = rows.filter((r) => !pushBlockOf(r)).slice(0, limit);
+  const failed: { id: string; error: string }[] = [];
+  let pushed = 0;
+  for (const row of ready) {
+    const r = await pushLandingToPos(row.id, actor);
+    if ("error" in r) failed.push({ id: row.id, error: r.error });
+    else pushed += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return {
+    imported: pushed,
+    skipped: rows.length - ready.length,
+    failed: failed.length,
+    detail: {
+      ungGuiDuoc: ready.length,
+      conVuong: rows.length - ready.length,
+      loi: failed.slice(0, 20),
+    },
+  };
 }

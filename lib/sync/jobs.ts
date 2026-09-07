@@ -16,6 +16,7 @@ import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
+import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
@@ -107,6 +108,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description: "Đọc Google Sheet (CSV export) đơn landing page → theo dõi trạng thái, đánh dấu trùng SĐT, chấm rủi ro hoàn, ghép mẫu mã & đơn Pancake. preview=1 chỉ in tiêu đề + cột đã dò + 5 dòng mẫu; new=1 chỉ nhập dòng mới; recheck=1 tính lại trùng / rủi ro cho mọi dòng.",
     run: async (o) => (o.params?.preview === "1" ? previewSheet() : o.params?.recheck === "1" ? recheckAllLanding(num(o.params?.days) ?? 60) : importLandingSheet({ onlyNew: o.params?.new === "1" })),
+  },
+  "landing-push": {
+    label: "Gửi POS các đơn landing đã đủ thông tin",
+    source: "PANCAKE",
+    description: "Tạo đơn nháp Pancake cho mọi đơn landing chưa lên POS mà đã đủ mẫu mã, SĐT và địa chỉ có tỉnh/thành. Đơn còn vướng bị bỏ qua (xem bộ lọc “Chưa đủ thông tin”). Chạy lại không tạo đơn trùng.",
+    run: (o) => pushAllReadyLanding(o.actor || "job:landing-push", num(o.params?.limit) ?? 200),
   },
   "facebook-ad-index": {
     label: "Tra ad_id đơn Pancake → chiến dịch Facebook",
