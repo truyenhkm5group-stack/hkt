@@ -371,7 +371,23 @@ Hai điểm đáng ghi:
   rồi mới áp 0032–0034. Kết quả giống hệt CSDL dựng mới (36 bảng / 133 index), chạy lại lần hai
   không lỗi.
 
-### Thẩm định sau deploy 08/09/2026 — PRODUCTION CHƯA CHẠY RELEASE
+### Deploy thật + thẩm định — 08/09/2026 (ĐÃ XONG)
+
+Deploy `#151` rồi `#152` qua GitHub API; production chạy `bc00d00aad63` → `b20c0c9a6c64`.
+Migration 0032/0033/0034 áp dụng sạch. Smoke test không có 5xx ngoài ~23 giây thay container.
+
+Ba kết luận:
+1. **Sự cố có từ trước, không do release**: webhook Pancake + Viettel Post bị 401 sai secret từ
+   06/09; 112 lần bị từ chối trong 200 dòng log. Pancake vẫn khoẻ nhờ job kéo mỗi 3 phút, Viettel
+   Post đứng hẳn (0 sự kiện/24h, 179 vận đơn quá 48h không tin mới).
+2. **Chạy thử backfill**: 1.751 vận đơn, 70 sẽ đổi; 17 đơn rời khỏi GIAO THÀNH CÔNG
+   (−10.207.000đ, GTC 35,96% → 34,99%). Cả 17 không có sự kiện 501 nào và không có dòng bảng kê.
+3. **Sổ kho**: 4 mẫu mã âm (−9) vì sổ chỉ có 2 phiếu nhập, sớm nhất 03/09 — thiếu số dư đầu kỳ.
+   Để unresolved, không bù bằng số bịa.
+
+Chi tiết: `docs/erp-release-report.md` mục 10d.
+
+### (lịch sử) Thẩm định trước đó — PRODUCTION CHƯA CHẠY RELEASE
 
 `/api/health` của https://erp.vnxcommerce.com trả `commit: cf909349c250` — commit TRƯỚC release,
 trong khi `origin/main` đã ở `8a8f577e99fe`. `ERP_COMMIT` được `install-vps.sh` ghi đè ở mỗi lần

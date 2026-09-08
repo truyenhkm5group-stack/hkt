@@ -315,6 +315,187 @@ Chạy từng câu qua ops `db-query` (một câu mỗi lần), hoặc chạy c�
 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/prod-readonly-probe.ts
 ```
 
+## 10d. THẨM ĐỊNH SAU DEPLOY THẬT — 08/09/2026
+
+### Deploy
+
+| | |
+|---|---|
+| Lần chạy | *Deploy ERP to VPS* #151, dispatch qua GitHub API từ máy phát triển |
+| Commit | `bc00d00aad63` → sau đó `b20c0c9a6c64` (bản vá guardrail) |
+| Kết quả | mọi bước xanh, kể cả SSH bootstrap và kiểm tra HTTPS |
+| `/api/health` | `{"ok":true,"commit":"bc00d00aad63","branch":"main"}` ⇒ **khớp `origin/main`** |
+| Container | `erp-app` và `erp-scheduler` dựng lại; `erp-db` healthy |
+| Migration | `[migrate] ✓ Migration đã áp dụng xong.` — 0032/0033/0034 áp dụng sạch |
+
+**Vì sao lần "deploy" trước không lên:** lần chạy gần nhất trước đó là #150 lúc `02:13 UTC` trên
+`cf909349c250` — tức deploy của bản CŨ, chạy **trước** khi release được merge. Không có lỗi pipeline
+nào; đơn giản là chưa ai bấm chạy sau khi merge.
+
+**Gián đoạn khi deploy:** Caddy trả 502 trong khoảng `06:15:20–06:15:35 UTC` (~20 giây) khi container
+app bị thay. Trong cửa sổ đó có webhook Pancake bị từ chối. Không mất dữ liệu: job
+`orders_incremental` chạy mỗi 3 phút đã đồng bộ lại ngay lúc `06:16:02`.
+
+### SỰ CỐ CÓ TỪ TRƯỚC: webhook đã chết 2 ngày
+
+Đây là phát hiện quan trọng nhất của đợt thẩm định, và **không phải do release này**.
+
+| Nguồn | Gói tin cuối cùng nhận thành công |
+|---|---|
+| Pancake | `2026-09-06 11:23:16` |
+| Viettel Post | `2026-09-06 11:33:09` |
+
+Cả hai dừng gần như cùng lúc, **hai ngày trước** khi release được deploy. Log ứng dụng cho thấy gói
+tin vẫn đang tới nhưng bị chặn: `[vtp-webhook] 401 sai tham số bí mật` (user-agent `mint/1.9.3`).
+Release **không đụng** vào phần kiểm tra secret — phần tôi sửa nằm sau bước đó.
+
+Hệ quả khác nhau ở hai nguồn:
+
+- **Pancake vẫn khoẻ ở mức dữ liệu** vì có job kéo mỗi 3 phút bù lại: 109 đơn mới trong 24h, đơn
+  mới nhất `06:16:59`, `orders_incremental` SUCCESS liên tục.
+- **Viettel Post đứng hẳn**: 0 sự kiện trong 24h, sự kiện mới nhất từ `2026-09-06 11:32`. Đường bù
+  duy nhất là `tracking_poll` thì trả `PARTIAL` — *"Đã kiểm tra 10 vận đơn · cập nhật 0 · API không
+  thấy 10"*, đúng vấn đề phạm vi tài khoản API đã biết. **379 vận đơn chưa kết thúc, 179 trong đó
+  quá 48h không có tin mới.**
+
+**Bằng chứng cứng:** trong 200 dòng log gần nhất có **112 lần** `POST /api/webhooks/pancake/pk_…`
+bị trả **401**, cộng các dòng `[vtp-webhook] 401 sai tham số bí mật`. Bên gửi vẫn đang thử lại liên
+tục — nghĩa là sửa secret là dữ liệu chảy lại ngay.
+
+Việc cần làm (một thao tác, thuộc về chủ shop vì nằm ở hệ thống bên ngoài): mở ERP → **Kết nối dữ
+liệu**, lấy URL webhook hiện tại của Pancake và Viettel Post, dán lại vào cấu hình bên gửi. Secret
+trên máy chủ và secret bên gửi đang dùng không khớp nhau.
+
+### Smoke test (chưa đăng nhập được — nêu rõ phần nào chưa xác minh)
+
+Môi trường này không có tài khoản ERP nên **không kiểm tra được giao diện sau đăng nhập**. Những gì
+xác minh được:
+
+| Đường dẫn | Mã | Ý nghĩa |
+|---|---|---|
+| `/api/health` | 200 | tiến trình sống, CSDL kết nối được, commit đúng |
+| `/login` | 200 | Next.js dựng trang thật |
+| `/`, `/orders`, `/shipments`, `/cod`, `/reports`, `/reports?tab=truth`, `/data-quality`, `/integrations`, `/inventory`, `/alerts`, `/ads`, `/products`, `/customers` | 307 | middleware chuyển hướng đăng nhập đúng, **không trang nào 5xx** |
+| `/api/notifications` | 401 | chặn đúng khi chưa có phiên |
+| `GET /api/webhooks/viettelpost` | 200 | điểm nhận webhook mở |
+
+Thời gian phản hồi 0,13–0,26 giây.
+
+**Bằng chứng gián tiếp về trang cần đăng nhập:** log sau deploy cho thấy người dùng thật đang dùng
+bản mới — `/landing` trả **200** và `/api/events` (luồng SSE cần phiên đăng nhập) trả **200**. Log
+ứng dụng **không có** lỗi render, `TypeError`, hay `digest` nào.
+
+Toàn bộ 5xx quan sát được (14 lần 502) nằm gọn trong `06:44:30–06:44:53` — đúng ~23 giây container
+bị thay khi deploy bản vá. Sau mốc đó chỉ còn 200/307/401.
+
+### Chạy thử dựng lại lịch sử (DRY RUN — không ghi gì)
+
+Chạy bằng job `canonical-backfill` không truyền `apply`, xong sau 13 giây.
+
+| Chỉ số | Giá trị |
+|---|---|
+| Vận đơn quét | **1.751** |
+| Không đổi | 1.524 |
+| Sẽ đổi | **70** (4,0%) |
+| Không có chứng từ ĐVVC nào | 157 |
+| Mốc thời gian hỏng | 0 |
+| Trạng thái ĐVVC chưa hiểu | **0** |
+| Sự kiện thiếu chuẩn hoá | 0 |
+| Ca nhập nhằng (ghi đã giao, lịch sử không có chứng từ giao) | **10** |
+
+Ma trận chuyển trạng thái:
+
+| Chuyển | Vận đơn | Đơn | Doanh thu lên đơn |
+|---|---|---|---|
+| `RETURNED → RETURNING` | 52 | 52 | 28.224.000đ |
+| `DELIVERED → DELIVERY_FAILED` | 6 | 6 | 3.419.000đ |
+| `DELIVERED → IN_TRANSIT` | 6 | 6 | 3.568.000đ |
+| `DELIVERED → OUT_FOR_DELIVERY` | 3 | 3 | 1.872.000đ |
+| `DELIVERED → RETURNING` | 2 | 2 | 1.348.000đ |
+| `RETURNED → PENDING` | 1 | 1 | 849.000đ |
+
+### Nhóm 17 đơn đang tính GIAO THÀNH CÔNG mà không có chứng từ giao
+
+Đây chính là nhóm mà luật canonical không còn đủ căn cứ để coi là đã giao:
+
+- **0/17 có bất kỳ sự kiện mã 501 nào** của Viettel Post;
+- **0/17 có dòng chứng từ bảng kê** (`cod_statement_lines`);
+- nhưng cả 17 đều có `cod_collected` **bằng đúng** `cod_amount` (499K–998K) và `cod_status = COLLECTED`;
+- tên trạng thái do chính ĐVVC ghi là *"Chờ phát lại"*, *"Đang vận chuyển"*, *"Đang giao hàng"*.
+
+Kiểm chứng bằng `outcome-explain` (công thức thật, không phải suy luận): cả nhóm hiện trả
+`ketQua: DELIVERED`. Nghĩa là **"đã giao" và "đã thu tiền" của nhóm này đến từ khai báo Pancake,
+không có một chứng từ logistics nào**. Đúng loại lỗi mà release này sinh ra để chặn.
+
+Nhắc lại bất biến: COD · payment · reconciliation · paid_to_bank · cash received **KHÔNG** phải
+bằng chứng logistics DELIVERED.
+
+### Tác động KPI dự kiến
+
+| Chỉ số | TRƯỚC | DỰ KIẾN SAU | Thay đổi |
+|---|---|---|---|
+| Giao thành công (đơn) | 424 | **407** | −17 (−4,0%) |
+| Hoàn (đơn) | 755 | **756** | +1 |
+| Đang giao (đơn) | 232 | **248** | +16 |
+| Chưa gửi / Huỷ | 250 / 293 | 250 / 293 | không đổi |
+| **GTC** | **35,96%** | **34,99%** | **−0,97 điểm** |
+| Tỷ lệ hoàn | 64,04% | 65,01% | +0,97 điểm |
+| Doanh thu đơn giao thành công | — | — | **−10.207.000đ** |
+
+Trong 10.207.000đ rời khỏi nhóm giao thành công: 8.859.000đ chuyển sang *đang giao* (còn có thể
+thành công), 1.348.000đ chuyển sang *hoàn*.
+
+**COD / tiền mặt: KHÔNG đổi.** Backfill chỉ dựng lại chiều logistics, không đụng `cod_collected`,
+`cod_status` hay bảng kê — đúng nguyên tắc ba chiều tách bạch.
+
+Mức thay đổi 4% nằm dưới ngưỡng bất thường 20%, và hướng thay đổi là ĐÚNG: nó gỡ bỏ những đơn được
+tính giao thành công mà không có chứng từ nào.
+
+### Khiếm khuyết của chính guardrail — đã phát hiện và sửa trong đợt này
+
+Bản chạy thử đầu tiên trả `deliveredToNotDelivered: 0` và `outcomeAfter` **bằng đúng** `outcomeBefore`.
+Đọc thoáng sẽ kết luận "không có tác động, ghi thật an toàn" — trong khi sự thật là **CHƯA ĐO**:
+kết quả đơn chỉ đổi sau khi trạng thái được ghi lại, mà chạy thử thì cố tình không ghi.
+
+Hậu quả nghiêm trọng: `backfillWarnings()` sinh ra để **chặn** lệnh ghi khi có đơn giao thành công
+bị lật, nhưng nó đọc phải con số 0 giả nên không bao giờ bắn. Đây đúng loại lỗi "chưa biết bị quy
+về 0" mà cả release này sinh ra để chống, và nó nằm ngay trên đường đi của lệnh ghi kế tiếp.
+
+Đã sửa ở `b20c0c9a6c64`: bốn trường trả `null` khi chạy thử, kèm cảnh báo mới. Chạy lại trên
+production sau khi vá:
+
+```
+"warnings": [
+  "Chạy thử KHÔNG đo được tác động lên kết quả đơn (70 vận đơn sẽ đổi trạng thái).
+   Phải đo riêng số đơn lật từ GIAO THÀNH CÔNG sang hoàn trước khi cho ghi.",
+  "10 vận đơn ghi 'đã giao' nhưng lịch sử không có chứng từ giao nào — không tự sửa, phải đối chiếu tay."
+]
+```
+
+Vì có cảnh báo, job `canonical-backfill` nay **từ chối ghi** kể cả khi truyền `apply=1` — phải
+thêm `force=1` một cách tường minh. Guardrail đã đúng.
+
+### Sổ kho
+
+| | |
+|---|---|
+| Mẫu mã tồn âm | **4** (`X001 L` −5, `Q003 XANH XL` −2, `Q003 XANH L` −1, `X001 XL` −1) |
+| Tổng số âm | −9 |
+| Trong đó chưa có phiếu nhập | **0** — cả 4 đều đã có phiếu nhập |
+| Tổng phiếu kho toàn hệ thống | **2** (đều là phiếu NHẬP, phiếu sớm nhất **03/09/2026**) |
+| Mẫu mã có phiếu / tổng | 28 / 38 |
+
+**Nguyên nhân gốc: sổ kho KHÔNG CÓ SỐ DƯ ĐẦU KỲ.** Toàn hệ thống mới có 2 phiếu nhập, sớm nhất
+03/09/2026, trong khi hàng đã được bán và xuất từ trước đó rất lâu. Phương trình
+`tồn = phiếu kho − đã xuất` vì thế trừ một số "đã xuất" tích luỹ nhiều tháng vào một số "đã nhập"
+chỉ bắt đầu từ 03/09 → ra số âm. Ví dụ `X001 L`: nhập 10, đã xuất 15 → −5.
+
+Đây **không phải** lỗi của release: công thức đúng, dữ liệu đầu vào thiếu.
+
+**Chưa xử lý (unresolved) — cố ý.** Cách chữa đúng là kho **kiểm kê thực tế** rồi lập phiếu đầu kỳ
+với số đếm thật. Tôi không tạo phiếu bù cho số khớp: bịa một con số vào sổ kho là đúng loại sai mà
+cả release này sinh ra để chống.
+
 ## 11. Danh sách kiểm tra sau deploy
 
 Mở lần lượt và xác nhận trang lên được, số liệu có nghĩa:
