@@ -34,7 +34,8 @@ export type ReconciliationRuleKey =
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
-  | "COD_OVERDUE_UNPAID";
+  | "COD_OVERDUE_UNPAID"
+  | "EXPENSE_NEEDS_ALLOCATION_REVIEW";
 
 /** Loại đối tượng mà một vi phạm trỏ tới — quyết định drill-down mở trang nào. */
 export type IssueEntity = "shipment" | "order" | "order_item" | "webhook_event" | "shipment_event";
@@ -165,6 +166,17 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
       "Cùng một số điện thoại có nhiều đơn chưa gắn được mã vận đơn, và bằng chứng của ĐVVC không phân biệt được đơn nào ứng với vận đơn nào. Máy CỐ Ý không đoán: gán bừa là bịa ra chứng từ.",
     suggestedAction:
       "Chỉ cần xử lý khi các cách ghép hợp lệ cho ra KẾT QUẢ KHÁC NHAU (ví dụ một vận đơn giao thành công, một vận đơn hoàn). Nếu mọi cách ghép đều cho cùng kết quả thì tổng hợp đã đúng, không cần làm gì.",
+    autoRepair: false,
+  },
+  EXPENSE_NEEDS_ALLOCATION_REVIEW: {
+    key: "EXPENSE_NEEDS_ALLOCATION_REVIEW",
+    entity: "order",
+    severity: "WARNING",
+    label: "Khoản chi theo kỳ chưa khai kỳ hiệu lực",
+    reason:
+      "Thuê mặt bằng, lương và phần mềm là chi phí THEO KỲ. Chưa khai kỳ thì báo cáo buộc phải ghi trọn khoản vào đúng ngày phát sinh, nên lợi nhuận của một tuần hay một khoảng ngắn sẽ sai — hoặc gánh cả tháng, hoặc bằng 0.",
+    suggestedAction:
+      "Mở Chi phí, sửa khoản này và điền kỳ hiệu lực (từ ngày → đến ngày). ERP CỐ Ý không tự đoán kỳ: một khoản phần mềm có thể là tháng, quý hay năm.",
     autoRepair: false,
   },
   ORDER_SHIPMENT_CONFLICT: {

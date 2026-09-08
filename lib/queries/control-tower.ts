@@ -167,6 +167,12 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           -- ORDER_OUTCOME da ket luan HOAN nho chinh van don hoan do.
           and not (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED'
                    and exists (select 1 from shipments leg where leg.order_reference = s.vtp_order_number))`;
+    case "EXPENSE_NEEDS_ALLOCATION_REVIEW":
+      return sql`select x.description as code,
+          x.category::text || ' · ' || x.amount::text || 'đ · ghi ngày ' ||
+            to_char(x.occurred_at at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
+          x.occurred_at as at, x.id as entity_id
+        from expenses x where x.needs_allocation_review = true`;
     case "AMBIGUOUS_ORDER_SHIPMENT_MAPPING":
       // Cùng SĐT, nhiều vận đơn chưa có mã ⇒ bằng chứng của ĐVVC không phân biệt được đơn nào ứng
       // với vận đơn nào. Nêu ra để người xem lại, không để máy đoán.
