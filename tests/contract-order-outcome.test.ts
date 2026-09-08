@@ -112,10 +112,13 @@ export async function testOrderOutcomeContract(db: Db) {
     { shipmentStage: "RETURNED", codCollected: 499_000, codStatus: "PAID_TO_BANK", statementRef: "BK-3", vtpEvents: [{ status: "504", stage: "RETURNED" }] },
     "RETURNED",
   );
+  // Chủ shop chốt 08/09/2026: KHÔNG có dấu vết nào của ĐVVC thì kết quả là CHƯA BIẾT, không phải
+  // "đang giao" — nói "đang giao" là bịa ra một sự kiện vận chuyển chưa từng được chứng minh.
+  // Đặc tả đã sửa tương ứng (mục 2 và bảng chân lý mục 6).
   await check(
-    "Pancake báo đã thanh toán nhưng không có chứng từ ĐVVC thì KHÔNG được kết luận giao thành công",
+    "Pancake báo đã thanh toán, không mã vận đơn, không sự kiện ĐVVC ⇒ CHƯA BIẾT",
     { orderStage: "PAID", shipmentStage: "PENDING", orderCod: 499_000, codStatus: "COLLECTED" },
-    "IN_TRANSIT",
+    "UNKNOWN",
   );
 
   // ───────── Ranh giới tiền, chỉ áp dụng khi ĐÃ giao thật ─────────

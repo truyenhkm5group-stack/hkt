@@ -67,7 +67,7 @@ export const IS_DELIVERED = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
 /** `RETURNED` và `RETURNED_BY_RULE` LUÔN gộp làm một trong mọi tổng hợp (đặc tả mục 6). */
 export const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
 export const IS_CANCELLED = sql`${ORDER_OUTCOME} = 'CANCELLED'`;
-export const IS_OPEN = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED')`;
+export const IS_OPEN = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
 /** Đơn ĐÃ KẾT THÚC — mẫu số của tỷ lệ giao thành công. Đơn huỷ KHÔNG nằm trong mẫu số. */
 export const IS_FINISHED = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 

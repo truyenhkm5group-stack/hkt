@@ -157,6 +157,22 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         where (o.stage in ('DELIVERED','PAID') and s.stage in ('RETURNING','RETURNED'))
            or (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED')
            or (o.stage in ('CANCELLED','DELETED') and s.stage in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))`;
+    case "AMBIGUOUS_ORDER_SHIPMENT_MAPPING":
+      // Cùng SĐT, nhiều vận đơn chưa có mã ⇒ bằng chứng của ĐVVC không phân biệt được đơn nào ứng
+      // với vận đơn nào. Nêu ra để người xem lại, không để máy đoán.
+      return sql`select coalesce(o.custom_id, o.id) as code,
+          'SĐT ' || nhom.sdt || ' có ' || nhom.so_don || ' đơn chưa gắn được mã vận đơn · thu hộ ' || coalesce(s.cod_amount, 0)::text as evidence,
+          s.updated_at as at, s.id as entity_id
+        from shipments s
+        join orders o on o.id = s.order_id
+        join (
+          select right(regexp_replace(coalesce(nullif(sh.receiver_phone, ''), nullif(od.ship_phone, ''), od.bill_phone, ''), '[^0-9]', '', 'g'), 9) as sdt,
+                 count(*) as so_don
+          from shipments sh left join orders od on od.id = sh.order_id
+          where coalesce(nullif(sh.vtp_order_number, ''), nullif(sh.tracking_code, '')) is null and sh.order_id is not null
+          group by 1 having count(*) > 1 and max(right(regexp_replace(coalesce(nullif(sh.receiver_phone, ''), nullif(od.ship_phone, ''), od.bill_phone, ''), '[^0-9]', '', 'g'), 9)) <> ''
+        ) nhom on nhom.sdt = right(regexp_replace(coalesce(nullif(s.receiver_phone, ''), nullif(o.ship_phone, ''), o.bill_phone, ''), '[^0-9]', '', 'g'), 9)
+        where coalesce(nullif(s.vtp_order_number, ''), nullif(s.tracking_code, '')) is null`;
     case "INVENTORY_RETURN_CONFLICT":
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'kho nhận hàng hoàn ' || to_char(s.return_received_at at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') || ' nhưng vận đơn đang ' || s.stage::text as evidence,

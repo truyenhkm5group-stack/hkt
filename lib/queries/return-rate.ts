@@ -179,6 +179,14 @@ const HAS_VTP_EVIDENCE = sql`exists (
 )`;
 
 /**
+ * CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC HAY KHÔNG — mã vận đơn, mã tra cứu, hoặc một sự kiện hành trình.
+ *
+ * Đây là ranh giới giữa "biết gói hàng đang ở đâu đó trong mạng lưới" và "không biết gì cả".
+ * Thiếu cả ba ⇒ chiều logistics là CHƯA BIẾT; tiền và trạng thái Pancake không lấp được chỗ đó.
+ */
+const HAS_CARRIER_LINK = sql`(${s.vtpOrderNumber} is not null or ${s.trackingCode} is not null or ${HAS_VTP_EVIDENCE})`;
+
+/**
  * HÀNG ĐÃ QUAY VỀ SHOP dù Viettel Post ghi "phát thành công".
  *
  * Hai bằng chứng, đều từ chính Viettel Post:
@@ -201,6 +209,16 @@ const GOODS_CAME_BACK = sql`(${HAS_RETURN_LEG} or ${REVENUE_EDITED_AFTER_DELIVER
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
  */
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
+  -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ 'UNKNOWN', KHÔNG PHẢI 'ĐANG GIAO'.
+  --
+  -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của
+  -- Viettel Post: ERP không biết gói hàng ở đâu, thậm chí không biết có gói hàng nào không. Nói
+  -- "đang giao" là bịa ra một sự kiện vận chuyển chưa từng được chứng minh, và nó che mất đúng
+  -- nhóm đơn cần người xem lại. Ca thật: 9 đơn Pancake "Đã nhận" tạo ngày 13/08 và 29/08, khối
+  -- partner rỗng, 0 sự kiện — trước đây rơi vào nhánh 'IN_TRANSIT' cuối cùng.
+  --
+  -- Đơn KHÔNG có dòng vận đơn nào thì không rơi vào đây: s.stage là NULL nên xuống 'NOT_SHIPPED'.
+  when ${s.stage} is not null and not ${HAS_CARRIER_LINK} and ${o.stage} not in ('CANCELLED','DELETED') then 'UNKNOWN'
   when ${VTP_RETURNED} then 'RETURNED'
   when ${VTP_CANCELLED} then 'CANCELLED'
   when ${s.stage} = 'DELIVERED' and ${GOODS_CAME_BACK} then 'RETURNED'
@@ -231,8 +249,9 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
   -- Pancake báo "đã giao" / "đã thanh toán" KHÔNG phải chứng từ giao hàng: đó là trạng thái bán
-  -- hàng, không phải trạng thái vận chuyển. Không có chứng từ ĐVVC thì cao nhất chỉ là ĐANG GIAO.
-  when ${o.stage} in ('DELIVERED','PAID','SHIPPED') then 'IN_TRANSIT'
+  -- hàng, không phải trạng thái vận chuyển. Tới đây là đơn KHÔNG có dòng vận đơn nào: không mã,
+  -- không sự kiện, không gì cả. Không được nói "đang giao" — ERP chưa biết gì về gói hàng này.
+  when ${o.stage} in ('DELIVERED','PAID','SHIPPED') then 'UNKNOWN'
   else 'NOT_SHIPPED' end`;
 
 /**

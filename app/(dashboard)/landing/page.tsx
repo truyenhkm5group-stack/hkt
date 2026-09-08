@@ -16,7 +16,7 @@ import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
-const OUTCOMES: (OrderOutcome | "NONE")[] = ["NONE", "NOT_SHIPPED", "IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"];
+const OUTCOMES: (OrderOutcome | "NONE")[] = ["NONE", "NOT_SHIPPED", "UNKNOWN", "IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"];
 const FLAGS = [
   { value: "DUP", label: "Trùng SĐT" },
   { value: "RISK", label: "Khách rủi ro" },

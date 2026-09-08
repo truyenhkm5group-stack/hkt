@@ -60,7 +60,7 @@ export const TRUTH_DIMENSIONS: Record<TruthDimension, TruthDimensionSpec> = {
     storedAt: "biểu thức ORDER_OUTCOME (lib/queries/return-rate.ts) — không lưu trong bảng",
     sourceOfTruth: "chứng từ logistics của ĐVVC trước, tiền CÓ CHỨNG TỪ sau",
     neverInferFrom: ["trạng thái Pancake", "COD khai báo", "cod_status đơn thuần"],
-    values: ["NOT_SHIPPED", "IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"],
+    values: ["NOT_SHIPPED", "UNKNOWN", "IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"],
   },
   payment_status: {
     key: "payment_status",
@@ -161,6 +161,8 @@ export const OUTCOME_GROUP: Record<OrderOutcome, OutcomeGroup> = {
   RETURNED_BY_RULE: "RETURNED",
   IN_TRANSIT: "OPEN",
   NOT_SHIPPED: "OPEN",
+  // Chưa biết thì CHƯA KẾT THÚC — không được rơi vào mẫu số tỷ lệ giao thành công.
+  UNKNOWN: "OPEN",
   CANCELLED: "CANCELLED",
 };
 

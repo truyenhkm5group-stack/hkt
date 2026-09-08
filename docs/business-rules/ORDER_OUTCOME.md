@@ -23,8 +23,13 @@
 - **Outbound leg / Return leg** — chiều đi tới khách / chiều mang hàng về shop. Viettel Post gửi cờ
   `IS_RETURNING`; ERP lưu ở `shipment_events.leg_type` = `OUTBOUND` | `RETURN`.
 - **Verified money** — tiền CÓ CHỨNG TỪ: số thực thu trên bảng kê COD, hoặc tiền đã về ngân hàng.
-- **Order outcome** — kết luận cuối dùng cho MỌI báo cáo: `NOT_SHIPPED`, `IN_TRANSIT`, `DELIVERED`,
-  `RETURNED`, `RETURNED_BY_RULE`, `CANCELLED`.
+- **Order outcome** — kết luận cuối dùng cho MỌI báo cáo: `NOT_SHIPPED`, `UNKNOWN`, `IN_TRANSIT`,
+  `DELIVERED`, `RETURNED`, `RETURNED_BY_RULE`, `CANCELLED`.
+- **`UNKNOWN`** (chủ shop chốt 08/09/2026) — ERP KHÔNG có bất kỳ dấu vết nào của ĐVVC cho đơn này:
+  không mã vận đơn, không mã tra cứu, không một sự kiện hành trình nào. Tách hẳn khỏi `IN_TRANSIT`
+  vì "đang giao" là một khẳng định về vị trí gói hàng — phải có chứng từ mới nói được. Cũng khác
+  `NOT_SHIPPED`, chỗ đó dành cho đơn chưa hề tạo vận đơn. `UNKNOWN` thuộc nhóm CHƯA KẾT THÚC nên
+  không nằm trong tử số lẫn mẫu số của tỷ lệ giao thành công.
 
 ## 3. Thứ tự nguồn tin (cao xuống thấp)
 
@@ -73,6 +78,7 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 | `DELIVERED` | verified > 100.000 | `DELIVERED` |
 | `DELIVERED` | chưa đủ chứng từ / UNKNOWN / PARTIAL / DISPUTED | `DELIVERED` ở `ORDER_OUTCOME`, **`UNVERIFIED`** ở `ORDER_OUTCOME_VERIFIED` |
 | chỉ Pancake báo PAID / DELIVERED, không có chứng từ ĐVVC | bất kỳ | **không được kết luận `DELIVERED`** |
+| **không có mã vận đơn, không mã tra cứu, không sự kiện ĐVVC** | bất kỳ, kể cả đã thu > 100K | **`UNKNOWN`** — không phải `IN_TRANSIT`, không phải `DELIVERED` |
 
 Ngưỡng đặt tập trung ở `lib/constants/returns.ts` (`maxCodForReturn` 50.000, `maxCodForFakeDelivery`
 100.000). Không hard-code số ở nơi khác.

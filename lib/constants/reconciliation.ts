@@ -31,6 +31,7 @@ export type ReconciliationRuleKey =
   | "INVALID_EVENT_ORDER"
   | "DELIVERED_WITHOUT_DATE"
   | "ORDER_SHIPMENT_CONFLICT"
+  | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
   | "COD_OVERDUE_UNPAID";
@@ -153,6 +154,17 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     reason: "Không có mốc giao thì không tính được thời gian giao vận và không biết bao giờ tới hạn trả tiền.",
     suggestedAction: "Dựng lại mốc từ lịch sử. Nếu lịch sử không có thì để trống — KHÔNG lấy ngày cập nhật của ERP thay vào, đó là bịa mốc.",
     autoRepair: { from: "lịch sử sự kiện Viettel Post (materializeShipmentState)" },
+  },
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: {
+    key: "AMBIGUOUS_ORDER_SHIPMENT_MAPPING",
+    entity: "shipment",
+    severity: "WARNING",
+    label: "Không biết vận đơn nào thuộc đơn nào",
+    reason:
+      "Cùng một số điện thoại có nhiều đơn chưa gắn được mã vận đơn, và bằng chứng của ĐVVC không phân biệt được đơn nào ứng với vận đơn nào. Máy CỐ Ý không đoán: gán bừa là bịa ra chứng từ.",
+    suggestedAction:
+      "Chỉ cần xử lý khi các cách ghép hợp lệ cho ra KẾT QUẢ KHÁC NHAU (ví dụ một vận đơn giao thành công, một vận đơn hoàn). Nếu mọi cách ghép đều cho cùng kết quả thì tổng hợp đã đúng, không cần làm gì.",
+    autoRepair: false,
   },
   ORDER_SHIPMENT_CONFLICT: {
     key: "ORDER_SHIPMENT_CONFLICT",

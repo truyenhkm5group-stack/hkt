@@ -1017,8 +1017,10 @@ async function main() {
       { ...base, id: "collected-100001", collected: 100_001, current: "DELIVERED", proposed: "DELIVERED" },
       // Pancake báo "đã giao"/"đã thanh toán" là trạng thái BÁN HÀNG, không phải chứng từ giao
       // hàng. Không có vận đơn nào thì cao nhất chỉ là ĐANG GIAO — xem docs/business-rules/ORDER_OUTCOME.md.
-      { ...base, id: "no-shipment-delivered", shipmentStage: null, current: "IN_TRANSIT" },
-      { ...base, id: "no-shipment-paid", shipmentStage: null, orderStage: "PAID", current: "IN_TRANSIT" },
+      // Không có dòng vận đơn nào ⇒ ERP không biết gì về chiều giao hàng. "Đã nhận" trên Pancake
+      // không lấp được chỗ đó (bất biến 15).
+      { ...base, id: "no-shipment-delivered", shipmentStage: null, current: "UNKNOWN" },
+      { ...base, id: "no-shipment-paid", shipmentStage: null, orderStage: "PAID", current: "UNKNOWN" },
       ...(["PENDING", "COLLECTED", "RECONCILED", "PAID_TO_BANK", "DISPUTED"] as const).map((codStatus): OutcomeCase => ({
         ...base, id: `transit-${codStatus}`, shipmentStage: "IN_TRANSIT", orderStage: "SHIPPED", codStatus, collected: 100_001,
         // Vận đơn CÒN ĐANG ĐI thì luôn là ĐANG GIAO, kể cả COD đã về ngân hàng. Tiền không bao
@@ -1061,7 +1063,10 @@ async function main() {
       const id = `p0-outcome-${c.id}`;
       await db.insert(schema.orders).values({ id, stage: c.orderStage, cod: c.orderCod, prepaid: c.prepaid, transferMoney: c.transfer, insertedAt: now });
       if (c.shipmentStage) {
-        await db.insert(schema.shipments).values({ orderId: id, stage: c.shipmentStage, codStatus: c.codStatus, codCollected: c.collected, codAmount: c.amount });
+        // Vận đơn CÓ mã: các ca này kiểm tra ngưỡng tiền của một gói hàng ĐÃ qua ĐVVC. Vận đơn
+        // không mã, không sự kiện là chuyện khác hẳn — kết quả của nó là UNKNOWN (bất biến 15).
+        await db.insert(schema.shipments).values({ orderId: id, stage: c.shipmentStage, codStatus: c.codStatus,
+          codCollected: c.collected, codAmount: c.amount, vtpOrderNumber: `P0-${c.id}` });
       }
       const [result] = await db.select({ outcome: ORDER_OUTCOME }).from(schema.orders)
         .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id)).where(eq(schema.orders.id, id));

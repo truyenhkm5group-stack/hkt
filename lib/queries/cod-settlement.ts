@@ -57,6 +57,10 @@ const TINH_TRANG = sql<SettlementStatus>`case
   when coalesce(shipments.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
   when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
   when ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
+  -- CHƯA BIẾT gì về chiều giao hàng thì KHÔNG được ghi thành khoản Viettel Post đang nợ: đòi tiền
+  -- một đơn mà ERP còn không chứng minh được đã gửi đi là tạo ra nợ ảo. Phải nằm TRƯỚC các nhánh
+  -- so tiền, nếu không danh sách theo đơn và số tổng sẽ nói hai điều khác nhau.
+  when ${ORDER_OUTCOME} = 'UNKNOWN' then 'CHUA_GIAO'
   when coalesce(t.cod_tra, 0) >= coalesce(shipments.cod_amount, 0) then 'DA_TRA_DU'
   when coalesce(t.cod_tra, 0) > 0 then 'TRA_THIEU'
   when shipments.stage <> 'DELIVERED' then 'CHUA_GIAO'

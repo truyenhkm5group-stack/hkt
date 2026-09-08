@@ -5,7 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { CARRIER_DOCUMENT_SOURCES, LOGISTICS_DECIDING_SOURCES, LOGISTICS_EVIDENCE_AUTHORITY, SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
+import { CARRIER_DOCUMENT_SOURCES, isFinishedOutcome, LOGISTICS_DECIDING_SOURCES, LOGISTICS_EVIDENCE_AUTHORITY, OUTCOME_GROUP, SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
 import { AUTO_REPAIRABLE_RULES, RECONCILIATION_RULES } from "@/lib/constants/reconciliation";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
@@ -297,7 +297,36 @@ export async function testBusinessInvariants(db: Db) {
     "14. tiền/COD phải mãi mãi ở mức NEVER cho chiều logistics",
   );
 
+  // ══ 15. KHÔNG CÓ CHỨNG TỪ ĐVVC ⇒ CHƯA BIẾT, KHÔNG PHẢI "ĐANG GIAO" ══
+  // Ca thật: 9 đơn Pancake "Đã nhận" ngày 13/08 và 29/08 — khối partner rỗng, không mã vận đơn,
+  // 0 sự kiện. Nói "đang giao" là bịa ra một sự kiện vận chuyển chưa từng được chứng minh, và nó
+  // giấu mất đúng nhóm đơn cần người xem lại.
+  const blindOrder = `inv-order-${++seq}`;
+  await db.insert(schema.orders).values({ id: blindOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  const [blindShip] = await db.insert(schema.shipments).values({
+    orderId: blindOrder, carrier: "Khác",
+    vtpOrderNumber: null, trackingCode: null,           // không một mã nào
+    stage: "DELIVERED", isFinal: true,                   // ảnh chụp cũ do Pancake đặt
+    codAmount: 474_000, codCollected: 474_000, codStatus: "COLLECTED", // và tiền cũng đã bị khai là thu được
+  }).returning({ id: schema.shipments.id });
+  const blindEvents = await db.select().from(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, blindShip.id));
+  assert.equal(blindEvents.length, 0, "15. dựng đúng ca: không có sự kiện nào");
+  const blindOutcome = await outcomeOf(blindOrder);
+  assert.equal(blindOutcome, "UNKNOWN", "15. không mã, không sự kiện ⇒ CHƯA BIẾT");
+  assert.notEqual(blindOutcome, "DELIVERED", "15. trạng thái Pancake + tiền khai KHÔNG tạo ra giao thành công");
+  assert.notEqual(blindOutcome, "IN_TRANSIT", "15. cũng KHÔNG được nói đang giao — không có gì chứng minh gói hàng đang đi");
+  assert.equal(OUTCOME_GROUP.UNKNOWN, "OPEN", "15. chưa biết là CHƯA KẾT THÚC, không vào tử số lẫn mẫu số GTC");
+  assert.equal(isFinishedOutcome("UNKNOWN"), false, "15. chưa biết thì chưa kết thúc");
+  // Vẫn là 'đang giao' khi CÓ chứng từ thật của ĐVVC — nhánh IN_TRANSIT không bị xoá, chỉ bị siết.
+  const movingCode = nextCode();
+  await applyVtpTracking(trackingPayload(movingCode, 400, "Đang vận chuyển", "05/09/2026 08:00:00"), "VTP_WEBHOOK", { allowCreate: true });
+  const [movingShip] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, movingCode));
+  const movingOrder = `inv-order-${++seq}`;
+  await db.insert(schema.orders).values({ id: movingOrder, stage: "SHIPPED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.update(schema.shipments).set({ orderId: movingOrder }).where(eq(schema.shipments.id, movingShip.id));
+  assert.equal(await outcomeOf(movingOrder), "IN_TRANSIT", "15. có chứng từ ĐVVC thì ĐANG GIAO vẫn dùng được");
+
   console.log(
-    `✓ Bất biến nghiệp vụ: 14/14 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản)`,
+    `✓ Bất biến nghiệp vụ: 15/15 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao')`,
   );
 }

@@ -117,7 +117,7 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
 
   const sampleOf = (rows: { code: string }[]) => rows.map((r) => r.code);
 
-  const [drift, codNotApplicable, paymentConflict, codConflict, orderNoShipment, shipmentNoOrder, duplicateTracking, stale, unknownStatus, invalidOrder, deliveredNoDate, orderShipmentConflict, inventoryConflict, failedEvents, codOverdue] =
+  const [drift, codNotApplicable, paymentConflict, codConflict, orderNoShipment, shipmentNoOrder, duplicateTracking, stale, unknownStatus, invalidOrder, deliveredNoDate, orderShipmentConflict, inventoryConflict, failedEvents, codOverdue, ambiguousMapping] =
     await Promise.all([
       db.select({ code }).from(s).where(withScope(STATE_DRIFT)).limit(500),
       db.select({ code }).from(s).where(withScope(sql`${s.codStatus} = 'NOT_APPLICABLE' and coalesce(${s.codAmount}, 0) > 0`)).limit(500),
@@ -214,7 +214,33 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
           ),
         )
         .limit(500),
+      /**
+       * HÀNG ĐỢI RÀ SOÁT THỦ CÔNG: cùng một số điện thoại có NHIỀU vận đơn chưa gắn được mã.
+       *
+       * Bằng chứng của ĐVVC (tên + SĐT người nhận + tiền thu hộ) không đủ phân biệt đơn nào ứng
+       * với vận đơn nào, nên bộ ghép cố ý từ chối gán. Nêu ra đây để người xem lại quyết định —
+       * không bao giờ để máy đoán.
+       */
+      db.execute(sql`
+        select coalesce(t.ma_don, '') as code from (
+          select right(regexp_replace(coalesce(nullif(sh.receiver_phone, ''), nullif(od.ship_phone, ''), od.bill_phone, ''), '[^0-9]', '', 'g'), 9) as sdt,
+                 coalesce(od.custom_id, od.id) as ma_don
+          from shipments sh
+          left join orders od on od.id = sh.order_id
+          where coalesce(nullif(sh.vtp_order_number, ''), nullif(sh.tracking_code, '')) is null
+            and sh.order_id is not null
+        ) t
+        where t.sdt <> '' and t.sdt in (
+          select right(regexp_replace(coalesce(nullif(sh2.receiver_phone, ''), nullif(od2.ship_phone, ''), od2.bill_phone, ''), '[^0-9]', '', 'g'), 9)
+          from shipments sh2 left join orders od2 on od2.id = sh2.order_id
+          where coalesce(nullif(sh2.vtp_order_number, ''), nullif(sh2.tracking_code, '')) is null and sh2.order_id is not null
+          group by 1 having count(*) > 1
+        )
+        limit 500`),
     ]);
+
+  /** `db.execute` trả mảng (PGlite) hoặc `{ rows }` (node-postgres) — chuẩn hoá trước khi dùng. */
+  const ambiguousRows = (Array.isArray(ambiguousMapping) ? ambiguousMapping : ((ambiguousMapping as { rows?: unknown })?.rows ?? [])) as { code: string }[];
 
   const all: ReconciliationIssue[] = [
     issueOf("SHIPMENT_STATE_DRIFT", drift.length, sampleOf(drift)),
@@ -229,6 +255,7 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
     issueOf("INVALID_EVENT_ORDER", invalidOrder.length, sampleOf(invalidOrder)),
     issueOf("DELIVERED_WITHOUT_DATE", deliveredNoDate.length, sampleOf(deliveredNoDate)),
     issueOf("ORDER_SHIPMENT_CONFLICT", orderShipmentConflict.length, sampleOf(orderShipmentConflict)),
+    issueOf("AMBIGUOUS_ORDER_SHIPMENT_MAPPING", ambiguousRows.length, sampleOf(ambiguousRows)),
     issueOf("INVENTORY_RETURN_CONFLICT", inventoryConflict.length, sampleOf(inventoryConflict)),
     issueOf("FAILED_EVENT_PROCESSING", failedEvents.length, sampleOf(failedEvents)),
     issueOf("COD_OVERDUE_UNPAID", codOverdue.length, sampleOf(codOverdue)),

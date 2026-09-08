@@ -229,7 +229,7 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
       .groupBy(sql`1`);
     const byStatus: Record<LandingStatus, number> = { NEW: 0, CONFIRMED: 0, PUSHED: 0, CANCELLED: 0 };
     for (const r of statusRows) byStatus[r.status as LandingStatus] = Number(r.n);
-    const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };
+    const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, UNKNOWN: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };
     for (const r of outcomeRows) byOutcome[r.oc as OrderOutcome | "NONE"] = Number(r.n);
     return { total: Number(row?.total ?? 0), byStatus, byOutcome, duplicates: Number(row?.duplicates ?? 0), risky: Number(row?.risky ?? 0), noVariant: Number(row?.noVariant ?? 0), pushErrors: Number(row?.pushErrors ?? 0),
       missingInfo: Number(row?.missingInfo ?? 0), lastImportAt: row?.lastImportAt ? new Date(row.lastImportAt) : null };

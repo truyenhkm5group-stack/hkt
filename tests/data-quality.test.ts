@@ -80,7 +80,7 @@ export async function testDataQuality(db: Db) {
   // Pancake khai "đã thanh toán" mà không có vận đơn và không có tiền → chưa xác minh, KHÔNG phải doanh thu.
   await db.insert(schema.orders).values({ id: "dq-declared-only", systemId: 970003, stage: "PAID", status: 0, insertedAt: new Date(), cod: 499000, totalPriceAfterDiscount: 499000 });
   const declaredOnly = await outcomes(db, "dq-declared-only");
-  assert.equal(declaredOnly.legacy, "IN_TRANSIT", "Pancake khai đã thanh toán KHÔNG phải chứng từ giao hàng — không có vận đơn thì cao nhất là ĐANG GIAO");
+  assert.equal(declaredOnly.legacy, "UNKNOWN", "Pancake khai đã thanh toán KHÔNG phải chứng từ giao hàng — không có vận đơn thì kết quả là CHƯA BIẾT, không phải ĐANG GIAO");
   assert.equal(declaredOnly.verified, "UNVERIFIED", "Pancake khai suông không phải bằng chứng tiền");
 
   // ───────── 3. KPI tổng hợp + không bao giờ đổi UNKNOWN thành 0 ─────────
@@ -137,7 +137,8 @@ export async function testDataQuality(db: Db) {
   const [after] = await db.select({ by: schema.shipments.returnReceivedBy }).from(schema.shipments).where(eq(schema.shipments.id, target.id));
   assert.equal(after.by, "test-kho", "giữ nguyên người xác nhận lần đầu");
   assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đã nhận thì rời khỏi danh sách chờ");
-
+
+
   // ───────── Giá vốn KHÔNG BIẾT không được coi là 0 ─────────
   // ORDER_COGS tra phiếu nhập → giá vốn Pancake → giá nhập mẫu mã. Hết cả ba mà ra 0 nghĩa là
   // chưa biết, không phải hàng không tốn vốn — lợi nhuận của những đơn này đang cao hơn thực tế.

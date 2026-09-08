@@ -20,10 +20,16 @@ export const RETURN_RULE = {
   maxCodForReturn: 50_000,
 };
 
-export type OrderOutcome = "NOT_SHIPPED" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
+/**
+ * `UNKNOWN` = ERP KHÔNG có bất kỳ dấu vết nào của ĐVVC cho vận đơn này (không mã, không sự kiện).
+ * Cố ý tách khỏi `IN_TRANSIT`: "đang giao" là một khẳng định về vị trí gói hàng, phải có chứng từ
+ * mới nói được. Cũng khác `NOT_SHIPPED` — chỗ đó là đơn chưa hề tạo vận đơn.
+ */
+export type OrderOutcome = "NOT_SHIPPED" | "UNKNOWN" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
 
 export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "Chưa gửi",
+  UNKNOWN: "Chưa có chứng từ ĐVVC",
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công (thu > 100K)",
   RETURNED: "Hoàn · hàng về kho (thu < 50K)",
@@ -33,6 +39,7 @@ export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
 
 export const OUTCOME_TONE: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "bg-muted text-muted-foreground",
+  UNKNOWN: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
   IN_TRANSIT: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   DELIVERED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
   RETURNED: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
