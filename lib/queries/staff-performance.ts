@@ -90,7 +90,6 @@ export async function getStaffPerformance(period: Period, field: AttributionFiel
   const who = columnFor(field);
   const from = period.from ? sql`${o.insertedAt} >= ${period.from.toISOString()}::timestamptz` : sql`true`;
   const to = period.to ? sql`${o.insertedAt} <= ${period.to.toISOString()}::timestamptz` : sql`true`;
-  const finished = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
   const isDelivered = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
   const isReturned = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
 
