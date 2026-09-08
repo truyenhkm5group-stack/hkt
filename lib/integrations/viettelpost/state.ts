@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import type { ShipmentStage } from "@/db/schema";
+import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { VTP_FINAL_STATUSES } from "@/lib/constants/viettelpost";
 import { eventStatusCode, resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
@@ -51,9 +52,9 @@ export type DerivedState = {
  *
  * Sự kiện Pancake vẫn được giữ nguyên trong lịch sử để tra cứu, chỉ không được quyền kết luận.
  */
-const CARRIER_SOURCES = new Set(["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL"]);
+const CARRIER_SOURCES = new Set<string>(CARRIER_EVENT_SOURCES);
 
-export const CARRIER_EVENT_SOURCES = [...CARRIER_SOURCES];
+export { CARRIER_EVENT_SOURCES };
 
 /** Nguồn nào đáng tin hơn khi hai sự kiện cùng mốc thời gian. Cao hơn = thắng. */
 const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15 };

@@ -1,10 +1,15 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
+import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
+
+/** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
+const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
+const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -45,7 +50,7 @@ const PREPAID = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)
 const VTP_FINAL_EVENT = (codes: string, leg?: "OUTBOUND" | "RETURN") => sql`exists (
   select 1 from shipment_events fe
   where fe.shipment_id = ${s.id}
-    and fe.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT')
+    and fe.source in (${sql.raw(DOC_SOURCES)})
     and fe.status in (${sql.raw(codes)})
     ${leg ? sql`and fe.leg_type = ${leg}` : sql``}
 )`;
@@ -169,7 +174,7 @@ export const IS_PROVISIONAL = sql`(${s.id} is not null and ${s.stage} = 'DELIVER
 const HAS_VTP_EVIDENCE = sql`exists (
   select 1 from shipment_events ev
   where ev.shipment_id = ${s.id}
-    and ev.source in ('VTP_WEBHOOK','VTP_IMPORT','VTP_POLL','MANUAL')
+    and ev.source in (${sql.raw(EVENT_SOURCES)})
     and ev.normalized_stage is not null
 )`;
 

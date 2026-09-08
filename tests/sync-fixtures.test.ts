@@ -12,6 +12,7 @@ import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcross
 import { testVtpHealth } from "./vtp-health.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
+import { testCanonicalTruth } from "./canonical-truth.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1067,6 +1068,7 @@ async function main() {
   }
 
   await testOrderOutcomeContract(db);
+  await testCanonicalTruth(db);
   await testDataQuality(db);
   await testConsistency(db);
   await testInventory(db);

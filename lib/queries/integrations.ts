@@ -1,6 +1,9 @@
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { RUN_STATUS_LABEL, SYNC_SOURCE_LABEL, SYNC_STATUS_ORDER, WEBHOOK_EVENT_LABEL, WEBHOOK_STATUS_ORDER } from "@/lib/constants/sync";
+import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+
+const DOC_SOURCES = sqlSourceList(CARRIER_DOCUMENT_SOURCES);
 import type { ListParams } from "@/lib/search-params";
 
 export const SYNC_RUN_SORTABLE = ["startedAt", "finishedAt", "status", "source"];
@@ -132,11 +135,11 @@ export async function viettelPostHealth() {
         sql`exists (
           select 1 from shipment_events ev
           where ev.shipment_id = ${schema.shipments.id}
-            and ev.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT')
+            and ev.source in (${sql.raw(DOC_SOURCES)})
             and ev.normalized_stage is not null
             and ev.occurred_at = (
               select max(e2.occurred_at) from shipment_events e2
-              where e2.shipment_id = ${schema.shipments.id} and e2.source in ('VTP_WEBHOOK','VTP_POLL','VTP_IMPORT') and e2.normalized_stage is not null
+              where e2.shipment_id = ${schema.shipments.id} and e2.source in (${sql.raw(DOC_SOURCES)}) and e2.normalized_stage is not null
             )
             and ev.normalized_stage <> ${schema.shipments.stage}
         )`,

@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
+import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
+
+const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
 /**
  * HIỆU SUẤT GIAO VẬN TÍNH TỪ HÀNH TRÌNH, KHÔNG TỪ TRẠNG THÁI HIỆN TẠI.
@@ -72,7 +75,7 @@ export async function logisticsPerformance(period: Period): Promise<LogisticsPer
           min(e.occurred_at) filter (where e.normalized_stage = 'RETURNED') as returned_at,
           max(e.occurred_at) as last_event_at
         from shipment_events e
-        where e.source in ('VTP_WEBHOOK','VTP_IMPORT','VTP_POLL','MANUAL') and e.normalized_stage is not null
+        where e.source in (${sql.raw(EVENT_SOURCES)}) and e.normalized_stage is not null
         group by e.shipment_id
       ),
       base as (

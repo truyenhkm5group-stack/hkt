@@ -10,7 +10,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | Task | Nội dung | Trạng thái | Commit |
 |---|---|---|---|
 | 1 | Kiểm toán kiến trúc & data truth | ✅ xong | `docs: audit ERP data truth architecture` |
-| 2 | Chuẩn hoá lớp chân lý nghiệp vụ | ⏳ | |
+| 2 | Chuẩn hoá lớp chân lý nghiệp vụ | ✅ xong | `feat: centralize canonical order shipment payment truth` |
 | 3 | Cứng hoá nạp dữ liệu Viettel Post | ⏳ | |
 | 4 | Bộ máy đối soát | ⏳ | |
 | 5 | Lớp chân lý chỉ số | ⏳ | |
@@ -47,6 +47,27 @@ Cả hai sẽ được sửa ở TASK 4 (bộ máy đối soát).
 
 Nền đo được trước khi sửa: `typecheck` sạch · `lint` sạch · `npm test` **TẤT CẢ KIỂM THỬ ĐẠT**.
 
+### TASK 2 — Lớp chân lý nghiệp vụ
+
+Thêm `lib/constants/truth.ts`: bảng đăng ký năm chiều (`TRUTH_DIMENSIONS`) nêu rõ với mỗi chiều
+câu hỏi nó trả lời, nơi lưu, nguồn sự thật và danh sách **cấm suy ra từ**. Không có công thức mới:
+`ORDER_OUTCOME` vẫn là bản duy nhất ở `lib/queries/return-rate.ts`.
+
+Gộp các danh sách nguồn sự kiện vốn bị chép cứng ở 4 tệp thành hai hằng số có ý nghĩa khác nhau:
+
+- `CARRIER_EVENT_SOURCES` (có `MANUAL`) — được quyền dựng trạng thái vận đơn;
+- `CARRIER_DOCUMENT_SOURCES` (không có `MANUAL`) — chứng từ máy, chỉ nhóm này được đọc mã cuối.
+
+`state.ts`, `return-rate.ts`, `integrations.ts`, `logistics.ts` nay đọc chung hai hằng số đó.
+
+Thêm `OUTCOME_GROUP` / `isFinishedOutcome()` để màn hình thôi liệt kê tay
+`('RETURNED','RETURNED_BY_RULE')`, và `legTypeFromReturningFlag()` cho cờ `IS_RETURNING`.
+
+`tests/canonical-truth.test.ts` khoá đủ 8 tình huống kế hoạch yêu cầu, cộng kiểm tra bảng đăng ký
+khớp enum trong schema.
+
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
-*(chưa có)*
+- `npm run lint` có sẵn 3 cảnh báo từ trước release này (0 lỗi):
+  `production-editor.tsx` biến `matrixTotals` không dùng · `lib/cs/failed-delivery.ts:205` biểu thức
+  không gán · `lib/landing/sheet.ts` `fetchJson` không dùng.
