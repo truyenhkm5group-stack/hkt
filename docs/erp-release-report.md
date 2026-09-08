@@ -1272,3 +1272,148 @@ kết cục cần đạt.
 
 Nếu deploy trước khi nhập tệp thì trong khoảng thời gian chờ, 9 đơn sẽ hiện *chưa kết luận* — không
 sai, nhưng khó chịu và không cần thiết.
+
+## 10l. ĐỐI SOÁT LỊCH SỬ SAU KHI NHẬP TỆP — 08/09/2026
+
+### Tệp thật sự đã nhập những gì
+
+Bốn tệp `ORDER_LIST` đang lưu trên máy chủ. Đọc **tiêu đề do chính Viettel Post in trong tệp**:
+
+| Tệp | Dòng | Khoảng ngày ghi trong tệp | Ngày xuất |
+|---|---|---|---|
+| `VTP_danh_sach_van_don_T8.xlsx` (357 KB) | 1448 | **01/08/2026 → 31/08/2026** | 06/09/2026 |
+| `VTP_danh_sach_van_don_01-05_09_2026.xlsx` | — | 01–05/09 | 06/09/2026 |
+| `VTP_danh_sach_van_don_06_09_2026.xlsx` | — | 06/09 | 06/09/2026 |
+| **`VTP_danh_sach_van_don_08_09_2026 16_23_42.xlsx`** (46 KB) | **157** | **07/09/2026 → 08/09/2026** | 08/09/2026 |
+
+**Tệp vừa xuất chỉ chứa 07/09–08/09, không phải 01/08–08/09.** Bộ lọc ngày trên web không được áp
+vào lần xuất đó. Tệp tự khai điều này ở dòng 4, nên không cần suy đoán.
+
+Tệp **tháng 8 đã có sẵn** từ 06/09 và đã được nhập ba lần hôm đó.
+
+### Kết quả hai lần nhập hôm nay
+
+| Lúc | Tệp | total | matched | updated | linked | **conflicts** | duplicate | unknown | unmatched |
+|---|---|---|---|---|---|---|---|---|---|
+| 06/09 19:01 | 3 tệp (có T8) | 1597 | 1560 | 69 | **69** | 10 | 1491 | 0 | 37 |
+| 06/09 19:02 | 3 tệp (có T8) | 1597 | 1572 | 0 | 0 | 10 | 1560 | 0 | 25 |
+| **08/09 09:22** | **3 tệp (có T8)** | 1597 | 1572 | **0** | **0** | **1582** | **0** | 0 | 25 |
+| 08/09 09:23 | tệp 07–08/09 | 148 | 148 | 47 | 0 | 0 | 0 | 94 | 0 |
+
+Lần nhập 09:22 **ghi được 0 dòng**: 1582/1597 dòng bị xếp là *xung đột*, trong khi cùng bộ tệp đó
+hôm 06/09 chỉ có 10. Số `duplicate` sụp từ 1560 xuống 0 — dấu hiệu rõ ràng của một hồi quy.
+
+### LỖI 1 — đổi hình dạng `snapshot` biến mọi dòng đã nhập thành “xung đột”
+
+`applyVtpOrderList()` nhận diện dòng đã nhập bằng cách so **toàn bộ** khoá của `snapshot` với
+`snapshot` đã lưu trong `shipment_events.raw`:
+
+```ts
+return previous?.snapshot && Object.keys(snapshot).every(
+  (key) => previous.snapshot![key] === snapshot[key]) ? "duplicate" : "conflict";
+```
+
+Các bản phát hành sau đã **thêm khoá** vào `snapshot` (`codPaymentText`, `paymentText`,
+`codReconciliationText`, `returnFlag`, `forwardFlag`). Sự kiện ghi từ 06/09 không có những khoá đó,
+nên `undefined === ""` cho **false** → dòng bị coi là *đã đổi* → **`return "conflict"` ngay lập tức**,
+không ghi sự kiện, không cập nhật, không gọi `materializeShipmentState()`.
+
+Hệ quả: **không thể nhập lại bất kỳ tệp nào đã từng nhập trước lần đổi hình dạng đó.** Sổ
+`disposition` trong `shipment_events` xác nhận: 1595 `applied`, 31 `stale`, **0 `conflict`** — tức
+1582 “xung đột” kia chưa từng để lại dấu vết nào, chúng bị chặn ở cửa.
+
+**Cách sửa:** chỉ so các khoá **có mặt ở cả hai bên**, hoặc gắn phiên bản cho `snapshot` và coi
+khoá thiếu là “không có thông tin” thay vì “khác nhau”. Khoá mới xuất hiện không phải là bằng chứng
+dữ liệu đã đổi.
+
+### LỖI 2 — một dòng bị loại khỏi bước ghép theo SĐT chỉ vì cột “Mã đơn hàng” trùng nơi khác
+
+Tập cần ghép theo SĐT được dựng như sau:
+
+```ts
+rows.filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(r.trackingCode) && !byCode.has(r.orderCode))
+```
+
+Điều kiện `!byCode.has(r.orderCode)` loại dòng ra **dù chính mã vận đơn của nó chưa ghép được**.
+
+Ca chứng minh: `PKE1508295104` (SĐT 0985222958, COD 849.000, *Shop hủy lấy*). Mã vận đơn không có
+trong ERP, nhưng cột *Mã đơn hàng* của nó là `PKE10911261809` — và giá trị đó **đang là
+`tracking_code` của vận đơn khác** (đơn 3176). Vì vậy dòng bị loại khỏi `needPhone`, bản đồ SĐT
+không bao giờ được dựng cho số máy đó, và dòng **âm thầm thành “không ghép được”** — dù đơn 3181 là
+ứng viên **duy nhất** mang đúng SĐT và đúng COD 849.000.
+
+**Cách sửa:** chỉ loại khi `orderCode` ghép được **đúng vận đơn mà dòng này đang nói tới**; còn lại
+vẫn cho vào bước SĐT — mã vẫn được ưu tiên hơn SĐT ở bước quyết định nên không mất tính chặt chẽ.
+
+### Vì sao 13 vận đơn còn lại không thể ghép — và đó là hành vi ĐÚNG
+
+Toàn ERP chỉ còn **13 vận đơn chưa có mã**, nhóm theo SĐT:
+
+| SĐT | Số vận đơn chưa mã | Các mức COD | Các đơn |
+|---|---|---|---|
+| 979936889 | **4** | 474.000 (cả bốn) | 2350, 2372, 2413, 2416 |
+| 896997119 | **2** | 474.000 (cả hai) | 2359, 2370 |
+| 909728879 | **2** | 474.000 (cả hai) | 2360, 2371 |
+| 977870669 | 2 | 400.000 (cả hai) | 2414, 2417 |
+| 345222695 | 2 | 399.000 · 474.000 | 2357, 2393 |
+| 985222958 | 1 | 849.000 | 3181 |
+
+Bộ ghép thu hẹp theo SĐT rồi theo **COD trùng khít**; còn nhiều hơn một ứng viên thì **từ chối gán**
+và ghi *“SĐT … có N vận đơn chưa có mã; cần đối chiếu”*. Với ba số máy đầu (4/2/2 vận đơn **cùng
+một mức COD**) thì bằng chứng thật sự không phân biệt được — máy từ chối là đúng, không phải lỗi.
+
+Hai số máy còn phân biệt được (345222695 có hai mức COD khác nhau; 985222958 chỉ có một ứng viên)
+lẽ ra phải ghép được. 985222958 trượt vì **LỖI 2**. 345222695 chưa xác định được nguyên nhân bằng
+dữ liệu hiện có — cần một lần chạy thử có ghi nhật ký từng dòng để chốt.
+
+### Hình mẫu “huỷ rồi tạo lại” — bộ ghép hiện tại xử lý sai thứ tự
+
+Vòng lặp áp dụng sắp xếp **theo mã vận đơn tăng dần**:
+
+```ts
+for (const m of [...matches].sort((a, b) => a.trackingCode.localeCompare(b.trackingCode)))
+```
+
+Mã tạo trước thì nhỏ hơn, nên **vận đơn BỊ HUỶ luôn được xử lý trước vận đơn thay thế**. Khi hai
+dòng cùng ghép về một vận đơn ERP chưa có mã, dòng huỷ chiếm chỗ và dòng *Giao thành công* rơi vào
+nhánh `current.vtpOrderNumber` đã có → `"conflict"`. Đúng cái bẫy chủ shop cảnh báo: **lấy lần gửi
+đầu bị huỷ làm kết quả cuối**.
+
+**Cách sửa:** khi nhiều dòng cùng ghép về một vận đơn theo SĐT, xếp theo **thứ tự thời gian của lần
+gửi** (`Ngày tạo`) và ưu tiên dòng **chưa kết thúc bằng huỷ**; hoặc tốt hơn: tạo **một dòng
+`shipments` cho mỗi lần gửi**, giữ nguyên chuỗi *attempt #1 → #2*, thay vì ép nhiều lần gửi vào một
+vận đơn.
+
+### Tệp CÓ đủ dữ liệu cần thiết
+
+Tiêu đề cột của tệp (dòng 8) xác nhận tệp mang đúng những trường mà webhook thiếu:
+
+`Mã Vận Đơn` · `Mã đơn hàng` · **`Ngày tạo`** · `Người nhận` · `Địa chỉ nhận` · **`ĐT Nhận`** ·
+`Tiền thu hộ` · `Trạng Thái` · `Lý do` · `Trạng thái đối soát COD` · `Đơn chuyển hoàn` ·
+`Ngày chuyển trạng thái` · `Tài khoản tạo đơn`
+
+Có **SĐT người nhận**, có **ngày tạo vận đơn** (để dựng chuỗi lần gửi), có **lý do** và **cờ chuyển
+hoàn**. Đủ để làm đối soát lịch sử — vấn đề nằm ở ba lỗi trên, không ở dữ liệu.
+
+### Chạy thử canonical sau khi nhập
+
+| | Trước (08/09 sáng) | Sau khi nhập |
+|---|---|---|
+| Vận đơn quét | 1751 | **1757** (+6 vận đơn chiều hoàn) |
+| Không đổi | 1524 | 1578 |
+| Sẽ đổi | 70 | **70** |
+| Thiếu bằng chứng | 157 | **109** (−48) |
+| Xung đột | 10 | 9 |
+
+Phân bố kết quả đơn hiện tại (`outcomeBefore`): `DELIVERED` **421** · `RETURNED` **767** ·
+`IN_TRANSIT` 223 · `NOT_SHIPPED` 250 · `CANCELLED` 293 · `RETURNED_BY_RULE` 0.
+
+Bảy mươi vận đơn sẽ đổi trạng thái, trong đó **17 rời khỏi DELIVERED** (6 → `IN_TRANSIT`,
+6 → `DELIVERY_FAILED`, 3 → `OUT_FOR_DELIVERY`, 2 → `RETURNING`) và 53 dịch chuyển trong nhóm hoàn.
+`outcomeAfter` vẫn trả **`null`** — theo đúng thiết kế, chạy thử **không đo** được tác động lên kết
+quả đơn, nên **không có** con số doanh thu/GTC dự phóng nào được đưa ra ở đây.
+
+### Chín đơn: chưa đơn nào được giải quyết
+
+Cả 9 vẫn `(CHƯA CÓ MÃ)`, `vtp_status_date` rỗng, `cod_collected = 0`. Ước tính cũ (**−9 đơn ·
+−4.566.000đ**) **giữ nguyên**, vì lần nhập không ghi được gì cho tháng 8.
