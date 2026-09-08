@@ -227,6 +227,94 @@ workflow** → nhánh `main` → để `reset_env` = false → Run.
 Workflow tự chạy `tsc --noEmit` và `npm test` TRƯỚC khi đụng tới máy chủ; contract test đỏ thì
 deploy dừng. Cả hai vừa xanh trên chính `main` sau khi merge.
 
+## 10c. THẨM ĐỊNH SAU DEPLOY — 08/09/2026
+
+### Kết quả: production CHƯA chạy release này
+
+| | |
+|---|---|
+| Thời điểm kiểm tra | 2026-09-08 05:56 UTC (12:56 giờ VN) |
+| Địa chỉ | https://erp.vnxcommerce.com |
+| `/api/health` | `{"ok":true,"commit":"cf909349c250","branch":"main"}` |
+| Commit production đang chạy | **`cf909349c250`** — commit TRƯỚC release |
+| Commit đáng lẽ phải chạy | `8a8f577e99fe` (`origin/main`), merge release `adff4611ba16` |
+
+**Vì sao con số này đáng tin.** `ERP_COMMIT` không phải giá trị nướng sẵn lúc build. Luồng deploy là:
+`bootstrap.sh` chạy `git fetch origin` rồi `git checkout -B main origin/main` (đặt thẳng về commit
+của remote), sau đó `install-vps.sh` mới đọc `git rev-parse HEAD` và **ghi đè** `ERP_COMMIT` +
+`ERP_BRANCH_NAME` vào `.env` ở MỖI lần chạy. Vậy nên giá trị `/api/health` trả về chính là commit
+mà máy chủ đã checkout ở lần deploy **hoàn tất** gần nhất.
+
+Cả `ERP_COMMIT` lẫn `ERP_BRANCH_NAME` đều nói `main@cf909349c250` ⇒ lần `install-vps.sh` chạy xong
+gần nhất là bản deploy của release TRƯỚC. Bản deploy mới **chưa chạy tới bước đó**.
+
+Đã gọi `/api/health` hai lần cách nhau ~80 giây, mốc `time` đổi theo thời gian thực và không có
+header cache ⇒ không phải phản hồi cũ được lưu đệm.
+
+### Ứng dụng vẫn khoẻ (bản cũ)
+
+| Kiểm tra | Kết quả |
+|---|---|
+| `/api/health` | HTTP 200, `ok: true` ⇒ tiến trình sống, CSDL kết nối được |
+| `/login` | HTTP 200 |
+| `/`, `/orders`, `/data-quality`, `/alerts` | HTTP 307 → chuyển hướng đăng nhập (đúng, không có phiên) |
+| `GET /api/webhooks/viettelpost` | HTTP 200 ⇒ điểm nhận webhook vẫn mở |
+
+### Cổng deploy KHÔNG phải nguyên nhân
+
+Chạy lại đúng ba bước cổng của workflow trên chính `8a8f577` (commit đang ở `origin/main`):
+
+- `npx tsc --noEmit` → sạch;
+- `npm test` → **TẤT CẢ KIỂM THỬ ĐẠT**;
+- `package.json` và `package-lock.json` **không đổi** giữa `cf90934` và `8a8f577` ⇒ `npm ci` hành xử
+  y hệt lần deploy thành công trước, không thể là chỗ hỏng.
+
+### Ba khả năng còn lại — cần xem log workflow để phân biệt
+
+1. **Workflow chạy TRƯỚC khi bản merge lên tới GitHub.** Máy chủ `git fetch` xong sẽ lấy đúng
+   `origin/main` **tại thời điểm nó chạy**; nếu lúc đó `origin/main` vẫn là `cf90934` thì máy chủ
+   dựng lại đúng bản cũ và deploy vẫn báo xanh.
+2. **Workflow hỏng ở bước SSH / bootstrap.** Chính `bootstrap.sh` ghi chú: *"2 trong 3 lần deploy
+   gần đây hỏng vì Failed to connect to github.com port 443"*. Nếu 4 lần thử đều trượt thì
+   `install-vps.sh` không chạy và `.env` giữ nguyên commit cũ — khớp đúng những gì quan sát được.
+3. **Workflow chưa được bấm chạy.**
+
+**Cách phân biệt:** GitHub → repo `hkt` → **Actions** → *Deploy ERP to VPS* → mở lần chạy gần nhất.
+Bước nào đỏ sẽ chỉ thẳng ra khả năng nào đúng. Nếu không có lần chạy nào sau 05:00 UTC 08/09 thì là
+khả năng 3.
+
+**Cách xử lý cho cả ba:** bấm chạy lại *Deploy ERP to VPS* trên nhánh `main` (nhánh nay đã ở
+`8a8f577`), rồi kiểm tra lại `/api/health` phải trả `commit` bắt đầu bằng `8a8f577`.
+
+### Những việc BỊ CHẶN vì chưa deploy
+
+| Việc | Vì sao chưa làm được |
+|---|---|
+| Smoke test 11 màn hình | Bản đang chạy chưa có các mục mới; và môi trường này không có tài khoản đăng nhập (mọi trang trả 307) |
+| Chạy thử dựng lại lịch sử trên production | Job `canonical-backfill` và `scripts/erp-backfill.ts` nằm trong release, bản đang chạy chưa có |
+| Mô phỏng tác động KPI | Cần số liệu production |
+| Đối chiếu chênh lệch tồn kho | Cần số liệu production |
+
+Môi trường làm việc không có `DATABASE_URL` của production, không có `gh` CLI và không có token
+GitHub, nên cũng không chạy được ops `db-query`. **Không có đường nào đọc dữ liệu production từ đây.**
+
+### Công cụ đã chuẩn bị sẵn để chạy ngay sau khi deploy thật xong
+
+`scripts/prod-readonly-probe.ts` — 12 truy vấn **chỉ đọc**, đo đúng những con số mà chạy thử backfill
+sẽ báo, nhưng chỉ dùng các bảng đã có nên chạy được **kể cả trên bản cũ**. Đã chạy thử trên CSDL có
+schema thật, cả 12 câu đều trả kết quả đúng.
+
+Nội dung đo: ảnh chụp lệch lịch sử (theo từng cặp trạng thái) · vận đơn thiếu chứng từ ĐVVC · ghi
+"đã giao" mà không có sự kiện phát thành công · **tiền đã về mà không có chứng từ giao hàng** · mã
+501 chiều hoàn còn bị coi là đã giao · trạng thái ĐVVC chưa hiểu · mốc thời gian đi ngược · mẫu mã
+tồn âm · tồn đọng gói tin webhook · sự kiện ĐVVC và đơn Pancake mới nhất.
+
+Chạy từng câu qua ops `db-query` (một câu mỗi lần), hoặc chạy cả bộ trên VPS:
+
+```
+docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/prod-readonly-probe.ts
+```
+
 ## 11. Danh sách kiểm tra sau deploy
 
 Mở lần lượt và xác nhận trang lên được, số liệu có nghĩa:

@@ -371,6 +371,23 @@ Hai điểm đáng ghi:
   rồi mới áp 0032–0034. Kết quả giống hệt CSDL dựng mới (36 bảng / 133 index), chạy lại lần hai
   không lỗi.
 
+### Thẩm định sau deploy 08/09/2026 — PRODUCTION CHƯA CHẠY RELEASE
+
+`/api/health` của https://erp.vnxcommerce.com trả `commit: cf909349c250` — commit TRƯỚC release,
+trong khi `origin/main` đã ở `8a8f577e99fe`. `ERP_COMMIT` được `install-vps.sh` ghi đè ở mỗi lần
+deploy từ HEAD sau khi `bootstrap.sh` đã `checkout -B main origin/main`, nên đây chính là bản máy
+chủ đang chạy, không phải giá trị cũ còn sót.
+
+Ứng dụng bản cũ vẫn khoẻ (`ok: true`, CSDL kết nối được, webhook endpoint mở).
+
+Cổng deploy không phải nguyên nhân: `tsc --noEmit` sạch và `npm test` xanh trên chính `8a8f577`,
+`package.json`/`package-lock.json` không đổi so với `cf90934`.
+
+Toàn bộ smoke test, chạy thử backfill, mô phỏng KPI và đối chiếu tồn kho **BỊ CHẶN** cho tới khi
+deploy thật xong. Chi tiết và cách xử lý: `docs/erp-release-report.md` mục 10c.
+
+Đã chuẩn bị `scripts/prod-readonly-probe.ts` — 12 truy vấn chỉ đọc, đã chạy thử trên schema thật.
+
 ### Deploy — CHƯA CHẠY
 
 `main` đã có toàn bộ release (`adff461`), đã push. Deploy chưa chạy vì workflow *Deploy ERP to VPS*
