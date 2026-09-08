@@ -1167,3 +1167,108 @@ theo dõi. Thay đổi đó động tới dữ liệu đã có nên tách riêng
 
 `npm test` **TẤT CẢ KIỂM THỬ ĐẠT** · 14/14 bất biến · `typecheck` sạch · `lint` 0 lỗi.
 **Chưa deploy. Chưa chạy WRITE BACKFILL.** Chưa import tệp nào, chưa tạo một sự kiện giả nào.
+
+## 10k. VÌ SAO ERP KHÔNG TÌM ĐƯỢC MÃ VẬN ĐƠN TỪ SĐT — 08/09/2026
+
+> **ĐÍNH CHÍNH mục 10j.** Tôi đã xếp 9 đơn vào nhóm D (*"chưa từng qua Viettel Post"*). **Sai.**
+> Ảnh chụp web viettelpost.vn của chủ shop cho thấy 4/5 số điện thoại **CÓ vận đơn “Giao thành
+> công” + “Đã nhận COD”** đúng bằng số tiền ERP đang ghi (474.000 / 399.000). Nhiều khả năng 9 đơn
+> này **thật sự đã giao và đã thu tiền**; ERP chỉ **không có bằng chứng**. Phân loại đúng là
+> **C — thiếu lịch sử carrier**, không phải D.
+
+### Đối chiếu 18 mã vận đơn thấy trên web với cơ sở dữ liệu ERP
+
+| | |
+|---|---|
+| **KHÔNG có trong ERP** | **16/18** |
+| Có trong ERP | 2 — `PKE1508908614` (đơn 3176, RETURNING) · `PKE1511633400` (đơn 3621, DELIVERED, thu 524.000đ) |
+
+Toàn bộ vận đơn tháng 8 của 4 số máy kia — kể cả những vận đơn **đã giao thành công và đã nhận
+COD** — đều vắng mặt trong ERP.
+
+### Lỗi ở đâu — BỐN khoảng trống, không phải một bug
+
+**1 · Webhook KHÔNG mang số điện thoại người nhận.** Đo trên 512 gói tin thật:
+
+| Trường trong `payload.DATA` | Số gói có |
+|---|---|
+| `RECEIVER_PHONE` | **0 / 512** |
+| `RECEIVER_FULLNAME` | 508 |
+| `ORDER_REFERENCE` | 512 |
+
+Vì vậy **cả webhook trực tiếp lẫn webhook chuyển tiếp qua Poscake đều không thể ghép theo SĐT** —
+dữ liệu đó chưa bao giờ có trong gói tin. Bằng chứng đối chứng: ERP đang giữ **242 vận đơn mồ côi**,
+và **0 vận đơn nào trong đó có SĐT**.
+
+**2 · `ORDER_REFERENCE` không dùng làm khoá ghép được.** Lấy 9 giá trị ở cột *“MÃ ĐƠN HÀNG”* trên web
+(`PKE10888185600`, `PKE180157128166277`, `PKE450373021651503`…) tra vào `orders` của ERP:
+**0/9 khớp**. Đó là mã VTP tự sinh, không phải mã đơn Pancake. Trường duy nhất trông giống khoá ghép
+hoá ra vô dụng.
+
+**3 · Lịch sử tháng 8 chưa từng tới ERP.** Webhook chỉ bắt đầu chảy từ **05/09**. Các vận đơn lập
+ngày 02/08 và 08/08 đã kết thúc vòng đời từ lâu; Viettel Post **không gửi lại lịch sử**. Kênh duy
+nhất từng mang được dữ liệu tháng 8 là `VTP_IMPORT` (sự kiện sớm nhất **04/08**) — tức tệp Excel đã
+nhập trước đây, nhưng tệp đó không phủ hết.
+
+**4 · API không thay thế được web.** Web viettelpost.vn chạy trên **phiên đăng nhập** của HMT shop và
+cho tra theo SĐT. ERP dùng **partner API** với token riêng: `getOrderDetailV3` và `order-filter` trả
+rỗng, `list-data-push-his` trả 403, và **partner API không có endpoint tìm theo SĐT người nhận**.
+ERP không thể làm điều mà web làm được.
+
+> **Đính chính kèm theo (mục 10f/10i):** trước đây tôi viết vận đơn *“thuộc partner khác”*. Ảnh chụp
+> chứng minh chúng **thuộc đúng tài khoản HMT shop**. Phát biểu đúng là: **quyền của token partner
+> API hẹp hơn quyền của phiên web** — API chỉ thấy đơn do chính nó tạo, còn web thấy mọi đơn của
+> khách hàng đó.
+
+### Hình mẫu “Shop hủy lấy rồi tạo lại” — mỗi đơn có hai vận đơn
+
+Trên web, mỗi *MÃ ĐƠN HÀNG* thường có **một cặp**: một vận đơn **Shop hủy lấy** (02/08 18:19) và một
+vận đơn **Giao thành công** (02/08 19:50–19:51) cùng số tiền. Ví dụ SĐT 909728879:
+
+| Mã đơn hàng | Vận đơn huỷ | Vận đơn thay thế | Kết quả |
+|---|---|---|---|
+| `PKE450373021651503` | PKE1484434076 | **PKE1484460381** | Giao thành công · Đã nhận COD 474.000đ |
+| `PKE10888185600` | PKE1484434068 | **PKE1484463375** | Giao thành công · Đã nhận COD 474.000đ |
+
+Thêm các vận đơn chiều hoàn `…1P1` (08/08, “Không có COD”). Nghĩa là **hai đơn 474.000đ của khách
+này là thật và đều đã giao** — khớp đúng hai đơn ERP 2360 và 2371 đang không có mã.
+
+Ghi chú do chính shop nhập trên một vận đơn của Linh le: *“1xtrùng đơn khách nhận 1 đơn”* — xác nhận
+có trùng đơn thật, cần đối chiếu tay.
+
+### Phải làm gì — một việc, ERP đã có sẵn đường đi
+
+Trên đúng màn hình chủ shop đang mở, bấm **XUẤT EXCEL** với:
+
+| Ô | Đặt |
+|---|---|
+| Ô tìm kiếm | **để trống** (lấy tất cả, không lọc theo một SĐT) |
+| Khoảng ngày | **01/08/2026 – 08/09/2026** |
+| Kho hàng | Tất cả kho hàng |
+| Trạng thái / dịch vụ / COD | **không lọc gì** |
+
+Rồi tải lên **ERP → Nhập dữ liệu Viettel Post**.
+
+Tệp *“Danh sách vận đơn”* là nguồn **DUY NHẤT có cột SĐT người nhận** — đúng thứ webhook thiếu.
+`matchVtpOrderList()` đã có sẵn đường ghép theo SĐT cho chính tình huống này, và đã kiểm tra:
+**cả 9 đơn đều có khoá SĐT hợp lệ** (`shipments.receiver_phone` và `orders.ship_phone` đều có số),
+nên bộ ghép sẽ nhìn thấy chúng.
+
+**Kỳ vọng đúng:** bộ ghép **cố ý không đoán bừa**. Nó thu hẹp theo SĐT rồi theo **số COD trùng khít**;
+còn nhiều hơn một ứng viên thì báo *“SĐT … có N vận đơn chưa có mã; cần đối chiếu”* và **không gán**.
+Với 909728879 và 896997119 (mỗi số có 2 đơn cùng 474.000đ) chắc chắn rơi vào diện này → chủ shop ghép
+tay. Ca nào SĐT + số tiền là duy nhất thì tự ghép.
+
+**Cảnh báo về khoảng ngày:** ảnh đầu tiên tìm SĐT 979936889 với khoảng **10/08–08/09** nên chỉ ra 1
+vận đơn. Mọi vận đơn *“Giao thành công”* của các số còn lại đều lập ngày **02/08** — **nằm ngoài**
+khoảng đó. Vì vậy phải xuất **từ 01/08**, không phải từ 10/08 hay 28/08.
+
+### Đổi khuyến nghị thứ tự: NHẬP TỆP TRƯỚC, DEPLOY BẢN VÁ SAU
+
+Khi 9 đơn đã có chứng từ ĐVVC thật, `hasCarrierTruth` sẽ giữ trạng thái của chúng **theo chứng từ**,
+nên bản vá **không** làm chúng rơi xuống `IN_TRANSIT` và **không** mất 4.566.000đ doanh thu. Con số
+lúc đó đúng vì **có bằng chứng**, chứ không phải vì ERP đoán từ trạng thái đơn Pancake — đó mới là
+kết cục cần đạt.
+
+Nếu deploy trước khi nhập tệp thì trong khoảng thời gian chờ, 9 đơn sẽ hiện *chưa kết luận* — không
+sai, nhưng khó chịu và không cần thiết.
