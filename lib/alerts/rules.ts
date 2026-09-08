@@ -18,6 +18,8 @@ import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
+import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
+import { ADS_ANOMALY_LABEL } from "@/lib/constants/ads-anomaly";
 import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
@@ -425,6 +427,38 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     }
   } catch {
     // chưa có dữ liệu vận đơn
+  }
+
+  // ───────── QUẢNG CÁO BẤT THƯỜNG ─────────
+  //
+  // Tách làm HAI loại việc vì hai người khác nhau xử lý: trục trặc vận hành (chi tăng vọt, mất dấu
+  // quy kết, đồng bộ đứng im) là việc của người chạy quảng cáo; còn "càng chạy càng lỗ" và "ROAS
+  // dưới ngưỡng" là quyết định KINH DOANH — dừng hay đổi giá — thuộc về chủ shop.
+  //
+  // ERP KHÔNG tự đổi ngân sách, không tắt chiến dịch, không sửa gì trên Facebook. Ranh giới cứng:
+  // đọc dữ liệu quảng cáo, không điều khiển quảng cáo.
+  if (cfg.enabled.adsAnomaly) {
+    activeKinds.push("ADS_ANOMALY", "PROFITABILITY_ALERT");
+    try {
+      const anomalies = await detectAdsAnomalies();
+      for (const an of anomalies) {
+        candidates.push({
+          kind: an.profitability ? "PROFITABILITY_ALERT" : "ADS_ANOMALY",
+          severity: an.severity,
+          title: `${ADS_ANOMALY_LABEL[an.kind]} · ${an.campaignName}`,
+          body: an.detail,
+          href: "/ads",
+          entityType: "AD_CAMPAIGN",
+          entityId: an.campaignId || an.kind,
+          // Khoá theo loại + chiến dịch + NGÀY: một vấn đề kéo dài không tạo việc mới mỗi lần quét,
+          // nhưng sang ngày mới mà vẫn còn thì được nhắc lại.
+          dedupeKey: `ads-anomaly:${an.kind}:${an.campaignId || "all"}:${new Date().toISOString().slice(0, 10)}`,
+          occurredAt: new Date(),
+        });
+      }
+    } catch {
+      // chưa có dữ liệu quảng cáo
+    }
   }
 
   // ───────── DỮ LIỆU SAI NGHIÊM TRỌNG ─────────

@@ -23,7 +23,7 @@ export type AlertConfig = {
   /** Hàng hoàn đã về tới shop quá N ngày mà kho chưa lập phiếu tái nhập → báo kho kiểm đếm */
   returnInspectionDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -42,7 +42,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   staleDays: 4,
   lookbackDays: 14,
   returnInspectionDays: 3,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {

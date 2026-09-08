@@ -104,6 +104,7 @@ const EVIDENCE_SOURCE: Record<string, string> = {
   CS_CASE: "Case CSKH",
   VARIANT: "Sổ kho ERP",
   AD_ACCOUNT: "Tài khoản quảng cáo Meta",
+  AD_CAMPAIGN: "Chi tiêu Meta + kết quả đơn",
 };
 
 /** Số tiền liên quan tới việc, nếu tra được — dùng cho phần "giá trị tiền" của điểm ưu tiên. */

@@ -26,6 +26,7 @@ import { testActionQueue } from "./action-queue.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testAdsAttribution } from "./ads-attribution.test";
+import { testAdsAnomaly } from "./ads-anomaly.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
@@ -1102,6 +1103,7 @@ async function main() {
   await testStaffPerformance(db);
   await testAdsRoas(db);
   await testAdsAttribution(db);
+  await testAdsAnomaly(db);
   await testAuditTrail(db);
   testUiConsistency();
   await testInventory(db);
