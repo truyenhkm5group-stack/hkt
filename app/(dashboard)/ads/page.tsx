@@ -14,6 +14,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
   const canWrite = can(user, "expenses:write");
   const canManageEmployees = can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
+  const adsLevel = raw.adsLevel === "ad" ? "ad" : "campaign";
   return (
     <div className="space-y-5">
       <PageHeader
@@ -23,7 +24,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         hint="Hiệu suất quảng cáo theo mã hàng và theo marketer: chi tiêu, đơn đã xác nhận, ROAS, CPO, lợi nhuận sau QC. Chi tiêu Facebook tự kéo mỗi giờ; ghép chiến dịch → mã hàng / marketer ở cuối trang."
         actions={canWrite ? <AdSpendDialog /> : null}
       />
-      <RoasSection period={period} />
+      <RoasSection period={period} level={adsLevel} />
       <AdsCoverageSection period={period} />
       <AdsTab raw={raw} period={period} canWrite={canWrite} canManageEmployees={canManageEmployees} />
     </div>

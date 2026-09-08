@@ -33,6 +33,15 @@ export type RoasRow = {
   name: string;
   level: RoasLevel;
   spend: number;
+  /**
+   * Có biết chi tiêu của dòng này hay không.
+   *
+   * Ở cấp MẨU QUẢNG CÁO thì KHÔNG: Facebook Insights được đồng bộ ở cấp chiến dịch/ngày, nên
+   * không tồn tại con số chi tiêu cho từng mẩu. Khi đó `spend` = 0 chỉ có nghĩa "chưa biết", và
+   * mọi chỉ số chia cho chi tiêu đều là `null` — KHÔNG được chia đều tiền chiến dịch cho các mẩu
+   * để bảng trông đầy đủ.
+   */
+  spendKnown: boolean;
   bookedOrders: number;
   bookedRevenue: number;
   deliveredOrders: number;
@@ -87,6 +96,8 @@ function spendPeriod(from: Date | null, to: Date | null) {
 
 async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> {
   const db = await getDb();
+  // Chi tiêu CHỈ tồn tại ở cấp chiến dịch. Xem docs/ads-attribution-audit.md.
+  const spendKnown = level === "campaign";
   const scope = metricScope(period, "confirmed");
   const HAS_AD = sql`${o.adId} is not null and ${o.adId} <> ''`;
   // Tiền COD CÓ CHỨNG TỪ trên đơn — không lấy COD khai báo.
@@ -134,22 +145,24 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
     const key = String(r.key ?? "");
     if (!key) continue;
     seen.add(key);
-    const spend = spendByKey.get(key)?.spend ?? 0;
+    const spend = spendKnown ? (spendByKey.get(key)?.spend ?? 0) : 0;
     const bookedRevenue = Number(r.bookedRevenue ?? 0);
     const deliveredRevenue = Number(r.deliveredRevenue ?? 0);
     const cash = Number(r.cash ?? 0);
     const contribution = deliveredRevenue - Number(r.deliveredCogs ?? 0) - Number(r.shipping ?? 0) - spend;
     const deliveredOrders = Number(r.deliveredOrders ?? 0);
     const returnedOrders = Number(r.returnedOrders ?? 0);
-    const ratio = (value: number) => (spend > 0 ? Math.round((value / spend) * 100) / 100 : null);
-    // CAC: tiền quảng cáo trên MỘT đơn. Không có đơn thì không có CAC — không phải CAC bằng 0.
-    const perOrder = (count: number) => (count > 0 ? Math.round(spend / count) : null);
+    // Không biết chi tiêu ⇒ không có ROAS và không có CAC. Đây là chỗ dễ sai nhất: chia doanh thu
+    // cho 0 rồi hiện ra một con số sẽ bị đọc như thể quảng cáo đó miễn phí.
+    const ratio = (value: number) => (spendKnown && spend > 0 ? Math.round((value / spend) * 100) / 100 : null);
+    const perOrder = (count: number) => (spendKnown && count > 0 ? Math.round(spend / count) : null);
     const bookedOrders = Number(r.bookedOrders ?? 0);
     rows.push({
       key,
       name: r.name || key,
       level,
       spend,
+      spendKnown,
       bookedOrders,
       bookedRevenue,
       deliveredOrders,
@@ -168,8 +181,10 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
   }
 
   // Chiến dịch có tiêu tiền nhưng KHÔNG có đơn nào gắn vào — vẫn phải hiện, đó là tiền đã mất.
+  // Chỉ xét ở cấp chiến dịch: ở cấp mẩu quảng cáo, khoá không cùng không gian nên mọi chiến dịch
+  // sẽ trông như "không có đơn nào", một kết luận sai hoàn toàn.
   let spendWithoutOrders = 0;
-  for (const [key, value] of spendByKey) {
+  for (const [key, value] of spendKnown ? spendByKey : new Map<string, { spend: number; name: string }>()) {
     if (seen.has(key)) continue;
     spendWithoutOrders += value.spend;
     if (value.spend > 0) {
@@ -178,6 +193,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
         name: value.name || key,
         level,
         spend: value.spend,
+        spendKnown: true,
         bookedOrders: 0,
         bookedRevenue: 0,
         deliveredOrders: 0,
@@ -198,7 +214,9 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
     }
   }
 
-  rows.sort((a, b) => b.spend - a.spend);
+  // Cấp chiến dịch xếp theo tiền đã tiêu. Cấp mẩu quảng cáo KHÔNG có tiền, nên xếp theo doanh thu
+  // GIAO THÀNH CÔNG — mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước.
+  rows.sort((a, b) => (spendKnown ? b.spend - a.spend : b.deliveredRevenue - a.deliveredRevenue) || b.deliveredOrders - a.deliveredOrders);
 
   const [unmappedRow] = await db
     .select({

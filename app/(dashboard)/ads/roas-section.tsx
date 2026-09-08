@@ -6,6 +6,8 @@ import { getAdsAttributionAudit } from "@/lib/queries/ads-attribution";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
 import { CAC_HINT, CAC_LABEL, ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
 import { successTone } from "@/lib/constants/returns";
+import { RoasLevelTabs } from "@/app/(dashboard)/ads/roas-level-tabs";
+import type { RoasLevel } from "@/lib/queries/ads-roas";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -25,17 +27,30 @@ function Roas({ value }: { value: number | null }) {
  * BỐN MỨC ROAS. Với shop bán COD, ROAS theo doanh thu lên đơn là con số vô nghĩa: đơn có thể hoàn,
  * và tiền còn nằm ở ĐVVC. Bốn cột dưới đây luôn giảm dần, và chỗ tụt nhiều nhất chính là vấn đề.
  */
-export async function RoasSection({ period }: { period: Period }) {
-  const r = await getAdsRoas(period, "campaign");
+export async function RoasSection({ period, level = "campaign" }: { period: Period; level?: RoasLevel }) {
+  const r = await getAdsRoas(period, level);
   if (!r.rows.length && !r.unmapped.ordersWithoutAd) return null;
+  const byAd = level === "ad";
 
   return (
     <SectionCard
-      title="ROAS theo kết quả đơn"
-      description={`${period.label} · chi ${formatVND(r.totals.spend)} · lợi nhuận góp ${formatVND(r.totals.contribution)}`}
-      hint="Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là vấn đề cần sửa."
+      title={byAd ? "Kết quả đơn theo mẩu quảng cáo" : "ROAS theo kết quả đơn"}
+      description={
+        byAd
+          ? `${period.label} · ${formatNumber(r.rows.length)} mẩu quảng cáo · doanh thu giao thành công ${formatVND(r.totals.deliveredRevenue)}`
+          : `${period.label} · chi ${formatVND(r.totals.spend)} · lợi nhuận góp ${formatVND(r.totals.contribution)}`
+      }
+      hint="Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là vấn đề cần sửa. Cấp mẩu quảng cáo KHÔNG có chi tiêu riêng nên không có ROAS ở cấp đó — xem docs/ads-attribution-audit.md."
+      actions={<RoasLevelTabs current={level} />}
       padded={false}
     >
+      {byAd ? (
+        <p className="border-b bg-sky-50 px-5 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+          Facebook chỉ cho ERP số chi tiêu theo CHIẾN DỊCH/ngày, nên ở cấp mẩu quảng cáo không có tiền chi và do đó không có
+          ROAS/CAC. Bảng này xếp theo doanh thu GIAO THÀNH CÔNG: mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước.
+          Cố ý KHÔNG chia đều tiền chiến dịch cho các mẩu — chia đều làm tổng khớp trong khi từng dòng đều sai.
+        </p>
+      ) : null}
       <div className="overflow-x-auto">
         <Table className="min-w-[1080px]">
           <TableHeader>
@@ -66,14 +81,14 @@ export async function RoasSection({ period }: { period: Period }) {
             {r.rows.slice(0, 40).map((row) => (
               <TableRow key={row.key}>
                 <TableCell className="max-w-[280px] truncate" title={row.name}>{row.name}</TableCell>
-                <TableCell className="numeric text-right whitespace-nowrap">{formatVND(row.spend)}</TableCell>
+                <TableCell className="numeric text-right whitespace-nowrap">{row.spendKnown ? formatVND(row.spend) : <span className="text-muted-foreground" title="Facebook không cung cấp chi tiêu ở cấp này">—</span>}</TableCell>
                 <TableCell className="numeric text-right">
                   {formatNumber(row.deliveredOrders)}/{formatNumber(row.bookedOrders)}
                 </TableCell>
                 <TableCell className={cn("numeric text-right", successTone(row.successRate))}>
                   {row.successRate === null ? "—" : `${row.successRate}%`}
                 </TableCell>
-                <TableCell className="text-right"><Roas value={row.orderRoas} /></TableCell>
+                <TableCell className="text-right">{row.spendKnown ? <Roas value={row.orderRoas} /> : <span className="text-muted-foreground" title="Không có chi tiêu ở cấp này">—</span>}</TableCell>
                 <TableCell className="text-right"><Roas value={row.deliveredRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.cashRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.contributionRoas} /></TableCell>
