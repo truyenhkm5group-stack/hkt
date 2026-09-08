@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram } from "@/lib/actions/alerts";
+import { acknowledgeCase, assignCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
 
 export function RunAlertsButton() {
@@ -51,6 +51,52 @@ export function MarkAllReadButton() {
       }
     >
       <Check className="size-4" /> Đã đọc hết
+    </Button>
+  );
+}
+
+/** TIẾP NHẬN — "tôi đang làm việc này". Khác đã đọc, khác đã xong. */
+export function AcknowledgeButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await acknowledgeCase(id);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Tôi nhận
+    </Button>
+  );
+}
+
+/** Trả việc về hàng đợi chung (bỏ người nhận). */
+export function UnassignButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await assignCase(id, null);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Trả lại
     </Button>
   );
 }

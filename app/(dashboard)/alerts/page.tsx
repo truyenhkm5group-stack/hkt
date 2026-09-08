@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BellRing } from "lucide-react";
-import { AlertConfigForm, MarkAllReadButton, ResolveButton, RunAlertsButton } from "@/app/(dashboard)/alerts/alerts-actions";
+import { AcknowledgeButton, AlertConfigForm, MarkAllReadButton, ResolveButton, RunAlertsButton, UnassignButton } from "@/app/(dashboard)/alerts/alerts-actions";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
@@ -9,6 +9,8 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { NOTIFICATION_KIND_LABEL, NOTIFICATION_KIND_ORDER, SEVERITY_TONE } from "@/lib/constants/alerts";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
+import { getActionQueue } from "@/lib/queries/action-queue";
+import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Cần xử lý" };
@@ -17,7 +19,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const user = await requirePermission("alerts:view");
   const raw = await searchParams;
   const kindFilter = typeof raw.kind === "string" ? raw.kind : "";
-  const [items, counts, config] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig()]);
+  const [items, counts, config, queue] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig(), getActionQueue({ limit: 300 })]);
+  const visibleCases = kindFilter ? queue.cases.filter((c) => items.find((n) => n.id === c.id)?.kind === kindFilter) : queue.cases;
   const visible = kindFilter ? items.filter((n) => n.kind === kindFilter) : items;
   const canConfig = can(user, "alerts:manage");
 
@@ -42,6 +45,42 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           </Link>
         ))}
       </section>
+
+      {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
+      <SectionCard
+        title={`Hàng đợi việc — ${formatNumber(visibleCases.length)} việc`}
+        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}`}
+        hint="Mức ưu tiên tính bằng quy tắc: mức nghiêm trọng + tuổi việc + giá trị tiền liên quan + KHẢ NĂNG CỨU ĐƯỢC. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích."
+        padded={false}
+      >
+        {visibleCases.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">Không có việc nào đang mở.</p>
+        ) : (
+          <ul className="divide-y">
+            {visibleCases.slice(0, 100).map((c) => (
+              <li key={c.id} className="flex flex-wrap items-start gap-3 px-5 py-3">
+                <span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", PRIORITY_TONE[c.priority])}>
+                  {PRIORITY_LABEL[c.priority]} · {c.score}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Link href={c.href || "#"} className="block text-sm font-semibold hover:text-primary hover:underline">{c.title}</Link>
+                  <p className="text-xs text-muted-foreground">{c.reason}</p>
+                  <p className="mt-0.5 text-xs"><span className="text-muted-foreground">Nên làm: </span>{c.recommendedAction}</p>
+                  <p className="text-[10.5px] text-muted-foreground" title={formatDateTime(c.detectedAt)}>
+                    {c.typeLabel} · phát hiện {c.ageLabel} trước · {CASE_STATUS_LABEL[c.status]}
+                    {c.owner ? ` · ${c.owner.name} đang xử lý` : " · chưa ai nhận"}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {c.status === "OPEN" ? <AcknowledgeButton id={c.id} /> : null}
+                  {c.owner ? <UnassignButton id={c.id} /> : null}
+                  <ResolveButton id={c.id} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
 
       <SectionCard title={`Đang mở (${formatNumber(visible.length)})`} description="Mỗi dòng là một đơn / vận đơn cần chăm sóc. Tự đóng khi trạng thái đã thay đổi; hoặc bấm “Đã xử lý”." padded={false}>
         {visible.length === 0 ? (

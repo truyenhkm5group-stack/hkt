@@ -221,9 +221,22 @@ export const notifications = pgTable(
     notifiedAt: ts("notified_at"),
     /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
     occurredAt: ts("occurred_at"),
+    /**
+     * HÀNG ĐỢI VIỆC: ai đang cầm việc này. Không có người nhận thì việc trôi — đó là lý do
+     * "Cần xử lý" cũ chỉ là danh sách đọc rồi bỏ.
+     */
+    assignedTo: text("assigned_to").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: ts("assigned_at"),
+    /** ĐÃ TIẾP NHẬN: có người nhìn thấy và nhận xử lý — khác "đã đọc" và khác "đã xong". */
+    acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: ts("acknowledged_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("notifications_open_idx").on(t.resolvedAt, t.createdAt), index("notifications_kind_idx").on(t.kind)],
+  (t) => [
+    index("notifications_open_idx").on(t.resolvedAt, t.createdAt),
+    index("notifications_kind_idx").on(t.kind),
+    index("notifications_assigned_idx").on(t.assignedTo, t.resolvedAt),
+  ],
 );
 
 export const auditLogs = pgTable(

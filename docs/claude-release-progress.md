@@ -20,7 +20,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 9 | Chân lý tài chính | ✅ xong | `feat: standardize ERP financial truth` |
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ✅ xong | `feat: improve inventory truth and stock risk` |
 | 11 | Chỉ số theo mẫu mã | ✅ xong | `feat: add product variant performance intelligence` |
-| 12 | Hàng đợi việc theo mức ưu tiên | ⏳ | |
+| 12 | Hàng đợi việc theo mức ưu tiên | ✅ xong | `feat: add prioritized ERP action queue` |
 | 13 | Tổng quan ra quyết định | ⏳ | |
 | 14 | ROAS theo kết quả đơn | ⏳ | |
 | 15 | Sức khoẻ tích hợp | ⏳ | |
@@ -243,6 +243,22 @@ Ma trận Màu × Size trên trang chi tiết sản phẩm, chỉ dựng khi mã
 
 Thiếu dữ liệu thì nói CHƯA BIẾT: chưa có phiếu nhập ⇒ `available = null` và không bịa ra days of
 cover; không tra được giá vốn ⇒ `contribution = null` kèm lý do.
+
+### TASK 12 — Hàng đợi việc theo mức ưu tiên
+
+"Cần xử lý" cũ là danh sách đọc rồi bỏ: không nói việc nào gấp hơn, không ai cầm việc, và gộp ba
+trạng thái khác nhau làm một.
+
+- `lib/constants/action-queue.ts`: 12 loại việc (đủ 7 loại kế hoạch yêu cầu), việc nên làm cho từng
+  loại, và công thức ưu tiên **đọc được**: mức nghiêm trọng (0–40) + tuổi việc (0–25, bão hoà ở 7
+  ngày) + tiền liên quan (0–20, bão hoà ở 5 triệu) + **khả năng cứu được** (0–15).
+- Khả năng cứu được là yếu tố phân biệt hàng đợi việc với danh sách cảnh báo: đơn giao thất bại còn
+  gọi lại được nên đứng trên đơn đã đang hoàn về.
+- Hai loại việc mới sinh từ dữ liệu: `COD_OVERDUE` (đòi tiền ĐVVC) và `DATA_ERROR` (luật mức ERROR
+  của trung tâm điều khiển) — nay có người cầm và đóng được, thay vì chỉ là một con số.
+- `notifications` thêm `assigned_to` / `acknowledged_*` (migration `0033_action_queue.sql`) để tách
+  **đã đọc ≠ đã tiếp nhận ≠ đã xong**.
+- `assignCase` / `acknowledgeCase` / `resolveNotification` đều ghi `audit_logs`.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

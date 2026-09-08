@@ -20,6 +20,7 @@ import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
 import { testProductIntelligence } from "./product-intelligence.test";
+import { testActionQueue } from "./action-queue.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1083,6 +1084,7 @@ async function main() {
   await testBusinessInvariants(db);
   await testFinancialTruth(db);
   await testProductIntelligence(db);
+  await testActionQueue(db);
   await testInventory(db);
   await testCodReconciliation();
   await testOrderSource();

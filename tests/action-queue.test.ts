@@ -1,0 +1,95 @@
+import assert from "node:assert/strict";
+import { eq } from "drizzle-orm";
+import type { Db } from "@/db";
+import { schema } from "@/db";
+import { CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseTypeOf, priorityOf } from "@/lib/constants/action-queue";
+import { getActionQueue } from "@/lib/queries/action-queue";
+
+/**
+ * HÀNG ĐỢI VIỆC.
+ *
+ * Điều phải khoá: mức ưu tiên là QUY TẮC đọc được, không phải cảm tính; và ba trạng thái
+ * đã đọc / đã tiếp nhận / đã xong không được gộp làm một.
+ */
+export async function testActionQueue(db: Db) {
+  // ───────── 1. Công thức ưu tiên: bốn yếu tố, mỗi yếu tố đẩy điểm lên ─────────
+  const base = { severity: "warning", ageHours: 0, amount: 0, type: "DELIVERY_STALE" as const };
+  const older = caseScore({ ...base, ageHours: 24 * 7 });
+  const richer = caseScore({ ...base, amount: 5_000_000 });
+  const worse = caseScore({ ...base, severity: "critical" });
+  const plain = caseScore(base);
+  assert.ok(older > plain, "việc để lâu hơn phải được ưu tiên hơn");
+  assert.ok(richer > plain, "việc dính nhiều tiền hơn phải được ưu tiên hơn");
+  assert.ok(worse > plain, "việc nghiêm trọng hơn phải được ưu tiên hơn");
+
+  // KHẢ NĂNG CỨU ĐƯỢC là yếu tố phân biệt hàng đợi việc với danh sách cảnh báo.
+  const failed = caseScore({ severity: "warning", ageHours: 24, amount: 500_000, type: "DELIVERY_FAILED" });
+  const returning = caseScore({ severity: "warning", ageHours: 24, amount: 500_000, type: "RETURNING" });
+  assert.ok(failed > returning, "đơn giao thất bại (còn gọi lại được) phải đứng trên đơn đã đang hoàn về");
+  assert.ok(RECOVERABILITY.DELIVERY_FAILED > RECOVERABILITY.RETURNING);
+
+  // Tuổi việc bão hoà: để 3 tuần không được gấp gấp ba lần để 1 tuần.
+  const oneWeek = caseScore({ ...base, ageHours: 24 * 7 });
+  const threeWeeks = caseScore({ ...base, ageHours: 24 * 21 });
+  assert.equal(oneWeek, threeWeeks, "tuổi việc phải bão hoà, nếu không việc cũ sẽ nhấn chìm việc mới");
+
+  assert.equal(priorityOf(95), "URGENT");
+  assert.equal(priorityOf(55), "HIGH");
+  assert.equal(priorityOf(35), "NORMAL");
+  assert.equal(priorityOf(10), "LOW");
+  assert.equal(caseTypeOf("SHIPMENT_FAILED"), "DELIVERY_FAILED");
+  assert.equal(caseTypeOf("KHONG_CO_LOAI_NAY"), "OTHER");
+
+  // ───────── 2. Hàng đợi thật: mỗi việc phải đủ thông tin để làm ─────────
+  const queue = await getActionQueue({ limit: 200 });
+  assert.ok(queue.cases.length > 0, "fixture phải có việc đang mở");
+  for (const c of queue.cases) {
+    assert.ok(c.typeLabel && CASE_TYPE_LABEL[c.type], `${c.id}: phải có loại việc`);
+    assert.ok(c.recommendedAction.length > 10, `${c.id}: phải nói rõ nên làm gì`);
+    assert.ok(c.detectedAt instanceof Date, `${c.id}: phải có thời điểm phát hiện`);
+    assert.ok(c.ageHours >= 0 && c.ageLabel.length > 0, `${c.id}: phải có tuổi việc`);
+    assert.ok(["OPEN", "ACKNOWLEDGED", "RESOLVED"].includes(c.status));
+    assert.ok(c.score >= 0 && c.score <= 100, `${c.id}: điểm ưu tiên phải trong 0–100`);
+  }
+  // Xếp giảm dần theo điểm — người mở trang làm từ trên xuống là đúng thứ tự.
+  for (let n = 1; n < queue.cases.length; n += 1) {
+    assert.ok(queue.cases[n - 1].score >= queue.cases[n].score, "hàng đợi phải xếp theo mức ưu tiên giảm dần");
+  }
+  const totalByPriority = queue.totals.URGENT + queue.totals.HIGH + queue.totals.NORMAL + queue.totals.LOW;
+  assert.equal(totalByPriority, queue.cases.length, "tổng theo mức ưu tiên phải bằng tổng việc");
+  assert.equal(queue.byType.reduce((t, r) => t + r.count, 0), queue.cases.length, "tổng theo loại phải bằng tổng việc");
+
+  // ───────── 3. Ba trạng thái tách bạch: đã đọc ≠ đã tiếp nhận ≠ đã xong ─────────
+  // Người thật để gán việc — cột người nhận có khoá ngoại sang users, cố ý để không gán cho
+  // một cái tên không tồn tại rồi mất dấu trách nhiệm.
+  const [owner] = await db
+    .insert(schema.users)
+    .values({ email: `queue-${Date.now()}@test.local`, name: "Nhân viên kiểm thử", passwordHash: "x", role: "CS" })
+    .returning({ id: schema.users.id });
+
+  const target = queue.cases[0];
+  const [before] = await db.select().from(schema.notifications).where(eq(schema.notifications.id, target.id));
+  assert.equal(before.acknowledgedAt, null, "việc mới chưa được tiếp nhận");
+  // Đánh dấu đã đọc KHÔNG được biến việc thành đã tiếp nhận.
+  await db.update(schema.notifications).set({ readBy: ["u-test"] }).where(eq(schema.notifications.id, target.id));
+  const afterRead = await getActionQueue({ limit: 200 });
+  assert.equal(afterRead.cases.find((c) => c.id === target.id)?.status, "OPEN", "đọc rồi KHÔNG có nghĩa là có người làm");
+
+  // Tiếp nhận thì trạng thái đổi và có người cầm việc.
+  await db
+    .update(schema.notifications)
+    .set({ acknowledgedAt: new Date(), acknowledgedBy: owner.id, assignedTo: owner.id })
+    .where(eq(schema.notifications.id, target.id));
+  const afterAck = await getActionQueue({ limit: 200 });
+  assert.equal(afterAck.cases.find((c) => c.id === target.id)?.status, "ACKNOWLEDGED", "đã tiếp nhận phải hiện đúng trạng thái");
+  assert.equal(afterAck.cases.find((c) => c.id === target.id)?.owner?.id, owner.id, "phải biết ai đang cầm việc");
+
+  // Đóng việc thì nó rời khỏi hàng đợi.
+  await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(eq(schema.notifications.id, target.id));
+  const afterResolve = await getActionQueue({ limit: 200 });
+  assert.equal(afterResolve.cases.find((c) => c.id === target.id), undefined, "việc đã xong không còn nằm trong hàng đợi");
+
+  console.log(
+    `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc (nghiêm trọng + tuổi + tiền + khả năng cứu)`,
+  );
+}
