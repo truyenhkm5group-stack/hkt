@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { codStatusForAmount } from "@/lib/constants/cod";
+import { legTypeFromReturningFlag } from "@/lib/constants/truth";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
 import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
 import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
@@ -58,6 +59,29 @@ export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Pro
 }
 
 /**
+ * CHIỀU ĐI HAY CHIỀU HOÀN CHO MỘT BƯỚC HÀNH TRÌNH.
+ *
+ * Trước đây các bước hành trình được ghi KHÔNG kèm `leg_type`, nên một bước mã 501 thuộc CHIỀU
+ * HOÀN có `normalized_stage = DELIVERED` và không có cờ chiều; `deriveShipmentState()` giữ nguyên
+ * DELIVERED và vận đơn hoàn hiện thành "giao thành công". Đúng cái bẫy mà `leg_type` sinh ra để
+ * chặn (F3 trong docs/erp-data-truth-audit.md).
+ *
+ * Quy tắc, cố ý hẹp để KHÔNG BAO GIỜ đoán:
+ *  1. bước có cờ IS_RETURNING của riêng nó  → dùng cờ đó;
+ *  2. bước mang MÃ TRẠNG THÁI CUỐI (501/503/504/101/107/201) → dùng cờ của bản ghi chính. Mã cuối
+ *     là kết luận nghiệp vụ, và cờ của bản ghi mô tả đúng chiều mà vận đơn kết thúc;
+ *  3. còn lại → null (CHƯA BIẾT). Không gán cờ của bản ghi cho các bước trung gian: một vận đơn
+ *     đi rồi quay về có cả bước chiều đi lẫn chiều hoàn trong cùng một hành trình, gán bừa sẽ
+ *     làm hỏng các mốc "lần đầu lấy hàng / lần đầu đi phát".
+ */
+function journeyLegType(record: VtpTrackingRecord, step: VtpTrackingRecord["journey"][number]): "OUTBOUND" | "RETURN" | null {
+  const own = legTypeFromReturningFlag(step.isReturning);
+  if (own) return own;
+  if (step.status !== null && VTP_FINAL_STATUSES.has(step.status)) return legTypeFromReturningFlag(record.isReturning);
+  return null;
+}
+
+/**
  * Áp trạng thái Viettel Post vào vận đơn. Dùng chung cho webhook, polling và import.
  * Không tạo vận đơn mới nếu không tìm thấy, trừ khi allowCreate = true.
  */
@@ -97,12 +121,23 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     // legType lấy từ cờ IS_RETURNING của ĐVVC: chỉ có nó mới phân biệt được "501 phát tới khách"
     // với "501 phát thành công CHIỀU HOÀN về shop" — hai việc trái ngược nhau mà VTP gọi chung là
     // "Thành công". Không có cờ thì để UNKNOWN, không đoán.
-    const legType = record.isReturning === null ? null : record.isReturning ? "RETURN" : "OUTBOUND";
+    const legType = legTypeFromReturningFlag(record.isReturning);
     eventRows.push({ shipmentId: shipment.id, source, status: String(record.status ?? record.statusName), statusName: meta.name, location: record.location, note: record.note, occurredAt: statusDate, normalizedStage: meta.stage, legType, raw: record.raw });
   }
   for (const step of record.journey) {
     if (!step.occurredAt) continue;
-    eventRows.push({ shipmentId: shipment.id, source, status: String(step.status ?? step.statusName), statusName: step.statusName || vtpStatusMeta(step.status).name, location: step.location, note: step.note, occurredAt: step.occurredAt, normalizedStage: vtpStatusMeta(step.status).stage, raw: step.raw });
+    eventRows.push({
+      shipmentId: shipment.id,
+      source,
+      status: String(step.status ?? step.statusName),
+      statusName: step.statusName || vtpStatusMeta(step.status).name,
+      location: step.location,
+      note: step.note,
+      occurredAt: step.occurredAt,
+      normalizedStage: vtpStatusMeta(step.status).stage,
+      legType: journeyLegType(record, step),
+      raw: step.raw,
+    });
   }
   if (eventRows.length) await db.insert(schema.shipmentEvents).values(eventRows).onConflictDoNothing();
 
@@ -118,7 +153,6 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     return { shipmentId: shipment.id, changed: false, created, stage: shipment.stage, reason: duplicate ? "duplicate" : "stale" };
   }
 
-  const isFinal = record.status !== null && VTP_FINAL_STATUSES.has(record.status);
   const codAmount = record.moneyCollection > 0 ? record.moneyCollection : shipment.codAmount;
   let codStatus: CodStatus = shipment.codStatus;
   // ĐVVC báo đã giao ⇒ tiền đang ở ĐVVC (COLLECTED). Đây là lời khai của ĐVVC, chưa phải chứng từ.
@@ -128,7 +162,6 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   if ((meta.stage === "RETURNED" || meta.stage === "CANCELLED") && codStatus === "COLLECTED") codStatus = "PENDING";
   // "Không thu hộ" chỉ đúng khi vận đơn không có tiền thu hộ.
   codStatus = codStatusForAmount(codAmount, codStatus);
-  const stage = meta.stage === "UNKNOWN" ? shipment.stage : meta.stage;
   const existingRaw = shipment.raw && typeof shipment.raw === "object" ? (shipment.raw as Record<string, unknown>) : {};
 
   await db
@@ -138,12 +171,10 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
       vtpOrderNumber: shipment.vtpOrderNumber ?? (record.orderNumber || null),
       trackingCode: shipment.trackingCode ?? (record.orderNumber || null),
       orderReference: record.orderReference || shipment.orderReference,
-      stage,
-      vtpStatus: record.status,
-      vtpStatusName: meta.name,
-      vtpStatusDate: statusDate,
-      vtpLocation: record.location || shipment.vtpLocation,
-      vtpNote: record.note || shipment.vtpNote,
+      // CỐ Ý KHÔNG ghi stage / vtp_status* / các mốc thời gian ở đây.
+      // Trạng thái vận đơn là HÀM CỦA LỊCH SỬ và chỉ có materializeShipmentState() được ghi nó
+      // (xem SHIPMENT_STAGE_WRITERS trong lib/constants/truth.ts). Hai chỗ cùng ghi thì luồng nào
+      // chạy sau sẽ thắng, kể cả khi nó mang sự kiện cũ hơn — đúng lỗi đã đo được trên production.
       vtpReasonCode: record.reasonCode ?? shipment.vtpReasonCode,
       service: record.service || shipment.service,
       weight: record.productWeight || shipment.weight,
@@ -159,12 +190,6 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
       receiverName: shipment.receiverName || record.receiverName,
       receiverPhone: shipment.receiverPhone || record.receiverPhone,
       receiverAddress: shipment.receiverAddress || record.receiverAddress,
-      pickedUpAt: shipment.pickedUpAt ?? (["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"].includes(stage) ? statusDate : null),
-      firstDeliveryAt: shipment.firstDeliveryAt ?? (stage === "OUT_FOR_DELIVERY" || stage === "DELIVERED" ? statusDate : null),
-      deliveredAt: stage === "DELIVERED" ? statusDate : shipment.deliveredAt,
-      returnedAt: stage === "RETURNED" ? statusDate : shipment.returnedAt,
-      cancelledAt: stage === "CANCELLED" ? statusDate : shipment.cancelledAt,
-      isFinal,
       lastVtpSyncAt: new Date(),
       raw: { ...existingRaw, vtp: record.raw },
       updatedAt: new Date(),
@@ -173,7 +198,7 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
 
   // Ảnh chụp cuối cùng luôn được dựng từ lịch sử: một chỗ duy nhất quyết định trạng thái.
   const finalState = await materializeShipmentState(db, shipment.id);
-  const stageNow = (finalState.after as typeof stage) ?? stage;
+  const stageNow = (finalState.after as ShipmentStage) ?? shipment.stage;
   // "Đã áp dụng" chỉ đúng khi trạng thái thực sự tiến triển. Gói tin lặp đi qua nhánh này (cùng
   // mốc thời gian nên vẫn được coi là không cũ hơn) nhưng không được đếm như một lần cập nhật.
   // So với ảnh chụp TRƯỚC khi ghi, vì đến lúc này bản ghi đã bị cập nhật rồi.

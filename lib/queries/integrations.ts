@@ -96,7 +96,7 @@ export async function viettelPostHealth() {
   const now = Date.now();
   const since = (hours: number) => new Date(now - hours * 3600_000);
 
-  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved] = await Promise.all([
+  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved, unknownStatuses] = await Promise.all([
     db.query.webhookEvents.findFirst({
       where: eq(schema.webhookEvents.source, "VIETTELPOST"),
       orderBy: [desc(schema.webhookEvents.receivedAt)],
@@ -109,6 +109,8 @@ export async function viettelPostHealth() {
         failed: sql<number>`count(*) filter (where ${schema.webhookEvents.status} = 'FAILED')`,
         ignored: sql<number>`count(*) filter (where ${schema.webhookEvents.status} = 'IGNORED')`,
         total: sql<number>`count(*)`,
+        /** Số LẦN GỬI LẠI của Viettel Post (ngoài lần đầu) — cao bất thường nghĩa là ERP trả lời chậm. */
+        redelivered: sql<number>`coalesce(sum(${schema.webhookEvents.deliveryCount} - 1), 0)`,
       })
       .from(schema.webhookEvents)
       .where(eq(schema.webhookEvents.source, "VIETTELPOST")),
@@ -167,6 +169,15 @@ export async function viettelPostHealth() {
           sql`(${schema.webhookEvents.status} = 'FAILED' or (${schema.webhookEvents.status} = 'IGNORED' and ${schema.webhookEvents.error} ilike '%không tìm thấy%'))`,
         ),
       ),
+    // TRẠNG THÁI ĐVVC ERP CHƯA HIỂU. Không được im lặng quy về một trạng thái nào đó — phải hiện
+    // ra để bổ sung vào bảng mã, nếu không thì vận đơn đứng im mà không ai biết vì sao.
+    db
+      .select({ status: schema.shipmentEvents.status, n: sql<number>`count(*)`, lastAt: sql<Date>`max(${schema.shipmentEvents.occurredAt})` })
+      .from(schema.shipmentEvents)
+      .where(sql`${schema.shipmentEvents.source} in (${sql.raw(DOC_SOURCES)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`)
+      .groupBy(schema.shipmentEvents.status)
+      .orderBy(sql`count(*) desc`)
+      .limit(20),
   ]);
 
   const data = latest?.payload && typeof latest.payload === "object" ? ((latest.payload as Record<string, unknown>).DATA as Record<string, unknown> | undefined) : undefined;
@@ -176,7 +187,14 @@ export async function viettelPostHealth() {
     lastWebhook: latest
       ? { at: latest.receivedAt, orderNumber: latest.externalId ?? "", status: latest.status, statusName: String(data?.STATUS_NAME ?? "") }
       : null,
-    webhooks: { last24h: Number(counts[0].h24), last7d: Number(counts[0].d7), failed: Number(counts[0].failed), ignored: Number(counts[0].ignored), total: Number(counts[0].total) },
+    webhooks: {
+      last24h: Number(counts[0].h24),
+      last7d: Number(counts[0].d7),
+      failed: Number(counts[0].failed),
+      ignored: Number(counts[0].ignored),
+      total: Number(counts[0].total),
+      redelivered: Number(counts[0].redelivered),
+    },
     lastPoll: lastPoll ?? null,
     apiScope,
     /** API đang KHÔNG thấy vận đơn nào của shop — đối chiếu qua API coi như không có. */
@@ -187,6 +205,8 @@ export async function viettelPostHealth() {
     webhookNotApplied: Number(notApplied[0].n),
     /** Gói tin chưa xử lý được, đang chờ xử lý lại. */
     unresolvedWebhooks: Number(unresolved[0].n),
+    /** Trạng thái ĐVVC gửi tới mà ERP chưa có trong bảng mã — phải bổ sung, không được đoán. */
+    unknownStatuses: unknownStatuses.map((r) => ({ status: r.status, count: Number(r.n), lastAt: r.lastAt ? new Date(r.lastAt) : null })),
   };
 }
 

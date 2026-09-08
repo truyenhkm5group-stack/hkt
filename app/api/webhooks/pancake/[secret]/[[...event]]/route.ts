@@ -4,7 +4,7 @@ import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { clearMemo } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { str } from "@/lib/integrations/http";
-import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook } from "@/lib/integrations/pancake/webhook";
+import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +32,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
     const value = request.headers.get(key);
     if (value) headers[key] = value;
   }
-  const eventId = await storeWebhook("PANCAKE", kind, externalId, payload, headers);
+  // Danh tính gói tin gồm cả mốc cập nhật: Pancake đẩy lại NGUYÊN bản ghi mỗi lần đơn đổi, nên
+  // chống trùng chỉ theo id sẽ nuốt mất các lần cập nhật sau. Thiếu mốc thì không chống trùng.
+  const updatedAt = str(payload.updated_at, payload.updated_at_external, payload.last_update_status_at) || null;
+  const stored = await storeWebhook("PANCAKE", kind, externalId, payload, headers, {
+    dedupeKey: webhookDedupeKey("PANCAKE", [kind, externalId, updatedAt]),
+    occurredAt: updatedAt ? new Date(updatedAt) : null,
+  });
   after(async () => {
-    await processPancakeWebhook(eventId);
+    await processPancakeWebhook(stored.id);
     clearMemo();
       scheduleAlertEvaluation();
   });
-  return NextResponse.json({ ok: true, received: kind, id: eventId });
+  return NextResponse.json({ ok: true, received: kind, id: stored.id, duplicate: stored.duplicate });
 }
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ secret: string; event?: string[] }> }) {

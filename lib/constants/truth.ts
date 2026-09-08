@@ -112,7 +112,7 @@ export const sqlSourceList = (sources: readonly string[]) => sources.map((s) => 
 export const LEG_TYPES = ["OUTBOUND", "RETURN", "UNKNOWN"] as const;
 export type LegType = (typeof LEG_TYPES)[number];
 
-export function legTypeFromReturningFlag(isReturning: boolean | null | undefined): LegType | null {
+export function legTypeFromReturningFlag(isReturning: boolean | null | undefined): "OUTBOUND" | "RETURN" | null {
   if (isReturning === null || isReturning === undefined) return null;
   return isReturning ? "RETURN" : "OUTBOUND";
 }

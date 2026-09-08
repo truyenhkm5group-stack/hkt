@@ -1062,10 +1062,28 @@ export const webhookEvents = pgTable(
     headers: jsonb("headers"),
     status: text("status").notNull().default("RECEIVED"),
     error: text("error"),
+    /**
+     * MỐC CỦA SỰ KIỆN (giờ ĐVVC / Pancake), khác hẳn `received_at` là giờ ERP nhận gói tin.
+     * Thiếu nó thì một gói tin xử lý lỗi không tra được nó thuộc thời điểm nào nếu không mở payload.
+     */
+    occurredAt: ts("occurred_at"),
+    /**
+     * KHOÁ CHỐNG TRÙNG của gói tin: nguồn + mã vận đơn + trạng thái + mốc sự kiện.
+     * Viettel Post thử lại tối đa 5 lần nên cùng một sự việc tới nhiều lần; không có khoá này thì
+     * mỗi lần thử lại đẻ thêm một dòng và con số "đã nhận / đã xử lý" trên trang Kết nối dữ liệu
+     * không còn đọc được. NULL = gói tin không đủ thông tin để nhận dạng, vẫn được lưu.
+     */
+    dedupeKey: text("dedupe_key"),
     receivedAt: ts("received_at").notNull().defaultNow(),
     processedAt: ts("processed_at"),
+    /** Số lần cùng một gói tin được gửi lại (1 = lần đầu). */
+    deliveryCount: integer("delivery_count").notNull().default(1),
   },
-  (t) => [index("webhook_events_source_received_idx").on(t.source, t.receivedAt), index("webhook_events_status_idx").on(t.status)],
+  (t) => [
+    index("webhook_events_source_received_idx").on(t.source, t.receivedAt),
+    index("webhook_events_status_idx").on(t.status),
+    uniqueIndex("webhook_events_dedupe_uq").on(t.dedupeKey),
+  ],
 );
 
 export const integrationTokens = pgTable("integration_tokens", {

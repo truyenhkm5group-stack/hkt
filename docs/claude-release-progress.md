@@ -11,7 +11,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 |---|---|---|---|
 | 1 | Kiểm toán kiến trúc & data truth | ✅ xong | `docs: audit ERP data truth architecture` |
 | 2 | Chuẩn hoá lớp chân lý nghiệp vụ | ✅ xong | `feat: centralize canonical order shipment payment truth` |
-| 3 | Cứng hoá nạp dữ liệu Viettel Post | ⏳ | |
+| 3 | Cứng hoá nạp dữ liệu Viettel Post | ✅ xong | `feat: harden ViettelPost event ingestion` |
 | 4 | Bộ máy đối soát | ⏳ | |
 | 5 | Lớp chân lý chỉ số | ⏳ | |
 | 6 | Dry-run lịch sử + backfill an toàn | ⏳ | |
@@ -65,6 +65,30 @@ Thêm `OUTCOME_GROUP` / `isFinishedOutcome()` để màn hình thôi liệt kê 
 
 `tests/canonical-truth.test.ts` khoá đủ 8 tình huống kế hoạch yêu cầu, cộng kiểm tra bảng đăng ký
 khớp enum trong schema.
+
+### TASK 3 — Cứng hoá nạp dữ liệu Viettel Post
+
+Đóng F3, F6, F7.
+
+- **F3** — bước hành trình nay có cờ chiều. `normalizeTracking` đọc `IS_RETURNING` của TỪNG bước;
+  `journeyLegType()` chỉ gán cờ khi bước có cờ riêng, hoặc khi bước mang MÃ TRẠNG THÁI CUỐI thì
+  lấy cờ của bản ghi chính. Bước trung gian để trống — một vận đơn đi rồi quay về có cả hai chiều
+  trong cùng hành trình, gán bừa sẽ hỏng các mốc "lần đầu lấy hàng / lần đầu đi phát".
+- **Một hàm duy nhất ghi trạng thái vận đơn.** `applyVtpTracking` thôi ghi
+  `stage / vtp_status* / is_final / các mốc`; chỉ `materializeShipmentState()` ghi, và nó dựng từ
+  lịch sử. Trước đây hai chỗ cùng ghi nên luồng chạy sau thắng kể cả khi mang sự kiện cũ hơn.
+- **F6/F7** — `webhook_events` thêm `dedupe_key` (unique), `occurred_at`, `delivery_count`
+  (migration `0032_webhook_dedupe.sql`, viết tay idempotent). Lần gửi lại rơi vào đúng dòng cũ và
+  vẫn được xử lý lại (xử lý vốn idempotent) nên gói tin hỏng lần đầu còn cơ hội chữa.
+- **Trạng thái lạ nhìn thấy được**: `viettelPostHealth()` trả `unknownStatuses` + `redelivered`,
+  hiển thị trên trang Kết nối dữ liệu.
+
+`tests/vtp-ingestion.test.ts` khoá cả bốn điểm, kèm kiểm tra mã nguồn để `applyVtpTracking` không
+lặng lẽ ghi lại `stage` trong tương lai.
+
+Lưu ý về migration: `drizzle-kit generate` sinh ra bản gộp cả 0027–0031 (những migration viết tay
+chưa có snapshot) — chạy nguyên bản đó sẽ `CREATE TABLE` đè lên bảng production. Đã thay bằng bản
+viết tay chỉ chứa thay đổi của 0032, đúng lối idempotent các migration 0025–0031 đang dùng.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

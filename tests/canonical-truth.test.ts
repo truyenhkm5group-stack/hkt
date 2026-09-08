@@ -43,7 +43,7 @@ const track = (orderNumber: string, status: number, statusName: string, at: stri
   receiverAddress: "",
   employeeName: "",
   employeePhone: "",
-  journey: [] as { status: number | null; statusName: string; location: string; note: string; occurredAt: Date | null; raw: Record<string, unknown> }[],
+  journey: [] as { status: number | null; statusName: string; location: string; note: string; occurredAt: Date | null; isReturning: boolean | null; raw: Record<string, unknown> }[],
   raw: {},
   ...extra,
 });

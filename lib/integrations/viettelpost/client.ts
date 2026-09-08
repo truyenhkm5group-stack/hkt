@@ -35,7 +35,7 @@ export type VtpTrackingRecord = {
   receiverAddress: string;
   employeeName: string;
   employeePhone: string;
-  journey: { status: number | null; statusName: string; location: string; note: string; occurredAt: Date | null; raw: Record<string, unknown> }[];
+  journey: { status: number | null; statusName: string; location: string; note: string; occurredAt: Date | null; isReturning: boolean | null; raw: Record<string, unknown> }[];
   raw: Record<string, unknown>;
 };
 
@@ -263,6 +263,11 @@ export function normalizeTracking(data: Record<string, unknown>, fallbackOrderNu
       location: str(r.LOCATION_CURRENTLY, r.LOCALION_CURRENTLY, r.LOCATION, r.location),
       note: str(r.NOTE, r.note),
       occurredAt: vtpDate(r.ORDER_STATUSDATE ?? r.STATUS_DATE ?? r.DATE ?? r.date ?? r.TIME),
+      /**
+       * Cờ chiều đi / chiều hoàn CỦA CHÍNH BƯỚC HÀNH TRÌNH, nếu Viettel Post có gửi.
+       * Không có thì để null — lớp trên sẽ quyết định, và không bao giờ đoán (xem sync.ts).
+       */
+      isReturning: r.IS_RETURNING === null || r.IS_RETURNING === undefined ? null : Boolean(r.IS_RETURNING),
       raw: r,
     };
   });

@@ -248,6 +248,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               {formatNumber(vtpHealth.webhooks.last7d)} trong 7 ngày · tổng {formatNumber(vtpHealth.webhooks.total)}
               {vtpHealth.webhooks.failed ? <span className="text-destructive"> · {formatNumber(vtpHealth.webhooks.failed)} xử lý lỗi</span> : null}
               {vtpHealth.webhooks.ignored ? <span className="text-warning"> · {formatNumber(vtpHealth.webhooks.ignored)} không khớp vận đơn</span> : null}
+              {vtpHealth.webhooks.redelivered ? <span className="block">{formatNumber(vtpHealth.webhooks.redelivered)} lần Viettel Post gửi lại (đã gộp, không đếm trùng)</span> : null}
             </p>
           </div>
           <div className="rounded-xl border p-4">
@@ -267,6 +268,12 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               {vtpHealth.stageMismatch ? <span className="text-destructive"> · {formatNumber(vtpHealth.stageMismatch)} lệch trạng thái</span> : null}
               {vtpHealth.webhookNotApplied ? <span className="block text-destructive">{formatNumber(vtpHealth.webhookNotApplied)} vận đơn có webhook mới hơn trạng thái đang lưu</span> : null}
               {vtpHealth.unresolvedWebhooks ? <span className="block text-warning">{formatNumber(vtpHealth.unresolvedWebhooks)} gói tin chưa xử lý được — chờ xử lý lại</span> : null}
+              {vtpHealth.unknownStatuses.length ? (
+                <span className="block text-warning">
+                  {vtpHealth.unknownStatuses.length} mã trạng thái ERP chưa hiểu: {vtpHealth.unknownStatuses.slice(0, 5).map((u) => `${u.status} (${formatNumber(u.count)})`).join(", ")}
+                  {vtpHealth.unknownStatuses.length > 5 ? "…" : ""}
+                </span>
+              ) : null}
             </p>
           </div>
         </div>
