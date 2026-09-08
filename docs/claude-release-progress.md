@@ -22,7 +22,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 11 | Chỉ số theo mẫu mã | ✅ xong | `feat: add product variant performance intelligence` |
 | 12 | Hàng đợi việc theo mức ưu tiên | ✅ xong | `feat: add prioritized ERP action queue` |
 | 13 | Tổng quan ra quyết định | ✅ xong | `feat: optimize ERP management dashboard` |
-| 14 | ROAS theo kết quả đơn | ⏳ | |
+| 14 | ROAS theo kết quả đơn | ✅ xong | `feat: add COD-aware ads profitability metrics` |
 | 15 | Sức khoẻ tích hợp | ⏳ | |
 | 16 | Hiệu năng | ⏳ | |
 | 17 | Nhật ký truy vết | ⏳ | |
@@ -271,6 +271,20 @@ phải tiền trong tài khoản") · việc cần xử lý · **dữ liệu sai
 
 Mọi thẻ bấm được và mở đúng TẬP ĐƠN đã sinh ra con số đó. Con số lấy từ đúng nơi định nghĩa
 (`financial-truth.ts`, `control-tower.ts`), không tính lại — khoá bằng kiểm thử.
+
+### TASK 14 — ROAS theo kết quả đơn
+
+`lib/queries/ads-roas.ts` tính bốn mức ROAS theo chiến dịch (hoặc từng mẩu quảng cáo), luôn giảm
+dần: **lên đơn → giao thành công → tiền về → lợi nhuận góp**. Chỗ tụt nhiều nhất chính là vấn đề.
+
+Với shop bán COD, ROAS theo doanh thu lên đơn là con số vô nghĩa: đơn có thể hoàn, và phần giao
+được thì tiền còn nằm ở ĐVVC hàng tuần.
+
+KHÔNG BỊA QUY KẾT: chỉ đơn có `ad_id` mới được gán. Đơn không có `ad_id`, đơn có `ad_id` lạ, và
+tiền quảng cáo của chiến dịch không có đơn nào — cả ba đều đếm riêng và hiển thị, không chia đều
+cho các chiến dịch để bảng trông đẹp.
+
+Chưa tiêu đồng nào thì ROAS trả `null` (chia cho 0 là vô nghĩa), không phải 0.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
