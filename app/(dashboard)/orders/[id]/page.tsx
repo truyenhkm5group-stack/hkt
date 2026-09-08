@@ -7,6 +7,8 @@ import { ExternalLink, MapPin, Phone, ShoppingBag, Truck, User } from "lucide-re
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
+import { EntityTimeline } from "@/components/entity-timeline";
+import { getOrderTimeline } from "@/lib/queries/entity-timeline";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncOrderButton } from "@/components/sync-order-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
@@ -29,6 +31,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   await requirePermission("orders:read");
   const { id } = await params;
   const order = await getOrderDetail(id);
+  const timeline = order ? await getOrderTimeline(order.id) : [];
   const riskCfg = await loadAlertConfig();
   const erpHist = order ? await erpHistoryByPhone([order.billPhone ?? ""], order.id) : { delivered: 0, returned: 0 };
   const risk = order ? assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg) : null;
@@ -168,6 +171,17 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             ) : (
               <p className="text-sm text-muted-foreground">Khi Pancake đẩy đơn sang Viettel Post, mã vận đơn và hành trình sẽ xuất hiện tại đây.</p>
             )}
+          </SectionCard>
+
+          {/* DÒNG THỜI GIAN TRUY VẾT — gộp năm chiều sự thật vào một chỗ, mỗi mốc mang theo nguồn
+              và sức nặng của nguồn đó. Trước đây muốn hiểu vì sao một con số trông sai thì phải mở
+              năm nơi khác nhau rồi tự xếp theo thời gian trong đầu. */}
+          <SectionCard
+            title="Dòng thời gian đầy đủ"
+            description="Đơn · giao vận · tiền · kho · người dùng — xếp theo thời gian, ghi rõ nguồn"
+            hint="Cùng một câu 'đã giao': Viettel Post nói thì QUYẾT ĐỊNH kết quả đơn, Pancake nói thì chỉ là bối cảnh. Nhãn nguồn cạnh mỗi mốc nói rõ điều đó, để không ai kết luận sai từ một dòng trông có vẻ đủ."
+          >
+            <EntityTimeline entries={timeline} />
           </SectionCard>
 
           <SectionCard title="Lịch sử trạng thái" description="Ghi nhận từ Pancake POS" padded={false}>
