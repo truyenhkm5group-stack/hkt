@@ -89,6 +89,20 @@ export async function testAdsRoas(db: Db) {
     assert.ok(ROAS_LABEL[key] && ROAS_HINT[key].length > 30, `${key} phải có nhãn và giải thích`);
   }
 
+  // ───────── CAC: chi phí thu hút một khách ─────────
+  // CAC giao thành công LUÔN cao hơn hoặc bằng CAC lên đơn, vì mẫu số nhỏ hơn. Khoảng cách giữa hai
+  // con số chính là tiền đã trả cho những đơn hoàn — với shop bán COD đó thường là chỗ lỗ.
+  for (const row of r.rows) {
+    if (row.cacBooked !== null && row.cacDelivered !== null) {
+      assert.ok(row.cacDelivered >= row.cacBooked, `${row.name}: CAC giao thành công không thể rẻ hơn CAC lên đơn`);
+    }
+    // Không có đơn thì KHÔNG có CAC — chia cho 0 là vô nghĩa, không phải bằng 0.
+    if (row.bookedOrders === 0) assert.equal(row.cacBooked, null, `${row.name}: chưa có đơn nào thì không có CAC`);
+    if (row.deliveredOrders === 0) assert.equal(row.cacDelivered, null, `${row.name}: chưa giao đơn nào thì không có CAC giao thành công`);
+    // CAC phải khớp đúng định nghĩa, không phải một con số gần đúng.
+    if (row.cacBooked !== null) assert.equal(row.cacBooked, Math.round(row.spend / row.bookedOrders), `${row.name}: CAC lên đơn phải bằng chi QC ÷ số đơn`);
+  }
+
   console.log(
     `✓ ROAS theo kết quả đơn: ${r.rows.length} chiến dịch · chi ${r.totals.spend}đ · ${r.unmapped.ordersWithoutAd} đơn không có ad_id hiện riêng, không chia đều`,
   );

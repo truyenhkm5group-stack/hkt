@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { getAdsAttributionAudit } from "@/lib/queries/ads-attribution";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
-import { ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
+import { CAC_HINT, CAC_LABEL, ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
 import { successTone } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -37,7 +37,7 @@ export async function RoasSection({ period }: { period: Period }) {
       padded={false}
     >
       <div className="overflow-x-auto">
-        <Table className="min-w-[900px]">
+        <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead>Chiến dịch</TableHead>
@@ -49,6 +49,14 @@ export async function RoasSection({ period }: { period: Period }) {
                   <span className="inline-flex items-center gap-1">
                     {ROAS_LABEL[key]}
                     <InfoHint>{ROAS_HINT[key]}</InfoHint>
+                  </span>
+                </TableHead>
+              ))}
+              {(["cacBooked", "cacDelivered"] as const).map((key) => (
+                <TableHead key={key} className="text-right whitespace-nowrap">
+                  <span className="inline-flex items-center gap-1">
+                    {CAC_LABEL[key]}
+                    <InfoHint>{CAC_HINT[key]}</InfoHint>
                   </span>
                 </TableHead>
               ))}
@@ -69,6 +77,9 @@ export async function RoasSection({ period }: { period: Period }) {
                 <TableCell className="text-right"><Roas value={row.deliveredRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.cashRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.contributionRoas} /></TableCell>
+                <TableCell className="numeric text-right whitespace-nowrap">{row.cacBooked === null ? "—" : formatVND(row.cacBooked)}</TableCell>
+                {/* CAC giao thành công luôn cao hơn CAC lên đơn; khoảng cách chính là tiền trả cho đơn hoàn. */}
+                <TableCell className="numeric text-right whitespace-nowrap font-medium">{row.cacDelivered === null ? "—" : formatVND(row.cacDelivered)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

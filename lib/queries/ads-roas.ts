@@ -47,6 +47,19 @@ export type RoasRow = {
   deliveredRoas: number | null;
   cashRoas: number | null;
   contributionRoas: number | null;
+  /**
+   * CHI PHÍ THU HÚT MỘT KHÁCH (đồng). Nghịch đảo của ROAS nhưng trả lời câu hỏi khác: "một đơn/một
+   * khách nhận hàng tốn bao nhiêu tiền quảng cáo". Chủ shop so nó với lãi gộp một đơn để biết còn
+   * chạy được không.
+   *
+   * `null` khi chưa có đơn nào — chia cho 0 là vô nghĩa, KHÔNG phải 0.
+   */
+  cacBooked: number | null;
+  /**
+   * Đắt hơn `cacBooked` đúng bằng phần đơn hoàn: đây mới là số tiền thật đã bỏ ra cho MỘT KHÁCH
+   * CẦM ĐƯỢC HÀNG. Với shop bán COD, khoảng cách giữa hai con số này thường là chỗ lỗ.
+   */
+  cacDelivered: number | null;
 };
 
 export type AdsRoas = {
@@ -129,12 +142,15 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
     const deliveredOrders = Number(r.deliveredOrders ?? 0);
     const returnedOrders = Number(r.returnedOrders ?? 0);
     const ratio = (value: number) => (spend > 0 ? Math.round((value / spend) * 100) / 100 : null);
+    // CAC: tiền quảng cáo trên MỘT đơn. Không có đơn thì không có CAC — không phải CAC bằng 0.
+    const perOrder = (count: number) => (count > 0 ? Math.round(spend / count) : null);
+    const bookedOrders = Number(r.bookedOrders ?? 0);
     rows.push({
       key,
       name: r.name || key,
       level,
       spend,
-      bookedOrders: Number(r.bookedOrders ?? 0),
+      bookedOrders,
       bookedRevenue,
       deliveredOrders,
       deliveredRevenue,
@@ -146,6 +162,8 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       deliveredRoas: ratio(deliveredRevenue),
       cashRoas: ratio(cash),
       contributionRoas: ratio(contribution),
+      cacBooked: perOrder(bookedOrders),
+      cacDelivered: perOrder(deliveredOrders),
     });
   }
 
@@ -172,6 +190,10 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
         deliveredRoas: 0,
         cashRoas: 0,
         contributionRoas: -1,
+        // Tiêu tiền mà không đơn nào: CAC là vô hạn, không phải một con số. Để `null` và hiện "—",
+        // vì in ra một số ở đây sẽ bị đọc nhầm thành "chi phí mỗi đơn".
+        cacBooked: null,
+        cacDelivered: null,
       });
     }
   }
@@ -215,6 +237,17 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
 export async function getAdsRoas(period: Period, level: RoasLevel = "campaign"): Promise<AdsRoas> {
   return memo(`adsRoas:${periodKey(period)}:${level}`, 90_000, () => roasUncached(period, level));
 }
+
+export const CAC_LABEL = {
+  cacBooked: "CAC lên đơn",
+  cacDelivered: "CAC giao thành công",
+} as const;
+
+export const CAC_HINT = {
+  cacBooked: "Chi quảng cáo ÷ số đơn đã lên. Trả lời 'một đơn tốn bao nhiêu tiền quảng cáo'.",
+  cacDelivered:
+    "Chi quảng cáo ÷ số đơn ĐÃ TỚI TAY KHÁCH. Đây mới là tiền thật bỏ ra cho một khách cầm được hàng; khoảng cách với CAC lên đơn chính là phần trả cho những đơn hoàn. So nó với lãi gộp một đơn để biết còn chạy được không.",
+} as const;
 
 export const ROAS_LABEL = {
   orderRoas: "ROAS lên đơn",
