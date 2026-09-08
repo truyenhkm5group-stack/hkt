@@ -21,7 +21,7 @@
  *    Mọi lệch GIỮA HAI CHIỀU đều chỉ báo cáo: máy không biết bên nào đúng.
  *  · Mỗi lần sửa đều ghi `audit_logs` để truy nguyên được.
  */
-import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { codStatusForAmount } from "@/lib/constants/cod";
