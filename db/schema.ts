@@ -230,12 +230,23 @@ export const notifications = pgTable(
     /** ĐÃ TIẾP NHẬN: có người nhìn thấy và nhận xử lý — khác "đã đọc" và khác "đã xong". */
     acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
     acknowledgedAt: ts("acknowledged_at"),
+    /** ĐANG LÀM: đã bắt tay vào việc. Khác "đã tiếp nhận" — giơ tay không phải là đang chạy. */
+    startedAt: ts("started_at"),
+    startedBy: text("started_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * BỎ QUA: đã xem và quyết định KHÔNG làm. Bắt buộc kèm lý do (ràng buộc CHECK ở migration
+     * 0037) — gạt một việc đi mà không nói vì sao là xoá bằng chứng lặng lẽ.
+     */
+    ignoredAt: ts("ignored_at"),
+    ignoredBy: text("ignored_by").references(() => users.id, { onDelete: "set null" }),
+    ignoredReason: text("ignored_reason").notNull().default(""),
     createdAt: createdAt(),
   },
   (t) => [
     index("notifications_open_idx").on(t.resolvedAt, t.createdAt),
     index("notifications_kind_idx").on(t.kind),
     index("notifications_assigned_idx").on(t.assignedTo, t.resolvedAt),
+    index("notifications_workflow_idx").on(t.resolvedAt, t.ignoredAt, t.startedAt),
   ],
 );
 

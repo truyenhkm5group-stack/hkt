@@ -75,8 +75,13 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     }
   }
 
+  // ĐƠN NẰM IM QUÁ LÂU — TÁCH LÀM HAI VIỆC KHÁC NHAU.
+  //
+  // Trước đây gộp chung một loại "đơn chờ xử lý". Nhưng đơn CHƯA chốt và đơn ĐÃ chốt mà chưa gửi là
+  // hai việc của hai người: cái đầu CSKH phải gọi khách xác nhận, cái sau kho phải đóng gói và đẩy
+  // sang ĐVVC. Gộp lại thì không ai biết việc nào của mình, và cả hai cùng trôi.
   if (cfg.enabled.pending) {
-    activeKinds.push("ORDER_PENDING");
+    activeKinds.push("ORDER_PENDING", "ORDER_CONFIRMED_STALE");
     const cutoff = new Date(Date.now() - cfg.pendingHours * 3_600_000);
     const rows = await db
       .select({ ...orderCols, shipmentStage: s.stage })
@@ -86,14 +91,18 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .limit(500);
     for (const r of rows) {
       const hours = Math.floor((Date.now() - new Date(r.insertedAt).getTime()) / 3_600_000);
+      const confirmed = r.stage === "CONFIRMED" || r.stage === "PACKING" || r.stage === "READY_TO_SHIP";
       candidates.push({
-        kind: "ORDER_PENDING",
+        kind: confirmed ? "ORDER_CONFIRMED_STALE" : "ORDER_PENDING",
         severity: hours >= cfg.pendingHours * 2 ? "critical" : "warning",
-        title: `Đơn chờ xử lý ${hours} giờ · ${orderLabel(r)}`,
-        body: `Trạng thái ${r.stage} · lên đơn ${new Date(r.insertedAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · chưa xác nhận / chưa giao ĐVVC`,
+        title: confirmed ? `Đã chốt ${hours} giờ chưa gửi hàng · ${orderLabel(r)}` : `Đơn chờ xử lý ${hours} giờ · ${orderLabel(r)}`,
+        body: confirmed
+          ? `Trạng thái ${r.stage} · chốt đơn ${new Date(r.insertedAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · khách đã đồng ý mua nhưng chưa có vận đơn — kho cần đóng gói và đẩy sang Viettel Post`
+          : `Trạng thái ${r.stage} · lên đơn ${new Date(r.insertedAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · chưa xác nhận / chưa giao ĐVVC`,
         href: `/orders/${r.id}`,
         entityType: "ORDER",
         entityId: r.id,
+        // Khoá giữ nguyên tiền tố cũ để việc đang mở không bị đóng rồi tạo lại khi bản này lên.
         dedupeKey: `order-pending:${r.id}`,
         occurredAt: r.insertedAt,
       });
@@ -294,6 +303,44 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       // bỏ qua nếu chưa có dữ liệu khách
     }
   }
+  // ───────── HÀNG HOÀN ĐÃ VỀ MÀ KHO CHƯA TÁI NHẬP ─────────
+  //
+  // Khoảng trống giữa "hàng về tới nơi" và "hàng có mặt trong tồn". Theo luật kho, hàng hoàn KHÔNG
+  // tự vào tồn khi ĐVVC báo đã hoàn — chỉ phiếu tái nhập với số ĐẾM THỰC TẾ mới cộng tồn. Nên mỗi
+  // vận đơn còn nằm đây là một lô hàng có thật trong kho mà ERP đang không đếm: kế hoạch sản xuất
+  // sẽ đặt thừa đúng bằng lượng đó.
+  //
+  // CHỈ báo sau ngưỡng ngày: hàng vừa về hôm qua chưa kịp kiểm đếm là bình thường, không phải việc.
+  if (cfg.enabled.returnInspection) {
+    activeKinds.push("RETURN_PENDING_INSPECTION");
+    try {
+      const cutoff = new Date(Date.now() - Math.max(1, cfg.returnInspectionDays) * 86_400_000);
+      const rows = await db
+        .select({ ...orderCols, shipmentId: s.id, code: s.vtpOrderNumber, tracking: s.trackingCode, returnedAt: s.returnedAt, items: sql<number>`(select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})` })
+        .from(s)
+        .leftJoin(o, eq(o.id, s.orderId))
+        .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), sql`${s.orderId} is not null`, sql`coalesce(${s.returnedAt}, ${s.updatedAt}) <= ${cutoff.toISOString()}::timestamptz`))
+        .orderBy(sql`coalesce(${s.returnedAt}, ${s.updatedAt}) asc`)
+        .limit(200);
+      for (const r of rows) {
+        const days = Math.floor((Date.now() - new Date(r.returnedAt ?? cutoff).getTime()) / 86_400_000);
+        candidates.push({
+          kind: "RETURN_PENDING_INSPECTION",
+          severity: days >= cfg.returnInspectionDays * 3 ? "critical" : "warning",
+          title: `Hàng hoàn về ${days} ngày chưa tái nhập · ${r.code ?? r.tracking ?? r.shipmentId}`,
+          body: `${r.id ? orderLabel(r) : "Vận đơn ngoài Pancake"} · ${Number(r.items ?? 0)} món đang không được đếm trong tồn — kiểm đếm thực tế rồi lập phiếu tái nhập.`,
+          href: "/data-quality?issue=return-not-received",
+          entityType: "SHIPMENT",
+          entityId: r.shipmentId,
+          dedupeKey: `return-inspect:${r.shipmentId}`,
+          occurredAt: r.returnedAt,
+        });
+      }
+    } catch {
+      // chưa có dữ liệu vận đơn hoàn
+    }
+  }
+
   // ───────── QUÁ HẠN MÀ TIỀN CHƯA VỀ ─────────
   // Không phải cảnh báo giao vận: đây là việc ĐÒI TIỀN. Trước đây chỉ nằm trong một con số trên
   // trang Đối soát COD nên không ai cầm việc, và tiền cứ treo.

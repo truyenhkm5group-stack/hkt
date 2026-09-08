@@ -2,9 +2,11 @@ import { desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
   CASE_ACTION,
+  RECOVERABILITY,
   CASE_TYPE_LABEL,
   ageLabel,
   caseScore,
+  caseStatusOf,
   caseTypeOf,
   priorityOf,
   type CasePriority,
@@ -18,11 +20,14 @@ import {
  * Nguồn là bảng `notifications` (đã có cơ chế chống trùng và tự đóng khi điều kiện hết), nên
  * không sinh thêm một bảng việc thứ hai để rồi hai nơi lệch nhau.
  *
- * BA TRẠNG THÁI TÁCH BẠCH, và trước đây chúng bị gộp làm một:
- *  · ĐÃ ĐỌC        — có người nhìn thấy (`read_by`);
- *  · ĐÃ TIẾP NHẬN  — có người nhận xử lý (`acknowledged_*`);
- *  · ĐÃ XONG       — việc đã xử lý xong (`resolved_at`).
- * "Đọc rồi" không có nghĩa là "có người làm".
+ * NĂM TRẠNG THÁI TÁCH BẠCH, và trước đây chúng bị gộp:
+ *  · ĐÃ ĐỌC        — có người nhìn thấy (`read_by`), KHÔNG phải một trạng thái việc;
+ *  · CHƯA AI NHẬN  — việc đang trôi;
+ *  · ĐÃ TIẾP NHẬN  — có người nhận (`acknowledged_*`);
+ *  · ĐANG LÀM      — đã bắt tay vào (`started_*`);
+ *  · ĐÃ XONG       — xử lý xong (`resolved_at`);
+ *  · BỎ QUA        — cố ý không làm, CÓ LÝ DO (`ignored_*`).
+ * "Đọc rồi" không có nghĩa là "có người làm", và "bỏ qua" không phải "đã xong".
  */
 
 const n = schema.notifications;
@@ -48,6 +53,13 @@ export type ActionCase = {
   acknowledgedBy: string | null;
   recommendedAction: string;
   href: string;
+  /** Tiền đang treo ở việc này (đồng). 0 = không tra được / không phải việc về tiền. */
+  financialImpact: number;
+  /** Khả năng hành động bây giờ còn cứu được kết quả (0–1). */
+  recoverability: number;
+  /** Bằng chứng: việc này từ đâu ra, dựa trên cái gì. Không có bằng chứng thì không phải việc. */
+  evidence: { source: string; detail: string };
+  ignoredReason: string;
 };
 
 export type ActionQueue = {
@@ -58,6 +70,23 @@ export type ActionQueue = {
   unassigned: number;
   /** Việc quá 3 ngày chưa ai nhận. */
   neglected: number;
+  /** Tổng tiền đang treo ở toàn bộ việc đang mở. */
+  financialImpact: number;
+};
+
+/**
+ * BẰNG CHỨNG của mỗi loại việc: con số này từ đâu ra.
+ *
+ * Một việc không nói được nó dựa trên cái gì thì người vận hành không có cách nào kiểm chứng, và
+ * hàng đợi trở lại thành danh sách đọc rồi bỏ.
+ */
+const EVIDENCE_SOURCE: Record<string, string> = {
+  ORDER: "Đơn Pancake",
+  SHIPMENT: "Vận đơn + sự kiện Viettel Post",
+  DATA_RULE: "Luật chất lượng dữ liệu",
+  CS_CASE: "Case CSKH",
+  VARIANT: "Sổ kho ERP",
+  AD_ACCOUNT: "Tài khoản quảng cáo Meta",
 };
 
 /** Số tiền liên quan tới việc, nếu tra được — dùng cho phần "giá trị tiền" của điểm ưu tiên. */
@@ -97,6 +126,9 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       assignedAt: n.assignedAt,
       acknowledgedBy: n.acknowledgedBy,
       acknowledgedAt: n.acknowledgedAt,
+      startedAt: n.startedAt,
+      ignoredAt: n.ignoredAt,
+      ignoredReason: n.ignoredReason,
       ownerName: schema.users.name,
       ownerEmail: schema.users.email,
     })
@@ -128,11 +160,15 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       detectedAt,
       ageHours,
       ageLabel: ageLabel(ageHours),
-      status: r.acknowledgedAt ? "ACKNOWLEDGED" : "OPEN",
+      status: caseStatusOf(r),
       owner: r.assignedTo ? { id: r.assignedTo, name: r.ownerName || r.ownerEmail || r.assignedTo } : null,
       acknowledgedBy: r.acknowledgedBy,
       recommendedAction: CASE_ACTION[type],
       href: r.href,
+      financialImpact: amounts.get(r.entityId) ?? 0,
+      recoverability: RECOVERABILITY[type],
+      evidence: { source: EVIDENCE_SOURCE[r.entityType] ?? "Hệ thống ERP", detail: r.body },
+      ignoredReason: r.ignoredReason ?? "",
     };
   });
 
@@ -142,9 +178,13 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
   const byTypeMap = new Map<CaseType, number>();
   let unassigned = 0;
   let neglected = 0;
+  let financialImpact = 0;
   for (const c of cases) {
     totals[c.priority] += 1;
     byTypeMap.set(c.type, (byTypeMap.get(c.type) ?? 0) + 1);
+    // Việc đã "Bỏ qua" có người quyết định rồi: không cộng tiền, không tính là đang trôi.
+    if (c.status === "IGNORED") continue;
+    financialImpact += c.financialImpact;
     if (!c.owner) {
       unassigned += 1;
       if (c.ageHours > 72) neglected += 1;
@@ -154,5 +194,5 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     .map(([type, count]) => ({ type, label: CASE_TYPE_LABEL[type], count }))
     .sort((a, b) => b.count - a.count);
 
-  return { cases, totals, byType, unassigned, neglected };
+  return { cases, totals, byType, unassigned, neglected, financialImpact };
 }

@@ -15,6 +15,11 @@
 
 export type CaseType =
   | "NEW_ORDER_UNPROCESSED"
+  /**
+   * Đơn ĐÃ xác nhận nhưng nằm im chưa ra vận đơn. Tách khỏi "đơn mới chưa xử lý" vì hai việc này
+   * do hai người khác nhau làm: đơn mới là việc của CSKH, đơn đã chốt mà chưa gửi là việc của kho.
+   */
+  | "ORDER_CONFIRMATION_STALE"
   | "DELIVERY_FAILED"
   | "DELIVERY_STALE"
   | "RETURNING"
@@ -25,6 +30,18 @@ export type CaseType =
   | "ORDER_INCOMPLETE"
   | "RISKY_ORDER"
   | "ADS_BILLING"
+  /**
+   * ĐVVC báo hàng đã hoàn về nhưng kho CHƯA lập phiếu tái nhập. Đây là khoảng trống giữa "hàng về
+   * tới nơi" và "hàng có mặt trong tồn" — theo luật kho, hàng hoàn KHÔNG tự vào tồn, nên mỗi việc
+   * còn mở ở đây là một khoản hàng đang không ai đếm.
+   */
+  | "RETURN_RECEIVED_PENDING_INSPECTION"
+  /** Dự báo sắp cháy hàng theo tốc độ bán thực tế — khác "sắp hết hàng" tính theo ngưỡng tĩnh. */
+  | "STOCKOUT_RISK"
+  /** Chi quảng cáo bất thường so với doanh thu giao thành công. */
+  | "ADS_ANOMALY"
+  /** Lợi nhuận / đóng góp tụt dưới ngưỡng — cảnh báo mức kinh doanh, không phải mức vận hành. */
+  | "PROFITABILITY_ALERT"
   /** Không biết vận đơn nào thuộc đơn nào — người phải quyết, máy cố ý không đoán. */
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   /** Vận đơn có thật nhưng chưa ghép được đơn ERP nào. */
@@ -34,6 +51,11 @@ export type CaseType =
 /** Ánh xạ từ `notifications.kind` sang loại việc. Một chỗ duy nhất. */
 export const KIND_TO_CASE: Record<string, CaseType> = {
   ORDER_PENDING: "NEW_ORDER_UNPROCESSED",
+  ORDER_CONFIRMED_STALE: "ORDER_CONFIRMATION_STALE",
+  RETURN_PENDING_INSPECTION: "RETURN_RECEIVED_PENDING_INSPECTION",
+  STOCKOUT_RISK: "STOCKOUT_RISK",
+  ADS_ANOMALY: "ADS_ANOMALY",
+  PROFITABILITY_ALERT: "PROFITABILITY_ALERT",
   SHIPMENT_FAILED: "DELIVERY_FAILED",
   SHIPMENT_STALE: "DELIVERY_STALE",
   SHIPMENT_RETURNING: "RETURNING",
@@ -54,6 +76,11 @@ export function caseTypeOf(kind: string): CaseType {
 
 export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   NEW_ORDER_UNPROCESSED: "Đơn mới chưa xử lý",
+  ORDER_CONFIRMATION_STALE: "Đã chốt nhưng chưa gửi hàng",
+  RETURN_RECEIVED_PENDING_INSPECTION: "Hàng hoàn về · chưa tái nhập kho",
+  STOCKOUT_RISK: "Sắp cháy hàng theo tốc độ bán",
+  ADS_ANOMALY: "Quảng cáo bất thường",
+  PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
   DELIVERY_FAILED: "Giao thất bại · còn cứu được",
   DELIVERY_STALE: "Vận đơn treo lâu",
   RETURNING: "Đang chuyển hoàn",
@@ -78,7 +105,17 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   DELIVERY_FAILED: 1,
   ORDER_INCOMPLETE: 1,
   NEW_ORDER_UNPROCESSED: 0.9,
+  // Hàng còn trong kho, gửi ngay là xong — cứu được nguyên đơn.
+  ORDER_CONFIRMATION_STALE: 0.9,
   RISKY_ORDER: 0.9,
+  // Đếm và lập phiếu là trả lại được toàn bộ giá trị hàng vào tồn.
+  RETURN_RECEIVED_PENDING_INSPECTION: 0.9,
+  // Đặt sản xuất kịp thì không mất doanh thu nào.
+  STOCKOUT_RISK: 0.8,
+  // Tắt/sửa quảng cáo là chặn được tiền chảy tiếp.
+  ADS_ANOMALY: 0.8,
+  // Nhìn thấy sớm còn đổi được giá / bỏ mẫu lỗ.
+  PROFITABILITY_ALERT: 0.6,
   CS_CASE: 0.8,
   // Còn kịp giục ĐVVC phát lại.
   DELIVERY_STALE: 0.7,
@@ -99,6 +136,12 @@ export const RECOVERABILITY: Record<CaseType, number> = {
 
 export const CASE_ACTION: Record<CaseType, string> = {
   NEW_ORDER_UNPROCESSED: "Xác nhận đơn trên Pancake rồi đẩy sang Viettel Post.",
+  ORDER_CONFIRMATION_STALE: "Đơn đã chốt mà chưa có vận đơn — kho đóng gói và đẩy sang Viettel Post ngay.",
+  RETURN_RECEIVED_PENDING_INSPECTION:
+    "Kiểm đếm hàng hoàn thực nhận rồi lập phiếu tái nhập. Hàng hoàn KHÔNG tự vào tồn — chưa lập phiếu thì số tồn đang thiếu đúng bằng lô này.",
+  STOCKOUT_RISK: "Xem Kế hoạch SX: đặt sản xuất trước ngày dự báo cháy hàng, trừ đi thời gian sản xuất.",
+  ADS_ANOMALY: "Mở Báo cáo quảng cáo, đối chiếu chi tiêu với doanh thu giao thành công của đúng chiến dịch.",
+  PROFITABILITY_ALERT: "Mở Báo cáo lợi nhuận, soi mẫu mã / kênh đang kéo tụt đóng góp.",
   DELIVERY_FAILED: "Gọi khách xác nhận rồi báo bưu tá phát lại — đây là nhóm cứu được nhiều tiền nhất.",
   DELIVERY_STALE: "Tra lại trên Viettel Post; nếu vẫn im thì mở khiếu nại.",
   RETURNING: "Chuẩn bị nhận hàng hoàn và lập phiếu tái nhập khi hàng về tới kho.",
@@ -157,13 +200,47 @@ export function priorityOf(score: number): CasePriority {
   return "LOW";
 }
 
-export type CaseStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+/**
+ * NĂM TRẠNG THÁI, KHÔNG PHẢI BA.
+ *
+ * "Đã tiếp nhận" và "đang làm" là hai việc khác nhau: giơ tay không phải là đang chạy. Và "bỏ qua"
+ * phải tách khỏi "đã xong", nếu không người vận hành buộc phải bấm "xong" cho việc mình cố ý không
+ * làm — biến số "đã xong" thành con số vô nghĩa.
+ */
+export type CaseStatus = "OPEN" | "ACKNOWLEDGED" | "IN_PROGRESS" | "RESOLVED" | "IGNORED";
 
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   OPEN: "Chưa ai nhận",
   ACKNOWLEDGED: "Đã tiếp nhận",
+  IN_PROGRESS: "Đang làm",
   RESOLVED: "Đã xong",
+  IGNORED: "Bỏ qua có lý do",
 };
+
+export const CASE_STATUS_TONE: Record<CaseStatus, string> = {
+  OPEN: "bg-muted text-muted-foreground",
+  ACKNOWLEDGED: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+  IN_PROGRESS: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  RESOLVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  IGNORED: "bg-muted text-muted-foreground line-through",
+};
+
+/** Trạng thái còn phải làm — dùng cho mọi phép đếm "việc đang mở". */
+export const ACTIVE_CASE_STATUSES: CaseStatus[] = ["OPEN", "ACKNOWLEDGED", "IN_PROGRESS"];
+
+/** Suy ra trạng thái từ các mốc thời gian. Một chỗ duy nhất, thứ tự ưu tiên cố định. */
+export function caseStatusOf(row: {
+  resolvedAt?: Date | null;
+  ignoredAt?: Date | null;
+  startedAt?: Date | null;
+  acknowledgedAt?: Date | null;
+}): CaseStatus {
+  if (row.resolvedAt) return "RESOLVED";
+  if (row.ignoredAt) return "IGNORED";
+  if (row.startedAt) return "IN_PROGRESS";
+  if (row.acknowledgedAt) return "ACKNOWLEDGED";
+  return "OPEN";
+}
 
 /** Tuổi việc dạng chữ, đủ để đọc lướt. */
 export function ageLabel(hours: number): string {

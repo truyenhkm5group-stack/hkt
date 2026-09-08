@@ -48,7 +48,11 @@ export async function testActionQueue(db: Db) {
     assert.ok(c.recommendedAction.length > 10, `${c.id}: phải nói rõ nên làm gì`);
     assert.ok(c.detectedAt instanceof Date, `${c.id}: phải có thời điểm phát hiện`);
     assert.ok(c.ageHours >= 0 && c.ageLabel.length > 0, `${c.id}: phải có tuổi việc`);
-    assert.ok(["OPEN", "ACKNOWLEDGED", "RESOLVED"].includes(c.status));
+    assert.ok(["OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "RESOLVED", "IGNORED"].includes(c.status));
+    // Mỗi việc phải nói được nó dựa trên bằng chứng nào — không có bằng chứng thì không phải việc.
+    assert.ok(c.evidence.source.length > 0 && c.evidence.detail.length > 0, `${c.id}: phải có bằng chứng`);
+    assert.ok(c.financialImpact >= 0, `${c.id}: tiền liên quan không được âm`);
+    assert.ok(c.recoverability > 0 && c.recoverability <= 1, `${c.id}: phải biết còn cứu được bao nhiêu`);
     assert.ok(c.score >= 0 && c.score <= 100, `${c.id}: điểm ưu tiên phải trong 0–100`);
   }
   // Xếp giảm dần theo điểm — người mở trang làm từ trên xuống là đúng thứ tự.
@@ -59,7 +63,7 @@ export async function testActionQueue(db: Db) {
   assert.equal(totalByPriority, queue.cases.length, "tổng theo mức ưu tiên phải bằng tổng việc");
   assert.equal(queue.byType.reduce((t, r) => t + r.count, 0), queue.cases.length, "tổng theo loại phải bằng tổng việc");
 
-  // ───────── 3. Ba trạng thái tách bạch: đã đọc ≠ đã tiếp nhận ≠ đã xong ─────────
+  // ───────── 3. Năm trạng thái tách bạch: đã đọc ≠ tiếp nhận ≠ đang làm ≠ xong ≠ bỏ qua ─────────
   // Người thật để gán việc — cột người nhận có khoá ngoại sang users, cố ý để không gán cho
   // một cái tên không tồn tại rồi mất dấu trách nhiệm.
   const [owner] = await db
@@ -84,10 +88,41 @@ export async function testActionQueue(db: Db) {
   assert.equal(afterAck.cases.find((c) => c.id === target.id)?.status, "ACKNOWLEDGED", "đã tiếp nhận phải hiện đúng trạng thái");
   assert.equal(afterAck.cases.find((c) => c.id === target.id)?.owner?.id, owner.id, "phải biết ai đang cầm việc");
 
+  // ĐANG LÀM khác ĐÃ TIẾP NHẬN: giơ tay không phải là đang chạy.
+  await db.update(schema.notifications).set({ startedAt: new Date(), startedBy: owner.id }).where(eq(schema.notifications.id, target.id));
+  const afterStart = await getActionQueue({ limit: 200 });
+  assert.equal(afterStart.cases.find((c) => c.id === target.id)?.status, "IN_PROGRESS", "đã bắt tay vào phải khác với mới giơ tay");
+
+  // BỎ QUA khác ĐÃ XONG. Việc bỏ qua vẫn hiện (để còn lật lại được) nhưng không tính là đang trôi
+  // và không cộng tiền vào tổng — nếu gộp vào "đã xong" thì con số "đã xong" thành vô nghĩa.
+  const second = queue.cases.find((c) => c.id !== target.id && c.financialImpact > 0) ?? queue.cases[1];
+  if (second) {
+    await db
+      .update(schema.notifications)
+      .set({ ignoredAt: new Date(), ignoredBy: owner.id, ignoredReason: "Khách đã tự huỷ, không cần làm" })
+      .where(eq(schema.notifications.id, second.id));
+    const afterIgnore = await getActionQueue({ limit: 200 });
+    const ignored = afterIgnore.cases.find((c) => c.id === second.id);
+    assert.equal(ignored?.status, "IGNORED", "bỏ qua phải là trạng thái riêng, không phải đã xong");
+    assert.ok(ignored?.ignoredReason.length, "bỏ qua PHẢI có lý do — gạt việc đi không nói vì sao là xoá bằng chứng");
+    assert.ok(afterIgnore.financialImpact <= afterStart.financialImpact, "tiền của việc đã bỏ qua không được cộng vào tổng đang treo");
+  }
+
   // Đóng việc thì nó rời khỏi hàng đợi.
   await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(eq(schema.notifications.id, target.id));
   const afterResolve = await getActionQueue({ limit: 200 });
   assert.equal(afterResolve.cases.find((c) => c.id === target.id), undefined, "việc đã xong không còn nằm trong hàng đợi");
+
+  // ───────── 4. Loại việc mới phải có đủ nhãn, hành động và mức cứu được ─────────
+  for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
+    assert.ok(CASE_TYPE_LABEL[t]?.length, `${t}: thiếu nhãn tiếng Việt`);
+    assert.ok(RECOVERABILITY[t] > 0, `${t}: phải khai mức còn cứu được`);
+  }
+  assert.equal(caseTypeOf("ORDER_CONFIRMED_STALE"), "ORDER_CONFIRMATION_STALE");
+  assert.equal(caseTypeOf("RETURN_PENDING_INSPECTION"), "RETURN_RECEIVED_PENDING_INSPECTION");
+  // Hàng hoàn chưa tái nhập phải đứng trên đơn đang hoàn về: một bên còn lấy lại được nguyên lô
+  // hàng vào tồn, một bên chỉ còn chờ hậu quả.
+  assert.ok(RECOVERABILITY.RETURN_RECEIVED_PENDING_INSPECTION > RECOVERABILITY.RETURNING);
 
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc (nghiêm trọng + tuổi + tiền + khả năng cứu)`,
