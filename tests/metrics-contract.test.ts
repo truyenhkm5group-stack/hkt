@@ -80,6 +80,22 @@ export async function testMetricsContract(db: Db) {
   assert.equal(again.kpi.successRevenue, dash.kpi.successRevenue);
   assert.equal(again.kpi.successRate, dash.kpi.successRate);
 
+  // ───────── 4b. BUỒNG LÁI: ba con số tiền phải là BA con số, và phải lấy từ đúng nơi ─────────
+  const { getFinancialTruth } = await import("@/lib/queries/financial-truth");
+  const financial = await getFinancialTruth(ALL);
+  assert.equal(dash.money.booked, financial.revenue.booked, "Tổng quan phải lấy doanh thu lên đơn từ lớp chân lý tài chính");
+  assert.equal(dash.money.delivered, financial.revenue.delivered, "…và doanh thu giao thành công");
+  assert.equal(dash.money.cashReceived, financial.cash.total, "…và tiền thực nhận");
+  assert.equal(dash.money.contribution, financial.contribution, "…và lợi nhuận góp");
+  assert.ok(dash.money.booked >= dash.money.delivered, "doanh thu lên đơn ≥ doanh thu giao thành công");
+  assert.notEqual(dash.money.delivered, dash.money.cashReceived, "giao thành công và thực nhận là hai con số khác nhau");
+  assert.equal(dash.money.delivered, dash.kpi.successRevenue, "hai chỗ trên cùng trang Tổng quan không được lệch nhau");
+  // Số vi phạm nghiêm trọng lấy từ chính trung tâm điều khiển, không đếm lại.
+  const { getControlTower } = await import("@/lib/queries/control-tower");
+  const tower = await getControlTower();
+  assert.equal(dash.dataIssues.critical, tower.totals.ERROR, "Tổng quan phải lấy số vi phạm nghiêm trọng từ trung tâm điều khiển");
+  assert.equal(dash.dataIssues.ruleCount, tower.ruleCount);
+
   // ───────── 5. Hợp đồng phải tồn tại và trỏ đúng nơi cài đặt ─────────
   const contract = readFileSync("docs/metrics-contract.md", "utf8");
   for (const needed of ["bookedRevenue", "deliveredRevenue", "cashReceived", "successRate", "deliveredCogs", "lib/queries/metrics.ts"]) {

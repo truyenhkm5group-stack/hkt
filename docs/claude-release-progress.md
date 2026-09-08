@@ -21,7 +21,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ✅ xong | `feat: improve inventory truth and stock risk` |
 | 11 | Chỉ số theo mẫu mã | ✅ xong | `feat: add product variant performance intelligence` |
 | 12 | Hàng đợi việc theo mức ưu tiên | ✅ xong | `feat: add prioritized ERP action queue` |
-| 13 | Tổng quan ra quyết định | ⏳ | |
+| 13 | Tổng quan ra quyết định | ✅ xong | `feat: optimize ERP management dashboard` |
 | 14 | ROAS theo kết quả đơn | ⏳ | |
 | 15 | Sức khoẻ tích hợp | ⏳ | |
 | 16 | Hiệu năng | ⏳ | |
@@ -259,6 +259,18 @@ trạng thái khác nhau làm một.
 - `notifications` thêm `assigned_to` / `acknowledged_*` (migration `0033_action_queue.sql`) để tách
   **đã đọc ≠ đã tiếp nhận ≠ đã xong**.
 - `assignCase` / `acknowledgeCase` / `resolveNotification` đều ghi `audit_logs`.
+
+### TASK 13 — Tổng quan ra quyết định
+
+Hàng KPI đầu trang nay có đủ 8 chỉ số kế hoạch yêu cầu và **phân biệt ba con số tiền ngay trong
+nhãn**: ① Doanh thu LÊN ĐƠN → ② Doanh thu GIAO THÀNH CÔNG → ③ TIỀN THỰC NHẬN. Trước đây cả ba đều
+được gọi là "doanh thu" nên chủ shop không biết tiền thật đang ở đâu.
+
+Thêm: Viettel Post còn giữ · lợi nhuận góp · lợi nhuận ước tính (ghi rõ "ước tính theo đơn, KHÔNG
+phải tiền trong tài khoản") · việc cần xử lý · **dữ liệu sai nghiêm trọng**.
+
+Mọi thẻ bấm được và mở đúng TẬP ĐƠN đã sinh ra con số đó. Con số lấy từ đúng nơi định nghĩa
+(`financial-truth.ts`, `control-tower.ts`), không tính lại — khoá bằng kiểm thử.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

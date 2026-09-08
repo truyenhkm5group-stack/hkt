@@ -76,11 +76,91 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       ) : null}
 
+      {/*
+        BUỒNG LÁI RA QUYẾT ĐỊNH.
+        Ba con số tiền được tách rõ bằng chính NHÃN, vì trước đây cả ba đều được gọi là "doanh thu":
+        LÊN ĐƠN (khách chốt) → GIAO THÀNH CÔNG (tới tay khách) → THỰC NHẬN (đã vào tài khoản).
+        Mỗi thẻ bấm được và mở đúng TẬP ĐƠN đã sinh ra con số đó.
+      */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Doanh thu lên đơn" value={formatVND(data.kpi.revenue, { compact: true })} change={change(data.kpi.revenue, data.previous?.revenue)} note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`} icon={ShoppingBag} tone="blue" />
-        <MetricCard label="Giao thành công" value={formatVND(data.kpi.successRevenue, { compact: true })} change={change(data.kpi.successRevenue, data.previous?.successRevenue)} note={`${formatNumber(data.kpi.successOrders)} đơn · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}`} icon={PackageCheck} tone="green" />
-        <MetricCard label="COD đã thu, chờ về tài khoản" value={formatVND(data.attention.codWaiting.amount, { compact: true })} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn đã giao${data.attention.codWaiting.deductedByStatements ? ` − ${formatVND(data.attention.codWaiting.deductedByStatements, { compact: true })} đã về theo bảng kê` : ""} · đã về ngân hàng trong kỳ ${formatVND(data.realized.amount, { compact: true })}${data.realized.source === "statements" ? ` (${formatNumber(data.realized.count)} bảng kê VTP, thực nhận ${formatVND(data.realized.net, { compact: true })})` : ""}`} icon={Banknote} tone="amber" />
-        <MetricCard label="Lợi nhuận ước tính" value={formatVND(data.finance.estimatedProfit, { compact: true })} note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`} icon={TrendingUp} tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"} />
+        <Link href={`/orders?period=${period.key}`} className="block">
+          <MetricCard
+            label="① Doanh thu LÊN ĐƠN"
+            value={formatVND(data.money.booked, { compact: true })}
+            change={change(data.kpi.revenue, data.previous?.revenue)}
+            note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn · chưa nói gì về việc giao được hay thu được tiền`}
+            icon={ShoppingBag}
+            tone="blue"
+          />
+        </Link>
+        <Link href={`/reports/returns?period=${period.key}`} className="block">
+          <MetricCard
+            label="② Doanh thu GIAO THÀNH CÔNG"
+            value={formatVND(data.money.delivered, { compact: true })}
+            change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
+            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`} trên đơn đã kết thúc`}
+            icon={PackageCheck}
+            tone="green"
+          />
+        </Link>
+        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
+          <MetricCard
+            label="③ TIỀN THỰC NHẬN"
+            value={formatVND(data.money.cashReceived, { compact: true })}
+            note={`Đã vào tài khoản theo bảng kê + khách chuyển trước · KHÁC hẳn hai con số bên trái`}
+            icon={Banknote}
+            tone="green"
+          />
+        </Link>
+        <Link href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`} className="block">
+          <MetricCard
+            label="Viettel Post còn giữ"
+            value={formatVND(data.money.codOutstanding, { compact: true })}
+            note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa thấy đồng nào trên bảng kê`}
+            icon={Truck}
+            tone="amber"
+          />
+        </Link>
+        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
+          <MetricCard
+            label="Lợi nhuận góp"
+            value={formatVND(data.money.contribution, { compact: true })}
+            note="Doanh thu giao TC − giá vốn − cước − phí hoàn − quảng cáo (chưa trừ vận hành)"
+            icon={CircleDollarSign}
+            tone={data.money.contribution >= 0 ? "primary" : "rose"}
+          />
+        </Link>
+        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
+          <MetricCard
+            label="Lợi nhuận ước tính"
+            value={formatVND(data.finance.estimatedProfit, { compact: true })}
+            note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công · ước tính theo đơn, KHÔNG phải tiền trong tài khoản`}
+            icon={TrendingUp}
+            tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
+          />
+        </Link>
+        <Link href="/alerts" className="block">
+          <MetricCard
+            label="Việc cần xử lý"
+            value={formatNumber(data.attention.newOrders + data.attention.failedDelivery + data.attention.staleShipments)}
+            note={`${formatNumber(data.attention.newOrders)} đơn mới · ${formatNumber(data.attention.failedDelivery)} giao thất bại / đang hoàn · ${formatNumber(data.attention.staleShipments)} treo lâu`}
+            icon={BellRing}
+            tone="amber"
+          />
+        </Link>
+        <Link href="/data-quality" className="block">
+          <MetricCard
+            label="Dữ liệu sai nghiêm trọng"
+            value={formatNumber(data.dataIssues.critical)}
+            note={
+              data.dataIssues.critical
+                ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm — số liệu trên trang này có thể chưa đúng`
+                : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`
+            }
+            icon={AlertTriangle}
+            tone={data.dataIssues.critical ? "rose" : "slate"}
+          />
+        </Link>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">

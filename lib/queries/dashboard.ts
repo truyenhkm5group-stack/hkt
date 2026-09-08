@@ -4,6 +4,8 @@ import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
 import { stockRiskSummary } from "@/lib/queries/stock";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import { getControlTower } from "@/lib/queries/control-tower";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
@@ -156,6 +158,8 @@ async function getDashboardDataUncached(period: Period) {
   const [newOrders] = await db.select({ count: count() }).from(schema.orders).where(eq(schema.orders.stage, "NEW"));
   // COD đã thu chờ về / đã về ngân hàng: cùng cách tính với Báo cáo lợi nhuận & Đối soát COD (bảng kê Viettel Post gộp theo đợt)
   const codCash = await codCashSummary(period);
+  // BA CON SỐ TIỀN và SỐ VI PHẠM NGHIÊM TRỌNG lấy từ đúng nơi định nghĩa chúng, không tính lại.
+  const [financial, tower] = await Promise.all([getFinancialTruth(period), getControlTower()]);
 
   // Đơn mới nhất
   const recentOrders = await db.query.orders.findMany({
@@ -205,6 +209,18 @@ async function getDashboardDataUncached(period: Period) {
       codWaiting: { count: codCash.codWaiting.count, amount: codCash.codWaiting.amount, collected: codCash.codWaiting.collected, deductedByStatements: codCash.codWaiting.deductedByStatements },
     },
     stockRisk,
+    /** Ba con số tiền tách bạch + lợi nhuận góp — dùng lại từ lib/queries/financial-truth.ts. */
+    money: {
+      booked: financial.revenue.booked,
+      delivered: financial.revenue.delivered,
+      cashReceived: financial.cash.total,
+      codOutstanding: financial.cod.outstanding,
+      codOutstandingCount: financial.cod.outstandingCount,
+      contribution: financial.contribution,
+      realizedProfit: financial.realizedProfit,
+    },
+    /** Vi phạm dữ liệu mức NGHIÊM TRỌNG — số liệu đang sai, không phải việc vận hành. */
+    dataIssues: { critical: tower.totals.ERROR, firing: tower.firing, ruleCount: tower.ruleCount },
     recentOrders,
     topProducts,
     lastSyncRows,
