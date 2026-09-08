@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Shirt,
   ShoppingBag,
+  TrendingUp,
   Truck,
   Users,
   UserCog,
@@ -68,6 +69,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     label: "Kho",
     items: [
       { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
+      { href: "/products/performance", label: "Hiệu quả mẫu mã", icon: TrendingUp, permission: "reports:returns" },
       { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
       { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
       { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
