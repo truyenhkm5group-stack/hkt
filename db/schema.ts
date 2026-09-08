@@ -737,6 +737,9 @@ export const shipments = pgTable(
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
+    // Đối soát COD quét "đã giao, có thu hộ, chưa thấy tiền" trên toàn bảng vận đơn mỗi lần mở
+    // trang Cần xử lý và mỗi lần chạy cảnh báo.
+    index("shipments_cod_overdue_idx").on(t.deliveredAt).where(sql`${t.stage} = 'DELIVERED' and ${t.codCollected} = 0`),
     index("shipments_cod_statement_idx").on(t.codStatementRef),
     // Vận đơn CHIỀU VỀ (quy tắc 2 của ORDER_OUTCOME) được dò bằng một truy vấn con tương quan
     // chạy cho từng dòng; không có index này thì mỗi dòng quét toàn bảng shipments → O(n²).
@@ -771,6 +774,10 @@ export const shipmentEvents = pgTable(
     // ORDER_OUTCOME dò "doanh thu bị sửa sau khi giao" bằng truy vấn con tương quan chạy cho
     // từng dòng; không có index riêng phần này thì mỗi dòng quét toàn bảng shipment_events.
     index("shipment_events_revenue_edit_idx").on(t.shipmentId, t.occurredAt).where(sql`${t.statusName} like 'Nhập doanh thu%'`),
+    // Hai luật đối soát mức NGHIÊM TRỌNG hỏi cùng một câu cho TỪNG vận đơn: "có sự kiện phát
+    // thành công nào của ĐVVC không?". Không có index riêng phần này thì mỗi vận đơn quét toàn
+    // bảng sự kiện — chi phí tăng theo bình phương khi shop lớn dần.
+    index("shipment_events_delivered_idx").on(t.shipmentId).where(sql`${t.normalizedStage} = 'DELIVERED'`),
     check("shipment_events_leg_check", sql`${t.legType} IN ('OUTBOUND', 'RETURN', 'UNKNOWN')`),
     check("shipment_events_verification_check", sql`${t.verificationStatus} IN ('PENDING', 'VERIFIED', 'REJECTED', 'DISPUTED')`),
     check("shipment_events_verified_check", sql`${t.verificationStatus} IS DISTINCT FROM 'VERIFIED' OR (

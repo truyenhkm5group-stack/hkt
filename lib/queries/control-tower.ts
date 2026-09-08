@@ -232,12 +232,14 @@ async function countRule(rule: ReconciliationRuleKey): Promise<number> {
 
 async function controlTowerUncached(): Promise<ControlTower> {
   const scannedAt = new Date();
-  const issues: ControlTowerIssue[] = [];
-  for (const rule of RECONCILIATION_RULE_ORDER) {
-    const count = await countRule(rule);
-    if (!count) continue;
+  // 18 luật, mỗi luật một truy vấn đếm — chúng độc lập nên chạy cùng lúc. Chạy nối tiếp thì thời
+  // gian mở trang là TỔNG của 18 lần chờ, và nó tăng tuyến tính mỗi khi thêm một luật mới.
+  const counts = await Promise.all(RECONCILIATION_RULE_ORDER.map(async (rule) => [rule, await countRule(rule)] as const));
+  const firingRules = counts.filter(([, count]) => count > 0);
+  const samples = await Promise.all(firingRules.map(([rule]) => runRule(rule, 5)));
+  const issues: ControlTowerIssue[] = firingRules.map(([rule, count], index) => {
     const meta = RECONCILIATION_RULES[rule];
-    issues.push({
+    return {
       rule,
       severity: meta.severity,
       entity: meta.entity,
@@ -247,10 +249,10 @@ async function controlTowerUncached(): Promise<ControlTower> {
       autoRepairable: meta.autoRepair !== false,
       count,
       detectedAt: scannedAt,
-      sample: await runRule(rule, 5),
+      sample: samples[index],
       href: RULE_HREF[rule] ?? null,
-    });
-  }
+    };
+  });
   issues.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || b.count - a.count);
   const totals: Record<IssueSeverity, number> = { ERROR: 0, WARNING: 0, INFO: 0 };
   for (const i of issues) totals[i.severity] += i.count;

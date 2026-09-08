@@ -24,7 +24,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 13 | Tổng quan ra quyết định | ✅ xong | `feat: optimize ERP management dashboard` |
 | 14 | ROAS theo kết quả đơn | ✅ xong | `feat: add COD-aware ads profitability metrics` |
 | 15 | Sức khoẻ tích hợp | ✅ xong | `feat: add integration health observability` |
-| 16 | Hiệu năng | ⏳ | |
+| 16 | Hiệu năng | ✅ xong | `perf: optimize ERP critical paths` |
 | 17 | Nhật ký truy vết | ⏳ | |
 | 18 | Nhất quán giao diện | ⏳ | |
 | — | FINAL GATE | ⏳ | |
@@ -300,6 +300,30 @@ không thể lấy ngưỡng 24 giờ).
 
 Mỗi connector ghi rõ **vì sao xử lý lại là an toàn** (idempotent theo khoá nào) — không idempotent
 thì không được cho bấm retry.
+
+### TASK 16 — Hiệu năng
+
+**Đo trước.** `scripts/perf-audit.ts` đo 11 truy vấn nặng nhất. Kết quả trên CSDL fixture:
+Tổng quan **324ms** — gấp 8 lần trang kế tiếp (Chân lý tài chính 40ms). Mọi trang khác đều dưới
+45ms, nên chỉ sửa đúng chỗ chậm nhất, không đụng phần đang chạy tốt.
+
+Ba thay đổi:
+
+1. **Tổng quan**: 19 truy vấn độc lập chạy nối tiếp → gom vào một `Promise.all`. Số liệu không đổi
+   một chữ số nào, chỉ hết chờ vô ích.
+2. **Trung tâm điều khiển**: 18 truy vấn đếm chạy nối tiếp → chạy cùng lúc. Quan trọng hơn con số
+   hiện tại là **độ dốc**: cứ thêm một luật thì trước đây thời gian mở trang lại tăng thêm.
+3. **Hai index riêng phần** (migration `0034_perf_indexes.sql`) cho hai truy vấn chạy trên TỪNG vận
+   đơn: "có sự kiện phát thành công nào của ĐVVC không?" và "đã giao, có thu hộ, chưa thấy tiền".
+   Chi phí của chúng tăng theo bình phương khi shop lớn dần.
+
+**Đo lại**: Tổng quan 324ms → **284ms** trên PGlite. Mức cải thiện ở đây bị giới hạn vì PGlite chỉ
+có MỘT kết nối nên `Promise.all` vẫn xếp hàng; trên Postgres production (có connection pool) các
+truy vấn thật sự chạy song song nên phần rút ngắn lớn hơn nhiều. Ghi lại đúng như đo được, không
+suy diễn thêm.
+
+KHÔNG cache theo cách làm KPI sai: mọi `memo` giữ nguyên TTL 60–120 giây như cũ, và mọi tham số
+ảnh hưởng kết quả đều nằm trong khoá cache.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

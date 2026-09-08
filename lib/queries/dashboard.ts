@@ -86,97 +86,113 @@ async function getDashboardDataUncached(period: Period) {
     return prev.from ? orderKpis(prev.from, prev.to) : Promise.resolve(null);
   })()]);
 
-  // Trạng thái đơn theo giai đoạn
-  const stageRows = await db
-    .select({ stage: schema.orders.stage, count: count(), revenue: sum(schema.orders.totalPriceAfterDiscount) })
-    .from(schema.orders)
-    .where(inPeriod(schema.orders.insertedAt, period.from, period.to))
-    .groupBy(schema.orders.stage);
+  // ĐO TRƯỚC, SỬA SAU (TASK 16): Tổng quan là trang chậm nhất — 324ms so với 40ms của trang kế
+  // tiếp — vì 15 truy vấn độc lập chạy NỐI TIẾP, mỗi cái chờ cái trước xong. Chúng không phụ
+  // thuộc nhau nên gom vào một lượt; số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
+  const [
+    stageRows,
+    dailyRows,
+    channelRows,
+    shipmentRows,
+    codRows,
+    expenseRows,
+    adsRows,
+    shippingRows,
+    failedDeliveryRows,
+    stockRisk,
+    staleRows,
+    newOrderRows,
+    codCash,
+    financial,
+    tower,
+    recentOrders,
+    topProducts,
+    lastSyncRows,
+    orderTotalRows,
+  ] = await Promise.all([
+    // Trạng thái đơn theo giai đoạn
+    db
+      .select({ stage: schema.orders.stage, count: count(), revenue: sum(schema.orders.totalPriceAfterDiscount) })
+      .from(schema.orders)
+      .where(inPeriod(schema.orders.insertedAt, period.from, period.to))
+      .groupBy(schema.orders.stage),
+    // Doanh thu theo ngày (giờ VN)
+    db
+      .select({
+        day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
+        orders: count(),
+        revenue: sum(schema.orders.totalPriceAfterDiscount),
+        success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
+        successRevenue: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then ${schema.orders.totalPriceAfterDiscount} else 0 end)`,
+      })
+      .from(schema.orders)
+      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+      .where(metricScope(period, "confirmed"))
+      .groupBy(sql`1`)
+      .orderBy(sql`1`),
+    // Theo kênh bán
+    db
+      .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
+      .from(schema.orders)
+      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+      .where(metricScope(period, "confirmed"))
+      .groupBy(schema.orders.source)
+      .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount))),
+    // Vận đơn theo giai đoạn (toàn bộ đang hoạt động, không theo kỳ)
+    db.select({ stage: schema.shipments.stage, count: count(), cod: sum(schema.shipments.codAmount) }).from(schema.shipments).groupBy(schema.shipments.stage),
+    // COD
+    db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus),
+    // Chi phí vận hành trong kỳ: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
+    db
+      .select({ amount: sum(schema.expenses.amount) })
+      .from(schema.expenses)
+      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, period.from ? gte(schema.expenses.occurredAt, period.from) : undefined, period.to ? lte(schema.expenses.occurredAt, period.to) : undefined)),
+    db
+      .select({ amount: sum(schema.adSpends.spend) })
+      .from(schema.adSpends)
+      .where(and(eq(schema.adSpends.excluded, false), period.from ? gte(schema.adSpends.spendDate, period.from) : undefined, period.to ? lte(schema.adSpends.spendDate, period.to) : undefined)),
+    db
+      .select({ fee: sum(schema.orders.partnerFee), returnFee: sum(schema.orders.returnFee) })
+      .from(schema.orders)
+      .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED"))),
+    db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"])),
+    // THIẾU HÀNG TÍNH THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG — cùng bộ máy days-of-cover với trang
+    // Kế hoạch SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số khác nhau (F5).
+    stockRiskSummary(),
+    db
+      .select({ count: count() })
+      .from(schema.shipments)
+      .where(and(inArray(schema.shipments.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(schema.shipments.updatedAt, new Date(Date.now() - 4 * 86_400_000)))),
+    db.select({ count: count() }).from(schema.orders).where(eq(schema.orders.stage, "NEW")),
+    // COD đã thu chờ về / đã về ngân hàng: cùng cách tính với Báo cáo lợi nhuận & Đối soát COD
+    codCashSummary(period),
+    // BA CON SỐ TIỀN và SỐ VI PHẠM NGHIÊM TRỌNG lấy từ đúng nơi định nghĩa chúng, không tính lại.
+    getFinancialTruth(period),
+    getControlTower(),
+    db.query.orders.findMany({
+      orderBy: [desc(schema.orders.insertedAt)],
+      limit: 8,
+      columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, stage: true, totalPriceAfterDiscount: true, insertedAt: true, itemsCount: true },
+      with: { shipment: { columns: { stage: true, carrier: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 2 } },
+    }),
+    // TOP MẪU MÃ — xếp theo DOANH THU GIAO THÀNH CÔNG, không theo số lượng lên đơn.
+    getProductIntelligence({ period, limit: 6 }),
+    db.select().from(schema.syncRuns).where(isNotNull(schema.syncRuns.finishedAt)).orderBy(desc(schema.syncRuns.startedAt)).limit(3),
+    db.select({ count: count() }).from(schema.orders),
+  ]);
+
   const byStage = Object.fromEntries(stageRows.map((r) => [r.stage, { count: Number(r.count), revenue: Number(r.revenue ?? 0) }])) as Record<OrderStage, { count: number; revenue: number }>;
-
-  // Doanh thu theo ngày (giờ VN)
-  const dailyRows = await db
-    .select({
-      day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
-      orders: count(),
-      revenue: sum(schema.orders.totalPriceAfterDiscount),
-      success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
-      successRevenue: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then ${schema.orders.totalPriceAfterDiscount} else 0 end)`,
-    })
-    .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(metricScope(period, "confirmed"))
-    .groupBy(sql`1`)
-    .orderBy(sql`1`);
   const daily = dailyRows.map((r) => ({ day: r.day, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0), successRevenue: Number(r.successRevenue ?? 0) }));
-
-  // Theo kênh bán
-  const channelRows = await db
-    .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
-    .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(metricScope(period, "confirmed"))
-    .groupBy(schema.orders.source)
-    .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount)));
   const channels = channelRows.map((r) => ({ source: r.source, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0) }));
-
-  // Vận đơn theo giai đoạn (toàn bộ đang hoạt động, không theo kỳ)
-  const shipmentRows = await db.select({ stage: schema.shipments.stage, count: count(), cod: sum(schema.shipments.codAmount) }).from(schema.shipments).groupBy(schema.shipments.stage);
   const shipmentsByStage = Object.fromEntries(shipmentRows.map((r) => [r.stage, { count: Number(r.count), cod: Number(r.cod ?? 0) }])) as Record<ShipmentStage, { count: number; cod: number }>;
-
-  // COD
-  const codRows = await db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus);
   const cod = Object.fromEntries(codRows.map((r) => [r.status, { count: Number(r.count), amount: Number(r.amount ?? 0) }]));
-
-
-  // Chi phí trong kỳ
-  const [expense] = await db
-    .select({ amount: sum(schema.expenses.amount) })
-    .from(schema.expenses)
-    // chi phí vận hành: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
-    .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, period.from ? gte(schema.expenses.occurredAt, period.from) : undefined, period.to ? lte(schema.expenses.occurredAt, period.to) : undefined));
-  const [ads] = await db
-    .select({ amount: sum(schema.adSpends.spend) })
-    .from(schema.adSpends)
-    .where(and(eq(schema.adSpends.excluded, false), period.from ? gte(schema.adSpends.spendDate, period.from) : undefined, period.to ? lte(schema.adSpends.spendDate, period.to) : undefined));
-  const [shippingFees] = await db
-    .select({ fee: sum(schema.orders.partnerFee), returnFee: sum(schema.orders.returnFee) })
-    .from(schema.orders)
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED")));
-
-  // Cần xử lý
-  const [failedDelivery] = await db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"]));
-  // THIẾU HÀNG TÍNH THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG.
-  // Trước đây ở đây là `tồn <= 5`: mẫu mã bán 20 cái/ngày còn 8 cái thì bị bỏ qua, còn mẫu mã bán
-  // 1 cái/tháng còn 3 cái thì bị báo động. Nay dùng chung bộ máy days-of-cover với trang Kế hoạch
-  // SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số khác nhau (F5).
-  const stockRisk = await stockRiskSummary();
-  const [stale] = await db
-    .select({ count: count() })
-    .from(schema.shipments)
-    .where(and(inArray(schema.shipments.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(schema.shipments.updatedAt, new Date(Date.now() - 4 * 86_400_000))));
-  const [newOrders] = await db.select({ count: count() }).from(schema.orders).where(eq(schema.orders.stage, "NEW"));
-  // COD đã thu chờ về / đã về ngân hàng: cùng cách tính với Báo cáo lợi nhuận & Đối soát COD (bảng kê Viettel Post gộp theo đợt)
-  const codCash = await codCashSummary(period);
-  // BA CON SỐ TIỀN và SỐ VI PHẠM NGHIÊM TRỌNG lấy từ đúng nơi định nghĩa chúng, không tính lại.
-  const [financial, tower] = await Promise.all([getFinancialTruth(period), getControlTower()]);
-
-  // Đơn mới nhất
-  const recentOrders = await db.query.orders.findMany({
-    orderBy: [desc(schema.orders.insertedAt)],
-    limit: 8,
-    columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, stage: true, totalPriceAfterDiscount: true, insertedAt: true, itemsCount: true },
-    with: { shipment: { columns: { stage: true, carrier: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 2 } },
-  });
-
-  // TOP MẪU MÃ — xếp theo DOANH THU GIAO THÀNH CÔNG, không theo số lượng lên đơn.
-  // Bán 100 cái mà hoàn 60 thì kém hơn hẳn bán 50 cái hoàn 5; xếp hạng theo số lên đơn sẽ đẩy
-  // đúng những mẫu mã hoàn nhiều lên đầu bảng rồi shop lại sản xuất thêm.
-  const topProducts = await getProductIntelligence({ period, limit: 6 });
-
-  // Sự kiện gần nhất
-  const lastSyncRows = await db.select().from(schema.syncRuns).where(isNotNull(schema.syncRuns.finishedAt)).orderBy(desc(schema.syncRuns.startedAt)).limit(3);
-  const [orderTotal] = await db.select({ count: count() }).from(schema.orders);
+  const [expense] = expenseRows;
+  const [ads] = adsRows;
+  const [shippingFees] = shippingRows;
+  const [failedDelivery] = failedDeliveryRows;
+  const [stale] = staleRows;
+  const [newOrders] = newOrderRows;
+  const [orderTotal] = orderTotalRows;
 
   const netRevenue = current.successRevenue;
   const realized = codCash.codPaid.amount;
