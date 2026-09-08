@@ -31,6 +31,14 @@ const DAILY = [
   { job: "pancake-warehouses", hour: 3, minute: 30 },
   { job: "facebook-ads", hour: 4, minute: 0, query: "days=30" },
   { job: "outreach-build", hour: 8, minute: 30 }, // lập danh sách chăm sóc khách & bán chéo mỗi sáng // đối chiếu lại 30 ngày (Facebook có thể điều chỉnh số liệu muộn)
+  // QUÉT đối soát mỗi sáng, CHỈ ĐỌC — cố ý KHÔNG truyền fix=1.
+  //
+  // Trước đây lệch dữ liệu chỉ lộ ra khi có người bấm tay, nên 70 vận đơn lệch ảnh chụp nằm im
+  // nhiều ngày. Quét tự động thì chúng hiện ra ở Chất lượng dữ liệu ngay hôm sau.
+  //
+  // Vì sao KHÔNG tự sửa: sửa dữ liệu production không có người xem là đúng loại việc phải hỏi chủ
+  // shop (AGENTS.md mục 7). Máy phát hiện, người quyết định.
+  { job: "data-check", hour: 6, minute: 30 },
 ];
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);
