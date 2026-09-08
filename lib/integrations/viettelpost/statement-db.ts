@@ -182,10 +182,93 @@ function phoneKey(value: string | null | undefined): string {
   return digits.length >= 9 ? digits.slice(-9) : "";
 }
 
+/** Mã vận đơn không phân biệt hoa thường — dùng làm khoá tra cứu ở MỌI nơi, tránh lệch hoa/thường. */
+const up = (value: string | null | undefined) => String(value ?? "").trim().toUpperCase();
+
+/**
+ * MỐC CỦA MỘT LẦN GỬI, để xếp thứ tự các lần gửi của cùng một đơn.
+ *
+ * Ưu tiên "Ngày tạo" vận đơn (đúng nghĩa lần gửi thứ mấy), rồi mới tới mốc đổi trạng thái.
+ * TUYỆT ĐỐI không xếp theo chuỗi mã vận đơn: mã tạo trước luôn nhỏ hơn, nên vận đơn ĐÃ BỊ HUỶ
+ * luôn được xử lý trước vận đơn thay thế và chiếm mất chỗ của nó.
+ */
+function attemptTime(row: { createdAt?: string | null; statusAt?: string | null; statusDate?: string | null }): number {
+  for (const value of [row.createdAt, row.statusAt, row.statusDate]) {
+    if (!value) continue;
+    const t = new Date(value).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  return 0;
+}
+
+/**
+ * SO SÁNH HAI ẢNH CHỤP DÒNG TỆP THEO Ý NGHĨA, KHÔNG THEO HÌNH DẠNG.
+ *
+ * Trước đây dùng `Object.keys(snapshot).every(k => previous[k] === snapshot[k])`. Mỗi lần thêm một
+ * trường mới vào `snapshot` (đã xảy ra với `codPaymentText`, `paymentText`, `returnFlag`…), mọi sự
+ * kiện ghi TRƯỚC đó đều thiếu khoá mới, `undefined === ""` cho false, và **toàn bộ lịch sử biến
+ * thành "xung đột"**. Đo được trên production: nhập lại đúng bộ tệp cũ cho 1.582/1.597 dòng xung
+ * đột, ghi được 0 dòng.
+ *
+ * Nay: chuẩn hoá giá trị trống (undefined / null / "" / 0 → cùng một dạng) rồi mới so, và tách
+ * hai loại khác biệt:
+ *  · DANH TÍNH (mã vận đơn, mã đơn hàng) khác nhau ⇒ đúng là xung đột, hai chứng từ khác nhau;
+ *  · phần còn lại khác nhau ⇒ chỉ là dòng tệp mới hơn của CÙNG một sự việc, cứ cập nhật tiếp.
+ *
+ * Thêm khoá mới KHÔNG BAO GIỜ là bằng chứng dữ liệu đã đổi.
+ */
+type RowSnapshot = Record<string, unknown>;
+/**
+ * Các trường mà khác nhau thì phải DỪNG LẠI cho người đối chiếu: danh tính chứng từ và TIỀN.
+ * Cùng một vận đơn, cùng một trạng thái, cùng một mốc mà số tiền lại khác ⇒ không được lặng lẽ
+ * ghi đè (bất biến đã có: "Cùng thời điểm đổi tiền không overwrite").
+ */
+const SNAPSHOT_SIGNIFICANT_FIELDS = ["trackingCode", "orderCode", "statusText", "cod", "fee"] as const;
+
+function snapshotValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "boolean") return value ? "1" : "";
+  if (typeof value === "number") return value === 0 ? "0" : String(value);
+  return String(value).trim();
+}
+
+export function compareRowSnapshots(previous: RowSnapshot | null | undefined, current: RowSnapshot): "same" | "changed" | "conflict" {
+  if (!previous) return "changed";
+  for (const key of SNAPSHOT_SIGNIFICANT_FIELDS) {
+    const before = snapshotValue(previous[key]);
+    const after = snapshotValue(current[key]);
+    // Bên cũ chưa từng ghi trường này thì KHÔNG kết luận gì — thiếu dữ liệu, không phải mâu thuẫn.
+    if (before && after && before !== after) return "conflict";
+  }
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(current)])) {
+    if (snapshotValue(previous[key]) !== snapshotValue(current[key])) return "changed";
+  }
+  return "same";
+}
+
 export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderListMatch[]> {
   const db = await getDb();
-  // File VTP để mã vận đơn chiều về ("…1P1") ở cột Mã Vận Đơn, mã gốc ở cột Mã đơn hàng → tra cả ba dạng
-  const codes = [...new Set(rows.flatMap((r) => [r.trackingCode, r.orderCode, legBaseCode(r.trackingCode)]).filter(Boolean))];
+  /**
+   * HAI CỘT CỦA TỆP THUỘC HAI KHÔNG GIAN ĐỊNH DANH KHÁC NHAU.
+   *
+   * "Mã Vận Đơn" là mã vận đơn. "Mã đơn hàng" là mã tham chiếu do Viettel Post tự sinh —
+   * KHÔNG phải mã đơn Pancake, và không cùng loại với mã vận đơn. Ngoại lệ duy nhất: với vận đơn
+   * CHIỀU VỀ ("…1P1"), cột "Mã đơn hàng" chứa chính mã vận đơn gốc — đó là lúc nó thuộc không
+   * gian mã vận đơn.
+   *
+   * Trước đây cả hai cột bị ném chung vào một bản đồ mã. Hậu quả đo được trên production:
+   * dòng `PKE1508295104` có "Mã đơn hàng" là `PKE10911261809`, mà giá trị đó tình cờ đang là
+   * `tracking_code` của một vận đơn KHÁC (đơn 3176) — thế là dòng bị loại khỏi bước dò theo SĐT
+   * và âm thầm mất tích, dù đơn 3181 là ứng viên DUY NHẤT khớp cả SĐT lẫn tiền thu hộ.
+   */
+  const legRows = rows.filter((r) => Boolean(legBaseCode(r.trackingCode)));
+  const codes = [
+    ...new Set(
+      [...rows.map((r) => r.trackingCode), ...legRows.map((r) => r.orderCode), ...legRows.map((r) => legBaseCode(r.trackingCode))]
+        .map(up)
+        .filter(Boolean),
+    ),
+  ];
   const found = codes.length
     ? await db
         .select({ id: schema.shipments.id, vtp: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
@@ -205,9 +288,13 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
   // Shop tạo đơn thẳng trên web Viettel Post: ERP có đơn (từ Pancake/POS) nhưng vận đơn CHƯA có mã,
   // còn cột "Mã đơn hàng" của file là mã VTP tự sinh nên không tra ngược được. Bằng chứng còn lại là
   // SĐT người nhận — dùng nó để gắn mã vào đúng vận đơn thay vì bỏ rơi cả dòng.
+  //
+  // Điều kiện loại trừ CHỈ xét mã vận đơn của chính dòng đó. Trước đây còn xét cả "Mã đơn hàng",
+  // nên một dòng chưa ghép được vẫn bị loại chỉ vì mã tham chiếu của nó trùng chuỗi với vận đơn
+  // của đơn khác — bước dò theo SĐT không bao giờ chạy tới nó.
   const needPhone = new Set(
     rows
-      .filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(r.trackingCode) && !byCode.has(r.orderCode))
+      .filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(up(r.trackingCode)))
       .map((r) => phoneKey(r.receiverPhone))
       .filter(Boolean),
   );
@@ -228,16 +315,17 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
     byPhone.set(c.phone, list);
   }
 
-  return rows.map((r) => {
+  const matched: OrderListMatch[] = rows.map((r) => {
     // Mã có đuôi P (…1P1) là vận đơn CHIỀU VỀ: cột "Mã đơn hàng" của file chính là mã gốc, tin hơn suy từ chuỗi.
     // Phải xét chiều về TRƯỚC, nếu không mã gốc ở cột "Mã đơn hàng" sẽ bị coi là khớp trực tiếp và đè trạng thái đơn gốc.
     const isLeg = Boolean(legBaseCode(r.trackingCode));
     const base = isLeg ? r.orderCode || legBaseCode(r.trackingCode) : "";
-    const direct = isLeg ? undefined : byCode.get(r.trackingCode);
-    const leg = isLeg && base ? byCode.get(base) : undefined;
-    const usedCode = isLeg ? base : r.trackingCode;
-    const conflictingReferences = !isLeg && byCode.has(r.trackingCode) && byCode.has(r.orderCode) && byCode.get(r.trackingCode)!.id !== byCode.get(r.orderCode)!.id;
-    let matchIssue = ambiguous.has(usedCode) || conflictingReferences ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
+    const direct = isLeg ? undefined : byCode.get(up(r.trackingCode));
+    const leg = isLeg && base ? byCode.get(up(base)) : undefined;
+    const usedCode = up(isLeg ? base : r.trackingCode);
+    // CỐ Ý không còn so "Mã đơn hàng" với bản đồ mã vận đơn: hai cột thuộc hai không gian định danh
+    // khác nhau, trùng chuỗi KHÔNG có nghĩa là cùng một thực thể.
+    let matchIssue = ambiguous.has(usedCode) ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
     // Chỉ xét SĐT khi mã không ghép được — mã vẫn là bằng chứng mạnh hơn.
     let byPhoneMatch: (typeof codeless)[number] | undefined;
     if (!matchIssue && !direct && !leg && !isLeg) {
@@ -264,6 +352,42 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       matchIssue,
     };
   });
+
+  /**
+   * NHIỀU LẦN GỬI CHO CÙNG MỘT ĐƠN — CHỌN LẦN GỬI CÓ HIỆU LỰC, KHÔNG CHỌN LẦN ĐẦU.
+   *
+   * Hình mẫu thật của shop: tạo vận đơn → "Shop hủy lấy" → tạo lại vận đơn thay thế → giao thành
+   * công. Cả hai dòng đều ghép về MỘT vận đơn ERP chưa có mã. Trước đây vòng áp dụng xếp theo
+   * chuỗi mã vận đơn, mà mã tạo trước luôn nhỏ hơn, nên **vận đơn đã bị huỷ luôn chiếm chỗ** và
+   * vận đơn giao thành công bị đẩy thành xung đột — lấy lần gửi hỏng làm kết quả cuối.
+   *
+   * Nay chọn theo CHỨNG TỪ: bỏ các lần gửi đã huỷ nếu còn lần gửi khác, rồi lấy lần gửi MỚI NHẤT
+   * theo mốc của ĐVVC. Các lần gửi còn lại không bị vứt: chúng giữ nguyên trong kết quả với
+   * `matchIssue` nói rõ lý do, để trang Chất lượng dữ liệu hiện ra cho người đối chiếu.
+   *
+   * Cố ý KHÔNG tự tạo thêm dòng `shipments` cho từng lần gửi: các báo cáo đang tính ở grain
+   * "đơn × vận đơn", thêm dòng là nhân đôi doanh thu. Đổi grain là việc riêng, không gộp vào đây.
+   */
+  const claimants = new Map<string, OrderListMatch[]>();
+  for (const m of matched) {
+    if (m.matchKind !== "phone" || !m.shipmentId) continue;
+    const list = claimants.get(m.shipmentId) ?? [];
+    list.push(m);
+    claimants.set(m.shipmentId, list);
+  }
+  for (const [, list] of claimants) {
+    if (list.length < 2) continue;
+    const alive = list.filter((m) => m.mapped.stage !== "CANCELLED");
+    const pool = alive.length ? alive : list;
+    const winner = [...pool].sort((a, b) => attemptTime(b) - attemptTime(a) || b.trackingCode.localeCompare(a.trackingCode))[0];
+    for (const m of list) {
+      if (m === winner) continue;
+      m.shipmentId = null;
+      m.matchKind = null;
+      m.matchIssue = `Vận đơn ERP này có ${list.length} lần gửi; đã chọn ${winner.trackingCode} (lần gửi sau cùng chưa bị huỷ)`;
+    }
+  }
+  return matched;
 }
 
 /** Danh sách vận đơn cập nhật logistics/COD khai báo; không chứng minh tiền thực thu hay ngân hàng. */
@@ -279,7 +403,8 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   let duplicate = 0;
   let missingDate = 0;
   let conflicts = matches.filter((m) => m.matchIssue).length;
-  for (const m of [...matches].sort((a, b) => a.trackingCode.localeCompare(b.trackingCode))) {
+  // Ghi lịch sử theo ĐÚNG thứ tự thời gian của các lần gửi, không theo chuỗi mã vận đơn.
+  for (const m of [...matches].sort((a, b) => attemptTime(a) - attemptTime(b) || a.trackingCode.localeCompare(b.trackingCode))) {
     if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
     const occurredAt = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
     if (!occurredAt || !Number.isFinite(occurredAt.getTime())) { missingDate++; continue; }
@@ -315,10 +440,14 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         returnFlag: m.returnFlag ?? false, forwardFlag: m.forwardFlag ?? false };
       const [existing] = await tx.select().from(schema.shipmentEvents).where(and(eq(schema.shipmentEvents.shipmentId, current.id),
         eq(schema.shipmentEvents.source, "VTP_IMPORT"), eq(schema.shipmentEvents.status, m.statusText), eq(schema.shipmentEvents.occurredAt, occurredAt)));
-      if (existing) {
-        const previous = existing.raw as { snapshot?: typeof snapshot } | null;
-        return previous?.snapshot && Object.keys(snapshot).every((key) => previous.snapshot![key as keyof typeof snapshot] === snapshot[key as keyof typeof snapshot]) ? "duplicate" : "conflict";
-      }
+      // So theo Ý NGHĨA, không theo hình dạng: thêm khoá mới vào `snapshot` không được biến toàn
+      // bộ lịch sử cũ thành xung đột (xem compareRowSnapshots).
+      const verdict = existing ? compareRowSnapshots((existing.raw as { snapshot?: RowSnapshot } | null)?.snapshot, snapshot) : null;
+      if (verdict === "same") return "duplicate";
+      // Danh tính hoặc TIỀN khác nhau ⇒ dừng cho người đối chiếu, không lặng lẽ đè.
+      if (verdict === "conflict") return "conflict";
+      // verdict === "changed": CÙNG một sự việc (đã trùng vận đơn + trạng thái + mốc) nhưng dòng
+      // tệp mang số mới hơn — vẫn cập nhật tiền/cước bên dưới, chỉ không chèn lại sự kiện.
       const older = current.vtpStatusDate !== null && current.vtpStatusDate > occurredAt;
       const sameTimeConflict = current.vtpStatusDate?.getTime() === occurredAt.getTime() && current.stage !== m.mapped.stage;
       const before = { stage: current.stage, codAmount: current.codAmount, shippingFee: current.shippingFee, vtpStatusDate: current.vtpStatusDate };
@@ -337,10 +466,17 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         }).where(eq(schema.shipments.id, current.id));
       }
       const disposition = older ? "stale" : sameTimeConflict ? "conflict" : "applied";
-      await tx.insert(schema.shipmentEvents).values({ shipmentId: current.id, source: "VTP_IMPORT", status: m.statusText,
-        statusName: m.statusText, occurredAt, normalizedStage: m.mapped.stage, legType: isLeg ? "RETURN" : "OUTBOUND",
-        verificationStatus: "PENDING", sourceReference: m.sourceHash ? `${m.sourceHash}:row:${m.sourceRow}` : null,
-        raw: { snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, importedBy: actor } });
+      const eventRaw = { snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, importedBy: actor };
+      if (existing) {
+        // Sự kiện đã có (cùng vận đơn + trạng thái + mốc): làm mới ảnh chụp để lần nhập sau nhận ra
+        // là trùng thay vì lại coi là "đã đổi". Lịch sử KHÔNG bị xoá, chỉ được bổ sung thông tin.
+        await tx.update(schema.shipmentEvents).set({ raw: eventRaw }).where(eq(schema.shipmentEvents.id, existing.id));
+      } else {
+        await tx.insert(schema.shipmentEvents).values({ shipmentId: current.id, source: "VTP_IMPORT", status: m.statusText,
+          statusName: m.statusText, occurredAt, normalizedStage: m.mapped.stage, legType: isLeg ? "RETURN" : "OUTBOUND",
+          verificationStatus: "PENDING", sourceReference: m.sourceHash ? `${m.sourceHash}:row:${m.sourceRow}` : null,
+          raw: eventRaw });
+      }
       await tx.insert(schema.auditLogs).values({ userEmail: actor, action: "VTP_ORDER_LIST_ROW", entity: "SHIPMENT", entityId: current.id,
         detail: { before, snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null } });
       // Trạng thái cuối cùng luôn do lịch sử sự kiện quyết định, không phụ thuộc luồng nào ghi sau.
