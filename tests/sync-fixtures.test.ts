@@ -23,6 +23,7 @@ import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
+import { testSalesFunnel } from "./sales-funnel.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
@@ -1095,6 +1096,7 @@ async function main() {
   await testFinancialTruth(db);
   await testProductIntelligence(db);
   await testActionQueue(db);
+  await testSalesFunnel(db);
   await testAdsRoas(db);
   await testAuditTrail(db);
   testUiConsistency();
