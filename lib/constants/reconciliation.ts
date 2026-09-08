@@ -35,7 +35,9 @@ export type ReconciliationRuleKey =
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
   | "COD_OVERDUE_UNPAID"
-  | "EXPENSE_NEEDS_ALLOCATION_REVIEW";
+  | "EXPENSE_NEEDS_ALLOCATION_REVIEW"
+  | "NEGATIVE_STOCK"
+  | "STOCK_MISSING_OPENING_BALANCE";
 
 /** Loại đối tượng mà một vi phạm trỏ tới — quyết định drill-down mở trang nào. */
 export type IssueEntity = "shipment" | "order" | "order_item" | "webhook_event" | "shipment_event";
@@ -166,6 +168,27 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
       "Cùng một số điện thoại có nhiều đơn chưa gắn được mã vận đơn, và bằng chứng của ĐVVC không phân biệt được đơn nào ứng với vận đơn nào. Máy CỐ Ý không đoán: gán bừa là bịa ra chứng từ.",
     suggestedAction:
       "Chỉ cần xử lý khi các cách ghép hợp lệ cho ra KẾT QUẢ KHÁC NHAU (ví dụ một vận đơn giao thành công, một vận đơn hoàn). Nếu mọi cách ghép đều cho cùng kết quả thì tổng hợp đã đúng, không cần làm gì.",
+    autoRepair: false,
+  },
+  NEGATIVE_STOCK: {
+    key: "NEGATIVE_STOCK",
+    entity: "order",
+    severity: "WARNING",
+    label: "Tồn kho âm",
+    reason:
+      "Sổ kho tính tồn = phiếu kho − đã xuất qua ĐVVC. Ra số âm nghĩa là hàng đã xuất nhiều hơn số từng nhập — gần như luôn do THIẾU SỐ DƯ ĐẦU KỲ, không phải do bán quá.",
+    suggestedAction:
+      "Kiểm kê thực tế rồi lập phiếu nhập ghi rõ 'số dư đầu kỳ theo kiểm kê ngày …'. TUYỆT ĐỐI không lập phiếu bù cho khớp số: bịa một con số vào sổ kho đúng là loại sai mà ERP sinh ra để chống.",
+    autoRepair: false,
+  },
+  STOCK_MISSING_OPENING_BALANCE: {
+    key: "STOCK_MISSING_OPENING_BALANCE",
+    entity: "order",
+    severity: "WARNING",
+    label: "Mẫu mã đã xuất hàng nhưng chưa có phiếu nhập nào",
+    reason:
+      "Có đơn đã xuất hàng của mẫu mã này nhưng sổ kho chưa từng ghi một phiếu nhập nào cho nó. Mọi con số tồn của mẫu mã đó đều vô nghĩa cho tới khi có số dư đầu kỳ.",
+    suggestedAction: "Đếm thực tế và lập phiếu nhập số dư đầu kỳ. ERP hiện 'Chưa có phiếu nhập' thay vì hiện số, nên không ai bị lừa bởi số 0.",
     autoRepair: false,
   },
   EXPENSE_NEEDS_ALLOCATION_REVIEW: {

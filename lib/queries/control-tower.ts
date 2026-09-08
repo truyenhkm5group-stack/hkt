@@ -167,6 +167,36 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           -- ORDER_OUTCOME da ket luan HOAN nho chinh van don hoan do.
           and not (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED'
                    and exists (select 1 from shipments leg where leg.order_reference = s.vtp_order_number))`;
+    case "NEGATIVE_STOCK":
+      // Tồn = phiếu kho − đã xuất (mốc ĐVVC). Chỉ xét mẫu mã ĐÃ có phiếu nhập: mẫu mã chưa có phiếu
+      // nào thì con số không phải "âm" mà là "chưa biết", và đã có luật riêng bên dưới.
+      return sql`select coalesce(nullif(v.sku, ''), v.id) as code,
+          'tồn ' || (coalesce(k.nhap, 0) - coalesce(x.xuat, 0))::text || ' · đã nhập ' || coalesce(k.nhap, 0)::text
+            || ' · đã xuất ' || coalesce(x.xuat, 0)::text as evidence,
+          now() as at, v.id as entity_id
+        from product_variants v
+        join (select ri.variant_id, sum(ri.quantity) as nhap
+              from stock_receipt_items ri group by 1) k on k.variant_id = v.id
+        left join (select oi.variant_id, sum(oi.quantity) as xuat
+                   from order_items oi
+                   join shipments sh on sh.order_id = oi.order_id
+                   where sh.picked_up_at is not null
+                      or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')
+                   group by 1) x on x.variant_id = v.id
+        where (coalesce(k.nhap, 0) - coalesce(x.xuat, 0)) < 0`;
+    case "STOCK_MISSING_OPENING_BALANCE":
+      return sql`select coalesce(nullif(v.sku, ''), v.id) as code,
+          'đã xuất ' || x.xuat::text || ' món nhưng chưa có phiếu nhập nào' as evidence,
+          now() as at, v.id as entity_id
+        from product_variants v
+        join (select oi.variant_id, sum(oi.quantity) as xuat
+              from order_items oi
+              join shipments sh on sh.order_id = oi.order_id
+              where sh.picked_up_at is not null
+                 or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')
+              group by 1) x on x.variant_id = v.id
+        where x.xuat > 0
+          and not exists (select 1 from stock_receipt_items ri where ri.variant_id = v.id)`;
     case "EXPENSE_NEEDS_ALLOCATION_REVIEW":
       return sql`select x.description as code,
           x.category::text || ' · ' || x.amount::text || 'đ · ghi ngày ' ||
