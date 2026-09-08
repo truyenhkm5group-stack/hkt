@@ -196,7 +196,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           {data.topProducts.length ? (
             <ul className="divide-y">
               {data.topProducts.map((p, i) => (
-                <li key={`${p.sku}-${i}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                <li key={`${p.variantId ?? p.sku}-${i}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">{i + 1}</span>
                   {p.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -206,11 +206,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">{p.productName}</p>
-                    <p className="truncate text-xs text-muted-foreground">{p.sku || "—"}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {p.sku || "—"}
+                      {p.successRate === null ? " · chưa có đơn kết thúc" : ` · GTC ${p.successRate}%`}
+                      {p.daysOfCover === null ? "" : ` · còn ${p.daysOfCover} ngày hàng`}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <p className="numeric text-sm font-bold">{formatNumber(p.quantity)} sp</p>
-                    <p className="numeric text-xs text-muted-foreground">{formatVND(p.revenue, { compact: true })}</p>
+                    <p className="numeric text-sm font-bold">{formatNumber(p.deliveredQty)} sp giao TC</p>
+                    <p className="numeric text-xs text-muted-foreground">{formatVND(p.deliveredRevenue, { compact: true })}</p>
+                    {p.returnedQty ? <p className="numeric text-[11px] text-destructive">{formatNumber(p.returnedQty)} sp hoàn</p> : null}
                   </div>
                 </li>
               ))}

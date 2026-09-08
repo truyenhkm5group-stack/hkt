@@ -19,7 +19,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ✅ xong | `test: enforce ERP business truth invariants` |
 | 9 | Chân lý tài chính | ✅ xong | `feat: standardize ERP financial truth` |
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ✅ xong | `feat: improve inventory truth and stock risk` |
-| 11 | Chỉ số theo mẫu mã | ⏳ | |
+| 11 | Chỉ số theo mẫu mã | ✅ xong | `feat: add product variant performance intelligence` |
 | 12 | Hàng đợi việc theo mức ưu tiên | ⏳ | |
 | 13 | Tổng quan ra quyết định | ⏳ | |
 | 14 | ROAS theo kết quả đơn | ⏳ | |
@@ -229,6 +229,20 @@ từ trước, không sửa. Bổ sung phần còn thiếu:
 
 `tests/inventory.test.ts` khoá: khả dụng ≤ tồn thực tế · hàng hụt không âm · Tổng quan dùng đúng
 con số rủi ro · Tổng quan / Kế hoạch SX / cảnh báo cùng một bộ máy.
+
+### TASK 11 — Chỉ số theo mẫu mã
+
+`lib/queries/product-intelligence.ts` ghép ba chiều cho từng mẫu mã: **BÁN** (số lên đơn, số giao
+thành công, doanh thu giao TC) · **CHẤT** (GTC, tỷ lệ hoàn, doanh thu mất vì hoàn, lợi nhuận góp) ·
+**CÒN** (khả dụng bán, days of cover). Lọc được theo kỳ, kênh bán, mã hàng, màu, size.
+
+Top mẫu mã trên Tổng quan nay xếp theo **doanh thu giao thành công**, không theo số lên đơn — xếp
+theo số lên đơn sẽ đẩy đúng những mẫu mã hoàn nhiều lên đầu bảng rồi shop lại sản xuất thêm.
+
+Ma trận Màu × Size trên trang chi tiết sản phẩm, chỉ dựng khi mã hàng thật sự có nhiều màu/size.
+
+Thiếu dữ liệu thì nói CHƯA BIẾT: chưa có phiếu nhập ⇒ `available = null` và không bịa ra days of
+cover; không tra được giá vốn ⇒ `contribution = null` kèm lý do.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

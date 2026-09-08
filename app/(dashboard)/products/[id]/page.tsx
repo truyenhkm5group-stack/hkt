@@ -13,6 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail } from "@/lib/queries/products";
+import { getProductMatrix } from "@/lib/queries/product-intelligence";
+import { successTone } from "@/lib/constants/returns";
+import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { requirePermission } from "@/lib/auth/session";
 
@@ -34,6 +37,9 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     notFound();
   }
   const { totals, warehouses } = product;
+  // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
+  const matrixPeriod = resolvePeriod({}, "90d");
+  const matrix = await getProductMatrix(id, matrixPeriod);
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
@@ -74,6 +80,50 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Bán ra theo ngày" description="Số lượng bán trong 30 ngày qua (không tính đơn huỷ/xoá)">
             <ProductSalesChart data={product.daily} />
           </SectionCard>
+
+          {matrix ? (
+            <SectionCard
+              title="Hiệu quả theo Màu × Size"
+              description={`${matrixPeriod.label} · mỗi ô: số giao thành công / tỷ lệ GTC / số ngày còn đủ hàng`}
+              hint="Xếp theo KẾT QUẢ THẬT, không theo số lên đơn: một mẫu mã bán nhiều mà hoàn nhiều thì kém hơn hẳn mẫu mã bán ít mà hoàn ít. Ô trống nghĩa là mẫu mã đó không bán được cái nào trong kỳ."
+              padded={false}
+            >
+              <div className="overflow-x-auto">
+                <Table className="min-w-[520px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Màu \ Size</TableHead>
+                      {matrix.sizes.map((size) => (
+                        <TableHead key={size} className="text-center">{size}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {matrix.colors.map((color) => (
+                      <TableRow key={color}>
+                        <TableCell className="font-medium whitespace-nowrap">{color}</TableCell>
+                        {matrix.sizes.map((size) => {
+                          const cell = matrix.cells[color]?.[size];
+                          if (!cell) return <TableCell key={size} className="text-center text-xs text-muted-foreground">—</TableCell>;
+                          return (
+                            <TableCell key={size} className="text-center">
+                              <span className="numeric block text-sm font-semibold">{formatNumber(cell.deliveredQty)}</span>
+                              <span className={cn("block text-[11px]", successTone(cell.successRate))}>
+                                {cell.successRate === null ? "chưa kết thúc" : `${cell.successRate}%`}
+                              </span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {cell.daysOfCover === null ? (cell.available === null ? "chưa có phiếu nhập" : "—") : `còn ${cell.daysOfCover} ngày`}
+                              </span>
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          ) : null}
 
           <SectionCard title={`Mẫu mã (${formatNumber(product.variants.length)})`} description="Tồn kho theo từng kho · số chờ giao / đang hoàn lấy từ Pancake" padded={false}>
             <div className="overflow-x-auto">

@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
 import { stockRiskSummary } from "@/lib/queries/stock";
+import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
@@ -164,15 +165,10 @@ async function getDashboardDataUncached(period: Period) {
     with: { shipment: { columns: { stage: true, carrier: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 2 } },
   });
 
-  // Top sản phẩm bán chạy trong kỳ
-  const topProducts = await db
-    .select({ productName: schema.orderItems.productName, sku: schema.orderItems.sku, quantity: sum(schema.orderItems.quantity), revenue: sum(schema.orderItems.lineTotal), image: sql<string | null>`max(${schema.orderItems.image})` })
-    .from(schema.orderItems)
-    .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
-    .where(metricScope(period, "confirmed"))
-    .groupBy(schema.orderItems.productName, schema.orderItems.sku)
-    .orderBy(desc(sum(schema.orderItems.quantity)))
-    .limit(6);
+  // TOP MẪU MÃ — xếp theo DOANH THU GIAO THÀNH CÔNG, không theo số lượng lên đơn.
+  // Bán 100 cái mà hoàn 60 thì kém hơn hẳn bán 50 cái hoàn 5; xếp hạng theo số lên đơn sẽ đẩy
+  // đúng những mẫu mã hoàn nhiều lên đầu bảng rồi shop lại sản xuất thêm.
+  const topProducts = await getProductIntelligence({ period, limit: 6 });
 
   // Sự kiện gần nhất
   const lastSyncRows = await db.select().from(schema.syncRuns).where(isNotNull(schema.syncRuns.finishedAt)).orderBy(desc(schema.syncRuns.startedAt)).limit(3);
@@ -210,7 +206,7 @@ async function getDashboardDataUncached(period: Period) {
     },
     stockRisk,
     recentOrders,
-    topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0) })),
+    topProducts,
     lastSyncRows,
     orderTotal: Number(orderTotal?.count ?? 0),
     todayKey: vnDateKey(new Date()),
