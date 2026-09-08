@@ -36,6 +36,11 @@ export type CaseType =
    * còn mở ở đây là một khoản hàng đang không ai đếm.
    */
   | "RETURN_RECEIVED_PENDING_INSPECTION"
+  /**
+   * Đơn vừa hoàn của một khách ĐÃ TỪNG mua thành công. Khác hẳn đơn hoàn của khách lạ: đây là
+   * người đã tin shop một lần rồi, mất họ là mất cả chuỗi mua sau này chứ không chỉ một đơn.
+   */
+  | "CUSTOMER_RECOVERY"
   /** Dự báo sắp cháy hàng theo tốc độ bán thực tế — khác "sắp hết hàng" tính theo ngưỡng tĩnh. */
   | "STOCKOUT_RISK"
   /** Chi quảng cáo bất thường so với doanh thu giao thành công. */
@@ -53,6 +58,7 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   ORDER_PENDING: "NEW_ORDER_UNPROCESSED",
   ORDER_CONFIRMED_STALE: "ORDER_CONFIRMATION_STALE",
   RETURN_PENDING_INSPECTION: "RETURN_RECEIVED_PENDING_INSPECTION",
+  CUSTOMER_RECOVERY: "CUSTOMER_RECOVERY",
   STOCKOUT_RISK: "STOCKOUT_RISK",
   ADS_ANOMALY: "ADS_ANOMALY",
   PROFITABILITY_ALERT: "PROFITABILITY_ALERT",
@@ -78,6 +84,7 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   NEW_ORDER_UNPROCESSED: "Đơn mới chưa xử lý",
   ORDER_CONFIRMATION_STALE: "Đã chốt nhưng chưa gửi hàng",
   RETURN_RECEIVED_PENDING_INSPECTION: "Hàng hoàn về · chưa tái nhập kho",
+  CUSTOMER_RECOVERY: "Mất khách quen · cần gọi lại",
   STOCKOUT_RISK: "Sắp cháy hàng theo tốc độ bán",
   ADS_ANOMALY: "Quảng cáo bất thường",
   PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
@@ -110,6 +117,8 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   RISKY_ORDER: 0.9,
   // Đếm và lập phiếu là trả lại được toàn bộ giá trị hàng vào tồn.
   RETURN_RECEIVED_PENDING_INSPECTION: 0.9,
+  // Gọi lại ngay sau khi hoàn thì còn giữ được khách; để một tuần là mất hẳn.
+  CUSTOMER_RECOVERY: 0.7,
   // Đặt sản xuất kịp thì không mất doanh thu nào.
   STOCKOUT_RISK: 0.8,
   // Tắt/sửa quảng cáo là chặn được tiền chảy tiếp.
@@ -139,6 +148,8 @@ export const CASE_ACTION: Record<CaseType, string> = {
   ORDER_CONFIRMATION_STALE: "Đơn đã chốt mà chưa có vận đơn — kho đóng gói và đẩy sang Viettel Post ngay.",
   RETURN_RECEIVED_PENDING_INSPECTION:
     "Kiểm đếm hàng hoàn thực nhận rồi lập phiếu tái nhập. Hàng hoàn KHÔNG tự vào tồn — chưa lập phiếu thì số tồn đang thiếu đúng bằng lô này.",
+  CUSTOMER_RECOVERY:
+    "Gọi khách hỏi vì sao không nhận hàng lần này. Đây là khách đã từng mua thành công — giữ được họ đáng giá hơn nhiều so với một đơn.",
   STOCKOUT_RISK: "Xem Kế hoạch SX: đặt sản xuất trước ngày dự báo cháy hàng, trừ đi thời gian sản xuất.",
   ADS_ANOMALY: "Mở Báo cáo quảng cáo, đối chiếu chi tiêu với doanh thu giao thành công của đúng chiến dịch.",
   PROFITABILITY_ALERT: "Mở Báo cáo lợi nhuận, soi mẫu mã / kênh đang kéo tụt đóng góp.",
@@ -191,6 +202,8 @@ const CUSTOMER_WAITING: Record<CaseType, number> = {
   NEW_ORDER_UNPROCESSED: 1,
   ORDER_CONFIRMATION_STALE: 1,
   DELIVERY_STALE: 0.8,
+  // Khách thật, đã tin shop một lần, và đang thất vọng.
+  CUSTOMER_RECOVERY: 1,
   RISKY_ORDER: 0.6,
   RETURNING: 0.4,
   STOCKOUT_RISK: 0.4,
@@ -346,6 +359,8 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   CS_CASE: 4,
   RISKY_ORDER: 12,
   RETURN_RECEIVED_PENDING_INSPECTION: 72,
+  // Cửa sổ gọi lại sau một lần hoàn rất ngắn: qua hai ngày thì lời xin lỗi không còn nghĩa gì.
+  CUSTOMER_RECOVERY: 48,
   COD_OVERDUE: 168,
   DATA_ERROR: 72,
   LOW_STOCK_RISK: 72,

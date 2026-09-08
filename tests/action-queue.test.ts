@@ -186,7 +186,7 @@ export async function testActionQueue(db: Db) {
   }
 
   // ───────── 4. Loại việc mới phải có đủ nhãn, hành động và mức cứu được ─────────
-  for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
+  for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
     assert.ok(CASE_TYPE_LABEL[t]?.length, `${t}: thiếu nhãn tiếng Việt`);
     assert.ok(RECOVERABILITY[t] > 0, `${t}: phải khai mức còn cứu được`);
   }
@@ -195,6 +195,14 @@ export async function testActionQueue(db: Db) {
   // Hàng hoàn chưa tái nhập phải đứng trên đơn đang hoàn về: một bên còn lấy lại được nguyên lô
   // hàng vào tồn, một bên chỉ còn chờ hậu quả.
   assert.ok(RECOVERABILITY.RETURN_RECEIVED_PENDING_INSPECTION > RECOVERABILITY.RETURNING);
+  // Mất khách QUEN phải gấp hơn một đơn hoàn thường: mất người đã tin shop một lần là mất cả chuỗi
+  // mua về sau, không chỉ một đơn. Và cửa sổ gọi lại ngắn hơn hẳn.
+  assert.ok(
+    caseScore({ severity: "warning", ageHours: 12, amount: 500_000, type: "CUSTOMER_RECOVERY" }) >
+      caseScore({ severity: "warning", ageHours: 12, amount: 500_000, type: "RETURNING" }),
+    "mất khách quen phải xếp trên đơn đang hoàn thường",
+  );
+  assert.ok((CASE_SLA_HOURS.CUSTOMER_RECOVERY ?? 0) < (CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION ?? 0), "gọi lại khách gấp hơn kiểm đếm hàng hoàn");
 
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc giải thích được (nghiêm trọng + tuổi + tiền + khả năng cứu + khách đang chờ + sắp cháy hàng)`,

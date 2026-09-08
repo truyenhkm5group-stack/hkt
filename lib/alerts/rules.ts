@@ -303,6 +303,60 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       // bỏ qua nếu chưa có dữ liệu khách
     }
   }
+  // ───────── MẤT KHÁCH QUEN ─────────
+  //
+  // Đơn vừa hoàn của một khách ĐÃ TỪNG mua thành công. Khác hẳn đơn hoàn của khách lạ: người này đã
+  // tin shop một lần rồi, nên mất họ là mất cả chuỗi mua về sau chứ không chỉ một đơn.
+  //
+  // CỐ Ý chỉ lấy khách có lịch sử mua thành công, và chỉ trong cửa sổ ngắn: gọi lại sau một tuần thì
+  // lời xin lỗi không còn nghĩa gì, mà mở rộng ra mọi đơn hoàn sẽ biến hàng đợi thành danh sách
+  // hàng trăm dòng không ai gọi nổi.
+  //
+  // KHÔNG tự nhắn tin cho khách ở đây — chỉ tạo việc để người gọi. Kịch bản nhắn tin tự động nằm ở
+  // module Chăm sóc khách, có cấu hình và giới hạn riêng.
+  if (cfg.enabled.customerRecovery) {
+    activeKinds.push("CUSTOMER_RECOVERY");
+    try {
+      const since = new Date(Date.now() - 7 * 86_400_000);
+      const rows = await db
+        .select({
+          ...orderCols,
+          shipmentId: s.id,
+          code: s.vtpOrderNumber,
+          returnedAt: s.returnedAt,
+          succeeded: schema.customers.succeedOrderCount,
+          purchased: schema.customers.purchasedAmount,
+        })
+        .from(s)
+        .innerJoin(o, eq(o.id, s.orderId))
+        .innerJoin(schema.customers, eq(schema.customers.id, o.customerId))
+        .where(
+          and(
+            inArray(s.stage, ["RETURNED", "RETURNING"]),
+            sql`coalesce(${schema.customers.succeedOrderCount}, 0) >= 1`,
+            sql`coalesce(${s.returnedAt}, ${s.updatedAt}) >= ${since.toISOString()}::timestamptz`,
+          ),
+        )
+        .orderBy(sql`coalesce(${s.returnedAt}, ${s.updatedAt}) desc`)
+        .limit(100);
+      for (const r of rows) {
+        candidates.push({
+          kind: "CUSTOMER_RECOVERY",
+          severity: "warning",
+          title: `Khách quen không nhận hàng · ${orderLabel(r)}`,
+          body: `Đã mua thành công ${Number(r.succeeded ?? 0)} đơn trước đó (tổng ${formatVND(Number(r.purchased ?? 0))}) — gọi hỏi vì sao lần này hoàn, giữ khách quan trọng hơn giữ một đơn.`,
+          href: `/orders/${r.id}`,
+          entityType: "ORDER",
+          entityId: r.id,
+          dedupeKey: `winback:${r.shipmentId}`,
+          occurredAt: r.returnedAt,
+        });
+      }
+    } catch {
+      // chưa có dữ liệu khách
+    }
+  }
+
   // ───────── HÀNG HOÀN ĐÃ VỀ MÀ KHO CHƯA TÁI NHẬP ─────────
   //
   // Khoảng trống giữa "hàng về tới nơi" và "hàng có mặt trong tồn". Theo luật kho, hàng hoàn KHÔNG
