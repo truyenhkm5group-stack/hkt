@@ -1,6 +1,6 @@
 import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
 import { AdsTab } from "@/app/(dashboard)/expenses/ads-tab";
-import { RoasSection } from "@/app/(dashboard)/ads/roas-section";
+import { AdsCoverageSection, RoasSection } from "@/app/(dashboard)/ads/roas-section";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -24,6 +24,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         actions={canWrite ? <AdSpendDialog /> : null}
       />
       <RoasSection period={period} />
+      <AdsCoverageSection period={period} />
       <AdsTab raw={raw} period={period} canWrite={canWrite} canManageEmployees={canManageEmployees} />
     </div>
   );
