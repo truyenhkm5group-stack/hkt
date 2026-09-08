@@ -383,6 +383,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   };
 
   let shipmentId: string;
+  /** Vận đơn ta vừa ghi có chứng từ ĐVVC hay không — quyết định có cần chốt lại theo lịch sử. */
+  let settleFromHistory = hasCarrierTruth;
   if (existing) {
     await db.update(schema.shipments).set({ ...data, updatedAt: new Date() }).where(eq(schema.shipments.id, existing.id));
     shipmentId = existing.id;
@@ -392,6 +394,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     if (orphan) {
       await db.update(schema.shipments).set({ ...data, orderId: mapped.id, stage: orphan.vtpStatusDate ? orphan.stage : stage, updatedAt: new Date() }).where(eq(schema.shipments.id, orphan.id));
       shipmentId = orphan.id;
+      // Vận đơn mồ côi do webhook ĐVVC tạo trước khi đơn Pancake về — nó CÓ chứng từ.
+      settleFromHistory = settleFromHistory || Boolean(orphan.vtpStatusDate);
     } else {
       const [row] = await db.insert(schema.shipments).values({ orderId: mapped.id, ...data }).returning({ id: schema.shipments.id });
       shipmentId = row.id;
@@ -405,9 +409,11 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
       .onConflictDoNothing();
   }
   // Chốt lại bằng lịch sử: có chứng từ ĐVVC thì ảnh chụp phải khớp lịch sử, bất kể Pancake vừa ghi
-  // gì. Không có chứng từ nào thì đây là lệnh rỗng và trạng thái Pancake ở trên được giữ nguyên.
-  const settled = await materializeShipmentState(db, shipmentId);
-  publish({ type: "shipment", shipmentId, status: (settled.after as ShipmentStage) ?? stage });
+  // gì. CHỈ chạy khi vận đơn thật sự có chứng từ — đồng bộ toàn bộ Pancake đi qua hàm này cho từng
+  // đơn, nên gọi vô điều kiện là cộng thêm hai truy vấn mỗi đơn mà không đổi được gì cho vận đơn
+  // chưa có sự kiện nào của ĐVVC.
+  const settled = settleFromHistory ? await materializeShipmentState(db, shipmentId) : null;
+  publish({ type: "shipment", shipmentId, status: (settled?.after as ShipmentStage) ?? stage });
 }
 
 // ───────────────────────── Jobs ─────────────────────────
