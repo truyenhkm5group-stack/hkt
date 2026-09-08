@@ -23,6 +23,7 @@ import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
+import { testUiConsistency } from "./ui-consistency.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1089,6 +1090,7 @@ async function main() {
   await testActionQueue(db);
   await testAdsRoas(db);
   await testAuditTrail(db);
+  testUiConsistency();
   await testInventory(db);
   await testCodReconciliation();
   await testOrderSource();

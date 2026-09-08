@@ -16,14 +16,15 @@ import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
 import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { OrderOutcomeBadge, VerifiedOutcomeBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
-import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, VERIFIED_OUTCOME_LABEL, type DqIssue, type VerifiedOutcome } from "@/lib/constants/data-quality";
-import { OUTCOME_LABEL, successTone, type OrderOutcome } from "@/lib/constants/returns";
+import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
+import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
@@ -45,15 +46,7 @@ function Rate({ value }: { value: number | null }) {
   return <span className={successTone(value)}>{value}%</span>;
 }
 
-function outcomeBadge(outcome: VerifiedOutcome | OrderOutcome, label: string) {
-  const tone =
-    outcome === "DELIVERED" ? "bg-success/12 text-success"
-    : outcome === "UNVERIFIED" ? "bg-warning/15 text-amber-700 dark:text-amber-300"
-    : outcome === "RETURNED" || outcome === "RETURNED_BY_RULE" ? "bg-destructive/10 text-destructive"
-    : outcome === "IN_TRANSIT" ? "bg-info/12 text-info"
-    : "bg-muted text-muted-foreground";
-  return <span className={cn("inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", tone)}>{label}</span>;
-}
+
 
 export default async function DataQualityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("dashboard:view");
@@ -396,8 +389,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                           </TableCell>
                           <TableCell className="numeric text-right">{formatVND(row.declaredRevenue)}</TableCell>
                           <TableCell className="numeric text-right">{row.hasCashProof ? formatVND(row.cash) : <Unknown />}</TableCell>
-                          <TableCell>{outcomeBadge(row.legacyOutcome as OrderOutcome, OUTCOME_LABEL[row.legacyOutcome as OrderOutcome] ?? row.legacyOutcome)}</TableCell>
-                          <TableCell>{outcomeBadge(row.verifiedOutcome, VERIFIED_OUTCOME_LABEL[row.verifiedOutcome] ?? row.verifiedOutcome)}</TableCell>
+                          <TableCell><OrderOutcomeBadge outcome={row.legacyOutcome as OrderOutcome} /></TableCell>
+                          <TableCell><VerifiedOutcomeBadge outcome={row.verifiedOutcome} /></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

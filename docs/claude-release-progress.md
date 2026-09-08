@@ -26,7 +26,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 15 | Sức khoẻ tích hợp | ✅ xong | `feat: add integration health observability` |
 | 16 | Hiệu năng | ✅ xong | `perf: optimize ERP critical paths` |
 | 17 | Nhật ký truy vết | ✅ xong | `feat: improve ERP business audit trail` |
-| 18 | Nhất quán giao diện | ⏳ | |
+| 18 | Nhất quán giao diện | ✅ xong | `refactor: improve ERP UX consistency` |
 | — | FINAL GATE | ⏳ | |
 
 ## Nhật ký
@@ -341,6 +341,22 @@ nhau; kho mã này PUBLIC nên một lần lộ là lộ vĩnh viễn. Trường
 Bổ sung nhật ký cho luồng còn thiếu: **phát lại gói tin webhook** (`scripts/vtp-retry-webhooks.ts`)
 trước đây ghi đè trạng thái gói tin mà không để lại dấu vết nào. Đối soát tự sửa và dựng lại lịch
 sử nay ghi before/after đầy đủ. 11 hành động và 4 loại đối tượng mới có nhãn tiếng Việt.
+
+### TASK 18 — Nhất quán giao diện
+
+Không đụng business logic. Xử lý đúng luật quan trọng nhất của task: **bốn chiều không được trình
+bày như một**.
+
+"Đã giao" của Pancake · "Giao thành công" của Viettel Post · "Đã về ngân hàng" của tiền · "Giao
+thành công" của KẾT QUẢ ĐƠN là bốn điều khác hẳn nhau, nhưng cả bốn đều là nhãn xanh hình viên
+thuốc. Người đọc thấy xanh là yên tâm mà không biết đang nhìn chiều nào.
+
+- Mỗi nhãn mang một tiền tố ngắn (`Đơn` · `VĐ` · `KQ` · `Tiền`) và tooltip nói rõ nguồn sự thật của
+  chiều đó cùng những gì **cấm suy ra** — đọc thẳng từ `lib/constants/truth.ts`.
+- Thêm `OrderOutcomeBadge` và `VerifiedOutcomeBadge` dùng chung. Trước đây kết quả đơn được vẽ tay
+  ở ba trang khác nhau nên mỗi trang một kiểu và mất luôn dấu hiệu phân biệt chiều.
+- `tests/ui-consistency.test.ts` khoá: 35 trạng thái của bốn chiều đều có nhãn tiếng Việt · mỗi
+  nhãn mang dấu hiệu chiều · **không trang nào được tự vẽ lại nhãn kết quả đơn**.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

@@ -11,7 +11,7 @@ import { ReturnRateTable } from "@/app/(dashboard)/reports/returns/return-rate-t
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
-import { OrderStageBadge } from "@/components/status-badge";
+import { OrderOutcomeBadge, OrderStageBadge } from "@/components/status-badge";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { OUTCOME_LABEL, OUTCOME_TONE, RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
+import { RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
   getReturnRateBySource,
@@ -418,14 +418,7 @@ export default async function ReturnRatePage({
                           <OrderStageBadge stage={r.stage} />
                         </TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              "inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold",
-                              OUTCOME_TONE[r.outcome],
-                            )}
-                          >
-                            {OUTCOME_LABEL[r.outcome]}
-                          </span>
+                          <OrderOutcomeBadge outcome={r.outcome} />
                           {r.returnedReason ? (
                             <div className="max-w-[200px] truncate text-[11px] text-muted-foreground">
                               {r.returnedReason}
