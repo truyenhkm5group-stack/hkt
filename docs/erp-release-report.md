@@ -809,3 +809,105 @@ Sau khi dán, kiểm chứng bằng đúng ba dấu hiệu (không cần chờ l
 3. Trang **Kết nối dữ liệu** thoát trạng thái *DEGRADED*, events/hour > 0.
 
 Sai một ký tự thì vẫn 401 — chỉ nên Copy, không gõ tay.
+
+## 10h. REALTIME ĐÃ THÔNG — xác minh end-to-end 08/09/2026
+
+Chủ shop dán URL mới (`?token=` với secret hiện hành) vào Poscake → Cấu hình chuyển tiếp Webhook.
+
+### Mốc chuyển trạng thái
+
+| Mốc (UTC) | Việc |
+|---|---|
+| 08:07:21 | Gói tin **401 cuối cùng** từ `mint/1.9.3` |
+| 08:07:18 | 3 request `curl/8.19.0` — **phép thử của tôi**, không phải Poscake (GET 200 · POST token sai 401 · POST không token 401) |
+| **08:12:01** | Gói tin **200 đầu tiên** — dữ liệu thật |
+| 08:18:36 | Gói tin gần nhất tại thời điểm chốt báo cáo |
+
+Cửa sổ chuyển đổi nằm giữa 08:07:21 và 08:12:01.
+
+### Gói tin thật đã nhận (KHÔNG có gói test nào trong nhóm 200)
+
+| Nhận lúc | HTTP | Vận đơn | Mã đơn | Mã thô | Trạng thái ĐVVC | Chiều | Xử lý | Lưu? | Vận đơn đổi? |
+|---|---|---|---|---|---|---|---|---|---|
+| 08:12:01 | 200 | PKE1515018957 | PKE90085133618451 | 500 | Giao cho bưu cục | *(thiếu cờ)* | PROCESSED | ✓ | → `OUT_FOR_DELIVERY` |
+| 08:12:11 | 200 | PKE1515018957 | PKE90085133618451 | 500 | Giao cho bưu cục | *(thiếu cờ)* | PROCESSED | ✓ | ✓ |
+| 08:13:24 | 200 | PKE1511614334 | PKE540445029262297 | 502 | Chuyển hoàn bưu cục gốc | **RETURN** | PROCESSED | ✓ | → `RETURNING` |
+| 08:16:30 | 200 | PKE1508909019 | PKE10901192769 | 400 | Nhận bảng kê đến | OUTBOUND | PROCESSED | ✓ | ✓ |
+| 08:18:01 | 200 | PKE1508909019 | PKE10901192769 | 500 | Giao bưu tá đi phát | OUTBOUND | PROCESSED | ✓ | → `OUT_FOR_DELIVERY` |
+
+**0 gói FAILED, 0 gói IGNORED.** Đây là **sự kiện vòng đời thật** (mã vận đơn thật, mã đơn thật, mốc
+thời gian thật), không phải gói tin kiểm tra kết nối — nên kết luận "realtime healthy" đứng được.
+
+`leg_type` suy từ cờ `IS_RETURNING`: `502 + IS_RETURNING=true` → **RETURN**; `400/500 +
+IS_RETURNING=false` → **OUTBOUND**. Hai gói đầu **không có** trường `IS_RETURNING` nên `leg_type`
+để **trống** — đúng nguyên tắc *UNKNOWN không phải 0*, không đoán bừa.
+
+### Sức khoẻ tích hợp Viettel Post — trước / sau
+
+| Chỉ số | Trước (08:00) | Sau (08:20) |
+|---|---|---|
+| Gói tin gần nhất | 07/09 07:42 (gói TEST) — **~25 giờ trước** | **2 phút trước** |
+| Gói/giờ | 0 | **6** |
+| Sự kiện hành trình mới nhất | 06/09 11:32:34 | **08/09 08:17:23** |
+| Gói lỗi (FAILED) | 0 | **0** (0 trong 24h) |
+| Mức sức khoẻ | DEGRADED / DOWN | **HEALTHY** |
+
+### Idempotency (mục 7)
+
+Cả hai đường — Viettel Post Partner gửi thẳng và Poscake chuyển tiếp — vào **cùng một route** và
+được ghi với **cùng `source = "VTP_WEBHOOK"`**. Vì vậy hai bản sao của cùng một sự việc rơi vào cùng
+khoá duy nhất `shipment_events_uq (shipment_id, source, status, occurred_at)`.
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Dòng `shipment_events` trùng khoá | **0** |
+| `webhook_events` VTP có `dedupe_key` | 6 gói / **6 sự việc** phân biệt |
+
+Quan trọng hơn khoá duy nhất: **kết quả đơn là HÀM của tập sự kiện, không phải phép cộng dồn.**
+`materializeShipmentState()` dựng lại trạng thái từ toàn bộ lịch sử; thêm một bản sao không đổi kết
+quả. Nên kể cả nếu một dòng trùng lọt qua, `ORDER_OUTCOME` vẫn không sinh outcome kép.
+
+### Kiến trúc nguồn dữ liệu (đã xác nhận bằng bằng chứng)
+
+| Nguồn | Vai trò | Căn cứ |
+|---|---|---|
+| **Poscake chuyển tiếp webhook VTP** | **CHÍNH** cho vận đơn do Poscake tạo | 485 + 6 gói thật đều từ `mint/1.9.3` |
+| Webhook Viettel Post Partner (trực tiếp) | **PHỤ** — nhận nếu có sự kiện thật | cấu hình đúng, nhưng mới chỉ gửi 2 gói TEST |
+| **API Viettel Post** | **KHÔNG** dùng làm nguồn đối chiếu | `getOrderDetailV3`/`order-filter` rỗng, `list-data-push-his` 403 — token không sở hữu vận đơn |
+| Tệp tải từ viettelpost.vn | Kênh **bù lịch sử** duy nhất | `applyVtpOrderList()` ghi `shipment_events` nguồn `VTP_IMPORT` |
+
+### Vận đơn treo: 380 (212 quá 48 giờ)
+
+Số treo **tăng** so với hôm qua vì thời gian trôi, không phải vì nạp dữ liệu hỏng. 51/380 đã nhận
+tin mới trong hôm nay — realtime đang tự gỡ dần.
+
+| Ngày tin cuối | Số vận đơn | Ghi chú |
+|---|---|---|
+| 22/01/2026 | 1 | **vận đơn ảo `123456789101112`** do gói TEST của ĐVVC tạo (07/09 04:31), không gắn đơn nào |
+| 28/08 – 03/09 | 13 | tồn cũ |
+| 04/09 | 33 | |
+| 05/09 | 70 | |
+| **06/09** | **119** | đúng ngày kênh nạp đứt |
+| 07/09 | 140 | phần lớn là vận đơn Pancake tạo, **chưa từng có sự kiện ĐVVC** |
+| 08/09 | 4 | đang chạy bình thường |
+
+### Module “Nhập dữ liệu Viettel Post” dùng được cho việc phục hồi
+
+`detectVtpFile()` tự nhận loại tệp bằng chính hai trình đọc thật (không đoán theo tên tệp), nên
+không nhập nhầm trạng thái với tiền:
+
+- **ORDER_LIST — “Danh sách vận đơn”**: trạng thái giao/hoàn, COD **khai báo**, cước. → `applyVtpOrderList()`
+- **STATEMENT_DETAIL — “Chi tiết bảng kê”**: tiền **THỰC THU**. → dùng cho đối soát COD, không phải logistics.
+
+`applyVtpOrderList()` ([statement-db.ts:270](../lib/integrations/viettelpost/statement-db.ts)) làm đúng
+việc cần cho phục hồi lịch sử:
+
+1. Ghi `shipment_events` nguồn **`VTP_IMPORT`** — chứng từ ĐVVC, không phải suy từ tiền.
+2. **Idempotent**: kiểm tra sẵn có theo (vận đơn, nguồn, trạng thái, mốc) trước khi chèn.
+3. **Không hạ cấp**: dòng cũ hơn trạng thái đang lưu bị đếm vào `stale` và bỏ qua.
+4. Gọi **`materializeShipmentState()`** — vẫn là chỗ ghi trạng thái DUY NHẤT.
+5. Nhận diện vận đơn **chiều hoàn** (`legs`), gắn vận đơn thiếu mã theo SĐT người nhận (`linked`),
+   đếm `conflicts` và `unmatched` để đối chiếu tay.
+
+⇒ Nhập tệp **không** phải backfill suy đoán. Nó bơm chứng từ ĐVVC thật vào đúng đường ống canonical.
+Khác hẳn `canonical-backfill` (đang bị chặn) vốn chỉ **tính lại** trên lịch sử đang thiếu.
