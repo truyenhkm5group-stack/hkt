@@ -136,6 +136,12 @@ export type PlanOutput = {
   shortage: number;
   suggested: number;
   status: PlanStatus;
+  /**
+   * HẠN ĐẶT HÀNG: ngày muộn nhất phải đặt để lô mới về kịp trước khi hết hàng.
+   * = ngày dự kiến hết hàng − thời gian sản xuất.
+   * `null` khi chưa dự báo được ngày hết hàng. Quá khứ nghĩa là ĐÃ MUỘN — vẫn hiện, không giấu.
+   */
+  reorderByDate: string | null;
   /** Tốc độ bán thô, chưa bỏ ngày đột biến. */
   rawVelocity: number;
   /** Đã bỏ một ngày đột biến khỏi tốc độ bán hay chưa. */
@@ -182,7 +188,7 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
   const v = computeVelocity(i.soldInWindow, i.windowDays, i.peakDayQty ?? 0);
   if (i.stockKnown === false) {
     return { available, velocity: v.velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed,
-      daysOfCover: null, stockOutDate: null, leadTimeDemand: 0,
+      daysOfCover: null, stockOutDate: null, reorderByDate: null, leadTimeDemand: 0,
       safetyStock: 0, target: 0, shortage: 0, suggested: 0, suggestedBeforeMoq: 0, moqApplied: false, status: "UNKNOWN",
       incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming: null };
   }
@@ -211,7 +217,10 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
   else if (daysOfCover !== null && daysOfCover < i.leadTimeDays + i.safetyDays) status = "LOW";
   else status = velocity <= 0 ? "IDLE" : "OK";
   const stockOutDate = daysOfCover !== null && available > 0 ? new Date(today.getTime() + daysOfCover * 86_400_000).toISOString().slice(0, 10) : available <= 0 && velocity > 0 ? today.toISOString().slice(0, 10) : null;
-  return { available, velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed, daysOfCover, stockOutDate,
+  // HẠN ĐẶT HÀNG: lùi từ ngày hết hàng về đúng thời gian sản xuất. Ngày này ở quá khứ nghĩa là đã
+  // muộn — vẫn hiện ra, vì giấu nó đi thì mẫu mã đang đứt hàng trông y hệt mẫu mã còn kịp.
+  const reorderByDate = stockOutDate ? new Date(new Date(`${stockOutDate}T00:00:00Z`).getTime() - i.leadTimeDays * 86_400_000).toISOString().slice(0, 10) : null;
+  return { available, velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed, daysOfCover, stockOutDate, reorderByDate,
     leadTimeDemand, safetyStock, target, shortage, suggested, suggestedBeforeMoq, moqApplied, status,
     incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming };
 }

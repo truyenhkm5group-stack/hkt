@@ -141,7 +141,19 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                     <TableCell className="text-right tabular-nums">{formatNumber(r.sold30)}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.velocity.toFixed(1)}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.daysOfCover === null ? "—" : `${Math.floor(r.daysOfCover)} ngày`}</TableCell>
-                    <TableCell className="text-xs">{fmtDate(r.stockOutDate)}</TableCell>
+                    <TableCell className="text-xs">
+                      {fmtDate(r.stockOutDate)}
+                      {/* HẠN ĐẶT: lùi từ ngày hết hàng về đúng thời gian sản xuất. Quá khứ = đã muộn, vẫn hiện. */}
+                      {r.reorderByDate ? (
+                        <span
+                          className={cn("block text-[10px]", new Date(`${r.reorderByDate}T00:00:00Z`).getTime() < Date.now() ? "font-semibold text-rose-600 dark:text-rose-400" : "text-muted-foreground")}
+                          title={`Phải đặt trước ngày này để lô mới về kịp (thời gian sản xuất ${r.leadTimeDays} ngày)`}
+                        >
+                          {new Date(`${r.reorderByDate}T00:00:00Z`).getTime() < Date.now() ? "đã quá hạn đặt " : "đặt trước "}
+                          {fmtDate(r.reorderByDate)}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.leadTimeDemand)}</TableCell>
                     <TableCell className="text-right tabular-nums" title="Nhu cầu (SX + đủ bán) + tồn an toàn">{formatNumber(r.target)}</TableCell>
                     <TableCell className="text-right tabular-nums font-bold">

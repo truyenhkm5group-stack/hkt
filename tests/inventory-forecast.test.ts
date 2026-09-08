@@ -76,6 +76,22 @@ export async function testInventoryForecast(db: Db) {
   assert.equal(outOfStock.status, "OUT");
   assert.ok(Number.isFinite(outOfStock.suggested), "tồn âm vẫn phải ra một con số hữu hạn");
 
+  // ───────── 5b. Hạn đặt hàng phải lùi đúng thời gian sản xuất ─────────
+  const soon = computePlan({ ...BASE, stock: 30, soldInWindow: 28, windowDays: 14, leadTimeDays: 7 });
+  assert.ok(soon.stockOutDate, "phải dự báo được ngày hết hàng");
+  assert.ok(soon.reorderByDate, "phải tính được hạn đặt hàng");
+  const gap = (new Date(`${soon.stockOutDate}T00:00:00Z`).getTime() - new Date(`${soon.reorderByDate}T00:00:00Z`).getTime()) / 86_400_000;
+  assert.equal(gap, 7, "hạn đặt hàng phải lùi đúng bằng thời gian sản xuất");
+
+  // Đã hết hàng: hạn đặt nằm ở QUÁ KHỨ. Vẫn phải hiện ra — giấu đi thì mẫu đang đứt hàng trông y
+  // hệt mẫu còn kịp.
+  const late = computePlan({ ...BASE, stock: 0, soldInWindow: 28, leadTimeDays: 7 });
+  assert.ok(late.reorderByDate, "đã muộn vẫn phải có hạn đặt để biết muộn bao nhiêu");
+  assert.ok(new Date(`${late.reorderByDate}T00:00:00Z`).getTime() < Date.now(), "hạn đặt của mẫu đã hết hàng phải nằm ở quá khứ");
+
+  // Chưa biết tồn thì không có hạn đặt nào cả.
+  assert.equal(computePlan({ ...BASE, stockKnown: false }).reorderByDate, null, "chưa biết tồn thì không đặt ra hạn nào");
+
   // ───────── 6. Chạy trên dữ liệu thật ─────────
   const plan = await getReplenishmentPlan({});
   for (const row of plan.rows) {
