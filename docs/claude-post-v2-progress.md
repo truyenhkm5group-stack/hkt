@@ -11,7 +11,10 @@ Production đang chạy `b067913` (bản V2). Nhánh `main` đi trước.
 | **A** | A3 · Hạn xử lý & tuổi việc | **XONG** | `d21bcf9` |
 | **A** | A4 · Quyền sở hữu việc | **XONG** | `0805463` |
 | **A** | A5 · Giao diện hàng đợi | **XONG** | `5c0e57f` |
-| B | B1–B4 · CS / Sales intelligence | chưa | |
+| **B** | B1 · Hợp đồng phễu bán hàng | **XONG** | `4e0a622` |
+| **B** | B2 · Hiệu suất nhân sự | **XONG** | `bcddd0c`, `272a7aa` |
+| **B** | B3 · Hàng đợi chăm sóc khách | **XONG** | `ed48e25` |
+| **B** | B4 · Báo cáo chuyển đổi | **XONG** | `92260ec` |
 | C | C1–C4 · Quảng cáo → giao thành công → lợi nhuận | chưa | |
 | D | D1–D3 · Mẫu mã × màu × size | chưa | |
 | E | E1–E5 · Tồn kho & dự báo sản xuất | chưa | |
@@ -44,6 +47,23 @@ làm được gì), vận đơn chưa ghép đơn và chưa rõ thuộc đơn n�
 **Bộ lọc không đổi số tổng hợp.** Tổng việc / tổng tiền treo / số trễ hạn luôn nói về toàn bộ hàng
 đợi. Nếu tổng cũng bị lọc thì chọn một bộ lọc là thấy "hết việc rồi".
 
+## Lô B — đã làm gì
+
+**Phễu bảy bước của kế hoạch chỉ đo được NĂM.** "Đã liên hệ" và "Đủ điều kiện" không có nguồn dữ
+liệu nào: ERP không đồng bộ hội thoại Pancake, và `conversation_id` chỉ tồn tại SAU KHI đơn đã tạo
+nên nó là hệ quả của việc lên đơn chứ không phải bằng chứng của việc liên hệ. Hệ quả phải nói thẳng:
+**ERP không đo được tỷ lệ chốt từ khách nhắn tin.**
+
+**Mỗi tỷ lệ hiện kèm mẫu số của nó**, và mẫu số chọn theo TRÁCH NHIỆM: tỷ lệ của kênh chia cho đơn
+đã rời kho, tỷ lệ của người chia cho đơn đã kết thúc, bước mua lại chia cho số khách.
+
+**Không đánh giá ai bằng số lượng đơn.** Bảng xếp theo doanh thu giao thành công. Đơn không gán được
+vào dòng "Chưa gán" xếp cuối, **không chia đều** cho nhân viên — chia đều làm tổng khớp trong khi
+từng người đều sai.
+
+**Loại việc mới: mất khách quen.** Đơn vừa hoàn của khách ĐÃ TỪNG mua thành công, hạn gọi lại 48
+giờ. Trước đây họ lẫn vào hàng trăm đơn hoàn khác và không ai gọi.
+
 ## Hiệu chuẩn có đổi hành vi
 
 Trần mức nghiêm trọng hạ 40 → 30, nên việc "nghiêm trọng nhưng không ai chờ, không dính tiền" không
@@ -54,6 +74,20 @@ chờ + còn cứu được. Trên dữ liệu kiểm thử, số việc GẤP g
 
 Migration **`0037`** — 5 cột hàng đợi việc + 2 khoá ngoại + 1 CHECK (bỏ qua phải có lý do) + 1 index.
 Idempotent, CHECK để `NOT VALID` nên không quét lại lịch sử.
+
+## Blocker
+
+**Phiên này không có `gh` CLI.** Không chạy được ops `db-query` nên không đo được độ phủ gán người
+THẬT trên production, và **không tự deploy được** ở cổng ra cuối.
+
+Xử lý: thay vì chép một con số không kiểm chứng được vào tài liệu, độ phủ được làm thành **hàm đo
+chạy trong ứng dụng** — mở trang Phễu bán hàng là thấy, đo lại lúc nào cũng được, và có kiểm thử.
+
+## Hai việc cố ý KHÔNG làm vì làm là bịa
+
+- **"Lead chưa follow-up"**: không có tập lead nào để đối chiếu.
+- **"Khách cũ đủ điều kiện mua lại"**: chưa có luật nghiệp vụ nào định nghĩa thế nào là đủ điều
+  kiện. Tự đặt ngưỡng là ra quyết định kinh doanh thay chủ shop.
 
 ## Không làm, đúng lệnh
 
