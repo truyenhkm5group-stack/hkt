@@ -19,6 +19,14 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   STOCK_RECEIPT_DELETE: "Xoá phiếu kho",
   COD_PAID: "Ghi nhận COD về ngân hàng",
   COD_RECONCILE: "Đối soát COD",
+  /**
+   * Chủ shop mở trang Viettel Post, đọc trạng thái rồi chép lại. Chạy một lần cho lịch sử, nhưng
+   * PHẢI truy nguyên được: nó ghi thẳng chứng từ vào lịch sử mà không có hệ thống ngoài nào đối
+   * chứng, nên đây chính là loại hành động cần nhật ký nhất.
+   */
+  VTP_MANUAL_VERIFICATION: "Chép tay chứng từ Viettel Post",
+  VTP_ORDER_LIST_IMPORT: "Nhập danh sách vận đơn Viettel Post",
+  VTP_ORDER_LIST_ROW: "Cập nhật vận đơn theo danh sách",
   COD_BATCH_CREATE: "Tạo bảng kê COD",
   SHIPMENT_REPUSH: "Yêu cầu VTP gửi lại webhook",
   SYNC_RUN: "Chạy đồng bộ",
