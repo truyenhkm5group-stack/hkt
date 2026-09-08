@@ -16,6 +16,7 @@ import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
+import { testBackfill } from "./backfill.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1073,6 +1074,7 @@ async function main() {
   await testOrderOutcomeContract(db);
   await testCanonicalTruth(db);
   await testDataQuality(db);
+  await testBackfill(db);
   await testConsistency(db);
   await testMetricsContract(db);
   await testInventory(db);

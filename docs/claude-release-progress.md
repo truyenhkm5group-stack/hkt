@@ -14,7 +14,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 3 | Cứng hoá nạp dữ liệu Viettel Post | ✅ xong | `feat: harden ViettelPost event ingestion` |
 | 4 | Bộ máy đối soát | ✅ xong | `feat: add shipment reconciliation safeguards` |
 | 5 | Lớp chân lý chỉ số | ✅ xong | `feat: centralize ERP metric truth` |
-| 6 | Dry-run lịch sử + backfill an toàn | ⏳ | |
+| 6 | Dry-run lịch sử + backfill an toàn | ✅ xong | `chore: rebuild canonical historical ERP truth` |
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ⏳ | |
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ⏳ | |
 | 9 | Chân lý tài chính | ⏳ | |
@@ -135,6 +135,26 @@ trường ngày · nguồn sự thật · cài đặt. Nêu rõ ba con số ti�
 
 `tests/metrics-contract.test.ts` khoá bất biến "cùng chỉ số + cùng kỳ + cùng bộ lọc ⇒ cùng con số",
 kèm chốt chặn giá vốn không được vượt doanh thu của chính tập đơn đó.
+
+### TASK 6 — Dry-run lịch sử + backfill an toàn
+
+`lib/sync/backfill.ts` dựng lại các giá trị SUY RA (trạng thái vận đơn, các mốc, và qua đó là kết
+quả đơn) từ lịch sử sự kiện. Không đụng dữ liệu gốc: `raw` của đơn/vận đơn/webhook, tiền
+(`cod_collected`, `cod_status`), người nhận, mốc kho thực nhận hàng hoàn.
+
+Chạy thử báo đủ: tổng · không đổi · sẽ đổi · không có chứng từ · mốc hỏng · sự kiện ERP chưa hiểu ·
+ma trận chuyển trạng thái · phân bố kết quả đơn trước/sau · số đơn lật giao thành công ↔ hoàn ·
+ca nhập nhằng · vận đơn không có chứng từ nào · ví dụ cụ thể.
+
+`backfillWarnings()` chặn tay người chạy khi bất thường: >20% vận đơn sẽ đổi, có đơn đang giao
+thành công bị lật, có ca "đã giao mà không có chứng từ giao", hoặc còn mã ĐVVC chưa hiểu.
+
+Idempotent (chạy lại báo 0 thay đổi), resumable (con trỏ trong `sync_state`), auditable
+(`backfill.canonical-state`). Quay lui không cần bản sao lưu vì lịch sử không bị đụng — dựng lại
+lần nữa là về đúng trạng thái tính được.
+
+Chạy được bằng `npx tsx scripts/erp-backfill.ts` (mặc định chạy thử) hoặc job `canonical-backfill`
+trên trang Kết nối dữ liệu.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

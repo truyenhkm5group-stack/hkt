@@ -13,6 +13,7 @@ import { evaluateAlerts } from "@/lib/alerts/rules";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
+import { backfillWarnings, runCanonicalBackfill } from "@/lib/sync/backfill";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
@@ -165,6 +166,21 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "QUÉT CHỈ ĐỌC toàn bộ luật đối soát (ảnh chụp lệch lịch sử, tiền về mà chưa có chứng từ giao, vận đơn mồ côi, mã trùng, treo lâu, mã ĐVVC lạ, mốc đi ngược, gói tin chưa xử lý…). fix=1 chỉ sửa HAI luật xác định: dựng lại ảnh chụp vận đơn từ lịch sử, và sửa nhãn 'không thu hộ' sai theo chính số tiền thu hộ. Lệch giữa tiền và giao hàng KHÔNG bao giờ tự sửa. days=N ngưỡng treo; since=N chỉ quét N ngày gần đây.",
     run: (o) => checkShipmentConsistency({ fix: o.params?.fix === "1", staleDays: num(o.params?.days), sinceDays: num(o.params?.since), actor: o.actor }),
+  },
+  "canonical-backfill": {
+    label: "Dựng lại trạng thái vận đơn từ lịch sử",
+    source: "VIETTELPOST",
+    description:
+      "MẶC ĐỊNH CHẠY THỬ: đếm xem dựng lại từ lịch sử sự kiện sẽ đổi bao nhiêu vận đơn, bao nhiêu đơn lật từ giao thành công sang hoàn và ngược lại — không ghi gì. apply=1 mới ghi thật, và bị chặn nếu chạy thử có bất thường (trừ khi force=1). batch=N chạy theo lô, resume=1 chạy tiếp chỗ dở. Không đụng dữ liệu gốc, tiền hay mốc kho nhận hàng hoàn.",
+    run: async (o) => {
+      const dry = await runCanonicalBackfill({ apply: false, batchSize: num(o.params?.batch), resume: o.params?.resume === "1", actor: o.actor });
+      const warnings = backfillWarnings(dry);
+      if (o.params?.apply !== "1") return { mode: "CHAY THU", ...dry, warnings };
+      if (warnings.length && o.params?.force !== "1") return { mode: "DUNG — chay thu co bat thuong", warnings, ...dry };
+      const applied = await runCanonicalBackfill({ apply: true, batchSize: num(o.params?.batch), resume: o.params?.resume === "1", actor: o.actor });
+      const recheck = await runCanonicalBackfill({ apply: false, batchSize: num(o.params?.batch), resume: o.params?.resume === "1", actor: o.actor });
+      return { mode: "GHI THAT", ...applied, idempotent: recheck.changed === 0, stillDrifted: recheck.changed };
+    },
   },
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",
