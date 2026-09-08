@@ -132,6 +132,90 @@ export async function acknowledgeCase(id: string): Promise<{ ok: true } | { erro
   return { ok: true };
 }
 
+/**
+ * BẮT ĐẦU LÀM — khác TIẾP NHẬN. Giơ tay nhận việc không phải là đang chạy: nếu gộp hai thứ này
+ * thì nhìn hàng đợi không biết việc nào thật sự có người đang xử lý ngay lúc này.
+ * Bắt đầu làm mà chưa tiếp nhận thì tiếp nhận luôn — không ai bắt đầu một việc mình chưa nhận.
+ */
+export async function startCase(id: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ assignedTo: n.assignedTo, acknowledgedAt: n.acknowledgedAt, startedAt: n.startedAt, ignoredAt: n.ignoredAt, title: n.title }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  if (before.ignoredAt) return { error: "Việc này đã được bỏ qua — bỏ đánh dấu trước khi làm tiếp" };
+  if (before.startedAt) return { ok: true };
+  const at = new Date();
+  await db
+    .update(n)
+    .set({
+      startedAt: at,
+      startedBy: user.id,
+      acknowledgedAt: before.acknowledgedAt ?? at,
+      acknowledgedBy: before.acknowledgedAt ? undefined : user.id,
+      assignedTo: before.assignedTo ?? user.id,
+      assignedAt: before.assignedTo ? undefined : at,
+    })
+    .where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.start", entity: "NOTIFICATION", entityId: id, detail: { title: before.title } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/**
+ * BỎ QUA — "đã xem và quyết định KHÔNG làm", BẮT BUỘC kèm lý do.
+ *
+ * Trước đây không có trạng thái này nên người vận hành phải bấm "đã xong" cho việc mình cố ý không
+ * làm, khiến con số "đã xong" không còn nói lên điều gì. Lý do là bắt buộc vì gạt một việc đi mà
+ * không nói vì sao chính là xoá bằng chứng lặng lẽ; ràng buộc CHECK ở CSDL cũng chặn điều đó.
+ *
+ * KHÔNG đóng việc: việc bỏ qua vẫn nằm trong hàng đợi để còn lật lại được, chỉ là không tính vào
+ * số việc đang trôi và không cộng tiền vào tổng đang treo.
+ */
+export async function ignoreCase(id: string, reason: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const clean = reason.trim();
+  if (clean.length < 5) return { error: "Phải ghi lý do bỏ qua (ít nhất 5 ký tự)" };
+  if (clean.length > 500) return { error: "Lý do quá dài (tối đa 500 ký tự)" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ title: n.title, kind: n.kind, ignoredAt: n.ignoredAt }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  await db.update(n).set({ ignoredAt: new Date(), ignoredBy: user.id, ignoredReason: clean }).where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.ignore", entity: "NOTIFICATION", entityId: id, detail: { title: before.title, kind: before.kind, reason: clean } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/** Bỏ đánh dấu "bỏ qua" — đưa việc trở lại hàng đợi bình thường. Lý do cũ được giữ trong nhật ký. */
+export async function unignoreCase(id: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ title: n.title, ignoredReason: n.ignoredReason }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  await db.update(n).set({ ignoredAt: null, ignoredBy: null, ignoredReason: "" }).where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.unignore", entity: "NOTIFICATION", entityId: id, detail: { title: before.title, previousReason: before.ignoredReason } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/** Danh sách người có thể nhận việc — để giao việc cho đúng người, không chỉ tự nhận. */
+export async function assignableUsers(): Promise<{ id: string; name: string }[]> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return [];
+  const db = await getDb();
+  const rows = await db
+    .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.active, true))
+    .limit(100);
+  return rows.map((r) => ({ id: r.id, name: r.name || r.email }));
+}
+
 /** Gửi tin thử vào nhóm Lark nhận cảnh báo ngưỡng thanh toán QC */
 export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();

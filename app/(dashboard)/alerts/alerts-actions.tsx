@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, RefreshCw, Save, Send } from "lucide-react";
+import { Check, Loader2, Play, RefreshCw, Save, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { acknowledgeCase, assignCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram } from "@/lib/actions/alerts";
+import { acknowledgeCase, assignCase, ignoreCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram, startCase, unignoreCase } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
 
 export function RunAlertsButton() {
@@ -120,6 +120,132 @@ export function ResolveButton({ id }: { id: string }) {
     >
       {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Đã xử lý
     </Button>
+  );
+}
+
+/** BẮT ĐẦU LÀM — khác "tôi nhận": giơ tay không phải là đang chạy. */
+export function StartButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await startCase(id);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Bắt đầu
+    </Button>
+  );
+}
+
+/**
+ * BỎ QUA — bắt buộc ghi lý do.
+ *
+ * Không dùng `window.confirm` vì nó không lấy được lý do; và bỏ qua mà không nói vì sao thì đúng
+ * bằng việc xoá bằng chứng. Người bấm phải gõ ra được câu trả lời cho "tại sao không làm".
+ */
+export function IgnoreButton({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  if (!open) {
+    return (
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setOpen(true)}>
+        <X className="size-3.5" /> Bỏ qua
+      </Button>
+    );
+  }
+  return (
+    <div className="flex w-full items-center gap-1 sm:w-auto">
+      <Input
+        autoFocus
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Vì sao không làm việc này?"
+        className="h-7 w-full text-xs sm:w-56"
+      />
+      <Button
+        size="sm"
+        className="h-7 px-2 text-xs"
+        disabled={pending || reason.trim().length < 5}
+        onClick={() =>
+          startTransition(async () => {
+            const r = await ignoreCase(id, reason);
+            if ("error" in r) toast.error(r.error);
+            else {
+              setOpen(false);
+              setReason("");
+              router.refresh();
+            }
+          })
+        }
+      >
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Lưu
+      </Button>
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setOpen(false)}>
+        Huỷ
+      </Button>
+    </div>
+  );
+}
+
+/** Bỏ đánh dấu "bỏ qua" — đưa việc trở lại hàng đợi. Lý do cũ vẫn nằm trong nhật ký. */
+export function UnignoreButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await unignoreCase(id);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />} Làm lại
+    </Button>
+  );
+}
+
+/** GIAO VIỆC cho người khác — không chỉ tự nhận. Việc không có chủ là việc trôi. */
+export function AssignSelect({ id, users, current }: { id: string; users: { id: string; name: string }[]; current: string | null }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  if (!users.length) return null;
+  return (
+    <select
+      className="h-7 rounded-md border bg-background px-1.5 text-xs"
+      value={current ?? ""}
+      disabled={pending}
+      onChange={(e) =>
+        startTransition(async () => {
+          const r = await assignCase(id, e.target.value || null);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      <option value="">Chưa ai nhận</option>
+      {users.map((u) => (
+        <option key={u.id} value={u.id}>
+          {u.name}
+        </option>
+      ))}
+    </select>
   );
 }
 

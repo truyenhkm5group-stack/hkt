@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BellRing } from "lucide-react";
-import { AcknowledgeButton, AlertConfigForm, MarkAllReadButton, ResolveButton, RunAlertsButton, UnassignButton } from "@/app/(dashboard)/alerts/alerts-actions";
+import { AcknowledgeButton, AlertConfigForm, AssignSelect, IgnoreButton, MarkAllReadButton, ResolveButton, RunAlertsButton, StartButton, UnassignButton, UnignoreButton } from "@/app/(dashboard)/alerts/alerts-actions";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
@@ -10,6 +10,7 @@ import { NOTIFICATION_KIND_LABEL, NOTIFICATION_KIND_ORDER, SEVERITY_TONE } from 
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
 import { getActionQueue } from "@/lib/queries/action-queue";
+import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const user = await requirePermission("alerts:view");
   const raw = await searchParams;
   const kindFilter = typeof raw.kind === "string" ? raw.kind : "";
-  const [items, counts, config, queue] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig(), getActionQueue({ limit: 300 })]);
+  const [items, counts, config, queue, staff] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig(), getActionQueue({ limit: 300 }), assignableUsers()]);
   const visibleCases = kindFilter ? queue.cases.filter((c) => items.find((n) => n.id === c.id)?.kind === kindFilter) : queue.cases;
   const visible = kindFilter ? items.filter((n) => n.kind === kindFilter) : items;
   const canConfig = can(user, "alerts:manage");
@@ -85,9 +86,18 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                     {c.status === "IGNORED" && c.ignoredReason ? ` · bỏ qua: ${c.ignoredReason}` : ""}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {c.status === "OPEN" ? <AcknowledgeButton id={c.id} /> : null}
-                  {c.owner ? <UnassignButton id={c.id} /> : null}
+                <div className="flex shrink-0 flex-wrap items-center gap-1">
+                  {c.status === "IGNORED" ? (
+                    <UnignoreButton id={c.id} />
+                  ) : (
+                    <>
+                      <AssignSelect id={c.id} users={staff} current={c.owner?.id ?? null} />
+                      {c.status === "OPEN" ? <AcknowledgeButton id={c.id} /> : null}
+                      {c.status !== "IN_PROGRESS" ? <StartButton id={c.id} /> : null}
+                      {c.owner ? <UnassignButton id={c.id} /> : null}
+                      <IgnoreButton id={c.id} />
+                    </>
+                  )}
                   <ResolveButton id={c.id} />
                 </div>
               </li>
