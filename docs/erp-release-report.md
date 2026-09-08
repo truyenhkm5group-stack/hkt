@@ -1417,3 +1417,136 @@ quả đơn, nên **không có** con số doanh thu/GTC dự phóng nào đượ
 
 Cả 9 vẫn `(CHƯA CÓ MÃ)`, `vtp_status_date` rỗng, `cod_collected = 0`. Ước tính cũ (**−9 đơn ·
 −4.566.000đ**) **giữ nguyên**, vì lần nhập không ghi được gì cho tháng 8.
+
+## 10m. HOTFIX PHỤC HỒI NHẬP TỆP — 08/09/2026
+
+### Tách bản vá: canonical patch KHÔNG được lên production
+
+Workflow deploy dùng `ERP_BRANCH: ${{ github.ref_name }}`, nên **deploy theo nhánh** là cách tách
+sạch nhất, không cần cờ tính năng và không nhân bản mã.
+
+| | |
+|---|---|
+| Nhánh `hotfix/vtp-import-recovery` | tách từ **`b20c0c9`** (đúng commit production đang chạy) + cherry-pick **chỉ** bản vá importer |
+| Đang chạy trên production | `c4234c9bafea` · nhánh `hotfix/vtp-import-recovery` |
+| Canonical patch (`9b7e3ae`) | nằm trên `main`, **CHƯA active** trên production |
+
+`/api/health` xác nhận: `{"commit":"c4234c9bafea","branch":"hotfix/vtp-import-recovery"}`.
+
+### Ba lỗi đã sửa
+
+**1 · So ảnh chụp theo Ý NGHĨA, không theo hình dạng.** `compareRowSnapshots()` chuẩn hoá giá trị
+trống (`undefined` / `null` / `""` / `false` về cùng một dạng) rồi trả ba mức:
+
+| Mức | Khi nào | Xử lý |
+|---|---|---|
+| `same` | không khác gì sau chuẩn hoá | dòng đã nhập |
+| `conflict` | **mã vận đơn · mã đơn hàng · trạng thái · tiền thu hộ · cước** khác nhau *và cả hai bên đều có giá trị* | dừng cho người đối chiếu |
+| `changed` | chỉ trường bổ trợ khác | cập nhật tiếp, không chèn lại sự kiện |
+
+Khoá **thiếu ở bên cũ** không bao giờ bị coi là mâu thuẫn. Bất biến sẵn có *"cùng thời điểm đổi
+tiền không overwrite"* được giữ nguyên — chính nó bắt lỗi bản sửa đầu của tôi khi tôi nới quá tay.
+Sự kiện đã có thì **làm mới ảnh chụp** thay vì chèn lại, nên lần nhập sau nhận ra ngay là trùng.
+Không xoá một dòng lịch sử nào.
+
+**2 · Hai cột, hai không gian định danh.** Chỉ nạp "Mã đơn hàng" vào bản đồ mã vận đơn cho **dòng
+chiều về** (nơi cột đó thật sự chứa mã gốc). Bỏ hẳn phép so chéo `conflictingReferences`. Điều kiện
+loại trừ ở bước dò theo SĐT chỉ còn xét **mã vận đơn của chính dòng đó**. Mọi tra cứu chuẩn hoá
+hoa/thường.
+
+**3 · Thứ tự lần gửi theo chứng từ, không theo chuỗi mã.** Vòng áp dụng xếp theo `attemptTime()`
+(*Ngày tạo* → mốc trạng thái). Khi nhiều lần gửi cùng ghép về một vận đơn ERP chưa có mã: bỏ các
+lần đã huỷ nếu còn lần khác, rồi lấy lần **mới nhất**; các lần còn lại **giữ nguyên** kèm
+`matchIssue` để hiện ra ở Chất lượng dữ liệu.
+
+Cố ý **không** tự tạo thêm dòng `shipments` cho từng lần gửi: báo cáo đang tính ở grain
+*đơn × vận đơn*, thêm dòng là nhân đôi doanh thu. Đổi grain là việc riêng, không gộp vào hotfix.
+
+### Nhập lại — trước / sau
+
+Cùng một tệp `VTP_danh_sach_van_don_T8.xlsx` (1.448 dòng, *"Từ ngày 01/08 đến 31/08"*):
+
+| | Trước bản vá (09:22) | Sau bản vá (10:12) |
+|---|---|---|
+| total | 1.597 (3 tệp) | 1.439 (riêng T8) |
+| matched | 1.572 | 1.414 |
+| **conflicts** | **1.582** | **10** |
+| **duplicate** | **0** | **1.414** |
+| unmatched | 25 | 25 |
+| linked | 0 | 0 |
+| parse errors | 0 | 0 |
+
+**Xung đột giả 1.582 → 10.** Mười ca còn lại là xung đột thật (cùng mốc, tiền khác), đúng bằng con
+số của ngày 06/09 khi kho mã còn lành.
+
+### Vì sao 25 dòng vẫn chưa ghép — nay đã trả lời được bằng dữ liệu
+
+Thêm `vtp-replay-files --explain` (chỉ đọc) chạy đúng bộ ghép rồi in từng dòng chưa ghép kèm lý do.
+Trước đây chỉ biết con số 25 mà không biết dòng nào, nên mọi chẩn đoán đều là phỏng đoán.
+
+| Nhóm | Số dòng | Lý do |
+|---|---|---|
+| Vận đơn **chiều về** mà vận đơn gốc chưa có trong ERP | 4 | không có ứng viên |
+| Vận đơn của khách **khác**, ERP chưa từng có đơn | 11 | không có ứng viên |
+| Ghép được theo SĐT nhưng **nhiều ứng viên** | 10 | *"SĐT … có N vận đơn chưa có mã; cần đối chiếu"* |
+
+**Điểm quan trọng:** trước bản vá, nhóm thứ ba **im lặng biến mất**; nay chúng hiện ra kèm lý do —
+đúng ý đồ *"nhập nhằng thì giữ nguyên nhập nhằng, và phải nhìn thấy được"*.
+
+### Chín đơn tranh chấp: 0/9 giải quyết được — và đã biết chính xác vì sao
+
+| SĐT | Đơn ERP (COD) | Dòng trong tệp (mã · tiền · trạng thái) | Kết luận |
+|---|---|---|---|
+| 979936889 | 2350·2372·2413·2416 — **cả 4 đều 474.000** | `PKE1484460382` 30.000 Giao TC · `PKE1484460367` 474.000 **Đã trả** | **AMBIGUOUS** (4 ứng viên) |
+| 909728879 | 2360·2371 — **cả 2 đều 474.000** | `PKE1484460381` 474.000 Giao TC · `PKE1484463375` 474.000 Giao TC | **AMBIGUOUS** (2 ứng viên) |
+| 896997119 | 2359·2370 — **cả 2 đều 474.000** | `PKE1484463371` 474.000 Giao TC · `PKE1484463380` 5.001 Giao TC | **AMBIGUOUS** (2 ứng viên) |
+| 0345222695 | 2357 (474.000) · 2393 (399.000) | `PKE1484463365` 30.000 · `PKE1484463403` 30.000 | **AMBIGUOUS** — không dòng nào khớp tiền |
+| 0985222958 | 3181 (849.000) | `PKE1508295104` **KHÔNG có trong tệp** | **NO_CANDIDATE** |
+
+Phát hiện thêm, kiểm chứng bằng `--find`: **vận đơn "Shop hủy lấy" KHÔNG nằm trong tệp xuất.**
+`PKE1508295104` và `PKE1484434062`, `PKE1484450905` đều vắng mặt dù thấy rõ trên web. Vì vậy lần
+gửi bị huỷ **không thể** phục hồi từ tệp danh sách vận đơn — chỉ tra được trực tiếp trên web.
+
+Một quan sát đáng để chủ shop quyết: với **909728879**, cả hai dòng đều *Giao thành công* và cùng
+474.000, còn hai đơn ERP cũng cùng 474.000 — ghép kiểu nào thì **kết quả nghiệp vụ của cả hai đơn
+vẫn là giao thành công**. Nhập nhằng ở đây là *vận đơn nào của đơn nào*, không phải *đơn có giao
+được hay không*. Với **896997119** thì khác: một dòng 474.000 và một dòng 5.001 cho hai kết quả
+khác nhau, nên ghép sai là sai số thật.
+
+### Kiểm thử
+
+`tests/vtp-import-recovery.test.ts` — bốn nhóm, dựng đúng ca production:
+
+1. thêm khoá mới ⇒ `same`; trường bổ trợ đổi ⇒ `changed`; trạng thái/tiền/mã đổi ⇒ `conflict`;
+   và nhập lại tệp cũ (ảnh chụp thiếu khoá) ⇒ **0 xung đột, 1 trùng**;
+2. mã tham chiếu trùng chuỗi với vận đơn khác ⇒ dòng **vẫn** đi qua bước dò theo SĐT và ghép đúng;
+3. lần gửi huỷ (mã nhỏ hơn, tạo trước) **không** chiếm chỗ lần gửi thay thế; vận đơn kết thúc
+   `DELIVERED`; lần gửi bị bỏ qua vẫn nêu lý do;
+4. hai ứng viên cùng SĐT cùng COD ⇒ **không ép ghép**.
+
+`npm test` **TẤT CẢ KIỂM THỬ ĐẠT** (14/14 bất biến) · `typecheck` sạch · `lint` 0 lỗi · deploy
+workflow tự chạy lại `tsc` + `npm test` như điều kiện chặn và đã dựng được ảnh Docker.
+
+**Quét Chất lượng dữ liệu sau khi sửa: 0 NGHIÊM TRỌNG**, 403 cảnh báo — 70 *lệch ảnh chụp* (đúng
+bằng số vận đơn `canonical-backfill` sẽ dựng lại) và 248 *vận đơn chưa ghép được đơn* (phần lớn là
+vận đơn chiều về, vốn không có đơn theo thiết kế).
+
+### Chạy thử canonical — hiện tại → dự phóng
+
+| | Hiện tại |
+|---|---|
+| `DELIVERED` | **421** |
+| `RETURNED` | **772** |
+| `IN_TRANSIT` | 218 |
+| `NOT_SHIPPED` | 250 |
+| `CANCELLED` | 293 |
+
+Quét 1.757 vận đơn · **70 sẽ đổi trạng thái** · 109 thiếu bằng chứng · 9 xung đột.
+Trong 70: **17 rời khỏi `DELIVERED`** (6 → `IN_TRANSIT`, 6 → `DELIVERY_FAILED`, 3 →
+`OUT_FOR_DELIVERY`, 2 → `RETURNING`), 53 dịch chuyển trong nhóm hoàn.
+
+`outcomeAfter` vẫn trả **`null`** — chạy thử **không đo** được tác động lên kết quả đơn (đúng
+guardrail đã cài). Vì vậy **không có** con số doanh thu / GTC dự phóng nào ở đây; đưa ra là bịa.
+
+Ước tính **−9 đơn · −4.566.000đ** cho nhóm 9 **vẫn còn nguyên hiệu lực**: không đơn nào trong 9
+thu được bằng chứng ĐVVC.
