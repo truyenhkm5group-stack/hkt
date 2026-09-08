@@ -14,6 +14,7 @@ import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
+import { testReconciliation } from "./reconciliation.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1078,6 +1079,7 @@ async function main() {
   await testVtpImportTruth(db);
   await testVtpState(db);
   await testVtpIngestion(db);
+  await testReconciliation(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
   testCodPaymentStatement();

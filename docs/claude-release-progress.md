@@ -12,7 +12,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 1 | Kiểm toán kiến trúc & data truth | ✅ xong | `docs: audit ERP data truth architecture` |
 | 2 | Chuẩn hoá lớp chân lý nghiệp vụ | ✅ xong | `feat: centralize canonical order shipment payment truth` |
 | 3 | Cứng hoá nạp dữ liệu Viettel Post | ✅ xong | `feat: harden ViettelPost event ingestion` |
-| 4 | Bộ máy đối soát | ⏳ | |
+| 4 | Bộ máy đối soát | ✅ xong | `feat: add shipment reconciliation safeguards` |
 | 5 | Lớp chân lý chỉ số | ⏳ | |
 | 6 | Dry-run lịch sử + backfill an toàn | ⏳ | |
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ⏳ | |
@@ -89,6 +89,32 @@ lặng lẽ ghi lại `stage` trong tương lai.
 Lưu ý về migration: `drizzle-kit generate` sinh ra bản gộp cả 0027–0031 (những migration viết tay
 chưa có snapshot) — chạy nguyên bản đó sẽ `CREATE TABLE` đè lên bảng production. Đã thay bằng bản
 viết tay chỉ chứa thay đổi của 0032, đúng lối idempotent các migration 0025–0031 đang dùng.
+
+### TASK 4 — Bộ máy đối soát
+
+**Đóng F1 và F2 — hai vi phạm nghiêm trọng nhất của release này.**
+
+`lib/constants/reconciliation.ts` là bộ luật: 15 luật, mỗi luật có mức nghiêm trọng
+(ERROR/WARNING/INFO), nghĩa thật, việc nên làm, và cờ **có được tự sửa hay không**.
+
+`lib/sync/consistency.ts` viết lại thành hai hàm tách bạch:
+
+- `scanReconciliation()` — CHỈ ĐỌC, chạy được mọi lúc, hỗ trợ quét gia tăng (`since=N`);
+- `repairReconciliation({ apply })` — mặc định chạy thử; chỉ sửa 3 luật XÁC ĐỊNH, và cả ba đều lấy
+  nguồn sự thật của **chính chiều đó**: dựng lại ảnh chụp vận đơn từ lịch sử sự kiện, khôi phục mốc
+  giao từ lịch sử, và sửa nhãn "không thu hộ" theo chính số tiền thu hộ. Mỗi lần sửa ghi
+  `audit_logs`.
+
+Đã **bỏ hẳn** ba hành vi sai của bản cũ:
+
+1. suy `stage = 'DELIVERED'` từ `cod_status` (F1) — nay là luật `PAYMENT_DELIVERED_CONFLICT`
+   mức ERROR, chỉ báo cáo;
+2. hạ `cod_status` đơn hoàn/huỷ về `NOT_APPLICABLE` (F2) — bỏ hoàn toàn;
+3. lấy `updated_at` của ERP làm mốc giao khi thiếu — nay dựng từ lịch sử, không có thì để trống.
+
+`tests/reconciliation.test.ts` khoá: tiền về ngân hàng KHÔNG biến vận đơn thành đã giao · đơn hoàn
+giữ nguyên dấu vết thu hộ · chạy thử không ghi gì · sửa xác định thì phải đúng theo lịch sử · mỗi
+lần sửa để lại nhật ký · quét hai lần cho cùng kết quả.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

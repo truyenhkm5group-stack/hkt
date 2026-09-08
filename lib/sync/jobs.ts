@@ -160,10 +160,11 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     run: (o) => verifyNewPhones({ lookbackDays: num(o.params?.days), cancelExisting: o.params?.cancel === "1" }),
   },
   "data-check": {
-    label: "Kiểm tra nhất quán vận đơn & COD",
+    label: "Đối soát dữ liệu vận đơn & COD",
     source: "ALL",
-    description: "Báo cáo lệch dữ liệu giữa Pancake / Viettel Post / bảng kê (COD đã về mà chưa giao, hoàn mà còn COD, vận đơn treo lâu, giao xong chưa có bảng kê). fix=1 để tự sửa các lỗi hiển nhiên; days=N ngưỡng treo.",
-    run: (o) => checkShipmentConsistency({ fix: o.params?.fix === "1", staleDays: num(o.params?.days) }),
+    description:
+      "QUÉT CHỈ ĐỌC toàn bộ luật đối soát (ảnh chụp lệch lịch sử, tiền về mà chưa có chứng từ giao, vận đơn mồ côi, mã trùng, treo lâu, mã ĐVVC lạ, mốc đi ngược, gói tin chưa xử lý…). fix=1 chỉ sửa HAI luật xác định: dựng lại ảnh chụp vận đơn từ lịch sử, và sửa nhãn 'không thu hộ' sai theo chính số tiền thu hộ. Lệch giữa tiền và giao hàng KHÔNG bao giờ tự sửa. days=N ngưỡng treo; since=N chỉ quét N ngày gần đây.",
+    run: (o) => checkShipmentConsistency({ fix: o.params?.fix === "1", staleDays: num(o.params?.days), sinceDays: num(o.params?.since), actor: o.actor }),
   },
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",
