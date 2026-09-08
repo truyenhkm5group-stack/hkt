@@ -27,7 +27,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 16 | Hiệu năng | ✅ xong | `perf: optimize ERP critical paths` |
 | 17 | Nhật ký truy vết | ✅ xong | `feat: improve ERP business audit trail` |
 | 18 | Nhất quán giao diện | ✅ xong | `refactor: improve ERP UX consistency` |
-| — | FINAL GATE | ⏳ | |
+| — | FINAL GATE | ✅ đạt 17/17 | `docs: báo cáo release ERP Data Truth` |
 
 ## Nhật ký
 
@@ -357,6 +357,19 @@ thuốc. Người đọc thấy xanh là yên tâm mà không biết đang nhìn
   ở ba trang khác nhau nên mỗi trang một kiểu và mất luôn dấu hiệu phân biệt chiều.
 - `tests/ui-consistency.test.ts` khoá: 35 trạng thái của bốn chiều đều có nhãn tiếng Việt · mỗi
   nhãn mang dấu hiệu chiều · **không trang nào được tự vẽ lại nhãn kết quả đơn**.
+
+### FINAL GATE
+
+17/17 kiểm tra ĐẠT. Báo cáo đầy đủ: `docs/erp-release-report.md`.
+
+Hai điểm đáng ghi:
+
+- **Tự soát diff tìm ra một hồi quy do chính release gây ra**: `upsertShipmentFromOrder()` gọi
+  `materializeShipmentState()` cho MỌI đơn, tức hàng chục nghìn truy vấn thừa mỗi lần đồng bộ lịch
+  sử. Đã sửa ở `81a33c3` — chỉ chốt lại khi vận đơn thật sự có chứng từ ĐVVC.
+- **Migration chạy thử theo đúng đường production**: dựng CSDL bằng migration của `main` (0000–0031)
+  rồi mới áp 0032–0034. Kết quả giống hệt CSDL dựng mới (36 bảng / 133 index), chạy lại lần hai
+  không lỗi.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
