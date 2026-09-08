@@ -12,6 +12,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { CashTab } from "@/app/(dashboard)/reports/cash-tab";
+import { FinancialTruthTab } from "@/app/(dashboard)/reports/financial-truth-tab";
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { can, requireUser } from "@/lib/auth/session";
@@ -137,15 +138,17 @@ export default async function ReportsPage({
     pnl: can(user, "reports:delivered"),
     cash: can(user, "reports:cash"),
     nominal: can(user, "reports:nominal"),
+    // Bậc thang chân lý tài chính đi cùng quyền xem dòng tiền: nó nói tiền thật đang ở đâu.
+    truth: can(user, "reports:cash"),
   };
   const canWrite = can(user, "reports:assumptions");
   const tabParam = param(raw, "tab");
-  const wanted: "pnl" | "cash" | "nominal" =
-    tabParam === "cash" ? "cash" : tabParam === "nominal" ? "nominal" : "pnl";
+  const wanted: "pnl" | "cash" | "nominal" | "truth" =
+    tabParam === "cash" ? "cash" : tabParam === "nominal" ? "nominal" : tabParam === "truth" ? "truth" : "pnl";
   // không có quyền tab đang xin → chuyển sang tab đầu tiên được phép; không được tab nào → về trang chủ
-  const firstAllowed = (["pnl", "cash", "nominal"] as const).find((t) => allowed[t]);
+  const firstAllowed = (["pnl", "truth", "cash", "nominal"] as const).find((t) => allowed[t]);
   if (!firstAllowed) redirect("/?forbidden=1");
-  const tab: "pnl" | "cash" | "nominal" = allowed[wanted] ? wanted : firstAllowed;
+  const tab: "pnl" | "cash" | "nominal" | "truth" = allowed[wanted] ? wanted : firstAllowed;
   if (tab !== wanted && tabParam) redirect(`/reports?tab=${tab}`);
   const productParam = param(raw, "product");
   const period = resolvePeriod(raw, "month");
@@ -200,6 +203,13 @@ export default async function ReportsPage({
               </Link>
             </TabsTrigger>
           ) : null}
+          {allowed.truth ? (
+            <TabsTrigger value="truth" asChild>
+              <Link href={`/reports?tab=truth${periodQuery}`} className="px-3">
+                <Wallet /> Sáu con số tiền
+              </Link>
+            </TabsTrigger>
+          ) : null}
           {allowed.cash ? (
             <TabsTrigger value="cash" asChild>
               <Link href={`/reports?tab=cash${periodQuery}`} className="px-3">
@@ -223,10 +233,13 @@ export default async function ReportsPage({
           resultLabel={
             tab === "cash"
               ? "Tiền vào / tiền ra được gán vào kỳ theo ngày thực nhận / thực chi."
+              : tab === "truth"
+              ? "Doanh thu lên đơn / doanh thu giao thành công / tiền thực nhận là BA con số khác nhau — xem rõ chênh lệch nằm ở đâu."
               : "Đơn được gán vào kỳ theo ngày lên đơn; tỷ lệ giao thành công ước tính theo lịch sử từng mã (đơn GTC = COD thực > 100K)."
           }
         />
       ) : null}
+      {tab === "truth" ? <FinancialTruthTab period={period} /> : null}
       {tab === "cash" ? <CashTab period={period} /> : null}
       {tab === "nominal" ? (
         <NominalTab

@@ -18,6 +18,7 @@ import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
 import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
+import { testFinancialTruth } from "./financial-truth.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1079,6 +1080,7 @@ async function main() {
   await testConsistency(db);
   await testMetricsContract(db);
   await testBusinessInvariants(db);
+  await testFinancialTruth(db);
   await testInventory(db);
   await testCodReconciliation();
   await testOrderSource();

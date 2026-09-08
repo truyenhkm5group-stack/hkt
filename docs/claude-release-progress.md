@@ -17,7 +17,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 6 | Dry-run lịch sử + backfill an toàn | ✅ xong | `chore: rebuild canonical historical ERP truth` |
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ✅ xong | `feat: turn data quality into ERP control tower` |
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ✅ xong | `test: enforce ERP business truth invariants` |
-| 9 | Chân lý tài chính | ⏳ | |
+| 9 | Chân lý tài chính | ✅ xong | `feat: standardize ERP financial truth` |
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ⏳ | |
 | 11 | Chỉ số theo mẫu mã | ⏳ | |
 | 12 | Hàng đợi việc theo mức ưu tiên | ⏳ | |
@@ -192,6 +192,26 @@ mà `npm test` đã là điều kiện CHẶN của workflow **Deploy ERP to VPS
 
 `SHIPMENT_STAGE_WRITERS` thành allowlist hai tên có giải thích; thêm tên phải là quyết định tường
 minh. Kèm kiểm tra bằng DỮ LIỆU: mọi vận đơn có chứng từ ĐVVC phải có ảnh chụp khớp lịch sử.
+
+### TASK 9 — Chân lý tài chính
+
+`lib/queries/financial-truth.ts` tách sáu con số tiền, mỗi con số một ý nghĩa: doanh thu lên đơn ·
+doanh thu giao thành công · COD ĐVVC đang cầm · COD đã đối soát · tiền thực nhận · lợi nhuận.
+Trên fixture: **8.396.000đ lên đơn ≠ 4.903.000đ giao thành công ≠ 1.174.000đ thực nhận** — ba con
+số mà trước đây các màn hình đều gọi là "doanh thu".
+
+Bậc thang lợi nhuận kiểm toán được: doanh thu giao TC − giá vốn − cước gửi − cước và phí đơn hoàn −
+quảng cáo = **lợi nhuận góp**; trừ tiếp chi phí vận hành = **lợi nhuận ước tính**. Lợi nhuận **thực
+nhận** tính theo dòng tiền và trả `null` kèm lý do khi kỳ chưa có bảng kê — không bao giờ thay bằng 0.
+
+Mỗi dòng mang nhãn độ chính xác (`per_order` / `per_document` / `period_only`) để không ai chia
+chi phí mức kỳ về từng đơn rồi tưởng đó là con số của đơn.
+
+Tab mới "Sáu con số tiền" trên trang Báo cáo (đi cùng quyền `reports:cash`).
+
+`tests/financial-truth.test.ts` khoá: ba con số phải khác nhau · doanh thu giao TC dùng cùng định
+nghĩa với Tổng quan · ba bậc trạng thái tiền loại trừ lẫn nhau · bậc thang cộng đúng · dòng chi phí
+mang dấu âm · nhãn độ chính xác đúng · thiếu chứng từ thì trả CHƯA BIẾT.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
