@@ -4,6 +4,7 @@ import { memo } from "@/lib/cache";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
+import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -660,3 +661,82 @@ export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_
  * Báo cáo dòng tiền thì không, nên hai trang báo "COD đã thu chờ về" khác nhau.
  */
 export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNED', 'CANCELLED'))`;
+
+export type ReturnRateBySource = {
+  source: OrderSourceKey;
+  orders: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+  inTransit: number;
+  failed: number;
+  cancelled: number;
+  revenue: number;
+  lostRevenue: number;
+  /** Tỷ lệ giao thành công (%) trên đơn ĐÃ KẾT THÚC; null khi chưa đơn nào kết thúc. */
+  successRate: number | null;
+  /** Tỷ lệ hoàn (%) trên đơn đã kết thúc; null khi chưa đơn nào kết thúc. */
+  returnRate: number | null;
+};
+
+/**
+ * TỶ LỆ GIAO THÀNH CÔNG / HOÀN CHIA THEO NGUỒN ĐƠN.
+ *
+ * Dùng NGUYÊN công thức kết quả đơn `ORDER_OUTCOME` và đúng cách tính tỷ lệ của bảng tổng hợp —
+ * chỉ thêm một chiều phân tách là nguồn đơn (`ORDER_SOURCE`). Không có định nghĩa thứ hai về
+ * "giao thành công" hay "hoàn" ở đây; nếu hai chỗ lệch nhau thì là lỗi, không phải hai cách tính.
+ *
+ * Mỗi đơn thuộc đúng MỘT nguồn (đơn có mặt ở cả hai kênh ghi cho nơi khách đặt trước), nên cộng
+ * các nguồn lại đúng bằng tổng toàn shop.
+ */
+export async function getReturnRateBySource(period: Period, q: string): Promise<ReturnRateBySource[]> {
+  const db = await getDb();
+  const conds: SQL[] = [REPORTABLE_ORDER];
+  if (period.from) conds.push(gte(o.insertedAt, period.from));
+  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const term = q.trim();
+  if (term) {
+    const like = `%${term}%`;
+    conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
+  }
+  const rows = await db
+    .select({
+      source: ORDER_SOURCE,
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
+    })
+    .from(o)
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(conds.length ? and(...conds) : undefined)
+    .groupBy(ORDER_SOURCE);
+
+  const thuTu: OrderSourceKey[] = ["FACEBOOK", "LANDING", "OTHER"];
+  return rows
+    .map((r) => {
+      const delivered = Number(r.delivered ?? 0);
+      const returned = Number(r.returned ?? 0);
+      const ketThuc = delivered + returned;
+      return {
+        source: r.source as OrderSourceKey,
+        orders: Number(r.orders ?? 0),
+        shipped: Number(r.shipped ?? 0),
+        delivered,
+        returned,
+        inTransit: Number(r.inTransit ?? 0),
+        failed: Number(r.failed ?? 0),
+        cancelled: Number(r.cancelled ?? 0),
+        revenue: Number(r.revenue ?? 0),
+        lostRevenue: Number(r.lostRevenue ?? 0),
+        successRate: ketThuc ? (delivered / ketThuc) * 100 : null,
+        returnRate: ketThuc ? (returned / ketThuc) * 100 : null,
+      };
+    })
+    .sort((a, b) => thuTu.indexOf(a.source) - thuTu.indexOf(b.source));
+}

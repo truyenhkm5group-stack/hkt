@@ -25,11 +25,13 @@ import {
 import { OUTCOME_LABEL, OUTCOME_TONE, RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
+  getReturnRateBySource,
   getReturnRateByVariant,
   getReturnRateSummary,
   listOrdersForVariant,
   RETURN_RATE_SORTABLE,
 } from "@/lib/queries/return-rate";
+import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/queries/order-source";
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -62,7 +64,7 @@ export default async function ReturnRatePage({
   const minShipped = Math.max(1, Number(params.filters.min?.[0] ?? "1") || 1);
   const variantKey = param(raw, "variant");
 
-  const [{ rows, total, pageCount, all }, summary, variantOrders] =
+  const [{ rows, total, pageCount, all }, summary, variantOrders, theoNguon] =
     await Promise.all([
       getReturnRateByVariant({
         period: params.period,
@@ -77,6 +79,7 @@ export default async function ReturnRatePage({
       variantKey
         ? listOrdersForVariant(variantKey, params.period)
         : Promise.resolve([]),
+      getReturnRateBySource(params.period, params.q),
     ]);
   const selected = variantKey ? all.find((r) => r.key === variantKey) : null;
 
@@ -163,6 +166,88 @@ export default async function ReturnRatePage({
       </section>
 
       {/* ───────── Hiệu suất giao vận tính từ hành trình Viettel Post ───────── */}
+      <SectionCard
+        title="Tỷ lệ giao thành công theo nguồn đơn"
+        description="Khách đến từ chat fanpage hay từ landing page thì giao thành công khác nhau thế nào."
+        hint={
+          <>
+            Dùng nguyên công thức kết quả đơn của toàn ERP, chỉ thêm chiều phân tách là nguồn đơn —
+            không có cách tính thứ hai cho &ldquo;giao thành công&rdquo; hay &ldquo;hoàn&rdquo;.
+            Mỗi đơn thuộc đúng một nguồn nên cộng các dòng lại bằng tổng toàn shop.{" "}
+            <b>Đơn có mặt ở cả hai kênh</b> (khách vừa chat vừa điền form) ghi cho nơi khách đặt
+            TRƯỚC: so lúc khách gửi form landing với lúc đơn được tạo từ hội thoại. Tỷ lệ tính trên
+            đơn ĐÃ KẾT THÚC (giao thành công + hoàn), đơn đang giao chưa được tính.
+          </>
+        }
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table className="min-w-[900px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nguồn đơn</TableHead>
+                <TableHead className="text-right">Đơn trong kỳ</TableHead>
+                <TableHead className="text-right">Đã gửi ĐVVC</TableHead>
+                <TableHead className="text-right">Giao thành công</TableHead>
+                <TableHead className="text-right">Hoàn</TableHead>
+                <TableHead className="text-right">Đang giao</TableHead>
+                <TableHead className="text-right">Tỷ lệ GTC</TableHead>
+                <TableHead className="text-right">Tỷ lệ hoàn</TableHead>
+                <TableHead className="text-right">Doanh thu giao TC</TableHead>
+                <TableHead className="text-right">Doanh thu mất do hoàn</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {theoNguon.map((r) => (
+                <TableRow key={r.source}>
+                  <TableCell>
+                    <span className={cn("rounded px-1.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap", ORDER_SOURCE_TONE[r.source])}>
+                      {ORDER_SOURCE_LABEL[r.source]}
+                    </span>
+                    <div className="mt-1 max-w-[240px] text-[11px] leading-4 text-muted-foreground">{ORDER_SOURCE_HINT[r.source]}</div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatNumber(r.orders)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatNumber(r.shipped)}</TableCell>
+                  <TableCell className="text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-400">{formatNumber(r.delivered)}</TableCell>
+                  <TableCell className="text-right tabular-nums font-semibold text-rose-600 dark:text-rose-400">{formatNumber(r.returned)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(r.inTransit)}</TableCell>
+                  <TableCell className="text-right">
+                    {r.successRate === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className={cn("rounded px-1.5 py-0.5 text-sm font-bold tabular-nums", successTone(r.successRate))}>{r.successRate.toFixed(1)}%</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{r.returnRate === null ? <span className="text-muted-foreground">—</span> : `${r.returnRate.toFixed(1)}%`}</TableCell>
+                  <TableCell className="text-right"><Money value={r.revenue} /></TableCell>
+                  <TableCell className="text-right"><Money value={r.lostRevenue} className="text-rose-600 dark:text-rose-400" /></TableCell>
+                </TableRow>
+              ))}
+              {theoNguon.length ? (() => {
+                const sum = (f: (r: (typeof theoNguon)[number]) => number) => theoNguon.reduce((t, r) => t + f(r), 0);
+                const delivered = sum((r) => r.delivered);
+                const returned = sum((r) => r.returned);
+                const ketThuc = delivered + returned;
+                return (
+                  <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
+                    <TableCell>Tổng — khớp với số toàn shop</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.orders))}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.shipped))}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(delivered)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(returned)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.inTransit))}</TableCell>
+                    <TableCell className="text-right tabular-nums">{ketThuc ? `${((delivered / ketThuc) * 100).toFixed(1)}%` : "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{ketThuc ? `${((returned / ketThuc) * 100).toFixed(1)}%` : "—"}</TableCell>
+                    <TableCell className="text-right"><Money value={sum((r) => r.revenue)} /></TableCell>
+                    <TableCell className="text-right"><Money value={sum((r) => r.lostRevenue)} /></TableCell>
+                  </TableRow>
+                );
+              })() : null}
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
+
       <SectionCard
         title="Hiệu suất giao vận"
         description="Tính theo mốc thời gian của từng sự kiện Viettel Post."
