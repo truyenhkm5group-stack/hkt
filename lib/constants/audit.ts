@@ -26,7 +26,6 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
    */
   VTP_MANUAL_VERIFICATION: "Chép tay chứng từ Viettel Post",
   VTP_ORDER_LIST_IMPORT: "Nhập danh sách vận đơn Viettel Post",
-  VTP_ORDER_LIST_ROW: "Cập nhật vận đơn theo danh sách",
   COD_BATCH_CREATE: "Tạo bảng kê COD",
   SHIPMENT_REPUSH: "Yêu cầu VTP gửi lại webhook",
   SYNC_RUN: "Chạy đồng bộ",
