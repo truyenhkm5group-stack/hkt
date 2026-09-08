@@ -15,7 +15,10 @@ Production đang chạy `b067913` (bản V2). Nhánh `main` đi trước.
 | **B** | B2 · Hiệu suất nhân sự | **XONG** | `bcddd0c`, `272a7aa` |
 | **B** | B3 · Hàng đợi chăm sóc khách | **XONG** | `ed48e25` |
 | **B** | B4 · Báo cáo chuyển đổi | **XONG** | `92260ec` |
-| C | C1–C4 · Quảng cáo → giao thành công → lợi nhuận | chưa | |
+| **C** | C1 · Rà soát độ phủ quy kết | **XONG** | `875e0eb` |
+| **C** | C2 · Chỉ số lợi nhuận quảng cáo (CAC) | **XONG** | `4a8c3f9` |
+| **C** | C3 · Drill-down quảng cáo | **XONG** | `5bc354d` |
+| **C** | C4 · Phát hiện bất thường | **XONG** | `e14f61f` |
 | D | D1–D3 · Mẫu mã × màu × size | chưa | |
 | E | E1–E5 · Tồn kho & dự báo sản xuất | chưa | |
 | F | F1–F3 · Bảng điều khiển quản trị | chưa | |
@@ -63,6 +66,25 @@ từng người đều sai.
 
 **Loại việc mới: mất khách quen.** Đơn vừa hoàn của khách ĐÃ TỪNG mua thành công, hạn gọi lại 48
 giờ. Trước đây họ lẫn vào hàng trăm đơn hoàn khác và không ai gọi.
+
+## Lô C — đã làm gì
+
+**Độ phủ quy kết đứng ngay cạnh ROAS.** Nếu chỉ 30% đơn có mã quảng cáo thì "ROAS 4,2" là ROAS của
+30% đó — con số vẫn đúng, nhưng đọc như thể nó nói về toàn shop là tự lừa mình.
+
+**Ba cấp kế hoạch đề nghị mà ERP không làm được, nêu tên thẳng trên giao diện**: nội dung quảng cáo
+(không có bảng nào lưu), chi tiêu cấp nhóm và cấp mẩu (Facebook đồng bộ ở cấp chiến dịch/ngày). Nêu
+tên chứ không im lặng — im lặng thì người sau đi tìm, không thấy, rồi tự dựng số thay thế.
+
+**Sửa một lỗi thật** phát hiện khi định mở cấp mẩu quảng cáo: đường tính đã có sẵn trong mã nhưng
+tra chi tiêu theo sai không gian khoá. Bật lên là mọi mẩu hiện chi 0đ và TOÀN BỘ tiền chiến dịch bị
+xếp vào "tiền tiêu mà không đơn nào". Sửa bằng cách nói **CHƯA BIẾT** thay vì nói 0.
+
+**CAC hai mức**, và khoảng cách giữa chúng mới là điều đáng đọc: phần chênh chính là tiền đã trả cho
+những đơn hoàn.
+
+**Sáu quy tắc phát hiện bất thường**, tách làm hai loại việc vì hai người khác nhau xử lý. ERP
+**không** tự đổi ngân sách hay tắt chiến dịch.
 
 ## Hiệu chuẩn có đổi hành vi
 
