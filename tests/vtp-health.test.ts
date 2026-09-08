@@ -5,7 +5,7 @@ import { schema } from "@/db";
 import { viettelPostHealth } from "@/lib/queries/integrations";
 import { clearMemo } from "@/lib/cache";
 import { getIntegrationHealth } from "@/lib/queries/integration-health";
-import { runSyncJob } from "@/lib/sync/runner";
+import { isJobRunning, runSyncJob, runningJobKeys } from "@/lib/sync/runner";
 
 /**
  * Hai sự thật vận hành mà production đã từng che mất:
@@ -108,5 +108,22 @@ export async function testVtpHealth(db: Db) {
 
     const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.syncRuns)
     .where(and(eq(schema.syncRuns.source, "VIETTELPOST"), eq(schema.syncRuns.status, "RUNNING")));
+  // ───────── KHOÁ JOB PHẢI ĐƯỢC NHẢ, KỂ CẢ KHI JOB HỎNG ─────────
+  // Khoá nằm trong bộ nhớ tiến trình và chỉ nhả trong `finally`. Nếu một lần chạy hỏng mà khoá
+  // không nhả thì job đó KHÔNG CÒN CHẠY ĐƯỢC NỮA cho tới khi khởi động lại container — im lặng và
+  // rất khó phát hiện, vì giao diện vẫn báo "đang chạy".
+  const key = "VIETTELPOST:test_lock";
+  await runSyncJob({ source: "VIETTELPOST", job: "test_lock" }, async () => {
+    assert.ok(isJobRunning(key), "trong lúc chạy thì khoá phải đang giữ");
+    throw new Error("hỏng có chủ đích");
+  }).catch(() => undefined);
+  assert.equal(isJobRunning(key), false, "job hỏng vẫn PHẢI nhả khoá, nếu không nó tự chặn chính mình vĩnh viễn");
+
+  // Chạy lại được ngay sau khi hỏng — đó là điều mà việc nhả khoá bảo đảm.
+  const lanHai = await runSyncJob({ source: "VIETTELPOST", job: "test_lock" }, async () => "xong");
+  assert.equal(lanHai.result, "xong", "sau lần hỏng, job phải chạy lại được ngay");
+  assert.equal(isJobRunning(key), false, "chạy xong cũng phải nhả khoá");
+  assert.ok(!runningJobKeys().includes(key), "khoá không được sót lại trong danh sách job đang chạy");
+
   console.log(`✓ Sức khoẻ Viettel Post: đóng lần chạy mồ côi (còn ${Number(n)} đang chạy thật) · đối chiếu không đạt ghi PARTIAL · phát hiện ${after.stageMismatch} vận đơn lệch trạng thái`);
 }

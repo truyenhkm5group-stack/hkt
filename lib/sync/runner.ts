@@ -28,6 +28,8 @@ export type SyncContext = {
 };
 
 const runningJobs = new Map<string, Promise<unknown>>();
+/** Đồng hồ canh cho từng job đang chạy — dọn khi job kết thúc để không giữ tiến trình sống. */
+const jobWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Bản ghi RUNNING mồ côi: `runningJobs` chỉ nằm trong bộ nhớ tiến trình, nên deploy hay khởi động
@@ -35,6 +37,31 @@ const runningJobs = new Map<string, Promise<unknown>>();
  * mất lần chạy hỏng. Đóng chúng lại mỗi khi bắt đầu một lần chạy mới.
  */
 const ORPHAN_RUN_AFTER_MS = 30 * 60_000;
+
+/**
+ * ĐỒNG HỒ CANH JOB TREO.
+ *
+ * Khoá job nằm trong bộ nhớ tiến trình và chỉ được nhả trong `finally`. Nếu một job TREO — mạng
+ * không timeout, bên thứ ba không trả lời, vòng lặp không thoát — thì `finally` không bao giờ chạy,
+ * khoá không bao giờ nhả, và job đó KHÔNG CÒN CHẠY ĐƯỢC NỮA cho tới khi khởi động lại container.
+ * Phần dọn bản ghi RUNNING mồ côi chỉ sửa dòng trong CSDL, không chạm tới khoá trong bộ nhớ.
+ *
+ * Hệ quả thật: một job đồng bộ treo lúc nửa đêm thì cả ngày hôm sau không có dữ liệu mới, mà giao
+ * diện vẫn báo "đang chạy" — im lặng và rất khó phát hiện.
+ *
+ * Sau ngưỡng này, khoá được nhả và lần chạy được đánh dấu hỏng. Job cũ có thể vẫn còn chạy nền,
+ * nhưng mọi job ở đây đều idempotent (ghi theo khoá tự nhiên), nên chạy chồng an toàn hơn hẳn so
+ * với việc đứng im vĩnh viễn.
+ */
+const JOB_WATCHDOG_MS = 30 * 60_000;
+
+/** Nhả khoá và huỷ đồng hồ canh của một job. */
+function releaseJob(key: string) {
+  runningJobs.delete(key);
+  const timer = jobWatchdogs.get(key);
+  if (timer) clearTimeout(timer);
+  jobWatchdogs.delete(key);
+}
 
 export function isJobRunning(key: string) {
   return runningJobs.has(key);
@@ -114,11 +141,29 @@ export async function runSyncJob<T>(
       throw error;
     } finally {
       clearMemo();
-      runningJobs.delete(key);
+      releaseJob(key);
     }
   })();
 
   runningJobs.set(key, promise);
+  // Nhả khoá sau ngưỡng canh, kể cả khi job không bao giờ kết thúc.
+  const watchdog = setTimeout(() => {
+    if (!runningJobs.has(key)) return;
+    runningJobs.delete(key);
+    jobWatchdogs.delete(key);
+    void db
+      .update(schema.syncRuns)
+      .set({
+        status: "FAILED",
+        error: `Job chạy quá ${Math.round(JOB_WATCHDOG_MS / 60_000)} phút mà không kết thúc — đã nhả khoá để lần chạy sau không bị chặn.`,
+        finishedAt: new Date(),
+      })
+      .where(and(eq(schema.syncRuns.id, run.id), eq(schema.syncRuns.status, "RUNNING")))
+      .catch(() => undefined);
+  }, JOB_WATCHDOG_MS);
+  // `unref` để đồng hồ canh không giữ tiến trình sống (quan trọng với script chạy một lần).
+  watchdog.unref?.();
+  jobWatchdogs.set(key, watchdog);
   return promise;
 }
 
