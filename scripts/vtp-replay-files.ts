@@ -9,10 +9,13 @@
  *   npx tsx scripts/vtp-replay-files.ts             # liệt kê tệp đang giữ, không nhập
  *   npx tsx scripts/vtp-replay-files.ts --apply     # phát lại toàn bộ
  *   npx tsx scripts/vtp-replay-files.ts --apply --like=BangKeChiCOD   # chỉ tệp khớp tên
+ *   npx tsx scripts/vtp-replay-files.ts --explain --like=T8            # CHỈ ĐỌC: vì sao dòng không ghép được
  */
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
+import { detectVtpFile } from "@/lib/integrations/viettelpost/import-files";
+import { matchVtpOrderList } from "@/lib/integrations/viettelpost/statement-db";
 
 /** `db.execute` trả mảng (PGlite) hoặc `{ rows }` (node-postgres) tuỳ trình điều khiển. */
 function rowsOf(result: unknown): Record<string, unknown>[] {
@@ -23,6 +26,8 @@ function rowsOf(result: unknown): Record<string, unknown>[] {
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  /** CHỈ ĐỌC: chạy bộ ghép rồi in đúng những dòng KHÔNG ghép được kèm lý do. Không ghi gì. */
+  const explain = process.argv.includes("--explain");
   const like = process.argv.find((a) => a.startsWith("--like="))?.slice(7) ?? "";
   const db = await getDb();
 
@@ -34,6 +39,24 @@ async function main() {
 
   if (!files.length) {
     console.log(JSON.stringify({ so_tep: 0, ghi_chu: "Chưa giữ tệp nào. Tệp chỉ được giữ từ lần nhập sau khi tính năng này lên." }, null, 2));
+    return;
+  }
+
+  if (explain) {
+    for (const f of files) {
+      let detected;
+      try { detected = detectVtpFile(Buffer.from(f.content, "base64"), f.filename); }
+      catch (e) { console.log(`${f.filename}: KHONG DOC DUOC — ${e instanceof Error ? e.message : String(e)}`); continue; }
+      if (detected.kind !== "ORDER_LIST") continue;
+      const matches = await matchVtpOrderList(detected.rows);
+      const chuaGhep = matches.filter((m) => !m.shipmentId);
+      console.log(`
+${f.filename}: ${matches.length} dòng · ${chuaGhep.length} dòng CHƯA ghép được`);
+      for (const m of chuaGhep.slice(0, 40)) {
+        console.log([m.trackingCode, m.orderCode, m.receiverPhone ?? "-", m.cod ?? "-", m.statusText,
+          m.mapped.stage, m.matchIssue ?? "(không có ứng viên nào)"].join(" | "));
+      }
+    }
     return;
   }
 
