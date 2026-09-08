@@ -33,6 +33,12 @@ export function testUiConsistency() {
     assert.ok(OUTCOME_LABEL[outcome] && OUTCOME_TONE[outcome], `thiếu nhãn/màu kết quả đơn ${outcome}`);
   }
   assert.ok(VERIFIED_OUTCOME_LABEL.UNVERIFIED.includes("Chưa xác minh"), "trạng thái chưa xác minh phải nói rõ là CHƯA BIẾT");
+  // CHƯA BIẾT phải đọc ra là "chưa có chứng từ", không được lẫn với "chưa gửi" hay "đang giao".
+  // Ba thứ này khác nhau về nghiệp vụ, và người dùng phải phân biệt được chỉ bằng cách đọc nhãn.
+  assert.ok(OUTCOME_LABEL.UNKNOWN.includes("chứng từ"), "nhãn CHƯA BIẾT phải nói rõ là thiếu chứng từ ĐVVC");
+  assert.notEqual(OUTCOME_LABEL.UNKNOWN, OUTCOME_LABEL.NOT_SHIPPED, "chưa có chứng từ KHÁC chưa gửi");
+  assert.notEqual(OUTCOME_LABEL.UNKNOWN, OUTCOME_LABEL.IN_TRANSIT, "chưa có chứng từ KHÁC đang giao");
+  assert.notEqual(OUTCOME_TONE.UNKNOWN, OUTCOME_TONE.IN_TRANSIT, "hai trạng thái khác nghĩa phải khác màu");
 
   // ───────── 2. Bốn chiều phải phân biệt được TRÊN GIAO DIỆN ─────────
   const badge = readFileSync("components/status-badge.tsx", "utf8");
