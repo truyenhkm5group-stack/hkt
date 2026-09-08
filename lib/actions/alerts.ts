@@ -1,6 +1,6 @@
 "use server";
 
-import { and, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -85,7 +85,49 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const db = await getDb();
+  const [before] = await db.select({ title: schema.notifications.title, kind: schema.notifications.kind }).from(schema.notifications).where(eq(schema.notifications.id, id));
   await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(inArray(schema.notifications.id, [id]));
+  // Đóng việc bằng tay là quyết định vận hành: ai đóng, đóng việc gì, lúc nào.
+  await audit({ userId: user.id, userEmail: user.email, action: "case.resolve", entity: "NOTIFICATION", entityId: id, detail: { title: before?.title ?? "", kind: before?.kind ?? "" } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/**
+ * NHẬN VIỆC — gán việc cho một người. Không có người cầm thì việc trôi.
+ * `userId` rỗng = trả việc về hàng đợi chung.
+ */
+export async function assignCase(id: string, userId: string | null): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ assignedTo: n.assignedTo, title: n.title }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  await db.update(n).set({ assignedTo: userId, assignedAt: userId ? new Date() : null }).where(eq(n.id, id));
+  // Việc đổi người là thay đổi trách nhiệm — phải truy nguyên được.
+  await audit({ userId: user.id, userEmail: user.email, action: "case.assign", entity: "NOTIFICATION", entityId: id, detail: { from: before.assignedTo, to: userId, title: before.title } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/**
+ * TIẾP NHẬN — "tôi đang làm việc này". Khác ĐÃ ĐỌC (chỉ nhìn thấy) và khác ĐÃ XONG.
+ * Tiếp nhận mà chưa có người nhận thì tự gán cho chính người bấm.
+ */
+export async function acknowledgeCase(id: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ assignedTo: n.assignedTo, acknowledgedAt: n.acknowledgedAt, title: n.title }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  if (before.acknowledgedAt) return { ok: true };
+  await db
+    .update(n)
+    .set({ acknowledgedBy: user.id, acknowledgedAt: new Date(), assignedTo: before.assignedTo ?? user.id, assignedAt: before.assignedTo ? undefined : new Date() })
+    .where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.acknowledge", entity: "NOTIFICATION", entityId: id, detail: { title: before.title } });
   revalidatePath("/alerts");
   return { ok: true };
 }

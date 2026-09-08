@@ -31,11 +31,56 @@ export function parseWebhookBody(text: string): Record<string, unknown> {
   return record;
 }
 
-/** Lưu webhook vào hộp thư đến; trả về id để xử lý nền */
-export async function storeWebhook(source: "PANCAKE" | "VIETTELPOST", eventType: string, externalId: string | null, payload: unknown, headers: Record<string, string>) {
+export type StoredWebhook = {
+  id: string;
+  /** Gói tin này ERP đã nhận trước đó (bên gửi gửi lại) — không tạo dòng mới, chỉ đếm thêm một lần gửi. */
+  duplicate: boolean;
+  /** Tổng số lần gói tin này được gửi tới (1 = lần đầu). */
+  deliveryCount: number;
+};
+
+/**
+ * Lưu webhook vào hộp thư đến; trả về id để xử lý nền.
+ *
+ * `dedupeKey` — danh tính NGHIỆP VỤ của gói tin (nguồn + mã vận đơn + trạng thái + mốc sự kiện).
+ * Viettel Post thử lại tối đa 5 lần cho cùng một sự việc; trước đây mỗi lần thử lại đẻ thêm một
+ * dòng nên "đã nhận 485 gói tin" không nói lên điều gì. Nay lần gửi lại chỉ tăng `delivery_count`
+ * và được xử lý lại trên chính dòng cũ — xử lý lại vốn idempotent, nên nếu lần đầu hỏng thì lần
+ * gửi lại vẫn có cơ hội chữa.
+ *
+ * `occurredAt` — MỐC CỦA SỰ KIỆN theo bên gửi, khác `received_at` là giờ ERP nhận.
+ * Không có khoá thì vẫn lưu bình thường: không nhận dạng được KHÔNG phải lý do để mất dữ liệu.
+ */
+export async function storeWebhook(
+  source: "PANCAKE" | "VIETTELPOST",
+  eventType: string,
+  externalId: string | null,
+  payload: unknown,
+  headers: Record<string, string>,
+  options: { dedupeKey?: string | null; occurredAt?: Date | null } = {},
+): Promise<StoredWebhook> {
   const db = await getDb();
-  const [row] = await db.insert(schema.webhookEvents).values({ source, eventType, externalId, payload, headers }).returning({ id: schema.webhookEvents.id });
-  return row.id;
+  const dedupeKey = options.dedupeKey || null;
+  const occurredAt = options.occurredAt ?? null;
+  if (dedupeKey) {
+    const [bumped] = await db
+      .update(schema.webhookEvents)
+      .set({ deliveryCount: sql`${schema.webhookEvents.deliveryCount} + 1`, receivedAt: new Date() })
+      .where(eq(schema.webhookEvents.dedupeKey, dedupeKey))
+      .returning({ id: schema.webhookEvents.id, deliveryCount: schema.webhookEvents.deliveryCount });
+    if (bumped) return { id: bumped.id, duplicate: true, deliveryCount: Number(bumped.deliveryCount) };
+  }
+  const [row] = await db
+    .insert(schema.webhookEvents)
+    .values({ source, eventType, externalId, payload, headers, dedupeKey, occurredAt })
+    .returning({ id: schema.webhookEvents.id });
+  return { id: row.id, duplicate: false, deliveryCount: 1 };
+}
+
+/** Danh tính nghiệp vụ của một gói tin: cùng khoá = cùng một sự việc, dù bên gửi gửi lại bao lần. */
+export function webhookDedupeKey(source: string, parts: (string | number | null | undefined)[]): string | null {
+  const usable = parts.map((p) => (p === null || p === undefined ? "" : String(p).trim())).filter(Boolean);
+  return usable.length >= 2 ? [source, ...usable].join("|") : null;
 }
 
 export async function markWebhook(id: string, status: "PROCESSED" | "FAILED" | "IGNORED", error?: string | null) {

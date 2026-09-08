@@ -16,6 +16,7 @@ import { asRecord } from "@/lib/integrations/http";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { markWebhook } from "@/lib/integrations/pancake/webhook";
+import { audit } from "@/lib/audit";
 
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.split("=")[1]) : 200;
@@ -39,6 +40,8 @@ async function main() {
   let stillUnmatched = 0;
   let failed = 0;
   const details: string[] = [];
+  /** Mã liên kết cho cả lượt phát lại. */
+  const runId = `replay-${Date.now().toString(36)}`;
 
   for (const row of rows) {
     const payload = asRecord(row.payload);
@@ -68,7 +71,23 @@ async function main() {
     }
   }
 
+  // PHÁT LẠI CŨNG LÀ MỘT THAY ĐỔI DỮ LIỆU — phải truy nguyên được ai chạy, lúc nào, đổi những gì.
+  // Trước đây script này ghi đè trạng thái gói tin mà không để lại dấu vết nào.
+  if (rows.length) {
+    await audit({
+      userEmail: "script:vtp-retry-webhooks",
+      action: "webhook.replay",
+      entity: "WEBHOOK_EVENT",
+      correlationId: runId,
+      before: { pending: rows.length },
+      after: { applied, stillUnmatched, failed },
+      reason: "Xử lý lại gói tin Viettel Post chưa áp dụng được. Luồng nạp dữ liệu idempotent nên chạy lại nhiều lần vô hại.",
+      detail: { errors: details.slice(0, 10) },
+    });
+  }
+
   console.log(JSON.stringify({
+    ma_lan_chay: runId,
     goi_tin_cho_xu_ly_lai: rows.length,
     da_ap_dung: applied,
     van_chua_ghep_duoc: stillUnmatched,

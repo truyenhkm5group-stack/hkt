@@ -1,5 +1,6 @@
 import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
 import { AdsTab } from "@/app/(dashboard)/expenses/ads-tab";
+import { RoasSection } from "@/app/(dashboard)/ads/roas-section";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -22,6 +23,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         hint="Hiệu suất quảng cáo theo mã hàng và theo marketer: chi tiêu, đơn đã xác nhận, ROAS, CPO, lợi nhuận sau QC. Chi tiêu Facebook tự kéo mỗi giờ; ghép chiến dịch → mã hàng / marketer ở cuối trang."
         actions={canWrite ? <AdSpendDialog /> : null}
       />
+      <RoasSection period={period} />
       <AdsTab raw={raw} period={period} canWrite={canWrite} canManageEmployees={canManageEmployees} />
     </div>
   );

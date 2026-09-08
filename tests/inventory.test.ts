@@ -8,6 +8,10 @@ import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProducts, productSummary } from "@/lib/queries/products";
 import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
+import { stockRiskSummary } from "@/lib/queries/stock";
+import { getDashboardData } from "@/lib/queries/dashboard";
+import { STOCK_STATE_LABEL, type StockState } from "@/lib/constants/inventory";
+import type { Period } from "@/lib/search-params";
 import { parseListParams } from "@/lib/search-params";
 
 function allParams() {
@@ -213,7 +217,33 @@ export async function testInventory(db: Db) {
   assert.equal(sauXuatTay.erpStock, truocXuatTay.erpStock - 4, "xuất tay trừ tồn đúng 4 món");
   assert.equal(sauXuatTay.shipped, truocXuatTay.shipped, "xuất tay không được cộng vào 'đã xuất qua ĐVVC'");
 
+  // ───────── 10. NĂM TRẠNG THÁI CỦA HÀNG + CẢNH BÁO THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG ─────────
+  clearMemo();
+  const risk = await stockRiskSummary();
+  for (const state of ["ON_HAND", "RESERVED", "AVAILABLE", "INBOUND", "UNSELLABLE"] as StockState[]) {
+    assert.ok(state in risk.states, `phải có trạng thái ${STOCK_STATE_LABEL[state]}`);
+    assert.ok(Number.isFinite(risk.states[state]), `${state} phải là số đo được`);
+  }
+  assert.ok(risk.states.AVAILABLE <= risk.states.ON_HAND, "khả dụng bán không được lớn hơn tồn thực tế");
+  assert.ok(risk.states.UNSELLABLE >= 0, "hàng hụt là số đo từ chênh lệch phiếu, không âm");
+  assert.ok(risk.atRisk === risk.out + risk.critical, "rủi ro cần xử lý = hết hàng + sẽ hết trước khi lô mới về");
+  assert.ok(risk.unknown >= 0, "mẫu mã chưa có phiếu nhập là CHƯA BIẾT, đếm riêng chứ không tính là hết hàng");
+
+  // Tổng quan phải dùng CHÍNH con số rủi ro đó, không tự đếm bằng ngưỡng cứng nào khác.
+  const ALL_PERIOD: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+  clearMemo();
+  const dash = await getDashboardData(ALL_PERIOD);
+  assert.equal(dash.attention.lowStock, risk.atRisk, "Tổng quan phải dùng cảnh báo theo rủi ro, không dùng ngưỡng 'tồn <= 5'");
+  assert.equal(dash.stockRisk.out, risk.out);
+  assert.equal(dash.stockRisk.critical, risk.critical);
+  // Cảnh báo vận hành cũng phải cùng bộ máy: cùng số mẫu mã OUT + CRITICAL.
+  const planNow = await getReplenishmentPlan();
+  assert.equal(risk.atRisk, planNow.summary.out + planNow.summary.critical, "Tổng quan, Kế hoạch SX và cảnh báo phải cùng một bộ máy days-of-cover");
+
   console.log(
     `✓ Sổ kho: tồn = phiếu kho − đã xuất (ĐVVC) · hàng hoàn chỉ về tồn qua phiếu tái nhập · xuất tay trừ tồn · ${summary.unknownStock} mẫu mã chưa có phiếu nhập không bị coi là hết hàng`,
+  );
+  console.log(
+    `✓ Trạng thái hàng: tồn ${risk.states.ON_HAND} · giữ chỗ ${risk.states.RESERVED} · khả dụng ${risk.states.AVAILABLE} · đang về ${risk.states.INBOUND} · hụt ${risk.states.UNSELLABLE} — cảnh báo theo rủi ro (${risk.atRisk} mẫu mã), không theo ngưỡng cứng`,
   );
 }

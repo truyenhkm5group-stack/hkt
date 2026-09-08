@@ -221,9 +221,22 @@ export const notifications = pgTable(
     notifiedAt: ts("notified_at"),
     /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
     occurredAt: ts("occurred_at"),
+    /**
+     * HÀNG ĐỢI VIỆC: ai đang cầm việc này. Không có người nhận thì việc trôi — đó là lý do
+     * "Cần xử lý" cũ chỉ là danh sách đọc rồi bỏ.
+     */
+    assignedTo: text("assigned_to").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: ts("assigned_at"),
+    /** ĐÃ TIẾP NHẬN: có người nhìn thấy và nhận xử lý — khác "đã đọc" và khác "đã xong". */
+    acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: ts("acknowledged_at"),
     createdAt: createdAt(),
   },
-  (t) => [index("notifications_open_idx").on(t.resolvedAt, t.createdAt), index("notifications_kind_idx").on(t.kind)],
+  (t) => [
+    index("notifications_open_idx").on(t.resolvedAt, t.createdAt),
+    index("notifications_kind_idx").on(t.kind),
+    index("notifications_assigned_idx").on(t.assignedTo, t.resolvedAt),
+  ],
 );
 
 export const auditLogs = pgTable(
@@ -724,6 +737,9 @@ export const shipments = pgTable(
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
+    // Đối soát COD quét "đã giao, có thu hộ, chưa thấy tiền" trên toàn bảng vận đơn mỗi lần mở
+    // trang Cần xử lý và mỗi lần chạy cảnh báo.
+    index("shipments_cod_overdue_idx").on(t.deliveredAt).where(sql`${t.stage} = 'DELIVERED' and ${t.codCollected} = 0`),
     index("shipments_cod_statement_idx").on(t.codStatementRef),
     // Vận đơn CHIỀU VỀ (quy tắc 2 của ORDER_OUTCOME) được dò bằng một truy vấn con tương quan
     // chạy cho từng dòng; không có index này thì mỗi dòng quét toàn bảng shipments → O(n²).
@@ -758,6 +774,10 @@ export const shipmentEvents = pgTable(
     // ORDER_OUTCOME dò "doanh thu bị sửa sau khi giao" bằng truy vấn con tương quan chạy cho
     // từng dòng; không có index riêng phần này thì mỗi dòng quét toàn bảng shipment_events.
     index("shipment_events_revenue_edit_idx").on(t.shipmentId, t.occurredAt).where(sql`${t.statusName} like 'Nhập doanh thu%'`),
+    // Hai luật đối soát mức NGHIÊM TRỌNG hỏi cùng một câu cho TỪNG vận đơn: "có sự kiện phát
+    // thành công nào của ĐVVC không?". Không có index riêng phần này thì mỗi vận đơn quét toàn
+    // bảng sự kiện — chi phí tăng theo bình phương khi shop lớn dần.
+    index("shipment_events_delivered_idx").on(t.shipmentId).where(sql`${t.normalizedStage} = 'DELIVERED'`),
     check("shipment_events_leg_check", sql`${t.legType} IN ('OUTBOUND', 'RETURN', 'UNKNOWN')`),
     check("shipment_events_verification_check", sql`${t.verificationStatus} IN ('PENDING', 'VERIFIED', 'REJECTED', 'DISPUTED')`),
     check("shipment_events_verified_check", sql`${t.verificationStatus} IS DISTINCT FROM 'VERIFIED' OR (
@@ -1062,10 +1082,28 @@ export const webhookEvents = pgTable(
     headers: jsonb("headers"),
     status: text("status").notNull().default("RECEIVED"),
     error: text("error"),
+    /**
+     * MỐC CỦA SỰ KIỆN (giờ ĐVVC / Pancake), khác hẳn `received_at` là giờ ERP nhận gói tin.
+     * Thiếu nó thì một gói tin xử lý lỗi không tra được nó thuộc thời điểm nào nếu không mở payload.
+     */
+    occurredAt: ts("occurred_at"),
+    /**
+     * KHOÁ CHỐNG TRÙNG của gói tin: nguồn + mã vận đơn + trạng thái + mốc sự kiện.
+     * Viettel Post thử lại tối đa 5 lần nên cùng một sự việc tới nhiều lần; không có khoá này thì
+     * mỗi lần thử lại đẻ thêm một dòng và con số "đã nhận / đã xử lý" trên trang Kết nối dữ liệu
+     * không còn đọc được. NULL = gói tin không đủ thông tin để nhận dạng, vẫn được lưu.
+     */
+    dedupeKey: text("dedupe_key"),
     receivedAt: ts("received_at").notNull().defaultNow(),
     processedAt: ts("processed_at"),
+    /** Số lần cùng một gói tin được gửi lại (1 = lần đầu). */
+    deliveryCount: integer("delivery_count").notNull().default(1),
   },
-  (t) => [index("webhook_events_source_received_idx").on(t.source, t.receivedAt), index("webhook_events_status_idx").on(t.status)],
+  (t) => [
+    index("webhook_events_source_received_idx").on(t.source, t.receivedAt),
+    index("webhook_events_status_idx").on(t.status),
+    uniqueIndex("webhook_events_dedupe_uq").on(t.dedupeKey),
+  ],
 );
 
 export const integrationTokens = pgTable("integration_tokens", {

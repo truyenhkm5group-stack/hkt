@@ -23,6 +23,16 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SHIPMENT_REPUSH: "Yêu cầu VTP gửi lại webhook",
   SYNC_RUN: "Chạy đồng bộ",
   SETTINGS_UPDATE: "Cập nhật cấu hình",
+  "reconcile.repair": "Đối soát tự sửa dữ liệu",
+  "backfill.canonical-state": "Dựng lại trạng thái từ lịch sử",
+  "webhook.replay": "Xử lý lại gói tin",
+  "case.assign": "Giao việc cho người xử lý",
+  "case.acknowledge": "Tiếp nhận việc",
+  "case.resolve": "Đóng việc",
+  VTP_ORDER_LIST_ROW: "Nhập dòng danh sách vận đơn",
+  "return.received": "Xác nhận nhận hàng hoàn",
+  "return.received.undo": "Huỷ xác nhận nhận hàng hoàn",
+  "return.received.bulk": "Xác nhận nhận hàng hoàn hàng loạt",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -37,6 +47,10 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   CUSTOMER: "Khách hàng",
   SETTINGS: "Cấu hình",
   SYNC: "Đồng bộ",
+  NOTIFICATION: "Việc cần xử lý",
+  WEBHOOK_EVENT: "Gói tin webhook",
+  DATA_RULE: "Luật đối soát",
+  shipments: "Vận đơn",
 };
 
 export function auditActionLabel(action: string) {

@@ -16,16 +16,19 @@ import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
 import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { OrderOutcomeBadge, VerifiedOutcomeBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
-import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, VERIFIED_OUTCOME_LABEL, type DqIssue, type VerifiedOutcome } from "@/lib/constants/data-quality";
-import { OUTCOME_LABEL, successTone, type OrderOutcome } from "@/lib/constants/returns";
+import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
+import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
+import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
+import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_LABEL, SEVERITY_TONE, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -43,15 +46,7 @@ function Rate({ value }: { value: number | null }) {
   return <span className={successTone(value)}>{value}%</span>;
 }
 
-function outcomeBadge(outcome: VerifiedOutcome | OrderOutcome, label: string) {
-  const tone =
-    outcome === "DELIVERED" ? "bg-success/12 text-success"
-    : outcome === "UNVERIFIED" ? "bg-warning/15 text-amber-700 dark:text-amber-300"
-    : outcome === "RETURNED" || outcome === "RETURNED_BY_RULE" ? "bg-destructive/10 text-destructive"
-    : outcome === "IN_TRANSIT" ? "bg-info/12 text-info"
-    : "bg-muted text-muted-foreground";
-  return <span className={cn("inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", tone)}>{label}</span>;
-}
+
 
 export default async function DataQualityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("dashboard:view");
@@ -61,6 +56,11 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   const page = Math.max(1, Number(param(raw, "page", "1")) || 1);
 
   const summary = await dataQualitySummary(params.period);
+  const tower = await getControlTower();
+  // Luật của trung tâm điều khiển mở danh sách riêng, không dùng chung với 7 nhóm legacy.
+  const ruleParam = param(raw, "rule");
+  const towerRule = (RECONCILIATION_RULE_ORDER as readonly string[]).includes(ruleParam) ? (ruleParam as ReconciliationRuleKey) : null;
+  const towerDrill = towerRule ? await controlTowerDrill(towerRule, page, PAGE_SIZE) : null;
 
   // Chỉ tải danh sách của nhóm vấn đề đang mở (drill-down).
   const drill = issue === "unlinked-shipment"
@@ -117,6 +117,89 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           note="COD khai báo của đơn chưa chứng minh được"
         />
       </div>
+
+      {/* ───────── Trung tâm điều khiển: toàn bộ bộ luật đối soát ───────── */}
+      <SectionCard
+        title="Trung tâm điều khiển"
+        description={`${formatNumber(tower.firing)}/${formatNumber(tower.ruleCount)} luật đang có vi phạm · ${formatNumber(tower.totals.ERROR)} nghiêm trọng · ${formatNumber(tower.totals.WARNING)} cảnh báo`}
+        hint="Mỗi dòng là một luật đối soát: mức nghiêm trọng, nghĩa thật, bằng chứng cụ thể và việc nên làm. ERP CHỈ tự sửa những luật ghi 'tự sửa được' — lệch giữa tiền và giao hàng thì không bao giờ tự sửa, vì máy không biết bên nào đúng."
+      >
+        {tower.issues.length === 0 ? (
+          <EmptyState title="Không có vi phạm nào" description="Toàn bộ bộ luật đối soát đang sạch." />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tower.issues.map((i) => (
+              <div key={i.rule} className={cn("rounded-xl border p-3", towerRule === i.rule && "border-primary bg-accent/40")}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                      <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold", SEVERITY_TONE[i.severity])}>{SEVERITY_LABEL[i.severity]}</span>
+                      {i.label}
+                      {i.autoRepairable ? <Badge variant="outline" className="text-[10px]">ERP tự sửa được</Badge> : <Badge variant="outline" className="text-[10px]">Chỉ báo cáo</Badge>}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{i.reason}</p>
+                    <p className="mt-1 text-xs"><span className="text-muted-foreground">Nên làm: </span>{i.suggestedAction}</p>
+                    <ul className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
+                      {i.sample.map((row) => (
+                        <li key={`${i.rule}-${row.code}`} className="truncate">
+                          <span className="font-mono">{row.code}</span> — {row.evidence}
+                          {row.at ? ` · ${formatDateTime(row.at)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <p className="numeric text-2xl font-bold">{formatNumber(i.count)}</p>
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={towerRule === i.rule ? `/data-quality?period=${params.period.key}` : `/data-quality?rule=${i.rule}&period=${params.period.key}`}>
+                        {towerRule === i.rule ? "Đóng" : "Xem danh sách"}
+                      </Link>
+                    </Button>
+                    {i.href ? <Link className="text-[11px] text-primary underline underline-offset-2" href={i.href}>Mở trang xử lý →</Link> : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ───────── Danh sách đầy đủ của một luật ───────── */}
+      {towerRule && towerDrill ? (
+        <SectionCard
+          title={RECONCILIATION_RULES[towerRule].label}
+          description={`${formatNumber(towerDrill.total)} bản ghi · trang ${page}/${towerDrill.pageCount}`}
+          hint={RECONCILIATION_RULES[towerRule].reason}
+          actions={<Button asChild variant="outline" size="sm"><Link href={`/data-quality?period=${params.period.key}`}>Đóng danh sách</Link></Button>}
+        >
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Mã</TableHead>
+                  <TableHead>Bằng chứng</TableHead>
+                  <TableHead>Thời điểm</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {towerDrill.rows.map((r) => (
+                  <TableRow key={`${towerRule}-${r.code}-${r.entityId ?? ""}`}>
+                    <TableCell className="font-mono text-xs">{r.code}</TableCell>
+                    <TableCell className="text-xs">{r.evidence}</TableCell>
+                    <TableCell className="text-xs whitespace-nowrap">{r.at ? formatDateTime(r.at) : "—"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {towerDrill.pageCount > 1 ? (
+            <div className="mt-3 flex gap-2">
+              {page > 1 ? <Button asChild variant="outline" size="sm"><Link href={`/data-quality?rule=${towerRule}&page=${page - 1}&period=${params.period.key}`}>← Trang trước</Link></Button> : null}
+              {page < towerDrill.pageCount ? <Button asChild variant="outline" size="sm"><Link href={`/data-quality?rule=${towerRule}&page=${page + 1}&period=${params.period.key}`}>Trang sau →</Link></Button> : null}
+            </div>
+          ) : null}
+        </SectionCard>
+      ) : null}
 
       {/* ───────── Vấn đề dữ liệu, mỗi ô bấm vào xem danh sách ───────── */}
       <SectionCard title="Vấn đề dữ liệu cần xử lý" description="Bấm vào từng nhóm để xem danh sách đơn / vận đơn liên quan.">
@@ -306,8 +389,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                           </TableCell>
                           <TableCell className="numeric text-right">{formatVND(row.declaredRevenue)}</TableCell>
                           <TableCell className="numeric text-right">{row.hasCashProof ? formatVND(row.cash) : <Unknown />}</TableCell>
-                          <TableCell>{outcomeBadge(row.legacyOutcome as OrderOutcome, OUTCOME_LABEL[row.legacyOutcome as OrderOutcome] ?? row.legacyOutcome)}</TableCell>
-                          <TableCell>{outcomeBadge(row.verifiedOutcome, VERIFIED_OUTCOME_LABEL[row.verifiedOutcome] ?? row.verifiedOutcome)}</TableCell>
+                          <TableCell><OrderOutcomeBadge outcome={row.legacyOutcome as OrderOutcome} /></TableCell>
+                          <TableCell><VerifiedOutcomeBadge outcome={row.verifiedOutcome} /></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

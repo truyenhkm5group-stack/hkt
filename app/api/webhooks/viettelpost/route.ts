@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { after } from "next/server";
 import { env } from "@/lib/env";
 import { asRecord, parseJsonSafeInts, str } from "@/lib/integrations/http";
-import { markWebhook, storeWebhook } from "@/lib/integrations/pancake/webhook";
+import { markWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { clearMemo } from "@/lib/cache";
@@ -62,7 +62,23 @@ export async function POST(request: NextRequest) {
   const data = findVtpData(body);
   const record = normalizeTracking(data);
   // lưu cả body gốc để soi định dạng khi gói tin đi qua trung gian (Pancake chuyển tiếp)
-  const eventId = await storeWebhook("VIETTELPOST", "tracking", record.orderNumber || null, data === body ? { DATA: data } : { DATA: data, RAW: body }, { "user-agent": request.headers.get("user-agent") ?? "", "content-type": request.headers.get("content-type") ?? "" });
+  // Viettel Post thử lại tối đa 5 lần cho CÙNG một sự việc. Danh tính của sự việc là
+  // mã vận đơn + trạng thái + MỐC CỦA ĐVVC — không phải thời điểm ERP nhận được gói tin.
+  // Lần gửi lại chỉ tăng delivery_count trên dòng cũ rồi vẫn được xử lý lại (xử lý idempotent),
+  // nên nếu lần đầu hỏng thì lần gửi lại còn cơ hội chữa.
+  const occurredAt = record.statusDate ?? null;
+  const stored = await storeWebhook(
+    "VIETTELPOST",
+    "tracking",
+    record.orderNumber || null,
+    data === body ? { DATA: data } : { DATA: data, RAW: body },
+    { "user-agent": request.headers.get("user-agent") ?? "", "content-type": request.headers.get("content-type") ?? "" },
+    {
+      dedupeKey: webhookDedupeKey("VIETTELPOST", [record.orderNumber, record.status ?? record.statusName, occurredAt?.toISOString()]),
+      occurredAt,
+    },
+  );
+  const eventId = stored.id;
 
   after(async () => {
     try {
@@ -75,7 +91,8 @@ export async function POST(request: NextRequest) {
         : result.reason === "duplicate" ? "Gói tin lặp — trạng thái đã đúng, không cần cập nhật"
         : result.reason === "stale" ? "Sự kiện của Viettel Post cũ hơn trạng thái đang lưu — giữ trạng thái mới hơn, đã ghi vào lịch sử"
         : null;
-      await markWebhook(eventId, result?.changed ? "PROCESSED" : "IGNORED", note);
+      const retryNote = stored.duplicate ? `Viettel Post gửi lại lần ${stored.deliveryCount}` : null;
+      await markWebhook(eventId, result?.changed ? "PROCESSED" : "IGNORED", [note, retryNote].filter(Boolean).join(" · ") || null);
       if (result?.changed) {
         clearMemo();
         scheduleAlertEvaluation();

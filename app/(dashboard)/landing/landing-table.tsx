@@ -11,8 +11,7 @@ import { Money, SectionCard } from "@/components/ui-bits";
 import { pushLanding, pushLandingBatch, recheckLanding, setLandingStatus, setLandingVariant } from "@/lib/actions/landing";
 import { PUSH_BLOCK_LABEL } from "@/lib/constants/landing";
 import { LANDING_STATUS_LABEL, LANDING_STATUSES, type LandingStatus } from "@/lib/constants/landing";
-import { OUTCOME_LABEL, OUTCOME_TONE } from "@/lib/constants/returns";
-import { OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
+import { OrderOutcomeBadge, OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
 import { formatVND } from "@/lib/format";
 import type { LandingRow, VariantOption } from "@/lib/queries/landing";
 import { cn } from "@/lib/utils";
@@ -192,7 +191,7 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                           ) : r.orderStage && ["CONFIRMED", "PACKING", "NEW"].includes(r.orderStage) ? (
                             <div className="mt-0.5 text-[11px] text-muted-foreground">Chưa gửi đơn vị vận chuyển</div>
                           ) : null}
-                          {r.outcome ? <div className={cn("mt-0.5 inline-block rounded px-1.5 py-0.5 text-[11px] font-medium", OUTCOME_TONE[r.outcome])}>{OUTCOME_LABEL[r.outcome]}</div> : null}
+                          {r.outcome ? <div className="mt-0.5"><OrderOutcomeBadge outcome={r.outcome} /></div> : null}
                         </>
                       ) : r.pancakeSystemId ? (
                         <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title="ERP đã tạo đơn nháp trên Pancake, đang chờ đồng bộ về">Đơn nháp POS #{r.pancakeSystemId} · chờ đồng bộ</span>

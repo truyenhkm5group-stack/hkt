@@ -20,6 +20,8 @@ import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBill
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
 import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
+import { getControlTower } from "@/lib/queries/control-tower";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
@@ -292,6 +294,62 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       // bỏ qua nếu chưa có dữ liệu khách
     }
   }
+  // ───────── QUÁ HẠN MÀ TIỀN CHƯA VỀ ─────────
+  // Không phải cảnh báo giao vận: đây là việc ĐÒI TIỀN. Trước đây chỉ nằm trong một con số trên
+  // trang Đối soát COD nên không ai cầm việc, và tiền cứ treo.
+  activeKinds.push("COD_OVERDUE");
+  try {
+    const db = await getDb();
+    const overdue = await db
+      .select({ id: schema.shipments.id, code: schema.shipments.vtpOrderNumber, amount: schema.shipments.codAmount, at: schema.shipments.deliveredAt })
+      .from(schema.shipments)
+      .where(
+        sql`${schema.shipments.stage} = 'DELIVERED' and coalesce(${schema.shipments.codAmount}, 0) > 0
+          and coalesce(${schema.shipments.codCollected}, 0) = 0
+          and coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate}, ${schema.shipments.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')`,
+      )
+      .limit(200);
+    for (const r of overdue) {
+      candidates.push({
+        kind: "COD_OVERDUE",
+        severity: "warning",
+        title: `${r.code ?? r.id} · Viettel Post chưa trả ${formatVND(r.amount ?? 0)}`,
+        body: `Đã phát thành công quá ${COD_OVERDUE_DAYS} ngày mà chưa thấy dòng bảng kê nào — đối chiếu và đòi Viettel Post.`,
+        href: "/cod",
+        entityType: "SHIPMENT",
+        entityId: r.id,
+        dedupeKey: `cod-overdue:${r.id}`,
+        occurredAt: r.at ?? null,
+      });
+    }
+  } catch {
+    // chưa có dữ liệu vận đơn
+  }
+
+  // ───────── DỮ LIỆU SAI NGHIÊM TRỌNG ─────────
+  // Đưa các luật mức ERROR của trung tâm điều khiển vào hàng đợi việc: có bằng chứng, có người
+  // nhận, có thể đóng — thay vì chỉ là một con số trên trang Chất lượng dữ liệu.
+  activeKinds.push("DATA_ERROR");
+  try {
+    const tower = await getControlTower();
+    for (const issue of tower.issues.filter((i) => i.severity === "ERROR")) {
+      candidates.push({
+        kind: "DATA_ERROR",
+        severity: "critical",
+        title: `${issue.label} · ${issue.count} bản ghi`,
+        body: `${issue.reason} Nên làm: ${issue.suggestedAction}`,
+        href: `/data-quality?rule=${issue.rule}`,
+        entityType: "DATA_RULE",
+        entityId: issue.rule,
+        // Khoá theo luật + số lượng: số đổi thì mở lại việc, số không đổi thì không tạo trùng.
+        dedupeKey: `data-error:${issue.rule}:${issue.count}`,
+        occurredAt: issue.detectedAt,
+      });
+    }
+  } catch {
+    // chưa quét được chất lượng dữ liệu
+  }
+
   return { candidates, activeKinds };
 }
 

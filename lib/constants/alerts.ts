@@ -52,10 +52,12 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   STOCK_LOW: "Thiếu hàng · cần sản xuất",
   ADS_BILLING: "Tài khoản QC · ngưỡng thanh toán",
   RISKY_ORDER: "Đơn rủi ro · xin cọc",
+  COD_OVERDUE: "Quá hạn mà tiền chưa về",
+  DATA_ERROR: "Dữ liệu sai nghiêm trọng",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["ORDER_INCOMPLETE", "SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "CS_CASE", "STOCK_LOW", "ADS_BILLING", "RISKY_ORDER", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "SHIPMENT_FAILED", "ORDER_PENDING", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "COD_OVERDUE", "CS_CASE", "STOCK_LOW", "ADS_BILLING", "RISKY_ORDER", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
