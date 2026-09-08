@@ -22,9 +22,16 @@ import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { MANUAL_VERIFICATION_SOURCE } from "@/lib/constants/truth";
 import { legBaseCode } from "@/lib/integrations/viettelpost/statement";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+
+/**
+ * NỘI TUYẾN, KHÔNG import từ lib. Script vận hành được tải mới từ GitHub còn `lib/` nằm trong ảnh
+ * Docker đang chạy: import một hằng số vừa thêm sẽ ra `undefined` cho tới khi ảnh được dựng lại —
+ * đã xảy ra thật, insert đầu tiên đổ vì cột `source` thành NULL. Giá trị này phải khớp
+ * `MANUAL_VERIFICATION_SOURCE` trong `lib/constants/truth.ts`.
+ */
+const MANUAL_VERIFICATION_SOURCE = "VTP_UI_MANUAL_VERIFICATION";
 
 const BATCH = "HISTORICAL_VTP_MANUAL_VERIFY_2026_09_08";
 /** Mốc cố định của lô ⇒ chạy lại bao nhiêu lần cũng ra đúng một dòng sự kiện (khoá duy nhất gồm mốc). */
