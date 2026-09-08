@@ -29,6 +29,7 @@ import { testAdsAttribution } from "./ads-attribution.test";
 import { testAdsAnomaly } from "./ads-anomaly.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
+import { testSlowMoving } from "./slow-moving.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
@@ -1111,6 +1112,7 @@ async function main() {
   testUiConsistency();
   await testInventory(db);
   await testInventoryForecast(db);
+  await testSlowMoving(db);
   await testCodReconciliation();
   await testOrderSource();
   await testVtpImportTruth(db);

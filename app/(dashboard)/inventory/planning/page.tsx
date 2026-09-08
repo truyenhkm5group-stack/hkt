@@ -12,6 +12,7 @@ import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE } from "@/lib/constants/planning";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
+import { SlowMovingSection } from "@/app/(dashboard)/inventory/planning/slow-moving-section";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Kế hoạch đặt hàng sản xuất" };
@@ -213,6 +214,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           </div>
         </SectionCard>
       ))}
+      {/* Đối trọng: bảng trên nói chỗ cần đổ thêm tiền, bảng này nói chỗ tiền đang nằm chết. */}
+      <SlowMovingSection />
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
       <p className="text-xs text-muted-foreground">
         Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu. Cột “Tồn Pancake” để đối chiếu — lệch nhiều nghĩa là phiếu nhập trên ERP chưa khớp kho thực tế.
