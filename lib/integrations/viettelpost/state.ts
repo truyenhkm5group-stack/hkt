@@ -57,7 +57,9 @@ const CARRIER_SOURCES = new Set<string>(CARRIER_EVENT_SOURCES);
 export { CARRIER_EVENT_SOURCES };
 
 /** Nguồn nào đáng tin hơn khi hai sự kiện cùng mốc thời gian. Cao hơn = thắng. */
-const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15 };
+// Cùng một mốc thời gian thì chứng từ MÁY thắng bản chép tay: người chép có thể nhầm, hệ thống thì
+// không. Khác mốc thì luôn xét theo thời gian trước — bản chép tay không đóng băng vòng đời.
+const SOURCE_RANK: Record<string, number> = { VTP_WEBHOOK: 40, VTP_IMPORT: 30, VTP_POLL: 20, MANUAL: 15, VTP_UI_MANUAL_VERIFICATION: 12 };
 
 /** Các mốc "lần đầu đạt tới" — giữ nguyên kể cả khi sau đó vận đơn chuyển sang trạng thái khác. */
 const REACHED_PICKUP: ShipmentStage[] = ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"];

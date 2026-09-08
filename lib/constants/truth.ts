@@ -98,7 +98,18 @@ export const TRUTH_DIMENSION_ORDER: TruthDimension[] = ["order_status", "shipmen
  * Bản sao hành trình từ Pancake KHÔNG nằm trong cả hai: mốc thời gian của nó là giờ Pancake ghi
  * nhận, không phải giờ sự kiện của ĐVVC.
  */
-export const CARRIER_EVENT_SOURCES = ["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL"] as const;
+export const CARRIER_EVENT_SOURCES = ["VTP_WEBHOOK", "VTP_IMPORT", "VTP_POLL", "MANUAL", "VTP_UI_MANUAL_VERIFICATION"] as const;
+
+/**
+ * Chủ shop mở trang Viettel Post, đọc trạng thái rồi chép lại. Đây LÀ chứng từ của ĐVVC — chỉ là
+ * đi qua mắt người — nên được quyền dựng trạng thái vận đơn. Nhưng cố ý KHÔNG nằm trong
+ * `CARRIER_DOCUMENT_SOURCES`: người chép lại không được phép tạo ra MÃ KẾT THÚC (501/504/…), vì mã
+ * cuối là kết luận nghiệp vụ chứ không phải mô tả.
+ *
+ * Cũng KHÔNG phải bản ghi đè vĩnh viễn: nó mang mốc thời gian như mọi sự kiện khác, nên một sự kiện
+ * thật của ĐVVC xảy ra SAU đó vẫn thắng và vòng đời vận đơn tiếp tục chạy bình thường.
+ */
+export const MANUAL_VERIFICATION_SOURCE = "VTP_UI_MANUAL_VERIFICATION" as const;
 export const CARRIER_DOCUMENT_SOURCES = ["VTP_WEBHOOK", "VTP_POLL", "VTP_IMPORT"] as const;
 
 /** Danh sách dùng trong chuỗi SQL: `... in ('VTP_WEBHOOK','VTP_POLL',...)`. */
