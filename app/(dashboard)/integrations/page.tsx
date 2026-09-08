@@ -253,7 +253,22 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
                     {c.lastEventAt ? formatTimeAgo(c.lastEventAt) : "—"}
                     {c.lagHours === null ? null : <span className="block text-[11px] text-muted-foreground">trễ {c.lagHours}h</span>}
                   </TableCell>
-                  <TableCell className="numeric text-right text-xs">{c.eventsPerHour}</TableCell>
+                  <TableCell className="numeric text-right text-xs">
+                    {c.eventsPerHour}
+                    {/*
+                      Tách theo TỪNG BÊN GỬI. Gộp chung thì một đường chết vẫn thấy "có dữ liệu" —
+                      đúng chuyện đã xảy ra: Poscake bị 401 gần ba ngày mà tổng số vẫn khác 0.
+                    */}
+                    {c.senders?.length ? (
+                      <span className="block text-left text-[11px] font-normal text-muted-foreground">
+                        {c.senders.map((s) => (
+                          <span key={s.label} className="block whitespace-nowrap">
+                            {s.label}: {formatNumber(s.events24h)}/24h · {s.lastAt ? formatTimeAgo(s.lastAt) : "chưa từng"}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right text-xs">
                     {c.failed || c.unprocessed || c.unknownMappings ? (
                       <span className="text-warning">

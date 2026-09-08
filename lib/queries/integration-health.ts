@@ -70,6 +70,15 @@ export type ConnectorHealth = {
   unprocessed: number;
   /** Số lần bên gửi phải gửi lại (ngoài lần đầu). */
   retries: number;
+  /**
+   * TỪNG BÊN GỬI vào cùng một điểm nhận.
+   *
+   * Viettel Post đẩy hành trình qua HAI đường: gửi thẳng từ VTP Partner, và Poscake chuyển tiếp
+   * nguyên văn. Gộp chung thì con số "vẫn có dữ liệu" che mất việc một đường đã chết — chính xác
+   * điều đã xảy ra: đường Poscake bị 401 suốt gần ba ngày trong khi VTP Partner thỉnh thoảng gửi
+   * gói tin TEST, nên tổng số vẫn khác 0 và không ai nhận ra.
+   */
+  senders?: { label: string; lastAt: Date | null; events24h: number }[];
   /** Trạng thái / mã ERP chưa có trong bảng ánh xạ. */
   unknownMappings: number;
   /**
@@ -226,8 +235,24 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
 
   const asDate = (v: Date | string | null | undefined) => (v ? new Date(v) : null);
 
-  return [
-    build(
+  // Tách theo `user-agent`: Poscake dùng client riêng, còn Viettel Post Partner gửi bằng Apache
+  // HttpClient. Không đoán theo nội dung gói tin — chữ ký của bên gửi là bằng chứng chắc hơn.
+  const senderRows = await db
+    .select({
+      ua: sql<string>`coalesce(${schema.webhookEvents.headers}->>'user-agent', '(không rõ)')`,
+      lastAt: sql<Date | null>`max(${schema.webhookEvents.receivedAt})`,
+      events24h: sql<number>`count(*) filter (where ${schema.webhookEvents.receivedAt} >= ${since24})`,
+    })
+    .from(schema.webhookEvents)
+    .where(eq(schema.webhookEvents.source, "VIETTELPOST"))
+    .groupBy(sql`coalesce(${schema.webhookEvents.headers}->>'user-agent', '(không rõ)')`);
+  const senderLabel = (ua: string) =>
+    /apache|java/i.test(ua) ? "Viettel Post gửi thẳng" : /mint|pancake|poscake/i.test(ua) ? "Poscake chuyển tiếp" : `Khác · ${ua.slice(0, 24)}`;
+  const senders = senderRows
+    .map((r) => ({ label: senderLabel(r.ua), lastAt: asDate(r.lastAt), events24h: Number(r.events24h) }))
+    .sort((a, b) => b.events24h - a.events24h);
+
+  const vtpHealth = build(
       "VIETTELPOST",
       {
         lastEventAt: asDate(vtp?.lastAt),
@@ -241,7 +266,10 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
       vtpRun,
       true,
       { can: true, hint: "Xử lý lại an toàn: sự kiện chống trùng theo vận đơn + nguồn + trạng thái + mốc ĐVVC, và trạng thái được dựng lại từ lịch sử." },
-    ),
+  );
+
+  return [
+    { ...vtpHealth, senders },
     build(
       "PANCAKE",
       {
