@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation } from "@/lib/constants/action-queue";
+import { CASE_SLA_HOURS, CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor } from "@/lib/constants/action-queue";
 import { getActionQueue } from "@/lib/queries/action-queue";
 
 /**
@@ -64,6 +64,28 @@ export async function testActionQueue(db: Db) {
   assert.equal(caseTypeOf("SHIPMENT_FAILED"), "DELIVERY_FAILED");
   assert.equal(caseTypeOf("KHONG_CO_LOAI_NAY"), "OTHER");
 
+  // ───────── 1c. Hạn xử lý: có hạn thì phải đo được, không hạn thì phải có lý do ─────────
+  const now = new Date("2026-09-08T10:00:00+07:00");
+  const detected = new Date("2026-09-08T00:00:00+07:00"); // 10 giờ trước
+  const inTime = slaFor("DELIVERY_FAILED", detected, now); // hạn 24 giờ
+  const late = slaFor("CS_CASE", detected, now); // hạn 4 giờ
+  assert.ok(inTime && !inTime.breached && inTime.hoursRemaining > 0, "việc còn trong hạn không được báo trễ");
+  assert.ok(late && late.breached && late.hoursRemaining < 0, "case CSKH 10 giờ chưa xử lý phải là trễ hạn");
+  assert.ok(late.label.includes("trễ hạn"), "nhãn trễ hạn phải đọc được bằng tiếng Việt");
+  assert.equal(inTime.dueAt.getTime(), detected.getTime() + 24 * 3_600_000, "hạn tính từ lúc PHÁT HIỆN, không phải từ bây giờ");
+
+  // CỐ Ý KHÔNG ĐẶT HẠN cho việc mà không ai làm gì được, hoặc cần người đối chiếu chứng từ:
+  // đặt hạn ở đó chỉ tạo số trễ hạn giả và ép ghép bừa vận đơn — đúng thứ luật cấm.
+  assert.equal(slaFor("RETURNING", detected, now), null, "đang chuyển hoàn thì chưa làm được gì, không đặt hạn");
+  assert.equal(CASE_SLA_HOURS.AMBIGUOUS_ORDER_SHIPMENT_MAPPING, null, "việc cần người đối chiếu KHÔNG được đặt hạn");
+  assert.equal(CASE_SLA_HOURS.ORPHAN_SHIPMENT, null);
+  // Mọi loại việc phải khai hạn một cách tường minh (số hoặc null), không được thiếu khoá.
+  for (const t of Object.keys(CASE_TYPE_LABEL) as (keyof typeof CASE_TYPE_LABEL)[]) {
+    assert.ok(t in CASE_SLA_HOURS, `${t}: thiếu khai hạn xử lý`);
+  }
+  // Việc có khách đang chờ phải có hạn ngắn hơn việc nội bộ.
+  assert.ok((CASE_SLA_HOURS.CS_CASE ?? 0) < (CASE_SLA_HOURS.COD_OVERDUE ?? 0), "khách chờ phải gấp hơn việc đòi tiền nội bộ");
+
   // ───────── 2. Hàng đợi thật: mỗi việc phải đủ thông tin để làm ─────────
   const queue = await getActionQueue({ limit: 200 });
   assert.ok(queue.cases.length > 0, "fixture phải có việc đang mở");
@@ -81,6 +103,7 @@ export async function testActionQueue(db: Db) {
     assert.ok(c.scoreExplanation.length > 0, `${c.id}: phải giải thích được vì sao xếp ưu tiên như vậy`);
     const sum = Math.round(c.scoreParts.severity + c.scoreParts.age + c.scoreParts.money + c.scoreParts.recoverability + c.scoreParts.customer + c.scoreParts.proximity);
     assert.equal(sum, c.score, `${c.id}: tổng các phần điểm phải đúng bằng điểm hiển thị`);
+    if (c.sla) assert.equal(c.sla.breached, c.sla.hoursRemaining < 0, `${c.id}: cờ trễ hạn phải khớp số giờ còn lại`);
   }
   // Xếp giảm dần theo điểm — người mở trang làm từ trên xuống là đúng thứ tự.
   for (let n = 1; n < queue.cases.length; n += 1) {

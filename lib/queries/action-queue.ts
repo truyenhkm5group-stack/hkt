@@ -9,11 +9,13 @@ import {
   caseScoreBreakdown,
   caseStatusOf,
   scoreExplanation,
+  slaFor,
   caseTypeOf,
   priorityOf,
   type CasePriority,
   type CaseStatus,
   type CaseType,
+  type CaseSla,
   type ScoreParts,
 } from "@/lib/constants/action-queue";
 
@@ -66,6 +68,8 @@ export type ActionCase = {
   /** Vì sao việc này xếp trên việc kia — từng phần điểm, để người đọc kiểm chứng được. */
   scoreParts: ScoreParts;
   scoreExplanation: string;
+  /** Hạn xử lý. `null` khi loại việc CỐ Ý không đặt hạn (xem CASE_SLA_HOURS). */
+  sla: CaseSla | null;
 };
 
 export type ActionQueue = {
@@ -78,6 +82,8 @@ export type ActionQueue = {
   neglected: number;
   /** Tổng tiền đang treo ở toàn bộ việc đang mở. */
   financialImpact: number;
+  /** Việc đã quá hạn xử lý. Chỉ đếm loại việc CÓ đặt hạn. */
+  breached: number;
 };
 
 /**
@@ -179,6 +185,7 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       ignoredReason: r.ignoredReason ?? "",
       scoreParts,
       scoreExplanation: scoreExplanation(scoreParts),
+      sla: slaFor(type, detectedAt, new Date(now)),
     };
   });
 
@@ -189,12 +196,14 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
   let unassigned = 0;
   let neglected = 0;
   let financialImpact = 0;
+  let breached = 0;
   for (const c of cases) {
     totals[c.priority] += 1;
     byTypeMap.set(c.type, (byTypeMap.get(c.type) ?? 0) + 1);
     // Việc đã "Bỏ qua" có người quyết định rồi: không cộng tiền, không tính là đang trôi.
     if (c.status === "IGNORED") continue;
     financialImpact += c.financialImpact;
+    if (c.sla?.breached) breached += 1;
     if (!c.owner) {
       unassigned += 1;
       if (c.ageHours > 72) neglected += 1;
@@ -204,5 +213,5 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     .map(([type, count]) => ({ type, label: CASE_TYPE_LABEL[type], count }))
     .sort((a, b) => b.count - a.count);
 
-  return { cases, totals, byType, unassigned, neglected, financialImpact };
+  return { cases, totals, byType, unassigned, neglected, financialImpact, breached };
 }

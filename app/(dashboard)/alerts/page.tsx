@@ -49,7 +49,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
       <SectionCard
         title={`Hàng đợi việc — ${formatNumber(visibleCases.length)} việc`}
-        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}`}
+        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}`}
         hint="Mức ưu tiên tính bằng quy tắc, không phải cảm tính: mức nghiêm trọng + tuổi việc + tiền đang treo + KHẢ NĂNG CỨU ĐƯỢC + có khách đang chờ + sắp cháy hàng. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích. Rê chuột lên mức ưu tiên để xem từng phần điểm."
         padded={false}
       >
@@ -73,6 +73,11 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                     {c.typeLabel} · phát hiện {c.ageLabel} trước · {CASE_STATUS_LABEL[c.status]}
                     {c.owner ? ` · ${c.owner.name} đang xử lý` : " · chưa ai nhận"}
                     {c.financialImpact > 0 ? ` · ${formatVND(c.financialImpact)} đang treo` : ""}
+                    {c.sla ? (
+                      <span className={cn("ml-1 font-semibold", c.sla.breached && "text-rose-600 dark:text-rose-400")} title={`Hạn xử lý ${formatDateTime(c.sla.dueAt)}`}>
+                        · {c.sla.label}
+                      </span>
+                    ) : null}
                   </p>
                   {/* Vì sao việc này đứng ở đây — điểm ưu tiên phải kiểm chứng được, không phải cảm tính. */}
                   <p className="text-[10.5px] text-muted-foreground/80">

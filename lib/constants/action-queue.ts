@@ -320,6 +320,67 @@ export function caseStatusOf(row: {
   return "OPEN";
 }
 
+/**
+ * ───────────── HẠN XỬ LÝ (SLA) ─────────────
+ *
+ * Số giờ kể từ lúc PHÁT HIỆN mà việc phải xong. Khác hẳn ngưỡng phát hiện trong cấu hình cảnh báo
+ * (`pendingHours`, `staleDays`): ngưỡng đó quyết định KHI NÀO một việc xuất hiện, còn hạn ở đây
+ * quyết định BAO LÂU thì việc đó bị coi là trễ.
+ *
+ * `null` = CỐ Ý KHÔNG ĐẶT HẠN. Có ba nhóm như vậy và đều có lý do:
+ *  · đang chuyển hoàn — không làm được gì cho tới khi hàng về tới nơi;
+ *  · vận đơn chưa ghép được đơn, và chưa rõ vận đơn thuộc đơn nào — cần người đối chiếu chứng từ,
+ *    đặt hạn chỉ tạo áp lực ép ghép bừa, đúng thứ mà luật cấm.
+ * Đặt hạn cho việc không ai làm gì được là tạo ra số trễ hạn giả.
+ *
+ * Một chỗ duy nhất giữ toàn bộ ngưỡng — sửa ở đây là sửa mọi nơi.
+ */
+export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
+  // Khách vừa đặt: để qua nửa ngày là nguội.
+  NEW_ORDER_UNPROCESSED: 12,
+  ORDER_CONFIRMATION_STALE: 24,
+  ORDER_INCOMPLETE: 8,
+  // Cửa sổ gọi lại khách sau khi giao hụt rất ngắn — quá một ngày là mất đơn.
+  DELIVERY_FAILED: 24,
+  DELIVERY_STALE: 48,
+  CS_CASE: 4,
+  RISKY_ORDER: 12,
+  RETURN_RECEIVED_PENDING_INSPECTION: 72,
+  COD_OVERDUE: 168,
+  DATA_ERROR: 72,
+  LOW_STOCK_RISK: 72,
+  STOCKOUT_RISK: 48,
+  ADS_BILLING: 12,
+  ADS_ANOMALY: 24,
+  PROFITABILITY_ALERT: 168,
+  RETURNING: null,
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: null,
+  ORPHAN_SHIPMENT: null,
+  OTHER: null,
+};
+
+export type CaseSla = {
+  dueAt: Date;
+  /** Giờ còn lại; âm nghĩa là đã trễ bấy nhiêu giờ. */
+  hoursRemaining: number;
+  breached: boolean;
+  label: string;
+};
+
+export function slaFor(type: CaseType, detectedAt: Date, now: Date = new Date()): CaseSla | null {
+  const hours = CASE_SLA_HOURS[type];
+  if (hours === null) return null;
+  const dueAt = new Date(detectedAt.getTime() + hours * 3_600_000);
+  const hoursRemaining = (dueAt.getTime() - now.getTime()) / 3_600_000;
+  const breached = hoursRemaining < 0;
+  return {
+    dueAt,
+    hoursRemaining,
+    breached,
+    label: breached ? `trễ hạn ${ageLabel(-hoursRemaining)}` : `còn ${ageLabel(hoursRemaining)}`,
+  };
+}
+
 /** Tuổi việc dạng chữ, đủ để đọc lướt. */
 export function ageLabel(hours: number): string {
   if (hours < 1) return "vừa xong";
