@@ -90,3 +90,17 @@ export function rescuedFromRate(orders: number, ratePct: number): number {
 export function fixedCostForPeriod(monthly: number, months: number): number {
   return Math.round(Math.max(0, monthly || 0) * Math.max(0, months));
 }
+
+/**
+ * ───────────── HAI TỶ LỆ QUẢNG CÁO ─────────────
+ *
+ * MỘT công thức duy nhất cho cả Báo cáo lợi nhuận và Bảng điều khiển. Trước đây chỉ có ở báo cáo;
+ * chép sang bảng điều khiển là mở đường cho hai trang cho ra hai con số của cùng một chỉ số.
+ *
+ * MẪU SỐ 0 ⇒ `null`, KHÔNG phải 0%: chưa bán được đồng nào mà hiện "0%" sẽ bị đọc thành "quảng cáo
+ * không tốn gì", ngược hoàn toàn sự thật.
+ */
+export function adsRatio(adSpend: number, denominator: number): number | null {
+  if (!(denominator > 0)) return null;
+  return (adSpend / denominator) * 100;
+}

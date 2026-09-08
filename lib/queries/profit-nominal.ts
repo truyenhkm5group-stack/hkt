@@ -1,5 +1,6 @@
 import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { adsRatio } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
@@ -554,12 +555,12 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
        * Mẫu số là doanh số ĐÃ CHỐT trên POS, không phải doanh thu đã giao.
        * Mẫu số 0 ⇒ `null`, để màn hình hiện "—" thay vì vô cực.
        */
-      adsOverPosSales: totals.salesAfterDiscount > 0 ? (adSpendAll / totals.salesAfterDiscount) * 100 : null,
+      adsOverPosSales: adsRatio(adSpendAll, totals.salesAfterDiscount),
       /**
        * QC / DT giao thành công — mẫu số là doanh thu GIAO THÀNH CÔNG theo `ORDER_OUTCOME`,
        * KHÔNG được thay bằng doanh số POS: hai con số nói hai việc khác nhau.
        */
-      adsOverDeliveredRevenue: totals.actualRevenue > 0 ? (adSpendAll / totals.actualRevenue) * 100 : null,
+      adsOverDeliveredRevenue: adsRatio(adSpendAll, totals.actualRevenue),
       operatingExpenses,
       rescued: totals.rescued,
       packingCost: totals.packingCost,

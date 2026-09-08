@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { adsRatio } from "@/lib/constants/profit";
 import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
 import { stockRiskSummary } from "@/lib/queries/stock";
@@ -238,6 +239,13 @@ async function getDashboardDataUncached(period: Period) {
       codOutstandingCount: financial.cod.outstandingCount,
       contribution: financial.contribution,
       realizedProfit: financial.realizedProfit,
+      /**
+       * Hai tỷ lệ quảng cáo — dùng CHUNG công thức với Báo cáo lợi nhuận (`adsRatio`), không viết
+       * lại. Mẫu số khác nhau có chủ đích và KHÔNG thay thế cho nhau: một bên là số khách chốt,
+       * một bên là số hàng thật sự tới tay khách.
+       */
+      adsOverBooked: adsRatio(adSpend, financial.revenue.booked),
+      adsOverDelivered: adsRatio(adSpend, financial.revenue.delivered),
     },
     /** Vi phạm dữ liệu mức NGHIÊM TRỌNG — số liệu đang sai, không phải việc vận hành. */
     dataIssues: { critical: tower.totals.ERROR, firing: tower.firing, ruleCount: tower.ruleCount },

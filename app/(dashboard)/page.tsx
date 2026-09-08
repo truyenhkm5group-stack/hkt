@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Banknote, BellRing, Boxes, CircleDollarSign, Clock, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
 import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { TopActions } from "@/app/(dashboard)/top-actions";
 import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
@@ -148,6 +149,26 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             tone="amber"
           />
         </Link>
+        {/* HAI TỶ LỆ QUẢNG CÁO — mẫu số khác nhau có chủ đích, không thay thế cho nhau:
+            một bên là số khách chốt, một bên là số hàng thật sự tới tay khách. */}
+        <Link href={`/ads?period=${period.key}`} className="block">
+          <MetricCard
+            label="QC / Doanh số POS"
+            value={data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`}
+            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo trên doanh thu LÊN ĐƠN · mẫu số chưa trừ đơn hoàn`}
+            icon={Megaphone}
+            tone="slate"
+          />
+        </Link>
+        <Link href={`/ads?period=${period.key}`} className="block">
+          <MetricCard
+            label="QC / DT giao thành công"
+            value={data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`}
+            note="Chi quảng cáo trên doanh thu ĐÃ TỚI TAY KHÁCH · luôn cao hơn tỷ lệ bên trái, phần chênh là tiền trả cho đơn hoàn"
+            icon={Megaphone}
+            tone={data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? "rose" : "slate"}
+          />
+        </Link>
         <Link href="/data-quality" className="block">
           <MetricCard
             label="Dữ liệu sai nghiêm trọng"
@@ -167,19 +188,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <SectionCard title="Doanh thu theo ngày" description="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
           <RevenueChart data={data.daily} />
         </SectionCard>
-        <SectionCard title="Cần xử lý" description="Ưu tiên trong ca làm việc" padded={false}>
-          <div className="divide-y">
-            <AttentionRow href="/orders?stage=NEW" icon={BellRing} tone="bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300" title={`${formatNumber(data.attention.newOrders)} đơn mới chờ xác nhận`} note="Đơn ở trạng thái Mới trên Pancake" />
-            <AttentionRow href="/shipments?stage=DELIVERY_FAILED,RETURNING" icon={AlertTriangle} tone="bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title={`${formatNumber(data.attention.failedDelivery)} vận đơn giao thất bại / đang hoàn`} note="Cần gọi khách hoặc yêu cầu phát tiếp" />
-            <AttentionRow href="/shipments?stage=PICKED_UP,IN_TRANSIT,OUT_FOR_DELIVERY" icon={Clock} tone="bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" title={`${formatNumber(data.attention.staleShipments)} vận đơn quá 4 ngày chưa giao`} note="Không có cập nhật mới từ ĐVVC" />
-            <AttentionRow href="/cod?cod=COLLECTED,RECONCILED" icon={CircleDollarSign} tone="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" title={`${formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về tài khoản`} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn đã giao, chưa nhận tiền`} />
-            <AttentionRow
-              href="/inventory/planning"
-              icon={Boxes}
-              tone="bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-              title={`${formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp`}
-              note={`${formatNumber(data.stockRisk.out)} đã hết · ${formatNumber(data.stockRisk.critical)} sẽ hết trước khi lô mới về · ${formatNumber(data.stockRisk.low)} sắp thiếu${data.stockRisk.unknown ? ` · ${formatNumber(data.stockRisk.unknown)} chưa có phiếu nhập nên chưa tính được` : ""}`}
-            />
+        <SectionCard
+          title="Việc cần làm hôm nay"
+          description="Xếp theo cùng công thức ưu tiên của toàn ERP"
+          hint="Trước đây ô này liệt kê các NHÓM việc kèm số đếm; đọc xong vẫn phải mở từng trang để biết bắt đầu từ đâu. Nay hiện đúng những việc cụ thể đứng đầu hàng đợi, kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa."
+          actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
+          padded={false}
+        >
+          <TopActions />
+          {/* Số đếm theo nhóm giữ lại ở dạng gọn: nó trả lời "tình hình chung thế nào", còn danh
+              sách trên trả lời "bắt đầu từ đâu". Hai câu hỏi khác nhau. */}
+          <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">
+            {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
+            {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
+            {formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
           </div>
           <div className="m-4 rounded-xl bg-sidebar p-4 text-sidebar-foreground">
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-sidebar-foreground/60">Đồng bộ gần nhất</p>
@@ -355,20 +377,5 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       </SectionCard>
     </div>
-  );
-}
-
-function AttentionRow({ href, icon: Icon, tone, title, note }: { href: string; icon: typeof BellRing; tone: string; title: string; note: string }) {
-  return (
-    <Link href={href} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50">
-      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold">{title}</p>
-        <p className="truncate text-xs text-muted-foreground">{note}</p>
-      </div>
-      <ArrowRight className="size-4 text-muted-foreground" />
-    </Link>
   );
 }

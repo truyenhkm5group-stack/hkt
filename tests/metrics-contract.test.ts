@@ -115,6 +115,17 @@ export async function testMetricsContract(db: Db) {
   assert.equal(kyVong(1_000_000, 0), null, "mẫu số 0 ⇒ null, không phải Infinity");
   assert.ok(pt.adsOverPosSales === null || Number.isFinite(pt.adsOverPosSales), "tỷ lệ phải là số hữu hạn hoặc null");
   assert.ok(pt.adsOverDeliveredRevenue === null || Number.isFinite(pt.adsOverDeliveredRevenue), "tỷ lệ phải là số hữu hạn hoặc null");
+
+  // ───────── BẢNG ĐIỀU KHIỂN VÀ BÁO CÁO PHẢI NÓI CÙNG MỘT CON SỐ ─────────
+  // Hai tỷ lệ quảng cáo nay hiện ở CẢ hai nơi. Nếu chúng lệch nhau thì chủ shop có hai sự thật cho
+  // cùng một chỉ số, và cái nào cũng không tin được. Cùng một hàm `adsRatio`, cùng một kỳ.
+  const dashboardNow = await getDashboardData(ALL);
+  const lechPos = dashboardNow.money.adsOverBooked === null || pt.adsOverPosSales === null ? 0 : Math.abs(dashboardNow.money.adsOverBooked - pt.adsOverPosSales);
+  const lechGiao = dashboardNow.money.adsOverDelivered === null || pt.adsOverDeliveredRevenue === null ? 0 : Math.abs(dashboardNow.money.adsOverDelivered - pt.adsOverDeliveredRevenue);
+  assert.ok(lechPos < 0.05, `QC/Doanh số POS lệch giữa bảng điều khiển (${dashboardNow.money.adsOverBooked}) và báo cáo (${pt.adsOverPosSales})`);
+  assert.ok(lechGiao < 0.05, `QC/DT giao thành công lệch giữa bảng điều khiển (${dashboardNow.money.adsOverDelivered}) và báo cáo (${pt.adsOverDeliveredRevenue})`);
+  // Mẫu số 0 ⇒ null ở CẢ HAI nơi: hiện "0%" sẽ bị đọc thành "quảng cáo không tốn gì".
+  assert.equal(dashboardNow.money.adsOverBooked === null, pt.adsOverPosSales === null, "hai nơi phải cùng coi mẫu số 0 là CHƯA CÓ");
   // Chạy lại cùng kỳ phải ra CÙNG con số — chỉ số không được phụ thuộc thứ tự gọi hay cache.
   clearMemo();
   const profit2 = await getNominalProfitReport(ALL);
