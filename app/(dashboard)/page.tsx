@@ -98,7 +98,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             label="② Doanh thu GIAO THÀNH CÔNG"
             value={formatVND(data.money.delivered, { compact: true })}
             change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
-            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`} trên đơn đã kết thúc`}
+            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`} trên đơn đã kết thúc${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} đơn CHƯA CÓ CHỨNG TỪ nên chưa kết luận được` : ""}`}
             icon={PackageCheck}
             tone="green"
           />

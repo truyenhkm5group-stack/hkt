@@ -95,6 +95,14 @@ export const COUNT_DELIVERED = sql<number>`count(*) filter (where ${IS_DELIVERED
 export const COUNT_RETURNED = sql<number>`count(*) filter (where ${IS_RETURNED})`;
 export const COUNT_CANCELLED = sql<number>`count(*) filter (where ${IS_CANCELLED})`;
 export const COUNT_OPEN = sql<number>`count(*) filter (where ${IS_OPEN})`;
+/**
+ * Đơn ERP KHÔNG kết luận được vì không có chứng từ ĐVVC nào.
+ *
+ * Tách riêng khỏi `COUNT_OPEN`: gộp vào "chưa kết thúc" thì chúng trông như đơn đang chạy bình
+ * thường, trong khi thật ra ERP không biết gói hàng ở đâu — đó là việc cần người xử lý, không phải
+ * việc chờ đợi.
+ */
+export const COUNT_UNKNOWN = sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'UNKNOWN')`;
 
 /**
  * TỶ LỆ GIAO THÀNH CÔNG = giao thành công ÷ (giao thành công + hoàn), tính trên ĐƠN ĐÃ KẾT THÚC.

@@ -10,7 +10,7 @@ import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
-import { BOOKED_COGS, BOOKED_REVENUE, COUNT_BOOKED, COUNT_CANCELLED, COUNT_DELIVERED, COUNT_OPEN, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, averageOrderValue, metricScope, successRate } from "@/lib/queries/metrics";
+import { BOOKED_COGS, BOOKED_REVENUE, COUNT_BOOKED, COUNT_CANCELLED, COUNT_DELIVERED, COUNT_OPEN, COUNT_RETURNED, COUNT_UNKNOWN, DELIVERED_COGS, DELIVERED_REVENUE, averageOrderValue, metricScope, successRate } from "@/lib/queries/metrics";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
   const conds = [];
@@ -31,6 +31,8 @@ export type OrderKpis = {
   failedOrders: number;
   returnedOrders: number;
   activeOrders: number;
+  /** Đơn CHƯA KẾT LUẬN ĐƯỢC vì thiếu chứng từ ĐVVC — cần người xử lý, không phải chờ đợi. */
+  unknownOrders: number;
   aov: number;
   /** GTC (%) = giao TC ÷ (giao TC + hoàn). null khi chưa có đơn nào kết thúc — hiển thị "—", không phải 0%. */
   successRate: number | null;
@@ -57,6 +59,7 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
       // với báo cáo Tỷ lệ giao thành công: GTC = giao TC ÷ (giao TC + hoàn), KHÔNG chia cho tổng đơn.
       returnedOrders: COUNT_RETURNED,
       activeOrders: COUNT_OPEN,
+      unknownOrders: COUNT_UNKNOWN,
     })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
@@ -71,6 +74,7 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
     failedOrders: Number(row?.failedOrders ?? 0),
     returnedOrders: Number(row?.returnedOrders ?? 0),
     activeOrders: Number(row?.activeOrders ?? 0),
+    unknownOrders: Number(row?.unknownOrders ?? 0),
     aov: 0,
     successRate: null,
   };
