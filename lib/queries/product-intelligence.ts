@@ -177,6 +177,29 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
   });
 }
 
+/**
+ * Tiền quảng cáo đã quy được về từng MÃ HÀNG trong kỳ.
+ *
+ * Quy kết ở cấp mã hàng, không phải mẫu mã: chiến dịch quảng cáo chạy cho một mã hàng, không chạy
+ * riêng cho màu đỏ size M. Mọi mẫu mã của cùng mã hàng dùng chung con số này — và vì thế nó chỉ
+ * dùng để PHÂN LOẠI, không dùng để tính lợi nhuận từng mẫu mã.
+ *
+ * Mã hàng không ghép được chiến dịch nào ⇒ KHÔNG có mặt trong map ⇒ chiều "chi quảng cáo" là CHƯA
+ * BIẾT, không phải 0. Đây là khác biệt quan trọng: 0 nghĩa là quảng cáo miễn phí.
+ */
+export async function adSpendByProduct(period: Period): Promise<Map<string, number>> {
+  const db = await getDb();
+  const conds: SQL[] = [eq(schema.adSpends.excluded, false), sql`${schema.adSpends.productId} is not null`];
+  if (period.from) conds.push(gte(schema.adSpends.spendDate, period.from));
+  if (period.to) conds.push(lte(schema.adSpends.spendDate, period.to));
+  const rows = await db
+    .select({ productId: schema.adSpends.productId, spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
+    .from(schema.adSpends)
+    .where(and(...conds))
+    .groupBy(schema.adSpends.productId);
+  return new Map(rows.filter((r) => r.productId).map((r) => [String(r.productId), Number(r.spend ?? 0)]));
+}
+
 export async function getProductIntelligence(query: ProductIntelQuery): Promise<ProductIntelRow[]> {
   const key = `productIntel:${periodKey(query.period)}:${query.q ?? ""}:${query.channel ?? ""}:${query.productId ?? ""}:${query.color ?? ""}:${query.size ?? ""}:${query.limit ?? 50}`;
   return memo(key, 90_000, () => intelligenceUncached(query));
