@@ -496,6 +496,124 @@ chỉ bắt đầu từ 03/09 → ra số âm. Ví dụ `X001 L`: nhập 10, đ�
 với số đếm thật. Tôi không tạo phiếu bù cho số khớp: bịa một con số vào sổ kho là đúng loại sai mà
 cả release này sinh ra để chống.
 
+## 10e. KHÔI PHỤC INGESTION — điều tra 08/09/2026
+
+### Nguyên nhân gốc của 401: secret webhook bị xoay mà không cập nhật bên gửi
+
+| | |
+|---|---|
+| Sự kiện | Workflow *Vận hành ERP trên VPS* run **#144**, thao tác **`rotate-webhook-secrets`** |
+| Thời điểm | **2026-09-06 11:22:37 UTC** |
+| Hành vi | ghi đè `PANCAKE_WEBHOOK_SECRET` và `VIETTELPOST_WEBHOOK_SECRET` trong `.env`, rồi `up -d app scheduler` |
+| Webhook Pancake cuối cùng nhận được | 11:23:16 (**41 giây sau**) |
+| Webhook Viettel Post cuối cùng nhận được | 11:33:09 |
+
+Thao tác đó in ra đúng lời nhắc *"Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)"* — tức
+phải sang bên gửi dán URL mới. **Bước đó chưa được làm.** Từ đó ERP chờ secret mới còn bên gửi vẫn
+gửi secret cũ.
+
+**Đây là request THẬT, không phải probe.** Bằng chứng:
+
+- Pancake POST tới `/api/webhooks/pancake/pk_<32 ký tự hex>` — đúng định dạng
+  `pk_$(openssl rand -hex 16)` mà `install-vps.sh` sinh ra. Bên gửi CÓ mang secret, chỉ là secret cũ.
+- Log VTP ghi `[vtp-webhook] 401 · vận đơn=PKE1511633373` — mã vận đơn thật.
+- Route VTP chỉ trả 401 khi `expected` **khác rỗng** và không khớp ⇒ biến môi trường trên máy chủ
+  ĐANG có giá trị, không phải bị thiếu hay không truyền vào container.
+- `middleware.ts` cho `/api/webhooks` đi qua ⇒ 401 đến từ chính route handler, không phải lớp đăng nhập.
+
+Không có mismatch tên biến, tên tham số, path, reverse proxy hay encoding: cùng bộ mã đó đã chạy tốt
+tới tận 11:23:16 và chỉ dừng ngay sau khi secret bị xoay.
+
+### Không có đường API nào để phục hồi dữ liệu Viettel Post
+
+Chạy `vtp-debug` trực tiếp lên API Viettel Post bằng token production:
+
+| Phép thử | Kết quả |
+|---|---|
+| `user/Login` | 200 OK, token 255 ký tự |
+| `user/info` | 200 — đúng tài khoản *"HMT shop"* |
+| `user/listInventory` | 33 kho |
+| `order/getOrderDetailV3` (một mã) | `data: []` |
+| `order/order-filter` 7 ngày | `data: []` |
+| `order/order-filter` **33 kho × 14 ngày** | `data: []` |
+| `order/list-data-push-his` | HTTP 403 |
+| Job `sync-vtp-import` 30 ngày | *"Nhập 0 vận đơn"* |
+
+`sync_state.viettelpost:api-scope` = `{"missingStreak": 189, "lastFoundAt": null}` — API **chưa từng
+một lần** thấy vận đơn nào.
+
+Tài khoản API hợp lệ nhưng **không sở hữu vận đơn nào**: vận đơn do Pancake tạo thuộc tài khoản
+Viettel Post của Pancake. Vì vậy **polling và reconciliation qua API là bất khả thi** — webhook là
+kênh thời gian thực DUY NHẤT, và kênh bù duy nhất là nhập tệp danh sách vận đơn xuất từ
+viettelpost.vn.
+
+### Nhóm 17 đơn — bảng điều tra đầy đủ
+
+Mọi dòng cùng một hình mẫu: Pancake nói `DELIVERED`, ảnh chụp ERP nói `DELIVERED`, nhưng **sự kiện
+mới nhất của chính ĐVVC** nói khác.
+
+| Mã vận đơn | Đơn | Sự kiện ĐVVC mới nhất | Lúc | Nguồn | COD khai/thu | 501? | Dòng bảng kê? |
+|---|---|---|---|---|---|---|---|
+| PKE1507585179 | 3134 | **505 Tồn - Thông báo chuyển hoàn** | 06/09 08:23 | WEBHOOK | 849K/849K | 0 | 0 |
+| PKE1511633368 | 3652 | 400 Nhận bảng kê đến | 06/09 07:44 | WEBHOOK | 524K/524K | 0 | 0 |
+| PKE1508898018 | 2489 | **505 Tồn - Thông báo chuyển hoàn** | 06/09 07:31 | WEBHOOK | 499K/499K | 0 | 0 |
+| PKE1508908993 | 2911 | Chờ phát lại | 06/09 04:55 | IMPORT | 499K/499K | 0 | 0 |
+| PKE1511633341 | 3678 | Đang giao hàng | 06/09 00:47 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1510195651 | 3357 | Đang vận chuyển | 06/09 00:43 | IMPORT | 998K/998K | 0 | 0 |
+| PKE1511633402 | 3613 | Chờ phát lại | 05/09 12:52 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1511614363 | 3609 | Chờ phát lại | 05/09 11:43 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1508909078 | 2525 | Chờ phát lại | 05/09 09:39 | IMPORT | 499K/499K | 0 | 0 |
+| PKE1507577540 | 3111 | Chờ phát lại | 05/09 08:40 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1512545995 | 3435 | Đang vận chuyển | 04/09 20:26 | IMPORT | 499K/499K | 0 | 0 |
+| PKE1510203466 | 3248 | Đang vận chuyển | 04/09 14:50 | IMPORT | 499K/499K | 0 | 0 |
+| PKE1511633340 | 3680 | Đang vận chuyển | 04/09 14:02 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1511633399 | 3614 | Đang vận chuyển | 04/09 08:23 | IMPORT | 524K/524K | 0 | 0 |
+| PKE1508909035 | 2634 | Chờ phát lại | 04/09 02:51 | IMPORT | 849K/849K | 0 | 0 |
+| PKE1508908990 | 2922 | Đang giao hàng | 02/09 08:06 | IMPORT | 849K/849K | 0 | 0 |
+| PKE1508909045 | 2587 | Đang giao hàng | 01/09 07:38 | IMPORT | 499K/499K | 0 | 0 |
+
+**0/17 có bất kỳ sự kiện mã 501 nào. 0/17 có dòng chứng từ bảng kê. 17/17 có `cod_collected` bằng
+đúng `cod_amount`.**
+
+Kết luận thận trọng: ERP **không có** bằng chứng logistics cho việc giao thành công của nhóm này —
+nhưng **cũng chưa thể khẳng định chúng không được giao**. Sự kiện mới nhất có từ 01/09–06/09, mà
+webhook chết từ 06/09 11:33; mọi mã 501 phát sinh sau mốc đó đều không tới được ERP. Riêng hai vận
+đơn mang mã **505 (yêu cầu chuyển hoàn)** thì gần như chắc chắn là đơn hoàn.
+
+### Chạy thử lại (TASK F)
+
+Chạy lại sau khi vá guardrail: **kết quả y hệt** — 1.751 quét, 70 sẽ đổi, 10 ca nhập nhằng. Đúng như
+mong đợi vì **không có một sự kiện Viettel Post mới nào** kể từ lần chạy trước (kênh nạp vẫn đứt).
+Hai lần cho cùng con số ⇒ bộ máy xác định, nhưng con số vẫn dựa trên lịch sử THIẾU.
+
+### Sổ kho (TASK H) — vẫn UNRESOLVED, đã định lượng được nguyên nhân
+
+| | |
+|---|---|
+| Toàn bộ sổ kho ERP | **2 phiếu, cùng ngày 03/09/2026**, tổng 1.948 món |
+| Hàng đã xuất TRƯỚC mốc đó | **1.349 đơn · 1.508 món** |
+| Mẫu mã tồn âm trong ERP | 4 (tổng −9) |
+| Tồn theo Pancake (nguồn độc lập) | `Q003 XANH L` −119 · `Q003 XANH XL` −116 · `X001 L` −23 · `X001 XL` −16 |
+| Tổng tồn Pancake toàn hệ thống | **−2.496** |
+
+Nguyên nhân gốc: **sổ kho không có số dư đầu kỳ**. Phương trình `tồn = phiếu kho − đã xuất` trừ
+1.508 món xuất từ trước vào một cuốn sổ chỉ bắt đầu ngày 03/09.
+
+Quan trọng: **Pancake cũng âm** (−2.496 toàn hệ thống), nên **không hệ thống nào có số đủ tin cậy để
+làm số dư đầu kỳ**. Chỉ còn cách đếm thực tế.
+
+Quy trình đề xuất (cần kho thực hiện, không tự làm được):
+
+1. Chốt mốc: chọn một thời điểm, tạm dừng xuất hàng.
+2. Kho **đếm tay** từng mẫu mã đang có trong kho.
+3. Nhập số đếm bằng phiếu `RECEIPT` (hoặc `ADJUSTMENT`) ghi rõ lý do *"số dư đầu kỳ theo kiểm kê
+   ngày …"* — con số ĐẾM ĐƯỢC, không phải con số suy ra.
+4. Từ mốc đó phương trình sổ kho tự đúng; ERP đã hiển thị "Chưa có phiếu nhập" cho mẫu mã chưa có
+   phiếu nên không bịa số.
+
+**Không tạo phiếu bù cho số khớp** — bịa một con số vào sổ kho đúng là loại sai mà release này sinh
+ra để chống.
+
 ## 11. Danh sách kiểm tra sau deploy
 
 Mở lần lượt và xác nhận trang lên được, số liệu có nghĩa:
