@@ -95,6 +95,27 @@ export async function testProductIntelligence(db: Db) {
     }
   }
 
+  // ───────── Bốn chỉ số bổ sung của mô hình mẫu mã ─────────
+  for (const row of rows) {
+    // Phễu ở cấp mẫu mã cũng phải THU HẸP: đã giao ≤ đã xác nhận ≤ lên đơn.
+    assert.ok(row.deliveredQty <= row.confirmedQty, `${row.sku}: không thể giao nhiều hơn số đã xác nhận`);
+    assert.ok(row.confirmedQty <= row.orderedQty, `${row.sku}: không thể xác nhận nhiều hơn số lên đơn`);
+    assert.ok(row.deliveredRevenue <= row.bookedRevenue, `${row.sku}: doanh thu giao thành công không thể vượt doanh thu lên đơn`);
+
+    // TỐC ĐỘ BÁN tính theo số GIAO THÀNH CÔNG, không theo số lên đơn: hàng hoàn không phải nhu cầu,
+    // tính nó vào sẽ đẩy kế hoạch sản xuất đặt thừa đúng bằng phần hoàn.
+    assert.ok(row.velocity >= 0, `${row.sku}: tốc độ bán không được âm`);
+    if (row.deliveredQty === 0) assert.equal(row.velocity, 0, `${row.sku}: chưa giao được cái nào thì tốc độ bán bằng 0`);
+
+    // Chưa có phiếu nhập thì tồn và hàng giữ chỗ đều là CHƯA BIẾT, không phải 0.
+    if (row.available === null) assert.equal(row.reserved, null, `${row.sku}: chưa biết tồn thì cũng chưa biết hàng giữ chỗ`);
+    if (row.reserved !== null) assert.ok(row.reserved >= 0, `${row.sku}: hàng giữ chỗ không được âm`);
+
+    // Không biết tồn hoặc không bán được cái nào ⇒ KHÔNG có số ngày còn hàng (không phải 0, không
+    // phải vô cực).
+    if (row.available === null || row.velocity === 0) assert.equal(row.daysOfCover, null, `${row.sku}: không đủ căn cứ thì không được bịa số ngày còn hàng`);
+  }
+
   console.log(
     `✓ Hiệu quả mẫu mã: ${rows.length} mẫu mã · dẫn đầu ${rows[0].sku || rows[0].productName} (${rows[0].deliveredQty} sp giao TC, GTC ${rows[0].successRate ?? "—"}%) · xếp theo kết quả thật, không theo số lên đơn`,
   );

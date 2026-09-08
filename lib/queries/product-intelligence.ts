@@ -43,6 +43,10 @@ export type ProductIntelRow = {
   deliveredQty: number;
   /** Số lượng của đơn hoàn. */
   returnedQty: number;
+  /** Số lượng thuộc đơn ĐÃ XÁC NHẬN (đã chốt trên Pancake) — bước trước "đã giao" trong phễu. */
+  confirmedQty: number;
+  /** Doanh thu LÊN ĐƠN (chưa trừ hoàn) — để so với doanh thu giao thành công. */
+  bookedRevenue: number;
   deliveredRevenue: number;
   /** Doanh thu mất vì đơn hoàn — hàng đã đi rồi về. */
   lostRevenue: number;
@@ -55,6 +59,13 @@ export type ProductIntelRow = {
   contributionBlockedBy: string | null;
   /** Khả dụng bán; `null` khi mẫu mã chưa có phiếu nhập nào (CHƯA BIẾT, không phải 0). */
   available: number | null;
+  /** Đã chốt đơn, hàng còn nằm trong kho chờ xuất — đã bị trừ khỏi khả dụng bán. */
+  reserved: number | null;
+  /**
+   * TỐC ĐỘ BÁN: số món GIAO THÀNH CÔNG mỗi ngày trong kỳ. Cố ý không dùng số lên đơn — hàng hoàn
+   * không phải nhu cầu, và tính nó vào tốc độ bán sẽ đẩy kế hoạch sản xuất đặt thừa.
+   */
+  velocity: number;
   /** Số ngày còn đủ hàng theo tốc độ bán trong kỳ; `null` khi không bán được cái nào hoặc chưa biết tồn. */
   daysOfCover: number | null;
 };
@@ -106,6 +117,8 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       orderedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
       deliveredQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
       returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
+      confirmedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${o.stage} not in ('NEW','WAITING') and ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
+      bookedRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
       deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
       returnedOrders: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
       deliveredRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
@@ -115,6 +128,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       missingCostLines: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and ${LINE_UNIT_COST} = 0)`,
       // Join theo mẫu mã là 1:1 nên `max()` chỉ để thoả GROUP BY, không đổi giá trị.
       available: sql<number | null>`max(case when ${stockKnownExpr(receipts)} then ${availableStockExpr(sales, receipts)} else null end)`,
+      reserved: sql<number | null>`max(case when ${stockKnownExpr(receipts)} then coalesce(${sales.reserved}, 0) else null end)`,
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
@@ -147,6 +161,8 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       orderedQty: Number(r.orderedQty ?? 0),
       deliveredQty,
       returnedQty: Number(r.returnedQty ?? 0),
+      confirmedQty: Number(r.confirmedQty ?? 0),
+      bookedRevenue: Number(r.bookedRevenue ?? 0),
       deliveredRevenue: Number(r.deliveredRevenue ?? 0),
       lostRevenue: Number(r.lostRevenue ?? 0),
       successRate: rate,
@@ -154,6 +170,8 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       contribution: missing > 0 ? null : Number(r.deliveredRevenue ?? 0) - Number(r.deliveredCost ?? 0),
       contributionBlockedBy: missing > 0 ? `${missing} dòng đã giao không tra được giá nhập — nhập phiếu kho có đơn giá cho mẫu mã này` : null,
       available,
+      reserved: r.reserved === null || r.reserved === undefined ? null : Number(r.reserved),
+      velocity: Math.round(velocity * 100) / 100,
       daysOfCover: available === null || velocity <= 0 ? null : Math.round((available / velocity) * 10) / 10,
     };
   });
