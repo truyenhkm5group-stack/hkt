@@ -368,7 +368,49 @@ export async function testBusinessInvariants(db: Db) {
   assert.equal(legShip.stage, "RETURNED", "16. 501 trên CHIỀU HOÀN = hàng về shop, không phải giao cho khách");
   assert.notEqual(legShip.stage, "DELIVERED");
 
+  // ══ 17. MỘT ĐƠN CÓ NHIỀU LẦN GỬI — LẦN SAU KHÔNG XOÁ LỊCH SỬ LẦN TRƯỚC ══
+  // Hình mẫu thật của shop: tạo vận đơn → "Shop hủy lấy" → tạo lại vận đơn thay thế → giao thành
+  // công. Cả hai lần gửi đều là chứng từ có thật và phải cùng tồn tại trong ERP.
+  const multiCode1 = nextCode();
+  const multiCode2 = nextCode();
+  await applyVtpTracking(trackingPayload(multiCode1, 107, "Huỷ - Shop hủy lấy", "02/08/2026 18:19:00"), "VTP_WEBHOOK", { allowCreate: true });
+  await applyVtpTracking(trackingPayload(multiCode2, 501, "Thành công - Phát thành công", "05/08/2026 09:00:00", { IS_RETURNING: false }), "VTP_WEBHOOK", { allowCreate: true });
+  const [lanGui1] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, multiCode1));
+  const [lanGui2] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, multiCode2));
+  assert.ok(lanGui1 && lanGui2, "17. hai lần gửi phải là HAI dòng vận đơn, không đè lên nhau");
+  assert.notEqual(lanGui1.id, lanGui2.id, "17. lần gửi sau KHÔNG được ghi đè lần gửi trước");
+  assert.equal(lanGui1.stage, "CANCELLED", "17. lần gửi bị huỷ giữ nguyên kết cục của nó");
+  assert.equal(lanGui2.stage, "DELIVERED", "17. lần gửi thay thế giữ nguyên kết cục của nó");
+  /**
+   * CÁCH ERP HIỆN ĐANG BIỂU DIỄN NHIỀU LẦN GỬI — và vì sao nó chưa phải 1:N thật.
+   *
+   * `shipments.order_id` đang mang ràng buộc UNIQUE, nên MỘT đơn chỉ gắn được MỘT vận đơn. Các lần
+   * gửi còn lại tồn tại như dòng riêng với `order_id` NULL và `order_reference` trỏ về vận đơn gốc
+   * — đúng quy ước vận đơn chiều hoàn đang dùng cho 250 dòng trên production.
+   *
+   * CỐ Ý CHƯA gỡ ràng buộc đó: mọi báo cáo đang tính ở grain "đơn × vận đơn", cho một đơn gắn N
+   * vận đơn mà chưa đổi grain là NHÂN ĐÔI DOANH THU — hỏng nặng hơn nhiều so với việc thiếu một
+   * quan hệ. Đổi grain là việc riêng, có phạm vi riêng (xem docs/claude-next-progress.md).
+   *
+   * Điều bất biến này khoá: lần gửi sau KHÔNG được nuốt lần gửi trước, và lịch sử mỗi lần vẫn nguyên.
+   */
+  const multiOrder = `inv-order-${++seq}`;
+  await db.insert(schema.orders).values({ id: multiOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.update(schema.shipments).set({ orderId: multiOrder }).where(eq(schema.shipments.id, lanGui2.id));
+  await db.update(schema.shipments).set({ orderReference: multiCode2 }).where(eq(schema.shipments.id, lanGui1.id));
+  await assert.rejects(
+    () => db.update(schema.shipments).set({ orderId: multiOrder }).where(eq(schema.shipments.id, lanGui1.id)),
+    "17. schema hiện ép 1:1 — nếu ràng buộc này được gỡ thì PHẢI đổi grain báo cáo cùng lúc, nếu không doanh thu nhân đôi",
+  );
+  const canGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderReference, multiCode2));
+  assert.equal(canGui.length, 1, "17. lần gửi trước vẫn còn nguyên như dòng riêng, không bị xoá");
+  // Lịch sử của từng lần gửi vẫn nguyên vẹn, không lần nào nuốt sự kiện của lần kia.
+  for (const sp of [lanGui1, lanGui2]) {
+    const evs = await db.select().from(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, sp.id));
+    assert.ok(evs.length >= 1, "17. mỗi lần gửi giữ lịch sử riêng");
+  }
+
   console.log(
-    `✓ Bất biến nghiệp vụ: 16/16 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao' · giao một phần rồi hoàn KHÔNG phải giao thành công)`,
+    `✓ Bất biến nghiệp vụ: 17/17 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao' · giao một phần rồi hoàn KHÔNG phải giao thành công · một đơn giữ được nhiều lần gửi)`,
   );
 }
