@@ -498,19 +498,30 @@ cả release này sinh ra để chống.
 
 ## 10e. KHÔI PHỤC INGESTION — điều tra 08/09/2026
 
-### Nguyên nhân gốc của 401: secret webhook bị xoay mà không cập nhật bên gửi
+### Nguyên nhân gốc của 401: secret bị xoay ngày 04/09, nhưng chỉ có hiệu lực từ ngày 06/09
 
-| | |
+> **ĐÍNH CHÍNH.** Bản trước của mục này quy cho ops run **#144** (06/09 11:22:37) chạy
+> `rotate-webhook-secrets`. **Sai.** Run #144 là thao tác `status`. Chuỗi ký tự
+> *"Đã tạo secret webhook mới…"* nằm trong khối `case` của workflow nên xuất hiện trong log của
+> **mọi** lần chạy ops, kể cả lần không hề xoay secret. Đã quét lại toàn bộ 144 lần chạy ops trước
+> mốc đó và đọc dòng `ACTION:` thật của từng lần.
+
+| Mốc | Việc gì xảy ra |
 |---|---|
-| Sự kiện | Workflow *Vận hành ERP trên VPS* run **#144**, thao tác **`rotate-webhook-secrets`** |
-| Thời điểm | **2026-09-06 11:22:37 UTC** |
-| Hành vi | ghi đè `PANCAKE_WEBHOOK_SECRET` và `VIETTELPOST_WEBHOOK_SECRET` trong `.env`, rồi `up -d app scheduler` |
-| Webhook Pancake cuối cùng nhận được | 11:23:16 (**41 giây sau**) |
-| Webhook Viettel Post cuối cùng nhận được | 11:33:09 |
+| **04/09 13:00:50** | ops run **#4** — lần **DUY NHẤT** từng chạy `rotate-webhook-secrets`. Ghi secret mới vào `.env`, rồi `docker compose up -d app scheduler`. |
+| 04/09 → 06/09 | Webhook **vẫn chạy bình thường**: 485 gói tin Viettel Post tiếp tục được nhận. |
+| **06/09 11:23:16** | Gói tin Pancake cuối cùng được nhận. |
+| **06/09 11:27:50 – 11:39:20** | **Deploy #86** — build lại image, tạo lại container. |
+| **06/09 11:33:09** | Gói tin Viettel Post cuối cùng được nhận. Sau mốc này: 401 liên tục. |
 
-Thao tác đó in ra đúng lời nhắc *"Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)"* — tức
-phải sang bên gửi dán URL mới. **Bước đó chưa được làm.** Từ đó ERP chờ secret mới còn bên gửi vẫn
-gửi secret cũ.
+**Vì sao xoay ngày 04/09 mà tới 06/09 mới hỏng:** `docker-compose.yml` nạp biến qua
+`env_file: .env`. Sửa **nội dung** tệp đó không làm Compose tạo lại container, nên tiến trình Node
+đang chạy vẫn giữ secret CŨ trong `process.env` suốt 2 ngày 22 giờ. Lần xoay **trông như không có
+tác dụng gì** — webhook vẫn xanh — nên không ai đi cập nhật bên gửi. Đến khi deploy #86 tạo lại
+container thì secret mới trong `.env` mới thực sự có hiệu lực, và cả hai kênh đứt cùng lúc.
+
+Đây là **lỗi hỏng trễ**: nguyên nhân và triệu chứng cách nhau gần ba ngày, nên mọi phép "xem thay
+đổi gì ngay trước lúc hỏng" đều dẫn sai hướng.
 
 **Đây là request THẬT, không phải probe.** Bằng chứng:
 
@@ -521,8 +532,7 @@ gửi secret cũ.
   ĐANG có giá trị, không phải bị thiếu hay không truyền vào container.
 - `middleware.ts` cho `/api/webhooks` đi qua ⇒ 401 đến từ chính route handler, không phải lớp đăng nhập.
 
-Không có mismatch tên biến, tên tham số, path, reverse proxy hay encoding: cùng bộ mã đó đã chạy tốt
-tới tận 11:23:16 và chỉ dừng ngay sau khi secret bị xoay.
+Không có mismatch tên biến, tên tham số, path, reverse proxy hay encoding.
 
 ### Không có đường API nào để phục hồi dữ liệu Viettel Post
 
@@ -644,3 +654,158 @@ Sau khi mọi thứ ổn định:
 - [ ] Chạy `data-check` (không `fix`) đọc báo cáo đối soát trên dữ liệu thật
 - [ ] Chạy `canonical-backfill` **chế độ chạy thử**, đọc số "đơn lật từ giao thành công sang hoàn"
 - [ ] Chỉ chạy `apply=1` **sau khi chủ shop duyệt** con số đó
+
+## 10f. XÁC MINH END-TO-END WEBHOOK — 08/09/2026 (HIỆU CHỈNH CHẨN ĐOÁN)
+
+### Có HAI người gửi khác nhau trên cùng một endpoint
+
+Phân tích `user-agent` của toàn bộ gói tin từng tới `/api/webhooks/viettelpost`:
+
+| User-agent | Số gói | Từ | Đến | Là ai |
+|---|---|---|---|---|
+| `mint/1.9.3` | **485** | 05/09 03:48 | 06/09 11:33 | **Pancake** (cùng UA với `/api/webhooks/pancake`, 3.767 gói) |
+| `Apache-HttpClient/4.5.13 (Java/1.8.0_471)` | **2** | 05/09 03:11 | 07/09 07:42 | **Viettel Post Partner** |
+
+Cả **2** gói tin từ Viettel Post Partner đều là **gói tin TEST**, không phải dữ liệu thật:
+`ORDER_NUMBER: 123456789101112` · `RECEIVER_FULLNAME: "KHACH HANG"` ·
+`ORDER_STATUSDATE: 22/01/2026 09:36:53` · `GROUPADDRESS_ID: 0` · bưu cục Bình Dương (shop ở Hà Nội).
+
+**⇒ Viettel Post Partner CHƯA TỪNG gửi một sự kiện hành trình thật nào.** Toàn bộ dữ liệu vận đơn
+thật đến ERP đều đi qua Pancake.
+
+### Cấu hình webhook Viettel Post Partner: ĐÚNG — và đã được chứng minh
+
+Gói tin test lúc **2026-09-07 07:42:30** đến từ Viettel Post Partner **SAU** khi secret mới có hiệu
+lực (06/09 11:39) và **được ERP lưu lại** (`status = IGNORED`, ghi chú *"Gói tin lặp — trạng thái đã
+đúng"*). Gói tin chỉ được lưu **sau khi đã qua bước kiểm tra secret**.
+
+⇒ URL và secret bên Viettel Post Partner **khớp**, đúng như chủ shop kiểm tra. Không cần đụng vào.
+
+### Cái đang hỏng là cấu hình CHUYỂN TIẾP bên PANCAKE
+
+Log tươi lúc 08/09 ~07:45:
+
+| Đường dẫn | Mã | Số lần | Người gửi |
+|---|---|---|---|
+| `/api/webhooks/pancake/pk_…` | **200** | 90 | Pancake — **đã sửa, đang chạy** |
+| `/api/webhooks/pancake/pk_…` | 401 | 39 | Pancake — cấu hình cũ còn sót |
+| `/api/webhooks/viettelpost` | **401** | **47** | **Pancake** (`ua=mint/1.9.3`) — **token cũ** |
+
+Log ứng dụng: 129 dòng `[vtp-webhook] 401 sai tham số bí mật · ua=mint/1.9.3 · vận đơn=PKE…` — mã
+vận đơn thật, bên gửi vẫn thử lại liên tục.
+
+**⇒ Chỉ còn một chỗ sai: token trong cấu hình Pancake dùng để chuyển tiếp hành trình Viettel Post
+sang ERP vẫn là token CŨ có từ trước lần xoay ngày 04/09.**
+
+### Kiểm chứng cơ chế bảo vệ (bằng lưu lượng thật, không phải test giả)
+
+| Yêu cầu | Kết quả | Bằng chứng |
+|---|---|---|
+| Secret đúng → 2xx | ĐẠT | 90 × 200 trên endpoint Pancake; gói tin Partner 07/09 được lưu |
+| Secret sai/thiếu → 401 | ĐẠT | 47 × 401 endpoint VTP, 39 × 401 endpoint Pancake |
+| Sự kiện thật được lưu | ĐẠT | 43 gói tin trong 30 phút, `status = PROCESSED` |
+| Payload gốc được giữ | ĐẠT | `webhook_events.payload` giữ nguyên khối `DATA` đầy đủ |
+| Chống trùng hoạt động | ĐẠT | **43/43 gói có `dedupe_key`**, đã gộp **47 lần gửi lại** |
+| Kết quả đơn không dùng COD | ĐẠT | nhóm 17 là `DELIVERED` do `stage` (Pancake) + có chứng từ ĐVVC, **không** do COD |
+
+Cơ chế chống trùng của release lần đầu được kiểm chứng bằng lưu lượng production thật.
+
+### Điều tra quyền sở hữu tài khoản
+
+**Tài khoản của token API ERP đang dùng:**
+`user/info` → *HMT shop* · `0886833448` · Ocean Park 1, Gia Lâm, Hà Nội ·
+`user/listInventory` → **33 kho**, `cusId: 18757294`.
+
+**Kho gửi hàng ghi trong payload webhook thật:** `GROUPADDRESS_ID` = **30727118**, **30741855**,
+**30263749** — **cả ba đều nằm trong danh sách 33 kho của chính tài khoản đó**.
+
+⇒ Địa chỉ kho gửi **thuộc đúng** tài khoản Viettel Post của shop.
+
+**Nhưng token API không đọc được vận đơn nào:**
+
+| Phép thử (kể cả vận đơn mới tạo `PKE1515089248` ngày 07/09) | Kết quả |
+|---|---|
+| `order/getOrderDetailV3` GET / POST | `data: []` |
+| `order/order-filter` 7 ngày | `data: []` |
+| `order/order-filter` 33 kho × 14 ngày | `data: []` |
+| `order/list-data-push-his` (lịch sử đẩy webhook) | **HTTP 403** |
+| `sync_state.viettelpost:api-scope` | `missingStreak: 189`, `lastFoundAt: null` |
+
+**Giải thích nhất quán với mọi bằng chứng:** Viettel Post giới hạn quyền đọc đơn và quyền xem lịch
+sử đẩy webhook theo **partner/ứng dụng API đã TẠO đơn**, không theo địa chỉ kho gửi. Vận đơn của
+shop do **Pancake** tạo qua tích hợp Viettel Post của Pancake, nên:
+
+- token API của shop → không thấy đơn (`data: []`), không xem được lịch sử đẩy (403);
+- webhook Partner của shop → không nhận được đẩy thật (chỉ nhận gói tin test).
+
+Đó cũng chính là lý do `list-data-push-his` trả 403 chứ không phải rỗng: tài khoản không phải chủ
+của các lần đẩy đó.
+
+### Vì sao ERP vẫn hiện DEGRADED
+
+Các con số ERP hiển thị đều **đúng sự thật**, không phải lỗi hiển thị:
+
+- *"webhook gần nhất khoảng 1 ngày trước"* = gói tin **test** của Viettel Post Partner lúc
+  `2026-09-07 07:42:30`. Đó là gói tin cuối cùng qua được kiểm tra secret.
+- *events/hour = 0* — sự kiện hành trình thật cuối cùng: `2026-09-06 11:32:34`, 0 sự kiện trong 30 phút.
+- *379 vận đơn chưa kết thúc, 184 quá 48h* — hệ quả trực tiếp: không có nguồn cập nhật nào.
+
+## 10g. TOKEN CHUYỂN TIẾP TRONG PANCAKE — kiểm tra cụ thể 08/09/2026
+
+### Route `/api/webhooks/viettelpost` chấp nhận secret ở đâu
+
+`extractSecret()` gom **12 vị trí** rồi so khớp với đúng **một** giá trị `VIETTELPOST_WEBHOOK_SECRET`;
+khớp ở bất kỳ vị trí nào là qua:
+
+| Nhóm | Các khoá được chấp nhận |
+|---|---|
+| Thân JSON | `TOKEN`, `token`, `secret`, `SECRET` |
+| Header | `token`, `x-token`, `secret`, `x-secret`, `x-webhook-secret`, `x-api-key` |
+| Header `Authorization` | `Bearer <giá trị>` hoặc `Token <giá trị>` (đã bỏ tiền tố) |
+| **Query string** | **`?token=`**, `?access_token=`, `?secret=` |
+
+⇒ **`?token=` được hỗ trợ.** Cách Pancake đang gửi là ĐÚNG CƠ CHẾ; chỉ sai GIÁ TRỊ.
+
+Không có secret riêng cho từng bên gửi: Viettel Post Partner (điền ở ô *Tham số bí mật*) và Pancake
+(nhét vào `?token=`) dùng **chung một** `VIETTELPOST_WEBHOOK_SECRET`. Sửa một chỗ là ảnh hưởng cả hai.
+
+Cảnh báo về `if (expected && …)`: nếu biến môi trường **rỗng** thì bước kiểm tra bị **bỏ qua hoàn
+toàn** — endpoint thành công khai. Hiện tại biến có giá trị (bằng chứng: có 401), nhưng đây là điểm
+cần nhớ khi ai đó "tạm xoá secret cho dễ test".
+
+### Kiểm chứng trực tiếp trên production (08/09/2026)
+
+| Phép thử | Kỳ vọng | Thực tế |
+|---|---|---|
+| `GET /api/webhooks/viettelpost` | 200, thông báo sẵn sàng | **200** |
+| `POST` kèm `?token=` **sai** | 401 | **401** `{"message":"Sai tham số bí mật"}` |
+| `POST` **không** có token | 401 | **401** |
+| `POST` từ Pancake, `?token=vtp_…` hiện tại | (đang) 401 | **401** — 13 lần chỉ trong 24 phút |
+
+Nhật ký Caddy cho thấy nguyên văn: `POST /api/webhooks/viettelpost?token=vtp_••••` từ IP
+`203.171.22.6`, `User-Agent: mint/1.9.3`, `status: 401`, lặp lại liên tục.
+
+⇒ **Token `vtp_ccb…` trong Pancake là token CŨ, đã hết hiệu lực từ 06/09 11:39.** Nó là secret gốc
+sinh lúc cài đặt, bị thay bởi ops run #4 ngày 04/09 nhưng chỉ thực sự mất tác dụng khi container
+được tạo lại.
+
+### URL phải dán vào Pancake
+
+```
+https://erp.vnxcommerce.com/api/webhooks/viettelpost?token=<TOKEN HIỆN HÀNH>
+```
+
+Lấy `<TOKEN HIỆN HÀNH>` tại: **ERP → Kết nối dữ liệu → thẻ Viettel Post → dòng “Tham số bí mật
+webhook (Secret parameter)” → bấm nút Copy** (`app/(dashboard)/integrations/page.tsx:157-167`).
+Giá trị bắt đầu bằng `vtp_` + 32 ký tự hex. **Không xoay lại secret** — chỉ dán giá trị đang có.
+
+Đó cũng chính là giá trị chủ shop đã điền đúng ở Viettel Post Partner, nên sau khi sửa Pancake thì
+**cả hai kênh dùng chung một token**.
+
+Sau khi dán, kiểm chứng bằng đúng ba dấu hiệu (không cần chờ lâu — Pancake gửi vài phút một gói):
+
+1. Nhật ký Caddy: `POST /api/webhooks/viettelpost?token=…` chuyển từ **401 → 200**.
+2. `select max(received_at) from webhook_events where source='VIETTELPOST'` — mốc mới trong vài phút.
+3. Trang **Kết nối dữ liệu** thoát trạng thái *DEGRADED*, events/hour > 0.
+
+Sai một ký tự thì vẫn 401 — chỉ nên Copy, không gõ tay.
