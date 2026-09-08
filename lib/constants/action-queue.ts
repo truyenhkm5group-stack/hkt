@@ -25,6 +25,10 @@ export type CaseType =
   | "ORDER_INCOMPLETE"
   | "RISKY_ORDER"
   | "ADS_BILLING"
+  /** Không biết vận đơn nào thuộc đơn nào — người phải quyết, máy cố ý không đoán. */
+  | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
+  /** Vận đơn có thật nhưng chưa ghép được đơn ERP nào. */
+  | "ORPHAN_SHIPMENT"
   | "OTHER";
 
 /** Ánh xạ từ `notifications.kind` sang loại việc. Một chỗ duy nhất. */
@@ -40,6 +44,8 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   ORDER_INCOMPLETE: "ORDER_INCOMPLETE",
   RISKY_ORDER: "RISKY_ORDER",
   ADS_BILLING: "ADS_BILLING",
+  AMBIGUOUS_MAPPING: "AMBIGUOUS_ORDER_SHIPMENT_MAPPING",
+  ORPHAN_SHIPMENT: "ORPHAN_SHIPMENT",
 };
 
 export function caseTypeOf(kind: string): CaseType {
@@ -58,6 +64,8 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   ORDER_INCOMPLETE: "Đơn thiếu thông tin",
   RISKY_ORDER: "Đơn rủi ro cao",
   ADS_BILLING: "Tài khoản quảng cáo",
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "Chưa rõ vận đơn thuộc đơn nào",
+  ORPHAN_SHIPMENT: "Vận đơn chưa ghép được đơn",
   OTHER: "Khác",
 };
 
@@ -83,6 +91,9 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   DATA_ERROR: 0.5,
   // Hàng đang trên đường về — chỉ còn xử lý hậu quả.
   RETURNING: 0.3,
+  // Ghép đúng đơn thì số liệu đúng lại ngay, nhưng hàng thì đã xong từ lâu.
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: 0.4,
+  ORPHAN_SHIPMENT: 0.4,
   OTHER: 0.5,
 };
 
@@ -99,6 +110,10 @@ export const CASE_ACTION: Record<CaseType, string> = {
   RISKY_ORDER: "Xin cọc hoặc xác nhận lại với khách trước khi gửi.",
   ADS_BILLING: "Nạp tiền / kiểm tra ngưỡng thanh toán tài khoản quảng cáo.",
   OTHER: "Xem chi tiết rồi xử lý.",
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING:
+    "Mở Chất lượng dữ liệu, đối chiếu vận đơn với đơn theo mã tham chiếu. CHỈ xử lý khi các cách ghép cho ra kết quả khác nhau — mọi cách ghép cùng kết quả thì tổng hợp đã đúng.",
+  ORPHAN_SHIPMENT:
+    "Tìm đơn tương ứng theo mã tham chiếu trên Viettel Post. Vận đơn chiều hoàn KHÔNG có đơn là bình thường, không cần làm gì.",
 };
 
 export type CasePriority = "URGENT" | "HIGH" | "NORMAL" | "LOW";
