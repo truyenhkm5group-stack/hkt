@@ -1055,3 +1055,115 @@ Pancake kế tiếp sẽ tính lại 9 vận đơn kia: **`DELIVERED` → `IN_TR
 
 Đó là sửa số của **kỳ đã chốt**, thuộc mục 7 của `AGENTS.md` (phải hỏi chủ shop). Mã đã commit và
 push; **chưa deploy**, chờ chủ shop duyệt con số này.
+
+## 10j. ĐIỀU TRA CHÍN ĐƠN — 08/09/2026
+
+### Bảng đầy đủ
+
+Tất cả đều **không có mã vận đơn**, `carrier = "Khác"`, `partner_status` rỗng, `cod_collected = 0`,
+`prepaid = 0`, và **`shipment_events` = 0 dòng ở MỌI nguồn** (không có cả bản sao PANCAKE).
+
+| Đơn | Ngày lên đơn | Trạng thái Pancake | ERP hiện tại | Mốc “giao” bịa | COD khai | Giá trị hàng | Nguồn | Khách · SĐT |
+|---|---|---|---|---|---|---|---|---|
+| 2350 | 13/08 09:11:19 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Facebook | Nguyễn thị Duyên · 979936889 |
+| 2357 | 13/08 09:11:24 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Facebook | Lê Hien · 0345222695 |
+| 2359 | 13/08 09:11:25 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Facebook | Linh le · 896997119 |
+| 2360 | 13/08 09:11:27 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Facebook | Nguyễn thị Bích thu · 909728879 |
+| 2370 | 13/08 09:11:39 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Khác | Linh le · 896997119 |
+| 2371 | 13/08 09:11:40 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Khác | Nguyễn thị Bích thu · 909728879 |
+| 2372 | 13/08 09:11:40 | **Đã nhận** | DELIVERED | 13/08 09:12:58 | 474.000 | 449.000 | Khác | Nguyễn thị Duyên · 979936889 |
+| 2393 | 13/08 09:11:58 | **Đã nhận** | DELIVERED | 13/08 09:12:56 | 399.000 | 399.000 | Facebook | Lê Hiên · 0345222695 |
+| 3181 | 29/08 09:04:36 | **Đã nhận** | DELIVERED | 29/08 09:05:05 | 849.000 | 998.000 | Facebook | Nhiễn Hiền · 0985222958 |
+
+- **Webhook VTP:** 0 · **Import VTP:** 0 · **Poll VTP:** 0 · **Sự kiện carrier mới nhất:** không có.
+- **Lý do đang DELIVERED:** khối `partner` trong dữ liệu Pancake **rỗng hoàn toàn**, nên mapper rơi
+  vào nhánh `!partnerMeta` và dịch thẳng trạng thái đơn *"Đã nhận"* → `shipmentStage = DELIVERED`.
+  Đúng nguyên văn cái luật bị cấm. `delivered_at` được lấy từ mốc đổi trạng thái Pancake, cách lúc
+  lên đơn **29–99 giây** — không một bưu tá nào giao hàng trong 30 giây.
+- **Kết quả đơn hiện tại:** cả 9 đều là `DELIVERED` **theo COD KHAI BÁO** (nhánh tạm tính), vì
+  `cod_collected = 0` và không có dòng bảng kê. Không đơn nào có bằng chứng tiền thật.
+- **Kết quả theo logic mới:** `IN_TRANSIT` — tức **CHƯA KẾT LUẬN ĐƯỢC**, không phải “đã hoàn”.
+
+### Phân loại: **9/9 thuộc nhóm D**
+
+| Nhóm | Số ca |
+|---|---|
+| A — có chứng từ giao thành công nhưng parser chưa nhận ra | **0** |
+| B — có chứng từ hoàn / thất bại | **0** |
+| C — thiếu lịch sử carrier | **0** |
+| **D — không có mã vận đơn / không ghép được thực thể** | **9** |
+
+Khác biệt quan trọng so với giả thiết ban đầu: đây **không phải** ca “lịch sử bị thiếu do webhook
+chết”. Chúng chưa từng được đẩy sang Viettel Post — Pancake không có khối `partner`, không có mã, và
+ERP không có một sự kiện nào để mất. Vì vậy **xuất tệp từ viettelpost.vn theo mã vận đơn sẽ không
+tìm được gì**, đơn giản vì không có mã để đối chiếu.
+
+### Bối cảnh — không phải lô nhập hàng loạt
+
+Trong khung 13/08 09:05–09:20 có **92 đơn**, trong đó **69 đơn CÓ mã vận đơn**. Tám đơn của chúng ta
+là thiểu số **không** có mã trong một lô đặt hàng bình thường. Đây là đơn thật của ngày hôm đó,
+chỉ là chưa bao giờ được tạo vận đơn.
+
+Phạm vi rộng hơn (đơn không có mã vận đơn nào): 422 `NEW` · 153 `CONFIRMED` · 146 `CANCELLED` ·
+143 `DELETED` · 3 `WAITING` · **9 `DELIVERED`** · 4 `RETURNED`. Chỉ nhóm 9 + 4 mới sinh ra dòng
+`shipments`, nên phạm vi lỗi đúng bằng những gì đã đo.
+
+### Dấu hiệu trùng đơn cần chủ shop xác nhận
+
+| SĐT | Các đơn |
+|---|---|
+| **0985222958** | **3176** — 998.000đ · 29/08 · vận đơn **PKE1508908614** · đang **RETURNING**<br>**3181** — 998.000đ · 29/08 · **không mã** · đang DELIVERED |
+| 0345222695 | 2357 (449.000, không mã) · 2393 (399.000, không mã) — khác số tiền |
+
+Cặp **3176 / 3181** cùng khách, cùng ngày, cùng **998.000đ**: rất giống một đơn được tạo hai lần —
+bản có vận đơn thì đang chuyển hoàn, bản không có mã thì đang được đếm là giao thành công. Nếu đúng
+là trùng thì hiện ERP vừa đếm thừa một đơn giao thành công, vừa đếm cả đơn hoàn của chính nó.
+
+Đã kiểm tra: **không có vận đơn mồ côi nào** trong ERP mang 5 số điện thoại này (0 dòng), nên không
+thể tự ghép bằng dữ liệu sẵn có.
+
+### Tác động KPI — trước → sau
+
+*(đo bằng định nghĩa theo `stage`; con số nền là xấp xỉ của bảng điều khiển, phần **chênh lệch** là chính xác)*
+
+| Chỉ số | Trước | Sau | Chênh |
+|---|---|---|---|
+| Đơn giao thành công | 666 | **657** | **−9** |
+| Doanh thu giao thành công | 354.714.000đ | **350.148.000đ** | **−4.566.000đ (−1,29%)** |
+| Đơn hoàn | 521 | 521 | 0 |
+| Tỷ lệ GTC | 56,11% | **55,77%** | **−0,34 điểm** |
+| Đơn chuyển sang “chưa kết luận” | — | **+9** | |
+
+**Không đơn nào chuyển thành hoàn.** Toàn bộ 9 chuyển từ *giao thành công (tạm tính)* sang
+*chưa kết luận*. Giá trị hàng của 9 đơn là 4.540.000đ; con số 4.566.000đ là COD khai báo (đã gồm
+25.000đ phí ship mỗi đơn).
+
+### Ba đường đi, chủ shop chọn
+
+**1 — Nếu 9 đơn này THẬT SỰ đã giao (giao tay / khách tự lấy / ship ngoài):** chứng từ đúng của
+chúng là **TIỀN**, không phải trạng thái. Ghi số tiền thực nhận vào đơn (trả trước / chuyển khoản),
+`ORDER_OUTCOME` sẽ kết luận **giao thành công một cách hợp lệ** qua nhánh “tiền thực > 100.000đ” —
+đúng luật của shop, không cần lách. Đây là đường **giữ nguyên doanh thu** mà vẫn đúng nguyên tắc.
+
+**2 — Nếu nghi chúng CÓ vận đơn mà Pancake không ghi:** xuất **“Danh sách vận đơn”** từ
+viettelpost.vn khoảng **13/08 → 29/08/2026** (lấy rộng ra 10/08 → 31/08 cho chắc). Tệp đó có cột
+**tên + SĐT người nhận**, và `applyVtpOrderList()` có sẵn đường **gắn mã theo SĐT người nhận**
+(`linked`) — nếu Viettel Post có vận đơn của 5 số máy kia thì ERP tự ghép và chứng từ thật sẽ tự
+quyết định kết quả. Khẳng định của chủ shop là đúng: **tệp 28/08–08/09 KHÔNG đủ**, nó bỏ sót toàn
+bộ 8 đơn ngày 13/08.
+
+**3 — Nếu không có cả hai:** để nguyên là *chưa kết luận*. Đó là câu trả lời trung thực khi không có
+chứng từ nào.
+
+### Một điểm cần biết trước khi deploy bản vá
+
+Sau bản vá, 9 dòng này thành `is_final = false` ⇒ **cộng thêm 9 vào danh sách vận đơn treo, vĩnh
+viễn**, vì sẽ không bao giờ có ĐVVC nào báo tin. Cách sạch hơn (cần chủ shop duyệt riêng): đơn
+**không có khối `partner`** thì **không tạo dòng `shipments`** ngay từ đầu — kết quả đơn vẫn ra
+`IN_TRANSIT` qua nhánh `o.stage` của `ORDER_OUTCOME`, mà không để lại vận đơn ma trong danh sách
+theo dõi. Thay đổi đó động tới dữ liệu đã có nên tách riêng, không gộp vào bản vá này.
+
+### Trạng thái
+
+`npm test` **TẤT CẢ KIỂM THỬ ĐẠT** · 14/14 bất biến · `typecheck` sạch · `lint` 0 lỗi.
+**Chưa deploy. Chưa chạy WRITE BACKFILL.** Chưa import tệp nào, chưa tạo một sự kiện giả nào.
