@@ -9,6 +9,7 @@ import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
+import { testCostAllocation } from "./cost-allocation.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
@@ -1102,6 +1103,7 @@ async function main() {
   await testOrderSource();
   await testVtpImportTruth(db);
   await testVtpImportRecovery(db);
+  await testCostAllocation(db);
   await testVtpState(db);
   await testVtpIngestion(db);
   await testReconciliation(db);

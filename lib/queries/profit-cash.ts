@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { COD_COLLECTABLE, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -67,9 +68,10 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to))),
     db
-      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
+      // Cùng một bộ máy phân bổ với Báo cáo lợi nhuận — hai trang không được cho hai con số.
+      .select({ amount: allocatedExpenseSum(period.from, period.to) })
       .from(schema.expenses)
-      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, between(schema.expenses.occurredAt, period.from, period.to))),
+      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to))),
     db
       // COD_COLLECTABLE: vận đơn đã hoàn / huỷ thì tiền không bao giờ về, dù trạng thái COD chưa cập nhật.
       // Trang Đối soát COD đã lọc điều kiện này; trước đây báo cáo dòng tiền thì không nên hai trang lệch nhau.

@@ -923,12 +923,28 @@ export const expenses = pgTable(
     description: text("description").notNull(),
     amount: integer("amount").notNull(),
     occurredAt: ts("occurred_at").notNull(),
+    /**
+     * KỲ HIỆU LỰC của khoản chi — chỉ dùng khi `allocationMethod = 'PERIOD_PRORATA'`.
+     * Có kỳ thì báo cáo lấy đúng phần ngày chồng lấn, thay vì cộng nguyên khoản vào bất kỳ khoảng
+     * nào chứa `occurred_at`. Xem `lib/constants/cost-allocation.ts`.
+     */
+    periodStart: ts("period_start"),
+    periodEnd: ts("period_end"),
+    allocationMethod: text("allocation_method").notNull().default("EVENT_DATE"),
+    /** Khoản theo kỳ nhưng CHƯA khai kỳ — nêu ở Chất lượng dữ liệu, KHÔNG tự đoán kỳ giúp. */
+    needsAllocationReview: boolean("needs_allocation_review").notNull().default(false),
     reference: text("reference").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt)],
+  (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt),
+    index("expenses_period_idx").on(t.periodStart, t.periodEnd),
+    check("expenses_allocation_check", sql`${t.allocationMethod} IN ('EVENT_DATE', 'PERIOD_PRORATA', 'ORDER_ATTRIBUTED', 'ACTUAL_DATED_SPEND')`),
+    // Chia theo ngày thì BẮT BUỘC có kỳ hợp lệ — không có kỳ mà đòi chia là không tính được.
+    check("expenses_period_check", sql`${t.allocationMethod} <> 'PERIOD_PRORATA' OR (
+      ${t.periodStart} IS NOT NULL AND ${t.periodEnd} IS NOT NULL AND ${t.periodEnd} >= ${t.periodStart})`),
+  ],
 );
 
 /** Đơn landing page (khách điền form → Google Sheet → ERP): theo dõi trạng thái, lọc trùng, gửi đơn nháp lên Pancake POS */

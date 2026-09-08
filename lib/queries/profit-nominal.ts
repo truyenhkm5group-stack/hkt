@@ -7,6 +7,7 @@ import { failedToReturnRate, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -236,6 +237,10 @@ export type NominalReport = {
     weightedReturnRate: number | null;
     /** Tỷ lệ giao thành công ước tính bình quân theo đơn (%) = 100 − weightedReturnRate */
     weightedDeliveryRate: number | null;
+    /** QC / Doanh số POS (%) — `null` khi chưa có doanh số để chia. */
+    adsOverPosSales: number | null;
+    /** QC / DT giao thành công (%) — `null` khi chưa có doanh thu giao thành công. */
+    adsOverDeliveredRevenue: number | null;
     operatingExpenses: number;
     rescued: number;
     packingCost: number;
@@ -299,9 +304,9 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   if (period.from) adConds.push(gte(ads.spendDate, period.from));
   if (period.to) adConds.push(lte(ads.spendDate, period.to));
 
-  const expConds: SQL[] = [sql`${schema.expenses.category} not in ('ADS','PURCHASE')`];
-  if (period.from) expConds.push(gte(schema.expenses.occurredAt, period.from));
-  if (period.to) expConds.push(lte(schema.expenses.occurredAt, period.to));
+  // Chi phí vận hành phải dùng ĐÚNG khoảng của báo cáo: khoản theo kỳ được chia theo số ngày chồng
+  // lấn, khoản một lần vẫn ghi trọn vào ngày phát sinh. Xem lib/queries/cost-allocation.ts.
+  const expConds: SQL[] = [sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to)];
 
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const [sales, adRows, perOrder, [expRow]] = await Promise.all([
@@ -347,7 +352,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_CANCELLED, ...periodCond(period.from, period.to)))
       .groupBy(o.id, PID),
     db
-      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)`, count: sql<number>`count(*)` })
+      .select({ amount: allocatedExpenseSum(period.from, period.to), count: sql<number>`count(*)` })
       .from(schema.expenses)
       .where(and(...expConds)),
   ]);
@@ -544,6 +549,17 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       actualRevenue: totals.actualRevenue,
       weightedReturnRate: totals.orders ? totals.weightedReturn / totals.orders : null,
       weightedDeliveryRate: totals.orders ? 100 - totals.weightedReturn / totals.orders : null,
+      /**
+       * QC / Doanh số POS — chi phí quảng cáo chia doanh số lên đơn (Pancake), CÙNG khoảng báo cáo.
+       * Mẫu số là doanh số ĐÃ CHỐT trên POS, không phải doanh thu đã giao.
+       * Mẫu số 0 ⇒ `null`, để màn hình hiện "—" thay vì vô cực.
+       */
+      adsOverPosSales: totals.salesAfterDiscount > 0 ? (adSpendAll / totals.salesAfterDiscount) * 100 : null,
+      /**
+       * QC / DT giao thành công — mẫu số là doanh thu GIAO THÀNH CÔNG theo `ORDER_OUTCOME`,
+       * KHÔNG được thay bằng doanh số POS: hai con số nói hai việc khác nhau.
+       */
+      adsOverDeliveredRevenue: totals.actualRevenue > 0 ? (adSpendAll / totals.actualRevenue) * 100 : null,
       operatingExpenses,
       rescued: totals.rescued,
       packingCost: totals.packingCost,
