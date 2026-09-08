@@ -4,6 +4,7 @@ import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { TopActions } from "@/app/(dashboard)/top-actions";
+import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
@@ -183,6 +184,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           />
         </Link>
       </section>
+
+      {/* Tóm tắt sinh theo QUY TẮC từ số liệu đã tính bằng SQL — không phải văn của mô hình. */}
+      <BusinessBriefSection period={period} />
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
         <SectionCard title="Doanh thu theo ngày" description="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
