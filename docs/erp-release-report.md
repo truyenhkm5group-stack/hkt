@@ -213,6 +213,20 @@ hàng loạt khi chưa được bật tường minh (`fix=1` / `apply=1`).
 
 ---
 
+## 10b. Trạng thái deploy — CHƯA CHẠY
+
+`main` đã có toàn bộ release (`adff461`) và đã push lên GitHub. **Deploy chưa chạy.**
+
+Lý do: workflow *Deploy ERP to VPS* chỉ kích hoạt bằng `workflow_dispatch`, và môi trường làm việc
+này không có `gh` CLI lẫn token GitHub nên không bấm chạy được. Đây là giới hạn công cụ, không phải
+cổng kiểm tra nào chưa đạt — FINAL GATE đã đạt 17/17.
+
+**Chủ shop bấm chạy:** GitHub → repo `hkt` → tab **Actions** → **Deploy ERP to VPS** → **Run
+workflow** → nhánh `main` → để `reset_env` = false → Run.
+
+Workflow tự chạy `tsc --noEmit` và `npm test` TRƯỚC khi đụng tới máy chủ; contract test đỏ thì
+deploy dừng. Cả hai vừa xanh trên chính `main` sau khi merge.
+
 ## 11. Danh sách kiểm tra sau deploy
 
 Mở lần lượt và xác nhận trang lên được, số liệu có nghĩa:

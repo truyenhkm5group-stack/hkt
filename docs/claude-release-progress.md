@@ -371,6 +371,13 @@ Hai điểm đáng ghi:
   rồi mới áp 0032–0034. Kết quả giống hệt CSDL dựng mới (36 bảng / 133 index), chạy lại lần hai
   không lỗi.
 
+### Deploy — CHƯA CHẠY
+
+`main` đã có toàn bộ release (`adff461`), đã push. Deploy chưa chạy vì workflow *Deploy ERP to VPS*
+chỉ kích hoạt bằng `workflow_dispatch` và môi trường này không có `gh` CLI lẫn token GitHub.
+Chủ shop bấm: Actions → Deploy ERP to VPS → Run workflow → nhánh `main`.
+Danh sách kiểm tra sau deploy nằm ở `docs/erp-release-report.md` mục 11.
+
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
 - `npm run lint` có sẵn 3 cảnh báo từ trước release này (0 lỗi):
