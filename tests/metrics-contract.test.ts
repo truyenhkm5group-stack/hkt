@@ -9,6 +9,7 @@ import { getDashboardData } from "@/lib/queries/dashboard";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
 import { adOrdersFromErp } from "@/lib/queries/expenses";
 import type { Period } from "@/lib/search-params";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -96,6 +97,31 @@ export async function testMetricsContract(db: Db) {
   assert.equal(dash.dataIssues.critical, tower.totals.ERROR, "Tổng quan phải lấy số vi phạm nghiêm trọng từ trung tâm điều khiển");
   assert.equal(dash.dataIssues.ruleCount, tower.ruleCount);
 
+  // ───────── 4B. HAI TỶ LỆ QUẢNG CÁO: cùng khoảng, mẫu số KHÁC NHAU, mẫu số 0 ⇒ null ─────────
+  //
+  // Hai chỉ số này rất dễ bị dùng lẫn: doanh số POS là tiền ĐÃ LÊN ĐƠN, doanh thu giao thành công
+  // là tiền THỰC SỰ tới tay khách. Thay mẫu số cho nhau là báo sai hiệu quả quảng cáo.
+  clearMemo();
+  const profit = await getNominalProfitReport(ALL);
+  const pt = profit.totals;
+  const kyVong = (tu: number, mau: number) => (mau > 0 ? (tu / mau) * 100 : null);
+  assert.equal(pt.adsOverPosSales, kyVong(pt.adSpend, pt.salesAfterDiscount), "QC/Doanh số POS = chi quảng cáo ÷ doanh số POS");
+  assert.equal(pt.adsOverDeliveredRevenue, kyVong(pt.adSpend, pt.actualRevenue), "QC/DT giao thành công = chi quảng cáo ÷ doanh thu đã giao");
+  // Chỉ so khi TỬ SỐ khác 0: chi quảng cáo bằng 0 thì cả hai tỷ lệ đều đúng bằng 0, không mâu thuẫn.
+  if (pt.adSpend > 0 && pt.salesAfterDiscount > 0 && pt.actualRevenue > 0 && pt.salesAfterDiscount !== pt.actualRevenue) {
+    assert.notEqual(pt.adsOverPosSales, pt.adsOverDeliveredRevenue, "hai tỷ lệ có mẫu số khác nhau thì KHÔNG được ra cùng một số");
+  }
+  // Mẫu số 0 phải trả null để màn hình hiện "—", tuyệt đối không hiện vô cực.
+  assert.equal(kyVong(1_000_000, 0), null, "mẫu số 0 ⇒ null, không phải Infinity");
+  assert.ok(pt.adsOverPosSales === null || Number.isFinite(pt.adsOverPosSales), "tỷ lệ phải là số hữu hạn hoặc null");
+  assert.ok(pt.adsOverDeliveredRevenue === null || Number.isFinite(pt.adsOverDeliveredRevenue), "tỷ lệ phải là số hữu hạn hoặc null");
+  // Chạy lại cùng kỳ phải ra CÙNG con số — chỉ số không được phụ thuộc thứ tự gọi hay cache.
+  clearMemo();
+  const profit2 = await getNominalProfitReport(ALL);
+  assert.equal(profit2.totals.adsOverPosSales, pt.adsOverPosSales, "cùng kỳ ⇒ cùng số");
+  assert.equal(profit2.totals.adsOverDeliveredRevenue, pt.adsOverDeliveredRevenue, "cùng kỳ ⇒ cùng số");
+  assert.equal(profit2.totals.operatingExpenses, pt.operatingExpenses, "chi phí vận hành đã phân bổ cũng phải xác định");
+
   // ───────── 5. Hợp đồng phải tồn tại và trỏ đúng nơi cài đặt ─────────
   const contract = readFileSync("docs/metrics-contract.md", "utf8");
   for (const needed of ["bookedRevenue", "deliveredRevenue", "cashReceived", "successRate", "deliveredCogs", "lib/queries/metrics.ts"]) {
@@ -104,6 +130,6 @@ export async function testMetricsContract(db: Db) {
   assert.ok(contract.includes("cùng bộ lọc"), "hợp đồng phải nêu bất biến 'cùng chỉ số + cùng kỳ + cùng bộ lọc ⇒ cùng con số'");
 
   console.log(
-    `✓ Hợp đồng chỉ số: doanh thu GTC ${dash.kpi.successRevenue}đ và giá vốn ${dash.kpi.successCogs}đ cùng một tập đơn · GTC ${dash.kpi.successRate}% khớp mọi màn hình · mẫu số 0 trả null`,
+    `✓ Hợp đồng chỉ số: doanh thu GTC ${dash.kpi.successRevenue}đ và giá vốn ${dash.kpi.successCogs}đ cùng một tập đơn · GTC ${dash.kpi.successRate}% khớp mọi màn hình · mẫu số 0 trả null · hai tỷ lệ QC đúng mẫu số riêng`,
   );
 }

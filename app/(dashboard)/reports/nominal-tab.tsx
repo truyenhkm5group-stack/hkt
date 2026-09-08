@@ -142,6 +142,25 @@ export async function NominalTab({
           icon={Percent}
           tone={t.weightedDeliveryRate !== null && t.weightedDeliveryRate < 55 ? "rose" : "green"}
         />
+        {/*
+          Hai tỷ lệ dùng CÙNG khoảng báo cáo đang chọn, và mẫu số KHÁC NHAU có chủ đích:
+          doanh số POS là tiền đã lên đơn, doanh thu giao thành công là tiền thực sự tới tay khách.
+          Mẫu số bằng 0 thì hiện "—", không bao giờ hiện vô cực.
+        */}
+        <MetricCard
+          label="QC / Doanh số POS"
+          value={t.adsOverPosSales !== null ? `${t.adsOverPosSales.toFixed(1)}%` : "—"}
+          note={`${period.label} · ${formatVND(t.adSpend, { compact: true })} chi quảng cáo ÷ ${formatVND(t.salesAfterDiscount, { compact: true })} doanh số đã chốt trên Pancake${t.adsOverPosSales === null ? " · chưa có doanh số để chia" : ""}`}
+          icon={Percent}
+          tone={t.adsOverPosSales !== null && t.adsOverPosSales > 30 ? "rose" : "amber"}
+        />
+        <MetricCard
+          label="QC / DT giao thành công"
+          value={t.adsOverDeliveredRevenue !== null ? `${t.adsOverDeliveredRevenue.toFixed(1)}%` : "—"}
+          note={`${period.label} · ${formatVND(t.adSpend, { compact: true })} chi quảng cáo ÷ ${formatVND(t.actualRevenue, { compact: true })} doanh thu ĐÃ GIAO (COD thực > 100K)${t.adsOverDeliveredRevenue === null ? " · chưa có đơn giao thành công nào" : ""}`}
+          icon={Percent}
+          tone={t.adsOverDeliveredRevenue !== null && t.adsOverDeliveredRevenue > 40 ? "rose" : "amber"}
+        />
       </section>
 
       <SectionCard
