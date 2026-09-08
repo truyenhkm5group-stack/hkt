@@ -175,22 +175,100 @@ export const PRIORITY_TONE: Record<CasePriority, string> = {
   LOW: "bg-muted text-muted-foreground",
 };
 
-const SEVERITY_WEIGHT: Record<string, number> = { critical: 40, warning: 20, info: 5 };
+const SEVERITY_WEIGHT: Record<string, number> = { critical: 30, warning: 15, info: 4 };
+
+/**
+ * CÓ NGƯỜI ĐANG CHỜ Ở ĐẦU KIA hay không.
+ *
+ * Yếu tố này tách khỏi "mức nghiêm trọng" vì hai thứ khác nhau: một luật dữ liệu sai có thể rất
+ * nghiêm trọng nhưng không ai ngồi chờ; một đơn giao hụt thì có khách thật đang cầm điện thoại.
+ * Việc có người chờ mà để lâu thì mất khách, không chỉ mất số liệu.
+ */
+const CUSTOMER_WAITING: Record<CaseType, number> = {
+  DELIVERY_FAILED: 1,
+  CS_CASE: 1,
+  ORDER_INCOMPLETE: 1,
+  NEW_ORDER_UNPROCESSED: 1,
+  ORDER_CONFIRMATION_STALE: 1,
+  DELIVERY_STALE: 0.8,
+  RISKY_ORDER: 0.6,
+  RETURNING: 0.4,
+  STOCKOUT_RISK: 0.4,
+  LOW_STOCK_RISK: 0.3,
+  // Việc nội bộ: quan trọng, nhưng không có khách nào đang chờ.
+  COD_OVERDUE: 0,
+  DATA_ERROR: 0,
+  ADS_BILLING: 0,
+  ADS_ANOMALY: 0,
+  PROFITABILITY_ALERT: 0,
+  RETURN_RECEIVED_PENDING_INSPECTION: 0,
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: 0,
+  ORPHAN_SHIPMENT: 0,
+  OTHER: 0,
+};
+
+export type ScoreParts = {
+  severity: number;
+  age: number;
+  money: number;
+  recoverability: number;
+  customer: number;
+  proximity: number;
+};
+
+export type ScoreInput = {
+  severity: string;
+  ageHours: number;
+  amount?: number | null;
+  type: CaseType;
+  /** Số ngày còn lại trước khi cháy hàng, nếu tra được. Càng gần 0 càng gấp. */
+  daysToStockout?: number | null;
+};
 
 /**
  * ĐIỂM ƯU TIÊN (0–100). Công thức mở, cố ý đơn giản để người vận hành đọc là hiểu vì sao:
  *
- *   mức nghiêm trọng (0–40) + tuổi việc (0–25) + tiền liên quan (0–20) + khả năng cứu (0–15)
+ *   nghiêm trọng (0–30) + tuổi việc (0–20) + tiền liên quan (0–20)
+ * + khả năng cứu (0–15) + có người đang chờ (0–10) + sắp cháy hàng (0–5)
+ *
+ * Từng phần đều trả ra được (`caseScoreBreakdown`) nên giao diện giải thích được vì sao một việc
+ * đứng trên việc khác — điểm mà người đọc không kiểm chứng được thì không khác gì cảm tính.
  *
  * Tuổi việc bão hoà ở 7 ngày: việc để 3 tuần không gấp gấp ba lần việc để 1 tuần, nó chỉ nói lên
  * rằng nó đang bị bỏ quên. Tiền bão hoà ở 5 triệu để một đơn lớn không nhấn chìm mọi việc khác.
+ *
+ * "Tiền liên quan" nhận giá trị đơn, số COD đang treo hoặc doanh thu giao thành công đang bị đe
+ * doạ — cùng một trục, khác nguồn, nên KHÔNG cộng chồng thành nhiều phần riêng.
  */
-export function caseScore(input: { severity: string; ageHours: number; amount?: number | null; type: CaseType }): number {
-  const severity = SEVERITY_WEIGHT[input.severity] ?? 5;
-  const age = Math.min(25, (Math.max(0, input.ageHours) / (7 * 24)) * 25);
+export function caseScoreBreakdown(input: ScoreInput): ScoreParts {
+  const severity = SEVERITY_WEIGHT[input.severity] ?? 4;
+  const age = Math.min(20, (Math.max(0, input.ageHours) / (7 * 24)) * 20);
   const money = Math.min(20, ((input.amount ?? 0) / 5_000_000) * 20);
-  const recoverable = RECOVERABILITY[input.type] * 15;
-  return Math.round(severity + age + money + recoverable);
+  const recoverability = RECOVERABILITY[input.type] * 15;
+  const customer = (CUSTOMER_WAITING[input.type] ?? 0) * 10;
+  // Cháy hàng trong 3 ngày là gấp nhất; quá 14 ngày thì chưa phải việc của hôm nay.
+  const days = input.daysToStockout;
+  const proximity = days === null || days === undefined ? 0 : Math.max(0, Math.min(5, ((14 - days) / 14) * 5));
+  return { severity, age, money, recoverability, customer, proximity };
+}
+
+export function caseScore(input: ScoreInput): number {
+  const p = caseScoreBreakdown(input);
+  return Math.round(p.severity + p.age + p.money + p.recoverability + p.customer + p.proximity);
+}
+
+/** Câu giải thích ngắn: yếu tố nào đẩy việc này lên cao nhất. */
+export function scoreExplanation(parts: ScoreParts): string {
+  const named: [string, number][] = [
+    ["mức nghiêm trọng", parts.severity],
+    ["để lâu chưa ai làm", parts.age],
+    ["tiền đang treo", parts.money],
+    ["còn cứu được", parts.recoverability],
+    ["có khách đang chờ", parts.customer],
+    ["sắp cháy hàng", parts.proximity],
+  ];
+  const top = named.filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return top.length ? top.map(([label, v]) => `${label} ${Math.round(v)}`).join(" · ") : "không có yếu tố nào nổi bật";
 }
 
 export function priorityOf(score: number): CasePriority {

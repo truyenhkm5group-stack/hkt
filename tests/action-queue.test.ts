@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseTypeOf, priorityOf } from "@/lib/constants/action-queue";
+import { CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation } from "@/lib/constants/action-queue";
 import { getActionQueue } from "@/lib/queries/action-queue";
 
 /**
@@ -33,6 +33,30 @@ export async function testActionQueue(db: Db) {
   const threeWeeks = caseScore({ ...base, ageHours: 24 * 21 });
   assert.equal(oneWeek, threeWeeks, "tuổi việc phải bão hoà, nếu không việc cũ sẽ nhấn chìm việc mới");
 
+  // ───────── 1b. Hai yếu tố mới, và tổng vẫn nằm trong 0–100 ─────────
+  // CÓ KHÁCH ĐANG CHỜ tách khỏi mức nghiêm trọng: một luật dữ liệu sai có thể rất nghiêm trọng
+  // nhưng không ai ngồi chờ; một đơn giao hụt thì có khách thật đang cầm điện thoại.
+  const waiting = caseScore({ severity: "warning", ageHours: 24, amount: 0, type: "CS_CASE" });
+  const internal = caseScore({ severity: "warning", ageHours: 24, amount: 0, type: "COD_OVERDUE" });
+  const partsWaiting = caseScoreBreakdown({ severity: "warning", ageHours: 24, amount: 0, type: "CS_CASE" });
+  const partsInternal = caseScoreBreakdown({ severity: "warning", ageHours: 24, amount: 0, type: "COD_OVERDUE" });
+  assert.ok(partsWaiting.customer > 0 && partsInternal.customer === 0, "chỉ việc có khách chờ mới được cộng phần đó");
+  assert.ok(waiting > internal, "việc có khách đang chờ phải đứng trên việc nội bộ cùng mức nghiêm trọng");
+
+  // SẮP CHÁY HÀNG: càng gần ngày hết hàng càng gấp; chưa tra được thì không cộng điểm ảo.
+  const soon = caseScoreBreakdown({ severity: "warning", ageHours: 0, type: "STOCKOUT_RISK", daysToStockout: 2 });
+  const later = caseScoreBreakdown({ severity: "warning", ageHours: 0, type: "STOCKOUT_RISK", daysToStockout: 12 });
+  const unknownStock = caseScoreBreakdown({ severity: "warning", ageHours: 0, type: "STOCKOUT_RISK", daysToStockout: null });
+  assert.ok(soon.proximity > later.proximity, "cháy hàng trong 2 ngày phải gấp hơn cháy hàng sau 12 ngày");
+  assert.equal(unknownStock.proximity, 0, "chưa dự báo được thì KHÔNG cộng điểm — không biết không phải là gấp");
+
+  // Trần điểm: mọi yếu tố kịch khung vẫn không vượt 100.
+  const maxed = caseScore({ severity: "critical", ageHours: 24 * 365, amount: 999_000_000, type: "DELIVERY_FAILED", daysToStockout: 0 });
+  assert.ok(maxed <= 100, `điểm ưu tiên phải nằm trong 0–100, nhận ${maxed}`);
+
+  // Phải giải thích được vì sao: điểm mà người đọc không kiểm chứng được thì không khác gì cảm tính.
+  assert.ok(scoreExplanation(partsWaiting).includes("khách đang chờ"), "lời giải thích phải nêu đúng yếu tố nổi bật");
+
   assert.equal(priorityOf(95), "URGENT");
   assert.equal(priorityOf(55), "HIGH");
   assert.equal(priorityOf(35), "NORMAL");
@@ -54,6 +78,9 @@ export async function testActionQueue(db: Db) {
     assert.ok(c.financialImpact >= 0, `${c.id}: tiền liên quan không được âm`);
     assert.ok(c.recoverability > 0 && c.recoverability <= 1, `${c.id}: phải biết còn cứu được bao nhiêu`);
     assert.ok(c.score >= 0 && c.score <= 100, `${c.id}: điểm ưu tiên phải trong 0–100`);
+    assert.ok(c.scoreExplanation.length > 0, `${c.id}: phải giải thích được vì sao xếp ưu tiên như vậy`);
+    const sum = Math.round(c.scoreParts.severity + c.scoreParts.age + c.scoreParts.money + c.scoreParts.recoverability + c.scoreParts.customer + c.scoreParts.proximity);
+    assert.equal(sum, c.score, `${c.id}: tổng các phần điểm phải đúng bằng điểm hiển thị`);
   }
   // Xếp giảm dần theo điểm — người mở trang làm từ trên xuống là đúng thứ tự.
   for (let n = 1; n < queue.cases.length; n += 1) {
@@ -125,6 +152,6 @@ export async function testActionQueue(db: Db) {
   assert.ok(RECOVERABILITY.RETURN_RECEIVED_PENDING_INSPECTION > RECOVERABILITY.RETURNING);
 
   console.log(
-    `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc (nghiêm trọng + tuổi + tiền + khả năng cứu)`,
+    `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc giải thích được (nghiêm trọng + tuổi + tiền + khả năng cứu + khách đang chờ + sắp cháy hàng)`,
   );
 }

@@ -6,12 +6,15 @@ import {
   CASE_TYPE_LABEL,
   ageLabel,
   caseScore,
+  caseScoreBreakdown,
   caseStatusOf,
+  scoreExplanation,
   caseTypeOf,
   priorityOf,
   type CasePriority,
   type CaseStatus,
   type CaseType,
+  type ScoreParts,
 } from "@/lib/constants/action-queue";
 
 /**
@@ -60,6 +63,9 @@ export type ActionCase = {
   /** Bằng chứng: việc này từ đâu ra, dựa trên cái gì. Không có bằng chứng thì không phải việc. */
   evidence: { source: string; detail: string };
   ignoredReason: string;
+  /** Vì sao việc này xếp trên việc kia — từng phần điểm, để người đọc kiểm chứng được. */
+  scoreParts: ScoreParts;
+  scoreExplanation: string;
 };
 
 export type ActionQueue = {
@@ -145,7 +151,9 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     const type = caseTypeOf(r.kind);
     const detectedAt = r.occurredAt ?? r.createdAt;
     const ageHours = Math.max(0, (now - detectedAt.getTime()) / 3_600_000);
-    const score = caseScore({ severity: r.severity, ageHours, amount: amounts.get(r.entityId) ?? null, type });
+    const scoreInput = { severity: r.severity, ageHours, amount: amounts.get(r.entityId) ?? null, type };
+    const scoreParts = caseScoreBreakdown(scoreInput);
+    const score = caseScore(scoreInput);
     return {
       id: r.id,
       type,
@@ -169,6 +177,8 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       recoverability: RECOVERABILITY[type],
       evidence: { source: EVIDENCE_SOURCE[r.entityType] ?? "Hệ thống ERP", detail: r.body },
       ignoredReason: r.ignoredReason ?? "",
+      scoreParts,
+      scoreExplanation: scoreExplanation(scoreParts),
     };
   });
 

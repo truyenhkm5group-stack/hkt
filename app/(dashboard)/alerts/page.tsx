@@ -7,7 +7,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { can, requirePermission } from "@/lib/auth/session";
 import { NOTIFICATION_KIND_LABEL, NOTIFICATION_KIND_ORDER, SEVERITY_TONE } from "@/lib/constants/alerts";
-import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
+import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
 import { getActionQueue } from "@/lib/queries/action-queue";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
@@ -49,8 +49,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
       <SectionCard
         title={`Hàng đợi việc — ${formatNumber(visibleCases.length)} việc`}
-        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}`}
-        hint="Mức ưu tiên tính bằng quy tắc: mức nghiêm trọng + tuổi việc + giá trị tiền liên quan + KHẢ NĂNG CỨU ĐƯỢC. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích."
+        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}`}
+        hint="Mức ưu tiên tính bằng quy tắc, không phải cảm tính: mức nghiêm trọng + tuổi việc + tiền đang treo + KHẢ NĂNG CỨU ĐƯỢC + có khách đang chờ + sắp cháy hàng. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích. Rê chuột lên mức ưu tiên để xem từng phần điểm."
         padded={false}
       >
         {visibleCases.length === 0 ? (
@@ -59,7 +59,10 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           <ul className="divide-y">
             {visibleCases.slice(0, 100).map((c) => (
               <li key={c.id} className="flex flex-wrap items-start gap-3 px-5 py-3">
-                <span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", PRIORITY_TONE[c.priority])}>
+                <span
+                  className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", PRIORITY_TONE[c.priority])}
+                  title={`Điểm ${c.score}/100 = ${c.scoreExplanation}`}
+                >
                   {PRIORITY_LABEL[c.priority]} · {c.score}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -69,6 +72,12 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                   <p className="text-[10.5px] text-muted-foreground" title={formatDateTime(c.detectedAt)}>
                     {c.typeLabel} · phát hiện {c.ageLabel} trước · {CASE_STATUS_LABEL[c.status]}
                     {c.owner ? ` · ${c.owner.name} đang xử lý` : " · chưa ai nhận"}
+                    {c.financialImpact > 0 ? ` · ${formatVND(c.financialImpact)} đang treo` : ""}
+                  </p>
+                  {/* Vì sao việc này đứng ở đây — điểm ưu tiên phải kiểm chứng được, không phải cảm tính. */}
+                  <p className="text-[10.5px] text-muted-foreground/80">
+                    Ưu tiên vì: {c.scoreExplanation} · nguồn: {c.evidence.source}
+                    {c.status === "IGNORED" && c.ignoredReason ? ` · bỏ qua: ${c.ignoredReason}` : ""}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
