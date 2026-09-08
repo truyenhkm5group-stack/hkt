@@ -64,7 +64,16 @@ export async function testBackfill(db: Db) {
   assert.ok(dry.total >= dry.changed + dry.unchanged - dry.noEvidence, "các con số phải cộng khớp");
   assert.ok(Object.keys(dry.stageTransitions).length > 0, "phải liệt kê ma trận chuyển trạng thái");
   assert.ok(dry.samples.length > 0, "phải có ví dụ để soi tay");
-  assert.ok(dry.outcomeBefore.DELIVERED >= 0 && dry.outcomeAfter.DELIVERED >= 0, "phải báo phân bố kết quả đơn");
+  assert.ok(dry.outcomeBefore.DELIVERED >= 0, "phải báo phân bố kết quả đơn TRƯỚC");
+  // CHẠY THỬ KHÔNG ĐO ĐƯỢC tác động kết quả đơn — phải trả CHƯA BIẾT, không phải bản sao/số 0.
+  assert.equal(dry.outcomeAfter, null, "chạy thử phải nói rõ chưa đo được phân bố SAU, không trả bản sao của TRƯỚC");
+  assert.equal(dry.deliveredToNotDelivered, null, "chạy thử chưa đo được số đơn lật khỏi GIAO THÀNH CÔNG");
+  assert.equal(dry.notDeliveredToDelivered, null);
+  assert.equal(dry.returnedChanged, null);
+  assert.ok(
+    backfillWarnings(dry).some((w) => w.includes("KHÔNG đo được")),
+    "chạy thử có thay đổi mà chưa đo được tác động thì PHẢI cảnh báo — đây là guardrail đứng trước lệnh ghi",
+  );
 
   const [beforeWrite] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, drifted.id));
   assert.equal(beforeWrite.stage, "PENDING", "chạy thử KHÔNG được ghi vào dữ liệu");
@@ -74,6 +83,9 @@ export async function testBackfill(db: Db) {
   const applied = await runCanonicalBackfill({ apply: true, actor: "test:backfill" });
   assert.equal(applied.applied, true);
   assert.ok(applied.changed > 0);
+  // Ghi thật thì mới đo được tác động — lúc đó các trường phải là SỐ, không còn null.
+  assert.notEqual(applied.outcomeAfter, null, "ghi thật phải đo được phân bố kết quả đơn SAU");
+  assert.equal(typeof applied.deliveredToNotDelivered, "number");
   const [afterWrite] = await db.select().from(schema.shipments).where(eq(schema.shipments.id, drifted.id));
   assert.equal(afterWrite.stage, "DELIVERED", "ảnh chụp phải khớp lịch sử sự kiện");
   assert.equal(afterWrite.deliveredAt?.toISOString(), "2026-09-03T09:30:00.000Z", "mốc giao lấy từ chính sự kiện của ĐVVC");
@@ -106,8 +118,8 @@ export async function testBackfill(db: Db) {
   assert.ok(logs.length > 0, "mỗi lần ghi thật phải để lại nhật ký");
 
   // ───────── 7. Cảnh báo bất thường phải chặn tay người chạy ─────────
-  assert.deepEqual(backfillWarnings({ ...third, total: 100, changed: 0, deliveredToNotDelivered: 0, conflicts: 0, unknownEvents: 0 }), []);
-  const risky = backfillWarnings({ ...third, total: 100, changed: 50, deliveredToNotDelivered: 3, conflicts: 2, unknownEvents: 1 });
+  assert.deepEqual(backfillWarnings({ ...third, applied: true, total: 100, changed: 0, deliveredToNotDelivered: 0, conflicts: 0, unknownEvents: 0 }), []);
+  const risky = backfillWarnings({ ...third, applied: true, total: 100, changed: 50, deliveredToNotDelivered: 3, conflicts: 2, unknownEvents: 1 });
   assert.equal(risky.length, 4, "phải nêu đủ bốn loại bất thường");
   assert.ok(risky.some((w) => w.includes("GIAO THÀNH CÔNG")), "lật đơn đã giao thành công phải được nêu riêng — doanh thu đã chốt sẽ giảm");
 

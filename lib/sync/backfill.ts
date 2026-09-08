@@ -56,13 +56,19 @@ export type BackfillReport = {
   stageTransitions: Record<string, number>;
   /** Phân bố KẾT QUẢ ĐƠN trước và sau — con số chủ shop thực sự quan tâm. */
   outcomeBefore: OutcomeCounts;
-  outcomeAfter: OutcomeCounts;
-  /** Đơn chuyển từ GIAO THÀNH CÔNG sang không thành công (doanh thu giảm). */
-  deliveredToNotDelivered: number;
-  /** Đơn chuyển từ không thành công sang GIAO THÀNH CÔNG (doanh thu tăng). */
-  notDeliveredToDelivered: number;
-  /** Thay đổi trong nhóm hoàn. */
-  returnedChanged: number;
+  /**
+   * Phân bố SAU khi ghi. `null` khi CHẠY THỬ: muốn biết kết quả đơn đổi thế nào thì phải thật sự
+   * dựng lại trạng thái, mà chạy thử thì cố tình không ghi gì. Trả `null` chứ KHÔNG trả bản sao
+   * của `outcomeBefore` — bản sao khiến người đọc tưởng "không có tác động" trong khi thực tế là
+   * CHƯA ĐO. Đúng nguyên tắc của kho mã này: chưa biết thì nói chưa biết, không quy về 0.
+   */
+  outcomeAfter: OutcomeCounts | null;
+  /** Đơn chuyển từ GIAO THÀNH CÔNG sang không thành công (doanh thu giảm). `null` khi chạy thử. */
+  deliveredToNotDelivered: number | null;
+  /** Đơn chuyển từ không thành công sang GIAO THÀNH CÔNG (doanh thu tăng). `null` khi chạy thử. */
+  notDeliveredToDelivered: number | null;
+  /** Thay đổi trong nhóm hoàn. `null` khi chạy thử. */
+  returnedChanged: number | null;
   /**
    * Ca nhập nhằng: ảnh chụp nói đã giao nhưng lịch sử không hề có sự kiện giao nào.
    * KHÔNG tự ghi đè — nêu ra để người vận hành xem.
@@ -203,20 +209,24 @@ export async function runCanonicalBackfill(options: BackfillOptions = {}): Promi
 
   // ── Bước 3: kết quả đơn thay đổi thế nào ──
   // Chạy thử thì con số "sau" chỉ khác "trước" khi thật sự ghi; ta vẫn báo cả hai để so được.
-  const outcomeAfter = apply ? await outcomeDistribution(db) : outcomeBefore;
-  const afterByShipment = apply ? await outcomeByShipment(db, willChange) : new Map<string, OrderOutcome>();
-  let deliveredToNotDelivered = 0;
-  let notDeliveredToDelivered = 0;
-  let returnedChanged = 0;
-  for (const id of willChange) {
+  // CHẠY THỬ KHÔNG ĐO ĐƯỢC TÁC ĐỘNG KẾT QUẢ ĐƠN. Kết quả đơn chỉ đổi sau khi trạng thái vận đơn
+  // được ghi lại, mà chạy thử thì cố tình không ghi. Trước đây chỗ này trả bản sao của
+  // `outcomeBefore` và các con số 0, khiến báo cáo chạy thử trông như "không có tác động" —
+  // nguy hiểm, vì đây chính là guardrail đứng trước lệnh ghi thật.
+  const outcomeAfter = apply ? await outcomeDistribution(db) : null;
+  const afterByShipment = apply ? await outcomeByShipment(db, willChange) : null;
+  let deliveredToNotDelivered = apply ? 0 : null;
+  let notDeliveredToDelivered = apply ? 0 : null;
+  let returnedChanged = apply ? 0 : null;
+  for (const id of afterByShipment ? willChange : []) {
     const before = beforeByShipment.get(id);
-    const after = afterByShipment.get(id);
+    const after = afterByShipment?.get(id);
     if (!before || !after || before === after) continue;
-    if (before === "DELIVERED") deliveredToNotDelivered += 1;
-    if (after === "DELIVERED") notDeliveredToDelivered += 1;
+    if (before === "DELIVERED") deliveredToNotDelivered = (deliveredToNotDelivered ?? 0) + 1;
+    if (after === "DELIVERED") notDeliveredToDelivered = (notDeliveredToDelivered ?? 0) + 1;
     const wasReturned = before === "RETURNED" || before === "RETURNED_BY_RULE";
     const isReturned = after === "RETURNED" || after === "RETURNED_BY_RULE";
-    if (wasReturned !== isReturned) returnedChanged += 1;
+    if (wasReturned !== isReturned) returnedChanged = (returnedChanged ?? 0) + 1;
   }
 
   const [{ n: missingEvidence }] = await db
@@ -271,7 +281,13 @@ export function backfillWarnings(report: BackfillReport): string[] {
   if (report.total > 0 && report.changed / report.total > 0.2) {
     warnings.push(`${report.changed}/${report.total} vận đơn sẽ đổi trạng thái (>20%) — kiểm tra lại bộ dịch trạng thái trước khi ghi.`);
   }
-  if (report.deliveredToNotDelivered > 0) {
+  if (report.deliveredToNotDelivered === null && report.changed > 0) {
+    // Không có số thì không được coi là không có tác động — đây là guardrail đứng trước lệnh ghi.
+    warnings.push(
+      `Chạy thử KHÔNG đo được tác động lên kết quả đơn (${report.changed} vận đơn sẽ đổi trạng thái). Phải đo riêng số đơn lật từ GIAO THÀNH CÔNG sang hoàn trước khi cho ghi.`,
+    );
+  }
+  if ((report.deliveredToNotDelivered ?? 0) > 0) {
     warnings.push(`${report.deliveredToNotDelivered} đơn đang GIAO THÀNH CÔNG sẽ bị lật — doanh thu đã chốt sẽ giảm, cần chủ shop duyệt.`);
   }
   if (report.conflicts > 0) {
