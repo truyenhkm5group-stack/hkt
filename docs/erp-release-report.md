@@ -911,3 +911,147 @@ việc cần cho phục hồi lịch sử:
 
 ⇒ Nhập tệp **không** phải backfill suy đoán. Nó bơm chứng từ ĐVVC thật vào đúng đường ống canonical.
 Khác hẳn `canonical-backfill` (đang bị chặn) vốn chỉ **tính lại** trên lịch sử đang thiếu.
+
+## 10i. PAYLOAD POSCAKE CHUYỂN TIẾP — điều tra 08/09/2026
+
+### Kết luận: **A — Poscake chuyển tiếp NGUYÊN VĂN gói tin Viettel Post**
+
+Đọc 492 gói tin thật đã lưu. Khối `DATA` mang **31 trường**, đều là **tên trường gốc của Viettel
+Post**, không phải tên do Poscake đặt:
+
+| Nhóm | Trường |
+|---|---|
+| Định danh | `ORDER_NUMBER` · `ORDER_REFERENCE` · `GROUPADDRESS_ID` |
+| **Trạng thái thô** | **`ORDER_STATUS`** (mã số) · **`STATUS_NAME`** · `REASON_CODE` |
+| **Mốc của ĐVVC** | **`ORDER_STATUSDATE`** (giờ VN) · `EXPECTED_DELIVERY_DATE` |
+| **Chiều đi/hoàn** | **`IS_RETURNING`** |
+| Hiện trường | `LOCATION_CURRENTLY` + `LOCALION_CURRENTLY` (giữ nguyên cả **lỗi chính tả của VTP**) · `EMPLOYEE_NAME` · `EMPLOYEE_PHONE` · `POD` |
+| Tiền | `MONEY_COLLECTION` · `MONEY_COLLECTION_ORIGIN` · `MONEY_TOTAL` · `MONEY_TOTALFEE` · `MONEY_TOTALVAT` · `MONEY_FEECOD` · `VOUCHER_VALUE` |
+
+Việc **lỗi chính tả `LOCALION_CURRENTLY` của Viettel Post vẫn còn nguyên** là bằng chứng mạnh nhất:
+Poscake không hề đọc-hiểu-ghi lại, nó chuyển tiếp thẳng.
+
+**Lớp bọc ngoài** chỉ có `{DATA, TOKEN}` — đúng phong bì gốc của Viettel Post — cộng `api_token`
+(96/492 gói) do Poscake thêm. **Không có một trường trạng thái chuẩn hoá nào của Poscake.**
+
+Mã trạng thái thô nhận được trải khắp vòng đời thật: `102` · `104` · `202` · `300` · `400` · `500` ·
+**`501`** (20) · `502` (30) · **`504`** (29) · `505` (114) · `506` (45) · `507`.
+
+ERP lưu **cả hai**: `payload.DATA` (bản ghi hành trình) và `payload.RAW` (toàn bộ body gốc kèm phong
+bì) — 492/492 gói có `RAW`.
+
+⇒ Theo mục 4 của yêu cầu: gói tin Poscake chuyển tiếp **ĐƯỢC** coi là chứng từ logistics.
+
+### Thang thẩm quyền — nay có một bản duy nhất
+
+Ghi thành `LOGISTICS_EVIDENCE_AUTHORITY` trong `lib/constants/truth.ts`:
+
+| Mức | Nguồn | Được kết luận? |
+|---|---|---|
+| **HIGH** | `VTP_WEBHOOK` — sự kiện mang mã số VTP, đến thẳng **hoặc Poscake chuyển tiếp nguyên văn** | ✔ |
+| **HIGH** | `VTP_IMPORT` — tệp danh sách vận đơn | ✔ |
+| **HIGH** | `VTP_POLL` — tra cứu API | ✔ |
+| MEDIUM | `partner_status` do Poscake tự chuẩn hoá | ✘ (chỉ khi chưa có HIGH) |
+| LOW | Trạng thái **ĐƠN** Pancake (“Đã nhận”) | ✘ — cao nhất chỉ được nói ĐANG GIAO |
+| **NEVER** | Tiền · COD · bảng kê · trạng thái thanh toán | ✘ vĩnh viễn |
+
+Ranh giới phải nhớ: gói tin **chuyển tiếp** (`webhook_events.source = 'VIETTELPOST'`) khác hẳn
+**bản sao hành trình** trong `orders.partner.extend_update` mà Poscake tự dựng — bản sao đó mốc thời
+gian là giờ Pancake ghi nhận nên chỉ ở mức MEDIUM và bị `deriveShipmentState()` loại.
+
+### LỖI TÌM ĐƯỢC — trạng thái đơn Pancake bị dịch thẳng thành “ĐÃ GIAO”
+
+`lib/integrations/pancake/mapper.ts` có đúng cái luật mà đặc tả cấm:
+
+| Dòng cũ | Sai ở chỗ |
+|---|---|
+| `stage === "DELIVERED" hoặc "PAID"` → `shipmentStage = "DELIVERED"` | trạng thái **ĐƠN** và trạng thái **THANH TOÁN** → trạng thái **LOGISTICS** |
+| `partnerMeta.stage === "PENDING"` + đơn `DELIVERED/PAID` → `"DELIVERED"` | **ghi đè cả khi ĐVVC đã nói `PENDING`** — vứt bỏ chứng từ để lấy trạng thái đơn |
+| `deliveredLike` gộp luôn `stage === "DELIVERED"` và `"PAID"` | kéo theo `deliveredAt`, `isFinal`, `codStatus` |
+| `codCollected: … ? (reconciledCod hoặc codAmount) : 0` | biến **COD KHAI BÁO** thành **tiền ĐÃ THU** |
+
+Dòng cuối là nặng nhất: `cod_collected` là bằng chứng tiền mà `ORDER_OUTCOME` dùng để kết luận giao
+thành công. Bịa nó ra chính là **rửa trạng thái đơn thành chứng từ tiền**, đi vòng qua chiều tiền để
+kết luận chiều logistics.
+
+Hệ quả kèm theo: lời cam kết ở nhánh cuối `ORDER_OUTCOME` — *Pancake báo “đã giao” KHÔNG phải chứng
+từ giao hàng… cao nhất chỉ là ĐANG GIAO* — **không bao giờ chạy tới**, vì mapper đã kịp đặt
+`s.stage = 'DELIVERED'` nên nhánh trên đó bắt trước.
+
+### Mức độ ảnh hưởng thật (đo trên production)
+
+| Phép đo | Kết quả |
+|---|---|
+| Vận đơn `stage = DELIVERED` mà **không có bất kỳ sự kiện ĐVVC nào** | **9** |
+| Trong đó `cod_collected` bịa | **0** (đều bằng 0) |
+| Tổng COD **khai báo** của 9 vận đơn | **4.566.000đ** |
+| Toàn hệ thống: `cod_collected > 0` mà không có dòng bảng kê | 19 vận đơn · 11.255.000đ · **18/19 bằng đúng số khai báo** |
+| Trong 19 đó, có chứng từ ĐVVC | **19/19 có** |
+
+Chín vận đơn kia là biểu hiện thuần khiết nhất: `partner_status` **rỗng**, không một sự kiện ĐVVC
+nào, vậy mà ERP ghi `DELIVERED` + `is_final = true` + `cod_status = COLLECTED` + `delivered_at`
+(13/08 và 29/08) — toàn bộ suy từ trạng thái đơn Pancake.
+
+### Đã sửa
+
+- `shipmentStage` từ trạng thái đơn Pancake cao nhất là **`IN_TRANSIT`**, không bao giờ `DELIVERED`.
+  Chọn `IN_TRANSIT` chứ không phải `PENDING` vì nó nằm trong `SHIPMENT_LEFT_WAREHOUSE` y như
+  `DELIVERED` ⇒ **SỔ KHO không đổi một món nào**, chỉ chiều logistics hết bịa.
+- Xoá hẳn nhánh ghi đè `partnerMeta.stage === "PENDING"`.
+- `deliveredLike` chỉ còn `shipmentStage === "DELIVERED"` (tức do ĐVVC nói) ⇒ `deliveredAt`,
+  `isFinal`, `codStatus` không còn sinh ra từ trạng thái đơn.
+- `codCollected` chỉ lấy từ `partner.cod` (số ĐVVC báo); **bỏ hẳn** nhánh lùi về `codAmount`.
+
+`partnerMeta` (trạng thái ĐVVC do Poscake chuyển tiếp) vẫn được quyền nói `DELIVERED` — đó là thông
+tin của hãng vận chuyển, chỉ đi nhờ đường Poscake.
+
+### Kiểm thử hồi quy (bất biến 13 & 14)
+
+Bất biến **13** dựng đúng ca yêu cầu: đơn Pancake `DELIVERED` + webhook VTP mã **505** *“Tồn - Thông
+báo chuyển hoàn”* ⇒ khẳng định `stage = RETURNING` và `ORDER_OUTCOME = RETURNED`, **không** phải
+`DELIVERED`. Kèm kiểm tra tầng mapper cho cả `delivered` lẫn `paid`: không ra `DELIVERED`, không bịa
+`deliveredAt`, `codCollected = 0`, `isFinal = false`.
+
+Bất biến **14** khoá thang thẩm quyền: `LOGISTICS_DECIDING_SOURCES` phải trùng
+`CARRIER_DOCUMENT_SOURCES`, và `PAYMENT_COD` phải vĩnh viễn ở mức `NEVER`.
+
+`npm test` in **TẤT CẢ KIỂM THỬ ĐẠT** với **14/14** bất biến. Mọi con số fixture cũ giữ nguyên
+(giao thành công 18 · hoàn 32 · GTC 36%) ⇒ bản vá không đụng vào ca đã có chứng từ ĐVVC.
+
+### Giữ xung đột, không ghi đè (mục 8)
+
+Đã có sẵn và được xác nhận còn đúng: sự kiện Pancake **vẫn lưu đủ** trong `shipment_events` (case
+`PKE1508908614` giữ 13 dòng PANCAKE bên cạnh 2 dòng chứng từ) nhưng bị `deriveShipmentState()` loại
+khỏi việc kết luận; luật `ORDER_SHIPMENT_CONFLICT` (`autoRepair: false`) nêu xung đột ra trang Chất
+lượng dữ liệu thay vì tự sửa.
+
+### Đơn nhiều vận đơn (mục 9)
+
+Đo thực tế: **1.509/1.509 đơn có đúng 1 vận đơn**, không đơn nào có hai vận đơn khác trạng thái ⇒
+hiện chưa có ca gộp nhầm. 242 vận đơn **chiều hoàn** được giữ thành dòng riêng (`order_id` NULL,
+`order_reference` = mã gốc) đúng quy ước. `ORDER_OUTCOME` tính ở grain `orders LEFT JOIN shipments`
+nên không gộp theo SĐT/khách; không cần sửa gì.
+
+### Hai case được hỏi
+
+**`PKE1508908614`** — đơn 3176. Lịch sử: **13 sự kiện nguồn PANCAKE** (giữ nguyên, không được kết
+luận) + **2 chứng từ**: `VTP_IMPORT` *“Chờ xử lý”* → PENDING (05/09 00:37:47) và `VTP_WEBHOOK`
+**505** *“Tồn - Thông báo chuyển hoàn bưu cục gốc”* → **RETURNING** (06/09 08:03:05). Chứng từ mới
+nhất thắng ⇒ `stage = RETURNING`, `cod_collected = 0`, `cod_status = PENDING`, `delivered_at` rỗng.
+`ORDER_OUTCOME`: không có mã cuối 504/503/501-hoàn nên không rơi vào `VTP_RETURNED`; có chứng từ ĐVVC
+và `stage = RETURNING` ⇒ **`RETURNED` (đơn hoàn)**. Pancake cũng đang nói `RETURNING` nên không xung
+đột. Đây là ví dụ đẹp: 505 không phải mã cuối mà vẫn kết luận đúng, và 13 bản sao Pancake không làm
+lệch gì.
+
+**`PKE1508295104`** — **KHÔNG tồn tại** trong ERP: 0 dòng ở `shipments`, 0 gói ở `webhook_events`,
+0 dấu vết trong `shipment_events.raw`. Không kết luận được gì; nếu vận đơn này có thật thì nó thuộc
+diện phải bù bằng tệp danh sách vận đơn.
+
+### Cần chủ shop quyết trước khi deploy
+
+Bản vá **chỉ tác động về sau** (`COD_RANK` và `hasCarrierTruth` chặn hạ cấp), nhưng lần đồng bộ
+Pancake kế tiếp sẽ tính lại 9 vận đơn kia: **`DELIVERED` → `IN_TRANSIT`**, kéo theo kết quả đơn từ
+*giao thành công* sang *đang giao* — **9 đơn · 4.566.000đ doanh thu tháng 8 chuyển sang “chưa biết”**.
+
+Đó là sửa số của **kỳ đã chốt**, thuộc mục 7 của `AGENTS.md` (phải hỏi chủ shop). Mã đã commit và
+push; **chưa deploy**, chờ chủ shop duyệt con số này.

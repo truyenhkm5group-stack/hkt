@@ -5,8 +5,9 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
+import { CARRIER_DOCUMENT_SOURCES, LOGISTICS_DECIDING_SOURCES, LOGISTICS_EVIDENCE_AUTHORITY, SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
 import { AUTO_REPAIRABLE_RULES, RECONCILIATION_RULES } from "@/lib/constants/reconciliation";
+import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { deriveShipmentState, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
@@ -243,7 +244,60 @@ export async function testBusinessInvariants(db: Db) {
   // Và số luật được phép tự sửa vẫn đúng ba luật xác định — không ai được lặng lẽ mở rộng.
   assert.equal(AUTO_REPAIRABLE_RULES.length, 3, "12. mở rộng danh sách luật tự sửa phải là quyết định tường minh");
 
+
+  // ══ 13. TRẠNG THÁI ĐƠN PANCAKE KHÔNG BAO GIỜ THÀNH "ĐÃ GIAO" ══
+  // Ca thật khiến luật này ra đời: Pancake nói "Đã nhận" (stage DELIVERED) trong khi chứng từ
+  // Viettel Post mới nhất là 505 "Tồn - Thông báo chuyển hoàn". Kết quả canonical PHẢI là hoàn.
+  const conflictOrder = `inv-order-${++seq}`;
+  const conflictCode = nextCode();
+  await db.insert(schema.orders).values({ id: conflictOrder, stage: "DELIVERED", cod: 849_000, prepaid: 0, insertedAt: new Date() });
+  await applyVtpTracking(
+    trackingPayload(conflictCode, 505, "Tồn - Thông báo chuyển hoàn bưu cục gốc", "06/09/2026 15:03:05", { IS_RETURNING: false }),
+    "VTP_WEBHOOK",
+    { allowCreate: true },
+  );
+  const [conflictShip] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, conflictCode));
+  assert.equal(conflictShip.stage, "RETURNING", "13. mã 505 của ĐVVC phải cho ra ĐANG HOÀN");
+  await db.update(schema.shipments).set({ orderId: conflictOrder }).where(eq(schema.shipments.id, conflictShip.id));
+  const conflictOutcome = await outcomeOf(conflictOrder);
+  assert.equal(conflictOutcome, "RETURNED", "13. Pancake nói 'Đã nhận' + ĐVVC nói đang hoàn ⇒ canonical là HOÀN");
+  assert.notEqual(conflictOutcome, "DELIVERED", "13. trạng thái đơn Pancake KHÔNG được lật kết quả thành giao thành công");
+
+  // Cùng luật đó ở tầng mapper: đơn Pancake "đã nhận"/"đã thanh toán" mà ĐVVC chưa nói gì thì cao
+  // nhất chỉ được là ĐANG GIAO, và tuyệt đối không được sinh ra tiền đã thu.
+  for (const pancakeStatus of ["delivered", "paid"]) {
+    const mapped = mapOrder({
+      id: `inv-map-${pancakeStatus}-${++seq}`,
+      status: pancakeStatus === "paid" ? 16 : 3,
+      cod: 499_000,
+      money_to_collect: 499_000,
+      inserted_at: "2026-09-01T00:00:00",
+      partner: { partner_name: "Viettel Post", order_number_vtp: nextCode(), extend_code: null },
+    });
+    assert.ok(mapped?.shipment, `13. đơn ${pancakeStatus} phải sinh vận đơn để kiểm tra`);
+    assert.notEqual(mapped.shipment.stage, "DELIVERED", `13. trạng thái đơn Pancake '${pancakeStatus}' không được thành ĐÃ GIAO`);
+    assert.equal(mapped.shipment.deliveredAt, null, `13. không có chứng từ ĐVVC thì không được bịa mốc giao hàng`);
+    assert.equal(mapped.shipment.codCollected, 0, `13. không được biến COD KHAI BÁO thành tiền ĐÃ THU`);
+    assert.equal(mapped.shipment.isFinal, false, `13. không có chứng từ ĐVVC thì vận đơn chưa kết thúc`);
+  }
+
+  // ══ 14. THANG THẨM QUYỀN CHỈ CÓ MỘT BẢN ══
+  assert.deepEqual(
+    [...LOGISTICS_DECIDING_SOURCES].sort(),
+    [...CARRIER_DOCUMENT_SOURCES].sort(),
+    "14. nguồn được quyền kết luận logistics phải khớp giữa thang thẩm quyền và bộ lọc sự kiện",
+  );
+  assert.ok(
+    LOGISTICS_EVIDENCE_AUTHORITY.every((s) => (s.level === "NEVER" ? !s.decides : true)),
+    "14. nguồn xếp hạng NEVER không bao giờ được quyền kết luận",
+  );
+  assert.equal(
+    LOGISTICS_EVIDENCE_AUTHORITY.find((s) => s.source === "PAYMENT_COD")?.level,
+    "NEVER",
+    "14. tiền/COD phải mãi mãi ở mức NEVER cho chiều logistics",
+  );
+
   console.log(
-    `✓ Bất biến nghiệp vụ: 12/12 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký)`,
+    `✓ Bất biến nghiệp vụ: 14/14 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản)`,
   );
 }

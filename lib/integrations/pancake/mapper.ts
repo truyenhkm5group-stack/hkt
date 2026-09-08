@@ -329,21 +329,36 @@ function mapShipment(order: Record<string, unknown>, stage: OrderStage, statusAt
   const partnerStatus = str(partner.partner_status) || null;
   const partnerMeta = partnerStatus ? PANCAKE_PARTNER_STATUS[partnerStatus] : undefined;
 
+  /**
+   * TRẠNG THÁI ĐƠN PANCAKE KHÔNG BAO GIỜ ĐƯỢC THÀNH "ĐÃ GIAO".
+   *
+   * `stage` ở đây là trạng thái BÁN HÀNG / TIỀN trên Pancake ("Đã nhận", "Đã thanh toán"), do
+   * nhân viên bấm tay. Nó không phải chứng từ vận chuyển. Trước đây `DELIVERED`/`PAID` được dịch
+   * thẳng thành `shipmentStage = "DELIVERED"`, tức là suy trạng thái LOGISTICS từ trạng thái ĐƠN
+   * và từ trạng thái THANH TOÁN — đúng thứ đặc tả cấm (docs/business-rules/ORDER_OUTCOME.md).
+   * Tệ hơn, nhánh cũ còn ghi đè cả khi ĐVVC đã nói `PENDING`.
+   *
+   * Nay: cao nhất mà trạng thái đơn Pancake được phép nói là ĐANG GIAO — đúng bằng câu mà
+   * `ORDER_OUTCOME` vẫn khẳng định ở nhánh cuối. `IN_TRANSIT` nằm trong `SHIPMENT_LEFT_WAREHOUSE`
+   * y như `DELIVERED` nên SỔ KHO không đổi một món nào; chỉ chiều logistics thôi hết bịa.
+   *
+   * `partnerMeta` (trạng thái ĐVVC do Pancake chuyển tiếp) vẫn được quyền nói DELIVERED —
+   * đó là thông tin của hãng vận chuyển, chỉ đi qua Pancake.
+   */
   let shipmentStage: ShipmentStage = partnerMeta?.stage ?? "PENDING";
   if (!partnerMeta) {
-    if (stage === "DELIVERED" || stage === "PAID") shipmentStage = "DELIVERED";
-    else if (stage === "RETURNING") shipmentStage = "RETURNING";
+    if (stage === "RETURNING") shipmentStage = "RETURNING";
     else if (stage === "RETURNED" || stage === "PARTIAL_RETURN") shipmentStage = "RETURNED";
     else if (stage === "CANCELLED" || stage === "DELETED") shipmentStage = hasPartner ? "CANCELLED" : "PENDING";
     else if (stage === "SHIPPED") shipmentStage = "PICKED_UP";
-  } else if (partnerMeta.stage === "PENDING" && (stage === "DELIVERED" || stage === "PAID")) {
-    shipmentStage = "DELIVERED";
+    else if (stage === "DELIVERED" || stage === "PAID") shipmentStage = "IN_TRANSIT";
   }
 
   const codAmount = Math.max(0, int(order.money_to_collect, order.cod));
   const reconciledCod = Math.max(0, int(partner.cod));
   const paidAt = pancakeDate(partner.paid_at);
-  const deliveredLike = shipmentStage === "DELIVERED" || stage === "DELIVERED" || stage === "PAID";
+  /** CHỈ trạng thái của ĐVVC mới được coi là đã giao. Trạng thái đơn / thanh toán thì không. */
+  const deliveredLike = shipmentStage === "DELIVERED";
   let codStatus: CodStatus = codAmount > 0 ? "PENDING" : "NOT_APPLICABLE";
   if (codAmount > 0) {
     if (paidAt || partnerStatus === "delivered_cod" || partnerStatus === "returned_cod") codStatus = "RECONCILED";
@@ -368,7 +383,15 @@ function mapShipment(order: Record<string, unknown>, stage: OrderStage, statusAt
     partnerStatus,
     stage: shipmentStage,
     codAmount,
-    codCollected: codStatus === "COLLECTED" || codStatus === "RECONCILED" ? (reconciledCod || codAmount) : 0,
+    /**
+     * TIỀN THỰC THU CHỈ ĐƯỢC LẤY TỪ SỐ ĐVVC BÁO (`partner.cod`), KHÔNG BAO GIỜ TỪ SỐ KHAI BÁO.
+     *
+     * Nhánh cũ `reconciledCod || codAmount` biến số COD KHAI BÁO thành số ĐÃ THU chỉ vì trạng thái
+     * nói "đã giao". `cod_collected` là bằng chứng tiền — `ORDER_OUTCOME` dùng nó để kết luận giao
+     * thành công — nên bịa nó ra chính là rửa trạng thái đơn thành chứng từ tiền.
+     * Chưa có số của ĐVVC thì là CHƯA BIẾT, để 0 và chờ bảng kê.
+     */
+    codCollected: codStatus === "COLLECTED" || codStatus === "RECONCILED" ? reconciledCod : 0,
     codStatus,
     codReconciledAt: paidAt,
     shippingFee: Math.max(0, int(partner.total_fee, order.partner_fee)),

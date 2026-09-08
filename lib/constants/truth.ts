@@ -105,6 +105,37 @@ export const CARRIER_DOCUMENT_SOURCES = ["VTP_WEBHOOK", "VTP_POLL", "VTP_IMPORT"
 export const sqlSourceList = (sources: readonly string[]) => sources.map((s) => `'${s}'`).join(",");
 
 /**
+ * ───────── THANG THẨM QUYỀN CỦA BẰNG CHỨNG LOGISTICS ─────────
+ *
+ * Viết ra thành bảng vì câu hỏi "cái nào thắng" đã được trả lời khác nhau ở từng chỗ trong lịch sử
+ * kho mã. Một chỗ duy nhất, mọi nơi tra lại.
+ *
+ * Điều tra 08/09/2026 (docs/erp-release-report.md mục 10i) xác định: Pancake CHUYỂN TIẾP NGUYÊN
+ * VĂN gói tin webhook của Viettel Post — giữ đủ `ORDER_STATUS` (mã số), `STATUS_NAME`,
+ * `ORDER_STATUSDATE`, `IS_RETURNING`, `REASON_CODE` — nên gói tin đó là chứng từ của HÃNG VẬN
+ * CHUYỂN, chỉ đi nhờ đường Pancake. Vì vậy nó nằm ở mức CAO, ngang webhook đến thẳng.
+ *
+ * Ranh giới phải nhớ: đó là gói tin CHUYỂN TIẾP (`webhook_events.source = 'VIETTELPOST'`), KHÁC
+ * hẳn bản sao hành trình trong `orders.partner.extend_update` mà Pancake tự dựng — bản sao đó chỉ
+ * ở mức TRUNG BÌNH vì mốc thời gian là giờ Pancake ghi nhận.
+ */
+export const LOGISTICS_EVIDENCE_AUTHORITY = [
+  { level: "HIGH", source: "VTP_WEBHOOK", what: "Sự kiện hành trình mang mã số của Viettel Post — đến thẳng hoặc do Pancake chuyển tiếp nguyên văn", decides: true },
+  { level: "HIGH", source: "VTP_IMPORT", what: "Tệp danh sách vận đơn tải từ viettelpost.vn", decides: true },
+  { level: "HIGH", source: "VTP_POLL", what: "Tra cứu hành trình qua API Viettel Post", decides: true },
+  { level: "MEDIUM", source: "PANCAKE_PARTNER_STATUS", what: "Trạng thái vận đơn Pancake tự chuẩn hoá (partner_status) — chỉ dùng khi CHƯA có bằng chứng mức CAO", decides: false },
+  { level: "LOW", source: "PANCAKE_ORDER_STAGE", what: "Trạng thái ĐƠN trên Pancake (\"Đã nhận\") — cao nhất chỉ được nói ĐANG GIAO", decides: false },
+  { level: "NEVER", source: "PAYMENT_COD", what: "Tiền, COD, bảng kê, trạng thái thanh toán — KHÔNG BAO GIỜ là bằng chứng logistics", decides: false },
+] as const;
+
+/**
+ * Chỉ những nguồn này được quyền kết luận chiều logistics. Phải trùng đúng
+ * `CARRIER_DOCUMENT_SOURCES` — kiểm thử bất biến khoá hai danh sách khớp nhau để không ai nới một
+ * bên mà quên bên kia. (`MANUAL` cố ý KHÔNG có mặt: người nhập tay không tạo ra được mã cuối.)
+ */
+export const LOGISTICS_DECIDING_SOURCES = LOGISTICS_EVIDENCE_AUTHORITY.filter((s) => s.decides).map((s) => s.source);
+
+/**
  * Chiều đi / chiều hoàn của một sự kiện — quy đổi từ cờ IS_RETURNING của Viettel Post.
  * `UNKNOWN` nghĩa là ĐVVC không gửi cờ: KHÔNG được đoán, và mã 501 không có cờ thì không được
  * coi là giao tới tay khách.
