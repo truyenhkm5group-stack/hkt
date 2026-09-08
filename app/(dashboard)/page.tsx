@@ -93,7 +93,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <AttentionRow href="/shipments?stage=DELIVERY_FAILED,RETURNING" icon={AlertTriangle} tone="bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title={`${formatNumber(data.attention.failedDelivery)} vận đơn giao thất bại / đang hoàn`} note="Cần gọi khách hoặc yêu cầu phát tiếp" />
             <AttentionRow href="/shipments?stage=PICKED_UP,IN_TRANSIT,OUT_FOR_DELIVERY" icon={Clock} tone="bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" title={`${formatNumber(data.attention.staleShipments)} vận đơn quá 4 ngày chưa giao`} note="Không có cập nhật mới từ ĐVVC" />
             <AttentionRow href="/cod?cod=COLLECTED,RECONCILED" icon={CircleDollarSign} tone="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" title={`${formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về tài khoản`} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn đã giao, chưa nhận tiền`} />
-            <AttentionRow href="/products?stock=low" icon={Boxes} tone="bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" title={`${formatNumber(data.attention.lowStock)} mẫu mã sắp hết hàng`} note="Tồn khả dụng ≤ 5" />
+            <AttentionRow
+              href="/inventory/planning"
+              icon={Boxes}
+              tone="bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+              title={`${formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp`}
+              note={`${formatNumber(data.stockRisk.out)} đã hết · ${formatNumber(data.stockRisk.critical)} sẽ hết trước khi lô mới về · ${formatNumber(data.stockRisk.low)} sắp thiếu${data.stockRisk.unknown ? ` · ${formatNumber(data.stockRisk.unknown)} chưa có phiếu nhập nên chưa tính được` : ""}`}
+            />
           </div>
           <div className="m-4 rounded-xl bg-sidebar p-4 text-sidebar-foreground">
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-sidebar-foreground/60">Đồng bộ gần nhất</p>

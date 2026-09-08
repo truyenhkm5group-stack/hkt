@@ -221,3 +221,47 @@ export async function stockReceiptSummary() {
     .from(schema.stockReceipts);
   return { receipts: Number(row?.receipts ?? 0), adjustments: Number(row?.adjustments ?? 0), received: Number(row?.received ?? 0), adjusted: Number(row?.adjusted ?? 0), cost: Number(row?.cost ?? 0), lastAt: row?.lastAt ? new Date(row.lastAt) : null };
 }
+
+/**
+ * TỔNG HỢP NĂM TRẠNG THÁI CỦA HÀNG + RỦI RO HẾT HÀNG.
+ *
+ * Dùng cho Tổng quan để thay ngưỡng cứng `tồn <= 5`: mẫu mã bán 20 cái/ngày còn 8 cái là sắp
+ * cháy hàng, mẫu mã bán 1 cái/tháng còn 3 cái thì vẫn dư. Rủi ro tính theo `days of cover` so với
+ * thời gian sản xuất — cùng một bộ máy với trang Kế hoạch SX và cảnh báo vận hành, nên ba nơi
+ * không thể ra ba con số khác nhau.
+ */
+export async function stockRiskSummary() {
+  const { getReplenishmentPlan } = await import("@/lib/queries/planning");
+  const [plan, db] = await Promise.all([getReplenishmentPlan(), getDb()]);
+  const salesAgg = variantSalesSubquery(db);
+  const receiptsAgg = variantReceiptsSubquery(db);
+  // HÀNG HỤT: đã lập phiếu tái nhập nhưng đếm được ít hơn số đã xuất — hỏng, mất, hoặc không
+  // bán lại được. Đây là số ĐO ĐƯỢC từ chênh lệch phiếu, không phải ước lượng.
+  const [shrink] = await db
+    .select({ n: sql<number>`coalesce(sum(${stockShrinkageExpr(salesAgg, receiptsAgg)}), 0)` })
+    .from(pv)
+    .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
+    .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id));
+  const rows = plan.rows;
+  const sum = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((total, r) => total + pick(r), 0);
+  return {
+    states: {
+      ON_HAND: sum((r) => (r.stockKnown ? r.stock : 0)),
+      RESERVED: sum((r) => r.committed),
+      AVAILABLE: sum((r) => (r.stockKnown ? r.available : 0)),
+      INBOUND: plan.summary.incomingUnits,
+      UNSELLABLE: Number(shrink?.n ?? 0),
+    },
+    /** Mẫu mã hết hàng hoặc sẽ hết TRƯỚC khi lô mới về — việc phải xử lý ngay. */
+    atRisk: plan.summary.out + plan.summary.critical,
+    out: plan.summary.out,
+    critical: plan.summary.critical,
+    low: plan.summary.low,
+    /** Mẫu mã chưa có phiếu nhập nào ⇒ tồn là CHƯA BIẾT, không phải 0 — không được đếm là hết hàng. */
+    unknown: plan.summary.unknown,
+    suggestedUnits: plan.summary.suggestedUnits,
+    orderCost: plan.summary.orderCost,
+  };
+}
+
+export type StockRiskSummary = Awaited<ReturnType<typeof stockRiskSummary>>;

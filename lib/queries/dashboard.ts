@@ -2,7 +2,7 @@ import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from
 import { getDb, schema } from "@/db";
 import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
-import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { stockRiskSummary } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
@@ -143,14 +143,11 @@ async function getDashboardDataUncached(period: Period) {
 
   // Cần xử lý
   const [failedDelivery] = await db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"]));
-  const lowStockSales = variantSalesSubquery(db);
-  const lowStockReceipts = variantReceiptsSubquery(db);
-  const [lowStock] = await db
-    .select({ count: count() })
-    .from(schema.productVariants)
-    .leftJoin(lowStockSales, eq(lowStockSales.variantId, schema.productVariants.id))
-    .leftJoin(lowStockReceipts, eq(lowStockReceipts.variantId, schema.productVariants.id))
-    .where(and(lte(erpStockExpr(lowStockSales, lowStockReceipts), 5), eq(schema.productVariants.isRemoved, false), eq(schema.productVariants.isHidden, false)));
+  // THIẾU HÀNG TÍNH THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG.
+  // Trước đây ở đây là `tồn <= 5`: mẫu mã bán 20 cái/ngày còn 8 cái thì bị bỏ qua, còn mẫu mã bán
+  // 1 cái/tháng còn 3 cái thì bị báo động. Nay dùng chung bộ máy days-of-cover với trang Kế hoạch
+  // SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số khác nhau (F5).
+  const stockRisk = await stockRiskSummary();
   const [stale] = await db
     .select({ count: count() })
     .from(schema.shipments)
@@ -207,10 +204,11 @@ async function getDashboardDataUncached(period: Period) {
     attention: {
       newOrders: Number(newOrders?.count ?? 0),
       failedDelivery: Number(failedDelivery?.count ?? 0),
-      lowStock: Number(lowStock?.count ?? 0),
+      lowStock: stockRisk.atRisk,
       staleShipments: Number(stale?.count ?? 0),
       codWaiting: { count: codCash.codWaiting.count, amount: codCash.codWaiting.amount, collected: codCash.codWaiting.collected, deductedByStatements: codCash.codWaiting.deductedByStatements },
     },
+    stockRisk,
     recentOrders,
     topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0) })),
     lastSyncRows,

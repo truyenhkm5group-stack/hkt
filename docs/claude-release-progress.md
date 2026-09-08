@@ -18,7 +18,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ✅ xong | `feat: turn data quality into ERP control tower` |
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ✅ xong | `test: enforce ERP business truth invariants` |
 | 9 | Chân lý tài chính | ✅ xong | `feat: standardize ERP financial truth` |
-| 10 | Chân lý tồn kho + rủi ro hết hàng | ⏳ | |
+| 10 | Chân lý tồn kho + rủi ro hết hàng | ✅ xong | `feat: improve inventory truth and stock risk` |
 | 11 | Chỉ số theo mẫu mã | ⏳ | |
 | 12 | Hàng đợi việc theo mức ưu tiên | ⏳ | |
 | 13 | Tổng quan ra quyết định | ⏳ | |
@@ -212,6 +212,23 @@ Tab mới "Sáu con số tiền" trên trang Báo cáo (đi cùng quyền `repor
 `tests/financial-truth.test.ts` khoá: ba con số phải khác nhau · doanh thu giao TC dùng cùng định
 nghĩa với Tổng quan · ba bậc trạng thái tiền loại trừ lẫn nhau · bậc thang cộng đúng · dòng chi phí
 mang dấu âm · nhãn độ chính xác đúng · thiếu chứng từ thì trả CHƯA BIẾT.
+
+### TASK 10 — Chân lý tồn kho + rủi ro hết hàng
+
+Kiểm toán sổ kho: phương trình `tồn = phiếu kho − đã xuất qua ĐVVC` và vòng đời hàng hoàn đã đúng
+từ trước, không sửa. Bổ sung phần còn thiếu:
+
+- Năm trạng thái của hàng có TÊN (`STOCK_STATE_LABEL`): `ON_HAND` · `RESERVED` · `AVAILABLE` ·
+  `INBOUND` · `UNSELLABLE`, mỗi trạng thái kèm giải thích. `UNSELLABLE` là số ĐO ĐƯỢC từ chênh lệch
+  phiếu tái nhập so với số đã xuất, không phải ước lượng.
+- **Đóng F5**: Tổng quan thôi dùng ngưỡng cứng `tồn <= 5`. Nay dùng `stockRiskSummary()` — cùng bộ
+  máy days-of-cover với trang Kế hoạch SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số
+  khác nhau. Dòng "Cần xử lý" nói rõ bao nhiêu đã hết, bao nhiêu sẽ hết trước khi lô mới về, bao
+  nhiêu chưa có phiếu nhập nên chưa tính được.
+- `REJECTED_HARD_STOCK_THRESHOLD` ghi lại điều đã bỏ để nó không lặng lẽ quay lại.
+
+`tests/inventory.test.ts` khoá: khả dụng ≤ tồn thực tế · hàng hụt không âm · Tổng quan dùng đúng
+con số rủi ro · Tổng quan / Kế hoạch SX / cảnh báo cùng một bộ máy.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
