@@ -15,7 +15,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 4 | Bộ máy đối soát | ✅ xong | `feat: add shipment reconciliation safeguards` |
 | 5 | Lớp chân lý chỉ số | ✅ xong | `feat: centralize ERP metric truth` |
 | 6 | Dry-run lịch sử + backfill an toàn | ✅ xong | `chore: rebuild canonical historical ERP truth` |
-| 7 | Trung tâm điều khiển Chất lượng dữ liệu | ⏳ | |
+| 7 | Trung tâm điều khiển Chất lượng dữ liệu | ✅ xong | `feat: turn data quality into ERP control tower` |
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ⏳ | |
 | 9 | Chân lý tài chính | ⏳ | |
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ⏳ | |
@@ -155,6 +155,24 @@ lần nữa là về đúng trạng thái tính được.
 
 Chạy được bằng `npx tsx scripts/erp-backfill.ts` (mặc định chạy thử) hoặc job `canonical-backfill`
 trên trang Kết nối dữ liệu.
+
+### TASK 7 — Trung tâm điều khiển Chất lượng dữ liệu
+
+Đóng F10. Bộ luật mở rộng lên 18 luật, đủ 12 luật kế hoạch yêu cầu (thêm
+`DELIVERED_WITHOUT_LOGISTICS_EVIDENCE`, `MISSING_PRODUCT_MAPPING`, `ZERO_TOTAL_WITH_ITEMS`), mỗi
+luật có thêm `entity` để biết vi phạm nằm trên loại đối tượng nào.
+
+`lib/queries/control-tower.ts` định nghĩa CÂU TRUY VẤN của từng luật đúng một lần, dùng lại cho cả
+đếm, lấy ví dụ và mở danh sách đầy đủ — nên con số trên thẻ và danh sách mở ra không thể lệch nhau.
+Mỗi dòng mang: mã · **bằng chứng cụ thể** · thời điểm · id để mở chi tiết.
+
+Trang Chất lượng dữ liệu có thêm mục "Trung tâm điều khiển": mức nghiêm trọng, nghĩa thật, việc nên
+làm, nhãn "ERP tự sửa được" hay "Chỉ báo cáo", 5 ví dụ kèm bằng chứng, nút mở danh sách có phân
+trang, và link sang trang xử lý tương ứng.
+
+Kiểm thử bổ sung trong `tests/reconciliation.test.ts`: mọi luật đang bật phải có lý do, việc cần
+làm, mốc phát hiện, loại đối tượng và bằng chứng cho từng dòng; tổng của drill-down phải bằng số
+trên thẻ; phân trang phải chạy.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

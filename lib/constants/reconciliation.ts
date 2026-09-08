@@ -17,6 +17,9 @@ export type IssueSeverity = "ERROR" | "WARNING" | "INFO";
 
 export type ReconciliationRuleKey =
   | "SHIPMENT_STATE_DRIFT"
+  | "DELIVERED_WITHOUT_LOGISTICS_EVIDENCE"
+  | "MISSING_PRODUCT_MAPPING"
+  | "ZERO_TOTAL_WITH_ITEMS"
   | "PAYMENT_DELIVERED_CONFLICT"
   | "COD_STATE_CONFLICT"
   | "COD_NOT_APPLICABLE_WITH_AMOUNT"
@@ -32,9 +35,13 @@ export type ReconciliationRuleKey =
   | "FAILED_EVENT_PROCESSING"
   | "COD_OVERDUE_UNPAID";
 
+/** Loại đối tượng mà một vi phạm trỏ tới — quyết định drill-down mở trang nào. */
+export type IssueEntity = "shipment" | "order" | "order_item" | "webhook_event" | "shipment_event";
+
 export type ReconciliationRule = {
   key: ReconciliationRuleKey;
   severity: IssueSeverity;
+  entity: IssueEntity;
   label: string;
   /** Nghĩa thật của con số này. */
   reason: string;
@@ -50,6 +57,7 @@ export type ReconciliationRule = {
 export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationRule> = {
   SHIPMENT_STATE_DRIFT: {
     key: "SHIPMENT_STATE_DRIFT",
+    entity: "shipment",
     severity: "WARNING",
     label: "Ảnh chụp vận đơn lệch với lịch sử sự kiện",
     reason: "`shipments.stage` khác trạng thái dựng lại từ `shipment_events`. Ảnh chụp đã bị một luồng nào đó ghi sai, hoặc còn sót từ trước khi trạng thái được tính từ lịch sử.",
@@ -58,6 +66,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   COD_NOT_APPLICABLE_WITH_AMOUNT: {
     key: "COD_NOT_APPLICABLE_WITH_AMOUNT",
+    entity: "shipment",
     severity: "WARNING",
     label: "Ghi 'không thu hộ' nhưng vận đơn vẫn có tiền thu hộ",
     reason: "`cod_status = NOT_APPLICABLE` chỉ đúng khi `cod_amount = 0`. Có tiền thu hộ mà ghi 'không thu hộ' là xoá mất dấu vết đòi tiền Viettel Post.",
@@ -66,6 +75,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   PAYMENT_DELIVERED_CONFLICT: {
     key: "PAYMENT_DELIVERED_CONFLICT",
+    entity: "shipment",
     severity: "ERROR",
     label: "Tiền đã về nhưng vận đơn chưa ghi giao thành công",
     reason: "Bảng kê nói tiền của vận đơn này đã về, còn hành trình Viettel Post thì chưa từng ghi phát thành công. Một trong hai nguồn sai, và MÁY KHÔNG BIẾT BÊN NÀO.",
@@ -74,6 +84,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   COD_STATE_CONFLICT: {
     key: "COD_STATE_CONFLICT",
+    entity: "shipment",
     severity: "ERROR",
     label: "Trạng thái tiền mâu thuẫn với chính chứng từ tiền",
     reason: "Ví dụ: đã ghi nhận số thực thu > 0 nhưng trạng thái vẫn là 'không thu hộ', hoặc vận đơn đã hoàn/huỷ mà tiền vẫn ghi đã về ngân hàng.",
@@ -82,6 +93,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   ORDER_WITH_TRACKING_NO_SHIPMENT: {
     key: "ORDER_WITH_TRACKING_NO_SHIPMENT",
+    entity: "order",
     severity: "WARNING",
     label: "Đơn đã sang bước gửi hàng nhưng ERP chưa có vận đơn",
     reason: "Pancake ghi đơn đã gửi/đã nhận/đang hoàn nhưng ERP không có dòng vận đơn nào. Đơn này nằm ngoài mọi số liệu logistics.",
@@ -90,6 +102,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   SHIPMENT_WITHOUT_ORDER: {
     key: "SHIPMENT_WITHOUT_ORDER",
+    entity: "shipment",
     severity: "WARNING",
     label: "Vận đơn chưa ghép được với đơn nào",
     reason: "Vận đơn có trên Viettel Post nhưng chưa ghép được đơn ERP. Không vào doanh thu, lợi nhuận, tồn kho, marketing.",
@@ -98,6 +111,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   DUPLICATE_TRACKING: {
     key: "DUPLICATE_TRACKING",
+    entity: "shipment",
     severity: "ERROR",
     label: "Một mã vận đơn nằm trên nhiều dòng",
     reason: "Cùng một mã vận đơn xuất hiện ở nhiều dòng `shipments`. Mọi tổng hợp theo vận đơn sẽ đếm hai lần.",
@@ -106,6 +120,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   STALE_SHIPMENT: {
     key: "STALE_SHIPMENT",
+    entity: "shipment",
     severity: "WARNING",
     label: "Vận đơn chưa kết thúc, lâu không có tin mới",
     reason: "Vận đơn đang mở mà Viettel Post không gửi tin nào trong nhiều ngày — có thể webhook rơi, có thể hàng đang kẹt thật.",
@@ -114,6 +129,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   UNKNOWN_VTP_STATUS: {
     key: "UNKNOWN_VTP_STATUS",
+    entity: "shipment_event",
     severity: "WARNING",
     label: "Viettel Post gửi trạng thái ERP chưa hiểu",
     reason: "Sự kiện có mã / chữ không nằm trong bảng mã của ERP nên không dựng được trạng thái. Sự kiện vẫn được lưu nguyên vẹn.",
@@ -122,6 +138,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   INVALID_EVENT_ORDER: {
     key: "INVALID_EVENT_ORDER",
+    entity: "shipment",
     severity: "ERROR",
     label: "Mốc thời gian đi ngược",
     reason: "Giao thành công trước cả khi lấy hàng, hoặc hoàn về trước khi rời kho. Nghĩa là một trong các mốc bị ghi sai.",
@@ -130,6 +147,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   DELIVERED_WITHOUT_DATE: {
     key: "DELIVERED_WITHOUT_DATE",
+    entity: "shipment",
     severity: "WARNING",
     label: "Vận đơn ghi giao thành công nhưng không có mốc giao",
     reason: "Không có mốc giao thì không tính được thời gian giao vận và không biết bao giờ tới hạn trả tiền.",
@@ -138,6 +156,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   ORDER_SHIPMENT_CONFLICT: {
     key: "ORDER_SHIPMENT_CONFLICT",
+    entity: "shipment",
     severity: "WARNING",
     label: "Pancake và Viettel Post nói hai điều khác nhau",
     reason: "Trạng thái đơn trên Pancake mâu thuẫn với trạng thái vận đơn. Theo quy tắc của shop, Viettel Post thắng — nhưng nhân viên vẫn đang nhìn số sai trên Pancake.",
@@ -146,6 +165,7 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   INVENTORY_RETURN_CONFLICT: {
     key: "INVENTORY_RETURN_CONFLICT",
+    entity: "shipment",
     severity: "ERROR",
     label: "Kho xác nhận nhận hàng hoàn của vận đơn không phải đơn hoàn",
     reason: "Có mốc kho thực nhận hàng hoàn nhưng vận đơn không hề hoàn. Hoặc kho nhận nhầm, hoặc trạng thái vận đơn sai — dù cách nào thì tồn kho cũng đang thừa.",
@@ -154,14 +174,43 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   },
   FAILED_EVENT_PROCESSING: {
     key: "FAILED_EVENT_PROCESSING",
+    entity: "webhook_event",
     severity: "WARNING",
     label: "Gói tin nhận được nhưng chưa xử lý được",
     reason: "Webhook hỏng lúc xử lý, hoặc tới trước khi đơn tương ứng được đồng bộ về ERP. Gói tin gốc vẫn còn nguyên.",
     suggestedAction: "Chạy lại: `npx tsx scripts/vtp-retry-webhooks.ts`. Xử lý lại là idempotent nên chạy bao nhiêu lần cũng được.",
     autoRepair: false,
   },
+  DELIVERED_WITHOUT_LOGISTICS_EVIDENCE: {
+    key: "DELIVERED_WITHOUT_LOGISTICS_EVIDENCE",
+    entity: "shipment",
+    severity: "ERROR",
+    label: "Ghi giao thành công nhưng không có chứng từ logistics",
+    reason: "Ảnh chụp vận đơn là 'đã giao' nhưng lịch sử không có sự kiện nào của Viettel Post nói đã phát thành công. Kết luận này không dựa trên chứng từ nào cả.",
+    suggestedAction: "Tra lại vận đơn trên Viettel Post rồi nhập danh sách vận đơn; nếu không có chứng từ thì KHÔNG được tính vào doanh thu.",
+    autoRepair: false,
+  },
+  MISSING_PRODUCT_MAPPING: {
+    key: "MISSING_PRODUCT_MAPPING",
+    entity: "order_item",
+    severity: "WARNING",
+    label: "Dòng đơn chưa ghép được mẫu mã",
+    reason: "Dòng đơn không trỏ tới mẫu mã nào trong ERP nên không trừ tồn, không vào kế hoạch sản xuất và không tra được giá vốn.",
+    suggestedAction: "Đồng bộ lại sản phẩm từ Pancake, hoặc tạo mẫu mã còn thiếu.",
+    autoRepair: false,
+  },
+  ZERO_TOTAL_WITH_ITEMS: {
+    key: "ZERO_TOTAL_WITH_ITEMS",
+    entity: "order",
+    severity: "WARNING",
+    label: "Đơn có hàng nhưng tổng tiền bằng 0",
+    reason: "Đơn có sản phẩm mà giá trị bằng 0. Hàng vẫn rời kho nhưng doanh thu ghi nhận là 0 — hoặc là đơn tặng/bảo hành, hoặc là dữ liệu hỏng.",
+    suggestedAction: "Kiểm tra trên Pancake xem có phải đơn tặng không; nếu không thì sửa giá rồi đồng bộ lại.",
+    autoRepair: false,
+  },
   COD_OVERDUE_UNPAID: {
     key: "COD_OVERDUE_UNPAID",
+    entity: "shipment",
     severity: "WARNING",
     label: "Giao xong quá lâu mà tiền chưa về",
     reason: "Đã phát thành công quá hạn trả tiền của Viettel Post mà chưa thấy dòng bảng kê nào.",

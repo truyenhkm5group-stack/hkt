@@ -4,6 +4,8 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AUTO_REPAIRABLE_RULES, RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER } from "@/lib/constants/reconciliation";
 import { checkShipmentConsistency, repairReconciliation, scanReconciliation } from "@/lib/sync/consistency";
+import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
+import { clearMemo } from "@/lib/cache";
 
 /**
  * BỘ MÁY ĐỐI SOÁT — kiểm thử khoá đúng một câu hỏi: ERP được phép TỰ SỬA những gì?
@@ -167,6 +169,39 @@ export async function testReconciliation(db: Db) {
   assert.ok(
     job.repair.reportedOnly.some((r) => r.rule === "PAYMENT_DELIVERED_CONFLICT" && r.why.length > 0),
     "báo cáo phải nói rõ vì sao có những thứ CỐ Ý không sửa",
+  );
+
+  // ───────── 8. TRUNG TÂM ĐIỀU KHIỂN: con số trên thẻ và danh sách mở ra phải BẰNG NHAU ─────────
+  clearMemo();
+  const tower = await getControlTower();
+  assert.ok(tower.issues.length > 0, "trung tâm điều khiển phải thấy được vi phạm");
+  assert.equal(tower.ruleCount, RECONCILIATION_RULE_ORDER.length, "phải kiểm đủ mọi luật trong bộ luật");
+  assert.equal(tower.issues[0].severity, "ERROR", "vi phạm nghiêm trọng phải nằm trên cùng");
+  for (const issue of tower.issues) {
+    assert.ok(issue.reason && issue.suggestedAction, `${issue.rule} phải có lý do và việc cần làm`);
+    assert.ok(issue.detectedAt instanceof Date, `${issue.rule} phải có mốc phát hiện`);
+    assert.ok(issue.entity, `${issue.rule} phải nói rõ vi phạm nằm trên loại đối tượng nào`);
+    assert.ok(issue.sample.length > 0 && issue.sample.length <= 5, `${issue.rule} phải có ví dụ`);
+    for (const row of issue.sample) assert.ok(row.code && row.evidence, `${issue.rule} phải nêu BẰNG CHỨNG cho từng dòng, không chỉ đếm`);
+  }
+  // Drill-down dùng CHÍNH câu truy vấn đã đếm nên tổng phải khớp tuyệt đối.
+  const first = tower.issues[0];
+  const drill = await controlTowerDrill(first.rule, 1, 5);
+  assert.equal(drill.total, first.count, "số trên thẻ và số của danh sách mở ra phải bằng nhau");
+  assert.ok(drill.rows.length <= 5);
+  if (first.count > 5) {
+    const page2 = await controlTowerDrill(first.rule, 2, 5);
+    assert.ok(page2.rows.length > 0, "phân trang phải chạy");
+    assert.notDeepEqual(page2.rows.map((r) => r.code), drill.rows.map((r) => r.code), "trang 2 phải khác trang 1");
+  }
+  // Luật mới của trung tâm điều khiển phải thật sự chạy được.
+  for (const rule of ["DELIVERED_WITHOUT_LOGISTICS_EVIDENCE", "MISSING_PRODUCT_MAPPING", "ZERO_TOTAL_WITH_ITEMS", "DUPLICATE_TRACKING", "INVALID_EVENT_ORDER"] as const) {
+    const r = await controlTowerDrill(rule, 1, 3);
+    assert.ok(r.total >= 0, `${rule} phải chạy được`);
+  }
+
+  console.log(
+    `✓ Trung tâm điều khiển: ${tower.firing}/${tower.ruleCount} luật đang có vi phạm · ${tower.totals.ERROR} nghiêm trọng · số trên thẻ khớp danh sách mở ra`,
   );
 
   console.log(
