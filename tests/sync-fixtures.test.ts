@@ -22,6 +22,7 @@ import { testFinancialTruth } from "./financial-truth.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
 import { testAdsRoas } from "./ads-roas.test";
+import { testAuditTrail } from "./audit-trail.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1087,6 +1088,7 @@ async function main() {
   await testProductIntelligence(db);
   await testActionQueue(db);
   await testAdsRoas(db);
+  await testAuditTrail(db);
   await testInventory(db);
   await testCodReconciliation();
   await testOrderSource();

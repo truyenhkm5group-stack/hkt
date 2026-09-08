@@ -264,6 +264,9 @@ export async function repairReconciliation(options: ScanOptions & { apply?: bool
   const db = await getDb();
   const apply = Boolean(options.apply);
   const actor = options.actor || "job:data-check";
+  // Một lần chạy = một mã liên kết. Không có nó thì 300 dòng nhật ký của một lần chạy trông y hệt
+  // 300 lần sửa tay rời rạc.
+  const runId = `reconcile-${Date.now().toString(36)}`;
   const scope = recentOnly(options.sinceDays ?? null);
   const withScope = (cond: ReturnType<typeof sql>) => (scope ? and(cond, scope) : cond);
 
@@ -300,12 +303,12 @@ export async function repairReconciliation(options: ScanOptions & { apply?: bool
       await audit({
         userEmail: actor,
         action: "reconcile.repair",
-        entity: "shipment",
-        detail: {
-          stateRebuilt: stateChanged,
-          codLabelFixed: codChanged,
-          note: "Chỉ sửa theo nguồn sự thật của chính chiều đó; lệch giữa tiền và giao hàng chỉ báo cáo.",
-        },
+        entity: "SHIPMENT",
+        correlationId: runId,
+        before: { drifted: rebuildIds.length, mislabelledCod: codRows.length },
+        after: { stateRebuilt: stateChanged, codLabelFixed: codChanged },
+        reason: "Chỉ sửa theo nguồn sự thật của chính chiều đó; lệch giữa tiền và giao hàng chỉ báo cáo, không tự sửa.",
+        detail: { samples: rebuildIds.slice(0, 20).map((r) => r.code) },
       });
     }
   }

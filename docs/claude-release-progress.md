@@ -25,7 +25,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 14 | ROAS theo kết quả đơn | ✅ xong | `feat: add COD-aware ads profitability metrics` |
 | 15 | Sức khoẻ tích hợp | ✅ xong | `feat: add integration health observability` |
 | 16 | Hiệu năng | ✅ xong | `perf: optimize ERP critical paths` |
-| 17 | Nhật ký truy vết | ⏳ | |
+| 17 | Nhật ký truy vết | ✅ xong | `feat: improve ERP business audit trail` |
 | 18 | Nhất quán giao diện | ⏳ | |
 | — | FINAL GATE | ⏳ | |
 
@@ -324,6 +324,23 @@ suy diễn thêm.
 
 KHÔNG cache theo cách làm KPI sai: mọi `memo` giữ nguyên TTL 60–120 giây như cũ, và mọi tham số
 ảnh hưởng kết quả đều nằm trong khoá cache.
+
+### TASK 17 — Nhật ký truy vết
+
+`audit()` nay nhận `before` · `after` · `reason` · `correlationId` để một dòng nhật ký trả lời đủ
+**sáu câu**: ai · làm gì · trên cái gì · trước ra sao · sau ra sao · vì sao. Thiếu "trước/sau" thì
+đúng lúc số liệu lệch lại không lần ngược được.
+
+`correlationId` nối các thay đổi cùng MỘT lần chạy — không có nó thì 300 dòng của một lượt dựng
+lại trông y hệt 300 lần sửa tay rời rạc.
+
+`redactSecrets()` che token / mật khẩu / URL webhook trước khi ghi, kể cả trong đối tượng lồng
+nhau; kho mã này PUBLIC nên một lần lộ là lộ vĩnh viễn. Trường trống vẫn giữ trống để còn phân biệt
+"chưa có" với "đã có".
+
+Bổ sung nhật ký cho luồng còn thiếu: **phát lại gói tin webhook** (`scripts/vtp-retry-webhooks.ts`)
+trước đây ghi đè trạng thái gói tin mà không để lại dấu vết nào. Đối soát tự sửa và dựng lại lịch
+sử nay ghi before/after đầy đủ. 11 hành động và 4 loại đối tượng mới có nhãn tiếng Việt.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

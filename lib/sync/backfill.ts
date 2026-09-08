@@ -127,6 +127,8 @@ export async function runCanonicalBackfill(options: BackfillOptions = {}): Promi
   const apply = Boolean(options.apply);
   const batchSize = options.batchSize ?? 0;
   const actor = options.actor || "job:canonical-backfill";
+  /** Mã liên kết cho cả lần dựng lại — mọi dòng nhật ký của lượt này mang cùng mã. */
+  const runId = `backfill-${Date.now().toString(36)}`;
 
   // ── Bước 1: điền `normalized_stage` còn trống, CHỈ cho sự kiện đến thẳng từ ĐVVC ──
   const blank = await db
@@ -228,16 +230,12 @@ export async function runCanonicalBackfill(options: BackfillOptions = {}): Promi
     await audit({
       userEmail: actor,
       action: "backfill.canonical-state",
-      entity: "shipment",
-      detail: {
-        total: rows.length,
-        changed,
-        normalizedFilled,
-        deliveredToNotDelivered,
-        notDeliveredToDelivered,
-        stageTransitions,
-        note: "Chỉ dựng lại giá trị suy ra từ lịch sử sự kiện; không đụng dữ liệu gốc, tiền hay mốc kho nhận hàng hoàn.",
-      },
+      entity: "SHIPMENT",
+      correlationId: runId,
+      before: { outcomes: outcomeBefore, scanned: rows.length },
+      after: { outcomes: outcomeAfter, changed, normalizedFilled, deliveredToNotDelivered, notDeliveredToDelivered, stageTransitions },
+      reason: "Dựng lại giá trị SUY RA từ lịch sử sự kiện; không đụng dữ liệu gốc, tiền hay mốc kho nhận hàng hoàn.",
+      detail: { samples },
     });
   }
 
