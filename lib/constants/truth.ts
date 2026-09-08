@@ -172,11 +172,21 @@ export const NOT_MONEY_EVIDENCE = [
 ] as const;
 
 /**
- * ───────── Ai được ghi vào chiều nào ─────────
- * Bất biến bổ sung sau kiểm toán TASK 1: `shipments.stage` chỉ được ghi bởi ĐÚNG MỘT hàm.
- * Bất biến này được khoá ở tests/business-invariants.test.ts.
+ * ───────── Ai được ghi vào chiều LOGISTICS ─────────
+ *
+ * Bất biến bổ sung sau kiểm toán TASK 1. Danh sách này là ALLOWLIST, và ngắn có chủ đích:
+ *
+ *  · `state.ts` — `materializeShipmentState()`, nơi DUY NHẤT dựng trạng thái từ chứng từ của ĐVVC;
+ *  · `pancake/sync.ts` — chỉ được ghi khi vận đơn CHƯA có bất kỳ chứng từ nào của ĐVVC
+ *    (`vtp_status_date is null`). Có chứng từ rồi thì Pancake không đụng vào nữa, và
+ *    `materializeShipmentState()` được gọi ngay sau đó để chốt lại theo lịch sử.
+ *    Vận đơn chưa có chứng từ thì trạng thái Pancake là thứ duy nhất ERP có; `ORDER_OUTCOME` đã
+ *    chặn sẵn — không chứng từ ĐVVC thì cao nhất chỉ là ĐANG GIAO.
+ *
+ * Thêm tên vào đây phải là một quyết định tường minh: mỗi luồng ghi thêm là một bản luật thứ hai,
+ * và hai bản luật thì sớm muộn cũng lệch nhau. Khoá ở tests/business-invariants.test.ts.
  */
-export const SHIPMENT_STAGE_WRITERS = ["lib/integrations/viettelpost/state.ts"] as const;
+export const SHIPMENT_STAGE_WRITERS = ["lib/integrations/viettelpost/state.ts", "lib/integrations/pancake/sync.ts"] as const;
 
 /** Kiểu tổng hợp một đơn theo cả năm chiều — dùng cho màn hình chi tiết và cho nhật ký truy vết. */
 export type OrderTruthSnapshot = {

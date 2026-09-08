@@ -16,7 +16,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 5 | Lớp chân lý chỉ số | ✅ xong | `feat: centralize ERP metric truth` |
 | 6 | Dry-run lịch sử + backfill an toàn | ✅ xong | `chore: rebuild canonical historical ERP truth` |
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ✅ xong | `feat: turn data quality into ERP control tower` |
-| 8 | Bộ kiểm thử bất biến nghiệp vụ | ⏳ | |
+| 8 | Bộ kiểm thử bất biến nghiệp vụ | ✅ xong | `test: enforce ERP business truth invariants` |
 | 9 | Chân lý tài chính | ⏳ | |
 | 10 | Chân lý tồn kho + rủi ro hết hàng | ⏳ | |
 | 11 | Chỉ số theo mẫu mã | ⏳ | |
@@ -173,6 +173,25 @@ trang, và link sang trang xử lý tương ứng.
 Kiểm thử bổ sung trong `tests/reconciliation.test.ts`: mọi luật đang bật phải có lý do, việc cần
 làm, mốc phát hiện, loại đối tượng và bằng chứng cho từng dòng; tổng của drill-down phải bằng số
 trên thẻ; phân trang phải chạy.
+
+### TASK 8 — Bộ kiểm thử bất biến nghiệp vụ
+
+`tests/business-invariants.test.ts` khoá đủ 12 bất biến kế hoạch yêu cầu. Chạy trong `npm test`,
+mà `npm test` đã là điều kiện CHẶN của workflow **Deploy ERP to VPS** — nên bộ này ở trong CI sẵn.
+
+**Bộ kiểm thử tìm ra hai vi phạm còn sót** (bất biến 10, quét mã nguồn):
+
+- `lib/integrations/pancake/sync.ts` giữ một BẢN THỨ HAI của luật dựng trạng thái (`keepVtpStage`
+  so mốc thời gian riêng). Đã bỏ; nay quy tắc gọn một câu: có bất kỳ chứng từ nào của ĐVVC thì
+  Pancake không đụng vào chiều logistics, và `materializeShipmentState()` được gọi ngay sau để chốt
+  theo lịch sử. Vận đơn chưa có chứng từ nào thì trạng thái Pancake vẫn dùng — `ORDER_OUTCOME` đã
+  chặn sẵn, không chứng từ thì cao nhất chỉ là ĐANG GIAO.
+- `lib/integrations/viettelpost/statement-db.ts` ghi thẳng `stage/isFinal/mốc` rồi mới gọi
+  `materializeShipmentState()` — thừa và dễ lệch. Nay chỉ ghi tiền/cước, trạng thái do lịch sử
+  quyết định.
+
+`SHIPMENT_STAGE_WRITERS` thành allowlist hai tên có giải thích; thêm tên phải là quyết định tường
+minh. Kèm kiểm tra bằng DỮ LIỆU: mọi vận đơn có chứng từ ĐVVC phải có ảnh chụp khớp lịch sử.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

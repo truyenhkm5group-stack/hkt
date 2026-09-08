@@ -328,12 +328,12 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         // Cũng không bao giờ HẠ trạng thái đã có chứng từ mạnh hơn.
         const codKhaiBao = m.cod !== null ? m.cod : current.codAmount;
         const nangCod = vtpSaysCodReceived(m.codPaymentText) && codKhaiBao > 0 && ["PENDING", "NOT_APPLICABLE"].includes(current.codStatus);
-        await tx.update(schema.shipments).set({ stage: m.mapped.stage, vtpStatusName: m.statusText,
-          isFinal: m.mapped.final, vtpStatusDate: occurredAt, lastVtpSyncAt: now, updatedAt: now,
+        // CỐ Ý chỉ ghi TIỀN và cước ở đây. Trạng thái, mốc thời gian và cờ kết thúc do
+        // materializeShipmentState() phía dưới dựng lại từ lịch sử — một chỗ duy nhất được ghi
+        // chiều logistics (SHIPMENT_STAGE_WRITERS trong lib/constants/truth.ts).
+        await tx.update(schema.shipments).set({ lastVtpSyncAt: now, updatedAt: now,
           ...(nangCod ? { codStatus: "COLLECTED" as const } : {}),
           ...(m.cod !== null ? { codAmount: m.cod } : {}), ...(m.fee !== null ? { shippingFee: m.fee } : {}),
-          ...(m.mapped.stage === "DELIVERED" ? { deliveredAt: occurredAt } : {}),
-          ...(m.mapped.stage === "RETURNED" ? { returnedAt: occurredAt } : {}),
         }).where(eq(schema.shipments.id, current.id));
       }
       const disposition = older ? "stale" : sameTimeConflict ? "conflict" : "applied";

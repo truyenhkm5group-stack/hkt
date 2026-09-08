@@ -18,6 +18,7 @@ import {
   type MappedVariant,
 } from "@/lib/integrations/pancake/mapper";
 import { publish } from "@/lib/realtime/bus";
+import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { getSyncState, runSyncJob, setSyncState, type SyncContext, type SyncTrigger } from "@/lib/sync/runner";
 
 const COD_RANK: Record<CodStatus, number> = { NOT_APPLICABLE: 0, PENDING: 1, COLLECTED: 2, RECONCILED: 3, PAID_TO_BANK: 4, DISPUTED: 5 };
@@ -334,17 +335,23 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     return;
   }
 
-  // Nếu Viettel Post đã cập nhật mới hơn dữ liệu Pancake thì giữ trạng thái của Viettel Post
-  const pancakeStamp = s.partnerUpdatedAt ?? mapped.updatedAtExternal ?? mapped.insertedAt;
-  // Dữ liệu Viettel Post (webhook / nhập danh sách vận đơn / bảng kê) là nguồn gốc; Pancake chỉ là bản sao có thể trễ.
-  // Giữ trạng thái VTP nếu đã có, trừ khi VTP chưa kết thúc mà Pancake báo trạng thái kết thúc mới hơn.
-  const FINAL_STAGES = new Set(["DELIVERED", "RETURNED", "CANCELLED"]);
-  const keepVtpStage = Boolean(
-    existing?.vtpStatusDate &&
-      existing.stage !== "UNKNOWN" &&
-      (FINAL_STAGES.has(existing.stage) || !FINAL_STAGES.has(s.stage) || existing.vtpStatusDate.getTime() > pancakeStamp.getTime()),
-  );
-  const stage: ShipmentStage = keepVtpStage && existing ? existing.stage : s.stage;
+  /**
+   * PANCAKE KHÔNG ĐƯỢC ĐÈ LÊN CHỨNG TỪ CỦA ĐVVC.
+   *
+   * Trước đây chỗ này có một phép so mốc thời gian riêng ("giữ trạng thái VTP trừ khi Pancake báo
+   * trạng thái kết thúc mới hơn") — tức một BẢN THỨ HAI của luật dựng trạng thái, chạy song song
+   * với `deriveShipmentState()`. Hai bản luật thì sớm muộn cũng lệch nhau, và bên thua là số liệu.
+   *
+   * Nay quy tắc gọn lại đúng một câu: **có bất kỳ chứng từ nào từ Viettel Post thì Pancake không
+   * đụng vào chiều logistics nữa.** `vtp_status_date` chỉ được ghi bởi `materializeShipmentState()`
+   * từ sự kiện của ĐVVC, nên nó chính là dấu hiệu "đã có chứng từ".
+   *
+   * Vận đơn CHƯA có chứng từ nào (đơn mới đẩy sang ĐVVC, hoặc shop tự giao) thì trạng thái Pancake
+   * là thứ duy nhất ERP có — vẫn dùng, nhưng `ORDER_OUTCOME` đã chặn sẵn: không có chứng từ ĐVVC
+   * thì cao nhất chỉ là ĐANG GIAO, không bao giờ là giao thành công.
+   */
+  const hasCarrierTruth = Boolean(existing?.vtpStatusDate);
+  const stage: ShipmentStage = hasCarrierTruth && existing ? existing.stage : s.stage;
 
   let codStatus: CodStatus = s.codStatus;
   if (existing && COD_RANK[existing.codStatus] > COD_RANK[codStatus] && existing.codStatus !== "NOT_APPLICABLE") codStatus = existing.codStatus;
@@ -367,7 +374,7 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     deliveredAt: existing?.deliveredAt ?? s.deliveredAt,
     returnedAt: existing?.returnedAt ?? s.returnedAt,
     cancelledAt: existing?.cancelledAt ?? s.cancelledAt,
-    isFinal: keepVtpStage && existing ? existing.isFinal : s.isFinal,
+    isFinal: hasCarrierTruth && existing ? existing.isFinal : s.isFinal,
     receiverName: s.receiverName,
     receiverPhone: s.receiverPhone,
     receiverAddress: s.receiverAddress,
@@ -397,7 +404,10 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
       .values(s.events.map((e) => ({ shipmentId, source: "PANCAKE", status: e.status, statusName: e.statusName, note: e.note, occurredAt: e.occurredAt, raw: e.raw })))
       .onConflictDoNothing();
   }
-  publish({ type: "shipment", shipmentId, status: stage });
+  // Chốt lại bằng lịch sử: có chứng từ ĐVVC thì ảnh chụp phải khớp lịch sử, bất kể Pancake vừa ghi
+  // gì. Không có chứng từ nào thì đây là lệnh rỗng và trạng thái Pancake ở trên được giữ nguyên.
+  const settled = await materializeShipmentState(db, shipmentId);
+  publish({ type: "shipment", shipmentId, status: (settled.after as ShipmentStage) ?? stage });
 }
 
 // ───────────────────────── Jobs ─────────────────────────
