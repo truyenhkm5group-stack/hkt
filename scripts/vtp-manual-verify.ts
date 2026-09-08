@@ -38,7 +38,25 @@ const BATCH = "HISTORICAL_VTP_MANUAL_VERIFY_2026_09_08";
 const VERIFIED_AT = new Date("2026-09-08T00:00:00+07:00");
 
 type CodText = "Đã nhận COD" | "Không có COD" | "Chưa đối soát COD";
-type Record18 = { tracking: string; phone: string; status: string; cod: CodText; amount: number; note?: string };
+type Record18 = {
+  tracking: string; phone: string; status: string; cod: CodText;
+  /** COD KHAI BÁO trên vận đơn. */
+  amount: number;
+  /**
+   * TIỀN ĐVVC THỰC SỰ THU ĐƯỢC, khi chứng từ nói rõ. Khác hẳn `amount`.
+   * Ca `PKE1484463365`: khai báo 474.000đ nhưng ĐVVC chỉ thu 30.000đ tiền khách trả để xem hàng,
+   * hàng thì quay về theo vận đơn hoàn. Ghi đúng số thực thu để `ORDER_OUTCOME` kết luận HOÀN theo
+   * ngưỡng tiền — 30.000đ KHÔNG bao giờ được coi là doanh thu bán hàng.
+   */
+  collected?: number;
+  /** Giao một phần: khách trả tiền xem hàng rồi không nhận, hàng quay về. */
+  partial?: boolean;
+  /** Khối lượng hàng hoàn ghi trên chứng từ ĐVVC (gam). */
+  returnedWeight?: number;
+  /** Vận đơn hoàn gắn với vận đơn này — bằng chứng hàng đã quay về shop. */
+  linkedReturn?: string;
+  note?: string;
+};
 
 /**
  * Chủ shop xác minh trên giao diện Viettel Post ngày 08/09/2026.
@@ -57,7 +75,15 @@ const RECORDS: Record18[] = [
   { tracking: "PKE14844633651P1", phone: "0345222695", status: "Giao thành công", cod: "Không có COD", amount: 0 },
   // Tệp xuất ghi 30.000đ cho vận đơn này, giao diện web ghi 474.000đ. Lấy số chủ shop xác minh trực
   // tiếp trên web; chênh lệch đã nêu trong báo cáo để đối chiếu lại.
-  { tracking: "PKE1484463365", phone: "0345222695", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000, note: "tệp xuất ghi 30.000đ — lệch với web" },
+  // ĐÍNH CHÍNH 08/09/2026 — tiêu đề "Giao thành công" KHÔNG đủ để kết luận đơn đã giao.
+  // Hành trình của chính ĐVVC ghi: "Tồn - Giao không thành công · yêu cầu giao 1 phần ·
+  // Thu hộ 30.000 · Trọng lượng hoàn 1.000 · Cod gốc 474.000", và có vận đơn hoàn
+  // PKE14844633651P1 đã giao thành công VỀ SHOP. Tức khách chỉ trả tiền xem hàng rồi không nhận,
+  // toàn bộ hàng bán quay về. 474.000đ KHÔNG phải doanh thu; 30.000đ là tiền ĐVVC thực thu.
+  // `ORDER_OUTCOME` kết luận HOÀN qua HAI đường độc lập: có vận đơn chiều hoàn, và thực thu < 50K.
+  { tracking: "PKE1484463365", phone: "0345222695", status: "Giao thành công", cod: "Đã nhận COD",
+    amount: 474_000, collected: 30_000, partial: true, returnedWeight: 1_000, linkedReturn: "PKE14844633651P1",
+    note: "giao một phần: khách trả 30.000đ xem hàng rồi hoàn — hàng bán KHÔNG tới tay khách" },
   { tracking: "PKE1484450905", phone: "0345222695", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 399_000 },
   { tracking: "PKE1484434062", phone: "0345222695", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
 
@@ -145,7 +171,13 @@ async function main() {
           verificationStatus: "VERIFIED",
           sourceReference: `${BATCH}:${r.tracking}`,
           raw: { evidenceType: "CARRIER_SCREENSHOT", verifiedBy: "SHOP_OWNER", batch: BATCH,
-            statusText: r.status, codText: r.cod, codAmount: r.amount, phone: r.phone, note: r.note ?? null },
+            statusText: r.status, codText: r.cod, phone: r.phone, note: r.note ?? null,
+            // Giữ NGUYÊN VĂN chứng từ: khai báo, thực thu, giao một phần, khối lượng hoàn, vận đơn hoàn.
+            direction: legOf ? "RETURN" : "OUTBOUND",
+            originalCod: r.amount, actualCollected: r.collected ?? null,
+            partialDelivery: r.partial ?? false, returnedWeight: r.returnedWeight ?? null,
+            linkedReturnTracking: r.linkedReturn ?? null, returnOccurred: Boolean(r.linkedReturn),
+            outboundOf: legOf || null },
         }).onConflictDoNothing();
       }
       if (apply) {
@@ -153,6 +185,8 @@ async function main() {
         if (cod.codStatus) set.codStatus = cod.codStatus;
         if (cod.amount !== null) set.codAmount = cod.amount;
         else if (!ship.codAmount && r.amount) set.codAmount = r.amount;
+        // Số THỰC THU chỉ ghi khi chứng từ nói rõ, và chỉ đi lên — không lần nhập nào được hạ nó.
+        if (r.collected !== undefined && r.collected > (ship.codCollected ?? 0)) set.codCollected = r.collected;
         if (!ship.receiverPhone) set.receiverPhone = r.phone;
         if (Object.keys(set).length) await db.update(schema.shipments).set({ ...set, updatedAt: new Date() }).where(eq(schema.shipments.id, ship.id));
         // Trạng thái vận đơn LUÔN do lịch sử quyết định — không ghi tay vào `stage`.
@@ -166,7 +200,7 @@ async function main() {
       van_don: existed ? "đã có" : apply ? "đã tạo" : "sẽ tạo",
       trang_thai_truoc: before?.stage ?? "—", trang_thai_de_xuat: stage, trang_thai_sau: after?.stage ?? "—",
       cod_truoc: before ? `${before.codStatus} ${before.codAmount}đ` : "—",
-      cod_de_xuat: `${cod.codStatus ?? "giữ nguyên"} ${cod.amount ?? r.amount}đ`,
+      cod_de_xuat: `${cod.codStatus ?? "giữ nguyên"} khai ${cod.amount ?? r.amount}đ${r.collected !== undefined ? ` · thực thu ${r.collected}đ` : ""}`,
       cod_sau: after ? `${after.codStatus} ${after.codAmount}đ` : "—",
       don: before?.orderId ?? after?.orderId ?? "(chưa ghép được đơn)",
       ghi_chu: r.note ?? "",

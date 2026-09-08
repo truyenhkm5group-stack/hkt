@@ -18,6 +18,7 @@ import { repairReconciliation } from "@/lib/sync/consistency";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
+import { DELIVERED_REVENUE } from "@/lib/queries/metrics";
 import { availableStockExpr, erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 
@@ -326,7 +327,48 @@ export async function testBusinessInvariants(db: Db) {
   await db.update(schema.shipments).set({ orderId: movingOrder }).where(eq(schema.shipments.id, movingShip.id));
   assert.equal(await outcomeOf(movingOrder), "IN_TRANSIT", "15. có chứng từ ĐVVC thì ĐANG GIAO vẫn dùng được");
 
+  // ══ 16. "GIAO THÀNH CÔNG" CỦA ĐVVC KHÔNG PHẢI LÀ KẾT LUẬN CUỐI ══
+  // Ca thật PKE1484463365: tiêu đề "Giao thành công", COD khai 474.000đ, nhưng hành trình ghi
+  // "Tồn - Giao không thành công · giao 1 phần · Thu hộ 30.000 · Trọng lượng hoàn 1.000", và có
+  // vận đơn hoàn PKE14844633651P1 đã giao VỀ SHOP. Khách chỉ trả tiền xem hàng rồi không nhận.
+  const partialOrder = `inv-order-${++seq}`;
+  const partialCode = nextCode();
+  await db.insert(schema.orders).values({ id: partialOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.insert(schema.shipments).values({
+    orderId: partialOrder, carrier: "Viettel Post", vtpOrderNumber: partialCode, trackingCode: partialCode,
+    stage: "DELIVERED", codAmount: 474_000, codCollected: 30_000, codStatus: "COLLECTED",
+    deliveredAt: new Date("2026-08-08T03:10:19Z"), vtpStatusDate: new Date("2026-08-08T03:10:19Z"),
+  });
+  // Vận đơn hoàn là DÒNG RIÊNG, trỏ về vận đơn gốc qua `order_reference` — đúng quy ước sẵn có.
+  await db.insert(schema.shipments).values({
+    carrier: "Viettel Post", vtpOrderNumber: `${partialCode}1P1`, trackingCode: `${partialCode}1P1`,
+    orderReference: partialCode, stage: "RETURNED", codAmount: 0, codStatus: "NOT_APPLICABLE",
+  });
+  assert.equal(await outcomeOf(partialOrder), "RETURNED",
+    "16. hàng quay về theo vận đơn hoàn ⇒ đơn HOÀN, dù ĐVVC ghi 'Giao thành công'");
+  // 30.000đ là tiền ĐVVC thu được lúc cho xem hàng — KHÔNG phải doanh thu bán hàng.
+  const [partialRow] = await db.select({ v: DELIVERED_REVENUE }).from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    .where(eq(schema.orders.id, partialOrder));
+  assert.equal(Number(partialRow?.v ?? 0), 0, "16. đơn hoàn không đóng góp một đồng doanh thu nào");
+  // Ngay cả khi KHÔNG có vận đơn hoàn, số thực thu 30.000đ (< 50K) cũng đủ kết luận HOÀN.
+  const thinOrder = `inv-order-${++seq}`;
+  const thinCode = nextCode();
+  await db.insert(schema.orders).values({ id: thinOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.insert(schema.shipments).values({ orderId: thinOrder, carrier: "Viettel Post", vtpOrderNumber: thinCode,
+    stage: "DELIVERED", codAmount: 474_000, codCollected: 30_000, codStatus: "COLLECTED",
+    vtpStatusDate: new Date("2026-08-08T03:10:19Z") });
+  assert.equal(await outcomeOf(thinOrder), "RETURNED", "16. thực thu 30.000đ trên đơn khai 474.000đ ⇒ HOÀN, không phải giao thành công");
+
+  // Vận đơn CHIỀU HOÀN mang trạng thái "Giao thành công" nghĩa là hàng về tới shop — tuyệt đối
+  // không được cộng vào số đơn giao thành công cho khách.
+  const legCode = `${nextCode()}1P1`;
+  await applyVtpTracking(trackingPayload(legCode, 501, "Thành công - Phát thành công", "09/08/2026 10:10:00", { IS_RETURNING: true }), "VTP_WEBHOOK", { allowCreate: true });
+  const [legShip] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, legCode));
+  assert.equal(legShip.stage, "RETURNED", "16. 501 trên CHIỀU HOÀN = hàng về shop, không phải giao cho khách");
+  assert.notEqual(legShip.stage, "DELIVERED");
+
   console.log(
-    `✓ Bất biến nghiệp vụ: 15/15 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao')`,
+    `✓ Bất biến nghiệp vụ: 16/16 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao' · giao một phần rồi hoàn KHÔNG phải giao thành công)`,
   );
 }
