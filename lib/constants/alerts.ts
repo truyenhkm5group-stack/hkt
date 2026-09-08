@@ -51,7 +51,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   ORDER_CONFIRMED_STALE: "Đã chốt · chưa gửi hàng",
   RETURN_PENDING_INSPECTION: "Hàng hoàn về · chưa tái nhập",
   CUSTOMER_RECOVERY: "Mất khách quen · cần gọi lại",
-  STOCKOUT_RISK: "Sắp cháy hàng",
+  STOCKOUT_RISK: "Hết trước khi SX xong",
   ADS_ANOMALY: "Quảng cáo bất thường",
   PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
   ORDER_INCOMPLETE: "Đơn thiếu SĐT / địa chỉ",

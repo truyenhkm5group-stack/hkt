@@ -1,5 +1,6 @@
 import { desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { getReplenishmentPlan } from "@/lib/queries/planning";
 import {
   CASE_ACTION,
   RECOVERABILITY,
@@ -140,6 +141,31 @@ function matchesFilter(c: ActionCase, f: QueueFilter): boolean {
   return true;
 }
 
+/**
+ * SỐ NGÀY CÒN ĐỦ HÀNG của các mẫu mã đang có việc trong hàng đợi.
+ *
+ * Đây là thứ làm cho yếu tố "sắp cháy hàng" của công thức ưu tiên thật sự chạy: cháy hàng sau 2
+ * ngày và sau 12 ngày cùng một mức cảnh báo nhưng khác hẳn nhau về việc phải làm hôm nay.
+ *
+ * Dùng lại `getReplenishmentPlan` (đã có bộ nhớ đệm) chứ KHÔNG tính lại — một công thức tồn kho
+ * duy nhất cho toàn ERP.
+ */
+async function daysToStockoutFor(variantIds: string[]): Promise<Map<string, number | null>> {
+  if (!variantIds.length) return new Map();
+  try {
+    const plan = await getReplenishmentPlan();
+    const wanted = new Set(variantIds);
+    const map = new Map<string, number | null>();
+    for (const row of plan.rows) {
+      if (wanted.has(row.variantId)) map.set(row.variantId, row.daysOfCover);
+    }
+    return map;
+  } catch {
+    // Chưa tính được kế hoạch: để CHƯA BIẾT, và công thức ưu tiên sẽ không cộng điểm nào.
+    return new Map();
+  }
+}
+
 export async function getActionQueue(options: { limit?: number; assignedTo?: string; filter?: QueueFilter } = {}): Promise<ActionQueue> {
   const db = await getDb();
   const limit = options.limit ?? 200;
@@ -172,13 +198,21 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     .limit(limit);
 
   const amounts = await amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]);
+  const stockDays = await daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]);
   const now = Date.now();
 
   const cases: ActionCase[] = rows.map((r) => {
     const type = caseTypeOf(r.kind);
     const detectedAt = r.occurredAt ?? r.createdAt;
     const ageHours = Math.max(0, (now - detectedAt.getTime()) / 3_600_000);
-    const scoreInput = { severity: r.severity, ageHours, amount: amounts.get(r.entityId) ?? null, type };
+    const scoreInput = {
+      severity: r.severity,
+      ageHours,
+      amount: amounts.get(r.entityId) ?? null,
+      type,
+      // Chưa tra được thì để `null` — KHÔNG BIẾT không phải là GẤP.
+      daysToStockout: r.entityType === "VARIANT" ? (stockDays.get(r.entityId) ?? null) : null,
+    };
     const scoreParts = caseScoreBreakdown(scoreInput);
     const score = caseScore(scoreInput);
     return {
