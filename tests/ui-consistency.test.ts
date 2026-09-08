@@ -6,6 +6,13 @@ import { VERIFIED_OUTCOME_LABEL } from "@/lib/constants/data-quality";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { TRUTH_DIMENSIONS, TRUTH_DIMENSION_ORDER } from "@/lib/constants/truth";
+import { CASE_ACTION, CASE_STATUS_LABEL, CASE_STATUS_TONE, CASE_TYPE_LABEL, PRIORITY_LABEL, type CaseType } from "@/lib/constants/action-queue";
+import { VERDICT_LABEL, VERDICT_TONE, type ProductVerdict } from "@/lib/constants/product-verdict";
+import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, type StockRisk } from "@/lib/constants/slow-moving";
+import { DIMENSION_LABEL, DIMENSION_TONE, type TimelineDimension } from "@/lib/constants/timeline";
+import { AREA_LABEL, AREA_TONE, CONFIDENCE_LABEL, type RecommendationArea } from "@/lib/constants/recommendation";
+import { ADS_ANOMALY_LABEL, type AdsAnomalyKind } from "@/lib/constants/ads-anomaly";
+import { ATTRIBUTION_FIELDS } from "@/lib/constants/sales-funnel";
 import { orderStageEnum, shipmentStageEnum, codStatusEnum } from "@/db/schema";
 
 /**
@@ -65,7 +72,74 @@ export function testUiConsistency() {
   }
   assert.deepEqual(offenders, [], `phải dùng <OrderOutcomeBadge/>, không tự vẽ nhãn kết quả đơn: ${offenders.join(", ")}`);
 
+  // ───────── 4. MỌI DANH MỤC MỚI phải đủ nhãn tiếng Việt, đủ màu, và nói được nên làm gì ─────────
+  // Thiếu một khoá thì giao diện hiện mã thô kiểu "RETURN_RECEIVED_PENDING_INSPECTION" — người vận
+  // hành không đọc được, và cái nhãn đó lập tức trở thành vô dụng.
+  let newLabels = 0;
+  for (const t of Object.keys(CASE_TYPE_LABEL) as CaseType[]) {
+    assert.ok(CASE_TYPE_LABEL[t]?.length > 3, `thiếu nhãn loại việc ${t}`);
+    assert.ok(CASE_ACTION[t]?.length > 10, `${t}: phải nói NÊN LÀM GÌ, không chỉ đặt tên vấn đề`);
+    newLabels += 1;
+  }
+  for (const st of Object.keys(CASE_STATUS_LABEL) as (keyof typeof CASE_STATUS_LABEL)[]) {
+    assert.ok(CASE_STATUS_LABEL[st]?.length > 2 && CASE_STATUS_TONE[st], `thiếu nhãn/màu trạng thái việc ${st}`);
+    newLabels += 1;
+  }
+  for (const v of Object.keys(VERDICT_LABEL) as ProductVerdict[]) {
+    assert.ok(VERDICT_LABEL[v]?.length > 3 && VERDICT_TONE[v], `thiếu nhãn/màu phân loại mẫu mã ${v}`);
+    newLabels += 1;
+  }
+  for (const r of Object.keys(STOCK_RISK_LABEL) as StockRisk[]) {
+    assert.ok(STOCK_RISK_LABEL[r]?.length > 3 && STOCK_RISK_TONE[r] && STOCK_RISK_ACTION[r]?.length > 10, `thiếu nhãn/màu/hành động rủi ro tồn ${r}`);
+    newLabels += 1;
+  }
+  for (const d of Object.keys(DIMENSION_LABEL) as TimelineDimension[]) {
+    assert.ok(DIMENSION_LABEL[d]?.length > 2 && DIMENSION_TONE[d], `thiếu nhãn/màu chiều dòng thời gian ${d}`);
+    newLabels += 1;
+  }
+  for (const a of Object.keys(AREA_LABEL) as RecommendationArea[]) {
+    assert.ok(AREA_LABEL[a]?.length > 2 && AREA_TONE[a], `thiếu nhãn/màu lĩnh vực khuyến nghị ${a}`);
+    newLabels += 1;
+  }
+  for (const k of Object.keys(ADS_ANOMALY_LABEL) as AdsAnomalyKind[]) {
+    assert.ok(ADS_ANOMALY_LABEL[k]?.length > 5, `thiếu nhãn bất thường quảng cáo ${k}`);
+    newLabels += 1;
+  }
+  for (const f of ATTRIBUTION_FIELDS) {
+    assert.ok(f.label.length > 3 && f.note.length > 5, `${f.field}: vai phải có nhãn và nói rõ dùng cho việc gì`);
+    newLabels += 1;
+  }
+  for (const c of Object.values(CONFIDENCE_LABEL)) assert.ok(c.length > 5, "mức tin cậy phải đọc được bằng tiếng Việt");
+  for (const p of Object.values(PRIORITY_LABEL)) assert.ok(p.length > 2, "mức ưu tiên phải đọc được bằng tiếng Việt");
+
+  // Không nhãn nào được lẫn với nhãn khác trong CÙNG một danh mục — trùng nhãn thì người dùng
+  // không phân biệt được hai trạng thái khác nghĩa.
+  for (const [name, values] of [
+    ["trạng thái việc", Object.values(CASE_STATUS_LABEL)],
+    ["phân loại mẫu mã", Object.values(VERDICT_LABEL)],
+    ["rủi ro tồn kho", Object.values(STOCK_RISK_LABEL)],
+    ["chiều dòng thời gian", Object.values(DIMENSION_LABEL)],
+  ] as const) {
+    assert.equal(new Set(values).size, values.length, `${name}: có hai giá trị dùng chung một nhãn`);
+  }
+
+  // ───────── 5. Mọi trang mới phải có trạng thái RỖNG và bảng phải cuộn ngang được ─────────
+  // Bảng rộng không bọc trong khung cuộn sẽ đẩy cả trang trượt ngang trên điện thoại.
+  const newPages = [
+    "app/(dashboard)/reports/funnel/page.tsx",
+    "app/(dashboard)/products/performance/page.tsx",
+    "app/(dashboard)/inventory/planning/slow-moving-section.tsx",
+  ];
+  for (const page of newPages) {
+    const src = readFileSync(page, "utf8");
+    assert.ok(src.includes("overflow-x-auto"), `${page}: bảng phải nằm trong khung cuộn ngang`);
+  }
+  for (const page of newPages.slice(0, 2)) {
+    const src = readFileSync(page, "utf8");
+    assert.ok(/Chưa có|Không có/.test(src), `${page}: phải có trạng thái rỗng nói rõ vì sao trống`);
+  }
+
   console.log(
-    `✓ Nhất quán giao diện: ${orderStageEnum.enumValues.length + shipmentStageEnum.enumValues.length + codStatusEnum.enumValues.length + Object.keys(OUTCOME_LABEL).length} trạng thái đều có nhãn tiếng Việt · bốn chiều mang dấu hiệu riêng · không trang nào tự vẽ lại nhãn kết quả đơn`,
+    `✓ Nhất quán giao diện: ${orderStageEnum.enumValues.length + shipmentStageEnum.enumValues.length + codStatusEnum.enumValues.length + Object.keys(OUTCOME_LABEL).length} trạng thái + ${newLabels} danh mục mới đều có nhãn tiếng Việt · bốn chiều mang dấu hiệu riêng · không trang nào tự vẽ lại nhãn kết quả đơn · trang mới có trạng thái rỗng và bảng cuộn được`,
   );
 }
