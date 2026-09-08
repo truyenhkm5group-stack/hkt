@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
-import { getAttributionCoverage, getSalesFunnel } from "@/lib/queries/sales-funnel";
+import { getAttributionCoverage, getFunnelBySource, getSalesFunnel } from "@/lib/queries/sales-funnel";
 
 const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -56,6 +56,21 @@ export async function testSalesFunnel(db: Db) {
   }
   // Năm vai KHÔNG thay thế được cho nhau — mỗi vai phải là một dòng riêng, không gộp.
   assert.equal(new Set(coverage.map((c) => c.field)).size, 5, "năm vai phải tách bạch");
+
+  // ───────── 5. Tách theo kênh: cộng lại phải bằng tổng, tỷ lệ có mẫu số đúng ─────────
+  const bySource = await getFunnelBySource(ALL);
+  assert.equal(
+    bySource.reduce((t, r) => t + r.created, 0),
+    created,
+    "cộng các kênh phải đúng bằng tổng đơn — không kênh nào được đếm hai lần, không đơn nào rơi mất",
+  );
+  for (const r of bySource) {
+    // Mẫu số là đơn ĐÃ RỜI KHO: kênh không chịu trách nhiệm cho đơn chưa từng gửi đi.
+    if (r.shipped === 0) assert.equal(r.deliveryRate, null, `${r.label}: chưa gửi đơn nào thì KHÔNG có tỷ lệ giao`);
+    else assert.ok(Math.abs((r.deliveryRate ?? 0) - r.delivered / r.shipped) < 1e-9, `${r.label}: tỷ lệ giao phải chia cho đơn đã rời kho`);
+    assert.ok(r.delivered <= r.shipped, `${r.label}: không thể giao nhiều hơn số đã gửi`);
+    assert.ok(r.confirmed <= r.created, `${r.label}: không thể xác nhận nhiều hơn số đơn tạo`);
+  }
 
   const low = coverage.filter((c) => c.lowCoverage).map((c) => c.label);
   console.log(

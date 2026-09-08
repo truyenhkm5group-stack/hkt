@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
 
@@ -146,4 +147,66 @@ export async function getAttributionCoverage(period: Period): Promise<Attributio
     const coverage = total > 0 ? v.filled / total : 0;
     return { field: f.field, label: f.label, filled: v.filled, total, coverage, distinct: v.distinct, lowCoverage: total > 0 && coverage * 100 < LOW_COVERAGE_PCT };
   });
+}
+
+export type FunnelBySource = {
+  source: OrderSourceKey;
+  label: string;
+  created: number;
+  confirmed: number;
+  shipped: number;
+  delivered: number;
+  unfinished: number;
+  deliveredRevenue: number;
+  /** Giao thành công / đã rời kho (0–1); `null` khi chưa gửi đơn nào. */
+  deliveryRate: number | null;
+  /** Xác nhận / được tạo (0–1); `null` khi chưa có đơn nào. */
+  confirmRate: number | null;
+};
+
+/**
+ * Phễu tách theo KÊNH ĐẶT HÀNG. Dùng lại `ORDER_SOURCE` — kênh của một đơn được quyết định ở một
+ * chỗ duy nhất trong ERP, không định nghĩa lại ở đây.
+ *
+ * Vì sao cần tách: tỷ lệ giao thành công của đơn landing và đơn chat Facebook khác nhau rất xa; gộp
+ * chung thành một con số trung bình thì con số đó không mô tả đúng kênh nào cả.
+ */
+export async function getFunnelBySource(period: Period): Promise<FunnelBySource[]> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      source: sql<OrderSourceKey>`${ORDER_SOURCE}`,
+      created: sql<number>`count(distinct ${o.id})`,
+      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
+      shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
+      delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+    })
+    .from(o)
+    .leftJoin(s, sql`${s.orderId} = ${o.id}`)
+    .where(periodWhere(period))
+    .groupBy(sql`${ORDER_SOURCE}`);
+
+  return rows
+    .map((r) => {
+      const created = Number(r.created ?? 0);
+      const shipped = Number(r.shipped ?? 0);
+      const delivered = Number(r.delivered ?? 0);
+      const confirmed = Number(r.confirmed ?? 0);
+      return {
+        source: r.source,
+        label: ORDER_SOURCE_LABEL[r.source] ?? r.source,
+        created,
+        confirmed,
+        shipped,
+        delivered,
+        unfinished: Number(r.unfinished ?? 0),
+        deliveredRevenue: Number(r.deliveredRevenue ?? 0),
+        // Mẫu số là đơn ĐÃ RỜI KHO: kênh nào cũng không chịu trách nhiệm cho đơn chưa từng gửi đi.
+        deliveryRate: shipped > 0 ? delivered / shipped : null,
+        confirmRate: created > 0 ? confirmed / created : null,
+      };
+    })
+    .sort((a, b) => b.deliveredRevenue - a.deliveredRevenue || b.created - a.created);
 }
