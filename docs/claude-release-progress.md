@@ -13,7 +13,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 2 | Chuẩn hoá lớp chân lý nghiệp vụ | ✅ xong | `feat: centralize canonical order shipment payment truth` |
 | 3 | Cứng hoá nạp dữ liệu Viettel Post | ✅ xong | `feat: harden ViettelPost event ingestion` |
 | 4 | Bộ máy đối soát | ✅ xong | `feat: add shipment reconciliation safeguards` |
-| 5 | Lớp chân lý chỉ số | ⏳ | |
+| 5 | Lớp chân lý chỉ số | ✅ xong | `feat: centralize ERP metric truth` |
 | 6 | Dry-run lịch sử + backfill an toàn | ⏳ | |
 | 7 | Trung tâm điều khiển Chất lượng dữ liệu | ⏳ | |
 | 8 | Bộ kiểm thử bất biến nghiệp vụ | ⏳ | |
@@ -115,6 +115,26 @@ viết tay chỉ chứa thay đổi của 0032, đúng lối idempotent các mig
 `tests/reconciliation.test.ts` khoá: tiền về ngân hàng KHÔNG biến vận đơn thành đã giao · đơn hoàn
 giữ nguyên dấu vết thu hộ · chạy thử không ghi gì · sửa xác định thì phải đúng theo lịch sử · mỗi
 lần sửa để lại nhật ký · quét hai lần cho cùng kết quả.
+
+### TASK 5 — Lớp chân lý chỉ số
+
+Đóng F4 và F9.
+
+`lib/queries/metrics.ts` giữ hai POPULATION có tên (`confirmed` / `reportable`), bộ lọc chuẩn
+`metricScope()`, các vị ngữ theo kết quả đơn và các biểu thức tiền. Không có công thức kết quả đơn
+mới — tất cả đi qua `ORDER_OUTCOME`.
+
+**F4 đã sửa:** Tổng quan tính `successRevenue` và `successCogs` trong CÙNG một câu truy vấn, cùng
+population. Trước đây giá vốn là một truy vấn riêng thiếu bộ lọc "đơn đã xác nhận", nên lợi nhuận
+ước tính lấy doanh thu của một tập đơn và giá vốn của tập đơn khác. Trên fixture: doanh thu GTC
+4.903.000đ, giá vốn 3.600.000đ, GTC 34,7% — khớp mọi màn hình.
+
+`docs/metrics-contract.md` ghi với từng chỉ số: ý nghĩa · tử số · mẫu số · population · loại trừ ·
+trường ngày · nguồn sự thật · cài đặt. Nêu rõ ba con số tiền không bao giờ được coi là một
+(lên đơn / giao thành công / thực nhận).
+
+`tests/metrics-contract.test.ts` khoá bất biến "cùng chỉ số + cùng kỳ + cùng bộ lọc ⇒ cùng con số",
+kèm chốt chặn giá vốn không được vượt doanh thu của chính tập đơn đó.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 

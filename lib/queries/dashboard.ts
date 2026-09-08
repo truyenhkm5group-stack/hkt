@@ -1,14 +1,13 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
 import { erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
-import { ORDER_COGS } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { BOOKED_COGS, BOOKED_REVENUE, COUNT_BOOKED, COUNT_CANCELLED, COUNT_DELIVERED, COUNT_OPEN, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, averageOrderValue, metricScope, successRate } from "@/lib/queries/metrics";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
   const conds = [];
@@ -22,7 +21,10 @@ export type OrderKpis = {
   revenue: number; // doanh thu lên đơn (không tính đơn huỷ/xoá)
   cogs: number;
   successOrders: number;
+  /** Doanh thu của đơn ĐÃ GIAO THÀNH CÔNG (earned revenue) — khác doanh thu lên đơn. */
   successRevenue: number;
+  /** Giá vốn của ĐÚNG những đơn đã sinh ra `successRevenue`. Cùng population, cùng bộ lọc. */
+  successCogs: number;
   failedOrders: number;
   returnedOrders: number;
   activeOrders: number;
@@ -34,20 +36,24 @@ export type OrderKpis = {
 async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis> {
   const db = await getDb();
   // Chỉ đơn ĐÃ XÁC NHẬN trên Pancake (bỏ đơn Mới chưa chốt, huỷ, xoá) — khớp báo cáo lợi nhuận
-  const where = and(inPeriod(schema.orders.insertedAt, from, to), inArray(schema.orders.stage, [...CONFIRMED_STAGES]));
+  const where = metricScope({ key: "custom", from, to, label: "", fromKey: null, toKey: null }, "confirmed");
   // Kết quả đơn theo trạng thái vận đơn Viettel Post kết hợp Pancake (ORDER_OUTCOME)
+  // MỌI con số dưới đây đi qua lớp chân lý chỉ số (lib/queries/metrics.ts) và dùng CHUNG một
+  // population — nếu không thì doanh thu lấy theo tập đơn này, giá vốn lấy theo tập đơn khác.
   const [row] = await db
     .select({
-      orders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} <> 'CANCELLED')`,
-      revenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
-      cogs: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
-      successOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      successRevenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-      failedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('CANCELLED','RETURNED','RETURNED_BY_RULE'))`,
+      orders: COUNT_BOOKED,
+      revenue: BOOKED_REVENUE,
+      cogs: BOOKED_COGS,
+      successOrders: COUNT_DELIVERED,
+      successRevenue: DELIVERED_REVENUE,
+      // Giá vốn của ĐÚNG những đơn đã sinh ra `successRevenue` — cùng bộ lọc, cùng câu truy vấn.
+      successCogs: DELIVERED_COGS,
+      failedOrders: sql<number>`${COUNT_RETURNED} + ${COUNT_CANCELLED}`,
       // Riêng đơn HOÀN (không gồm huỷ) — mẫu số của tỷ lệ giao thành công, phải cùng định nghĩa
       // với báo cáo Tỷ lệ giao thành công: GTC = giao TC ÷ (giao TC + hoàn), KHÔNG chia cho tổng đơn.
-      returnedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`,
-      activeOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED'))`,
+      returnedOrders: COUNT_RETURNED,
+      activeOrders: COUNT_OPEN,
     })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
@@ -58,15 +64,15 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
     cogs: Number(row?.cogs ?? 0),
     successOrders: Number(row?.successOrders ?? 0),
     successRevenue: Number(row?.successRevenue ?? 0),
+    successCogs: Number(row?.successCogs ?? 0),
     failedOrders: Number(row?.failedOrders ?? 0),
     returnedOrders: Number(row?.returnedOrders ?? 0),
     activeOrders: Number(row?.activeOrders ?? 0),
     aov: 0,
     successRate: null,
   };
-  kpi.aov = kpi.orders ? Math.round(kpi.revenue / kpi.orders) : 0;
-  const finished = kpi.successOrders + kpi.returnedOrders;
-  kpi.successRate = finished ? Math.round((kpi.successOrders / finished) * 1000) / 10 : null;
+  kpi.aov = averageOrderValue(kpi.revenue, kpi.orders);
+  kpi.successRate = successRate(kpi.successOrders, kpi.returnedOrders);
   return kpi;
 }
 
@@ -96,7 +102,7 @@ async function getDashboardDataUncached(period: Period) {
     })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
+    .where(metricScope(period, "confirmed"))
     .groupBy(sql`1`)
     .orderBy(sql`1`);
   const daily = dailyRows.map((r) => ({ day: r.day, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0), successRevenue: Number(r.successRevenue ?? 0) }));
@@ -106,7 +112,7 @@ async function getDashboardDataUncached(period: Period) {
     .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
+    .where(metricScope(period, "confirmed"))
     .groupBy(schema.orders.source)
     .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount)));
   const channels = channelRows.map((r) => ({ source: r.source, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0) }));
@@ -166,7 +172,7 @@ async function getDashboardDataUncached(period: Period) {
     .select({ productName: schema.orderItems.productName, sku: schema.orderItems.sku, quantity: sum(schema.orderItems.quantity), revenue: sum(schema.orderItems.lineTotal), image: sql<string | null>`max(${schema.orderItems.image})` })
     .from(schema.orderItems)
     .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
-    .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), inArray(schema.orders.stage, [...CONFIRMED_STAGES])))
+    .where(metricScope(period, "confirmed"))
     .groupBy(schema.orderItems.productName, schema.orderItems.sku)
     .orderBy(desc(sum(schema.orderItems.quantity)))
     .limit(6);
@@ -181,15 +187,10 @@ async function getDashboardDataUncached(period: Period) {
   const adSpend = Number(ads?.amount ?? 0);
   const shipping = Number(shippingFees?.fee ?? 0);
   const returnFee = Number(shippingFees?.returnFee ?? 0);
-  const successCogs = Number(
-    (
-      await db
-        .select({ cogs: sql<number>`coalesce(sum(${ORDER_COGS}), 0)` })
-        .from(schema.orders)
-        .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-        .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), sql`${ORDER_OUTCOME} = 'DELIVERED'`))
-    )[0]?.cogs ?? 0,
-  );
+  // Giá vốn LẤY TỪ CHÍNH `orderKpis` — cùng population, cùng bộ lọc với doanh thu giao thành công.
+  // Trước đây đây là một truy vấn riêng THIẾU bộ lọc đơn đã xác nhận, nên lợi nhuận ước tính lấy
+  // doanh thu của một tập đơn và giá vốn của một tập đơn khác (F4).
+  const successCogs = current.successCogs;
   const estimatedProfit = netRevenue - successCogs - shipping - returnFee - adSpend - expenses;
 
   return {
