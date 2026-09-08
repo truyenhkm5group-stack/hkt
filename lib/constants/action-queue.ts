@@ -388,3 +388,23 @@ export function ageLabel(hours: number): string {
   const days = Math.floor(hours / 24);
   return `${days} ngày`;
 }
+
+export type QueueFilter = {
+  type?: CaseType;
+  priority?: CasePriority;
+  status?: CaseStatus;
+  /** `""` = chỉ việc chưa ai nhận. */
+  owner?: string;
+  /** Chỉ việc treo từ N đồng trở lên. */
+  minAmount?: number;
+  /** Chỉ việc đã quá hạn xử lý. */
+  breachedOnly?: boolean;
+  /** Cách xếp: theo tác động (mặc định) · theo tiền · theo tuổi việc. */
+  sort?: "impact" | "money" | "age";
+};
+
+export const QUEUE_SORT_LABEL: Record<NonNullable<QueueFilter["sort"]>, string> = {
+  impact: "Tác động lớn nhất trước",
+  money: "Tiền treo nhiều nhất trước",
+  age: "Để lâu nhất trước",
+};

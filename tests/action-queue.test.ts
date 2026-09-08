@@ -163,6 +163,28 @@ export async function testActionQueue(db: Db) {
   const afterResolve = await getActionQueue({ limit: 200 });
   assert.equal(afterResolve.cases.find((c) => c.id === target.id), undefined, "việc đã xong không còn nằm trong hàng đợi");
 
+  // ───────── 3b. Bộ lọc chỉ cắt danh sách, KHÔNG được đổi các con số tổng hợp ─────────
+  // Nếu tổng cũng bị lọc thì chọn một bộ lọc là thấy "hết việc rồi" — đúng kiểu số liệu tự trấn an.
+  const all = await getActionQueue({ limit: 200 });
+  const onlyUrgentish = await getActionQueue({ limit: 200, filter: { minAmount: 1 } });
+  assert.equal(onlyUrgentish.total, all.total, "tổng số việc không được đổi theo bộ lọc");
+  assert.equal(onlyUrgentish.financialImpact, all.financialImpact, "tổng tiền treo không được đổi theo bộ lọc");
+  assert.ok(onlyUrgentish.matched <= onlyUrgentish.total, "số việc đang xem không thể nhiều hơn tổng");
+  assert.ok(onlyUrgentish.cases.every((c) => c.financialImpact >= 1), "lọc theo tiền phải cắt đúng");
+
+  const unassignedOnly = await getActionQueue({ limit: 200, filter: { owner: "" } });
+  assert.ok(unassignedOnly.cases.every((c) => !c.owner), "lọc 'chưa ai nhận' không được lẫn việc đã có người");
+
+  // Xếp theo tiền và theo tuổi phải thật sự đổi thứ tự, không phải nhãn suông.
+  const byMoney = await getActionQueue({ limit: 200, filter: { sort: "money" } });
+  for (let i = 1; i < byMoney.cases.length; i += 1) {
+    assert.ok(byMoney.cases[i - 1].financialImpact >= byMoney.cases[i].financialImpact, "xếp theo tiền phải giảm dần");
+  }
+  const byAge = await getActionQueue({ limit: 200, filter: { sort: "age" } });
+  for (let i = 1; i < byAge.cases.length; i += 1) {
+    assert.ok(byAge.cases[i - 1].ageHours >= byAge.cases[i].ageHours, "xếp theo tuổi phải giảm dần");
+  }
+
   // ───────── 4. Loại việc mới phải có đủ nhãn, hành động và mức cứu được ─────────
   for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
     assert.ok(CASE_TYPE_LABEL[t]?.length, `${t}: thiếu nhãn tiếng Việt`);

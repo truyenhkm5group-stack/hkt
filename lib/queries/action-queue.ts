@@ -16,6 +16,7 @@ import {
   type CaseStatus,
   type CaseType,
   type CaseSla,
+  type QueueFilter,
   type ScoreParts,
 } from "@/lib/constants/action-queue";
 
@@ -84,6 +85,10 @@ export type ActionQueue = {
   financialImpact: number;
   /** Việc đã quá hạn xử lý. Chỉ đếm loại việc CÓ đặt hạn. */
   breached: number;
+  /** Số việc khớp bộ lọc đang xem. */
+  matched: number;
+  /** Tổng số việc đang mở, không phụ thuộc bộ lọc. */
+  total: number;
 };
 
 /**
@@ -119,7 +124,22 @@ async function amountsFor(entityIds: string[]): Promise<Map<string, number>> {
   return map;
 }
 
-export async function getActionQueue(options: { limit?: number; assignedTo?: string } = {}): Promise<ActionQueue> {
+/**
+ * BỘ LỌC HÀNG ĐỢI. Lọc SAU khi tính điểm, cố ý:
+ * các con số tổng hợp (bao nhiêu việc, bao nhiêu tiền, bao nhiêu trễ hạn) phải nói về TOÀN BỘ hàng
+ * đợi, không đổi theo bộ lọc đang xem — nếu không, lọc một cái là thấy "hết việc rồi".
+ */
+function matchesFilter(c: ActionCase, f: QueueFilter): boolean {
+  if (f.type && c.type !== f.type) return false;
+  if (f.priority && c.priority !== f.priority) return false;
+  if (f.status && c.status !== f.status) return false;
+  if (f.owner !== undefined && (f.owner === "" ? Boolean(c.owner) : c.owner?.id !== f.owner)) return false;
+  if (f.minAmount && c.financialImpact < f.minAmount) return false;
+  if (f.breachedOnly && !c.sla?.breached) return false;
+  return true;
+}
+
+export async function getActionQueue(options: { limit?: number; assignedTo?: string; filter?: QueueFilter } = {}): Promise<ActionQueue> {
   const db = await getDb();
   const limit = options.limit ?? 200;
   const rows = await db
@@ -189,7 +209,13 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     };
   });
 
-  cases.sort((a, b) => b.score - a.score || b.ageHours - a.ageHours);
+  // MẶC ĐỊNH xếp theo tác động: người mở trang làm từ trên xuống là đúng thứ tự.
+  const sort = options.filter?.sort ?? "impact";
+  cases.sort((a, b) => {
+    if (sort === "money" && a.financialImpact !== b.financialImpact) return b.financialImpact - a.financialImpact;
+    if (sort === "age" && a.ageHours !== b.ageHours) return b.ageHours - a.ageHours;
+    return b.score - a.score || b.ageHours - a.ageHours;
+  });
 
   const totals: Record<CasePriority, number> = { URGENT: 0, HIGH: 0, NORMAL: 0, LOW: 0 };
   const byTypeMap = new Map<CaseType, number>();
@@ -213,5 +239,9 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     .map(([type, count]) => ({ type, label: CASE_TYPE_LABEL[type], count }))
     .sort((a, b) => b.count - a.count);
 
-  return { cases, totals, byType, unassigned, neglected, financialImpact, breached };
+  // Bộ lọc chỉ cắt DANH SÁCH hiển thị; mọi con số tổng hợp ở trên vẫn nói về toàn bộ hàng đợi.
+  const filter = options.filter;
+  const visible = filter ? cases.filter((c) => matchesFilter(c, filter)) : cases;
+
+  return { cases: visible, totals, byType, unassigned, neglected, financialImpact, breached, matched: visible.length, total: cases.length };
 }

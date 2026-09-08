@@ -11,7 +11,8 @@ import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/fo
 import { listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
 import { getActionQueue } from "@/lib/queries/action-queue";
 import { assignableUsers } from "@/lib/actions/alerts";
-import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
+import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type CasePriority, type CaseStatus, type CaseType } from "@/lib/constants/action-queue";
+import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Cần xử lý" };
@@ -20,8 +21,24 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const user = await requirePermission("alerts:view");
   const raw = await searchParams;
   const kindFilter = typeof raw.kind === "string" ? raw.kind : "";
-  const [items, counts, config, queue, staff] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig(), getActionQueue({ limit: 300 }), assignableUsers()]);
-  const visibleCases = kindFilter ? queue.cases.filter((c) => items.find((n) => n.id === c.id)?.kind === kindFilter) : queue.cases;
+  const one = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : "");
+  // Bộ lọc lấy thẳng từ URL nên chia sẻ được: "việc trễ hạn trên 1 triệu chưa ai nhận" là một
+  // đường dẫn gửi cho nhau được.
+  const ownerRaw = one("owner");
+  const filter = {
+    type: (one("type") || undefined) as CaseType | undefined,
+    priority: (one("priority") || undefined) as CasePriority | undefined,
+    status: (one("status") || undefined) as CaseStatus | undefined,
+    owner: ownerRaw === "none" ? "" : ownerRaw || undefined,
+    minAmount: Number(one("minAmount")) || undefined,
+    breachedOnly: one("breached") === "1",
+    sort: (one("sort") || "impact") as "impact" | "money" | "age",
+  };
+  const [items, counts, config, queue, staff] = await Promise.all([listOpenNotifications(300), openCountsByKind(), loadAlertConfig(), getActionQueue({ limit: 300, filter }), assignableUsers()]);
+  // Hàng đợi việc có bộ lọc riêng (theo LOẠI VIỆC); các thẻ đếm ở trên lọc danh sách cảnh báo thô
+  // bên dưới (theo LOẠI CẢNH BÁO). Hai thứ khác nhau, trước đây chồng lên nhau nên lọc một cái là
+  // cả hai cùng rỗng mà không rõ vì sao.
+  const visibleCases = queue.cases;
   const visible = kindFilter ? items.filter((n) => n.kind === kindFilter) : items;
   const canConfig = can(user, "alerts:manage");
 
@@ -49,13 +66,16 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
 
       {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
       <SectionCard
-        title={`Hàng đợi việc — ${formatNumber(visibleCases.length)} việc`}
-        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}`}
+        title={`Hàng đợi việc — ${formatNumber(queue.total)} việc`}
+        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}${queue.matched !== queue.total ? ` · đang xem ${formatNumber(queue.matched)}/${formatNumber(queue.total)}` : ""}`}
+        actions={<QueueFilters types={queue.byType} staff={staff} />}
         hint="Mức ưu tiên tính bằng quy tắc, không phải cảm tính: mức nghiêm trọng + tuổi việc + tiền đang treo + KHẢ NĂNG CỨU ĐƯỢC + có khách đang chờ + sắp cháy hàng. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích. Rê chuột lên mức ưu tiên để xem từng phần điểm."
         padded={false}
       >
         {visibleCases.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-muted-foreground">Không có việc nào đang mở.</p>
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">
+            {queue.total ? "Không có việc nào khớp bộ lọc đang chọn." : "Không có việc nào đang mở."}
+          </p>
         ) : (
           <ul className="divide-y">
             {visibleCases.slice(0, 100).map((c) => (
@@ -71,7 +91,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                   <p className="text-xs text-muted-foreground">{c.reason}</p>
                   <p className="mt-0.5 text-xs"><span className="text-muted-foreground">Nên làm: </span>{c.recommendedAction}</p>
                   <p className="text-[10.5px] text-muted-foreground" title={formatDateTime(c.detectedAt)}>
-                    {c.typeLabel} · phát hiện {c.ageLabel} trước · {CASE_STATUS_LABEL[c.status]}
+                    {c.typeLabel} · phát hiện {c.ageLabel} trước ·{" "}
+                    <span className={cn("rounded px-1 py-px", CASE_STATUS_TONE[c.status])}>{CASE_STATUS_LABEL[c.status]}</span>
                     {c.owner ? ` · ${c.owner.name} đang xử lý` : " · chưa ai nhận"}
                     {c.financialImpact > 0 ? ` · ${formatVND(c.financialImpact)} đang treo` : ""}
                     {c.sla ? (
