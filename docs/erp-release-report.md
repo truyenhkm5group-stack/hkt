@@ -1550,3 +1550,102 @@ guardrail đã cài). Vì vậy **không có** con số doanh thu / GTC dự ph�
 
 Ước tính **−9 đơn · −4.566.000đ** cho nhóm 9 **vẫn còn nguyên hiệu lực**: không đơn nào trong 9
 thu được bằng chứng ĐVVC.
+
+## 10n. NGỮ NGHĨA `UNKNOWN` VÀ PHÂN LOẠI NHẬP NHẰNG — 08/09/2026
+
+### Lỗ hổng đã bịt: không chứng từ ⇒ CHƯA BIẾT, không phải "đang giao"
+
+Nhánh cuối cũ của `ORDER_OUTCOME` dịch *"Pancake báo đã giao / đã thanh toán mà không có chứng từ"*
+thành `IN_TRANSIT`. Sai hai lần: "đang giao" là một **khẳng định về vị trí gói hàng** (phải có chứng
+từ mới nói được), và nó **giấu mất** đúng nhóm đơn cần người xem lại, vì "đang giao" trông như một
+trạng thái bình thường.
+
+Thêm `HAS_CARRIER_LINK` = *có mã vận đơn **hoặc** mã tra cứu **hoặc** một sự kiện hành trình*, và
+hai nhánh mới:
+
+| Tình huống | Trước | Nay |
+|---|---|---|
+| Vận đơn tồn tại, **không** mã, **không** sự kiện | `IN_TRANSIT` / `DELIVERED` (theo tiền) | **`UNKNOWN`** |
+| Không có dòng vận đơn nào, Pancake báo đã giao / đã thanh toán | `IN_TRANSIT` | **`UNKNOWN`** |
+| Đơn chưa hề tạo vận đơn | `NOT_SHIPPED` | `NOT_SHIPPED` (giữ nguyên) |
+| Có chứng từ ĐVVC nói đang đi | `IN_TRANSIT` | `IN_TRANSIT` (giữ nguyên) |
+
+`UNKNOWN` thuộc nhóm **CHƯA KẾT THÚC** nên không vào tử số lẫn mẫu số tỷ lệ giao thành công.
+
+**Đặc tả được sửa tường minh** (`docs/business-rules/ORDER_OUTCOME.md` mục 2 và bảng chân lý mục 6)
+theo yêu cầu chủ shop. Contract test và test chất lượng dữ liệu đổi giá trị kỳ vọng **theo đặc tả
+mới**, không phải để CI xanh.
+
+**Một bất biến sẵn có bắt lỗi lan toả:** `cod-settlement` vẫn xếp đơn `UNKNOWN` vào diện "Viettel
+Post còn nợ" trong danh sách theo đơn trong khi số tổng đã loại nó ra (19 ≠ 20). Đã sửa: `UNKNOWN`
+xếp `CHUA_GIAO`, và nhánh đó phải nằm **trước** các nhánh so tiền — đòi tiền một đơn mà ERP còn
+không chứng minh được đã gửi đi là tạo ra **nợ ảo**.
+
+### Tách nhập nhằng DANH TÍNH khỏi nhập nhằng KẾT QUẢ
+
+Đối chiếu 5 nhóm còn lại bằng chính dữ liệu tệp (`vtp-replay-files --explain`) và ERP:
+
+| SĐT | Đơn ERP | Ứng viên trong tệp (tiền · trạng thái) | Kết quả từng ứng viên | Phân loại |
+|---|---|---|---|---|
+| 909728879 | 2 × 474.000 | `…0381` 474.000 Giao TC · `…3375` 474.000 Giao TC | DELIVERED · DELIVERED | **A** — tổng hợp xác định: 2 giao thành công |
+| 977870669 | 2 × 400.000 | `…0383` 400.000 Đã trả · `…0372` 400.000 Đã trả | RETURNED · RETURNED | **A** — 2 hoàn |
+| 0345222695 | 474.000 · 399.000 | `…3365` 30.000 · `…3403` 30.000 | RETURNED · RETURNED (< 50K) | **A** — 2 hoàn |
+| 979936889 | 4 × 474.000 | `…0382` 30.000 Giao TC · `…0367` 474.000 Đã trả | RETURNED · RETURNED | **A** — 2 hoàn + 2 chưa biết, mọi cách ghép cho cùng tổng |
+| 896997119 | 2 × 474.000 | `…3371` 474.000 Giao TC · `…3380` 5.001 Giao TC | DELIVERED · RETURNED | **A có ghi chú** — tổng hợp xác định (1+1); hai đơn giống hệt nhau nên không có cách nào phân biệt, nhưng nếu cần biết ĐÍCH DANH đơn nào được giao thì phải hỏi khách |
+| 0985222958 | 1 × 849.000 (đơn 3181) | **không có ứng viên** — `PKE1508295104` không nằm trong tệp | — | **C** — NO_CARRIER_EVIDENCE ⇒ `UNKNOWN` |
+
+**Số nhóm THẬT SỰ cần chủ shop xử lý: 0.** Không nhóm nào mà cách ghép khác nhau lại cho ra tổng
+hợp khác nhau. Đúng như yêu cầu: không làm phiền chủ shop vì những thứ máy đã biết chắc ở mức tổng.
+
+### Điều CHƯA làm, và vì sao
+
+Lớp `outcome_resolution = GROUP_DETERMINISTIC` **chưa được dựng**. Các chỉ số hiện tính ở grain
+**đơn**, nên muốn dùng kết quả mức nhóm thì phải có một tầng đối soát riêng — và yêu cầu nói rõ:
+*không hack metric*. Vì vậy 13 vận đơn kia sẽ mang `UNKNOWN`, chứ ERP **không** tự gán vận đơn cụ
+thể vào đơn cụ thể. Đây là việc kế tiếp có phạm vi rõ ràng, không phải việc lén làm trong bản vá.
+
+Tương tự, **không phát minh mã vận đơn**: `PKE1508295104` (*"Shop hủy lấy"*) chỉ tồn tại trên web
+viettelpost.vn, không có trong tệp xuất lẫn webhook ⇒ đánh dấu là **khoảng trống lịch sử**, không
+suy ra, không tạo mã giả.
+
+### Hàng đợi rà soát thủ công
+
+Thêm luật `AMBIGUOUS_ORDER_SHIPMENT_MAPPING` (`autoRepair: false`) vào bộ đối soát và Trung tâm điều
+khiển: cùng một SĐT có nhiều đơn chưa gắn được mã ⇒ nêu ra kèm số đơn, các mức thu hộ và mã đơn, để
+bấm vào xem được danh sách. Lời khuyên ghi thẳng trong luật: **chỉ cần xử lý khi các cách ghép cho
+ra kết quả khác nhau**; mọi cách ghép cho cùng kết quả thì không phải làm gì.
+
+Chủ shop **không** sửa trạng thái thô — mọi thay đổi vẫn phải đi qua đường ghi có nhật ký.
+
+### Dự phóng KPI — hiện tại → sau khi ngữ nghĩa `UNKNOWN` có hiệu lực
+
+Đo trên production bằng truy vấn chỉ đọc (ngữ nghĩa mới chưa deploy nên phải tính tay):
+
+| | Hiện tại | Dự phóng | Chênh |
+|---|---|---|---|
+| `DELIVERED` | 421 | **412** | **−9** |
+| `RETURNED` | 772 | **768** | **−4** |
+| `RETURNING` | *(nằm trong `RETURNED`)* | — | — |
+| `IN_TRANSIT` | 218 | 218 | 0 |
+| **`UNKNOWN`** | — | **13** | **+13** |
+| `NOT_SHIPPED` | 250 | 250 | 0 |
+| `CANCELLED` | 293 | 293 | 0 |
+| Doanh thu giao thành công | — | — | **−4.566.000đ** |
+| Tỷ lệ GTC | 35,29% | **34,92%** | −0,37 điểm |
+
+Mười ba đơn chuyển sang `UNKNOWN` gồm **9 đơn đang là `DELIVERED`** (4.566.000đ) và **4 đơn đang là
+`RETURNED`** (1.748.000đ). **0 đơn** thuộc diện "không có dòng vận đơn nào mà Pancake báo đã giao" —
+tức toàn bộ tác động nằm gọn trong 13 vận đơn đã biết mặt.
+
+Con số tuyệt đối của *doanh thu giao thành công* theo định nghĩa `ORDER_OUTCOME` chưa được đo trong
+lượt này; chỉ phần chênh **−4.566.000đ** là đo được chính xác. Không suy ra số tổng.
+
+### Trạng thái mã nguồn
+
+| Nhánh | Nội dung | Trên production? |
+|---|---|---|
+| `hotfix/vtp-import-recovery` | 3 lỗi importer + hai công cụ chẩn đoán | **ĐANG CHẠY** (`c4234c9`) |
+| `main` | thêm canonical patch (mapper) + ngữ nghĩa `UNKNOWN` + luật nhập nhằng | **chưa deploy** |
+
+`npm test` **TẤT CẢ KIỂM THỬ ĐẠT** · **15/15** bất biến · typecheck sạch · lint 0 lỗi ·
+Chất lượng dữ liệu: **0 NGHIÊM TRỌNG**.
