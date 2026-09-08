@@ -3,6 +3,8 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { viettelPostHealth } from "@/lib/queries/integrations";
+import { clearMemo } from "@/lib/cache";
+import { getIntegrationHealth } from "@/lib/queries/integration-health";
 import { runSyncJob } from "@/lib/sync/runner";
 
 /**
@@ -83,6 +85,26 @@ export async function testVtpHealth(db: Db) {
   });
   const sauKhiLech = await viettelPostHealth();
   assert.equal(sauKhiLech.webhookNotApplied, truocKhiLech + 1, "webhook mới hơn trạng thái đang lưu phải được đếm ra");
+
+  // ───────── Sức khoẻ cho MỌI connector, không chỉ Viettel Post ─────────
+  clearMemo();
+  const connectors = await getIntegrationHealth();
+  assert.deepEqual(
+    connectors.map((c) => c.key).sort(),
+    ["BANK", "FACEBOOK", "PANCAKE", "VIETTELPOST"],
+    "phải theo dõi mọi connector, không chỉ Viettel Post",
+  );
+  for (const c of connectors) {
+    assert.ok(["HEALTHY", "DEGRADED", "DOWN", "UNKNOWN"].includes(c.state), `${c.key}: phải có mức sức khoẻ`);
+    assert.ok(c.reason.length > 10, `${c.key}: phải nói được VÌ SAO xếp vào mức đó`);
+    assert.ok(c.eventsPerHour >= 0 && c.events24h >= 0);
+    assert.ok(c.reprocessHint.length > 20, `${c.key}: phải nói rõ vì sao xử lý lại là an toàn`);
+    // Chưa từng nhận gì và chưa từng chạy thì KHÔNG được coi là khoẻ.
+    if (!c.lastEventAt && !c.lastReconciliation?.at) assert.equal(c.state, "UNKNOWN", `${c.key}: thiếu căn cứ phải là CHƯA ĐỦ CĂN CỨ, không phải ĐANG CHẠY TỐT`);
+    if (c.lastEventAt) assert.ok(c.lagHours !== null, `${c.key}: có sự kiện thì phải đo được độ trễ`);
+  }
+  const vtpConnector = connectors.find((c) => c.key === "VIETTELPOST")!;
+  assert.notEqual(vtpConnector.state, "HEALTHY", "fixture có gói tin kẹt và mã lạ nên Viettel Post không thể là ĐANG CHẠY TỐT");
 
     const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.syncRuns)
     .where(and(eq(schema.syncRuns.source, "VIETTELPOST"), eq(schema.syncRuns.status, "RUNNING")));

@@ -17,6 +17,7 @@ import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
+import { HEALTH_LABEL, HEALTH_TONE, getIntegrationHealth } from "@/lib/queries/integration-health";
 import { paramList, parseListParams, type SearchParams } from "@/lib/search-params";
 import { JOB_DEFINITIONS } from "@/lib/sync/jobs";
 import { getSyncState, runningJobKeys } from "@/lib/sync/runner";
@@ -46,7 +47,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
 
-  const [vtpToken, cursor, backfill, runs, runFacets, webhooks, vtpHealth] = await Promise.all([
+  const [vtpToken, cursor, backfill, runs, runFacets, webhooks, vtpHealth, connectors] = await Promise.all([
     getIntegrationTokenInfo("viettelpost"),
     getSyncState<{ cursor: string }>("pancake.orders.updated_at.cursor"),
     getSyncState<BackfillState>("pancake.orders.backfill"),
@@ -54,6 +55,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
     syncRunFacets(runParams),
     listRecentWebhooks(webhookFilters, 30),
     viettelPostHealth(),
+    getIntegrationHealth(),
   ]);
 
   const appUrl = env.appUrl;
@@ -219,6 +221,70 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           }
         />
       </section>
+
+      {/* ───────── Sức khoẻ TẤT CẢ tích hợp ───────── */}
+      <SectionCard
+        title="Sức khoẻ tích hợp"
+        description="Cùng một bộ câu hỏi cho mọi kết nối: còn chảy dữ liệu không, trễ bao lâu, có gì kẹt lại."
+        hint="Trạng thái CHƯA ĐỦ CĂN CỨ không đồng nghĩa với ĐANG CHẠY TỐT: kết nối chưa từng nhận dữ liệu và chưa từng chạy đối chiếu thì ERP không có cơ sở để nói nó khoẻ. Một tích hợp chết âm thầm là chuyện đã xảy ra thật."
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table className="min-w-[860px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Kết nối</TableHead>
+                <TableHead>Tình trạng</TableHead>
+                <TableHead>Nhận tin gần nhất</TableHead>
+                <TableHead className="text-right">Sự kiện/giờ</TableHead>
+                <TableHead className="text-right">Kẹt lại</TableHead>
+                <TableHead>Đối chiếu gần nhất</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {connectors.map((c) => (
+                <TableRow key={c.key}>
+                  <TableCell className="font-medium whitespace-nowrap">{c.label}</TableCell>
+                  <TableCell>
+                    <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", HEALTH_TONE[c.state])}>{HEALTH_LABEL[c.state]}</span>
+                    <span className="block max-w-[320px] text-[11px] text-muted-foreground">{c.reason}</span>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs">
+                    {c.lastEventAt ? formatTimeAgo(c.lastEventAt) : "—"}
+                    {c.lagHours === null ? null : <span className="block text-[11px] text-muted-foreground">trễ {c.lagHours}h</span>}
+                  </TableCell>
+                  <TableCell className="numeric text-right text-xs">{c.eventsPerHour}</TableCell>
+                  <TableCell className="text-right text-xs">
+                    {c.failed || c.unprocessed || c.unknownMappings ? (
+                      <span className="text-warning">
+                        {c.failed ? `${formatNumber(c.failed)} lỗi ` : ""}
+                        {c.unprocessed ? `${formatNumber(c.unprocessed)} chưa khớp ` : ""}
+                        {c.unknownMappings ? `${formatNumber(c.unknownMappings)} mã lạ` : ""}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                    {c.retries ? <span className="block text-[11px] text-muted-foreground">{formatNumber(c.retries)} lần gửi lại</span> : null}
+                  </TableCell>
+                  <TableCell className="max-w-[260px] text-xs">
+                    {c.lastReconciliation?.at ? (
+                      <>
+                        {formatTimeAgo(c.lastReconciliation.at)} · {c.lastReconciliation.status}
+                        {c.lastReconciliation.detail ? <span className="block truncate text-[11px] text-muted-foreground" title={c.lastReconciliation.detail}>{c.lastReconciliation.detail}</span> : null}
+                      </>
+                    ) : (
+                      "Chưa chạy lần nào"
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <p className="border-t px-5 py-3 text-xs text-muted-foreground">
+          Xử lý lại được cho mọi kết nối ở trên vì luồng nạp dữ liệu là idempotent: {connectors.map((c) => c.reprocessHint).find(Boolean)}
+        </p>
+      </SectionCard>
 
       {/* ───────── Sức khoẻ Viettel Post ───────── */}
       <SectionCard

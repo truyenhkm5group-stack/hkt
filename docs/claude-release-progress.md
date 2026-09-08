@@ -23,7 +23,7 @@ Kiểm toán nền: `docs/erp-data-truth-audit.md`.
 | 12 | Hàng đợi việc theo mức ưu tiên | ✅ xong | `feat: add prioritized ERP action queue` |
 | 13 | Tổng quan ra quyết định | ✅ xong | `feat: optimize ERP management dashboard` |
 | 14 | ROAS theo kết quả đơn | ✅ xong | `feat: add COD-aware ads profitability metrics` |
-| 15 | Sức khoẻ tích hợp | ⏳ | |
+| 15 | Sức khoẻ tích hợp | ✅ xong | `feat: add integration health observability` |
 | 16 | Hiệu năng | ⏳ | |
 | 17 | Nhật ký truy vết | ⏳ | |
 | 18 | Nhất quán giao diện | ⏳ | |
@@ -285,6 +285,21 @@ tiền quảng cáo của chiến dịch không có đơn nào — cả ba đề
 cho các chiến dịch để bảng trông đẹp.
 
 Chưa tiêu đồng nào thì ROAS trả `null` (chia cho 0 là vô nghĩa), không phải 0.
+
+### TASK 15 — Sức khoẻ tích hợp
+
+Đóng F8. `lib/queries/integration-health.ts` trả lời **cùng một bộ câu hỏi cho mọi connector**
+(Pancake · Viettel Post · Facebook Ads · Bảng kê/ngân hàng), thay vì chỉ Viettel Post có:
+nhận tin lần cuối · xử lý thành công lần cuối · độ trễ · đối chiếu lần cuối · sự kiện/giờ ·
+gói tin lỗi · gói tin chưa khớp được đơn · số lần bên gửi phải gửi lại · mã ánh xạ chưa hiểu.
+
+Bốn mức: `HEALTHY` / `DEGRADED` / `DOWN` / `UNKNOWN`, mỗi mức luôn kèm **lý do**. `UNKNOWN` không
+bao giờ được hiểu là khoẻ — chưa từng nhận dữ liệu và chưa từng chạy đối chiếu thì ERP không có cơ
+sở để nói. Ngưỡng "im lặng" đặt theo nhịp thật của từng nguồn (bảng kê về vài ngày một lần thì
+không thể lấy ngưỡng 24 giờ).
+
+Mỗi connector ghi rõ **vì sao xử lý lại là an toàn** (idempotent theo khoá nào) — không idempotent
+thì không được cho bấm retry.
 
 ## Backlog (phát hiện ngoài phạm vi, không tự sửa)
 
