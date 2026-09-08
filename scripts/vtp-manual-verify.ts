@@ -168,7 +168,9 @@ async function main() {
           shipmentId: ship.id, source: MANUAL_VERIFICATION_SOURCE,
           status: r.status, statusName: r.status, occurredAt: VERIFIED_AT,
           normalizedStage: stage, legType: legOf ? "RETURN" : "OUTBOUND",
-          verificationStatus: "VERIFIED",
+          // Ràng buộc `shipment_events_verified_check` đòi dòng VERIFIED phải khai đủ ai xác minh
+          // và lúc nào — đúng như vậy, và đó là lý do dấu VERIFIED ở đây có nghĩa.
+          verificationStatus: "VERIFIED", verifiedAt: VERIFIED_AT, verifiedBy: "SHOP_OWNER",
           sourceReference: `${BATCH}:${r.tracking}`,
           raw: { evidenceType: "CARRIER_SCREENSHOT", verifiedBy: "SHOP_OWNER", batch: BATCH,
             statusText: r.status, codText: r.cod, phone: r.phone, note: r.note ?? null,
