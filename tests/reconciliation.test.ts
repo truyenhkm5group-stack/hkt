@@ -144,7 +144,13 @@ export async function testReconciliation(db: Db) {
   // ───────── 5. Việc sửa phải TRUY NGUYÊN ĐƯỢC ─────────
   const logs = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "reconcile.repair"));
   assert.ok(logs.length > 0, "mỗi lần tự sửa phải để lại nhật ký");
-  assert.equal(logs[0].entity, "shipment");
+  // Tên đối tượng viết HOA đồng bộ với phần còn lại của nhật ký (SHIPMENT / ORDER / STOCK_RECEIPT…)
+  // để trang Nhật ký lọc được theo một danh sách duy nhất.
+  assert.equal(logs[0].entity, "SHIPMENT");
+  const repairDetail = logs[0].detail as Record<string, unknown>;
+  assert.ok(repairDetail.before && repairDetail.after, "phải ghi TRƯỚC và SAU, nếu không thì lúc số liệu lệch không lần ngược được");
+  assert.ok(String(repairDetail.reason).length > 10, "phải ghi VÌ SAO sửa");
+  assert.ok(String(repairDetail.correlationId).startsWith("reconcile-"), "phải nối được các thay đổi cùng một lần chạy");
 
   // ───────── 6. Quét chỉ đọc: chạy hai lần cho cùng kết quả, không đổi dữ liệu ─────────
   const a = await scanReconciliation();
