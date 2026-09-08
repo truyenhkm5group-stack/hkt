@@ -175,7 +175,11 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
       db
         .select({ code })
         .from(s)
-        .where(and(inArray(s.stage, ["PENDING", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_FAILED", "RETURNING"]), lt(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, staleCutoff)))
+        .where(and(
+          inArray(s.stage, ["PENDING", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_FAILED", "RETURNING"]),
+          lt(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, staleCutoff),
+          sql`not (${sql.raw(sqlIsTestTracking(`"shipments"."vtp_order_number"`))})`,
+        ))
         .limit(500),
       db
         .select({ code: schema.shipmentEvents.status, n: sql<number>`count(*)` })
@@ -199,9 +203,11 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
         .from(s)
         .innerJoin(o, eq(o.id, s.orderId))
         .where(
-          sql`(${o.stage} in ('DELIVERED','PAID') and ${s.stage} in ('RETURNING','RETURNED'))
+          sql`((${o.stage} in ('DELIVERED','PAID') and ${s.stage} in ('RETURNING','RETURNED'))
             or (${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') and ${s.stage} = 'DELIVERED')
-            or (${o.stage} in ('CANCELLED','DELETED') and ${s.stage} in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))`,
+            or (${o.stage} in ('CANCELLED','DELETED') and ${s.stage} in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT')))
+            and not (${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') and ${s.stage} = 'DELIVERED'
+                     and exists (select 1 from shipments leg where leg.order_reference = ${s.vtpOrderNumber}))`,
         )
         .limit(500),
       db

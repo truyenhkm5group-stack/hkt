@@ -159,9 +159,14 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           'Pancake ' || o.stage::text || ' · Viettel Post ' || s.stage::text as evidence,
           s.updated_at as at, s.id as entity_id
         from shipments s join orders o on o.id = s.order_id
-        where (o.stage in ('DELIVERED','PAID') and s.stage in ('RETURNING','RETURNED'))
+        where ((o.stage in ('DELIVERED','PAID') and s.stage in ('RETURNING','RETURNED'))
            or (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED')
-           or (o.stage in ('CANCELLED','DELETED') and s.stage in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))`;
+           or (o.stage in ('CANCELLED','DELETED') and s.stage in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT')))
+          -- KHONG phai xung dot: VTP ghi "Giao thanh cong" cho CHIEU DI roi hang quay ve theo van don
+          -- hoan, con Pancake ghi ket qua CUOI la hoan. Hai ben noi ve hai viec khac nhau va deu dung;
+          -- ORDER_OUTCOME da ket luan HOAN nho chinh van don hoan do.
+          and not (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED'
+                   and exists (select 1 from shipments leg where leg.order_reference = s.vtp_order_number))`;
     case "AMBIGUOUS_ORDER_SHIPMENT_MAPPING":
       // Cùng SĐT, nhiều vận đơn chưa có mã ⇒ bằng chứng của ĐVVC không phân biệt được đơn nào ứng
       // với vận đơn nào. Nêu ra để người xem lại, không để máy đoán.
