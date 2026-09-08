@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { CASE_STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE } from "@/lib/constants/action-queue";
 import { formatVND } from "@/lib/format";
-import { getActionQueue } from "@/lib/queries/action-queue";
+import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * trang là biết ngay việc đầu tiên phải làm.
  */
 export async function TopActions({ limit = 6 }: { limit?: number }) {
-  const queue = await getActionQueue({ limit: 60 });
+  const queue = await getDashboardActionQueue();
   // Việc đã có người ĐANG LÀM không cần chen lên đầu bảng điều khiển của chủ shop.
   const top = queue.cases.filter((c) => c.status === "OPEN" || c.status === "ACKNOWLEDGED").slice(0, limit);
 

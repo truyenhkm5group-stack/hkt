@@ -1,5 +1,5 @@
 import { getDashboardData } from "@/lib/queries/dashboard";
-import { getActionQueue } from "@/lib/queries/action-queue";
+import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
 import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-intelligence";
@@ -53,7 +53,7 @@ const vnd = (v: number) => `${Math.round(v).toLocaleString("vi-VN")}đ`;
 export async function getBusinessBrief(period: Period): Promise<BusinessBrief> {
   const [dash, queue, adsAnomalies, slow, products, adSpend] = await Promise.all([
     getDashboardData(period),
-    getActionQueue({ limit: 60 }),
+    getDashboardActionQueue(),
     detectAdsAnomalies().catch(() => []),
     getSlowMoving().catch(() => null),
     getProductIntelligence({ period, limit: 100 }).catch(() => []),
