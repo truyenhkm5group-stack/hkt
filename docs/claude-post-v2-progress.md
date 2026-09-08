@@ -1,8 +1,9 @@
 # Tiến độ roadmap sau V2
 
-Cập nhật 08/09/2026. **Chưa deploy** — gom theo lô, chỉ phát hành khi cổng ra của lô đó đạt.
+Cập nhật 09/09/2026. **Toàn bộ 10 lô A–J đã xong. Cổng ra 15/17 đạt tại chỗ.**
 
-Production đang chạy `b067913` (bản V2). Nhánh `main` đi trước.
+Production vẫn chạy `b067913` (bản V2). Nhánh `main` đi trước **33 commit** và **chưa deploy được**
+vì phiên này không có `gh` CLI — xem `docs/erp-post-v2-release-report.md` mục cuối để chạy deploy.
 
 | Lô | Task | Trạng thái | Commit |
 |---|---|---|---|
@@ -19,13 +20,21 @@ Production đang chạy `b067913` (bản V2). Nhánh `main` đi trước.
 | **C** | C2 · Chỉ số lợi nhuận quảng cáo (CAC) | **XONG** | `4a8c3f9` |
 | **C** | C3 · Drill-down quảng cáo | **XONG** | `5bc354d` |
 | **C** | C4 · Phát hiện bất thường | **XONG** | `e14f61f` |
-| D | D1–D3 · Mẫu mã × màu × size | chưa | |
-| E | E1–E5 · Tồn kho & dự báo sản xuất | chưa | |
-| F | F1–F3 · Bảng điều khiển quản trị | chưa | |
-| G | G1–G3 · Nền tảng trợ lý (chỉ đọc) | chưa | |
-| H | H1–H2 · Tìm kiếm & dòng thời gian | chưa | |
-| I | I1–I3 · Hiệu năng & độ tin cậy vòng 2 | chưa | |
-| J | J · Nhất quán giao diện | chưa | |
+| **D** | D1 · Mô hình hiệu quả mẫu mã | **XONG** | `30fea62` |
+| **D** | D2 · Bảng mẫu mã × màu × size | **XONG** | `83211e7` |
+| **D** | D3 · Luật phân loại mẫu mã | **XONG** | `1cd925f` |
+| **E** | E1 · Tốc độ bán chống nhiễu | **XONG** | `845bbf0` |
+| **E** | E2 · Số ngày còn đủ hàng + MOQ | **XONG** | `2c157c2` |
+| **E** | E3 · Dự báo cháy hàng | **XONG** | `32183ec` |
+| **E** | E4 · Đề xuất sản xuất + hạn đặt | **XONG** | `973f043` |
+| **E** | E5 · Hàng bán chậm & vốn nằm chết | **XONG** | `c93b560` |
+| **F** | F1–F3 · Bảng điều khiển quản trị | **XONG** | `804e29e` |
+| **G** | G1–G3 · Nền tảng trợ lý (chỉ đọc) | **XONG** | `20da309` |
+| **H** | H1 · Tìm kiếm toàn hệ thống | **XONG** | `2b08892` |
+| **H** | H2 · Dòng thời gian truy vết | **XONG** | `89a2573` |
+| **I** | I1–I2 · Đo & tối ưu hiệu năng | **XONG** | `7529f72` |
+| **I** | I3 · Độ tin cậy job nền | **XONG** | `7342b17` |
+| **J** | J · Nhất quán giao diện | **XONG** | `912dfeb` |
 
 ## Lô A — đã làm gì
 
@@ -96,6 +105,21 @@ chờ + còn cứu được. Trên dữ liệu kiểm thử, số việc GẤP g
 
 Migration **`0037`** — 5 cột hàng đợi việc + 2 khoá ngoại + 1 CHECK (bỏ qua phải có lý do) + 1 index.
 Idempotent, CHECK để `NOT VALID` nên không quét lại lịch sử.
+
+## Lô D–J — đã làm gì
+
+Xem `docs/erp-post-v2-release-report.md` để có bản đầy đủ. Ba điểm đáng nhớ nhất:
+
+**Ba lỗi THẬT được phát hiện và sửa**, cả ba đều im lặng: ROAS cấp mẩu quảng cáo tra chi tiêu sai
+không gian khoá (bật lên là mọi mẩu hiện 0đ và toàn bộ tiền chiến dịch bị xếp nhầm); ô tìm kiếm sập
+khi dán mã vận đơn vì tràn kiểu số nguyên; job treo tự chặn chính mình vĩnh viễn.
+
+**"Đáng nhân bản" đòi ĐỦ CẢ SÁU chiều.** Thiếu chiều nào thì trả "chưa đủ căn cứ" kèm tên chiều
+thiếu, không hạ tiêu chuẩn xuống năm chiều rồi vẫn gắn nhãn. Gắn nhãn bán chạy dựa trên vài chiều
+rồi để chủ shop đặt sản xuất hàng nghìn cái là thiệt hại lớn nhất một báo cáo có thể gây ra.
+
+**Một ngày livestream không được quyết định kế hoạch cả tháng.** Tốc độ bán bỏ ngày đột biến khi và
+chỉ khi một ngày chiếm hơn nửa tổng bán — dập mọi dao động sẽ khiến kế hoạch luôn đặt thiếu.
 
 ## Blocker
 
