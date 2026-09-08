@@ -144,7 +144,22 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                     <TableCell className="text-xs">{fmtDate(r.stockOutDate)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.leadTimeDemand)}</TableCell>
                     <TableCell className="text-right tabular-nums" title="Nhu cầu (SX + đủ bán) + tồn an toàn">{formatNumber(r.target)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{r.suggested ? formatNumber(r.suggested) : <span className="text-muted-foreground">0</span>}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">
+                      {r.suggested ? (
+                        <span
+                          title={
+                            (r.moqApplied ? `Nhu cầu thật là ${formatNumber(r.suggestedBeforeMoq)}, nâng lên vì xưởng nhận từ ${formatNumber(r.suggested)} cái. ` : "") +
+                            (r.velocityTrimmed ? `Tốc độ bán đã bỏ một ngày đột biến (${formatNumber(r.peakDayQty)} cái/ngày) — nếu tính cả ngày đó thì đề xuất sẽ cao hơn nhiều.` : "")
+                          }
+                        >
+                          {formatNumber(r.suggested)}
+                          {r.moqApplied ? <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">(tối thiểu)</span> : null}
+                          {r.velocityTrimmed ? <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">*</span> : null}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right"><Money value={r.orderCost} className={r.orderCost ? "" : "text-muted-foreground"} /></TableCell>
                     <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[r.status])}>{PLAN_STATUS_LABEL[r.status]}</span></TableCell>
                   </TableRow>
