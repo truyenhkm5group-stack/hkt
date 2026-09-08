@@ -29,6 +29,7 @@ import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { RECONCILIATION_RULES, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { sqlIsTestTracking } from "@/lib/constants/truth";
 
 const s = schema.shipments;
 const o = schema.orders;
@@ -152,7 +153,18 @@ export async function scanReconciliation(options: ScanOptions = {}): Promise<Rec
         .leftJoin(s, eq(s.orderId, o.id))
         .where(and(isNull(s.id), inArray(o.stage, ["SHIPPED", "DELIVERED", "PAID", "RETURNING", "PARTIAL_RETURN", "RETURNED"])))
         .limit(500),
-      db.select({ code }).from(s).where(isNull(s.orderId)).limit(500),
+      // Vận đơn CHIỀU HOÀN không có đơn là ĐÚNG THIẾT KẾ (dòng riêng, `order_reference` trỏ về vận
+      // đơn gốc), và gói tin TEST của ĐVVC không phải gói hàng thật. Đếm chúng như sự cố hệ thống
+      // thì con số cảnh báo mất hết ý nghĩa: 250/264 "vận đơn mồ côi" hoá ra đều hợp lệ.
+      db
+        .select({ code })
+        .from(s)
+        .where(and(
+          isNull(s.orderId),
+          sql`not (${s.orderReference} is not null and exists (select 1 from shipments g where g.vtp_order_number = ${s.orderReference}))`,
+          sql`not (${sql.raw(sqlIsTestTracking(`"shipments"."vtp_order_number"`))})`,
+        ))
+        .limit(500),
       db
         .select({ code: sql<string>`${s.trackingCode}` })
         .from(s)

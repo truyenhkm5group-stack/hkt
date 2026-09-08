@@ -230,6 +230,20 @@ export const NOT_MONEY_EVIDENCE = [
  * Thêm tên vào đây phải là một quyết định tường minh: mỗi luồng ghi thêm là một bản luật thứ hai,
  * và hai bản luật thì sớm muộn cũng lệch nhau. Khoá ở tests/business-invariants.test.ts.
  */
+/**
+ * Mã vận đơn TEST mà chính Viettel Post bắn vào khi bấm "Kiểm tra" trên trang cấu hình webhook.
+ * Không phải gói hàng thật, không gắn với đơn nào — nhưng vẫn là dữ liệu ĐVVC đã gửi nên KHÔNG xoá;
+ * chỉ loại khỏi các luật đối soát để nó thôi bị đếm như một sự cố hệ thống.
+ */
+export const VTP_TEST_TRACKING_CODES = ["123456789101112"] as const;
+
+/**
+ * SQL: vận đơn này là bản sao TEST của ĐVVC hay không.
+ * Dùng chung cho mọi luật đối soát để chỉ có MỘT định nghĩa.
+ */
+export const sqlIsTestTracking = (column: string) =>
+  `${column} in (${VTP_TEST_TRACKING_CODES.map((c) => `'${c}'`).join(",")})`;
+
 export const SHIPMENT_STAGE_WRITERS = ["lib/integrations/viettelpost/state.ts", "lib/integrations/pancake/sync.ts"] as const;
 
 /** Kiểu tổng hợp một đơn theo cả năm chiều — dùng cho màn hình chi tiết và cho nhật ký truy vết. */

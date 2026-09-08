@@ -1,6 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
+import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_ORDER, type IssueEntity, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
@@ -115,7 +116,11 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'người nhận ' || coalesce(nullif(s.receiver_name, ''), '(trống)') || ' · ' || coalesce(nullif(s.receiver_phone, ''), '(không SĐT)') as evidence,
           s.updated_at as at, s.id as entity_id
-        from shipments s where s.order_id is null`;
+        from shipments s
+        where s.order_id is null
+          -- Vận đơn CHIỀU HOÀN là dòng riêng không có đơn — đúng quy ước, không phải sự cố.
+          and not (s.order_reference is not null and exists (select 1 from shipments g where g.vtp_order_number = s.order_reference))
+          and not (${sql.raw(sqlIsTestTracking("s.vtp_order_number"))})`;
     case "DUPLICATE_TRACKING":
       return sql`select s.tracking_code as code,
           count(*)::text || ' dòng cùng một mã vận đơn' as evidence,

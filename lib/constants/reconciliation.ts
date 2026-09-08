@@ -106,8 +106,9 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     entity: "shipment",
     severity: "WARNING",
     label: "Vận đơn chưa ghép được với đơn nào",
-    reason: "Vận đơn có trên Viettel Post nhưng chưa ghép được đơn ERP. Không vào doanh thu, lợi nhuận, tồn kho, marketing.",
-    suggestedAction: "Ghép tay theo số điện thoại / mã tham chiếu ở trang Chất lượng dữ liệu.",
+    reason:
+      "Vận đơn có trên Viettel Post nhưng chưa ghép được đơn ERP. Không vào doanh thu, lợi nhuận, tồn kho, marketing. CỐ Ý không đếm vận đơn CHIỀU HOÀN (chúng là dòng riêng, không có đơn — đúng thiết kế) và gói tin TEST của ĐVVC.",
+    suggestedAction: "Ghép tay theo mã tham chiếu ở trang Chất lượng dữ liệu. Số điện thoại KHÔNG đủ làm danh tính.",
     autoRepair: false,
   },
   DUPLICATE_TRACKING: {
