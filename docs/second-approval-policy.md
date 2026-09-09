@@ -98,10 +98,10 @@ khung xương canh 21 tuyến.
 | Ghi giảm / xuất tay | ✅ `createStockReceipt` kind `ISSUE` |
 | Sửa / xoá khoản chi | ✅ `updateExpense`, `deleteExpense` |
 | Sửa cơ chế trả công | ✅ `savePayrollConfig` |
-| Sửa tiền COD | ⬜ chưa |
+| Đổi luật nghiệp vụ | ✅ `saveProfitAssumptions` |
+| Đặt hàng vượt ngưỡng | ✅ `saveProductionOrder` |
+| Sửa tiền COD | ⬜ chưa — chưa có Server Action sửa COD, hiện chỉ sửa qua script vận hành |
 | Ghi đè kết luận ĐVVC | ⬜ chưa |
-| Đặt hàng vượt ngưỡng | ⬜ chưa |
-| Đổi luật nghiệp vụ | ⬜ chưa |
 | Ngân sách quảng cáo | ⬜ chưa — ERP hiện KHÔNG có đường ghi ngân sách QC (lớp tư vấn chỉ đọc) |
 
 Phần chưa nối được **in ra ở mỗi lần chạy kiểm thử**, không nằm im trong tài liệu.

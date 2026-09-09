@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { guardSecondApproval } from "@/lib/actions/approvals";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -31,6 +32,21 @@ export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true 
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const before = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);
+  {
+    // Đổi giả định lợi nhuận là đổi cách ĐỌC mọi số liệu lịch sử cùng lúc — báo cáo tháng trước in
+    // lại sẽ ra con số khác mà không ai đụng vào dữ liệu của tháng đó.
+    const cong = await guardSecondApproval({
+      group: "BUSINESS_RULE_CHANGE",
+      action: "reports.assumptions",
+      entity: "SETTINGS",
+      entityId: PROFIT_ASSUMPTIONS_KEY,
+      summary: `Đổi giả định lợi nhuận`,
+      amount: null,
+      payload: { truoc: before, sau: parsed.data },
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
   await setSettingJson(PROFIT_ASSUMPTIONS_KEY, parsed.data);
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PROFIT_ASSUMPTIONS_KEY, detail: { before, after: parsed.data } });
   revalidatePath("/reports");
