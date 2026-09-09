@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AUTO_REPAIRABLE_RULES, RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER } from "@/lib/constants/reconciliation";
@@ -209,6 +209,49 @@ export async function testReconciliation(db: Db) {
   console.log(
     `✓ Trung tâm điều khiển: ${tower.firing}/${tower.ruleCount} luật đang có vi phạm · ${tower.totals.ERROR} nghiêm trọng · số trên thẻ khớp danh sách mở ra`,
   );
+
+  // ───────── ĐƠN KHÔNG THỂ CÓ HAI VẬN ĐƠN — CSDL CƯỠNG CHẾ ─────────
+  //
+  // Gần như MỌI báo cáo đều `orders left join shipments` rồi tính trên từng dòng, nên một đơn hai
+  // vận đơn sẽ bị đếm hai lần: doanh thu cộng đôi, số đơn cộng đôi, tỷ lệ giao thành công lệch.
+  //
+  // Điều tra 09/09/2026 tìm ra thứ đang bảo vệ mọi con số đó: ràng buộc `shipments_order_id_unique`
+  // có từ migration 0000. Nó nằm trong SQL nhưng KHÔNG được khai trong `db/schema.ts` suốt thời gian
+  // qua — ai đọc mã đều tưởng nhiều vận đơn một đơn là hợp lệ. Nay đã khai, và khoá lại ở đây.
+  //
+  // Bài kiểm thử này chứng minh sự bảo vệ là THẬT, chứ không phải "hiện chưa có ca nào".
+  const [donGoc] = await db.select({ id: schema.orders.id }).from(schema.orders).limit(1);
+  if (donGoc) {
+    const daCo = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, donGoc.id));
+    let biTuChoi = false;
+    try {
+      await db.insert(schema.shipments).values({ id: "grain-vd-2", orderId: donGoc.id, vtpOrderNumber: "GRAIN002", stage: "IN_TRANSIT" });
+    } catch {
+      biTuChoi = true;
+    }
+    if (daCo.length) {
+      assert.ok(biTuChoi, "CSDL PHẢI từ chối vận đơn thứ hai của cùng một đơn — đây là thứ giữ cho doanh thu không bị cộng đôi");
+    } else {
+      // Đơn chưa có vận đơn: dòng đầu vào được, dòng thứ hai phải bị từ chối.
+      assert.ok(!biTuChoi, "đơn chưa có vận đơn thì dòng đầu tiên phải vào được");
+      let lanHai = false;
+      try {
+        await db.insert(schema.shipments).values({ id: "grain-vd-3", orderId: donGoc.id, vtpOrderNumber: "GRAIN003", stage: "IN_TRANSIT" });
+      } catch {
+        lanHai = true;
+      }
+      assert.ok(lanHai, "CSDL PHẢI từ chối vận đơn thứ hai của cùng một đơn");
+      await db.delete(schema.shipments).where(inArray(schema.shipments.id, ["grain-vd-2", "grain-vd-3"]));
+    }
+    clearMemo();
+  }
+
+  // Luật đối soát vẫn tồn tại như CHUÔNG BÁO nếu một ngày ràng buộc kia bị gỡ: nó luôn đếm 0 khi
+  // ràng buộc còn nguyên, và bật ngay khi có ca đầu tiên.
+  clearMemo();
+  const thap = await getControlTower();
+  const luatNhieuVanDon = thap.issues.find((i) => i.rule === "ORDER_WITH_MULTIPLE_SHIPMENTS");
+  assert.equal(luatNhieuVanDon, undefined, "ràng buộc CSDL còn nguyên thì luật này phải im — bật lên nghĩa là hàng rào đã bị gỡ");
 
   console.log(
     `✓ Đối soát: ${a.issues.length} luật có vi phạm (${a.totals.ERROR} nghiêm trọng · ${a.totals.WARNING} cảnh báo) · chỉ ${AUTO_REPAIRABLE_RULES.length} luật được tự sửa · tiền KHÔNG bao giờ tạo ra "đã giao"`,

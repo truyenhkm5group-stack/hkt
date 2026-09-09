@@ -849,6 +849,18 @@ export const shipments = pgTable(
   {
     id: id(),
     orderId: text("order_id")
+      /**
+       * MỘT ĐƠN CHỈ ĐƯỢC CÓ MỘT VẬN ĐƠN — ràng buộc này do CSDL cưỡng chế từ migration 0000.
+       *
+       * Nó vô hình trong mã suốt thời gian qua (chỉ có trong SQL, không khai ở đây) nhưng đang gánh
+       * một vai trò lớn: gần như MỌI báo cáo đều `orders left join shipments` rồi tính trên từng
+       * dòng, nên nếu một đơn có hai vận đơn thì doanh thu và số đơn của nó bị cộng HAI LẦN. Ràng
+       * buộc này khiến chuyện đó không xảy ra được — không phải nhờ may mắn hay nhờ quy ước.
+       *
+       * Hệ quả cần biết: gửi lại một đơn bằng vận đơn MỚI sẽ bị CSDL từ chối. Đó là một giới hạn
+       * vận hành thật, và là quyết định nghiệp vụ — không được nới ra chỉ để cho qua một ca lẻ, vì
+       * nới ra là mở đường cho số liệu tiền bị nhân đôi trong im lặng.
+       */
       .unique()
       .references(() => orders.id, { onDelete: "cascade" }),
     carrier: text("carrier").notNull().default(""),

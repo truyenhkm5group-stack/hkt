@@ -32,6 +32,7 @@ export type ReconciliationRuleKey =
   | "DELIVERED_WITHOUT_DATE"
   | "ORDER_SHIPMENT_CONFLICT"
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
+  | "ORDER_WITH_MULTIPLE_SHIPMENTS"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
   | "COD_OVERDUE_UNPAID"
@@ -67,6 +68,33 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     reason: "`shipments.stage` khác trạng thái dựng lại từ `shipment_events`. Ảnh chụp đã bị một luồng nào đó ghi sai, hoặc còn sót từ trước khi trạng thái được tính từ lịch sử.",
     suggestedAction: "Dựng lại ảnh chụp từ lịch sử — lịch sử là nguồn sự thật.",
     autoRepair: { from: "lịch sử sự kiện Viettel Post (materializeShipmentState)" },
+  },
+  /**
+   * MỘT ĐƠN CÓ HƠN MỘT VẬN ĐƠN GẮN VÀO.
+   *
+   * Vì sao đây là luật đối soát chứ không phải chuyện nhỏ: gần như MỌI báo cáo đều
+   * `orders left join shipments`, nên một đơn hai vận đơn sẽ được đếm HAI LẦN — doanh thu cộng đôi,
+   * số đơn cộng đôi, tỷ lệ giao thành công lệch, lợi nhuận sai.
+   *
+   * Đo trên production 09/09/2026: 2.430 đơn, **0 đơn** rơi vào trường hợp này. Số liệu đang đúng.
+   * Không phải may: luật 7 (`AGENTS.md`) bắt vận đơn chiều hoàn mang `order_id NULL` nên nguồn sinh
+   * vận đơn thứ hai phổ biến nhất không lọt vào phép nối.
+   *
+   * Nhưng nó IM LẶNG: ngày đầu tiên có một ca, mọi con số tiền sai mà không gì báo. Luật này tồn tại
+   * để ngày đó có người biết — và để KHÔNG ai phải đổi grain báo cáo trước khi có ca thật.
+   */
+  ORDER_WITH_MULTIPLE_SHIPMENTS: {
+    key: "ORDER_WITH_MULTIPLE_SHIPMENTS",
+    entity: "order",
+    severity: "ERROR",
+    label: "Một đơn có nhiều vận đơn — báo cáo sẽ đếm hai lần",
+    reason:
+      "Báo cáo nối đơn với vận đơn rồi tính trên từng dòng, nên đơn có hai vận đơn bị đếm hai lần: doanh thu cộng đôi, số đơn cộng đôi, tỷ lệ giao thành công lệch. Vận đơn chiều hoàn KHÔNG gây ra chuyện này (nó mang `order_id` rỗng theo thiết kế) — nên một ca ở đây nghĩa là có vận đơn thứ hai được gắn thật vào đơn.",
+    suggestedAction:
+      "Mở đơn, xác định vận đơn nào là thật. Nếu shop gửi lại đơn bằng vận đơn mới thì phải quyết định đếm thế nào TRƯỚC khi số liệu kỳ này được chốt — đây là quyết định nghiệp vụ, ERP cố ý không tự chọn.",
+    // KHÔNG tự sửa: máy không biết vận đơn nào là thật, và đoán sai là xoá mất một lần gửi hàng có
+    // thật khỏi sổ.
+    autoRepair: false,
   },
   COD_NOT_APPLICABLE_WITH_AMOUNT: {
     key: "COD_NOT_APPLICABLE_WITH_AMOUNT",
