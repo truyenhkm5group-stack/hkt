@@ -37,7 +37,7 @@ export function MetricCard({
 }) {
   const hasChange = typeof change === "number" && Number.isFinite(change);
   return (
-    <Card className={cn("gap-0 p-5", className)}>
+    <Card className={cn("h-full gap-0 p-5", className)}>
       <div className="flex items-start justify-between gap-3">
         <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
           {label}

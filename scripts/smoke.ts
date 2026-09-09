@@ -44,8 +44,11 @@ const ROUTES = [
  * Cố ý KHÔNG dò chuỗi lỗi trong nội dung: Next.js nhúng sẵn nội dung not-found vào bundle của
  * mọi trang, nên dò "This page could not be found" báo lỗi giả cho cả trang tốt.
  * Mã HTTP mới là tín hiệu đáng tin (200 = ổn, 404/500 = hỏng).
+ *
+ * Chuỗi này đến từ nhãn thương hiệu ở sidebar (`components/brand.tsx` — aria-label của BrandWordmark),
+ * nên chỉ có mặt khi khung dashboard đã dựng xong.
  */
-const RENDER_MARKER = "Shop Control";
+const RENDER_MARKER = "VNXcommerce";
 
 async function main() {
   const secret = (process.env.AUTH_SECRET ?? "").trim();

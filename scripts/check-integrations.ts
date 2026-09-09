@@ -170,7 +170,7 @@ async function checkFacebook() {
 }
 
 async function main() {
-  console.log("Kiểm tra kết nối API — Shop Control ERP");
+  console.log("Kiểm tra kết nối API — VNXcommerce ERP");
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
   await checkFacebook();

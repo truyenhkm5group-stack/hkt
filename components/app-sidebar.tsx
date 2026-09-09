@@ -34,6 +34,7 @@ import {
   Users,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
+import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
@@ -108,12 +109,11 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
   return (
     <Sidebar collapsible="icon" variant="sidebar">
       <SidebarHeader className="border-b border-sidebar-border/60 px-2 py-3">
-        <Link href="/" className="flex items-center gap-3 rounded-lg px-1.5 py-1">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-xs font-black text-primary-foreground shadow-[0_8px_24px_-8px_var(--primary)]">SC</span>
-          <span className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <strong className="block truncate text-[15px] font-bold tracking-tight">Shop Control</strong>
-            <span className="block truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/50">Fashion ERP</span>
+        <Link href="/" aria-label="VNXcommerce — về trang tổng quan" className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-opacity hover:opacity-90">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-[0_10px_24px_-10px_var(--brand)]">
+            <BrandGlyph className="h-[13px]" />
           </span>
+          <BrandWordmark className="min-w-0 text-[16px] text-brand-bright group-data-[collapsible=icon]:hidden" />
         </Link>
       </SidebarHeader>
       <SidebarContent className="px-2 py-2">
@@ -122,7 +122,7 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
           if (!items.length) return null;
           return (
             <SidebarGroup key={group.label} className="p-0 pt-2">
-              <SidebarGroupLabel className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">{group.label}</SidebarGroupLabel>
+              <SidebarGroupLabel className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/40">{group.label}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu className="gap-0.5">
                   {items.map((item) => {
@@ -132,9 +132,9 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
                     const active = best?.href === item.href;
                     return (
                       <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton asChild isActive={active} tooltip={item.label} className="h-9 rounded-lg text-[13.5px] text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground">
+                        <SidebarMenuButton asChild isActive={active} tooltip={item.label} className="relative h-9 rounded-lg text-[13.5px] text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[active=true]:before:absolute data-[active=true]:before:left-0 data-[active=true]:before:top-1/2 data-[active=true]:before:h-4 data-[active=true]:before:w-[3px] data-[active=true]:before:-translate-y-1/2 data-[active=true]:before:rounded-r-full data-[active=true]:before:bg-brand-bright">
                           <Link href={item.href}>
-                            <item.icon className={active ? "text-primary" : "text-sidebar-foreground/55"} />
+                            <item.icon className={active ? "text-brand-bright" : "text-sidebar-foreground/50"} />
                             <span>{item.label}</span>
                           </Link>
                         </SidebarMenuButton>

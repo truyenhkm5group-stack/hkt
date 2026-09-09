@@ -1,4 +1,4 @@
-# AGENTS.md — Quy ước cho agent (Codex / Claude / người) làm việc trên Shop Control ERP
+# AGENTS.md — Quy ước cho agent (Codex / Claude / người) làm việc trên VNXcommerce ERP
 
 Đọc `HANDOFF.md` trước khi bắt đầu bất kỳ việc gì. File này là **luật**, HANDOFF là **bối cảnh**.
 

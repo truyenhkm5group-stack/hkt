@@ -1,4 +1,4 @@
-# HANDOFF — Shop Control ERP (bàn giao cho Codex / agent kế tiếp)
+# HANDOFF — VNXcommerce ERP (bàn giao cho Codex / agent kế tiếp)
 
 Cập nhật: 06/09/2026 · Repo: `truyenhkm5group-stack/hkt` (GitHub, **PUBLIC**) · Nhánh phát triển: `claude/fashion-erp-poscake-viettelpost-u97pgx` (đồng thời push lên `main`) · Bản chạy thật: https://erp.vnxcommerce.com (VPS, Docker, deploy bằng GitHub Actions).
 

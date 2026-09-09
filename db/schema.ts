@@ -1,4 +1,4 @@
-// Shop Control ERP — Drizzle schema (PostgreSQL)
+// VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
 import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";

@@ -1,6 +1,6 @@
 # ERP DATA TRUTH — BÁO CÁO KIỂM TOÁN KIẾN TRÚC (TASK 1)
 
-> Phạm vi: toàn bộ đường đi của sự thật dữ liệu trong Shop Control ERP — Đơn hàng, Vận đơn,
+> Phạm vi: toàn bộ đường đi của sự thật dữ liệu trong VNXcommerce ERP — Đơn hàng, Vận đơn,
 > Pancake, Viettel Post, COD, Tổng quan, Báo cáo, Chất lượng dữ liệu, Tồn kho, Chi phí/Lợi nhuận,
 > Quảng cáo, Nhật ký, cron/queue, schema/migration.
 >

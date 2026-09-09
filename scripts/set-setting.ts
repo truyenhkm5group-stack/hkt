@@ -20,7 +20,7 @@ async function main() {
   console.log(`Đã lưu ${key} (${Object.keys(patch).length} trường cập nhật, ${Object.keys(next).length} trường tổng)`);
   if (args.includes("--test-lark")) {
     const cfg = await loadAlertConfig();
-    const r = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ Shop Control ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? "https://erp.vnxcommerce.com"}/alerts` }]]);
+    const r = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ VNXcommerce ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? "https://erp.vnxcommerce.com"}/alerts` }]]);
     console.log(r.ok ? "Đã gửi tin thử Lark thành công." : `Lark lỗi: ${r.error}`);
   }
 }

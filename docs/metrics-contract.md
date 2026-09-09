@@ -1,4 +1,4 @@
-# HỢP ĐỒNG CHỈ SỐ — Shop Control ERP
+# HỢP ĐỒNG CHỈ SỐ — VNXcommerce ERP
 
 > **Bất biến:** cùng một chỉ số · cùng một kỳ · cùng bộ lọc ⇒ **cùng một con số**, ở mọi trang và
 > mọi API. Lệch nhau nghĩa là một trang sai, không phải "cách tính khác".

@@ -1,4 +1,4 @@
-# Shop Control ERP — Quản trị nội bộ shop thời trang online
+# VNXcommerce ERP — Quản trị nội bộ shop thời trang online
 
 Hệ thống ERP nội bộ đồng bộ **đơn hàng, khách hàng, sản phẩm, tồn kho, đổi/trả** từ **Pancake POS** và **trạng thái vận đơn, COD** từ **Viettel Post**, rồi gom về một chỗ để vận hành, đối soát tiền và tính lợi nhuận thực.
 
