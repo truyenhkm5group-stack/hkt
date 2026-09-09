@@ -1107,11 +1107,19 @@ export const fbAds = pgTable(
     status: text("status").notNull().default(""),
     /** Không tra được trên Facebook (đã xoá / không có quyền) */
     missing: boolean("missing").notNull().default(false),
+    /**
+     * BÀI VIẾT mà mẩu quảng cáo này quảng bá — mắt xích nối đơn chỉ có `post_id` về chiến dịch.
+     * Pancake ghi `orders.post_id` cho 82% đơn nhưng chỉ ghi `ad_id` cho 46%; nối qua bài viết là
+     * cách DUY NHẤT tăng độ phủ mà không phải suy đoán.
+     */
+    postId: text("post_id"),
+    /** Chuỗi gốc "<page_id>_<post_id>" của Facebook — giữ để truy nguyên. */
+    storyId: text("story_id"),
     fetchedAt: ts("fetched_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("fb_ads_campaign_idx").on(t.campaignId)],
+  (t) => [index("fb_ads_campaign_idx").on(t.campaignId), index("fb_ads_post_idx").on(t.postId)],
 );
 export type FbAd = typeof fbAds.$inferSelect;
 

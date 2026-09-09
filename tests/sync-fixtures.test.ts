@@ -28,6 +28,7 @@ import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testAdsAttribution } from "./ads-attribution.test";
 import { testAdsAnomaly } from "./ads-anomaly.test";
+import { testAdsAttributionLink } from "./ads-attribution-link.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
 import { testSlowMoving } from "./slow-moving.test";
@@ -1115,6 +1116,7 @@ async function main() {
   await testAdsRoas(db);
   await testAdsAttribution(db);
   await testAdsAnomaly(db);
+  await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testUiConsistency();
   testDrilldownContract();

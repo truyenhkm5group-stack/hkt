@@ -44,7 +44,7 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
     await db
       .insert(schema.fbAds)
       .values({ id: info.id, name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, fetchedAt: now })
-      .onConflictDoUpdate({ target: schema.fbAds.id, set: { name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, fetchedAt: now, updatedAt: now } });
+      .onConflictDoUpdate({ target: schema.fbAds.id, set: { name: info.name, adsetId: info.adsetId, campaignId: info.campaignId, campaignName: info.campaignName, accountId: info.accountId, status: info.status, missing: info.missing, postId: info.postId ?? null, storyId: info.storyId ?? null, fetchedAt: now, updatedAt: now } });
     if (info.missing) {
       result.missing += 1;
       if (info.error && result.errors.length < 5) result.errors.push(`${info.id}: ${info.error}`);

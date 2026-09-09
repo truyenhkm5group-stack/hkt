@@ -2,6 +2,7 @@ import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, metricScope, successRate } from "@/lib/queries/metrics";
+import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -99,12 +100,22 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
   // Chi tiêu CHỈ tồn tại ở cấp chiến dịch. Xem docs/ads-attribution-audit.md.
   const spendKnown = level === "campaign";
   const scope = metricScope(period, "confirmed");
-  const HAS_AD = sql`${o.adId} is not null and ${o.adId} <> ''`;
+  /**
+   * ĐƠN THUỘC VỀ QUẢNG CÁO: có `ad_id` Pancake gửi, HOẶC nối được về chiến dịch qua bài viết.
+   *
+   * Pancake chỉ gửi ad_id cho ~46% đơn nhưng gửi post_id cho ~82%; Facebook cho biết mẩu quảng cáo
+   * nào quảng bá bài nào, nên phần chênh nối được bằng dữ kiện thật. Chi tiết và ba ràng buộc:
+   * lib/queries/ads-attribution-link.ts.
+   *
+   * Ở cấp MẨU QUẢNG CÁO thì chỉ dùng `ad_id`: một bài có thể do nhiều mẩu chạy, chọn bừa một mẩu là
+   * bịa. Nối qua bài viết chỉ có nghĩa ở cấp CHIẾN DỊCH — cũng là cấp duy nhất có số chi tiêu.
+   */
+  const HAS_AD = level === "campaign" ? sql`(${ORDER_CAMPAIGN_ID} is not null)` : sql`${o.adId} is not null and ${o.adId} <> ''`;
   // Tiền COD CÓ CHỨNG TỪ trên đơn — không lấy COD khai báo.
   const CASH = sql<number>`coalesce(sum(coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)) filter (where ${IS_DELIVERED}), 0)`;
 
   // ── Kết quả đơn gộp theo chiến dịch (hoặc theo từng mẩu quảng cáo) ──
-  const groupKey = level === "campaign" ? sql`coalesce(${schema.fbAds.campaignId}, ${o.adId})` : sql`${o.adId}`;
+  const groupKey = level === "campaign" ? sql`coalesce(${ORDER_CAMPAIGN_ID}, ${o.adId})` : sql`${o.adId}`;
   const groupName = level === "campaign" ? sql<string>`max(coalesce(nullif(${schema.fbAds.campaignName}, ''), ${o.adId}))` : sql<string>`max(coalesce(nullif(${schema.fbAds.name}, ''), ${o.adId}))`;
 
   const orderRows = await db

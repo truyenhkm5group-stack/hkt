@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { AMBIGUOUS_BY_POST, LINKED_BY_POST } from "@/lib/queries/ads-attribution-link";
 import { metricScope } from "@/lib/queries/metrics";
 import type { Period } from "@/lib/search-params";
 
@@ -84,6 +85,8 @@ export async function getAdsAttributionAudit(period: Period): Promise<AdsAttribu
       campaignKnown: sql<number>`count(*) filter (where ${HAS_AD} and exists (select 1 from fb_ads fa where fa.id = ${o.adId} and fa.campaign_id is not null))`,
       adsetKnown: sql<number>`count(*) filter (where ${HAS_AD} and exists (select 1 from fb_ads fa where fa.id = ${o.adId} and fa.adset_id is not null))`,
       withPage: sql<number>`count(*) filter (where ${o.pageId} is not null and ${o.pageId} <> '')`,
+      linkedByPost: sql<number>`count(*) filter (where ${LINKED_BY_POST})`,
+      ambiguousByPost: sql<number>`count(*) filter (where ${AMBIGUOUS_BY_POST})`,
     })
     .from(o)
     .where(scope);
@@ -167,6 +170,24 @@ export async function getAdsAttributionAudit(period: Period): Promise<AdsAttribu
       total: withAd,
       coverage: cov(Number(orderRow?.campaignKnown ?? 0), withAd),
       note: "Đây là cấp sâu nhất mà cả TIỀN lẫn ĐƠN cùng có dữ liệu.",
+    },
+    {
+      key: "order.postLink",
+      label: "Nối thêm được nhờ bài viết",
+      unit: "order",
+      matched: Number(orderRow?.linkedByPost ?? 0),
+      total: orders,
+      coverage: cov(Number(orderRow?.linkedByPost ?? 0), orders),
+      note: "Pancake không gửi mã quảng cáo nhưng có mã bài viết, và bài đó chỉ thuộc MỘT chiến dịch — nối bằng dữ kiện của Facebook, không phải suy đoán.",
+    },
+    {
+      key: "order.postAmbiguous",
+      label: "Có bài viết nhưng nhiều chiến dịch cùng chạy",
+      unit: "order",
+      matched: Number(orderRow?.ambiguousByPost ?? 0),
+      total: orders,
+      coverage: cov(Number(orderRow?.ambiguousByPost ?? 0), orders),
+      note: "CỐ Ý không nối: chọn bừa một chiến dịch sẽ gán doanh thu sai chỗ mà con số vẫn trông hợp lý.",
     },
     {
       key: "order.adset",

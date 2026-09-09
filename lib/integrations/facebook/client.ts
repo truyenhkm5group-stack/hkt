@@ -40,7 +40,21 @@ const THROTTLE_MS = 150;
 let lastCallAt = 0;
 
 /** Client Facebook Marketing API (chỉ đọc): tài khoản quảng cáo trong Business Manager và insights theo ngày × chiến dịch */
-export type FbAdInfo = { id: string; name: string; adsetId: string | null; campaignId: string | null; campaignName: string; accountId: string | null; status: string; missing: boolean; error?: string };
+export type FbAdInfo = {
+  id: string;
+  name: string;
+  adsetId: string | null;
+  campaignId: string | null;
+  campaignName: string;
+  accountId: string | null;
+  status: string;
+  missing: boolean;
+  error?: string;
+  /** Bài viết mà mẩu quảng cáo này quảng bá (phần sau dấu gạch dưới của effective_object_story_id). */
+  postId?: string | null;
+  /** Chuỗi gốc "<page_id>_<post_id>" — giữ lại để truy nguyên. */
+  storyId?: string | null;
+};
 
 export class FacebookAdsClient {
   constructor(
@@ -138,8 +152,22 @@ export class FacebookAdsClient {
     for (let i = 0; i < clean.length; i += 50) {
       const chunk = clean.slice(i, i + 50);
       let record: Record<string, unknown> = {};
+      /**
+       * `creative{effective_object_story_id}` cho biết mẩu quảng cáo này quảng bá BÀI VIẾT nào —
+       * dạng "<page_id>_<post_id>". Đây là mắt xích để nối đơn chỉ có `post_id` (82% đơn) về chiến
+       * dịch, thay vì chỉ nối được 46% đơn có sẵn `ad_id`.
+       *
+       * XIN THÊM MỘT CÁCH AN TOÀN: nếu token không đủ quyền đọc creative thì Graph API hỏng CẢ LÔ.
+       * Nên hỏng là lùi về đúng danh sách trường cũ — mất phần nối mới, KHÔNG mất phần đang chạy.
+       */
+      const FIELDS_BASE = "id,name,adset_id,campaign_id,account_id,status,campaign{id,name}";
+      const FIELDS_WITH_CREATIVE = `${FIELDS_BASE},creative{effective_object_story_id}`;
       try {
-        record = await this.get("", { ids: chunk.join(","), fields: "id,name,adset_id,campaign_id,account_id,status,campaign{id,name}" });
+        try {
+          record = await this.get("", { ids: chunk.join(","), fields: FIELDS_WITH_CREATIVE });
+        } catch {
+          record = await this.get("", { ids: chunk.join(","), fields: FIELDS_BASE });
+        }
       } catch (error) {
         // một id lỗi làm hỏng cả lô → tra từng id
         if (chunk.length > 1) {
@@ -157,7 +185,10 @@ export class FacebookAdsClient {
           continue;
         }
         const campaign = asRecord(item.campaign);
-        out.push({ id, name: str(item.name), adsetId: str(item.adset_id) || null, campaignId: str(item.campaign_id) || str(campaign.id) || null, campaignName: str(campaign.name), accountId: str(item.account_id).replace(/^act_/, "") || null, status: str(item.status), missing: false });
+        // "<page_id>_<post_id>" → lấy phần sau dấu gạch dưới, đúng thứ Pancake ghi vào orders.post_id.
+        const story = str(asRecord(item.creative).effective_object_story_id);
+        const postId = story.includes("_") ? story.split("_").slice(1).join("_") : story || null;
+        out.push({ id, name: str(item.name), adsetId: str(item.adset_id) || null, campaignId: str(item.campaign_id) || str(campaign.id) || null, campaignName: str(campaign.name), accountId: str(item.account_id).replace(/^act_/, "") || null, status: str(item.status), missing: false, postId: postId || null, storyId: story || null });
       }
     }
     return out;
