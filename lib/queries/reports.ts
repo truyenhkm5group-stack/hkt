@@ -100,6 +100,11 @@ export type PnlLines = {
   adRevenue: number;
 };
 
+/** `pnl()` nhận hai mốc rời; Profit Engine nhận một kỳ. Nhãn chỉ để hiển thị, không ảnh hưởng số. */
+function rangeAsPeriod(from: Date | null, to: Date | null): Period {
+  return { key: "custom", from, to, label: "", fromKey: null, toKey: null };
+}
+
 async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Promise<PnlLines> {
   const db = await getDb();
   const base = orderFacts(db, basis, from, to);
@@ -125,9 +130,9 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
       .select({ spend: sum(schema.adSpends.spend), orders: sum(schema.adSpends.orders), revenue: sum(schema.adSpends.revenue) })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, from, to))),
-    // MỘT đường duy nhất qua Profit Engine — nơi quyết định nguồn nào có thẩm quyền, nguồn chính đã
-    // phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn. Trang này không tự cộng theo cách riêng.
-    getOperatingCost({ key: "custom", from, to, label: "", fromKey: null, toKey: null }),
+    // MỘT đường duy nhất qua Profit Engine — nơi quyết định nguồn nào có thẩm quyền và khoản gõ tay
+    // nào bị loại vì trùng nguồn. Trang này không được tự cộng theo cách riêng.
+    getOperatingCost(rangeAsPeriod(from, to)),
   ]);
 
   const operating = expenseRows.amount;

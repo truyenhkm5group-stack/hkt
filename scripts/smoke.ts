@@ -14,9 +14,6 @@ import { getDb, schema } from "@/db";
 
 const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:3000";
 
-/** Hết kiên nhẫn với MỘT trang. Trang treo là lỗi thật, nhưng phải phân biệt với trang lỗi. */
-const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 60_000);
-
 /** Các màn hình phải mở được. Thêm route mới vào đây khi bổ sung màn hình quan trọng. */
 const ROUTES = [
   "/",
@@ -57,30 +54,6 @@ const ROUTES = [
  */
 const RENDER_MARKER = "VNXcommerce";
 
-/**
- * ═══════════ PHÂN LOẠI KẾT QUẢ — MỘT CHỮ "LỖI" KHÔNG ĐỦ ═══════════
- *
- * Sự cố thật 09/09/2026: bộ smoke báo "13/21 màn hình LỖI" và deploy bị đánh dấu thất bại,
- * trong khi cả 13 đều là HTTP 307 (chuyển hướng đăng nhập) do phiếu ký hết hạn giữa chừng —
- * ứng dụng hoàn toàn bình thường. Một phép kiểm gộp "trang hỏng" với "phép kiểm tự hỏng" vào
- * cùng một nhãn thì tín hiệu đỏ của nó mất hết ý nghĩa, và lần sau không ai tin nó nữa.
- *
- * Nên mỗi kết quả phải tự khai nó thuộc loại nào:
- *   SUCCESS      — trang mở được và dựng xong khung ứng dụng.
- *   APP_ERROR    — trang trả 4xx/5xx, hoặc 200 mà không dựng nổi khung. LỖI THẬT của ứng dụng.
- *   AUTH_EXPIRED — bị đá về đăng nhập vì phiếu ký đã quá hạn. Lỗi CỦA PHÉP KIỂM, không phải của app.
- *   REDIRECT     — bị đá về đăng nhập trong khi phiếu ký còn mới ⇒ quyền/cấu hình sai. Lỗi thật.
- *   TIMEOUT      — trang không trả lời trong hạn. Lỗi thật (nhưng khác bản chất với APP_ERROR).
- */
-type Verdict = "SUCCESS" | "APP_ERROR" | "AUTH_EXPIRED" | "REDIRECT" | "TIMEOUT";
-
-/** Hạn của phiếu ký. Quá mốc này mà bị 307 thì nguyên nhân là hết hạn, không phải phân quyền. */
-const TOKEN_TTL_MS = 10 * 60 * 1000;
-/** Chừa biên: gần hết hạn cũng tính là hết hạn, vì thời điểm máy chủ kiểm có thể lệch vài giây. */
-const TOKEN_NEAR_EXPIRY_MS = TOKEN_TTL_MS - 30_000;
-
-type Result = { route: string; verdict: Verdict; detail: string; ms: number };
-
 async function main() {
   const secret = (process.env.AUTH_SECRET ?? "").trim();
   if (!secret) throw new Error("Thiếu AUTH_SECRET — không mint được phiên đăng nhập để smoke test");
@@ -120,102 +93,43 @@ async function main() {
       .setExpirationTime("10m")
       .sign(key);
 
-  const results: Result[] = [];
+  const failures: string[] = [];
   const runStarted = Date.now();
-
   for (const route of ROUTES) {
     const started = Date.now();
-    // Phiếu ký được tạo NGAY TRƯỚC lần gọi này, nên tuổi của nó gần bằng thời gian chờ của
-    // chính trang này — dùng nó để phân biệt "hết hạn" với "sai quyền".
-    const mintedAt = Date.now();
-    const cookie = `erp_session=${await mint()}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(`${BASE}${route}`, {
-        headers: { cookie },
+        headers: { cookie: `erp_session=${await mint()}` },
         redirect: "manual",
-        signal: controller.signal,
       });
       const ms = Date.now() - started;
-
-      if (response.status >= 300 && response.status < 400) {
-        const tokenAge = Date.now() - mintedAt;
-        const expired = tokenAge >= TOKEN_NEAR_EXPIRY_MS;
-        results.push({
-          route,
-          verdict: expired ? "AUTH_EXPIRED" : "REDIRECT",
-          detail: expired
-            ? `HTTP ${response.status} sau ${Math.round(tokenAge / 1000)}s — phiếu ký hết hạn giữa lần gọi, KHÔNG phải lỗi trang`
-            : `HTTP ${response.status} với phiếu ký còn mới (${Math.round(tokenAge / 1000)}s) — kiểm tra quyền của tài khoản quản trị`,
-          ms,
-        });
-        continue;
-      }
-
       if (response.status !== 200) {
-        results.push({ route, verdict: "APP_ERROR", detail: `HTTP ${response.status}`, ms });
+        // 307 = bị đá về trang đăng nhập. Với phiếu ký lại mỗi lần, nguyên nhân KHÔNG còn là hết
+        // hạn phiên — nói thẳng ra để lần sau không ai đi tìm nhầm chỗ.
+        const hint = response.status === 307 ? " (bị chuyển hướng — kiểm tra quyền của tài khoản quản trị)" : "";
+        failures.push(`${route} → HTTP ${response.status}${hint}`);
+        console.error(`  ✗ ${route} → HTTP ${response.status} (${ms}ms)`);
         continue;
       }
-
       const body = await response.text();
       if (!body.includes(RENDER_MARKER)) {
-        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng không dựng được khung ứng dụng", ms });
+        failures.push(`${route} → không render được khung ứng dụng`);
+        console.error(`  ✗ ${route} → không thấy khung ứng dụng (${ms}ms)`);
         continue;
       }
-
-      results.push({ route, verdict: "SUCCESS", detail: `${Math.round(body.length / 1024)}kB`, ms });
+      console.log(`  ✓ ${route} (${ms}ms, ${Math.round(body.length / 1024)}kB)`);
     } catch (error) {
-      const ms = Date.now() - started;
-      const aborted = error instanceof Error && error.name === "AbortError";
-      results.push({
-        route,
-        verdict: aborted ? "TIMEOUT" : "APP_ERROR",
-        detail: aborted ? `không trả lời trong ${Math.round(TIMEOUT_MS / 1000)}s` : error instanceof Error ? error.message : String(error),
-        ms,
-      });
-    } finally {
-      clearTimeout(timer);
+      failures.push(`${route} → ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`  ✗ ${route} → ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  const icon: Record<Verdict, string> = {
-    SUCCESS: "✓",
-    APP_ERROR: "✗",
-    AUTH_EXPIRED: "⚠",
-    REDIRECT: "✗",
-    TIMEOUT: "✗",
-  };
-  for (const r of results) {
-    const line = `  ${icon[r.verdict]} ${r.route} [${r.verdict}] ${r.detail} (${r.ms}ms)`;
-    if (r.verdict === "SUCCESS") console.log(line);
-    else console.error(line);
-  }
-
-  const by = (v: Verdict) => results.filter((r) => r.verdict === v);
-  console.log(
-    `\n[smoke] ${by("SUCCESS").length}/${results.length} đạt · ` +
-      `${by("APP_ERROR").length} lỗi ứng dụng · ${by("REDIRECT").length} sai quyền · ` +
-      `${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
-      `(cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s)`,
-  );
-
-  // HẾT PHIÊN KHÔNG PHẢI LỖI CỦA ỨNG DỤNG nên không đánh trượt deploy — nhưng phải hiện ra, vì
-  // với cơ chế ký lại mỗi trang thì nó chỉ xảy ra khi một trang chậm hơn cả hạn phiếu ký.
-  if (by("AUTH_EXPIRED").length) {
-    console.error(
-      `\n[smoke] ⚠ ${by("AUTH_EXPIRED").length} trang không kiểm được vì phiếu ký hết hạn giữa lần gọi ` +
-        `(trang chậm hơn ${TOKEN_TTL_MS / 60000} phút). Không tính là lỗi trang, nhưng KHÔNG chứng minh được trang đó tốt.`,
-    );
-  }
-
-  const fatal = [...by("APP_ERROR"), ...by("REDIRECT"), ...by("TIMEOUT")];
-  if (fatal.length) {
-    console.error(`\n[smoke] ${fatal.length}/${results.length} màn hình LỖI THẬT:`);
-    for (const f of fatal) console.error(`  - ${f.route} [${f.verdict}] ${f.detail}`);
+  if (failures.length) {
+    console.error(`\n[smoke] ${failures.length}/${ROUTES.length} màn hình LỖI (cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s):`);
+    for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`[smoke] ✓ Không có lỗi thật.`);
+  console.log(`\n[smoke] ✓ ${ROUTES.length}/${ROUTES.length} màn hình mở được (cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s).`);
   process.exit(0);
 }
 

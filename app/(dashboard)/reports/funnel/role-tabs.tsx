@@ -1,7 +1,7 @@
 "use client";
 
-import { useNavTransition } from "@/components/nav-progress";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTransition } from "react";
 import { Loader2 } from "lucide-react";
 import { ATTRIBUTION_FIELDS, type AttributionField } from "@/lib/constants/sales-funnel";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 export function RoleTabs({ current }: { current: AttributionField }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [pending, start] = useNavTransition();
+  const [pending, start] = useTransition();
 
   const go = (field: AttributionField) => {
     const next = new URLSearchParams(params.toString());

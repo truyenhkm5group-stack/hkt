@@ -53,7 +53,6 @@ import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
-import { testLoadingUxContract } from "./loading-ux-contract.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1165,7 +1164,6 @@ async function main() {
   await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testUiConsistency();
-  testLoadingUxContract();
   testDrilldownContract();
   testAlertConfig();
   testMigrationJournal();

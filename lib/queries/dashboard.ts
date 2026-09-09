@@ -10,7 +10,6 @@ import { getControlTower } from "@/lib/queries/control-tower";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
-// Giữ bảng dẫn xuất của phiên hiệu năng, và lấy chi phí vận hành qua Profit Engine.
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { averageOrderValue, factMetrics, metricScope, orderMetricFacts, successRate } from "@/lib/queries/metrics";
 
