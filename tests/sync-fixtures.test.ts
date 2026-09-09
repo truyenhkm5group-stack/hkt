@@ -47,6 +47,7 @@ import { testSearch } from "./search.test";
 import { testEntityTimeline } from "./entity-timeline.test";
 import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
+import { testSchedulerCoverage } from "./scheduler-coverage.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testCrm } from "./crm.test";
@@ -1208,6 +1209,7 @@ async function main() {
   testDrilldownContract();
   testAlertConfig();
   testMigrationJournal();
+  testSchedulerCoverage();
   await testCashflow(db);
   await testPurchasing(db);
   await testCrm(db);

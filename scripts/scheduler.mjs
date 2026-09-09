@@ -23,6 +23,15 @@ const JOBS = [
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới
   { job: "landing-sheet", every: minutes("SYNC_LANDING_EVERY_MINUTES", 10), offset: 8.5 }, // đầy đủ: ghép lại theo SĐT, cập nhật dòng đã sửa
+  // LỚP TĂNG TỐC PHẢI CÓ NGƯỜI LÀM MỚI, nếu không nó tự mục.
+  //
+  // `canonical_order_outcome` chỉ được coi là dùng được khi nó MỚI HƠN đơn và vận đơn của nó; đơn cũ
+  // hơn thì báo cáo tự tính lại (chậm chứ không sai). Mà `pancake-orders` chạy 3 phút một lần và
+  // chạm vào `orders.updated_at`, nên số dòng cũ chỉ có tăng.
+  //
+  // Đo trên production 09/09/2026: sau 73 phút không ai dựng lại, 80/2.433 dòng đã cũ. Cứ thế thì
+  // vài tuần nữa gần như mọi đơn rơi về đường chậm và trang chủ quay lại mức 60 giây của trước P0.3.
+  { job: "outcome-materialize", every: minutes("OUTCOME_MATERIALIZE_EVERY_MINUTES", 5), offset: 1.5 },
 ];
 
 const DAILY = [
