@@ -382,8 +382,24 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         .leftJoin(o, eq(o.id, s.orderId))
         .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), sql`${s.orderId} is not null`, sql`coalesce(${s.returnedAt}, ${s.updatedAt}) <= ${cutoff.toISOString()}::timestamptz`))
         .orderBy(sql`coalesce(${s.returnedAt}, ${s.updatedAt}) asc`)
-        .limit(200);
-      for (const r of rows) {
+        .limit(500);
+
+      /**
+       * KIỂM ĐẾM HÀNG HOÀN LÀ VIỆC LÀM THEO LÔ, KHÔNG PHẢI TỪNG KIỆN MỘT.
+       *
+       * Kho xác nhận hàng loạt trên trang Chất lượng dữ liệu. Nếu sinh mỗi kiện một việc thì shop
+       * đang tồn đọng vài trăm kiện sẽ nhận vài trăm việc CÙNG LÚC ngay lần quét đầu — chúng chiếm
+       * trọn hàng đợi, đẩy mọi loại việc khác xuống dưới, và cả nhóm Lark ngập tin. Một hàng đợi
+       * như thế bị bỏ qua toàn bộ, kể cả những việc gấp thật.
+       *
+       * Nên: nêu đích danh N kiện CŨ NHẤT (đủ để bắt tay vào ngay), phần còn lại gộp thành MỘT việc
+       * duy nhất chỉ sang trang xác nhận hàng loạt.
+       */
+      const NAMED_LIMIT = 15;
+      const named = rows.slice(0, NAMED_LIMIT);
+      const rest = rows.slice(NAMED_LIMIT);
+
+      for (const r of named) {
         const days = Math.floor((Date.now() - new Date(r.returnedAt ?? cutoff).getTime()) / 86_400_000);
         candidates.push({
           kind: "RETURN_PENDING_INSPECTION",
@@ -395,6 +411,27 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           entityId: r.shipmentId,
           dedupeKey: `return-inspect:${r.shipmentId}`,
           occurredAt: r.returnedAt,
+        });
+      }
+
+      if (rest.length) {
+        const items = rest.reduce((t, r) => t + Number(r.items ?? 0), 0);
+        const oldest = rest.reduce((min, r) => {
+          const at = new Date(r.returnedAt ?? cutoff).getTime();
+          return at < min ? at : min;
+        }, Date.now());
+        const oldestDays = Math.floor((Date.now() - oldest) / 86_400_000);
+        candidates.push({
+          kind: "RETURN_PENDING_INSPECTION",
+          severity: "warning",
+          title: `Thêm ${rest.length} kiện hàng hoàn chờ kiểm đếm`,
+          body: `Ngoài ${NAMED_LIMIT} kiện nêu đích danh ở trên, còn ${rest.length} kiện nữa (khoảng ${items} món, cũ nhất ${oldestDays} ngày) — xác nhận hàng loạt trên trang Chất lượng dữ liệu.`,
+          href: "/data-quality?issue=return-not-received",
+          entityType: "DATA_RULE",
+          entityId: "return-not-received",
+          // Khoá theo SỐ LƯỢNG: kho xử lý bớt thì việc cũ tự đóng và mở việc mới với con số đúng.
+          dedupeKey: `return-inspect-bulk:${rest.length}`,
+          occurredAt: new Date(oldest),
         });
       }
     } catch {
