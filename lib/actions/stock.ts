@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray } from "drizzle-orm";
+import { guardSecondApproval } from "@/lib/actions/approvals";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -41,6 +42,34 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
 
   const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
   const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
+
+  /**
+   * PHÊ DUYỆT HAI BƯỚC cho hai loại phiếu tạo ra / xoá đi hàng mà KHÔNG có chứng từ ngoài đối chiếu.
+   *
+   * `RECEIPT` (nhập hàng thật) và `RETURN` (tái nhập theo số đã kiểm đếm) KHÔNG cần: cái trước có
+   * hoá đơn nhà cung cấp, cái sau có số đếm thực tế — và bắt duyệt việc thường ngày chỉ tạo thói
+   * quen bấm cho xong (xem `NO_SECOND_APPROVAL` trong lib/constants/approval.ts).
+   *
+   * `ADJUSTMENT` và `ISSUE` thì khác: chúng là lời khai của một người, không đối chiếu được với gì.
+   */
+  const nhomDuyet = data.kind === "ADJUSTMENT" ? "INVENTORY_ADJUSTMENT" : data.kind === "ISSUE" ? "INVENTORY_WRITE_OFF" : null;
+  if (nhomDuyet) {
+    const cong = await guardSecondApproval({
+      group: nhomDuyet,
+      action: `stock.${data.kind.toLowerCase()}`,
+      entity: "STOCK_RECEIPT",
+      summary: `${data.kind === "ADJUSTMENT" ? "Điều chỉnh kiểm kê" : "Xuất kho tay"} ${items.length} mẫu mã · ${totalQuantity} món${data.reference ? ` · ${data.reference}` : ""}`,
+      amount: Math.abs(totalCost) || null,
+      payload: data,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") {
+      return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    }
+    if (cong.mode === "BLOCKED_NO_APPROVER") {
+      return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng hệ thống chưa có ai khác đủ tư cách duyệt. Thêm một tài khoản ADMIN hoặc MANAGER trước.` };
+    }
+  }
+
   const [receipt] = await db
     .insert(schema.stockReceipts)
     .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: data.supplier, note: data.note, totalQuantity, totalCost, createdBy: user.email })

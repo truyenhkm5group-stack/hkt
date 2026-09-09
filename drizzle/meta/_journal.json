@@ -351,6 +351,13 @@
       "when": 1788945584898,
       "tag": "0050_shipment_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1788945585898,
+      "tag": "0051_approval_requests",
+      "breakpoints": true
     }
   ]
 }

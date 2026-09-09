@@ -365,6 +365,59 @@ export const auditLogs = pgTable(
   (t) => [index("audit_entity_created_idx").on(t.entity, t.createdAt), index("audit_created_idx").on(t.createdAt)],
 );
 
+export const approvalStatusEnum = pgEnum("approval_status", ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "EXECUTED"]);
+
+/**
+ * ───────────── YÊU CẦU PHÊ DUYỆT HAI BƯỚC ─────────────
+ *
+ * Việc rủi ro không được thực hiện ngay: nó thành một YÊU CẦU, và chỉ chạy khi có người khác gật.
+ * Danh sách nhóm nào cần duyệt nằm ở `lib/constants/approval.ts`, không nằm rải rác trong từng trang.
+ *
+ * Bảng này là SỔ, không phải hàng đợi tạm: yêu cầu bị từ chối vẫn nằm lại. Ai xin làm gì, ai không
+ * cho, lúc nào — đó chính là thứ có giá trị khi cần nhìn lại, và xoá đi là mất sạch.
+ *
+ * `payload` giữ nguyên đầu vào đã được kiểm tra, để lúc duyệt chạy ĐÚNG việc đã xin — không phải một
+ * việc khác được sửa lại trong lúc chờ.
+ */
+export const approvalRequests = pgTable(
+  "approval_requests",
+  {
+    id: id(),
+    /** Nhóm việc (`ApprovalGroup`) — quyết định luật áp dụng. */
+    group: text("group").notNull(),
+    /** Thao tác cụ thể, ví dụ "stock.adjustment" — để chạy lại đúng hàm khi được duyệt. */
+    action: text("action").notNull(),
+    entity: text("entity").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Số tiền liên quan, dùng để đối chiếu ngưỡng. NULL = chưa biết, và chưa biết thì coi như vượt. */
+    amount: bigint("amount", { mode: "number" }),
+    /** Mô tả bằng tiếng Việt để người duyệt hiểu mình đang gật cái gì mà không phải đọc JSON. */
+    summary: text("summary").notNull(),
+    payload: jsonb("payload"),
+    status: approvalStatusEnum("status").notNull().default("PENDING"),
+    requestedBy: text("requested_by").references(() => users.id, { onDelete: "set null" }),
+    requestedByEmail: text("requested_by_email").notNull().default(""),
+    // Khai tường minh, KHÔNG dùng helper createdAt(): helper gắn cứng tên cột "created_at", còn
+    // migration khai "requested_at" — lệch tên là mọi phép chèn hỏng ngay ở câu lệnh đầu tiên.
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    /** NGƯỜI DUYỆT PHẢI KHÁC NGƯỜI XIN — cưỡng chế ở tầng ứng dụng và ở đây. */
+    decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedByEmail: text("decided_by_email"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** Lý do từ chối, hoặc ghi chú khi duyệt. */
+    note: text("note"),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    executionError: text("execution_error"),
+  },
+  (t) => [
+    index("approval_status_idx").on(t.status, t.requestedAt),
+    index("approval_group_idx").on(t.group, t.status),
+    // Người xin không được tự duyệt. Ứng dụng đã chặn; đây là hàng rào cuối, vì hàng rào ở tầng
+    // ứng dụng có thể bị một đường ghi mới nào đó đi vòng qua.
+    check("approval_khac_nguoi", sql`${t.decidedBy} is null or ${t.decidedBy} <> ${t.requestedBy}`),
+  ],
+);
+
 // ───────────────────────── Danh mục Pancake ─────────────────────────
 
 export const warehouses = pgTable("warehouses", {

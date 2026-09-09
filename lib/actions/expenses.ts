@@ -1,6 +1,7 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { guardSecondApproval } from "@/lib/actions/approvals";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -54,6 +55,21 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   const db = await getDb();
   const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
   if (!existing) return { error: "Không tìm thấy khoản chi phí" };
+  {
+    // Sửa một khoản chi là đổi kết quả kinh doanh của cả kỳ — so ngưỡng bằng số LỚN HƠN giữa giá trị
+    // cũ và mới, vì hạ một khoản lớn xuống nhỏ cũng rủi ro y như dựng một khoản lớn lên.
+    const cong = await guardSecondApproval({
+      group: "EXPENSE_EDIT",
+      action: "expense.update",
+      entity: "EXPENSE",
+      entityId: id,
+      summary: `Sửa khoản chi ${existing.description} · ${existing.amount}đ → ${data.amount}đ`,
+      amount: Math.max(Math.abs(existing.amount), Math.abs(data.amount)),
+      payload: { truoc: existing, sau: data },
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
   await db
     .update(schema.expenses)
     .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason })
@@ -133,6 +149,19 @@ export async function deleteExpense(id: string): Promise<ActionResult> {
   const db = await getDb();
   const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
   if (!existing) return { error: "Không tìm thấy khoản chi phí" };
+  {
+    const cong = await guardSecondApproval({
+      group: "EXPENSE_EDIT",
+      action: "expense.delete",
+      entity: "EXPENSE",
+      entityId: id,
+      summary: `Xoá khoản chi ${existing.description} · ${existing.amount}đ`,
+      amount: Math.abs(existing.amount),
+      payload: existing,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
   await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt } });
   for (const p of ["/expenses", "/ads"]) revalidatePath(p);
