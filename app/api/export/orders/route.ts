@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const existing = sp[key];
     sp[key] = existing ? [...(Array.isArray(existing) ? existing : [existing]), value] : value;
   });
-  const params = parseListParams(sp, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
+  const params = parseListParams(sp, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
   const db = await getDb();
   const rows = await db.query.orders.findMany({
     where: orderListWhere(params),

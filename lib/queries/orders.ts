@@ -31,9 +31,10 @@ function getShipmentSearch(like: string) {
   return sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and (s.tracking_code ilike ${like} or s.vtp_order_number ilike ${like}))`;
 }
 
-export function orderListWhere(params: ListParams) {
+export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?: boolean } = {}) {
   const conds: (SQL | undefined)[] = [];
-  const { period, filters, q } = params;
+  const { period, q } = params;
+  const filters: Record<string, string[] | undefined> = opts.ignoreAddressFilter ? { ...params.filters, address: undefined } : params.filters;
   if (period.from) conds.push(gte(schema.orders.insertedAt, period.from));
   if (period.to) conds.push(lte(schema.orders.insertedAt, period.to));
   if (filters.stage?.length) conds.push(inArray(schema.orders.stage, filters.stage as OrderStage[]));
@@ -41,6 +42,11 @@ export function orderListWhere(params: ListParams) {
   if (filters.carrier?.length) conds.push(exists(sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and s.carrier in ${filters.carrier})`));
   if (filters.seller?.length) conds.push(inArray(schema.orders.sellerName, filters.seller));
   if (filters.tag?.length) conds.push(sql`${schema.orders.tags} && ${sql.raw(`ARRAY[${filters.tag.map((t) => `'${t.replace(/'/g, "''")}'`).join(",")}]::text[]`)}`);
+  // Pancake chỉ giao được khi đã ghép địa chỉ khách vào đơn vị hành chính (3 cấp cũ hoặc 2 cấp mới
+  // từ 01/07/2025). Không ghép được thì `province_name` rỗng và đơn đứng im ở POS với dòng "Vui lòng
+  // cung cấp địa chỉ cần chuẩn hoá" — nhân viên phải mở đơn, hỏi lại khách rồi chọn tay.
+  if (filters.address?.includes("unnormalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') = ''`);
+  if (filters.address?.includes("normalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') <> ''`);
   if (filters.payment?.includes("cod")) conds.push(sql`${schema.orders.moneyToCollect} > 0`);
   if (filters.payment?.includes("prepaid")) conds.push(sql`${schema.orders.moneyToCollect} = 0`);
   conds.push(orderSearchCondition(q));
@@ -148,7 +154,13 @@ async function orderSummaryUncached(params: ListParams) {
     .from(schema.orders)
     .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
     .where(where);
-  return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0) };
+  // Đếm đơn chưa chuẩn hoá địa chỉ BỎ QUA chính bộ lọc địa chỉ, để con số trên nhãn bộ lọc không
+  // đổi theo lựa chọn của chính nó (chọn "Đã chuẩn hoá" mà nhãn kia hiện 0 thì gây hiểu nhầm).
+  const [unnormalized] = await db
+    .select({ n: count() })
+    .from(schema.orders)
+    .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
+  return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
 }
 
 export async function getOrderDetail(id: string) {

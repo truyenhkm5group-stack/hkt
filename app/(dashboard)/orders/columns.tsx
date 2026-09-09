@@ -33,6 +33,10 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
           {row.original.billPhone}
           {row.original.shipProvince ? ` · ${row.original.shipProvince}` : ""}
         </div>
+        {/* Không có tỉnh nghĩa là Pancake chưa ghép được địa chỉ vào đơn vị hành chính → chưa gửi ĐVVC được. */}
+        {!row.original.shipProvince && !["CANCELLED", "DELETED"].includes(row.original.stage) ? (
+          <div className="text-xs font-medium text-amber-600">Địa chỉ chưa chuẩn hoá</div>
+        ) : null}
       </div>
     ),
   },

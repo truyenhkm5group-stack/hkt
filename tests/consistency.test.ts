@@ -78,6 +78,27 @@ export async function testConsistency(db: Db) {
     dataQualitySummary(ALL),
   ]);
 
+  // ───────── ĐỊA CHỈ CHƯA CHUẨN HOÁ: ĐẾM PHẢI ĐỘC LẬP VỚI CHÍNH BỘ LỌC ĐÓ ─────────
+  //
+  // Pancake chỉ giao được khi đã ghép địa chỉ khách vào đơn vị hành chính. Không ghép được thì
+  // `ship_province` rỗng, đơn đứng im ở POS với dòng "Vui lòng cung cấp địa chỉ cần chuẩn hoá", và
+  // trước đây ERP KHÔNG hề báo. Đo trên production 09/09/2026: 386/2.423 đơn trong 60 ngày, 231 đơn
+  // còn sống.
+  //
+  // Con số trên NHÃN BỘ LỌC phải bỏ qua chính bộ lọc địa chỉ — nếu không, bấm vào "Chưa chuẩn hoá"
+  // rồi thì nhãn tự đổi theo lựa chọn của mình và không còn nói lên tổng nữa.
+  const [{ n: liveUnnormalized }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.orders)
+    .where(sql`coalesce(${schema.orders.shipProvince}, '') = '' and ${schema.orders.stage} not in ('CANCELLED','DELETED')`);
+  assert.equal(orders.unnormalizedAddress, Number(liveUnnormalized), "đếm địa chỉ chưa chuẩn hoá phải khớp đơn còn sống");
+  const locked = await orderSummary({ ...params, filters: { ...params.filters, address: ["normalized"] } });
+  assert.equal(
+    locked.unnormalizedAddress,
+    orders.unnormalizedAddress,
+    "nhãn bộ lọc phải giữ nguyên khi đang lọc 'đã chuẩn hoá' — nếu không nó đếm chính tập vừa lọc ra",
+  );
+
   assert.equal(gtc.delivered, t.delivered, "Báo cáo Tỷ lệ giao thành công phải khớp nguồn sự thật");
   assert.equal(orders.success, t.delivered, "KPI 'giao thành công' trang Đơn hàng phải khớp");
   assert.equal(ads.delivered, t.delivered, "Quảng cáo/Marketing phải khớp");
