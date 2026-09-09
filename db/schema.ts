@@ -1006,6 +1006,69 @@ export const stockReceiptItems = pgTable(
 
 // ───────────────────────── Chi phí & marketing ─────────────────────────
 
+/**
+ * ───────────── KIỂM HÀNG HOÀN ─────────────
+ *
+ * "ĐVVC báo đã hoàn" KHÔNG có nghĩa là hàng đã về tồn. Giữa hai mốc đó là một quy trình có thật mà
+ * trước đây ERP nén thành một ô ngày duy nhất (`shipments.return_received_at`):
+ *
+ *   ĐÃ NHẬN  →  CHỜ KIỂM  →  ĐÃ KIỂM  →  {BÁN LẠI ĐƯỢC · KHÔNG BÁN ĐƯỢC · HỎNG · THIẾU}
+ *
+ * Vì sao phải tách: một kiện hàng về có thể thiếu món, rách, bẩn. Đánh dấu "đã nhận" rồi cộng
+ * nguyên số đã xuất trở lại tồn là ghi vào sổ một lượng hàng không có thật — và phần chênh đó sẽ
+ * không bao giờ ai tìm ra, vì nó nằm im trong số tồn.
+ *
+ * CHỈ khi kết luận BÁN LẠI ĐƯỢC với SỐ ĐẾM THỰC TẾ thì mới sinh phiếu tái nhập. Số không bán được
+ * ghi riêng để nhìn thấy phần mất, thay vì giấu nó bằng cách không cộng vào.
+ */
+export const returnInspections = pgTable(
+  "return_inspections",
+  {
+    id: id(),
+    /** Một vận đơn hoàn chỉ có MỘT phiếu kiểm — chống tạo trùng khi bấm hai lần. */
+    shipmentId: text("shipment_id")
+      .notNull()
+      .unique()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** RECEIVED (đã nhận, chờ kiểm) · INSPECTED (đã kiểm xong) */
+    status: text("status").notNull().default("RECEIVED"),
+    receivedAt: ts("received_at").notNull(),
+    receivedBy: text("received_by").notNull().default(""),
+    inspectedAt: ts("inspected_at"),
+    inspectedBy: text("inspected_by"),
+    /** RESTOCKABLE · UNSELLABLE · DAMAGED · MISSING — chỉ có khi đã kiểm. */
+    condition: text("condition"),
+    /** Số món ĐẾM ĐƯỢC và bán lại được — đây là số duy nhất được cộng vào tồn. */
+    restockQty: integer("restock_qty").notNull().default(0),
+    /** Số món về nhưng không bán lại được (rách, bẩn, thiếu phụ kiện). */
+    unsellableQty: integer("unsellable_qty").notNull().default(0),
+    /** Bằng chứng: ảnh, ghi chú của người kiểm. Bắt buộc khi kết luận không bán được. */
+    note: text("note").notNull().default(""),
+    /** Phiếu tái nhập được sinh ra khi kết luận bán lại được — để truy nguyên hai chiều. */
+    stockReceiptId: text("stock_receipt_id").references(() => stockReceipts.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("return_inspections_status_idx").on(t.status, t.receivedAt),
+    index("return_inspections_order_idx").on(t.orderId),
+    check("return_inspections_status_check", sql`${t.status} IN ('RECEIVED', 'INSPECTED')`),
+    check("return_inspections_condition_check", sql`${t.condition} IS NULL OR ${t.condition} IN ('RESTOCKABLE', 'UNSELLABLE', 'DAMAGED', 'MISSING')`),
+    // Đã kiểm thì PHẢI có kết luận, người kiểm và mốc kiểm — không có "đã kiểm" mà không biết ai kiểm.
+    check(
+      "return_inspections_inspected_check",
+      sql`${t.status} <> 'INSPECTED' OR (${t.condition} IS NOT NULL AND ${t.inspectedAt} IS NOT NULL AND ${t.inspectedBy} IS NOT NULL AND length(trim(${t.inspectedBy})) > 0)`,
+    ),
+    // Kết luận KHÔNG bán được thì phải nói vì sao — nếu không, phần hàng mất biến mất không dấu vết.
+    check(
+      "return_inspections_reason_check",
+      sql`${t.condition} IS NULL OR ${t.condition} = 'RESTOCKABLE' OR length(trim(${t.note})) > 0`,
+    ),
+    check("return_inspections_qty_check", sql`${t.restockQty} >= 0 AND ${t.unsellableQty} >= 0`),
+  ],
+);
+
 export const expenses = pgTable(
   "expenses",
   {

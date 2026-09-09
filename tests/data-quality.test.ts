@@ -5,6 +5,7 @@ import { schema } from "@/db";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
+import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import type { Period } from "@/lib/search-params";
 
@@ -130,13 +131,17 @@ export async function testDataQuality(db: Db) {
   assert.ok(waiting.rows.every((r) => r.returnReceivedAt === null), "danh sách chờ chỉ gồm vận đơn chưa xác nhận");
   const target = waiting.rows[0];
   assert.ok(target, "phải có ít nhất một vận đơn hoàn đang chờ kho");
-  const first = await markReturnReceived([target.id], "test-kho", "Đếm đủ hàng");
+  const first = await markReturnReceived([target.id], "test-kho", "Kiện đã về");
   assert.equal(first.count, 1);
   const second = await markReturnReceived([target.id], "test-kho-2");
-  assert.equal(second.count, 0, "xác nhận lần hai không ghi đè, không cộng trùng");
+  assert.equal(second.count, 0, "ghi nhận lần hai không ghi đè, không tạo thêm phiếu");
+
+  // Chỉ lúc ĐẾM XONG kiện mới rời khỏi danh sách chờ và mới có mốc kho nhận trên vận đơn.
+  const inspected = await recordInspection({ shipmentId: target.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ hàng", actor: "test-kho" });
+  assert.ok("ok" in inspected, "kiện đã ghi nhận về thì đếm được");
   const [after] = await db.select({ by: schema.shipments.returnReceivedBy }).from(schema.shipments).where(eq(schema.shipments.id, target.id));
-  assert.equal(after.by, "test-kho", "giữ nguyên người xác nhận lần đầu");
-  assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đã nhận thì rời khỏi danh sách chờ");
+  assert.equal(after.by, "test-kho", "mốc kho nhận ghi tên người ĐẾM");
+  assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đếm xong thì rời khỏi danh sách chờ");
 
 
   // ───────── Giá vốn KHÔNG BIẾT không được coi là 0 ─────────

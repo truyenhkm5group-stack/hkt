@@ -33,6 +33,7 @@ import { testAdsAttributionLink } from "./ads-attribution-link.test";
 import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
+import { testReturnInspection } from "./return-inspection.test";
 import { testSlowMoving } from "./slow-moving.test";
 import { testDrilldownContract } from "./drilldown-contract.test";
 import { testBusinessBrief } from "./business-brief.test";
@@ -53,6 +54,7 @@ import path from "node:path";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import { parseJsonSafeInts } from "@/lib/integrations/http";
 import { mapOrder, mapProduct } from "@/lib/integrations/pancake/mapper";
@@ -292,14 +294,25 @@ async function main() {
     .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
     .where(and(inArray(schema.orders.id, ["rr-9002", "rr-9009"]), isNull(schema.shipments.returnReceivedAt)));
   assert.equal(pendingReturns.length, 2, "hai vận đơn hoàn đang chờ kho nhận");
-  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Kho đếm đủ 2 kiện");
+  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Hai kiện đã về, chờ đếm");
+  const afterArrival = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
+  assert.equal(afterArrival?.currentStock, 1, "ghi nhận đã về CHƯA cộng tồn — chưa ai mở kiện ra đếm");
+
+  // Kho đếm từng kiện: mỗi kiện 1 món còn bán được → tồn 1 + 2 = 3.
+  for (const r of pendingReturns) {
+    const done = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ", actor: "test-kho" });
+    assert.ok("ok" in done, "kiện đã ghi nhận về thì đếm được");
+  }
   const afterReceive = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
-  assert.equal(afterReceive?.currentStock, 3, "kho nhận 2 kiện hoàn → tồn 1 + 2 = 3");
-  // Xác nhận lần hai không được cộng thêm lần nữa (chống đếm trùng).
-  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Bấm nhầm lần hai");
+  assert.equal(afterReceive?.currentStock, 3, "kho đếm 2 kiện hoàn → tồn 1 + 2 = 3");
+  // Đếm lần hai bị chặn, nếu không phiếu tái nhập sẽ cộng tồn hai lần.
+  for (const r of pendingReturns) {
+    const again = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Bấm nhầm lần hai", actor: "test-kho" });
+    assert.ok("error" in again, "kiện đã đếm rồi thì không đếm lại được");
+  }
   const afterTwice = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
-  assert.equal(afterTwice?.currentStock, 3, "xác nhận lại không cộng trùng tồn");
-  console.log(`✓ Tồn kho ERP RR-001: 1 khi 5 đơn hoàn chưa về kho → 3 sau khi kho nhận 2 kiện (chống cộng trùng)`);
+  assert.equal(afterTwice?.currentStock, 3, "đếm lại không cộng trùng tồn");
+  console.log(`✓ Tồn kho ERP RR-001: 1 khi 5 đơn hoàn chưa về kho → vẫn 1 khi mới ghi nhận đã về → 3 sau khi kho ĐẾM 2 kiện (chống cộng trùng)`);
 
   // Nhập sao kê MB Bank → chi phí
   const ledgerJson = JSON.stringify({
@@ -1179,6 +1192,8 @@ async function main() {
   await testVtpCodPaymentColumn();
   await testStatementDedupAcrossFilenames();
   await testStatementDetailMatching(db);
+  // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
+  await testReturnInspection(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

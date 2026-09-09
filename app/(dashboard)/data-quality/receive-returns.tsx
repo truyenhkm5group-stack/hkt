@@ -13,8 +13,10 @@ import {
 import { cancelReturnReceived, confirmAllReturnedReceived, confirmReturnReceived } from "@/lib/actions/returns-warehouse";
 
 /**
- * Xác nhận kho đã nhận hàng hoàn. Chỉ sau thao tác này hàng mới được cộng lại tồn ERP.
- * Cố ý giữ đơn giản: chọn dòng → bấm xác nhận, không có quy trình phiếu nhập hoàn đầy đủ.
+ * Ghi nhận kiện hàng hoàn ĐÃ VỀ TỚI KHO.
+ *
+ * Thao tác này KHÔNG cộng tồn. Nó chỉ chuyển kiện sang hàng đợi ĐẾM ở trang Kiểm đếm hàng hoàn —
+ * nơi người đếm nói còn bao nhiêu món bán lại được, và chỉ chừng đó vào tồn.
  */
 export function ReceiveReturns({
   rows,
@@ -63,7 +65,7 @@ export function ReceiveReturns({
         </Button>
         <Button size="sm" variant="outline" disabled={!selected.size || pending} onClick={() => run(cancelReturnReceived)}>
           <Undo2 className="size-4" />
-          Huỷ xác nhận
+          Huỷ ghi nhận
         </Button>
         <Button
           size="sm"
@@ -83,14 +85,14 @@ export function ReceiveReturns({
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Xác nhận kho đã nhận {bulk.count} kiện hàng hoàn?</AlertDialogTitle>
+                <AlertDialogTitle>Ghi nhận {bulk.count} kiện hàng hoàn đã về kho?</AlertDialogTitle>
                 <AlertDialogDescription>
                   Gồm {bulk.items} món, {bulk.waitingDays !== null ? `kiện chờ lâu nhất đã ${bulk.waitingDays} ngày` : "trên toàn bộ danh sách"}. Chỉ tính vận đơn Viettel Post
                   đã trả hàng xong cho người gửi — vận đơn đang trên đường về không bị đụng tới.
                   <br />
                   <br />
-                  Sau khi xác nhận, số hàng này được <strong>cộng lại vào tồn kho</strong> và kế hoạch đặt hàng sẽ tính theo tồn mới.
-                  Chỉ làm khi kho đã thực sự nhận được hàng. Bấm nhầm thì dùng “Huỷ xác nhận” để trả lại như cũ.
+                  Thao tác này <strong>chưa cộng tồn kho</strong>: các kiện chuyển sang hàng đợi kiểm đếm. Hàng chỉ vào lại tồn ở trang
+                  “Kiểm đếm hàng hoàn”, theo đúng số món kho đếm được và còn bán lại được. Bấm nhầm thì dùng “Huỷ xác nhận” — trừ kiện đã đếm.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -108,7 +110,7 @@ export function ReceiveReturns({
                     })
                   }
                 >
-                  Kho đã nhận đủ
+                  Kho đã nhận, chuyển sang chờ đếm
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

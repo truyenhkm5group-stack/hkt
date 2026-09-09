@@ -3,7 +3,7 @@
  * tạo thông báo mới (chống trùng bằng dedupeKey), tự đóng thông báo cũ khi điều kiện không còn,
  * gửi Telegram cho thông báo mới và phát sự kiện realtime để chuông trên giao diện cập nhật.
  */
-import { and, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
@@ -477,6 +477,60 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       }
     } catch {
       // chưa có dữ liệu vận đơn hoàn
+    }
+
+    // ───────── KIỆN ĐÃ VỀ TỚI KHO MÀ CHƯA AI ĐẾM ─────────
+    //
+    // Khác hẳn nhóm trên: đây là hàng ĐÃ NẰM TRONG KHO. Không phải chờ ĐVVC, không phải chờ ai giao
+    // — chỉ chờ người mở kiện ra đếm. Số món trong đám này đang không được tính vào tồn, nên kế
+    // hoạch sản xuất đặt thừa đúng bằng chỗ đó, và tiền vốn nằm chết trong kho không ai biết.
+    try {
+      const rows = await db
+        .select({
+          shipmentId: schema.returnInspections.shipmentId,
+          code: s.vtpOrderNumber,
+          receivedAt: schema.returnInspections.receivedAt,
+          items: sql<number>`(select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${schema.returnInspections.orderId})`,
+        })
+        .from(schema.returnInspections)
+        .leftJoin(s, eq(s.id, schema.returnInspections.shipmentId))
+        .where(sql`${schema.returnInspections.status} = 'RECEIVED' and ${schema.returnInspections.receivedAt} <= now() - interval '2 days'`)
+        .orderBy(asc(schema.returnInspections.receivedAt))
+        .limit(500);
+
+      // Cùng lý do như trên: nêu đích danh vài kiện cũ nhất, phần còn lại gộp một việc.
+      const NAMED = 10;
+      for (const r of rows.slice(0, NAMED)) {
+        const days = Math.floor((Date.now() - new Date(r.receivedAt).getTime()) / 86_400_000);
+        candidates.push({
+          kind: "RETURN_PENDING_INSPECTION",
+          severity: days >= 7 ? "critical" : "warning",
+          title: `Kiện hoàn đã về ${days} ngày chưa đếm · ${r.code ?? r.shipmentId}`,
+          body: `${Number(r.items ?? 0)} món đang nằm trong kho mà sổ chưa tính — mở kiện, đếm số còn bán được rồi xác nhận.`,
+          href: "/inventory/returns",
+          entityType: "SHIPMENT",
+          entityId: r.shipmentId,
+          dedupeKey: `return-count:${r.shipmentId}`,
+          occurredAt: r.receivedAt,
+        });
+      }
+      const rest = rows.slice(NAMED);
+      if (rest.length) {
+        const items = rest.reduce((t, r) => t + Number(r.items ?? 0), 0);
+        candidates.push({
+          kind: "RETURN_PENDING_INSPECTION",
+          severity: "warning",
+          title: `Thêm ${rest.length} kiện hoàn đã về kho chờ đếm`,
+          body: `Khoảng ${items} món đang không được tính vào tồn. Đếm theo lô trên trang Kiểm đếm hàng hoàn.`,
+          href: "/inventory/returns",
+          entityType: "DATA_RULE",
+          entityId: "return-inspection-pending",
+          dedupeKey: `return-count-bulk:${rest.length}`,
+          occurredAt: rest[0].receivedAt,
+        });
+      }
+    } catch {
+      // bảng kiểm hàng hoàn chưa có dữ liệu
     }
   }
 
