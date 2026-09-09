@@ -207,9 +207,11 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
               from stock_receipt_items ri group by 1) k on k.variant_id = v.id
         left join (select oi.variant_id, sum(oi.quantity) as xuat
                    from order_items oi
-                   join shipments sh on sh.order_id = oi.order_id
-                   where sh.picked_up_at is not null
-                      or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')
+                   -- ĐÃ XUẤT đo bằng EXISTS: một đơn gửi lại nhiều lần vẫn chỉ xuất kho MỘT lần
+                   -- hàng đó; phép nối sẽ nhân số lượng lên và báo tồn âm giả.
+                   where exists (select 1 from shipments sh where sh.order_id = oi.order_id
+                                 and (sh.picked_up_at is not null
+                                      or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))
                    group by 1) x on x.variant_id = v.id
         where (coalesce(k.nhap, 0) - coalesce(x.xuat, 0)) < 0`;
     case "STOCK_MISSING_OPENING_BALANCE":
@@ -219,9 +221,10 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         from product_variants v
         join (select oi.variant_id, sum(oi.quantity) as xuat
               from order_items oi
-              join shipments sh on sh.order_id = oi.order_id
-              where sh.picked_up_at is not null
-                 or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')
+              -- Cùng lý do với NEGATIVE_STOCK: đếm theo ĐƠN có xuất kho, không theo số lần gửi.
+              where exists (select 1 from shipments sh where sh.order_id = oi.order_id
+                            and (sh.picked_up_at is not null
+                                 or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))
               group by 1) x on x.variant_id = v.id
         where x.xuat > 0
           and not exists (select 1 from stock_receipt_items ri where ri.variant_id = v.id)`;

@@ -1,6 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
 
@@ -109,7 +109,8 @@ export async function getStaffPerformance(period: Period, field: AttributionFiel
       cogsKnown: sql<number>`count(distinct ${o.id}) filter (where ${isDelivered} and ${o.cogs} is not null)`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`)
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .where(sql`${from} and ${to}`)
     .groupBy(sql`${who}`);
 

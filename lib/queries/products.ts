@@ -3,7 +3,7 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or,
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
-import { ORDER_OUTCOME, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -88,7 +88,8 @@ function sold30Subquery(db: Db) {
     .select({ variantId: schema.orderItems.variantId, qty: sql<number>`sum(${schema.orderItems.quantity})`.as("qty") })
     .from(schema.orderItems)
     .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
     .where(and(gte(schema.orders.insertedAt, since), notInArray(schema.orders.stage, ["CANCELLED", "DELETED"]), sql`${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`))
     .groupBy(schema.orderItems.variantId)
     .as("sold30");

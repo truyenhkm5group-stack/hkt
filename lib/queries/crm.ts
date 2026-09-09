@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CRM_RULE, CRM_SEGMENT_ORDER, type CrmSegment } from "@/lib/constants/crm";
-import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 
 /**
  * ───────────── GIỮ CHÂN KHÁCH ─────────────
@@ -56,7 +56,8 @@ const ORDER_FACTS = sql`
          coalesce(orders.total_price_after_discount, 0) as revenue,
          ${ORDER_OUTCOME} as outcome
   from orders
-  left join shipments on shipments.order_id = orders.id
+  -- MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng doanh thu nhiều lần.
+  left join shipments on shipments.order_id = orders.id and ${PRIMARY_ATTEMPT}
   where ${REPORTABLE_ORDER}
   offset 0
 `;

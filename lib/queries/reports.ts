@@ -3,7 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
-import { OUTCOME_FENCE, ORDER_OUTCOME, outcomeColumn } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
@@ -62,7 +62,8 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
       outcome: outcomeColumn(),
     })
     .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
     .where(between(basisDate(basis), from, to))
     .offset(OUTCOME_FENCE)
     .as("order_facts");
@@ -292,7 +293,8 @@ async function getProfitReportUncached(period: Period, basis: ReportBasis) {
       .from(schema.orderItems)
       .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
       .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderItems.variantId))
-      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
       .leftJoin(lastCost, eq(lastCost.variantId, schema.productVariants.id))
       .where(and(inPeriod, SUCCESS))
       .groupBy(schema.orderItems.productName)

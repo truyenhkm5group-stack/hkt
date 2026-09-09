@@ -4,6 +4,7 @@
  * gửi Telegram cho thông báo mới và phát sự kiện realtime để chuông trên giao diện cập nhật.
  */
 import { and, asc, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
@@ -88,7 +89,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     const rows = await db
       .select({ ...orderCols, shipmentStage: s.stage })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      // Đơn nhiều lần gửi là MỘT đơn: cảnh báo theo lần gửi quyết định, không bắn trùng mỗi lần gửi.
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(and(inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), lte(o.insertedAt, cutoff), sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`, sql`(${s.id} is null or ${s.stage} = 'PENDING')`))
       .limit(500);
     for (const r of rows) {
@@ -130,7 +132,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       const rows = await db
         .select({ ...orderCols, shipAddress: o.shipAddress, conversationId: o.conversationId, pageId: o.pageId, hasShipment: sql<boolean>`${s.id} is not null` })
         .from(o)
-        .leftJoin(s, eq(s.orderId, o.id))
+        // Đơn nhiều lần gửi là MỘT đơn: cảnh báo theo lần gửi quyết định, không bắn trùng mỗi lần gửi.
+        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
         .where(
           and(
             inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]),

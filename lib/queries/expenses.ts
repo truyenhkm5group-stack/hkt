@@ -4,7 +4,7 @@ import { getDb, schema } from "@/db";
 import type { ExpenseCategory } from "@/db/schema";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { previousPeriod, type ListParams, type Period } from "@/lib/search-params";
 import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
@@ -241,7 +241,8 @@ export async function adOrdersFromErp(from: Date | null, to: Date | null) {
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
     })
     .from(o)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
     .where(and(inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(o.insertedAt, from, to)));
   return {
     orders: Number(row?.orders ?? 0),

@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
 
@@ -26,7 +26,8 @@ function orderAggregate(db: Db) {
       lastOrderErp: sql<Date | string | null>`max(${o.insertedAt})`.as("last_order_erp"),
     })
     .from(o)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
     .where(isNotNull(o.customerId))
     .groupBy(o.customerId)
     .as("agg");
@@ -236,7 +237,8 @@ export async function getCustomerDetail(id: string) {
         lastOrderAt: sql<Date | string | null>`max(${o.insertedAt})`,
       })
       .from(o)
-      .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
+      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
       .where(eq(o.customerId, customer.id)),
     db.query.orders.findMany({
       where: eq(o.customerId, customer.id),

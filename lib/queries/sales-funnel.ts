@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -69,7 +69,8 @@ export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
       repeatCustomers: sql<number>`count(distinct ${o.customerId}) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${schema.customers.succeedOrderCount}, 0) > 1)`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`)
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .leftJoin(schema.customers, sql`${schema.customers.id} = ${o.customerId}`)
     .where(where);
 
@@ -184,7 +185,8 @@ export async function getFunnelBySource(period: Period): Promise<FunnelBySource[
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`)
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .where(periodWhere(period))
     .groupBy(sql`${ORDER_SOURCE}`);
 

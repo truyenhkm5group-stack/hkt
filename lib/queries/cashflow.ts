@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
+import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { getDb, schema } from "@/db";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
 /**
  * ───────────── DÒNG TIỀN & VỐN LƯU ĐỘNG ─────────────
@@ -82,17 +83,21 @@ export async function getCashflow(): Promise<CashflowReport> {
           and coalesce(${s.deliveredAt}, ${s.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')), 0)`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`);
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`);
 
   // ── Nhịp chi thực tế ──
   const [ads] = await db
     .select({ total: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
     .from(schema.adSpends)
     .where(sql`${schema.adSpends.excluded} = false and ${schema.adSpends.spendDate} >= now() - interval '14 days'`);
+  // MỘT KHOẢN CHI MỘT NGUỒN (AGENTS.md mục 15). Ngay trên đây đã cộng chi tiêu quảng cáo từ TÀI
+  // KHOẢN QC; nếu ở đây cộng luôn khoản gõ tay nhóm "Quảng cáo" thì nhịp chi bị thổi gấp đôi và chủ
+  // shop tưởng mình đang đốt tiền nhanh hơn thực tế. Giá vốn cũng vậy — nó đi theo phiếu kho.
   const [opex] = await db
     .select({ total: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
     .from(schema.expenses)
-    .where(sql`${schema.expenses.occurredAt} >= now() - interval '60 days'`);
+    .where(sql`${schema.expenses.occurredAt} >= now() - interval '60 days' and ${operatingExpenseCond()}`);
 
   // ── Tiền hàng đã cam kết với xưởng: đơn sản xuất ĐÃ GỬI mà chưa nhận ──
   const [prod] = await db
@@ -108,10 +113,12 @@ export async function getCashflow(): Promise<CashflowReport> {
         from (
           select pv.id,
             coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = pv.id), 0)
+              -- ĐÃ XUẤT KHO tính bằng EXISTS chứ không bằng phép nối: một đơn nhiều lần gửi thì
+              -- phép nối nhân số lượng lên theo số lần gửi và thổi phồng "đã xuất", làm tồn âm giả.
               - coalesce((select sum(oi.quantity) from order_items oi join orders oo on oo.id = oi.order_id
-                          left join shipments ss on ss.order_id = oo.id
                           where oi.variant_id = pv.id
-                            and (ss.picked_up_at is not null or ss.stage::text in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED'))), 0) as ton,
+                            and exists (select 1 from shipments ss where ss.order_id = oo.id
+                                        and (ss.picked_up_at is not null or ss.stage::text in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))), 0) as ton,
             pv.last_imported_price as gia
           from product_variants pv where pv.is_removed = false
         ) x
