@@ -118,3 +118,48 @@ Mọi KPI dùng để ra quyết định phải có:
 10. Có test cho boundary và tình huống xung đột.
 11. Một KPI phải cho biết cả giá trị và mức độ completeness khi cần.
 12. Logic chung không được copy sang từng page.
+
+## 9. NHIỀU PHIÊN LÀM VIỆC SONG SONG — BẮT BUỘC
+
+Ngày 09/09/2026 có hai phiên cùng sửa **một cây làm việc** và cùng đẩy lên `main`. Trong một
+buổi chiều, **bốn lần** `main` đỏ trên bản checkout sạch, mỗi lần đều chặn deploy của **cả hai**
+phiên. Nguyên nhân luôn giống nhau: một phiên `git add` tệp có `import` trỏ tới tệp mà phiên kia
+chưa đưa vào kho. Ở cây làm việc mọi thứ xanh vì tệp nằm sẵn trên đĩa.
+
+**Mỗi phiên làm việc phải có cây làm việc riêng và nhánh riêng.** Không hai phiên nào được ghi
+vào cùng một thư mục.
+
+```
+git worktree add -b claude/<tên-việc> ../wt-<tên-việc> origin/main
+```
+
+Trong mỗi phiên:
+
+- Chỉ commit tệp **thuộc việc của mình**. Không `git add .` mù, không `git add -A` cả cây.
+- **Không** dựa vào tệp chưa vào kho của phiên khác. Nếu mã của bạn `import` nó thì hoặc nó phải
+  vào kho cùng commit của bạn, hoặc bạn chưa được commit dòng `import` đó.
+- Không `reset` / `revert` / `checkout` đè lên thay đổi của nhánh khác.
+- Trước khi commit: đọc `git status`, `git diff --cached`, và tự hỏi từng tệp *"tệp này có thuộc
+  việc mình đang làm không?"*.
+
+**Cổng bắt buộc trước khi đẩy lên `main`:** chạy trên một bản checkout SẠCH theo đúng SHA ứng
+viên — không bao giờ chạy cổng trên cây làm việc bẩn dùng chung.
+
+```
+git worktree add --detach ../wt-gate <SHA>
+cd ../wt-gate && npm ci && npm run typecheck && npm run lint && npm test && npm run build
+```
+
+`tests/repo-integrity.test.ts` khoá phần dễ sai nhất ở mức mã nguồn: mã **đã vào kho** không được
+`import` tệp **chưa vào kho** (cả `./x` lẫn `@/x`), và migration mới phải có mốc muộn hơn mọi mốc
+đã có. Bài kiểm đọc `git ls-files`/`git show HEAD:` chứ không đọc đĩa, nên nó đỏ ngay trên máy
+người viết thay vì đợi tới CI.
+
+**Việc đang dở không được chỉ tồn tại trên đĩa.** Chụp ảnh không xâm lấn (không đụng chỉ mục và
+cây làm việc) rồi đẩy lên remote:
+
+```
+GIT_INDEX_FILE=/tmp/wip git read-tree HEAD && GIT_INDEX_FILE=/tmp/wip git add -A
+TREE=$(GIT_INDEX_FILE=/tmp/wip git write-tree)
+git push origin $(git commit-tree "$TREE" -p HEAD -m "wip: ảnh chụp"):refs/heads/wip/<tên>
+```
