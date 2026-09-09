@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_COGS } from "@/lib/queries/cogs";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 /**
@@ -41,12 +42,13 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
     else await tx.delete(c);
 
     const inserted = await tx.execute(sql`
-      insert into canonical_order_outcome (id, order_id, shipment_id, outcome, logic_version, computed_at)
+      insert into canonical_order_outcome (id, order_id, shipment_id, outcome, cogs, logic_version, computed_at)
       select
         md5(${schema.orders.id} || ':' || coalesce(${schema.shipments.id}, '')),
         ${schema.orders.id},
         ${schema.shipments.id},
         ${ORDER_OUTCOME},
+        ${ORDER_COGS},
         ${CANONICAL_OUTCOME_VERSION},
         now()
       from ${schema.orders}
@@ -128,7 +130,7 @@ export async function outcomeParity(limit = 50): Promise<{ total: number; matche
     left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
     left join canonical_order_outcome m
       on m.order_id = ${schema.orders.id} and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
-    where m.outcome is null or m.outcome <> (${ORDER_OUTCOME})
+    where m.outcome is null or m.outcome <> (${ORDER_OUTCOME}) or coalesce(m.cogs, -1) <> (${ORDER_COGS})
     limit ${limit}
   `);
 

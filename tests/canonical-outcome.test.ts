@@ -4,6 +4,7 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CANONICAL_OUTCOME_VERSION, outcomeCoverage, outcomeParity, rematerializeOutcomes, rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_COGS } from "@/lib/queries/cogs";
 
 /**
  * VẬT CHẤT HOÁ KHÔNG ĐƯỢC ĐỔI MỘT KẾT LUẬN NÀO.
@@ -60,6 +61,22 @@ export async function testCanonicalOutcome(db: Db) {
     assert.deepEqual(after.mismatches, [], "dựng lại đúng đơn đó là hết lệch");
     assert.equal((await outcomeCoverage()).rows, cov.rows, "dựng lại một đơn không được làm mất dòng của đơn khác");
   }
+
+  // ───────── 4b. GIÁ VỐN cũng phải khớp từng dòng ─────────
+  //
+  // Đo được: sau khi kết quả đơn đã tính sẵn, đọc bảng cho toàn bộ dòng chỉ mất 48ms nhưng báo cáo
+  // vẫn 5–10 giây — thủ phạm còn lại là `ORDER_COGS`, truy vấn con LỒNG HAI TẦNG. Nó vào cùng bảng,
+  // nên cũng phải chịu cùng phép đối chiếu: sai giá vốn là sai lợi nhuận.
+  const [{ lech }] = await db
+    .select({ lech: sql<number>`count(*)` })
+    .from(schema.orders)
+    .leftJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id}`)
+    .leftJoin(
+      schema.canonicalOrderOutcome,
+      sql`${schema.canonicalOrderOutcome.orderId} = ${schema.orders.id} and coalesce(${schema.canonicalOrderOutcome.shipmentId}, '') = coalesce(${schema.shipments.id}, '')`,
+    )
+    .where(sql`${schema.canonicalOrderOutcome.cogs} <> (${ORDER_COGS})`);
+  assert.equal(Number(lech), 0, "giá vốn đã tính sẵn phải khớp từng dòng với biểu thức chuẩn — lệch là lợi nhuận sai");
 
   // ───────── 5. Phiên bản luật phải được ghi ─────────
   const [{ v }] = await db
@@ -118,6 +135,6 @@ export async function testCanonicalOutcome(db: Db) {
   assert.equal((await outcomeCoverage()).stale, 0, "dựng lại xong không còn dòng cũ");
 
   console.log(
-    `✓ Kết quả đơn vật chất hoá: ${cov.rows} dòng khớp TỪNG DÒNG với biểu thức chuẩn · grain (đơn × vận đơn) giữ nguyên · dựng lại không nhân đôi · dựng theo đơn không đụng đơn khác · phiên bản luật v${CANONICAL_OUTCOME_VERSION}`,
+    `✓ Kết quả đơn vật chất hoá: ${cov.rows} dòng khớp TỪNG DÒNG với biểu thức chuẩn · grain (đơn × vận đơn) giữ nguyên · dựng lại không nhân đôi · dựng theo đơn không đụng đơn khác · giá vốn khớp từng dòng · phiên bản luật v${CANONICAL_OUTCOME_VERSION}`,
   );
 }

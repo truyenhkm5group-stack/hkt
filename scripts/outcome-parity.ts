@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_COGS } from "@/lib/queries/cogs";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 
 /**
@@ -60,8 +61,10 @@ async function main() {
   const [par] = rowsOf<{ total: number; matched: number; mismatched: number }>(await db.execute(sql`
     select
       count(*)::int as total,
-      count(*) filter (where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome = (${ORDER_OUTCOME}))::int as matched,
-      count(*) filter (where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome <> (${ORDER_OUTCOME}))::int as mismatched
+      count(*) filter (where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+                         and m.outcome = (${ORDER_OUTCOME}) and m.cogs = (${ORDER_COGS}))::int as matched,
+      count(*) filter (where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+                         and (m.outcome <> (${ORDER_OUTCOME}) or m.cogs <> (${ORDER_COGS})))::int as mismatched
     from ${schema.orders}
     left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
     left join canonical_order_outcome m
@@ -87,16 +90,18 @@ async function main() {
   if (Number(par?.mismatched ?? 0) > 0) {
     const rows = rowsOf<Record<string, unknown>>(await db.execute(sql`
       select ${schema.orders.id} as order_id, ${schema.shipments.id} as shipment_id,
-             (${ORDER_OUTCOME}) as live, m.outcome as materialized
+             (${ORDER_OUTCOME}) as live, m.outcome as materialized,
+             (${ORDER_COGS}) as live_cogs, m.cogs as materialized_cogs
       from ${schema.orders}
       left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
       left join canonical_order_outcome m
         on m.order_id = ${schema.orders.id} and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
-      where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome <> (${ORDER_OUTCOME})
+      where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+        and (m.outcome <> (${ORDER_OUTCOME}) or m.cogs <> (${ORDER_COGS}))
       limit 10
     `));
     console.log("\n✗ CÁC DÒNG LỆCH (dừng lại và tìm nguyên nhân, KHÔNG sửa dữ liệu cho khớp):");
-    for (const r of rows) console.log(`   ${r.order_id}/${r.shipment_id ?? "—"}: chuẩn=${r.live} bảng=${r.materialized}`);
+    for (const r of rows) console.log(`   ${r.order_id}/${r.shipment_id ?? "—"}: kết quả chuẩn=${r.live} bảng=${r.materialized} · giá vốn chuẩn=${r.live_cogs} bảng=${r.materialized_cogs}`);
     process.exit(1);
   }
 

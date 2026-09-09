@@ -330,6 +330,13 @@
       "when": 1788945581898,
       "tag": "0047_canonical_order_outcome",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788945582898,
+      "tag": "0048_canonical_cogs",
+      "breakpoints": true
     }
   ]
 }

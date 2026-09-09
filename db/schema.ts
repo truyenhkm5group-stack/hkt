@@ -304,6 +304,16 @@ export const canonicalOrderOutcome = pgTable(
     shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
     /** Kết quả do chính `ORDER_OUTCOME` sinh ra — chép lại, không diễn giải. */
     outcome: text("outcome").notNull(),
+    /**
+     * Giá vốn cả đơn, do chính `ORDER_COGS` sinh ra.
+     *
+     * Đo trên production sau khi vật chất hoá kết quả đơn: đọc kết quả đã tính sẵn cho toàn bộ 2.431
+     * dòng chỉ mất **48ms**, nhưng báo cáo vẫn mất 5–10 giây. Thủ phạm còn lại là `ORDER_COGS` — một
+     * truy vấn con LỒNG HAI TẦNG: mỗi đơn duyệt từng dòng hàng, mỗi dòng hàng lại tra ngược phiếu
+     * nhập gần nhất. Cùng một bệnh, cùng một cách chữa, và ở cùng một bảng để chỉ có MỘT nơi phải
+     * dựng lại và MỘT phép đối chiếu.
+     */
+    cogs: money("cogs"),
     /** Phiên bản luật đã dùng để tính dòng này. Luật đổi ⇒ dòng cũ thành cũ, phát hiện được. */
     logicVersion: integer("logic_version").notNull().default(1),
     computedAt: ts("computed_at").notNull().defaultNow(),

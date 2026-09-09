@@ -7,4 +7,4 @@
  * Nằm ở hằng số dùng chung để `return-rate.ts` (nơi định nghĩa luật) và `canonical-outcome.ts` (nơi
  * ghi bảng) cùng đọc được mà không tạo vòng lặp import.
  */
-export const CANONICAL_OUTCOME_VERSION = 1;
+export const CANONICAL_OUTCOME_VERSION = 2;

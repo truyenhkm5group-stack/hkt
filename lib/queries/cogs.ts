@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { schema } from "@/db";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { LAST_RECEIPT_COST, type VariantLastCost } from "@/lib/queries/stock";
 
 const i = schema.orderItems;
@@ -47,6 +48,21 @@ export const ORDER_COGS = sql<number>`coalesce((
  * Cố ý đặt ở đây chứ không ở return-rate.ts: return-rate ← cogs ← stock ← return-rate sẽ thành
  * vòng import, và biểu thức SQL dựng ở mức mô-đun trong vòng import thì có thể là `undefined`.
  */
+/**
+ * Giá vốn đọc từ bảng đã tính sẵn; **thiếu dòng thì tính tại chỗ** bằng chính biểu thức trên.
+ *
+ * Cùng nguyên tắc với `ORDER_OUTCOME_FAST`: bảng trống, thiếu dòng, hay sai phiên bản thì CHẬM chứ
+ * không SAI. Đo được: đọc bảng cho toàn bộ 2.431 dòng mất 48ms, trong khi tính trực tiếp mất vài
+ * giây — vì `ORDER_COGS` là truy vấn con lồng hai tầng (mỗi đơn → mỗi dòng hàng → tra phiếu nhập).
+ */
+export const ORDER_COGS_FAST = sql<number>`coalesce(
+  (select m.cogs from canonical_order_outcome m
+    where m.order_id = ${schema.orders.id}
+      and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
+      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
+  ${ORDER_COGS}
+)`;
+
 export function orderCogsColumn() {
-  return ORDER_COGS.as("order_cogs");
+  return ORDER_COGS_FAST.as("order_cogs");
 }
