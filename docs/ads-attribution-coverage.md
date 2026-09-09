@@ -67,15 +67,49 @@ nào mang lại đơn.
 ERP giữ chúng ở trạng thái **nhập nhằng** thay vì chọn bừa — đúng nguyên tắc, và đó là lý do con số
 không đẹp lên.
 
+### Phân nhóm chính thức (đo lại 09/09/2026, n = 1.676)
+
+| Nhóm | Nghĩa | Số đơn |
+|---|---|---|
+| — | Có `ad_id` tra được chiến dịch | **770** |
+| **A · UNIQUE_DETERMINISTIC** | Bài chỉ thuộc **một** chiến dịch | **5** |
+| **B · AMBIGUOUS** | Bài thuộc **nhiều** chiến dịch | **539** |
+| **C · UNMAPPED** | Không có bằng chứng nguồn nào | **362** |
+
+**Chỉ nhóm A được nối tự động, và nó đã được nối.** Độ phủ cuối: **46,2%**.
+
+### Giả thuyết "tách theo kỳ" — ĐÃ KIỂM VÀ BÁC BỎ
+
+Nếu các chiến dịch của cùng một bài chạy ở **những khoảng thời gian rời nhau**, thì ngày đặt đơn sẽ
+phân giải được. Đã kiểm trên chính 4 bài chiếm toàn bộ 539 đơn:
+
+| Bài | Các chiến dịch | Kết luận |
+|---|---|---|
+| …329169 | 27/07–30/08 · 06/08–07/08 · 06/08–28/08 | **chồng lấn** |
+| …329169 | 28/07–24/08 · 06/08–07/08 | **chồng lấn** |
+| …493325 | 29/08–05/09 · 02/09–03/09 · 03/09 · 05/09–08/09 | **chồng lấn** |
+| …120117 | 5 chiến dịch, 23/08–08/09 | **chồng lấn** |
+
+**Không bài nào tách được theo kỳ.** Ngày đặt đơn không phân giải được chiến dịch ⇒ **không auto-map**.
+
+### Một quan sát KHÔNG dùng để tự động hoá
+
+Ở 2 trong 4 bài, **một chiến dịch chiếm hơn 99,8% chi tiêu** (221,3 triệu so với 169 nghìn và 95
+nghìn; 164,4 triệu so với 169 nghìn).
+
+Gán hết cho chiến dịch lớn nhất sẽ đúng gần hết — nhưng đó là **suy đoán theo tỷ trọng**, không phải
+bằng chứng. ERP **không làm**, và tài liệu ghi lại để chủ shop tự nhìn và tự quyết.
+
 ### Việc chủ shop làm được để độ phủ nhảy vọt
 
-Nếu **mỗi bài viết chỉ chạy trong MỘT chiến dịch** (hoặc tách bài riêng cho từng chiến dịch), thì
-539 đơn kia lập tức nối được:
+Toàn bộ 539 đơn nhập nhằng dồn vào **đúng 4 bài viết**. Nếu mỗi bài chỉ chạy trong **một** chiến
+dịch, 539 đơn đó lập tức nối được:
 
-> **46,2% → khoảng 78%** — vượt ngưỡng 80% chỉ còn một khoảng rất ngắn.
+> **46,2% → 78,4%**
 
-Đây là thay đổi **cách đặt quảng cáo**, không phải thay đổi phần mềm. ERP không thể tự làm, và cũng
-không nên đoán thay.
+Đây là thay đổi **cách đặt quảng cáo**, không phải thay đổi phần mềm. Con số 78,4% **không phải kết
+quả ERP đạt được**, mà là kết quả *nếu* cách đặt quảng cáo đổi — ghi rõ để không ai đọc nhầm thành
+cam kết.
 
 ## Trần thật, không hứa quá
 
