@@ -122,8 +122,16 @@ tức là mô phỏng một thế giới không tồn tại. Đã quy cả hai v
 hơn con số** là 539 đơn có bài viết được chạy bởi nhiều chiến dịch cùng lúc, nên từ bài KHÔNG suy ra
 được chiến dịch nào mang lại đơn. ERP giữ nhập nhằng thay vì chọn bừa.
 
-**Việc chủ shop làm được:** nếu mỗi bài chỉ chạy trong MỘT chiến dịch thì 539 đơn kia lập tức nối
-được — **46,2% → khoảng 78%**. Đây là thay đổi CÁCH ĐẶT QUẢNG CÁO, không phải thay đổi phần mềm.
+**Đã rút lại khuyến nghị "tách mỗi bài về một chiến dịch".** Chủ shop nêu rõ (09/09/2026): nghiệp vụ
+marketing là scale theo tầng — một bài viết được nhân lên nhiều quảng cáo, nhiều nhóm, nhiều chiến
+dịch, nhiều tài khoản; và ngược lại một tài khoản có nhiều chiến dịch, một chiến dịch nhiều nhóm,
+một nhóm nhiều quảng cáo. Quan hệ bài ↔ chiến dịch là **nhiều–nhiều theo thiết kế**, không phải do
+đặt sai. Nên **78% không đạt được** và 539 đơn nhập nhằng sẽ không tự phân giải bằng dữ liệu hiện có.
+
+**Cách duy nhất tăng độ phủ mà không bịa số:** gắn mã theo dõi riêng cho từng mẩu quảng cáo
+(`ref`/`utm` trong liên kết hoặc kịch bản tin nhắn) để đơn mang được `ad_id` thật. Đó là thay đổi
+cách chạy quảng cáo, cần chủ shop quyết. Cho tới lúc đó, kết luận lỗ/lãi cấp chiến dịch vẫn phải bị
+chặn bởi ngưỡng độ phủ, và phần dưới ngưỡng trả về CHƯA ĐỦ DỮ LIỆU thay vì một con số trông chắc chắn.
 
 ### F.4 Đo lại sau khi bản vá đã chạy trên production (09/09/2026, 10:0x)
 
@@ -136,8 +144,9 @@ Migration đã áp: `fb_ads` có **99/105 mẩu mang `post_id`** trên 51 chiế
 | Nối được sau khi cộng cả đường bài viết | 1.189 | **49,2%** |
 
 Đường nối bài viết thêm **~17 đơn**. Đúng như đo trước đó: nó không phải chỗ để cải thiện, vì phần
-lớn bài viết bị nhiều chiến dịch cùng chạy. **49,2% là con số thật; 78% vẫn chỉ đạt được nếu chủ
-shop tách chiến dịch.** Không dùng suy đoán để làm đẹp độ phủ.
+lớn bài viết bị nhiều chiến dịch cùng chạy — và theo đính chính của chủ shop, đó là **cách làm đúng
+của nghiệp vụ marketing**, không phải lỗi cấu hình. **~49% là trần thật của quy kết theo bài viết ở
+cấp chiến dịch.** Không dùng suy đoán để làm đẹp độ phủ.
 
 ## G. Hàng hoàn (P0.2)
 
