@@ -71,6 +71,26 @@ async function main() {
       on m.order_id = ${schema.orders.id} and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
   `));
 
+  /**
+   * ───────── ĐỘ PHỦ CỦA VIỆC ĐÔNG CỨNG GIÁ VỐN ─────────
+   *
+   * Bản trước chỉ đối chiếu `outcome` và `cogs`. Nó báo "2433/2433 khớp · 0 lệch · dự phòng 0%" —
+   * xanh hoàn toàn — trong khi CẢ 407 đơn đã giao đều có `recognized_cogs` NULL, tức việc đông cứng
+   * giá vốn của P0.4 chưa hề có hiệu lực trên production và một phiếu nhập mới vẫn viết lại được lợi
+   * nhuận kỳ đã qua.
+   *
+   * Bài học: một cột được THÊM VÀO mà không có ai đối chiếu thì im lặng rỗng, và mọi báo cáo độ phủ
+   * vẫn xanh. Nên độ phủ phải đo cả những cột mới, không chỉ những cột cũ.
+   */
+  const [dong] = rowsOf<{ da_giao: number; da_chot: number; thieu_can_cu: number; suy_nguoc: number }>(await db.execute(sql`
+    select
+      count(*) filter (where m.outcome::text = 'DELIVERED')::int as da_giao,
+      count(*) filter (where m.outcome::text = 'DELIVERED' and m.recognized_cogs is not null)::int as da_chot,
+      count(*) filter (where m.outcome::text = 'DELIVERED' and m.cogs_basis is null)::int as thieu_can_cu,
+      count(*) filter (where m.cogs_basis = 'RECEIPT_AFTER')::int as suy_nguoc
+    from canonical_order_outcome m
+  `));
+
   const eligible = Number(cov?.eligible ?? 0);
   const current = Number(cov?.current_version ?? 0);
   const fallback = eligible ? Math.round(((eligible - current) / eligible) * 1000) / 10 : 0;
@@ -85,6 +105,21 @@ async function main() {
   console.log(`ELIGIBLE          ${eligible}`);
   console.log(`CURRENT_VERSION   ${current}`);
   console.log(`FALLBACK_RATE     ${fallback}%   ← lớp dự phòng là lưới an toàn, không phải đường chạy chính`);
+
+  const daGiao = Number(dong?.da_giao ?? 0);
+  const daChot = Number(dong?.da_chot ?? 0);
+  const chuaChot = daGiao - daChot;
+  console.log("\n── ĐÔNG CỨNG GIÁ VỐN KỲ ĐÃ CHỐT (P0.4) ──");
+  console.log(`DELIVERED         ${daGiao}`);
+  console.log(`COGS_FROZEN       ${daChot}`);
+  console.log(`COGS_NOT_FROZEN   ${chuaChot}   ← phải bằng 0; khác 0 nghĩa là giá vốn kỳ cũ VẪN trôi theo phiếu nhập mới`);
+  console.log(`BASIS_MISSING     ${Number(dong?.thieu_can_cu ?? 0)}`);
+  console.log(`BASIS_RECEIPT_AFTER ${Number(dong?.suy_nguoc ?? 0)}   ← giá vốn suy ngược, cần nhập phiếu nhập cũ với ngày THẬT`);
+  if (chuaChot > 0) {
+    console.log(`\n✗ ${chuaChot} đơn đã giao CHƯA chốt giá vốn — việc đông cứng của P0.4 chưa có hiệu lực với chúng.`);
+    console.log("   Chạy lại thao tác này sau khi bộ lập lịch dựng xong, hoặc kiểm tra điều kiện làm cũ trong rematerializeStale().");
+    process.exit(1);
+  }
 
   // Vài dòng lệch đầu tiên, nếu có — để đi tìm nguyên nhân, KHÔNG để sửa dữ liệu cho khớp.
   if (Number(par?.mismatched ?? 0) > 0) {
