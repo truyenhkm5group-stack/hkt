@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { listOpenNotifications, unreadCount } from "@/lib/queries/notifications";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 });
+  if (!can(user, "alerts:view")) return NextResponse.json({ error: "Không có quyền xem cảnh báo" }, { status: 403 });
   const [items, unread] = await Promise.all([listOpenNotifications(20), unreadCount(user.id)]);
   return NextResponse.json({
     unread,

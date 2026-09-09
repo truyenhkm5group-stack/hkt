@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { env, integrationStatus } from "@/lib/env";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
@@ -20,8 +20,11 @@ function scrub(message: string) {
 
 /** Kiểm tra kết nối tới Pancake POS / Viettel Post. Không bao giờ trả về khoá API. */
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  // Bấm thử kết nối là gọi thật sang Pancake / Viettel Post bằng khoá của shop — chỉ người được
+  // giao trang Kết nối dữ liệu mới được làm.
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  if (!can(user, "integrations:view")) return NextResponse.json({ ok: false, error: "Không có quyền kiểm tra kết nối" }, { status: 403 });
   const body = (await request.json().catch(() => ({}))) as { provider?: string };
   const provider = body.provider;
   const status = integrationStatus();
