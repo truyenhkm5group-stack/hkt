@@ -47,6 +47,21 @@ const ROUTES = [
 ];
 
 /**
+ * LƯỢT LÀM NÓNG — đo riêng, KHÔNG tính vào kết quả đạt/không đạt.
+ *
+ * Đo 09/09/2026 trên production: `/` nằm đầu danh sách nên nó gánh toàn bộ chi phí NGUỘI (mở pool
+ * kết nối, mọi `memo()` còn trống, JIT chưa nóng) và vượt 60 giây, trong khi 24 trang còn lại đều
+ * dưới 310 ms. Một lần đo duy nhất ở vị trí đầu KHÔNG phân biệt được "trang chủ chậm thật" với
+ * "trang đầu tiên nào cũng phải trả giá nguội".
+ *
+ * Nên tách hẳn: gọi trước một lần để nuốt chi phí nguội và IN RA con số đó (người đầu tiên vào
+ * sau mỗi lần deploy phải chờ đúng chừng ấy — vẫn là việc phải sửa, nhưng sửa bằng làm nóng đệm,
+ * không phải bằng viết lại truy vấn). Sau đó mọi phép đo đều là trạng thái nóng, và deploy không
+ * bị chặn chỉ vì lần chạy đầu tiên.
+ */
+const WARMUP_ROUTE = "/";
+
+/**
  * Dấu hiệu trang ĐÃ render thật (khung dashboard có mặt).
  * Cố ý KHÔNG dò chuỗi lỗi trong nội dung: Next.js nhúng sẵn nội dung not-found vào bundle của
  * mọi trang, nên dò "This page could not be found" báo lỗi giả cho cả trang tốt.
@@ -121,6 +136,29 @@ async function main() {
       .sign(key);
 
   const results: Result[] = [];
+
+  // Chi phí nguội: đo và in ra, không tính đạt/không đạt. Hạn chờ nới rộng vì đây chính là lần
+  // chậm nhất theo thiết kế — mục đích là BIẾT nó bao lâu, không phải đánh trượt deploy vì nó.
+  {
+    const started = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS * 3);
+    try {
+      const r = await fetch(`${BASE}${WARMUP_ROUTE}`, {
+        headers: { cookie: `erp_session=${await mint()}` },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      await r.text();
+      console.log(`  ⏱ làm nóng ${WARMUP_ROUTE} → HTTP ${r.status} (${Date.now() - started}ms) — chi phí NGUỘI, không tính vào kết quả`);
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === "AbortError";
+      console.error(`  ⏱ làm nóng ${WARMUP_ROUTE} → ${aborted ? `quá ${Math.round((TIMEOUT_MS * 3) / 1000)}s` : String(error)} (không tính vào kết quả)`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   const runStarted = Date.now();
 
   for (const route of ROUTES) {
