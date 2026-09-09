@@ -55,14 +55,24 @@ export const ORDER_COGS = sql<number>`coalesce((
  * không SAI. Đo được: đọc bảng cho toàn bộ 2.431 dòng mất 48ms, trong khi tính trực tiếp mất vài
  * giây — vì `ORDER_COGS` là truy vấn con lồng hai tầng (mỗi đơn → mỗi dòng hàng → tra phiếu nhập).
  */
-export const ORDER_COGS_FAST = sql<number>`coalesce(
-  (select m.cogs from canonical_order_outcome m
-    where m.order_id = ${schema.orders.id}
-      and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
-      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
-  ${ORDER_COGS}
-)`;
+/**
+ * DỰNG LƯỜI, KHÔNG PHẢI HẰNG SỐ MỨC MÔ-ĐUN.
+ *
+ * Chú thích ngay trên đã cảnh báo: `return-rate ← cogs ← stock ← return-rate` là một vòng import, và
+ * biểu thức SQL dựng ở mức mô-đun trong vòng import có thể là `undefined` lúc nạp. Tôi đã dẫm đúng
+ * vào đó: khai `ORDER_COGS_FAST` thành `const` làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ —
+ * không lỗi, không cảnh báo, chỉ là con số sai. Hàm thì chỉ dựng lúc gọi, nên vòng import đã đóng.
+ */
+export function orderCogsFast() {
+  return sql<number>`coalesce(
+    (select m.cogs from canonical_order_outcome m
+      where m.order_id = ${schema.orders.id}
+        and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
+        and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
+    ${ORDER_COGS}
+  )`;
+}
 
 export function orderCogsColumn() {
-  return ORDER_COGS_FAST.as("order_cogs");
+  return orderCogsFast().as("order_cogs");
 }

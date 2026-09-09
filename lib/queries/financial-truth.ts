@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_COGS } from "@/lib/queries/cogs";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { metricScope } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
@@ -145,7 +146,21 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const facts = db
     .select({
       revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
-      cogs: sql<number>`${ORDER_COGS}`.as("f_cogs"),
+      /**
+       * GIÁ VỐN CỦA KỲ ĐÃ CHỐT, KHÔNG PHẢI GIÁ VỐN HÔM NAY.
+       *
+       * Đơn đã ghi nhận giao thành công dùng `recognized_cogs` — con số đã chốt tại thời điểm giao và
+       * không đổi nữa. Nếu không, nhập một lô mới hôm nay sẽ viết lại lợi nhuận của tháng trước:
+       * chủ shop in báo cáo tháng 8 hai lần vào hai ngày khác nhau ra hai con số khác nhau.
+       *
+       * Đơn chưa chốt vẫn dùng giá vốn hiện tại — đó là ƯỚC TÍNH, và nó chỉ vào phần chưa giao.
+       */
+      cogs: sql<number>`coalesce(
+        (select m.recognized_cogs from canonical_order_outcome m
+          where m.order_id = ${o.id} and coalesce(m.shipment_id, '') = coalesce(${s.id}, '')
+            and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.recognized_cogs is not null),
+        ${ORDER_COGS}
+      )`.as("f_cogs"),
       fee: sql<number>`${FEE}`.as("f_fee"),
       returnFee: sql<number>`${o.returnFee}`.as("f_return_fee"),
       prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),

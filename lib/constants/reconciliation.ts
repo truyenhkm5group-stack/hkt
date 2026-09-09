@@ -33,6 +33,7 @@ export type ReconciliationRuleKey =
   | "ORDER_SHIPMENT_CONFLICT"
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   | "ORDER_WITH_MULTIPLE_SHIPMENTS"
+  | "COGS_BASIS_UNVERIFIED"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
   | "COD_OVERDUE_UNPAID"
@@ -83,6 +84,31 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
    * Nhưng nó IM LẶNG: ngày đầu tiên có một ca, mọi con số tiền sai mà không gì báo. Luật này tồn tại
    * để ngày đó có người biết — và để KHÔNG ai phải đổi grain báo cáo trước khi có ca thật.
    */
+  /**
+   * GIÁ VỐN SUY NGƯỢC TỪ PHIẾU NHẬP LẬP SAU NGÀY GIAO.
+   *
+   * Đo trên production 09/09/2026: shop có đúng 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
+   * sớm nhất từ 22/01; 0/2.495 dòng hàng có giá vốn Pancake, 0/37 mẫu mã có giá nhập. Nghĩa là giá
+   * vốn của 368/407 đơn đã giao — 58 triệu — đang được suy ngược từ hai phiếu của tháng 9.
+   *
+   * Con số đó KHÔNG sai theo nghĩa tính nhầm; nó chỉ là chưa có căn cứ. Nhưng nó đang nằm trong lợi
+   * nhuận như thể đã được kiểm chứng, và đó mới là vấn đề. Luật này để chủ shop nhìn thấy đúng phần
+   * lợi nhuận đang dựa trên phỏng đoán.
+   *
+   * CỐ Ý KHÔNG "sửa" bằng cách dựng lại giá vốn về ngày giao: làm vậy sẽ đưa 368 đơn về 0đ và thổi
+   * lợi nhuận lịch sử lên 58 triệu — sai nặng hơn hiện tại.
+   */
+  COGS_BASIS_UNVERIFIED: {
+    key: "COGS_BASIS_UNVERIFIED",
+    entity: "order",
+    severity: "WARNING",
+    label: "Giá vốn suy ngược từ phiếu nhập lập sau ngày giao",
+    reason:
+      "Đơn đã giao nhưng tại thời điểm giao KHÔNG có phiếu nhập nào cho mẫu mã đó. Giá vốn hiện tại lấy từ phiếu lập SAU đó, nên nó là phỏng đoán chứ không phải chứng từ. Lợi nhuận của nhóm đơn này chưa có căn cứ.",
+    suggestedAction:
+      "Nhập phiếu nhập cũ với ngày nhập THẬT nếu còn chứng từ. Nếu không còn, đây là giới hạn của dữ liệu lịch sử — cần biết để không đọc lợi nhuận kỳ cũ như số đã kiểm chứng.",
+    autoRepair: false,
+  },
   ORDER_WITH_MULTIPLE_SHIPMENTS: {
     key: "ORDER_WITH_MULTIPLE_SHIPMENTS",
     entity: "order",

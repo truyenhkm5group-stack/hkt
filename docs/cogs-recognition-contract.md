@@ -77,10 +77,55 @@ mang phiên bản luật cũ ⇒ tự tính lại. **Chậm chứ không sai.**
 - `tests/metric-shape-consistency.test.ts`: sáu con số tiền của `getFinancialTruth` tính lại theo
   cách nội tuyến cũ, khớp 6/6.
 
-## 6. Việc còn bỏ ngỏ (cần chủ shop quyết, không phải việc kỹ thuật)
+## 6. ĐÃ CHỐT: giá vốn của kỳ đã ghi nhận không đổi nữa
 
-1. **Giá vốn có nên đóng băng tại thời điểm giao hàng không?** Hiện tại là không (mục 2). Đổi sang
-   đóng băng sẽ làm lợi nhuận kỳ cũ ổn định, nhưng là **đổi phương pháp tính**.
+Cột `canonical_order_outcome.recognized_cogs` ghi **một lần** lúc đơn được ghi nhận giao thành công,
+rồi không đổi. Báo cáo lợi nhuận đã giao đọc cột đó; đơn chưa giao vẫn dùng giá vốn hiện tại và đó là
+**ước tính**.
+
+Bốn tình huống được khoá bằng kiểm thử (`tests/cogs-recognition.test.ts`):
+
+| | |
+| --- | --- |
+| Đơn giao 10/08 giá 200.000, ngày 01/09 nhập lô 250.000 | giá vốn tháng 8 **vẫn 200.000** |
+| Đơn chưa giao | giá vốn ghi nhận là **CHƯA CÓ** (`NULL`), không phải 0 |
+| Dựng lại bảng nhiều lần | con số đã chốt **y nguyên** |
+| Chạy lại báo cáo sau khi nhập hàng | lợi nhuận kỳ cũ **không đổi** |
+
+## 6b. Điều đo được trên production, và vì sao KHÔNG dựng lại lịch sử
+
+Quét toàn bộ 407 đơn đã giao:
+
+```
+MATCHED          39
+DRIFTED         368      ← giá vốn hôm nay khác giá vốn lúc giao
+UNVERIFIABLE    368      ← và cả 368 đơn đó đều KHÔNG có phiếu nhập tại thời điểm giao
+TOTAL_COGS_NOW   64.509.000đ
+TOTAL_COGS_THEN   6.460.000đ
+DELTA            58.049.000đ
+```
+
+Điều tra tiếp: shop có **đúng 2 phiếu nhập**, cả hai ngày **03/09/2026**, nhập vào ERP 04/09 — trong
+khi đơn giao sớm nhất từ **22/01/2026**. Và **0/2.495 dòng hàng** có giá vốn Pancake, **0/37 mẫu mã**
+có giá nhập.
+
+Nên đây **không phải** chuyện "giá đổi vì nhập lô mới". Đây là chuyện **toàn bộ giá vốn lịch sử đang
+được suy ngược từ hai phiếu của tháng 9**.
+
+**Vì thế cố ý KHÔNG dựng lại lịch sử theo "giá vốn tại ngày giao".** Làm vậy sẽ đưa 368 đơn về **0đ**
+và thổi lợi nhuận lịch sử lên **58 triệu** — sai nặng hơn hiện tại, và sai theo hướng dễ chịu, đúng
+kiểu sai nguy hiểm nhất.
+
+Thay vào đó: **giữ nguyên con số hiện tại** (KPI không đổi) và **gắn nhãn** `RECEIPT_AFTER`, kèm luật
+đối soát `COGS_BASIS_UNVERIFIED` hiện trong Trung tâm điều khiển. Chủ shop nhìn thấy đúng phần lợi
+nhuận đang dựa trên phỏng đoán, thay vì tin nhầm là đã kiểm chứng.
+
+Cách sửa thật, nếu muốn: **nhập phiếu nhập cũ với ngày nhập THẬT**. Có chứng từ thì căn cứ tự chuyển
+sang `RECEIPT_BEFORE`, không cần đụng mã.
+
+## 7. Việc còn bỏ ngỏ (cần chủ shop quyết, không phải việc kỹ thuật)
+
+1. ~~Giá vốn có nên đóng băng tại thời điểm giao hàng không?~~ **ĐÃ CHỐT: có** — xem mục 6.
 2. **Đơn không tra được giá vốn đang tính 0.** `getFinancialTruth` đã đếm và nêu rõ số đơn này
    (`missingCogsOrders`) kèm câu "lợi nhuận của nhóm này đang CAO HƠN thực tế" — nhưng vẫn là 0 chứ
    chưa phải CHƯA BIẾT. Nếu muốn đúng luật "`NULL` là chưa biết, không phải 0", đây là chỗ phải sửa.

@@ -65,6 +65,13 @@ export type ControlTower = {
 function ruleSql(rule: ReconciliationRuleKey): SQL {
   const overdueDays = COD_OVERDUE_DAYS;
   switch (rule) {
+    case "COGS_BASIS_UNVERIFIED":
+      return sql`select coalesce(o.system_id::text, o.id) as code,
+          'giá vốn ' || to_char(m.recognized_cogs, 'FM999,999,999') || 'đ suy ngược từ phiếu nhập lập sau ngày giao' as evidence,
+          m.recognized_at as at, o.id as entity_id
+        from canonical_order_outcome m
+        join orders o on o.id = m.order_id
+        where m.cogs_basis = 'RECEIPT_AFTER'`;
     case "ORDER_WITH_MULTIPLE_SHIPMENTS":
       // Đếm theo ĐƠN, không theo vận đơn: một đơn ba vận đơn là MỘT vấn đề, không phải ba.
       return sql`select coalesce(o.system_id::text, o.id) as code,

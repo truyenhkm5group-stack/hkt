@@ -37,24 +37,66 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
 
   const scope = ids ? sql`${schema.orders.id} in ${ids}` : sql`true`;
 
-  return db.transaction(async (tx) => {
-    if (ids) await tx.delete(c).where(sql`${c.orderId} in ${ids}`);
-    else await tx.delete(c);
+  /**
+   * Mốc ghi nhận doanh thu = ngày hàng tới tay khách.
+   */
+  const RECOGNIZED_AT = sql`coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate})`;
 
+  /**
+   * CĂN CỨ CỦA GIÁ VỐN — nói thật về chất lượng con số, không chỉ về con số.
+   *
+   * Đo trên production 09/09/2026: shop chỉ có 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
+   * sớm nhất từ 22/01; không dòng hàng nào có giá vốn Pancake, không mẫu mã nào có giá nhập. Nghĩa
+   * là giá vốn của gần như toàn bộ đơn lịch sử đang được SUY NGƯỢC từ hai phiếu của tháng 9.
+   *
+   * Không được im lặng về chuyện đó, và cũng không được "sửa" bằng cách dựng lại về 0 — làm vậy sẽ
+   * thổi lợi nhuận lịch sử lên 58 triệu, sai nặng hơn hiện tại.
+   */
+  const COGS_BASIS = sql`case
+    when not exists (
+      select 1 from order_items oi
+      join stock_receipt_items ri on ri.variant_id = oi.variant_id
+      join stock_receipts r on r.id = ri.receipt_id and ri.unit_cost > 0
+      where oi.order_id = ${schema.orders.id}
+    ) then 'NONE'
+    when exists (
+      select 1 from order_items oi
+      join stock_receipt_items ri on ri.variant_id = oi.variant_id
+      join stock_receipts r on r.id = ri.receipt_id and ri.unit_cost > 0
+      where oi.order_id = ${schema.orders.id} and r.received_at <= ${RECOGNIZED_AT}
+    ) then 'RECEIPT_BEFORE'
+    else 'RECEIPT_AFTER'
+  end`;
+
+  return db.transaction(async (tx) => {
+    // KHÔNG xoá rồi ghi lại: giá vốn ĐÃ CHỐT phải sống sót qua mọi lần dựng lại, nếu không thì việc
+    // đóng băng chẳng có nghĩa gì. Dùng upsert và cố ý GIỮ giá trị cũ của ba cột đã chốt.
     const inserted = await tx.execute(sql`
-      insert into canonical_order_outcome (id, order_id, shipment_id, outcome, cogs, logic_version, computed_at)
+      insert into canonical_order_outcome
+        (id, order_id, shipment_id, outcome, cogs, recognized_cogs, recognized_at, cogs_basis, logic_version, computed_at)
       select
         md5(${schema.orders.id} || ':' || coalesce(${schema.shipments.id}, '')),
         ${schema.orders.id},
         ${schema.shipments.id},
         ${ORDER_OUTCOME},
         ${ORDER_COGS},
+        case when (${ORDER_OUTCOME}) = 'DELIVERED' then ${ORDER_COGS} end,
+        case when (${ORDER_OUTCOME}) = 'DELIVERED' then ${RECOGNIZED_AT} end,
+        case when (${ORDER_OUTCOME}) = 'DELIVERED' then (${COGS_BASIS}) end,
         ${CANONICAL_OUTCOME_VERSION},
         now()
       from ${schema.orders}
       left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
       where ${scope}
-      on conflict do nothing
+      on conflict (order_id, (coalesce(shipment_id, ''))) do update set
+        outcome = excluded.outcome,
+        cogs = excluded.cogs,
+        -- ĐÃ CHỐT LÀ KHÔNG ĐỔI. Một phiếu nhập mới không được phép viết lại lợi nhuận kỳ đã qua.
+        recognized_cogs = coalesce(canonical_order_outcome.recognized_cogs, excluded.recognized_cogs),
+        recognized_at   = coalesce(canonical_order_outcome.recognized_at, excluded.recognized_at),
+        cogs_basis      = coalesce(canonical_order_outcome.cogs_basis, excluded.cogs_basis),
+        logic_version = excluded.logic_version,
+        computed_at = now()
     `);
     const rows = typeof inserted === "object" && inserted !== null && "rowCount" in inserted ? Number((inserted as { rowCount: number }).rowCount ?? 0) : 0;
     return { rows };

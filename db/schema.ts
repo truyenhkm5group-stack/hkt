@@ -314,6 +314,31 @@ export const canonicalOrderOutcome = pgTable(
      * dựng lại và MỘT phép đối chiếu.
      */
     cogs: money("cogs"),
+    /**
+     * ───────────── GIÁ VỐN ĐÃ CHỐT CHO KỲ ĐÃ GHI NHẬN ─────────────
+     *
+     * Ghi MỘT LẦN lúc đơn được ghi nhận là giao thành công, rồi **không đổi nữa**. Đây là thứ chặn
+     * việc lợi nhuận kỳ đã chốt tự đổi khi kho nhập lô mới — chuyện đang xảy ra vì `ORDER_COGS` lấy
+     * "phiếu nhập gần nhất tính theo hôm nay".
+     *
+     * `NULL` = đơn chưa được ghi nhận giao thành công. Không phải 0.
+     */
+    recognizedCogs: integer("recognized_cogs"),
+    /** Mốc ghi nhận doanh thu (ngày giao). `NULL` khi chưa giao. */
+    recognizedAt: ts("recognized_at"),
+    /**
+     * CĂN CỨ của giá vốn đã chốt — và đây là chỗ phải nói thật:
+     *
+     *  · `RECEIPT_BEFORE` — có phiếu nhập TRƯỚC ngày giao. Căn cứ vững.
+     *  · `RECEIPT_AFTER`  — giá vốn suy ngược từ phiếu lập SAU ngày giao. **CHƯA XÁC MINH.**
+     *  · `NONE`           — không có nguồn giá vốn nào. Đang là 0 nhưng nghĩa thật là CHƯA BIẾT.
+     *
+     * Đo trên production 09/09/2026: shop chỉ có 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
+     * sớm nhất từ 22/01; 0/2.495 dòng hàng có giá vốn Pancake, 0/37 mẫu mã có giá nhập. Nên
+     * **368/407 đơn đã giao mang căn cứ `RECEIPT_AFTER`** — 58 triệu giá vốn suy ngược. Con số đó
+     * phải HIỆN RA, không được lẫn vào lợi nhuận như thể đã kiểm chứng.
+     */
+    cogsBasis: text("cogs_basis"),
     /** Phiên bản luật đã dùng để tính dòng này. Luật đổi ⇒ dòng cũ thành cũ, phát hiện được. */
     logicVersion: integer("logic_version").notNull().default(1),
     computedAt: ts("computed_at").notNull().defaultNow(),

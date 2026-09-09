@@ -296,7 +296,18 @@ export const ORDER_OUTCOME_FAST = sql`coalesce(
   (select m.outcome from canonical_order_outcome m
     where m.order_id = ${o.id}
       and coalesce(m.shipment_id, '') = coalesce(${s.id}, '')
-      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
+      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+      -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU.
+      --
+      -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà
+      -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử,
+      -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ
+      -- là con số sai.
+      --
+      -- Hai phép so mốc thời gian là đủ và gần như miễn phí; đổi lại "chậm chứ không sai" trở thành
+      -- đúng cho CẢ trường hợp dữ liệu vừa đổi.
+      and m.computed_at >= ${o.updatedAt}
+      and (${s.id} is null or m.computed_at >= ${s.updatedAt})),
   ${ORDER_OUTCOME}
 )`;
 
