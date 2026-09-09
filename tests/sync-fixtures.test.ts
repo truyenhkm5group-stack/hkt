@@ -40,6 +40,7 @@ import { testEntityTimeline } from "./entity-timeline.test";
 import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
 import { testCashflow } from "./cashflow.test";
+import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
@@ -1125,6 +1126,7 @@ async function main() {
   testAlertConfig();
   testMigrationJournal();
   await testCashflow(db);
+  testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);
   await testEntityTimeline(db);
