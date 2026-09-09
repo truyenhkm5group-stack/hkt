@@ -45,6 +45,38 @@ Thà thiếu còn hơn gán doanh thu sai chỗ — vì con số gán sai vẫn 
 nối tính lúc truy vấn. Ghi ngược là bịa quy kết, và sau đó không ai phân biệt được đâu là dữ liệu
 thật, đâu là ERP tự đoán.
 
+## KẾT QUẢ ĐO THẬT SAU KHI CHẠY (09/09/2026)
+
+Sau khi đồng bộ điền `post_id` cho 94/99 mẩu quảng cáo và quy hai bên về cùng một khoá:
+
+| | Số đơn | Tỷ lệ |
+|---|---|---|
+| Nối bằng `ad_id` | 770 | 45,9% |
+| **Nối thêm được nhờ bài viết** | **5** | **+0,3%** |
+| **Bài do NHIỀU chiến dịch cùng chạy ⇒ giữ nhập nhằng** | **539** | **32,2%** |
+| Còn lại (không có bài, hoặc bài chưa chạy quảng cáo) | 362 | 21,6% |
+
+**Độ phủ cuối: 46,2%.** Đường nối hoạt động đúng, nhưng chỉ thêm được 5 đơn.
+
+### Vì sao chỉ +0,3% — và đây mới là phát hiện quan trọng
+
+**539 đơn có bài viết được chạy bởi nhiều chiến dịch cùng lúc.** Với cách shop đang tổ chức quảng
+cáo, một bài viết thường xuất hiện trong nhiều chiến dịch, nên từ bài KHÔNG suy ra được chiến dịch
+nào mang lại đơn.
+
+ERP giữ chúng ở trạng thái **nhập nhằng** thay vì chọn bừa — đúng nguyên tắc, và đó là lý do con số
+không đẹp lên.
+
+### Việc chủ shop làm được để độ phủ nhảy vọt
+
+Nếu **mỗi bài viết chỉ chạy trong MỘT chiến dịch** (hoặc tách bài riêng cho từng chiến dịch), thì
+539 đơn kia lập tức nối được:
+
+> **46,2% → khoảng 78%** — vượt ngưỡng 80% chỉ còn một khoảng rất ngắn.
+
+Đây là thay đổi **cách đặt quảng cáo**, không phải thay đổi phần mềm. ERP không thể tự làm, và cũng
+không nên đoán thay.
+
 ## Trần thật, không hứa quá
 
 | | Tỷ lệ |
