@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money } from "@/components/ui-bits";
 import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, SLOW_MOVING_RULES } from "@/lib/constants/slow-moving";
 import { formatNumber } from "@/lib/format";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
+import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,11 +15,29 @@ import { cn } from "@/lib/utils";
  * không bao giờ thấy chỗ tiền đang nằm chết — đó là cách một shop vừa thiếu hàng bán vừa hết vốn.
  */
 export async function SlowMovingSection() {
-  const report = await getSlowMoving();
+  const [report, pendingReturns] = await Promise.all([getSlowMoving(), pendingReturnedForWarehouse().catch(() => null)]);
   const risky = report.rows.filter((r) => r.risk !== "HEALTHY");
-  if (!risky.length) return null;
+  if (!risky.length && !pendingReturns?.count) return null;
 
   return (
+    <>
+      {/* HÀNG HOÀN CHỜ ĐẾM — vốn nằm NGOÀI SỔ, khác hẳn vốn nằm chết TRONG sổ ở bảng dưới. */}
+      {pendingReturns?.count ? (
+        <SectionCard
+          title={`${formatNumber(pendingReturns.count)} kiện hàng hoàn chờ kiểm đếm`}
+          description={`${formatNumber(pendingReturns.items)} món · khoảng ${Math.round(pendingReturns.value).toLocaleString("vi-VN")}đ vốn đang NẰM NGOÀI SỔ${pendingReturns.stale ? ` · ${formatNumber(pendingReturns.stale)} kiện quá 30 ngày` : ""}`}
+          hint="Hàng hoàn KHÔNG tự vào tồn khi Viettel Post báo đã hoàn — chỉ phiếu tái nhập với số ĐẾM THỰC TẾ mới cộng tồn. Cho tới lúc đó, số hàng này có thật trong kho nhưng ERP không đếm, nên bảng đề xuất sản xuất ở trên đang đặt THỪA đúng bằng lượng đó. Giá trị quy theo giá nhập gần nhất; mẫu mã chưa có giá nhập không được tính vào."
+        >
+          <p className="text-sm">
+            Xác nhận hàng loạt ở{" "}
+            <Link href="/data-quality?issue=return-not-received" className="font-semibold text-primary hover:underline">
+              Chất lượng dữ liệu → Hàng hoàn chưa về kho
+            </Link>
+            . Đếm thực tế rồi lập phiếu — phần đếm thiếu sẽ hiện ra thành hàng hụt thay vì bị giấu.
+          </p>
+        </SectionCard>
+      ) : null}
+      {risky.length ? (
     <SectionCard
       title={`Vốn đang nằm chết — ${formatNumber(risky.length)} mẫu mã`}
       description={`${Math.round(report.totalExcessValue).toLocaleString("vi-VN")}đ vượt mức cần thiết trên tổng ${Math.round(report.totalStockValue).toLocaleString("vi-VN")}đ vốn tồn · ${report.byRisk.DEAD.count} mẫu chết · ${report.byRisk.EXCESS.count} mẫu thừa`}
@@ -62,5 +82,7 @@ export async function SlowMovingSection() {
         </Table>
       </div>
     </SectionCard>
+      ) : null}
+    </>
   );
 }

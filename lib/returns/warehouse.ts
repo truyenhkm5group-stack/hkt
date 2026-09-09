@@ -67,10 +67,30 @@ export async function pendingReturnedForWarehouse() {
       count: sql<number>`count(*)`,
       items: sql<number>`coalesce(sum((select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})), 0)`,
       oldestAt: sql<Date | null>`min(${s.returnedAt})`,
+      /**
+       * VỐN ĐANG NẰM NGOÀI SỔ — tính theo GIÁ NHẬP của chính các món trong kiện.
+       *
+       * Vì sao cần con số này: "445 kiện chờ đếm" không nói lên mức độ nghiêm trọng. Quy ra tiền
+       * thì nó so sánh được với vốn nằm chết và với tiền mặt đang có — và mới trả lời được câu
+       * "có đáng bỏ một buổi ra đếm không".
+       */
+      value: sql<number>`coalesce(sum((
+        select coalesce(sum(oi.quantity * coalesce(nullif(pv.last_imported_price, 0), 0)), 0)
+        from order_items oi left join product_variants pv on pv.id = oi.variant_id
+        where oi.order_id = ${s.orderId}
+      )), 0)`,
+      /** Quá 30 ngày: nhóm có nguy cơ không bao giờ được đếm. */
+      stale: sql<number>`count(*) filter (where ${s.returnedAt} < now() - interval '30 days')`,
     })
     .from(s)
     .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), isNotNull(s.orderId)));
-  return { count: Number(row?.count ?? 0), items: Number(row?.items ?? 0), oldestAt: row?.oldestAt ?? null };
+  return {
+    count: Number(row?.count ?? 0),
+    items: Number(row?.items ?? 0),
+    oldestAt: row?.oldestAt ?? null,
+    value: Number(row?.value ?? 0),
+    stale: Number(row?.stale ?? 0),
+  };
 }
 
 /** Danh sách vận đơn hoàn đã về tới shop, cũ nhất trước — dùng cho thao tác xác nhận hàng loạt. */
