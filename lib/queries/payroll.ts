@@ -14,6 +14,8 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { distributeProportionally } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -237,9 +239,12 @@ async function productEconomics(period: Period) {
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
     db
-      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
+      // CÙNG bộ máy phân bổ với Báo cáo lợi nhuận. Trước đây chỗ này cộng NGUYÊN khoản theo
+      // `occurred_at`, nên tiền thuê cả tháng rơi trọn vào kỳ tính lương chứa ngày ghi sổ và biến
+      // mất khỏi mọi kỳ khác — hoa hồng marketer tính trên một nền chi phí khác hẳn báo cáo LN.
+      .select({ amount: allocatedExpenseSum(period.from, period.to) })
       .from(schema.expenses)
-      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, ...periodConds(schema.expenses.occurredAt, period))),
+      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to))),
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
@@ -264,8 +269,11 @@ async function productEconomics(period: Period) {
   const perOrderTotal = rows.reduce((a, r) => a + r.packingCost + r.opsStaffCost, 0);
   // CP vận hành phân bổ của mã = (đã nhập + cố định) theo tỷ trọng doanh thu GTC + đóng hàng & NV vận đơn theo đơn của chính mã
   const operating = operatingEntered + fixedCost + perOrderTotal;
+  // Chia bằng largest remainder ⇒ Σ phần phân bổ của các mã = ĐÚNG (đã nhập + cố định), không lệch
+  // vì làm tròn từng dòng; lương/hoa hồng cộng lại phải khớp tổng chi phí của shop.
+  const sharedParts = distributeProportionally(operatingEntered + fixedCost, rows.map((r) => r.revenue));
   return {
-    rows: rows.map((r) => ({ ...r, operatingAlloc: (revenueTotal ? Math.round(((operatingEntered + fixedCost) * r.revenue) / revenueTotal) : 0) + r.packingCost + r.opsStaffCost })),
+    rows: rows.map((r, idx) => ({ ...r, operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
     operating,
     operatingEntered,
     fixedCost,

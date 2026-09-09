@@ -6,6 +6,7 @@ import { ORDER_COGS } from "@/lib/queries/cogs";
 import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, IS_RETURNED, metricScope } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 /**
  * ───────────────────── CHÂN LÝ TÀI CHÍNH ─────────────────────
@@ -176,9 +177,11 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)));
   const [opsRow] = await db
-    .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
+    // Cùng bộ máy phân bổ với Báo cáo lợi nhuận — trang "sự thật tài chính" không được là trang
+    // duy nhất còn cộng nguyên khoản thuê tháng vào một tuần.
+    .select({ amount: allocatedExpenseSum(period.from, period.to) })
     .from(schema.expenses)
-    .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, between(schema.expenses.occurredAt, period.from, period.to)));
+    .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to)));
 
   const deliveredRevenue = Number(orderRow?.deliveredRevenue ?? 0);
   const deliveredCogs = Number(orderRow?.deliveredCogs ?? 0);

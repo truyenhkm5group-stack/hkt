@@ -108,3 +108,101 @@ export function allocateExpenseToRange(expense: AllocatableExpense, reportStart:
   const before = new Date(from.getTime() - 86_400_000);
   return cumulative(to) - cumulative(before);
 }
+
+/**
+ * ══════════════ PHÂN BỔ CHI PHÍ SUY RA TỪ GIẢ ĐỊNH (không nằm ở bảng `expenses`) ══════════════
+ *
+ * Bốn phương pháp ở trên chỉ áp cho KHOẢN CHI CÓ CHỨNG TỪ. Báo cáo lợi nhuận còn có những chi phí
+ * ƯỚC TÍNH suy ra từ bộ giả định: đóng hàng, nhân viên vận đơn, chi phí cố định, dự phòng rủi ro
+ * tồn kho, thuế, phí thẻ. Mỗi khoản như vậy phải khai rõ CĂN CỨ PHÂN BỔ (cost driver) — chi phí đi
+ * theo cái gì — rồi mới nhân. Không khai driver thì sớm muộn cũng có người nhân nhầm cơ sở.
+ */
+export const COST_DRIVERS = ["TIME", "PER_ORDER", "PER_UNIT_SOLD", "PCT_REVENUE", "PCT_ADS", "DIRECT"] as const;
+export type CostDriver = (typeof COST_DRIVERS)[number];
+
+export const COST_DRIVER_LABEL: Record<CostDriver, string> = {
+  TIME: "Theo thời gian",
+  PER_ORDER: "Theo đơn xử lý",
+  PER_UNIT_SOLD: "Theo hàng bán ra",
+  PCT_REVENUE: "Theo % doanh thu",
+  PCT_ADS: "Theo % chi quảng cáo",
+  DIRECT: "Gắn thẳng vào đối tượng",
+};
+
+/**
+ * ─────────── DỰ PHÒNG RỦI RO TỒN KHO: DRIVER LÀ HÀNG BÁN RA, KHÔNG PHẢI HÀNG NHẬP ───────────
+ *
+ * Bug gốc (chủ shop nêu 09/09/2026): rủi ro tồn kho tính bằng `% × giá trị hàng NHẬP trong kỳ`.
+ * Mã Q002 nhập 200 triệu, rủi ro 10% = 20 triệu. Xem báo cáo MỘT TUẦN chỉ bán 100/1.000 đơn của lô
+ * đó thì tuần ấy vẫn gánh đủ 20 triệu ⇒ mã lãi thành mã lỗ. Tuần sau không nhập gì thì rủi ro = 0
+ * ⇒ mã lỗ thành mã lãi. Cùng một mã, cùng một tốc độ bán, hai kết luận trái ngược — đúng hình dạng
+ * của bug tiền thuê mặt bằng ở đầu file này, chỉ khác là nó nằm ở chiều HÀNG chứ không phải chiều
+ * NGÀY: một sự kiện NHẬP KHO bị ném trọn vào kỳ báo cáo chứa nó.
+ *
+ * Nguyên tắc: dự phòng rủi ro là DỰ PHÒNG TRÊN HÀNG, được giải phóng vào lợi nhuận THEO HÀNG RA
+ * KHỎI KHO, giống hệt giá vốn. Tỷ lệ giữ nguyên ý nghĩa chủ shop đã chốt — 10% giá trị lô hàng cuối
+ * cùng sẽ mất vì lỗi / xả / thất thoát — chỉ đổi THỜI ĐIỂM ghi nhận:
+ *
+ *     rủi ro ghi vào kỳ = % × GIÁ VỐN HÀNG BÁN RA trong kỳ
+ *
+ * Bán hết lô thì Σ mọi kỳ = % × giá vốn cả lô = ĐÚNG BẰNG con số cũ. Tổng vòng đời không đổi, chỉ
+ * hết nhảy bậc theo ngày nhập hàng. Đây là cùng một phép "hiệu hai số luỹ kế" ở trên, đổi trục từ
+ * NGÀY sang SỐ HÀNG.
+ */
+export function inventoryRiskOnSold(cogsSold: number, riskPercent: number): number {
+  return Math.round(Math.max(0, cogsSold) * clampPercent(riskPercent) / 100);
+}
+
+/**
+ * PHẦN RỦI RO CÒN TREO TRÊN HÀNG TỒN — memo, KHÔNG trừ vào lợi nhuận kỳ.
+ *
+ * Chuyển rủi ro sang ghi theo hàng bán mà không hiện phần này thì rủi ro hàng ế biến mất khỏi màn
+ * hình, và báo cáo lại sai theo hướng ngược lại: lạc quan giả. Hàng chưa bán vẫn đang gánh rủi ro,
+ * chỉ là chưa tới lúc ghi vào lãi lỗ.
+ *
+ * Đây là ƯỚC TÍNH. Hàng hỏng / xả lỗ THỰC TẾ phải vào sổ bằng phiếu kho ADJUSTMENT + khoản chi
+ * thật, không được để dự phòng đứng thay chứng từ.
+ */
+export function inventoryRiskExposure(stockValue: number, riskPercent: number): number {
+  return Math.round(Math.max(0, stockValue) * clampPercent(riskPercent) / 100);
+}
+
+function clampPercent(pct: number): number {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, n));
+}
+
+/**
+ * ─────────── CHIA MỘT TỔNG CHO NHIỀU ĐỐI TƯỢNG SAO CHO CỘNG LẠI ĐÚNG BẰNG TỔNG ───────────
+ *
+ * `Math.round(total * w / W)` cho từng dòng là cách ai cũng viết, và Σ các dòng gần như không bao
+ * giờ bằng `total`: chia 5.000.000đ cho 7 mã thì lệch vài đồng, chia cho 300 mã thì lệch hàng trăm.
+ * Bảng chi tiết cộng lại không khớp dòng tổng ⇒ chủ shop mất niềm tin vào cả báo cáo.
+ *
+ * Dùng LARGEST REMAINDER: lấy phần nguyên trước, phần dư còn thiếu phát cho các dòng có phần lẻ lớn
+ * nhất. Kết quả CHẮC CHẮN Σ = total (khi total ≥ 0 và có ít nhất một trọng số > 0).
+ */
+export function distributeProportionally(total: number, weights: number[]): number[] {
+  const out = new Array<number>(weights.length).fill(0);
+  const sum = weights.reduce((t, w) => t + Math.max(0, w), 0);
+  if (!Number.isFinite(total) || total === 0 || sum <= 0) return out;
+  const sign = total < 0 ? -1 : 1;
+  const abs = Math.abs(Math.round(total));
+  const exact = weights.map((w) => (abs * Math.max(0, w)) / sum);
+  let given = 0;
+  for (let idx = 0; idx < exact.length; idx += 1) {
+    out[idx] = Math.floor(exact[idx]);
+    given += out[idx];
+  }
+  const order = exact
+    .map((v, idx) => ({ idx, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.idx - b.idx);
+  for (let k = 0; given < abs && k < order.length; k += 1, given += 1) out[order[k].idx] += 1;
+  // Còn thiếu sau một vòng (nhiều dòng trọng số 0) thì dồn nốt vào dòng nặng nhất.
+  if (given < abs) {
+    const heaviest = weights.reduce((best, w, idx) => (w > weights[best] ? idx : best), 0);
+    out[heaviest] += abs - given;
+  }
+  return sign < 0 ? out.map((v) => -v) : out;
+}

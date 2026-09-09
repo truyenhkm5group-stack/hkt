@@ -11,6 +11,7 @@ import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 import { BOOKED_COGS, BOOKED_REVENUE, COUNT_BOOKED, COUNT_CANCELLED, COUNT_DELIVERED, COUNT_OPEN, COUNT_RETURNED, COUNT_UNKNOWN, DELIVERED_COGS, DELIVERED_REVENUE, averageOrderValue, metricScope, successRate } from "@/lib/queries/metrics";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
@@ -149,9 +150,12 @@ async function getDashboardDataUncached(period: Period) {
     db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus),
     // Chi phí vận hành trong kỳ: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
     db
-      .select({ amount: sum(schema.expenses.amount) })
+      // Phân bổ đúng khoảng như Báo cáo lợi nhuận: khoản theo kỳ chia theo số ngày chồng lấn.
+      // Cộng nguyên khoản theo `occurred_at` sẽ khiến thẻ này và báo cáo LN nói hai con số khác nhau
+      // cho cùng một chỉ số "chi phí vận hành trong kỳ".
+      .select({ amount: allocatedExpenseSum(period.from, period.to) })
       .from(schema.expenses)
-      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, period.from ? gte(schema.expenses.occurredAt, period.from) : undefined, period.to ? lte(schema.expenses.occurredAt, period.to) : undefined)),
+      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to))),
     db
       .select({ amount: sum(schema.adSpends.spend) })
       .from(schema.adSpends)

@@ -11,6 +11,8 @@ import { orderSummary } from "@/lib/queries/orders";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { shipmentSummary } from "@/lib/queries/shipments";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { parseListParams, type Period } from "@/lib/search-params";
@@ -165,6 +167,37 @@ export async function testConsistency(db: Db) {
     assert.ok(planned.sold30 <= Number(totalQty) - Number(returnedQty), "nhu cầu 30 ngày không được gồm đơn hoàn");
   }
 
+  // ───────── 8. MỘT con số "chi phí vận hành trong kỳ" cho MỌI màn hình ─────────
+  // Trước đây mỗi trang tự cộng `sum(expenses.amount) where occurred_at ...`, nên Bảng điều khiển,
+  // Sự thật tài chính, Báo cáo lợi nhuận, Dòng tiền và Lương cho tới BỐN con số khác nhau cho cùng
+  // một chỉ số. Khoản theo kỳ (thuê mặt bằng) là chỗ chúng lệch nhau nhiều nhất.
+  const kyThang: Period = { key: "custom", from: new Date("2026-09-01T00:00:00+07:00"), to: new Date("2026-09-30T23:59:59+07:00"), label: "Tháng 9", fromKey: "2026-09-01", toKey: "2026-09-30" };
+  await db.insert(schema.expenses).values([
+    { id: "cs-rent", category: "RENT", description: "Thuê mặt bằng tháng 9", amount: 3_000_000,
+      occurredAt: new Date("2026-09-01T00:00:00+07:00"), allocationMethod: "PERIOD_PRORATA",
+      periodStart: new Date("2026-09-01T00:00:00+07:00"), periodEnd: new Date("2026-09-30T23:59:59+07:00") },
+  ]);
+  clearMemo();
+  const tuan1: Period = { key: "custom", from: new Date("2026-09-01T00:00:00+07:00"), to: new Date("2026-09-07T23:59:59+07:00"), label: "Tuần 1", fromKey: "2026-09-01", toKey: "2026-09-07" };
+  const [dashThang, truthThang, nominalThang, cashThang] = await Promise.all([
+    getDashboardData(kyThang), getFinancialTruth(kyThang), getNominalProfitReport(kyThang), getCashProfitReport(kyThang),
+  ]);
+  const opexThang = nominalThang.operatingExpenses;
+  assert.equal(dashThang.finance.expenses, opexThang, "Bảng điều khiển và Báo cáo lợi nhuận phải cùng một CP vận hành");
+  assert.equal(Math.abs(truthThang.waterfall.find((w) => w.key === "operating")?.amount ?? 0), opexThang, "Sự thật tài chính phải cùng một CP vận hành");
+  assert.equal(cashThang.cashOut.operating, opexThang, "Dòng tiền thực phải cùng một CP vận hành");
+  assert.ok(opexThang >= 3_000_000, "cả tháng ⇒ tiền thuê vào trọn khoản");
+
+  clearMemo();
+  const [dashTuan, truthTuan, nominalTuan] = await Promise.all([getDashboardData(tuan1), getFinancialTruth(tuan1), getNominalProfitReport(tuan1)]);
+  const opexTuan = nominalTuan.operatingExpenses;
+  assert.equal(dashTuan.finance.expenses, opexTuan, "xem một tuần: Bảng điều khiển vẫn khớp Báo cáo lợi nhuận");
+  assert.equal(Math.abs(truthTuan.waterfall.find((w) => w.key === "operating")?.amount ?? 0), opexTuan, "xem một tuần: Sự thật tài chính vẫn khớp");
+  assert.ok(opexTuan < opexThang, "một tuần phải NHỎ HƠN cả tháng — không được cộng nguyên khoản thuê vào tuần");
+  await db.delete(schema.expenses).where(eq(schema.expenses.id, "cs-rent"));
+  clearMemo();
+
+  console.log(`✓ Nhất quán: chi phí vận hành ${opexThang}đ (tháng) / ${opexTuan}đ (tuần) GIỐNG NHAU ở Bảng điều khiển · Sự thật tài chính · Lợi nhuận · Dòng tiền — khoản theo kỳ chia theo ngày ở mọi trang`);
   console.log(`✓ Nhất quán: giao thành công ${t.delivered} khớp ở Đơn hàng / Vận đơn / GTC / Marketing / Chất lượng dữ liệu; hoàn ${t.returned}; GTC ${gtc.successRate}%`);
   console.log(`✓ Nhất quán: tồn kho khớp giữa Sản phẩm và Kế hoạch SX; nhu cầu SX không gồm đơn hoàn`);
 }

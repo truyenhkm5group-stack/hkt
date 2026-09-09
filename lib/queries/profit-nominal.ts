@@ -9,6 +9,8 @@ import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold, PERIOD_LIKE_CATEGORIES } from "@/lib/constants/cost-allocation";
+import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -189,9 +191,22 @@ export type NominalRow = {
   /** Hàng nhập trong kỳ theo phiếu nhập (số lượng, giá trị) */
   purchaseQty: number;
   purchaseCost: number;
-  /** Dự phòng rủi ro tồn kho = tổng giá trị hàng nhập trong kỳ × % giả định */
+  /**
+   * Dự phòng rủi ro tồn kho GHI VÀO KỲ = % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ.
+   * KHÔNG phải % × giá trị hàng nhập: hàng nhập là sự kiện một lần, ném trọn vào kỳ chứa nó thì
+   * tuần bán 100/1.000 đơn của lô vẫn gánh đủ dự phòng cả lô. Xem `lib/constants/cost-allocation.ts`.
+   */
   inventoryRisk: number;
-  /** LN theo tổng giá trị hàng nhập = DT GTC ƯT − CPQC − hàng nhập − VC − vận hành − rủi ro TK − thuế − CP khác */
+  /**
+   * Rủi ro trên TOÀN BỘ hàng nhập trong kỳ (% × `purchaseCost`) — chỉ dùng cho bảng "LN theo hàng
+   * nhập", nơi đã trừ trọn giá trị hàng nhập nên phải trừ trọn phần rủi ro đi kèm.
+   */
+  inventoryRiskOnPurchase: number;
+  /** Giá trị hàng còn trong kho của mã (chỉ mẫu mã đã có phiếu nhập) */
+  stockValue: number;
+  /** Rủi ro CÒN TREO trên hàng tồn = % × `stockValue` — memo, KHÔNG trừ vào lợi nhuận kỳ */
+  inventoryRiskPending: number;
+  /** LN theo tổng giá trị hàng nhập = DT GTC ƯT − CPQC − hàng nhập − VC − vận hành − rủi ro TK cả lô − thuế − CP khác */
   profitOnPurchase: number;
   marginOnPurchase: number | null;
   /** Dự trù thuế = DT GTC ước tính × % */
@@ -215,6 +230,12 @@ export type NominalReport = {
   periodMonths: number;
   /** Chi phí cố định của kỳ = chi phí tháng × số tháng */
   fixedCost: number;
+  /**
+   * CẢNH BÁO ĐẾM HAI LẦN: giả định "chi phí cố định / tháng" và các khoản RENT / SALARY / SOFTWARE
+   * nhập ở bảng Chi phí là HAI nguồn cho CÙNG một loại chi phí. Khai cả hai thì mặt bằng bị trừ hai
+   * lần và lợi nhuận thấp giả. ERP KHÔNG tự bỏ bên nào — chọn nguồn nào là quyết định của chủ shop.
+   */
+  fixedCostOverlap: { amount: number; count: number; categories: string[] } | null;
   totals: {
     /** Σ đơn theo mã (đơn nhiều mã đếm nhiều lần) */
     orders: number;
@@ -250,6 +271,9 @@ export type NominalReport = {
     opexTotal: number;
     otherCostsTotal: number;
     inventoryRisk: number;
+    inventoryRiskOnPurchase: number;
+    stockValue: number;
+    inventoryRiskPending: number;
     netProfit: number;
     failed: number;
     pending: number;
@@ -292,11 +316,36 @@ export async function purchaseByProduct(period: Period): Promise<Map<string, { q
   return new Map(rows.filter((r) => r.productId).map((r) => [r.productId as string, { qty: Number(r.qty), cost: Number(r.cost), name: r.name ?? "", code: r.code ?? "" }]));
 }
 
+/**
+ * GIÁ TRỊ HÀNG CÒN TRONG KHO theo mã — cơ sở của phần rủi ro còn treo (memo).
+ *
+ * Dùng lại đúng định nghĩa tồn của SỔ KHO (`lib/queries/stock.ts`), không tự dựng công thức tồn thứ
+ * hai. Mẫu mã CHƯA CÓ PHIẾU NHẬP nào bị loại hẳn: ở đó "nhập = 0" là THIẾU DỮ LIỆU chứ không phải
+ * "nhập 0 cái", lấy 0 trừ số đã xuất sẽ ra tồn âm bịa ra.
+ */
+async function stockValueByProduct(): Promise<Map<string, number>> {
+  const db = await getDb();
+  const salesAgg = variantSalesSubquery(db);
+  const receiptsAgg = variantReceiptsSubquery(db);
+  const unitCost = sql<number>`coalesce(nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
+  const rows = await db
+    .select({
+      productId: pv.productId,
+      value: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0) * ${unitCost}) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
+    })
+    .from(pv)
+    .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
+    .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id))
+    .where(eq(pv.isRemoved, false))
+    .groupBy(pv.productId);
+  return new Map(rows.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.value)]));
+}
+
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
 async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
-  const [history, failedProb, purchases] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period)]);
+  const [history, failedProb, purchases, stockValues] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period), stockValueByProduct()]);
   const rescueRate = Number(assumptions.rescueRatePercent ?? 10);
   const pFail = assumptions.failedToReturnPercent > 0 ? Math.min(1, assumptions.failedToReturnPercent / 100) : failedProb.rate;
   const taxPct = Math.max(0, Number(assumptions.taxPercent ?? 0)) / 100;
@@ -310,7 +359,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const expConds: SQL[] = [sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to)];
 
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-  const [sales, adRows, perOrder, [expRow]] = await Promise.all([
+  const [sales, adRows, perOrder, [expRow], overlapRows] = await Promise.all([
     db
       .select({
         productId: PID,
@@ -356,10 +405,17 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .select({ amount: allocatedExpenseSum(period.from, period.to), count: sql<number>`count(*)` })
       .from(schema.expenses)
       .where(and(...expConds)),
+    // Khoản chi thực thuộc nhóm "cố định" — để đối chiếu với giả định `fixedCostMonthly` và cảnh
+    // báo đếm hai lần, chứ KHÔNG tự trừ bên nào ra.
+    db
+      .select({ category: schema.expenses.category, amount: allocatedExpenseSum(period.from, period.to) })
+      .from(schema.expenses)
+      .where(and(inArray(schema.expenses.category, [...PERIOD_LIKE_CATEGORIES]), expenseInRange(period.from, period.to)))
+      .groupBy(schema.expenses.category),
   ]);
   const operatingExpenses = Number(expRow?.amount ?? 0);
   const operatingCount = Number(expRow?.count ?? 0);
-  const riskPct = Math.min(Math.max(Number(assumptions.inventoryRiskPercent ?? 0), 0), 100) / 100;
+  const riskPct = Number(assumptions.inventoryRiskPercent ?? 0);
   // kỳ "Toàn bộ" / thiếu mốc: lấy từ đơn đầu tiên tới đơn cuối (hoặc hôm nay nếu kỳ chưa kết thúc)
   const toDate = (v: string | Date | null | undefined) => (v ? new Date(v) : null);
   const firstAt = sales.map((r) => toDate(r.firstAt)).filter((d): d is Date => !!d && !Number.isNaN(d.getTime())).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
@@ -449,7 +505,11 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         opexPerDelivered: null,
         purchaseQty: purchases.get(r.productId)?.qty ?? 0,
         purchaseCost: purchases.get(r.productId)?.cost ?? 0,
-        inventoryRisk: Math.round((purchases.get(r.productId)?.cost ?? 0) * riskPct),
+        // Dự phòng đi theo HÀNG BÁN RA, không theo hàng nhập — xem `inventoryRiskOnSold`.
+        inventoryRisk: inventoryRiskOnSold(calc.expectedCogs, riskPct),
+        inventoryRiskOnPurchase: inventoryRiskOnSold(purchases.get(r.productId)?.cost ?? 0, riskPct),
+        stockValue: stockValues.get(r.productId) ?? 0,
+        inventoryRiskPending: inventoryRiskExposure(stockValues.get(r.productId) ?? 0, riskPct),
         profitOnPurchase: 0,
         marginOnPurchase: null,
         tax: Math.round(calc.expectedRevenue * taxPct),
@@ -466,16 +526,27 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
       returnRate: 0, deliveryRate: 100, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
-      purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: Math.round(pur.cost * riskPct), profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
+      // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
+      // nằm nguyên ở phần CÒN TREO trên hàng tồn.
+      purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: 0, inventoryRiskOnPurchase: inventoryRiskOnSold(pur.cost, riskPct),
+      stockValue: stockValues.get(pid) ?? 0, inventoryRiskPending: inventoryRiskExposure(stockValues.get(pid) ?? 0, riskPct),
+      profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
     });
   }
-  // phân bổ chi phí vận hành đã nhập + chi phí cố định theo tỷ trọng doanh số POS, rồi tính LN ròng từng mã
-  const grossAll = rows.reduce((t, r) => t + r.grossSales, 0);
+  // phân bổ chi phí vận hành đã nhập + chi phí cố định theo tỷ trọng doanh số POS, rồi tính LN ròng từng mã.
+  // Chia bằng LARGEST REMAINDER: Σ phần của các mã = ĐÚNG tổng của shop, không lệch vì làm tròn từng dòng.
+  const weights = rows.map((r) => r.grossSales);
+  const operatingParts = distributeProportionally(operatingExpenses, weights);
+  const fixedParts = distributeProportionally(fixedCost, weights);
+  rows.forEach((r, idx) => {
+    r.operatingAlloc = operatingParts[idx];
+    r.fixedAlloc = fixedParts[idx];
+  });
   for (const r of rows) {
-    r.operatingAlloc = grossAll ? Math.round((operatingExpenses * r.grossSales) / grossAll) : 0;
-    r.fixedAlloc = grossAll ? Math.round((fixedCost * r.grossSales) / grossAll) : 0;
     r.opexTotal = r.operatingAlloc + r.packingCost + r.opsStaffCost + r.fixedAlloc;
-    r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost;
+    // Bảng "LN theo hàng nhập" trừ TRỌN giá trị hàng nhập trong kỳ ⇒ phải trừ TRỌN phần rủi ro của
+    // lô đó, không phải phần đã giải phóng theo hàng bán. Hai bảng, hai cơ sở, mỗi bảng nhất quán.
+    r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRiskOnPurchase - r.tax - r.otherCost;
     r.marginOnPurchase = r.expectedRevenue ? (r.profitOnPurchase / r.expectedRevenue) * 100 : null;
     r.otherCostsTotal = r.opexTotal + r.inventoryRisk + r.tax + r.otherCost;
     r.opexPerOrder = r.orders ? Math.round(r.otherCostsTotal / r.orders) : null;
@@ -506,6 +577,9 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       packingCost: t.packingCost + r.packingCost,
       opsStaffCost: t.opsStaffCost + r.opsStaffCost,
       inventoryRisk: t.inventoryRisk + r.inventoryRisk,
+      inventoryRiskOnPurchase: t.inventoryRiskOnPurchase + r.inventoryRiskOnPurchase,
+      stockValue: t.stockValue + r.stockValue,
+      inventoryRiskPending: t.inventoryRiskPending + r.inventoryRiskPending,
       failed: t.failed + r.failed,
       pending: t.pending + r.pending,
       tax: t.tax + r.tax,
@@ -513,7 +587,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       purchaseQty: t.purchaseQty + r.purchaseQty,
       purchaseCost: t.purchaseCost + r.purchaseCost,
     }),
-    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
+    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, inventoryRiskOnPurchase: 0, stockValue: 0, inventoryRiskPending: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
@@ -521,7 +595,11 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const opexTotal = operatingExpenses + totals.packingCost + totals.opsStaffCost + fixedCost;
   const otherCostsTotal = opexTotal + totals.inventoryRisk + totals.tax + otherCostAll;
   const netProfit = expectedProfitAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
-  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
+  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRiskOnPurchase - totals.tax - otherCostAll;
+  // Đối chiếu giả định "cố định / tháng" với khoản cố định đã có chứng từ trong kỳ — cảnh báo, không tự sửa.
+  const overlap = overlapRows.map((r) => ({ category: r.category, amount: Number(r.amount ?? 0) })).filter((r) => r.amount > 0);
+  const overlapAmount = overlap.reduce((t, r) => t + r.amount, 0);
+  const fixedCostOverlap = fixedCost > 0 && overlapAmount > 0 ? { amount: overlapAmount, count: overlap.length, categories: overlap.map((r) => r.category) } : null;
   const expectedDeliveredAll = rows.reduce((t, r) => t + r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100), 0);
   return {
     assumptions,
@@ -531,6 +609,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     operatingCount,
     periodMonths: months,
     fixedCost,
+    fixedCostOverlap,
     totals: {
       orders: totals.orders,
       ordersDistinct,
@@ -569,6 +648,9 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       opexTotal,
       otherCostsTotal,
       inventoryRisk: totals.inventoryRisk,
+      inventoryRiskOnPurchase: totals.inventoryRiskOnPurchase,
+      stockValue: totals.stockValue,
+      inventoryRiskPending: totals.inventoryRiskPending,
       netProfit,
       netMargin: totals.expectedRevenue ? (netProfit / totals.expectedRevenue) * 100 : null,
       failed: totals.failed,

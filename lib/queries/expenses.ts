@@ -6,6 +6,7 @@ import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { AD_PLATFORMS, EXPENSE_CATEGORY_LABEL, EXPENSE_CATEGORY_ORDER } from "@/lib/constants/expenses";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type ListParams, type Period } from "@/lib/search-params";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 export const EXPENSE_SORTABLE = ["occurredAt", "amount", "category", "createdAt"];
 export const AD_SORTABLE = ["spendDate", "spend", "leads", "orders", "revenue", "platform"];
@@ -61,11 +62,22 @@ export async function expenseFacets(params: ListParams) {
   };
 }
 
-/** Tổng chi phí trong kỳ + theo nhóm (không phụ thuộc bộ lọc nhóm/tìm kiếm) */
+/**
+ * Tổng chi phí trong kỳ + theo nhóm (không phụ thuộc bộ lọc nhóm/tìm kiếm).
+ *
+ * HAI CON SỐ, HAI Ý NGHĨA — cố ý giữ cả hai:
+ *  - `total`   = tiền ĐÃ GHI SỔ trong kỳ (theo `occurred_at`). Đây là sổ chi, phải cộng đúng bằng
+ *                tổng các dòng đang liệt kê bên dưới, nếu không chủ shop cộng tay sẽ ra số khác.
+ *  - `allocated` = phần THUỘC VỀ KỲ sau khi chia khoản theo kỳ theo số ngày chồng lấn. Đây mới là
+ *                con số các báo cáo lợi nhuận / lương / dòng tiền dùng.
+ *
+ * Trước đây chỉ có `total`, nên trang Chi phí và Báo cáo lợi nhuận nói hai con số khác nhau cho
+ * cùng một kỳ mà không chỗ nào giải thích vì sao.
+ */
 export async function expenseSummary(period: Period) {
   const db = await getDb();
   const prev = previousPeriod(period);
-  const [rows, [previous]] = await Promise.all([
+  const [rows, [previous], [allocatedRow]] = await Promise.all([
     db
       .select({ category: schema.expenses.category, amount: sum(schema.expenses.amount), count: count() })
       .from(schema.expenses)
@@ -78,11 +90,16 @@ export async function expenseSummary(period: Period) {
           .from(schema.expenses)
           .where(and(...periodCond(schema.expenses.occurredAt, prev.from, prev.to)))
       : Promise.resolve([{ amount: null as string | null }]),
+    db
+      .select({ amount: allocatedExpenseSum(period.from, period.to) })
+      .from(schema.expenses)
+      .where(expenseInRange(period.from, period.to)),
   ]);
   const byCategory = rows.map((r) => ({ category: r.category, label: EXPENSE_CATEGORY_LABEL[r.category], amount: Number(r.amount ?? 0), count: Number(r.count) }));
   const total = byCategory.reduce((s, r) => s + r.amount, 0);
   const totalCount = byCategory.reduce((s, r) => s + r.count, 0);
-  return { total, totalCount, byCategory, previousTotal: prev.from ? Number(previous?.amount ?? 0) : null };
+  const allocated = Number(allocatedRow?.amount ?? 0);
+  return { total, totalCount, byCategory, allocated, previousTotal: prev.from ? Number(previous?.amount ?? 0) : null };
 }
 
 // ───────────────────────── Quảng cáo ─────────────────────────

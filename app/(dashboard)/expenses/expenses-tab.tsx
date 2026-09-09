@@ -20,7 +20,7 @@ export async function ExpensesTab({ raw, period, canWrite }: { raw: SearchParams
   return (
     <div className="space-y-5">
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label={`Tổng chi phí · ${period.label.toLowerCase()}`} value={formatVND(summary.total, { compact: true })} change={change(summary.total, summary.previousTotal)} note={`${formatNumber(summary.totalCount)} khoản chi · ${summary.byCategory.length} nhóm`} icon={ReceiptText} tone="rose" />
+        <MetricCard label={`Tổng chi phí · ${period.label.toLowerCase()}`} value={formatVND(summary.total, { compact: true })} change={change(summary.total, summary.previousTotal)} note={`${formatNumber(summary.totalCount)} khoản chi · ${summary.byCategory.length} nhóm${summary.allocated !== summary.total ? ` · phân bổ vào kỳ ${formatVND(summary.allocated, { compact: true })}` : ""}`} icon={ReceiptText} tone="rose" />
         {top.map((row, i) => (
           <MetricCard key={row.category} label={row.label} value={formatVND(row.amount, { compact: true })} note={`${pct(row.amount, summary.total).toFixed(1)}% tổng chi phí · ${formatNumber(row.count)} khoản`} icon={Layers} tone={tones[i]} />
         ))}

@@ -139,3 +139,156 @@ doanh số POS là tiền đã lên đơn, doanh thu giao thành công là tiề
 9. tháng Hai năm nhuận 29 ngày, năm thường 28 ngày;
 + bản SQL cho **cùng** con số với bản TypeScript ở mọi ca trên;
 + khoản theo kỳ **vẫn lọt** vào tuần cuối tháng dù ghi ngày 01/09.
+
+---
+
+# Phần 2 — Phân bổ chi phí SUY RA TỪ GIẢ ĐỊNH (bổ sung 09/09/2026)
+
+Phần 1 ở trên chỉ giải quyết **khoản chi có chứng từ** trong bảng `expenses`. Báo cáo lợi nhuận còn
+có những chi phí **ước tính** suy ra từ bộ giả định, và chúng có đúng cùng một loại bug — chỉ khác
+trục.
+
+## Căn cứ phân bổ (cost driver) của từng khoản
+
+Mỗi chi phí phải khai rõ **đi theo cái gì** trước khi nhân. Không khai driver thì sớm muộn cũng có
+người nhân nhầm cơ sở.
+
+| Chi phí | Driver | Cơ sở nhân |
+|---|---|---|
+| Chi phí vận hành đã nhập (bảng Chi phí) | `TIME` → rồi chia theo doanh số | phân bổ theo kỳ (Phần 1), sau đó chia cho các mã theo tỷ trọng doanh số POS |
+| Chi phí cố định / tháng (giả định) | `TIME` | `fixedCostMonthly × số tháng của kỳ` |
+| Đóng hàng, nhân viên vận đơn | `PER_ORDER` | số đơn gửi đi của chính mã |
+| **Dự phòng rủi ro tồn kho** | **`PER_UNIT_SOLD`** | **giá vốn hàng BÁN RA trong kỳ** |
+| Dự trù thuế | `PCT_REVENUE` | DT giao thành công ước tính |
+| Chi phí khác (phí thẻ ngoại tệ) | `PCT_ADS` | chi phí quảng cáo |
+| Giá vốn, cước, phí hoàn | `DIRECT` | gắn thẳng vào đơn / vận đơn |
+
+## Bug rủi ro tồn kho (chủ shop nêu 09/09/2026)
+
+Bản cũ: `rủi ro = % × giá trị hàng NHẬP trong kỳ`.
+
+Mã Q002 nhập 200.000.000đ, dự phòng 10% = 20.000.000đ. Xem báo cáo **một tuần**, tuần đó chỉ bán
+100/1.000 đơn của lô:
+
+| Khoảng xem | Bản cũ | Đúng phải là |
+|---|---|---|
+| Cả vòng đời lô (bán hết 1.000 đơn) | 20.000.000đ | 20.000.000đ |
+| **Tuần bán 100/1.000 đơn** | **20.000.000đ** ❌ | **2.000.000đ** |
+| **Tuần sau, không nhập gì** | **0đ** ❌ | **2.000.000đ** |
+
+Cùng một mã, cùng một tốc độ bán, hai tuần liền nhau cho hai kết luận trái ngược: tuần nhập hàng thì
+mã "lỗ nặng, cần dừng", tuần sau thì "lãi tốt, cần đẩy mạnh". **Báo cáo sai thì quyết định sai.**
+
+Đây là **đúng hình dạng bug tiền thuê mặt bằng** ở Phần 1, chỉ khác trục: ở đó một sự kiện *ghi sổ*
+bị ném trọn vào kỳ chứa nó; ở đây một sự kiện *nhập kho* bị ném trọn vào kỳ chứa nó.
+
+## Nguyên tắc
+
+**Dự phòng rủi ro là dự phòng TRÊN HÀNG, được giải phóng vào lãi lỗ THEO HÀNG RA KHỎI KHO** — giống
+hệt giá vốn.
+
+```
+rủi ro ghi vào kỳ = % × giá vốn hàng bán ra trong kỳ
+```
+
+**Tỷ lệ giữ nguyên ý nghĩa chủ shop đã chốt** (10% giá trị lô hàng cuối cùng sẽ mất vì lỗi / xả /
+thất thoát). Chỉ đổi **thời điểm ghi nhận**: bán hết lô thì Σ mọi kỳ = `% × giá vốn cả lô` = **đúng
+bằng con số cũ**. Tổng vòng đời không đổi, chỉ hết nhảy bậc theo ngày nhập hàng.
+
+## Phần rủi ro CÒN TREO phải lộ ra
+
+Chuyển sang ghi theo hàng bán mà không hiện phần còn lại thì rủi ro **hàng ế** biến mất khỏi màn
+hình — và báo cáo lại sai theo hướng ngược lại: **lạc quan giả**.
+
+```
+rủi ro còn treo = % × giá trị hàng CÒN TRONG KHO
+```
+
+Con số này là **memo**, **KHÔNG trừ** vào lợi nhuận kỳ. Nó dùng đúng định nghĩa tồn của Sổ kho
+(`lib/queries/stock.ts`), và **bỏ hẳn** mẫu mã chưa có phiếu nhập nào: ở đó "nhập = 0" là *thiếu dữ
+liệu*, không phải *nhập 0 cái*.
+
+Dự phòng là **ước tính**. Hàng hỏng / xả lỗ **thực tế** phải vào sổ bằng phiếu kho `ADJUSTMENT` +
+khoản chi thật — không được để dự phòng đứng thay chứng từ.
+
+## Hai bảng, hai cơ sở, mỗi bảng nhất quán với chính nó
+
+| Bảng | Trừ tiền hàng bằng | ⇒ Trừ rủi ro bằng |
+|---|---|---|
+| Lợi nhuận danh nghĩa (bảng chính) | giá vốn hàng bán ra | `inventoryRisk` = % × giá vốn hàng bán |
+| Lợi nhuận theo tổng giá trị hàng nhập | **trọn** giá trị hàng nhập trong kỳ | `inventoryRiskOnPurchase` = % × giá trị hàng nhập |
+
+Bảng thứ hai **cố ý** giữ cơ sở cũ: nó đã trừ trọn giá trị lô thì phải trừ trọn phần rủi ro đi kèm.
+Dùng lẫn hai cơ sở giữa hai bảng mới là sai.
+
+## Chia một tổng cho nhiều mã: Σ phải BẰNG ĐÚNG tổng
+
+`Math.round(total × w / W)` từng dòng là cách ai cũng viết, và Σ các dòng gần như không bao giờ bằng
+`total`. Bảng chi tiết cộng lại không khớp dòng tổng ⇒ chủ shop mất niềm tin vào cả báo cáo.
+
+`distributeProportionally()` dùng **largest remainder**: phần nguyên trước, phần dư phát cho các dòng
+có phần lẻ lớn nhất. Σ **chắc chắn** = total. Dùng cho: CP vận hành đã nhập, CP cố định (cả ở báo cáo
+lợi nhuận lẫn ở bảng lương).
+
+## Cảnh báo đếm hai lần chi phí cố định
+
+Giả định `fixedCostMonthly` và các khoản `RENT` / `SALARY` / `SOFTWARE` nhập ở bảng Chi phí là **hai
+nguồn cho cùng một loại chi phí**. Khai cả hai ⇒ mặt bằng bị trừ hai lần ⇒ lợi nhuận thấp giả.
+
+ERP **không tự bỏ bên nào** — chọn nguồn nào là quyết định của chủ shop. Khi phát hiện chồng lấn,
+trang Báo cáo lợi nhuận hiện banner cảnh báo kèm số tiền của cả hai nguồn (`fixedCostOverlap`).
+
+## MỘT con số chi phí vận hành cho MỌI màn hình
+
+Bộ máy phân bổ ở Phần 1 ban đầu chỉ được áp cho **hai** file. Năm nơi khác vẫn tự cộng
+`sum(expenses.amount) WHERE occurred_at BETWEEN …`, nên cùng một chỉ số "chi phí vận hành trong kỳ"
+cho tới bốn con số khác nhau — và bảng **lương / hoa hồng marketer** nằm trong số đó.
+
+Đã chuyển sang bộ máy chung:
+
+| File | Màn hình |
+|---|---|
+| `lib/queries/profit-nominal.ts` | Báo cáo lợi nhuận (danh nghĩa) |
+| `lib/queries/profit-cash.ts` | Dòng tiền thực |
+| `lib/queries/payroll.ts` | **Lương & hoa hồng marketer** |
+| `lib/queries/dashboard.ts` | Bảng điều khiển |
+| `lib/queries/financial-truth.ts` | Sự thật tài chính |
+| `lib/queries/reports.ts` | Báo cáo tổng hợp + **biểu đồ theo ngày** |
+
+Cố ý **giữ nguyên** cách cộng thô ở hai chỗ:
+
+- `lib/queries/cashflow.ts` — nhịp chi 60 ngày là **tiền mặt thực chi**, tiền ra khi trả thì đúng là
+  ngày trả, không chia theo kỳ hiệu lực.
+- `lib/queries/expenses.ts::listExpenses` — trang Chi phí là **sổ chi**, tổng phải cộng đúng bằng các
+  dòng đang liệt kê. Thẻ tổng hiện thêm số **"phân bổ vào kỳ"** để chủ shop thấy con số mà các báo
+  cáo dùng, thay vì tự hỏi vì sao hai trang lệch nhau.
+
+### Biểu đồ theo ngày
+
+`allocatedExpenseByDay()` rải khoản theo kỳ ra từng ngày. Trước đây tiền thuê cả tháng dựng thành
+**một cột duy nhất** ở ngày ghi sổ, mọi ngày khác chi phí bằng 0 — nhìn biểu đồ đó sẽ kết luận
+"ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
+
+## Kiểm thử bắt buộc (bổ sung)
+
+`tests/cost-allocation.test.ts`:
+
+- tuần bán 1/10 lô chỉ gánh **1/10** dự phòng, và **phải nhỏ hơn 1/5** dự phòng cả lô (chặn hồi quy);
+- cộng dự phòng của cả 10 tuần bán hết lô = **đúng** dự phòng cả lô (đổi thời điểm, không đổi tổng);
+- kỳ không bán được gì ⇒ dự phòng ghi vào kỳ = **0**;
+- giá vốn âm ⇒ 0, tỷ lệ bị kẹp trong [0, 100];
+- `distributeProportionally`: chia cho 7 mã và cho 313 mã đều cộng lại **đúng** tổng — kèm assertion
+  chứng minh cách làm tròn từng dòng kiểu cũ **không** khớp;
+- rải theo ngày: mọi ngày trong kỳ thuê đều có chi phí, hai ngày bất kỳ chênh nhau ≤ 1đ, cộng 30 ngày
+  = đúng tổng đã phân bổ;
+- **ranh giới ở mức mã nguồn**: sáu file báo cáo không được chứa `sum(expenses.amount)` và bắt buộc
+  phải dùng `allocatedExpenseSum` / `allocatedExpenseByDay`. Bug này đã bị sửa một lần rồi tái sinh ở
+  năm trang khác vì mỗi trang tự chép lại phép cộng thô — lời hứa trong tài liệu không chặn được ai.
+
+`tests/consistency.test.ts` (khối 8): cùng một kỳ, chi phí vận hành phải **bằng nhau** ở Bảng điều
+khiển · Sự thật tài chính · Báo cáo lợi nhuận · Dòng tiền, và số của **một tuần phải nhỏ hơn** số của
+cả tháng.
+
+`tests/sync-fixtures.test.ts` (khối 8): `inventoryRisk` phải bằng `% × expectedCogs`; mã có nhập hàng
+mà chưa bán được gì phải có `inventoryRisk = 0` nhưng `inventoryRiskOnPurchase > 0`; Σ phần phân bổ
+CP vận hành / CP cố định của các mã phải **bằng đúng** tổng của kỳ.

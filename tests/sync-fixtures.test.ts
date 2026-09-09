@@ -81,6 +81,7 @@ import type { OrderOutcome } from "@/lib/constants/returns";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
+import { inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
@@ -572,6 +573,7 @@ async function main() {
 
   // Các báo cáo lợi nhuận / lương chạy được trên CSDL thật (bắt lỗi SQL: enum, cột, join)
   const nominal = await getNominalProfitReport(all);
+  const riskPct = Number(nominal.assumptions.inventoryRiskPercent ?? 0);
   assert.ok(nominal.totals.orders >= 0 && Number.isFinite(nominal.totals.opexTotal), "báo cáo danh nghĩa có tổng vận hành");
   assert.equal(nominal.totals.opexTotal, nominal.operatingExpenses + nominal.totals.packingCost + nominal.totals.opsStaffCost + nominal.fixedCost, "tổng vận hành = đã nhập + đóng hàng + NV vận đơn + cố định");
   for (const r of nominal.rows) {
@@ -580,7 +582,24 @@ async function main() {
     assert.ok(r.rescued <= r.orders, "đơn cứu ≤ đơn");
     assert.equal(r.otherCostsTotal, r.opexTotal + r.inventoryRisk + r.tax + r.otherCost, `chi phí ngoài hàng-QC-VC ${r.code}`);
     if (r.orders) assert.equal(r.opexPerOrder, Math.round(r.otherCostsTotal / r.orders), `CP vận hành/đơn trước hoàn ${r.code}`);
+    // RỦI RO TỒN KHO ĐI THEO HÀNG BÁN RA, không theo hàng nhập trong kỳ.
+    assert.equal(r.inventoryRisk, inventoryRiskOnSold(r.expectedCogs, riskPct), `rủi ro TK ${r.code} tính trên giá vốn hàng bán`);
+    assert.equal(r.inventoryRiskOnPurchase, inventoryRiskOnSold(r.purchaseCost, riskPct), `rủi ro TK cả lô nhập ${r.code}`);
+    assert.equal(r.inventoryRiskPending, inventoryRiskExposure(r.stockValue, riskPct), `rủi ro còn treo ${r.code}`);
+    // Mã nhập hàng trong kỳ mà chưa bán được gì thì chưa giải phóng đồng dự phòng nào vào lãi lỗ —
+    // đây chính là ca chủ shop nêu: nhập 200 triệu, tuần chưa bán mấy mà gánh đủ 20 triệu.
+    if (r.purchaseCost > 0 && r.expectedCogs === 0) {
+      assert.equal(r.inventoryRisk, 0, `mã ${r.code} nhập hàng nhưng chưa bán ⇒ chưa ghi dự phòng vào kỳ`);
+      assert.ok(r.inventoryRiskOnPurchase > 0, `rủi ro cả lô của ${r.code} vẫn hiện ở bảng theo hàng nhập`);
+    }
+    assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRiskOnPurchase - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
   }
+  // Σ phần phân bổ của các mã = ĐÚNG tổng của shop (largest remainder), không lệch vì làm tròn từng dòng.
+  if (nominal.totals.grossSales > 0) {
+    assert.equal(nominal.rows.reduce((a, r) => a + r.operatingAlloc, 0), nominal.operatingExpenses, "Σ CP vận hành phân bổ các mã = tổng CP vận hành của kỳ");
+    assert.equal(nominal.rows.reduce((a, r) => a + r.fixedAlloc, 0), nominal.fixedCost, "Σ CP cố định phân bổ các mã = tổng CP cố định của kỳ");
+  }
+  assert.equal(nominal.totals.inventoryRisk, nominal.rows.reduce((a, r) => a + r.inventoryRisk, 0), "tổng rủi ro TK = Σ các mã");
   assert.ok(nominal.assumptions.shipFeeReturnedUsed >= nominal.assumptions.shipFeeDeliveredUsed, "cước đơn hoàn ≥ cước gửi");
   for (const basis of ["profit1", "profit2", "nominal", "cash"] as const) {
     const mk = await getMarketerReport(all, basis);

@@ -4,6 +4,7 @@ import { getDb, schema } from "@/db";
 import { LINE_UNIT_COST, ORDER_COGS } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type Period } from "@/lib/search-params";
+import { allocatedExpenseByDay, allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 export type ReportBasis = "created" | "delivered";
 
@@ -81,9 +82,10 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, from, to)));
   const expenseRows = await db
-    .select({ category: schema.expenses.category, amount: sum(schema.expenses.amount) })
+    // Khoản theo kỳ (thuê mặt bằng, phần mềm) chia theo số ngày chồng lấn, không cộng nguyên khoản.
+    .select({ category: schema.expenses.category, amount: allocatedExpenseSum(from, to) })
     .from(schema.expenses)
-    .where(between(schema.expenses.occurredAt, from, to))
+    .where(expenseInRange(from, to))
     .groupBy(schema.expenses.category);
 
   const adsExpense = expenseRows.filter((r) => r.category === "ADS").reduce((s, r) => s + Number(r.amount ?? 0), 0);
@@ -160,11 +162,10 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)))
       .groupBy(sql`1`),
-    db
-      .select({ day: dayOf(schema.expenses.occurredAt), ads: sql<number>`coalesce(sum(${schema.expenses.amount}) filter (where ${schema.expenses.category} = 'ADS'), 0)`, other: sql<number>`coalesce(sum(${schema.expenses.amount}) filter (where ${schema.expenses.category} <> 'ADS'), 0)` })
-      .from(schema.expenses)
-      .where(between(schema.expenses.occurredAt, period.from, period.to))
-      .groupBy(sql`1`),
+    // Chi phí RẢI ĐỀU theo ngày trong kỳ hiệu lực. Gộp theo `occurred_at` thì tiền thuê cả tháng
+    // dựng thành một cột duy nhất ở ngày ghi sổ và mọi ngày khác chi phí bằng 0 — nhìn biểu đồ đó
+    // sẽ kết luận "ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
+    allocatedExpenseByDay(db, period.from, period.to),
   ]);
 
   const map = new Map<string, DailyRow>();
@@ -187,10 +188,10 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     row.marketplaceFee += Number(r.marketplaceFee);
   }
   for (const r of adRows) get(r.day).adSpend += Number(r.spend ?? 0);
-  for (const r of expenseRows) {
-    const row = get(r.day);
-    row.adSpend += Number(r.ads);
-    row.operating += Number(r.other);
+  for (const [day, amounts] of expenseRows) {
+    const row = get(day);
+    row.adSpend += amounts.ads;
+    row.operating += amounts.other;
   }
   const rows = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
   for (const row of rows) {

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { allocateExpenseToRange, inclusiveDays, type AllocatableExpense } from "@/lib/constants/cost-allocation";
-import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { allocateExpenseToRange, distributeProportionally, inclusiveDays, inventoryRiskExposure, inventoryRiskOnSold, type AllocatableExpense } from "@/lib/constants/cost-allocation";
+import { allocatedExpenseByDay, allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 
 /**
  * ═══════ PHÂN BỔ CHI PHÍ THEO KHOẢNG BÁO CÁO ═══════
@@ -96,9 +97,76 @@ export async function testCostAllocation(db: Db) {
     .where(and(eq(schema.expenses.id, "ca-rent"), expenseInRange(d("2026-09-20"), dEnd("2026-09-25"))));
   assert.ok(Number(ngoai?.v ?? 0) > 0, "khoản thuê vẫn được tính ở tuần cuối tháng dù ghi ngày 01/09");
 
+  // ══ Rải theo NGÀY: biểu đồ theo ngày không được có một cột dựng đứng ở ngày ghi sổ ══
+  const byDay = await allocatedExpenseByDay(db, d("2026-09-01"), dEnd("2026-09-30"));
+  const ngay01 = byDay.get("2026-09-01")?.other ?? 0;
+  const ngay20 = byDay.get("2026-09-20")?.other ?? 0;
+  assert.ok(ngay01 > 0 && ngay20 > 0, "theo ngày: mọi ngày trong kỳ thuê đều có chi phí, không chỉ ngày ghi sổ");
+  assert.ok(Math.abs(ngay01 - ngay20) <= 1, "theo ngày: tiền thuê rải đều, hai ngày bất kỳ chênh nhau tối đa 1đ");
+  assert.ok(ngay01 < 100_000, "theo ngày: KHÔNG được dồn cả 2.000.000đ vào ngày 01/09");
+  const tongTheoNgay = [...byDay.values()].reduce((t, v) => t + v.ads + v.other, 0);
+  assert.equal(tongTheoNgay, 2_500_000, "theo ngày: cộng 30 ngày = đúng tổng đã phân bổ của kỳ, không thừa không thiếu");
+  const ngay10 = byDay.get("2026-09-10")?.other ?? 0;
+  assert.ok(Math.abs(ngay10 - (ngay01 + 500_000)) <= 1, "theo ngày: ngày 10 = phần thuê của ngày đó + trọn khoản một lần 500K");
+
   await db.delete(schema.expenses).where(sql`${schema.expenses.id} in ('ca-rent','ca-oneoff')`);
 
+  // ══ RỦI RO TỒN KHO: driver là HÀNG BÁN RA, không phải hàng nhập ══
+  // Bối cảnh chủ shop nêu: mã Q002 nhập 200 triệu, dự phòng 10% = 20 triệu, tuần chỉ bán 100/1.000 đơn.
+  const giaTriLo = 200_000_000;
+  const duPhongCaLo = 20_000_000;
+  assert.equal(inventoryRiskOnSold(giaTriLo, 10), duPhongCaLo, "bán hết cả lô ⇒ đúng 10% giá trị lô, tỷ lệ giữ nguyên ý nghĩa cũ");
+  const giaVonTuan = giaTriLo / 10; // bán 100/1.000 đơn của lô
+  const duPhongTuan = inventoryRiskOnSold(giaVonTuan, 10);
+  assert.equal(duPhongTuan, 2_000_000, "tuần bán 1/10 lô chỉ gánh 1/10 dự phòng");
+  assert.ok(duPhongTuan < duPhongCaLo / 5, "KHÔNG được ném trọn 20 triệu vào tuần bán 100/1.000 đơn");
+  // Cộng mọi kỳ của vòng đời lô = đúng dự phòng cả lô: đổi THỜI ĐIỂM ghi nhận, không đổi TỔNG.
+  let congDon = 0;
+  for (let tuan = 0; tuan < 10; tuan += 1) congDon += inventoryRiskOnSold(giaVonTuan, 10);
+  assert.equal(congDon, duPhongCaLo, "10 tuần bán hết lô cộng lại = đúng dự phòng cả lô");
+  assert.equal(inventoryRiskOnSold(0, 10), 0, "kỳ không bán được gì ⇒ chưa giải phóng đồng dự phòng nào");
+  assert.equal(inventoryRiskOnSold(1_000_000, 0), 0, "tỷ lệ 0 ⇒ không dự phòng");
+  assert.equal(inventoryRiskOnSold(1_000_000, 999), 1_000_000, "tỷ lệ bị kẹp ở 100%");
+  assert.equal(inventoryRiskOnSold(-5_000_000, 10), 0, "giá vốn âm ⇒ 0, không sinh dự phòng âm");
+  // Phần còn treo trên hàng tồn phải LỘ RA, nếu không rủi ro hàng ế biến mất khỏi màn hình.
+  assert.equal(inventoryRiskExposure(giaTriLo * 0.9, 10), 18_000_000, "hàng còn tồn 90% lô ⇒ còn treo 18 triệu");
+  assert.equal(inventoryRiskExposure(0, 10), 0);
+
+  // ══ CHIA MỘT TỔNG: Σ các dòng phải BẰNG ĐÚNG tổng ══
+  const chia = distributeProportionally(5_000_000, [1, 1, 1, 1, 1, 1, 1]);
+  assert.equal(chia.reduce((t, v) => t + v, 0), 5_000_000, "chia 5 triệu cho 7 mã: cộng lại đúng 5 triệu");
+  const lech = [1, 1, 1, 1, 1, 1, 1].map(() => Math.round(5_000_000 / 7)).reduce((t, v) => t + v, 0);
+  assert.notEqual(lech, 5_000_000, "cách làm tròn từng dòng kiểu cũ thì KHÔNG khớp — đây là lý do phải dùng largest remainder");
+  const nhieu = distributeProportionally(1_234_567, Array.from({ length: 313 }, (_, k) => k + 1));
+  assert.equal(nhieu.reduce((t, v) => t + v, 0), 1_234_567, "chia cho 313 mã trọng số lệch nhau vẫn cộng đúng tổng");
+  assert.deepEqual(distributeProportionally(1_000, [3, 1]), [750, 250], "chia theo đúng tỷ trọng");
+  assert.deepEqual(distributeProportionally(1_000, [0, 0]), [0, 0], "mọi trọng số 0 ⇒ không chia bừa cho ai");
+  assert.equal(distributeProportionally(-900, [2, 1]).reduce((t, v) => t + v, 0), -900, "tổng âm vẫn cộng đúng");
+
+  // ══ RANH GIỚI Ở MỨC MÃ NGUỒN: không trang nào được tự cộng chi phí theo `occurred_at` ══
+  //
+  // Bug này đã bị sửa MỘT LẦN ở báo cáo lợi nhuận rồi lại tái sinh ở năm trang khác, vì mỗi trang tự
+  // viết lại `sum(expenses.amount) where occurred_at between ...`. Lời hứa trong tài liệu không chặn
+  // được ai; bài kiểm thử này đỏ ngay khi có người chép lại phép cộng thô.
+  const PHAI_DUNG_BO_MAY_PHAN_BO = [
+    "lib/queries/profit-nominal.ts",
+    "lib/queries/profit-cash.ts",
+    "lib/queries/payroll.ts",
+    "lib/queries/dashboard.ts",
+    "lib/queries/financial-truth.ts",
+    "lib/queries/reports.ts",
+  ];
+  for (const file of PHAI_DUNG_BO_MAY_PHAN_BO) {
+    const src = readFileSync(file, "utf8");
+    const thoSo = /sum\(\s*\$\{\s*schema\.expenses\.amount\s*\}\s*\)/.test(src) || /sum\(schema\.expenses\.amount\)/.test(src);
+    assert.equal(thoSo, false, `${file}: cộng thẳng expenses.amount — phải dùng allocatedExpenseSum/allocatedExpenseByDay, nếu không khoản theo kỳ lại rơi trọn vào một kỳ`);
+    assert.ok(/allocatedExpense(Sum|ByDay)/.test(src), `${file}: phải dùng bộ máy phân bổ dùng chung`);
+  }
+
   console.log(
-    "✓ Phân bổ chi phí theo kỳ: thuê tháng không còn cộng nguyên vào một tuần · hai khoảng liền nhau cộng đúng tổng · khoản một lần đúng kỳ · tháng nhuận đúng · SQL khớp TypeScript",
+    "✓ Phân bổ chi phí theo kỳ: thuê tháng không còn cộng nguyên vào một tuần · hai khoảng liền nhau cộng đúng tổng · khoản một lần đúng kỳ · tháng nhuận đúng · SQL khớp TypeScript · rải đều theo ngày",
+  );
+  console.log(
+    "✓ Rủi ro tồn kho đi theo HÀNG BÁN RA: tuần bán 1/10 lô chỉ gánh 1/10 dự phòng, cộng cả vòng đời vẫn đúng % giá trị lô, phần hàng chưa bán hiện riêng · chia chi phí cho các mã cộng lại đúng tổng",
   );
 }

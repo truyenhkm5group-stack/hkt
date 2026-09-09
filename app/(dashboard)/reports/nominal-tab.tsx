@@ -24,6 +24,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatNumber, formatVND } from "@/lib/format";
+import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
+import type { ExpenseCategory } from "@/db/schema";
 import {
   getNominalDailyForProduct,
   getNominalProfitReport,
@@ -81,9 +83,24 @@ export async function NominalTab({
     : [];
   const t = report.totals;
 
+  const overlap = report.fixedCostOverlap;
+
   return (
     <div className="space-y-5">
       <AssumptionsForm assumptions={report.assumptions} canWrite={canWrite} />
+
+      {overlap ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+          <b>Có thể đang trừ chi phí cố định hai lần.</b> Kỳ này vừa có giả định “chi phí cố định{" "}
+          {formatVND(report.assumptions.fixedCostMonthly ?? 0, { compact: true })}/tháng” ={" "}
+          {formatVND(report.fixedCost, { compact: true })}, vừa có{" "}
+          {formatVND(overlap.amount, { compact: true })} khoản chi thật thuộc nhóm{" "}
+          {overlap.categories.map((c) => EXPENSE_CATEGORY_LABEL[c as ExpenseCategory] ?? c).join(", ")} đã nhập ở bảng Chi phí.
+          Hai nguồn này là cùng một loại chi phí — ERP <b>không tự bỏ bên nào</b> vì chọn nguồn nào là
+          quyết định của chủ shop. Đã ghi chứng từ đủ ở bảng Chi phí thì đặt giả định cố định về 0; còn
+          muốn dùng giả định thì đừng nhập lại các khoản đó.
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <MetricCard
@@ -127,7 +144,7 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          note={`Margin ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · = DT GTC ƯT − giá vốn − vận chuyển − CPQC − vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ước ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng) − rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập ${formatVND(t.purchaseCost, { compact: true })}) − thuế ${formatVND(t.tax, { compact: true })} − CP khác ${formatVND(t.otherCost, { compact: true })}`}
+          note={`Margin ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · = DT GTC ƯT − giá vốn − vận chuyển − CPQC − vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ước ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng) − rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${report.assumptions.inventoryRiskPercent ?? 10}% giá vốn hàng bán ${formatVND(t.expectedCogs, { compact: true })}; còn treo trên tồn ${formatVND(t.inventoryRiskPending, { compact: true })}) − thuế ${formatVND(t.tax, { compact: true })} − CP khác ${formatVND(t.otherCost, { compact: true })}`}
           icon={Wallet}
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
@@ -189,7 +206,7 @@ export async function NominalTab({
                 <TableHead className="text-right" title={`Chi phí cố định (văn phòng, điện nước…) ${(report.assumptions.fixedCostMonthly ?? 0).toLocaleString("vi-VN")} ₫/tháng × ${report.periodMonths} tháng của kỳ, phân bổ theo tỷ trọng doanh số POS`}>CP cố định</TableHead>
                 <TableHead className="text-right" title="Mọi chi phí ngoài tiền hàng, QC, vận chuyển (vận hành đã nhập + đóng hàng + NV vận đơn + cố định + rủi ro TK + thuế + CP khác) ÷ số đơn lên (trước hoàn huỷ)">CP vận hành/đơn trước hoàn</TableHead>
                 <TableHead className="text-right" title="Cùng các chi phí trên ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">CP vận hành/đơn sau hoàn huỷ</TableHead>
-                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho = tổng giá trị hàng nhập trong kỳ (phiếu nhập) × % giả định">Rủi ro TK {report.assumptions.inventoryRiskPercent ?? 10}% hàng nhập</TableHead>
+                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho ghi vào kỳ = % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ. Không tính trên giá trị hàng nhập: nhập hàng là sự kiện một lần, ném trọn vào kỳ chứa nó thì tuần chỉ bán được 1/10 lô vẫn gánh đủ dự phòng cả lô. Phần rủi ro của hàng chưa bán nằm ở cột 'Rủi ro còn treo'.">Rủi ro TK {report.assumptions.inventoryRiskPercent ?? 10}% giá vốn bán</TableHead>
                 <TableHead className="text-right" title="Dự trù thuế = DT GTC ước tính × %">Thuế {report.assumptions.taxPercent ?? 1.5}%</TableHead>
                 <TableHead className="text-right" title="Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền)">CP khác {report.assumptions.otherCostPercentOfAds ?? 1.1}% QC</TableHead>
                 <TableHead className="text-right" title="Lợi nhuận danh nghĩa = DT GTC ước tính − giá vốn − vận chuyển − CPQC − vận hành − rủi ro TK − thuế − CP khác">LN danh nghĩa</TableHead>
@@ -323,7 +340,10 @@ export async function NominalTab({
                     <TableCell className="text-right"><Money value={r.fixedAlloc} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.opexPerDelivered ?? 0} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                    <TableCell className="text-right">
+                      <Money value={r.inventoryRisk} className="text-muted-foreground" />
+                      {r.inventoryRiskPending ? <div className="text-[10.5px] text-muted-foreground" title="Rủi ro của hàng CÒN TRONG KHO — chưa trừ vào lợi nhuận kỳ này, sẽ được ghi dần khi hàng bán ra">còn treo {formatVND(r.inventoryRiskPending, { compact: true })}</div> : null}
+                    </TableCell>
                     <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
                     <TableCell className="text-right">
@@ -396,7 +416,10 @@ export async function NominalTab({
                   <TableCell className="text-right"><Money value={t.fixedCost} /></TableCell>
                   <TableCell className="text-right"><Money value={t.opexPerOrder ?? 0} /></TableCell>
                   <TableCell className="text-right"><Money value={t.opexPerDelivered ?? 0} /></TableCell>
-                  <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                  <TableCell className="text-right">
+                    <Money value={t.inventoryRisk} />
+                    {t.inventoryRiskPending ? <div className="text-[10.5px] font-normal text-muted-foreground" title={`Rủi ro của hàng còn trong kho (${formatVND(t.stockValue, { compact: true })} giá trị tồn) — chưa trừ vào lợi nhuận kỳ này`}>còn treo {formatVND(t.inventoryRiskPending, { compact: true })}</div> : null}
+                  </TableCell>
                   <TableCell className="text-right"><Money value={t.tax} /></TableCell>
                   <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
                   <TableCell className="text-right">
@@ -423,8 +446,9 @@ export async function NominalTab({
           − CPQC − CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân
           bổ theo doanh số) − đóng hàng (đơn × đơn giá) − nhân viên vận đơn (đơn
           × đơn giá + đơn cứu được GTC ước theo % × thưởng) − CP cố định (tháng ×
-          số tháng của kỳ, phân bổ theo doanh số) − dự phòng rủi ro tồn kho (%
-          hàng nhập) − thuế − CP khác. CP vận hành/đơn = mọi chi phí ngoài tiền
+          số tháng của kỳ, phân bổ theo doanh số) − dự phòng rủi ro tồn kho (% ×
+          GIÁ VỐN HÀNG BÁN RA trong kỳ, không phải % giá trị hàng nhập — phần
+          rủi ro của hàng chưa bán hiện riêng ở dòng “còn treo”) − thuế − CP khác. CP vận hành/đơn = mọi chi phí ngoài tiền
           hàng, QC, vận chuyển chia cho số đơn lên (trước hoàn) hoặc số đơn giao
           thành công ước tính (sau hoàn huỷ); sửa đơn giá ở Giả định. Đơn chưa giao vẫn được tính theo tỷ lệ ước tính, nên
           đây là lợi nhuận danh nghĩa; đối chiếu với tab “Dòng tiền thực” khi
@@ -558,7 +582,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
-        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − rủi ro TK − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − rủi ro TK của cả lô nhập − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -573,7 +597,7 @@ export async function NominalTab({
                 <TableHead className="text-right">CPQC</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
                 <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
-                <TableHead className="text-right">Rủi ro TK</TableHead>
+                <TableHead className="text-right" title="Bảng này đã trừ TRỌN giá trị hàng nhập trong kỳ nên cũng trừ TRỌN phần rủi ro của lô đó (% × giá trị hàng nhập). Bảng trên đi theo hàng bán ra nên chỉ trừ phần dự phòng đã giải phóng — hai bảng, hai cơ sở, mỗi bảng nhất quán với chính nó.">Rủi ro TK cả lô nhập</TableHead>
                 <TableHead className="text-right">Thuế</TableHead>
                 <TableHead className="text-right">CP khác</TableHead>
                 <TableHead className="text-right">LN theo hàng nhập</TableHead>
@@ -592,7 +616,7 @@ export async function NominalTab({
                   <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
                   <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRiskOnPurchase} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} /></TableCell>
@@ -609,7 +633,7 @@ export async function NominalTab({
                 <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
                 <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
-                <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRiskOnPurchase} /></TableCell>
                 <TableCell className="text-right"><Money value={t.tax} /></TableCell>
                 <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} /></TableCell>

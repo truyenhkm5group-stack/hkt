@@ -51,6 +51,14 @@ deploy dừng, không phải cảnh báo.
 11. Landing: 1 sản phẩm không ghi giá = 499K + 25K ship; gói ≥ 2 = giá gói, free ship; không đoán mẫu mã khi thiếu cả size lẫn màu; không ghi ngược vào Pancake (API không có update-order).
 12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
 13. Giá vốn tính "sống" theo phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập mẫu mã.
+14. **PHÂN BỔ CHI PHÍ** (`docs/profit-cost-allocation-contract.md`): mọi chi phí phải khai rõ **căn
+    cứ phân bổ** rồi mới nhân. Chi phí theo thời gian (thuê mặt bằng, phần mềm, cố định) chia theo
+    số ngày chồng lấn; **dự phòng rủi ro tồn kho đi theo GIÁ VỐN HÀNG BÁN RA, không theo giá trị
+    hàng nhập trong kỳ** — nhập hàng là sự kiện một lần, ném trọn vào kỳ chứa nó thì tuần bán 1/10 lô
+    vẫn gánh đủ dự phòng cả lô. Phần rủi ro của hàng chưa bán hiện riêng ở dòng "còn treo", KHÔNG trừ
+    vào lợi nhuận kỳ. Chỉ có MỘT bộ máy: `lib/constants/cost-allocation.ts` +
+    `lib/queries/cost-allocation.ts`; trang nào tự cộng `sum(expenses.amount)` theo `occurred_at` là
+    sai và `tests/cost-allocation.test.ts` chặn ở mức mã nguồn.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

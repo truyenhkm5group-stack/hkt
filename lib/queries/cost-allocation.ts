@@ -1,5 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
+import type { Db } from "@/db";
 import { schema } from "@/db";
+import { allocateExpenseToRange, type AllocatableExpense } from "@/lib/constants/cost-allocation";
 
 const e = schema.expenses;
 
@@ -64,4 +66,78 @@ export function expenseInRange(from: Date | null, to: Date | null): SQL {
 /** Tổng chi phí vận hành đã phân bổ đúng khoảng — dùng chung cho mọi báo cáo. */
 export function allocatedExpenseSum(from: Date | null, to: Date | null): SQL<number> {
   return sql<number>`coalesce(sum(${allocatedExpenseAmount(from, to)}), 0)`;
+}
+
+/**
+ * ─────────── CHI PHÍ ĐÃ PHÂN BỔ THEO TỪNG NGÀY (cho biểu đồ / bảng theo ngày) ───────────
+ *
+ * Biểu đồ theo ngày là chỗ bug phân bổ lộ ra rõ nhất: tiền thuê cả tháng đổ vào đúng ngày ghi sổ
+ * tạo một cột dựng đứng, những ngày còn lại chi phí bằng 0. Nhìn biểu đồ đó sẽ kết luận "ngày 01
+ * lỗ nặng" — sai hoàn toàn.
+ *
+ * Cộng bằng TypeScript chứ không bằng SQL vì bảng chi phí là sổ nhập tay, số dòng nhỏ, và như vậy
+ * chỉ có ĐÚNG MỘT công thức phân bổ (`allocateExpenseToRange`) thay vì thêm một bản SQL thứ ba phải
+ * đi khoá bằng kiểm thử. Vòng lặp bị chặn bởi chính kỳ hiệu lực của từng khoản nên không bao giờ
+ * chạy vô hạn dù báo cáo chọn "Toàn bộ".
+ */
+export async function allocatedExpenseByDay(
+  db: Db,
+  from: Date | null,
+  to: Date | null,
+): Promise<Map<string, { ads: number; other: number }>> {
+  const rows = await db
+    .select({
+      category: e.category,
+      amount: e.amount,
+      occurredAt: e.occurredAt,
+      allocationMethod: e.allocationMethod,
+      periodStart: e.periodStart,
+      periodEnd: e.periodEnd,
+    })
+    .from(e)
+    .where(expenseInRange(from, to));
+
+  const out = new Map<string, { ads: number; other: number }>();
+  const add = (day: string, isAds: boolean, amount: number) => {
+    if (!amount) return;
+    const cur = out.get(day) ?? { ads: 0, other: 0 };
+    if (isAds) cur.ads += amount;
+    else cur.other += amount;
+    out.set(day, cur);
+  };
+
+  for (const row of rows) {
+    const item: AllocatableExpense = {
+      amount: Number(row.amount),
+      occurredAt: row.occurredAt,
+      allocationMethod: row.allocationMethod as AllocatableExpense["allocationMethod"],
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+    };
+    const isAds = row.category === "ADS";
+    const prorata = item.allocationMethod === "PERIOD_PRORATA" && item.periodStart && item.periodEnd;
+    if (!prorata) {
+      add(vnDayKey(item.occurredAt), isAds, allocateExpenseToRange(item, from, to));
+      continue;
+    }
+    // Chỉ quét phần chồng lấn giữa kỳ hiệu lực và khoảng báo cáo — không quét cả khoảng báo cáo.
+    const start = from && from > item.periodStart! ? from : item.periodStart!;
+    const end = to && to < item.periodEnd! ? to : item.periodEnd!;
+    for (let day = startOfVnDay(start); day <= end; day = new Date(day.getTime() + 86_400_000)) {
+      const dayEnd = new Date(day.getTime() + 86_400_000 - 1);
+      add(vnDayKey(day), isAds, allocateExpenseToRange(item, day, dayEnd > end ? end : dayEnd));
+    }
+  }
+  return out;
+}
+
+/** Khoá ngày theo lịch Việt Nam, khớp `to_char(... at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')` của SQL. */
+function vnDayKey(value: Date): string {
+  return new Date(value.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** 00:00 giờ Việt Nam của ngày chứa mốc này. */
+function startOfVnDay(value: Date): Date {
+  const shifted = value.getTime() + 7 * 3_600_000;
+  return new Date(Math.floor(shifted / 86_400_000) * 86_400_000 - 7 * 3_600_000);
 }
