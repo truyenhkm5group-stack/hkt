@@ -82,12 +82,12 @@ export async function sendTestLark(): Promise<{ ok: true } | { error: string }> 
 }
 
 /** Chạy quy tắc cảnh báo ngay */
-export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; open: number; telegramError?: string; larkError?: string } | { error: string }> {
+export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; reclassified: number; open: number; telegramError?: string; larkError?: string } | { error: string }> {
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const r = await evaluateAlerts();
   revalidatePath("/alerts");
-  return { ok: true, created: r.created, resolved: r.resolved, open: r.open, telegramError: r.telegram.error, larkError: r.lark.error };
+  return { ok: true, created: r.created, resolved: r.resolved, reclassified: r.reclassified, open: r.open, telegramError: r.telegram.error, larkError: r.lark.error };
 }
 
 /** Đánh dấu đã đọc (ids rỗng = tất cả đang mở) */

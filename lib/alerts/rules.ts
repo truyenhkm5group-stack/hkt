@@ -571,11 +571,12 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
+export type AlertRunResult = { created: number; resolved: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
   const db = await getDb();
+  const n = schema.notifications;
   const cfg = await loadAlertConfig();
   // phát hiện case CSKH mới từ thẻ / ghi chú / phiếu đổi trả Pancake trước khi quét
   if (cfg.enabled.cs) {
@@ -585,8 +586,32 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     // SĐT mới chưa có lịch sử mua (Pancake tô xanh) → nhắn khách xác nhận SĐT & xin số phụ trước khi gửi hàng
     await verifyNewPhones().catch(() => undefined);
   }
+  /**
+   * PHÂN LOẠI LẠI VIỆC ĐANG MỞ CHO ĐÚNG ĐỘI.
+   *
+   * Khi tách "đơn chờ xử lý" thành hai loại (CSKH gọi khách vs kho đóng gói), khoá chống trùng được
+   * giữ nguyên có chủ ý để việc đang mở không bị đóng rồi tạo lại. Nhưng hệ quả là toàn bộ việc CŨ
+   * vẫn mang nhãn cũ — đo trên production: 494 việc gộp chung, 0 việc mang nhãn mới. Tức là phần
+   * tách chỉ có tác dụng cho việc phát sinh về sau, còn tồn đọng hôm nay thì không ai chia được.
+   *
+   * Ở đây phân loại lại theo TRẠNG THÁI HIỆN TẠI của đơn. Đây là phép suy diễn xác định (nhãn vốn
+   * được tính từ chính trạng thái đó), idempotent, không tạo thêm việc và không đóng việc nào.
+   */
+  const reclassified = await db
+    .update(n)
+    .set({ kind: "ORDER_CONFIRMED_STALE" })
+    .where(
+      and(
+        isNull(n.resolvedAt),
+        eq(n.kind, "ORDER_PENDING"),
+        eq(n.entityType, "ORDER"),
+        sql`exists (select 1 from orders o where o.id = ${n.entityId} and o.stage in ('CONFIRMED','PACKING','READY_TO_SHIP'))`,
+      ),
+    )
+    .returning({ id: n.id })
+    .catch(() => [] as { id: string }[]);
+
   const { candidates, activeKinds } = await collectCandidates();
-  const n = schema.notifications;
   const keys = candidates.map((c) => c.dedupeKey);
 
   // đóng thông báo mở của các loại đang xét mà điều kiện không còn
@@ -644,7 +669,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     }
   }
   if (created.length || resolved) publish({ type: "notification", open: Number(open) });
-  return { created: created.length, resolved, open: Number(open), telegram, lark };
+  return { created: created.length, resolved, reclassified: reclassified.length, open: Number(open), telegram, lark };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };

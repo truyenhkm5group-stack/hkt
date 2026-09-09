@@ -24,7 +24,7 @@ export function RunAlertsButton() {
           const r = await runAlertsNow();
           if ("error" in r) toast.error(r.error);
           else {
-            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
+            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng${r.reclassified ? ` · ${r.reclassified} phân loại lại` : ""} · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
             router.refresh();
           }
         })
