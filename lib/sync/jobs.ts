@@ -10,6 +10,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
@@ -121,6 +122,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "FACEBOOK",
     description: "Đơn Pancake có ad_id (quảng cáo tạo ra đơn) → tra Facebook lấy chiến dịch / tài khoản → ghi nhận đơn, doanh thu cho đúng marketer kể cả khi chạy chung fanpage. days=N số ngày đơn quét lùi (mặc định 120).",
     run: (o) => syncFacebookAdIndex({ days: num(o.params?.days) }),
+  },
+  "outcome-materialize": {
+    label: "Dựng lại kết quả đơn đã tính sẵn",
+    source: "ALL",
+    description:
+      "Tính lại kết quả đơn cho những đơn có ĐẦU VÀO ĐÃ ĐỔI (đơn, vận đơn, sự kiện ĐVVC, dòng bảng kê) hoặc mang phiên bản luật cũ. Đây là LỚP TĂNG TỐC — không đụng dữ liệu nghiệp vụ, và báo cáo vẫn tự tính khi thiếu dòng nên chậm chứ không sai.",
+    run: () => rematerializeStale(),
   },
   alerts: {
     label: "Cảnh báo vận hành",

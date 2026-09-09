@@ -2,6 +2,7 @@ import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
@@ -276,9 +277,37 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
 // vì rải `as unknown as number` khắp các truy vấn.
 export const OUTCOME_FENCE = sql`0` as unknown as number;
 
-/** Cột kết quả đơn của bảng dẫn xuất. Luôn đặt tên `outcome` để mọi nơi đọc giống nhau. */
+/**
+ * ───────────── BIỂU THỨC BÁO CÁO DÙNG: ĐỌC KẾT QUẢ ĐÃ TÍNH SẴN ─────────────
+ *
+ * Đọc `canonical_order_outcome`; **thiếu dòng thì tính tại chỗ bằng chính `ORDER_OUTCOME` ở trên**.
+ *
+ * Vì sao phải có nhánh dự phòng thay vì tin bảng: bảng có thể trống (chưa dựng lần đầu), thiếu dòng
+ * (đơn vừa đồng bộ về), hoặc mang phiên bản luật cũ (vừa sửa luật xong). Cả ba trường hợp, một báo
+ * cáo tin bảng sẽ trả số SAI mà trông vẫn hợp lý — kiểu sai tệ nhất. `coalesce` khiến chuyện đó
+ * không xảy ra được: thiếu dòng thì tự tính, chỉ CHẬM chứ không SAI.
+ *
+ * Postgres tính `coalesce` theo thứ tự và dừng ở giá trị khác NULL đầu tiên, nên khi bảng đầy đủ thì
+ * biểu thức đắt tiền phía sau không hề chạy: một lần tra chỉ mục duy nhất (~0,01ms) thay cho ~2,4ms.
+ *
+ * `logic_version` là chốt an toàn cuối — sửa luật mà quên dựng lại thì hệ thống TỰ quay về luật mới.
+ */
+export const ORDER_OUTCOME_FAST = sql`coalesce(
+  (select m.outcome from canonical_order_outcome m
+    where m.order_id = ${o.id}
+      and coalesce(m.shipment_id, '') = coalesce(${s.id}, '')
+      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
+  ${ORDER_OUTCOME}
+)`;
+
+/**
+ * Cột kết quả đơn của bảng dẫn xuất. Luôn đặt tên `outcome` để mọi nơi đọc giống nhau.
+ *
+ * Dùng biểu thức ĐỌC BẢNG ĐÃ TÍNH SẴN: đây là điểm chung của gần như mọi báo cáo, nên đổi ở đây là
+ * đổi cho tất cả cùng lúc — và vì có nhánh dự phòng nên không nơi nào có thể trả số sai.
+ */
 export function outcomeColumn() {
-  return ORDER_OUTCOME.as("outcome");
+  return ORDER_OUTCOME_FAST.as("outcome");
 }
 
 /**

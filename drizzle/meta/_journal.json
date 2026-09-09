@@ -323,6 +323,13 @@
       "when": 1788945580898,
       "tag": "0046_attribution_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788945581898,
+      "tag": "0047_canonical_order_outcome",
+      "breakpoints": true
     }
   ]
 }

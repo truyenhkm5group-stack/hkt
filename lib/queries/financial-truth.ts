@@ -4,7 +4,7 @@ import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_COGS } from "@/lib/queries/cogs";
 import { metricScope } from "@/lib/queries/metrics";
-import { ORDER_OUTCOME, OUTCOME_FENCE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -149,7 +149,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       fee: sql<number>`${FEE}`.as("f_fee"),
       returnFee: sql<number>`${o.returnFee}`.as("f_return_fee"),
       prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),
-      outcome: ORDER_OUTCOME.as("f_outcome"),
+      // Đọc kết quả ĐÃ VẬT CHẤT HOÁ; thiếu dòng thì tự tính bằng luật chuẩn (xem canonical-outcome.ts).
+      outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))

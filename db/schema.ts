@@ -272,6 +272,49 @@ export const notifications = pgTable(
   ],
 );
 
+/**
+ * ───────────── KẾT QUẢ ĐƠN ĐÃ VẬT CHẤT HOÁ ─────────────
+ *
+ * Đây là LỚP TĂNG TỐC, KHÔNG phải nguồn sự thật. Nguồn sự thật vẫn là biểu thức `ORDER_OUTCOME`
+ * trong `lib/queries/return-rate.ts`; bảng này chỉ lưu lại kết quả của chính biểu thức đó để báo cáo
+ * khỏi tính lại.
+ *
+ * VÌ SAO CẦN: đo trên production 09/09/2026 — `ORDER_OUTCOME` là một biểu thức CASE chứa nhiều truy
+ * vấn con tương quan, tốn ~2,4ms cho mỗi đơn. Với 2.426 đơn, MỖI báo cáo phải trả ~6 giây chỉ để
+ * dựng lại cùng một kết luận; trang chủ vì thế mất 30–47 giây. Rào `OUTCOME_FENCE` đã hạ số lần tính
+ * từ "mỗi cột một lần" xuống "mỗi dòng một lần" — đây là bước tiếp theo: mỗi đơn một lần, và chỉ
+ * tính lại khi đầu vào đổi.
+ *
+ * GRAIN LÀ (ĐƠN × VẬN ĐƠN), CỐ Ý:
+ * mọi báo cáo hiện nay đều `orders LEFT JOIN shipments` rồi tính kết quả cho TỪNG dòng. Vật chất hoá
+ * ở grain khác sẽ đổi con số (một đơn hai vận đơn đang được đếm hai lần). Muốn đổi grain thì phải là
+ * một quyết định nghiệp vụ riêng, không phải hệ quả phụ của việc tăng tốc.
+ *
+ * `logic_version` để khi luật đổi thì phát hiện được dòng cũ và dựng lại có kiểm soát, thay vì trộn
+ * lẫn hai ngữ nghĩa mà không ai biết.
+ */
+export const canonicalOrderOutcome = pgTable(
+  "canonical_order_outcome",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** `NULL` = đơn chưa có vận đơn nào. Đúng dòng mà `LEFT JOIN` sinh ra. */
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
+    /** Kết quả do chính `ORDER_OUTCOME` sinh ra — chép lại, không diễn giải. */
+    outcome: text("outcome").notNull(),
+    /** Phiên bản luật đã dùng để tính dòng này. Luật đổi ⇒ dòng cũ thành cũ, phát hiện được. */
+    logicVersion: integer("logic_version").notNull().default(1),
+    computedAt: ts("computed_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("canonical_outcome_order_idx").on(t.orderId),
+    index("canonical_outcome_value_idx").on(t.outcome),
+    index("canonical_outcome_version_idx").on(t.logicVersion),
+  ],
+);
+
 export const auditLogs = pgTable(
   "audit_logs",
   {
