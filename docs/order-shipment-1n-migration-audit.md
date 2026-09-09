@@ -98,7 +98,7 @@ Order 1 ─── N ShipmentAttempt
 | --- | --- |
 | Kiểm toán | **xong** (tài liệu này) |
 | Migration + schema (`0050`) | **xong** — bỏ `UNIQUE(order_id)`, thêm `attempt_no` + `direction` |
-| Grain đơn cho đường tiền | **xong** — `PRIMARY_ATTEMPT` áp vào **21 phép nối** ở 11 tệp truy vấn |
+| Grain đơn cho đường tiền | **xong, sau khi vá thiếu** — xem mục 9 |
 | Đường ghi giữ mọi lần gửi | **xong** — mã vận đơn mới ⇒ lần gửi mới, không ghi đè |
 | Kiểm thử A–E | **xong** |
 | Luật đối soát | **đổi nghĩa** — xem mục 8 |
@@ -130,3 +130,53 @@ Nay nhiều lần gửi là **hợp lệ**, nên luật đổi thành **CẢNH B
 
 Đó hoặc là ghép nhầm vận đơn vào đơn, hoặc là hai gói hàng thật đang cùng đi tới một khách — và cả
 hai đều tốn cước. Báo đỏ mọi ca gửi lại là dạy người dùng bỏ qua cảnh báo.
+
+## 9. Việc rà lần đầu THIẾU 12 phép nối — và cách nó lộ ra
+
+Lần rà đầu áp `PRIMARY_ATTEMPT` cho 21 phép nối ở 14 tệp, rồi ghi "xong". Rà lại bằng cách đối chiếu
+máy móc hai danh sách — *tệp có nối `shipments`* (26) với *tệp có dùng `PRIMARY_ATTEMPT`* (14) — cho
+ra **12 phép nối ở 9 tệp chưa canh**:
+
+| Tệp | Cái bị nhân đôi |
+| --- | --- |
+| `reports.ts` (2 chỗ) | doanh thu, giá vốn, số lượng theo mẫu mã |
+| `orders.ts` | số đơn, doanh thu, COD, số lượng trên trang Đơn hàng |
+| `staff-performance.ts` | doanh thu chốt / đã giao, giá vốn theo nhân sự |
+| `customers.ts` (2 chỗ) | doanh thu và số đơn theo khách |
+| `crm.ts` | doanh thu theo nhóm khách |
+| `expenses.ts` | doanh thu đối chiếu quảng cáo |
+| `sales-funnel.ts` (2 chỗ) | doanh thu đã giao theo nguồn |
+| `products.ts` | số lượng bán 30 ngày ⇒ **tồn kho** |
+| `cashflow.ts` (2 chỗ) | COD đang giữ, vốn nằm trong hàng |
+
+Cộng ba chỗ nữa ngoài `lib/queries`: hai luật đối soát tồn kho ở `control-tower.ts` và hai truy vấn
+cảnh báo ở `alerts/rules.ts`.
+
+### Vì sao sót — và đây mới là phần đáng ghi
+
+Trước Phase 2, thứ giữ mọi con số đúng **không phải mã nguồn** mà là ràng buộc CSDL: nó khiến mọi
+phép nối `orders → shipments` đúng một cách miễn phí, kể cả những phép nối viết ra mà không ai nghĩ
+tới grain. Gỡ ràng buộc ra là **rút nền** khỏi 26 tệp cùng lúc.
+
+Và bài kiểm CASE E không bắt được, vì nó **tự viết** một câu truy vấn có `PRIMARY_ATTEMPT` rồi kiểm
+câu đó trả một dòng. Nó chứng minh *công cụ chạy được*, không chứng minh *công cụ đã được dùng ở
+đâu*. Một bài kiểm như thế xanh mãi mãi dù nửa kho mã quên gọi.
+
+### Nay có hai lớp canh, và cả hai đã được thử cho đỏ
+
+1. `tests/shipment-join-grain.test.ts` — quét **mã nguồn**: nối vận đơn phải có canh, hoặc nằm trong
+   danh sách miễn trừ **kèm lý do**; danh sách miễn trừ cũng bị kiểm rác.
+2. `tests/multi-attempt-money.test.ts` — kiểm **hành vi** qua chính 8 hàm báo cáo thật: thêm một lần
+   gửi *sao y* vào một đơn có sẵn thì 23 con số tiền/đếm phải không đổi.
+
+Bài kiểm hành vi phải dựng ba lần mới đúng, và hai lần hụt đáng ghi lại:
+
+- lần gửi thêm mang trạng thái **đang giao** ⇒ bị bộ lọc "chỉ đơn giao thành công" gạt đi, nên gỡ
+  canh của Báo cáo lợi nhuận mà bài kiểm vẫn xanh. **Nhân đôi chỉ cắn khi cả hai lần gửi cùng lọt
+  một bộ lọc.**
+- lần gửi thêm mang **tiền đã thu** ⇒ bài kiểm đỏ, nhưng đỏ *sai*: COD của đơn chuyển từ "chưa về"
+  sang "đã về" là đúng nghiệp vụ, vì dữ kiện tiền thật sự đã đổi.
+
+Chỉ **bản sao y** tách được "số dòng đổi" khỏi "sự thật đổi" — và đó là điều duy nhất bài kiểm này
+được phép nói.
+
