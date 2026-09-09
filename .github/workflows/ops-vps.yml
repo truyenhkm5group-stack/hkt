@@ -35,6 +35,7 @@ on:
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
+          - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
@@ -123,6 +124,10 @@ jobs:
               vtp-statements-autolink)
                 fetch_script vtp-statement-autolink.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-autolink.ts $ARG ;;
+              kpi-snapshot)
+                # Dùng bản script mới nhất trên main; công thức kết quả đơn lấy từ lib trong image.
+                fetch_script kpi-snapshot.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/kpi-snapshot.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/kpi-snapshot.ts ;;
               vtp-rebuild-state)
                 fetch_script vtp-rebuild-state.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-rebuild-state.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-rebuild-state.ts $ARG ;;
