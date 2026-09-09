@@ -43,6 +43,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     những dòng không ai cuộn xuống đọc. Nay 50 dòng mỗi trang, lọc theo loại chạy TRONG SQL nên
     không còn chuyện cảnh báo cũ bị rơi khỏi 300 dòng mới nhất rồi biến mất khỏi bộ lọc.
   */
+  const queuePage = Math.max(1, Number(one("qpage")) || 1);
+  const queuePageSize = Math.min(200, Math.max(20, Number(one("qsize")) || 100));
   const page = Math.max(1, Number(one("page")) || 1);
   const pageSize = Math.min(200, Math.max(10, Number(one("pageSize")) || 50));
   const [items, openTotal, counts, config, queue, staff, throughput] = await Promise.all([
@@ -50,7 +52,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     countOpenNotifications(kindFilter || undefined),
     openCountsByKind(),
     loadAlertConfig(),
-    getActionQueue({ limit: 300, filter }),
+    // Phân trang THẬT: nạp đúng một trang, đếm bằng CSDL. Trước đây nạp 300 rồi lấy số đó làm tổng.
+    getActionQueue({ limit: queuePageSize, page: queuePage, filter }),
     assignableUsers(),
     // 30 ngày gần nhất: đủ dài để có mẫu, đủ ngắn để nói về cách làm việc hiện tại.
     queueThroughput(new Date(Date.now() - 30 * 86_400_000), new Date()),
@@ -86,8 +89,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
 
       {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
       <SectionCard
-        title={`Hàng đợi việc — ${formatNumber(queue.total)} việc`}
-        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}${queue.matched !== queue.loaded ? ` · đang xem ${formatNumber(queue.matched)}/${formatNumber(queue.loaded)}` : ""}${queue.loaded < queue.total ? ` · các con số trên tính trên ${formatNumber(queue.loaded)} việc mới nhất` : ""}`}
+        title={`Hàng đợi việc — ${formatNumber(queue.openTotal)} việc đang mở`}
+        description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""} · đang hiển thị ${formatNumber(queue.loaded === 0 ? 0 : (queue.page - 1) * queue.pageSize + 1)}–${formatNumber((queue.page - 1) * queue.pageSize + queue.matched)} / ${formatNumber(queue.total)}${queue.exactTotal ? "" : " (lọc theo mức ưu tiên/tiền/trễ hạn nên tổng là ước lượng trên)"}${queue.loaded < queue.total ? ` · các con số tổng hợp tính trên ${formatNumber(queue.loaded)} việc của trang này` : ""}`}
         actions={<QueueFilters types={queue.byType} teams={queue.byTeam} staff={staff} />}
         hint="Mức ưu tiên tính bằng quy tắc, không phải cảm tính: mức nghiêm trọng + tuổi việc + tiền đang treo + KHẢ NĂNG CỨU ĐƯỢC + có khách đang chờ + sắp cháy hàng. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích. Rê chuột lên mức ưu tiên để xem từng phần điểm."
         padded={false}

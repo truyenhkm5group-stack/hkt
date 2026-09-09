@@ -1,4 +1,4 @@
-import { desc, eq, isNull, sql } from "drizzle-orm";
+import { desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import {
@@ -13,6 +13,7 @@ import {
   slaFor,
   caseTypeOf,
   priorityOf,
+  KIND_TO_CASE,
   teamOf,
   TEAM_LABEL,
   TEAM_ORDER,
@@ -105,12 +106,19 @@ export type ActionQueue = {
    * Tổng số việc ĐANG MỞ trong CSDL — đếm thật, không phụ thuộc bộ lọc và không bị `limit` cắt.
    */
   total: number;
+  /** Tổng việc ĐANG MỞ bất kể bộ lọc — để người dùng biết đang xem một phần của cái gì. */
+  openTotal: number;
   /**
-   * Số việc được nạp và tính điểm trong lượt này (trần `limit`). Các con số tổng hợp bên trên
+   * Số việc được nạp và tính điểm trong lượt này (trần `pageSize`). Các con số tổng hợp bên trên
    * (`totals`, `byType`, `byTeam`, `financialImpact`, `breached`) chỉ nói về ngần này — nói khác đi
    * là nói quá.
    */
   loaded: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  /** `false` = đang lọc bằng tiêu chí chỉ tính được sau khi chấm điểm, nên `total` là ước lượng trên. */
+  exactTotal: boolean;
 };
 
 /**
@@ -145,6 +153,54 @@ async function amountsFor(entityIds: string[]): Promise<Map<string, number>> {
     .where(sql`${schema.shipments.id} in ${entityIds}`);
   for (const r of shipments) map.set(r.id, Number(r.amount ?? 0));
   return map;
+}
+
+/**
+ * ───────────── BỘ LỌC ĐẨY ĐƯỢC XUỐNG CSDL ─────────────
+ *
+ * Phân trang chỉ đúng khi CÙNG MỘT điều kiện dùng cho cả danh sách lẫn phép đếm. Nên mọi bộ lọc
+ * suy được từ cột trong bảng phải chạy TRONG SQL:
+ *
+ *   · bộ phận / loại việc → tập `kind` (ánh xạ `KIND_TO_CASE` đảo ngược được);
+ *   · trạng thái          → các mốc thời gian;
+ *   · người cầm việc      → `assigned_to`.
+ *
+ * Ba thứ KHÔNG đẩy xuống được vì chúng chỉ tồn tại sau khi tính điểm trong ứng dụng: MỨC ƯU TIÊN,
+ * TIỀN TREO và TRỄ HẠN. Chúng vẫn lọc ở tầng ứng dụng, và `getActionQueue` nói rõ điều đó qua
+ * `exactTotal` — không giả vờ rằng tổng vẫn chính xác khi đang lọc bằng chúng.
+ */
+function kindsFor(filter: QueueFilter | undefined): string[] | null {
+  if (!filter?.type && !filter?.team) return null;
+  const kinds = Object.entries(KIND_TO_CASE)
+    .filter(([, caseType]) => (filter.type ? caseType === filter.type : true) && (filter.team ? teamOf(caseType) === filter.team : true))
+    .map(([kind]) => kind);
+  return kinds;
+}
+
+function queueWhere(options: { assignedTo?: string; filter?: QueueFilter }): SQL {
+  const conds: SQL[] = [sql`${n.resolvedAt} is null`];
+  if (options.assignedTo) conds.push(sql`${n.assignedTo} = ${options.assignedTo}`);
+
+  const f = options.filter;
+  const kinds = kindsFor(f);
+  if (kinds) conds.push(kinds.length ? sql`${n.kind} in ${kinds}` : sql`false`);
+
+  if (f?.owner !== undefined) conds.push(f.owner === "" ? sql`${n.assignedTo} is null` : sql`${n.assignedTo} = ${f.owner}`);
+
+  if (f?.status) {
+    // Hàng đợi chỉ nạp việc CHƯA đóng, nên chỉ bốn trạng thái này xuất hiện được.
+    if (f.status === "IGNORED") conds.push(sql`${n.ignoredAt} is not null`);
+    else if (f.status === "IN_PROGRESS") conds.push(sql`${n.ignoredAt} is null and ${n.startedAt} is not null`);
+    else if (f.status === "ACKNOWLEDGED") conds.push(sql`${n.ignoredAt} is null and ${n.startedAt} is null and ${n.acknowledgedAt} is not null`);
+    else if (f.status === "OPEN") conds.push(sql`${n.ignoredAt} is null and ${n.startedAt} is null and ${n.acknowledgedAt} is null`);
+    else conds.push(sql`false`);
+  }
+  return conds.reduce((a, b) => sql`${a} and ${b}`);
+}
+
+/** Bộ lọc CHỈ tính được sau khi chấm điểm — không đẩy xuống CSDL được. */
+function hasComputedFilter(f: QueueFilter | undefined): boolean {
+  return Boolean(f?.priority || f?.minAmount || f?.breachedOnly);
 }
 
 /**
@@ -188,9 +244,14 @@ async function daysToStockoutFor(variantIds: string[]): Promise<Map<string, numb
   }
 }
 
-export async function getActionQueue(options: { limit?: number; assignedTo?: string; filter?: QueueFilter } = {}): Promise<ActionQueue> {
+export async function getActionQueue(
+  options: { limit?: number; page?: number; assignedTo?: string; filter?: QueueFilter } = {},
+): Promise<ActionQueue> {
   const db = await getDb();
   const limit = options.limit ?? 200;
+  const page = Math.max(1, options.page ?? 1);
+  const offset = (page - 1) * limit;
+  const where = queueWhere(options);
   const rows = await db
     .select({
       id: n.id,
@@ -215,9 +276,10 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     })
     .from(n)
     .leftJoin(schema.users, eq(schema.users.id, n.assignedTo))
-    .where(options.assignedTo ? sql`${n.resolvedAt} is null and ${n.assignedTo} = ${options.assignedTo}` : isNull(n.resolvedAt))
+    .where(where)
     .orderBy(desc(n.createdAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
   /**
    * TỔNG THẬT, KHÔNG PHẢI TỔNG CỦA PHẦN VỪA NẠP.
@@ -226,10 +288,10 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
    * lấy `rows.length` làm tổng là hiển thị 300 và nói đó là tất cả — người đọc tin rằng hàng đợi
    * nhỏ hơn thực tế ba lần. Đếm thẳng trong CSDL thì con số đúng bất kể nạp bao nhiêu.
    */
-  const [{ openTotal }] = await db
-    .select({ openTotal: sql<number>`count(*)` })
-    .from(n)
-    .where(options.assignedTo ? sql`${n.resolvedAt} is null and ${n.assignedTo} = ${options.assignedTo}` : isNull(n.resolvedAt));
+  // ĐẾM BẰNG CHÍNH ĐIỀU KIỆN CỦA DANH SÁCH — không nạp 966 dòng chỉ để đếm.
+  const [{ filteredTotal }] = await db.select({ filteredTotal: sql<number>`count(*)` }).from(n).where(where);
+  // Và tổng việc đang mở BẤT KỂ bộ lọc, để người dùng biết mình đang xem một phần của cái gì.
+  const [{ openTotal }] = await db.select({ openTotal: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt));
 
   const amounts = await amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]);
   const stockDays = await daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]);
@@ -338,9 +400,20 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     financialImpact,
     breached,
     matched: visible.length,
-    total: Number(openTotal ?? cases.length),
-    /** Số việc thật sự được nạp và tính điểm — mọi con số tổng hợp ở trên chỉ nói về ngần này. */
+    total: Number(filteredTotal ?? cases.length),
+    openTotal: Number(openTotal ?? cases.length),
     loaded: cases.length,
+    page,
+    pageSize: limit,
+    hasMore: offset + cases.length < Number(filteredTotal ?? 0),
+    /**
+     * Tổng đếm trong CSDL CÓ phản ánh đúng bộ lọc đang xem hay không.
+     *
+     * `false` khi người dùng lọc theo mức ưu tiên / tiền treo / trễ hạn — ba thứ chỉ tính được sau
+     * khi chấm điểm trong ứng dụng, nên phép đếm ở CSDL không biết tới chúng. Nói thẳng ra còn hơn
+     * hiển thị một con số trông chính xác mà không phải.
+     */
+    exactTotal: !hasComputedFilter(options.filter),
   };
 }
 

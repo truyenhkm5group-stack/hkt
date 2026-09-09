@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { CASE_SLA_HOURS, CASE_STATUS_LABEL, CASE_TYPE_LABEL, caseStatusOf, RECOVERABILITY, TEAM_LABEL, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor, teamOf, type CaseType } from "@/lib/constants/action-queue";
@@ -266,14 +266,56 @@ export async function testActionQueue(db: Db) {
 
   // ───────── TỔNG PHẢI LÀ TỔNG THẬT, KHÔNG PHẢI TỔNG CỦA PHẦN VỪA NẠP ─────────
   //
-  // Trang Cần xử lý nạp 300 việc, production có 966 việc đang mở. Lấy số dòng vừa nạp làm tổng là
-  // nói với chủ shop rằng hàng đợi nhỏ hơn thực tế ba lần — và mọi quyết định "có cần thêm người
-  // không" đều dựa trên con số đó.
-  const nho = await getActionQueue({ limit: 1 });
-  const day = await getActionQueue({ limit: 500 });
-  assert.equal(nho.total, day.total, "tổng việc đang mở KHÔNG được đổi theo số dòng nạp về");
-  assert.equal(nho.loaded, Math.min(1, day.total), "phải nói rõ nạp được bao nhiêu");
-  assert.ok(nho.loaded <= nho.total, "số nạp không bao giờ vượt tổng thật");
+  // Lỗi thật trên production: trang nạp 300 việc rồi lấy chính số đó làm tổng, trong khi có 966 việc
+  // đang mở. Chủ shop nhìn thấy hàng đợi nhỏ hơn thực tế ba lần — và quyết định "có cần thêm người
+  // không" dựa trên con số đó.
+  //
+  // Dựng lại ĐÚNG kịch bản production: 966 việc, trang 300.
+  const DAN_SO = 966;
+  const moc = Date.now();
+  await db
+    .insert(schema.notifications)
+    .values(
+      Array.from({ length: DAN_SO }, (_, i) => ({
+        kind: "COD_OVERDUE",
+        severity: "warning",
+        title: `Việc phân trang ${i}`,
+        body: "dựng lại kịch bản 966 việc đang mở",
+        href: "/cod",
+        entityType: "SHIPMENT",
+        entityId: `paging-${i}`,
+        dedupeKey: `paging-test:${i}`,
+        occurredAt: new Date(moc - i * 60_000),
+        readBy: [] as string[],
+      })),
+    )
+    .onConflictDoNothing();
+
+  const trang1 = await getActionQueue({ limit: 300, page: 1 });
+  assert.equal(trang1.loaded, 300, "một trang phải nạp đúng 300 việc");
+  assert.ok(trang1.total >= DAN_SO, `tổng phải là dân số đầy đủ (≥${DAN_SO}), đang là ${trang1.total}`);
+  assert.ok(trang1.total > trang1.loaded, "tổng phải LỚN HƠN số nạp — đây chính là chỗ từng sai");
+  assert.equal(trang1.page, 1);
+  assert.equal(trang1.pageSize, 300);
+  assert.ok(trang1.hasMore, "còn việc ở trang sau thì phải nói có");
+  assert.ok(trang1.exactTotal, "không lọc bằng tiêu chí tính sau thì tổng phải là con số chính xác");
+
+  // Trang sau phải là việc KHÁC, không lặp lại trang đầu.
+  const trang2 = await getActionQueue({ limit: 300, page: 2 });
+  assert.equal(trang2.total, trang1.total, "tổng không đổi theo trang đang xem");
+  const trung = trang2.cases.filter((c) => trang1.cases.some((x) => x.id === c.id));
+  assert.equal(trung.length, 0, "trang 2 không được lặp lại việc của trang 1");
+
+  // Trang cuối: không còn gì phía sau.
+  const cuoi = await getActionQueue({ limit: 300, page: Math.ceil(trang1.total / 300) });
+  assert.ok(!cuoi.hasMore, "trang cuối phải báo hết");
+
+  // Lọc bằng tiêu chí chỉ tính được sau khi chấm điểm ⇒ phải TỰ KHAI rằng tổng là ước lượng trên.
+  const locUuTien = await getActionQueue({ limit: 300, page: 1, filter: { priority: "URGENT" } });
+  assert.equal(locUuTien.exactTotal, false, "lọc theo mức ưu tiên thì tổng ở CSDL không biết tới nó — phải khai ra");
+
+  // Dọn để không ảnh hưởng các phép đếm khác trong bộ kiểm thử.
+  await db.delete(schema.notifications).where(sql`${schema.notifications.dedupeKey} like 'paging-test:%'`);
 
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ${queue.byTeam.length} bộ phận (${queue.byTeam.map((t) => `${TEAM_LABEL[t.team]} ${t.count}`).join(" · ")}) · ưu tiên theo quy tắc giải thích được`,
