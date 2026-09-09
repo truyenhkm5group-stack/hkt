@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
  * con số rồi trình bày như sự thật.
  */
 export async function BankReconcileTab({ period }: { period: Period }) {
-  const [groups, lines] = await Promise.all([bankByGroup(period), bankReconciliation(period)]);
+  const [groups, recon] = await Promise.all([bankByGroup(period), bankReconciliation(period)]);
+  const { lines, hasBankData } = recon;
   const totalIn = groups.reduce((t, g) => t + g.moneyIn, 0);
   const totalOut = groups.reduce((t, g) => t + g.moneyOut, 0);
 
@@ -23,7 +24,11 @@ export async function BankReconcileTab({ period }: { period: Period }) {
     <div className="space-y-5">
       <SectionCard
         title="Sao kê so với sổ sách ERP"
-        description="Lệch KHÔNG có nghĩa là sai: tiền và hàng thường rơi vào hai kỳ khác nhau. Bảng này để bạn nhìn thấy khoảng lệch, ERP không tự sửa bên nào."
+        description={
+          hasBankData
+            ? "Lệch KHÔNG có nghĩa là sai: tiền và hàng thường rơi vào hai kỳ khác nhau. Bảng này để bạn nhìn thấy khoảng lệch, ERP không tự sửa bên nào."
+            : "CHƯA NHẬP SAO KÊ cho kỳ này, nên chưa có gì để đối chiếu. Cột bên phải là số ERP đang dùng — đó KHÔNG phải chênh lệch."
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -42,11 +47,15 @@ export async function BankReconcileTab({ period }: { period: Period }) {
               {lines.map((line) => (
                 <TableRow key={line.key}>
                   <TableCell className="font-medium">{line.label}</TableCell>
-                  <TableCell className="text-right"><Money value={line.bankAmount} /></TableCell>
+                  <TableCell className="text-right">
+                    {line.bankAmount === null ? <span className="text-muted-foreground">chưa nhập</span> : <Money value={line.bankAmount} />}
+                  </TableCell>
                   <TableCell className="text-right"><Money value={line.erpAmount} /></TableCell>
                   <TableCell className="text-[12.5px] text-muted-foreground">{line.erpLabel}</TableCell>
-                  <TableCell className={cn("text-right numeric font-semibold", Math.abs(line.diff) > 0 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
-                    {line.diff === 0 ? "khớp" : formatVND(line.diff, { sign: true })}
+                  {/* CHƯA BIẾT không được trình bày như một khoảng lệch: sổ rỗng mà hiện "−64,5 triệu"
+                      là báo động do thiếu dữ liệu, nhìn y hệt báo động do lệch sổ. */}
+                  <TableCell className={cn("text-right numeric font-semibold", line.diff !== null && Math.abs(line.diff) > 0 ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+                    {line.diff === null ? "—" : line.diff === 0 ? "khớp" : formatVND(line.diff, { sign: true })}
                   </TableCell>
                   <TableCell className="max-w-[320px] text-[11.5px] text-muted-foreground">{line.note}</TableCell>
                 </TableRow>

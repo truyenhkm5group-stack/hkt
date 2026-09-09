@@ -7,7 +7,7 @@ import { COST_AUTHORITY, ECONOMIC_COSTS, EXPENSE_CATEGORIES_NOT_OWNED, EXPENSE_C
 import { matchRule, ruleMatches, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
 import { bankRefFor, dedupeByRef, LEDGER_TO_BANK_GROUP, statementInstant, toBankRow } from "@/lib/integrations/bank/statement";
 import { parseLedger } from "@/lib/integrations/bank/ledger";
-import { bankByGroup, bankSummary, listBankTransactions, unclassifiedBankCount } from "@/lib/queries/bank";
+import { bankByGroup, bankReconciliation, bankSummary, listBankTransactions, unclassifiedBankCount } from "@/lib/queries/bank";
 import { parseListParams, type Period } from "@/lib/search-params";
 
 /**
@@ -176,6 +176,33 @@ export async function testBankLedger(db: Db) {
 
   await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.id} like 'bank-test-%'`);
 
+  /**
+   * ───────── SỔ RỖNG LÀ "CHƯA BIẾT", KHÔNG PHẢI "CHI 0đ" ─────────
+   *
+   * Đo trên production 10/09/2026: `bank_transactions` có **0 dòng** — shop chưa nhập sao kê lần nào.
+   * Bảng đối soát khi đó hiện "tiền thật trên sao kê 0đ" và "chênh lệch −64.509.000đ" cho dòng quảng
+   * cáo. Đó là báo động do THIẾU DỮ LIỆU, trình bày y hệt báo động do LỆCH SỔ — và người đọc không có
+   * cách nào phân biệt.
+   *
+   * Luật 3 của `docs/business-rules/ORDER_OUTCOME.md`: NULL là CHƯA BIẾT, không phải 0.
+   */
+  const kyRong: Period = { key: "custom", from: new Date("2019-01-01T00:00:00+07:00"), to: new Date("2019-12-31T23:59:59+07:00"), label: "Kỳ không có sao kê", fromKey: "2019-01-01", toKey: "2019-12-31" };
+  const doiSoatRong = await bankReconciliation(kyRong);
+  assert.equal(doiSoatRong.hasBankData, false, "7. kỳ không có dòng sao kê nào phải được nhận biết là CHƯA NHẬP");
+  for (const dong of doiSoatRong.lines) {
+    assert.equal(dong.bankAmount, null, `7. ${dong.key}: chưa nhập sao kê thì tiền trên sao kê là CHƯA BIẾT (null), không phải 0`);
+    assert.equal(dong.diff, null, `7. ${dong.key}: không có sao kê thì KHÔNG được bịa ra một khoảng lệch`);
+  }
+
+  // Và năm khoản mục phải cùng có mặt: cước và lương từng được TÍNH rồi bỏ đó không dùng, nên sao kê
+  // có hai nhóm đó mà bảng đối soát vẫn im.
+  assert.deepEqual(
+    doiSoatRong.lines.map((l) => l.key).sort(),
+    ["ads", "cod", "payroll", "purchase", "shipping"],
+    "7. đối soát phải phủ đủ năm khoản mục sao kê có nhóm kế toán tương ứng",
+  );
+
   console.log("✓ Sổ ngân hàng: giờ VN đúng · nhập lại chồng lấn không nhân đôi và không xoá nhãn tay · chuyển nội bộ/trả gốc không tính vào dòng tiền kinh doanh · quy tắc không ghi đè phân loại tay");
   console.log("✓ Ranh giới sao kê ↔ chi phí: nhóm kế toán chỉ quyết định LOẠI DÒNG TIỀN, không nhóm nào tạo khoản chi; đối chiếu bằng liên kết chứng từ");
+  console.log("✓ Đối soát sao kê: 5 khoản mục (thêm cước & lương lấy từ Profit Engine) · kỳ chưa nhập sao kê là CHƯA BIẾT chứ không phải chênh lệch");
 }

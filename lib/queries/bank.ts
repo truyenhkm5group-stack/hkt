@@ -12,6 +12,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type 
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { BANK_GROUPS, BANK_GROUP_SPEC, isBankGroup, isBusinessCash, type BankGroup } from "@/lib/constants/bank";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import type { ListParams, Period } from "@/lib/search-params";
 
 const b = schema.bankTransactions;
@@ -208,7 +209,27 @@ export type BankRuleRow = Awaited<ReturnType<typeof listBankRules>>[number];
  * cáo. Lệch KHÔNG có nghĩa là sai — trả tiền xưởng tháng này cho hàng nhập tháng trước thì lệch là
  * đúng. Bảng này để chủ shop NHÌN THẤY khoảng lệch và tự phán đoán, chứ ERP không tự sửa bên nào.
  */
-export async function bankReconciliation(period: Period) {
+/**
+ * Một dòng đối soát. `bankAmount = null` nghĩa là **CHƯA NHẬP SAO KÊ**, không phải "chi 0đ".
+ *
+ * Phân biệt này không phải chuyện chữ nghĩa. Sổ ngân hàng rỗng mà hiện 0đ thì bảng đối soát báo
+ * "sao kê nói bạn chi 0đ quảng cáo, chênh lệch −64,5 triệu" — một báo động do THIẾU DỮ LIỆU, trình
+ * bày y như một báo động do LỆCH SỔ. Đo trên production 10/09/2026: `bank_transactions` có 0 dòng,
+ * nên toàn bộ ba dòng đối soát đang ở đúng tình trạng đó.
+ */
+export type BankReconLine = {
+  key: string;
+  label: string;
+  /** Tiền thật trên sao kê. `null` = kỳ này chưa nhập sao kê nào. */
+  bankAmount: number | null;
+  erpAmount: number;
+  erpLabel: string;
+  /** `null` khi chưa có sao kê để so — không được hiểu là "khớp". */
+  diff: number | null;
+  note: string;
+};
+
+export async function bankReconciliation(period: Period): Promise<{ lines: BankReconLine[]; hasBankData: boolean }> {
   const db = await getDb();
   const inPeriod = and(...periodCond(b.txnAt, period.from, period.to));
   const sumOf = (groups: BankGroup[]) =>
@@ -220,9 +241,12 @@ export async function bankReconciliation(period: Period) {
       shipping: sumOf(["SHIPPING_FEE", "RETURN_FEE"]),
       payroll: sumOf(["PAYROLL_SALARY", "PAYROLL_COMMISSION"]),
       codIn: sql<number>`coalesce(sum(${b.amount}) filter (where ${b.accountingGroup} = 'COD_SETTLEMENT' and ${b.amount} > 0), 0)`,
+      // Có dòng nào trong kỳ không — để phân biệt "chưa nhập" với "đã nhập và bằng 0".
+      n: sql<number>`count(*)`,
     })
     .from(b)
     .where(inPeriod);
+  const hasBankData = Number(bankRow?.n ?? 0) > 0;
 
   const [adsRow] = await db
     .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
@@ -237,18 +261,43 @@ export async function bankReconciliation(period: Period) {
     .from(schema.codBatches)
     .where(and(...periodCond(schema.codBatches.receivedAt, period.from, period.to)));
 
-  const line = (key: string, label: string, bankAmount: number, erpAmount: number, erpLabel: string, note: string) => ({
+  // CƯỚC và LƯƠNG lấy thẳng từ Profit Engine, không tự cộng lại.
+  //
+  // Trước đây hai nhóm này được TÍNH ở trên rồi bỏ đó không dùng, nên sao kê có cước và lương mà
+  // bảng đối soát vẫn im. Và tự cộng lại ở đây sẽ là nguồn thứ hai cho cùng một khoản — đúng thứ
+  // `lib/constants/cost-sources.ts` sinh ra để cấm.
+  const chiPhi = await getRecognizedCosts(period);
+
+  const line = (key: string, label: string, bankAmount: number, erpAmount: number, erpLabel: string, note: string): BankReconLine => ({
     key,
     label,
-    bankAmount,
+    bankAmount: hasBankData ? bankAmount : null,
     erpAmount,
     erpLabel,
-    diff: bankAmount - erpAmount,
+    diff: hasBankData ? bankAmount - erpAmount : null,
     note,
   });
-  return [
+
+  const lines = [
     line("ads", "Chi quảng cáo", Number(bankRow?.ads ?? 0), Number(adsRow?.amount ?? 0), "Tài khoản quảng cáo", "Meta thu thẻ trễ vài ngày so với ngày chạy nên lệch nhỏ là bình thường."),
     line("purchase", "Nhập hàng", Number(bankRow?.purchase ?? 0), Number(purchaseRow?.amount ?? 0), "Phiếu nhập kho", "Trả trước / trả sau cho xưởng khiến tiền và hàng rơi vào hai kỳ khác nhau."),
+    line(
+      "shipping",
+      "Cước & phí hoàn",
+      Number(bankRow?.shipping ?? 0),
+      chiPhi.components.SHIPPING.amount + chiPhi.components.RETURN_COST.amount,
+      "Vận đơn & bảng kê ĐVVC",
+      "ĐVVC thường cấn trừ cước vào tiền COD trả về, nên phần cước có thể không hiện thành dòng chi riêng trên sao kê.",
+    ),
+    line(
+      "payroll",
+      "Lương & hoa hồng",
+      Number(bankRow?.payroll ?? 0),
+      chiPhi.components.SALARY.amount + chiPhi.components.COMMISSION.amount,
+      "Bảng Lương",
+      "Lương tháng này thường trả vào tháng sau; hoa hồng đi theo ĐƠN nên không rơi đều theo ngày.",
+    ),
     line("cod", "Tiền COD về", Number(bankRow?.codIn ?? 0), Number(codRow?.amount ?? 0), "Bảng kê Viettel Post", "Lệch lớn nghĩa là có đợt nhận tiền chưa nhập bảng kê, hoặc dòng sao kê gán sai nhóm."),
   ];
+  return { lines, hasBankData };
 }
