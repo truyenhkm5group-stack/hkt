@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { CASE_SLA_HOURS, CASE_TYPE_LABEL, RECOVERABILITY, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor } from "@/lib/constants/action-queue";
+import { CASE_SLA_HOURS, CASE_TYPE_LABEL, RECOVERABILITY, TEAM_LABEL, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor, teamOf, type CaseType } from "@/lib/constants/action-queue";
 import { getActionQueue } from "@/lib/queries/action-queue";
 
 /**
@@ -211,7 +211,30 @@ export async function testActionQueue(db: Db) {
   assert.equal(RECOVERABILITY.CANCELLED_BUT_SHIPPING, 1, "chặn kịp là cứu được toàn bộ");
   assert.equal(caseTypeOf("CANCELLED_BUT_SHIPPING"), "CANCELLED_BUT_SHIPPING");
 
+  // ───────── MỖI VIỆC PHẢI THUỘC VỀ MỘT BỘ PHẬN ─────────
+  //
+  // Đo trên production 09/09/2026: 1.009 việc đang mở, KHÔNG việc nào có chủ. Một hàng đợi xếp
+  // đúng thứ tự nhưng ai mở lên cũng thấy toàn việc của người khác thì không ai bắt đầu từ đâu.
+  // "Chưa phân nhóm" không được phép tồn tại: nó biến thành nơi việc rơi vào rồi nằm im.
+  for (const type of Object.keys(CASE_TYPE_LABEL) as CaseType[]) {
+    assert.ok(TEAM_LABEL[teamOf(type)], `loại việc ${type} chưa gán bộ phận nào — sẽ không ai cầm`);
+  }
+  assert.equal(teamOf("RETURN_RECEIVED_PENDING_INSPECTION"), "WAREHOUSE", "đếm hàng hoàn là việc của kho");
+  assert.equal(teamOf("CANCELLED_BUT_SHIPPING"), "LOGISTICS", "chặn kiện đang chạy là việc của giao vận");
+  assert.equal(teamOf("COD_OVERDUE"), "FINANCE", "đòi tiền là việc của kế toán");
+  assert.equal(teamOf("CUSTOMER_RECOVERY"), "CS", "gọi lại khách là việc của chăm sóc khách");
+
+  // Tổng theo bộ phận phải BẰNG số việc đang mở — nếu lệch thì có việc rơi ra ngoài mọi nhóm và
+  // không bao giờ hiện lên màn hình của ai.
+  const dangMo = queue.cases.filter((c) => c.status !== "IGNORED" && c.status !== "RESOLVED").length;
+  const tongNhom = queue.byTeam.reduce((t, x) => t + x.count, 0);
+  assert.equal(tongNhom, dangMo, "cộng các bộ phận phải bằng tổng việc đang mở, không việc nào lọt ra ngoài");
+  assert.ok(
+    queue.byTeam.every((t) => t.unassigned <= t.count && t.breached <= t.count && t.urgent <= t.count),
+    "số phụ của mỗi nhóm không được vượt tổng của chính nhóm đó",
+  );
+
   console.log(
-    `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc giải thích được (nghiêm trọng + tuổi + tiền + khả năng cứu + khách đang chờ + sắp cháy hàng)`,
+    `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ${queue.byTeam.length} bộ phận (${queue.byTeam.map((t) => `${TEAM_LABEL[t.team]} ${t.count}`).join(" · ")}) · ưu tiên theo quy tắc giải thích được`,
   );
 }

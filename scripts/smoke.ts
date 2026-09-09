@@ -28,6 +28,7 @@ const ROUTES = [
   "/products",
   "/inventory",
   "/inventory/receipts",
+  "/inventory/returns",
   "/inventory/planning",
   "/customers",
   "/ads",
@@ -68,24 +69,42 @@ async function main() {
     name = user.name;
   }
 
-  const token = await new SignJWT({ email, name, role: "ADMIN" })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(userId)
-    .setIssuedAt()
-    .setExpirationTime("10m")
-    .sign(new TextEncoder().encode(secret));
+  /**
+   * PHIÊN ĐƯỢC KÝ LẠI TRƯỚC TỪNG TRANG.
+   *
+   * Sự cố thật 09/09/2026: một phiếu ký duy nhất hạn 10 phút, mà cả lượt smoke trên VPS 2 nhân
+   * (lần render đầu của mỗi trang phải dựng báo cáo từ đầu, chưa có bộ nhớ đệm) mất 10 phút 07
+   * giây. Đúng phút thứ 10, mọi trang còn lại bị đá về trang đăng nhập — báo cáo ra "13/21 màn
+   * hình LỖI" trong khi ứng dụng hoàn toàn bình thường. Một phép kiểm mà hỏng vì chính nó chạy
+   * lâu thì nó không đo được cái nó định đo.
+   *
+   * Ký lại tốn vài chục micro giây và không gọi mạng, nên rẻ hơn nhiều so với việc kéo dài hạn
+   * phiếu — kéo dài chỉ đẩy ngưỡng đi chứ không bỏ được ngưỡng.
+   */
+  const key = new TextEncoder().encode(secret);
+  const mint = () =>
+    new SignJWT({ email, name, role: "ADMIN" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(userId)
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(key);
 
   const failures: string[] = [];
+  const runStarted = Date.now();
   for (const route of ROUTES) {
     const started = Date.now();
     try {
       const response = await fetch(`${BASE}${route}`, {
-        headers: { cookie: `erp_session=${token}` },
+        headers: { cookie: `erp_session=${await mint()}` },
         redirect: "manual",
       });
       const ms = Date.now() - started;
       if (response.status !== 200) {
-        failures.push(`${route} → HTTP ${response.status}`);
+        // 307 = bị đá về trang đăng nhập. Với phiếu ký lại mỗi lần, nguyên nhân KHÔNG còn là hết
+        // hạn phiên — nói thẳng ra để lần sau không ai đi tìm nhầm chỗ.
+        const hint = response.status === 307 ? " (bị chuyển hướng — kiểm tra quyền của tài khoản quản trị)" : "";
+        failures.push(`${route} → HTTP ${response.status}${hint}`);
         console.error(`  ✗ ${route} → HTTP ${response.status} (${ms}ms)`);
         continue;
       }
@@ -103,11 +122,11 @@ async function main() {
   }
 
   if (failures.length) {
-    console.error(`\n[smoke] ${failures.length}/${ROUTES.length} màn hình LỖI:`);
+    console.error(`\n[smoke] ${failures.length}/${ROUTES.length} màn hình LỖI (cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s):`);
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`\n[smoke] ✓ ${ROUTES.length}/${ROUTES.length} màn hình mở được.`);
+  console.log(`\n[smoke] ✓ ${ROUTES.length}/${ROUTES.length} màn hình mở được (cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s).`);
   process.exit(0);
 }
 

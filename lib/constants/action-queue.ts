@@ -182,6 +182,65 @@ export const CASE_ACTION: Record<CaseType, string> = {
     "Tìm đơn tương ứng theo mã tham chiếu trên Viettel Post. Vận đơn chiều hoàn KHÔNG có đơn là bình thường, không cần làm gì.",
 };
 
+/**
+ * ───────────── AI CHỊU TRÁCH NHIỆM ─────────────
+ *
+ * Một hàng đợi 1.000 việc xếp đúng thứ tự vẫn không chạy được nếu mỗi người mở lên đều thấy cả
+ * nghìn việc của người khác. Đo trên production 09/09/2026: 1.009 việc đang mở, không việc nào có
+ * chủ — nghĩa là chưa ai từng mở nó ra làm.
+ *
+ * Nhóm ở đây là NHÓM CÔNG VIỆC, không phải chức danh: một người có thể gánh nhiều nhóm ở shop nhỏ.
+ * Điều quan trọng là mỗi việc trả lời được "việc này là của bộ phận nào" trước khi hỏi "của ai".
+ */
+export type CaseTeam = "CS" | "LOGISTICS" | "WAREHOUSE" | "FINANCE" | "ADS" | "DATA" | "PRODUCTION";
+
+export const TEAM_LABEL: Record<CaseTeam, string> = {
+  CS: "Chăm sóc khách",
+  LOGISTICS: "Giao vận",
+  WAREHOUSE: "Kho",
+  FINANCE: "Kế toán",
+  ADS: "Quảng cáo",
+  DATA: "Chất lượng dữ liệu",
+  PRODUCTION: "Sản xuất & đặt hàng",
+};
+
+/** Thứ tự hiển thị: nhóm có khách đang chờ đứng trước nhóm việc nội bộ. */
+export const TEAM_ORDER: CaseTeam[] = ["CS", "LOGISTICS", "WAREHOUSE", "PRODUCTION", "FINANCE", "ADS", "DATA"];
+
+export const CASE_TEAM: Record<CaseType, CaseTeam> = {
+  // Có khách thật đang chờ ở đầu kia.
+  NEW_ORDER_UNPROCESSED: "CS",
+  ORDER_INCOMPLETE: "CS",
+  RISKY_ORDER: "CS",
+  CS_CASE: "CS",
+  CUSTOMER_RECOVERY: "CS",
+  // Kiện hàng đang ở đâu đó ngoài kho.
+  DELIVERY_FAILED: "LOGISTICS",
+  DELIVERY_STALE: "LOGISTICS",
+  RETURNING: "LOGISTICS",
+  CANCELLED_BUT_SHIPPING: "LOGISTICS",
+  // Hàng nằm trong kho: đóng gói chưa gửi, hoặc về rồi chưa đếm.
+  ORDER_CONFIRMATION_STALE: "WAREHOUSE",
+  RETURN_RECEIVED_PENDING_INSPECTION: "WAREHOUSE",
+  // Quyết định đặt bao nhiêu, đặt lúc nào.
+  LOW_STOCK_RISK: "PRODUCTION",
+  STOCKOUT_RISK: "PRODUCTION",
+  // Tiền.
+  COD_OVERDUE: "FINANCE",
+  PROFITABILITY_ALERT: "FINANCE",
+  ADS_BILLING: "ADS",
+  ADS_ANOMALY: "ADS",
+  // Số liệu sai — không có khách nào chờ, nhưng mọi báo cáo phía sau đều dựa vào đây.
+  DATA_ERROR: "DATA",
+  AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "DATA",
+  ORPHAN_SHIPMENT: "DATA",
+  OTHER: "DATA",
+};
+
+export function teamOf(type: CaseType): CaseTeam {
+  return CASE_TEAM[type];
+}
+
 export type CasePriority = "URGENT" | "HIGH" | "NORMAL" | "LOW";
 
 export const PRIORITY_LABEL: Record<CasePriority, string> = {
@@ -422,6 +481,8 @@ export function ageLabel(hours: number): string {
 
 export type QueueFilter = {
   type?: CaseType;
+  /** Chỉ việc của một bộ phận — để người mở trang thấy đúng phần của mình. */
+  team?: CaseTeam;
   priority?: CasePriority;
   status?: CaseStatus;
   /** `""` = chỉ việc chưa ai nhận. */

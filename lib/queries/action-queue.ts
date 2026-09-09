@@ -13,6 +13,10 @@ import {
   slaFor,
   caseTypeOf,
   priorityOf,
+  teamOf,
+  TEAM_LABEL,
+  TEAM_ORDER,
+  type CaseTeam,
   type CasePriority,
   type CaseStatus,
   type CaseType,
@@ -43,6 +47,9 @@ export type ActionCase = {
   id: string;
   type: CaseType;
   typeLabel: string;
+  /** Bộ phận chịu trách nhiệm. Suy từ loại việc, một chỗ duy nhất. */
+  team: CaseTeam;
+  teamLabel: string;
   entityType: string;
   entityId: string;
   priority: CasePriority;
@@ -78,6 +85,12 @@ export type ActionQueue = {
   cases: ActionCase[];
   totals: Record<CasePriority, number>;
   byType: { type: CaseType; label: string; count: number }[];
+  /**
+   * Chia theo BỘ PHẬN — thứ trả lời được câu "việc này của ai" trước khi hỏi "làm cái nào trước".
+   * Có cả số việc gấp, số trễ hạn và tiền treo của từng nhóm: một nhóm 400 việc nhẹ không cần chú
+   * ý bằng một nhóm 20 việc đang trễ hạn với vài chục triệu treo.
+   */
+  byTeam: { team: CaseTeam; label: string; count: number; urgent: number; breached: number; unassigned: number; financialImpact: number }[];
   /** Việc chưa ai nhận — con số quan trọng nhất của một hàng đợi. */
   unassigned: number;
   /** Việc quá 3 ngày chưa ai nhận. */
@@ -133,6 +146,7 @@ async function amountsFor(entityIds: string[]): Promise<Map<string, number>> {
  */
 function matchesFilter(c: ActionCase, f: QueueFilter): boolean {
   if (f.type && c.type !== f.type) return false;
+  if (f.team && c.team !== f.team) return false;
   if (f.priority && c.priority !== f.priority) return false;
   if (f.status && c.status !== f.status) return false;
   if (f.owner !== undefined && (f.owner === "" ? Boolean(c.owner) : c.owner?.id !== f.owner)) return false;
@@ -219,6 +233,8 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       id: r.id,
       type,
       typeLabel: CASE_TYPE_LABEL[type],
+      team: teamOf(type),
+      teamLabel: TEAM_LABEL[teamOf(type)],
       entityType: r.entityType,
       entityId: r.entityId,
       priority: priorityOf(score),
@@ -270,6 +286,20 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
       if (c.ageHours > 72) neglected += 1;
     }
   }
+  // Chia theo bộ phận. Việc "Bỏ qua có lý do" đã có người quyết nên không tính vào phần đang trôi.
+  const teamStats = new Map<CaseTeam, { count: number; urgent: number; breached: number; unassigned: number; financialImpact: number }>();
+  for (const c of cases) {
+    if (c.status === "IGNORED" || c.status === "RESOLVED") continue;
+    const cur = teamStats.get(c.team) ?? { count: 0, urgent: 0, breached: 0, unassigned: 0, financialImpact: 0 };
+    cur.count += 1;
+    if (c.priority === "URGENT") cur.urgent += 1;
+    if (c.sla?.breached) cur.breached += 1;
+    if (!c.owner) cur.unassigned += 1;
+    cur.financialImpact += c.financialImpact;
+    teamStats.set(c.team, cur);
+  }
+  const byTeam = TEAM_ORDER.filter((t) => teamStats.has(t)).map((team) => ({ team, label: TEAM_LABEL[team], ...teamStats.get(team)! }));
+
   const byType = [...byTypeMap.entries()]
     .map(([type, count]) => ({ type, label: CASE_TYPE_LABEL[type], count }))
     .sort((a, b) => b.count - a.count);
@@ -278,5 +308,5 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
   const filter = options.filter;
   const visible = filter ? cases.filter((c) => matchesFilter(c, filter)) : cases;
 
-  return { cases: visible, totals, byType, unassigned, neglected, financialImpact, breached, matched: visible.length, total: cases.length };
+  return { cases: visible, totals, byType, byTeam, unassigned, neglected, financialImpact, breached, matched: visible.length, total: cases.length };
 }
