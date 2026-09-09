@@ -3,12 +3,14 @@
 Cập nhật: 09/09/2026, sau khi Session 1 đóng băng phạm vi.
 Vai trò người viết: **điều phối phát hành** (release coordinator). Không mở tính năng mới.
 
-| Phiên | Trạng thái | Ghi chú |
-| --- | --- | --- |
-| **SESSION_1** | **READY** | Toàn bộ đã commit và đã lên `main`. Không còn tệp nào chưa commit. |
-| SESSION_2 | WAITING | Chưa báo cáo bàn giao. |
-| SESSION_3 | WAITING | Chưa báo cáo bàn giao. |
-| SESSION_4 | WAITING | Chưa báo cáo bàn giao. |
+| Phiên | Trạng thái | SHA cuối | Migration | Ghi chú |
+| --- | --- | --- | ---: | --- |
+| **SESSION_1** | **READY** | `586205e` | 2 (`0038`, `0043`) | Toàn bộ đã lên `main`. 0 tệp chưa commit. |
+| SESSION_2 | **WAITING** | — | — | Chưa nộp biên bản. |
+| **SESSION_3** | **READY** | `2bf8cdb` | 0 | Biên bản: `docs/session-3-handoff.md`. Cổng checkout sạch: PASS. 0 tệp chưa commit. |
+| SESSION_4 | **WAITING** | — | — | Chưa nộp biên bản. Nhiều khả năng là phiên **P0 HIỆU NĂNG** — Session 3 ghi nhận họ đang giữ `app-sidebar.tsx`, `db/schema.ts`, `drizzle/meta/_journal.json`, `lib/cache.ts`, `db/index.ts`, `lib/perf/*`, `components/nav-progress.tsx`, `lib/constants/action-queue.ts`, `app/(dashboard)/alerts/*`. Trên đĩa đã thấy `docs/erp-performance-p0-report.md` và `docs/perf/` chưa commit. |
+
+**Điều kiện phát hành: cả bốn dòng phải READY.** Hiện 2/4.
 
 ---
 
@@ -142,6 +144,30 @@ Cập nhật assertion: `inventory` · `data-quality` · `action-queue` · `sync
 
 ---
 
+## 1b. SESSION_3 — đã nhận biên bản
+
+Nguồn: `docs/session-3-handoff.md` (commit `f91cb50`, khôi phục lại sau sự cố ở mục 4).
+
+- `SESSION_3_STATUS = READY_FOR_INTEGRATION` · `FINAL_SESSION3_COMMIT = 2bf8cdb` · **0 migration** ·
+  **0 tệp chưa commit** · cổng checkout sạch **PASS**.
+- 11 commit: nhận diện VNXcommerce · Mua hàng & xưởng · Giữ chân khách · Mô phỏng kịch bản · khoá
+  quyền 13 đường API · `scripts/final-gate.ts` · ba lần vá `main` đỏ do commit lẫn tệp.
+- Nợ lại: **3 trang mới chưa có trong menu** (`app-sidebar.tsx`) — họ cố ý không sửa vì tệp đó đang
+  do phiên hiệu năng giữ.
+- Họ chủ động **không** làm Phase A vì phải chạm `db/schema.ts` + sổ migration của phiên khác. Phần
+  Phase A hàng hoàn **đã do Session 1 làm xong** (`0043`), nên khi gộp cần đối chiếu thiết kế schema
+  ở mục I biên bản của họ với bảng `return_inspections` đã có, **tránh dựng bảng thứ hai cho cùng
+  một việc**.
+
+⚠️ **Một điểm trong biên bản Session 3 đã lỗi thời:** mục L của họ ghi *"tách bài viết ra từng chiến
+dịch riêng sẽ đưa độ phủ lên ~78% và mở khoá Phase E"*. Chủ shop đã bác điều này (xem mục 5). Ngưỡng
+chặn SCALE/CUT vẫn đúng và phải giữ; chỉ có lối thoát đề xuất là sai.
+
+⚠️ **Rủi ro #2 của họ cần Coordinator gánh:** số liệu Session 3 chưa đối chiếu trên production (họ
+không có quyền `db-query`). Sau deploy phải so: tiền cam kết xưởng · số lô quá hạn · tỷ lệ mua lại.
+
+---
+
 ## 2. Bản ứng cử phát hành hiện tại
 
 **SHA: `21b643f`** (`origin/main` lúc kiểm) — *fix(deploy): bản được kiểm phải đúng là bản được
@@ -229,6 +255,28 @@ bất biến nghiệp vụ → nhất quán chỉ số → Chất lượng dữ 
 | 3 | Cây làm việc và chỉ mục git dùng chung | **RỦI RO CÒN NGUYÊN**: một phiên `git add`/`git commit` có thể cuốn theo tệp dở của phiên khác, hoặc commit từ chỉ mục cũ làm mất thay đổi vừa vào. Đã xảy ra 4 lần hôm nay. Giảm thiểu: chỉ commit theo đường dẫn tường minh, và kiểm checkout sạch trước mỗi lần deploy. |
 | 4 | Bài kiểm thử sổ migration cần bản sao có `.git` | **ĐÃ BIẾT** — dùng `git worktree`, không dùng `git archive` |
 | 5 | Deploy `34334451645` báo thất bại | **KHÔNG PHẢI LỖI ỨNG DỤNG** — phiếu smoke hết hạn giữa chừng; bản vá đã áp thật, `fb_ads.post_id` có mặt trên production |
+| 6 | **`git reset` trên cây chung làm văng 2 commit** | **ĐÃ KHÔI PHỤC** — xem mục 4b |
+| 7 | **Hai tệp của phiên khác đang bị XOÁ trên đĩa** | **ĐANG THEO DÕI, KHÔNG ĐỤNG VÀO** — `docs/safe-release-review.md` và `tests/repo-integrity.test.ts` có trong `main` nhưng đang ở trạng thái `D` trong cây làm việc. Ai chạy `git commit -a` sẽ xoá chúng khỏi kho. Chủ sở hữu là phiên khác nên tôi không `checkout` phục hồi (đúng ràng buộc "không checkout tệp của phiên khác"). **Cần phiên đó tự kiểm.** |
+
+### 4b. Sự cố mất commit trên cây làm việc dùng chung (09/09/2026)
+
+Đang làm việc thì `HEAD` nhảy về `origin/main` do một phiên khác chạy `reset`. Reflog:
+
+```
+ddf63cd HEAD@{0}: reset: moving to origin/main
+1d4913f HEAD@{1}: commit: docs: biên bản bàn giao Session 3 ...
+e415bf9 HEAD@{3}: commit: docs: đóng băng phạm vi Session 1 ...
+```
+
+**Hai commit rơi khỏi `main`**: biên bản bàn giao của Session 3 và bản đóng băng phạm vi của Session 1.
+Nội dung tệp vẫn còn trên đĩa (reset không phải `--hard`), nên đã khôi phục bằng cách commit lại đúng
+các đường dẫn đó, **giữ nguyên nội dung và thông điệp gốc** — `f91cb50` (Session 3) và `586205e`
+(Session 1). Không rewrite history, không đụng tệp của ai.
+
+**Bài học cho phần còn lại của đợt phát hành:** `git reset` / `git pull` trên cây dùng chung có thể
+làm biến mất commit vừa tạo của phiên khác **mà không báo lỗi gì**. Trước mỗi lần chốt bản ứng cử,
+phải đối chiếu `git log` với danh sách SHA trong biên bản của từng phiên — SHA nào không còn là tổ
+tiên của `HEAD` thì đã bị rơi và phải khôi phục.
 
 ---
 
