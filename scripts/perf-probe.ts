@@ -22,7 +22,6 @@ import { clearMemo } from "@/lib/cache";
  */
 let dbMs = 0;
 let dbCalls = 0;
-let planMs = 0;
 {
   const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
   const original = pg.Pool.prototype.query;
@@ -39,7 +38,6 @@ let planMs = 0;
     dbCalls += 1;
     return out;
   };
-  void planMs;
 }
 
 const results: { page: string; fn: string; ms: number; dbMs: number; calls: number; note: string }[] = [];
