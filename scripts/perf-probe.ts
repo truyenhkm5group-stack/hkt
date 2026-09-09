@@ -41,6 +41,14 @@ async function main() {
   const tower = await import("@/lib/queries/control-tower");
   await timed("/ (thành phần)", "getControlTower", () => tower.getControlTower());
 
+  // Bóc từng thành phần trang chủ: biết "trang chủ chậm" chưa sửa được gì, phải biết HÀM nào.
+  const fin = await import("@/lib/queries/financial-truth");
+  await timed("/ (thành phần)", "getFinancialTruth", () => fin.getFinancialTruth(month));
+  const codq = await import("@/lib/queries/cod");
+  await timed("/ (thành phần)", "codCashSummary", () => codq.codCashSummary(month));
+  const eng = await import("@/lib/queries/cost-engine");
+  await timed("/ (thành phần)", "getOperatingCost", () => eng.getOperatingCost(month));
+
   const cod = await import("@/lib/queries/cod-settlement");
   await timed("/cod", "codSettlementSummary", () => cod.codSettlementSummary(month));
   await timed("/cod", "codSettlementCounts", () => cod.codSettlementCounts(month));
