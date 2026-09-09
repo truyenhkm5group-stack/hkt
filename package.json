@@ -22,7 +22,8 @@
     "import:vtp-statements": "tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts",
     "set:setting": "tsx --tsconfig tsconfig.json scripts/set-setting.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "gate": "tsx --tsconfig tsconfig.json scripts/final-gate.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
