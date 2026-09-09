@@ -26,6 +26,17 @@ const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 60_000);
  */
 const SLOW_MS = Number(process.env.SMOKE_SLOW_MS ?? 2_000);
 
+/**
+ * NGÂN SÁCH CHO CẢ LƯỢT CHẠY.
+ *
+ * Sự cố thật: 5 trang chậm × 60 giây quá hạn = 5 phút đốt sạch, đẩy bước deploy vượt hạn 35 phút và
+ * làm cả lần deploy ĐỎ — trong khi ứng dụng đã lên đúng bản và đang chạy tốt. Một phép kiểm mà tự nó
+ * làm hỏng lần phát hành thì tệ hơn là không có.
+ *
+ * Hết ngân sách thì các trang còn lại ghi BỎ QUA — nói thẳng là chưa kiểm, KHÔNG phải là đã đạt.
+ */
+const BUDGET_MS = Number(process.env.SMOKE_BUDGET_MS ?? 300_000);
+
 /** Các màn hình phải mở được. Thêm route mới vào đây khi bổ sung màn hình quan trọng. */
 const ROUTES = [
   "/",
@@ -95,9 +106,10 @@ const RENDER_MARKER = "VNXcommerce";
  *   AUTH_EXPIRED — bị đá về đăng nhập vì phiếu ký đã quá hạn. Lỗi CỦA PHÉP KIỂM, không phải của app.
  *   REDIRECT     — bị đá về đăng nhập trong khi phiếu ký còn mới ⇒ quyền/cấu hình sai. Lỗi thật.
  *   SLOW         — trang MỞ ĐƯỢC nhưng lâu hơn ngưỡng. Vấn đề hiệu năng, KHÔNG chặn deploy.
+ *   SKIPPED      — hết ngân sách thời gian nên CHƯA kiểm. Không phải "đạt", cũng không phải "hỏng".
  *   TIMEOUT      — trang không trả lời trong hạn. Lỗi thật (nhưng khác bản chất với APP_ERROR).
  */
-type Verdict = "SUCCESS" | "SLOW" | "APP_ERROR" | "AUTH_EXPIRED" | "REDIRECT" | "TIMEOUT";
+type Verdict = "SUCCESS" | "SLOW" | "SKIPPED" | "APP_ERROR" | "AUTH_EXPIRED" | "REDIRECT" | "TIMEOUT";
 
 /** Hạn của phiếu ký. Quá mốc này mà bị 307 thì nguyên nhân là hết hạn, không phải phân quyền. */
 const TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -172,6 +184,13 @@ async function main() {
   const runStarted = Date.now();
 
   for (const route of ROUTES) {
+    // Hết ngân sách: ghi BỎ QUA cho phần còn lại thay vì đốt thêm 60 giây mỗi trang và làm hỏng
+    // chính lần deploy đang kiểm.
+    if (Date.now() - runStarted > BUDGET_MS) {
+      results.push({ route, verdict: "SKIPPED", detail: `hết ngân sách ${Math.round(BUDGET_MS / 1000)}s cho cả lượt — CHƯA kiểm`, ms: 0 });
+      console.error(`  – ${route} [SKIPPED] chưa kiểm vì hết ngân sách`);
+      continue;
+    }
     const started = Date.now();
     // Phiếu ký được tạo NGAY TRƯỚC lần gọi này, nên tuổi của nó gần bằng thời gian chờ của
     // chính trang này — dùng nó để phân biệt "hết hạn" với "sai quyền".
@@ -239,6 +258,7 @@ async function main() {
     AUTH_EXPIRED: "⚠",
     REDIRECT: "✗",
     SLOW: "⚠",
+    SKIPPED: "–",
     TIMEOUT: "✗",
   };
   for (const r of results) {
@@ -251,7 +271,7 @@ async function main() {
   console.log(
     `\n[smoke] ${(by("SUCCESS").length + by("SLOW").length)}/${results.length} đạt · ` +
       `${by("APP_ERROR").length} lỗi ứng dụng · ${by("REDIRECT").length} sai quyền · ` +
-      `${by("SLOW").length} chậm · ${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
+      `${by("SLOW").length} chậm · ${by("SKIPPED").length} chưa kiểm · ${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
       `(cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s)`,
   );
 

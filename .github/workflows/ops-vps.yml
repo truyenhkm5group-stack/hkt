@@ -38,6 +38,7 @@ on:
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
+          - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
@@ -138,6 +139,11 @@ jobs:
               profit-verify)
                 fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
+              outcome-parity)
+                # Mặc định CHỈ ĐO. "--apply" dựng lại bảng dẫn xuất — KHÔNG đụng đơn, vận đơn, sự
+                # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
+                fetch_script outcome-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/outcome-parity.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/outcome-parity.ts $ARG ;;
               perf-probe)
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
