@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { rematerializeOutcomes, rematerializeStale } from "@/lib/queries/canonical-outcome";
+import { CANONICAL_OUTCOME_VERSION, rematerializeOutcomes, rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { getProfitReport } from "@/lib/queries/reports";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import type { Period } from "@/lib/search-params";
@@ -120,6 +120,36 @@ export async function testCogsRecognition(db: Db) {
   if (suyNguoc.outcome === "DELIVERED") {
     assert.equal(suyNguoc.cogsBasis, "RECEIPT_AFTER", "đơn giao tháng 7 mà phiếu nhập sớm nhất là tháng 8 thì giá vốn là suy ngược — phải gắn nhãn CHƯA XÁC MINH");
   }
+
+  /**
+   * ───────── DÒNG GHI TRƯỚC P0.4: CÓ KẾT QUẢ MÀ CHƯA CHỐT GIÁ VỐN ─────────
+   *
+   * P0.4 thêm ba cột đông cứng giá vốn nhưng cố ý KHÔNG tăng `logic_version` — tăng sẽ làm cả 2.433
+   * đơn thành cũ cùng lúc và trang chủ quay lại mức 60 giây ngay sau khi deploy.
+   *
+   * Hệ quả không lường trước: bộ dò dòng cũ chỉ nhìn `logic_version`, nên những dòng ghi TRƯỚC P0.4
+   * không bao giờ được điền `recognized_cogs`. Chúng vẫn đọc `m.cogs` — tức giá vốn HIỆN TẠI — nên
+   * việc đông cứng im lặng không áp dụng cho chính những đơn lịch sử cần nó nhất.
+   *
+   * Dựng lại đúng ca đó: xoá ba cột như thể dòng được ghi bởi bản cũ, rồi đòi bộ dò nhặt nó lên.
+   */
+  await db
+    .update(schema.canonicalOrderOutcome)
+    .set({ recognizedCogs: null, recognizedAt: null, cogsBasis: null })
+    .where(eq(schema.canonicalOrderOutcome.orderId, "cogs-o1"));
+  const nhuBanCu = await doc();
+  assert.equal(nhuBanCu.recognizedCogs, null, "dựng bối cảnh: dòng đang ở trạng thái 'ghi bởi bản trước P0.4'");
+  assert.equal(nhuBanCu.logicVersion, CANONICAL_OUTCOME_VERSION, "và nó KHÔNG cũ về phiên bản — đó chính là chỗ bộ dò cũ mù");
+
+  await rematerializeStale();
+  const daVa = await doc();
+  assert.notEqual(daVa.recognizedCogs, null, "dòng đã giao mà chưa chốt giá vốn PHẢI được bộ dò nhặt lên và điền");
+  assert.notEqual(daVa.cogsBasis, null, "điền giá vốn thì phải điền cả căn cứ của nó");
+
+  // Và không được lặp vô hạn: chạy lại lần nữa thì không còn gì để làm với đơn này.
+  const truocLan2 = Number((await doc()).recognizedCogs);
+  await rematerializeStale();
+  assert.equal(Number((await doc()).recognizedCogs), truocLan2, "chạy lại không đổi con số đã chốt — điều kiện làm cũ phải TỰ TẮT");
 
   // ───────── MỌI BÁO CÁO PHẢI DÙNG CÙNG MỘT GIÁ VỐN ─────────
   //

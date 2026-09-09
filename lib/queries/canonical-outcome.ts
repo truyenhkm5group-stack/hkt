@@ -141,6 +141,17 @@ export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: numbe
        )
        -- Sua dong hang cua don (so luong, mau ma, gia von Pancake) cung doi gia von ca don.
        or exists (select 1 from order_items oi2 where oi2.order_id = o.id and o.updated_at > m.computed_at)
+       -- DON DA GIAO MA CHUA CHOT GIA VON: dong duoc ghi TRUOC ban P0.4 khong co recognized_cogs.
+       --
+       -- P0.4 them ba cot dong cung gia von nhung KHONG tang logic_version (co y: tang version lam
+       -- moi dong thanh cu cung luc, ca 2.433 don roi ve duong tinh truc tiep va trang chu quay lai
+       -- muc 60 giay cua truoc P0.3). He qua khong luong truoc: bo do dong cu chi nhin version, nen
+       -- nhung dong cu KHONG BAO GIO duoc dien, va gia von cua chung van troi theo phieu nhap moi -
+       -- tuc viec dong cung im lang khong ap dung cho chinh nhung don lich su can no nhat.
+       --
+       -- Dieu kien nay lap dung khoang trong do, va no TU TAT: mot lan dung lai la recognized_cogs
+       -- khac NULL (bang 0 neu khong tra duoc gia von), nen khong lap vo han.
+       or (m.outcome = 'DELIVERED' and m.recognized_cogs is null)
     limit ${limit}
   `);
   const ids = ((Array.isArray(staleIds) ? staleIds : ((staleIds as { rows?: unknown[] }).rows ?? [])) as { id: string }[]).map((r) => String(r.id));
