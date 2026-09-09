@@ -16,6 +16,7 @@ import {
   HandCoins,
   Headset,
   HeartHandshake,
+  Landmark,
   LayoutDashboard,
   Lightbulb,
   Megaphone,
@@ -86,6 +87,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/import-vtp", label: "Bổ sung danh sách vận đơn", icon: FileUp, permission: "cod:write" },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
+      { href: "/bank", label: "Sổ ngân hàng", icon: Landmark, permission: "bank:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
       { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },

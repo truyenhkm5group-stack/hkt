@@ -11,6 +11,7 @@ import {
   AssumptionsForm,
   ReturnRateOverride,
 } from "@/app/(dashboard)/reports/assumptions-form";
+import { CostQualityPanel } from "@/app/(dashboard)/reports/cost-quality-panel";
 import { MetricCard } from "@/components/metric-card";
 import { MarketerNominalRows } from "./marketer-nominal-rows";
 import { Button } from "@/components/ui/button";
@@ -24,8 +25,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatNumber, formatVND } from "@/lib/format";
-import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
-import type { ExpenseCategory } from "@/db/schema";
 import {
   getNominalDailyForProduct,
   getNominalProfitReport,
@@ -83,24 +82,11 @@ export async function NominalTab({
     : [];
   const t = report.totals;
 
-  const overlap = report.fixedCostOverlap;
-
   return (
     <div className="space-y-5">
       <AssumptionsForm assumptions={report.assumptions} canWrite={canWrite} />
 
-      {overlap ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-          <b>Có thể đang trừ chi phí cố định hai lần.</b> Kỳ này vừa có giả định “chi phí cố định{" "}
-          {formatVND(report.assumptions.fixedCostMonthly ?? 0, { compact: true })}/tháng” ={" "}
-          {formatVND(report.fixedCost, { compact: true })}, vừa có{" "}
-          {formatVND(overlap.amount, { compact: true })} khoản chi thật thuộc nhóm{" "}
-          {overlap.categories.map((c) => EXPENSE_CATEGORY_LABEL[c as ExpenseCategory] ?? c).join(", ")} đã nhập ở bảng Chi phí.
-          Hai nguồn này là cùng một loại chi phí — ERP <b>không tự bỏ bên nào</b> vì chọn nguồn nào là
-          quyết định của chủ shop. Đã ghi chứng từ đủ ở bảng Chi phí thì đặt giả định cố định về 0; còn
-          muốn dùng giả định thì đừng nhập lại các khoản đó.
-        </div>
-      ) : null}
+      <CostQualityPanel period={period} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <MetricCard

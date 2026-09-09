@@ -8,8 +8,8 @@ import { failedToReturnRate, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
-import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
-import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold, PERIOD_LIKE_CATEGORIES } from "@/lib/constants/cost-allocation";
+import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 
 const o = schema.orders;
@@ -230,12 +230,6 @@ export type NominalReport = {
   periodMonths: number;
   /** Chi phí cố định của kỳ = chi phí tháng × số tháng */
   fixedCost: number;
-  /**
-   * CẢNH BÁO ĐẾM HAI LẦN: giả định "chi phí cố định / tháng" và các khoản RENT / SALARY / SOFTWARE
-   * nhập ở bảng Chi phí là HAI nguồn cho CÙNG một loại chi phí. Khai cả hai thì mặt bằng bị trừ hai
-   * lần và lợi nhuận thấp giả. ERP KHÔNG tự bỏ bên nào — chọn nguồn nào là quyết định của chủ shop.
-   */
-  fixedCostOverlap: { amount: number; count: number; categories: string[] } | null;
   totals: {
     /** Σ đơn theo mã (đơn nhiều mã đếm nhiều lần) */
     orders: number;
@@ -356,10 +350,10 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
 
   // Chi phí vận hành phải dùng ĐÚNG khoảng của báo cáo: khoản theo kỳ được chia theo số ngày chồng
   // lấn, khoản một lần vẫn ghi trọn vào ngày phát sinh. Xem lib/queries/cost-allocation.ts.
-  const expConds: SQL[] = [sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to)];
+  const expConds: SQL[] = [operatingExpenseCond(), expenseInRange(period.from, period.to)];
 
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-  const [sales, adRows, perOrder, [expRow], overlapRows] = await Promise.all([
+  const [sales, adRows, perOrder, [expRow]] = await Promise.all([
     db
       .select({
         productId: PID,
@@ -405,13 +399,6 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .select({ amount: allocatedExpenseSum(period.from, period.to), count: sql<number>`count(*)` })
       .from(schema.expenses)
       .where(and(...expConds)),
-    // Khoản chi thực thuộc nhóm "cố định" — để đối chiếu với giả định `fixedCostMonthly` và cảnh
-    // báo đếm hai lần, chứ KHÔNG tự trừ bên nào ra.
-    db
-      .select({ category: schema.expenses.category, amount: allocatedExpenseSum(period.from, period.to) })
-      .from(schema.expenses)
-      .where(and(inArray(schema.expenses.category, [...PERIOD_LIKE_CATEGORIES]), expenseInRange(period.from, period.to)))
-      .groupBy(schema.expenses.category),
   ]);
   const operatingExpenses = Number(expRow?.amount ?? 0);
   const operatingCount = Number(expRow?.count ?? 0);
@@ -596,10 +583,6 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const otherCostsTotal = opexTotal + totals.inventoryRisk + totals.tax + otherCostAll;
   const netProfit = expectedProfitAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRiskOnPurchase - totals.tax - otherCostAll;
-  // Đối chiếu giả định "cố định / tháng" với khoản cố định đã có chứng từ trong kỳ — cảnh báo, không tự sửa.
-  const overlap = overlapRows.map((r) => ({ category: r.category, amount: Number(r.amount ?? 0) })).filter((r) => r.amount > 0);
-  const overlapAmount = overlap.reduce((t, r) => t + r.amount, 0);
-  const fixedCostOverlap = fixedCost > 0 && overlapAmount > 0 ? { amount: overlapAmount, count: overlap.length, categories: overlap.map((r) => r.category) } : null;
   const expectedDeliveredAll = rows.reduce((t, r) => t + r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100), 0);
   return {
     assumptions,
@@ -609,7 +592,6 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     operatingCount,
     periodMonths: months,
     fixedCost,
-    fixedCostOverlap,
     totals: {
       orders: totals.orders,
       ordersDistinct,

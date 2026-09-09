@@ -292,3 +292,118 @@ cả tháng.
 `tests/sync-fixtures.test.ts` (khối 8): `inventoryRisk` phải bằng `% × expectedCogs`; mã có nhập hàng
 mà chưa bán được gì phải có `inventoryRisk = 0` nhưng `inventoryRiskOnPurchase > 0`; Σ phần phân bổ
 CP vận hành / CP cố định của các mã phải **bằng đúng** tổng của kỳ.
+
+---
+
+# Phần 3 — Hợp đồng đầy đủ theo từng loại chi phí (chốt 09/09/2026)
+
+## Bảy cách ghi nhận
+
+Bốn giá trị đầu lưu được ở `expenses.allocation_method` (có ràng buộc `CHECK`); ba giá trị sau mô tả
+chi phí **không** nằm ở bảng Chi phí. Khai ở `lib/constants/cost-allocation.ts::RECOGNITION_METHODS`.
+
+| Phương pháp | Trường ngày | Lưu ở CSDL | Dùng cho |
+|---|---|---|---|
+| `EVENT_DATE` | `expenses.occurred_at` | ✓ | chi phí một lần |
+| `PERIOD_PRORATA` | `expenses.period_start … period_end` | ✓ | thuê mặt bằng, phần mềm, **lương cố định** |
+| `DAILY_RATE` | khoảng của báo cáo | — | giả định `fixedCostMonthly` × số tháng |
+| `ORDER_ATTRIBUTED` | `orders.inserted_at` | ✓ | đóng hàng, NV vận đơn, **hoa hồng theo đơn** |
+| `SHIPMENT_ATTRIBUTED` | mốc kết thúc của chính vận đơn | — | cước gửi, phí hoàn |
+| `ACTUAL_DATED_SPEND` | `ad_spends.spend_date` | ✓ | chi phí quảng cáo |
+| `INVENTORY_RISK_BY_COGS` | kỳ bán hàng (giá vốn hàng bán) | — | dự phòng rủi ro tồn kho |
+
+## Hợp đồng từng loại chi phí
+
+| Chi phí | Nguồn sự thật | Cách ghi nhận | Trường ngày | Chiều gắn | Chính sách trùng nguồn |
+|---|---|---|---|---|---|
+| Giá vốn hàng bán | phiếu kho | `ORDER_ATTRIBUTED` | `orders.inserted_at` | đơn → mẫu mã | khoản `PURCHASE` gõ tay **bị loại** khỏi CP vận hành |
+| Dự phòng rủi ro tồn kho | giả định × giá vốn bán | `INVENTORY_RISK_BY_COGS` | kỳ bán hàng | mã hàng | phần chưa bán hiện riêng, **không** trừ |
+| Cước vận chuyển | vận đơn / bảng kê ĐVVC | `SHIPMENT_ATTRIBUTED` | mốc vận đơn | đơn | khoản `SHIPPING` gõ tay **bị loại** |
+| Phí hoàn | vận đơn / bảng kê ĐVVC | `SHIPMENT_ATTRIBUTED` | mốc vận đơn | đơn | khoản `RETURN_FEE` gõ tay **bị loại** |
+| Quảng cáo | tài khoản QC (`ad_spends`) | `ACTUAL_DATED_SPEND` | `spend_date` | mã hàng / marketer | khoản `ADS` gõ tay **bị loại** |
+| **Lương cố định** | bảng Chi phí | `PERIOD_PRORATA` | kỳ hiệu lực | toàn shop → mã theo doanh số | trùng với giả định cố định ⇒ cảnh báo |
+| **Hoa hồng** | bảng Chi phí | `ORDER_ATTRIBUTED` | ngày phát sinh | marketer / mã | **không** prorate theo ngày |
+| Mặt bằng · điện nước | bảng Chi phí | `PERIOD_PRORATA` | kỳ hiệu lực | toàn shop | trùng với giả định cố định ⇒ cảnh báo |
+| Phần mềm | bảng Chi phí | `PERIOD_PRORATA` | kỳ hiệu lực | toàn shop | gói năm phải khai kỳ 12 tháng |
+| Đóng gói | bảng Chi phí | `EVENT_DATE` / `ORDER_ATTRIBUTED` | `occurred_at` | đơn | trùng với giả định đóng hàng/đơn ⇒ cảnh báo |
+| Chi phí vận hành khác | bảng Chi phí | `EVENT_DATE` | `occurred_at` | toàn shop | — |
+
+`lib/constants/cost-sources.ts::COST_AUTHORITY` là bản mã hoá của cột "Nguồn sự thật";
+`EXPENSE_CATEGORIES_NOT_OWNED` là bản mã hoá của cột "bị loại".
+
+## Lương ≠ hoa hồng
+
+Gộp hai thứ này thành một dòng "Lương & hoa hồng" là sai từ gốc, vì **bản chất phân bổ ngược nhau**:
+
+- **Lương cố định** đi theo THỜI GIAN. 9 triệu/tháng, lọc 7/30 ngày ⇒ `9tr × 7/30 = 2,1tr`.
+- **Hoa hồng** đi theo ĐƠN. Ghi vào đúng kỳ phát sinh đơn; chia đều theo ngày là **bịa**, vì một
+  tuần bán gấp ba tuần khác thì hoa hồng cũng gấp ba, không bằng nhau.
+
+ERP **không tự đổi** basis POS ↔ Delivered của hoa hồng: hợp đồng hiện tại chọn basis nào thì giữ
+nguyên basis đó. Điều duy nhất được đảm bảo là **cùng một kỳ báo cáo ⇒ cùng một tập đơn ⇒ cùng một
+con số hoa hồng**.
+
+Bảng Chi phí hiện chỉ có MỘT nhóm `SALARY` gộp cả hai. Khi không phân biệt được, ERP **không đoán** —
+nó nêu ra bằng luật `COMMISSION_BASIS_NEEDS_REVIEW`. Dữ liệu mới đi qua Sổ ngân hàng thì đã tách sẵn
+hai nhóm `PAYROLL_SALARY` và `PAYROLL_COMMISSION`.
+
+## Vì sao lương thuộc `EXPENSES` chứ không phải `PAYROLL`
+
+Module Lương **tính ra** số phải trả nhưng KHÔNG ghi khoản chi nào vào lợi nhuận — nó đọc lợi nhuận
+từ báo cáo để chia. Đường duy nhất đưa tiền lương vào lãi lỗ hôm nay là khoản `SALARY` ở bảng Chi phí.
+
+Đặt thẩm quyền cho `PAYROLL` rồi loại `SALARY` khỏi bảng Chi phí sẽ làm **lương biến mất khỏi lợi
+nhuận** — sai nặng hơn hẳn cái nó định sửa. Khi module Lương thực sự ghi khoản chi thì đổi
+`COST_AUTHORITY.SALARY` cùng lúc với việc loại `SALARY` ra.
+
+## Luật chất lượng dữ liệu chi phí
+
+`lib/queries/cost-quality.ts`, hiện ngay trên Báo cáo lợi nhuận (không giấu ở trang khác — người
+đang nhìn con số chính là người cần biết nó có vấn đề gì):
+
+| Luật | Khi nào bật | ERP làm gì |
+|---|---|---|
+| `DUPLICATE_COST_SOURCE` | giả định đang bật **và** có chứng từ cùng loại trong kỳ | cảnh báo, **không** tự bỏ bên nào |
+| `EXCLUDED_BY_AUTHORITY` | có khoản gõ tay thuộc nhóm nguồn khác sở hữu | nói rõ khoản đó không vào lợi nhuận và vì sao |
+| `COMMISSION_BASIS_NEEDS_REVIEW` | khoản `SALARY` để `EVENT_DATE`, không khai kỳ | yêu cầu chủ shop phân định, **không đoán** |
+| `PERIOD_COST_WITHOUT_PERIOD` | `needs_allocation_review = true` | yêu cầu khai kỳ hiệu lực |
+
+Không luật nào xoá hay sửa dữ liệu.
+
+## Sổ ngân hàng — tiền thật, và ranh giới với lợi nhuận
+
+`bank_transactions` ghi **mọi** giao dịch của tài khoản, kể cả tiền vào và các khoản không ảnh hưởng
+lãi lỗ, để sổ khớp số dư ngân hàng. Mỗi dòng được gán một **nhóm kế toán**
+(`lib/constants/bank.ts::BANK_GROUP_SPEC`) và chính nhóm đó — không phải dấu của số tiền — quyết
+định giao dịch đi vào báo cáo nào.
+
+Chỉ nhóm mà **bảng Chi phí có thẩm quyền** mới đẩy được sang lợi nhuận. Quảng cáo, tiền hàng, cước,
+phí hoàn, doanh thu đều bị chặn ở tầng hợp đồng, kèm câu trả lời hiện thẳng trên giao diện. Chống
+đẩy trùng bằng mã tham chiếu `MB <mã GD>`.
+
+Ba thứ dễ sai nhất, đều có kiểm thử (`tests/bank-ledger.test.ts`):
+
+1. **Giờ** — sao kê ghi giờ Việt Nam; đọc như UTC thì giao dịch 23:30 ngày cuối tháng nhảy sang kỳ sau.
+2. **Nhập lại chồng lấn** — khoá tự nhiên là mã giao dịch ngân hàng; tải lại không nhân đôi dòng tiền
+   và **không xoá nhãn** người dùng đã gán.
+3. **Chuyển nội bộ / trả nợ gốc** — tiền ra thật nhưng không phải dòng tiền kinh doanh, phải loại
+   khỏi tổng, nếu không cùng một đồng vừa là tiền ra vừa là tiền vào.
+
+## Kiểm thử liên module (fixture chuẩn của hợp đồng)
+
+`tests/consistency.test.ts` khối 8 dựng đúng fixture trong yêu cầu — thuê **3.000.000đ**, tháng
+**30 ngày** — rồi lọc **7 ngày** và bắt mọi nơi trả **700.000đ**:
+
+| Module | Tháng | 7 ngày |
+|---|---|---|
+| Báo cáo lợi nhuận | 3.000.000 | 700.000 |
+| Bảng điều khiển | 3.000.000 | 700.000 |
+| Sự thật tài chính | 3.000.000 | 700.000 |
+| Dòng tiền thực | 3.000.000 | — |
+| Báo cáo tổng hợp | 3.000.000 | 700.000 |
+| Biểu đồ theo ngày (cộng các cột) | 3.000.000 | 700.000 |
+| Phân bổ xuống từng mã (Σ) | 3.000.000 | 700.000 |
+| Bảng lương (nền chi phí) | — | 700.000 |
+
+Thêm hai chốt chặn hồi quy: **không cột ngày nào** được vượt 200.000đ (chặn "ôm cả khoản thuê vào
+một ngày"), và **cả 7 ngày** đều phải có chi phí.

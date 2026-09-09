@@ -1101,6 +1101,94 @@ export const expenses = pgTable(
   ],
 );
 
+/**
+ * ═══════════ SỔ GIAO DỊCH NGÂN HÀNG — DÒNG TIỀN THU / CHI THỰC ═══════════
+ *
+ * Sao kê là nguồn TIỀN THẬT: mọi đồng vào ra tài khoản đều có một dòng ở đây, kể cả những dòng
+ * không ảnh hưởng lãi lỗ (chuyển giữa tài khoản của mình, trả nợ gốc, rút vốn).
+ *
+ * Bảng này CHỈ ghi nhận và phân loại. Việc một dòng có được trừ vào lợi nhuận hay không do
+ * `lib/constants/bank.ts::BANK_GROUP_SPEC` quyết định, dựa trên hợp đồng nguồn sự thật ở
+ * `lib/constants/cost-sources.ts` — tiền quảng cáo, tiền hàng, cước ĐVVC đã có nguồn chuyên biệt
+ * nên dòng sao kê tương ứng chỉ tính vào DÒNG TIỀN, không trừ lần thứ hai vào lãi lỗ.
+ */
+export const bankTransactions = pgTable(
+  "bank_transactions",
+  {
+    id: id(),
+    /** Mốc giao dịch. Sao kê ghi giờ Việt Nam; mapper đổi sang UTC trước khi lưu. */
+    txnAt: ts("txn_at").notNull(),
+    /** DƯƠNG = tiền vào, ÂM = tiền ra. Một cột có dấu thay vì hai cột, để không bao giờ cộng nhầm cả hai. */
+    amount: integer("amount").notNull(),
+    description: text("description").notNull().default(""),
+    counterparty: text("counterparty").notNull().default(""),
+    /** Mã giao dịch của ngân hàng — KHOÁ TỰ NHIÊN chống nhập trùng khi tải lại sao kê. */
+    bankRef: text("bank_ref").notNull(),
+    /** Tài khoản / ngân hàng phát sinh (để sau này gộp nhiều tài khoản) */
+    account: text("account").notNull().default(""),
+    /** Nhóm kế toán — quyết định giao dịch này đi vào báo cáo nào */
+    accountingGroup: text("accounting_group").notNull().default("UNCLASSIFIED"),
+    /** Mã danh mục chi tiết của app sao kê (LUONG, THUE_MAT_BANG…) — giữ nguyên để truy nguyên */
+    categoryCode: text("category_code").notNull().default(""),
+    note: text("note").notNull().default(""),
+    /** Quy tắc đã tự gán nhãn dòng này (nếu có) — sửa tay thì xoá về NULL để quy tắc không ghi đè */
+    ruleId: text("rule_id"),
+    /** "" = chưa ai phân loại; "rule" = do quy tắc; còn lại là email người phân loại */
+    classifiedBy: text("classified_by").notNull().default(""),
+    classifiedAt: ts("classified_at"),
+    /** IMPORT = từ file sao kê, MANUAL = gõ tay (tiền mặt, ví điện tử…) */
+    source: text("source").notNull().default("IMPORT"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bank_txn_ref_idx").on(t.bankRef),
+    index("bank_txn_at_idx").on(t.txnAt),
+    index("bank_txn_group_idx").on(t.accountingGroup, t.txnAt),
+    // Số tiền 0 không phải giao dịch; chiều tiền phải rõ ràng.
+    check("bank_txn_amount_check", sql`${t.amount} <> 0`),
+    check("bank_txn_source_check", sql`${t.source} IN ('IMPORT', 'MANUAL')`),
+  ],
+);
+
+/**
+ * QUY TẮC GÁN NHÃN TỰ ĐỘNG cho giao dịch sao kê.
+ *
+ * Quy tắc chỉ chạm vào dòng CHƯA ai sửa tay (`classified_by` rỗng hoặc = 'rule'). Người đã phân
+ * loại tay thì quy tắc không được ghi đè — nếu không, mỗi lần nhập sao kê mới lại xoá công sức
+ * phân loại của chủ shop.
+ */
+export const bankRules = pgTable(
+  "bank_rules",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    /** Số nhỏ chạy trước. Quy tắc đầu tiên khớp sẽ thắng — không cộng dồn nhiều quy tắc lên một dòng. */
+    priority: integer("priority").notNull().default(100),
+    /** IN = chỉ tiền vào, OUT = chỉ tiền ra, ANY = cả hai */
+    direction: text("direction").notNull().default("ANY"),
+    /** Khớp CHỨA, không phân biệt hoa thường và dấu tiếng Việt (chuẩn hoá bằng lib/text.ts) */
+    matchCounterparty: text("match_counterparty").notNull().default(""),
+    matchDescription: text("match_description").notNull().default(""),
+    /** Khoảng số tiền theo TRỊ TUYỆT ĐỐI (₫). `maxAmount` = 0 nghĩa là không giới hạn trên. */
+    minAmount: integer("min_amount").notNull().default(0),
+    maxAmount: integer("max_amount").notNull().default(0),
+    accountingGroup: text("accounting_group").notNull(),
+    categoryCode: text("category_code").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bank_rules_priority_idx").on(t.enabled, t.priority),
+    check("bank_rules_direction_check", sql`${t.direction} IN ('IN', 'OUT', 'ANY')`),
+    // Quy tắc không có điều kiện nào sẽ khớp MỌI dòng — chặn ngay ở CSDL.
+    check("bank_rules_match_check", sql`length(${t.matchCounterparty}) > 0 OR length(${t.matchDescription}) > 0 OR ${t.minAmount} > 0 OR ${t.maxAmount} > 0`),
+    check("bank_rules_amount_check", sql`${t.maxAmount} = 0 OR ${t.maxAmount} >= ${t.minAmount}`),
+  ],
+);
+
 /** Đơn landing page (khách điền form → Google Sheet → ERP): theo dõi trạng thái, lọc trùng, gửi đơn nháp lên Pancake POS */
 export const landingOrders = pgTable(
   "landing_orders",

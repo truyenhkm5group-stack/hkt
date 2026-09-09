@@ -5,6 +5,7 @@ import { LINE_UNIT_COST, ORDER_COGS } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { allocatedExpenseByDay, allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { EXPENSE_CATEGORIES_NOT_OWNED } from "@/lib/constants/cost-sources";
 
 export type ReportBasis = "created" | "delivered";
 
@@ -89,7 +90,8 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
     .groupBy(schema.expenses.category);
 
   const adsExpense = expenseRows.filter((r) => r.category === "ADS").reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const operating = expenseRows.filter((r) => r.category !== "ADS" && r.category !== "PURCHASE").reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  // Cùng hợp đồng nguồn sự thật với mọi báo cáo khác: loại các nhóm mà bảng Chi phí không có thẩm quyền.
+  const operating = expenseRows.filter((r) => !EXPENSE_CATEGORIES_NOT_OWNED.includes(r.category)).reduce((s, r) => s + Number(r.amount ?? 0), 0);
   const revenue = Number(o?.revenue ?? 0);
   const cogs = Number(o?.cogs ?? 0);
   const shipping = Number(o?.shipping ?? 0);

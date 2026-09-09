@@ -13,6 +13,8 @@ import { listVariantsForReceipt } from "@/lib/queries/stock";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { getDailyBreakdown, getProfitReport } from "@/lib/queries/reports";
+import { getMarketerReport } from "@/lib/queries/payroll";
 import { shipmentSummary } from "@/lib/queries/shipments";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { parseListParams, type Period } from "@/lib/search-params";
@@ -194,6 +196,36 @@ export async function testConsistency(db: Db) {
   assert.equal(dashTuan.finance.expenses, opexTuan, "xem một tuần: Bảng điều khiển vẫn khớp Báo cáo lợi nhuận");
   assert.equal(Math.abs(truthTuan.waterfall.find((w) => w.key === "operating")?.amount ?? 0), opexTuan, "xem một tuần: Sự thật tài chính vẫn khớp");
   assert.ok(opexTuan < opexThang, "một tuần phải NHỎ HƠN cả tháng — không được cộng nguyên khoản thuê vào tuần");
+  // Fixture chuẩn của hợp đồng: thuê 3.000.000đ / 30 ngày, lọc 7 ngày ⇒ MỌI nơi phải ra 700.000đ.
+  assert.equal(opexThang, 3_000_000, "cả tháng = trọn khoản thuê");
+  assert.equal(opexTuan, 700_000, "7/30 ngày của 3.000.000đ = 700.000đ — con số này phải giống nhau ở mọi module");
+
+  // BÁO CÁO TỔNG HỢP + BIỂU ĐỒ THEO NGÀY: cộng các cột trong khoảng phải bằng đúng phần phân bổ.
+  const [pnlThang, pnlTuan, ngayThang, ngayTuan] = await Promise.all([
+    getProfitReport(kyThang, "created"), getProfitReport(tuan1, "created"),
+    getDailyBreakdown(kyThang, "created"), getDailyBreakdown(tuan1, "created"),
+  ]);
+  assert.equal(pnlThang.current.operating, opexThang, "Báo cáo tổng hợp (tháng) phải cùng một CP vận hành");
+  assert.equal(pnlTuan.current.operating, opexTuan, "Báo cáo tổng hợp (tuần) phải cùng một CP vận hành");
+  const congNgayThang = ngayThang.reduce((t, r) => t + r.operating, 0);
+  const congNgayTuan = ngayTuan.reduce((t, r) => t + r.operating, 0);
+  assert.equal(congNgayThang, opexThang, "cộng 30 cột của biểu đồ theo ngày = đúng phần phân bổ của tháng");
+  assert.equal(congNgayTuan, opexTuan, "cộng 7 cột của biểu đồ theo ngày = đúng 700.000đ");
+  // Không cột nào được ôm trọn khoản thuê: đó chính là hình dạng bug cũ.
+  const cotLonNhat = Math.max(0, ...ngayThang.map((r) => r.operating));
+  assert.ok(cotLonNhat < 200_000, `không ngày nào được ôm cả khoản thuê (cột lớn nhất ${cotLonNhat}đ)`);
+  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= 7, "cả 7 ngày đều có chi phí, không phải chỉ ngày ghi sổ");
+
+  // LỢI NHUẬN THEO MÃ: phần phân bổ xuống từng mã cộng lại = đúng tổng của kỳ (largest remainder).
+  assert.equal(nominalTuan.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexTuan, "Σ phân bổ xuống mã (tuần) = 700.000đ, không lệch vì làm tròn");
+  assert.equal(nominalThang.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexThang, "Σ phân bổ xuống mã (tháng) = 3.000.000đ");
+
+  // LƯƠNG / HOA HỒNG: nền chi phí của bảng lương phải là CÙNG con số, không phải bản cộng thô riêng.
+  for (const basis of ["profit1", "nominal"] as const) {
+    const mk = await getMarketerReport(tuan1, basis);
+    assert.equal(mk.totals.operatingEntered, opexTuan, `bảng lương (${basis}) dùng chung CP vận hành đã phân bổ`);
+  }
+
   await db.delete(schema.expenses).where(eq(schema.expenses.id, "cs-rent"));
   clearMemo();
 

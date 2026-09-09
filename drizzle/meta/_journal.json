@@ -288,6 +288,13 @@
       "when": 1788839392150,
       "tag": "0043_return_inspections",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788945576898,
+      "tag": "0042_bank_ledger",
+      "breakpoints": true
     }
   ]
 }

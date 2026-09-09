@@ -59,6 +59,19 @@ deploy dừng, không phải cảnh báo.
     vào lợi nhuận kỳ. Chỉ có MỘT bộ máy: `lib/constants/cost-allocation.ts` +
     `lib/queries/cost-allocation.ts`; trang nào tự cộng `sum(expenses.amount)` theo `occurred_at` là
     sai và `tests/cost-allocation.test.ts` chặn ở mức mã nguồn.
+15. **MỘT NGUỒN CHO MỘT KHOẢN CHI** (`lib/constants/cost-sources.ts`): mỗi loại chi phí kinh tế có
+    ĐÚNG MỘT nguồn được đưa vào lợi nhuận. Quảng cáo → tài khoản QC; giá vốn → phiếu kho; cước và
+    phí hoàn → vận đơn / bảng kê ĐVVC; còn lại → bảng Chi phí. Khoản gõ tay thuộc nhóm nguồn khác sở
+    hữu bị LOẠI khỏi phép tính (không xoá dữ liệu) và nêu ở luật `EXCLUDED_BY_AUTHORITY`. Không hard-code
+    `category not in ('ADS','PURCHASE')` ở bất cứ đâu — dùng `operatingExpenseCond()`.
+16. **LƯƠNG ≠ HOA HỒNG**: lương cố định đi theo THỜI GIAN (`PERIOD_PRORATA`), hoa hồng đi theo ĐƠN
+    (`ORDER_ATTRIBUTED`, KHÔNG chia đều theo ngày). Không tự đổi basis POS/Delivered của hoa hồng;
+    không phân định được thì bật `COMMISSION_BASIS_NEEDS_REVIEW`, không đoán.
+17. **SỔ NGÂN HÀNG** (`lib/constants/bank.ts`): ghi mọi giao dịch để khớp số dư; NHÓM KẾ TOÁN (không
+    phải dấu số tiền) quyết định giao dịch vào báo cáo nào. Chỉ nhóm mà bảng Chi phí có thẩm quyền
+    mới đẩy sang lợi nhuận. Khoá tự nhiên `bank_transactions.bank_ref`; nhập lại sao kê không được
+    nhân đôi dòng tiền và không được xoá nhãn người dùng đã gán. Quy tắc tự động không bao giờ ghi
+    đè dòng đã phân loại tay.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

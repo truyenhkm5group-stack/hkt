@@ -14,7 +14,7 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
-import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { distributeProportionally } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -244,7 +244,7 @@ async function productEconomics(period: Period) {
       // mất khỏi mọi kỳ khác — hoa hồng marketer tính trên một nền chi phí khác hẳn báo cáo LN.
       .select({ amount: allocatedExpenseSum(period.from, period.to) })
       .from(schema.expenses)
-      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, expenseInRange(period.from, period.to))),
+      .where(and(operatingExpenseCond(), expenseInRange(period.from, period.to))),
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));

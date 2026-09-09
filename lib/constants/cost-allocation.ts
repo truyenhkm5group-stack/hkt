@@ -206,3 +206,69 @@ export function distributeProportionally(total: number, weights: number[]): numb
   }
   return sign < 0 ? out.map((v) => -v) : out;
 }
+
+/**
+ * ═══════ BẢY CÁCH GHI NHẬN CHI PHÍ VÀO MỘT KỲ BÁO CÁO ═══════
+ *
+ * `COST_ALLOCATION_METHODS` ở đầu file chỉ có BỐN giá trị, vì đó là những giá trị được phép lưu ở
+ * cột `expenses.allocation_method` (có ràng buộc CHECK ở CSDL). Nhưng báo cáo còn có chi phí KHÔNG
+ * nằm ở bảng đó — giá vốn, cước, dự phòng rủi ro tồn kho — và chúng cũng phải khai cách ghi nhận,
+ * nếu không sẽ lại có người nhân vào một cơ sở không liên quan tới kỳ báo cáo.
+ *
+ * Danh sách dưới đây là hợp đồng ĐẦY ĐỦ, dùng cho tài liệu và cho kiểm thử đối chiếu.
+ */
+export const RECOGNITION_METHODS = [
+  "EVENT_DATE",
+  "PERIOD_PRORATA",
+  "DAILY_RATE",
+  "ORDER_ATTRIBUTED",
+  "SHIPMENT_ATTRIBUTED",
+  "ACTUAL_DATED_SPEND",
+  "INVENTORY_RISK_BY_COGS",
+] as const;
+export type RecognitionMethod = (typeof RECOGNITION_METHODS)[number];
+
+export const RECOGNITION_METHOD_SPEC: Record<RecognitionMethod, { label: string; dateField: string; storable: boolean; note: string }> = {
+  EVENT_DATE: {
+    label: "Ghi trọn vào ngày phát sinh",
+    dateField: "expenses.occurred_at",
+    storable: true,
+    note: "Chi phí một lần: sửa chữa, phí lẻ. Báo cáo không chứa ngày đó ⇒ bằng 0.",
+  },
+  PERIOD_PRORATA: {
+    label: "Chia theo số ngày của kỳ hiệu lực",
+    dateField: "expenses.period_start … period_end",
+    storable: true,
+    note: "Thuê mặt bằng, phần mềm, lương cố định. Tính bằng hiệu hai số luỹ kế nên hai kỳ liền nhau cộng lại đúng trọn khoản.",
+  },
+  DAILY_RATE: {
+    label: "Quy đổi từ đơn giá tháng theo số ngày",
+    dateField: "khoảng của báo cáo",
+    storable: false,
+    note: "Giả định `fixedCostMonthly` × số tháng của kỳ. Khác PERIOD_PRORATA ở chỗ không có chứng từ, chỉ có đơn giá.",
+  },
+  ORDER_ATTRIBUTED: {
+    label: "Gắn theo đơn",
+    dateField: "orders.inserted_at",
+    storable: true,
+    note: "Đóng hàng, nhân viên vận đơn, hoa hồng theo đơn. Đi theo SỐ ĐƠN của kỳ, KHÔNG chia đều theo ngày.",
+  },
+  SHIPMENT_ATTRIBUTED: {
+    label: "Gắn theo vận đơn",
+    dateField: "shipments (mốc kết thúc của chính vận đơn)",
+    storable: false,
+    note: "Cước gửi, phí hoàn. Nguồn có thẩm quyền là vận đơn / bảng kê ĐVVC, không phải bảng Chi phí.",
+  },
+  ACTUAL_DATED_SPEND: {
+    label: "Số thực chi theo từng ngày",
+    dateField: "ad_spends.spend_date",
+    storable: true,
+    note: "Chi phí quảng cáo. Cộng đúng số ngày trong khoảng, không chia đều từ một tổng tháng.",
+  },
+  INVENTORY_RISK_BY_COGS: {
+    label: "Dự phòng giải phóng theo hàng bán ra",
+    dateField: "kỳ bán hàng (theo giá vốn hàng bán trong kỳ)",
+    storable: false,
+    note: "Dự phòng rủi ro tồn kho. % × giá vốn hàng BÁN RA, KHÔNG phải % giá trị hàng nhập trong kỳ.",
+  },
+};

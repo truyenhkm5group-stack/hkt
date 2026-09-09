@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { allocateExpenseToRange, type AllocatableExpense } from "@/lib/constants/cost-allocation";
+import { EXPENSE_CATEGORIES_NOT_OWNED } from "@/lib/constants/cost-sources";
 
 const e = schema.expenses;
 
@@ -140,4 +141,19 @@ function vnDayKey(value: Date): string {
 function startOfVnDay(value: Date): Date {
   const shifted = value.getTime() + 7 * 3_600_000;
   return new Date(Math.floor(shifted / 86_400_000) * 86_400_000 - 7 * 3_600_000);
+}
+
+/**
+ * ─────────── KHOẢN CHI THUỘC "CHI PHÍ VẬN HÀNH" CỦA BÁO CÁO ───────────
+ *
+ * Loại các nhóm mà bảng Chi phí KHÔNG có thẩm quyền (`lib/constants/cost-sources.ts`): quảng cáo đã
+ * về từ tài khoản QC, tiền hàng đã nằm trong giá vốn, cước và phí hoàn đã tính theo từng đơn. Ghi
+ * thêm ở bảng Chi phí rồi cộng vào đây là trừ ĐÚNG MỘT ĐỒNG ĐÓ hai lần.
+ *
+ * Trước đây mỗi truy vấn tự gõ `category not in ('ADS','PURCHASE')`. Danh sách đó thiếu `SHIPPING`
+ * và `RETURN_FEE` — hai nhóm đã được báo cáo lợi nhuận tự tính theo đơn — nên khoản cước gõ tay bị
+ * trừ hai lần suốt. Khai ở MỘT chỗ thì hợp đồng đổi là mọi truy vấn đổi theo.
+ */
+export function operatingExpenseCond(): SQL {
+  return sql`${e.category} not in ${EXPENSE_CATEGORIES_NOT_OWNED}`;
 }
