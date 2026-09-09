@@ -264,6 +264,17 @@ export async function testActionQueue(db: Db) {
     assert.equal(tp.peopleShare, null, "chưa biết gì thì tỷ lệ phải là CHƯA BIẾT, không phải 0%");
   }
 
+  // ───────── TỔNG PHẢI LÀ TỔNG THẬT, KHÔNG PHẢI TỔNG CỦA PHẦN VỪA NẠP ─────────
+  //
+  // Trang Cần xử lý nạp 300 việc, production có 966 việc đang mở. Lấy số dòng vừa nạp làm tổng là
+  // nói với chủ shop rằng hàng đợi nhỏ hơn thực tế ba lần — và mọi quyết định "có cần thêm người
+  // không" đều dựa trên con số đó.
+  const nho = await getActionQueue({ limit: 1 });
+  const day = await getActionQueue({ limit: 500 });
+  assert.equal(nho.total, day.total, "tổng việc đang mở KHÔNG được đổi theo số dòng nạp về");
+  assert.equal(nho.loaded, Math.min(1, day.total), "phải nói rõ nạp được bao nhiêu");
+  assert.ok(nho.loaded <= nho.total, "số nạp không bao giờ vượt tổng thật");
+
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ${queue.byTeam.length} bộ phận (${queue.byTeam.map((t) => `${TEAM_LABEL[t.team]} ${t.count}`).join(" · ")}) · ưu tiên theo quy tắc giải thích được`,
   );

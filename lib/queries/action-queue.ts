@@ -101,8 +101,16 @@ export type ActionQueue = {
   breached: number;
   /** Số việc khớp bộ lọc đang xem. */
   matched: number;
-  /** Tổng số việc đang mở, không phụ thuộc bộ lọc. */
+  /**
+   * Tổng số việc ĐANG MỞ trong CSDL — đếm thật, không phụ thuộc bộ lọc và không bị `limit` cắt.
+   */
   total: number;
+  /**
+   * Số việc được nạp và tính điểm trong lượt này (trần `limit`). Các con số tổng hợp bên trên
+   * (`totals`, `byType`, `byTeam`, `financialImpact`, `breached`) chỉ nói về ngần này — nói khác đi
+   * là nói quá.
+   */
+  loaded: number;
 };
 
 /**
@@ -211,6 +219,18 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
     .orderBy(desc(n.createdAt))
     .limit(limit);
 
+  /**
+   * TỔNG THẬT, KHÔNG PHẢI TỔNG CỦA PHẦN VỪA NẠP.
+   *
+   * `rows` bị cắt ở `limit` (trang Cần xử lý nạp 300). Production đang có **966 việc đang mở**, nên
+   * lấy `rows.length` làm tổng là hiển thị 300 và nói đó là tất cả — người đọc tin rằng hàng đợi
+   * nhỏ hơn thực tế ba lần. Đếm thẳng trong CSDL thì con số đúng bất kể nạp bao nhiêu.
+   */
+  const [{ openTotal }] = await db
+    .select({ openTotal: sql<number>`count(*)` })
+    .from(n)
+    .where(options.assignedTo ? sql`${n.resolvedAt} is null and ${n.assignedTo} = ${options.assignedTo}` : isNull(n.resolvedAt));
+
   const amounts = await amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]);
   const stockDays = await daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]);
   const now = Date.now();
@@ -308,7 +328,20 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
   const filter = options.filter;
   const visible = filter ? cases.filter((c) => matchesFilter(c, filter)) : cases;
 
-  return { cases: visible, totals, byType, byTeam, unassigned, neglected, financialImpact, breached, matched: visible.length, total: cases.length };
+  return {
+    cases: visible,
+    totals,
+    byType,
+    byTeam,
+    unassigned,
+    neglected,
+    financialImpact,
+    breached,
+    matched: visible.length,
+    total: Number(openTotal ?? cases.length),
+    /** Số việc thật sự được nạp và tính điểm — mọi con số tổng hợp ở trên chỉ nói về ngần này. */
+    loaded: cases.length,
+  };
 }
 
 /**
