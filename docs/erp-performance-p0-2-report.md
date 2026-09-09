@@ -92,13 +92,31 @@ chiếu trước/sau trên production cho từng trạng thái, không phải m�
 Mục tiêu hiệu năng chủ shop đặt (trang chủ nguội < 1,5s) **chưa đạt** — sẽ đạt khi làm xong lớp vật
 chất hoá đó.
 
-## 7. AFTER
+## 7. AFTER — đo bằng smoke trên production, bản `ea7091a`
 
-*(điền sau khi bản `ea7091a` chạy trên production và đo lại bằng `ops perf-probe`)*
+Bốn trong năm màn hình quá hạn đã hết. Đây là thời gian mở trang thật, đo trên chính máy chủ:
 
-| Hàm | BEFORE | AFTER | Cải thiện |
+| Màn hình | TRƯỚC (`d8b290d`) | SAU (`ea7091a`) | Cải thiện |
 | --- | ---: | ---: | ---: |
-| `getDashboardData` | 30.000–47.300ms | | |
-| `getFinancialTruth` | 20.503ms | | |
-| `adsRoas` (30 ngày) | 25.075ms | | |
-| `getReturnRateSummary` | 5.945ms | | |
+| `/cod` | **quá hạn 60s** | **152ms** | ≥ 395× |
+| `/cod?recon=unproven` | quá hạn 60s | 196ms | ≥ 306× |
+| `/cod?recon=stale` | quá hạn 60s | 191ms | ≥ 314× |
+| `/reports/returns` | quá hạn 60s | 116ms | ≥ 517× |
+| `/ads` | quá hạn 60s | 70ms | ≥ 857× |
+| `/reports` | 2.965ms | 219ms | 13,5× |
+| **`/` (trang chủ)** | quá hạn 60s | **vẫn quá hạn** (làm nóng 80s) | — |
+
+Toàn lượt: **24/25 màn hình đạt · 0 lỗi ứng dụng · 0 sai quyền · 1 quá hạn**.
+
+### Trang chủ vẫn là điểm còn lại
+
+Đúng như dự đoán từ phần đo: `getDashboardData` là hàm nặng nhất, và phần lớn chi phí nằm ở việc
+tính `ORDER_OUTCOME` một lần cho mỗi đơn — thứ mà rào không hạ thêm được nữa.
+
+Đó chính là việc của **P0.3B: vật chất hoá kết quả đơn** (commit `c4f8865`, chưa deploy).
+
+### Ghi chú trung thực về lần deploy
+
+Deploy `ea7091a` vẫn bị đánh **ĐỎ** dù ứng dụng lên đúng bản và 24/25 màn hình tốt — vì trang chủ
+quá hạn. Đã thêm ngân sách cho cả lượt smoke để một trang chậm không còn đốt hết thời gian và kéo
+sập cả lần phát hành; nhưng `TIMEOUT` vẫn **cố ý** bị coi là lỗi thật, không hạ xuống mức cảnh báo.
