@@ -153,3 +153,66 @@ export function testUiConsistency() {
     `✓ Nhất quán giao diện: ${orderStageEnum.enumValues.length + shipmentStageEnum.enumValues.length + codStatusEnum.enumValues.length + Object.keys(OUTCOME_LABEL).length} trạng thái + ${newLabels} danh mục mới đều có nhãn tiếng Việt · bốn chiều mang dấu hiệu riêng · không trang nào tự vẽ lại nhãn kết quả đơn · trang mới có trạng thái rỗng và bảng cuộn được`,
   );
 }
+
+/**
+ * MỌI TRANG ĐÃ LÀM XONG PHẢI CÓ LỐI VÀO TỪ MENU.
+ *
+ * Sự cố thật 09/09/2026: ba trang đã hoàn chỉnh — Mua hàng & xưởng, Giữ chân khách, Mô phỏng kịch
+ * bản — nằm trong kho suốt nhưng **không có dòng nào trong menu**. Người dùng chỉ vào được nếu tình
+ * cờ bấm một nút trên trang khác, hoặc gõ tay đường dẫn. Một tính năng không có lối vào thì với
+ * người dùng nó không tồn tại, và công sức làm ra nó bằng không.
+ *
+ * Bài kiểm này so DANH SÁCH ROUTE THẬT trong `app/(dashboard)` với danh sách `href` trong menu.
+ * Route động (`[id]`) và trang chi tiết cố ý không vào menu — vào được từ danh sách cha.
+ */
+export function testNavigationCoverage() {
+  const sidebar = readFileSync("components/app-sidebar.tsx", "utf8");
+  const linked = new Set([...sidebar.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]));
+
+  /** Trang CỐ Ý không có trong menu, kèm lý do — thêm vào đây phải nêu được vì sao. */
+  const INTENTIONALLY_UNLINKED: Record<string, string> = {
+    "/settings/profile": "vào từ menu người dùng ở góc dưới, không phải điều hướng chính",
+    "/inventory/planning/orders": "danh sách con của Kế hoạch SX, vào từ chính trang đó",
+    "/inventory/planning/orders/new": "hành động tạo mới, không phải một mục menu",
+  };
+
+  const pages = walkPages("app/(dashboard)");
+  const missing: string[] = [];
+  for (const route of pages) {
+    if (route.includes("[")) continue; // trang chi tiết: vào từ danh sách cha
+    if (linked.has(route) || route in INTENTIONALLY_UNLINKED) continue;
+    missing.push(route);
+  }
+
+  assert.deepEqual(
+    missing,
+    [],
+    `những trang này đã làm xong nhưng KHÔNG có lối vào từ menu — với người dùng chúng không tồn tại: ${missing.join(", ")}`,
+  );
+
+  // Chiều ngược lại cũng phải đúng: menu không được trỏ tới trang không có thật.
+  const routeSet = new Set(pages);
+  for (const href of linked) {
+    const path = href.split("?")[0];
+    assert.ok(routeSet.has(path), `menu trỏ tới ${href} nhưng không có trang nào ở đó — bấm vào là 404`);
+  }
+
+  console.log(`✓ Điều hướng: ${pages.length} trang, ${linked.size} mục menu, 0 trang bị bỏ quên, 0 mục menu trỏ vào chỗ trống`);
+}
+
+/** Liệt kê mọi route có `page.tsx` dưới một thư mục, trả về đường dẫn URL (bỏ nhóm `(...)`). */
+function walkPages(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string, url: string) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const seg = entry.name.startsWith("(") && entry.name.endsWith(")") ? "" : `/${entry.name}`;
+        walk(`${d}/${entry.name}`, url + seg);
+      } else if (entry.name === "page.tsx") {
+        out.push(url || "/");
+      }
+    }
+  };
+  walk(dir, "");
+  return out.sort();
+}

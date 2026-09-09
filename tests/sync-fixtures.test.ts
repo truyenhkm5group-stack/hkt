@@ -52,7 +52,7 @@ import { testAccessControl } from "./access-control.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
-import { testUiConsistency } from "./ui-consistency.test";
+import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -1165,6 +1165,7 @@ async function main() {
   await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testUiConsistency();
+  testNavigationCoverage();
   testLoadingUxContract();
   testDrilldownContract();
   testAlertConfig();
