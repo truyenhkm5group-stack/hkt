@@ -9,10 +9,18 @@
  */
 import "dotenv/config";
 import { resolvePeriod } from "@/lib/search-params";
+import { clearMemo } from "@/lib/cache";
 
 const results: { page: string; fn: string; ms: number; note: string }[] = [];
 
+/**
+ * XOÁ ĐỆM TRƯỚC MỖI PHÉP ĐO.
+ *
+ * Lượt đo đầu tiên đã lấp đệm cho các lượt sau: `getControlTower` từng ra 0ms chỉ vì trang chủ vừa
+ * gọi nó xong. Không xoá thì bảng xếp hạng nói dối, và ta đi sửa nhầm hàm.
+ */
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
+  clearMemo();
   const t0 = Date.now();
   try {
     const out = await run();
@@ -28,6 +36,10 @@ async function main() {
   // Đúng kỳ mặc định của từng trang: đó là thứ người dùng thật mở ra.
   const month = resolvePeriod({ period: "30d" }, "30d");
   const all = resolvePeriod({ period: "all" }, "all");
+
+  // Đo TRUNG TÂM ĐIỀU KHIỂN TRƯỚC trang chủ: trang chủ gọi nó bên trong, nên đo sau là đo đệm.
+  const tower = await import("@/lib/queries/control-tower");
+  await timed("/ (thành phần)", "getControlTower", () => tower.getControlTower());
 
   const cod = await import("@/lib/queries/cod-settlement");
   await timed("/cod", "codSettlementSummary", () => cod.codSettlementSummary(month));
@@ -45,12 +57,12 @@ async function main() {
 
   const dash = await import("@/lib/queries/dashboard");
   await timed("/", "getDashboardData", () => dash.getDashboardData(month));
-  const tower = await import("@/lib/queries/control-tower");
-  await timed("/", "getControlTower", () => tower.getControlTower());
-
   // Trang NHANH để đối chiếu — nếu mọi thứ đều chậm thì vấn đề nằm ở chỗ khác.
   const ads = await import("@/lib/queries/ads-roas");
-  await timed("/ads (đối chiếu)", "adsRoas", () => ads.getAdsRoas(all, "campaign"));
+  // Kỳ MẶC ĐỊNH của trang (30 ngày) và kỳ TOÀN BỘ — chênh nhau bao nhiêu cho biết chi phí đi theo
+  // lượng dữ liệu hay theo số câu truy vấn.
+  await timed("/ads", "adsRoas 30 ngày", () => ads.getAdsRoas(month, "campaign"));
+  await timed("/ads", "adsRoas toàn kỳ", () => ads.getAdsRoas(all, "campaign"));
 
   results.sort((a, b) => b.ms - a.ms);
   console.log("\n── THỜI GIAN TỪNG TRUY VẤN (chậm nhất trước) ──");
