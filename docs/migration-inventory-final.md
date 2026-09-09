@@ -5,8 +5,11 @@
 
 ## Kết luận
 
-**44/44 migration trong kho đã được áp trên production. Không thiếu bản nào, không trùng bản nào,
+**44/44 migration cũ trong kho đã được áp trên production. Không thiếu bản nào, không trùng bản nào,
 không có bản nào bị bỏ qua.** Mọi băm nội dung đều khớp.
+
+Bản **0045** là bản mới của phiên tiếp quản, mốc `1788945579898` — lớn hơn mốc áp gần nhất nên chắc
+chắn được áp ở lần deploy tới.
 
 ## Cách drizzle quyết định áp hay bỏ qua
 
@@ -43,19 +46,13 @@ sửa tay mốc trong sổ.
 | 41 | 1788839392150 | `0043_return_inspections` | 1788839392150 | khớp |
 | 42 | 1788945576898 | `0042_bank_ledger` | 1788945576898 | khớp |
 | 43 | 1788945577898 | `0044_cost_authority` | 1788945577898 | khớp |
-| 44 | 1788945578898 | `0041_shipment_return_leg_index` | **1788940601682** | **mốc trong sổ khác mốc đã ghi khi áp** |
+| 44 | 1788945578898 | `0041_shipment_return_leg_index` | 1788945578898 | khớp (đã sửa ở `2d09a60`) |
 
 ### Về dòng 44
 
-`0041_shipment_return_leg_index` **đã được áp** (băm khớp tuyệt đối). Nhưng sổ trong kho hiện ghi
-`when = 1788940601682`, còn production ghi `created_at = 1788945578898` — tức là mốc trong sổ **đã bị
-sửa sau khi bản đó được áp** (commit `2d09a60`, để cứu chính nó khỏi bị bỏ qua).
-
-**Không được sửa lại.** Lý do: bản đó đã áp rồi, và nếu nâng mốc trong sổ lên trên 1788945578898 thì
-drizzle sẽ **áp LẠI** nó. Để nguyên thì mốc trong sổ nhỏ hơn mốc áp gần nhất ⇒ không bao giờ chạy
-lại. Đây là trạng thái an toàn.
-
-Với CSDL dựng mới từ đầu, thứ tự áp đọc theo mảng trong sổ nên vẫn đúng.
+`0041_shipment_return_leg_index` từng suýt bị bỏ qua vĩnh viễn: mốc của nó trong sổ cũ hơn bản áp gần
+nhất. Commit `2d09a60` đã sửa mốc thành đúng `1788945578898` và chuyển mục xuống cuối mảng, nên bây
+giờ **sổ khớp tuyệt đối với production ở cả 44 dòng**.
 
 ## Thứ tự trong sổ (10 mục cuối)
 
@@ -68,9 +65,10 @@ Với CSDL dựng mới từ đầu, thứ tự áp đọc theo mảng trong s�
 | 39 | `0039_marketing_ideas` | 39 | 1788839390150 |
 | 40 | `0038_fb_ads_post_link` | 40 | 1788839391150 |
 | 41 | `0043_return_inspections` | 43 | 1788839392150 |
-| 42 | `0041_shipment_return_leg_index` | 41 | 1788940601682 |
-| 43 | `0042_bank_ledger` | 42 | 1788945576898 |
-| 44 | `0044_cost_authority` | 44 | 1788945577898 |
+| 42 | `0042_bank_ledger` | 42 | 1788945576898 |
+| 43 | `0044_cost_authority` | 44 | 1788945577898 |
+| 44 | `0041_shipment_return_leg_index` | 41 | 1788945578898 |
+| 45 | `0045_case_resolution_source` | 45 | 1788945579898 | *(bản mới, chưa áp)* |
 
 Số hiệu file **không** theo thứ tự áp (0043 áp trước 0041). Đó là kết quả của bốn phiên làm việc song
 song, và **cố ý không sửa** — đổi tên file là tạo mục mới và drizzle sẽ áp lại. Thứ tự đọc được nằm ở

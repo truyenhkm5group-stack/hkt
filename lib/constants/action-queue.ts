@@ -371,13 +371,15 @@ export function priorityOf(score: number): CasePriority {
  * phải tách khỏi "đã xong", nếu không người vận hành buộc phải bấm "xong" cho việc mình cố ý không
  * làm — biến số "đã xong" thành con số vô nghĩa.
  */
-export type CaseStatus = "OPEN" | "ACKNOWLEDGED" | "IN_PROGRESS" | "RESOLVED" | "IGNORED";
+export type CaseStatus = "OPEN" | "ACKNOWLEDGED" | "IN_PROGRESS" | "RESOLVED" | "AUTO_RESOLVED" | "CLOSED_STALE" | "IGNORED";
 
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   OPEN: "Chưa ai nhận",
   ACKNOWLEDGED: "Đã tiếp nhận",
   IN_PROGRESS: "Đang làm",
-  RESOLVED: "Đã xong",
+  RESOLVED: "Người xử lý xong",
+  AUTO_RESOLVED: "Điều kiện tự hết",
+  CLOSED_STALE: "Đóng vì thôi theo dõi",
   IGNORED: "Bỏ qua có lý do",
 };
 
@@ -385,21 +387,39 @@ export const CASE_STATUS_TONE: Record<CaseStatus, string> = {
   OPEN: "bg-muted text-muted-foreground",
   ACKNOWLEDGED: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   IN_PROGRESS: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  // Người làm xong = màu công trạng. Điều kiện tự hết = màu trung tính: không ai làm gì cả.
   RESOLVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  AUTO_RESOLVED: "bg-muted text-muted-foreground",
+  CLOSED_STALE: "bg-muted text-muted-foreground",
   IGNORED: "bg-muted text-muted-foreground line-through",
 };
 
 /** Trạng thái còn phải làm — dùng cho mọi phép đếm "việc đang mở". */
 export const ACTIVE_CASE_STATUSES: CaseStatus[] = ["OPEN", "ACKNOWLEDGED", "IN_PROGRESS"];
 
-/** Suy ra trạng thái từ các mốc thời gian. Một chỗ duy nhất, thứ tự ưu tiên cố định. */
+/**
+ * Suy ra trạng thái từ các mốc thời gian. Một chỗ duy nhất, thứ tự ưu tiên cố định.
+ *
+ * "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM". Ba đường dẫn tới cùng một cột `resolved_at` nhưng nói ba chuyện
+ * khác hẳn nhau, nên phải hiện ra ba nhãn khác nhau:
+ *   · người bấm đóng          ⇒ RESOLVED       — có công của đội, đếm được vào năng suất;
+ *   · điều kiện phát hiện hết ⇒ AUTO_RESOLVED  — không ai làm gì, đơn tự đi tiếp;
+ *   · loại cảnh báo bị tắt    ⇒ CLOSED_STALE   — thôi theo dõi, KHÔNG phải đã xử lý.
+ * `UNKNOWN` (dòng đóng trước khi có cột này) cũng về AUTO_RESOLVED nhưng KHÔNG được tính là công của
+ * ai — xem `queueThroughput`.
+ */
 export function caseStatusOf(row: {
   resolvedAt?: Date | null;
+  resolution?: string | null;
   ignoredAt?: Date | null;
   startedAt?: Date | null;
   acknowledgedAt?: Date | null;
 }): CaseStatus {
-  if (row.resolvedAt) return "RESOLVED";
+  if (row.resolvedAt) {
+    if (row.resolution === "MANUAL") return "RESOLVED";
+    if (row.resolution === "STALE") return "CLOSED_STALE";
+    return "AUTO_RESOLVED";
+  }
   if (row.ignoredAt) return "IGNORED";
   if (row.startedAt) return "IN_PROGRESS";
   if (row.acknowledgedAt) return "ACKNOWLEDGED";

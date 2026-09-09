@@ -625,7 +625,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -668,15 +668,33 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   const { candidates, activeKinds } = await collectCandidates();
   const keys = candidates.map((c) => c.dedupeKey);
 
-  // đóng thông báo mở của các loại đang xét mà điều kiện không còn
+  // ĐÓNG VIỆC MÀ ĐIỀU KIỆN KHÔNG CÒN — và khai rõ là HỆ THỐNG đóng, không phải người.
+  // `resolution = 'AUTO'` là điều làm cho "đội xử lý được bao nhiêu việc" trở thành câu hỏi trả lời
+  // được: không có nó thì đơn tự đi tiếp cũng trông y như có người ngồi làm.
   let resolved = 0;
   if (activeKinds.length) {
     const closed = await db
       .update(n)
-      .set({ resolvedAt: new Date() })
+      .set({ resolvedAt: new Date(), resolution: "AUTO" })
       .where(and(isNull(n.resolvedAt), inArray(n.kind, activeKinds), keys.length ? notInArray(n.dedupeKey, keys) : sql`true`))
       .returning({ id: n.id });
     resolved = closed.length;
+  }
+
+  // VIỆC CỦA LOẠI CẢNH BÁO ĐÃ BỊ TẮT.
+  //
+  // Trước đây vòng đóng ở trên chỉ chạm các loại ĐANG BẬT, nên tắt một loại cảnh báo đi thì việc cũ
+  // của nó nằm lại trong hàng đợi vĩnh viễn: không ai sinh thêm, cũng không gì đóng chúng. Chủ shop
+  // tắt cảnh báo nghĩa là thôi theo dõi, nên việc phải rời hàng đợi — nhưng gắn nhãn STALE để không
+  // ai nhầm nó với việc đã được xử lý.
+  let stale = 0;
+  if (activeKinds.length) {
+    const closedStale = await db
+      .update(n)
+      .set({ resolvedAt: new Date(), resolution: "STALE" })
+      .where(and(isNull(n.resolvedAt), notInArray(n.kind, [...activeKinds, "SYSTEM"])))
+      .returning({ id: n.id });
+    stale = closedStale.length;
   }
 
   // tạo mới (bỏ qua khoá đã có, kể cả đã đóng — tránh báo lại cùng một mốc)
@@ -723,7 +741,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     }
   }
   if (created.length || resolved) publish({ type: "notification", open: Number(open) });
-  return { created: created.length, resolved, reclassified: reclassified.length, open: Number(open), telegram, lark };
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };

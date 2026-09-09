@@ -217,6 +217,24 @@ export const notifications = pgTable(
     readBy: jsonb("read_by").$type<string[]>().notNull().default([]),
     /** Tự đóng khi điều kiện không còn (đơn đã giao / đã xử lý) */
     resolvedAt: ts("resolved_at"),
+    /**
+     * AI ĐÓNG VIỆC NÀY — `NULL` nghĩa là HỆ THỐNG tự đóng, không phải người.
+     *
+     * Vì sao phải tách: trước đây cả hai đường đều chỉ ghi `resolved_at`, nên "điều kiện tự hết"
+     * và "có người ngồi làm xong" trông y hệt nhau. Production 09/09/2026 có 3.896 việc đã đóng mà
+     * không ai trả lời được bao nhiêu trong đó là công của đội. Lấy con số đó đo năng suất là đo
+     * nhầm.
+     */
+    resolvedBy: text("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * VÌ SAO ĐÓNG:
+     *  · `MANUAL` — người bấm đóng, đã làm xong.
+     *  · `AUTO`   — điều kiện phát hiện không còn (đơn đã giao, hàng đã về, tiền đã về).
+     *  · `STALE`  — loại cảnh báo này bị tắt nên việc cũ không còn ai theo dõi. KHÔNG phải đã xử lý.
+     *  · `UNKNOWN`— việc đã đóng TRƯỚC khi có cột này (3.896 dòng lịch sử). Không suy đoán ngược:
+     *               chưa biết ai đóng thì ghi là chưa biết, không gán bừa cho hệ thống hay cho người.
+     */
+    resolution: text("resolution"),
     /** Đã gửi Telegram lúc */
     notifiedAt: ts("notified_at"),
     /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
@@ -247,6 +265,10 @@ export const notifications = pgTable(
     index("notifications_kind_idx").on(t.kind),
     index("notifications_assigned_idx").on(t.assignedTo, t.resolvedAt),
     index("notifications_workflow_idx").on(t.resolvedAt, t.ignoredAt, t.startedAt),
+    check("notifications_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('MANUAL', 'AUTO', 'STALE', 'UNKNOWN')`),
+    // Đã đóng thì phải nói được VÌ SAO đóng; và chỉ đóng tay mới có người đóng.
+    check("notifications_resolution_shape_check", sql`(${t.resolvedAt} IS NULL) = (${t.resolution} IS NULL)`),
+    check("notifications_resolver_check", sql`${t.resolvedBy} IS NULL OR ${t.resolution} = 'MANUAL'`),
   ],
 );
 

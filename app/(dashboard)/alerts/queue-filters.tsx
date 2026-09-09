@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useNavTransition } from "@/components/nav-progress";
-import { CASE_STATUS_LABEL, CASE_TYPE_LABEL, PRIORITY_LABEL, QUEUE_SORT_LABEL, type CaseStatus, type CaseType } from "@/lib/constants/action-queue";
+import { CASE_STATUS_LABEL, CASE_TYPE_LABEL, PRIORITY_LABEL, QUEUE_SORT_LABEL, TEAM_LABEL, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -14,9 +14,12 @@ import { Button } from "@/components/ui/button";
  */
 export function QueueFilters({
   types,
+  teams,
   staff,
 }: {
   types: { type: CaseType; label: string; count: number }[];
+  /** Chia theo bộ phận — người mở trang lọc ra đúng phần việc của mình trước khi xếp thứ tự. */
+  teams: { team: CaseTeam; count: number; urgent: number; breached: number }[];
   staff: { id: string; name: string }[];
 }) {
   const router = useRouter();
@@ -32,10 +35,19 @@ export function QueueFilters({
 
   const value = (key: string) => params.get(key) ?? "";
   const box = "h-8 rounded-md border bg-background px-2 text-xs";
-  const active = ["type", "priority", "status", "owner", "minAmount", "breached", "sort"].some((k) => params.get(k));
+  const active = ["team", "type", "priority", "status", "owner", "minAmount", "breached", "sort"].some((k) => params.get(k));
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <select className={box} value={value("team")} onChange={(e) => set("team", e.target.value)} aria-label="Lọc theo bộ phận">
+        <option value="">Mọi bộ phận</option>
+        {teams.map((t) => (
+          <option key={t.team} value={t.team}>
+            {TEAM_LABEL[t.team]} ({t.count}{t.breached ? ` · ${t.breached} trễ` : ""})
+          </option>
+        ))}
+      </select>
+
       <select className={box} value={value("type")} onChange={(e) => set("type", e.target.value)} aria-label="Lọc theo loại việc">
         <option value="">Mọi loại việc</option>
         {types.map((t) => (

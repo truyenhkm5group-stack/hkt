@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { CASE_SLA_HOURS, CASE_TYPE_LABEL, RECOVERABILITY, TEAM_LABEL, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor, teamOf, type CaseType } from "@/lib/constants/action-queue";
-import { getActionQueue } from "@/lib/queries/action-queue";
+import { CASE_SLA_HOURS, CASE_STATUS_LABEL, CASE_TYPE_LABEL, caseStatusOf, RECOVERABILITY, TEAM_LABEL, caseScore, caseScoreBreakdown, caseTypeOf, priorityOf, scoreExplanation, slaFor, teamOf, type CaseType } from "@/lib/constants/action-queue";
+import { getActionQueue, queueThroughput } from "@/lib/queries/action-queue";
 
 /**
  * HÀNG ĐỢI VIỆC.
@@ -158,8 +158,12 @@ export async function testActionQueue(db: Db) {
     assert.ok(afterIgnore.financialImpact <= afterStart.financialImpact, "tiền của việc đã bỏ qua không được cộng vào tổng đang treo");
   }
 
-  // Đóng việc thì nó rời khỏi hàng đợi.
-  await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(eq(schema.notifications.id, target.id));
+  // Đóng việc thì nó rời khỏi hàng đợi. Ràng buộc CSDL bắt phải khai VÌ SAO đóng — không có đường
+  // nào đóng một việc mà không nói nó được đóng bằng cách nào.
+  await db
+    .update(schema.notifications)
+    .set({ resolvedAt: new Date(), resolution: "MANUAL", resolvedBy: null })
+    .where(eq(schema.notifications.id, target.id));
   const afterResolve = await getActionQueue({ limit: 200 });
   assert.equal(afterResolve.cases.find((c) => c.id === target.id), undefined, "việc đã xong không còn nằm trong hàng đợi");
 
@@ -233,6 +237,32 @@ export async function testActionQueue(db: Db) {
     queue.byTeam.every((t) => t.unassigned <= t.count && t.breached <= t.count && t.urgent <= t.count),
     "số phụ của mỗi nhóm không được vượt tổng của chính nhóm đó",
   );
+
+  // ───────── "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM" ─────────
+  //
+  // Ba đường dẫn tới cùng cột `resolved_at` nhưng nói ba chuyện khác hẳn nhau. Trước đây cả ba ghi
+  // giống hệt nhau, nên 3.896 việc đã đóng trên production không trả lời được câu "đội xử lý được
+  // bao nhiêu". Lấy con số đó đo năng suất là đo nhầm.
+  assert.equal(caseStatusOf({ resolvedAt: new Date(), resolution: "MANUAL" }), "RESOLVED", "người bấm đóng là công của đội");
+  assert.equal(caseStatusOf({ resolvedAt: new Date(), resolution: "AUTO" }), "AUTO_RESOLVED", "điều kiện tự hết KHÔNG phải công của ai");
+  assert.equal(caseStatusOf({ resolvedAt: new Date(), resolution: "STALE" }), "CLOSED_STALE", "tắt cảnh báo là thôi theo dõi, không phải đã xử lý");
+  assert.equal(caseStatusOf({ resolvedAt: new Date(), resolution: "UNKNOWN" }), "AUTO_RESOLVED", "dòng lịch sử không được tính là công của người");
+  assert.equal(caseStatusOf({ resolvedAt: new Date() }), "AUTO_RESOLVED", "thiếu nguồn gốc thì KHÔNG được mặc định là người làm");
+  // Mốc bỏ qua vẫn thắng khi chưa đóng, và thứ tự ưu tiên không đổi.
+  assert.equal(caseStatusOf({ ignoredAt: new Date() }), "IGNORED");
+  assert.equal(caseStatusOf({ startedAt: new Date() }), "IN_PROGRESS");
+  assert.equal(caseStatusOf({}), "OPEN");
+
+  // Nhãn phải nói đúng bản chất — người đọc bảng không được hiểu "tự đóng" thành "đã xử lý".
+  assert.notEqual(CASE_STATUS_LABEL.AUTO_RESOLVED, CASE_STATUS_LABEL.RESOLVED, "hai trạng thái khác nhau phải có hai nhãn khác nhau");
+  assert.ok(!CASE_STATUS_LABEL.AUTO_RESOLVED.includes("xong"), "nhãn 'tự đóng' không được gợi ý là ai đó làm xong");
+
+  // Thông lượng: phần trăm do người làm chỉ tính trên phần ĐÃ BIẾT nguồn gốc.
+  const tp = await queueThroughput(null, null);
+  assert.ok(tp.byPeople >= 0 && tp.automatic >= 0 && tp.stale >= 0 && tp.unknown >= 0);
+  if (tp.byPeople + tp.automatic + tp.stale === 0) {
+    assert.equal(tp.peopleShare, null, "chưa biết gì thì tỷ lệ phải là CHƯA BIẾT, không phải 0%");
+  }
 
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ${queue.byTeam.length} bộ phận (${queue.byTeam.map((t) => `${TEAM_LABEL[t.team]} ${t.count}`).join(" · ")}) · ưu tiên theo quy tắc giải thích được`,

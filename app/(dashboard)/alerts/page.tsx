@@ -9,9 +9,9 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { NOTIFICATION_KIND_LABEL, NOTIFICATION_KIND_ORDER, SEVERITY_TONE } from "@/lib/constants/alerts";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { countOpenNotifications, listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
-import { getActionQueue } from "@/lib/queries/action-queue";
+import { getActionQueue, queueThroughput } from "@/lib/queries/action-queue";
 import { assignableUsers } from "@/lib/actions/alerts";
-import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type CasePriority, type CaseStatus, type CaseType } from "@/lib/constants/action-queue";
+import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   // đường dẫn gửi cho nhau được.
   const ownerRaw = one("owner");
   const filter = {
+    team: (one("team") || undefined) as CaseTeam | undefined,
     type: (one("type") || undefined) as CaseType | undefined,
     priority: (one("priority") || undefined) as CasePriority | undefined,
     status: (one("status") || undefined) as CaseStatus | undefined,
@@ -44,13 +45,15 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   */
   const page = Math.max(1, Number(one("page")) || 1);
   const pageSize = Math.min(200, Math.max(10, Number(one("pageSize")) || 50));
-  const [items, openTotal, counts, config, queue, staff] = await Promise.all([
+  const [items, openTotal, counts, config, queue, staff, throughput] = await Promise.all([
     listOpenNotifications(pageSize, { offset: (page - 1) * pageSize, kind: kindFilter || undefined }),
     countOpenNotifications(kindFilter || undefined),
     openCountsByKind(),
     loadAlertConfig(),
     getActionQueue({ limit: 300, filter }),
     assignableUsers(),
+    // 30 ngày gần nhất: đủ dài để có mẫu, đủ ngắn để nói về cách làm việc hiện tại.
+    queueThroughput(new Date(Date.now() - 30 * 86_400_000), new Date()),
   ]);
   // Hàng đợi việc có bộ lọc riêng (theo LOẠI VIỆC); các thẻ đếm ở trên lọc danh sách cảnh báo thô
   // bên dưới (theo LOẠI CẢNH BÁO). Hai thứ khác nhau, trước đây chồng lên nhau nên lọc một cái là
@@ -85,10 +88,57 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <SectionCard
         title={`Hàng đợi việc — ${formatNumber(queue.total)} việc`}
         description={`${formatNumber(queue.totals.URGENT)} gấp · ${formatNumber(queue.totals.HIGH)} cao · ${formatNumber(queue.unassigned)} chưa ai nhận${queue.neglected ? ` · ${formatNumber(queue.neglected)} bị bỏ quên quá 3 ngày` : ""}${queue.breached ? ` · ${formatNumber(queue.breached)} TRỄ HẠN` : ""}${queue.financialImpact > 0 ? ` · ${formatVND(queue.financialImpact)} đang treo` : ""}${queue.matched !== queue.total ? ` · đang xem ${formatNumber(queue.matched)}/${formatNumber(queue.total)}` : ""}`}
-        actions={<QueueFilters types={queue.byType} staff={staff} />}
+        actions={<QueueFilters types={queue.byType} teams={queue.byTeam} staff={staff} />}
         hint="Mức ưu tiên tính bằng quy tắc, không phải cảm tính: mức nghiêm trọng + tuổi việc + tiền đang treo + KHẢ NĂNG CỨU ĐƯỢC + có khách đang chờ + sắp cháy hàng. Đơn giao thất bại còn gọi lại được nên đứng trên đơn đã hoàn xong — việc không cứu được nữa thì gấp cũng vô ích. Rê chuột lên mức ưu tiên để xem từng phần điểm."
         padded={false}
       >
+        {/*
+          ĐỘI THỰC SỰ ĐÓNG ĐƯỢC BAO NHIÊU VIỆC — 30 ngày.
+          "Đã đóng" gộp ba chuyện khác hẳn nhau: người làm xong · điều kiện tự hết · thôi theo dõi.
+          Không tách ra thì con số 3.896 việc đã đóng không nói lên điều gì về đội.
+        */}
+        {throughput.byPeople + throughput.automatic + throughput.stale + throughput.unknown > 0 ? (
+          <p className="border-b px-5 py-2.5 text-xs text-muted-foreground">
+            30 ngày qua đã đóng: <strong className="text-foreground">{formatNumber(throughput.byPeople)}</strong> việc do người xử lý
+            {throughput.peopleShare !== null ? ` (${throughput.peopleShare}%)` : ""} · {formatNumber(throughput.automatic)} tự đóng vì điều
+            kiện hết
+            {throughput.stale ? ` · ${formatNumber(throughput.stale)} thôi theo dõi` : ""}
+            {throughput.ignored ? ` · ${formatNumber(throughput.ignored)} bỏ qua có lý do` : ""}
+            {throughput.unknown ? ` · ${formatNumber(throughput.unknown)} đóng trước khi ERP ghi được ai đóng` : ""}
+          </p>
+        ) : null}
+
+        {/*
+          CHIA VIỆC THEO BỘ PHẬN.
+          Một hàng đợi gần nghìn việc xếp đúng thứ tự vẫn không chạy nếu ai mở lên cũng thấy toàn
+          việc của người khác. Dải này trả lời "việc này của bộ phận nào" trước khi hỏi "làm cái nào
+          trước", và bấm vào là lọc ra đúng phần đó.
+        */}
+        {queue.byTeam.length > 1 ? (
+          <div className="flex flex-wrap gap-2 border-b px-5 py-3">
+            {queue.byTeam.map((t) => {
+              const params = new URLSearchParams();
+              if (one("team") !== t.team) params.set("team", t.team);
+              const href = params.toString() ? `/alerts?${params.toString()}` : "/alerts";
+              return (
+                <Link
+                  key={t.team}
+                  href={href}
+                  className={cn(
+                    "rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-accent",
+                    one("team") === t.team && "border-primary bg-accent font-semibold",
+                  )}
+                >
+                  <span>{TEAM_LABEL[t.team]}</span>
+                  <span className="numeric ml-1.5 font-semibold">{formatNumber(t.count)}</span>
+                  {t.breached ? <span className="ml-1.5 text-destructive">{formatNumber(t.breached)} trễ</span> : null}
+                  {t.financialImpact > 0 ? <span className="ml-1.5 text-muted-foreground">{formatVND(t.financialImpact)}</span> : null}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+
         {visibleCases.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted-foreground">
             {queue.total ? "Không có việc nào khớp bộ lọc đang chọn." : "Không có việc nào đang mở."}

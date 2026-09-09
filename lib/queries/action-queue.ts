@@ -310,3 +310,60 @@ export async function getActionQueue(options: { limit?: number; assignedTo?: str
 
   return { cases: visible, totals, byType, byTeam, unassigned, neglected, financialImpact, breached, matched: visible.length, total: cases.length };
 }
+
+/**
+ * ───────────── ĐỘI THỰC SỰ XỬ LÝ ĐƯỢC BAO NHIÊU VIỆC ─────────────
+ *
+ * Câu hỏi tưởng dễ mà trước đây ERP không trả lời được. Cột `resolved_at` gộp ba chuyện khác hẳn
+ * nhau: người ngồi làm xong, điều kiện tự hết (đơn đi tiếp, tiền về, hàng về), và loại cảnh báo bị
+ * tắt. Production 09/09/2026 có 3.896 việc đã đóng — lấy con số đó báo cáo năng suất là báo nhầm,
+ * vì phần lớn có thể chẳng ai đụng vào.
+ *
+ * `chuaBiet` là các việc đóng TRƯỚC khi có cột nguồn gốc. Cố ý giữ riêng thay vì đoán: chưa biết thì
+ * là chưa biết, không dồn vào bên nào để bảng trông đẹp.
+ */
+export type QueueThroughput = {
+  /** Người bấm đóng — công của đội, đếm được. */
+  byPeople: number;
+  /** Điều kiện phát hiện không còn. Không ai làm gì cả. */
+  automatic: number;
+  /** Loại cảnh báo bị tắt nên thôi theo dõi. KHÔNG phải đã xử lý. */
+  stale: number;
+  /** Đóng trước khi có cột nguồn gốc — không quy được cho ai. */
+  unknown: number;
+  /** Bỏ qua có lý do. */
+  ignored: number;
+  /** Tỷ lệ việc đóng được là do người làm, trên phần ĐÃ BIẾT nguồn gốc. `null` khi chưa biết gì. */
+  peopleShare: number | null;
+};
+
+export async function queueThroughput(from: Date | null, to: Date | null): Promise<QueueThroughput> {
+  const db = await getDb();
+  const window =
+    from && to
+      ? sql`${n.resolvedAt} between ${from.toISOString()}::timestamptz and ${to.toISOString()}::timestamptz`
+      : sql`${n.resolvedAt} is not null`;
+  const [row] = await db
+    .select({
+      byPeople: sql<number>`count(*) filter (where ${n.resolution} = 'MANUAL')`,
+      automatic: sql<number>`count(*) filter (where ${n.resolution} = 'AUTO')`,
+      stale: sql<number>`count(*) filter (where ${n.resolution} = 'STALE')`,
+      unknown: sql<number>`count(*) filter (where ${n.resolution} = 'UNKNOWN' or ${n.resolution} is null)`,
+      ignored: sql<number>`count(*) filter (where ${n.ignoredAt} is not null)`,
+    })
+    .from(n)
+    .where(window);
+
+  const byPeople = Number(row?.byPeople ?? 0);
+  const automatic = Number(row?.automatic ?? 0);
+  const stale = Number(row?.stale ?? 0);
+  const known = byPeople + automatic + stale;
+  return {
+    byPeople,
+    automatic,
+    stale,
+    unknown: Number(row?.unknown ?? 0),
+    ignored: Number(row?.ignored ?? 0),
+    peopleShare: known > 0 ? Math.round((byPeople / known) * 1000) / 10 : null,
+  };
+}

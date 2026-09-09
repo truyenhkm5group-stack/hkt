@@ -110,7 +110,11 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const db = await getDb();
   const [before] = await db.select({ title: schema.notifications.title, kind: schema.notifications.kind }).from(schema.notifications).where(eq(schema.notifications.id, id));
-  await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(inArray(schema.notifications.id, [id]));
+  // Ghi RÕ là người đóng: đây là công của đội, phải tách khỏi việc điều kiện tự hết.
+  await db
+    .update(schema.notifications)
+    .set({ resolvedAt: new Date(), resolvedBy: user.id, resolution: "MANUAL" })
+    .where(inArray(schema.notifications.id, [id]));
   // Đóng việc bằng tay là quyết định vận hành: ai đóng, đóng việc gì, lúc nào.
   await audit({ userId: user.id, userEmail: user.email, action: "case.resolve", entity: "NOTIFICATION", entityId: id, detail: { title: before?.title ?? "", kind: before?.kind ?? "" } });
   revalidatePath("/alerts");

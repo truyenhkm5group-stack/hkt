@@ -309,6 +309,13 @@
       "when": 1788945578898,
       "tag": "0041_shipment_return_leg_index",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788945579898,
+      "tag": "0045_case_resolution_source",
+      "breakpoints": true
     }
   ]
 }
