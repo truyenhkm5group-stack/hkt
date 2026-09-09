@@ -4,7 +4,8 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { IS_RETURNED } from "@/lib/queries/metrics";
+import { IS_RETURNED, metricScope } from "@/lib/queries/metrics";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { getProfitReport } from "@/lib/queries/reports";
@@ -148,7 +149,40 @@ export async function testMetricShapeConsistency(db: Db) {
     );
   }
 
+  // ───────── CHÂN LÝ TÀI CHÍNH: bảng dẫn xuất vs nội tuyến ─────────
+  //
+  // Đo trên production 09/09/2026: `getFinancialTruth` mất 20,5 GIÂY để trả về 2kB, vì mười hai cột
+  // gộp của nó cột nào cũng nội tuyến trọn `ORDER_OUTCOME`. Đã bọc vào bảng dẫn xuất kèm rào.
+  //
+  // Đây là những con số TIỀN quan trọng nhất của shop, nên "tăng tốc không đổi số" phải được CHỨNG
+  // MINH: tính lại đúng cách nội tuyến cũ rồi so từng con số một.
+  clearMemo();
+  const truth = await getFinancialTruth(ALL);
+  const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
+  const [naive] = await db
+    .select({
+      bookedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
+      bookedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} <> 'CANCELLED')`,
+      deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      deliveredOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returnedOrders: sql<number>`count(*) filter (where ${IS_RETURNED})`,
+      shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${IS_RETURNED}), 0)`,
+    })
+    .from(o)
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(metricScope(ALL, "confirmed"));
+
+  assert.equal(truth.revenue.booked, Number(naive.bookedRevenue), "doanh thu lên đơn phải giống hệt cách tính nội tuyến");
+  assert.equal(truth.revenue.bookedOrders, Number(naive.bookedOrders), "số đơn lên đơn phải giống hệt");
+  assert.equal(truth.revenue.delivered, Number(naive.deliveredRevenue), "doanh thu giao thành công phải giống hệt");
+  assert.equal(truth.revenue.deliveredOrders, Number(naive.deliveredOrders), "số đơn giao thành công phải giống hệt");
+  // Cước nằm trong bảng phân rã lợi nhuận góp; đối chiếu qua đúng dòng của nó.
+  const shipLine = truth.waterfall.find((l) => l.key === "shipping_out");
+  assert.ok(shipLine, "phải có dòng cước gửi hàng trong bảng phân rã");
+  assert.equal(Math.abs(shipLine.amount), Number(naive.shippingDelivered), "cước chiều giao phải giống hệt cách tính nội tuyến");
+
   console.log(
-    `✓ Lớp tăng tốc không đổi số liệu: ${compared} mẫu mã khớp từng cột với cách tính nguyên thuỷ · Báo cáo lợi nhuận khớp · đệm không đổi kết quả · bộ đếm tồn kho khớp cột tồn (${expected.out} hết hàng · ${expected.low} sắp hết)`,
+    `✓ Lớp tăng tốc không đổi số liệu: ${compared} mẫu mã khớp từng cột với cách tính nguyên thuỷ · Chân lý tài chính khớp 6/6 con số · Báo cáo lợi nhuận khớp · đệm không đổi kết quả · bộ đếm tồn kho khớp cột tồn (${expected.out} hết hàng · ${expected.low} sắp hết)`,
   );
 }

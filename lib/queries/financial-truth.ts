@@ -3,8 +3,8 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_COGS } from "@/lib/queries/cogs";
-import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, IS_RETURNED, metricScope } from "@/lib/queries/metrics";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { metricScope } from "@/lib/queries/metrics";
+import { ORDER_OUTCOME, OUTCOME_FENCE } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -129,24 +129,54 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const scope = metricScope(period, "confirmed");
   const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
 
-  const [orderRow] = await db
+  /**
+   * ───────── TÍNH KẾT QUẢ ĐƠN MỘT LẦN CHO MỖI DÒNG, KHÔNG PHẢI MƯỜI HAI LẦN ─────────
+   *
+   * Đo trên production 09/09/2026: hàm này mất **20,5 giây** để trả về 2kB. Nguyên nhân: mười hai
+   * cột gộp dưới đây, cột nào cũng nội tuyến trọn `ORDER_OUTCOME` (một biểu thức CASE chứa nhiều
+   * truy vấn con tương quan). Postgres không gộp chúng lại được nên mỗi đơn bị tính kết quả mười
+   * hai lần — trang chủ vì thế mất hơn 30 giây và người mở đầu tiên mỗi sáng phải ngồi chờ.
+   *
+   * Bọc vào bảng dẫn xuất kèm rào `OUTCOME_FENCE` thì mỗi dòng tính đúng một lần. Đây là đổi HÌNH
+   * DẠNG truy vấn, KHÔNG đổi công thức: cùng `ORDER_OUTCOME`, cùng phép nối, cùng bộ lọc, nên cùng
+   * con số ra. `tests/metric-shape-consistency.test.ts` chứng minh điều đó bằng cách tính lại theo
+   * cách nội tuyến cũ rồi so từng con số.
+   */
+  const facts = db
     .select({
-      bookedRevenue: BOOKED_REVENUE,
-      bookedOrders: COUNT_BOOKED,
-      deliveredRevenue: DELIVERED_REVENUE,
-      deliveredOrders: COUNT_DELIVERED,
-      deliveredCogs: DELIVERED_COGS,
-      returnedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
-      returnedOrders: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${IS_DELIVERED}), 0)`,
-      shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${IS_RETURNED}), 0)`,
-      returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${IS_RETURNED}), 0)`,
-      prepaid: sql<number>`coalesce(sum(${o.prepaid} + ${o.transferMoney} + ${o.cash}) filter (where ${IS_DELIVERED}), 0)`,
-      missingCogsOrders: sql<number>`count(*) filter (where ${IS_DELIVERED} and ${ORDER_COGS} = 0 and ${o.totalPriceAfterDiscount} > 0)`,
+      revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
+      cogs: sql<number>`${ORDER_COGS}`.as("f_cogs"),
+      fee: sql<number>`${FEE}`.as("f_fee"),
+      returnFee: sql<number>`${o.returnFee}`.as("f_return_fee"),
+      prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),
+      outcome: ORDER_OUTCOME.as("f_outcome"),
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))
-    .where(scope);
+    .where(scope)
+    .offset(OUTCOME_FENCE)
+    .as("truth_facts");
+
+  const isDelivered = sql`${facts.outcome} = 'DELIVERED'`;
+  const isReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const isBooked = sql`${facts.outcome} <> 'CANCELLED'`;
+
+  const [orderRow] = await db
+    .select({
+      bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isBooked}), 0)`,
+      bookedOrders: sql<number>`count(*) filter (where ${isBooked})`,
+      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isDelivered}), 0)`,
+      deliveredOrders: sql<number>`count(*) filter (where ${isDelivered})`,
+      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${isDelivered}), 0)`,
+      returnedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isReturned}), 0)`,
+      returnedOrders: sql<number>`count(*) filter (where ${isReturned})`,
+      shippingDelivered: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isDelivered}), 0)`,
+      shippingReturned: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isReturned}), 0)`,
+      returnFee: sql<number>`coalesce(sum(${facts.returnFee}) filter (where ${isReturned}), 0)`,
+      prepaid: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${isDelivered}), 0)`,
+      missingCogsOrders: sql<number>`count(*) filter (where ${isDelivered} and ${facts.cogs} = 0 and ${facts.revenue} > 0)`,
+    })
+    .from(facts);
 
   // ── Chiều TIỀN: đọc trên vận đơn của đơn trong kỳ, tách rõ ba bậc chứng từ ──
   const [codRow] = await db
