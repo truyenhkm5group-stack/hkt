@@ -1,9 +1,11 @@
-import { Repeat, RotateCcw, UserPlus, Users } from "lucide-react";
+import Link from "next/link";
+import { HeartHandshake, Repeat, RotateCcw, UserPlus, Users } from "lucide-react";
 import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
+import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { customerFacets, customerSummary, CUSTOMER_SORTABLE, listCustomers } from "@/lib/queries/customers";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -24,13 +26,20 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         eyebrow="Vận hành"
         title="Khách hàng"
         description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số liệu Pancake kết hợp đơn hàng trong ERP`}
-        actions={<SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
+            </Button>
+            <SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />
+          </div>
+        }
       />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
         <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên Pancake ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Khách mua lại" value={formatNumber(summary.repeat)} note={`Từ 2 đơn trở lên · ${pct(summary.repeat, summary.withOrders).toFixed(1)}% khách đã mua`} icon={Repeat} tone="primary" />
+        <MetricCard label="Khách mua lại" value={formatNumber(summary.repeat)} note={`Từ 2 đơn trở lên · ${pct(summary.repeat, summary.withOrders).toFixed(1)}% khách đã mua`} hint="Đếm theo ĐƠN ĐÃ ĐẶT, kể cả đơn sau đó hoàn về. Con số tính trên đơn GIAO THÀNH CÔNG — dùng để quyết chi tiền chăm sóc — nằm ở trang Giữ chân khách và luôn thấp hơn." icon={Repeat} tone="primary" />
         <MetricCard label="Tỷ lệ hoàn" value={`${returnRate.toFixed(1)}%`} note={`${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone={returnRate >= 10 ? "rose" : "amber"} />
       </section>
 

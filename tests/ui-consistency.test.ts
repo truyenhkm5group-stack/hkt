@@ -10,6 +10,7 @@ import { CASE_ACTION, CASE_STATUS_LABEL, CASE_STATUS_TONE, CASE_TYPE_LABEL, PRIO
 import { VERDICT_LABEL, VERDICT_TONE, type ProductVerdict } from "@/lib/constants/product-verdict";
 import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, type StockRisk } from "@/lib/constants/slow-moving";
 import { DIMENSION_LABEL, DIMENSION_TONE, type TimelineDimension } from "@/lib/constants/timeline";
+import { CRM_SEGMENT_ACTION, CRM_SEGMENT_LABEL, CRM_SEGMENT_ORDER, CRM_SEGMENT_TONE } from "@/lib/constants/crm";
 import { AREA_LABEL, AREA_TONE, CONFIDENCE_LABEL, type RecommendationArea } from "@/lib/constants/recommendation";
 import { ADS_ANOMALY_LABEL, type AdsAnomalyKind } from "@/lib/constants/ads-anomaly";
 import { ATTRIBUTION_FIELDS } from "@/lib/constants/sales-funnel";
@@ -109,6 +110,11 @@ export function testUiConsistency() {
     assert.ok(f.label.length > 3 && f.note.length > 5, `${f.field}: vai phải có nhãn và nói rõ dùng cho việc gì`);
     newLabels += 1;
   }
+  for (const seg of CRM_SEGMENT_ORDER) {
+    assert.ok(CRM_SEGMENT_LABEL[seg]?.length > 3 && CRM_SEGMENT_TONE[seg], `thiếu nhãn/màu phân khúc khách ${seg}`);
+    assert.ok(CRM_SEGMENT_ACTION[seg]?.length > 20, `${seg}: phải nói NÊN LÀM GÌ với nhóm khách này`);
+    newLabels += 1;
+  }
   for (const c of Object.values(CONFIDENCE_LABEL)) assert.ok(c.length > 5, "mức tin cậy phải đọc được bằng tiếng Việt");
   for (const p of Object.values(PRIORITY_LABEL)) assert.ok(p.length > 2, "mức ưu tiên phải đọc được bằng tiếng Việt");
 
@@ -119,6 +125,7 @@ export function testUiConsistency() {
     ["phân loại mẫu mã", Object.values(VERDICT_LABEL)],
     ["rủi ro tồn kho", Object.values(STOCK_RISK_LABEL)],
     ["chiều dòng thời gian", Object.values(DIMENSION_LABEL)],
+    ["phân khúc khách", Object.values(CRM_SEGMENT_LABEL)],
   ] as const) {
     assert.equal(new Set(values).size, values.length, `${name}: có hai giá trị dùng chung một nhãn`);
   }
@@ -130,13 +137,14 @@ export function testUiConsistency() {
     "app/(dashboard)/products/performance/page.tsx",
     "app/(dashboard)/inventory/planning/slow-moving-section.tsx",
     "app/(dashboard)/inventory/purchasing/page.tsx",
+    "app/(dashboard)/customers/retention/page.tsx",
   ];
+  // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
+  const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
   for (const page of newPages) {
     const src = readFileSync(page, "utf8");
     assert.ok(src.includes("overflow-x-auto"), `${page}: bảng phải nằm trong khung cuộn ngang`);
-  }
-  for (const page of [newPages[0], newPages[1], newPages[3]]) {
-    const src = readFileSync(page, "utf8");
+    if (khongCanTrangThaiRong.includes(page)) continue;
     assert.ok(/Chưa có|Không có/.test(src), `${page}: phải có trạng thái rỗng nói rõ vì sao trống`);
   }
 
