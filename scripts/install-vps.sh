@@ -184,6 +184,15 @@ for i in $(seq 1 60); do
 done
 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true' && say "ERP đã chạy" || warn "ERP chưa phản hồi, xem log: $COMPOSE logs -f app"
 
+say "Đối chiếu sổ migration với cơ sở dữ liệu thật"
+# Migration có mốc cũ hơn mốc đã áp bị drizzle bỏ qua VĨNH VIỄN, không lỗi, không cảnh báo.
+# Bài kiểm nào dựng CSDL mới từ đầu cũng không thấy được — chỉ CSDL đã chạy mới lộ ra.
+# Đã xảy ra hai lần trong ngày 09/09/2026 (0038 và 0041), xem scripts/verify-migrations.ts.
+if ! docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/verify-migrations.ts; then
+  warn "SỔ MIGRATION KHÔNG KHỚP CSDL — xem danh sách ở trên."
+  MIGRATIONS_UNAPPLIED=1
+fi
+
 say "Smoke test các màn hình chính (đăng nhập thật, không chỉ /api/health)"
 # /api/health chỉ chứng minh tiến trình sống + CSDL kết nối được; nó KHÔNG bắt được
 # trang lỗi runtime (truy vấn hỏng, thiếu cột). Smoke test mở thật từng màn hình.
@@ -230,6 +239,11 @@ INFO
 
 # Smoke test hỏng => deploy phải BÁO ĐỎ. Trước đây workflow chỉ cảnh báo nên một lần
 # deploy làm ERP crash-loop vẫn được ghi là thành công và không ai biết production đang sập.
+if [ "${MIGRATIONS_UNAPPLIED:-0}" = "1" ]; then
+  warn "Deploy KHÔNG đạt: có migration trong sổ chưa được áp lên cơ sở dữ liệu."
+  exit 1
+fi
+
 if [ "${SMOKE_FAILED:-0}" = "1" ]; then
   warn "Deploy KHÔNG đạt: smoke test có màn hình lỗi."
   exit 1
