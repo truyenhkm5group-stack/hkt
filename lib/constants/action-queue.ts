@@ -41,6 +41,12 @@ export type CaseType =
    * người đã tin shop một lần rồi, mất họ là mất cả chuỗi mua sau này chứ không chỉ một đơn.
    */
   | "CUSTOMER_RECOVERY"
+  /**
+   * Đơn ĐÃ HUỶ trên Pancake nhưng kiện hàng VẪN ĐANG ĐI tới khách. Mỗi giờ trôi qua là gói hàng
+   * tiến gần hơn tới một người đã nói không mua: gần như chắc chắn thành đơn hoàn, mất hai chiều
+   * cước và một vòng hàng nằm ngoài kho.
+   */
+  | "CANCELLED_BUT_SHIPPING"
   /** Dự báo sắp cháy hàng theo tốc độ bán thực tế — khác "sắp hết hàng" tính theo ngưỡng tĩnh. */
   | "STOCKOUT_RISK"
   /** Chi quảng cáo bất thường so với doanh thu giao thành công. */
@@ -59,6 +65,7 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   ORDER_CONFIRMED_STALE: "ORDER_CONFIRMATION_STALE",
   RETURN_PENDING_INSPECTION: "RETURN_RECEIVED_PENDING_INSPECTION",
   CUSTOMER_RECOVERY: "CUSTOMER_RECOVERY",
+  CANCELLED_BUT_SHIPPING: "CANCELLED_BUT_SHIPPING",
   STOCKOUT_RISK: "STOCKOUT_RISK",
   ADS_ANOMALY: "ADS_ANOMALY",
   PROFITABILITY_ALERT: "PROFITABILITY_ALERT",
@@ -85,6 +92,7 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   ORDER_CONFIRMATION_STALE: "Đã chốt nhưng chưa gửi hàng",
   RETURN_RECEIVED_PENDING_INSPECTION: "Hàng hoàn về · chưa tái nhập kho",
   CUSTOMER_RECOVERY: "Mất khách quen · cần gọi lại",
+  CANCELLED_BUT_SHIPPING: "Đã huỷ nhưng hàng vẫn đang đi",
   STOCKOUT_RISK: "Hết trước khi sản xuất xong",
   ADS_ANOMALY: "Quảng cáo bất thường",
   PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
@@ -119,6 +127,8 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   RETURN_RECEIVED_PENDING_INSPECTION: 0.9,
   // Gọi lại ngay sau khi hoàn thì còn giữ được khách; để một tuần là mất hẳn.
   CUSTOMER_RECOVERY: 0.7,
+  // Chặn kịp là cứu được cả hàng lẫn hai chiều cước; hàng tới nơi rồi thì hết cứu.
+  CANCELLED_BUT_SHIPPING: 1,
   // Đặt sản xuất kịp thì không mất doanh thu nào.
   STOCKOUT_RISK: 0.8,
   // Tắt/sửa quảng cáo là chặn được tiền chảy tiếp.
@@ -148,6 +158,8 @@ export const CASE_ACTION: Record<CaseType, string> = {
   ORDER_CONFIRMATION_STALE: "Đơn đã chốt mà chưa có vận đơn — kho đóng gói và đẩy sang Viettel Post ngay.",
   RETURN_RECEIVED_PENDING_INSPECTION:
     "Kiểm đếm hàng hoàn thực nhận rồi lập phiếu tái nhập. Hàng hoàn KHÔNG tự vào tồn — chưa lập phiếu thì số tồn đang thiếu đúng bằng lô này.",
+  CANCELLED_BUT_SHIPPING:
+    "Gọi Viettel Post yêu cầu thu hồi kiện hàng NGAY, hoặc gọi khách xác nhận có nhận nữa không. Để hàng tới nơi là gần như chắc chắn hoàn, mất hai chiều cước.",
   CUSTOMER_RECOVERY:
     "Gọi khách hỏi vì sao không nhận hàng lần này. Đây là khách đã từng mua thành công — giữ được họ đáng giá hơn nhiều so với một đơn.",
   STOCKOUT_RISK: "Xem Kế hoạch SX: đặt sản xuất trước ngày dự báo cháy hàng, trừ đi thời gian sản xuất.",
@@ -204,6 +216,8 @@ const CUSTOMER_WAITING: Record<CaseType, number> = {
   DELIVERY_STALE: 0.8,
   // Khách thật, đã tin shop một lần, và đang thất vọng.
   CUSTOMER_RECOVERY: 1,
+  // Khách đã nói KHÔNG mua mà hàng vẫn đang tới — không ai chờ, nhưng hậu quả rơi thẳng vào khách.
+  CANCELLED_BUT_SHIPPING: 0.8,
   RISKY_ORDER: 0.6,
   RETURNING: 0.4,
   STOCKOUT_RISK: 0.4,
@@ -361,6 +375,8 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   RETURN_RECEIVED_PENDING_INSPECTION: 72,
   // Cửa sổ gọi lại sau một lần hoàn rất ngắn: qua hai ngày thì lời xin lỗi không còn nghĩa gì.
   CUSTOMER_RECOVERY: 48,
+  // Kiện hàng đang chạy: tính bằng giờ, không phải ngày.
+  CANCELLED_BUT_SHIPPING: 6,
   COD_OVERDUE: 168,
   DATA_ERROR: 72,
   LOW_STOCK_RISK: 72,

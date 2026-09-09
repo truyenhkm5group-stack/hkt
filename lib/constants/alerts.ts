@@ -23,7 +23,7 @@ export type AlertConfig = {
   /** Hàng hoàn đã về tới shop quá N ngày mà kho chưa lập phiếu tái nhập → báo kho kiểm đếm */
   returnInspectionDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -42,7 +42,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   staleDays: 4,
   lookbackDays: 14,
   returnInspectionDays: 3,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -51,6 +51,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   ORDER_CONFIRMED_STALE: "Đã chốt · chưa gửi hàng",
   RETURN_PENDING_INSPECTION: "Hàng hoàn về · chưa tái nhập",
   CUSTOMER_RECOVERY: "Mất khách quen · cần gọi lại",
+  CANCELLED_BUT_SHIPPING: "Đã huỷ nhưng hàng vẫn đang đi",
   STOCKOUT_RISK: "Hết trước khi SX xong",
   ADS_ANOMALY: "Quảng cáo bất thường",
   PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
@@ -66,7 +67,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "COD_OVERDUE", "CS_CASE", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "COD_OVERDUE", "CS_CASE", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",

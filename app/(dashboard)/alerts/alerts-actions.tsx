@@ -378,6 +378,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.adsAnomaly} onCheckedChange={(v) => toggle("adsAnomaly", v === true)} /> Quảng cáo bất thường & chiến dịch đang lỗ
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.cancelledButShipping} onCheckedChange={(v) => toggle("cancelledButShipping", v === true)} /> Đơn đã huỷ nhưng hàng vẫn đang đi tới khách
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>

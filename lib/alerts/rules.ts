@@ -310,6 +310,47 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       // bỏ qua nếu chưa có dữ liệu khách
     }
   }
+  // ───────── ĐÃ HUỶ NHƯNG HÀNG VẪN ĐANG ĐI ─────────
+  //
+  // Đơn huỷ trên Pancake mà kiện hàng vẫn trên đường tới khách. Mỗi giờ trôi qua là gói hàng tiến
+  // gần hơn tới một người đã nói KHÔNG mua — gần như chắc chắn thành đơn hoàn, mất hai chiều cước
+  // và một vòng hàng nằm ngoài kho.
+  //
+  // VÌ SAO PHẢI LÀ MỘT LOẠI VIỆC RIÊNG: luật đối soát đã phát hiện xung đột này từ lâu, nhưng nó ở
+  // mức CẢNH BÁO trên trang Chất lượng dữ liệu — tức là một con số không ai cầm. Đây lại đúng loại
+  // việc phải xử lý TRONG VÀI GIỜ, không phải đọc trong báo cáo cuối tuần.
+  //
+  // CỐ Ý KHÔNG đụng tới `ORDER_OUTCOME`: việc huỷ trên Pancake không được ghi đè chứng từ ĐVVC, và
+  // ngược lại chứng từ ĐVVC cũng không tự sửa trạng thái đơn. Ở đây chỉ TẠO VIỆC cho người quyết.
+  if (cfg.enabled.cancelledButShipping) {
+    activeKinds.push("CANCELLED_BUT_SHIPPING");
+    try {
+      const rows = await db
+        .select({ ...orderCols, shipmentId: s.id, code: s.vtpOrderNumber, vdStage: s.stage, capNhat: s.updatedAt })
+        .from(s)
+        .innerJoin(o, eq(o.id, s.orderId))
+        .where(and(inArray(o.stage, ["CANCELLED", "DELETED"]), inArray(s.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"])))
+        .orderBy(sql`${s.updatedAt} desc`)
+        .limit(100);
+      for (const r of rows) {
+        candidates.push({
+          kind: "CANCELLED_BUT_SHIPPING",
+          severity: "critical",
+          title: `Đơn đã huỷ nhưng hàng đang đi · ${r.code ?? r.shipmentId}`,
+          body: `${orderLabel(r)} · Pancake: ${r.stage} · Viettel Post: ${SHIPMENT_STAGE_LABEL[r.vdStage] ?? r.vdStage} (cập nhật ${fmtAt(r.capNhat)}) — chặn kịp thì cứu được cả hàng lẫn hai chiều cước.`,
+          href: `/orders/${r.id}`,
+          entityType: "SHIPMENT",
+          entityId: r.shipmentId,
+          // Khoá theo trạng thái vận đơn: hàng chuyển sang chặng khác thì mở việc mới với thông tin đúng.
+          dedupeKey: `cancel-shipping:${r.shipmentId}:${r.vdStage}`,
+          occurredAt: r.capNhat,
+        });
+      }
+    } catch {
+      // chưa có dữ liệu vận đơn
+    }
+  }
+
   // ───────── MẤT KHÁCH QUEN ─────────
   //
   // Đơn vừa hoàn của một khách ĐÃ TỪNG mua thành công. Khác hẳn đơn hoàn của khách lạ: người này đã

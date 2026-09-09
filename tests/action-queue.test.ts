@@ -186,7 +186,7 @@ export async function testActionQueue(db: Db) {
   }
 
   // ───────── 4. Loại việc mới phải có đủ nhãn, hành động và mức cứu được ─────────
-  for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
+  for (const t of ["ORDER_CONFIRMATION_STALE", "RETURN_RECEIVED_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "STOCKOUT_RISK", "ADS_ANOMALY", "PROFITABILITY_ALERT"] as const) {
     assert.ok(CASE_TYPE_LABEL[t]?.length, `${t}: thiếu nhãn tiếng Việt`);
     assert.ok(RECOVERABILITY[t] > 0, `${t}: phải khai mức còn cứu được`);
   }
@@ -203,6 +203,13 @@ export async function testActionQueue(db: Db) {
     "mất khách quen phải xếp trên đơn đang hoàn thường",
   );
   assert.ok((CASE_SLA_HOURS.CUSTOMER_RECOVERY ?? 0) < (CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION ?? 0), "gọi lại khách gấp hơn kiểm đếm hàng hoàn");
+
+  // ĐÃ HUỶ MÀ HÀNG VẪN ĐANG ĐI là việc gấp NHẤT trong các loại: kiện hàng đang chạy tính bằng GIỜ,
+  // và chặn kịp thì cứu được cả hàng lẫn hai chiều cước. Để tới nơi là hết cứu.
+  assert.equal(CASE_SLA_HOURS.CANCELLED_BUT_SHIPPING, 6, "hạn phải tính bằng giờ, không phải ngày");
+  assert.ok((CASE_SLA_HOURS.CANCELLED_BUT_SHIPPING ?? 0) < (CASE_SLA_HOURS.DELIVERY_FAILED ?? 0), "chặn hàng đang chạy gấp hơn gọi lại đơn giao hụt");
+  assert.equal(RECOVERABILITY.CANCELLED_BUT_SHIPPING, 1, "chặn kịp là cứu được toàn bộ");
+  assert.equal(caseTypeOf("CANCELLED_BUT_SHIPPING"), "CANCELLED_BUT_SHIPPING");
 
   console.log(
     `✓ Hàng đợi việc: ${queue.cases.length} việc · ${queue.totals.URGENT} gấp · ${queue.unassigned} chưa ai nhận · ưu tiên theo quy tắc giải thích được (nghiêm trọng + tuổi + tiền + khả năng cứu + khách đang chờ + sắp cháy hàng)`,

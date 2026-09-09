@@ -50,6 +50,7 @@ const configSchema = z.object({
     returnInspection: z.boolean().default(true),
     customerRecovery: z.boolean().default(true),
     adsAnomaly: z.boolean().default(true),
+    cancelledButShipping: z.boolean().default(true),
   }),
 });
 
