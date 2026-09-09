@@ -22,23 +22,6 @@ import { clearMemo } from "@/lib/cache";
  */
 let dbMs = 0;
 let dbCalls = 0;
-{
-  const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
-  const original = pg.Pool.prototype.query;
-  pg.Pool.prototype.query = function patched(...args: unknown[]) {
-    const t0 = Date.now();
-    const out = original.apply(this, args as never) as Promise<unknown>;
-    if (out && typeof (out as Promise<unknown>).then === "function") {
-      return (out as Promise<unknown>).finally(() => {
-        dbMs += Date.now() - t0;
-        dbCalls += 1;
-      });
-    }
-    dbMs += Date.now() - t0;
-    dbCalls += 1;
-    return out;
-  };
-}
 
 const results: { page: string; fn: string; ms: number; dbMs: number; calls: number; note: string }[] = [];
 
@@ -64,6 +47,26 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
 }
 
 async function main() {
+  // Bọc `Pool.query` NGAY ĐẦU, trước khi bất kỳ truy vấn nào chạy. Đặt ở mức mô-đun thì cần
+  // top-level await, mà bản dựng CJS không hỗ trợ.
+  {
+    const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
+    const original = pg.Pool.prototype.query;
+    pg.Pool.prototype.query = function patched(...args: unknown[]) {
+      const t0 = Date.now();
+      const out = original.apply(this, args as never) as Promise<unknown>;
+      if (out && typeof (out as Promise<unknown>).then === "function") {
+        return (out as Promise<unknown>).finally(() => {
+          dbMs += Date.now() - t0;
+          dbCalls += 1;
+        });
+      }
+      dbMs += Date.now() - t0;
+      dbCalls += 1;
+      return out;
+    };
+  }
+
   // Đúng kỳ mặc định của từng trang: đó là thứ người dùng thật mở ra.
   const month = resolvePeriod({ period: "30d" }, "30d");
   const all = resolvePeriod({ period: "all" }, "all");
