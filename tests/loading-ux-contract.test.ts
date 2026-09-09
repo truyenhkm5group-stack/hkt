@@ -25,8 +25,34 @@ function walk(dir: string, ext: string, acc: string[] = []): string[] {
 
 const read = (p: string) => readFileSync(p, "utf8");
 
-/** Trang nặng: có kỳ báo cáo hoặc bảng dữ liệu ⇒ mở lần đầu phải có khung xương riêng. */
-const ROUTES_CAN_KHUNG_XUONG = [
+/**
+ * TRANG NẶNG PHẢI CÓ KHUNG XƯƠNG — và "trang nặng" được TÌM RA, không phải liệt kê.
+ *
+ * Bản trước liệt kê 23 tuyến gõ tay. Đo lại ngày 10/09/2026: bảy tuyến có bảng dữ liệu hoặc kỳ báo
+ * cáo đang KHÔNG có `loading.tsx` và cũng KHÔNG có tên trong danh sách — `bank`, `ideas`,
+ * `import-vtp`, `customers/[id]`, `products/[id]`, `reports/funnel`, `reports/scenario`. Trang mới
+ * thêm vào thì không ai canh, đúng như bốn lá chắn danh-sách-trắng khác trong kho mã này.
+ *
+ * Nay tự tìm: tuyến nào có `parseListParams` (bảng có phân trang) hoặc `Period` (kỳ báo cáo) thì
+ * phải có khung xương. Muốn miễn thì khai lý do.
+ */
+const MIEN_KHUNG_XUONG: Record<string, string> = {
+  // Biểu mẫu TẠO MỚI, không phải trang danh sách: dựng khung xương bảng ở đây là hứa hẹn sai thứ
+  // sắp hiện ra. Nó lọt bộ dò vì có đọc tham số tìm kiếm để điền sẵn, không phải vì nặng.
+  "app/(dashboard)/inventory/planning/orders/new": "biểu mẫu tạo lệnh sản xuất, không có bảng để dựng khung",
+};
+
+/**
+ * SÀN: những tuyến đã biết chắc là nặng.
+ *
+ * Bộ dò tự tìm là để bắt trang MỚI. Nhưng một bộ dò tự tìm cũng có thể âm thầm HẸP LẠI khi ai đó đổi
+ * cách viết — và lúc đó lá chắn im lặng đúng kiểu nó sinh ra để chống. Đã suýt xảy ra ngay khi viết
+ * bài kiểm này: tiêu chí đầu tiên dùng `Period` nên trượt `resolvePeriod`, và bốn tuyến
+ * (`alerts`, `landing`, `payroll`, `inventory/planning`) rơi khỏi phạm vi canh mà không có gì báo.
+ *
+ * Nên sàn này không phải danh sách trắng: nó là **cận dưới** mà bộ dò phải luôn phủ hết.
+ */
+const SAN_TUYEN_NANG = [
   "app/(dashboard)/orders",
   "app/(dashboard)/shipments",
   "app/(dashboard)/products",
@@ -50,8 +76,32 @@ const ROUTES_CAN_KHUNG_XUONG = [
   "app/(dashboard)/integrations",
 ];
 
+/** Dấu hiệu một trang là NẶNG: có bảng phân trang, có kỳ báo cáo, hoặc đọc tham số tìm kiếm. */
+const DAU_HIEU_NANG = /parseListParams|resolvePeriod|Period|DataTable|searchParams/;
+
+function tuyenCanKhungXuong(): string[] {
+  const ket: string[] = [];
+  const dinhTuyen = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) dinhTuyen(path.join(dir, entry.name));
+    }
+    if (!existsSync(path.join(dir, "page.tsx"))) return;
+    const nang = readdirSync(dir)
+      .filter((f) => f.endsWith(".tsx") && f !== "loading.tsx")
+      .some((f) => DAU_HIEU_NANG.test(read(path.join(dir, f))));
+    if (nang) ket.push(dir.split(path.sep).join("/"));
+  };
+  dinhTuyen("app/(dashboard)");
+  return ket.filter((r) => !(r in MIEN_KHUNG_XUONG) && r !== "app/(dashboard)");
+}
+
 export function testLoadingUxContract() {
   // ───────── 1. MỞ TRANG LẦN ĐẦU: khung xương đúng hình dạng trang ─────────
+  const ROUTES_CAN_KHUNG_XUONG = tuyenCanKhungXuong();
+  // Bộ dò phải phủ HẾT sàn. Hụt một tuyến nghĩa là tiêu chí vừa hẹp lại, và phải sửa tiêu chí —
+  // không phải thêm tuyến đó vào một danh sách riêng.
+  const sanBiHut = SAN_TUYEN_NANG.filter((r) => !ROUTES_CAN_KHUNG_XUONG.includes(r));
+  assert.deepEqual(sanBiHut, [], `bộ dò tuyến nặng vừa HẸP LẠI, không còn thấy: ${sanBiHut.join(", ")} — sửa DAU_HIEU_NANG`);
   for (const route of ROUTES_CAN_KHUNG_XUONG) {
     const file = path.join(route, "loading.tsx");
     assert.ok(existsSync(file), `${route} thiếu loading.tsx — mở trang lần đầu sẽ trắng màn hình`);
