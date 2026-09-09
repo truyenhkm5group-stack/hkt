@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { NavLink } from "@/components/nav-progress";
 import { redirect } from "next/navigation";
 import {
   Banknote,
@@ -198,30 +198,30 @@ export default async function ReportsPage({
         <TabsList>
           {allowed.pnl ? (
             <TabsTrigger value="pnl" asChild>
-              <Link href={`/reports?tab=pnl${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=pnl${periodQuery}`} className="px-3">
                 <Boxes /> Theo đơn giao thành công
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.truth ? (
             <TabsTrigger value="truth" asChild>
-              <Link href={`/reports?tab=truth${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=truth${periodQuery}`} className="px-3">
                 <Wallet /> Sáu con số tiền
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.cash ? (
             <TabsTrigger value="cash" asChild>
-              <Link href={`/reports?tab=cash${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=cash${periodQuery}`} className="px-3">
                 <WalletCards /> Dòng tiền thực
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.nominal ? (
             <TabsTrigger value="nominal" asChild>
-              <Link href={`/reports?tab=nominal${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=nominal${periodQuery}`} className="px-3">
                 <Calculator /> Danh nghĩa theo mã hàng
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
         </TabsList>

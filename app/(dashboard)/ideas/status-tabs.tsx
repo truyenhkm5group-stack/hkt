@@ -1,7 +1,7 @@
 "use client";
 
 import { parseAsString, useQueryStates } from "nuqs";
-import { useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IDEA_STATUSES, IDEA_STATUS_LABEL } from "@/lib/constants/ideas";
 import { formatNumber } from "@/lib/format";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 /** Lọc ý tưởng theo trạng thái duyệt. Tab mặc định là "Tất cả" nên không ghi lên URL. */
 export function IdeaStatusTabs({ counts, active }: { counts: Record<string, number>; active: string }) {
-  const [dangChuyen, startTransition] = useTransition();
+  const [dangChuyen, startTransition] = useNavTransition();
   const [, setState] = useQueryStates({ tt: parseAsString, page: parseAsString }, { shallow: false, history: "push", startTransition });
   return (
     <Tabs value={active} onValueChange={(value) => void setState({ tt: value === "ALL" ? null : value, page: null })}>

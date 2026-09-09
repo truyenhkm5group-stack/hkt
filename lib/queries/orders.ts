@@ -1,3 +1,4 @@
+import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
@@ -102,6 +103,10 @@ export type OrderListRow = Awaited<ReturnType<typeof listOrders>>["rows"][number
 
 /** Số đơn theo giai đoạn / nguồn / ĐVVC trong kỳ (cho bộ lọc) */
 export async function orderFacets(params: ListParams) {
+  return memo(`orderFacets:${listKey(params, false)}`, 30_000, () => orderFacetsUncached(params));
+}
+
+async function orderFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = orderListWhere({ ...params, filters: {}, q: params.q });
   const [stages, sources, carriers, sellers] = await Promise.all([
@@ -126,6 +131,10 @@ export async function orderFacets(params: ListParams) {
 }
 
 export async function orderSummary(params: ListParams) {
+  return memo(`orderSummary:${listKey(params)}`, 30_000, () => orderSummaryUncached(params));
+}
+
+async function orderSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = orderListWhere(params);
   const [row] = await db

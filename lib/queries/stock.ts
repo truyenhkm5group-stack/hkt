@@ -109,6 +109,35 @@ export function variantReceiptsSubquery(db: Db) {
 /** Giá nhập gần nhất ghi trên phiếu (nếu có), dùng thay giá vốn Pancake khi Pancake = 0 */
 export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id where ri2.variant_id = ${pv.id} and ri2.unit_cost > 0 and r2.kind = 'RECEIPT' order by r2.received_at desc, r2.created_at desc limit 1)`;
 
+/**
+ * CÙNG MỘT CON SỐ với `LAST_RECEIPT_COST`, nhưng tính MỘT LẦN CHO MỖI MẪU MÃ thay vì một lần cho
+ * mỗi dòng đọc nó.
+ *
+ * BẰNG CHỨNG (EXPLAIN ANALYZE, bộ dữ liệu 12.894 đơn — xem docs/erp-performance-p0-report.md):
+ * dùng ở cấp DÒNG ĐƠN HÀNG, truy vấn con tương quan này chạy 4.260 lần, mỗi lần 4,8 ms, ngốn
+ * 10.350.750 khối đệm — 99,3% toàn bộ chi phí của truy vấn "Hiệu quả mẫu mã". Bộ tối ưu chọn quét
+ * từ phía PHIẾU KHO nên vòng lặp trong chạy 2.556.000 lượt (600 phiếu × 4.260 dòng): chi phí tăng
+ * theo TÍCH của số dòng đơn và số phiếu kho.
+ *
+ * `distinct on (variant_id)` quét bảng phiếu đúng MỘT LẦN rồi để các truy vấn nối vào. Thứ tự sắp
+ * xếp và bộ lọc giữ y nguyên (`unit_cost > 0`, `kind = 'RECEIPT'`, mới nhất trước) nên giá trị
+ * từng mẫu mã không đổi một đồng — khoá bằng tests/metric-shape-consistency.test.ts.
+ *
+ * Nối vào bằng `pv.id` (KHÔNG phải `order_items.variant_id`): mẫu mã đã bị xoá khỏi ERP thì
+ * `LAST_RECEIPT_COST` trả NULL, và bản nối phải trả NULL y hệt.
+ */
+export function variantLastCostSubquery(db: Db) {
+  return db
+    .selectDistinctOn([ri.variantId], { variantId: ri.variantId, lastCost: ri.unitCost })
+    .from(ri)
+    .innerJoin(r, eq(r.id, ri.receiptId))
+    .where(sql`${ri.unitCost} > 0 and ${r.kind} = 'RECEIPT'`)
+    .orderBy(ri.variantId, desc(r.receivedAt), desc(r.createdAt))
+    .as("vlastcost");
+}
+
+export type VariantLastCost = ReturnType<typeof variantLastCostSubquery>;
+
 export type StockAggregates = ReturnType<typeof variantSalesSubquery>;
 export type ReceiptAggregates = ReturnType<typeof variantReceiptsSubquery>;
 

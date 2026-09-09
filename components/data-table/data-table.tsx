@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
+import { useNavTransition } from "@/components/nav-progress";
 import {
   type ColumnDef,
   type Row,
@@ -91,7 +92,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
   // Sắp xếp / phân trang đều đi vòng lên máy chủ. Không bắt trạng thái chờ thì bảng đứng im vài
   // trăm mili-giây sau khi bấm và người dùng tưởng không ăn.
-  const [dangTai, startTransition] = React.useTransition();
+  const [dangTai, startTransition] = useNavTransition();
   const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push", startTransition });
   // Gom nhóm; dòng cha là bản tổng hợp do trang cung cấp. Thứ tự NHÓM phải theo chính cột đang sắp xếp:
   // máy chủ chỉ sắp xếp được từng mẫu mã, còn dòng cha là số TỔNG HỢP, nên nếu giữ thứ tự xuất hiện thì

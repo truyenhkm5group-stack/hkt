@@ -1,7 +1,7 @@
 "use client";
 
 import { parseAsString, useQueryStates } from "nuqs";
-import { useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SETTLEMENT_LABEL, type SettlementStatus } from "@/lib/constants/cod";
 import { formatNumber } from "@/lib/format";
@@ -11,7 +11,7 @@ const THU_TU: (SettlementStatus | "ALL")[] = ["QUA_HAN", "CHUA_TRA", "TRA_THIEU"
 
 /** Thanh lọc theo tình trạng thanh toán của Viettel Post cho từng vận đơn. */
 export function SettlementTabs({ counts, active }: { counts: Record<string, number>; active: string }) {
-  const [dangChuyen, startTransition] = useTransition();
+  const [dangChuyen, startTransition] = useNavTransition();
   const [, setState] = useQueryStates({ tt: parseAsString, page: parseAsString }, { shallow: false, history: "push", startTransition });
   return (
     <Tabs value={active} onValueChange={(value) => void setState({ tt: value === "QUA_HAN" ? null : value, page: null })}>

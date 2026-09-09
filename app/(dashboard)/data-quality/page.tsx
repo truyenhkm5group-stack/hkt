@@ -55,24 +55,28 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   const issue = (DQ_ISSUES as readonly string[]).includes(param(raw, "issue")) ? (param(raw, "issue") as DqIssue) : null;
   const page = Math.max(1, Number(param(raw, "page", "1")) || 1);
 
-  const summary = await dataQualitySummary(params.period);
-  const tower = await getControlTower();
   // Luật của trung tâm điều khiển mở danh sách riêng, không dùng chung với 7 nhóm legacy.
   const ruleParam = param(raw, "rule");
   const towerRule = (RECONCILIATION_RULE_ORDER as readonly string[]).includes(ruleParam) ? (ruleParam as ReconciliationRuleKey) : null;
-  const towerDrill = towerRule ? await controlTowerDrill(towerRule, page, PAGE_SIZE) : null;
 
-  // Chỉ tải danh sách của nhóm vấn đề đang mở (drill-down).
-  const drill = issue === "unlinked-shipment"
-    ? { kind: "shipment" as const, ...(await unlinkedShipments(page, PAGE_SIZE, params.q, params.sort, params.dir)) }
-    : issue === "return-not-received"
-      ? { kind: "shipment" as const, ...(await returnsAwaitingWarehouse(page, PAGE_SIZE, params.q)) }
-      : issue
-        ? { kind: "order" as const, ...(await dataQualityOrders(issue, params.period, page, PAGE_SIZE, params.q)) }
-        : null;
-
-  // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
-  const backlog = issue === "return-not-received" ? await pendingReturnedForWarehouse() : null;
+  // NĂM TRUY VẤN ĐỘC LẬP, KHÔNG ĐỨNG CHỜ NHAU. Trước đây chúng chạy nối tiếp nên thời gian dựng
+  // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
+  // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
+  const [summary, tower, towerDrill, drill, backlog] = await Promise.all([
+    dataQualitySummary(params.period),
+    getControlTower(),
+    towerRule ? controlTowerDrill(towerRule, page, PAGE_SIZE) : Promise.resolve(null),
+    // Chỉ tải danh sách của nhóm vấn đề đang mở (drill-down).
+    issue === "unlinked-shipment"
+      ? unlinkedShipments(page, PAGE_SIZE, params.q, params.sort, params.dir).then((r) => ({ kind: "shipment" as const, ...r }))
+      : issue === "return-not-received"
+        ? returnsAwaitingWarehouse(page, PAGE_SIZE, params.q).then((r) => ({ kind: "shipment" as const, ...r }))
+        : issue
+          ? dataQualityOrders(issue, params.period, page, PAGE_SIZE, params.q).then((r) => ({ kind: "order" as const, ...r }))
+          : Promise.resolve(null),
+    // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
+    issue === "return-not-received" ? pendingReturnedForWarehouse() : Promise.resolve(null),
+  ]);
   const warehouseBacklog = backlog
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
     : undefined;

@@ -1,5 +1,6 @@
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { probeActive, recordQuery } from "@/lib/perf/probe";
 import * as schema from "./schema";
 
 export type Db = NodePgDatabase<typeof schema>;
@@ -64,14 +65,48 @@ async function createPglite(): Promise<Db> {
     }
   }
   const client = new PGlite(dir);
+  instrumentQueries(client as unknown as QueryClient);
   holder.__erpDb!.pglite = client;
   return drizzle(client, { schema }) as unknown as Db;
 }
 
 function createPg(): Db {
   const pool = new Pool({ connectionString: databaseUrl(), max: 10 });
+  instrumentQueries(pool as unknown as QueryClient);
   holder.__erpDb!.pool = pool;
   return drizzlePg(pool, { schema });
+}
+
+type QueryClient = { query: (...args: unknown[]) => Promise<unknown> };
+
+/**
+ * Bọc `client.query` để đếm SỐ CÂU và thời gian của từng câu trong một lần dựng trang.
+ * Cả hai driver (node-postgres và PGlite) đều đi qua đúng hàm này, nên chỉ cần bọc một chỗ.
+ *
+ * CHỈ bật khi ERP_PERF_PROBE=1 (script đo dùng). Production không bọc gì cả: lớp CSDL là chỗ
+ * không được thêm rủi ro để đổi lấy một con số.
+ */
+function instrumentQueries(client: QueryClient) {
+  if (process.env.ERP_PERF_PROBE !== "1") return;
+  const original = client.query.bind(client) as QueryClient["query"];
+  client.query = async (...args: unknown[]) => {
+    if (!probeActive()) return original(...args);
+    const started = performance.now();
+    try {
+      const result = (await original(...args)) as { rows?: unknown[] } | undefined;
+      recordQuery(queryText(args[0]), performance.now() - started, result?.rows?.length ?? 0);
+      return result;
+    } catch (error) {
+      recordQuery(queryText(args[0]), performance.now() - started, -1);
+      throw error;
+    }
+  };
+}
+
+function queryText(first: unknown) {
+  if (typeof first === "string") return first;
+  if (first && typeof first === "object" && "text" in first) return String((first as { text: unknown }).text);
+  return "(không rõ)";
 }
 
 function isProcessAlive(pid: number) {
