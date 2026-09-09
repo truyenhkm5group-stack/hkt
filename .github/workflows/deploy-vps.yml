@@ -24,17 +24,34 @@ jobs:
       # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
       # (docs/business-rules/ORDER_OUTCOME.md) phải xanh thì mới được deploy.
       # Đây là điều kiện CHẶN, không phải cảnh báo — đỏ là dừng, không deploy.
+      # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI: ghim thẳng vào SHA thay vì tên nhánh.
+      # Nhánh có thể được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song),
+      # và khi đó "main" ở bước này với "main" ở bước SSH là hai bản mã khác nhau.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          # Cần commit cha để kiểm "sổ migration chỉ nối vào cuối" (tests/repo-integrity.test.ts).
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - name: Cài phụ thuộc
         run: npm ci
+      # Chạy TRƯỚC tsc: khi có tệp trỏ ra ngoài kho, bài này nói thẳng tên tệp và tên import,
+      # còn tsc chỉ nói "Cannot find module" ở một toạ độ dòng/cột.
+      - name: Toàn vẹn kho mã (không import tệp chưa vào kho)
+        run: npx tsx --tsconfig tsconfig.json tests/repo-integrity.test.ts
       - name: Kiểm tra kiểu dữ liệu
         run: npx tsc --noEmit
+      - name: Kiểm tra chuẩn mã nguồn
+        run: npx eslint --max-warnings=0
       - name: Kiểm thử (gồm contract test luật nghiệp vụ)
         run: npm test
+      # Bản dựng production bắt lỗi ranh giới client/server mà `tsc` không thấy. Chạy TRƯỚC khi
+      # đụng tới máy chủ: thà đỏ ở đây còn hơn container khởi động lại vô hạn trên VPS.
+      - name: Dựng bản production
+        run: npm run build
 
       - name: Kiểm tra Secrets bắt buộc
         env:
@@ -55,6 +72,8 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           ERP_BRANCH: ${{ github.ref_name }}
+          # SHA đã qua typecheck/lint/test/build ở trên. VPS phải triển khai ĐÚNG commit này.
+          ERP_DEPLOY_SHA: ${{ github.sha }}
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
           ERP_NONINTERACTIVE: "1"
           ERP_RESET_ENV: ${{ inputs.reset_env && '1' || '0' }}
@@ -75,21 +94,42 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 35m
-          envs: ERP_BRANCH,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN
+          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN
           script: |
             set -e
-            export ERP_BRANCH ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN
+            export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN
             if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
-            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ERP_BRANCH}/scripts/bootstrap.sh" | bash
+            # Lấy chính bản bootstrap của commit đang triển khai. Lấy theo tên nhánh thì kịch bản
+            # cài đặt có thể đến từ một commit khác với mã nguồn — đúng lỗi mà bước này phải chặn.
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ERP_DEPLOY_SHA}/scripts/bootstrap.sh" | bash
 
       - name: Kiểm tra HTTPS từ bên ngoài
         env:
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
+          ERP_DEPLOY_SHA: ${{ github.sha }}
         run: |
+          # `/api/health` trả ERP_COMMIT dạng 12 ký tự (scripts/install-vps.sh ghi vào .env).
+          #
+          # SỐNG LÀ CHƯA ĐỦ — phải sống ĐÚNG BẢN VỪA KIỂM. Trước đây bước này chỉ hỏi "có thở
+          # không", nên một máy chủ chạy mã của commit khác vẫn được coi là deploy đạt.
+          #
+          # Vẫn thử lại khi commit chưa khớp: ngay sau lệnh khởi động lại, container cũ có thể
+          # còn trả lời thêm vài giây. Chỉ kết luận sai commit sau khi đã chờ hết vòng lặp.
+          EXPECTED="$(echo "$ERP_DEPLOY_SHA" | cut -c1-12)"
+          LAST=""
           for i in $(seq 1 18); do
-            if curl -fsS -m 15 "https://$ERP_DOMAIN/api/health" | grep -q '"ok":true'; then echo "✓ https://$ERP_DOMAIN đang chạy"; exit 0; fi
+            BODY="$(curl -fsS -m 15 "https://$ERP_DOMAIN/api/health" || true)"
+            [ -n "$BODY" ] && LAST="$BODY"
+            if echo "$BODY" | grep -q '"ok":true' && echo "$BODY" | grep -q "\"commit\":\"$EXPECTED\""; then
+              echo "✓ https://$ERP_DOMAIN đang chạy đúng commit $EXPECTED"; exit 0
+            fi
             sleep 10
           done
+          if echo "$LAST" | grep -q '"ok":true'; then
+            echo "::error::Production sống nhưng chạy SAI commit. Mong đợi $EXPECTED — thực tế: $LAST"
+            echo "Nguyên nhân thường gặp: nhánh được đẩy tiếp trong lúc deploy, hoặc bước ghim commit trên VPS không chạy."
+            exit 1
+          fi
           # Deploy KHÔNG được báo thành công khi ERP không phản hồi: lần trước container app
           # restart vô hạn vì migration lỗi, workflow chỉ cảnh báo nên coi như deploy đã xong
           # và không ai biết production đang sập. Fail ở đây để lỗi hiện ra ngay.

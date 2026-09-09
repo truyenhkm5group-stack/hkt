@@ -49,4 +49,31 @@ else
 fi
 
 cd "$DIR"
+
+# ═════════════ BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI ═════════════
+#
+# SỰ CỐ THẬT 09/09/2026: workflow chạy `tsc`/`npm test` trên commit lúc bấm chạy, nhưng đoạn
+# trên đây lấy ĐỈNH NHÁNH LÚC KÉO. Khi hai phiên làm việc cùng đẩy lên `main`, phiên kia đẩy
+# thêm 3 commit trong lúc deploy đang chạy — máy chủ nhận một bản mã KHÔNG commit nào kiểm qua.
+# Deploy vẫn báo xanh vì không có bước nào đối chiếu hai con số đó.
+#
+# `ERP_DEPLOY_SHA` do workflow truyền vào, bằng đúng SHA mà bước kiểm thử đã chạy. Có nó thì
+# đặt cây làm việc về ĐÚNG commit bất biến ấy; không có thì giữ hành vi cũ (cài tay trên VPS).
+#
+# Tên biến CỐ Ý khác `ERP_COMMIT` — `scripts/install-vps.sh` ghi `ERP_COMMIT` vào `.env` cho
+# `/api/health`, trùng tên sẽ khiến hai vai trò khác nhau đè lên nhau.
+if [ -n "${ERP_DEPLOY_SHA:-}" ]; then
+  echo "▶ Ghim mã nguồn về đúng commit đã kiểm: $ERP_DEPLOY_SHA"
+  # Commit có thể chưa nằm trong nhánh đã fetch (nhánh bị đẩy tiếp sau đó), nên lấy thẳng SHA.
+  git_retry -C "$DIR" fetch --quiet origin "$ERP_DEPLOY_SHA"
+  git -C "$DIR" checkout --quiet -B "$BRANCH" "$ERP_DEPLOY_SHA"
+
+  ACTUAL="$(git -C "$DIR" rev-parse HEAD)"
+  if [ "$ACTUAL" != "$ERP_DEPLOY_SHA" ]; then
+    echo "::error::Ghim commit thất bại — yêu cầu $ERP_DEPLOY_SHA nhưng cây làm việc đang ở $ACTUAL."
+    exit 1
+  fi
+  echo "  ✓ HEAD = $ACTUAL"
+fi
+
 exec bash scripts/install-vps.sh
