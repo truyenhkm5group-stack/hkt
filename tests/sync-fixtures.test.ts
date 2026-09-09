@@ -4,6 +4,7 @@
  */
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
+import { testIdeas } from "./ideas.test";
 import { testOrderSource } from "./order-source.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
@@ -1125,6 +1126,7 @@ async function main() {
   await testSlowMoving(db);
   await testCodReconciliation();
   await testOrderSource();
+  await testIdeas();
   await testVtpImportTruth(db);
   await testVtpImportRecovery(db);
   await testCostAllocation(db);

@@ -67,6 +67,14 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    module: "Ý tưởng marketing",
+    items: [
+      { key: "ideas:view", label: "Ý tưởng: xem" },
+      { key: "ideas:write", label: "Ý tưởng: đăng & sửa", hint: "Đăng ý tưởng kèm ảnh, sửa hoặc xoá ý tưởng của chính mình" },
+      { key: "ideas:review", label: "Ý tưởng: nhận xét & duyệt", hint: "Quyền của quản lý: viết nhận xét và chốt Duyệt / Cần sửa / Không duyệt" },
+    ],
+  },
+  {
     module: "Hệ thống",
     items: [
       { key: "integrations:view", label: "Kết nối dữ liệu: xem" },
@@ -101,18 +109,18 @@ export const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap((g) => g.
 
 export const PERMISSION_LABEL: Record<string, string> = Object.fromEntries(PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label])));
 
-const VIEW_ALL: Permission[] = ["dashboard:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view"];
+const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view"];
 
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
   // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
-  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
-  MARKETING: [...VIEW_ALL, "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
+  MARKETING: [...VIEW_ALL, "ideas:write", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };
 

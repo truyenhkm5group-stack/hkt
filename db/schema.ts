@@ -593,6 +593,86 @@ export const codBatches = pgTable(
 );
 
 /**
+ * Ý TƯỞNG MARKETING — bảng ý tưởng để marketer đăng bài mẫu và nhận nhận xét của quản lý.
+ *
+ * Mỗi dòng là một ý tưởng: ai phụ trách, ngày, nội dung, ảnh minh hoạ và quá trình trao đổi với
+ * quản lý. Cố ý KHÔNG dính gì tới đơn hàng / tiền — đây là chỗ làm việc của đội marketing, không
+ * phải một chiều báo cáo, nên không được lẫn vào các con số nghiệp vụ.
+ */
+export const ideaStatusEnum = pgEnum("idea_status", ["NEW", "REVIEWING", "CHANGES", "APPROVED", "REJECTED"]);
+
+export const marketingIdeas = pgTable(
+  "marketing_ideas",
+  {
+    id: id(),
+    /** Marketer phụ trách — id nhân sự trong cấu hình lương (có thể trống nếu nhập tay). */
+    marketerId: text("marketer_id"),
+    /** Tên marketer hiển thị; giữ lại tên tại thời điểm đăng để đổi cấu hình nhân sự không mất dấu. */
+    marketerName: text("marketer_name").notNull().default(""),
+    /** Ngày của ý tưởng (YYYY-MM-DD) — do người đăng chọn, không phải giờ hệ thống. */
+    ideaDate: text("idea_date").notNull(),
+    /** Nội dung ý tưởng; dòng đầu được dùng làm tiêu đề khi hiển thị danh sách. */
+    content: text("content").notNull().default(""),
+    status: ideaStatusEnum("status").notNull().default("NEW"),
+    createdBy: text("created_by").notNull().default(""),
+    createdByName: text("created_by_name").notNull().default(""),
+    /** Lần quản lý chốt trạng thái gần nhất. */
+    reviewedAt: ts("reviewed_at"),
+    reviewedBy: text("reviewed_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("marketing_ideas_date_idx").on(t.ideaDate), index("marketing_ideas_status_idx").on(t.status), index("marketing_ideas_marketer_idx").on(t.marketerId)],
+);
+
+/**
+ * Ảnh của ý tưởng, lưu thẳng trong CSDL.
+ *
+ * Máy chủ chỉ có ổ đĩa của CSDL là bền qua mỗi lần deploy nên ảnh nằm ở đây thay vì trên đĩa ứng
+ * dụng. Ảnh được thu nhỏ ngay trên trình duyệt trước khi gửi lên, và để BẢNG RIÊNG để truy vấn
+ * danh sách ý tưởng không bao giờ phải kéo theo dữ liệu ảnh.
+ */
+export const marketingIdeaImages = pgTable(
+  "marketing_idea_images",
+  {
+    id: id(),
+    ideaId: text("idea_id")
+      .notNull()
+      .references(() => marketingIdeas.id, { onDelete: "cascade" }),
+    contentType: text("content_type").notNull().default("image/jpeg"),
+    bytes: integer("bytes").notNull().default(0),
+    /** Nội dung ảnh dạng base64. */
+    data: text("data").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("marketing_idea_images_idea_idx").on(t.ideaId, t.sortOrder)],
+);
+
+/** Trao đổi giữa marketer và quản lý về một ý tưởng; giữ nguyên cả quá trình, không ghi đè. */
+export const marketingIdeaComments = pgTable(
+  "marketing_idea_comments",
+  {
+    id: id(),
+    ideaId: text("idea_id")
+      .notNull()
+      .references(() => marketingIdeas.id, { onDelete: "cascade" }),
+    authorEmail: text("author_email").notNull().default(""),
+    authorName: text("author_name").notNull().default(""),
+    body: text("body").notNull(),
+    /** Trạng thái mà nhận xét này đặt (nếu có) — để đọc lại vì sao ý tưởng đổi trạng thái. */
+    statusSet: ideaStatusEnum("status_set"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("marketing_idea_comments_idea_idx").on(t.ideaId, t.createdAt)],
+);
+
+export const marketingIdeasRelations = relations(marketingIdeas, ({ many }) => ({
+  images: many(marketingIdeaImages),
+  comments: many(marketingIdeaComments),
+}));
+
+/**
  * TỆP BẢNG KÊ GỐC — giữ nguyên nội dung tệp Viettel Post gửi qua email.
  *
  * Vì sao cần: Apps Script trong Gmail chỉ gửi thư CHƯA gắn nhãn "đã nhập", nên khi ERP đọc sai
@@ -1238,5 +1318,7 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type CodBatch = typeof codBatches.$inferSelect;
 export type CodStatementLine = typeof codStatementLines.$inferSelect;
 export type VtpStatementFile = typeof vtpStatementFiles.$inferSelect;
+export type MarketingIdea = typeof marketingIdeas.$inferSelect;
+export type IdeaStatus = MarketingIdea["status"];
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;
