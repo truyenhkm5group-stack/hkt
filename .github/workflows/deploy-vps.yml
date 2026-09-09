@@ -12,8 +12,16 @@ on:
         type: boolean
         default: false
 
+# MỘT THAO TÁC CHẠM VPS TẠI MỘT THỜI ĐIỂM.
+#
+# Trước đây deploy và vận hành dùng hai nhóm riêng, nên một lệnh vận hành có thể chạy ĐÈ lên giữa
+# lúc deploy đang dựng ảnh và khởi động lại container — đúng lúc máy chủ yếu nhất. Nay dùng CHUNG
+# một nhóm: việc thứ hai xếp hàng chờ.
+#
+# `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê, dựng
+# lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
 concurrency:
-  group: deploy-vps
+  group: vps-operations
   cancel-in-progress: false
 
 jobs:
