@@ -78,6 +78,32 @@ export async function testCanonicalOutcome(db: Db) {
     .where(sql`${schema.canonicalOrderOutcome.cogs} <> (${ORDER_COGS})`);
   assert.equal(Number(lech), 0, "giá vốn đã tính sẵn phải khớp từng dòng với biểu thức chuẩn — lệch là lợi nhuận sai");
 
+  // ───────── 4c. PHIẾU NHẬP MỚI PHẢI LÀM CŨ GIÁ VỐN ĐÃ LƯU ─────────
+  //
+  // Đây là cái bẫy riêng của giá vốn, và nó im lặng: giá vốn lấy "phiếu nhập GẦN NHẤT" tính theo
+  // THỜI ĐIỂM HIỆN TẠI, không theo ngày lên đơn. Nên nhập một phiếu mới hôm nay đổi giá vốn của MỌI
+  // đơn lịch sử có mẫu mã đó. Nếu bộ dò cũ chỉ nhìn đơn và vận đơn thì kết quả đơn vẫn đúng mà giá
+  // vốn thành cũ — lợi nhuận sai mà không gì báo.
+  const [dongHang] = await db
+    .select({ orderId: schema.orderItems.orderId, variantId: schema.orderItems.variantId })
+    .from(schema.orderItems)
+    .where(sql`${schema.orderItems.variantId} is not null`)
+    .limit(1);
+  if (dongHang?.variantId) {
+    await rematerializeStale();
+    assert.equal((await rematerializeStale()).rebuilt, 0, "trước khi nhập phiếu thì không còn gì để dựng lại");
+
+    const [phieu] = await db
+      .insert(schema.stockReceipts)
+      .values({ kind: "RECEIPT", receivedAt: new Date(), reference: "Phiếu thử làm cũ giá vốn", totalQuantity: 1, totalCost: 999_000, createdBy: "test" })
+      .returning({ id: schema.stockReceipts.id });
+    await db.insert(schema.stockReceiptItems).values({ receiptId: phieu.id, variantId: dongHang.variantId, quantity: 1, unitCost: 999_000 });
+
+    const sauKhiNhap = await rematerializeStale();
+    assert.ok(sauKhiNhap.rebuilt >= 1, "nhập phiếu mới PHẢI làm cũ giá vốn của đơn có mẫu mã đó — nếu không, lợi nhuận sai trong im lặng");
+    assert.deepEqual((await outcomeParity(50)).mismatches, [], "dựng lại xong giá vốn phải khớp lại");
+  }
+
   // ───────── 5. Phiên bản luật phải được ghi ─────────
   const [{ v }] = await db
     .select({ v: sql<number>`min(${schema.canonicalOrderOutcome.logicVersion})` })

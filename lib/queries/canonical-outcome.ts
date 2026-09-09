@@ -88,6 +88,17 @@ export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: numbe
        or s.updated_at > m.computed_at
        or exists (select 1 from shipment_events e where e.shipment_id = s.id and e.created_at > m.computed_at)
        or exists (select 1 from cod_statement_lines l where l.shipment_id = s.id and l.created_at > m.computed_at)
+       -- DAU VAO CUA GIA VON, KHONG CHI CUA KET QUA DON: gia von lay gia tren phieu nhap GAN NHAT
+       -- cua mau ma, tinh theo THOI DIEM HIEN TAI chu khong theo ngay len don. Nhap mot phieu moi
+       -- hom nay se doi gia von cua MOI don lich su co mau ma do.
+       or exists (
+         select 1 from order_items oi
+         join stock_receipt_items ri on ri.variant_id = oi.variant_id
+         join stock_receipts r on r.id = ri.receipt_id
+         where oi.order_id = o.id and r.updated_at > m.computed_at
+       )
+       -- Sua dong hang cua don (so luong, mau ma, gia von Pancake) cung doi gia von ca don.
+       or exists (select 1 from order_items oi2 where oi2.order_id = o.id and o.updated_at > m.computed_at)
     limit ${limit}
   `);
   const ids = ((Array.isArray(staleIds) ? staleIds : ((staleIds as { rows?: unknown[] }).rows ?? [])) as { id: string }[]).map((r) => String(r.id));
