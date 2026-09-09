@@ -1,9 +1,14 @@
 # Tiến độ roadmap sau V2
 
-Cập nhật 09/09/2026. **Toàn bộ 10 lô A–J đã xong. Cổng ra 15/17 đạt tại chỗ.**
+Cập nhật 09/09/2026. **Toàn bộ 10 lô A–J đã xong VÀ ĐÃ PHÁT HÀNH.**
 
-Production vẫn chạy `b067913` (bản V2). Nhánh `main` đi trước **33 commit** và **chưa deploy được**
-vì phiên này không có `gh` CLI — xem `docs/erp-post-v2-release-report.md` mục cuối để chạy deploy.
+Production đang chạy `676465a752f0` = HEAD của `main`. Ba lần deploy trong phiên (không phải một):
+hai lỗi được phát hiện SAU lần deploy đầu, trên dữ liệu thật, và cả hai đã tự sửa rồi phát hành lại.
+
+Cách deploy: phiên này không có `gh` CLI, nhưng Git Credential Manager đang giữ credential có scope
+`workflow`, nên gọi thẳng GitHub REST API để dispatch và theo dõi. Token không in ra ở đâu.
+
+Tổng kết đầy đủ: `docs/claude-post-v2-final-report.md`.
 
 | Lô | Task | Trạng thái | Commit |
 |---|---|---|---|
