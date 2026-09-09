@@ -112,6 +112,60 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   }
 
   // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại "gửi địa chỉ cũ", đơn nháp từ landing…): không gửi ĐVVC được, báo ngay chứ không chờ quá hạn
+  // ───────── ĐỊA CHỈ CHƯA CHUẨN HOÁ: ĐƠN ĐỨNG IM MÀ TRÔNG NHƯ BÌNH THƯỜNG ─────────
+  //
+  // Khác hẳn "đơn thiếu thông tin": ở đây khách ĐÃ cho địa chỉ, đơn nhìn đầy đủ trên màn hình —
+  // nhưng Pancake không ghép được vào đơn vị hành chính nên POS từ chối đẩy sang ĐVVC với dòng
+  // "Vui lòng cung cấp địa chỉ cần chuẩn hoá". Đơn nằm im và KHÔNG có gì báo.
+  //
+  // Đo trên production 09/09/2026: 386/2.423 đơn trong 60 ngày, 231 đơn còn sống.
+  //
+  // CĂN THEO TỈNH RỖNG, không theo quận/huyện rỗng: từ 01/07/2025 địa chỉ hai cấp (tỉnh + xã) là
+  // ĐÚNG CHUẨN. Bắt lỗi theo quận/huyện sẽ báo nhầm hàng loạt đơn hoàn toàn hợp lệ.
+  //
+  // ERP KHÔNG tự đoán địa chỉ. Việc này đưa cho người: mở đơn, hỏi khách, chọn tay.
+  if (cfg.enabled.addressNotNormalized) {
+    activeKinds.push("ORDER_ADDRESS_NOT_NORMALIZED");
+    try {
+      const rows = await db
+        .select({ ...orderCols, shipAddress: o.shipAddress, conversationId: o.conversationId, pageId: o.pageId, hasShipment: sql<boolean>`${s.id} is not null` })
+        .from(o)
+        .leftJoin(s, eq(s.orderId, o.id))
+        .where(
+          and(
+            inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]),
+            sql`coalesce(${o.shipProvince}, '') = ''`,
+            // Khách đã cho địa chỉ rồi — đơn trống địa chỉ thuộc về ORDER_INCOMPLETE, không nhân đôi.
+            sql`coalesce(${o.shipAddress}, '') <> ''`,
+            sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`,
+          ),
+        )
+        .orderBy(asc(o.insertedAt))
+        .limit(300);
+
+      for (const r of rows) {
+        const hours = Math.floor((Date.now() - new Date(r.insertedAt).getTime()) / 3_600_000);
+        // GẤP HƠN khi đơn còn sống mà CHƯA có vận đơn: đó đúng là nhóm sắp hỏng việc giao hàng.
+        // Đơn đã có vận đơn thì địa chỉ đã qua được cửa, chỉ còn là nợ dữ liệu.
+        const blockingFulfillment = !r.hasShipment;
+        const chat = r.pageId && r.conversationId ? ` · Chat: https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : "";
+        candidates.push({
+          kind: "ORDER_ADDRESS_NOT_NORMALIZED",
+          severity: blockingFulfillment && hours >= cfg.pendingHours ? "critical" : "warning",
+          title: `Địa chỉ chưa chuẩn hoá${blockingFulfillment ? " · chưa có vận đơn" : ""} · ${orderLabel(r)}`,
+          body: `Pancake không ghép được "${r.shipAddress}" vào tỉnh/xã nên POS chưa đẩy sang đơn vị vận chuyển được (lên đơn ${fmtAt(r.insertedAt)}, đã ${hours} giờ). Mở đơn, hỏi khách rồi CHỌN TAY tỉnh/xã — không đoán hộ khách.${chat}`,
+          href: `/orders/${r.id}`,
+          entityType: "ORDER",
+          entityId: r.id,
+          dedupeKey: `order-address:${r.id}`,
+          occurredAt: r.insertedAt,
+        });
+      }
+    } catch {
+      // chưa có dữ liệu đơn
+    }
+  }
+
   if (cfg.enabled.incomplete) {
     activeKinds.push("ORDER_INCOMPLETE");
     const rows = await db

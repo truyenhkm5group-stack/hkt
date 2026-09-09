@@ -28,6 +28,12 @@ export type CaseType =
   | "LOW_STOCK_RISK"
   | "CS_CASE"
   | "ORDER_INCOMPLETE"
+  /**
+   * Pancake KHÔNG ghép được địa chỉ khách vào đơn vị hành chính, nên POS không đẩy sang ĐVVC được.
+   * Khác "đơn thiếu thông tin": ở đây khách đã cho địa chỉ, chỉ là hệ thống chưa chuẩn hoá được —
+   * đơn trông đầy đủ trên màn hình nhưng đứng im, và trước đây không có gì báo.
+   */
+  | "ORDER_ADDRESS_NOT_NORMALIZED"
   | "RISKY_ORDER"
   | "ADS_BILLING"
   /**
@@ -77,6 +83,7 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   STOCK_LOW: "LOW_STOCK_RISK",
   CS_CASE: "CS_CASE",
   ORDER_INCOMPLETE: "ORDER_INCOMPLETE",
+  ORDER_ADDRESS_NOT_NORMALIZED: "ORDER_ADDRESS_NOT_NORMALIZED",
   RISKY_ORDER: "RISKY_ORDER",
   ADS_BILLING: "ADS_BILLING",
   AMBIGUOUS_MAPPING: "AMBIGUOUS_ORDER_SHIPMENT_MAPPING",
@@ -104,6 +111,7 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   LOW_STOCK_RISK: "Hết hàng · đang mất đơn",
   CS_CASE: "Case CSKH",
   ORDER_INCOMPLETE: "Đơn thiếu thông tin",
+  ORDER_ADDRESS_NOT_NORMALIZED: "Địa chỉ chưa chuẩn hoá · không giao được",
   RISKY_ORDER: "Đơn rủi ro cao",
   ADS_BILLING: "Tài khoản quảng cáo",
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "Chưa rõ vận đơn thuộc đơn nào",
@@ -119,6 +127,8 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   // Gọi khách ngay là cứu được nguyên đơn.
   DELIVERY_FAILED: 1,
   ORDER_INCOMPLETE: 1,
+  // Gọi khách hỏi lại địa chỉ rồi chọn tay trên POS là cứu được nguyên đơn.
+  ORDER_ADDRESS_NOT_NORMALIZED: 1,
   NEW_ORDER_UNPROCESSED: 0.9,
   // Hàng còn trong kho, gửi ngay là xong — cứu được nguyên đơn.
   ORDER_CONFIRMATION_STALE: 0.9,
@@ -173,6 +183,8 @@ export const CASE_ACTION: Record<CaseType, string> = {
   LOW_STOCK_RISK: "Đặt sản xuất theo số đề xuất ở trang Kế hoạch SX.",
   CS_CASE: "Trả lời khách trên Pancake và đóng case.",
   ORDER_INCOMPLETE: "Bổ sung số điện thoại / địa chỉ trước khi gửi hàng.",
+  ORDER_ADDRESS_NOT_NORMALIZED:
+    "Mở đơn trên Pancake, chọn TAY tỉnh/xã cho địa chỉ khách rồi lưu. KHÔNG đoán hộ khách: sai địa chỉ là mất cả hàng lẫn hai chiều cước. Địa chỉ chỉ có tỉnh + xã là ĐÚNG chuẩn hai cấp mới, không phải lỗi.",
   RISKY_ORDER: "Xin cọc hoặc xác nhận lại với khách trước khi gửi.",
   ADS_BILLING: "Nạp tiền / kiểm tra ngưỡng thanh toán tài khoản quảng cáo.",
   OTHER: "Xem chi tiết rồi xử lý.",
@@ -211,6 +223,7 @@ export const CASE_TEAM: Record<CaseType, CaseTeam> = {
   // Có khách thật đang chờ ở đầu kia.
   NEW_ORDER_UNPROCESSED: "CS",
   ORDER_INCOMPLETE: "CS",
+  ORDER_ADDRESS_NOT_NORMALIZED: "CS",
   RISKY_ORDER: "CS",
   CS_CASE: "CS",
   CUSTOMER_RECOVERY: "CS",
@@ -270,6 +283,7 @@ const CUSTOMER_WAITING: Record<CaseType, number> = {
   DELIVERY_FAILED: 1,
   CS_CASE: 1,
   ORDER_INCOMPLETE: 1,
+  ORDER_ADDRESS_NOT_NORMALIZED: 1,
   NEW_ORDER_UNPROCESSED: 1,
   ORDER_CONFIRMATION_STALE: 1,
   DELIVERY_STALE: 0.8,
@@ -446,6 +460,8 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   NEW_ORDER_UNPROCESSED: 12,
   ORDER_CONFIRMATION_STALE: 24,
   ORDER_INCOMPLETE: 8,
+  // Đơn đứng im vì địa chỉ: mỗi giờ trôi qua là khách nguội thêm và đối thủ giao trước.
+  ORDER_ADDRESS_NOT_NORMALIZED: 12,
   // Cửa sổ gọi lại khách sau khi giao hụt rất ngắn — quá một ngày là mất đơn.
   DELIVERY_FAILED: 24,
   DELIVERY_STALE: 48,

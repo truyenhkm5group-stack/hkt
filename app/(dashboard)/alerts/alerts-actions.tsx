@@ -381,6 +381,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.cancelledButShipping} onCheckedChange={(v) => toggle("cancelledButShipping", v === true)} /> Đơn đã huỷ nhưng hàng vẫn đang đi tới khách
         </label>
+        <label className="flex items-center gap-2">
+          <Checkbox checked={form.enabled.addressNotNormalized} onCheckedChange={(v) => toggle("addressNotNormalized", v === true)} /> Địa chỉ chưa chuẩn hoá nên chưa đẩy được sang đơn vị vận chuyển
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>

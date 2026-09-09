@@ -405,6 +405,41 @@ async function main() {
   assert.ok(closed?.resolvedAt, "tự đóng khi đã giao");
   console.log(`✓ Cảnh báo: giao thất bại → thông báo (${run1.created} mới), giao xong → tự đóng`);
 
+  // ───────── ĐỊA CHỈ CHƯA CHUẨN HOÁ ─────────
+  //
+  // Đơn TRÔNG đầy đủ nhưng POS không đẩy sang ĐVVC được. Ba luật phải đúng, nếu sai thì hoặc bỏ sót
+  // hàng trăm đơn đang kẹt, hoặc báo nhầm hàng loạt đơn hoàn toàn hợp lệ.
+  // SĐT cố ý nằm NGOÀI dải 09000000xx: fixture chung dùng dải đó để kiểm thử ghép đơn landing theo
+  // số điện thoại, trùng vào là làm hỏng bài kiểm thử của người khác.
+  await db.insert(schema.orders).values([
+    // (a) kẹt thật: có địa chỉ, KHÔNG có tỉnh.
+    { id: "addr-ket", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000101", shipAddress: "123 đường ABC", shipProvince: "" },
+    // (b) HAI CẤP MỚI (tỉnh + xã, không quận/huyện) — ĐÚNG chuẩn từ 01/07/2025, KHÔNG được báo.
+    { id: "addr-hai-cap", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000102", shipAddress: "456 đường XYZ", shipProvince: "Hà Nội", shipDistrict: "", shipCommune: "Phường Láng" },
+    // (c) trống địa chỉ — thuộc ORDER_INCOMPLETE, không được đếm hai lần ở đây.
+    { id: "addr-trong", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000103", shipAddress: "", shipProvince: "" },
+  ]).onConflictDoNothing();
+
+  await evaluateAlerts();
+  const addrCases = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "ORDER_ADDRESS_NOT_NORMALIZED"));
+  const addrIds = new Set(addrCases.map((c) => c.entityId));
+  assert.ok(addrIds.has("addr-ket"), "đơn có địa chỉ mà thiếu tỉnh PHẢI được báo — đây là đơn đang đứng im");
+  assert.ok(!addrIds.has("addr-hai-cap"), "địa chỉ hai cấp (tỉnh + xã) là ĐÚNG chuẩn mới, báo là báo nhầm hàng loạt");
+  assert.ok(!addrIds.has("addr-trong"), "đơn trống địa chỉ thuộc 'đơn thiếu thông tin', không được đếm hai lần");
+
+  // Chưa có vận đơn ⇒ đang chặn việc giao hàng ⇒ phải nêu rõ trong tiêu đề để nhìn là biết gấp.
+  const ketCase = addrCases.find((c) => c.entityId === "addr-ket");
+  assert.ok(ketCase?.title.includes("chưa có vận đơn"), "đơn chưa có vận đơn phải được nêu rõ là đang chặn giao hàng");
+  // ERP KHÔNG tự đoán địa chỉ: việc phải nói rõ là người mở đơn chọn tay.
+  assert.ok(/chọn tay|CHỌN TAY/i.test(ketCase?.body ?? ""), "việc phải yêu cầu NGƯỜI chọn tay, ERP không đoán hộ khách");
+
+  // Chạy lại không tạo trùng.
+  const truoc = addrCases.length;
+  await evaluateAlerts();
+  const sau = (await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "ORDER_ADDRESS_NOT_NORMALIZED"))).length;
+  assert.equal(sau, truoc, "quét lại không tạo việc trùng");
+  console.log(`✓ Địa chỉ chưa chuẩn hoá: ${truoc} việc · địa chỉ hai cấp KHÔNG bị báo nhầm · đơn trống địa chỉ không đếm hai lần · quét lại không trùng`);
+
   // Case CSKH tự phát hiện từ thẻ / ghi chú đơn Pancake
   await db.update(schema.orders).set({ tags: ["Trả hàng"], note: "khách nhận sai size, đổi size L cho khách" }).where(eq(schema.orders.id, "rr-9001"));
   const cs1 = await detectCsCases();

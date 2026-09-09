@@ -51,6 +51,7 @@ const configSchema = z.object({
     customerRecovery: z.boolean().default(true),
     adsAnomaly: z.boolean().default(true),
     cancelledButShipping: z.boolean().default(true),
+    addressNotNormalized: z.boolean().default(true),
   }),
 });
 
