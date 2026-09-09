@@ -126,6 +126,27 @@ export async function getCashflow(): Promise<CashflowReport> {
     })
     .from(sql`(select 1) as t`);
 
+  /**
+   * ĐO ĐỘ ĐẦY ĐỦ CỦA DỮ LIỆU, không chỉ đo con số.
+   *
+   * Bốn cấu phần của dự phóng này đều có thể bằng 0 vì hai lý do hoàn toàn khác nhau: **không phát
+   * sinh**, hoặc **chưa có ai nhập dữ liệu**. Trình bày hai thứ đó giống hệt nhau là cách chắc chắn
+   * nhất để chủ shop tin nhầm một con số rỗng.
+   *
+   * Đo trên production 10/09/2026: `production_orders` 0 dòng, `bank_transactions` 0 dòng,
+   * `stock_receipts` đúng 2 phiếu, và 0/37 mẫu mã có giá nhập — nghĩa là "tiền hàng đã cam kết 0đ"
+   * và "vốn tồn kho 0đ" hiện tại đều là CHƯA BIẾT, không phải 0.
+   */
+  const [dayDu] = await db
+    .select({
+      lenhSanXuat: sql<number>`(select count(*) from production_orders)`,
+      mauMaCoGia: sql<number>`(select count(*) from product_variants where is_removed = false and coalesce(last_imported_price, 0) > 0)`,
+      mauMaTong: sql<number>`(select count(*) from product_variants where is_removed = false)`,
+      phieuNhap: sql<number>`(select count(*) from stock_receipts where kind = 'RECEIPT')`,
+      khoanChi60Ngay: sql<number>`(select count(*) from expenses where occurred_at >= now() - interval '60 days')`,
+    })
+    .from(sql`(select 1) as t`);
+
   const adsPerDay = Number(ads?.total ?? 0) / 14;
   const opexPerDay = Number(opex?.total ?? 0) / 60;
   const codTotal = Number(cod?.amount ?? 0);
@@ -163,7 +184,21 @@ export async function getCashflow(): Promise<CashflowReport> {
       "ERP KHÔNG có số dư ngân hàng: đây là dòng tiền RÒNG dự kiến (vào trừ ra), không phải số dư tài khoản.",
       "Không dự phóng tiền từ đơn CHƯA giao — đơn chưa giao thì chưa chắc thành tiền, và tỷ lệ hoàn đủ lớn để phép ngoại suy đó sai nghiêm trọng.",
       "Chi quảng cáo và chi vận hành dự phóng theo NHỊP THỰC TẾ đã chi, không theo kế hoạch — nhịp đổi thì con số đổi theo.",
-      "Vốn tồn kho chỉ tính mẫu mã CÓ giá nhập; mẫu chưa có giá nhập không được tính vào.",
+      // Những dòng dưới đây chỉ hiện KHI dữ liệu thật sự thiếu — nói đúng cái đang thiếu, không nói chung chung.
+      ...(Number(dayDu?.lenhSanXuat ?? 0) === 0
+        ? ['"Tiền hàng đã cam kết với xưởng" đang là 0đ vì ERP CHƯA CÓ lệnh sản xuất nào, không phải vì shop chưa đặt hàng. Nhập lệnh sản xuất thì phần này mới có số.']
+        : []),
+      ...(Number(dayDu?.mauMaCoGia ?? 0) === 0
+        ? [`Vốn tồn kho đang là 0đ vì KHÔNG mẫu mã nào có giá nhập (0/${Number(dayDu?.mauMaTong ?? 0)}). Đây là CHƯA BIẾT, không phải "hàng không đáng tiền".`]
+        : [
+            `Vốn tồn kho chỉ tính ${Number(dayDu?.mauMaCoGia ?? 0)}/${Number(dayDu?.mauMaTong ?? 0)} mẫu mã CÓ giá nhập; phần còn lại không được tính vào.`,
+          ]),
+      ...(Number(dayDu?.phieuNhap ?? 0) < 3
+        ? [`Chỉ có ${Number(dayDu?.phieuNhap ?? 0)} phiếu nhập kho trong ERP, nên mọi con số dựa trên giá vốn ở đây đều đang được suy ngược.`]
+        : []),
+      ...(Number(dayDu?.khoanChi60Ngay ?? 0) === 0
+        ? ["Nhịp chi vận hành đang là 0đ/ngày vì 60 ngày qua KHÔNG có khoản chi nào được ghi — dự phóng tiền ra vì thế đang thấp hơn thực tế."]
+        : []),
     ],
   };
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import type { Db } from "@/db";
+import { eq, sql } from "drizzle-orm";
+import { schema, type Db } from "@/db";
 import { getCashflow } from "@/lib/queries/cashflow";
 
 /**
@@ -8,7 +9,6 @@ import { getCashflow } from "@/lib/queries/cashflow";
  * Điều phải khoá: LỢI NHUẬN KHÔNG PHẢI TIỀN, và ERP không được giả vờ biết số dư ngân hàng.
  */
 export async function testCashflow(db: Db) {
-  void db;
   const r = await getCashflow();
 
   // ───────── 1. Không bịa số dư ngân hàng ─────────
@@ -23,6 +23,43 @@ export async function testCashflow(db: Db) {
     r.limitations.some((l) => l.includes("CHƯA giao")),
     "phải nói rõ không dự phóng tiền từ đơn chưa giao",
   );
+
+  /**
+   * ───────── 1b. 0đ VÌ KHÔNG PHÁT SINH, hay 0đ VÌ CHƯA AI NHẬP? ─────────
+   *
+   * Bốn cấu phần của dự phóng đều có thể bằng 0 vì hai lý do khác hẳn nhau, và trình bày chúng giống
+   * nhau là cách chắc chắn nhất để chủ shop tin nhầm một con số rỗng. Đo trên production 10/09/2026:
+   * `production_orders` 0 dòng, `stock_receipts` đúng 2, 0/37 mẫu mã có giá nhập — nên "đã cam kết
+   * với xưởng 0đ" và "vốn tồn kho 0đ" đều đang là CHƯA BIẾT.
+   *
+   * `limitations` vì thế phải ĐO dữ liệu, không được là văn bản cố định.
+   */
+  const soLenhSanXuat = (await db.select({ n: sql<number>`count(*)` }).from(schema.productionOrders))[0];
+  if (Number(soLenhSanXuat?.n ?? 0) === 0) {
+    assert.equal(r.workingCapital.productionCommitted, 0, "fixture: chưa có lệnh sản xuất thì phần cam kết là 0");
+    assert.ok(
+      r.limitations.some((l) => l.includes("CHƯA CÓ lệnh sản xuất")),
+      "0đ vì chưa ai nhập lệnh sản xuất PHẢI được nói ra — nếu không nó đọc y như 'shop không cam kết gì với xưởng'",
+    );
+  }
+
+  const giaNhap = (
+    await db
+      .select({ co: sql<number>`count(*) filter (where coalesce(${schema.productVariants.lastImportedPrice}, 0) > 0)`, tong: sql<number>`count(*)` })
+      .from(schema.productVariants)
+      .where(eq(schema.productVariants.isRemoved, false))
+  )[0];
+  if (Number(giaNhap?.co ?? 0) === 0) {
+    assert.ok(
+      r.limitations.some((l) => l.includes("KHÔNG mẫu mã nào có giá nhập")),
+      "vốn tồn kho 0đ vì thiếu giá nhập phải được nói là CHƯA BIẾT, không phải 'hàng không đáng tiền'",
+    );
+  } else {
+    assert.ok(
+      r.limitations.some((l) => l.includes("mẫu mã CÓ giá nhập")),
+      "phải nói rõ vốn tồn kho chỉ phủ được bao nhiêu mẫu mã",
+    );
+  }
 
   // ───────── 2. Ba kỳ phải nhất quán với nhau ─────────
   const [d7, d14, d30] = r.buckets;
