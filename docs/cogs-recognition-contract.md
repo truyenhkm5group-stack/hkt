@@ -123,6 +123,55 @@ nhuận đang dựa trên phỏng đoán, thay vì tin nhầm là đã kiểm ch
 Cách sửa thật, nếu muốn: **nhập phiếu nhập cũ với ngày nhập THẬT**. Có chứng từ thì căn cứ tự chuyển
 sang `RECEIPT_BEFORE`, không cần đụng mã.
 
+## 6c. Bản P0.4 đã lên production nhưng KHÔNG chạy suốt một ngày
+
+Ghi lại vì đây là loại hỏng khó thấy nhất: mã đúng, kiểm thử xanh, deploy xanh — và tính năng vẫn
+không hoạt động.
+
+Truy vấn thẳng vào bảng ngày 10/09/2026, sau khi P0.4 đã chạy trên production hơn một ngày:
+
+```
+can_cu            n     gia_von_da_chot   trong_do_da_giao
+(chưa ghi nhận)   2433  (rỗng)            407
+```
+
+**Cả 2.433 dòng có `recognized_cogs` và `cogs_basis` đều NULL, gồm cả 407 đơn đã giao.** Đường đọc
+`coalesce(recognized_cogs, cogs)` vì thế luôn rơi về `cogs` — giá vốn HIỆN TẠI. Một phiếu nhập mới
+vẫn viết lại được lợi nhuận kỳ đã qua, đúng thứ P0.4 sinh ra để chặn.
+
+### Ba lớp lẽ ra phải bắt được, cả ba đều im
+
+1. **Bộ dò dòng cũ** nhận biết qua `logic_version`, mà P0.4 cố ý KHÔNG tăng phiên bản — tăng thì cả
+   2.433 đơn thành cũ cùng lúc và trang chủ quay lại mức 60 giây ngay sau deploy. Quyết định đó đúng,
+   nhưng thiếu bước thay thế: một điều kiện làm cũ riêng cho cột mới.
+2. **`outcome-parity --apply`** gọi đúng bộ dò đó, nên nó báo "dựng lại 0 đơn" và không điền gì.
+3. **Báo cáo độ phủ** chỉ đối chiếu `outcome` và `cogs`, nên in `MATCHED 2433 · MISMATCHED 0 ·
+   FALLBACK_RATE 0%` — xanh hoàn toàn — trong khi ba cột mới rỗng sạch.
+
+> **Bài học:** một cột được THÊM VÀO mà không ai đối chiếu thì im lặng rỗng, và mọi báo cáo độ phủ
+> vẫn xanh. Độ phủ phải đo cả cột mới, không chỉ cột cũ.
+
+### Đã vá và đã kiểm chứng
+
+- Điều kiện làm cũ mới: đơn `DELIVERED` mà `recognized_cogs` còn NULL. Tự tắt sau một lượt.
+- `outcome-parity` nay in và **thoát mã lỗi** khi `COGS_NOT_FROZEN > 0`.
+- Ghi vào `lib/constants/canonical-outcome.ts`: thêm cột mà luật không đổi thì giữ nguyên phiên bản
+  và thêm điều kiện làm cũ riêng — đừng mặc định tăng phiên bản, và cũng đừng quên bước thay thế.
+
+Đo lại sau khi vá:
+
+```
+lượt 1: dựng lại 580 đơn · còn 0
+DELIVERED           407
+COGS_FROZEN         407
+COGS_NOT_FROZEN       0
+BASIS_MISSING         0
+BASIS_RECEIPT_AFTER 368
+```
+
+KPI trước / sau: **không đổi một con số nào** (2.433 đơn · 407 giao thành công · GTC 32,4% · doanh
+thu lên đơn 1.069.391.498đ · thực nhận có chứng từ 212.052.000đ).
+
 ## 7. Việc còn bỏ ngỏ (cần chủ shop quyết, không phải việc kỹ thuật)
 
 1. ~~Giá vốn có nên đóng băng tại thời điểm giao hàng không?~~ **ĐÃ CHỐT: có** — xem mục 6.
