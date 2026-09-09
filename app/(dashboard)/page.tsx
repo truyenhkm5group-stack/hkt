@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
 import { RevenueChart } from "@/components/charts/revenue-chart";
@@ -9,6 +10,7 @@ import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import { SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
@@ -185,8 +187,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </Link>
       </section>
 
-      {/* Tóm tắt sinh theo QUY TẮC từ số liệu đã tính bằng SQL — không phải văn của mô hình. */}
-      <BusinessBriefSection period={period} />
+      {/*
+        HAI KHỐI DƯỚI ĐÂY CHẢY VỀ SAU, KHÔNG CHẶN CÁC THẺ TIỀN Ở TRÊN.
+        "Tóm tắt & rủi ro" và "Việc cần làm hôm nay" kéo theo hàng đợi việc và kế hoạch tồn kho —
+        nặng hơn hẳn phần còn lại của trang và KHÔNG phải thứ chủ shop nhìn đầu tiên. Bọc trong
+        Suspense thì ba con số tiền hiện ngay, hai khối này điền vào sau cùng khung xương của chính
+        chúng. Trước đây cả trang phải đợi khối chậm nhất.
+      */}
+      <Suspense fallback={<Skeleton className="h-32 rounded-xl" />}>
+        <BusinessBriefSection period={period} />
+      </Suspense>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
         <SectionCard title="Doanh thu theo ngày" description="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
@@ -199,7 +209,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
           padded={false}
         >
-          <TopActions />
+          <Suspense fallback={<div className="space-y-2 p-5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>}>
+            <TopActions />
+          </Suspense>
           {/* Số đếm theo nhóm giữ lại ở dạng gọn: nó trả lời "tình hình chung thế nào", còn danh
               sách trên trả lời "bắt đầu từ đâu". Hai câu hỏi khác nhau. */}
           <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">

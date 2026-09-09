@@ -272,3 +272,57 @@ export const RECOGNITION_METHOD_SPEC: Record<RecognitionMethod, { label: string;
     note: "Dự phòng rủi ro tồn kho. % × giá vốn hàng BÁN RA, KHÔNG phải % giá trị hàng nhập trong kỳ.",
   },
 };
+
+/**
+ * ─────────── CHIA MỘT KHOẢN THÁNG THEO SỐ NGÀY CỦA KHOẢNG BÁO CÁO ───────────
+ *
+ * Dùng cho lương cứng và mọi khoản khai theo đơn giá THÁNG: 9.000.000đ/tháng, xem 7 ngày của một
+ * tháng 30 ngày ⇒ 2.100.000đ.
+ *
+ * Chia theo SỐ NGÀY THẬT của từng tháng, không dùng hằng số 30,44:
+ *  - cộng đủ một tháng luôn ra ĐÚNG khoản tháng, không dư không thiếu;
+ *  - tháng 2 có 28/29 ngày thì một ngày của tháng 2 đắt hơn một ngày của tháng 3 — đúng như hợp
+ *    đồng lao động tính theo tháng, chứ không phải theo "tháng bình quân 30,44 ngày".
+ *
+ * Hằng số 30,44 (`periodMonths`) vẫn đúng cho chi phí cố định ước tính, nơi không có hợp đồng nào
+ * để bám vào. Hai chỗ khác nhau vì bản chất khác nhau, không phải vì quên đồng bộ.
+ */
+export function prorateMonthlyAmount(monthly: number, from: Date | null, to: Date | null): number {
+  const amount = Math.round(Number(monthly) || 0);
+  if (!amount || !from || !to || to < from) return 0;
+  let total = 0;
+  for (const month of vnMonthsBetween(from, to)) {
+    const daysInMonth = month.days;
+    const overlapStart = month.start > from ? month.start : from;
+    const overlapEnd = month.end < to ? month.end : to;
+    if (overlapEnd < overlapStart) continue;
+    const overlapDays = inclusiveDays(overlapStart, overlapEnd);
+    total += overlapDays >= daysInMonth ? amount : Math.round((amount * overlapDays) / daysInMonth);
+  }
+  return total;
+}
+
+/** Các tháng (theo lịch Việt Nam) mà khoảng `[from, to]` chạm tới, kèm số ngày thật của tháng đó. */
+function vnMonthsBetween(from: Date, to: Date): { start: Date; end: Date; days: number }[] {
+  const out: { start: Date; end: Date; days: number }[] = [];
+  const vn = (d: Date) => new Date(d.getTime() + VN_OFFSET_MS);
+  let year = vn(from).getUTCFullYear();
+  let month = vn(from).getUTCMonth();
+  const lastYear = vn(to).getUTCFullYear();
+  const lastMonth = vn(to).getUTCMonth();
+  // Trần vòng lặp: 1200 tháng = 100 năm. Dữ liệu hỏng cũng không treo tiến trình.
+  for (let guard = 0; guard < 1200; guard += 1) {
+    const days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    // 00:00 ngày 1 và 23:59:59.999 ngày cuối, theo giờ Việt Nam.
+    const start = new Date(Date.UTC(year, month, 1) - VN_OFFSET_MS);
+    const end = new Date(Date.UTC(year, month, days, 23, 59, 59, 999) - VN_OFFSET_MS);
+    out.push({ start, end, days });
+    if (year === lastYear && month === lastMonth) break;
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return out;
+}

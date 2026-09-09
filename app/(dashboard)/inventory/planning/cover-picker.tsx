@@ -1,7 +1,7 @@
 "use client";
 
 import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
-import { useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
 import { InfoHint } from "@/components/info-hint";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,7 @@ const LUA_CHON = [7, 14, 21, 30, 45, 60, 90];
  * vào nguồn cung hay không. Ghi lên URL nên chia sẻ được link và bấm quay lại vẫn đúng.
  */
 export function CoverPicker({ coverDays, macDinh, countIncoming }: { coverDays: number; macDinh: number; countIncoming: boolean }) {
-  const [dangTinh, startTransition] = useTransition();
+  const [dangTinh, startTransition] = useNavTransition();
   const [, setState] = useQueryStates(
     { ngay: parseAsInteger, hoan: parseAsString },
     { shallow: false, history: "push", startTransition },

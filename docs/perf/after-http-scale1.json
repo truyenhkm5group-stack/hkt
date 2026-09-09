@@ -1,0 +1,284 @@
+{
+  "label": "SAU · HTTP scale1",
+  "base": "http://localhost:3123",
+  "rounds": 5,
+  "measuredAt": "2026-09-09T09:29:16.674Z",
+  "nganSach": {
+    "dieuHuongCoDem": 200,
+    "doiKy": 700,
+    "baoCaoLanh": 1500,
+    "apiP95": 1000
+  },
+  "rows": [
+    {
+      "name": "Tỷ lệ giao thành công",
+      "path": "/reports/returns",
+      "kind": "HTML",
+      "p50": 274,
+      "p95": 288,
+      "min": 240,
+      "kb": 250.1,
+      "status": 200
+    },
+    {
+      "name": "Tổng quan",
+      "path": "/",
+      "kind": "HTML",
+      "p50": 267,
+      "p95": 277,
+      "min": 240,
+      "kb": 306.1,
+      "status": 200
+    },
+    {
+      "name": "Tổng quan",
+      "path": "/",
+      "kind": "RSC",
+      "p50": 224,
+      "p95": 269,
+      "min": 198,
+      "kb": 115.4,
+      "status": 200
+    },
+    {
+      "name": "Tỷ lệ giao thành công",
+      "path": "/reports/returns",
+      "kind": "RSC",
+      "p50": 217,
+      "p95": 237,
+      "min": 212,
+      "kb": 78.1,
+      "status": 200
+    },
+    {
+      "name": "Tổng quan · đổi kỳ tháng trước",
+      "path": "/?period=last_month",
+      "kind": "RSC",
+      "p50": 181,
+      "p95": 230,
+      "min": 164,
+      "kb": 115.5,
+      "status": 200
+    },
+    {
+      "name": "Sản phẩm & tồn kho",
+      "path": "/products",
+      "kind": "HTML",
+      "p50": 179,
+      "p95": 218,
+      "min": 171,
+      "kb": 245.7,
+      "status": 200
+    },
+    {
+      "name": "Tổng quan · đổi kỳ 7 ngày",
+      "path": "/?period=7d",
+      "kind": "RSC",
+      "p50": 171,
+      "p95": 209,
+      "min": 167,
+      "kb": 113.1,
+      "status": 200
+    },
+    {
+      "name": "Quảng cáo",
+      "path": "/ads",
+      "kind": "HTML",
+      "p50": 165,
+      "p95": 191,
+      "min": 160,
+      "kb": 470.4,
+      "status": 200
+    },
+    {
+      "name": "Sản phẩm & tồn kho",
+      "path": "/products",
+      "kind": "RSC",
+      "p50": 136,
+      "p95": 158,
+      "min": 133,
+      "kb": 60.2,
+      "status": 200
+    },
+    {
+      "name": "Cần xử lý (hàng đợi việc)",
+      "path": "/alerts",
+      "kind": "HTML",
+      "p50": 133,
+      "p95": 147,
+      "min": 128,
+      "kb": 736.5,
+      "status": 200
+    },
+    {
+      "name": "Vận đơn",
+      "path": "/shipments",
+      "kind": "HTML",
+      "p50": 104,
+      "p95": 132,
+      "min": 94,
+      "kb": 309.6,
+      "status": 200
+    },
+    {
+      "name": "Quảng cáo · đổi kỳ 30 ngày",
+      "path": "/ads?period=30d",
+      "kind": "RSC",
+      "p50": 119,
+      "p95": 131,
+      "min": 114,
+      "kb": 141.2,
+      "status": 200
+    },
+    {
+      "name": "Báo cáo lợi nhuận",
+      "path": "/reports",
+      "kind": "HTML",
+      "p50": 82,
+      "p95": 100,
+      "min": 73,
+      "kb": 300.2,
+      "status": 200
+    },
+    {
+      "name": "Quảng cáo",
+      "path": "/ads",
+      "kind": "RSC",
+      "p50": 90,
+      "p95": 98,
+      "min": 86,
+      "kb": 140.3,
+      "status": 200
+    },
+    {
+      "name": "Đơn hàng",
+      "path": "/orders",
+      "kind": "HTML",
+      "p50": 72,
+      "p95": 95,
+      "min": 64,
+      "kb": 281.8,
+      "status": 200
+    },
+    {
+      "name": "Hiệu quả mẫu mã",
+      "path": "/products/performance",
+      "kind": "HTML",
+      "p50": 83,
+      "p95": 94,
+      "min": 80,
+      "kb": 494,
+      "status": 200
+    },
+    {
+      "name": "Cần xử lý (hàng đợi việc)",
+      "path": "/alerts",
+      "kind": "RSC",
+      "p50": 85,
+      "p95": 90,
+      "min": 74,
+      "kb": 198.2,
+      "status": 200
+    },
+    {
+      "name": "Vận đơn",
+      "path": "/shipments",
+      "kind": "RSC",
+      "p50": 65,
+      "p95": 86,
+      "min": 58,
+      "kb": 55.5,
+      "status": 200
+    },
+    {
+      "name": "Lợi nhuận · đổi tab dòng tiền",
+      "path": "/reports?tab=cash",
+      "kind": "RSC",
+      "p50": 82,
+      "p95": 84,
+      "min": 78,
+      "kb": 53.3,
+      "status": 200
+    },
+    {
+      "name": "Báo cáo lợi nhuận",
+      "path": "/reports",
+      "kind": "RSC",
+      "p50": 44,
+      "p95": 76,
+      "min": 36,
+      "kb": 98.7,
+      "status": 200
+    },
+    {
+      "name": "Chất lượng dữ liệu",
+      "path": "/data-quality",
+      "kind": "HTML",
+      "p50": 52,
+      "p95": 62,
+      "min": 47,
+      "kb": 204.7,
+      "status": 200
+    },
+    {
+      "name": "Hiệu quả mẫu mã",
+      "path": "/products/performance",
+      "kind": "RSC",
+      "p50": 46,
+      "p95": 53,
+      "min": 41,
+      "kb": 168.9,
+      "status": 200
+    },
+    {
+      "name": "Nhật ký kho",
+      "path": "/inventory",
+      "kind": "HTML",
+      "p50": 36,
+      "p95": 41,
+      "min": 35,
+      "kb": 149.6,
+      "status": 200
+    },
+    {
+      "name": "Đơn hàng",
+      "path": "/orders",
+      "kind": "RSC",
+      "p50": 35,
+      "p95": 40,
+      "min": 28,
+      "kb": 56.5,
+      "status": 200
+    },
+    {
+      "name": "Lợi nhuận · đổi kỳ 90 ngày",
+      "path": "/reports?period=90d",
+      "kind": "RSC",
+      "p50": 33,
+      "p95": 39,
+      "min": 29,
+      "kb": 105.3,
+      "status": 200
+    },
+    {
+      "name": "Chất lượng dữ liệu",
+      "path": "/data-quality",
+      "kind": "RSC",
+      "p50": 25,
+      "p95": 34,
+      "min": 24,
+      "kb": 67.3,
+      "status": 200
+    },
+    {
+      "name": "Nhật ký kho",
+      "path": "/inventory",
+      "kind": "RSC",
+      "p50": 19,
+      "p95": 21,
+      "min": 18,
+      "kb": 35.7,
+      "status": 200
+    }
+  ]
+}

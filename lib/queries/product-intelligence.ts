@@ -1,11 +1,11 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { IS_RETURNED, successRate } from "@/lib/queries/metrics";
+import { lineUnitCost } from "@/lib/queries/cogs";
+import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
-import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
-import { availableStockExpr, variantReceiptsSubquery, variantSalesSubquery, stockKnownExpr } from "@/lib/queries/stock";
+import { OUTCOME_FENCE, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { availableStockExpr, variantLastCostSubquery, variantReceiptsSubquery, variantSalesSubquery, stockKnownExpr } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -103,32 +103,36 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
   const limit = query.limit ?? 50;
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
+  // Giá nhập gần nhất tính MỘT LẦN cho mỗi mẫu mã (xem variantLastCostSubquery): trước đây đây là
+  // truy vấn con chạy cho từng dòng đơn và chiếm 99,3% chi phí của cả truy vấn này.
+  const lastCost = variantLastCostSubquery(db);
   const windowDays = query.period.from && query.period.to ? Math.max(1, Math.round((query.period.to.getTime() - query.period.from.getTime()) / 86_400_000)) : 30;
 
-  const rows = await db
+  /**
+   * BẢNG DẪN XUẤT: kết quả đơn và giá vốn tính ĐÚNG MỘT LẦN cho mỗi dòng đơn hàng.
+   *
+   * Trước đây 13 cột gộp mỗi cột nội tuyến lại cả `ORDER_OUTCOME` (13 truy vấn con tương quan bên
+   * trong) — hơn 100 `SubPlan` cho một truy vấn, và khâu gộp chiếm 99,7% thời gian. `OUTCOME_FENCE`
+   * chặn Postgres kéo bảng dẫn xuất này lên rồi nội tuyến lại. Xem lib/queries/return-rate.ts.
+   */
+  const base = db
     .select({
       variantId: i.variantId,
-      sku: sql<string>`max(${i.sku})`,
-      productId: sql<string | null>`max(${i.productId})`,
-      productName: sql<string>`max(${i.productName})`,
-      color: sql<string>`coalesce(max(${pv.color}), '')`,
-      size: sql<string>`coalesce(max(${pv.size}), '')`,
-      image: sql<string | null>`max(${i.image})`,
-      orderedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
-      deliveredQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-      returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
-      confirmedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${o.stage} not in ('NEW','WAITING') and ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
-      bookedRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`,
-      deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returnedOrders: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
-      deliveredRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-      lostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${IS_RETURNED}), 0)`,
-      deliveredCost: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-      /** Dòng đã giao mà không tra được giá vốn — nếu có thì lợi nhuận góp là CHƯA BIẾT. */
-      missingCostLines: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and ${LINE_UNIT_COST} = 0)`,
-      // Join theo mẫu mã là 1:1 nên `max()` chỉ để thoả GROUP BY, không đổi giá trị.
-      available: sql<number | null>`max(case when ${stockKnownExpr(receipts)} then ${availableStockExpr(sales, receipts)} else null end)`,
-      reserved: sql<number | null>`max(case when ${stockKnownExpr(receipts)} then coalesce(${sales.reserved}, 0) else null end)`,
+      orderId: o.id,
+      sku: i.sku,
+      productId: i.productId,
+      productName: i.productName,
+      image: i.image,
+      quantity: i.quantity,
+      lineTotal: i.lineTotal,
+      unitCost: sql<number>`${lineUnitCost(lastCost)}`.as("unit_cost"),
+      orderStage: o.stage,
+      color: pv.color,
+      size: pv.size,
+      stockKnown: sql<boolean>`${stockKnownExpr(receipts)}`.as("stock_known"),
+      availableStock: sql<number>`${availableStockExpr(sales, receipts)}`.as("available_stock"),
+      reservedStock: sql<number>`coalesce(${sales.reserved}, 0)`.as("reserved_stock"),
+      outcome: outcomeColumn(),
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
@@ -136,9 +140,43 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     .leftJoin(pv, eq(pv.id, i.variantId))
     .leftJoin(sales, eq(sales.variantId, i.variantId))
     .leftJoin(receipts, eq(receipts.variantId, i.variantId))
+    .leftJoin(lastCost, eq(lastCost.variantId, pv.id))
     .where(scope(query))
-    .groupBy(i.variantId)
-    .orderBy(desc(sql`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`))
+    .offset(OUTCOME_FENCE)
+    .as("pi_base");
+
+  const DELIVERED = sql`${base.outcome} = 'DELIVERED'`;
+  const RETURNED = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const NOT_CANCELLED = sql`${base.outcome} <> 'CANCELLED'`;
+
+  const rows = await db
+    .select({
+      variantId: base.variantId,
+      sku: sql<string>`max(${base.sku})`,
+      productId: sql<string | null>`max(${base.productId})`,
+      productName: sql<string>`max(${base.productName})`,
+      color: sql<string>`coalesce(max(${base.color}), '')`,
+      size: sql<string>`coalesce(max(${base.size}), '')`,
+      image: sql<string | null>`max(${base.image})`,
+      orderedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${NOT_CANCELLED}), 0)`,
+      deliveredQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${DELIVERED}), 0)`,
+      returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED}), 0)`,
+      confirmedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${base.orderStage} not in ('NEW','WAITING') and ${NOT_CANCELLED}), 0)`,
+      bookedRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${NOT_CANCELLED}), 0)`,
+      deliveredOrders: sql<number>`count(distinct ${base.orderId}) filter (where ${DELIVERED})`,
+      returnedOrders: sql<number>`count(distinct ${base.orderId}) filter (where ${RETURNED})`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${DELIVERED}), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED}), 0)`,
+      deliveredCost: sql<number>`coalesce(sum(${base.quantity} * ${base.unitCost}) filter (where ${DELIVERED}), 0)`,
+      /** Dòng đã giao mà không tra được giá vốn — nếu có thì lợi nhuận góp là CHƯA BIẾT. */
+      missingCostLines: sql<number>`count(*) filter (where ${DELIVERED} and ${base.unitCost} = 0)`,
+      // Join theo mẫu mã là 1:1 nên `max()` chỉ để thoả GROUP BY, không đổi giá trị.
+      available: sql<number | null>`max(case when ${base.stockKnown} then ${base.availableStock} else null end)`,
+      reserved: sql<number | null>`max(case when ${base.stockKnown} then ${base.reservedStock} else null end)`,
+    })
+    .from(base)
+    .groupBy(base.variantId)
+    .orderBy(desc(sql`coalesce(sum(${base.lineTotal}) filter (where ${DELIVERED}), 0)`))
     .limit(limit);
 
   return rows.map((r) => {

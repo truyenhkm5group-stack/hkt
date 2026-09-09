@@ -8,7 +8,7 @@ import { failedToReturnRate, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
-import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 
@@ -350,10 +350,8 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
 
   // Chi phí vận hành phải dùng ĐÚNG khoảng của báo cáo: khoản theo kỳ được chia theo số ngày chồng
   // lấn, khoản một lần vẫn ghi trọn vào ngày phát sinh. Xem lib/queries/cost-allocation.ts.
-  const expConds: SQL[] = [operatingExpenseCond(), expenseInRange(period.from, period.to)];
-
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-  const [sales, adRows, perOrder, [expRow]] = await Promise.all([
+  const [sales, adRows, perOrder, operating] = await Promise.all([
     db
       .select({
         productId: PID,
@@ -395,13 +393,12 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .leftJoin(pv, eq(pv.id, i.variantId))
       .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_CANCELLED, ...periodCond(period.from, period.to)))
       .groupBy(o.id, PID),
-    db
-      .select({ amount: allocatedExpenseSum(period.from, period.to), count: sql<number>`count(*)` })
-      .from(schema.expenses)
-      .where(and(...expConds)),
+    // CHI PHÍ VẬN HÀNH đi qua Profit Engine — nơi duy nhất quyết định nguồn nào có thẩm quyền,
+    // nguồn chính đã phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn.
+    getOperatingCost(period),
   ]);
-  const operatingExpenses = Number(expRow?.amount ?? 0);
-  const operatingCount = Number(expRow?.count ?? 0);
+  const operatingExpenses = operating.amount;
+  const operatingCount = operating.count;
   const riskPct = Number(assumptions.inventoryRiskPercent ?? 0);
   // kỳ "Toàn bộ" / thiếu mốc: lấy từ đơn đầu tiên tới đơn cuối (hoặc hôm nay nếu kỳ chưa kết thúc)
   const toDate = (v: string | Date | null | undefined) => (v ? new Date(v) : null);

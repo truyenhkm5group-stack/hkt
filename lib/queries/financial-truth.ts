@@ -7,6 +7,7 @@ import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, DELIVERED_COGS, DELIVERE
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 
 /**
  * ───────────────────── CHÂN LÝ TÀI CHÍNH ─────────────────────
@@ -176,12 +177,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)));
-  const [opsRow] = await db
-    // Cùng bộ máy phân bổ với Báo cáo lợi nhuận — trang "sự thật tài chính" không được là trang
-    // duy nhất còn cộng nguyên khoản thuê tháng vào một tuần.
-    .select({ amount: allocatedExpenseSum(period.from, period.to) })
-    .from(schema.expenses)
-    .where(and(operatingExpenseCond(), expenseInRange(period.from, period.to)));
+  // Một đường duy nhất: Profit Engine. Trang "sự thật tài chính" không được tự cộng theo cách riêng.
+  const opsRow = await getOperatingCost(period);
 
   const deliveredRevenue = Number(orderRow?.deliveredRevenue ?? 0);
   const deliveredCogs = Number(orderRow?.deliveredCogs ?? 0);

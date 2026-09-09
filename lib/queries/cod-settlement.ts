@@ -114,7 +114,7 @@ export type CodSettlementSummary = {
 };
 
 export async function codSettlementSummary(period: Period): Promise<CodSettlementSummary> {
-  return memo(`cod-settlement:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90, async () => {
+  return memo(`cod-settlement:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, async () => {
     const db = await getDb();
     const rows = rowsOf(await db.execute(sql`
       with t as (${SO_CHUNG_TU})

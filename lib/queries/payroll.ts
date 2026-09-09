@@ -14,7 +14,7 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
-import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { distributeProportionally } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -209,7 +209,7 @@ async function productEconomics(period: Period) {
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
   // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
   const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
-  const [sales, receipts, [exp], assumptions] = await Promise.all([
+  const [sales, receipts, exp, assumptions] = await Promise.all([
     db
       .select({
         productId: productKey,
@@ -238,17 +238,12 @@ async function productEconomics(period: Period) {
       .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
-    db
-      // CÙNG bộ máy phân bổ với Báo cáo lợi nhuận. Trước đây chỗ này cộng NGUYÊN khoản theo
-      // `occurred_at`, nên tiền thuê cả tháng rơi trọn vào kỳ tính lương chứa ngày ghi sổ và biến
-      // mất khỏi mọi kỳ khác — hoa hồng marketer tính trên một nền chi phí khác hẳn báo cáo LN.
-      .select({ amount: allocatedExpenseSum(period.from, period.to) })
-      .from(schema.expenses)
-      .where(and(operatingExpenseCond(), expenseInRange(period.from, period.to))),
+    // Nền chi phí của bảng lương phải là CÙNG con số với báo cáo lợi nhuận, nên đi chung engine.
+    getOperatingCost(period),
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
-  const operatingEntered = Number(exp?.amount ?? 0);
+  const operatingEntered = exp.amount;
   // chi phí cố định (văn phòng, điện nước…) theo giả định báo cáo lợi nhuận, quy đổi theo số ngày của kỳ
   const dates = (v: (string | null)[]) => v.map((x) => (x ? new Date(x) : null)).filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
   const now = new Date();

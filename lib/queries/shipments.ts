@@ -1,3 +1,4 @@
+import { listKey, memo } from "@/lib/cache";
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
@@ -132,6 +133,10 @@ export type ShipmentListRow = Awaited<ReturnType<typeof listShipments>>["rows"][
 
 /** Số vận đơn theo giai đoạn / ĐVVC / trạng thái COD trong kỳ (cho bộ lọc) */
 export async function shipmentFacets(params: ListParams) {
+  return memo(`shipmentFacets:${listKey(params, false)}`, 30_000, () => shipmentFacetsUncached(params));
+}
+
+async function shipmentFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = shipmentListWhere({ ...params, filters: {} });
   const [stages, carriers, cods, finals, linked] = await Promise.all([
@@ -162,6 +167,10 @@ export async function shipmentFacets(params: ListParams) {
 }
 
 export async function shipmentSummary(params: ListParams) {
+  return memo(`shipmentSummary:${listKey(params)}`, 30_000, () => shipmentSummaryUncached(params));
+}
+
+async function shipmentSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = shipmentListWhere(params);
   const s = schema.shipments;

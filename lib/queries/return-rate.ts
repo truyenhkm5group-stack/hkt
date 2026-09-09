@@ -255,6 +255,33 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   else 'NOT_SHIPPED' end`;
 
 /**
+ * ─────────────── TÍNH KẾT QUẢ ĐƠN ĐÚNG MỘT LẦN CHO MỖI DÒNG ───────────────
+ *
+ * BẰNG CHỨNG (EXPLAIN ANALYZE, xem docs/erp-performance-p0-report.md): Postgres NỘI TUYẾN cả biểu
+ * thức `ORDER_OUTCOME` — kèm 13 truy vấn con tương quan bên trong — vào TỪNG cột gộp có
+ * `filter (where ORDER_OUTCOME = …)`. Một truy vấn 10 cột gộp sinh ra hơn 100 `SubPlan`, và mỗi
+ * `SubPlan` chạy lại cho từng dòng. Trên bảng hiệu quả mẫu mã (4.260 dòng): quét dữ liệu mất 93 ms,
+ * còn khâu gộp mất 27.706 ms — 99,7% thời gian là tính đi tính lại cùng một giá trị.
+ *
+ * CÁCH SỬA: đưa `ORDER_OUTCOME` xuống một bảng dẫn xuất, gộp bên ngoài trên cột đã tính sẵn.
+ * `OUTCOME_FENCE` (`offset 0`) là RÀO tối ưu hoá chuẩn của Postgres: không có nó, bộ tối ưu "kéo
+ * subquery lên" (subquery pull-up) và nội tuyến lại y như cũ — đã đo, không nhanh hơn một mili-giây.
+ *
+ * QUAN TRỌNG: đây là đổi HÌNH DẠNG truy vấn, KHÔNG đổi công thức. Cùng biểu thức `ORDER_OUTCOME`,
+ * cùng dữ liệu vào, cùng con số ra — đo từng dòng bằng `scripts/bench/outcome-shape.ts` và khoá
+ * bằng `tests/metric-shape-consistency.test.ts`.
+ */
+// Drizzle khai báo `.offset()` nhận `number`, và nó BỎ QUA số 0 (0 là giá trị falsy) nên không thể
+// truyền 0 trực tiếp. Một biểu thức SQL thì được in ra nguyên vẹn. Ép kiểu đúng MỘT chỗ ở đây thay
+// vì rải `as unknown as number` khắp các truy vấn.
+export const OUTCOME_FENCE = sql`0` as unknown as number;
+
+/** Cột kết quả đơn của bảng dẫn xuất. Luôn đặt tên `outcome` để mọi nơi đọc giống nhau. */
+export function outcomeColumn() {
+  return ORDER_OUTCOME.as("outcome");
+}
+
+/**
  * ───────── Quy tắc THỰC TẾ (Data Truth) — dùng cho trang Chất lượng dữ liệu ─────────
  * Khác ORDER_OUTCOME legacy ở đúng một điểm: trạng thái Pancake/Viettel Post KHÔNG được
  * coi là bằng chứng doanh thu. Không có số tiền thực thu → UNVERIFIED ("Chưa xác minh"),
@@ -358,7 +385,6 @@ export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME} in ('RETURNED','RE
 const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
 const IS_FAILED = sql`${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
-const IS_PENDING = sql`${ORDER_OUTCOME} = 'NOT_SHIPPED'`;
 const IS_SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
@@ -419,30 +445,50 @@ function baseWhere(period: Period, q: string): SQL | undefined {
 /** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
 export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[] }> {
   const db = await getDb();
-  const raw = await db
+  // 11 cột gộp trên cùng một biểu thức kết quả đơn ⇒ tính một lần cho mỗi dòng bằng bảng dẫn xuất.
+  const base = db
     .select({
-      key: VARIANT_KEY,
-      variantId: sql<string | null>`max(${i.variantId})`,
-      sku: sql<string>`max(${i.sku})`,
-      productName: sql<string>`max(${i.productName})`,
-      variationDetail: sql<string>`max(${i.variationDetail})`,
-      image: sql<string | null>`max(${i.image})`,
-      shipped: sql<number>`count(distinct ${o.id}) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
-      returnedByRule: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
-      inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(distinct ${o.id}) filter (where ${IS_FAILED})`,
-      cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
-      lostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${IS_RETURNED}), 0)`,
-      deliveredRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      key: VARIANT_KEY.as("variant_key"),
+      orderId: o.id,
+      variantId: i.variantId,
+      sku: i.sku,
+      productName: i.productName,
+      variationDetail: i.variationDetail,
+      image: i.image,
+      quantity: i.quantity,
+      lineTotal: i.lineTotal,
+      shipmentStage: s.stage,
+      outcome: outcomeColumn(),
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
     .leftJoin(s, eq(s.orderId, o.id))
     .where(baseWhere(query.period, query.q))
-    .groupBy(VARIANT_KEY);
+    .offset(OUTCOME_FENCE)
+    .as("variant_base");
+
+  const RETURNED_ANY = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const raw = await db
+    .select({
+      key: base.key,
+      variantId: sql<string | null>`max(${base.variantId})`,
+      sku: sql<string>`max(${base.sku})`,
+      productName: sql<string>`max(${base.productName})`,
+      variationDetail: sql<string>`max(${base.variationDetail})`,
+      image: sql<string | null>`max(${base.image})`,
+      shipped: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      delivered: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(distinct ${base.orderId}) filter (where ${RETURNED_ANY})`,
+      returnedByRule: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+      cancelled: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'CANCELLED')`,
+      returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED_ANY}), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED_ANY}), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+    })
+    .from(base)
+    .groupBy(base.key);
 
   const p = await failedToReturnRate();
   const all: ReturnRateRow[] = raw
@@ -559,25 +605,40 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     const like = `%${term}%`;
     conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
   }
-  const [row] = await db
+  // 13 cột gộp ⇒ trước đây `ORDER_OUTCOME` bị nội tuyến 13 lần cho mỗi đơn. Bảng dẫn xuất tính
+  // đúng một lần (xem OUTCOME_FENCE ở đầu file); công thức và con số không đổi.
+  const base = db
     .select({
-      orders: sql<number>`count(*)`,
-      shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      returnedByRule: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
-      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
-      pending: sql<number>`count(*) filter (where ${IS_PENDING})`,
-      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
-      // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
-      finishedNoVtp: sql<number>`count(*) filter (where ${s.id} is not null and ${s.vtpStatusDate} is null and ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
-      provisional: sql<number>`count(*) filter (where ${IS_PROVISIONAL})`,
+      shipmentId: s.id,
+      vtpStatusDate: s.vtpStatusDate,
+      shipmentStage: s.stage,
+      revenue: o.totalPriceAfterDiscount,
+      provisional: sql<boolean>`${IS_PROVISIONAL}`.as("provisional"),
+      outcome: outcomeColumn(),
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))
-    .where(conds.length ? and(...conds) : undefined);
+    .where(conds.length ? and(...conds) : undefined)
+    .offset(OUTCOME_FENCE)
+    .as("gtc_base");
+
+  const [row] = await db
+    .select({
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+      returnedByRule: sql<number>`count(*) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+      pending: sql<number>`count(*) filter (where ${base.outcome} = 'NOT_SHIPPED')`,
+      cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+      // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
+      finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      provisional: sql<number>`count(*) filter (where ${base.provisional})`,
+    })
+    .from(base);
   const delivered = Number(row?.delivered ?? 0);
   const returned = Number(row?.returned ?? 0);
   const failed = Number(row?.failed ?? 0);

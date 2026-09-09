@@ -1,8 +1,9 @@
+import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
-import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -12,9 +13,29 @@ const pv = schema.productVariants;
 const p = schema.products;
 
 /**
- * Tồn khả dụng ERP theo mẫu mã (subquery dùng trong điều kiện lọc):
- * Nhập − Giao thật − Đang giao − Hàng hoàn kho CHƯA xác nhận nhận về.
- * Phải khớp với `erpStockExpr` trong lib/queries/stock.ts.
+ * TỒN THỰC TẾ theo mẫu mã, dạng biểu thức vô hướng — dùng trong ĐIỀU KIỆN LỌC và BỘ ĐẾM FACET,
+ * nơi không có sẵn hai bảng gộp `vsales` / `vreceipts` để nối vào.
+ *
+ *   Tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC
+ *
+ * Phải cho ra ĐÚNG con số của `erpStockExpr` (lib/queries/stock.ts). Bài kiểm thử
+ * `tests/inventory.test.ts` khoá điều đó cho từng mẫu mã.
+ *
+ * SỬA MỘT LỖI NGHIỆP VỤ, KHÔNG CHỈ LÀ TỐI ƯU. Bản trước trừ đi
+ * `ORDER_OUTCOME in ('DELIVERED','IN_TRANSIT') or RETURN_PENDING_WAREHOUSE` — tức là đếm "đã xuất"
+ * bằng ĐỊNH NGHĨA THEO TIỀN, đúng thứ mà AGENTS.md mục 3.10 và HANDOFF mục 6.7 cấm:
+ *
+ *   «"Đã xuất" đếm theo SHIPMENT_LEFT_WAREHOUSE … KHÔNG dùng ORDER_OUTCOME (đó là định nghĩa
+ *    theo tiền) và KHÔNG dùng trạng thái Pancake.»
+ *
+ * Hệ quả đo được: bộ lọc "Sắp hết / Hết hàng" và ba bộ đếm facet chạy theo một công thức, còn cột
+ * tồn hiển thị trong chính bảng đó chạy theo công thức khác — lọc "Hết hàng" ra những dòng mà cột
+ * tồn ghi số dương. Nay cả hai dùng chung một định nghĩa.
+ *
+ * Phần thưởng kèm theo: `ORDER_OUTCOME` mang theo 13 truy vấn con tương quan và bị nội tuyến vào
+ * TỪNG cột gộp, nên riêng ba bộ đếm facet phải quét toàn bộ bảng đơn 3 lần cho MỖI mẫu mã
+ * (đo được: 72 mẫu mã × 1.440 đơn × 2 lần = 335 ms cho một truy vấn ở quy mô hiện tại, và chi phí
+ * tăng theo TÍCH số mẫu mã với số đơn). `SHIPMENT_LEFT_WAREHOUSE` không có truy vấn con nào.
  */
 const ERP_STOCK_SUB = sql<number>`(
   coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = ${pv.id}), 0)
@@ -22,7 +43,7 @@ const ERP_STOCK_SUB = sql<number>`(
       join ${schema.orders} on ${schema.orders.id} = ${schema.orderItems.orderId}
       left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
       where ${schema.orderItems.variantId} = ${pv.id}
-        and (${ORDER_OUTCOME} in ('DELIVERED','IN_TRANSIT') or ${RETURN_PENDING_WAREHOUSE})), 0)
+        and ${SHIPMENT_LEFT_WAREHOUSE}), 0)
 )`;
 
 /** Mẫu mã đang bán: không ẩn / khoá / xoá ở cả cấp mẫu mã lẫn sản phẩm */
@@ -133,6 +154,11 @@ export type ProductListRow = {
 };
 
 export async function listWarehouses() {
+  // Danh sách kho gần như không đổi và mọi trang kho đều hỏi nó — đệm 5 phút.
+  return memo("listWarehouses", 300_000, listWarehousesUncached);
+}
+
+async function listWarehousesUncached() {
   const db = await getDb();
   return db.select({ id: schema.warehouses.id, name: schema.warehouses.name }).from(schema.warehouses).orderBy(asc(schema.warehouses.name));
 }
@@ -286,6 +312,10 @@ export async function listProducts(params: ListParams, limit?: number) {
 
 /** Số mẫu mã theo tồn kho / danh mục / kho / trạng thái (cho bộ lọc) */
 export async function productFacets(params: ListParams) {
+  return memo(`productFacets:${listKey(params, false)}`, 30_000, () => productFacetsUncached(params));
+}
+
+async function productFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = productListWhere({ ...params, filters: {} });
   const selling = sellingCondition();
@@ -342,6 +372,10 @@ export async function productFacets(params: ListParams) {
 
 /** KPI tồn kho theo bộ lọc hiện tại (bỏ qua lọc tồn kho / trạng thái) */
 export async function productSummary(params: ListParams) {
+  return memo(`productSummary:${listKey(params)}`, 30_000, () => productSummaryUncached(params));
+}
+
+async function productSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = productListWhere(params, ["stock", "status"]);
   const selling = sellingCondition();
