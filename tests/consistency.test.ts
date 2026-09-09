@@ -195,14 +195,38 @@ export async function testConsistency(db: Db) {
   // Trước đây mỗi trang tự cộng `sum(expenses.amount) where occurred_at ...`, nên Bảng điều khiển,
   // Sự thật tài chính, Báo cáo lợi nhuận, Dòng tiền và Lương cho tới BỐN con số khác nhau cho cùng
   // một chỉ số. Khoản theo kỳ (thuê mặt bằng) là chỗ chúng lệch nhau nhiều nhất.
-  const kyThang: Period = { key: "custom", from: new Date("2026-09-01T00:00:00+07:00"), to: new Date("2026-09-30T23:59:59+07:00"), label: "Tháng 9", fromKey: "2026-09-01", toKey: "2026-09-30" };
+  /**
+   * KỲ PHẢI ĐI THEO DỮ LIỆU, KHÔNG ĐI THEO NGÀY TRÊN LỊCH.
+   *
+   * Sự cố thật 10/09/2026: kỳ ở đây từng ghim cứng 01–07/09, còn đơn trong bộ dữ liệu mẫu lại dùng
+   * ngày TƯƠNG ĐỐI ("hôm nay trừ N ngày"). Qua nửa đêm, đơn rời khỏi cửa sổ ghim cứng, bảng lợi
+   * nhuận theo mã không còn dòng nào, và phép cộng phân bổ ra 0 — bài kiểm thử đỏ mà mã nguồn không
+   * đổi một dòng. Một cổng ra đỏ theo ngày trên lịch thì không ai còn tin nó nữa.
+   *
+   * Nay kỳ được dựng QUANH chính hôm nay, nên nó luôn chứa dữ liệu mẫu.
+   */
+  // Ranh giới NGÀY theo giờ Việt Nam — cắt giữa ngày sẽ đếm lệch một ngày và mọi con số prorata sai.
+  const ngay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(d);
+  const dauNgayVN = (key: string) => new Date(`${key}T00:00:00+07:00`);
+  const cuoiNgayVN = (key: string) => new Date(`${key}T23:59:59+07:00`);
+  const homNay = new Date();
+  const [nam, thang] = ngay(homNay).split("-").map(Number);
+  const dauThang = dauNgayVN(`${nam}-${String(thang).padStart(2, "0")}-01`);
+  const soNgayThang = new Date(Date.UTC(nam, thang, 0)).getUTCDate();
+  const cuoiThang = cuoiNgayVN(`${nam}-${String(thang).padStart(2, "0")}-${String(soNgayThang).padStart(2, "0")}`);
+  const kyThang: Period = { key: "custom", from: dauThang, to: cuoiThang, label: "Tháng này", fromKey: ngay(dauThang), toKey: ngay(cuoiThang) };
   await db.insert(schema.expenses).values([
-    { id: "cs-rent", category: "RENT", description: "Thuê mặt bằng tháng 9", amount: 3_000_000,
-      occurredAt: new Date("2026-09-01T00:00:00+07:00"), allocationMethod: "PERIOD_PRORATA",
-      periodStart: new Date("2026-09-01T00:00:00+07:00"), periodEnd: new Date("2026-09-30T23:59:59+07:00") },
+    { id: "cs-rent", category: "RENT", description: "Thuê mặt bằng tháng này", amount: 3_000_000,
+      occurredAt: dauThang, allocationMethod: "PERIOD_PRORATA", periodStart: dauThang, periodEnd: cuoiThang },
   ]);
   clearMemo();
-  const tuan1: Period = { key: "custom", from: new Date("2026-09-01T00:00:00+07:00"), to: new Date("2026-09-07T23:59:59+07:00"), label: "Tuần 1", fromKey: "2026-09-01", toKey: "2026-09-07" };
+  // Bảy ngày KẾT THÚC HÔM NAY, cắt trong tháng — luôn chứa đơn của bộ dữ liệu mẫu.
+  const tuanDenKey = ngay(homNay);
+  const tuanTuKey = ngay(new Date(dauNgayVN(tuanDenKey).getTime() - 6 * 86_400_000));
+  const tuanTu = new Date(Math.max(dauThang.getTime(), dauNgayVN(tuanTuKey).getTime()));
+  const tuanDen = cuoiNgayVN(tuanDenKey);
+  const soNgayTuan = Math.round((tuanDen.getTime() - tuanTu.getTime()) / 86_400_000);
+  const tuan1: Period = { key: "custom", from: tuanTu, to: tuanDen, label: `${soNgayTuan} ngày gần nhất`, fromKey: ngay(tuanTu), toKey: ngay(tuanDen) };
   const [dashThang, truthThang, nominalThang, cashThang] = await Promise.all([
     getDashboardData(kyThang), getFinancialTruth(kyThang), getNominalProfitReport(kyThang), getCashProfitReport(kyThang),
   ]);
@@ -220,7 +244,12 @@ export async function testConsistency(db: Db) {
   assert.ok(opexTuan < opexThang, "một tuần phải NHỎ HƠN cả tháng — không được cộng nguyên khoản thuê vào tuần");
   // Fixture chuẩn của hợp đồng: thuê 3.000.000đ / 30 ngày, lọc 7 ngày ⇒ MỌI nơi phải ra 700.000đ.
   assert.equal(opexThang, 3_000_000, "cả tháng = trọn khoản thuê");
-  assert.equal(opexTuan, 700_000, "7/30 ngày của 3.000.000đ = 700.000đ — con số này phải giống nhau ở mọi module");
+  // Prorata theo SỐ NGÀY CHỒNG LẤN — tính từ chính cửa sổ, không ghim cứng theo tháng 9.
+  assert.equal(
+    opexTuan,
+    Math.round((3_000_000 * soNgayTuan) / soNgayThang),
+    `${soNgayTuan}/${soNgayThang} ngày của 3.000.000đ — con số này phải giống nhau ở mọi module`,
+  );
 
   // BÁO CÁO TỔNG HỢP + BIỂU ĐỒ THEO NGÀY: cộng các cột trong khoảng phải bằng đúng phần phân bổ.
   const [pnlThang, pnlTuan, ngayThang, ngayTuan] = await Promise.all([
@@ -232,14 +261,14 @@ export async function testConsistency(db: Db) {
   const congNgayThang = ngayThang.reduce((t, r) => t + r.operating, 0);
   const congNgayTuan = ngayTuan.reduce((t, r) => t + r.operating, 0);
   assert.equal(congNgayThang, opexThang, "cộng 30 cột của biểu đồ theo ngày = đúng phần phân bổ của tháng");
-  assert.equal(congNgayTuan, opexTuan, "cộng 7 cột của biểu đồ theo ngày = đúng 700.000đ");
+  assert.equal(congNgayTuan, opexTuan, "cộng các cột của biểu đồ theo ngày = đúng phần phân bổ của tuần");
   // Không cột nào được ôm trọn khoản thuê: đó chính là hình dạng bug cũ.
   const cotLonNhat = Math.max(0, ...ngayThang.map((r) => r.operating));
   assert.ok(cotLonNhat < 200_000, `không ngày nào được ôm cả khoản thuê (cột lớn nhất ${cotLonNhat}đ)`);
-  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= 7, "cả 7 ngày đều có chi phí, không phải chỉ ngày ghi sổ");
+  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= 7, "mọi ngày trong tuần đều có chi phí, không phải chỉ ngày ghi sổ");
 
   // LỢI NHUẬN THEO MÃ: phần phân bổ xuống từng mã cộng lại = đúng tổng của kỳ (largest remainder).
-  assert.equal(nominalTuan.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexTuan, "Σ phân bổ xuống mã (tuần) = 700.000đ, không lệch vì làm tròn");
+  assert.equal(nominalTuan.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexTuan, "Σ phân bổ xuống mã (tuần) phải bằng đúng phần phân bổ của kỳ, không lệch vì làm tròn");
   assert.equal(nominalThang.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexThang, "Σ phân bổ xuống mã (tháng) = 3.000.000đ");
 
   // LƯƠNG / HOA HỒNG: nền chi phí của bảng lương phải là CÙNG con số, không phải bản cộng thô riêng.
