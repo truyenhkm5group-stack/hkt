@@ -1,5 +1,6 @@
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { pgliteDirectory } from "@/lib/local-mode";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
 import * as schema from "./schema";
 
@@ -19,9 +20,8 @@ export function isPglite() {
 
 /** Đường dẫn thư mục dữ liệu khi dùng PGlite (pglite://./data/pglite hoặc pglite:memory) */
 export function pgliteDataDir() {
-  const url = databaseUrl();
-  const path = url.replace(/^pglite:\/\//, "").replace(/^pglite:/, "");
-  return path === "memory" || path === "" ? undefined : path;
+  // Cách tách đường dẫn nằm ở `lib/local-mode.ts` để lệnh dựng bản test và lớp CSDL hiểu giống nhau.
+  return pgliteDirectory(databaseUrl()) ?? undefined;
 }
 
 async function createPglite(): Promise<Db> {

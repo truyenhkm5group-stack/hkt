@@ -56,6 +56,31 @@ Công nghệ: Next.js 15 · React 19 · TypeScript · Tailwind CSS v4 · shadcn/
 
 ## 1. Chạy thử trên máy cá nhân
 
+> **Quy trình:** thay đổi nào cũng dựng **bản test trên máy** xem tận mắt trước, ưng rồi mới đưa
+> lên ERP thật. Lý do và ranh giới an toàn: `docs/ideas/0001-ban-localhost-truoc-khi-len-erp.md`.
+
+### Cách nhanh nhất — bản test một lệnh (`npm run local`)
+
+Yêu cầu: [Node.js 22+](https://nodejs.org). Không cần Docker, không cần Postgres, không cần API key.
+
+```bash
+npm install
+npm run local            # chuẩn bị rồi mở http://localhost:3000
+```
+
+Lệnh này tự tạo `.env.local`, dựng CSDL nhúng riêng cho bản test (`data/pglite-local`), tạo tài
+khoản quản trị và gieo ~1.100 đơn mẫu. Đăng nhập `admin@shop.local` / `Admin@12345`.
+
+```bash
+npm run local:setup      # chỉ chuẩn bị, không mở giao diện
+npm run local:reset      # xoá sạch dữ liệu thử rồi gieo lại từ đầu
+```
+
+Bản test **không chạm vào dữ liệu thật và không gọi API thật**: khoá Pancake / Viettel Post /
+Facebook để trống, còn lệnh dựng bản test từ chối chạy nếu `DATABASE_URL` trỏ ra ngoài máy mình.
+Mọi trang đều có dải vàng “BẢN TEST TRÊN MÁY” để không nhầm với số thật của shop. Muốn thử một tích
+hợp thật thì tự điền khoá vào `.env.local` — lần chạy sau không đè lên giá trị bạn đã điền.
+
 ### Cách A — Docker Desktop (khuyên dùng, giống môi trường thật)
 
 Yêu cầu: [Docker Desktop](https://www.docker.com/products/docker-desktop/).

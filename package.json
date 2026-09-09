@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "local": "npm run local:setup && next dev",
+    "local:setup": "tsx --tsconfig tsconfig.json scripts/local-test.ts",
+    "local:reset": "tsx --tsconfig tsconfig.json scripts/local-test.ts --reset",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

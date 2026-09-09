@@ -5,6 +5,7 @@
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testIdeas } from "./ideas.test";
+import { testLocalMode } from "./local-mode.test";
 import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
 import { testConsistency } from "./consistency.test";
@@ -1184,6 +1185,7 @@ async function main() {
   await testCodReconciliation();
   await testOrderSource();
   await testIdeas();
+  testLocalMode();
   await testPermissions();
   await testVtpImportTruth(db);
   await testVtpImportRecovery(db);

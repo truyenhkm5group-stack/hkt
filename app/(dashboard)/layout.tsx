@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { AppSidebar } from "@/components/app-sidebar";
+import { LocalTestBanner } from "@/components/local-test-banner";
 import { NavProgressProvider, NavProgressReset, StaleWhileRefreshing } from "@/components/nav-progress";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
@@ -21,6 +22,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <SidebarProvider defaultOpen={defaultOpen}>
             <AppSidebar user={user} />
             <SidebarInset className="min-w-0">
+              {/* Bản test trên máy tự khai báo trước cả tiêu đề trang — xem `components/local-test-banner.tsx`. */}
+              <LocalTestBanner />
               <SiteHeader />
               {/*
                 GIỮ SỐ CŨ TRONG LÚC CHỜ SỐ MỚI. Đổi kỳ / bộ lọc trên cùng một trang không xoá nội
