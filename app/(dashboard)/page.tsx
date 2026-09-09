@@ -156,7 +156,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="QC / Doanh số POS"
             value={data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`}
-            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo trên doanh thu LÊN ĐƠN · mẫu số chưa trừ đơn hoàn`}
+            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo trên doanh thu LÊN ĐƠN · mẫu số chưa trừ đơn hoàn, nên đây là tỷ lệ LẠC QUAN NHẤT`}
             icon={Megaphone}
             tone="slate"
           />
@@ -165,7 +165,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="QC / DT giao thành công"
             value={data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`}
-            note="Chi quảng cáo trên doanh thu ĐÃ TỚI TAY KHÁCH · luôn cao hơn tỷ lệ bên trái, phần chênh là tiền trả cho đơn hoàn"
+            note="Chi quảng cáo trên doanh thu ĐÃ TỚI TAY KHÁCH · kỳ đang chạy luôn cao bất thường vì tiền quảng cáo tiêu ngay còn hàng thì 1–2 tuần sau mới giao xong"
             icon={Megaphone}
             tone={data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? "rose" : "slate"}
           />

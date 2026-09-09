@@ -55,7 +55,7 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
         <MetricCard
           label="Còn đang chạy"
           value={formatNumber(funnel.unfinished)}
-          note="Chưa biết kết quả — KHÔNG tính là thất bại"
+          note="Chưa biết kết quả — KHÔNG tính là thất bại. Kỳ đang chạy luôn có nhiều đơn ở đây."
           icon={Filter}
           tone={funnel.unfinished ? "amber" : "slate"}
         />
