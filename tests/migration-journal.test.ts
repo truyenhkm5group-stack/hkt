@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 
 /**
@@ -18,24 +19,46 @@ import { readFileSync, readdirSync } from "node:fs";
  * một mục mới và drizzle sẽ áp LẠI nó. Việc cần làm là chặn từ lần sau, không phải viết lại quá khứ.
  */
 export function testMigrationJournal() {
-  const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as {
-    entries: { idx: number; tag: string; when: number }[];
+  /**
+   * KIỂM TRẠNG THÁI ĐÃ VÀO KHO, KHÔNG PHẢI CÂY LÀM VIỆC.
+   *
+   * Kho mã này có lúc hai phiên làm việc song song trên cùng thư mục. File `.sql` chưa `git add`
+   * là việc ĐANG DỞ của người khác — nó bị tạo, đổi tên và xoá liên tục, và bắt lỗi theo nó chỉ làm
+   * hỏng bộ kiểm thử của người thứ ba mà không sửa được gì.
+   *
+   * Điều thật sự phải chặn là trạng thái ĐÃ VÀO KHO: file có mà sổ không có (sẽ không bao giờ được
+   * áp), hoặc sổ có mà file không có (migrator sẽ hỏng ngay lúc khởi động).
+   */
+  const fromHead = (path: string) => {
+    try {
+      return execSync(`git show HEAD:${path}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      return null;
+    }
   };
-  const files = readdirSync("drizzle").filter((f) => f.endsWith(".sql"));
+
+  const journalRaw = fromHead("drizzle/meta/_journal.json") ?? readFileSync("drizzle/meta/_journal.json", "utf8");
+  const journal = JSON.parse(journalRaw) as { entries: { idx: number; tag: string; when: number }[] };
+
+  const files = execSync("git ls-files drizzle", { encoding: "utf8" })
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith(".sql"))
+    .map((l) => l.slice("drizzle/".length));
 
   // ───────── 1. Mọi mục trong sổ phải có file thật ─────────
   for (const e of journal.entries) {
-    assert.ok(files.includes(`${e.tag}.sql`), `sổ migration trỏ tới ${e.tag}.sql nhưng không có file đó`);
+    assert.ok(files.includes(`${e.tag}.sql`), `sổ migration trỏ tới ${e.tag}.sql nhưng kho không có file đó — migrator sẽ hỏng ngay lúc khởi động`);
   }
 
   // ───────── 2. Mọi file phải có mục trong sổ ─────────
-  // File nằm trong thư mục mà không có trong sổ thì KHÔNG BAO GIỜ được áp — và người viết nó sẽ
-  // tưởng là đã áp.
+  // File nằm trong kho mà không có trong sổ thì KHÔNG BAO GIỜ được áp — và người viết nó sẽ tưởng
+  // là đã áp.
   for (const f of files) {
     const tag = f.replace(/\.sql$/, "");
     assert.ok(
       journal.entries.some((e) => e.tag === tag),
-      `${f} không có trong sổ migration nên sẽ KHÔNG BAO GIỜ được áp`,
+      `${f} đã vào kho nhưng không có trong sổ migration nên sẽ KHÔNG BAO GIỜ được áp`,
     );
   }
 

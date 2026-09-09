@@ -44,13 +44,20 @@ const o = schema.orders;
 const ORDER_POST_KEY = sql`regexp_replace(${o.postId}, '^.*_', '')`;
 
 /**
+ * KHOÁ DÙNG ĐƯỢC: sau khi cắt tiền tố, phải là chuỗi chữ số đủ dài. Khoá hỏng (nhập tay, cắt sai,
+ * mã của hệ thống khác) bị loại — nối theo nó là gán doanh thu vào chỗ không có thật.
+ * Điều kiện này phải khớp `isUsablePostKey` trong lib/constants/ads-identity.ts.
+ */
+const ORDER_POST_USABLE = sql`(${ORDER_POST_KEY} ~ '^[0-9]{5,}$')`;
+
+/**
  * Bài viết → chiến dịch, CHỈ khi mọi mẩu quảng cáo của bài đó thuộc cùng một chiến dịch.
  * Bài được nhiều chiến dịch chạy sẽ không có mặt ở đây.
  */
 export const POST_TO_CAMPAIGN = sql`(
   select fa.post_id, min(fa.campaign_id) as campaign_id
   from fb_ads fa
-  where fa.post_id is not null and fa.post_id <> '' and fa.campaign_id is not null
+  where fa.post_id is not null and fa.post_id ~ '^[0-9]{5,}$' and fa.campaign_id is not null
   group by fa.post_id
   having count(distinct fa.campaign_id) = 1
 )`;
@@ -69,14 +76,14 @@ export const ORDER_CAMPAIGN_ID = sql<string | null>`coalesce(
 /** Đơn nối được về chiến dịch bằng bài viết (không phải bằng ad_id). */
 export const LINKED_BY_POST = sql`(
   (${o.adId} is null or ${o.adId} = '' or not exists (select 1 from fb_ads fa where fa.id = ${o.adId}))
-  and ${o.postId} is not null and ${o.postId} <> ''
+  and ${ORDER_POST_USABLE}
   and exists (select 1 from ${POST_TO_CAMPAIGN} p where p.post_id = ${ORDER_POST_KEY})
 )`;
 
 /** Đơn CÓ bài viết nhưng bài đó do nhiều chiến dịch cùng chạy ⇒ nhập nhằng, cố ý không nối. */
 export const AMBIGUOUS_BY_POST = sql`(
   (${o.adId} is null or ${o.adId} = '')
-  and ${o.postId} is not null and ${o.postId} <> ''
+  and ${ORDER_POST_USABLE}
   and exists (
     select 1 from fb_ads fa where fa.post_id = ${ORDER_POST_KEY} and fa.campaign_id is not null
     group by fa.post_id having count(distinct fa.campaign_id) > 1
@@ -96,6 +103,8 @@ export type AttributionLinkReport = {
   noSignal: number;
   /** Có post_id nhưng chưa mẩu quảng cáo nào khai bài đó (chưa đồng bộ hoặc bài không chạy QC). */
   postNotIndexed: number;
+  /** Mã bài viết hỏng — không phải chuỗi chữ số sau khi chuẩn hoá. Không nối, và phải nhìn thấy. */
+  invalidPostKey: number;
   coverageBefore: number;
   coverageAfter: number;
   /** Trần lý thuyết nếu mọi bài viết đều tra được: đơn có ad_id hoặc post_id. */
@@ -121,6 +130,7 @@ export async function getAttributionLinkReport(days = 30): Promise<AttributionLi
       noSignal: sql<number>`count(*) filter (where (${o.adId} is null or ${o.adId} = '') and not ${HAS_POST})`,
       postNotIndexed: sql<number>`count(*) filter (where not ${HAS_AD} and ${HAS_POST} and not exists (select 1 from fb_ads fa where fa.post_id = ${ORDER_POST_KEY}))`,
       ceiling: sql<number>`count(*) filter (where (${o.adId} is not null and ${o.adId} <> '') or ${HAS_POST})`,
+      invalidPostKey: sql<number>`count(*) filter (where ${HAS_POST} and not ${ORDER_POST_USABLE})`,
     })
     .from(o)
     .where(scope);
@@ -137,6 +147,7 @@ export async function getAttributionLinkReport(days = 30): Promise<AttributionLi
     ambiguous: Number(row?.ambiguous ?? 0),
     noSignal: Number(row?.noSignal ?? 0),
     postNotIndexed: Number(row?.postNotIndexed ?? 0),
+    invalidPostKey: Number(row?.invalidPostKey ?? 0),
     coverageBefore: pct(byAdId),
     coverageAfter: pct(byAdId + byPost),
     ceiling: pct(Number(row?.ceiling ?? 0)),

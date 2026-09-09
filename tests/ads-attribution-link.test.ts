@@ -26,9 +26,11 @@ export async function testAdsAttributionLink(db: Db) {
   // Pancake ghi post_id dạng ĐẦY ĐỦ "<page_id>_<post_id>"; Facebook cho phần sau. Fixture phải
   // phản ánh đúng hai định dạng đó, nếu không bài kiểm thử sẽ xanh trong khi production không khớp
   // — đúng lỗi đã xảy ra thật.
+  // Dùng ĐÚNG định dạng production: trang và bài đều là chuỗi chữ số dài.
   const PAGE = "1092821970588849";
-  const POST = "post-kiem-thu-001";
-  const AMBIG = "post-kiem-thu-nhap-nhang";
+  const POST = "990000000000000001";
+  const AMBIG = "990000000000000002";
+  const HONG = "khong-phai-so";
   const before = await db.select({ adId: schema.orders.adId, postId: schema.orders.postId }).from(schema.orders).where(sql`${schema.orders.id} = ${order.id}`);
 
   // ───────── 1. Một bài, MỘT chiến dịch ⇒ nối được ─────────
@@ -53,6 +55,13 @@ export async function testAdsAttributionLink(db: Db) {
   const ambiguous = await getAttributionLinkReport(3650);
   assert.ok(ambiguous.ambiguous >= 1, "bài do nhiều chiến dịch chạy PHẢI được đếm là nhập nhằng");
   assert.equal(ambiguous.byPost, 0, "nhập nhằng thì KHÔNG được nối — thà thiếu còn hơn gán sai chỗ");
+
+  // ───────── 2b. Mã bài HỎNG thì không nối, cũng không tính là nhập nhằng ─────────
+  // Nối theo mã hỏng là gán doanh thu vào chỗ không có thật.
+  await db.update(schema.orders).set({ postId: `${PAGE}_${HONG}` }).where(sql`${schema.orders.id} = ${order.id}`);
+  const broken = await getAttributionLinkReport(3650);
+  assert.equal(broken.byPost, 0, "mã bài hỏng KHÔNG được nối");
+  assert.ok(broken.invalidPostKey >= 1, "mã bài hỏng phải được đếm riêng để nhìn thấy, không im lặng bỏ qua");
 
   // ───────── 3. KHÔNG ghi ngược vào bảng đơn ─────────
   // Đơn phải giữ nguyên sự thật thô Pancake gửi; phần nối chỉ tồn tại lúc truy vấn.
