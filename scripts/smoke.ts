@@ -17,6 +17,15 @@ const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:3000";
 /** Hết kiên nhẫn với MỘT trang. Trang treo là lỗi thật, nhưng phải phân biệt với trang lỗi. */
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 60_000);
 
+/**
+ * NGƯỠNG "CHẬM" — trang trả 200 nhưng lâu hơn mức này là vấn đề HIỆU NĂNG, không phải lỗi ứng dụng.
+ *
+ * Hai chuyện khác hẳn nhau và phải xử lý khác nhau: một trang hỏng thì KHÔNG được lên production;
+ * một trang chậm thì phải sửa, nhưng chặn deploy vì nó là chặn nhầm — bản mới có khi còn nhanh hơn
+ * bản đang chạy. Deploy #172 đã đỏ đúng vì gộp hai thứ này làm một.
+ */
+const SLOW_MS = Number(process.env.SMOKE_SLOW_MS ?? 2_000);
+
 /** Các màn hình phải mở được. Thêm route mới vào đây khi bổ sung màn hình quan trọng. */
 const ROUTES = [
   "/",
@@ -85,9 +94,10 @@ const RENDER_MARKER = "VNXcommerce";
  *   APP_ERROR    — trang trả 4xx/5xx, hoặc 200 mà không dựng nổi khung. LỖI THẬT của ứng dụng.
  *   AUTH_EXPIRED — bị đá về đăng nhập vì phiếu ký đã quá hạn. Lỗi CỦA PHÉP KIỂM, không phải của app.
  *   REDIRECT     — bị đá về đăng nhập trong khi phiếu ký còn mới ⇒ quyền/cấu hình sai. Lỗi thật.
+ *   SLOW         — trang MỞ ĐƯỢC nhưng lâu hơn ngưỡng. Vấn đề hiệu năng, KHÔNG chặn deploy.
  *   TIMEOUT      — trang không trả lời trong hạn. Lỗi thật (nhưng khác bản chất với APP_ERROR).
  */
-type Verdict = "SUCCESS" | "APP_ERROR" | "AUTH_EXPIRED" | "REDIRECT" | "TIMEOUT";
+type Verdict = "SUCCESS" | "SLOW" | "APP_ERROR" | "AUTH_EXPIRED" | "REDIRECT" | "TIMEOUT";
 
 /** Hạn của phiếu ký. Quá mốc này mà bị 307 thì nguyên nhân là hết hạn, không phải phân quyền. */
 const TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -202,7 +212,13 @@ async function main() {
         continue;
       }
 
-      results.push({ route, verdict: "SUCCESS", detail: `${Math.round(body.length / 1024)}kB`, ms });
+      // Trang mở được: phân biệt NHANH với CHẬM. Chậm là việc phải sửa, không phải cớ chặn deploy.
+      results.push({
+        route,
+        verdict: ms > SLOW_MS ? "SLOW" : "SUCCESS",
+        detail: `${Math.round(body.length / 1024)}kB${ms > SLOW_MS ? ` · CHẬM, ngưỡng ${Math.round(SLOW_MS / 1000)}s` : ""}`,
+        ms,
+      });
     } catch (error) {
       const ms = Date.now() - started;
       const aborted = error instanceof Error && error.name === "AbortError";
@@ -222,6 +238,7 @@ async function main() {
     APP_ERROR: "✗",
     AUTH_EXPIRED: "⚠",
     REDIRECT: "✗",
+    SLOW: "⚠",
     TIMEOUT: "✗",
   };
   for (const r of results) {
@@ -232,9 +249,9 @@ async function main() {
 
   const by = (v: Verdict) => results.filter((r) => r.verdict === v);
   console.log(
-    `\n[smoke] ${by("SUCCESS").length}/${results.length} đạt · ` +
+    `\n[smoke] ${(by("SUCCESS").length + by("SLOW").length)}/${results.length} đạt · ` +
       `${by("APP_ERROR").length} lỗi ứng dụng · ${by("REDIRECT").length} sai quyền · ` +
-      `${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
+      `${by("SLOW").length} chậm · ${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
       `(cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s)`,
   );
 
@@ -245,6 +262,20 @@ async function main() {
       `\n[smoke] ⚠ ${by("AUTH_EXPIRED").length} trang không kiểm được vì phiếu ký hết hạn giữa lần gọi ` +
         `(trang chậm hơn ${TOKEN_TTL_MS / 60000} phút). Không tính là lỗi trang, nhưng KHÔNG chứng minh được trang đó tốt.`,
     );
+  }
+
+  /**
+   * CHỈ LỖI THẬT MỚI CHẶN DEPLOY.
+   *
+   * `SLOW` cố ý KHÔNG nằm trong danh sách chặn: trang vẫn mở được, và chặn bản mới vì nó chậm có thể
+   * đang chặn đúng bản vá làm nó nhanh hơn. Nhưng cũng KHÔNG im lặng — in riêng thành một mục để
+   * không ai bỏ qua.
+   */
+  const slow = by("SLOW");
+  if (slow.length) {
+    console.error(`
+[smoke] ${slow.length} màn hình CHẬM (mở được, không chặn deploy — nhưng phải sửa):`);
+    for (const r of slow.sort((a, b) => b.ms - a.ms)) console.error(`  - ${r.route} → ${(r.ms / 1000).toFixed(1)}s`);
   }
 
   const fatal = [...by("APP_ERROR"), ...by("REDIRECT"), ...by("TIMEOUT")];

@@ -1,7 +1,9 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, metricScope, successRate } from "@/lib/queries/metrics";
+import { metricScope, successRate } from "@/lib/queries/metrics";
+import { ORDER_COGS } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME, OUTCOME_FENCE } from "@/lib/queries/return-rate";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
 
@@ -111,31 +113,64 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
    * bịa. Nối qua bài viết chỉ có nghĩa ở cấp CHIẾN DỊCH — cũng là cấp duy nhất có số chi tiêu.
    */
   const HAS_AD = level === "campaign" ? sql`(${ORDER_CAMPAIGN_ID} is not null)` : sql`${o.adId} is not null and ${o.adId} <> ''`;
-  // Tiền COD CÓ CHỨNG TỪ trên đơn — không lấy COD khai báo.
-  const CASH = sql<number>`coalesce(sum(coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)) filter (where ${IS_DELIVERED}), 0)`;
-
   // ── Kết quả đơn gộp theo chiến dịch (hoặc theo từng mẩu quảng cáo) ──
+  // Tiền mặt tính trong bảng dẫn xuất: COD CÓ CHỨNG TỪ trên đơn, không lấy COD khai báo.
   const groupKey = level === "campaign" ? sql`coalesce(${ORDER_CAMPAIGN_ID}, ${o.adId})` : sql`${o.adId}`;
-  const groupName = level === "campaign" ? sql<string>`max(coalesce(nullif(${schema.fbAds.campaignName}, ''), ${o.adId}))` : sql<string>`max(coalesce(nullif(${schema.fbAds.name}, ''), ${o.adId}))`;
 
-  const orderRows = await db
+  /**
+   * ───────── MỖI ĐƠN TÍNH KẾT QUẢ MỘT LẦN, KHOÁ NHÓM CŨNG VẬY ─────────
+   *
+   * Đo trên production 09/09/2026: hàm này mất **25–27 giây**, và mất NHƯ NHAU cho 30 ngày lẫn toàn
+   * kỳ — dấu hiệu rõ ràng rằng chi phí không đi theo lượng dữ liệu mà theo số lần tính LẶP.
+   *
+   * Tám cột gộp ở dưới, cột nào cũng nội tuyến trọn `ORDER_OUTCOME`; riêng khoá nhóm còn chứa
+   * `ORDER_CAMPAIGN_ID` (một truy vấn con tương quan) và bị tính cả ở SELECT lẫn GROUP BY. Gói vào
+   * bảng dẫn xuất kèm rào thì mỗi đơn tính đúng một lần, khoá nhóm cũng chỉ dựng một lần.
+   *
+   * Đổi HÌNH DẠNG, KHÔNG đổi công thức. `tests/ads-roas.test.ts` và
+   * `tests/metric-shape-consistency.test.ts` giữ cho con số không đổi.
+   */
+  const facts = db
     .select({
-      key: sql<string>`${groupKey}`,
-      name: groupName,
-      bookedOrders: COUNT_BOOKED,
-      bookedRevenue: BOOKED_REVENUE,
-      deliveredOrders: COUNT_DELIVERED,
-      deliveredRevenue: DELIVERED_REVENUE,
-      returnedOrders: COUNT_RETURNED,
-      deliveredCogs: DELIVERED_COGS,
-      shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)), 0)`,
-      cash: CASH,
+      key: sql<string>`${groupKey}`.as("f_key"),
+      campaignName: sql<string>`${schema.fbAds.campaignName}`.as("f_campaign_name"),
+      adName: sql<string>`${schema.fbAds.name}`.as("f_ad_name"),
+      adId: sql<string>`${o.adId}`.as("f_ad_id"),
+      revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
+      cogs: sql<number>`${ORDER_COGS}`.as("f_cogs"),
+      shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("f_shipping"),
+      cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("f_cash"),
+      outcome: ORDER_OUTCOME.as("f_outcome"),
     })
     .from(o)
     .leftJoin(s, eq(s.orderId, o.id))
     .leftJoin(schema.fbAds, eq(schema.fbAds.id, o.adId))
     .where(and(scope, HAS_AD))
-    .groupBy(sql`${groupKey}`);
+    .offset(OUTCOME_FENCE)
+    .as("ads_facts");
+
+  const fDelivered = sql`${facts.outcome} = 'DELIVERED'`;
+  const fReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const fBooked = sql`${facts.outcome} <> 'CANCELLED'`;
+
+  const orderRows = await db
+    .select({
+      key: sql<string>`${facts.key}`,
+      name:
+        level === "campaign"
+          ? sql<string>`max(coalesce(nullif(${facts.campaignName}, ''), ${facts.adId}))`
+          : sql<string>`max(coalesce(nullif(${facts.adName}, ''), ${facts.adId}))`,
+      bookedOrders: sql<number>`count(*) filter (where ${fBooked})`,
+      bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${fBooked}), 0)`,
+      deliveredOrders: sql<number>`count(*) filter (where ${fDelivered})`,
+      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${fDelivered}), 0)`,
+      returnedOrders: sql<number>`count(*) filter (where ${fReturned})`,
+      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${fDelivered}), 0)`,
+      shipping: sql<number>`coalesce(sum(${facts.shipping}), 0)`,
+      cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${fDelivered}), 0)`,
+    })
+    .from(facts)
+    .groupBy(facts.key);
 
   // ── Tiền quảng cáo theo cùng khoá ──
   const spendRows = await db
