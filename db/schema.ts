@@ -491,6 +491,24 @@ export const orders = pgTable(
     /** Hội thoại Pancake (để mở chat: https://pancake.vn/<page_id>?c_id=<conversation_id>) */
     conversationId: text("conversation_id"),
     adId: text("ad_id"),
+    /**
+     * ───────────── ĐỊNH DANH QUY KẾT THÔ, GIỮ NGUYÊN NHƯ NGUỒN GỬI ─────────────
+     *
+     * Đo trên production 09/09/2026: Pancake gửi `p_utm_campaign`, `p_utm_source` và
+     * `customer_referral_code` trên **mọi đơn** (2.425/2.425) nhưng cả ba **đều rỗng** — vì hiện
+     * chưa có gì gắn mã theo dõi vào liên kết quảng cáo. Ngày shop bắt đầu gắn, dữ liệu sẽ chảy về
+     * qua đúng ba trường này.
+     *
+     * Nên ERP giữ chúng NGAY TỪ BÂY GIỜ, thô, không diễn giải. Không có cột thì ngày đó dữ liệu
+     * chảy qua rồi mất, và độ phủ quy kết vẫn nằm ở trần cũ mà không ai hiểu vì sao.
+     *
+     * KHÔNG suy diễn: rỗng là rỗng, không bịa từ trường khác.
+     */
+    utmCampaign: text("utm_campaign"),
+    utmSource: text("utm_source"),
+    referralCode: text("referral_code"),
+    /** Mốc nguồn ghi nhận quy kết (nếu nguồn có gửi) — khác thời điểm ERP đọc được. */
+    attributionCapturedAt: ts("attribution_captured_at"),
     marketplaceId: text("marketplace_id"),
     sellerName: text("seller_name").notNull().default(""),
     careName: text("care_name").notNull().default(""),

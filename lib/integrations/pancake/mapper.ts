@@ -136,6 +136,11 @@ export type MappedOrder = {
   conversationId: string | null;
   postId: string | null;
   adId: string | null;
+  /** Mã theo dõi thô do nguồn gửi. Hôm nay Pancake gửi trường nhưng luôn rỗng — giữ để ngày shop
+   *  bắt đầu gắn mã là dữ liệu chảy thẳng vào, không phải sửa mapper giữa lúc cần số. */
+  utmCampaign: string | null;
+  utmSource: string | null;
+  referralCode: string | null;
   marketplaceId: string | null;
   sellerName: string;
   careName: string;
@@ -481,6 +486,10 @@ export function mapOrder(value: unknown): MappedOrder | null {
     conversationId: str(order.conversation_id) || null,
     postId: str(order.post_id) || null,
     adId: str(order.ad_id) || null,
+    // GIỮ NGUYÊN như nguồn gửi, không diễn giải, không suy từ trường khác.
+    utmCampaign: str(order.p_utm_campaign) || null,
+    utmSource: str(order.p_utm_source) || null,
+    referralCode: str(order.customer_referral_code) || null,
     marketplaceId: str(order.marketplace_id) || null,
     sellerName: personName(order.assigning_seller),
     careName: personName(order.assigning_care),

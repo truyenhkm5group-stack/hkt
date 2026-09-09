@@ -37,6 +37,7 @@ import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
 import { testReturnInspection } from "./return-inspection.test";
+import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
 import { testSlowMoving } from "./slow-moving.test";
 import { testDrilldownContract } from "./drilldown-contract.test";
 import { testBusinessBrief } from "./business-brief.test";
@@ -1242,6 +1243,7 @@ async function main() {
   await testStatementDetailMatching(db);
   // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
   await testReturnInspection(db);
+  await testAdsAttributionCoverage(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

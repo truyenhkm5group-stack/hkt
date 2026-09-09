@@ -16,6 +16,7 @@ import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
 import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { adsAttributionCoverage } from "@/lib/queries/ads-attribution-coverage";
 import { OrderOutcomeBadge, VerifiedOutcomeBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
@@ -62,7 +63,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   // NĂM TRUY VẤN ĐỘC LẬP, KHÔNG ĐỨNG CHỜ NHAU. Trước đây chúng chạy nối tiếp nên thời gian dựng
   // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
   // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
-  const [summary, tower, towerDrill, drill, backlog] = await Promise.all([
+  const [summary, tower, towerDrill, drill, backlog, adsCoverage] = await Promise.all([
     dataQualitySummary(params.period),
     getControlTower(),
     towerRule ? controlTowerDrill(towerRule, page, PAGE_SIZE) : Promise.resolve(null),
@@ -76,6 +77,8 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           : Promise.resolve(null),
     // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
     issue === "return-not-received" ? pendingReturnedForWarehouse() : Promise.resolve(null),
+    // Độ phủ quy kết quảng cáo 30 ngày — chỉ số theo dõi dữ liệu MỚI có tốt lên hay không.
+    adsAttributionCoverage(new Date(Date.now() - 30 * 86_400_000), new Date()),
   ]);
   const warehouseBacklog = backlog
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
@@ -121,6 +124,32 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           note="COD khai báo của đơn chưa chứng minh được"
         />
       </div>
+
+      {/*
+        ───────── ĐỘ PHỦ QUY KẾT QUẢNG CÁO ─────────
+        Chủ shop đã chốt: ~49% là GIỚI HẠN CỦA DỮ LIỆU, không phải lỗi. Quan hệ bài viết ↔ chiến dịch
+        là nhiều–nhiều theo đúng nghiệp vụ scale. Thẻ này KHÔNG để trách móc con số, mà để trả lời
+        một câu: dữ liệu mới có đang tốt lên không. Nó chỉ tăng khi từng mẩu quảng cáo có mã theo dõi
+        riêng — nên "đơn có mã theo dõi" đứng ngay cạnh.
+      */}
+      <SectionCard
+        title="Độ phủ quy kết quảng cáo — 30 ngày"
+        description={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.total)} đơn quy kết được (${adsCoverage.coveragePct}%) · ${formatNumber(adsCoverage.ambiguous)} nhập nhằng · ${formatNumber(adsCoverage.unmapped)} không có gì để nối`}
+        hint="Quy kết được = có mã quảng cáo thật, HOẶC bài viết chỉ thuộc đúng một chiến dịch. Bài chạy ở nhiều chiến dịch thì ERP GIỮ NHẬP NHẰNG, không chọn bừa — và không ngoại suy kết quả của phần quy kết được sang toàn bộ đơn."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard label="Quy kết được" value={`${adsCoverage.coveragePct}%`} icon={Percent} tone={adsCoverage.coveragePct >= 80 ? "green" : "amber"} note={`${formatNumber(adsCoverage.uniqueDeterministic)} đơn có căn cứ xác định`} />
+          <MetricCard label="Nhập nhằng" value={formatNumber(adsCoverage.ambiguous)} icon={CircleHelp} tone="amber" note="Có bài viết nhưng bài chạy ở nhiều chiến dịch — giữ nguyên, không đoán" />
+          <MetricCard label="Không nối được" value={formatNumber(adsCoverage.unmapped)} icon={AlertTriangle} tone="slate" note="Không có mã quảng cáo lẫn bài viết" />
+          <MetricCard
+            label="Đơn có mã theo dõi"
+            value={formatNumber(adsCoverage.withTrackingCode)}
+            icon={ShoppingBag}
+            tone={adsCoverage.withTrackingCode > 0 ? "green" : "slate"}
+            note={adsCoverage.withTrackingCode > 0 ? "Đường duy nhất để độ phủ tăng thật" : "Chưa mẩu quảng cáo nào gắn mã theo dõi riêng"}
+          />
+        </div>
+      </SectionCard>
 
       {/* ───────── Trung tâm điều khiển: toàn bộ bộ luật đối soát ───────── */}
       <SectionCard
