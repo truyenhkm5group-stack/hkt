@@ -55,7 +55,7 @@ export type LogisticsPerformance = {
 };
 
 export async function logisticsPerformance(period: Period): Promise<LogisticsPerformance> {
-  return memo(`logistics-performance:${period.fromKey ?? "-"}:${period.toKey ?? "-"}`, 90, async () => {
+  return memo(`logistics-performance:${period.fromKey ?? "-"}:${period.toKey ?? "-"}`, 90_000, async () => {
     const db = await getDb();
     const from = period.from ? sql`${period.from}` : sql`'-infinity'::timestamptz`;
     const to = period.to ? sql`${period.to}` : sql`'infinity'::timestamptz`;

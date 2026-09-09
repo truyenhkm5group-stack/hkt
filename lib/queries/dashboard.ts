@@ -10,9 +10,8 @@ import { getControlTower } from "@/lib/queries/control-tower";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
-import { BOOKED_COGS, BOOKED_REVENUE, COUNT_BOOKED, COUNT_CANCELLED, COUNT_DELIVERED, COUNT_OPEN, COUNT_RETURNED, COUNT_UNKNOWN, DELIVERED_COGS, DELIVERED_REVENUE, averageOrderValue, metricScope, successRate } from "@/lib/queries/metrics";
+import { averageOrderValue, factMetrics, metricScope, orderMetricFacts, successRate } from "@/lib/queries/metrics";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
   const conds = [];
@@ -47,25 +46,27 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
   // Kết quả đơn theo trạng thái vận đơn Viettel Post kết hợp Pancake (ORDER_OUTCOME)
   // MỌI con số dưới đây đi qua lớp chân lý chỉ số (lib/queries/metrics.ts) và dùng CHUNG một
   // population — nếu không thì doanh thu lấy theo tập đơn này, giá vốn lấy theo tập đơn khác.
+  // 10 cột gộp trên cùng biểu thức kết quả đơn ⇒ đọc trên BẢNG DẪN XUẤT để nó chỉ tính một lần
+  // cho mỗi đơn. Cùng định nghĩa, cùng population, cùng con số — xem lib/queries/metrics.ts.
+  const base = orderMetricFacts(db, where);
+  const m = factMetrics(base);
   const [row] = await db
     .select({
-      orders: COUNT_BOOKED,
-      revenue: BOOKED_REVENUE,
-      cogs: BOOKED_COGS,
-      successOrders: COUNT_DELIVERED,
-      successRevenue: DELIVERED_REVENUE,
+      orders: m.countBooked,
+      revenue: m.bookedRevenue,
+      cogs: m.bookedCogs,
+      successOrders: m.countDelivered,
+      successRevenue: m.deliveredRevenue,
       // Giá vốn của ĐÚNG những đơn đã sinh ra `successRevenue` — cùng bộ lọc, cùng câu truy vấn.
-      successCogs: DELIVERED_COGS,
-      failedOrders: sql<number>`${COUNT_RETURNED} + ${COUNT_CANCELLED}`,
+      successCogs: m.deliveredCogs,
+      failedOrders: sql<number>`${m.countReturned} + ${m.countCancelled}`,
       // Riêng đơn HOÀN (không gồm huỷ) — mẫu số của tỷ lệ giao thành công, phải cùng định nghĩa
       // với báo cáo Tỷ lệ giao thành công: GTC = giao TC ÷ (giao TC + hoàn), KHÔNG chia cho tổng đơn.
-      returnedOrders: COUNT_RETURNED,
-      activeOrders: COUNT_OPEN,
-      unknownOrders: COUNT_UNKNOWN,
+      returnedOrders: m.countReturned,
+      activeOrders: m.countOpen,
+      unknownOrders: m.countUnknown,
     })
-    .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-    .where(where);
+    .from(base);
   const kpi: OrderKpis = {
     orders: Number(row?.orders ?? 0),
     revenue: Number(row?.revenue ?? 0),
@@ -95,6 +96,11 @@ async function getDashboardDataUncached(period: Period) {
   // ĐO TRƯỚC, SỬA SAU (TASK 16): Tổng quan là trang chậm nhất — 324ms so với 40ms của trang kế
   // tiếp — vì 15 truy vấn độc lập chạy NỐI TIẾP, mỗi cái chờ cái trước xong. Chúng không phụ
   // thuộc nhau nên gom vào một lượt; số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
+  // MỘT bảng dẫn xuất dùng chung cho cả hai truy vấn theo ngày và theo kênh: cùng population
+  // ("đơn đã xác nhận"), cùng kỳ, và kết quả đơn tính đúng một lần cho mỗi đơn.
+  const scopeFacts = orderMetricFacts(db, metricScope(period, "confirmed"));
+  const scopeMetrics = factMetrics(scopeFacts);
+
   const [
     stageRows,
     dailyRows,
@@ -122,28 +128,24 @@ async function getDashboardDataUncached(period: Period) {
       .from(schema.orders)
       .where(inPeriod(schema.orders.insertedAt, period.from, period.to))
       .groupBy(schema.orders.stage),
-    // Doanh thu theo ngày (giờ VN)
+    // Doanh thu theo ngày (giờ VN) — trên bảng dẫn xuất, kết quả đơn tính một lần cho mỗi đơn
     db
       .select({
-        day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
+        day: scopeFacts.day,
         orders: count(),
-        revenue: sum(schema.orders.totalPriceAfterDiscount),
-        success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
-        successRevenue: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then ${schema.orders.totalPriceAfterDiscount} else 0 end)`,
+        revenue: sum(scopeFacts.revenue),
+        success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)`,
+        successRevenue: sql<number>`sum(case when ${scopeMetrics.isDelivered} then ${scopeFacts.revenue} else 0 end)`,
       })
-      .from(schema.orders)
-      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-      .where(metricScope(period, "confirmed"))
-      .groupBy(sql`1`)
-      .orderBy(sql`1`),
+      .from(scopeFacts)
+      .groupBy(scopeFacts.day)
+      .orderBy(scopeFacts.day),
     // Theo kênh bán
     db
-      .select({ source: schema.orders.source, orders: count(), revenue: sum(schema.orders.totalPriceAfterDiscount), success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)` })
-      .from(schema.orders)
-      .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
-      .where(metricScope(period, "confirmed"))
-      .groupBy(schema.orders.source)
-      .orderBy(desc(sum(schema.orders.totalPriceAfterDiscount))),
+      .select({ source: scopeFacts.source, orders: count(), revenue: sum(scopeFacts.revenue), success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)` })
+      .from(scopeFacts)
+      .groupBy(scopeFacts.source)
+      .orderBy(desc(sum(scopeFacts.revenue))),
     // Vận đơn theo giai đoạn (toàn bộ đang hoạt động, không theo kỳ)
     db.select({ stage: schema.shipments.stage, count: count(), cod: sum(schema.shipments.codAmount) }).from(schema.shipments).groupBy(schema.shipments.stage),
     // COD

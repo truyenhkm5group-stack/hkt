@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
+import { LinkPending, LinkProgressReporter } from "@/components/nav-progress";
 import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
@@ -137,9 +138,20 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
                     return (
                       <SidebarMenuItem key={item.href}>
                         <SidebarMenuButton asChild isActive={active} tooltip={item.label} className="relative h-9 rounded-lg text-[13.5px] text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[active=true]:before:absolute data-[active=true]:before:left-0 data-[active=true]:before:top-1/2 data-[active=true]:before:h-4 data-[active=true]:before:w-[3px] data-[active=true]:before:-translate-y-1/2 data-[active=true]:before:rounded-r-full data-[active=true]:before:bg-brand-bright">
+                          {/*
+                            CỐ Ý DÙNG PREFETCH MẶC ĐỊNH, KHÔNG ÉP `prefetch`. Với route động,
+                            `prefetch` ép Next tải TRƯỚC toàn bộ dữ liệu trang — 25 mục menu nhân
+                            lên là 25 lần dựng báo cáo trên một VPS 2 nhân, ngay khi người dùng vừa
+                            đăng nhập. Chế độ mặc định chỉ tải trước phần khung tới ranh giới
+                            `loading.tsx`; nay mỗi trang nặng đã có `loading.tsx` riêng nên bấm vào
+                            là thấy khung xương đúng hình dạng ngay lập tức, còn CSDL không bị gọi.
+                          */}
                           <Link href={item.href}>
                             <item.icon className={active ? "text-brand-bright" : "text-sidebar-foreground/50"} />
                             <span>{item.label}</span>
+                            {/* Chấm chờ ngay trong mục vừa bấm + báo lên thanh tiến trình chung */}
+                            <LinkPending />
+                            <LinkProgressReporter />
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>

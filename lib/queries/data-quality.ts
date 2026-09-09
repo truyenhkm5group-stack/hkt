@@ -50,7 +50,7 @@ export type DataQualitySummary = Awaited<ReturnType<typeof dataQualitySummary>>;
  */
 export async function dataQualitySummary(period: Period) {
   const db = await getDb();
-  return memo(`data-quality:summary:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90, async () => {
+  return memo(`data-quality:summary:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, async () => {
     const where = periodWhere(period);
     const V = ORDER_OUTCOME_VERIFIED;
     const L = ORDER_OUTCOME;

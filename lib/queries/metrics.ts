@@ -1,8 +1,8 @@
-import { and, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
-import { schema } from "@/db";
+import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { schema, type Db } from "@/db";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { ORDER_COGS } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { ORDER_COGS, orderCogsColumn } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME, OUTCOME_FENCE, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -117,4 +117,60 @@ export function successRate(delivered: number, returned: number): number | null 
 /** Giá trị đơn trung bình. Không có đơn nào thì 0 (đếm được là 0, không phải chưa biết). */
 export function averageOrderValue(revenue: number, orders: number): number {
   return orders ? Math.round(revenue / orders) : 0;
+}
+
+// ─────────────── BẢNG DẪN XUẤT CẤP ĐƠN (tăng tốc, KHÔNG đổi công thức) ───────────────
+
+/**
+ * Bảng dẫn xuất một-dòng-một-đơn với `ORDER_OUTCOME` và `ORDER_COGS` đã tính sẵn.
+ *
+ * Vì sao: Postgres nội tuyến hai biểu thức đó (mỗi cái chứa nhiều truy vấn con tương quan) vào
+ * TỪNG cột gộp. Thẻ KPI Tổng quan có 10 cột như vậy ⇒ mỗi đơn bị tính kết quả 10 lần. Gói vào bảng
+ * dẫn xuất kèm rào `OUTCOME_FENCE` thì mỗi đơn tính đúng một lần.
+ *
+ * Định nghĩa chỉ số KHÔNG đổi: vẫn cùng `ORDER_OUTCOME`, cùng population, cùng trường ngày. Các
+ * hằng số gộp nội tuyến ở trên vẫn giữ nguyên để đối chiếu và để các truy vấn chưa chuyển dùng
+ * tiếp — hai cách phải luôn ra cùng con số (tests/metric-shape-consistency.test.ts).
+ */
+export function orderMetricFacts(db: Db, where: SQL | undefined) {
+  return db
+    .select({
+      orderId: schema.orders.id,
+      orderStage: schema.orders.stage,
+      source: schema.orders.source,
+      insertedAt: schema.orders.insertedAt,
+      day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`.as("day"),
+      revenue: schema.orders.totalPriceAfterDiscount,
+      cogs: orderCogsColumn(),
+      outcome: outcomeColumn(),
+    })
+    .from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    .where(where)
+    .offset(OUTCOME_FENCE)
+    .as("metric_facts");
+}
+
+export type OrderMetricFacts = ReturnType<typeof orderMetricFacts>;
+
+/** Bộ cột gộp đọc trên bảng dẫn xuất — bản sao 1:1 của các hằng số nội tuyến ở trên. */
+export function factMetrics(base: OrderMetricFacts) {
+  const delivered = sql`${base.outcome} = 'DELIVERED'`;
+  const returned = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const booked = sql`${base.outcome} <> 'CANCELLED'`;
+  return {
+    isDelivered: delivered,
+    isReturned: returned,
+    isBooked: booked,
+    countBooked: sql<number>`count(*) filter (where ${booked})`,
+    countDelivered: sql<number>`count(*) filter (where ${delivered})`,
+    countReturned: sql<number>`count(*) filter (where ${returned})`,
+    countCancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+    countOpen: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))`,
+    countUnknown: sql<number>`count(*) filter (where ${base.outcome} = 'UNKNOWN')`,
+    bookedRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${booked}), 0)`,
+    bookedCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${booked}), 0)`,
+    deliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${delivered}), 0)`,
+    deliveredCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${delivered}), 0)`,
+  };
 }

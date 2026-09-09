@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { schema } from "@/db";
-import { LAST_RECEIPT_COST } from "@/lib/queries/stock";
+import { LAST_RECEIPT_COST, type VariantLastCost } from "@/lib/queries/stock";
 
 const i = schema.orderItems;
 const pv = schema.productVariants;
@@ -10,6 +10,19 @@ const pv = schema.productVariants;
  * giá nhập trên phiếu nhập gần nhất (ERP) → giá vốn Pancake ghi trên đơn lúc đồng bộ → giá nhập mẫu mã trên Pancake.
  */
 export const LINE_UNIT_COST = sql<number>`coalesce(${LAST_RECEIPT_COST}, nullif(${i.unitCost}, 0), ${pv.lastImportedPrice}, 0)`;
+
+/**
+ * ĐÚNG CÙNG công thức `LINE_UNIT_COST`, nhưng lấy giá nhập gần nhất từ bảng đã tính sẵn
+ * (`variantLastCostSubquery`) thay vì chạy truy vấn con cho TỪNG dòng đơn hàng.
+ *
+ * Dùng ở các truy vấn cấp DÒNG ĐƠN (hiệu quả mẫu mã, lợi nhuận theo mã hàng): ở đó số dòng lên tới
+ * hàng chục nghìn nên chi phí của truy vấn con nhân lên đúng bấy nhiêu lần. Các truy vấn cấp MẪU MÃ
+ * (Sản phẩm & tồn kho, Kế hoạch SX, Hàng bán chậm) vẫn dùng `LINE_UNIT_COST` — ở đó nó chỉ chạy
+ * vài trăm lần, và giữ nguyên thì không phải chứng minh lại gì.
+ */
+export function lineUnitCost(lastCost: VariantLastCost) {
+  return sql<number>`coalesce(${lastCost.lastCost}, nullif(${i.unitCost}, 0), ${pv.lastImportedPrice}, 0)`;
+}
 
 /**
  * Giá vốn cả đơn tính "sống" từ dòng đơn (thay cho orders.cogs — chỉ là ảnh chụp lúc đồng bộ, bằng 0 nếu Pancake chưa có giá vốn).
@@ -25,3 +38,15 @@ export const ORDER_COGS = sql<number>`coalesce((
   from order_items oi left join product_variants pv2 on pv2.id = oi.variant_id
   where oi.order_id = ${schema.orders.id}
 ), 0)`;
+
+/**
+ * Cột giá vốn cả đơn cho BẢNG DẪN XUẤT (xem `OUTCOME_FENCE` trong lib/queries/return-rate.ts).
+ * `ORDER_COGS` là truy vấn con tương quan, và cũng bị nội tuyến lại vào từng cột gộp y như
+ * `ORDER_OUTCOME` — nên nó phải được tính một lần cho mỗi dòng, ở cùng chỗ.
+ *
+ * Cố ý đặt ở đây chứ không ở return-rate.ts: return-rate ← cogs ← stock ← return-rate sẽ thành
+ * vòng import, và biểu thức SQL dựng ở mức mô-đun trong vòng import thì có thể là `undefined`.
+ */
+export function orderCogsColumn() {
+  return ORDER_COGS.as("order_cogs");
+}

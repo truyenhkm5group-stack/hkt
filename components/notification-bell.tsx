@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck } from "lucide-react";
@@ -17,7 +18,7 @@ type Item = { id: string; kind: string; severity: string; title: string; body: s
 export function NotificationBell() {
   const [items, setItems] = useState<Item[]>([]);
   const [unread, setUnread] = useState(0);
-  const [, startTransition] = useTransition();
+  const [, startTransition] = useNavTransition();
   const router = useRouter();
 
   const load = useCallback(async () => {

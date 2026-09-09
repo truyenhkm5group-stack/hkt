@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
 import { Loader2 } from "lucide-react";
+import { useNavTransition } from "@/components/nav-progress";
 import { CASE_STATUS_LABEL, CASE_TYPE_LABEL, PRIORITY_LABEL, QUEUE_SORT_LABEL, type CaseStatus, type CaseType } from "@/lib/constants/action-queue";
 import { Button } from "@/components/ui/button";
 
@@ -21,7 +21,7 @@ export function QueueFilters({
 }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [pending, start] = useTransition();
+  const [pending, start] = useNavTransition();
 
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params.toString());

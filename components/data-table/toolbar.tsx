@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { parseAsArrayOf, parseAsString, useQueryState, useQueryStates } from "nuqs";
-import { CalendarDays, Check, ListFilter, Search, X } from "lucide-react";
+import { CalendarDays, Check, ListFilter, Loader2, Search, X } from "lucide-react";
 import { PERIOD_OPTIONS, type PeriodKey } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useNavTransition } from "@/components/nav-progress";
 
 export type FacetOption = { value: string; label: string; count?: number; icon?: React.ReactNode };
 export type FacetDef = { key: string; label: string; options: FacetOption[]; single?: boolean };
@@ -20,16 +21,21 @@ const shallowOff = { shallow: false as const, history: "push" as const };
 
 /**
  * Mọi thay đổi bộ lọc / tìm kiếm đều đi vòng lên máy chủ. Bọc trong transition để React biết đang
- * chờ, nhờ đó nút vừa bấm hiện trạng thái chờ thay vì đứng im.
+ * chờ, nhờ đó nút vừa bấm hiện trạng thái chờ thay vì đứng im — và để thanh tiến trình chung trên
+ * đỉnh trang biết có việc đang chạy (xem components/nav-progress.tsx).
+ *
+ * TRƯỚC ĐÂY chỉ `ResetFilters` dùng transition; kỳ báo cáo, ô tìm kiếm và facet thì không, nên đổi
+ * kỳ xong màn hình đứng im vài giây mà không có dấu hiệu nào.
  */
 function useShallowOff() {
-  const [pending, startTransition] = React.useTransition();
+  const [pending, startTransition] = useNavTransition();
   return { options: { ...shallowOff, startTransition }, pending };
 }
 
 export function SearchInput({ placeholder = "Tìm kiếm…", className }: { placeholder?: string; className?: string }) {
-  const [q, setQ] = useQueryState("q", parseAsString.withDefault("").withOptions(shallowOff));
-  const [, setPage] = useQueryState("page", parseAsString.withOptions(shallowOff));
+  const { options } = useShallowOff();
+  const [q, setQ] = useQueryState("q", parseAsString.withDefault("").withOptions(options));
+  const [, setPage] = useQueryState("page", parseAsString.withOptions(options));
   const [value, setValue] = React.useState(q);
   React.useEffect(() => setValue(q), [q]);
   React.useEffect(() => {
@@ -54,8 +60,9 @@ export function SearchInput({ placeholder = "Tìm kiếm…", className }: { pla
 }
 
 export function FacetFilter({ facet }: { facet: FacetDef }) {
-  const [selected, setSelected] = useQueryState(facet.key, parseAsArrayOf(parseAsString, ",").withDefault([]).withOptions(shallowOff));
-  const [, setPage] = useQueryState("page", parseAsString.withOptions(shallowOff));
+  const { options } = useShallowOff();
+  const [selected, setSelected] = useQueryState(facet.key, parseAsArrayOf(parseAsString, ",").withDefault([]).withOptions(options));
+  const [, setPage] = useQueryState("page", parseAsString.withOptions(options));
   const set = new Set(selected);
   const toggle = (value: string) => {
     const next = new Set(set);
@@ -138,11 +145,35 @@ export function FacetFilter({ facet }: { facet: FacetDef }) {
   );
 }
 
+/**
+ * CHỌN KỲ BÁO CÁO — chỗ người dùng bấm nhiều nhất và cũng là chỗ chậm nhất.
+ *
+ * Ba việc phải đúng ở đây:
+ *  1. Đổi kỳ đi qua transition ⇒ nội dung CŨ vẫn hiện trong lúc chờ (không màn hình trắng, không
+ *     nháy về 0) và thanh tiến trình chung biết có việc đang chạy.
+ *  2. Ô ngày tuỳ chọn gõ đến đâu KHÔNG bắn điều hướng đến đó. `<input type="date">` phát sự kiện
+ *     cho từng ký tự ngày/tháng/năm, nên gõ một ngày trước đây bắn ba lần dựng lại trang trên máy
+ *     chủ, hai lần đầu là công toi. Nay chờ 500 ms sau khi ngừng gõ, và chỉ gửi khi ngày HỢP LỆ.
+ *  3. Yêu cầu cũ tự bị bỏ: `startTransition` của React luôn lấy lần điều hướng MỚI NHẤT làm kết
+ *     quả, nên bấm Tháng 8 → Tháng 9 → 7 ngày qua thì màn hình chắc chắn hiện 7 ngày qua, không
+ *     phụ thuộc câu trả lời nào về trước.
+ */
 export function PeriodFilter({ defaultKey = "all", options = PERIOD_OPTIONS }: { defaultKey?: PeriodKey; options?: { value: PeriodKey; label: string }[] }) {
+  const { options: navOptions, pending } = useShallowOff();
   const [state, setState] = useQueryStates(
     { period: parseAsString.withDefault(defaultKey), from: parseAsString.withDefault(""), to: parseAsString.withDefault(""), page: parseAsString.withDefault("") },
-    shallowOff,
+    navOptions,
   );
+  // Bản nháp cục bộ của hai ô ngày: hiện ngay khi gõ, chỉ gửi lên máy chủ khi đã ngừng gõ.
+  const [draft, setDraft] = React.useState({ from: state.from, to: state.to });
+  React.useEffect(() => setDraft({ from: state.from, to: state.to }), [state.from, state.to]);
+  React.useEffect(() => {
+    if (draft.from === state.from && draft.to === state.to) return;
+    const valid = (v: string) => v === "" || /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (!valid(draft.from) || !valid(draft.to)) return;
+    const timer = setTimeout(() => void setState({ from: draft.from || null, to: draft.to || null, page: null }), 500);
+    return () => clearTimeout(timer);
+  }, [draft, state.from, state.to, setState]);
   return (
     <div className="flex items-center gap-1.5">
       <Select value={state.period} onValueChange={(v) => void setState({ period: v === defaultKey ? null : v, page: null })}>
@@ -160,11 +191,12 @@ export function PeriodFilter({ defaultKey = "all", options = PERIOD_OPTIONS }: {
       </Select>
       {state.period === "custom" ? (
         <>
-          <Input type="date" className="h-8 w-[140px]" value={state.from} onChange={(e) => void setState({ from: e.target.value || null, page: null })} />
+          <Input type="date" className="h-8 w-[140px]" value={draft.from} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} />
           <span className="text-xs text-muted-foreground">→</span>
-          <Input type="date" className="h-8 w-[140px]" value={state.to} onChange={(e) => void setState({ to: e.target.value || null, page: null })} />
+          <Input type="date" className="h-8 w-[140px]" value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} />
         </>
       ) : null}
+      {pending ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Đang tải kỳ báo cáo" /> : null}
     </div>
   );
 }

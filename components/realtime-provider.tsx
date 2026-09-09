@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Radio, RadioTower } from "lucide-react";
 import { toast } from "sonner";
 import { formatTimeAgo } from "@/lib/format";
@@ -11,23 +11,43 @@ type RealtimeState = { connected: boolean; lastEventAt: number | null; events: n
 const RealtimeContext = createContext<RealtimeState>({ connected: false, lastEventAt: null, events: 0 });
 
 /**
+ * TRANG BÁO CÁO NẶNG — làm mới thưa hơn hẳn.
+ *
+ * `router.behavior`: mỗi `router.refresh()` XOÁ TOÀN BỘ bộ nhớ đệm điều hướng phía client, nên lần
+ * bấm sang tab kế tiếp phải dựng lại trang trên máy chủ từ đầu. Với nhịp cũ (20 giây/lần cho mọi
+ * trang) thì bộ đệm 30 giây khai báo trong `next.config.ts` gần như không bao giờ còn sống — đo
+ * được là một trong các lý do "chuyển tab báo cáo chậm".
+ *
+ * Trang vận hành (đơn mới, vận đơn, cảnh báo, chat) vẫn cần nhịp nhanh: người dùng đang nhìn dòng
+ * việc chạy. Trang báo cáo tổng hợp thì không — số liệu kỳ tháng không đổi theo từng giây, và bản
+ * thân các báo cáo đã có đệm 60–120 giây ở máy chủ nên làm mới dày hơn cũng chỉ trả về đúng số cũ.
+ */
+const LIVE_ROUTES = ["/orders", "/shipments", "/alerts", "/cs", "/landing", "/outreach", "/returns", "/integrations"];
+const LIVE_GAP = 20_000;
+const REPORT_GAP = 90_000;
+
+/**
  * Kết nối SSE tới /api/events và làm mới dữ liệu trang (router.refresh) khi có thay đổi.
- * Gộp sự kiện, tối thiểu 20 giây giữa hai lần làm mới; chỉ tự làm mới định kỳ (5 phút) khi mất kết nối SSE.
+ * Gộp sự kiện; nhịp tối thiểu tuỳ theo trang đang mở (xem trên); chỉ tự làm mới định kỳ (5 phút) khi mất kết nối SSE.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [state, setState] = useState<RealtimeState>({ connected: false, lastEventAt: null, events: 0 });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRefresh = useRef(0);
+  // Đọc trong callback của SSE nên phải qua ref: closure của effect không thấy pathname mới.
+  const gap = useRef(LIVE_GAP);
+  gap.current = pathname === "/" || LIVE_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`)) ? LIVE_GAP : REPORT_GAP;
 
   useEffect(() => {
     let source: EventSource | null = null;
     let closed = false;
     let retry = 1000;
 
-    const MIN_GAP = 20_000; // không làm mới trang dày hơn 20 giây/lần dù có nhiều sự kiện
     const scheduleRefresh = () => {
       if (timer.current) return; // đã có lịch làm mới, gộp sự kiện
+      const minGap = gap.current;
       const since = Date.now() - lastRefresh.current;
       timer.current = setTimeout(
         () => {
@@ -37,7 +57,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
             router.refresh();
           }
         },
-        since > MIN_GAP ? 1500 : MIN_GAP - since,
+        since > minGap ? 1500 : minGap - since,
       );
     };
 

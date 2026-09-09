@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ const LEVELS = [
 export function RoasLevelTabs({ current }: { current: string }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [pending, start] = useTransition();
+  const [pending, start] = useNavTransition();
 
   return (
     <div className="flex flex-wrap items-center gap-1">
