@@ -4,7 +4,7 @@ import { jwtVerify, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
-import { hasPermission, resolvePermissions, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
+import { hasPermission, resolvePermissions, USER_PERMISSION_SNAPSHOT_KEY, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
 import { env } from "@/lib/env";
 import { getSettingJson } from "@/lib/settings";
 
@@ -69,17 +69,34 @@ export async function loadRoleTemplates(): Promise<RolePermissionMap> {
   return getSettingJson<RolePermissionMap>(ROLE_PERMISSIONS_KEY, {});
 }
 
+/**
+ * Ảnh chụp "lúc lưu quyền tuỳ chỉnh cho người này, hệ thống có những khoá quyền nào".
+ *
+ * Để trong `settings` thay vì thêm cột: chỉ vài người dùng nên dữ liệu rất nhỏ, và tránh được một
+ * migration vào lúc kho đang có phiên làm việc khác sửa dở `db/schema.ts`.
+ */
+export async function loadPermissionSnapshots(): Promise<Record<string, string[]>> {
+  return getSettingJson<Record<string, string[]>>(USER_PERMISSION_SNAPSHOT_KEY, {});
+}
+
 /** Người dùng hiện tại với quyền đã tính (null nếu chưa đăng nhập / bị khoá), không chuyển hướng */
 export async function getCurrentUser(): Promise<SessionUser | null> {
   const session = await getSession();
   if (!session) return null;
   const db = await getDb();
-  const [user, templates] = await Promise.all([
+  const [user, templates, snapshots] = await Promise.all([
     db.query.users.findFirst({ where: eq(schema.users.id, session.id), columns: { id: true, email: true, name: true, role: true, active: true, permissions: true } }),
     loadRoleTemplates(),
+    loadPermissionSnapshots(),
   ]);
   if (!user || !user.active) return null;
-  return { id: user.id, email: user.email, name: user.name, role: user.role, permissions: resolvePermissions(user.role, user.permissions, templates) };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    permissions: resolvePermissions(user.role, user.permissions, templates, snapshots[user.id] ?? null),
+  };
 }
 
 /** Lấy người dùng hiện tại (kiểm tra còn active trong DB), chuyển hướng /login nếu chưa đăng nhập */

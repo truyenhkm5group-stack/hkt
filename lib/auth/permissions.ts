@@ -144,11 +144,52 @@ export function rolePermissions(role: Role, templates?: RolePermissionMap | null
   return [...(DEFAULT_ROLE_PERMISSIONS[role] ?? DEFAULT_ROLE_PERMISSIONS.VIEWER)];
 }
 
-/** Quyền thực tế của một người dùng: tuỳ chỉnh riêng (nếu có) → mẫu vai trò. ADMIN luôn toàn quyền. */
-export function resolvePermissions(role: Role, custom: string[] | null | undefined, templates?: RolePermissionMap | null): string[] {
+export const USER_PERMISSION_SNAPSHOT_KEY = "users.permissionsKnown";
+
+/**
+ * Khoá quyền được thêm SAU khi ERP bắt đầu ghi lại "lúc lưu danh sách quyền tuỳ chỉnh thì hệ thống
+ * đang có những khoá nào". Các danh sách lưu trước đó chưa từng được hỏi về những khoá này.
+ *
+ * Chỉ dùng cho các bản lưu cũ; từ nay mỗi lần lưu quyền đều kèm ảnh chụp khoá hiện có nên danh
+ * sách này không cần dài thêm.
+ */
+export const PERMISSIONS_ADDED_AFTER_SNAPSHOT: string[] = ["ideas:view", "ideas:write", "ideas:review"];
+
+/** Bộ khoá quyền của thời điểm trước khi có ảnh chụp — dùng cho người chưa có ảnh chụp nào. */
+function khoaDaBietKieuCu(): Set<string> {
+  return new Set((ALL_PERMISSIONS as string[]).filter((p) => !PERMISSIONS_ADDED_AFTER_SNAPSHOT.includes(p)));
+}
+
+/**
+ * Quyền thực tế của một người dùng: tuỳ chỉnh riêng (nếu có) → mẫu vai trò. ADMIN luôn toàn quyền.
+ *
+ * DANH SÁCH TUỲ CHỈNH CHỈ NÓI VỀ NHỮNG KHOÁ ĐÃ TỒN TẠI LÚC LƯU.
+ *
+ * Trước đây danh sách tuỳ chỉnh được coi là câu trả lời cho mọi khoá, kể cả khoá sinh ra sau đó.
+ * Hậu quả: người từng được lưu quyền riêng bị đóng băng vĩnh viễn — mỗi module mới đều vô hình với
+ * họ, mà không ai biết vì menu chỉ đơn giản là không hiện. Đúng chuyện đã xảy ra với module Ý
+ * tưởng marketing: tài khoản Quản lý có danh sách 37 khoá lưu từ trước nên không thấy menu.
+ *
+ * Nay khoá nào CHƯA TỒN TẠI lúc người đó được lưu quyền thì áp mẫu của vai trò — vì chưa ai từng
+ * được hỏi về nó. Khoá đã tồn tại mà bị bỏ khỏi danh sách vẫn là quyết định có chủ ý, giữ nguyên.
+ *
+ * `known` là ảnh chụp bộ khoá tại thời điểm lưu; chưa có thì coi như bộ khoá của thời trước ảnh chụp.
+ */
+export function resolvePermissions(
+  role: Role,
+  custom: string[] | null | undefined,
+  templates?: RolePermissionMap | null,
+  known?: string[] | null,
+): string[] {
   if (role === "ADMIN") return [...ALL_PERMISSIONS];
-  if (Array.isArray(custom)) return expandLegacy(custom).filter((p) => (ALL_PERMISSIONS as string[]).includes(p));
-  return rolePermissions(role, templates);
+  if (!Array.isArray(custom)) return rolePermissions(role, templates);
+  const rieng = new Set(expandLegacy(custom).filter((p) => (ALL_PERMISSIONS as string[]).includes(p)));
+  const daBiet = Array.isArray(known) && known.length ? new Set(known) : khoaDaBietKieuCu();
+  const mau = new Set(rolePermissions(role, templates));
+  for (const p of ALL_PERMISSIONS as string[]) {
+    if (!daBiet.has(p) && mau.has(p)) rieng.add(p);
+  }
+  return [...rieng];
 }
 
 export function hasPermission(perms: readonly string[] | Set<string> | null | undefined, permission: string) {
