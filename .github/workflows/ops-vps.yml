@@ -37,6 +37,7 @@ on:
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
+          - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
@@ -137,6 +138,9 @@ jobs:
               profit-verify)
                 fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
+              perf-probe)
+                fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
               smoke)
                 # Chạy smoke trên hệ thống ĐANG ỔN ĐỊNH. Khác hẳn smoke lúc deploy: lúc đó scheduler
                 # vừa khởi động và đang đồng bộ toàn bộ đơn, nên trang nặng bị tranh CPU. Chạy tay ở
