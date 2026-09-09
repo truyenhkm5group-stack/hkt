@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { postKeySql, usablePostKeySql } from "@/lib/queries/ads-identity-sql";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 
@@ -35,11 +36,11 @@ const POST_TO_ONE_CAMPAIGN = sql`(
 )`;
 
 /** Khoá bài viết của đơn: Pancake lưu `<page_id>_<post_id>`, bảng quảng cáo lưu phần sau. */
-const ORDER_POST_KEY = sql`regexp_replace(${o.postId}, '^.*_', '')`;
+const ORDER_POST_KEY = postKeySql(o.postId);
 
 const HAS_REAL_AD = sql`(${o.adId} is not null and exists (select 1 from fb_ads f2 where f2.id = ${o.adId}))`;
 const HAS_UNIQUE_POST = sql`exists (select 1 from ${POST_TO_ONE_CAMPAIGN} p where p.post_id = ${ORDER_POST_KEY})`;
-const HAS_ANY_POST = sql`coalesce(${ORDER_POST_KEY}, '') ~ '^[0-9]{5,}$'`;
+const HAS_ANY_POST = usablePostKeySql(o.postId);
 
 export type AttributionCoverage = {
   total: number;

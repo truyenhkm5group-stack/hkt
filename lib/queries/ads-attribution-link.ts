@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { postKeySql } from "@/lib/queries/ads-identity-sql";
 import { getDb, schema } from "@/db";
 
 /**
@@ -41,7 +42,7 @@ const o = schema.orders;
  * `regexp_replace(..., '^.*_', '')` cắt tiền tố nếu có, và trả nguyên chuỗi nếu không có gạch dưới —
  * an toàn với cả hai định dạng.
  */
-const ORDER_POST_KEY = sql`regexp_replace(${o.postId}, '^.*_', '')`;
+const ORDER_POST_KEY = postKeySql(o.postId);
 
 /**
  * KHOÁ DÙNG ĐƯỢC: sau khi cắt tiền tố, phải là chuỗi chữ số đủ dài. Khoá hỏng (nhập tay, cắt sai,

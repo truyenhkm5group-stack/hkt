@@ -56,10 +56,15 @@ export function isUsableAdId(raw: string | null | undefined): boolean {
 }
 
 /**
- * Biểu thức SQL chuẩn hoá — PHẢI khớp từng ký tự với `normalizePostKey` ở trên.
- * Kiểm thử đối chiếu hai bản này trên cùng bộ dữ liệu để chúng không trôi khỏi nhau.
+ * BẢN SQL NẰM Ở `lib/queries/ads-identity-sql.ts`, KHÔNG nằm ở đây.
+ *
+ * Trước 10/09/2026 chỗ này có hai hằng số chuỗi `POST_KEY_SQL` / `USABLE_POST_KEY_SQL` mang đúng chú
+ * thích "kiểm thử đối chiếu hai bản này để chúng không trôi khỏi nhau" — mà KHÔNG nơi nào dùng chúng,
+ * và bài kiểm đó chưa từng được viết. Hai tệp truy vấn mỗi tệp tự chép tay một bản riêng, thành ba
+ * bản không có gì buộc phải khớp.
+ *
+ * Nay bản SQL là biểu thức drizzle thật, dùng chung ở đúng một chỗ, và `tests/ads-identity.test.ts`
+ * chạy cả hai bản trên cùng bộ dữ liệu để chứng minh chúng cho cùng kết quả.
+ *
+ * Tệp này (constants) cố ý KHÔNG import drizzle: client component được phép import nó.
  */
-export const POST_KEY_SQL = "regexp_replace(%s, '^.*_', '')";
-
-/** Điều kiện SQL "khoá dùng được", khớp với `isUsablePostKey`. */
-export const USABLE_POST_KEY_SQL = "%s ~ '^[0-9]{5,}$'";

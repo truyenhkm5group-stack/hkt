@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { isUsableAdId, isUsablePostKey, normalizePostKey } from "@/lib/constants/ads-identity";
+import { postKeySql, usableAdIdSql, usablePostKeySql } from "@/lib/queries/ads-identity-sql";
 
 /**
  * DANH TÍNH QUẢNG CÁO — KIỂM BẰNG ĐỊNH DẠNG PRODUCTION THẬT.
@@ -53,12 +54,35 @@ export async function testAdsIdentity(db: Db) {
     assert.ok(!isUsablePostKey(normalizePostKey(bad)), `mã hỏng "${bad}" KHÔNG được coi là dùng được`);
   }
 
-  // ───────── 7. SQL và TypeScript phải chuẩn hoá GIỐNG HỆT NHAU ─────────
-  // Hai bản trôi khỏi nhau thì không bao giờ báo lỗi — nó chỉ trả về ít kết quả hơn sự thật.
-  const mau = [THAT.donPostDayDu, THAT.postRieng, THAT.qcStory, "abc_def", "1092821970588849_"];
+  /**
+   * ───────── 7. SQL và TypeScript phải chuẩn hoá GIỐNG HỆT NHAU ─────────
+   *
+   * Hai bản trôi khỏi nhau thì không bao giờ báo lỗi — chỉ trả về ít kết quả hơn sự thật, và quy kết
+   * quảng cáo quyết định doanh thu ghi cho marketer nào, tức hoa hồng của người thật.
+   *
+   * Bản trước của bài kiểm này tự gõ lại `regexp_replace(...)` NGAY TRONG BÀI KIỂM — nên nó chứng
+   * minh "regex tôi vừa gõ khớp hàm TypeScript", chứ không chứng minh "biểu thức mà truy vấn thật
+   * đang dùng khớp hàm TypeScript". Truy vấn đổi mà bài kiểm vẫn xanh.
+   *
+   * Nay gọi ĐÚNG hàm mà `ads-attribution-link.ts` và `ads-attribution-coverage.ts` đang dùng.
+   */
+  const mau = [THAT.donPostDayDu, THAT.postRieng, THAT.qcStory, THAT.qcPost, "abc_def", "1092821970588849_", "123"];
   for (const raw of mau) {
-    const [row] = await db.select({ key: sql<string>`regexp_replace(${raw}, '^.*_', '')` }).from(sql`(select 1) as t`);
-    assert.equal(row.key, normalizePostKey(raw) ?? "", `SQL và TypeScript phải cho cùng kết quả với "${raw}"`);
+    const [row] = await db
+      .select({ key: postKeySql(sql`${raw}`), dungDuoc: usablePostKeySql(sql`${raw}`) })
+      .from(sql`(select 1) as t`);
+    assert.equal(row.key, normalizePostKey(raw) ?? "", `SQL và TypeScript phải cho cùng KHOÁ với "${raw}"`);
+    assert.equal(
+      Boolean(row.dungDuoc),
+      isUsablePostKey(normalizePostKey(raw)),
+      `SQL và TypeScript phải cùng kết luận khoá "${raw}" có DÙNG ĐƯỢC hay không`,
+    );
+  }
+
+  // Mã mẩu quảng cáo cũng có hai bản, cùng lý do.
+  for (const raw of [THAT.adId, "abc", "123", ""]) {
+    const [row] = await db.select({ dungDuoc: usableAdIdSql(sql`${raw}`) }).from(sql`(select 1) as t`);
+    assert.equal(Boolean(row.dungDuoc), isUsableAdId(raw), `SQL và TypeScript phải cùng kết luận mã QC "${raw}"`);
   }
 
   // ───────── 8. Cùng một bài ở hai kỳ khác nhau vẫn là một bài ─────────
