@@ -11,7 +11,38 @@ import "dotenv/config";
 import { resolvePeriod } from "@/lib/search-params";
 import { clearMemo } from "@/lib/cache";
 
-const results: { page: string; fn: string; ms: number; note: string }[] = [];
+/**
+ * ĐẾM THỜI GIAN CSDL RIÊNG VỚI THỜI GIAN ỨNG DỤNG.
+ *
+ * Đo được: đọc toàn bộ 2.431 dòng từ bảng đã tính sẵn chỉ mất 33–48ms (EXPLAIN ANALYZE, nhánh dự
+ * phòng ghi rõ "never executed"). Nhưng hàm báo cáo vẫn mất 5–14 giây. Nghĩa là phần lớn thời gian
+ * KHÔNG nằm ở việc chạy câu lệnh — và nếu không tách ra thì còn đoán mãi.
+ *
+ * Bọc thẳng `Pool.query` của `pg`: mọi câu lệnh đều đi qua đó, không sót đường nào.
+ */
+let dbMs = 0;
+let dbCalls = 0;
+let planMs = 0;
+{
+  const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
+  const original = pg.Pool.prototype.query;
+  pg.Pool.prototype.query = function patched(...args: unknown[]) {
+    const t0 = Date.now();
+    const out = original.apply(this, args as never) as Promise<unknown>;
+    if (out && typeof (out as Promise<unknown>).then === "function") {
+      return (out as Promise<unknown>).finally(() => {
+        dbMs += Date.now() - t0;
+        dbCalls += 1;
+      });
+    }
+    dbMs += Date.now() - t0;
+    dbCalls += 1;
+    return out;
+  };
+  void planMs;
+}
+
+const results: { page: string; fn: string; ms: number; dbMs: number; calls: number; note: string }[] = [];
 
 /**
  * XOÁ ĐỆM TRƯỚC MỖI PHÉP ĐO.
@@ -21,14 +52,16 @@ const results: { page: string; fn: string; ms: number; note: string }[] = [];
  */
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
+  const dbBefore = dbMs;
+  const callsBefore = dbCalls;
   const t0 = Date.now();
   try {
     const out = await run();
     const ms = Date.now() - t0;
     const size = out === undefined ? 0 : JSON.stringify(out).length;
-    results.push({ page, fn, ms, note: `${Math.round(size / 1024)}kB` });
+    results.push({ page, fn, ms, dbMs: dbMs - dbBefore, calls: dbCalls - callsBefore, note: `${Math.round(size / 1024)}kB` });
   } catch (error) {
-    results.push({ page, fn, ms: Date.now() - t0, note: `LỖI: ${error instanceof Error ? error.message : String(error)}` });
+    results.push({ page, fn, ms: Date.now() - t0, dbMs: dbMs - dbBefore, calls: dbCalls - callsBefore, note: `LỖI: ${error instanceof Error ? error.message : String(error)}` });
   }
 }
 
