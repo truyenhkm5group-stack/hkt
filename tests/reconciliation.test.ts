@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AUTO_REPAIRABLE_RULES, RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER } from "@/lib/constants/reconciliation";
 import { checkShipmentConsistency, repairReconciliation, scanReconciliation } from "@/lib/sync/consistency";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
 import { clearMemo } from "@/lib/cache";
 
@@ -210,48 +211,53 @@ export async function testReconciliation(db: Db) {
     `✓ Trung tâm điều khiển: ${tower.firing}/${tower.ruleCount} luật đang có vi phạm · ${tower.totals.ERROR} nghiêm trọng · số trên thẻ khớp danh sách mở ra`,
   );
 
-  // ───────── ĐƠN KHÔNG THỂ CÓ HAI VẬN ĐƠN — CSDL CƯỠNG CHẾ ─────────
+  // ───────── MỘT ĐƠN CÓ THỂ CÓ NHIỀU LẦN GỬI, VÀ TIỀN VẪN ĐẾM MỘT LẦN ─────────
   //
-  // Gần như MỌI báo cáo đều `orders left join shipments` rồi tính trên từng dòng, nên một đơn hai
-  // vận đơn sẽ bị đếm hai lần: doanh thu cộng đôi, số đơn cộng đôi, tỷ lệ giao thành công lệch.
+  // Trước 10/09/2026 ràng buộc `shipments_order_id_unique` chặn cứng lần gửi thứ hai. Cái giá không
+  // nhìn thấy: đường đồng bộ GHI ĐÈ lên lần gửi đầu khi Pancake báo mã vận đơn mới — lần đầu biến
+  // mất khỏi sổ, không cảnh báo.
   //
-  // Điều tra 09/09/2026 tìm ra thứ đang bảo vệ mọi con số đó: ràng buộc `shipments_order_id_unique`
-  // có từ migration 0000. Nó nằm trong SQL nhưng KHÔNG được khai trong `db/schema.ts` suốt thời gian
-  // qua — ai đọc mã đều tưởng nhiều vận đơn một đơn là hợp lệ. Nay đã khai, và khoá lại ở đây.
-  //
-  // Bài kiểm thử này chứng minh sự bảo vệ là THẬT, chứ không phải "hiện chưa có ca nào".
+  // Nay ràng buộc đã gỡ. Nghĩa vụ đi kèm: mọi đường tính TIỀN phải ở grain ĐƠN, nếu không ngay lần
+  // gửi lại đầu tiên doanh thu bị đếm hai lần trong im lặng.
   const [donGoc] = await db.select({ id: schema.orders.id }).from(schema.orders).limit(1);
   if (donGoc) {
-    const daCo = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, donGoc.id));
-    let biTuChoi = false;
-    try {
-      await db.insert(schema.shipments).values({ id: "grain-vd-2", orderId: donGoc.id, vtpOrderNumber: "GRAIN002", stage: "IN_TRANSIT" });
-    } catch {
-      biTuChoi = true;
-    }
-    if (daCo.length) {
-      assert.ok(biTuChoi, "CSDL PHẢI từ chối vận đơn thứ hai của cùng một đơn — đây là thứ giữ cho doanh thu không bị cộng đôi");
-    } else {
-      // Đơn chưa có vận đơn: dòng đầu vào được, dòng thứ hai phải bị từ chối.
-      assert.ok(!biTuChoi, "đơn chưa có vận đơn thì dòng đầu tiên phải vào được");
-      let lanHai = false;
-      try {
-        await db.insert(schema.shipments).values({ id: "grain-vd-3", orderId: donGoc.id, vtpOrderNumber: "GRAIN003", stage: "IN_TRANSIT" });
-      } catch {
-        lanHai = true;
-      }
-      assert.ok(lanHai, "CSDL PHẢI từ chối vận đơn thứ hai của cùng một đơn");
-      await db.delete(schema.shipments).where(inArray(schema.shipments.id, ["grain-vd-2", "grain-vd-3"]));
-    }
+    await db
+      .insert(schema.shipments)
+      .values([
+        { id: "grain-vd-1", orderId: donGoc.id, vtpOrderNumber: "GRAIN001", stage: "CANCELLED", attemptNo: 90, direction: "OUTBOUND" },
+        { id: "grain-vd-2", orderId: donGoc.id, vtpOrderNumber: "GRAIN002", stage: "DELIVERED", attemptNo: 91, direction: "OUTBOUND" },
+      ])
+      .onConflictDoNothing();
+
+    const lanGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, donGoc.id));
+    assert.ok(lanGui.length >= 2, "CASE E: CSDL phải CHẤP NHẬN lần gửi thứ hai của cùng một đơn");
+
+    // CASE A: lần 1 huỷ, lần 2 giao thành công ⇒ đơn được đếm ĐÚNG MỘT LẦN, và lần quyết định là
+    // lần tới tay khách.
+    const [{ n: soDong }] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.orders)
+      .leftJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}`)
+      .where(sql`${schema.orders.id} = ${donGoc.id}`);
+    assert.equal(Number(soDong), 1, "CASE A: đơn có hai lần gửi vẫn chỉ ra MỘT dòng ở đường tính tiền — không nhân đôi doanh thu");
+
+    const [chon] = await db
+      .select({ id: schema.shipments.id })
+      .from(schema.orders)
+      .innerJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}`)
+      .where(sql`${schema.orders.id} = ${donGoc.id}`);
+    assert.equal(chon.id, "grain-vd-2", "lần gửi TỚI TAY KHÁCH phải là lần quyết định, không phải lần huỷ");
+
+    await db.delete(schema.shipments).where(inArray(schema.shipments.id, ["grain-vd-1", "grain-vd-2"]));
     clearMemo();
   }
 
-  // Luật đối soát vẫn tồn tại như CHUÔNG BÁO nếu một ngày ràng buộc kia bị gỡ: nó luôn đếm 0 khi
-  // ràng buộc còn nguyên, và bật ngay khi có ca đầu tiên.
+  // Luật đối soát nay là CHUÔNG BÁO cho trường hợp đáng ngờ: đơn có nhiều lần gửi là hợp lệ về mô
+  // hình, nhưng vẫn đáng nhìn — nó có thể là gửi lại thật, cũng có thể là ghép nhầm vận đơn.
   clearMemo();
   const thap = await getControlTower();
   const luatNhieuVanDon = thap.issues.find((i) => i.rule === "ORDER_WITH_MULTIPLE_SHIPMENTS");
-  assert.equal(luatNhieuVanDon, undefined, "ràng buộc CSDL còn nguyên thì luật này phải im — bật lên nghĩa là hàng rào đã bị gỡ");
+  assert.equal(luatNhieuVanDon, undefined, "dọn xong các lần gửi thử thì luật này phải im trở lại");
 
   console.log(
     `✓ Đối soát: ${a.issues.length} luật có vi phạm (${a.totals.ERROR} nghiêm trọng · ${a.totals.WARNING} cảnh báo) · chỉ ${AUTO_REPAIRABLE_RULES.length} luật được tự sửa · tiền KHÔNG bao giờ tạo ra "đã giao"`,

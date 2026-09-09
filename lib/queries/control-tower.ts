@@ -73,12 +73,24 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         join orders o on o.id = m.order_id
         where m.cogs_basis = 'RECEIPT_AFTER'`;
     case "ORDER_WITH_MULTIPLE_SHIPMENTS":
-      // Đếm theo ĐƠN, không theo vận đơn: một đơn ba vận đơn là MỘT vấn đề, không phải ba.
+      /**
+       * NHIỀU LẦN GỬI KHÔNG TỰ ĐỘNG LÀ LỖI.
+       *
+       * Từ 10/09/2026 một đơn được phép có nhiều lần gửi: giao thất bại rồi gửi lại, huỷ rồi tạo
+       * lại, gửi hàng thay thế. Báo đỏ mọi ca như vậy là dạy người dùng bỏ qua cảnh báo.
+       *
+       * Chỉ báo trường hợp thật sự đáng ngờ: **hai lần gửi CÙNG ĐANG SỐNG** — tức đơn đang được gửi
+       * hai lần cùng lúc. Đó hoặc là ghép nhầm vận đơn, hoặc là hai gói hàng thật đang trên đường
+       * tới cùng một khách, và cả hai đều tốn tiền.
+       *
+       * Đếm theo ĐƠN: một đơn ba lần gửi là MỘT vấn đề, không phải ba.
+       */
       return sql`select coalesce(o.system_id::text, o.id) as code,
-          count(s.id)::text || ' vận đơn cùng gắn vào một đơn' as evidence,
+          count(s.id)::text || ' lần gửi đang cùng chạy cho một đơn' as evidence,
           max(s.updated_at) as at, o.id as entity_id
         from orders o
         join shipments s on s.order_id = o.id
+        where s.stage not in ('CANCELLED','RETURNED','DELIVERED')
         group by o.id, o.system_id
         having count(s.id) > 1`;
     case "SHIPMENT_STATE_DRIFT":

@@ -1,6 +1,6 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -76,7 +76,7 @@ export function variantSalesSubquery(db: Db) {
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .groupBy(oi.variantId)
     .as("vsales");
 }

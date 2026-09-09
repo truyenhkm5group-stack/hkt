@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
 import { ORDER_COGS } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME_FAST, OUTCOME_FENCE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
 
@@ -143,7 +143,8 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(schema.fbAds, eq(schema.fbAds.id, o.adId))
     .where(and(scope, HAS_AD))
     .offset(OUTCOME_FENCE)
@@ -271,7 +272,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       ordersWithUnknownAd: sql<number>`count(*) filter (where ${HAS_AD} and not exists (select 1 from fb_ads fa where fa.id = ${o.adId}))`,
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(scope);
 
   const totals = rows.reduce(

@@ -4,7 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
-import { OUTCOME_FENCE, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
 import { availableStockExpr, variantLastCostSubquery, variantReceiptsSubquery, variantSalesSubquery, stockKnownExpr } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 
@@ -136,7 +136,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(pv, eq(pv.id, i.variantId))
     .leftJoin(sales, eq(sales.variantId, i.variantId))
     .leftJoin(receipts, eq(receipts.variantId, i.variantId))

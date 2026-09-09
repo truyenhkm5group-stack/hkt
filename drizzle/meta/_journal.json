@@ -344,6 +344,13 @@
       "when": 1788945583898,
       "tag": "0049_recognized_cogs",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1788945584898,
+      "tag": "0050_shipment_attempts",
+      "breakpoints": true
     }
   ]
 }

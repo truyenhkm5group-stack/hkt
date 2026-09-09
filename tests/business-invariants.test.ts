@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, isFinishedOutcome, LOGISTICS_DECIDING_SOURCES, LOGISTICS_EVIDENCE_AUTHORITY, OUTCOME_GROUP, SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
@@ -382,26 +383,32 @@ export async function testBusinessInvariants(db: Db) {
   assert.equal(lanGui1.stage, "CANCELLED", "17. lần gửi bị huỷ giữ nguyên kết cục của nó");
   assert.equal(lanGui2.stage, "DELIVERED", "17. lần gửi thay thế giữ nguyên kết cục của nó");
   /**
-   * CÁCH ERP HIỆN ĐANG BIỂU DIỄN NHIỀU LẦN GỬI — và vì sao nó chưa phải 1:N thật.
+   * MỘT ĐƠN, NHIỀU LẦN GỬI — và tiền vẫn chỉ đếm một lần.
    *
-   * `shipments.order_id` đang mang ràng buộc UNIQUE, nên MỘT đơn chỉ gắn được MỘT vận đơn. Các lần
-   * gửi còn lại tồn tại như dòng riêng với `order_id` NULL và `order_reference` trỏ về vận đơn gốc
-   * — đúng quy ước vận đơn chiều hoàn đang dùng cho 250 dòng trên production.
+   * Từ 10/09/2026 `shipments.order_id` KHÔNG còn UNIQUE, nên giao thất bại rồi gửi lại, huỷ rồi tạo
+   * lại, hay gửi hàng thay thế đều được lưu thành lần gửi riêng thay vì ghi đè lên lần trước.
    *
-   * CỐ Ý CHƯA gỡ ràng buộc đó: mọi báo cáo đang tính ở grain "đơn × vận đơn", cho một đơn gắn N
-   * vận đơn mà chưa đổi grain là NHÂN ĐÔI DOANH THU — hỏng nặng hơn nhiều so với việc thiếu một
-   * quan hệ. Đổi grain là việc riêng, có phạm vi riêng (xem docs/claude-next-progress.md).
-   *
-   * Điều bất biến này khoá: lần gửi sau KHÔNG được nuốt lần gửi trước, và lịch sử mỗi lần vẫn nguyên.
+   * Nghĩa vụ đi kèm — và là điều bất biến này khoá: mọi đường tính TIỀN phải ở grain ĐƠN. Nếu không,
+   * ngay lần gửi lại đầu tiên doanh thu và số đơn bị đếm HAI LẦN, trong im lặng. Xem `PRIMARY_ATTEMPT`
+   * trong lib/queries/return-rate.ts.
    */
   const multiOrder = `inv-order-${++seq}`;
   await db.insert(schema.orders).values({ id: multiOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
-  await db.update(schema.shipments).set({ orderId: multiOrder }).where(eq(schema.shipments.id, lanGui2.id));
+  await db.update(schema.shipments).set({ orderId: multiOrder, attemptNo: 2, direction: "OUTBOUND" }).where(eq(schema.shipments.id, lanGui2.id));
   await db.update(schema.shipments).set({ orderReference: multiCode2 }).where(eq(schema.shipments.id, lanGui1.id));
-  await assert.rejects(
-    () => db.update(schema.shipments).set({ orderId: multiOrder }).where(eq(schema.shipments.id, lanGui1.id)),
-    "17. schema hiện ép 1:1 — nếu ràng buộc này được gỡ thì PHẢI đổi grain báo cáo cùng lúc, nếu không doanh thu nhân đôi",
-  );
+  // CASE E: cùng một đơn nhận được lần gửi thứ hai — CSDL phải CHẤP NHẬN.
+  await db.update(schema.shipments).set({ orderId: multiOrder, attemptNo: 1, direction: "OUTBOUND" }).where(eq(schema.shipments.id, lanGui1.id));
+  const soLanGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, multiOrder));
+  assert.equal(soLanGui.length, 2, "17. CASE E: một đơn phải giữ được CẢ HAI lần gửi — lần sau không nuốt lần trước");
+
+  // ĐƯỜNG TÍNH TIỀN vẫn phải thấy ĐÚNG MỘT dòng cho đơn đó. Đây là nửa còn lại của việc mở 1:N:
+  // mô hình cho phép nhiều lần gửi, và tiền vẫn đếm một lần.
+  const [{ n: dongTinhTien }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.orders)
+    .leftJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}`)
+    .where(eq(schema.orders.id, multiOrder));
+  assert.equal(Number(dongTinhTien), 1, "17. đơn hai lần gửi vẫn chỉ ra MỘT dòng ở đường tính tiền — không nhân đôi doanh thu");
   const canGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderReference, multiCode2));
   assert.equal(canGui.length, 1, "17. lần gửi trước vẫn còn nguyên như dòng riêng, không bị xoá");
   // Lịch sử của từng lần gửi vẫn nguyên vẹn, không lần nào nuốt sự kiện của lần kia.

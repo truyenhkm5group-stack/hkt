@@ -292,6 +292,32 @@ export const OUTCOME_FENCE = sql`0` as unknown as number;
  *
  * `logic_version` là chốt an toàn cuối — sửa luật mà quên dựng lại thì hệ thống TỰ quay về luật mới.
  */
+/**
+ * ───────────── LẦN GỬI QUYẾT ĐỊNH KẾT QUẢ CỦA ĐƠN ─────────────
+ *
+ * Từ 10/09/2026 một đơn có thể có NHIỀU lần gửi (giao thất bại rồi gửi lại, huỷ rồi tạo lại, gửi
+ * hàng thay thế). Mọi báo cáo TIỀN đều `orders left join shipments` rồi cộng trên từng dòng — nên
+ * ngay lần gửi lại đầu tiên, doanh thu và số đơn của đơn đó bị đếm HAI LẦN, trong im lặng.
+ *
+ * Điều kiện nối này bảo đảm **mỗi đơn đúng một dòng**: chọn lần gửi quyết định.
+ *
+ * Thứ tự chọn, và lý do:
+ *  1. **Lần gửi tới tay khách thắng.** Khách đã nhận được hàng ở lần nào thì đơn đó là giao thành
+ *     công — lần huỷ trước đó không xoá được sự thật ấy.
+ *  2. Chưa lần nào tới tay khách thì lấy **lần gửi mới nhất**: đó là tình trạng hiện thời của đơn.
+ *  3. Cuối cùng chốt bằng `id` để kết quả ổn định giữa hai lần chạy — số liệu không được đổi chỉ vì
+ *     Postgres trả dòng theo thứ tự khác.
+ *
+ * Với dữ liệu hôm nay (mỗi đơn một vận đơn) điều kiện này chọn đúng dòng duy nhất, nên KHÔNG con số
+ * nào đổi.
+ */
+export const PRIMARY_ATTEMPT = sql`${s.id} = (
+  select sh.id from shipments sh
+  where sh.order_id = ${o.id}
+  order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+  limit 1
+)`;
+
 export const ORDER_OUTCOME_FAST = sql`coalesce(
   (select m.outcome from canonical_order_outcome m
     where m.order_id = ${o.id}
@@ -502,7 +528,8 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(baseWhere(query.period, query.q))
     .offset(OUTCOME_FENCE)
     .as("variant_base");
@@ -657,7 +684,8 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
       outcome: outcomeColumn(),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(conds.length ? and(...conds) : undefined)
     .offset(OUTCOME_FENCE)
     .as("gtc_base");
@@ -749,7 +777,8 @@ export async function listOrdersForVariant(key: string, period: Period): Promise
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(and(...conds))
     .groupBy(o.id, s.id)
     .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
@@ -838,7 +867,8 @@ export async function getReturnRateBySource(period: Period, q: string): Promise<
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(conds.length ? and(...conds) : undefined)
     .groupBy(ORDER_SOURCE);
 

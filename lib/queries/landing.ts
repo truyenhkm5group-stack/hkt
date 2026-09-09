@@ -4,7 +4,7 @@ import type { RiskAssessment } from "@/lib/alerts/risk";
 import { memo, periodKey } from "@/lib/cache";
 import { pushBlockOf, type DuplicateHit, type LandingStatus, type PushBlock } from "@/lib/constants/landing";
 import type { OrderOutcome } from "@/lib/constants/returns";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const l = schema.landingOrders;
@@ -181,7 +181,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
     })
     .from(l)
     .leftJoin(o, eq(o.id, l.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(pv, eq(pv.id, l.variantId))
     .leftJoin(p, eq(p.id, pv.productId))
     .where(and(...conds(f)))
@@ -224,7 +224,7 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
       .select({ oc: sql<string>`case when ${l.orderId} is null then 'NONE' else ${ORDER_OUTCOME} end`, n: sql<number>`count(*)` })
       .from(l)
       .leftJoin(o, eq(o.id, l.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(where)
       .groupBy(sql`1`);
     const byStatus: Record<LandingStatus, number> = { NEW: 0, CONFIRMED: 0, PUSHED: 0, CANCELLED: 0 };

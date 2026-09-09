@@ -4,7 +4,7 @@ import { adsRatio } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
-import { failedToReturnRate, ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT, failedToReturnRate } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -62,7 +62,7 @@ export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
         returnFeeSample: sql<number>`count(*) filter (where ${IS_RETURNED} and ${o.returnFee} > 0)`,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(gte(o.insertedAt, since));
     const d = Math.round(Number(row?.delivered ?? 0));
     returnFeeFromData = Math.round(Number(row?.returnFee ?? 0));
@@ -121,7 +121,7 @@ export async function productReturnHistory(windowDays: number): Promise<Map<stri
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(pv, eq(pv.id, i.variantId))
     .where(and(gte(o.insertedAt, since), eq(i.isBonus, false)))
     .groupBy(sql`1`);
@@ -373,7 +373,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       // chỉ tính đơn đã xác nhận trên Pancake (bỏ đơn mới / chờ xác nhận / huỷ)
@@ -670,7 +670,7 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
       })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .where(and(eq(i.isBonus, false), sql`coalesce(${pv.productId}, ${i.productId}) = ${productId}`, ...periodCond(period.from, period.to)))
       .groupBy(sql`1`)

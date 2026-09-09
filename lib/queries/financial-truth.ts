@@ -5,7 +5,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { ORDER_COGS } from "@/lib/queries/cogs";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { metricScope } from "@/lib/queries/metrics";
-import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -168,7 +168,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn có nhiều lần gửi không được đếm nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(scope)
     .offset(OUTCOME_FENCE)
     .as("truth_facts");

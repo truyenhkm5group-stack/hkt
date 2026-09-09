@@ -883,21 +883,31 @@ export const shipments = pgTable(
   "shipments",
   {
     id: id(),
-    orderId: text("order_id")
-      /**
-       * MỘT ĐƠN CHỈ ĐƯỢC CÓ MỘT VẬN ĐƠN — ràng buộc này do CSDL cưỡng chế từ migration 0000.
-       *
-       * Nó vô hình trong mã suốt thời gian qua (chỉ có trong SQL, không khai ở đây) nhưng đang gánh
-       * một vai trò lớn: gần như MỌI báo cáo đều `orders left join shipments` rồi tính trên từng
-       * dòng, nên nếu một đơn có hai vận đơn thì doanh thu và số đơn của nó bị cộng HAI LẦN. Ràng
-       * buộc này khiến chuyện đó không xảy ra được — không phải nhờ may mắn hay nhờ quy ước.
-       *
-       * Hệ quả cần biết: gửi lại một đơn bằng vận đơn MỚI sẽ bị CSDL từ chối. Đó là một giới hạn
-       * vận hành thật, và là quyết định nghiệp vụ — không được nới ra chỉ để cho qua một ca lẻ, vì
-       * nới ra là mở đường cho số liệu tiền bị nhân đôi trong im lặng.
-       */
-      .unique()
-      .references(() => orders.id, { onDelete: "cascade" }),
+    /**
+     * MỘT ĐƠN CÓ THỂ CÓ NHIỀU LẦN GỬI.
+     *
+     * Trước 10/09/2026 cột này mang ràng buộc `UNIQUE` từ migration 0000, ép một đơn chỉ có một vận
+     * đơn. Cái giá không nhìn thấy: khi Pancake báo một mã vận đơn MỚI cho đơn đã có vận đơn, đường
+     * đồng bộ **ghi đè lên dòng cũ** — lần gửi đầu tiên biến mất khỏi sổ, không cảnh báo. Giao thất
+     * bại rồi gửi lại, huỷ rồi tạo lại, gửi hàng thay thế: cả ba đều mất dấu.
+     *
+     * Bỏ ràng buộc đó đi kèm một nghĩa vụ: **mọi đường tính TIỀN phải chuyển sang grain ĐƠN**. Báo
+     * cáo nối đơn với vận đơn rồi cộng trên từng dòng sẽ đếm đơn hai lần ngay lần gửi lại đầu tiên —
+     * và đếm sai trong im lặng. Hai việc đó cố ý đi cùng một lần phát hành.
+     */
+    orderId: text("order_id").references(() => orders.id, { onDelete: "cascade" }),
+    /** Lần gửi thứ mấy của đơn. 1 = lần đầu. Vận đơn không gắn đơn để `NULL`. */
+    attemptNo: integer("attempt_no"),
+    /**
+     * CHIỀU của lần gửi:
+     *  · `OUTBOUND`    — gửi tới khách;
+     *  · `RETURN`      — chiều hoàn về shop;
+     *  · `REPLACEMENT` — gửi hàng thay thế sau đổi/lỗi.
+     *
+     * Chiều KHÔNG được suy từ trạng thái: "phát thành công" của chiều hoàn nghĩa là hàng về tới
+     * shop, không phải tới tay khách. Nhầm chỗ này là thổi tỷ lệ giao thành công.
+     */
+    direction: text("direction"),
     carrier: text("carrier").notNull().default(""),
     partnerId: integer("partner_id"),
     trackingCode: text("tracking_code"),
@@ -1587,7 +1597,13 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   warehouse: one(warehouses, { fields: [orders.warehouseId], references: [warehouses.id] }),
   items: many(orderItems),
   statusHistory: many(orderStatusHistory),
+  /**
+   * GIỮ quan hệ một-vận-đơn cho các đường đã có (nó lấy MỘT dòng bất kỳ), nhưng từ 10/09/2026 một
+   * đơn có thể có NHIỀU lần gửi — dùng `attempts` khi cần đủ.
+   */
   shipment: one(shipments, { fields: [orders.id], references: [shipments.orderId] }),
+  /** Mọi lần gửi của đơn, gồm cả lần đã huỷ và lần gửi lại. */
+  attempts: many(shipments),
   returns: many(orderReturns),
 }));
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({

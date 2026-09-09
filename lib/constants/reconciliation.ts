@@ -112,12 +112,12 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
   ORDER_WITH_MULTIPLE_SHIPMENTS: {
     key: "ORDER_WITH_MULTIPLE_SHIPMENTS",
     entity: "order",
-    severity: "ERROR",
-    label: "Một đơn có nhiều vận đơn — báo cáo sẽ đếm hai lần",
+    severity: "WARNING",
+    label: "Một đơn đang có hai lần gửi cùng chạy",
     reason:
-      "Báo cáo nối đơn với vận đơn rồi tính trên từng dòng, nên đơn có hai vận đơn bị đếm hai lần: doanh thu cộng đôi, số đơn cộng đôi, tỷ lệ giao thành công lệch. Vận đơn chiều hoàn KHÔNG gây ra chuyện này (nó mang `order_id` rỗng theo thiết kế) — nên một ca ở đây nghĩa là có vận đơn thứ hai được gắn thật vào đơn.",
+      "Gửi lại sau khi giao thất bại là bình thường và ERP lưu đủ mọi lần gửi. Nhưng ở đây có HAI lần gửi cùng đang sống — chưa lần nào huỷ, hoàn hay giao xong. Hoặc là ghép nhầm vận đơn vào đơn, hoặc là hai gói hàng thật đang cùng đi tới một khách, và cả hai đều tốn cước.",
     suggestedAction:
-      "Mở đơn, xác định vận đơn nào là thật. Nếu shop gửi lại đơn bằng vận đơn mới thì phải quyết định đếm thế nào TRƯỚC khi số liệu kỳ này được chốt — đây là quyết định nghiệp vụ, ERP cố ý không tự chọn.",
+      "Mở đơn, xem hai mã vận đơn. Ghép nhầm thì gỡ khỏi đơn. Gửi trùng thật thì gọi Viettel Post thu hồi một gói trước khi cả hai tới nơi.",
     // KHÔNG tự sửa: máy không biết vận đơn nào là thật, và đoán sai là xoá mất một lần gửi hàng có
     // thật khỏi sổ.
     autoRepair: false,

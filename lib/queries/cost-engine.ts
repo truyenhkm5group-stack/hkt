@@ -33,7 +33,7 @@ import { COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
 import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond } from "@/lib/queries/cost-allocation";
 import { ORDER_COGS } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const e = schema.expenses;
@@ -122,7 +122,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     db
       .select({ amount: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)` })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(and(...periodConds(o.insertedAt, period.from, period.to))),
     db
       .select({
@@ -130,7 +130,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
         returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(and(...periodConds(o.insertedAt, period.from, period.to))),
   ]);
 

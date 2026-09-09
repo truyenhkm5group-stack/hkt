@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { ORDER_COGS, orderCogsColumn } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, OUTCOME_FENCE, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -145,7 +145,8 @@ export function orderMetricFacts(db: Db, where: SQL | undefined) {
       outcome: outcomeColumn(),
     })
     .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT trong return-rate.ts).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
     .where(where)
     .offset(OUTCOME_FENCE)
     .as("metric_facts");

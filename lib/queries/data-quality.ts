@@ -5,16 +5,7 @@ import type { DqIssue, VerifiedOutcome } from "@/lib/constants/data-quality";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
 import { ORDER_COGS } from "@/lib/queries/cogs";
-import {
-  HAS_CASH_PROOF,
-  IS_PANCAKE_DECLARED_ONLY,
-  IS_RETURN_NOT_RECEIVED,
-  IS_STATUS_CONFLICT,
-  IS_VTP_LOW_CASH,
-  ORDER_OUTCOME,
-  ORDER_OUTCOME_VERIFIED,
-  VERIFIED_CASH,
-} from "@/lib/queries/return-rate";
+import { HAS_CASH_PROOF, IS_PANCAKE_DECLARED_ONLY, IS_RETURN_NOT_RECEIVED, IS_STATUS_CONFLICT, IS_VTP_LOW_CASH, ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, PRIMARY_ATTEMPT, VERIFIED_CASH } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const o = schema.orders;
@@ -83,7 +74,7 @@ export async function dataQualitySummary(period: Period) {
         marketingRiskRevenue: sql<number>`coalesce(sum(${DECLARED_REVENUE}) filter (where ${L} = 'DELIVERED' and ${V} <> 'DELIVERED'), 0)`,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(scope);
 
     // Vận đơn chưa ghép được với đơn ERP (nằm ngoài không gian bảng orders).
@@ -230,12 +221,12 @@ export async function dataQualityOrders(issue: DqIssue, period: Period, page: nu
         returnReceivedAt: s.returnReceivedAt,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(where)
       .orderBy(desc(o.insertedAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ n: sql<number>`count(*)` }).from(o).leftJoin(s, eq(s.orderId, o.id)).where(where),
+    db.select({ n: sql<number>`count(*)` }).from(o).leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT)).where(where),
   ]);
   return { rows: rows as DqOrderRow[], total: num(total?.n) };
 }
