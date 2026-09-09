@@ -27,17 +27,33 @@ export async function testAdsAnomaly(db: Db) {
 
   const anomalies = await detectAdsAnomalies();
 
-  // ───────── Tiêu 3 triệu, không đơn nào: PHẢI kêu, và kêu ở mức kinh doanh ─────────
-  // Đây là loại thất thoát dễ bị bỏ sót nhất vì nó không làm chỉ số nào xấu đi — nó chỉ biến mất.
+  // ───────── ĐỘ PHỦ QUY KẾT THẤP ⇒ KHÔNG ĐƯỢC KẾT LUẬN LỖ/LÃI ─────────
+  // Fixture chỉ có ~2,5% đơn mang mã quảng cáo. Chiến dịch vừa dựng tiêu 3 triệu và không có đơn
+  // nào gắn vào — nhưng ở độ phủ này KHÔNG kết luận được là nó lỗ, vì doanh thu do nó mang lại có
+  // thể đang nằm ở những đơn không quy kết được.
   const losing = anomalies.find((x) => x.kind === "CAMPAIGN_LOSING_MONEY" && x.campaignName === marker);
-  assert.ok(losing, "chiến dịch tiêu 3 triệu mà không đơn nào PHẢI sinh cảnh báo");
-  assert.equal(losing.severity, "critical", "mất trắng tiền quảng cáo là nghiêm trọng");
-  assert.equal(losing.profitability, true, "dừng một chiến dịch lỗ là quyết định kinh doanh, không phải việc trực quảng cáo");
-  assert.ok(losing.detail.includes("Lợi nhuận góp"), "phải nói rõ con số nào dẫn tới kết luận");
-  assert.equal(losing.amount, 3_000_000, "số tiền liên quan phải đúng bằng phần đã mất");
+  assert.equal(losing, undefined, "độ phủ quy kết thấp thì KHÔNG được kết luận chiến dịch đang lỗ");
 
-  const lowRoas = anomalies.find((x) => x.kind === "LOW_DELIVERED_ROAS" && x.campaignName === marker);
-  assert.ok(lowRoas, "ROAS giao thành công bằng 0 phải bị bắt");
+  // ───────── ĐỘ PHỦ QUY KẾT THẤP ⇒ KHÔNG ĐƯỢC KẾT LUẬN LỖ/LÃI ─────────
+  // Phát hiện trên production: chi tiêu đếm ĐỦ 100%, doanh thu chỉ quy được cho đơn CÓ mã quảng cáo
+  // (~46%). Lấy chi tiêu đủ trừ doanh thu thiếu rồi kết luận "đang lỗ" là so hai vế không cùng gốc,
+  // và nó báo lỗ cho gần như MỌI chiến dịch — 26 cảnh báo trong một lần quét.
+  //
+  // Câu trả lời trung thực ở độ phủ thấp không phải "đang lỗ" mà là "CHƯA KẾT LUẬN ĐƯỢC".
+  assert.ok(
+    ADS_ANOMALY_RULES.minAttributionToJudgeProfit > ADS_ANOMALY_RULES.minAttributionPct,
+    "ngưỡng dám kết luận lợi nhuận phải cao hơn hẳn ngưỡng 'quy kết hỏng'",
+  );
+  const attributionLost = anomalies.find((x) => x.kind === "ATTRIBUTION_LOST");
+  const profitAlerts = anomalies.filter((x) => x.profitability);
+  if (attributionLost) {
+    assert.equal(profitAlerts.length, 0, "độ phủ chưa đủ thì KHÔNG được phát bất kỳ cảnh báo lợi nhuận nào");
+    assert.ok(attributionLost.detail.includes("KHÔNG kết luận"), "phải nói thẳng là chưa kết luận được, không im lặng bỏ qua");
+  }
+  // Cảnh báo SO KỲ vẫn dùng được ở độ phủ thấp, vì cả hai kỳ cùng thiếu như nhau.
+  for (const k of ["SPEND_SURGE_NO_REVENUE", "SUCCESS_RATE_DROP", "SPEND_SYNC_STALE"] as const) {
+    assert.equal(isProfitabilityAnomaly(k), false, `${k}: so kỳ với kỳ thì không phụ thuộc độ phủ`);
+  }
 
   for (const an of anomalies) {
     assert.ok(ADS_ANOMALY_LABEL[an.kind], `${an.kind}: thiếu nhãn tiếng Việt`);
@@ -70,5 +86,7 @@ export async function testAdsAnomaly(db: Db) {
   const afterCleanup = await detectAdsAnomalies();
   assert.ok(!afterCleanup.some((x) => x.campaignName === marker), "dữ liệu dựng cho kiểm thử phải được dọn sạch");
 
-  console.log(`✓ Quảng cáo bất thường: ${anomalies.length} cảnh báo (bắt đúng ca tiêu 3 triệu không ra đơn) · ngưỡng ở một chỗ duy nhất · tách cảnh báo kinh doanh khỏi cảnh báo vận hành · KHÔNG tự đổi ngân sách`);
+  console.log(
+    `✓ Quảng cáo bất thường: ${anomalies.length} cảnh báo · độ phủ quy kết thấp thì KHÔNG kết luận lỗ/lãi (chỉ báo "chưa kết luận được") · tách cảnh báo kinh doanh khỏi vận hành · KHÔNG tự đổi ngân sách`,
+  );
 }

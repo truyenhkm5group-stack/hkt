@@ -30,6 +30,20 @@ export const ADS_ANOMALY_RULES = {
   minSpendToJudge: 500_000,
   /** Chi tiêu trong kỳ mà tỷ lệ đơn quy kết được dưới mức này ⇒ quy kết đang hỏng. */
   minAttributionPct: 20,
+  /**
+   * ĐỘ PHỦ QUY KẾT TỐI THIỂU ĐỂ DÁM KẾT LUẬN VỀ LỢI NHUẬN CHIẾN DỊCH.
+   *
+   * Lý do tồn tại, phát hiện trên dữ liệu thật: chi tiêu quảng cáo được đếm ĐỦ 100%, nhưng doanh
+   * thu chỉ quy về được cho những đơn CÓ mã quảng cáo. Production đang ở mức ~46%, nghĩa là hơn một
+   * nửa doanh thu do quảng cáo mang lại không được cộng vào chiến dịch nào.
+   *
+   * Lấy chi tiêu đủ trừ đi doanh thu thiếu rồi kết luận "chiến dịch đang lỗ" là so hai vế không
+   * cùng gốc — và nó sẽ báo lỗ cho gần như MỌI chiến dịch. Với 46% độ phủ, câu trả lời trung thực
+   * không phải "đang lỗ" mà là "CHƯA KẾT LUẬN ĐƯỢC".
+   *
+   * CỐ Ý KHÔNG suy rộng doanh thu theo tỷ lệ độ phủ: đó là bịa quy kết, đúng thứ đặc tả cấm.
+   */
+  minAttributionToJudgeProfit: 80,
   /** Không thấy dòng chi tiêu Facebook mới nào quá số ngày này ⇒ đồng bộ có thể đã chết. */
   staleSpendDays: 2,
 } as const;

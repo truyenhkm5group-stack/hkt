@@ -54,6 +54,19 @@ export async function detectAdsAnomalies(): Promise<AdsAnomaly[]> {
   const [current, previous, audit] = await Promise.all([getAdsRoas(now, "campaign"), getAdsRoas(before, "campaign"), getAdsAttributionAudit(now)]);
   const prevByKey = new Map(previous.rows.map((r) => [r.key, r]));
 
+  /**
+   * CÓ DÁM KẾT LUẬN VỀ LỢI NHUẬN CHIẾN DỊCH HAY KHÔNG.
+   *
+   * Chi tiêu đếm đủ 100%; doanh thu chỉ quy được cho đơn CÓ mã quảng cáo. Độ phủ thấp thì hiệu
+   * "doanh thu − chi tiêu" âm ở gần như mọi chiến dịch, và cảnh báo "đang lỗ" trở thành tiếng kêu
+   * suốt ngày — người nhận sẽ tắt hết, kể cả cảnh báo đúng.
+   *
+   * So sánh KỲ NÀY với KỲ TRƯỚC thì vẫn dùng được, vì cả hai kỳ cùng thiếu như nhau.
+   */
+  const ceilingRow = audit.rows.find((r) => r.key === "order.ad");
+  const attributionPct = ceilingRow && ceilingRow.total > 0 ? ceilingRow.coverage * 100 : 0;
+  const canJudgeProfit = attributionPct >= ADS_ANOMALY_RULES.minAttributionToJudgeProfit;
+
   for (const row of current.rows) {
     if (row.spend < ADS_ANOMALY_RULES.minSpendToJudge) continue;
     const prev = prevByKey.get(row.key);
@@ -95,7 +108,7 @@ export async function detectAdsAnomalies(): Promise<AdsAnomaly[]> {
     }
 
     // ── 3. ROAS giao thành công dưới ngưỡng ──
-    if (row.spendKnown && row.deliveredRoas !== null && row.deliveredRoas < ADS_ANOMALY_RULES.minDeliveredRoas) {
+    if (canJudgeProfit && row.spendKnown && row.deliveredRoas !== null && row.deliveredRoas < ADS_ANOMALY_RULES.minDeliveredRoas) {
       out.push({
         kind: "LOW_DELIVERED_ROAS",
         campaignId: row.key,
@@ -110,7 +123,7 @@ export async function detectAdsAnomalies(): Promise<AdsAnomaly[]> {
     // ── 4. Càng chạy càng lỗ ──
     // Lợi nhuận góp đã trừ giá vốn, cước và chính tiền quảng cáo. Âm nghĩa là mỗi đồng chi thêm là
     // mất thêm — khác hẳn "ROAS thấp", vốn vẫn có thể đang lãi mỏng.
-    if (row.spendKnown && row.contribution < 0) {
+    if (canJudgeProfit && row.spendKnown && row.contribution < 0) {
       out.push({
         kind: "CAMPAIGN_LOSING_MONEY",
         campaignId: row.key,
@@ -127,14 +140,17 @@ export async function detectAdsAnomalies(): Promise<AdsAnomaly[]> {
   // Tiền vẫn tiêu nhưng ERP không còn nối được đơn nào vào quảng cáo: thường là Pancake ngừng ghi
   // ad_id. Không phải lỗi hiệu quả, là lỗi ĐO LƯỜNG — nhưng nếu không báo thì mọi báo cáo quảng cáo
   // bên trên đều lặng lẽ sai.
-  const ceiling = audit.rows.find((r) => r.key === "order.ad");
-  if (current.totals.spend >= ADS_ANOMALY_RULES.minSpendToJudge && ceiling && ceiling.total > 0 && ceiling.coverage * 100 < ADS_ANOMALY_RULES.minAttributionPct) {
+  if (current.totals.spend >= ADS_ANOMALY_RULES.minSpendToJudge && ceilingRow && ceilingRow.total > 0 && !canJudgeProfit) {
+    const nghiemTrong = attributionPct < ADS_ANOMALY_RULES.minAttributionPct;
     out.push({
       kind: "ATTRIBUTION_LOST",
       campaignId: "",
       campaignName: "Toàn bộ tài khoản",
-      severity: "warning",
-      detail: `Chỉ ${(ceiling.coverage * 100).toFixed(1)}% đơn ${days} ngày qua có mã quảng cáo, trong khi vẫn chi ${vnd(current.totals.spend)}. Mọi chỉ số ROAS đang chỉ mô tả phần nhỏ đó.`,
+      severity: nghiemTrong ? "critical" : "warning",
+      detail:
+        `Chỉ ${attributionPct.toFixed(1)}% đơn ${days} ngày qua có mã quảng cáo, trong khi chi tiêu ${vnd(current.totals.spend)} được đếm đủ. ` +
+        `Vì thế ERP KHÔNG kết luận chiến dịch nào lỗ hay lãi — hiệu "doanh thu trừ chi tiêu" ở đây so hai vế không cùng gốc. ` +
+        `Gắn mã quảng cáo cho đơn (hoặc ghép chiến dịch → mã hàng) tới trên ${ADS_ANOMALY_RULES.minAttributionToJudgeProfit}% thì cảnh báo lợi nhuận mới bật lại.`,
       amount: current.totals.spend,
       profitability: false,
     });
