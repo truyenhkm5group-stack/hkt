@@ -30,6 +30,20 @@ import { getDb, schema } from "@/db";
 const o = schema.orders;
 
 /**
+ * KHOÁ BÀI VIẾT DÙNG CHUNG CHO HAI BÊN.
+ *
+ * Pancake ghi `orders.post_id` dạng ĐẦY ĐỦ `"<page_id>_<post_id>"`; Facebook trả
+ * `effective_object_story_id` cũng dạng đó, và ERP lưu phần sau vào `fb_ads.post_id`.
+ *
+ * Đo trên production mới thấy: so thẳng hai cột thì KHÔNG BAO GIỜ khớp — một bên có tiền tố trang,
+ * một bên không. Nên cả hai phải quy về CÙNG một khoá: phần sau dấu gạch dưới cuối cùng.
+ *
+ * `regexp_replace(..., '^.*_', '')` cắt tiền tố nếu có, và trả nguyên chuỗi nếu không có gạch dưới —
+ * an toàn với cả hai định dạng.
+ */
+const ORDER_POST_KEY = sql`regexp_replace(${o.postId}, '^.*_', '')`;
+
+/**
  * Bài viết → chiến dịch, CHỈ khi mọi mẩu quảng cáo của bài đó thuộc cùng một chiến dịch.
  * Bài được nhiều chiến dịch chạy sẽ không có mặt ở đây.
  */
@@ -49,14 +63,14 @@ export const POST_TO_CAMPAIGN = sql`(
  */
 export const ORDER_CAMPAIGN_ID = sql<string | null>`coalesce(
   (select fa.campaign_id from fb_ads fa where fa.id = ${o.adId}),
-  (select p.campaign_id from ${POST_TO_CAMPAIGN} p where p.post_id = ${o.postId})
+  (select p.campaign_id from ${POST_TO_CAMPAIGN} p where p.post_id = ${ORDER_POST_KEY})
 )`;
 
 /** Đơn nối được về chiến dịch bằng bài viết (không phải bằng ad_id). */
 export const LINKED_BY_POST = sql`(
   (${o.adId} is null or ${o.adId} = '' or not exists (select 1 from fb_ads fa where fa.id = ${o.adId}))
   and ${o.postId} is not null and ${o.postId} <> ''
-  and exists (select 1 from ${POST_TO_CAMPAIGN} p where p.post_id = ${o.postId})
+  and exists (select 1 from ${POST_TO_CAMPAIGN} p where p.post_id = ${ORDER_POST_KEY})
 )`;
 
 /** Đơn CÓ bài viết nhưng bài đó do nhiều chiến dịch cùng chạy ⇒ nhập nhằng, cố ý không nối. */
@@ -64,7 +78,7 @@ export const AMBIGUOUS_BY_POST = sql`(
   (${o.adId} is null or ${o.adId} = '')
   and ${o.postId} is not null and ${o.postId} <> ''
   and exists (
-    select 1 from fb_ads fa where fa.post_id = ${o.postId} and fa.campaign_id is not null
+    select 1 from fb_ads fa where fa.post_id = ${ORDER_POST_KEY} and fa.campaign_id is not null
     group by fa.post_id having count(distinct fa.campaign_id) > 1
   )
 )`;
@@ -105,7 +119,7 @@ export async function getAttributionLinkReport(days = 30): Promise<AttributionLi
       byPost: sql<number>`count(*) filter (where not ${HAS_AD} and ${LINKED_BY_POST})`,
       ambiguous: sql<number>`count(*) filter (where not ${HAS_AD} and ${AMBIGUOUS_BY_POST})`,
       noSignal: sql<number>`count(*) filter (where (${o.adId} is null or ${o.adId} = '') and not ${HAS_POST})`,
-      postNotIndexed: sql<number>`count(*) filter (where not ${HAS_AD} and ${HAS_POST} and not exists (select 1 from fb_ads fa where fa.post_id = ${o.postId}))`,
+      postNotIndexed: sql<number>`count(*) filter (where not ${HAS_AD} and ${HAS_POST} and not exists (select 1 from fb_ads fa where fa.post_id = ${ORDER_POST_KEY}))`,
       ceiling: sql<number>`count(*) filter (where (${o.adId} is not null and ${o.adId} <> '') or ${HAS_POST})`,
     })
     .from(o)

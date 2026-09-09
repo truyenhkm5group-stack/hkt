@@ -23,6 +23,10 @@ export async function testAdsAttributionLink(db: Db) {
     .limit(1);
   assert.ok(order, "fixture phải có đơn không mang ad_id");
 
+  // Pancake ghi post_id dạng ĐẦY ĐỦ "<page_id>_<post_id>"; Facebook cho phần sau. Fixture phải
+  // phản ánh đúng hai định dạng đó, nếu không bài kiểm thử sẽ xanh trong khi production không khớp
+  // — đúng lỗi đã xảy ra thật.
+  const PAGE = "1092821970588849";
   const POST = "post-kiem-thu-001";
   const AMBIG = "post-kiem-thu-nhap-nhang";
   const before = await db.select({ adId: schema.orders.adId, postId: schema.orders.postId }).from(schema.orders).where(sql`${schema.orders.id} = ${order.id}`);
@@ -30,10 +34,13 @@ export async function testAdsAttributionLink(db: Db) {
   // ───────── 1. Một bài, MỘT chiến dịch ⇒ nối được ─────────
   await db.insert(schema.fbAds).values({ id: "999000001", name: "QC kiểm thử A", campaignId: "camp-kt-1", campaignName: "Chiến dịch kiểm thử", postId: POST, storyId: `123_${POST}` }).onConflictDoNothing();
   await db.insert(schema.fbAds).values({ id: "999000002", name: "QC kiểm thử B", campaignId: "camp-kt-1", campaignName: "Chiến dịch kiểm thử", postId: POST, storyId: `123_${POST}` }).onConflictDoNothing();
-  await db.update(schema.orders).set({ postId: POST }).where(sql`${schema.orders.id} = ${order.id}`);
+  await db.update(schema.orders).set({ postId: `${PAGE}_${POST}` }).where(sql`${schema.orders.id} = ${order.id}`);
 
   const linked = await getAttributionLinkReport(3650);
-  assert.ok(linked.byPost >= 1, "đơn chỉ có post_id phải nối được khi mọi mẩu quảng cáo của bài thuộc CÙNG một chiến dịch");
+  assert.ok(
+    linked.byPost >= 1,
+    "đơn chỉ có post_id phải nối được khi mọi mẩu quảng cáo của bài thuộc CÙNG một chiến dịch — kể cả khi đơn lưu dạng '<page>_<post>' còn quảng cáo lưu phần sau",
+  );
   assert.ok(linked.coverageAfter >= linked.coverageBefore, "nối thêm thì độ phủ chỉ được tăng");
 
   // ───────── 2. Một bài, NHIỀU chiến dịch ⇒ KHÔNG nối, phải đếm là nhập nhằng ─────────
@@ -41,7 +48,7 @@ export async function testAdsAttributionLink(db: Db) {
   // không ai phát hiện được vì con số trông vẫn hợp lý.
   await db.insert(schema.fbAds).values({ id: "999000003", name: "QC kiểm thử C", campaignId: "camp-kt-2", campaignName: "Chiến dịch khác", postId: AMBIG, storyId: `123_${AMBIG}` }).onConflictDoNothing();
   await db.insert(schema.fbAds).values({ id: "999000004", name: "QC kiểm thử D", campaignId: "camp-kt-3", campaignName: "Chiến dịch khác nữa", postId: AMBIG, storyId: `123_${AMBIG}` }).onConflictDoNothing();
-  await db.update(schema.orders).set({ postId: AMBIG }).where(sql`${schema.orders.id} = ${order.id}`);
+  await db.update(schema.orders).set({ postId: `${PAGE}_${AMBIG}` }).where(sql`${schema.orders.id} = ${order.id}`);
 
   const ambiguous = await getAttributionLinkReport(3650);
   assert.ok(ambiguous.ambiguous >= 1, "bài do nhiều chiến dịch chạy PHẢI được đếm là nhập nhằng");
