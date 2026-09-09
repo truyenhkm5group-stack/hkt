@@ -44,6 +44,7 @@ import { testMigrationJournal } from "./migration-journal.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testCrm } from "./crm.test";
+import { testScenario } from "./scenario.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -1164,6 +1165,7 @@ async function main() {
   await testCashflow(db);
   await testPurchasing(db);
   await testCrm(db);
+  testScenario();
   testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);

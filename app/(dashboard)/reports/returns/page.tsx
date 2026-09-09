@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Download,
+  FlaskConical,
   PackageCheck,
   Percent,
   Truck,
@@ -109,11 +110,17 @@ export default async function ReturnRatePage({
         title="Tỷ lệ giao thành công theo mã hàng"
         description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.delivered)} giao thành công (COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })}) · ${formatNumber(summary.returned)} không thành công · tính trên đơn lên trong kỳ`}
         actions={
-          <Button asChild variant="outline" size="sm">
-            <a href={`/api/export/return-rate?${exportQuery}`}>
-              <Download className="size-4" /> Xuất CSV
-            </a>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Tỷ lệ giao thành công là đòn bẩy lợi nhuận mạnh nhất — mở thẳng sang chỗ tính thử */}
+            <Button asChild variant="outline" size="sm">
+              <Link href="/reports/scenario"><FlaskConical className="size-4" /> Mô phỏng kịch bản</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/export/return-rate?${exportQuery}`}>
+                <Download className="size-4" /> Xuất CSV
+              </a>
+            </Button>
+          </div>
         }
       />
 

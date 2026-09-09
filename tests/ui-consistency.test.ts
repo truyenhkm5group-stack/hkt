@@ -138,6 +138,7 @@ export function testUiConsistency() {
     "app/(dashboard)/inventory/planning/slow-moving-section.tsx",
     "app/(dashboard)/inventory/purchasing/page.tsx",
     "app/(dashboard)/customers/retention/page.tsx",
+    "app/(dashboard)/reports/scenario/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
