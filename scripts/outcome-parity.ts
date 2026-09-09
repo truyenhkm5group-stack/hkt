@@ -17,6 +17,16 @@ import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 
+/**
+ * Hai trình điều khiển trả kết quả hai kiểu: `pg` trả `{ rows: [...] }`, PGlite trả thẳng mảng.
+ * Đã có tiền lệ script ops hỏng vì giả định một kiểu — nên đọc cả hai ở đúng một chỗ.
+ */
+function rowsOf<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  const rows = (result as { rows?: unknown[] } | null)?.rows;
+  return Array.isArray(rows) ? (rows as T[]) : [];
+}
+
 const apply = process.argv.includes("--apply");
 
 async function main() {
@@ -34,7 +44,7 @@ async function main() {
   }
 
   // ───────── ĐỘ PHỦ ─────────
-  const [cov] = (await db.execute(sql`
+  const [cov] = rowsOf<{ eligible: number; current_version: number; missing: number; stale_version: number }>(await db.execute(sql`
     select
       count(*)::int                                                                as eligible,
       count(m.id) filter (where m.logic_version = ${CANONICAL_OUTCOME_VERSION})::int as current_version,
@@ -44,10 +54,10 @@ async function main() {
     left join shipments s on s.order_id = o.id
     left join canonical_order_outcome m
       on m.order_id = o.id and coalesce(m.shipment_id, '') = coalesce(s.id, '')
-  `)) as unknown as { eligible: number; current_version: number; missing: number; stale_version: number }[];
+  `));
 
   // ───────── ĐỐI CHIẾU TỪNG DÒNG, TOÀN BỘ ─────────
-  const [par] = (await db.execute(sql`
+  const [par] = rowsOf<{ total: number; matched: number; mismatched: number }>(await db.execute(sql`
     select
       count(*)::int as total,
       count(*) filter (where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome = (${ORDER_OUTCOME}))::int as matched,
@@ -56,7 +66,7 @@ async function main() {
     left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
     left join canonical_order_outcome m
       on m.order_id = ${schema.orders.id} and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
-  `)) as unknown as { total: number; matched: number; mismatched: number }[];
+  `));
 
   const eligible = Number(cov?.eligible ?? 0);
   const current = Number(cov?.current_version ?? 0);
@@ -75,7 +85,7 @@ async function main() {
 
   // Vài dòng lệch đầu tiên, nếu có — để đi tìm nguyên nhân, KHÔNG để sửa dữ liệu cho khớp.
   if (Number(par?.mismatched ?? 0) > 0) {
-    const rows = (await db.execute(sql`
+    const rows = rowsOf<Record<string, unknown>>(await db.execute(sql`
       select ${schema.orders.id} as order_id, ${schema.shipments.id} as shipment_id,
              (${ORDER_OUTCOME}) as live, m.outcome as materialized
       from ${schema.orders}
@@ -84,7 +94,7 @@ async function main() {
         on m.order_id = ${schema.orders.id} and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
       where m.outcome is not null and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome <> (${ORDER_OUTCOME})
       limit 10
-    `)) as unknown as Record<string, unknown>[];
+    `));
     console.log("\n✗ CÁC DÒNG LỆCH (dừng lại và tìm nguyên nhân, KHÔNG sửa dữ liệu cho khớp):");
     for (const r of rows) console.log(`   ${r.order_id}/${r.shipment_id ?? "—"}: chuẩn=${r.live} bảng=${r.materialized}`);
     process.exit(1);
