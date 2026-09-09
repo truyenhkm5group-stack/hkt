@@ -18,6 +18,20 @@ Không có `gh` CLI. Dùng credential mà Git Credential Manager đang giữ cho
 `workflow` — để gọi thẳng GitHub REST API dispatch workflow và đọc log. **Token không in ra ở bất
 kỳ đâu.**
 
+### B.2 Một lần deploy "thất bại" mà ứng dụng vẫn tốt (09/09/2026)
+
+Run 34334451645 kết thúc **failure**, báo "13/21 màn hình LỖI". Ứng dụng hoàn toàn bình thường:
+container đã lên, migration đã áp, `fb_ads.post_id` đã có mặt.
+
+Nguyên nhân: smoke test ký **một** phiếu đăng nhập hạn 10 phút cho cả lượt, mà cả lượt trên VPS 2
+nhân mất **10 phút 07 giây** — lần render đầu của mỗi trang phải dựng báo cáo từ đầu, chưa có bộ nhớ
+đệm. Đúng phút thứ 10, 13 trang còn lại bị đá về trang đăng nhập (HTTP 307 trong 4–20ms, tức là
+middleware chặn chứ không phải trang lỗi). 8 trang chạy trước mốc đó đều 200.
+
+Một phép kiểm hỏng vì chính nó chạy lâu thì nó không đo được cái nó định đo. Đã sửa: ký lại phiếu
+**trước từng trang** (vài chục micro giây, không gọi mạng), in tổng thời gian chạy, và ghi rõ 307
+nghĩa là vấn đề QUYỀN chứ không phải hết hạn phiên.
+
 ## C. Bối cảnh đặc biệt: hai phiên làm việc song song
 
 Trong phiên này có **một phiên khác đang code cùng lúc trên cùng cây làm việc** (module Ý tưởng
@@ -111,6 +125,20 @@ hơn con số** là 539 đơn có bài viết được chạy bởi nhiều chi�
 **Việc chủ shop làm được:** nếu mỗi bài chỉ chạy trong MỘT chiến dịch thì 539 đơn kia lập tức nối
 được — **46,2% → khoảng 78%**. Đây là thay đổi CÁCH ĐẶT QUẢNG CÁO, không phải thay đổi phần mềm.
 
+### F.4 Đo lại sau khi bản vá đã chạy trên production (09/09/2026, 10:0x)
+
+Migration đã áp: `fb_ads` có **99/105 mẩu mang `post_id`** trên 51 chiến dịch. Đo lại độ phủ trên
+30 ngày (n = 2.416 đơn):
+
+| | Số đơn | Tỷ lệ |
+|---|---:|---:|
+| Nối bằng `ad_id` | 1.172 | 48,5% |
+| Nối được sau khi cộng cả đường bài viết | 1.189 | **49,2%** |
+
+Đường nối bài viết thêm **~17 đơn**. Đúng như đo trước đó: nó không phải chỗ để cải thiện, vì phần
+lớn bài viết bị nhiều chiến dịch cùng chạy. **49,2% là con số thật; 78% vẫn chỉ đạt được nếu chủ
+shop tách chiến dịch.** Không dùng suy đoán để làm đẹp độ phủ.
+
 ## G. Hàng hoàn (P0.2)
 
 674 vận đơn HOÀN chưa xác nhận: **445 có gắn đơn** (497 món), 229 là vận đơn chiều hoàn không gắn
@@ -122,6 +150,36 @@ Toàn bộ 445 cần kho đếm tay, đúng luật đã khoá.
 
 Việc làm được: **cho thấy quy mô bằng tiền** ngay trên trang Kế hoạch SX, kèm hệ quả — bảng đề xuất
 sản xuất đang đặt **thừa đúng bằng lượng đó**.
+
+### G.2 Quy trình kiểm đếm (làm 09/09/2026)
+
+Tìm ra một lỗi nặng hơn số tồn đọng: nút "Kho đã nhận" **tự lập phiếu tái nhập bằng đúng số đã
+xuất**. Bấm xác nhận hàng loạt cho 445 kiện là ERP tự khẳng định "về đủ" cho hàng trăm kiện chưa ai
+mở ra — kiện thiếu món, rách, bẩn đều vào tồn như hàng lành, và phần chênh không hiện ra ở đâu.
+
+Nguyên nhân gốc: hai việc khác nhau bị nén vào một ô ngày (`shipments.return_received_at`), nên
+người bê hàng vào kho vô tình quyết định luôn con số tồn.
+
+Đã tách:
+
+```
+ĐVVC báo hoàn → ĐÃ VỀ KHO → CHỜ ĐẾM → ĐÃ KIỂM → {bán lại được · không bán được · hỏng · thiếu}
+                                                        ↓
+                                            phiếu tái nhập CHỈ phần đếm được
+```
+
+- bảng `return_inspections`, một phiếu / vận đơn, ràng buộc CHECK ở mức CSDL (đã kiểm thì phải có
+  kết luận + người kiểm + mốc kiểm; kết luận không bán được thì bắt buộc có lý do);
+- ghi nhận đã về **không** sinh phiếu, **không** đụng tồn;
+- `recordInspection` là nơi DUY NHẤT hàng hoàn cộng lại tồn, theo số ĐẾM ĐƯỢC; đếm lần hai bị chặn;
+  đã đếm rồi thì không huỷ ngược được — sửa tồn phải qua phiếu điều chỉnh có người ký;
+- phần không bán được thành số riêng; phần đếm thiếu so với số đã xuất hiện ra thành **hàng hụt**
+  trên sổ kho thay vì biến mất;
+- trang mới **Kiểm đếm hàng hoàn** (`/inventory/returns`) và việc riêng cho kho trong hàng đợi.
+
+`tests/return-inspection.test.ts` khoá 8 luật; assertion của inventory / data-quality /
+sync-fixtures đã cập nhật theo vòng đời mới (ghi nhận đã về → tồn KHÔNG đổi; đếm 3/4 món → tồn +3,
+hao 1).
 
 ## H. Hàng đợi việc (P0.3)
 
@@ -138,6 +196,32 @@ sản xuất đang đặt **thừa đúng bằng lượng đó**.
 chủ ý — hệ quả không lường trước là **494 việc cũ vẫn mang nhãn cũ**, phần tách chỉ có tác dụng cho
 việc phát sinh về sau. Đã thêm bước phân loại lại theo trạng thái hiện tại của đơn: xác định,
 idempotent, không tạo và không đóng việc nào.
+
+### H.2 Chia theo bộ phận (làm 09/09/2026)
+
+Đo lại trên production sáng 09/09: **4.874 việc từng tạo · 978 đang mở · 3.896 đã tự đóng khi điều
+kiện hết** (cơ chế tự đóng chạy đúng, không phải xoá cho đẹp) · **0 việc có chủ · 0 việc được tiếp
+nhận**.
+
+Con số cuối là vấn đề thật: hàng đợi xếp đúng thứ tự theo quy tắc, nhưng ai mở lên cũng thấy nguyên
+978 việc của người khác — nên chưa ai từng bắt đầu.
+
+Thành phần 978 việc đang mở, quy về bộ phận chịu trách nhiệm:
+
+| Bộ phận | Việc | Gồm |
+| --- | ---: | --- |
+| Chăm sóc khách | 647 | 302 case CSKH · 257 đơn mới chưa xử lý · 72 đơn thiếu thông tin · 16 gọi lại khách quen |
+| Kho | 188 | 172 đã chốt chưa gửi · 16 hàng hoàn chờ đếm |
+| Giao vận | 103 | 87 đang chuyển hoàn · 16 giao thất bại |
+| Kế toán | 11 | quá hạn mà tiền chưa về |
+| Sản xuất | 9 | sắp hết hàng |
+
+Đã thêm `CASE_TEAM` (7 nhóm, **không có nhóm "chưa phân loại"** — đó là nơi việc rơi vào rồi nằm
+im), `ActionQueue.byTeam` kèm số gấp / số TRỄ HẠN / số chưa ai nhận / tiền treo của từng nhóm, dải
+chip lọc ngay trên danh sách, và kiểm thử khoá: mọi loại việc phải có nhóm, tổng theo nhóm phải
+BẰNG số việc đang mở.
+
+**Không đóng bớt việc nào để dashboard đẹp.** 978 việc là tồn đọng vận hành thật.
 
 ## I. Xung đột Pancake ↔ ĐVVC (P0.4)
 
