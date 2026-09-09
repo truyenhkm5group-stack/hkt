@@ -6,7 +6,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { vnStartOfDay } from "@/lib/format";
-import { adSpendSchema, expenseSchema } from "@/lib/validation/expenses";
+import { adSpendSchema, allocationSchema, expenseSchema } from "@/lib/validation/expenses";
 
 export type ActionResult = { ok: true; id?: string } | { error: string };
 
@@ -52,6 +52,67 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");
+  return { ok: true, id };
+}
+
+/**
+ * KHAI KỲ HIỆU LỰC cho một khoản chi.
+ *
+ * Vì sao cần một hành động riêng thay vì gộp vào form sửa chi phí: đây là việc của TÀI CHÍNH, làm
+ * theo lô, trên đúng những khoản đang được đánh dấu cần xem lại — và người làm chỉ cần điền hai
+ * ngày, không phải mở lại toàn bộ form.
+ *
+ * KHÔNG ĐOÁN KỲ. ERP không tự suy kỳ từ ngày ghi sổ hay từ nội dung chuyển khoản; người khai phải
+ * biết hoá đơn/hợp đồng nói gì. Khai xong thì cờ "cần xem lại" tự tắt.
+ *
+ * Chọn `EVENT_DATE` là một câu trả lời hợp lệ: nghĩa là "khoản này đúng là chi một lần cho ngày
+ * đó", và cũng làm tắt cờ — khác hẳn với việc bỏ mặc không trả lời.
+ */
+export async function setExpenseAllocation(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+  const parsed = allocationSchema.safeParse(input);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const { id, allocationMethod, periodStart, periodEnd } = parsed.data;
+
+  if (allocationMethod === "PERIOD_PRORATA") {
+    if (!periodStart || !periodEnd) return { error: "Phân bổ theo kỳ thì phải khai đủ ngày bắt đầu và ngày kết thúc" };
+    if (vnStartOfDay(periodEnd) < vnStartOfDay(periodStart)) return { error: "Ngày kết thúc kỳ không được trước ngày bắt đầu" };
+  }
+
+  const db = await getDb();
+  const [before] = await db
+    .select({ description: schema.expenses.description, amount: schema.expenses.amount, method: schema.expenses.allocationMethod, from: schema.expenses.periodStart, to: schema.expenses.periodEnd })
+    .from(schema.expenses)
+    .where(eq(schema.expenses.id, id));
+  if (!before) return { error: "Không tìm thấy khoản chi" };
+
+  await db
+    .update(schema.expenses)
+    .set({
+      allocationMethod,
+      periodStart: allocationMethod === "PERIOD_PRORATA" && periodStart ? vnStartOfDay(periodStart) : null,
+      periodEnd: allocationMethod === "PERIOD_PRORATA" && periodEnd ? vnStartOfDay(periodEnd) : null,
+      // Đã có người trả lời thì không cần hỏi lại nữa.
+      needsAllocationReview: false,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.expenses.id, id));
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "EXPENSE_ALLOCATION_SET",
+    entity: "EXPENSE",
+    entityId: id,
+    detail: {
+      description: before.description,
+      amount: before.amount,
+      truoc: { phuongPhap: before.method, tu: before.from, den: before.to },
+      sau: { phuongPhap: allocationMethod, tu: periodStart ?? null, den: periodEnd ?? null },
+    },
+  });
+  for (const p of ["/expenses", "/reports", "/data-quality", "/"]) revalidatePath(p);
   return { ok: true, id };
 }
 

@@ -10,6 +10,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   USER_RESET_PASSWORD: "Đặt lại mật khẩu",
   EXPENSE_CREATE: "Thêm chi phí",
   EXPENSE_UPDATE: "Sửa chi phí",
+  EXPENSE_ALLOCATION_SET: "Khai kỳ hiệu lực cho chi phí",
   EXPENSE_DELETE: "Xoá chi phí",
   AD_SPEND_CREATE: "Thêm chi tiêu QC",
   AD_SPEND_UPDATE: "Sửa chi tiêu QC",

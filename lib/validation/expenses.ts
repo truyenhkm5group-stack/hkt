@@ -24,3 +24,17 @@ export const adSpendSchema = z.object({
   note: z.string().trim().max(500, "Ghi chú tối đa 500 ký tự"),
 });
 export type AdSpendInput = z.infer<typeof adSpendSchema>;
+
+/**
+ * KHAI KỲ HIỆU LỰC cho một khoản chi.
+ *
+ * `EVENT_DATE` là câu trả lời hợp lệ, không phải "chưa trả lời": nó nghĩa là khoản này đúng là chi
+ * một lần cho ngày ghi sổ. Chỉ `PERIOD_PRORATA` mới bắt buộc hai ngày kỳ.
+ */
+export const allocationSchema = z.object({
+  id: z.string().min(1, "Thiếu mã khoản chi"),
+  allocationMethod: z.enum(["EVENT_DATE", "PERIOD_PRORATA"], { error: "Chọn cách phân bổ" }),
+  periodStart: dateKey.optional().nullable(),
+  periodEnd: dateKey.optional().nullable(),
+});
+export type AllocationInput = z.infer<typeof allocationSchema>;
