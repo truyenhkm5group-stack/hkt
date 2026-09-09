@@ -5,6 +5,13 @@
  * không thay được: dữ liệu khác, kế hoạch truy vấn khác. Script này chạy TRONG container
  * production, chỉ ĐỌC, và in thời gian từng hàm mà Server Component của trang đó gọi.
  *
+ * ⚠ ĐỌC CON SỐ NÀY CHO ĐÚNG. Probe xoá TOÀN BỘ bộ nhớ đệm trước mỗi phép đo, nên nó dựng lại điều
+ * kiện XẤU NHẤT TUYỆT ĐỐI — kể cả những lớp đệm có TTL 5 phút mà người dùng gần như không bao giờ
+ * trả giá. Ví dụ thật: `getReturnRateSummary` ở đây ra 5.549ms, còn trang `/reports/returns` mà
+ * người dùng mở thật chỉ mất **170ms**. Cả hai đều đúng; chỉ một cái là trải nghiệm của chủ shop.
+ *
+ * Dùng probe để TÌM hàm nào đắt. Dùng `ops smoke` để biết người dùng thật chờ bao lâu.
+ *
  * Chạy: docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts
  */
 import "dotenv/config";
