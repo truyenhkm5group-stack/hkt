@@ -39,6 +39,19 @@ export function testMigrationJournal() {
     );
   }
 
+  // ───────── 3a. Mốc thời gian quyết định migration có được áp hay không ─────────
+  // SỰ CỐ THẬT 09/09/2026: drizzle chỉ áp migration có mốc MUỘN HƠN migration cuối đã áp. Một mục
+  // được thêm vào giữa sổ với mốc cũ hơn sẽ bị BỎ QUA VĨNH VIỄN — file có, sổ có, kiểm thử xanh
+  // (vì cơ sở dữ liệu kiểm thử dựng mới từ đầu), nhưng production thiếu cột và trang liên quan lỗi.
+  //
+  // Nên mốc phải TĂNG NGHIÊM NGẶT, không chỉ không giảm.
+  for (let i = 1; i < journal.entries.length; i += 1) {
+    assert.ok(
+      journal.entries[i].when > journal.entries[i - 1].when,
+      `mốc migration phải TĂNG NGHIÊM NGẶT — ${journal.entries[i].tag} (${journal.entries[i].when}) không muộn hơn ${journal.entries[i - 1].tag} (${journal.entries[i - 1].when}). Mục có mốc cũ hơn sẽ bị bỏ qua vĩnh viễn trên cơ sở dữ liệu đã chạy.`,
+    );
+  }
+
   // ───────── 3. Thứ tự áp phải tăng dần theo thời gian ─────────
   // Drizzle áp theo thứ tự mảng; nếu `when` không tăng thì thứ tự đọc được của con người khác với
   // thứ tự máy chạy.
