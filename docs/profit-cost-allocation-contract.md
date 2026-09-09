@@ -407,3 +407,149 @@ Ba thứ dễ sai nhất, đều có kiểm thử (`tests/bank-ledger.test.ts`):
 
 Thêm hai chốt chặn hồi quy: **không cột ngày nào** được vượt 200.000đ (chặn "ôm cả khoản thuê vào
 một ngày"), và **cả 7 ngày** đều phải có chi phí.
+
+---
+
+# Phần 4 — Thẩm quyền chi phí, chuyển giao an toàn, ranh giới tiền ↔ chi phí (chốt 09/09/2026)
+
+## Vấn đề của Phần 3
+
+Phần 3 chốt "mỗi loại chi phí có đúng một nguồn". Nhưng chuyển thẩm quyền từ nguồn A sang nguồn B là
+việc **nguy hiểm**: nếu B chưa thật sự cung cấp được số mà A đã bị loại, khoản đó thành **0**.
+
+Và 0 nhìn giống một con số hợp lệ. Lương biến mất khỏi lợi nhuận **nguy hiểm hơn** lương bị trừ hai
+lần: trừ hai lần thì lợi nhuận thấp bất thường (dễ nghi), mất hẳn thì lợi nhuận cao đẹp (không ai nghi).
+
+## Sổ đăng ký thẩm quyền — `lib/constants/cost-authority.ts`
+
+Mỗi thành phần chi phí khai đủ sáu điều:
+
+| Trường | Ý nghĩa |
+|---|---|
+| `source` | nguồn có thẩm quyền |
+| `recognitionMethod` | cách ghi nhận vào kỳ |
+| `dateBasis` | trường ngày quyết định khoản thuộc kỳ nào |
+| `fallback` | lùi về đâu khi nguồn chính chưa đủ |
+| `duplicatePolicy` | làm gì với dữ liệu của nguồn khác |
+| `coverageRequirement` | điều kiện để nguồn chính thật sự cầm quyền |
+
+### Ba chính sách trùng nguồn — cố ý KHÔNG gộp làm một
+
+| Chính sách | Nhóm | Cách xử lý |
+|---|---|---|
+| `EXCLUDE_OTHER_SOURCES` | `ADS`, `PURCHASE` | loại hẳn khoản gõ tay |
+| `ALLOW_WITH_EVIDENCE` | `SHIPPING`, `RETURN_FEE` | chỉ nhận khoản khai `MANUAL_ADJUSTMENT` kèm lý do |
+| `NONE` | mặt bằng, phần mềm, vận hành khác | không có nguồn cạnh tranh |
+
+`ALLOW_WITH_EVIDENCE` ra đời vì **loại sạch cả nhóm là làm mất tiền thật**: đền bù kiện vỡ, phí ngoại
+lệ, cước chuyến gom hàng không gắn được vận đơn nào đều là chi phí có thật. Nhận hết thì trừ hai lần;
+loại hết thì mất tiền. Nên chỉ nhận khoản **nói được vì sao nó không nằm trong cước theo vận đơn** —
+CSDL bắt buộc có lý do (`expenses_adjustment_reason_check`).
+
+## Chuyển giao lương an toàn — `lib/queries/payroll-cost.ts`
+
+`getRecognizedPayrollCost(period)` trả về: `fixedSalary`, `commission`, `totalPayrollCost`,
+`recognitionPeriod`, `allocationBasis`, `coverage`, `reasons`.
+
+```
+nếu coverage == COMPLETE:
+    lương ghi nhận = bảng Lương (lương cứng chia theo ngày)
+    bỏ qua khoản "Lương" ở bảng Chi phí   + cảnh báo DUPLICATE_PAYROLL_EXPENSE_SOURCE
+ngược lại:
+    lương ghi nhận = khoản chi ở bảng Chi phí   (KHÔNG BAO GIỜ để thành 0)
+    cảnh báo PAYROLL_COST_COVERAGE_INCOMPLETE   (không lùi im lặng)
+```
+
+Mặc định `mode = LEGACY_EXPENSES`: hành vi **không đổi** so với trước. Bật `PAYROLL` là quyết định
+tường minh của chủ shop, và chỉ nên bật **sau khi** đã ngừng ghi lương vào bảng Chi phí.
+
+### Lương cứng chia theo SỐ NGÀY THẬT của từng tháng
+
+`prorateMonthlyAmount()`: 9.000.000đ/tháng, xem 7 ngày của tháng 30 ngày ⇒ **2.100.000đ**. Cộng đủ một
+tháng luôn ra đúng khoản tháng. Tháng 2 có 28 ngày thì một ngày của tháng 2 đắt hơn một ngày của
+tháng 4 — đúng như hợp đồng lao động tính theo tháng, không phải "tháng bình quân 30,44 ngày".
+
+Hằng số 30,44 (`periodMonths`) vẫn dùng cho **chi phí cố định ước tính**, nơi không có hợp đồng nào để
+bám vào. Hai chỗ khác nhau vì bản chất khác nhau, không phải vì quên đồng bộ.
+
+### Vì sao hoa hồng CHƯA thể do bảng Lương ghi nhận
+
+Cả bốn cơ sở tính hoa hồng của ERP đều là **% của LỢI NHUẬN**. Muốn coi hoa hồng là chi phí nằm trong
+lợi nhuận thì phải biết lợi nhuận trước — mà lợi nhuận lại cần biết chi phí. **Vòng tròn.**
+
+Hai lối thoát, cả hai đều là quyết định của chủ shop:
+
+1. chốt một cơ sở **không** dẫn xuất từ lợi nhuận (vd % doanh thu thuần), hoặc
+2. coi hoa hồng là **phân phối lợi nhuận** sau khi đã có lợi nhuận, không phải chi phí.
+
+Trước khi chốt, ERP **không đoán**: hoa hồng giữ đường cũ và bật `COMMISSION_BASIS_NEEDS_REVIEW`.
+Đây cũng là lý do `payroll-cost.ts` **không gọi** `getPayrollReport` — gọi vào là đệ quy vô hạn.
+
+## Một đường duy nhất — `lib/queries/cost-engine.ts`
+
+Sáu báo cáo (Lợi nhuận, Dòng tiền, Bảng điều khiển, Sự thật tài chính, Báo cáo tổng hợp, Bảng lương)
+**không còn tự cộng chi phí**; tất cả gọi `getOperatingCost()` / `getRecognizedCosts()`.
+
+Kiểm thử chặn ở mức mã nguồn: không file nào được chứa `sum(expenses.amount)` hay danh sách nhóm bị
+loại gõ tay.
+
+### Phạm vi — nói thẳng điều CHƯA làm
+
+Engine là nguồn **duy nhất** cho khối vận hành theo kỳ. Các thành phần còn lại được engine đọc từ
+**chứng từ thật** để mọi trang cùng nhìn một con số — nhưng Báo cáo lợi nhuận danh nghĩa vẫn **ước
+tính** giá vốn và cước theo tỷ lệ giao thành công dự kiến. Hai con số đó khác nhau vì **ước tính khác
+thực tế**, KHÔNG phải vì trừ hai lần. Hợp nhất hẳn hai cơ sở đó là việc riêng, **chưa làm**.
+
+## Sổ ngân hàng: TIỀN không phải CHI PHÍ
+
+Trước đây có nút "đẩy sang bảng Chi phí" tạo khoản chi mới từ một dòng tiền. **Đã bỏ.** Nó biến "tiền
+đã đi ra" thành "chi phí của kỳ chứa ngày trả tiền" — lương tháng 9 trả ngày 05/10 sẽ thành chi phí
+tháng 10, vừa sai kỳ vừa trùng với khoản đã ghi nhận.
+
+```
+SỔ NGÂN HÀNG  = sự thật về TIỀN   (đã vào/ra, theo ngày ngân hàng ghi)
+PROFIT ENGINE = sự thật về CHI PHÍ (theo kỳ hưởng lợi ích, theo nguồn có thẩm quyền)
+```
+
+Nhóm kế toán nay **chỉ** quyết định `BankCashClass`: `BUSINESS_INFLOW`, `BUSINESS_OUTFLOW`,
+`INTERNAL_TRANSFER`, `CAPITAL`, `OWNER`, `TAX`, `OTHER`, `UNCLASSIFIED`. Không nhóm nào mang ảnh
+hưởng lãi lỗ — kiểm thử chặn ở mức kiểu dữ liệu.
+
+Nối tiền với chứng từ là **đối chiếu** (`bank_transactions.linked_type` / `linked_id`), tới khoản chi,
+đợt COD, phiếu nhập hoặc chi tiêu QC **đã có**. Chứng từ phải tồn tại thật mới nối được.
+
+## Luật chất lượng dữ liệu (bổ sung)
+
+| Luật | Khi nào bật |
+|---|---|
+| `PAYROLL_COST_COVERAGE_INCOMPLETE` | bảng Lương chưa đủ điều kiện, đang dùng nguồn dự phòng |
+| `DUPLICATE_PAYROLL_EXPENSE_SOURCE` | bảng Lương cầm quyền nhưng vẫn còn khoản "Lương" ở bảng Chi phí |
+| `DUPLICATE_LOGISTICS_COST_SOURCE` | khoản cước / phí hoàn gõ tay không khai là điều chỉnh |
+| `COMMISSION_BASIS_NEEDS_REVIEW` | chưa chốt cơ sở ghi nhận hoa hồng |
+
+Tất cả hiện **ngay trên Báo cáo lợi nhuận**. Không luật nào xoá hay sửa dữ liệu.
+
+## Năm kiểm thử chống trừ hai lần — `tests/cost-double-count.test.ts`
+
+| # | Tình huống | Kỳ vọng |
+|---|---|---|
+| 1 | cước vận đơn 20.000 + khoản chi `SHIPPING` 20.000 | **20.000**, không phải 40.000 |
+| 1b | thêm khoản `MANUAL_ADJUSTMENT` 150.000 có lý do | **170.000** — tiền thật không bị vứt |
+| 2 | phí hoàn vận đơn 25.000 + khoản chi `RETURN_FEE` 25.000 | **25.000** |
+| 3 | lương bảng Lương 9.000.000 + khoản chi 9.000.000, coverage COMPLETE | **9.000.000**, không phải 18.000.000 |
+| 4 | cùng dữ liệu, coverage INCOMPLETE | dùng nguồn dự phòng, lương **khác 0**, có cảnh báo |
+| 5 | 9.000.000/tháng, xem 7 ngày của tháng 30 ngày | **2.100.000** |
+
+Kèm bất biến: tổng engine bằng tổng các thành phần, và mỗi đồng thuộc **đúng một** thành phần.
+
+## Migration
+
+`0044_cost_authority.sql` — viết tay, **không** dùng `db:generate` (chuỗi snapshot của kho đứt ở
+0032 nên bản sinh tự động dựng lại cả những thay đổi 0033–0043 đã áp, chạy lên production sẽ lỗi).
+
+Tương thích ngược: chỉ **thêm** cột có giá trị mặc định. Mọi dòng cũ nhận `cost_source = 'MANUAL'` và
+`linked_type` rỗng — đúng hành vi hiện tại, không viết lại lịch sử. Ràng buộc `CHECK` thêm **sau** khi
+cột đã có mặc định nên không dòng nào vi phạm.
+
+Toàn bộ chuỗi 0000 đến 0044 được dựng lại từ **CSDL trống** ở mỗi lần `npm test` (`tests/setup-env.ts`
+xoá và tạo mới), nên migration được kiểm chứng thật chứ không chỉ đọc bằng mắt.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { BANK_GROUPS, BANK_GROUP_SPEC, canPostToExpenses, postBlockedReason } from "@/lib/constants/bank";
+import { BANK_CASH_CLASSES, BANK_GROUPS, BANK_GROUP_SPEC, BANK_LINK_TYPES, isBusinessCash } from "@/lib/constants/bank";
 import { COST_AUTHORITY, ECONOMIC_COSTS, EXPENSE_CATEGORIES_NOT_OWNED, EXPENSE_CATEGORY_ECONOMIC, expensesOwnCategory } from "@/lib/constants/cost-sources";
 import { matchRule, ruleMatches, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
 import { bankRefFor, dedupeByRef, LEDGER_TO_BANK_GROUP, statementInstant, toBankRow } from "@/lib/integrations/bank/statement";
@@ -65,36 +65,37 @@ export async function testBankLedger(db: Db) {
   assert.equal(rows[0].amount, -6_000_000, "3. tiền ra lưu số ÂM");
   assert.equal(rows[2].amount, 51_329_620, "3. tiền vào lưu số DƯƠNG");
 
-  // ══ 4. LUẬT MỘT NGUỒN — CHỐNG TRỪ HAI LẦN ══
-  assert.equal(canPostToExpenses("RENT_UTILITIES"), true, "4. mặt bằng: bảng Chi phí có thẩm quyền ⇒ đẩy được");
-  assert.equal(canPostToExpenses("OTHER_EXPENSE"), true, "4. chi phí khác đẩy được");
-  assert.equal(canPostToExpenses("ADS_SPEND"), false, "4. quảng cáo đã có từ tài khoản QC ⇒ KHÔNG đẩy");
-  assert.equal(canPostToExpenses("PURCHASE"), false, "4. tiền hàng đã nằm trong giá vốn ⇒ KHÔNG đẩy");
-  assert.equal(canPostToExpenses("SHIPPING_FEE"), false, "4. cước đã tính theo vận đơn ⇒ KHÔNG đẩy");
-  assert.equal(canPostToExpenses("SALES_REVENUE"), false, "4. doanh thu không phải chi phí");
-  assert.equal(canPostToExpenses("INTERNAL_TRANSFER"), false, "4. chuyển nội bộ không ảnh hưởng lãi lỗ");
-  for (const g of ["ADS_SPEND", "PURCHASE", "SHIPPING_FEE", "RETURN_FEE"] as const) {
-    assert.ok((postBlockedReason(g) ?? "").includes("hai lần"), `4. ${g} phải nói RÕ vì sao bị chặn, không im lặng`);
+  // ══ 4. RANH GIỚI CỨNG: SAO KÊ LÀ TIỀN, KHÔNG PHẢI CHI PHÍ ══
+  //
+  // Nhóm kế toán chỉ quyết định LOẠI DÒNG TIỀN. Không có nhóm nào tạo ra một khoản chi trong lãi lỗ:
+  // trả lương ngày 05/10 là tiền ra ngày 05/10, nhưng chi phí lương thuộc kỳ hưởng lợi ích.
+  for (const g of BANK_GROUPS) {
+    const spec = BANK_GROUP_SPEC[g];
+    assert.ok(spec.label && spec.hint, `4. nhóm ${g} phải có nhãn và giải thích`);
+    assert.ok(BANK_CASH_CLASSES.includes(spec.cashClass), `4. nhóm ${g} phải khai loại dòng tiền`);
+    assert.ok(spec.linkTo === null || BANK_LINK_TYPES.includes(spec.linkTo), `4. nhóm ${g} khai sai loại chứng từ đối chiếu`);
+    // Không còn khái niệm "đẩy sang chi phí" — kiểm ở mức kiểu dữ liệu để không ai thêm lại.
+    assert.equal("pnl" in spec, false, `4. nhóm ${g} KHÔNG được mang ảnh hưởng lãi lỗ`);
+    assert.equal("authority" in spec, false, `4. nhóm ${g} KHÔNG được mang thẩm quyền chi phí`);
   }
-  assert.equal(postBlockedReason("RENT_UTILITIES"), null, "4. nhóm đẩy được thì không có lý do chặn");
+  assert.equal(BANK_GROUP_SPEC.ADS_SPEND.cashClass, "BUSINESS_OUTFLOW", "4. chi quảng cáo là tiền ra kinh doanh");
+  assert.equal(BANK_GROUP_SPEC.ADS_SPEND.linkTo, "AD_SPEND", "4. đối chiếu với chi tiêu QC, không tạo chi phí mới");
+  assert.equal(BANK_GROUP_SPEC.PURCHASE.linkTo, "STOCK_RECEIPT", "4. tiền hàng đối chiếu với phiếu nhập");
+  assert.equal(BANK_GROUP_SPEC.COD_SETTLEMENT.linkTo, "COD_BATCH", "4. tiền COD đối chiếu với đợt nhận tiền");
+  assert.equal(isBusinessCash("INTERNAL_TRANSFER"), false, "4. chuyển nội bộ không phải dòng tiền kinh doanh");
+  assert.equal(isBusinessCash("LOAN_PRINCIPAL"), false, "4. trả nợ gốc không phải dòng tiền kinh doanh");
+  assert.equal(isBusinessCash("OWNER_DRAW"), false, "4. rút vốn không phải dòng tiền kinh doanh");
+  assert.equal(isBusinessCash("UNCLASSIFIED"), true, "4. chưa phân loại vẫn là tiền thật đã vào/ra tài khoản");
 
-  // Mỗi loại chi phí kinh tế có ĐÚNG MỘT nguồn có thẩm quyền — không được để trống.
+  // Hợp đồng thẩm quyền chi phí sống ở nơi khác và KHÔNG dính vào sổ ngân hàng.
   for (const cost of ECONOMIC_COSTS) assert.ok(COST_AUTHORITY[cost], `4. ${cost} phải khai nguồn có thẩm quyền`);
   assert.deepEqual(
     [...EXPENSE_CATEGORIES_NOT_OWNED].sort(),
     ["ADS", "PURCHASE", "RETURN_FEE", "SHIPPING"].sort(),
     "4. bảng Chi phí KHÔNG có thẩm quyền với quảng cáo, tiền hàng, cước và phí hoàn",
   );
-  assert.equal(expensesOwnCategory("SALARY"), true, "4. lương: bảng Chi phí là đường DUY NHẤT đưa vào lợi nhuận hôm nay");
+  assert.equal(expensesOwnCategory("SALARY"), true, "4. lương: bảng Chi phí vẫn là nguồn dự phòng hợp lệ");
   assert.equal(EXPENSE_CATEGORY_ECONOMIC.PURCHASE, "COGS", "4. nhập hàng là giá vốn, không phải chi phí vận hành");
-
-  // Mọi nhóm đều phải khai đủ hợp đồng — thiếu một trường là một chỗ số liệu đi lạc mà không ai biết.
-  for (const g of BANK_GROUPS) {
-    const spec = BANK_GROUP_SPEC[g];
-    assert.ok(spec.label && spec.hint, `4. nhóm ${g} phải có nhãn và giải thích`);
-    if (spec.pnl.kind === "EXPENSE") assert.ok(spec.authority, `4. nhóm chi phí ${g} phải khai nguồn có thẩm quyền`);
-    if (spec.pnl.kind === "NONE" && g !== "UNCLASSIFIED") assert.equal(spec.authority, null, `4. nhóm ${g} không vào lãi lỗ thì không có nguồn thẩm quyền`);
-  }
 
   // ══ 5. QUY TẮC GÁN NHÃN ══
   const base: BankRuleLike = {
@@ -176,5 +177,5 @@ export async function testBankLedger(db: Db) {
   await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.id} like 'bank-test-%'`);
 
   console.log("✓ Sổ ngân hàng: giờ VN đúng · nhập lại chồng lấn không nhân đôi và không xoá nhãn tay · chuyển nội bộ/trả gốc không tính vào dòng tiền kinh doanh · quy tắc không ghi đè phân loại tay");
-  console.log("✓ Luật một nguồn: quảng cáo / tiền hàng / cước / phí hoàn KHÔNG đẩy được sang bảng Chi phí và nói rõ vì sao — chặn trừ hai lần ngay ở hợp đồng");
+  console.log("✓ Ranh giới sao kê ↔ chi phí: nhóm kế toán chỉ quyết định LOẠI DÒNG TIỀN, không nhóm nào tạo khoản chi; đối chiếu bằng liên kết chứng từ");
 }

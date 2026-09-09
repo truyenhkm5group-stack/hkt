@@ -6,8 +6,8 @@ import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
 import { OUTCOME_FENCE, ORDER_OUTCOME, outcomeColumn } from "@/lib/queries/return-rate";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
-import { allocatedExpenseByDay, allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
-import { EXPENSE_CATEGORIES_NOT_OWNED } from "@/lib/constants/cost-sources";
+import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 
 export type ReportBasis = "created" | "delivered";
 
@@ -125,17 +125,16 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
       .select({ spend: sum(schema.adSpends.spend), orders: sum(schema.adSpends.orders), revenue: sum(schema.adSpends.revenue) })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, from, to))),
-    db
-      // Khoản theo kỳ (thuê mặt bằng, phần mềm) chia theo số ngày chồng lấn, không cộng nguyên khoản.
-      .select({ category: schema.expenses.category, amount: allocatedExpenseSum(from, to) })
-      .from(schema.expenses)
-      .where(expenseInRange(from, to))
-      .groupBy(schema.expenses.category),
+    // MỘT đường duy nhất qua Profit Engine — nơi quyết định nguồn nào có thẩm quyền, nguồn chính đã
+    // phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn. Trang này không tự cộng theo cách riêng.
+    getOperatingCost({ key: "custom", from, to, label: "", fromKey: null, toKey: null }),
   ]);
 
-  const adsExpense = expenseRows.filter((r) => r.category === "ADS").reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  // Cùng hợp đồng nguồn sự thật với mọi báo cáo khác: loại các nhóm mà bảng Chi phí không có thẩm quyền.
-  const operating = expenseRows.filter((r) => !EXPENSE_CATEGORIES_NOT_OWNED.includes(r.category)).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const operating = expenseRows.amount;
+  // KHÔNG cộng khoản chi nhóm "Quảng cáo" gõ tay vào chi phí QC: tài khoản quảng cáo là nguồn có
+  // thẩm quyền và có số thực chi TỪNG NGÀY. Trang này từng là nơi duy nhất còn cộng cả hai, nên một
+  // đồng quảng cáo ghi ở cả hai chỗ bị trừ hai lần ở đây mà không bị ở Báo cáo lợi nhuận.
+  const adsExpense = 0;
   const revenue = Number(o?.revenue ?? 0);
   const cogs = Number(o?.cogs ?? 0);
   const shipping = Number(o?.shipping ?? 0);

@@ -1,6 +1,6 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money, SectionCard } from "@/components/ui-bits";
-import { BANK_GROUP_SPEC, type BankGroup } from "@/lib/constants/bank";
+import { BANK_CASH_CLASS_LABEL, BANK_GROUP_SPEC, BANK_LINK_TYPE_LABEL, BANK_NOT_A_COST_NOTE, type BankGroup } from "@/lib/constants/bank";
 import { formatNumber, formatVND } from "@/lib/format";
 import { bankByGroup, bankReconciliation } from "@/lib/queries/bank";
 import type { Period } from "@/lib/search-params";
@@ -69,7 +69,7 @@ export async function BankReconcileTab({ period }: { period: Period }) {
                 <TableHead className="text-right">Số GD</TableHead>
                 <TableHead className="text-right">Tiền vào</TableHead>
                 <TableHead className="text-right">Tiền ra</TableHead>
-                <TableHead>Ảnh hưởng báo cáo</TableHead>
+                <TableHead title={BANK_NOT_A_COST_NOTE}>Loại dòng tiền</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -80,14 +80,7 @@ export async function BankReconcileTab({ period }: { period: Period }) {
               ) : (
                 groups.map((g) => {
                   const spec = BANK_GROUP_SPEC[g.group as BankGroup];
-                  const effect =
-                    spec.pnl.kind === "NONE"
-                      ? "Không vào lãi lỗ"
-                      : spec.pnl.kind === "REVENUE"
-                        ? "Doanh thu (nguồn: đơn hàng / bảng kê)"
-                        : spec.authority === "EXPENSES"
-                          ? "Chi phí vận hành — đẩy sang bảng Chi phí để vào lợi nhuận"
-                          : "Đã vào lợi nhuận từ nguồn khác — chỉ đối chiếu";
+                  const effect = `${BANK_CASH_CLASS_LABEL[spec.cashClass]}${spec.linkTo ? ` · đối chiếu với ${BANK_LINK_TYPE_LABEL[spec.linkTo].toLowerCase()}` : ""}`;
                   return (
                     <TableRow key={g.group} className={cn(g.group === "UNCLASSIFIED" && "bg-amber-50/60 dark:bg-amber-950/20")}>
                       <TableCell className="font-medium">{g.label}</TableCell>

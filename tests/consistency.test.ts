@@ -13,6 +13,7 @@ import { listVariantsForReceipt } from "@/lib/queries/stock";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { getDailyBreakdown, getProfitReport } from "@/lib/queries/reports";
 import { getMarketerReport } from "@/lib/queries/payroll";
 import { shipmentSummary } from "@/lib/queries/shipments";
@@ -226,10 +227,22 @@ export async function testConsistency(db: Db) {
     assert.equal(mk.totals.operatingEntered, opexTuan, `bảng lương (${basis}) dùng chung CP vận hành đã phân bổ`);
   }
 
+  // ── BẤT BIẾN CUỐI: engine là nguồn duy nhất, và Σ thành phần = tổng engine ──
+  const engineThang = await getRecognizedCosts(kyThang);
+  const engineTuan = await getRecognizedCosts(tuan1);
+  assert.equal(engineThang.operatingTotal, opexThang, "Profit Engine và Báo cáo lợi nhuận là CÙNG một con số (tháng)");
+  assert.equal(engineTuan.operatingTotal, opexTuan, "Profit Engine và Báo cáo lợi nhuận là CÙNG một con số (tuần)");
+  const congThanhPhan = Object.values(engineThang.components).reduce((t, c) => t + c.amount, 0);
+  assert.equal(congThanhPhan, engineThang.total, "Σ thành phần = tổng engine, không đồng nào rơi ngoài");
+  // Mỗi đồng thuộc ĐÚNG MỘT thành phần: khoản thuê chỉ được xuất hiện ở RENT.
+  assert.equal(engineThang.components.RENT.amount, 3_000_000, "khoản thuê nằm ở đúng thành phần Mặt bằng");
+  assert.equal(engineThang.components.OTHER_OPERATING.amount, 0, "và KHÔNG xuất hiện lần nữa ở Chi phí vận hành khác");
+  assert.equal(engineThang.components.UTILITIES.amount, 0, "điện nước chưa tách khỏi Mặt bằng ⇒ bằng 0, không đếm chồng");
+
   await db.delete(schema.expenses).where(eq(schema.expenses.id, "cs-rent"));
   clearMemo();
 
-  console.log(`✓ Nhất quán: chi phí vận hành ${opexThang}đ (tháng) / ${opexTuan}đ (tuần) GIỐNG NHAU ở Bảng điều khiển · Sự thật tài chính · Lợi nhuận · Dòng tiền — khoản theo kỳ chia theo ngày ở mọi trang`);
+  console.log(`✓ Nhất quán: chi phí vận hành ${opexThang}đ (tháng) / ${opexTuan}đ (tuần) GIỐNG NHAU ở Profit Engine · Bảng điều khiển · Sự thật tài chính · Lợi nhuận · Dòng tiền · Báo cáo tổng hợp · biểu đồ theo ngày · phân bổ theo mã · bảng lương`);
   console.log(`✓ Nhất quán: giao thành công ${t.delivered} khớp ở Đơn hàng / Vận đơn / GTC / Marketing / Chất lượng dữ liệu; hoàn ${t.returned}; GTC ${gtc.successRate}%`);
   console.log(`✓ Nhất quán: tồn kho khớp giữa Sản phẩm và Kế hoạch SX; nhu cầu SX không gồm đơn hoàn`);
 }

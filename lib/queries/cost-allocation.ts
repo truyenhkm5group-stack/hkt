@@ -2,7 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { allocateExpenseToRange, type AllocatableExpense } from "@/lib/constants/cost-allocation";
-import { EXPENSE_CATEGORIES_NOT_OWNED } from "@/lib/constants/cost-sources";
+import { COVERAGE_GATED_EXPENSE_CATEGORIES, EVIDENCE_ONLY_EXPENSE_CATEGORIES, HARD_EXCLUDED_EXPENSE_CATEGORIES } from "@/lib/constants/cost-authority";
 
 const e = schema.expenses;
 
@@ -146,14 +146,29 @@ function startOfVnDay(value: Date): Date {
 /**
  * ─────────── KHOẢN CHI THUỘC "CHI PHÍ VẬN HÀNH" CỦA BÁO CÁO ───────────
  *
- * Loại các nhóm mà bảng Chi phí KHÔNG có thẩm quyền (`lib/constants/cost-sources.ts`): quảng cáo đã
- * về từ tài khoản QC, tiền hàng đã nằm trong giá vốn, cước và phí hoàn đã tính theo từng đơn. Ghi
- * thêm ở bảng Chi phí rồi cộng vào đây là trừ ĐÚNG MỘT ĐỒNG ĐÓ hai lần.
+ * Tra sổ đăng ký thẩm quyền (`lib/constants/cost-authority.ts`) thay vì gõ tay danh sách nhóm. Ba
+ * chính sách khác nhau, và gộp chúng làm một là nguồn gốc của hai lỗi đã xảy ra:
  *
- * Trước đây mỗi truy vấn tự gõ `category not in ('ADS','PURCHASE')`. Danh sách đó thiếu `SHIPPING`
- * và `RETURN_FEE` — hai nhóm đã được báo cáo lợi nhuận tự tính theo đơn — nên khoản cước gõ tay bị
- * trừ hai lần suốt. Khai ở MỘT chỗ thì hợp đồng đổi là mọi truy vấn đổi theo.
+ *  1. LOẠI HẲN (`ADS`, `PURCHASE`) — tài khoản quảng cáo và phiếu kho bao trọn khoản này.
+ *  2. CHỈ NHẬN KHOẢN ĐIỀU CHỈNH CÓ CHỨNG CỨ (`SHIPPING`, `RETURN_FEE`) — cước từng đơn đã tính theo
+ *     vận đơn, nhưng đền bù / phí ngoại lệ / cước chuyến gom hàng KHÔNG gắn được vận đơn nào vẫn là
+ *     tiền thật. Loại sạch cả nhóm là làm mất tiền thật; nhận hết là trừ hai lần. Nên chỉ nhận khoản
+ *     khai rõ `cost_source = 'MANUAL_ADJUSTMENT'` kèm lý do (CSDL bắt buộc có lý do).
+ *  3. LOẠI CÓ ĐIỀU KIỆN (`SALARY`) — chỉ khi bảng Lương đã phủ đủ dữ liệu. Chưa đủ mà loại thì lương
+ *     thành 0, và 0 nhìn giống một con số hợp lệ.
  */
-export function operatingExpenseCond(): SQL {
-  return sql`${e.category} not in ${EXPENSE_CATEGORIES_NOT_OWNED}`;
+export function operatingExpenseCond(opts: { payrollCovered?: boolean } = {}): SQL {
+  const conds: SQL[] = [sql`${e.category} not in ${HARD_EXCLUDED_EXPENSE_CATEGORIES}`];
+  if (EVIDENCE_ONLY_EXPENSE_CATEGORIES.length) {
+    conds.push(sql`(${e.category} not in ${EVIDENCE_ONLY_EXPENSE_CATEGORIES} or ${e.costSource} = 'MANUAL_ADJUSTMENT')`);
+  }
+  if (opts.payrollCovered && COVERAGE_GATED_EXPENSE_CATEGORIES.length) {
+    conds.push(sql`${e.category} not in ${COVERAGE_GATED_EXPENSE_CATEGORIES}`);
+  }
+  return sql`(${sql.join(conds, sql` and `)})`;
+}
+
+/** Khoản trong nhóm "chỉ nhận điều chỉnh" mà KHÔNG khai là điều chỉnh — tức phần bị loại vì trùng nguồn. */
+export function logisticsDuplicateCond(): SQL {
+  return sql`(${e.category} in ${EVIDENCE_ONLY_EXPENSE_CATEGORIES} and ${e.costSource} <> 'MANUAL_ADJUSTMENT')`;
 }

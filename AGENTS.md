@@ -71,7 +71,16 @@ deploy dừng, không phải cảnh báo.
     phải dấu số tiền) quyết định giao dịch vào báo cáo nào. Chỉ nhóm mà bảng Chi phí có thẩm quyền
     mới đẩy sang lợi nhuận. Khoá tự nhiên `bank_transactions.bank_ref`; nhập lại sao kê không được
     nhân đôi dòng tiền và không được xoá nhãn người dùng đã gán. Quy tắc tự động không bao giờ ghi
-    đè dòng đã phân loại tay.
+    đè dòng đã phân loại tay. **Sao kê KHÔNG tạo chi phí**: nhóm kế toán chỉ quyết định LOẠI DÒNG
+    TIỀN (`BankCashClass`); nối tiền với chứng từ là ĐỐI CHIẾU (`linked_type`/`linked_id`), không
+    phải ghi nhận. Tiền ra ngày trả khác chi phí của kỳ trả.
+18. **SỔ ĐĂNG KÝ THẨM QUYỀN CHI PHÍ** (`lib/constants/cost-authority.ts`) + **MỘT ĐƯỜNG DUY NHẤT**
+    (`lib/queries/cost-engine.ts`): mọi báo cáo lấy chi phí vận hành qua `getOperatingCost()` /
+    `getRecognizedCosts()`, KHÔNG tự cộng. Chuyển thẩm quyền phải qua `coverage`: nguồn mới chưa phủ
+    đủ thì tự lùi về `fallback` VÀ nêu cảnh báo — tuyệt đối không để khoản chi thành 0, và không bao
+    giờ cộng cả hai nguồn. Lương mặc định vẫn ở bảng Chi phí; hoa hồng chưa chốt được cơ sở nên bật
+    `COMMISSION_BASIS_NEEDS_REVIEW`, không đoán. Cước/phí hoàn gõ tay chỉ được tính khi khai
+    `cost_source = 'MANUAL_ADJUSTMENT'` kèm lý do.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

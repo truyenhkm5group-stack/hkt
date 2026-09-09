@@ -22,10 +22,15 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
+  // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
+  // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
+  if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
+    return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
+  }
   const db = await getDb();
   const [row] = await db
     .insert(schema.expenses)
-    .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, createdBy: user.email })
+    .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason, createdBy: user.email })
     .returning({ id: schema.expenses.id });
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_CREATE", entity: "EXPENSE", entityId: row.id, detail: data });
   for (const p of ["/expenses", "/ads"]) revalidatePath(p);
@@ -41,12 +46,17 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   const parsed = expenseSchema.safeParse(input);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const data = parsed.data;
+  // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
+  // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
+  if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
+    return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
+  }
   const db = await getDb();
   const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
   if (!existing) return { error: "Không tìm thấy khoản chi phí" };
   await db
     .update(schema.expenses)
-    .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference })
+    .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason })
     .where(eq(schema.expenses.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_UPDATE", entity: "EXPENSE", entityId: id, detail: { before: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, reference: existing.reference }, after: data } });
   for (const p of ["/expenses", "/ads"]) revalidatePath(p);

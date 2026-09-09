@@ -159,8 +159,16 @@ export async function testCostAllocation(db: Db) {
   for (const file of PHAI_DUNG_BO_MAY_PHAN_BO) {
     const src = readFileSync(file, "utf8");
     const thoSo = /sum\(\s*\$\{\s*schema\.expenses\.amount\s*\}\s*\)/.test(src) || /sum\(schema\.expenses\.amount\)/.test(src);
-    assert.equal(thoSo, false, `${file}: cộng thẳng expenses.amount — phải dùng allocatedExpenseSum/allocatedExpenseByDay, nếu không khoản theo kỳ lại rơi trọn vào một kỳ`);
-    assert.ok(/allocatedExpense(Sum|ByDay)/.test(src), `${file}: phải dùng bộ máy phân bổ dùng chung`);
+    assert.equal(thoSo, false, `${file}: cộng thẳng expenses.amount — phải đi qua Profit Engine, nếu không khoản theo kỳ lại rơi trọn vào một kỳ`);
+    // Báo cáo KHÔNG được tự quyết định nguồn nào có thẩm quyền: phải hỏi Profit Engine
+    // (`getOperatingCost` / `getRecognizedCosts`) hoặc dùng bộ phân bổ theo ngày dùng chung.
+    assert.ok(
+      /getOperatingCost|getRecognizedCosts|allocatedExpenseByDay/.test(src),
+      `${file}: phải lấy chi phí vận hành qua Profit Engine, không tự cộng theo cách riêng`,
+    );
+    // Không trang nào được tự gõ lại danh sách nhóm bị loại — đó chính là chỗ SHIPPING và
+    // RETURN_FEE bị bỏ sót và bị trừ hai lần suốt một thời gian dài.
+    assert.equal(/not in \('ADS','PURCHASE'\)/.test(src), false, `${file}: còn gõ tay danh sách nhóm bị loại`);
   }
 
   console.log(

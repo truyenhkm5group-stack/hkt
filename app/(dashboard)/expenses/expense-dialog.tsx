@@ -25,6 +25,8 @@ function toForm(expense?: ExpenseRow | null): Partial<ExpenseInput> {
     amount: expense?.amount,
     occurredAt: expense ? vnDateKey(expense.occurredAt) : todayVN(),
     reference: expense?.reference ?? "",
+    costSource: (expense?.costSource === "MANUAL_ADJUSTMENT" ? "MANUAL_ADJUSTMENT" : "MANUAL") as ExpenseInput["costSource"],
+    reason: expense?.reason ?? "",
   };
 }
 
@@ -150,6 +152,53 @@ export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: Expen
                   </FormItem>
                 )}
               />
+              {/*
+                KHOẢN ĐIỀU CHỈNH — lối thoát DUY NHẤT của luật chống trừ hai lần.
+                Cước và phí hoàn của từng đơn đã được tính theo vận đơn, nên khoản gõ tay trong hai nhóm đó bị
+                loại. Nhưng đền bù, phí ngoại lệ, cước chuyến gom hàng không gắn được vận đơn nào vẫn là tiền
+                thật — khai là "điều chỉnh" kèm lý do thì được tính.
+              */}
+              <FormField
+                control={form.control}
+                name="costSource"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nguồn khoản chi</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="MANUAL">Khoản chi thông thường</SelectItem>
+                        <SelectItem value="MANUAL_ADJUSTMENT">Điều chỉnh thủ công (ngoài cước theo vận đơn)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Nhóm “Phí giao hàng” và “Phí hoàn” đã được tính theo từng vận đơn. Khoản gõ tay trong hai
+                      nhóm đó chỉ vào lợi nhuận khi chọn <b>Điều chỉnh thủ công</b> và ghi rõ lý do.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {form.watch("costSource") === "MANUAL_ADJUSTMENT" ? (
+                <FormField
+                  control={form.control}
+                  name="reason"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Lý do điều chỉnh</FormLabel>
+                      <FormControl>
+                        <Input placeholder="VD: đền bù kiện vỡ, không thuộc bảng kê nào" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
               <FormField
                 control={form.control}
                 name="reference"

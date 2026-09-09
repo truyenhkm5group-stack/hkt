@@ -17,14 +17,24 @@ import { and, count, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { PERIOD_LIKE_CATEGORIES } from "@/lib/constants/cost-allocation";
-import { EXPENSE_CATEGORIES_NOT_OWNED, EXPENSE_CATEGORY_ECONOMIC, COST_AUTHORITY, COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
+import { EXPENSE_CATEGORY_ECONOMIC, COST_AUTHORITY, COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
+import { HARD_EXCLUDED_EXPENSE_CATEGORIES } from "@/lib/constants/cost-authority";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
 import { DEFAULT_PROFIT_ASSUMPTIONS, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
 import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
-export const COST_QUALITY_RULES = ["DUPLICATE_COST_SOURCE", "COMMISSION_BASIS_NEEDS_REVIEW", "PERIOD_COST_WITHOUT_PERIOD", "EXCLUDED_BY_AUTHORITY"] as const;
+export const COST_QUALITY_RULES = [
+  "DUPLICATE_COST_SOURCE",
+  "COMMISSION_BASIS_NEEDS_REVIEW",
+  "PERIOD_COST_WITHOUT_PERIOD",
+  "EXCLUDED_BY_AUTHORITY",
+  "PAYROLL_COST_COVERAGE_INCOMPLETE",
+  "DUPLICATE_PAYROLL_EXPENSE_SOURCE",
+  "DUPLICATE_LOGISTICS_COST_SOURCE",
+] as const;
 export type CostQualityRule = (typeof COST_QUALITY_RULES)[number];
 
 export type CostQualityIssue = {
@@ -56,7 +66,7 @@ async function build(period: Period): Promise<CostQualityIssue[]> {
   const excluded = await db
     .select({ category: e.category, amount: allocatedExpenseSum(period.from, period.to), n: count() })
     .from(e)
-    .where(and(inArray(e.category, EXPENSE_CATEGORIES_NOT_OWNED), inRange))
+    .where(and(inArray(e.category, HARD_EXCLUDED_EXPENSE_CATEGORIES), inRange))
     .groupBy(e.category);
   for (const row of excluded) {
     const amount = Number(row.amount ?? 0);
@@ -115,28 +125,6 @@ async function build(period: Period): Promise<CostQualityIssue[]> {
     });
   }
 
-  // ── 3. Lương gộp chung hoa hồng: không biết phân bổ kiểu nào ──
-  // Lương cố định đi theo THỜI GIAN (chia đều theo ngày trong kỳ hiệu lực).
-  // Hoa hồng đi theo ĐƠN (ghi vào đúng kỳ phát sinh đơn, KHÔNG chia đều theo ngày).
-  // Một khoản `SALARY` không khai kỳ thì ERP không có cách nào biết nó là loại nào — và đoán bừa
-  // sẽ làm lợi nhuận tuần sai theo hai hướng ngược nhau.
-  const [ambiguous] = await db
-    .select({ amount: allocatedExpenseSum(period.from, period.to), n: count() })
-    .from(e)
-    .where(and(eq(e.category, "SALARY"), eq(e.allocationMethod, "EVENT_DATE"), inRange));
-  if (Number(ambiguous?.n ?? 0) > 0) {
-    issues.push({
-      rule: "COMMISSION_BASIS_NEEDS_REVIEW",
-      severity: "medium",
-      title: `${Number(ambiguous?.n)} khoản lương / hoa hồng chưa rõ cách phân bổ`,
-      detail:
-        "Lương cố định đi theo THỜI GIAN nên phải chia theo số ngày trong kỳ hiệu lực. Hoa hồng đi theo ĐƠN nên ghi trọn vào kỳ phát sinh đơn, không được chia đều. Các khoản này đang ghi trọn vào ngày trả tiền, nên báo cáo theo tuần của phần lương cố định sẽ sai.",
-      action: "Với khoản là LƯƠNG THÁNG: sửa cách phân bổ thành “Chia theo số ngày trong kỳ” và khai kỳ hiệu lực. Với khoản là HOA HỒNG theo đơn: giữ nguyên “Phát sinh một lần”.",
-      amount: Number(ambiguous?.amount ?? 0),
-      count: Number(ambiguous?.n ?? 0),
-    });
-  }
-
   // ── 4. Khoản bản chất theo kỳ nhưng chưa khai kỳ ──
   const [needsPeriod] = await db
     .select({ amount: allocatedExpenseSum(period.from, period.to), n: count() })
@@ -155,6 +143,12 @@ async function build(period: Period): Promise<CostQualityIssue[]> {
     });
   }
 
+  // Cảnh báo của Profit Engine (độ phủ bảng Lương, trùng nguồn lương / cước, cơ sở hoa hồng) hiện
+  // CÙNG một chỗ với các luật ở đây: chủ shop không phải đi tìm ở hai nơi để hiểu một con số.
+  const engine = await getRecognizedCosts(period);
+  for (const w of engine.warnings) {
+    issues.push({ rule: w.rule as CostQualityRule, severity: w.severity, title: w.title, detail: w.detail, action: w.action, amount: w.amount, count: w.count });
+  }
   return issues.sort((a, x) => (a.severity === x.severity ? x.amount - a.amount : a.severity === "high" ? -1 : 1));
 }
 

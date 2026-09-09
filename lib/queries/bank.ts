@@ -11,7 +11,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { BANK_GROUPS, BANK_GROUP_SPEC, isBankGroup, type BankGroup } from "@/lib/constants/bank";
+import { BANK_GROUPS, BANK_GROUP_SPEC, isBankGroup, isBusinessCash, type BankGroup } from "@/lib/constants/bank";
 import type { ListParams, Period } from "@/lib/search-params";
 
 const b = schema.bankTransactions;
@@ -19,7 +19,7 @@ const b = schema.bankTransactions;
 export const BANK_SORTABLE = ["txnAt", "amount", "counterparty", "accountingGroup"];
 
 /** Nhóm KHÔNG phải dòng tiền kinh doanh (chuyển nội bộ, trả gốc, rút vốn…) — loại khỏi mọi tổng dòng tiền */
-export const NON_BUSINESS_GROUPS = BANK_GROUPS.filter((g) => !BANK_GROUP_SPEC[g].businessCash);
+export const NON_BUSINESS_GROUPS = BANK_GROUPS.filter((g) => !isBusinessCash(g));
 
 function periodCond(column: AnyPgColumn, from: Date | null, to: Date | null): SQL[] {
   const conds: SQL[] = [];
@@ -83,8 +83,10 @@ export async function listBankTransactions(params: ListParams, options: BankList
         classifiedBy: b.classifiedBy,
         source: b.source,
         ruleId: b.ruleId,
-        /** Đã đẩy sang bảng Chi phí chưa — khoá theo mã tham chiếu "MB <mã GD>" */
-        posted: sql<boolean>`exists (select 1 from ${schema.expenses} e where e.reference = ('MB ' || ${b.bankRef}))`,
+        linkedType: b.linkedType,
+        linkedId: b.linkedId,
+        /** Đã nối với chứng từ nào chưa — ĐỐI CHIẾU, không phải ghi nhận chi phí */
+        linked: sql<boolean>`${b.linkedType} <> ''`,
       })
       .from(b)
       .where(where)

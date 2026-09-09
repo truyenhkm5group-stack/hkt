@@ -1094,11 +1094,23 @@ export const expenses = pgTable(
     /** Khoản theo kỳ nhưng CHƯA khai kỳ — nêu ở Chất lượng dữ liệu, KHÔNG tự đoán kỳ giúp. */
     needsAllocationReview: boolean("needs_allocation_review").notNull().default(false),
     reference: text("reference").notNull().default(""),
+    /**
+     * NGUỒN của khoản chi — quyết định nó có được tính vào lợi nhuận hay không khi nhóm của nó đã
+     * có nguồn chuyên biệt (cước, phí hoàn). `MANUAL_ADJUSTMENT` là khoản ĐIỀU CHỈNH có chứng cứ:
+     * đền bù, phí ngoại lệ, cước chuyến gom hàng không gắn được vận đơn nào — tiền thật, phải tính.
+     * Khoản `MANUAL` thông thường trong các nhóm đó bị loại vì vận đơn đã bao trọn.
+     */
+    costSource: text("cost_source").notNull().default("MANUAL"),
+    /** Bắt buộc với `MANUAL_ADJUSTMENT`: vì sao khoản này KHÔNG nằm trong cước theo vận đơn */
+    reason: text("reason").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt),
+    check("expenses_cost_source_check", sql`${t.costSource} IN ('MANUAL', 'MANUAL_ADJUSTMENT', 'BANK_IMPORT', 'PAYROLL')`),
+    // Khoản điều chỉnh mà không nói vì sao thì không kiểm chứng được ⇒ chặn ngay ở CSDL.
+    check("expenses_adjustment_reason_check", sql`${t.costSource} <> 'MANUAL_ADJUSTMENT' OR length(trim(${t.reason})) > 0`),
     index("expenses_period_idx").on(t.periodStart, t.periodEnd),
     check("expenses_allocation_check", sql`${t.allocationMethod} IN ('EVENT_DATE', 'PERIOD_PRORATA', 'ORDER_ATTRIBUTED', 'ACTUAL_DATED_SPEND')`),
     // Chia theo ngày thì BẮT BUỘC có kỳ hợp lệ — không có kỳ mà đòi chia là không tính được.
@@ -1144,6 +1156,15 @@ export const bankTransactions = pgTable(
     classifiedAt: ts("classified_at"),
     /** IMPORT = từ file sao kê, MANUAL = gõ tay (tiền mặt, ví điện tử…) */
     source: text("source").notNull().default("IMPORT"),
+    /**
+     * ĐỐI CHIẾU, KHÔNG PHẢI GHI NHẬN.
+     *
+     * Một dòng tiền ra KHÔNG tự sinh chi phí trong lãi lỗ — trả lương qua ngân hàng là tiền đi ra,
+     * nhưng chi phí lương đã được ghi nhận theo kỳ ở nguồn có thẩm quyền. Liên kết ở đây chỉ để nối
+     * TIỀN THẬT với CHỨNG TỪ đã có, phục vụ đối chiếu; không nhân đôi chi phí.
+     */
+    linkedType: text("linked_type").notNull().default(""),
+    linkedId: text("linked_id").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1151,6 +1172,10 @@ export const bankTransactions = pgTable(
     uniqueIndex("bank_txn_ref_idx").on(t.bankRef),
     index("bank_txn_at_idx").on(t.txnAt),
     index("bank_txn_group_idx").on(t.accountingGroup, t.txnAt),
+    index("bank_txn_linked_idx").on(t.linkedType, t.linkedId),
+    check("bank_txn_linked_check", sql`${t.linkedType} IN ('', 'EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND')`),
+    // Có loại thì phải có mã, và ngược lại — nửa vời thì đối chiếu không lần ra được gì.
+    check("bank_txn_linked_pair_check", sql`(${t.linkedType} = '' AND ${t.linkedId} = '') OR (${t.linkedType} <> '' AND length(${t.linkedId}) > 0)`),
     // Số tiền 0 không phải giao dịch; chiều tiền phải rõ ràng.
     check("bank_txn_amount_check", sql`${t.amount} <> 0`),
     check("bank_txn_source_check", sql`${t.source} IN ('IMPORT', 'MANUAL')`),

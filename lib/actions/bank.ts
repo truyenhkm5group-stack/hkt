@@ -13,7 +13,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { BANK_GROUPS, BANK_GROUP_SPEC, canPostToExpenses, isBankGroup, postBlockedReason, type BankGroup } from "@/lib/constants/bank";
+import { BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, type BankGroup, type BankLinkType } from "@/lib/constants/bank";
 import { parseLedger } from "@/lib/integrations/bank/ledger";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
 import { matchRule, RULE_CLASSIFIER, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
@@ -316,72 +316,60 @@ async function applyRulesInternal(): Promise<number> {
   return applied;
 }
 
-// ───────────────────────── Đẩy sang bảng Chi phí ─────────────────────────
+// ───────────────────────── Đối chiếu: NỐI với chứng từ đã có ─────────────────────────
 
 /**
- * Đưa giao dịch đã phân loại vào Báo cáo lợi nhuận bằng cách tạo khoản chi ở bảng Chi phí.
+ * Nối một giao dịch sao kê với chứng từ đã có (khoản chi, đợt COD, phiếu nhập, chi tiêu QC).
  *
- * CHỈ nhóm mà bảng Chi phí có thẩm quyền mới được đẩy. Quảng cáo, tiền hàng, cước ĐVVC đã vào lợi
- * nhuận từ nguồn chuyên biệt của chúng — đẩy thêm là trừ hai lần (xem `lib/constants/cost-sources.ts`).
- *
- * Chống đẩy trùng bằng mã tham chiếu `MB <mã GD>`, cùng khoá mà luồng nhập sao kê cũ đã dùng.
+ * ĐÂY KHÔNG PHẢI GHI NHẬN CHI PHÍ. Trước đây có một hành động "đẩy sang bảng Chi phí" tạo khoản chi
+ * mới từ dòng tiền — đã bỏ, vì nó biến "tiền đã đi ra" thành "chi phí của kỳ chứa ngày trả tiền",
+ * trong khi chi phí phải thuộc kỳ hưởng lợi ích (lương tháng 9 trả ngày 05/10 là chi phí tháng 9).
+ * Nối chỉ trả lời "đồng tiền này ứng với chứng từ nào" để đối chiếu.
  */
-export async function postBankToExpenses(ids: string[]): Promise<{ ok: true; posted: number; skipped: number; blocked: string[] } | { error: string }> {
+const linkSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(BANK_LINK_TYPES),
+  targetId: z.string().trim().min(1, "Chưa chọn chứng từ").max(200),
+});
+
+export async function linkBankTransaction(input: unknown): Promise<{ ok: true } | { error: string }> {
   const g = await guard();
   if (g.error !== undefined) return { error: g.error };
-  const parsed = z.array(z.string().min(1)).min(1, "Chưa chọn giao dịch nào").max(1000).safeParse(ids);
+  const parsed = linkSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { id, type, targetId } = parsed.data;
 
   const db = await getDb();
-  const rows = await db.select().from(b).where(inArray(b.id, parsed.data));
-  const blocked = new Set<string>();
-  const eligible = rows.filter((r) => {
-    if (r.amount >= 0) {
-      blocked.add("Chỉ đẩy được giao dịch TIỀN RA sang bảng Chi phí.");
-      return false;
-    }
-    if (!isBankGroup(r.accountingGroup)) return false;
-    const reason = postBlockedReason(r.accountingGroup);
-    if (reason) {
-      blocked.add(reason);
-      return false;
-    }
-    return canPostToExpenses(r.accountingGroup);
-  });
-  if (!eligible.length) return { ok: true, posted: 0, skipped: rows.length, blocked: [...blocked] };
+  const [row] = await db.select().from(b).where(eq(b.id, id));
+  if (!row) return { error: "Không tìm thấy giao dịch" };
 
-  const references = eligible.map((r) => `MB ${r.bankRef}`);
-  const already = new Set(
-    (await db.select({ reference: schema.expenses.reference }).from(schema.expenses).where(inArray(schema.expenses.reference, references))).map((r) => r.reference),
-  );
-  const toInsert = eligible.filter((r) => !already.has(`MB ${r.bankRef}`));
-  if (toInsert.length) {
-    await db.insert(schema.expenses).values(
-      toInsert.map((r) => {
-        const spec = BANK_GROUP_SPEC[r.accountingGroup as BankGroup];
-        const category = spec.pnl.kind === "EXPENSE" ? spec.pnl.category : "OTHER";
-        return {
-          category,
-          description: [r.counterparty, r.description].filter(Boolean).join(" · ").slice(0, 500) || spec.label,
-          amount: Math.abs(r.amount),
-          occurredAt: r.txnAt,
-          reference: `MB ${r.bankRef}`,
-          createdBy: g.user.email,
-          // KHÔNG tự đoán kỳ hiệu lực. Lương tháng / phần mềm năm phải do người khai kỳ; đoán kỳ là
-          // bịa chứng từ, và một khoản phần mềm có thể là tháng, quý hay năm.
-          allocationMethod: "EVENT_DATE" as const,
-          needsAllocationReview: spec.pnl.kind === "EXPENSE" && ["RENT", "SALARY", "SOFTWARE"].includes(category),
-        };
-      }),
-    );
-  }
-  await audit({
-    userId: g.user.id,
-    userEmail: g.user.email,
-    action: "BANK_POST_TO_EXPENSES",
-    entity: "EXPENSE",
-    detail: { posted: toInsert.length, alreadyPosted: eligible.length - toInsert.length, skipped: rows.length - eligible.length, references: toInsert.map((r) => `MB ${r.bankRef}`) },
-  });
+  // Chứng từ phải CÓ THẬT — nối tới một mã không tồn tại thì đối chiếu vô nghĩa.
+  const exists = await targetExists(type, targetId);
+  if (!exists) return { error: `Không tìm thấy ${BANK_LINK_TYPE_LABEL[type].toLowerCase()} với mã này` };
+
+  await db.update(b).set({ linkedType: type, linkedId: targetId, updatedAt: new Date() }).where(eq(b.id, id));
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_LINK", entity: "BANK_TRANSACTION", entityId: id, before: { linkedType: row.linkedType, linkedId: row.linkedId }, after: { linkedType: type, linkedId: targetId } });
   revalidateAll();
-  return { ok: true, posted: toInsert.length, skipped: rows.length - toInsert.length, blocked: [...blocked] };
+  return { ok: true };
+}
+
+export async function unlinkBankTransaction(id: string): Promise<{ ok: true } | { error: string }> {
+  const g = await guard();
+  if (g.error !== undefined) return { error: g.error };
+  const db = await getDb();
+  const [row] = await db.select().from(b).where(eq(b.id, id));
+  if (!row) return { error: "Không tìm thấy giao dịch" };
+  await db.update(b).set({ linkedType: "", linkedId: "", updatedAt: new Date() }).where(eq(b.id, id));
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_UNLINK", entity: "BANK_TRANSACTION", entityId: id, before: { linkedType: row.linkedType, linkedId: row.linkedId } });
+  revalidateAll();
+  return { ok: true };
+}
+
+async function targetExists(type: BankLinkType, targetId: string): Promise<boolean> {
+  const db = await getDb();
+  const one = async (rows: Promise<unknown[]>) => (await rows).length > 0;
+  if (type === "EXPENSE") return one(db.select({ id: schema.expenses.id }).from(schema.expenses).where(eq(schema.expenses.id, targetId)).limit(1));
+  if (type === "COD_BATCH") return one(db.select({ id: schema.codBatches.id }).from(schema.codBatches).where(eq(schema.codBatches.id, targetId)).limit(1));
+  if (type === "STOCK_RECEIPT") return one(db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
+  return one(db.select({ id: schema.adSpends.id }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
 }

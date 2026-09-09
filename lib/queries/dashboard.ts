@@ -10,7 +10,8 @@ import { getControlTower } from "@/lib/queries/control-tower";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
-import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+// Giữ bảng dẫn xuất của phiên hiệu năng, và lấy chi phí vận hành qua Profit Engine.
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { averageOrderValue, factMetrics, metricScope, orderMetricFacts, successRate } from "@/lib/queries/metrics";
 
 function inPeriod(column: typeof schema.orders.insertedAt, from: Date | null, to: Date | null) {
@@ -151,13 +152,8 @@ async function getDashboardDataUncached(period: Period) {
     // COD
     db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus),
     // Chi phí vận hành trong kỳ: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
-    db
-      // Phân bổ đúng khoảng như Báo cáo lợi nhuận: khoản theo kỳ chia theo số ngày chồng lấn.
-      // Cộng nguyên khoản theo `occurred_at` sẽ khiến thẻ này và báo cáo LN nói hai con số khác nhau
-      // cho cùng một chỉ số "chi phí vận hành trong kỳ".
-      .select({ amount: allocatedExpenseSum(period.from, period.to) })
-      .from(schema.expenses)
-      .where(and(operatingExpenseCond(), expenseInRange(period.from, period.to))),
+    // MỘT đường duy nhất qua Profit Engine: thẻ này và báo cáo lợi nhuận không được nói hai con số.
+    getOperatingCost(period),
     db
       .select({ amount: sum(schema.adSpends.spend) })
       .from(schema.adSpends)
@@ -197,7 +193,7 @@ async function getDashboardDataUncached(period: Period) {
   const channels = channelRows.map((r) => ({ source: r.source, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0) }));
   const shipmentsByStage = Object.fromEntries(shipmentRows.map((r) => [r.stage, { count: Number(r.count), cod: Number(r.cod ?? 0) }])) as Record<ShipmentStage, { count: number; cod: number }>;
   const cod = Object.fromEntries(codRows.map((r) => [r.status, { count: Number(r.count), amount: Number(r.amount ?? 0) }]));
-  const [expense] = expenseRows;
+  const expense = expenseRows;
   const [ads] = adsRows;
   const [shippingFees] = shippingRows;
   const [failedDelivery] = failedDeliveryRows;

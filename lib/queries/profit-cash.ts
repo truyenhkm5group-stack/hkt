@@ -3,7 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { COD_COLLECTABLE, ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
-import { allocatedExpenseSum, expenseInRange, operatingExpenseCond } from "@/lib/queries/cost-allocation";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -35,7 +35,7 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
   const finishedAt = sql`coalesce(${s.deliveredAt}, ${s.returnedAt}, ${s.vtpStatusDate}, ${o.lastUpdateStatusAt}, ${o.updatedAtExternal}, ${o.insertedAt})`;
   const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
   const b = schema.codBatches;
-  const [[batchRows], [orderRows], [purchases], [adRows], [expenseRows], codWaiting, codTransit] = await Promise.all([
+  const [[batchRows], [orderRows], [purchases], [adRows], expenseRows, codWaiting, codTransit] = await Promise.all([
     db
       .select({
         count: sql<number>`count(*)`,
@@ -67,11 +67,8 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to))),
-    db
-      // Cùng một bộ máy phân bổ với Báo cáo lợi nhuận — hai trang không được cho hai con số.
-      .select({ amount: allocatedExpenseSum(period.from, period.to) })
-      .from(schema.expenses)
-      .where(and(operatingExpenseCond(), expenseInRange(period.from, period.to))),
+    // CÙNG một đường với mọi báo cáo khác: Profit Engine quyết định nguồn nào có thẩm quyền.
+    getOperatingCost(period),
     db
       // COD_COLLECTABLE: vận đơn đã hoàn / huỷ thì tiền không bao giờ về, dù trạng thái COD chưa cập nhật.
       // Trang Đối soát COD đã lọc điều kiện này; trước đây báo cáo dòng tiền thì không nên hai trang lệch nhau.
@@ -107,7 +104,7 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
     shippingStatement: statements.feeTotal,
     shippingMode: (statements.feeTotal > 0 ? "statement" : "estimate") as "statement" | "estimate",
     adSpend: Number(adRows?.amount ?? 0),
-    operating: Number(expenseRows?.amount ?? 0),
+    operating: expenseRows.amount,
     total: 0,
   };
   // Cước đã bị Viettel Post trừ ngay trên bảng kê (tiền vào là số thực nhận) → không trừ lần nữa; chỉ dùng ước tính khi kỳ chưa có bảng kê
