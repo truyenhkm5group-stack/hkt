@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Banknote,
   BarChart3,
   BellRing,
   Boxes,
@@ -87,6 +88,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
       { href: "/reports/returns", label: "Tỷ lệ giao thành công", icon: Undo2, permission: "reports:returns" },
       { href: "/reports/funnel", label: "Phễu bán hàng", icon: Filter, permission: "reports:returns" },
+      { href: "/reports/cashflow", label: "Dòng tiền", icon: Banknote, permission: "reports:cash" },
       { href: "/data-quality", label: "Chất lượng dữ liệu", icon: ShieldCheck, permission: "dashboard:view" },
       { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },
     ],
