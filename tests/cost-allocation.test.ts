@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -148,28 +148,70 @@ export async function testCostAllocation(db: Db) {
   // Bug này đã bị sửa MỘT LẦN ở báo cáo lợi nhuận rồi lại tái sinh ở năm trang khác, vì mỗi trang tự
   // viết lại `sum(expenses.amount) where occurred_at between ...`. Lời hứa trong tài liệu không chặn
   // được ai; bài kiểm thử này đỏ ngay khi có người chép lại phép cộng thô.
-  const PHAI_DUNG_BO_MAY_PHAN_BO = [
-    "lib/queries/profit-nominal.ts",
-    "lib/queries/profit-cash.ts",
-    "lib/queries/payroll.ts",
-    "lib/queries/dashboard.ts",
-    "lib/queries/financial-truth.ts",
-    "lib/queries/reports.ts",
-  ];
-  for (const file of PHAI_DUNG_BO_MAY_PHAN_BO) {
+  //
+  // TRƯỚC 10/09/2026 bài kiểm này canh một DANH SÁCH SÁU TỆP gõ tay — nên `cashflow.ts` cộng thẳng
+  // toàn bộ `expenses.amount` suốt một thời gian dài mà không đỏ: nó không có tên trong danh sách.
+  // Nhịp chi của trang Dòng tiền vì thế cộng cả khoản gõ tay nhóm "Quảng cáo" CHỒNG LÊN chi tiêu lấy
+  // từ tài khoản QC ngay phía trên — đốt tiền trông gấp đôi thực tế.
+  //
+  // Nay quét NGƯỢC LẠI: mọi tệp trong `lib/queries` đụng tới `expenses.amount` đều phải chứng minh,
+  // và muốn miễn thì phải khai lý do. Danh sách trắng gõ tay không bao giờ theo kịp kho mã.
+  const MIEN_TRU_CHI_PHI: Record<string, { lyDo: string; phaiLocThamQuyen: boolean }> = {
+    // Trang Chi phí là SỔ GHI, không phải báo cáo tài chính: nó phải hiện ĐỦ mọi khoản đã gõ, kể cả
+    // khoản bị loại khỏi lợi nhuận vì nguồn khác có thẩm quyền. Lọc bớt ở đây thì người vừa nhập
+    // xong thấy khoản của mình biến mất — tệ hơn nhiều so với việc phải giải thích cột "bị loại".
+    // Phần bị loại đã được nêu riêng bằng luật đối soát EXCLUDED_BY_AUTHORITY.
+    "lib/queries/expenses.ts": { lyDo: "sổ ghi chi phí, hiện đúng số đã gõ vào", phaiLocThamQuyen: false },
+    // Dòng tiền đo TIỀN RA THẬT theo ngày chi, không theo kỳ kế toán — nên không đi qua bộ phân bổ.
+    // Nhưng nó VẪN là một con số tài chính, nên vẫn phải tôn trọng thẩm quyền nguồn chi.
+    "lib/queries/cashflow.ts": { lyDo: "dự phóng dòng tiền đo theo ngày chi thật", phaiLocThamQuyen: true },
+  };
+  const CONG_THO = /sum\(\s*\$\{\s*schema\.expenses\.amount\s*\}\s*\)|sum\(schema\.expenses\.amount\)/;
+  const tepTruyVan = readdirSync("lib/queries")
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => `lib/queries/${f}`);
+  assert.ok(tepTruyVan.length > 20, `đọc hụt thư mục truy vấn (chỉ thấy ${tepTruyVan.length} tệp)`);
+
+  const congTho: string[] = [];
+  for (const file of tepTruyVan) {
     const src = readFileSync(file, "utf8");
-    const thoSo = /sum\(\s*\$\{\s*schema\.expenses\.amount\s*\}\s*\)/.test(src) || /sum\(schema\.expenses\.amount\)/.test(src);
-    assert.equal(thoSo, false, `${file}: cộng thẳng expenses.amount — phải đi qua Profit Engine, nếu không khoản theo kỳ lại rơi trọn vào một kỳ`);
-    // Báo cáo KHÔNG được tự quyết định nguồn nào có thẩm quyền: phải hỏi Profit Engine
-    // (`getOperatingCost` / `getRecognizedCosts`) hoặc dùng bộ phân bổ theo ngày dùng chung.
+    // Không trang nào được tự gõ lại danh sách nhóm bị loại — đó chính là chỗ SHIPPING và
+    // RETURN_FEE bị bỏ sót và bị trừ hai lần suốt một thời gian dài.
+    assert.equal(/not in \('ADS','PURCHASE'\)/.test(src), false, `${file}: còn gõ tay danh sách nhóm bị loại`);
+    if (!CONG_THO.test(src)) continue;
+    const mienTru = MIEN_TRU_CHI_PHI[file];
+    if (mienTru) {
+      // Miễn PHÂN BỔ không kéo theo miễn THẨM QUYỀN: con số nào còn là con số tài chính thì vẫn phải
+      // hỏi ai có quyền sở hữu khoản chi đó, nếu không quảng cáo bị cộng hai lần.
+      if (mienTru.phaiLocThamQuyen) {
+        assert.ok(
+          /operatingExpenseCond|getOperatingCost|getRecognizedCosts/.test(src),
+          `${file}: được miễn phân bổ theo kỳ (${mienTru.lyDo}), NHƯNG vẫn phải lọc thẩm quyền nguồn chi`,
+        );
+      }
+      continue;
+    }
+    if (!/getOperatingCost|getRecognizedCosts|allocatedExpenseByDay/.test(src)) congTho.push(file);
+  }
+  assert.deepEqual(
+    congTho,
+    [],
+    `Cộng thẳng expenses.amount mà không qua Profit Engine: ${congTho.join(", ")}. ` +
+      "Dùng getOperatingCost / getRecognizedCosts / allocatedExpenseByDay, hoặc khai vào MIEN_TRU_CHI_PHI kèm lý do.",
+  );
+
+  // Các trang lợi nhuận thì không được miễn: chúng PHẢI hỏi Profit Engine.
+  for (const file of ["lib/queries/profit-nominal.ts", "lib/queries/profit-cash.ts", "lib/queries/payroll.ts", "lib/queries/dashboard.ts", "lib/queries/financial-truth.ts", "lib/queries/reports.ts"]) {
+    const src = readFileSync(file, "utf8");
     assert.ok(
       /getOperatingCost|getRecognizedCosts|allocatedExpenseByDay/.test(src),
       `${file}: phải lấy chi phí vận hành qua Profit Engine, không tự cộng theo cách riêng`,
     );
-    // Không trang nào được tự gõ lại danh sách nhóm bị loại — đó chính là chỗ SHIPPING và
-    // RETURN_FEE bị bỏ sót và bị trừ hai lần suốt một thời gian dài.
-    assert.equal(/not in \('ADS','PURCHASE'\)/.test(src), false, `${file}: còn gõ tay danh sách nhóm bị loại`);
   }
+
+  // Danh sách miễn trừ phải sạch: khai cho tệp không còn cộng thô là rác, và che mất ca thật.
+  const thuaMienTru = Object.keys(MIEN_TRU_CHI_PHI).filter((f) => !CONG_THO.test(readFileSync(f, "utf8")));
+  assert.deepEqual(thuaMienTru, [], `MIEN_TRU_CHI_PHI còn khai tệp không còn cộng thô: ${thuaMienTru.join(", ")}`);
 
   console.log(
     "✓ Phân bổ chi phí theo kỳ: thuê tháng không còn cộng nguyên vào một tuần · hai khoảng liền nhau cộng đúng tổng · khoản một lần đúng kỳ · tháng nhuận đúng · SQL khớp TypeScript · rải đều theo ngày",
