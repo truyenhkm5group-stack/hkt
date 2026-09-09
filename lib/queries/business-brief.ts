@@ -1,6 +1,7 @@
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
+import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
 import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { classifyProduct } from "@/lib/constants/product-verdict";
@@ -51,13 +52,15 @@ function pctChange(now: number, before: number | undefined | null): number | nul
 const vnd = (v: number) => `${Math.round(v).toLocaleString("vi-VN")}đ`;
 
 export async function getBusinessBrief(period: Period): Promise<BusinessBrief> {
-  const [dash, queue, adsAnomalies, slow, products, adSpend] = await Promise.all([
+  const [dash, queue, adsAnomalies, slow, products, adSpend, muaHang] = await Promise.all([
     getDashboardData(period),
     getDashboardActionQueue(),
     detectAdsAnomalies().catch(() => []),
     getSlowMoving().catch(() => null),
     getProductIntelligence({ period, limit: 100 }).catch(() => []),
     adSpendByProduct(period).catch(() => new Map<string, number>()),
+    // Chạy song song với phần còn lại và có nhớ tạm riêng, nên không kéo dài thời gian dựng trang.
+    getPurchasingReport().catch(() => null),
   ]);
 
   const metrics: BriefMetric[] = [
@@ -153,6 +156,39 @@ export async function getBusinessBrief(period: Period): Promise<BusinessBrief> {
     }
   }
 
+  // ── Rủi ro mua hàng: tiền đã hứa với xưởng đang treo, và giá vốn sắp đổi ──
+  // CỐ Ý chỉ đưa hai loại này vào bản tóm tắt: cả hai đều gấp và làm được ngay. Chỉ số giữ chân
+  // khách thì đúng nhưng nhúc nhích theo tháng — để trong bản tóm tắt hằng ngày là nhiễu.
+  if (muaHang) {
+    if (muaHang.open.overdueCount > 0) {
+      risks.push({
+        area: "PURCHASING",
+        title: `${muaHang.open.overdueCount} lô đã gửi xưởng quá hạn hẹn`,
+        metric: "Tiền cam kết với xưởng và hạn hẹn trên đơn sản xuất",
+        evidence: `${vnd(muaHang.open.overdueCommitted)} nằm ở lô quá hạn · trễ nhiều nhất ${muaHang.open.maxLateDays ?? 0} ngày · tổng đang cam kết ${vnd(muaHang.open.committed)}`,
+        timeRange: "Toàn bộ lô chưa nhận",
+        amount: muaHang.open.overdueCommitted,
+        reason: "Hàng chưa về thì tiền đã hứa vẫn phải trả, còn kế hoạch bán theo mẫu đó thì trượt. Gọi xưởng chốt lại ngày giao.",
+        confidence: RECOMMENDATION_CONFIDENCE.HIGH,
+        href: "/inventory/purchasing",
+      });
+    }
+    const tangGia = muaHang.priceJumps[0];
+    if (tangGia) {
+      risks.push({
+        area: "PURCHASING",
+        title: `Giá nhập ${tangGia.productName || tangGia.sku} tăng ${tangGia.changePercent}%`,
+        metric: "Giá nhập lần gần nhất so với chính lần nhập trước của cùng mẫu mã",
+        evidence: `${vnd(tangGia.previousCost)} → ${vnd(tangGia.latestCost)} · ${tangGia.supplier}${muaHang.priceJumps.length > 1 ? ` · còn ${muaHang.priceJumps.length - 1} mẫu khác cũng tăng` : ""}`,
+        timeRange: `${muaHang.windowDays} ngày gần nhất`,
+        amount: Math.max(0, tangGia.latestCost - tangGia.previousCost),
+        reason: "Giá vốn tăng mà giá bán giữ nguyên thì lãi gộp mỏng đi ở mọi đơn của mẫu này — xem lại giá bán hoặc đổi xưởng.",
+        confidence: RECOMMENDATION_CONFIDENCE.HIGH,
+        href: "/inventory/purchasing",
+      });
+    }
+  }
+
   // ── Rủi ro số liệu: đứng đầu danh sách vì nó làm mọi con số phía trên đáng ngờ ──
   if (dash.dataIssues.critical > 0) {
     risks.unshift({
@@ -210,6 +246,8 @@ function renderSummary(metrics: BriefMetric[], actions: BusinessBrief["topAction
     out.push(`Việc gấp nhất: ${actions[0].title}${actions[0].amount > 0 ? ` (${vnd(actions[0].amount)} đang treo)` : ""}.`);
   }
   if (overdue > 0) out.push(`${overdue} việc đã quá hạn xử lý.`);
+  const treoXuong = risks.find((r) => r.area === "PURCHASING" && r.amount > 0);
+  if (treoXuong) out.push(`${treoXuong.title} — ${vnd(treoXuong.amount)} liên quan.`);
   if (risks.length) out.push(`${risks.length} rủi ro đang theo dõi, đứng đầu là: ${risks[0].title}.`);
   if (!out.length) out.push("Chưa đủ dữ liệu trong kỳ này để tóm tắt.");
   return out;

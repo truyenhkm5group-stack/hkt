@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { inArray } from "drizzle-orm";
 import type { Db } from "@/db";
+import { schema } from "@/db";
+import { clearMemo } from "@/lib/cache";
 import { AREA_LABEL, CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { getBusinessBrief } from "@/lib/queries/business-brief";
 
@@ -14,7 +17,6 @@ const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fr
  *  3. Rủi ro SỐ LIỆU luôn đứng đầu — nó làm mọi con số phía trên đáng ngờ.
  */
 export async function testBusinessBrief(db: Db) {
-  void db;
 
   const brief = await getBusinessBrief(ALL);
   const again = await getBusinessBrief(ALL);
@@ -71,6 +73,40 @@ export async function testBusinessBrief(db: Db) {
   // câu không rỗng.
   assert.ok(brief.summary.length > 0, "phải sinh được ít nhất một câu tóm tắt");
   for (const line of brief.summary) assert.ok(line.trim().length > 10, "câu tóm tắt phải có nội dung");
+
+  // ───────── Tiền đã hứa với xưởng mà hàng chưa về phải NỔI LÊN bản tóm tắt ─────────
+  // Đây là khoản tiền dễ quên nhất: nó không nằm trong báo cáo lợi nhuận (chưa phát sinh chi phí),
+  // không nằm trong tồn kho (hàng chưa về), nên nếu bản tóm tắt không nhắc thì không màn hình nào
+  // nhắc cả.
+  const loIds = ["bb-po-late"];
+  try {
+    await db.insert(schema.products).values({ id: "bb-prod", name: "Áo kiểm thử tóm tắt" }).onConflictDoNothing();
+    await db.insert(schema.productionOrders).values({
+      id: loIds[0],
+      code: "BB-LATE",
+      productId: "bb-prod",
+      productName: "Áo kiểm thử tóm tắt",
+      status: "SENT",
+      supplier: "Xưởng kiểm thử tóm tắt",
+      totalQty: 200,
+      unitCost: 120_000,
+      sentAt: new Date(Date.now() - 50 * 86_400_000),
+      dueDate: new Date(Date.now() - 9 * 86_400_000),
+    });
+    clearMemo();
+    const coLoTre = await getBusinessBrief(ALL);
+    const rui_ro = coLoTre.risks.find((r) => r.area === "PURCHASING" && r.amount > 0);
+    assert.ok(rui_ro, "lô đã gửi xưởng quá hạn hẹn phải xuất hiện trong danh sách rủi ro");
+    assert.equal(rui_ro?.href, "/inventory/purchasing", "rủi ro phải mở đúng trang kiểm chứng được");
+    assert.ok((rui_ro?.amount ?? 0) >= 200 * 120_000, "số tiền nêu ra phải gồm cả lô vừa dựng");
+    assert.ok(
+      coLoTre.summary.some((l) => l.includes("quá hạn hẹn")),
+      "câu tóm tắt phải nhắc tiền đang treo ở xưởng — không màn hình nào khác nhắc khoản này",
+    );
+  } finally {
+    await db.delete(schema.productionOrders).where(inArray(schema.productionOrders.id, loIds));
+    clearMemo();
+  }
 
   console.log(
     `✓ Tóm tắt kinh doanh: ${brief.metrics.length} chỉ số · ${brief.topActions.length} việc gấp · ${brief.risks.length} rủi ro (đủ chỉ số/bằng chứng/thời gian/độ tin cậy) · deterministic · KHÔNG tự hành động`,

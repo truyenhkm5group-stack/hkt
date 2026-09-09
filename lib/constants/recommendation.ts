@@ -10,13 +10,14 @@
  * Mọi thứ ở lớp này chỉ ĐỌC và chỉ ĐỀ XUẤT; người quyết định là chủ shop.
  */
 
-export type RecommendationArea = "DATA" | "ADS" | "PRODUCT" | "INVENTORY" | "OPERATIONS";
+export type RecommendationArea = "DATA" | "ADS" | "PRODUCT" | "INVENTORY" | "PURCHASING" | "OPERATIONS";
 
 export const AREA_LABEL: Record<RecommendationArea, string> = {
   DATA: "Số liệu",
   ADS: "Quảng cáo",
   PRODUCT: "Mẫu mã",
   INVENTORY: "Tồn kho",
+  PURCHASING: "Mua hàng",
   OPERATIONS: "Vận hành",
 };
 
@@ -25,6 +26,7 @@ export const AREA_TONE: Record<RecommendationArea, string> = {
   ADS: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
   PRODUCT: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   INVENTORY: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+  PURCHASING: "bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300",
   OPERATIONS: "bg-muted text-muted-foreground",
 };
 
