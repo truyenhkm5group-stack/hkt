@@ -256,7 +256,32 @@ bất biến nghiệp vụ → nhất quán chỉ số → Chất lượng dữ 
 | 4 | Bài kiểm thử sổ migration cần bản sao có `.git` | **ĐÃ BIẾT** — dùng `git worktree`, không dùng `git archive` |
 | 5 | Deploy `34334451645` báo thất bại | **KHÔNG PHẢI LỖI ỨNG DỤNG** — phiếu smoke hết hạn giữa chừng; bản vá đã áp thật, `fb_ads.post_id` có mặt trên production |
 | 6 | **`git reset` trên cây chung làm văng 2 commit** | **ĐÃ KHÔI PHỤC** — xem mục 4b |
-| 7 | **Hai tệp của phiên khác đang bị XOÁ trên đĩa** | **ĐANG THEO DÕI, KHÔNG ĐỤNG VÀO** — `docs/safe-release-review.md` và `tests/repo-integrity.test.ts` có trong `main` nhưng đang ở trạng thái `D` trong cây làm việc. Ai chạy `git commit -a` sẽ xoá chúng khỏi kho. Chủ sở hữu là phiên khác nên tôi không `checkout` phục hồi (đúng ràng buộc "không checkout tệp của phiên khác"). **Cần phiên đó tự kiểm.** |
+| 7 | **Cây làm việc đang LẠC HẬU so với `main` ở 6 tệp** | **CẦN CHỦ SỞ HỮU XỬ LÝ — tôi cố ý không đụng** — xem mục 4c |
+
+### 4c. Cây làm việc lạc hậu so với `main` — 6 tệp
+
+Lệnh `reset` ở mục 4b chỉ dời con trỏ, **không cập nhật tệp trên đĩa**. Nên mọi thay đổi mà `21b643f`
+và `ddf63cd` mang vào đều CÓ trong `main` nhưng **KHÔNG có trên đĩa**:
+
+```
+ M .github/workflows/deploy-vps.yml     M AGENTS.md
+ M scripts/bootstrap.sh                 M scripts/smoke.ts
+ D docs/safe-release-review.md          D tests/repo-integrity.test.ts
+```
+
+Không ai xoá gì cả — đây là bản cũ nằm lại. Nhưng hậu quả thì thật:
+
+1. **Ai chạy `git commit -a` sẽ ÂM THẦM lùi cả 6 tệp**, xoá `docs/safe-release-review.md` và
+   `tests/repo-integrity.test.ts` khỏi kho, và huỷ bản phân loại kết quả smoke của `21b643f`.
+2. Chạy kiểm thử tại máy sẽ khác kết quả chạy trên `main`, vì `tests/repo-integrity.test.ts` không có
+   trên đĩa.
+
+**Cách xử lý đúng:** `git checkout -- <6 đường dẫn>` để đồng bộ đĩa với `main`. Tôi **không tự làm**
+vì cả 6 thuộc phiên khác và ràng buộc của đợt này là không `checkout` tệp của phiên khác. Phiên sở
+hữu (hoặc chủ shop) chạy lệnh đó là xong.
+
+**Không ảnh hưởng bản ứng cử:** mọi cổng ra đều chạy trên worktree sạch dựng từ SHA, không đọc đĩa
+của cây chung.
 
 ### 4b. Sự cố mất commit trên cây làm việc dùng chung (09/09/2026)
 
