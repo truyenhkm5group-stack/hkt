@@ -36,6 +36,7 @@ on:
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
+          - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
@@ -124,6 +125,9 @@ jobs:
               vtp-statements-autolink)
                 fetch_script vtp-statement-autolink.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-autolink.ts $ARG ;;
+              profit-verify)
+                fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
               kpi-snapshot)
                 # Dùng bản script mới nhất trên main; công thức kết quả đơn lấy từ lib trong image.
                 fetch_script kpi-snapshot.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/kpi-snapshot.ts'
