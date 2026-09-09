@@ -2,7 +2,7 @@ import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { ORDER_COGS } from "@/lib/queries/cogs";
+import { ORDER_COGS, orderCogsFast } from "@/lib/queries/cogs";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { metricScope } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -155,12 +155,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
        *
        * Đơn chưa chốt vẫn dùng giá vốn hiện tại — đó là ƯỚC TÍNH, và nó chỉ vào phần chưa giao.
        */
-      cogs: sql<number>`coalesce(
-        (select m.recognized_cogs from canonical_order_outcome m
-          where m.order_id = ${o.id} and coalesce(m.shipment_id, '') = coalesce(${s.id}, '')
-            and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.recognized_cogs is not null),
-        ${ORDER_COGS}
-      )`.as("f_cogs"),
+      // MỘT định nghĩa giá vốn duy nhất cho mọi báo cáo — xem `orderCogsFast()`.
+      cogs: orderCogsFast().as("f_cogs"),
       fee: sql<number>`${FEE}`.as("f_fee"),
       returnFee: sql<number>`${o.returnFee}`.as("f_return_fee"),
       prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),

@@ -65,10 +65,19 @@ export const ORDER_COGS = sql<number>`coalesce((
  */
 export function orderCogsFast() {
   return sql<number>`coalesce(
-    (select m.cogs from canonical_order_outcome m
+    (select
+       -- ĐƠN ĐÃ GHI NHẬN GIAO THÀNH CÔNG: dùng giá vốn ĐÃ CHỐT tại thời điểm giao.
+       --
+       -- Đây là chỗ quyết định lợi nhuận kỳ đã qua có tự đổi hay không. Giá vốn lấy "phiếu nhập gần
+       -- nhất tính theo hôm nay", nên nếu báo cáo đọc con số hiện tại thì nhập một lô mới sẽ viết
+       -- lại lợi nhuận tháng trước. Đặt ở ĐÂY, trong hàm mà mọi báo cáo dùng chung, để Báo cáo lợi
+       -- nhuận · Bảng điều khiển · Hiệu quả mẫu mã · Quảng cáo không thể nói ba con số khác nhau.
+       coalesce(m.recognized_cogs, m.cogs)
+     from canonical_order_outcome m
       where m.order_id = ${schema.orders.id}
         and coalesce(m.shipment_id, '') = coalesce(${schema.shipments.id}, '')
-        and m.logic_version = ${CANONICAL_OUTCOME_VERSION}),
+        and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+        and m.computed_at >= ${schema.orders.updatedAt}),
     ${ORDER_COGS}
   )`;
 }

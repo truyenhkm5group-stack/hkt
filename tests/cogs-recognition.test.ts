@@ -3,6 +3,9 @@ import { eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { rematerializeOutcomes, rematerializeStale } from "@/lib/queries/canonical-outcome";
+import { getProfitReport } from "@/lib/queries/reports";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import type { Period } from "@/lib/search-params";
 
 /**
  * ───────────── GIÁ VỐN CỦA KỲ ĐÃ CHỐT KHÔNG ĐƯỢC TỰ ĐỔI ─────────────
@@ -117,6 +120,28 @@ export async function testCogsRecognition(db: Db) {
   if (suyNguoc.outcome === "DELIVERED") {
     assert.equal(suyNguoc.cogsBasis, "RECEIPT_AFTER", "đơn giao tháng 7 mà phiếu nhập sớm nhất là tháng 8 thì giá vốn là suy ngược — phải gắn nhãn CHƯA XÁC MINH");
   }
+
+  // ───────── MỌI BÁO CÁO PHẢI DÙNG CÙNG MỘT GIÁ VỐN ─────────
+  //
+  // Sửa `getFinancialTruth` mà quên `reports.ts` thì Báo cáo lợi nhuận vẫn tự đổi khi kho nhập lô
+  // mới, trong khi Bảng điều khiển thì không — hai màn hình nói hai con số cho cùng một tháng. Định
+  // nghĩa nay nằm ở đúng MỘT hàm dùng chung (`orderCogsFast`), nên bài kiểm này khoá việc đó.
+  clearMemo();
+  const kyThang8: Period = {
+    key: "custom",
+    from: new Date("2026-08-01T00:00:00+07:00"),
+    to: new Date("2026-08-31T23:59:59+07:00"),
+    label: "Tháng 8",
+    fromKey: "2026-08-01",
+    toKey: "2026-08-31",
+  };
+  const [baoCao, chanLy] = await Promise.all([getProfitReport(kyThang8, "created"), getFinancialTruth(kyThang8)]);
+  const cogsChanLy = Math.abs(chanLy.waterfall.find((w) => w.key === "cogs")?.amount ?? 0);
+  assert.equal(
+    baoCao.current.cogs,
+    cogsChanLy,
+    "Báo cáo lợi nhuận và Chân lý tài chính phải cùng một giá vốn — hai màn hình không được nói hai con số cho cùng một tháng",
+  );
 
   const [{ n: chuaXacMinh }] = await db
     .select({ n: sql<number>`count(*)` })
