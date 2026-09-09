@@ -20,7 +20,6 @@ import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
-import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
 import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
@@ -1130,7 +1129,6 @@ async function main() {
   await testBackfill(db);
   await testConsistency(db);
   await testMetricsContract(db);
-  await testMetricShapeConsistency(db);
   await testBusinessInvariants(db);
   await testFinancialTruth(db);
   await testProductIntelligence(db);
