@@ -129,12 +129,13 @@ export function testUiConsistency() {
     "app/(dashboard)/reports/funnel/page.tsx",
     "app/(dashboard)/products/performance/page.tsx",
     "app/(dashboard)/inventory/planning/slow-moving-section.tsx",
+    "app/(dashboard)/inventory/purchasing/page.tsx",
   ];
   for (const page of newPages) {
     const src = readFileSync(page, "utf8");
     assert.ok(src.includes("overflow-x-auto"), `${page}: bảng phải nằm trong khung cuộn ngang`);
   }
-  for (const page of newPages.slice(0, 2)) {
+  for (const page of [newPages[0], newPages[1], newPages[3]]) {
     const src = readFileSync(page, "utf8");
     assert.ok(/Chưa có|Không có/.test(src), `${page}: phải có trạng thái rỗng nói rõ vì sao trống`);
   }

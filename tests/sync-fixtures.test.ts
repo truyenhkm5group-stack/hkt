@@ -41,6 +41,7 @@ import { testEntityTimeline } from "./entity-timeline.test";
 import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
 import { testCashflow } from "./cashflow.test";
+import { testPurchasing } from "./purchasing.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -1147,6 +1148,7 @@ async function main() {
   testAlertConfig();
   testMigrationJournal();
   await testCashflow(db);
+  await testPurchasing(db);
   testAdvisorySafety();
   await testBusinessBrief(db);
   await testSearch(db);

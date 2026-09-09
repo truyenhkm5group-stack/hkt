@@ -22,6 +22,7 @@ const READ_ONLY_MODULES = [
   "lib/queries/cashflow.ts",
   "lib/queries/slow-moving.ts",
   "lib/queries/sales-funnel.ts",
+  "lib/queries/purchasing.ts",
   "lib/queries/staff-performance.ts",
   "lib/queries/entity-timeline.ts",
   "lib/queries/search.ts",
