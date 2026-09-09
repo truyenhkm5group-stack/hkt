@@ -335,6 +335,11 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
           <Label>Chỉ xét đơn phát sinh trong (ngày)</Label>
           <Input type="number" min={1} value={form.lookbackDays} onChange={(e) => setForm({ ...form, lookbackDays: Number(e.target.value) || 14 })} />
         </div>
+        {/* Hàng hoàn vừa về hôm qua chưa kịp kiểm đếm là bình thường — chỉ báo sau ngưỡng này. */}
+        <div className="space-y-1">
+          <Label>Hàng hoàn về quá (ngày) mà chưa tái nhập</Label>
+          <Input type="number" min={1} value={form.returnInspectionDays} onChange={(e) => setForm({ ...form, returnInspectionDays: Number(e.target.value) || 3 })} />
+        </div>
       </div>
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2">
@@ -360,6 +365,18 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.risk} onCheckedChange={(v) => toggle("risk", v === true)} /> Đơn của khách rủi ro (hoàn nhiều / bị chặn) → CSKH xin cọc trước khi gửi
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.incomplete} onCheckedChange={(v) => toggle("incomplete", v === true)} /> Đơn thiếu SĐT / địa chỉ (chưa gửi ĐVVC được)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.returnInspection} onCheckedChange={(v) => toggle("returnInspection", v === true)} /> Hàng hoàn đã về mà kho chưa lập phiếu tái nhập
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.customerRecovery} onCheckedChange={(v) => toggle("customerRecovery", v === true)} /> Mất khách quen (khách từng mua thành công nay hoàn đơn) → gọi lại
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.adsAnomaly} onCheckedChange={(v) => toggle("adsAnomaly", v === true)} /> Quảng cáo bất thường & chiến dịch đang lỗ
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">

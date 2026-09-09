@@ -27,7 +27,30 @@ const configSchema = z.object({
   billingWarnPercent: z.number().int().min(10).max(100).default(80),
   riskMinReturned: z.number().int().min(1).max(50).default(2),
   riskReturnRatePct: z.number().int().min(1).max(100).default(40),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true), billing: z.boolean().default(true), risk: z.boolean().default(true) }),
+  returnInspectionDays: z.number().int().min(1).max(60).default(3),
+  /**
+   * PHẢI KHAI ĐỦ MỌI CỜ Ở ĐÂY.
+   *
+   * `z.object()` CẮT BỎ khoá không khai báo. Cờ nào thiếu ở đây thì mỗi lần chủ shop bấm Lưu là nó
+   * biến mất khỏi settings, rồi `loadAlertConfig` lại trộn với mặc định — nên cảnh báo âm thầm bật
+   * lại như chưa từng bị tắt. Không có lỗi nào hiện ra, chỉ là cái nút không có tác dụng.
+   *
+   * `incomplete` từng thiếu đúng như vậy: chủ shop không bao giờ tắt được cảnh báo "đơn thiếu SĐT".
+   */
+  enabled: z.object({
+    failed: z.boolean(),
+    pending: z.boolean(),
+    stale: z.boolean(),
+    returning: z.boolean(),
+    cs: z.boolean().default(true),
+    stock: z.boolean().default(true),
+    billing: z.boolean().default(true),
+    risk: z.boolean().default(true),
+    incomplete: z.boolean().default(true),
+    returnInspection: z.boolean().default(true),
+    customerRecovery: z.boolean().default(true),
+    adsAnomaly: z.boolean().default(true),
+  }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {

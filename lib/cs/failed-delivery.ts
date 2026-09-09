@@ -202,7 +202,8 @@ async function run(options: { lookbackDays?: number; log?: (m: string) => void }
             : { title: "ℹ️ Shop đã trao đổi trong chat", resolution: `Không nhắn lại: shop đã nhắn khách lúc ${when}: “${chatSnippet}”.`, status: "DONE" };
         }
       } catch (e) {
-        result.errors.length < 10 && result.errors.push(`${r.tracking}: không đọc được chat (${e instanceof Error ? e.message : String(e)})`);
+        // Chỉ giữ 10 lỗi đầu: nhật ký lỗi dài hàng trăm dòng không ai đọc, và che mất lỗi thật.
+        if (result.errors.length < 10) result.errors.push(`${r.tracking}: không đọc được chat (${e instanceof Error ? e.message : String(e)})`);
       }
     }
     if (skip) {

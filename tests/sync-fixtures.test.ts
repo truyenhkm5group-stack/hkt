@@ -34,6 +34,7 @@ import { testDrilldownContract } from "./drilldown-contract.test";
 import { testBusinessBrief } from "./business-brief.test";
 import { testSearch } from "./search.test";
 import { testEntityTimeline } from "./entity-timeline.test";
+import { testAlertConfig } from "./alert-config.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
@@ -1115,6 +1116,7 @@ async function main() {
   await testAuditTrail(db);
   testUiConsistency();
   testDrilldownContract();
+  testAlertConfig();
   await testBusinessBrief(db);
   await testSearch(db);
   await testEntityTimeline(db);

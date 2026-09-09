@@ -11,7 +11,6 @@ import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/li
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { clearMemo } from "@/lib/cache";
 import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findOfferCell, findPhoneCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate, pushBlockOf } from "@/lib/constants/landing";
-import { fetchJson } from "@/lib/integrations/http";
 import { getSettingJson } from "@/lib/settings";
 
 export async function loadLandingConfig(): Promise<LandingConfig> {
