@@ -7,7 +7,7 @@ import { getDb, schema } from "@/db";
 import type { IdeaStatus } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { IDEA_IMAGE_MAX_BASE64, IDEA_MAX_IMAGES, IDEA_REVIEW_DECISIONS } from "@/lib/constants/ideas";
+import { IDEA_IMAGE_MAX_BASE64, IDEA_MAX_IMAGES } from "@/lib/constants/ideas";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -191,4 +191,3 @@ export async function deleteIdeaImage(input: unknown): Promise<Result> {
   return { ok: true };
 }
 
-export { IDEA_REVIEW_DECISIONS };

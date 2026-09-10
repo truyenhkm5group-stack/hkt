@@ -56,6 +56,7 @@ import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
+import { testUseServerExports } from "./use-server-exports.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
@@ -1223,6 +1224,7 @@ async function main() {
   testFastPathWiring();
   testBankMatch();
   testActionWiring();
+  testUseServerExports();
   testOperatingFunnel();
   await testMemoInflight();
   await testBankPipeline(db);
