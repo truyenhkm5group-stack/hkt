@@ -173,7 +173,22 @@ async function getDashboardDataUncached(period: Period) {
     db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"])),
     // THIẾU HÀNG TÍNH THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG — cùng bộ máy days-of-cover với trang
     // Kế hoạch SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số khác nhau (F5).
-    stockRiskSummary(),
+    // ═══ SỔ KHO KHÔNG ĐƯỢC GIỮ TRANG CHỦ LÀM CON TIN ═══
+    //
+    // SỰ CỐ THẬT (10/09/2026): trang chủ quá hạn 60 giây, ba lượt đo liên tiếp. Đo bằng perf-probe
+    // trên máy rảnh: `getDashboardData` mất 71,8 GIÂY, và câu lệnh nặng nhất là sổ kho — 61,4s,
+    // trong khi một giờ trước đó nó là 32,5s. Chi phí này có sẵn từ lâu; nó vừa vượt ngưỡng.
+    //
+    // Trang chủ cần đúng MỘT con số từ đây: bao nhiêu mẫu mã cần sản xuất gấp. Bắt cả trang — doanh
+    // thu, đơn mới, COD, cảnh báo — chờ một phút vì một dòng chữ ở chân thẻ là đổi sai.
+    //
+    // Nên đặt hạn chờ. Quá hạn thì con số đó là CHƯA TÍNH ĐƯỢC (không phải 0 — 0 nghĩa là "không
+    // mẫu nào cần sản xuất gấp", một câu nói dối đúng theo hướng dễ chịu). Phép tính vẫn chạy tiếp
+    // phía sau và ghi vào đệm, nên lượt mở sau đã có số.
+    //
+    // Đây KHÔNG phải bản vá cho truy vấn chậm: sổ kho vẫn chậm và vẫn phải sửa. Nó chỉ chặn việc
+    // một mục nặng kéo sập cả trang.
+    coHanCho(stockRiskSummary(), TRAN_SO_KHO_MS),
     db
       .select({ count: count() })
       .from(schema.shipments)
@@ -237,7 +252,7 @@ async function getDashboardDataUncached(period: Period) {
     attention: {
       newOrders: Number(newOrders?.count ?? 0),
       failedDelivery: Number(failedDelivery?.count ?? 0),
-      lowStock: stockRisk.atRisk,
+      lowStock: stockRisk ? stockRisk.atRisk : null,
       staleShipments: Number(stale?.count ?? 0),
       codWaiting: { count: codCash.codWaiting.count, amount: codCash.codWaiting.amount, collected: codCash.codWaiting.collected, deductedByStatements: codCash.codWaiting.deductedByStatements },
     },
@@ -270,6 +285,21 @@ async function getDashboardDataUncached(period: Period) {
 }
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
+
+/**
+ * Hạn chờ cho một mục KHÔNG thiết yếu của trang chủ.
+ *
+ * Quá hạn thì trả `null` (CHƯA BIẾT) chứ không phải giá trị mặc định — và phép tính vẫn chạy tiếp
+ * để ghi vào đệm, nên lượt mở sau không phải trả giá lại từ đầu.
+ */
+const TRAN_SO_KHO_MS = 3_000;
+
+function coHanCho<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  // Nuốt lỗi của lượt bị bỏ lại: nó không còn ai đọc, nhưng một lời hứa bị từ chối mà không ai bắt
+  // sẽ làm sập tiến trình Node.
+  p.catch(() => {});
+  return Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+}
 
 export async function getDashboardData(period: Period) {
   // TTL 60 giây quá ngắn cho một trang tốn hàng chục giây khi đệm nguội: người thứ hai mở trang

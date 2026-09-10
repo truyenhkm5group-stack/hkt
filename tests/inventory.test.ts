@@ -254,8 +254,20 @@ export async function testInventory(db: Db) {
   clearMemo();
   const dash = await getDashboardData(ALL_PERIOD);
   assert.equal(dash.attention.lowStock, risk.atRisk, "Tổng quan phải dùng cảnh báo theo rủi ro, không dùng ngưỡng 'tồn <= 5'");
-  assert.equal(dash.stockRisk.out, risk.out);
-  assert.equal(dash.stockRisk.critical, risk.critical);
+  /*
+    SỔ KHO CÓ HẠN CHỜ TRÊN TRANG CHỦ, VÀ QUÁ HẠN LÀ `null` — KHÔNG PHẢI 0.
+
+    Trên production sổ kho từng mất 61 giây và kéo cả trang chủ quá hạn 60 giây, nên trang chủ nay
+    bỏ qua mục này sau 3 giây. Với dữ liệu kiểm thử thì nó luôn kịp, nên ở đây phải CÓ số — nếu bài
+    kiểm này bắt đầu thấy `null`, nghĩa là ngay cả bộ dữ liệu nhỏ cũng đã quá 3 giây và sổ kho đã
+    hỏng nặng hơn nhiều so với lúc viết dòng này.
+
+    Điều quan trọng phải giữ: quá hạn thì là CHƯA BIẾT. Trả 0 sẽ đọc thành "không mẫu nào cần sản
+    xuất gấp" — một câu nói dối đúng theo hướng dễ chịu, đúng loại sai mà sổ kho cấm.
+  */
+  assert.notEqual(dash.stockRisk, null, "với dữ liệu kiểm thử, sổ kho phải kịp hạn 3 giây của trang chủ");
+  assert.equal(dash.stockRisk?.out, risk.out);
+  assert.equal(dash.stockRisk?.critical, risk.critical);
   // Cảnh báo vận hành cũng phải cùng bộ máy: cùng số mẫu mã OUT + CRITICAL.
   const planNow = await getReplenishmentPlan();
   assert.equal(risk.atRisk, planNow.summary.out + planNow.summary.critical, "Tổng quan, Kế hoạch SX và cảnh báo phải cùng một bộ máy days-of-cover");

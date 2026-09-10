@@ -217,7 +217,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">
             {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
             {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
-            {formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
+            {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
           </div>
           <div className="m-4 rounded-xl bg-sidebar p-4 text-sidebar-foreground">
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-sidebar-foreground/60">Đồng bộ gần nhất</p>
