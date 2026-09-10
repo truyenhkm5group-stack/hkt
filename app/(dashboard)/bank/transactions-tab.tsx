@@ -1,9 +1,11 @@
-import { ArrowDownLeft, ArrowUpRight, ReceiptText, TriangleAlert } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownLeft, ArrowUpRight, FileSpreadsheet, ReceiptText, TriangleAlert } from "lucide-react";
 import { BankDirectionFilter, BankUnclassifiedToggle } from "@/app/(dashboard)/bank/bank-filters";
 import { ManualTxnDialog } from "@/app/(dashboard)/bank/manual-dialog";
 import { BankTransactionsTable } from "@/app/(dashboard)/bank/transactions-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { BANK_SORTABLE, bankFacets, bankSummary, listBankTransactions, type BankListOptions } from "@/lib/queries/bank";
 import { formatNumber, formatVND } from "@/lib/format";
 import { param, parseListParams, type Period, type SearchParams } from "@/lib/search-params";
@@ -23,6 +25,37 @@ export async function BankTransactionsTab({ raw, period, canWrite }: { raw: Sear
     // nếu không, bật nút xong con số tự đổi và không ai hiểu mình còn bao nhiêu việc.
     bankSummary({ ...params, filters: {}, q: "" }, { direction: "ANY", onlyUnclassified: false }),
   ]);
+
+  /**
+   * SỔ RỖNG LÀ "CHƯA NHẬP", KHÔNG PHẢI "KHÔNG CHI ĐỒNG NÀO".
+   *
+   * Production hiện chưa có giao dịch nào. Hiện bốn thẻ 0đ cùng một bảng trống thì người dùng đọc ra
+   * "tháng này không thu chi gì" — sai hoàn toàn, và sai theo hướng yên tâm.
+   *
+   * `unfilteredSummary` là số của CẢ SỔ (không lọc), nên 0 ở đây nghĩa là sổ thật sự trống chứ không
+   * phải bộ lọc đang che.
+   */
+  if (unfilteredSummary.count === 0) {
+    return (
+      <SectionCard>
+        <EmptyState
+          title="Chưa có giao dịch ngân hàng"
+          description="Nhập sao kê để bắt đầu đối soát. Sau khi nhập, ERP tự phân loại theo quy tắc bạn đặt và tự tìm chứng từ khớp với từng dòng tiền."
+          action={
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Link
+                href="/bank?tab=nhap-sao-ke"
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <FileSpreadsheet className="size-4" /> Nhập sao kê
+              </Link>
+              {canWrite ? <ManualTxnDialog /> : null}
+            </div>
+          }
+        />
+      </SectionCard>
+    );
+  }
 
   return (
     <div className="space-y-5">

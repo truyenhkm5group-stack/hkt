@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { FeedbackForm } from "@/app/(dashboard)/ideas/feedback-form";
+import { ThemAnh, XoaAnh, XoaYTuong } from "@/app/(dashboard)/ideas/idea-manage";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,9 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
   const laNguoiDang = idea.createdBy === user.email;
   // Marketer trả lời được trên chính ý tưởng của mình; người ngoài chỉ đọc.
   const duocTraLoi = canReview || (laNguoiDang && can(user, "ideas:write"));
+  // SỬA SAI SÓT: cùng luật với tầng hành động (người đăng sửa của mình, người duyệt sửa của mọi
+  // người). Ẩn nút chỉ để gọn mắt — tầng hành động vẫn tự kiểm, vì ẩn nút không phải kiểm soát.
+  const duocSua = canReview || (laNguoiDang && can(user, "ideas:write"));
 
   return (
     <div className="space-y-5">
@@ -33,6 +37,7 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
         actions={
           <div className="flex items-center gap-2">
             <span className={cn("rounded-md px-2 py-1 text-xs font-semibold", IDEA_STATUS_TONE[idea.status])}>{IDEA_STATUS_LABEL[idea.status]}</span>
+            {duocSua ? <XoaYTuong ideaId={idea.id} soAnh={idea.images.length} soTraoDoi={idea.comments.length} /> : null}
             <Button asChild variant="outline" size="sm">
               <Link href="/ideas">
                 <ArrowLeft className="size-4" /> Danh sách
@@ -44,7 +49,12 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-5">
-          <SectionCard title="Ảnh minh hoạ" description={`${formatNumber(idea.images.length)} ảnh`} padded={false}>
+          <SectionCard
+            title="Ảnh minh hoạ"
+            description={`${formatNumber(idea.images.length)} ảnh`}
+            actions={duocSua ? <ThemAnh ideaId={idea.id} dangCo={idea.images.length} /> : null}
+            padded={false}
+          >
             {idea.images.length ? (
               <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3">
                 {idea.images.map((a) => (
@@ -52,13 +62,15 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/api/ideas/images/${a.id}`} alt="" className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90" loading="lazy" />
                     <span className="absolute bottom-1 right-1 rounded bg-background/85 px-1 text-[10px] text-muted-foreground">{Math.round(a.bytes / 1024)} KB</span>
+                    {duocSua ? <XoaAnh imageId={a.id} /> : null}
                   </a>
                 ))}
               </div>
             ) : (
-              <p className="flex items-center gap-2 px-5 py-8 text-sm text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-3 px-5 py-8 text-sm text-muted-foreground">
                 <ImageIcon className="size-4" /> Ý tưởng này chưa có ảnh.
-              </p>
+                {duocSua ? <ThemAnh ideaId={idea.id} dangCo={0} /> : null}
+              </div>
             )}
           </SectionCard>
 

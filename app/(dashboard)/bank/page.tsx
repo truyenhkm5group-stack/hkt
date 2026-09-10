@@ -1,5 +1,6 @@
 import { BankTabs, BANK_TABS, type BankTab } from "@/app/(dashboard)/bank/bank-tabs";
 import { BankImportTab } from "@/app/(dashboard)/bank/import-tab";
+import { BankMatchTab } from "@/app/(dashboard)/bank/match-tab";
 import { BankReconcileTab } from "@/app/(dashboard)/bank/reconcile-tab";
 import { BankRulesTab } from "@/app/(dashboard)/bank/rules-tab";
 import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
@@ -39,6 +40,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
       <BankTabs active={tab} unclassified={unclassified} />
 
       {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}
+      {tab === "doi-khop" ? <BankMatchTab canWrite={canWrite} /> : null}
       {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} /> : null}
       {tab === "quy-tac" ? <BankRulesTab rules={rules} canWrite={canWrite} /> : null}
       {tab === "doi-chieu" ? <BankReconcileTab period={period} /> : null}

@@ -6,11 +6,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export const BANK_TABS = ["giao-dich", "nhap-sao-ke", "quy-tac", "doi-chieu"] as const;
+export const BANK_TABS = ["giao-dich", "doi-khop", "nhap-sao-ke", "quy-tac", "doi-chieu"] as const;
 export type BankTab = (typeof BANK_TABS)[number];
 
 const LABEL: Record<BankTab, string> = {
   "giao-dich": "Giao dịch",
+  "doi-khop": "Đối khớp chứng từ",
   "nhap-sao-ke": "Nhập sao kê",
   "quy-tac": "Quy tắc gán nhãn",
   "doi-chieu": "Đối chiếu",

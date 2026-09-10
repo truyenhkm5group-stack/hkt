@@ -14,6 +14,8 @@ import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
+import { ideasWaitingReview } from "@/lib/queries/ideas";
+import { Lightbulb } from "lucide-react";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +84,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       />
       {/* Việc có NGƯỜI đang chờ đứng trên việc do máy quét ra — để lẫn xuống dưới thì người xin ngồi đợi mà không ai biết. */}
       <ApprovalSection />
+      {/* Ý tưởng marketing chờ duyệt cũng là NGƯỜI đang chờ, và trước đây không có chỗ nào báo. */}
+      <IdeasWaiting />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {NOTIFICATION_KIND_ORDER.filter((k) => k !== "SYSTEM").map((kind) => (
           <Link key={kind} href={kindFilter === kind ? "/alerts" : `/alerts?kind=${kind}&page=1`} className={cn("block rounded-xl", kindFilter === kind && "ring-2 ring-primary/40")}>
@@ -250,5 +254,29 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         </SectionCard>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Ý TƯỞNG MARKETING ĐANG CHỜ DUYỆT.
+ *
+ * `ideasWaitingReview()` có sẵn từ lâu nhưng KHÔNG nơi nào gọi, nên marketer đăng ý tưởng xong là
+ * nó nằm im — quản lý chỉ biết nếu tự nhớ mở trang Ý tưởng. Đây là NGƯỜI đang chờ người khác, đúng
+ * loại việc trang này sinh ra để hiển thị.
+ *
+ * Không có gì chờ thì mục này BIẾN MẤT hẳn, không hiện khung rỗng: trang này vốn đã dài.
+ */
+async function IdeasWaiting() {
+  const n = await ideasWaitingReview();
+  if (!n) return null;
+  return (
+    <Link
+      href="/ideas?tt=NEW"
+      className="flex items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50/60 px-4 py-2.5 text-sm transition-colors hover:border-amber-400 dark:border-amber-900/60 dark:bg-amber-950/20"
+    >
+      <Lightbulb className="size-4 shrink-0 text-amber-600" />
+      <b>{formatNumber(n)} ý tưởng marketing</b> đang chờ duyệt
+      <span className="ml-auto text-[12px] text-muted-foreground">Mở trang Ý tưởng →</span>
+    </Link>
   );
 }

@@ -373,3 +373,45 @@ async function targetExists(type: BankLinkType, targetId: string): Promise<boole
   if (type === "STOCK_RECEIPT") return one(db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
   return one(db.select({ id: schema.adSpends.id }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
 }
+
+/**
+ * TỰ NỐI CÁC KHỚP CHẮC CHẮN — và CHỈ chúng.
+ *
+ * `EXACT` nghĩa là nội dung chuyển khoản CÓ mã chứng từ và số tiền khớp chính xác. Đó không phải
+ * phỏng đoán, nên để máy nối là đúng: bắt người bấm xác nhận hàng trăm dòng hiển nhiên chỉ tạo thói
+ * quen bấm cho xong, và thói quen đó sẽ đi theo sang những dòng thật sự cần nhìn.
+ *
+ * Ba mức còn lại KHÔNG BAO GIỜ được tự nối — `AUTO_CONFIRMABLE` trong lib/integrations/bank/match.ts
+ * khoá điều đó, và kiểm thử khoá luôn việc chỉ có đúng một mức được tự nối.
+ */
+export async function autoConfirmExactMatches(): Promise<{ ok: true; confirmed: number; message: string } | { error: string }> {
+  const g = await guard();
+  if (g.error !== undefined) return { error: g.error };
+  const { getMatchOverview } = await import("@/lib/queries/bank-match");
+  const { AUTO_CONFIRMABLE } = await import("@/lib/integrations/bank/match");
+
+  const overview = await getMatchOverview(500);
+  const chacChan = overview.suggestions.filter((s) => AUTO_CONFIRMABLE[s.confidence] && s.target);
+  if (!chacChan.length) return { ok: true, confirmed: 0, message: "Không có khớp chắc chắn nào để tự nối" };
+
+  const db = await getDb();
+  let done = 0;
+  for (const s of chacChan) {
+    if (!s.target) continue;
+    // Đi qua đúng đường kiểm tra của `linkBankTransaction`: chứng từ phải CÓ THẬT.
+    const exists = await targetExists(s.target.type, s.target.id);
+    if (!exists) continue;
+    await db.update(b).set({ linkedType: s.target.type, linkedId: s.target.id, updatedAt: new Date() }).where(eq(b.id, s.txnId));
+    done += 1;
+  }
+  await audit({
+    userId: g.user.id,
+    userEmail: g.user.email,
+    action: "BANK_AUTO_LINK",
+    entity: "BANK_TRANSACTION",
+    entityId: "",
+    detail: { confirmed: done, candidates: chacChan.length },
+  });
+  revalidateAll();
+  return { ok: true, confirmed: done, message: `Đã tự nối ${done} giao dịch có mã chứng từ trùng khớp` };
+}

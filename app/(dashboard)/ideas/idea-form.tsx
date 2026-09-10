@@ -10,34 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createIdea } from "@/lib/actions/ideas";
-import { IDEA_IMAGE_MAX_EDGE, IDEA_IMAGE_QUALITY, IDEA_MAX_IMAGES } from "@/lib/constants/ideas";
+import { IDEA_MAX_IMAGES } from "@/lib/constants/ideas";
+import { thuNhoAnh } from "@/lib/ideas/shrink-image";
 import { todayVN } from "@/lib/format";
 
 type AnhDaChon = { base64: string; contentType: string; preview: string; kb: number; ten: string };
-
-/**
- * Thu nhỏ ảnh NGAY TRÊN TRÌNH DUYỆT trước khi gửi lên.
- *
- * Ảnh chụp từ điện thoại thường 3–6 MB; ảnh nằm trong CSDL nên gửi nguyên bản là làm phình cơ sở
- * dữ liệu và mỗi lần mở trang lại tải cả chục MB. Thu về cạnh dài tối đa {IDEA_IMAGE_MAX_EDGE}px
- * là đủ nhìn rõ bố cục, màu sắc và chữ trên ảnh mẫu.
- */
-async function thuNhoAnh(file: File): Promise<{ base64: string; contentType: string; preview: string; kb: number }> {
-  const bitmap = await createImageBitmap(file);
-  const tyLe = Math.min(1, IDEA_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * tyLe));
-  const h = Math.max(1, Math.round(bitmap.height * tyLe));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Trình duyệt không xử lý được ảnh này");
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close?.();
-  const dataUrl = canvas.toDataURL("image/jpeg", IDEA_IMAGE_QUALITY);
-  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-  return { base64, contentType: "image/jpeg", preview: dataUrl, kb: Math.round((base64.length * 3) / 4 / 1024) };
-}
 
 export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: string; name: string }[]; defaultMarketer?: string }) {
   const [open, setOpen] = useState(false);

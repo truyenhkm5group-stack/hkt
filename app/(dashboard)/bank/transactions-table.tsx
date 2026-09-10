@@ -9,6 +9,7 @@ import { RuleFromTxnButton } from "@/app/(dashboard)/bank/rule-from-txn";
 import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
 import { classifyBankTransactions, deleteBankTransaction } from "@/lib/actions/bank";
+import { UnlinkButton } from "@/app/(dashboard)/bank/unlink-button";
 import { BANK_GROUP_SECTIONS, BANK_GROUP_SPEC, BANK_LINK_TYPE_LABEL, BANK_NOT_A_COST_NOTE, type BankGroup, type BankLinkType } from "@/lib/constants/bank";
 import { formatDate, formatVND } from "@/lib/format";
 import type { BankTxnRow } from "@/lib/queries/bank";
@@ -46,6 +47,8 @@ function buildColumns({ canWrite }: { canWrite: boolean }): ColumnDef<BankTxnRow
                 đã đối chiếu
               </span>
             ) : null}
+            {/* Nối nhầm là chuyện có thật; không có đường gỡ thì cách sửa duy nhất là xoá một giao dịch tiền THẬT. */}
+            {row.original.linked ? <UnlinkButton id={row.original.id} /> : null}
           </div>
         </div>
       ),

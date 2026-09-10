@@ -51,6 +51,8 @@ import { testSchedulerCoverage } from "./scheduler-coverage.test";
 import { testShipmentJoinGrain } from "./shipment-join-grain.test";
 import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testBankMatch } from "./bank-match.test";
+import { testBankPipeline } from "./bank-pipeline.test";
+import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
@@ -1218,6 +1220,8 @@ async function main() {
   testShipmentJoinGrain();
   testFastPathWiring();
   testBankMatch();
+  testActionWiring();
+  await testBankPipeline(db);
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
