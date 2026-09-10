@@ -311,11 +311,29 @@ export const OUTCOME_FENCE = sql`0` as unknown as number;
  * Với dữ liệu hôm nay (mỗi đơn một vận đơn) điều kiện này chọn đúng dòng duy nhất, nên KHÔNG con số
  * nào đổi.
  */
-export const PRIMARY_ATTEMPT = sql`${s.id} = (
-  select sh.id from shipments sh
-  where sh.order_id = ${o.id}
-  order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
-  limit 1
+/**
+ * ĐƯỜNG TẮT CHO CA PHỔ BIẾN — và nó là cả sự khác biệt giữa 40 giây và 100 mili giây.
+ *
+ * Bản đầu chỉ có vế sau: một truy vấn con tương quan mang `order by … limit 1` ĐẶT TRONG ĐIỀU KIỆN
+ * NỐI. Postgres không dùng được nó làm khoá nối, nên nó rơi về lặp lồng và SẮP XẾP LẠI cho từng cặp
+ * dòng ứng viên. Đo trên production 10/09/2026, câu sổ kho theo mẫu mã mất **39.960ms** và chạy hai
+ * lần trong một lần mở trang chủ — trang chủ vì thế quá hạn 60 giây.
+ *
+ * Vế trước là một phép PHẢN NỐI rẻ: "đơn này có lần gửi nào KHÁC không?". Hôm nay production có
+ * **0 đơn nhiều lần gửi**, nên vế trước đúng với 100% dữ liệu và vế sau không bao giờ phải chạy.
+ *
+ * KHÔNG phải tối ưu đánh đổi tính đúng: hai vế nối bằng `or`, nên đơn nhiều lần gửi vẫn đi qua đúng
+ * luật chọn lần gửi quyết định như cũ. Nó chỉ thôi bắt 2.433 đơn một-lần-gửi trả giá cho một luật
+ * sinh ra vì thiểu số.
+ */
+export const PRIMARY_ATTEMPT = sql`(
+  not exists (select 1 from shipments sh0 where sh0.order_id = ${o.id} and sh0.id <> ${s.id})
+  or ${s.id} = (
+    select sh.id from shipments sh
+    where sh.order_id = ${o.id}
+    order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+    limit 1
+  )
 )`;
 
 export const ORDER_OUTCOME_FAST = sql`coalesce(
