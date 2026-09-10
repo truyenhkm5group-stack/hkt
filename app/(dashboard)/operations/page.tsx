@@ -127,6 +127,28 @@ export default async function OperationsPage() {
         />
       </div>
 
+      {/*
+        ĐỘ TƯƠI CỦA SỐ LIỆU ĐỨNG TRƯỚC MỌI CON SỐ KHÁC.
+
+        Một bảng điều hành toàn màu xanh dựng trên số liệu cũ ba tiếng thì tệ hơn là không có bảng:
+        nó tạo ra sự yên tâm không có căn cứ. Nên nếu trạng thái vận đơn đang cũ, nói ngay ở đây,
+        trước cả câu "đang kẹt ở đâu".
+      */}
+      {health.logistics.note ? (
+        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
+          <div className="min-w-[260px] flex-1">
+            <div className="text-[13.5px] font-semibold">
+              Trạng thái vận đơn đang cũ · {formatNumber(health.logistics.stalePoll)}/{formatNumber(health.logistics.inFlight)} kiện đang chạy tra lần cuối quá 2 giờ
+            </div>
+            <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{health.logistics.note}</p>
+          </div>
+          <Link href={health.logistics.href} className="shrink-0 rounded-lg border bg-card px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent">
+            Kết nối dữ liệu
+          </Link>
+        </div>
+      ) : null}
+
       {/* ───────── A. ĐANG KẸT Ở ĐÂU ───────── */}
       <SectionCard
         title="A · Đang kẹt ở đâu"
