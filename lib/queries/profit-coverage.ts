@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { getCogsCoverage } from "@/lib/queries/cogs-quality";
 import type { Period } from "@/lib/search-params";
@@ -53,9 +53,22 @@ export async function getProfitCoverage(period: Period): Promise<ProfitCoverage>
 
 async function build(period: Period): Promise<ProfitCoverage> {
   const db = await getDb();
-  const o = schema.orders;
-  const from = period.from ? sql`and ${o.insertedAt} >= ${period.from}` : sql``;
-  const to = period.to ? sql`and ${o.insertedAt} <= ${period.to}` : sql``;
+  /*
+    ĐIỀU KIỆN KỲ VIẾT BẰNG BÍ DANH, KHÔNG BẰNG CỘT DRIZZLE.
+
+    SỰ CỐ THẬT (thấy trong log production 10/09/2026): dùng cột Drizzle `orders.insertedAt` sinh ra
+    `"orders"."inserted_at"`, trong khi các câu lệnh dưới đây đặt bí danh `orders o`. Postgres từ
+    chối thẳng: *invalid reference to FROM-clause entry for table "orders" — perhaps you meant to
+    reference the table alias "o"*. Cả hai thành phần độ phủ (doanh thu và quy kết quảng cáo) hỏng.
+
+    Trang Báo cáo vẫn mở được vì khối này nằm sau ranh giới `Suspense` riêng, nên lỗi chỉ nuốt mất
+    bảng độ phủ chứ không chặn trang — đúng loại hỏng im lặng khó thấy nhất: bảng nói về ĐỘ TIN CẬY
+    của số liệu lại là bảng biến mất mà không ai biết.
+
+    `tsc` không bắt được loại này: cả hai cách viết đều là `SQL` hợp lệ về kiểu.
+  */
+  const from = period.from ? sql`and o.inserted_at >= ${period.from}` : sql``;
+  const to = period.to ? sql`and o.inserted_at <= ${period.to}` : sql``;
 
   const [cogs, doanhThu, quangCao, nganHang, chiPhi] = await Promise.all([
     getCogsCoverage(period),
