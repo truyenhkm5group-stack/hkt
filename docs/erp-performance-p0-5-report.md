@@ -357,3 +357,48 @@ thức, nên `tests/metric-shape-consistency.test.ts` là chỗ chứng minh con
 
 **Không tăng TTL để giấu.** Mục tiêu <1,5s cold vẫn còn nợ ba hàm, và nợ đó được ghi ở đây kèm đúng
 câu lệnh phải sửa.
+
+---
+
+# Phụ lục 4 — hai việc cần chủ shop biết
+
+## 1. Máy chủ suýt không dựng nổi image (RAM)
+
+Deploy #208 hỏng ở bước dựng image **trên VPS**:
+
+```
+#13 215.7 Next.js build worker exited with code: null and signal: SIGKILL
+target scheduler: failed to solve: process "/bin/sh -c npm run build" ... exit code: 1
+```
+
+`SIGKILL` ở đây là hết RAM. Máy có 1963 MB và phải chạy đồng thời: Postgres, ứng dụng, bộ lập lịch,
+Caddy — rồi `next build` bên trong Docker. Cổng CI trên GitHub dựng thành công cùng SHA đó, nên
+KHÔNG phải lỗi mã.
+
+Deploy #209 chạy lại cùng SHA thì thành công (38/38). Nghĩa là hiện đang ở sát mép: lần này may,
+lần sau có thể không.
+
+Hai hướng nếu tái diễn, theo thứ tự nên thử:
+
+1. Giới hạn bộ nhớ của trình dựng (`NODE_OPTIONS=--max-old-space-size=1024` trong Dockerfile) để
+   Node dọn rác thay vì phình ra rồi bị giết.
+2. Dựng image ở GitHub Actions rồi đẩy sang VPS, thay vì bắt VPS tự dựng.
+
+Chưa làm hướng nào: cả hai đổi cách phát hành, và chưa có bằng chứng nó tái diễn.
+
+## 2. `/bank` lỗi một lần, không tái hiện được
+
+Chủ shop báo `/bank` lỗi (mã 1532032257). Sau deploy #207 nó chạy lại 65ms và giữ nguyên qua hai
+lượt smoke. Log container cũ đã bị xoá khi khởi động lại nên **không đọc được nguyên văn lỗi**, và
+#207 không đụng gì tới sổ ngân hàng.
+
+Không tái hiện được thì không đoán nguyên nhân. Nhưng có một rủi ro do chính lượt sửa hiệu năng tạo
+ra, và nó đã được xử lý dù có phải thủ phạm hay không:
+
+- Bể kết nối chỉ có 5, mỗi giao dịch `chayKhongJit` giữ một kết nối, và `cost-engine` được gọi đồng
+  thời từ Bảng điều khiển · Sổ ngân hàng · Báo cáo lợi nhuận. `pg` mặc định chờ MÃI khi hết kết
+  nối ⇒ trang treo mà không có gì báo động. Nay đặt hạn 15 giây: thà hỏng ồn ào còn hơn treo im.
+- `cost-engine` gộp hai giao dịch thành một, thôi chiếm 2/5 bể cho một hàm.
+
+Và điều quan trọng hơn cả: `/bank` lúc đó **không nằm trong lá chắn smoke**, cùng với 10 tuyến khác.
+`tests/smoke-coverage.test.ts` nay bắt buộc mọi tuyến trên thanh điều hướng phải được mở thử.
