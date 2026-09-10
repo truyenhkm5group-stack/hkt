@@ -28,6 +28,7 @@ import { clearMemo } from "@/lib/cache";
  * Bọc thẳng `Pool.query` của `pg`: mọi câu lệnh đều đi qua đó, không sót đường nào.
  */
 let dbMs = 0;
+const chamNhat: { ms: number; sql: string }[] = [];
 let dbCalls = 0;
 
 const results: { page: string; fn: string; ms: number; dbMs: number; calls: number; note: string }[] = [];
@@ -59,17 +60,35 @@ async function main() {
   {
     const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
     const original = pg.Pool.prototype.query;
+    /**
+     * GHI LẠI CÂU LỆNH CHẬM NHẤT KÈM NGUYÊN VĂN SQL.
+     *
+     * "getBusinessBrief 46 giây" chưa sửa được gì — 105 lượt gọi thì phải biết lượt NÀO. Ba vòng
+     * chẩn đoán trước đều phải đoán, và đoán sai hai lần. Bộ đo phải tự trả lời câu đó.
+     */
+    const ghiCham = (sqlText: string, ms: number) => {
+      if (ms < 200) return;
+      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600) });
+      chamNhat.sort((a, b) => b.ms - a.ms);
+      chamNhat.length = Math.min(chamNhat.length, 8);
+    };
     pg.Pool.prototype.query = function patched(...args: unknown[]) {
       const t0 = Date.now();
+      const first = args[0] as unknown;
+      const sqlText = typeof first === "string" ? first : String((first as { text?: string } | null)?.text ?? "");
       const out = original.apply(this, args as never) as Promise<unknown>;
       if (out && typeof (out as Promise<unknown>).then === "function") {
         return (out as Promise<unknown>).finally(() => {
-          dbMs += Date.now() - t0;
+          const ms = Date.now() - t0;
+          dbMs += ms;
           dbCalls += 1;
+          ghiCham(sqlText, ms);
         });
       }
-      dbMs += Date.now() - t0;
+      const ms = Date.now() - t0;
+      dbMs += ms;
       dbCalls += 1;
+      ghiCham(sqlText, ms);
       return out;
     };
   }
@@ -138,6 +157,10 @@ async function main() {
     );
   const total = results.reduce((t, r) => t + r.ms, 0);
   console.log(`\nTổng ${total}ms cho ${results.length} truy vấn.`);
+
+  console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
+  if (!chamNhat.length) console.log("  (không câu lệnh nào vượt 200ms)");
+  for (const c of chamNhat) console.log(`\n  ${c.ms}ms\n  ${c.sql}`);
   process.exit(0);
 }
 
