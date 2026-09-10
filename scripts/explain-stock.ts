@@ -113,11 +113,23 @@ async function main() {
 
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
-  const muc = [
-    ["TOÀN BỘ dòng kế hoạch (đúng câu /inventory/planning chạy)", buildPlanRowsQuery(db, a)],
-    ["vsales (đơn hàng → mẫu mã)", db.select().from(sales)],
-    ["vreceipts (phiếu kho → mẫu mã)", db.select().from(receipts)],
-  ] as const;
+
+  /*
+    CÂU TOÀN BỘ CÓ THỂ CHƯA TỒN TẠI TRONG IMAGE ĐANG CHẠY.
+
+    Ops nạp SCRIPT mới nhất từ GitHub nhưng `lib/` thì lấy từ image đã dựng — nên ngay sau khi tách
+    `buildPlanRowsQuery`, script mới gặp image cũ và hàm chưa có. Bắt lỗi ở đây để các phép đo còn
+    lại VẪN CHẠY: nửa số liệu vẫn hơn không có gì, và thông báo nói rõ vì sao thiếu.
+  */
+  const muc: [string, { toSQL(): { sql: string; params: unknown[] } }][] = [];
+  try {
+    muc.push(["TOÀN BỘ dòng kế hoạch (đúng câu /inventory/planning chạy)", buildPlanRowsQuery(db, a)]);
+  } catch (e) {
+    console.log(`⚠ Chưa đo được câu toàn bộ: ${e instanceof Error ? e.message : String(e)}`);
+    console.log("  (image đang chạy chưa có buildPlanRowsQuery — deploy rồi chạy lại để có số này)");
+  }
+  muc.push(["vsales (đơn hàng → mẫu mã)", db.select().from(sales)]);
+  muc.push(["vreceipts (phiếu kho → mẫu mã)", db.select().from(receipts)]);
 
   for (const [ten, truyVan] of muc) {
     const { sql: text, params } = truyVan.toSQL();
