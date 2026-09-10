@@ -130,7 +130,12 @@ async function main() {
 
   results.sort((a, b) => b.ms - a.ms);
   console.log("\n── THỜI GIAN TỪNG TRUY VẤN (chậm nhất trước) ──");
-  for (const r of results) console.log(`${String(r.ms).padStart(7)}ms  ${r.page.padEnd(18)} ${r.fn.padEnd(26)} ${r.note}`);
+  // IN CẢ PHẦN TÁCH CSDL / ỨNG DỤNG: "chậm" chưa sửa được gì, phải biết thời gian nằm ở Postgres
+  // hay ở Node, và bao nhiêu lượt gọi. 39 giây trong 20 lượt gọi khác hẳn 39 giây trong 4.000 lượt.
+  for (const r of results)
+    console.log(
+      `${String(r.ms).padStart(7)}ms  csdl ${String(r.dbMs).padStart(6)}ms  ứng dụng ${String(Math.max(0, r.ms - r.dbMs)).padStart(6)}ms  ${String(r.calls).padStart(5)} lượt  ${r.page.padEnd(16)} ${r.fn.padEnd(26)} ${r.note}`,
+    );
   const total = results.reduce((t, r) => t + r.ms, 0);
   console.log(`\nTổng ${total}ms cho ${results.length} truy vấn.`);
   process.exit(0);
