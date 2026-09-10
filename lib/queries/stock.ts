@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -9,6 +10,22 @@ const ri = schema.stockReceiptItems;
 const r = schema.stockReceipts;
 const pv = schema.productVariants;
 const p = schema.products;
+const coo = schema.canonicalOrderOutcome;
+
+/**
+ * ───────────── BẢNG DẪN XUẤT SINH RA ĐỂ **NỐI**, KHÔNG PHẢI ĐỂ TRA TỪNG DÒNG ─────────────
+ *
+ * `ORDER_OUTCOME_FAST` là truy vấn con TƯƠNG QUAN. Dùng nó trong một câu gộp trên 2.495 dòng hàng
+ * thì Postgres gắn cả chuỗi dự phòng vào phép quét `orders`, và `EXPLAIN ANALYZE` trên production
+ * (10/09/2026) cho thấy chính phép quét đó mất **9.053ms cho 2.443 dòng** — chỉ 350 buffer, tức
+ * không phải đọc đĩa mà là biểu thức chạy trên từng dòng. Cả câu sổ kho: **39.960ms**, chạy hai lần
+ * mỗi lần mở trang chủ.
+ *
+ * Ở đây nối thẳng vào bảng dẫn xuất: một phép nối băm, tính một lần cho tất cả. Điều kiện tươi mới
+ * đặt NGAY TRONG phép nối, nên dòng cũ không khớp và `coalesce` rơi về biểu thức chuẩn — vẫn đúng
+ * luật "chậm chứ không sai", chỉ khác là phần chậm nay chỉ trả cho những dòng thật sự cũ.
+ */
+const OUTCOME_JOINED = sql`coalesce(${coo.outcome}, ${ORDER_OUTCOME_FAST})`;
 
 /**
  * SỔ KHO — mọi con số tồn của ERP đều ra từ một phương trình duy nhất:
@@ -45,7 +62,7 @@ const OUT_IN_TRANSIT = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.stage} in ('PICKE
  * Gồm đơn hoàn (theo kết quả đơn) và đơn huỷ sau khi đã xuất — chủ shop yêu cầu xử lý như hàng hoàn.
  */
 const OUT_AWAITING_RETURN = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is null
-  and (${RETURN_PENDING_WAREHOUSE} or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
+  and ((${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null) or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
   and not ${VTP_DESTROYED})`;
 
 /** Hàng hoàn kho ĐÃ xử lý (đã có phiếu tái nhập) — dùng để đối chiếu với số thực nhập, ra phần hụt. */
@@ -70,13 +87,24 @@ export function variantSalesSubquery(db: Db) {
       /** Đã chốt đơn, hàng còn trong kho — trừ khỏi tồn KHẢ DỤNG, không trừ khỏi tồn thực tế. */
       reserved: sql<number>`coalesce(sum(${QTY}) filter (where ${RESERVED_IN_WAREHOUSE}), 0)`.as("out_reserved"),
       /** Giao thành công theo TIỀN (ORDER_OUTCOME) — chỉ để đối chiếu, KHÔNG dùng tính tồn. */
-      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`.as("sold_delivered"),
+      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} = 'DELIVERED'), 0)`.as("sold_delivered"),
       /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
-      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
+      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    // Kết quả đơn lấy bằng PHÉP NỐI, không bằng truy vấn con cho từng dòng — xem OUTCOME_JOINED.
+    .leftJoin(
+      coo,
+      and(
+        eq(coo.orderId, o.id),
+        sql`coalesce(${coo.shipmentId}, '') = coalesce(${s.id}, '')`,
+        eq(coo.logicVersion, CANONICAL_OUTCOME_VERSION),
+        sql`${coo.computedAt} >= ${o.updatedAt}`,
+        sql`(${s.id} is null or ${coo.computedAt} >= ${s.updatedAt})`,
+      ),
+    )
     .groupBy(oi.variantId)
     .as("vsales");
 }
