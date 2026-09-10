@@ -106,6 +106,21 @@ async function main() {
 
   const dash = await import("@/lib/queries/dashboard");
   await timed("/", "getDashboardData", () => dash.getDashboardData(month));
+
+  /**
+   * ĐIỂM MÙ ĐÃ SỬA (10/09/2026).
+   *
+   * Bộ đo này từng chỉ đo `getDashboardData` rồi kết luận "trang chủ = 40 giây". Nhưng trang chủ
+   * còn chờ HAI thứ nữa mà bộ đo không hề nhìn tới: `getBusinessBrief` và `getDashboardActionQueue`.
+   * Cả hai nằm trong Suspense nên HTML đầu tiên ra sớm — nhưng phản hồi HTTP chỉ KẾT THÚC khi chúng
+   * xong, tức smoke vẫn tính đủ thời gian đó.
+   *
+   * Sửa lớp tăng tốc xong mà trang chủ vẫn quá hạn 60 giây chính là vì phần chưa ai đo.
+   */
+  const brief = await import("@/lib/queries/business-brief");
+  await timed("/ (Suspense)", "getBusinessBrief", () => brief.getBusinessBrief(month));
+  const dq = await import("@/lib/queries/dashboard-queue");
+  await timed("/ (Suspense)", "getDashboardActionQueue", () => dq.getDashboardActionQueue());
   // Trang NHANH để đối chiếu — nếu mọi thứ đều chậm thì vấn đề nằm ở chỗ khác.
   const ads = await import("@/lib/queries/ads-roas");
   // Kỳ MẶC ĐỊNH của trang (30 ngày) và kỳ TOÀN BỘ — chênh nhau bao nhiêu cho biết chi phí đi theo
