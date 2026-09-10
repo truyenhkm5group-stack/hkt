@@ -2,7 +2,7 @@
  * Đọc hội thoại Pancake (Pages API) → phát hiện case CSKH từ tin nhắn KHÁCH gửi và thẻ hội thoại:
  * tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng, khiếu nại.
  */
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { loadCsRules, stripIgnored } from "@/lib/cs/detect";
@@ -45,7 +45,17 @@ const SDT = /(?:^|[^\d])(0\d(?:[\s.\-]?\d){8,9})(?:[^\d]|$)/;
  */
 const DIA_CHI = /\b(thon|xom|ap|to |khu pho|kp |so nha|sn |ngo |ngach |hem |duong |pho |xa |phuong |thi tran |tt |quan |huyen |thi xa |tp |thanh pho |tinh )/;
 
-export type CustomerOrderInfo = { at: Date | null; text: string; phone: string; hasAddress: boolean };
+export type CustomerOrderInfo = {
+  /** Lúc thông tin ĐỦ để lên đơn = tin muộn hơn trong hai tin. */
+  at: Date | null;
+  text: string;
+  phone: string;
+  /** Nguyên văn đoạn khách gửi địa chỉ — người xử lý dán thẳng vào đơn, khỏi mở lại chat. */
+  address: string;
+  /** Lúc khách gửi SĐT và lúc khách gửi địa chỉ, để tính được thời gian chờ của từng mảnh. */
+  phoneAt: Date | null;
+  addressAt: Date | null;
+};
 
 /**
  * Khách đã cho ĐỦ SĐT và ĐỊA CHỈ trong hội thoại này chưa.
@@ -81,7 +91,14 @@ export function findCustomerOrderInfo(messages: PancakeMessage[], convPhones: st
 
   // Mốc = tin MUỘN hơn trong hai tin: trước đó thông tin chưa đủ để lên đơn.
   const moc = [sdt?.at ?? null, diaChi.at].filter((d): d is Date => d instanceof Date).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
-  return { at: moc, text: (sdt?.at && diaChi.at && sdt.at > diaChi.at ? sdt.text : diaChi.text) || diaChi.text, phone: soCuoi, hasAddress: true };
+  return {
+    at: moc,
+    text: (sdt?.at && diaChi.at && sdt.at > diaChi.at ? sdt.text : diaChi.text) || diaChi.text,
+    phone: soCuoi,
+    address: diaChi.text,
+    phoneAt: sdt?.at ?? null,
+    addressAt: diaChi.at,
+  };
 }
 
 /** Loại case chỉ có nghĩa SAU khi khách đã đặt đơn (trước đó chỉ là câu hỏi tư vấn, không phải việc cần xử lý) */
@@ -145,6 +162,69 @@ export function detectFromMessages(messages: { text: string; fromPage: boolean; 
   return [...hits.values()];
 }
 
+/**
+ * ═══════════ GHÉP ĐƠN TRƯỚC KHI KẾT LUẬN "CHƯA TẠO ĐƠN" ═══════════
+ *
+ * Kết luận "khách đủ thông tin mà chưa có đơn" chỉ đúng khi ta THẬT SỰ biết là chưa có. Ghép sai
+ * theo hướng nào cũng tệ:
+ *
+ *  · ghép hụt  ⇒ báo "chưa tạo đơn" trong khi đơn đã có, CSKH gọi lại khách đã mua rồi;
+ *  · ghép bừa  ⇒ im lặng bỏ sót một đơn thật.
+ *
+ * BA MỨC CHẮC CHẮN, xét theo đúng thứ tự:
+ *
+ *  1. `conversation_id` — Pancake gắn thẳng đơn với hội thoại. Chắc chắn, dùng ngay.
+ *  2. SĐT + đúng MỘT đơn trong cửa sổ thời gian — đủ chắc.
+ *  3. SĐT + NHIỀU đơn ⇒ **NHẬP NHẰNG**. Không chọn đại, và cũng không kết luận "chưa tạo đơn".
+ *
+ * Mức 3 là chỗ luật cũ sai: nó lấy đơn mới nhất theo SĐT rồi coi như xong. Một số điện thoại có
+ * nhiều đơn là chuyện thường (khách mua nhiều lần, hoặc SĐT của người nhận hộ), và chọn đại một
+ * đơn để so mốc thời gian là dựng ra một kết luận không có căn cứ.
+ */
+export type OrderMatch =
+  | { kind: "BY_CONVERSATION"; order: MatchedOrder }
+  | { kind: "BY_PHONE_UNIQUE"; order: MatchedOrder }
+  | { kind: "AMBIGUOUS"; candidates: number; order: MatchedOrder | null }
+  | { kind: "NONE"; order: null };
+
+export type MatchedOrder = { id: string; customerId: string | null; billFullName: string | null; billPhone: string | null; systemId: number | null; insertedAt: Date | null; stage: string | null };
+
+/**
+ * Đơn ứng với hội thoại này, kèm MỨC CHẮC CHẮN.
+ *
+ * `since` giới hạn cửa sổ khi ghép bằng SĐT: đơn của ba tháng trước không nói gì về lần chốt hôm
+ * nay. Ghép bằng `conversation_id` thì không cần cửa sổ — nó đã là bằng chứng trực tiếp.
+ */
+export async function matchOrderForConversation(
+  db: Awaited<ReturnType<typeof getDb>>,
+  conversationId: string,
+  phones: string[],
+  since: Date,
+): Promise<OrderMatch> {
+  const cols = { id: true, customerId: true, billFullName: true, billPhone: true, systemId: true, insertedAt: true, stage: true } as const;
+  const conNguyen = sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`;
+
+  const theoHoiThoai = await db.query.orders.findFirst({
+    where: and(eq(schema.orders.conversationId, conversationId), conNguyen),
+    orderBy: [desc(schema.orders.insertedAt)],
+    columns: cols,
+  });
+  if (theoHoiThoai) return { kind: "BY_CONVERSATION", order: theoHoiThoai };
+
+  const so = phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
+  if (!so.length) return { kind: "NONE", order: null };
+
+  const theoSdt = await db.query.orders.findMany({
+    where: and(inArray(schema.orders.billPhone, so), conNguyen, gte(schema.orders.insertedAt, since)),
+    orderBy: [desc(schema.orders.insertedAt)],
+    columns: cols,
+    limit: 5,
+  });
+  if (!theoSdt.length) return { kind: "NONE", order: null };
+  if (theoSdt.length === 1) return { kind: "BY_PHONE_UNIQUE", order: theoSdt[0] };
+  return { kind: "AMBIGUOUS", candidates: theoSdt.length, order: theoSdt[0] };
+}
+
 function pancakeChatUrl(pageId: string, conversationId: string) {
   return `https://pancake.vn/${pageId}?c_id=${conversationId}`;
 }
@@ -174,6 +254,18 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
   log(`Quét ${pages.length}/${allPages.length} page: ${pages.map((p) => p.name).join(", ")}`);
   let scanned = 0;
   let withHits = 0;
+  /*
+    BA CON SỐ PHẢI BÁO RA, KHÔNG ĐƯỢC NUỐT.
+
+    Một lượt quét trả về "tạo 12 case" mà không nói đã bỏ qua bao nhiêu và vì sao thì không kiểm
+    chứng được. Hai lý do bỏ qua dưới đây có nghĩa hoàn toàn khác nhau:
+
+     · `daCoDon`   — khách đủ thông tin VÀ đơn đã có. Hệ thống chạy đúng, không có việc gì.
+     · `nhapNhang` — một SĐT nhiều đơn, không ghép chắc được. Đây là nợ dữ liệu, không phải "ổn".
+  */
+  let daCoDon = 0;
+  let nhapNhang = 0;
+  let duThongTinTong = 0;
   let created = 0;
   const errors: string[] = [];
   for (const page of pages) {
@@ -203,13 +295,11 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         }
       }
       const recent = messages.filter((m) => !m.insertedAt || m.insertedAt >= since);
-      // gắn đơn: theo conversation_id, nếu không thì theo SĐT gần nhất (đơn chưa huỷ/xoá)
       const phones = conv.phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
-      const order = await db.query.orders.findFirst({
-        where: and(or(eq(schema.orders.conversationId, conv.id), phones.length ? inArray(schema.orders.billPhone, phones) : sql`false`), sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`),
-        orderBy: [desc(schema.orders.insertedAt)],
-        columns: { id: true, customerId: true, billFullName: true, billPhone: true, systemId: true, insertedAt: true, stage: true },
-      });
+      // Ghép đơn KÈM MỨC CHẮC CHẮN — xem `matchOrderForConversation`. Cửa sổ 90 ngày khi ghép bằng
+      // SĐT: đơn của quý trước không nói gì về lần chốt hôm nay.
+      const match = await matchOrderForConversation(db, conv.id, phones, new Date(Date.now() - 90 * 86_400_000));
+      const order = match.order;
       // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case
       const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns, { requireOrder: true, orderInsertedAt: order?.insertedAt ?? null, orderStage: order?.stage ?? null });
       /*
@@ -224,19 +314,44 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
       const closeHits: ChatHit[] = [];
       const duThongTin = findCustomerOrderInfo(recent, conv.phones);
       if (duThongTin) {
-        // Đơn tạo trước lúc khách cho đủ thông tin 30 phút trở về trước = đơn của lần mua CŨ.
-        const from = duThongTin.at ? new Date(duThongTin.at.getTime() - 30 * 60_000) : null;
-        const hasNewOrder = Boolean(order?.insertedAt && from && new Date(order.insertedAt) >= from);
-        if (!hasNewOrder) {
+        duThongTinTong += 1;
+        /*
+          NHẬP NHẰNG THÌ KHÔNG KẾT LUẬN.
+
+          Một SĐT có nhiều đơn là chuyện thường (khách mua nhiều lần, hoặc số của người nhận hộ).
+          Chọn đại một đơn rồi so mốc thời gian là dựng ra kết luận không có căn cứ — theo cả hai
+          hướng: báo "chưa tạo đơn" cho khách đã mua, hoặc im lặng bỏ sót một đơn thật.
+        */
+        if (match.kind === "AMBIGUOUS") {
+          nhapNhang += 1;
+        } else {
+          // Đơn tạo trước lúc khách cho đủ thông tin 30 phút trở về trước = đơn của lần mua CŨ.
+          const from = duThongTin.at ? new Date(duThongTin.at.getTime() - 30 * 60_000) : null;
+          const hasNewOrder = Boolean(order?.insertedAt && from && new Date(order.insertedAt) >= from);
+          if (hasNewOrder) daCoDon += 1;
+          if (!hasNewOrder) {
+          /*
+            CASE PHẢI MANG ĐỦ BẰNG CHỨNG ĐỂ LÀM ĐƯỢC NGAY.
+
+            Người xử lý cần: SĐT · địa chỉ nguyên văn · lúc thông tin đủ · đã chờ bao lâu · việc
+            cần làm. Thiếu một trong số đó là họ phải mở lại chat đọc từ đầu, và một hàng đợi bắt
+            người ta làm thế thì sớm muộn cũng bị bỏ.
+          */
           const cuLabel = order?.systemId ? ` Đơn gần nhất #${order.systemId} là của lần mua trước.` : "";
           const luc = duThongTin.at
-            ? ` lúc ${duThongTin.at.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}`
-            : "";
+            ? duThongTin.at.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })
+            : "không rõ";
+          const choGio = duThongTin.at ? Math.max(0, Math.round((Date.now() - duThongTin.at.getTime()) / 3_600_000)) : null;
+          const choLabel = choGio === null ? "" : choGio < 24 ? ` · đã chờ ${choGio} giờ` : ` · đã chờ ${Math.floor(choGio / 24)} ngày`;
           closeHits.push({
             kind: "ORDER_NOT_CREATED",
             keyword: duThongTin.phone,
-            message: `Khách đã cho đủ SĐT và địa chỉ${luc} nhưng chưa thấy đơn mới trên Pancake: “${duThongTin.text}”.${cuLabel} Tạo đơn ngay để không sót.`,
+            message:
+              `SĐT ${duThongTin.phone} · địa chỉ: “${duThongTin.address}” · đủ thông tin lúc ${luc}${choLabel}. ` +
+              `Chưa thấy đơn tương ứng trên Pancake${match.kind === "BY_CONVERSATION" ? " (đã đối chiếu theo hội thoại)" : match.kind === "BY_PHONE_UNIQUE" ? " (đã đối chiếu theo SĐT)" : ""}.` +
+              `${cuLabel} VIỆC CẦN LÀM: tạo đơn trên Pancake, hoặc kiểm tra lại với khách nếu đã đổi ý.`,
           });
+          }
         }
       }
       const hits = [...closeHits, ...tagHits.filter((t) => !closeHits.some((c) => c.kind === t.kind)), ...msgHits.filter((h) => ![...tagHits, ...closeHits].some((t) => t.kind === h.kind))];
@@ -256,11 +371,14 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         customerName: conv.customerName || order?.billFullName || "",
         customerPhone: phones[0] ?? order?.billPhone ?? "",
         chatUrl: pancakeChatUrl(page.id, conv.id),
+        conversationId: conv.id,
+        // Chỉ loại "đủ thông tin · chưa tạo đơn" mới có mốc này; loại khác để NULL = không áp dụng.
+        infoCompleteAt: h.kind === "ORDER_NOT_CREATED" ? (duThongTin?.at ?? null) : null,
         createdBy: "pancake-chat",
       }));
       const inserted = await db.insert(schema.csCases).values(values).onConflictDoNothing({ target: schema.csCases.dedupeKey }).returning({ id: schema.csCases.id });
       created += inserted.length;
     }
   }
-  return { pages: pages.length, scanned, withHits, created, errors: errors.slice(0, 20), errorCount: errors.length };
+  return { pages: pages.length, scanned, withHits, created, infoComplete: duThongTinTong, alreadyOrdered: daCoDon, ambiguous: nhapNhang, errors: errors.slice(0, 20), errorCount: errors.length };
 }

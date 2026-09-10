@@ -49,6 +49,7 @@ on:
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
+          - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -209,6 +210,10 @@ jobs:
               cs-cleanup)
                 fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;
+              cs-rule-update)
+                # Mặc định CHỈ ĐẾM. Truyền arg "--apply" mới ghi thật.
+                fetch_script cs-rule-update.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-rule-update.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-rule-update.ts $ARG ;;
               bank-ledger-prune)
                 fetch_script import-bank-ledger.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --prune-non-operating ;;

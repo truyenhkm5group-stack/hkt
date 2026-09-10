@@ -3,7 +3,7 @@ export const CS_KINDS = ["ORDER_NOT_CREATED", "EXCHANGE_SIZE", "EXCHANGE_COLOR",
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
-  ORDER_NOT_CREATED: "Đã chốt trong chat · chưa tạo đơn",
+  ORDER_NOT_CREATED: "Đủ thông tin tạo đơn · chưa tạo đơn",
   EXCHANGE_SIZE: "Đổi size",
   EXCHANGE_COLOR: "Đổi màu / mẫu",
   WRONG_ADDRESS: "Sai địa chỉ",
@@ -18,13 +18,49 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
   OTHER: "Khác",
 };
 
-export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
+/**
+ * ═══════ "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM" ═══════
+ *
+ * `DONE` là công của người: có ai đó ngồi xử lý xong. `AUTO_RESOLVED` là điều kiện tự hết hoặc
+ * luật phát hiện đổi — KHÔNG ai làm gì cả.
+ *
+ * Gộp hai thứ này lại là cách nhanh nhất để biến con số năng suất CSKH thành vô nghĩa: đóng 180
+ * case sai luật sẽ trông y hệt 180 lần có người gọi khách. Bảng `notifications` đã học bài này rồi
+ * (xem `resolution` ở đó); bảng case học lại đúng một lần nữa.
+ */
+export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "DONE", "AUTO_RESOLVED", "CANCELLED"] as const;
 export type CsStatus = (typeof CS_STATUSES)[number];
-export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", DONE: "Đã xong", CANCELLED: "Huỷ" };
+export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", DONE: "Đã xong", AUTO_RESOLVED: "Tự đóng", CANCELLED: "Huỷ" };
+
+/**
+ * VÌ SAO một case được đóng tự động. Bắt buộc có khi `status = AUTO_RESOLVED`.
+ *
+ * Đóng mà không nói vì sao là xoá bằng chứng lặng lẽ: sáu tháng sau không ai trả lời được "180 case
+ * đó đi đâu".
+ */
+export const CS_RESOLUTIONS = ["INVALIDATED_BY_RULE_UPDATE", "CONDITION_GONE"] as const;
+export type CsResolution = (typeof CS_RESOLUTIONS)[number];
+export const CS_RESOLUTION_LABEL: Record<CsResolution, string> = {
+  INVALIDATED_BY_RULE_UPDATE: "Luật phát hiện đã đổi — case cũ không còn đúng",
+  CONDITION_GONE: "Điều kiện phát hiện không còn",
+};
+
+/**
+ * PHIÊN BẢN LUẬT PHÁT HIỆN "đủ thông tin · chưa tạo đơn".
+ *
+ *  · v1 — tìm từ khoá "chốt đơn"/"em chốt" trong tin của SHOP. **SAI**: kịch bản bán hàng chứa sẵn
+ *         chữ đó trong câu MỜI chốt, nên gần như mọi hội thoại có tư vấn đều bị đánh dấu.
+ *  · v2 — KHÁCH đã cho đủ SĐT và địa chỉ (chủ shop chốt 10/09/2026). Quan sát được, không suy đoán.
+ *
+ * Ghi số này vào case để sau còn phân biệt được case nào sinh bởi luật nào.
+ */
+export const ORDER_NOT_CREATED_RULE_VERSION = 2;
 export const CS_STATUS_TONE: Record<CsStatus, string> = {
   OPEN: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
   IN_PROGRESS: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
   DONE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  // Màu trung tính, cố ý: tự đóng KHÔNG phải công của ai.
+  AUTO_RESOLVED: "bg-muted text-muted-foreground",
   CANCELLED: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
 };
 

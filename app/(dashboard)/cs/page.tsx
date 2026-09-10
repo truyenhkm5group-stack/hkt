@@ -1,5 +1,7 @@
 import { Headset, Inbox, MapPinOff, Ruler } from "lucide-react";
+import { Suspense } from "react";
 import { CaseDialog } from "@/app/(dashboard)/cs/case-dialog";
+import { OrderIntakeSection } from "@/app/(dashboard)/cs/intake-section";
 import { CsTable, DetectButton } from "@/app/(dashboard)/cs/cs-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { UrlPagination } from "@/components/data-table/url-pagination";
@@ -39,6 +41,14 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
         <MetricCard label="Sai địa chỉ / SĐT" value={formatNumber((summary.byKind.WRONG_ADDRESS ?? 0) + (summary.byKind.WRONG_PHONE ?? 0))} note="Cần sửa trên Pancake trước khi giao" icon={MapPinOff} tone="amber" />
         <MetricCard label="Trả hàng / khiếu nại / giục giao / sai giá" value={formatNumber((summary.byKind.RETURN ?? 0) + (summary.byKind.COMPLAINT ?? 0) + (summary.byKind.URGE_DELIVERY ?? 0) + (summary.byKind.WRONG_PRICE ?? 0) + (summary.byKind.SIZE_ADVICE ?? 0))} note="Đang mở" icon={Headset} tone="blue" />
       </section>
+      {/*
+        Trong Suspense riêng: khối này nối case với đơn qua conversation_id, nặng hơn các thẻ đếm ở
+        trên và không được giữ cả trang chờ theo.
+      */}
+      <Suspense fallback={null}>
+        <OrderIntakeSection />
+      </Suspense>
+
       <DataTableToolbar
         searchPlaceholder="Tên khách, SĐT, nội dung…"
         period={{ defaultKey: "all" }}

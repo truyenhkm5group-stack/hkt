@@ -85,7 +85,7 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
-import { detectFromMessages, findCustomerOrderInfo } from "@/lib/cs/chat-detect";
+import { detectFromMessages, findCustomerOrderInfo, matchOrderForConversation } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
@@ -1022,7 +1022,37 @@ async function main() {
     const shopNhacLai = [msg("s4", "Em gửi về số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy nhé chị", true, t0), msg("c5", "0912345678", false, t0)];
     assert.equal(findCustomerOrderInfo(shopNhacLai), null, "địa chỉ trong tin của SHOP không tính là khách đã cho");
 
-    console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; "đã chốt" = khách cho ĐỦ SĐT + địa chỉ (kịch bản bán hàng của shop KHÔNG còn bị tính)`);
+    /*
+      ═══ GHÉP ĐƠN TRƯỚC KHI KẾT LUẬN "CHƯA TẠO ĐƠN" ═══
+
+      Kết luận "chưa có đơn" chỉ đúng khi ta THẬT SỰ biết là chưa có. Ghép hụt thì CSKH gọi lại
+      khách đã mua; ghép bừa thì im lặng bỏ sót một đơn thật. Ba mức chắc chắn phải phân biệt được.
+    */
+    const cuaSo = new Date(Date.now() - 90 * 86_400_000);
+    const theoHoiThoai = await matchOrderForConversation(db, "conv-suong", ["0949947123"], cuaSo);
+    assert.equal(theoHoiThoai.kind, "BY_CONVERSATION", "có conversation_id thì đó là bằng chứng trực tiếp, dùng ngay");
+
+    const khongCo = await matchOrderForConversation(db, "conv-khong-ton-tai", ["0900000000"], cuaSo);
+    assert.equal(khongCo.kind, "NONE", "không hội thoại, không SĐT khớp ⇒ chưa có đơn");
+    assert.equal(khongCo.order, null);
+
+    // G. Một SĐT có NHIỀU đơn ⇒ KHÔNG ép ghép, và cũng KHÔNG kết luận "chưa tạo đơn".
+    await db.insert(schema.orders).values([
+      { id: "amb-1", billPhone: "0988777666", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 86_400_000) },
+      { id: "amb-2", billPhone: "0988777666", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 3_600_000) },
+    ]).onConflictDoNothing();
+    const nhieuDon = await matchOrderForConversation(db, "conv-amb", ["0988777666"], cuaSo);
+    assert.equal(nhieuDon.kind, "AMBIGUOUS", "một SĐT nhiều đơn ⇒ NHẬP NHẰNG, không chọn đại");
+    assert.ok(nhieuDon.kind === "AMBIGUOUS" && nhieuDon.candidates >= 2, "phải nói có bao nhiêu ứng viên");
+
+    await db.insert(schema.orders).values({ id: "uniq-1", billPhone: "0977666555", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 3_600_000) }).onConflictDoNothing();
+    const motDon = await matchOrderForConversation(db, "conv-uniq", ["0977666555"], cuaSo);
+    assert.equal(motDon.kind, "BY_PHONE_UNIQUE", "SĐT khớp đúng MỘT đơn trong cửa sổ ⇒ đủ chắc");
+
+    console.log(
+      `✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; "đủ thông tin tạo đơn" = khách cho ĐỦ SĐT + địa chỉ ` +
+        `(kịch bản bán hàng của shop KHÔNG còn bị tính) · ghép đơn 4 mức: hội thoại > SĐT-duy-nhất > NHẬP NHẰNG (không kết luận) > chưa có`,
+    );
   }
 
   // File "Danh sách vận đơn" của viettelpost.vn: cột Mã Vận Đơn là vận đơn CHIỀU VỀ (mã gốc + 1P1), cột Mã đơn hàng mới là mã gốc ERP lưu

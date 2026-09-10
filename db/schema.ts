@@ -90,6 +90,21 @@ export const csCases = pgTable(
     dedupeKey: text("dedupe_key").unique(),
     /** Link hội thoại Pancake (case từ chat) */
     chatUrl: text("chat_url").notNull().default(""),
+    /**
+     * Hội thoại Pancake sinh ra case. Tách khỏi `chat_url` vì URL là để NGƯỜI bấm, còn cái này là
+     * để MÁY ghép: nối case với đơn được tạo sau đó (`orders.conversation_id`).
+     */
+    conversationId: text("conversation_id"),
+    /**
+     * ═══ LÚC KHÁCH CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══
+     *
+     * KHÁC `created_at`: case được phát hiện lúc job quét (có thể vài giờ sau), còn mốc này là lúc
+     * khách thật sự đã đưa đủ thông tin để lên đơn. Đo "bao lâu từ đủ thông tin tới lúc có đơn" mà
+     * lấy `created_at` thì con số đó đo tốc độ của JOB QUÉT, không đo tốc độ của CSKH.
+     *
+     * `NULL` với case thuộc loại khác hoặc case sinh bởi luật cũ — CHƯA BIẾT, không phải 0.
+     */
+    infoCompleteAt: ts("info_complete_at"),
     createdBy: text("created_by").notNull().default(""),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
