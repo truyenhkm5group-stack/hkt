@@ -138,3 +138,84 @@ Cùng hình dạng xấu còn ở các hàm khác, xếp theo chi phí đo đư�
 
 Sửa theo đúng cách của mục 3: nối bảng dẫn xuất thay vì tra từng dòng. **Không** đụng tới định nghĩa
 kết quả đơn — chỉ đổi *lúc nào* và *bằng hình dạng nào* nó được đọc.
+
+---
+
+# Phụ lục — sự cố 10/09/2026: sổ kho kéo sập trang chủ
+
+## Diễn biến đo được
+
+| Lúc | `/` | Trang khác |
+| --- | --- | --- |
+| deploy #196 | 126ms | 19/25 đạt, 0 quá hạn |
+| deploy #197–#198 | **QUÁ HẠN 60s** | tập trang hỏng ĐỔI giữa các lượt |
+| deploy #199 (sau khi sửa) | **196ms** | 14/25 đạt, còn đúng `/inventory/planning` |
+
+## Nguyên nhân
+
+Một câu lệnh: **sổ kho**. Đo bằng `perf-probe` trên máy RẢNH (RAM 531/1963MB, `erp-app` 0% CPU):
+
+```
+                     một giờ trước   →   lúc sự cố
+câu lệnh sổ kho          32,5s              61,4s
+getDashboardData         43,0s              71,8s
+getBusinessBrief         41,4s              65,3s
+```
+
+Chi phí này **có sẵn từ lâu** và đang tăng; nó vừa vượt ngưỡng 60 giây. Trang chủ gọi
+`stockRiskSummary()` trong cùng `Promise.all` với doanh thu, đơn mới, COD và cảnh báo — nên toàn bộ
+trang chờ nó. Các trang khác hỏng theo kiểu ngẫu nhiên vì tranh CPU với chính truy vấn đó.
+
+## Cách xác định (và ba lần chẩn đoán SAI trên đường đi)
+
+Ghi lại để lần sau không đi lại:
+
+1. **"Hỏng ở cổng bí mật"** — sai. Cổng đó xanh; đọc nhầm dòng script được echo ra thành dòng lỗi.
+   Đọc `steps[].conclusion` từ API job thay vì grep log là ra ngay.
+2. **"Bảng kết quả đơn vật chất hoá bị rỗng nên rơi về đường chậm"** — sai. Bảng khoẻ: 2.629 dòng,
+   một phiên bản luật, vừa tính lúc 09:01.
+3. **"CSDL rảnh trong lúc trang treo"** — KHÔNG CÓ CĂN CỨ. Mẫu `pg_stat_activity` lấy GIỮA hai lượt
+   smoke chứ không phải trong lúc treo. Suýt dẫn tới một bản sửa nhắm sai chỗ.
+
+Thứ thật sự chỉ đúng chỗ là `perf-probe`: nó xoá đệm, đo từng báo cáo, và in nguyên văn tám câu lệnh
+chậm nhất. Cùng một câu lệnh xuất hiện ba lần ở đầu bảng với 61s/51s/41s.
+
+Phép kiểm cuối cùng chứng minh chẩn đoán: sau khi trang chủ thôi chờ sổ kho, **mọi** trang về
+100–400ms và chỉ còn `/inventory/planning` quá hạn — đúng trang mà toàn bộ nội dung LÀ sổ kho, không
+có chỗ nào để né.
+
+## Đã sửa
+
+Trang chủ đặt hạn 3 giây cho riêng mục sổ kho; quá hạn thì con số đó là **CHƯA TÍNH ĐƯỢC**, hiện
+"đang tính". Cố ý không trả 0 — 0 đọc thành "không mẫu nào cần sản xuất gấp".
+
+Kèm hai lỗi khác lộ ra trong lúc điều tra:
+
+- `memo` gộp lời gọi trùng khoá **không có trần thời gian**: một lượt tính bị bỏ rơi (job giữ ấm gọi
+  qua `?wait=0`) làm mọi người đọc sau đó chờ một lời hứa đã chết cho tới khi khởi động lại ứng dụng.
+  Nay quá 20 giây thì tính lại. `tests/memo-inflight.test.ts`.
+- Bảng độ phủ lợi nhuận ném lỗi im lặng: điều kiện kỳ viết bằng cột Drizzle sinh ra
+  `"orders"."inserted_at"` trong câu lệnh đặt bí danh `orders o`. Hỏng cả doanh thu lẫn quy kết
+  quảng cáo, nhưng nằm sau `Suspense` nên trang vẫn mở. Sau khi sửa: 413 đơn giao / 397 có chứng
+  từ tiền.
+
+## CÒN NỢ — sổ kho vẫn 61 giây
+
+Bản sửa trên **không chạm vào truy vấn**. Nó chỉ chặn việc một mục nặng giữ cả trang làm con tin.
+
+`/inventory/planning` vẫn quá hạn, và đây là việc thật còn lại. Manh mối đã có từ `explain-stock`:
+
+```
+vsales (đơn → mẫu mã)     9.862ms   cost=2.195.549   JIT: bật
+vreceipts (phiếu → mẫu)       0,3ms
+```
+
+Chi phí kế hoạch 2,2 triệu trên máy 2 nhân làm PostgreSQL bật JIT — với dạng truy vấn nhiều truy vấn
+con tương quan, thời gian biên dịch JIT thường lớn hơn thời gian chạy. Hai hướng đáng đo TRƯỚC KHI
+sửa mã:
+
+1. Đo lại `vsales` với `jit = off` — một tham số, đảo ngược được, không đụng dữ liệu.
+2. Vật chất hoá phần bán ra theo mẫu mã, đúng cách đã dùng cho `canonical_order_outcome`.
+
+Không làm hướng nào trong phiên này: sổ kho bị khoá bởi luật nghiệp vụ (AGENTS mục 3.10), và sửa vội
+một truy vấn quyết định số tồn là cách nhanh nhất để có số tồn sai mà không ai phát hiện.
