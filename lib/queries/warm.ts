@@ -20,7 +20,18 @@ import { resolvePeriod } from "@/lib/search-params";
  */
 
 /** Các kỳ người dùng thật hay mở. Giữ ấm kỳ không ai xem là đốt CPU vô ích. */
-const KY_HAY_MO = ["30d", "7d", "month"] as const;
+/**
+ * CHỈ KỲ MẶC ĐỊNH.
+ *
+ * Bản đầu giữ ấm ba kỳ + bản tóm tắt, chạy mỗi 2 phút. Trên máy 2 nhân, chính việc giữ ấm giành mất
+ * CPU của người đang mở trang: smoke sau đó có `/cod?recon=stale` quá hạn 60 giây, dù chính trang đó
+ * đo được 146ms ở lượt trước.
+ *
+ * Giữ ấm là để NGƯỜI DÙNG không phải chờ — nếu nó làm người dùng chờ ở trang khác thì nó đang tự
+ * phản lại mục đích. Kỳ 30 ngày là kỳ mặc định của trang chủ và chiếm gần hết lượt mở; hai kỳ còn
+ * lại người dùng tự trả giá một lần rồi được đệm 5 phút.
+ */
+const KY_HAY_MO = ["30d"] as const;
 
 export type WarmResult = { warmed: string[]; failed: { key: string; error: string }[]; ms: number };
 

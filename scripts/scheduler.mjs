@@ -32,9 +32,9 @@ const JOBS = [
   // Đo trên production 09/09/2026: sau 73 phút không ai dựng lại, 80/2.433 dòng đã cũ. Cứ thế thì
   // vài tuần nữa gần như mọi đơn rơi về đường chậm và trang chủ quay lại mức 60 giây của trước P0.3.
   { job: "outcome-materialize", every: minutes("OUTCOME_MATERIALIZE_EVERY_MINUTES", 5), offset: 1.5 },
-  // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 2 phút — ngắn hơn TTL 180
+  // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 4 phút — ngắn hơn TTL 300
   // giây của bảng điều khiển, nên đệm không bao giờ kịp nguội và người mở trang không phải trả giá.
-  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 2), offset: 0.5 },
+  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
 ];
 
 const DAILY = [
