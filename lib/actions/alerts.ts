@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { ghiBangChung } from "@/lib/evidence/record";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
@@ -110,12 +111,37 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const db = await getDb();
-  const [before] = await db.select({ title: schema.notifications.title, kind: schema.notifications.kind }).from(schema.notifications).where(eq(schema.notifications.id, id));
+  const n = schema.notifications;
+  const [before] = await db
+    .select({
+      title: n.title,
+      kind: n.kind,
+      entityType: n.entityType,
+      entityId: n.entityId,
+      occurredAt: n.occurredAt,
+      createdAt: n.createdAt,
+      startedAt: n.startedAt,
+    })
+    .from(n)
+    .where(eq(n.id, id));
+  const dongLuc = new Date();
   // Ghi RÕ là người đóng: đây là công của đội, phải tách khỏi việc điều kiện tự hết.
-  await db
-    .update(schema.notifications)
-    .set({ resolvedAt: new Date(), resolvedBy: user.id, resolution: "MANUAL" })
-    .where(inArray(schema.notifications.id, [id]));
+  await db.update(n).set({ resolvedAt: dongLuc, resolvedBy: user.id, resolution: "MANUAL" }).where(inArray(n.id, [id]));
+  // Bằng chứng hành động: chụp lại tiền đang treo và kết quả đơn NGAY LÚC ĐÓNG. Không chặn việc
+  // đóng nếu ghi hỏng — người vận hành không được trả giá cho một lớp đo lường.
+  if (before) {
+    await ghiBangChung({
+      notificationId: id,
+      kind: before.kind,
+      entityType: before.entityType,
+      entityId: before.entityId,
+      detectedAt: before.occurredAt ?? before.createdAt,
+      startedAt: before.startedAt,
+      completedAt: dongLuc,
+      actorId: user.id,
+      actorEmail: user.email,
+    }).catch((e) => console.error("[action-evidence]", e));
+  }
   // Đóng việc bằng tay là quyết định vận hành: ai đóng, đóng việc gì, lúc nào.
   await audit({ userId: user.id, userEmail: user.email, action: "case.resolve", entity: "NOTIFICATION", entityId: id, detail: { title: before?.title ?? "", kind: before?.kind ?? "" } });
   revalidatePath("/alerts");

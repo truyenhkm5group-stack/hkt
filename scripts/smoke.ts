@@ -40,6 +40,10 @@ const BUDGET_MS = Number(process.env.SMOKE_BUDGET_MS ?? 300_000);
 /** Các màn hình phải mở được. Thêm route mới vào đây khi bổ sung màn hình quan trọng. */
 const ROUTES = [
   "/",
+  // Trang điều hành hằng ngày: chủ shop mở nó đầu ngày, và nó đọc cả hàng đợi việc lẫn đường ống
+  // hàng hoàn. Phải nằm trong lá chắn hiệu năng, nếu không một tính năng mới có thể kéo nó chậm lại
+  // mà không lượt đo nào thấy.
+  "/operations",
   "/orders",
   "/shipments",
   "/import-vtp",
@@ -53,6 +57,7 @@ const ROUTES = [
   "/inventory",
   "/inventory/receipts",
   "/inventory/returns",
+  "/returns",
   "/inventory/planning",
   "/inventory/purchasing",
   "/customers",

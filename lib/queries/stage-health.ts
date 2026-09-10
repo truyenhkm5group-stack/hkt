@@ -75,6 +75,15 @@ export type StageHealth = {
   aging: Record<AgingKey, number>;
   oldestHours: number;
   oldestLabel: string;
+  /**
+   * Tuổi TRUNG VỊ và p90 của việc đang mở ở khâu này.
+   *
+   * "Cũ nhất" một mình nói dối theo cả hai hướng: một việc bị quên từ tháng trước làm khâu đang chạy
+   * tốt trông như thảm hoạ, còn 200 việc mới tinh thì trông như không có gì. Trung vị nói tình hình
+   * chung, p90 nói cái đuôi — và cái đuôi mới là chỗ khách bỏ đi.
+   */
+  medianAgeHours: number;
+  p90AgeHours: number;
   /** Việc đã quá hạn xử lý theo SLA của chính loại việc đó. */
   breached: number;
   impact: MoneyImpact;
@@ -153,9 +162,18 @@ function agingCols() {
   return cols.reduce((a, b) => sql`${a}${b}`);
 }
 
-type KindRow = { kind: string; n: number; money: string | number; breached: number; unassigned: number; oldest: string | number } & Record<AgingKey, number>;
+type KindRow = {
+  kind: string;
+  n: number;
+  money: string | number;
+  breached: number;
+  unassigned: number;
+  oldest: string | number;
+  median_h: string | number | null;
+  p90_h: string | number | null;
+} & Record<AgingKey, number>;
 
-type TypeTotals = { count: number; money: number; breached: number; unassigned: number; oldest: number } & Record<AgingKey, number>;
+type TypeTotals = { count: number; money: number; breached: number; unassigned: number; oldest: number; median: number; p90: number } & Record<AgingKey, number>;
 
 function emptyAging(): Record<AgingKey, number> {
   const out = {} as Record<AgingKey, number>;
@@ -164,7 +182,7 @@ function emptyAging(): Record<AgingKey, number> {
 }
 
 function emptyTotals(): TypeTotals {
-  return { count: 0, money: 0, breached: 0, unassigned: 0, oldest: 0, ...emptyAging() };
+  return { count: 0, money: 0, breached: 0, unassigned: 0, oldest: 0, median: 0, p90: 0, ...emptyAging() };
 }
 
 /**
@@ -183,7 +201,9 @@ async function loadKindRows(): Promise<KindRow[]> {
              coalesce(sum(coalesce(o.total_price_after_discount, s.cod_amount, 0)), 0) as money,
              count(*) filter (where ${slaBreachExpr()})::int as breached,
              count(*) filter (where n.assigned_to is null)::int as unassigned,
-             coalesce(max(extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600), 0) as oldest
+             coalesce(max(extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600), 0) as oldest,
+             percentile_cont(0.5) within group (order by extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600) as median_h,
+             percentile_cont(0.9) within group (order by extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600) as p90_h
              ${agingCols()}
         from notifications n
         left join orders o on o.id = n.entity_id and n.entity_type = 'ORDER'
@@ -251,6 +271,15 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
       cur.breached += Number(r.breached ?? 0);
       cur.unassigned += Number(r.unassigned ?? 0);
       cur.oldest = Math.max(cur.oldest, Number(r.oldest ?? 0));
+      // Trung vị/p90 gộp từ nhiều `kind` về một loại việc: lấy trọng số theo SỐ VIỆC, không lấy
+      // trung bình cộng của hai trung vị — hai nhóm lệch nhau về cỡ thì trung bình cộng nói sai.
+      const soCu = cur.count - Number(r.n ?? 0);
+      const soMoi = Number(r.n ?? 0);
+      const tong = soCu + soMoi;
+      if (tong > 0) {
+        cur.median = (cur.median * soCu + Number(r.median_h ?? 0) * soMoi) / tong;
+        cur.p90 = Math.max(cur.p90, Number(r.p90_h ?? 0));
+      }
       for (const b of AGING_BUCKETS) cur[b.key] += Number(r[b.key] ?? 0);
       byType.set(type, cur);
     }
@@ -262,6 +291,8 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
       let breached = 0;
       let unassigned = 0;
       let oldest = 0;
+      let medianSum = 0;
+      let p90 = 0;
 
       for (const type of spec.caseTypes) {
         // Loại việc chỉ thuộc về MỘT khâu — nếu không, một đồng bị đếm ở hai chỗ và tổng sai.
@@ -272,6 +303,8 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
         breached += v.breached;
         unassigned += v.unassigned;
         oldest = Math.max(oldest, v.oldest);
+        medianSum += v.median * v.count;
+        p90 = Math.max(p90, v.p90);
         for (const b of AGING_BUCKETS) aging[b.key] += v[b.key];
         exceptions.push({
           type,
@@ -310,6 +343,9 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
           backlog = kien;
           breached = cho.reduce((t, h) => t + h.slaBreach, 0);
           oldest = Math.max(oldest, ...cho.map((h) => h.oldestHours));
+          // Tuổi cũng phải lấy từ đường ống: tuổi của 16 việc cảnh báo không mô tả 484 kiện thật.
+          medianSum = cho.reduce((t, h) => t + h.medianAgeHours * h.parcels, 0);
+          p90 = Math.max(p90, ...cho.map((h) => h.p90AgeHours));
           for (const b of AGING_BUCKETS) aging[b.key] = 0;
           // Chia mốc tuổi theo tuổi TRUNG VỊ của từng khâu: không có tuổi từng kiện ở đây, và bịa
           // một phân phối chi tiết thì tệ hơn là nói thẳng mức trung bình.
@@ -348,6 +384,8 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
         aging,
         oldestHours: oldest,
         oldestLabel: oldest > 0 ? ageLabel(oldest) : "—",
+        medianAgeHours: backlog > 0 ? medianSum / backlog : 0,
+        p90AgeHours: p90,
         breached,
         impact,
         exceptions,

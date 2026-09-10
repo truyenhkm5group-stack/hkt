@@ -8,6 +8,7 @@ import { ageLabel } from "@/lib/constants/action-queue";
 import { AGING_BUCKETS } from "@/lib/constants/operating-funnel";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getEstimatorStatus } from "@/lib/queries/impact";
+import { getActionEffectiveness } from "@/lib/queries/action-evidence";
 import { getFunnelHealth, getRecoveryScoreboard, type StageHealth, type StageStatus } from "@/lib/queries/stage-health";
 import { cn } from "@/lib/utils";
 
@@ -68,9 +69,16 @@ function AgingBar({ stage }: { stage: StageHealth }) {
   );
 }
 
+/** Tuổi dạng chữ, gọn đủ để đọc lướt trong một dòng nhiều số. */
+function gio(h: number): string {
+  if (h < 1) return "<1 giờ";
+  if (h < 24) return `${Math.round(h)} giờ`;
+  return `${(h / 24).toFixed(1)} ngày`;
+}
+
 export default async function OperationsPage() {
   await requirePermission("dashboard:view");
-  const [health, estimator, bang] = await Promise.all([getFunnelHealth(), getEstimatorStatus(), getRecoveryScoreboard(7)]);
+  const [health, estimator, bang, hieuQua] = await Promise.all([getFunnelHealth(), getEstimatorStatus(), getRecoveryScoreboard(7), getActionEffectiveness(30)]);
 
   // Câu B lấy ngoại lệ của MỌI khâu rồi xếp theo tiền treo — người vận hành cần biết việc nào
   // đáng làm trước trong cả shop, không phải trong từng khâu.
@@ -145,7 +153,9 @@ export default async function OperationsPage() {
                       </span>
                       {s.unassigned > 0 ? <span className="text-amber-700 dark:text-amber-300">{formatNumber(s.unassigned)} chưa ai nhận</span> : null}
                       {s.breached > 0 ? <span className="text-rose-600 dark:text-rose-400">{formatNumber(s.breached)} trễ hạn</span> : null}
-                      <span className="text-muted-foreground">cũ nhất {s.oldestLabel}</span>
+                      <span className="text-muted-foreground">
+                        giữa {gio(s.medianAgeHours)} · p90 {gio(s.p90AgeHours)} · cũ nhất {s.oldestLabel}
+                      </span>
                       {s.impact.moneyAtRisk > 0 ? <span className="numeric font-semibold">{formatVND(s.impact.moneyAtRisk)}</span> : null}
                     </>
                   ) : (
@@ -159,6 +169,8 @@ export default async function OperationsPage() {
                   <AgingBar stage={s} />
                   {/* TIỀN Ở KHÂU NÀY NGHĨA LÀ GÌ — không nói thì mỗi người hiểu một kiểu và cộng nhầm. */}
                   <p className="text-[11.5px] leading-snug text-muted-foreground">{s.moneyMeaning}</p>
+                  {/* VIỆC NÊN LÀM ngay trên thẻ nút thắt: thấy tắc mà không biết làm gì thì thẻ này vô dụng. */}
+                  {s.nextAction ? <p className="text-[11.5px] font-medium leading-snug">→ {s.nextAction}</p> : null}
                 </div>
               ) : s.sourceStatus !== "HEALTHY" ? (
                 <p className="mt-1.5 text-[11.5px] leading-snug text-muted-foreground">{s.sourceNote}</p>
@@ -278,6 +290,36 @@ export default async function OperationsPage() {
                   </>
                 )}
               </p>
+            </div>
+
+            {/*
+              CÔNG CỦA TỪNG ĐỘI, ĐO TỪ BẰNG CHỨNG THẬT.
+
+              Bảng này chỉ lớn lên khi có người bấm đóng việc. Cố ý KHÔNG suy ngược từ lịch sử: 96
+              việc đã đóng trước đây đều không biết ai đóng, nên chúng không nói được gì về hiệu quả
+              của hành động.
+            */}
+            <div className="rounded-lg border px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="font-semibold">30 ngày qua · công theo đội</dt>
+                <dd className="numeric shrink-0 font-bold">{formatNumber(hieuQua.totalClosed)} việc</dd>
+              </div>
+              {hieuQua.teams.length ? (
+                <ul className="mt-1.5 space-y-1">
+                  {hieuQua.teams.map((t) => (
+                    <li key={t.team} className="flex items-center gap-2 text-[12px]">
+                      <span className="min-w-[110px]">{t.label}</span>
+                      <span className="numeric">{formatNumber(t.casesClosed)} việc</span>
+                      <span className="numeric text-muted-foreground">đụng {formatVND(t.moneyHandled)}</span>
+                      <span className="ml-auto numeric text-muted-foreground">
+                        {t.recoveredValue === null ? "thu về: chưa đo được" : `thu về ${formatVND(t.recoveredValue)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">{hieuQua.note}</p>
+              )}
             </div>
 
             {health.unestimatedAtRisk > 0 ? (

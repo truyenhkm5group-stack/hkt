@@ -1276,6 +1276,70 @@ export const returnInspections = pgTable(
   ],
 );
 
+/**
+ * ═══════ BẰNG CHỨNG HÀNH ĐỘNG — CÔNG CỦA ĐỘI, ĐO ĐƯỢC ═══════
+ *
+ * Câu chưa trả lời được: *CSKH đã cứu bao nhiêu doanh thu? Kế toán đòi về bao nhiêu COD? Kho giải
+ * phóng bao nhiêu vốn?*
+ *
+ * Không suy ngược từ lịch sử. Đo trên production 10/09/2026: 96 việc đã đóng có kết quả đơn, **cả
+ * 96 đều mang `resolution = 'UNKNOWN'`** — đóng từ trước khi có cột ghi nguồn gốc, không ca nào
+ * chứng minh được là có người xử lý. Lấy chúng tính "hiệu quả hành động" là đo một thứ khác rồi dán
+ * nhãn sai.
+ *
+ * Nên bảng này bắt đầu từ HÔM NAY, ghi một dòng mỗi lần MỘT NGƯỜI đóng một việc:
+ *
+ *   · ai đóng, lúc nào, mất bao lâu kể từ khi phát hiện;
+ *   · TIỀN ĐANG TREO tại thời điểm đóng — chụp lại, vì giá trị đơn có thể đổi sau;
+ *   · KẾT QUẢ ĐƠN tại thời điểm đóng — mốc để so về sau.
+ *
+ * `recovered_value` cố ý để TRỐNG lúc ghi. Lúc đóng việc thì đơn thường chưa ngã ngũ; điền một con
+ * số ở đó là đoán. Nó được tính sau, khi đơn đã có kết quả cuối, bằng cách so `outcome_at_close`
+ * với kết quả hiện tại. Chưa tính được thì là `NULL` = CHƯA BIẾT, không phải 0.
+ */
+export const actionEvidence = pgTable(
+  "action_evidence",
+  {
+    id: id(),
+    /** Việc trong hàng đợi. Không `references` để giữ bằng chứng khi việc cũ bị dọn. */
+    notificationId: text("notification_id").notNull(),
+    caseType: text("case_type").notNull(),
+    team: text("team").notNull().default(""),
+    entityType: text("entity_type").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Ai đóng. `NULL` nghĩa là dòng hỏng — bảng này chỉ ghi việc CÓ NGƯỜI đóng. */
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    detectedAt: ts("detected_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at").notNull(),
+    /** Số giờ từ lúc phát hiện tới lúc đóng. Chụp lại để khỏi tính lại từ hai mốc có thể bị sửa. */
+    hoursToClose: integer("hours_to_close"),
+    /**
+     * Tiền đang treo TẠI THỜI ĐIỂM ĐÓNG (đồng). Ảnh chụp, không phải giá trị hôm nay.
+     *
+     * Cố ý KHÔNG dùng helper `money()` (notNull default 0): việc không gắn với đơn hay vận đơn thì
+     * không có tiền để tra, và đó là CHƯA BIẾT — ghi 0 sẽ kéo mọi con số trung bình xuống bằng
+     * những dòng vốn không có gì để đo.
+     */
+    moneyAtRisk: bigint("money_at_risk", { mode: "number" }),
+    /** Kết quả đơn tại thời điểm đóng — mốc so sánh về sau. `NULL` = việc không gắn với đơn. */
+    outcomeAtClose: text("outcome_at_close"),
+    /**
+     * Tiền THẬT SỰ thu về, tính sau khi đơn ngã ngũ. `NULL` = CHƯA BIẾT, không phải 0.
+     */
+    recoveredValue: integer("recovered_value"),
+    recoveredAt: ts("recovered_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("action_evidence_actor_idx").on(t.actorId, t.completedAt),
+    index("action_evidence_type_idx").on(t.caseType, t.completedAt),
+    // Một việc đóng một lần: bấm hai lần không được đếm thành hai công.
+    uniqueIndex("action_evidence_notification_idx").on(t.notificationId),
+  ],
+);
+
 export const expenses = pgTable(
   "expenses",
   {
