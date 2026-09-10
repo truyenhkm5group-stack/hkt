@@ -10,7 +10,15 @@ RUN npm ci --no-audit --no-fund
 # Build ứng dụng
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+
+# ═══ GIỚI HẠN BỘ NHỚ CHỈ CHO BƯỚC DỰNG ═══
+#
+# Deploy #208 chết vì `next build` bị SIGKILL trên VPS ~1,9 GB đang chạy Postgres + ứng dụng + bộ
+# lập lịch + Caddy. Không giới hạn thì Node cứ phình ra tới lúc nhân hệ điều hành giết nó.
+#
+# Đặt trên chính dòng `RUN` chứ KHÔNG dùng `ENV`: `ENV` sẽ theo image sang lúc chạy và bóp luôn
+# vùng nhớ của ứng dụng đang phục vụ người dùng — một tác dụng phụ hoàn toàn không mong muốn.
+RUN NODE_OPTIONS=--max-old-space-size=1024 npm run build
 
 ENV NODE_ENV=production
 ENV PORT=3000

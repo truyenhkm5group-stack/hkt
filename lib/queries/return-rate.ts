@@ -673,7 +673,23 @@ export type ReturnRateSummary = {
 export async function failedToReturnRate(): Promise<{ rate: number; sample: number }> {
   return memo("failedToReturnRate", 300_000, async () => {
     const db = await getDb();
-    const [row] = await db
+    /*
+      JIT TẮT — HÀM NÀY LÀ CHI PHÍ CÒN LẠI LỚN NHẤT, VÀ TÔI ĐÃ ĐỂ SÓT NÓ.
+
+      Lượt sửa trước cố ý để `failedToReturnRate()` NGOÀI giao dịch của hai hàm gọi nó (đúng, vì nó
+      tự mở kết nối riêng — bọc vào là khoá chết). Nhưng để ngoài không có nghĩa là để nguyên: nó
+      cần giao dịch của CHÍNH NÓ.
+
+      Kế hoạch thực thi trên production nói rõ: chi phí ước lượng 599.692 — gấp sáu lần ngưỡng
+      `jit_above_cost` mặc định (100.000) nên JIT bật. Cùng phép quét ấy chạy riêng bằng psql chỉ
+      **127ms** (`shared hit=2594, read=0`), còn trong câu này là **2.900ms**.
+
+      Đã loại hai giả thuyết khác bằng số liệu trước khi kết luận:
+       · KHÔNG phải đọc đĩa — tỷ lệ trúng đệm của `shipment_events` là 100% (18,4 triệu hit / 2.544 read);
+       · KHÔNG phải tra cứu kết quả đơn đã tính sẵn — nó chỉ tốn 0,003ms × 649 lượt ≈ 2ms, và nhánh
+         nhanh thắng 2.520/2.521 lượt.
+    */
+    const [row] = await chayKhongJit(db, (tx) => tx
       .select({
         // Theo DOANH THU chứ không theo trạng thái: Viettel Post ghi "giao thành công" cho cả
         // chiều hoàn, nên đếm bằng stage thô sẽ làm tỷ lệ "giao thất bại → hoàn" thấp giả tạo
@@ -683,7 +699,7 @@ export async function failedToReturnRate(): Promise<{ rate: number; sample: numb
       })
       .from(sql`(select distinct e.shipment_id from shipment_events e where e.occurred_at >= now() - interval '180 days' and (e.status in ('505','506','507','510') or e.status_name ilike '%thất bại%' or e.status_name ilike '%hẹn%' or e.status_name ilike '%không liên lạc%')) f`)
       .innerJoin(s, sql`${s.id} = f.shipment_id`)
-      .leftJoin(o, eq(o.id, s.orderId));
+      .leftJoin(o, eq(o.id, s.orderId)));
     const returned = Number(row?.returned ?? 0);
     const delivered = Number(row?.delivered ?? 0);
     const sample = returned + delivered;

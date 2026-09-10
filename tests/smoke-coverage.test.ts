@@ -23,12 +23,27 @@ import path from "node:path";
  */
 
 /**
- * Tuyến CỐ Ý không đưa vào smoke, và vì sao.
+ * ═══════ HỢP ĐỒNG PHỦ TUYẾN: BỐN NHÓM, KHÔNG PHẢI MỘT DANH SÁCH ═══════
  *
- * "Chưa kịp thêm" KHÔNG phải lý do hợp lệ. Mỗi dòng ở đây phải nói được vì sao việc mở tuyến đó
- * trong một lượt kiểm tự động là sai chứ không phải là thiếu.
+ * "Phủ 100%" mà đếm theo tệp trong `app/` là con số mù: nó gộp cả tuyến API, tuyến in ấn, tuyến
+ * chuyển hướng. Thứ cần phủ là những gì NGƯỜI DÙNG BẤM VÀO ĐƯỢC.
+ *
+ * Nên mỗi tuyến phải thuộc đúng một nhóm, và ba nhóm không-phải-`SMOKE_REQUIRED` đều phải nói lý do:
+ *
+ *  · `SMOKE_REQUIRED`          — mặc định. Có trên thanh điều hướng ⇒ phải mở thử được.
+ *  · `AUTH_ONLY`               — chỉ kiểm được quyền, nội dung phụ thuộc người đăng nhập.
+ *  · `API_ONLY`                — không phải trang, không dựng HTML.
+ *  · `INTENTIONALLY_EXCLUDED`  — cố ý không kiểm tự động, KÈM LÝ DO.
+ *
+ * Hiện KHÔNG tuyến nào thuộc ba nhóm sau: cả 34 tuyến điều hướng đều là trang thật và đều được mở
+ * thử. Bảng để trống là trạng thái ĐÚNG, không phải chưa làm.
  */
-const MIEN_TRU: Record<string, string> = {};
+type NhomTuyen = "AUTH_ONLY" | "API_ONLY" | "INTENTIONALLY_EXCLUDED";
+
+const PHAN_NHOM: Record<string, { nhom: NhomTuyen; lyDo: string }> = {};
+
+/** Chỉ để bài kiểm đọc: tuyến nào KHÔNG bắt buộc có mặt trong smoke. */
+const MIEN_TRU: Record<string, string> = Object.fromEntries(Object.entries(PHAN_NHOM).map(([k, v]) => [k, `${v.nhom}: ${v.lyDo}`]));
 
 const goc = path.resolve(__dirname, "..");
 
@@ -54,7 +69,7 @@ export function testSmokeCoverage() {
 
   const thuaKhai = Object.keys(MIEN_TRU).filter((r) => !tuyen.includes(r));
   assert.deepEqual(thuaKhai, [], `MIEN_TRU còn khai tuyến đã bị xoá khỏi thanh điều hướng: ${thuaKhai.join(", ")}`);
-  for (const [r, ly] of Object.entries(MIEN_TRU)) assert.ok(ly.length > 25, `MIEN_TRU["${r}"] phải nói VÌ SAO, một dòng lý do thật`);
+  for (const [r, v] of Object.entries(PHAN_NHOM)) assert.ok(v.lyDo.length > 25, `PHAN_NHOM["${r}"] phải nói VÌ SAO, một dòng lý do thật`);
 
   /*
     TRANG LỖI CŨNG TRẢ HTTP 200.
@@ -73,7 +88,7 @@ export function testSmokeCoverage() {
   );
 
   console.log(
-    `✓ Lá chắn smoke phủ tuyến: ${tuyen.length} tuyến trên thanh điều hướng · ${daPhu.size} tuyến trong smoke · ${Object.keys(MIEN_TRU).length} miễn trừ có lý do · 0 tuyến bỏ sót · nhận ra được trang lỗi trả HTTP 200`,
+    `✓ Lá chắn smoke phủ tuyến: ${tuyen.length} tuyến điều hướng · ${daPhu.size} trong smoke · ${tuyen.length - Object.keys(PHAN_NHOM).length}/${tuyen.length} thuộc nhóm SMOKE_REQUIRED · ${Object.keys(PHAN_NHOM).length} phân nhóm khác có lý do · 0 bỏ sót · nhận ra được trang lỗi trả HTTP 200`,
   );
 }
 

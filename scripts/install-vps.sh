@@ -175,6 +175,50 @@ else
   warn "Không đọc được POSTGRES_PASSWORD trong .env — bỏ qua bước đồng bộ mật khẩu CSDL."
 fi
 
+# ═════════════ DỰNG IMAGE: KIỂM TRƯỚC, ĐỪNG ĐỂ BỊ GIẾT GIỮA CHỪNG ═════════════
+#
+# SỰ CỐ THẬT (deploy #208, 10/09/2026):
+#
+#   #13 215.7 Next.js build worker exited with code: null and signal: SIGKILL
+#   target scheduler: failed to solve: process "/bin/sh -c npm run build" ... exit code: 1
+#
+# `SIGKILL` giữa lúc `next build` là hết RAM. Máy có ~1,9 GB và đang chạy Postgres + ứng dụng +
+# bộ lập lịch + Caddy, rồi `next build` chạy bên trong Docker — mà compose dựng HAI image (app và
+# scheduler) từ cùng một Dockerfile. Cùng SHA đó chạy lại ở #209 thì thành công: đang ở sát mép.
+#
+# "Chạy lại thấy được" KHÔNG phải giải pháp. Ba việc dưới đây, theo thứ tự rẻ nhất trước:
+#
+#  1. DỌN RÁC AN TOÀN. Chỉ xoá image/cache KHÔNG còn container nào dùng (`-f` không có `-a`, nên
+#     image đang chạy không bị đụng tới). Đây là chỗ lấy lại nhiều dung lượng và bộ nhớ đệm nhất
+#     mà không rủi ro.
+#  2. GIỚI HẠN BỘ NHỚ TRÌNH DỰNG. `NODE_OPTIONS=--max-old-space-size` bắt Node dọn rác thay vì
+#     phình ra tới lúc bị giết. Chọn 1024 MB: đủ cho bản dựng này, còn chừa chỗ cho Postgres.
+#  3. CHẶN SỚM KHI KHÔNG ĐỦ. Thà dừng với một dòng nói rõ còn bao nhiêu RAM, hơn là để bị SIGKILL
+#     rồi phải đi đọc log Docker mới hiểu.
+#
+# KHÔNG dừng ứng dụng đang chạy để lấy RAM: mất dịch vụ mà chưa chắc dựng nổi thì tệ hơn nhiều.
+say "Dọn image và bộ nhớ đệm dựng không còn dùng"
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+
+TONG_MB="$(free -m | awk '/^Mem:/ {print $2}')"
+CON_MB="$(free -m | awk '/^Mem:/ {print $7}')"     # available: gồm cả phần đệm lấy lại được
+SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}')"
+say "Bộ nhớ trước khi dựng: còn dùng được ${CON_MB} MB / ${TONG_MB} MB · swap ${SWAP_MB} MB"
+
+# Ngưỡng 700 MB đo từ chính lần hỏng: bản dựng cần khoảng 600–900 MB đỉnh.
+if [ "${CON_MB:-0}" -lt 700 ] && [ "${SWAP_MB:-0}" -lt 512 ]; then
+  echo "::error::Không đủ bộ nhớ để dựng: còn ${CON_MB} MB, swap ${SWAP_MB} MB (cần ≥700 MB hoặc ≥512 MB swap)."
+  echo "         Bản đang chạy KHÔNG bị đụng tới. Xem docs/erp-performance-p0-5-report.md phụ lục 4."
+  exit 1
+fi
+if [ "${SWAP_MB:-0}" -lt 512 ]; then
+  warn "Máy chủ KHÔNG có swap (hoặc dưới 512 MB). Bản dựng đang chạy sát mép RAM — xem kế hoạch chuyển sang dựng image ở CI."
+fi
+
+# Giới hạn bộ nhớ của trình dựng nằm trong Dockerfile (trên chính dòng RUN), KHÔNG ở đây: biến môi
+# trường của shell không đi vào bản dựng Docker.
+
 $COMPOSE up -d --build
 
 say "Chờ ERP sẵn sàng"

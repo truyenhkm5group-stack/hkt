@@ -32,6 +32,17 @@ import { getCashflow } from "@/lib/queries/cashflow";
 import { getSalesFunnel, getFunnelBySource } from "@/lib/queries/sales-funnel";
 import { getStaffPerformance } from "@/lib/queries/staff-performance";
 import { customerSummary } from "@/lib/queries/customers";
+/*
+  TÁM HÀM DƯỚI ĐÂY VỪA ĐƯỢC ĐỔI HÌNH DẠNG TRUY VẤN (tắt JIT trong giao dịch riêng).
+
+  Đổi hình dạng KHÔNG được đổi grain. Một đơn gửi lại hai lần vẫn phải đếm MỘT lần doanh thu, một
+  lần giá vốn, một lần cước. Trước lượt sửa đó, bài kiểm này chỉ phủ 8 hàm và không có hàm nào
+  trong số vừa đổi — nên nó sẽ xanh kể cả khi một trong số chúng bắt đầu nhân đôi tiền.
+*/
+import { getDashboardData } from "@/lib/queries/dashboard";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { getReturnRateSummary } from "@/lib/queries/return-rate";
+import { getSlowMoving } from "@/lib/queries/slow-moving";
 import type { ListParams, Period } from "@/lib/search-params";
 
 /**
@@ -55,7 +66,7 @@ const THAM_SO: ListParams = { page: 1, pageSize: 25, sort: "", dir: "desc", q: "
 /** Mọi con số TIỀN và ĐẾM mà một lần gửi thêm tuyệt đối không được chạm tới. */
 async function chupSo() {
   clearMemo();
-  const [donHang, loiNhuan, chanLy, dongTien, pheu, pheuNguon, nhanSu, khach] = await Promise.all([
+  const [donHang, loiNhuan, chanLy, dongTien, pheu, pheuNguon, nhanSu, khach, bangDieuKhien, chiPhi, gtc, hangCham] = await Promise.all([
     orderSummary(THAM_SO),
     getProfitReport(KY_TAT_CA, "created"),
     getFinancialTruth(KY_TAT_CA),
@@ -64,6 +75,10 @@ async function chupSo() {
     getFunnelBySource(KY_TAT_CA),
     getStaffPerformance(KY_TAT_CA, "marketerName"),
     customerSummary(THAM_SO),
+    getDashboardData(KY_TAT_CA),
+    getRecognizedCosts(KY_TAT_CA),
+    getReturnRateSummary(KY_TAT_CA, ""),
+    getSlowMoving(),
   ]);
   return {
     "Đơn hàng · số đơn": donHang.orders,
@@ -89,6 +104,19 @@ async function chupSo() {
     "Khách hàng · doanh thu": khach.amount,
     "Khách hàng · số đơn": khach.orders,
     "Khách hàng · đơn hoàn": khach.returned,
+    // ── Bốn hàm vừa đổi hình dạng truy vấn ──
+    "Bảng điều khiển · doanh thu đã giao": bangDieuKhien.money.delivered,
+    "Bảng điều khiển · doanh thu chốt": bangDieuKhien.money.booked,
+    "Bảng điều khiển · số đơn": bangDieuKhien.kpi.orders,
+    "Bảng điều khiển · giá vốn": bangDieuKhien.finance.successCogs,
+    "Chi phí ghi nhận · giá vốn": chiPhi.components.COGS.amount,
+    "Chi phí ghi nhận · cước": chiPhi.components.SHIPPING.amount,
+    "Chi phí ghi nhận · phí hoàn": chiPhi.components.RETURN_COST.amount,
+    "Tỷ lệ GTC · số đơn": gtc.orders,
+    "Tỷ lệ GTC · đã giao": gtc.delivered,
+    "Tỷ lệ GTC · đã hoàn": gtc.returned,
+    "Tỷ lệ GTC · doanh thu mất": gtc.lostRevenue,
+    "Hàng chậm · vốn nằm chết": hangCham.totalExcessValue,
   } as Record<string, number>;
 }
 
@@ -159,5 +187,5 @@ export async function testMultiAttemptMoney(db: Db) {
   const chuaVe = Object.keys(truoc).filter((k) => truoc[k] !== sauKhiDon[k]);
   assert.deepEqual(chuaVe, [], `xoá lần gửi thêm rồi mà số chưa trở lại như cũ: ${chuaVe.join(", ")}`);
 
-  console.log(`✓ Một đơn nhiều lần gửi: ${Object.keys(truoc).length} con số tiền/đếm ở 8 báo cáo KHÔNG đổi khi thêm lần gửi thứ hai`);
+  console.log(`✓ Một đơn nhiều lần gửi: ${Object.keys(truoc).length} con số tiền/đếm ở 12 báo cáo KHÔNG đổi khi thêm lần gửi thứ hai`);
 }
