@@ -30,8 +30,45 @@ import { clearMemo } from "@/lib/cache";
 let dbMs = 0;
 const chamNhat: { ms: number; sql: string }[] = [];
 let dbCalls = 0;
+let dbRows = 0;
 
-const results: { page: string; fn: string; ms: number; dbMs: number; calls: number; note: string }[] = [];
+/**
+ * ═══════ CÂU LỆNH LẶP LẠI — NGHI PHẠM SỐ MỘT ═══════
+ *
+ * Một hàm báo cáo mất 18 giây với 104 lượt truy vấn thì câu hỏi đầu tiên KHÔNG phải "câu nào chậm"
+ * mà là **"có bao nhiêu câu là cùng một câu chạy lại"**. Nhiều báo cáo dựng lại cùng một tập nền
+ * (kết quả đơn, giá vốn đã chốt, tổng hợp vận đơn) mỗi lần cần tới nó.
+ *
+ * Gom theo HÌNH DẠNG câu lệnh: bỏ khoảng trắng thừa và thay mọi số/chuỗi bằng `?`, nên hai lần
+ * chạy cùng một truy vấn với tham số khác nhau vẫn được coi là một.
+ */
+type LanChay = { lan: number; ms: number; rows: number; mau: string };
+let lapHienTai = new Map<string, LanChay>();
+
+function hinhDang(sqlText: string): string {
+  return sqlText
+    .replace(/\s+/g, " ")
+    .replace(/'[^']*'/g, "'?'")
+    .replace(/\$\d+/g, "$?")
+    .replace(/\d+/g, "?")
+    .trim();
+}
+
+const results: {
+  page: string;
+  fn: string;
+  ms: number;
+  dbMs: number;
+  calls: number;
+  rows: number;
+  /** Lượt gọi thứ hai, đệm còn nguyên — con số người dùng thật gặp phần lớn thời gian. */
+  warmMs: number;
+  /** Câu lệnh chạy lại nhiều nhất trong hàm này: số lần · tổng ms · nguyên văn rút gọn. */
+  lapNhieuNhat: { lan: number; ms: number; mau: string } | null;
+  /** Số câu lệnh KHÁC NHAU. `calls` trừ đi số này là phần chạy lại. */
+  khacNhau: number;
+  note: string;
+}[] = [];
 
 /**
  * XOÁ ĐỆM TRƯỚC MỖI PHÉP ĐO.
@@ -41,16 +78,55 @@ const results: { page: string; fn: string; ms: number; dbMs: number; calls: numb
  */
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
+  lapHienTai = new Map();
   const dbBefore = dbMs;
   const callsBefore = dbCalls;
+  const rowsBefore = dbRows;
   const t0 = Date.now();
   try {
     const out = await run();
     const ms = Date.now() - t0;
+
+    /*
+      LƯỢT THỨ HAI: ĐỆM CÒN NGUYÊN.
+
+      Hai con số này trả lời hai câu khác nhau và cả hai đều cần:
+        · NGUỘI — chi phí thật của hàm. Đây là thứ phải sửa.
+        · ẤM    — thứ người dùng gặp phần lớn thời gian.
+      Chỉ nhìn con số ấm là để bộ đệm che mất một hàm 18 giây; chỉ nhìn nguội là hoảng vì một chi
+      phí mà người dùng hiếm khi trả. Báo cáo phải in cả hai.
+    */
+    const t1 = Date.now();
+    await run().catch(() => undefined);
+    const warmMs = Date.now() - t1;
+
+    const lap = [...lapHienTai.values()].filter((v) => v.lan > 1).sort((a, b) => b.ms - a.ms)[0] ?? null;
     const size = out === undefined ? 0 : JSON.stringify(out).length;
-    results.push({ page, fn, ms, dbMs: dbMs - dbBefore, calls: dbCalls - callsBefore, note: `${Math.round(size / 1024)}kB` });
+    results.push({
+      page,
+      fn,
+      ms,
+      dbMs: dbMs - dbBefore,
+      calls: dbCalls - callsBefore,
+      rows: dbRows - rowsBefore,
+      warmMs,
+      lapNhieuNhat: lap ? { lan: lap.lan, ms: lap.ms, mau: lap.mau } : null,
+      khacNhau: lapHienTai.size,
+      note: `${Math.round(size / 1024)}kB`,
+    });
   } catch (error) {
-    results.push({ page, fn, ms: Date.now() - t0, dbMs: dbMs - dbBefore, calls: dbCalls - callsBefore, note: `LỖI: ${error instanceof Error ? error.message : String(error)}` });
+    results.push({
+      page,
+      fn,
+      ms: Date.now() - t0,
+      dbMs: dbMs - dbBefore,
+      calls: dbCalls - callsBefore,
+      rows: dbRows - rowsBefore,
+      warmMs: 0,
+      lapNhieuNhat: null,
+      khacNhau: lapHienTai.size,
+      note: `LỖI: ${error instanceof Error ? error.message : String(error)}`,
+    });
   }
 }
 
@@ -72,18 +148,40 @@ async function main() {
       chamNhat.sort((a, b) => b.ms - a.ms);
       chamNhat.length = Math.min(chamNhat.length, 8);
     };
+    const ghiLap = (sqlText: string, ms: number, rows: number) => {
+      const khoa = hinhDang(sqlText);
+      const cur = lapHienTai.get(khoa) ?? { lan: 0, ms: 0, rows: 0, mau: sqlText.replace(/\s+/g, " ").trim().slice(0, 220) };
+      cur.lan += 1;
+      cur.ms += ms;
+      cur.rows += rows;
+      lapHienTai.set(khoa, cur);
+    };
     pg.Pool.prototype.query = function patched(...args: unknown[]) {
       const t0 = Date.now();
       const first = args[0] as unknown;
       const sqlText = typeof first === "string" ? first : String((first as { text?: string } | null)?.text ?? "");
       const out = original.apply(this, args as never) as Promise<unknown>;
       if (out && typeof (out as Promise<unknown>).then === "function") {
-        return (out as Promise<unknown>).finally(() => {
-          const ms = Date.now() - t0;
-          dbMs += ms;
-          dbCalls += 1;
-          ghiCham(sqlText, ms);
-        });
+        return (out as Promise<unknown>).then(
+          (kq) => {
+            const ms = Date.now() - t0;
+            const rows = Number((kq as { rowCount?: number } | null)?.rowCount ?? 0);
+            dbMs += ms;
+            dbCalls += 1;
+            dbRows += rows;
+            ghiCham(sqlText, ms);
+            ghiLap(sqlText, ms, rows);
+            return kq;
+          },
+          (e) => {
+            const ms = Date.now() - t0;
+            dbMs += ms;
+            dbCalls += 1;
+            ghiCham(sqlText, ms);
+            ghiLap(sqlText, ms, 0);
+            throw e;
+          },
+        );
       }
       const ms = Date.now() - t0;
       dbMs += ms;
@@ -157,6 +255,36 @@ async function main() {
     );
   const total = results.reduce((t, r) => t + r.ms, 0);
   console.log(`\nTổng ${total}ms cho ${results.length} truy vấn.`);
+
+  /*
+    ═══ NGUỘI SO VỚI ẤM ═══
+
+    Bộ đệm che được một hàm 18 giây: trang vẫn 100ms và mọi lá chắn vẫn xanh. Nhưng chi phí đó
+    KHÔNG biến mất — nó rơi vào đúng người mở trang lúc đệm vừa hết hạn, và đó thường là chủ shop
+    mở máy buổi sáng. In cả hai để không ai kết luận "backend đã khoẻ" từ con số ấm.
+  */
+  console.log("\n── NGUỘI ↔ ẤM (đệm rỗng ↔ đệm còn nguyên) ──");
+  for (const r of [...results].sort((a, b) => b.ms - a.ms).slice(0, 12)) {
+    const tiLe = r.warmMs > 0 ? `${Math.round(r.ms / Math.max(1, r.warmMs))}x` : "—";
+    console.log(`  ${String(r.ms).padStart(7)}ms nguội  ${String(r.warmMs).padStart(6)}ms ấm  ${tiLe.padStart(6)}  ${r.fn}`);
+  }
+
+  /*
+    ═══ CÂU LỆNH CHẠY LẠI ═══
+
+    Đây là chỗ tìm NGUYÊN NHÂN CHUNG. Nhiều báo cáo dựng lại cùng một tập nền — kết quả đơn, giá
+    vốn đã chốt, tổng hợp vận đơn — mỗi lần cần tới. Nếu một hàm chạy CÙNG một hình dạng câu lệnh
+    hàng chục lần thì việc phải làm là dùng chung tập nền, không phải tối ưu câu lệnh đó.
+  */
+  console.log("\n── CHẠY LẠI CÙNG MỘT CÂU (nghi phạm số một của hàm chậm) ──");
+  const coLap = results.filter((r) => r.lapNhieuNhat && r.lapNhieuNhat.lan > 1).sort((a, b) => (b.lapNhieuNhat?.ms ?? 0) - (a.lapNhieuNhat?.ms ?? 0));
+  if (!coLap.length) console.log("  (không hàm nào chạy lại cùng một câu)");
+  for (const r of coLap.slice(0, 8)) {
+    const l = r.lapNhieuNhat as { lan: number; ms: number; mau: string };
+    console.log(`\n  ${r.fn}: ${r.calls} lượt · ${r.khacNhau} câu khác nhau · ${r.rows} dòng`);
+    console.log(`    câu chạy lại nhiều nhất: x${l.lan} lượt, tốn ${l.ms}ms`);
+    console.log(`    ${l.mau}`);
+  }
 
   console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
   if (!chamNhat.length) console.log("  (không câu lệnh nào vượt 200ms)");
