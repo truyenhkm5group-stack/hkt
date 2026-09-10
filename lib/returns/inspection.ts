@@ -177,16 +177,59 @@ async function createRestockReceipt(orderId: string | null, shipmentId: string, 
   return receipt.id;
 }
 
+export type InspectionItem = { sku: string; name: string; color: string; size: string; quantity: number };
+
 export type PendingInspection = {
   shipmentId: string;
   code: string | null;
   orderId: string | null;
+  orderCode: string | null;
+  customerName: string;
+  customerPhone: string;
   receivedAt: Date;
   receivedBy: string;
   /** Số món ERP đã xuất theo đơn — mốc đối chiếu để người đếm thấy ngay phần thiếu. */
   expectedQty: number;
   ageDays: number;
+  /**
+   * Từng dòng hàng của đơn: mã, tên, màu, size, số lượng.
+   *
+   * Lấy sẵn ở đây thay vì để màn hình tự tra: người đếm cầm kiện hàng trên tay cần biết NGAY phải
+   * thấy gì trong đó. Bắt họ mở đơn ở tab khác để đọc màu/size là biến việc 10 giây thành việc 40
+   * giây — nhân với 453 kiện thì đó là hơn một ngày công.
+   */
+  items: InspectionItem[];
 };
+
+/** Gộp dòng hàng của đơn thành JSON ngay trong SQL — một truy vấn, không N+1. */
+const ITEMS_JSON = sql<string>`coalesce((
+  select json_agg(json_build_object(
+    'sku', coalesce(nullif(oi.sku, ''), ''),
+    'name', coalesce(oi.product_name, ''),
+    'color', coalesce(pv.color, ''),
+    'size', coalesce(pv.size, ''),
+    'quantity', oi.quantity
+  ) order by oi.product_name)
+  from order_items oi
+  left join product_variants pv on pv.id = oi.variant_id
+  where oi.order_id = ${ins.orderId}
+), '[]')`;
+
+function parseItems(raw: unknown): InspectionItem[] {
+  if (!raw) return [];
+  const list = typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
+  if (!Array.isArray(list)) return [];
+  return list.map((x) => {
+    const r = x as Record<string, unknown>;
+    return {
+      sku: String(r.sku ?? ""),
+      name: String(r.name ?? ""),
+      color: String(r.color ?? ""),
+      size: String(r.size ?? ""),
+      quantity: Number(r.quantity ?? 0),
+    };
+  });
+}
 
 /** Kiện ĐÃ VỀ nhưng CHƯA ĐẾM — việc của kho, và là phần hàng có thật mà sổ đang chưa biết. */
 export async function listPendingInspections(limit = 100): Promise<PendingInspection[]> {
@@ -195,10 +238,15 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
     .select({
       shipmentId: ins.shipmentId,
       code: s.vtpOrderNumber,
+      tracking: s.trackingCode,
       orderId: ins.orderId,
+      orderCode: sql<string | null>`(select coalesce(nullif(o2.custom_id, ''), o2.system_id::text) from orders o2 where o2.id = ${ins.orderId})`,
+      customerName: sql<string>`coalesce((select coalesce(nullif(o2.bill_full_name, ''), nullif(o2.ship_full_name, ''), '') from orders o2 where o2.id = ${ins.orderId}), '')`,
+      customerPhone: sql<string>`coalesce((select coalesce(nullif(o2.bill_phone, ''), nullif(o2.ship_phone, ''), '') from orders o2 where o2.id = ${ins.orderId}), '')`,
       receivedAt: ins.receivedAt,
       receivedBy: ins.receivedBy,
       expectedQty: sql<number>`coalesce((select sum(oi.quantity) from order_items oi where oi.order_id = ${ins.orderId}), 0)`,
+      items: ITEMS_JSON,
     })
     .from(ins)
     .leftJoin(s, eq(s.id, ins.shipmentId))
@@ -208,10 +256,40 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
 
   const now = Date.now();
   return rows.map((r) => ({
-    ...r,
+    shipmentId: r.shipmentId,
+    code: r.code ?? r.tracking ?? null,
+    orderId: r.orderId,
+    orderCode: r.orderCode ?? null,
+    customerName: r.customerName ?? "",
+    customerPhone: r.customerPhone ?? "",
+    receivedAt: r.receivedAt,
+    receivedBy: r.receivedBy,
     expectedQty: Number(r.expectedQty ?? 0),
     ageDays: Math.floor((now - new Date(r.receivedAt).getTime()) / 86_400_000),
+    items: parseItems(r.items),
   }));
+}
+
+/**
+ * QUÉT MÃ VẬN ĐƠN → RA ĐÚNG MỘT KIỆN.
+ *
+ * Người đếm cầm kiện hàng, bắn mã, và phải thấy ngay kiện đó — không phải cuộn tìm trong 453 dòng.
+ *
+ * Dò theo BỐN mã cùng lúc vì mã in trên kiện không phải lúc nào cũng là mã ERP dùng làm khoá: mã
+ * vận đơn Viettel Post, mã tra cứu, mã tham chiếu (vận đơn chiều hoàn mang mã gốc), và mã đơn của
+ * shop. So khớp KHÔNG phân biệt hoa thường và bỏ khoảng trắng thừa — máy quét hay thêm cả hai.
+ */
+export async function findPendingByCode(code: string): Promise<PendingInspection | null> {
+  const q = code.trim();
+  if (!q) return null;
+  const list = await listPendingInspections(1000);
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  const target = norm(q);
+  return (
+    list.find((r) => norm(r.code) === target || norm(r.orderCode) === target || norm(r.shipmentId) === target) ??
+    // Bắn thiếu vài ký tự đầu (máy quét đọc hụt) vẫn tìm được, miễn là ĐỦ DÀI để không mơ hồ.
+    (target.length >= 6 ? (list.find((r) => norm(r.code).endsWith(target) || norm(r.orderCode).endsWith(target)) ?? null) : null)
+  );
 }
 
 export type InspectionSummary = {
@@ -246,4 +324,114 @@ export async function inspectionSummary(): Promise<InspectionSummary> {
     restockedQty: Number(row?.restockedQty ?? 0),
     unsellableQty: Number(row?.unsellableQty ?? 0),
   };
+}
+
+export type InspectionDashboard = {
+  /** ĐVVC báo hoàn nhưng kho CHƯA bấm nhận — hàng đang trên đường về hoặc đã tới mà chưa ai ghi. */
+  awaitingArrival: number;
+  /** Đã nhận, CHƯA đếm. Đây là phần hàng có thật mà sổ đang chưa biết. */
+  pendingInspection: number;
+  pendingItems: number;
+  /** Đã đếm và đã vào lại tồn. */
+  restocked: number;
+  restockedQty: number;
+  damaged: number;
+  missing: number;
+  wrongItem: number;
+  unsellable: number;
+  /** Tuổi của các kiện CHỜ ĐẾM — hàng nằm càng lâu thì sổ càng sai lâu. */
+  aging: { duoi1Ngay: number; tu1Den3Ngay: number; tu3Den7Ngay: number; tren7Ngay: number; cuNhatNgay: number };
+};
+
+/**
+ * BẢNG ĐIỀU KHIỂN KIỂM HÀNG HOÀN.
+ *
+ * Sáu con số + tuổi tồn đọng, trả về trong MỘT lượt. Tách "chờ nhận" khỏi "chờ đếm" là cố ý: hai
+ * việc đó thuộc hai người khác nhau và tắc ở hai chỗ khác nhau — gộp lại thì không biết phải đi
+ * giục ai.
+ */
+export async function inspectionDashboard(): Promise<InspectionDashboard> {
+  const db = await getDb();
+  const [row] = await db
+    .select({
+      awaitingArrival: sql<number>`(select count(*) from shipments sh where sh.stage = 'RETURNED' and sh.return_received_at is null and sh.order_id is not null)`,
+      pendingInspection: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED')`,
+      pendingItems: sql<number>`coalesce(sum((select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${ins.orderId})) filter (where ${ins.status} = 'RECEIVED'), 0)`,
+      restocked: sql<number>`count(*) filter (where ${ins.condition} = 'RESTOCKABLE')`,
+      restockedQty: sql<number>`coalesce(sum(${ins.restockQty}), 0)`,
+      damaged: sql<number>`count(*) filter (where ${ins.condition} = 'DAMAGED')`,
+      missing: sql<number>`count(*) filter (where ${ins.condition} = 'MISSING')`,
+      wrongItem: sql<number>`count(*) filter (where ${ins.condition} = 'WRONG_ITEM')`,
+      unsellable: sql<number>`count(*) filter (where ${ins.condition} = 'UNSELLABLE')`,
+      d1: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} >= now() - interval '1 day')`,
+      d13: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '1 day' and ${ins.receivedAt} >= now() - interval '3 days')`,
+      d37: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '3 days' and ${ins.receivedAt} >= now() - interval '7 days')`,
+      d7: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '7 days')`,
+      oldest: sql<number>`coalesce(extract(day from now() - min(${ins.receivedAt}) filter (where ${ins.status} = 'RECEIVED')), 0)`,
+    })
+    .from(ins);
+  return {
+    awaitingArrival: Number(row?.awaitingArrival ?? 0),
+    pendingInspection: Number(row?.pendingInspection ?? 0),
+    pendingItems: Number(row?.pendingItems ?? 0),
+    restocked: Number(row?.restocked ?? 0),
+    restockedQty: Number(row?.restockedQty ?? 0),
+    damaged: Number(row?.damaged ?? 0),
+    missing: Number(row?.missing ?? 0),
+    wrongItem: Number(row?.wrongItem ?? 0),
+    unsellable: Number(row?.unsellable ?? 0),
+    aging: {
+      duoi1Ngay: Number(row?.d1 ?? 0),
+      tu1Den3Ngay: Number(row?.d13 ?? 0),
+      tu3Den7Ngay: Number(row?.d37 ?? 0),
+      tren7Ngay: Number(row?.d7 ?? 0),
+      cuNhatNgay: Math.floor(Number(row?.oldest ?? 0)),
+    },
+  };
+}
+
+export type BulkInspectionResult = { done: number; failed: { shipmentId: string; error: string }[] };
+
+/**
+ * ĐẾM HÀNG LOẠT — dùng khi nhiều kiện có CÙNG kết luận.
+ *
+ * Ca thật ở kho: mở một xe hàng hoàn, mười kiện còn nguyên seal, cùng "nhận đủ". Bắt bấm mười lần
+ * qua mười màn hình là lý do người ta bỏ luôn việc ghi nhận.
+ *
+ * BA RÀNG BUỘC KHÔNG ĐƯỢC NỚI, kể cả khi làm hàng loạt:
+ *  1. "Nhận đủ" nghĩa là ĐÚNG BẰNG số ERP đã xuất — không có ô nhập số nào ở đường hàng loạt, nên
+ *     không ai vô tình khai một con số mình chưa đếm.
+ *  2. Kết luận không bán được VẪN phải có lý do; thiếu lý do thì kiện đó bị bỏ qua, không im lặng.
+ *  3. Từng kiện chạy qua ĐÚNG hàm `recordInspection` — không có đường ghi tắt nào bỏ qua luật
+ *     "đã đếm rồi thì không đếm lại".
+ */
+export async function recordInspectionBulk(
+  shipmentIds: string[],
+  condition: ReturnCondition,
+  note: string,
+  actor: string,
+): Promise<BulkInspectionResult> {
+  const ids = [...new Set(shipmentIds.filter((x) => x.trim()))];
+  if (!ids.length) return { done: 0, failed: [] };
+
+  const pending = await listPendingInspections(1000);
+  const expected = new Map(pending.map((p) => [p.shipmentId, p.expectedQty]));
+
+  const failed: { shipmentId: string; error: string }[] = [];
+  let done = 0;
+  for (const id of ids) {
+    const qty = expected.get(id) ?? 0;
+    const r = await recordInspection({
+      shipmentId: id,
+      condition,
+      // "Nhận đủ" = đúng bằng số đã xuất. Mọi kết luận khác KHÔNG cộng tồn.
+      restockQty: condition === "RESTOCKABLE" ? qty : 0,
+      unsellableQty: condition === "RESTOCKABLE" ? 0 : qty,
+      note,
+      actor,
+    });
+    if ("error" in r) failed.push({ shipmentId: id, error: r.error });
+    else done += 1;
+  }
+  return { done, failed };
 }

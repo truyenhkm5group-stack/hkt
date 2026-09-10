@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { inspectionSummary, listPendingInspections, markReturnsArrived, recordInspection, undoReturnArrived } from "@/lib/returns/inspection";
+import { findPendingByCode, inspectionDashboard, inspectionSummary, listPendingInspections, markReturnsArrived, recordInspection, recordInspectionBulk, undoReturnArrived } from "@/lib/returns/inspection";
 
 /**
  * KIỂM ĐẾM HÀNG HOÀN — ranh giới giữa "hàng về tới nơi" và "hàng có trong sổ".
@@ -32,6 +32,16 @@ export async function testReturnInspection(db: Db) {
 
   const receiptQty = async () => {
     const rows = await db.select({ q: schema.stockReceiptItems.quantity }).from(schema.stockReceiptItems).where(eq(schema.stockReceiptItems.shipmentId, "ins-ship-1"));
+    return rows.reduce((t, r) => t + Number(r.q ?? 0), 0);
+  };
+
+  /** Tổng số món ĐÃ VÀO LẠI TỒN qua phiếu tái nhập — thước đo duy nhất đáng tin cho phần này. */
+  const tongTaiNhap = async () => {
+    const rows = await db
+      .select({ q: schema.stockReceiptItems.quantity })
+      .from(schema.stockReceiptItems)
+      .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+      .where(eq(schema.stockReceipts.kind, "RETURN"));
     return rows.reduce((t, r) => t + Number(r.q ?? 0), 0);
   };
 
@@ -91,7 +101,67 @@ export async function testReturnInspection(db: Db) {
   assert.ok(summary.restockedQty >= 3, "tổng số vào lại tồn tính đúng");
   assert.ok(summary.unsellableQty >= 1, "phần không bán được phải HIỆN RA, không được giấu bằng cách bỏ qua");
 
+  /**
+   * ───────── 9. TRẠM ĐẾM: quét mã, xử lý hàng loạt, bảng điều khiển ─────────
+   *
+   * 453 kiện tồn đọng trên production không phải vì thiếu tính năng ghi nhận — nó đã có từ lâu. Nó
+   * tồn đọng vì nhịp thao tác: mở đơn ở tab khác để xem màu/size, bấm từng kiện một. Ba thứ dưới đây
+   * là thứ biến việc đó thành làm được, nên chúng phải được khoá như luật nghiệp vụ.
+   */
+  const kienChoDem = await listPendingInspections(50);
+  assert.ok(kienChoDem.length > 0, "fixture: phải còn kiện chờ đếm để kiểm phần trạm đếm");
+  const mau = kienChoDem[0];
+
+  // Người đếm cầm kiện trên tay cần thấy NGAY phải có gì trong đó — không phải mở đơn ở tab khác.
+  assert.ok(Array.isArray(mau.items), "mỗi kiện phải kèm sẵn danh sách dòng hàng");
+  assert.ok("customerName" in mau && "customerPhone" in mau, "phải kèm khách + SĐT để đối chiếu khi kiện không có mã rõ");
+
+  // QUÉT MÃ: bắn đúng mã ra đúng kiện; bắn mã lạ thì nói rõ vì sao, không im lặng.
+  const quetDung = await findPendingByCode(mau.code ?? mau.shipmentId);
+  assert.equal(quetDung?.shipmentId, mau.shipmentId, "bắn đúng mã phải ra đúng kiện đó");
+  const quetHoaThuong = await findPendingByCode((mau.code ?? mau.shipmentId).toUpperCase());
+  assert.equal(quetHoaThuong?.shipmentId, mau.shipmentId, "máy quét hay trả hoa/thường khác nhau — so khớp KHÔNG được phân biệt");
+  assert.equal(await findPendingByCode("khong-co-ma-nay"), null, "mã không có thật phải trả về CHƯA THẤY, không trả bừa một kiện gần giống");
+  assert.equal(await findPendingByCode("   "), null, "bắn hụt (chuỗi rỗng) không được trả về kiện nào");
+
+  // HÀNG LOẠT: nhiều kiện cùng kết luận, và "nhận đủ" = đúng bằng số ERP đã xuất.
+  const loat = kienChoDem.slice(0, 2).map((r) => r.shipmentId);
+  const tonTruocLoat = await tongTaiNhap();
+  const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", "kho@test");
+  assert.equal(kqLoat.done, loat.length, "mọi kiện hợp lệ trong lượt phải được xử lý");
+  assert.equal(kqLoat.failed.length, 0, "không kiện nào được phép hỏng im lặng");
+  const congThem = kienChoDem.slice(0, 2).reduce((t, r) => t + r.expectedQty, 0);
+  assert.equal(await tongTaiNhap(), tonTruocLoat + congThem, "hàng loạt “nhận đủ” cộng ĐÚNG BẰNG số ERP đã xuất, không hơn không kém");
+
+  // Chạy lại đúng lượt đó: đã đếm rồi thì bị chặn, và LỖI PHẢI HIỆN RA kèm tên kiện.
+  const lanHai = await recordInspectionBulk(loat, "RESTOCKABLE", "", "kho@test");
+  assert.equal(lanHai.done, 0, "kiện đã đếm không được đếm lại qua đường hàng loạt");
+  assert.equal(lanHai.failed.length, loat.length, "kiện bị chặn phải được nêu tên, không nuốt lỗi");
+
+  // Kết luận KHÔNG vào tồn thì phải có lý do — kể cả khi làm hàng loạt.
+  const conLai = (await listPendingInspections(50))[0];
+  if (conLai) {
+    const tonTruocHong = await tongTaiNhap();
+    const hong = await recordInspectionBulk([conLai.shipmentId], "DAMAGED", "vỡ khi vận chuyển", "kho@test");
+    assert.equal(hong.done, 1, "kết luận hỏng có lý do thì ghi được");
+    assert.equal(await tongTaiNhap(), tonTruocHong, "kết luận HỎNG tuyệt đối không cộng tồn");
+  }
+
+  // BẢNG ĐIỀU KHIỂN: tách "chờ nhận" khỏi "chờ đếm" — hai việc tắc ở hai chỗ, thuộc hai người.
+  clearMemo();
+  const bang = await inspectionDashboard();
+  assert.ok(bang.pendingInspection >= 0 && bang.awaitingArrival >= 0, "hai con số phải tách rời nhau");
+  assert.ok(bang.restocked >= 1, "kiện đã vào lại tồn phải được đếm vào bảng");
+  assert.equal(
+    bang.aging.duoi1Ngay + bang.aging.tu1Den3Ngay + bang.aging.tu3Den7Ngay + bang.aging.tren7Ngay,
+    bang.pendingInspection,
+    "bốn nhóm tuổi phải cộng lại đúng bằng số kiện chờ đếm — thiếu một nhóm là có kiện biến mất khỏi tầm nhìn",
+  );
+
   console.log(
     `✓ Kiểm đếm hàng hoàn: ghi nhận đã về không cộng tồn · đếm 3/4 món → tồn +3, hao 1 · đếm lại bị chặn · huỷ sau khi đếm bị chặn · ${summary.pending} kiện đang chờ đếm`,
+  );
+  console.log(
+    `✓ Trạm đếm: quét mã ra đúng kiện (không phân biệt hoa thường, mã lạ trả CHƯA THẤY) · hàng loạt cộng đúng số đã xuất · đếm lại bị chặn và nêu tên · kết luận hỏng KHÔNG cộng tồn · ${bang.aging.duoi1Ngay + bang.aging.tu1Den3Ngay + bang.aging.tu3Den7Ngay + bang.aging.tren7Ngay} kiện phân theo 4 nhóm tuổi`,
   );
 }

@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
-import { recordInspection } from "@/lib/returns/inspection";
+import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
+import { findPendingByCode, recordInspection, recordInspectionBulk, type PendingInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
 
 export type ReturnReceiveResult = { ok: true; count: number; message: string } | { error: string };
@@ -145,4 +145,67 @@ export async function submitReturnInspection(input: unknown): Promise<Inspection
       ? `Đã kiểm đếm: ${restocked} món vào lại tồn${parsed.data.unsellableQty ? `, ${parsed.data.unsellableQty} món không bán được` : ""}.`
       : `Đã kiểm đếm: không món nào vào lại tồn (${parsed.data.unsellableQty} món không bán được).`,
   };
+}
+
+const bulkInspectSchema = z.object({
+  shipmentIds: z.array(z.string().min(1).max(100)).min(1, "Chưa chọn kiện nào").max(200, "Tối đa 200 kiện mỗi lượt"),
+  condition: z.enum(RETURN_CONDITIONS),
+  note: z.string().trim().max(500).default(""),
+});
+
+export type BulkInspectionActionResult =
+  | { ok: true; done: number; failed: { shipmentId: string; error: string }[]; message: string }
+  | { error: string };
+
+/**
+ * ĐẾM HÀNG LOẠT nhiều kiện CÙNG một kết luận.
+ *
+ * Ca thật: mở một xe hàng hoàn, mười kiện còn nguyên seal, cùng "nhận đủ". Bắt bấm mười lần qua
+ * mười màn hình chính là lý do người ta bỏ luôn việc ghi nhận — và 453 kiện tồn đọng là hệ quả.
+ *
+ * KHÔNG có ô nhập số ở đường hàng loạt: "nhận đủ" nghĩa là ĐÚNG BẰNG số ERP đã xuất. Muốn khai một
+ * con số khác thì phải đếm từng kiện, vì đó là lúc người đếm thật sự nhìn vào trong kiện.
+ *
+ * Kiện nào hỏng thì báo tên kiện đó, không nuốt lỗi: 197/200 thành công mà im lặng về 3 kiện còn
+ * lại là cách chắc chắn nhất để ba kiện ấy biến mất khỏi sổ.
+ */
+export async function submitBulkInspection(input: unknown): Promise<BulkInspectionActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = bulkInspectSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { shipmentIds, condition, note } = parsed.data;
+  if (CONDITION_NEEDS_NOTE[condition] && !note) return { error: `Kết luận “${CONDITION_LABEL[condition]}” phải ghi rõ lý do` };
+
+  const r = await recordInspectionBulk(shipmentIds, condition, note, user.email);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected.bulk",
+    entity: "shipments",
+    entityId: "",
+    detail: { condition, requested: shipmentIds.length, done: r.done, failed: r.failed.length, note },
+  });
+  revalidate();
+  return {
+    ok: true,
+    done: r.done,
+    failed: r.failed,
+    message: r.failed.length
+      ? `Đã kiểm ${r.done} kiện · ${r.failed.length} kiện KHÔNG xử lý được`
+      : `Đã kiểm ${r.done} kiện với kết luận “${CONDITION_LABEL[condition]}”`,
+  };
+}
+
+export type ScanResult = { ok: true; found: PendingInspection } | { error: string };
+
+/** QUÉT MÃ → ra đúng một kiện. Không thấy thì nói rõ vì sao, đừng để người đếm bắn lại vô ích. */
+export async function scanReturnByCode(code: string): Promise<ScanResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const q = String(code ?? "").trim();
+  if (!q) return { error: "Chưa có mã nào" };
+  const found = await findPendingByCode(q);
+  if (!found) return { error: `Không thấy kiện “${q}” trong danh sách chờ đếm — có thể kiện này chưa được bấm “kho đã nhận”, hoặc đã đếm rồi.` };
+  return { ok: true, found };
 }
