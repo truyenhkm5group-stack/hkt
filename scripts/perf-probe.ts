@@ -28,7 +28,7 @@ import { clearMemo } from "@/lib/cache";
  * Bọc thẳng `Pool.query` của `pg`: mọi câu lệnh đều đi qua đó, không sót đường nào.
  */
 let dbMs = 0;
-const chamNhat: { ms: number; sql: string }[] = [];
+const chamNhat: { ms: number; sql: string; full: string; params: unknown[] }[] = [];
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -44,6 +44,13 @@ let dbRows = 0;
  */
 type LanChay = { lan: number; ms: number; rows: number; mau: string };
 let lapHienTai = new Map<string, LanChay>();
+
+/** Tham số của lượt gọi — `pg` nhận cả `query(text, values)` lẫn `query({ text, values })`. */
+function layThamSo(args: unknown[]): unknown[] {
+  const first = args[0] as { values?: unknown[] } | null;
+  if (first && typeof first === "object" && Array.isArray(first.values)) return first.values;
+  return Array.isArray(args[1]) ? (args[1] as unknown[]) : [];
+}
 
 function hinhDang(sqlText: string): string {
   return sqlText
@@ -142,9 +149,10 @@ async function main() {
      * "getBusinessBrief 46 giây" chưa sửa được gì — 105 lượt gọi thì phải biết lượt NÀO. Ba vòng
      * chẩn đoán trước đều phải đoán, và đoán sai hai lần. Bộ đo phải tự trả lời câu đó.
      */
-    const ghiCham = (sqlText: string, ms: number) => {
+    const ghiCham = (sqlText: string, ms: number, params: unknown[] = []) => {
       if (ms < 200) return;
-      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600) });
+      // Giữ NGUYÊN VĂN đầy đủ + tham số để lát nữa chạy EXPLAIN ANALYZE trên đúng câu đó.
+      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params });
       chamNhat.sort((a, b) => b.ms - a.ms);
       chamNhat.length = Math.min(chamNhat.length, 8);
     };
@@ -169,7 +177,7 @@ async function main() {
             dbMs += ms;
             dbCalls += 1;
             dbRows += rows;
-            ghiCham(sqlText, ms);
+            ghiCham(sqlText, ms, layThamSo(args));
             ghiLap(sqlText, ms, rows);
             return kq;
           },
@@ -286,10 +294,56 @@ async function main() {
     console.log(`    ${l.mau}`);
   }
 
+  /*
+    ═══ EXPLAIN ANALYZE CHO BA CÂU CHẬM NHẤT ═══
+
+    "Câu này 10 giây" chưa sửa được gì. Kế hoạch thực thi mới nói được VÌ SAO: quét tuần tự hay
+    dùng chỉ mục, chạy MỘT lần hay chạy lại cho từng dòng (loops), đọc bao nhiêu khối đệm.
+
+    Chạy ngay tại đây trên đúng câu vừa đo, với đúng tham số của nó — không chép tay, không dựng
+    lại. Chỉ ĐỌC: EXPLAIN ANALYZE có chạy thật nhưng đây đều là select.
+  */
+  {
+    const pg = (await import("pg")).default as unknown as {
+      Pool: new (o: { connectionString: string; max: number }) => { query: (t: string) => Promise<unknown>; end: () => Promise<void> };
+    };
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL ?? "", max: 1 });
+    console.log("\n── KẾ HOẠCH THỰC THI CỦA BA CÂU CHẬM NHẤT ──");
+    for (const c of chamNhat.slice(0, 3)) {
+      try {
+        const r = (await pool.query(`explain (analyze, buffers, timing) ${nhungThamSo(c.full, c.params)}`)) as { rows?: Record<string, string>[] };
+        const dong = (r.rows ?? []).map((x) => String(Object.values(x)[0]));
+        // Chỉ in nút ĐẮT hoặc chạy lại nhiều lần — bản kế hoạch đầy đủ dài hàng trăm dòng.
+        const dangChuY = dong.filter((l) => /loops=[2-9]|loops=\d\d|actual time=\d{3,}|Seq Scan|SubPlan|shared read/.test(l));
+        console.log(`\n  ${c.ms}ms · ${c.sql.slice(0, 110)}…`);
+        console.log(dangChuY.slice(0, 14).map((l) => `    ${l.trim().slice(0, 190)}`).join("\n") || "    (không nút nào đáng chú ý)");
+        for (const l of dong) if (l.startsWith("Execution Time") || l.startsWith("Planning Time")) console.log(`    ${l}`);
+      } catch (e) {
+        console.log(`\n  ${c.ms}ms — không EXPLAIN được: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    await pool.end().catch(() => undefined);
+  }
+
   console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
   if (!chamNhat.length) console.log("  (không câu lệnh nào vượt 200ms)");
   for (const c of chamNhat) console.log(`\n  ${c.ms}ms\n  ${c.sql}`);
   process.exit(0);
+}
+
+/**
+ * Nhúng tham số vào câu lệnh để EXPLAIN chạy được — nó không nhận tham số rời.
+ *
+ * Chỉ dùng cho công cụ chẩn đoán chạy tay trên ops, không nằm trên đường của người dùng.
+ */
+function nhungThamSo(text: string, params: unknown[]): string {
+  return text.replace(/\$(\d+)/g, (_, i) => {
+    const v = params[Number(i) - 1];
+    if (v === null || v === undefined) return "null";
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (v instanceof Date) return `'${v.toISOString()}'`;
+    return `'${String(v).replace(/'/g, "''")}'`;
+  });
 }
 
 main().catch((error) => {
