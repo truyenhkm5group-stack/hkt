@@ -21,7 +21,7 @@
  */
 import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import {
   COST_AUTHORITY_REGISTRY,
@@ -119,19 +119,25 @@ async function build(period: Period): Promise<RecognizedCosts> {
       .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), ...periodConds(schema.adSpends.spendDate, period.from, period.to))),
-    db
-      .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)` })
-      .from(o)
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(...periodConds(o.insertedAt, period.from, period.to))),
-    db
-      .select({
-        shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
-        returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
-      })
-      .from(o)
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(...periodConds(o.insertedAt, period.from, period.to))),
+    // JIT tat: hai cau nay la cau cham nhat con lai cua probe — 10.525ms va 10.305ms. Chung mang
+    // nhanh du phong tinh truc tiep cua ORDER_OUTCOME nen chi phi uoc luong rat cao va JIT bat.
+    chayKhongJit(db, (tx) =>
+      tx
+        .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)` })
+        .from(o)
+        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+        .where(and(...periodConds(o.insertedAt, period.from, period.to))),
+    ),
+    chayKhongJit(db, (tx) =>
+      tx
+        .select({
+          shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
+          returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        })
+        .from(o)
+        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+        .where(and(...periodConds(o.insertedAt, period.from, period.to))),
+    ),
   ]);
 
   const warnings: CostEngineWarning[] = [];

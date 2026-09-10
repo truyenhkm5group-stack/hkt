@@ -1,5 +1,5 @@
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio } from "@/lib/constants/profit";
 import { codCashSummary } from "@/lib/queries/cod";
 import { memo, periodKey } from "@/lib/cache";
@@ -51,7 +51,11 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
   // cho mỗi đơn. Cùng định nghĩa, cùng population, cùng con số — xem lib/queries/metrics.ts.
   const base = orderMetricFacts(db, where);
   const m = factMetrics(base);
-  const [row] = await db
+  /*
+    JIT TAT - do duoc: cau lenh nay 8.318ms va 8.182ms trong mot luot probe (chay hai lan: ky nay
+    va ky truoc). Cung ho da tach bach duoc JIT: 8.578ms bat / 26ms tat, cung so khoi dem.
+  */
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       orders: m.countBooked,
       revenue: m.bookedRevenue,
@@ -67,7 +71,7 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
       activeOrders: m.countOpen,
       unknownOrders: m.countUnknown,
     })
-    .from(base);
+    .from(base));
   const kpi: OrderKpis = {
     orders: Number(row?.orders ?? 0),
     revenue: Number(row?.revenue ?? 0),
@@ -138,23 +142,28 @@ async function getDashboardDataUncached(period: Period) {
       .where(inPeriod(schema.orders.insertedAt, period.from, period.to))
       .groupBy(schema.orders.stage),
     // Doanh thu theo ngày (giờ VN) — trên bảng dẫn xuất, kết quả đơn tính một lần cho mỗi đơn
-    db
-      .select({
-        day: scopeFacts.day,
-        orders: count(),
-        revenue: sum(scopeFacts.revenue),
-        success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)`,
-        successRevenue: sql<number>`sum(case when ${scopeMetrics.isDelivered} then ${scopeFacts.revenue} else 0 end)`,
-      })
-      .from(scopeFacts)
-      .groupBy(scopeFacts.day)
-      .orderBy(scopeFacts.day),
-    // Theo kênh bán
-    db
-      .select({ source: scopeFacts.source, orders: count(), revenue: sum(scopeFacts.revenue), success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)` })
-      .from(scopeFacts)
-      .groupBy(scopeFacts.source)
-      .orderBy(desc(sum(scopeFacts.revenue))),
+    // JIT tat: chuoi doanh thu theo ngay do duoc 8.024ms trong luot probe.
+    chayKhongJit(db, (tx) =>
+      tx
+        .select({
+          day: scopeFacts.day,
+          orders: count(),
+          revenue: sum(scopeFacts.revenue),
+          success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)`,
+          successRevenue: sql<number>`sum(case when ${scopeMetrics.isDelivered} then ${scopeFacts.revenue} else 0 end)`,
+        })
+        .from(scopeFacts)
+        .groupBy(scopeFacts.day)
+        .orderBy(scopeFacts.day),
+    ),
+    // Theo kênh bán — cùng bảng dẫn xuất, cùng lý do.
+    chayKhongJit(db, (tx) =>
+      tx
+        .select({ source: scopeFacts.source, orders: count(), revenue: sum(scopeFacts.revenue), success: sql<number>`sum(case when ${scopeMetrics.isDelivered} then 1 else 0 end)` })
+        .from(scopeFacts)
+        .groupBy(scopeFacts.source)
+        .orderBy(desc(sum(scopeFacts.revenue))),
+    ),
     // Vận đơn theo giai đoạn (toàn bộ đang hoạt động, không theo kỳ)
     db.select({ stage: schema.shipments.stage, count: count(), cod: sum(schema.shipments.codAmount) }).from(schema.shipments).groupBy(schema.shipments.stage),
     // COD
