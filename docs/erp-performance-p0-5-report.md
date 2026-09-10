@@ -219,3 +219,75 @@ sửa mã:
 
 Không làm hướng nào trong phiên này: sổ kho bị khoá bởi luật nghiệp vụ (AGENTS mục 3.10), và sửa vội
 một truy vấn quyết định số tồn là cách nhanh nhất để có số tồn sai mà không ai phát hiện.
+
+---
+
+# Phụ lục 2 — JIT của PostgreSQL là nguyên nhân, và nó đã được đo
+
+## Phép đo quyết định
+
+Trên **đúng câu `/inventory/planning` chạy**, cùng dữ liệu, cùng kế hoạch thực thi:
+
+| | JIT ON | JIT OFF |
+| --- | --- | --- |
+| TOTAL_TIME | 26.078 ms | **134 ms** |
+| PLANNING_TIME | 84,45 ms | 33,24 ms |
+| EXECUTION_TIME | 25.942,61 ms | **76,86 ms** |
+| ROWS | 41 | 41 |
+| BUFFERS | hit 443.673 · read 0 | hit 443.658 · read 0 |
+| JIT_TIME | **51.518,04 ms · 1.432 hàm** | không bật |
+
+Và trên truy vấn con nặng nhất (`vsales`): 8.578,82 ms → **26,02 ms**, JIT 17.036,85 ms · 465 hàm.
+
+**Cùng khối đệm, cùng số dòng, cùng kế hoạch.** Toàn bộ chênh lệch là thời gian BIÊN DỊCH. PostgreSQL
+bật JIT khi chi phí ước lượng vượt `jit_above_cost` (mặc định 100.000); báo cáo tồn kho có chi phí
+hàng triệu vì nối sáu bảng dẫn xuất. Trên máy 2 nhân, biên dịch 1.432 hàm tốn gấp 337 lần phép tính.
+
+## Cách sửa
+
+`chayKhongJit()` trong `db/index.ts` đặt `set local jit = off` TRONG ĐÚNG giao dịch của báo cáo.
+**Không** tắt JIT toàn máy chủ: `set local` hết hiệu lực khi giao dịch kết thúc, không rò sang phiên
+khác, không đụng `postgresql.conf`. Truy vấn ngoài các báo cáo này vẫn dùng JIT như cũ.
+
+Áp cho các chỗ ĐÃ ĐO: truy vấn dòng kế hoạch · truy vấn hàng hụt · hai truy vấn của báo cáo lương.
+
+**Hai luật rút ra khi làm việc này** (cả hai đều do tự gây ra rồi tự phát hiện):
+
+1. **Giao dịch chỉ được ôm câu lệnh chạy trên CHÍNH NÓ.** Bọc cả một `Promise.all` có
+   `getOperatingCost()` bên trong là khoá chết: giao dịch giữ kết nối, hàm kia chờ kết nối.
+2. **PGlite không có JIT và không được mở giao dịch ở đây.** Nó là PostgreSQL biên dịch sang WASM,
+   không có LLVM. Mở giao dịch thì treo — và treo IM LẶNG.
+
+## Kết quả
+
+Smoke deploy #203: **27/27 đạt · 0 quá hạn · 0 chậm**, toàn bộ 56–155ms.
+
+```
+/                   107ms     /operations          102ms     /inventory/planning   63ms
+/orders              77ms     /shipments            94ms     /payroll             155ms
+/reports            119ms     /reports/returns     153ms     /returns              65ms
+/alerts              81ms     /customers/retention 117ms     /ads                  59ms
+```
+
+`/inventory/planning`: **61 giây → 63ms**. `getDashboardActionQueue` (đo bằng perf-probe):
+**28.655ms → 16ms**.
+
+Tồn kho không đổi một số nào: `ON_HAND / RESERVED / AVAILABLE / INBOUND / UNSELLABLE` giữ nguyên,
+`tests/consistency` khoá việc tồn khớp giữa Sản phẩm và Kế hoạch SX.
+
+## Còn nợ — điểm nóng đã đo, chưa áp
+
+perf-probe sau khi sửa (thời gian CSDL cộng dồn, đệm đã xoá trước mỗi phép đo):
+
+```
+getBusinessBrief          18.757ms      getReturnRateByVariant     7.582ms
+getDashboardData          15.063ms      getReturnRateSummary       6.830ms
+getFinancialTruth         10.262ms      adsRoas (mỗi kỳ)      ~4.700ms
+```
+
+Các trang chứa chúng hiện 59–155ms **nhờ bộ đệm và job giữ ấm** — chi phí thật chỉ phải trả trên
+đường nguội. Đó chính là dạng hỏng đã làm `/` và `/payroll` quá hạn: lúc nhanh lúc chết tuỳ đệm.
+
+Cùng một họ truy vấn, nên gần như chắc chắn cùng một nguyên nhân. **Nhưng chưa đo từng cái**, và
+mục 9 của chủ shop nói rõ: trang đang nhanh thì đóng băng, không tối ưu theo cảm tính. Việc đúng
+tiếp theo là chạy `explain-stock` mở rộng cho sáu hàm này, rồi mới áp — mỗi chỗ một con số.

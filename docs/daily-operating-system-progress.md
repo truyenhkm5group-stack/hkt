@@ -19,7 +19,7 @@ Sổ theo dõi sống. Kiểm và số liệu: `docs/measured-daily-operating-sy
 | 10 | Hoàn về | ✅ | ✅ | ⬜ cố ý không đặt hạn | ✅ | ✅ | `/reports/returns` |
 | 11 | COD chờ về | ✅ | ✅ | ✅ | ✅ | ✅ | `/cod?recon=unproven` |
 | 12 | Tiền đã về | ⚠️ sổ ngân hàng trống | — | — | ✅ | ✅ | `/cod` |
-| 13 | Hàng hoàn chờ kiểm đếm | ⚠️ xem §7 báo cáo | ✅ | ✅ | ✅ | ✅ | `/inventory/returns` |
+| 13 | Hàng hoàn chờ kiểm đếm | ✅ đường ống 6 khâu | ✅ trung vị + p90 | ✅ | ✅ vốn kẹt / giải phóng / mất hẳn | ✅ | `/inventory/returns` |
 | 14 | Tồn kho & vốn | ⚠️ 2 phiếu nhập | ✅ | ✅ | ✅ | ✅ | `/products` |
 | 15 | Sản xuất / nhập hàng | ⬜ 0 lệnh sản xuất | — | — | — | ✅ | `/inventory/planning` |
 | 16 | Mua lại / chăm sóc | ✅ | ✅ | ✅ | ✅ | ✅ | `/customers/retention` |
@@ -29,7 +29,10 @@ Sổ theo dõi sống. Kiểm và số liệu: `docs/measured-daily-operating-sy
 | Việc | Chặn ở đâu |
 | --- | --- |
 | Ước tính tiền thu hồi | Cần ca **có người bấm đóng** để đo tỷ lệ thật. Hiện 0 ca. Tự bật khi đội bắt đầu dùng hàng đợi. |
+| Sáu báo cáo nặng còn lại | Đã đo (6,8–18,7 giây mỗi cái trên đường nguội) nhưng CHƯA áp tắt JIT — xem `docs/erp-performance-p0-5-report.md` phụ lục 2. |
 | Tốc độ phản hồi lead | Nguồn không có mốc phản hồi đầu tiên cho từng hội thoại. |
 | Tỷ lệ chuyển giữa các khâu | `conversion` đã có trong hợp đồng, chưa cắm số — `getSalesFunnel` mới phủ 5/16 khâu. |
 | "Cứu được" của COD quá hạn / hàng hoàn chờ đếm | Cần định nghĩa riêng (tiền về / hàng vào tồn), không dùng chung định nghĩa giao thành công. |
-| 471 kiện hoàn vs 16 việc trong hàng đợi | Cần chủ shop chốt luật phát hiện — xem §7 báo cáo. |
+| ~~471 kiện hoàn vs 16 việc~~ | XONG. 16 việc là đúng theo thiết kế (15 kiện cũ nhất + 1 việc gộp). Toàn bộ dân số nay đo ở đường ống: 484 kiện chờ kho nhận giữ 77,5 triệu, 165 kiện đang trên đường về giữ 27 triệu. |
+| Cước chiều hoàn | `orders.return_fee > 0` ở 0/2.509 đơn — nguồn chưa có. Hiện "chưa đo được", KHÔNG hiện 0đ. |
+| Hiệu quả hành động theo đội | Bảng `action_evidence` bắt đầu ghi từ 10/09/2026. Chỉ lớn lên bằng việc làm thật. |
