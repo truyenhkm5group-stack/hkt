@@ -148,7 +148,16 @@ function slaBreachExpr() {
     .map(([kind, hours]) => sql`when n.kind = ${kind} then ${hours}`);
   if (!parts.length) return sql`false`;
   const cases = parts.reduce((a, b) => sql`${a} ${b}`);
-  return sql`extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600 > (case ${cases} else null end)`;
+  /*
+    ÉP KIỂU TƯỜNG MINH — KHÔNG BỎ ĐƯỢC.
+
+    Tham số rời không mang kiểu, nên Postgres suy mọi nhánh `then` ra text rồi so sánh
+    numeric với text và từ chối: `operator does not exist: numeric > text`.
+
+    Đây là lần thứ HAI cùng một lỗi trong một ngày (lần đầu ở lib/queries/return-pipeline.ts).
+    `tsc` không thấy được: cả hai cách viết đều là SQL hợp lệ về kiểu TypeScript.
+  */
+  return sql`extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600 > (case ${cases} else null end)::numeric`;
 }
 
 /** Cột đếm cho từng mốc tuổi: `giờ >= mốc trước` và `< mốc này`. */

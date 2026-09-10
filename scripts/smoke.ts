@@ -98,6 +98,14 @@ const WARMUP_ROUTE = "/";
 const RENDER_MARKER = "VNXcommerce";
 
 /**
+ * Dòng chữ mà ranh giới lỗi của Next in ra (`app/(dashboard)/error.tsx`).
+ *
+ * Trang lỗi trả HTTP 200 và có đủ khung ứng dụng, nên nó vượt qua mọi tiêu chí còn lại. Đây là
+ * dấu hiệu DUY NHẤT phân biệt được nó với một trang thật.
+ */
+const ERROR_MARKER = "Có lỗi khi tải trang";
+
+/**
  * ═══════════ PHÂN LOẠI KẾT QUẢ — MỘT CHỮ "LỖI" KHÔNG ĐỦ ═══════════
  *
  * Sự cố thật 09/09/2026: bộ smoke báo "13/21 màn hình LỖI" và deploy bị đánh dấu thất bại,
@@ -233,6 +241,22 @@ async function main() {
       const body = await response.text();
       if (!body.includes(RENDER_MARKER)) {
         results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng không dựng được khung ứng dụng", ms });
+        continue;
+      }
+
+      /*
+        ═══ TRANG LỖI CŨNG TRẢ HTTP 200 ═══
+
+        SỰ CỐ THẬT (10/09/2026). `/operations` hỏng hoàn toàn vì một lỗi SQL, chủ shop mở ra thấy
+        "Có lỗi khi tải trang" — mà smoke báo **SUCCESS 121kB trong 102ms**, hai lần deploy liên
+        tiếp. Ranh giới lỗi của Next dựng ra một trang hoàn chỉnh, có đủ khung ứng dụng, và trả
+        HTTP 200. Mọi tiêu chí smoke đang dùng đều đạt.
+
+        Nghĩa là suốt thời gian đó lá chắn hiệu năng vẫn xanh trong khi một trang chết hẳn. Đo mã
+        HTTP và kích thước là chưa đủ: phải đọc xem trang có đang NÓI rằng nó lỗi hay không.
+      */
+      if (body.includes(ERROR_MARKER)) {
+        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng dựng ra TRANG LỖI (ranh giới lỗi của Next) — xem log máy chủ theo mã lỗi", ms });
         continue;
       }
 
