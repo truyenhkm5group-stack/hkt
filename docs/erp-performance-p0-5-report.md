@@ -87,7 +87,44 @@ phải lỗi đang gây ra 40 giây:
   cùng tệp còn chứa các vị ngữ dẫn xuất dùng khắp nơi. Đây là lần thứ hai trong hai ngày một danh
   sách miễn trừ che mất lỗi thật; lá chắn nay kiểm riêng từng vị ngữ.
 
-## 5. Còn lại
+## 5. KẾT QUẢ — và mắt xích thật sự cuối cùng
+
+```
+[smoke] 19/25 đạt · 0 lỗi ứng dụng · 0 sai quyền · 1 chậm · 0 QUÁ HẠN
+  ✓ /                    99ms      (trước: QUÁ HẠN 60 giây)
+  ✓ /orders              97ms
+  ✓ /inventory/planning  52ms
+  ✓ /ads                 59ms
+  ⚠ /customers/retention 2.368ms   ← còn lại, không chặn deploy
+```
+
+Sau khi vá xong hình dạng phép nối và bật giữ ấm, trang chủ VẪN quá hạn. Nhật ký cho thấy job giữ
+ấm chạy đúng lịch. Mắt xích cuối nằm ở chỗ không ai ngờ:
+
+```
+lib/audit.ts   clearMemo()   ← xoá SẠCH đệm sau MỌI thao tác ghi, kể cả ĐĂNG NHẬP
+```
+
+Smoke đăng nhập lại trước mỗi màn hình (thêm vào từ trước để tránh hết hạn JWT), nên nó **xoá đệm 25
+lần trong một lượt chạy**. Trang chủ luôn rơi vào lượt tính nguội.
+
+Và đó không chỉ là chuyện của smoke: mỗi lần bất kỳ ai đăng nhập, toàn bộ đệm báo cáo của cả hệ
+thống bị san phẳng. Đăng nhập không đổi doanh thu, không đổi tồn kho, không đổi lợi nhuận.
+
+### Ba tầng cùng lúc mới đủ
+
+| Tầng | Việc nó làm |
+| --- | --- |
+| **Đăng nhập thôi xoá đệm** | bỏ LOGIN/LOGOUT khỏi đường làm mới đệm — danh sách cố ý HẸP |
+| **Job nền đánh dấu cũ, không xoá hẳn** | `staleMemo()` thay `clearMemo()` khi `runJob` đang chạy; người đọc nhận ngay số lượt trước |
+| **Trả số cũ ngay, làm mới phía sau** | `memo()` phục vụ stale-while-revalidate, trần 15 phút |
+
+Cộng thêm `dashboard-warm` mỗi 4 phút để cả lượt nguội đầu tiên cũng do bộ lập lịch trả giá.
+
+**Điểm quan trọng: không tầng nào giấu chi phí thật.** `perf-probe` xoá đệm trước mỗi phép đo nên nó
+vẫn báo đúng 33–40 giây cho `getDashboardData`. Cái đổi là AI trả giá đó.
+
+## 6. Còn lại
 
 Cùng hình dạng xấu còn ở các hàm khác, xếp theo chi phí đo được:
 
