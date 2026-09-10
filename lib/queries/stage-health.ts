@@ -71,6 +71,14 @@ export type StageHealth = {
   backlog: number;
   /** Việc chưa ai nhận — con số quan trọng nhất của một khâu đang tắc. */
   unassigned: number;
+  /**
+   * Số VIỆC đang mở trong hàng đợi cho khâu này.
+   *
+   * Thường bằng `backlog`. Khác nhau ở khâu hàng hoàn, và khác một cách CÓ CHỦ Ý: hàng đợi cố ý
+   * chỉ mở 15 việc đích danh + 1 việc gộp, còn `backlog` là dân số thật (đo được 484 kiện). Hiện
+   * cả hai để không ai nhìn 16 rồi tưởng chỉ còn 16 kiện.
+   */
+  queueCases: number;
   /** Chia theo tuổi việc — thứ phân biệt "đang bận" với "đang tắc". */
   aging: Record<AgingKey, number>;
   oldestHours: number;
@@ -389,6 +397,7 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
         teamLabel: TEAM_LABEL[spec.team],
         status: statusOf(spec, backlog, breached, src),
         backlog,
+        queueCases: exceptions.reduce((t, e) => t + e.count, 0),
         unassigned,
         aging,
         oldestHours: oldest,

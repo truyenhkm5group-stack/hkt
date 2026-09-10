@@ -291,3 +291,69 @@ Các trang chứa chúng hiện 59–155ms **nhờ bộ đệm và job giữ ấ
 Cùng một họ truy vấn, nên gần như chắc chắn cùng một nguyên nhân. **Nhưng chưa đo từng cái**, và
 mục 9 của chủ shop nói rõ: trang đang nhanh thì đóng băng, không tối ưu theo cảm tính. Việc đúng
 tiếp theo là chạy `explain-stock` mở rộng cho sáu hàm này, rồi mới áp — mỗi chỗ một con số.
+
+---
+
+# Phụ lục 3 — nghiệm thu đường NGUỘI, và bottleneck còn lại
+
+## Đo trước, sửa sau — công cụ đo được mở rộng trước
+
+`perf-probe` nay in thêm ba thứ mà trước đây phải đoán:
+
+- **NGUỘI ↔ ẤM**: mỗi hàm chạy hai lượt, đệm rỗng rồi đệm còn nguyên.
+- **CHẠY LẠI CÙNG MỘT CÂU**: gom câu lệnh theo HÌNH DẠNG (bỏ tham số) rồi đếm — chỗ tìm nguyên nhân
+  chung giữa các báo cáo.
+- **Số dòng** trả về mỗi hàm: phân biệt chậm-vì-nhiều-dữ-liệu với chậm-vì-lặp.
+
+## Giả thuyết bị số liệu bác bỏ
+
+Nghi ngờ ban đầu: *nhiều báo cáo dựng lại cùng một tập nền*. Số liệu nói không:
+
+```
+getBusinessBrief   104 lượt truy vấn · 92 câu KHÁC NHAU
+getDashboardData    75 lượt truy vấn · 70 câu KHÁC NHAU
+```
+
+Không phải lặp. Vấn đề là **từng câu đơn lẻ tốn 13–17 giây**, và tất cả cùng một họ — gộp nhiều cột
+trên bảng dẫn xuất kết quả đơn, đúng họ đã tách bạch được JIT (8.578ms ↔ 26ms, cùng khối đệm).
+
+## Kết quả (đường NGUỘI, đệm rỗng)
+
+| Hàm | Ban đầu | Lượt 1 | Lượt 2 | Ấm | Mục tiêu | Đạt |
+| --- | --- | --- | --- | --- | --- | --- |
+| getDashboardData | 15.182ms | 10.719ms | **3.536ms** | 0ms | <1,5s | chưa |
+| getBusinessBrief | 17.611ms | 10.617ms | **3.307ms** | 0ms | <1,5–2s | chưa |
+| getFinancialTruth | 19.162ms | 6.285ms | **2.899ms** | 0ms | <1,5s | chưa |
+| getReturnRateByVariant | 7.066ms | 2.953ms | **3.309ms** | 54ms | <800ms | chưa |
+| getReturnRateSummary | 6.465ms | 3.241ms | **3.223ms** | 29ms | <800ms | chưa |
+| adsRoas 30 ngày | 5.083ms | 849ms | **829ms** | 0ms | <1,5–2s | **✓** |
+| adsRoas toàn kỳ | 4.458ms | 876ms | **879ms** | 0ms | <1,5–2s | **✓** |
+| getOperatingCost | 3.356ms | 4.208ms | **57ms** | 0ms | — | **✓** |
+
+Mục "CHẠY LẠI CÙNG MỘT CÂU" nay **trống hoàn toàn**: không hàm nào còn chạy lại cùng một câu lệnh.
+
+Smoke deploy #206: **27/27 đạt · 0 quá hạn · 0 chậm**.
+
+## Bottleneck còn lại — biết chính xác, chưa sửa
+
+Ba câu chậm nhất còn lại đều ~3,2 giây và đều mang cùng một hình dạng:
+
+```
+coalesce(
+  (select m.outcome from canonical_order_outcome m
+    where m.order_id = orders.id
+      and coalesce(m.shipment_id,'') = coalesce(shipments.id,'')
+      and m.logic_version = $1),
+  <biểu thức ORDER_OUTCOME tính trực tiếp>
+)
+```
+
+Đây **không còn là JIT** — nó là công việc thật: một truy vấn con TƯƠNG QUAN chạy cho từng dòng trên
+~2.500 đơn, cộng phép nối `PRIMARY_ATTEMPT` sang vận đơn.
+
+Hướng sửa đúng (chưa làm, cần đo trước): thay tra cứu tương quan bằng một phép NỐI với bảng đã tính
+sẵn, giữ nguyên nhánh dự phòng cho dòng thiếu. Đây là đổi HÌNH DẠNG truy vấn chứ không đổi công
+thức, nên `tests/metric-shape-consistency.test.ts` là chỗ chứng minh con số không đổi.
+
+**Không tăng TTL để giấu.** Mục tiêu <1,5s cold vẫn còn nợ ba hàm, và nợ đó được ghi ở đây kèm đúng
+câu lệnh phải sửa.

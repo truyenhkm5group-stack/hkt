@@ -149,8 +149,20 @@ export default async function OperationsPage() {
                   {s.backlog > 0 ? (
                     <>
                       <span>
-                        <b className="numeric">{formatNumber(s.backlog)}</b> việc
+                        <b className="numeric">{formatNumber(s.backlog)}</b> {s.queueCases !== s.backlog ? "kiện tồn đọng" : "việc"}
                       </span>
+                      {/*
+                        TỒN ĐỌNG ≠ VIỆC ĐANG MỞ.
+
+                        Hàng đợi cố ý chỉ mở 15 việc đích danh + 1 việc gộp cho hàng hoàn, để vài
+                        trăm dòng không chiếm trọn màn hình. Nhưng nhìn "16" mà không thấy "484"
+                        thì người vận hành tưởng đã gần xong. Hiện cả hai, ngay cạnh nhau.
+                      */}
+                      {s.queueCases !== s.backlog ? (
+                        <span className="text-muted-foreground">
+                          {formatNumber(s.queueCases)} việc đang mở
+                        </span>
+                      ) : null}
                       {s.unassigned > 0 ? <span className="text-amber-700 dark:text-amber-300">{formatNumber(s.unassigned)} chưa ai nhận</span> : null}
                       {s.breached > 0 ? <span className="text-rose-600 dark:text-rose-400">{formatNumber(s.breached)} trễ hạn</span> : null}
                       <span className="text-muted-foreground">

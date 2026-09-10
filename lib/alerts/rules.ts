@@ -475,11 +475,34 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     try {
       const cutoff = new Date(Date.now() - Math.max(1, cfg.returnInspectionDays) * 86_400_000);
       const rows = await db
-        .select({ ...orderCols, shipmentId: s.id, code: s.vtpOrderNumber, tracking: s.trackingCode, returnedAt: s.returnedAt, items: sql<number>`(select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})` })
+        .select({
+          ...orderCols,
+          shipmentId: s.id,
+          code: s.vtpOrderNumber,
+          tracking: s.trackingCode,
+          returnedAt: s.returnedAt,
+          items: sql<number>`(select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})`,
+          // Giá vốn của ĐƠN, lấy MỘT giá trị: bảng kết quả đơn có grain (đơn × vận đơn) nên nối
+          // thẳng sẽ nhân giá vốn lên đúng bằng số lần gửi.
+          goodsCost: sql<number>`coalesce((select max(coalesce(m.recognized_cogs, m.cogs, 0)) from canonical_order_outcome m where m.order_id = ${s.orderId}), 0)`,
+        })
         .from(s)
         .leftJoin(o, eq(o.id, s.orderId))
         .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), sql`${s.orderId} is not null`, sql`coalesce(${s.returnedAt}, ${s.updatedAt}) <= ${cutoff.toISOString()}::timestamptz`))
-        .orderBy(sql`coalesce(${s.returnedAt}, ${s.updatedAt}) asc`)
+        /*
+          ═══ XẾP THEO GIÁ TRỊ VỐN, KHÔNG CHỈ THEO TUỔI ═══
+
+          Bản đầu lấy 15 kiện CŨ NHẤT. Nhưng một kiện 2 triệu nằm 20 ngày đáng mở trước một kiện
+          80 nghìn nằm 25 ngày: cùng một lần cúi xuống đếm, một bên trả lại 2 triệu vốn cho sổ.
+
+          Thứ tự: TRỄ HẠN trước (đã quá ngưỡng thì mọi kiện đều phải làm), rồi GIÁ VỐN, rồi TUỔI.
+          Giá vốn lấy từ bảng kết quả đơn đã tính sẵn — cùng con số mà báo cáo lợi nhuận dùng, không
+          tự tính lại. Đơn chưa có giá vốn thì về 0 và rơi xuống dưới, đúng như nó đáng.
+        */
+        .orderBy(
+          sql`coalesce((select max(coalesce(m.recognized_cogs, m.cogs, 0)) from canonical_order_outcome m where m.order_id = ${s.orderId}), 0) desc`,
+          sql`coalesce(${s.returnedAt}, ${s.updatedAt}) asc`,
+        )
         .limit(500);
 
       /**
@@ -519,11 +542,27 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           return at < min ? at : min;
         }, Date.now());
         const oldestDays = Math.floor((Date.now() - oldest) / 86_400_000);
+        /*
+          ═══ VIỆC GỘP PHẢI NÓI ĐỦ SỐ, KHÔNG CHỈ NÓI "CÒN NỮA" ═══
+
+          Người mở hàng đợi thấy 16 việc rất dễ tưởng chỉ còn 16 kiện. Thực tế đo được trên
+          production: 484 kiện giữ 77,5 triệu vốn. Việc gộp là chỗ DUY NHẤT nói được con số thật,
+          nên nó phải mang đủ: tổng tồn đọng · tổng giá vốn · tuổi cũ nhất · số kiện quá hạn.
+
+          Giá vốn cộng theo ĐƠN của các kiện còn lại, lấy từ bảng kết quả đơn đã tính sẵn.
+        */
+        const vonTonDong = rest.reduce((t, r) => t + Number(r.goodsCost ?? 0), 0);
+        const quaHan = rest.filter((r) => Date.now() - new Date(r.returnedAt ?? cutoff).getTime() >= cfg.returnInspectionDays * 86_400_000).length;
+        const trieu = (n: number) => `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} triệu`;
         candidates.push({
           kind: "RETURN_PENDING_INSPECTION",
           severity: "warning",
-          title: `Thêm ${rest.length} kiện hàng hoàn chờ kiểm đếm`,
-          body: `Ngoài ${NAMED_LIMIT} kiện nêu đích danh ở trên, còn ${rest.length} kiện nữa (khoảng ${items} món, cũ nhất ${oldestDays} ngày) — xác nhận hàng loạt trên trang Chất lượng dữ liệu.`,
+          title: `Thêm ${rest.length} kiện hàng hoàn chờ kiểm đếm · ${trieu(vonTonDong)} vốn`,
+          body:
+            `Ngoài ${NAMED_LIMIT} kiện nêu đích danh ở trên, còn ${rest.length} kiện nữa: khoảng ${items} món, ` +
+            `${trieu(vonTonDong)} giá vốn đang KHÔNG được tính trong tồn, cũ nhất ${oldestDays} ngày` +
+            `${quaHan ? `, ${quaHan} kiện đã quá hạn ${cfg.returnInspectionDays} ngày` : ""}. ` +
+            `Xem toàn bộ đường ống hàng hoàn ở trang Kiểm đếm hàng hoàn, hoặc xác nhận hàng loạt trên trang Chất lượng dữ liệu.`,
           href: "/data-quality?issue=return-not-received",
           entityType: "DATA_RULE",
           entityId: "return-not-received",
