@@ -178,6 +178,18 @@ export { schema };
  * cáo đổ vỡ vì một tinh chỉnh hiệu năng.
  */
 export async function chayKhongJit<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
+  /*
+    PGLITE KHÔNG CÓ JIT, VÀ KHÔNG ĐƯỢC MỞ GIAO DỊCH Ở ĐÂY.
+
+    PGlite là PostgreSQL biên dịch sang WASM, không có LLVM nên không có trình biên dịch để tắt —
+    tối ưu này vô nghĩa ở đó. Quan trọng hơn: bản đầu vẫn mở giao dịch trên PGlite và nó KHÔNG BAO
+    GIỜ kết thúc. Không lỗi, không treo lộ liễu — vòng lặp sự kiện cạn và Node thoát với mã 0, cắt
+    cụt bộ kiểm thử ở giữa chừng mà vẫn báo "thành công".
+
+    Đúng dạng hỏng nguy hiểm nhất, và là lần thứ hai trong cùng một ngày (xem `memo` trong
+    lib/cache.ts): một lời hứa không bao giờ settle thì không có gì báo động cả.
+  */
+  if (isPglite()) return fn(db);
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sqlRaw.raw("set local jit = off"));

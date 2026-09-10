@@ -1280,6 +1280,22 @@ async function main() {
 
 }
 
+/*
+  ═══════ THOÁT GIỮA CHỪNG PHẢI LÀ THẤT BẠI ═══════
+
+  SỰ CỐ THẬT (10/09/2026). Một lượt chạy dừng sau 28 bài rồi thoát với mã 0 — không lỗi, không
+  cảnh báo, và `npm test` báo thành công. Nguyên nhân: một giao dịch ôm cả những hàm tự mở kết
+  nối riêng nên khoá chết trên PGlite; lời hứa không bao giờ settle, vòng lặp sự kiện cạn, Node
+  thoát êm với mã 0.
+
+  Hậu quả nếu không chặn: CỔNG PHÁT HÀNH cho qua một lượt kiểm thử chạy được một phần tư. Mọi
+  contract test về luật nghiệp vụ nằm ở nửa sau đều không chạy, và không ai biết.
+
+  Nên: đánh dấu THẤT BẠI ngay từ đầu, chỉ gỡ khi chạy tới dòng cuối. Thoát sớm vì bất kỳ lý do gì
+  cũng để lại mã 1.
+*/
+process.exitCode = 1;
+
 main().catch((error) => {
   console.error("✗ Kiểm thử thất bại:", error);
   process.exit(1);

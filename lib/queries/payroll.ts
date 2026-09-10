@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
@@ -209,8 +209,29 @@ async function productEconomics(period: Period) {
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
   // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
   const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
-  const [sales, receipts, exp, assumptions] = await Promise.all([
-    db
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY.
+
+    Cùng họ truy vấn với `vsales` (order_items × orders × shipments kèm tra kết quả đơn), và họ đó
+    đã đo được trên production: 8.578ms với JIT, 26ms không JIT, cùng số khối đệm. Trang Lương quá
+    hạn 60 giây ở lượt smoke nguội trong khi lượt trước nó 91ms — đúng dấu hiệu chi phí biên dịch
+    chỉ phải trả khi đệm rỗng.
+
+    Không đổi một phép tính nào: `set local` chỉ tắt trình biên dịch, kế hoạch và kết quả y nguyên.
+  */
+  /*
+    CHỈ BỌC HAI TRUY VẤN NẶNG, KHÔNG BỌC CẢ `Promise.all`.
+
+    Bản đầu bọc cả `getOperatingCost()` và `resolveAssumptions()` — hai hàm tự mở kết nối RIÊNG.
+    Giao dịch giữ một kết nối rồi chờ hai hàm kia, hai hàm kia chờ kết nối: khoá chết. Trên PGlite
+    (một kết nối duy nhất) nó treo tuyệt đối, và treo im lặng — Node thoát mã 0, bộ kiểm thử bị cắt
+    cụt ở giữa mà vẫn báo thành công.
+
+    Luật rút ra: giao dịch chỉ được ôm những câu lệnh chạy TRÊN CHÍNH nó.
+  */
+  const [[sales, receipts], exp, assumptions] = await Promise.all([
+    chayKhongJit(db, (tx) => Promise.all([
+    tx
       .select({
         productId: productKey,
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
@@ -231,13 +252,14 @@ async function productEconomics(period: Period) {
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       .where(and(eq(i.isBonus, false), ...periodConds(o.insertedAt, period)))
       .groupBy(sql`1`),
-    db
+    tx
       .select({ productId: pv.productId, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
       .from(schema.stockReceiptItems)
       .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
       .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
+    ])),
     // Nền chi phí của bảng lương phải là CÙNG con số với báo cáo lợi nhuận, nên đi chung engine.
     getOperatingCost(period),
     resolveAssumptions(),
