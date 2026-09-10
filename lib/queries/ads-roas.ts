@@ -1,5 +1,5 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
@@ -154,7 +154,12 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
   const fReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const fBooked = sql`${facts.outcome} <> 'CANCELLED'`;
 
-  const orderRows = await db
+  /*
+    JIT TAT - do duoc tren production: adsRoas 5.083ms (30 ngay) va 4.458ms (toan ky) nguoi, 0-1ms
+    am. Cung ho truy van da tach bach duoc JIT: 8.578ms bat / 26ms tat, cung so khoi dem.
+    Chi boc cau lenh nay; phan tien quang cao ben duoi chay rieng nhu cu.
+  */
+  const orderRows = await chayKhongJit(db, (tx) => tx
     .select({
       key: sql<string>`${facts.key}`,
       name:
@@ -171,7 +176,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${fDelivered}), 0)`,
     })
     .from(facts)
-    .groupBy(facts.key);
+    .groupBy(facts.key));
 
   // ── Tiền quảng cáo theo cùng khoá ──
   const spendRows = await db

@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computeVelocity } from "@/lib/constants/planning";
 import { loadPlanningAssumptions } from "@/lib/queries/planning";
@@ -113,7 +113,12 @@ async function slowMovingUncached(): Promise<SlowMovingReport> {
   const win = windowSalesSubquery(db, windowDays);
   const last = lastSoldSubquery(db);
 
-  const rows = await db
+  /*
+    JIT TẮT — đo được: câu lệnh sổ bán theo mẫu mã tốn 17.571ms trên production, và cùng họ với
+    truy vấn đã tách bạch được JIT (8.578ms bật ↔ 26ms tắt, cùng khối đệm). `getBusinessBrief` gọi
+    hàm này, và nó là 17.611ms nguội.
+  */
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       variantId: pv.id,
       productId: pv.productId,
@@ -134,7 +139,7 @@ async function slowMovingUncached(): Promise<SlowMovingReport> {
     .leftJoin(receipts, eq(receipts.variantId, pv.id))
     .leftJoin(win, eq(win.variantId, pv.id))
     .leftJoin(last, eq(last.variantId, pv.id))
-    .where(and(eq(pv.isRemoved, false), eq(p.isRemoved, false)));
+    .where(and(eq(pv.isRemoved, false), eq(p.isRemoved, false))));
 
   const out: SlowMovingRow[] = [];
   const byRisk: Record<StockRisk, { count: number; value: number }> = {

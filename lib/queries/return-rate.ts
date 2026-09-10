@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
@@ -565,7 +565,9 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     .as("variant_base");
 
   const RETURNED_ANY = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
-  const raw = await db
+  // Cùng lý do và cùng cách bọc như `getReturnRateSummary`: chỉ câu lệnh cuối, `failedToReturnRate()`
+  // nằm ngoài giao dịch. Đo được 7.066ms nguội cho hàm này.
+  const raw = await chayKhongJit(db, (tx) => tx
     .select({
       key: base.key,
       variantId: sql<string | null>`max(${base.variantId})`,
@@ -585,7 +587,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
     })
     .from(base)
-    .groupBy(base.key);
+    .groupBy(base.key));
 
   const p = await failedToReturnRate();
   const all: ReturnRateRow[] = raw
@@ -720,7 +722,18 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     .offset(OUTCOME_FENCE)
     .as("gtc_base");
 
-  const [row] = await db
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY — đo được, không đoán.
+
+    perf-probe trên production: `getReturnRateSummary` 6.465ms nguội, và câu lệnh gộp 13 cột này
+    một mình tốn 7.114ms cho hai lượt. Cùng họ với truy vấn đã đo tách bạch được JIT: 8.578ms bật
+    JIT ↔ 26ms tắt JIT, CÙNG số khối đệm.
+
+    Chỉ bọc câu lệnh CUỐI. Bảng dẫn xuất `base` chỉ là mảnh SQL nên dựng bằng `db` hay `tx` đều
+    như nhau; `failedToReturnRate()` bên dưới tự mở kết nối riêng nên PHẢI nằm ngoài giao dịch —
+    bọc nó vào là khoá chết (đã dẫm phải một lần ở báo cáo lương).
+  */
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       orders: sql<number>`count(*)`,
       shipped: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
@@ -736,7 +749,7 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
       finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
       provisional: sql<number>`count(*) filter (where ${base.provisional})`,
     })
-    .from(base);
+    .from(base));
   const delivered = Number(row?.delivered ?? 0);
   const returned = Number(row?.returned ?? 0);
   const failed = Number(row?.failed ?? 0);

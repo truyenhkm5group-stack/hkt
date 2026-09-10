@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { metricScope } from "@/lib/queries/metrics";
@@ -173,7 +173,17 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const isReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const isBooked = sql`${facts.outcome} <> 'CANCELLED'`;
 
-  const [orderRow] = await db
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY.
+
+    perf-probe trên production 10/09/2026: `getFinancialTruth` **19.162ms nguội / 0ms ấm**. Câu
+    lệnh này là câu đắt nhất của nó — mười hai cột gộp trên bảng dẫn xuất `facts`, chi phí ước
+    lượng đủ cao để Postgres bật JIT.
+
+    Cùng họ với truy vấn đã tách bạch được: 8.578ms bật JIT ↔ 26ms tắt JIT, CÙNG số khối đệm.
+    Chỉ bọc câu lệnh này; các câu COD/bảng kê/quảng cáo bên dưới chạy riêng như cũ.
+  */
+  const [orderRow] = await chayKhongJit(db, (tx) => tx
     .select({
       bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isBooked}), 0)`,
       bookedOrders: sql<number>`count(*) filter (where ${isBooked})`,
@@ -188,7 +198,7 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       prepaid: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${isDelivered}), 0)`,
       missingCogsOrders: sql<number>`count(*) filter (where ${isDelivered} and ${facts.cogs} = 0 and ${facts.revenue} > 0)`,
     })
-    .from(facts);
+    .from(facts));
 
   // ── Chiều TIỀN: đọc trên vận đơn của đơn trong kỳ, tách rõ ba bậc chứng từ ──
   const [codRow] = await db

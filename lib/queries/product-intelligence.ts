@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { successRate } from "@/lib/queries/metrics";
@@ -149,7 +149,11 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
   const RETURNED = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const NOT_CANCELLED = sql`${base.outcome} <> 'CANCELLED'`;
 
-  const rows = await db
+  /*
+    JIT TAT - cung ho truy van, va getBusinessBrief goi ham nay. Chi boc cau lenh nay.
+    Do duoc: 8.578ms bat JIT / 26ms tat JIT tren cung mot cau, cung so khoi dem.
+  */
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       variantId: base.variantId,
       sku: sql<string>`max(${base.sku})`,
@@ -177,7 +181,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     .from(base)
     .groupBy(base.variantId)
     .orderBy(desc(sql`coalesce(sum(${base.lineTotal}) filter (where ${DELIVERED}), 0)`))
-    .limit(limit);
+    .limit(limit));
 
   return rows.map((r) => {
     const delivered = Number(r.deliveredOrders ?? 0);
