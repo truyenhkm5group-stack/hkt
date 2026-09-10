@@ -109,19 +109,23 @@ function peakDaySubquery(db: Awaited<ReturnType<typeof getDb>>, days: number) {
     .as("peak_day");
 }
 
-async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanReport> {
-  const db = await getDb();
-  const saved = await loadPlanningAssumptions();
-  const coverDays = Number.isFinite(opt.coverDays) ? Math.min(365, Math.max(0, Math.round(opt.coverDays as number))) : saved.coverDays;
-  const countIncoming = opt.countIncoming !== false;
-  const a: PlanningAssumptions = { ...saved, coverDays };
+/**
+ * ═══════ CÂU LỆNH DÒNG KẾ HOẠCH — TÁCH RA ĐỂ ĐO ĐƯỢC ═══════
+ *
+ * Trước đây câu này dựng ngay trong `getReplenishmentPlanUncached`, nên công cụ chẩn đoán muốn
+ * `EXPLAIN` nó thì phải CHÉP TAY lại SQL — và chép tay nghĩa là đo một câu khác với câu đang chạy
+ * thật. Tách ra ở đây, không đổi một dấu nào của truy vấn.
+ *
+ * `scripts/explain-stock.ts` gọi đúng hàm này.
+ */
+export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: PlanningAssumptions) {
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
   const d7 = demandSubquery(db, 7, "d7");
   const d30 = demandSubquery(db, 30, "d30");
   const dw = demandSubquery(db, Math.max(1, a.velocityWindowDays), "dw");
   const peak = peakDaySubquery(db, Math.max(1, a.velocityWindowDays));
-  const rows = await db
+  return db
     .select({
       variantId: pv.id,
       productId: pv.productId,
@@ -158,6 +162,15 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
     .leftJoin(peak, eq(peak.variantId, pv.id))
     .where(sql`${pv.isRemoved} = false and ${p.isRemoved} = false`)
     .orderBy(asc(p.name), asc(pv.sku));
+}
+
+async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanReport> {
+  const db = await getDb();
+  const saved = await loadPlanningAssumptions();
+  const coverDays = Number.isFinite(opt.coverDays) ? Math.min(365, Math.max(0, Math.round(opt.coverDays as number))) : saved.coverDays;
+  const countIncoming = opt.countIncoming !== false;
+  const a: PlanningAssumptions = { ...saved, coverDays };
+  const rows = await buildPlanRowsQuery(db, a);
 
   // Tỷ lệ nhập lại được kho: hàng hoàn đã lập phiếu tái nhập ÷ hàng hoàn đã xử lý, tính trên toàn
   // shop (mẫu từng mẫu mã quá nhỏ). Chưa có dữ liệu thì coi như về đủ — đó là mặc định vật lý.
