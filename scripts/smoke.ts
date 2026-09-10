@@ -69,6 +69,28 @@ const ROUTES = [
   "/data-quality",
   "/data-quality?issue=unlinked-shipment",
   "/data-quality?issue=return-not-received",
+  /*
+    ═══ MƯỜI MỘT TUYẾN TỪNG KHÔNG ĐƯỢC PHỦ ═══
+
+    SỰ CỐ THẬT (10/09/2026). `/bank` và `/ideas` hỏng hẳn trên production và chủ shop phải tự phát
+    hiện — cả hai đều KHÔNG có trong danh sách này. Lá chắn canh một danh sách gõ tay thì nó chỉ
+    canh được những gì có người nhớ thêm vào, và 11/34 tuyến của thanh điều hướng đang ở ngoài.
+
+    Đây là lần thứ tám cùng một hình dạng lỗi trong kho mã này: một lá chắn canh whitelist thay vì
+    canh cả bề mặt. `tests/smoke-coverage.test.ts` nay đọc thanh điều hướng và bắt buộc mọi tuyến
+    phải có mặt ở đây, hoặc được khai miễn trừ KÈM LÝ DO.
+  */
+  "/bank",
+  "/cs",
+  "/outreach",
+  "/landing",
+  "/ideas",
+  "/products/performance",
+  "/reports/funnel",
+  "/reports/cashflow",
+  "/integrations",
+  "/settings/users",
+  "/audit",
 ];
 
 /**
