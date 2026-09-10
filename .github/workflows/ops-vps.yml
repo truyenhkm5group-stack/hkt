@@ -34,6 +34,7 @@ on:
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
+          - explain-stock       # EXPLAIN ANALYZE truy vấn sổ kho — kế hoạch thực thi của câu chậm nhất
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
@@ -182,6 +183,9 @@ jobs:
               vtp-manual-verify)
                 fetch_script vtp-manual-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-manual-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-manual-verify.ts $ARG ;;
+              explain-stock)
+                fetch_script explain-stock.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/explain-stock.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/explain-stock.ts ;;
               outcome-explain)
                 fetch_script order-outcome-explain.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/order-outcome-explain.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/order-outcome-explain.ts $ARG ;;
