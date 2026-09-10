@@ -1,3 +1,4 @@
+import { memo, periodKey } from "@/lib/cache";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
@@ -51,7 +52,22 @@ function pctChange(now: number, before: number | undefined | null): number | nul
 
 const vnd = (v: number) => `${Math.round(v).toLocaleString("vi-VN")}đ`;
 
+/**
+ * BẢN TÓM TẮT KHÔNG HỀ CÓ ĐỆM — và đó là thành phần ĐẮT NHẤT của trang chủ.
+ *
+ * Đo trên production 10/09/2026: 46.277ms, **105 lượt truy vấn**, chạy lại từ đầu MỖI lần mở trang
+ * chủ. Nó gọi lại `getDashboardData` cộng sáu bộ tổng hợp nặng khác, và chạy SONG SONG với chính
+ * bảng điều khiển — 181 lượt truy vấn cùng lúc trên một máy 2 nhân.
+ *
+ * Đây là nội dung TƯ VẤN: "tồn kho mã này bán chậm", "chi phí quảng cáo bất thường". Không ai cần
+ * nó tươi từng giây, và không quyết định nào đổi vì nó cũ mười phút. Nên TTL dài là đúng bản chất
+ * của dữ liệu, không phải một sự đánh đổi.
+ */
 export async function getBusinessBrief(period: Period): Promise<BusinessBrief> {
+  return memo(`businessBrief:${periodKey(period)}`, 600_000, () => buildBusinessBrief(period));
+}
+
+async function buildBusinessBrief(period: Period): Promise<BusinessBrief> {
   const [dash, queue, adsAnomalies, slow, products, adSpend, muaHang] = await Promise.all([
     getDashboardData(period),
     getDashboardActionQueue(),

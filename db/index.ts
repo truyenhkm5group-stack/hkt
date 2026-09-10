@@ -71,7 +71,21 @@ async function createPglite(): Promise<Db> {
 }
 
 function createPg(): Db {
-  const pool = new Pool({ connectionString: databaseUrl(), max: 10 });
+  /**
+   * BỂ KẾT NỐI PHẢI VỪA VỚI SỐ NHÂN CPU, KHÔNG PHẢI VỪA VỚI SỐ TRUY VẤN.
+   *
+   * Đo trên production 10/09/2026: VPS có **2 nhân**, `erp-db` ghim 105% CPU, load 15 phút 5,47.
+   * Trang chủ bắn 181 lượt truy vấn cùng lúc (76 của bảng điều khiển + 105 của bản tóm tắt). Với
+   * `max: 10`, mười tiến trình Postgres cùng tranh 2 nhân — mỗi câu 300ms thành 9 giây, và tổng
+   * thời gian TĂNG so với chạy ít luồng hơn.
+   *
+   * Đây là chỗ trực giác đánh lừa: thêm luồng KHÔNG làm nhanh hơn khi CPU đã bão hoà, nó chỉ chia
+   * nhỏ cùng một lượng CPU thành nhiều phần và cộng thêm chi phí chuyển ngữ cảnh.
+   *
+   * Cho phép chỉnh bằng `PGPOOL_MAX` để không phải deploy lại khi đổi cấu hình máy.
+   */
+  const max = Math.max(2, Number(process.env.PGPOOL_MAX) || 5);
+  const pool = new Pool({ connectionString: databaseUrl(), max });
   instrumentQueries(pool as unknown as QueryClient);
   holder.__erpDb!.pool = pool;
   return drizzlePg(pool, { schema });

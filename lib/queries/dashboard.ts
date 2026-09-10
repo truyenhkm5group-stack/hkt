@@ -272,5 +272,8 @@ async function getDashboardDataUncached(period: Period) {
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
 export async function getDashboardData(period: Period) {
-  return memo(`getDashboardData:${periodKey(period)}`, 60000, () => getDashboardDataUncached(period));
+  // TTL 60 giây quá ngắn cho một trang tốn hàng chục giây khi đệm nguội: người thứ hai mở trang
+  // trong cùng phút được hưởng đệm, người mở sau 61 giây lại trả giá đầy đủ. Ba phút là khoảng mà
+  // số liệu vẫn còn tươi với người vận hành nhưng chi phí dựng lại giảm ba lần.
+  return memo(`getDashboardData:${periodKey(period)}`, 180_000, () => getDashboardDataUncached(period));
 }

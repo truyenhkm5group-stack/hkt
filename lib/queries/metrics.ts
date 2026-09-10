@@ -1,8 +1,9 @@
 import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { orderCogsColumn, orderCogsFast } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { orderCogsFast } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -146,12 +147,34 @@ export function orderMetricFacts(db: Db, where: SQL | undefined) {
       insertedAt: schema.orders.insertedAt,
       day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`.as("day"),
       revenue: schema.orders.totalPriceAfterDiscount,
-      cogs: orderCogsColumn(),
-      outcome: outcomeColumn(),
+      cogs: sql<number>`coalesce(${schema.canonicalOrderOutcome.recognizedCogs}, ${schema.canonicalOrderOutcome.cogs}, ${orderCogsFast()})`.as("order_cogs"),
+      outcome: sql<string>`coalesce(${schema.canonicalOrderOutcome.outcome}, ${ORDER_OUTCOME_FAST})`.as("outcome"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT trong return-rate.ts).
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
+    /**
+     * NỐI bảng dẫn xuất, không tra từng dòng.
+     *
+     * `outcomeColumn()` / `orderCogsColumn()` là truy vấn con TƯƠNG QUAN. Dùng chúng ở đây thì
+     * Postgres gắn cả chuỗi dự phòng vào phép quét `orders` — `EXPLAIN ANALYZE` trên production
+     * 10/09/2026 đo được **9.053ms cho một phép quét 2.443 dòng chỉ tốn 350 buffer**, tức toàn bộ
+     * thời gian là biểu thức chạy trên từng dòng.
+     *
+     * Phép nối này khiến `coalesce(m.outcome, …)` chạm được cột đã nối trước, nên nhánh đắt chỉ
+     * chạy cho dòng THẬT SỰ cũ. Điều kiện tươi mới nằm ngay trong phép nối vì đó là chỗ duy nhất
+     * bảo đảm dòng cũ không lọt qua.
+     */
+    .leftJoin(
+      schema.canonicalOrderOutcome,
+      and(
+        eq(schema.canonicalOrderOutcome.orderId, schema.orders.id),
+        sql`coalesce(${schema.canonicalOrderOutcome.shipmentId}, '') = coalesce(${schema.shipments.id}, '')`,
+        eq(schema.canonicalOrderOutcome.logicVersion, CANONICAL_OUTCOME_VERSION),
+        sql`${schema.canonicalOrderOutcome.computedAt} >= ${schema.orders.updatedAt}`,
+        sql`(${schema.shipments.id} is null or ${schema.canonicalOrderOutcome.computedAt} >= ${schema.shipments.updatedAt})`,
+      ),
+    )
     .where(where)
     .offset(OUTCOME_FENCE)
     .as("metric_facts");
