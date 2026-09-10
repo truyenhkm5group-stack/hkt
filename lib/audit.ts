@@ -50,6 +50,21 @@ export type AuditParams = {
   detail?: unknown;
 };
 
+/**
+ * NHỮNG VIỆC CÓ GHI NHẬT KÝ NHƯNG KHÔNG ĐỔI MỘT CON SỐ KINH DOANH NÀO.
+ *
+ * SỰ CỐ THẬT (10/09/2026). `audit()` xoá sạch đệm báo cáo sau MỌI thao tác ghi — kể cả ĐĂNG NHẬP.
+ * Smoke đăng nhập lại trước mỗi màn hình (để tránh hết hạn JWT), nên nó xoá đệm 25 lần trong một
+ * lượt chạy và trang chủ LUÔN rơi vào lượt tính nguội 60–95 giây.
+ *
+ * Đó không chỉ là chuyện của smoke: mỗi lần bất kỳ ai đăng nhập, toàn bộ đệm báo cáo của cả hệ
+ * thống bị san phẳng. Đăng nhập không đổi doanh thu, không đổi tồn kho, không đổi lợi nhuận.
+ *
+ * Danh sách này cố ý HẸP: chỉ những việc chắc chắn không chạm dữ liệu nghiệp vụ. Nghi ngờ thì để
+ * ngoài — xoá đệm thừa chỉ tốn thời gian, còn bỏ sót thì trình bày số cũ như số mới.
+ */
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT"]);
+
 export async function audit(params: AuditParams) {
   // Mọi thao tác ghi đều được ghi nhật ký → làm mới cache báo cáo. NHƯNG mức độ tuỳ ai ghi:
   //
@@ -57,7 +72,9 @@ export async function audit(params: AuditParams) {
   //  · JOB NỀN ghi     → đánh dấu cũ. Không ai ngồi chờ job, nhưng có người đang mở trang — bắt họ
   //    trả giá dựng lại toàn bộ chỉ vì bộ đồng bộ vừa chạy là lý do trang chủ mất 73–88 giây
   //    (`landing-sheet` chạy MỖI PHÚT, nên đệm bị san phẳng liên tục).
-  if (dangTrongJobNen()) staleMemo();
+  if (KHONG_DOI_SO_LIEU.has(params.action)) {
+    // Không làm gì: xem KHONG_DOI_SO_LIEU.
+  } else if (dangTrongJobNen()) staleMemo();
   else clearMemo();
   try {
     const db = await getDb();
