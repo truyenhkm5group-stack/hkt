@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { IDEA_MAX_IMAGES, ideaTitle } from "@/lib/constants/ideas";
-import { getIdea, ideaCounts, listIdeas } from "@/lib/queries/ideas";
+import { getIdea, ideaCounts, listIdeas, listMarketers } from "@/lib/queries/ideas";
 
 const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -88,5 +88,44 @@ export async function testIdeas() {
   assert.equal(Number(conCmt?.n ?? 0), 0, "và xoá cả phần trao đổi");
   clearMemo();
 
+  /**
+   * ───────── 7. ĐĂNG ĐƯỢC KHI CHƯA KHAI BÁO NHÂN SỰ NÀO ─────────
+   *
+   * SỰ CỐ THẬT (10/09/2026), chủ shop báo bằng ảnh chụp màn hình: hộp thoại "Thêm ý tưởng" có ô
+   * "Marketer phụ trách" RỖNG và nút "Đăng ý tưởng" xám vĩnh viễn.
+   *
+   * Nguyên nhân: ô đó là `select` lấy danh sách từ khai báo nhân sự phòng Marketing ở trang Lương.
+   * Shop chưa khai ai ⇒ danh sách rỗng ⇒ trường bắt buộc không bao giờ điền được ⇒ không có đường
+   * nào đăng được ý tưởng ĐẦU TIÊN. Một màn hình tự khoá mình lại.
+   *
+   * Bài kiểm này khoá HỢP ĐỒNG mà giao diện dựa vào: tên marketer là chữ TỰ DO, `marketerId` chỉ là
+   * liên kết tuỳ chọn. Ai đó siết `marketerName` thành khoá ngoại tới bảng nhân sự thì đỏ ngay,
+   * thay vì để màn hình lại tự khoá lần nữa.
+   */
+  const [tuDo] = await db
+    .insert(schema.marketingIdeas)
+    .values({
+      marketerId: null,
+      marketerName: "Chị Hà (chưa khai nhân sự)",
+      ideaDate: "2026-09-10",
+      content: "Ý tưởng đăng khi chưa khai báo nhân sự nào",
+      createdBy: "chu@shop.vn",
+      createdByName: "Chủ shop",
+    })
+    .returning({ id: schema.marketingIdeas.id });
+  const daDang = await getIdea(tuDo.id);
+  assert.ok(daDang, "phải đăng được ý tưởng khi CHƯA khai báo nhân sự nào");
+  assert.equal(daDang.marketerName, "Chị Hà (chưa khai nhân sự)", "tên marketer là chữ tự do, không phải khoá ngoại");
+
+  // Và tên tự do đó phải quay lại thành GỢI Ý cho lần sau — nếu không, mỗi lần đăng lại gõ từ đầu.
+  clearMemo();
+  const goiY = await listMarketers();
+  assert.ok(
+    goiY.some((m) => m.name === "Chị Hà (chưa khai nhân sự)"),
+    "tên đã dùng phải thành gợi ý cho lần sau, kể cả khi người đó không có trong bảng nhân sự",
+  );
+  await db.delete(schema.marketingIdeas).where(eq(schema.marketingIdeas.id, tuDo.id));
+
   console.log("✓ Ý tưởng marketing: danh sách không kéo dữ liệu ảnh, giữ đủ quá trình trao đổi, xoá sạch ảnh & nhận xét");
+  console.log(`✓ Đăng được khi chưa khai nhân sự: tên marketer là chữ tự do · tên đã dùng thành gợi ý lần sau (${goiY.length} gợi ý)`);
 }

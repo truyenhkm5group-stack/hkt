@@ -57,16 +57,20 @@ export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: stri
   const dong = () => {
     setOpen(false);
     setNoiDung("");
+    setMarketer(defaultMarketer ?? "");
     setAnh([]);
     setNgay(todayVN());
   };
 
   const gui = () => {
-    const chon = marketers.find((m) => m.id === marketer);
+    // Ô nhập giữ TÊN. Khớp lại theo tên (không phân biệt hoa thường, bỏ khoảng thừa) để giữ được
+    // liên kết với nhân sự đã khai; gõ tên mới thì chỉ gửi tên, đúng như tầng hành động cho phép.
+    const ten = marketer.trim();
+    const chon = marketers.find((m) => m.name.trim().toLowerCase() === ten.toLowerCase());
     start(async () => {
       const r = await createIdea({
         marketerId: chon && !chon.id.startsWith("ten:") ? chon.id : undefined,
-        marketerName: chon?.name ?? marketer,
+        marketerName: ten,
         ideaDate: ngay,
         content: noiDung,
         images: anh.map((a) => ({ base64: a.base64, contentType: a.contentType })),
@@ -104,23 +108,35 @@ export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: stri
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="idea-mkt">Marketer phụ trách</Label>
-                <select
+                {/*
+                  GÕ ĐƯỢC, KHÔNG CHỈ CHỌN ĐƯỢC.
+                  Bản trước là một `select` lấy danh sách từ khai báo nhân sự phòng Marketing ở trang
+                  Lương. Shop chưa khai ai thì danh sách RỖNG, và vì trường này bắt buộc nên nút
+                  "Đăng ý tưởng" bị vô hiệu VĨNH VIỄN — không có đường nào đăng được ý tưởng đầu tiên.
+                  Dòng gợi ý bên dưới có nói thiếu gì, nhưng nói xong vẫn là ngõ cụt.
+                  Tầng hành động vốn đã nhận tên tự do (`marketerName` bắt buộc, `marketerId` tuỳ
+                  chọn), nên `datalist` là đúng hình dạng dữ liệu: gõ tên bất kỳ, và vẫn gợi ý những
+                  người đã khai hoặc đã từng xuất hiện trên ý tưởng cũ.
+                */}
+                <Input
                   id="idea-mkt"
-                  className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  list="idea-mkt-list"
                   value={marketer}
                   onChange={(e) => setMarketer(e.target.value)}
+                  placeholder={marketers.length ? "Chọn hoặc gõ tên marketer" : "Gõ tên marketer phụ trách"}
+                  autoComplete="off"
                   required
-                >
-                  <option value="">— Chọn marketer —</option>
+                />
+                <datalist id="idea-mkt-list">
                   {marketers.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
+                    <option key={m.id} value={m.name} />
                   ))}
-                </select>
-                {marketers.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">Chưa khai báo nhân sự phòng Marketing ở trang Lương &amp; hoa hồng.</p>
-                ) : null}
+                </datalist>
+                <p className="text-[11px] text-muted-foreground">
+                  {marketers.length
+                    ? "Gõ tên mới cũng được — tên đã dùng sẽ tự gợi ý ở lần sau."
+                    : "Chưa khai báo nhân sự phòng Marketing nên chưa có gợi ý. Cứ gõ tên — khai ở trang Lương & hoa hồng thì lần sau chọn nhanh hơn."}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="idea-date">Ngày</Label>
@@ -176,7 +192,7 @@ export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: stri
               <Button type="button" variant="outline" onClick={dong} disabled={pending}>
                 Huỷ
               </Button>
-              <Button type="submit" disabled={pending || dangXuLyAnh || !marketer || !noiDung.trim()}>
+              <Button type="submit" disabled={pending || dangXuLyAnh || !marketer.trim() || !noiDung.trim()}>
                 {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Đăng ý tưởng
               </Button>
             </DialogFooter>
