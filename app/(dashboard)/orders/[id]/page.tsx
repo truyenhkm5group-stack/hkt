@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { notFound } from "next/navigation";
@@ -41,7 +42,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const prev = order && thieuThongTin ? await previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : null;
   const newPhone = order ? isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther }) : false;
   if (!order) notFound();
-  const s = order.shipment;
+  /**
+   * MỌI LẦN GỬI, THEO THỨ TỰ.
+   *
+   * Trước đây trang này lấy `order.shipment` — quan hệ `one(...)`, tức MỘT dòng bất kỳ. Với đơn gửi
+   * lại, người vận hành thấy "đang giao" mà không biết đây đã là lần thứ ba, và lần huỷ trước đó
+   * biến mất khỏi màn hình dù vẫn còn nguyên trong sổ.
+   */
+  const attempts = order.attempts;
+  const s = attempts.at(-1) ?? null;
   const paid = order.prepaid + order.transferMoney + order.cash;
   const pancakeUrl = order.shopId ? `https://pos.pancake.vn/shop/${order.shopId}/orders?id=${order.id}` : `https://pos.pancake.vn/shop/${env.pancake.shopId}/orders`;
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
@@ -137,9 +146,24 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </div>
           </SectionCard>
 
-          <SectionCard title="Vận chuyển & COD" description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"} actions={s ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}>
-            {s ? (
-              <div className="space-y-4">
+          <SectionCard
+            title={attempts.length > 1 ? `Vận chuyển & COD · ${attempts.length} lần gửi` : "Vận chuyển & COD"}
+            description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"}
+            actions={s ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}
+          >
+            {attempts.length ? (
+              <div className="space-y-5">
+                {attempts.map((s, idx) => (
+              <div key={s.id} className={cn("space-y-4", idx > 0 && "border-t pt-5")}>
+                {/* SỐ THỨ TỰ + CHIỀU: đơn gửi lại phải đọc được như một dòng thời gian, không phải
+                    một trạng thái duy nhất. Lần huỷ trước đó vẫn là chứng từ có thật. */}
+                {attempts.length > 1 ? (
+                  <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                    <span className="rounded-md bg-primary/10 px-2 py-0.5 font-semibold text-primary">Lần gửi {s.attemptNo ?? idx + 1}</span>
+                    {s.direction ? <span className="rounded-md border px-2 py-0.5 text-muted-foreground">{SHIPMENT_DIRECTION_LABEL[s.direction] ?? s.direction}</span> : null}
+                    <span className="text-muted-foreground">tạo {formatDateTime(s.createdAt)}</span>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
                   <CodStatusBadge status={s.codStatus} className="text-xs" />
@@ -167,6 +191,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   ]}
                 />
                 <ShipmentTimeline events={s.events} />
+              </div>
+                ))}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Khi Pancake đẩy đơn sang Viettel Post, mã vận đơn và hành trình sẽ xuất hiện tại đây.</p>

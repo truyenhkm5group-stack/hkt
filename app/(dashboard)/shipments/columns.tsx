@@ -1,6 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
@@ -21,9 +22,19 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
           <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
             {number ?? "—"}
           </RowLink>
-          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <Truck className="size-3.5 shrink-0" />
             <span className="truncate">{s.carrier || "ĐVVC"}</span>
+            {/* Từ 10/09/2026 một đơn có thể có nhiều lần gửi. Chỉ hiện khi KHÁC lần đầu — gắn nhãn
+                "lần 1" cho mọi dòng chỉ làm loãng bảng mà không thêm thông tin nào. */}
+            {s.attemptNo && s.attemptNo > 1 ? (
+              <span className="rounded bg-primary/10 px-1 font-semibold text-primary" title="Đơn này đã được gửi lại">
+                lần {s.attemptNo}
+              </span>
+            ) : null}
+            {s.direction && s.direction !== "OUTBOUND" ? (
+              <span className="rounded border px-1">{SHIPMENT_DIRECTION_LABEL[s.direction] ?? s.direction}</span>
+            ) : null}
           </div>
         </div>
       );

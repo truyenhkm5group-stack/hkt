@@ -173,7 +173,20 @@ export async function getOrderDetail(id: string) {
       warehouse: true,
       items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true, lastImportedPrice: true } } } },
       statusHistory: { orderBy: [desc(schema.orderStatusHistory.updatedAt)] },
-      shipment: { with: { events: { orderBy: [desc(schema.shipmentEvents.occurredAt)] }, codBatch: true } },
+      /**
+       * MỌI LẦN GỬI, KHÔNG PHẢI MỘT.
+       *
+       * Quan hệ `shipment` là `one(...)` — nó lấy MỘT dòng bất kỳ. Từ 10/09/2026 một đơn được phép
+       * có nhiều lần gửi (giao thất bại rồi gửi lại, huỷ rồi tạo lại, gửi hàng thay thế), nên hiển
+       * thị một dòng là XOÁ lịch sử khỏi mắt người vận hành: họ thấy "đang giao" mà không biết đây
+       * đã là lần thứ ba.
+       *
+       * Sắp theo thứ tự lần gửi để đọc được như một dòng thời gian.
+       */
+      attempts: {
+        with: { events: { orderBy: [desc(schema.shipmentEvents.occurredAt)] }, codBatch: true },
+        orderBy: [asc(schema.shipments.attemptNo), asc(schema.shipments.createdAt)],
+      },
       returns: true,
     },
   });

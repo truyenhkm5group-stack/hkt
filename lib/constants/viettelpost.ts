@@ -153,3 +153,16 @@ export const VTP_ORDER_ACTIONS: { type: VtpOrderActionType; key: string; label: 
   { type: 1, key: "approve", label: "Duyệt đơn", hint: "Duyệt đơn chờ duyệt", confirm: "Duyệt đơn hàng này?", tone: "secondary" },
   { type: 4, key: "cancel", label: "Huỷ vận đơn", hint: "Huỷ đơn trên Viettel Post (chưa phát)", confirm: "HUỶ vận đơn này trên Viettel Post?", tone: "destructive" },
 ];
+
+/**
+ * CHIỀU CỦA MỘT LẦN GỬI.
+ *
+ * Từ 10/09/2026 một đơn có thể có nhiều lần gửi, và mỗi lần mang một chiều khác nhau. Gộp chúng
+ * thành một trạng thái duy nhất trên màn hình là xoá lịch sử khỏi mắt người vận hành: họ thấy "đang
+ * giao" mà không biết đây đã là lần thứ ba, và lần huỷ trước đó biến mất dù vẫn còn nguyên trong sổ.
+ */
+export const SHIPMENT_DIRECTION_LABEL: Record<string, string> = {
+  OUTBOUND: "Chiều đi",
+  RETURN: "Chiều hoàn",
+  REPLACEMENT: "Gửi thay thế",
+};

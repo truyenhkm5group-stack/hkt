@@ -89,6 +89,10 @@ export async function listShipments(params: ListParams) {
         trackingCode: true,
         vtpOrderNumber: true,
         orderReference: true,
+        // Lần gửi thứ mấy và chiều nào — nếu không nạp thì bảng không thể hiện được, và người vận
+        // hành nhìn ba dòng cùng một đơn mà không biết chúng liên quan với nhau thế nào.
+        attemptNo: true,
+        direction: true,
         stage: true,
         vtpStatusName: true,
         vtpStatusDate: true,
