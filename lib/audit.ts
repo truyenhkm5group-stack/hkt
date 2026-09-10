@@ -1,5 +1,5 @@
 import { getDb, schema } from "@/db";
-import { clearMemo } from "@/lib/cache";
+import { clearMemo, dangTrongJobNen, staleMemo } from "@/lib/cache";
 
 /**
  * ───────────── NHẬT KÝ TRUY VẾT ─────────────
@@ -51,8 +51,14 @@ export type AuditParams = {
 };
 
 export async function audit(params: AuditParams) {
-  // mọi thao tác ghi đều được ghi nhật ký → xoá cache báo cáo để số liệu cập nhật ngay
-  clearMemo();
+  // Mọi thao tác ghi đều được ghi nhật ký → làm mới cache báo cáo. NHƯNG mức độ tuỳ ai ghi:
+  //
+  //  · NGƯỜI bấm lưu  → xoá hẳn. Họ vừa chủ động đổi và phải thấy đúng số mới; chờ là chấp nhận được.
+  //  · JOB NỀN ghi     → đánh dấu cũ. Không ai ngồi chờ job, nhưng có người đang mở trang — bắt họ
+  //    trả giá dựng lại toàn bộ chỉ vì bộ đồng bộ vừa chạy là lý do trang chủ mất 73–88 giây
+  //    (`landing-sheet` chạy MỖI PHÚT, nên đệm bị san phẳng liên tục).
+  if (dangTrongJobNen()) staleMemo();
+  else clearMemo();
   try {
     const db = await getDb();
     const structured =

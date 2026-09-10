@@ -12,6 +12,7 @@ import {
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
+import { trongJobNen } from "@/lib/cache";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
@@ -225,5 +226,6 @@ function num(value: string | undefined) {
 export async function runJob(job: string, options: JobOptions) {
   const definition = JOB_DEFINITIONS[job];
   if (!definition) throw new Error(`Không có job "${job}"`);
-  return definition.run(options);
+  // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
+  return trongJobNen(() => definition.run(options));
 }
