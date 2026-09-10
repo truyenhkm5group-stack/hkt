@@ -109,7 +109,7 @@ export type RetentionReport = {
   /** Số ngày trung vị giữa lần nhận hàng thứ nhất và thứ hai. `null` khi chưa có khách nào mua lại. */
   medianDaysToSecond: number | null;
   segments: CrmSegmentRow[];
-  cohorts: CohortRow[];
+  /** Cohort tách sang `getRetentionCohorts()` — nó nặng nhất và người dùng cuộn xuống mới thấy. */
   atRisk: AtRiskCustomer[];
   coverage: {
     /** Đơn giao thành công có gán khách / tổng đơn giao thành công. Đây là TRẦN của mọi con số. */
@@ -139,8 +139,33 @@ export function segmentOf(deliveredOrders: number, daysSinceLast: number): CrmSe
 async function retentionUncached(): Promise<RetentionReport> {
   const db = await getDb();
 
-  // ───────── 1. Mỗi khách một dòng, tính trên ĐƠN ĐÃ NHẬN ─────────
-  const perCustomer = rowsOf(
+  /**
+   * BA TRUY VẤN ĐỘC LẬP, CHẠY MỘT LƯỢT.
+   *
+   * Trước đây chúng `await` nối tiếp, mỗi truy vấn dựng lại `ORDER_FACTS` từ đầu — tức tính kết quả
+   * đơn cho toàn bộ đơn hàng BA lần, xếp hàng chờ nhau. Đo trên production 10/09/2026: trang này
+   * **2.368ms**, chậm nhất trong 25 màn hình.
+   *
+   * Chúng không phụ thuộc nhau, nên tổng thời gian nay bằng truy vấn CHẬM NHẤT thay vì tổng ba.
+   */
+  const [perCustomer, naiveRows, gapRows] = await Promise.all([
+    dsKhach(db),
+    dsTheoDonDaDat(db),
+    dsKhoangCach(db),
+  ]);
+  const [naive] = naiveRows;
+  const gaps = gapRows;
+  const buyers = perCustomer.length;
+  const repeatBuyers = perCustomer.filter((c) => c.orders >= 2).length;
+  const revenueTotal = perCustomer.reduce((sum, c) => sum + c.revenue, 0);
+  const medianDaysToSecond = gaps.length ? gaps[Math.floor((gaps.length - 1) / 2)] : null;
+
+  return finishRetention({ perCustomer, naive, medianDaysToSecond, buyers, repeatBuyers, revenueTotal });
+}
+
+/** Mỗi khách một dòng, tính trên ĐƠN ĐÃ NHẬN. */
+async function dsKhach(db: Awaited<ReturnType<typeof getDb>>) {
+  return rowsOf(
     await db.execute(sql`
       with facts as (${ORDER_FACTS})
       select customer_id,
@@ -159,14 +184,14 @@ async function retentionUncached(): Promise<RetentionReport> {
     revenue: num(r.revenue),
     daysSince: num(r.days_since),
   }));
+}
 
-  const buyers = perCustomer.length;
-  const repeatBuyers = perCustomer.filter((c) => c.orders >= 2).length;
-  const revenueTotal = perCustomer.reduce((sum, c) => sum + c.revenue, 0);
-
-  // ───────── 2. Cùng công thức, nhưng đếm theo ĐƠN ĐÃ ĐẶT ─────────
-  // Giữ lại có chủ đích: không so được với con số quen dùng thì không ai tin con số đúng.
-  const [naive] = rowsOf(
+/**
+ * Cùng công thức, nhưng đếm theo ĐƠN ĐÃ ĐẶT.
+ * Giữ lại có chủ đích: không so được với con số quen dùng thì không ai tin con số đúng.
+ */
+async function dsTheoDonDaDat(db: Awaited<ReturnType<typeof getDb>>) {
+  return rowsOf(
     await db.execute(sql`
       with facts as (${ORDER_FACTS}),
       per_customer as (
@@ -178,10 +203,12 @@ async function retentionUncached(): Promise<RetentionReport> {
       select count(*) as buyers, count(*) filter (where orders_n >= 2) as repeat_buyers
       from per_customer
     `),
-  );
+  ) as { buyers: unknown; repeat_buyers: unknown }[];
+}
 
-  // ───────── 3. Bao lâu thì khách quay lại (trung vị, chỉ trên khách ĐÃ mua lại) ─────────
-  const gaps = rowsOf(
+/** Bao lâu thì khách quay lại (trung vị, chỉ trên khách ĐÃ mua lại). */
+async function dsKhoangCach(db: Awaited<ReturnType<typeof getDb>>) {
+  return rowsOf(
     await db.execute(sql`
       with facts as (${ORDER_FACTS}),
       ranked as (
@@ -197,9 +224,25 @@ async function retentionUncached(): Promise<RetentionReport> {
       order by gap_days asc
     `),
   ).map((r) => num(r.gap_days));
-  const medianDaysToSecond = gaps.length ? gaps[Math.floor((gaps.length - 1) / 2)] : null;
+}
 
-  // ───────── 4. Cohort theo tháng nhận hàng lần đầu ─────────
+/**
+ * ═══════ COHORT — TÍNH RIÊNG, VÀ CHỈ KHI CÓ NGƯỜI XEM ═══════
+ *
+ * Bảng cohort quét toàn bộ lịch sử đơn giao thành công rồi gộp theo tháng-mua-đầu × tháng-quay-lại.
+ * Nó là phần NẶNG NHẤT của trang, và cũng là phần người dùng cuộn xuống mới thấy.
+ *
+ * Bắt lượt tải đầu tiên chờ nó xong là bắt mọi người trả giá cho một bảng phần lớn không ai mở. Nay
+ * nó nằm sau ranh giới Suspense riêng: bốn thẻ số và bảng phân khúc hiện ngay, cohort điền vào sau.
+ *
+ * Đệm riêng, TTL dài hơn phần tóm tắt: cohort theo THÁNG nên nó gần như không đổi trong ngày.
+ */
+export async function getRetentionCohorts(): Promise<CohortRow[]> {
+  return memo("crm-retention-cohorts", 600_000, cohortsUncached);
+}
+
+async function cohortsUncached(): Promise<CohortRow[]> {
+  const db = await getDb();
   const cohortRows = rowsOf(
     await db.execute(sql`
       with facts as (${ORDER_FACTS}),
@@ -233,8 +276,23 @@ async function retentionUncached(): Promise<RetentionReport> {
     }
     return { cohort, size, months };
   });
+  return cohorts;
+}
 
-  // ───────── 5. Phân khúc ─────────
+type SoLieuTomTat = {
+  perCustomer: { id: string; orders: number; revenue: number; daysSince: number }[];
+  naive: { buyers: unknown; repeat_buyers: unknown } | undefined;
+  medianDaysToSecond: number | null;
+  buyers: number;
+  repeatBuyers: number;
+  revenueTotal: number;
+};
+
+/** Phần còn lại của báo cáo, tính THUẦN trên dữ liệu đã lấy — không truy vấn thêm. */
+async function finishRetention({ perCustomer, naive, medianDaysToSecond, buyers, repeatBuyers, revenueTotal }: SoLieuTomTat): Promise<RetentionReport> {
+  const db = await getDb();
+
+  // ───────── Phân khúc ─────────
   const bySegment = new Map<CrmSegment, { customers: number; revenue: number }>();
   for (const c of perCustomer) {
     const seg = segmentOf(c.orders, c.daysSince);
@@ -309,7 +367,6 @@ async function retentionUncached(): Promise<RetentionReport> {
     avgCustomerValue: buyers ? Math.round(revenueTotal / buyers) : null,
     medianDaysToSecond,
     segments,
-    cohorts,
     atRisk,
     coverage: {
       deliveredOrders,

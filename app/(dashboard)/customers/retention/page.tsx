@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CalendarRange, Repeat, TrendingDown, Users } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -7,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { requirePermission } from "@/lib/auth/session";
 import { CRM_RULE, CRM_SEGMENT_ACTION, CRM_SEGMENT_LABEL, CRM_SEGMENT_TONE } from "@/lib/constants/crm";
 import { formatDate, formatNumber } from "@/lib/format";
-import { getRetentionReport } from "@/lib/queries/crm";
+import { getRetentionCohorts, getRetentionReport } from "@/lib/queries/crm";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Giữ chân khách" };
@@ -108,51 +110,11 @@ export default async function RetentionPage() {
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Cohort giữ chân"
-        description={`Theo tháng khách nhận hàng lần đầu · ${CRM_RULE.cohortMonths} tháng gần nhất`}
-        hint="Mỗi dòng là một nhóm khách nhận hàng lần đầu trong cùng tháng. Ô trống nghĩa là tháng đó CHƯA TỚI — không phải không ai quay lại."
-        padded={false}
-      >
-        {r.cohorts.length ? (
-          <div className="overflow-x-auto">
-            <Table className="min-w-[720px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tháng đầu mua</TableHead>
-                  <TableHead className="text-right">Khách</TableHead>
-                  {Array.from({ length: CRM_RULE.cohortMonths }, (_, i) => (
-                    <TableHead key={i} className="text-right">
-                      +{i + 1} tháng
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...r.cohorts].reverse().map((c) => (
-                  <TableRow key={c.cohort}>
-                    <TableCell className="font-medium">{c.cohort}</TableCell>
-                    <TableCell className="numeric text-right">{formatNumber(c.size)}</TableCell>
-                    {c.months.map((m, i) => (
-                      <TableCell key={i} className="numeric text-right">
-                        {m === null ? (
-                          <span className="text-muted-foreground/50">·</span>
-                        ) : c.size ? (
-                          <span title={`${m}/${c.size} khách`}>{Math.round((m / c.size) * 1000) / 10}%</span>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ) : (
-          <EmptyState title="Chưa đủ dữ liệu để dựng cohort" description="Cần ít nhất một tháng có khách nhận hàng lần đầu." />
-        )}
-      </SectionCard>
+      {/* COHORT tách sau ranh giới Suspense riêng: nó là phần nặng nhất và người dùng cuộn xuống
+          mới thấy. Bốn thẻ số và bảng phân khúc hiện ngay, cohort điền vào sau. */}
+      <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+        <CohortCard />
+      </Suspense>
 
       <SectionCard
         title="Khách nguy cơ rời bỏ"
@@ -209,5 +171,56 @@ export default async function RetentionPage() {
         </div>
       </SectionCard>
     </div>
+  );
+}
+
+async function CohortCard() {
+  const cohorts = await getRetentionCohorts();
+  return (
+      <SectionCard
+        title="Cohort giữ chân"
+        description={`Theo tháng khách nhận hàng lần đầu · ${CRM_RULE.cohortMonths} tháng gần nhất`}
+        hint="Mỗi dòng là một nhóm khách nhận hàng lần đầu trong cùng tháng. Ô trống nghĩa là tháng đó CHƯA TỚI — không phải không ai quay lại."
+        padded={false}
+      >
+        {cohorts.length ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[720px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tháng đầu mua</TableHead>
+                  <TableHead className="text-right">Khách</TableHead>
+                  {Array.from({ length: CRM_RULE.cohortMonths }, (_, i) => (
+                    <TableHead key={i} className="text-right">
+                      +{i + 1} tháng
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...cohorts].reverse().map((c) => (
+                  <TableRow key={c.cohort}>
+                    <TableCell className="font-medium">{c.cohort}</TableCell>
+                    <TableCell className="numeric text-right">{formatNumber(c.size)}</TableCell>
+                    {c.months.map((m, i) => (
+                      <TableCell key={i} className="numeric text-right">
+                        {m === null ? (
+                          <span className="text-muted-foreground/50">·</span>
+                        ) : c.size ? (
+                          <span title={`${m}/${c.size} khách`}>{Math.round((m / c.size) * 1000) / 10}%</span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <EmptyState title="Chưa đủ dữ liệu để dựng cohort" description="Cần ít nhất một tháng có khách nhận hàng lần đầu." />
+        )}
+      </SectionCard>
   );
 }

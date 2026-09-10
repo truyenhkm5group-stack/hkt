@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CRM_RULE, CRM_SEGMENT_ACTION, CRM_SEGMENT_LABEL, CRM_SEGMENT_ORDER } from "@/lib/constants/crm";
-import { getRetentionReport, monthIndex, segmentOf } from "@/lib/queries/crm";
+import { getRetentionCohorts, getRetentionReport, monthIndex, segmentOf } from "@/lib/queries/crm";
 
 /**
  * ───────── GIỮ CHÂN KHÁCH ─────────
@@ -124,15 +124,19 @@ export async function testCrm(db: Db) {
     assert.ok(r.atRisk.length <= CRM_RULE.atRiskListSize, "danh sách hành động phải có giới hạn để còn dùng được");
     assert.ok(!r.atRisk.some((c) => c.id === customerIds[1]), "khách hoàn hết không được lọt vào danh sách chăm sóc");
 
-    // Cohort: tháng CHƯA TỚI phải để trống, không phải 0.
-    assert.ok(r.cohorts.length >= 1, "phải có ít nhất một cohort");
-    const moi_nhat = r.cohorts[r.cohorts.length - 1];
+    /**
+     * Cohort nay tính RIÊNG (`getRetentionCohorts`) vì nó là phần nặng nhất của trang và người dùng
+     * cuộn xuống mới thấy — xem ghi chú trong lib/queries/crm.ts. Luật thì không đổi một chữ.
+     */
+    const cohorts = await getRetentionCohorts();
+    assert.ok(cohorts.length >= 1, "phải có ít nhất một cohort");
+    const moi_nhat = cohorts[cohorts.length - 1];
     assert.equal(moi_nhat.months.length, CRM_RULE.cohortMonths);
     assert.ok(
       moi_nhat.months.some((m) => m === null),
       "cohort tháng này chưa có cơ hội quay lại — các tháng chưa tới phải là CHƯA BIẾT, không phải 0",
     );
-    for (const c of r.cohorts) {
+    for (const c of cohorts) {
       for (const m of c.months) {
         assert.ok(m === null || m <= c.size, `${c.cohort}: số khách quay lại không thể nhiều hơn quy mô cohort`);
       }
