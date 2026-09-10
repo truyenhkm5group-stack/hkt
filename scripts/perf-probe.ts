@@ -57,7 +57,7 @@ function hinhDang(sqlText: string): string {
     .replace(/\s+/g, " ")
     .replace(/'[^']*'/g, "'?'")
     .replace(/\$\d+/g, "$?")
-    .replace(/\d+/g, "?")
+    .replace(/\b\d+\b/g, "?")
     .trim();
 }
 

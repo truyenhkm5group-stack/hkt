@@ -13,23 +13,75 @@ import { normalize, stripHtml } from "@/lib/text";
 export type ChatHit = { kind: CsKind; keyword: string; message: string };
 
 /**
- * Tin nhắn MỚI NHẤT của shop báo đã chốt đơn ("em chốt thêm 1 đầm Q002 size L, gửi về địa chỉ cũ").
- * Chỉ xét tin của shop (fromPage) để không nhầm với khách hỏi "chốt giúp em".
+ * ═══════════ "ĐÃ CHỐT" = KHÁCH ĐÃ CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══════════
+ *
+ * SỰ CỐ THẬT (10/09/2026, chủ shop báo kèm ảnh). Trang CSKH có **181 case** mang nhãn "Đã chốt
+ * trong chat · chưa tạo đơn" mà phần lớn khách còn chưa cho số điện thoại. Vài dòng nguyên văn:
+ *
+ *   "Để hỗ trợ chị chốt đơn, em xin…"      ← shop ĐANG HỎI, không phải đã chốt
+ *   "Chị cho em xin số điện thoại…"          ← shop đang đi xin SĐT
+ *   "Dạ 1 đầm 499.000đ + 25.000…"            ← báo giá
+ *
+ * Nguyên nhân: luật cũ tìm từ khoá ("chot don", "em chot"…) trong tin của SHOP. Nhưng kịch bản bán
+ * hàng của shop chứa sẵn chữ "chốt đơn" trong câu MỜI chốt, nên gần như mọi hội thoại có tư vấn đều
+ * bị đánh dấu. Tìm từ khoá trong lời người bán để suy ra ý định của người mua là sai từ gốc.
+ *
+ * ĐỊNH NGHĨA ĐÚNG, chủ shop chốt 10/09/2026: **đơn đã chốt là đơn KHÁCH đã cho đủ SĐT và địa chỉ**
+ * — tương đương trạng thái "đơn mới" trên Pancake. Đó là thứ quan sát được, không phải suy đoán:
+ * có đủ hai thứ đó thì lên đơn được ngay; thiếu một thứ thì chưa.
+ *
+ * Nên hàm này đọc tin của KHÁCH (`!fromPage`), và chỉ báo khi thấy CẢ HAI.
  */
-export function findClosingMessage(messages: PancakeMessage[], keywords: string[]): { at: Date | null; text: string; keyword: string } | null {
-  const keys = keywords.map((k) => normalize(k).trim()).filter(Boolean);
-  if (!keys.length) return null;
-  let best: { at: Date | null; text: string; keyword: string } | null = null;
+
+/** Số điện thoại Việt Nam trong một đoạn văn: 9–11 chữ số, cho phép dấu cách/chấm/gạch xen giữa. */
+const SDT = /(?:^|[^\d])(0\d(?:[\s.\-]?\d){8,9})(?:[^\d]|$)/;
+
+/**
+ * Dấu hiệu ĐỊA CHỈ.
+ *
+ * Cố ý KHÔNG dùng "câu dài có dấu phẩy" làm tiêu chí: khách kể chuyện cũng dài và cũng có phẩy.
+ * Chỉ nhận khi có từ chỉ đơn vị hành chính hoặc cách viết địa chỉ thật — thà bỏ sót vài ca hơn là
+ * dựng lại đúng cái đống 181 case sai.
+ */
+const DIA_CHI = /\b(thon|xom|ap|to |khu pho|kp |so nha|sn |ngo |ngach |hem |duong |pho |xa |phuong |thi tran |tt |quan |huyen |thi xa |tp |thanh pho |tinh )/;
+
+export type CustomerOrderInfo = { at: Date | null; text: string; phone: string; hasAddress: boolean };
+
+/**
+ * Khách đã cho ĐỦ SĐT và ĐỊA CHỈ trong hội thoại này chưa.
+ *
+ * Hai thứ có thể nằm ở HAI tin nhắn khác nhau (khách thường gửi SĐT trước, địa chỉ sau) nên xét
+ * trên toàn bộ tin của khách, rồi lấy mốc thời gian của tin MUỘN hơn trong hai tin — đó mới là lúc
+ * thông tin đủ để lên đơn.
+ *
+ * `phones` của hội thoại (do Pancake tự tách) được dùng làm nguồn bổ sung cho số điện thoại: khách
+ * có thể đã cho SĐT ở lần nhắn trước cửa sổ quét.
+ */
+export function findCustomerOrderInfo(messages: PancakeMessage[], convPhones: string[] = []): CustomerOrderInfo | null {
+  let sdt: { at: Date | null; text: string; value: string } | null = null;
+  let diaChi: { at: Date | null; text: string } | null = null;
+
   for (const m of messages) {
-    if (!m.fromPage || !m.text) continue;
+    if (m.fromPage || !m.text) continue;
     const plain = stripHtml(m.text);
     const n = normalize(plain);
-    const hit = keys.find((k) => n.includes(k));
-    if (!hit) continue;
-    const newer = !best || (m.insertedAt && (!best.at || m.insertedAt > best.at));
-    if (newer) best = { at: m.insertedAt, text: plain.slice(0, 240), keyword: hit };
+    const khopSdt = SDT.exec(plain);
+    if (khopSdt && (!sdt || (m.insertedAt && (!sdt.at || m.insertedAt > sdt.at)))) {
+      sdt = { at: m.insertedAt, text: plain.slice(0, 240), value: khopSdt[1].replace(/\D/g, "") };
+    }
+    if (DIA_CHI.test(n) && (!diaChi || (m.insertedAt && (!diaChi.at || m.insertedAt > diaChi.at)))) {
+      diaChi = { at: m.insertedAt, text: plain.slice(0, 240) };
+    }
   }
-  return best;
+
+  // SĐT do Pancake tách sẵn cũng tính — nhưng KHÔNG thay được địa chỉ.
+  const soPancake = convPhones.map((p) => p.replace(/\D/g, "")).find((p) => p.length >= 9);
+  const soCuoi = sdt?.value ?? soPancake ?? "";
+  if (!soCuoi || !diaChi) return null;
+
+  // Mốc = tin MUỘN hơn trong hai tin: trước đó thông tin chưa đủ để lên đơn.
+  const moc = [sdt?.at ?? null, diaChi.at].filter((d): d is Date => d instanceof Date).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  return { at: moc, text: (sdt?.at && diaChi.at && sdt.at > diaChi.at ? sdt.text : diaChi.text) || diaChi.text, phone: soCuoi, hasAddress: true };
 }
 
 /** Loại case chỉ có nghĩa SAU khi khách đã đặt đơn (trước đó chỉ là câu hỏi tư vấn, không phải việc cần xử lý) */
@@ -160,19 +212,30 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
       });
       // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case
       const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns, { requireOrder: true, orderInsertedAt: order?.insertedAt ?? null, orderStage: order?.stage ?? null });
-      // Shop đã chốt trong chat mà chưa thấy đơn mới → dễ sót đơn nhất (khách cũ mua lại thường không nhắn lại SĐT / địa chỉ)
+      /*
+        KHÁCH ĐÃ CHO ĐỦ SĐT + ĐỊA CHỈ MÀ CHƯA THẤY ĐƠN → đây mới là đơn sắp bị sót.
+
+        Luật cũ tìm từ khoá "chốt đơn" trong tin của SHOP, và kịch bản bán hàng có sẵn câu "để hỗ
+        trợ chị chốt đơn, em xin…" nên gần như mọi hội thoại có tư vấn đều bị đánh dấu: 181 case
+        mà phần lớn khách còn chưa cho số điện thoại.
+
+        Nay dùng thứ QUAN SÁT ĐƯỢC: khách đã đưa đủ hai thứ để lên đơn hay chưa.
+      */
       const closeHits: ChatHit[] = [];
-      const closing = findClosingMessage(recent, rules.closingKeywords ?? []);
-      if (closing) {
-        // đơn tạo trước lúc chốt 30 phút trở về trước = đơn của lần mua CŨ, không phải lần này
-        const from = closing.at ? new Date(closing.at.getTime() - 30 * 60_000) : null;
+      const duThongTin = findCustomerOrderInfo(recent, conv.phones);
+      if (duThongTin) {
+        // Đơn tạo trước lúc khách cho đủ thông tin 30 phút trở về trước = đơn của lần mua CŨ.
+        const from = duThongTin.at ? new Date(duThongTin.at.getTime() - 30 * 60_000) : null;
         const hasNewOrder = Boolean(order?.insertedAt && from && new Date(order.insertedAt) >= from);
         if (!hasNewOrder) {
           const cuLabel = order?.systemId ? ` Đơn gần nhất #${order.systemId} là của lần mua trước.` : "";
+          const luc = duThongTin.at
+            ? ` lúc ${duThongTin.at.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}`
+            : "";
           closeHits.push({
             kind: "ORDER_NOT_CREATED",
-            keyword: closing.keyword,
-            message: `Shop đã chốt trong chat${closing.at ? ` lúc ${closing.at.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}` : ""} nhưng chưa thấy đơn mới trên Pancake: “${closing.text}”.${cuLabel} Tạo đơn ngay để không sót.`,
+            keyword: duThongTin.phone,
+            message: `Khách đã cho đủ SĐT và địa chỉ${luc} nhưng chưa thấy đơn mới trên Pancake: “${duThongTin.text}”.${cuLabel} Tạo đơn ngay để không sót.`,
           });
         }
       }

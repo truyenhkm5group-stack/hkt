@@ -85,7 +85,7 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
-import { detectFromMessages, findClosingMessage } from "@/lib/cs/chat-detect";
+import { detectFromMessages, findCustomerOrderInfo } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
@@ -985,17 +985,44 @@ async function main() {
     assert.equal(await previousOrderHint({ id: "don-cu", customerId: "cust-cu", conversationId: "conv-suong", billPhone: "0949947123", insertedAt: before(7 * 86_400_000) }), null, "không lấy ngược đơn mới hơn làm gợi ý");
 
     const msg = (id: string, text: string, fromPage: boolean, at: Date) => ({ id, text, fromId: fromPage ? "page" : "cus", fromName: fromPage ? "Shop" : "Khách", fromPage, insertedAt: at, hasAttachment: false });
-    const msgs = [
-      msg("m1", "Chị lấy thêm 1 đầm màu đen nữa em giảm giá cho chị nhe", true, before(3_600_000)),
-      msg("m2", "Q002 L", false, before(1_800_000)),
-      msg("m3", "Dạ em chốt thêm 1 đầm Q002 màu Đen, size L giá 470k freeship gửi về địa chỉ cũ ạ", true, t0),
+    /*
+      ═══ "ĐÃ CHỐT" = KHÁCH CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══
+
+      SỰ CỐ THẬT (10/09/2026): trang CSKH có 181 case "Đã chốt trong chat · chưa tạo đơn" mà phần
+      lớn khách còn CHƯA cho số điện thoại. Luật cũ tìm từ khoá "chốt đơn" trong tin của SHOP, mà
+      kịch bản bán hàng có sẵn câu mời "để hỗ trợ chị chốt đơn, em xin…" — nên gần như mọi hội
+      thoại có tư vấn đều bị đánh dấu.
+
+      Ba dòng dưới đây lấy NGUYÊN VĂN từ ảnh chủ shop gửi. Chúng phải KHÔNG tạo case.
+    */
+    const kichBanBanHang = [
+      msg("s1", "Để hỗ trợ chị chốt đơn, em gửi chị bảng size ạ", true, before(3_600_000)),
+      msg("s2", "Chị cho em xin số điện thoại và địa chỉ để em lên đơn ạ", true, before(1_800_000)),
+      msg("s3", "Dạ 1 đầm 499.000đ + 25.000đ phí ship ạ", true, t0),
     ];
-    const close = findClosingMessage(msgs, DEFAULT_CS_RULES.closingKeywords);
-    assert.equal(close?.at?.getTime(), t0.getTime(), "bắt tin chốt mới nhất của shop");
-    assert.ok(close?.text.includes("chốt thêm"));
-    assert.equal(findClosingMessage(msgs.filter((m) => !m.fromPage), DEFAULT_CS_RULES.closingKeywords), null, "tin của khách không tính là shop đã chốt");
-    assert.equal(findClosingMessage(msgs, []), null, "không khai từ khoá thì không bắt");
-    console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; bắt tin shop đã chốt để không sót đơn`);
+    assert.equal(findCustomerOrderInfo(kichBanBanHang), null, "shop MỜI chốt / đi xin SĐT không phải là khách đã chốt");
+
+    const chiCoSdt = [...kichBanBanHang, msg("c1", "0912345678", false, t0)];
+    assert.equal(findCustomerOrderInfo(chiCoSdt), null, "chỉ có SĐT, chưa có địa chỉ ⇒ chưa lên đơn được ⇒ chưa chốt");
+
+    const chiCoDiaChi = [...kichBanBanHang, msg("c2", "Số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy Hà Nội", false, t0)];
+    assert.equal(findCustomerOrderInfo(chiCoDiaChi), null, "chỉ có địa chỉ, chưa có SĐT ⇒ chưa chốt");
+
+    const duCa = [
+      ...kichBanBanHang,
+      msg("c3", "0912345678", false, before(600_000)),
+      msg("c4", "Số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy Hà Nội nhé em", false, t0),
+    ];
+    const du = findCustomerOrderInfo(duCa);
+    assert.ok(du, "khách cho ĐỦ SĐT và địa chỉ ⇒ đã chốt");
+    assert.equal(du?.phone, "0912345678", "phải lấy đúng số khách gửi");
+    assert.equal(du?.at?.getTime(), t0.getTime(), "mốc là tin MUỘN hơn trong hai tin — trước đó chưa đủ để lên đơn");
+
+    // Địa chỉ do CHÍNH SHOP nhắc lại không tính: đó là shop đọc lại, không phải khách cung cấp.
+    const shopNhacLai = [msg("s4", "Em gửi về số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy nhé chị", true, t0), msg("c5", "0912345678", false, t0)];
+    assert.equal(findCustomerOrderInfo(shopNhacLai), null, "địa chỉ trong tin của SHOP không tính là khách đã cho");
+
+    console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; "đã chốt" = khách cho ĐỦ SĐT + địa chỉ (kịch bản bán hàng của shop KHÔNG còn bị tính)`);
   }
 
   // File "Danh sách vận đơn" của viettelpost.vn: cột Mã Vận Đơn là vận đơn CHIỀU VỀ (mã gốc + 1P1), cột Mã đơn hàng mới là mã gốc ERP lưu

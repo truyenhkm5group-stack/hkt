@@ -91,7 +91,6 @@ export type CsRules = {
    * Cụm trong tin nhắn của SHOP nghĩa là đã chốt đơn với khách (không dấu, thường). Nếu hội thoại có cụm này mà chưa
    * thấy đơn mới thì mở case "đã chốt chưa tạo đơn" — hay gặp với khách cũ mua lại, chỉ nhắn "gửi địa chỉ cũ".
    */
-  closingKeywords: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -182,7 +181,6 @@ export const DEFAULT_CS_RULES: CsRules = {
   ],
   chatLookbackHours: 48,
   chatPageIds: [],
-  closingKeywords: ["em chot", "chot don", "chot cho minh", "chot them", "da chot", "em len don", "len don cho", "gui ve dia chi cu", "dia chi cu"],
   ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
   failedDeliveryAuto: true,
   failedDeliveryShopName: "Shop",
