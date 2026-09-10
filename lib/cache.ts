@@ -35,9 +35,65 @@ type Entry = { value: unknown; expiresAt: number };
  * về mỗi vài phút. Đổi 60 giây chờ lấy một phút lệch là đổi có lợi rõ ràng.
  */
 const NGUONG_QUA_CU = 15 * 60_000;
-const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, Promise<unknown>>; version: number } };
+
+/**
+ * ═══════ TRẦN CHỜ CHUNG MỘT LƯỢT TÍNH ═══════
+ *
+ * SỰ CỐ THẬT (10/09/2026, sau deploy #197): trang chủ treo đúng 60 giây, ba lượt đo liên tiếp, trên
+ * một máy chủ RẢNH — `pg_stat_activity` không có truy vấn nào đang chạy. Sáu mươi giây đó không nằm
+ * ở CSDL mà ở chính chỗ này.
+ *
+ * Nguyên nhân: gộp lời gọi trùng khoá (`inflight`) KHÔNG có trần thời gian. Job giữ ấm được gọi qua
+ * `POST /api/sync/dashboard-warm?wait=0` — máy chủ trả lời ngay rồi bỏ rơi công việc phía sau. Một
+ * lượt tính bị bỏ rơi giữa chừng thì lời hứa của nó KHÔNG BAO GIỜ kết thúc, nên `.finally` không
+ * chạy và mục `inflight` nằm lại vĩnh viễn. Từ đó mọi người đọc cùng khoá đều rơi vào nhánh "đang
+ * có lượt tính rồi, dùng chung" và chờ một lời hứa đã chết — **cho tới khi khởi động lại ứng dụng**.
+ *
+ * Vì sao chỉ trang chủ hỏng: chỉ khoá của bảng điều khiển mới được job giữ ấm chạm tới. Mọi trang
+ * khác vẫn 70–170ms suốt thời gian đó, nên nhìn từ ngoài trông như một trang bị lỗi riêng.
+ *
+ * Trần ở đây KHÔNG phải để "chữa cháy cho job giữ ấm". Nó là điều kiện đúng đắn của chính cơ chế
+ * gộp: gộp lời gọi chỉ hợp lệ khi lượt được gộp vào còn sống. Không kiểm chứng được điều đó thì
+ * tính lại còn hơn treo mãi mãi.
+ */
+const TRAN_CHO_CHUNG = 20_000;
+
+/** Đọc mỗi lần gọi (rẻ) để bài kiểm hạ trần xuống mili giây thay vì phải chờ đủ 20 giây thật. */
+function tranChoChung(): number {
+  return Number(process.env.MEMO_INFLIGHT_TIMEOUT_MS) || TRAN_CHO_CHUNG;
+}
+
+type DangChay = { p: Promise<unknown>; at: number };
+
+const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number } };
 if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0 };
 const store = holder.__erpMemo;
+
+/** Lượt tính đang chạy cho khoá này, NẾU nó còn sống. Quá trần thì coi như đã bị bỏ rơi. */
+function luotDangChay(key: string): Promise<unknown> | null {
+  const cur = store.inflight.get(key);
+  if (!cur) return null;
+  if (Date.now() - cur.at > tranChoChung()) {
+    store.inflight.delete(key);
+    return null;
+  }
+  return cur.p;
+}
+
+/**
+ * Ghi nhận một lượt tính đang chạy, và tự gỡ khi xong.
+ *
+ * Chỉ gỡ NẾU vẫn đúng lượt của mình: một lượt bị bỏ rơi mà kết thúc muộn không được phép gỡ lượt
+ * mới đang chạy — làm thế sẽ mở đường cho hai lượt tính chồng nhau trên cùng một khoá.
+ */
+function ghiNhanChay(key: string, p: Promise<unknown>) {
+  const muc: DangChay = { p, at: Date.now() };
+  store.inflight.set(key, muc);
+  const go = () => {
+    if (store.inflight.get(key) === muc) store.inflight.delete(key);
+  };
+  void p.then(go, go);
+}
 
 export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const now = Date.now();
@@ -55,32 +111,29 @@ export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>):
    * Có trần `NGUONG_QUA_CU`: số cũ quá 15 phút thì thà bắt chờ còn hơn trình bày một con số không
    * còn liên quan. Trả số của tuần trước mà không nói gì là tệ hơn bắt chờ.
    */
-  if (hit && !store.inflight.has(key) && now - hit.expiresAt < NGUONG_QUA_CU) {
+  if (hit && !luotDangChay(key) && now - hit.expiresAt < NGUONG_QUA_CU) {
     const version = store.version;
     const refresh = fn()
       .then((value) => {
         if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
         return value;
       })
-      .catch(() => hit.value)
-      .finally(() => store.inflight.delete(key));
-    store.inflight.set(key, refresh as Promise<unknown>);
+      .catch(() => hit.value);
+    ghiNhanChay(key, refresh as Promise<unknown>);
     record(name, performance.now() - started, true);
     return hit.value as T;
   }
 
-  const running = store.inflight.get(key);
-  // Đang có lượt tính cho đúng khoá này → dùng chung, không tính lại (khử trùng lặp yêu cầu).
+  // Đang có lượt tính CÒN SỐNG cho đúng khoá này → dùng chung, không tính lại (khử trùng lặp).
+  const running = luotDangChay(key);
   if (running) return running as Promise<T>;
   const version = store.version;
-  const p = fn()
-    .then((value) => {
-      if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
-      record(name, performance.now() - started, false);
-      return value;
-    })
-    .finally(() => store.inflight.delete(key));
-  store.inflight.set(key, p);
+  const p = fn().then((value) => {
+    if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+    record(name, performance.now() - started, false);
+    return value;
+  });
+  ghiNhanChay(key, p);
   return p;
 }
 
