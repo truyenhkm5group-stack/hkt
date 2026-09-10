@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
 import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -170,7 +170,9 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
   const coverDays = Number.isFinite(opt.coverDays) ? Math.min(365, Math.max(0, Math.round(opt.coverDays as number))) : saved.coverDays;
   const countIncoming = opt.countIncoming !== false;
   const a: PlanningAssumptions = { ...saved, coverDays };
-  const rows = await buildPlanRowsQuery(db, a);
+  // JIT tắt trong đúng giao dịch này: đo được 8.578ms → 26ms cho một truy vấn cùng loại, toàn bộ
+  // chênh lệch là thời gian biên dịch. Xem `chayKhongJit`.
+  const rows = await chayKhongJit(db, (tx) => buildPlanRowsQuery(tx, a));
 
   // Tỷ lệ nhập lại được kho: hàng hoàn đã lập phiếu tái nhập ÷ hàng hoàn đã xử lý, tính trên toàn
   // shop (mẫu từng mẫu mã quá nhỏ). Chưa có dữ liệu thì coi như về đủ — đó là mặc định vật lý.

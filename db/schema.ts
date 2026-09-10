@@ -1253,7 +1253,15 @@ export const returnInspections = pgTable(
     index("return_inspections_status_idx").on(t.status, t.receivedAt),
     index("return_inspections_order_idx").on(t.orderId),
     check("return_inspections_status_check", sql`${t.status} IN ('RECEIVED', 'INSPECTED')`),
-    check("return_inspections_condition_check", sql`${t.condition} IS NULL OR ${t.condition} IN ('RESTOCKABLE', 'UNSELLABLE', 'DAMAGED', 'MISSING')`),
+    /*
+      Danh sách này PHẢI khớp `RETURN_CONDITIONS` ở lib/constants/returns-condition.ts.
+
+      Đã lệch một lần: `WRONG_ITEM` (khách trả về một món KHÁC với món đã gửi) được thêm vào hằng
+      số và vào nút bấm của trạm kiểm đếm, nhưng ràng buộc này thì không — nên người kho bấm
+      "Không đúng hàng" là gặp lỗi ràng buộc, đúng lúc đang đứng đếm hàng. `tsc` không thấy được
+      loại lệch này vì một bên là TypeScript, một bên là chuỗi SQL.
+    */
+    check("return_inspections_condition_check", sql`${t.condition} IS NULL OR ${t.condition} IN ('RESTOCKABLE', 'UNSELLABLE', 'DAMAGED', 'MISSING', 'WRONG_ITEM')`),
     // Đã kiểm thì PHẢI có kết luận, người kiểm và mốc kiểm — không có "đã kiểm" mà không biết ai kiểm.
     check(
       "return_inspections_inspected_check",

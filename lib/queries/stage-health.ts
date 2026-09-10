@@ -14,6 +14,7 @@ import {
 } from "@/lib/constants/action-queue";
 import { AGING_BUCKETS, OPERATING_FUNNEL, type AgingKey, type SourceStatus, type StageKey, type StageSpec } from "@/lib/constants/operating-funnel";
 import { combineImpact, getRecoveryRates, type MoneyImpact } from "@/lib/queries/impact";
+import { getReturnPipeline } from "@/lib/queries/return-pipeline";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -238,7 +239,7 @@ function statusOf(spec: StageSpec, backlog: number, breached: number, source: So
  */
 export async function getFunnelHealth(): Promise<FunnelHealth> {
   return memo("stage-health", 120_000, async () => {
-    const [kindRows, source, rates] = await Promise.all([loadKindRows(), loadSourceStatus(), getRecoveryRates()]);
+    const [kindRows, source, rates, hoan] = await Promise.all([loadKindRows(), loadSourceStatus(), getRecoveryRates(), getReturnPipeline()]);
 
     // Gom theo LOẠI VIỆC trước (nhiều `kind` có thể về cùng một loại), rồi mới gom theo khâu.
     const byType = new Map<CaseType, TypeTotals>();
@@ -286,10 +287,53 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
       }
 
       exceptions.sort((a, b) => b.amount - a.amount || b.count - a.count);
-      const impact = combineImpact(
-        exceptions.map((e) => ({ type: e.type, amount: e.amount })),
-        rates,
-      );
+
+      /*
+        ═══ KHÂU HÀNG HOÀN ĐỌC TỪ ĐƯỜNG ỐNG, KHÔNG TỪ HÀNG ĐỢI VIỆC ═══
+
+        Đây là khâu DUY NHẤT mà hai con số khác nhau một cách chính đáng, và phải nói rõ vì sao.
+
+        Hàng đợi việc cố ý chỉ mở 16 việc: nêu đích danh 15 kiện cũ nhất rồi gộp phần còn lại thành
+        MỘT việc — sinh mỗi kiện một việc sẽ đẩy vài trăm dòng vào hàng đợi cùng lúc và làm cả hàng
+        đợi bị bỏ qua. Quyết định đó đúng cho HÀNG ĐỢI.
+
+        Nhưng nó sai cho BẢNG ĐIỀU HÀNH. Đo trên production 10/09/2026: 16 việc ↔ 484 kiện thật giữ
+        77,5 triệu vốn. Lấy 16 làm số của khâu là báo cáo thiếu đi 77 triệu.
+
+        Nên: tồn đọng và tiền lấy từ đường ống (dân số thật), còn "việc cần làm ngay" vẫn là 16 của
+        hàng đợi. Hai câu hỏi khác nhau, hai con số khác nhau, cùng hiện ra.
+      */
+      if (spec.key === "RETURN_INSPECTION") {
+        const cho = hoan.stages.filter((h) => h.actionable && h.parcels > 0);
+        const kien = cho.reduce((t, h) => t + h.parcels, 0);
+        if (kien > 0) {
+          backlog = kien;
+          breached = cho.reduce((t, h) => t + h.slaBreach, 0);
+          oldest = Math.max(oldest, ...cho.map((h) => h.oldestHours));
+          for (const b of AGING_BUCKETS) aging[b.key] = 0;
+          // Chia mốc tuổi theo tuổi TRUNG VỊ của từng khâu: không có tuổi từng kiện ở đây, và bịa
+          // một phân phối chi tiết thì tệ hơn là nói thẳng mức trung bình.
+          for (const h of cho) {
+            const moc = AGING_BUCKETS.find((b) => h.medianAgeHours < b.maxHours) ?? AGING_BUCKETS[AGING_BUCKETS.length - 1];
+            aging[moc.key] += h.parcels;
+          }
+        }
+      }
+      const impact =
+        spec.key === "RETURN_INSPECTION"
+          ? {
+              // Vốn kẹt là SỰ THẬT đo từ giá vốn đơn. "Cứu được" ở đây nghĩa là hàng vào lại tồn —
+              // một định nghĩa khác hẳn "đơn giao thành công", nên KHÔNG dùng bộ ước lượng chung.
+              moneyAtRisk: hoan.capitalLocked,
+              estimatedRecoverable: null,
+              estimateBasis: null,
+              sample: null,
+              unestimatedAtRisk: hoan.capitalLocked,
+            }
+          : combineImpact(
+              exceptions.map((e) => ({ type: e.type, amount: e.amount })),
+              rates,
+            );
       const src = source[spec.key];
 
       return {

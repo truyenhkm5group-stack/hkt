@@ -1,6 +1,8 @@
 import { Boxes, ClipboardCheck, PackageX, ScanLine, Timer, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { InspectionStation } from "@/app/(dashboard)/inventory/returns/inspection-station";
+import { ReturnPipelineSection } from "@/app/(dashboard)/inventory/returns/pipeline-section";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
@@ -33,6 +35,18 @@ export default async function ReturnInspectionPage() {
         description="Bắn mã → kiện nhảy lên đầu → một chạm ra kết luận. Hàng hoàn CHỈ vào lại tồn khi có người đếm thực tế."
         hint="Ghi nhận kiện đã về là một việc; đếm được bao nhiêu món còn bán được là việc khác. ERP không bao giờ tự cộng hàng hoàn vào tồn."
       />
+
+      {/*
+        ĐƯỜNG ỐNG ĐẶT TRƯỚC TRẠM ĐẾM, CỐ Ý.
+
+        Trạm đếm chỉ hiện kiện sẵn sàng đếm hôm nay. Câu hỏi lớn hơn — bao nhiêu vốn đang nằm ngoài
+        sổ và nằm bao lâu — phải nhìn thấy trước khi cúi xuống đếm từng kiện.
+
+        Trong Suspense riêng: nó đọc thêm bảng kết quả đơn, không được giữ trạm đếm chờ theo.
+      */}
+      <Suspense fallback={null}>
+        <ReturnPipelineSection />
+      </Suspense>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <MetricCard

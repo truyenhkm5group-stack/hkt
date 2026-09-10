@@ -1,3 +1,4 @@
+import { sql as sqlRaw } from "drizzle-orm";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
@@ -150,3 +151,41 @@ export async function getDb(): Promise<Db> {
 }
 
 export { schema };
+
+/**
+ * ═══════ CHẠY MỘT BÁO CÁO NẶNG MÀ KHÔNG BẬT JIT ═══════
+ *
+ * ĐO ĐƯỢC trên production 10/09/2026, cùng câu, cùng dữ liệu, cùng kế hoạch:
+ *
+ *   vsales · JIT BẬT   thực thi 8.578,82 ms   biên dịch JIT 17.036,85 ms (465 hàm)
+ *   vsales · JIT TẮT   thực thi     26,02 ms   không biên dịch
+ *
+ * Số khối đệm giống hệt nhau (47.802 và 47.796) — cùng một khối lượng công việc. Toàn bộ chênh
+ * lệch là THỜI GIAN BIÊN DỊCH. PostgreSQL bật JIT khi chi phí ước lượng vượt `jit_above_cost`
+ * (mặc định 100.000), mà các báo cáo tồn kho có chi phí ước lượng hàng triệu vì chúng nối nhiều
+ * bảng dẫn xuất. Trên máy 2 nhân, biên dịch 465 hàm tốn nhiều hơn chính phép tính hàng trăm lần.
+ *
+ * ─── VÌ SAO KHÔNG TẮT JIT TOÀN MÁY CHỦ ───
+ *
+ * Tắt ở `postgresql.conf` sẽ đổi hành vi cho MỌI thứ chạm vào CSDL này, kể cả những truy vấn chưa
+ * ai đo. Ở đây chỉ tắt trong ĐÚNG giao dịch của báo cáo đang chạy: `set local` hết hiệu lực khi
+ * giao dịch kết thúc, không rò sang phiên khác, không đụng cấu hình.
+ *
+ * ─── VÌ SAO CÓ NHÁNH DỰ PHÒNG ───
+ *
+ * Bộ kiểm thử chạy trên PGlite (PostgreSQL biên dịch sang WASM) và không phải bản dựng nào cũng
+ * nhận `set local jit`. Không đặt được thì vẫn chạy tiếp — chậm hơn thì chấp nhận, còn hơn để báo
+ * cáo đổ vỡ vì một tinh chỉnh hiệu năng.
+ */
+export async function chayKhongJit<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sqlRaw.raw("set local jit = off"));
+      return fn(tx as unknown as Db);
+    });
+  } catch (error) {
+    // Chỉ rơi về đường thường khi chính việc TẮT JIT hỏng. Lỗi của báo cáo phải ném lên như cũ.
+    if (!(error instanceof Error) || !/jit/i.test(error.message)) throw error;
+    return fn(db);
+  }
+}

@@ -57,9 +57,38 @@ function jobsCoLich(): Set<string> {
   return new Set([...src.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]));
 }
 
+/**
+ * Mọi dòng lịch, giữ nguyên cả tham số `query` — vì tham số mới là thứ phân biệt hai lần chạy của
+ * CÙNG một job.
+ */
+function dongLich(): { job: string; query: string }[] {
+  const src = fs.readFileSync(path.join(goc, "scripts/scheduler.mjs"), "utf8");
+  return [...src.matchAll(/\{\s*job:\s*"([a-z0-9-]+)"([^}]*)\}/g)].map((m) => {
+    const q = /query:\s*"([^"]*)"/.exec(m[2]);
+    return { job: m[1], query: q ? q[1] : "" };
+  });
+}
+
 export function testSchedulerCoverage() {
   const khai = jobsDaKhai();
   const coLich = jobsCoLich();
+
+  /*
+    ───────── MỘT JOB CHẠY HAI LỊCH: PHẢI KHÁC THAM SỐ ─────────
+
+    `landing-sheet` có hai lịch và nhìn qua tưởng trùng. Không trùng: lịch 1 phút chạy `new=1` (chỉ
+    nạp dòng MỚI, gần thời gian thực), lịch 10 phút chạy đầy đủ (cập nhật dòng đã sửa, ghép lại
+    theo SĐT, chấm lại rủi ro). Hai công việc khác nhau trên cùng một nguồn.
+
+    Nhưng hai dòng lịch GIỐNG HỆT nhau thì là lỗi thật: cùng một job chạy hai lần cùng lúc, tốn CPU
+    của một máy hai nhân và không thêm gì. Bài kiểm này chặn đúng trường hợp đó — và cho phép trường
+    hợp có chủ đích ở trên đi qua.
+  */
+  const dong = dongLich();
+  const dem = new Map<string, number>();
+  for (const d of dong) dem.set(`${d.job}?${d.query}`, (dem.get(`${d.job}?${d.query}`) ?? 0) + 1);
+  const trung = [...dem.entries()].filter(([, n]) => n > 1).map(([k]) => k);
+  assert.deepEqual(trung, [], `bộ lập lịch có dòng TRÙNG HỆT (cùng job, cùng tham số): ${trung.join(", ")}`);
 
   assert.ok(khai.length > 15, `đọc hụt JOB_DEFINITIONS (chỉ thấy ${khai.length} job) — biểu thức dò khoá hỏng?`);
   assert.ok(coLich.size > 8, `đọc hụt bộ lập lịch (chỉ thấy ${coLich.size} job) — biểu thức dò hỏng?`);
@@ -86,7 +115,7 @@ export function testSchedulerCoverage() {
     "`outcome-materialize` phải nằm trong bộ lập lịch — không có nó thì canonical_order_outcome mục dần và mọi báo cáo trôi về đường chậm.",
   );
 
-  console.log(`✓ Lịch chạy job: ${khai.length} job khai · ${coLich.size} có lịch · ${Object.keys(KHONG_CAN_LICH).length} chạy tay/lồng có lý do · 0 job treo`);
+  console.log(`✓ Lịch chạy job: ${khai.length} job khai · ${coLich.size} có lịch · ${dong.length} dòng lịch, 0 dòng trùng hệt · ${Object.keys(KHONG_CAN_LICH).length} chạy tay/lồng có lý do · 0 job treo`);
 }
 
 // Chạy được độc lập, và cũng export để bộ kiểm thử chung dùng lại.

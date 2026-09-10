@@ -57,6 +57,7 @@ import { testApproval } from "./approval.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testUseServerExports } from "./use-server-exports.test";
+import { testReturnPipeline } from "./return-pipeline.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
@@ -1271,6 +1272,9 @@ async function main() {
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);
   await testCanonicalOutcome(db);
+  // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
+  // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
+  await testReturnPipeline(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

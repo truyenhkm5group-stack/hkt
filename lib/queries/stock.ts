@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
@@ -294,11 +294,14 @@ export async function stockRiskSummary() {
   const receiptsAgg = variantReceiptsSubquery(db);
   // HÀNG HỤT: đã lập phiếu tái nhập nhưng đếm được ít hơn số đã xuất — hỏng, mất, hoặc không
   // bán lại được. Đây là số ĐO ĐƯỢC từ chênh lệch phiếu, không phải ước lượng.
-  const [shrink] = await db
-    .select({ n: sql<number>`coalesce(sum(${stockShrinkageExpr(salesAgg, receiptsAgg)}), 0)` })
-    .from(pv)
-    .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
-    .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id));
+  // Cùng dạng truy vấn với `vsales`, cùng bệnh JIT: 8.578ms → 26ms khi tắt. Xem `chayKhongJit`.
+  const [shrink] = await chayKhongJit(db, (tx) =>
+    tx
+      .select({ n: sql<number>`coalesce(sum(${stockShrinkageExpr(salesAgg, receiptsAgg)}), 0)` })
+      .from(pv)
+      .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
+      .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id)),
+  );
   const rows = plan.rows;
   const sum = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((total, r) => total + pick(r), 0);
   return {
