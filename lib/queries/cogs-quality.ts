@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { Period } from "@/lib/search-params";

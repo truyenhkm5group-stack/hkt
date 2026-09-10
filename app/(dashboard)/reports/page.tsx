@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { NavLink } from "@/components/nav-progress";
 import { redirect } from "next/navigation";
 import {
@@ -21,7 +22,9 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SourceBadge } from "@/components/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Money, SectionCard } from "@/components/ui-bits";
+import { ProfitCoverageSection } from "@/app/(dashboard)/reports/coverage-section";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -193,6 +196,12 @@ export default async function ReportsPage({
           </Button>
         }
       />
+
+      {/* ĐỘ TIN CẬY ĐỨNG NGAY DƯỚI TIÊU ĐỀ: người đọc phải biết con số dựa trên gì TRƯỚC khi tin nó,
+          không phải sau khi đã cuộn qua ba bảng. Bọc Suspense để nó không giữ cả trang lại. */}
+      <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
+        <ProfitCoverageSection period={period} />
+      </Suspense>
 
       <Tabs value={tab}>
         <TabsList>
