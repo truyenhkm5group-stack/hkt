@@ -85,6 +85,28 @@ export function testFastPathWiring() {
     assert.equal(SONG.test(src), false, `${f}: còn sót biểu thức SỐNG lẫn giữa các biểu thức nhanh — một cột chậm kéo cả câu lệnh về tốc độ cũ`);
   }
 
+  /**
+   * MIỄN TRỪ KHÔNG ĐƯỢC QUÁ RỘNG — đây là chỗ lỗi 40 giây chui qua.
+   *
+   * `return-rate.ts` được miễn với lý do "nơi định nghĩa", và đúng là vậy. Nhưng cùng tệp đó còn
+   * chứa các VỊ NGỮ DẪN XUẤT dùng ở khắp nơi, trong đó `RETURN_PENDING_WAREHOUSE` nằm trong sáu bộ
+   * lọc của truy vấn sổ kho chạy trên 2.495 dòng hàng. Nó dùng bản SỐNG, và miễn trừ cả tệp khiến
+   * không lá chắn nào thấy.
+   *
+   * Nên kiểm riêng: vị ngữ dẫn xuất phải dùng bản nhanh, dù ở trong tệp được miễn.
+   */
+  const VI_NGU_DAN_XUAT = ["RETURN_PENDING_WAREHOUSE", "SHIPMENT_DELIVERED", "SHIPMENT_RETURNED"];
+  const srcRr = readFileSync("lib/queries/return-rate.ts", "utf8");
+  for (const ten of VI_NGU_DAN_XUAT) {
+    const dong = srcRr.split(/\r?\n/).find((l) => l.includes(`export const ${ten} =`));
+    assert.ok(dong, `không tìm thấy vị ngữ ${ten} — đổi tên thì phải cập nhật lá chắn`);
+    assert.equal(
+      /\$\{ORDER_OUTCOME\}/.test(dong ?? ""),
+      false,
+      `${ten} dùng biểu thức SỐNG. Vị ngữ dẫn xuất phải đọc bảng dẫn xuất kể cả khi nằm trong tệp được miễn — đây đúng là chỗ lỗi 40 giây của trang chủ chui qua.`,
+    );
+  }
+
   // Danh sách miễn trừ phải sạch.
   const thuaMienTru = Object.keys(DUOC_DUNG_BAN_SONG).filter((f) => !SONG.test(readFileSync(f, "utf8")));
   assert.deepEqual(thuaMienTru, [], `DUOC_DUNG_BAN_SONG còn khai tệp không còn dùng bản sống: ${thuaMienTru.join(", ")}`);

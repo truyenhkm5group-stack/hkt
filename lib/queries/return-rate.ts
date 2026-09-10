@@ -464,12 +464,24 @@ export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED'
  * Rộng hơn IS_RETURN_NOT_RECEIVED vì phủ cả RETURNED_BY_RULE (vận đơn báo "giao thành công"
  * nhưng khách chỉ trả phí, hàng vẫn quay về). Kho chưa xác nhận nhận → hàng CHƯA có trong tồn.
  */
-export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
+/**
+ * CHỖ NÀY TỪNG LÀ CẢ 40 GIÂY CỦA TRANG CHỦ.
+ *
+ * Vị ngữ này nằm trong SÁU bộ lọc của truy vấn sổ kho (`variantSalesSubquery`), chạy trên 2.495 dòng
+ * hàng. Khi nó dùng `ORDER_OUTCOME` BẢN SỐNG, mỗi dòng phải dựng lại kết luận đơn — kèm cả các truy
+ * vấn con quét `shipment_events` bằng ILIKE. Đo trên production 10/09/2026: câu sổ kho **39.960ms**,
+ * chạy hai lần trong một lần mở trang chủ.
+ *
+ * Nó lọt lưới vì lá chắn `tests/fast-path-wiring.test.ts` miễn trừ CẢ TỆP `return-rate.ts` với lý do
+ * "đây là nơi định nghĩa". Đúng là nơi định nghĩa — nhưng những VỊ NGỮ DẪN XUẤT trong cùng tệp thì
+ * không có lý do gì được dùng bản chậm. Miễn trừ quá rộng là chỗ lỗi chui qua.
+ */
+export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
 
-const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
-const IS_FAILED = sql`${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
-const IS_SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
+const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
 const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
@@ -799,7 +811,7 @@ export async function listOrdersForVariant(key: string, period: Period): Promise
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(and(...conds))
     .groupBy(o.id, s.id)
-    .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
+    .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
     .limit(300);
   return rows.map((r) => ({ ...r, quantity: Number(r.quantity), lineTotal: Number(r.lineTotal), cod: Number(r.cod), fee: Number(r.fee) }));
 }
@@ -824,8 +836,8 @@ export const SHIPMENT_COD = sql`coalesce(nullif(${s.codCollected}, 0), ${s.codAm
  * nên vận đơn chưa ghép đơn (order NULL) vẫn cho kết quả đúng theo dữ liệu của chính nó.
  * Yêu cầu FROM shipments LEFT JOIN orders.
  */
-export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME} = 'DELIVERED')`;
-export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`;
+export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME_FAST} = 'DELIVERED')`;
+export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`;
 
 /**
  * Vận đơn CÒN TIỀN COD ĐỂ THU. Vận đơn đã hoàn / huỷ thì khoản COD khai báo không bao giờ về nữa,
@@ -876,12 +888,12 @@ export async function getReturnRateBySource(period: Period, q: string): Promise<
       source: ORDER_SOURCE,
       orders: sql<number>`count(*)`,
       shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
       failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
-      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
     })
     .from(o)
