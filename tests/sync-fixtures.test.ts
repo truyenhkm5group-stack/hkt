@@ -57,6 +57,7 @@ import { testApproval } from "./approval.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testUseServerExports } from "./use-server-exports.test";
+import { testSmokeCoverage } from "./smoke-coverage.test";
 import { testReturnPipeline } from "./return-pipeline.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
@@ -1226,6 +1227,7 @@ async function main() {
   testBankMatch();
   testActionWiring();
   testUseServerExports();
+  testSmokeCoverage();
   testOperatingFunnel();
   await testMemoInflight();
   await testBankPipeline(db);

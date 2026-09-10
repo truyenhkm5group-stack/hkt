@@ -86,7 +86,19 @@ function createPg(): Db {
    * Cho phép chỉnh bằng `PGPOOL_MAX` để không phải deploy lại khi đổi cấu hình máy.
    */
   const max = Math.max(2, Number(process.env.PGPOOL_MAX) || 5);
-  const pool = new Pool({ connectionString: databaseUrl(), max });
+  /*
+    ═══ BỂ CẠN PHẢI BÁO LỖI, KHÔNG ĐƯỢC CHỜ VÔ HẠN ═══
+
+    Mặc định `pg` chờ MÃI khi hết kết nối. Trên bể 5 kết nối của máy hai nhân, một lúc nhiều báo
+    cáo nặng cùng chạy là chuyện thường — và mỗi giao dịch (`chayKhongJit`) giữ một kết nối suốt
+    thời gian câu lệnh chạy.
+
+    Chờ vô hạn nghĩa là trang treo mà KHÔNG có gì báo động: không lỗi, không log, không cảnh báo.
+    Hôm nay đã dẫm phải đúng hình dạng đó hai lần (bộ đệm `memo` và giao dịch ôm nhầm hàm). Thà
+    hỏng ồn ào còn hơn treo im lặng: 15 giây không xin được kết nối thì ném lỗi, và lỗi đó vào log
+    kèm tên trang.
+  */
+  const pool = new Pool({ connectionString: databaseUrl(), max, connectionTimeoutMillis: 15_000 });
   instrumentQueries(pool as unknown as QueryClient);
   holder.__erpDb!.pool = pool;
   return drizzlePg(pool, { schema });

@@ -107,7 +107,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     return { amount: Number(row?.amount ?? 0), n: Number(row?.n ?? 0) };
   };
 
-  const [rent, software, otherOperating, salaryLegacy, logisticsAdjust, logisticsDup, adSpend, cogsRow, shipRow] = await Promise.all([
+  const [rent, software, otherOperating, salaryLegacy, logisticsAdjust, logisticsDup, adSpend, [cogsRow, shipRow]] = await Promise.all([
     categorySum(["RENT"]),
     categorySum(["SOFTWARE"]),
     categorySum(["PACKAGING", "OTHER"]),
@@ -121,23 +121,32 @@ async function build(period: Period): Promise<RecognizedCosts> {
       .where(and(eq(schema.adSpends.excluded, false), ...periodConds(schema.adSpends.spendDate, period.from, period.to))),
     // JIT tat: hai cau nay la cau cham nhat con lai cua probe — 10.525ms va 10.305ms. Chung mang
     // nhanh du phong tinh truc tiep cua ORDER_OUTCOME nen chi phi uoc luong rat cao va JIT bat.
-    chayKhongJit(db, (tx) =>
-      tx
+    /*
+      MỘT GIAO DỊCH CHO CẢ HAI CÂU, KHÔNG PHẢI HAI.
+
+      Mỗi giao dịch giữ MỘT kết nối của bể (chỉ có 5). Mở hai giao dịch song song ngay trong cùng
+      một `Promise.all` là tự lấy mất 2/5 bể cho một hàm — mà hàm này được gọi từ Bảng điều khiển,
+      Sổ ngân hàng, Báo cáo lợi nhuận cùng lúc. Hai câu này chạy tuần tự bên trong một giao dịch:
+      chậm hơn không đáng kể (cùng nhau chưa tới 1 giây sau khi tắt JIT), mà chỉ tốn một kết nối.
+
+      Chúng là hai câu chậm nhất còn lại của probe — 10.525ms và 10.305ms trước khi tắt JIT.
+    */
+    chayKhongJit(db, async (tx) => {
+      const [cogs] = await tx
         .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)` })
         .from(o)
         .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-        .where(and(...periodConds(o.insertedAt, period.from, period.to))),
-    ),
-    chayKhongJit(db, (tx) =>
-      tx
+        .where(and(...periodConds(o.insertedAt, period.from, period.to)));
+      const [ship] = await tx
         .select({
           shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
           returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
         })
         .from(o)
         .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-        .where(and(...periodConds(o.insertedAt, period.from, period.to))),
-    ),
+        .where(and(...periodConds(o.insertedAt, period.from, period.to)));
+      return [cogs, ship] as const;
+    }),
   ]);
 
   const warnings: CostEngineWarning[] = [];
@@ -208,12 +217,12 @@ async function build(period: Period): Promise<RecognizedCosts> {
   };
 
   const components: Record<CostComponent, RecognizedComponent> = {
-    COGS: mk("COGS", Number(cogsRow[0]?.amount ?? 0), { note: "Giá vốn đơn GIAO THÀNH CÔNG theo chứng từ. Báo cáo danh nghĩa dùng bản ƯỚC TÍNH theo tỷ lệ giao thành công — khác cơ sở, không phải trừ hai lần." }),
+    COGS: mk("COGS", Number(cogsRow?.amount ?? 0), { note: "Giá vốn đơn GIAO THÀNH CÔNG theo chứng từ. Báo cáo danh nghĩa dùng bản ƯỚC TÍNH theo tỷ lệ giao thành công — khác cơ sở, không phải trừ hai lần." }),
     ADS: mk("ADS", Number(adSpend[0]?.amount ?? 0)),
-    SHIPPING: mk("SHIPPING", Number(shipRow[0]?.shipping ?? 0) + logisticsAdjust.amount, {
+    SHIPPING: mk("SHIPPING", Number(shipRow?.shipping ?? 0) + logisticsAdjust.amount, {
       note: `Cước theo vận đơn${logisticsAdjust.amount ? ` + ${logisticsAdjust.amount.toLocaleString("vi-VN")} ₫ điều chỉnh có lý do` : ""}. Khoản gõ tay không khai điều chỉnh bị loại.`,
     }),
-    RETURN_COST: mk("RETURN_COST", Number(shipRow[0]?.returnFee ?? 0)),
+    RETURN_COST: mk("RETURN_COST", Number(shipRow?.returnFee ?? 0)),
     SALARY: mk("SALARY", salaryAmount, {
       coverage: payroll.coverage,
       usedFallback: !payrollCovered,
