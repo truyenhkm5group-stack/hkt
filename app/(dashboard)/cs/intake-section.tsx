@@ -22,13 +22,13 @@ export async function OrderIntakeSection() {
 
   return (
     <SectionCard
-      title="Khâu chốt đơn · đủ thông tin → có đơn"
+      title="Khâu chốt đơn · ca đã đánh dấu chờ lên đơn"
       description={`${m.windowDays} ngày qua. "Đủ thông tin" = khách đã cho cả SĐT và địa chỉ — tương đương trạng thái đơn mới trên Pancake.`}
-      hint="Thời gian tính từ lúc KHÁCH đưa đủ thông tin, không phải từ lúc job quét thấy. Lấy mốc quét là đo tốc độ của máy chứ không đo tốc độ của CSKH."
+      hint="Bảng này chỉ đếm ca ĐÃ TỪNG bị đánh dấu là đang chờ. Khách đủ thông tin mà đã có đơn ngay lúc quét thì không sinh case nên không có ở đây — tỷ lệ chuyển của CẢ khâu nằm ở báo cáo lượt quét. Thời gian tính từ lúc KHÁCH đưa đủ thông tin, không phải từ lúc job quét thấy: lấy mốc quét là đo tốc độ của máy chứ không đo tốc độ của CSKH."
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Khách đủ thông tin</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ca đã đánh dấu chờ</div>
           <div className="numeric text-lg font-bold">{formatNumber(m.infoComplete)}</div>
           <div className="text-[11.5px] text-muted-foreground">Đã cho cả SĐT và địa chỉ</div>
         </div>

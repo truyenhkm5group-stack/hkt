@@ -38,13 +38,24 @@ const DOI: CaseTeam = "CS";
 const SLA_GIO = CASE_SLA_HOURS.NEW_ORDER_UNPROCESSED ?? 12;
 
 export type OrderIntakeMetrics = {
-  /** Khách đã cho đủ SĐT + địa chỉ, trong cửa sổ đang xét. */
+  /**
+   * ⚠ ĐỌC CHO ĐÚNG PHẠM VI: đây là số ca ĐÃ TỪNG BỊ ĐÁNH DẤU "chờ lên đơn", KHÔNG phải toàn bộ
+   * khách đủ thông tin.
+   *
+   * Khách đủ thông tin mà ĐÃ CÓ đơn ngay lúc quét thì không sinh case, nên không có mặt ở đây.
+   * Đo trên production 11/09/2026: một lượt quét 7 ngày thấy 157 khách đủ thông tin, trong đó 136
+   * đã có đơn — chỉ 21 ca còn lại mới có khả năng thành case.
+   *
+   * Tỷ lệ chuyển của CẢ KHÂU nằm ở báo cáo lượt quét (`syncPancakeChatCases`), không ở đây. Bảng
+   * này trả lời câu hẹp hơn nhưng quan trọng hơn với người vận hành: **những ca ta đã đánh dấu là
+   * đang chờ, bao lâu thì thành đơn, và bao nhiêu ca vẫn chưa.**
+   */
   infoComplete: number;
   /** Trong số đó, đã có đơn được tạo SAU thời điểm đủ thông tin. */
   orderCreatedAfterInfo: number;
   /** Còn lại: đủ thông tin mà vẫn chưa có đơn. Đây là việc phải làm. */
   orderNotCreated: number;
-  /** Tỷ lệ chuyển của khâu (0–1). `null` khi chưa có mẫu nào. */
+  /** Tỷ lệ ca ĐÃ ĐÁNH DẤU về đích (0–1). KHÔNG phải tỷ lệ chuyển của cả khâu — xem `infoComplete`. */
   conversion: number | null;
   /** Giờ từ lúc đủ thông tin tới lúc có đơn — chỉ tính ca ĐÃ có đơn. `null` khi chưa có ca nào. */
   medianHoursToOrder: number | null;
