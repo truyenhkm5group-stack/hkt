@@ -5,7 +5,7 @@ import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import {
@@ -139,7 +139,7 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
     const s = schema.shipments;
     const pv = schema.productVariants;
     const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
+    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
     const rows = await db
       .select({ productId: productKey, pageId: o.pageId, adId: o.adId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
       .from(i)
@@ -219,10 +219,10 @@ async function productEconomics(period: Period) {
         sentOrders: sql<number>`count(distinct ${o.id}) filter (where ${s.id} is not null and ${o.stage} not in ('CANCELLED','DELETED') and ${s.stage} not in ('CANCELLED','PENDING'))`,
         firstAt: sql<string | null>`min(${o.insertedAt})`,
         lastAt: sql<string | null>`max(${o.insertedAt})`,
-        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-        shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
+        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
       })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))

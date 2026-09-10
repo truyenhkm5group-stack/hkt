@@ -1,8 +1,8 @@
 import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { ORDER_COGS, orderCogsColumn } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { orderCogsColumn, orderCogsFast } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -62,14 +62,19 @@ export function metricScope(period: Period, population: MetricPopulation = "conf
 
 // ───────────────────────── Vị ngữ theo kết quả đơn ─────────────────────────
 // Tất cả đều đi qua ORDER_OUTCOME; không nơi nào được viết lại điều kiện stage.
+//
+// ĐỌC BẢNG ĐÃ TÍNH SẴN, KHÔNG TÍNH LẠI. `ORDER_OUTCOME_FAST` = coalesce(bảng dẫn xuất, biểu thức
+// chuẩn) nên KẾT QUẢ KHÔNG ĐỔI — chỉ đổi *lúc nào* nó được tính. Đo trên production 10/09/2026:
+// những hằng số này từng dùng biểu thức SỐNG, khiến trang chủ mất 40,7 giây và quá hạn 60 giây
+// trong smoke. Lớp tăng tốc P0.3 đã có sẵn, chỉ là chưa ai nối vào đây.
 
-export const IS_DELIVERED = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
+export const IS_DELIVERED = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
 /** `RETURNED` và `RETURNED_BY_RULE` LUÔN gộp làm một trong mọi tổng hợp (đặc tả mục 6). */
-export const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
-export const IS_CANCELLED = sql`${ORDER_OUTCOME} = 'CANCELLED'`;
-export const IS_OPEN = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+export const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+export const IS_CANCELLED = sql`${ORDER_OUTCOME_FAST} = 'CANCELLED'`;
+export const IS_OPEN = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
 /** Đơn ĐÃ KẾT THÚC — mẫu số của tỷ lệ giao thành công. Đơn huỷ KHÔNG nằm trong mẫu số. */
-export const IS_FINISHED = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 // ───────────────────────── Tiền ─────────────────────────
 
@@ -77,20 +82,20 @@ export const IS_FINISHED = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETU
  * DOANH THU LÊN ĐƠN (booked revenue) — giá trị đơn khách đã chốt, chưa nói gì về việc giao được
  * hay thu được tiền. Loại đơn huỷ.
  */
-export const BOOKED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`;
+export const BOOKED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
 
 /** DOANH THU GIAO THÀNH CÔNG (delivered revenue) — giá trị đơn ĐÃ tới tay khách. */
 export const DELIVERED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_DELIVERED}), 0)`;
 
 /** GIÁ VỐN của đơn giao thành công — PHẢI cùng population với DELIVERED_REVENUE. */
-export const DELIVERED_COGS = sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${IS_DELIVERED}), 0)`;
+export const DELIVERED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${IS_DELIVERED}), 0)`;
 
 /** Giá vốn của mọi đơn không huỷ — dùng cho báo cáo danh nghĩa. */
-export const BOOKED_COGS = sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`;
+export const BOOKED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
 
 // ───────────────────────── Đếm ─────────────────────────
 
-export const COUNT_BOOKED = sql<number>`count(*) filter (where ${ORDER_OUTCOME} <> 'CANCELLED')`;
+export const COUNT_BOOKED = sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED')`;
 export const COUNT_DELIVERED = sql<number>`count(*) filter (where ${IS_DELIVERED})`;
 export const COUNT_RETURNED = sql<number>`count(*) filter (where ${IS_RETURNED})`;
 export const COUNT_CANCELLED = sql<number>`count(*) filter (where ${IS_CANCELLED})`;
@@ -102,7 +107,7 @@ export const COUNT_OPEN = sql<number>`count(*) filter (where ${IS_OPEN})`;
  * thường, trong khi thật ra ERP không biết gói hàng ở đâu — đó là việc cần người xử lý, không phải
  * việc chờ đợi.
  */
-export const COUNT_UNKNOWN = sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'UNKNOWN')`;
+export const COUNT_UNKNOWN = sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'UNKNOWN')`;
 
 /**
  * TỶ LỆ GIAO THÀNH CÔNG = giao thành công ÷ (giao thành công + hoàn), tính trên ĐƠN ĐÃ KẾT THÚC.

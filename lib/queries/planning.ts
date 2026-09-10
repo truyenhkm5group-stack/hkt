@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
 import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { getSettingJson } from "@/lib/settings";
 
 const pv = schema.productVariants;
@@ -75,7 +75,7 @@ function demandSubquery(db: Awaited<ReturnType<typeof getDb>>, days: number, ali
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
+    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
     .groupBy(oi.variantId)
     .as(`demand_${alias}`);
 }
@@ -98,7 +98,7 @@ function peakDaySubquery(db: Awaited<ReturnType<typeof getDb>>, days: number) {
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
+    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
     .groupBy(oi.variantId, sql`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`)
     .as("daily_sales");
 

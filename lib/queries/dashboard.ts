@@ -89,10 +89,16 @@ async function orderKpis(from: Date | null, to: Date | null): Promise<OrderKpis>
 
 async function getDashboardDataUncached(period: Period) {
   const db = await getDb();
-  const [current, previous] = await Promise.all([orderKpis(period.from, period.to), (() => {
-    const prev = previousPeriod(period);
-    return prev.from ? orderKpis(prev.from, prev.to) : Promise.resolve(null);
-  })()]);
+  /**
+   * KHÔNG await Ở ĐÂY. Hai truy vấn KPI không phụ thuộc gì vào 19 truy vấn bên dưới, nên `await` tại
+   * chỗ này biến trang chủ thành HAI PHA NỐI TIẾP: chờ KPI xong rồi mới bắt đầu phần còn lại.
+   *
+   * Đo trên production 10/09/2026 trước khi sửa: trang chủ 40.704ms và quá hạn 60 giây trong smoke.
+   * Gộp vào cùng một lượt thì tổng thời gian bằng truy vấn CHẬM NHẤT, không phải tổng hai pha.
+   */
+  const prevPeriod = previousPeriod(period);
+  const currentPromise = orderKpis(period.from, period.to);
+  const previousPromise = prevPeriod.from ? orderKpis(prevPeriod.from, prevPeriod.to) : Promise.resolve(null);
 
   // ĐO TRƯỚC, SỬA SAU (TASK 16): Tổng quan là trang chậm nhất — 324ms so với 40ms của trang kế
   // tiếp — vì 15 truy vấn độc lập chạy NỐI TIẾP, mỗi cái chờ cái trước xong. Chúng không phụ
@@ -122,6 +128,8 @@ async function getDashboardDataUncached(period: Period) {
     topProducts,
     lastSyncRows,
     orderTotalRows,
+    current,
+    previous,
   ] = await Promise.all([
     // Trạng thái đơn theo giai đoạn
     db
@@ -186,6 +194,8 @@ async function getDashboardDataUncached(period: Period) {
     getProductIntelligence({ period, limit: 6 }),
     db.select().from(schema.syncRuns).where(isNotNull(schema.syncRuns.finishedAt)).orderBy(desc(schema.syncRuns.startedAt)).limit(3),
     db.select({ count: count() }).from(schema.orders),
+    currentPromise,
+    previousPromise,
   ]);
 
   const byStage = Object.fromEntries(stageRows.map((r) => [r.stage, { count: Number(r.count), revenue: Number(r.revenue ?? 0) }])) as Record<OrderStage, { count: number; revenue: number }>;

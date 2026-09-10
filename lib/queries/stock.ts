@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -70,9 +70,9 @@ export function variantSalesSubquery(db: Db) {
       /** Đã chốt đơn, hàng còn trong kho — trừ khỏi tồn KHẢ DỤNG, không trừ khỏi tồn thực tế. */
       reserved: sql<number>`coalesce(sum(${QTY}) filter (where ${RESERVED_IN_WAREHOUSE}), 0)`.as("out_reserved"),
       /** Giao thành công theo TIỀN (ORDER_OUTCOME) — chỉ để đối chiếu, KHÔNG dùng tính tồn. */
-      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`.as("sold_delivered"),
+      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`.as("sold_delivered"),
       /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
-      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
+      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))

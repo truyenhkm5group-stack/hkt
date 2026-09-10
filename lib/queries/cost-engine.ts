@@ -31,9 +31,9 @@ import {
 } from "@/lib/constants/cost-authority";
 import { COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
 import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond } from "@/lib/queries/cost-allocation";
-import { ORDER_COGS } from "@/lib/queries/cogs";
+import { orderCogsFast } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const e = schema.expenses;
@@ -120,14 +120,14 @@ async function build(period: Period): Promise<RecognizedCosts> {
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), ...periodConds(schema.adSpends.spendDate, period.from, period.to))),
     db
-      .select({ amount: sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)` })
+      .select({ amount: sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)` })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(and(...periodConds(o.insertedAt, period.from, period.to))),
     db
       .select({
-        shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
-        returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
+        returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))

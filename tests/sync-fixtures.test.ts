@@ -49,6 +49,7 @@ import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
 import { testSchedulerCoverage } from "./scheduler-coverage.test";
 import { testShipmentJoinGrain } from "./shipment-join-grain.test";
+import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testApproval } from "./approval.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
@@ -1214,6 +1215,7 @@ async function main() {
   testMigrationJournal();
   testSchedulerCoverage();
   testShipmentJoinGrain();
+  testFastPathWiring();
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);

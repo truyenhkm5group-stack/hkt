@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS, type SettlementStatus } from "@/lib/constants/cod";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -55,12 +55,12 @@ const SO_CHUNG_TU = sql`
  */
 const TINH_TRANG = sql<SettlementStatus>`case
   when coalesce(shipments.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
-  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
-  when ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
+  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
+  when ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
   -- CHƯA BIẾT gì về chiều giao hàng thì KHÔNG được ghi thành khoản Viettel Post đang nợ: đòi tiền
   -- một đơn mà ERP còn không chứng minh được đã gửi đi là tạo ra nợ ảo. Phải nằm TRƯỚC các nhánh
   -- so tiền, nếu không danh sách theo đơn và số tổng sẽ nói hai điều khác nhau.
-  when ${ORDER_OUTCOME} = 'UNKNOWN' then 'CHUA_GIAO'
+  when ${ORDER_OUTCOME_FAST} = 'UNKNOWN' then 'CHUA_GIAO'
   when coalesce(t.cod_tra, 0) >= coalesce(shipments.cod_amount, 0) then 'DA_TRA_DU'
   when coalesce(t.cod_tra, 0) > 0 then 'TRA_THIEU'
   when shipments.stage <> 'DELIVERED' then 'CHUA_GIAO'
@@ -68,7 +68,7 @@ const TINH_TRANG = sql<SettlementStatus>`case
   else 'CHUA_TRA' end`;
 
 /** Vận đơn Viettel Post phải trả tiền: kết quả đơn là GIAO THÀNH CÔNG và có thu hộ. */
-const PHAI_TRA = sql`(coalesce(shipments.cod_amount, 0) > 0 and ${ORDER_OUTCOME} = 'DELIVERED')`;
+const PHAI_TRA = sql`(coalesce(shipments.cod_amount, 0) > 0 and ${ORDER_OUTCOME_FAST} = 'DELIVERED')`;
 
 /**
  * SỐ TIỀN VIETTEL POST PHẢI TRẢ CHO MỘT ĐƠN.

@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { getDb, schema } from "@/db";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
 /**
  * ───────────── DÒNG TIỀN & VỐN LƯU ĐỘNG ─────────────
@@ -76,10 +76,10 @@ export async function getCashflow(): Promise<CashflowReport> {
   // ── Tiền COD đang bị giữ: đơn ĐÃ GIAO THÀNH CÔNG mà chưa có đồng chứng từ nào ──
   const [cod] = await db
     .select({
-      amount: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
-      count: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
+      amount: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
+      count: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
       overdue: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (
-        where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0
+        where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0
           and coalesce(${s.deliveredAt}, ${s.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')), 0)`,
     })
     .from(o)

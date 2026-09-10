@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computeVelocity } from "@/lib/constants/planning";
 import { loadPlanningAssumptions } from "@/lib/queries/planning";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LAST_RECEIPT_COST, availableStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { SLOW_MOVING_RULES, type StockRisk } from "@/lib/constants/slow-moving";
 
@@ -77,7 +77,7 @@ function windowSalesSubquery(db: Awaited<ReturnType<typeof getDb>>, windowDays: 
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(sql`${o.insertedAt} >= now() - (${windowDays} || ' days')::interval and ${oi.isBonus} = false and ${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
+    .where(sql`${o.insertedAt} >= now() - (${windowDays} || ' days')::interval and ${oi.isBonus} = false and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
     .groupBy(oi.variantId, sql`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`)
     .as("sm_daily");
 
@@ -99,7 +99,7 @@ function lastSoldSubquery(db: Awaited<ReturnType<typeof getDb>>) {
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     // Lần cuối THẬT SỰ giao được hàng — đơn hoàn nghĩa là chưa bán được.
-    .where(sql`${ORDER_OUTCOME} = 'DELIVERED'`)
+    .where(sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`)
     .groupBy(oi.variantId)
     .as("sm_last");
 }

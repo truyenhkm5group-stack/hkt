@@ -4,7 +4,7 @@ import { adsRatio } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
-import { ORDER_OUTCOME, PRIMARY_ATTEMPT, failedToReturnRate } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, failedToReturnRate } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -20,7 +20,7 @@ const p = schema.products;
 const ads = schema.adSpends;
 
 const NOT_CANCELLED = sql`${o.stage} not in ('CANCELLED','DELETED')`;
-const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 
 function periodCond(from: Date | null, to: Date | null): SQL[] {
   const conds: SQL[] = [];
@@ -57,7 +57,7 @@ export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
     const since = new Date(Date.now() - 90 * 86_400_000);
     const [row] = await db
       .select({
-        delivered: sql<number>`avg(nullif(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}), 0)) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+        delivered: sql<number>`avg(nullif(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}), 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returnFee: sql<number>`avg(nullif(${o.returnFee}, 0)) filter (where ${IS_RETURNED})`,
         returnFeeSample: sql<number>`count(*) filter (where ${IS_RETURNED} and ${o.returnFee} > 0)`,
       })
@@ -98,7 +98,7 @@ export async function rescuedOrdersByProduct(period: Period): Promise<Map<string
       and(
         eq(i.isBonus, false),
         inArray(o.stage, [...CONFIRMED_STAGES]),
-        sql`${ORDER_OUTCOME} = 'DELIVERED'`,
+        sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`,
         sql`exists (select 1 from ${schema.shipmentEvents} where ${schema.shipmentEvents.shipmentId} = ${s.id} and ${FAILED_EVENT})`,
         ...periodCond(period.from, period.to),
       ),
@@ -116,7 +116,7 @@ export async function productReturnHistory(windowDays: number): Promise<Map<stri
   const rows = await db
     .select({
       productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
-      finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
       returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
     })
     .from(i)
@@ -362,12 +362,12 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         items: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED}), 0)`,
         grossSales: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${NOT_CANCELLED}), 0)`,
         cogsFull: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${NOT_CANCELLED}), 0)`,
-        delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+        delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
-        inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
-        pending: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED')`,
-        failed: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED')`,
-        actualRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+        inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
+        pending: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'NOT_SHIPPED')`,
+        failed: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED')`,
+        actualRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
         firstAt: sql<string | null>`min(${o.insertedAt}) filter (where ${NOT_CANCELLED})`,
         lastAt: sql<string | null>`max(${o.insertedAt}) filter (where ${NOT_CANCELLED})`,
       })
@@ -665,7 +665,7 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
         items: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED}), 0)`,
         grossSales: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${NOT_CANCELLED}), 0)`,
         cogsFull: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${NOT_CANCELLED}), 0)`,
-        delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+        delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
       })
       .from(i)

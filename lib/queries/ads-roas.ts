@@ -2,7 +2,7 @@ import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
-import { ORDER_COGS } from "@/lib/queries/cogs";
+import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
@@ -137,7 +137,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       adName: sql<string>`${schema.fbAds.name}`.as("f_ad_name"),
       adId: sql<string>`${o.adId}`.as("f_ad_id"),
       revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
-      cogs: sql<number>`${ORDER_COGS}`.as("f_cogs"),
+      cogs: sql<number>`${orderCogsFast()}`.as("f_cogs"),
       shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("f_shipping"),
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("f_cash"),
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
