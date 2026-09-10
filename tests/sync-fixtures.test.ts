@@ -54,6 +54,7 @@ import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
+import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
@@ -1221,6 +1222,7 @@ async function main() {
   testFastPathWiring();
   testBankMatch();
   testActionWiring();
+  testOperatingFunnel();
   await testBankPipeline(db);
   await testApproval(db);
   await testMultiAttemptMoney(db);

@@ -37,6 +37,11 @@ const MIEN_TRU: Record<string, string> = {
   "lib/queries/control-tower.ts": "luật đối soát: có luật cố ý ĐẾM số lần gửi của một đơn, có luật chỉ kiểm tra vắng mặt",
   "lib/queries/data-quality.ts": "cùng lý do với control-tower — dò bất thường trên từng vận đơn",
   "lib/queries/stock.ts": "sổ kho đo theo MỐC XUẤT KHO của từng vận đơn, và đã khử trùng bằng exists",
+  // Grain ở đây là VIỆC CẦN XỬ LÝ, không phải đơn: mỗi việc trỏ tới đúng một đối tượng qua
+  // `entity_id`, nên phép nối tra ra nhiều nhất một dòng đơn và một dòng vận đơn. Không có chỗ nào
+  // để nhân lên — và cũng KHÔNG được thêm PRIMARY_ATTEMPT vào đây: việc gắn với lần gửi thứ hai
+  // của một đơn là một việc có thật, lọc nó đi thì tiền của nó biến mất khỏi bảng điều hành.
+  "lib/queries/stage-health.ts": "grain là VIỆC (notifications), nối theo entity_id nên mỗi việc ra đúng một dòng — không nhân được",
 };
 
 /** Nối `orders → shipments` ở mọi cách viết đang dùng trong kho (Drizzle builder và SQL thô). */
