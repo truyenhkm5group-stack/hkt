@@ -2,14 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Phone, Truck } from "lucide-react";
+import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -26,6 +26,8 @@ import {
   type CareStatus,
   type CareView,
   type CarrierActionKey,
+  CARE_NOTE_PRESETS_MAX,
+  type CareNotePreset,
 } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
@@ -47,6 +49,8 @@ type Props = {
   initial: CareWorkbench;
   view: Exclude<CareView, "all">;
   staff: { id: string; name: string }[];
+  /** Mẫu note nhanh của shop — bấm là đổ chữ vào ô; thêm/bớt ngay trong popover. */
+  presets: CareNotePreset[];
   canManage: boolean;
 };
 
@@ -73,8 +77,10 @@ function reviveState(s: CareState): CareState {
   return { ...s, followUpAt: d(s.followUpAt), lastNoteAt: d(s.lastNoteAt), firstResponseAt: d(s.firstResponseAt), doneAt: d(s.doneAt), updatedAt: d(s.updatedAt) };
 }
 
-export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
+export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, canManage }: Props) {
   const [cases, setCases] = useState<CareCase[]>(() => initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
+  // Mẫu note dùng chung cho mọi dòng: sửa ở một dòng, dòng khác thấy ngay.
+  const [presets, setPresets] = useState<CareNotePreset[]>(initialPresets);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [owner, setOwner] = useState("");
@@ -240,6 +246,8 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
                   key={c.shipmentId}
                   c={c}
                   staff={staff}
+                  presets={presets}
+                  onPresetsChange={setPresets}
                   canManage={canManage}
                   checked={selected.has(c.shipmentId)}
                   onCheck={(v) =>
@@ -264,7 +272,7 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
   );
 }
 
-function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -474,14 +482,28 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
               <MessageSquarePlus className="size-3" /> Ghi note
             </button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-80 space-y-2 p-3">
+          <PopoverContent align="start" className="w-[22rem] space-y-2 p-3">
+            {/*
+              LOẠI hành động: bấm chọn loại và — nếu ô còn trống — đổ luôn nhãn vào ô, để một cú bấm
+              là lưu được. Trước đây bấm chip chỉ đổi màu chip, ô vẫn trống, nút Lưu vẫn xám: người
+              dùng tưởng hỏng (phản hồi chủ shop 11/09).
+            */}
             <div className="flex flex-wrap gap-1">
               {CARE_ACTION_KINDS.map((k) => (
-                <button key={k} type="button" onClick={() => setKind(k)} className={cn("rounded border px-1.5 py-px text-[10.5px]", kind === k ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}>
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setKind(k);
+                    if (!note.trim() || (Object.values(CARE_ACTION_LABEL) as string[]).includes(note.trim())) setNote(CARE_ACTION_LABEL[k]);
+                  }}
+                  className={cn("rounded border px-1.5 py-px text-[10.5px]", kind === k ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}
+                >
                   {CARE_ACTION_LABEL[k]}
                 </button>
               ))}
             </div>
+            <NotePresets presets={presets} onChange={onPresetsChange} onPick={(p) => { setKind(p.kind); setNote(p.text); }} />
             <Textarea
               autoFocus
               value={note}
@@ -552,5 +574,90 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
         )}
       </td>
     </tr>
+  );
+}
+
+
+/**
+ * MẪU NOTE NHANH — bấm là đổ chữ vào ô (và chọn loại), "Sửa mẫu" để thêm / bớt. Bộ mẫu dùng chung
+ * cả shop, lưu ở bảng settings (`care.notePresets`), có nhật ký ai đổi.
+ */
+function NotePresets({ presets, onChange, onPick }: { presets: CareNotePreset[]; onChange: (p: CareNotePreset[]) => void; onPick: (p: CareNotePreset) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState<CareActionKind>("CALLED_NO_ANSWER");
+  const [saving, start] = useTransition();
+
+  const persist = (next: CareNotePreset[]) =>
+    start(async () => {
+      const r = await saveCareNotePresets({ presets: next });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      onChange(r.data);
+    });
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    if (presets.length >= CARE_NOTE_PRESETS_MAX) {
+      toast.error(`Tối đa ${CARE_NOTE_PRESETS_MAX} mẫu`);
+      return;
+    }
+    persist([...presets, { id: `p-${Date.now().toString(36)}`, kind, text: t }]);
+    setText("");
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10.5px] uppercase tracking-wide text-muted-foreground">
+        <span>Mẫu nhanh</span>
+        <button type="button" className="inline-flex items-center gap-1 rounded px-1 hover:bg-accent normal-case" onClick={() => setEditing((v) => !v)}>
+          <Pencil className="size-3" /> {editing ? "Xong" : "Sửa mẫu"}
+        </button>
+      </div>
+      {presets.length === 0 && !editing ? <p className="text-[11px] text-muted-foreground">Chưa có mẫu — bấm “Sửa mẫu” để thêm.</p> : null}
+      <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
+        {presets.map((p) => (
+          <span key={p.id} className="inline-flex max-w-full items-stretch overflow-hidden rounded border text-[10.5px]">
+            <button type="button" className="truncate px-1.5 py-px text-left hover:bg-accent" title={`${CARE_ACTION_LABEL[p.kind]}\n${p.text}`} onClick={() => onPick(p)}>
+              {p.text}
+            </button>
+            {editing ? (
+              <button type="button" aria-label="Xoá mẫu" disabled={saving} className="border-l px-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40" onClick={() => persist(presets.filter((x) => x.id !== p.id))}>
+                <Trash2 className="size-3" />
+              </button>
+            ) : null}
+          </span>
+        ))}
+      </div>
+      {editing ? (
+        <div className="flex gap-1">
+          <select value={kind} onChange={(e) => setKind(e.target.value as CareActionKind)} className="h-7 max-w-[120px] rounded-md border bg-background px-1 text-[11px]" aria-label="Loại hành động của mẫu">
+            {CARE_ACTION_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {CARE_ACTION_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            maxLength={200}
+            placeholder="Nội dung mẫu mới…"
+            className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 text-[11.5px]"
+          />
+          <Button size="sm" className="h-7 px-2 text-xs" disabled={saving || !text.trim()} onClick={add}>
+            {saving ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }

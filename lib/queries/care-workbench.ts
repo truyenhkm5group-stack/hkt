@@ -14,6 +14,8 @@ import { rowsOf } from "@/lib/sql-rows";
 
 export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 export { careViewOf, slaOf } from "@/lib/care/view";
+import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, type CareNotePreset } from "@/lib/constants/care";
+import { getSettingJson } from "@/lib/settings";
 /** Tên cũ — UI hiện tại đang dùng; giữ nguyên hình dạng, `CareQueue` là bản đầy đủ. */
 export type CareWorkbench = CareQueue;
 
@@ -389,4 +391,10 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
 /** Nhãn hành động care gần nhất — dùng chung với ngăn kéo. */
 export function careActionLabel(kind: string): string {
   return CARE_ACTION_LABEL[kind as CareActionKind] ?? kind;
+}
+
+/** Mẫu note nhanh của shop (bảng settings); chưa ai chỉnh thì dùng bộ mặc định. */
+export async function getCareNotePresets(): Promise<CareNotePreset[]> {
+  const v = await getSettingJson<{ presets: CareNotePreset[] }>(CARE_NOTE_PRESETS_KEY, { presets: CARE_NOTE_PRESETS_DEFAULT });
+  return Array.isArray(v.presets) ? v.presets : CARE_NOTE_PRESETS_DEFAULT;
 }

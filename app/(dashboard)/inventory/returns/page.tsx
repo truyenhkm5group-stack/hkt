@@ -118,6 +118,7 @@ export default async function ReturnInspectionPage() {
               rows={choNhan.rows.map((r) => ({
                 id: r.id,
                 label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,
+                items: r.items.length ? r.items.map((i) => `${i.name}${i.variant ? ` (${i.variant})` : ""} ×${i.qty}`).join(" · ") : "Chưa nối được đơn — không biết mặt hàng",
                 receivedAt: r.returnReceivedAt ? formatDateTime(r.returnReceivedAt) : null,
               }))}
             />

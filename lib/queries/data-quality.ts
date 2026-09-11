@@ -233,6 +233,7 @@ export async function dataQualityOrders(issue: DqIssue, period: Period, page: nu
 
 export type DqShipmentRow = {
   id: string;
+  orderId: string | null;
   vtpOrderNumber: string | null;
   orderReference: string | null;
   stage: string;
@@ -249,6 +250,7 @@ export type DqShipmentRow = {
 
 const SHIPMENT_COLUMNS = {
   id: s.id,
+  orderId: s.orderId,
   vtpOrderNumber: s.vtpOrderNumber,
   orderReference: s.orderReference,
   stage: s.stage,
@@ -297,5 +299,46 @@ export async function returnsAwaitingWarehouse(page: number, pageSize: number, q
     db.select(SHIPMENT_COLUMNS).from(s).where(where).orderBy(desc(s.returnedAt), desc(s.updatedAt)).limit(pageSize).offset((page - 1) * pageSize),
     db.select({ n: sql<number>`count(*)` }).from(s).where(where),
   ]);
-  return { rows: rows as DqShipmentRow[], total: num(total?.n) };
+  const items = await returnItemsByShipment(rows as DqShipmentRow[]);
+  return { rows: (rows as DqShipmentRow[]).map((r) => ({ ...r, items: items.get(r.id) ?? [] })), total: num(total?.n) };
+}
+
+export type ReturnItemSummary = { name: string; variant: string; qty: number };
+
+/**
+ * Mặt hàng của đơn ứng với từng kiện chờ kho nhận — kho nhìn danh sách là biết kiện nào chứa gì,
+ * không phải mở từng đơn (phản hồi chủ shop 11/09). Kiện chiều về (`[số]P[số]`) có `order_id`
+ * NULL: nối qua `order_reference` = mã vận đơn gốc để lấy đơn. Không nối được ⇒ danh sách rỗng.
+ */
+async function returnItemsByShipment(rows: DqShipmentRow[]): Promise<Map<string, ReturnItemSummary[]>> {
+  const out = new Map<string, ReturnItemSummary[]>();
+  if (!rows.length) return out;
+  const db = await getDb();
+  const refs = [...new Set(rows.filter((r) => !r.orderId && r.orderReference).map((r) => r.orderReference as string))];
+  const refToOrder = new Map<string, string>();
+  if (refs.length) {
+    const found = await db.select({ vtp: s.vtpOrderNumber, orderId: s.orderId }).from(s).where(and(inArray(s.vtpOrderNumber, refs), sql`${s.orderId} is not null`));
+    for (const f of found) if (f.vtp && f.orderId) refToOrder.set(f.vtp, f.orderId);
+  }
+  const orderOf = (r: DqShipmentRow) => r.orderId ?? (r.orderReference ? refToOrder.get(r.orderReference) : undefined) ?? null;
+  const orderIds = [...new Set(rows.map(orderOf).filter((x): x is string => Boolean(x)))];
+  if (!orderIds.length) return out;
+  const oi = schema.orderItems;
+  const lines = await db
+    .select({ orderId: oi.orderId, name: oi.productName, variant: oi.variationDetail, qty: sql<number>`coalesce(sum(${oi.quantity}), 0)` })
+    .from(oi)
+    .where(inArray(oi.orderId, orderIds))
+    .groupBy(oi.orderId, oi.productName, oi.variationDetail)
+    .orderBy(oi.productName);
+  const byOrder = new Map<string, ReturnItemSummary[]>();
+  for (const l of lines) {
+    const arr = byOrder.get(l.orderId) ?? [];
+    arr.push({ name: l.name, variant: l.variant ?? "", qty: num(l.qty) });
+    byOrder.set(l.orderId, arr);
+  }
+  for (const r of rows) {
+    const o = orderOf(r);
+    if (o) out.set(r.id, byOrder.get(o) ?? []);
+  }
+  return out;
 }

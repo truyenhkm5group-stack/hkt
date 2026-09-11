@@ -22,7 +22,7 @@ export function ReceiveReturns({
   rows,
   bulk,
 }: {
-  rows: { id: string; label: string; receivedAt: string | null }[];
+  rows: { id: string; label: string; receivedAt: string | null; items?: string }[];
   /** Toàn bộ hàng hoàn ĐÃ VỀ TỚI SHOP còn chờ kho xác nhận — không giới hạn ở trang đang xem. */
   bulk?: { count: number; items: number; waitingDays: number | null };
 }) {
@@ -121,11 +121,15 @@ export function ReceiveReturns({
         {rows.map((row) => (
           <li key={row.id} className="flex items-center gap-3 px-3 py-2 text-sm">
             <Checkbox checked={selected.has(row.id)} onCheckedChange={() => toggle(row.id)} aria-label={`Chọn ${row.label}`} />
-            <span className="numeric font-medium">{row.label}</span>
+            <div className="min-w-0 flex-1">
+              <div className="numeric font-medium">{row.label}</div>
+              {/* Kiện này chứa gì — kho đối chiếu ngay khi nhận, không phải mở từng đơn. */}
+              {row.items ? <div className="truncate text-xs text-muted-foreground" title={row.items}>{row.items}</div> : null}
+            </div>
             {row.receivedAt ? (
-              <span className="ml-auto text-xs text-success">Đã nhận {row.receivedAt}</span>
+              <span className="ml-auto shrink-0 text-xs text-success">Đã nhận {row.receivedAt}</span>
             ) : (
-              <span className="ml-auto text-xs text-muted-foreground">Chưa về kho</span>
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">Chưa về kho</span>
             )}
           </li>
         ))}

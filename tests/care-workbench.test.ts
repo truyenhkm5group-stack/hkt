@@ -6,11 +6,12 @@ import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import { settleCarrierRequests } from "@/lib/care/carrier-requests";
 import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus, type CareActor } from "@/lib/care/service";
 import { careViewOf, slaOf } from "@/lib/care/view";
-import { CARE_STATUSES, CARE_TRANSITIONS, canTransition } from "@/lib/constants/care";
+import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, CARE_STATUSES, CARE_TRANSITIONS, canTransition } from "@/lib/constants/care";
+import { setSettingJson } from "@/lib/settings";
 import { setViettelPostClientForTests } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { getCareReport } from "@/lib/queries/care-report";
-import { getCareCaseDetail, getCareEvents, getCareQueue } from "@/lib/queries/care-workbench";
+import { getCareCaseDetail, getCareEvents, getCareNotePresets, getCareQueue } from "@/lib/queries/care-workbench";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -31,6 +32,12 @@ import { resolvePeriod } from "@/lib/search-params";
 export async function testCareWorkbench(db: Db) {
   const actor: CareActor = { id: null, email: "cs@test", name: "CS", source: "API" };
   const gio = (h: number) => new Date(Date.now() - h * 3600_000);
+
+  // ───────── Mẫu note nhanh: mặc định có sẵn, chỉnh xong thì đọc đúng bộ đã lưu ─────────
+  assert.ok(CARE_NOTE_PRESETS_DEFAULT.length >= 5 && CARE_NOTE_PRESETS_DEFAULT.every((p) => p.text.trim() && p.id), "bộ mẫu mặc định phải có nội dung và id");
+  assert.deepEqual(await getCareNotePresets(), CARE_NOTE_PRESETS_DEFAULT, "chưa ai chỉnh ⇒ dùng bộ mặc định");
+  await setSettingJson(CARE_NOTE_PRESETS_KEY, { presets: [{ id: "x1", kind: "OTHER", text: "Mẫu riêng của shop" }] });
+  assert.deepEqual(await getCareNotePresets(), [{ id: "x1", kind: "OTHER", text: "Mẫu riêng của shop" }], "đã chỉnh ⇒ đọc đúng bộ đã lưu, không trộn mặc định");
 
   // ───────── Bảng chuyển trạng thái tự nhất quán ─────────
   for (const from of CARE_STATUSES) for (const to of CARE_TRANSITIONS[from]) assert.ok(CARE_STATUSES.includes(to), `${from} → ${to}: đích phải là trạng thái hợp lệ`);

@@ -221,3 +221,25 @@ export function carrierActionAllowed(key: CarrierActionKey, stage: string): bool
       return !final;
   }
 }
+
+// ───────────────────────────── MẪU NOTE NHANH ─────────────────────────────
+
+import type { CareActionKind } from "@/lib/constants/delivery-tower";
+
+/** Một mẫu note: bấm là đổ chữ vào ô và chọn sẵn loại hành động. Chủ shop tự thêm / bớt. */
+export type CareNotePreset = { id: string; kind: CareActionKind; text: string };
+
+export const CARE_NOTE_PRESETS_KEY = "care.notePresets";
+export const CARE_NOTE_PRESETS_MAX = 30;
+
+/** Bộ mặc định khi chưa ai chỉnh — đúng những câu CS gõ đi gõ lại mỗi ngày. */
+export const CARE_NOTE_PRESETS_DEFAULT: CareNotePreset[] = [
+  { id: "p-no-answer", kind: "CALLED_NO_ANSWER", text: "Gọi 2 lần không nghe máy, đã nhắn Zalo/Pancake hẹn giao lại." },
+  { id: "p-reached-tomorrow", kind: "RESCHEDULED", text: "Khách hẹn nhận sáng mai, đã báo bưu tá phát lại." },
+  { id: "p-reached-weekend", kind: "RESCHEDULED", text: "Khách đi vắng, hẹn giao lại cuối tuần." },
+  { id: "p-address", kind: "ADDRESS_FIXED", text: "Khách đổi địa chỉ / SĐT nhận, đã cập nhật cho bưu cục." },
+  { id: "p-refused", kind: "CUSTOMER_REFUSED", text: "Khách xác nhận không lấy hàng nữa, cho hoàn về." },
+  { id: "p-carrier", kind: "ESCALATED_CARRIER", text: "Bưu tá báo sai, khách vẫn ở nhà — đã khiếu nại bưu cục yêu cầu phát lại." },
+  { id: "p-messaged", kind: "MESSAGED", text: "Đã nhắn tin xác nhận đơn, chờ khách trả lời." },
+  { id: "p-wrong-phone", kind: "CALLED_NO_ANSWER", text: "SĐT không liên lạc được (thuê bao), đã nhắn Pancake xin số khác." },
+];

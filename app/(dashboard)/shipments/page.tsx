@@ -13,7 +13,7 @@ import { assignableUsers } from "@/lib/actions/alerts";
 import { can, requirePermission } from "@/lib/auth/session";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
-import { getCareWorkbench } from "@/lib/queries/care-workbench";
+import { getCareNotePresets, getCareWorkbench } from "@/lib/queries/care-workbench";
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
 import { parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const viewRaw = typeof raw.view === "string" ? raw.view : "care";
   const view: CareView | "report" = viewRaw === "report" ? "report" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";
 
-  const [wb, staff] = view === "all" || view === "report" ? [null, []] : await Promise.all([getCareWorkbench(), assignableUsers()]);
+  const [wb, staff, presets] = view === "all" || view === "report" ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets()]);
   const counts = wb?.counts ?? (view === "all" || view === "report" ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
 
   const tab = (key: CareView | "report", label: string, count?: number) => (
@@ -88,7 +88,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       ) : view === "all" ? (
         <AllShipments raw={raw} />
       ) : (
-        <CareWorkbenchView initial={wb!} view={view} staff={staff} canManage={can(user, "shipments:manage")} />
+        <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} canManage={can(user, "shipments:manage")} />
       )}
     </div>
   );

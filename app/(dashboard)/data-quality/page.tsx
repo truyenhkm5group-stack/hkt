@@ -25,7 +25,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
 import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
+import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments, type ReturnItemSummary } from "@/lib/queries/data-quality";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_LABEL, SEVERITY_TONE, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -359,6 +359,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                   rows={drill.rows.map((r) => ({
                     id: r.id,
                     label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,
+                    items: ((r as { items?: ReturnItemSummary[] }).items ?? []).map((i) => `${i.name}${i.variant ? ` (${i.variant})` : ""} ×${i.qty}`).join(" · ") || "Chưa nối được đơn — không biết mặt hàng",
                     receivedAt: r.returnReceivedAt ? formatDateTime(r.returnReceivedAt) : null,
                   }))}
                 />

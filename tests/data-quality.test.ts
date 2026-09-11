@@ -137,6 +137,15 @@ export async function testDataQuality(db: Db) {
   assert.ok(waiting.rows.every((r) => r.returnReceivedAt === null), "danh sách chờ chỉ gồm vận đơn chưa xác nhận");
   const target = waiting.rows[0];
   assert.ok(target, "phải có ít nhất một vận đơn hoàn đang chờ kho");
+  // Kho nhìn danh sách là biết kiện chứa gì: kiện nối được đơn phải mang mặt hàng (tên · mẫu · số lượng).
+  const coDon = waiting.rows.filter((r) => r.orderId);
+  assert.ok(coDon.length > 0, "fixture phải có kiện chờ kho nhận nối được đơn");
+  for (const r of coDon) {
+    const [{ qty }] = await db.select({ qty: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)::int` }).from(schema.orderItems).where(eq(schema.orderItems.orderId, r.orderId!));
+    assert.equal(r.items.reduce((a, i) => a + i.qty, 0), Number(qty), `kiện ${r.id}: tổng số món liệt kê phải bằng đúng order_items của đơn`);
+    assert.ok(r.items.every((i) => i.name && i.qty > 0), "mỗi dòng mặt hàng có tên và số lượng dương");
+  }
+  assert.ok(waiting.rows.filter((r) => !r.orderId && !r.orderReference).every((r) => r.items.length === 0), "kiện không nối được đơn ⇒ danh sách mặt hàng rỗng, không đoán");
   const first = await markReturnReceived([target.id], "test-kho", "Kiện đã về");
   assert.equal(first.count, 1);
   const second = await markReturnReceived([target.id], "test-kho-2");
