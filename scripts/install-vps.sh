@@ -189,6 +189,9 @@ fi
 # `SIGKILL` giữa lúc `next build` là hết RAM. Máy có ~1,9 GB và đang chạy Postgres + ứng dụng +
 # bộ lập lịch + Caddy, rồi `next build` chạy bên trong Docker — mà compose dựng HAI image (app và
 # scheduler) từ cùng một Dockerfile. Cùng SHA đó chạy lại ở #209 thì thành công: đang ở sát mép.
+# Deploy #227 (11/09/2026) chết lại đúng chỗ đó khi bản dựng nặng thêm (SDK AI). Từ đó
+# docker-compose.prod.yml khai MỘT image `erp-app:local`: app dựng, scheduler dùng lại — chỉ còn
+# một `next build` tại một thời điểm.
 #
 # "Chạy lại thấy được" KHÔNG phải giải pháp. Ba việc dưới đây, theo thứ tự rẻ nhất trước:
 #

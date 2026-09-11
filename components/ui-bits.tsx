@@ -23,9 +23,10 @@ export function DescriptionList({ items, className, columns = 2 }: { items: { la
 export function SectionCard({ title, description, hint, actions, children, className, contentClassName, padded = true }: { title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
   return (
     <section className={cn("overflow-hidden rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
+      {/* Bộ lọc dài (Cần xử lý) từng ép tiêu đề thành một cột hẹp: hàng đầu được GÃY DÒNG, tiêu đề giữ tối thiểu 220px. */}
       {title ? (
-        <div className="flex items-start justify-between gap-3 border-b border-hairline px-5 py-3">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-hairline px-5 py-3">
+          <div className="min-w-0 flex-1 basis-[220px]">
             <h2 className="flex items-center gap-1.5 text-[13.5px] font-bold">
               {title}
               {hint ? <InfoHint>{hint}</InfoHint> : null}
@@ -33,7 +34,7 @@ export function SectionCard({ title, description, hint, actions, children, class
             {/* Một câu ngắn. Giải thích dài thuộc về `hint` (dấu ⓘ ở trên), không in ra màn hình. */}
             {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
           </div>
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
       ) : null}
       <div className={cn(padded && "p-5", contentClassName)}>{children}</div>

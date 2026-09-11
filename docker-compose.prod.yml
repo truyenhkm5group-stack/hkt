@@ -19,7 +19,10 @@ services:
       retries: 20
 
   app:
+    # MỘT image cho cả app lẫn scheduler. Trước đây cả hai khai `build: .` nên compose dựng HAI lần
+    # cùng lúc — hai `next build` song song trên VPS ~1,9 GB là đúng cách bị SIGKILL (deploy #208, #227).
     build: .
+    image: erp-app:local
     container_name: erp-app
     restart: unless-stopped
     env_file: .env
@@ -34,7 +37,8 @@ services:
         condition: service_healthy
 
   scheduler:
-    build: .
+    # Dùng lại image của app (đã dựng ở trên), không dựng lần hai.
+    image: erp-app:local
     container_name: erp-scheduler
     restart: unless-stopped
     env_file: .env
