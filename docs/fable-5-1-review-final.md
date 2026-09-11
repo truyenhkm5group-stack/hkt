@@ -208,6 +208,19 @@ chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu
   lực (tra được qua API / chỉ nhận webhook / đang dò). Vận đơn chỉ nhận webhook khoẻ theo webhook.
 - Kiểm thử: `tests/vtp-capability.test.ts` (client giả qua `setViettelPostClientForTests`).
 
+**Sau deploy `62bbaf8`** (ảnh chụp KPI production 06:48 UTC 11/09): 2.556 đơn · 421 giao thành công ·
+GTC 31,6% · lên đơn 985.504.498đ · giao thành công 223.925.000đ · **thực nhận có chứng từ
+212.052.000đ (không đổi)** · COD đang chờ 10.377.000đ · việc đang mở 269. Số đơn/tiền tăng so với
+mục 6 là do dữ liệu mới về (2.433 → 2.556 đơn), không phải do đổi công thức.
+
+**Kiểm chứng production sau deploy `dc076dd`** (07:09 UTC, đọc qua `db-query`):
+- Giá vốn đơn đã giao: `RECEIPT_BEFORE` 53 · `RECEIPT_AFTER` 368 · không dòng nào `recognized_cogs`
+  NULL · chưa có lần chốt lại nào (`trued_up` 0, `audit COGS_TRUE_UP` 0) — đúng như kỳ vọng vì shop
+  chưa nhập phiếu mới; cơ chế chỉ kích hoạt khi có chứng từ mạnh hơn.
+- Viettel Post: hai lượt tra gần nhất ghi **SUCCESS** (trước đây PARTIAL mỗi 10 phút), mỗi lượt kết
+  luận 10 vận đơn chỉ nhận webhook; đang chạy 565 vận đơn `WEBHOOK_ONLY`, còn 4 `UNKNOWN_CAPABILITY`
+  đang dò. Kết nối dữ liệu không còn "chạy nhưng có lỗi" vì lý do năng lực tài khoản.
+
 ### 7.6 Tra nhanh ngay trên hàng đợi và danh sách đơn (ít bấm hơn)
 
 Không viết ngăn kéo đơn mới: ngăn kéo vận đơn (`CareDrawer`) đã gom khách · món hàng · lịch sử mua ·
