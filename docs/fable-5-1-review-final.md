@@ -142,7 +142,10 @@ sau mở lại (một việc tổng hợp chỉ xong khi hết thứ nó đếm)
 `cs_cases` (tồn đọng, quá hạn, tuổi, chưa ai nhận, tiền), không đếm thông báo. Luật một chỗ:
 `lib/constants/cs.ts`; lá chắn: `tests/cs-case-grouping.test.ts`.
 
-Ước tính trên số production: 232 dòng → **~4 dòng riêng + ~10 dòng tổng hợp**.
+Đo trên production sau deploy `ed92988` (lượt quét cảnh báo đầu tiên): **232 dòng "Case CSKH" → 14
+dòng riêng + 9 dòng tổng hợp**; "đang chuyển hoàn" 99 → 1. Tổng việc đang mở **468 → 254**. Phần
+còn lại của hàng đợi bây giờ nói về đúng thứ cần người làm: 163 đơn đã chốt chưa gửi, 25 giao hụt
+chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu mã thiếu hàng.
 
 ### 7.2 Cùng mẫu cho hai nguồn nhiễu khác
 
