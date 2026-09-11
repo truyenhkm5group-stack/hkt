@@ -13,6 +13,7 @@ import { testInventory } from "./inventory.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
 import { testCostAllocation } from "./cost-allocation.test";
 import { testBankLedger } from "./bank-ledger.test";
+import { testSepayWebhook } from "./sepay-webhook.test";
 import { testCostDoubleCount } from "./cost-double-count.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
@@ -1326,6 +1327,7 @@ async function main() {
   await testVtpImportRecovery(db);
   await testCostAllocation(db);
   await testBankLedger(db);
+  await testSepayWebhook(db);
   await testCostDoubleCount(db);
   await testVtpState(db);
   await testVtpIngestion(db);

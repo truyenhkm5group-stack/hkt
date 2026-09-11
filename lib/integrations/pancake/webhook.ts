@@ -52,7 +52,7 @@ export type StoredWebhook = {
  * Không có khoá thì vẫn lưu bình thường: không nhận dạng được KHÔNG phải lý do để mất dữ liệu.
  */
 export async function storeWebhook(
-  source: "PANCAKE" | "VIETTELPOST",
+  source: "PANCAKE" | "VIETTELPOST" | "SEPAY",
   eventType: string,
   externalId: string | null,
   payload: unknown,
@@ -83,7 +83,10 @@ export function webhookDedupeKey(source: string, parts: (string | number | null 
   return usable.length >= 2 ? [source, ...usable].join("|") : null;
 }
 
-export async function markWebhook(id: string, status: "PROCESSED" | "FAILED" | "IGNORED", error?: string | null) {
+/** ACCOUNT_UNMAPPED: đã ghi vào sổ nhưng tài khoản ngân hàng chưa được người xác nhận. */
+export type WebhookStatus = "PROCESSED" | "FAILED" | "IGNORED" | "ACCOUNT_UNMAPPED";
+
+export async function markWebhook(id: string, status: WebhookStatus, error?: string | null) {
   const db = await getDb();
   await db
     .update(schema.webhookEvents)

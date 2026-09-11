@@ -1451,6 +1451,51 @@ export const expenses = pgTable(
  * `lib/constants/cost-sources.ts` — tiền quảng cáo, tiền hàng, cước ĐVVC đã có nguồn chuyên biệt
  * nên dòng sao kê tương ứng chỉ tính vào DÒNG TIỀN, không trừ lần thứ hai vào lãi lỗ.
  */
+/**
+ * ════════════ TÀI KHOẢN NGÂN HÀNG ════════════
+ *
+ * Trước đây `bank_transactions.account` là một ô chữ tự do và luôn rỗng, vì sao kê tải tay không
+ * nói tài khoản nào — người nhập tự biết. Realtime thì không: một webhook SePay có thể tới từ bất
+ * kỳ tài khoản nào đã nối, nên phải có thực thể tài khoản thì mới trả lời được "đồng tiền này ở
+ * tài khoản nào" và "số dư từng tài khoản là bao nhiêu".
+ *
+ * KHOÁ TỰ NHIÊN = nhà cung cấp + cổng ngân hàng + số tài khoản + tài khoản phụ. `sub_account` là
+ * tài khoản ảo (VA) của SePay: cùng một số tài khoản gốc có thể sinh nhiều VA, và tiền vào VA là
+ * tiền vào tài khoản gốc — nhưng phải phân biệt được thì mới đối chiếu đơn hàng theo VA.
+ *
+ * `UNCONFIRMED` = ERP tự tạo khi thấy một tài khoản lạ trong gói tin đã xác thực chữ ký. Không
+ * chặn tiền lại: gói tin qua được HMAC nghĩa là nó đến từ chính tài khoản SePay của shop, nên tài
+ * khoản đó có thật. Việc của người là ĐẶT TÊN và xác nhận, không phải đi cứu giao dịch bị chặn.
+ */
+export const bankAccounts = pgTable(
+  "bank_accounts",
+  {
+    id: id(),
+    /** '' = tài khoản khai tay (sao kê tải về), 'SEPAY' = nhận diện từ gói tin SePay */
+    provider: text("provider").notNull().default(""),
+    /** Tên ngân hàng do nhà cung cấp đặt: MBBank, Vietcombank, ACB… KHÔNG hard-code ngân hàng nào. */
+    gateway: text("gateway").notNull().default(""),
+    accountNumber: text("account_number").notNull(),
+    /** Tài khoản ảo (VA) nếu có — '' là tài khoản gốc. */
+    subAccount: text("sub_account").notNull().default(""),
+    /** Tên người đọc hiểu. ERP tự sinh khi mới thấy, người sửa lại sau. */
+    label: text("label").notNull().default(""),
+    currency: text("currency").notNull().default("VND"),
+    /** ACTIVE = đã xác nhận · UNCONFIRMED = ERP tự thấy, chờ người đặt tên · DISABLED = ngừng dùng */
+    status: text("status").notNull().default("UNCONFIRMED"),
+    note: text("note").notNull().default(""),
+    /** Gói tin gần nhất chạm tới tài khoản này — để biết tài khoản còn sống hay đã ngừng đổ dữ liệu. */
+    lastSeenAt: ts("last_seen_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bank_accounts_natural_uq").on(t.provider, t.gateway, t.accountNumber, t.subAccount),
+    index("bank_accounts_status_idx").on(t.status),
+    check("bank_accounts_status_check", sql`${t.status} IN ('ACTIVE', 'UNCONFIRMED', 'DISABLED')`),
+  ],
+);
+
 export const bankTransactions = pgTable(
   "bank_transactions",
   {
@@ -1475,8 +1520,51 @@ export const bankTransactions = pgTable(
     /** "" = chưa ai phân loại; "rule" = do quy tắc; còn lại là email người phân loại */
     classifiedBy: text("classified_by").notNull().default(""),
     classifiedAt: ts("classified_at"),
-    /** IMPORT = từ file sao kê, MANUAL = gõ tay (tiền mặt, ví điện tử…) */
+    /**
+     * NGUỒN GỐC, KHÔNG PHẢI DANH TÍNH.
+     *
+     * Đường vào đã TẠO dòng này. Bất biến sau khi tạo. Cùng một giao dịch ngân hàng có thể được
+     * nhiều đường xác nhận (webhook báo trước, sao kê tải về sau) — nhưng chỉ có MỘT dòng, và
+     * `seen_sources` mới là nơi ghi đủ các đường đã xác nhận nó.
+     *
+     * IMPORT = sao kê · MANUAL = gõ tay · WEBHOOK = SePay đẩy realtime · API = truy vấn đối chiếu
+     */
     source: text("source").notNull().default("IMPORT"),
+    /** Nhà cung cấp đã đẩy dòng này về: '' (sao kê tải tay) hoặc 'SEPAY'. */
+    provider: text("provider").notNull().default(""),
+    /**
+     * DANH TÍNH GIAO HÀNG của nhà cung cấp (`id` trong gói tin SePay) — KHÁC danh tính kinh tế.
+     *
+     * SePay gửi lại tối đa 7 lần trong 5 giờ. Ràng buộc DUY NHẤT trên cột này là thứ khiến gửi lại
+     * KHÔNG THỂ đẻ dòng thứ hai, kể cả hai gói tin tới cùng lúc — chống trùng bằng mã ứng dụng
+     * thôi thì vẫn thua điều kiện tranh chấp.
+     *
+     * NGƯỜI ĐẦU TIÊN THẮNG: đã có mã rồi thì gói tin sau không ghi đè. Hai mã SePay khác nhau cùng
+     * trỏ về một giao dịch ngân hàng là bất thường — phải nêu ra, không được im lặng thay mã.
+     */
+    providerTxnId: text("provider_txn_id").notNull().default(""),
+    /** Tài khoản ngân hàng phát sinh. NULL = chưa nhận diện được (sao kê tải tay đời cũ). */
+    bankAccountId: text("bank_account_id"),
+    /** Đường vào xác nhận dòng này gần nhất. */
+    lastSeenSource: text("last_seen_source").notNull().default(""),
+    /** Toàn bộ provenance: [{source, provider, at, ref}] — mỗi lần một đường xác nhận thì thêm một mục. */
+    seenSources: jsonb("seen_sources").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Số dư luỹ kế sau giao dịch, theo ngân hàng.
+     *
+     * NULL = CHƯA BIẾT, không phải 0. Đây là mỏ neo đối chiếu mạnh nhất của cả sổ: xếp theo thời
+     * gian thì `balance_after[i] − balance_after[i−1]` phải bằng `amount[i]`. Đứt chuỗi = thiếu
+     * giao dịch; bước không khớp = trùng giao dịch.
+     */
+    balanceAfter: integer("balance_after"),
+    /**
+     * LƯỚI AN TOÀN, KHÔNG PHẢI KHOÁ. Cố ý KHÔNG unique.
+     *
+     * Hai dòng cùng `match_key` mà khác `bank_ref` thì ERP nêu ra để người xem, TUYỆT ĐỐI không tự
+     * gộp: hai lần chuyển cùng số tiền cho cùng một người trong cùng một phút là chuyện có thật, và
+     * tự gộp là xoá tiền thật.
+     */
+    matchKey: text("match_key").notNull().default(""),
     /**
      * ĐỐI CHIẾU, KHÔNG PHẢI GHI NHẬN.
      *
@@ -1499,7 +1587,12 @@ export const bankTransactions = pgTable(
     check("bank_txn_linked_pair_check", sql`(${t.linkedType} = '' AND ${t.linkedId} = '') OR (${t.linkedType} <> '' AND length(${t.linkedId}) > 0)`),
     // Số tiền 0 không phải giao dịch; chiều tiền phải rõ ràng.
     check("bank_txn_amount_check", sql`${t.amount} <> 0`),
-    check("bank_txn_source_check", sql`${t.source} IN ('IMPORT', 'MANUAL')`),
+    check("bank_txn_source_check", sql`${t.source} IN ('IMPORT', 'MANUAL', 'WEBHOOK', 'API')`),
+    // CHỐNG TRÙNG Ở TẦNG CSDL, không phải ở tầng ứng dụng: gói tin gửi lại (SePay thử tối đa 7 lần)
+    // hoặc hai gói tin cùng lúc đều không thể đẻ dòng thứ hai cho cùng một mã giao dịch nhà cung cấp.
+    uniqueIndex("bank_txn_provider_uq").on(t.provider, t.providerTxnId).where(sql`${t.providerTxnId} <> ''`),
+    index("bank_txn_match_idx").on(t.matchKey),
+    index("bank_txn_account_idx").on(t.bankAccountId, t.txnAt),
   ],
 );
 

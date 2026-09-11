@@ -85,6 +85,21 @@ export const env = {
       return this.openaiConfigured || this.anthropicConfigured;
     },
   },
+  /**
+   * SePay — cổng Open Banking đẩy biến động số dư realtime về ERP.
+   *
+   * HMAC là đường chính (`SEPAY_WEBHOOK_SECRET`). API key chỉ là đường lùi cho lúc dựng thử: nó
+   * chứng minh nguồn gửi nhưng KHÔNG phát hiện nội dung bị sửa, nên khi đã khai secret HMAC thì
+   * route từ chối hạ cấp xuống API key.
+   */
+  sepay: {
+    get webhookSecret() {
+      return read("SEPAY_WEBHOOK_SECRET");
+    },
+    get webhookApiKey() {
+      return read("SEPAY_WEBHOOK_API_KEY");
+    },
+  },
   viettelPost: {
     get apiKey() {
       return read("VIETTELPOST_API_KEY");
@@ -112,5 +127,7 @@ export function integrationStatus() {
     facebook: Boolean(env.facebook.accessToken),
     pancakeWebhook: Boolean(env.pancake.webhookSecret),
     viettelPostWebhook: Boolean(env.viettelPost.webhookSecret),
+    sepayWebhook: Boolean(env.sepay.webhookSecret || env.sepay.webhookApiKey),
+    sepayWebhookSigned: Boolean(env.sepay.webhookSecret),
   };
 }

@@ -11,6 +11,7 @@
  */
 import type { BankGroup } from "@/lib/constants/bank";
 import type { LedgerTxn } from "@/lib/integrations/bank/ledger";
+import { bankMatchKey } from "@/lib/integrations/bank/sepay";
 
 /**
  * Mã danh mục của app sao kê → nhóm kế toán ERP.
@@ -95,12 +96,21 @@ export type BankImportRow = {
   accountingGroup: BankGroup;
   categoryCode: string;
   note: string;
+  /**
+   * LƯỚI AN TOÀN PHÁT HIỆN TRÙNG CHÉO HAI NGUỒN.
+   *
+   * Dòng nhập từ file phải mang khoá này thì mới so được với dòng do webhook SePay tạo. Thiếu nó,
+   * lưới chỉ canh được webhook-với-webhook — đúng cặp nguy hiểm nhất (file ↔ realtime) lại lọt.
+   * Khoá CỐ Ý không chứa số tài khoản: sao kê tải tay không nói tài khoản nào.
+   */
+  matchKey: string;
 };
 
 export function toBankRow(txn: LedgerTxn): BankImportRow {
   const code = txn.categoryCode.trim().toUpperCase();
+  const txnAt = statementInstant(txn);
   return {
-    txnAt: statementInstant(txn),
+    txnAt,
     amount: txn.amount,
     description: txn.description.replace(/\s+/g, " ").trim().slice(0, 1000),
     counterparty: txn.counterparty.replace(/\s+/g, " ").trim().slice(0, 300),
@@ -108,6 +118,7 @@ export function toBankRow(txn: LedgerTxn): BankImportRow {
     accountingGroup: LEDGER_TO_BANK_GROUP[code] ?? "UNCLASSIFIED",
     categoryCode: code === "CHUA_PHAN_LOAI" ? "" : code.slice(0, 100),
     note: txn.note.trim().slice(0, 500),
+    matchKey: bankMatchKey({ amount: txn.amount, txnAt }),
   };
 }
 
