@@ -314,24 +314,32 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
 
   if (cfg.enabled.returning) {
     activeKinds.push("SHIPMENT_RETURNING");
-    const rows = await db
-      .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, statusName: s.vtpStatusName, statusDate: s.vtpStatusDate, updatedAt: s.updatedAt })
+    /*
+      MỘT VIỆC TỔNG HỢP, KHÔNG PHẢI 99 VIỆC. Kiện đang trên đường về là kiện KHÔNG AI LÀM GÌ ĐƯỢC
+      (hạn xử lý null, khả năng cứu 0,3, hành động "chuẩn bị nhận hàng") — production có 99 dòng
+      như vậy chiếm chỗ trong hàng đợi. Tháp giao vận đã có rổ riêng cho chúng. Ở đây chỉ còn một
+      dòng nói đủ số: bao nhiêu kiện, bao nhiêu COD, kiện cũ nhất — và cập nhật tại chỗ.
+    */
+    const [tong] = await db
+      .select({
+        n: sql<number>`count(*)::int`,
+        cod: sql<number>`coalesce(sum(${s.codAmount}), 0)`,
+        oldest: sql<number>`coalesce(max(extract(epoch from (now() - coalesce(${s.vtpStatusDate}, ${s.updatedAt}))) / 3600), 0)`,
+      })
       .from(s)
-      .leftJoin(o, eq(o.id, s.orderId))
-      .where(and(eq(s.stage, "RETURNING"), sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt}) >= ${lookback.toISOString()}::timestamptz`))
-      .limit(500);
-    for (const r of rows) {
-      const code = r.vtp || r.tracking || r.shipmentId;
+      .where(and(eq(s.stage, "RETURNING"), sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt}) >= ${lookback.toISOString()}::timestamptz`));
+    if (Number(tong?.n ?? 0) > 0) {
       candidates.push({
         kind: "SHIPMENT_RETURNING",
         severity: "info",
-        title: `Đang chuyển hoàn · ${code}`,
-        body: `${r.id ? orderLabel(r) : "Vận đơn ngoài Pancake"}${r.statusName ? ` · ${r.statusName}` : ""} — theo dõi nhận hàng hoàn về kho`,
-        href: `/shipments/${r.shipmentId}`,
-        entityType: "SHIPMENT",
-        entityId: r.shipmentId,
-        dedupeKey: `ship-returning:${r.shipmentId}`,
-        occurredAt: r.statusDate ?? r.updatedAt,
+        title: `Đang chuyển hoàn · ${Number(tong.n)} kiện · ${formatVND(Number(tong.cod))} COD không về`,
+        body: `Viettel Post đang chở hàng về shop; chưa làm gì được cho tới khi hàng tới. Kiện cũ nhất đang về ${ageLabel(Number(tong.oldest))}. Khi hàng tới: xác nhận đã nhận rồi kiểm đếm ở trang Kiểm đếm hàng hoàn. Xem danh sách`,
+        href: "/shipments?stage=RETURNING",
+        entityType: "SHIPMENT_GROUP",
+        entityId: "returning",
+        dedupeKey: "ship-returning-all",
+        occurredAt: new Date(Date.now() - Number(tong.oldest) * 3_600_000),
+        refresh: true,
       });
     }
   }
@@ -673,9 +681,12 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           href: "/inventory/returns",
           entityType: "DATA_RULE",
           entityId: "return-not-received",
-          // Khoá theo SỐ LƯỢNG: kho xử lý bớt thì việc cũ tự đóng và mở việc mới với con số đúng.
-          dedupeKey: `return-inspect-bulk:${rest.length}`,
+          // Khoá ỔN ĐỊNH, nội dung cập nhật tại chỗ. Bản trước khoá theo số lượng: kho đếm bớt một
+          // kiện là việc cũ "tự đóng" và một việc mới mở ra — mỗi ngày vài lần, làm số "tự đóng"
+          // trong 30 ngày phồng lên mà không việc nào thật sự xong.
+          dedupeKey: "return-inspect-bulk",
           occurredAt: new Date(oldest),
+          refresh: true,
         });
       }
     } catch {
@@ -728,7 +739,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           href: "/inventory/returns",
           entityType: "DATA_RULE",
           entityId: "return-inspection-pending",
-          dedupeKey: `return-count-bulk:${rest.length}`,
+          dedupeKey: "return-count-bulk",
+          refresh: true,
           occurredAt: rest[0].receivedAt,
         });
       }
@@ -913,18 +925,28 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   if (candidates.length) {
     created = await db
       .insert(n)
-      .values(candidates.map(({ refresh: _refresh, ...c }) => ({ ...c, readBy: [] as string[] })))
+      .values(
+        candidates.map((c) => {
+          const row = { ...c, readBy: [] as string[] };
+          delete row.refresh; // cờ điều khiển, không phải cột
+          return row;
+        }),
+      )
       .onConflictDoNothing({ target: n.dedupeKey })
       .returning();
   }
-  // Việc TỔNG HỢP đang mở: nội dung phải nói con số của LÚC NÀY, không phải của lúc tạo.
+  /*
+    VIỆC "SỐNG" (refresh): nội dung phải nói con số của LÚC NÀY, không phải của lúc tạo. Và nếu nó
+    đã bị đóng — bởi máy hay bởi người — mà điều kiện vẫn còn (vẫn có case / kiện), thì mở lại:
+    một việc tổng hợp không "xong" được bằng cách bấm nút, nó chỉ xong khi hết thứ nó đếm.
+  */
   const createdKeys = new Set(created.map((c) => c.dedupeKey));
   for (const c of candidates) {
     if (!c.refresh || createdKeys.has(c.dedupeKey)) continue;
     await db
       .update(n)
-      .set({ title: c.title, body: c.body, severity: c.severity, href: c.href, occurredAt: c.occurredAt ?? null })
-      .where(and(eq(n.dedupeKey, c.dedupeKey), isNull(n.resolvedAt)));
+      .set({ title: c.title, body: c.body, severity: c.severity, href: c.href, occurredAt: c.occurredAt ?? null, resolvedAt: null, resolution: null, resolvedBy: null })
+      .where(eq(n.dedupeKey, c.dedupeKey));
   }
   const [{ open }] = await db.select({ open: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt));
 

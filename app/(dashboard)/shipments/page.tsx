@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { DeliveryTower } from "@/app/(dashboard)/shipments/tower";
 import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -35,6 +37,10 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         Bảng tra cứu vẫn nguyên vẹn bên dưới — không bỏ gì cả. Chỉ đổi thứ tự: việc cần làm hôm nay
         đứng trước danh sách để tra, vì mở trang này buổi sáng là để làm việc, không phải để tra.
       */}
+      {/* Số vận đơn cũ ba tiếng mà trông như số thật thì tệ hơn không có số: độ tươi đứng trước bảng. */}
+      <Suspense fallback={null}>
+        <DataFreshnessStrip />
+      </Suspense>
       <DeliveryTower bucket={typeof raw.bucket === "string" ? raw.bucket : undefined} />
       <DataTableToolbar
         searchPlaceholder="Mã vận đơn, mã VTP, SĐT, tên người nhận, mã đơn…"

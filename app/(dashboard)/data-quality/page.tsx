@@ -5,11 +5,9 @@ import {
   Boxes,
   CircleHelp,
   Link2Off,
-  PackageCheck,
   Percent,
   ShoppingBag,
   Truck,
-  Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
@@ -101,12 +99,13 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
 
       <DataTableToolbar period={{ defaultKey: "90d" }} searchPlaceholder={issue ? "Tìm mã đơn, mã vận đơn, tên, SĐT…" : undefined} resultLabel={`Kỳ: ${params.period.label}`} />
 
-      {/* ───────── KPI vận hành theo quy tắc thực tế ───────── */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Tổng đơn (không tính huỷ)" value={formatNumber(summary.total)} icon={ShoppingBag} tone="primary" note={`${formatNumber(summary.cancelled)} đơn huỷ không tính`} />
-        <MetricCard label="Giao thành công — đối chiếu tạm" value={formatNumber(summary.delivered)} icon={PackageCheck} tone="amber" note="Chưa xác minh theo chứng từ" />
-        <MetricCard label="Đơn hoàn — đối chiếu tạm" value={formatNumber(summary.returned)} icon={Undo2} tone="rose" note="Không đồng nghĩa kho đã nhận hàng" />
-        <MetricCard label="Đơn đang giao" value={formatNumber(summary.inTransit)} icon={Truck} tone="blue" note="Chưa kết luận được kết quả" />
+      {/*
+        CHỈ HAI THẺ TRANG NÀY MỚI TRẢ LỜI ĐƯỢC. Sáu thẻ "đối chiếu tạm" (tổng đơn, giao TC, hoàn,
+        đang giao, tỷ lệ giao, tiền legacy) chép lại /reports/returns và thẻ ② trang chủ bằng một
+        phiên bản "tạm" — cùng người đọc thấy hai tỷ lệ giao khác nhau ở hai trang. Bảng đối chiếu
+        legacy ↔ có chứng từ bên dưới vẫn giữ đủ các con số đó, đúng chỗ của nó.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2">
         <MetricCard
           label="Đơn chưa đủ dữ liệu xác minh"
           value={formatNumber(summary.unverified)}
@@ -114,8 +113,6 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           tone="amber"
           note={<Link className="underline underline-offset-2" href={drillHref("unverified")}>Xem danh sách →</Link>}
         />
-        <MetricCard label="Tỷ lệ giao — đối chiếu tạm" value={<Rate value={summary.successRate} />} icon={Percent} tone="amber" note="Chưa phải tỷ lệ đã xác minh" />
-        <MetricCard label="Tiền legacy — ước tính" value={<Money value={summary.provenCash} />} icon={CircleHelp} tone="amber" note="Có COD fallback và trả trước chưa kiểm chứng" />
         <MetricCard
           label="Giá trị COD chưa xác minh"
           value={summary.unverified ? <Money value={summary.unverifiedCod} /> : <Unknown>—</Unknown>}

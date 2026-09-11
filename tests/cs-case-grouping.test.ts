@@ -83,6 +83,12 @@ export async function testCsCaseGrouping(db: Db) {
   const [sauDong] = await open("cs-group:EXCHANGE_COLOR:-");
   assert.ok(sauDong && sauDong.id === nhomTra.id, "đóng bớt case thì việc tổng hợp CẬP NHẬT, không đóng rồi tạo mới");
   assert.match(sauDong.title, /1 case đang mở/);
+  // Người bấm "Đã xử lý" lên việc tổng hợp khi case vẫn còn: việc SỐNG mở lại ở lượt quét sau —
+  // nó chỉ xong khi hết thứ nó đếm, không xong bằng một cú bấm.
+  await db.update(schema.notifications).set({ resolvedAt: new Date(), resolution: "MANUAL" }).where(eq(schema.notifications.id, nhomTra.id));
+  await evaluateAlerts();
+  const [moLai] = await open("cs-group:EXCHANGE_COLOR:-");
+  assert.ok(moLai && moLai.id === nhomTra.id, "việc tổng hợp bị đóng tay khi case vẫn còn phải được mở lại, cùng id");
   await db.update(schema.csCases).set({ status: "DONE", resolvedAt: new Date() }).where(eq(schema.csCases.id, "csg-2"));
   await evaluateAlerts();
   assert.equal((await open("cs-group:EXCHANGE_COLOR:-")).length, 0, "hết case thì việc tổng hợp tự đóng");

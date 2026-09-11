@@ -452,6 +452,21 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
         Nên: tồn đọng và tiền lấy từ đường ống (dân số thật), còn "việc cần làm ngay" vẫn là 16 của
         hàng đợi. Hai câu hỏi khác nhau, hai con số khác nhau, cùng hiện ra.
       */
+      // Cùng lý do với hàng hoàn bên dưới: từ 11/09/2026 "đang chuyển hoàn" chỉ còn MỘT việc tổng
+      // hợp trong hàng đợi, nhưng khâu này phải đếm số KIỆN thật đang về.
+      if (spec.key === "RETURNING") {
+        const dangVe = hoan.stages.find((h) => h.key === "RETURNING_TO_SENDER");
+        if (dangVe && dangVe.parcels > 0) {
+          backlog = dangVe.parcels;
+          breached = dangVe.slaBreach;
+          oldest = Math.max(oldest, dangVe.oldestHours);
+          medianSum = dangVe.medianAgeHours * dangVe.parcels;
+          p90 = Math.max(p90, dangVe.p90AgeHours);
+          for (const b of AGING_BUCKETS) aging[b.key] = 0;
+          const moc = AGING_BUCKETS.find((b) => dangVe.medianAgeHours < b.maxHours) ?? AGING_BUCKETS[AGING_BUCKETS.length - 1];
+          aging[moc.key] += dangVe.parcels;
+        }
+      }
       if (spec.key === "RETURN_INSPECTION") {
         const cho = hoan.stages.filter((h) => h.actionable && h.parcels > 0);
         const kien = cho.reduce((t, h) => t + h.parcels, 0);

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, FileUp, Landmark, Receipt, Undo2 } from "lucide-react";
+import { Suspense } from "react";
+import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { SettlementTabs } from "@/app/(dashboard)/cod/settlement-tabs";
 import { StatementUploadDialog } from "@/app/(dashboard)/cod/statement-upload";
 import { UrlPagination } from "@/components/data-table/url-pagination";
@@ -78,6 +80,10 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           </>
         }
       />
+      {/* Tiền COD đọc từ bảng kê + trạng thái ĐVVC; đường nào đang đứt thì số ở đây đang cũ — nói ra trước. */}
+      <Suspense fallback={null}>
+        <DataFreshnessStrip />
+      </Suspense>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard

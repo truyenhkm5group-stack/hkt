@@ -3,7 +3,8 @@ import { getDb, schema } from "@/db";
 import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
 
-export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK";
+/** `ERP`: job nội bộ (dựng lại bảng dẫn xuất…) — cũng phải có bản ghi chạy, nếu không hỏng là không ai biết. */
+export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ERP";
 export type SyncTrigger = "MANUAL" | "CRON" | "WEBHOOK";
 
 export type SyncSummary = {
