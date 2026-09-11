@@ -1,98 +1,44 @@
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import {
-  CARE_BUCKETS,
-  CARE_REASON_LABEL,
-  CARE_SLA,
-  type CareReasonKey,
-  type CareStatus,
-  type CareView,
-  type CarrierActionKey,
-  type CarrierRequestStatus,
-} from "@/lib/constants/care";
-import { CARE_ACTION_LABEL, BUCKET_BY_KEY, type CareActionKind } from "@/lib/constants/delivery-tower";
+import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
+import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
+import { careViewOf, slaOf } from "@/lib/care/view";
+import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
-import { careViewOf, slaOf } from "@/lib/care/view";
 import { getDeliveryTower, type TowerRow } from "@/lib/queries/delivery-tower";
+import { getShipmentQuickView } from "@/lib/queries/shipment-quickview";
 import { rowsOf } from "@/lib/sql-rows";
 
+export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
+export { careViewOf, slaOf } from "@/lib/care/view";
+/** Tên cũ — UI hiện tại đang dùng; giữ nguyên hình dạng, `CareQueue` là bản đầy đủ. */
+export type CareWorkbench = CareQueue;
+
 /**
- * ═══════════ BÀN LÀM VIỆC GIAO VẬN: CASE, KHÔNG PHẢI VẬN ĐƠN ═══════════
+ * ═══════════ HÀNG ĐỢI CARE: ACTIONABLE POPULATION, KHÔNG PHẢI DANH SÁCH VẬN ĐƠN ═══════════
  *
- * Mở ra là thấy việc: kiện nào đang cần người, vì sao, phải làm gì, ai đang cầm, tiền nào đang
- * treo. Vận đơn bình thường (đang giao, đã giao, đang hoàn…) KHÔNG xuất hiện — tra ở "Tất cả".
+ * Máy chủ quyết định kiện nào cần người; UI không nhận toàn bộ vận đơn rồi tự lọc. Điều kiện cần
+ * care lấy từ ĐÚNG các rổ của tháp giao vận (một luật xếp rổ) + case CSKH sai địa chỉ / SĐT còn mở
+ * của lần gửi đang chạy. Trạng thái care là lớp riêng đè lên: kiện RỜI hàng đợi khi điều kiện hết,
+ * không phải khi đội bấm xong.
  *
- * Điều kiện cần care lấy từ ĐÚNG các rổ của tháp giao vận (một luật xếp rổ, không viết lại) cộng
- * case CSKH "sai địa chỉ / SĐT" còn mở của đơn đang gửi. Trạng thái care là lớp riêng đè lên: đội
- * đánh dấu tới đâu là chuyện của đội; kiện RỜI hàng đợi khi điều kiện hết, không phải khi đội bấm xong.
+ * Kiện "cũ dữ liệu / thiếu dữ liệu" (DATA_FRESHNESS) KHÔNG phải kiện hỏng: trả riêng ở `dataGaps`,
+ * không đếm vào backlog care, không tính SLA care.
  */
 
-export type CareState = {
-  status: CareStatus;
-  owner: { id: string; name: string } | null;
-  followUpAt: Date | null;
-  lastNote: string;
-  lastNoteAt: Date | null;
-  lastNoteBy: string;
-  firstResponseAt: Date | null;
-  doneAt: Date | null;
-  reopenCount: number;
-  updatedAt: Date | null;
-  updatedBy: string;
-};
-
-export type CarrierRequestView = {
-  id: string;
-  actionKey: CarrierActionKey;
-  status: CarrierRequestStatus;
-  at: Date;
-  error: string | null;
-  note: string;
-  actor: string;
-};
-
-export type CareCase = {
-  shipmentId: string;
-  tracking: string;
-  orderId: string | null;
-  orderSystemId: number | null;
-  customer: string;
-  phone: string;
-  codAmount: number;
-  carrier: {
-    stage: string;
-    stageLabel: string;
-    rawStatus: string;
-    ageHours: number | null;
-    failedAttempts: number;
-  };
-  reason: CareReasonKey;
-  reasonLabel: string;
-  reasonDetail: string;
-  nextAction: string;
-  /** Lúc kiện VÀO điều kiện cần care — mốc tính SLA. */
-  queueSince: Date;
-  sla: { firstResponseDueAt: Date; resolveDueAt: Date; firstResponseBreached: boolean; resolveBreached: boolean };
-  care: CareState;
-  /** Kiện đã được đóng rồi lại rơi vào điều kiện cần care sau đó. */
-  reopened: boolean;
-  lastCareAction: { label: string; at: Date; byHuman: boolean } | null;
-  carrierRequest: CarrierRequestView | null;
-  /** Tài khoản API có quyền trên kiện này không. Không có ⇒ mọi thao tác ĐVVC là PHẢI LÀM TAY. */
-  carrierCapability: "API" | "MANUAL";
-  view: Exclude<CareView, "all">;
-};
-
-export type CareWorkbench = {
-  cases: CareCase[];
-  counts: Record<Exclude<CareView, "all">, number>;
-  /** Tổng COD đang treo ở các kiện Cần care. */
-  moneyAtRisk: number;
-  overdue: number;
-  unassigned: number;
-  measuredAt: Date;
+const REASON_CLASS: Record<CareReasonKey, CareReasonClass> = {
+  CARE_TODAY: "CUSTOMER_ACTION",
+  NO_CONTACT: "CUSTOMER_ACTION",
+  DELIVERY_FAILED: "CUSTOMER_ACTION",
+  AWAITING_REDELIVERY: "CARRIER_ACTION",
+  WRONG_INFO: "CUSTOMER_ACTION",
+  STALE_NO_UPDATE: "DATA_FRESHNESS",
+  DATA_GAP: "DATA_FRESHNESS",
+  RETURNING: "CARRIER_ACTION",
+  RETURN_AT_SHOP: "CARRIER_ACTION",
 };
 
 const EMPTY_CARE: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "" };
@@ -116,8 +62,6 @@ function toCareState(r: CareRow | undefined): CareState {
   };
 }
 
-export { careViewOf, slaOf };
-
 async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
@@ -129,22 +73,23 @@ async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>
   return new Map(rows.map((r) => [r.care.shipmentId, { ...r.care, ownerName: r.ownerName }]));
 }
 
+function toRequestView(r: typeof schema.carrierActionRequests.$inferSelect): CarrierRequestView {
+  return { id: r.id, actionKey: r.actionKey as CarrierActionKey, status: r.status as CarrierRequestStatus, at: r.createdAt, error: r.error, note: r.note, actor: r.actorEmail, attempts: r.attempts };
+}
+
 async function loadLatestRequests(shipmentIds: string[]): Promise<Map<string, CarrierRequestView>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ shipment_id: string; id: string; action_key: string; status: string; at: string; error: string | null; note: string; actor_email: string }>(
+  const rows = rowsOf<{ shipment_id: string; id: string; action_key: string; status: string; at: string; error: string | null; note: string; actor_email: string; attempts: number }>(
     await db.execute(sql`
-      select distinct on (shipment_id) shipment_id, id, action_key, status, created_at as at, error, note, actor_email
+      select distinct on (shipment_id) shipment_id, id, action_key, status, created_at as at, error, note, actor_email, attempts
         from carrier_action_requests
        where shipment_id in ${shipmentIds}
        order by shipment_id, created_at desc
     `),
   );
   return new Map(
-    rows.map((r) => [
-      r.shipment_id,
-      { id: r.id, actionKey: r.action_key as CarrierActionKey, status: r.status as CarrierRequestStatus, at: new Date(r.at), error: r.error, note: r.note, actor: r.actor_email },
-    ]),
+    rows.map((r) => [r.shipment_id, { id: r.id, actionKey: r.action_key as CarrierActionKey, status: r.status as CarrierRequestStatus, at: new Date(r.at), error: r.error, note: r.note, actor: r.actor_email, attempts: Number(r.attempts ?? 0) }]),
   );
 }
 
@@ -193,12 +138,20 @@ async function loadWrongInfoCases(excludeIds: Set<string>): Promise<WrongInfoRow
   return rows.filter((r) => !excludeIds.has(r.shipment_id));
 }
 
-function carrierCapabilityOf(capability: string): "API" | "MANUAL" {
-  const configured = Boolean(env.viettelPost.apiKey || (env.viettelPost.username && env.viettelPost.password));
-  return configured && capability === "API_TRACKABLE" ? "API" : "MANUAL";
+function vtpConfigured() {
+  return Boolean(env.viettelPost.apiKey || (env.viettelPost.username && env.viettelPost.password));
 }
 
-async function buildWorkbench(): Promise<CareWorkbench> {
+function carrierCapabilityOf(capability: string): "API" | "MANUAL" {
+  return vtpConfigured() && capability === "API_TRACKABLE" ? "API" : "MANUAL";
+}
+
+type TrackingCapability = CareCase["carrier"]["trackingCapability"];
+function asTrackingCapability(v: string | undefined): TrackingCapability {
+  return v === "API_TRACKABLE" || v === "WEBHOOK_ONLY" ? v : "UNKNOWN_CAPABILITY";
+}
+
+async function buildQueue(): Promise<CareQueue> {
   const now = new Date();
   const tower = await getDeliveryTower();
   const towerRows: TowerRow[] = tower.buckets.filter((b) => (CARE_BUCKETS as string[]).includes(b.key)).flatMap((b) => b.rows);
@@ -211,7 +164,7 @@ async function buildWorkbench(): Promise<CareWorkbench> {
     .select({ care: schema.shipmentCare, ownerName: schema.users.name })
     .from(schema.shipmentCare)
     .leftJoin(schema.users, eq(schema.users.id, schema.shipmentCare.ownerId))
-    .where(and(eq(schema.shipmentCare.careStatus, "DONE"), gte(schema.shipmentCare.doneAt, new Date(now.getTime() - CARE_SLA.doneWindowDays * 86_400_000))))
+    .where(and(inArray(schema.shipmentCare.careStatus, CARE_TERMINAL_STATUSES), gte(schema.shipmentCare.doneAt, new Date(now.getTime() - CARE_SLA.doneWindowDays * 86_400_000))))
     .orderBy(desc(schema.shipmentCare.doneAt))
     .limit(300);
   const doneOnlyIds = doneRows.map((r) => r.care.shipmentId).filter((id) => !towerIds.has(id) && !wrongInfo.some((w) => w.shipment_id === id));
@@ -246,17 +199,20 @@ async function buildWorkbench(): Promise<CareWorkbench> {
     return f?.failedAt ?? f?.lastAt ?? fallback ?? f?.createdAt ?? now;
   };
 
-  const cases: CareCase[] = [];
-  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability">) => {
+  const all: CareCase[] = [];
+  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier"> & { carrier: Omit<CareCase["carrier"], "trackingCapability"> }) => {
     const care = toCareState(careMap.get(base.shipmentId));
     const { view, reopened } = careViewOf(care, base.queueSince, now);
-    cases.push({
+    const capability = facts.get(base.shipmentId)?.capability;
+    all.push({
       ...base,
+      carrier: { ...base.carrier, trackingCapability: asTrackingCapability(capability) },
+      reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
       sla: slaOf(base.queueSince, care, now),
       carrierRequest: reqMap.get(base.shipmentId) ?? null,
-      carrierCapability: carrierCapabilityOf(facts.get(base.shipmentId)?.capability ?? "UNKNOWN_CAPABILITY"),
+      carrierCapability: carrierCapabilityOf(capability ?? "UNKNOWN_CAPABILITY"),
       view,
     });
   };
@@ -318,14 +274,37 @@ async function buildWorkbench(): Promise<CareWorkbench> {
   }
 
   // Cần care: tiền lớn trước, rồi kiện vào hàng đợi lâu nhất. Người làm buổi sáng đi từ trên xuống.
-  cases.sort((a, b) => b.codAmount - a.codAmount || a.queueSince.getTime() - b.queueSince.getTime());
+  all.sort((a, b) => b.codAmount - a.codAmount || a.queueSince.getTime() - b.queueSince.getTime());
+
+  const dataGaps = all.filter((c) => c.reasonClass === "DATA_FRESHNESS");
+  const cases = all.filter((c) => c.reasonClass !== "DATA_FRESHNESS");
 
   const counts = { care: 0, waiting: 0, escalated: 0, done: 0 };
   for (const c of cases) counts[c.view] += 1;
   const careCases = cases.filter((c) => c.view === "care");
+  const openCases = cases.filter((c) => c.view !== "done");
+
+  const byReasonMap = new Map<CareReasonKey, { count: number; money: number }>();
+  for (const c of careCases) {
+    const cur = byReasonMap.get(c.reason) ?? { count: 0, money: 0 };
+    byReasonMap.set(c.reason, { count: cur.count + 1, money: cur.money + c.codAmount });
+  }
+  const byOwnerMap = new Map<string, { ownerId: string | null; name: string; open: number; overdue: number; money: number }>();
+  for (const c of openCases) {
+    const key = c.care.owner?.id ?? "";
+    const cur = byOwnerMap.get(key) ?? { ownerId: c.care.owner?.id ?? null, name: c.care.owner?.name ?? "Chưa ai nhận", open: 0, overdue: 0, money: 0 };
+    cur.open += 1;
+    if (c.sla.firstResponseBreached || c.sla.resolveBreached) cur.overdue += 1;
+    cur.money += c.codAmount;
+    byOwnerMap.set(key, cur);
+  }
+
   return {
     cases,
+    dataGaps,
     counts,
+    byReason: [...byReasonMap.entries()].map(([reason, v]) => ({ reason, label: CARE_REASON_LABEL[reason], ...v })).sort((a, b) => b.count - a.count),
+    byOwner: [...byOwnerMap.values()].sort((a, b) => b.overdue - a.overdue || b.open - a.open),
     moneyAtRisk: careCases.reduce((a, c) => a + c.codAmount, 0),
     overdue: careCases.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length,
     unassigned: careCases.filter((c) => !c.care.owner).length,
@@ -333,8 +312,78 @@ async function buildWorkbench(): Promise<CareWorkbench> {
   };
 }
 
-export async function getCareWorkbench(): Promise<CareWorkbench> {
-  return memo("care-workbench", 30_000, buildWorkbench);
+/** Hàng đợi care — actionable population, đệm 30 giây, mọi hành động ghi đều xoá đệm. */
+export async function getCareQueue(): Promise<CareQueue> {
+  return memo("care-queue", 30_000, buildQueue);
+}
+
+/** Tên cũ, cùng dữ liệu. */
+export const getCareWorkbench = getCareQueue;
+
+/** Lịch sử case (chỉ thêm), mới nhất trước. */
+export async function getCareEvents(shipmentId: string, limit = 100): Promise<CareEvent[]> {
+  const db = await getDb();
+  const rows = await db.select().from(schema.careCaseEvents).where(eq(schema.careCaseEvents.shipmentId, shipmentId)).orderBy(desc(schema.careCaseEvents.createdAt)).limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    at: r.createdAt,
+    actor: r.actorEmail,
+    source: r.source as CareEventSource,
+    action: r.action as CareEventAction,
+    note: r.note,
+    previousStatus: (r.previousStatus as CareStatus | null) ?? null,
+    nextStatus: (r.nextStatus as CareStatus | null) ?? null,
+    previousOwner: r.previousOwner,
+    nextOwner: r.nextOwner,
+    followUpAt: r.followUpAt,
+    sla: (r.sla as CareEvent["sla"]) ?? null,
+    payload: r.payload,
+  }));
+}
+
+/**
+ * Toàn bộ bối cảnh một kiện: đơn + khách + lần gửi + hành trình ĐVVC thô + COD + lịch sử care + yêu
+ * cầu ĐVVC + năng lực từng hành động. Dùng cho ngăn kéo và cho AI tóm tắt. Không đệm: mở là đọc mới.
+ */
+export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDetail | null> {
+  const db = await getDb();
+  const [qv, s, careRows, events, requests] = await Promise.all([
+    getShipmentQuickView(shipmentId),
+    db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, carrier: true, stage: true, attemptNo: true, trackingCapability: true, receiverAddress: true, vtpOrderNumber: true, trackingCode: true }, with: { order: { columns: { id: true, systemId: true, totalPriceAfterDiscount: true, prepaid: true, transferMoney: true, cash: true } } } }),
+    loadCareRows([shipmentId]),
+    getCareEvents(shipmentId),
+    db.select().from(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, shipmentId)).orderBy(desc(schema.carrierActionRequests.createdAt)).limit(20),
+  ]);
+  if (!qv || !s) return null;
+  const facts = await loadQueueFacts([shipmentId]);
+  const f = facts.get(shipmentId);
+  const care = toCareState(careRows.get(shipmentId));
+  const queueSince = f?.failedAt ?? f?.lastAt ?? null;
+  const tracking = s.vtpOrderNumber ?? s.trackingCode ?? qv.tracking;
+  return {
+    shipment: {
+      id: s.id,
+      tracking,
+      carrier: s.carrier || "Viettel Post",
+      stage: s.stage,
+      stageLabel: qv.stageLabel,
+      rawStatus: qv.rawStatus,
+      codAmount: qv.codAmount,
+      receiver: { name: qv.customer, phone: qv.phone, address: qv.address || s.receiverAddress || "" },
+      attemptNo: s.attemptNo ?? qv.attemptNo,
+      trackingCapability: asTrackingCapability(s.trackingCapability),
+    },
+    order: s.order ? { id: s.order.id, systemId: s.order.systemId, total: Number(s.order.totalPriceAfterDiscount ?? 0), prepaid: Number(s.order.prepaid ?? 0) + Number(s.order.transferMoney ?? 0) + Number(s.order.cash ?? 0), items: qv.items, chatUrl: qv.chatUrl } : null,
+    customer: { name: qv.customer, phone: qv.phone, history: qv.history },
+    journey: qv.timeline,
+    care,
+    queueSince,
+    sla: queueSince ? slaOf(queueSince, care) : null,
+    events,
+    careActions: qv.careActions,
+    carrierRequests: requests.map(toRequestView),
+    capabilities: carrierCapabilitiesFor({ stage: s.stage, trackingCapability: s.trackingCapability, configured: vtpConfigured(), tracking }),
+  };
 }
 
 /** Nhãn hành động care gần nhất — dùng chung với ngăn kéo. */

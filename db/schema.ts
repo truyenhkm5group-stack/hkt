@@ -1869,7 +1869,7 @@ export const shipmentCare = pgTable(
       .notNull()
       .unique()
       .references(() => shipments.id, { onDelete: "cascade" }),
-    /** `NEW` · `IN_PROGRESS` · `WAITING` · `ESCALATED` · `DONE` — xem `lib/constants/care.ts`. */
+    /** Vòng đời ở `lib/constants/care.ts::CARE_TRANSITIONS` — chỉ đi theo bảng chuyển trạng thái. */
     careStatus: text("care_status").notNull().default("NEW"),
     ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
     ownerEmail: text("owner_email").notNull().default(""),
@@ -1891,14 +1891,14 @@ export const shipmentCare = pgTable(
   (t) => [
     index("shipment_care_status_idx").on(t.careStatus, t.followUpAt),
     index("shipment_care_owner_idx").on(t.ownerId, t.careStatus),
-    check("shipment_care_status_check", sql`${t.careStatus} IN ('NEW', 'IN_PROGRESS', 'WAITING', 'ESCALATED', 'DONE')`),
+    check("shipment_care_status_check", sql`${t.careStatus} IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'WAITING_CARRIER', 'WAITING_REDELIVERY', 'RESOLVED', 'ESCALATED', 'CANCELLED')`),
   ],
 );
 
 /**
  * ═══════════ YÊU CẦU GỬI ĐVVC: VÒNG ĐỜI ĐẦY ĐỦ, KHÔNG GIẢ VỜ THÀNH CÔNG ═══════════
  *
- *   PENDING → SENT → ACK (API nhận) → SUCCESS (sự kiện ĐVVC xác nhận) | FAILED | UNSUPPORTED
+ *   PENDING → SENT → ACKNOWLEDGED (API nhận) → SUCCESS (sự kiện ĐVVC xác nhận) | FAILED | UNSUPPORTED
  *   MANUAL_REQUIRED (tài khoản API không có quyền trên kiện này) → MANUAL_DONE (người xác nhận đã làm tay)
  *
  * Mỗi yêu cầu có khoá idempotent, payload gửi đi, phản hồi nhận về, ai gửi, lúc nào. "Đã xử lý"
@@ -1916,9 +1916,14 @@ export const carrierActionRequests = pgTable(
     actionKey: text("action_key").notNull(),
     status: text("status").notNull().default("PENDING"),
     idempotencyKey: text("idempotency_key").notNull().unique(),
+    /** Dữ liệu nghiệp vụ của yêu cầu (loại, ghi chú, trường sửa). */
     payload: jsonb("payload"),
+    /** Thân gói tin THÔ gửi đi và phản hồi THÔ nhận về — để truy lại đúng những gì ĐVVC nhìn thấy. */
+    rawRequest: jsonb("raw_request"),
     response: jsonb("response"),
     error: text("error"),
+    /** Số lần đã gọi API (retry hữu hạn, chỉ khi lỗi tạm thời). */
+    attempts: integer("attempts").notNull().default(0),
     actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
     actorEmail: text("actor_email").notNull().default(""),
     note: text("note").notNull().default(""),
@@ -1932,7 +1937,45 @@ export const carrierActionRequests = pgTable(
   (t) => [
     index("carrier_action_shipment_idx").on(t.shipmentId, t.createdAt),
     index("carrier_action_status_idx").on(t.status, t.createdAt),
-    check("carrier_action_status_check", sql`${t.status} IN ('PENDING', 'SENT', 'ACK', 'SUCCESS', 'FAILED', 'UNSUPPORTED', 'MANUAL_REQUIRED', 'MANUAL_DONE')`),
+    check("carrier_action_status_check", sql`${t.status} IN ('PENDING', 'SENT', 'ACKNOWLEDGED', 'SUCCESS', 'FAILED', 'UNSUPPORTED', 'MANUAL_REQUIRED', 'MANUAL_DONE')`),
+  ],
+);
+
+/**
+ * ═══════════ LỊCH SỬ CASE — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ ═══════════
+ *
+ * Mỗi lần đổi trạng thái / giao người / note / hẹn / gửi ĐVVC là MỘT dòng: ai, lúc nào, làm gì, từ
+ * trạng thái nào sang trạng thái nào, SLA lúc đó ra sao, nguồn (UI / API / AI / hệ thống). Bảng này
+ * là nguồn cho "thời gian phản hồi đầu", "mở lại", "workload" — không ai được viết lại quá khứ.
+ */
+export const careCaseEvents = pgTable(
+  "care_case_events",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** `UI` · `API` · `AI` · `SYSTEM` — xem `CARE_EVENT_SOURCES`. */
+    source: text("source").notNull().default("UI"),
+    /** `STATUS` · `ASSIGN` · `NOTE` · `FOLLOW_UP` · `RESOLVE` · `REOPEN` · `CANCEL` · `CARRIER_*` — xem `CARE_EVENT_ACTIONS`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousOwner: text("previous_owner"),
+    nextOwner: text("next_owner"),
+    followUpAt: ts("follow_up_at"),
+    /** Ảnh chụp SLA lúc xảy ra: mốc vào hàng đợi, hạn phản hồi đầu, hạn đóng, đã vỡ chưa. */
+    sla: jsonb("sla"),
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("care_case_events_shipment_idx").on(t.shipmentId, t.createdAt),
+    index("care_case_events_actor_idx").on(t.actorEmail, t.createdAt),
+    check("care_case_events_source_check", sql`${t.source} IN ('UI', 'API', 'AI', 'SYSTEM')`),
   ],
 );
 

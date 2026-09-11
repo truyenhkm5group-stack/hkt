@@ -126,7 +126,7 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
         toast.error(r.error);
         return;
       }
-      for (const [id, st] of Object.entries(r.data)) patch(id, st);
+      for (const [id, st] of Object.entries(r.data.states)) patch(id, st);
       setSelected(new Set());
       toast.success(`${ids.length} kiện → ${CARE_STATUS_LABEL[status]}`);
     });
@@ -138,7 +138,7 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
         toast.error(r.error);
         return;
       }
-      for (const [id, st] of Object.entries(r.data)) patch(id, st);
+      for (const [id, st] of Object.entries(r.data.states)) patch(id, st);
       setSelected(new Set());
       toast.success(`Đã giao ${ids.length} kiện`);
     });
@@ -279,8 +279,13 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
         toast.error(r.error);
         return;
       }
-      onPatch(r.data[c.shipmentId]);
-      if (status === "DONE") toast.success(`${c.tracking}: đã xong — chuyển sang “Đã xử lý”`);
+      const st = r.data.states[c.shipmentId];
+      if (!st) {
+        toast.error(r.data.skipped[0]?.reason ?? "Không đổi được trạng thái");
+        return;
+      }
+      onPatch(st);
+      if (status === "RESOLVED" || status === "CANCELLED") toast.success(`${c.tracking}: ${CARE_STATUS_LABEL[status]} — chuyển sang “Đã xử lý”`);
     });
   const changeOwner = (ownerId: string) =>
     start(async () => {
@@ -289,7 +294,8 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
         toast.error(r.error);
         return;
       }
-      onPatch(r.data[c.shipmentId]);
+      const st = r.data.states[c.shipmentId];
+      if (st) onPatch(st);
     });
   const followUp = (at: Date | null) =>
     start(async () => {

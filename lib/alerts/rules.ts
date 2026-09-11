@@ -67,10 +67,6 @@ function orderLabel(o: { systemId: number | null; billFullName: string | null; b
   return `#${o.systemId ?? "?"} · ${o.billFullName || "Khách"}${o.billPhone ? ` · ${o.billPhone}` : ""} · ${formatVND(o.totalPriceAfterDiscount ?? 0)}`;
 }
 
-function dayKey(d: Date | null) {
-  return d ? d.toISOString().slice(0, 13) : "x";
-}
-
 export async function collectCandidates(): Promise<{ candidates: Candidate[]; activeKinds: string[] }> {
   const db = await getDb();
   const cfg = await loadAlertConfig();
@@ -98,8 +94,12 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         href: `/shipments/${r.shipmentId}`,
         entityType: "SHIPMENT",
         entityId: r.shipmentId,
-        dedupeKey: `ship-failed:${r.shipmentId}:${dayKey(r.statusDate ?? r.updatedAt)}`,
+        // MỘT KIỆN MỘT VIỆC. Trước đây khoá kèm ngày: giao hụt lần hai hôm sau đẻ ra việc thứ hai cho
+        // cùng kiện, cùng lý do. Nay một việc sống theo kiện, mốc/tiêu đề cập nhật tại chỗ (refresh),
+        // và tự đóng khi kiện rời chặng giao hụt.
+        dedupeKey: `ship-failed:${r.shipmentId}`,
         occurredAt: r.statusDate ?? r.updatedAt,
+        refresh: true,
       });
     }
   }

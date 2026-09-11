@@ -5,7 +5,7 @@ import { CARRIER_ACTION_CONFIRM_STAGES, type CarrierActionKey } from "@/lib/cons
 /**
  * ───────────── ĐVVC XÁC NHẬN BẰNG SỰ KIỆN, KHÔNG BẰNG PHẢN HỒI API ─────────────
  *
- * API trả "OK" chỉ là ACK: Viettel Post đã nhận yêu cầu. Bưu tá có đi phát lại hay không thì phải
+ * API trả "OK" chỉ là ACKNOWLEDGED: Viettel Post đã nhận yêu cầu. Bưu tá có đi phát lại hay không thì phải
  * đợi sự kiện hành trình. Hàm này chạy mỗi khi có sự kiện mới của kiện (webhook / tra API / nhập
  * tệp): yêu cầu đang ACK mà thấy chặng khớp, xảy ra SAU lúc gửi ⇒ SUCCESS, ghi mốc xác nhận.
  *
@@ -15,7 +15,7 @@ export async function settleCarrierRequests(db: Db, shipmentId: string, stage: s
   const open = await db
     .select({ id: schema.carrierActionRequests.id, actionKey: schema.carrierActionRequests.actionKey, sentAt: schema.carrierActionRequests.sentAt })
     .from(schema.carrierActionRequests)
-    .where(and(eq(schema.carrierActionRequests.shipmentId, shipmentId), inArray(schema.carrierActionRequests.status, ["SENT", "ACK"]), isNotNull(schema.carrierActionRequests.sentAt)));
+    .where(and(eq(schema.carrierActionRequests.shipmentId, shipmentId), inArray(schema.carrierActionRequests.status, ["SENT", "ACKNOWLEDGED"]), isNotNull(schema.carrierActionRequests.sentAt)));
   const matched = open.filter((r) => {
     const stages = CARRIER_ACTION_CONFIRM_STAGES[r.actionKey as CarrierActionKey] ?? [];
     return stages.includes(stage) && r.sentAt !== null && eventAt.getTime() >= r.sentAt.getTime();

@@ -19,6 +19,10 @@ export async function setCareStatus(input: z.input<typeof svc.statusSchema>) {
   const a = await actor("shipments:view");
   return a ? svc.setCareStatus(a, input) : DENIED;
 }
+export async function reopenCase(input: z.input<typeof svc.reopenSchema>) {
+  const a = await actor("shipments:view");
+  return a ? svc.reopenCase(a, input) : DENIED;
+}
 export async function setCareOwner(input: z.input<typeof svc.ownerSchema>) {
   const a = await actor("shipments:view");
   return a ? svc.setCareOwner(a, input) : DENIED;

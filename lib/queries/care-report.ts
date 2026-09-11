@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { CARE_SLA } from "@/lib/constants/care";
-import { getCareWorkbench } from "@/lib/queries/care-workbench";
+import { getCareQueue } from "@/lib/queries/care-workbench";
 import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 import type { Period } from "@/lib/search-params";
@@ -39,7 +39,20 @@ export type CareStaffRow = {
 
 export type CareReport = {
   period: Period;
-  backlog: { care: number; waiting: number; escalated: number; overdue: number; unassigned: number; moneyAtRisk: number };
+  backlog: {
+    care: number;
+    waiting: number;
+    escalated: number;
+    overdue: number;
+    unassigned: number;
+    moneyAtRisk: number;
+    /** Backlog theo lý do (đang ở Cần care). */
+    byReason: { reason: string; label: string; count: number; money: number }[];
+    /** Backlog theo người (mọi kiện đang mở). */
+    byOwner: { ownerId: string | null; name: string; open: number; overdue: number; money: number }[];
+    /** Kiện cũ dữ liệu / thiếu dữ liệu — việc giao vận, không phải backlog care. */
+    dataGaps: number;
+  };
   firstResponse: { medianHours: number | null; withinSla: number; measured: number };
   done: { count: number; reopened: number; medianResolveHours: number | null; withinSla: number };
   recovery: {
@@ -51,6 +64,7 @@ export type CareReport = {
     returnedIntervened: number;
     returnedNotIntervened: number;
     recoveredCod: number;
+    recoveredRevenue: number;
     stillOpen: number;
   };
   redelivery: { requested: number; delivered: number; returned: number; pending: number };
@@ -77,10 +91,10 @@ export async function getCareReport(period: Period): Promise<CareReport> {
 
 async function build(period: Period): Promise<CareReport> {
   const db = await getDb();
-  const wb = await getCareWorkbench();
+  const wb = await getCareQueue();
 
   // ── Kiện giao hụt trong kỳ: có ai can thiệp không, kết cục ra sao ──
-  const failed = rowsOf<{ shipment_id: string; intervened: boolean; delivered: boolean; returned: boolean; cod: string | number; actors: string[] | null }>(
+  const failed = rowsOf<{ shipment_id: string; intervened: boolean; delivered: boolean; returned: boolean; cod: string | number; revenue: string | number }>(
     await db.execute(sql`
       with hut as (
         select e.shipment_id, min(e.occurred_at) as first_failed_at
@@ -89,11 +103,19 @@ async function build(period: Period): Promise<CareReport> {
          group by e.shipment_id
       )
       select h.shipment_id,
-             exists (select 1 from care_actions a where a.shipment_id = h.shipment_id and a.created_at >= h.first_failed_at) as intervened,
+             -- CAN THIỆP = có hành động care của NGƯỜI sau lần giao hụt VÀ TRƯỚC khi kiện ngã ngũ.
+             -- Hành động ghi sau khi ĐVVC đã phát xong không được tính công — không suy ngược.
+             exists (
+               select 1 from care_actions a
+                where a.shipment_id = h.shipment_id and a.created_at >= h.first_failed_at
+                  and a.created_at <= coalesce(
+                    (select min(e.occurred_at) from shipment_events e where e.shipment_id = h.shipment_id and e.normalized_stage in ('DELIVERED','RETURNED') and e.occurred_at > h.first_failed_at),
+                    now())
+             ) as intervened,
              (${SHIPMENT_DELIVERED}) as delivered,
              (${SHIPMENT_RETURNED}) as returned,
              shipments.cod_amount as cod,
-             (select array_agg(distinct a.actor_email) from care_actions a where a.shipment_id = h.shipment_id and a.created_at >= h.first_failed_at) as actors
+             coalesce(orders.total_price_after_discount, 0) as revenue
         from hut h
         join shipments on shipments.id = h.shipment_id
         left join orders on orders.id = shipments.order_id
@@ -110,6 +132,8 @@ async function build(period: Period): Promise<CareReport> {
     returnedIntervened: fi.filter((r) => r.returned).length,
     returnedNotIntervened: fn.filter((r) => r.returned).length,
     recoveredCod: fi.filter((r) => r.delivered).reduce((a, r) => a + Number(r.cod ?? 0), 0),
+    /** Doanh thu đơn (sau giảm giá) của kiện giao hụt có can thiệp rồi giao thành công. */
+    recoveredRevenue: fi.filter((r) => r.delivered).reduce((a, r) => a + Number(r.revenue ?? 0), 0),
     stillOpen: failed.filter((r) => !r.delivered && !r.returned).length,
   };
 
@@ -119,7 +143,7 @@ async function build(period: Period): Promise<CareReport> {
       with yc as (
         select a.shipment_id from care_actions a where a.kind = 'RESCHEDULED' and ${between("a.created_at", period)}
         union
-        select r.shipment_id from carrier_action_requests r where r.action_key = 'redeliver' and r.status in ('ACK','SUCCESS','MANUAL_DONE') and ${between("r.created_at", period)}
+        select r.shipment_id from carrier_action_requests r where r.action_key = 'redeliver' and r.status in ('ACKNOWLEDGED','SUCCESS','MANUAL_DONE') and ${between("r.created_at", period)}
       )
       select (${SHIPMENT_DELIVERED}) as delivered, (${SHIPMENT_RETURNED}) as returned
         from yc join shipments on shipments.id = yc.shipment_id left join orders on orders.id = shipments.order_id
@@ -137,7 +161,7 @@ async function build(period: Period): Promise<CareReport> {
     await db.execute(sql`
       select count(*)::int as total,
              count(*) filter (where status = 'SUCCESS')::int as success,
-             count(*) filter (where status in ('SENT','ACK'))::int as ack,
+             count(*) filter (where status in ('SENT','ACKNOWLEDGED'))::int as ack,
              count(*) filter (where status = 'FAILED')::int as failed,
              count(*) filter (where status = 'UNSUPPORTED')::int as unsupported,
              count(*) filter (where status = 'MANUAL_REQUIRED')::int as manual,
@@ -151,7 +175,7 @@ async function build(period: Period): Promise<CareReport> {
     await db.execute(sql`
       select extract(epoch from (c.first_response_at - c.created_at)) / 3600 as first_hours,
              extract(epoch from (c.done_at - c.created_at)) / 3600 as resolve_hours,
-             (c.care_status = 'DONE' and ${between("c.done_at", period)}) as done,
+             (c.care_status in ('RESOLVED','CANCELLED') and ${between("c.done_at", period)}) as done,
              (c.reopen_count > 0) as reopened
         from shipment_care c
        where ${between("c.updated_at", period)}
@@ -177,7 +201,7 @@ async function build(period: Period): Promise<CareReport> {
       ),
       xong as (
         select c.updated_by as actor, count(*)::int as cases_done
-          from shipment_care c where c.care_status = 'DONE' and ${between("c.done_at", period)} group by c.updated_by
+          from shipment_care c where c.care_status in ('RESOLVED','CANCELLED') and ${between("c.done_at", period)} group by c.updated_by
       ),
       ket as (
         select a.actor_email as actor,
@@ -190,12 +214,14 @@ async function build(period: Period): Promise<CareReport> {
           left join orders on orders.id = shipments.order_id
          where ${between("a.created_at", period)}
            and exists (select 1 from shipment_events e where e.shipment_id = a.shipment_id and e.normalized_stage = 'DELIVERY_FAILED' and e.occurred_at <= a.created_at)
+           -- Chỉ tính công khi hành động đi TRƯỚC kết cục: ghi note sau khi kiện đã giao / hoàn thì không.
+           and not exists (select 1 from shipment_events e2 where e2.shipment_id = a.shipment_id and e2.normalized_stage in ('DELIVERED','RETURNED') and e2.occurred_at < a.created_at)
          group by a.actor_email
       ),
       tre as (
         select c.owner_email as actor, count(*)::int as overdue_owned
           from shipment_care c
-         where c.care_status in ('NEW','IN_PROGRESS','WAITING') and c.first_response_at is null and c.created_at < now() - (${CARE_SLA.firstResponseHours} || ' hours')::interval
+         where c.care_status in ('NEW','ASSIGNED','IN_PROGRESS','WAITING_CUSTOMER','WAITING_CARRIER','WAITING_REDELIVERY') and c.first_response_at is null and c.created_at < now() - (${CARE_SLA.firstResponseHours} || ' hours')::interval
          group by c.owner_email
       ),
       ph as (
@@ -233,7 +259,7 @@ async function build(period: Period): Promise<CareReport> {
 
   return {
     period,
-    backlog: { care: wb.counts.care, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk },
+    backlog: { care: wb.counts.care, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk, byReason: wb.byReason, byOwner: wb.byOwner, dataGaps: wb.dataGaps.length },
     firstResponse: { medianHours: median(firstHours), withinSla: firstHours.filter((h) => h <= CARE_SLA.firstResponseHours).length, measured: firstHours.length },
     done: { count: doneRows.length, reopened: careRows.filter((r) => r.reopened).length, medianResolveHours: median(resolveHours), withinSla: resolveHours.filter((h) => h <= CARE_SLA.resolveHours).length },
     recovery,
