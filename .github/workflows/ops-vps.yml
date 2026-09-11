@@ -274,32 +274,17 @@ jobs:
                 [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && { upsert_env SEPAY_WEBHOOK_API_KEY "$SEPAY_WEBHOOK_API_KEY"; echo "SEPAY_WEBHOOK_API_KEY: đã ghi (${#SEPAY_WEBHOOK_API_KEY} ký tự)"; }
                 $C up -d app scheduler
                 sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                # ĐỌC QUA CONTAINER, KHÔNG QUA HOST. Cổng 3000 KHÔNG mở ra host trên production
+                # (Caddy đi qua mạng docker) — gọi 127.0.0.1:3000 từ máy chủ luôn "Connection refused".
                 echo "── GET /api/webhooks/sepay ──"
-                curl -fsS -m 20 http://127.0.0.1:3000/api/webhooks/sepay; echo
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/webhooks/sepay; echo
 
                 # ═══ THỬ CHỮ KÝ MÀ KHÔNG GHI MỘT ĐỒNG TIỀN GIẢ NÀO VÀO SỔ ═══
-                #
-                # Gói tin thử CỐ Ý thiếu `transferType`. Chữ ký ĐÚNG thì máy chủ đi qua được cửa xác
-                # thực rồi mới từ chối vì sai định dạng ⇒ 400. Chữ ký SAI thì bị chặn ngay ⇒ 401.
-                # Hai mã khác nhau chứng minh HMAC chạy đúng, mà sổ ngân hàng KHÔNG có thêm dòng nào.
-                #
-                # Đừng thay bằng gói tin hợp lệ để "thử cho giống thật": nó sẽ tạo một giao dịch ma
-                # trong sổ và chảy thẳng vào báo cáo dòng tiền.
-                TS="$(date +%s)"
-                BODY='{"id":"ops-hmac-check","gateway":"OPSCHECK","transactionDate":"2026-01-01 00:00:00","accountNumber":"0","transferAmount":1}'
-                SIG="sha256=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SEPAY_WEBHOOK_SECRET" -r | cut -d' ' -f1)"
-                OK_CODE="$(curl -s -o /tmp/sepay_ok.json -m 20 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "X-SePay-Signature: $SIG" -H "X-SePay-Timestamp: $TS" -d "$BODY" http://127.0.0.1:3000/api/webhooks/sepay)"
-                echo "chữ ký ĐÚNG → HTTP $OK_CODE · $(cat /tmp/sepay_ok.json)"
-                BAD_CODE="$(curl -s -o /tmp/sepay_bad.json -m 20 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-SePay-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000' -H "X-SePay-Timestamp: $TS" -d "$BODY" http://127.0.0.1:3000/api/webhooks/sepay)"
-                echo "chữ ký SAI  → HTTP $BAD_CODE · $(cat /tmp/sepay_bad.json)"
-                rm -f /tmp/sepay_ok.json /tmp/sepay_bad.json
-                if [ "$OK_CODE" = "400" ] && [ "$BAD_CODE" = "401" ]; then
-                  echo "✓ HMAC đúng: chữ ký hợp lệ qua được xác thực (400 = sai định dạng có chủ đích), chữ ký sai bị chặn (401)"
-                else
-                  echo "::error::HMAC không như kỳ vọng — chữ ký đúng=$OK_CODE (mong 400), chữ ký sai=$BAD_CODE (mong 401)"
-                  echo "401 ở cả hai nghĩa là .env chưa nhận secret; 200 ở chữ ký sai nghĩa là xác thực KHÔNG chạy — dừng dùng webhook cho tới khi sửa."
-                  exit 1
-                fi ;;
+                # Chi tiết vì sao gói tin thử CỐ Ý sai định dạng: xem đầu scripts/sepay-hmac-check.ts.
+                # Chạy TRONG container nên secret không bao giờ phải đi qua dòng lệnh: nó đã nằm sẵn
+                # trong môi trường của tiến trình, và script chỉ in ĐỘ DÀI chứ không in giá trị.
+                fetch_script sepay-hmac-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-hmac-check.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-hmac-check.ts ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
