@@ -54,6 +54,7 @@ on:
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
+          - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -250,6 +251,9 @@ jobs:
                 sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
                 fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --ai ;;
+              ai-check)
+                fetch_script ai-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ai-check.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ai-check.ts $ARG ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
