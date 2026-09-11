@@ -346,6 +346,42 @@ Migration `0060_shipment_care`. Kiểm thử: `tests/care-workbench.test.ts` (5 
 ĐVVC · audit đủ · góc nhìn / mở lại / tới hạn · yêu cầu ĐVVC làm tay / ACK→SUCCESS theo sự kiện /
 idempotent / lỗi quyền · báo cáo theo kết cục).
 
+### 7.9 Vòng 6: Operational Care Engine (backend, nhánh riêng — không deploy)
+
+Từ vòng này Fable chỉ làm backend; UI do phiên Opus 5 làm trên worktree riêng. Nhánh
+`claude/serene-hopper-bsfnnh`, không merge `main`, không deploy.
+
+- Vòng đời case chuẩn `NEW → ASSIGNED → IN_PROGRESS → WAITING_CUSTOMER | WAITING_CARRIER |
+  WAITING_REDELIVERY → RESOLVED | ESCALATED | CANCELLED` (`CARE_TRANSITIONS`, `canTransition`);
+  care_status tách hẳn trạng thái ĐVVC. Migration `0061_care_lifecycle` ánh xạ WAITING→
+  WAITING_CUSTOMER, DONE→RESOLVED, ACK→ACKNOWLEDGED.
+- Lịch sử chỉ-thêm `care_case_events` (actor, nguồn UI/API/AI/SYSTEM, hành động, note, trạng thái
+  trước/sau, người trước/sau, hẹn, ảnh chụp SLA, payload) + `audit_logs`; không sửa/xoá.
+- Lớp nghiệp vụ `lib/care/service.ts` không phụ thuộc phiên (Server Action và AI chỉ bọc quyền):
+  đổi trạng thái (hàng loạt, bỏ qua kiện sai đường kèm lý do), note, giao việc, hẹn theo dõi, đóng,
+  mở lại, yêu cầu ĐVVC (idempotent, retry hữu hạn 3 lần, raw request/response, ACKNOWLEDGED → SUCCESS
+  chỉ khi có sự kiện xác nhận, lỗi quyền ⇒ UNSUPPORTED, WEBHOOK_ONLY ⇒ MANUAL_REQUIRED).
+- Ma trận năng lực VTP `docs/vtp-capability-matrix.md`: SUPPORTED / UNSUPPORTED / WEB_ONLY /
+  PERMISSION_MISSING / UNKNOWN theo credential × kiện × chặng; production 565/565 kiện WEBHOOK_ONLY
+  ⇒ mọi thao tác là PERMISSION_MISSING cho tới khi có tài khoản API đúng.
+- Báo cáo hiệu quả care với attribution chặt: "cứu được sau care" chỉ khi có can thiệp ghi nhận
+  SAU lần giao hụt và TRƯỚC kết cục; doanh thu + COD cứu được; backlog theo lý do / người; dataGaps
+  không tính là backlog. Cảnh báo SHIPMENT_FAILED dedupe theo kiện (không theo ngày), tự đóng khi hết
+  điều kiện.
+- Hợp đồng kiểu `lib/care/contracts.ts` + `docs/care-engine-contract.md` + `docs/handoff-care-engine.md`.
+
+### 7.10 AI Copilot — tầng nền (backend, cùng nhánh)
+
+`docs/ai-copilot-architecture.md`. ERP truth → typed tools → AI: sổ đăng ký tool tách đọc/ghi với
+quyền + chính sách (`auto` / `confirm` / `forbidden`) + sàn rủi ro theo nhóm (tài chính / tồn kho /
+ĐVVC / phá huỷ bị cấm ở MVP); tool ghi chỉ chạy sau khi người xác nhận bằng token HMAC gắn người ·
+tool · input, không chạy lại; mọi lượt ghi `ai_interactions` (migration 0062); hành động AI để lại
+`care_case_events.source = AI` với actor là người xác nhận. Provider trừu tượng, bản Anthropic
+(`claude-opus-5`, adaptive thinking, prompt hệ thống đệm được). MVP: 5 tool đọc + 4 tool ghi cho Vận
+đơn & care (tóm tắt kiện từ đơn + khách + lần gửi + hành trình VTP thô + COD + lịch sử care; hàng đợi;
+tìm; báo cáo; độ tươi dữ liệu). Kiểm thử không mạng: vòng lặp p50 19 ms; ước ~$0,027 một lượt tóm
+tắt (có đệm $0,017). Chưa có UI (handoff `docs/handoff-ai-copilot.md`), chưa có khoá trên VPS.
+
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).
 2. Ngăn kéo đơn dùng chung (/orders, /alerts) mang sẵn rủi ro + gợi ý địa chỉ cũ + nút Pancake +

@@ -1979,6 +1979,51 @@ export const careCaseEvents = pgTable(
   ],
 );
 
+/**
+ * ═══════════ NHẬT KÝ TƯƠNG TÁC AI — AI KHÔNG ĐƯỢC LÀM GÌ MÀ KHÔNG ĐỂ LẠI DẤU ═══════════
+ *
+ * Mỗi lượt hỏi/đáp một dòng: ai hỏi, ở màn hình nào, model nào, gọi tool gì với input gì, hành
+ * động nào ĐƯỢC ĐỀ NGHỊ và hành động nào ĐÃ CHẠY (chỉ sau khi người xác nhận), token / chi phí /
+ * độ trễ. Không ghi secret, không ghi nguyên gói dữ liệu — chỉ tên tool + input + tóm tắt kết quả.
+ */
+export const aiInteractions = pgTable(
+  "ai_interactions",
+  {
+    id: id(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    userEmail: text("user_email").notNull().default(""),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    /** Bối cảnh màn hình: route + đối tượng đang xem. */
+    route: text("route").notNull().default(""),
+    entityType: text("entity_type").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Câu hỏi của người dùng (cắt 4000 ký tự). */
+    prompt: text("prompt").notNull().default(""),
+    /** Câu trả lời cuối của AI (cắt 8000 ký tự). */
+    answer: text("answer").notNull().default(""),
+    /** [{ name, input, kind, executed, ok, summary }] */
+    toolCalls: jsonb("tool_calls"),
+    /** Hành động ghi AI đề nghị, chờ người xác nhận: [{ token, name, input }]. */
+    actionsProposed: jsonb("actions_proposed"),
+    /** Hành động ghi ĐÃ chạy sau khi người xác nhận: [{ token, name, input, result }]. */
+    actionsExecuted: jsonb("actions_executed"),
+    usage: jsonb("usage"),
+    /** USD, 6 chữ số thập phân — ước tính theo bảng giá trong mã, không phải hoá đơn. */
+    costUsd: text("cost_usd").notNull().default("0"),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    rounds: integer("rounds").notNull().default(0),
+    status: text("status").notNull().default("OK"),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ai_interactions_user_idx").on(t.userId, t.createdAt),
+    index("ai_interactions_entity_idx").on(t.entityType, t.entityId, t.createdAt),
+    check("ai_interactions_status_check", sql`${t.status} IN ('OK', 'NEEDS_CONFIRMATION', 'REFUSED', 'ERROR')`),
+  ],
+);
+
 export const careActions = pgTable(
   "care_actions",
   {

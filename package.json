@@ -29,6 +29,7 @@
     "bench:explain": "tsx --tsconfig tsconfig.json scripts/bench/explain.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@electric-sql/pglite": "^0.5.8",
     "@hookform/resolvers": "^5.9.1",
     "@tanstack/react-table": "^8.21.3",

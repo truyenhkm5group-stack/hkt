@@ -58,6 +58,26 @@ export const env = {
       return readInt("FACEBOOK_USD_VND", 25_500);
     },
   },
+  /** AI Copilot. Khoá API đọc bởi chính SDK (ANTHROPIC_API_KEY) — không đi qua đây, không log. */
+  ai: {
+    /** `anthropic` (mặc định) · `off`. */
+    get provider() {
+      return read("AI_PROVIDER", "anthropic");
+    },
+    get model() {
+      return read("AI_MODEL", "claude-opus-5");
+    },
+    /** low · medium · high · xhigh · max — mặc định medium: tóm tắt/giải thích, không cần suy luận sâu. */
+    get effort() {
+      return read("AI_EFFORT", "medium");
+    },
+    get maxToolRounds() {
+      return readInt("AI_MAX_TOOL_ROUNDS", 6);
+    },
+    get configured() {
+      return Boolean(read("ANTHROPIC_API_KEY") || read("ANTHROPIC_AUTH_TOKEN"));
+    },
+  },
   viettelPost: {
     get apiKey() {
       return read("VIETTELPOST_API_KEY");
