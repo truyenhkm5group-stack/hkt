@@ -221,6 +221,11 @@ mục 6 là do dữ liệu mới về (2.433 → 2.556 đơn), không phải do 
   luận 10 vận đơn chỉ nhận webhook; đang chạy 565 vận đơn `WEBHOOK_ONLY`, còn 4 `UNKNOWN_CAPABILITY`
   đang dò. Kết nối dữ liệu không còn "chạy nhưng có lỗi" vì lý do năng lực tài khoản.
 
+- Đường nguội sau vòng 3 (`perf-probe` 07:10 UTC): getBusinessBrief 716ms (vòng 2: 1.004ms) ·
+  getDashboardData 580ms (751ms) · getFinancialTruth 165ms (243ms) · getControlTower 294ms. Chậm nhất
+  còn lại là `adsRoas` trên /ads (873ms nguội, đệm 120s) — truy vấn con gán chiến dịch theo từng đơn,
+  ứng viên P2 nếu /ads thành trang mở hằng ngày.
+
 ### 7.6 Tra nhanh ngay trên hàng đợi và danh sách đơn (ít bấm hơn)
 
 Không viết ngăn kéo đơn mới: ngăn kéo vận đơn (`CareDrawer`) đã gom khách · món hàng · lịch sử mua ·
