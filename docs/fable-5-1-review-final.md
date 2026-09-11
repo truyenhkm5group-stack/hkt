@@ -1,0 +1,118 @@
+# Review độc lập ERP — 11/09/2026
+
+Thực hiện `FABLE_5_1_ERP_REVIEW_BRIEF.md`. Một phiên, một nhánh (`claude/serene-hopper-bsfnnh`),
+gộp vào `main`. Direct VTP Fulfillment vẫn PENDING, không đụng. Không đổi luật kết quả đơn
+(`ORDER_OUTCOME`): 14 ca contract xanh nguyên, ảnh chụp KPI production trước/sau ở mục 6.
+
+Cách làm: bốn lượt rà độc lập (số liệu đúng · hiệu năng · UX · độ tươi) đối chiếu với mã nguồn và
+với số đo THẬT trên production (`perf-probe`, `db-query`, `kpi-snapshot` qua ops workflow). Chỉ sửa
+chỗ có bằng chứng và không cần chủ shop chốt luật mới; chỗ cần chủ shop quyết nêu ở mục 8.
+
+---
+
+## 1. Vấn đề quan trọng nhất đã tìm thấy
+
+| # | Vấn đề | Bằng chứng | Hệ quả với người vận hành |
+|---|---|---|---|
+| 1 | **Đệm báo cáo bị xoá sạch mỗi phút** bởi job nền và webhook, nên "trả số cũ ngay, làm mới phía sau" (sửa 10/09) chưa bao giờ chạy | `lib/sync/runner.ts` `finally { clearMemo() }` cho MỌI job; `lib/landing/sheet.ts` job mỗi phút xoá đệm kể cả 0 dòng mới; webhook Pancake xoá sau mọi gói tin kể cả gói lặp | perf-probe production 11/09 03:06: trang chủ vẫn lượt nguội — bảng điều khiển **3.285ms**, tóm tắt **3.766ms**, sự thật tài chính **3.039ms**; một câu `select … from settings` phải chờ **300ms** vì ba lượt chen nhau trên 2 nhân |
+| 2 | **Câu chậm nhất trang chủ là JIT, không phải dữ liệu** | EXPLAIN ANALYZE: `Seq Scan on shipments actual time=2703..2707 rows=1976` — dòng đầu 2,7 giây, 1.975 dòng còn lại 4ms; chi phí ước lượng 801.408 > `jit_above_cost` | 2,7–3,5 giây mỗi lượt, chạy 3 lần đồng thời |
+| 3 | **Hạn xử lý sinh ra đã trễ** | Luật chờ 24 giờ mới mở việc "đơn mới", hạn 12 giờ đếm từ lúc LÊN ĐƠN ⇒ 237/237 và 203/203 trễ hạn (đo 10/09) | Cờ "trễ hạn" trên trang chủ / Cần xử lý / Điều hành không phân biệt được gì |
+| 4 | **Pancake bị coi là nguồn tiền thực thu** | Mapper ghi `partner.cod` (= COD đăng ký, bằng đúng `money_to_collect` trong fixture thật) vào `cod_collected`; đồng bộ `Math.max` với số cũ | Bảng kê ghi thực thu 30.000đ, lần đồng bộ sau max(30.000, 474.000) ⇒ đơn HOÀN tự lật thành GIAO THÀNH CÔNG. Production hôm nay chỉ còn **1 vận đơn / 30.000đ** mang dấu vết này (đã kiểm bằng db-query), nên sửa là phòng ngừa, không cần dọn dữ liệu |
+| 5 | **`cod_status = COLLECTED` bị coi là chứng từ tiền** | `CASH_COLLECTED` lấy COD khai báo khi trạng thái ∈ {COLLECTED, RECONCILED, PAID_TO_BANK}; COLLECTED được đặt từ chiều logistics | 28 vận đơn COLLECTED không có số thực thu đang được tính là "đã xác minh" trên trang Chất lượng dữ liệu — vi phạm §1/§8 đặc tả |
+| 6 | **Ba công thức "Lợi nhuận ước tính"** cùng nhãn | Tổng quan cộng cước của MỌI đơn không huỷ; Sự thật tài chính chỉ đơn giao + hoàn; /reports thêm phí sàn | Cùng kỳ, thẻ và trang nó trỏ tới ra hai số |
+| 7 | **"COD chờ về" bốn định nghĩa**, /reports thiếu `COD_COLLECTABLE`; "Viettel Post chưa trả" dùng `stage = 'DELIVERED'` thô | `reports.ts`, `rules.ts`, `control-tower.ts` | Nợ ảo: vận đơn 501 có chiều hoàn vẫn thành việc "đòi X đồng" |
+| 8 | **Hai danh sách trên cùng một bảng** ở /alerts; trang chủ chép tháp Giao vận, Đối soát COD và /orders; hai KPI "khách mua lại" mâu thuẫn ở hai trang | `alerts/page.tsx`, `page.tsx`, `customers/*` | Không biết bấm "Đã xử lý" ở đâu; cùng số ở hai nơi là hai chỗ để lệch |
+| 9 | Chi tiết đơn 6 lượt CSDL nối đuôi, dòng thời gian 5 + 2×N câu, ngăn kéo tra nhanh 6 lượt, mỗi lần điều hướng 6 câu chỉ để biết người đăng nhập | `orders/[id]/page.tsx`, `entity-timeline.ts`, `shipment-quickview.ts`, `auth/session.ts` | Trang mở nhiều nhất sau danh sách chậm vì chờ vô ích |
+| 10 | Webhook bảng kê Gmail không phát sự kiện, /cod không phải trang sống; TTL 120ms nhầm đơn vị | `vtp-statement/route.ts`, `realtime-provider.tsx`, `ads-attribution-coverage.ts` | Tiền về phải F5 mới thấy |
+
+## 2. Đã tối ưu — theo ba commit
+
+### `5842c8c` perf(độ tươi) — nhanh hơn, tươi hơn
+- Job nền / webhook chỉ **đánh dấu đệm cũ** (`staleMemo`), và chỉ khi thật sự có dòng đổi.
+  Người đọc nhận số của phút trước ngay; khi lượt tính lại xong và giá trị ĐỔI, đệm phát sự kiện
+  `sync/CACHE` để trang tự kéo số mới (lượt đó trúng đệm, không lặp).
+- Job không đổi gì thì không phát sự kiện `sync` ⇒ không bắt mọi trình duyệt dựng lại trang 3
+  phút một lần.
+- Tổng COD theo trạng thái chạy trong giao dịch **tắt JIT**, đọc bảng kết quả đã tính sẵn, mỗi
+  đơn một dòng; bốn phép đọc của Sự thật tài chính chạy song song.
+- `getCurrentUser` bọc `cache()` của React; mẫu quyền đệm 60 giây (xoá khi sửa quyền).
+- Chi tiết đơn 6 → 2 lượt; dòng thời gian gom `in (…)`; ngăn kéo 6 → 2 lượt; hàng đợi 4 phép
+  đọc song song; chỉ mục `audit_logs(entity_id, created_at)` (migration 0057).
+- Webhook bảng kê phát sự kiện + quét cảnh báo; `/cod` là trang sống; TTL 120ms → 120s.
+- Lá chắn: `tests/cache-semantics.test.ts`.
+
+### `3dc9bbf` fix(số liệu) — đúng hơn
+- Hạn xử lý đếm từ **lúc ERP giao việc** (`created_at`) ở hàng đợi và bảng điều hành; tuổi việc
+  vẫn từ mốc nghiệp vụ.
+- Pancake **không bao giờ** ghi `cod_collected`; đồng bộ giữ nguyên số đang có.
+- `CASH_COLLECTED` chỉ còn số thực thu; chưa có là CHƯA XÁC MINH.
+- Tổng quan lấy cước / phí hoàn từ bậc thang Sự thật tài chính — một công thức.
+- /reports cùng population đơn đã xác nhận với Tổng quan; "COD chờ về" có `COD_COLLECTABLE`
+  (nay loại cả RETURNING); GTC% ở tiêu đề chia cho đơn đã kết thúc.
+- "Viettel Post chưa trả" (luật cảnh báo + luật đối soát) đi qua `SHIPMENT_DELIVERED`.
+- Lá chắn: 5 assertion mới; `docs/metrics-contract.md` ghi hai định nghĩa đổi.
+
+### `165f38b` feat(gọn hơn) — ít màn, ít bấm
+- /alerts: một hàng đợi (bỏ danh sách "Đang mở" + 6 thẻ đếm); bớt 3 truy vấn, bớt ~1 MB HTML.
+- Trang chủ bỏ "Vận đơn & COD" và "Đơn hàng mới nhất"; bớt 3 truy vấn.
+- ⌘K "Đi tới trang": mọi trang được phép, cùng luật lọc quyền với thanh bên.
+- Khối "Chờ kho nhận" nằm ngay trên trạm đếm hàng hoàn; việc trong hàng đợi trỏ thẳng về đó.
+- /customers bỏ thẻ mâu thuẫn; thanh bên 33 → 30 mục (ba trang về làm nút trên trang cha).
+
+## 3. UI/UX trước → sau
+
+| Việc | Trước | Sau |
+|---|---|---|
+| Xử lý một việc ở Cần xử lý | 2 danh sách cùng bảng + 6 thẻ, không biết bấm ở đâu | 1 hàng đợi có ưu tiên · người nhận · hạn |
+| Đi tới trang "Kiểm đếm hàng hoàn" | rê chuột 4 nhóm / 33 mục | ⌘K gõ "kiểm đếm" ↵ |
+| Nhận kiện hàng hoàn rồi đếm | /alerts → /data-quality (tick) → /inventory/returns (đếm) | /inventory/returns: tick ở khối trên, đếm ở khối dưới |
+| Trang chủ | 10 thẻ + 5 khối + bảng 8 cột chép /orders | 10 thẻ + 3 khối |
+| Khách mua lại | 2 định nghĩa ở 2 trang, thẻ tự nhận mình sai | 1 định nghĩa (giao thành công) ở Giữ chân khách |
+
+## 4. Hiệu năng trước → sau
+
+Số production (perf-probe, đệm rỗng, hệ thống rảnh) — xem mục 6 cho số sau deploy.
+
+| Hàm | Trước (03:06) | Sau |
+|---|---|---|
+| getBusinessBrief | 3.766ms · 91 lượt | *(mục 6)* |
+| getDashboardData | 3.285ms · 66 lượt | *(mục 6)* |
+| getFinancialTruth | 3.039ms · 12 lượt · câu COD 2.7–3.5s (JIT) | *(mục 6)* |
+
+Số vòng đi-về CSDL (đọc mã, không đổi kết quả): chi tiết đơn 6 → 2; dòng thời gian đơn có N vận
+đơn 5 + 2N → 1 + 5 (song song); ngăn kéo 6 → 2; mỗi lần điều hướng bớt 4–5 câu tra người dùng;
+trang chủ bớt 4 truy vấn; /alerts bớt 3.
+
+## 5. Phần dư thừa đã loại / gộp
+- Danh sách "Đang mở" + 6 thẻ đếm ở /alerts · khối "Vận đơn & COD" + bảng "Đơn hàng mới nhất" ở
+  trang chủ · thẻ "Khách mua lại" (/customers) + "Cách đếm cũ thổi lên" (/customers/retention) ·
+  ba mục menu · truy vấn cước riêng của Tổng quan (đã có ở Sự thật tài chính).
+
+## 6. Production: trước → sau deploy
+
+*(điền sau khi deploy)*
+
+## 7. P0/P1 còn lại (có bằng chứng, chưa sửa vì cần chủ shop quyết hoặc quá phạm vi)
+
+| Ưu tiên | Việc | Vì sao chưa làm |
+|---|---|---|
+| P0 | **CS_CASE nhân đôi cả trang /cs vào hàng đợi** (364 việc, SLA 4 giờ ⇒ 338 "trễ"); `href` là tìm kiếm chứ không phải deep-link | Đổi số việc đang mở của cả hệ — AGENTS §7: hỏi chủ shop. Đề xuất: chỉ mirror WRONG_ADDRESS/WRONG_PHONE (chặn giao hàng), còn lại một việc gộp |
+| P0 | **Giá vốn đóng băng ở 0**: đơn giao trước khi mẫu mã có phiếu nhập chốt `recognized_cogs = 0` vĩnh viễn ⇒ lợi nhuận Tổng quan/Báo cáo cao hơn thật | Đụng kỳ đã chốt — chủ shop quyết. Đề xuất: lưu NULL khi không tra được, hiện "N đơn chưa có giá vốn" ở mọi trang lợi nhuận |
+| P1 | `SHIPMENT_RETURNING` 99 việc không ai làm được gì (SLA null, "chuẩn bị nhận hàng") | Nên là một việc gộp hoặc bỏ khỏi hàng đợi — tháp /shipments đã hiện rổ này |
+| P1 | Mốc kỳ khác nhau cùng nhãn: `prepaid` ở Dòng tiền theo mốc kết thúc, ở /reports theo `inserted_at` | Cần chốt một mốc, ghi vào hợp đồng chỉ số |
+| P1 | Cột "Cờ" (rủi ro / SĐT mới / thiếu địa chỉ) ngay ở dòng /orders + ngăn kéo đơn dùng chung với /alerts | Việc M; ngăn kéo vận đơn (phiên song song vừa thêm vào ⌘K) là mẫu để tổng quát hoá |
+| P1 | `outcome-materialize` chạy mù: không `sync_runs`, không hiện ở Kết nối dữ liệu | Job hỏng ⇒ mọi báo cáo âm thầm rơi về đường chậm; nên bọc `runSyncJob` và hiện `outcomeCoverage()` |
+| P1 | `dedupeKey` theo số lượng (`return-inspect-bulk:${n}`, `data-error:${rule}:${count}`) ⇒ đóng/mở việc mới mỗi khi số đổi, thổi phồng "tự đóng" | Việc S nhưng đổi cách đo năng suất đội |
+| P2 | /data-quality 8 thẻ KPI chép /reports/returns; /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
+
+## 8. Việc tiếp theo theo ROI
+1. Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0) — mỗi việc nửa ngày, đổi trực tiếp số
+   "việc đang mở" và số lợi nhuận.
+2. Ngăn kéo đơn dùng chung (/orders, /alerts) mang sẵn rủi ro + gợi ý địa chỉ cũ + nút Pancake +
+   "Xong": rút luồng đơn mới → gửi từ 5 màn hình còn 1.
+3. `outcome-materialize` vào `sync_runs` + độ phủ ở Kết nối dữ liệu.
+4. Gộp /operations vào /alerts (tab "Theo khâu"), /data-quality vào Kết nối dữ liệu.
+
+## 9. Không làm, cố ý
+Không mở Direct VTP Fulfillment · không đổi ngưỡng 50K/100K · không sửa dữ liệu production · không
+đổi lịch scheduler · không thêm dịch vụ ngoài · không đổi công thức `ORDER_OUTCOME`.
