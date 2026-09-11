@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { AlertTriangle, Boxes, Download, Info, PackagePlus, PackageX, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, Download, PackagePlus, PackageX, ShoppingBag, Warehouse } from "lucide-react";
 import { ProductsTable } from "@/app/(dashboard)/products/products-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -25,7 +26,18 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Kho"
         title="Sản phẩm & tồn kho"
-        description={`${formatNumber(summary.products)} sản phẩm · ${formatNumber(summary.selling)} mẫu mã đang bán · ${formatNumber(summary.stockUnits)} sản phẩm trong kho · ${warehouses.length} kho`}
+        description={`${formatNumber(warehouses.length)} kho`}
+        hint={
+          <>
+            <b>SỔ KHO.</b> <b>Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay −{" "}
+            <b>Đã xuất</b>; <b>Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chờ xuất.
+            &ldquo;Đã xuất&rdquo; đếm theo xác nhận <b>lấy hàng của Viettel Post</b>, không theo
+            trạng thái Pancake và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập{" "}
+            <b>phiếu tái nhập</b> với số đếm thực tế — ĐVVC báo &ldquo;đã hoàn&rdquo; mới chỉ là
+            hàng đang trên đường về. Mẫu mã chưa có phiếu nhập thì ERP báo &ldquo;Chưa có phiếu
+            nhập&rdquo; thay vì hiện số bịa.
+          </>
+        }
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -43,25 +55,68 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Mẫu mã đang bán" value={formatNumber(summary.selling)} note={`${formatNumber(summary.products)} sản phẩm`} icon={Boxes} tone="blue" />
-        <MetricCard label="Sắp hết hàng" value={formatNumber(summary.low)} note="Tồn khả dụng ERP từ 1 đến 5" icon={AlertTriangle} tone="amber" />
+      {/*
+        TRANG KHO MỞ RA LÀ THẤY VIỆC, KHÔNG PHẢI THẤY BÀI GIẢNG.
+        Trước đây năm thẻ bằng nhau — "mẫu mã đang bán" (thông tin nền) to ngang "hết hàng" (việc
+        phải làm hôm nay) — và ngay dưới là năm dòng văn xuôi giảng công thức sổ kho, chiếm chỗ mọi
+        lúc dù chỉ cần đọc một lần. Nay hai câu hỏi hành động đứng trước ở cỡ lớn và BẤM ĐƯỢC (mở
+        thẳng danh sách mẫu mã tương ứng), phần nền gom vào dải mảnh, còn công thức sổ kho chuyển
+        nguyên văn vào dấu ⓘ cạnh tiêu đề — vẫn tra được bất cứ lúc nào, không còn chắn màn hình.
+      */}
+      <section className="grid gap-4 lg:grid-cols-3">
         <MetricCard
+          size="lg"
           label="Hết hàng"
           value={formatNumber(summary.out)}
           note={summary.unknownStock ? `Tồn ≤ 0, vẫn đang bán · ${formatNumber(summary.unknownStock)} mẫu mã CHƯA tính được tồn (chưa có phiếu nhập)` : "Tồn ≤ 0, vẫn đang bán"}
+          hint="Mẫu mã vẫn đang bày bán mà tồn khả dụng đã về 0 hoặc âm — mỗi đơn chốt thêm là một đơn có nguy cơ phải huỷ. Mẫu mã chưa có phiếu nhập nào KHÔNG nằm ở đây: chúng là CHƯA BIẾT tồn, không phải hết hàng."
           icon={PackageX}
           tone={summary.out > 0 ? "rose" : "slate"}
+          href="/products?stock=out"
         />
-        <MetricCard label="Giá trị tồn kho" value={formatVND(summary.stockValue, { compact: true })} note={`${formatNumber(summary.stockUnits)} sản phẩm × giá nhập gần nhất`} icon={Warehouse} tone="primary" />
-        <MetricCard label="Đã xuất kho" value={formatNumber(summary.shipped)} note={`Nhập mới ${formatNumber(summary.receiptIn)} · tái nhập ${formatNumber(summary.returnIn)} · hoàn chờ nhận ${formatNumber(summary.awaitingReturn)}${summary.shrinkage ? ` · hụt ${formatNumber(summary.shrinkage)}` : ""}`} icon={ShoppingBag} tone="green" />
+        <MetricCard
+          size="lg"
+          label="Sắp hết hàng"
+          value={formatNumber(summary.low)}
+          note="Tồn khả dụng ERP từ 1 đến 5"
+          hint="Còn hàng nhưng chỉ đủ vài đơn nữa. Đây là danh sách cần đặt sản xuất hoặc nhập bổ sung trước khi nó rơi xuống nhóm hết hàng."
+          icon={AlertTriangle}
+          tone={summary.low > 0 ? "amber" : "slate"}
+          href="/products?stock=low"
+        />
+        <MetricCard
+          size="lg"
+          label="Giá trị tồn kho"
+          value={formatVND(summary.stockValue, { compact: true })}
+          note={`${formatNumber(summary.stockUnits)} sản phẩm × giá nhập gần nhất`}
+          hint="Vốn đang nằm trong kho, tính theo giá nhập gần nhất của từng mẫu mã. Không gồm hàng hoàn đang trên đường về vì hàng đó chưa được kho đếm."
+          icon={Warehouse}
+          tone="primary"
+        />
       </section>
 
-      <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <b className="text-foreground">Sổ kho</b>: <b className="text-foreground">Tồn thực tế</b> = Nhập mới + Tái nhập + Điều chỉnh − Xuất tay − <b className="text-foreground">Đã xuất</b>; <b className="text-foreground">Khả dụng bán</b> = Tồn thực tế − hàng đã chốt đơn chờ xuất. “Đã xuất” đếm theo xác nhận <b className="text-foreground">lấy hàng của Viettel Post</b>, không theo trạng thái Pancake và không theo tiền COD. Hàng hoàn chỉ quay lại tồn khi kho lập <Link href="/inventory/receipts" className="font-semibold text-primary hover:underline">phiếu tái nhập</Link> với số đếm thực tế — ĐVVC báo “đã hoàn” mới chỉ là hàng đang trên đường về. Mẫu mã chưa có phiếu nhập thì ERP báo “Chưa có phiếu nhập” thay vì hiện số bịa.</div>
-      </div>
+      <StatStrip
+        columns={3}
+        items={[
+          { label: "Mẫu mã đang bán", value: formatNumber(summary.selling), note: `trong ${formatNumber(summary.products)} sản phẩm`, icon: Boxes, href: "/products?status=selling" },
+          {
+            label: "Đã xuất kho",
+            value: formatNumber(summary.shipped),
+            note: `nhập mới ${formatNumber(summary.receiptIn)} · tái nhập ${formatNumber(summary.returnIn)}${summary.shrinkage ? ` · hụt ${formatNumber(summary.shrinkage)}` : ""}`,
+            hint: "Đếm theo xác nhận LẤY HÀNG của Viettel Post — không theo trạng thái Pancake, không theo tiền COD.",
+            icon: ShoppingBag,
+          },
+          {
+            label: "Hoàn chờ kho nhận",
+            value: formatNumber(summary.awaitingReturn),
+            note: "chưa cộng vào tồn",
+            hint: "Viettel Post báo đã hoàn nhưng kho chưa lập phiếu tái nhập với số đếm thực tế. Hàng này CHƯA nằm trong tồn khả dụng, và cố ý như vậy.",
+            icon: PackagePlus,
+            tone: summary.awaitingReturn ? ("amber" as const) : ("muted" as const),
+            href: "/inventory/returns",
+          },
+        ]}
+      />
 
       <DataTableToolbar
         searchPlaceholder="Tên sản phẩm, SKU, barcode, màu, size…"
