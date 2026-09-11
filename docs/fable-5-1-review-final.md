@@ -73,11 +73,19 @@ chỗ có bằng chứng và không cần chủ shop chốt luật mới; chỗ 
 
 Số production (perf-probe, đệm rỗng, hệ thống rảnh) — xem mục 6 cho số sau deploy.
 
-| Hàm | Trước (03:06) | Sau |
+| Hàm (lượt NGUỘI, đệm rỗng) | Trước (03:06, commit 9d9cf18) | Sau (03:52, commit 6988432) |
 |---|---|---|
-| getBusinessBrief | 3.766ms · 91 lượt | *(mục 6)* |
-| getDashboardData | 3.285ms · 66 lượt | *(mục 6)* |
-| getFinancialTruth | 3.039ms · 12 lượt · câu COD 2.7–3.5s (JIT) | *(mục 6)* |
+| getBusinessBrief | **3.766ms** · 91 lượt | **1.004ms** · 86 lượt |
+| getDashboardData | **3.285ms** · 66 lượt | **751ms** · 61 lượt |
+| getFinancialTruth | **3.039ms** · 12 lượt · câu COD 2,7–3,5s (JIT) | **243ms** · 11 lượt · câu COD không còn trong top 8 |
+| getControlTower | 255ms | 393ms (đo ngay sau deploy, scheduler đang đồng bộ) |
+| Tổng 17 phép đo | 13.695ms | 5.322ms |
+
+Lượt nguội là điều kiện XẤU NHẤT tuyệt đối (probe xoá sạch đệm). Với bản này người dùng gần như
+không còn gặp lượt nguội: job nền chỉ đánh dấu cũ, job giữ ấm 4 phút một lần nay thắng, và người
+đọc nhận số của phút trước ngay rồi được kéo lên số mới bằng sự kiện. Câu chậm nhất còn lại là độ
+phủ quy kết quảng cáo (641ms, chạy 2 lần trong tóm tắt) — ứng viên tối ưu kế tiếp, không phải nút
+thắt.
 
 Số vòng đi-về CSDL (đọc mã, không đổi kết quả): chi tiết đơn 6 → 2; dòng thời gian đơn có N vận
 đơn 5 + 2N → 1 + 5 (song song); ngăn kéo 6 → 2; mỗi lần điều hướng bớt 4–5 câu tra người dùng;
@@ -90,7 +98,29 @@ trang chủ bớt 4 truy vấn; /alerts bớt 3.
 
 ## 6. Production: trước → sau deploy
 
-*(điền sau khi deploy)*
+Deploy #216 (`6988432eb3f0`), `/api/health` trả đúng commit, run xanh. Ảnh chụp KPI bằng `kpi-snapshot`
+(cùng `ORDER_OUTCOME`, chỉ đọc):
+
+| | Trước (03:30) | Sau (03:51) | Ghi chú |
+|---|---|---|---|
+| Tổng đơn | 2.539 | 2.541 | +2 đơn mới về từ Pancake trong 21 phút |
+| Giao thành công | 414 | 416 | +2 (một đơn kết thúc thật trong khoảng đo; COD chờ tăng đúng 998.000đ của đơn đó) |
+| Hoàn | 903 | 904 | hành trình thật |
+| Đang giao / chưa rõ / chưa gửi / huỷ | 366 / 13 / 191 / 652 | 363 / 13 / 193 / 652 | |
+| Doanh thu lên đơn | 983.433.498đ | 983.957.498đ | +524.000đ = 2 đơn mới |
+| Doanh thu giao TC | 220.457.000đ | 221.455.000đ | +998.000đ = đơn vừa giao |
+| **Tiền thực nhận có chứng từ** | **212.052.000đ** | **212.052.000đ** | giống hệt từng đồng |
+| Việc đang mở | 473 | 468 | |
+
+Mọi chênh lệch đều giải thích được bằng đơn mới / đơn vừa giao trong 21 phút giữa hai lần đo; tiền
+thực nhận giống hệt. Không công thức kết quả đơn nào bị đổi. Hai thay đổi định nghĩa có chủ đích
+(Tổng quan lấy cước từ Sự thật tài chính; /reports cùng population với Tổng quan) không nằm trong
+ảnh chụp này và đã ghi ở `docs/metrics-contract.md`.
+
+Kiểm tra dữ liệu trước khi sửa mục 4 (db-query, chỉ đọc): 1.976 vận đơn — 659 PAID_TO_BANK đều có
+`cod_collected`; chỉ **1** vận đơn (30.000đ, COLLECTED) có `cod_collected` mà không có dòng bảng kê;
+28 vận đơn COLLECTED + DELIVERED không có số thực thu (nhóm bị nhánh dự phòng cũ coi là "đã xác
+minh"). Vì vậy không cần dọn dữ liệu.
 
 ## 7. P0/P1 còn lại (có bằng chứng, chưa sửa vì cần chủ shop quyết hoặc quá phạm vi)
 
