@@ -1,4 +1,4 @@
-import { BankTabs, BANK_TABS, type BankTab } from "@/app/(dashboard)/bank/bank-tabs";
+import { BankTabs } from "@/app/(dashboard)/bank/bank-tabs";
 import { BankImportTab } from "@/app/(dashboard)/bank/import-tab";
 import { BankMatchTab } from "@/app/(dashboard)/bank/match-tab";
 import { BankReconcileTab } from "@/app/(dashboard)/bank/reconcile-tab";
@@ -6,6 +6,7 @@ import { BankRulesTab } from "@/app/(dashboard)/bank/rules-tab";
 import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
+import { BANK_TABS, type BankTab } from "@/lib/constants/bank";
 import { listBankRules, unclassifiedBankCount } from "@/lib/queries/bank";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 

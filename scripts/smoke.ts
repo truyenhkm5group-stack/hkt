@@ -131,6 +131,25 @@ const RENDER_MARKER = "VNXcommerce";
 const ERROR_MARKER = "Có lỗi khi tải trang";
 
 /**
+ * ═══════════ DẤU HIỆU THỨ HAI: LỖI NẰM TRONG GÓI RSC, CHƯA THÀNH CHỮ ═══════════
+ *
+ * SỰ CỐ THẬT (11/09/2026). `/bank` hỏng hẳn — `TypeError: f.BANK_TABS.includes is not a function` —
+ * và smoke báo **SUCCESS 124kB trong 66ms**, hai lượt deploy liên tiếp. Chủ shop là người phát hiện.
+ *
+ * Vì sao `ERROR_MARKER` không bắt được: lỗi nổ ở THÂN TRANG, trước mọi ranh giới Suspense. Next
+ * dựng xong khung ngoài (nên `RENDER_MARKER` vẫn có), rồi đẩy lỗi sang máy khách dưới dạng gói RSC.
+ * Dòng chữ "Có lỗi khi tải trang" chỉ xuất hiện SAU khi trình duyệt chạy JavaScript — HTML máy chủ
+ * trả về không hề có nó. `curl` không chạy JavaScript, nên nó không bao giờ thấy.
+ *
+ * Nhưng MÃ LỖI thì phải có trong HTML: máy khách in được "Mã lỗi: 1532032257" nghĩa là con số đó
+ * đến từ gói RSC nhúng trong trang. Đó là dấu hiệu duy nhất đọc được mà không cần trình duyệt.
+ *
+ * Hai dấu hiệu bổ cho nhau: lỗi trong nhánh có Suspense thì hiện thành chữ, lỗi ở thân trang thì
+ * chỉ còn mã. Thiếu một trong hai là còn một nửa cửa mở.
+ */
+const DIGEST_MARKER = /\\?"digest\\?"\s*:\s*\\?"\d{3,}/;
+
+/**
  * ═══════════ PHÂN LOẠI KẾT QUẢ — MỘT CHỮ "LỖI" KHÔNG ĐỦ ═══════════
  *
  * Sự cố thật 09/09/2026: bộ smoke báo "13/21 màn hình LỖI" và deploy bị đánh dấu thất bại,
@@ -282,6 +301,17 @@ async function main() {
       */
       if (body.includes(ERROR_MARKER)) {
         results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng dựng ra TRANG LỖI (ranh giới lỗi của Next) — xem log máy chủ theo mã lỗi", ms });
+        continue;
+      }
+
+      /*
+        Lỗi ở THÂN TRANG không kịp thành chữ trong HTML — chỉ còn mã lỗi trong gói RSC. Xem
+        DIGEST_MARKER ở trên: đây chính là lỗ hổng đã để `/bank` đi qua hai lượt deploy.
+      */
+      const ma = DIGEST_MARKER.exec(body);
+      if (ma) {
+        const so = /(\d{3,})/.exec(ma[0])?.[1] ?? "";
+        results.push({ route, verdict: "APP_ERROR", detail: `HTTP 200 nhưng gói RSC mang LỖI MÁY CHỦ (mã ${so}) — trang chỉ hiện lỗi sau khi chạy JavaScript`, ms });
         continue;
       }
 
