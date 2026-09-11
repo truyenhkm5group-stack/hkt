@@ -4,7 +4,7 @@ import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
 
 /** `ERP`: job nội bộ (dựng lại bảng dẫn xuất…) — cũng phải có bản ghi chạy, nếu không hỏng là không ai biết. */
-export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ERP";
+export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ERP" | "SEPAY";
 export type SyncTrigger = "MANUAL" | "CRON" | "WEBHOOK";
 
 export type SyncSummary = {

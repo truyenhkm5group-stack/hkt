@@ -25,11 +25,25 @@ import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landi
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
+import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
-export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+  "sepay-reconcile": {
+    label: "Đối chiếu giao dịch ngân hàng qua API SePay",
+    source: "SEPAY",
+    description:
+      "Quét lại N ngày qua API SePay và vá những gói tin webhook không bao giờ tới. Webhook chỉ được SePay thử lại 7 lần trong 5 giờ; sự cố dài hơn thế làm mất hẳn giao dịch, và sổ thiếu tiền mà nhìn vào không thấy gì bất thường. MẶC ĐỊNH CHẠY THỬ — truyền apply=1 mới ghi.",
+    run: (o) =>
+      reconcileSepay({
+        days: num(o.params?.days),
+        apply: o.params?.apply === "1",
+        trigger: o.trigger,
+        actor: o.actor,
+      }),
+  },
   "pancake-orders": {
     label: "Đơn hàng mới cập nhật",
     source: "PANCAKE",

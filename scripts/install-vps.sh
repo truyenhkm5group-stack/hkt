@@ -64,6 +64,7 @@ if [ -f .env ]; then
   # chết đường realtime đang chạy — mọi gói tin sau đó bị từ chối 401 mà không ai hiểu vì sao.
   [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && upsert_env SEPAY_WEBHOOK_SECRET "${SEPAY_WEBHOOK_SECRET}"
   [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && upsert_env SEPAY_WEBHOOK_API_KEY "${SEPAY_WEBHOOK_API_KEY}"
+  [ -n "${SEPAY_API_TOKEN:-}" ] && upsert_env SEPAY_API_TOKEN "${SEPAY_API_TOKEN}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
@@ -111,6 +112,9 @@ VIETTELPOST_WEBHOOK_SECRET="vtp_$(rand 16)"
 # (my.sepay.vn → Webhooks → Bảo mật: HMAC-SHA256), KHÔNG phải ERP sinh. Rỗng = chưa cấu hình.
 SEPAY_WEBHOOK_SECRET="${SEPAY_WEBHOOK_SECRET:-}"
 SEPAY_WEBHOOK_API_KEY="${SEPAY_WEBHOOK_API_KEY:-}"
+# Token API v2 — cho đường ĐỐI CHIẾU (vá gói tin webhook đã mất). Rỗng = đường đối chiếu tắt,
+# đường realtime vẫn chạy bình thường.
+SEPAY_API_TOKEN="${SEPAY_API_TOKEN:-}"
 
 FACEBOOK_ACCESS_TOKEN="${FACEBOOK_ACCESS_TOKEN:-}"
 FACEBOOK_BUSINESS_ID="${FACEBOOK_BUSINESS_ID:-336423739082347}"

@@ -13,6 +13,7 @@ export const SYNC_JOB_LABEL: Record<string, string> = {
   tracking_selected: "Cập nhật vận đơn được chọn",
   orders_import: "Nhập vận đơn từ Viettel Post",
   ads_insights: "Chi tiêu quảng cáo Facebook",
+  sepay_reconcile: "Đối chiếu giao dịch ngân hàng qua API SePay",
 };
 
 export function syncJobLabel(job: string) {
@@ -39,6 +40,7 @@ export const SYNC_SOURCE_LABEL: Record<string, string> = {
   PANCAKE: "Pancake POS",
   VIETTELPOST: "Viettel Post",
   FACEBOOK: "Facebook Ads",
+  SEPAY: "SePay (ngân hàng)",
   ALL: "Tất cả",
 };
 

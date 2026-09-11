@@ -99,6 +99,18 @@ export const env = {
     get webhookApiKey() {
       return read("SEPAY_WEBHOOK_API_KEY");
     },
+    /**
+     * Token API v2 (my.sepay.vn → Cài đặt công ty → API Access).
+     *
+     * KHÁC secret webhook: secret dùng để XÁC MINH gói tin SePay đẩy sang, token này dùng để ERP
+     * CHỦ ĐỘNG hỏi lại SePay. Thiếu token thì đường đối chiếu nằm im, đường realtime vẫn chạy.
+     */
+    get apiToken() {
+      return read("SEPAY_API_TOKEN");
+    },
+    get apiBaseUrl() {
+      return read("SEPAY_API_BASE_URL", "https://userapi.sepay.vn/v2").replace(/\/$/, "");
+    },
   },
   viettelPost: {
     get apiKey() {
@@ -129,5 +141,6 @@ export function integrationStatus() {
     viettelPostWebhook: Boolean(env.viettelPost.webhookSecret),
     sepayWebhook: Boolean(env.sepay.webhookSecret || env.sepay.webhookApiKey),
     sepayWebhookSigned: Boolean(env.sepay.webhookSecret),
+    sepayApi: Boolean(env.sepay.apiToken),
   };
 }

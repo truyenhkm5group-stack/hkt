@@ -56,6 +56,7 @@ on:
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
           - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
+          - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
@@ -96,6 +97,9 @@ jobs:
           # đối KHÔNG truyền qua ô "arg" — ô đó được in nguyên văn vào log của mọi lần chạy.
           SEPAY_WEBHOOK_SECRET: ${{ secrets.SEPAY_WEBHOOK_SECRET }}
           SEPAY_WEBHOOK_API_KEY: ${{ secrets.SEPAY_WEBHOOK_API_KEY }}
+          # Token API v2 — dùng cho đường ĐỐI CHIẾU. Khác secret webhook: secret để xác minh gói tin
+          # SePay đẩy sang, token này để ERP chủ động hỏi lại SePay.
+          SEPAY_API_TOKEN: ${{ secrets.SEPAY_API_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -103,7 +107,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN
           script: |
             set -e
             cd /root/erp
@@ -273,6 +277,7 @@ jobs:
                 # CHỈ ghi khi có giá trị: Secret trống không được phép xoá khoá đang dùng trên máy.
                 [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && { upsert_env SEPAY_WEBHOOK_SECRET "$SEPAY_WEBHOOK_SECRET"; echo "SEPAY_WEBHOOK_SECRET: đã ghi (${#SEPAY_WEBHOOK_SECRET} ký tự)"; }
                 [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && { upsert_env SEPAY_WEBHOOK_API_KEY "$SEPAY_WEBHOOK_API_KEY"; echo "SEPAY_WEBHOOK_API_KEY: đã ghi (${#SEPAY_WEBHOOK_API_KEY} ký tự)"; }
+                [ -n "${SEPAY_API_TOKEN:-}" ] && { upsert_env SEPAY_API_TOKEN "$SEPAY_API_TOKEN"; echo "SEPAY_API_TOKEN: đã ghi (${#SEPAY_API_TOKEN} ký tự)"; }
                 $C up -d app scheduler
                 sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
                 # ĐỌC QUA CONTAINER, KHÔNG QUA HOST. Cổng 3000 KHÔNG mở ra host trên production
@@ -291,6 +296,11 @@ jobs:
                 # UNIQUE ở CSDL chặn dòng thứ hai; script vẫn đếm trước/sau và báo đỏ nếu số dòng đổi.
                 fetch_script sepay-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-verify.ts ;;
+              sepay-reconcile)
+                # MẶC ĐỊNH CHẠY THỬ: chỉ nói sẽ vá gì, không ghi. Truyền `--apply` ở ô "arg" mới ghi.
+                # Bộ đọc API này chưa từng chạy với API thật, nên phải NHÌN một lượt trước khi cho ghi.
+                fetch_script sepay-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-reconcile.ts'
+                docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/sepay-reconcile.ts $ARG" ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;

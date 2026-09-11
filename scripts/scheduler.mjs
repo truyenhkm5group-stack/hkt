@@ -10,6 +10,16 @@ const minutes = (name, fallback) => {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
+// ĐỐI CHIẾU SEPAY — CỐ Ý TẮT MẶC ĐỊNH.
+//
+// `AGENTS.md` mục 7: đổi lịch scheduler phải hỏi chủ shop. Nên job này chỉ chạy khi chủ shop tự
+// đặt `SYNC_SEPAY_EVERY_MINUTES` (gợi ý 60). Chưa đặt thì lịch hiện tại không thêm một mục nào.
+//
+// Và nó chạy CHẠY THỬ: `apply=1` phải khai tường minh. Một job tự ghi vào sổ tiền mỗi giờ là thứ
+// phải bật bằng tay sau khi đã nhìn ít nhất một lượt chạy thử.
+const sepayEvery = Number(process.env.SYNC_SEPAY_EVERY_MINUTES) || 0;
+const sepayApply = process.env.SYNC_SEPAY_APPLY === "1" ? "&apply=1" : "";
+
 const JOBS = [
   { job: "pancake-orders", every: minutes("SYNC_ORDERS_EVERY_MINUTES", 3), offset: 0.2 },
   { job: "vtp-tracking", every: minutes("SYNC_VTP_EVERY_MINUTES", 10), offset: 1 },
@@ -34,7 +44,8 @@ const JOBS = [
   { job: "outcome-materialize", every: minutes("OUTCOME_MATERIALIZE_EVERY_MINUTES", 5), offset: 1.5 },
   // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 4 phút — ngắn hơn TTL 300
   // giây của bảng điều khiển, nên đệm không bao giờ kịp nguội và người mở trang không phải trả giá.
-  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
+  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },  // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
+  ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];
 
 const DAILY = [
