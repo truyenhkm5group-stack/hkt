@@ -46,6 +46,9 @@ const ROUTES = [
   "/operations",
   "/orders",
   "/shipments",
+  // Tuyến NẶNG NHẤT của trang Vận đơn: tháp điều khiển mở sẵn một rổ, tức là render cả danh sách
+  // kiện kèm tuổi tin cuối. Không phủ nó thì lá chắn chỉ canh trang rỗng.
+  "/shipments?bucket=CARE_TODAY",
   "/import-vtp",
   "/cod",
   "/cod?recon=unproven",
