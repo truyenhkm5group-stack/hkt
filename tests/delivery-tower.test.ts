@@ -5,6 +5,7 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { DELIVERY_BUCKETS, EXCLUSIVE_BUCKETS } from "@/lib/constants/delivery-tower";
 import { getDeliveryTower, tongRoThat } from "@/lib/queries/delivery-tower";
+import { getReturnPipeline } from "@/lib/queries/return-pipeline";
 
 /**
  * ═══════════ THÁP ĐIỀU KHIỂN GIAO VẬN: MỖI KIỆN ĐÚNG MỘT RỔ ═══════════
@@ -139,6 +140,19 @@ export async function testDeliveryTower(db: Db) {
 
   // Cột thô và cột chuẩn hoá phải cùng có mặt: lệch giữa hai bên là thứ duy nhất phát hiện sai ánh xạ.
   assert.ok(dongStale.rawStatus.length > 0 && dongStale.stageLabel.length > 0, "phải hiện CẢ trạng thái thô của VTP lẫn cách ERP hiểu");
+
+  /*
+    ═══ HAI MÀN HÌNH, MỘT ĐỐNG HÀNG, PHẢI CÙNG MỘT SỐ ═══
+
+    Rổ "hoàn đã về shop" của tháp và khâu CARRIER_RETURN_DELIVERED của đường ống hàng hoàn nói về
+    ĐÚNG một đống hàng. Lệch một vế điều kiện là hai trang báo hai con số, và người đọc không có
+    cách nào biết tin bên nào — kiểu sai tệ nhất vì không có lỗi nào phát ra.
+  */
+  clearMemo();
+  const ong = await getReturnPipeline();
+  const khauVeShop = ong.stages.find((k) => k.key === "CARRIER_RETURN_DELIVERED");
+  const roVeShop = thap.buckets.find((b) => b.key === "RETURN_AT_SHOP")!;
+  assert.equal(roVeShop.count, khauVeShop?.parcels ?? 0, "rổ 'hoàn đã về shop' phải khớp khâu CARRIER_RETURN_DELIVERED của đường ống hàng hoàn");
 
   // ───────── 6. BỘ DÒ VIỆC KHÔNG ĐƯỢC QUAY VỀ `updated_at` ─────────
   /*

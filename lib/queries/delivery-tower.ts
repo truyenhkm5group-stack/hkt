@@ -189,8 +189,27 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
              order by c.updated_at desc
              limit 1
           ) cs on true
-         where s.is_final = false
-            or (s.stage = 'RETURNED' and s.return_received_at is null)
+         where s.order_id is not null
+           /*
+             ═══ AI VÀO THÁP ═══
+
+             1. CHỈ VẬN ĐƠN CÓ GẮN ĐƠN. Vận đơn chiều hoàn là dòng riêng với order_id NULL (luật
+                vận đơn số 7): hàng thật, nhưng không có khách để gọi, và đường ống hàng hoàn đã
+                đếm chúng theo cách riêng. Vận đơn mồ côi có luật riêng ở trang Chất lượng dữ liệu.
+
+             2. Chặng RETURNED xử lý bằng ĐÚNG MỘT nhánh, không để nhánh "chưa kết thúc" bắt lại một
+                phần của nó. Điều kiện của nhánh đó lấy y hệt khâu CARRIER_RETURN_DELIVERED của
+                đường ống hàng hoàn — lệch một vế là hai màn hình nói hai con số cho cùng một đống
+                hàng, và không lỗi nào phát ra.
+           */
+           and (
+             (s.is_final = false and s.stage <> 'RETURNED')
+             or (
+               s.stage = 'RETURNED'
+               and s.return_received_at is null
+               and not exists (select 1 from return_inspections ri where ri.shipment_id = s.id)
+             )
+           )
       `),
     );
 
