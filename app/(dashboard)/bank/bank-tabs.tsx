@@ -8,7 +8,7 @@ import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 
-export function BankTabs({ active, unclassified }: { active: BankTab; unclassified: number }) {
+export function BankTabs({ active, unclassified, unconfirmedAccounts }: { active: BankTab; unclassified: number; unconfirmedAccounts: number }) {
   const [dangChuyen, startTransition] = useTransition();
   const [, setState] = useQueryStates({ tab: parseAsString, page: parseAsString }, { shallow: false, history: "push", startTransition });
   return (
@@ -20,6 +20,11 @@ export function BankTabs({ active, unclassified }: { active: BankTab; unclassifi
             {tab === "giao-dich" && unclassified > 0 ? (
               <span className="rounded-full bg-amber-500/20 px-1.5 font-mono text-[10.5px] text-amber-700 dark:text-amber-300" title="Giao dịch chưa phân loại">
                 {formatNumber(unclassified)}
+              </span>
+            ) : null}
+            {tab === "tai-khoan" && unconfirmedAccounts > 0 ? (
+              <span className="rounded-full bg-amber-500/20 px-1.5 font-mono text-[10.5px] text-amber-700 dark:text-amber-300" title="Tài khoản ngân hàng chưa xác nhận">
+                {formatNumber(unconfirmedAccounts)}
               </span>
             ) : null}
           </TabsTrigger>

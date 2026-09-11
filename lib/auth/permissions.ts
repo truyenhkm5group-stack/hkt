@@ -48,6 +48,10 @@ export const PERMISSION_GROUPS = [
       { key: "expenses:write", label: "Chi phí vận hành & Quảng cáo: sửa", hint: "Thêm chi phí, nhập sao kê, thêm chi tiêu QC, ghép chiến dịch, gán marketer" },
       { key: "bank:view", label: "Sổ ngân hàng: xem", hint: "Giao dịch thu / chi thực trên sao kê, đối chiếu với sổ sách ERP" },
       { key: "bank:write", label: "Sổ ngân hàng: nhập & phân loại", hint: "Nhập sao kê, gán nhóm kế toán, quy tắc gán nhãn, đẩy khoản chi sang bảng Chi phí" },
+      // CỐ Ý TÁCH KHỎI `bank:write`. Xác nhận một tài khoản ngân hàng là quyết định "tiền của tài
+      // khoản này được tính vào sổ của shop" — cao hơn hẳn việc gán nhãn cho một dòng đã có. Kế
+      // toán nhập sao kê hằng ngày không cần quyền đó; chủ shop cấp thêm khi muốn.
+      { key: "bank:accounts", label: "Sổ ngân hàng: xác nhận tài khoản", hint: "Đặt tên, xác nhận tài khoản ngân hàng mới do webhook phát hiện, hoặc ngừng dùng một tài khoản" },
     ],
   },
   {

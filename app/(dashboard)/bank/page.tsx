@@ -1,4 +1,5 @@
 import { BankTabs } from "@/app/(dashboard)/bank/bank-tabs";
+import { BankAccountsTab } from "@/app/(dashboard)/bank/accounts-tab";
 import { BankImportTab } from "@/app/(dashboard)/bank/import-tab";
 import { BankMatchTab } from "@/app/(dashboard)/bank/match-tab";
 import { BankReconcileTab } from "@/app/(dashboard)/bank/reconcile-tab";
@@ -7,7 +8,7 @@ import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { BANK_TABS, type BankTab } from "@/lib/constants/bank";
-import { listBankRules, unclassifiedBankCount } from "@/lib/queries/bank";
+import { listBankAccounts, listBankRules, unclassifiedBankCount, unconfirmedBankAccountCount } from "@/lib/queries/bank";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Sổ ngân hàng" };
@@ -24,11 +25,20 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
   const raw = await searchParams;
   const user = await requirePermission("bank:view");
   const canWrite = can(user, "bank:write");
+  // Quyền RIÊNG: xác nhận tài khoản là quyết định "tiền của tài khoản này vào sổ shop",
+  // cao hơn hẳn việc gán nhãn một dòng đã có.
+  const canManageAccounts = can(user, "bank:accounts");
   const period = resolvePeriod(raw, "month");
   const requested = param(raw, "tab", "giao-dich");
   const tab = (BANK_TABS.includes(requested as BankTab) ? requested : "giao-dich") as BankTab;
 
-  const [unclassified, rules] = await Promise.all([unclassifiedBankCount(), tab === "quy-tac" ? listBankRules() : Promise.resolve([])]);
+  // Số tài khoản chờ xác nhận luôn được đếm: nó là con số trên tab, phải đúng ở mọi tab.
+  const [unclassified, unconfirmedAccounts, rules, accounts] = await Promise.all([
+    unclassifiedBankCount(),
+    unconfirmedBankAccountCount(),
+    tab === "quy-tac" ? listBankRules() : Promise.resolve([]),
+    tab === "tai-khoan" ? listBankAccounts() : Promise.resolve([]),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -38,9 +48,10 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
         description="Dòng tiền thu / chi thực trên tài khoản"
         hint="Nhập sao kê ngân hàng, phân loại từng giao dịch vào nhóm kế toán, và đưa khoản chi hợp lệ sang Báo cáo lợi nhuận. Nhóm nào đã có nguồn chuyên biệt (quảng cáo, tiền hàng, cước ĐVVC) chỉ dùng để đối chiếu, không trừ lần thứ hai."
       />
-      <BankTabs active={tab} unclassified={unclassified} />
+      <BankTabs active={tab} unclassified={unclassified} unconfirmedAccounts={unconfirmedAccounts} />
 
       {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}
+      {tab === "tai-khoan" ? <BankAccountsTab accounts={accounts} canManage={canManageAccounts} /> : null}
       {tab === "doi-khop" ? <BankMatchTab canWrite={canWrite} /> : null}
       {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} /> : null}
       {tab === "quy-tac" ? <BankRulesTab rules={rules} canWrite={canWrite} /> : null}

@@ -13,7 +13,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, type BankLinkType } from "@/lib/constants/bank";
+import { BANK_ACCOUNT_STATUSES, BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, maskAccountNumber, type BankLinkType } from "@/lib/constants/bank";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
 import { applyBankRules as runBankRules } from "@/lib/integrations/bank/apply-rules";
@@ -119,6 +119,86 @@ export async function importBankStatement(
   });
   revalidateAll();
   return { ok: true, inserted, updated: rows.rows.length - inserted, duplicates: rows.duplicates, labelled };
+}
+
+
+// ───────────────────────── Tài khoản ngân hàng ─────────────────────────
+
+/**
+ * QUYỀN RIÊNG, KHÔNG DÙNG `bank:write`.
+ *
+ * Xác nhận một tài khoản là quyết định "tiền của tài khoản này được tính vào sổ của shop" — cao hơn
+ * hẳn việc gán nhãn cho một dòng đã có. Kế toán nhập sao kê hằng ngày không cần quyền đó.
+ */
+async function guardAccounts(): Promise<Guard> {
+  const user = await requireUser();
+  if (!can(user, "bank:accounts")) return { error: "Chỉ chủ shop / quản trị mới xác nhận được tài khoản ngân hàng" };
+  return { user };
+}
+
+const accountSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(500).optional(),
+  status: z.enum(BANK_ACCOUNT_STATUSES).optional(),
+});
+
+/**
+ * Đặt tên / xác nhận / ngừng dùng một tài khoản ngân hàng.
+ *
+ * ─── KHÔNG ĐỤNG MỘT GIAO DỊCH NÀO ───
+ *
+ * Câu lệnh chỉ ghi vào `bank_accounts`. Đổi trạng thái tài khoản KHÔNG sửa, không ẩn, không xoá,
+ * không gắn lại bất kỳ dòng nào trong `bank_transactions` — tiền đã vào sổ là CHỨNG TỪ, còn trạng
+ * thái tài khoản là CẤU HÌNH. Trộn hai thứ đó lại là cách một thao tác cấu hình vô tình viết lại
+ * lịch sử tiền.
+ *
+ * Cũng vì thế `DISABLED` không làm mất giao dịch cũ và không chặn giao dịch mới vào sổ: gói tin đã
+ * qua HMAC vẫn được ghi, chỉ là tài khoản mang nhãn "ngừng dùng" để người đọc hiểu vì sao dòng tiền
+ * dừng lại. Mất tiền vì một nhãn cấu hình là hậu quả tệ hơn nhiều so với một nhãn sai.
+ */
+export async function updateBankAccount(input: unknown): Promise<{ ok: true } | { error: string }> {
+  const g = await guardAccounts();
+  if (g.error !== undefined) return { error: g.error };
+  const parsed = accountSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { id, label, note, status } = parsed.data;
+
+  const db = await getDb();
+  const [truoc] = await db.select().from(schema.bankAccounts).where(eq(schema.bankAccounts.id, id));
+  if (!truoc) return { error: "Không tìm thấy tài khoản" };
+
+  // Tên rỗng thì giữ nguyên tên ERP tự đặt — thà một cái tên máy sinh còn hơn một dòng trống không
+  // ai nhận ra là tài khoản nào.
+  const tenMoi = label !== undefined && label.length > 0 ? label : truoc.label;
+  if (tenMoi === truoc.label && note === undefined && (status === undefined || status === truoc.status)) {
+    return { ok: true };
+  }
+
+  await db
+    .update(schema.bankAccounts)
+    .set({
+      label: tenMoi,
+      ...(note !== undefined ? { note } : {}),
+      ...(status !== undefined ? { status } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.bankAccounts.id, id));
+
+  // AI làm, lúc nào, đổi từ gì sang gì — `audit()` ghi cả `created_at`.
+  await audit({
+    userId: g.user.id,
+    userEmail: g.user.email,
+    action: status && status !== truoc.status ? `BANK_ACCOUNT_${status}` : "BANK_ACCOUNT_UPDATE",
+    entity: "BANK_ACCOUNT",
+    entityId: id,
+    before: { label: truoc.label, status: truoc.status, note: truoc.note },
+    after: { label: tenMoi, status: status ?? truoc.status, note: note ?? truoc.note },
+    detail: { gateway: truoc.gateway, accountNumber: maskAccountNumber(truoc.accountNumber), subAccount: truoc.subAccount },
+  });
+
+  revalidateAll();
+  return { ok: true };
 }
 
 // ───────────────────────── Phân loại ─────────────────────────

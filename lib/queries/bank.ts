@@ -8,7 +8,7 @@
  * Vì vậy mọi tổng hợp ở đây đều theo NGÀY GIAO DỊCH TRÊN SAO KÊ, không phân bổ theo kỳ hiệu lực.
  * Phân bổ là việc của bảng Chi phí sau khi giao dịch được đẩy sang (`lib/queries/cost-allocation.ts`).
  */
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { BANK_GROUPS, BANK_GROUP_SPEC, isBankGroup, isBusinessCash, type BankGroup } from "@/lib/constants/bank";
@@ -170,6 +170,80 @@ export async function bankByGroup(period: Period) {
 export async function unclassifiedBankCount(): Promise<number> {
   const db = await getDb();
   const [row] = await db.select({ n: count() }).from(b).where(eq(b.accountingGroup, "UNCLASSIFIED"));
+  return Number(row?.n ?? 0);
+}
+
+
+/**
+ * ═══════ DANH SÁCH TÀI KHOẢN NGÂN HÀNG ═══════
+ *
+ * Một truy vấn, gộp sẵn số liệu theo tài khoản. CỐ Ý gộp ở CSDL thay vì đếm từng tài khoản ở
+ * TypeScript: số tài khoản thì ít, nhưng `bank_transactions` sẽ lớn dần, và một vòng lặp gọi N+1
+ * câu lệnh là cách một trang nhẹ biến thành trang chậm sau vài tháng.
+ *
+ * `lastIn` / `lastOut` là MỐC của giao dịch gần nhất mỗi chiều, không phải số tiền cộng dồn —
+ * người xem cần biết "tài khoản này còn sống không", và một con số tổng không trả lời được câu đó.
+ */
+export async function listBankAccounts() {
+  const db = await getDb();
+  const a = schema.bankAccounts;
+  const b = schema.bankTransactions;
+
+  const soLieu = db
+    .select({
+      bankAccountId: b.bankAccountId,
+      soGiaoDich: sql<number>`count(*)`.as("so_giao_dich"),
+      tienVao: sql<number>`coalesce(sum(case when ${b.amount} > 0 then ${b.amount} else 0 end), 0)`.as("tien_vao"),
+      tienRa: sql<number>`coalesce(sum(case when ${b.amount} < 0 then -${b.amount} else 0 end), 0)`.as("tien_ra"),
+      lanVaoGanNhat: sql<Date | null>`max(${b.txnAt}) filter (where ${b.amount} > 0)`.as("lan_vao_gan_nhat"),
+      lanRaGanNhat: sql<Date | null>`max(${b.txnAt}) filter (where ${b.amount} < 0)`.as("lan_ra_gan_nhat"),
+    })
+    .from(b)
+    .where(isNotNull(b.bankAccountId))
+    .groupBy(b.bankAccountId)
+    .as("so_lieu");
+
+  const rows = await db
+    .select({
+      id: a.id,
+      provider: a.provider,
+      gateway: a.gateway,
+      accountNumber: a.accountNumber,
+      subAccount: a.subAccount,
+      label: a.label,
+      currency: a.currency,
+      status: a.status,
+      note: a.note,
+      lastSeenAt: a.lastSeenAt,
+      createdAt: a.createdAt,
+      soGiaoDich: sql<number>`coalesce(${soLieu.soGiaoDich}, 0)`,
+      tienVao: sql<number>`coalesce(${soLieu.tienVao}, 0)`,
+      tienRa: sql<number>`coalesce(${soLieu.tienRa}, 0)`,
+      lanVaoGanNhat: soLieu.lanVaoGanNhat,
+      lanRaGanNhat: soLieu.lanRaGanNhat,
+    })
+    .from(a)
+    .leftJoin(soLieu, eq(soLieu.bankAccountId, a.id))
+    // Chưa xác nhận lên đầu: đó là việc cần người làm, không phải thông tin để đọc cho biết.
+    .orderBy(sql`case when ${a.status} = 'UNCONFIRMED' then 0 when ${a.status} = 'ACTIVE' then 1 else 2 end`, asc(a.gateway), asc(a.accountNumber));
+
+  return rows.map((r) => ({
+    ...r,
+    soGiaoDich: Number(r.soGiaoDich),
+    tienVao: Number(r.tienVao),
+    tienRa: Number(r.tienRa),
+  }));
+}
+
+export type BankAccountRow = Awaited<ReturnType<typeof listBankAccounts>>[number];
+
+/** Số tài khoản đang chờ người xác nhận — để gắn số lên tab, đúng cách `giao-dich` đang làm. */
+export async function unconfirmedBankAccountCount(): Promise<number> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.bankAccounts)
+    .where(eq(schema.bankAccounts.status, "UNCONFIRMED"));
   return Number(row?.n ?? 0);
 }
 

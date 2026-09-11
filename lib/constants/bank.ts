@@ -371,11 +371,50 @@ export const BANK_DIRECTION_LABEL: Record<BankDirection, string> = {
  *
  * `tests/client-boundary-exports.test.ts` nay khoá điều này cho CẢ kho mã.
  */
-export const BANK_TABS = ["giao-dich", "doi-khop", "nhap-sao-ke", "quy-tac", "doi-chieu"] as const;
+/**
+ * TRẠNG THÁI TÀI KHOẢN NGÂN HÀNG.
+ *
+ * `UNCONFIRMED` là trạng thái MẶC ĐỊNH của mọi tài khoản do webhook phát hiện, và đó là chủ đích:
+ * ERP tự khai tài khoản để KHÔNG MẤT GIAO DỊCH, nhưng việc xác nhận "đúng là tài khoản của shop"
+ * là quyết định của con người. Không đường tự động nào được phép đặt `ACTIVE`.
+ *
+ * `DISABLED` KHÔNG xoá và KHÔNG ẩn giao dịch đã có — tiền đã vào sổ là chứng từ, không phải cấu
+ * hình. Nó chỉ đánh dấu tài khoản thôi dùng để người đọc báo cáo hiểu vì sao dòng tiền dừng lại.
+ */
+export const BANK_ACCOUNT_STATUSES = ["UNCONFIRMED", "ACTIVE", "DISABLED"] as const;
+export type BankAccountStatus = (typeof BANK_ACCOUNT_STATUSES)[number];
+
+export const BANK_ACCOUNT_STATUS_LABEL: Record<BankAccountStatus, string> = {
+  UNCONFIRMED: "Chưa xác nhận",
+  ACTIVE: "Đang dùng",
+  DISABLED: "Ngừng dùng",
+};
+
+export const BANK_ACCOUNT_STATUS_TONE: Record<BankAccountStatus, string> = {
+  UNCONFIRMED: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  ACTIVE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  DISABLED: "bg-muted text-muted-foreground",
+};
+
+/**
+ * Che số tài khoản khi hiển thị: `******5264`.
+ *
+ * Sổ ngân hàng mở cho nhiều vai trò xem, và số tài khoản đầy đủ là thứ không cần thiết phải nằm
+ * trên màn hình để làm việc — bốn số cuối đủ để người đối chiếu nhận ra tài khoản nào.
+ */
+export function maskAccountNumber(value: string): string {
+  const s = (value ?? "").trim();
+  if (!s) return "—";
+  if (s.length <= 4) return s;
+  return "*".repeat(Math.max(4, s.length - 4)) + s.slice(-4);
+}
+
+export const BANK_TABS = ["giao-dich", "tai-khoan", "doi-khop", "nhap-sao-ke", "quy-tac", "doi-chieu"] as const;
 export type BankTab = (typeof BANK_TABS)[number];
 
 export const BANK_TAB_LABEL: Record<BankTab, string> = {
   "giao-dich": "Giao dịch",
+  "tai-khoan": "Tài khoản ngân hàng",
   "doi-khop": "Đối khớp chứng từ",
   "nhap-sao-ke": "Nhập sao kê",
   "quy-tac": "Quy tắc gán nhãn",
