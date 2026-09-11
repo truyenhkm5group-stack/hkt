@@ -102,7 +102,8 @@ export default async function ReturnInspectionPage() {
       {bang.awaitingArrival && choNhan.rows.length ? (
         <SectionCard
           title={`Chờ kho nhận · ${formatNumber(bang.awaitingArrival)} kiện`}
-          description="Viettel Post đã trả về shop, chưa ai bấm “đã nhận”. Xác nhận ở đây rồi kiện mới xuống hàng đợi đếm bên dưới — chưa cộng tồn."
+          description="Viettel Post đã trả về shop, chưa ai bấm “đã nhận”."
+          hint="Xác nhận ở đây rồi kiện mới xuống hàng đợi đếm bên dưới. Bấm “đã nhận” KHÔNG cộng tồn: tồn chỉ tăng khi có người đếm thực tế."
           actions={
             choNhan.total > choNhan.rows.length ? (
               <Link href="/data-quality?issue=return-not-received" className="text-xs font-semibold text-primary hover:underline">

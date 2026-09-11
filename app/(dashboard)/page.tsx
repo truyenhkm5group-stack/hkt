@@ -4,6 +4,7 @@ import { AlertTriangle, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, 
 import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { StatStrip } from "@/components/stat-tile";
 import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
@@ -72,120 +73,127 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       ) : null}
 
       {/*
-        BUỒNG LÁI RA QUYẾT ĐỊNH.
+        BUỒNG LÁI RA QUYẾT ĐỊNH — BA BẬC, KHÔNG PHẢI MƯỜI THẺ BẰNG NHAU.
+
         Ba con số tiền được tách rõ bằng chính NHÃN, vì trước đây cả ba đều được gọi là "doanh thu":
         LÊN ĐƠN (khách chốt) → GIAO THÀNH CÔNG (tới tay khách) → THỰC NHẬN (đã vào tài khoản).
         Mỗi thẻ bấm được và mở đúng TẬP ĐƠN đã sinh ra con số đó.
+
+        Trước đây cả mười chỉ số nằm trên cùng một lưới, cùng một cỡ chữ: mắt không biết đọc từ đâu
+        và "dữ liệu sai nghiêm trọng" to ngang "doanh thu". Nay KÍCH THƯỚC nói ra thứ tự quan trọng:
+          bậc 1 — dây chuyền tiền, ba con số dẫn dắt cả trang;
+          bậc 2 — lợi nhuận và tiền/việc đang treo, thứ cần quyết hôm nay;
+          bậc 3 — tỷ lệ theo dõi định kỳ, gom vào một dải mảnh.
+        Cùng chừng ấy thông tin, không bỏ con số nào.
       */}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Link href={`/orders?period=${period.key}`} className="block">
-          <MetricCard
-            label="① Doanh thu LÊN ĐƠN"
-            value={formatVND(data.money.booked, { compact: true })}
-            change={change(data.kpi.revenue, data.previous?.revenue)}
-            note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`}
-            hint="Tiền khách chốt lúc lên đơn — chưa nói gì về việc giao được hay thu được tiền. Bấm thẻ để mở đúng tập đơn."
-            icon={ShoppingBag}
-            tone="blue"
-          />
-        </Link>
-        <Link href={`/reports/returns?period=${period.key}`} className="block">
-          <MetricCard
-            label="② Doanh thu GIAO THÀNH CÔNG"
-            value={formatVND(data.money.delivered, { compact: true })}
-            change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
-            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} chưa có chứng từ` : ""}`}
-            hint="Kết luận theo chứng từ Viettel Post, rồi tới tiền COD thực thu; không suy từ trạng thái Pancake. GTC tính trên đơn đã kết thúc. Đơn chưa có chứng từ là CHƯA BIẾT, không tính vào mẫu số."
-            icon={PackageCheck}
-            tone="green"
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="③ TIỀN THỰC NHẬN"
-            value={formatVND(data.money.cashReceived, { compact: true })}
-            note="Bảng kê Viettel Post + khách chuyển trước"
-            hint="Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
-            icon={Banknote}
-            tone="green"
-          />
-        </Link>
-        <Link href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`} className="block">
-          <MetricCard
-            label="Viettel Post còn giữ"
-            value={formatVND(data.money.codOutstanding, { compact: true })}
-            note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa có trên bảng kê`}
-            hint="Đơn giao thành công mà chưa dòng bảng kê nào nhắc tới — tiền cần đòi Viettel Post. Bấm thẻ để mở danh sách."
-            icon={Truck}
-            tone="amber"
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="Lợi nhuận góp"
-            value={formatVND(data.money.contribution, { compact: true })}
-            note="Trước chi phí vận hành"
-            hint="Doanh thu giao thành công − giá vốn − cước − phí hoàn − quảng cáo. Chưa trừ chi phí vận hành cố định."
-            icon={CircleDollarSign}
-            tone={data.money.contribution >= 0 ? "primary" : "rose"}
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="Lợi nhuận ước tính"
-            value={formatVND(data.finance.estimatedProfit, { compact: true })}
-            note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`}
-            hint="Ước tính THEO ĐƠN trong kỳ, đã trừ chi phí vận hành phân bổ theo kỳ. KHÔNG phải tiền trong tài khoản — phần lớn còn nằm ở Viettel Post."
-            icon={TrendingUp}
-            tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
-          />
-        </Link>
-        <Link href="/alerts" className="block">
-          <MetricCard
-            label="Việc cần xử lý"
-            value={formatNumber(data.attention.newOrders + data.attention.failedDelivery + data.attention.staleShipments)}
-            note={`${formatNumber(data.attention.newOrders)} đơn mới · ${formatNumber(data.attention.failedDelivery)} giao thất bại / đang hoàn · ${formatNumber(data.attention.staleShipments)} treo lâu`}
-            icon={BellRing}
-            tone="amber"
-          />
-        </Link>
-        {/* HAI TỶ LỆ QUẢNG CÁO — mẫu số khác nhau có chủ đích, không thay thế cho nhau:
-            một bên là số khách chốt, một bên là số hàng thật sự tới tay khách. */}
-        <Link href={`/ads?period=${period.key}`} className="block">
-          <MetricCard
-            label="QC / Doanh số POS"
-            value={data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`}
-            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo / doanh thu lên đơn`}
-            hint="Mẫu số là doanh thu LÊN ĐƠN, chưa trừ đơn hoàn — đây là tỷ lệ lạc quan nhất, dùng để so với ngưỡng chốt đơn của marketer."
-            icon={Megaphone}
-            tone="slate"
-          />
-        </Link>
-        <Link href={`/ads?period=${period.key}`} className="block">
-          <MetricCard
-            label="QC / DT giao thành công"
-            value={data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`}
-            note="Chi quảng cáo / doanh thu đã tới tay khách"
-            hint="Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép."
-            icon={Megaphone}
-            tone={data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? "rose" : "slate"}
-          />
-        </Link>
-        <Link href="/data-quality" className="block">
-          <MetricCard
-            label="Dữ liệu sai nghiêm trọng"
-            value={formatNumber(data.dataIssues.critical)}
-            note={
-              data.dataIssues.critical
-                ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm`
-                : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`
-            }
-            hint="Vi phạm nghiêm trọng nghĩa là số liệu trên trang này có thể chưa đúng. Bấm thẻ để xem luật nào và sửa ở đâu."
-            icon={AlertTriangle}
-            tone={data.dataIssues.critical ? "rose" : "slate"}
-          />
-        </Link>
+      <section className="grid gap-4 lg:grid-cols-3">
+        <MetricCard
+          size="lg"
+          href={`/orders?period=${period.key}`}
+          label="① Doanh thu LÊN ĐƠN"
+          value={formatVND(data.money.booked, { compact: true })}
+          change={change(data.kpi.revenue, data.previous?.revenue)}
+          note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`}
+          hint="Tiền khách chốt lúc lên đơn — chưa nói gì về việc giao được hay thu được tiền. Bấm thẻ để mở đúng tập đơn."
+          icon={ShoppingBag}
+          tone="blue"
+        />
+        <MetricCard
+          size="lg"
+          href={`/reports/returns?period=${period.key}`}
+          label="② Doanh thu GIAO THÀNH CÔNG"
+          value={formatVND(data.money.delivered, { compact: true })}
+          change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
+          note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} chưa có chứng từ` : ""}`}
+          hint="Kết luận theo chứng từ Viettel Post, rồi tới tiền COD thực thu; không suy từ trạng thái Pancake. GTC tính trên đơn đã kết thúc. Đơn chưa có chứng từ là CHƯA BIẾT, không tính vào mẫu số."
+          icon={PackageCheck}
+          tone="green"
+        />
+        <MetricCard
+          size="lg"
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="③ TIỀN THỰC NHẬN"
+          value={formatVND(data.money.cashReceived, { compact: true })}
+          note="Bảng kê Viettel Post + khách chuyển trước"
+          hint="Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
+          icon={Banknote}
+          tone="green"
+        />
       </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="Lợi nhuận ước tính"
+          value={formatVND(data.finance.estimatedProfit, { compact: true })}
+          note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`}
+          hint="Ước tính THEO ĐƠN trong kỳ, đã trừ chi phí vận hành phân bổ theo kỳ. KHÔNG phải tiền trong tài khoản — phần lớn còn nằm ở Viettel Post."
+          icon={TrendingUp}
+          tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
+        />
+        <MetricCard
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="Lợi nhuận góp"
+          value={formatVND(data.money.contribution, { compact: true })}
+          note="Trước chi phí vận hành"
+          hint="Doanh thu giao thành công − giá vốn − cước − phí hoàn − quảng cáo. Chưa trừ chi phí vận hành cố định."
+          icon={CircleDollarSign}
+          tone={data.money.contribution >= 0 ? "primary" : "rose"}
+        />
+        <MetricCard
+          href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`}
+          label="Viettel Post còn giữ"
+          value={formatVND(data.money.codOutstanding, { compact: true })}
+          note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa có trên bảng kê`}
+          hint="Đơn giao thành công mà chưa dòng bảng kê nào nhắc tới — tiền cần đòi Viettel Post. Bấm thẻ để mở danh sách."
+          icon={Truck}
+          tone="amber"
+        />
+        <MetricCard
+          href="/alerts"
+          label="Việc cần xử lý"
+          value={formatNumber(data.attention.newOrders + data.attention.failedDelivery + data.attention.staleShipments)}
+          note={`${formatNumber(data.attention.newOrders)} đơn mới · ${formatNumber(data.attention.failedDelivery)} giao thất bại / đang hoàn · ${formatNumber(data.attention.staleShipments)} treo lâu`}
+          icon={BellRing}
+          tone="amber"
+        />
+      </section>
+
+      {/* HAI TỶ LỆ QUẢNG CÁO — mẫu số khác nhau có chủ đích, không thay thế cho nhau:
+          một bên là số khách chốt, một bên là số hàng thật sự tới tay khách. */}
+      <StatStrip
+        columns={3}
+        items={[
+          {
+            label: "QC / Doanh số POS",
+            value: data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`,
+            note: `${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo / doanh thu lên đơn`,
+            hint: "Mẫu số là doanh thu LÊN ĐƠN, chưa trừ đơn hoàn — đây là tỷ lệ lạc quan nhất, dùng để so với ngưỡng chốt đơn của marketer.",
+            icon: Megaphone,
+            href: `/ads?period=${period.key}`,
+          },
+          {
+            label: "QC / DT giao thành công",
+            value: data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`,
+            note: "Chi quảng cáo / doanh thu đã tới tay khách",
+            hint: "Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép.",
+            icon: Megaphone,
+            tone: data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? ("rose" as const) : ("default" as const),
+            href: `/ads?period=${period.key}`,
+          },
+          {
+            label: "Dữ liệu sai nghiêm trọng",
+            value: formatNumber(data.dataIssues.critical),
+            note: data.dataIssues.critical
+              ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm`
+              : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`,
+            hint: "Vi phạm nghiêm trọng nghĩa là số liệu trên trang này có thể chưa đúng. Bấm ô để xem luật nào và sửa ở đâu.",
+            icon: AlertTriangle,
+            tone: data.dataIssues.critical ? ("rose" as const) : ("muted" as const),
+            href: "/data-quality",
+          },
+        ]}
+      />
 
       {/*
         HAI KHỐI DƯỚI ĐÂY CHẢY VỀ SAU, KHÔNG CHẶN CÁC THẺ TIỀN Ở TRÊN.

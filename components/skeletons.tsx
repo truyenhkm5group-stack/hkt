@@ -60,12 +60,34 @@ function TableSkeleton({ rows = 10 }: { rows?: number }) {
   );
 }
 
-/** Trang danh sách: tiêu đề · thanh lọc · thẻ tổng · bảng. */
-export function TablePageSkeleton({ cards = 4, rows = 10 }: { cards?: number; rows?: number }) {
+/** Hàng thẻ dẫn dắt (cỡ lớn) — khớp `<MetricCard size="lg">`. */
+function LeadCardsSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <Skeleton key={i} className="h-[132px] rounded-xl" />
+      ))}
+    </div>
+  );
+}
+
+/** Dải chỉ số phụ — MỘT khối liền, khớp `<StatStrip>` (không phải nhiều thẻ rời). */
+function StripSkeleton() {
+  return <Skeleton className="h-[72px] rounded-xl" />;
+}
+
+/**
+ * Trang danh sách: tiêu đề · thẻ tổng · thanh lọc · bảng.
+ *
+ * THỨ TỰ PHẢI KHỚP TRANG THẬT. Trước đây khung xương vẽ thanh lọc TRƯỚC thẻ tổng, trong khi mọi
+ * trang danh sách đều xếp thẻ tổng ngay dưới tiêu đề rồi mới tới thanh lọc — nên khi dữ liệu về,
+ * hai khối đổi chỗ cho nhau và cả trang giật một nhịp. Khung xương sai hình còn hại hơn không có.
+ */
+export function TablePageSkeleton({ cards = 4, lead = 0, strip = false, rows = 10 }: { cards?: number; /** số thẻ cỡ lớn ở hàng đầu */ lead?: number; /** có dải chỉ số phụ hay không */ strip?: boolean; rows?: number }) {
   return (
     <div className="space-y-5">
       <HeaderSkeleton />
-      <ToolbarSkeleton />
+      {lead > 0 ? <LeadCardsSkeleton count={lead} /> : null}
       {cards > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: cards }).map((_, i) => (
@@ -73,22 +95,49 @@ export function TablePageSkeleton({ cards = 4, rows = 10 }: { cards?: number; ro
           ))}
         </div>
       ) : null}
+      {strip ? <StripSkeleton /> : null}
+      <ToolbarSkeleton />
       <TableSkeleton rows={rows} />
     </div>
   );
 }
 
+/** Trang Tổng quan: tiêu đề · ba thẻ lớn · bốn thẻ vừa · dải phụ · biểu đồ + danh sách việc. */
+export function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <HeaderSkeleton />
+      <LeadCardsSkeleton />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-[124px] rounded-xl" />
+        ))}
+      </div>
+      <StripSkeleton />
+      <Skeleton className="h-9 rounded-xl" />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
+        <Skeleton className="h-[320px] rounded-xl" />
+        <Skeleton className="h-[320px] rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
 /** Trang báo cáo: tiêu đề · tab · thẻ KPI · biểu đồ · bảng. */
-export function ReportPageSkeleton({ cards = 4, chart = true }: { cards?: number; chart?: boolean }) {
+export function ReportPageSkeleton({ cards = 4, lead = 0, strip = false, chart = true }: { cards?: number; /** số thẻ cỡ lớn ở hàng đầu */ lead?: number; /** có dải chỉ số phụ hay không */ strip?: boolean; chart?: boolean }) {
   return (
     <div className="space-y-5">
       <HeaderSkeleton actions={1} />
+      {lead > 0 ? <LeadCardsSkeleton count={lead} /> : null}
+      {cards > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: cards }).map((_, i) => (
+            <Skeleton key={i} className="h-28 rounded-xl" />
+          ))}
+        </div>
+      ) : null}
+      {strip ? <StripSkeleton /> : null}
       <Skeleton className="h-9 w-80 max-w-full rounded-lg" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: cards }).map((_, i) => (
-          <Skeleton key={i} className="h-28 rounded-xl" />
-        ))}
-      </div>
       {chart ? <Skeleton className="h-[280px] rounded-xl" /> : null}
       <TableSkeleton rows={7} />
     </div>

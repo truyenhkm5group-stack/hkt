@@ -48,7 +48,8 @@ export function BankRulesTab({ rules, canWrite }: { rules: BankRuleRow[]; canWri
   return (
     <SectionCard
       title="Quy tắc gán nhãn tự động"
-      description="Sao kê một tháng có hàng trăm dòng lặp lại cùng một đối tác. Quy tắc gán nhãn thay cho việc chọn tay từng dòng — nhưng không bao giờ ghi đè dòng bạn đã tự phân loại."
+      description="Gán nhãn thay cho việc chọn tay từng dòng lặp lại."
+      hint="Sao kê một tháng có hàng trăm dòng lặp lại cùng một đối tác. Quy tắc chạy thay cho việc chọn tay từng dòng — nhưng không bao giờ ghi đè dòng bạn đã tự phân loại."
       actions={
         canWrite ? (
           <div className="flex gap-2">

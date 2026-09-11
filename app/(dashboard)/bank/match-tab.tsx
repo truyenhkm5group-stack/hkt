@@ -68,7 +68,8 @@ export async function BankMatchTab({ canWrite }: { canWrite: boolean }) {
 
       <SectionCard
         title="Gợi ý đối khớp"
-        description="Việc cần người quyết đứng trước. Chỉ khớp định danh (có mã chứng từ trong nội dung chuyển khoản) mới được tự nối — mọi mức khác đều phải có người bấm."
+        description="Việc cần người quyết đứng trước."
+        hint="Chỉ khớp định danh (có mã chứng từ trong nội dung chuyển khoản) mới được tự nối — mọi mức khác đều phải có người bấm."
         padded={false}
       >
         {suggestions.length === 0 ? (

@@ -23,7 +23,8 @@ export async function ProfitCoverageSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Lợi nhuận này dựa trên dữ liệu đầy đủ tới đâu"
-      description="Năm thành phần đo riêng, không gộp thành một điểm. Phần trăm thấp KHÔNG có nghĩa là số sai — nó có nghĩa là phần đó chưa kiểm chứng được."
+      description="Năm thành phần đo riêng, không gộp thành một điểm."
+      hint="Phần trăm thấp KHÔNG có nghĩa là số sai — nó có nghĩa là phần đó chưa kiểm chứng được. Chưa biết khác không, và không bao giờ được làm tròn thành 0."
       padded={false}
     >
       <div className="divide-y">

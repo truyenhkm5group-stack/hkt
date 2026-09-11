@@ -2,6 +2,7 @@ import { Download } from "lucide-react";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -23,7 +24,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Bán hàng"
         title="Đơn hàng"
-        description={`${formatNumber(summary.orders)} đơn · doanh thu ${formatVND(summary.revenue)} · ${formatNumber(summary.success)} giao thành công · COD ${formatVND(summary.cod, { compact: true })}`}
         actions={
           <>
             <Button asChild variant="outline" size="sm">
@@ -34,6 +34,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             <SyncButton job="pancake-orders" label="Đồng bộ đơn" />
           </>
         }
+      />
+      {/*
+        BỐN CON SỐ CỦA BỘ LỌC HIỆN TẠI, ĐỌC ĐƯỢC BẰNG MẮT LƯỚT.
+        Trước đây cùng bốn số này nằm trong một câu chữ xám dưới tiêu đề — "1.234 đơn · doanh thu
+        … · 900 giao thành công · COD …" — muốn lấy một số phải đọc cả câu. Dải ô cho mỗi số một
+        chỗ đứng, và số đơn không còn bị nhắc lại lần nữa ở dòng kết quả bên dưới.
+      */}
+      <StatStrip
+        items={[
+          { label: "Đơn trong bộ lọc", value: formatNumber(summary.orders), note: `${formatNumber(summary.quantity)} sản phẩm` },
+          { label: "Doanh thu lên đơn", value: formatVND(summary.revenue, { compact: true }), hint: "Tiền khách chốt lúc lên đơn, chưa nói gì về việc giao được hay thu được tiền." },
+          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green", hint: "Kết luận theo chứng từ Viettel Post rồi tới COD thực thu — không theo trạng thái Pancake." },
+          { label: "COD", value: formatVND(summary.cod, { compact: true }), hint: "Tổng tiền thu hộ khai báo trên các đơn đang lọc. Đã thu được bao nhiêu thì xem Đối soát COD." },
+        ]}
       />
       <DataTableToolbar
         searchPlaceholder="Mã đơn, SĐT, tên khách, mã vận đơn, SKU…"
@@ -46,7 +60,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}
-        resultLabel={`${formatNumber(total)} đơn phù hợp · ${formatNumber(summary.quantity)} sản phẩm`}
+        resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
       <OrdersTable rows={rows} pageCount={pageCount} total={total} />
     </div>
