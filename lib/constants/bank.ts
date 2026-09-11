@@ -354,3 +354,30 @@ export const BANK_DIRECTION_LABEL: Record<BankDirection, string> = {
   IN: "Chỉ tiền vào",
   OUT: "Chỉ tiền ra",
 };
+
+/**
+ * ═══════════ THẺ CỦA MÀN HÌNH SỔ NGÂN HÀNG ═══════════
+ *
+ * Nằm Ở ĐÂY, không nằm trong `bank-tabs.tsx`, và lý do là một sự cố thật.
+ *
+ * `BANK_TABS` từng khai trong `bank-tabs.tsx` — tệp có `"use client"`. Server Component
+ * `bank/page.tsx` import nó về gọi `.includes()` để lọc tham số `?tab=`. Qua ranh giới `"use client"`
+ * Next KHÔNG chuyển giá trị thật sang máy chủ: nó thay module bằng một *client reference proxy*.
+ * Phía máy chủ `BANK_TABS` là đối tượng tham chiếu chứ không phải mảng, nên `.includes` không tồn
+ * tại và CẢ TRANG hỏng: `TypeError: f.BANK_TABS.includes is not a function`.
+ *
+ * `tsc`, `eslint` và `next build` đều xanh — phép thay module xảy ra lúc dựng, không có trong mã
+ * nguồn. Chỉ người mở trang mới thấy, và người đó là chủ shop.
+ *
+ * `tests/client-boundary-exports.test.ts` nay khoá điều này cho CẢ kho mã.
+ */
+export const BANK_TABS = ["giao-dich", "doi-khop", "nhap-sao-ke", "quy-tac", "doi-chieu"] as const;
+export type BankTab = (typeof BANK_TABS)[number];
+
+export const BANK_TAB_LABEL: Record<BankTab, string> = {
+  "giao-dich": "Giao dịch",
+  "doi-khop": "Đối khớp chứng từ",
+  "nhap-sao-ke": "Nhập sao kê",
+  "quy-tac": "Quy tắc gán nhãn",
+  "doi-chieu": "Đối chiếu",
+};

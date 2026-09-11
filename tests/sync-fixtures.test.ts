@@ -54,6 +54,7 @@ import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
+import { testClientBoundaryExports } from "./client-boundary-exports.test";
 import { testDeliveryTower } from "./delivery-tower.test";
 import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
@@ -1287,6 +1288,7 @@ async function main() {
   testBankMatch();
   testActionWiring();
   testUseServerExports();
+  testClientBoundaryExports();
   testSmokeCoverage();
   testOperatingFunnel();
   testLogisticsFreshness();

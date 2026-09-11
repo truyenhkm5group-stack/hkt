@@ -79,6 +79,30 @@ export function testSmokeCoverage() {
     Đo mã HTTP và kích thước là chưa đủ.
   */
   assert.match(smoke, /ERROR_MARKER/, "smoke phải nhận ra TRANG LỖI — trang lỗi cũng trả HTTP 200 và có đủ khung ứng dụng");
+
+  /*
+    ═══ DẤU HIỆU THỨ HAI: LỖI CHƯA KỊP THÀNH CHỮ ═══
+
+    SỰ CỐ THẬT (11/09/2026). `/bank` hỏng hẳn và smoke báo SUCCESS 124kB/66ms qua HAI lượt deploy;
+    chủ shop là người phát hiện. Lỗi nổ ở THÂN TRANG, trước mọi ranh giới Suspense: Next dựng xong
+    khung ngoài rồi đẩy lỗi sang máy khách trong gói RSC. Dòng chữ "Có lỗi khi tải trang" chỉ xuất
+    hiện sau khi trình duyệt chạy JavaScript — mà `curl` thì không chạy JavaScript.
+
+    Bài kiểm chạy chính biểu thức đó trên ba mẫu, để nó không thể "có mặt cho có".
+  */
+  assert.match(smoke, /DIGEST_MARKER/, "smoke phải đọc được MÃ LỖI trong gói RSC — lỗi ở thân trang không kịp thành chữ trong HTML");
+  const nguon = /const DIGEST_MARKER = (\/.+\/[a-z]*);/.exec(smoke)?.[1];
+  assert.ok(nguon, "không đọc được biểu thức DIGEST_MARKER từ mã nguồn smoke");
+  const bieuThuc = eval(nguon!) as RegExp;
+
+  // Gói RSC thật nhúng trong HTML: dấu nháy bị thoát vì nó nằm trong một chuỗi JavaScript.
+  const loiThucTe = 'self.__next_f.push([1,"a:E{\\"digest\\":\\"1532032257\\"}\n"])';
+  assert.ok(bieuThuc.test(loiThucTe), "bộ dò KHÔNG bắt được gói RSC lỗi thật — đúng hình dạng đã để /bank lọt qua");
+  assert.ok(bieuThuc.test('{"digest":"3746021"}'), "bộ dò phải bắt cả dạng không thoát nháy");
+  assert.ok(
+    !bieuThuc.test('<p>Bản tin digest tháng 9</p><span>digest: xem báo cáo</span>'),
+    "bộ dò KHÔNG được báo nhầm chữ 'digest' bình thường trong nội dung trang",
+  );
   const errorTsx = fs.readFileSync(path.join(goc, "app/(dashboard)/error.tsx"), "utf8");
   const nhan = /const ERROR_MARKER = "([^"]+)"/.exec(smoke)?.[1] ?? "";
   assert.ok(nhan.length > 5, "ERROR_MARKER phải là một chuỗi thật");
