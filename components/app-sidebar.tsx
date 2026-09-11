@@ -7,12 +7,9 @@ import {
   BarChart3,
   BellRing,
   Boxes,
-  CircleDollarSign,
   ClipboardCheck,
   Factory,
   FileSpreadsheet,
-  Filter,
-  Gauge,
   HandCoins,
   Headset,
   HeartHandshake,
@@ -29,7 +26,6 @@ import {
   ShieldCheck,
   Shirt,
   ShoppingBag,
-  Sliders,
   TrendingUp,
   Truck,
   Undo2,
@@ -57,54 +53,72 @@ import { hasPermission, type Permission } from "@/lib/auth/permissions";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission; /** đủ một trong các quyền này là hiện */ anyOf?: Permission[] };
 
+/**
+ * MENU XẾP THEO LUỒNG CÔNG VIỆC, KHÔNG THEO MÔ-ĐUN KỸ THUẬT.
+ *
+ * Luồng thật của shop: tin nhắn → chốt đơn → xác nhận → lên đơn → rủi ro → giao vận → giao thành
+ * công / hoàn → COD / tiền → tồn kho → sản xuất. Người làm khâu nào nhìn thấy các trang của khâu đó
+ * đứng cạnh nhau. Trang "báo cáo" không còn là một nhóm riêng: báo cáo GTC đứng ở Giao vận, báo cáo
+ * lợi nhuận / dòng tiền đứng ở Tiền — vì người đọc chúng là người làm khâu đó.
+ *
+ * 33 → 27 mục: Điều hành theo khâu là tab của Cần xử lý; Phễu bán hàng và Mô phỏng kịch bản vào từ
+ * Báo cáo lợi nhuận và ô lệnh ⌘K.
+ */
 const groups: { label: string; items: NavItem[] }[] = [
   {
-    label: "Vận hành",
+    label: "Hôm nay",
     items: [
       { href: "/", label: "Tổng quan", icon: LayoutDashboard, permission: "dashboard:view" },
-      { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
-      { href: "/shipments", label: "Vận đơn", icon: Truck, permission: "shipments:view" },
-      { href: "/operations", label: "Điều hành hằng ngày", icon: Gauge, permission: "dashboard:view" },
       { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "alerts:view" },
-      { href: "/cs", label: "CSKH", icon: Headset, permission: "cs:view" },
-      { href: "/outreach", label: "Chăm sóc & bán chéo", icon: HeartHandshake, permission: "outreach:view" },
+    ],
+  },
+  {
+    label: "Bán hàng · chốt đơn",
+    items: [
+      { href: "/cs", label: "CSKH & tin nhắn", icon: Headset, permission: "cs:view" },
+      { href: "/orders", label: "Đơn hàng", icon: ShoppingBag, permission: "orders:read" },
       { href: "/landing", label: "Đơn landing page", icon: FileSpreadsheet, permission: "landing:view" },
-      { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
+      { href: "/outreach", label: "Chăm sóc & bán chéo", icon: HeartHandshake, permission: "outreach:view" },
+      { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/ideas", label: "Ý tưởng marketing", icon: Lightbulb, permission: "ideas:view" },
     ],
   },
   {
-    label: "Kho",
+    label: "Giao vận · hoàn",
     items: [
-      { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
-      { href: "/products/performance", label: "Hiệu quả mẫu mã", icon: TrendingUp, permission: "reports:returns" },
-      { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
-      { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
+      { href: "/shipments", label: "Vận đơn & care", icon: Truck, permission: "shipments:view" },
+      { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/inventory/returns", label: "Kiểm đếm hàng hoàn", icon: ClipboardCheck, permission: "products:view" },
-      { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
+      { href: "/reports/returns", label: "Tỷ lệ giao thành công", icon: Undo2, permission: "reports:returns" },
     ],
   },
   {
-    label: "Tài chính",
+    label: "Tiền",
     items: [
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/bank", label: "Sổ ngân hàng", icon: Landmark, permission: "bank:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
-      { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
-      { href: "/reports/returns", label: "Tỷ lệ giao thành công", icon: Undo2, permission: "reports:returns" },
-      { href: "/reports/funnel", label: "Phễu bán hàng", icon: Filter, permission: "reports:returns" },
       { href: "/reports/cashflow", label: "Dòng tiền", icon: Banknote, permission: "reports:cash" },
-      { href: "/reports/scenario", label: "Mô phỏng kịch bản", icon: Sliders, permission: "reports:nominal" },
-      { href: "/data-quality", label: "Chất lượng dữ liệu", icon: ShieldCheck, permission: "dashboard:view" },
       { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },
+    ],
+  },
+  {
+    label: "Kho · sản xuất",
+    items: [
+      { href: "/products", label: "Sản phẩm & tồn kho", icon: Shirt, permission: "products:view" },
+      { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
+      { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
+      { href: "/products/performance", label: "Hiệu quả mẫu mã", icon: TrendingUp, permission: "reports:returns" },
+      { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
     ],
   },
   {
     label: "Hệ thống",
     items: [
       { href: "/integrations", label: "Kết nối dữ liệu", icon: PlugZap, permission: "integrations:view" },
+      { href: "/data-quality", label: "Chất lượng dữ liệu", icon: ShieldCheck, permission: "dashboard:view" },
       { href: "/settings/users", label: "Người dùng", icon: UserCog, permission: "users:manage" },
       { href: "/audit", label: "Nhật ký hệ thống", icon: ScrollText, permission: "audit:view" },
     ],
@@ -176,17 +190,6 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
             </SidebarGroup>
           );
         })}
-        <SidebarGroup className="mt-auto p-0 pt-4">
-          <SidebarGroupContent>
-            <div className="mx-1 rounded-xl border border-sidebar-border/60 bg-sidebar-accent/40 p-3 group-data-[collapsible=icon]:hidden">
-              <div className="flex items-center gap-2 text-xs font-semibold">
-                <CircleDollarSign className="size-4 text-success" />
-                Tiền thực về
-              </div>
-              <p className="mt-1.5 text-[11px] leading-5 text-sidebar-foreground/55">Lợi nhuận tính trên COD đã về tài khoản, trừ giá vốn, phí ship, phí hoàn, quảng cáo và chi phí.</p>
-            </div>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border/60 p-2">
         <NavUser user={user} />
@@ -197,10 +200,11 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
 }
 
 /*
-  BA TRANG KHÔNG CÒN MỤC MENU RIÊNG — mỗi trang đã có nút vào ngay trên trang cha của nó:
+  SÁU TRANG KHÔNG CÒN MỤC MENU RIÊNG — mỗi trang đã có lối vào ngay trên trang cha của nó:
   Giữ chân khách (từ Khách hàng), Mua hàng & xưởng (từ Kế hoạch SX), Bổ sung danh sách vận đơn (từ
-  Đối soát COD). 33 mục menu là quá nhiều để quét bằng mắt; mục nào có "nhà" thì về nhà. Vẫn tới được
-  từ ô lệnh ⌘K (nhóm "Đi tới trang" đọc từ đây) nên giữ tiêu đề cho breadcrumb.
+  Đối soát COD), Điều hành theo khâu (tab của Cần xử lý), Phễu bán hàng và Mô phỏng kịch bản (từ Báo
+  cáo lợi nhuận). Mục nào có "nhà" thì về nhà. Vẫn tới được từ ô lệnh ⌘K (nhóm "Đi tới trang" đọc
+  từ đây) nên giữ tiêu đề cho breadcrumb.
 */
 export const NAV_TITLES: Record<string, string> = {
   ...Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.href, i.label]))),
@@ -208,4 +212,7 @@ export const NAV_TITLES: Record<string, string> = {
   "/customers/retention": "Giữ chân khách",
   "/inventory/purchasing": "Mua hàng & xưởng",
   "/import-vtp": "Bổ sung danh sách vận đơn",
+  "/operations": "Điều hành theo khâu",
+  "/reports/funnel": "Phễu bán hàng",
+  "/reports/scenario": "Mô phỏng kịch bản",
 };

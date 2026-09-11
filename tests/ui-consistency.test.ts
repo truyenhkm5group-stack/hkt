@@ -177,6 +177,9 @@ export function testNavigationCoverage() {
     "/customers/retention": "vào từ nút 'Giữ chân khách' ngay trên trang Khách hàng, và từ ô lệnh ⌘K",
     "/inventory/purchasing": "vào từ nút 'Mua hàng & xưởng' ngay trên trang Kế hoạch SX, và từ ô lệnh ⌘K",
     "/import-vtp": "vào từ nút 'Bổ sung danh sách vận đơn' ngay trên trang Đối soát COD, và từ ô lệnh ⌘K",
+    "/operations": "tab 'Theo khâu vận hành' ngay trên trang Cần xử lý (cùng hàng đợi, hai góc nhìn), và từ ô lệnh ⌘K",
+    "/reports/funnel": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
+    "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
   };
 
   const pages = walkPages("app/(dashboard)");

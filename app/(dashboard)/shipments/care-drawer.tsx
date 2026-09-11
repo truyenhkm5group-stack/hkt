@@ -2,10 +2,13 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import { ExternalLink, Loader2, MessageSquare, Phone } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Phone } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { resolveNotification } from "@/lib/actions/alerts";
 import { loadShipmentQuickView, recordCareAction } from "@/lib/actions/care";
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
@@ -23,15 +26,28 @@ import { cn } from "@/lib/utils";
  * họ không mở.
  *
  * KHÔNG có nút nào tự nhắn khách. Nút ở đây GHI LẠI việc người vừa làm.
+ *
+ * LÀM MỘT LƯỢT, KHÔNG MỞ-ĐÓNG TỪNG KIỆN. Truyền `queue` (danh sách kiện theo đúng thứ tự của
+ * bảng/hàng đợi phía sau) thì ngăn kéo có ‹ Trước · n/N · Tiếp › và sau khi ghi nhận sẽ TỰ CHUYỂN
+ * sang kiện kế tiếp: một buổi gọi 30 khách là 30 lần bấm "Ghi nhận", không phải 30 lần đóng ngăn
+ * kéo, tìm dòng, mở lại. `caseId` (việc trong hàng đợi Cần xử lý) cho phép "Ghi nhận & đóng việc".
  */
+export type CareQueueItem = { shipmentId: string; caseId?: string | null };
+
 export function CareDrawer({
   shipmentId,
+  caseId = null,
+  queue,
   children,
   className,
   open: openNgoai,
   onOpenChange,
 }: {
   shipmentId: string;
+  /** Việc trong hàng đợi Cần xử lý gắn với kiện này — có thì hiện thêm "Ghi nhận & đóng việc". */
+  caseId?: string | null;
+  /** Danh sách kiện để đi lần lượt. Kiện hiện tại phải nằm trong danh sách; không có thì bỏ qua. */
+  queue?: CareQueueItem[];
   /** Không truyền thì ngăn kéo không tự vẽ nút mở — dùng cho nơi đã có sẵn nút (ô lệnh ⌘K). */
   children?: React.ReactNode;
   className?: string;
@@ -39,12 +55,15 @@ export function CareDrawer({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
 }) {
+  const router = useRouter();
   const [openTrong, setOpenTrong] = useState(false);
   const open = openNgoai ?? openTrong;
   const setOpen = (v: boolean) => {
     setOpenTrong(v);
     onOpenChange?.(v);
   };
+  // Kiện ĐANG XEM có thể khác kiện được truyền vào khi người dùng đi tiếp trong danh sách.
+  const [current, setCurrent] = useState<CareQueueItem>({ shipmentId, caseId });
   const [data, setData] = useState<QuickView | null>(null);
   const [dangTai, setDangTai] = useState(false);
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
@@ -52,24 +71,50 @@ export function CareDrawer({
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  async function tai() {
-    if (data) return;
+  const hangDoi = queue && queue.some((q) => q.shipmentId === current.shipmentId) ? queue : null;
+  const viTri = hangDoi ? hangDoi.findIndex((q) => q.shipmentId === current.shipmentId) : -1;
+  const truoc = hangDoi && viTri > 0 ? hangDoi[viTri - 1] : null;
+  const tiep = hangDoi && viTri >= 0 && viTri < hangDoi.length - 1 ? hangDoi[viTri + 1] : null;
+
+  async function tai(id = current.shipmentId) {
     setDangTai(true);
-    const r = await loadShipmentQuickView(shipmentId);
+    const r = await loadShipmentQuickView(id);
     setData(r ?? null);
     setDangTai(false);
   }
 
-  function ghi() {
+  function chuyen(item: CareQueueItem) {
+    setCurrent(item);
+    setData(null);
+    setMsg(null);
+    setNote("");
+    void tai(item.shipmentId);
+  }
+
+  function ghi(dongViec: boolean) {
     start(async () => {
-      const r = await recordCareAction({ shipmentId, kind, note });
+      const r = await recordCareAction({ shipmentId: current.shipmentId, kind, note });
       if (r.error) {
         setMsg(r.error);
         return;
       }
-      setMsg("Đã ghi nhận");
+      if (dongViec && current.caseId) {
+        const d = await resolveNotification(current.caseId);
+        if ("error" in d) {
+          setMsg(`Đã ghi nhận, nhưng chưa đóng được việc: ${d.error}`);
+          return;
+        }
+        router.refresh();
+      }
       setNote("");
-      const lai = await loadShipmentQuickView(shipmentId);
+      if (tiep) {
+        // Tự chuyển sang kiện kế tiếp — người gọi khách không phải quay lại bảng để tìm dòng tiếp theo.
+        toast.success(`Đã ghi nhận${dongViec ? " và đóng việc" : ""} · chuyển sang kiện ${viTri + 2}/${hangDoi!.length}`);
+        chuyen(tiep);
+        return;
+      }
+      setMsg(hangDoi ? "Đã ghi nhận — hết danh sách" : "Đã ghi nhận");
+      const lai = await loadShipmentQuickView(current.shipmentId);
       setData(lai ?? null);
     });
   }
@@ -88,7 +133,7 @@ export function CareDrawer({
           type="button"
           onClick={() => {
             setOpen(true);
-            void tai();
+            if (!data && !dangTai) void tai();
           }}
           className={cn("text-left hover:underline", className)}
         >
@@ -98,6 +143,20 @@ export function CareDrawer({
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-xl">
           <SheetHeader className="pb-2">
+            {hangDoi ? (
+              <div className="flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                <button type="button" disabled={!truoc} onClick={() => truoc && chuyen(truoc)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện trước">
+                  <ChevronLeft className="size-3.5" />
+                </button>
+                <span className="numeric px-1">
+                  {viTri + 1}/{hangDoi.length}
+                </span>
+                <button type="button" disabled={!tiep} onClick={() => tiep && chuyen(tiep)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện tiếp theo">
+                  <ChevronRight className="size-3.5" />
+                </button>
+                <span className="ml-1">đi lần lượt theo danh sách — ghi nhận xong tự chuyển kiện kế</span>
+              </div>
+            ) : null}
             <SheetTitle className="text-base">{data ? `${data.customer} · ${data.tracking}` : "Đang mở kiện hàng…"}</SheetTitle>
             <SheetDescription>
               {data ? `${data.stageLabel} · VTP báo "${data.rawStatus}" · COD ${formatVND(data.codAmount)}` : "Tải thông tin cần để gọi khách"}
@@ -138,12 +197,11 @@ export function CareDrawer({
 
               {/* ───── Khách này đã mua bao nhiêu lần: đổi hẳn cách nói chuyện ───── */}
               {data.history ? (
-                <div className="rounded-lg border bg-muted/30 px-3 py-2 text-[12px]">
+                <div className="rounded-lg border bg-muted/30 px-3 py-2 text-[12px]" title="Đếm theo số điện thoại — một người nhắn từ hai trang Pancake vẫn là một khách.">
                   <b>Khách cũ:</b> {formatNumber(data.history.totalOrders)} đơn · giao thành công {formatNumber(data.history.delivered)} · hoàn {formatNumber(data.history.returned)}
                   {data.attemptNo && data.attemptNo > 1 ? <> · đây là lần gửi thứ {data.attemptNo}</> : null}
                   {data.failedAttempts > 0 ? <> · bưu tá đã giao hụt {formatNumber(data.failedAttempts)} lần</> : null}
-                  {/* Đếm theo SĐT, không theo customer_id: Pancake tách khách theo trang nên một người có thể có nhiều hồ sơ. */}
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">Đếm theo số điện thoại — một người nhắn từ hai trang Pancake vẫn là một khách.</div>
+                  {/* Đếm theo SĐT, không theo customer_id: Pancake tách khách theo trang nên một người có thể có nhiều hồ sơ — nói trong tooltip, không chiếm dòng. */}
                 </div>
               ) : null}
 
@@ -187,10 +245,9 @@ export function CareDrawer({
 
               {/* ───── Ghi lại việc vừa làm ───── */}
               <div className="rounded-xl border p-3">
-                <div className="text-[12px] font-semibold">Ghi lại việc vừa làm</div>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-                  ERP không tự nhắn khách. Ghi ở đây để đo được việc chăm có cứu được đơn hay không — đo từ hôm nay, không dựng lại quá khứ.
-                </p>
+                <div className="text-[12px] font-semibold" title="ERP không tự nhắn khách. Ghi ở đây để đo được việc chăm có cứu được đơn hay không — đo từ hôm nay, không dựng lại quá khứ.">
+                  Ghi lại việc vừa làm
+                </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {CARE_ACTION_KINDS.map((k) => (
                     <button
@@ -204,10 +261,15 @@ export function CareDrawer({
                   ))}
                 </div>
                 <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Khách nói gì? (không bắt buộc)" className="mt-2 min-h-[60px] text-[12.5px]" />
-                <div className="mt-2 flex items-center gap-2">
-                  <Button size="sm" onClick={ghi} disabled={pending}>
-                    {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi nhận
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button size="sm" onClick={() => ghi(false)} disabled={pending}>
+                    {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi nhận{tiep ? " · kiện tiếp" : ""}
                   </Button>
+                  {current.caseId ? (
+                    <Button size="sm" variant="outline" onClick={() => ghi(true)} disabled={pending} title="Ghi nhận việc chăm và đóng việc này trong hàng đợi Cần xử lý">
+                      Ghi nhận & đóng việc
+                    </Button>
+                  ) : null}
                   {msg ? <span className="text-[12px] text-muted-foreground">{msg}</span> : null}
                 </div>
               </div>

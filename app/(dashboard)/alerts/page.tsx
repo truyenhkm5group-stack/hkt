@@ -11,6 +11,8 @@ import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEA
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
 import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
+import { InfoHint } from "@/components/info-hint";
+import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { ideasWaitingReview } from "@/lib/queries/ideas";
 import { Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -56,6 +58,12 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const visibleCases = queue.cases;
   const canConfig = can(user, "alerts:manage");
 
+  // Ngăn kéo tra nhanh đi LẦN LƯỢT theo đúng 50 việc đang hiện: ghi nhận xong tự sang việc kế.
+  const hangDoiCare = visibleCases
+    .slice(0, 50)
+    .filter((c) => c.quickShipmentId)
+    .map((c) => ({ shipmentId: c.quickShipmentId as string, caseId: c.id }));
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -65,6 +73,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         hint="Đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn, case CSKH mới — nhân viên vận đơn theo dõi tại đây và nhận tin qua nhóm Lark Suite (hoặc Telegram)."
         actions={
           <>
+            <QueueViewTabs active="queue" />
             <MarkAllReadButton />
             <RunAlertsButton />
           </>
@@ -151,17 +160,23 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                   {PRIORITY_LABEL[c.priority]} · {c.score}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <Link href={c.href || "#"} className="text-sm font-semibold hover:text-primary hover:underline">{c.title}</Link>
-                    {/* Mở kiện hàng ngay tại đây: gọi khách / xem ĐVVC nói gì mà không rời hàng đợi. */}
+                    {/* Mở kiện hàng ngay tại đây: gọi khách / xem ĐVVC nói gì mà không rời hàng đợi; ghi nhận xong tự sang việc kế. */}
                     {c.quickShipmentId ? (
-                      <CareDrawer shipmentId={c.quickShipmentId} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
+                      <CareDrawer shipmentId={c.quickShipmentId} caseId={c.id} queue={hangDoiCare} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
                         Tra nhanh
                       </CareDrawer>
                     ) : null}
+                    {/* "Nên làm" + "vì sao đứng ở đây" nằm trong ⓘ — màn hình chính chỉ còn việc và lý do. */}
+                    <InfoHint label="Nên làm gì và vì sao việc này đứng ở đây">
+                      <p><b>Nên làm:</b> {c.recommendedAction}</p>
+                      <p className="mt-1"><b>Ưu tiên vì:</b> {c.scoreExplanation}</p>
+                      <p className="mt-1"><b>Nguồn:</b> {c.evidence.source}</p>
+                      {c.status === "IGNORED" && c.ignoredReason ? <p className="mt-1"><b>Bỏ qua:</b> {c.ignoredReason}</p> : null}
+                    </InfoHint>
                   </div>
                   <p className="text-xs text-muted-foreground">{c.reason}</p>
-                  <p className="mt-0.5 text-xs"><span className="text-muted-foreground">Nên làm: </span>{c.recommendedAction}</p>
                   <p className="text-[10.5px] text-muted-foreground" title={formatDateTime(c.detectedAt)}>
                     {c.typeLabel} · phát hiện {c.ageLabel} trước ·{" "}
                     <span className={cn("rounded px-1 py-px", CASE_STATUS_TONE[c.status])}>{CASE_STATUS_LABEL[c.status]}</span>
@@ -172,11 +187,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                         · {c.sla.label}
                       </span>
                     ) : null}
-                  </p>
-                  {/* Vì sao việc này đứng ở đây — điểm ưu tiên phải kiểm chứng được, không phải cảm tính. */}
-                  <p className="text-[10.5px] text-muted-foreground/80">
-                    Ưu tiên vì: {c.scoreExplanation} · nguồn: {c.evidence.source}
-                    {c.status === "IGNORED" && c.ignoredReason ? ` · bỏ qua: ${c.ignoredReason}` : ""}
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1">

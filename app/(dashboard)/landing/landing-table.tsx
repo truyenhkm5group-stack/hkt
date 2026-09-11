@@ -27,6 +27,12 @@ const fmt = (d: Date | null | undefined) => (d ? new Date(d).toLocaleString("vi-
 
 export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]; variants: VariantOption[]; canManage: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
+  /*
+    Ô chọn mẫu mã chỉ DỰNG khi người dùng bấm vào dòng đó. Đo trên production 11/09/2026: trang này
+    nặng 3.591kB — 300 dòng × một <select> mang toàn bộ danh sách mẫu mã, dù người dùng chỉ sửa
+    một hai dòng. Dựng theo yêu cầu thì HTML còn vài trăm kB và danh sách cuộn mượt.
+  */
+  const [dangChonMauMa, setDangChonMauMa] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const run = (id: string, fn: () => Promise<{ error?: string } & Record<string, unknown>>, okMsg?: (r: Record<string, unknown>) => string) => {
@@ -110,17 +116,34 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
                     </TableCell>
                     <TableCell className="text-xs">
                       {canManage && r.status !== "CANCELLED" && !r.pancakeSystemId ? (
-                        <select
-                          className={cn("h-8 max-w-[240px] rounded-md border bg-background px-2 text-xs", !r.variantId && "border-amber-400")}
-                          value={r.variantId ?? ""}
-                          disabled={isBusy}
-                          onChange={(e) => run(r.id, () => setLandingVariant(r.id, e.target.value || null))}
-                        >
-                          <option value="">— chọn mẫu mã —</option>
-                          {variants.map((v) => (
-                            <option key={v.id} value={v.id}>{v.label}</option>
-                          ))}
-                        </select>
+                        dangChonMauMa === r.id ? (
+                          <select
+                            autoFocus
+                            className={cn("h-8 max-w-[240px] rounded-md border bg-background px-2 text-xs", !r.variantId && "border-amber-400")}
+                            value={r.variantId ?? ""}
+                            disabled={isBusy}
+                            onBlur={() => setDangChonMauMa(null)}
+                            onChange={(e) => {
+                              setDangChonMauMa(null);
+                              run(r.id, () => setLandingVariant(r.id, e.target.value || null));
+                            }}
+                          >
+                            <option value="">— chọn mẫu mã —</option>
+                            {variants.map((v) => (
+                              <option key={v.id} value={v.id}>{v.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setDangChonMauMa(r.id)}
+                            title="Bấm để chọn / đổi mẫu mã"
+                            className={cn("h-8 max-w-[240px] truncate rounded-md border bg-background px-2 text-left text-xs hover:bg-accent", !r.variantId && "border-amber-400 text-amber-700")}
+                          >
+                            {r.variantLabel || "— chọn mẫu mã —"}
+                          </button>
+                        )
                       ) : (
                         <span className={cn(!r.variantId && "text-amber-700")}>{r.variantLabel || "chưa ghép"}</span>
                       )}

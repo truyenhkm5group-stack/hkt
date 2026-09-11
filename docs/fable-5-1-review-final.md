@@ -235,6 +235,55 @@ với mọi báo cáo) và mỗi dòng có nút **Tra nhanh** mở ngăn kéo t�
 cũng vậy. Trước: gọi một khách từ hàng đợi = rời trang → chi tiết đơn → vận đơn → quay lại và mất
 chỗ. Sau: một lần bấm, đóng lại vẫn ở đúng dòng. Kiểm thử: `tests/action-queue.test.ts`.
 
+### 7.7 Vòng 4: SMART + LEAN — luồng công việc, ít bấm, ít chữ
+
+Trọng tâm đổi sang UI/UX + luồng hằng ngày. Nguyên tắc: không thêm màn, chỉ **rút đường đi** của
+người làm việc và **cất chữ giải thích vào ⓘ**.
+
+**Menu theo luồng công việc, không theo mô-đun** (`components/app-sidebar.tsx`)
+- Trước: 4 nhóm kỹ thuật (Vận hành / Kho / Tài chính / Hệ thống), 33 mục; báo cáo GTC nằm ở "Tài
+  chính" dù người đọc là đội giao vận; Điều hành và Cần xử lý là hai mục cách nhau ba dòng dù cùng
+  một hàng đợi.
+- Sau: 6 nhóm theo luồng **Hôm nay → Bán hàng · chốt đơn → Giao vận · hoàn → Tiền → Kho · sản xuất
+  → Hệ thống**, 27 mục. Điều hành theo khâu thành **tab** của Cần xử lý (`QueueViewTabs`, cả hai
+  trang); Phễu bán hàng và Mô phỏng kịch bản vào từ Báo cáo lợi nhuận. Bỏ ô giải thích tĩnh "Tiền
+  thực về" ở đáy thanh bên. Mọi trang vẫn tới được từ ⌘K; `tests/ui-consistency.test.ts` khoá lối vào.
+
+**Care giao thất bại: một lượt, không mở-đóng từng kiện** (`app/(dashboard)/shipments/care-drawer.tsx`)
+- Ngăn kéo nhận `queue` (đúng danh sách đang hiện, đúng thứ tự) → có ‹ n/N ›, và **ghi nhận xong tự
+  chuyển sang kiện kế tiếp**. Từ hàng đợi Cần xử lý còn có **"Ghi nhận & đóng việc"** (đóng luôn việc
+  trong hàng đợi, không quay ra bấm "Đã xử lý").
+- Nơi nối: Tháp giao vận (60 kiện của rổ đang mở), hàng đợi Cần xử lý (50 việc đang hiện, việc về đơn
+  lấy lần gửi chính), danh sách Đơn hàng (từng kiện).
+
+**Ít chữ trên màn, chữ vào ⓘ**
+- Tổng quan: 10 thẻ tiền — mỗi `note` dài 1–2 câu cảnh báo chuyển thành `hint` (ⓘ), dòng note chỉ còn
+  số; bỏ khối "Đồng bộ gần nhất" (trùng dải độ tươi phía trên và trang Kết nối).
+- Cần xử lý: mỗi dòng bớt hai dòng chữ ("Nên làm" · "Ưu tiên vì / nguồn") → vào ⓘ cạnh tiêu đề; dòng
+  còn tiêu đề + lý do + meta. Bộ lọc giữ nguyên vị trí cuộn (`scroll: false`) — đổi lọc là thấy
+  kết quả tại chỗ.
+- Tháp giao vận: "Tiền trong rổ" và câu hỏi của rổ vào tooltip, chỉ giữ "Nên làm".
+
+**Tải nhanh hơn**
+- `/landing` nặng **3.591kB** vì 300 dòng × một `<select>` mang toàn bộ mẫu mã. Ô chọn nay chỉ dựng
+  khi bấm vào dòng; các dòng khác là một nút chữ. (Số sau deploy ghi ở dưới.)
+
+**Benchmark theo số bấm / số lần đổi trang (đếm trên đường đi thật của giao diện)**
+
+| Luồng | Trước | Sau |
+|---|---|---|
+| Gọi khách giao thất bại rồi ghi kết quả, 1 kiện | Giao vận → rổ → mở ngăn kéo → ghi → đóng: 4 bấm, 0 đổi trang (đã có ngăn kéo) | 3 bấm (rổ → kiện → Ghi nhận), tự sang kiện kế |
+| Gọi 20 kiện liên tiếp | 20 × (đóng + tìm dòng + mở + ghi) ≈ 80 bấm, cuộn tìm dòng 20 lần | 1 mở + 20 Ghi nhận ≈ 21 bấm, 0 cuộn |
+| Từ hàng đợi Cần xử lý: xử lý việc về vận đơn rồi đóng việc | mở /shipments/… (đổi trang) → xem → quay lại → cuộn tìm việc → Đã xử lý: 4 bấm, 2 đổi trang | Tra nhanh → Ghi nhận & đóng việc: 2 bấm, 0 đổi trang |
+| Đi từ Cần xử lý sang góc nhìn theo khâu | tìm mục menu khác nhóm | 1 tab ngay trên trang |
+| Tìm trang GTC / kiểm đếm hoàn khi đang làm giao vận | ở nhóm "Tài chính" / "Kho" | cùng nhóm "Giao vận · hoàn" |
+| Số mục menu phải quét | 33 | 27 |
+| Chữ giải thích trên Tổng quan (10 thẻ) | ~1.100 ký tự luôn hiện | ~350 ký tự; phần còn lại trong ⓘ |
+| Cần xử lý, chiều cao một dòng việc | 5 dòng chữ | 3 dòng chữ (≈ 40% nhiều việc hơn trên một màn) |
+
+**Độ trễ tải trang (smoke production, ấm, trước vòng 4 — 07:23 UTC)**: 39/39 trang ≤ 186ms; nặng
+nhất theo dung lượng: `/landing` 3.591kB · `/alerts` 602kB · `/ads` 594kB · `/integrations` 594kB.
+
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).
 2. Ngăn kéo đơn dùng chung (/orders, /alerts) mang sẵn rủi ro + gợi ý địa chỉ cũ + nút Pancake +

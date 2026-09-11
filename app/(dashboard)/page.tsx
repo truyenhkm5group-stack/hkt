@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
+import { AlertTriangle, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
 import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -14,7 +14,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import { integrationStatus } from "@/lib/env";
-import { formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
+import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { requirePermission } from "@/lib/auth/session";
@@ -83,7 +83,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             label="① Doanh thu LÊN ĐƠN"
             value={formatVND(data.money.booked, { compact: true })}
             change={change(data.kpi.revenue, data.previous?.revenue)}
-            note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn · chưa nói gì về việc giao được hay thu được tiền`}
+            note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`}
+            hint="Tiền khách chốt lúc lên đơn — chưa nói gì về việc giao được hay thu được tiền. Bấm thẻ để mở đúng tập đơn."
             icon={ShoppingBag}
             tone="blue"
           />
@@ -93,7 +94,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             label="② Doanh thu GIAO THÀNH CÔNG"
             value={formatVND(data.money.delivered, { compact: true })}
             change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
-            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`} trên đơn đã kết thúc${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} đơn CHƯA CÓ CHỨNG TỪ nên chưa kết luận được` : ""}`}
+            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} chưa có chứng từ` : ""}`}
+            hint="Kết luận theo chứng từ Viettel Post, rồi tới tiền COD thực thu; không suy từ trạng thái Pancake. GTC tính trên đơn đã kết thúc. Đơn chưa có chứng từ là CHƯA BIẾT, không tính vào mẫu số."
             icon={PackageCheck}
             tone="green"
           />
@@ -102,7 +104,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="③ TIỀN THỰC NHẬN"
             value={formatVND(data.money.cashReceived, { compact: true })}
-            note={`Đã vào tài khoản theo bảng kê + khách chuyển trước · KHÁC hẳn hai con số bên trái`}
+            note="Bảng kê Viettel Post + khách chuyển trước"
+            hint="Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
             icon={Banknote}
             tone="green"
           />
@@ -111,7 +114,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="Viettel Post còn giữ"
             value={formatVND(data.money.codOutstanding, { compact: true })}
-            note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa thấy đồng nào trên bảng kê`}
+            note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa có trên bảng kê`}
+            hint="Đơn giao thành công mà chưa dòng bảng kê nào nhắc tới — tiền cần đòi Viettel Post. Bấm thẻ để mở danh sách."
             icon={Truck}
             tone="amber"
           />
@@ -120,7 +124,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="Lợi nhuận góp"
             value={formatVND(data.money.contribution, { compact: true })}
-            note="Doanh thu giao TC − giá vốn − cước − phí hoàn − quảng cáo (chưa trừ vận hành)"
+            note="Trước chi phí vận hành"
+            hint="Doanh thu giao thành công − giá vốn − cước − phí hoàn − quảng cáo. Chưa trừ chi phí vận hành cố định."
             icon={CircleDollarSign}
             tone={data.money.contribution >= 0 ? "primary" : "rose"}
           />
@@ -129,7 +134,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="Lợi nhuận ước tính"
             value={formatVND(data.finance.estimatedProfit, { compact: true })}
-            note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công · ước tính theo đơn, KHÔNG phải tiền trong tài khoản`}
+            note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`}
+            hint="Ước tính THEO ĐƠN trong kỳ, đã trừ chi phí vận hành phân bổ theo kỳ. KHÔNG phải tiền trong tài khoản — phần lớn còn nằm ở Viettel Post."
             icon={TrendingUp}
             tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
           />
@@ -149,7 +155,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="QC / Doanh số POS"
             value={data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`}
-            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo trên doanh thu LÊN ĐƠN · mẫu số chưa trừ đơn hoàn, nên đây là tỷ lệ LẠC QUAN NHẤT`}
+            note={`${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo / doanh thu lên đơn`}
+            hint="Mẫu số là doanh thu LÊN ĐƠN, chưa trừ đơn hoàn — đây là tỷ lệ lạc quan nhất, dùng để so với ngưỡng chốt đơn của marketer."
             icon={Megaphone}
             tone="slate"
           />
@@ -158,7 +165,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <MetricCard
             label="QC / DT giao thành công"
             value={data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`}
-            note="Chi quảng cáo trên doanh thu ĐÃ TỚI TAY KHÁCH · kỳ đang chạy luôn cao bất thường vì tiền quảng cáo tiêu ngay còn hàng thì 1–2 tuần sau mới giao xong"
+            note="Chi quảng cáo / doanh thu đã tới tay khách"
+            hint="Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép."
             icon={Megaphone}
             tone={data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? "rose" : "slate"}
           />
@@ -169,9 +177,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             value={formatNumber(data.dataIssues.critical)}
             note={
               data.dataIssues.critical
-                ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm — số liệu trên trang này có thể chưa đúng`
+                ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm`
                 : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`
             }
+            hint="Vi phạm nghiêm trọng nghĩa là số liệu trên trang này có thể chưa đúng. Bấm thẻ để xem luật nào và sửa ở đâu."
             icon={AlertTriangle}
             tone={data.dataIssues.critical ? "rose" : "slate"}
           />
@@ -214,24 +223,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
             {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
             {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
-          </div>
-          <div className="m-4 rounded-xl bg-sidebar p-4 text-sidebar-foreground">
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-sidebar-foreground/60">Đồng bộ gần nhất</p>
-            {data.lastSyncRows.length ? (
-              <ul className="mt-2 space-y-1.5 text-xs">
-                {data.lastSyncRows.map((run) => (
-                  <li key={run.id} className="flex items-center justify-between gap-2">
-                    <span className="truncate">{run.source === "PANCAKE" ? "Pancake" : "Viettel Post"} · {run.job}</span>
-                    <span className={run.status === "SUCCESS" ? "text-emerald-300" : run.status === "FAILED" ? "text-rose-300" : "text-amber-300"}>{formatTimeAgo(run.finishedAt)}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-xs text-sidebar-foreground/70">Chưa chạy đồng bộ lần nào.</p>
-            )}
-            <Link href="/integrations" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary-foreground/90 hover:underline">
-              Kết nối dữ liệu <ArrowRight className="size-3" />
-            </Link>
           </div>
         </SectionCard>
       </section>

@@ -30,7 +30,8 @@ export function QueueFilters({
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
-    start(() => router.push(`/alerts?${next.toString()}`));
+    // Giữ nguyên vị trí cuộn: kết quả lọc hiện ngay tại chỗ, không nhảy lên đầu trang.
+    start(() => router.push(`/alerts?${next.toString()}`, { scroll: false }));
   };
 
   const value = (key: string) => params.get(key) ?? "";
@@ -108,7 +109,7 @@ export function QueueFilters({
       </select>
 
       {active ? (
-        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => start(() => router.push("/alerts"))}>
+        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => start(() => router.push("/alerts", { scroll: false }))}>
           Bỏ lọc
         </Button>
       ) : null}

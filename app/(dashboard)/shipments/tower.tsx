@@ -25,6 +25,8 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
   const kiemTra = tongRoThat(tower);
 
   const gio = (h: number | null) => (h === null ? "chưa có tin" : h < 1 ? "<1 giờ" : h < 48 ? `${Math.round(h)} giờ` : `${Math.round(h / 24)} ngày`);
+  // Danh sách để ngăn kéo đi LẦN LƯỢT: đúng 60 kiện đang hiện, đúng thứ tự đang hiện.
+  const hangDoiCare = dangMo ? dangMo.rows.slice(0, 60).map((r) => ({ shipmentId: r.shipmentId })) : undefined;
 
   return (
     <SectionCard
@@ -75,12 +77,8 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
           <div className="flex flex-wrap items-start justify-between gap-3 bg-muted/40 px-4 py-3">
             <div className="min-w-[280px] flex-1">
               <div className="text-[13px] font-bold">{dangMo.label}</div>
-              <p className="text-[12px] text-muted-foreground">{dangMo.question}</p>
-              <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
+              <p className="text-[12px] text-muted-foreground" title={`${dangMo.question} · Tiền trong rổ: ${dangMo.moneyMeaning}`}>
                 <b className="font-semibold text-foreground">Nên làm:</b> {dangMo.nextAction}
-              </p>
-              <p className="text-[11.5px] leading-snug text-muted-foreground">
-                <b className="font-semibold text-foreground">Tiền trong rổ:</b> {dangMo.moneyMeaning}
               </p>
             </div>
             <Link href="/shipments" className="shrink-0 rounded-lg border bg-card px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent">
@@ -109,7 +107,7 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
                         Bấm mã vận đơn MỞ NGĂN KÉO, không rời trang. Trước đây một cuộc gọi cho khách
                         giao hụt cần sáu lần chuyển màn hình; giờ còn một lần mở và một lần đóng.
                       */}
-                      <CareDrawer shipmentId={r.shipmentId} className="font-medium">
+                      <CareDrawer shipmentId={r.shipmentId} queue={hangDoiCare} className="font-medium">
                         {r.tracking}
                       </CareDrawer>
                       <div className="text-[11px] text-muted-foreground">

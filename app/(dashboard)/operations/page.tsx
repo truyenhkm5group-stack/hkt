@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Banknote, CircleHelp, Clock, UserX } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { MetricCard } from "@/components/metric-card";
 import { CareEffectivenessSection } from "@/app/(dashboard)/operations/care-section";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -91,8 +92,9 @@ export default async function OperationsPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Điều hành hằng ngày"
-        description="Bốn câu hỏi, theo đúng thứ tự: đang kẹt ở đâu · việc nào làm ngay · ai phụ trách · thu về được bao nhiêu."
+        title="Điều hành theo khâu"
+        description="Đang kẹt ở đâu · việc nào làm ngay · ai phụ trách · thu về được bao nhiêu."
+        actions={<QueueViewTabs active="stages" />}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

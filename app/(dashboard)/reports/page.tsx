@@ -236,6 +236,11 @@ export default async function ReportsPage({
           ) : null}
         </TabsList>
       </Tabs>
+      {/* Hai báo cáo chuyên sâu ít mở hơn: vào từ đây thay vì chiếm hai mục menu. */}
+      <p className="-mt-3 text-[11.5px] text-muted-foreground">
+        Xem thêm: <NavLink href={`/reports/funnel${periodQuery ? `?${periodQuery.slice(1)}` : ""}`} className="font-medium text-primary hover:underline">Phễu bán hàng</NavLink> ·{" "}
+        <NavLink href="/reports/scenario" className="font-medium text-primary hover:underline">Mô phỏng kịch bản</NavLink>
+      </p>
 
       {tab !== "pnl" ? (
         <DataTableToolbar
