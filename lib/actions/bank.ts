@@ -14,11 +14,29 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, type BankGroup, type BankLinkType } from "@/lib/constants/bank";
-import { parseLedger } from "@/lib/integrations/bank/ledger";
+import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
 import { matchRule, RULE_CLASSIFIER, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
 
 const MAX_TEXT = 5_000_000;
+/** base64 phình ~4/3 so với tệp gốc, nên 5MB tệp ≈ 6,7MB chuỗi. */
+const MAX_BASE64 = Math.ceil((MAX_TEXT * 4) / 3) + 1024;
+
+/**
+ * Đầu vào của bước nhập: dán thẳng nội dung (CSV/JSON) HOẶC tải tệp lên.
+ *
+ * Tệp .xlsx là nhị phân nên không đi qua đường dán được — ép nó thành chuỗi UTF-8 sẽ ra rác và
+ * người dùng chỉ nhận được câu "không nhận ra cột". Vì vậy tệp đi riêng dưới dạng base64, giống
+ * luồng nhập tệp Viettel Post.
+ */
+const importInputSchema = z.union([
+  z.string().max(MAX_TEXT, "File quá lớn (tối đa 5MB)"),
+  z.object({
+    filename: z.string().trim().max(300).default(""),
+    base64: z.string().min(1, "Tệp trống").max(MAX_BASE64, "File quá lớn (tối đa 5MB)"),
+  }),
+]);
+export type BankImportInput = z.infer<typeof importInputSchema>;
 const b = schema.bankTransactions;
 
 function revalidateAll() {
@@ -45,14 +63,19 @@ async function guard(): Promise<Guard> {
  * chỉ cập nhật những trường mô tả có thể được ngân hàng bổ sung muộn. Đây là lý do dùng
  * `DO UPDATE` có chọn lọc thay vì `DO NOTHING`: sao kê tải lại thường đầy đủ hơn bản tải sớm.
  */
-export async function importBankStatement(text: string): Promise<{ ok: true; inserted: number; updated: number; duplicates: number; labelled: number } | { error: string }> {
+export async function importBankStatement(
+  input: BankImportInput,
+): Promise<{ ok: true; inserted: number; updated: number; duplicates: number; labelled: number } | { error: string }> {
   const g = await guard();
   if (g.error !== undefined) return { error: g.error };
-  if (typeof text !== "string" || text.length > MAX_TEXT) return { error: "File quá lớn (tối đa 5MB)" };
+  const parsedInput = importInputSchema.safeParse(input);
+  if (!parsedInput.success) return { error: parsedInput.error.issues[0]?.message ?? "Không đọc được dữ liệu gửi lên" };
 
   let rows;
   try {
-    const parsed = parseLedger(text);
+    const source =
+      typeof parsedInput.data === "string" ? parsedInput.data : Buffer.from(parsedInput.data.base64, "base64");
+    const parsed = parseLedgerFile(source);
     if (!parsed.length) return { error: "Không tìm thấy giao dịch nào trong file" };
     rows = dedupeByRef(parsed.map(toBankRow));
   } catch (e) {

@@ -6,7 +6,9 @@ import { BANK_CASH_CLASSES, BANK_GROUPS, BANK_GROUP_SPEC, BANK_LINK_TYPES, isBus
 import { COST_AUTHORITY, ECONOMIC_COSTS, EXPENSE_CATEGORIES_NOT_OWNED, EXPENSE_CATEGORY_ECONOMIC, expensesOwnCategory } from "@/lib/constants/cost-sources";
 import { matchRule, ruleMatches, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
 import { bankRefFor, dedupeByRef, LEDGER_TO_BANK_GROUP, statementInstant, toBankRow } from "@/lib/integrations/bank/statement";
-import { parseLedger } from "@/lib/integrations/bank/ledger";
+import * as XLSX from "xlsx";
+import { parseCsv, parseLedger } from "@/lib/integrations/bank/ledger";
+import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { bankByGroup, bankReconciliation, bankSummary, listBankTransactions, unclassifiedBankCount } from "@/lib/queries/bank";
 import { parseListParams, type Period } from "@/lib/search-params";
 
@@ -204,5 +206,69 @@ export async function testBankLedger(db: Db) {
 
   console.log("✓ Sổ ngân hàng: giờ VN đúng · nhập lại chồng lấn không nhân đôi và không xoá nhãn tay · chuyển nội bộ/trả gốc không tính vào dòng tiền kinh doanh · quy tắc không ghi đè phân loại tay");
   console.log("✓ Ranh giới sao kê ↔ chi phí: nhóm kế toán chỉ quyết định LOẠI DÒNG TIỀN, không nhóm nào tạo khoản chi; đối chiếu bằng liên kết chứng từ");
+
+  /**
+   * ───────── 8. SAO KÊ CHÍNH THỨC NGÂN HÀNG GỬI ─────────
+   *
+   * SỰ CỐ THẬT (11/09/2026). Chủ shop tải sao kê MB Bank từ Internet Banking rồi nhập vào ERP; ERP
+   * trả về đúng một câu "Không nhận ra cột Ngày / Tiền vào / Tiền ra trong CSV", và tệp .xlsx thì
+   * không nhận. Bộ đọc cũ coi DÒNG ĐẦU TỆP là dòng tiêu đề — trong khi sao kê ngân hàng có 17 dòng
+   * đầu thư (tên chủ tài khoản, số tài khoản, số dư đầu kỳ, lời chào song ngữ) trước bảng.
+   *
+   * Ba cái bẫy của định dạng này, cả ba đều im lặng:
+   *  a) dòng tiêu đề nằm sâu trong tệp, và có HAI dòng (Việt rồi Anh);
+   *  b) ngày và giờ nằm CHUNG một ô ("05/08/2026 14:08:08") — không có cột Giờ riêng;
+   *  c) trình xuất CSV của MB ghi literal "37" vào MỌI ô trống. Lệch 37₫ mỗi dòng thì không ai
+   *     nhìn ra bằng mắt, nhưng sổ sẽ không bao giờ khớp số dư ngân hàng.
+   */
+  const MB_SAO_KE = [
+    ",,,,,,,,,",
+    ",SỔ PHỤ CHI TIẾT KIÊM BÁO NỢ/BÁO CÓ,,,,,NGÂN HÀNG TMCP QUÂN ĐỘI,,,",
+    "Tên khách hàng/ Customer name: HO KHAC TRUYEN,,,,,,,Tài khoản/ Account No: 9972165264,,",
+    '"Số dư đầu kỳ/ Opening Balance: 2,154 VND",,,,,,,,,',
+    ",,,,,,,,,",
+    "Ngày giao dịch,Ngày hạch toán,Số bút toán,Phát sinh nợ,Phát sinh có,Số dư lũy kế,Nội dung,Đơn vị thụ hưởng/ Đơn vị chuyển,Tài khoản,Ngân hàng đối tác",
+    "Transaction date,Accounting Date,Transaction No,Debit,Credit,Accumulated balance,Details,Beneficiary/Applicant,Account,Remitter Bank",
+    '05/08/2026 14:08:08,05/08/2026,FT26217021601512,37,"3,122,361","3,124,515",Tong cong ty co phan Buu chinh Viet VTP GLMTQY05,TONG CONG TY CO PHAN BUU CHINH VIETTEL,0001092570236,MB',
+    '10/08/2026 09:45:51,10/08/2026,FT26222139215282,"500,000",37,"2,624,515",CUSTOMER HO KHAC TRUYEN chuyen tien. DEN: HO KHAC TRUYEN,HO KHAC TRUYEN,000666126666,MB',
+    '16/08/2026 01:21:02,15/08/2026,9972165264-20260815,37,139,"2,624,654","Tra lai tien gui, so TK: 9972165264-20260815",37,37,37',
+    '11/09/2026 16:02:54,11/09/2026,FT26254097039000,"2,554,234",37,"70,420",CUSTOMER MBCT Mr T chuyen khoan nhanh qua Za lo,NGUYEN THANH LIEM,935977268234,TECHCOMBANK',
+    'Tổng phát sinh trong kỳ / Total,,,"3,054,234","3,122,500",,,,,',
+    '"Số dư cuối kỳ / Closing Balance: 70,420 VND",,,,,,,,,',
+  ].join("\r\n");
+
+  const mb = parseLedger(MB_SAO_KE);
+  assert.equal(mb.length, 4, "8a. tìm được dòng tiêu đề nằm sâu trong tệp, bỏ dòng tiêu đề tiếng Anh và hai dòng tổng cuối");
+  assert.equal(mb[0].bankRef, "FT26217021601512", "8a. đọc 'Số bút toán' làm mã giao dịch");
+  assert.equal(mb[0].counterparty, "TONG CONG TY CO PHAN BUU CHINH VIETTEL", "8a. đọc 'Đơn vị thụ hưởng/ Đơn vị chuyển' làm đối tác");
+  assert.equal(mb[0].time, "14:08", "8b. giờ nằm chung ô với ngày vẫn phải lấy ra được");
+  assert.equal(toBankRow(mb[0]).txnAt.toISOString(), "2026-08-05T07:08:00.000Z", "8b. 14:08 giờ VN = 07:08Z");
+
+  // 8c. "37" là ô trống, KHÔNG phải 37₫. Bằng chứng nằm ngay trong tệp: dòng trả lãi có "37" ở cột
+  // ngân hàng đối tác — không ngân hàng nào tên "37" — và cột số dư lũy kế của chính MB xác nhận.
+  assert.equal(mb[0].amount, 3_122_361, "8c. tiền vào đúng nguyên vẹn, không bị trừ 37₫ của ô trống");
+  assert.equal(mb[1].amount, -500_000, "8c. tiền ra đúng nguyên vẹn, không bị cộng 37₫ của ô trống");
+  assert.equal(mb[2].amount, 139, "8c. lãi 139₫ vẫn là 139₫ — ô trống bị bỏ chứ không phải mọi số nhỏ");
+  const dauKy = 2_154;
+  const cuoiKy = mb.reduce((so, t) => so + t.amount, dauKy);
+  assert.equal(cuoiKy, 70_420, "8c. số dư đầu kỳ + các giao dịch đọc được = số dư cuối kỳ ngân hàng in ra");
+
+  // 8d. Ngược lại: 37₫ THẬT không được tự ý bỏ. Không có bằng chứng ô trống thì giữ nguyên —
+  // thà nhập thừa 37₫ còn hơn ERP tự xoá một khoản có thật.
+  const batBaMuoiBay = parseLedger(
+    ["Ngày,Giờ,Tiền vào,Tiền ra,Nội dung,Đối tác,Mã GD", "05/08/2026,14:08,37,,Phi dieu chinh,MB,FT-37"].join("\n"),
+  );
+  assert.equal(batBaMuoiBay[0].amount, 37, "8d. không có bằng chứng thì 37 vẫn là số tiền thật");
+
+  // 8e. Cùng một sao kê ở dạng .xlsx phải cho ra kết quả y hệt. Ngân hàng cho tải cả hai định dạng
+  // và chủ shop tải cái nào tiện tay; bắt đổi sang CSV trước khi nhập là đẩy việc sang người dùng.
+  const luoi = MB_SAO_KE.split("\r\n").map((dong) => parseCsv(dong)[0] ?? []);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(luoi), "Sao ke tai khoan");
+  const excel = parseLedgerFile(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer);
+  assert.deepEqual(excel, mb, "8e. .xlsx và .csv của cùng một sao kê phải cho ra cùng một danh sách giao dịch");
+
+  console.log("✓ Sao kê ngân hàng chính thức: tìm tiêu đề sau phần đầu thư · ngày+giờ chung ô · ô trống \"37\" của MB không thành 37₫ · .xlsx = .csv");
+
   console.log("✓ Đối soát sao kê: 5 khoản mục (thêm cước & lương lấy từ Profit Engine) · kỳ chưa nhập sao kê là CHƯA BIẾT chứ không phải chênh lệch");
 }
