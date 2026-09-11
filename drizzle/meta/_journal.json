@@ -379,6 +379,20 @@
       "when": 1788945765898,
       "tag": "0054_cs_info_complete",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788945825898,
+      "tag": "0055_tracking_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789032000000,
+      "tag": "0056_care_actions",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
+import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { PageHeader } from "@/components/page-header";
 import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
@@ -194,6 +195,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         Suspense thì ba con số tiền hiện ngay, hai khối này điền vào sau cùng khung xương của chính
         chúng. Trước đây cả trang phải đợi khối chậm nhất.
       */}
+      {/* Độ tươi đứng TRƯỚC mọi con số: biết số cũ hay mới là điều kiện để đọc số. */}
+      <Suspense fallback={<Skeleton className="h-9 rounded-xl" />}>
+        <DataFreshnessStrip />
+      </Suspense>
+
       <Suspense fallback={<Skeleton className="h-32 rounded-xl" />}>
         <BusinessBriefSection period={period} />
       </Suspense>

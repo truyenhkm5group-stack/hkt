@@ -4,6 +4,7 @@ import { BackfillForm } from "@/app/(dashboard)/integrations/backfill-form";
 import { SyncRunsTable } from "@/app/(dashboard)/integrations/sync-runs-table";
 import { TestConnectionButton } from "@/app/(dashboard)/integrations/test-connection-button";
 import { WebhookEventsTable } from "@/app/(dashboard)/integrations/webhook-events-table";
+import { WebhookHealthPanel } from "@/app/(dashboard)/integrations/webhook-health";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { CopyButton } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
@@ -93,6 +94,9 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
         description="Pancake POS, Viettel Post, webhook thời gian thực và lịch đồng bộ tự động"
         actions={canSync ? <SyncButton job="all" label="Đồng bộ tất cả" variant="default" /> : null}
       />
+
+      {/* Sức khoẻ đường truyền đứng TRƯỚC cấu hình: câu hỏi thường gặp là "có đang chạy không", không phải "khoá là gì". */}
+      <WebhookHealthPanel />
 
       {!status.pancake || !status.viettelPost ? (
         <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">

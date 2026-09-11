@@ -330,6 +330,14 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <div className="space-y-1">
           <Label>Vận đơn treo không cập nhật quá (ngày)</Label>
           <Input type="number" min={1} value={form.staleDays} onChange={(e) => setForm({ ...form, staleDays: Number(e.target.value) || 4 })} />
+          {/*
+            Ngưỡng này là TRẦN CHUNG, không phải ngưỡng duy nhất: mỗi chặng có ngưỡng riêng ngặt hơn
+            (đang đi giao 48 giờ, đã lấy hàng 72 giờ) vì im lặng ở mỗi chặng có ý nghĩa khác nhau.
+            Hạ số này xuống sẽ siết TẤT CẢ các chặng; nâng lên quá ngưỡng chặng thì chặng vẫn thắng.
+          */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Trần chung. Từng chặng còn ngưỡng riêng ngặt hơn (đang đi giao 48 giờ, đã lấy hàng 72 giờ) — bên nào ngặt hơn thì bên đó tính.
+          </p>
         </div>
         <div className="space-y-1">
           <Label>Chỉ xét đơn phát sinh trong (ngày)</Label>

@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { codStatusForAmount } from "@/lib/constants/cod";
+import { CAPABILITY_PROBE_LIMIT } from "@/lib/constants/logistics-freshness";
 import { legTypeFromReturningFlag } from "@/lib/constants/truth";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
 import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
@@ -251,9 +252,30 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
           or(sql`${schema.shipments.carrier} ilike '%viettel%'`, isNotNull(schema.shipments.vtpOrderNumber)),
           or(isNotNull(schema.shipments.vtpOrderNumber), isNotNull(schema.shipments.trackingCode)),
           options.includeFinal ? undefined : eq(schema.shipments.isFinal, false),
+          /*
+            ═══ THÔI HỎI NHỮNG VẬN ĐƠN ĐÃ CHỨNG MINH LÀ KHÔNG HỎI ĐƯỢC ═══
+
+            Đo được 11/09/2026: nguồn `VTP_POLL` sinh ra **0 sự kiện** từ trước tới nay, còn
+            `sync_runs` ghi "tài khoản API không thấy vận đơn nào — lượt thứ 548 liên tiếp". Vận đơn
+            do Pancake tạo thuộc một tài khoản Viettel Post khác.
+
+            Gọi mãi một API không bao giờ trả về gì không làm sai số liệu, nhưng tốn request, tốn
+            thời gian job, và làm log đầy tiếng ồn che mất lỗi thật.
+
+            KHÔNG bỏ hẳn khả năng đối chiếu: chỉ loại vận đơn đã đủ bằng chứng (`WEBHOOK_ONLY`).
+            Vận đơn `UNKNOWN_CAPABILITY` vẫn được thử, có giới hạn; vận đơn `API_TRACKABLE` vẫn đối
+            chiếu như cũ. Ngày shop trỏ ERP về đúng tài khoản, vận đơn mới sẽ tự vào lại vòng này.
+          */
+          sql`${schema.shipments.trackingCapability} <> 'WEBHOOK_ONLY'`,
         );
     const shipments = await db
-      .select({ id: schema.shipments.id, vtpOrderNumber: schema.shipments.vtpOrderNumber, trackingCode: schema.shipments.trackingCode })
+      .select({
+        id: schema.shipments.id,
+        vtpOrderNumber: schema.shipments.vtpOrderNumber,
+        trackingCode: schema.shipments.trackingCode,
+        trackingCapability: schema.shipments.trackingCapability,
+        capabilityProbes: schema.shipments.capabilityProbes,
+      })
       .from(schema.shipments)
       .where(where)
       .orderBy(sql`${schema.shipments.lastVtpSyncAt} asc nulls first`, asc(schema.shipments.createdAt))
@@ -269,11 +291,30 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
       try {
         const record = await client.getOrderDetail(orderNumber);
         if (!record) {
-          // API không thấy vận đơn: đếm riêng, KHÔNG gộp vào "bỏ qua" để không che mất sự thật.
+          /*
+            API trả "không thấy" là một câu trả lời DỨT KHOÁT, không phải lỗi tạm thời: vận đơn hoặc
+            thuộc tài khoản này hoặc không. Đếm riêng (không gộp vào "bỏ qua" để khỏi che sự thật),
+            và sau `CAPABILITY_PROBE_LIMIT` lần thì kết luận — thôi hỏi nữa.
+          */
           notFound += 1;
           ctx.summary.skipped += 1;
-          await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id));
+          const soLan = (shipment.capabilityProbes ?? 0) + 1;
+          await db
+            .update(schema.shipments)
+            .set({
+              lastVtpSyncAt: new Date(),
+              capabilityProbes: soLan,
+              ...(soLan >= CAPABILITY_PROBE_LIMIT ? { trackingCapability: "WEBHOOK_ONLY" as const } : {}),
+            })
+            .where(eq(schema.shipments.id, shipment.id));
           continue;
+        }
+        // Tra được ⇒ bằng chứng dứt khoát theo hướng ngược lại: vận đơn này đối chiếu API được.
+        if (shipment.trackingCapability !== "API_TRACKABLE") {
+          await db
+            .update(schema.shipments)
+            .set({ trackingCapability: "API_TRACKABLE", capabilityProbes: 0 })
+            .where(eq(schema.shipments.id, shipment.id));
         }
         const result = await applyVtpTracking({ ...record, orderNumber }, "VTP_POLL");
         if (result?.changed) ctx.summary.updated += 1;

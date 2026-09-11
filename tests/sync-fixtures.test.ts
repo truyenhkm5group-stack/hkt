@@ -54,6 +54,8 @@ import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
+import { testDeliveryTower } from "./delivery-tower.test";
+import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testUseServerExports } from "./use-server-exports.test";
@@ -1286,6 +1288,7 @@ async function main() {
   testUseServerExports();
   testSmokeCoverage();
   testOperatingFunnel();
+  testLogisticsFreshness();
   await testMemoInflight();
   await testBankPipeline(db);
   await testApproval(db);
@@ -1334,6 +1337,7 @@ async function main() {
   // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
   // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
   await testReturnPipeline(db);
+  await testDeliveryTower(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

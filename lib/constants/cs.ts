@@ -1,3 +1,4 @@
+import { normalize } from "@/lib/text";
 /** Case chăm sóc khách hàng (CSKH) */
 export const CS_KINDS = ["ORDER_NOT_CREATED", "EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "PHONE_VERIFY", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
@@ -246,3 +247,21 @@ export const DEFAULT_CS_RULES: CsRules = {
       "Dạ chào {ten} ơi, đơn {san_pham} (mã {ma_van_don}) bưu tá giao tới nhưng chưa thành công ạ (bưu tá ghi: {ly_do}). Mình cho shop hỏi lý do và giờ thuận tiện để bưu tá {buu_ta} – {sdt_buu_ta} giao lại nhé. Hàng được kiểm tra trước khi thanh toán ạ 💛",
   },
 };
+
+/**
+ * Phân loại lý do giao hụt từ ghi chú bưu tá / tên trạng thái (ưu tiên ghi chú mới nhất).
+ *
+ * Nằm ở hằng số dùng chung, KHÔNG nằm cạnh bộ nhắn tin: tháp điều khiển giao vận cũng cần đúng
+ * định nghĩa "khách không nghe máy" này. Hai bộ regex song song sẽ lệch nhau, và cái lệch chỉ lộ
+ * ra khi có người đối chiếu hai màn hình.
+ */
+export function classifyFailedReason(texts: (string | null | undefined)[]): FailedReason {
+  const n = normalize(texts.filter(Boolean).join(" | "));
+  if (/hen phat lai|hen giao|hen lai|khach hen|phat lai luc|giao lai luc/.test(n)) return "RESCHEDULED";
+  if (/tu choi|khong nhan|ko nhan|khong lay|khong dat|khong mua|doi y|huy don|boom|bom hang|khong dong y/.test(n)) return "REFUSED";
+  if (/khong lien lac|ko lien lac|khong nghe may|ko nghe may|thue bao|khong bat may|sai so|so dien thoai sai|khong goi duoc/.test(n)) return "NO_CONTACT";
+  if (/sai dia chi|khong tim thay dia chi|dia chi khong|khong ro dia chi|khong dung dia chi|dia chi sai|khong tim duoc/.test(n)) return "WRONG_ADDRESS";
+  if (/khong co nha|di vang|khong co nguoi nhan|khach nghi|vang nha|khong co mat|di lam|di cong tac/.test(n)) return "NOT_HOME";
+  if (/khong du tien|chua co tien|khong co tien|tien cod|kiem hang|dong kiem|xem hang|phi ship|cuoc/.test(n)) return "COD_ISSUE";
+  return "OTHER";
+}

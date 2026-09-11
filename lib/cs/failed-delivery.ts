@@ -5,30 +5,20 @@
  */
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { FAILED_REASON_LABEL, type FailedReason } from "@/lib/constants/cs";
+import { FAILED_REASON_LABEL, classifyFailedReason } from "@/lib/constants/cs";
 import { loadCsRules } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { shortName } from "@/lib/constants/outreach";
 import { normalize } from "@/lib/text";
 
+export { classifyFailedReason };
+
 export type FailedMode = "RETRY" | "PENDING";
 
 /** Hẹn phát lại hay chờ xử lý (giữ để tương thích) */
 export function failedMode(texts: (string | null | undefined)[]): FailedMode {
   return classifyFailedReason(texts) === "RESCHEDULED" ? "RETRY" : "PENDING";
-}
-
-/** Phân loại lý do từ ghi chú bưu tá / tên trạng thái (ưu tiên ghi chú mới nhất) */
-export function classifyFailedReason(texts: (string | null | undefined)[]): FailedReason {
-  const n = normalize(texts.filter(Boolean).join(" | "));
-  if (/hen phat lai|hen giao|hen lai|khach hen|phat lai luc|giao lai luc/.test(n)) return "RESCHEDULED";
-  if (/tu choi|khong nhan|ko nhan|khong lay|khong dat|khong mua|doi y|huy don|boom|bom hang|khong dong y/.test(n)) return "REFUSED";
-  if (/khong lien lac|ko lien lac|khong nghe may|ko nghe may|thue bao|khong bat may|sai so|so dien thoai sai|khong goi duoc/.test(n)) return "NO_CONTACT";
-  if (/sai dia chi|khong tim thay dia chi|dia chi khong|khong ro dia chi|khong dung dia chi|dia chi sai|khong tim duoc/.test(n)) return "WRONG_ADDRESS";
-  if (/khong co nha|di vang|khong co nguoi nhan|khach nghi|vang nha|khong co mat|di lam|di cong tac/.test(n)) return "NOT_HOME";
-  if (/khong du tien|chua co tien|khong co tien|tien cod|kiem hang|dong kiem|xem hang|phi ship|cuoc/.test(n)) return "COD_ISSUE";
-  return "OTHER";
 }
 
 /** Bưu tá / Viettel Post đang chuyển hoàn (đóng bảng kê hoàn, chuyển hoàn) → khách không thể nhận, không hỏi lý do */

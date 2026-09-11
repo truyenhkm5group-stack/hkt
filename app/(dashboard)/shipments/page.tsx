@@ -1,3 +1,4 @@
+import { DeliveryTower } from "@/app/(dashboard)/shipments/tower";
 import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
@@ -28,6 +29,13 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           </>
         }
       />
+      {/*
+        THÁP ĐỨNG TRƯỚC BẢNG.
+
+        Bảng tra cứu vẫn nguyên vẹn bên dưới — không bỏ gì cả. Chỉ đổi thứ tự: việc cần làm hôm nay
+        đứng trước danh sách để tra, vì mở trang này buổi sáng là để làm việc, không phải để tra.
+      */}
+      <DeliveryTower bucket={typeof raw.bucket === "string" ? raw.bucket : undefined} />
       <DataTableToolbar
         searchPlaceholder="Mã vận đơn, mã VTP, SĐT, tên người nhận, mã đơn…"
         period={{ defaultKey: "30d" }}

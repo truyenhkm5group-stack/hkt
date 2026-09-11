@@ -23,11 +23,20 @@ import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
 import { ADS_ANOMALY_LABEL } from "@/lib/constants/ads-anomaly";
 import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { getControlTower } from "@/lib/queries/control-tower";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
+
+/**
+ * MỐC TIN CUỐI CÙNG TỪ ĐVVC cho một vận đơn.
+ *
+ * `VTP_POLL` cố ý KHÔNG có trong danh sách: nguồn đó chưa từng sinh ra một sự kiện nào (đo
+ * 11/09/2026), nên đưa vào chỉ làm người đọc tưởng nó có đóng góp.
+ */
+const MOC_DVVC = sql`(select max(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION'))`;
 
 type Candidate = { kind: string; severity: "info" | "warning" | "critical"; title: string; body: string; href: string; entityType: string; entityId: string; dedupeKey: string; occurredAt?: Date | null };
 
@@ -209,24 +218,77 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
 
   if (cfg.enabled.stale) {
     activeKinds.push("SHIPMENT_STALE");
-    const cutoff = new Date(Date.now() - cfg.staleDays * 86_400_000);
+    /*
+      ═══ IM LẶNG ĐO TỪ SỰ KIỆN ĐVVC, KHÔNG TỪ `updated_at` ═══
+
+      Bản cũ so `coalesce(vtp_status_date, updated_at)` với một ngưỡng phẳng. Cả hai vế đều sai:
+
+      · `updated_at` bị chạm bởi MỌI lần ghi vào dòng vận đơn — nhập bảng kê COD, ghép đợt tiền,
+        đối soát. Một kiện im lặng năm ngày nhưng hôm qua có người nhập bảng kê thì trông như vừa
+        mới cập nhật. Đo được 11/09/2026: luật cũ thấy 6 kiện treo, trong khi có 182 kiện thật sự
+        im quá ngưỡng của chặng.
+      · ngưỡng phẳng gộp "chờ lấy hàng bốn ngày" (bình thường) với "đang đi giao bốn ngày" (mất tin
+        về một kiện đang ở tay bưu tá) làm một.
+
+      Nay: tuổi tính từ SỰ KIỆN ĐVVC gần nhất, ngưỡng lấy theo CHẶNG từ `FRESHNESS_BY_STAGE`.
+
+      ═══ VÀ CHỈ MỨC NGHIÊM TRỌNG MỚI THÀNH VIỆC ═══
+
+      182 kiện quá ngưỡng "cũ" nhưng chỉ 18 vượt ngưỡng NGHIÊM TRỌNG. Đổ cả 182 vào hàng đợi là
+      giết hàng đợi: một danh sách không ai làm hết được thì cũng không ai mở lần thứ hai. Số còn
+      lại vẫn được ĐO đầy đủ ở tháp điều khiển giao vận và dải độ tươi — đo không có nghĩa là phải
+      sinh việc.
+    */
+    const nguongTheoChang = sql.join(
+      [
+        // `${s.stage}` chứ KHÔNG phải chữ "s.stage": drizzle không đặt bí danh cho bảng, nên bí danh
+        // gõ tay trong sql`` sẽ thành "missing FROM-clause entry for table s" ngay câu đầu tiên.
+        sql`case ${s.stage}::text`,
+        ...Object.entries(FRESHNESS_BY_STAGE).map(([st, t]) => sql` when ${st} then ${Math.min(t.critical, cfg.staleDays * 24)}`),
+        sql` else ${cfg.staleDays * 24} end`,
+      ],
+      sql``,
+    );
     const rows = await db
-      .select({ ...orderCols, shipmentId: s.id, tracking: s.trackingCode, vtp: s.vtpOrderNumber, stage2: s.stage, statusName: s.vtpStatusName, updatedAt: s.updatedAt, statusDate: s.vtpStatusDate })
+      .select({
+        ...orderCols,
+        shipmentId: s.id,
+        tracking: s.trackingCode,
+        vtp: s.vtpOrderNumber,
+        stage2: s.stage,
+        statusName: s.vtpStatusName,
+        updatedAt: s.updatedAt,
+        statusDate: s.vtpStatusDate,
+        tuoiGio: sql<number>`extract(epoch from (now() - ${MOC_DVVC})) / 3600`,
+        nguong: sql<number>`(${nguongTheoChang})::numeric`,
+      })
       .from(s)
       .leftJoin(o, eq(o.id, s.orderId))
-      .where(and(inArray(s.stage, ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]), lte(sql`coalesce(${s.vtpStatusDate}, ${s.updatedAt})`, cutoff), sql`${s.createdAt} >= ${lookback.toISOString()}::timestamptz`))
+      .where(
+        and(
+          inArray(s.stage, ["PENDING", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"]),
+          eq(s.isFinal, false),
+          sql`${s.createdAt} >= ${lookback.toISOString()}::timestamptz`,
+          // Chưa có sự kiện nào ⇒ `MOC_DVVC` là NULL ⇒ phép so sánh trả NULL ⇒ KHÔNG vào đây.
+          // Nhóm đó là lỗ hổng dữ liệu, thuộc rổ "chưa rõ" của tháp điều khiển, không phải việc gọi ĐVVC.
+          sql`extract(epoch from (now() - ${MOC_DVVC})) / 3600 >= (${nguongTheoChang})::numeric`,
+        ),
+      )
       .limit(500);
     for (const r of rows) {
       const code = r.vtp || r.tracking || r.shipmentId;
-      const days = Math.floor((Date.now() - new Date(r.statusDate ?? r.updatedAt).getTime()) / 86_400_000);
+      const gio = Math.round(Number(r.tuoiGio ?? 0));
+      const nguong = Math.round(Number(r.nguong ?? 0));
       candidates.push({
         kind: "SHIPMENT_STALE",
         severity: "warning",
-        title: `Vận đơn ${code} không cập nhật ${days} ngày`,
-        body: `${r.id ? orderLabel(r) : "Vận đơn ngoài Pancake"} · ${SHIPMENT_STAGE_LABEL[r.stage2] ?? r.stage2}${r.statusName ? ` · ${r.statusName}` : ""} — kiểm tra với Viettel Post`,
+        title: `Vận đơn ${code} không có tin ${gio >= 48 ? `${Math.round(gio / 24)} ngày` : `${gio} giờ`}`,
+        body: `${r.id ? orderLabel(r) : "Vận đơn ngoài Pancake"} · ${SHIPMENT_STAGE_LABEL[r.stage2] ?? r.stage2}${r.statusName ? ` · ${r.statusName}` : ""} — ĐVVC im quá ${nguong} giờ ở chặng này. Tra mã trên trang Viettel Post; đây là vấn đề ĐỘ TƯƠI DỮ LIỆU, chưa phải kết luận đơn hỏng.`,
         href: `/shipments/${r.shipmentId}`,
         entityType: "SHIPMENT",
         entityId: r.shipmentId,
+        // Một kiện một việc, không kèm ngày: kiện im thêm một ngày KHÔNG được đẻ ra việc thứ hai.
+        // Có mốc ĐVVC mới thì kiện rời danh sách ứng viên và việc tự đóng với nhãn AUTO.
         dedupeKey: `ship-stale:${r.shipmentId}`,
         occurredAt: r.statusDate ?? r.updatedAt,
       });

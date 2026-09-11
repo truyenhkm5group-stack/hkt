@@ -14,6 +14,7 @@ import {
 } from "@/lib/constants/action-queue";
 import { AGING_BUCKETS, OPERATING_FUNNEL, type AgingKey, type SourceStatus, type StageKey, type StageSpec } from "@/lib/constants/operating-funnel";
 import { combineImpact, getRecoveryRates, type MoneyImpact } from "@/lib/queries/impact";
+import { getLogisticsFreshness, type LogisticsFreshness } from "@/lib/queries/logistics-freshness";
 import { getReturnPipeline } from "@/lib/queries/return-pipeline";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -129,8 +130,12 @@ export type TeamLoad = {
  */
 export type LogisticsDataFreshness = {
   inFlight: number;
-  stalePoll: number;
-  neverPolled: number;
+  /** Kiện có sự kiện ĐVVC cũ hơn ngưỡng của chặng nó đang ở. */
+  stale: number;
+  critical: number;
+  /** Webhook còn sống không — con số này mới nói integration có đang chạy hay không. */
+  webhookLastHour: number;
+  webhookLast24h: number;
   /** Số lượt tra cứu liên tiếp mà tài khoản API VTP không thấy vận đơn nào. */
   apiBlindStreak: number;
   /** Câu giải thích nguyên nhân + việc cần làm. `null` khi mọi thứ bình thường. */
@@ -256,47 +261,15 @@ async function loadKindRows(): Promise<KindRow[]> {
 
 /** Nguồn dữ liệu của từng khâu có thật hay không — đo, không khai sẵn. */
 /**
- * ═══════ ĐỘ TƯƠI CỦA TRẠNG THÁI VẬN ĐƠN ═══════
+ * ═══════ ĐỘ TƯƠI ĐỌC TỪ SỰ KIỆN ĐVVC, KHÔNG PHẢI TỪ LẦN TRA CỨU ═══════
  *
- * Một khâu giao vận "thông" trên màn hình mà số liệu bên dưới cũ ba tiếng thì màn hình đang nói dối
- * một cách lịch sự. Nên khâu giao vận phải tự khai độ tươi của chính nó.
+ * Bản đầu ở đây đếm `last_vtp_sync_at` — "lần cuối ERP gọi API". Con số đó VÔ NGHĨA: đo được nguồn
+ * `VTP_POLL` sinh ra **0 sự kiện từ trước tới nay**, nên một lần tra cứu không làm dữ liệu tươi thêm
+ * một giây nào. Nó chỉ nói "ta có gọi", không nói "ta có biết kiện hàng đang ở đâu".
  *
- * ĐO ĐƯỢC trên production 11/09/2026:
- *
- *   554 kiện đang chạy · MỌI kiện đều đã được tra ít nhất một lần (0 kiện chưa tra)
- *   nhưng tuổi tra cứu trung bình 180–229 PHÚT, và 398/554 kiện tra lần cuối quá 2 giờ
- *
- * Job tra cứu chạy mỗi 10 phút với giới hạn 300 — lẽ ra phủ hết 554 kiện trong ~20 phút. Nguyên
- * nhân nằm ở `sync_runs`: *"Tài khoản API Viettel Post không thấy bất kỳ vận đơn nào trong 10 vận
- * đơn vừa tra (lượt thứ 548 liên tiếp)"*. Vận đơn do Pancake tạo thuộc một tài khoản VTP khác, nên
- * bộ tra cứu tự hạ xuống chế độ dò 10 kiện/lượt thay vì đập vào một API không trả về gì.
- *
- * Đó là hành vi ĐÚNG của bộ tra cứu. Nhưng hệ quả — trạng thái vận đơn chỉ còn đến từ webhook — là
- * thứ chủ shop phải thấy, và trước đây nó chỉ nằm trong `sync_runs.error` và một ô ở trang Kết nối
- * dữ liệu mà không ai mở hằng ngày.
+ * Nay dùng `lib/queries/logistics-freshness.ts`: tuổi tính từ SỰ KIỆN ĐVVC gần nhất, ngưỡng theo
+ * từng chặng.
  */
-type LogisticsFreshness = { inFlight: number; stalePoll: number; neverPolled: number; apiBlindStreak: number };
-
-async function loadLogisticsFreshness(db: Awaited<ReturnType<typeof getDb>>): Promise<LogisticsFreshness> {
-  const [row] = rowsOf<{ dang_chay: number; tra_cu: number; chua_tra: number }>(
-    await db.execute(sql`
-      select count(*)::int as dang_chay,
-             count(*) filter (where last_vtp_sync_at < now() - interval '2 hours')::int as tra_cu,
-             count(*) filter (where last_vtp_sync_at is null)::int as chua_tra
-        from shipments
-       where order_id is not null and is_final = false`),
-  );
-  const [scope] = rowsOf<{ streak: number }>(
-    await db.execute(sql`select coalesce((value ->> 'missingStreak')::int, 0) as streak from sync_state where key = 'vtp:api-scope'`),
-  );
-  return {
-    inFlight: Number(row?.dang_chay ?? 0),
-    stalePoll: Number(row?.tra_cu ?? 0),
-    neverPolled: Number(row?.chua_tra ?? 0),
-    apiBlindStreak: Number(scope?.streak ?? 0),
-  };
-}
-
 async function loadSourceStatus(db: Awaited<ReturnType<typeof getDb>>, tuoi: LogisticsFreshness): Promise<Record<StageKey, SourceStatus>> {
   const [row] = rowsOf<{ bank: number; production: number; inspections: number; receipts: number; cs: number }>(
     await db.execute(sql`
@@ -321,11 +294,14 @@ async function loadSourceStatus(db: Awaited<ReturnType<typeof getDb>>, tuoi: Log
   // Ít phiếu nhập ⇒ phần lớn mẫu mã chưa biết tồn, sổ kho nói được rất ít.
   base.INVENTORY = receipts > 0 ? (receipts < 10 ? "DEGRADED" : "HEALTHY") : "DATA_UNAVAILABLE";
   /*
-    Quá NỬA số kiện đang chạy có trạng thái tra cứu cũ hơn 2 giờ ⇒ khâu giao vận KHÔNG được coi là
-    nguồn khoẻ. Ngưỡng một nửa, cố ý rộng: vài kiện chậm là bình thường, quá nửa là hệ thống đang
+    Quá NỬA số kiện đang chạy im lặng quá ngưỡng của chặng nó đang ở ⇒ khâu giao vận KHÔNG được coi
+    là nguồn khoẻ. Ngưỡng một nửa, cố ý rộng: vài kiện chậm là bình thường, quá nửa là hệ thống đang
     nhìn logistics qua một cửa sổ mờ.
+
+    DEGRADED ở đây là NGUỒN yếu, KHÔNG phải đơn hỏng. Nó không đổi kết quả của một đơn nào.
   */
-  if (tuoi.inFlight > 0 && tuoi.stalePoll * 2 > tuoi.inFlight) {
+  const khongTuoi = tuoi.byClass.STALE + tuoi.byClass.CRITICAL_STALE;
+  if (tuoi.inFlight > 0 && khongTuoi * 2 > tuoi.inFlight) {
     base.HANDED_TO_CARRIER = "DEGRADED";
     base.IN_TRANSIT = "DEGRADED";
     base.RETURNING = "DEGRADED";
@@ -350,7 +326,7 @@ function statusOf(spec: StageSpec, backlog: number, breached: number, source: So
 export async function getFunnelHealth(): Promise<FunnelHealth> {
   return memo("stage-health", 120_000, async () => {
     const db = await getDb();
-    const tuoiVanDon = await loadLogisticsFreshness(db);
+    const tuoiVanDon = await getLogisticsFreshness();
     const [kindRows, source, rates, hoan] = await Promise.all([
       loadKindRows(),
       loadSourceStatus(db, tuoiVanDon),
@@ -526,16 +502,22 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
     const worst = kẹt.slice().sort((a, b) => b.impact.moneyAtRisk - a.impact.moneyAtRisk || b.backlog - a.backlog)[0] ?? null;
     const coUocTinh = stages.some((s) => s.impact.estimatedRecoverable !== null);
 
-    const cuQuaNua = tuoiVanDon.inFlight > 0 && tuoiVanDon.stalePoll * 2 > tuoiVanDon.inFlight;
+    const khongTuoi = tuoiVanDon.byClass.STALE + tuoiVanDon.byClass.CRITICAL_STALE;
+    const cuQuaNua = tuoiVanDon.inFlight > 0 && khongTuoi * 2 > tuoiVanDon.inFlight;
     return {
       stages,
       logistics: {
-        ...tuoiVanDon,
+        inFlight: tuoiVanDon.inFlight,
+        stale: khongTuoi,
+        critical: tuoiVanDon.byClass.CRITICAL_STALE,
+        webhookLastHour: tuoiVanDon.webhookLastHour,
+        webhookLast24h: tuoiVanDon.webhookLast24h,
+        apiBlindStreak: tuoiVanDon.apiBlindStreak,
         note: !cuQuaNua
           ? null
           : tuoiVanDon.apiBlindStreak >= 3
             ? `Tài khoản API Viettel Post KHÔNG thấy vận đơn của shop (${formatSoLuot(tuoiVanDon.apiBlindStreak)} lượt tra liên tiếp không có kết quả) — vận đơn do Pancake tạo thuộc tài khoản VTP khác. Bộ tra cứu đã tự hạ xuống chế độ dò để khỏi đập vào một API không trả về gì, nên trạng thái vận đơn hiện CHỈ đến từ webhook. VIỆC CẦN LÀM: trỏ ERP về đúng tài khoản Viettel Post mà Pancake đang dùng.`
-            : "Quá nửa số kiện đang chạy có trạng thái tra cứu cũ hơn 2 giờ. Kiểm tra job tra cứu Viettel Post.",
+            : `Quá nửa số kiện đang chạy (${formatSoLuot(khongTuoi)}/${formatSoLuot(tuoiVanDon.inFlight)}) im lặng quá ngưỡng của chặng. Webhook nhận ${formatSoLuot(tuoiVanDon.webhookLastHour)} sự kiện trong 1 giờ qua, ${formatSoLuot(tuoiVanDon.webhookLast24h)} trong 24 giờ. Đây là vấn đề ĐỘ TƯƠI DỮ LIỆU, không phải kết luận về đơn: kết quả đơn vẫn theo chứng từ cuối cùng.`,
         href: "/integrations",
       },
       byTeam: [...teams.values()].sort((a, b) => b.moneyAtRisk - a.moneyAtRisk || b.backlog - a.backlog),

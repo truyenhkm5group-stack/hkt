@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Banknote, CircleHelp, Clock, UserX } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { MetricCard } from "@/components/metric-card";
+import { CareEffectivenessSection } from "@/app/(dashboard)/operations/care-section";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { ageLabel } from "@/lib/constants/action-queue";
@@ -139,7 +140,8 @@ export default async function OperationsPage() {
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
           <div className="min-w-[260px] flex-1">
             <div className="text-[13.5px] font-semibold">
-              Trạng thái vận đơn đang cũ · {formatNumber(health.logistics.stalePoll)}/{formatNumber(health.logistics.inFlight)} kiện đang chạy tra lần cuối quá 2 giờ
+              Trạng thái vận đơn đang cũ · {formatNumber(health.logistics.stale)}/{formatNumber(health.logistics.inFlight)} kiện đang chạy quá ngưỡng im lặng của chặng
+              {health.logistics.critical > 0 ? <span className="ml-1 font-normal">({formatNumber(health.logistics.critical)} cũ nghiêm trọng)</span> : null}
             </div>
             <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{health.logistics.note}</p>
           </div>
@@ -368,6 +370,8 @@ export default async function OperationsPage() {
           </dl>
         </SectionCard>
       </div>
+
+      <CareEffectivenessSection />
     </div>
   );
 }

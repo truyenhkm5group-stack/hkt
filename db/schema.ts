@@ -1022,6 +1022,22 @@ export const shipments = pgTable(
     cancelledAt: ts("cancelled_at"),
     isFinal: boolean("is_final").notNull().default(false),
     lastVtpSyncAt: ts("last_vtp_sync_at"),
+    /**
+     * ═══ TÀI KHOẢN API CÓ ĐỌC ĐƯỢC VẬN ĐƠN NÀY KHÔNG ═══
+     *
+     * `API_TRACKABLE` · `WEBHOOK_ONLY` · `UNKNOWN_CAPABILITY` (xem lib/constants/logistics-freshness.ts).
+     *
+     * Đo được 11/09/2026: nguồn `VTP_POLL` sinh ra **0 sự kiện** từ trước tới nay, trong khi
+     * `sync_runs` ghi "tài khoản API không thấy vận đơn nào — lượt thứ 548 liên tiếp". Vận đơn do
+     * Pancake tạo thuộc một tài khoản Viettel Post khác. ERP vẫn đều đặn gọi một API không bao giờ
+     * trả về gì: không sai số liệu, nhưng tốn request và làm log đầy tiếng ồn che mất lỗi thật.
+     *
+     * Kết luận theo TỪNG VẬN ĐƠN chứ không theo tài khoản — để ngày shop trỏ ERP về đúng tài khoản
+     * thì vận đơn mới tự được xếp lại đúng mà không cần sửa gì.
+     */
+    trackingCapability: text("tracking_capability").notNull().default("UNKNOWN_CAPABILITY"),
+    /** Số lần đã tra mà API trả "không thấy". Tới ngưỡng thì kết luận `WEBHOOK_ONLY`. */
+    capabilityProbes: integer("capability_probes").notNull().default(0),
     lastPancakeSyncAt: ts("last_pancake_sync_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),
@@ -1035,6 +1051,7 @@ export const shipments = pgTable(
     index("shipments_carrier_idx").on(t.carrier),
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
+    index("shipments_capability_idx").on(t.trackingCapability, t.isFinal),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
     // Đối soát COD quét "đã giao, có thu hộ, chưa thấy tiền" trên toàn bảng vận đơn mỗi lần mở
     // trang Cần xử lý và mỗi lần chạy cảnh báo.
@@ -1798,3 +1815,44 @@ export type MarketingIdea = typeof marketingIdeas.$inferSelect;
 export type IdeaStatus = MarketingIdea["status"];
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;
+
+/**
+ * ═══════════ SỔ CHĂM SÓC ĐƠN GIAO HỤT ═══════════
+ *
+ * Câu hỏi bảng này sinh ra để trả lời: **gọi khách có cứu được đơn không, và cứu được bao nhiêu?**
+ *
+ * Trước đây không trả lời được. Bot tự nhắn thì có case CSKH, nhưng người nhấc máy gọi xong thì
+ * không có chỗ nào ghi — nên "đội CSKH cứu được bao nhiêu đơn" là một câu hỏi không có dữ liệu.
+ *
+ * ĐO TỪ HÔM NAY. Không dựng lại cohort quá khứ: dữ liệu cũ không mang actor, và suy ngược sẽ đẻ ra
+ * một tỷ lệ hiệu quả nghe rất thuyết phục mà không có gì đứng sau.
+ */
+export const careActions = pgTable(
+  "care_actions",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Loại hành động — xem `CARE_ACTION_KINDS`. Ghi nhận việc ĐÃ LÀM, không phải việc định làm. */
+    kind: text("kind").notNull(),
+    note: text("note").notNull().default(""),
+    /*
+      ẢNH CHỤP BỐI CẢNH LÚC HÀNH ĐỘNG — cố ý không tính lại về sau.
+
+      So sánh "trước / sau khi có người chăm" phải đứng trên trạng thái LÚC ĐÓ. Tính lại theo trạng
+      thái hôm nay là hỏi "kiện này giờ ra sao" chứ không phải "việc chăm có tác dụng gì".
+    */
+    stageAtAction: text("stage_at_action").notNull().default(""),
+    bucketAtAction: text("bucket_at_action").notNull().default(""),
+    /** `NULL` = CHƯA BIẾT (vận đơn không gắn đơn), không phải 0đ. */
+    codAtAction: bigint("cod_at_action", { mode: "number" }),
+    eventAgeHoursAtAction: integer("event_age_hours_at_action"),
+    failedAttemptsAtAction: integer("failed_attempts_at_action"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("care_actions_shipment_idx").on(t.shipmentId, t.createdAt), index("care_actions_created_idx").on(t.createdAt)],
+);
