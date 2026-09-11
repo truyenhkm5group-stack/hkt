@@ -117,3 +117,74 @@ không nằm trong tài liệu này.
 | Swap 0 MB trên VPS | Chủ shop | Rủi ro OOM khi build trên máy chủ |
 | Direct VTP Fulfillment | **PENDING** — chưa mở, theo đúng yêu cầu |
 | Sáu báo cáo đường nguội còn trên mục tiêu | ERP | Đã ghi ở `docs/erp-performance-p0-5-report.md` |
+
+---
+
+## 8. Đo lại SAU khi lên production (deploy #214 `9d9cf18` và #215 `a3ae7c3`)
+
+Không dừng ở "deploy xanh". Dưới đây là số đo lấy từ production sau khi mã chạy thật.
+
+### 8.1 Deploy
+
+| | #214 | #215 |
+|---|---|---|
+| Migration | 56/56 đã áp (`0055`, `0056` vào) | 56/56 |
+| Smoke | 38/38 đạt · 0 lỗi · 0 chậm (267s) | **39/39** đạt · 0 lỗi · 0 chậm (253s) |
+| `/shipments` (đã có tháp) | 142ms | 142ms |
+| `/shipments?bucket=CARE_TODAY` | chưa phủ | **84ms** |
+| `/operations` | 112ms | 91ms |
+
+Mục tiêu §14 của tháp điều khiển là **dưới 1 giây**. Đo được 84–142ms.
+
+### 8.2 Khả năng tra cứu sau backfill
+
+| Trạng thái | Vận đơn | Đang chạy |
+|---|---:|---:|
+| `WEBHOOK_ONLY` | 488 | 488 |
+| `UNKNOWN_CAPABILITY` | 1.488 | 88 |
+
+488 kiện đang chạy đã rời khỏi vòng tra cứu API — đúng những kiện mà API chưa bao giờ trả về gì.
+88 kiện còn lại sẽ được thử tối đa 3 lần rồi kết luận, theo từng vận đơn.
+
+### 8.3 Dân số tháp điều khiển
+
+| Chặng | Kiện | COD |
+|---|---:|---:|
+| RETURNED (về shop, chưa đếm) | 484 | 259.477.000đ |
+| RETURNING | 174 | 94.699.500đ |
+| IN_TRANSIT | 160 | 85.783.000đ |
+| PENDING | 110 | 65.475.999đ |
+| OUT_FOR_DELIVERY | 72 | 37.911.000đ |
+| DELIVERY_FAILED | 37 | 20.138.999đ |
+| PICKED_UP | 1 | 524.000đ |
+
+### 8.4 MỘT PHÁT HIỆN PHẢI GHI RA: mã lý do của ĐVVC hiện KHÔNG có
+
+`vtp_reason_code` **NULL trên toàn bộ** vận đơn đang theo dõi — kể cả 37 kiện giao hụt. Nghĩa là
+nhánh *"mã lý do là chứng từ, đứng trên ghi chú bưu tá"* của bộ xếp rổ **hôm nay chưa chạy lần nào**.
+
+Nhánh đó vẫn giữ, vì nó đúng và sẽ chạy khi webhook mang mã lý do về. Nhưng ghi lại ở đây để không
+ai tưởng nó đang gánh việc.
+
+Phần gánh việc thật là ghi chú bưu tá, và nó KHÔNG rỗng — 37 kiện giao hụt chia được:
+
+| Đọc từ ghi chú | Kiện | Rổ |
+|---|---:|---|
+| có chữ "hẹn" | 20 | Chờ giao lại |
+| "không liên lạc / nghe máy / thuê bao" | 13 | Khách không nghe máy |
+| còn lại | 4 | Giao thất bại |
+| ghi chú rỗng | **0** | — |
+
+Ba rổ đều có hàng thật. Không có rổ nào là tính năng chết.
+
+### 8.5 Bộ dò việc sau khi đổi sang sự kiện ĐVVC
+
+| Loại | Đang mở | Tạo mới 2h qua | Tự đóng 2h qua |
+|---|---:|---:|---:|
+| `SHIPMENT_FAILED` | 24 | 9 | 3 |
+| `SHIPMENT_RETURNING` | 8 | 7 | 0 |
+| `SHIPMENT_STALE` | **10** (trước: 6) | 5 | 1 |
+
+Vòng tự đóng chạy đúng: có mốc ĐVVC mới thì kiện rời danh sách ứng viên và việc đóng với nhãn
+`AUTO` — không ai phải dọn tay, và "đội xử lý được bao nhiêu việc" vẫn đếm được vì `AUTO` không bị
+lẫn với việc do người đóng.
