@@ -192,7 +192,9 @@ function slaBreachExpr() {
     Đây là lần thứ HAI cùng một lỗi trong một ngày (lần đầu ở lib/queries/return-pipeline.ts).
     `tsc` không thấy được: cả hai cách viết đều là SQL hợp lệ về kiểu TypeScript.
   */
-  return sql`extract(epoch from (now() - coalesce(n.occurred_at, n.created_at))) / 3600 > (case ${cases} else null end)::numeric`;
+  // Hạn đếm từ lúc ERP GIAO VIỆC (`created_at`) — cùng mốc với hàng đợi (lib/queries/action-queue.ts).
+  // Đếm từ mốc nghiệp vụ thì việc vừa sinh ra đã trễ (luật chờ 24 giờ mới mở việc, hạn 12 giờ).
+  return sql`extract(epoch from (now() - n.created_at)) / 3600 > (case ${cases} else null end)::numeric`;
 }
 
 /** Cột đếm cho từng mốc tuổi: `giờ >= mốc trước` và `< mốc này`. */

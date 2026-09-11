@@ -120,7 +120,6 @@ async function getDashboardDataUncached(period: Period) {
     codRows,
     expenseRows,
     adsRows,
-    shippingRows,
     failedDeliveryRows,
     stockRisk,
     staleRows,
@@ -175,10 +174,6 @@ async function getDashboardDataUncached(period: Period) {
       .select({ amount: sum(schema.adSpends.spend) })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), period.from ? gte(schema.adSpends.spendDate, period.from) : undefined, period.to ? lte(schema.adSpends.spendDate, period.to) : undefined)),
-    db
-      .select({ fee: sum(schema.orders.partnerFee), returnFee: sum(schema.orders.returnFee) })
-      .from(schema.orders)
-      .where(and(inPeriod(schema.orders.insertedAt, period.from, period.to), ne(schema.orders.stage, "CANCELLED"), ne(schema.orders.stage, "DELETED"))),
     db.select({ count: count() }).from(schema.shipments).where(inArray(schema.shipments.stage, ["DELIVERY_FAILED", "RETURNING"])),
     // THIẾU HÀNG TÍNH THEO RỦI RO, KHÔNG THEO NGƯỠNG CỨNG — cùng bộ máy days-of-cover với trang
     // Kế hoạch SX và cảnh báo vận hành, nên ba nơi không thể ra ba con số khác nhau (F5).
@@ -229,7 +224,6 @@ async function getDashboardDataUncached(period: Period) {
   const cod = Object.fromEntries(codRows.map((r) => [r.status, { count: Number(r.count), amount: Number(r.amount ?? 0) }]));
   const expense = expenseRows;
   const [ads] = adsRows;
-  const [shippingFees] = shippingRows;
   const [failedDelivery] = failedDeliveryRows;
   const [stale] = staleRows;
   const [newOrders] = newOrderRows;
@@ -239,8 +233,19 @@ async function getDashboardDataUncached(period: Period) {
   const realized = codCash.codPaid.amount;
   const expenses = Number(expense?.amount ?? 0);
   const adSpend = Number(ads?.amount ?? 0);
-  const shipping = Number(shippingFees?.fee ?? 0);
-  const returnFee = Number(shippingFees?.returnFee ?? 0);
+  /*
+    MỘT CÔNG THỨC LỢI NHUẬN ƯỚC TÍNH — CỦA SỰ THẬT TÀI CHÍNH.
+
+    Trước đây thẻ này tự cộng cước theo `orders.partner_fee` của MỌI đơn không huỷ trong kỳ (kể cả
+    đơn mới, đang giao, chưa rõ) và phí hoàn của mọi đơn không huỷ, rồi trỏ sang tab Sự thật tài
+    chính — nơi cước chỉ tính cho đơn đã giao + đơn hoàn và phí hoàn chỉ cho đơn hoàn. Cùng nhãn,
+    cùng kỳ, hai con số. Nay cước và phí hoàn lấy đúng từ bậc thang của Sự thật tài chính; doanh thu
+    và giá vốn vẫn là của `orderKpis` (cùng population, cùng bộ lọc — đã khoá bằng
+    tests/metrics-contract.test.ts) và bằng đúng hai dòng đầu của bậc thang.
+  */
+  const line = (key: string) => Math.abs(financial.waterfall.find((l) => l.key === key)?.amount ?? 0);
+  const shipping = line("shipping_out");
+  const returnFee = line("shipping_return");
   // Giá vốn LẤY TỪ CHÍNH `orderKpis` — cùng population, cùng bộ lọc với doanh thu giao thành công.
   // Trước đây đây là một truy vấn riêng THIẾU bộ lọc đơn đã xác nhận, nên lợi nhuận ước tính lấy
   // doanh thu của một tập đơn và giá vốn của một tập đơn khác (F4).

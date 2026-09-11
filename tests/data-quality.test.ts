@@ -63,6 +63,12 @@ export async function testDataQuality(db: Db) {
   await mk(db, "dq-907", "DELIVERED", { stage: "DELIVERED", codAmount: 100001, codCollected: 100001, codStatus: "COLLECTED", shippingFee: 17000, vtpOrderNumber: "DQ907" });
   assert.equal((await outcomes(db, "dq-907")).verified, "DELIVERED", "thu 100.001đ vượt ngưỡng → giao thành công");
 
+  // `cod_status = COLLECTED` được đặt từ CHIỀU LOGISTICS (trạng thái "đã giao"), không phải từ chứng
+  // từ tiền. Đặc tả §8: `cod_status` đơn thuần KHÔNG phải verified money ⇒ chưa có số thực thu thì
+  // là CHƯA XÁC MINH, không được lấy COD khai báo làm "tiền có chứng từ".
+  await mk(db, "dq-910", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, codCollected: 0, codStatus: "COLLECTED", shippingFee: 17000, vtpOrderNumber: "DQ910" });
+  assert.equal((await outcomes(db, "dq-910")).verified, "UNVERIFIED", "trạng thái COLLECTED mà không có số thực thu → chưa xác minh, không phải giao thành công đã chứng minh");
+
   // Huỷ / đang giao / đã hoàn.
   await mk(db, "dq-908", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, vtpOrderNumber: "DQ908" });
   assert.equal((await outcomes(db, "dq-908")).verified, "IN_TRANSIT");

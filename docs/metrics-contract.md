@@ -125,8 +125,17 @@ liệu (`missing-cogs`) — **không** im lặng coi lợi nhuận là đúng.
 deliveredRevenue − deliveredCogs − cước ĐVVC − phí hoàn − chi quảng cáo − chi phí vận hành
 ```
 
-Là **ước tính**: cước và chi phí lấy theo kỳ, không phân bổ theo từng đơn. Con số quyết toán nằm ở
+Là **ước tính**: chi phí lấy theo kỳ, không phân bổ theo từng đơn. Con số quyết toán nằm ở
 Báo cáo lợi nhuận (`profit-nominal.ts` danh nghĩa, `profit-cash.ts` tiền thật).
+
+**Cước ĐVVC và phí hoàn lấy từ bậc thang của Sự thật tài chính** (`financial-truth.ts`): cước chỉ
+của đơn đã giao thành công và đơn hoàn (`coalesce(shipping_fee vận đơn, partner_fee đơn)`), phí hoàn
+chỉ của đơn hoàn. Trước 11/09/2026 thẻ Tổng quan tự cộng `orders.partner_fee` của MỌI đơn không huỷ
+trong kỳ (kể cả đơn mới, đang giao) nên cùng nhãn "Lợi nhuận ước tính" ở Tổng quan và ở tab Sự thật
+tài chính là hai con số. Nay là một.
+
+**Population của Báo cáo lợi nhuận (`/reports`)** cũng là đơn đã xác nhận (`CONFIRMED_ORDER`) —
+trước đây gom cả `NEW`/`WAITING`, nên "N đơn" của cùng kỳ ở `/reports` và Tổng quan khác nhau.
 
 ---
 

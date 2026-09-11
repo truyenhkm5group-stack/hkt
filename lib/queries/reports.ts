@@ -3,7 +3,8 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
+import { COD_COLLECTABLE, ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
+import { populationFilter } from "@/lib/queries/metrics";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
@@ -64,7 +65,9 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
-    .where(between(basisDate(basis), from, to))
+    // CÙNG POPULATION VỚI TỔNG QUAN: đơn đã xác nhận. Trước đây báo cáo này gom cả đơn NEW/WAITING
+    // nên "N đơn" của cùng một kỳ ở hai trang là hai con số (docs/metrics-contract.md).
+    .where(and(populationFilter("confirmed"), between(basisDate(basis), from, to)))
     .offset(OUTCOME_FENCE)
     .as("order_facts");
 }
@@ -305,10 +308,12 @@ async function getProfitReportUncached(period: Period, basis: ReportBasis) {
       .select({ amount: sum(schema.shipments.codCollected), count: count() })
       .from(schema.shipments)
       .where(and(eq(schema.shipments.codStatus, "PAID_TO_BANK"), between(schema.shipments.codPaidToBankAt, period.from, period.to))),
+    // CÙNG ĐỊNH NGHĨA với Đối soát COD và Tổng quan: vận đơn đã hoàn / đang hoàn / huỷ thì khoản COD
+    // khai báo không bao giờ về nữa, dù trạng thái COD chưa được cập nhật (COD_COLLECTABLE).
     db
       .select({ amount: sum(schema.shipments.codAmount), count: count() })
       .from(schema.shipments)
-      .where(inArray(schema.shipments.codStatus, ["COLLECTED", "RECONCILED"])),
+      .where(and(inArray(schema.shipments.codStatus, ["COLLECTED", "RECONCILED"]), COD_COLLECTABLE)),
     // Bảng kê tiền COD Viettel Post (đợt nhận tiền) trong kỳ — nguồn "tiền đã về" kể cả khi chưa gắn từng vận đơn
     db
       .select({ count: count(), gross: sql<number>`coalesce(sum(coalesce(nullif(${schema.codBatches.codGross}, 0), ${schema.codBatches.totalAmount})), 0)`, fee: sql<number>`coalesce(sum(${schema.codBatches.feeTotal}), 0)`, net: sql<number>`coalesce(sum(${schema.codBatches.totalAmount}), 0)` })

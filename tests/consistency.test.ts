@@ -146,13 +146,14 @@ export async function testConsistency(db: Db) {
   const [{ n: badWaiting }] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.shipments)
-    .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} in ('RETURNED','CANCELLED')`);
+    .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} in ('RETURNING','RETURNED','CANCELLED')`);
   if (Number(badWaiting) > 0) {
     const [{ amount }] = await db
       .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
       .from(schema.shipments)
-      .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} not in ('RETURNED','CANCELLED')`);
-    assert.equal(cash.pending.codCollectedWaiting, Number(amount), "COD chờ về không được tính vận đơn đã hoàn/huỷ");
+      // Đang hoàn về cũng là tiền không bao giờ về — cùng định nghĩa với COD_COLLECTABLE.
+      .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} not in ('RETURNING','RETURNED','CANCELLED')`);
+    assert.equal(cash.pending.codCollectedWaiting, Number(amount), "COD chờ về không được tính vận đơn đang hoàn/đã hoàn/huỷ");
   }
 
   // ───────── 6. Tồn kho: hàng hoàn chưa về kho không được nằm trong tồn ─────────

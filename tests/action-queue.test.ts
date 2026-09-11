@@ -105,6 +105,20 @@ export async function testActionQueue(db: Db) {
     assert.equal(sum, c.score, `${c.id}: tổng các phần điểm phải đúng bằng điểm hiển thị`);
     if (c.sla) assert.equal(c.sla.breached, c.sla.hoursRemaining < 0, `${c.id}: cờ trễ hạn phải khớp số giờ còn lại`);
   }
+  // ───────── HẠN XỬ LÝ ĐẾM TỪ LÚC ERP GIAO VIỆC, KHÔNG TỪ MỐC NGHIỆP VỤ ─────────
+  //
+  // Production 10/09/2026: 237/237 "đơn mới chưa xử lý" trễ hạn ngay lúc sinh ra — luật chờ 24 giờ
+  // mới mở việc, nhưng hạn 12 giờ đếm từ lúc LÊN ĐƠN. Cờ trễ hạn vì thế không phân biệt được gì.
+  const [vuaGiao] = await db
+    .insert(schema.notifications)
+    .values({ kind: "ORDER_PENDING", severity: "warning", title: "Đơn nằm 10 ngày, việc vừa được giao", body: "kiểm hạn xử lý", href: "/orders/sla-1", entityType: "ORDER", entityId: "sla-anchor-1", dedupeKey: "sla-anchor-1", occurredAt: new Date(Date.now() - 10 * 86_400_000) })
+    .returning({ id: schema.notifications.id });
+  const viecVuaGiao = (await getActionQueue({ limit: 500, filter: { type: "NEW_ORDER_UNPROCESSED" } })).cases.find((c) => c.id === vuaGiao.id);
+  assert.ok(viecVuaGiao, "việc vừa giao phải có trong hàng đợi");
+  assert.ok(viecVuaGiao.ageHours >= 239, "tuổi việc vẫn đo từ mốc nghiệp vụ (đơn nằm 10 ngày)");
+  assert.ok(viecVuaGiao.sla && !viecVuaGiao.sla.breached, "việc VỪA được giao không thể đã trễ hạn — hạn đếm từ lúc giao việc, không từ lúc lên đơn");
+  await db.delete(schema.notifications).where(eq(schema.notifications.id, vuaGiao.id));
+
   // Xếp giảm dần theo điểm — người mở trang làm từ trên xuống là đúng thứ tự.
   for (let n = 1; n < queue.cases.length; n += 1) {
     assert.ok(queue.cases[n - 1].score >= queue.cases[n].score, "hàng đợi phải xếp theo mức ưu tiên giảm dần");

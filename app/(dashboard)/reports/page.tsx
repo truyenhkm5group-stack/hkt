@@ -35,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatNumber, formatVND, pct } from "@/lib/format";
+import { successRate } from "@/lib/queries/metrics";
 import {
   getProfitReport,
   parseBasis,
@@ -187,7 +188,7 @@ export default async function ReportsPage({
       <PageHeader
         eyebrow="Tài chính"
         title="Báo cáo lợi nhuận"
-        description={`${period.label} · ${REPORT_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(current.orders)} đơn · ${formatNumber(current.successOrders)} giao thành công (${pct(current.successOrders, current.orders).toFixed(1)}%)`}
+        description={`${period.label} · ${REPORT_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(current.orders)} đơn · ${formatNumber(current.successOrders)} giao thành công${(() => { const r = successRate(current.successOrders, current.returned); return r === null ? "" : ` (GTC ${r.toFixed(1)}% trên đơn đã kết thúc)`; })()}`}
         actions={
           <Button asChild variant="outline" size="sm">
             <a href={`/api/export/report?${exportQuery}`}>

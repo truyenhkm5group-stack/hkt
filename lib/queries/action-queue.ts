@@ -341,7 +341,18 @@ export async function getActionQueue(
       ignoredReason: r.ignoredReason ?? "",
       scoreParts,
       scoreExplanation: scoreExplanation(scoreParts),
-      sla: slaFor(type, detectedAt, new Date(now)),
+      /*
+        HẠN XỬ LÝ TÍNH TỪ LÚC ERP GIAO VIỆC (`created_at`), KHÔNG TỪ MỐC NGHIỆP VỤ (`occurred_at`).
+
+        Đo trên production 10/09/2026: 237/237 "đơn mới chưa xử lý" và 203/203 "đã chốt chưa gửi"
+        đều TRỄ HẠN — vì luật chỉ mở việc khi đơn đã quá 24 giờ (`pendingHours`) nhưng hạn 12 giờ lại
+        đếm từ lúc LÊN ĐƠN. Việc vừa sinh ra đã trễ, nên cờ trễ hạn không còn phân biệt được gì và
+        con số "trễ hạn" trên trang chủ / Điều hành là vô nghĩa.
+
+        Tuổi việc (`ageHours`) vẫn đo từ mốc nghiệp vụ — đó là câu "đơn này đã nằm bao lâu". Hạn xử
+        lý là câu khác: "từ lúc được giao, người ta có bao lâu". Không thể trễ một việc chưa được giao.
+      */
+      sla: slaFor(type, r.createdAt, new Date(now)),
     };
   });
 

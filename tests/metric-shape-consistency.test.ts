@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { IS_RETURNED, metricScope } from "@/lib/queries/metrics";
+import { CONFIRMED_ORDER, IS_RETURNED, metricScope } from "@/lib/queries/metrics";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
@@ -103,7 +103,9 @@ export async function testMetricShapeConsistency(db: Db) {
       cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id));
+    .leftJoin(s, eq(s.orderId, o.id))
+    // Báo cáo lợi nhuận đếm trên CÙNG population với Tổng quan: đơn đã xác nhận (docs/metrics-contract.md).
+    .where(CONFIRMED_ORDER);
 
   clearMemo();
   const report = await getProfitReport(ALL, "created");

@@ -5,6 +5,7 @@ import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_ORDER, type IssueEntity, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 
 /**
  * ───────────── TRUNG TÂM ĐIỀU KHIỂN CHẤT LƯỢNG DỮ LIỆU ─────────────
@@ -264,12 +265,15 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         from webhook_events w
         where w.status = 'FAILED' or (w.status = 'IGNORED' and w.error ilike '%không tìm thấy%')`;
     case "COD_OVERDUE_UNPAID":
-      return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
-          'thu hộ ' || coalesce(s.cod_amount, 0)::text || 'đ · giao ' || to_char(coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
-          coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) as at, s.id as entity_id
-        from shipments s
-        where s.stage = 'DELIVERED' and coalesce(s.cod_amount, 0) > 0 and coalesce(s.cod_collected, 0) = 0
-          and coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) < now() - (${overdueDays} * interval '1 day')`;
+      // Đi qua SHIPMENT_DELIVERED (ORDER_OUTCOME), không qua stage thô: vận đơn 501 nhưng có chiều
+      // hoàn / sửa doanh thu sau giao là ĐƠN HOÀN — không có tiền để đòi (nợ ảo). Biểu thức chuẩn
+      // gọi bảng bằng đúng tên nên câu này KHÔNG đặt bí danh cho shipments/orders.
+      return sql`select coalesce(shipments.vtp_order_number, shipments.tracking_code, shipments.id) as code,
+          'thu hộ ' || coalesce(shipments.cod_amount, 0)::text || 'đ · giao ' || to_char(coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
+          coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) as at, shipments.id as entity_id
+        from shipments left join orders on orders.id = shipments.order_id
+        where ${SHIPMENT_DELIVERED} and coalesce(shipments.cod_amount, 0) > 0 and coalesce(shipments.cod_collected, 0) = 0
+          and coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) < now() - (${overdueDays} * interval '1 day')`;
     case "MISSING_PRODUCT_MAPPING":
       return sql`select coalesce(nullif(i.sku, ''), i.product_name, i.id) as code,
           'đơn ' || coalesce(nullif(o.custom_id, ''), o.id) || ' · ' || coalesce(nullif(i.product_name, ''), '(không tên)') as evidence,

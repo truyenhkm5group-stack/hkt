@@ -283,6 +283,20 @@ export async function testBusinessInvariants(db: Db) {
     assert.equal(mapped.shipment.isFinal, false, `13. không có chứng từ ĐVVC thì vận đơn chưa kết thúc`);
   }
 
+  // Pancake chuyển tiếp "đã giao" KÈM `partner.cod` (COD ĐĂNG KÝ với ĐVVC — đặc tả §8: không phải
+  // verified money). Trước đây số này bị ghi vào `cod_collected` và `Math.max` ở lần đồng bộ sau đè
+  // lên số thực thu 30.000đ của bảng kê: đơn hoàn tự lật thành giao thành công.
+  const relayed = mapOrder({
+    id: `inv-map-relay-${++seq}`,
+    status: 3,
+    cod: 474_000,
+    money_to_collect: 474_000,
+    inserted_at: "2026-09-01T00:00:00",
+    partner: { partner_name: "Viettel Post", order_number_vtp: nextCode(), extend_code: null, partner_status: "delivered", cod: 474_000, updated_at: "2026-09-03T10:00:00" },
+  });
+  assert.ok(relayed?.shipment, "13. đơn có partner_status phải sinh vận đơn");
+  assert.equal(relayed.shipment.codCollected, 0, "13. partner.cod là COD ĐĂNG KÝ, không phải tiền đã thu — Pancake không bao giờ là nguồn tiền thực thu");
+
   // ══ 14. THANG THẨM QUYỀN CHỈ CÓ MỘT BẢN ══
   assert.deepEqual(
     [...LOGISTICS_DECIDING_SOURCES].sort(),

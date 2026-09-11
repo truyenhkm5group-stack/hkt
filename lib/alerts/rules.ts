@@ -4,7 +4,7 @@
  * gửi Telegram cho thông báo mới và phát sự kiện realtime để chuông trên giao diện cập nhật.
  */
 import { and, asc, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
-import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { PRIMARY_ATTEMPT, SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
@@ -698,11 +698,19 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   activeKinds.push("COD_OVERDUE");
   try {
     const db = await getDb();
+    /*
+      KHÔNG DÙNG `stage = 'DELIVERED'` THÔ. Vận đơn mang mã 501 nhưng có vận đơn chiều hoàn, hay bị
+      sửa doanh thu sau giao, hay thực thu < 50K là ĐƠN HOÀN theo ORDER_OUTCOME — tiền của nó không
+      về và cũng không có gì để đòi. Đọc stage thô dựng thành việc "đòi Viettel Post X đồng" trong khi
+      trang Đối soát COD xếp cùng vận đơn đó vào "giao nhưng hoàn": nợ ảo (đo ~10 triệu trước khi
+      trang Đối soát sửa). Đi qua SHIPMENT_DELIVERED — cùng một công thức với mọi báo cáo.
+    */
     const overdue = await db
       .select({ id: schema.shipments.id, code: schema.shipments.vtpOrderNumber, amount: schema.shipments.codAmount, at: schema.shipments.deliveredAt })
       .from(schema.shipments)
+      .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
       .where(
-        sql`${schema.shipments.stage} = 'DELIVERED' and coalesce(${schema.shipments.codAmount}, 0) > 0
+        sql`${SHIPMENT_DELIVERED} and coalesce(${schema.shipments.codAmount}, 0) > 0
           and coalesce(${schema.shipments.codCollected}, 0) = 0
           and coalesce(${schema.shipments.deliveredAt}, ${schema.shipments.vtpStatusDate}, ${schema.shipments.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')`,
       )

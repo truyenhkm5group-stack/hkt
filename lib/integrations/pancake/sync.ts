@@ -368,7 +368,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     partnerStatus: s.partnerStatus,
     stage,
     codAmount: s.codAmount,
-    codCollected: Math.max(existing?.codCollected ?? 0, s.codCollected),
+    // Tiền thực thu CHỈ đến từ bảng kê ĐVVC; Pancake không được nâng lẫn hạ con số này.
+    codCollected: existing?.codCollected ?? 0,
     codStatus,
     codReconciledAt: s.codReconciledAt ?? existing?.codReconciledAt ?? null,
     shippingFee: s.shippingFee || existing?.shippingFee || 0,

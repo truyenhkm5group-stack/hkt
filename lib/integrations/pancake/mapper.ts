@@ -360,7 +360,6 @@ function mapShipment(order: Record<string, unknown>, stage: OrderStage, statusAt
   }
 
   const codAmount = Math.max(0, int(order.money_to_collect, order.cod));
-  const reconciledCod = Math.max(0, int(partner.cod));
   const paidAt = pancakeDate(partner.paid_at);
   /** CHỈ trạng thái của ĐVVC mới được coi là đã giao. Trạng thái đơn / thanh toán thì không. */
   const deliveredLike = shipmentStage === "DELIVERED";
@@ -389,14 +388,19 @@ function mapShipment(order: Record<string, unknown>, stage: OrderStage, statusAt
     stage: shipmentStage,
     codAmount,
     /**
-     * TIỀN THỰC THU CHỈ ĐƯỢC LẤY TỪ SỐ ĐVVC BÁO (`partner.cod`), KHÔNG BAO GIỜ TỪ SỐ KHAI BÁO.
+     * PANCAKE KHÔNG BAO GIỜ LÀ NGUỒN TIỀN THỰC THU.
      *
-     * Nhánh cũ `reconciledCod || codAmount` biến số COD KHAI BÁO thành số ĐÃ THU chỉ vì trạng thái
-     * nói "đã giao". `cod_collected` là bằng chứng tiền — `ORDER_OUTCOME` dùng nó để kết luận giao
-     * thành công — nên bịa nó ra chính là rửa trạng thái đơn thành chứng từ tiền.
-     * Chưa có số của ĐVVC thì là CHƯA BIẾT, để 0 và chờ bảng kê.
+     * Bản trước lấy `partner.cod` làm số "đã thu" khi trạng thái nói đã giao. Nhưng `partner.cod` là
+     * COD ĐĂNG KÝ với ĐVVC — fixture thật (tests/fixtures-pancake-order.json) có `partner.cod` =
+     * `money_to_collect` = 3.905.000 — và đặc tả (docs/business-rules/ORDER_OUTCOME.md §8) liệt kê
+     * thẳng nó trong "KHÔNG phải verified money". Ghi nó vào `cod_collected` là rửa trạng thái đơn
+     * thành chứng từ tiền: bảng kê ghi thực thu 30.000đ, lần đồng bộ Pancake kế tiếp lấy max(30.000,
+     * 474.000) và đơn HOÀN tự lật thành GIAO THÀNH CÔNG, im lặng.
+     *
+     * Tiền thực thu chỉ có MỘT nguồn: dòng chứng từ bảng kê Viettel Post (statement-db.ts). Chưa có
+     * thì là CHƯA BIẾT — để 0 và chờ bảng kê.
      */
-    codCollected: codStatus === "COLLECTED" || codStatus === "RECONCILED" ? reconciledCod : 0,
+    codCollected: 0,
     codStatus,
     codReconciledAt: paidAt,
     shippingFee: Math.max(0, int(partner.total_fee, order.partner_fee)),

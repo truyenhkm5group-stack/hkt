@@ -373,11 +373,19 @@ export function outcomeColumn() {
  */
 
 /**
- * TIỀN COD ĐÃ THỰC THU. Ưu tiên số thực thu; nếu chưa có số nhưng Viettel Post đã xác nhận
- * trạng thái thu tiền thì lấy COD khai báo trên vận đơn. COD khai báo đơn thuần KHÔNG phải bằng chứng.
+ * TIỀN COD ĐÃ THỰC THU — chỉ có MỘT nguồn: số thực thu ghi từ chứng từ (`cod_collected`).
+ *
+ * Bản trước còn một nhánh dự phòng: chưa có số nhưng `cod_status` ∈ {COLLECTED, RECONCILED,
+ * PAID_TO_BANK} thì lấy COD KHAI BÁO. Mà `COLLECTED` được đặt từ CHIỀU LOGISTICS (trạng thái
+ * "đã giao" của Pancake / tệp danh sách VTP — lib/integrations/viettelpost/sync.ts, pancake/mapper.ts),
+ * nên nhánh đó là: giao → COLLECTED → "tiền có chứng từ = COD khai báo" → ORDER_OUTCOME_VERIFIED
+ * = DELIVERED. Đúng vòng suy luận mà đặc tả §1 cấm ("Payment không suy từ trạng thái giao") và §8
+ * liệt kê ("`cod_status` đơn thuần" không phải verified money). Hệ quả đo được: `provenCash` /
+ * `verifiedRevenue` trên trang Chất lượng dữ liệu phồng lên, số "chưa xác minh" hụt.
+ *
+ * Chưa có số thực thu thì là CHƯA XÁC MINH, không phải 0 và không phải COD khai báo.
  */
-export const CASH_COLLECTED = sql<number>`coalesce(nullif(${s.codCollected}, 0),
-  case when ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK') then nullif(${s.codAmount}, 0) end, 0)`;
+export const CASH_COLLECTED = sql<number>`coalesce(nullif(${s.codCollected}, 0), 0)`;
 
 /** Tổng tiền CÓ BẰNG CHỨNG của đơn: COD đã thu + tiền khách chuyển trước đã ghi nhận. */
 export const VERIFIED_CASH = sql<number>`(${CASH_COLLECTED} + ${PREPAID})`;
@@ -873,7 +881,7 @@ export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETU
  * dù trạng thái COD chưa được cập nhật. Trước đây chỉ trang Đối soát COD lọc điều kiện này còn
  * Báo cáo dòng tiền thì không, nên hai trang báo "COD đã thu chờ về" khác nhau.
  */
-export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNED', 'CANCELLED'))`;
+export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNING', 'RETURNED', 'CANCELLED'))`;
 
 export type ReturnRateBySource = {
   source: OrderSourceKey;
