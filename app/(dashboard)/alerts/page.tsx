@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AcknowledgeButton, AlertConfigForm, AssignSelect, IgnoreButton, MarkAllReadButton, ResolveButton, RunAlertsButton, StartButton, UnassignButton, UnignoreButton } from "@/app/(dashboard)/alerts/alerts-actions";
+import { AlertConfigForm, CaseActions, MarkAllReadButton, RunAlertsButton, StaffProvider } from "@/app/(dashboard)/alerts/alerts-actions";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { loadAlertConfig } from "@/lib/alerts/config";
@@ -146,6 +146,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             {queue.total ? "Không có việc nào khớp bộ lọc đang chọn." : "Không có việc nào đang mở."}
           </p>
         ) : (
+          <StaffProvider staff={staff}>
           <ul className="divide-y">
             {/*
               50 dòng, không phải 100. Mỗi dòng mang sáu nút thao tác (đều là component phía trình
@@ -191,23 +192,11 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                     ) : null}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1">
-                  {c.status === "IGNORED" ? (
-                    <UnignoreButton id={c.id} />
-                  ) : (
-                    <>
-                      <AssignSelect id={c.id} users={staff} current={c.owner?.id ?? null} />
-                      {c.status === "OPEN" ? <AcknowledgeButton id={c.id} /> : null}
-                      {c.status !== "IN_PROGRESS" ? <StartButton id={c.id} /> : null}
-                      {c.owner ? <UnassignButton id={c.id} /> : null}
-                      <IgnoreButton id={c.id} />
-                    </>
-                  )}
-                  <ResolveButton id={c.id} />
-                </div>
+                <CaseActions id={c.id} status={c.status} ownerId={c.owner?.id ?? null} />
               </li>
             ))}
           </ul>
+          </StaffProvider>
         )}
       </SectionCard>
 

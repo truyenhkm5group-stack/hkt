@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { createContext, useContext, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Play, RefreshCw, Save, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { acknowledgeCase, assignCase, ignoreCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram, startCase, unignoreCase } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
+import type { CaseStatus } from "@/lib/constants/action-queue";
 
 export function RunAlertsButton() {
   const [pending, startTransition] = useTransition();
@@ -408,6 +409,39 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         </Button>
         <span className="text-xs text-muted-foreground">Cảnh báo quét mỗi 10 phút và ngay sau webhook Pancake / Viettel Post; mỗi vấn đề chỉ báo một lần, tự đóng khi đơn đã được xử lý.</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * ───────────── MỘT THÀNH PHẦN CHO CẢ CỤM NÚT CỦA MỘT VIỆC ─────────────
+ *
+ * Đo trên production 11/09/2026: /alerts nặng 602kB cho 50 việc — mỗi dòng sáu thành phần phía
+ * trình duyệt, và ô "giao cho" mang nguyên danh sách nhân sự LẶP LẠI 50 lần trong gói dữ liệu.
+ * Nay danh sách nhân sự đi qua context (một lần cho cả trang), mỗi dòng chỉ còn một thành phần.
+ */
+const StaffContext = createContext<{ id: string; name: string }[]>([]);
+
+export function StaffProvider({ staff, children }: { staff: { id: string; name: string }[]; children: React.ReactNode }) {
+  return <StaffContext.Provider value={staff}>{children}</StaffContext.Provider>;
+}
+
+export function CaseActions({ id, status, ownerId }: { id: string; status: CaseStatus; ownerId: string | null }) {
+  const users = useContext(StaffContext);
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1">
+      {status === "IGNORED" ? (
+        <UnignoreButton id={id} />
+      ) : (
+        <>
+          <AssignSelect id={id} users={users} current={ownerId} />
+          {status === "OPEN" ? <AcknowledgeButton id={id} /> : null}
+          {status !== "IN_PROGRESS" ? <StartButton id={id} /> : null}
+          {ownerId ? <UnassignButton id={id} /> : null}
+          <IgnoreButton id={id} />
+        </>
+      )}
+      <ResolveButton id={id} />
     </div>
   );
 }
