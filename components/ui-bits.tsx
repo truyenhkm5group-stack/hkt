@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { cn } from "@/lib/utils";
 
@@ -21,14 +22,15 @@ export function DescriptionList({ items, className, columns = 2 }: { items: { la
  */
 export function SectionCard({ title, description, hint, actions, children, className, contentClassName, padded = true }: { title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
   return (
-    <section className={cn("overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xs", className)}>
+    <section className={cn("overflow-hidden rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
       {title ? (
-        <div className="flex items-start justify-between gap-3 border-b px-5 py-3.5">
-          <div>
-            <h2 className="flex items-center gap-1.5 text-sm font-bold">
+        <div className="flex items-start justify-between gap-3 border-b border-hairline px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-1.5 text-[13.5px] font-bold">
               {title}
               {hint ? <InfoHint>{hint}</InfoHint> : null}
             </h2>
+            {/* Một câu ngắn. Giải thích dài thuộc về `hint` (dấu ⓘ ở trên), không in ra màn hình. */}
             {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
@@ -39,11 +41,16 @@ export function SectionCard({ title, description, hint, actions, children, class
   );
 }
 
-export function EmptyState({ title, description, action, className }: { title: string; description?: React.ReactNode; action?: React.ReactNode; className?: string }) {
+export function EmptyState({ title, description, action, icon: Icon, className }: { title: string; description?: React.ReactNode; action?: React.ReactNode; icon?: LucideIcon; className?: string }) {
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-10 text-center", className)}>
+    <div className={cn("flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-surface-sunken/40 p-10 text-center", className)}>
+      {Icon ? (
+        <span className="mb-1 flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-5" />
+        </span>
+      ) : null}
       <p className="text-sm font-semibold">{title}</p>
-      {description ? <p className="max-w-md text-xs text-muted-foreground">{description}</p> : null}
+      {description ? <p className="max-w-md text-xs leading-5 text-muted-foreground">{description}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );

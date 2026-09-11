@@ -43,28 +43,41 @@
   --success: oklch(0.6 0.15 160);
   --warning: oklch(0.75 0.16 75);
   --info: oklch(0.6 0.14 250);
+  /* ─── Lớp bề mặt: nền trang < thẻ < thẻ nổi. Ba mức, không nhiều hơn. ───
+     Trước đây mọi khối đều là `bg-card` nên ngăn kéo, popover và thẻ nằm chồng nhau mà nhìn
+     phẳng như một. Ba mức này là toàn bộ chiều sâu của hệ thống. */
+  --surface-sunken: oklch(0.965 0.004 250);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(1 0 0);
+  /* Đường kẻ trong một khối (giữa các dòng) nhạt hơn viền bao quanh khối. */
+  --hairline: oklch(0.93 0.005 250);
+  --table-head: oklch(0.972 0.004 250);
+  --row-hover: oklch(0.965 0.006 250);
+  --shadow-card: 0 1px 2px -1px oklch(0.2 0.03 260 / 8%), 0 1px 3px oklch(0.2 0.03 260 / 5%);
+  --shadow-raised: 0 8px 24px -12px oklch(0.2 0.03 260 / 22%), 0 2px 6px -2px oklch(0.2 0.03 260 / 10%);
 }
 
 .dark {
   --brand: oklch(0.7 0.2 34);
   --brand-bright: oklch(0.75 0.18 34);
-  --background: oklch(0.15 0.015 260);
-  --foreground: oklch(0.95 0.01 260);
-  --card: oklch(0.2 0.02 260);
-  --card-foreground: oklch(0.95 0.01 260);
-  --popover: oklch(0.2 0.02 260);
-  --popover-foreground: oklch(0.95 0.01 260);
+  --background: oklch(0.145 0.014 265);
+  --foreground: oklch(0.96 0.008 260);
+  --card: oklch(0.192 0.016 265);
+  --card-foreground: oklch(0.96 0.008 260);
+  --popover: oklch(0.225 0.018 265);
+  --popover-foreground: oklch(0.96 0.008 260);
   --primary: oklch(0.7 0.19 34);
   --primary-foreground: oklch(0.16 0.03 34);
   --secondary: oklch(0.27 0.02 260);
   --secondary-foreground: oklch(0.95 0.01 260);
-  --muted: oklch(0.27 0.02 260);
-  --muted-foreground: oklch(0.7 0.02 260);
+  --muted: oklch(0.255 0.018 265);
+  /* 0.70 trên nền 0.145 cho ~6:1 — chữ phụ vẫn đọc được ở bảng dày chữ. */
+  --muted-foreground: oklch(0.715 0.018 262);
   --accent: oklch(0.3 0.045 34);
   --accent-foreground: oklch(0.95 0.02 40);
   --destructive: oklch(0.7 0.2 18);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(1 0 0 / 13%);
+  --input: oklch(1 0 0 / 17%);
   --ring: oklch(0.68 0.18 34);
   --chart-1: oklch(0.7 0.19 34);
   --chart-2: oklch(0.65 0.13 250);
@@ -82,6 +95,14 @@
   --success: oklch(0.7 0.15 160);
   --warning: oklch(0.8 0.16 75);
   --info: oklch(0.7 0.14 250);
+  --surface-sunken: oklch(0.125 0.012 265);
+  --surface: oklch(0.192 0.016 265);
+  --surface-raised: oklch(0.225 0.018 265);
+  --hairline: oklch(1 0 0 / 8%);
+  --table-head: oklch(0.215 0.017 265);
+  --row-hover: oklch(1 0 0 / 4%);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-raised: 0 12px 32px -12px oklch(0 0 0 / 60%), 0 2px 8px -2px oklch(0 0 0 / 40%);
 }
 
 @theme inline {
@@ -125,6 +146,12 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
+  --color-table-head: var(--table-head);
+  --color-row-hover: var(--row-hover);
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }

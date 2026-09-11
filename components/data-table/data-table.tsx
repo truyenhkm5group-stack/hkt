@@ -195,18 +195,27 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
           <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => { setAllOpen(false); setExpanded({}); }}>Thu gọn tất cả</button>
         </div>
       ) : null}
-      <div className={cn("overflow-hidden rounded-xl border bg-card transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
-        <div className="overflow-x-auto">
-          <Table className={cn(dense && "[&_td]:py-1.5")}>
-            <TableHeader className="bg-muted/50">
+      {/*
+        TIÊU ĐỀ CỘT DÍNH LẠI KHI CUỘN. Bảng ERP hay dài 50 dòng; cuộn tới dòng 30 mà mất hàng tiêu
+        đề thì phải cuộn ngược lên chỉ để biết cột đang đọc là cột gì. Trần chiều cao chỉ đặt khi
+        bảng THỰC SỰ dài (> 12 dòng) — bảng ngắn giữ nguyên dòng chảy của trang, không sinh thêm
+        một thanh cuộn lồng nhau không cần thiết. Vùng cuộn nằm TRONG thẻ nên thanh phân trang luôn
+        thấy được, không phải cuộn xuống đáy mới bấm sang trang sau.
+      */}
+      <div className={cn("overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
+          <Table
+            className={cn(dense && "[&_td]:py-1.5")}
+            containerClassName={cn(data.length > 12 && "max-h-[calc(100vh-15rem)] min-h-[20rem]")}
+          >
+            <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-table-head [&_th]:after:absolute [&_th]:after:inset-x-0 [&_th]:after:bottom-0 [&_th]:after:h-px [&_th]:after:bg-border">
               {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id} className="hover:bg-transparent">
+                <TableRow key={headerGroup.id} className="border-0 hover:bg-transparent">
                   {headerGroup.headers.map((header) => {
                     const canSort = header.column.id !== "__select" && (header.column.getCanSort() || sortableSet.has(header.column.id));
                     const sorted: false | "asc" | "desc" = params.sort === header.column.id ? (params.dir === "asc" ? "asc" : "desc") : false;
                     const align = (header.column.columnDef.meta as { align?: string } | undefined)?.align;
                     return (
-                      <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }} className={cn("h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground", align === "right" && "text-right")}>
+                      <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }} className={cn("text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground", align === "right" && "text-right")}>
                         {header.isPlaceholder ? null : canSort ? (
                           <button type="button" className={cn("inline-flex items-center gap-1 uppercase hover:text-foreground", align === "right" && "flex-row-reverse")} onClick={() => toggleSort(header.column.id)}>
                             {flexRender(header.column.columnDef.header, header.getContext())}
@@ -318,7 +327,6 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
               )}
             </TableBody>
           </Table>
-        </div>
         {footer}
         <DataTablePagination page={params.page} pageSize={params.pageSize} pageCount={pageCount} total={total} onPageChange={(page) => void setParams({ page })} onPageSizeChange={(pageSize) => void setParams({ pageSize, page: 1 })} />
       </div>

@@ -5,14 +5,19 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { ColumnVisibility } from "@/components/data-table/column-visibility"
 
-function Table({ className, columnToggle = true, ...props }: React.ComponentProps<"table"> & { /** Tắt nút ẩn/hiện cột cho bảng này */ columnToggle?: boolean }) {
+function Table({ className, columnToggle = true, containerClassName, ...props }: React.ComponentProps<"table"> & {
+  /** Tắt nút ẩn/hiện cột cho bảng này */
+  columnToggle?: boolean
+  /** Lớp cho khung cuộn bao quanh bảng — nơi đặt trần chiều cao để tiêu đề cột dính lại khi cuộn. */
+  containerClassName?: string
+}) {
   const ref = React.useRef<HTMLTableElement>(null)
   return (
     <div className="relative w-full">
       {columnToggle ? <ColumnVisibility tableRef={ref} /> : null}
       <div
         data-slot="table-container"
-        className="relative w-full overflow-x-auto"
+        className={cn("relative w-full overflow-x-auto", containerClassName)}
       >
         <table
           ref={ref}
@@ -63,7 +68,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        "border-b border-hairline transition-colors hover:bg-row-hover has-aria-expanded:bg-row-hover data-[state=selected]:bg-accent/40",
         className
       )}
       {...props}
@@ -76,7 +81,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "h-9 px-2.5 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}
@@ -89,7 +94,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "px-2.5 py-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}
