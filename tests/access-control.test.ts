@@ -36,6 +36,7 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   "app/api/webhooks/pancake/[secret]/[[...event]]/route.ts": "webhook Pancake, xác thực bằng bí mật trong đường dẫn",
   "app/api/webhooks/viettelpost/route.ts": "webhook Viettel Post, phải trả HTTP 200 trong 1 giây",
   "app/api/webhooks/vtp-statement/route.ts": "webhook bảng kê Viettel Post",
+  "app/api/webhooks/sepay/route.ts": "webhook SePay, xác thực bằng HMAC-SHA256 trên byte gốc + chống phát lại 5 phút — không có phiên đăng nhập",
   "app/api/sync/[job]/route.ts": "gọi bằng x-cron-secret (bộ lập lịch) hoặc phiên có quyền sync:run",
 };
 

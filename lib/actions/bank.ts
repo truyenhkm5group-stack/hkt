@@ -13,10 +13,10 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, type BankGroup, type BankLinkType } from "@/lib/constants/bank";
+import { BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, type BankLinkType } from "@/lib/constants/bank";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
-import { matchRule, RULE_CLASSIFIER, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
+import { applyBankRules as runBankRules } from "@/lib/integrations/bank/apply-rules";
 
 const MAX_TEXT = 5_000_000;
 /** base64 phình ~4/3 so với tệp gốc, nên 5MB tệp ≈ 6,7MB chuỗi. */
@@ -312,31 +312,7 @@ export async function applyBankRules(): Promise<{ ok: true; applied: number } | 
  * Chỉ đụng dòng có `classified_by` rỗng hoặc `'rule'` — người đã phân loại tay thì bất khả xâm phạm.
  */
 async function applyRulesInternal(): Promise<number> {
-  const db = await getDb();
-  const rules = (await db.select().from(schema.bankRules).where(eq(schema.bankRules.enabled, true))) as BankRuleLike[];
-  if (!rules.length) return 0;
-  const candidates = await db
-    .select({ id: b.id, amount: b.amount, counterparty: b.counterparty, description: b.description, note: b.note, group: b.accountingGroup, classifiedBy: b.classifiedBy })
-    .from(b)
-    // Chỉ dòng CHƯA ai sửa tay: rỗng = chưa phân loại, 'rule' = do quy tắc gán lần trước.
-    .where(inArray(b.classifiedBy, ["", RULE_CLASSIFIER]));
-  let applied = 0;
-  const updates: { id: string; group: BankGroup; categoryCode: string; ruleId: string }[] = [];
-  for (const row of candidates) {
-    if (!ruleMayOverwrite(row.classifiedBy)) continue;
-    const hit = matchRule(rules, row);
-    if (!hit) continue;
-    if (row.group === hit.group) continue;
-    updates.push({ id: row.id, group: hit.group, categoryCode: hit.categoryCode, ruleId: hit.rule.id });
-  }
-  for (const u of updates) {
-    await db
-      .update(b)
-      .set({ accountingGroup: u.group, categoryCode: u.categoryCode || undefined, classifiedBy: RULE_CLASSIFIER, classifiedAt: new Date(), ruleId: u.ruleId, updatedAt: new Date() })
-      .where(eq(b.id, u.id));
-    applied += 1;
-  }
-  return applied;
+  return runBankRules(await getDb());
 }
 
 // ───────────────────────── Đối chiếu: NỐI với chứng từ đã có ─────────────────────────
