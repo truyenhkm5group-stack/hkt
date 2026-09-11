@@ -43,3 +43,12 @@ export async function markCarrierManualDone(input: z.input<typeof svc.manualSche
   const a = await actor("shipments:manage");
   return a ? svc.markCarrierManualDone(a, input) : { error: "Không có quyền thao tác vận đơn" as const };
 }
+
+/**
+ * Mẫu note dùng chung cho cả shop. Ai ghi được note thì sửa được danh sách mẫu — chính đội trực
+ * care là người biết câu nào hay phải gõ lại. Mọi lần đổi đều vào nhật ký hệ thống.
+ */
+export async function saveCareNotePresets(input: z.input<typeof svc.notePresetsSchema>) {
+  const a = await actor("shipments:view");
+  return a ? svc.saveNotePresets(a, input) : DENIED;
+}

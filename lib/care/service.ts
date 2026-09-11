@@ -6,13 +6,18 @@ import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
 import { slaOf } from "@/lib/care/view";
 import {
+  CARE_NOTE_PRESETS_KEY,
+  CARE_NOTE_PRESET_MAX,
+  CARE_NOTE_PRESET_TEXT_MAX,
   CARE_STATUSES,
   CARE_TERMINAL_STATUSES,
   CARRIER_ACTION_KEYS,
+  DEFAULT_CARE_NOTE_PRESETS,
   CARRIER_ACTION_LABEL,
   canTransition,
   carrierActionAllowed,
   type CareEventAction,
+  type CareNotePreset,
   type CareEventSource,
   type CareStatus,
   type CarrierActionKey,
@@ -20,6 +25,7 @@ import {
 } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { IntegrationError } from "@/lib/integrations/http";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { getViettelPostClient, VTP_ORDER_ACTIONS } from "@/lib/integrations/viettelpost/client";
 import { syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import type { CareState, CarrierRequestView } from "@/lib/care/contracts";
@@ -437,4 +443,61 @@ export async function markCarrierManualDone(user: CareActor, input: z.input<type
   if (careRow) await recordCareEvent(user, careRow, { action: "CARRIER_MANUAL", note: parsed.data.note, payload: { requestId: row.id, actionKey: row.actionKey } });
   clearMemo();
   return { ok: true, data: toView(row) };
+}
+
+// ───────────────────────── MẪU NOTE SOẠN SẴN ─────────────────────────
+
+/**
+ * Danh sách mẫu note dùng chung cho cả shop, lưu trong bảng `settings`.
+ *
+ * Không có bảng riêng vì đây là CẤU HÌNH, không phải dữ liệu nghiệp vụ: không cần truy vấn theo
+ * mẫu, không cần lịch sử từng mẫu, và mất nó không làm sai một con số nào. Khoá tự nhiên
+ * `settings.key` đúng theo quy ước sẵn có của kho mã.
+ */
+export const notePresetsSchema = z.object({
+  presets: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(64),
+        text: z.string().trim().min(1, "Mẫu note không được để trống").max(CARE_NOTE_PRESET_TEXT_MAX),
+        kind: z.enum(CARE_ACTION_KINDS).default("OTHER"),
+      }),
+    )
+    .max(CARE_NOTE_PRESET_MAX, `Tối đa ${CARE_NOTE_PRESET_MAX} mẫu note`),
+});
+
+/** Chưa ai đụng tới thì trả về tám mẫu mặc định — đúng các chip đang có trên màn hình. */
+export async function listNotePresets(): Promise<CareNotePreset[]> {
+  const stored = await getSettingJson<{ presets: CareNotePreset[] | null }>(CARE_NOTE_PRESETS_KEY, { presets: null });
+  if (!stored.presets || !Array.isArray(stored.presets)) return DEFAULT_CARE_NOTE_PRESETS;
+  return stored.presets;
+}
+
+/**
+ * Ghi đè cả danh sách. Danh sách ngắn và người dùng sửa từng mẫu một trên giao diện, nên ghi cả
+ * mảng đơn giản hơn và không sinh trạng thái nửa vời; ai ghi gì vẫn nằm đủ trong nhật ký.
+ */
+export async function saveNotePresets(user: CareActor, input: z.input<typeof notePresetsSchema>): Promise<Result<CareNotePreset[]>> {
+  const parsed = notePresetsSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  // Trùng nội dung thì giữ mẫu đầu tiên: hai chip chữ y hệt nhau người dùng không phân biệt được.
+  const seen = new Set<string>();
+  const presets = parsed.data.presets.filter((p) => {
+    const key = p.text.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const before = await listNotePresets();
+  await setSettingJson(CARE_NOTE_PRESETS_KEY, { presets });
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "SETTINGS_UPDATE",
+    entity: "SETTINGS",
+    entityId: CARE_NOTE_PRESETS_KEY,
+    before: { count: before.length },
+    after: { count: presets.length, presets: presets.map((p) => p.text) },
+  });
+  return { ok: true, data: presets };
 }

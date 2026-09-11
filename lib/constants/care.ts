@@ -1,4 +1,4 @@
-import type { BucketKey } from "@/lib/constants/delivery-tower";
+import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type BucketKey, type CareActionKind } from "@/lib/constants/delivery-tower";
 
 /**
  * ═══════════ CARE VẬN ĐƠN: TRẠNG THÁI NỘI BỘ, KHÔNG PHẢI TRẠNG THÁI ĐVVC ═══════════
@@ -221,3 +221,29 @@ export function carrierActionAllowed(key: CarrierActionKey, stage: string): bool
       return !final;
   }
 }
+
+// ───────────────────────── MẪU NOTE SOẠN SẴN ─────────────────────────
+
+/**
+ * MẪU NOTE = MỘT CÂU CÓ SẴN + MỘT LOẠI HÀNH ĐỘNG.
+ *
+ * Người trực care gõ đi gõ lại vài câu giống hệt nhau cả ngày ("gọi lần 1 không bắt máy"…), nên
+ * mẫu soạn sẵn tiết kiệm thật. Mỗi mẫu mang theo `kind` để báo cáo hiệu quả care vẫn đếm được
+ * theo loại việc — chọn mẫu là vừa điền chữ vừa chọn loại, không phải hai thao tác rời.
+ *
+ * Danh sách lưu ở bảng `settings` (khoá tự nhiên bên dưới) và DÙNG CHUNG cho cả shop: một người
+ * thêm mẫu thì cả đội dùng được. Lần đầu chưa có gì thì lấy tám mẫu mặc định dựng từ chính nhãn
+ * của các loại hành động — tức là giữ nguyên đúng những chip đang có trên màn hình hôm nay.
+ */
+export const CARE_NOTE_PRESETS_KEY = "care.notePresets";
+
+export type CareNotePreset = { id: string; text: string; kind: CareActionKind };
+
+export const DEFAULT_CARE_NOTE_PRESETS: CareNotePreset[] = CARE_ACTION_KINDS.map((kind) => ({
+  id: `mac-dinh-${kind.toLowerCase()}`,
+  text: CARE_ACTION_LABEL[kind],
+  kind,
+}));
+
+export const CARE_NOTE_PRESET_MAX = 30;
+export const CARE_NOTE_PRESET_TEXT_MAX = 120;

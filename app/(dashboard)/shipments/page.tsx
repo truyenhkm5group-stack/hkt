@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignableUsers } from "@/lib/actions/alerts";
+import { listNotePresets } from "@/lib/care/service";
 import { can, requirePermission } from "@/lib/auth/session";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -32,7 +33,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const viewRaw = typeof raw.view === "string" ? raw.view : "care";
   const view: CareView | "report" = viewRaw === "report" ? "report" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";
 
-  const [wb, staff] = view === "all" || view === "report" ? [null, []] : await Promise.all([getCareWorkbench(), assignableUsers()]);
+  const [wb, staff, notePresets] = view === "all" || view === "report" ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), listNotePresets()]);
   const counts = wb?.counts ?? (view === "all" || view === "report" ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
 
   const tab = (key: CareView | "report", label: string, count?: number) => (
@@ -88,7 +89,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       ) : view === "all" ? (
         <AllShipments raw={raw} />
       ) : (
-        <CareWorkbenchView initial={wb!} view={view} staff={staff} canManage={can(user, "shipments:manage")} />
+        <CareWorkbenchView initial={wb!} view={view} staff={staff} canManage={can(user, "shipments:manage")} notePresets={notePresets} />
       )}
     </div>
   );

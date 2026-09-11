@@ -2,14 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Phone, Truck } from "lucide-react";
+import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Phone, Plus, Truck, X } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -23,6 +23,7 @@ import {
   CARRIER_REQUEST_TONE,
   FOLLOW_UP_PRESETS,
   carrierActionAllowed,
+  type CareNotePreset,
   type CareStatus,
   type CareView,
   type CarrierActionKey,
@@ -48,6 +49,8 @@ type Props = {
   view: Exclude<CareView, "all">;
   staff: { id: string; name: string }[];
   canManage: boolean;
+  /** Mẫu note dùng chung cả shop, đọc từ bảng settings ở phía máy chủ. */
+  notePresets: CareNotePreset[];
 };
 
 const CARRIER_MENU: CarrierActionKey[] = ["redeliver", "approve-return", "resend", "cancel"];
@@ -73,13 +76,32 @@ function reviveState(s: CareState): CareState {
   return { ...s, followUpAt: d(s.followUpAt), lastNoteAt: d(s.lastNoteAt), firstResponseAt: d(s.firstResponseAt), doneAt: d(s.doneAt), updatedAt: d(s.updatedAt) };
 }
 
-export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
+export function CareWorkbenchView({ initial, view, staff, canManage, notePresets }: Props) {
   const [cases, setCases] = useState<CareCase[]>(() => initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [owner, setOwner] = useState("");
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
+  /*
+    Mẫu note giữ ở CẤP BẢNG, không ở từng dòng: thêm một mẫu khi đang ghi cho kiện này thì mở
+    kiện khác phải thấy ngay, không phải tải lại trang. Ghi lạc quan rồi hoàn lại nếu máy chủ từ
+    chối — danh sách mẫu là cấu hình tiện tay, không đáng bắt người dùng đứng chờ.
+  */
+  const [presets, setPresets] = useState<CareNotePreset[]>(notePresets);
+  const [savingPresets, startPresets] = useTransition();
+  const persistPresets = (next: CareNotePreset[]) =>
+    startPresets(async () => {
+      const truoc = presets;
+      setPresets(next);
+      const r = await saveCareNotePresets({ presets: next });
+      if ("error" in r) {
+        setPresets(truoc);
+        toast.error(r.error);
+        return;
+      }
+      setPresets(r.data);
+    });
 
   const patch = (shipmentId: string, care: CareState, extra: Partial<CareCase> = {}) =>
     setCases((prev) =>
@@ -241,6 +263,9 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
                   c={c}
                   staff={staff}
                   canManage={canManage}
+                  presets={presets}
+                  savingPresets={savingPresets}
+                  onPresets={persistPresets}
                   checked={selected.has(c.shipmentId)}
                   onCheck={(v) =>
                     setSelected((s) => {
@@ -264,11 +289,12 @@ export function CareWorkbenchView({ initial, view, staff, canManage }: Props) {
   );
 }
 
-function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, staff, canManage, presets, savingPresets, onPresets, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; canManage: boolean; presets: CareNotePreset[]; savingPresets: boolean; onPresets: (next: CareNotePreset[]) => void; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
+  const [managing, setManaging] = useState(false);
   const [vtpOpen, setVtpOpen] = useState(false);
   const [vtpNote, setVtpNote] = useState("");
   const terminal = c.care.status === "RESOLVED" || c.care.status === "CANCELLED";
@@ -318,6 +344,26 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
       onPatch(r.data);
       if (at) toast.success(`${c.tracking}: hẹn theo dõi ${formatDateTime(at)}`);
     });
+  /*
+    ĐIỀN MẪU KHÔNG ĐƯỢC XOÁ CHỮ NGƯỜI DÙNG ĐANG GÕ.
+    Ô trống, hoặc đang chứa đúng chữ của một mẫu khác (tức người dùng vừa bấm nhầm mẫu) → thay
+    thẳng. Còn nếu trong ô là chữ tự gõ thì nối xuống dòng mới, không đè lên công của họ.
+  */
+  const applyPreset = (p: CareNotePreset) => {
+    setKind(p.kind);
+    setNote((truoc) => {
+      const cu = truoc.trim();
+      if (!cu || presets.some((x) => x.text === cu)) return p.text;
+      return `${cu}\n${p.text}`;
+    });
+  };
+  const addPreset = () => {
+    const text = note.trim();
+    if (!text || presets.some((p) => p.text === text)) return;
+    onPresets([...presets, { id: `m${Date.now().toString(36)}`, text, kind }]);
+  };
+  const removePreset = (p: CareNotePreset) => onPresets(presets.filter((x) => x.id !== p.id));
+
   const saveNote = () =>
     start(async () => {
       const r = await addCareNote({ shipmentId: c.shipmentId, note, kind });
@@ -474,13 +520,28 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
               <MessageSquarePlus className="size-3" /> Ghi note
             </button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-80 space-y-2 p-3">
+          <PopoverContent align="start" className="w-[22rem] space-y-2 p-3">
+            {/*
+              BẤM MẪU LÀ CHỮ NHẢY VÀO Ô NGAY.
+              Trước đây dãy chip này chỉ đặt `kind` (loại việc, dùng cho báo cáo) mà KHÔNG điền gì
+              vào ô chữ, trong khi nút Lưu lại khoá khi ô chữ còn trống — nên người trực bấm mẫu
+              xong thấy "không có gì xảy ra và không lưu được". Nay một cú bấm làm cả hai việc:
+              chọn loại việc VÀ điền sẵn câu chữ để sửa tiếp.
+            */}
             <div className="flex flex-wrap gap-1">
-              {CARE_ACTION_KINDS.map((k) => (
-                <button key={k} type="button" onClick={() => setKind(k)} className={cn("rounded border px-1.5 py-px text-[10.5px]", kind === k ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}>
-                  {CARE_ACTION_LABEL[k]}
-                </button>
+              {presets.map((p) => (
+                <span key={p.id} className={cn("inline-flex items-center rounded border text-[10.5px]", note.trim() === p.text && kind === p.kind ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}>
+                  <button type="button" onClick={() => applyPreset(p)} className="px-1.5 py-px" title={`Điền: ${p.text}`}>
+                    {p.text}
+                  </button>
+                  {managing ? (
+                    <button type="button" onClick={() => removePreset(p)} disabled={savingPresets} className="border-l px-1 py-px text-muted-foreground hover:text-destructive" title="Bỏ mẫu này">
+                      <X className="size-2.5" />
+                    </button>
+                  ) : null}
+                </span>
               ))}
+              {!presets.length ? <span className="text-[10.5px] text-muted-foreground">Chưa có mẫu nào — gõ một câu rồi bấm “Lưu mẫu”.</span> : null}
             </div>
             <Textarea
               autoFocus
@@ -492,13 +553,40 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
               placeholder="Khách nói gì? (Ctrl/⌘ + Enter để lưu)"
               className="min-h-[64px] text-[12px]"
             />
-            <div className="flex justify-end gap-1">
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setNoteOpen(false)}>
-                Huỷ
-              </Button>
-              <Button size="sm" className="h-7 px-2 text-xs" disabled={pending || !note.trim()} onClick={saveNote}>
-                {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />} Lưu
-              </Button>
+            {/*
+              Loại việc luôn hiện ra thành một ô chọn. Báo cáo hiệu quả care đếm theo nó, nên không
+              được để người dùng lưu mà không biết mình đang ghi vào loại nào — trước đây nó ẩn sau
+              dãy chip, chọn mẫu xong là loại việc âm thầm đổi theo.
+            */}
+            <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+              <span className="shrink-0">Loại việc</span>
+              <select value={kind} onChange={(e) => setKind(e.target.value as CareActionKind)} className="min-w-0 flex-1 rounded border bg-transparent px-1 py-px text-[10.5px]">
+                {CARE_ACTION_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {CARE_ACTION_LABEL[k]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-1 border-t pt-2">
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => setManaging((m) => !m)} className="rounded px-1 py-px text-[10.5px] text-muted-foreground hover:bg-accent hover:text-foreground" title="Hiện nút bỏ mẫu">
+                  {managing ? "Xong" : "Sửa mẫu"}
+                </button>
+                {note.trim() && !presets.some((p) => p.text === note.trim()) ? (
+                  <button type="button" onClick={addPreset} disabled={savingPresets} className="inline-flex items-center gap-0.5 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent" title="Lưu câu đang gõ thành mẫu để lần sau chọn cho nhanh">
+                    {savingPresets ? <Loader2 className="size-2.5 animate-spin" /> : <Plus className="size-2.5" />} Lưu mẫu
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setNoteOpen(false)}>
+                  Huỷ
+                </Button>
+                <Button size="sm" className="h-7 px-2 text-xs" disabled={pending || !note.trim()} onClick={saveNote}>
+                  {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />} Lưu
+                </Button>
+              </div>
             </div>
           </PopoverContent>
         </Popover>

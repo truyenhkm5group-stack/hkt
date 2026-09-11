@@ -4,9 +4,10 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import { settleCarrierRequests } from "@/lib/care/carrier-requests";
-import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus, type CareActor } from "@/lib/care/service";
+import { addCareNote, listNotePresets, markCarrierManualDone, reopenCase, requestCarrierAction, saveNotePresets, setCareFollowUp, setCareOwner, setCareStatus, type CareActor } from "@/lib/care/service";
 import { careViewOf, slaOf } from "@/lib/care/view";
-import { CARE_STATUSES, CARE_TRANSITIONS, canTransition } from "@/lib/constants/care";
+import { CARE_NOTE_PRESET_MAX, CARE_STATUSES, CARE_TRANSITIONS, DEFAULT_CARE_NOTE_PRESETS, canTransition } from "@/lib/constants/care";
+import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
 import { setViettelPostClientForTests } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { getCareReport } from "@/lib/queries/care-report";
@@ -196,9 +197,43 @@ export async function testCareWorkbench(db: Db) {
   const me = report.staff.find((s) => s.actor === "cs@test");
   assert.ok(me && me.recovered <= me.intervened, "cứu được không thể lớn hơn số kiện can thiệp");
 
+  // ───────── 7. Mẫu note soạn sẵn ─────────
+  // Lỗi thật 11/09: bấm chip mẫu chỉ đổi `kind`, không điền chữ vào ô, mà nút Lưu lại khoá khi ô
+  // trống ⇒ người trực bấm mẫu xong không lưu được gì. Phần điền chữ nằm ở giao diện; ở đây khoá
+  // phần dữ liệu: danh sách mặc định phải dùng được ngay, và mỗi mẫu phải mang đủ chữ + loại việc
+  // để một cú bấm điền được cả hai.
+  const macDinh = await listNotePresets();
+  assert.deepEqual(macDinh, DEFAULT_CARE_NOTE_PRESETS, "chưa ai sửa thì phải có sẵn bộ mẫu mặc định, không phải danh sách rỗng");
+  assert.ok(
+    macDinh.every((p) => p.text.trim().length > 0 && CARE_ACTION_KINDS.includes(p.kind)),
+    "mỗi mẫu phải mang CẢ chữ lẫn loại việc — thiếu chữ thì bấm xong ô vẫn trống và không lưu được",
+  );
+
+  const luu = await saveNotePresets(actor, {
+    presets: [
+      { id: "p1", text: "Gọi lần 1 không bắt máy", kind: "CALLED_NO_ANSWER" },
+      { id: "p2", text: "  Gọi lần 1 không bắt máy  ", kind: "CALLED_REACHED" },
+      { id: "p3", text: "Khách hẹn giao lại chiều mai", kind: "RESCHEDULED" },
+    ],
+  });
+  assert.ok("ok" in luu && luu.ok, "lưu danh sách mẫu hợp lệ phải thành công");
+  assert.deepEqual(
+    luu.data.map((p) => p.text),
+    ["Gọi lần 1 không bắt máy", "Khách hẹn giao lại chiều mai"],
+    "hai mẫu chữ y hệt nhau (chỉ khác khoảng trắng) người dùng không phân biệt được ⇒ giữ mẫu đầu",
+  );
+  assert.deepEqual(await listNotePresets(), luu.data, "đọc lại phải ra đúng danh sách vừa ghi");
+
+  assert.ok("error" in (await saveNotePresets(actor, { presets: [{ id: "x", text: "   ", kind: "OTHER" }] })), "mẫu rỗng bị chặn — nó sẽ tạo ra một chip bấm vào không ra chữ nào");
+  assert.ok(
+    "error" in (await saveNotePresets(actor, { presets: Array.from({ length: CARE_NOTE_PRESET_MAX + 1 }, (_, i) => ({ id: `q${i}`, text: `mẫu ${i}`, kind: "OTHER" as const })) })),
+    `quá ${CARE_NOTE_PRESET_MAX} mẫu bị chặn`,
+  );
+  assert.deepEqual(await listNotePresets(), luu.data, "lần ghi bị từ chối KHÔNG được làm hỏng danh sách đang dùng");
+
   clearMemo();
   q = await getCareQueue();
   console.log(
-    `✓ Care engine: ${q.counts.care} cần care · ${q.dataGaps.length} thiếu dữ liệu tách riêng · vòng đời theo bảng chuyển · ${events.length} sự kiện chỉ-thêm · ĐVVC: làm tay / ACKNOWLEDGED→SUCCESS theo sự kiện / retry hữu hạn / UNSUPPORTED · báo cáo attribution chặt`,
+    `✓ Care engine: ${q.counts.care} cần care · ${q.dataGaps.length} thiếu dữ liệu tách riêng · vòng đời theo bảng chuyển · ${events.length} sự kiện chỉ-thêm · ĐVVC: làm tay / ACKNOWLEDGED→SUCCESS theo sự kiện / retry hữu hạn / UNSUPPORTED · báo cáo attribution chặt · mẫu note: mặc định dùng được ngay, trùng chữ gộp một, rỗng/quá hạn mức bị chặn`,
   );
 }
