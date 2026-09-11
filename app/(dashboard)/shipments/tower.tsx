@@ -131,7 +131,11 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
                     <td className="px-3 py-2 whitespace-nowrap">{gio(r.lastEventAgeHours)}</td>
                     <td className="px-3 py-2">
                       {r.lastCsAction ? (
-                        <span className="text-muted-foreground">{r.lastCsAction.slice(0, 90)}</span>
+                        <span className={r.lastCsActionByHuman ? "" : "text-muted-foreground"}>
+                          {r.lastCsAction.slice(0, 90)}
+                          {/* Bot nhắn một tin KHÔNG thay được một cuộc gọi — nói rõ ai làm, đừng để hai việc trông như một. */}
+                          {r.lastCsActionByHuman ? null : <span className="ml-1 rounded bg-muted px-1 text-[10px]">bot</span>}
+                        </span>
                       ) : (
                         <span className="font-medium text-rose-600 dark:text-rose-400">Chưa ai chạm</span>
                       )}

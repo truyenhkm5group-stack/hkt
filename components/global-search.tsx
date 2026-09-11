@@ -7,6 +7,7 @@ import { allowedNavItems, type NavUserLike } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Kbd } from "@/components/kbd";
+import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { globalSearch } from "@/lib/actions/search";
 import type { SearchHit, SearchResult } from "@/lib/queries/search";
 
@@ -36,6 +37,14 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
   const pages = useMemo(() => allowedNavItems(user), [user]);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
+  /*
+    Chọn một VẬN ĐƠN thì mở NGĂN KÉO, không rời trang.
+
+    Ô lệnh thường được gọi ra giữa lúc đang làm việc khác — tra một mã vận đơn rồi bị ném sang trang
+    khác là làm mất chỗ đang đứng, và người dùng phải bấm quay lại. Đơn / khách / sản phẩm vẫn điều
+    hướng như cũ: ở đó người ta thường MUỐN sang trang đó làm tiếp.
+  */
+  const [xemVanDon, setXemVanDon] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -106,7 +115,18 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
             return (
               <CommandGroup key={kind} heading={`${GROUP_LABEL[kind]}${total > hits.length ? ` — hiện ${hits.length}/${total}` : ` (${total})`}`}>
                 {hits.map((h) => (
-                  <CommandItem key={`${h.kind}-${h.id}`} value={`${h.kind} ${h.id} ${h.title} ${h.subtitle}`} onSelect={() => go(h.href)}>
+                  <CommandItem
+                    key={`${h.kind}-${h.id}`}
+                    value={`${h.kind} ${h.id} ${h.title} ${h.subtitle}`}
+                    onSelect={() => {
+                      if (kind === "SHIPMENT") {
+                        setOpen(false);
+                        setXemVanDon(h.id);
+                        return;
+                      }
+                      go(h.href);
+                    }}
+                  >
                     <Icon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{h.title}</span>
@@ -158,6 +178,8 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
           ) : null}
         </CommandList>
       </CommandDialog>
+
+      {xemVanDon ? <CareDrawer shipmentId={xemVanDon} open onOpenChange={(v) => !v && setXemVanDon(null)} /> : null}
     </>
   );
 }

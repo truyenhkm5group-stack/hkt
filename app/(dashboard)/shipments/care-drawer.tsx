@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { ExternalLink, Loader2, MessageSquare, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,27 @@ import { cn } from "@/lib/utils";
  *
  * KHÔNG có nút nào tự nhắn khách. Nút ở đây GHI LẠI việc người vừa làm.
  */
-export function CareDrawer({ shipmentId, children, className }: { shipmentId: string; children: React.ReactNode; className?: string }) {
-  const [open, setOpen] = useState(false);
+export function CareDrawer({
+  shipmentId,
+  children,
+  className,
+  open: openNgoai,
+  onOpenChange,
+}: {
+  shipmentId: string;
+  /** Không truyền thì ngăn kéo không tự vẽ nút mở — dùng cho nơi đã có sẵn nút (ô lệnh ⌘K). */
+  children?: React.ReactNode;
+  className?: string;
+  /** Điều khiển từ ngoài. Bỏ trống thì ngăn kéo tự quản trạng thái mở của mình. */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+}) {
+  const [openTrong, setOpenTrong] = useState(false);
+  const open = openNgoai ?? openTrong;
+  const setOpen = (v: boolean) => {
+    setOpenTrong(v);
+    onOpenChange?.(v);
+  };
   const [data, setData] = useState<QuickView | null>(null);
   const [dangTai, setDangTai] = useState(false);
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
@@ -33,8 +52,7 @@ export function CareDrawer({ shipmentId, children, className }: { shipmentId: st
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  async function mo() {
-    setOpen(true);
+  async function tai() {
     if (data) return;
     setDangTai(true);
     const r = await loadShipmentQuickView(shipmentId);
@@ -56,11 +74,27 @@ export function CareDrawer({ shipmentId, children, className }: { shipmentId: st
     });
   }
 
+  // Mở từ ngoài (ô lệnh ⌘K) cũng phải nạp dữ liệu — nếu chỉ nạp trong hàm bấm nút thì ngăn kéo
+  // mở ra rỗng và đứng im mãi.
+  useEffect(() => {
+    if (open && !data && !dangTai) void tai();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   return (
     <>
-      <button type="button" onClick={mo} className={cn("text-left hover:underline", className)}>
-        {children}
-      </button>
+      {children ? (
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            void tai();
+          }}
+          className={cn("text-left hover:underline", className)}
+        >
+          {children}
+        </button>
+      ) : null}
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-xl">
           <SheetHeader className="pb-2">

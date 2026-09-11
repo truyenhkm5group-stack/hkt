@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { TEAM_LABEL } from "@/lib/constants/action-queue";
-import { DELIVERY_BUCKETS, EXCLUSIVE_BUCKETS, type BucketKey, type BucketSpec } from "@/lib/constants/delivery-tower";
+import { CARE_ACTION_LABEL, DELIVERY_BUCKETS, EXCLUSIVE_BUCKETS, type BucketKey, type BucketSpec, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { classifyFailedReason } from "@/lib/constants/cs";
 import { classifyFreshness, thresholdFor, type FreshnessClass } from "@/lib/constants/logistics-freshness";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -62,6 +62,8 @@ export type TowerRow = {
   team: string;
   /** Việc CSKH đã làm gần nhất cho kiện này. `null` = chưa ai chạm vào. */
   lastCsAction: string | null;
+  /** Người ghi hay bot ghi. Bot nhắn một tin KHÔNG thay được một cuộc gọi — hai việc khác nhau. */
+  lastCsActionByHuman: boolean;
   lastCsActionAt: Date | null;
   nextAction: string;
 };
@@ -106,6 +108,7 @@ type Raw = {
   lan_hut: number;
   cs_action: string | null;
   cs_action_at: string | null;
+  cs_boi_nguoi: boolean | null;
   event_note: string | null;
 };
 
@@ -154,6 +157,35 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
     */
     const rows = rowsOf<Raw>(
       await db.execute(sql`
+        /*
+          VIỆC CSKH ĐÃ LÀM GOM TRONG MỘT LƯỢT QUÉT, không hỏi lại cho từng kiện.
+
+          Bản đầu dùng lateral với điều kiện 'failed-delivery:' || s.id || ':%'. Vế phải KHÔNG phải
+          hằng số lúc lập kế hoạch, nên Postgres không dùng được index tiền tố: mỗi kiện một lần
+          quét bảng case. 554 kiện là 554 lượt quét cho một màn hình mở mỗi sáng.
+
+          Nay quét MỘT lần, tách mã vận đơn ra khỏi khoá chống trùng rồi nối bình thường.
+        */
+        with cham as (
+          select sid, nhan, luc from (
+            select split_part(c.dedupe_key, ':', 2) as sid,
+                   c.resolution as nhan,
+                   c.updated_at as luc,
+                   row_number() over (partition by split_part(c.dedupe_key, ':', 2) order by c.updated_at desc) as hang
+              from cs_cases c
+             where c.dedupe_key like 'failed-delivery:%'
+          ) t where hang = 1
+        ),
+        nguoi as (
+          -- Việc NGƯỜI ghi đứng trên việc bot ghi: bot nhắn một tin không thay được một cuộc gọi.
+          select sid, nhan, luc from (
+            select a.shipment_id as sid,
+                   a.kind as nhan,
+                   a.created_at as luc,
+                   row_number() over (partition by a.shipment_id order by a.created_at desc) as hang
+              from care_actions a
+          ) t where hang = 1
+        )
         select s.id,
                s.order_id,
                o.system_id,
@@ -171,8 +203,9 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
                extract(epoch from (now() - ev.moc)) / 3600 as tuoi_gio,
                coalesce(ev.lan_hut, 0) as lan_hut,
                ev.ghi_chu as event_note,
-               cs.resolution as cs_action,
-               cs.updated_at as cs_action_at
+               coalesce(nguoi.nhan, cham.nhan) as cs_action,
+               coalesce(nguoi.luc, cham.luc) as cs_action_at,
+               (nguoi.sid is not null) as cs_boi_nguoi
           from shipments s
           left join orders o on o.id = s.order_id
           left join lateral (
@@ -182,15 +215,29 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
               from shipment_events e
              where e.shipment_id = s.id
           ) ev on true
-          left join lateral (
-            select c.resolution, c.updated_at
-              from cs_cases c
-             where c.dedupe_key like 'failed-delivery:' || s.id || ':%'
-             order by c.updated_at desc
-             limit 1
-          ) cs on true
-         where s.is_final = false
-            or (s.stage = 'RETURNED' and s.return_received_at is null)
+          left join cham on cham.sid = s.id
+          left join nguoi on nguoi.sid = s.id
+         where s.order_id is not null
+           /*
+             ═══ AI VÀO THÁP ═══
+
+             1. CHỈ VẬN ĐƠN CÓ GẮN ĐƠN. Vận đơn chiều hoàn là dòng riêng với order_id NULL (luật
+                vận đơn số 7): hàng thật, nhưng không có khách để gọi, và đường ống hàng hoàn đã
+                đếm chúng theo cách riêng. Vận đơn mồ côi có luật riêng ở trang Chất lượng dữ liệu.
+
+             2. Chặng RETURNED xử lý bằng ĐÚNG MỘT nhánh, không để nhánh "chưa kết thúc" bắt lại một
+                phần của nó. Điều kiện của nhánh đó lấy y hệt khâu CARRIER_RETURN_DELIVERED của
+                đường ống hàng hoàn — lệch một vế là hai màn hình nói hai con số cho cùng một đống
+                hàng, và không lỗi nào phát ra.
+           */
+           and (
+             (s.is_final = false and s.stage <> 'RETURNED')
+             or (
+               s.stage = 'RETURNED'
+               and s.return_received_at is null
+               and not exists (select 1 from return_inspections ri where ri.shipment_id = s.id)
+             )
+           )
       `),
     );
 
@@ -222,7 +269,8 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
         failedAttempts: Number(r.lan_hut ?? 0),
         reasonLabel: xep.reason,
         team: TEAM_LABEL[spec.team],
-        lastCsAction: r.cs_action && r.cs_action.trim() ? r.cs_action.trim() : null,
+        lastCsAction: r.cs_action && r.cs_action.trim() ? (r.cs_boi_nguoi ? (CARE_ACTION_LABEL[r.cs_action as CareActionKind] ?? r.cs_action) : r.cs_action.trim()) : null,
+        lastCsActionByHuman: Boolean(r.cs_boi_nguoi),
         lastCsActionAt: r.cs_action_at ? new Date(r.cs_action_at) : null,
         nextAction: spec.nextAction,
       };
