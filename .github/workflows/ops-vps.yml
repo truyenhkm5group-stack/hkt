@@ -55,6 +55,7 @@ on:
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
+          - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
@@ -285,6 +286,11 @@ jobs:
                 # trong môi trường của tiến trình, và script chỉ in ĐỘ DÀI chứ không in giá trị.
                 fetch_script sepay-hmac-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-hmac-check.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-hmac-check.ts ;;
+              sepay-verify)
+                # Kiểm chứng trên máy chủ THẬT. Phép phát lại dùng đúng mã giao dịch SePay đã có nên ràng buộc
+                # UNIQUE ở CSDL chặn dòng thứ hai; script vẫn đếm trước/sau và báo đỏ nếu số dòng đổi.
+                fetch_script sepay-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-verify.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-verify.ts ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;

@@ -342,6 +342,29 @@ export async function testSepayWebhook(db: Db) {
   // Gửi lại gói tin không có mã ngân hàng: khoá lùi vẫn tất định nên vẫn một dòng.
   assert.equal((await ingestSepayTransaction(db, toiThieu)).created, false, "14. gửi lại gói tin không có referenceCode vẫn không đẻ dòng mới");
 
+  // ═══ 15. SỐ DƯ LUỸ KẾ 0 LÀ CHƯA BIẾT, KHÔNG PHẢI SỐ DƯ BẰNG 0 ═══
+  //
+  // SỰ CỐ THẬT, ĐO TRÊN PRODUCTION 11/09/2026. Gói tin thật đầu tiên từ MB qua SePay (2.000₫
+  // tiền vào, mã FT26255929554527) mang `accumulated: 0` — trong khi tài khoản đang có ~70.420₫.
+  // SePay không lấy được số dư luỹ kế của MB nên gửi 0 thay cho "không có".
+  //
+  // Bằng chứng không thể chối: với TIỀN VÀO, số dư sau giao dịch bắt buộc ≥ số tiền vào. Số dư 0
+  // sau khi nhận 2.000₫ là trạng thái không tồn tại được. Lưu nó như số dư ĐÃ BIẾT sẽ phá bất biến
+  // chuỗi số dư — mỏ neo đối chiếu mạnh nhất của cả sổ.
+  const thatTuProduction = take(
+    payload({ id: 81024863, transferAmount: 2000, transferType: "in", referenceCode: "FT26255929554527", transactionDate: "2026-09-11 23:18:00", accumulated: 0, content: "HO KHAC TRUYEN chuyen tien" }),
+  );
+  assert.equal(thatTuProduction.balanceAfter, null, "15. accumulated = 0 ⇒ CHƯA BIẾT (null), KHÔNG phải số dư bằng 0");
+  assert.equal(thatTuProduction.amount, 2000, "15. số tiền vẫn đọc đúng");
+  assert.equal(
+    toBankRow({ date: "2026-09-11", time: "23:18", amount: 2000, description: "", counterparty: "", bankRef: "FT26255929554527", categoryCode: "", note: "" }).txnAt.toISOString(),
+    thatTuProduction.txnAt.toISOString(),
+    "15. webhook và sao kê quy cùng một mốc UTC cho cùng một giao dịch — 23:18 giờ VN",
+  );
+  // Số dư THẬT vẫn được giữ nguyên: luật chỉ loại giá trị không thể có, không loại mọi số.
+  assert.equal(take(payload({ id: 81024864, accumulated: 19_077_000 })).balanceAfter, 19_077_000, "15. số dư dương có thật vẫn được lưu");
+  assert.equal(take(payload({ id: 81024865, accumulated: -5 })).balanceAfter, null, "15. số dư âm là vô nghĩa ⇒ CHƯA BIẾT");
+
   // ═══ CHUẨN HOÁ MÃ — chỗ ba đường vào hội tụ ═══
   // Lệch một dấu cách hay một chữ hoa là ra hai dòng canonical, và không ai nhìn ra bằng mắt.
   assert.equal(normalizeBankRef(" ft26254097039000 "), "FT26254097039000", "chuẩn hoá: bỏ khoảng trắng, viết hoa");

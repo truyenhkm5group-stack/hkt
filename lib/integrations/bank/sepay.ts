@@ -132,6 +132,28 @@ function money(value: unknown): number | null {
 }
 
 /**
+ * SỐ DƯ LUỸ KẾ — `0` NGHĨA LÀ CHƯA BIẾT, KHÔNG PHẢI SỐ DƯ BẰNG 0.
+ *
+ * ĐO TRÊN PRODUCTION 11/09/2026: gói tin thật đầu tiên từ MB qua SePay (2.000₫ tiền vào, mã
+ * FT26255929554527) mang `accumulated: 0`, trong khi tài khoản đang có ~70.420₫. SePay không lấy
+ * được số dư luỹ kế của MB nên gửi 0 thay cho "không có".
+ *
+ * Lưu 0 như một số dư ĐÃ BIẾT là đúng loại bẫy mà `AGENTS.md` mục 8 luật 5 cấm, và nó phá thẳng
+ * bất biến chuỗi số dư (`balance_after[i] − balance_after[i−1] = amount[i]`) — mỏ neo đối chiếu
+ * mạnh nhất của cả sổ.
+ *
+ * Bằng chứng không thể chối: với giao dịch TIỀN VÀO, số dư sau giao dịch bắt buộc ≥ số tiền vào.
+ * `accumulated = 0` sau khi nhận 2.000₫ là trạng thái không tồn tại được.
+ *
+ * Chọn ngưỡng `<= 0` cho cả hai chiều: mất một số dư 0 có thật chỉ khiến ERP nói "chưa biết" —
+ * hướng sai an toàn. Ngược lại, tin một số 0 bịa sẽ làm đối chiếu báo sai ở mọi kỳ về sau.
+ */
+function accumulatedBalance(value: unknown): number | null {
+  const n = money(value);
+  return n === null || n <= 0 ? null : n;
+}
+
+/**
  * "2024-07-02 11:08:33" là GIỜ VIỆT NAM. Gắn +07:00 trước khi cho `Date` đọc, nếu không máy chủ
  * chạy UTC sẽ hiểu thành 11:08 UTC = 18:08 giờ Việt Nam và giao dịch buổi tối nhảy sang ngày sau.
  * Chuỗi nào đã tự mang múi giờ (có `Z` hoặc `+07:00`) thì tôn trọng nguyên bản.
@@ -199,7 +221,7 @@ export function parseSepayPayload(payload: unknown): SepayParseResult {
       txnAt,
       content: text(p.content) || text(p.description),
       code: text(p.code),
-      balanceAfter: money(p.accumulated),
+      balanceAfter: accumulatedBalance(p.accumulated),
     },
   };
 }
