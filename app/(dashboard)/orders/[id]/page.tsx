@@ -31,17 +31,20 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requirePermission("orders:read");
   const { id } = await params;
-  const order = await getOrderDetail(id);
-  const timeline = order ? await getOrderTimeline(order.id) : [];
-  const riskCfg = await loadAlertConfig();
-  const erpHist = order ? await erpHistoryByPhone([order.billPhone ?? ""], order.id) : { delivered: 0, returned: 0 };
-  const risk = order ? assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg) : null;
-  const erpOther = order ? await erpOrderCountByPhone([order.billPhone ?? ""], order.id) : 0;
-  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
-  const thieuThongTin = Boolean(order && (!order.billPhone || !(order.shipFullAddress || order.shipAddress)));
-  const prev = order && thieuThongTin ? await previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : null;
-  const newPhone = order ? isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther }) : false;
+  // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
+  // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
+  const [order, riskCfg] = await Promise.all([getOrderDetail(id), loadAlertConfig()]);
   if (!order) notFound();
+  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
+  const thieuThongTin = !order.billPhone || !(order.shipFullAddress || order.shipAddress);
+  const [timeline, erpHist, erpOther, prev] = await Promise.all([
+    getOrderTimeline(order.id),
+    erpHistoryByPhone([order.billPhone ?? ""], order.id),
+    erpOrderCountByPhone([order.billPhone ?? ""], order.id),
+    thieuThongTin ? previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : Promise.resolve(null),
+  ]);
+  const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
+  const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
   /**
    * MỌI LẦN GỬI, THEO THỨ TỰ.
    *

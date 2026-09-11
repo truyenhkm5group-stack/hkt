@@ -9,7 +9,7 @@ import { env } from "@/lib/env";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { loadAdsMapping, resolveMarketer } from "@/lib/integrations/facebook/mapping";
 import { isUsableAdId } from "@/lib/constants/ads-identity";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 
 /**
  * Kết quả tra danh mục quảng cáo.
@@ -102,7 +102,7 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
   }
   const mapping = await loadAdsMapping();
   result.resolved = infos.filter((i) => !i.missing && i.campaignId && resolveMarketer(i.campaignId, i.campaignName, i.accountId, mapping)).length;
-  clearMemo();
+  if (result.fetched > 0) staleMemo();
   log(`Tra ${todo.length} ad_id: ${result.fetched} có chiến dịch, ${result.missing} không tra được, ${result.resolved} nhận diện được marketer`);
   return result;
 }

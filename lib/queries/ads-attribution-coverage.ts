@@ -78,7 +78,7 @@ const SELECT = {
 
 /** Độ phủ trong một khoảng. */
 export async function adsAttributionCoverage(from: Date | null, to: Date | null): Promise<AttributionCoverage> {
-  return memo(`ads-coverage:${from?.toISOString() ?? ""}:${to?.toISOString() ?? ""}`, 120, async () => {
+  return memo(`ads-coverage:${from?.toISOString() ?? ""}:${to?.toISOString() ?? ""}`, 120_000, async () => {
     const db = await getDb();
     const where =
       from && to
@@ -95,7 +95,7 @@ export async function adsAttributionCoverage(from: Date | null, to: Date | null)
  * Ngày theo giờ Việt Nam: một ngày bán hàng của shop kết thúc lúc nửa đêm giờ VN, không phải UTC.
  */
 export async function adsAttributionCoverageByDay(days = 30): Promise<CoverageDay[]> {
-  return memo(`ads-coverage-day:${days}`, 120, async () => {
+  return memo(`ads-coverage-day:${days}`, 120_000, async () => {
     const db = await getDb();
     const rows = await db
       .select({ day: sql<string>`to_char((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date, 'YYYY-MM-DD')`, ...SELECT })

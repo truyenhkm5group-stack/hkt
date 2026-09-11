@@ -5,7 +5,7 @@ import { asRecord, parseJsonSafeInts, str } from "@/lib/integrations/http";
 import { markWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 
 export const dynamic = "force-dynamic";
@@ -94,7 +94,9 @@ export async function POST(request: NextRequest) {
       const retryNote = stored.duplicate ? `Viettel Post gửi lại lần ${stored.deliveryCount}` : null;
       await markWebhook(eventId, result?.changed ? "PROCESSED" : "IGNORED", [note, retryNote].filter(Boolean).join(" · ") || null);
       if (result?.changed) {
-        clearMemo();
+        // Không ai ngồi chờ webhook: đánh dấu đệm cũ để người đang mở trang nhận số ngay và được
+        // kéo lên số mới khi lượt tính lại xong — thay vì bắt họ trả giá lượt tính nguội.
+        staleMemo();
         scheduleAlertEvaluation();
       }
     } catch (error) {

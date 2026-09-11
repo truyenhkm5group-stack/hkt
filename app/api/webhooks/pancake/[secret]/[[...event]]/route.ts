@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { after } from "next/server";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { str } from "@/lib/integrations/http";
 import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
@@ -40,9 +40,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
     occurredAt: updatedAt ? new Date(updatedAt) : null,
   });
   after(async () => {
-    await processPancakeWebhook(stored.id);
-    clearMemo();
+    const outcome = await processPancakeWebhook(stored.id);
+    /*
+      CHỈ KHI CÓ GÌ ĐỔI, VÀ CHỈ ĐÁNH DẤU CŨ.
+
+      Pancake đẩy lại NGUYÊN bản ghi mỗi lần đơn đổi, thường vài lần cho một đơn, và gói tin lặp thì
+      không ghi gì. Xoá hẳn đệm sau MỌI gói tin là san phẳng đệm liên tục trong giờ cao điểm — không
+      ai đang chờ webhook, nên đúng ngữ nghĩa là "đánh dấu cũ" (lib/cache.ts).
+    */
+    if (outcome.changed) {
+      staleMemo();
       scheduleAlertEvaluation();
+    }
   });
   return NextResponse.json({ ok: true, received: kind, id: stored.id, duplicate: stored.duplicate });
 }

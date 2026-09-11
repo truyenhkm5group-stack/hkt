@@ -22,7 +22,8 @@ const RealtimeContext = createContext<RealtimeState>({ connected: false, lastEve
  * việc chạy. Trang báo cáo tổng hợp thì không — số liệu kỳ tháng không đổi theo từng giây, và bản
  * thân các báo cáo đã có đệm 60–120 giây ở máy chủ nên làm mới dày hơn cũng chỉ trả về đúng số cũ.
  */
-const LIVE_ROUTES = ["/orders", "/shipments", "/alerts", "/cs", "/landing", "/outreach", "/returns", "/integrations"];
+// `/cod` có thao tác ghi (đánh dấu đã về ngân hàng) và nhận bảng kê từ Gmail bất kỳ lúc nào — phải là trang sống.
+const LIVE_ROUTES = ["/orders", "/shipments", "/alerts", "/cs", "/landing", "/outreach", "/returns", "/integrations", "/cod"];
 const LIVE_GAP = 20_000;
 const REPORT_GAP = 90_000;
 

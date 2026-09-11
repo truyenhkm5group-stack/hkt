@@ -377,7 +377,13 @@ export const auditLogs = pgTable(
     detail: jsonb("detail"),
     createdAt: createdAt(),
   },
-  (t) => [index("audit_entity_created_idx").on(t.entity, t.createdAt), index("audit_created_idx").on(t.createdAt)],
+  (t) => [
+    index("audit_entity_created_idx").on(t.entity, t.createdAt),
+    index("audit_created_idx").on(t.createdAt),
+    // Dòng thời gian của đơn tra nhật ký theo `entity_id` (mã đơn + mã các vận đơn). Không có chỉ mục
+    // này là quét tuần tự bảng tăng nhanh nhất CSDL mỗi lần mở chi tiết đơn.
+    index("audit_entity_id_idx").on(t.entityId, t.createdAt),
+  ],
 );
 
 export const approvalStatusEnum = pgEnum("approval_status", ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "EXECUTED"]);

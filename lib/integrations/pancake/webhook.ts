@@ -91,10 +91,13 @@ export async function markWebhook(id: string, status: "PROCESSED" | "FAILED" | "
     .where(eq(schema.webhookEvents.id, id));
 }
 
-export async function processPancakeWebhook(eventId: string) {
+/** Kết quả xử lý một gói tin: `changed` = có ghi dữ liệu nghiệp vụ (đơn / khách / sản phẩm / tồn). */
+export type PancakeWebhookOutcome = { changed: boolean; result: string };
+
+export async function processPancakeWebhook(eventId: string): Promise<PancakeWebhookOutcome> {
   const db = await getDb();
   const event = await db.query.webhookEvents.findFirst({ where: eq(schema.webhookEvents.id, eventId) });
-  if (!event || event.status === "PROCESSED") return;
+  if (!event || event.status === "PROCESSED") return { changed: false, result: "already-processed" };
   const payload = asRecord(event.payload);
   const kind = event.eventType as PancakeWebhookKind;
   try {
@@ -161,7 +164,10 @@ export async function processPancakeWebhook(eventId: string) {
       }
     }
     await markWebhook(eventId, result === "ignored" ? "IGNORED" : "PROCESSED", note);
+    // "unchanged"/"skipped" của upsertOrder nghĩa là bản ghi không mới hơn bản đang có — không có gì đổi.
+    return { changed: !["ignored", "unchanged", "skipped"].includes(result), result };
   } catch (error) {
     await markWebhook(eventId, "FAILED", error instanceof Error ? error.message : String(error));
+    return { changed: false, result: "failed" };
   }
 }

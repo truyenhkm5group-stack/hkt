@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { AUDIT_ACTION_LABEL } from "@/lib/constants/audit";
 import { pancakeStatusName } from "@/lib/constants/pancake";
@@ -55,13 +55,56 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
     amount: Number(order.total ?? 0),
   });
 
+  /*
+    NĂM CHIỀU ĐỌC SONG SONG, MỖI CHIỀU MỘT CÂU.
+
+    Trước đây: lịch sử → vận đơn → (mỗi vận đơn: sự kiện, rồi dòng bảng kê) → giao dịch → nhật ký,
+    tất cả nối đuôi — 5 + 2×N vòng đi-về cho một trang. Nay vận đơn đọc trước (các chiều khác cần
+    danh sách id của nó), rồi bốn chiều còn lại chạy cùng lúc; sự kiện và dòng bảng kê gom theo
+    `in (…)` thay vì lặp từng vận đơn.
+  */
+  const shipments = await db
+    .select({ id: schema.shipments.id, code: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, createdAt: schema.shipments.createdAt, returnReceivedAt: schema.shipments.returnReceivedAt, returnReceivedBy: schema.shipments.returnReceivedBy })
+    .from(schema.shipments)
+    .where(eq(schema.shipments.orderId, orderId));
+  const shipmentIds = shipments.map((s) => s.id);
+
+  const [history, allEvents, allLines, payments, audits] = await Promise.all([
+    db
+      .select({ id: schema.orderStatusHistory.id, status: schema.orderStatusHistory.status, old: schema.orderStatusHistory.oldStatus, editor: schema.orderStatusHistory.editorName, at: schema.orderStatusHistory.updatedAt })
+      .from(schema.orderStatusHistory)
+      .where(eq(schema.orderStatusHistory.orderId, orderId))
+      .orderBy(desc(schema.orderStatusHistory.updatedAt))
+      .limit(50),
+    shipmentIds.length
+      ? db
+          .select({ id: schema.shipmentEvents.id, shipmentId: schema.shipmentEvents.shipmentId, source: schema.shipmentEvents.source, status: schema.shipmentEvents.status, statusName: schema.shipmentEvents.statusName, location: schema.shipmentEvents.location, note: schema.shipmentEvents.note, legType: schema.shipmentEvents.legType, at: schema.shipmentEvents.occurredAt })
+          .from(schema.shipmentEvents)
+          .where(inArray(schema.shipmentEvents.shipmentId, shipmentIds))
+          .orderBy(desc(schema.shipmentEvents.occurredAt))
+          .limit(60 * shipmentIds.length)
+      : Promise.resolve([]),
+    shipmentIds.length
+      ? db
+          .select({ id: schema.codStatementLines.id, shipmentId: schema.codStatementLines.shipmentId, cod: schema.codStatementLines.cod, fee: schema.codStatementLines.fee, net: schema.codStatementLines.net, key: schema.codStatementLines.statementKey, at: schema.codStatementLines.createdAt })
+          .from(schema.codStatementLines)
+          .where(inArray(schema.codStatementLines.shipmentId, shipmentIds))
+          .limit(20 * shipmentIds.length)
+      : Promise.resolve([]),
+    db
+      .select({ id: schema.paymentTransactions.id, type: schema.paymentTransactions.transactionType, amount: schema.paymentTransactions.amount, status: schema.paymentTransactions.verificationStatus, source: schema.paymentTransactions.source, at: schema.paymentTransactions.occurredAt, reason: schema.paymentTransactions.reason })
+      .from(schema.paymentTransactions)
+      .where(eq(schema.paymentTransactions.orderId, orderId))
+      .limit(30),
+    db
+      .select({ id: schema.auditLogs.id, action: schema.auditLogs.action, email: schema.auditLogs.userEmail, at: schema.auditLogs.createdAt, detail: schema.auditLogs.detail })
+      .from(schema.auditLogs)
+      .where(inArray(schema.auditLogs.entityId, [orderId, ...shipmentIds]))
+      .orderBy(desc(schema.auditLogs.createdAt))
+      .limit(30),
+  ]);
+
   // ── 1. TRẠNG THÁI ĐƠN (Pancake) — KHÔNG phải bằng chứng giao vận ──
-  const history = await db
-    .select({ id: schema.orderStatusHistory.id, status: schema.orderStatusHistory.status, old: schema.orderStatusHistory.oldStatus, editor: schema.orderStatusHistory.editorName, at: schema.orderStatusHistory.updatedAt })
-    .from(schema.orderStatusHistory)
-    .where(eq(schema.orderStatusHistory.orderId, orderId))
-    .orderBy(desc(schema.orderStatusHistory.updatedAt))
-    .limit(50);
   for (const h of history) {
     entries.push({
       id: `status-${h.id}`,
@@ -75,11 +118,6 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
   }
 
   // ── 2. VẬN ĐƠN & SỰ KIỆN ĐVVC — bằng chứng giao vận, có sức nặng cao nhất ──
-  const shipments = await db
-    .select({ id: schema.shipments.id, code: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, createdAt: schema.shipments.createdAt, returnReceivedAt: schema.shipments.returnReceivedAt, returnReceivedBy: schema.shipments.returnReceivedBy })
-    .from(schema.shipments)
-    .where(eq(schema.shipments.orderId, orderId));
-
   for (const s of shipments) {
     entries.push({
       id: `shipment-${s.id}`,
@@ -103,12 +141,7 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
       });
     }
 
-    const events = await db
-      .select({ id: schema.shipmentEvents.id, source: schema.shipmentEvents.source, status: schema.shipmentEvents.status, statusName: schema.shipmentEvents.statusName, location: schema.shipmentEvents.location, note: schema.shipmentEvents.note, legType: schema.shipmentEvents.legType, at: schema.shipmentEvents.occurredAt })
-      .from(schema.shipmentEvents)
-      .where(eq(schema.shipmentEvents.shipmentId, s.id))
-      .orderBy(desc(schema.shipmentEvents.occurredAt))
-      .limit(60);
+    const events = allEvents.filter((e) => e.shipmentId === s.id).slice(0, 60);
     for (const e of events) {
       entries.push({
         id: `event-${e.id}`,
@@ -124,11 +157,7 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
     }
 
     // ── 3. TIỀN — chứng từ bảng kê, tách hẳn khỏi giao vận ──
-    const lines = await db
-      .select({ id: schema.codStatementLines.id, cod: schema.codStatementLines.cod, fee: schema.codStatementLines.fee, net: schema.codStatementLines.net, key: schema.codStatementLines.statementKey, at: schema.codStatementLines.createdAt })
-      .from(schema.codStatementLines)
-      .where(eq(schema.codStatementLines.shipmentId, s.id))
-      .limit(20);
+    const lines = allLines.filter((l) => l.shipmentId === s.id).slice(0, 20);
     for (const l of lines) {
       entries.push({
         id: `statement-${l.id}`,
@@ -143,11 +172,6 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
   }
 
   // ── 4. GIAO DỊCH TIỀN đã ghi sổ ──
-  const payments = await db
-    .select({ id: schema.paymentTransactions.id, type: schema.paymentTransactions.transactionType, amount: schema.paymentTransactions.amount, status: schema.paymentTransactions.verificationStatus, source: schema.paymentTransactions.source, at: schema.paymentTransactions.occurredAt, reason: schema.paymentTransactions.reason })
-    .from(schema.paymentTransactions)
-    .where(eq(schema.paymentTransactions.orderId, orderId))
-    .limit(30);
   for (const p of payments) {
     entries.push({
       id: `payment-${p.id}`,
@@ -162,12 +186,6 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
   }
 
   // ── 5. NGƯỜI DÙNG CAN THIỆP — nhật ký truy vết ──
-  const audits = await db
-    .select({ id: schema.auditLogs.id, action: schema.auditLogs.action, email: schema.auditLogs.userEmail, at: schema.auditLogs.createdAt, detail: schema.auditLogs.detail })
-    .from(schema.auditLogs)
-    .where(sql`${schema.auditLogs.entityId} = ${orderId} or ${schema.auditLogs.entityId} in ${shipments.length ? shipments.map((s) => s.id) : [""]}`)
-    .orderBy(desc(schema.auditLogs.createdAt))
-    .limit(30);
   for (const a of audits) {
     entries.push({
       id: `audit-${a.id}`,

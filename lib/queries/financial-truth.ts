@@ -4,7 +4,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { metricScope } from "@/lib/queries/metrics";
-import { ORDER_OUTCOME, ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -201,7 +201,22 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .from(facts));
 
   // ── Chiều TIỀN: đọc trên vận đơn của đơn trong kỳ, tách rõ ba bậc chứng từ ──
-  const [codRow] = await db
+  /*
+    CÂU NÀY TỪNG LÀ CÂU CHẬM NHẤT CỦA TRANG CHỦ — VÌ JIT, KHÔNG VÌ DỮ LIỆU.
+
+    perf-probe production 11/09/2026, EXPLAIN ANALYZE: `Seq Scan on shipments … actual
+    time=2703ms..2707ms rows=1976` — dòng đầu tiên mất 2,7 giây, 1.975 dòng còn lại mất 4ms. Các
+    SubPlan bên trong chỉ tốn 0,006–0,036ms mỗi lượt. Chi phí ước lượng 801.408 vượt `jit_above_cost`
+    nên Postgres biên dịch hàng trăm hàm trước khi đọc dòng đầu; máy 2 nhân trả 2,7–3,5 giây cho
+    việc đó, và ba lượt gọi đồng thời (trang chủ + tóm tắt + sự thật tài chính) chen nhau tới mức
+    một câu `select … from settings where key = $1` phải chờ 300ms.
+
+    Cùng cách sửa với `orderRow`: tắt JIT trong đúng giao dịch này. Đọc kết quả ĐÃ VẬT CHẤT HOÁ để
+    biểu thức không phải tính lại (`ORDER_OUTCOME_FAST`, cùng công thức, chỉ khác lúc tính).
+    MỖI ĐƠN MỘT DÒNG: đơn gửi lại nhiều lần chỉ tính lần gửi quyết định (PRIMARY_ATTEMPT), vì các
+    cột này được gắn nhãn "đơn" trên màn hình.
+  */
+  const codRowP = chayKhongJit(db, (tx) => tx
     .select({
       collected: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${s.codStatus} = 'COLLECTED'), 0)`,
       collectedCount: sql<number>`count(*) filter (where ${s.codStatus} = 'COLLECTED')`,
@@ -210,26 +225,27 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       paidToBank: sql<number>`coalesce(sum(coalesce(nullif(${s.codCollected}, 0), ${s.codAmount})) filter (where ${s.codStatus} = 'PAID_TO_BANK'), 0)`,
       paidToBankCount: sql<number>`count(*) filter (where ${s.codStatus} = 'PAID_TO_BANK')`,
       // Đơn ĐÃ GIAO THÀNH CÔNG mà chưa có đồng nào trên bảng kê — phần Viettel Post còn giữ.
-      outstanding: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
-      outstandingCount: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
+      outstanding: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
+      outstandingCount: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
     })
     .from(o)
-    .innerJoin(s, eq(s.orderId, o.id))
-    .where(scope);
+    .innerJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(scope));
 
   // ── TIỀN THỰC NHẬN: theo NGÀY ĐỐI SOÁT của bảng kê, không theo ngày lên đơn ──
   const b = schema.codBatches;
-  const [batchRow] = await db
+  const batchRowP = db
     .select({ count: sql<number>`count(*)`, net: sql<number>`coalesce(sum(${b.totalAmount}), 0)`, fee: sql<number>`coalesce(sum(${b.feeTotal}), 0)` })
     .from(b)
     .where(between(b.receivedAt, period.from, period.to));
 
-  const [adsRow] = await db
+  const adsRowP = db
     .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)));
   // Một đường duy nhất: Profit Engine. Trang "sự thật tài chính" không được tự cộng theo cách riêng.
-  const opsRow = await getOperatingCost(period);
+  // Bốn phép đọc không phụ thuộc nhau: chạy song song thay vì nối đuôi.
+  const [[codRow], [batchRow], [adsRow], opsRow] = await Promise.all([codRowP, batchRowP, adsRowP, getOperatingCost(period)]);
 
   const deliveredRevenue = Number(orderRow?.deliveredRevenue ?? 0);
   const deliveredCogs = Number(orderRow?.deliveredCogs ?? 0);

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { jwtVerify, SignJWT } from "jose";
@@ -6,6 +7,7 @@ import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
 import { hasPermission, resolvePermissions, USER_PERMISSION_SNAPSHOT_KEY, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
 import { env } from "@/lib/env";
+import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
@@ -64,9 +66,16 @@ export async function getSession(): Promise<SessionUser | null> {
   return verifySessionToken(token);
 }
 
-/** Mẫu quyền của các vai trò (bản chỉnh trong settings, nếu có) */
+/**
+ * Mẫu quyền của các vai trò (bản chỉnh trong settings, nếu có).
+ *
+ * Đệm 60 giây: hai khoá này được đọc ở MỌI lần dựng trang, mọi server action, mọi lượt hỏi
+ * chuông thông báo (30 giây/lần) — mà chúng chỉ đổi khi quản trị sửa quyền, và lúc đó `audit()`
+ * xoá hẳn đệm nên số mới hiện ngay. Trước đây mỗi lần điều hướng tốn 6 câu truy vấn chỉ để biết
+ * người đang đăng nhập là ai (layout + trang, mỗi bên 3 câu).
+ */
 export async function loadRoleTemplates(): Promise<RolePermissionMap> {
-  return getSettingJson<RolePermissionMap>(ROLE_PERMISSIONS_KEY, {});
+  return memo("auth:roleTemplates", 60_000, () => getSettingJson<RolePermissionMap>(ROLE_PERMISSIONS_KEY, {}));
 }
 
 /**
@@ -76,11 +85,18 @@ export async function loadRoleTemplates(): Promise<RolePermissionMap> {
  * migration vào lúc kho đang có phiên làm việc khác sửa dở `db/schema.ts`.
  */
 export async function loadPermissionSnapshots(): Promise<Record<string, string[]>> {
-  return getSettingJson<Record<string, string[]>>(USER_PERMISSION_SNAPSHOT_KEY, {});
+  return memo("auth:permissionSnapshots", 60_000, () => getSettingJson<Record<string, string[]>>(USER_PERMISSION_SNAPSHOT_KEY, {}));
 }
 
-/** Người dùng hiện tại với quyền đã tính (null nếu chưa đăng nhập / bị khoá), không chuyển hướng */
-export async function getCurrentUser(): Promise<SessionUser | null> {
+/**
+ * Người dùng hiện tại với quyền đã tính (null nếu chưa đăng nhập / bị khoá), không chuyển hướng.
+ *
+ * `cache()` của React khử trùng lặp TRONG MỘT LẦN DỰNG: layout gọi `requireUser`, trang gọi
+ * `requirePermission`, các khối Suspense gọi `can` — trước đây mỗi lời gọi là một lượt tra
+ * người dùng riêng. Không phải đệm theo thời gian: lần dựng kế tiếp vẫn tra lại, nên khoá tài
+ * khoản là có hiệu lực ngay ở lần điều hướng tiếp theo như cũ.
+ */
+export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const session = await getSession();
   if (!session) return null;
   const db = await getDb();
@@ -97,7 +113,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     role: user.role,
     permissions: resolvePermissions(user.role, user.permissions, templates, snapshots[user.id] ?? null),
   };
-}
+});
 
 /** Lấy người dùng hiện tại (kiểm tra còn active trong DB), chuyển hướng /login nếu chưa đăng nhập */
 export async function requireUser(roles?: Role[]): Promise<SessionUser> {

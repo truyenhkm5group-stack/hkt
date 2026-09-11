@@ -289,12 +289,15 @@ export async function getActionQueue(
    * nhỏ hơn thực tế ba lần. Đếm thẳng trong CSDL thì con số đúng bất kể nạp bao nhiêu.
    */
   // ĐẾM BẰNG CHÍNH ĐIỀU KIỆN CỦA DANH SÁCH — không nạp 966 dòng chỉ để đếm.
-  const [{ filteredTotal }] = await db.select({ filteredTotal: sql<number>`count(*)` }).from(n).where(where);
-  // Và tổng việc đang mở BẤT KỂ bộ lọc, để người dùng biết mình đang xem một phần của cái gì.
-  const [{ openTotal }] = await db.select({ openTotal: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt));
-
-  const amounts = await amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]);
-  const stockDays = await daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]);
+  // Bốn phép đọc dưới đây không phụ thuộc nhau: chạy song song. Hàng đợi cố ý KHÔNG đệm (người vừa
+  // bấm "Tôi nhận" phải thấy ngay), nên mỗi vòng đi-về tiết kiệm được là tiết kiệm ở mọi lần mở trang.
+  const [[{ filteredTotal }], [{ openTotal }], amounts, stockDays] = await Promise.all([
+    db.select({ filteredTotal: sql<number>`count(*)` }).from(n).where(where),
+    // Và tổng việc đang mở BẤT KỂ bộ lọc, để người dùng biết mình đang xem một phần của cái gì.
+    db.select({ openTotal: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt)),
+    amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]),
+    daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]),
+  ]);
   const now = Date.now();
 
   const cases: ActionCase[] = rows.map((r) => {

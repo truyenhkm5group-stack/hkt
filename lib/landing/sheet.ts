@@ -9,7 +9,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-o
 import { getDb, schema } from "@/db";
 import { assessCustomerRisk, erpHistoryByPhone, type RiskAssessment } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 import { DEFAULT_LANDING_CONFIG, LANDING_CONFIG_KEY, detectColumns, detectColumnsByContent, findAddressCell, findOfferCell, findPhoneCell, findVariantCell, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseVariantText, rowToLanding, sheetTabs, type DuplicateHit, type LandingColumnKey, type LandingConfig, type VariantCandidate, pushBlockOf } from "@/lib/constants/landing";
 import { getSettingJson } from "@/lib/settings";
 
@@ -272,7 +272,9 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
   }
   // Chạy nhanh (near-realtime, mỗi phút): chỉ nạp dòng mới, bỏ qua bước ghép lại toàn bộ cho nhẹ
   if (options.onlyNew) {
-    clearMemo();
+    // Chạy MỖI PHÚT: chỉ đánh dấu đệm cũ khi thật sự có dòng mới. Xoá hẳn đệm mỗi phút là lý do
+    // trang chủ không bao giờ được ấm (đo 10/09/2026: 73–88 giây mỗi lần mở).
+    if (result.inserted + result.updated + result.linked > 0) staleMemo();
     return result;
   }
   // các dòng chưa gắn đơn Pancake: thử ghép lại theo SĐT (khách được lên đơn sau khi nhân viên gọi chốt)
@@ -290,7 +292,7 @@ export async function importLandingSheet(options: { log?: (m: string) => void; o
       result.linked += 1;
     }
   }
-  clearMemo();
+  if (result.inserted + result.updated + result.linked > 0) staleMemo();
   return result;
 }
 
@@ -394,6 +396,6 @@ export async function recheckAllLanding(days = 60): Promise<{ rechecked: number;
     await refreshLandingChecks(r.id);
     if (r.orderId && (await syncVariantFromPos(r.id, r.orderId))) variantsMatched += 1;
   }
-  clearMemo();
+  if (rows.length) staleMemo();
   return { rechecked: rows.length, variantsMatched };
 }

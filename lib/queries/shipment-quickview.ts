@@ -84,20 +84,19 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
   );
   if (!s) return null;
 
-  const timeline = rowsOf<{ at: string; status: string; note: string; location: string; source: string }>(
-    await db.execute(sql`
+  // Năm phép đọc dưới đây chỉ cần `s` — chạy cùng lúc. Ngăn kéo mở khi người CSKH đang cầm máy,
+  // mỗi vòng đi-về nối đuôi là một nhịp chờ thấy được.
+  const timelineP = db.execute(sql`
       select e.occurred_at as at, coalesce(nullif(e.status_name, ''), e.status) as status, e.note, e.location, e.source
         from shipment_events e
        where e.shipment_id = ${shipmentId}
          and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','MANUAL')
        order by e.occurred_at desc
        limit 12
-    `),
-  );
+    `);
 
-  const items = s.order_id
-    ? rowsOf<{ name: string; qty: number; price: string | number }>(
-        await db.execute(sql`
+  const itemsP = s.order_id
+    ? db.execute(sql`
           select coalesce(nullif(oi.product_name, ''), 'Mẫu chưa rõ')
                  || case when oi.variation_detail <> '' then ' · ' || oi.variation_detail else '' end as name,
                  oi.quantity as qty,
@@ -106,9 +105,8 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
            where oi.order_id = ${s.order_id}
            order by oi.quantity desc
            limit 12
-        `),
-      )
-    : [];
+        `)
+    : Promise.resolve([]);
 
   /*
     LỊCH SỬ KHÁCH ĐẾM THEO SĐT, không theo `customer_id`.
@@ -118,8 +116,8 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
     theo người.
   */
   const phone = s.bill_phone || s.r_phone || "";
-  const [his] = phone
-    ? await db
+  const hisP = phone
+    ? db
         .select({
           delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')::int`,
           returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))::int`,
@@ -130,23 +128,26 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
         // và lịch sử khách hiện ra tệ hơn sự thật ngay lúc người CSKH đang cầm máy gọi họ.
         .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
         .where(and(eq(schema.orders.billPhone, phone), notInArray(schema.orders.stage, ["DELETED"])))
-    : [];
+    : Promise.resolve([]);
 
   // Số lần giao hụt đếm từ CHẶNG ĐÃ CHUẨN HOÁ của sự kiện, không dò chữ trong tên trạng thái:
   // ĐVVC đổi cách viết một chữ là phép dò chữ im lặng trả về 0.
-  const [demHut] = rowsOf<{ lan: number }>(
-    await db.execute(sql`select count(*)::int as lan from shipment_events where shipment_id = ${shipmentId} and normalized_stage = 'DELIVERY_FAILED'`),
-  );
+  const demHutP = db.execute(sql`select count(*)::int as lan from shipment_events where shipment_id = ${shipmentId} and normalized_stage = 'DELIVERY_FAILED'`);
 
-  const care = rowsOf<{ kind: string; note: string; actor: string; at: string }>(
-    await db.execute(sql`
+  const careP = db.execute(sql`
       select kind, note, actor_email as actor, created_at as at
         from care_actions
        where shipment_id = ${shipmentId}
        order by created_at desc
        limit 10
-    `),
-  );
+    `);
+
+  const [timelineRaw, itemsRaw, hisRows, demHutRaw, careRaw] = await Promise.all([timelineP, itemsP, hisP, demHutP, careP]);
+  const timeline = rowsOf<{ at: string; status: string; note: string; location: string; source: string }>(timelineRaw);
+  const items = s.order_id ? rowsOf<{ name: string; qty: number; price: string | number }>(itemsRaw) : [];
+  const [his] = hisRows;
+  const [demHut] = rowsOf<{ lan: number }>(demHutRaw);
+  const care = rowsOf<{ kind: string; note: string; actor: string; at: string }>(careRaw);
 
   return {
     shipmentId: s.id,

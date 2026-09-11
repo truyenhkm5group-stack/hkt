@@ -7,6 +7,7 @@
  * mã đo khắp nơi. Xem kết quả ở `/api/perf` (chỉ quản trị).
  */
 import { record, reportName } from "@/lib/perf/registry";
+import { publish } from "@/lib/realtime/bus";
 
 type Entry = { value: unknown; expiresAt: number };
 
@@ -115,7 +116,21 @@ export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>):
     const version = store.version;
     const refresh = fn()
       .then((value) => {
-        if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+        if (store.version === version) {
+          store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+          /**
+           * NGƯỜI ĐANG XEM SỐ CŨ PHẢI ĐƯỢC KÉO LÊN SỐ MỚI.
+           *
+           * Nhánh này trả số cũ ngay rồi mới tính lại — đúng chủ đích. Nhưng nếu dừng ở đó thì người
+           * đang mở trang cứ nhìn số của phút trước cho tới khi có một sự kiện KHÁC xảy ra: job đồng
+           * bộ xong → SSE → trang làm mới → đọc đệm → nhận số CŨ (lượt mới đang chạy phía sau) → không
+           * còn sự kiện nào nữa. Đo được trên trang báo cáo: lệch tới vài phút.
+           *
+           * Nên khi lượt làm mới xong và giá trị THẬT SỰ đổi, phát một sự kiện để trang tự làm mới
+           * lần nữa. Lần đó là trúng đệm, không tính lại, nên không có vòng lặp.
+           */
+          if (daDoi(hit.value, value)) publish({ type: "sync", source: "CACHE", job: `memo:${name}`, status: "SUCCESS" });
+        }
         return value;
       })
       .catch(() => hit.value);
@@ -135,6 +150,15 @@ export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>):
   });
   ghiNhanChay(key, p);
   return p;
+}
+
+/** Hai giá trị đệm có khác nhau không — so bản JSON; không so được thì coi là đã đổi (an toàn hơn im lặng). */
+function daDoi(a: unknown, b: unknown): boolean {
+  try {
+    return JSON.stringify(a) !== JSON.stringify(b);
+  } catch {
+    return true;
+  }
 }
 
 /**

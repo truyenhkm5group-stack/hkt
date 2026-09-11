@@ -5,7 +5,9 @@ import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
+import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
+import { publish } from "@/lib/realtime/bus";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +96,18 @@ export async function POST(request: NextRequest) {
         detail: JSON.stringify(result).slice(0, 4000),
       })
       .where(eq(schema.syncRuns.id, run.id));
-    clearMemo();
+    /*
+      TIỀN VỀ PHẢI HIỆN RA MÀ KHÔNG CẦN F5.
+
+      Trước đây đường này ghi sync_runs rồi im: không phát sự kiện realtime, không kích lượt quét cảnh
+      báo. Người đang mở trang Đối soát COD chỉ thấy bảng kê mới khi có một sự kiện KHÁC xảy ra hoặc
+      tự tải lại — với kịch bản Gmail 15 phút/lần thì số COD lệch tới hàng chục phút mà không ai biết.
+    */
+    if (imported > 0) {
+      staleMemo();
+      publish({ type: "sync", source: "VIETTELPOST", job: "vtp-statement-mail", status: failed.length ? "PARTIAL" : "SUCCESS" });
+      scheduleAlertEvaluation();
+    }
     const body = { ok: imported > 0, imported, failed: failed.length, files: result.files.map((f) => ({ filename: f.filename, kind: f.kind, rows: f.rows, applied: f.applied, note: f.note })) };
     // KHÔNG được trả 200 khi không nhập được tệp nào. Script trong Gmail chỉ gắn nhãn
     // "đã nhập" khi nhận HTTP 200; trả 200 cho một lượt hỏng sạch khiến thư bị đánh dấu xong

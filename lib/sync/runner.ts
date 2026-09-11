@@ -1,6 +1,6 @@
 import { and, eq, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
 
 export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK";
@@ -129,7 +129,16 @@ export async function runSyncJob<T>(
         .update(schema.syncRuns)
         .set({ status, imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed, detail: summary.detail || logs.at(-1) || "", error: errorText?.slice(0, 2000) ?? null, finishedAt: new Date() })
         .where(eq(schema.syncRuns.id, run.id));
-      publish({ type: "sync", source: options.source, job: options.job, status });
+      /*
+        CHỈ BÁO KHI CÓ GÌ ĐỂ BÁO.
+
+        Mỗi sự kiện `sync` khiến MỌI trình duyệt đang mở làm mới trang trên máy chủ. Job đồng bộ
+        đơn chạy 3 phút một lần và phần lớn lượt chạy không đổi một dòng nào — phát sự kiện cho lượt
+        đó là bắt máy chủ 2 nhân dựng lại trang cho từng người xem mà không có gì mới để xem.
+        Vẫn báo khi: có dòng đổi · có cảnh báo/lỗi · hoặc chính NGƯỜI bấm chạy (họ đang chờ kết quả).
+      */
+      const coGiDeBao = summary.imported + summary.updated + summary.failed > 0 || status !== "SUCCESS" || (options.trigger ?? "MANUAL") === "MANUAL";
+      if (coGiDeBao) publish({ type: "sync", source: options.source, job: options.job, status });
       return { run: { id: run.id, status }, summary, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -140,7 +149,17 @@ export async function runSyncJob<T>(
       publish({ type: "sync", source: options.source, job: options.job, status: "FAILED" });
       throw error;
     } finally {
-      clearMemo();
+      /*
+        ĐÁNH DẤU CŨ, KHÔNG XOÁ HẲN — đây là job nền, không ai ngồi chờ nó.
+
+        SỰ CỐ THẬT (10/09/2026, sửa dở): bản vá "trả số cũ ngay, làm mới phía sau" chỉ đổi `audit()`,
+        còn dòng này vẫn xoá sạch đệm sau MỌI job — đơn 3 phút, vận đơn 10 phút, cảnh báo 10 phút.
+        Job giữ ấm 4 phút một lần thua cuộc, và người mở trang chủ vẫn trả giá lượt tính nguội
+        (đo trên production 11/09: 3,3 giây bảng điều khiển + 3,8 giây tóm tắt + 3 giây sự thật
+        tài chính). Người vừa bấm "Đồng bộ" nhận số của phút trước ngay lập tức, và được kéo lên số
+        mới bằng sự kiện `memo` khi lượt tính lại xong (xem lib/cache.ts).
+      */
+      staleMemo();
       releaseJob(key);
     }
   })();
