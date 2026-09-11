@@ -1851,6 +1851,91 @@ export type InventoryHistory = typeof inventoryHistories.$inferSelect;
  * ĐO TỪ HÔM NAY. Không dựng lại cohort quá khứ: dữ liệu cũ không mang actor, và suy ngược sẽ đẻ ra
  * một tỷ lệ hiệu quả nghe rất thuyết phục mà không có gì đứng sau.
  */
+/**
+ * ═══════════ TRẠNG THÁI CARE NỘI BỘ CỦA MỘT KIỆN — KHÔNG PHẢI TRẠNG THÁI VẬN CHUYỂN ═══════════
+ *
+ * `shipments.stage` là ĐVVC nói gì về kiện (chứng từ). Bảng này là ĐỘI nói gì về việc của mình với
+ * kiện đó: chưa xử lý · đang xử lý · chờ kết quả · escalate · đã xong. Hai chiều tách rời cố ý:
+ * đội bấm "đã xong" KHÔNG làm kiện thành "đã giao", và kiện được giao KHÔNG tự đóng việc của đội —
+ * kiện chỉ RỜI hàng đợi mặc định (điều kiện cần care hết), còn lịch sử ở đây và ở `care_actions`.
+ *
+ * Một dòng cho một kiện (khoá tự nhiên `shipment_id`). Không có dòng = CHƯA XỬ LÝ.
+ */
+export const shipmentCare = pgTable(
+  "shipment_care",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .unique()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    /** `NEW` · `IN_PROGRESS` · `WAITING` · `ESCALATED` · `DONE` — xem `lib/constants/care.ts`. */
+    careStatus: text("care_status").notNull().default("NEW"),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    ownerEmail: text("owner_email").notNull().default(""),
+    /** Hẹn theo dõi lại. Tới hạn thì kiện quay về "Cần care" dù đang "chờ kết quả". */
+    followUpAt: ts("follow_up_at"),
+    lastNote: text("last_note").notNull().default(""),
+    lastNoteAt: ts("last_note_at"),
+    lastNoteBy: text("last_note_by").notNull().default(""),
+    /** Lần đầu có NGƯỜI động vào (đổi trạng thái / ghi note / gọi). Đo thời gian phản hồi đầu. */
+    firstResponseAt: ts("first_response_at"),
+    doneAt: ts("done_at"),
+    escalatedAt: ts("escalated_at"),
+    /** Số lần kiện quay lại hàng đợi SAU khi đã đóng. */
+    reopenCount: integer("reopen_count").notNull().default(0),
+    updatedBy: text("updated_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("shipment_care_status_idx").on(t.careStatus, t.followUpAt),
+    index("shipment_care_owner_idx").on(t.ownerId, t.careStatus),
+    check("shipment_care_status_check", sql`${t.careStatus} IN ('NEW', 'IN_PROGRESS', 'WAITING', 'ESCALATED', 'DONE')`),
+  ],
+);
+
+/**
+ * ═══════════ YÊU CẦU GỬI ĐVVC: VÒNG ĐỜI ĐẦY ĐỦ, KHÔNG GIẢ VỜ THÀNH CÔNG ═══════════
+ *
+ *   PENDING → SENT → ACK (API nhận) → SUCCESS (sự kiện ĐVVC xác nhận) | FAILED | UNSUPPORTED
+ *   MANUAL_REQUIRED (tài khoản API không có quyền trên kiện này) → MANUAL_DONE (người xác nhận đã làm tay)
+ *
+ * Mỗi yêu cầu có khoá idempotent, payload gửi đi, phản hồi nhận về, ai gửi, lúc nào. "Đã xử lý"
+ * không bao giờ được ghi trước khi ĐVVC xác nhận.
+ */
+export const carrierActionRequests = pgTable(
+  "carrier_action_requests",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderNumber: text("order_number").notNull().default(""),
+    /** `redeliver` · `approve-return` · `resend` · `approve` · `cancel` · `edit` — xem `lib/constants/care.ts`. */
+    actionKey: text("action_key").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    payload: jsonb("payload"),
+    response: jsonb("response"),
+    error: text("error"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    note: text("note").notNull().default(""),
+    sentAt: ts("sent_at"),
+    ackAt: ts("ack_at"),
+    /** Mốc ĐVVC xác nhận bằng SỰ KIỆN (không phải bằng phản hồi API). */
+    confirmedAt: ts("confirmed_at"),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("carrier_action_shipment_idx").on(t.shipmentId, t.createdAt),
+    index("carrier_action_status_idx").on(t.status, t.createdAt),
+    check("carrier_action_status_check", sql`${t.status} IN ('PENDING', 'SENT', 'ACK', 'SUCCESS', 'FAILED', 'UNSUPPORTED', 'MANUAL_REQUIRED', 'MANUAL_DONE')`),
+  ],
+);
+
 export const careActions = pgTable(
   "care_actions",
   {

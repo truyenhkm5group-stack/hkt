@@ -46,6 +46,14 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "return.received": "Xác nhận nhận hàng hoàn",
   "return.received.undo": "Huỷ xác nhận nhận hàng hoàn",
   "return.received.bulk": "Xác nhận nhận hàng hoàn hàng loạt",
+  "care.record": "CSKH ghi nhận việc đã làm",
+  "care.status": "Đổi trạng thái care nội bộ",
+  "care.owner": "Giao kiện cho người care",
+  "care.followUp": "Hẹn theo dõi lại kiện",
+  "care.note": "Ghi note care",
+  "carrier.request": "Gửi yêu cầu tới ĐVVC",
+  "carrier.request.result": "ĐVVC trả lời yêu cầu",
+  "carrier.manual": "Xác nhận đã làm tay trên ĐVVC",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {

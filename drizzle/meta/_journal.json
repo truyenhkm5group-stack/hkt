@@ -414,6 +414,13 @@
       "when": 1789107349696,
       "tag": "0059_cogs_true_up",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1789119873605,
+      "tag": "0060_shipment_care",
+      "breakpoints": true
     }
   ]
 }

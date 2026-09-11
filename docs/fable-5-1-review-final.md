@@ -293,6 +293,54 @@ người làm việc và **cất chữ giải thích vào ⓘ**.
 **Sau deploy (kiểm tra bằng mắt theo mã)**: thanh bên 6 nhóm / 27 mục; Cần xử lý và Điều hành có tab
 chung; ngăn kéo care có ‹ n/N › và tự sang kiện kế sau "Ghi nhận"; Tổng quan còn số + ⓘ.
 
+### 7.8 Vòng 5: Vận đơn & care thành bàn làm việc giao vận
+
+**Kiến trúc** (không viết lại luật nào đã có)
+- Điều kiện cần care = đúng các rổ của tháp giao vận (`xepRo`, một luật) + case CSKH sai địa chỉ / SĐT
+  còn mở của lần gửi đang chạy. Rổ hàng hoàn thuộc đường ống kho, không vào đây.
+- **Hai chiều tách rời**: `shipments.stage` (chứng từ ĐVVC) và `shipment_care.care_status` (đội đã
+  làm tới đâu: Chưa xử lý · Đang xử lý · Chờ kết quả · Escalate · Đã xong). Đội bấm Đã xong không
+  đổi chặng ĐVVC; kiện được giao không tự đóng việc — nó chỉ RỜI hàng đợi. Test khoá điều này.
+- **Yêu cầu gửi ĐVVC** (`carrier_action_requests`): PENDING → SENT → ACK (API nhận) → SUCCESS chỉ khi
+  sự kiện hành trình xác nhận (`settleCarrierRequests` móc vào `applyVtpTracking`) | FAILED |
+  UNSUPPORTED; khoá idempotent theo kiện + hành động + nội dung + ngày; payload / phản hồi / người /
+  mốc; audit đủ. Tài khoản API không sở hữu kiện (`tracking_capability ≠ API_TRACKABLE`) ⇒
+  **MANUAL_REQUIRED**, không gọi API, không giả vờ; người làm tay trên viettelpost.vn rồi bấm "Đã làm
+  tay" ⇒ MANUAL_DONE. Production hiện 565/565 kiện đang chạy là WEBHOOK_ONLY nên mọi thao tác VTP là
+  làm tay có ghi vết — cho tới khi shop trỏ ERP về đúng tài khoản Viettel Post của Pancake.
+- Nghiệp vụ nằm ở `lib/care/service.ts` (không phụ thuộc phiên) — Server Action chỉ kiểm quyền;
+  nhờ vậy kiểm thử gọi thẳng nghiệp vụ với actor giả.
+
+**Giao diện** (`/shipments`): năm tab một hàng **Cần care | Đang chờ kết quả | Escalated | Đã xử lý |
+Tất cả vận đơn** (+ "Hiệu quả care" bên phải), chữ giải thích trong ⓘ. Mặc định chỉ kiện cần người.
+Mỗi dòng: kiện · vì sao · nên làm · khách + SĐT bấm gọi · COD · VTP báo (thô + chặng + tuổi tin) ·
+trạng thái care (select) · người care · hẹn theo dõi (+2 giờ / sáng mai / +2 ngày) · note gần nhất +
+"Ghi note" (popover, Ctrl+Enter) · người và lúc cập nhật · thao tác VTP (API / làm tay). Chọn nhiều
+dòng ⇒ đổi trạng thái / giao người hàng loạt. Mọi hành động vá tại dòng, không tải lại, không cuộn;
+kiện đổi góc nhìn thì rời tab ngay, đếm trên tab đổi theo. "Tra nhanh" mở ngăn kéo đi lần lượt.
+
+**Báo cáo hiệu quả care** (`view=report`, theo kỳ): backlog / vỡ SLA / chưa ai nhận / COD treo ·
+phản hồi đầu (trung vị, trong 2 giờ) · đã đóng (trong 24 giờ, mở lại) · **giao hụt → kết cục** so
+sánh nhóm có người care và không ai care (giao được / hoàn / còn chạy) · phát lại thành công ·
+yêu cầu ĐVVC theo trạng thái · theo nhân viên xếp theo **COD cứu được**, cứu / can thiệp, hoàn sau
+care, đã đóng, phản hồi đầu, vỡ SLA đang cầm; số lần bấm chỉ để tham khảo, không xếp hạng.
+
+**Benchmark luồng care giao thất bại**
+
+| Bước | Trước (vòng 4) | Sau |
+|---|---|---|
+| Biết hôm nay phải gọi ai | mở tháp → bấm rổ → đọc bảng | mở tab: danh sách đã là việc, xếp COD giảm dần, vỡ SLA đỏ |
+| Đổi trạng thái xử lý | không có (chỉ ghi "đã gọi") | 1 bấm tại dòng |
+| Ghi note | mở ngăn kéo → gõ → Ghi nhận (2 bấm) | popover tại dòng, Ctrl+Enter (1 bấm) |
+| Giao việc / hẹn theo dõi | không có | 1 bấm tại dòng |
+| Phát tiếp / duyệt hoàn | mở trang chi tiết vận đơn → nút → xác nhận (đổi trang) | popover tại dòng, không đổi trang; nói thẳng API hay làm tay |
+| Đổi trạng thái 20 kiện | 20 lượt | chọn 20 → 1 bấm |
+| Bảng mặc định | toàn bộ vận đơn 30 ngày (hàng trăm dòng) | chỉ kiện cần người |
+
+Migration `0060_shipment_care`. Kiểm thử: `tests/care-workbench.test.ts` (5 nhóm: care không chạm
+ĐVVC · audit đủ · góc nhìn / mở lại / tới hạn · yêu cầu ĐVVC làm tay / ACK→SUCCESS theo sự kiện /
+idempotent / lỗi quyền · báo cáo theo kết cục).
+
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).
 2. Ngăn kéo đơn dùng chung (/orders, /alerts) mang sẵn rủi ro + gợi ý địa chỉ cũ + nút Pancake +

@@ -9,6 +9,7 @@ import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations
 import { publish } from "@/lib/realtime/bus";
 import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/sync/runner";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { settleCarrierRequests } from "@/lib/care/carrier-requests";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 /**
@@ -200,6 +201,8 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   // Ảnh chụp cuối cùng luôn được dựng từ lịch sử: một chỗ duy nhất quyết định trạng thái.
   const finalState = await materializeShipmentState(db, shipment.id);
   const stageNow = (finalState.after as ShipmentStage) ?? shipment.stage;
+  // Yêu cầu đã gửi ĐVVC (phát tiếp / duyệt hoàn…) chỉ thành SUCCESS khi sự kiện hành trình xác nhận.
+  await settleCarrierRequests(db, shipment.id, meta.stage ?? stageNow, statusDate).catch(() => undefined);
   // "Đã áp dụng" chỉ đúng khi trạng thái thực sự tiến triển. Gói tin lặp đi qua nhánh này (cùng
   // mốc thời gian nên vẫn được coi là không cũ hơn) nhưng không được đếm như một lần cập nhật.
   // So với ảnh chụp TRƯỚC khi ghi, vì đến lúc này bản ghi đã bị cập nhật rồi.

@@ -42,6 +42,10 @@ const MIEN_TRU: Record<string, string> = {
   // để nhân lên — và cũng KHÔNG được thêm PRIMARY_ATTEMPT vào đây: việc gắn với lần gửi thứ hai
   // của một đơn là một việc có thật, lọc nó đi thì tiền của nó biến mất khỏi bảng điều hành.
   "lib/queries/stage-health.ts": "grain là VIỆC (notifications), nối theo entity_id nên mỗi việc ra đúng một dòng — không nhân được",
+  // Bàn làm việc giao vận và báo cáo care đo theo KIỆN (mỗi lần gửi là một kiện phải care, kể cả
+  // lần gửi thứ hai của cùng một đơn). Nối orders chỉ để lấy tên / SĐT khách, không cộng tiền theo đơn.
+  "lib/queries/care-workbench.ts": "grain là KIỆN CẦN CARE — lần gửi thứ hai cũng là một kiện phải gọi; nối orders chỉ lấy tên/SĐT",
+  "lib/queries/care-report.ts": "grain là KIỆN giao hụt / kiện có can thiệp; kết cục đọc theo SHIPMENT_DELIVERED của chính kiện đó",
 };
 
 /** Nối `orders → shipments` ở mọi cách viết đang dùng trong kho (Drizzle builder và SQL thô). */
