@@ -173,7 +173,7 @@ chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu
 |---|---|---|
 | ~~P0~~ | ~~Giá vốn đóng băng ở 0~~ | **Đã làm ở vòng 3 (mục 7.5)** theo quyết định chủ shop |
 | ~~P1~~ | ~~Mốc `prepaid` khác nhau giữa Dòng tiền và /reports~~ | **Đã làm ở vòng 3 (mục 7.5)** |
-| P1 | Ngăn kéo đơn dùng chung cho /alerts và /orders (mẫu: ngăn kéo vận đơn) | Việc M |
+| ~~P1~~ | ~~Ngăn kéo đơn dùng chung cho /alerts và /orders~~ | **Đã làm ở vòng 3** bằng cách dùng lại ngăn kéo vận đơn (xem 7.6) |
 | ~~P1~~ | ~~Job tra Viettel Post ghi PARTIAL vì tài khoản API không thấy vận đơn~~ | **Đã làm ở vòng 3 (mục 7.5)** |
 | P2 | /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
 
@@ -207,6 +207,15 @@ chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu
   SUCCESS; chi tiết lượt chạy, sức khoẻ connector và thẻ trên trang Kết nối nêu số vận đơn theo năng
   lực (tra được qua API / chỉ nhận webhook / đang dò). Vận đơn chỉ nhận webhook khoẻ theo webhook.
 - Kiểm thử: `tests/vtp-capability.test.ts` (client giả qua `setViettelPostClientForTests`).
+
+### 7.6 Tra nhanh ngay trên hàng đợi và danh sách đơn (ít bấm hơn)
+
+Không viết ngăn kéo đơn mới: ngăn kéo vận đơn (`CareDrawer`) đã gom khách · món hàng · lịch sử mua ·
+ĐVVC nói gì · ai đã chăm · nút gọi / chat Pancake. Hàng đợi `/alerts` nay mang `quickShipmentId`
+(việc về vận đơn = chính kiện đó; việc về đơn = lần gửi chính theo `PRIMARY_ATTEMPT`, cùng cách chọn
+với mọi báo cáo) và mỗi dòng có nút **Tra nhanh** mở ngăn kéo tại chỗ; cột Vận chuyển của `/orders`
+cũng vậy. Trước: gọi một khách từ hàng đợi = rời trang → chi tiết đơn → vận đơn → quay lại và mất
+chỗ. Sau: một lần bấm, đóng lại vẫn ở đúng dòng. Kiểm thử: `tests/action-queue.test.ts`.
 
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).

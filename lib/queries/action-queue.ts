@@ -2,6 +2,7 @@ import { desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { csGroupValues } from "@/lib/queries/cs";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import {
   CASE_ACTION,
   RECOVERABILITY,
@@ -81,6 +82,12 @@ export type ActionCase = {
   scoreExplanation: string;
   /** Hạn xử lý. `null` khi loại việc CỐ Ý không đặt hạn (xem CASE_SLA_HOURS). */
   sla: CaseSla | null;
+  /**
+   * Kiện hàng để mở NGĂN KÉO TRA NHANH ngay trên hàng đợi (khách là ai, mua gì, ĐVVC nói gì, ai đã
+   * chăm) — không phải rời trang. Việc về vận đơn thì là chính nó; việc về đơn thì là lần gửi
+   * chính của đơn. `null` = chưa có kiện nào để mở (đơn chưa gửi, việc về mẫu mã / nhóm...).
+   */
+  quickShipmentId: string | null;
 };
 
 export type ActionQueue = {
@@ -141,6 +148,18 @@ const EVIDENCE_SOURCE: Record<string, string> = {
 };
 
 /** Số tiền liên quan tới việc, nếu tra được — dùng cho phần "giá trị tiền" của điểm ưu tiên. */
+/** Lần gửi chính của từng đơn — cùng `PRIMARY_ATTEMPT` với mọi báo cáo, không tự chọn vận đơn. */
+async function primaryShipmentFor(orderIds: string[]): Promise<Map<string, string>> {
+  if (!orderIds.length) return new Map();
+  const db = await getDb();
+  const rows = await db
+    .select({ orderId: schema.shipments.orderId, id: schema.shipments.id })
+    .from(schema.shipments)
+    .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+    .where(sql`${schema.shipments.orderId} in ${orderIds} and ${PRIMARY_ATTEMPT}`);
+  return new Map(rows.map((r) => [String(r.orderId), r.id]));
+}
+
 async function amountsFor(entityIds: string[]): Promise<Map<string, number>> {
   if (!entityIds.length) return new Map();
   const db = await getDb();
@@ -302,12 +321,13 @@ export async function getActionQueue(
   // ĐẾM BẰNG CHÍNH ĐIỀU KIỆN CỦA DANH SÁCH — không nạp 966 dòng chỉ để đếm.
   // Bốn phép đọc dưới đây không phụ thuộc nhau: chạy song song. Hàng đợi cố ý KHÔNG đệm (người vừa
   // bấm "Tôi nhận" phải thấy ngay), nên mỗi vòng đi-về tiết kiệm được là tiết kiệm ở mọi lần mở trang.
-  const [[{ filteredTotal }], [{ openTotal }], amounts, stockDays] = await Promise.all([
+  const [[{ filteredTotal }], [{ openTotal }], amounts, stockDays, primaryShipments] = await Promise.all([
     db.select({ filteredTotal: sql<number>`count(*)` }).from(n).where(where),
     // Và tổng việc đang mở BẤT KỂ bộ lọc, để người dùng biết mình đang xem một phần của cái gì.
     db.select({ openTotal: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt)),
     amountsFor([...new Set(rows.map((r) => r.entityId).filter(Boolean))]),
     daysToStockoutFor([...new Set(rows.filter((r) => r.entityType === "VARIANT").map((r) => r.entityId).filter(Boolean))]),
+    primaryShipmentFor([...new Set(rows.filter((r) => r.entityType === "ORDER").map((r) => r.entityId).filter(Boolean))]),
   ]);
   const now = Date.now();
 
@@ -352,6 +372,7 @@ export async function getActionQueue(
       ignoredReason: r.ignoredReason ?? "",
       scoreParts,
       scoreExplanation: scoreExplanation(scoreParts),
+      quickShipmentId: r.entityType === "SHIPMENT" ? r.entityId || null : r.entityType === "ORDER" ? (primaryShipments.get(r.entityId) ?? null) : null,
       /*
         HẠN XỬ LÝ TÍNH TỪ LÚC ERP GIAO VIỆC (`created_at`), KHÔNG TỪ MỐC NGHIỆP VỤ (`occurred_at`).
 

@@ -89,6 +89,16 @@ export async function testActionQueue(db: Db) {
   // ───────── 2. Hàng đợi thật: mỗi việc phải đủ thông tin để làm ─────────
   const queue = await getActionQueue({ limit: 200 });
   assert.ok(queue.cases.length > 0, "fixture phải có việc đang mở");
+  // Tra nhanh cho việc về ĐƠN: đơn đã có lần gửi thì phải mở được lần gửi chính; chưa gửi thì null.
+  const donCoViec = [...new Set(queue.cases.filter((c) => c.entityType === "ORDER").map((c) => c.entityId))];
+  const kienCuaDon = donCoViec.length
+    ? await db.select({ orderId: schema.shipments.orderId }).from(schema.shipments).where(sql`${schema.shipments.orderId} in ${donCoViec}`)
+    : [];
+  const donDaGui = new Set(kienCuaDon.map((r) => String(r.orderId)));
+  for (const c of queue.cases.filter((c) => c.entityType === "ORDER")) {
+    if (donDaGui.has(c.entityId)) assert.ok(c.quickShipmentId, `${c.id}: đơn đã gửi ĐVVC phải mở được ngăn kéo tra nhanh của lần gửi chính`);
+    else assert.equal(c.quickShipmentId, null, `${c.id}: đơn chưa gửi thì không có kiện nào để tra nhanh`);
+  }
   for (const c of queue.cases) {
     assert.ok(c.typeLabel && CASE_TYPE_LABEL[c.type], `${c.id}: phải có loại việc`);
     assert.ok(c.recommendedAction.length > 10, `${c.id}: phải nói rõ nên làm gì`);
@@ -98,6 +108,9 @@ export async function testActionQueue(db: Db) {
     // Mỗi việc phải nói được nó dựa trên bằng chứng nào — không có bằng chứng thì không phải việc.
     assert.ok(c.evidence.source.length > 0 && c.evidence.detail.length > 0, `${c.id}: phải có bằng chứng`);
     assert.ok(c.financialImpact >= 0, `${c.id}: tiền liên quan không được âm`);
+    // Tra nhanh ngay trên hàng đợi: việc về vận đơn mở chính kiện đó; việc về đơn mở lần gửi chính.
+    if (c.entityType === "SHIPMENT") assert.equal(c.quickShipmentId, c.entityId, `${c.id}: việc về vận đơn phải mở được chính kiện đó`);
+    if (c.entityType !== "SHIPMENT" && c.entityType !== "ORDER") assert.equal(c.quickShipmentId, null, `${c.id}: việc không về kiện hàng thì không có gì để tra nhanh`);
     assert.ok(c.recoverability > 0 && c.recoverability <= 1, `${c.id}: phải biết còn cứu được bao nhiêu`);
     assert.ok(c.score >= 0 && c.score <= 100, `${c.id}: điểm ưu tiên phải trong 0–100`);
     assert.ok(c.scoreExplanation.length > 0, `${c.id}: phải giải thích được vì sao xếp ưu tiên như vậy`);

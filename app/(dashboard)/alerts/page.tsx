@@ -10,6 +10,7 @@ import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
+import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { ideasWaitingReview } from "@/lib/queries/ideas";
 import { Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -150,7 +151,15 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                   {PRIORITY_LABEL[c.priority]} · {c.score}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <Link href={c.href || "#"} className="block text-sm font-semibold hover:text-primary hover:underline">{c.title}</Link>
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <Link href={c.href || "#"} className="text-sm font-semibold hover:text-primary hover:underline">{c.title}</Link>
+                    {/* Mở kiện hàng ngay tại đây: gọi khách / xem ĐVVC nói gì mà không rời hàng đợi. */}
+                    {c.quickShipmentId ? (
+                      <CareDrawer shipmentId={c.quickShipmentId} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
+                        Tra nhanh
+                      </CareDrawer>
+                    ) : null}
+                  </div>
                   <p className="text-xs text-muted-foreground">{c.reason}</p>
                   <p className="mt-0.5 text-xs"><span className="text-muted-foreground">Nên làm: </span>{c.recommendedAction}</p>
                   <p className="text-[10.5px] text-muted-foreground" title={formatDateTime(c.detectedAt)}>
