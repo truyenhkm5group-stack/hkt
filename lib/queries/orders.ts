@@ -6,6 +6,8 @@ import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import type { ListParams } from "@/lib/search-params";
+import { loadAlertConfig } from "@/lib/alerts/config";
+import { assessCustomerRisk } from "@/lib/alerts/risk";
 
 export const ORDER_SORTABLE = ["insertedAt", "total", "systemId", "updatedAtExternal", "status"];
 
@@ -67,7 +69,7 @@ export async function listOrders(params: ListParams) {
   const sortColumn = sortMap[params.sort] ?? schema.orders.insertedAt;
   const orderBy = params.dir === "asc" ? asc(sortColumn) : desc(sortColumn);
 
-  const [rows, [{ total }]] = await Promise.all([
+  const [rowsRaw, [{ total }], riskCfg] = await Promise.all([
     db.query.orders.findMany({
       where,
       orderBy: [orderBy, desc(schema.orders.id)],
@@ -97,10 +99,25 @@ export async function listOrders(params: ListParams) {
       with: {
         shipment: { columns: { id: true, stage: true, carrier: true, trackingCode: true, vtpOrderNumber: true, codStatus: true, vtpStatusName: true } },
         items: { columns: { productName: true, variationDetail: true, quantity: true, image: true }, limit: 3 },
+        // Lịch sử khách theo Pancake — đủ để chấm rủi ro ngay trên dòng.
+        customer: { columns: { succeedOrderCount: true, returnedOrderCount: true, isBlock: true } },
       },
     }),
     db.select({ total: count() }).from(schema.orders).where(where),
+    loadAlertConfig(),
   ]);
+
+  /*
+    CỜ RỦI RO NGAY TRÊN DÒNG. Trước đây khách có lịch sử hoàn cao chỉ lộ ra khi MỞ chi tiết đơn —
+    người CSKH duyệt 50 đơn mỗi sáng thì không mở 50 trang. Cùng công thức với chi tiết đơn và luật
+    cảnh báo (`assessCustomerRisk`), chỉ khác là ở đây dùng số Pancake của khách (không tra thêm lịch
+    sử ERP theo SĐT cho từng dòng); chi tiết đơn vẫn có bản đầy đủ.
+  */
+  const rows = rowsRaw.map((r) => {
+    const c = r.customer;
+    const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
+    return { ...r, risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null };
+  });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }

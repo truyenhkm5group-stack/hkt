@@ -37,6 +37,12 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
         {!row.original.shipProvince && !["CANCELLED", "DELETED"].includes(row.original.stage) ? (
           <div className="text-xs font-medium text-amber-600">Địa chỉ chưa chuẩn hoá</div>
         ) : null}
+        {/* Khách có lịch sử hoàn cao / bị chặn: xin cọc hoặc xác nhận kỹ TRƯỚC khi gửi — thấy ngay trên dòng, không phải mở chi tiết. */}
+        {row.original.risk && !["CANCELLED", "DELETED", "DELIVERED", "PAID"].includes(row.original.stage) ? (
+          <div className={`text-xs font-semibold ${row.original.risk.severity === "critical" ? "text-rose-600" : "text-amber-600"}`} title={row.original.risk.reasons.join(" · ")}>
+            Rủi ro · {row.original.risk.reasons[0]}
+          </div>
+        ) : null}
       </div>
     ),
   },

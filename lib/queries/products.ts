@@ -1,7 +1,7 @@
 import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { toDate } from "@/lib/format";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -205,8 +205,13 @@ export async function listProducts(params: ListParams, limit?: number) {
   const orderBy = params.dir === "asc" ? asc(sortExpr) : desc(sortExpr);
   const pageSize = limit ?? params.pageSize;
 
+  /*
+    TẮT JIT CHO CÂU DANH SÁCH. Nó nối ba bảng dẫn xuất của sổ kho (`vsales` / `vreceipts` / bán 30
+    ngày) — đúng họ truy vấn đã đo được 8.578ms bật JIT ↔ 26ms tắt JIT trên production (xem
+    db/index.ts). `stockRiskSummary` đã được bọc; câu danh sách của trang Sản phẩm thì chưa.
+  */
   const [rows, [{ total }]] = await Promise.all([
-    db
+    chayKhongJit(db, (tx) => tx
       .select({
         id: pv.id,
         productId: pv.productId,
@@ -254,7 +259,7 @@ export async function listProducts(params: ListParams, limit?: number) {
       .where(where)
       .orderBy(orderBy, asc(p.name), asc(pv.sku))
       .limit(pageSize)
-      .offset(limit ? 0 : (params.page - 1) * params.pageSize),
+      .offset(limit ? 0 : (params.page - 1) * params.pageSize)),
     db.select({ total: count() }).from(pv).innerJoin(p, eq(pv.productId, p.id)).where(where),
   ]);
 

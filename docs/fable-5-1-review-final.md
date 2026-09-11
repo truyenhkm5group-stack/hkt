@@ -122,18 +122,57 @@ Kiểm tra dữ liệu trước khi sửa mục 4 (db-query, chỉ đọc): 1.97
 28 vận đơn COLLECTED + DELIVERED không có số thực thu (nhóm bị nhánh dự phòng cũ coi là "đã xác
 minh"). Vì vậy không cần dọn dữ liệu.
 
-## 7. P0/P1 còn lại (có bằng chứng, chưa sửa vì cần chủ shop quyết hoặc quá phạm vi)
+## 7. Vòng 2 (cùng ngày, sau khi chủ shop chốt CS_CASE)
+
+### 7.1 Case CSKH: gom thông báo, không gom việc
+
+Production lúc chốt: 232 case đang mở — 183 giao hụt do bot tự nhắn, 14 giục giao, 12 trả hàng,
+10 đủ thông tin chưa tạo đơn, 6 tư vấn size, 4 khiếu nại, 1 sai địa chỉ, 2 đổi size/màu.
+
+| Loại | Cách hiện | Vì sao |
+|---|---|---|
+| Sai địa chỉ · Sai SĐT · Xác nhận SĐT bot gửi hỏng | **mỗi case một việc** | lỗi cụ thể trên một đơn, chặn gửi hàng |
+| Còn lại (giao hụt, giục giao, trả hàng, đổi size/màu, khiếu nại, tư vấn size, chốt sai giá, xác nhận SĐT đã gửi, khác) | **một việc tổng hợp theo (loại · người phụ trách)** | cùng hành động, cùng nơi làm; con số mới là thứ có ý nghĩa |
+| Case trong nhóm mà khách-đang-chờ (đủ thông tin chưa tạo đơn, giục giao, khiếu nại, chốt sai giá) quá hạn 4 giờ và còn trong cửa sổ 72 giờ; hoặc case đã có NGƯỜI nhận mà quá hạn | **tách riêng** | thật sự đến hạn cần người làm |
+
+Việc tổng hợp nói đủ: số case · số quá hạn · cũ nhất · người phụ trách · tiền đơn liên quan (nếu có)
+· "Xem danh sách" trỏ thẳng bộ lọc `/cs`. Khoá chống trùng KHÔNG chứa số đếm — số đổi thì nội dung
+cập nhật tại chỗ; hết case thì tự đóng (AUTO); người bấm "Đã xử lý" khi case vẫn còn thì lượt quét
+sau mở lại (một việc tổng hợp chỉ xong khi hết thứ nó đếm). Bảng điều hành đếm **case gốc** trong
+`cs_cases` (tồn đọng, quá hạn, tuổi, chưa ai nhận, tiền), không đếm thông báo. Luật một chỗ:
+`lib/constants/cs.ts`; lá chắn: `tests/cs-case-grouping.test.ts`.
+
+Ước tính trên số production: 232 dòng → **~4 dòng riêng + ~10 dòng tổng hợp**.
+
+### 7.2 Cùng mẫu cho hai nguồn nhiễu khác
+
+- **Đang chuyển hoàn**: 99 việc "chuẩn bị nhận hàng" (hạn null, không ai làm gì được) → **một** việc
+  sống: N kiện · COD không về · kiện cũ nhất; khâu "Hoàn về" ở bảng điều hành đếm KIỆN từ đường ống.
+- **Hai việc gộp hàng hoàn** (`return-inspect-bulk`, `return-count-bulk`): khoá theo số lượng nên kho
+  đếm bớt một kiện là "tự đóng" + mở việc mới — vài lần mỗi ngày, thổi phồng "tự đóng" 30 ngày. Nay
+  khoá ổn định, cập nhật tại chỗ.
+
+### 7.3 Còn lại trong vòng này
+
+- Dải độ tươi hiện trên `/shipments` và `/cod` (trước đây chỉ trang chủ có).
+- `outcome-materialize` chạy qua `runSyncJob`: có bản ghi ở Kết nối dữ liệu, có đồng hồ canh, phát
+  sự kiện khi dựng lại được dòng. Trước đây hỏng là mọi báo cáo âm thầm chậm dần.
+- Nút Đồng bộ không làm mới trang TRƯỚC khi job chạy (số chưa đổi, sự kiện sẽ kéo).
+- `/data-quality` bỏ 6 thẻ "đối chiếu tạm" chép `/reports/returns`; giữ 2 thẻ chỉ trang này có.
+- `/products`: câu danh sách bọc tắt JIT (cùng họ 8.578 → 26ms); chỉ mục `shipments(created_at)`
+  cho lọc kỳ + sắp mặc định của `/shipments` (migration 0058).
+- Cờ **Rủi ro** ngay trên dòng `/orders` (cùng `assessCustomerRisk` với chi tiết đơn và luật cảnh
+  báo, dùng số Pancake của khách) — người duyệt 50 đơn mỗi sáng không phải mở 50 trang.
+
+### 7.4 P0/P1 còn lại (cần chủ shop quyết hoặc quá phạm vi)
 
 | Ưu tiên | Việc | Vì sao chưa làm |
 |---|---|---|
-| P0 | **CS_CASE nhân đôi cả trang /cs vào hàng đợi** (364 việc, SLA 4 giờ ⇒ 338 "trễ"); `href` là tìm kiếm chứ không phải deep-link | Đổi số việc đang mở của cả hệ — AGENTS §7: hỏi chủ shop. Đề xuất: chỉ mirror WRONG_ADDRESS/WRONG_PHONE (chặn giao hàng), còn lại một việc gộp |
 | P0 | **Giá vốn đóng băng ở 0**: đơn giao trước khi mẫu mã có phiếu nhập chốt `recognized_cogs = 0` vĩnh viễn ⇒ lợi nhuận Tổng quan/Báo cáo cao hơn thật | Đụng kỳ đã chốt — chủ shop quyết. Đề xuất: lưu NULL khi không tra được, hiện "N đơn chưa có giá vốn" ở mọi trang lợi nhuận |
-| P1 | `SHIPMENT_RETURNING` 99 việc không ai làm được gì (SLA null, "chuẩn bị nhận hàng") | Nên là một việc gộp hoặc bỏ khỏi hàng đợi — tháp /shipments đã hiện rổ này |
 | P1 | Mốc kỳ khác nhau cùng nhãn: `prepaid` ở Dòng tiền theo mốc kết thúc, ở /reports theo `inserted_at` | Cần chốt một mốc, ghi vào hợp đồng chỉ số |
-| P1 | Cột "Cờ" (rủi ro / SĐT mới / thiếu địa chỉ) ngay ở dòng /orders + ngăn kéo đơn dùng chung với /alerts | Việc M; ngăn kéo vận đơn (phiên song song vừa thêm vào ⌘K) là mẫu để tổng quát hoá |
-| P1 | `outcome-materialize` chạy mù: không `sync_runs`, không hiện ở Kết nối dữ liệu | Job hỏng ⇒ mọi báo cáo âm thầm rơi về đường chậm; nên bọc `runSyncJob` và hiện `outcomeCoverage()` |
-| P1 | `dedupeKey` theo số lượng (`return-inspect-bulk:${n}`, `data-error:${rule}:${count}`) ⇒ đóng/mở việc mới mỗi khi số đổi, thổi phồng "tự đóng" | Việc S nhưng đổi cách đo năng suất đội |
-| P2 | /data-quality 8 thẻ KPI chép /reports/returns; /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
+| P1 | Ngăn kéo đơn dùng chung cho /alerts và /orders (mẫu: ngăn kéo vận đơn) | Việc M |
+| P1 | Job tra Viettel Post ghi PARTIAL mỗi 10 phút vì tài khoản API không thấy vận đơn ⇒ Kết nối dữ liệu luôn "DEGRADED", che lỗi thật | Cấu hình tài khoản VTP; cần tách lý do "API mù" khỏi PARTIAL |
+| P2 | /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
 
 ## 8. Việc tiếp theo theo ROI
 1. Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0) — mỗi việc nửa ngày, đổi trực tiếp số

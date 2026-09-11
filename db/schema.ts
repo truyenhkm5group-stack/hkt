@@ -1051,6 +1051,8 @@ export const shipments = pgTable(
   },
   (t) => [
     index("shipments_order_idx").on(t.orderId),
+    // Trang Vận đơn lọc kỳ và sắp mặc định theo ngày tạo; năm bộ đếm facet dùng cùng vị ngữ.
+    index("shipments_created_idx").on(t.createdAt),
     index("shipments_vtp_number_idx").on(t.vtpOrderNumber),
     index("shipments_stage_idx").on(t.stage),
     index("shipments_cod_status_idx").on(t.codStatus),
