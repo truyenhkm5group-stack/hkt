@@ -36,10 +36,17 @@ export type StatTileProps = {
 
 export function StatStrip({ items, className, columns = 4 }: { items: StatTileProps[]; className?: string; columns?: 2 | 3 | 4 | 5 }) {
   const cols = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4", 5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" }[columns];
+  /*
+    ĐƯỜNG KẺ LÀ KHE HỞ 1px, KHÔNG PHẢI VIỀN CỦA TỪNG Ô.
+    Lưới này đổi số cột theo bề rộng màn hình. Nếu mỗi ô tự vẽ viền trái thì ô đầu của hàng thứ
+    hai cũng vẽ — thành một vạch lạc lõng giữa khối — còn giữa hai hàng lại chẳng có vạch nào.
+    Để nền cả khối là màu viền rồi chừa khe 1px giữa các ô thì lưới gãy hàng kiểu gì đường kẻ
+    cũng tự đúng: ngang có, dọc có, mép ngoài không thừa.
+  */
   return (
-    <div className={cn("grid overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] divide-y divide-hairline sm:divide-y-0", cols, className)}>
-      {items.map((item, i) => (
-        <StatTile key={item.label} {...item} className={cn(i > 0 && "sm:border-l sm:border-hairline")} />
+    <div className={cn("grid gap-px overflow-hidden rounded-xl border bg-border shadow-[var(--shadow-card)]", cols, className)}>
+      {items.map((item) => (
+        <StatTile key={item.label} {...item} className="bg-card" />
       ))}
     </div>
   );
