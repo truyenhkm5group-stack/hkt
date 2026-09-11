@@ -3,6 +3,7 @@
  *   npm run check:integrations
  */
 import "dotenv/config";
+import { eq } from "drizzle-orm";
 import { env } from "@/lib/env";
 import { asRecord, str } from "@/lib/integrations/http";
 import { PancakeClient } from "@/lib/integrations/pancake/client";
@@ -10,6 +11,11 @@ import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
+import { runCopilot } from "@/lib/ai/copilot";
+import { testAiConnection } from "@/lib/ai/provider";
+import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
+import { getDb, schema } from "@/db";
+import { resolvePermissions } from "@/lib/auth/permissions";
 
 const ok = (msg: string) => console.log(`  ✓ ${msg}`);
 const bad = (msg: string) => console.log(`  ✗ ${msg}`);
@@ -169,12 +175,57 @@ async function checkFacebook() {
   }
 }
 
+/**
+ * AI Copilot: (1) một lượt ping rẻ (bậc routine); (2) một câu hỏi THẬT qua đúng vòng lặp copilot với
+ * tool đọc trên dữ liệu production, chạy dưới tài khoản quản trị đầu tiên. In META (trạng thái, tool,
+ * số vòng, độ trễ, token) — KHÔNG in câu trả lời vì log Actions là công khai và câu trả lời có thể
+ * chứa tên / SĐT khách.
+ */
+async function checkAi() {
+  console.log("\n▶ AI Copilot");
+  const provider = resolveProviderName();
+  if (!provider) {
+    bad(`Chưa cấu hình: ${aiDisabledReason()}`);
+    return;
+  }
+  info(`provider ${provider} · model copilot ${modelFor(provider, "copilot")} · routine ${modelFor(provider, "routine")}`);
+  try {
+    const ping = await testAiConnection();
+    ok(`Ping ${ping.provider} · ${ping.model} trả lời "${ping.answer}" sau ${ping.latencyMs} ms`);
+  } catch (error) {
+    bad(`Ping thất bại: ${error instanceof Error ? error.message.slice(0, 300) : String(error)}`);
+    return;
+  }
+  const db = await getDb();
+  const [admin] = await db.select({ id: schema.users.id, email: schema.users.email, name: schema.users.name }).from(schema.users).where(eq(schema.users.role, "ADMIN")).limit(1);
+  if (!admin) {
+    bad("Không có tài khoản ADMIN để chạy thử copilot");
+    return;
+  }
+  const t0 = Date.now();
+  const r = await runCopilot({
+    user: { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null) },
+    message: "Hàng đợi care hôm nay: bao nhiêu kiện cần care, COD đang treo bao nhiêu, kiện nào nên xử lý trước? Trả lời ngắn.",
+    context: { route: "/shipments", entityType: "", entityId: "" },
+  });
+  const line = `copilot e2e: status ${r.status} · ${r.rounds} vòng · tool [${r.toolCalls.map((t) => `${t.name}${t.ok ? "" : "✗"}`).join(", ")}] · ${r.answer.length} ký tự trả lời · ${Date.now() - t0} ms · token in ${r.usage.inputTokens} (đệm ${r.usage.cacheReadTokens}) out ${r.usage.outputTokens} · chi phí ${r.costUsd === null ? "chưa có giá" : `$${r.costUsd}`} · cảnh báo ${r.warnings.length} · đề nghị ghi ${r.pendingActions.length} (không chạy)`;
+  if (r.status === "OK" && r.toolCalls.some((t) => t.executed && t.ok)) ok(line);
+  else bad(`${line}${r.error ? ` · lỗi: ${r.error.slice(0, 200)}` : ""}`);
+  if (r.warnings.length) info(`cảnh báo: ${r.warnings.join(" | ").slice(0, 300)}`);
+  info(`đã ghi ai_interactions id ${r.interactionId ?? "(không ghi được)"}`);
+}
+
 async function main() {
   console.log("Kiểm tra kết nối API — VNXcommerce ERP");
+  if (process.argv.includes("--ai")) {
+    await checkAi();
+    process.exit(0);
+  }
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
   await checkFacebook();
   await checkPancakePages();
+  await checkAi();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
   process.exit(0);
 }

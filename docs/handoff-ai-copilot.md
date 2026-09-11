@@ -43,6 +43,16 @@ if (r.pendingActions.length) {
 
 ## Bật trên máy chủ
 
+Đường DUY NHẤT để đưa khoá lên VPS là GitHub Actions **Secret** (được che trong log; repo là PUBLIC
+nên KHÔNG dán khoá vào ô `arg` của workflow, không commit, không `set-setting`):
+
+1. GitHub → Settings → Secrets and variables → Actions → New repository secret: `OPENAI_API_KEY`
+   (hoặc `ANTHROPIC_API_KEY`). Tuỳ chọn Variable `AI_PROVIDER` (auto | openai | anthropic | off).
+2. Chạy workflow **Vận hành ERP trên VPS** với action `apply-ai-env`: ghi vào `.env` (chỉ khi
+   Secret có giá trị), khởi động lại app + scheduler, rồi chạy `check-integrations --ai` — ping
+   model thật và một câu hỏi thật qua vòng lặp copilot (in meta, không in câu trả lời).
+   Mỗi lần **Deploy ERP to VPS** về sau cũng tự ghi lại các khoá này từ Secrets.
+
 `.env` trên VPS: `OPENAI_API_KEY=…` (mặc định dùng OpenAI: gpt-5.6-terra cho copilot, luna cho
 việc rẻ, sol cho phân tích) hoặc `ANTHROPIC_API_KEY=…` (claude-opus-5). Không commit. Tuỳ chọn
 `AI_PROVIDER` (auto | openai | anthropic | off), `AI_MODEL`, `AI_EFFORT`, `AI_MAX_TOOL_ROUNDS` (6).

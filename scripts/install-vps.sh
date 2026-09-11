@@ -56,6 +56,10 @@ if [ -f .env ]; then
   upsert_env VIETTELPOST_USERNAME "${VIETTELPOST_USERNAME:-}"
   upsert_env VIETTELPOST_PASSWORD "${VIETTELPOST_PASSWORD:-}"
   upsert_env PANCAKE_API_KEY "${PANCAKE_API_KEY:-}"
+  # AI Copilot: CHỈ ghi khi Secret có giá trị — secret chưa đặt không được xoá khoá đang dùng trên máy.
+  [ -n "${OPENAI_API_KEY:-}" ] && upsert_env OPENAI_API_KEY "${OPENAI_API_KEY}"
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && upsert_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY}"
+  [ -n "${AI_PROVIDER:-}" ] && upsert_env AI_PROVIDER "${AI_PROVIDER}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"

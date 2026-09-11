@@ -1,6 +1,8 @@
 # Triển khai ERP lên VPS qua SSH (máy chạy của GitHub sẽ SSH vào VPS và chạy scripts/bootstrap.sh).
 # Cần các Secrets trong repo: VPS_HOST, VPS_PASSWORD (hoặc VPS_SSH_KEY), PANCAKE_API_KEY,
 # VIETTELPOST_API_KEY, VIETTELPOST_USERNAME, VIETTELPOST_PASSWORD, ADMIN_PASSWORD.
+# Tuỳ chọn: OPENAI_API_KEY / ANTHROPIC_API_KEY (AI Copilot) — đặt Secret rồi chạy lại deploy, hoặc
+# ops "apply-ai-env" để ghi vào .env và khởi động lại mà không cần dựng lại image.
 # Tuỳ chọn Variables: ERP_DOMAIN (mặc định erp.vnxcommerce.com), ADMIN_EMAIL, VPS_USER.
 name: Deploy ERP to VPS
 
@@ -95,6 +97,10 @@ jobs:
           FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
           FACEBOOK_BUSINESS_ID: ${{ vars.FACEBOOK_BUSINESS_ID || '336423739082347' }}
           PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+          # AI Copilot — tuỳ chọn. Secret trống thì .env giữ nguyên giá trị cũ (không xoá khoá đang dùng).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -102,10 +108,10 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 35m
-          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN
+          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER
           script: |
             set -e
-            export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN
+            export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN OPENAI_API_KEY ANTHROPIC_API_KEY AI_PROVIDER
             if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
             # Lấy chính bản bootstrap của commit đang triển khai. Lấy theo tên nhánh thì kịch bản
             # cài đặt có thể đến từ một commit khác với mã nguồn — đúng lỗi mà bước này phải chặn.

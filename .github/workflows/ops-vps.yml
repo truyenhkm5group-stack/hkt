@@ -53,6 +53,7 @@ on:
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
+          - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -84,6 +85,10 @@ jobs:
           ACTION: ${{ inputs.action }}
           DAYS: ${{ inputs.days }}
           ARG: ${{ inputs.arg }}
+          # Chỉ dùng cho apply-ai-env. Secret được GitHub che trong log; KHÔNG bao giờ truyền khoá qua ô "arg".
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -91,7 +96,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER
           script: |
             set -e
             cd /root/erp
@@ -233,6 +238,18 @@ jobs:
                 grep -qE "^PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"" .env && grep -qE "^VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"" .env && echo "Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)."
                 $C up -d app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              apply-ai-env)
+                # Ghi khoá AI từ Secrets vào .env (chỉ khi có giá trị), khởi động lại, rồi thử kết nối thật.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                CHANGED=0
+                [ -n "${OPENAI_API_KEY:-}" ] && { upsert_env OPENAI_API_KEY "$OPENAI_API_KEY"; CHANGED=1; echo "OPENAI_API_KEY: đã ghi (${#OPENAI_API_KEY} ký tự)"; }
+                [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; CHANGED=1; echo "ANTHROPIC_API_KEY: đã ghi (${#ANTHROPIC_API_KEY} ký tự)"; }
+                [ -n "${AI_PROVIDER:-}" ] && { upsert_env AI_PROVIDER "$AI_PROVIDER"; CHANGED=1; echo "AI_PROVIDER=$AI_PROVIDER"; }
+                if [ "$CHANGED" = "0" ]; then echo "Không có Secret OPENAI_API_KEY / ANTHROPIC_API_KEY nào trong repo — chưa ghi gì. Thêm Secret ở Settings → Secrets and variables → Actions rồi chạy lại."; exit 1; fi
+                $C up -d app scheduler
+                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --ai ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
