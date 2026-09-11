@@ -13,7 +13,8 @@ import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
-import { openCsCases } from "@/lib/queries/cs";
+import { CS_CASE_SLA_HOURS, csCasesToSurface, csGroupKey, openCsGroups } from "@/lib/queries/cs";
+import { ageLabel } from "@/lib/constants/action-queue";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
@@ -38,7 +39,23 @@ import { publish } from "@/lib/realtime/bus";
  */
 const MOC_DVVC = sql`(select max(e.occurred_at) from shipment_events e where e.shipment_id = ${schema.shipments.id} and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION'))`;
 
-type Candidate = { kind: string; severity: "info" | "warning" | "critical"; title: string; body: string; href: string; entityType: string; entityId: string; dedupeKey: string; occurredAt?: Date | null };
+type Candidate = {
+  kind: string;
+  severity: "info" | "warning" | "critical";
+  title: string;
+  body: string;
+  href: string;
+  entityType: string;
+  entityId: string;
+  dedupeKey: string;
+  occurredAt?: Date | null;
+  /**
+   * Việc TỔNG HỢP: khoá chống trùng giữ nguyên nhưng nội dung (số case, số quá hạn…) đổi theo thời
+   * gian. Bật cờ này thì lượt quét ghi đè tiêu đề / nội dung / mức của dòng đang mở thay vì để nó
+   * nói con số của lần tạo.
+   */
+  refresh?: boolean;
+};
 
 /** Định dạng thời điểm ngắn gọn cho tin Lark/Telegram (giờ Việt Nam) */
 function fmtAt(d: Date | string | null | undefined) {
@@ -319,9 +336,16 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     }
   }
   if (cfg.enabled.cs) {
-    activeKinds.push("CS_CASE");
-    const cases = await openCsCases();
-    for (const c of cases) {
+    activeKinds.push("CS_CASE", "CS_CASE_GROUP");
+    /*
+      MỘT VIỆC RIÊNG CHO CASE CẦN CAN THIỆP TỪNG ĐƠN; MỘT VIỆC TỔNG HỢP CHO PHẦN CÒN LẠI.
+
+      Trước đây MỖI case đang mở là một dòng: production 364 dòng "Case CSKH" cùng tiêu đề, cùng
+      hành động, 338 dòng "trễ hạn" — người mở hàng đợi không đọc nổi, và chuông báo cũng thế. Luật
+      case nào tách riêng nằm ở lib/constants/cs.ts; các case gốc vẫn nguyên trong `cs_cases`.
+    */
+    const rieng = await csCasesToSurface();
+    for (const c of rieng) {
       candidates.push({
         kind: "CS_CASE",
         severity: c.kind === "WRONG_ADDRESS" || c.kind === "WRONG_PHONE" || (c.kind === "PHONE_VERIFY" && c.title.startsWith("⛔")) ? "warning" : "info",
@@ -332,6 +356,27 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         entityId: c.id,
         dedupeKey: `cs-case:${c.id}`,
         occurredAt: c.updatedAt ?? c.createdAt,
+      });
+    }
+    const nhom = await openCsGroups(rieng.map((c) => c.id));
+    for (const g of nhom) {
+      const label = CS_KIND_LABEL[g.kind as CsKind] ?? g.kind;
+      const owner = g.assignee ? `phụ trách: ${g.assignee}` : "chưa ai nhận";
+      const money = g.value > 0 ? ` · ${formatVND(g.value)} tiền đơn liên quan (${g.withOrder} case có đơn)` : g.withOrder ? ` · ${g.withOrder} case có đơn` : "";
+      const params = new URLSearchParams({ kind: g.kind, status: "OPEN" });
+      if (g.assignee) params.set("assignee", g.assignee);
+      candidates.push({
+        kind: "CS_CASE_GROUP",
+        severity: g.overdue > 0 ? "warning" : "info",
+        title: `${label} · ${g.count} case đang mở`,
+        body: `${g.overdue} quá hạn ${CS_CASE_SLA_HOURS} giờ · cũ nhất ${ageLabel(g.oldestHours)} · ${owner}${money} · Xem danh sách`,
+        href: `/cs?${params.toString()}`,
+        entityType: "CS_GROUP",
+        entityId: csGroupKey(g.kind, g.assignee),
+        // Khoá KHÔNG chứa số đếm: số đổi thì cập nhật nội dung (refresh), không đóng rồi mở việc mới.
+        dedupeKey: `cs-group:${g.kind}:${g.assignee || "-"}`,
+        occurredAt: new Date(Date.now() - g.oldestHours * 3_600_000),
+        refresh: true,
       });
     }
   }
@@ -868,9 +913,18 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   if (candidates.length) {
     created = await db
       .insert(n)
-      .values(candidates.map((c) => ({ ...c, readBy: [] as string[] })))
+      .values(candidates.map(({ refresh: _refresh, ...c }) => ({ ...c, readBy: [] as string[] })))
       .onConflictDoNothing({ target: n.dedupeKey })
       .returning();
+  }
+  // Việc TỔNG HỢP đang mở: nội dung phải nói con số của LÚC NÀY, không phải của lúc tạo.
+  const createdKeys = new Set(created.map((c) => c.dedupeKey));
+  for (const c of candidates) {
+    if (!c.refresh || createdKeys.has(c.dedupeKey)) continue;
+    await db
+      .update(n)
+      .set({ title: c.title, body: c.body, severity: c.severity, href: c.href, occurredAt: c.occurredAt ?? null })
+      .where(and(eq(n.dedupeKey, c.dedupeKey), isNull(n.resolvedAt)));
   }
   const [{ open }] = await db.select({ open: sql<number>`count(*)` }).from(n).where(isNull(n.resolvedAt));
 

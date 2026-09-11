@@ -20,6 +20,55 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
 };
 
 /**
+ * ═══════ CASE NÀO LÊN HÀNG ĐỢI RIÊNG, CASE NÀO GOM ═══════
+ *
+ * Đo trên production 11/09/2026: 232 case đang mở, trong đó 183 "giao không thành" do bot tự nhắn,
+ * 14 "giục giao", 12 "trả hàng" — mỗi case một dòng trong hàng đợi việc, cùng tiêu đề, cùng hành
+ * động "trả lời khách". Ba trăm dòng giống nhau không phải ba trăm việc: nó là MỘT khối tồn đọng
+ * và người mở hàng đợi không đọc nổi phần còn lại.
+ *
+ *  · `EACH`  — lỗi CỤ THỂ trên một đơn, phải can thiệp từng đơn trước khi gửi hàng: sai địa chỉ,
+ *              sai SĐT. Mỗi case là một việc riêng.
+ *  · `GROUP` — gom thành MỘT việc tổng hợp theo (loại · người phụ trách): số case, số quá hạn, cũ
+ *              nhất, tiền đơn liên quan, đường xem danh sách. Toàn bộ case gốc vẫn nằm trong bảng
+ *              `cs_cases` để đếm tồn đọng, tuổi, hạn, phân công và tra ngược — gom là gom THÔNG
+ *              BÁO, không gom việc.
+ *
+ * Ngoại lệ có chủ đích: case xác nhận SĐT mà bot KHÔNG gửi được (tiêu đề bắt đầu bằng "⛔") cũng
+ * là việc từng đơn — không ai nhắn thì đơn đó không được gửi.
+ */
+export const CS_SURFACE_MODE: Record<CsKind, "EACH" | "GROUP"> = {
+  WRONG_ADDRESS: "EACH",
+  WRONG_PHONE: "EACH",
+  ORDER_NOT_CREATED: "GROUP",
+  EXCHANGE_SIZE: "GROUP",
+  EXCHANGE_COLOR: "GROUP",
+  RETURN: "GROUP",
+  COMPLAINT: "GROUP",
+  SIZE_ADVICE: "GROUP",
+  WRONG_PRICE: "GROUP",
+  URGE_DELIVERY: "GROUP",
+  DELIVERY_FAILED: "GROUP",
+  PHONE_VERIFY: "GROUP",
+  OTHER: "GROUP",
+};
+
+/**
+ * CASE TRONG NHÓM VẪN ĐƯỢC TÁCH RA RIÊNG KHI THẬT SỰ ĐẾN HẠN CẦN NGƯỜI LÀM.
+ *
+ * Hai điều kiện, cái nào đúng cũng tách:
+ *  · khách ĐANG CHỜ CÂU TRẢ LỜI (các loại dưới) mà case đã quá hạn xử lý và còn TRONG CỬA SỔ
+ *    `CS_ESCALATE_WINDOW_HOURS` — quá cửa sổ thì trả lời cũng không còn cứu được gì, nó ở lại
+ *    trong tổng hợp với tư cách tồn đọng;
+ *  · case đã CÓ NGƯỜI nhận (không phải bot) mà quá hạn — việc của một người cụ thể thì phải hiện
+ *    trong hàng đợi của người đó.
+ */
+export const CS_ESCALATE_KINDS: readonly CsKind[] = ["ORDER_NOT_CREATED", "URGE_DELIVERY", "COMPLAINT", "WRONG_PRICE"];
+export const CS_ESCALATE_WINDOW_HOURS = 72;
+/** Người phụ trách là máy, không phải người: việc gán cho nó không được tách ra thành việc của "ai đó". */
+export const CS_BOT_ASSIGNEES: readonly string[] = ["Bot ERP"];
+
+/**
  * ═══════ "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM" ═══════
  *
  * `DONE` là công của người: có ai đó ngồi xử lý xong. `AUTO_RESOLVED` là điều kiện tự hết hoặc

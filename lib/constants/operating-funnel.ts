@@ -93,8 +93,10 @@ export const OPERATING_FUNNEL: StageSpec[] = [
     label: "Khách nhắn / tiềm năng",
     order: 2,
     team: "CS",
-    caseTypes: ["CS_CASE"],
-    moneyMeaning: "Chưa quy ra tiền được — chưa có mô hình xác định nào nối một cuộc hội thoại với doanh thu.",
+    // CS_BACKLOG: việc tổng hợp của các case gom nhóm. Ở bảng điều hành nó được đếm bằng SỐ CASE GỐC
+    // trong `cs_cases`, không phải số thông báo tổng hợp — xem lib/queries/stage-health.ts.
+    caseTypes: ["CS_CASE", "CS_BACKLOG"],
+    moneyMeaning: "Tiền của các ĐƠN đã gắn vào case (đổi/trả, giục giao, giao hụt…); case chỉ có hội thoại thì chưa quy ra tiền được.",
     href: "/cs",
     sourceNote:
       "Nguồn là case CSKH dựng từ hội thoại Pancake, KHÔNG phải toàn bộ tin nhắn. Không có mốc phản hồi đầu tiên cho từng lead, nên tỷ lệ và thời gian phản hồi CHƯA đo được.",

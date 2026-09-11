@@ -17,6 +17,7 @@ import { combineImpact, getRecoveryRates, type MoneyImpact } from "@/lib/queries
 import { getLogisticsFreshness, type LogisticsFreshness } from "@/lib/queries/logistics-freshness";
 import { getReturnPipeline } from "@/lib/queries/return-pipeline";
 import { rowsOf } from "@/lib/sql-rows";
+import { CS_CASE_SLA_HOURS } from "@/lib/queries/cs";
 
 /**
  * ═══════════ SỨC KHOẺ TỪNG KHÂU VẬN HÀNH ═══════════
@@ -261,6 +262,43 @@ async function loadKindRows(): Promise<KindRow[]> {
   );
 }
 
+/**
+ * TỒN ĐỌNG CASE CSKH ĐẾM BẰNG CASE GỐC, KHÔNG BẰNG THÔNG BÁO TỔNG HỢP.
+ *
+ * Từ 11/09/2026 phần lớn case CSKH được gom thành một thông báo theo (loại · người phụ trách)
+ * để hàng đợi không ngập. Nhưng bảng điều hành đo KHỐI LƯỢNG VIỆC: 183 case giao hụt là 183 case,
+ * không phải 2 thông báo. Nên dòng `CS_CASE_GROUP` đọc từ notifications bị thay bằng dòng này —
+ * cùng hình dạng (tồn đọng, quá hạn, chưa ai nhận, tuổi, tiền đơn gắn vào case), tính trên mọi case
+ * đang mở CHƯA có dòng việc riêng (case có dòng riêng đã được đếm ở `CS_CASE`).
+ */
+async function loadCsBacklogRow(): Promise<KindRow | null> {
+  const db = await getDb();
+  const age = sql`extract(epoch from (now() - c.created_at)) / 3600`;
+  const cols = AGING_BUCKETS.map((b, i) => {
+    const from = i === 0 ? 0 : AGING_BUCKETS[i - 1].maxHours;
+    const cond = Number.isFinite(b.maxHours) ? sql`${age} >= ${from} and ${age} < ${b.maxHours}` : sql`${age} >= ${from}`;
+    return sql`, count(*) filter (where ${cond})::int as ${sql.identifier(b.key)}`;
+  });
+  const agingSql = cols.length ? cols.reduce((a, b) => sql`${a} ${b}`) : sql``;
+  const [row] = rowsOf<KindRow>(
+    await db.execute(sql`
+      select 'CS_CASE_GROUP' as kind,
+             count(*)::int as n,
+             coalesce(sum(o.total_price_after_discount), 0) as money,
+             count(*) filter (where c.created_at < now() - (${CS_CASE_SLA_HOURS} * interval '1 hour'))::int as breached,
+             count(*) filter (where coalesce(c.assignee, '') = '')::int as unassigned,
+             coalesce(max(${age}), 0) as oldest,
+             percentile_cont(0.5) within group (order by ${age}) as median_h,
+             percentile_cont(0.9) within group (order by ${age}) as p90_h
+             ${agingSql}
+        from cs_cases c
+        left join orders o on o.id = c.order_id
+       where c.status = 'OPEN'
+         and not exists (select 1 from notifications n where n.entity_type = 'CS_CASE' and n.entity_id = c.id and n.resolved_at is null)`),
+  );
+  return row && Number(row.n) > 0 ? row : null;
+}
+
 /** Nguồn dữ liệu của từng khâu có thật hay không — đo, không khai sẵn. */
 /**
  * ═══════ ĐỘ TƯƠI ĐỌC TỪ SỰ KIỆN ĐVVC, KHÔNG PHẢI TỪ LẦN TRA CỨU ═══════
@@ -329,12 +367,15 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
   return memo("stage-health", 120_000, async () => {
     const db = await getDb();
     const tuoiVanDon = await getLogisticsFreshness();
-    const [kindRows, source, rates, hoan] = await Promise.all([
+    const [kindRowsRaw, csBacklog, source, rates, hoan] = await Promise.all([
       loadKindRows(),
+      loadCsBacklogRow(),
       loadSourceStatus(db, tuoiVanDon),
       getRecoveryRates(),
       getReturnPipeline(),
     ]);
+    // Thông báo tổng hợp CSKH không phải khối lượng việc — thay bằng dòng đếm case gốc.
+    const kindRows = [...kindRowsRaw.filter((r) => r.kind !== "CS_CASE_GROUP"), ...(csBacklog ? [csBacklog] : [])];
 
     // Gom theo LOẠI VIỆC trước (nhiều `kind` có thể về cùng một loại), rồi mới gom theo khâu.
     const byType = new Map<CaseType, TypeTotals>();

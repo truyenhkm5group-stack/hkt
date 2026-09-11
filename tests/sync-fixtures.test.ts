@@ -28,6 +28,7 @@ import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
+import { testCsCaseGrouping } from "./cs-case-grouping.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testAdsAttribution } from "./ads-attribution.test";
@@ -469,8 +470,10 @@ async function main() {
   const cs2 = await detectCsCases();
   assert.equal(cs2.created, 0, "quét lại không tạo trùng");
   const alertsWithCs = await evaluateAlerts();
-  const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE"));
-  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo");
+  // Trả hàng / đổi size thuộc nhóm GOM (lib/constants/cs.ts): lên chuông dưới dạng việc TỔNG HỢP
+  // theo loại, không phải mỗi case một dòng.
+  const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE_GROUP"));
+  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo dưới dạng việc tổng hợp theo loại");
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD
@@ -1267,6 +1270,7 @@ async function main() {
   await testProductIntelligence(db);
   await testProductVerdict(db);
   await testActionQueue(db);
+  await testCsCaseGrouping(db);
   await testSalesFunnel(db);
   await testStaffPerformance(db);
   await testAdsRoas(db);

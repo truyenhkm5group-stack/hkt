@@ -27,6 +27,11 @@ export type CaseType =
   | "DATA_ERROR"
   | "LOW_STOCK_RISK"
   | "CS_CASE"
+  /**
+   * MỘT khối case CSKH cùng loại, cùng người phụ trách — gom thành một việc tổng hợp thay vì hàng
+   * trăm dòng giống nhau. Các case gốc vẫn nằm trong `cs_cases`; xem lib/constants/cs.ts.
+   */
+  | "CS_BACKLOG"
   | "ORDER_INCOMPLETE"
   /**
    * Pancake KHÔNG ghép được địa chỉ khách vào đơn vị hành chính, nên POS không đẩy sang ĐVVC được.
@@ -82,6 +87,7 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   DATA_ERROR: "DATA_ERROR",
   STOCK_LOW: "LOW_STOCK_RISK",
   CS_CASE: "CS_CASE",
+  CS_CASE_GROUP: "CS_BACKLOG",
   ORDER_INCOMPLETE: "ORDER_INCOMPLETE",
   ORDER_ADDRESS_NOT_NORMALIZED: "ORDER_ADDRESS_NOT_NORMALIZED",
   RISKY_ORDER: "RISKY_ORDER",
@@ -110,6 +116,7 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   DATA_ERROR: "Dữ liệu sai nghiêm trọng",
   LOW_STOCK_RISK: "Hết hàng · đang mất đơn",
   CS_CASE: "Case CSKH",
+  CS_BACKLOG: "Case CSKH · nhóm đang chờ",
   ORDER_INCOMPLETE: "Đơn thiếu thông tin",
   ORDER_ADDRESS_NOT_NORMALIZED: "Địa chỉ chưa chuẩn hoá · không giao được",
   RISKY_ORDER: "Đơn rủi ro cao",
@@ -146,6 +153,7 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   // Nhìn thấy sớm còn đổi được giá / bỏ mẫu lỗ.
   PROFITABILITY_ALERT: 0.6,
   CS_CASE: 0.8,
+  CS_BACKLOG: 0.8,
   // Còn kịp giục ĐVVC phát lại.
   DELIVERY_STALE: 0.7,
   // Sản xuất kịp thì không mất doanh thu.
@@ -182,6 +190,7 @@ export const CASE_ACTION: Record<CaseType, string> = {
   DATA_ERROR: "Mở Chất lượng dữ liệu → Trung tâm điều khiển để xem bằng chứng của từng dòng.",
   LOW_STOCK_RISK: "Đặt sản xuất theo số đề xuất ở trang Kế hoạch SX.",
   CS_CASE: "Trả lời khách trên Pancake và đóng case.",
+  CS_BACKLOG: "Mở danh sách case của nhóm, làm từ case cũ nhất; đóng case trên trang CSKH thì việc này tự thu nhỏ và tự đóng khi hết.",
   ORDER_INCOMPLETE: "Bổ sung số điện thoại / địa chỉ trước khi gửi hàng.",
   ORDER_ADDRESS_NOT_NORMALIZED:
     "Mở đơn trên Pancake, chọn TAY tỉnh/xã cho địa chỉ khách rồi lưu. KHÔNG đoán hộ khách: sai địa chỉ là mất cả hàng lẫn hai chiều cước. Địa chỉ chỉ có tỉnh + xã là ĐÚNG chuẩn hai cấp mới, không phải lỗi.",
@@ -226,6 +235,7 @@ export const CASE_TEAM: Record<CaseType, CaseTeam> = {
   ORDER_ADDRESS_NOT_NORMALIZED: "CS",
   RISKY_ORDER: "CS",
   CS_CASE: "CS",
+  CS_BACKLOG: "CS",
   CUSTOMER_RECOVERY: "CS",
   // Kiện hàng đang ở đâu đó ngoài kho.
   DELIVERY_FAILED: "LOGISTICS",
@@ -282,6 +292,7 @@ const SEVERITY_WEIGHT: Record<string, number> = { critical: 30, warning: 15, inf
 const CUSTOMER_WAITING: Record<CaseType, number> = {
   DELIVERY_FAILED: 1,
   CS_CASE: 1,
+  CS_BACKLOG: 1,
   ORDER_INCOMPLETE: 1,
   ORDER_ADDRESS_NOT_NORMALIZED: 1,
   NEW_ORDER_UNPROCESSED: 1,
@@ -466,6 +477,8 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   DELIVERY_FAILED: 24,
   DELIVERY_STALE: 48,
   CS_CASE: 4,
+  // Việc tổng hợp không có hạn riêng: số case QUÁ HẠN nằm trong chính nội dung của nó.
+  CS_BACKLOG: null,
   RISKY_ORDER: 12,
   RETURN_RECEIVED_PENDING_INSPECTION: 72,
   // Cửa sổ gọi lại sau một lần hoàn rất ngắn: qua hai ngày thì lời xin lỗi không còn nghĩa gì.

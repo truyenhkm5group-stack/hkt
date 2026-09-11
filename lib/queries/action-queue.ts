@@ -1,6 +1,7 @@
 import { desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { csGroupValues } from "@/lib/queries/cs";
 import {
   CASE_ACTION,
   RECOVERABILITY,
@@ -132,6 +133,7 @@ const EVIDENCE_SOURCE: Record<string, string> = {
   SHIPMENT: "Vận đơn + sự kiện Viettel Post",
   DATA_RULE: "Luật chất lượng dữ liệu",
   CS_CASE: "Case CSKH",
+  CS_GROUP: "Case CSKH gộp theo loại · người phụ trách (bảng cs_cases)",
   VARIANT: "Sổ kho ERP",
   AD_ACCOUNT: "Tài khoản quảng cáo Meta",
   AD_CAMPAIGN: "Chi tiêu Meta + kết quả đơn",
@@ -152,6 +154,9 @@ async function amountsFor(entityIds: string[]): Promise<Map<string, number>> {
     .from(schema.shipments)
     .where(sql`${schema.shipments.id} in ${entityIds}`);
   for (const r of shipments) map.set(r.id, Number(r.amount ?? 0));
+  // Việc tổng hợp case CSKH: tiền là tổng các ĐƠN gắn vào case của nhóm, tính SỐNG từ cs_cases.
+  const groupKeys = entityIds.filter((id) => id.includes("|"));
+  if (groupKeys.length) for (const [k, v] of await csGroupValues(groupKeys)) if (entityIds.includes(k)) map.set(k, v);
   return map;
 }
 
