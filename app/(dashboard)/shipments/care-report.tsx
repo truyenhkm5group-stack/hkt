@@ -18,7 +18,7 @@ export async function CareReportSection({ period }: { period: Period }) {
         <MetricCard label="Backlog cần care" value={formatNumber(r.backlog.care)} note={`${formatNumber(r.backlog.overdue)} vỡ SLA · ${formatNumber(r.backlog.unassigned)} chưa ai nhận · COD treo ${formatVND(r.backlog.moneyAtRisk, { compact: true })}`} tone={r.backlog.overdue ? "rose" : "amber"} hint="Kiện đang trong điều kiện cần người, tính lúc này (không theo kỳ). Chờ kết quả và Escalated đếm riêng ở tab." />
         <MetricCard label="Phản hồi đầu (trung vị)" value={r.firstResponse.medianHours === null ? "—" : `${r.firstResponse.medianHours} giờ`} note={`${formatNumber(r.firstResponse.withinSla)}/${formatNumber(r.firstResponse.measured)} kiện trong 2 giờ`} tone="slate" hint="Từ lúc kiện được đội mở (dòng care) tới lần đầu có người động vào. Chỉ đo kiện có dòng care trong kỳ." />
         <MetricCard label="Đã đóng trong kỳ" value={formatNumber(r.done.count)} note={`${formatNumber(r.done.withinSla)} trong 24 giờ · ${formatNumber(r.done.reopened)} mở lại · trung vị ${r.done.medianResolveHours === null ? "—" : `${r.done.medianResolveHours} giờ`}`} tone="slate" hint="Đội bấm Đã xong. Không đồng nghĩa kiện đã giao — cột bên phải mới nói kết cục." />
-        <MetricCard label="COD cứu được sau can thiệp" value={formatVND(r.recovery.recoveredCod, { compact: true })} note={`${formatNumber(r.recovery.recoveredIntervened)}/${formatNumber(r.recovery.failedIntervened)} kiện giao hụt có người care rồi giao thành công`} tone="green" hint="Kiện giao hụt trong kỳ, có ít nhất một hành động care của người sau lần hụt, rồi ĐVVC xác nhận giao thành công. Tiền là COD của kiện đó — đã tới tay khách, chưa chắc đã về tài khoản." />
+        <MetricCard label="COD cứu được sau can thiệp" value={formatVND(r.recovery.recoveredCod, { compact: true })} note={`${formatNumber(r.recovery.recoveredIntervened)}/${formatNumber(r.recovery.failedIntervened)} kiện giao hụt có người care rồi giao thành công · doanh thu ${formatVND(r.recovery.recoveredRevenue, { compact: true })}`} tone="green" hint="Kiện giao hụt trong kỳ, có ít nhất một hành động care của người SAU lần hụt và TRƯỚC kết cục, rồi ĐVVC xác nhận giao thành công. COD là tiền của kiện đó — đã tới tay khách, chưa chắc đã về tài khoản; doanh thu là giá trị đơn được cứu." />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -74,6 +74,33 @@ export async function CareReportSection({ period }: { period: Period }) {
           </div>
         </SectionCard>
       </div>
+
+      {r.backlog.byOwner.length ? (
+        <SectionCard title="Khối lượng đang cầm" hint="Kiện đang mở (kể cả đang chờ / escalated) theo người nhận, tính lúc này. Để chia lại việc, không phải để xếp hạng." padded={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-[12.5px]">
+              <thead className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2">Người</th>
+                  <th className="px-3 py-2 text-right">Đang mở</th>
+                  <th className="px-3 py-2 text-right">Vỡ SLA</th>
+                  <th className="px-3 py-2 text-right">COD đang treo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {r.backlog.byOwner.map((o) => (
+                  <tr key={o.ownerId ?? "none"}>
+                    <td className={`px-4 py-2 font-medium ${o.ownerId ? "" : "text-rose-600 dark:text-rose-400"}`}>{o.name}</td>
+                    <td className="numeric px-3 py-2 text-right">{formatNumber(o.open)}</td>
+                    <td className={`numeric px-3 py-2 text-right ${o.overdue ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>{formatNumber(o.overdue)}</td>
+                    <td className="numeric px-3 py-2 text-right">{formatVND(o.money, { compact: true })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Theo nhân viên"

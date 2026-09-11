@@ -1,6 +1,6 @@
 # AI Copilot — kiến trúc (ERP truth → typed tools → AI)
 
-Ngày 11/09/2026. Tầng backend, chưa có giao diện. Không đụng công thức KPI nào.
+Ngày 11/09/2026 (cập nhật cùng ngày: OpenAI provider, router, 20 tool, ngăn kéo toàn cục). Không đụng công thức KPI nào.
 
 ## 1. Nguyên tắc
 
@@ -31,9 +31,13 @@ Ngày 11/09/2026. Tầng backend, chưa có giao diện. Không đụng công th
 
 | Tệp | Vai trò |
 |---|---|
-| `lib/ai/provider.ts` | `AiProvider` (text · tool_use · tool_result); `AnthropicProvider` (SDK chính thức, `claude-opus-5`, adaptive thinking, effort từ env, system prompt có `cache_control`, strict tools, server-side fallback); `FakeProvider` cho kiểm thử; `estimateCostUsd`. |
+| `lib/ai/provider.ts` | `AiProvider` (text · tool_use · tool_result); `AnthropicProvider` (SDK chính thức, adaptive thinking, system prompt có `cache_control`, strict tools, server-side fallback); `FakeProvider` cho kiểm thử; `estimateCostUsd` (model chưa có giá ⇒ `null`, không phải 0); `getAiProvider(tier)`; `testAiConnection()` cho trang Kết nối dữ liệu. |
+| `lib/ai/providers/openai.ts` | `OpenAiProvider` — **Responses API** (`client.responses.create`): system → `instructions`, tool_use ↔ `function_call`, tool_result ↔ `function_call_output`, tools `type: function, strict: true`, `reasoning.effort`, `store: false`; `cached_tokens` → cacheReadTokens. `fetch` tiêm được để kiểm thử không mạng. |
+| `lib/ai/router.ts` | MỘT chỗ chọn provider + model: `AI_PROVIDER` = auto (OpenAI nếu có `OPENAI_API_KEY`, không thì Anthropic) · openai · anthropic · off. Ba bậc: `routine` gpt-5.6-luna / claude-haiku-4-5 · `copilot` gpt-5.6-terra / claude-opus-5 · `analysis` gpt-5.6-sol / claude-opus-5 (effort low / medium / high). `AI_MODEL` ghi đè bậc copilot. `aiDisabledReason()` nói đúng secret còn thiếu. Kiểm thử chặn chuỗi model ngoài router/provider. |
 | `lib/ai/tools/registry.ts` | `defineTool`, `toolsFor(user)`, `describeTools`, `strictInputSchema` (zod → JSON Schema, `additionalProperties:false`, mọi khoá bắt buộc — khoá tuỳ chọn khai `nullable()`). |
 | `lib/ai/tools/care.ts` | 5 đọc: `get_care_case`, `get_care_queue_summary`, `search_care_cases`, `get_care_report`, `get_data_freshness`. 4 ghi (confirm): `add_care_note`, `assign_care_case`, `set_care_status`, `set_care_follow_up` → `lib/care/service.ts` với `actor.source = "AI"`. 1 cấm: `request_carrier_action`. |
+| `lib/ai/tools/erp.ts` | 8 đọc toàn ERP, cùng hàm với màn hình: `search_customer` (searchEntities), `get_customer_history` (getCustomerDetail), `get_order_context` (getOrderDetail + getOrderTimeline + kết quả đơn từ bảng vật chất hoá `canonical_order_outcome` — không suy), `get_profit_summary` (getFinancialTruth + getNominalProfitReport), `get_cash_position` (getCashflow), `get_inventory_risks` (getSlowMoving + getReplenishmentPlan), `get_product_performance` (getProductIntelligence + classifyProduct), `get_owner_brief` (getBusinessBrief). 2 ghi (confirm): `resolve_case`, `reopen_case`. Quyền theo trang tương ứng (`orders:read`, `customers:view`, `reports:nominal`, `reports:cash`, `planning:view`, `products:view`, `dashboard:view`). |
+| `components/ai-copilot.tsx` | Ngăn kéo toàn cục (nút ✦ trên thanh đầu, Ctrl+J, sự kiện `erp:copilot`): tự mang route + tham số (kỳ, bộ lọc) + đối tượng đang mở; thẻ hành động đề nghị với nút Xác nhận / Bỏ qua; cảnh báo dữ liệu cũ tách riêng; hiện "AI chưa được cấu hình" kèm secret cần thêm. Ngăn kéo kiện có nút "Tóm tắt bằng AI". |
 | `lib/ai/policy.ts` | Token xác nhận = HMAC-SHA256(`AUTH_SECRET`, userId · tool · input chuẩn hoá) cắt 32 hex; `COPILOT_LIMITS` (vòng lặp ≤ `AI_MAX_TOOL_ROUNDS`, ≤ 5 hành động/câu, kết quả tool ≤ 12k ký tự). |
 | `lib/ai/prompt.ts` | Prompt hệ thống ỔN ĐỊNH (đệm được). Bối cảnh màn hình/người/giờ đi vào tin nhắn user đầu. |
 | `lib/ai/copilot.ts` | `runCopilot` (vòng lặp) và `confirmCopilotActions` (thực thi sau xác nhận). |
@@ -86,8 +90,9 @@ prompt** (bảng giá trong `provider.ts`, không phải hoá đơn). 200 lượ
 
 ## 6. Chưa làm, cố ý
 
-- Không có UI (phiên Opus). Không streaming (thêm sau khi UI cần).
-- Không tool tài chính / tồn kho / ĐVVC (forbidden). Không tool cho Orders/CSKH/Inventory/Profit —
-  thêm từng file `lib/ai/tools/<module>.ts` theo cùng mẫu, đăng ký trong `copilot.ts`.
-- Không gọi model trong kiểm thử (FakeProvider). Chưa benchmark model thật trên production vì chưa
-  có khoá trên VPS: bật bằng cách đặt `ANTHROPIC_API_KEY` trong `.env` (không commit).
+- Không streaming (thêm khi UI cần). Không tool GHI cho tài chính / tồn kho / ĐVVC (sàn `forbidden`).
+- Không gọi model trong kiểm thử (FakeProvider + fetch giả cho OpenAI). Chưa benchmark model thật
+  trên production vì chưa có khoá trên VPS: bật bằng `OPENAI_API_KEY` (hoặc `ANTHROPIC_API_KEY`)
+  trong `.env`, không commit. Thiếu khoá ⇒ app vẫn chạy, giao diện nói "AI chưa được cấu hình".
+- Giá gpt-5.6-* chưa có trong bảng ⇒ `costUsd = null` (chưa biết), cập nhật `PRICE_PER_MTOK` khi có
+  giá niêm yết.

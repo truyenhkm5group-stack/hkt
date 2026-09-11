@@ -73,7 +73,8 @@ export type CopilotResult = {
   /** Cảnh báo dữ liệu (cũ / thiếu quyền / tool lỗi) — UI hiện riêng, không trộn vào câu trả lời. */
   warnings: string[];
   usage: AiUsage;
-  costUsd: number;
+  /** USD ước tính theo bảng giá trong mã; `null` = chưa có giá cho model này (không phải 0). */
+  costUsd: number | null;
   latencyMs: number;
   rounds: number;
   model: string;

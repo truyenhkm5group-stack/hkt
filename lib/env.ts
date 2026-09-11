@@ -58,24 +58,31 @@ export const env = {
       return readInt("FACEBOOK_USD_VND", 25_500);
     },
   },
-  /** AI Copilot. Khoá API đọc bởi chính SDK (ANTHROPIC_API_KEY) — không đi qua đây, không log. */
+  /** AI Copilot. Khoá API đọc bởi chính SDK (OPENAI_API_KEY / ANTHROPIC_API_KEY) — không đi qua đây, không log. */
   ai: {
-    /** `anthropic` (mặc định) · `off`. */
+    /** `auto` (mặc định) · `openai` · `anthropic` · `off`. Chọn model ở `lib/ai/router.ts`. */
     get provider() {
-      return read("AI_PROVIDER", "anthropic");
+      return read("AI_PROVIDER", "auto");
     },
+    /** Ghi đè model bậc copilot của provider đang dùng. Trống = theo bảng trong router. */
     get model() {
-      return read("AI_MODEL", "claude-opus-5");
+      return read("AI_MODEL");
     },
-    /** low · medium · high · xhigh · max — mặc định medium: tóm tắt/giải thích, không cần suy luận sâu. */
+    /** Trống = theo bậc (routine low · copilot medium · analysis high). */
     get effort() {
-      return read("AI_EFFORT", "medium");
+      return read("AI_EFFORT");
     },
     get maxToolRounds() {
       return readInt("AI_MAX_TOOL_ROUNDS", 6);
     },
-    get configured() {
+    get openaiConfigured() {
+      return Boolean(read("OPENAI_API_KEY"));
+    },
+    get anthropicConfigured() {
       return Boolean(read("ANTHROPIC_API_KEY") || read("ANTHROPIC_AUTH_TOKEN"));
+    },
+    get configured() {
+      return this.openaiConfigured || this.anthropicConfigured;
     },
   },
   viettelPost: {

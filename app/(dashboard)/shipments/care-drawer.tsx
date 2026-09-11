@@ -3,8 +3,9 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Phone } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Phone, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { openCopilot } from "@/components/ai-copilot";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
@@ -191,6 +192,14 @@ export function CareDrawer({
                 <Link href={`/shipments/${data.shipmentId}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
                   Chi tiết vận đơn
                 </Link>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand/40 bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent"
+                  title="AI đọc đơn, khách, hành trình Viettel Post, COD và lịch sử care rồi tóm tắt + đề nghị bước tiếp theo. Không tự làm gì."
+                  onClick={() => openCopilot({ message: "Tóm tắt kiện này: chuyện gì đang xảy ra, vì sao cần care, tiền nào đang rủi ro, nên làm gì tiếp?", context: { entityType: "shipment", entityId: data.shipmentId }, send: true })}
+                >
+                  <Sparkles className="size-3.5 text-brand" /> Tóm tắt bằng AI
+                </button>
               </div>
 
               {data.address ? <p className="text-[12px] leading-snug text-muted-foreground">{data.address}</p> : null}

@@ -8,6 +8,8 @@ import { RealtimeIndicator } from "@/components/realtime-provider";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Suspense } from "react";
+import { AiCopilot } from "@/components/ai-copilot";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -53,6 +55,9 @@ export function SiteHeader({ user }: { user: NavUserLike }) {
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
         <GlobalSearch user={user} />
+        <Suspense fallback={null}>
+          <AiCopilot />
+        </Suspense>
         <NotificationBell />
         <RealtimeIndicator />
       </div>

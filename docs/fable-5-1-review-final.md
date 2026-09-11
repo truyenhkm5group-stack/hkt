@@ -370,17 +370,37 @@ Từ vòng này Fable chỉ làm backend; UI do phiên Opus 5 làm trên worktre
   điều kiện.
 - Hợp đồng kiểu `lib/care/contracts.ts` + `docs/care-engine-contract.md` + `docs/handoff-care-engine.md`.
 
-### 7.10 AI Copilot — tầng nền (backend, cùng nhánh)
+### 7.10 AI Copilot — tầng nền + OpenAI + ngăn kéo (11/09/2026)
 
 `docs/ai-copilot-architecture.md`. ERP truth → typed tools → AI: sổ đăng ký tool tách đọc/ghi với
 quyền + chính sách (`auto` / `confirm` / `forbidden`) + sàn rủi ro theo nhóm (tài chính / tồn kho /
-ĐVVC / phá huỷ bị cấm ở MVP); tool ghi chỉ chạy sau khi người xác nhận bằng token HMAC gắn người ·
-tool · input, không chạy lại; mọi lượt ghi `ai_interactions` (migration 0062); hành động AI để lại
-`care_case_events.source = AI` với actor là người xác nhận. Provider trừu tượng, bản Anthropic
-(`claude-opus-5`, adaptive thinking, prompt hệ thống đệm được). MVP: 5 tool đọc + 4 tool ghi cho Vận
-đơn & care (tóm tắt kiện từ đơn + khách + lần gửi + hành trình VTP thô + COD + lịch sử care; hàng đợi;
-tìm; báo cáo; độ tươi dữ liệu). Kiểm thử không mạng: vòng lặp p50 19 ms; ước ~$0,027 một lượt tóm
-tắt (có đệm $0,017). Chưa có UI (handoff `docs/handoff-ai-copilot.md`), chưa có khoá trên VPS.
+ĐVVC / phá huỷ bị cấm); tool ghi chỉ chạy sau khi người xác nhận bằng token HMAC gắn người · tool ·
+input, không chạy lại; mọi lượt ghi `ai_interactions` (migration 0062); hành động AI để lại
+`care_case_events.source = AI` với actor là người xác nhận.
+
+Provider trừu tượng, hai bản first-class: **OpenAI Responses API** (mặc định khi có
+`OPENAI_API_KEY`) và Anthropic. Router ba bậc ở `lib/ai/router.ts`: routine gpt-5.6-luna ·
+copilot gpt-5.6-terra · analysis gpt-5.6-sol (Anthropic: haiku-4-5 / opus-5 / opus-5); kiểm thử
+chặn chuỗi model rải ngoài router. 20 tool: 13 đọc (care 5 + ERP 8: khách, đơn với mọi lần gửi và
+kết quả đơn từ bảng vật chất hoá, lợi nhuận, tiền, kho, sản phẩm, tổng quan), 6 ghi cần xác nhận
+(note, giao, đổi trạng thái, hẹn, đóng, mở lại), 1 cấm (yêu cầu ĐVVC). Ngăn kéo copilot toàn cục
+(✦ / Ctrl+J) biết route + kỳ + đối tượng đang mở; ngăn kéo kiện có "Tóm tắt bằng AI". Thiếu khoá
+⇒ "AI chưa được cấu hình" kèm tên secret, app không lỗi. Thẻ AI + nút thử kết nối ở Kết nối dữ liệu.
+Kiểm thử không mạng (FakeProvider, fetch giả cho OpenAI): vòng lặp p50 18 ms; ước ~$0,03 một lượt
+tóm tắt kiện với Opus 5 (gpt-5.6 chưa có giá ⇒ chi phí ghi là chưa biết, không phải 0).
+
+### 7.11 Vòng 7: tích hợp & phát hành một lần (11/09/2026)
+
+Vai trò: Integration + Release Lead. Nhánh `release/integration-2026-09-11` từ `origin/main`
+(`1320cc8`), mang care engine + AI copilot + OpenAI + UI nối care/AI + báo cáo care (khối lượng theo
+người, doanh thu cứu được) + nút mở lại case. **Nhánh UI `claude/erp-ui-redesign-opus5` không tồn
+tại trên remote** tại thời điểm tích hợp (chưa được đẩy lên), nên phần redesign của Opus chưa vào
+release này — sẽ tích hợp ở release kế khi nhánh có trên GitHub, theo luật: nghiệp vụ / truy vấn /
+hợp đồng / quyền giữ bản main, trình bày ưu tiên Opus, sidebar/dashboard/operations merge ngữ nghĩa.
+Các nhánh cũ (`perf/p0-reporting-speed`, `claude/release-engineering-p0`, `hotfix/vtp-import-recovery`,
+`claude/vtp-direct-fulfillment-p1`, `codex/erp-data-truth-p0`, `wip/*`, …) không có merge-base với
+`main` hiện tại và `main` là siêu tập nội dung của chúng (mọi khác biệt là main mới hơn) ⇒ không mang
+gì thêm.
 
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).

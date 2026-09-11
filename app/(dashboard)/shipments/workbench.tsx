@@ -9,7 +9,7 @@ import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, markCarrierManualDone, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -271,6 +271,7 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
   const [vtpOpen, setVtpOpen] = useState(false);
   const [vtpNote, setVtpNote] = useState("");
+  const terminal = c.care.status === "RESOLVED" || c.care.status === "CANCELLED";
 
   const changeStatus = (status: CareStatus) =>
     start(async () => {
@@ -286,6 +287,16 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
       }
       onPatch(st);
       if (status === "RESOLVED" || status === "CANCELLED") toast.success(`${c.tracking}: ${CARE_STATUS_LABEL[status]} — chuyển sang “Đã xử lý”`);
+    });
+  const reopen = () =>
+    start(async () => {
+      const r = await reopenCase({ shipmentId: c.shipmentId, note: "Mở lại từ bàn làm việc" });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      onPatch(r.data);
+      toast.success(`${c.tracking}: đã mở lại — quay về “Cần care”`);
     });
   const changeOwner = (ownerId: string) =>
     start(async () => {
@@ -396,9 +407,14 @@ function CaseRow({ c, staff, canManage, checked, onCheck, onPatch }: { c: CareCa
       </td>
       <td className="px-2 py-2">
         <div className="flex flex-wrap items-center gap-1">
+          {terminal ? (
+            <button type="button" disabled={pending} onClick={reopen} className="h-7 rounded-md border px-2 text-[11.5px] font-medium hover:bg-accent" title="Case đã đóng — mở lại để tiếp tục care (lịch sử giữ nguyên)">
+              Mở lại
+            </button>
+          ) : null}
           <select
             value={c.care.status}
-            disabled={pending}
+            disabled={pending || terminal}
             onChange={(e) => changeStatus(e.target.value as CareStatus)}
             title={CARE_STATUS_HINT[c.care.status]}
             className={cn("h-7 rounded-md border-0 px-1.5 text-[11.5px] font-semibold", CARE_STATUS_TONE[c.care.status])}

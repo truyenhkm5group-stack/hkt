@@ -5,7 +5,7 @@ import type { CopilotConfirmResult, CopilotResult, CopilotToolInfo } from "@/lib
 import { confirmCopilotActions as confirmCore, runCopilot } from "@/lib/ai/copilot";
 import { describeTools } from "@/lib/ai/tools/registry";
 import { requireUser } from "@/lib/auth/session";
-import { env } from "@/lib/env";
+import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
 
 /**
  * Server Action của AI Copilot — lớp mỏng: xác thực phiên, zod, rồi giao cho `lib/ai/copilot.ts`.
@@ -23,7 +23,7 @@ export async function askCopilot(input: z.input<typeof askSchema>): Promise<Copi
   const user = await requireUser();
   const parsed = askSchema.safeParse(input);
   if (!parsed.success) {
-    return { interactionId: null, status: "ERROR", answer: "", toolCalls: [], pendingActions: [], warnings: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0, latencyMs: 0, rounds: 0, model: env.ai.model, error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    return { interactionId: null, status: "ERROR", answer: "", toolCalls: [], pendingActions: [], warnings: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: null, latencyMs: 0, rounds: 0, model: "", error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   }
   return runCopilot({ user, ...parsed.data });
 }
@@ -38,7 +38,8 @@ export async function confirmCopilotActions(input: z.input<typeof confirmSchema>
 }
 
 /** Cho UI: copilot có bật không và người này dùng được tool nào. */
-export async function copilotStatus(): Promise<{ enabled: boolean; model: string; tools: CopilotToolInfo[] }> {
+export async function copilotStatus(): Promise<{ enabled: boolean; provider: string; model: string; reason: string | null; tools: CopilotToolInfo[] }> {
   const user = await requireUser();
-  return { enabled: env.ai.provider !== "off" && env.ai.configured, model: env.ai.model, tools: describeTools(user) };
+  const name = resolveProviderName();
+  return { enabled: Boolean(name), provider: name ?? "", model: name ? modelFor(name, "copilot") : "", reason: aiDisabledReason(), tools: describeTools(user) };
 }

@@ -309,3 +309,19 @@ export async function outcomeCoverage(): Promise<{ rows: number; stale: number; 
     .from(c);
   return { rows: Number(row?.rows ?? 0), stale: Number(row?.stale ?? 0), computedAt: row?.computedAt ?? null };
 }
+
+/**
+ * Kết quả đơn ĐÃ VẬT CHẤT HOÁ theo luật chuẩn — cho AI tools và ngăn kéo: đọc bảng dẫn xuất, không
+ * tính lại. Đơn chưa có dòng ⇒ không có trong Map (chưa biết, không phải PENDING).
+ */
+export async function getOrderOutcomes(orderIds: string[]): Promise<Map<string, { outcome: string; shipmentId: string | null }>> {
+  const out = new Map<string, { outcome: string; shipmentId: string | null }>();
+  if (!orderIds.length) return out;
+  const db = await getDb();
+  const rows = await db
+    .select({ orderId: schema.canonicalOrderOutcome.orderId, shipmentId: schema.canonicalOrderOutcome.shipmentId, outcome: schema.canonicalOrderOutcome.outcome })
+    .from(schema.canonicalOrderOutcome)
+    .where(sql`${schema.canonicalOrderOutcome.orderId} in (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})`);
+  for (const r of rows) out.set(r.orderId, { outcome: r.outcome, shipmentId: r.shipmentId });
+  return out;
+}

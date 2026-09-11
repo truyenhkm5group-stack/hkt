@@ -5,11 +5,12 @@ import { actionToken, COPILOT_LIMITS, verifyActionToken } from "@/lib/ai/policy"
 import { COPILOT_SYSTEM_PROMPT, contextPreamble } from "@/lib/ai/prompt";
 import { estimateCostUsd, getAiProvider, type AiBlock, type AiMessage, type AiProvider, type AiUsage } from "@/lib/ai/provider";
 import { registerCareTools } from "@/lib/ai/tools/care";
+import { registerErpTools } from "@/lib/ai/tools/erp";
 import { getTool, toolsFor, toProviderTools, type AiToolContext, type AiToolDefinition } from "@/lib/ai/tools/registry";
 import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
-import { env } from "@/lib/env";
+import { aiDisabledReason } from "@/lib/ai/router";
 
 /**
  * ═══════════ VÒNG LẶP COPILOT — ERP TRUTH → TYPED TOOLS → AI ═══════════
@@ -24,6 +25,7 @@ import { env } from "@/lib/env";
  */
 
 registerCareTools();
+registerErpTools();
 
 const EMPTY_USAGE: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -60,8 +62,8 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
   const started = Date.now();
   const now = input.now ?? new Date();
   const provider = input.provider === undefined ? getAiProvider() : input.provider;
-  const base: Omit<CopilotResult, "status" | "answer"> = { interactionId: null, toolCalls: [], pendingActions: [], warnings: [], usage: EMPTY_USAGE, costUsd: 0, latencyMs: 0, rounds: 0, model: provider?.model ?? env.ai.model };
-  if (!provider) return { ...base, status: "DISABLED", answer: "AI Copilot chưa được bật trên máy chủ này (thiếu khoá API).", error: "AI_DISABLED" };
+  const base: Omit<CopilotResult, "status" | "answer"> = { interactionId: null, toolCalls: [], pendingActions: [], warnings: [], usage: EMPTY_USAGE, costUsd: null, latencyMs: 0, rounds: 0, model: provider?.model ?? "" };
+  if (!provider) return { ...base, status: "DISABLED", answer: `AI chưa được cấu hình trên máy chủ này (${aiDisabledReason() ?? "chưa có khoá API"}).`, error: "AI_DISABLED" };
 
   const message = clip(input.message.trim(), COPILOT_LIMITS.maxPromptChars);
   if (!message) return { ...base, status: "ERROR", answer: "", error: "Câu hỏi trống" };
@@ -177,7 +179,8 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
         actionsProposed: pending,
         actionsExecuted: [],
         usage,
-        costUsd: costUsd.toFixed(6),
+        // Chuỗi rỗng = chưa biết giá (model chưa có trong bảng), không phải 0.
+        costUsd: costUsd === null ? "" : costUsd.toFixed(6),
         latencyMs,
         rounds,
         status,

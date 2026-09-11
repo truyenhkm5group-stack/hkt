@@ -1,7 +1,11 @@
 # Handoff AI Copilot cho phiên UI (Claude Opus 5)
 
-Backend đã xong và có kiểm thử. UI chỉ cần gọi ba Server Action ở `lib/actions/ai.ts` và dùng kiểu
-ở `lib/ai/contracts.ts`. **Không đổi tên / hình dạng kiểu** — chỉ thêm trường optional nếu cần.
+Backend đã xong và có kiểm thử. **Đã có một ngăn kéo copilot toàn cục** (`components/ai-copilot.tsx`,
+gắn ở `components/site-header.tsx`, mở bằng nút ✦ / Ctrl+J / `openCopilot()`), và nút "Tóm tắt bằng
+AI" trong ngăn kéo kiện (`app/(dashboard)/shipments/care-drawer.tsx`). Redesign thì sửa trình bày
+của hai chỗ đó; phần gọi Server Action và kiểu dữ liệu giữ nguyên. Ba Server Action ở
+`lib/actions/ai.ts`, kiểu ở `lib/ai/contracts.ts`. **Không đổi tên / hình dạng kiểu** — chỉ thêm
+trường optional nếu cần.
 
 ## Gọi
 
@@ -35,14 +39,15 @@ if (r.pendingActions.length) {
   là xác nhận thường; các nhóm khác hiện chưa có (forbidden).
 - `warnings` hiện trên câu trả lời, không trộn vào nó.
 - `status === "DISABLED"` ⇒ máy chủ chưa có khoá; ẩn hoặc hiện dòng "chưa bật".
-- Sau khi nối xong: xoá ba dòng `lib/actions/ai.ts::*` trong `CHUA_NOI` ở
-  `tests/action-wiring.test.ts`.
+- `copilotStatus()` trả `{ enabled, provider, model, reason, tools }` — `reason` là secret còn thiếu.
 
 ## Bật trên máy chủ
 
-`.env` trên VPS: `ANTHROPIC_API_KEY=…` (không commit). Tuỳ chọn `AI_MODEL` (mặc định
-`claude-opus-5`), `AI_EFFORT` (medium), `AI_MAX_TOOL_ROUNDS` (6), `AI_PROVIDER=off` để tắt.
-Migration `0062_ai_interactions` tự áp khi app khởi động.
+`.env` trên VPS: `OPENAI_API_KEY=…` (mặc định dùng OpenAI: gpt-5.6-terra cho copilot, luna cho
+việc rẻ, sol cho phân tích) hoặc `ANTHROPIC_API_KEY=…` (claude-opus-5). Không commit. Tuỳ chọn
+`AI_PROVIDER` (auto | openai | anthropic | off), `AI_MODEL`, `AI_EFFORT`, `AI_MAX_TOOL_ROUNDS` (6).
+Migration `0062_ai_interactions` tự áp khi app khởi động. Trang Kết nối dữ liệu có thẻ "AI Copilot"
+với nút thử kết nối.
 
 ## Kiểm thử
 

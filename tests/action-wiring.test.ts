@@ -35,11 +35,6 @@ const CHUA_NOI: Record<string, string> = {
   "lib/actions/cs.ts::saveCsRules": "chưa có màn hình cấu hình luật CSKH; shop đang dùng luật mặc định",
   // Ghi chú nội bộ cho đơn landing: cột đã có, tầng hành động đã có, chưa có ô nhập trên bảng.
   "lib/actions/landing.ts::setLandingNote": "chưa có ô ghi chú trên bảng đơn landing",
-  // AI Copilot: tầng backend đã xong (lib/ai/*), giao diện hộp thoại do phiên UI riêng làm theo
-  // docs/handoff-ai-copilot.md. Nối xong thì xoá ba dòng này.
-  "lib/actions/ai.ts::askCopilot": "chưa có hộp thoại copilot trên giao diện — xem docs/handoff-ai-copilot.md",
-  "lib/actions/ai.ts::confirmCopilotActions": "chưa có nút xác nhận hành động AI trên giao diện",
-  "lib/actions/ai.ts::copilotStatus": "chưa có giao diện hiện trạng thái copilot",
 };
 
 const goc = path.resolve(__dirname, "..");

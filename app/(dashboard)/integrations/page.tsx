@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
+import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
@@ -44,6 +45,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const user = await requirePermission("integrations:view");
   const canSync = can(user, "sync:run");
   const status = integrationStatus();
+  const aiProvider = resolveProviderName();
   const running = runningJobKeys();
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
@@ -223,6 +225,22 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               <SyncButton job="cs-chat" label="Quét hội thoại ngay" />
             </div>
           }
+        />
+        <ConnectionCard
+          initials="AI"
+          tone="bg-violet-600"
+          title="AI Copilot"
+          description="Trợ lý đọc số ERP qua tool; hành động ghi chỉ chạy sau khi người xác nhận"
+          hint="AI không truy vấn CSDL, không tự tính KPI. Mọi lượt hỏi ghi vào ai_interactions (ai hỏi, tool nào, đề nghị gì, đã chạy gì). Khoá API chỉ SDK đọc từ .env, không hiển thị, không log."
+          configured={Boolean(aiProvider)}
+          items={[
+            { label: "Provider", value: aiProvider ? <span className="font-mono">{aiProvider}</span> : <span className="text-muted-foreground">{aiDisabledReason()}</span> },
+            { label: "Model copilot", value: aiProvider ? <span className="font-mono">{modelFor(aiProvider, "copilot")}</span> : <span className="text-muted-foreground">—</span> },
+            { label: "Routine / phân tích", value: aiProvider ? <span className="font-mono text-xs">{MODEL_BY_TIER[aiProvider].routine} · {MODEL_BY_TIER[aiProvider].analysis}</span> : <span className="text-muted-foreground">—</span>, span: true },
+            { label: "OPENAI_API_KEY", value: env.ai.openaiConfigured ? <span className="text-emerald-700 dark:text-emerald-300">đã đặt</span> : <span className="text-muted-foreground">chưa đặt</span> },
+            { label: "ANTHROPIC_API_KEY", value: env.ai.anthropicConfigured ? <span className="text-emerald-700 dark:text-emerald-300">đã đặt</span> : <span className="text-muted-foreground">chưa đặt</span> },
+          ]}
+          footer={<TestConnectionButton provider="ai" disabled={!aiProvider} />}
         />
       </section>
 

@@ -6,7 +6,10 @@ import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
 import { actionToken, stableStringify } from "@/lib/ai/policy";
 import { COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompt";
 import { estimateCostUsd, FakeProvider, type AiResponse } from "@/lib/ai/provider";
+import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { registerCareTools } from "@/lib/ai/tools/care";
+import { registerErpTools } from "@/lib/ai/tools/erp";
+import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
 import { allTools, RISK_FLOOR, strictInputSchema, toolsFor } from "@/lib/ai/tools/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
@@ -26,11 +29,13 @@ import { clearMemo } from "@/lib/cache";
  */
 export async function testAiCopilot(db: Db) {
   registerCareTools();
+  registerErpTools();
   const gio = (h: number) => new Date(Date.now() - h * 3600_000);
 
   // ───────── Sổ đăng ký: phân tách đọc/ghi, sàn rủi ro, JSON Schema chặt ─────────
   const tools = allTools();
-  assert.ok(tools.length >= 10, `phải có ít nhất 10 tool, thấy ${tools.length}`);
+  assert.ok(tools.length >= 20, `phải có ít nhất 20 tool (care + ERP), thấy ${tools.length}`);
+  for (const n of ["search_customer", "get_order_context", "get_customer_history", "get_profit_summary", "get_cash_position", "get_inventory_risks", "get_product_performance", "get_owner_brief", "resolve_case", "reopen_case"]) assert.ok(tools.some((t) => t.name === n), `thiếu tool ${n}`);
   for (const t of tools) {
     if (t.kind === "write") assert.notEqual(t.policy, "auto", `${t.name}: tool ghi không được chạy tự động`);
     if (RISK_FLOOR[t.riskClass] === "forbidden") assert.equal(t.policy, "forbidden", `${t.name}: nhóm ${t.riskClass} phải bị cấm ở MVP`);
@@ -190,6 +195,74 @@ export async function testAiCopilot(db: Db) {
   assert.equal(r8.status, "OK");
   assert.equal(r8.toolCalls.filter((t) => t.executed && t.ok).length, 4, JSON.stringify(r8.toolCalls.map((t) => t.summary)));
 
+  // ───────── 4b. OpenAI Responses API: ánh xạ đúng, không mạng (fetch giả) ─────────
+  const seen: { url: string; body: Record<string, unknown> }[] = [];
+  const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    seen.push({ url: String(url), body });
+    const isSecond = (body.input as unknown[]).some((it) => (it as { type?: string }).type === "function_call_output");
+    const payload = isSecond
+      ? { id: "resp_2", object: "response", status: "completed", model: "gpt-5.6-terra", output: [{ type: "message", id: "m2", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Kiện AICARE001 giao hụt 1 lần.", annotations: [] }] }], usage: { input_tokens: 900, output_tokens: 50, input_tokens_details: { cached_tokens: 700 }, output_tokens_details: { reasoning_tokens: 10 }, total_tokens: 950 } }
+      : { id: "resp_1", object: "response", status: "completed", model: "gpt-5.6-terra", output: [{ type: "function_call", id: "fc_1", call_id: "call_abc", name: "get_care_case", arguments: JSON.stringify({ shipmentId: "ai-s1" }), status: "completed" }], usage: { input_tokens: 800, output_tokens: 20, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 5 }, total_tokens: 820 } };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  process.env.OPENAI_API_KEY = "sk-test-khong-that";
+  try {
+    const oa = new OpenAiProvider("gpt-5.6-terra", "medium", fakeFetch);
+    const r9 = await runCopilot({ user: cs, provider: oa, message: "Tóm tắt kiện này", context: ctx });
+    assert.equal(r9.status, "OK", JSON.stringify(r9));
+    assert.equal(r9.rounds, 2);
+    assert.ok(r9.answer.includes("AICARE001"));
+    assert.equal(r9.toolCalls[0]!.name, "get_care_case");
+    assert.ok(r9.toolCalls[0]!.executed && r9.toolCalls[0]!.ok, "tool đọc phải chạy với input từ function_call");
+    assert.equal(seen.length, 2);
+    assert.ok(seen[0]!.url.endsWith("/responses"), `phải gọi Responses API, thấy ${seen[0]!.url}`);
+    const b0 = seen[0]!.body;
+    assert.equal(b0.model, "gpt-5.6-terra");
+    assert.equal(b0.instructions, COPILOT_SYSTEM_PROMPT, "system prompt ⇒ instructions");
+    assert.equal(b0.store, false, "không lưu hội thoại phía OpenAI");
+    assert.deepEqual(b0.reasoning, { effort: "medium" });
+    const t0 = (b0.tools as { type: string; name: string; strict: boolean; parameters: { additionalProperties: boolean } }[]).find((t) => t.name === "get_care_case")!;
+    assert.ok(t0 && t0.type === "function" && t0.strict === true && t0.parameters.additionalProperties === false, "tool ⇒ function strict");
+    const in1 = seen[1]!.body.input as { type: string; call_id?: string; name?: string; output?: string; role?: string }[];
+    assert.ok(in1.some((i) => i.type === "function_call" && i.call_id === "call_abc" && i.name === "get_care_case"), "lượt 2 phải phát lại function_call");
+    const out = in1.find((i) => i.type === "function_call_output" && i.call_id === "call_abc");
+    assert.ok(out && JSON.parse(out.output!).shipment.tracking === "AICARE001", "function_call_output mang kết quả tool");
+    assert.equal(r9.usage.cacheReadTokens, 700, "cached_tokens ⇒ cacheReadTokens");
+    assert.equal(r9.usage.inputTokens, 800 + 200, "input không đệm = input_tokens − cached");
+    assert.equal(r9.costUsd, null, "model chưa có giá ⇒ chi phí chưa biết");
+    const [row9] = await db.select().from(schema.aiInteractions).where(eq(schema.aiInteractions.id, r9.interactionId!));
+    assert.equal(row9!.provider, "openai");
+    assert.equal(row9!.costUsd, "", "chưa biết giá ⇒ chuỗi rỗng, không phải 0");
+    assert.ok(!JSON.stringify(seen).includes("sk-test-khong-that"), "khoá không nằm trong body");
+
+    // Router: chọn provider theo khoá có sẵn, model theo bậc, không rải chuỗi model.
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_MODEL;
+    const hadAnthropic = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    assert.equal(resolveProviderName(), "openai");
+    assert.equal(modelFor("openai", "routine"), "gpt-5.6-luna");
+    assert.equal(modelFor("openai", "copilot"), "gpt-5.6-terra");
+    assert.equal(modelFor("openai", "analysis"), "gpt-5.6-sol");
+    process.env.AI_MODEL = "gpt-5.6-luna";
+    assert.equal(modelFor("openai", "copilot"), "gpt-5.6-luna", "AI_MODEL ghi đè bậc copilot");
+    delete process.env.AI_MODEL;
+    delete process.env.OPENAI_API_KEY;
+    assert.equal(resolveProviderName(), null);
+    assert.ok(aiDisabledReason()!.includes("OPENAI_API_KEY"), "lý do tắt phải nói đúng secret còn thiếu");
+    process.env.AI_PROVIDER = "off";
+    assert.equal(aiDisabledReason(), "AI_PROVIDER=off");
+    delete process.env.AI_PROVIDER;
+    if (hadAnthropic) process.env.ANTHROPIC_API_KEY = hadAnthropic;
+    assert.equal(MODEL_BY_TIER.anthropic.copilot, "claude-opus-5");
+    const src = readFileSync("lib/ai/copilot.ts", "utf8") + readFileSync("lib/ai/tools/care.ts", "utf8") + readFileSync("lib/ai/tools/erp.ts", "utf8") + readFileSync("lib/actions/ai.ts", "utf8");
+    assert.ok(!/gpt-5|claude-opus|claude-sonnet|claude-haiku/.test(src), "chuỗi model chỉ được nằm ở router / provider");
+  } finally {
+    delete process.env.OPENAI_API_KEY;
+  }
+
   // ───────── 5. Benchmark: chi phí vòng lặp (không mạng) và ước tính tiền ─────────
   const lat: number[] = [];
   for (let i = 0; i < 12; i += 1) {
@@ -208,9 +281,10 @@ export async function testAiCopilot(db: Db) {
   const cached = { inputTokens: caseTokens + 200, outputTokens: 400, cacheReadTokens: promptTokens, cacheWriteTokens: 0 };
   const costCold = estimateCostUsd("claude-opus-5", typical);
   const costWarm = estimateCostUsd("claude-opus-5", cached);
-  assert.ok(costCold < 0.2, `một lượt tóm tắt kiện ước ${costCold} USD — quá đắt cho thao tác thường ngày`);
+  assert.ok(costCold !== null && costWarm !== null && costCold < 0.2, `một lượt tóm tắt kiện ước ${costCold} USD — quá đắt cho thao tác thường ngày`);
+  assert.equal(estimateCostUsd("gpt-5.6-terra", typical), null, "model chưa có giá ⇒ chi phí CHƯA BIẾT, không phải 0");
 
   console.log(
-    `✓ AI Copilot: ${tools.length} tool (${tools.filter((t) => t.kind === "read").length} đọc · ${tools.filter((t) => t.kind === "write" && t.policy === "confirm").length} ghi-cần-xác-nhận · ${tools.filter((t) => t.policy === "forbidden").length} cấm) · ghi chỉ chạy sau xác nhận, có token, không chạy lại · vòng lặp p50 ${p50.toFixed(0)}ms p95 ${p95.toFixed(0)}ms (không mạng) · ước ~${promptTokens} token prompt+tool, hồ sơ kiện ~${caseTokens} token · một lượt tóm tắt ≈ $${costCold.toFixed(4)} lạnh / $${costWarm.toFixed(4)} có đệm`,
+    `✓ AI Copilot (Anthropic + OpenAI Responses, router 3 bậc): ${tools.length} tool (${tools.filter((t) => t.kind === "read").length} đọc · ${tools.filter((t) => t.kind === "write" && t.policy === "confirm").length} ghi-cần-xác-nhận · ${tools.filter((t) => t.policy === "forbidden").length} cấm) · ghi chỉ chạy sau xác nhận, có token, không chạy lại · vòng lặp p50 ${p50.toFixed(0)}ms p95 ${p95.toFixed(0)}ms (không mạng) · ước ~${promptTokens} token prompt+tool, hồ sơ kiện ~${caseTokens} token · một lượt tóm tắt ≈ $${costCold.toFixed(4)} lạnh / $${costWarm.toFixed(4)} có đệm`,
   );
 }
