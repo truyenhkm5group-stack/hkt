@@ -298,3 +298,38 @@ export function CareDrawer({
     </>
   );
 }
+
+/**
+ * ───────────── MỘT NGĂN KÉO CHO CẢ DANH SÁCH ─────────────
+ *
+ * Ngăn kéo đặt TRONG từng dòng thì sống chết theo dòng: bấm "Ghi nhận & đóng việc" là việc biến
+ * khỏi hàng đợi, dòng bị gỡ, ngăn kéo đóng sập giữa chừng và không sang được kiện kế. Vì thế ngăn
+ * kéo đứng NGOÀI danh sách (host), còn mỗi dòng chỉ là một nút phát tín hiệu "mở kiện này". Danh
+ * sách dựng lại bao nhiêu lần thì host vẫn đứng nguyên.
+ */
+const CARE_OPEN_EVENT = "erp:care-open";
+
+export function CareDrawerHost({ queue }: { queue: CareQueueItem[] }) {
+  const [item, setItem] = useState<CareQueueItem | null>(null);
+  useEffect(() => {
+    const onOpen = (e: Event) => setItem((e as CustomEvent<CareQueueItem>).detail);
+    window.addEventListener(CARE_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(CARE_OPEN_EVENT, onOpen);
+  }, []);
+  if (!item) return null;
+  // `key` theo kiện MỞ BAN ĐẦU: đi tiếp trong danh sách đổi trạng thái bên trong, không đổi key.
+  return <CareDrawer key={item.shipmentId} shipmentId={item.shipmentId} caseId={item.caseId ?? null} queue={queue} open onOpenChange={(v) => !v && setItem(null)} />;
+}
+
+/** Nút mở ngăn kéo dùng chung (host) — đặt được trong bất kỳ dòng nào, kể cả trong server component. */
+export function CareOpenButton({ shipmentId, caseId = null, className, children }: { shipmentId: string; caseId?: string | null; className?: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new CustomEvent<CareQueueItem>(CARE_OPEN_EVENT, { detail: { shipmentId, caseId } }))}
+      className={cn("text-left hover:underline", className)}
+    >
+      {children}
+    </button>
+  );
+}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, PhoneOff } from "lucide-react";
-import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
+import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { SectionCard } from "@/components/ui-bits";
 import { BUCKET_TONE, EXCLUSIVE_BUCKETS, type BucketKey } from "@/lib/constants/delivery-tower";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -26,7 +26,7 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
 
   const gio = (h: number | null) => (h === null ? "chưa có tin" : h < 1 ? "<1 giờ" : h < 48 ? `${Math.round(h)} giờ` : `${Math.round(h / 24)} ngày`);
   // Danh sách để ngăn kéo đi LẦN LƯỢT: đúng 60 kiện đang hiện, đúng thứ tự đang hiện.
-  const hangDoiCare = dangMo ? dangMo.rows.slice(0, 60).map((r) => ({ shipmentId: r.shipmentId })) : undefined;
+  const hangDoiCare = dangMo ? dangMo.rows.slice(0, 60).map((r) => ({ shipmentId: r.shipmentId })) : [];
 
   return (
     <SectionCard
@@ -72,6 +72,7 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
         })}
       </div>
 
+      {dangMo ? <CareDrawerHost queue={hangDoiCare} /> : null}
       {dangMo ? (
         <div className="border-t">
           <div className="flex flex-wrap items-start justify-between gap-3 bg-muted/40 px-4 py-3">
@@ -107,9 +108,9 @@ export async function DeliveryTower({ bucket }: { bucket?: string }) {
                         Bấm mã vận đơn MỞ NGĂN KÉO, không rời trang. Trước đây một cuộc gọi cho khách
                         giao hụt cần sáu lần chuyển màn hình; giờ còn một lần mở và một lần đóng.
                       */}
-                      <CareDrawer shipmentId={r.shipmentId} queue={hangDoiCare} className="font-medium">
+                      <CareOpenButton shipmentId={r.shipmentId} className="font-medium">
                         {r.tracking}
-                      </CareDrawer>
+                      </CareOpenButton>
                       <div className="text-[11px] text-muted-foreground">
                         {r.orderSystemId ? `#${r.orderSystemId}` : "ngoài Pancake"}
                         {r.failedAttempts > 0 ? ` · giao hụt ${r.failedAttempts} lần` : ""}

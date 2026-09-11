@@ -10,7 +10,7 @@ import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
-import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
+import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { InfoHint } from "@/components/info-hint";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { ideasWaitingReview } from "@/lib/queries/ideas";
@@ -66,6 +66,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="space-y-5">
+      {/* Ngăn kéo tra nhanh đứng ngoài danh sách: việc bị đóng, dòng biến mất, ngăn kéo vẫn đi tiếp. */}
+      <CareDrawerHost queue={hangDoiCare} />
       <PageHeader
         eyebrow="Vận hành"
         title="Cần xử lý"
@@ -164,9 +166,9 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                     <Link href={c.href || "#"} className="text-sm font-semibold hover:text-primary hover:underline">{c.title}</Link>
                     {/* Mở kiện hàng ngay tại đây: gọi khách / xem ĐVVC nói gì mà không rời hàng đợi; ghi nhận xong tự sang việc kế. */}
                     {c.quickShipmentId ? (
-                      <CareDrawer shipmentId={c.quickShipmentId} caseId={c.id} queue={hangDoiCare} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
+                      <CareOpenButton shipmentId={c.quickShipmentId} caseId={c.id} className="rounded border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
                         Tra nhanh
-                      </CareDrawer>
+                      </CareOpenButton>
                     ) : null}
                     {/* "Nên làm" + "vì sao đứng ở đây" nằm trong ⓘ — màn hình chính chỉ còn việc và lý do. */}
                     <InfoHint label="Nên làm gì và vì sao việc này đứng ở đây">
