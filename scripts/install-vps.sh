@@ -208,6 +208,29 @@ say "Dọn image và bộ nhớ đệm dựng không còn dùng"
 docker image prune -f >/dev/null 2>&1 || true
 docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
 
+# ═══ ĐƯỜNG CHÍNH: IMAGE ĐÃ DỰNG Ở CI (GHCR) — VPS CHỈ KÉO VỀ ═══
+# Deploy #228 chứng minh máy này không còn dựng nổi bản hiện tại kể cả khi chỉ dựng MỘT image.
+# Workflow dựng image trên máy chạy GitHub, đẩy lên ghcr.io theo đúng SHA rồi truyền tên qua
+# ERP_IMAGE; ở đây kéo về, gắn tag `erp-app:local` (tên compose dùng) và khởi động lại — không build.
+if [ -n "${ERP_IMAGE:-}" ]; then
+  say "Kéo image đã dựng ở CI: $ERP_IMAGE"
+  if [ -n "${GHCR_TOKEN:-}" ]; then
+    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null 2>&1 || warn "Đăng nhập ghcr.io thất bại — thử kéo image công khai"
+  fi
+  PULLED=0
+  for i in 1 2 3; do
+    if docker pull "$ERP_IMAGE"; then PULLED=1; break; fi
+    warn "Kéo image hỏng (lần $i/3) — thử lại sau $((i * 15))s"; sleep $((i * 15))
+  done
+  docker logout ghcr.io >/dev/null 2>&1 || true
+  if [ "$PULLED" != "1" ]; then
+    echo "::error::Không kéo được $ERP_IMAGE. Bản đang chạy KHÔNG bị đụng tới."
+    exit 1
+  fi
+  docker tag "$ERP_IMAGE" erp-app:local
+  $COMPOSE up -d
+else
+
 TONG_MB="$(free -m | awk '/^Mem:/ {print $2}')"
 CON_MB="$(free -m | awk '/^Mem:/ {print $7}')"     # available: gồm cả phần đệm lấy lại được
 SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}')"
@@ -227,6 +250,7 @@ fi
 # trường của shell không đi vào bản dựng Docker.
 
 $COMPOSE up -d --build
+fi
 
 say "Chờ ERP sẵn sàng"
 for i in $(seq 1 60); do

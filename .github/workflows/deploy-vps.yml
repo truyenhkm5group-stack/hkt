@@ -26,6 +26,11 @@ concurrency:
   group: vps-operations
   cancel-in-progress: false
 
+# `packages: write` để đẩy image lên GHCR bằng GITHUB_TOKEN — không cần secret mới.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -63,6 +68,29 @@ jobs:
       - name: Dựng bản production
         run: npm run build
 
+      # ═══ DỰNG IMAGE Ở CI, KHÔNG DỰNG TRÊN VPS ═══
+      #
+      # Deploy #208, #227 và #228 đều chết vì `next build` bị SIGKILL trên VPS ~1,9 GB đang chạy
+      # Postgres + ứng dụng + bộ lập lịch + Caddy (#228 đã chỉ còn MỘT lần dựng mà vẫn chết; `npm ci`
+      # trong Docker mất 11 phút vì máy đang tráo bộ nhớ). Máy chạy của GitHub có 7 GB: dựng ở đây,
+      # đẩy lên GHCR theo đúng SHA, VPS chỉ `docker pull` rồi khởi động lại — vài chục giây, không
+      # đụng RAM của dịch vụ đang phục vụ người dùng.
+      - name: Đăng nhập GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Dựng image và đẩy lên GHCR theo SHA
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
+        run: |
+          IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          docker build -t "$IMAGE_LC" .
+          docker push "$IMAGE_LC"
+          echo "ERP_IMAGE=$IMAGE_LC" >> "$GITHUB_ENV"
+          echo "Đã đẩy $IMAGE_LC"
+
       - name: Kiểm tra Secrets bắt buộc
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -97,6 +125,10 @@ jobs:
           FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
           FACEBOOK_BUSINESS_ID: ${{ vars.FACEBOOK_BUSINESS_ID || '336423739082347' }}
           PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+          # Image đã dựng ở CI + thông tin đăng nhập GHCR (GITHUB_TOKEN chỉ sống trong lần chạy này).
+          ERP_IMAGE: ${{ env.ERP_IMAGE }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # AI Copilot — tuỳ chọn. Secret trống thì .env giữ nguyên giá trị cũ (không xoá khoá đang dùng).
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -108,10 +140,10 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 35m
-          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER
+          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,ERP_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
-            export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN OPENAI_API_KEY ANTHROPIC_API_KEY AI_PROVIDER
+            export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN OPENAI_API_KEY ANTHROPIC_API_KEY AI_PROVIDER ERP_IMAGE GHCR_USER GHCR_TOKEN
             if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
             # Lấy chính bản bootstrap của commit đang triển khai. Lấy theo tên nhánh thì kịch bản
             # cài đặt có thể đến từ một commit khác với mã nguồn — đúng lỗi mà bước này phải chặn.
