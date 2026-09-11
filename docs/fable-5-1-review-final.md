@@ -337,6 +337,11 @@ care, đã đóng, phản hồi đầu, vỡ SLA đang cầm; số lần bấm c
 | Đổi trạng thái 20 kiện | 20 lượt | chọn 20 → 1 bấm |
 | Bảng mặc định | toàn bộ vận đơn 30 ngày (hàng trăm dòng) | chỉ kiện cần người |
 
+**Production sau deploy `778f956`** (10:22 UTC): migration 60 đã áp, hai bảng mới rỗng (chưa ai
+thao tác); hàng đợi mặc định có 45 kiện giao thất bại đang chạy với COD treo 24.280.999đ, 0 case sai
+địa chỉ/SĐT mở. Smoke 39/39: `/shipments` (mặc định = Cần care) 71ms · 500kB (trước: bảng đủ 336kB);
+trang hằng ngày ≤ 140ms; `/ads` vẫn chậm lần mở đầu (3,8s, việc P2 đã nêu).
+
 Migration `0060_shipment_care`. Kiểm thử: `tests/care-workbench.test.ts` (5 nhóm: care không chạm
 ĐVVC · audit đủ · góc nhìn / mở lại / tới hạn · yêu cầu ĐVVC làm tay / ACK→SUCCESS theo sự kiện /
 idempotent / lỗi quyền · báo cáo theo kết cục).
