@@ -175,7 +175,7 @@ chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu
 | ~~P1~~ | ~~Mốc `prepaid` khác nhau giữa Dòng tiền và /reports~~ | **Đã làm ở vòng 3 (mục 7.5)** |
 | ~~P1~~ | ~~Ngăn kéo đơn dùng chung cho /alerts và /orders~~ | **Đã làm ở vòng 3** bằng cách dùng lại ngăn kéo vận đơn (xem 7.6) |
 | ~~P1~~ | ~~Job tra Viettel Post ghi PARTIAL vì tài khoản API không thấy vận đơn~~ | **Đã làm ở vòng 3 (mục 7.5)** |
-| P2 | /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
+| ~~P2~~ | ~~/operations và /alerts là hai góc nhìn của cùng hàng đợi~~ | **Đã làm ở vòng 4**: tab chung, một mục menu |
 
 ### 7.5 Vòng 3: ba quyết định của chủ shop (11/09/2026)
 
@@ -281,8 +281,17 @@ người làm việc và **cất chữ giải thích vào ⓘ**.
 | Chữ giải thích trên Tổng quan (10 thẻ) | ~1.100 ký tự luôn hiện | ~350 ký tự; phần còn lại trong ⓘ |
 | Cần xử lý, chiều cao một dòng việc | 5 dòng chữ | 3 dòng chữ (≈ 40% nhiều việc hơn trên một màn) |
 
-**Độ trễ tải trang (smoke production, ấm, trước vòng 4 — 07:23 UTC)**: 39/39 trang ≤ 186ms; nặng
-nhất theo dung lượng: `/landing` 3.591kB · `/alerts` 602kB · `/ads` 594kB · `/integrations` 594kB.
+**Độ trễ tải trang (smoke production, ấm)** — trước vòng 4 (07:23 UTC) → sau deploy `b7060fd` (08:42 UTC):
+- 39/39 trang đạt cả hai lần; trang thường dùng hằng ngày: `/` 99 → 89ms · `/alerts` 49 → 73ms ·
+  `/shipments?bucket=CARE_TODAY` 97 → 71ms · `/orders` 71 → 68ms · `/cod` 91 → 85ms.
+- Dung lượng: `/landing` **3.591 → 2.782kB** (ô chọn mẫu mã dựng theo yêu cầu; phần còn lại là 300
+  dòng × cột trùng SĐT / lịch sử POS — muốn xuống dưới 1MB phải phân trang 100 dòng, việc P2).
+  `/alerts` 602 → 605kB: gom nút và đưa nhân sự qua context KHÔNG giảm gói — dung lượng nằm ở nội
+  dung 50 dòng bị lặp trong gói RSC (tiêu đề trong `Link`, chữ trong ⓘ), việc P2 nếu muốn giảm.
+- `/ads` 5,3s ở lần mở đầu sau deploy (đệm nguội, đúng `adsRoas` đã nêu ở 7.5); lần sau 102ms.
+
+**Sau deploy (kiểm tra bằng mắt theo mã)**: thanh bên 6 nhóm / 27 mục; Cần xử lý và Điều hành có tab
+chung; ngăn kéo care có ‹ n/N › và tự sang kiện kế sau "Ghi nhận"; Tổng quan còn số + ⓘ.
 
 ## 8. Việc tiếp theo theo ROI
 1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).
