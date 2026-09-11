@@ -82,12 +82,17 @@ async function main() {
    * Bài học: một cột được THÊM VÀO mà không có ai đối chiếu thì im lặng rỗng, và mọi báo cáo độ phủ
    * vẫn xanh. Nên độ phủ phải đo cả những cột mới, không chỉ những cột cũ.
    */
-  const [dong] = rowsOf<{ da_giao: number; da_chot: number; thieu_can_cu: number; suy_nguoc: number }>(await db.execute(sql`
+  const [dong] = rowsOf<{ da_giao: number; da_chot: number; thieu_can_cu: number; suy_nguoc: number; tam_tinh: number; chua_biet: number; da_chot_lai: number }>(await db.execute(sql`
     select
       count(*) filter (where m.outcome::text = 'DELIVERED')::int as da_giao,
-      count(*) filter (where m.outcome::text = 'DELIVERED' and m.recognized_cogs is not null)::int as da_chot,
+      -- "Đã chốt" = đã có CĂN CỨ. Từ 11/09/2026 đơn không tra được nguồn nào mang basis 'NONE' và
+      -- recognized_cogs NULL (CHƯA BIẾT, không phải 0) — vẫn là đã chốt, không phải còn dở.
+      count(*) filter (where m.outcome::text = 'DELIVERED' and m.cogs_basis is not null)::int as da_chot,
       count(*) filter (where m.outcome::text = 'DELIVERED' and m.cogs_basis is null)::int as thieu_can_cu,
-      count(*) filter (where m.cogs_basis = 'RECEIPT_AFTER')::int as suy_nguoc
+      count(*) filter (where m.cogs_basis = 'RECEIPT_AFTER')::int as suy_nguoc,
+      count(*) filter (where m.cogs_basis = 'PROVISIONAL')::int as tam_tinh,
+      count(*) filter (where m.outcome::text = 'DELIVERED' and m.cogs_basis = 'NONE')::int as chua_biet,
+      count(*) filter (where m.trued_up_at is not null)::int as da_chot_lai
     from canonical_order_outcome m
   `));
 
@@ -115,6 +120,9 @@ async function main() {
   console.log(`COGS_NOT_FROZEN   ${chuaChot}   ← phải bằng 0; khác 0 nghĩa là giá vốn kỳ cũ VẪN trôi theo phiếu nhập mới`);
   console.log(`BASIS_MISSING     ${Number(dong?.thieu_can_cu ?? 0)}`);
   console.log(`BASIS_RECEIPT_AFTER ${Number(dong?.suy_nguoc ?? 0)}   ← giá vốn suy ngược, cần nhập phiếu nhập cũ với ngày THẬT`);
+  console.log(`BASIS_PROVISIONAL   ${Number(dong?.tam_tinh ?? 0)}   ← tạm tính theo giá Pancake / giá nhập mẫu mã`);
+  console.log(`BASIS_NONE          ${Number(dong?.chua_biet ?? 0)}   ← đã giao mà CHƯA BIẾT giá vốn (NULL, báo cáo đang tính 0)`);
+  console.log(`TRUED_UP            ${Number(dong?.da_chot_lai ?? 0)}   ← đã chốt lại một lần theo chứng từ kho mạnh hơn`);
   if (chuaChot > 0) {
     console.log(`\n✗ ${chuaChot} đơn đã giao CHƯA chốt giá vốn — việc đông cứng của P0.4 chưa có hiệu lực với chúng.`);
     console.log("   Chạy lại thao tác này sau khi bộ lập lịch dựng xong, hoặc kiểm tra điều kiện làm cũ trong rematerializeStale().");

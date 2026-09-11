@@ -17,13 +17,14 @@ import type { Period } from "@/lib/search-params";
  * BA HẠNG, và ranh giới giữa chúng là CHỨNG TỪ, không phải cảm tính:
  *
  *  · `VERIFIED`      — có phiếu nhập kho lập TRƯỚC hoặc ĐÚNG ngày giao. Giá vốn truy nguyên được.
- *  · `RECONSTRUCTED` — chỉ có phiếu nhập lập SAU ngày giao. Con số suy ngược từ giá của tương lai.
- *  · `UNVERIFIED`    — không có phiếu nhập nào cho mẫu mã đó. Giá vốn rơi về giá Pancake / giá nhập
- *                      mẫu mã, hoặc bằng 0 — và 0 ở đây nghĩa là CHƯA BIẾT.
+ *  · `RECONSTRUCTED` — TẠM TÍNH: chỉ có phiếu nhập lập SAU ngày giao (suy ngược từ phiếu gần ngày
+ *                      giao nhất), hoặc chưa có phiếu nào và đang dùng giá vốn Pancake / giá nhập
+ *                      mẫu mã. Con số bảo vệ được, nhưng chưa phải chứng từ kho tại thời điểm giao.
+ *  · `UNVERIFIED`    — không có nguồn giá vốn nào. Giá vốn ghi nhận là NULL = CHƯA BIẾT, không phải 0;
+ *                      báo cáo đang đọc 0 cho nhóm này và phải nói ra điều đó.
  *
  * KHÔNG hàm nào ở đây SỬA giá vốn. Hợp đồng ghi nhận (docs/cogs-recognition-contract.md) đã chốt:
- * không dựng lại lịch sử khi chưa có chứng từ mạnh hơn, vì dựng lại sẽ đưa 368 đơn về 0đ và thổi
- * lợi nhuận lịch sử lên 58 triệu — sai nặng hơn hiện tại, và sai theo hướng dễ chịu.
+ * chỉ `rematerializeOutcomes()` được chốt lại — đúng MỘT lần, khi có chứng từ kho mạnh hơn, có nhật ký.
  */
 
 export const COGS_QUALITY = ["VERIFIED", "RECONSTRUCTED", "UNVERIFIED"] as const;
@@ -31,14 +32,14 @@ export type CogsQuality = (typeof COGS_QUALITY)[number];
 
 export const COGS_QUALITY_LABEL: Record<CogsQuality, string> = {
   VERIFIED: "Có chứng từ",
-  RECONSTRUCTED: "Suy ngược",
+  RECONSTRUCTED: "Tạm tính / suy ngược",
   UNVERIFIED: "Chưa xác minh",
 };
 
 export const COGS_QUALITY_NOTE: Record<CogsQuality, string> = {
   VERIFIED: "Có phiếu nhập kho lập trước hoặc đúng ngày giao — giá vốn truy nguyên được về chứng từ.",
-  RECONSTRUCTED: "Chỉ có phiếu nhập lập SAU ngày giao, nên giá vốn đang được suy ngược từ giá của tương lai.",
-  UNVERIFIED: "Không có phiếu nhập nào cho mẫu mã của đơn. Giá vốn rơi về nguồn yếu hơn hoặc bằng 0 — 0 ở đây là CHƯA BIẾT.",
+  RECONSTRUCTED: "Chưa có phiếu nhập tại thời điểm giao: giá vốn tạm tính từ phiếu nhập gần ngày giao nhất, hoặc từ giá vốn Pancake / giá nhập mẫu mã. Có phiếu nhập kho thì được chốt lại đúng MỘT lần, có nhật ký.",
+  UNVERIFIED: "Không có nguồn giá vốn nào cho mẫu mã của đơn. Giá vốn ghi nhận là CHƯA BIẾT (không phải 0); báo cáo đang tính 0 cho nhóm này nên lợi nhuận của họ đang CAO HƠN thực tế.",
 };
 
 export type CogsQualityRow = { quality: CogsQuality; orders: number; amount: number; share: number };
@@ -64,7 +65,7 @@ export type CogsCoverage = {
  */
 const HANG = sql`case
   when m.cogs_basis = 'RECEIPT_BEFORE' then 'VERIFIED'
-  when m.cogs_basis = 'RECEIPT_AFTER' then 'RECONSTRUCTED'
+  when m.cogs_basis in ('RECEIPT_AFTER', 'PROVISIONAL') then 'RECONSTRUCTED'
   else 'UNVERIFIED'
 end`;
 
@@ -95,7 +96,7 @@ async function build(period: Period | null): Promise<CogsCoverage> {
     select count(distinct m.order_id)::int as n
     from canonical_order_outcome m
     join orders o on o.id = m.order_id
-    where m.outcome::text = 'DELIVERED' and m.recognized_cogs is null ${from} ${to}
+    where m.outcome::text = 'DELIVERED' and m.cogs_basis is null ${from} ${to}
   `).then((r) => (Array.isArray(r) ? r : ((r as { rows?: unknown[] }).rows ?? [])) as { n: number }[]);
 
   const byQuality = new Map(list.map((r) => [r.quality as CogsQuality, { orders: Number(r.orders ?? 0), amount: Number(r.amount ?? 0) }]));
@@ -109,6 +110,7 @@ async function build(period: Period | null): Promise<CogsCoverage> {
 
   const verified = byQuality.get("VERIFIED")?.amount ?? 0;
   const suyNguoc = byQuality.get("RECONSTRUCTED")?.orders ?? 0;
+  const chuaBiet = byQuality.get("UNVERIFIED")?.orders ?? 0;
 
   return {
     deliveredOrders,
@@ -116,8 +118,9 @@ async function build(period: Period | null): Promise<CogsCoverage> {
     rows: qualityRows,
     verifiedShare: deliveredCogs ? verified / deliveredCogs : 0,
     notRecognized: Number(chuaChot?.n ?? 0),
-    huongSua: suyNguoc
-      ? `Nhập phiếu nhập kho cũ với NGÀY NHẬP THẬT cho ${suyNguoc} đơn đang suy ngược. Có chứng từ thì căn cứ tự chuyển sang “có chứng từ”, không cần đụng mã và không đơn nào bị sửa số.`
-      : "Mọi đơn đã giao đều có phiếu nhập lập trước ngày giao — giá vốn truy nguyên được.",
+    huongSua:
+      suyNguoc || chuaBiet
+        ? `Nhập phiếu nhập kho cũ với NGÀY NHẬP THẬT cho ${suyNguoc + chuaBiet} đơn đang tạm tính / chưa biết. Có chứng từ mạnh hơn thì giá vốn được chốt lại đúng MỘT lần (có nhật ký) rồi đóng băng — không cần đụng mã.`
+        : "Mọi đơn đã giao đều có phiếu nhập lập trước ngày giao — giá vốn truy nguyên được.",
   };
 }

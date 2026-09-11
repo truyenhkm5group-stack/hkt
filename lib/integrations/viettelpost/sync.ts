@@ -225,9 +225,14 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
  * Trước đây mỗi lần chạy vẫn ghi SUCCESS với "cập nhật 0", nên đối chiếu chết âm thầm suốt nhiều
  * ngày mà không ai biết, đồng thời đốt hàng trăm lệnh gọi API mỗi lần. Nay:
  *  · đếm riêng số vận đơn API KHÔNG THẤY, ghi thẳng vào tóm tắt;
- *  · cả lượt không thấy vận đơn nào → ghi cảnh báo (lần chạy thành PARTIAL, không phải SUCCESS);
  *  · lặp lại nhiều lần → chỉ dò một nhúm nhỏ cho tới khi API thấy lại, tự khôi phục ngay sau đó.
  * Không tự ý sửa dữ liệu: webhook và file bảng kê vẫn là nguồn thật.
+ *
+ * KHOẺ THEO NĂNG LỰC (chủ shop chốt 11/09/2026): vận đơn đã kết luận `WEBHOOK_ONLY` không được làm
+ * lần chạy thành PARTIAL chỉ vì tài khoản API hiện tại không đọc được vận đơn Pancake tạo — với
+ * chúng, webhook là nguồn đúng và đủ. Chỉ `API_TRACKABLE` mới phải đối chiếu được qua API: một vận
+ * đơn từng tra được mà nay API "không thấy" mới là cảnh báo thật. `UNKNOWN_CAPABILITY` được dò hữu
+ * hạn (`CAPABILITY_PROBE_LIMIT`) rồi kết luận — dò hụt là PHÂN LOẠI, không phải lỗi.
  */
 const API_SCOPE_KEY = "viettelpost:api-scope";
 /** Số lượt liên tiếp API không thấy vận đơn nào trước khi chuyển sang chế độ chỉ dò. */
@@ -282,6 +287,10 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
       .limit(probing ? SCOPE_PROBE_SIZE : options.limit ?? 300);
     ctx.summary.detail = `Kiểm tra ${shipments.length} vận đơn`;
     let notFound = 0;
+    /** Vận đơn ĐÃ TỪNG tra được qua API mà nay API không thấy — lỗ hổng đối chiếu thật. */
+    let notFoundTrackable = 0;
+    /** Vận đơn vừa được kết luận WEBHOOK_ONLY trong lượt này. */
+    let concluded = 0;
     for (const shipment of shipments) {
       const orderNumber = shipment.vtpOrderNumber ?? shipment.trackingCode;
       if (!orderNumber) {
@@ -298,13 +307,16 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
           */
           notFound += 1;
           ctx.summary.skipped += 1;
+          if (shipment.trackingCapability === "API_TRACKABLE") notFoundTrackable += 1;
           const soLan = (shipment.capabilityProbes ?? 0) + 1;
+          const ketLuan = shipment.trackingCapability !== "API_TRACKABLE" && soLan >= CAPABILITY_PROBE_LIMIT;
+          if (ketLuan) concluded += 1;
           await db
             .update(schema.shipments)
             .set({
               lastVtpSyncAt: new Date(),
               capabilityProbes: soLan,
-              ...(soLan >= CAPABILITY_PROBE_LIMIT ? { trackingCapability: "WEBHOOK_ONLY" as const } : {}),
+              ...(ketLuan ? { trackingCapability: "WEBHOOK_ONLY" as const } : {}),
             })
             .where(eq(schema.shipments.id, shipment.id));
           continue;
@@ -334,15 +346,25 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         lastFoundAt: found > 0 ? new Date().toISOString() : scope.lastFoundAt,
         lastCheckedAt: new Date().toISOString(),
       } satisfies ApiScopeState);
-      if (allMissing) {
-        ctx.summary.warning =
-          `Tài khoản API Viettel Post không thấy bất kỳ vận đơn nào trong ${shipments.length} vận đơn vừa tra (lượt thứ ${scope.missingStreak + 1} liên tiếp). ` +
-          "Vận đơn do Pancake tạo thuộc tài khoản Viettel Post khác nên đối chiếu qua API không chạy được; " +
-          "nguồn thật hiện tại là webhook và file bảng kê. Cần Viettel Post gắn mã khách hàng của shop vào tài khoản API partner.";
-      }
     }
+    // CẢNH BÁO (⇒ PARTIAL) chỉ khi đối chiếu THẬT bị hụt: vận đơn tra được qua API mà nay không thấy.
+    // Tài khoản API không đọc được vận đơn Pancake tạo là NĂNG LỰC của tài khoản, không phải lỗi của
+    // lần chạy — đã được phân loại và ghi ở chi tiết, không ghi ở cảnh báo.
+    if (notFoundTrackable > 0) {
+      ctx.summary.warning =
+        `${notFoundTrackable} vận đơn từng tra được qua API nay API Viettel Post không thấy — đối chiếu qua API cho chúng đang hụt. ` +
+        "Kiểm tra tài khoản API partner (đổi mã khách hàng / hết hạn) trước khi kết luận gì về vận đơn.";
+    }
+    const [ngoaiPhamVi] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.shipments)
+      .where(and(eq(schema.shipments.isFinal, false), eq(schema.shipments.trackingCapability, "WEBHOOK_ONLY")));
+    const webhookOnlyOpen = Number(ngoaiPhamVi?.n ?? 0);
     ctx.summary.detail =
-      `Đã kiểm tra ${shipments.length} vận đơn · cập nhật ${ctx.summary.updated} · API không thấy ${notFound} · lỗi ${ctx.summary.failed}` +
+      `Đã kiểm tra ${shipments.length} vận đơn · cập nhật ${ctx.summary.updated} · API không thấy ${notFound}` +
+      (concluded ? ` (${concluded} vừa kết luận chỉ nhận webhook)` : "") +
+      ` · lỗi ${ctx.summary.failed}` +
+      (webhookOnlyOpen ? ` · ${webhookOnlyOpen} vận đơn đang chạy chỉ nhận webhook — ngoài phạm vi tài khoản API, không cần đối chiếu API` : "") +
       (probing ? ` · đang chỉ dò ${SCOPE_PROBE_SIZE} vận đơn vì ${scope.missingStreak} lượt liên tiếp API không thấy gì` : "");
     return shipments.length;
   });

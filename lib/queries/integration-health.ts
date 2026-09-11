@@ -79,6 +79,12 @@ export type ConnectorHealth = {
    * gói tin TEST, nên tổng số vẫn khác 0 và không ai nhận ra.
    */
   senders?: { label: string; lastAt: Date | null; events24h: number }[];
+  /**
+   * Viettel Post: vận đơn đang chạy theo NĂNG LỰC tra cứu. `webhookOnly` là vận đơn Pancake tạo mà
+   * tài khoản API hiện tại không đọc được — chúng KHOẺ theo webhook, không kéo mức sức khoẻ xuống
+   * (chủ shop chốt 11/09/2026). Chỉ `apiTrackable` mới phải đối chiếu được qua API.
+   */
+  capability?: { apiTrackable: number; webhookOnly: number; unknown: number };
   /** Trạng thái / mã ERP chưa có trong bảng ánh xạ. */
   unknownMappings: number;
   /**
@@ -252,6 +258,19 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
     .map((r) => ({ label: senderLabel(r.ua), lastAt: asDate(r.lastAt), events24h: Number(r.events24h) }))
     .sort((a, b) => b.events24h - a.events24h);
 
+  // NĂNG LỰC TRA CỨU của vận đơn đang chạy — cùng phép đếm với `viettelPostHealth()`.
+  const capRows = await db
+    .select({ capability: schema.shipments.trackingCapability, n: sql<number>`count(*)` })
+    .from(schema.shipments)
+    .where(and(eq(schema.shipments.isFinal, false), isNotNull(schema.shipments.vtpOrderNumber)))
+    .groupBy(schema.shipments.trackingCapability);
+  const capability = { apiTrackable: 0, webhookOnly: 0, unknown: 0 };
+  for (const r of capRows) {
+    if (r.capability === "API_TRACKABLE") capability.apiTrackable += Number(r.n);
+    else if (r.capability === "WEBHOOK_ONLY") capability.webhookOnly += Number(r.n);
+    else capability.unknown += Number(r.n);
+  }
+
   const vtpHealth = build(
       "VIETTELPOST",
       {
@@ -268,8 +287,14 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
       { can: true, hint: "Xử lý lại an toàn: sự kiện chống trùng theo vận đơn + nguồn + trạng thái + mốc ĐVVC, và trạng thái được dựng lại từ lịch sử." },
   );
 
+  // Khoẻ theo năng lực: nói rõ phần vận đơn ngoài phạm vi API để không ai đọc "API không thấy" thành "hỏng".
+  const vtpReason =
+    vtpHealth.state === "HEALTHY" && capability.webhookOnly > 0
+      ? `${vtpHealth.reason} ${capability.webhookOnly} vận đơn đang chạy chỉ nhận webhook (ngoài phạm vi tài khoản API) — khoẻ theo năng lực của chúng; ${capability.apiTrackable} vận đơn đối chiếu qua API.`
+      : vtpHealth.reason;
+
   return [
-    { ...vtpHealth, senders },
+    { ...vtpHealth, reason: vtpReason, senders, capability },
     build(
       "PANCAKE",
       {

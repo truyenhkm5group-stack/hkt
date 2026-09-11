@@ -37,7 +37,10 @@ export async function CashTab({ period }: { period: Period }) {
     },
     {
       label: "Khách thanh toán trước / chuyển khoản",
-      note: `${formatNumber(r.cashIn.prepaidOrders)} đơn giao thành công thật trong kỳ có tiền trả trước`,
+      note:
+        `${formatNumber(r.cashIn.prepaidOrders)} đơn có tiền trả trước, ghi theo NGÀY TIỀN THỰC TRẢ (lúc lên đơn), không đợi giao` +
+        (r.cashIn.prepaidOnReturned ? ` · trong đó ${formatVND(r.cashIn.prepaidOnReturned, { compact: true })} thuộc đơn đã hoàn — có thể phải trả lại khách` : "") +
+        (r.pending.prepaidUnallocated ? ` · số dư trả trước của ${formatNumber(r.pending.prepaidUnallocatedCount)} đơn chưa kết thúc: ${formatVND(r.pending.prepaidUnallocated, { compact: true })} (chưa vào lợi nhuận kỳ nào)` : ""),
       value: r.cashIn.prepaid,
       kind: "in",
     },

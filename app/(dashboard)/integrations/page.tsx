@@ -338,11 +338,17 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           </div>
           <div className="rounded-xl border p-4">
             <p className="text-[13px] font-medium text-muted-foreground">Đối chiếu qua API</p>
-            <p className={cn("mt-1 text-2xl font-bold", vtpHealth.apiBlind && "text-destructive")}>{vtpHealth.apiBlind ? "Không dùng được" : vtpHealth.lastPoll ? formatTimeAgo(vtpHealth.lastPoll.finishedAt) : "—"}</p>
+            <p className={cn("mt-1 text-2xl font-bold", vtpHealth.lastPoll?.status === "FAILED" && "text-destructive")}>
+              {vtpHealth.capability.apiTrackable === 0 && vtpHealth.capability.unknown === 0 && vtpHealth.capability.webhookOnly > 0
+                ? "Ngoài phạm vi"
+                : vtpHealth.lastPoll
+                  ? formatTimeAgo(vtpHealth.lastPoll.finishedAt)
+                  : "—"}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {vtpHealth.apiBlind
-                ? "Tài khoản API không sở hữu các vận đơn này — xem cảnh báo bên dưới."
-                : vtpHealth.lastPoll?.detail || "Chưa chạy đối chiếu lần nào"}
+              {formatNumber(vtpHealth.capability.apiTrackable)} tra được qua API · {formatNumber(vtpHealth.capability.webhookOnly)} chỉ nhận webhook
+              {vtpHealth.capability.unknown ? ` · ${formatNumber(vtpHealth.capability.unknown)} đang dò` : ""}
+              {vtpHealth.apiBlind ? " · tài khoản API không sở hữu vận đơn Pancake tạo — chúng khoẻ theo webhook, không cần đối chiếu API" : ""}
             </p>
           </div>
           <div className="rounded-xl border p-4">
@@ -363,15 +369,15 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           </div>
         </div>
 
-        {vtpHealth.apiBlind || vtpHealth.lastPoll?.error ? (
+        {vtpHealth.lastPoll?.status === "FAILED" || (vtpHealth.lastPoll?.status === "PARTIAL" && vtpHealth.lastPoll.error) ? (
           <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
             <div className="text-xs leading-5">
-              <p className="font-medium text-foreground">Đối chiếu qua API Viettel Post không chạy được</p>
-              <p className="mt-1 text-muted-foreground">{vtpHealth.lastPoll?.error || "Tài khoản API không thấy vận đơn nào của shop."}</p>
+              <p className="font-medium text-foreground">Đối chiếu qua API Viettel Post đang hụt</p>
+              <p className="mt-1 text-muted-foreground">{vtpHealth.lastPoll?.error}</p>
               <p className="mt-1 text-muted-foreground">
-                Trong lúc chờ Viettel Post gắn mã khách hàng vào tài khoản API, nguồn thật là <strong className="text-foreground">webhook</strong> (thời gian thực) và{" "}
-                <strong className="text-foreground">file bảng kê / danh sách vận đơn</strong> tải từ viettelpost.vn. ERP đã tự giảm nhịp gọi API và sẽ chạy lại đầy đủ ngay khi API thấy vận đơn.
+                Chỉ vận đơn tra được qua API bị ảnh hưởng. Vận đơn chỉ nhận webhook vẫn cập nhật bình thường qua <strong className="text-foreground">webhook</strong> (thời gian thực) và{" "}
+                <strong className="text-foreground">file bảng kê / danh sách vận đơn</strong> tải từ viettelpost.vn.
               </p>
             </div>
           </div>

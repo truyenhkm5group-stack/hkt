@@ -319,3 +319,11 @@ export function getViettelPostClient() {
   if (!cached) cached = new ViettelPostClient();
   return cached;
 }
+
+/**
+ * CHỈ CHO KIỂM THỬ: thay client bằng bản giả để chạy job đối chiếu mà không đụng mạng. Truyền
+ * `null` để trả lại client thật. Job chỉ dùng `getOrderDetail`, nên bản giả chỉ cần có hàm đó.
+ */
+export function setViettelPostClientForTests(client: Pick<ViettelPostClient, "getOrderDetail"> | null) {
+  cached = client as ViettelPostClient | null;
+}

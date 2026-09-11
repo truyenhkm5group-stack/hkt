@@ -171,15 +171,45 @@ chờ phát lại, 10 vận đơn im lặng, 9 đơn thiếu thông tin, 9 mẫu
 
 | Ưu tiên | Việc | Vì sao chưa làm |
 |---|---|---|
-| P0 | **Giá vốn đóng băng ở 0**: đơn giao trước khi mẫu mã có phiếu nhập chốt `recognized_cogs = 0` vĩnh viễn ⇒ lợi nhuận Tổng quan/Báo cáo cao hơn thật | Đụng kỳ đã chốt — chủ shop quyết. Đề xuất: lưu NULL khi không tra được, hiện "N đơn chưa có giá vốn" ở mọi trang lợi nhuận |
-| P1 | Mốc kỳ khác nhau cùng nhãn: `prepaid` ở Dòng tiền theo mốc kết thúc, ở /reports theo `inserted_at` | Cần chốt một mốc, ghi vào hợp đồng chỉ số |
+| ~~P0~~ | ~~Giá vốn đóng băng ở 0~~ | **Đã làm ở vòng 3 (mục 7.5)** theo quyết định chủ shop |
+| ~~P1~~ | ~~Mốc `prepaid` khác nhau giữa Dòng tiền và /reports~~ | **Đã làm ở vòng 3 (mục 7.5)** |
 | P1 | Ngăn kéo đơn dùng chung cho /alerts và /orders (mẫu: ngăn kéo vận đơn) | Việc M |
-| P1 | Job tra Viettel Post ghi PARTIAL mỗi 10 phút vì tài khoản API không thấy vận đơn ⇒ Kết nối dữ liệu luôn "DEGRADED", che lỗi thật | Cấu hình tài khoản VTP; cần tách lý do "API mù" khỏi PARTIAL |
+| ~~P1~~ | ~~Job tra Viettel Post ghi PARTIAL vì tài khoản API không thấy vận đơn~~ | **Đã làm ở vòng 3 (mục 7.5)** |
 | P2 | /operations và /alerts là hai góc nhìn của cùng hàng đợi | Gộp thành tab — việc M |
 
+### 7.5 Vòng 3: ba quyết định của chủ shop (11/09/2026)
+
+**Giá vốn** (`lib/queries/canonical-outcome.ts`, migration `0059`, `docs/cogs-recognition-contract.md` §8)
+- Trước: đơn giao trước khi mẫu mã có phiếu nhập chốt `recognized_cogs = 0` **vĩnh viễn**; đơn
+  không tra được nguồn nào cũng là 0 — 0 và "chưa biết" trông y hệt nhau.
+- Sau: chưa có phiếu ⇒ **tạm tính** (phiếu sớm nhất sau ngày giao → giá Pancake → giá nhập mẫu mã),
+  căn cứ mới `PROVISIONAL`; không nguồn nào ⇒ **NULL** (chưa biết, không phải 0). Có chứng từ kho
+  mạnh hơn ⇒ **chốt lại đúng một lần**, ghi `audit_logs` (`COGS_TRUE_UP`, hiện trên dòng thời gian
+  đơn), rồi đóng băng. Phiếu cùng hạng (thêm lô sau) không đổi gì. Căn cứ cả đơn = mắt xích yếu nhất.
+- Chất lượng giá vốn (`/reports` mục độ phủ) vẫn ba hạng: Có chứng từ / Tạm tính-suy ngược / Chưa
+  xác minh; luật `COGS_BASIS_UNVERIFIED` nay gồm cả tạm tính và chưa biết, mỗi loại một câu.
+- Kiểm thử: bốn tình huống mới trong `tests/cogs-recognition.test.ts` (NULL không lặp vô hạn ·
+  chốt lại một lần có nhật ký rồi đóng băng · tạm tính rồi chốt theo phiếu · cùng hạng không đổi).
+
+**Trả trước** (`lib/queries/profit-cash.ts`, `docs/metrics-contract.md` mục `prepaid`)
+- Trước: Dòng tiền chỉ cộng trả trước của đơn **giao thành công**, theo mốc **kết thúc đơn** — tiền
+  về tháng 3, giao tháng 4 mới "vào"; /reports lại theo ngày lên đơn.
+- Sau: Dòng tiền ghi theo **ngày tiền thực trả** (`inserted_at`, Pancake không có mốc riêng), không
+  đợi giao, loại đơn huỷ; lợi nhuận vẫn phân bổ theo kỳ đơn giao. Không đếm trùng. Thêm **số dư trả
+  trước** của đơn chưa kết thúc và phần thuộc đơn đã hoàn (có thể phải trả lại) — nêu, không trừ.
+- Kiểm thử: `tests/prepaid-cash.test.ts`.
+
+**Viettel Post** (`lib/integrations/viettelpost/sync.ts`, `lib/queries/integration-health.ts`, trang Kết nối)
+- Trước: mỗi lượt tra 10 phút ghi PARTIAL vì tài khoản API không thấy vận đơn Pancake tạo ⇒ Kết nối
+  dữ liệu luôn "chạy nhưng có lỗi", thẻ "Đối chiếu qua API: Không dùng được" đỏ — che lỗi thật.
+- Sau: cảnh báo (PARTIAL) **chỉ khi** vận đơn `API_TRACKABLE` mà API không thấy (đối chiếu hụt thật);
+  `UNKNOWN_CAPABILITY` dò hữu hạn rồi **kết luận** `WEBHOOK_ONLY` — là phân loại, lượt chạy vẫn
+  SUCCESS; chi tiết lượt chạy, sức khoẻ connector và thẻ trên trang Kết nối nêu số vận đơn theo năng
+  lực (tra được qua API / chỉ nhận webhook / đang dò). Vận đơn chỉ nhận webhook khoẻ theo webhook.
+- Kiểm thử: `tests/vtp-capability.test.ts` (client giả qua `setViettelPostClientForTests`).
+
 ## 8. Việc tiếp theo theo ROI
-1. Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0) — mỗi việc nửa ngày, đổi trực tiếp số
-   "việc đang mở" và số lợi nhuận.
+1. ~~Chốt với chủ shop hai P0 ở mục 7 (CS_CASE, giá vốn 0)~~ — đã chốt và đã làm (7.1, 7.5).
 2. Ngăn kéo đơn dùng chung (/orders, /alerts) mang sẵn rủi ro + gợi ý địa chỉ cũ + nút Pancake +
    "Xong": rút luồng đơn mới → gửi từ 5 màn hình còn 1.
 3. `outcome-materialize` vào `sync_runs` + độ phủ ở Kết nối dữ liệu.

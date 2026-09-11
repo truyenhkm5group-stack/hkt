@@ -110,14 +110,34 @@ Ba con số dưới đây **không bao giờ được coi là một**. Nhãn tr�
 
 `deliveredRevenue ≠ cashReceived`. Chênh lệch là tiền Viettel Post còn giữ, đo ở trang Đối soát COD.
 
+### `prepaid` — Tiền khách TRẢ TRƯỚC (chuyển khoản / đặt cọc / tiền mặt lúc lên đơn)
+
+Chủ shop chốt 11/09/2026: **dòng tiền theo ngày tiền thực trả, lợi nhuận theo kỳ hưởng lợi**. Cùng
+một con số trên đơn (`orders.prepaid + transfer_money + cash`) nhưng hai báo cáo dùng hai mốc, và
+đó là cố ý:
+
+| Báo cáo | Mốc | Population | Cài đặt |
+|---|---|---|---|
+| **Dòng tiền** (`/reports` tab Dòng tiền, lương cơ sở dòng tiền) | `orders.inserted_at` — Pancake ghi tiền trả trước lúc lên đơn, không có mốc thanh toán riêng | đơn có trả trước > 0, **không** phải `CANCELLED` (đơn huỷ giữ số trả trước nhưng không có chứng từ tiền về) | `profit-cash.ts::cashIn.prepaid` |
+| **Lợi nhuận / Chân lý tài chính / Báo cáo tổng hợp** | kỳ đơn (`inserted_at`) **và** đơn giao thành công — doanh thu được hưởng | `DELIVERED` | `financial-truth.ts`, `reports.ts` |
+
+Không đếm trùng: tiền trả trước vào dòng tiền **một lần** ở tháng tiền về; giao xong không cộng lại.
+Phần đã trả cho đơn **chưa kết thúc** là **số dư trả trước** (`pending.prepaidUnallocated`) — nghĩa vụ
+giao hàng, chưa vào lợi nhuận kỳ nào. Trả trước của đơn đã hoàn được nêu riêng
+(`cashIn.prepaidOnReturned`): tiền đã vào nhưng có thể phải trả lại; ERP không có chứng từ hoàn tiền
+nên chỉ nêu, không trừ. Kiểm thử: `tests/prepaid-cash.test.ts`.
+
 ### `deliveredCogs` — Giá vốn của đơn giao thành công
 
 Phải **cùng population và cùng bộ lọc** với `deliveredRevenue`, và nên tính trong CÙNG một câu
 truy vấn để không thể lệch. Cài đặt: `metrics.ts::DELIVERED_COGS`.
 
 Giá vốn một dòng đơn tính "sống" theo thứ tự: phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập
-mẫu mã (`lib/queries/cogs.ts`). Đơn không tra được giá nào ⇒ giá vốn 0 và bị nêu ở Chất lượng dữ
-liệu (`missing-cogs`) — **không** im lặng coi lợi nhuận là đúng.
+mẫu mã (`lib/queries/cogs.ts`). Đơn đã giao đọc giá vốn **đã ghi nhận** (`recognized_cogs`, chốt
+lúc giao; chưa có phiếu thì tạm tính; chốt lại đúng một lần khi có phiếu, có nhật ký — xem
+`docs/cogs-recognition-contract.md` mục 8). Đơn không tra được giá nào ⇒ giá vốn ghi nhận là NULL
+(CHƯA BIẾT), báo cáo tính 0 và **nêu** ở Chất lượng dữ liệu (`missing-cogs`) và luật
+`COGS_BASIS_UNVERIFIED` — **không** im lặng coi lợi nhuận là đúng.
 
 ### `estimatedProfit` — Lợi nhuận ước tính (Tổng quan)
 

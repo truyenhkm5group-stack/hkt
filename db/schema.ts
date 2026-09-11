@@ -342,11 +342,18 @@ export const canonicalOrderOutcome = pgTable(
     /** Mốc ghi nhận doanh thu (ngày giao). `NULL` khi chưa giao. */
     recognizedAt: ts("recognized_at"),
     /**
-     * CĂN CỨ của giá vốn đã chốt — và đây là chỗ phải nói thật:
+     * CĂN CỨ của giá vốn đã chốt — và đây là chỗ phải nói thật. Xếp theo độ mạnh giảm dần:
      *
-     *  · `RECEIPT_BEFORE` — có phiếu nhập TRƯỚC ngày giao. Căn cứ vững.
-     *  · `RECEIPT_AFTER`  — giá vốn suy ngược từ phiếu lập SAU ngày giao. **CHƯA XÁC MINH.**
-     *  · `NONE`           — không có nguồn giá vốn nào. Đang là 0 nhưng nghĩa thật là CHƯA BIẾT.
+     *  · `RECEIPT_BEFORE` — có phiếu nhập TRƯỚC hoặc ĐÚNG ngày giao. Căn cứ vững (có chứng từ).
+     *  · `RECEIPT_AFTER`  — chỉ có phiếu nhập lập SAU ngày giao: giá vốn suy ngược từ phiếu gần
+     *                       ngày giao nhất. Tạm tính, nhưng có chứng từ để bấu víu.
+     *  · `PROVISIONAL`    — chưa có phiếu nhập nào; lấy giá vốn Pancake ghi trên dòng hàng hoặc giá
+     *                       nhập lưu ở mẫu mã. Tạm tính, chưa có chứng từ kho.
+     *  · `NONE`           — không có nguồn nào. `recognized_cogs` là NULL = CHƯA BIẾT, **không phải 0**.
+     *
+     * Chủ shop chốt 11/09/2026: đơn đã giao KHÔNG được giữ giá vốn 0 chỉ vì phiếu nhập đến sau. Khi
+     * xuất hiện căn cứ MẠNH HƠN (phiếu nhập kho), giá vốn được chốt lại ĐÚNG MỘT LẦN, có nhật ký
+     * (`trued_up_*`), rồi đóng băng hẳn. Xem `rematerializeOutcomes()`.
      *
      * Đo trên production 09/09/2026: shop chỉ có 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
      * sớm nhất từ 22/01; 0/2.495 dòng hàng có giá vốn Pancake, 0/37 mẫu mã có giá nhập. Nên
@@ -354,6 +361,15 @@ export const canonicalOrderOutcome = pgTable(
      * phải HIỆN RA, không được lẫn vào lợi nhuận như thể đã kiểm chứng.
      */
     cogsBasis: text("cogs_basis"),
+    /**
+     * LẦN CHỐT LẠI DUY NHẤT. `NULL` = chưa từng chốt lại (vẫn còn quyền chốt lại một lần khi có chứng
+     * từ mạnh hơn). Khác NULL = đã dùng quyền đó, từ nay giá vốn đóng băng tuyệt đối.
+     */
+    truedUpAt: ts("trued_up_at"),
+    /** Giá vốn TRƯỚC lần chốt lại (để truy nguyên; NULL nếu trước đó là CHƯA BIẾT). */
+    truedUpFrom: integer("trued_up_from"),
+    /** Căn cứ TRƯỚC lần chốt lại. */
+    truedUpFromBasis: text("trued_up_from_basis"),
     /** Phiên bản luật đã dùng để tính dòng này. Luật đổi ⇒ dòng cũ thành cũ, phát hiện được. */
     logicVersion: integer("logic_version").notNull().default(1),
     computedAt: ts("computed_at").notNull().defaultNow(),

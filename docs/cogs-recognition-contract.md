@@ -175,6 +175,59 @@ thu lên đơn 1.069.391.498đ · thực nhận có chứng từ 212.052.000đ).
 ## 7. Việc còn bỏ ngỏ (cần chủ shop quyết, không phải việc kỹ thuật)
 
 1. ~~Giá vốn có nên đóng băng tại thời điểm giao hàng không?~~ **ĐÃ CHỐT: có** — xem mục 6.
-2. **Đơn không tra được giá vốn đang tính 0.** `getFinancialTruth` đã đếm và nêu rõ số đơn này
-   (`missingCogsOrders`) kèm câu "lợi nhuận của nhóm này đang CAO HƠN thực tế" — nhưng vẫn là 0 chứ
-   chưa phải CHƯA BIẾT. Nếu muốn đúng luật "`NULL` là chưa biết, không phải 0", đây là chỗ phải sửa.
+2. ~~Đơn không tra được giá vốn đang tính 0.~~ **ĐÃ CHỐT 11/09/2026** — xem mục 8.
+
+## 8. ĐÃ CHỐT 11/09/2026: tạm tính khi chưa có phiếu, chốt lại ĐÚNG MỘT LẦN, rồi đóng băng
+
+Chủ shop quyết ba điều, và `rematerializeOutcomes()` (`lib/queries/canonical-outcome.ts`) là nơi
+duy nhất thực hiện chúng:
+
+1. **Đơn đã giao không được giữ giá vốn 0 chỉ vì phiếu nhập đến sau.** Chưa có phiếu tại thời điểm
+   giao thì dùng giá vốn **tạm tính có thể bảo vệ được**, theo thứ tự mạnh → yếu.
+2. **Khi xuất hiện chứng từ kho mạnh hơn, chốt lại đúng MỘT lần, có nhật ký, rồi đóng băng hẳn.**
+3. **Chỉ là 0 khi thực sự miễn phí.** Dữ liệu hiện không có cách khai "miễn phí", nên 0 không bao
+   giờ tự sinh: không có nguồn nào ⇒ `recognized_cogs = NULL` (CHƯA BIẾT).
+
+### Căn cứ và độ mạnh (`cogs_basis`)
+
+| Hạng | `cogs_basis` | Nguồn của từng dòng hàng | Chất lượng hiện ra |
+| --- | --- | --- | --- |
+| 3 | `RECEIPT_BEFORE` | phiếu nhập gần nhất **trước hoặc đúng** ngày giao | Có chứng từ |
+| 2 | `RECEIPT_AFTER` | phiếu nhập **sớm nhất sau** ngày giao (gần ngày giao nhất) | Tạm tính / suy ngược |
+| 1 | `PROVISIONAL` | giá vốn Pancake trên dòng hàng → giá nhập lưu ở mẫu mã (≠ 0) | Tạm tính / suy ngược |
+| 0 | `NONE` | không có gì ⇒ `recognized_cogs = NULL` | Chưa xác minh |
+
+Căn cứ của **cả đơn** là hạng **yếu nhất** trong các dòng hàng (một món có phiếu, một món chỉ có giá
+Pancake ⇒ cả đơn là `PROVISIONAL`). Khác `ORDER_COGS` (cột `cogs`, ước tính "sống" theo phiếu gần
+nhất tính tới hôm nay): giá vốn ghi nhận ưu tiên phiếu **trước ngày giao**, nên nhập lô mới sau này
+không làm số đã ghi nhận trôi.
+
+### Luật chốt lại (`trued_up_at`, `trued_up_from`, `trued_up_from_basis`)
+
+Chốt lại xảy ra khi **cả bốn** điều đúng, và chỉ xảy ra **một lần** cho mỗi dòng:
+
+- chưa từng chốt lại (`trued_up_at IS NULL`);
+- dòng **đã từng được ghi nhận** (`cogs_basis` khác NULL) — lần ghi nhận đầu tiên không phải chốt lại;
+- căn cứ mới là **chứng từ kho** (hạng ≥ 2);
+- căn cứ mới **mạnh hơn** căn cứ đang chốt.
+
+Mỗi lần chốt lại ghi một dòng `audit_logs` (`COGS_TRUE_UP`, entity `ORDER`) với `before/after`, và
+hiện ở dòng thời gian của đơn. Sau đó **không đổi nữa**, kể cả khi sau này có chứng từ còn mạnh hơn.
+
+Hệ quả cần nhớ:
+
+| Tình huống | Kết quả |
+| --- | --- |
+| Đơn giao, không nguồn nào; tháng sau nhập phiếu | NULL → giá phiếu (`RECEIPT_AFTER`), 1 nhật ký; sau đó đóng băng |
+| Đơn giao với giá Pancake 90K; sau đó nhập phiếu ngày cũ 100K | 90K → 100K (`RECEIPT_BEFORE`), 1 nhật ký; phiếu 110K sau đó **không** đổi |
+| Đơn đang suy ngược từ lô tháng 8; nhập thêm lô tháng 10 | cùng hạng ⇒ **không** chốt lại, không tiêu quyền |
+| Đơn chưa giao | vẫn NULL, không căn cứ |
+
+`NONE` là **kết luận**, không phải việc dở: bộ dò dòng cũ nhìn `cogs_basis IS NULL`, không nhìn con
+số, nên đơn CHƯA BIẾT không bị dựng lại vô hạn. Báo cáo vẫn đọc `coalesce(recognized_cogs, cogs)`
+⇒ nhóm CHƯA BIẾT hiện 0 và **được nêu** (`missingCogsOrders`, luật `COGS_BASIS_UNVERIFIED` nay gồm
+cả `PROVISIONAL` và `NONE`).
+
+Migration `0059_cogs_true_up`: thêm ba cột, mở rộng ràng buộc `cogs_basis`, và đưa
+`recognized_cogs = 0` của dòng `NONE` về NULL (tổng báo cáo không đổi vì đường đọc rơi về `cogs`).
+Kiểm thử: `tests/cogs-recognition.test.ts` khối "QUYẾT ĐỊNH CHỦ SHOP 11/09/2026".

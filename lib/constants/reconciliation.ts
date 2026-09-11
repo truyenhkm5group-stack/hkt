@@ -102,11 +102,11 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     key: "COGS_BASIS_UNVERIFIED",
     entity: "order",
     severity: "WARNING",
-    label: "Giá vốn suy ngược từ phiếu nhập lập sau ngày giao",
+    label: "Giá vốn đã giao chưa có chứng từ kho tại thời điểm giao",
     reason:
-      "Đơn đã giao nhưng tại thời điểm giao KHÔNG có phiếu nhập nào cho mẫu mã đó. Giá vốn hiện tại lấy từ phiếu lập SAU đó, nên nó là phỏng đoán chứ không phải chứng từ. Lợi nhuận của nhóm đơn này chưa có căn cứ.",
+      "Đơn đã giao nhưng tại thời điểm giao KHÔNG có phiếu nhập nào cho mẫu mã đó. Giá vốn đang TẠM TÍNH (phiếu lập sau, hoặc giá Pancake / giá nhập mẫu mã) hoặc CHƯA BIẾT (báo cáo tính 0). Lợi nhuận của nhóm đơn này chưa có căn cứ.",
     suggestedAction:
-      "Nhập phiếu nhập cũ với ngày nhập THẬT nếu còn chứng từ. Nếu không còn, đây là giới hạn của dữ liệu lịch sử — cần biết để không đọc lợi nhuận kỳ cũ như số đã kiểm chứng.",
+      "Nhập phiếu nhập cũ với ngày nhập THẬT nếu còn chứng từ: giá vốn được chốt lại đúng MỘT lần, có nhật ký, rồi đóng băng. Nếu không còn, đây là giới hạn của dữ liệu lịch sử — cần biết để không đọc lợi nhuận kỳ cũ như số đã kiểm chứng.",
     autoRepair: false,
   },
   ORDER_WITH_MULTIPLE_SHIPMENTS: {

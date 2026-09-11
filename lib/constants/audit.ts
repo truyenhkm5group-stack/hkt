@@ -18,6 +18,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   STOCK_RECEIPT_CREATE: "Nhập hàng vào kho",
   STOCK_ADJUST_CREATE: "Điều chỉnh kiểm kê",
   STOCK_RECEIPT_DELETE: "Xoá phiếu kho",
+  /** Hệ thống chốt lại giá vốn đã ghi nhận — đúng một lần, khi có chứng từ kho mạnh hơn. */
+  COGS_TRUE_UP: "Chốt lại giá vốn theo chứng từ kho",
   COD_PAID: "Ghi nhận COD về ngân hàng",
   COD_RECONCILE: "Đối soát COD",
   /**
