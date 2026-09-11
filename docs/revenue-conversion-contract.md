@@ -284,3 +284,114 @@ mở đầu tiên sau khi deploy. Ghi số trả về vào commit message / bàn
 8. Không tuyên bố điểm rủi ro có tác dụng khi kiểm định chưa đạt hai điều kiện ở §6.
 9. Không viết lại điều kiện `stage` cho bước "giao thành công" — dùng `ORDER_OUTCOME_FAST`.
 10. Không bỏ `PRIMARY_ATTEMPT` khỏi bất kỳ phép nối `shipments` ở mức đơn.
+
+---
+
+## 8. Đo trên production bằng ops `db-query` — dán trực tiếp, không cần mở app
+
+Mỗi ô là **một câu lệnh** (ops `db-query` chỉ nhận một câu; CTE trong cùng một câu thì dùng được).
+Tất cả **chỉ đọc**. Enum đã cast `::text`.
+
+### 8.1 Phễu đơn hàng — năm bước, 30 ngày
+
+Đây là câu trả lời cho *"phễu thật hiện tại và chỗ rơi lớn nhất"*. `muc` là **mức đi được** (1..5) —
+cùng định nghĩa với `getConversionFunnel`, nên số phải khớp màn hình.
+
+```sql
+with m as (
+  select o.id,
+         case
+           when coalesce((select c.outcome from canonical_order_outcome c
+                           where c.order_id = o.id and coalesce(c.shipment_id,'') = coalesce(s.id,'')
+                           limit 1), '') = 'DELIVERED' then 5
+           when s.picked_up_at is not null
+             or s.stage::text in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED') then 4
+           when s.id is not null then 3
+           when o.stage::text not in ('NEW','WAITING') then 2
+           else 1 end as muc
+    from orders o
+    left join shipments s on s.order_id = o.id
+     and not exists (select 1 from shipments s2 where s2.order_id = o.id and s2.id <> s.id)
+   where o.inserted_at >= now() - interval '30 days'
+)
+select count(*) as b1_don_tao,
+       count(*) filter (where muc >= 2) as b2_xac_nhan,
+       count(*) filter (where muc >= 3) as b3_co_van_don,
+       count(*) filter (where muc >= 4) as b4_roi_kho,
+       count(*) filter (where muc >= 5) as b5_giao_tc
+  from m;
+```
+
+### 8.2 Phễu trước đơn + độ phủ hội thoại
+
+**Trả 0 dòng cho tới khi job `cs-chat` chạy ít nhất một lượt sau khi deploy** — đó là sự thật về dữ
+liệu, không phải lỗi.
+
+```sql
+select count(*) as hoi_thoai,
+       min(coalesce(first_customer_message_at, first_seen_at)) as som_nhat,
+       max(last_scan_at) as quet_gan_nhat,
+       count(*) filter (where truncated) as bi_cat_tran,
+       count(*) filter (where first_shop_reply_at is not null) as da_tra_loi,
+       count(*) filter (where first_shop_reply_at is null) as chua_ai_tra_loi,
+       count(*) filter (where phone_at is not null) as co_sdt,
+       count(*) filter (where address_at is not null) as co_dia_chi,
+       count(*) filter (where matched_order_id is not null
+                          and match_basis in ('BY_CONVERSATION','BY_PHONE_UNIQUE')) as da_thanh_don,
+       count(*) filter (where match_basis = 'AMBIGUOUS') as nhap_nhang_khong_ket_luan,
+       round(percentile_cont(0.5) within group (
+         order by extract(epoch from (first_shop_reply_at - first_customer_message_at)) / 60
+       ) filter (where first_shop_reply_at >= first_customer_message_at)) as tra_loi_p50_phut
+  from conversation_funnel;
+```
+
+### 8.3 Rò rỉ ở khâu đơn hàng — đã xác nhận mà chưa có vận đơn
+
+Hàng còn trong kho, chỉ thiếu thao tác. Đây là nhóm rẻ nhất để thu tiền về.
+
+```sql
+select count(*) as don_cho_gui,
+       sum(o.total_price_after_discount) as tien_dang_treo,
+       count(*) filter (where o.inserted_at < now() - interval '24 hours') as qua_han_24h,
+       min(o.inserted_at) as don_cu_nhat
+  from orders o
+ where o.stage::text in ('CONFIRMED','PACKING','READY_TO_SHIP')
+   and not exists (select 1 from shipments s where s.order_id = o.id);
+```
+
+### 8.4 Kiểm định điểm rủi ro — bảng nhóm
+
+Bản **giản lược** của `getPreshipRiskBacktest` (ba tín hiệu mạnh nhất, ngưỡng như nhau) để đối chiếu
+thủ công với số trên màn hình. Bản đầy đủ 11 tín hiệu chạy trong ứng dụng.
+
+```sql
+with d as (
+  select o.id,
+         c.outcome,
+         (case when o.ship_province = '' or (o.ship_commune = '' and o.ship_district = '') then 14 else 0 end)
+       + (case when right(regexp_replace(coalesce(nullif(o.bill_phone,''), o.ship_phone, ''), '\D', '', 'g'), 9)
+                    !~ '^[1-9][0-9]{8}$' then 10 else 0 end)
+       + (case when (select count(*) from canonical_order_outcome c2 join orders oh on oh.id = c2.order_id
+                      where oh.id <> o.id and oh.inserted_at < o.inserted_at
+                        and right(regexp_replace(oh.bill_phone,'\D','','g'),9)
+                          = right(regexp_replace(coalesce(nullif(o.bill_phone,''), o.ship_phone, ''),'\D','','g'),9)
+                        and c2.outcome in ('RETURNED','RETURNED_BY_RULE')) >= 3 then 30 else 0 end)
+       - (case when coalesce(o.prepaid,0) + coalesce(o.transfer_money,0) > 100000 then 25 else 0 end) as diem
+    from orders o
+    join canonical_order_outcome c on c.order_id = o.id
+   where c.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')
+     and o.inserted_at >= now() - interval '180 days'
+)
+select case when diem >= 40 then 'CAO' when diem >= 20 then 'TRUNG BINH' else 'THAP' end as nhom,
+       count(*) as don,
+       count(*) filter (where outcome = 'DELIVERED') as giao_tc,
+       count(*) filter (where outcome <> 'DELIVERED') as hoan,
+       round(count(*) filter (where outcome <> 'DELIVERED')::numeric / nullif(count(*),0), 3) as ty_le_hoan
+  from d
+ group by 1
+ order by 1;
+```
+
+**Đọc kết quả 8.4 cho đúng:** nhóm `CAO` phải có `ty_le_hoan` cao hơn nhóm `THAP` **rõ rệt** (≥ 1,3
+lần mặt bằng) và mỗi nhóm phải có **≥ 20 đơn**. Không đạt thì điểm rủi ro **chưa** chứng minh được gì,
+và **không được** dùng nó để biện minh cho quyết định nào tốn tiền — kể cả khi nó trông có lý.
