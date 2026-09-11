@@ -341,7 +341,8 @@ export async function seedBenchData(scale: number, days = 180): Promise<SeedStat
       body: "Nội dung cảnh báo mẫu",
       dedupeKey: `bench-dedupe-${n}`,
       occurredAt: new Date(now - between(0, 60) * DAY),
-      resolvedAt: rand() < 0.5 ? new Date(now - between(0, 30) * DAY) : null,
+      // Đã đóng thì phải nói được VÌ SAO đóng (ràng buộc `notifications_resolution_shape_check`).
+      ...(rand() < 0.5 ? { resolvedAt: new Date(now - between(0, 30) * DAY), resolution: pick(["MANUAL", "AUTO", "STALE"] as const) } : {}),
     });
   }
   await insertChunked(schema.notifications, notificationRows, 12);
