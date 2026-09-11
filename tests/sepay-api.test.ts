@@ -4,6 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { extractSepayRows, mapSepayApiRow, sepayApiDate, webhookFailedAtProvider } from "@/lib/integrations/bank/sepay-api";
 import { ingestSepayTransaction } from "@/lib/integrations/bank/sepay-ingest";
+import { bankLedgerTotals, previewSepayTransaction } from "@/lib/integrations/bank/sepay-reconcile";
 import { toBankRow } from "@/lib/integrations/bank/statement";
 
 /**
@@ -152,12 +153,82 @@ export async function testSepayApi(db: Db) {
   const dem = await db.select({ n: sql<number>`count(*)` }).from(b).where(eq(b.bankRef, "FT-API-CONVERGE"));
   assert.equal(Number(dem[0].n), 1, "9. đúng một dòng cho một mã bút toán");
 
+
+  // ═══ 10. XEM TRƯỚC PHẢI DỰ BÁO ĐÚNG CÁI SẼ XẢY RA ═══
+  //
+  // LỖI THẬT có trong bản đầu: phần xem trước chỉ hỏi theo mã SePay, nên một giao dịch đã nhập từ
+  // FILE mà webhook làm mất bị đếm là "mới" — trong khi lượt ghi thật sẽ HỘI TỤ vào dòng cũ chứ
+  // không tạo dòng nào. Lượt chạy thử nói 12, lượt ghi tạo 3: người đọc nó để quyết định có cho ghi
+  // hay không, nên một con số sai ở đây làm hỏng chính mục đích của chế độ chạy thử.
+  const tuFileChuaCoWebhook = toBankRow({
+    date: "2026-09-12",
+    time: "10:00",
+    amount: 5_550_000,
+    description: "Da nhap tu sao ke",
+    counterparty: "ABC",
+    bankRef: "FT-PREVIEW-FILE",
+    categoryCode: "",
+    note: "",
+  });
+  await db.insert(b).values({ ...tuFileChuaCoWebhook, id: "preview-test-file", source: "IMPORT" });
+
+  const gdTuFile = take(apiRow({ id: "78001", reference_number: "FT-PREVIEW-FILE", amount_in: "5550000", transaction_date: "2026-09-12 10:00:00" }));
+  const xemTruocFile = await previewSepayTransaction(db, gdTuFile);
+  assert.equal(xemTruocFile.existingSource, "IMPORT", "10. dòng nhập từ file được nhận ra qua MÃ BÚT TOÁN NGÂN HÀNG, dù chưa mang mã SePay nào");
+
+  // Và lượt ghi thật phải làm đúng như xem trước đã nói: hội tụ, không tạo dòng.
+  const ghiThat = await ingestSepayTransaction(db, gdTuFile, { source: "API" });
+  assert.equal(ghiThat.created, false, "10. ghi thật HỘI TỤ đúng như xem trước dự báo — không tạo dòng mới");
+  assert.equal(ghiThat.transactionId, "preview-test-file", "10. hội tụ vào đúng dòng của file");
+
+  // Giao dịch webhook đã ghi: nhận ra qua mã SePay.
+  const gdTuWebhook = take(apiRow({ id: "78002", reference_number: "FT-PREVIEW-WH" }));
+  await ingestSepayTransaction(db, gdTuWebhook, { source: "WEBHOOK" });
+  assert.equal((await previewSepayTransaction(db, gdTuWebhook)).existingSource, "WEBHOOK", "10. dòng do webhook tạo được nhận ra qua mã SePay");
+
+  // Giao dịch thật sự mới: chưa có ở cả hai khoá.
+  const hoanToanMoi = take(apiRow({ id: "78003", reference_number: "FT-PREVIEW-NEW", amount_in: "123000" }));
+  const xemTruocMoi = await previewSepayTransaction(db, hoanToanMoi);
+  assert.equal(xemTruocMoi.existingSource, null, "10. giao dịch chưa có ở cả hai khoá ⇒ là mới thật");
+
+  // ═══ 11. XEM TRƯỚC CÒN NÓI ĐƯỢC VIỆC GHI SẼ CHẠM VÀO GÌ ═══
+  // Tài khoản của gói tin thử chưa ai xác nhận ⇒ phải được nêu ra TRƯỚC khi ghi, không để người
+  // dùng phát hiện sau khi tiền đã vào sổ.
+  assert.equal(xemTruocMoi.accountUnconfirmed, true, "11. tài khoản chưa xác nhận được nêu ngay ở bước xem trước");
+
+  // Nghi trùng: một dòng khác cùng số tiền + cùng phút nhưng KHÁC mã bút toán.
+  const nghiTrung = take(apiRow({ id: "78004", reference_number: "FT-PREVIEW-TWIN", amount_in: "5550000", transaction_date: "2026-09-12 10:00:00" }));
+  assert.equal(
+    (await previewSepayTransaction(db, nghiTrung)).duplicateSuspect,
+    true,
+    "11. nghi trùng được NÊU RA ở bước xem trước — người quyết định trước khi ghi, không phải dọn sau",
+  );
+  // Nêu ra KHÔNG có nghĩa là chặn: ghi thật vẫn tạo dòng, vì hai giao dịch cùng số tiền trong cùng
+  // một phút là chuyện có thật và tự gộp là xoá tiền.
+  assert.equal((await ingestSepayTransaction(db, nghiTrung, { source: "API" })).created, true, "11. nghi trùng vẫn được GHI — nêu ra, không tự gộp");
+
+  // Tài khoản đã xác nhận thì hết cờ.
+  await db.update(schema.bankAccounts).set({ status: "ACTIVE" }).where(eq(schema.bankAccounts.provider, "SEPAY"));
+  assert.equal(
+    (await previewSepayTransaction(db, take(apiRow({ id: "78005", reference_number: "FT-PREVIEW-OK" })))).accountUnconfirmed,
+    false,
+    "11. xác nhận tài khoản xong thì hết cờ",
+  );
+
+  // ═══ 12. TỔNG SỔ ĐỌC ĐƯỢC ĐỂ SO TRƯỚC/SAU ═══
+  const tong = await bankLedgerTotals(db);
+  assert.ok(tong.rows > 0, "12. đếm được số dòng của sổ");
+  assert.ok(tong.inflow >= 0 && tong.outflow >= 0, "12. tiền vào / ra đều là số không âm");
+
+  await db.delete(b).where(sql`${b.providerTxnId} in ('78001','78002','78003','78004','78005')`);
+  await db.delete(b).where(eq(b.id, "preview-test-file"));
+
   // Dọn dẹp — bài kiểm khác dùng chung bảng.
   await db.delete(b).where(sql`${b.providerTxnId} in ('77100','77101','77102')`);
   await db.delete(b).where(eq(b.id, "sepay-api-test-file"));
   await db.delete(schema.bankAccounts).where(eq(schema.bankAccounts.provider, "SEPAY"));
 
   console.log(
-    "✓ Đối chiếu API SePay: đọc đúng v2 lẫn v1 · KHÔNG đoán chiều tiền · phong bì đổi dạng không làm im lặng đọc ra 0 · dùng CHUNG cửa ghi với webhook · vá được giao dịch webhook làm mất mà không đè nhãn người dùng",
+    "✓ Đối chiếu API SePay: xem trước dự báo ĐÚNG cái ghi thật sẽ làm · đọc đúng v2 lẫn v1 · KHÔNG đoán chiều tiền · phong bì đổi dạng không làm im lặng đọc ra 0 · dùng CHUNG cửa ghi với webhook · vá được giao dịch webhook làm mất mà không đè nhãn người dùng",
   );
 }

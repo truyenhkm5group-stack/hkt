@@ -57,6 +57,7 @@ on:
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
           - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
           - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
+          - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
@@ -301,6 +302,28 @@ jobs:
                 # Bộ đọc API này chưa từng chạy với API thật, nên phải NHÌN một lượt trước khi cho ghi.
                 fetch_script sepay-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-reconcile.ts'
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/sepay-reconcile.ts $ARG" ;;
+              sepay-schedule)
+                # Bật / tắt lịch đối chiếu định kỳ. `AGENTS.md` mục 7: đổi lịch scheduler phải do chủ
+                # shop quyết, nên nó là một thao tác TƯỜNG MINH chứ không phải mặc định trong mã.
+                #
+                # `arg` ở đây là SỐ PHÚT, không phải bí mật — in ra log là đúng và cần thiết.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                PHUT="$(echo "${ARG:-}" | tr -dc '0-9')"
+                if [ "${ARG:-}" = "off" ] || [ -z "$PHUT" ] || [ "$PHUT" = "0" ]; then
+                  upsert_env SYNC_SEPAY_EVERY_MINUTES "0"
+                  upsert_env SYNC_SEPAY_APPLY "0"
+                  echo "Đã TẮT lịch đối chiếu SePay định kỳ."
+                else
+                  upsert_env SYNC_SEPAY_EVERY_MINUTES "$PHUT"
+                  # Bật lịch mà để CHẠY THỬ thì job chạy mỗi giờ và không vá gì — vô nghĩa.
+                  upsert_env SYNC_SEPAY_APPLY "1"
+                  echo "Đã BẬT lịch đối chiếu SePay: mỗi $PHUT phút, quét 2 ngày gần nhất, GHI THẬT."
+                fi
+                grep -E "^SYNC_SEPAY_" .env
+                # Bộ lập lịch đọc .env lúc khởi động, nên phải dựng lại tiến trình thì lịch mới đổi.
+                $C up -d scheduler
+                sleep 8
+                docker logs --tail 20 erp-scheduler 2>&1 | grep -i "lịch chạy" || docker logs --tail 10 erp-scheduler 2>&1 ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
