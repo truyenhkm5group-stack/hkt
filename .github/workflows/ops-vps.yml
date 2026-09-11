@@ -54,6 +54,7 @@ on:
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
+          - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
@@ -90,6 +91,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          # Chỉ dùng cho apply-sepay-env. Cùng nguyên tắc: GitHub che secret trong log, và tuyệt
+          # đối KHÔNG truyền qua ô "arg" — ô đó được in nguyên văn vào log của mọi lần chạy.
+          SEPAY_WEBHOOK_SECRET: ${{ secrets.SEPAY_WEBHOOK_SECRET }}
+          SEPAY_WEBHOOK_API_KEY: ${{ secrets.SEPAY_WEBHOOK_API_KEY }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -97,7 +102,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY
           script: |
             set -e
             cd /root/erp
@@ -254,6 +259,47 @@ jobs:
               ai-check)
                 fetch_script ai-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ai-check.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ai-check.ts $ARG ;;
+              apply-sepay-env)
+                # Ghi secret webhook SePay từ Secrets vào .env rồi khởi động lại app.
+                #
+                # GIÁ TRỊ SECRET KHÔNG BAO GIỜ ĐƯỢC IN. Chỉ in ĐỘ DÀI để biết đã ghi được gì.
+                # GitHub cũng tự che secret trong log, nhưng không dựa vào một lớp bảo vệ duy nhất.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                if [ -z "${SEPAY_WEBHOOK_SECRET:-}" ] && [ -z "${SEPAY_WEBHOOK_API_KEY:-}" ]; then
+                  echo "Chưa có Secret SEPAY_WEBHOOK_SECRET trong repo — KHÔNG ghi gì (ghi đè rỗng sẽ giết đường realtime đang chạy)."
+                  echo "Thêm ở Settings → Secrets and variables → Actions rồi chạy lại."; exit 1
+                fi
+                # CHỈ ghi khi có giá trị: Secret trống không được phép xoá khoá đang dùng trên máy.
+                [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && { upsert_env SEPAY_WEBHOOK_SECRET "$SEPAY_WEBHOOK_SECRET"; echo "SEPAY_WEBHOOK_SECRET: đã ghi (${#SEPAY_WEBHOOK_SECRET} ký tự)"; }
+                [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && { upsert_env SEPAY_WEBHOOK_API_KEY "$SEPAY_WEBHOOK_API_KEY"; echo "SEPAY_WEBHOOK_API_KEY: đã ghi (${#SEPAY_WEBHOOK_API_KEY} ký tự)"; }
+                $C up -d app scheduler
+                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                echo "── GET /api/webhooks/sepay ──"
+                curl -fsS -m 20 http://127.0.0.1:3000/api/webhooks/sepay; echo
+
+                # ═══ THỬ CHỮ KÝ MÀ KHÔNG GHI MỘT ĐỒNG TIỀN GIẢ NÀO VÀO SỔ ═══
+                #
+                # Gói tin thử CỐ Ý thiếu `transferType`. Chữ ký ĐÚNG thì máy chủ đi qua được cửa xác
+                # thực rồi mới từ chối vì sai định dạng ⇒ 400. Chữ ký SAI thì bị chặn ngay ⇒ 401.
+                # Hai mã khác nhau chứng minh HMAC chạy đúng, mà sổ ngân hàng KHÔNG có thêm dòng nào.
+                #
+                # Đừng thay bằng gói tin hợp lệ để "thử cho giống thật": nó sẽ tạo một giao dịch ma
+                # trong sổ và chảy thẳng vào báo cáo dòng tiền.
+                TS="$(date +%s)"
+                BODY='{"id":"ops-hmac-check","gateway":"OPSCHECK","transactionDate":"2026-01-01 00:00:00","accountNumber":"0","transferAmount":1}'
+                SIG="sha256=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SEPAY_WEBHOOK_SECRET" -r | cut -d' ' -f1)"
+                OK_CODE="$(curl -s -o /tmp/sepay_ok.json -m 20 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "X-SePay-Signature: $SIG" -H "X-SePay-Timestamp: $TS" -d "$BODY" http://127.0.0.1:3000/api/webhooks/sepay)"
+                echo "chữ ký ĐÚNG → HTTP $OK_CODE · $(cat /tmp/sepay_ok.json)"
+                BAD_CODE="$(curl -s -o /tmp/sepay_bad.json -m 20 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-SePay-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000' -H "X-SePay-Timestamp: $TS" -d "$BODY" http://127.0.0.1:3000/api/webhooks/sepay)"
+                echo "chữ ký SAI  → HTTP $BAD_CODE · $(cat /tmp/sepay_bad.json)"
+                rm -f /tmp/sepay_ok.json /tmp/sepay_bad.json
+                if [ "$OK_CODE" = "400" ] && [ "$BAD_CODE" = "401" ]; then
+                  echo "✓ HMAC đúng: chữ ký hợp lệ qua được xác thực (400 = sai định dạng có chủ đích), chữ ký sai bị chặn (401)"
+                else
+                  echo "::error::HMAC không như kỳ vọng — chữ ký đúng=$OK_CODE (mong 400), chữ ký sai=$BAD_CODE (mong 401)"
+                  echo "401 ở cả hai nghĩa là .env chưa nhận secret; 200 ở chữ ký sai nghĩa là xác thực KHÔNG chạy — dừng dùng webhook cho tới khi sửa."
+                  exit 1
+                fi ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
