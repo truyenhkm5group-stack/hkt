@@ -389,14 +389,14 @@ kết quả đơn từ bảng vật chất hoá, lợi nhuận, tiền, kho, s�
 Kiểm thử không mạng (FakeProvider, fetch giả cho OpenAI): vòng lặp p50 18 ms; ước ~$0,03 một lượt
 tóm tắt kiện với Opus 5 (gpt-5.6 chưa có giá ⇒ chi phí ghi là chưa biết, không phải 0).
 
-### 7.11 Vòng 7: tích hợp & phát hành một lần (11/09/2026)
+### 7.11 Vòng 7: tích hợp & phát hành một lần (11/09/2026) — `docs/release-2026-09-11-integration.md`
 
 Vai trò: Integration + Release Lead. Nhánh `release/integration-2026-09-11` từ `origin/main`
-(`1320cc8`), mang care engine + AI copilot + OpenAI + UI nối care/AI + báo cáo care (khối lượng theo
-người, doanh thu cứu được) + nút mở lại case. **Nhánh UI `claude/erp-ui-redesign-opus5` không tồn
-tại trên remote** tại thời điểm tích hợp (chưa được đẩy lên), nên phần redesign của Opus chưa vào
-release này — sẽ tích hợp ở release kế khi nhánh có trên GitHub, theo luật: nghiệp vụ / truy vấn /
-hợp đồng / quyền giữ bản main, trình bày ưu tiên Opus, sidebar/dashboard/operations merge ngữ nghĩa.
+(`1320cc8`), mang care engine + AI copilot + OpenAI + UI nối care/AI + báo cáo care + 5 commit UI
+của Opus (`claude/erp-ui-redesign-opus5`, merge sạch, review ngữ nghĩa sidebar/dashboard) + hai sửa
+deploy. Production `9dd6823` → **`80af7ec`** (deploy #229 thành công sau #227/#228 chết vì `next
+build` SIGKILL trên VPS 1,9 GB — từ nay image dựng ở GitHub Actions, đẩy GHCR theo SHA, VPS chỉ kéo
+về). Smoke 39/39, migration 60 → 62, tiền theo chứng từ không đổi. AI chờ Secret `OPENAI_API_KEY`.
 Các nhánh cũ (`perf/p0-reporting-speed`, `claude/release-engineering-p0`, `hotfix/vtp-import-recovery`,
 `claude/vtp-direct-fulfillment-p1`, `codex/erp-data-truth-p0`, `wip/*`, …) không có merge-base với
 `main` hiện tại và `main` là siêu tập nội dung của chúng (mọi khác biệt là main mới hơn) ⇒ không mang
