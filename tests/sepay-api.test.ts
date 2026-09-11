@@ -223,12 +223,70 @@ export async function testSepayApi(db: Db) {
   await db.delete(b).where(sql`${b.providerTxnId} in ('78001','78002','78003','78004','78005')`);
   await db.delete(b).where(eq(b.id, "preview-test-file"));
 
+
+  // ═══ 13. SEPAY DÙNG HAI KHÔNG GIAN MÃ CHO CÙNG MỘT GIAO DỊCH ═══
+  //
+  // ĐO TRÊN PRODUCTION 12/09/2026, ở đúng lượt đối chiếu đầu tiên. Cùng giao dịch
+  // FT26255929554527: webhook gửi `81024863` (số nguyên), API v2 trả
+  // `7c10d655-adfc-11f1-b21a-a6006ab65aca` (UUID).
+  //
+  // Hai hệ quả, và cả hai đều phải xử lý cho đúng:
+  //
+  //  a) HỘI TỤ PHẢI DỰA VÀO MÃ BÚT TOÁN NGÂN HÀNG, không phải mã nhà cung cấp. Nếu chỉ so mã SePay
+  //     thì mọi lượt đối chiếu sẽ tưởng mọi dòng webhook đều là giao dịch mới.
+  //  b) KHÁC MÃ KHÔNG PHẢI MÂU THUẪN DỮ LIỆU. Xếp nó vào `conflict` thì lượt chạy mỗi giờ sẽ đẻ ra
+  //     một danh sách mâu thuẫn dài vô tận, và mâu thuẫn THẬT sẽ chìm trong đó.
+  const quaWebhook = take(apiRow({ id: "79001", reference_number: "FT-TWO-ID-SPACES", amount_in: "2000" }));
+  const daGhi = await ingestSepayTransaction(db, quaWebhook, { source: "WEBHOOK" });
+  assert.equal(daGhi.created, true, "13. webhook ghi dòng với mã số nguyên");
+
+  // Cùng giao dịch, nhưng API trả mã UUID.
+  const quaApi = take(apiRow({ id: "7c10d655-adfc-11f1-b21a-a6006ab65aca", reference_number: "FT-TWO-ID-SPACES", amount_in: "2000" }));
+  const lanApi = await ingestSepayTransaction(db, quaApi, { source: "API" });
+  assert.equal(lanApi.created, false, "13a. HỘI TỤ qua mã bút toán ngân hàng — không tạo dòng thứ hai dù mã nhà cung cấp khác");
+  assert.equal(lanApi.transactionId, daGhi.transactionId, "13a. cùng một dòng canonical");
+  assert.equal(lanApi.providerIdMismatch, true, "13b. khác mã được NÊU RA riêng");
+  assert.equal(lanApi.conflict, null, "13b. nhưng KHÔNG xếp vào mâu thuẫn dữ liệu — nếu không, lượt chạy mỗi giờ sẽ chôn mâu thuẫn thật");
+
+  // Mã của webhook được GIỮ (người đầu tiên thắng), mã của API vào provenance.
+  const [dongChung] = await db.select().from(b).where(eq(b.bankRef, "FT-TWO-ID-SPACES"));
+  assert.equal(dongChung.providerTxnId, "79001", "13b. mã đầu tiên được giữ, không bị lượt sau thay");
+  assert.equal((dongChung.seenSources as unknown[]).length, 2, "13b. cả hai đường đều ghi vào provenance — vẫn truy nguyên được đủ");
+
+  // Mâu thuẫn THẬT vẫn phải kêu: cùng mã bút toán mà khác số tiền.
+  const lechTien = take(apiRow({ id: "79002", reference_number: "FT-TWO-ID-SPACES", amount_in: "9999000" }));
+  const ketQuaLech = await ingestSepayTransaction(db, lechTien, { source: "API" });
+  assert.ok(ketQuaLech.conflict?.includes("số tiền"), "13c. khác SỐ TIỀN vẫn là mâu thuẫn thật và vẫn kêu lên");
+
+  // ═══ 14. RỦI RO KÉO THEO: GIAO DỊCH KHÔNG CÓ MÃ BÚT TOÁN NGÂN HÀNG ═══
+  //
+  // Hai không gian mã cộng với việc THIẾU mã ngân hàng là cặp duy nhất có thể sinh hai dòng cho một
+  // giao dịch: khoá lùi `SEPAY:<id>` sẽ khác nhau ở hai đường vào.
+  //
+  // ERP CỐ Ý KHÔNG tự gộp — hai lần chuyển cùng số tiền trong cùng một phút là chuyện có thật, và
+  // tự gộp là xoá tiền thật. Thay vào đó lưới an toàn phải BẮT ĐƯỢC và nêu ra để người quyết định.
+  // Bài kiểm này khoá đúng hành vi xuống cấp đó, để nó không âm thầm biến mất.
+  const khongMaWebhook = take({ id: "79010", transaction_date: "2026-09-12 07:00:00", account_number: "9972165264", amount_in: "654000", bank_brand_name: "MBBank" });
+  const khongMaApi = take({ id: "aaaa-bbbb-cccc-dddd", transaction_date: "2026-09-12 07:00:00", account_number: "9972165264", amount_in: "654000", bank_brand_name: "MBBank" });
+  const w1 = await ingestSepayTransaction(db, khongMaWebhook, { source: "WEBHOOK" });
+  const a1 = await ingestSepayTransaction(db, khongMaApi, { source: "API" });
+  assert.equal(w1.created, true, "14. dòng đầu vào sổ");
+  assert.equal(a1.created, true, "14. KHÔNG có mã ngân hàng ⇒ hai đường sinh hai khoá ⇒ hai dòng — đây là xuống cấp ĐÃ BIẾT");
+  assert.equal(
+    a1.duplicateSuspect,
+    true,
+    "14. nhưng LƯỚI AN TOÀN bắt được và nêu ra ngay — người quyết định, ERP không tự gộp và cũng không im lặng",
+  );
+
+  await db.delete(b).where(sql`${b.providerTxnId} in ('79001','79002','79010','aaaa-bbbb-cccc-dddd')`);
+  await db.delete(b).where(eq(b.bankRef, "FT-TWO-ID-SPACES"));
+
   // Dọn dẹp — bài kiểm khác dùng chung bảng.
   await db.delete(b).where(sql`${b.providerTxnId} in ('77100','77101','77102')`);
   await db.delete(b).where(eq(b.id, "sepay-api-test-file"));
   await db.delete(schema.bankAccounts).where(eq(schema.bankAccounts.provider, "SEPAY"));
 
   console.log(
-    "✓ Đối chiếu API SePay: xem trước dự báo ĐÚNG cái ghi thật sẽ làm · đọc đúng v2 lẫn v1 · KHÔNG đoán chiều tiền · phong bì đổi dạng không làm im lặng đọc ra 0 · dùng CHUNG cửa ghi với webhook · vá được giao dịch webhook làm mất mà không đè nhãn người dùng",
+    "✓ Đối chiếu API SePay: SePay dùng HAI không gian mã (webhook số, API UUID) — hội tụ qua mã ngân hàng, khác mã không phải mâu thuẫn · xem trước dự báo ĐÚNG cái ghi thật sẽ làm · đọc đúng v2 lẫn v1 · KHÔNG đoán chiều tiền · phong bì đổi dạng không làm im lặng đọc ra 0 · dùng CHUNG cửa ghi với webhook · vá được giao dịch webhook làm mất mà không đè nhãn người dùng",
   );
 }

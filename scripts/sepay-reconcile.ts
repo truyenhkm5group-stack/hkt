@@ -53,6 +53,7 @@ async function main() {
   line("SePay tự báo gửi webhook hỏng", r.providerSaysWebhookFailed);
   line("dòng API đọc không ra", r.unreadable.length);
   line("mâu thuẫn sổ / API", r.conflicts.length);
+  line("khác mã nhà cung cấp (bình thường)", `${r.providerIdMismatch} — webhook gửi số, API v2 trả UUID`);
   console.log("");
   line(apply ? "tiền vào ĐÃ tăng thêm" : "tiền vào SẼ tăng thêm", `${vnd(r.projectedIn)}₫`);
   line(apply ? "tiền ra ĐÃ tăng thêm" : "tiền ra SẼ tăng thêm", `${vnd(r.projectedOut)}₫`);

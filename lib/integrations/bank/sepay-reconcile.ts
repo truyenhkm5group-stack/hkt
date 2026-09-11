@@ -70,8 +70,16 @@ export type SepayReconcileResult = {
   providerSaysWebhookFailed: number;
   /** Dòng API đọc không ra — nêu tên, không bỏ qua im lặng. */
   unreadable: string[];
-  /** Mâu thuẫn giữa sổ và API, hoặc giữa xem trước và ghi thật. */
+  /** Mâu thuẫn DỮ LIỆU giữa sổ và API (số tiền / mốc), hoặc giữa xem trước và ghi thật. */
   conflicts: string[];
+  /**
+   * Số dòng mà webhook và API mang hai mã nhà cung cấp khác nhau cho CÙNG một giao dịch.
+   *
+   * BÌNH THƯỜNG với SePay: webhook gửi số nguyên, API v2 trả UUID. Đếm để thấy quy mô, KHÔNG
+   * xếp vào mâu thuẫn — nếu không, lượt chạy mỗi giờ sẽ đẻ ra một danh sách mâu thuẫn dài vô tận
+   * và mâu thuẫn THẬT sẽ chìm trong đó.
+   */
+  providerIdMismatch: number;
   /** Hình dạng phong bì thật của API, để lần sau siết bộ đọc cho đúng. */
   shape: string;
 };
@@ -97,6 +105,7 @@ function emptyResult(apply: boolean, from: Date, to: Date): SepayReconcileResult
     providerSaysWebhookFailed: 0,
     unreadable: [],
     conflicts: [],
+    providerIdMismatch: 0,
     shape: "",
   };
 }
@@ -232,6 +241,7 @@ export async function reconcileSepay(options: {
           } else {
             ctx.summary.skipped += 1;
           }
+          if (outcome.providerIdMismatch) out.providerIdMismatch += 1;
           if (outcome.conflict) out.conflicts.push(`${txn.referenceCode || txn.providerTxnId}: ${outcome.conflict}`);
         }
 
@@ -256,6 +266,7 @@ export async function reconcileSepay(options: {
         `thiếu ${out.missing}`,
         apply ? `đã vá ${out.patched}` : "CHẠY THỬ (chưa ghi)",
         out.duplicateSuspects ? `nghi trùng ${out.duplicateSuspects}` : "",
+        out.providerIdMismatch ? `khác mã nhà cung cấp ${out.providerIdMismatch} (bình thường với SePay)` : "",
         out.accountUnconfirmed ? `tài khoản chưa xác nhận ${out.accountUnconfirmed}` : "",
         out.providerSaysWebhookFailed ? `SePay báo gửi hỏng ${out.providerSaysWebhookFailed}` : "",
         out.unreadable.length ? `đọc không ra ${out.unreadable.length}` : "",

@@ -46,8 +46,22 @@ export type IngestOutcome = {
   accountUnmapped: boolean;
   /** Có dòng khác cùng tài khoản + số tiền + phút nhưng KHÁC mã giao dịch. Nêu ra, không tự gộp. */
   duplicateSuspect: boolean;
-  /** Mâu thuẫn giữa hai nguồn trên cùng một dòng (số tiền / mốc / mã nhà cung cấp khác nhau). */
+  /** Mâu thuẫn DỮ LIỆU giữa hai nguồn trên cùng một dòng: số tiền hoặc mốc khác nhau. */
   conflict: string | null;
+  /**
+   * Cùng một giao dịch mang hai mã nhà cung cấp khác nhau.
+   *
+   * ĐO TRÊN PRODUCTION 12/09/2026: SePay dùng HAI KHÔNG GIAN MÃ cho cùng một giao dịch — webhook
+   * gửi số nguyên (`81024863`), API v2 trả UUID (`7c10d655-adfc-11f1-…`). Đây là tính chất của
+   * nhà cung cấp, KHÔNG phải dữ liệu sai.
+   *
+   * Vì thế nó KHÔNG được xếp vào `conflict`: lượt đối chiếu chạy mỗi giờ sẽ báo lại đúng thứ này
+   * cho MỌI dòng do webhook tạo, và một danh sách mâu thuẫn dài ra mãi là danh sách người ta học
+   * cách phớt lờ — chôn mất mâu thuẫn thật ở giữa.
+   *
+   * Mã của lượt sau vẫn được ghi vào `seen_sources`, nên vẫn truy nguyên được đầy đủ.
+   */
+  providerIdMismatch: boolean;
   bankAccountId: string;
   bankRef: string;
 };
@@ -150,6 +164,7 @@ export async function ingestSepayTransaction(
       accountUnmapped: account.unmapped,
       duplicateSuspect: false,
       conflict: null,
+      providerIdMismatch: false,
       bankAccountId: account.id,
       bankRef: already[0].bankRef,
     };
@@ -219,13 +234,13 @@ export async function ingestSepayTransaction(
    * Ghi đè im lặng sẽ giấu mất nó; giữ giá trị của nguồn thẩm quyền cao hơn rồi báo ra mới đúng.
    */
   const conflicts: string[] = [];
+  let providerIdMismatch = false;
   if (!created) {
     if (row.amount !== txn.amount) conflicts.push(`số tiền sổ ${row.amount} ≠ gói tin ${txn.amount}`);
     const drift = Math.abs(new Date(row.txnAt).getTime() - txn.txnAt.getTime());
     if (drift > 5 * 60_000) conflicts.push(`mốc lệch ${Math.round(drift / 60_000)} phút`);
-    if (row.providerTxnId && row.providerTxnId !== txn.providerTxnId) {
-      conflicts.push(`đã mang mã SePay ${row.providerTxnId}, gói tin này là ${txn.providerTxnId}`);
-    }
+    // Khác mã nhà cung cấp KHÔNG phải mâu thuẫn dữ liệu — xem chú thích ở `providerIdMismatch`.
+    providerIdMismatch = Boolean(row.providerTxnId && row.providerTxnId !== txn.providerTxnId);
   }
 
   // Nghi ngờ trùng: cùng tài khoản + số tiền + phút nhưng KHÁC mã giao dịch. Chỉ báo, không gộp.
@@ -242,6 +257,7 @@ export async function ingestSepayTransaction(
     accountUnmapped: account.unmapped,
     duplicateSuspect: suspects.length > 0,
     conflict: conflicts.length ? conflicts.join(" · ") : null,
+    providerIdMismatch,
     bankAccountId: account.id,
     bankRef,
   };
