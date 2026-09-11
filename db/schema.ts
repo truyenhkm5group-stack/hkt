@@ -1333,6 +1333,74 @@ export const returnInspections = pgTable(
 );
 
 /**
+ * ───────────── KẾT QUẢ ĐẾM THEO TỪNG MÓN ─────────────
+ *
+ * VÌ SAO PHẢI LÀ BẢNG RIÊNG. `return_inspections` có grain MỘT DÒNG MỘT KIỆN: một `condition`, một
+ * `restock_qty` cho cả kiện. Một kiện ba món hoàn toàn có thể vừa đủ một món, vừa thiếu một món,
+ * vừa hỏng một món — ép cả kiện về một kết luận là vứt đúng phần thông tin mà người kho vừa bỏ
+ * công đếm ra, và sau đó không ai trả lời được "mã nào hay bị trả về hỏng".
+ *
+ * Nhét kết quả từng món vào cột `note` dạng JSON thì không đếm được, không lọc được, không ràng
+ * buộc được — và biến một cột đang có nghĩa "lý do người kiểm ghi" thành hai nghĩa. Nên là bảng.
+ *
+ * QUAN HỆ VỚI TỒN KHO: bảng này KHÔNG đụng tồn. Nó chỉ ghi lại người kho đã thấy gì. Tồn vẫn chỉ
+ * đổi qua `stock_receipts` / `stock_receipt_items` như mọi đường khác, và chỉ cho món kết luận `OK`.
+ *
+ * HÀNG KỲ VỌNG ĐƯỢC CHỤP LẠI TẠI LÚC KIỂM, không đọc sống từ đơn: đơn có thể bị sửa, mẫu mã có thể
+ * bị xoá hoặc đổi tên sau đó. Muốn biết "lúc đếm, kho tưởng sẽ nhận được gì" thì phải giữ đúng ảnh
+ * chụp ấy — nếu không, phần lệch sẽ tự biến mất khi dữ liệu gốc đổi.
+ */
+export const returnInspectionItems = pgTable(
+  "return_inspection_items",
+  {
+    id: id(),
+    inspectionId: text("inspection_id")
+      .notNull()
+      .references(() => returnInspections.id, { onDelete: "cascade" }),
+    /** Lặp lại để lọc/đếm theo kiện mà không phải nối bảng — kiện là thứ người kho cầm trên tay. */
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+
+    // ── Hàng KỲ VỌNG (ảnh chụp tại lúc kiểm) ──
+    expectedVariantId: text("expected_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    expectedSku: text("expected_sku").notNull().default(""),
+    expectedName: text("expected_name").notNull().default(""),
+    expectedColor: text("expected_color").notNull().default(""),
+    expectedSize: text("expected_size").notNull().default(""),
+    expectedQty: integer("expected_qty").notNull().default(0),
+
+    // ── Hàng THỰC NHẬN ──
+    /** Khác `expected_variant_id` khi khách trả về nhầm mẫu mã. */
+    actualVariantId: text("actual_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    actualSku: text("actual_sku").notNull().default(""),
+    actualQty: integer("actual_qty").notNull().default(0),
+
+    /** OK · SHORT · WRONG_ITEM · DAMAGED · DIRTY · UNSELLABLE · OTHER */
+    condition: text("condition").notNull(),
+    note: text("note").notNull().default(""),
+    inspectedBy: text("inspected_by").notNull().default(""),
+    inspectedAt: ts("inspected_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("return_inspection_items_inspection_idx").on(t.inspectionId),
+    index("return_inspection_items_shipment_idx").on(t.shipmentId),
+    /** Hỏi "mã Q002 bị trả về bao nhiêu, hỏng mấy cái" phải quét được theo mẫu mã. */
+    index("return_inspection_items_variant_idx").on(t.expectedVariantId),
+    /*
+      Danh sách PHẢI khớp `ITEM_CONDITIONS` ở lib/constants/return-lifecycle.ts.
+      Đã có tiền lệ lệch giữa hằng số TypeScript và ràng buộc SQL (`WRONG_ITEM` của bảng kiểm cả
+      kiện): người kho bấm một nút hợp lệ và nhận lỗi ràng buộc, đúng lúc đang đứng đếm hàng.
+    */
+    check("return_inspection_items_condition_check", sql`${t.condition} IN ('OK', 'SHORT', 'WRONG_ITEM', 'DAMAGED', 'DIRTY', 'UNSELLABLE', 'OTHER')`),
+    check("return_inspection_items_qty_check", sql`${t.expectedQty} >= 0 AND ${t.actualQty} >= 0`),
+    // Không "đủ" mà không nói vì sao thì phần hàng mất biến mất không dấu vết.
+    check("return_inspection_items_reason_check", sql`${t.condition} = 'OK' OR length(trim(${t.note})) > 0`),
+  ],
+);
+
+/**
  * ═══════ BẰNG CHỨNG HÀNH ĐỘNG — CÔNG CỦA ĐỘI, ĐO ĐƯỢC ═══════
  *
  * Câu chưa trả lời được: *CSKH đã cứu bao nhiêu doanh thu? Kế toán đòi về bao nhiêu COD? Kho giải

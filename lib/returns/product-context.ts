@@ -50,6 +50,8 @@ export type OrderLinkBasis = "DIRECT" | "RETURN_LEG" | "AMBIGUOUS" | "UNRESOLVED
 export type ItemsBasis = "ITEM_EVIDENCE" | "ORDER_ONLY" | "NONE";
 
 export type ReturnItem = {
+  /** Nối dòng hàng với sổ kho. Thiếu nó thì món đếm được không biết cộng vào mẫu mã nào. */
+  variantId: string | null;
   sku: string;
   name: string;
   color: string;
@@ -179,6 +181,7 @@ export async function returnProductContext(shipmentIds: string[]): Promise<Map<s
       db
         .select({
           orderId: oi.orderId,
+          variantId: oi.variantId,
           sku: oi.sku,
           productName: oi.productName,
           variationDetail: oi.variationDetail,
@@ -210,6 +213,7 @@ export async function returnProductContext(shipmentIds: string[]): Promise<Map<s
       if (evidence && qty <= 0) continue;
       const list = itemsByOrder.get(r.orderId) ?? [];
       list.push({
+        variantId: r.variantId ?? null,
         sku: (r.sku ?? "").trim(),
         // Mẫu mã bị xoá / đổi tên: `product_variants` mất dòng thì màu·size trống, nhưng tên và
         // SKU chụp tại lúc bán vẫn nằm trong `order_items` — dùng `variation_detail` làm phương án

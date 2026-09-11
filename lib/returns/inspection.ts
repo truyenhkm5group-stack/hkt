@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { ReturnCondition } from "@/lib/constants/returns-condition";
+import { ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, isItemCondition, itemHasDiscrepancy, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import { returnProductContext, type ReturnProductContext } from "@/lib/returns/product-context";
 
 /**
@@ -178,7 +179,9 @@ async function createRestockReceipt(orderId: string | null, shipmentId: string, 
   return receipt.id;
 }
 
-export type InspectionItem = { sku: string; name: string; color: string; size: string; quantity: number };
+/** `variantId` là thứ DUY NHẤT nối được dòng hàng với sổ kho — thiếu nó thì món đếm được không
+ *  biết cộng vào mẫu mã nào, nên nó phải đi cùng mọi dòng hàng ngay từ truy vấn. */
+export type InspectionItem = { variantId: string | null; sku: string; name: string; color: string; size: string; quantity: number };
 
 export type PendingInspection = {
   shipmentId: string;
@@ -205,6 +208,7 @@ export type PendingInspection = {
 /** Gộp dòng hàng của đơn thành JSON ngay trong SQL — một truy vấn, không N+1. */
 const ITEMS_JSON = sql<string>`coalesce((
   select json_agg(json_build_object(
+    'variantId', oi.variant_id,
     'sku', coalesce(nullif(oi.sku, ''), ''),
     'name', coalesce(oi.product_name, ''),
     'color', coalesce(pv.color, ''),
@@ -223,6 +227,7 @@ function parseItems(raw: unknown): InspectionItem[] {
   return list.map((x) => {
     const r = x as Record<string, unknown>;
     return {
+      variantId: r.variantId ? String(r.variantId) : null,
       sku: String(r.sku ?? ""),
       name: String(r.name ?? ""),
       color: String(r.color ?? ""),
@@ -283,7 +288,7 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
       receivedBy: r.receivedBy,
       expectedQty: Number(r.expectedQty ?? 0) || (them?.expectedQty ?? 0),
       ageDays: Math.floor((now - new Date(r.receivedAt).getTime()) / 86_400_000),
-      items: goc.length ? goc : (them?.items ?? []).map((i) => ({ sku: i.sku, name: i.name, color: i.color, size: i.size, quantity: i.quantity })),
+      items: goc.length ? goc : (them?.items ?? []).map((i) => ({ variantId: i.variantId, sku: i.sku, name: i.name, color: i.color, size: i.size, quantity: i.quantity })),
     };
   });
 }
@@ -452,4 +457,185 @@ export async function recordInspectionBulk(
     else done += 1;
   }
   return { done, failed };
+}
+
+// ───────────────────────── ĐẾM THEO TỪNG MÓN ─────────────────────────
+
+export type InspectedItemInput = {
+  /** Ảnh chụp hàng kỳ vọng — màn hình gửi lên từ bối cảnh đã ghép, để lưu đúng thứ người kho thấy lúc đếm. */
+  expectedVariantId: string | null;
+  expectedSku: string;
+  expectedName: string;
+  expectedColor: string;
+  expectedSize: string;
+  expectedQty: number;
+  /** Mẫu mã THỰC NHẬN — khác kỳ vọng khi khách trả nhầm hàng. Bỏ trống thì hiểu là đúng mẫu kỳ vọng. */
+  actualVariantId: string | null;
+  actualSku: string;
+  actualQty: number;
+  condition: ItemCondition;
+  note: string;
+};
+
+export type ItemInspectionResult =
+  | { ok: true; restocked: number; receiptId: string | null; hasDiscrepancy: boolean }
+  | { error: string };
+
+/**
+ * ═══════════ KHO ĐẾM XONG MỘT KIỆN, GHI KẾT LUẬN THEO TỪNG MÓN ═══════════
+ *
+ * Khác `recordInspection` (một kết luận cho CẢ KIỆN, giữ nguyên cho đường đếm nhanh): ở đây mỗi
+ * món có kết luận riêng, nên một kiện vừa đủ một món vừa thiếu một món vừa hỏng một món ghi lại
+ * được đúng như thế.
+ *
+ * BA ĐIỀU KHÔNG ĐƯỢC PHÁ:
+ *
+ *  1. CHỈ MÓN `OK` MỚI VÀO TỒN, và vào đúng SỐ THỰC NHẬN của chính nó. Sáu kết luận còn lại là
+ *     hàng có thật trên bàn nhưng chưa bán lại được — chúng phải hiện thành thất thoát có tên.
+ *  2. TỒN CHỈ ĐỔI QUA PHIẾU KHO. Hàm này không tự cộng vào tồn; nó lập phiếu tái nhập và để đúng
+ *     cơ chế sổ kho đang có làm phần còn lại.
+ *  3. ĐẾM MỘT LẦN. Kiện đã kiểm rồi thì chặn — nếu không, phiếu tái nhập cộng tồn hai lần.
+ *
+ * Và một khác biệt quan trọng nữa so với đường đếm nhanh: phiếu tái nhập ghi ĐÚNG MẪU MÃ người kho
+ * đếm được, không phân bổ theo tỷ lệ dòng hàng của đơn. Phân bổ theo tỷ lệ là phép đoán chấp nhận
+ * được khi chỉ biết tổng số; khi đã biết từng món mà vẫn đoán thì là làm hỏng dữ liệu tốt hơn.
+ */
+export async function recordItemInspection(input: { shipmentId: string; items: InspectedItemInput[]; actor: string }): Promise<ItemInspectionResult> {
+  const db = await getDb();
+  const [row] = await db.select().from(ins).where(eq(ins.shipmentId, input.shipmentId));
+  if (!row) return { error: "Kiện này chưa được ghi nhận đã về kho" };
+  if (row.status === "INSPECTED") return { error: "Kiện này đã đếm rồi — muốn sửa số thì lập phiếu điều chỉnh kho" };
+  if (!input.items.length) return { error: "Phải đếm ít nhất một món" };
+
+  const actor = input.actor.trim();
+  if (!actor) return { error: "Thiếu người kiểm" };
+
+  // Làm sạch + kiểm TOÀN BỘ trước khi ghi bất cứ thứ gì: một món sai thì cả kiện không ghi, chứ
+  // không ghi được nửa rồi bỏ dở.
+  const items = input.items.map((it) => ({
+    ...it,
+    expectedQty: Math.max(0, Math.trunc(it.expectedQty)),
+    actualQty: Math.max(0, Math.trunc(it.actualQty)),
+    note: it.note.trim(),
+    actualSku: it.actualSku.trim() || it.expectedSku.trim(),
+    actualVariantId: it.actualVariantId ?? it.expectedVariantId,
+  }));
+  for (const it of items) {
+    if (!isItemCondition(it.condition)) return { error: `Kết luận không hợp lệ: ${String(it.condition)}` };
+    if (ITEM_CONDITION_NEEDS_NOTE[it.condition] && !it.note) {
+      return { error: `${ITEM_CONDITION_LABEL[it.condition]} thì phải ghi rõ vì sao (${it.expectedSku || it.expectedName})` };
+    }
+    if (it.condition === "OK" && it.actualQty <= 0) {
+      return { error: `Kết luận "đủ" thì phải đếm được ít nhất một món (${it.expectedSku || it.expectedName})` };
+    }
+  }
+
+  const now = new Date();
+  const restockTotal = items.filter((it) => ITEM_CONDITION_RESTOCKS[it.condition] && it.actualVariantId).reduce((t, it) => t + it.actualQty, 0);
+  const unsellableTotal = items.filter((it) => !ITEM_CONDITION_RESTOCKS[it.condition]).reduce((t, it) => t + it.actualQty, 0);
+  const hasDiscrepancy = items.some((it) => itemHasDiscrepancy(it));
+
+  // Gộp theo mẫu mã: cùng một mẫu mã ở hai dòng phải thành MỘT dòng phiếu, nếu không sổ kho có hai
+  // bút toán cho cùng một thứ trong cùng một phiếu.
+  const byVariant = new Map<string, number>();
+  for (const it of items) {
+    if (!ITEM_CONDITION_RESTOCKS[it.condition] || it.actualQty <= 0 || !it.actualVariantId) continue;
+    byVariant.set(it.actualVariantId, (byVariant.get(it.actualVariantId) ?? 0) + it.actualQty);
+  }
+
+  let receiptId: string | null = null;
+  if (byVariant.size) {
+    const [receipt] = await db
+      .insert(schema.stockReceipts)
+      .values({
+        kind: "RETURN",
+        receivedAt: now,
+        reference: `Đếm hàng hoàn ${input.shipmentId}`,
+        note: `Đếm theo từng món · ${byVariant.size} mẫu mã`,
+        totalQuantity: restockTotal,
+        totalCost: 0,
+        createdBy: actor,
+      })
+      .returning({ id: schema.stockReceipts.id });
+    receiptId = receipt?.id ?? null;
+    if (receiptId) {
+      const rid = receiptId;
+      await db.insert(schema.stockReceiptItems).values([...byVariant.entries()].map(([variantId, quantity]) => ({ receiptId: rid, variantId, quantity, shipmentId: input.shipmentId })));
+    }
+  }
+
+  await db.insert(schema.returnInspectionItems).values(
+    items.map((it) => ({
+      inspectionId: row.id,
+      shipmentId: input.shipmentId,
+      expectedVariantId: it.expectedVariantId,
+      expectedSku: it.expectedSku,
+      expectedName: it.expectedName,
+      expectedColor: it.expectedColor,
+      expectedSize: it.expectedSize,
+      expectedQty: it.expectedQty,
+      actualVariantId: it.actualVariantId,
+      actualSku: it.actualSku,
+      actualQty: it.actualQty,
+      condition: it.condition,
+      note: it.note,
+      inspectedBy: actor,
+      inspectedAt: now,
+    })),
+  );
+
+  /*
+    KẾT LUẬN CẢ KIỆN SUY RA TỪ CÁC MÓN, không bắt người dùng nhập lại lần nữa.
+
+    Cột `condition` của `return_inspections` vẫn được điền để mọi báo cáo và bảng đếm đang có chạy
+    y nguyên — nhưng từ nay nó là số DẪN XUẤT; sự thật chi tiết nằm ở bảng từng món.
+    Thứ tự ưu tiên theo mức nghiêm trọng: thiếu > sai hàng > hỏng > không bán được.
+  */
+  const parcelCondition: ReturnCondition = items.every((it) => it.condition === "OK")
+    ? "RESTOCKABLE"
+    : items.some((it) => it.condition === "SHORT")
+      ? "MISSING"
+      : items.some((it) => it.condition === "WRONG_ITEM")
+        ? "WRONG_ITEM"
+        : items.some((it) => it.condition === "DAMAGED")
+          ? "DAMAGED"
+          : "UNSELLABLE";
+  // Ràng buộc CSDL: kết luận khác "bán lại được" thì BẮT BUỘC có lý do. Gộp lý do của từng món để
+  // người đọc phiếu kiện thấy ngay vì sao, không phải mở bảng chi tiết.
+  const summary = items
+    .filter((it) => it.condition !== "OK")
+    .map((it) => `${it.expectedSku || it.expectedName}: ${ITEM_CONDITION_LABEL[it.condition]}${it.note ? ` — ${it.note}` : ""}`)
+    .join(" · ");
+
+  await db
+    .update(ins)
+    .set({
+      status: "INSPECTED",
+      condition: parcelCondition,
+      restockQty: restockTotal,
+      unsellableQty: unsellableTotal,
+      note: summary,
+      inspectedAt: now,
+      inspectedBy: actor,
+      stockReceiptId: receiptId,
+      updatedAt: now,
+    })
+    .where(eq(ins.id, row.id));
+
+  await db
+    .update(s)
+    .set({ returnReceivedAt: now, returnReceivedBy: actor, returnReceivedNote: summary || null, updatedAt: now })
+    .where(and(eq(s.id, input.shipmentId), isNull(s.returnReceivedAt)));
+
+  return { ok: true, restocked: restockTotal, receiptId, hasDiscrepancy };
+}
+
+/** Kết quả đếm theo món của một kiện — để ngăn kéo hiện lại việc đã làm. */
+export async function listInspectedItems(shipmentId: string) {
+  const db = await getDb();
+  return db
+    .select()
+    .from(schema.returnInspectionItems)
+    .where(eq(schema.returnInspectionItems.shipmentId, shipmentId))
+    .orderBy(asc(schema.returnInspectionItems.createdAt));
 }
