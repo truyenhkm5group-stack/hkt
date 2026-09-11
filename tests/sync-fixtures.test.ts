@@ -38,6 +38,8 @@ import { testActionQueue } from "./action-queue.test";
 import { testCsCaseGrouping } from "./cs-case-grouping.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
+import { testConversionFunnel } from "./conversion-funnel.test";
+import { testPreshipRisk } from "./preship-risk.test";
 import { testAdsAttribution } from "./ads-attribution.test";
 import { testAdsAnomaly } from "./ads-anomaly.test";
 import { testAdsAttributionLink } from "./ads-attribution-link.test";
@@ -1282,6 +1284,15 @@ async function main() {
   await testCsCaseGrouping(db);
   await testSalesFunnel(db);
   await testStaffPerformance(db);
+  /*
+    HAI KHỐI NÀY CHÈN RỒI DỌN FIXTURE CỦA CHÍNH CHÚNG.
+
+    Đặt sau phễu bán hàng để so chéo được hai con số (đơn được tạo / đã xác nhận phải khớp). Cả hai
+    dọn sạch trong `finally`, nên thứ tự với các khối sau không quan trọng — nhưng nếu có khối nào
+    đếm tổng đơn thì vẫn nên giữ hai khối này ở đây.
+  */
+  await testConversionFunnel(db);
+  await testPreshipRisk(db);
   await testAdsRoas(db);
   await testAdsAttribution(db);
   await testAdsAnomaly(db);

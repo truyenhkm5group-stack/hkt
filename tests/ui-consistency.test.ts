@@ -179,6 +179,7 @@ export function testNavigationCoverage() {
     "/import-vtp": "vào từ nút 'Bổ sung danh sách vận đơn' ngay trên trang Đối soát COD, và từ ô lệnh ⌘K",
     "/operations": "tab 'Theo khâu vận hành' ngay trên trang Cần xử lý (cùng hàng đợi, hai góc nhìn), và từ ô lệnh ⌘K",
     "/reports/funnel": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
+    "/orders/verify": "một GÓC NHÌN của chính danh sách đơn (đơn còn trong kho, xếp theo khả năng hoàn), vào từ nút 'Cần xác minh trước khi giao' ngay trên trang Đơn hàng",
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
   };
 

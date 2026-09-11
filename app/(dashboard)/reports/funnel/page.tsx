@@ -11,6 +11,14 @@ import { getAttributionCoverage, getFunnelBySource, getSalesFunnel } from "@/lib
 import { getStaffPerformance } from "@/lib/queries/staff-performance";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { RoleTabs } from "@/app/(dashboard)/reports/funnel/role-tabs";
+import {
+  ConversionByDimensionSection,
+  LeakageSection,
+  PreOrderFunnelSection,
+  RiskBacktestSection,
+  StuckStepsSection,
+} from "@/app/(dashboard)/reports/funnel/conversion-sections";
+import { CONVERSION_DIMENSION_LABEL, type ConversionDimension } from "@/lib/constants/conversion";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Phễu bán hàng" };
@@ -25,6 +33,8 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", sortable: [], defaultPeriod: "30d" });
   const roleParam = typeof raw.role === "string" ? raw.role : "";
+  const dimParam = typeof raw.dim === "string" ? raw.dim : "";
+  const dimension: ConversionDimension = (dimParam in CONVERSION_DIMENSION_LABEL ? dimParam : "employee") as ConversionDimension;
   const role: AttributionField = (ATTRIBUTION_FIELDS.find((f) => f.field === roleParam)?.field ?? "sellerName") as AttributionField;
 
   const [funnel, coverage, bySource, staff] = await Promise.all([
@@ -44,7 +54,7 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
         eyebrow="Báo cáo"
         title="Phễu bán hàng & hiệu suất nhân sự"
         description="Từ đơn được tạo tới tiền thật đã bán được, và ai làm ra phần nào."
-        hint="Phễu tính theo NGÀY TẠO ĐƠN, không theo ngày xảy ra từng bước — nếu mỗi bước đếm theo ngày riêng thì bước sau có thể lớn hơn bước trước và cái hình vẽ ra không còn là cái phễu. Đơn còn đang chạy được đếm riêng, KHÔNG tính là thất bại. Hai bước 'đã liên hệ' và 'đủ điều kiện' không có trong ERP vì không có nguồn dữ liệu nào — xem docs/sales-funnel-contract.md."
+        hint="Phễu tính theo NGÀY TẠO ĐƠN, không theo ngày xảy ra từng bước — nếu mỗi bước đếm theo ngày riêng thì bước sau có thể lớn hơn bước trước và cái hình vẽ ra không còn là cái phễu. Đơn còn đang chạy được đếm riêng, KHÔNG tính là thất bại. Phần TRƯỚC ĐƠN (khách nhắn → được trả lời → cho SĐT → cho địa chỉ) nằm ở khối riêng ngay dưới, và cố ý KHÔNG nối vào phễu đơn vì mẫu số khác nhau về bản chất — xem docs/revenue-conversion-contract.md."
       />
 
       <DataTableToolbar period={{ defaultKey: "30d" }} />
@@ -94,6 +104,12 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
           </Table>
         </div>
       </SectionCard>
+
+      {/* ───────── PHỄU TRƯỚC ĐƠN (hội thoại) ───────── */}
+      <PreOrderFunnelSection period={params.period} />
+
+      {/* ───────── ĐƠN KẸT Ở BƯỚC NÀO, KẸT BAO LÂU ───────── */}
+      <StuckStepsSection period={params.period} />
 
       {/* ───────── THEO KÊNH ───────── */}
       <SectionCard
@@ -202,6 +218,15 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
           </p>
         ) : null}
       </SectionCard>
+
+      {/* ───────── CHUYỂN ĐỔI THEO CHIỀU ───────── */}
+      <ConversionByDimensionSection period={params.period} dimension={dimension} role={role} />
+
+      {/* ───────── RÒ RỈ DOANH THU ───────── */}
+      <LeakageSection />
+
+      {/* ───────── KIỂM ĐỊNH ĐIỂM RỦI RO ───────── */}
+      <RiskBacktestSection period={params.period} />
 
       {/* ───────── ĐỘ PHỦ GÁN NGƯỜI ───────── */}
       <SectionCard

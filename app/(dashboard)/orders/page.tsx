@@ -1,4 +1,5 @@
-import { Download } from "lucide-react";
+import Link from "next/link";
+import { Download, ShieldAlert } from "lucide-react";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
@@ -26,6 +27,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         title="Đơn hàng"
         actions={
           <>
+            {/*
+              LỐI VÀO DANH SÁCH SOÁT TRƯỚC KHI GỬI.
+
+              Đặt ở đây chứ không thêm một mục menu mới: nó là một GÓC NHÌN của chính danh sách đơn
+              (đơn còn trong kho, xếp theo khả năng hoàn), không phải một module riêng — cùng khuôn với
+              "Bổ sung danh sách vận đơn" trên trang Đối soát COD.
+            */}
+            <Button asChild variant="outline" size="sm">
+              <Link href="/orders/verify">
+                <ShieldAlert className="size-4" /> Cần xác minh trước khi giao
+              </Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/orders?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV

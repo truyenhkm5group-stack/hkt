@@ -10,9 +10,15 @@ import type { Period } from "@/lib/search-params";
  *
  * Đặc tả: docs/sales-funnel-contract.md — đọc trước khi sửa.
  *
- * NĂM bước, không phải bảy. "Đã liên hệ" và "Đủ điều kiện" KHÔNG có nguồn dữ liệu nào trong kho mã
- * này (ERP không đồng bộ hội thoại Pancake), nên chúng không tồn tại ở đây. Bịa ra bằng cách suy từ
- * đơn hàng là dựng số liệu.
+ * NĂM bước ở ĐÂY, và đó là phạm vi của chính hàm này: phễu từ lúc CÓ ĐƠN trở đi.
+ *
+ * Chú thích cũ ở đây viết "ERP không đồng bộ hội thoại Pancake" — câu đó SAI (job `cs-chat` vẫn đọc hội
+ * thoại 15 phút một lần, chỉ không lưu). Từ 12/09/2026 bằng chứng hội thoại được giữ ở bảng
+ * `conversation_funnel`, và phần phễu TRƯỚC ĐƠN nằm ở `lib/queries/conversation-funnel.ts`
+ * (đặc tả: `docs/revenue-conversion-contract.md`).
+ *
+ * Hàm này KHÔNG đổi: hai phễu cố ý đứng riêng vì mẫu số khác nhau về bản chất (hội thoại quét được ≠
+ * toàn bộ hội thoại). "Đủ điều kiện" thì vẫn không đo được và đã được khai ở `UNMEASURABLE_STAGES`.
  *
  * Phễu tính theo KỲ TẠO ĐƠN, không theo ngày xảy ra từng bước: nếu mỗi bước đếm theo ngày riêng thì
  * bước sau có thể lớn hơn bước trước — một phễu phình ra ở giữa, vô nghĩa.

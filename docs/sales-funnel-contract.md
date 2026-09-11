@@ -30,20 +30,35 @@ Bước 4 CỐ Ý dùng `ORDER_OUTCOME` chứ không dùng `shipments.stage = 'D
 
 ## Hai bước KHÔNG đo được, và vì sao
 
-### "Đã liên hệ" — không có nguồn
+### "Đã liên hệ" — ĐÃ CÓ NGUỒN từ 12/09/2026 (mục này từng SAI)
 
-ERP **không đồng bộ hội thoại Pancake**. `orders.conversation_id` chỉ tồn tại **sau khi đơn đã được
-tạo**, nên nó là hệ quả của việc lên đơn, không phải bằng chứng của việc liên hệ. Không có bảng nào
-chứa cuộc trò chuyện chưa thành đơn.
+> **SỬA LẠI.** Bản trước của tài liệu này viết *"ERP không đồng bộ hội thoại Pancake"* và kết luận bước
+> "đã liên hệ" là không đo được. **Câu đó sai.** Job `cs-chat` VẪN đọc hội thoại Pancake và tới 50 tin
+> nhắn mỗi hội thoại, 15 phút một lần — nó chỉ **không lưu lại**. Thậm chí nó đã tính sẵn lúc khách cho
+> SĐT và lúc khách cho địa chỉ rồi ném đi.
+>
+> Từ 12/09/2026 bằng chứng đó được giữ ở bảng `conversation_funnel` (migration `0065`), nên bước "đã
+> liên hệ" đo được — dưới tên đúng của nó: **"đã được trả lời"** (`first_shop_reply_at`, tin của shop gửi
+> SAU tin đầu của khách). Đặc tả: `docs/revenue-conversion-contract.md`.
 
-Hệ quả nghiêm trọng, phải nói thẳng: **ERP không đo được tỷ lệ chuyển đổi từ hội thoại sang đơn.**
-Mọi con số kiểu "chốt được 30% khách nhắn tin" mà ERP hiện ra sẽ là số bịa. Muốn có nó thì phải đồng
-bộ hội thoại từ Pancake trước — một việc riêng, chưa làm.
+`orders.conversation_id` vẫn chỉ tồn tại **sau khi đơn đã được tạo**, nên nó vẫn không phải bằng chứng
+của việc liên hệ — mốc phản hồi lấy từ chính tin nhắn, không từ đơn.
 
-### "Đủ điều kiện" — không có trạng thái tương ứng
+Điều kiện để công bố tỷ lệ chuyển hội thoại → đơn (xem `docs/revenue-conversion-contract.md` §3): kỳ phải
+nằm trong khoảng đã quét, mẫu ≥ 20 hội thoại, và phép ghép đơn phải chắc chắn. Ngoài ba điều kiện đó thì
+tỷ lệ vẫn là số bịa — cửa sổ quét 48 giờ và trần 200 hội thoại mỗi page làm mẫu vừa lệch vừa bị cắt.
+
+### "Đủ điều kiện" — VẪN không đo được, và đã được khai chính thức
 
 Pancake không có bước "qualified". `orders.stage` đi thẳng từ mới sang đã xác nhận. Không suy ra được
 từ bất cứ trường nào.
+
+Điều này **không đổi** sau khi có dữ liệu hội thoại: mọi căn cứ nghĩ ra được đều là (a) đổi tên chính
+mốc "đã có SĐT / địa chỉ" — nhân đôi một sự thật rồi gọi là hai bước, hoặc (b) tìm từ khoá trong câu
+chữ — đúng loại suy diễn đã dựng ra 181 case sai.
+
+Nên nó được **khai** ở `UNMEASURABLE_STAGES` (`lib/constants/conversion.ts`) kèm lý do và hiện thành một
+dòng "KHÔNG ĐO ĐƯỢC" trên màn hình; `tests/conversion-funnel.test.ts` khẳng định nó không bao giờ có số.
 
 ## Ai làm bước nào — độ phủ phải hiện ra
 

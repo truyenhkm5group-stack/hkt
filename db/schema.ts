@@ -2146,3 +2146,126 @@ export const careActions = pgTable(
   },
   (t) => [index("care_actions_shipment_idx").on(t.shipmentId, t.createdAt), index("care_actions_created_idx").on(t.createdAt)],
 );
+
+/**
+ * ═══════════ PHỄU HỘI THOẠI — GIỮ LẠI BẰNG CHỨNG ĐANG BỊ NÉM ĐI ═══════════
+ *
+ * Đặc tả: `docs/revenue-conversion-contract.md` · hằng số: `lib/constants/conversion.ts`.
+ *
+ * ─── VÌ SAO BẢNG NÀY CẦN TỒN TẠI ───
+ *
+ * `docs/sales-funnel-contract.md` kết luận hai bước đầu của phễu là KHÔNG ĐO ĐƯỢC vì "ERP không
+ * đồng bộ hội thoại Pancake". `lib/constants/operating-funnel.ts` nói ở khâu `LEAD`: *"Không có
+ * mốc phản hồi đầu tiên cho từng lead, nên tỷ lệ và thời gian phản hồi CHƯA đo được."*
+ *
+ * Nhưng job `cs-chat` vẫn gọi Pancake Pages API mỗi 15 phút, đọc hội thoại và tới 50 tin nhắn mỗi
+ * hội thoại, tính ra lúc khách cho SĐT và lúc khách cho địa chỉ — rồi **ném đi tất cả** trừ những
+ * ca sinh ra case CSKH.
+ *
+ * Hệ quả là MẪU SỐ BIẾN MẤT: `cs_cases` chỉ giữ ca đủ thông tin mà CHƯA có đơn (ca đã có đơn không
+ * sinh case). Không có mẫu số thì không có tỷ lệ chuyển đổi — chính `getOrderIntakeMetrics` phải tự
+ * cảnh báo rằng con số của nó "KHÔNG phải tỷ lệ chuyển của cả khâu". Đo trên chính lượt quét ngày
+ * 11/09/2026: 157 khách đủ thông tin, 136 đã có đơn, chỉ 21 ca thành case — nghĩa là 87% bằng chứng
+ * bị mất ngay tại chỗ.
+ *
+ * Bảng này KHÔNG thêm suy diễn nào. Nó chỉ ghi lại thứ job đã đọc được.
+ *
+ * ─── NULL LÀ CHƯA BIẾT ───
+ *
+ * Mọi mốc thời gian ở đây `NULL` nghĩa là **chưa quan sát được trong cửa sổ quét**, KHÔNG phải
+ * "không xảy ra". Hội thoại có thể đã có SĐT từ trước cửa sổ 48 giờ. Vì thế `scan_window_from` lưu
+ * mốc sớm nhất ta THẬT SỰ nhìn thấy — không có nó thì không phân biệt được "khách chưa cho số" với
+ * "ta chưa đọc tới đoạn khách cho số".
+ */
+export const conversationFunnel = pgTable(
+  "conversation_funnel",
+  {
+    id: id(),
+    /** Page Facebook của hội thoại. Khoá tự nhiên là (page_id, conversation_id). */
+    pageId: text("page_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    /** `customer_id` của Pancake trong hội thoại — cần để gọi lại API tin nhắn. */
+    pancakeCustomerId: text("pancake_customer_id").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    /** SĐT khách đã cho (chỉ chữ số). `NULL` = chưa thấy trong cửa sổ quét. */
+    phone: text("phone"),
+
+    /* ───── MỐC THỜI GIAN: NGUỒN DUY NHẤT CHO THỜI GIAN PHẢN HỒI ───── */
+    /** Tin ĐẦU TIÊN của khách mà ta nhìn thấy. Bước 1 của phễu. */
+    firstCustomerMessageAt: ts("first_customer_message_at"),
+    /**
+     * Tin ĐẦU TIÊN của shop SAU tin đầu của khách. Đây là thứ làm "thời gian phản hồi" đo được —
+     * mốc mà cả hai đặc tả phễu trước đây đều nói là không có.
+     */
+    firstShopReplyAt: ts("first_shop_reply_at"),
+    lastCustomerMessageAt: ts("last_customer_message_at"),
+    lastShopMessageAt: ts("last_shop_message_at"),
+    customerMessageCount: integer("customer_message_count").notNull().default(0),
+    shopMessageCount: integer("shop_message_count").notNull().default(0),
+
+    /*
+      ───── KHÔNG CÓ CỘT "Ý ĐỊNH MUA", VÀ ĐÓ LÀ MỘT QUYẾT ĐỊNH ─────
+
+      Kế hoạch ban đầu có một bước phễu "đủ điều kiện / có ý định mua". ERP KHÔNG có nguồn nào cho
+      nó. Mọi căn cứ nghĩ ra được đều là một trong hai thứ:
+
+       · chính SĐT hoặc địa chỉ khách đã cho — tức là ĐÚNG hai cột dưới đây, chỉ đổi tên. Đếm nó
+         thành một bước riêng là nhân đôi cùng một sự thật rồi gọi là hai bước;
+       · máy tìm từ khoá trong câu chữ — đúng loại suy diễn đã dựng ra 181 case sai
+         (xem `lib/cs/chat-detect.ts`).
+
+      Nên bước đó được khai là KHÔNG ĐO ĐƯỢC ở `UNMEASURABLE_STAGES`
+      (`lib/constants/conversion.ts`) và hiện thành một dòng "KHÔNG ĐO ĐƯỢC" có lý do trên màn hình.
+      Thứ ĐO ĐƯỢC và có ích hơn nằm ngay trên: `first_shop_reply_at` — khách đã được trả lời chưa.
+    */
+
+    /* ───── SĐT VÀ ĐỊA CHỈ ───── */
+    phoneAt: ts("phone_at"),
+    addressAt: ts("address_at"),
+    /** Nguyên văn đoạn khách gửi địa chỉ — người xử lý dán thẳng vào đơn, khỏi mở lại chat. */
+    addressText: text("address_text").notNull().default(""),
+    /** Lúc có ĐỦ cả SĐT và địa chỉ = mốc muộn hơn trong hai mốc trên. */
+    infoCompleteAt: ts("info_complete_at"),
+
+    /** Thẻ hội thoại Pancake — bằng chứng do NGƯỜI gắn, mạnh hơn máy suy từ câu chữ. */
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** Nhân viên đã trả lời hội thoại này (tên trên tin của page). '' = chưa ai trả lời. */
+    ownerName: text("owner_name").notNull().default(""),
+
+    /* ───── GHÉP SANG ĐƠN ───── */
+    matchedOrderId: text("matched_order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** `BY_CONVERSATION` · `BY_PHONE_UNIQUE` · `AMBIGUOUS` · `NONE` — ba mức của `matchOrderForConversation`. */
+    matchBasis: text("match_basis").notNull().default("NONE"),
+    /** Số đơn ứng viên khi ghép bằng SĐT. > 1 ⇒ nhập nhằng, KHÔNG kết luận. */
+    matchCandidates: integer("match_candidates").notNull().default(0),
+    /** Mốc lên đơn của đơn đã ghép — để đo "từ đủ thông tin tới có đơn" không phải join lại. */
+    matchedOrderAt: ts("matched_order_at"),
+    /**
+     * Lượt quét chạm TRẦN 200 hội thoại/page ⇒ page đó còn hội thoại chưa đọc. Không ghi cờ này thì
+     * một con số bị cắt trông y hệt một con số đầy đủ.
+     */
+    truncated: boolean("truncated").notNull().default(false),
+
+    /* ───── ĐỘ PHỦ: KHÔNG CÓ NÓ THÌ MỌI TỶ LỆ ĐỀU BỊA ───── */
+    /** Lần đầu ERP ghi được hội thoại này. */
+    firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+    lastScanAt: ts("last_scan_at").notNull().defaultNow(),
+    /**
+     * Mốc SỚM NHẤT ta thật sự đọc được tin trong hội thoại này. Tin cũ hơn mốc này chưa bao giờ
+     * được đọc, nên `NULL` ở các mốc trên có thể chỉ là chưa đọc tới — không phải chưa xảy ra.
+     */
+    scanWindowFrom: ts("scan_window_from"),
+    /** Nguyên văn đoạn làm căn cứ cho từng mốc: `{ intent, phone, address }`. Để người kiểm chứng được. */
+    evidence: jsonb("evidence"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("conversation_funnel_uq").on(t.pageId, t.conversationId),
+    index("conversation_funnel_first_msg_idx").on(t.firstCustomerMessageAt),
+    index("conversation_funnel_info_idx").on(t.infoCompleteAt),
+    index("conversation_funnel_order_idx").on(t.matchedOrderId),
+    index("conversation_funnel_unanswered_idx").on(t.firstShopReplyAt, t.lastCustomerMessageAt),
+    check("conversation_funnel_match_basis_check", sql`${t.matchBasis} IN ('BY_CONVERSATION','BY_PHONE_UNIQUE','AMBIGUOUS','NONE')`),
+  ],
+);
