@@ -8,6 +8,7 @@ import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -51,12 +52,29 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
   ).toString();
   const tyLeTra = tong.phaiThu.amount > 0 ? Math.round((tong.daTra.amount / tong.phaiThu.amount) * 1000) / 10 : null;
 
+  /**
+   * Mở đúng danh sách đã sinh ra con số trên thẻ, NGAY TRÊN TRANG NÀY.
+   * Ba thẻ vấn đề (quá hạn / trả thiếu / giao nhưng thu không đủ) trùng khớp từng-một với ba tình
+   * trạng của dải tab bên dưới. Trước đây chúng chỉ là số để đọc: người dùng phải tự nhìn xuống và
+   * bấm đúng cái tab tên na ná. Nay bấm thẳng con số thì danh sách đổi theo — giữ nguyên kỳ và từ
+   * khoá đang lọc, chỉ nhảy về trang 1.
+   */
+  const drill = (tt: string) => {
+    const q = new URLSearchParams();
+    for (const key of ["period", "from", "to", "q"] as const) {
+      const value = param(raw, key);
+      if (value) q.set(key, value);
+    }
+    q.set("tt", tt);
+    return `/cod?${q.toString()}`;
+  };
+
   return (
     <div className="space-y-5">
+      {/* Không nhắc lại "chưa trả / quá hạn" dưới tiêu đề: hai con số đó đã có thẻ riêng bên dưới. */}
       <PageHeader
         eyebrow="Tài chính"
         title="Đối soát COD"
-        description={`${formatVND(tong.conThieu, { compact: true })} Viettel Post chưa trả · ${formatNumber(tong.quaHan.count)} đơn quá hạn`}
         hint={
           <>
             So từng <b>đơn đã phát thành công</b> với các dòng bảng kê Viettel Post gửi qua email:
@@ -85,8 +103,16 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         <DataFreshnessStrip />
       </Suspense>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/*
+        BA CON SỐ DẪN DẮT, BỐN CON SỐ THEO DÕI — KHÔNG PHẢI BẢY THẺ BẰNG NHAU.
+        Câu hỏi của trang này là một dây chuyền: Viettel Post PHẢI TRẢ bao nhiêu → ĐÃ TRẢ bao nhiêu
+        → CÒN THIẾU bao nhiêu. Ba số đó là bậc một. Bốn số còn lại (quá hạn, trả thiếu, giao nhưng
+        thu không đủ, thực nhận) là để theo dõi và đi tiếp, nên gom vào một dải mảnh — và ba trong
+        số đó bấm được, mở thẳng danh sách tương ứng ở dải tab bên dưới.
+      */}
+      <section className="grid gap-4 lg:grid-cols-3">
         <MetricCard
+          size="lg"
           label="Viettel Post phải trả"
           value={formatVND(tong.phaiThu.amount, { compact: true })}
           note={`${formatNumber(tong.phaiThu.count)} đơn giao thành công${tong.uocTinh.count ? ` · ${formatVND(tong.uocTinh.amount, { compact: true })} còn tạm tính` : ""}`}
@@ -103,55 +129,65 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           tone="slate"
         />
         <MetricCard
+          size="lg"
           label="Đã trả theo bảng kê"
           value={formatVND(tong.daTra.amount, { compact: true })}
           note={`${formatNumber(tong.daTra.count)} đơn · ${tyLeTra === null ? "—" : `${tyLeTra}%`} số phải trả${tong.soNgayTraTB === null ? "" : ` · thường trả sau ${tong.soNgayTraTB} ngày`}`}
           hint="Cộng số tiền COD ghi cho từng vận đơn trên các bảng kê đã nhận. Đây là tiền có chứng từ, không phải suy đoán."
           icon={Banknote}
           tone="green"
+          href={drill("DA_TRA_DU")}
         />
         <MetricCard
+          size="lg"
           label="Chưa trả"
           value={formatVND(tong.conThieu, { compact: true })}
           note={`${formatNumber((dem.CHUA_TRA ?? 0) + (dem.QUA_HAN ?? 0))} đơn chưa thấy trên bảng kê nào`}
           hint="Phải trả trừ đi đã trả. Gồm cả đơn còn trong hạn lẫn đơn đã quá hạn."
           icon={Clock}
           tone={tong.conThieu ? "amber" : "slate"}
-        />
-        <MetricCard
-          label={`Quá hạn > ${tong.overdueDays} ngày`}
-          value={formatVND(tong.quaHan.amount, { compact: true })}
-          note={`${formatNumber(tong.quaHan.count)} đơn đã phát thành công mà chưa có đồng nào`}
-          hint={`Đơn phát thành công quá ${tong.overdueDays} ngày mà không dòng bảng kê nào nhắc tới. Đây là tiền cần đòi Viettel Post. Ngưỡng đo trên dữ liệu thật: bảng kê thường chốt trả trong vài ngày sau khi phát.`}
-          icon={AlertTriangle}
-          tone={tong.quaHan.count ? "rose" : "slate"}
-        />
-        <MetricCard
-          label="Trả thiếu so với khai báo"
-          value={formatVND(tong.traThieu.gap, { compact: true })}
-          note={`${formatNumber(tong.traThieu.count)} đơn bảng kê trả ít hơn tiền thu hộ`}
-          hint="Đơn VẪN là giao thành công mà bảng kê trả ít hơn tiền thu hộ khai báo — phần chênh này Viettel Post còn nợ. Đơn khách chỉ trả tiền ship không nằm ở đây: chúng là đơn hoàn, xem ở thẻ bên cạnh."
-          icon={Receipt}
-          tone={tong.traThieu.count ? "amber" : "slate"}
-        />
-        <MetricCard
-          label="Giao nhưng thu không đủ"
-          value={formatNumber(tong.giaoNhungHoan.count)}
-          note={`khai báo ${formatVND(tong.giaoNhungHoan.khaiBao, { compact: true })} · bảng kê chỉ trả ${formatVND(tong.giaoNhungHoan.thucThu, { compact: true })}`}
-          hint="Viettel Post báo phát thành công nhưng bảng kê chỉ trả một phần nhỏ — khách không nhận hàng, chỉ trả tiền ship để xem. Theo quy tắc của shop đây là ĐƠN HOÀN nên KHÔNG tính vào tiền Viettel Post phải trả; tách riêng ra đây để thấy hàng đã đi rồi quay về."
-          icon={Undo2}
-          tone={tong.giaoNhungHoan.count ? "amber" : "slate"}
-        />
-        <MetricCard
-          label="Thực nhận về tài khoản"
-          value={formatVND(tong.thucNhan, { compact: true })}
-          note={`đã trừ cước ${formatVND(tong.cuoc, { compact: true })}${tong.chuaGhep.count ? ` · ${formatVND(tong.chuaGhep.amount, { compact: true })} chưa truy nguyên` : ""}`}
-          hint="Số tiền còn lại phải thanh toán ghi ở phần KẾT LUẬN ĐỐI SOÁT của các bảng kê: tiền COD trừ cước. Đây là số khớp với tiền về tài khoản ngân hàng."
-          icon={Landmark}
-          tone="primary"
+          href={drill("CHUA_TRA")}
         />
       </section>
 
+      <StatStrip
+        items={[
+          {
+            label: `Quá hạn > ${tong.overdueDays} ngày`,
+            value: formatVND(tong.quaHan.amount, { compact: true }),
+            note: `${formatNumber(tong.quaHan.count)} đơn đã phát thành công mà chưa có đồng nào`,
+            hint: `Đơn phát thành công quá ${tong.overdueDays} ngày mà không dòng bảng kê nào nhắc tới. Đây là tiền cần đòi Viettel Post. Ngưỡng đo trên dữ liệu thật: bảng kê thường chốt trả trong vài ngày sau khi phát.`,
+            icon: AlertTriangle,
+            tone: tong.quaHan.count ? ("rose" as const) : ("muted" as const),
+            href: drill("QUA_HAN"),
+          },
+          {
+            label: "Trả thiếu so với khai báo",
+            value: formatVND(tong.traThieu.gap, { compact: true }),
+            note: `${formatNumber(tong.traThieu.count)} đơn bảng kê trả ít hơn tiền thu hộ`,
+            hint: "Đơn VẪN là giao thành công mà bảng kê trả ít hơn tiền thu hộ khai báo — phần chênh này Viettel Post còn nợ. Đơn khách chỉ trả tiền ship không nằm ở đây: chúng là đơn hoàn, xem ở ô bên cạnh.",
+            icon: Receipt,
+            tone: tong.traThieu.count ? ("amber" as const) : ("muted" as const),
+            href: drill("TRA_THIEU"),
+          },
+          {
+            label: "Giao nhưng thu không đủ",
+            value: formatNumber(tong.giaoNhungHoan.count),
+            note: `khai báo ${formatVND(tong.giaoNhungHoan.khaiBao, { compact: true })} · bảng kê chỉ trả ${formatVND(tong.giaoNhungHoan.thucThu, { compact: true })}`,
+            hint: "Viettel Post báo phát thành công nhưng bảng kê chỉ trả một phần nhỏ — khách không nhận hàng, chỉ trả tiền ship để xem. Theo quy tắc của shop đây là ĐƠN HOÀN nên KHÔNG tính vào tiền Viettel Post phải trả; tách riêng ra đây để thấy hàng đã đi rồi quay về.",
+            icon: Undo2,
+            tone: tong.giaoNhungHoan.count ? ("amber" as const) : ("muted" as const),
+            href: drill("GIAO_NHUNG_HOAN"),
+          },
+          {
+            label: "Thực nhận về tài khoản",
+            value: formatVND(tong.thucNhan, { compact: true }),
+            note: `đã trừ cước ${formatVND(tong.cuoc, { compact: true })}${tong.chuaGhep.count ? ` · ${formatVND(tong.chuaGhep.amount, { compact: true })} chưa truy nguyên` : ""}`,
+            hint: "Số tiền còn lại phải thanh toán ghi ở phần KẾT LUẬN ĐỐI SOÁT của các bảng kê: tiền COD trừ cước. Đây là số khớp với tiền về tài khoản ngân hàng.",
+            icon: Landmark,
+          },
+        ]}
+      />
       {thieuBangKe.length ? (
         <SectionCard
           title="Thiếu bảng kê — cần tải bổ sung từ Viettel Post"
