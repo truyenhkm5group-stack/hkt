@@ -174,6 +174,9 @@ export function testNavigationCoverage() {
     "/settings/profile": "vào từ menu người dùng ở góc dưới, không phải điều hướng chính",
     "/inventory/planning/orders": "danh sách con của Kế hoạch SX, vào từ chính trang đó",
     "/inventory/planning/orders/new": "hành động tạo mới, không phải một mục menu",
+    "/customers/retention": "vào từ nút 'Giữ chân khách' ngay trên trang Khách hàng, và từ ô lệnh ⌘K",
+    "/inventory/purchasing": "vào từ nút 'Mua hàng & xưởng' ngay trên trang Kế hoạch SX, và từ ô lệnh ⌘K",
+    "/import-vtp": "vào từ nút 'Bổ sung danh sách vận đơn' ngay trên trang Đối soát COD, và từ ô lệnh ⌘K",
   };
 
   const pages = walkPages("app/(dashboard)");

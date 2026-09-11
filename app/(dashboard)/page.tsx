@@ -8,15 +8,13 @@ import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { PageHeader } from "@/components/page-header";
-import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
+import { SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
-import { Money, SectionCard } from "@/components/ui-bits";
+import { SectionCard } from "@/components/ui-bits";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
-import { SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import { integrationStatus } from "@/lib/env";
-import { formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
+import { formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { requirePermission } from "@/lib/auth/session";
@@ -40,14 +38,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const margin = data.finance.netRevenue ? (data.finance.estimatedProfit / data.finance.netRevenue) * 100 : 0;
   const maxStage = Math.max(1, ...ORDER_STAGE_ORDER.map((s) => data.byStage[s]?.count ?? 0));
   const maxChannel = Math.max(1, ...data.channels.map((c) => c.revenue));
-
-  const codSteps = [
-    { key: "PENDING", label: "Chưa thu", tone: "bg-amber-400" },
-    { key: "COLLECTED", label: "Đã thu (chờ ĐVVC đối soát)", tone: "bg-sky-500" },
-    { key: "RECONCILED", label: "ĐVVC đã đối soát", tone: "bg-indigo-500" },
-    { key: "PAID_TO_BANK", label: "Đã về ngân hàng", tone: "bg-emerald-500" },
-    { key: "DISPUTED", label: "Có chênh lệch", tone: "bg-rose-500" },
-  ];
 
   return (
     <div className="space-y-6">
@@ -246,7 +236,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </SectionCard>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-2">
+      {/*
+        BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
+        của trang Đối soát COD) và "Đơn hàng mới nhất" (bản chép 8 cột của trang Đơn hàng). Cùng số
+        ở hai nơi là hai chỗ để lệch, và ba truy vấn nữa mỗi lần mở trang chủ. Mỗi khối chỉ còn ở
+        NHÀ của nó: vận đơn ở /shipments, COD ở /cod, đơn mới ở /orders.
+      */}
+      <section className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
         <SectionCard title="Luồng đơn hàng" description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)">
           <div className="space-y-2.5">
             {ORDER_STAGE_ORDER.filter((s) => s !== "DELETED" || (data.byStage[s]?.count ?? 0) > 0).map((stage) => {
@@ -289,33 +285,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
           )}
         </SectionCard>
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-2">
-        <SectionCard title="Vận đơn & COD" description="Toàn bộ vận đơn đang theo dõi (Pancake + Viettel Post)">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {SHIPMENT_STAGE_ORDER.filter((s) => s !== "UNKNOWN").map((stage) => (
-              <Link key={stage} href={`/shipments?stage=${stage}`} className="rounded-lg border bg-background p-2.5 hover:border-primary/50">
-                <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{SHIPMENT_STAGE_LABEL[stage]}</p>
-                <p className="numeric mt-1 text-lg font-bold">{formatNumber(data.shipmentsByStage[stage]?.count ?? 0)}</p>
-              </Link>
-            ))}
-          </div>
-          <div className="mt-5 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tiền thu hộ (COD)</p>
-            {codSteps.map((step) => {
-              const row = data.cod[step.key] ?? { count: 0, amount: 0 };
-              return (
-                <Link key={step.key} href={`/cod?cod=${step.key}`} className="flex items-center gap-3 rounded-lg px-1 py-1 text-sm hover:bg-muted/60">
-                  <span className={`size-2.5 rounded-full ${step.tone}`} />
-                  <span className="flex-1 text-xs font-medium">{step.label}</span>
-                  <span className="text-xs text-muted-foreground">{formatNumber(row.count)} vđ</span>
-                  <span className="numeric w-24 text-right text-xs font-semibold">{formatVND(row.amount, { compact: true })}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </SectionCard>
         <SectionCard title="Sản phẩm bán chạy" description="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
@@ -350,54 +319,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </SectionCard>
       </section>
 
-      <SectionCard title="Đơn hàng mới nhất" description="Cập nhật tức thì khi Pancake gửi webhook" actions={<Link href="/orders" className="text-xs font-semibold text-primary hover:underline">Xem tất cả</Link>} padded={false}>
-        <div className="overflow-x-auto">
-          <Table className="min-w-[860px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Mã đơn</TableHead>
-                <TableHead>Khách hàng</TableHead>
-                <TableHead>Sản phẩm</TableHead>
-                <TableHead>Kênh</TableHead>
-                <TableHead>Trạng thái</TableHead>
-                <TableHead>Vận chuyển</TableHead>
-                <TableHead className="text-right">Tổng tiền</TableHead>
-                <TableHead>Thời gian</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.recentOrders.length ? (
-                data.recentOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell>
-                      <Link href={`/orders/${order.id}`} className="font-bold hover:text-primary hover:underline">
-                        #{order.systemId ?? order.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">{order.billFullName || "—"}</div>
-                      <div className="text-xs text-muted-foreground">{order.billPhone}</div>
-                    </TableCell>
-                    <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground">
-                      {order.items.map((i) => `${i.productName}${i.variationDetail ? ` (${i.variationDetail})` : ""} ×${i.quantity}`).join(", ")}
-                      {order.itemsCount > 2 ? ` +${order.itemsCount - 2}` : ""}
-                    </TableCell>
-                    <TableCell><SourceBadge source={order.source} /></TableCell>
-                    <TableCell><OrderStageBadge stage={order.stage} /></TableCell>
-                    <TableCell>{order.shipment ? <span className="inline-flex items-center gap-1.5 text-xs"><Truck className="size-3.5 text-muted-foreground" /><ShipmentStageBadge stage={order.shipment.stage} /></span> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
-                    <TableCell className="text-right font-bold"><Money value={order.totalPriceAfterDiscount} /></TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(order.insertedAt)}</TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">Chưa có đơn hàng.</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </SectionCard>
     </div>
   );
 }

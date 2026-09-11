@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, lte, sql, sum } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio } from "@/lib/constants/profit";
 import { codCashSummary } from "@/lib/queries/cod";
@@ -7,7 +7,7 @@ import { stockRiskSummary } from "@/lib/queries/stock";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { getControlTower } from "@/lib/queries/control-tower";
-import type { OrderStage, ShipmentStage } from "@/db/schema";
+import type { OrderStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
 // Giữ bảng dẫn xuất của phiên hiệu năng, và lấy chi phí vận hành qua Profit Engine.
@@ -116,8 +116,6 @@ async function getDashboardDataUncached(period: Period) {
     stageRows,
     dailyRows,
     channelRows,
-    shipmentRows,
-    codRows,
     expenseRows,
     adsRows,
     failedDeliveryRows,
@@ -127,7 +125,6 @@ async function getDashboardDataUncached(period: Period) {
     codCash,
     financial,
     tower,
-    recentOrders,
     topProducts,
     lastSyncRows,
     orderTotalRows,
@@ -163,10 +160,6 @@ async function getDashboardDataUncached(period: Period) {
         .groupBy(scopeFacts.source)
         .orderBy(desc(sum(scopeFacts.revenue))),
     ),
-    // Vận đơn theo giai đoạn (toàn bộ đang hoạt động, không theo kỳ)
-    db.select({ stage: schema.shipments.stage, count: count(), cod: sum(schema.shipments.codAmount) }).from(schema.shipments).groupBy(schema.shipments.stage),
-    // COD
-    db.select({ status: schema.shipments.codStatus, count: count(), amount: sum(schema.shipments.codAmount) }).from(schema.shipments).where(ne(schema.shipments.codStatus, "NOT_APPLICABLE")).groupBy(schema.shipments.codStatus),
     // Chi phí vận hành trong kỳ: không gồm quảng cáo (đã lấy từ tài khoản QC) và nhập hàng (đã nằm trong giá vốn)
     // MỘT đường duy nhất qua Profit Engine: thẻ này và báo cáo lợi nhuận không được nói hai con số.
     getOperatingCost(period),
@@ -203,12 +196,6 @@ async function getDashboardDataUncached(period: Period) {
     // BA CON SỐ TIỀN và SỐ VI PHẠM NGHIÊM TRỌNG lấy từ đúng nơi định nghĩa chúng, không tính lại.
     getFinancialTruth(period),
     getControlTower(),
-    db.query.orders.findMany({
-      orderBy: [desc(schema.orders.insertedAt)],
-      limit: 8,
-      columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, stage: true, totalPriceAfterDiscount: true, insertedAt: true, itemsCount: true },
-      with: { shipment: { columns: { stage: true, carrier: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 2 } },
-    }),
     // TOP MẪU MÃ — xếp theo DOANH THU GIAO THÀNH CÔNG, không theo số lượng lên đơn.
     getProductIntelligence({ period, limit: 6 }),
     db.select().from(schema.syncRuns).where(isNotNull(schema.syncRuns.finishedAt)).orderBy(desc(schema.syncRuns.startedAt)).limit(3),
@@ -220,8 +207,6 @@ async function getDashboardDataUncached(period: Period) {
   const byStage = Object.fromEntries(stageRows.map((r) => [r.stage, { count: Number(r.count), revenue: Number(r.revenue ?? 0) }])) as Record<OrderStage, { count: number; revenue: number }>;
   const daily = dailyRows.map((r) => ({ day: r.day, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0), successRevenue: Number(r.successRevenue ?? 0) }));
   const channels = channelRows.map((r) => ({ source: r.source, orders: Number(r.orders), revenue: Number(r.revenue ?? 0), success: Number(r.success ?? 0) }));
-  const shipmentsByStage = Object.fromEntries(shipmentRows.map((r) => [r.stage, { count: Number(r.count), cod: Number(r.cod ?? 0) }])) as Record<ShipmentStage, { count: number; cod: number }>;
-  const cod = Object.fromEntries(codRows.map((r) => [r.status, { count: Number(r.count), amount: Number(r.amount ?? 0) }]));
   const expense = expenseRows;
   const [ads] = adsRows;
   const [failedDelivery] = failedDeliveryRows;
@@ -259,8 +244,6 @@ async function getDashboardDataUncached(period: Period) {
     byStage,
     daily,
     channels,
-    shipmentsByStage,
-    cod,
     realized: { amount: realized, count: codCash.codPaid.source === "statements" ? codCash.codPaid.batches.count : codCash.codPaid.count, source: codCash.codPaid.source, net: codCash.cashInCod },
     finance: { netRevenue, successCogs, shipping, returnFee, adSpend, expenses, estimatedProfit },
     attention: {
@@ -290,7 +273,6 @@ async function getDashboardDataUncached(period: Period) {
     },
     /** Vi phạm dữ liệu mức NGHIÊM TRỌNG — số liệu đang sai, không phải việc vận hành. */
     dataIssues: { critical: tower.totals.ERROR, firing: tower.firing, ruleCount: tower.ruleCount },
-    recentOrders,
     topProducts,
     lastSyncRows,
     orderTotal: Number(orderTotal?.count ?? 0),

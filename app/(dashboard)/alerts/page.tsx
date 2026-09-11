@@ -1,14 +1,10 @@
 import Link from "next/link";
-import { BellRing } from "lucide-react";
 import { AcknowledgeButton, AlertConfigForm, AssignSelect, IgnoreButton, MarkAllReadButton, ResolveButton, RunAlertsButton, StartButton, UnassignButton, UnignoreButton } from "@/app/(dashboard)/alerts/alerts-actions";
 import { PageHeader } from "@/components/page-header";
-import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { can, requirePermission } from "@/lib/auth/session";
-import { NOTIFICATION_KIND_LABEL, NOTIFICATION_KIND_ORDER, SEVERITY_TONE } from "@/lib/constants/alerts";
-import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
-import { countOpenNotifications, listOpenNotifications, openCountsByKind } from "@/lib/queries/notifications";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getActionQueue, queueThroughput } from "@/lib/queries/action-queue";
 import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
@@ -16,7 +12,6 @@ import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
 import { ideasWaitingReview } from "@/lib/queries/ideas";
 import { Lightbulb } from "lucide-react";
-import { UrlPagination } from "@/components/data-table/url-pagination";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Cần xử lý" };
@@ -24,7 +19,6 @@ export const metadata = { title: "Cần xử lý" };
 export default async function AlertsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requirePermission("alerts:view");
   const raw = await searchParams;
-  const kindFilter = typeof raw.kind === "string" ? raw.kind : "";
   const one = (k: string) => (typeof raw[k] === "string" ? (raw[k] as string) : "");
   // Bộ lọc lấy thẳng từ URL nên chia sẻ được: "việc trễ hạn trên 1 triệu chưa ai nhận" là một
   // đường dẫn gửi cho nhau được.
@@ -40,20 +34,17 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     sort: (one("sort") || "impact") as "impact" | "money" | "age",
   };
   /*
-    PHÂN TRANG DANH SÁCH CẢNH BÁO THÔ.
-    Đo được: trang này trả về 1.368 KB HTML vì nó dựng thẳng 300 cảnh báo cộng 100 dòng hàng đợi,
-    mỗi dòng kèm sáu nút thao tác. Trên 3G của nhân viên giao hàng thì đó là vài giây chỉ để tải
-    những dòng không ai cuộn xuống đọc. Nay 50 dòng mỗi trang, lọc theo loại chạy TRONG SQL nên
-    không còn chuyện cảnh báo cũ bị rơi khỏi 300 dòng mới nhất rồi biến mất khỏi bộ lọc.
+    MỘT HÀNG ĐỢI, KHÔNG PHẢI HAI DANH SÁCH TRÊN CÙNG MỘT BẢNG.
+
+    Trước đây trang này hiện "Hàng đợi việc" (xếp theo ưu tiên, có người nhận, có hạn) VÀ bên dưới
+    là "Đang mở" — cùng bảng `notifications`, cùng những dòng đó, chỉ khác bộ lọc — cộng sáu thẻ đếm
+    theo loại cảnh báo lọc danh sách dưới chứ không lọc hàng đợi trên. Người dùng không biết bấm
+    "Đã xử lý" ở danh sách nào, và trang trả về hơn 1 MB HTML. Nay chỉ còn hàng đợi: bộ lọc theo loại
+    việc / đội / người nhận / tiền / trễ hạn nằm ở góc phải.
   */
   const queuePage = Math.max(1, Number(one("qpage")) || 1);
   const queuePageSize = Math.min(200, Math.max(20, Number(one("qsize")) || 100));
-  const page = Math.max(1, Number(one("page")) || 1);
-  const pageSize = Math.min(200, Math.max(10, Number(one("pageSize")) || 50));
-  const [items, openTotal, counts, config, queue, staff, throughput] = await Promise.all([
-    listOpenNotifications(pageSize, { offset: (page - 1) * pageSize, kind: kindFilter || undefined }),
-    countOpenNotifications(kindFilter || undefined),
-    openCountsByKind(),
+  const [config, queue, staff, throughput] = await Promise.all([
     loadAlertConfig(),
     // Phân trang THẬT: nạp đúng một trang, đếm bằng CSDL. Trước đây nạp 300 rồi lấy số đó làm tổng.
     getActionQueue({ limit: queuePageSize, page: queuePage, filter }),
@@ -61,11 +52,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     // 30 ngày gần nhất: đủ dài để có mẫu, đủ ngắn để nói về cách làm việc hiện tại.
     queueThroughput(new Date(Date.now() - 30 * 86_400_000), new Date()),
   ]);
-  // Hàng đợi việc có bộ lọc riêng (theo LOẠI VIỆC); các thẻ đếm ở trên lọc danh sách cảnh báo thô
-  // bên dưới (theo LOẠI CẢNH BÁO). Hai thứ khác nhau, trước đây chồng lên nhau nên lọc một cái là
-  // cả hai cùng rỗng mà không rõ vì sao.
   const visibleCases = queue.cases;
-  const visible = items;
   const canConfig = can(user, "alerts:manage");
 
   return (
@@ -86,13 +73,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       <ApprovalSection />
       {/* Ý tưởng marketing chờ duyệt cũng là NGƯỜI đang chờ, và trước đây không có chỗ nào báo. */}
       <IdeasWaiting />
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        {NOTIFICATION_KIND_ORDER.filter((k) => k !== "SYSTEM").map((kind) => (
-          <Link key={kind} href={kindFilter === kind ? "/alerts" : `/alerts?kind=${kind}&page=1`} className={cn("block rounded-xl", kindFilter === kind && "ring-2 ring-primary/40")}>
-            <MetricCard label={NOTIFICATION_KIND_LABEL[kind]} value={formatNumber(counts[kind] ?? 0)} note={kindFilter === kind ? "Đang lọc · bấm để bỏ lọc" : "Bấm để lọc"} icon={BellRing} tone={(counts[kind] ?? 0) > 0 ? (kind === "SHIPMENT_RETURNING" ? "blue" : "amber") : "slate"} />
-          </Link>
-        ))}
-      </section>
 
       {/* ───────── HÀNG ĐỢI VIỆC: xếp theo mức ưu tiên tính được ───────── */}
       <SectionCard
@@ -208,43 +188,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             ))}
           </ul>
         )}
-      </SectionCard>
-
-      <SectionCard
-        title={`Đang mở (${formatNumber(openTotal)})`}
-        description={`Mỗi dòng là một đơn / vận đơn cần chăm sóc. Tự đóng khi trạng thái đã thay đổi; hoặc bấm “Đã xử lý”.${openTotal > pageSize ? ` Đang xem ${formatNumber((page - 1) * pageSize + 1)}–${formatNumber(Math.min(page * pageSize, openTotal))}.` : ""}`}
-        padded={false}
-      >
-        {visible.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-muted-foreground">Không có việc cần xử lý.</p>
-        ) : (
-          <ul className="divide-y">
-            {visible.map((n) => {
-              const read = n.readBy.includes(user.id);
-              return (
-                <li key={n.id} className={cn("flex flex-wrap items-start gap-3 px-5 py-3", !read && "bg-primary/5")}>
-                  <span className={cn("mt-0.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", SEVERITY_TONE[n.severity] ?? SEVERITY_TONE.info)}>{NOTIFICATION_KIND_LABEL[n.kind] ?? n.kind}</span>
-                  <div className="min-w-0 flex-1">
-                    <Link href={n.href || "#"} className={cn("block text-sm hover:text-primary hover:underline", !read && "font-semibold")}>
-                      {n.title}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">{n.body}</div>
-                    <div className="text-[10.5px] text-muted-foreground" title={`Cảnh báo lúc ${formatDateTime(n.createdAt)}${n.occurredAt ? ` · cập nhật gần nhất ${formatDateTime(n.occurredAt)}` : ""}`}>
-                      {formatTimeAgo(n.createdAt)}{n.occurredAt ? ` · cập nhật ${formatDateTime(n.occurredAt)}` : ""}
-                      {n.notifiedAt ? " · đã gửi Telegram" : ""}
-                    </div>
-                  </div>
-                  <ResolveButton id={n.id} />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {openTotal > pageSize ? (
-          <div className="border-t px-3 py-2">
-            <UrlPagination pageCount={Math.max(1, Math.ceil(openTotal / pageSize))} total={openTotal} />
-          </div>
-        ) : null}
       </SectionCard>
 
       {canConfig ? (

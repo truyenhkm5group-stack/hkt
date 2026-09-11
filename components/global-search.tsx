@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, ShoppingBag, Truck, Users, Shirt } from "lucide-react";
+import { allowedNavItems, type NavUserLike } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Kbd } from "@/components/kbd";
@@ -23,8 +24,16 @@ const LIST_HREF = { ORDER: "/orders", SHIPMENT: "/shipments", CUSTOMER: "/custom
  * bình thường vì khách mua nhiều lần và vận đơn chiều hoàn là dòng riêng — nó nói thẳng ra, để
  * không ai tưởng bản ghi đầu tiên là bản ghi duy nhất.
  */
-export function GlobalSearch() {
+export function GlobalSearch({ user }: { user: NavUserLike }) {
   const [open, setOpen] = useState(false);
+  /*
+    ĐI TỚI BẤT KỲ TRANG NÀO TỪ BÀN PHÍM.
+
+    Thanh bên có hơn ba mươi mục; ô lệnh trước đây chỉ có bốn lối tắt. Người dùng biết tên trang
+    ("kiểm đếm hàng hoàn", "đối soát") nhưng phải rê chuột tìm trong bốn nhóm. Nay gõ vài chữ của
+    tên trang là tới — danh sách lọc theo đúng quyền của người đang đăng nhập, cùng luật với thanh bên.
+  */
+  const pages = useMemo(() => allowedNavItems(user), [user]);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
   const [pending, startTransition] = useTransition();
@@ -114,19 +123,32 @@ export function GlobalSearch() {
             );
           })}
 
-          <CommandGroup heading={q ? `Mở danh sách đầy đủ` : "Đi tới"}>
-            <CommandItem value={`orders-list ${q}`} onSelect={() => go(q ? `/orders?q=${encodeURIComponent(q)}` : "/orders")}>
-              <ShoppingBag className="size-4" /> Đơn hàng
-            </CommandItem>
-            <CommandItem value={`shipments-list ${q}`} onSelect={() => go(q ? `/shipments?q=${encodeURIComponent(q)}` : "/shipments")}>
-              <Truck className="size-4" /> Vận đơn
-            </CommandItem>
-            <CommandItem value={`customers-list ${q}`} onSelect={() => go(q ? `/customers?q=${encodeURIComponent(q)}` : "/customers")}>
-              <Users className="size-4" /> Khách hàng
-            </CommandItem>
-            <CommandItem value={`products-list ${q}`} onSelect={() => go(q ? `/products?q=${encodeURIComponent(q)}` : "/products")}>
-              <Shirt className="size-4" /> Sản phẩm
-            </CommandItem>
+          {q ? (
+            <CommandGroup heading="Mở danh sách đầy đủ với từ khoá này">
+              <CommandItem value={`orders-list ${q}`} onSelect={() => go(`/orders?q=${encodeURIComponent(q)}`)}>
+                <ShoppingBag className="size-4" /> Đơn hàng
+              </CommandItem>
+              <CommandItem value={`shipments-list ${q}`} onSelect={() => go(`/shipments?q=${encodeURIComponent(q)}`)}>
+                <Truck className="size-4" /> Vận đơn
+              </CommandItem>
+              <CommandItem value={`customers-list ${q}`} onSelect={() => go(`/customers?q=${encodeURIComponent(q)}`)}>
+                <Users className="size-4" /> Khách hàng
+              </CommandItem>
+              <CommandItem value={`products-list ${q}`} onSelect={() => go(`/products?q=${encodeURIComponent(q)}`)}>
+                <Shirt className="size-4" /> Sản phẩm
+              </CommandItem>
+            </CommandGroup>
+          ) : null}
+
+          {/* Mọi trang được phép — gõ tên trang là tới, không cần rê chuột qua bốn nhóm menu. */}
+          <CommandGroup heading="Đi tới trang">
+            {pages.map((p) => (
+              <CommandItem key={p.href} value={`trang ${p.label} ${p.group} ${p.href}`} onSelect={() => go(p.href)}>
+                <p.icon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-sm">{p.label}</span>
+                <span className="text-[11px] text-muted-foreground">{p.group}</span>
+              </CommandItem>
+            ))}
           </CommandGroup>
 
           {pending ? (

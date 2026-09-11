@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CalendarRange, Repeat, TrendingDown, Users } from "lucide-react";
+import { CalendarRange, Repeat, Users } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
@@ -37,7 +37,7 @@ export default async function RetentionPage() {
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard
           label="Khách đã nhận hàng"
           value={formatNumber(r.buyers)}
@@ -52,13 +52,6 @@ export default async function RetentionPage() {
           hint="Tính trên đơn GIAO THÀNH CÔNG. Đây là con số dùng để quyết định có đáng chi tiền chăm sóc khách cũ hay không."
           icon={Repeat}
           tone="green"
-        />
-        <MetricCard
-          label="Cách đếm cũ thổi lên"
-          value={r.inflationPoints === null ? "—" : `+${r.inflationPoints} điểm`}
-          note={`Đếm theo đơn ĐÃ ĐẶT cho ra ${pctText(r.naiveRepeatRate)} — cao hơn vì tính cả khách đặt rồi hoàn`}
-          icon={TrendingDown}
-          tone={r.inflationPoints !== null && r.inflationPoints > 0 ? "amber" : "slate"}
         />
         <MetricCard
           label="Bao lâu thì quay lại"

@@ -21,7 +21,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <SidebarProvider defaultOpen={defaultOpen}>
             <AppSidebar user={user} />
             <SidebarInset className="min-w-0">
-              <SiteHeader />
+              <SiteHeader user={{ role: user.role, permissions: user.permissions }} />
               {/*
                 GIỮ SỐ CŨ TRONG LÚC CHỜ SỐ MỚI. Đổi kỳ / bộ lọc trên cùng một trang không xoá nội
                 dung: React giữ cây cũ trong suốt transition, còn lớp bọc này làm nó mờ đi và khoá

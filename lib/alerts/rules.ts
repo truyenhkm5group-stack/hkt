@@ -589,7 +589,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
           severity: days >= cfg.returnInspectionDays * 3 ? "critical" : "warning",
           title: `Hàng hoàn về ${days} ngày chưa tái nhập · ${r.code ?? r.tracking ?? r.shipmentId}`,
           body: `${r.id ? orderLabel(r) : "Vận đơn ngoài Pancake"} · ${Number(r.items ?? 0)} món đang không được đếm trong tồn — kiểm đếm thực tế rồi lập phiếu tái nhập.`,
-          href: "/data-quality?issue=return-not-received",
+          href: "/inventory/returns",
           entityType: "SHIPMENT",
           entityId: r.shipmentId,
           dedupeKey: `return-inspect:${r.shipmentId}`,
@@ -625,7 +625,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
             `${trieu(vonTonDong)} giá vốn đang KHÔNG được tính trong tồn, cũ nhất ${oldestDays} ngày` +
             `${quaHan ? `, ${quaHan} kiện đã quá hạn ${cfg.returnInspectionDays} ngày` : ""}. ` +
             `Xem toàn bộ đường ống hàng hoàn ở trang Kiểm đếm hàng hoàn, hoặc xác nhận hàng loạt trên trang Chất lượng dữ liệu.`,
-          href: "/data-quality?issue=return-not-received",
+          href: "/inventory/returns",
           entityType: "DATA_RULE",
           entityId: "return-not-received",
           // Khoá theo SỐ LƯỢNG: kho xử lý bớt thì việc cũ tự đóng và mở việc mới với con số đúng.

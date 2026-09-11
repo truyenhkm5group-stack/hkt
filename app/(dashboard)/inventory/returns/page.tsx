@@ -3,11 +3,14 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { InspectionStation } from "@/app/(dashboard)/inventory/returns/inspection-station";
 import { ReturnPipelineSection } from "@/app/(dashboard)/inventory/returns/pipeline-section";
+import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
+import { returnsAwaitingWarehouse } from "@/lib/queries/data-quality";
+import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
@@ -24,7 +27,7 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
 export default async function ReturnInspectionPage() {
   const user = await requirePermission("products:view");
   const canWrite = can(user, "inventory:write");
-  const [bang, pending] = await Promise.all([inspectionDashboard(), listPendingInspections(300)]);
+  const [bang, pending, choNhan, backlog] = await Promise.all([inspectionDashboard(), listPendingInspections(300), returnsAwaitingWarehouse(1, 50, ""), pendingReturnedForWarehouse()]);
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -91,14 +94,36 @@ export default async function ReturnInspectionPage() {
         </div>
       ) : null}
 
-      {bang.awaitingArrival ? (
-        <p className="text-sm text-muted-foreground">
-          Còn {formatNumber(bang.awaitingArrival)} kiện Viettel Post đã trả về shop mà chưa ai ghi nhận đã nhận —{" "}
-          <Link href="/data-quality?issue=return-not-received" className="font-medium text-primary hover:underline">
-            ghi nhận đã về kho
-          </Link>{" "}
-          trước rồi mới đếm được.
-        </p>
+      {/*
+        BƯỚC 1 NẰM NGAY TRÊN BƯỚC 2. Trước đây "kho đã nhận" ở trang Chất lượng dữ liệu, "đếm" ở đây:
+        một việc của kho phải qua hai trang và hai giao diện khác nhau. Nay cả hai bước ở một chỗ —
+        tick đã nhận rồi cuộn xuống đếm. Vẫn là hai thao tác tách bạch: nhận hàng không cộng tồn.
+      */}
+      {bang.awaitingArrival && choNhan.rows.length ? (
+        <SectionCard
+          title={`Chờ kho nhận · ${formatNumber(bang.awaitingArrival)} kiện`}
+          description="Viettel Post đã trả về shop, chưa ai bấm “đã nhận”. Xác nhận ở đây rồi kiện mới xuống hàng đợi đếm bên dưới — chưa cộng tồn."
+          actions={
+            choNhan.total > choNhan.rows.length ? (
+              <Link href="/data-quality?issue=return-not-received" className="text-xs font-semibold text-primary hover:underline">
+                Xem đủ {formatNumber(choNhan.total)} kiện
+              </Link>
+            ) : null
+          }
+        >
+          {canWrite ? (
+            <ReceiveReturns
+              bulk={{ count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }}
+              rows={choNhan.rows.map((r) => ({
+                id: r.id,
+                label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,
+                receivedAt: r.returnReceivedAt ? formatDateTime(r.returnReceivedAt) : null,
+              }))}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Bạn không có quyền cập nhật kho nên chỉ xem được số kiện.</p>
+          )}
+        </SectionCard>
       ) : null}
 
       <SectionCard

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, Landmark, Receipt, Undo2 } from "lucide-react";
+import { AlertTriangle, Banknote, CircleDollarSign, Clock, Download, FileUp, Landmark, Receipt, Undo2 } from "lucide-react";
 import { SettlementTabs } from "@/app/(dashboard)/cod/settlement-tabs";
 import { StatementUploadDialog } from "@/app/(dashboard)/cod/statement-upload";
 import { UrlPagination } from "@/components/data-table/url-pagination";
@@ -71,6 +71,9 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
               </a>
             </Button>
             <StatementUploadDialog />
+            <Button asChild variant="outline" size="sm">
+              <Link href="/import-vtp"><FileUp className="size-4" /> Bổ sung danh sách vận đơn</Link>
+            </Button>
             <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
           </>
         }

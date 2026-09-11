@@ -11,7 +11,6 @@ import {
   ClipboardCheck,
   Factory,
   FileSpreadsheet,
-  FileUp,
   Filter,
   Gauge,
   HandCoins,
@@ -23,7 +22,6 @@ import {
   Megaphone,
   PackageCheck,
   PackagePlus,
-  PackageSearch,
   PlugZap,
   ReceiptText,
   RotateCcw,
@@ -35,7 +33,6 @@ import {
   TrendingUp,
   Truck,
   Undo2,
-  UserCheck,
   UserCog,
   Users,
 } from "lucide-react";
@@ -74,7 +71,6 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/landing", label: "Đơn landing page", icon: FileSpreadsheet, permission: "landing:view" },
       { href: "/returns", label: "Đổi / trả hàng", icon: RotateCcw, permission: "returns:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
-      { href: "/customers/retention", label: "Giữ chân khách", icon: UserCheck, permission: "customers:view" },
       { href: "/ideas", label: "Ý tưởng marketing", icon: Lightbulb, permission: "ideas:view" },
     ],
   },
@@ -87,13 +83,11 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/inventory/receipts", label: "Nhập hàng & kiểm kê", icon: PackagePlus, permission: "products:view" },
       { href: "/inventory/returns", label: "Kiểm đếm hàng hoàn", icon: ClipboardCheck, permission: "products:view" },
       { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
-      { href: "/inventory/purchasing", label: "Mua hàng & xưởng", icon: PackageSearch, permission: "planning:view" },
     ],
   },
   {
     label: "Tài chính",
     items: [
-      { href: "/import-vtp", label: "Bổ sung danh sách vận đơn", icon: FileUp, permission: "cod:write" },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/bank", label: "Sổ ngân hàng", icon: Landmark, permission: "bank:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
@@ -116,6 +110,18 @@ const groups: { label: string; items: NavItem[] }[] = [
     ],
   },
 ];
+
+/** Người dùng tối thiểu để lọc menu theo quyền — dùng chung cho thanh bên và ô lệnh ⌘K. */
+export type NavUserLike = { role: Role; permissions: string[] };
+
+/** Mọi trang người này được vào, theo đúng luật lọc của thanh bên (ADMIN thấy hết). */
+export function allowedNavItems(user: NavUserLike): { href: string; label: string; group: string; icon: NavItem["icon"] }[] {
+  return groups.flatMap((g) =>
+    g.items
+      .filter((item) => user.role === "ADMIN" || (item.anyOf ? item.anyOf.some((p) => hasPermission(user.permissions, p)) : !item.permission || hasPermission(user.permissions, item.permission)))
+      .map((item) => ({ href: item.href, label: item.label, group: g.label, icon: item.icon })),
+  );
+}
 
 export function AppSidebar({ user }: { user: { name: string; email: string; role: Role; permissions: string[] } }) {
   const pathname = usePathname();
@@ -190,4 +196,16 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
   );
 }
 
-export const NAV_TITLES: Record<string, string> = { ...Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.href, i.label]))), "/settings/profile": "Tài khoản của tôi" };
+/*
+  BA TRANG KHÔNG CÒN MỤC MENU RIÊNG — mỗi trang đã có nút vào ngay trên trang cha của nó:
+  Giữ chân khách (từ Khách hàng), Mua hàng & xưởng (từ Kế hoạch SX), Bổ sung danh sách vận đơn (từ
+  Đối soát COD). 33 mục menu là quá nhiều để quét bằng mắt; mục nào có "nhà" thì về nhà. Vẫn tới được
+  từ ô lệnh ⌘K (nhóm "Đi tới trang" đọc từ đây) nên giữ tiêu đề cho breadcrumb.
+*/
+export const NAV_TITLES: Record<string, string> = {
+  ...Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.href, i.label]))),
+  "/settings/profile": "Tài khoản của tôi",
+  "/customers/retention": "Giữ chân khách",
+  "/inventory/purchasing": "Mua hàng & xưởng",
+  "/import-vtp": "Bổ sung danh sách vận đơn",
+};

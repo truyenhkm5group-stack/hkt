@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HeartHandshake, Repeat, RotateCcw, UserPlus, Users } from "lucide-react";
+import { HeartHandshake, RotateCcw, UserPlus, Users } from "lucide-react";
 import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -36,10 +36,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/*
+        KHÔNG CÒN THẺ "KHÁCH MUA LẠI" Ở ĐÂY. Nó đếm theo đơn ĐÃ ĐẶT (kể cả đơn hoàn) và tự ghi chú
+        rằng con số thật nằm ở trang Giữ chân khách — tức là một KPI biết mình sai mà vẫn đứng đó.
+        Một chỉ số, một định nghĩa (đơn giao thành công), một chỗ: trang Giữ chân khách.
+      */}
+      <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
         <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên Pancake ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Khách mua lại" value={formatNumber(summary.repeat)} note={`Từ 2 đơn trở lên · ${pct(summary.repeat, summary.withOrders).toFixed(1)}% khách đã mua`} hint="Đếm theo ĐƠN ĐÃ ĐẶT, kể cả đơn sau đó hoàn về. Con số tính trên đơn GIAO THÀNH CÔNG — dùng để quyết chi tiền chăm sóc — nằm ở trang Giữ chân khách và luôn thấp hơn." icon={Repeat} tone="primary" />
         <MetricCard label="Tỷ lệ hoàn" value={`${returnRate.toFixed(1)}%`} note={`${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone={returnRate >= 10 ? "rose" : "amber"} />
       </section>
 

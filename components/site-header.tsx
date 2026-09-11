@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_TITLES } from "@/components/app-sidebar";
+import { NAV_TITLES, type NavUserLike } from "@/components/app-sidebar";
 import { BrandWordmark } from "@/components/brand";
 import { RealtimeIndicator } from "@/components/realtime-provider";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
@@ -11,7 +11,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationBell } from "@/components/notification-bell";
 
-export function SiteHeader() {
+export function SiteHeader({ user }: { user: NavUserLike }) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
   const first = segments.length ? `/${segments[0]}` : "/";
@@ -52,7 +52,7 @@ export function SiteHeader() {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
-        <GlobalSearch />
+        <GlobalSearch user={user} />
         <NotificationBell />
         <RealtimeIndicator />
       </div>
