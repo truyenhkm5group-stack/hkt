@@ -55,8 +55,7 @@ export function BankImportTab({ canWrite }: { canWrite: boolean }) {
   return (
     <SectionCard
       title="Nhập sao kê ngân hàng"
-      description="Nhận file CSV hoặc JSON xuất từ ứng dụng quản lý giao dịch."
-      hint="Mọi giao dịch đều được ghi vào sổ — kể cả tiền vào và khoản không ảnh hưởng lãi lỗ — để sổ khớp với số dư ngân hàng."
+      description="Nhận file CSV hoặc JSON xuất từ ứng dụng quản lý giao dịch. Mọi giao dịch đều được ghi vào sổ — kể cả tiền vào và khoản không ảnh hưởng lãi lỗ — để sổ khớp với số dư ngân hàng."
     >
       <div className="space-y-4">
         <div className="rounded-lg border border-dashed p-4 text-sm">
