@@ -110,19 +110,26 @@ Kết luận parity: mọi con số tiền theo chứng từ giữ nguyên; các
 sinh trong 2 giờ giữa hai lần chụp, không có chênh lệch do đổi công thức. Không đụng `ORDER_OUTCOME`,
 COD/payment truth, recognized COGS, phân bổ chi phí, sổ ngân hàng, ShipmentAttempt 1:N, tồn kho.
 
-## 7. Trạng thái AI Copilot trên production
+## 7. AI Copilot trên production — CONFIGURED / HEALTHY (16:04 UTC, run ops #599)
 
-- Mã, migration, ngăn kéo, thẻ Kết nối dữ liệu: **đã lên**. `ai_interactions` đã tạo (0 dòng).
-- Khoá OpenAI chủ shop cấp: **chưa vào máy chủ**. Lý do: repo PUBLIC ⇒ không thể đi qua ô `arg`
-  của workflow (log công khai), không commit, không set-setting; phiên làm việc này không có
-  quyền tạo GitHub Secret và không gọi được api.openai.com (proxy chặn) nên chưa kiểm được khoá.
-- Đường làm: chủ shop tạo Secret `OPENAI_API_KEY` (Settings → Secrets and variables → Actions →
-  New repository secret) → chạy workflow *Vận hành ERP trên VPS* action `apply-ai-env`: ghi vào
-  `.env`, khởi động lại app + scheduler, rồi `check-integrations --ai` ping model thật và chạy một
-  câu hỏi thật qua vòng lặp copilot (in meta, không in câu trả lời). Từ đó mỗi lần deploy tự giữ khoá.
-- Cho tới lúc đó, ngăn kéo AI hiện "AI chưa được cấu hình. Chưa có OPENAI_API_KEY…", app không lỗi.
-- Model routing khi bật: routine gpt-5.6-luna · copilot gpt-5.6-terra · analysis gpt-5.6-sol
-  (`AI_MODEL` ghi đè bậc copilot; Anthropic dự phòng haiku-4-5 / opus-5 / opus-5).
+Chủ shop tạo Secret `OPENAI_API_KEY` và nạp credit; `apply-ai-env` (#596) ghi khoá vào `.env`
+(164 ký tự, không in), khởi động lại app + scheduler, health đúng commit. Lần ping đầu 15:50 trả
+429 "no credits remaining" (tài khoản chưa có credit); sau khi nạp, `ai-check --write` chạy thật
+trên dữ liệu production (script `scripts/ai-check.ts`, chỉ in meta):
+
+| Bài | Kết quả |
+|---|---|
+| Routing | routine → gpt-5.6-luna · copilot → gpt-5.6-terra · analysis → gpt-5.6-sol; **API trả về đúng model yêu cầu** cho cả ba bậc |
+| 1. Chat đơn giản | luna 1.753 ms · terra 1.087 ms · sol 1.333 ms; 19 token vào / 5 ra mỗi lượt |
+| 2. Read tool dữ liệu thật | `get_care_queue_summary` chạy OK, 2 vòng, 5,6 s, 1.200 token vào (5.972 token đệm prompt) / 58 ra |
+| 3. Case care | kiện thật (view care, IN_PROGRESS, lý do NO_CONTACT): `get_care_case` OK, 2 vòng, 8,5 s, trả lời 1.018 ký tự, 1 cảnh báo dữ liệu cũ ("tin ĐVVC cuối đã 31 giờ, tài khoản API không đọc được kiện"), 0 hành động ghi tự đề nghị |
+| 4. Write tool | AI đề nghị `add_care_note` ⇒ `NEEDS_CONFIRMATION`, 4,3 s; **chưa xác nhận ⇒ không ghi**; người khác xác nhận ⇒ từ chối; không có quyền ⇒ "Thiếu quyền shipments:view"; token lạ ⇒ từ chối; xác nhận đúng người ⇒ chạy: `care_case_events` mới `source=AI`, `action=NOTE`, actor = người xác nhận; `audit_logs` `AI_ACTIONS_CONFIRMED` = 1; xác nhận lại cùng token ⇒ không chạy lại. Hành động là một note có nhãn "Kiểm thử AI production…" trên kiện đó, không đổi trạng thái ĐVVC. |
+| 5. Lỗi | timeout mạng (giả) ⇒ `ERROR` "Request timed out." sau 1,4 s (SDK thử lại 2 lần), nhật ký vẫn ghi; 429 hết hạn mức (giả) ⇒ `ERROR` rõ lý do; model không tồn tại (API thật) ⇒ `ERROR` 404. App không sập. |
+| Audit | `ai_interactions` 1 → 7; mỗi lượt có status / model / độ trễ / số vòng; không chuỗi giống khoá trong nhật ký |
+
+Chi phí: gpt-5.6-* chưa có trong bảng giá ⇒ cột `cost_usd` ghi "chưa biết" (không phải 0) — cập nhật
+`PRICE_PER_MTOK` khi có giá niêm yết. Thẻ **AI Copilot** ở Kết nối dữ liệu hiện configured, nút thử
+kết nối gọi thật.
 
 ## 8. Còn lại
 
@@ -132,11 +139,12 @@ COD/payment truth, recognized COGS, phân bổ chi phí, sổ ngân hàng, Shipm
 - **P2** Giá gpt-5.6-* chưa có trong bảng ước tính chi phí ⇒ `costUsd` ghi là chưa biết.
 - **P2** Tool AI cho Orders/CSKH (write), Inventory, Profit hiện chỉ có tool ĐỌC; tool GHI ngoài care
   bị cấm ở MVP theo sàn rủi ro — mở là quyết định của chủ shop.
-- Chưa có Secret ⇒ chưa đo được độ trễ / chi phí model thật trên production.
+- Chi phí thật gpt-5.6 chưa đo được bằng tiền (chưa có bảng giá); token đã đo ở mục 7.
 
 ## 9. Việc chủ shop cần làm
 
-1. Tạo GitHub Secret `OPENAI_API_KEY` (giá trị khoá đã gửi riêng cho phiên này — không dán vào chat
-   công khai / ô arg / commit). Tuỳ chọn Variable `AI_PROVIDER=openai`.
-2. Chạy ops `apply-ai-env`, đọc kết quả `check-integrations --ai`, mở ERP → ✦ AI → "Tóm tắt kiện này".
-3. Quyết định: thêm swap 1 GB cho VPS; có mở tool ghi AI ngoài care không.
+1. ~~Secret `OPENAI_API_KEY` + credit~~ — đã xong, AI healthy.
+2. Quyết định: thêm swap 1 GB cho VPS; có mở tool ghi AI ngoài care không; đặt hạn mức chi tiêu
+   OpenAI theo tháng trên platform.openai.com (ERP chưa có công tơ chi phí cho gpt-5.6).
+3. Production hiện ở `3994696` (deploy #230 của phiên Opus: SePay realtime) — chưa qua cổng của
+   phiên này; xem báo cáo của phiên đó.
