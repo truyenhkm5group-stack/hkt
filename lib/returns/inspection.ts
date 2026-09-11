@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { ReturnCondition } from "@/lib/constants/returns-condition";
+import { returnProductContext, type ReturnProductContext } from "@/lib/returns/product-context";
 
 /**
  * ───────────── VÒNG ĐỜI KIỂM HÀNG HOÀN ─────────────
@@ -254,20 +255,37 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
     .orderBy(asc(ins.receivedAt))
     .limit(limit);
 
+  /*
+    VÁ CHO VẬN ĐƠN CHIỀU VỀ (mã gốc + 1P1).
+
+    Theo quy ước của kho mã, vận đơn chiều về là một dòng `shipments` RIÊNG với `order_id` NULL —
+    nên `return_inspections.order_id` chép lại cũng NULL, và mọi truy vấn con ở trên trả rỗng:
+    người đếm nhìn thấy đúng một mã vận đơn trần trụi, không biết trong kiện lẽ ra có gì.
+
+    Ghép lại bằng ĐỊNH DANH qua `product-context` (mã gốc → vận đơn chiều đi → đơn), CHỈ cho những
+    dòng đang trống, và gộp một lượt cho cả loạt chứ không mỗi dòng một truy vấn.
+  */
+  const thieuBoiCanh = rows.filter((r) => !r.orderId).map((r) => r.shipmentId);
+  const boSung = thieuBoiCanh.length ? await returnProductContext(thieuBoiCanh) : new Map<string, ReturnProductContext>();
+
   const now = Date.now();
-  return rows.map((r) => ({
-    shipmentId: r.shipmentId,
-    code: r.code ?? r.tracking ?? null,
-    orderId: r.orderId,
-    orderCode: r.orderCode ?? null,
-    customerName: r.customerName ?? "",
-    customerPhone: r.customerPhone ?? "",
-    receivedAt: r.receivedAt,
-    receivedBy: r.receivedBy,
-    expectedQty: Number(r.expectedQty ?? 0),
-    ageDays: Math.floor((now - new Date(r.receivedAt).getTime()) / 86_400_000),
-    items: parseItems(r.items),
-  }));
+  return rows.map((r) => {
+    const them = r.orderId ? undefined : boSung.get(r.shipmentId);
+    const goc = parseItems(r.items);
+    return {
+      shipmentId: r.shipmentId,
+      code: r.code ?? r.tracking ?? null,
+      orderId: r.orderId ?? them?.orderId ?? null,
+      orderCode: r.orderCode ?? them?.orderCode ?? null,
+      customerName: r.customerName ?? "",
+      customerPhone: r.customerPhone ?? "",
+      receivedAt: r.receivedAt,
+      receivedBy: r.receivedBy,
+      expectedQty: Number(r.expectedQty ?? 0) || (them?.expectedQty ?? 0),
+      ageDays: Math.floor((now - new Date(r.receivedAt).getTime()) / 86_400_000),
+      items: goc.length ? goc : (them?.items ?? []).map((i) => ({ sku: i.sku, name: i.name, color: i.color, size: i.size, quantity: i.quantity })),
+    };
+  });
 }
 
 /**
