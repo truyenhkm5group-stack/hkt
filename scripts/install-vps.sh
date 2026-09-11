@@ -60,6 +60,10 @@ if [ -f .env ]; then
   [ -n "${OPENAI_API_KEY:-}" ] && upsert_env OPENAI_API_KEY "${OPENAI_API_KEY}"
   [ -n "${ANTHROPIC_API_KEY:-}" ] && upsert_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY}"
   [ -n "${AI_PROVIDER:-}" ] && upsert_env AI_PROVIDER "${AI_PROVIDER}"
+  # Webhook SePay: cũng CHỈ ghi khi Secret có giá trị. Secret chưa đặt mà ghi đè rỗng là làm
+  # chết đường realtime đang chạy — mọi gói tin sau đó bị từ chối 401 mà không ai hiểu vì sao.
+  [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && upsert_env SEPAY_WEBHOOK_SECRET "${SEPAY_WEBHOOK_SECRET}"
+  [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && upsert_env SEPAY_WEBHOOK_API_KEY "${SEPAY_WEBHOOK_API_KEY}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
@@ -102,6 +106,11 @@ VIETTELPOST_USERNAME="${VIETTELPOST_USERNAME:-}"
 VIETTELPOST_PASSWORD="${VIETTELPOST_PASSWORD:-}"
 VIETTELPOST_BASE_URL="https://partner.viettelpost.vn/v2"
 VIETTELPOST_WEBHOOK_SECRET="vtp_$(rand 16)"
+
+# Webhook SePay — biến động số dư ngân hàng realtime. Secret do SePay sinh khi tạo webhook
+# (my.sepay.vn → Webhooks → Bảo mật: HMAC-SHA256), KHÔNG phải ERP sinh. Rỗng = chưa cấu hình.
+SEPAY_WEBHOOK_SECRET="${SEPAY_WEBHOOK_SECRET:-}"
+SEPAY_WEBHOOK_API_KEY="${SEPAY_WEBHOOK_API_KEY:-}"
 
 FACEBOOK_ACCESS_TOKEN="${FACEBOOK_ACCESS_TOKEN:-}"
 FACEBOOK_BUSINESS_ID="${FACEBOOK_BUSINESS_ID:-336423739082347}"
