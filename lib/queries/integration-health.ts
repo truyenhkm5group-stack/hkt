@@ -2,6 +2,8 @@ import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { integrationStatus } from "@/lib/env";
+import { STATEMENT_MAIL_SILENCE_HOURS, readStatementMailHeartbeat } from "@/lib/integrations/viettelpost/statement-mail";
 
 /**
  * ───────────── SỨC KHOẺ TÍCH HỢP ─────────────
@@ -85,6 +87,13 @@ export type ConnectorHealth = {
    * (chủ shop chốt 11/09/2026). Chỉ `apiTrackable` mới phải đối chiếu được qua API.
    */
   capability?: { apiTrackable: number; webhookOnly: number; unknown: number };
+  /**
+   * NHỊP TIM CỦA BÊN GỬI — chỉ có ở kết nối mà bên gửi chủ động im khi không có gì để gửi.
+   *
+   * Script Gmail chỉ gọi sang ERP khi hộp thư có bảng kê mới. Không có nhịp tim thì "chưa có bảng
+   * kê" và "script đã chết" trông giống hệt nhau, và thẻ này sẽ xanh trong cả hai trường hợp.
+   */
+  heartbeat?: { label: string; at: Date | null; stale: boolean; note: string };
   /** Trạng thái / mã ERP chưa có trong bảng ánh xạ. */
   unknownMappings: number;
   /**
@@ -122,6 +131,17 @@ async function webhookStats(source: string) {
     .from(schema.webhookEvents)
     .where(eq(schema.webhookEvents.source, source));
   return row;
+}
+
+/** Lần chạy gần nhất của MỘT job cụ thể — `sync_runs` của một nguồn có thể có nhiều job khác nhau. */
+async function lastRunOfJob(source: string, job: string) {
+  const db = await getDb();
+  const row = await db.query.syncRuns.findFirst({
+    where: and(eq(schema.syncRuns.source, source), eq(schema.syncRuns.job, job), isNotNull(schema.syncRuns.finishedAt)),
+    orderBy: [desc(schema.syncRuns.finishedAt)],
+    columns: { status: true, detail: true, error: true, finishedAt: true },
+  });
+  return row ?? null;
 }
 
 async function lastRun(source: string) {
@@ -194,14 +214,42 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
     })
     .from(schema.adSpends);
 
-  // Bảng kê / sổ ngân hàng: "sự kiện" là tệp bảng kê đã nhận.
-  const [bankRow] = await db
+  /*
+    ───────── SỔ NGÂN HÀNG / BẢNG KÊ: HAI NỬA, MỖI NỬA PHẢI TỰ NÓI ĐƯỢC ─────────
+
+    Kết nối này có hai đường vào khác hẳn nhau và hỏng theo hai kiểu khác nhau: bảng kê COD của
+    Viettel Post về qua Gmail, và biến động số dư SePay đẩy thẳng vào sổ ngân hàng. Trước đây thẻ
+    này chỉ đếm tệp bảng kê — SePay chết thì thẻ vẫn xanh, đúng cái bẫy đã phải học ở Viettel Post.
+
+    Mốc của bảng kê lấy theo lần ERP THỰC SỰ ĐỌC tệp chứ không phải lần đầu thấy tên tệp: khoá tự
+    nhiên của `vtp_statement_files` là TÊN TỆP, nên gửi lại đúng tệp cũ chỉ cập nhật nội dung còn
+    `received_at` đứng im — đường dẫn vẫn chảy mà bảng báo "không nhận được gì".
+  */
+  const mocBangKe = sql`greatest(${schema.vtpStatementFiles.receivedAt}, coalesce(${schema.vtpStatementFiles.lastImportedAt}, ${schema.vtpStatementFiles.receivedAt}))`;
+  const [bangKeRow] = await db
     .select({
-      lastAt: sql<Date | null>`max(${schema.vtpStatementFiles.receivedAt})`,
-      events24h: sql<number>`count(*) filter (where ${schema.vtpStatementFiles.receivedAt} >= ${since24})`,
+      lastAt: sql<Date | null>`max(${mocBangKe})`,
+      events24h: sql<number>`count(*) filter (where ${mocBangKe} >= ${since24})`,
       total: sql<number>`count(*)`,
     })
     .from(schema.vtpStatementFiles);
+
+  // Sổ ngân hàng: chỉ đếm dòng do MÁY đưa vào (webhook SePay / API đối chiếu). Dòng nhập tay hoặc
+  // nhập từ tệp sao kê là công của người, không nói lên kết nối còn sống hay không.
+  const mayGhi = sql`${schema.bankTransactions.source} in ('WEBHOOK', 'API')`;
+  const [soNganHangRow] = await db
+    .select({
+      lastAt: sql<Date | null>`max(${schema.bankTransactions.createdAt}) filter (where ${mayGhi})`,
+      events24h: sql<number>`count(*) filter (where ${mayGhi} and ${schema.bankTransactions.createdAt} >= ${since24})`,
+      total: sql<number>`count(*)`,
+    })
+    .from(schema.bankTransactions);
+
+  const [statementMailRun, sepayRun, heartbeat] = await Promise.all([
+    lastRunOfJob("VIETTELPOST", "vtp-statement-mail"),
+    lastRun("SEPAY"),
+    readStatementMailHeartbeat(),
+  ]);
 
   const build = (
     key: ConnectorKey,
@@ -293,6 +341,85 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
       ? `${vtpHealth.reason} ${capability.webhookOnly} vận đơn đang chạy chỉ nhận webhook (ngoài phạm vi tài khoản API) — khoẻ theo năng lực của chúng; ${capability.apiTrackable} vận đơn đối chiếu qua API.`
       : vtpHealth.reason;
 
+  const bank = (() => {
+    const status = integrationStatus();
+    const sepayConfigured = status.sepayWebhook || status.sepayApi;
+    const bangKeAt = asDate(bangKeRow?.lastAt);
+    const soAt = asDate(soNganHangRow?.lastAt);
+    const mocs = [bangKeAt, soAt].filter((d): d is Date => Boolean(d));
+    const lastEventAt = mocs.length ? new Date(Math.max(...mocs.map((d) => d.getTime()))) : null;
+
+    /*
+      Lần chạy để hiển thị: ƯU TIÊN NÊU CÁI HỎNG. Một lượt đối chiếu SePay thất bại không được biến
+      mất chỉ vì đường bảng kê tình cờ chạy xong sau đó — hai đường độc lập, hỏng ở đâu phải thấy ở
+      đó. Trước đây ô này luôn là `null` nên thẻ ghi "Chưa chạy lần nào" kể cả khi Gmail vừa đẩy
+      bảng kê sang vài phút trước.
+    */
+    const runs = [
+      statementMailRun ? { ...statementMailRun, label: "bảng kê qua Gmail" } : null,
+      sepayRun ? { ...sepayRun, label: "đối chiếu SePay" } : null,
+    ].filter((r): r is NonNullable<typeof r> => Boolean(r));
+    const hong = runs.find((r) => r.status === "FAILED");
+    const moiNhat = [...runs].sort((a, b) => (b.finishedAt?.getTime() ?? 0) - (a.finishedAt?.getTime() ?? 0))[0];
+    const run = hong ?? moiNhat ?? null;
+
+    const base = build(
+      "BANK",
+      {
+        lastEventAt,
+        lastProcessedAt: lastEventAt,
+        events24h: Number(bangKeRow?.events24h ?? 0) + Number(soNganHangRow?.events24h ?? 0),
+        failed: 0,
+        unprocessed: 0,
+        retries: 0,
+        unknownMappings: 0,
+      },
+      run ? { status: run.status, detail: `${run.label}${run.detail || run.error ? ` · ${run.detail || run.error}` : ""}`, error: run.error, finishedAt: run.finishedAt } : null,
+      Number(bangKeRow?.total ?? 0) > 0 || Number(soNganHangRow?.total ?? 0) > 0 || sepayConfigured,
+      { can: true, hint: "Nhập lại an toàn: dòng bảng kê chống trùng theo kỳ chốt + mã vận đơn, giao dịch ngân hàng chống trùng theo mã giao dịch của ngân hàng." },
+    );
+
+    const beatAt = heartbeat ? new Date(heartbeat.at) : null;
+    const beatStale = beatAt ? Date.now() - beatAt.getTime() > STATEMENT_MAIL_SILENCE_HOURS * 3600_000 : false;
+    const beatNote = !beatAt
+      ? "Script Gmail chưa từng báo sống — cập nhật lại đoạn script theo docs/GMAIL-BANG-KE-VTP.md thì ERP mới phân biệt được “Viettel Post chưa gửi bảng kê” với “script đã tắt”."
+      : beatStale
+        ? `Lẽ ra 15 phút một lượt: quá ${STATEMENT_MAIL_SILENCE_HOURS} giờ không thấy nghĩa là trình kích hoạt bên Gmail đã tắt hoặc tham số bí mật đã đổi.`
+        : `Còn chạy — lượt gần nhất ${heartbeat?.files ? `mang ${heartbeat.files} tệp` : "không có thư mới"}.`;
+
+    const gio = (d: Date | null) => (d ? Math.max(0, Math.floor((Date.now() - d.getTime()) / 3600_000)) : null);
+    const chiTiet = [
+      bangKeAt ? `Bảng kê Viettel Post gần nhất cách đây ${gio(bangKeAt)} giờ.` : "Chưa nhận bảng kê Viettel Post nào.",
+      sepayConfigured ? (soAt ? `Giao dịch SePay đẩy về gần nhất cách đây ${gio(soAt)} giờ.` : "Chưa có giao dịch nào do SePay đẩy về.") : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    /*
+      Script im lặng là SỰ KIỆN CÓ THẬT, không phải suy đoán: nó chạy 15 phút một lượt nên quá
+      ngưỡng là đã lỡ hàng chục lượt. Nhưng CHƯA TỪNG báo sống thì là CHƯA BIẾT — không được hạ mức
+      chỉ vì chủ shop chưa kịp cập nhật đoạn script.
+    */
+    const state = base.state === "HEALTHY" && beatStale ? ("DEGRADED" as const) : base.state;
+    const reason = [
+      state === "DEGRADED" && beatStale ? "Dữ liệu cũ vẫn còn nhưng script Gmail lấy bảng kê đã ngừng liên lạc." : base.reason,
+      chiTiet,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return {
+      ...base,
+      state,
+      reason,
+      senders: [
+        { label: "Bảng kê VTP qua Gmail", lastAt: bangKeAt, events24h: Number(bangKeRow?.events24h ?? 0) },
+        ...(sepayConfigured ? [{ label: "SePay đẩy vào sổ", lastAt: soAt, events24h: Number(soNganHangRow?.events24h ?? 0) }] : []),
+      ],
+      heartbeat: { label: "Script Gmail lấy bảng kê", at: beatAt, stale: beatStale, note: beatNote },
+    };
+  })();
+
   return [
     { ...vtpHealth, reason: vtpReason, senders, capability },
     build(
@@ -325,21 +452,7 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
       Number(fbRow?.total ?? 0) > 0 || Boolean(fbRun),
       { can: true, hint: "Kéo lại an toàn: chi tiêu upsert theo khoá đồng bộ (tài khoản + chiến dịch + ngày)." },
     ),
-    build(
-      "BANK",
-      {
-        lastEventAt: asDate(bankRow?.lastAt),
-        lastProcessedAt: asDate(bankRow?.lastAt),
-        events24h: Number(bankRow?.events24h ?? 0),
-        failed: 0,
-        unprocessed: 0,
-        retries: 0,
-        unknownMappings: 0,
-      },
-      null,
-      Number(bankRow?.total ?? 0) > 0,
-      { can: true, hint: "Nhập lại an toàn: dòng bảng kê chống trùng theo kỳ chốt + mã vận đơn." },
-    ),
+    bank,
   ];
 }
 

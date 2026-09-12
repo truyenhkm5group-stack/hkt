@@ -274,6 +274,16 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
                   <TableCell className="whitespace-nowrap text-xs">
                     {c.lastEventAt ? formatTimeAgo(c.lastEventAt) : "—"}
                     {c.lagHours === null ? null : <span className="block text-[11px] text-muted-foreground">trễ {c.lagHours}h</span>}
+                    {/*
+                      NHỊP TIM của bên gửi. Script Gmail chỉ gọi sang khi có bảng kê mới, nên nếu
+                      không có dòng này thì "Viettel Post chưa gửi gì" và "script đã tắt" trông y
+                      hệt nhau — và thẻ vẫn xanh trong cả hai trường hợp.
+                    */}
+                    {c.heartbeat ? (
+                      <span className={cn("block text-[11px]", c.heartbeat.stale ? "text-warning" : "text-muted-foreground")} title={c.heartbeat.note}>
+                        {c.heartbeat.label}: {c.heartbeat.at ? formatTimeAgo(c.heartbeat.at) : "chưa từng báo sống"}
+                      </span>
+                    ) : null}
                   </TableCell>
                   <TableCell className="numeric text-right text-xs">
                     {c.eventsPerHour}
