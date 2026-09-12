@@ -90,6 +90,7 @@ import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
+import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1380,6 +1381,9 @@ async function main() {
   // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
   await testReturnPipeline(db);
   await testDeliveryTower(db);
+  // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
+  // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
+  await testFulfillmentBottleneck(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

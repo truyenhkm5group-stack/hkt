@@ -1,4 +1,4 @@
-import { BellRing, Gauge } from "lucide-react";
+import { BellRing, Gauge, PackageSearch } from "lucide-react";
 import { NavLink } from "@/components/nav-progress";
 import { cn } from "@/lib/utils";
 
@@ -6,9 +6,14 @@ import { cn } from "@/lib/utils";
  * Cần xử lý và Điều hành theo khâu là HAI GÓC NHÌN của cùng một hàng đợi việc (cùng luật phát hiện,
  * cùng dữ liệu). Trước đây là hai mục menu đứng cách nhau; nay là hai tab đứng cạnh nhau ngay trên
  * trang, còn thanh bên chỉ giữ một lối vào.
+ *
+ * Tab thứ ba, "Nút thắt trước khi rời kho", KHÁC hai tab kia: nó không đọc từ hàng đợi
+ * `notifications` chung mà tính trực tiếp từ `orders`/`shipments`/`shipment_events` cho đúng một
+ * đoạn hẹp (đã chốt → rời kho) — xem lib/queries/fulfillment-bottleneck.ts. Vẫn đặt chung dải tab vì
+ * cùng trả lời câu "việc gì đang kẹt", chỉ khác độ phân giải.
  */
-export function QueueViewTabs({ active }: { active: "queue" | "stages" }) {
-  const tab = (key: "queue" | "stages", href: string, label: string, Icon: typeof BellRing) => (
+export function QueueViewTabs({ active }: { active: "queue" | "stages" | "fulfillment" }) {
+  const tab = (key: "queue" | "stages" | "fulfillment", href: string, label: string, Icon: typeof BellRing) => (
     <NavLink
       href={href}
       className={cn(
@@ -23,6 +28,7 @@ export function QueueViewTabs({ active }: { active: "queue" | "stages" }) {
     <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
       {tab("queue", "/alerts", "Hàng đợi việc", BellRing)}
       {tab("stages", "/operations", "Theo khâu vận hành", Gauge)}
+      {tab("fulfillment", "/operations/fulfillment", "Nút thắt trước khi rời kho", PackageSearch)}
     </div>
   );
 }

@@ -256,11 +256,11 @@ export function AppSidebar({ user }: { user: { name: string; email: string; role
 }
 
 /*
-  SÁU TRANG KHÔNG CÒN MỤC MENU RIÊNG — mỗi trang đã có lối vào ngay trên trang cha của nó:
+  BẢY TRANG KHÔNG CÒN MỤC MENU RIÊNG — mỗi trang đã có lối vào ngay trên trang cha của nó:
   Giữ chân khách (từ Khách hàng), Mua hàng & xưởng (từ Kế hoạch SX), Bổ sung danh sách vận đơn (từ
-  Đối soát COD), Điều hành theo khâu (tab của Cần xử lý), Phễu bán hàng và Mô phỏng kịch bản (từ Báo
-  cáo lợi nhuận). Mục nào có "nhà" thì về nhà. Vẫn tới được từ ô lệnh ⌘K (nhóm "Đi tới trang" đọc
-  từ đây) nên giữ tiêu đề cho breadcrumb.
+  Đối soát COD), Điều hành theo khâu và Nút thắt trước khi rời kho (hai tab của Cần xử lý), Phễu bán
+  hàng và Mô phỏng kịch bản (từ Báo cáo lợi nhuận). Mục nào có "nhà" thì về nhà. Vẫn tới được từ ô
+  lệnh ⌘K (nhóm "Đi tới trang" đọc từ đây) nên giữ tiêu đề cho breadcrumb.
 */
 export const NAV_TITLES: Record<string, string> = {
   ...Object.fromEntries(groups.flatMap((g) => g.items.map((i) => [i.href, i.label]))),
@@ -269,6 +269,7 @@ export const NAV_TITLES: Record<string, string> = {
   "/inventory/purchasing": "Mua hàng & xưởng",
   "/import-vtp": "Bổ sung danh sách vận đơn",
   "/operations": "Điều hành theo khâu",
+  "/operations/fulfillment": "Nút thắt trước khi rời kho",
   "/reports/funnel": "Phễu bán hàng",
   "/reports/scenario": "Mô phỏng kịch bản",
 };
