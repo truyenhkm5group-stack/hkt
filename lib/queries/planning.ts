@@ -36,6 +36,10 @@ export type PlanRow = PlanOutput & {
   sold7: number;
   sold30: number;
   soldInWindow: number;
+  /** Giao thành công theo ORDER_OUTCOME (toàn lịch sử) — để tính tỷ lệ hoàn của riêng mẫu mã. */
+  delivered: number;
+  /** Đơn hoàn theo ORDER_OUTCOME (toàn lịch sử). */
+  returned: number;
   /** Số lượng bán của ngày mạnh nhất trong cửa sổ — căn cứ nhận ra đột biến. */
   peakDayQty: number;
   leadTimeDays: number;
@@ -210,6 +214,8 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
       sold7: Number(r.sold7 ?? 0),
       sold30: Number(r.sold30 ?? 0),
       soldInWindow: Number(r.soldInWindow ?? 0),
+      delivered: Number(r.delivered ?? 0),
+      returned: Number(r.returned ?? 0),
       peakDayQty: Number(r.peakDayQty ?? 0),
       leadTimeDays,
       unitCost,
