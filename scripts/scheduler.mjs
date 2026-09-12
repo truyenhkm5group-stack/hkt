@@ -29,6 +29,15 @@ const JOBS = [
   { job: "pancake-inventory", every: minutes("SYNC_INVENTORY_EVERY_MINUTES", 60), offset: 8 },
   { job: "facebook-ads", every: minutes("SYNC_ADS_EVERY_MINUTES", 60), offset: 10 },
   { job: "alerts", every: minutes("ALERTS_EVERY_MINUTES", 10), offset: 3 },
+  /*
+    VIỆC ĐỊNH KỲ PHẢI CÓ AI ĐÓ SINH RA NÓ.
+
+    Định nghĩa việc lặp nằm trong `work_recurrences`, nhưng bản thân nó không tự thành việc. Chạy
+    15 phút một lần chứ không một lần mỗi ngày: định nghĩa khai giờ sinh riêng (8 giờ, 17 giờ…), và
+    một lượt chạy mỗi ngày sẽ bỏ lỡ mọi giờ không trùng lượt đó. Sinh trùng thì vô hại — khoá tự
+    nhiên (recurrence_id, occurrence_key) chặn ở CSDL.
+  */
+  { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới
@@ -44,7 +53,8 @@ const JOBS = [
   { job: "outcome-materialize", every: minutes("OUTCOME_MATERIALIZE_EVERY_MINUTES", 5), offset: 1.5 },
   // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 4 phút — ngắn hơn TTL 300
   // giây của bảng điều khiển, nên đệm không bao giờ kịp nguội và người mở trang không phải trả giá.
-  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },  // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
+  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
+  // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];
 

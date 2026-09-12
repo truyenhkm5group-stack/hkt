@@ -18,6 +18,7 @@ import {
   Landmark,
   LayoutDashboard,
   Lightbulb,
+  ListTodo,
   ListChecks,
   Megaphone,
   PackageCheck,
@@ -75,6 +76,9 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/", label: "Tổng quan", icon: LayoutDashboard, permission: "dashboard:view" },
       { href: "/alerts", label: "Cần xử lý", icon: BellRing, permission: "alerts:view" },
+      // MỘT mục cho cả Work OS. Năm góc nhìn (Việc của tôi / Phòng ban / Tất cả / Mục tiêu / Hiệu
+      // suất) là tab bên trong `/work` — sáu mục sidebar sẽ bắt người dùng chọn trước khi nhìn.
+      { href: "/work", label: "Công việc & mục tiêu", icon: ListTodo, permission: "work:view" },
     ],
   },
   {

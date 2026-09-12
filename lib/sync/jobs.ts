@@ -9,6 +9,7 @@ import {
   syncProducts,
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
+import { generateRecurringTasks } from "@/lib/work/service";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
@@ -163,6 +164,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     run: () => warmDashboard(),
+  },
+  "work-recurrence": {
+    label: "Sinh việc định kỳ",
+    source: "ALL",
+    description:
+      "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL.",
+    run: () => generateRecurringTasks(),
   },
   alerts: {
     label: "Cảnh báo vận hành",

@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import type { DepartmentCode } from "@/lib/constants/departments";
 import { krProgress, metricBinding, type MetricTrust, type MetricUnit } from "@/lib/constants/metric-bindings";
 import { resolveMetrics } from "@/lib/queries/metric-resolver";
+import { KR_CONFIDENCES, OKR_LEVELS, OKR_STATUSES, type KrConfidence, type OkrLevel, type OkrStatus } from "@/lib/constants/okr";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -18,37 +19,6 @@ import type { Period } from "@/lib/search-params";
  * người đọc sẽ hành động sai ở đúng một nửa số trường hợp. Nên `progress` trả `null`, và giao diện
  * in "chưa đo được" chứ không vẽ thanh.
  */
-
-export const OKR_LEVELS = ["COMPANY", "DEPARTMENT", "INDIVIDUAL"] as const;
-export type OkrLevel = (typeof OKR_LEVELS)[number];
-
-export const OKR_LEVEL_LABEL: Record<OkrLevel, string> = {
-  COMPANY: "Công ty",
-  DEPARTMENT: "Phòng ban",
-  INDIVIDUAL: "Cá nhân",
-};
-
-export const OKR_STATUSES = ["DRAFT", "ACTIVE", "CLOSED", "CANCELLED"] as const;
-export type OkrStatus = (typeof OKR_STATUSES)[number];
-
-export const OKR_STATUS_LABEL: Record<OkrStatus, string> = { DRAFT: "Nháp", ACTIVE: "Đang chạy", CLOSED: "Đã chốt", CANCELLED: "Huỷ" };
-
-export const KR_CONFIDENCES = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "UNKNOWN"] as const;
-export type KrConfidence = (typeof KR_CONFIDENCES)[number];
-
-export const KR_CONFIDENCE_LABEL: Record<KrConfidence, string> = {
-  ON_TRACK: "Đúng hướng",
-  AT_RISK: "Có rủi ro",
-  OFF_TRACK: "Chệch hướng",
-  UNKNOWN: "Chưa chấm",
-};
-
-export const KR_CONFIDENCE_TONE: Record<KrConfidence, string> = {
-  ON_TRACK: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  AT_RISK: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  OFF_TRACK: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
-  UNKNOWN: "bg-muted text-muted-foreground",
-};
 
 export type KeyResultView = {
   id: string;
@@ -119,6 +89,9 @@ function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: num
     note: live?.note ?? "",
   };
 }
+
+export { KR_CONFIDENCES, OKR_LEVELS, OKR_STATUSES };
+export type { KrConfidence, OkrLevel, OkrStatus };
 
 export type OkrQuery = { period: string; level?: OkrLevel; departmentId?: string; ownerUserId?: string; includeDraft?: boolean };
 
