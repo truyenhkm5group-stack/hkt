@@ -33,6 +33,7 @@ import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
 import { testFinanceTruth } from "./finance-truth.test";
+import { testFinanceInvariants } from "./finance-invariants.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -71,6 +72,7 @@ import { testShipmentJoinGrain } from "./shipment-join-grain.test";
 import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
+import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
@@ -1331,6 +1333,8 @@ async function main() {
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
+  testFinanceOpsPure();
+  await testFinanceOpsQueries(db);
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
@@ -1393,6 +1397,9 @@ async function main() {
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);
+  // Cổng phát hành của bản gộp tài chính: chỗ hỏng của một bản gộp không nằm trong nhánh nào cả,
+  // nó nằm ở chỗ hai nhánh cùng chạm một con số. Chạy sau `testFinanceTruth` và tự dọn.
+  await testFinanceInvariants(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

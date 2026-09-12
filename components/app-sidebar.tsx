@@ -18,6 +18,7 @@ import {
   Landmark,
   LayoutDashboard,
   Lightbulb,
+  ListChecks,
   Megaphone,
   PackageCheck,
   PackagePlus,
@@ -102,6 +103,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/bank", label: "Sổ ngân hàng", icon: Landmark, permission: "bank:view" },
+      { href: "/finance-ops", label: "Hàng đợi tác vụ tài chính", icon: ListChecks, permission: "bank:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },
       { href: "/reports", label: "Báo cáo lợi nhuận", icon: BarChart3, permission: "reports:delivered", anyOf: ["reports:delivered", "reports:cash", "reports:nominal"] },
       { href: "/reports/cashflow", label: "Dòng tiền", icon: Banknote, permission: "reports:cash" },

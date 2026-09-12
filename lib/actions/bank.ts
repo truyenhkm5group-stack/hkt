@@ -456,6 +456,60 @@ export async function unlinkBankTransaction(id: string): Promise<{ ok: true } | 
   return { ok: true };
 }
 
+/**
+ * XÁC NHẬN MỘT CẶP CHUYỂN NỘI BỘ — gán nhãn CẢ HAI vế VÀ ghép chúng lại với nhau.
+ *
+ * Hai việc, không phải một, và thiếu việc thứ hai là thiếu đúng phần có giá trị. Gán nhãn
+ * `INTERNAL_TRANSFER` cho hai dòng thì chúng bị loại khỏi dòng tiền kinh doanh — tổng đã đúng. Nhưng
+ * sổ vẫn không biết hai dòng đó là MỘT sự kiện: không đối chiếu được vế nào thiếu, và một dòng bị gán
+ * nhãn nhầm sẽ nằm im mãi mà không ai thấy. `getCashLedger().internalTransfer.unpairedCount` sinh ra
+ * để nêu đúng chỗ đó, và nó chỉ có nghĩa khi cặp thật sự được ghép.
+ *
+ * Mối nối `BANK_TRANSACTION` đi qua `createLink`, nên nó tự kiểm hai chân NGƯỢC CHIỀU và tự tạo chân
+ * đối ứng. Ghép hai dòng cùng chiều là khai khống một lần chuyển tiền, và ở đây bị từ chối.
+ */
+const transferPairSchema = z.object({ outId: z.string().min(1), inId: z.string().min(1) });
+
+export async function confirmInternalTransferPair(input: unknown): Promise<{ ok: true; amount: number } | { error: string }> {
+  const g = await guard();
+  if (g.error !== undefined) return { error: g.error };
+  const parsed = transferPairSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { outId, inId } = parsed.data;
+  if (outId === inId) return { error: "Hai vế của một lần chuyển nội bộ phải là hai giao dịch khác nhau" };
+
+  // Ghép TRƯỚC, gán nhãn SAU. Ghép là bước có thể từ chối (sai chiều, đã nối đủ, không tìm thấy);
+  // gán nhãn trước rồi ghép hỏng sẽ để lại hai dòng mang nhãn "chuyển nội bộ" mà không thành cặp —
+  // đúng trạng thái nửa vời mà hàng đợi phải nêu ra, nay lại do chính ERP tạo ra.
+  const noi = await createLink({
+    txnId: outId,
+    targetType: "BANK_TRANSACTION",
+    targetId: inId,
+    confidence: "MANUAL",
+    method: "TRANSFER_PAIR",
+    confirmedBy: g.user.email,
+    note: "Xác nhận cặp chuyển nội bộ từ Hàng đợi tác vụ tài chính",
+  });
+  if ("error" in noi) return { error: noi.error };
+
+  const db = await getDb();
+  await db
+    .update(b)
+    .set({ accountingGroup: "INTERNAL_TRANSFER", classifiedBy: g.user.email, classifiedAt: new Date(), ruleId: null, updatedAt: new Date() })
+    .where(inArray(b.id, [outId, inId]));
+
+  await audit({
+    userId: g.user.id,
+    userEmail: g.user.email,
+    action: "BANK_INTERNAL_TRANSFER_PAIR",
+    entity: "BANK_TRANSACTION",
+    entityId: outId,
+    after: { outId, inId, amount: noi.amount, group: "INTERNAL_TRANSFER" },
+  });
+  revalidateAll();
+  return { ok: true, amount: noi.amount };
+}
+
 /*
   CỐ Ý CHƯA CÓ "gỡ đúng một mối nối".
 

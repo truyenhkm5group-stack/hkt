@@ -32,17 +32,35 @@ function toForm(expense?: ExpenseRow | null): Partial<ExpenseInput> {
 
 /**
  * Dialog thêm/sửa chi phí. Không truyền `open` → tự quản lý trạng thái và hiện nút “Thêm chi phí”.
+ *
+ * `defaultValues` / `onCreated` phục vụ nơi gọi muốn ĐIỀN SẴN một vài trường (vd từ một dòng sao kê
+ * ngân hàng đang chờ xử lý ở Hàng đợi tác vụ tài chính) rồi làm thêm việc SAU KHI tạo xong (vd nối
+ * khoản chi vừa tạo với đúng dòng sao kê đó). Không đổi hành vi của nơi gọi cũ: hai prop đều tuỳ
+ * chọn, bỏ qua thì y hệt trước.
  */
-export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: ExpenseRow | null; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function ExpenseDialog({
+  expense,
+  open,
+  onOpenChange,
+  defaultValues,
+  onCreated,
+}: {
+  expense?: ExpenseRow | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  defaultValues?: Partial<ExpenseInput>;
+  onCreated?: (id: string) => void | Promise<void>;
+}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const form = useForm<ExpenseInput>({ resolver: zodResolver(expenseSchema), defaultValues: toForm(expense) });
+  const form = useForm<ExpenseInput>({ resolver: zodResolver(expenseSchema), defaultValues: { ...toForm(expense), ...defaultValues } });
 
   useEffect(() => {
-    if (isOpen) form.reset(toForm(expense));
+    if (isOpen) form.reset({ ...toForm(expense), ...defaultValues });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, expense, form]);
 
   const submit = (values: ExpenseInput) => {
@@ -52,7 +70,11 @@ export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: Expen
         toast.error(result.error);
         return;
       }
-      toast.success(expense ? "Đã cập nhật chi phí" : "Đã thêm chi phí");
+      if (!expense && onCreated && result.id) {
+        await onCreated(result.id);
+      } else {
+        toast.success(expense ? "Đã cập nhật chi phí" : "Đã thêm chi phí");
+      }
       setOpen(false);
       router.refresh();
     });
