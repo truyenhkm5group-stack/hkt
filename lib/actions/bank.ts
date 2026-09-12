@@ -13,7 +13,9 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { BANK_ACCOUNT_STATUSES, BANK_GROUPS, BANK_LINK_TYPES, BANK_LINK_TYPE_LABEL, maskAccountNumber, type BankLinkType } from "@/lib/constants/bank";
+import { BANK_ACCOUNT_STATUSES, BANK_GROUPS, maskAccountNumber } from "@/lib/constants/bank";
+import { LINK_TARGET_TYPES } from "@/lib/constants/finance-truth";
+import { autoLinkActor, createLink, removeAllLinks } from "@/lib/finance/linkage";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
 import { applyBankRules as runBankRules } from "@/lib/integrations/bank/apply-rules";
@@ -407,51 +409,61 @@ async function applyRulesInternal(): Promise<number> {
  */
 const linkSchema = z.object({
   id: z.string().min(1),
-  type: z.enum(BANK_LINK_TYPES),
+  type: z.enum(LINK_TARGET_TYPES),
   targetId: z.string().trim().min(1, "Chưa chọn chứng từ").max(200),
+  /**
+   * Bỏ trống = nối TRỌN phần còn lại. Khai số khi một chuyển khoản trả nhiều chứng từ, hoặc khi một
+   * khoản chi được trả làm nhiều lần — hai tình huống mà ô `linked_id` cũ không diễn tả được.
+   */
+  amount: z.coerce.number().int().positive().optional(),
+  note: z.string().trim().max(500).default(""),
 });
 
-export async function linkBankTransaction(input: unknown): Promise<{ ok: true } | { error: string }> {
+export async function linkBankTransaction(input: unknown): Promise<{ ok: true; amount: number } | { error: string }> {
   const g = await guard();
   if (g.error !== undefined) return { error: g.error };
   const parsed = linkSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { id, type, targetId } = parsed.data;
+  const { id, type, targetId, amount, note } = parsed.data;
 
-  const db = await getDb();
-  const [row] = await db.select().from(b).where(eq(b.id, id));
-  if (!row) return { error: "Không tìm thấy giao dịch" };
+  // MỘT ĐƯỜNG DUY NHẤT: mọi kiểm tra (chứng từ có thật, không nối vượt số tiền, chuyển nội bộ phải
+  // ghép đối xứng) nằm ở `createLink`. Hành động này chỉ lo quyền, zod, kiểm toán và làm mới trang.
+  const kq = await createLink({ txnId: id, targetType: type, targetId, amount, confidence: "MANUAL", method: "MANUAL", confirmedBy: g.user.email, note });
+  if ("error" in kq) return { error: kq.error };
 
-  // Chứng từ phải CÓ THẬT — nối tới một mã không tồn tại thì đối chiếu vô nghĩa.
-  const exists = await targetExists(type, targetId);
-  if (!exists) return { error: `Không tìm thấy ${BANK_LINK_TYPE_LABEL[type].toLowerCase()} với mã này` };
-
-  await db.update(b).set({ linkedType: type, linkedId: targetId, updatedAt: new Date() }).where(eq(b.id, id));
-  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_LINK", entity: "BANK_TRANSACTION", entityId: id, before: { linkedType: row.linkedType, linkedId: row.linkedId }, after: { linkedType: type, linkedId: targetId } });
+  await audit({
+    userId: g.user.id,
+    userEmail: g.user.email,
+    action: "BANK_LINK",
+    entity: "BANK_TRANSACTION",
+    entityId: id,
+    after: { linkId: kq.id, targetType: type, targetId, amount: kq.amount, confidence: "MANUAL" },
+  });
   revalidateAll();
-  return { ok: true };
+  return { ok: true, amount: kq.amount };
 }
 
+/** Gỡ MỌI mối nối của một giao dịch — nút "bỏ nối" trên màn hình đối khớp. */
 export async function unlinkBankTransaction(id: string): Promise<{ ok: true } | { error: string }> {
   const g = await guard();
   if (g.error !== undefined) return { error: g.error };
   const db = await getDb();
   const [row] = await db.select().from(b).where(eq(b.id, id));
   if (!row) return { error: "Không tìm thấy giao dịch" };
-  await db.update(b).set({ linkedType: "", linkedId: "", updatedAt: new Date() }).where(eq(b.id, id));
-  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_UNLINK", entity: "BANK_TRANSACTION", entityId: id, before: { linkedType: row.linkedType, linkedId: row.linkedId } });
+  const n = await removeAllLinks(id);
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_UNLINK", entity: "BANK_TRANSACTION", entityId: id, before: { linkedType: row.linkedType, linkedId: row.linkedId, links: n } });
   revalidateAll();
   return { ok: true };
 }
 
-async function targetExists(type: BankLinkType, targetId: string): Promise<boolean> {
-  const db = await getDb();
-  const one = async (rows: Promise<unknown[]>) => (await rows).length > 0;
-  if (type === "EXPENSE") return one(db.select({ id: schema.expenses.id }).from(schema.expenses).where(eq(schema.expenses.id, targetId)).limit(1));
-  if (type === "COD_BATCH") return one(db.select({ id: schema.codBatches.id }).from(schema.codBatches).where(eq(schema.codBatches.id, targetId)).limit(1));
-  if (type === "STOCK_RECEIPT") return one(db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
-  return one(db.select({ id: schema.adSpends.id }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
-}
+/*
+  CỐ Ý CHƯA CÓ "gỡ đúng một mối nối".
+
+  Tầng dịch vụ đã có `removeLink` và bài kiểm đã khoá nó. Nhưng màn hình đối khớp hiện chỉ hiện MỘT
+  mối nối cho mỗi giao dịch, nên một Server Action gỡ-từng-mối sẽ là mã không nút nào bấm được —
+  đúng thứ `tests/action-wiring.test.ts` sinh ra để chặn. Khi màn hình hiện đủ danh sách mối nối thì
+  thêm action bọc `removeLink`, không sớm hơn.
+*/
 
 /**
  * TỰ NỐI CÁC KHỚP CHẮC CHẮN — và CHỈ chúng.
@@ -473,14 +485,21 @@ export async function autoConfirmExactMatches(): Promise<{ ok: true; confirmed: 
   const chacChan = overview.suggestions.filter((s) => AUTO_CONFIRMABLE[s.confidence] && s.target);
   if (!chacChan.length) return { ok: true, confirmed: 0, message: "Không có khớp chắc chắn nào để tự nối" };
 
-  const db = await getDb();
   let done = 0;
   for (const s of chacChan) {
     if (!s.target) continue;
-    // Đi qua đúng đường kiểm tra của `linkBankTransaction`: chứng từ phải CÓ THẬT.
-    const exists = await targetExists(s.target.type, s.target.id);
-    if (!exists) continue;
-    await db.update(b).set({ linkedType: s.target.type, linkedId: s.target.id, updatedAt: new Date() }).where(eq(b.id, s.txnId));
+    // Đi qua ĐÚNG một đường với nối tay: `createLink` kiểm chứng từ có thật, kiểm không nối vượt số
+    // tiền, và ghi `confirmed_by = auto:exact` để sau còn phân biệt được máy nối với người nối.
+    const kq = await createLink({
+      txnId: s.txnId,
+      targetType: s.target.type,
+      targetId: s.target.id,
+      confidence: "EXACT",
+      method: "IDENTIFIER_MATCH",
+      confirmedBy: autoLinkActor(),
+      note: s.reasons.join(" · "),
+    });
+    if ("error" in kq) continue;
     done += 1;
   }
   await audit({
