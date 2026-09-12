@@ -55,7 +55,14 @@ export type ObjectiveView = {
   status: OkrStatus;
   keyResults: KeyResultView[];
   /**
-   * Tiến độ Objective = TRUNG BÌNH tiến độ các KR ĐO ĐƯỢC. `null` khi không KR nào đo được.
+   * Tiến độ Objective = TRUNG BÌNH tiến độ các KR ĐO ĐƯỢC, **mỗi KR kẹp ở 100% khi cộng vào**.
+   *
+   * Hai luật khác nhau, và cả hai đều cần:
+   *
+   *  · Ở TỪNG KR, phần trăm KHÔNG kẹp — vượt đích 150% là một sự thật đáng thấy.
+   *  · Ở MỨC OBJECTIVE, mỗi KR chỉ đóng góp tối đa 100%. Nếu không, một KR vượt đích sẽ che một KR
+   *    đang chết: ba KR ở 150% / 0% / 0% sẽ hiện 50%, nghe như "đi được nửa đường", trong khi thực
+   *    tế hai phần ba mục tiêu chưa nhúc nhích. Objective là AND, không phải trung bình cộng.
    *
    * KR chưa đo KHÔNG bị tính là 0: làm thế thì một Objective có 3 KR tốt và 1 KR chưa nối chỉ số
    * sẽ hiện 75% trong khi thực tế nó đang 100% trên phần đo được. `measuredCount` nói rõ trung
@@ -148,7 +155,7 @@ export async function listObjectives(q: OkrQuery, metricPeriod: Period): Promise
       period: o.period,
       status: o.status as OkrStatus,
       keyResults: list,
-      progress: measured.length ? measured.reduce((s, k) => s + (k.progress ?? 0), 0) / measured.length : null,
+      progress: measured.length ? measured.reduce((s, k) => s + Math.min(100, k.progress ?? 0), 0) / measured.length : null,
       measuredCount: measured.length,
       totalCount: list.length,
     };

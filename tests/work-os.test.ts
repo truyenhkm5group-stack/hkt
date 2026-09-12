@@ -22,7 +22,7 @@ import {
 } from "@/lib/constants/work-sources";
 import { metricScore } from "@/lib/queries/bsc";
 import { METRICS_WITHOUT_RESOLVER, resolveMetric } from "@/lib/queries/metric-resolver";
-import { buildDepartmentQueue, bucketOf, filterWork, healthOf, isMine, listDepartments, sortForQueue } from "@/lib/queries/work";
+import { assignableMembers, buildDepartmentQueue, bucketOf, filterWork, healthOf, isMine, listDepartments, sortForQueue } from "@/lib/queries/work";
 import { collectWorkItems, duplicateKeys } from "@/lib/queries/work-adapters";
 import { combineScore, getPerformance } from "@/lib/queries/work-performance";
 import { buildSnapshot, periodRange } from "@/lib/queries/reviews";
@@ -74,6 +74,7 @@ async function donDep(db: Db) {
   await db.delete(schema.workItems).where(like(schema.workItems.sourceKey, `${P}%`));
   await db.delete(schema.workRecurrences).where(like(schema.workRecurrences.title, `${P}%`));
   await db.delete(schema.okrObjectives).where(like(schema.okrObjectives.title, `${P}%`));
+  await db.delete(schema.okrObjectives).where(like(schema.okrObjectives.id, `${P}%`));
   await db.delete(schema.reviewCycles).where(eq(schema.reviewCycles.period, "1999-W01"));
   await db.delete(schema.csCases).where(like(schema.csCases.id, `${P}%`));
   await db.delete(schema.shipmentCare).where(like(schema.shipmentCare.shipmentId, `${P}%`));
@@ -296,6 +297,17 @@ export async function testWorkOs(db: Db) {
   const phongCuaTuan = await departmentsOfUser(`${P}u-tuan`);
   assert.ok(!phongCuaTuan.some((d) => d.code === "SALES"), "Tuấn KHÔNG được thuộc phòng Kinh doanh — trang phòng ban dựa vào đây để chặn xem chéo");
 
+  /*
+    Gọi THẲNG hàm dựng danh sách người nhận việc. Nó dùng một truy vấn con tương quan, và một truy
+    vấn con tương quan viết sai chỉ nổ lúc CHẠY — `tsc` không đọc được SQL sinh ra. Đúng lỗi này đã
+    làm `/work/all` đổ hoàn toàn ở lượt QA trình duyệt 12/09/2026.
+  */
+  const nguoiNhan = await assignableMembers();
+  assert.ok(nguoiNhan.length >= 3, "phải liệt kê được người nhận việc");
+  const linhRow = nguoiNhan.find((m) => m.id === `${P}u-linh`)!;
+  assert.ok(linhRow, "Linh phải có trong danh sách người nhận việc");
+  assert.deepEqual(linhRow.departments, ["Kinh doanh & CSKH"], "phòng ban của người nhận việc phải đọc được, không rỗng");
+
   /* ═══════════ 13 · CHỈ SỐ: NỐI THẬT, `null` KHI CHƯA ĐO ═══════════ */
   assert.deepEqual(METRICS_WITHOUT_RESOLVER, [], "chỉ số khai trong sổ mà không có hàm đọc thì KR nối vào nó sẽ mãi mãi trống");
   for (const k of METRIC_KEYS) {
@@ -323,6 +335,30 @@ export async function testWorkOs(db: Db) {
   assert.equal(metricScore(null, 100, "UP"), null, "ô chưa đo được KHÔNG phải 0 điểm");
   assert.equal(metricScore(0, 0, "DOWN"), 100, "đích 'không còn cái nào' và thực tế bằng 0 là đạt tuyệt đối");
   assert.equal(metricScore(3, 0, "DOWN"), 0, "đích 0 mà còn 3 là chưa đạt");
+
+  /*
+    ═══ MỘT KR VƯỢT ĐÍCH KHÔNG ĐƯỢC CHE MỘT KR ĐANG CHẾT ═══
+
+    Luật khác nhau ở hai mức, và cả hai đều cần:
+      · từng KR: KHÔNG kẹp — vượt đích 200% là sự thật đáng thấy;
+      · mức Objective: mỗi KR đóng góp tối đa 100%.
+    Không có luật thứ hai thì 200% / 0% ra 100% — "đã xong" trong khi một nửa mục tiêu chưa nhúc
+    nhích. Đo trên dữ liệu demo 12/09/2026: thẻ điểm toàn shop đọc 84% trong khi góc nhìn Quy trình
+    nội bộ đúng bằng 0.
+  */
+  const objId = `${P}obj1`;
+  await db.insert(schema.okrObjectives).values({
+    id: objId, level: "COMPANY", title: `${P}Mục tiêu kiểm kẹp`, period: "2026-Q3",
+    periodStart: T(24 * 60), periodEnd: new Date(Date.now() + 24 * 3_600_000), status: "ACTIVE",
+  }).onConflictDoNothing();
+  await db.insert(schema.okrKeyResults).values([
+    { id: `${P}kr-vuot`, objectiveId: objId, title: "Vượt đích gấp đôi", metricSource: "MANUAL", unit: "COUNT", direction: "UP", baseline: 0, target: 10, current: 20, sortOrder: 10 },
+    { id: `${P}kr-chet`, objectiveId: objId, title: "Chưa nhúc nhích", metricSource: "MANUAL", unit: "COUNT", direction: "UP", baseline: 0, target: 10, current: 0, sortOrder: 20 },
+  ]).onConflictDoNothing();
+  const { listObjectives } = await import("@/lib/queries/okr");
+  const mucTieu = (await listObjectives({ period: "2026-Q3" }, resolvePeriod({ period: "30d" }, "30d"))).find((o) => o.id === objId)!;
+  assert.equal(mucTieu.keyResults.find((k) => k.id === `${P}kr-vuot`)!.progress, 200, "TỪNG KR: vượt đích hiện đúng 200%, không bị cắt");
+  assert.equal(Math.round(mucTieu.progress!), 50, "MỨC OBJECTIVE: KR vượt đích chỉ đóng góp 100% ⇒ (100+0)/2 = 50%, KHÔNG phải (200+0)/2");
 
   /* ═══════════ 15 · THẺ ĐIỂM NHÂN SỰ: SÁU TRỤC, KHÔNG MỘT SỐ ═══════════ */
   // Cửa sổ phải phủ được các sự kiện vừa sinh TRONG bài này — `NOW` chụp từ đầu bài thì không.

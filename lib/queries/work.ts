@@ -400,7 +400,18 @@ export async function assignableMembers(): Promise<{ id: string; name: string; e
       id: schema.users.id,
       name: schema.users.name,
       email: schema.users.email,
-      departments: sql<string>`coalesce((select string_agg(d.name, ', ' order by d.sort_order) from department_members dm join departments d on d.id = dm.department_id where dm.user_id = ${schema.users.id} and dm.active), '')`,
+      /*
+        QUALIFY BẰNG TAY: `"users"."id"`, KHÔNG phải tham chiếu cột của Drizzle.
+
+        SỰ CỐ THẬT (12/09/2026, bắt được ở lượt QA trình duyệt chứ không phải ở kiểm thử). Truy vấn
+        này chỉ có MỘT bảng trong FROM, nên Drizzle in tên cột KHÔNG kèm tên bảng — tham chiếu
+        `schema.users.id` ra thành `"id"` trần. Bên trong truy vấn con đã có `department_members dm` và `departments d`, nên
+        Postgres báo `column reference "id" is ambiguous` và trang `/work/all` đổ hoàn toàn.
+
+        `tsc` xanh, `eslint` xanh, `npm test` xanh — không công cụ nào đọc được ngữ nghĩa SQL sinh
+        ra. Chỉ có người mở trang mới thấy. `tests/work-os.test.ts` nay gọi thẳng hàm này.
+      */
+      departments: sql<string>`coalesce((select string_agg(d.name, ', ' order by d.sort_order) from department_members dm join departments d on d.id = dm.department_id where dm.user_id = "users"."id" and dm.active), '')`,
     })
     .from(schema.users)
     .where(eq(schema.users.active, true))

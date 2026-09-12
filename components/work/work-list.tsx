@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Ban, CheckCircle2, ExternalLink, Hand, Loader2, MessageSquarePlus, ShieldAlert } from "lucide-react";
+import { AlarmClock, Ban, CheckCircle2, ExternalLink, Hand, Loader2, MessageSquarePlus, MoreHorizontal, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,9 @@ const ICONS: Partial<Record<WorkActionKey, typeof Hand>> = {
   CARE_RESOLVE: CheckCircle2,
   RETURN_RECEIVE: CheckCircle2,
 };
+
+/** Bao nhiêu nút hiện thẳng trên dòng; phần còn lại vào menu ba chấm. */
+const INLINE_ACTIONS = 3;
 
 /** Bốn kiểu hẹn bấm một phát — cùng khung giờ với CSKH (khách nhắn ban ngày). */
 const SNOOZE_PRESETS: { label: string; hours: number }[] = [
@@ -144,6 +147,10 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
         const assigneeName = patch.assigneeName ?? item.assignee?.name ?? "";
         const busy = pendingKey === item.key;
         const spec = WORK_SOURCE_SPEC[item.sourceType as WorkSource];
+        // Ba nút đầu của nguồn là ba việc hay làm nhất với loại việc đó (xem `WORK_SOURCE_SPEC`).
+        const usable = item.actions.filter((a) => WORK_ACTION[a as WorkActionKey] && (canAct || WORK_ACTION[a as WorkActionKey].mode === "LINK"));
+        const visible = usable.slice(0, INLINE_ACTIONS);
+        const overflow = usable.slice(INLINE_ACTIONS);
 
         return (
           <li key={item.key} className={cn("flex flex-col gap-2 p-3 transition-opacity sm:flex-row sm:items-start sm:gap-3", (busy || patch.done) && "opacity-60")}>
@@ -169,14 +176,12 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
               </span>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-1 sm:w-[290px] sm:justify-end">
+            <div className="flex shrink-0 flex-wrap items-center gap-1 sm:w-[320px] sm:justify-end">
               {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
               <WorkHistoryButton workKey={item.key} />
-              {item.actions.map((a) => {
+              {visible.map((a) => {
                 const key = a as WorkActionKey;
                 const actSpec = WORK_ACTION[key];
-                if (!actSpec) return null;
-                if (!canAct && actSpec.mode !== "LINK") return null;
                 const Icon = ICONS[key];
 
                 if (actSpec.mode === "LINK") {
@@ -231,6 +236,59 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
                   </Button>
                 );
               })}
+              {/*
+                TRÀN VÀO MENU, KHÔNG XUỐNG DÒNG.
+
+                Một dòng việc có tới tám hành động. In hết ra hàng ngang thì chúng xuống ba dòng và
+                dòng việc cao gấp ba — quét 40 việc thành cuộn ba màn hình, đúng cái bệnh mà bảng
+                CSKH đã chữa. Ba nút hay dùng nhất ở ngoài, phần còn lại sau dấu ba chấm.
+              */}
+              {overflow.length ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button size="sm" variant="ghost" className="h-7 px-1.5 text-xs" title="Thao tác khác" disabled={busy}>
+                      <MoreHorizontal className="size-3.5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-1.5" align="end">
+                    <div className="grid gap-0.5">
+                      {overflow.map((a) => {
+                        const key = a as WorkActionKey;
+                        const actSpec = WORK_ACTION[key];
+                        const Icon = ICONS[key];
+                        if (actSpec.mode === "LINK") {
+                          if (!item.sourceUrl) return null;
+                          return (
+                            <Button key={key} asChild size="sm" variant="ghost" className="h-8 justify-start text-xs">
+                              <Link href={item.sourceUrl}><ExternalLink className="size-3.5" /> {actSpec.label}</Link>
+                            </Button>
+                          );
+                        }
+                        if (key === "WORK_SNOOZE" || key === "CS_SNOOZE" || key === "CARE_FOLLOW_UP") {
+                          return (
+                            <div key={key} className="grid gap-0.5 border-t pt-1 first:border-0 first:pt-0">
+                              <p className="px-2 pt-1 text-[11px] font-medium text-muted-foreground">{actSpec.label}</p>
+                              {SNOOZE_PRESETS.map((pre) => (
+                                <Button key={pre.label} size="sm" variant="ghost" className="h-7 justify-start text-xs" onClick={() => run(item.key, {}, { action: key, at: snoozeTarget(pre.hours).toISOString() }, `Đã hẹn ${pre.label.toLowerCase()}`)}>
+                                  {pre.label}
+                                </Button>
+                              ))}
+                            </div>
+                          );
+                        }
+                        if (key === "WORK_NOTE" || key === "CARE_NOTE" || key === "WORK_BLOCK") {
+                          return <NoteButton key={key} label={actSpec.label} hint={actSpec.hint} icon={Icon} disabled={busy} required={key === "WORK_BLOCK"} full onSubmit={(note) => run(item.key, key === "WORK_BLOCK" ? { status: "BLOCKED" } : {}, { action: key, note }, key === "WORK_BLOCK" ? "Đã báo bị chặn" : "Đã ghi chú")} />;
+                        }
+                        return (
+                          <Button key={key} size="sm" variant="ghost" className="h-8 justify-start text-xs" disabled={busy} onClick={() => run(item.key, key.endsWith("CLAIM") ? { status: "ASSIGNED" } : {}, { action: key }, `${actSpec.label}: xong`)}>
+                            {Icon ? <Icon className="size-3.5" /> : null} {actSpec.label}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : null}
             </div>
           </li>
         );
@@ -239,13 +297,13 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
   );
 }
 
-function NoteButton({ label, hint, icon: Icon, disabled, required, onSubmit }: { label: string; hint: string; icon?: typeof Hand; disabled?: boolean; required?: boolean; onSubmit: (note: string) => void }) {
+function NoteButton({ label, hint, icon: Icon, disabled, required, full, onSubmit }: { label: string; hint: string; icon?: typeof Hand; disabled?: boolean; required?: boolean; full?: boolean; onSubmit: (note: string) => void }) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" title={hint} disabled={disabled}>
+        <Button size="sm" variant="ghost" className={cn("text-xs", full ? "h-8 justify-start" : "h-7 px-2")} title={hint} disabled={disabled}>
           {Icon ? <Icon className="size-3.5" /> : null} {label}
         </Button>
       </PopoverTrigger>

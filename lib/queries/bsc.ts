@@ -120,7 +120,15 @@ export async function getScorecard(opts: { scope: "COMPANY" | "DEPARTMENT"; depa
       perspective: p,
       label: BSC_PERSPECTIVE_LABEL[p],
       metrics: list,
-      score: scoredWeight ? scored.reduce((s, v) => s + (v.score ?? 0) * v.weight, 0) / scoredWeight : null,
+      /*
+        KẸP Ở 100% KHI CỘNG VÀO — nhưng ô vẫn hiện số thật.
+
+        Không kẹp thì một ô vượt đích gấp đôi sẽ che một ô đang bằng 0: đo trên dữ liệu demo,
+        "Doanh thu giao thành công" đạt 185% kéo điểm thẻ lên 84% trong khi "Việc quá hạn" đang
+        đúng 0%. Một thẻ điểm CÂN BẰNG mà đọc ra 84% khi một góc nhìn chết hẳn thì nó đang nói dối
+        — và chữ "cân bằng" là toàn bộ lý do BSC tồn tại.
+      */
+      score: scoredWeight ? scored.reduce((s, v) => s + Math.min(100, v.score ?? 0) * v.weight, 0) / scoredWeight : null,
       coverage: totalWeight ? scoredWeight / totalWeight : 0,
     };
   }).filter((p) => p.metrics.length > 0);
@@ -138,7 +146,7 @@ export async function getScorecard(opts: { scope: "COMPANY" | "DEPARTMENT"; depa
     perspectives,
     // Bốn góc nhìn CÂN BẰNG NHAU ở cấp thẻ — đó chính là ý nghĩa của chữ "cân bằng" trong BSC.
     // Trọng số chỉ phân biệt các ô BÊN TRONG một góc nhìn.
-    score: measured.length ? measured.reduce((s, p) => s + (p.score ?? 0), 0) / measured.length : null,
+    score: measured.length ? measured.reduce((s, p) => s + Math.min(100, p.score ?? 0), 0) / measured.length : null,
     coverage: totalWeightAll ? scoredWeightAll / totalWeightAll : 0,
   };
 }
