@@ -327,13 +327,24 @@ export async function testConversionFunnel(db: Db) {
  */
 async function testWritePath(db: Db) {
   const gio = 3_600_000;
+  /*
+    MỘT MỐC "BÂY GIỜ" DUY NHẤT CHO CẢ BÀI.
+
+    Trước đây fixture gọi `Date.now()` lúc dựng tin, còn phần kiểm gọi `Date.now()` lần nữa lúc so.
+    Mili-giây nhảy giữa hai lần gọi là đủ để bài đỏ với "1789137613671 !== 1789137613672" — một lần
+    trong vài lượt chạy, và luôn ở chỗ không liên quan gì tới thứ đang kiểm.
+
+    Bài kiểm chớp nháy còn tệ hơn không có bài kiểm: nó dạy người ta chạy lại cho tới khi xanh, và
+    thói quen đó sẽ đi theo sang lần một bài kiểm THẬT bắt được lỗi thật.
+  */
+  const BAY_GIO = Date.now();
   const tin = (text: string, fromPage: boolean, h: number, fromName = ""): PancakeMessage => ({
     id: `${fromPage ? "p" : "c"}-${h}`,
     text,
     fromId: fromPage ? "page" : "cust",
     fromName,
     fromPage,
-    insertedAt: new Date(Date.now() - h * gio),
+    insertedAt: new Date(BAY_GIO - h * gio),
     hasAttachment: false,
   });
 
@@ -348,7 +359,7 @@ async function testWritePath(db: Db) {
   assert.equal(tl.shopMessageCount, 2, "phải đếm đúng số tin của shop");
   assert.equal(
     tl.firstShopReplyAt?.getTime(),
-    new Date(Date.now() - 19 * gio).getTime(),
+    new Date(BAY_GIO - 19 * gio).getTime(),
     "mốc phản hồi phải là tin shop SAU tin đầu của khách — tin chào mời gửi trước KHÔNG phải phản hồi cho ai",
   );
   assert.ok(
