@@ -1,5 +1,6 @@
 import { and, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { activeMembershipsByUser } from "@/lib/org/membership";
 import type { DepartmentCode } from "@/lib/constants/departments";
 import { slaStateOf, sumMoney, type WorkItem } from "@/lib/constants/work";
 import { WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
@@ -112,15 +113,18 @@ export async function getPerformance(q: PerformanceQuery): Promise<WorkerScoreca
     collectWorkItems({ now, closedSince: q.from }),
     closedEventsInPeriod(q),
     db.query.users.findMany({ columns: { id: true, name: true, email: true, active: true } }),
-    db
-      .select({ userId: schema.departmentMembers.userId, code: schema.departments.code })
-      .from(schema.departmentMembers)
-      .innerJoin(schema.departments, sql`${schema.departments.id} = ${schema.departmentMembers.departmentId}`)
-      .where(sql`${schema.departmentMembers.active}`),
+    /*
+      Tư cách thành viên đọc qua ĐÚNG dịch vụ mà `/work` và màn Người dùng dùng.
+
+      Bản trước tự viết truy vấn ở đây và QUÊN vế `departments.active`: người thuộc một phòng ĐÃ
+      TẮT vẫn được tính vào thẻ điểm của phòng đó, trong khi hàng đợi của họ đã trống từ lâu. Không
+      ai báo lỗi — hai con số cùng đúng theo hai định nghĩa khác nhau.
+    */
+    activeMembershipsByUser(),
   ]);
 
   const deptOf = new Map<string, DepartmentCode[]>();
-  for (const m of memberships) deptOf.set(m.userId, [...(deptOf.get(m.userId) ?? []), m.code as DepartmentCode]);
+  for (const [userId, list] of memberships) deptOf.set(userId, list.map((m) => m.code));
 
   const okrByUser = await individualOkrProgress();
 

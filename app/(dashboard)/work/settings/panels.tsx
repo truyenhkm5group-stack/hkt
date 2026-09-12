@@ -14,7 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DEPARTMENT_ROLE_LABEL } from "@/lib/constants/departments";
 import { WORK_PRIORITIES, WORK_PRIORITY_LABEL } from "@/lib/constants/work";
 import { deleteRecurrence, runRecurrenceNow, saveDepartment, saveRecurrence } from "@/lib/actions/work";
-import { assignUserToDepartment, removeUserFromDepartment, setLead } from "@/lib/actions/org";
+import { assignUserToDepartment, leavingImpact, removeUserFromDepartment, setLead } from "@/lib/actions/org";
+import { LeavingImpactDialog, type LeavingImpactView } from "@/components/leaving-impact-dialog";
 import { PickerMenu } from "@/components/picker-menu";
 
 type Member = { userId: string; name: string; roleInDept: string; active: boolean };
@@ -41,6 +42,24 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
       toast.success(ok);
       router.refresh();
     });
+
+  /*
+    BỎ NGƯỜI KHỎI PHÒNG PHẢI XEM TRƯỚC TÁC ĐỘNG — cùng hộp thoại mà `/settings/users` dùng.
+
+    Bản trước bỏ người ra chỉ bằng một cú bấm, không hỏi gì. Việc họ đang cầm KHÔNG được giao lại
+    tự động (đó là luật, và nó đúng), nhưng người bấm không biết luật ấy nên tưởng hệ thống đã lo
+    — và những việc đó nằm im trong hàng đợi của một người đã sang phòng khác.
+  */
+  const [xacNhan, setXacNhan] = useState<{ deptId: string; deptName: string; userId: string; userName: string } | null>(null);
+  const [tacDong, setTacDong] = useState<LeavingImpactView | null>(null);
+
+  const hoiTruoc = (yeuCau: NonNullable<typeof xacNhan>) => {
+    setTacDong(null);
+    setXacNhan(yeuCau);
+    void leavingImpact(yeuCau.userId).then((r) => {
+      if (!("error" in r)) setTacDong(r.impact);
+    });
+  };
 
   return (
     <div className="divide-y">
@@ -74,7 +93,7 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
               <Badge key={m.userId} variant="secondary" className="gap-1 pr-1 text-[11px]">
                 {m.name}
                 <span className="text-muted-foreground">· {DEPARTMENT_ROLE_LABEL[m.roleInDept as "LEAD" | "MEMBER"]}</span>
-                <button type="button" aria-label={`Bỏ ${m.name} khỏi phòng`} className="rounded p-0.5 hover:bg-background" onClick={() => run(() => removeUserFromDepartment({ departmentId: d.id, userId: m.userId }), "Đã bỏ khỏi phòng")}>
+                <button type="button" aria-label={`Bỏ ${m.name} khỏi phòng`} className="rounded p-0.5 hover:bg-background" onClick={() => hoiTruoc({ deptId: d.id, deptName: d.name, userId: m.userId, userName: m.name })}>
                   <UserMinus className="size-3" />
                 </button>
               </Badge>
@@ -107,6 +126,31 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
           <Plus className="size-4" /> Thêm phòng
         </Button>
       </div>
+
+      {xacNhan ? (
+        <LeavingImpactDialog
+          open
+          onOpenChange={(v) => (v ? null : setXacNhan(null))}
+          userName={xacNhan.userName}
+          title={`Bỏ ${xacNhan.userName} khỏi ${xacNhan.deptName}?`}
+          description="Dòng thành viên được giữ lại (đánh dấu đã rời), nên lịch sử và việc đã giao không mất."
+          confirmLabel="Bỏ khỏi phòng"
+          impact={tacDong}
+          pending={pending}
+          onConfirm={() =>
+            start(async () => {
+              const r = await removeUserFromDepartment({ departmentId: xacNhan.deptId, userId: xacNhan.userId });
+              if ("error" in r) {
+                toast.error(r.error);
+                return;
+              }
+              toast.success(r.leadCleared ? `Đã bỏ khỏi ${xacNhan.deptName} — ghế trưởng phòng cũng trống` : `Đã bỏ khỏi ${xacNhan.deptName}`);
+              setXacNhan(null);
+              router.refresh();
+            })
+          }
+        />
+      ) : null}
     </div>
   );
 }

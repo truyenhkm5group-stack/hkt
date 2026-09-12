@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { z } from "zod";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
+import { getDb, schema } from "@/db";
+import { eq } from "drizzle-orm";
+import { impactOfLeaving, type LeavingImpact } from "@/lib/org/impact";
 import {
   assignMembership,
-  impactOfLeaving,
   removeMembership,
   setDepartmentLead,
   transferMembership,
@@ -30,7 +33,9 @@ import {
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
 function revalidate() {
-  for (const p of ["/work", "/work/today", "/work/department", "/work/all", "/work/performance", "/work/settings", "/settings/users", "/"]) revalidatePath(p);
+  for (const p of ORG_DEPENDENT_PATHS) revalidatePath(p);
+  // Bố cục cũng đọc sự thật tổ chức (menu, chuông, nhãn phòng ban), nên phải làm mới cả nó.
+  revalidatePath("/", "layout");
 }
 
 function actorOf(u: SessionUser): MembershipActor {
@@ -95,12 +100,21 @@ export async function transferUserDepartment(input: unknown): Promise<Result> {
   và một đường vào để canh quyền, đổi lấy đúng con số không.
 */
 
-/** Bao nhiêu việc người này đang cầm — hỏi TRƯỚC khi cho rời phòng. Chỉ đọc. */
-export async function leavingImpact(userId: string): Promise<Result<{ holding: number }>> {
+/**
+ * Người này đang cầm bao nhiêu việc, bao nhiêu tiền, ở phòng nào — hỏi TRƯỚC khi gỡ hay chuyển.
+ *
+ * Chỉ đọc, và CỐ Ý chỉ đọc. Không hàm nào trong tệp này giao lại việc hàng loạt khi đổi phòng
+ * ban: một lượt giao lại tự động là hàng chục việc đổi chủ trong một nhịp mà không ai kịp nhìn,
+ * và không gỡ lại được vì trạng thái cũ đã bị ghi đè ở từng miền nguồn. Xem trước → người bấm
+ * quyết định → giao lại từng việc bằng công cụ đã có ở `/work/today`.
+ */
+export async function leavingImpact(userId: string): Promise<Result<{ impact: LeavingImpact }>> {
   const { error } = await authorize();
   if (error) return { error };
   const parsed = idSchema.safeParse(userId);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
-  const r = await impactOfLeaving(parsed.data);
-  return { ok: true, holding: r.holding };
+  const db = await getDb();
+  const u = await db.query.users.findFirst({ where: eq(schema.users.id, parsed.data), columns: { id: true, name: true, email: true } });
+  if (!u) return { error: "Không tìm thấy người dùng" };
+  return { ok: true, impact: await impactOfLeaving(u) };
 }

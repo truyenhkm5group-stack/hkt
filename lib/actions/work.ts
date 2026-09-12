@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
@@ -25,7 +26,8 @@ import * as svc from "@/lib/work/service";
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
 function revalidate() {
-  for (const p of ["/work", "/work/department", "/work/all", "/work/performance", "/work/settings", "/work/review", "/"]) revalidatePath(p);
+  for (const p of ORG_DEPENDENT_PATHS) revalidatePath(p);
+  revalidatePath("/", "layout");
 }
 
 function actorOf(user: SessionUser): svc.WorkActor {

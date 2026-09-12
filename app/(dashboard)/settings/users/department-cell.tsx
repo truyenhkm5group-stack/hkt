@@ -1,10 +1,11 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRightLeft, Building2, Crown, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { LeavingImpactDialog, type LeavingImpactView } from "@/components/leaving-impact-dialog";
 import { PickerMenu } from "@/components/picker-menu";
 import { assignUserToDepartment, leavingImpact, removeUserFromDepartment, setLead, transferUserDepartment } from "@/lib/actions/org";
 import { cn } from "@/lib/utils";
@@ -22,8 +23,9 @@ import { cn } from "@/lib/utils";
  * ─── RỜI PHÒNG KHI ĐANG CẦM VIỆC PHẢI HỎI LẠI ───
  *
  * Bỏ một người khỏi phòng KHÔNG tự giao lại việc của họ — đó là luật, và nó đúng: người chuyển
- * phòng vẫn phải đóng nốt việc dở. Nhưng người bấm cần BIẾT điều đó trước, nên ở đây hỏi số việc
- * họ đang cầm rồi mới xác nhận. Tự rải lại vài chục việc vì một cú bấm là thứ không gỡ lại được.
+ * phòng vẫn phải đóng nốt việc dở. Nhưng người bấm cần BIẾT điều đó trước, nên ở đây mở hộp thoại
+ * xem trước tác động (việc đang cầm, quá hạn, tiền treo, ở phòng nào) rồi mới xác nhận. Tự rải
+ * lại vài chục việc vì một cú bấm là thứ không gỡ lại được.
  */
 
 export type UserDept = { departmentId: string; code: string; name: string; roleInDept: "LEAD" | "MEMBER"; isLead: boolean };
@@ -55,19 +57,43 @@ export function DepartmentCell({
       router.refresh();
     });
 
-  const roiPhong = (d: UserDept) =>
+  /*
+    Mở hộp thoại TRƯỚC, đếm việc SAU. Nếu đợi đếm xong mới mở thì người bấm thấy giao diện đứng im
+    vài trăm mili-giây và bấm lại — còn hộp thoại mở ngay thì họ thấy "đang đếm" và biết hệ thống
+    đã nhận lệnh.
+  */
+  const [xacNhan, setXacNhan] = useState<{ kind: "REMOVE"; dept: UserDept } | { kind: "TRANSFER"; from: UserDept; toId: string; toName: string } | null>(null);
+  const [tacDong, setTacDong] = useState<LeavingImpactView | null>(null);
+
+  const hoiTruoc = (yeuCau: NonNullable<typeof xacNhan>) => {
+    setTacDong(null);
+    setXacNhan(yeuCau);
+    void leavingImpact(userId).then((r) => {
+      if (!("error" in r)) setTacDong(r.impact);
+    });
+  };
+
+  const dongY = () => {
+    const yc = xacNhan;
+    if (!yc) return;
     start(async () => {
-      const tacDong = await leavingImpact(userId);
-      const dangCam = "error" in tacDong ? 0 : tacDong.holding;
-      if (dangCam > 0 && !window.confirm(`${userName} đang cầm ${dangCam} việc.\n\nBỏ khỏi ${d.name} KHÔNG giao lại việc nào — việc vẫn mang tên họ cho tới khi trưởng phòng chuyển đi.\n\nVẫn bỏ khỏi phòng?`)) return;
-      const r = await removeUserFromDepartment({ departmentId: d.departmentId, userId });
+      const r =
+        yc.kind === "REMOVE"
+          ? await removeUserFromDepartment({ departmentId: yc.dept.departmentId, userId })
+          : await transferUserDepartment({ fromDepartmentId: yc.from.departmentId, toDepartmentId: yc.toId, userId });
       if ("error" in r) {
         toast.error(r.error);
         return;
       }
-      toast.success(r.leadCleared ? `Đã bỏ khỏi ${d.name} — ghế trưởng phòng cũng trống` : `Đã bỏ khỏi ${d.name}`);
+      if (yc.kind === "REMOVE") {
+        toast.success("leadCleared" in r && r.leadCleared ? `Đã bỏ khỏi ${yc.dept.name} — ghế trưởng phòng cũng trống` : `Đã bỏ khỏi ${yc.dept.name}`);
+      } else {
+        toast.success(`Đã chuyển ${userName} sang ${yc.toName}`);
+      }
+      setXacNhan(null);
       router.refresh();
     });
+  };
 
   const conLai = all.filter((a) => !departments.some((d) => d.departmentId === a.id));
 
@@ -87,7 +113,7 @@ export function DepartmentCell({
           >
             <Crown className={cn("size-3", d.isLead && "text-amber-600")} />
           </button>
-          <button type="button" aria-label={`Bỏ ${userName} khỏi ${d.name}`} title="Bỏ khỏi phòng (giữ lịch sử)" disabled={pending} className="rounded p-0.5 hover:bg-background" onClick={() => roiPhong(d)}>
+          <button type="button" aria-label={`Bỏ ${userName} khỏi ${d.name}`} title="Bỏ khỏi phòng (giữ lịch sử)" disabled={pending} className="rounded p-0.5 hover:bg-background" onClick={() => hoiTruoc({ kind: "REMOVE", dept: d })}>
             <X className="size-3" />
           </button>
         </Badge>
@@ -120,7 +146,25 @@ export function DepartmentCell({
           disabled={pending || !userActive}
           empty="Không còn phòng nào khác"
           options={conLai.map((a) => ({ value: a.id, label: `${departments[0].name} → ${a.name}` }))}
-          onPick={(v) => run(() => transferUserDepartment({ fromDepartmentId: departments[0].departmentId, toDepartmentId: v, userId }), `Đã chuyển ${userName} sang phòng mới`)}
+          onPick={(v) => hoiTruoc({ kind: "TRANSFER", from: departments[0], toId: v, toName: conLai.find((a) => a.id === v)?.name ?? "phòng mới" })}
+        />
+      ) : null}
+
+      {xacNhan ? (
+        <LeavingImpactDialog
+          open
+          onOpenChange={(v) => (v ? null : setXacNhan(null))}
+          userName={userName}
+          title={xacNhan.kind === "REMOVE" ? `Bỏ ${userName} khỏi ${xacNhan.dept.name}?` : `Chuyển ${userName} sang ${xacNhan.toName}?`}
+          description={
+            xacNhan.kind === "REMOVE"
+              ? "Dòng thành viên được giữ lại (đánh dấu đã rời), nên lịch sử và việc đã giao không mất."
+              : "Thêm vào phòng mới trước, rời phòng cũ sau — không có khoảnh khắc nào họ không thuộc phòng nào."
+          }
+          confirmLabel={xacNhan.kind === "REMOVE" ? "Bỏ khỏi phòng" : "Chuyển phòng"}
+          impact={tacDong}
+          pending={pending}
+          onConfirm={dongY}
         />
       ) : null}
     </div>

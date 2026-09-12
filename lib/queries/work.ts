@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode, type DepartmentRole } from "@/lib/constants/departments";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/lib/constants/work";
 import { WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 import { collectWorkItems, type CollectOptions } from "@/lib/queries/work-adapters";
+import { activeMembershipsByUser, membersOfDepartment, membershipOf } from "@/lib/org/membership";
 
 /**
  * ═══════════ HÀNG ĐỢI: XẾP VIỆC THEO THỨ TỰ PHẢI LÀM ═══════════
@@ -60,35 +61,20 @@ export async function listDepartments(includeInactive = false): Promise<Departme
 export type DepartmentMemberRow = { userId: string; name: string; email: string; role: string; roleInDept: DepartmentRole; title: string; active: boolean };
 
 export async function listDepartmentMembers(departmentId: string): Promise<DepartmentMemberRow[]> {
-  const db = await getDb();
-  const m = schema.departmentMembers;
-  const rows = await db
-    .select({
-      userId: m.userId,
-      name: schema.users.name,
-      email: schema.users.email,
-      role: schema.users.role,
-      roleInDept: m.roleInDept,
-      title: m.title,
-      active: m.active,
-    })
-    .from(m)
-    .innerJoin(schema.users, eq(schema.users.id, m.userId))
-    .where(eq(m.departmentId, departmentId))
-    .orderBy(asc(m.roleInDept), asc(schema.users.name));
-  return rows.map((r) => ({ ...r, roleInDept: r.roleInDept as DepartmentRole }));
+  return membersOfDepartment(departmentId);
 }
 
-/** Phòng ban của một người (có thể nhiều — ở shop nhỏ chuyện đó là bình thường). */
+/**
+ * Phòng ban của một người (có thể nhiều — ở shop nhỏ chuyện đó là bình thường).
+ *
+ * Uỷ quyền cho `lib/org/membership.ts`: đây là cửa MỌI màn hình Work OS hỏi "tôi thuộc phòng
+ * nào" (`/work`, `/work/today`, `/work/department`, `/work/performance`), nên nó phải trả lời
+ * bằng đúng mệnh đề mà màn Người dùng và phép tính quyền đang dùng. Một truy vấn thứ hai cho cùng
+ * câu hỏi là một cách để hai bên nói khác nhau.
+ */
 export async function departmentsOfUser(userId: string): Promise<{ code: DepartmentCode; id: string; name: string; roleInDept: DepartmentRole }[]> {
-  const db = await getDb();
-  const m = schema.departmentMembers;
-  const rows = await db
-    .select({ id: schema.departments.id, code: schema.departments.code, name: schema.departments.name, roleInDept: m.roleInDept })
-    .from(m)
-    .innerJoin(schema.departments, eq(schema.departments.id, m.departmentId))
-    .where(and(eq(m.userId, userId), eq(m.active, true), eq(schema.departments.active, true)));
-  return rows.map((r) => ({ ...r, code: r.code as DepartmentCode, roleInDept: r.roleInDept as DepartmentRole }));
+  const rows = await membershipOf(userId);
+  return rows.map((r) => ({ id: r.departmentId, code: r.code, name: r.name, roleInDept: r.roleInDept }));
 }
 
 /**
@@ -113,31 +99,18 @@ export type OrgPerson = {
 
 export async function listOrgPeople(): Promise<OrgPerson[]> {
   const db = await getDb();
-  const [users, rows] = await Promise.all([
+  const [users, byUser] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, role: schema.users.role })
       .from(schema.users)
       .where(eq(schema.users.active, true))
       .orderBy(asc(schema.users.name)),
-    db
-      .select({
-        userId: schema.departmentMembers.userId,
-        id: schema.departments.id,
-        code: schema.departments.code,
-        name: schema.departments.name,
-        roleInDept: schema.departmentMembers.roleInDept,
-        sortOrder: schema.departments.sortOrder,
-      })
-      .from(schema.departmentMembers)
-      .innerJoin(schema.departments, eq(schema.departments.id, schema.departmentMembers.departmentId))
-      .where(and(eq(schema.departmentMembers.active, true), eq(schema.departments.active, true)))
-      .orderBy(asc(schema.departments.sortOrder)),
+    activeMembershipsByUser(),
   ]);
-  const byUser = new Map<string, OrgPerson["departments"]>();
-  for (const r of rows) {
-    byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), { id: r.id, code: r.code as DepartmentCode, name: r.name, roleInDept: r.roleInDept as DepartmentRole }]);
-  }
-  return users.map((u) => ({ ...u, departments: byUser.get(u.id) ?? [] }));
+  return users.map((u) => ({
+    ...u,
+    departments: (byUser.get(u.id) ?? []).map((d) => ({ id: d.departmentId, code: d.code, name: d.name, roleInDept: d.roleInDept })),
+  }));
 }
 
 /* ═══════════════════ NHẬN DIỆN "VIỆC CỦA TÔI" ═══════════════════ */

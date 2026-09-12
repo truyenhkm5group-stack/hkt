@@ -14,6 +14,7 @@ import { audit } from "@/lib/audit";
 import { departmentCodesOfMany, effectiveAccess, toCustomRole } from "@/lib/auth/access";
 import { can, loadPermissionSnapshots, loadRoleTemplates, requireUser } from "@/lib/auth/session";
 import { normalizeScope } from "@/lib/constants/access-scope";
+import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { effectivePreview } from "@/lib/queries/access";
 import { savePositionSchema, saveAccessRoleSchema, setUserAccessSchema } from "@/lib/validation/access";
 
@@ -31,7 +32,7 @@ function firstIssue(error: { issues: { message: string }[] }) {
  * thấy số cũ và tưởng thao tác của mình trượt.
  */
 function refreshOrgViews() {
-  for (const p of ["/settings/users", "/work", "/work/today", "/work/department", "/work/all", "/work/performance", "/work/settings"]) revalidatePath(p);
+  for (const p of ORG_DEPENDENT_PATHS) revalidatePath(p);
   revalidatePath("/", "layout");
 }
 

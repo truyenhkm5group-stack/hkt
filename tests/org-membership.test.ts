@@ -4,6 +4,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { assignMembership, membershipDrift, membershipOf, removeMembership, setDepartmentLead, transferMembership } from "@/lib/org/membership";
+import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 
 /**
  * ═══════════════ SỰ THẬT TỔ CHỨC ═══════════════
@@ -78,6 +79,85 @@ export function testNoEmptyValueSelect() {
       `\`PickerMenu\` (components/picker-menu.tsx): nó dựng trên Popover nên luôn nằm cạnh ô bấm.`,
   );
   console.log(`✓ Không còn ô chọn điều khiển bằng chuỗi rỗng: quét ${tep.length} tệp giao diện`);
+}
+
+/**
+ * LÁ CHẮN MÃ NGUỒN: chỉ MỘT nơi được đọc thẳng bảng `department_members`.
+ *
+ * "Còn hiệu lực" phải có nghĩa GIỐNG NHAU ở mọi màn hình: dòng thành viên còn bật VÀ phòng ban
+ * còn bật. Trước bản này bốn nơi tự viết lấy mệnh đề `WHERE`, và `lib/queries/work-performance.ts`
+ * quên vế phòng ban — người thuộc phòng ĐÃ TẮT vẫn được tính vào thẻ điểm của phòng đó trong khi
+ * hàng đợi của họ đã trống từ lâu. Không ai báo lỗi: hai con số cùng đúng theo hai định nghĩa
+ * khác nhau, và cái sai chỉ lộ ra khi có người ngồi cộng tay.
+ *
+ * `lib/auth/access.ts` được miễn vì nó là máy tính quyền — nó cần chính bảng ấy nhưng KHÔNG được
+ * phụ thuộc vào `lib/org/membership.ts` (tệp đó ghi nhật ký, và nhật ký gọi lại phép tính quyền).
+ */
+const DUOC_DOC_THANG = ["lib/org/membership.ts", "lib/auth/access.ts"];
+
+export function testOneMembershipReadPath() {
+  const goc = path.resolve(__dirname, "..");
+  const tep: string[] = [];
+  const di = (thuMuc: string) => {
+    for (const f of fs.readdirSync(path.join(goc, thuMuc), { withFileTypes: true })) {
+      const p = `${thuMuc}/${f.name}`;
+      if (f.isDirectory()) di(p);
+      else if (f.name.endsWith(".ts") || f.name.endsWith(".tsx")) tep.push(p);
+    }
+  };
+  di("lib");
+  di("app");
+
+  const pham = tep.filter((f) => !DUOC_DOC_THANG.includes(f) && /\bdepartmentMembers\b|"department_members"/.test(fs.readFileSync(path.join(goc, f), "utf8")));
+  assert.deepEqual(
+    pham,
+    [],
+    `Chỉ ${DUOC_DOC_THANG.join(" và ")} được đọc thẳng bảng thành viên phòng ban. Tệp vi phạm:\n${pham.join("\n")}\n` +
+      `Dùng membershipOf / activeMembershipsByUser / membersOfDepartment thay vì tự viết mệnh đề WHERE.`,
+  );
+
+  console.log(`✓ Một đường đọc tư cách thành viên: quét ${tep.length} tệp, chỉ ${DUOC_DOC_THANG.length} tệp được phép đọc thẳng`);
+}
+
+/**
+ * ĐỔI PHÒNG BAN KHÔNG ĐƯỢC TỰ GIAO LẠI VIỆC HÀNG LOẠT — và mọi màn hình phải thấy ngay.
+ *
+ * Hai tính chất, khoá ở mức mã nguồn vì cả hai đều là chuyện "có ai đó thêm vào cho tiện":
+ *
+ *  · Tệp ghi sự thật tổ chức không được gọi hàm giao việc. Một lượt giao lại tự động là hàng chục
+ *    việc đổi chủ trong một nhịp mà không ai kịp nhìn, và không gỡ lại được vì trạng thái cũ đã
+ *    bị ghi đè ở từng miền nguồn.
+ *  · Mọi server action ghi sự thật tổ chức phải làm mới qua CÙNG một danh sách màn hình. Hai mảng
+ *    chép tay đã lệch một lần: cả hai đều quên `/work/okr` và `/work/review`, nên chủ shop xếp
+ *    người xong mở màn Mục tiêu ra vẫn thấy tổ chức cũ và kết luận thao tác của mình đã trượt.
+ */
+const TEP_GHI_TO_CHUC = ["lib/actions/org.ts", "lib/actions/access.ts", "lib/org/membership.ts"];
+const HAM_GIAO_VIEC = ["assignWorkItem", "bulkAssign", "reassign", "distributeWork", "autoAssign"];
+
+export function testNoAutoReassignOnOrgChange() {
+  const goc = path.resolve(__dirname, "..");
+
+  const pham: string[] = [];
+  for (const f of TEP_GHI_TO_CHUC) {
+    const src = fs.readFileSync(path.join(goc, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    for (const ham of HAM_GIAO_VIEC) {
+      if (new RegExp(`\\b${ham}\\s*\\(`).test(src)) pham.push(`${f} gọi ${ham}()`);
+    }
+  }
+  assert.deepEqual(pham, [], `Đổi tổ chức không được tự giao lại việc:\n${pham.join("\n")}\nXem trước tác động rồi để người bấm quyết định, đừng rải lại giúp họ.`);
+
+  // Danh sách màn hình phụ thuộc sự thật tổ chức phải là MỘT hằng số dùng chung, không phải mảng chép tay.
+  const dungHang: string[] = [];
+  for (const f of ["lib/actions/org.ts", "lib/actions/access.ts", "lib/actions/work.ts", "lib/actions/workforce.ts"]) {
+    const src = fs.readFileSync(path.join(goc, f), "utf8");
+    if (!src.includes("ORG_DEPENDENT_PATHS")) dungHang.push(f);
+  }
+  assert.deepEqual(dungHang, [], `Các tệp sau tự liệt kê màn hình cần làm mới thay vì dùng ORG_DEPENDENT_PATHS:\n${dungHang.join("\n")}`);
+
+  assert.ok(ORG_DEPENDENT_PATHS.includes("/work/okr"), "màn Mục tiêu đọc phòng ban nên phải nằm trong danh sách làm mới");
+  assert.ok(ORG_DEPENDENT_PATHS.includes("/work/performance"), "màn Hiệu suất đọc phòng ban nên phải nằm trong danh sách làm mới");
+
+  console.log(`✓ Đổi tổ chức không tự giao lại việc: ${TEP_GHI_TO_CHUC.length} tệp ghi không gọi hàm giao việc nào · ${ORG_DEPENDENT_PATHS.length} màn hình làm mới qua một hằng số dùng chung`);
 }
 
 export async function testOrgMembership(db: Db) {

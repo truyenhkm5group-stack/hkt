@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { DEPARTMENT_LABEL, type DepartmentCode, type DepartmentRole } from "@/lib/constants/departments";
@@ -86,6 +86,52 @@ export async function membershipOf(userId: string, includeInactive = false): Pro
     active: r.active,
     isLead: r.leadUserId === userId,
   }));
+}
+
+/**
+ * MỌI tư cách thành viên CÒN HIỆU LỰC, gom theo người — một câu truy vấn cho cả kho.
+ *
+ * ═══ VÌ SAO HÀM NÀY TỒN TẠI ═══
+ *
+ * "Còn hiệu lực" phải có nghĩa GIỐNG NHAU ở mọi màn hình: dòng thành viên còn bật VÀ phòng ban
+ * còn bật. Trước bản này bốn nơi tự viết lấy mệnh đề `WHERE`, và một trong bốn (`work-performance`)
+ * quên mất vế phòng ban — nên một người thuộc phòng ĐÃ TẮT vẫn được tính vào thẻ điểm của phòng
+ * đó, trong khi hàng đợi của họ đã trống từ lâu. Không ai báo lỗi: hai con số cùng đúng theo hai
+ * định nghĩa khác nhau, và cái sai chỉ lộ ra khi có người ngồi cộng tay.
+ *
+ * Nên chỉ còn một mệnh đề, ở đây. `tests/org-membership.test.ts` quét mã nguồn để không tệp nào
+ * khác đọc thẳng `department_members`.
+ */
+export async function activeMembershipsByUser(): Promise<Map<string, { departmentId: string; code: DepartmentCode; name: string; roleInDept: DepartmentRole; sortOrder: number }[]>> {
+  const db = await getDb();
+  const m = schema.departmentMembers;
+  const d = schema.departments;
+  const rows = await db
+    .select({ userId: m.userId, departmentId: m.departmentId, code: d.code, name: d.name, roleInDept: m.roleInDept, sortOrder: d.sortOrder })
+    .from(m)
+    .innerJoin(d, eq(d.id, m.departmentId))
+    .where(and(eq(m.active, true), eq(d.active, true)))
+    .orderBy(asc(d.sortOrder), asc(d.name));
+  const out = new Map<string, { departmentId: string; code: DepartmentCode; name: string; roleInDept: DepartmentRole; sortOrder: number }[]>();
+  for (const r of rows) {
+    const list = out.get(r.userId) ?? [];
+    list.push({ departmentId: r.departmentId, code: r.code as DepartmentCode, name: r.name, roleInDept: r.roleInDept as DepartmentRole, sortOrder: r.sortOrder });
+    out.set(r.userId, list);
+  }
+  return out;
+}
+
+/** Danh sách người của MỘT phòng, kèm thông tin tài khoản. Dùng cho màn cấu hình phòng ban. */
+export async function membersOfDepartment(departmentId: string): Promise<{ userId: string; name: string; email: string; role: string; roleInDept: DepartmentRole; title: string; active: boolean }[]> {
+  const db = await getDb();
+  const m = schema.departmentMembers;
+  const rows = await db
+    .select({ userId: m.userId, name: schema.users.name, email: schema.users.email, role: schema.users.role, roleInDept: m.roleInDept, title: m.title, active: m.active })
+    .from(m)
+    .innerJoin(schema.users, eq(schema.users.id, m.userId))
+    .where(eq(m.departmentId, departmentId))
+    .orderBy(asc(m.roleInDept), asc(schema.users.name));
+  return rows.map((r) => ({ ...r, roleInDept: r.roleInDept as DepartmentRole }));
 }
 
 /* ═══════════════════ GHI ═══════════════════ */
@@ -246,21 +292,6 @@ export async function transferMembership(
 }
 
 /* ═══════════════════ TÁC ĐỘNG & LỆCH DỮ LIỆU ═══════════════════ */
-
-/**
- * Bao nhiêu việc đang mang tên người này — để màn hình hỏi lại TRƯỚC khi cho họ rời phòng.
- *
- * Đọc `work_items` (việc đã có người cầm ở lớp công việc). KHÔNG dựng lại toàn bộ phép chiếu: ở
- * đây chỉ cần con số để cảnh báo, và dựng phép chiếu là một lượt đọc nặng cho một hộp thoại xác nhận.
- */
-export async function impactOfLeaving(userId: string): Promise<{ holding: number }> {
-  const db = await getDb();
-  const r = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(schema.workItems)
-    .where(and(eq(schema.workItems.assigneeId, userId), sql`coalesce(${schema.workItems.status}, '') not in ('DONE', 'CANCELLED')`));
-  return { holding: Number(r[0]?.n ?? 0) };
-}
 
 export type MembershipDrift = {
   kind: "LEAD_NOT_MEMBER" | "LEAD_INACTIVE_MEMBER" | "MEMBER_OF_INACTIVE_DEPT" | "INACTIVE_USER_ACTIVE_MEMBER" | "DUPLICATE_ROW";

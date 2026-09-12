@@ -38,7 +38,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testWorkforce } from "./workforce.test";
-import { testNoEmptyValueSelect, testOrgMembership } from "./org-membership.test";
+import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
 import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
 import { testDeployScript } from "./deploy-script.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
@@ -1420,6 +1420,8 @@ async function main() {
   await testOrgMembership(db);
   await testAccessModel(db);
   testNoEmptyValueSelect();
+  testOneMembershipReadPath();
+  testNoAutoReassignOnOrgChange();
   testPositionGrantsNothing();
   testRoleBuilderCannotEscalate();
   testScopeOnlyNarrows();
