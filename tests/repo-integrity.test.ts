@@ -20,6 +20,7 @@
  */
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 /** Đuôi mà một đường dẫn import không đuôi có thể tương ứng, theo thứ tự TypeScript tra. */
@@ -148,11 +149,55 @@ export function testMigrationAppendOnly() {
   );
 }
 
+/**
+ * ═══════════ MIGRATION MỚI KHÔNG ĐƯỢC TÁI SỬ DỤNG SỐ HIỆU ĐÃ CÓ ═══════════
+ *
+ * Sự cố 09/09/2026: hai phiên làm việc song song sinh cùng migration `0032`. Lúc đó drizzle bỏ
+ * qua nó (chạy theo _journal.json) nên sẽ chạy lại lần nữa. Bài kiểm này nên chặn từ lần tiếp
+ * theo — nếu một mục JÃ CÓ SỐ HIỆU BẰNG MỘT MỤC ĐÃ CHẠY, nó phải được bỏ qua hoặc nâng số.
+ */
+export function testMigrationNumberUnique() {
+  const journal = JSON.parse(
+    execSync("git ls-files -s drizzle/meta/_journal.json", { encoding: "utf8" })
+      ? execSync(`git show HEAD:drizzle/meta/_journal.json`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      : readFileSync("drizzle/meta/_journal.json", "utf8"),
+  ) as { entries: { idx: number; tag: string }[] };
+
+  // Kiểm tra CÓ TRÙNG trong sổ hiện tại không
+  const byIdx = new Map<number, string[]>();
+  for (const e of journal.entries) {
+    const list = byIdx.get(e.idx) ?? [];
+    list.push(e.tag);
+    byIdx.set(e.idx, list);
+  }
+
+  const dups = [...byIdx.entries()].filter(([, tags]) => tags.length > 1);
+  const KNOWN_COLLISION = 1; // idx 32 từ 09/09/2026 — đã công nhận trong lịch sử
+  assert.ok(
+    dups.length <= KNOWN_COLLISION,
+    `Migration index collision: có ${dups.length} số hiệu bị dùng lần > 1 ` +
+      dups.map(([idx, tags]) => `${idx}=${tags.join("+")}`) +
+      ". Khi sinh migration mới, dùng số LỚNHƠN tất cả số đang có.",
+  );
+
+  // Kiểm tra số hiệu tăng dần (ít nhất là không giảm) — nếu giảm thì khó đọc.
+  let maxIdx = 0;
+  for (const e of journal.entries) {
+    if (e.idx < maxIdx) {
+      console.warn(`⚠ migration-number-decreasing: ${e.tag} (idx=${e.idx}) < trước đó (${maxIdx}). Thứ tự trong sổ không khớp với số hiệu.`);
+    }
+    maxIdx = Math.max(maxIdx, e.idx);
+  }
+
+  console.log(`✓ Migration indices duy nhất: ${journal.entries.length} mục, max idx=${maxIdx}`);
+}
+
 // Chạy được độc lập (CI gọi thẳng tệp này), và cũng export để bộ kiểm thử chung dùng lại.
 if (process.argv[1] && /repo-integrity\.test\.ts$/.test(process.argv[1])) {
   try {
     testRepoIntegrity();
     testMigrationAppendOnly();
+    testMigrationNumberUnique();
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
