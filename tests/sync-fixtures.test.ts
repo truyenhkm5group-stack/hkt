@@ -59,6 +59,9 @@ import { testSearch } from "./search.test";
 import { testEntityTimeline } from "./entity-timeline.test";
 import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
+import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
+import { testDuplicateMetrics } from "./duplicate-metrics.test";
+import { testLogisticsStatusBoundary } from "./logistics-status-boundary.test";
 import { testSchedulerCoverage } from "./scheduler-coverage.test";
 import { testShipmentJoinGrain } from "./shipment-join-grain.test";
 import { testFastPathWiring } from "./fast-path-wiring.test";
@@ -1375,6 +1378,14 @@ async function main() {
   // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
   await testReturnPipeline(db);
   await testDeliveryTower(db);
+
+  // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
+  console.log("\n─ Toàn vẹn kho mã");
+  testRepoIntegrity();
+  testMigrationAppendOnly();
+  testMigrationNumberUnique();
+  testDuplicateMetrics();
+  testLogisticsStatusBoundary();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
