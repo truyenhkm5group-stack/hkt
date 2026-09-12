@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
+import { returnProductContext } from "@/lib/returns/product-context";
 import type { DqIssue, VerifiedOutcome } from "@/lib/constants/data-quality";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
@@ -311,34 +312,18 @@ export type ReturnItemSummary = { name: string; variant: string; qty: number };
  * NULL: nối qua `order_reference` = mã vận đơn gốc để lấy đơn. Không nối được ⇒ danh sách rỗng.
  */
 async function returnItemsByShipment(rows: DqShipmentRow[]): Promise<Map<string, ReturnItemSummary[]>> {
+  // MỘT engine ghép kiện ↔ đơn cho cả ERP: `lib/returns/product-context` (định danh, mã gốc chiều
+  // về, phiếu trả từng dòng, mơ hồ thì KHÔNG đoán). Ở đây chỉ rút gọn thành dòng chữ cho bảng.
   const out = new Map<string, ReturnItemSummary[]>();
   if (!rows.length) return out;
-  const db = await getDb();
-  const refs = [...new Set(rows.filter((r) => !r.orderId && r.orderReference).map((r) => r.orderReference as string))];
-  const refToOrder = new Map<string, string>();
-  if (refs.length) {
-    const found = await db.select({ vtp: s.vtpOrderNumber, orderId: s.orderId }).from(s).where(and(inArray(s.vtpOrderNumber, refs), sql`${s.orderId} is not null`));
-    for (const f of found) if (f.vtp && f.orderId) refToOrder.set(f.vtp, f.orderId);
-  }
-  const orderOf = (r: DqShipmentRow) => r.orderId ?? (r.orderReference ? refToOrder.get(r.orderReference) : undefined) ?? null;
-  const orderIds = [...new Set(rows.map(orderOf).filter((x): x is string => Boolean(x)))];
-  if (!orderIds.length) return out;
-  const oi = schema.orderItems;
-  const lines = await db
-    .select({ orderId: oi.orderId, name: oi.productName, variant: oi.variationDetail, qty: sql<number>`coalesce(sum(${oi.quantity}), 0)` })
-    .from(oi)
-    .where(inArray(oi.orderId, orderIds))
-    .groupBy(oi.orderId, oi.productName, oi.variationDetail)
-    .orderBy(oi.productName);
-  const byOrder = new Map<string, ReturnItemSummary[]>();
-  for (const l of lines) {
-    const arr = byOrder.get(l.orderId) ?? [];
-    arr.push({ name: l.name, variant: l.variant ?? "", qty: num(l.qty) });
-    byOrder.set(l.orderId, arr);
-  }
+  const ctx = await returnProductContext(rows.map((r) => r.id));
   for (const r of rows) {
-    const o = orderOf(r);
-    if (o) out.set(r.id, byOrder.get(o) ?? []);
+    const c = ctx.get(r.id);
+    if (!c || c.itemsBasis === "NONE") continue;
+    out.set(
+      r.id,
+      c.items.map((i) => ({ name: i.name, variant: [i.color, i.size].filter(Boolean).join(", "), qty: i.quantity })),
+    );
   }
   return out;
 }

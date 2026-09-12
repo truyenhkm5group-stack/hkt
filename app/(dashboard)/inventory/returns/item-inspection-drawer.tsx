@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ITEM_CONDITIONS, ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import { submitItemInspection } from "@/lib/actions/returns-warehouse";
+import type { ItemsBasis } from "@/lib/returns/product-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -51,6 +52,7 @@ export function ItemInspectionDrawer({
   items,
   disabled,
   onDone,
+  itemsBasis,
 }: {
   shipmentId: string;
   code: string | null;
@@ -58,8 +60,11 @@ export function ItemInspectionDrawer({
   items: DrawerItem[];
   disabled?: boolean;
   onDone?: () => void;
+  /** Căn cứ danh sách kỳ vọng: có phiếu trả từng món, hay chỉ suy từ cả đơn. Mặc định ORDER_ONLY (thận trọng). */
+  itemsBasis?: ItemsBasis;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [daDoiChieu, setDaDoiChieu] = React.useState(false);
   const [pending, start] = React.useTransition();
   const router = useRouter();
   const [dong, setDong] = React.useState<Dong[]>([]);
@@ -67,6 +72,7 @@ export function ItemInspectionDrawer({
   // Dựng lại mỗi lần mở: kiện có thể đã đổi, và bản nháp cũ của kiện trước không được lẫn sang.
   React.useEffect(() => {
     if (!open) return;
+    setDaDoiChieu(false);
     setDong(
       items.map((it) => ({
         expectedVariantId: it.variantId,
@@ -92,6 +98,7 @@ export function ItemInspectionDrawer({
     start(async () => {
       const r = await submitItemInspection({
         shipmentId,
+        orderOnlyConfirmed: daDoiChieu,
         items: dong.map((d) => ({
           expectedVariantId: d.expectedVariantId,
           expectedSku: d.expectedSku,
@@ -202,9 +209,17 @@ export function ItemInspectionDrawer({
                   {coLech ? <span className="text-amber-700 dark:text-amber-300"> · có lệch so với hàng kỳ vọng</span> : null}
                   <div className="mt-0.5 text-muted-foreground">Phần còn lại được ghi là thất thoát có tên, không lặng lẽ biến mất khỏi sổ.</div>
                 </div>
-                <Button className="w-full" disabled={pending || thieuLyDo.length > 0} onClick={luu}>
+                {(itemsBasis ?? "ORDER_ONLY") === "ORDER_ONLY" ? (
+                  <label className="flex items-start gap-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                    <input type="checkbox" className="mt-0.5" checked={daDoiChieu} onChange={(e) => setDaDoiChieu(e.target.checked)} />
+                    <span>
+                      Đơn này <b>không có phiếu trả từng món</b> — danh sách trên chỉ suy từ cả đơn. Tôi đã đối chiếu thực tế với hàng trong kiện trước khi lưu.
+                    </span>
+                  </label>
+                ) : null}
+                <Button className="w-full" disabled={pending || thieuLyDo.length > 0 || ((itemsBasis ?? "ORDER_ONLY") === "ORDER_ONLY" && !daDoiChieu)} onClick={luu}>
                   {pending ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
-                  {thieuLyDo.length ? `Còn ${thieuLyDo.length} món chưa nêu lý do` : "Lưu kết quả đếm"}
+                  {thieuLyDo.length ? `Còn ${thieuLyDo.length} món chưa nêu lý do` : (itemsBasis ?? "ORDER_ONLY") === "ORDER_ONLY" && !daDoiChieu ? "Xác nhận đã đối chiếu để lưu" : "Lưu kết quả đếm"}
                 </Button>
               </>
             ) : null}

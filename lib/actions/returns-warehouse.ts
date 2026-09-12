@@ -223,6 +223,8 @@ export async function scanReturnByCode(code: string): Promise<ScanResult> {
  */
 const itemInspectionSchema = z.object({
   shipmentId: z.string().min(1).max(100),
+  /** Người kho xác nhận đã đối chiếu thực tế khi danh sách kỳ vọng chỉ suy từ cả đơn (ORDER_ONLY). */
+  orderOnlyConfirmed: z.boolean().default(false),
   items: z
     .array(
       z.object({
@@ -251,7 +253,7 @@ export async function submitItemInspection(input: unknown): Promise<ItemInspecti
   const parsed = itemInspectionSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: user.email });
+  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: user.email, orderOnlyConfirmed: parsed.data.orderOnlyConfirmed });
   if ("error" in result) return { error: result.error };
 
   await audit({

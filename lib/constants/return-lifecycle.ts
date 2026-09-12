@@ -126,3 +126,9 @@ export function isItemCondition(value: unknown): value is ItemCondition {
 export function itemHasDiscrepancy(item: { expectedQty: number; actualQty: number; condition: ItemCondition }): boolean {
   return item.condition !== "OK" || item.actualQty !== item.expectedQty;
 }
+
+/**
+ * Kiện đã về shop quá số ngày này mà kho chưa nhận ⇒ đỏ. Ngưỡng nghiệp vụ — đổi phải có chủ shop
+ * (AGENTS.md mục 7). Ở `lib/constants` để cả truy vấn máy chủ lẫn bảng ở trình duyệt dùng chung.
+ */
+export const RECEIVE_SLA_DAYS = 3;

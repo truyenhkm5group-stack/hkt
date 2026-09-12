@@ -1,3 +1,4 @@
+import { RECEIVE_SLA_DAYS } from "@/lib/constants/return-lifecycle";
 import { and, asc, desc, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { IS_RETURN_NOT_RECEIVED } from "@/lib/queries/return-rate";
@@ -47,7 +48,7 @@ export type ReceiveQueue = {
 };
 
 /** Quá hạn: ĐVVC đã trả về shop chừng này ngày mà kho vẫn chưa bấm nhận. */
-export const RECEIVE_SLA_DAYS = 3;
+export { RECEIVE_SLA_DAYS };
 
 const days = (d: Date | null) => (d ? Math.floor((Date.now() - d.getTime()) / 86_400_000) : null);
 

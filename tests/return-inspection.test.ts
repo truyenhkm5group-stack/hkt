@@ -130,7 +130,7 @@ export async function testReturnInspection(db: Db) {
   const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", "kho@test");
   assert.equal(kqLoat.done, loat.length, "mọi kiện hợp lệ trong lượt phải được xử lý");
   assert.equal(kqLoat.failed.length, 0, "không kiện nào được phép hỏng im lặng");
-  const congThem = kienChoDem.slice(0, 2).reduce((t, r) => t + r.expectedQty, 0);
+  const congThem = kienChoDem.slice(0, 2).reduce((t, r) => t + (r.expectedQty ?? 0), 0);
   assert.equal(await tongTaiNhap(), tonTruocLoat + congThem, "hàng loạt “nhận đủ” cộng ĐÚNG BẰNG số ERP đã xuất, không hơn không kém");
 
   // Chạy lại đúng lượt đó: đã đếm rồi thì bị chặn, và LỖI PHẢI HIỆN RA kèm tên kiện.

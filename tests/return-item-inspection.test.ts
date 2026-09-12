@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { ITEM_CONDITIONS, ITEM_CONDITION_RESTOCKS } from "@/lib/constants/return-lifecycle";
-import { listInspectedItems, markReturnsArrived, recordItemInspection } from "@/lib/returns/inspection";
+import { listInspectedItems, listPendingInspections, markReturnsArrived, recordItemInspection } from "@/lib/returns/inspection";
 
 /**
  * ───────── ĐẾM HÀNG HOÀN THEO TỪNG MÓN ─────────
@@ -128,6 +128,35 @@ export async function testReturnItemInspection(db: Db) {
   });
   assert.ok("error" in lanHai, "đếm lại lần hai phải bị chặn — nếu không, phiếu tái nhập cộng tồn hai lần");
   assert.equal((await daVaoTon("rii-ship")).tong, 2, "sau lần bấm trùng, tồn vẫn đúng 2");
+
+  // ───────── 8b. Nhận lần hai là vô hại: không tạo dòng mới, không đổi mốc nhận ─────────
+  const lanNhanHai = await markReturnsArrived(["rii-ship"], "nguoi-nhan-2");
+  assert.equal(lanNhanHai.count, 0, "kiện đã nhận thì bấm 'đã nhận' lần nữa không tạo thêm gì");
+  const [phieuSauNhanHai] = await db.select().from(schema.returnInspections).where(eq(schema.returnInspections.shipmentId, "rii-ship"));
+  assert.equal(phieuSauNhanHai.receivedBy, "nguoi-nhan", "mốc nhận đầu tiên phải giữ nguyên, không bị người sau ghi đè");
+
+  // ───────── 8c. Danh sách kỳ vọng CHỈ suy từ cả đơn (không có phiếu trả từng món) ⇒ phải xác nhận đối chiếu ─────────
+  await db.insert(schema.orders).values({ id: "rii-order3", stage: "SHIPPED", status: 3, insertedAt: new Date("2026-08-02T00:00:00Z") }).onConflictDoNothing();
+  await db
+    .insert(schema.orderItems)
+    .values([
+      { id: "rii-oi-3a", orderId: "rii-order3", variantId: "rii-var-a", productId: "rii-prod", productName: "Áo RII", sku: "RII-A", quantity: 2, unitPrice: 200000, returnQuantity: 0 },
+      { id: "rii-oi-3b", orderId: "rii-order3", variantId: "rii-var-b", productId: "rii-prod", productName: "Áo RII", sku: "RII-B", quantity: 1, unitPrice: 200000, returnQuantity: 0 },
+    ])
+    .onConflictDoNothing();
+  await db.insert(schema.shipments).values({ id: "rii-ship3", orderId: "rii-order3", vtpOrderNumber: "RII003", stage: "RETURNED", returnedAt: new Date("2026-08-22T00:00:00Z") }).onConflictDoNothing();
+  await markReturnsArrived(["rii-ship3"], "nguoi-nhan");
+  const choDem = (await listPendingInspections(500)).find((r) => r.shipmentId === "rii-ship3");
+  assert.ok(choDem, "kiện vừa nhận phải nằm trong hàng đợi đếm");
+  assert.equal(choDem.itemsBasis, "ORDER_ONLY", "đơn không có phiếu trả từng món ⇒ căn cứ chỉ là cả đơn");
+  assert.equal(choDem.expectedQty, 3, "kỳ vọng suy từ cả đơn: 2 + 1");
+  const mon3 = [{ expectedVariantId: "rii-var-a", expectedSku: "RII-A", expectedName: "Áo RII", expectedColor: "Đỏ", expectedSize: "L", expectedQty: 2, actualVariantId: null, actualSku: "", actualQty: 2, condition: "OK" as const, note: "" }];
+  const chuaXacNhan = await recordItemInspection({ shipmentId: "rii-ship3", actor: "kho-a", items: mon3 });
+  assert.ok("error" in chuaXacNhan, "ORDER_ONLY mà chưa xác nhận đối chiếu thì KHÔNG được lưu — hoàn một phần sẽ cộng tồn cả đơn");
+  assert.equal((await daVaoTon("rii-ship3")).tong, 0, "bị từ chối thì không có phiếu kho");
+  const daXacNhan = await recordItemInspection({ shipmentId: "rii-ship3", actor: "kho-a", items: mon3, orderOnlyConfirmed: true });
+  assert.ok("ok" in daXacNhan && daXacNhan.ok, "xác nhận đã đối chiếu ⇒ lưu được");
+  assert.equal((await daVaoTon("rii-ship3")).tong, 2, "chỉ 2 món đếm được vào tồn, không phải 3 món của cả đơn");
 
   // ───────── 9. Kiện không món nào bán lại được: KHÔNG sinh phiếu kho ─────────
   const hong = await recordItemInspection({

@@ -13,6 +13,7 @@ import { scanReturnByCode, submitBulkInspection, submitReturnInspection } from "
 import { CONDITION_ACTION_LABEL, CONDITION_LABEL, CONDITION_NEEDS_NOTE, type ReturnCondition } from "@/lib/constants/returns-condition";
 import { formatNumber } from "@/lib/format";
 import type { InspectionItem } from "@/lib/returns/inspection";
+import type { ItemsBasis } from "@/lib/returns/product-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,7 +41,9 @@ export type Row = {
   customerName: string;
   customerPhone: string;
   receivedBy: string;
-  expectedQty: number;
+  /** `null` = chưa ghép được đơn ⇒ CHƯA BIẾT số kỳ vọng, không phải 0. */
+  expectedQty: number | null;
+  itemsBasis: ItemsBasis;
   ageDays: number;
   items: InspectionItem[];
 };
@@ -108,8 +111,14 @@ export function InspectionStation({ rows: initial, canWrite }: { rows: Row[]; ca
       toast.error(`Kết luận “${CONDITION_LABEL[condition]}” phải ghi lý do ở ô bên dưới trước khi bấm`);
       return;
     }
-    const restock = condition === "RESTOCKABLE" ? (soLuong ?? row.expectedQty) : 0;
-    const unsellable = condition === "RESTOCKABLE" ? Math.max(0, row.expectedQty - restock) : row.expectedQty;
+    // Không biết số kỳ vọng (kiện chưa ghép được đơn) thì KHÔNG được suy ra số nào — phải có số đếm tay.
+    if (row.expectedQty === null && soLuong === undefined) {
+      toast.error("Kiện này chưa ghép được đơn nên không biết số kỳ vọng — nhập số đếm được rồi mới kết luận");
+      return;
+    }
+    const expected = row.expectedQty ?? soLuong ?? 0;
+    const restock = condition === "RESTOCKABLE" ? (soLuong ?? expected) : 0;
+    const unsellable = condition === "RESTOCKABLE" ? Math.max(0, expected - restock) : expected;
 
     // Biến mất NGAY. Máy chủ chạy phía sau.
     boKien(row.shipmentId);
@@ -261,9 +270,10 @@ function KienHang({
   onChon: (v: boolean) => void;
   onKetLuan: (condition: ReturnCondition, qty?: number) => void;
 }) {
-  const [qty, setQty] = React.useState(String(row.expectedQty));
+  const [qty, setQty] = React.useState(row.expectedQty === null ? "" : String(row.expectedQty));
   const soDem = Math.max(0, Math.trunc(Number(qty) || 0));
-  const thieu = row.expectedQty - soDem;
+  /** `null` = không có mốc để so (chưa biết kỳ vọng). */
+  const thieu = row.expectedQty === null ? null : row.expectedQty - soDem;
 
   return (
     <div className={cn("rounded-xl border bg-card p-3 transition-colors", chon && "border-primary/50 bg-primary/5", row.ageDays >= 7 && "border-l-4 border-l-rose-500")}>
@@ -304,11 +314,11 @@ function KienHang({
             <div className="flex items-center gap-1">
               <span className="text-[12px] text-muted-foreground">Đếm được</span>
               <Input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" className="h-9 w-16 text-center font-mono text-sm" />
-              <span className="text-[12px] text-muted-foreground">/ {formatNumber(row.expectedQty)}</span>
+              <span className="text-[12px] text-muted-foreground" title={row.expectedQty === null ? "Chưa ghép được đơn — không biết số kỳ vọng" : undefined}>/ {row.expectedQty === null ? "—" : formatNumber(row.expectedQty)}</span>
             </div>
             {/* "Nhận đủ" đổi nghĩa theo ô đếm: đếm thiếu thì nút tự nói ra phần thiếu, không im lặng cộng đủ. */}
             <Button size="sm" className="h-9 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => onKetLuan("RESTOCKABLE", soDem)} disabled={soDem <= 0}>
-              <Check className="size-4" /> {thieu > 0 ? `Nhận ${soDem}, hụt ${thieu}` : "Nhận đủ"}
+              <Check className="size-4" /> {thieu === null ? `Nhận ${soDem} (chưa có mốc kỳ vọng)` : thieu > 0 ? `Nhận ${soDem}, hụt ${thieu}` : "Nhận đủ"}
             </Button>
             {NHANH.filter((n) => n.condition !== "RESTOCKABLE").map(({ condition, icon: Icon }) => (
               <Button key={condition} size="sm" variant="outline" className="h-9" onClick={() => onKetLuan(condition)}>
@@ -326,6 +336,7 @@ function KienHang({
                 shipmentId={row.shipmentId}
                 code={row.code}
                 orderCode={row.orderCode}
+                itemsBasis={row.itemsBasis}
                 items={row.items.map((it) => ({ variantId: it.variantId ?? null, sku: it.sku, name: it.name, color: it.color, size: it.size, quantity: it.quantity }))}
               />
             ) : null}

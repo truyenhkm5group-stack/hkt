@@ -1,5 +1,7 @@
 "use client";
 
+import { RECEIVE_SLA_DAYS } from "@/lib/constants/return-lifecycle";
+
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -192,7 +194,7 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
                   {/* CHƯA BIẾT hiện là "—", không phải 0. Số 0 ở đây đọc thành "kiện rỗng". */}
                   <td className="numeric px-2 py-2 text-right font-semibold">{c.expectedQty === null ? "—" : formatNumber(c.expectedQty)}</td>
                   <td className="numeric px-2 py-2 text-right text-muted-foreground">{formatVND(r.codAmount, { compact: true })}</td>
-                  <td className={cn("numeric px-2 py-2 text-right", (r.ageDays ?? 0) >= 3 && "font-semibold text-rose-600 dark:text-rose-400")}>
+                  <td className={cn("numeric px-2 py-2 text-right", (r.ageDays ?? 0) >= RECEIVE_SLA_DAYS && "font-semibold text-rose-600 dark:text-rose-400")}>
                     {r.ageDays === null ? "—" : `${r.ageDays}n`}
                   </td>
                 </tr>
