@@ -20,6 +20,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { SourceBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -197,6 +198,7 @@ export default async function ReportsPage({
           </Button>
         }
       />
+      <FinanceNav />
 
       {/* ĐỘ TIN CẬY ĐỨNG NGAY DƯỚI TIÊU ĐỀ: người đọc phải biết con số dựa trên gì TRƯỚC khi tin nó,
           không phải sau khi đã cuộn qua ba bảng. Bọc Suspense để nó không giữ cả trang lại. */}

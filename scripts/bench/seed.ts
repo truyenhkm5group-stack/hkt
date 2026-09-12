@@ -329,6 +329,84 @@ export async function seedBenchData(scale: number, days = 180): Promise<SeedStat
   }
   await insertChunked(schema.expenses, expenseRows, 12);
 
+  // ── Sổ ngân hàng: tài khoản + giao dịch có CHUỖI SỐ DƯ liền mạch ────────
+  /*
+    Bảng này trước đây KHÔNG được sinh, nên mọi phép đo chạm `bank_transactions` đều "nhanh vì
+    rỗng" — một con số vô nghĩa. Nhóm báo cáo tài chính đọc chính bảng này, nên phải sinh đúng
+    hình dạng của nó.
+
+    QUAN TRỌNG: `balance_after` phải là một CHUỖI LIỀN MẠCH thật (số dư sau cộng đúng số tiền),
+    vì báo cáo dòng tiền kiểm chính bất biến đó. Sinh số dư ngẫu nhiên sẽ tạo hàng nghìn chỗ "sổ
+    đứt" giả và phép đo lại đo một nhánh mà production không đi.
+  */
+  const bankAccountRows: (typeof schema.bankAccounts.$inferInsert)[] = [
+    { id: "bench-ba-1", provider: "SEPAY", gateway: "MBBank", accountNumber: "9972165264", label: "MB kinh doanh", status: "ACTIVE" },
+    { id: "bench-ba-2", provider: "SEPAY", gateway: "ACB", accountNumber: "4455667788", label: "ACB dự phòng", status: "ACTIVE" },
+  ];
+  await db.insert(schema.bankAccounts).values(bankAccountRows);
+
+  const bankTxnRows: (typeof schema.bankTransactions.$inferInsert)[] = [];
+  /*
+    NHÓM CHIA THEO CHIỀU TIỀN, và số dư KHÔNG được phép trôi âm vô hạn.
+
+    Bản đầu bốc nhóm đều tay từ cả chín nhóm, mà chỉ hai trong đó là tiền vào ⇒ 78% giao dịch là
+    tiền ra, số dư trôi xuống −2,1 tỷ sau 7.240 dòng và `balance_after` (kiểu `integer`) TRÀN ở
+    scale 10. Đó là dữ liệu mẫu sai hình dạng, không phải truy vấn sai: một tài khoản thật không
+    bao giờ chạy tới −2 tỷ.
+
+    Nên: tiền vào ít dòng hơn nhưng MỖI DÒNG LỚN HƠN (đúng hình dạng của shop COD — bảng kê ĐVVC
+    trả gộp vài ngày một lần), kèm một sàn an toàn. Sàn giữ chuỗi số dư vẫn ĐÚNG BẤT BIẾN
+    (`balance_after` luôn bằng tổng luỹ kế) — nó chỉ đổi chiều giao dịch trước khi cộng, không sửa
+    số dư sau khi cộng.
+  */
+  const nhomVao = ["COD_SETTLEMENT", "SALES_REVENUE"] as const;
+  const nhomRa = ["ADS_SPEND", "PURCHASE", "RENT_UTILITIES", "PAYROLL_SALARY", "SOFTWARE", "UNCLASSIFIED", "INTERNAL_TRANSFER"] as const;
+  /*
+    SỐ DƯ PHẢI DAO ĐỘNG QUANH MỘT MỨC, KHÔNG ĐƯỢC TRÔI MỘT CHIỀU.
+
+    Hai lần sai liên tiếp ở đây đều là TRÀN KIỂU `integer` tại scale 10, và cả hai đều do cùng một
+    nguyên nhân: một quy tắc sinh có kỳ vọng khác 0. Bốc nhóm đều tay ⇒ 78% là tiền ra ⇒ trôi tới
+    −2,1 tỷ. Thêm sàn rồi làm tiền vào lớn hơn ⇒ trôi ngược lên +2,15 tỷ. Với 7.240 dòng thì một
+    độ lệch trung bình rất nhỏ cũng đủ đẩy số dư ra khỏi dải.
+
+    Một tài khoản vận hành thật KHÔNG trôi một chiều — nó dao động quanh một mức: tiền COD về thì
+    dày lên, trả tiền hàng và quảng cáo thì mỏng đi. Nên chiều của mỗi giao dịch được lái theo
+    khoảng cách tới mức mục tiêu. Số tiền hai chiều cùng dải, nên kỳ vọng tự triệt tiêu.
+
+    Việc này KHÔNG làm hỏng bất biến chuỗi số dư: `balance_after` vẫn luôn bằng tổng luỹ kế, vì
+    quy tắc chỉ chọn CHIỀU trước khi cộng, không sửa số dư sau khi cộng.
+  */
+  const MUC_TIEU = 80_000_000;
+  const balance: Record<string, number> = { "bench-ba-1": 50_000_000, "bench-ba-2": 20_000_000 };
+  const txnPerDay = Math.max(1, Math.round(4 * scale));
+  let txnSeq = 0;
+  for (let d = days; d >= 0; d -= 1) {
+    for (let t = 0; t < txnPerDay; t += 1) {
+      const accountId = rand() < 0.7 ? "bench-ba-1" : "bench-ba-2";
+      // Trên mức mục tiêu thì nghiêng về tiền ra, dưới thì nghiêng về tiền vào.
+      const vao = rand() < (balance[accountId] > MUC_TIEU ? 0.35 : 0.65);
+      const amount = (vao ? 1 : -1) * between(200_000, 8_000_000);
+      const group = vao ? pick(nhomVao) : pick(nhomRa);
+      balance[accountId] += amount;
+      txnSeq += 1;
+      bankTxnRows.push({
+        id: `bench-bt-${txnSeq}`,
+        bankAccountId: accountId,
+        txnAt: new Date(now - d * DAY + t * 3_600_000),
+        amount,
+        description: `Giao dich ${txnSeq}`,
+        counterparty: pick(["Meta Platforms", "Viettel Post", "Xuong may A", "Chu nha", "Nhan vien", "Dich vu phan mem"]),
+        bankRef: `BENCH-FT-${txnSeq}`,
+        accountingGroup: group,
+        balanceAfter: balance[accountId],
+        source: "WEBHOOK",
+        provider: "SEPAY",
+        providerTxnId: `bench-sepay-${txnSeq}`,
+      });
+    }
+  }
+  await insertChunked(schema.bankTransactions, bankTxnRows, 20);
+
   // ── Thông báo (hàng đợi việc / cảnh báo) ────────────────────────────────
   const notificationRows: (typeof schema.notifications.$inferInsert)[] = [];
   const notifCount = Math.max(20, Math.round(300 * scale));
@@ -367,6 +445,8 @@ export async function seedBenchData(scale: number, days = 180): Promise<SeedStat
     fb_ads: fbRows.length,
     stock_receipt_items: receiptItemRows.length,
     expenses: expenseRows.length,
+    bank_accounts: bankAccountRows.length,
+    bank_transactions: bankTxnRows.length,
     notifications: notificationRows.length,
   };
 }

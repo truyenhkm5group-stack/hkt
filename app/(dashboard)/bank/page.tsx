@@ -5,6 +5,7 @@ import { BankMatchTab } from "@/app/(dashboard)/bank/match-tab";
 import { BankReconcileTab } from "@/app/(dashboard)/bank/reconcile-tab";
 import { BankRulesTab } from "@/app/(dashboard)/bank/rules-tab";
 import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { BANK_TABS, type BankTab } from "@/lib/constants/bank";
@@ -49,6 +50,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
         description="Dòng tiền thu / chi thực trên tài khoản"
         hint="Nhập sao kê ngân hàng, phân loại từng giao dịch vào nhóm kế toán, và đưa khoản chi hợp lệ sang Báo cáo lợi nhuận. Nhóm nào đã có nguồn chuyên biệt (quảng cáo, tiền hàng, cước ĐVVC) chỉ dùng để đối chiếu, không trừ lần thứ hai."
       />
+      <FinanceNav badges={{ bank: unclassified }} />
       <BankTabs active={tab} unclassified={unclassified} unconfirmedAccounts={unconfirmedAccounts} />
 
       {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}

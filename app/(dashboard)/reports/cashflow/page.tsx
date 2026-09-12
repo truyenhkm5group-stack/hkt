@@ -1,129 +1,56 @@
-import { AlertTriangle, Banknote, Boxes, TrendingDown } from "lucide-react";
-import { MetricCard } from "@/components/metric-card";
+import { BridgeTab } from "@/app/(dashboard)/reports/cashflow/bridge-tab";
+import { CashflowTabs } from "@/app/(dashboard)/reports/cashflow/cashflow-tabs";
+import { ForecastTab } from "@/app/(dashboard)/reports/cashflow/forecast-tab";
+import { StatementTab } from "@/app/(dashboard)/reports/cashflow/statement-tab";
+import { PeriodFilter } from "@/components/data-table/toolbar";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
-import { Money, SectionCard } from "@/components/ui-bits";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
-import { formatNumber } from "@/lib/format";
-import { getCashflow } from "@/lib/queries/cashflow";
-import { cn } from "@/lib/utils";
+import { isCashflowTab, type CashflowTab } from "@/lib/constants/cashflow-tabs";
+import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Dòng tiền" };
 
-export default async function CashflowPage() {
+/**
+ * ═══════════ DÒNG TIỀN — BA CƠ SỞ ĐO, BA TAB ═══════════
+ *
+ * Trước đây trang này CHỈ có phần dự phóng, và nó nói thẳng lý do: "ERP KHÔNG có số dư ngân hàng".
+ * Câu đó đúng vào lúc viết và nay đã lỗi thời — `bank_transactions.balance_after` (số dư do chính
+ * ngân hàng ghi trên mỗi giao dịch) đã được lưu từ lâu mà không truy vấn nào đọc tới.
+ *
+ * Nên trang nay có ba tab, và chúng là ba CƠ SỞ ĐO khác nhau — không bao giờ được cộng với nhau:
+ *
+ *   · Tiền thật đã vào ra — ĐÃ XẢY RA. Từ sao kê, có đầu kỳ / cuối kỳ ngân hàng ghi, có phép kiểm.
+ *   · Dự phóng kỳ tới     — CHƯA XẢY RA. Suy từ nhịp chi. Nội dung nguyên bản, giữ nguyên công thức.
+ *   · Lợi nhuận ≠ tiền    — GIẢI THÍCH vì sao hai con số trên khác nhau.
+ *
+ * Mỗi tab chỉ chạy truy vấn của CHÍNH NÓ: mở tab dự phóng không phải trả giá cho báo cáo tiền thật
+ * và ngược lại. Đây là lý do phần thân là ba thành phần riêng chứ không phải một trang gọi hết.
+ */
+export default async function CashflowPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const raw = await searchParams;
   await requirePermission("reports:cash");
-  const r = await getCashflow();
-  const w = r.workingCapital;
-  const worst = r.buckets.reduce((min, b) => (b.net < min.net ? b : min), r.buckets[0]);
+  const period = resolvePeriod(raw, "month");
+  const requested = param(raw, "tab", "thuc-te");
+  const tab = (isCashflowTab(requested) ? requested : "thuc-te") as CashflowTab;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Tài chính"
-        title="Dòng tiền & vốn lưu động"
-        description="Lợi nhuận không phải tiền — trang này trả lời tuần sau có đủ tiền chạy tiếp không."
-        hint="Một shop bán COD có thể lãi trên giấy mà vẫn hết tiền mặt: hàng đã giao nhưng Viettel Post giữ tiền cả tuần, còn tiền quảng cáo và tiền hàng thì trả ngay. ERP KHÔNG có số dư ngân hàng, nên đây là dòng tiền RÒNG dự kiến (vào trừ ra), không phải số dư tài khoản."
+        title="Dòng tiền"
+        description="Lợi nhuận không phải tiền — trang này đo tiền"
+        hint="Một shop bán COD có thể lãi trên giấy mà vẫn hết tiền mặt: hàng đã giao nhưng Viettel Post giữ tiền cả tuần, còn tiền quảng cáo và tiền hàng thì trả ngay. Ba tab là ba cơ sở đo khác nhau (đã xảy ra / chưa xảy ra / giải thích khoảng lệch) và không bao giờ được cộng với nhau."
+        actions={tab === "du-phong" ? undefined : <PeriodFilter defaultKey="month" />}
       />
+      <FinanceNav />
+      <CashflowTabs active={tab} />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Viettel Post đang giữ"
-          value={<Money value={w.codReceivable} />}
-          note={`${formatNumber(w.codReceivableCount)} đơn đã giao chưa thấy chứng từ tiền`}
-          icon={Banknote}
-          tone={w.codReceivable > 0 ? "amber" : "slate"}
-        />
-        <MetricCard
-          label="Trong đó quá hạn"
-          value={<Money value={w.codOverdue} />}
-          note="Đã quá kỳ đối soát thông thường — nhiều khả năng phải đi đòi"
-          icon={AlertTriangle}
-          tone={w.codOverdue > 0 ? "rose" : "slate"}
-        />
-        <MetricCard label="Vốn nằm trong hàng tồn" value={<Money value={w.inventoryValue} />} note="Theo giá nhập; mẫu chưa có giá nhập không tính vào" icon={Boxes} tone="slate" />
-        <MetricCard
-          label="Kỳ căng nhất"
-          value={<Money value={worst.net} />}
-          note={`${worst.label} · dòng tiền ròng thấp nhất trong ba kỳ`}
-          icon={TrendingDown}
-          tone={worst.net < 0 ? "rose" : "green"}
-        />
-      </section>
-
-      <SectionCard
-        title="Dự phóng dòng tiền"
-        description="Tiền vào trừ tiền ra, theo nhịp chi thực tế"
-        hint={`Tiền vào = COD của đơn ĐÃ GIAO chưa thấy chứng từ, rải đều tới kỳ đối soát ${r.basis.codSettlementDays} ngày. Tiền ra = nhịp chi quảng cáo 14 ngày gần nhất (${r.basis.adsPerDay.toLocaleString("vi-VN")}đ/ngày) + nhịp chi vận hành 60 ngày gần nhất (${r.basis.opexPerDay.toLocaleString("vi-VN")}đ/ngày) + tiền hàng phải trả xưởng. CỐ Ý không dự phóng tiền từ đơn chưa giao.`}
-        padded={false}
-      >
-        <div className="overflow-x-auto">
-          <Table className="min-w-[720px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Kỳ</TableHead>
-                <TableHead className="text-right">COD dự kiến về</TableHead>
-                <TableHead className="text-right">Chi quảng cáo</TableHead>
-                <TableHead className="text-right">Chi vận hành</TableHead>
-                <TableHead className="text-right">Tiền hàng xưởng</TableHead>
-                <TableHead className="text-right">Dòng tiền ròng</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {r.buckets.map((b) => (
-                <TableRow key={b.days}>
-                  <TableCell className="font-medium">{b.label}</TableCell>
-                  <TableCell className="text-right"><Money value={b.codExpected} /></TableCell>
-                  <TableCell className="text-right"><Money value={-b.adsPlanned} /></TableCell>
-                  <TableCell className="text-right"><Money value={-b.opexPlanned} /></TableCell>
-                  <TableCell className="text-right">{b.productionDue ? <Money value={-b.productionDue} /> : "—"}</TableCell>
-                  <TableCell className={cn("text-right font-semibold", b.net < 0 && "text-rose-600 dark:text-rose-400")}>
-                    <Money value={b.net} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">ERP KHÔNG biết những điều sau — đọc trước khi tin con số:</p>
-          <ul className="mt-1 space-y-0.5">
-            {r.limitations.map((l, i) => (
-              <li key={i}>• {l}</li>
-            ))}
-          </ul>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Vốn lưu động" description="Tiền đang nằm ở đâu ngoài tài khoản" padded={false}>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Khoản</TableHead>
-                <TableHead className="text-right">Giá trị</TableHead>
-                <TableHead>Nghĩa là gì</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell className="font-medium">COD chờ về</TableCell>
-                <TableCell className="text-right"><Money value={w.codReceivable} /></TableCell>
-                <TableCell className="text-xs text-muted-foreground">Hàng đã tới tay khách, tiền còn ở Viettel Post</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-medium">Vốn trong hàng tồn</TableCell>
-                <TableCell className="text-right"><Money value={w.inventoryValue} /></TableCell>
-                <TableCell className="text-xs text-muted-foreground">Đã trả tiền xưởng, chưa bán được</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-medium">Đã cam kết với xưởng</TableCell>
-                <TableCell className="text-right"><Money value={w.productionCommitted} /></TableCell>
-                <TableCell className="text-xs text-muted-foreground">Đơn sản xuất đã gửi, chưa nhận hàng — sẽ phải trả</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-      </SectionCard>
+      {tab === "thuc-te" ? <StatementTab period={period} /> : null}
+      {/* Dự phóng luôn nhìn về PHÍA TRƯỚC (7/14/30 ngày tới) nên nó không nhận kỳ báo cáo —
+          ô chọn kỳ vì thế được ẩn ở tab này thay vì hiện ra rồi không làm gì. */}
+      {tab === "du-phong" ? <ForecastTab /> : null}
+      {tab === "doi-chieu" ? <BridgeTab period={period} /> : null}
     </div>
   );
 }

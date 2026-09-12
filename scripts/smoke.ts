@@ -85,6 +85,9 @@ const ROUTES = [
     phải có mặt ở đây, hoặc được khai miễn trừ KÈM LÝ DO.
   */
   "/bank",
+  // Buồng lái tài chính: đọc năm engine cùng lúc (số dư, dòng tiền, kết quả đơn, COD, chi phí) nên
+  // nó là trang tài chính NẶNG NHẤT. Không phủ thì một engine chậm lại sẽ không lượt đo nào thấy.
+  "/finance",
   "/cs",
   "/outreach",
   "/landing",

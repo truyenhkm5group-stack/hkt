@@ -100,6 +100,9 @@ const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "Tiền",
     items: [
+      // Đứng ĐẦU nhóm: đây là màn hình trả lời "còn bao nhiêu tiền, nằm ở đâu" — câu hỏi đầu tiên
+      // của chủ shop mỗi sáng, và câu mà sáu trang còn lại của nhóm này cộng lại vẫn không trả lời.
+      { href: "/finance", label: "Tổng quan tài chính", icon: Wallet, permission: "bank:view", anyOf: ["bank:view", "reports:cash", "cod:view"] },
       { href: "/cod", label: "Đối soát COD", icon: PackageCheck, permission: "cod:view" },
       { href: "/bank", label: "Sổ ngân hàng", icon: Landmark, permission: "bank:view" },
       { href: "/expenses", label: "Chi phí vận hành", icon: ReceiptText, permission: "expenses:view" },

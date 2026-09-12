@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { getDb, schema } from "@/db";
+import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
@@ -71,6 +72,22 @@ export type CashflowReport = {
  * bán COD tỷ lệ hoàn đủ lớn để phép ngoại suy đó thành sai lệch nghiêm trọng.
  */
 export async function getCashflow(): Promise<CashflowReport> {
+  /**
+   * ĐỆM — thiếu từ đầu, và phép đo cho thấy cái giá.
+   *
+   * `npm run bench` scale 10: **1.978 ms lạnh / 2.035 ms ẤM**. Ấm bằng lạnh nghĩa là KHÔNG có đệm
+   * nào cả — mọi lượt mở trang đều trả đủ giá, kể cả khi hai người mở cách nhau một giây. Mọi báo
+   * cáo nặng khác trong kho mã đều đã có `memo` (`financial-truth`, `cost-engine`,
+   * `cod-settlement`…); hàm này bị bỏ sót.
+   *
+   * Dự phóng không nhận tham số nào (luôn nhìn 7/14/30 ngày TỚI) nên khoá là hằng số. TTL 90 giây
+   * bằng với các báo cáo tài chính khác: dự phóng dựa trên nhịp chi nhiều tuần, chậm 90 giây không
+   * đổi kết luận nào.
+   */
+  return memo("cashflow-forecast", 90_000, buildCashflow);
+}
+
+async function buildCashflow(): Promise<CashflowReport> {
   const db = await getDb();
 
   // ── Tiền COD đang bị giữ: đơn ĐÃ GIAO THÀNH CÔNG mà chưa có đồng chứng từ nào ──
