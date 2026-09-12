@@ -1,0 +1,450 @@
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+[AdsDecision] 40.6 ms
+select "d_key", max(coalesce(nullif("d_campaign_name", ''), "d_ad_id")), count(*) filter (where "d_outcome" <> 'CANCELLED'), count(*) filter (where "d_outcome" = 'DELIVERED'), count(*) filter (where "d_outcome" in ('RETURNED','RETURNED_BY_RULE')), count(*) filter (where "d_outcome" in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')), coalesce(sum("d_revenue") filter (where "d_outcome" <> 'CANCELLED'), 0), 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+GroupAggregate  (cost=45408.48..45423.13 rows=200 width=160) (actual time=80.297..80.386 rows=14.00 loops=1)
+  Group Key: ads_decision_facts.d_key
+  Buffers: shared hit=11734
+  ->  Sort  (cost=45408.48..45409.05 rows=226 width=114) (actual time=80.274..80.304 rows=110.00 loops=1)
+        Sort Key: ads_decision_facts.d_key
+        Sort Method: quicksort  Memory: 27kB
+        Buffers: shared hit=11734
+        ->  Subquery Scan on ads_decision_facts  (cost=1455.55..45399.65 rows=226 width=114) (actual time=44.068..80.183 rows=110.00 loops=1)
+              Buffers: shared hit=11734
+              ->  Hash Left Join  (cost=1455.55..45397.39 rows=226 width=146) (actual time=44.036..80.102 rows=110.00 loops=1)
+                    Hash Cond: (orders.ad_id = fb_ads.id)
+                    Buffers: shared hit=11734
+                    ->  Hash Right Join  (cost=1452.29..1615.86 rows=226 width=152) (actual time=7.134..7.815 rows=110.00 loops=1)
+                          Hash Cond: (shipments.order_id = orders.id)
+                          Join Filter: ((NOT EXISTS(SubPlan 32)) OR (shipments.id = (SubPlan 33)))
+                          Buffers: shared hit=1248
+                          ->  Seq Scan on shipments  (cost=0.00..154.10 rows=3610 width=92) (actual time=0.027..1.368 rows=3610.00 loops=1)
+                                Buffers: shared hit=118
+                          ->  Hash  (cost=1449.46..1449.46 rows=226 width=72) (actual time=5.329..5.331 rows=110.00 loops=1)
+                                Buckets: 1024  Batches: 1  Memory Usage: 16kB
+                                Buffers: shared hit=800
+                                ->  Index Scan using orders_inserted_idx on orders  (cost=0.30..1449.46 rows=226 width=72) (actual time=0.108..5.249 rows=110.00 loops=1)
+                                      Index Cond: ((inserted_at >= '2026-09-01 00:00:00+07'::timestamp with time zone) AND (inserted_at <= '2026-09-12 23:59:59.999+07'::timestamp with time zone))
+                                      Filter: ((stage = ANY ('{CONFIRMED,PACKING,READY_TO_SHIP,SHIPPED,DELIVERED,PAID,RETURNING,PARTIAL_RETURN,RETURNED}'::order_stage[])) AND (COALESCE((SubPlan 34), (SubPlan 35)) IS NOT NULL))
+                                      Rows Removed by Filter: 141
+                                      Index Searches: 1
+                                      Buffers: shared hit=800
+                                      SubPlan 34
+                                        ->  Seq Scan on fb_ads fa_2  (cost=0.00..2.70 rows=1 width=12) (actual time=0.005..0.005 rows=0.47 loops=235)
+                                              Filter: (id = orders.ad_id)
+                                              Rows Removed by Filter: 56
+                                              Buffers: shared hit=470
+                                      SubPlan 35
+                                        ->  Subquery Scan on p_1  (cost=2.99..3.02 rows=1 width=32) (actual time=0.020..0.020 rows=0.00 loops=125)
+                                              Buffers: shared hit=250
+                                              ->  GroupAggregate  (cost=2.99..3.01 rows=1 width=47) (actual time=0.020..0.020 rows=0.00 loops=125)
+                                                    Filter: (count(DISTINCT fa_3.campaign_id) = 1)
+                                                    Buffers: shared hit=250
+                                                    ->  Sort  (cost=2.99..2.99 rows=1 width=27) (actual time=0.019..0.019 rows=0.00 loops=125)
+                                                          Sort Key: fa_3.campaign_id
+                                                          Sort Method: quicksort  Memory: 17kB
+                                                          Buffers: shared hit=250
+                                                          ->  Seq Scan on fb_ads fa_3  (cost=0.00..2.98 rows=1 width=27) (actual time=0.013..0.013 rows=0.00 loops=125)
+                                                                Filter: ((post_id IS NOT NULL) AND (campaign_id IS NOT NULL) AND (post_id ~ '^[0-9]{5,}$'::text) AND (post_id = regexp_replace(orders.post_id, '^.*_'::text, ''::text)))
+                                                                Rows Removed by Filter: 56
+                                                                Buffers: shared hit=250
+                          SubPlan 32
+                            ->  Index Scan using shipments_order_idx on shipments sh0  (cost=0.28..8.30 rows=1 width=0) (actual time=0.003..0.003 rows=0.00 loops=110)
+                                  Index Cond: (order_id = orders.id)
+                                  Filter: (id <> shipments.id)
+                                  Rows Removed by Filter: 1
+                                  Index Searches: 110
+                                  Buffers: shared hit=330
+                          SubPlan 33
+                            ->  Limit  (cost=8.31..8.31 rows=1 width=25) (never executed)
+                                  ->  Sort  (cost=8.31..8.31 rows=1 width=25) (never executed)
+                                        Sort Key: ((sh.stage = 'DELIVERED'::shipment_stage)) DESC, sh.attempt_no DESC NULLS LAST, sh.created_at DESC, sh.id
+                                        ->  Index Scan using shipments_order_idx on shipments sh  (cost=0.28..8.30 rows=1 width=25) (never executed)
+                                              Index Cond: (order_id = orders.id)
+                                              Index Searches: 0
+                    ->  Hash  (cost=2.56..2.56 rows=56 width=30) (actual time=0.071..0.071 rows=56.00 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 7kB
+                          Buffers: shared hit=2
+                          ->  Seq Scan on fb_ads  (cost=0.00..2.56 rows=56 width=30) (actual time=0.040..0.052 rows=56.00 loops=1)
+                                Buffers: shared hit=2
+                    SubPlan 1
+                      ->  Seq Scan on fb_ads fa  (cost=0.00..2.70 rows=1 width=12) (actual time=0.003..0.004 rows=1.00 loops=110)
+                            Filter: (id = orders.ad_id)
+                            Rows Removed by Filter: 55
+                            Buffers: shared hit=220
+                    SubPlan 2
+                      ->  Subquery Scan on p  (cost=2.99..3.02 rows=1 width=32) (never executed)
+                            ->  GroupAggregate  (cost=2.99..3.01 rows=1 width=47) (never executed)
+                                  Filter: (count(DISTINCT fa_1.campaign_id) = 1)
+                                  ->  Sort  (cost=2.99..2.99 rows=1 width=27) (never executed)
+                                        Sort Key: fa_1.campaign_id
+                                        ->  Seq Scan on fb_ads fa_1  (cost=0.00..2.98 rows=1 width=27) (never executed)
+                                              Filter: ((post_id IS NOT NULL) AND (campaign_id IS NOT NULL) AND (post_id ~ '^[0-9]{5,}$'::text) AND (post_id = regexp_replace(orders.post_id, '^.*_'::text, ''::text)))
+                    SubPlan 3
+                      ->  Seq Scan on canonical_order_outcome m  (cost=0.00..0.00 rows=1 width=4) (actual time=0.000..0.000 rows=0.00 loops=110)
+                            Filter: ((computed_at >= orders.updated_at) AND (order_id = orders.id) AND (COALESCE(shipment_id, ''::text) = COALESCE(shipments.id, ''::text)) AND (logic_version = 2))
+                    SubPlan 5
+                      ->  Aggregate  (cost=48.77..48.78 rows=1 width=8) (actual time=0.301..0.302 rows=1.00 loops=110)
+                            Buffers: shared hit=7728
+                            ->  Hash Right Join  (cost=11.66..16.57 rows=2 width=24) (actual time=0.022..0.047 rows=2.06 loops=110)
+                                  Hash Cond: (pv2.id = oi.variant_id)
+                                  Buffers: shared hit=664
+                                  ->  Seq Scan on product_variants pv2  (cost=0.00..4.26 rows=126 width=16) (actual time=0.001..0.017 rows=126.00 loops=110)
+                                        Buffers: shared hit=330
+                                  ->  Hash  (cost=11.63..11.63 rows=2 width=20) (actual time=0.009..0.009 rows=2.06 loops=110)
+                                        Buckets: 1024  Batches: 1  Memory Usage: 5kB
+                                        Buffers: shared hit=334
+                                        ->  Bitmap Heap Scan on order_items oi  (cost=4.30..11.63 rows=2 width=20) (actual time=0.003..0.004 rows=2.06 loops=110)
+                                              Recheck Cond: (order_id = orders.id)
+                                              Heap Blocks: exact=114
+                                              Buffers: shared hit=334
+                                              ->  Bitmap Index Scan on order_items_order_idx  (cost=0.00..4.30 rows=2 width=0) (actual time=0.002..0.002 rows=2.06 loops=110)
+                                                    Index Cond: (order_id = orders.id)
+                                                    Index Searches: 110
+                                                    Buffers: shared hit=220
+                            SubPlan 4
+                              ->  Limit  (cost=10.56..16.09 rows=1 width=20) (actual time=0.120..0.120 rows=1.00 loops=227)
+                                    Buffers: shared hit=7064
+                                    ->  Incremental Sort  (cost=10.56..71.44 rows=11 width=20) (actual time=0.119..0.119 rows=1.00 loops=227)
+                                          Sort Key: r2.received_at DESC, r2.created_at DESC
+                                          Presorted Key: r2.received_at
+                                          Full-sort Groups: 227  Sort Method: quicksort  Average Memory: 17kB  Peak Memory: 17kB
+                                          Buffers: shared hit=7064
+                                          ->  Nested Loop  (cost=4.51..70.95 rows=11 width=20) (actual time=0.062..0.117 rows=2.01 loops=227)
+                                                Join Filter: (ri2.receipt_id = r2.id)
+                                                Rows Removed by Join Filter: 319
+                                                Buffers: shared hit=7064
+                                                ->  Index Scan Backward using stock_receipts_received_idx on stock_receipts r2  (cost=0.14..22.83 rows=180 width=27) (actual time=0.002..0.010 rows=29.89 loops=227)
+                                                      Index Searches: 227
+                                                      Buffers: shared hit=4818
+                                                ->  Materialize  (cost=4.36..18.44 rows=11 width=15) (actual time=0.000..0.002 rows=10.75 loops=6786)
+                                                      Storage: Memory  Maximum Storage: 17kB
+                                                      Buffers: shared hit=2246
+                                                      ->  Bitmap Heap Scan on stock_receipt_items ri2  (cost=4.36..18.39 rows=11 width=15) (actual time=0.004..0.009 rows=11.70 loops=227)
+                                                            Recheck Cond: (variant_id = oi.variant_id)
+                                                            Filter: (unit_cost > 0)
+                                                            Heap Blocks: exact=1792
+                                                            Buffers: shared hit=2246
+                                                            ->  Bitmap Index Scan on stock_receipt_items_variant_idx  (cost=0.00..4.36 rows=11 width=0) (actual time=0.002..0.002 rows=11.70 loops=227)
+                                                                  Index Cond: (variant_id = oi.variant_id)
+                                                                  Index Searches: 227
+                                                                  Buffers: shared hit=454
+                    SubPlan 6
+                      ->  Seq Scan on canonical_order_outcome m_1  (cost=0.00..0.00 rows=1 width=32) (actual time=0.000..0.000 rows=0.00 loops=110)
+                            Filter: ((computed_at >= orders.updated_at) AND ((shipments.id IS NULL) OR (computed_at >= shipments.updated_at)) AND (order_id = orders.id) AND (COALESCE(shipment_id, ''::text) = COALESCE(shipments.id, ''::text)) AND (logic_version = 2))
+                    SubPlan 8
+                      ->  Seq Scan on shipment_events ev  (cost=0.00..512.08 rows=14159 width=12) (never executed)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                    SubPlan 10
+                      ->  Seq Scan on shipment_events fe  (cost=0.00..512.08 rows=854 width=12) (actual time=0.018..1.658 rows=854.00 loops=1)
+                            Filter: ((status = ANY ('{504,503}'::text[])) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 13305
+                            Buffers: shared hit=282
+                    SubPlan 12
+                      ->  Seq Scan on shipment_events fe_1  (cost=0.00..547.48 rows=149 width=12) (actual time=1.263..1.263 rows=0.00 loops=1)
+                            Filter: ((status = '501'::text) AND (leg_type = 'RETURN'::text) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 14159
+                            Buffers: shared hit=282
+                    SubPlan 14
+                      ->  Seq Scan on shipment_events fe_2  (cost=0.00..529.78 rows=1 width=12) (actual time=1.609..1.609 rows=0.00 loops=1)
+                            Filter: ((source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])) AND (status = ANY ('{101,107,201}'::text[])))
+                            Rows Removed by Filter: 14159
+                            Buffers: shared hit=282
+                    SubPlan 15
+                      ->  Index Scan using shipments_order_reference_lookup_idx on shipments leg  (cost=0.12..8.14 rows=1 width=0) (actual time=0.001..0.001 rows=0.00 loops=70)
+                            Index Cond: (order_reference = shipments.vtp_order_number)
+                            Filter: (id <> shipments.id)
+                            Index Searches: 70
+                            Buffers: shared hit=140
+                    SubPlan 16
+                      ->  Index Only Scan using shipment_events_revenue_edit_idx on shipment_events ev_1  (cost=0.13..8.11 rows=1 width=0) (actual time=0.001..0.001 rows=0.00 loops=70)
+                            Index Cond: ((shipment_id = shipments.id) AND (occurred_at >= (COALESCE(shipments.delivered_at, shipments.vtp_status_date) - '00:02:00'::interval)))
+                            Heap Fetches: 0
+                            Index Searches: 70
+                            Buffers: shared hit=140
+                    SubPlan 18
+                      ->  Seq Scan on shipment_events fe_3  (cost=0.00..547.48 rows=2326 width=12) (actual time=0.025..2.420 rows=2475.00 loops=1)
+                            Filter: ((status = '501'::text) AND (leg_type = 'OUTBOUND'::text) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 11684
+                            Buffers: shared hit=282
+                    SubPlan 20
+                      ->  Seq Scan on shipment_events ev_2  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.087..4.263 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 22
+                      ->  Seq Scan on shipment_events ev_3  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.045..4.025 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 24
+                      ->  Seq Scan on shipment_events ev_4  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.137..3.577 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 26
+                      ->  Seq Scan on shipment_events ev_5  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.038..3.644 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 27
+                      ->  Index Only Scan using shipment_events_revenue_edit_idx on shipment_events ev_6  (cost=0.13..8.11 rows=1 width=0) (never executed)
+                            Index Cond: ((shipment_id = shipments.id) AND (occurred_at >= (COALESCE(shipments.delivered_at, shipments.vtp_status_date) - '00:02:00'::interval)))
+                            Heap Fetches: 0
+                            Index Searches: 0
+                    SubPlan 29
+                      ->  Seq Scan on cod_statement_lines l  (cost=0.00..51.64 rows=1764 width=12) (never executed)
+                            Filter: cod_reported
+                    SubPlan 31
+                      ->  Seq Scan on cod_statement_lines l_1  (cost=0.00..51.64 rows=1764 width=12) (never executed)
+                            Filter: cod_reported
+Planning:
+  Buffers: shared hit=88
+Planning Time: 3.642 ms
+Execution Time: 80.824 ms
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+[AdsDecision] 30.0 ms
+select "p_key", max("p_name"), count(distinct "p_order_id") filter (where "p_outcome" <> 'CANCELLED'), count(distinct "p_order_id") filter (where "p_outcome" = 'DELIVERED'), count(distinct "p_order_id") filter (where "p_outcome" in ('RETURNED','RETURNED_BY_RULE')), count(distinct "p_order_id") filter (where "p_outcome" in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')), coalesce(sum("p_line_revenue") filt
+────────────────────────────────────────────────────────────────────────────────────────────────────
+GroupAggregate  (cost=63864.57..63893.16 rows=200 width=184) (actual time=43.368..43.724 rows=21.00 loops=1)
+  Group Key: ads_product_facts.p_key
+  Buffers: shared hit=4567
+  ->  Sort  (cost=63864.57..63865.71 rows=455 width=132) (actual time=43.299..43.377 rows=482.00 loops=1)
+        Sort Key: ads_product_facts.p_key, ads_product_facts.p_order_id
+        Sort Method: quicksort  Memory: 58kB
+        Buffers: shared hit=4567
+        ->  Subquery Scan on ads_product_facts  (cost=489.43..63844.48 rows=455 width=132) (actual time=13.597..42.946 rows=482.00 loops=1)
+              Buffers: shared hit=4567
+              ->  WindowAgg  (cost=489.43..63839.93 rows=455 width=132) (actual time=13.595..42.779 rows=482.00 loops=1)
+                    Window: w1 AS (PARTITION BY orders.id)
+                    Storage: Memory  Maximum Storage: 17kB
+                    Buffers: shared hit=4567
+                    ->  Sort  (cost=489.41..490.55 rows=455 width=180) (actual time=4.983..5.058 rows=482.00 loops=1)
+                          Sort Key: orders.id
+                          Sort Method: quicksort  Memory: 116kB
+                          Buffers: shared hit=1059
+                          ->  Hash Left Join  (cost=201.12..469.33 rows=455 width=180) (actual time=4.138..4.773 rows=482.00 loops=1)
+                                Hash Cond: (COALESCE(product_variants.product_id, order_items.product_id) = products.id)
+                                Buffers: shared hit=1059
+                                ->  Hash Left Join  (cost=199.65..466.64 rows=455 width=168) (actual time=4.119..4.581 rows=482.00 loops=1)
+                                      Hash Cond: (order_items.variant_id = product_variants.id)
+                                      Buffers: shared hit=1058
+                                      ->  Hash Join  (cost=193.81..459.56 rows=455 width=166) (actual time=4.046..4.346 rows=482.00 loops=1)
+                                            Hash Cond: (order_items.order_id = orders.id)
+                                            Buffers: shared hit=1055
+                                            ->  Seq Scan on order_items  (cost=0.00..231.42 rows=7942 width=58) (actual time=0.021..1.025 rows=7942.00 loops=1)
+                                                  Buffers: shared hit=152
+                                            ->  Hash  (cost=190.97..190.97 rows=227 width=120) (actual time=2.048..2.053 rows=235.00 loops=1)
+                                                  Buckets: 1024  Batches: 1  Memory Usage: 40kB
+                                                  Buffers: shared hit=903
+                                                  ->  Hash Right Join  (cost=27.40..190.97 rows=227 width=120) (actual time=1.443..1.963 rows=235.00 loops=1)
+                                                        Hash Cond: (shipments.order_id = orders.id)
+                                                        Join Filter: ((NOT EXISTS(SubPlan 27)) OR (shipments.id = (SubPlan 28)))
+                                                        Buffers: shared hit=903
+                                                        ->  Seq Scan on shipments  (cost=0.00..154.10 rows=3610 width=92) (actual time=0.008..0.917 rows=3610.00 loops=1)
+                                                              Buffers: shared hit=118
+                                                        ->  Hash  (cost=24.56..24.56 rows=227 width=40) (actual time=0.180..0.181 rows=235.00 loops=1)
+                                                              Buckets: 1024  Batches: 1  Memory Usage: 21kB
+                                                              Buffers: shared hit=80
+                                                              ->  Index Scan using orders_inserted_idx on orders  (cost=0.30..24.56 rows=227 width=40) (actual time=0.010..0.123 rows=235.00 loops=1)
+                                                                    Index Cond: ((inserted_at >= '2026-09-01 00:00:00+07'::timestamp with time zone) AND (inserted_at <= '2026-09-12 23:59:59.999+07'::timestamp with time zone))
+                                                                    Filter: (stage = ANY ('{CONFIRMED,PACKING,READY_TO_SHIP,SHIPPED,DELIVERED,PAID,RETURNING,PARTIAL_RETURN,RETURNED}'::order_stage[]))
+                                                                    Rows Removed by Filter: 16
+                                                                    Index Searches: 1
+                                                                    Buffers: shared hit=80
+                                                        SubPlan 27
+                                                          ->  Index Scan using shipments_order_idx on shipments sh0  (cost=0.28..8.30 rows=1 width=0) (actual time=0.001..0.001 rows=0.00 loops=235)
+                                                                Index Cond: (order_id = orders.id)
+                                                                Filter: (id <> shipments.id)
+                                                                Rows Removed by Filter: 1
+                                                                Index Searches: 235
+                                                                Buffers: shared hit=705
+                                                        SubPlan 28
+                                                          ->  Limit  (cost=8.31..8.31 rows=1 width=25) (never executed)
+                                                                ->  Sort  (cost=8.31..8.31 rows=1 width=25) (never executed)
+                                                                      Sort Key: ((sh.stage = 'DELIVERED'::shipment_stage)) DESC, sh.attempt_no DESC NULLS LAST, sh.created_at DESC, sh.id
+                                                                      ->  Index Scan using shipments_order_idx on shipments sh  (cost=0.28..8.30 rows=1 width=25) (never executed)
+                                                                            Index Cond: (order_id = orders.id)
+                                                                            Index Searches: 0
+                                      ->  Hash  (cost=4.26..4.26 rows=126 width=26) (actual time=0.070..0.070 rows=126.00 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                                            Buffers: shared hit=3
+                                            ->  Seq Scan on product_variants  (cost=0.00..4.26 rows=126 width=26) (actual time=0.018..0.043 rows=126.00 loops=1)
+                                                  Buffers: shared hit=3
+                                ->  Hash  (cost=1.21..1.21 rows=21 width=22) (actual time=0.015..0.016 rows=21.00 loops=1)
+                                      Buckets: 1024  Batches: 1  Memory Usage: 5kB
+                                      Buffers: shared hit=1
+                                      ->  Seq Scan on products  (cost=0.00..1.21 rows=21 width=22) (actual time=0.007..0.010 rows=21.00 loops=1)
+                                            Buffers: shared hit=1
+                    SubPlan 1
+                      ->  Seq Scan on canonical_order_outcome m  (cost=0.00..0.00 rows=1 width=32) (actual time=0.000..0.000 rows=0.00 loops=482)
+                            Filter: ((computed_at >= orders.updated_at) AND ((shipments.id IS NULL) OR (computed_at >= shipments.updated_at)) AND (order_id = orders.id) AND (COALESCE(shipment_id, ''::text) = COALESCE(shipments.id, ''::text)) AND (logic_version = 2))
+                    SubPlan 3
+                      ->  Seq Scan on shipment_events ev  (cost=0.00..512.08 rows=14159 width=12) (never executed)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                    SubPlan 5
+                      ->  Seq Scan on shipment_events fe  (cost=0.00..512.08 rows=854 width=12) (actual time=0.010..1.768 rows=854.00 loops=1)
+                            Filter: ((status = ANY ('{504,503}'::text[])) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 13305
+                            Buffers: shared hit=282
+                    SubPlan 7
+                      ->  Seq Scan on shipment_events fe_1  (cost=0.00..547.48 rows=149 width=12) (actual time=2.530..2.530 rows=0.00 loops=1)
+                            Filter: ((status = '501'::text) AND (leg_type = 'RETURN'::text) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 14159
+                            Buffers: shared hit=282
+                    SubPlan 9
+                      ->  Seq Scan on shipment_events fe_2  (cost=0.00..529.78 rows=1 width=12) (actual time=1.925..1.925 rows=0.00 loops=1)
+                            Filter: ((source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])) AND (status = ANY ('{101,107,201}'::text[])))
+                            Rows Removed by Filter: 14159
+                            Buffers: shared hit=282
+                    SubPlan 10
+                      ->  Index Scan using shipments_order_reference_lookup_idx on shipments leg  (cost=0.12..8.14 rows=1 width=0) (actual time=0.001..0.001 rows=0.00 loops=313)
+                            Index Cond: (order_reference = shipments.vtp_order_number)
+                            Filter: (id <> shipments.id)
+                            Index Searches: 313
+                            Buffers: shared hit=626
+                    SubPlan 11
+                      ->  Index Only Scan using shipment_events_revenue_edit_idx on shipment_events ev_1  (cost=0.13..8.11 rows=1 width=0) (actual time=0.001..0.001 rows=0.00 loops=313)
+                            Index Cond: ((shipment_id = shipments.id) AND (occurred_at >= (COALESCE(shipments.delivered_at, shipments.vtp_status_date) - '00:02:00'::interval)))
+                            Heap Fetches: 0
+                            Index Searches: 313
+                            Buffers: shared hit=626
+                    SubPlan 13
+                      ->  Seq Scan on shipment_events fe_3  (cost=0.00..547.48 rows=2326 width=12) (actual time=0.033..1.528 rows=2475.00 loops=1)
+                            Filter: ((status = '501'::text) AND (leg_type = 'OUTBOUND'::text) AND (source = ANY ('{VTP_WEBHOOK,VTP_POLL,VTP_IMPORT}'::text[])))
+                            Rows Removed by Filter: 11684
+                            Buffers: shared hit=282
+                    SubPlan 15
+                      ->  Seq Scan on shipment_events ev_2  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.008..2.967 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 17
+                      ->  Seq Scan on shipment_events ev_3  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.057..3.436 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 19
+                      ->  Seq Scan on shipment_events ev_4  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.029..3.109 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 21
+                      ->  Seq Scan on shipment_events ev_5  (cost=0.00..512.08 rows=14159 width=12) (actual time=0.175..4.280 rows=14159.00 loops=1)
+                            Filter: ((normalized_stage IS NOT NULL) AND (source = ANY ('{VTP_WEBHOOK,VTP_IMPORT,VTP_POLL,MANUAL,VTP_UI_MANUAL_VERIFICATION}'::text[])))
+                            Buffers: shared hit=282
+                    SubPlan 22
+                      ->  Index Only Scan using shipment_events_revenue_edit_idx on shipment_events ev_6  (cost=0.13..8.11 rows=1 width=0) (never executed)
+                            Index Cond: ((shipment_id = shipments.id) AND (occurred_at >= (COALESCE(shipments.delivered_at, shipments.vtp_status_date) - '00:02:00'::interval)))
+                            Heap Fetches: 0
+                            Index Searches: 0
+                    SubPlan 24
+                      ->  Seq Scan on cod_statement_lines l  (cost=0.00..51.64 rows=1764 width=12) (never executed)
+                            Filter: cod_reported
+                    SubPlan 26
+                      ->  Seq Scan on cod_statement_lines l_1  (cost=0.00..51.64 rows=1764 width=12) (never executed)
+                            Filter: cod_reported
+Planning:
+  Buffers: shared hit=80
+Planning Time: 2.467 ms
+Execution Time: 43.929 ms
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+[AdsDecision] 3.8 ms
+select count(*), count(*) filter (where ("orders"."ad_id" is not null and exists (select 1 from fb_ads f2 where f2.id = "orders"."ad_id")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_id ~ '^[0-9]{5,}$' and fa.campaign_id is not null group by fa.post_id having count(distinct fa.campaign_id) = 1 ) p where p.post_id = regexp_replace("orders"."p
+────────────────────────────────────────────────────────────────────────────────────────────────────
+Aggregate  (cost=4302.98..4302.99 rows=1 width=40) (actual time=3.383..3.390 rows=1.00 loops=1)
+  Buffers: shared hit=782
+  ->  Index Scan using orders_inserted_idx on orders  (cost=0.28..23.29 rows=249 width=92) (actual time=0.041..0.177 rows=251.00 loops=1)
+        Index Cond: ((inserted_at >= '2026-09-01 00:00:00+07'::timestamp with time zone) AND (inserted_at <= '2026-09-12 23:59:59.999+07'::timestamp with time zone))
+        Index Searches: 1
+        Buffers: shared hit=80
+  SubPlan 1
+    ->  Seq Scan on fb_ads f2  (cost=0.00..2.70 rows=1 width=0) (actual time=0.002..0.002 rows=1.00 loops=116)
+          Filter: (id = orders.ad_id)
+          Rows Removed by Filter: 29
+          Buffers: shared hit=232
+  SubPlan 4
+    ->  GroupAggregate  (cost=2.71..2.75 rows=1 width=15) (actual time=0.189..0.190 rows=0.00 loops=1)
+          Group Key: fa.post_id
+          Filter: (count(DISTINCT fa.campaign_id) = 1)
+          Buffers: shared hit=2
+          ->  Sort  (cost=2.71..2.71 rows=2 width=27) (actual time=0.188..0.188 rows=0.00 loops=1)
+                Sort Key: fa.post_id, fa.campaign_id
+                Sort Method: quicksort  Memory: 17kB
+                Buffers: shared hit=2
+                ->  Seq Scan on fb_ads fa  (cost=0.00..2.70 rows=2 width=27) (actual time=0.153..0.153 rows=0.00 loops=1)
+                      Filter: ((post_id IS NOT NULL) AND (campaign_id IS NOT NULL) AND (post_id ~ '^[0-9]{5,}$'::text))
+                      Rows Removed by Filter: 56
+                      Buffers: shared hit=2
+  SubPlan 5
+    ->  Seq Scan on fb_ads f2_1  (cost=0.00..2.70 rows=1 width=0) (actual time=0.002..0.002 rows=1.00 loops=116)
+          Filter: (id = orders.ad_id)
+          Rows Removed by Filter: 29
+          Buffers: shared hit=232
+  SubPlan 8
+    ->  GroupAggregate  (cost=2.71..2.75 rows=1 width=15) (actual time=0.036..0.037 rows=0.00 loops=1)
+          Group Key: fa_1.post_id
+          Filter: (count(DISTINCT fa_1.campaign_id) = 1)
+          Buffers: shared hit=2
+          ->  Sort  (cost=2.71..2.71 rows=2 width=27) (actual time=0.036..0.036 rows=0.00 loops=1)
+                Sort Key: fa_1.post_id, fa_1.campaign_id
+                Sort Method: quicksort  Memory: 17kB
+                Buffers: shared hit=2
+                ->  Seq Scan on fb_ads fa_1  (cost=0.00..2.70 rows=2 width=27) (actual time=0.028..0.028 rows=0.00 loops=1)
+                      Filter: ((post_id IS NOT NULL) AND (campaign_id IS NOT NULL) AND (post_id ~ '^[0-9]{5,}$'::text))
+                      Rows Removed by Filter: 56
+                      Buffers: shared hit=2
+  SubPlan 9
+    ->  Seq Scan on fb_ads f2_2  (cost=0.00..2.70 rows=1 width=0) (actual time=0.002..0.002 rows=1.00 loops=116)
+          Filter: (id = orders.ad_id)
+          Rows Removed by Filter: 29
+          Buffers: shared hit=232
+  SubPlan 12
+    ->  GroupAggregate  (cost=2.71..2.75 rows=1 width=15) (actual time=0.037..0.038 rows=0.00 loops=1)
+          Group Key: fa_2.post_id
+          Filter: (count(DISTINCT fa_2.campaign_id) = 1)
+          Buffers: shared hit=2
+          ->  Sort  (cost=2.71..2.71 rows=2 width=27) (actual time=0.036..0.037 rows=0.00 loops=1)
+                Sort Key: fa_2.post_id, fa_2.campaign_id
+                Sort Method: quicksort  Memory: 17kB
+                Buffers: shared hit=2
+                ->  Seq Scan on fb_ads fa_2  (cost=0.00..2.70 rows=2 width=27) (actual time=0.033..0.033 rows=0.00 loops=1)
+                      Filter: ((post_id IS NOT NULL) AND (campaign_id IS NOT NULL) AND (post_id ~ '^[0-9]{5,}$'::text))
+                      Rows Removed by Filter: 56
+                      Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=4
+Planning Time: 1.570 ms
+Execution Time: 3.655 ms
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+[AdsDecision] 3.1 ms
+select "ad_spends"."product_id", max("campaign"), coalesce(sum("spend"), 0) from "ad_spends" where ("ad_spends"."excluded" = $1 and "ad_spends"."spend_date" >= $2 and "ad_spends"."spend_date" <= $3) group by "ad_spends"."product_id"
+────────────────────────────────────────────────────────────────────────────────────────────────────
+HashAggregate  (cost=17.12..17.33 rows=21 width=50) (actual time=0.130..0.135 rows=21.00 loops=1)
+  Group Key: product_id
+  Batches: 1  Memory Usage: 32kB
+  Buffers: shared hit=7
+  ->  Index Scan using ad_spends_date_idx on ad_spends  (cost=0.28..15.80 rows=176 width=31) (actual time=0.014..0.064 rows=168.00 loops=1)
+        Index Cond: ((spend_date >= '2026-09-01 00:00:00+07'::timestamp with time zone) AND (spend_date <= '2026-09-12 23:59:59.999+07'::timestamp with time zone))
+        Filter: (NOT excluded)
+        Index Searches: 1
+        Buffers: shared hit=7
+Planning:
+  Buffers: shared hit=3
+Planning Time: 0.337 ms
+Execution Time: 0.172 ms
+
+════════════════════════════════════════════════════════════════════════════════════════════════════
+[AdsDecision] 0.8 ms
+select coalesce("ad_spends"."campaign_id", "ad_spends"."campaign"), max("campaign"), coalesce(sum("spend"), 0) from "ad_spends" where ("ad_spends"."excluded" = $1 and "ad_spends"."spend_date" >= $2 and "ad_spends"."spend_date" <= $3) group by coalesce("ad_spends"."campaign_id", "ad_spends"."campaign")
+────────────────────────────────────────────────────────────────────────────────────────────────────
+HashAggregate  (cost=17.12..18.31 rows=119 width=72) (actual time=0.108..0.112 rows=14.00 loops=1)
+  Group Key: COALESCE(campaign_id, campaign)
+  Batches: 1  Memory Usage: 32kB
+  Buffers: shared hit=7
+  ->  Index Scan using ad_spends_date_idx on ad_spends  (cost=0.28..15.80 rows=176 width=53) (actual time=0.009..0.056 rows=168.00 loops=1)
+        Index Cond: ((spend_date >= '2026-09-01 00:00:00+07'::timestamp with time zone) AND (spend_date <= '2026-09-12 23:59:59.999+07'::timestamp with time zone))
+        Filter: (NOT excluded)
+        Index Searches: 1
+        Buffers: shared hit=7
+Planning:
+  Buffers: shared hit=3
+Planning Time: 0.155 ms
+Execution Time: 0.132 ms

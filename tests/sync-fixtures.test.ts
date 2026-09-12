@@ -83,6 +83,7 @@ import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
+import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
@@ -1296,6 +1297,7 @@ async function main() {
   await testConversionFunnel(db);
   await testPreshipRisk(db);
   await testAdsRoas(db);
+  await testAdsDecision(db);
   await testAdsAttribution(db);
   await testAdsAnomaly(db);
   await testAdsIdentity(db);
