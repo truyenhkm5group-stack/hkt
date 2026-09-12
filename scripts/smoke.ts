@@ -85,6 +85,7 @@ const ROUTES = [
     phải có mặt ở đây, hoặc được khai miễn trừ KÈM LÝ DO.
   */
   "/bank",
+  "/finance-ops",
   "/cs",
   "/outreach",
   "/landing",

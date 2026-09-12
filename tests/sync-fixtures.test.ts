@@ -68,6 +68,7 @@ import { testShipmentJoinGrain } from "./shipment-join-grain.test";
 import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
+import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testActionWiring } from "./action-wiring.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
@@ -1327,6 +1328,8 @@ async function main() {
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
+  testFinanceOpsPure();
+  await testFinanceOpsQueries(db);
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
