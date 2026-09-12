@@ -10,6 +10,8 @@ import { CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { MAX_UNMEASURABLE_FOR_HIGH, RISK_BAND_LABEL, RISK_BAND_TONE, RISK_SIGNAL_LABEL, RISK_SIGNALS, RISK_THRESHOLDS } from "@/lib/constants/preship-risk";
 import { formatNumber } from "@/lib/format";
 import { listPreshipRisk, summarizePreshipRisk } from "@/lib/queries/preship-risk";
+import { getPreshipRiskBacktest } from "@/lib/queries/preship-risk-backtest";
+import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Đơn cần xác minh trước khi giao" };
@@ -28,8 +30,9 @@ export const metadata = { title: "Đơn cần xác minh trước khi giao" };
  */
 export default async function VerifyOrdersPage() {
   await requirePermission("orders:read");
-  const rows = await listPreshipRisk({ limit: 300 });
+  const [rows, kiemDinh] = await Promise.all([listPreshipRisk({ limit: 300 }), getPreshipRiskBacktest(resolvePeriod({ period: "90d" }, "90d")).catch(() => null)]);
   const tk = summarizePreshipRisk(rows);
+  const chuaKiemChung = !kiemDinh || kiemDinh.verdict !== "PHÂN BIỆT ĐƯỢC";
   const canSoat = rows.filter((r) => r.risk.band !== "LOW");
 
   return (
@@ -51,6 +54,16 @@ export default async function VerifyOrdersPage() {
           </Link>
         }
       />
+
+      {chuaKiemChung ? (
+        <div className="flex gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <b>Điểm rủi ro CHƯA được kiểm chứng trên dữ liệu thật của shop</b>
+            {kiemDinh ? <> — kiểm định 90 ngày: {kiemDinh.verdict}{kiemDinh.verdictReason ? ` (${kiemDinh.verdictReason})` : ""}.</> : "."} Trọng số là giả thiết do người đặt ra. Dùng để xếp thứ tự gọi xác nhận, không dùng để biện minh cho quyết định tốn tiền. Kết quả kiểm định xem ở Phễu bán hàng.
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Đơn còn trong kho" value={formatNumber(tk.total)} note="Chưa bàn giao ĐVVC — còn xác minh được" icon={CheckCircle2} tone="slate" />

@@ -706,6 +706,8 @@ export const orders = pgTable(
     index("orders_inserted_idx").on(t.insertedAt),
     index("orders_updated_ext_idx").on(t.updatedAtExternal),
     index("orders_customer_idx").on(t.customerId),
+    // Do migration 0065 tạo (chấm rủi ro theo tỉnh); khai ở đây để drizzle-kit không đề nghị xoá.
+    index("orders_ship_province_idx").on(t.shipProvince).where(sql`${t.shipProvince} <> ''`),
     index("orders_source_idx").on(t.source),
     index("orders_system_idx").on(t.systemId),
     index("orders_bill_phone_idx").on(t.billPhone),
