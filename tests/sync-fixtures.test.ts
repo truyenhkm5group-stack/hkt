@@ -62,6 +62,7 @@ import { testSearch } from "./search.test";
 import { testEntityTimeline } from "./entity-timeline.test";
 import { testAlertConfig } from "./alert-config.test";
 import { testMigrationJournal } from "./migration-journal.test";
+import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
 import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
 import { testDuplicateMetrics } from "./duplicate-metrics.test";
 import { testLogisticsStatusBoundary } from "./logistics-status-boundary.test";
@@ -1397,6 +1398,7 @@ async function main() {
   console.log("\n─ Toàn vẹn kho mã");
   testRepoIntegrity();
   testMigrationAppendOnly();
+  await testMigrationUpgradePath();
   testMigrationNumberUnique();
   testDuplicateMetrics();
   testLogisticsStatusBoundary();
