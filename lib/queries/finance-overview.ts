@@ -97,18 +97,23 @@ async function demNgoaiLe(period: Period) {
 
           Va chi tinh khi so ngan hang DA co du lieu — so rong thi 100% khoan chi 'chua doi khop',
           mot bao dong do THIEU DU LIEU trinh bay y nhu mot bao dong do lech so.
+
+          ĐỌC bang bank_transaction_links, KHÔNG ĐỌC linked_type/linked_id. Hai cột đó nay chỉ là ẢNH
+          CHỤP mối nối LỚN NHẤT của mỗi dòng tiền (xem lib/finance/linkage.ts::syncPrimaryLink).
+          Một chuyển khoản 30 triệu trả hai hoá đơn 20 + 10 chỉ chụp được hoá đơn 20; hoá đơn 10 sẽ
+          hiện "chưa đối khớp" dù tiền đã trả xong, và người dùng đi tìm một khoản không tồn tại.
         */
         (select count(*) from expenses e
           where e.cost_source = 'MANUAL' ${tuNgay} ${denNgay}
             and exists (select 1 from bank_transactions limit 1)
             and not exists (
-              select 1 from bank_transactions b where b.linked_type = 'EXPENSE' and b.linked_id = e.id
+              select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id
             )) as chi_chua_doi_khop,
         (select coalesce(sum(e.amount), 0) from expenses e
           where e.cost_source = 'MANUAL' ${tuNgay} ${denNgay}
             and exists (select 1 from bank_transactions limit 1)
             and not exists (
-              select 1 from bank_transactions b where b.linked_type = 'EXPENSE' and b.linked_id = e.id
+              select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id
             )) as chi_chua_doi_khop_tien,
         -- Đơn đã giao quá hạn đối soát mà chưa thấy đồng nào: tiền có khả năng phải đi đòi.
         (select count(*) from shipments s

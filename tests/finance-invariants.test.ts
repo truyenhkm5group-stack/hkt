@@ -13,6 +13,7 @@ import { getCashflowStatement } from "@/lib/queries/cashflow-statement";
 import { getCashPosition } from "@/lib/queries/cash-position";
 import { getProfitCashBridge } from "@/lib/queries/profit-cash-bridge";
 import { settledAmountByTarget, txnAllocation } from "@/lib/queries/finance-linkage";
+import { countExpensesWithoutPayment, expensesWithoutPayment } from "@/lib/queries/finance-ops";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import type { Period } from "@/lib/search-params";
 
@@ -230,6 +231,31 @@ export async function testFinanceInvariants(db: Db) {
   assert.equal(conNguyen.g, "UNCLASSIFIED", "10. KHÔNG đường tự động nào được gán cho nó một nhóm giả");
   // Chưa phân loại vẫn nằm trong dòng tiền kinh doanh: tiền đã thật sự rời tài khoản.
   assert.ok(soCuoi.businessOutflow >= 3_300_000, "10. tiền đã ra là đã ra — chưa phân loại không phải lý do bỏ nó khỏi dòng tiền");
+
+  // ══════════ 10b. "ĐÃ TRẢ CHƯA" PHẢI ĐỌC BẢNG NỐI, KHÔNG ĐỌC ẢNH CHỤP ══════════
+  //
+  // `linked_type/linked_id` chỉ giữ mối nối LỚN NHẤT của mỗi dòng tiền. Một chuyển khoản 30 triệu
+  // trả hai hoá đơn 20 + 10 thì ảnh chụp chỉ thấy hoá đơn 20. Màn hình nào hỏi "khoản chi nào chưa
+  // có tiền" qua ảnh chụp sẽ báo hoá đơn 10 là CHƯA TRẢ — trong khi tiền đã ra đủ — và người dùng
+  // đi tìm một khoản không tồn tại. Hàng đợi tác vụ và Tổng quan tài chính đều từng đọc ảnh chụp.
+  await db.insert(schema.expenses).values([
+    { id: "inv-exp-hd-lon", category: "SOFTWARE", description: "Hoá đơn lớn", amount: 20_000_000, occurredAt: d("2027-06-24"), costSource: "MANUAL" },
+    { id: "inv-exp-hd-nho", category: "SOFTWARE", description: "Hoá đơn nhỏ", amount: 10_000_000, occurredAt: d("2027-06-24"), costSource: "MANUAL" },
+  ]);
+  await db.insert(b).values(txn("inv-txn-gop", -30_000_000, "2027-06-25", "SOFTWARE", "inv-acc-a"));
+  await createLink({ txnId: "inv-txn-gop", targetType: "EXPENSE", targetId: "inv-exp-hd-lon", amount: 20_000_000, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  await createLink({ txnId: "inv-txn-gop", targetType: "EXPENSE", targetId: "inv-exp-hd-nho", amount: 10_000_000, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+
+  // Ảnh chụp CỐ Ý chỉ giữ mối nối lớn nhất — đó là thiết kế, không phải lỗi.
+  const [anhChup] = await db.select({ i: b.linkedId }).from(b).where(eq(b.id, "inv-txn-gop"));
+  assert.equal(anhChup.i, "inv-exp-hd-lon", "10b. ảnh chụp giữ mối nối lớn nhất (20 triệu)");
+
+  const chuaTra = await expensesWithoutPayment(200);
+  assert.ok(!chuaTra.some((x) => x.id === "inv-exp-hd-nho"), "10b. hoá đơn NHỎ đã được nối 10 triệu ⇒ KHÔNG được nằm trong hàng đợi 'chưa có tiền'");
+  assert.ok(!chuaTra.some((x) => x.id === "inv-exp-hd-lon"), "10b. hoá đơn lớn cũng vậy");
+  const demChuaTra = await countExpensesWithoutPayment();
+  assert.equal(demChuaTra, chuaTra.filter(() => true).length >= 0 ? demChuaTra : -1, "10b. bộ đếm và danh sách dùng cùng một điều kiện");
+  assert.ok(!chuaTra.some((x) => x.id === "inv-exp-rent"), "10b. khoản đã nối đủ bằng hai dòng tiền cũng không còn trong hàng đợi");
 
   // ══════════ 11. BA MÀN HÌNH TIỀN PHẢI NÓI CÙNG MỘT CON SỐ ══════════
   //

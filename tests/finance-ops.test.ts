@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { createLink } from "@/lib/finance/linkage";
 import { codMatchStatus, matchEmployeeByText } from "@/lib/constants/finance-ops";
 import { matchInternalTransferPairs } from "@/lib/integrations/bank/internal-transfer";
 import {
@@ -125,10 +126,21 @@ export async function testFinanceOpsQueries(db: Db) {
       description: "CK tien thue kho",
       counterparty: "CHU NHA",
       accountingGroup: "RENT_UTILITIES",
-      linkedType: "EXPENSE",
-      linkedId: "fops-exp-1",
       source: "IMPORT",
     });
+    /*
+      NỐI QUA `createLink`, KHÔNG GHI THẲNG `linked_type/linked_id`.
+
+      Hai cột đó nay chỉ là ẢNH CHỤP mối nối lớn nhất; nguồn sự thật là `bank_transaction_links`.
+      Ghi thẳng ảnh chụp trong bài kiểm nghĩa là bài kiểm dựng một trạng thái mà ứng dụng không bao
+      giờ tạo ra được — nó sẽ xanh trong khi đường thật hỏng, hoặc đỏ trong khi đường thật đúng.
+      Đi qua đúng hàm mà Server Action gọi thì bài kiểm mới nói được điều gì về ứng dụng.
+    */
+    const noi = await createLink({
+      txnId: "fops-b1", targetType: "EXPENSE", targetId: "fops-exp-1",
+      confidence: "MANUAL", method: "MANUAL", confirmedBy: "kiemthu@shop.vn",
+    });
+    assert.ok("ok" in noi, "nối được khoản chi với dòng tiền");
     const sauKhiNoi = await expensesWithoutPayment(500);
     assert.ok(!sauKhiNoi.some((r) => r.id === "fops-exp-1"), "đã nối chứng từ thì phải biến mất khỏi hàng đợi");
     const demSau = await countExpensesWithoutPayment();
