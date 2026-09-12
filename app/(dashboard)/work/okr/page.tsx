@@ -12,6 +12,8 @@ import { currentQuarter, listObjectives, okrPeriods, quarterRange, type KeyResul
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { OkrToolbar } from "@/app/(dashboard)/work/okr/toolbar";
+import { AddBscMetric, DeleteBscMetric } from "@/components/work/bsc-editor";
+import { AddKeyResult, CheckinKeyResult, DeleteKeyResult, DeleteObjective } from "@/components/work/okr-editor";
 import { listDepartments } from "@/lib/queries/work";
 
 export const metadata = { title: "Mục tiêu · OKR & BSC" };
@@ -32,7 +34,7 @@ function formatValue(v: number | null, unit: string): string {
   return new Intl.NumberFormat("vi-VN").format(Math.round(v * 100) / 100);
 }
 
-function KrRow({ kr }: { kr: KeyResultView }) {
+function KrRow({ kr, canManage }: { kr: KeyResultView; canManage: boolean }) {
   const measured = kr.progress !== null;
   return (
     <li className="space-y-1.5 px-3 py-2.5">
@@ -46,6 +48,12 @@ function KrRow({ kr }: { kr: KeyResultView }) {
         <span className={cn("w-14 text-right text-sm font-semibold tabular-nums", !measured && "text-muted-foreground")}>
           {measured ? `${Math.round(kr.progress!)}%` : "—"}
         </span>
+        {canManage ? (
+          <span className="flex items-center gap-0.5">
+            <CheckinKeyResult id={kr.id} manual={kr.trust === "MANUAL"} current={kr.current} />
+            <DeleteKeyResult id={kr.id} />
+          </span>
+        ) : null}
       </div>
       {/* Chưa đo được thì KHÔNG vẽ thanh: thanh rỗng trông hệt như đang ở 0%. */}
       {measured ? <Progress value={Math.min(100, kr.progress!)} className="h-1.5" /> : null}
@@ -72,6 +80,7 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
     getScorecard({ scope: "COMPANY", departmentId: null, period }, metricPeriod),
   ]);
 
+  const canManage = can(user, "okr:manage");
   const byLevel = (["COMPANY", "DEPARTMENT", "INDIVIDUAL"] as const).map((level) => ({ level, list: objectives.filter((o) => o.level === level) }));
 
   return (
@@ -98,14 +107,26 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
                         {o.description ? ` — ${o.description}` : ""}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className={cn("text-lg font-bold tabular-nums", o.progress === null && "text-muted-foreground")}>{o.progress === null ? "—" : `${Math.round(o.progress)}%`}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {o.measuredCount}/{o.totalCount} KR đo được
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className={cn("text-lg font-bold tabular-nums", o.progress === null && "text-muted-foreground")}>{o.progress === null ? "—" : `${Math.round(o.progress)}%`}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {o.measuredCount}/{o.totalCount} KR đo được
+                        </p>
+                      </div>
+                      {canManage ? (
+                        <span className="flex items-center gap-0.5">
+                          <AddKeyResult objectiveId={o.id} />
+                          <DeleteObjective id={o.id} title={o.title} />
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                  {o.keyResults.length ? <ul className="divide-y">{o.keyResults.map((kr) => <KrRow key={kr.id} kr={kr} />)}</ul> : <p className="px-3 py-3 text-xs text-muted-foreground">Chưa có Key Result nào — mục tiêu không có số thì không đo được.</p>}
+                  {o.keyResults.length ? (
+                    <ul className="divide-y">{o.keyResults.map((kr) => <KrRow key={kr.id} kr={kr} canManage={canManage} />)}</ul>
+                  ) : (
+                    <p className="px-3 py-3 text-xs text-muted-foreground">Chưa có Key Result nào — mục tiêu không có số thì không đo được.</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -126,6 +147,7 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
       <SectionCard
         title={company ? `Thẻ điểm cân bằng · ${company.name}` : "Thẻ điểm cân bằng"}
         description={company ? `Điểm tổng ${company.score === null ? "chưa tính được" : `${Math.round(company.score)}%`} · đo được ${Math.round(company.coverage * 100)}% trọng số` : undefined}
+        actions={company && canManage ? <AddBscMetric scorecardId={company.id} /> : null}
         hint="Bốn góc nhìn CÂN BẰNG NHAU ở cấp thẻ — đó là ý nghĩa của chữ “cân bằng”. Trọng số chỉ phân biệt các ô bên trong một góc nhìn. Ô chưa đo được rơi khỏi cả tử lẫn mẫu, không bị tính 0 điểm; phần trăm độ phủ nói rõ điểm đang đứng trên bao nhiêu."
         padded={false}
       >
@@ -142,9 +164,12 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
                   {p.metrics.map((m) => (
                     <li key={m.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="min-w-0 truncate" title={m.basis || m.label}>{m.label}</span>
-                      <span className={cn("shrink-0 tabular-nums", m.value === null && "text-muted-foreground")}>
-                        {formatValue(m.value, m.unit)}
-                        {m.target !== null ? <span className="text-muted-foreground"> / {formatValue(m.target, m.unit)}</span> : null}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className={cn("tabular-nums", m.value === null && "text-muted-foreground")}>
+                          {formatValue(m.value, m.unit)}
+                          {m.target !== null ? <span className="text-muted-foreground"> / {formatValue(m.target, m.unit)}</span> : null}
+                        </span>
+                        {canManage ? <DeleteBscMetric id={m.id} /> : null}
                       </span>
                     </li>
                   ))}

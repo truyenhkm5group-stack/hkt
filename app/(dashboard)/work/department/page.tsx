@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { formatVND } from "@/lib/format";
-import { buildDepartmentQueue, departmentsOfUser, getDepartmentCockpit, HEALTH_LABEL, HEALTH_TONE } from "@/lib/queries/work";
+import { buildDepartmentQueue, departmentsOfUser, getDepartmentCockpit, DEPT_HEALTH_LABEL, DEPT_HEALTH_TONE } from "@/lib/queries/work";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ export default async function DepartmentWorkPage({ searchParams }: { searchParam
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium">{r.label}</span>
-                <Badge variant="secondary" className={cn("shrink-0 text-[11px]", HEALTH_TONE[r.health])}>{HEALTH_LABEL[r.health]}</Badge>
+                <Badge variant="secondary" className={cn("shrink-0 text-[11px]", DEPT_HEALTH_TONE[r.health])}>{DEPT_HEALTH_LABEL[r.health]}</Badge>
               </div>
               <p className="mt-1.5 text-lg font-semibold tabular-nums">
                 {r.open}

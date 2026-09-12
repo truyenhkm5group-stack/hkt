@@ -25,7 +25,7 @@ import path from "node:path";
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
 /** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0068_bank_transaction_links";
+const MOI = "0069_work_management_os";
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -57,23 +57,18 @@ export async function testMigrationUpgradePath() {
 
     const truoc = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(truoc, cu.entries.length, "bước 1: số migration đã áp phải khớp sổ đã cắt");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'bank_transaction_links'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'work_items'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
 
-      Migration mang một câu `INSERT ... SELECT` chuyển mối nối kiểu cũ sang bảng nối. Chạy nó trên
-      bảng trống thì câu đó không làm gì và bài kiểm không chứng minh được gì — đúng chỗ dễ hỏng
-      nhất lại là chỗ không được kiểm.
+      Work OS là lớp CHỈ CỘNG THÊM: nó không được đụng tới một dòng nghiệp vụ nào. Gieo sẵn một
+      người dùng, một đơn và một case CSKH rồi kiểm lại sau khi áp migration — nếu một ngày nào đó
+      có ai thêm `UPDATE`/`ALTER` vào 0069 thì bài này đỏ, chứ không phải production đỏ.
     */
-    await client.query(`insert into bank_accounts (id, provider, gateway, account_number, sub_account, label, status)
-      values ('up-acc', '', 'MBBank', '9990001111', '', 'MB', 'ACTIVE')`);
-    await client.query(`insert into expenses (id, category, description, amount, occurred_at)
-      values ('up-exp', 'RENT', 'Thuê mặt bằng', 5000000, now())`);
-    await client.query(`insert into bank_transactions (id, txn_at, amount, bank_ref, linked_type, linked_id, classified_by)
-      values ('up-txn', now(), -5000000, 'UPREF1', 'EXPENSE', 'up-exp', 'ketoan@shop.vn')`);
-    await client.query(`insert into bank_transactions (id, txn_at, amount, bank_ref)
-      values ('up-txn-2', now(), -1000000, 'UPREF2')`);
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
+    await client.query(`insert into orders (id, stage, status, inserted_at, bill_full_name) values ('up-o1', 'CONFIRMED', 2, now(), 'Khách Cũ')`);
+    await client.query(`insert into cs_cases (id, order_id, kind, status, title) values ('up-c1', 'up-o1', 'OTHER', 'OPEN', 'Case có từ trước')`);
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -82,23 +77,46 @@ export async function testMigrationUpgradePath() {
     const sau = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(sau - truoc, 1, `bước 2: phải áp thêm ĐÚNG 1 migration, thực tế ${sau - truoc}`);
 
-    const noi = await client.query<{ txn_id: string; target_type: string; target_id: string; amount: number; confirmed_by: string }>(
-      "select txn_id, target_type, target_id, amount, confirmed_by from bank_transaction_links",
+    // Bảy phòng ban mặc định phải có mặt, nếu không hàng đợi mở lên lần đầu sẽ rỗng.
+    const phong = await client.query<{ code: string }>("select code from departments order by sort_order");
+    assert.deepEqual(
+      phong.rows.map((r) => r.code),
+      ["SALES", "LOGISTICS", "WAREHOUSE", "MARKETING", "FINANCE", "MANAGEMENT", "HR"],
+      "bảy phòng ban mặc định phải được gieo, đúng thứ tự hiển thị",
     );
-    assert.equal(noi.rows.length, 1, "mối nối kiểu cũ phải được chuyển sang, không mất");
-    assert.equal(noi.rows[0].txn_id, "up-txn", "chuyển đúng dòng tiền");
-    assert.equal(noi.rows[0].target_id, "up-exp", "chuyển đúng chứng từ đích");
-    assert.equal(Number(noi.rows[0].amount), 5_000_000, "phân bổ TRỌN số tiền — đó đúng là nghĩa của mối nối 1–1 cũ");
-    assert.equal(noi.rows[0].confirmed_by, "ketoan@shop.vn", "người đã phân loại dòng đó giữ nguyên, KHÔNG bị gán cho 'migration'");
 
-    // Ràng buộc cũ được NỚI chứ không siết: giá trị mới cũng phải nhận được.
-    await client.query("update bank_transactions set linked_type = 'PAYROLL_PERIOD', linked_id = '2027-04' where id = 'up-txn-2'");
+    // CHỈ CỘNG THÊM: dữ liệu nghiệp vụ có từ trước phải nguyên vẹn.
+    assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and status = 'OPEN'"), 1, "case CSKH có từ trước không được đụng tới");
+    assert.equal(await dem("select count(*)::int as n from orders where id = 'up-o1'"), 1, "đơn có từ trước không được đụng tới");
+    assert.equal(await dem("select count(*)::int as n from work_items"), 0, "migration KHÔNG được chép việc sẵn có vào work_items — hàng đợi là PHÉP CHIẾU, không phải bản sao");
+
+    /*
+      RÀNG BUỘC QUAN TRỌNG NHẤT CỦA BẢN NÀY, kiểm ở mức CSDL chứ không tin vào kỷ luật:
+      dòng CHIẾU không được giữ trạng thái, và việc TAY bắt buộc phải giữ.
+    */
+    const deptId = (await client.query<{ id: string }>("select id from departments where code = 'SALES'")).rows[0].id;
+    await client.query(`insert into work_items (id, source_type, source_key, authority, department_id) values ('up-w1', 'CS_CASE', 'up-c1', 'SOURCE', '${deptId}')`);
+    await assert.rejects(
+      () => client.query(`update work_items set status = 'DONE' where id = 'up-w1'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("work_items_authority_check"),
+      "dòng CHIẾU mà ghi được trạng thái nghĩa là hai nơi cùng giữ một sự thật — ràng buộc phải chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into work_items (id, source_type, source_key, authority, title) values ('up-w2', 'MANUAL_TASK', 'up-w2', 'WORK', 'Việc tay không trạng thái')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("work_items_authority_check"),
+      "việc TAY mà thiếu trạng thái thì không nơi nào giữ trạng thái của nó — ràng buộc phải chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into work_items (id, source_type, source_key, authority, status, title, blocked_reason) values ('up-w3', 'MANUAL_TASK', 'up-w3', 'WORK', 'BLOCKED', 'Bị chặn', '')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("work_items_blocked_reason_check"),
+      "chặn mà không nói vì sao là xoá bằng chứng lặng lẽ — ràng buộc phải chặn",
+    );
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
-    assert.equal(await dem("select count(*)::int as n from bank_transaction_links"), 1, "chạy lại migration KHÔNG được đẻ dòng thứ hai");
+    assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · mối nối cũ chuyển nguyên vẹn · chạy lại không nhân đôi · ràng buộc được nới nhận giá trị mới`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · 7 phòng ban gieo đúng · dữ liệu nghiệp vụ nguyên vẹn · work_items rỗng (phép chiếu, không bản sao) · 3 ràng buộc thẩm quyền chặn đúng · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

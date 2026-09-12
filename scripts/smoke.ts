@@ -101,6 +101,20 @@ const ROUTES = [
   "/integrations",
   "/settings/users",
   "/audit",
+  /*
+    BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
+
+    `/work` chiếu BẢY nguồn việc cùng lúc (case CSKH, care vận đơn, nút thắt fulfillment, dòng tiền
+    chưa phân loại, quyết định quảng cáo, cảnh báo, việc tay). Một nguồn chậm lại sẽ kéo cả trang,
+    và đây là trang nhân viên mở đầu ca — nếu nó chậm thì cả đội chờ.
+
+    Ba tuyến còn lại đọc đúng ba engine khác nhau trên cùng phép chiếu đó: buồng lái phòng ban,
+    danh sách chéo phòng, và thẻ điểm mục tiêu (nơi mọi chỉ số OKR/BSC được đọc sống).
+  */
+  "/work",
+  "/work/department",
+  "/work/all",
+  "/work/okr",
 ];
 
 /**

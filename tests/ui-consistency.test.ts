@@ -182,6 +182,14 @@ export function testNavigationCoverage() {
     "/reports/funnel": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
     "/orders/verify": "một GÓC NHÌN của chính danh sách đơn (đơn còn trong kho, xếp theo khả năng hoàn), vào từ nút 'Cần xác minh trước khi giao' ngay trên trang Đơn hàng",
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
+    // Work OS: MỘT mục sidebar (`/work`), năm góc nhìn là tab bên trong `app/(dashboard)/work/tabs.tsx`.
+    // Sáu mục menu cho một bàn làm việc sẽ bắt người dùng chọn góc nhìn trước khi nhìn thấy gì.
+    "/work/department": "tab 'Phòng ban' của bàn làm việc /work",
+    "/work/all": "tab 'Tất cả công việc' của bàn làm việc /work",
+    "/work/okr": "tab 'Mục tiêu' của bàn làm việc /work",
+    "/work/performance": "tab 'Hiệu suất' của bàn làm việc /work",
+    "/work/review": "tab 'Kỳ review' của bàn làm việc /work",
+    "/work/settings": "tab 'Cấu hình' của bàn làm việc /work, chỉ hiện với quyền work:admin",
   };
 
   const pages = walkPages("app/(dashboard)");

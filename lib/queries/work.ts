@@ -322,13 +322,13 @@ export function healthOf(open: number, overdue: number, blocked: number): Depart
   return "OK";
 }
 
-export const HEALTH_LABEL: Record<DepartmentHealth["health"], string> = {
+export const DEPT_HEALTH_LABEL: Record<DepartmentHealth["health"], string> = {
   OK: "Đang chảy",
   WATCH: "Cần để mắt",
   STUCK: "Đang kẹt",
 };
 
-export const HEALTH_TONE: Record<DepartmentHealth["health"], string> = {
+export const DEPT_HEALTH_TONE: Record<DepartmentHealth["health"], string> = {
   OK: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
   WATCH: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
   STUCK: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",

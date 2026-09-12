@@ -36,6 +36,7 @@ import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
 import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
+import { testWorkOs } from "./work-os.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -1404,6 +1405,13 @@ async function main() {
   // Cổng phát hành của bản gộp tài chính: chỗ hỏng của một bản gộp không nằm trong nhánh nào cả,
   // nó nằm ở chỗ hai nhánh cùng chạm một con số. Chạy sau `testFinanceTruth` và tự dọn.
   await testFinanceInvariants(db);
+  /*
+    CHẠY SAU CÙNG TRONG KHỐI DỮ LIỆU. Hệ điều hành công việc CHIẾU lên toàn bộ dữ liệu của mọi bài
+    phía trên (case CSKH, kiện care, đơn, dòng tiền, cảnh báo) — chạy giữa chừng thì nó nhìn thấy
+    một nửa thế giới, và mọi con số tổng hợp của nó nói về một tập khác với tập cuối cùng. Bài tự
+    gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
+  */
+  await testWorkOs(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

@@ -14,6 +14,7 @@ import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departmen
 import { MONEY_CONFIDENCE_LABEL, WORK_PRIORITY_LABEL, WORK_PRIORITY_TONE, WORK_STATUS_LABEL, WORK_STATUS_TONE, slaStateOf, type WorkItem } from "@/lib/constants/work";
 import { WORK_ACTION, type WorkActionKey } from "@/lib/constants/work-actions";
 import { WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { WorkHistoryButton } from "@/components/work/work-history";
 import { runWorkAction } from "@/lib/actions/work-quick";
 import { formatDateTime, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -170,6 +171,7 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
 
             <div className="flex shrink-0 flex-wrap items-center gap-1 sm:w-[290px] sm:justify-end">
               {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+              <WorkHistoryButton workKey={item.key} />
               {item.actions.map((a) => {
                 const key = a as WorkActionKey;
                 const actSpec = WORK_ACTION[key];
