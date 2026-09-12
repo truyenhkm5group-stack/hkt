@@ -46,6 +46,7 @@ import { testAdsAttributionLink } from "./ads-attribution-link.test";
 import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
+import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
 import { testReturnProductContext } from "./return-product-context.test";
@@ -1340,6 +1341,7 @@ async function main() {
   await testInventory(db);
   await testInventoryForecast(db);
   await testSlowMoving(db);
+  await testInventoryDecision(db);
   await testCodReconciliation();
   await testOrderSource();
   await testIdeas();

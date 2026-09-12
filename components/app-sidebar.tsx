@@ -33,6 +33,7 @@ import {
   Undo2,
   UserCog,
   Users,
+  Wallet,
 } from "lucide-react";
 import type { Role } from "@/db/schema";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
@@ -115,6 +116,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/inventory", label: "Nhật ký kho", icon: Boxes, permission: "products:view" },
       { href: "/products/performance", label: "Hiệu quả mẫu mã", icon: TrendingUp, permission: "reports:returns" },
       { href: "/inventory/planning", label: "Kế hoạch đặt hàng SX", icon: Factory, permission: "planning:view" },
+      { href: "/inventory/decisions", label: "Quyết định vốn tồn kho", icon: Wallet, permission: "planning:view" },
     ],
   },
   {

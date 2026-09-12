@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart, Truck } from "lucide-react";
+import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart, Truck, Wallet } from "lucide-react";
 import { CoverPicker } from "@/app/(dashboard)/inventory/planning/cover-picker";
 import { PlanningForm } from "@/app/(dashboard)/inventory/planning/planning-form";
 import { MetricCard } from "@/components/metric-card";
@@ -51,6 +51,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
             </Button>
             <Button asChild variant="outline" size="sm">
               <Link href="/inventory/purchasing"><Truck className="size-4" /> Mua hàng & xưởng</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/inventory/decisions"><Wallet className="size-4" /> Quyết định vốn tồn kho</Link>
             </Button>
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/planning?ngay=${used.coverDays}${used.countIncoming ? "" : "&hoan=0"}`}><Download className="size-4" /> Xuất CSV</a>
