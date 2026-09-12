@@ -1,16 +1,14 @@
 import { Boxes, ClipboardCheck, PackageX, ScanLine, Timer, TriangleAlert } from "lucide-react";
-import Link from "next/link";
 import { Suspense } from "react";
 import { InspectionStation } from "@/app/(dashboard)/inventory/returns/inspection-station";
 import { ReturnPipelineSection } from "@/app/(dashboard)/inventory/returns/pipeline-section";
-import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
-import { returnsAwaitingWarehouse } from "@/lib/queries/data-quality";
-import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
+import { ReceiveQueue } from "@/app/(dashboard)/inventory/returns/receive-queue";
+import { receiveQueue, RECEIVE_SLA_DAYS } from "@/lib/returns/receive-queue";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
@@ -27,7 +25,7 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
 export default async function ReturnInspectionPage() {
   const user = await requirePermission("products:view");
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, backlog] = await Promise.all([inspectionDashboard(), listPendingInspections(300), returnsAwaitingWarehouse(1, 50, ""), pendingReturnedForWarehouse()]);
+  const [bang, pending, choNhan] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400 })]);
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -99,32 +97,60 @@ export default async function ReturnInspectionPage() {
         một việc của kho phải qua hai trang và hai giao diện khác nhau. Nay cả hai bước ở một chỗ —
         tick đã nhận rồi cuộn xuống đếm. Vẫn là hai thao tác tách bạch: nhận hàng không cộng tồn.
       */}
-      {bang.awaitingArrival && choNhan.rows.length ? (
+      {choNhan.rows.length ? (
         <SectionCard
-          title={`Chờ kho nhận · ${formatNumber(bang.awaitingArrival)} kiện`}
-          description="Viettel Post đã trả về shop, chưa ai bấm “đã nhận”."
-          hint="Xác nhận ở đây rồi kiện mới xuống hàng đợi đếm bên dưới. Bấm “đã nhận” KHÔNG cộng tồn: tồn chỉ tăng khi có người đếm thực tế."
-          actions={
-            choNhan.total > choNhan.rows.length ? (
-              <Link href="/data-quality?issue=return-not-received" className="text-xs font-semibold text-primary hover:underline">
-                Xem đủ {formatNumber(choNhan.total)} kiện
-              </Link>
-            ) : null
+          title={`Chờ kho nhận · ${formatNumber(choNhan.total)} kiện`}
+          description={
+            /*
+              TÓM TẮT CHO NGƯỜI ĐỨNG Ở KHO, KHÔNG PHẢI CHO BÁO CÁO.
+              "Bao nhiêu món phải dọn chỗ" và "bao nhiêu kiện nằm quá lâu" là hai câu họ hỏi trước
+              khi mở kiện đầu tiên. Số món CHỈ cộng phần đã ghép được đơn; phần chưa ghép nêu riêng
+              chứ không ước lượng — một con số trộn cả phần đoán sẽ bị đọc thành tồn kho.
+            */
+            [
+              `${formatNumber(choNhan.summary.expectedUnits)} sản phẩm dự kiến từ ${formatNumber(choNhan.summary.mapped)} kiện đã ghép được đơn`,
+              choNhan.summary.unmapped ? `${formatNumber(choNhan.summary.unmapped)} kiện chưa xác định đơn` : "",
+              choNhan.summary.overdue ? `${formatNumber(choNhan.summary.overdue)} kiện quá ${RECEIVE_SLA_DAYS} ngày` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")
           }
+          hint="Xác nhận ở đây rồi kiện mới xuống hàng đợi đếm bên dưới. Bấm “đã nhận” KHÔNG cộng tồn: tồn chỉ tăng khi có người đếm thực tế. “Sản phẩm dự kiến” là hàng LẼ RA quay về theo đơn gốc — chưa ai đếm, và không phải số tồn."
+          padded={false}
         >
-          {canWrite ? (
-            <ReceiveReturns
-              bulk={{ count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }}
+          <div className="space-y-3 p-3">
+            {choNhan.summary.topSkus.length ? (
+              <div className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                <span className="text-muted-foreground">Dự kiến theo mã hàng:</span>
+                {choNhan.summary.topSkus.slice(0, 8).map((x) => (
+                  <span key={x.sku || x.name} className="rounded-md bg-muted px-1.5 py-0.5">
+                    <span className="font-medium">{x.sku || x.name}</span>
+                    <span className="numeric"> · {formatNumber(x.qty)}</span>
+                  </span>
+                ))}
+                {choNhan.summary.topSkus.length > 8 ? <span className="text-muted-foreground">+{choNhan.summary.topSkus.length - 8} mã nữa</span> : null}
+              </div>
+            ) : null}
+            <ReceiveQueue
+              total={choNhan.total}
+              canWrite={canWrite}
               rows={choNhan.rows.map((r) => ({
-                id: r.id,
-                label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,
-                items: r.items.length ? r.items.map((i) => `${i.name}${i.variant ? ` (${i.variant})` : ""} ×${i.qty}`).join(" · ") : "Chưa nối được đơn — không biết mặt hàng",
-                receivedAt: r.returnReceivedAt ? formatDateTime(r.returnReceivedAt) : null,
+                shipmentId: r.shipmentId,
+                code: r.code,
+                receiverName: r.receiverName,
+                receiverPhone: r.receiverPhone,
+                codAmount: r.codAmount,
+                returnedAt: r.returnedAt ? r.returnedAt.toISOString() : null,
+                ageDays: r.ageDays,
+                ctx: r.ctx,
               }))}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">Bạn không có quyền cập nhật kho nên chỉ xem được số kiện.</p>
-          )}
+            {choNhan.total > choNhan.loaded ? (
+              <p className="text-[11.5px] text-muted-foreground">
+                Đang hiện {formatNumber(choNhan.loaded)} kiện cũ nhất trong tổng {formatNumber(choNhan.total)}. Xử lý bớt thì phần còn lại tự lên.
+              </p>
+            ) : null}
+          </div>
         </SectionCard>
       ) : null}
 

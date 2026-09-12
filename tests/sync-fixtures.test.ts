@@ -47,6 +47,8 @@ import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
 import { testReturnInspection } from "./return-inspection.test";
+import { testReturnItemInspection } from "./return-item-inspection.test";
+import { testReturnProductContext } from "./return-product-context.test";
 import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
 import { testCanonicalOutcome } from "./canonical-outcome.test";
 import { testCogsRecognition } from "./cogs-recognition.test";
@@ -1363,6 +1365,8 @@ async function main() {
   await testStatementDetailMatching(db);
   // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
   await testReturnInspection(db);
+  await testReturnProductContext(db);
+  await testReturnItemInspection(db);
   // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);

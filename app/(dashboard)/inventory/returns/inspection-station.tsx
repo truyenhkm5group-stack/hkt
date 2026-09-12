@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Barcode, Check, Loader2, PackageX, ScanLine, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ItemInspectionDrawer } from "@/app/(dashboard)/inventory/returns/item-inspection-drawer";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui-bits";
@@ -314,6 +315,20 @@ function KienHang({
                 <Icon className="size-4" /> {CONDITION_ACTION_LABEL[condition]}
               </Button>
             ))}
+            {/*
+              ĐƯỜNG THỨ HAI, KHÔNG THAY ĐƯỜNG THỨ NHẤT.
+              Các nút trên là đếm nhanh CẢ KIỆN — đúng cho kiện một mẫu mã, và đó là đa số. Kiện
+              nhiều món mà mỗi món một tình trạng thì ép về một kết luận là mất thông tin, nên có
+              lối riêng vào ngăn kéo đếm từng món. Chỉ hiện khi kiện thực sự có dòng hàng để đếm.
+            */}
+            {row.items.length ? (
+              <ItemInspectionDrawer
+                shipmentId={row.shipmentId}
+                code={row.code}
+                orderCode={row.orderCode}
+                items={row.items.map((it) => ({ variantId: it.variantId ?? null, sku: it.sku, name: it.name, color: it.color, size: it.size, quantity: it.quantity }))}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

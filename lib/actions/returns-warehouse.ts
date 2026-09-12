@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
 import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
-import { findPendingByCode, recordInspection, recordInspectionBulk, type PendingInspection } from "@/lib/returns/inspection";
+import { findPendingByCode, recordInspection, recordInspectionBulk, recordItemInspection, type PendingInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
 
 export type ReturnReceiveResult = { ok: true; count: number; message: string } | { error: string };
@@ -208,4 +209,70 @@ export async function scanReturnByCode(code: string): Promise<ScanResult> {
   const found = await findPendingByCode(q);
   if (!found) return { error: `Không thấy kiện “${q}” trong danh sách chờ đếm — có thể kiện này chưa được bấm “kho đã nhận”, hoặc đã đếm rồi.` };
   return { ok: true, found };
+}
+
+/**
+ * ═══════════ KHO ĐẾM XONG MỘT KIỆN, GHI KẾT LUẬN THEO TỪNG MÓN ═══════════
+ *
+ * Khác `submitReturnInspection` (một kết luận cho cả kiện — đường đếm nhanh, giữ nguyên): ở đây
+ * mỗi món có kết luận riêng. Chỉ món kết luận "Đủ" mới sinh phiếu tái nhập, và vào đúng mẫu mã
+ * người kho đếm được.
+ *
+ * Quyền `inventory:write` như mọi thao tác chạm tồn. Ghi nhật ký kèm ĐÚNG những gì đã đếm, vì đây
+ * là bước duy nhất biến hàng hoàn thành tồn — về sau còn phải truy được ai đã kết luận thế nào.
+ */
+const itemInspectionSchema = z.object({
+  shipmentId: z.string().min(1).max(100),
+  items: z
+    .array(
+      z.object({
+        expectedVariantId: z.string().max(100).nullable().default(null),
+        expectedSku: z.string().trim().max(120).default(""),
+        expectedName: z.string().trim().max(300).default(""),
+        expectedColor: z.string().trim().max(120).default(""),
+        expectedSize: z.string().trim().max(120).default(""),
+        expectedQty: z.number().int().min(0).max(10_000),
+        actualVariantId: z.string().max(100).nullable().default(null),
+        actualSku: z.string().trim().max(120).default(""),
+        actualQty: z.number().int().min(0).max(10_000),
+        condition: z.enum(ITEM_CONDITIONS),
+        note: z.string().trim().max(500).default(""),
+      }),
+    )
+    .min(1, "Phải đếm ít nhất một món")
+    .max(100, "Tối đa 100 dòng hàng mỗi kiện"),
+});
+
+export type ItemInspectionActionResult = { ok: true; restocked: number; hasDiscrepancy: boolean; message: string } | { error: string };
+
+export async function submitItemInspection(input: unknown): Promise<ItemInspectionActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = itemInspectionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: user.email });
+  if ("error" in result) return { error: result.error };
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected.items",
+    entity: "shipments",
+    entityId: parsed.data.shipmentId,
+    detail: {
+      restocked: result.restocked,
+      hasDiscrepancy: result.hasDiscrepancy,
+      items: parsed.data.items.map((i) => `${i.expectedSku || i.expectedName}: ${i.condition} ${i.actualQty}/${i.expectedQty}`),
+    },
+  });
+  revalidate();
+
+  const lech = result.hasDiscrepancy ? " · CÓ LỆCH so với hàng kỳ vọng" : "";
+  return {
+    ok: true,
+    restocked: result.restocked,
+    hasDiscrepancy: result.hasDiscrepancy,
+    message: result.restocked ? `Đã đếm xong. ${result.restocked} món vào lại tồn${lech}.` : `Đã đếm xong. Không món nào vào lại tồn${lech}.`,
+  };
 }
