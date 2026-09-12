@@ -13,6 +13,7 @@ on:
         options:
           - status              # trạng thái container + health
           - perf                # tài nguyên VPS (CPU/RAM từng container) và thời gian phản hồi vài trang
+          - disk                # ổ đĩa còn bao nhiêu và ai đang chiếm chỗ (Docker, backup, log)
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
@@ -128,6 +129,17 @@ jobs:
                   echo "$path: ${t} ms"
                 done
                 $C exec -T db psql -U erp -d erp -P pager=off -c "select count(*) as active, count(*) filter (where state='active') running from pg_stat_activity where datname='erp';" -c "select relname, n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 8;" ;;
+              disk)
+                # SỰ CỐ #242 (12/09/2026): deploy chết vì hết đĩa, và KHÔNG thao tác vận hành nào
+                # nhìn thấy được ổ đĩa — người trực chỉ có một thông báo containerd khó đọc trong
+                # log deploy. Ổ đĩa là tài nguyên duy nhất trong bốn thứ (CPU / RAM / đĩa / mạng)
+                # chưa có chỗ xem, nên nó là thứ duy nhất hỏng mà không ai thấy trước.
+                df -h /; echo
+                echo "── Docker chiếm chỗ ──"; docker system df; echo
+                echo "── Ảnh đang có (mới nhất trước) ──"
+                docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' | head -20; echo
+                echo "── Thư mục lớn ──"
+                du -sh /var/lib/docker /var/lib/containerd /root/backups /root/erp 2>/dev/null | sort -h ;;
               logs)
                 $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
               sync-pancake-all)

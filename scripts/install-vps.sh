@@ -221,6 +221,44 @@ say "Dọn image và bộ nhớ đệm dựng không còn dùng"
 docker image prune -f >/dev/null 2>&1 || true
 docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
 
+# ═══ ẢNH CŨ CỦA CHÍNH KHO NÀY — THỦ PHẠM LÀM ĐẦY Ổ ĐĨA ═══
+#
+# SỰ CỐ THẬT (deploy #242, 12/09/2026): bước kéo image chết với `no space left on device` khi giải
+# nén layer. Ba lần thử lại đều hỏng; bản đang chạy không bị đụng tới, nhưng bản mới KHÔNG lên được.
+#
+# NGUYÊN NHÂN GỐC, và nó đã âm thầm tích luỹ suốt 240 lần deploy: `docker image prune -f` ở trên
+# CHỈ xoá ảnh KHÔNG CÓ TAG. Mỗi lần deploy kéo về một ảnh `ghcr.io/<kho>:<sha>` **có tag**, gắn
+# thêm tag `erp-app:local` rồi đi tiếp — tag `ghcr.io/...:<sha>` ở lại VĨNH VIỄN. Ảnh cũ chỉ mất
+# tag `erp-app:local` (nên nó thành dangling và được dọn), còn tag theo SHA thì không ai gỡ.
+#
+# Nói cách khác: mỗi lần deploy để lại một ảnh ~1 GB trên đĩa, và lệnh dọn ở trên nhìn thẳng qua nó.
+#
+# Ở đây gỡ mọi tag theo SHA của kho này. `docker rmi` trên một TAG chỉ gỡ tag; ảnh đang chạy không
+# bao giờ bị xoá (Docker từ chối), nên thao tác này không thể làm sập bản đang chạy.
+if [ -n "${ERP_IMAGE:-}" ]; then
+  ERP_REPO="${ERP_IMAGE%%:*}"
+  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${ERP_REPO}:" | grep -v '^.*:<none>$' | while read -r tag_cu; do
+    [ "$tag_cu" = "$ERP_IMAGE" ] && continue
+    docker rmi "$tag_cu" >/dev/null 2>&1 || true
+  done
+  docker image prune -f >/dev/null 2>&1 || true
+fi
+
+# ═══ CỔNG Ổ ĐĨA — CÙNG LỐI VỚI CỔNG BỘ NHỚ Ở DƯỚI ═══
+#
+# Hỏng vì hết đĩa GIỮA LÚC giải nén để lại một lớp snapshot dở dang và một thông báo containerd
+# khó đọc. Chặn TRƯỚC, với một câu nói rõ còn bao nhiêu và ai đang ăn chỗ, thì người vận hành biết
+# phải làm gì. 3 GB đo từ chính lần hỏng: ảnh nén ~400 MB nhưng giải nén cần vài GB.
+DISK_MB="$(df -Pm /var/lib 2>/dev/null | awk 'NR==2 {print $4}')"
+say "Ổ đĩa còn trống: ${DISK_MB:-?} MB"
+if [ "${DISK_MB:-0}" -lt 3000 ]; then
+  echo "::error::Không đủ ổ đĩa để kéo image: còn ${DISK_MB} MB (cần ≥3000 MB). Bản đang chạy KHÔNG bị đụng tới."
+  echo "         Chỗ đang bị chiếm nhiều nhất:"
+  docker system df 2>/dev/null || true
+  du -sh /var/lib/docker /var/lib/containerd /root/backups 2>/dev/null || true
+  exit 1
+fi
+
 # ═══ ĐƯỜNG CHÍNH: IMAGE ĐÃ DỰNG Ở CI (GHCR) — VPS CHỈ KÉO VỀ ═══
 # Deploy #228 chứng minh máy này không còn dựng nổi bản hiện tại kể cả khi chỉ dựng MỘT image.
 # Workflow dựng image trên máy chạy GitHub, đẩy lên ghcr.io theo đúng SHA rồi truyền tên qua
@@ -241,6 +279,10 @@ if [ -n "${ERP_IMAGE:-}" ]; then
     exit 1
   fi
   docker tag "$ERP_IMAGE" erp-app:local
+  # GỠ TAG THEO SHA NGAY SAU KHI ĐÃ CÓ `erp-app:local`.
+  # Ảnh vẫn sống (tag kia trỏ vào nó); chỉ cái tên thừa biến mất. Không có dòng này thì mỗi lần
+  # deploy lại bỏ thêm một ảnh có tag lên đĩa, và ba tháng nữa sự cố #242 quay lại y nguyên.
+  docker rmi "$ERP_IMAGE" >/dev/null 2>&1 || true
   $COMPOSE up -d
 else
 
