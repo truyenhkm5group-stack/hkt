@@ -2467,3 +2467,518 @@ export const conversationFunnel = pgTable(
     check("conversation_funnel_match_basis_check", sql`${t.matchBasis} IN ('BY_CONVERSATION','BY_PHONE_UNIQUE','AMBIGUOUS','NONE')`),
   ],
 );
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   HỆ ĐIỀU HÀNH CÔNG VIỆC (Work OS) — đặc tả: docs/work-management-os.md
+
+   Bảy bảng dưới đây KHÔNG chép dữ liệu nghiệp vụ. Chúng thêm đúng ba thứ ERP chưa từng có:
+   tầng tổ chức (phòng ban), lớp công việc (giao/hạn/hoãn/chặn cho việc đã tồn tại ở miền khác),
+   và tầng mục tiêu (OKR / BSC / kỳ review).
+
+   Việc sinh ra từ `cs_cases`, `shipment_care`, `bank_transactions`… KHÔNG có dòng ở đây trừ khi
+   có người chạm vào (giao cho ai, đặt hạn, hoãn, ghi chú). Hàng đợi là PHÉP CHIẾU, không phải bản
+   sao — xem `lib/queries/work-adapters.ts`.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export const departments = pgTable(
+  "departments",
+  {
+    id: id(),
+    /** `MANAGEMENT` · `MARKETING` · `SALES` · `LOGISTICS` · `WAREHOUSE` · `FINANCE` · `HR` — hoặc mã do chủ shop đặt. */
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    leadUserId: text("lead_user_id").references(() => users.id, { onDelete: "set null" }),
+    sortOrder: integer("sort_order").notNull().default(100),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("departments_active_idx").on(t.active, t.sortOrder)],
+);
+
+export const departmentMembers = pgTable(
+  "department_members",
+  {
+    id: id(),
+    departmentId: text("department_id")
+      .notNull()
+      .references(() => departments.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `LEAD` · `MEMBER`. Trưởng phòng thấy toàn bộ việc của phòng. */
+    roleInDept: text("role_in_dept").notNull().default("MEMBER"),
+    /** Chức danh hiển thị, tự do. Không dùng để phân quyền. */
+    title: text("title").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Một người ở một phòng đúng một dòng. Muốn ở hai phòng thì hai dòng — điều đó hợp lệ ở shop nhỏ.
+    uniqueIndex("department_members_uq").on(t.departmentId, t.userId),
+    index("department_members_user_idx").on(t.userId, t.active),
+    check("department_members_role_check", sql`${t.roleInDept} IN ('LEAD', 'MEMBER')`),
+  ],
+);
+
+/**
+ * ═══════════ LỚP CÔNG VIỆC ═══════════
+ *
+ * Bảng này giữ HAI loại dòng, và cột `authority` nói rõ dòng nào là loại nào:
+ *
+ *  · `authority = 'WORK'`   — việc tay / việc định kỳ. Không miền nào sở hữu, nên bảng này LÀ
+ *    nguồn: `status` bắt buộc có giá trị.
+ *  · `authority = 'SOURCE'` — LỚP GHI CHÚ cho một việc đã tồn tại ở miền nghiệp vụ (case CSKH,
+ *    kiện care, dòng tiền chưa phân loại…). Chỉ giữ thứ miền kia không có: người nhận ở tầng công
+ *    việc, ưu tiên đặt tay, hạn đặt tay, hoãn tới, lý do chặn. `status` bắt buộc `NULL`.
+ *
+ * Ràng buộc `work_items_authority_check` làm điều đó thành BẤT KHẢ THI ở mức CSDL, không phải một
+ * quy ước người ta nhớ hay quên. Nếu không có nó, một ngày nào đó `cs_cases.status = 'DONE'` sẽ
+ * đứng cạnh `work_items.status = 'IN_PROGRESS'` và không ai biết bên nào đúng.
+ *
+ * `(source_type, source_key)` UNIQUE: `source_key` là khoá tự nhiên TẠI NGUỒN, nên "hai việc cho
+ * cùng một gốc" là điều không biểu diễn được. Chống trùng ở đây là tính chất cấu trúc.
+ */
+export const workItems = pgTable(
+  "work_items",
+  {
+    id: id(),
+    /** Xem `lib/constants/work-sources.ts::WORK_SOURCES`. */
+    sourceType: text("source_type").notNull(),
+    /** Khoá tự nhiên tại nguồn (`cs_cases.id`, `shipment_care.shipment_id`, `bank_transactions.id`…). */
+    sourceKey: text("source_key").notNull(),
+    /** `SOURCE` | `WORK` — phải khớp `WORK_SOURCE_SPEC[sourceType].statusAuthority`; contract test khoá. */
+    authority: text("authority").notNull(),
+
+    /* ───── Nội dung: CHỈ điền cho dòng `WORK`. Dòng `SOURCE` đọc tiêu đề từ nguồn. ───── */
+    title: text("title").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    /** Người ĐANG CẦM việc ở tầng công việc. Khác người phụ trách ở nguồn — xem chú thích bảng. */
+    assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    assignedBy: text("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: ts("assigned_at"),
+    /** Người chịu trách nhiệm cuối (thường là trưởng phòng). Khác người làm. */
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+
+    /** `NULL` với dòng `SOURCE` — trạng thái nằm ở miền nghiệp vụ. Ràng buộc CHECK ép điều đó. */
+    status: text("status"),
+    /** Mức ưu tiên ĐẶT TAY, đè lên mức tính được. `NULL` = dùng mức tính được. */
+    priority: text("priority"),
+    /** Hạn cam kết của người làm. Khác SLA của loại việc: SLA là luật, cái này là lời hứa. */
+    dueAt: ts("due_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    completedBy: text("completed_by").references(() => users.id, { onDelete: "set null" }),
+    /** Hoãn tới. Việc không biến mất, chỉ thôi nổi lên trước giờ này. */
+    snoozedUntil: ts("snoozed_until"),
+    /** Bắt buộc khi `status = 'BLOCKED'` — chặn mà không nói vì sao thì không ai gỡ được. */
+    blockedReason: text("blocked_reason").notNull().default(""),
+
+    /* ───── Việc định kỳ ───── */
+    recurrenceId: text("recurrence_id"),
+    /** Kỳ mà dòng này đại diện (`2026-09-12`, `2026-W37`…). Cùng `recurrence_id` là khoá chống sinh hai lần. */
+    occurrenceKey: text("occurrence_key").notNull().default(""),
+
+    /* ───── Liên kết nghiệp vụ (CHỈ để mở đúng chỗ, không phải bản sao dữ liệu) ───── */
+    businessEntity: text("business_entity").notNull().default("NONE"),
+    businessEntityId: text("business_entity_id").notNull().default(""),
+
+    /**
+     * Tiền do NGƯỜI khai cho việc tay. `NULL` = CHƯA BIẾT, không phải 0đ (AGENTS.md mục 0.3).
+     * Việc chiếu từ miền nghiệp vụ KHÔNG dùng hai cột này — tiền của chúng tính sống từ nguồn.
+     */
+    moneyAtRisk: bigint("money_at_risk", { mode: "number" }),
+    moneyRecoverable: bigint("money_recoverable", { mode: "number" }),
+    /** `MEASURED` · `ESTIMATED` · `UNKNOWN`. Khác `UNKNOWN` thì `money_basis` bắt buộc có chữ. */
+    moneyConfidence: text("money_confidence").notNull().default("UNKNOWN"),
+    moneyBasis: text("money_basis").notNull().default(""),
+
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    checklist: jsonb("checklist").$type<{ text: string; done: boolean }[]>().notNull().default([]),
+
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** `AUTO` · `MANUAL` · `RECURRING`. */
+    creationSource: text("creation_source").notNull().default("MANUAL"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("work_items_source_uq").on(t.sourceType, t.sourceKey),
+    index("work_items_assignee_idx").on(t.assigneeId, t.status),
+    index("work_items_department_idx").on(t.departmentId, t.status),
+    index("work_items_due_idx").on(t.dueAt),
+    index("work_items_recurrence_idx").on(t.recurrenceId, t.occurrenceKey),
+    check("work_items_authority_enum_check", sql`${t.authority} IN ('SOURCE', 'WORK')`),
+    /*
+      ĐÂY LÀ RÀNG BUỘC QUAN TRỌNG NHẤT CỦA BẢNG.
+
+      Một dòng chiếu từ miền nghiệp vụ KHÔNG được giữ trạng thái, và một việc tay BẮT BUỘC phải
+      giữ. Viết bằng CHECK chứ không bằng quy ước, vì quy ước sẽ bị phá vào lúc không ai nhìn.
+    */
+    check("work_items_authority_check", sql`(${t.authority} = 'WORK') = (${t.status} IS NOT NULL)`),
+    check("work_items_status_check", sql`${t.status} IS NULL OR ${t.status} IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'WAITING', 'DONE', 'CANCELLED')`),
+    check("work_items_priority_check", sql`${t.priority} IS NULL OR ${t.priority} IN ('URGENT', 'HIGH', 'NORMAL', 'LOW')`),
+    check("work_items_money_confidence_check", sql`${t.moneyConfidence} IN ('MEASURED', 'ESTIMATED', 'UNKNOWN')`),
+    // Nói một con số là đo được / ước tính thì phải nói ĐO BẰNG GÌ.
+    check("work_items_money_basis_check", sql`${t.moneyConfidence} = 'UNKNOWN' OR length(btrim(${t.moneyBasis})) > 0`),
+    // Chặn mà không nói vì sao là xoá bằng chứng lặng lẽ — cùng luật với `notifications.ignored_reason`.
+    check("work_items_blocked_reason_check", sql`${t.status} IS DISTINCT FROM 'BLOCKED' OR length(btrim(${t.blockedReason})) > 0`),
+    check("work_items_creation_source_check", sql`${t.creationSource} IN ('AUTO', 'MANUAL', 'RECURRING')`),
+  ],
+);
+
+/**
+ * Lịch sử một việc — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ.
+ *
+ * Cùng hình dạng với `cs_case_events` và `care_case_events` để ba bàn làm việc đọc được như nhau.
+ * `audit_logs` không thay được: audit là nhật ký AN NINH (ai đụng vào cái gì), đây là nhật ký
+ * NGHIỆP VỤ mà người nhận ca sau phải đọc được ngay trên dòng.
+ *
+ * Ghi được cho CẢ việc chiếu: `work_key` là `<sourceType>:<sourceKey>`, nên một ghi chú gắn vào
+ * một case CSKH không cần bảng `work_items` phải có dòng.
+ */
+export const workItemEvents = pgTable(
+  "work_item_events",
+  {
+    id: id(),
+    /** `<sourceType>:<sourceKey>` — ổn định kể cả khi chưa có dòng `work_items`. */
+    workKey: text("work_key").notNull(),
+    workItemId: text("work_item_id").references(() => workItems.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Ảnh chụp tên lúc xảy ra — người dùng có thể đổi tên hoặc nghỉ việc. */
+    actorName: text("actor_name").notNull().default(""),
+    /** `UI` · `API` · `SYSTEM` · `RECURRENCE`. */
+    source: text("source").notNull().default("UI"),
+    /** `CREATE` · `STATUS` · `ASSIGN` · `NOTE` · `SNOOZE` · `DUE` · `PRIORITY` · `BLOCK` · `DOMAIN_ACTION`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousAssignee: text("previous_assignee"),
+    nextAssignee: text("next_assignee"),
+    /** Với `DOMAIN_ACTION`: tên hành động miền đã gọi và kết quả tóm tắt. */
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("work_item_events_key_idx").on(t.workKey, t.createdAt),
+    index("work_item_events_actor_idx").on(t.actorEmail, t.createdAt),
+    check("work_item_events_source_check", sql`${t.source} IN ('UI', 'API', 'SYSTEM', 'RECURRENCE')`),
+  ],
+);
+
+/**
+ * Định nghĩa việc lặp: đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công.
+ *
+ * KHÔNG dùng cron string. Bốn nhịp cố định phủ hết nhu cầu thật của shop và đọc được bằng tiếng
+ * Việt trên màn hình; một ô nhập cron là mời gọi sai lịch mà không ai phát hiện.
+ */
+export const workRecurrences = pgTable(
+  "work_recurrences",
+  {
+    id: id(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    priority: text("priority").notNull().default("NORMAL"),
+    /** `DAILY` · `WEEKDAYS` · `WEEKLY` · `MONTHLY`. */
+    cadence: text("cadence").notNull(),
+    /** Với `WEEKLY`: 1=thứ Hai … 7=Chủ nhật. Với `MONTHLY`: ngày trong tháng (1–28). */
+    cadenceDay: integer("cadence_day"),
+    /** Giờ trong ngày (0–23, giờ Việt Nam) mà việc của kỳ đó xuất hiện. */
+    hourOfDay: integer("hour_of_day").notNull().default(8),
+    /** Số giờ kể từ lúc sinh tới hạn. */
+    dueInHours: integer("due_in_hours").notNull().default(24),
+    checklist: jsonb("checklist").$type<{ text: string; done: boolean }[]>().notNull().default([]),
+    active: boolean("active").notNull().default(true),
+    lastGeneratedKey: text("last_generated_key").notNull().default(""),
+    lastGeneratedAt: ts("last_generated_at"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("work_recurrences_active_idx").on(t.active),
+    check("work_recurrences_cadence_check", sql`${t.cadence} IN ('DAILY', 'WEEKDAYS', 'WEEKLY', 'MONTHLY')`),
+    check("work_recurrences_priority_check", sql`${t.priority} IN ('URGENT', 'HIGH', 'NORMAL', 'LOW')`),
+    check("work_recurrences_hour_check", sql`${t.hourOfDay} BETWEEN 0 AND 23`),
+    // Ngày 29–31 không tồn tại ở mọi tháng: chặn ở CSDL thay vì để việc tháng 2 im lặng không sinh.
+    check("work_recurrences_day_check", sql`${t.cadenceDay} IS NULL OR (${t.cadence} = 'WEEKLY' AND ${t.cadenceDay} BETWEEN 1 AND 7) OR (${t.cadence} = 'MONTHLY' AND ${t.cadenceDay} BETWEEN 1 AND 28)`),
+  ],
+);
+
+/* ───────────────────────── MỤC TIÊU: OKR ───────────────────────── */
+
+/**
+ * Objective — ĐỊNH TÍNH. Ba tầng: công ty → phòng ban → cá nhân, nối bằng `parent_id`.
+ * Objective KHÔNG có số; số nằm ở Key Result. Trộn hai thứ là cách nhanh nhất biến OKR thành
+ * một danh sách KPI đội lốt.
+ */
+export const okrObjectives = pgTable(
+  "okr_objectives",
+  {
+    id: id(),
+    /** `COMPANY` · `DEPARTMENT` · `INDIVIDUAL`. */
+    level: text("level").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    parentId: text("parent_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /** Kỳ: `2026-Q3` · `2026-09` · `2026`. Chuỗi để so sánh và nhóm được mà không cần bảng kỳ riêng. */
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `DRAFT` · `ACTIVE` · `CLOSED` · `CANCELLED`. */
+    status: text("status").notNull().default("DRAFT"),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("okr_objectives_period_idx").on(t.period, t.level),
+    index("okr_objectives_dept_idx").on(t.departmentId, t.period),
+    index("okr_objectives_owner_idx").on(t.ownerUserId, t.period),
+    foreignKey({ columns: [t.parentId], foreignColumns: [t.id], name: "okr_objectives_parent_fk" }).onDelete("set null"),
+    check("okr_objectives_level_check", sql`${t.level} IN ('COMPANY', 'DEPARTMENT', 'INDIVIDUAL')`),
+    check("okr_objectives_status_check", sql`${t.status} IN ('DRAFT', 'ACTIVE', 'CLOSED', 'CANCELLED')`),
+    // Objective cấp phòng / cá nhân phải nói rõ của phòng nào / của ai.
+    check("okr_objectives_scope_check", sql`${t.level} = 'COMPANY' OR ${t.departmentId} IS NOT NULL OR ${t.ownerUserId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Key Result — ĐỊNH LƯỢNG, và đây là chỗ dễ bịa nhất trong toàn bộ hệ OKR.
+ *
+ * `metric_source` chỉ nhận `MANUAL` hoặc một khoá CÓ THẬT trong `lib/constants/metric-bindings.ts`.
+ * Nối vào một khoá không tồn tại thì `current` sẽ mãi mãi là `NULL` và giao diện nói thẳng "chưa
+ * đo được" — KHÔNG rơi về 0, vì một KR hiện 0% trông hệt như một KR đang thất bại.
+ *
+ * `current` để `NULL` khi CHƯA ĐO: `NULL` là CHƯA BIẾT (AGENTS.md mục 0.3).
+ */
+export const okrKeyResults = pgTable(
+  "okr_key_results",
+  {
+    id: id(),
+    objectiveId: text("objective_id")
+      .notNull()
+      .references(() => okrObjectives.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    /** `MANUAL` hoặc khoá trong `METRIC_BINDINGS`. */
+    metricSource: text("metric_source").notNull().default("MANUAL"),
+    /** `NUMBER` · `VND` · `PERCENT` · `COUNT` · `DAYS` · `HOURS`. */
+    unit: text("unit").notNull().default("NUMBER"),
+    /** `UP` = càng cao càng tốt; `DOWN` = càng thấp càng tốt (tỷ lệ hoàn, số dòng chưa phân loại…). */
+    direction: text("direction").notNull().default("UP"),
+    baseline: doublePrecision("baseline"),
+    target: doublePrecision("target").notNull(),
+    /** Giá trị hiện tại. `NULL` = CHƯA ĐO ĐƯỢC, khác hẳn 0. */
+    current: doublePrecision("current"),
+    currentAt: ts("current_at"),
+    /** `ON_TRACK` · `AT_RISK` · `OFF_TRACK` · `UNKNOWN` — do người chấm, không suy máy móc từ %. */
+    confidence: text("confidence").notNull().default("UNKNOWN"),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("okr_key_results_objective_idx").on(t.objectiveId, t.sortOrder),
+    check("okr_key_results_unit_check", sql`${t.unit} IN ('NUMBER', 'VND', 'PERCENT', 'COUNT', 'DAYS', 'HOURS')`),
+    check("okr_key_results_direction_check", sql`${t.direction} IN ('UP', 'DOWN')`),
+    check("okr_key_results_confidence_check", sql`${t.confidence} IN ('ON_TRACK', 'AT_RISK', 'OFF_TRACK', 'UNKNOWN')`),
+    // Đích bằng mốc xuất phát thì phần trăm hoàn thành chia cho 0 — chặn ngay ở CSDL.
+    check("okr_key_results_target_check", sql`${t.baseline} IS NULL OR ${t.target} <> ${t.baseline}`),
+  ],
+);
+
+/** Lịch sử chấm KR — để có ĐƯỜNG XU HƯỚNG, không chỉ một con số hiện tại. Chỉ thêm. */
+export const okrCheckins = pgTable(
+  "okr_checkins",
+  {
+    id: id(),
+    keyResultId: text("key_result_id")
+      .notNull()
+      .references(() => okrKeyResults.id, { onDelete: "cascade" }),
+    value: doublePrecision("value"),
+    confidence: text("confidence").notNull().default("UNKNOWN"),
+    note: text("note").notNull().default(""),
+    /** `MANUAL` = người nhập; `AUTO` = đọc từ chỉ số ERP. Trộn hai nguồn thì không ai biết số từ đâu. */
+    source: text("source").notNull().default("MANUAL"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("okr_checkins_kr_idx").on(t.keyResultId, t.createdAt),
+    check("okr_checkins_source_check", sql`${t.source} IN ('MANUAL', 'AUTO')`),
+  ],
+);
+
+/* ───────────────────────── BSC ───────────────────────── */
+
+/**
+ * Thẻ điểm cân bằng. Bốn góc nhìn là cố định (đó là định nghĩa của BSC), nhưng chỉ số và TRỌNG SỐ
+ * do chủ shop khai — không hard-code "Marketing thì đo ROAS" thành chân lý.
+ */
+export const bscScorecards = pgTable(
+  "bsc_scorecards",
+  {
+    id: id(),
+    /** `COMPANY` · `DEPARTMENT`. */
+    scope: text("scope").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    period: text("period").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bsc_scorecards_uq").on(t.scope, t.departmentId, t.period),
+    check("bsc_scorecards_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT')`),
+    check("bsc_scorecards_dept_check", sql`(${t.scope} = 'COMPANY') = (${t.departmentId} IS NULL)`),
+  ],
+);
+
+export const bscMetrics = pgTable(
+  "bsc_metrics",
+  {
+    id: id(),
+    scorecardId: text("scorecard_id")
+      .notNull()
+      .references(() => bscScorecards.id, { onDelete: "cascade" }),
+    /** `FINANCIAL` · `CUSTOMER` · `INTERNAL_PROCESS` · `LEARNING_GROWTH`. */
+    perspective: text("perspective").notNull(),
+    label: text("label").notNull(),
+    /** `MANUAL` hoặc khoá trong `METRIC_BINDINGS` — cùng sổ đăng ký với KR. */
+    metricSource: text("metric_source").notNull().default("MANUAL"),
+    unit: text("unit").notNull().default("NUMBER"),
+    direction: text("direction").notNull().default("UP"),
+    target: doublePrecision("target"),
+    /** Giá trị nhập tay khi `metric_source = 'MANUAL'`. `NULL` = chưa nhập. */
+    manualValue: doublePrecision("manual_value"),
+    manualValueAt: ts("manual_value_at"),
+    /** Trọng số trong góc nhìn. Tổng KHÔNG bắt buộc bằng 100 — chuẩn hoá lúc tính. */
+    weight: doublePrecision("weight").notNull().default(1),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bsc_metrics_card_idx").on(t.scorecardId, t.perspective, t.sortOrder),
+    check("bsc_metrics_perspective_check", sql`${t.perspective} IN ('FINANCIAL', 'CUSTOMER', 'INTERNAL_PROCESS', 'LEARNING_GROWTH')`),
+    check("bsc_metrics_unit_check", sql`${t.unit} IN ('NUMBER', 'VND', 'PERCENT', 'COUNT', 'DAYS', 'HOURS')`),
+    check("bsc_metrics_direction_check", sql`${t.direction} IN ('UP', 'DOWN')`),
+    check("bsc_metrics_weight_check", sql`${t.weight} > 0`),
+  ],
+);
+
+/**
+ * Kỳ review — và cột `snapshot` là lý do bảng này tồn tại.
+ *
+ * AGENTS.md mục 8.9: *không silent correction kỳ đã chốt*. Nếu báo cáo tháng 9 được tính lại bằng
+ * truy vấn của tháng 11 thì con số tháng 9 sẽ ÂM THẦM đổi mỗi lần ai đó sửa một công thức — và
+ * cuộc họp tháng 10 đã diễn ra trên một con số không còn tồn tại.
+ *
+ * Nên: `FINAL` là đóng băng. Sau đó mọi thứ đọc từ `snapshot`, không truy vấn lại.
+ */
+export const reviewCycles = pgTable(
+  "review_cycles",
+  {
+    id: id(),
+    /** `WEEKLY` · `MONTHLY` · `QUARTERLY`. */
+    kind: text("kind").notNull(),
+    /** `COMPANY` · `DEPARTMENT`. */
+    scope: text("scope").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `DRAFT` = tính sống mỗi lần mở; `FINAL` = đọc `snapshot`, không tính lại. */
+    status: text("status").notNull().default("DRAFT"),
+    /** Ảnh chụp toàn bộ số của kỳ. Bất biến sau khi `FINAL`. */
+    snapshot: jsonb("snapshot"),
+    /** Phiên bản logic lúc chụp — để biết ảnh cũ được dựng bằng công thức nào. */
+    snapshotVersion: integer("snapshot_version").notNull().default(1),
+    highlights: text("highlights").notNull().default(""),
+    issues: text("issues").notNull().default(""),
+    nextActions: text("next_actions").notNull().default(""),
+    finalizedAt: ts("finalized_at"),
+    finalizedBy: text("finalized_by").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("review_cycles_uq").on(t.kind, t.scope, t.departmentId, t.period),
+    index("review_cycles_period_idx").on(t.periodStart),
+    check("review_cycles_kind_check", sql`${t.kind} IN ('WEEKLY', 'MONTHLY', 'QUARTERLY')`),
+    check("review_cycles_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT')`),
+    check("review_cycles_dept_check", sql`(${t.scope} = 'COMPANY') = (${t.departmentId} IS NULL)`),
+    check("review_cycles_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    // Chốt kỳ mà không có ảnh chụp thì "chốt" không có nghĩa gì: lần mở sau vẫn tính lại.
+    check("review_cycles_final_check", sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`),
+  ],
+);
+
+export const departmentsRelations = relations(departments, ({ one, many }) => ({
+  lead: one(users, { fields: [departments.leadUserId], references: [users.id] }),
+  members: many(departmentMembers),
+}));
+
+export const departmentMembersRelations = relations(departmentMembers, ({ one }) => ({
+  department: one(departments, { fields: [departmentMembers.departmentId], references: [departments.id] }),
+  user: one(users, { fields: [departmentMembers.userId], references: [users.id] }),
+}));
+
+export const workItemsRelations = relations(workItems, ({ one, many }) => ({
+  department: one(departments, { fields: [workItems.departmentId], references: [departments.id] }),
+  assignee: one(users, { fields: [workItems.assigneeId], references: [users.id] }),
+  events: many(workItemEvents),
+}));
+
+export const workItemEventsRelations = relations(workItemEvents, ({ one }) => ({
+  item: one(workItems, { fields: [workItemEvents.workItemId], references: [workItems.id] }),
+}));
+
+export const okrObjectivesRelations = relations(okrObjectives, ({ one, many }) => ({
+  department: one(departments, { fields: [okrObjectives.departmentId], references: [departments.id] }),
+  owner: one(users, { fields: [okrObjectives.ownerUserId], references: [users.id] }),
+  keyResults: many(okrKeyResults),
+}));
+
+export const okrKeyResultsRelations = relations(okrKeyResults, ({ one, many }) => ({
+  objective: one(okrObjectives, { fields: [okrKeyResults.objectiveId], references: [okrObjectives.id] }),
+  checkins: many(okrCheckins),
+}));
+
+export const bscScorecardsRelations = relations(bscScorecards, ({ one, many }) => ({
+  department: one(departments, { fields: [bscScorecards.departmentId], references: [departments.id] }),
+  metrics: many(bscMetrics),
+}));
+
+export const bscMetricsRelations = relations(bscMetrics, ({ one }) => ({
+  scorecard: one(bscScorecards, { fields: [bscMetrics.scorecardId], references: [bscScorecards.id] }),
+}));
+
+export type Department = typeof departments.$inferSelect;
+export type DepartmentMember = typeof departmentMembers.$inferSelect;
+export type WorkItemRow = typeof workItems.$inferSelect;
+export type WorkItemEvent = typeof workItemEvents.$inferSelect;
+export type WorkRecurrence = typeof workRecurrences.$inferSelect;
+export type OkrObjective = typeof okrObjectives.$inferSelect;
+export type OkrKeyResult = typeof okrKeyResults.$inferSelect;
+export type OkrCheckin = typeof okrCheckins.$inferSelect;
+export type BscScorecard = typeof bscScorecards.$inferSelect;
+export type BscMetric = typeof bscMetrics.$inferSelect;
+export type ReviewCycle = typeof reviewCycles.$inferSelect;
