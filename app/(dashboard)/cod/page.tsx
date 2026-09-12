@@ -7,6 +7,7 @@ import { StatementUploadDialog } from "@/app/(dashboard)/cod/statement-upload";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
@@ -98,6 +99,7 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           </>
         }
       />
+      <FinanceNav badges={{ cod: tong.quaHan.count }} />
       {/* Tiền COD đọc từ bảng kê + trạng thái ĐVVC; đường nào đang đứt thì số ở đây đang cũ — nói ra trước. */}
       <Suspense fallback={null}>
         <DataFreshnessStrip />

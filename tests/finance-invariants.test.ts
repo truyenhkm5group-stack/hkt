@@ -8,7 +8,10 @@ import { ingestSepayTransaction } from "@/lib/integrations/bank/sepay-ingest";
 import { toBankRow } from "@/lib/integrations/bank/statement";
 import { createLink, removeAllLinks } from "@/lib/finance/linkage";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
-import { getCashLedger, getCashProfitBridge, getObligationLedger } from "@/lib/queries/finance-ledger";
+import { getCashLedger, getObligationLedger } from "@/lib/queries/finance-ledger";
+import { getCashflowStatement } from "@/lib/queries/cashflow-statement";
+import { getCashPosition } from "@/lib/queries/cash-position";
+import { getProfitCashBridge } from "@/lib/queries/profit-cash-bridge";
 import { settledAmountByTarget, txnAllocation } from "@/lib/queries/finance-linkage";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import type { Period } from "@/lib/search-params";
@@ -207,13 +210,15 @@ export async function testFinanceInvariants(db: Db) {
 
   // ══════════ 9. LỢI NHUẬN ≠ TIỀN MẶT, NHƯNG CẦU NỐI PHẢI GIẢI THÍCH ĐƯỢC ══════════
   clearMemo();
-  const cau = await getCashProfitBridge(KY);
-  const tong = cau.lines.filter((x) => x.key !== "business_net_cash").reduce((t, x) => t + x.amount, 0);
-  assert.equal(cau.businessNetCash - tong, cau.unexplained, "9. phần chưa giải thích được đúng bằng chênh giữa tiền thật và tổng các dòng đã nêu tên");
-  assert.ok(cau.lines.some((x) => x.key === "cod_held"), "9. cầu nối phải nêu khoản COD ĐVVC còn giữ");
-  assert.ok(cau.lines.some((x) => x.key === "unpaid_expense"), "9. và khoản chi đã ghi nhận nhưng chưa chi tiền");
-  // KHÔNG ÉP KHỚP: phần chưa giải thích được hiện nguyên, không bị nhét vào một dòng "điều chỉnh khác".
-  assert.ok(cau.limitations.some((x) => x.includes("chưa giải thích được")), "9. phải nói thẳng phần chưa giải thích được là gì");
+  const cau = await getProfitCashBridge(KY);
+  // Đẳng thức của cầu nối: lợi nhuận + các khoản GIẢI THÍCH ĐƯỢC + phần chưa giải thích = tiền thật.
+  assert.notEqual(cau.cashMovement, null, "9. kỳ này có sao kê nên phải nói được biến động tiền thật");
+  assert.equal(cau.profit + cau.explained + (cau.unexplained ?? 0), cau.cashMovement, "9. lợi nhuận + khoản giải thích được + phần chưa giải thích = tiền thật, không sai một đồng");
+  assert.ok(cau.lines.some((x) => x.key === "cod"), "9. cầu nối phải nêu khoản COD ĐVVC còn giữ — chênh lớn nhất của shop bán COD");
+  assert.ok(cau.lines.some((x) => x.key === "financing"), "9. và khoản vốn/vay: tiền thật vào ra nhưng không phải lãi lỗ");
+  // KHÔNG ÉP KHỚP: phần chưa giải thích được đứng riêng, không bị nhét vào một dòng "điều chỉnh khác".
+  assert.ok(!cau.lines.some((x) => /điều chỉnh khác/i.test(x.label)), "9. không được có dòng 'điều chỉnh khác' do máy nhồi cho khớp");
+  assert.ok(cau.reasons.length > 0, "9. còn phần chưa giải thích thì phải nói CỤ THỂ vì sao");
 
   // ══════════ 10. GIAO DỊCH CHƯA PHÂN LOẠI VẪN ĐƯỢC GIỮ, KHÔNG BIẾN THÀNH 0 HAY NHÓM GIẢ ══════════
   await db.insert(b).values(txn("inv-txn-unknown", -3_300_000, "2027-06-22", "UNCLASSIFIED", "inv-acc-a"));
@@ -225,6 +230,23 @@ export async function testFinanceInvariants(db: Db) {
   assert.equal(conNguyen.g, "UNCLASSIFIED", "10. KHÔNG đường tự động nào được gán cho nó một nhóm giả");
   // Chưa phân loại vẫn nằm trong dòng tiền kinh doanh: tiền đã thật sự rời tài khoản.
   assert.ok(soCuoi.businessOutflow >= 3_300_000, "10. tiền đã ra là đã ra — chưa phân loại không phải lý do bỏ nó khỏi dòng tiền");
+
+  // ══════════ 11. BA MÀN HÌNH TIỀN PHẢI NÓI CÙNG MỘT CON SỐ ══════════
+  //
+  // Ba nhánh tài chính làm song song và mỗi nhánh có lý do chính đáng để đọc `bank_transactions`.
+  // Đó là chỗ một bản gộp hỏng mà không bài kiểm nào của từng nhánh thấy: Tổng quan tài chính,
+  // Báo cáo dòng tiền và Sổ nghĩa vụ cùng trả lời "kỳ này tiền vào ra bao nhiêu" theo ba phép cộng
+  // riêng. Bài này ép ba phép cộng đó bằng nhau, hoặc bản phát hành dừng lại.
+  clearMemo();
+  const [soTien, baoCao, viTri] = await Promise.all([getCashLedger(KY), getCashflowStatement(KY), getCashPosition()]);
+  assert.equal(soTien.businessInflow, baoCao.moneyIn, "11. tiền vào kinh doanh: Sổ tiền và Báo cáo dòng tiền phải khớp từng đồng");
+  assert.equal(soTien.businessOutflow, baoCao.moneyOut, "11. tiền ra kinh doanh cũng vậy");
+  assert.equal(soTien.businessNet, baoCao.net, "11. và dòng tiền ròng");
+  assert.equal(soTien.txnCount, baoCao.txnCount, "11. cùng đếm một tập giao dịch");
+  assert.equal(soTien.unclassified.count, baoCao.unclassified.count, "11. cùng đếm một tập dòng chưa phân loại");
+  // Số dư CHỈ có một nguồn: `cash-position.ts`. Sổ tiền đọc lại, không tự tính.
+  assert.equal(soTien.balance.total, viTri.total, "11. số dư tổng: Sổ tiền đọc lại đúng con số của Vị thế tiền, không tự tính");
+  assert.equal(soTien.balance.complete, viTri.complete, "11. và mang theo cả mức độ đầy đủ — số dư thiếu tài khoản là CẬN DƯỚI, không phải con số đủ");
 
   // ── Bất biến bao trùm: không dòng tiền nào bị nối vượt số tiền thật ──
   const vuot = await db.execute(sql`
@@ -255,6 +277,6 @@ export async function testFinanceInvariants(db: Db) {
   clearMemo();
   assert.equal((await getRecognizedCosts(KY)).components.RENT.amount, 12_000_000, "hoàn tác: gỡ mối nối KHÔNG đụng tới chi phí — nối chưa bao giờ tạo ra nó");
 
-  console.log("✓ Mười bất biến tài chính: một gói tin một dòng tiền · CSV+SePay hội tụ · COD không sinh doanh thu lần hai · nối tiền không nhân đôi chi phí · chuyển nội bộ về 0 · vốn/vay không thành doanh thu · nghĩa vụ lương ≠ tiền lương · lãi lỗ không đổi vì phân loại · cầu nối không ép khớp · chưa phân loại vẫn được giữ");
+  console.log("✓ Mười bất biến tài chính + đối chiếu chéo ba màn hình tiền: một gói tin một dòng tiền · CSV+SePay hội tụ · COD không sinh doanh thu lần hai · nối tiền không nhân đôi chi phí · chuyển nội bộ về 0 · vốn/vay không thành doanh thu · nghĩa vụ lương ≠ tiền lương · lãi lỗ không đổi vì phân loại · cầu nối không ép khớp · chưa phân loại vẫn được giữ · Sổ tiền / Báo cáo dòng tiền / Vị thế tiền nói cùng một con số");
   await donDep(db);
 }

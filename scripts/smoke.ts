@@ -85,6 +85,11 @@ const ROUTES = [
     phải có mặt ở đây, hoặc được khai miễn trừ KÈM LÝ DO.
   */
   "/bank",
+  // Buồng lái tài chính: đọc năm engine cùng lúc (số dư, dòng tiền, kết quả đơn, COD, chi phí) nên
+  // nó là trang tài chính NẶNG NHẤT. Không phủ thì một engine chậm lại sẽ không lượt đo nào thấy.
+  "/finance",
+  // Hàng đợi tác vụ tài chính: nơi người dùng PHÂN LOẠI và NỐI dòng tiền. Trang này hỏng thì mọi
+  // con số của buồng lái ở trên đứng im vì không ai còn phân loại được nữa.
   "/finance-ops",
   "/cs",
   "/outreach",

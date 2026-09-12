@@ -94,6 +94,12 @@ async function main() {
   const { getControlTower } = await import("@/lib/queries/control-tower");
   const { getReturnRateSummary, getReturnRateByVariant } = await import("@/lib/queries/return-rate");
   const { getFinancialTruth } = await import("@/lib/queries/financial-truth");
+  const { getCashPosition } = await import("@/lib/queries/cash-position");
+  const { getCashflowStatement } = await import("@/lib/queries/cashflow-statement");
+  const { getCashflow } = await import("@/lib/queries/cashflow");
+  const { getProfitCashBridge } = await import("@/lib/queries/profit-cash-bridge");
+  const { getExpenseReport } = await import("@/lib/queries/expense-report");
+  const { getFinanceOverview } = await import("@/lib/queries/finance-overview");
 
   const orderParams = parseListParams({ period: "all" }, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "cod"] });
   const shipmentParams = parseListParams({ period: "all" }, { defaultSort: "vtpStatusDate", filterKeys: ["stage", "cod", "carrier"] });
@@ -122,6 +128,23 @@ async function main() {
       run: () => getReturnRateByVariant({ period: month, q: "", minShipped: 0, sort: "returned", dir: "desc", page: 1, pageSize: 50 }),
     },
     { page: "Chân lý tài chính (Truth)", run: () => getFinancialTruth(month) },
+    /*
+      ═══ NHÓM TÀI CHÍNH ═══
+
+      `Tổng quan tài chính` là trang tài chính NẶNG NHẤT vì nó đọc năm engine cùng lúc. Đo cả trang
+      VÀ đo từng engine riêng: nếu trang chậm mà từng engine đều nhanh thì lỗi ở cách gộp, còn nếu
+      một engine chậm thì đã biết ngay engine nào — chỉ đo con số tổng thì phải đi dò lại từ đầu.
+
+      Hai dòng dòng tiền đứng cạnh nhau CÓ CHỦ ĐÍCH: `Dự phóng` là truy vấn đã có từ trước,
+      `Tiền thật` là truy vấn mới. Đặt cùng một lượt đo để so trực tiếp trên cùng một máy, cùng một
+      bộ dữ liệu — đó là phép so TRƯỚC/SAU duy nhất có nghĩa với một trang vừa được thêm tab.
+    */
+    { page: "Tổng quan tài chính (Finance)", run: () => getFinanceOverview(month) },
+    { page: "· Tiền hiện có (Cash position)", run: () => getCashPosition() },
+    { page: "· Dòng tiền THẬT (Statement)", run: () => getCashflowStatement(month) },
+    { page: "· Dòng tiền DỰ PHÓNG (Forecast — đã có trước)", run: () => getCashflow() },
+    { page: "· Lợi nhuận ≠ tiền (Bridge)", run: () => getProfitCashBridge(month) },
+    { page: "· Báo cáo chi phí (Expense report)", run: () => getExpenseReport(month) },
   ];
 
   const results: Result[] = [];

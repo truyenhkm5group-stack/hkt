@@ -10,7 +10,8 @@ import { toBankRow } from "@/lib/integrations/bank/statement";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { createLink, removeLink } from "@/lib/finance/linkage";
 import { settledAmountByTarget, txnAllocation } from "@/lib/queries/finance-linkage";
-import { getCashLedger, getCashProfitBridge, getObligationLedger } from "@/lib/queries/finance-ledger";
+import { getCashLedger, getObligationLedger } from "@/lib/queries/finance-ledger";
+import { getProfitCashBridge } from "@/lib/queries/profit-cash-bridge";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
@@ -281,19 +282,18 @@ export async function testFinanceTruth(db: Db) {
   // Không ÉP KHỚP: phần chưa giải thích được hiện nguyên, vì bịa một dòng "điều chỉnh khác" biến
   // công cụ chẩn đoán thành công cụ trấn an.
   clearMemo();
-  const cau = await getCashProfitBridge(KY);
-  // 59 triệu của khối chuẩn bị + 3 triệu của dòng nhập từ file ở nhóm 8 = 62 triệu tiền ra kinh doanh.
-  assert.equal(cau.businessNetCash, 11_970_000 - 62_000_000, "10. dòng tiền kinh doanh ròng = vào − ra, đã loại chuyển nội bộ");
-  assert.ok(cau.lines.some((x) => x.key === "cod_held"), "10. phải nêu khoản COD ĐVVC còn giữ — thường là chênh lớn nhất của shop COD");
-  assert.ok(cau.lines.some((x) => x.key === "business_net_cash" && x.subtotal), "10. kết thúc bằng dòng tiền thật, không phải một con số ép cho khớp");
-  assert.ok(cau.limitations.length > 0, "10. luôn nói ra giới hạn của con số");
+  const cau = await getProfitCashBridge(KY);
+  assert.equal(cau.profit + cau.explained + (cau.unexplained ?? 0), cau.cashMovement, "10. lợi nhuận + khoản giải thích được + phần chưa giải thích = tiền thật");
+  assert.ok(cau.lines.some((x) => x.key === "cod"), "10. phải nêu khoản COD ĐVVC còn giữ — thường là chênh lớn nhất của shop COD");
+  assert.ok(cau.lines.some((x) => x.anchor), "10. phải có dòng mốc (lợi nhuận / tiền), không phải một dãy điều chỉnh trôi nổi");
+  assert.ok(cau.reasons.length > 0, "10. luôn nói ra vì sao còn phần chưa giải thích");
 
   // ═══════════ 11. SỐ DƯ: CHƯA BIẾT KHÔNG PHẢI LÀ 0 ═══════════
   clearMemo();
   const so = await getCashLedger(KY);
-  const taiKhoanB = so.balance.accounts.find((a) => a.id === "ft-acc-b");
+  const taiKhoanB = so.balance.accounts.find((a) => a.accountId === "ft-acc-b");
   assert.equal(taiKhoanB?.balance, null, "11. tài khoản chưa có số dư luỹ kế là CHƯA BIẾT, không phải 0đ");
-  const taiKhoanA = so.balance.accounts.find((a) => a.id === "ft-acc-a");
+  const taiKhoanA = so.balance.accounts.find((a) => a.accountId === "ft-acc-a");
   // Dòng MỚI NHẤT có số dư là dòng 22/05 — số dư luỹ kế của nó do webhook SePay bổ sung ở nhóm 8,
   // chứ không phải dòng COD ngày 15/05. Số dư đi theo mốc thời gian, không theo đường vào.
   assert.equal(taiKhoanA?.balance, 25_000_000, "11. số dư lấy dòng MỚI NHẤT có số dư luỹ kế");

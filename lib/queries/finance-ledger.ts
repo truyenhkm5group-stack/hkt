@@ -10,8 +10,22 @@
  * mà tiền đâu?**
  *
  * Tệp này KHÔNG tính lại cái gì đã có nguồn. Nó ĐỌC LẠI: `getRecognizedCosts` cho chi phí,
- * `getFinancialTruth` cho doanh thu/COD, `getRecognizedPayrollCost` cho nghĩa vụ lương,
- * `bank_transactions` cho tiền. Việc của nó là ĐẶT CHÚNG CẠNH NHAU mà không cộng chồng.
+ * `getFinancialTruth` cho doanh thu/COD, `getCashPosition` cho số dư, `bank_transactions` cho tổng
+ * phát sinh. Việc của nó là ĐẶT CHÚNG CẠNH NHAU mà không cộng chồng.
+ *
+ * ─── RANH GIỚI VỚI BUỒNG LÁI TÀI CHÍNH ───
+ *
+ * Ba tệp cùng nói về tiền, và mỗi tệp trả lời ĐÚNG MỘT câu hỏi:
+ *
+ *   `cash-position.ts`      → "còn bao nhiêu, ở tài khoản nào" (số dư, ba mức chắc chắn).
+ *   `cashflow-statement.ts` → "kỳ vừa rồi tiền vào ra thế nào" (báo cáo dòng tiền theo bốn khoang).
+ *   `profit-cash-bridge.ts` → "vì sao lợi nhuận khác tiền".
+ *   tệp này                 → "NGHĨA VỤ đã phát sinh đã được tiền thật phủ tới đâu", cộng độ phủ
+ *                             mối nối và tình trạng ghép cặp chuyển nội bộ.
+ *
+ * Không tệp nào trong bốn tệp được trả lời câu của tệp kia. Bản đầu của tệp này có cả số dư lẫn
+ * cầu nối riêng; cả hai đã bị gỡ khi gộp, vì hai cách tính cho một câu hỏi là hai con số khác nhau
+ * trên hai màn hình.
  *
  * ─── HAI ĐIỀU TỆP NÀY TUYỆT ĐỐI KHÔNG LÀM ───
  *  · Không biến một dòng tiền thành chi phí hay doanh thu. Tiền ra đã nối với khoản chi vẫn chỉ là
@@ -23,6 +37,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { BANK_CASH_CLASS_LABEL, BANK_GROUP_SPEC, isBankGroup, type BankCashClass, type BankGroup } from "@/lib/constants/bank";
+import { getCashPosition, type AccountBalance } from "@/lib/queries/cash-position";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import type { Period } from "@/lib/search-params";
@@ -42,17 +57,6 @@ const NON_BUSINESS: BankGroup[] = (Object.keys(BANK_GROUP_SPEC) as BankGroup[]).
   const c = BANK_GROUP_SPEC[g].cashClass;
   return c !== "BUSINESS_INFLOW" && c !== "BUSINESS_OUTFLOW" && c !== "TAX" && c !== "UNCLASSIFIED";
 });
-
-export type AccountBalance = {
-  id: string;
-  label: string;
-  accountNumber: string;
-  status: string;
-  /** `null` = CHƯA BIẾT. Ngân hàng/SePay không phải lúc nào cũng gửi số dư luỹ kế. */
-  balance: number | null;
-  balanceAt: Date | null;
-  txnCount: number;
-};
 
 export type CashLedger = {
   period: Period;
@@ -75,8 +79,12 @@ export type CashLedger = {
   classified: { count: number; amount: number };
   unclassified: { count: number; amount: number };
   byCashClass: { cashClass: BankCashClass; label: string; in: number; out: number; count: number }[];
-  /** Số dư. `total = null` khi CHƯA tài khoản nào có số dư luỹ kế — không được hiển thị thành 0đ. */
-  balance: { total: number | null; knownAccounts: number; totalAccounts: number; accounts: AccountBalance[] };
+  /**
+   * Số dư — ĐỌC LẠI từ `lib/queries/cash-position.ts`, không tính ở đây.
+   * `total = null` khi chưa tài khoản nào biết được số dư; `complete = false` nghĩa là con số chỉ
+   * là CẬN DƯỚI vì còn tài khoản chưa biết, và màn hình phải nói ra điều đó.
+   */
+  balance: { total: number | null; knownAccounts: number; totalAccounts: number; complete: boolean; accounts: AccountBalance[] };
   /** Phân bổ mối nối: bao nhiêu tiền đã đối chiếu được với chứng từ. */
   linkage: { linkedAmount: number; linkedTxns: number; unlinkedTxns: number };
 };
@@ -160,50 +168,17 @@ async function cashLedgerUncached(period: Period): Promise<CashLedger> {
     .innerJoin(b, eq(b.id, l.txnId))
     .where(where);
 
-  /**
-   * SỐ DƯ: dòng MỚI NHẤT của mỗi tài khoản CÓ số dư luỹ kế.
-   *
-   * Đọc TOÀN BỘ lịch sử chứ không chỉ trong kỳ: số dư là trạng thái tại một thời điểm, không phải
-   * một phép cộng của kỳ. Lọc theo kỳ thì một tài khoản không phát sinh trong kỳ sẽ hiện "chưa
-   * biết" trong khi ERP biết rõ số dư của nó.
-   */
-  const accountRows = await db
-    .select({
-      id: schema.bankAccounts.id,
-      label: schema.bankAccounts.label,
-      accountNumber: schema.bankAccounts.accountNumber,
-      status: schema.bankAccounts.status,
-      /*
-        VIẾT NGUYÊN `"bank_accounts"."id"`, KHÔNG dùng `${schema.bankAccounts.id}`.
+  /*
+    SỐ DƯ: KHÔNG TÍNH Ở ĐÂY.
 
-        Trong DANH SÁCH CỘT, drizzle dựng cột KHÔNG kèm tên bảng — `${schema.bankAccounts.id}` ra
-        đúng chữ `"id"`. Đặt vào một truy vấn con tương quan có `from bank_transactions t`, chữ
-        `"id"` đó bám vào `t.id` chứ không phải tài khoản đang xét, nên điều kiện thành
-        `t.bank_account_id = t.id` — KHÔNG BAO GIỜ đúng, KHÔNG báo lỗi, và mọi tài khoản hiện
-        "chưa biết số dư". Đã dựng lại được bằng `.toSQL()` ngày 12/09/2026.
+    `lib/queries/cash-position.ts` là nguồn DUY NHẤT cho "tài khoản còn bao nhiêu", và nó phân ba
+    mức chắc chắn (CONFIRMED / DERIVED / UNKNOWN) cùng phép kiểm chuỗi số dư. Bản đầu của tệp này
+    tự đọc `balance_after` mới nhất — cùng câu hỏi, cách tính khác, nên hai màn hình sẽ hiện HAI số
+    dư khác nhau cho cùng một tài khoản ngay khi giao dịch gần nhất không mang số dư ngân hàng.
 
-        (Ở `where` drizzle có kèm tên bảng nên chỗ đó an toàn — chỉ danh sách cột mới dính.)
-      */
-      balance: sql<number | null>`(select t.balance_after from bank_transactions t
-        where t.bank_account_id = "bank_accounts"."id" and t.balance_after is not null
-        order by t.txn_at desc, t.created_at desc limit 1)`,
-      balanceAt: sql<Date | null>`(select t.txn_at from bank_transactions t
-        where t.bank_account_id = "bank_accounts"."id" and t.balance_after is not null
-        order by t.txn_at desc, t.created_at desc limit 1)`,
-      txnCount: sql<number>`(select count(*) from bank_transactions t where t.bank_account_id = "bank_accounts"."id")`,
-    })
-    .from(schema.bankAccounts);
-
-  const accounts: AccountBalance[] = accountRows.map((r) => ({
-    id: r.id,
-    label: r.label || r.accountNumber,
-    accountNumber: r.accountNumber,
-    status: r.status,
-    balance: r.balance === null || r.balance === undefined ? null : Number(r.balance),
-    balanceAt: r.balanceAt ? new Date(r.balanceAt) : null,
-    txnCount: Number(r.txnCount),
-  }));
-  const coSoDu = accounts.filter((a) => a.balance !== null);
+    Đó đúng là thứ bản gộp này phải loại: một con số, một cách tính.
+  */
+  const viTri = await getCashPosition();
 
   const transferIn = Number(tong?.transferIn ?? 0);
   const transferOut = Number(tong?.transferOut ?? 0);
@@ -240,10 +215,11 @@ async function cashLedgerUncached(period: Period): Promise<CashLedger> {
       .map(([cashClass, v]) => ({ cashClass, label: BANK_CASH_CLASS_LABEL[cashClass], ...v }))
       .sort((x, y) => y.in + y.out - (x.in + x.out)),
     balance: {
-      total: coSoDu.length ? coSoDu.reduce((t, a) => t + (a.balance ?? 0), 0) : null,
-      knownAccounts: coSoDu.length,
-      totalAccounts: accounts.length,
-      accounts,
+      total: viTri.total,
+      knownAccounts: viTri.knownAccounts,
+      totalAccounts: viTri.knownAccounts + viTri.unknownAccounts,
+      complete: viTri.complete,
+      accounts: viTri.accounts,
     },
     linkage: { linkedAmount: Number(linkRow?.amount ?? 0), linkedTxns, unlinkedTxns: txnCount - linkedTxns },
   };
@@ -348,109 +324,4 @@ async function obligationLedgerUncached(period: Period): Promise<ObligationLedge
 
 export async function getObligationLedger(period: Period): Promise<ObligationLedger> {
   return memo(`obligationLedger:${periodKey(period)}`, 90_000, () => obligationLedgerUncached(period));
-}
-
-/**
- * ═══════ CẦU NỐI LỢI NHUẬN → TIỀN MẶT ═══════
- *
- * Câu hỏi này chủ shop hỏi mỗi tháng và ERP chưa bao giờ trả lời được: **"báo lãi 40 triệu mà tài
- * khoản có 6 triệu, tiền đi đâu?"**
- *
- * Bảng dưới đi từ LỢI NHUẬN ƯỚC TÍNH (theo đơn, theo kỳ hưởng lợi ích) xuống DÒNG TIỀN KINH DOANH
- * RÒNG (tiền thật vào ra trong kỳ), nêu tên từng khoản chênh. Mỗi dòng là một lý do cụ thể, không
- * phải một số dư ép cho khớp.
- *
- * KHÔNG ÉP KHỚP. Phần không giải thích được hiện nguyên ở dòng cuối với nhãn "chưa giải thích được"
- * — bịa một dòng "điều chỉnh khác" để tổng bằng nhau là biến một công cụ chẩn đoán thành một công
- * cụ trấn an.
- */
-export type BridgeLine = { key: string; label: string; amount: number; note: string; subtotal?: boolean };
-
-export type CashProfitBridge = {
-  period: Period;
-  lines: BridgeLine[];
-  estimatedProfit: number;
-  businessNetCash: number;
-  /** Phần chênh KHÔNG giải thích được bằng các dòng ở trên. Càng gần 0 thì hai sổ càng khớp. */
-  unexplained: number;
-  hasBankData: boolean;
-  limitations: string[];
-};
-
-async function bridgeUncached(period: Period): Promise<CashProfitBridge> {
-  const [truth, ledger, ngh] = await Promise.all([getFinancialTruth(period), getCashLedger(period), getObligationLedger(period)]);
-
-  const codChuaVe = ngh.lines.find((x) => x.key === "COD")?.outstanding ?? 0;
-  const chiChuaTra = ngh.lines.find((x) => x.key === "EXPENSE")?.outstanding ?? 0;
-  const luongChuaTra = ngh.lines.find((x) => x.key === "PAYROLL")?.outstanding ?? 0;
-
-  const lines: BridgeLine[] = [
-    {
-      key: "profit",
-      label: "Lợi nhuận ước tính (theo đơn trong kỳ)",
-      amount: truth.estimatedProfit,
-      note: "Doanh thu giao thành công trừ giá vốn, cước, quảng cáo, vận hành. Là LỢI ÍCH KINH TẾ của kỳ, không phải tiền trong tài khoản.",
-      subtotal: true,
-    },
-    {
-      key: "cod_held",
-      label: "− Tiền COD ĐVVC còn giữ",
-      amount: -codChuaVe,
-      note: "Hàng đã tới tay khách, doanh thu đã ghi, nhưng tiền còn nằm ở ĐVVC. Đây thường là khoản chênh LỚN NHẤT của shop bán COD.",
-    },
-    {
-      key: "unpaid_expense",
-      label: "+ Chi phí đã ghi nhận nhưng chưa chi tiền",
-      amount: chiChuaTra,
-      note: "Chi phí thuộc kỳ này mà tiền chưa ra (trả sau, trả gối đầu). Lợi nhuận đã trừ, tài khoản thì chưa.",
-    },
-    {
-      key: "unpaid_payroll",
-      label: "+ Lương đã ghi nhận nhưng chưa trả",
-      amount: luongChuaTra,
-      note: "Lương tháng làm việc thường trả sang tháng sau.",
-    },
-    {
-      key: "non_operating",
-      label: "± Dòng tiền không thuộc lãi lỗ",
-      amount: -(ledger.byCashClass.find((c) => c.cashClass === "CAPITAL")?.in ?? 0) + (ledger.byCashClass.find((c) => c.cashClass === "OWNER")?.out ?? 0),
-      note: "Góp vốn, vay, rút vốn: tiền thật vào ra nhưng không phải lãi lỗ. Đưa vào đây để hai vế nói cùng một ngôn ngữ.",
-    },
-  ];
-
-  const giaiThich = lines.reduce((t, x) => t + x.amount, 0);
-  const unexplained = ledger.businessNet - giaiThich;
-
-  lines.push({
-    key: "business_net_cash",
-    label: "= Dòng tiền kinh doanh ròng (tiền thật)",
-    amount: ledger.businessNet,
-    note: "Tiền thật vào trừ tiền thật ra trong kỳ, đã loại chuyển nội bộ. Đây là con số quyết định tuần sau có tiền chạy quảng cáo hay không.",
-    subtotal: true,
-  });
-
-  return {
-    period,
-    lines,
-    estimatedProfit: truth.estimatedProfit,
-    businessNetCash: ledger.businessNet,
-    unexplained,
-    hasBankData: ledger.hasData,
-    limitations: [
-      ...(ledger.hasData
-        ? []
-        : ["Kỳ này CHƯA có giao dịch ngân hàng nào trong ERP, nên vế tiền mặt đang là 0 vì THIẾU DỮ LIỆU, không phải vì không phát sinh."]),
-      ...(ledger.unclassified.count > 0
-        ? [`${ledger.unclassified.count} giao dịch chưa phân loại (${ledger.unclassified.amount.toLocaleString("vi-VN")} ₫) vẫn nằm trong dòng tiền kinh doanh — phân loại xong con số sẽ đổi.`]
-        : []),
-      ...(ledger.internalTransfer.unpairedCount > 0
-        ? [`${ledger.internalTransfer.unpairedCount} chân chuyển nội bộ chưa ghép đôi; chênh ${ledger.internalTransfer.net.toLocaleString("vi-VN")} ₫ đang lọt vào số dư thay vì triệt tiêu.`]
-        : []),
-      "Phần “chưa giải thích được” KHÔNG bị ép về 0. Nó lớn nghĩa là còn nghĩa vụ hoặc dòng tiền chưa được nối với chứng từ, không phải một khoản tiền bị mất.",
-    ],
-  };
-}
-
-export async function getCashProfitBridge(period: Period): Promise<CashProfitBridge> {
-  return memo(`cashProfitBridge:${periodKey(period)}`, 90_000, () => bridgeUncached(period));
 }
