@@ -235,11 +235,27 @@ docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
 #
 # Ở đây gỡ mọi tag theo SHA của kho này. `docker rmi` trên một TAG chỉ gỡ tag; ảnh đang chạy không
 # bao giờ bị xoá (Docker từ chối), nên thao tác này không thể làm sập bản đang chạy.
+#
+# `|| true` Ở ĐÂY LÀ BẮT BUỘC, KHÔNG PHẢI CHO CHẮC.
+#
+# Script này chạy với `set -euo pipefail` (dòng 6). Một `grep` KHÔNG TÌM THẤY GÌ trả về trạng thái
+# 1; với `pipefail` thì cả đường ống mang trạng thái 1, và `set -e` giết script ngay tại đó.
+#
+# Mà "không tìm thấy gì" chính là trạng thái BÌNH THƯỜNG ở đây — đúng vào lúc máy chủ đã sạch.
+# Deploy #244 chết đúng dòng này, ngay sau khi `docker-prune` vừa dọn hết ảnh cũ: bản sửa cho việc
+# đĩa đầy tự giết mình vì đĩa đã hết đầy. `bash -n` không bắt được (cú pháp hoàn toàn hợp lệ) —
+# đây là lỗi TRẠNG THÁI THOÁT, chỉ lộ lúc chạy.
+#
+# Nên: thay đường ống-vào-`while` bằng một phép thế lệnh có `|| true`, rồi lặp trên biến. Không
+# đường ống nào còn có thể làm đổ script, và "danh sách rỗng" chỉ đơn giản là lặp 0 lần.
 if [ -n "${ERP_IMAGE:-}" ]; then
   ERP_REPO="${ERP_IMAGE%%:*}"
-  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${ERP_REPO}:" | grep -v '^.*:<none>$' | while read -r tag_cu; do
-    [ "$tag_cu" = "$ERP_IMAGE" ] && continue
-    docker rmi "$tag_cu" >/dev/null 2>&1 || true
+  ANH_CU="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${ERP_REPO}:" || true)"
+  for tag_cu in $ANH_CU; do
+    # Giữ đúng ảnh sắp dùng; ảnh không tag để `docker image prune` dọn.
+    if [ "$tag_cu" != "$ERP_IMAGE" ] && [ "$tag_cu" != "${ERP_REPO}:<none>" ]; then
+      docker rmi "$tag_cu" >/dev/null 2>&1 || true
+    fi
   done
   docker image prune -f >/dev/null 2>&1 || true
 fi

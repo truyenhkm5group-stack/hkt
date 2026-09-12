@@ -99,6 +99,60 @@ CSDL đã có 68 migration và dữ liệu nghiệp vụ thật → 7 phòng gie
 `work_items` RỖNG (phép chiếu, không bản sao), 3 ràng buộc thẩm quyền chặn đúng, chạy lại không
 nhân đôi.
 
+## 5b. HAI LẦN DEPLOY ĐỎ — và cả hai KHÔNG phải lỗi của bản này
+
+Ghi lại vì nó là một lỗi hạ tầng kiểu **chậm và im lặng**, đúng loại khó tìm nhất, và nó sẽ quay
+lại nếu người sau không biết.
+
+| Deploy | Chết ở đâu | Thông báo |
+|---|---|---|
+| #242 (`12d337b`) | giải nén layer | `failed to extract layer ... no space left on device` |
+| #243 (`2bf77eb`) | `git pull` trên VPS | `error: file write error: No space left on device` |
+
+Cả hai lần: **bản đang chạy KHÔNG bị đụng tới** — production giữ nguyên `f280faa`, không migration
+nào chạy, không gián đoạn dịch vụ. Mọi cổng CI đều xanh ở cả hai lần.
+
+### Nguyên nhân gốc: tích luỹ suốt ~240 lần deploy
+
+`docker image prune -f` trong `install-vps.sh` **chỉ xoá ảnh KHÔNG CÓ TAG**. Mỗi lần deploy kéo về
+`ghcr.io/<kho>:<sha>` — một ảnh **có tag** ~2,6 GB — gắn thêm `erp-app:local` rồi đi tiếp. Ảnh cũ
+mất tag `erp-app:local` nên thành dangling và được dọn; tag theo SHA thì **không ai gỡ**. Lệnh dọn
+nhìn thẳng qua đúng thứ đang tích lại.
+
+Đo được bằng thao tác `disk` mới: 39G/39G · 0 byte trống · 16 ảnh / 31,74 GB / **26,33 GB thu hồi
+được (82%)** · 12 ảnh theo SHA.
+
+### #243 phơi ra một điều #242 chưa thấy
+
+Bản sửa nằm trong `install-vps.sh`, mà script đó chỉ chạy **sau khi** VPS `git pull` được. Máy chủ
+đầy tới mức không ghi nổi một loose object — **không tải nổi chính bản sửa cho việc nó bị đầy**.
+Sửa đúng chỗ vẫn vô dụng nếu không có đường đưa nó tới.
+
+Lối ra: workflow vận hành **nhúng thẳng** script qua SSH, không cần `git pull` trên máy chủ (chứng
+minh: thao tác `disk` chạy được lúc đĩa đã 100%). Thao tác `docker-prune` đi đường đó.
+
+### Kết quả
+
+```
+TRƯỚC  /dev/vda1  39G  39G   0   100%   · 16 ảnh · 31,74 GB
+SAU    /dev/vda1  39G  8.8G  30G  23%   ·  3 ảnh ·  3,16 GB
+```
+
+Dịch vụ sống suốt quá trình: 4/4 container Up, `{"ok":true,"commit":"f280faa260c5"}`.
+
+### Bốn sửa để nó không quay lại
+
+1. `install-vps.sh` — gỡ mọi tag `ghcr.io/<kho>:<sha>` cũ **trước** khi kéo.
+2. `install-vps.sh` — gỡ tag theo SHA **ngay sau** khi gắn `erp-app:local` (ảnh vẫn sống).
+3. `install-vps.sh` — **cổng ổ đĩa** dưới 3 GB thì dừng sớm, kèm `docker system df`, cùng lối với
+   cổng bộ nhớ đã có ngay bên dưới.
+4. `bootstrap.sh` — thông báo lỗi nói **đúng nguyên nhân**. #243 báo "Không kết nối được github.com
+   — kiểm tra mạng của VPS" trong khi mạng hoàn toàn bình thường; một thông báo sai hướng bắt người
+   trực đi soi nhầm chỗ.
+
+Cộng thêm hai thao tác vận hành mới: `disk` (ổ đĩa là tài nguyên DUY NHẤT trong bốn thứ CPU / RAM /
+đĩa / mạng chưa có chỗ xem — nên nó là thứ duy nhất hỏng mà không ai thấy trước) và `docker-prune`.
+
 ## 6. CHƯA LÀM — và vì sao
 
 * **Kéo-thả / phụ thuộc giữa việc / sprint.** Cố ý không làm: V1 phải dùng được hằng ngày, không
