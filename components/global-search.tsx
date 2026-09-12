@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Search, ShoppingBag, Truck, Users, Shirt } from "lucide-react";
+import { ListTodo, Loader2, Search, ShoppingBag, Shirt, Truck, UserRound, Users } from "lucide-react";
 import { allowedNavItems, type NavUserLike } from "@/components/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -11,9 +11,9 @@ import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { globalSearch } from "@/lib/actions/search";
 import type { SearchHit, SearchResult } from "@/lib/queries/search";
 
-const ICON = { ORDER: ShoppingBag, SHIPMENT: Truck, CUSTOMER: Users, PRODUCT: Shirt } as const;
-const GROUP_LABEL = { ORDER: "Đơn hàng", SHIPMENT: "Vận đơn", CUSTOMER: "Khách hàng", PRODUCT: "Sản phẩm" } as const;
-const LIST_HREF = { ORDER: "/orders", SHIPMENT: "/shipments", CUSTOMER: "/customers", PRODUCT: "/products" } as const;
+const ICON = { ORDER: ShoppingBag, SHIPMENT: Truck, CUSTOMER: Users, PRODUCT: Shirt, WORK: ListTodo, EMPLOYEE: UserRound } as const;
+const GROUP_LABEL = { ORDER: "Đơn hàng", SHIPMENT: "Vận đơn", CUSTOMER: "Khách hàng", PRODUCT: "Sản phẩm", WORK: "Công việc", EMPLOYEE: "Nhân sự" } as const;
+const LIST_HREF = { ORDER: "/orders", SHIPMENT: "/shipments", CUSTOMER: "/customers", PRODUCT: "/products", WORK: "/work/all", EMPLOYEE: "/work/all" } as const;
 
 /**
  * Ô LỆNH ⌘K.
@@ -86,7 +86,17 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
 
   const grouped = (kind: SearchHit["kind"]) => (result?.hits ?? []).filter((h) => h.kind === kind);
   const countOf = (kind: SearchHit["kind"]) =>
-    kind === "ORDER" ? result?.counts.orders : kind === "SHIPMENT" ? result?.counts.shipments : kind === "CUSTOMER" ? result?.counts.customers : result?.counts.products;
+    kind === "ORDER"
+      ? result?.counts.orders
+      : kind === "SHIPMENT"
+        ? result?.counts.shipments
+        : kind === "CUSTOMER"
+          ? result?.counts.customers
+          : kind === "WORK"
+            ? result?.counts.work
+            : kind === "EMPLOYEE"
+              ? result?.counts.employees
+              : result?.counts.products;
 
   return (
     <>
@@ -95,8 +105,8 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
         <span className="hidden flex-1 text-left text-xs font-normal sm:inline">Tìm đơn, SĐT, mã vận đơn…</span>
         <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
       </Button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Tìm kiếm" description="Tìm nhanh đơn hàng, vận đơn, khách hàng, sản phẩm">
-        <CommandInput placeholder="Nhập mã đơn, số điện thoại, tên khách, mã vận đơn…" value={query} onValueChange={setQuery} />
+      <CommandDialog open={open} onOpenChange={setOpen} title="Tìm kiếm" description="Tìm nhanh đơn hàng, vận đơn, khách hàng, sản phẩm, công việc, nhân sự">
+        <CommandInput placeholder="Nhập mã đơn, số điện thoại, tên khách, mã vận đơn, tên việc, tên nhân viên…" value={query} onValueChange={setQuery} />
         <CommandList>
           {/* Một số điện thoại KHÔNG phải một đơn — nói thẳng khi nó khớp nhiều bản ghi. */}
           {result?.ambiguous ? (
@@ -107,7 +117,7 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
             {q.length < 2 ? "Nhập ít nhất 2 ký tự." : pending ? "Đang tìm…" : "Không tìm thấy bản ghi nào khớp."}
           </CommandEmpty>
 
-          {(["ORDER", "SHIPMENT", "CUSTOMER", "PRODUCT"] as const).map((kind) => {
+          {(["ORDER", "SHIPMENT", "CUSTOMER", "PRODUCT", "WORK", "EMPLOYEE"] as const).map((kind) => {
             const hits = grouped(kind);
             if (!hits.length) return null;
             const total = countOf(kind) ?? hits.length;

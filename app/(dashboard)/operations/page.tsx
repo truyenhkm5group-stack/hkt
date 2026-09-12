@@ -5,13 +5,14 @@ import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { MetricCard } from "@/components/metric-card";
 import { CareEffectivenessSection } from "@/app/(dashboard)/operations/care-section";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { ageLabel } from "@/lib/constants/action-queue";
 import { AGING_BUCKETS } from "@/lib/constants/operating-funnel";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getEstimatorStatus } from "@/lib/queries/impact";
 import { getActionEffectiveness } from "@/lib/queries/action-evidence";
 import { getFunnelHealth, getRecoveryScoreboard, type StageHealth, type StageStatus } from "@/lib/queries/stage-health";
+import { DEPT_HEALTH_LABEL, DEPT_HEALTH_TONE, getDepartmentCockpit } from "@/lib/queries/work";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Điều hành hằng ngày" };
@@ -79,8 +80,17 @@ function gio(h: number): string {
 }
 
 export default async function OperationsPage() {
-  await requirePermission("dashboard:view");
+  const user = await requirePermission("dashboard:view");
   const [health, estimator, bang, hieuQua] = await Promise.all([getFunnelHealth(), getEstimatorStatus(), getRecoveryScoreboard(7), getActionEffectiveness(30)]);
+  /*
+    SỨC KHOẺ PHÒNG BAN — DẢI LIÊN KẾT, KHÔNG PHẢI MỘT BẢNG ĐIỀU KHIỂN THỨ HAI.
+
+    Trang này đã trả lời "khâu nào đang kẹt". Câu còn thiếu của ban điều hành là "PHÒNG nào đang
+    kẹt" — khác nhau: một khâu tắc có thể do hai phòng, và một phòng kẹt có thể kéo ba khâu.
+    Buồng lái đầy đủ nằm ở `/work/department`; ở đây chỉ là bảy ô bấm được, để không dựng thêm một
+    bảng điều khiển trùng lặp.
+  */
+  const cockpit = can(user, "work:all") ? await getDepartmentCockpit() : null;
 
   // Câu B lấy ngoại lệ của MỌI khâu rồi xếp theo tiền treo — người vận hành cần biết việc nào
   // đáng làm trước trong cả shop, không phải trong từng khâu.
@@ -96,6 +106,34 @@ export default async function OperationsPage() {
         description="Đang kẹt ở đâu · việc nào làm ngay · ai phụ trách · thu về được bao nhiêu."
         actions={<QueueViewTabs active="stages" />}
       />
+
+      {cockpit ? (
+        <SectionCard
+          title="Phòng nào đang kẹt"
+          description="Cùng hàng đợi, nhìn theo NGƯỜI CHỊU TRÁCH NHIỆM thay vì theo khâu."
+          actions={
+            <Link href="/work/department" className="text-xs font-medium text-primary hover:underline">
+              Mở buồng lái phòng ban <ArrowRight className="inline size-3" />
+            </Link>
+          }
+          padded={false}
+        >
+          <div className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+            {cockpit.rows.map((r) => (
+              <Link key={r.department} href={`/work/department?dept=${r.department}`} className="bg-background p-2.5 transition-colors hover:bg-accent/50">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium">{r.label}</span>
+                  <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", DEPT_HEALTH_TONE[r.health])}>{DEPT_HEALTH_LABEL[r.health]}</span>
+                </div>
+                <p className="mt-1 text-sm tabular-nums">
+                  {r.open} <span className="text-xs font-normal text-muted-foreground">việc</span>
+                  {r.overdue ? <span className="ml-1.5 text-xs font-medium text-destructive">{r.overdue} quá hạn</span> : null}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard

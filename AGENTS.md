@@ -82,6 +82,24 @@ deploy dừng, không phải cảnh báo.
     `COMMISSION_BASIS_NEEDS_REVIEW`, không đoán. Cước/phí hoàn gõ tay chỉ được tính khi khai
     `cost_source = 'MANUAL_ADJUSTMENT'` kèm lý do.
 
+19. **CÔNG VIỆC ≠ TRẠNG THÁI NGHIỆP VỤ** (`docs/work-management-os.md`): hàng đợi `/work` là **PHÉP
+    CHIẾU** lên việc đã tồn tại ở miền nghiệp vụ, KHÔNG phải bản sao. Mỗi nguồn khai thẩm quyền ở
+    `lib/constants/work-sources.ts`: `SOURCE` = miền giữ trạng thái (dòng `work_items` chỉ là lớp
+    ghi chú, cột `status` bắt buộc `NULL` — ràng buộc `work_items_authority_check`); `WORK` = việc
+    tay / định kỳ, `work_items` là nguồn duy nhất. Đóng một việc chiếu PHẢI đi qua Server Action
+    của chính miền đó; nút trên hàng đợi gọi hàm thật (`lib/actions/work-quick.ts`), không có
+    nhánh nào "đánh dấu xong". Thêm nguồn việc mới thì phải khai vào
+    `ALERT_KINDS_OWNED_ELSEWHERE` nếu nó trùng độ mịn với một cảnh báo đang có — nếu không, tiền
+    bị cộng hai lần ở mọi tổng hợp.
+20. **KR / BSC CHỈ NỐI VÀO CHỈ SỐ CÓ THẬT** (`lib/constants/metric-bindings.ts`): `metric_source`
+    chỉ nhận `MANUAL` hoặc một khoá trong sổ đăng ký, và mỗi khoá khai rõ mức tin cậy
+    (`MEASURED` / `ESTIMATED` / `MANUAL`) cùng câu căn cứ. ERP chưa đo được thì để `MANUAL` —
+    KHÔNG viết một truy vấn gần đúng rồi gọi nó là chỉ số. Tiến độ chưa đo được là `null`, không
+    bao giờ 0%.
+21. **KỲ REVIEW ĐÃ CHỐT LÀ BẤT BIẾN**: `review_cycles.status = 'FINAL'` thì mọi con số đọc từ
+    `snapshot`, không truy vấn lại. Sửa công thức tháng sau không được làm đổi số của kỳ đã chốt
+    (mục 8.9). Ràng buộc `review_cycles_final_check` không cho chốt mà thiếu ảnh chụp.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.

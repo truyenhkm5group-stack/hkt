@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { WORK_STATUS_LABEL, type WorkStatus } from "@/lib/constants/work";
 
 /**
  * ───────────── TÌM KIẾM TOÀN HỆ THỐNG ─────────────
@@ -17,7 +18,7 @@ import { getDb, schema } from "@/db";
  */
 
 export type SearchHit = {
-  kind: "ORDER" | "SHIPMENT" | "CUSTOMER" | "PRODUCT";
+  kind: "ORDER" | "SHIPMENT" | "CUSTOMER" | "PRODUCT" | "WORK" | "EMPLOYEE";
   id: string;
   title: string;
   subtitle: string;
@@ -28,7 +29,7 @@ export type SearchResult = {
   query: string;
   hits: SearchHit[];
   /** Tổng số bản ghi khớp từng loại — có thể lớn hơn số dòng trả về. */
-  counts: { orders: number; shipments: number; customers: number; products: number };
+  counts: { orders: number; shipments: number; customers: number; products: number; work: number; employees: number };
   /** Cảnh báo khi một khoá tra cứu khớp nhiều bản ghi — người dùng phải tự chọn. */
   ambiguous: string | null;
 };
@@ -37,7 +38,7 @@ const digitsOnly = (v: string) => v.replace(/\D/g, "");
 
 export async function searchEntities(rawQuery: string, limitPerKind = 5): Promise<SearchResult> {
   const q = rawQuery.trim();
-  const empty: SearchResult = { query: q, hits: [], counts: { orders: 0, shipments: 0, customers: 0, products: 0 }, ambiguous: null };
+  const empty: SearchResult = { query: q, hits: [], counts: { orders: 0, shipments: 0, customers: 0, products: 0, work: 0, employees: 0 }, ambiguous: null };
   if (q.length < 2) return empty;
 
   const db = await getDb();
@@ -56,8 +57,10 @@ export async function searchEntities(rawQuery: string, limitPerKind = 5): Promis
   const s = schema.shipments;
   const c = schema.customers;
   const p = schema.products;
+  const w = schema.workItems;
+  const u = schema.users;
 
-  const [orders, shipments, customers, products] = await Promise.all([
+  const [orders, shipments, customers, products, work, employees] = await Promise.all([
     db
       .select({
         id: o.id,
@@ -103,6 +106,26 @@ export async function searchEntities(rawQuery: string, limitPerKind = 5): Promis
       .from(p)
       .where(sql`(${p.name} ilike ${like} or ${p.customId} ilike ${like})`)
       .limit(limitPerKind),
+    /*
+      VIỆC — chỉ tra bảng `work_items`, KHÔNG chạy phép chiếu.
+
+      Phép chiếu gọi bảy adapter (kể cả `getAdsDecision` vốn nặng); chạy nó trên MỖI lần gõ phím là
+      không chấp nhận được. Việc sinh từ miền nghiệp vụ vẫn tìm được bằng chính đơn / vận đơn của
+      nó — đường đó đã có ở trên. Cái duy nhất chỉ tìm được ở đây là việc TAY và việc ĐỊNH KỲ, và
+      chúng nằm đúng trong bảng này.
+    */
+    db
+      .select({ id: w.id, sourceType: w.sourceType, sourceKey: w.sourceKey, title: w.title, status: w.status, dueAt: w.dueAt, total_count: sql<number>`count(*) over ()` })
+      .from(w)
+      .where(sql`${w.authority} = 'WORK' and (${w.title} ilike ${like} or ${w.summary} ilike ${like})`)
+      .orderBy(sql`case when ${w.status} in ('DONE','CANCELLED') then 1 else 0 end, ${w.updatedAt} desc`)
+      .limit(limitPerKind),
+    db
+      .select({ id: u.id, name: u.name, email: u.email, total_count: sql<number>`count(*) over ()` })
+      .from(u)
+      .where(sql`${u.active} and (${u.name} ilike ${like} or ${u.email} ilike ${like})`)
+      .orderBy(sql`${u.name}`)
+      .limit(limitPerKind),
   ]);
 
   const hits: SearchHit[] = [
@@ -135,6 +158,21 @@ export async function searchEntities(rawQuery: string, limitPerKind = 5): Promis
       subtitle: r.code ? `Mã ${r.code}` : "Sản phẩm",
       href: `/products/${r.id}`,
     })),
+    ...work.map((r) => ({
+      kind: "WORK" as const,
+      id: r.id,
+      title: r.title,
+      subtitle: `${WORK_STATUS_LABEL[(r.status ?? "NEW") as WorkStatus]}${r.dueAt ? ` · hạn ${new Date(r.dueAt).toLocaleDateString("vi-VN")}` : " · không đặt hạn"}`,
+      href: `/work/all?q=${encodeURIComponent(r.title)}`,
+    })),
+    ...employees.map((r) => ({
+      kind: "EMPLOYEE" as const,
+      id: r.id,
+      title: r.name,
+      subtitle: r.email,
+      // Mở thẳng hàng đợi của người đó — câu hỏi thường gặp là "người này đang cầm việc gì".
+      href: `/work/all?assignee=${encodeURIComponent(r.id)}`,
+    })),
   ];
 
   const counts = {
@@ -142,6 +180,8 @@ export async function searchEntities(rawQuery: string, limitPerKind = 5): Promis
     shipments: Number(shipments[0]?.total_count ?? 0),
     customers: Number(customers[0]?.total_count ?? 0),
     products: Number(products[0]?.total_count ?? 0),
+    work: Number(work[0]?.total_count ?? 0),
+    employees: Number(employees[0]?.total_count ?? 0),
   };
 
   // Một số điện thoại khớp nhiều đơn / nhiều vận đơn là chuyện BÌNH THƯỜNG, không phải lỗi — nhưng
