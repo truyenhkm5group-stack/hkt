@@ -38,7 +38,7 @@ const o = schema.orders;
 const s = schema.shipments;
 const po = schema.productionOrders;
 
-const DAY_MS = 86_400_000;
+const MS_PER_DAY = 86_400_000;
 
 export type InventoryDecisionRow = InventoryDecisionResult & {
   variantId: string;
@@ -228,7 +228,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
     const returnRateSource: "variant" | "shop" | null = ownSample ? "variant" : returnRate === null ? null : "shop";
     const leadTimeSource: "override" | "default" = a.leadTimeOverrides[r.productId] != null ? "override" : "default";
     const firstAt = firstReceipt.get(r.variantId);
-    const ageDays = firstAt ? Math.floor((now - firstAt.getTime()) / DAY_MS) : null;
+    const ageDays = firstAt ? Math.floor((now - firstAt.getTime()) / MS_PER_DAY) : null;
     const daysSinceLastSale = lastSale.get(r.variantId) ?? null;
 
     if (r.stockKnown) stockKnownCount += 1;
@@ -400,9 +400,9 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
   const a = plan.assumptions;
   const windowDays = Math.max(1, a.velocityWindowDays);
   const horizonDays = Math.min(Math.max(1, a.leadTimeDays), daysBack);
-  const cutoff = new Date(Date.now() - daysBack * DAY_MS);
-  const beforeStart = new Date(cutoff.getTime() - windowDays * DAY_MS);
-  const horizonEnd = new Date(cutoff.getTime() + horizonDays * DAY_MS);
+  const cutoff = new Date(Date.now() - daysBack * MS_PER_DAY);
+  const beforeStart = new Date(cutoff.getTime() - windowDays * MS_PER_DAY);
+  const horizonEnd = new Date(cutoff.getTime() + horizonDays * MS_PER_DAY);
 
   // Nhu cầu ròng quanh mốc cắt + lần bán cuối trước mốc — một lượt quét.
   const demand = await db
@@ -470,9 +470,9 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
     const soldAfter = Number(d?.soldAfter ?? 0);
     const velocity = soldBefore / windowDays;
     const lastBefore = d?.lastSoldBefore ? new Date(d.lastSoldBefore) : null;
-    const daysSinceLastSale = lastBefore ? Math.floor((cutoff.getTime() - lastBefore.getTime()) / DAY_MS) : null;
+    const daysSinceLastSale = lastBefore ? Math.floor((cutoff.getTime() - lastBefore.getTime()) / MS_PER_DAY) : null;
     const firstAt = r.firstAt ? new Date(r.firstAt) : null;
-    const ageDays = firstAt ? Math.floor((cutoff.getTime() - firstAt.getTime()) / DAY_MS) : null;
+    const ageDays = firstAt ? Math.floor((cutoff.getTime() - firstAt.getTime()) / MS_PER_DAY) : null;
     if (ageDays !== null && ageDays < 0) continue; // mẫu chưa tồn tại tại mốc cắt.
 
     // Cùng công thức đặt hàng với kế hoạch SX, chạy trên số liệu tại mốc cắt.

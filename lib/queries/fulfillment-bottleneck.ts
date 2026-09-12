@@ -144,7 +144,7 @@ function sinceStage(r: Row): Date {
   return new Date(r.last_update_status_at ?? r.inserted_at);
 }
 
-function classify(r: Row): { reason: FulfillmentBlockReason; detail: string; detectedAt: Date } {
+function classifyBottleneck(r: Row): { reason: FulfillmentBlockReason; detail: string; detectedAt: Date } {
   if (!r.shipment_id) {
     const blocked = dataBlockReason(r);
     if (blocked) return { reason: "DATA_BLOCKED", detail: blocked, detectedAt: sinceStage(r) };
@@ -204,7 +204,7 @@ export async function getFulfillmentBottleneckQueue(): Promise<FulfillmentBottle
 
   const now = Date.now();
   const cases: FulfillmentBottleneckCase[] = rows.map((r) => {
-    const { reason, detail, detectedAt } = classify(r);
+    const { reason, detail, detectedAt } = classifyBottleneck(r);
     const hours = BOTTLENECK_SLA_HOURS[reason];
     const dueAt = new Date(detectedAt.getTime() + hours * 3_600_000);
     const hoursRemaining = (dueAt.getTime() - now) / 3_600_000;

@@ -13,7 +13,7 @@ import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
  * khác nhau (tạo lại vận đơn ↔ giục bưu tá).
  *
  * BỐN LÝ DO, LOẠI TRỪ LẪN NHAU, THEO ĐÚNG THỨ TỰ CHẶN (xét từ trên xuống, dừng ở lý do đầu tiên
- * đúng — xem lib/queries/fulfillment-bottleneck.ts::classifyRow):
+ * đúng — xem lib/queries/fulfillment-bottleneck.ts::classifyBottleneck):
  *
  *   1. DATA_BLOCKED            — đơn đã chốt nhưng thiếu SĐT/địa chỉ hoặc địa chỉ chưa chuẩn hoá,
  *                                 nên KHÔNG THỂ tạo vận đơn được (đây là "lỗi data khiến fulfillment
