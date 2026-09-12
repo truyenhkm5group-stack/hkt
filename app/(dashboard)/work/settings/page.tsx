@@ -16,6 +16,7 @@ import { effectiveSlaRules } from "@/lib/constants/work-sla";
 import { assignableMembers, listDepartmentMembers, listDepartments, listOrgPeople } from "@/lib/queries/work";
 import { getScoreWeights, getWorkConfig } from "@/lib/queries/work-config";
 import { getReadiness } from "@/lib/queries/work-readiness";
+import { membershipDrift } from "@/lib/org/membership";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { buildCapacity, getStaffing } from "@/lib/queries/workforce";
 import { DEFAULT_WIP_LIMIT } from "@/lib/constants/workforce";
@@ -48,6 +49,8 @@ export default async function WorkSettingsPage() {
     getScoreWeights(),
     db.select().from(schema.workRecurrences).orderBy(asc(schema.workRecurrences.title)),
   ]);
+  // BÁO CÁO LỆCH — chạy thử, không sửa gì. Cố ý không có nút "sửa hàng loạt": xem `membershipDrift`.
+  const drift = await membershipDrift();
   const openItems = queue.items.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
   const capacity = buildCapacity(people, openItems, staffing, now);
   const staffRows: StaffRow[] = capacity.map((c) => ({
@@ -209,6 +212,27 @@ export default async function WorkSettingsPage() {
           </p>
         </div>
       </SectionCard>
+
+      {drift.length ? (
+        <SectionCard
+          title={`Dữ liệu tổ chức đang lệch · ${drift.length} dòng`}
+          description="Báo cáo CHẠY THỬ — ERP không tự sửa gì. Mỗi dòng nói lệch cái gì và cách sửa; sửa bằng chính các nút bên dưới, mỗi lượt một dòng nhật ký."
+          hint="Không có nút “sửa hàng loạt”, và đó là quyết định: ba trong năm loại lệch có hơn một cách sửa đúng (bỏ ghế trưởng phòng hay thêm lại người đó làm thành viên? tuỳ việc chủ shop định làm). Một lượt sửa hàng loạt trên dữ liệu tổ chức là thứ không gỡ lại được."
+        >
+          <ul className="space-y-1.5 text-sm">
+            {drift.map((d, i) => (
+              <li key={`${d.kind}-${d.departmentId}-${d.userId}-${i}`} className="flex flex-wrap items-baseline gap-1.5">
+                <Badge variant="secondary" className="bg-amber-50 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                  {d.label}
+                </Badge>
+                <span className="font-medium">{d.userName}</span>
+                <span className="text-muted-foreground">· {d.department} —</span>
+                <span className="text-xs text-muted-foreground">{d.fix}</span>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Nhân sự và phòng ban"

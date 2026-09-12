@@ -13,7 +13,9 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DEPARTMENT_ROLE_LABEL } from "@/lib/constants/departments";
 import { WORK_PRIORITIES, WORK_PRIORITY_LABEL } from "@/lib/constants/work";
-import { deleteRecurrence, removeDepartmentMember, runRecurrenceNow, saveDepartment, saveRecurrence, setDepartmentMember } from "@/lib/actions/work";
+import { deleteRecurrence, runRecurrenceNow, saveDepartment, saveRecurrence } from "@/lib/actions/work";
+import { assignUserToDepartment, removeUserFromDepartment, setLead } from "@/lib/actions/org";
+import { PickerMenu } from "@/components/picker-menu";
 
 type Member = { userId: string; name: string; roleInDept: string; active: boolean };
 type Dept = { id: string; code: string; name: string; leadUserId: string | null; active: boolean; members: Member[] };
@@ -49,16 +51,21 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
             <Badge variant="outline" className="text-[11px]">{d.code}</Badge>
             {!d.active ? <Badge variant="secondary" className="text-[11px]">ngừng dùng</Badge> : null}
             <div className="ml-auto flex items-center gap-2">
-              <Select
-                value={d.leadUserId ?? "none"}
-                onValueChange={(v) => run(() => saveDepartment({ id: d.id, code: d.code, name: d.name, leadUserId: v === "none" ? null : v, active: d.active }), "Đã đổi trưởng phòng")}
-              >
-                <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Chưa có trưởng phòng" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Chưa có trưởng phòng</SelectItem>
-                  {people.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {/*
+                Đổi trưởng phòng đi qua `setLead`: nó ghi CẢ ghế trưởng phòng lẫn vai LEAD trong
+                phòng. Bản cũ gọi `saveDepartment` nên trưởng phòng có thể không phải thành viên —
+                và khi đó "việc của phòng tôi" của họ rỗng.
+              */}
+              <PickerMenu
+                className="w-[200px]"
+                label={d.leadUserId ? (people.find((p) => p.id === d.leadUserId)?.name ?? "Trưởng phòng") : "Chưa có trưởng phòng"}
+                disabled={pending}
+                options={[
+                  { value: "__none", label: "— bỏ trống ghế trưởng phòng", checked: !d.leadUserId },
+                  ...people.map((p) => ({ value: p.id, label: p.name, checked: p.id === d.leadUserId })),
+                ]}
+                onPick={(v) => run(() => setLead({ departmentId: d.id, userId: v === "__none" ? null : v }), "Đã đổi trưởng phòng")}
+              />
               <Switch checked={d.active} disabled={pending} onCheckedChange={(v) => run(() => saveDepartment({ id: d.id, code: d.code, name: d.name, leadUserId: d.leadUserId, active: v }), v ? "Đã bật lại phòng" : "Đã ngừng dùng phòng")} />
             </div>
           </div>
@@ -67,17 +74,22 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
               <Badge key={m.userId} variant="secondary" className="gap-1 pr-1 text-[11px]">
                 {m.name}
                 <span className="text-muted-foreground">· {DEPARTMENT_ROLE_LABEL[m.roleInDept as "LEAD" | "MEMBER"]}</span>
-                <button type="button" aria-label={`Bỏ ${m.name} khỏi phòng`} className="rounded p-0.5 hover:bg-background" onClick={() => run(() => removeDepartmentMember({ departmentId: d.id, userId: m.userId }), "Đã bỏ khỏi phòng")}>
+                <button type="button" aria-label={`Bỏ ${m.name} khỏi phòng`} className="rounded p-0.5 hover:bg-background" onClick={() => run(() => removeUserFromDepartment({ departmentId: d.id, userId: m.userId }), "Đã bỏ khỏi phòng")}>
                   <UserMinus className="size-3" />
                 </button>
               </Badge>
             ))}
-            <Select value="" onValueChange={(v) => run(() => setDepartmentMember({ departmentId: d.id, userId: v, roleInDept: "MEMBER" }), "Đã thêm thành viên")}>
-              <SelectTrigger className="h-7 w-[150px] text-xs"><span className="flex items-center gap-1"><UserPlus className="size-3" /> Thêm người</span></SelectTrigger>
-              <SelectContent>
-                {people.filter((p) => !d.members.some((m) => m.active && m.userId === p.id)).map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {/* `PickerMenu`, KHÔNG `Select` — xem `components/picker-menu.tsx`: `<Select value="">` mở bảng chọn ra ngoài màn hình. */}
+            <PickerMenu
+              className="h-7 w-[160px]"
+              label="Thêm người"
+              icon={<UserPlus className="size-3" />}
+              align="start"
+              disabled={pending}
+              empty="Mọi người đang hoạt động đã ở trong phòng này"
+              options={people.filter((p) => !d.members.some((m) => m.active && m.userId === p.id)).map((p) => ({ value: p.id, label: p.name }))}
+              onPick={(v) => run(() => assignUserToDepartment({ departmentId: d.id, userId: v }), "Đã thêm thành viên")}
+            />
           </div>
         </div>
       ))}

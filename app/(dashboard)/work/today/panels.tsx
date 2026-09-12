@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PickerMenu } from "@/components/picker-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { autoAssign, bulkAssign, reassignWork } from "@/lib/actions/workforce";
@@ -154,9 +154,18 @@ export function ReassignSelect({ workKey, current, people }: { workKey: string; 
   const [pending, start] = useTransition();
   const router = useRouter();
   return (
-    <Select
-      value=""
-      onValueChange={(v) =>
+    /* `PickerMenu` chứ không `Select value=""` — xem `components/picker-menu.tsx`. */
+    <PickerMenu
+      className="w-[160px]"
+      label={current || "chưa ai nhận"}
+      icon={<Users className="size-3 shrink-0" />}
+      disabled={pending}
+      empty="Phòng chưa có ai để giao"
+      options={[
+        { value: "__none", label: "— trả về hàng đợi phòng" },
+        ...people.map((p) => ({ value: p.id, label: p.name, hint: p.away ? "đang nghỉ" : `còn ${p.free}/${p.limit} chỗ`, disabled: p.away, checked: p.name === current })),
+      ]}
+      onPick={(v) =>
         start(async () => {
           const r = await reassignWork({ key: workKey, userId: v === "__none" ? null : v });
           if ("error" in r) {
@@ -167,21 +176,7 @@ export function ReassignSelect({ workKey, current, people }: { workKey: string; 
           router.refresh();
         })
       }
-    >
-      <SelectTrigger className="h-7 w-[150px] text-xs" disabled={pending}>
-        <span className="flex items-center gap-1 truncate">
-          <Users className="size-3 shrink-0" /> {current || "chưa ai nhận"}
-        </span>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none">— trả về hàng đợi phòng</SelectItem>
-        {people.map((p) => (
-          <SelectItem key={p.id} value={p.id} disabled={p.away}>
-            {p.name} · {p.away ? "đang nghỉ" : `còn ${p.free}/${p.limit}`}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    />
   );
 }
 
@@ -194,9 +189,13 @@ export function BulkAssignBar({ keys, people, onDone }: { keys: string[]; people
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2.5 text-sm">
       <span className="font-medium">{keys.length} việc đang chọn</span>
-      <Select
-        value=""
-        onValueChange={(v) =>
+      <PickerMenu
+        className="w-[210px]"
+        label="Giao cho…"
+        disabled={pending}
+        empty="Phòng chưa có ai để giao"
+        options={people.map((p) => ({ value: p.id, label: p.name, hint: p.away ? "đang nghỉ" : `còn ${p.free}/${p.limit} chỗ`, disabled: p.away && !force }))}
+        onPick={(v) =>
           start(async () => {
             const r = await bulkAssign({ keys, userId: v, force });
             if ("error" in r) {
@@ -208,18 +207,7 @@ export function BulkAssignBar({ keys, people, onDone }: { keys: string[]; people
             router.refresh();
           })
         }
-      >
-        <SelectTrigger className="h-8 w-[200px] text-xs" disabled={pending}>
-          <SelectValue placeholder="Giao cho…" />
-        </SelectTrigger>
-        <SelectContent>
-          {people.map((p) => (
-            <SelectItem key={p.id} value={p.id} disabled={p.away && !force}>
-              {p.name} · {p.away ? "đang nghỉ" : `còn ${p.free}/${p.limit}`}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
         giao vượt trần (ghi vào nhật ký)

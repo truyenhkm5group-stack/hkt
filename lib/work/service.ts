@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
+import { assignMembership, removeMembership } from "@/lib/org/membership";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { canTransition, parseWorkKey, WORK_STATUSES, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
 import { authorityOf, isWorkSource, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
@@ -549,7 +550,7 @@ export async function deleteRecurrence(id: string): Promise<WorkResult> {
 
 /* ═══════════════════ PHÒNG BAN ═══════════════════ */
 
-export async function saveDepartment(input: { id?: string; code: string; name: string; description?: string; leadUserId?: string | null; sortOrder?: number; active?: boolean }): Promise<WorkResult<{ id: string }>> {
+export async function saveDepartment(input: { id?: string; code: string; name: string; description?: string; leadUserId?: string | null; sortOrder?: number; active?: boolean }, actor?: WorkActor): Promise<WorkResult<{ id: string }>> {
   const db = await getDb();
   const code = input.code.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]{1,30}$/.test(code)) return { error: "Mã phòng chỉ gồm chữ HOA, số và gạch dưới" };
@@ -559,35 +560,32 @@ export async function saveDepartment(input: { id?: string; code: string; name: s
   if (input.id) {
     await db.update(schema.departments).set(values).where(eq(schema.departments.id, input.id));
     // Trưởng phòng phải là thành viên của chính phòng đó, nếu không "việc của phòng tôi" sẽ rỗng.
-    if (values.leadUserId) await setDepartmentMember(input.id, values.leadUserId, "LEAD");
+    if (values.leadUserId) await setDepartmentMember(input.id, values.leadUserId, "LEAD", "", actor);
     return { ok: true, id: input.id };
   }
   const dup = await db.query.departments.findFirst({ where: eq(schema.departments.code, code), columns: { id: true } });
   if (dup) return { error: `Mã phòng "${code}" đã tồn tại` };
   const id = crypto.randomUUID();
   await db.insert(schema.departments).values({ id, ...values });
-  if (values.leadUserId) await setDepartmentMember(id, values.leadUserId, "LEAD");
+  if (values.leadUserId) await setDepartmentMember(id, values.leadUserId, "LEAD", "", actor);
   return { ok: true, id };
 }
 
-export async function setDepartmentMember(departmentId: string, userId: string, roleInDept: "LEAD" | "MEMBER", title = ""): Promise<WorkResult> {
-  const db = await getDb();
-  await db
-    .insert(schema.departmentMembers)
-    .values({ departmentId, userId, roleInDept, title, active: true })
-    .onConflictDoUpdate({ target: [schema.departmentMembers.departmentId, schema.departmentMembers.userId], set: { roleInDept, title, active: true, updatedAt: new Date() } });
-  return { ok: true };
+/**
+ * ỦY QUYỀN CHO `lib/org/membership.ts` — cửa ghi DUY NHẤT của sự thật tổ chức.
+ *
+ * Giữ chữ ký cũ để mã gọi hiện có và kiểm thử không phải đổi, nhưng phần thân không còn tự ghi:
+ * ba đường ghi cho cùng một sự thật là ba cách để chúng lệch nhau. Nơi gọi nào có người thật đứng
+ * sau thì truyền `actor` để nhật ký kiểm toán nêu đúng tên; không có thì ghi là hệ thống.
+ */
+export async function setDepartmentMember(departmentId: string, userId: string, roleInDept: "LEAD" | "MEMBER", title = "", actor?: WorkActor): Promise<WorkResult> {
+  const r = await assignMembership({ departmentId, userId, roleInDept, title }, { id: actor?.id ?? "", email: actor?.email ?? "system" });
+  return "error" in r ? r : { ok: true };
 }
 
-export async function removeDepartmentMember(departmentId: string, userId: string): Promise<WorkResult> {
-  const db = await getDb();
-  // Ngừng hoạt động thay vì xoá: lịch sử "ai từng ở phòng nào" là căn cứ của báo cáo kỳ đã chốt.
-  await db
-    .update(schema.departmentMembers)
-    .set({ active: false, updatedAt: new Date() })
-    .where(and(eq(schema.departmentMembers.departmentId, departmentId), eq(schema.departmentMembers.userId, userId)));
-  await db.update(schema.departments).set({ leadUserId: null }).where(and(eq(schema.departments.id, departmentId), eq(schema.departments.leadUserId, userId)));
-  return { ok: true };
+export async function removeDepartmentMember(departmentId: string, userId: string, actor?: WorkActor): Promise<WorkResult> {
+  const r = await removeMembership({ departmentId, userId }, { id: actor?.id ?? "", email: actor?.email ?? "system" });
+  return "error" in r ? r : { ok: true };
 }
 
 /** Lịch sử một việc, mới nhất trước. */

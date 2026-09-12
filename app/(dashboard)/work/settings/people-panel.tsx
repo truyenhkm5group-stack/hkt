@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Crown, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { PickerMenu } from "@/components/picker-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DEPARTMENT_ROLE_LABEL, ROLE_DEPARTMENT_HINT, DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
-import { removeDepartmentMember, saveDepartment, setDepartmentMember } from "@/lib/actions/work";
+import { assignUserToDepartment, removeUserFromDepartment, setLead } from "@/lib/actions/org";
 import { cn } from "@/lib/utils";
 
 /**
@@ -106,15 +106,12 @@ export function PeoplePanel({ people, departments }: { people: PersonRow[]; depa
                               title={laTruong ? "Đang là trưởng phòng" : "Đặt làm trưởng phòng"}
                               disabled={pending || laTruong}
                               className="rounded p-0.5 hover:bg-background disabled:opacity-50"
-                              onClick={() =>
-                                run(async () => {
-                                  const dept = departments.find((x) => x.id === d.id)!;
-                                  const r = await saveDepartment({ id: dept.id, code: dept.code, name: dept.name, leadUserId: p.id, active: dept.active });
-                                  if ("error" in r) return r;
-                                  // Trưởng phòng phải là LEAD trong chính phòng đó, nếu không họ chỉ thấy việc của mình.
-                                  return setDepartmentMember({ departmentId: d.id, userId: p.id, roleInDept: "LEAD" });
-                                }, `Đã đặt ${p.name} làm trưởng ${d.name}`)
-                              }
+                              /*
+                                MỘT lượt gọi, không phải hai. `setLead` ghi cả ghế trưởng phòng
+                                LẪN vai LEAD trong phòng — trước đây màn hình tự ghép hai lệnh, và
+                                nếu lệnh thứ hai hỏng thì phòng có trưởng phòng không phải thành viên.
+                              */
+                              onClick={() => run(() => setLead({ departmentId: d.id, userId: p.id }), `Đã đặt ${p.name} làm trưởng ${d.name}`)}
                             >
                               <Crown className={cn("size-3", laTruong && "text-amber-600")} />
                             </button>
@@ -124,7 +121,7 @@ export function PeoplePanel({ people, departments }: { people: PersonRow[]; depa
                               title="Bỏ khỏi phòng (chỉ ngừng hoạt động, giữ lịch sử)"
                               disabled={pending}
                               className="rounded p-0.5 hover:bg-background"
-                              onClick={() => run(() => removeDepartmentMember({ departmentId: d.id, userId: p.id }), `Đã bỏ ${p.name} khỏi ${d.name}`)}
+                              onClick={() => run(() => removeUserFromDepartment({ departmentId: d.id, userId: p.id }), `Đã bỏ ${p.name} khỏi ${d.name}`)}
                             >
                               <UserMinus className="size-3" />
                             </button>
@@ -135,25 +132,23 @@ export function PeoplePanel({ people, departments }: { people: PersonRow[]; depa
                   )}
                 </TableCell>
                 <TableCell className="align-top text-right">
-                  <Select
-                    value=""
-                    onValueChange={(v) => run(() => setDepartmentMember({ departmentId: v, userId: p.id, roleInDept: "MEMBER" }), "Đã thêm vào phòng")}
-                  >
-                    <SelectTrigger className="ml-auto h-8 w-[160px] text-xs">
-                      <span className="flex items-center gap-1">
-                        <UserPlus className="size-3" /> Chọn phòng
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {departments
-                        .filter((d) => d.active && !p.departments.some((x) => x.id === d.id))
-                        .map((d) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                  {/*
+                    `PickerMenu`, KHÔNG PHẢI `Select` — xem chú thích đầu `components/picker-menu.tsx`.
+                    Bản cũ dùng `<Select value="">`, và Radix ở chế độ `item-aligned` ném bảng chọn
+                    ra ngoài màn hình (đo được: `y=6787` trên màn hình cao 1100). Người dùng bấm,
+                    không thấy gì, không lỗi — và không một dòng kiểm toán nào được ghi.
+                  */}
+                  <PickerMenu
+                    className="ml-auto w-[170px]"
+                    label="Chọn phòng"
+                    icon={<UserPlus className="size-3" />}
+                    disabled={pending}
+                    empty="Người này đã ở mọi phòng đang dùng"
+                    options={departments
+                      .filter((d) => d.active && !p.departments.some((x) => x.id === d.id))
+                      .map((d) => ({ value: d.id, label: d.name }))}
+                    onPick={(v) => run(() => assignUserToDepartment({ departmentId: v, userId: p.id }), "Đã thêm vào phòng")}
+                  />
                 </TableCell>
               </TableRow>
             ))}

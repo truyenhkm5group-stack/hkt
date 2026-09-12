@@ -16,6 +16,7 @@ import { PERMISSION_LABEL, type RolePermissionMap } from "@/lib/auth/permissions
 import { ROLE_LABEL, ROLE_TONE } from "@/lib/constants/roles";
 import { formatDateTime, formatTimeAgo, initials } from "@/lib/format";
 import type { UserRow } from "@/lib/queries/users";
+import { DepartmentCell, type UserDept } from "@/app/(dashboard)/settings/users/department-cell";
 import { cn } from "@/lib/utils";
 
 const badge = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
@@ -106,13 +107,27 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
   );
 }
 
-export function UsersTable({ users, currentUserId, activeAdmins, templates }: { users: UserRow[]; currentUserId: string; activeAdmins: number; templates: RolePermissionMap }) {
+export function UsersTable({
+  users,
+  currentUserId,
+  activeAdmins,
+  templates,
+  departmentsByUser,
+  allDepartments,
+}: {
+  users: UserRow[];
+  currentUserId: string;
+  activeAdmins: number;
+  templates: RolePermissionMap;
+  departmentsByUser: Record<string, UserDept[]>;
+  allDepartments: { id: string; name: string }[];
+}) {
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[820px]">
+      <Table className="min-w-[1060px]">
         <TableHeader className="bg-muted/50">
           <TableRow className="hover:bg-transparent">
-            {["Người dùng", "Email", "Vai trò", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""].map((h, i) => (
+            {["Người dùng", "Email", "Vai trò", "Phòng ban", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""].map((h, i) => (
               <TableHead key={i} className="h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {h}
               </TableHead>
@@ -147,6 +162,19 @@ export function UsersTable({ users, currentUserId, activeAdmins, templates }: { 
                       Tuỳ chỉnh · {u.permissions.length} quyền
                     </div>
                   ) : null}
+                </TableCell>
+                {/*
+                  PHÒNG BAN SỬA ĐƯỢC NGAY TỪ ĐÂY — cùng Server Action với màn Cấu hình công việc.
+                  Một sự thật, hai lối vào; trước đây chỉ có một lối và khi nó hỏng thì hết đường.
+                */}
+                <TableCell>
+                  <DepartmentCell
+                    userId={u.id}
+                    userName={u.name}
+                    userActive={u.active}
+                    departments={departmentsByUser[u.id] ?? []}
+                    all={allDepartments}
+                  />
                 </TableCell>
                 <TableCell>
                   {u.active ? (
