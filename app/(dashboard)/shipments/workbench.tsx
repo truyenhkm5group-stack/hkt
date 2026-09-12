@@ -503,7 +503,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
                 </button>
               ))}
             </div>
-            <NotePresets presets={presets} onChange={onPresetsChange} onPick={(p) => { setKind(p.kind); setNote(p.text); }} />
+            <NotePresets presets={presets} canEdit={canManage} onChange={onPresetsChange} onPick={(p) => { setKind(p.kind); setNote(p.text); }} />
             <Textarea
               autoFocus
               value={note}
@@ -582,7 +582,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
  * MẪU NOTE NHANH — bấm là đổ chữ vào ô (và chọn loại), "Sửa mẫu" để thêm / bớt. Bộ mẫu dùng chung
  * cả shop, lưu ở bảng settings (`care.notePresets`), có nhật ký ai đổi.
  */
-function NotePresets({ presets, onChange, onPick }: { presets: CareNotePreset[]; onChange: (p: CareNotePreset[]) => void; onPick: (p: CareNotePreset) => void }) {
+function NotePresets({ presets, canEdit, onChange, onPick }: { presets: CareNotePreset[]; canEdit: boolean; onChange: (p: CareNotePreset[]) => void; onPick: (p: CareNotePreset) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
   const [kind, setKind] = useState<CareActionKind>("CALLED_NO_ANSWER");
@@ -612,11 +612,13 @@ function NotePresets({ presets, onChange, onPick }: { presets: CareNotePreset[];
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10.5px] uppercase tracking-wide text-muted-foreground">
         <span>Mẫu nhanh</span>
-        <button type="button" className="inline-flex items-center gap-1 rounded px-1 hover:bg-accent normal-case" onClick={() => setEditing((v) => !v)}>
-          <Pencil className="size-3" /> {editing ? "Xong" : "Sửa mẫu"}
-        </button>
+        {canEdit ? (
+          <button type="button" className="inline-flex items-center gap-1 rounded px-1 hover:bg-accent normal-case" onClick={() => setEditing((v) => !v)}>
+            <Pencil className="size-3" /> {editing ? "Xong" : "Sửa mẫu"}
+          </button>
+        ) : null}
       </div>
-      {presets.length === 0 && !editing ? <p className="text-[11px] text-muted-foreground">Chưa có mẫu — bấm “Sửa mẫu” để thêm.</p> : null}
+      {presets.length === 0 && !editing ? <p className="text-[11px] text-muted-foreground">{canEdit ? "Chưa có mẫu — bấm “Sửa mẫu” để thêm." : "Chưa có mẫu chung — nhờ trưởng CS thêm."}</p> : null}
       <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
         {presets.map((p) => (
           <span key={p.id} className="inline-flex max-w-full items-stretch overflow-hidden rounded border text-[10.5px]">

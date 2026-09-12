@@ -53,10 +53,14 @@ const presetsSchema = z.object({
   presets: z.array(z.object({ id: z.string().min(1).max(40), kind: z.enum(CARE_ACTION_KINDS), text: z.string().trim().min(1, "Mẫu không được trống").max(200, "Mẫu tối đa 200 ký tự") })).max(CARE_NOTE_PRESETS_MAX, `Tối đa ${CARE_NOTE_PRESETS_MAX} mẫu`),
 });
 
-/** Chủ shop / CS tự thêm bớt mẫu note nhanh. Dùng chung cả shop (một bộ), có nhật ký ai đổi. */
+/**
+ * Bộ mẫu note dùng CHUNG cả shop: ai có `shipments:view` thì DÙNG được; thêm / sửa / xoá cần
+ * `shipments:manage` (trưởng CS / quản trị) — đổi mẫu chung là đổi cách cả đội ghi nhận, không phải
+ * việc của từng người trực. Có nhật ký ai đổi.
+ */
 export async function saveCareNotePresets(input: z.input<typeof presetsSchema>): Promise<{ ok: true; data: CareNotePreset[] } | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "shipments:view")) return DENIED;
+  if (!can(user, "shipments:manage")) return { error: "Chỉ người có quyền thao tác vận đơn (shipments:manage) mới sửa được mẫu chung" };
   const parsed = presetsSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   // Không cho hai mẫu trùng chữ — bấm nhầm không phân biệt được.
