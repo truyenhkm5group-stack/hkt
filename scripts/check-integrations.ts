@@ -204,7 +204,7 @@ async function checkAi() {
   }
   const t0 = Date.now();
   const r = await runCopilot({
-    user: { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null) },
+    user: { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null), scope: "ALL", departmentCodes: [], positionId: null },
     message: "Hàng đợi care hôm nay: bao nhiêu kiện cần care, COD đang treo bao nhiêu, kiện nào nên xử lý trước? Trả lời ngắn.",
     context: { route: "/shipments", entityType: "", entityId: "" },
   });

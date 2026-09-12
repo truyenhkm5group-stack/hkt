@@ -25,7 +25,7 @@ import path from "node:path";
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
 /** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0069_work_management_os";
+const MOI = "0070_access_role_position_scope";
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -57,7 +57,7 @@ export async function testMigrationUpgradePath() {
 
     const truoc = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(truoc, cu.entries.length, "bước 1: số migration đã áp phải khớp sổ đã cắt");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'work_items'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'access_roles'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -112,11 +112,50 @@ export async function testMigrationUpgradePath() {
       "chặn mà không nói vì sao là xoá bằng chứng lặng lẽ — ràng buộc phải chặn",
     );
 
+    /*
+      ═══ BA CHIỀU QUYỀN TRUY CẬP (0070) ═══
+
+      ĐIỀU KIỆN TIÊN QUYẾT, kiểm trước mọi thứ khác: tài khoản CÓ TỪ TRƯỚC không được mất gì.
+      `up-u1` được tạo ở bước 1, tức là trước khi migration chạy — đúng hoàn cảnh của mọi tài
+      khoản trên production. Sau migration, phạm vi của họ phải là `ALL` (không thu hẹp gì) và
+      họ không được bị gán vai trò tuỳ chỉnh hay chức danh nào cả.
+    */
+    const cu1 = (await client.query<{ data_scope: string; access_role_id: string | null; position_id: string | null }>(
+      "select data_scope, access_role_id, position_id from users where id = 'up-u1'",
+    )).rows[0];
+    assert.equal(cu1.data_scope, "ALL", "tài khoản có từ trước phải giữ phạm vi ALL — deploy xong mà có người mất màn hình là bản phân quyền hỏng");
+    assert.equal(cu1.access_role_id, null, "migration KHÔNG được tự gán vai trò tuỳ chỉnh cho ai");
+    assert.equal(cu1.position_id, null, "migration KHÔNG được tự đoán chức danh của ai");
+
+    // Chức danh gieo sẵn: chỉ là NHÃN, và phải nối đúng phòng ban đang có.
+    assert.equal(await dem("select count(*)::int as n from positions"), 10, "mười chức danh mặc định phải được gieo");
+    assert.equal(
+      await dem("select count(*)::int as n from positions p join departments d on d.id = p.department_id where p.code = 'ACCOUNTANT' and d.code = 'FINANCE'"),
+      1,
+      "chức danh Kế toán phải nối tới phòng Kế toán",
+    );
+    assert.equal(await dem("select count(*)::int as n from positions where department_id is null"), 0, "phòng ban đã có đủ nên không chức danh nào được treo lơ lửng");
+
+    // Danh sách phạm vi là danh sách ĐÓNG, khoá ở mức CSDL chứ không chỉ ở tầng ứng dụng.
+    await assert.rejects(
+      () => client.query(`update users set data_scope = 'DEPT' where id = 'up-u1'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("users_data_scope_check"),
+      "một chuỗi phạm vi lạ lọt vào CSDL buộc code phải chọn giữa khoá nhầm người và lộ dữ liệu — ràng buộc phải chặn",
+    );
+
+    // Vai trò tuỳ chỉnh không được lấy ADMIN làm nền: nền ADMIN biến mọi giới hạn phía trên thành trang trí.
+    await assert.rejects(
+      () => client.query(`insert into access_roles (id, code, name, base_role) values ('up-r1', 'THU_QUY', 'Thủ quỹ', 'ADMIN')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("access_roles_base_role_check"),
+      "vai trò tuỳ chỉnh nền ADMIN là một cửa hậu toàn quyền — ràng buộc phải chặn",
+    );
+
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
     assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
+    assert.equal(await dem("select count(*)::int as n from positions"), 10, "chạy lại migration KHÔNG được gieo thêm chức danh lần hai");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · 7 phòng ban gieo đúng · dữ liệu nghiệp vụ nguyên vẹn · work_items rỗng (phép chiếu, không bản sao) · 3 ràng buộc thẩm quyền chặn đúng · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · 10 chức danh nối đúng phòng · work_items rỗng (phép chiếu, không bản sao) · 5 ràng buộc chặn đúng · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

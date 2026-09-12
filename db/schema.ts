@@ -1,7 +1,7 @@
 // VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -53,6 +53,63 @@ export type ExpenseCategory = (typeof expenseCategoryEnum.enumValues)[number];
 
 // ───────────────────────── Người dùng ─────────────────────────
 
+/**
+ * VAI TRÒ TUỲ CHỈNH — bó quyền do chủ shop tự đặt tên.
+ *
+ * Tám vai trò hệ thống (`roleEnum`) KHÔNG nằm trong bảng này: chúng là hằng số trong mã nguồn nên
+ * không ai xoá được, và mẫu quyền của chúng vẫn ở `settings["auth.rolePermissions"]` như cũ. Bảng
+ * này chỉ chứa vai trò SINH THÊM. Tách như vậy thì "vai trò hệ thống được bảo vệ" là một tính
+ * chất của CẤU TRÚC, không phải một cờ `is_system` mà một câu UPDATE nhỡ tay là mất.
+ *
+ * `base_role` là vai trò nền: `users.role` vẫn phải giữ một giá trị enum hợp lệ (mọi chỗ kiểm tra
+ * `requireUser([...])` và mọi nhãn hiển thị đang đọc nó), và nếu vai trò tuỳ chỉnh bị TẮT thì
+ * người dùng rơi về đúng mẫu quyền của vai trò nền — không bao giờ rơi về "toàn quyền".
+ */
+export const accessRoles = pgTable(
+  "access_roles",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Vai trò hệ thống dùng làm nền. KHÔNG được là `ADMIN` (xem `lib/auth/access.ts`). */
+    baseRole: roleEnum("base_role").notNull().default("VIEWER"),
+    /** Bó quyền của vai trò này (danh sách khoá quyền). */
+    permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
+    /** Phạm vi dữ liệu gợi ý khi gán vai trò này cho một người; người dùng vẫn đặt riêng được. */
+    defaultScope: text("default_scope").notNull().default("ALL"),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("access_roles_active_idx").on(t.active, t.sortOrder)],
+);
+
+/**
+ * CHỨC DANH — nhãn tổ chức. KHÔNG SINH QUYỀN, không bao giờ.
+ *
+ * Gắn được với một phòng ban để hiển thị và để gợi ý khi xếp người, nhưng bản thân việc có chức
+ * danh "Kế toán trưởng" không mở thêm một quyền nào. Xem phần đầu `lib/constants/access-scope.ts`.
+ */
+export const positions = pgTable(
+  "positions",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Phòng ban thường gắn với chức danh này (chỉ để hiển thị / gợi ý). */
+    departmentId: text("department_id").references((): AnyPgColumn => departments.id, { onDelete: "set null" }),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("positions_active_idx").on(t.active, t.sortOrder)],
+);
+
+
 export const users = pgTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
@@ -61,6 +118,16 @@ export const users = pgTable("users", {
   role: roleEnum("role").notNull().default("VIEWER"),
   /** Quyền tuỳ chỉnh riêng (danh sách khoá quyền); null = dùng mẫu quyền của vai trò */
   permissions: jsonb("permissions").$type<string[] | null>(),
+  /** Vai trò tuỳ chỉnh (`access_roles`); null = dùng mẫu quyền của vai trò hệ thống ở `role`. */
+  accessRoleId: text("access_role_id").references((): AnyPgColumn => accessRoles.id, { onDelete: "set null" }),
+  /** Chức danh (`positions`). Chỉ là nhãn — KHÔNG tham gia vào phép tính quyền. */
+  positionId: text("position_id").references((): AnyPgColumn => positions.id, { onDelete: "set null" }),
+  /**
+   * Phạm vi dữ liệu: `SELF` · `ASSIGNED` · `TEAM` · `DEPARTMENT` · `ALL`
+   * (`lib/constants/access-scope.ts`). Mặc định `ALL` để bản này không đổi hành vi của tài khoản
+   * nào đang chạy; thu hẹp là một quyết định chủ shop phải bấm.
+   */
+  dataScope: text("data_scope").notNull().default("ALL"),
   active: boolean("active").notNull().default(true),
   lastLoginAt: ts("last_login_at"),
   createdAt: createdAt(),
@@ -2982,3 +3049,5 @@ export type OkrCheckin = typeof okrCheckins.$inferSelect;
 export type BscScorecard = typeof bscScorecards.$inferSelect;
 export type BscMetric = typeof bscMetrics.$inferSelect;
 export type ReviewCycle = typeof reviewCycles.$inferSelect;
+export type AccessRole = typeof accessRoles.$inferSelect;
+export type Position = typeof positions.$inferSelect;

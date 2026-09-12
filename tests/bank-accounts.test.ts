@@ -207,8 +207,8 @@ export async function testBankAccounts(db: Db) {
   // `requireUser()`, hàm đọc cookie phiên đăng nhập qua `next/headers` — chỉ có trong một request
   // Next.js thật, không có trong tiến trình `tsx` chạy thẳng bài kiểm. `can()` là hàm thuần nên kiểm
   // được ngay, và đó chính xác là đoạn quyết định "được phép" hay "Không có quyền" bên trong action.
-  const ketToanGia: SessionUser = { id: "test-accountant", email: "ketoan@shop.test", name: "Kế toán", role: "ACCOUNTANT", permissions: resolvePermissions("ACCOUNTANT", null) };
-  const quanTriGia: SessionUser = { id: "test-admin", email: "admin@shop.test", name: "Admin", role: "ADMIN", permissions: resolvePermissions("ADMIN", null) };
+  const ketToanGia: SessionUser = { id: "test-accountant", email: "ketoan@shop.test", name: "Kế toán", role: "ACCOUNTANT", permissions: resolvePermissions("ACCOUNTANT", null), scope: "ALL", departmentCodes: [], positionId: null };
+  const quanTriGia: SessionUser = { id: "test-admin", email: "admin@shop.test", name: "Admin", role: "ADMIN", permissions: resolvePermissions("ADMIN", null), scope: "ALL", departmentCodes: [], positionId: null };
   assert.equal(can(ketToanGia, "bank:accounts"), false, "15. kế toán bị TỪ CHỐI xác nhận tài khoản qua đúng hàm guardAccounts() dùng");
   assert.equal(can(ketToanGia, "bank:write"), true, "15. nhưng kế toán vẫn nhập & phân loại sao kê được như cũ");
   assert.equal(can(quanTriGia, "bank:accounts"), true, "15. admin được phép xác nhận tài khoản");

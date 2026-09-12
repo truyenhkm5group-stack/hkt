@@ -55,8 +55,8 @@ export async function testAiCopilot(db: Db) {
   // ───────── Người dùng & dữ liệu ─────────
   await db.insert(schema.users).values({ id: "ai-user-cs", email: "cs-ai@test", name: "Hà", passwordHash: "x", role: "CS", active: true }).onConflictDoNothing();
   await db.insert(schema.users).values({ id: "ai-user-viewer", email: "viewer-ai@test", name: "Khách xem", passwordHash: "x", role: "VIEWER", active: true }).onConflictDoNothing();
-  const cs: SessionUser = { id: "ai-user-cs", email: "cs-ai@test", name: "Hà", role: "CS", permissions: resolvePermissions("CS", null) };
-  const viewer: SessionUser = { id: "ai-user-viewer", email: "viewer-ai@test", name: "Khách xem", role: "VIEWER", permissions: [] };
+  const cs: SessionUser = { id: "ai-user-cs", email: "cs-ai@test", name: "Hà", role: "CS", permissions: resolvePermissions("CS", null), scope: "ALL", departmentCodes: [], positionId: null };
+  const viewer: SessionUser = { id: "ai-user-viewer", email: "viewer-ai@test", name: "Khách xem", role: "VIEWER", permissions: [], scope: "ALL", departmentCodes: [], positionId: null };
 
   const csTools = toolsFor(cs).map((t) => t.name);
   assert.ok(csTools.includes("get_care_case") && csTools.includes("add_care_note"), "CS thấy tool đọc và tool ghi care");

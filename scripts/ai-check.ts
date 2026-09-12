@@ -58,7 +58,7 @@ async function main() {
     fail("Không có tài khoản ADMIN");
     process.exit(1);
   }
-  const user: SessionUser = { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null) };
+  const user: SessionUser = { id: admin.id, email: admin.email, name: admin.name, role: "ADMIN", permissions: resolvePermissions("ADMIN", null), scope: "ALL", departmentCodes: [], positionId: null };
   const [{ n: aiRowsBefore }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.aiInteractions);
 
   // ───────── 1. Chat đơn giản, từng bậc — model THẬT API báo về ─────────

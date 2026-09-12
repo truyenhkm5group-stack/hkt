@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
 import { hasPermission, resolvePermissions, USER_PERMISSION_SNAPSHOT_KEY, type Permission, type RolePermissionMap } from "@/lib/auth/permissions";
+import { departmentCodesOfMany, effectiveAccess, loadCustomRole } from "@/lib/auth/access";
+import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
@@ -15,13 +17,30 @@ export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 export const SESSION_COOKIE = "erp_session";
 const SESSION_DAYS = 7;
 
-export type SessionUser = { id: string; email: string; name: string; role: Role; permissions: string[] };
+export type SessionUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  permissions: string[];
+  /** Phạm vi dữ liệu (`lib/constants/access-scope.ts`). `ALL` = không thu hẹp gì. */
+  scope: AccessScope;
+  /** Mã phòng ban người này là thành viên — rỗng khi phạm vi là `ALL` (lúc đó không cần biết). */
+  departmentCodes: string[];
+  /** Chức danh. CHỈ ĐỂ HIỂN THỊ — không tham gia vào bất kỳ phép kiểm tra quyền nào. */
+  positionId: string | null;
+};
 
 function secretKey() {
   return new TextEncoder().encode(env.authSecret);
 }
 
-export async function signSession(user: Omit<SessionUser, "permissions">) {
+/** Phần danh tính đi vào cookie. Quyền / phạm vi KHÔNG nằm trong token — chúng được nạp lại từ
+ *  CSDL ở mỗi lần dựng, nên thu hẹp phạm vi của một người có hiệu lực ngay, không đợi họ đăng
+ *  nhập lại. */
+export type SessionIdentity = Pick<SessionUser, "id" | "email" | "name" | "role">;
+
+export async function signSession(user: SessionIdentity) {
   return new SignJWT({ email: user.email, name: user.name, role: user.role })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
@@ -36,13 +55,13 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
     if (!payload.sub) return null;
     const role = (payload.role as Role) ?? "VIEWER";
     // quyền thực tế được nạp lại từ DB trong requireUser / getCurrentUser
-    return { id: payload.sub, email: String(payload.email ?? ""), name: String(payload.name ?? ""), role, permissions: resolvePermissions(role, null) };
+    return { id: payload.sub, email: String(payload.email ?? ""), name: String(payload.name ?? ""), role, permissions: resolvePermissions(role, null), scope: "ALL", departmentCodes: [], positionId: null };
   } catch {
     return null;
   }
 }
 
-export async function createSession(user: Omit<SessionUser, "permissions">) {
+export async function createSession(user: SessionIdentity) {
   const token = await signSession(user);
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
@@ -101,17 +120,55 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   if (!session) return null;
   const db = await getDb();
   const [user, templates, snapshots] = await Promise.all([
-    db.query.users.findFirst({ where: eq(schema.users.id, session.id), columns: { id: true, email: true, name: true, role: true, active: true, permissions: true } }),
+    db.query.users.findFirst({
+      where: eq(schema.users.id, session.id),
+      columns: { id: true, email: true, name: true, role: true, active: true, permissions: true, accessRoleId: true, positionId: true, dataScope: true },
+    }),
     loadRoleTemplates(),
     loadPermissionSnapshots(),
   ]);
   if (!user || !user.active) return null;
+  const scope = normalizeScope(user.dataScope);
+  const known = snapshots[user.id] ?? null;
+
+  /*
+    ĐƯỜNG NHANH: phạm vi `ALL` và không có vai trò tuỳ chỉnh — tức là MỌI tài khoản đang chạy hôm
+    nay. Không thêm một câu truy vấn nào, kết quả đúng bằng hành vi trước bản này. Chỉ khi chủ shop
+    CHỦ ĐỘNG thu hẹp phạm vi hoặc gán vai trò tuỳ chỉnh thì mới tốn thêm hai câu — và lúc đó tài
+    khoản ấy đáng để tốn.
+  */
+  if (scope === "ALL" && !user.accessRoleId) {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      permissions: resolvePermissions(user.role, user.permissions, templates, known),
+      scope,
+      departmentCodes: [],
+      positionId: user.positionId ?? null,
+    };
+  }
+
+  const [customRole, deptMap] = await Promise.all([loadCustomRole(user.accessRoleId), departmentCodesOfMany([user.id])]);
+  const access = effectiveAccess({
+    role: user.role,
+    userCustom: user.permissions,
+    customRole,
+    scope,
+    departmentCodes: deptMap[user.id] ?? [],
+    templates,
+    known,
+  });
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
-    permissions: resolvePermissions(user.role, user.permissions, templates, snapshots[user.id] ?? null),
+    permissions: access.permissions,
+    scope: access.scope,
+    departmentCodes: access.departmentCodes,
+    positionId: user.positionId ?? null,
   };
 });
 
