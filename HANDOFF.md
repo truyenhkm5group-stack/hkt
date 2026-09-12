@@ -16,9 +16,13 @@ Bản 12/09 thêm tầng công việc và tầng mục tiêu. Đọc theo thứ 
 1. `docs/work-management-os.md` — kiến trúc. **Điểm phải hiểu trước khi sửa bất cứ gì ở `/work`:**
    hàng đợi là **PHÉP CHIẾU** lên sáu hàng đợi đã có, KHÔNG phải bản sao. `work_items` chỉ có dòng
    cho việc TAY / ĐỊNH KỲ, hoặc khi có người chạm vào một việc chiếu.
-2. `AGENTS.md` mục 19–21 — ba luật mới, không thương lượng.
-3. `docs/release-2026-09-12-work-os.md` — biên bản: đã giao gì, chưa làm gì và vì sao.
-4. `docs/navigation-review.md` — rà soát điều hướng, ba đề xuất **chờ chủ shop quyết**.
+2. `AGENTS.md` mục 19–24 — sáu luật mới, không thương lượng.
+3. `docs/release-2026-09-12-work-os.md` — biên bản bản khung: đã giao gì, chưa làm gì và vì sao.
+4. `docs/release-2026-09-12-work-os-operationalization.md` — biên bản bản **vận hành hoá**: sơ đồ
+   tổ chức, cấu hình hạn xử lý / phòng chịu trách nhiệm sửa được, `/work` gọn lại, mẫu OKR/BSC
+   không tự kích hoạt, họp tuần một màn hình, báo cáo mức sẵn sàng. **Đọc mục 11 để biết chủ shop
+   còn phải tự khai những gì trước ngày nhân viên bắt đầu dùng.**
+5. `docs/navigation-review.md` — rà soát điều hướng, ba đề xuất **chờ chủ shop quyết**.
 
 Bảng mới (migration `0069_work_management_os`, chỉ cộng thêm): `departments` ·
 `department_members` · `work_items` · `work_item_events` · `work_recurrences` · `okr_objectives` ·

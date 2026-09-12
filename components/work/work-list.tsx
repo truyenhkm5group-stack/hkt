@@ -112,7 +112,21 @@ function SlaCell({ item, now }: { item: WorkItem; now: number }) {
   );
 }
 
-export function WorkList({ items, emptyTitle, emptyDescription, showDepartment = false, canAct = true }: { items: WorkItem[]; emptyTitle: string; emptyDescription?: string; showDepartment?: boolean; canAct?: boolean }) {
+/**
+ * ═══════ DẠNG GỌN: SÁU THỨ TRÊN MỘT DÒNG, KHÔNG THỨ BẢY ═══════
+ *
+ * `compact` là dạng mặc định của màn hình mở đầu ca (`/work`). Một dòng chỉ được mang đúng sáu
+ * thứ: **việc cần làm · thực thể · tiền · hạn · người cầm · nút bấm**. Mọi lời giải thích lùi vào
+ * tooltip.
+ *
+ * Vì sao phải cắt: nhân viên quét hàng đợi 40 dòng vào đầu ca. Mỗi dòng cao thêm một dòng chữ là
+ * cả danh sách dài thêm một màn hình, và thứ bị đẩy xuống dưới nếp gấp là việc quá hạn ở cuối rổ.
+ * Nhãn trạng thái cũng bỏ ở dạng gọn: tên cái rổ đã nói rồi, in lại là chiếm chỗ để nhắc lại.
+ *
+ * Dạng đầy đủ vẫn dùng ở `/work/all` và hàng đợi phòng — nơi người ta ĐỌC để phân việc chứ không
+ * quét để làm.
+ */
+export function WorkList({ items, emptyTitle, emptyDescription, showDepartment = false, canAct = true, compact = false }: { items: WorkItem[]; emptyTitle: string; emptyDescription?: string; showDepartment?: boolean; canAct?: boolean; compact?: boolean }) {
   const [patches, setPatches] = useState<Record<string, Patch>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -156,13 +170,33 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
           <li key={item.key} className={cn("flex flex-col gap-2 p-3 transition-opacity sm:flex-row sm:items-start sm:gap-3", (busy || patch.done) && "opacity-60")}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant="secondary" className={cn("text-[11px]", WORK_PRIORITY_TONE[item.priority])}>{WORK_PRIORITY_LABEL[item.priority]}</Badge>
-                <Badge variant="secondary" className={cn("text-[11px]", WORK_STATUS_TONE[status])}>{WORK_STATUS_LABEL[status]}</Badge>
+                {/* Dạng gọn chỉ in mức ưu tiên khi nó KHÁC bình thường — "Bình thường" không phải tin tức. */}
+                {!compact || item.priority !== "NORMAL" ? (
+                  <Badge variant="secondary" className={cn("text-[11px]", WORK_PRIORITY_TONE[item.priority])}>{WORK_PRIORITY_LABEL[item.priority]}</Badge>
+                ) : null}
+                {/* Tên rổ đã nói trạng thái ở dạng gọn; chỉ hai trạng thái "đang mắc" mới đáng in lại. */}
+                {!compact || status === "BLOCKED" || status === "WAITING" ? (
+                  <Badge variant="secondary" className={cn("text-[11px]", WORK_STATUS_TONE[status])}>{WORK_STATUS_LABEL[status]}</Badge>
+                ) : null}
                 {showDepartment ? <Badge variant="outline" className="text-[11px]">{DEPARTMENT_LABEL[item.department as DepartmentCode] ?? item.department}</Badge> : null}
                 <span className="text-[11px] text-muted-foreground">{spec?.label ?? item.sourceType}</span>
+                {/*
+                  THỰC THỂ NGHIỆP VỤ — mã đơn / mã vận đơn / mã giao dịch.
+
+                  Không có nó thì người làm phải mở từng dòng ra mới biết việc này dính tới đơn nào,
+                  và "gọi khách đơn nào" là câu hỏi đầu tiên của mọi ca. In mã ngay trên dòng cắt
+                  đúng một cú bấm khỏi mỗi việc.
+                */}
+                {item.businessEntityId ? (
+                  <span className="max-w-[150px] truncate rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={`${item.businessEntity}: ${item.businessEntityId}`}>
+                    {item.businessEntityId}
+                  </span>
+                ) : null}
               </div>
-              <p className="mt-1 truncate text-sm font-medium" title={item.title}>{item.title}</p>
-              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground" title={item.recommendedAction || item.summary}>{item.recommendedAction || item.summary}</p>
+              <p className="mt-1 truncate text-sm font-medium" title={compact ? `${item.title}\n\n${item.recommendedAction || item.summary}` : item.title}>{item.title}</p>
+              {compact ? null : (
+                <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground" title={item.recommendedAction || item.summary}>{item.recommendedAction || item.summary}</p>
+              )}
               {item.blockedReason ? (
                 <p className="mt-1 flex items-center gap-1 text-xs font-medium text-destructive"><ShieldAlert className="size-3.5 shrink-0" />{item.blockedReason}</p>
               ) : null}

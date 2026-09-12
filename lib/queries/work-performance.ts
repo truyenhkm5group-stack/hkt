@@ -64,6 +64,16 @@ export type WorkerScorecard = {
   resolutionHours: { median: number | null; sample: number; slowest: number | null };
   /** Tiến độ OKR cá nhân (0–100). `null` khi người này chưa có KR nào đo được. */
   okr: ScoreAxis;
+  /**
+   * TIỀN LẤY LẠI ĐƯỢC nhờ những việc người này đã đóng trong kỳ — chỉ cộng phần `MEASURED`.
+   *
+   * Đây là trục duy nhất nói bằng tiền, và nó cố ý KHÔNG được gộp vào một điểm nào: tiền của một
+   * ca phụ thuộc giá trị đơn, không phụ thuộc người xử lý. Nó trả lời "việc của người này có giá
+   * trị gì" chứ không phải "người này giỏi hơn ai".
+   */
+  recovered: { amount: number; sample: number; unknown: number };
+  /** Việc đã đóng nhưng THUỘC PHÒNG KHÁC — không tính vào các trục ở trên. */
+  outOfDepartment: number;
 
   /** Ảnh chụp hiện tại, không phải của kỳ: việc đang cầm. */
   openNow: number;
@@ -125,7 +135,25 @@ export async function getPerformance(q: PerformanceQuery): Promise<WorkerScoreca
   return people
     .map((u) => {
       const me = { id: u.id, name: u.name, email: u.email };
-      const myClosed = closed.filter((e) => e.actorId === u.id || e.actorEmail.toLowerCase() === u.email.toLowerCase());
+      const myDepts = deptOf.get(u.id) ?? [];
+      const daDong = closed.filter((e) => e.actorId === u.id || e.actorEmail.toLowerCase() === u.email.toLowerCase());
+
+      /*
+        ═══ CHỈ TÍNH VIỆC THUỘC PHÒNG CỦA NGƯỜI NÀY ═══
+
+        Yêu cầu nghiệp vụ: không trừ điểm ai vì kết quả do phòng khác (hay ĐVVC, hay hệ thống) gây
+        ra. Lọc theo phòng của CHÍNH VIỆC — không theo một bảng cứng — nên khi chủ shop đổi phân
+        công ở màn hình cấu hình thì thẻ điểm đi theo ngay, không phải sửa mã.
+
+        Người CHƯA được xếp phòng thì không lọc gì cả: lọc theo một tập rỗng sẽ biến thẻ điểm của
+        họ thành trống trơn, và một bảng trống trông y hệt "người này không làm gì".
+      */
+      const trongPhong = (workKeyOfEvent: string): boolean => {
+        if (!myDepts.length) return true;
+        const it = itemByKey.get(workKeyOfEvent);
+        return it ? myDepts.includes(it.department) : false;
+      };
+      const myClosed = daDong.filter((e) => trongPhong(e.workKey));
       const myOpen = items.filter((i) => isMine(i, me) && i.status !== "DONE" && i.status !== "CANCELLED");
 
       /*
@@ -199,6 +227,20 @@ export async function getPerformance(q: PerformanceQuery): Promise<WorkerScoreca
           note: myBlocked ? `${myBlocked} lần báo bị chặn` : "",
         },
         okr: okrByUser.get(u.id) ?? { value: null, sample: 0, note: "Chưa có Key Result cá nhân nào đo được" },
+        recovered: (() => {
+          let amount = 0;
+          let sample = 0;
+          let unknown = 0;
+          for (const e of myClosed) {
+            const it = itemByKey.get(e.workKey);
+            if (it && it.money.confidence === "MEASURED" && it.money.recoverable !== null) {
+              amount += it.money.recoverable;
+              sample += 1;
+            } else unknown += 1;
+          }
+          return { amount, sample, unknown };
+        })(),
+        outOfDepartment: daDong.length - myClosed.length,
         openNow: myOpen.length,
         overdueNow: myOpen.filter((i) => slaStateOf(i.slaAt ?? i.dueAt, now) === "BREACHED").length,
         blockedNow: myOpen.filter((i) => i.status === "BLOCKED").length,
@@ -206,7 +248,7 @@ export async function getPerformance(q: PerformanceQuery): Promise<WorkerScoreca
       } satisfies WorkerScorecard;
     })
     // Người không có việc nào đang cầm và không đóng việc nào trong kỳ thì không có gì để nói.
-    .filter((s) => s.openNow > 0 || s.productivity.closed > 0 || s.okr.value !== null)
+    .filter((s) => s.openNow > 0 || s.productivity.closed > 0 || s.okr.value !== null || s.outOfDepartment > 0)
     .sort((a, b) => b.overdueNow - a.overdueNow || b.openNow - a.openNow);
 }
 

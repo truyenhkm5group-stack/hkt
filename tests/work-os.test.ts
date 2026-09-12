@@ -6,7 +6,32 @@ import { DEPARTMENT_CODES, TEAM_DEPARTMENT } from "@/lib/constants/departments";
 import { isMetricKey, krProgress, METRIC_BINDINGS, METRIC_KEYS } from "@/lib/constants/metric-bindings";
 import { CS_STATUSES } from "@/lib/constants/cs";
 import { CARE_STATUSES } from "@/lib/constants/care";
-import { TEAM_ORDER } from "@/lib/constants/action-queue";
+import { CASE_SLA_HOURS, TEAM_ORDER } from "@/lib/constants/action-queue";
+import { BOTTLENECK_SLA_HOURS, BOTTLENECK_TEAM } from "@/lib/constants/fulfillment-bottleneck";
+import { CARE_SLA } from "@/lib/constants/care";
+import { DEPT_PERF, DEPARTMENTS_WITHOUT_PERF } from "@/lib/constants/department-performance";
+import { DEFAULT_TEMPLATES } from "@/lib/constants/bsc";
+import { DEPARTMENTS_WITHOUT_TEMPLATE, OKR_TEMPLATES, TEMPLATE_KRS_WITH_UNKNOWN_METRIC, krShapeOf, templatesOf } from "@/lib/constants/okr-templates";
+import {
+  ALERT_TYPES_WITHOUT_OWNER,
+  DEFAULT_OWNERSHIP_MAP,
+  SOURCES_WITHOUT_OWNER,
+  departmentFor,
+} from "@/lib/constants/work-ownership";
+import {
+  ALERT_TYPES_WITHOUT_SLA,
+  DEFAULT_SLA_MAP,
+  SOURCES_WITHOUT_SLA,
+  alertSlaKey,
+  effectiveSlaRules,
+  slaDueAt,
+  slaHoursFor,
+} from "@/lib/constants/work-sla";
+import { sanitizeOwnership, sanitizeSla } from "@/lib/queries/work-config";
+import { getReadiness } from "@/lib/queries/work-readiness";
+import { bottleneckOf, normalizeSnapshot, totalsOf } from "@/lib/queries/reviews";
+import { applyWorkConfig } from "@/lib/queries/work-adapters";
+import { closedStats, listOrgPeople } from "@/lib/queries/work";
 import { MONEY_UNKNOWN, slaStateOf, sumMoney, WORK_STATUSES, workKey, type WorkItem } from "@/lib/constants/work";
 import { WORK_ACTION, WORK_ACTION_KEYS } from "@/lib/constants/work-actions";
 import {
@@ -250,7 +275,7 @@ export async function testWorkOs(db: Db) {
 
   /* ═══════════ 9 · RỔ, SLA, QUÁ HẠN, HOÃN ═══════════ */
   const mau = (over: Partial<WorkItem>): WorkItem => ({
-    key: "k", sourceType: "MANUAL_TASK", sourceKey: "k", title: "t", summary: "", department: "SALES", assignee: null,
+    key: "k", sourceType: "MANUAL_TASK", sourceKey: "k", kind: null, title: "t", summary: "", department: "SALES", assignee: null,
     status: "NEW", statusAuthority: "WORK", priority: "NORMAL", score: 10, createdAt: T(1), startedAt: null, dueAt: null,
     slaAt: null, completedAt: null, snoozedUntil: null, businessEntity: "NONE", businessEntityId: "", sourceUrl: "",
     money: MONEY_UNKNOWN, tags: [], evidence: { source: "", detail: "" }, blockedReason: "", creationSource: "MANUAL",
@@ -445,6 +470,211 @@ export async function testWorkOs(db: Db) {
   /* ═══════════ 20 · HOÃN PHẢI Ở TƯƠNG LAI ═══════════ */
   const hoanSai = await snoozeWork(csKey, T(5), linh);
   assert.ok("error" in hoanSai, "hẹn về quá khứ là vô nghĩa, phải bị từ chối");
+
+  /* ═══════════ 21 · CẤU HÌNH VẬN HÀNH: HẠN XỬ LÝ & PHÒNG CHỊU TRÁCH NHIỆM ═══════════ */
+  /*
+    Bản trước có BỐN bảng hạn rải rác và không bảng nào sửa được nếu không deploy. Khối này khoá
+    ba tính chất của bảng gộp: PHỦ ĐỦ · MẶC ĐỊNH ĐÚNG BẰNG SỐ ĐANG CHẠY · GHI ĐÈ THEO ĐÚNG THỨ TỰ.
+  */
+  assert.deepEqual(SOURCES_WITHOUT_SLA, [], "mọi nguồn việc phải có luật hạn xử lý (mức nguồn hoặc mức loại)");
+  assert.deepEqual(SOURCES_WITHOUT_OWNER, [], "mọi nguồn có phòng cố định phải có luật phòng ban");
+  assert.deepEqual(ALERT_TYPES_WITHOUT_SLA, [], "mọi loại cảnh báo còn thuộc nguồn ALERT phải có hạn riêng");
+  assert.deepEqual(ALERT_TYPES_WITHOUT_OWNER, [], "mọi loại cảnh báo còn thuộc nguồn ALERT phải có phòng chịu trách nhiệm");
+
+  // MẶC ĐỊNH LÀ SỐ ĐANG CHẠY, KHÔNG PHẢI SỐ MỚI — gõ lại một con số là mở đường cho hai nơi lệch nhau.
+  assert.equal(DEFAULT_SLA_MAP[alertSlaKey("ORDER_INCOMPLETE")].hours, CASE_SLA_HOURS.ORDER_INCOMPLETE, "hạn cảnh báo phải lấy lại từ CASE_SLA_HOURS");
+  assert.equal(DEFAULT_SLA_MAP.SHIPMENT_CARE.hours, CARE_SLA.resolveHours, "hạn care phải lấy lại từ CARE_SLA");
+  assert.equal(
+    DEFAULT_SLA_MAP["FULFILLMENT_EXCEPTION:AWAITING_PICKUP"].hours,
+    BOTTLENECK_SLA_HOURS.AWAITING_PICKUP,
+    "hạn nút thắt kho phải lấy lại từ BOTTLENECK_SLA_HOURS, và phải TÁCH theo lý do tắc",
+  );
+  assert.notEqual(
+    DEFAULT_SLA_MAP["FULFILLMENT_EXCEPTION:AWAITING_PICKUP"].hours,
+    DEFAULT_SLA_MAP["FULFILLMENT_EXCEPTION:DATA_BLOCKED"].hours,
+    "bốn lý do tắc có hạn khác nhau — gộp làm một là làm nửa hàng đợi kho đỏ oan",
+  );
+  for (const r of Object.values(DEFAULT_SLA_MAP)) {
+    assert.ok(r.why.trim().length > 20, `luật hạn "${r.key}" phải nói VÌ SAO — một ngưỡng không có lý do thì không ai dám sửa`);
+  }
+
+  // Thứ tự ưu tiên: ghi đè loại > ghi đè nguồn > mặc định loại > mặc định nguồn > không đặt hạn.
+  assert.equal(slaHoursFor("CS_CASE", null, null), CASE_SLA_HOURS.CS_CASE, "không ghi đè thì dùng mặc định");
+  assert.equal(slaHoursFor("CS_CASE", null, { CS_CASE: 2 }), 2, "ghi đè mức nguồn thắng mặc định");
+  assert.equal(slaHoursFor("ALERT", "RISKY_ORDER", { ALERT: 99 }), 99, "ghi đè mức nguồn áp cho mọi loại của nguồn đó");
+  assert.equal(slaHoursFor("ALERT", "RISKY_ORDER", { ALERT: 99, "ALERT:RISKY_ORDER": 3 }), 3, "ghi đè mức LOẠI thắng ghi đè mức nguồn");
+  assert.equal(slaHoursFor("ALERT", "RISKY_ORDER", { "ALERT:RISKY_ORDER": null }), null, "ghi đè null = CỐ Ý không đặt hạn, không phải quên");
+  assert.equal(slaHoursFor("KHONG_CO_NGUON_NAY", null, null), null, "nguồn lạ thì không đặt hạn, không bịa ra một con số");
+  assert.equal(slaDueAt("CS_CASE", null, T(0), { CS_CASE: 5 })?.getTime(), T(0).getTime() + 5 * 3_600_000, "mốc hết hạn = lúc việc xuất hiện + số giờ");
+  assert.equal(slaDueAt("ADS_DECISION", null, T(0), null), null, "loại việc cố ý không đặt hạn thì không sinh mốc nào");
+
+  // Màn hình cấu hình phải phân biệt "đang dùng mặc định" với "người đã sửa".
+  const hieuLuc = effectiveSlaRules({ CS_CASE: 2 });
+  const oCs = hieuLuc.find((r) => r.key === "CS_CASE")!;
+  assert.equal(oCs.hours, 2);
+  assert.equal(oCs.defaultHours, CASE_SLA_HOURS.CS_CASE, "mặc định cũ phải còn đọc được, nếu không thì không ai dám sửa lại");
+  assert.equal(oCs.overridden, true);
+  assert.equal(hieuLuc.find((r) => r.key === "SHIPMENT_CARE")!.overridden, false);
+
+  // PHÒNG BAN: một lý do tắc của kho lại thuộc phòng bán hàng, và luật phải giữ đúng điều đó.
+  assert.equal(
+    DEFAULT_OWNERSHIP_MAP["FULFILLMENT_EXCEPTION:DATA_BLOCKED"].department,
+    TEAM_DEPARTMENT[BOTTLENECK_TEAM.DATA_BLOCKED],
+    "đơn thiếu SĐT/địa chỉ phải gọi khách — không phải việc của kho",
+  );
+  assert.notEqual(
+    DEFAULT_OWNERSHIP_MAP["FULFILLMENT_EXCEPTION:DATA_BLOCKED"].department,
+    DEFAULT_OWNERSHIP_MAP["FULFILLMENT_EXCEPTION:AWAITING_PICKUP"].department,
+    "gộp bốn lý do vào một phòng là đẩy việc gọi khách sang phòng không có số điện thoại của ai",
+  );
+  assert.equal(departmentFor("CS_CASE", null, "MANAGEMENT", null), "SALES", "không ghi đè thì dùng luật mặc định");
+  assert.equal(departmentFor("CS_CASE", null, "MANAGEMENT", { CS_CASE: "HR" }), "HR", "ghi đè mức nguồn thắng mặc định");
+  assert.equal(departmentFor("ALERT", "DATA_ERROR", "MANAGEMENT", { "ALERT:DATA_ERROR": "FINANCE" }), "FINANCE", "ghi đè mức loại có hiệu lực");
+  assert.equal(departmentFor("NGUON_LA", null, "WAREHOUSE", null), "WAREHOUSE", "không luật nào khớp thì giữ phòng adapter suy được — việc KHÔNG rơi vào khoảng trống");
+  // KHÔNG BAO GIỜ có cột "người mặc định": máy không biết hôm nay ai nghỉ, ai đang gánh 40 ca.
+  for (const r of Object.values(DEFAULT_OWNERSHIP_MAP)) {
+    assert.ok(DEPARTMENT_CODES.includes(r.department), `luật sở hữu "${r.key}" phải trỏ tới một phòng ban có thật`);
+    assert.ok(!Object.hasOwn(r, "assigneeId") && !Object.hasOwn(r, "ownerUserId"), "luật sở hữu KHÔNG được gán việc cho một cá nhân");
+  }
+
+  // Dòng rác trong `settings` không được làm sập hàng đợi của cả shop.
+  assert.deepEqual(sanitizeSla({ CS_CASE: 4, XAU: "abc", QUA_LON: 99999, AM: -3, KHONG_HAN: null }), { CS_CASE: 4, KHONG_HAN: null }, "ghi đè hỏng bị bỏ, phần còn lại giữ nguyên");
+  assert.deepEqual(sanitizeSla("không phải object"), {}, "giá trị sai kiểu trả về bảng rỗng chứ không ném lỗi");
+  assert.deepEqual(sanitizeOwnership({ CS_CASE: "SALES", X: "KHONG_CO_PHONG_NAY" }), { CS_CASE: "SALES" }, "mã phòng không có thật bị bỏ");
+
+  /* ═══════════ 22 · ÁP CẤU HÌNH LÊN VIỆC ═══════════ */
+  const viecMau: WorkItem = mau({ sourceType: "ALERT", kind: "RISKY_ORDER", department: "MANAGEMENT", statusAuthority: "SOURCE", createdAt: T(10) });
+  // Không ai ghi đè ⇒ con số phải ĐÚNG BẰNG số đang chạy, không được đổi lặng lẽ.
+  const mocDinh = applyWorkConfig(viecMau, { sla: {}, ownership: {} });
+  assert.equal(mocDinh.slaAt?.getTime(), T(10).getTime() + CASE_SLA_HOURS.RISKY_ORDER! * 3_600_000, "chưa ai sửa cấu hình thì hạn giữ nguyên số cũ");
+  assert.equal(mocDinh.department, TEAM_DEPARTMENT.CS, "phòng ban cũng giữ nguyên phân công đang chạy");
+  const daSua = applyWorkConfig(viecMau, { sla: { "ALERT:RISKY_ORDER": 1 }, ownership: { "ALERT:RISKY_ORDER": "FINANCE" } });
+  assert.equal(daSua.slaAt?.getTime(), T(10).getTime() + 3_600_000, "sửa cấu hình có hiệu lực ngay, không cần deploy");
+  assert.equal(daSua.department, "FINANCE");
+  // Việc tay: HẠN NGƯỜI GIAO ĐẶT LUÔN THẮNG cấu hình.
+  const viecTay: WorkItem = mau({ sourceType: "MANUAL_TASK", kind: null, statusAuthority: "WORK", createdAt: T(10), dueAt: T(-5) });
+  assert.equal(applyWorkConfig(viecTay, { sla: { MANUAL_TASK: 1 }, ownership: {} }).slaAt?.getTime(), T(-5).getTime(), "hạn người giao đặt thắng hạn dự phòng của cấu hình");
+
+  /* ═══════════ 23 · VIỆC ĐÃ ĐÓNG: TRUNG VỊ, ĐÚNG HẸN, TIỀN ĐO ĐƯỢC ═══════════ */
+  const H = 3_600_000;
+  const dong = (gio: number, hanGio: number | null, tien: number | null, doDuoc: boolean): WorkItem =>
+    mau({
+      key: `d${gio}-${tien}-${doDuoc}`,
+      status: "DONE",
+      createdAt: new Date(NOW.getTime() - (gio + 1) * H),
+      completedAt: new Date(NOW.getTime() - 1 * H),
+      slaAt: hanGio === null ? null : new Date(NOW.getTime() - (gio + 1) * H + hanGio * H),
+      money: tien === null ? MONEY_UNKNOWN : { atRisk: tien, recoverable: tien, confidence: doDuoc ? "MEASURED" : "ESTIMATED", basis: "kiểm thử" },
+    });
+  const tk = closedStats([dong(1, 10, 100, true), dong(3, 10, 50, true), dong(100, 10, 999, false), dong(5, null, null, false)], NOW);
+  assert.equal(tk.count, 4);
+  // TRUNG VỊ chứ không trung bình: ca 100 giờ không được kéo con số của cả tháng lên.
+  assert.equal(tk.medianHours, 4, "trung vị của 1·3·5·100 giờ là 4, trung bình sẽ là 27,25 — che mất sự thật");
+  assert.equal(tk.slowestHours, 100, "ca chậm nhất phải hiện riêng, một con số giữa không nói gì về đuôi");
+  assert.equal(tk.slaSample, 3, "ca không đặt hạn rơi khỏi mẫu số đúng hẹn");
+  assert.equal(Math.round(tk.slaHitRate! * 100), 67, "2/3 ca có hạn đóng kịp");
+  assert.equal(tk.moneyRecovered, 150, "chỉ cộng phần ĐO ĐƯỢC — ước tính không được trộn thành tiền thật");
+  assert.equal(tk.moneyRecoveredUnknown, 2, "số ca chưa tra được phải hiện, không bị coi là 0đ");
+  assert.equal(closedStats([], NOW).slaHitRate, null, "không có ca nào thì KHÔNG có tỷ lệ nào — null, không phải 100%");
+
+  /* ═══════════ 24 · HỌP TUẦN: NÚT THẮT CHỌN THEO TỶ LỆ, KHÔNG THEO SỐ LƯỢNG ═══════════ */
+  const phong = (department: "SALES" | "WAREHOUSE", open: number, overdue: number, blocked: number) => ({
+    department,
+    label: department,
+    health: healthOf(open, overdue, blocked),
+    open,
+    overdue,
+    unassigned: 0,
+    blocked,
+    urgent: 0,
+    slaOnTime: null,
+    money: { atRisk: 1000, recoverable: 0, unknown: 2, known: 1 },
+    topItem: null,
+    leadName: "",
+  });
+  const nutThat = bottleneckOf([phong("SALES", 200, 20, 0), phong("WAREHOUSE", 10, 8, 0)]);
+  assert.equal(nutThat?.department, "WAREHOUSE", "phòng đông việc nhất là phòng BẬN nhất, không phải phòng KẸT nhất");
+  assert.equal(bottleneckOf([phong("SALES", 200, 0, 0)]), null, "không phòng nào quá hạn thì không có nút thắt để bịa ra");
+  const tongKy = totalsOf([phong("SALES", 200, 20, 1), phong("WAREHOUSE", 10, 8, 4)]);
+  assert.equal(tongKy.open, 210);
+  assert.equal(tongKy.overdue, 28);
+  assert.equal(tongKy.moneyUnknown, 4, "số việc chưa tra được tiền phải cộng dồn, không bị nuốt");
+  // Ảnh chụp đời cũ vẫn đọc được — và KHÔNG được tính lại từ dữ liệu hôm nay.
+  const cuV1 = normalizeSnapshot({ version: 1, builtAt: "", periodFrom: "", periodTo: "", departments: [phong("SALES", 5, 1, 0)], objectives: [], scorecard: null, people: [], failedSources: [] } as never);
+  assert.equal(cuV1.totals.open, 5, "tổng của ảnh chụp v1 dựng lại TỪ CHÍNH ẢNH CHỤP");
+  assert.deepEqual(cuV1.topIssues, [], "v1 không lưu danh sách việc nóng — để rỗng, không dựng lại từ hôm nay");
+
+  /* ═══════════ 25 · HIỆU SUẤT THEO PHÒNG & MẪU OKR/BSC ═══════════ */
+  assert.deepEqual(DEPARTMENTS_WITHOUT_PERF, [], "mọi phòng phải khai được đo bằng gì");
+  for (const code of DEPARTMENT_CODES) {
+    const spec = DEPT_PERF[code];
+    assert.ok(spec.notAttributed.trim().length > 20, `phòng ${code} phải nói rõ cái gì KHÔNG tính cho họ`);
+    assert.ok(spec.metrics.length > 0, `phòng ${code} phải có ít nhất một chỉ số`);
+    for (const m of spec.metrics) {
+      if (m.availability === "UNAVAILABLE") assert.ok(m.note.trim().length > 30, `chỉ số chưa đo được của ${code} phải nói THIẾU CÁI GÌ, không chỉ nói "chưa có"`);
+    }
+  }
+  // Không nguồn nào mà kết quả do ĐVVC quyết lại được tính vào trục Kết quả.
+  assert.equal(WORK_SOURCE_SPEC.SHIPMENT_CARE.outcomeAttributable, false, "bưu tá giao hỏng không phải lỗi người care");
+
+  assert.deepEqual(TEMPLATE_KRS_WITH_UNKNOWN_METRIC, [], "mọi KR mẫu phải nối vào chỉ số CÓ THẬT hoặc khai MANUAL");
+  assert.deepEqual(DEPARTMENTS_WITHOUT_TEMPLATE, [], "phòng nào cũng phải có mẫu, nếu không nút “Dùng mẫu” mở ra một hộp rỗng");
+  for (const t of OKR_TEMPLATES) {
+    assert.ok(t.krs.length > 0, `mẫu "${t.key}" phải có ít nhất một KR — mục tiêu không có số thì không đo được`);
+    for (const kr of t.krs) {
+      assert.ok(isMetricKey(kr.metricSource), `KR "${kr.title}" nối vào khoá không có trong sổ đăng ký`);
+      assert.ok(kr.why.trim().length > 20, `KR "${kr.title}" phải nói vì sao đo bằng chỉ số đó`);
+    }
+  }
+  assert.ok(templatesOf("SALES").length > 0);
+  // ĐƠN VỊ VÀ CHIỀU LẤY TỪ SỔ ĐĂNG KÝ. Ghi cứng "UP" làm điểm ĐẢO NGƯỢC với chỉ số càng-thấp-càng-tốt.
+  assert.equal(krShapeOf("return_rate").direction, "DOWN", "tỷ lệ hoàn càng thấp càng tốt");
+  assert.equal(krShapeOf("delivered_revenue").direction, "UP");
+  assert.equal(krShapeOf("MANUAL").direction, "UP", "chỉ số nhập tay không có trong sổ — mặc định UP, không ném lỗi");
+  assert.equal(metricScore(20, 10, "DOWN"), 50, "vượt đích ở chiều giảm phải bị chấm thấp");
+  for (const [code, oBsc] of Object.entries(DEFAULT_TEMPLATES)) {
+    for (const o of oBsc) assert.ok(isMetricKey(o.metricSource), `ô BSC mẫu của ${code} nối vào khoá "${o.metricSource}" không có trong sổ đăng ký`);
+  }
+
+  /* ═══════════ 26 · MỨC SẴN SÀNG VẬN HÀNH ═══════════ */
+  /*
+    Báo cáo này là DANH SÁCH VIỆC PHẢI LÀM của chủ shop, nên nó không được phép làm tròn lên. Khoá
+    ba điều: nó chạy được, nó không coi nguồn hỏng là 0, và nó nêu đúng người chưa có phòng ban.
+  */
+  const sanSang = await getReadiness(NOW);
+  assert.ok(sanSang.total >= 0 && Number.isFinite(sanSang.total));
+  assert.equal(sanSang.sources.length, WORK_SOURCES.length, "mọi nguồn phải có mặt trong báo cáo, kể cả nguồn đang rỗng");
+  assert.deepEqual(sanSang.gaps.sourcesWithoutSla, [], "không nguồn nào được thiếu luật hạn");
+  assert.deepEqual(sanSang.gaps.sourcesWithoutOwner, [], "không nguồn nào được thiếu luật phòng ban");
+  assert.equal(
+    sanSang.slaCoverage.withSla + sanSang.slaCoverage.withoutSla,
+    sanSang.total,
+    "độ phủ hạn phải cộng đủ tổng — thiếu một phần là giấu đi phần không ai đo",
+  );
+  const nguoi = await listOrgPeople();
+  assert.equal(
+    sanSang.gaps.peopleWithoutDepartment.length,
+    nguoi.filter((n) => n.departments.length === 0).length,
+    "số người chưa có phòng ban phải khớp với dữ liệu thật — đây là việc chặn nhân viên dùng được hàng đợi",
+  );
+  /*
+    `ADS_DECISION` CỐ Ý chỉ có nút MỞ: ERP đọc Facebook Ads chứ không ghi, nên một nút "Tạm dừng"
+    ở đây sẽ là nút giả. Báo cáo sẵn sàng phải NÊU RA điều đó.
+
+    Và đếm phải là nút RIÊNG của nguồn gọi Server Action của miền — không đếm bốn nút chung của lớp
+    công việc, vì nguồn nào cũng có chúng. Bản đầu của báo cáo này đếm cả nút chung và kết luận
+    rằng mọi nguồn đều xử lý được tại chỗ; bài kiểm bắt được đúng chỗ đó.
+  */
+  assert.equal(sanSang.sources.find((x) => x.source === "ADS_DECISION")!.domainActions, 0, "nguồn quảng cáo không có hành động ghi nào của miền");
+  assert.ok(sanSang.gaps.sourcesWithoutRealAction.includes(WORK_SOURCE_SPEC.ADS_DECISION.label), "mức sẵn sàng phải nêu tên nguồn chưa xử lý xong được tại chỗ");
+  assert.ok(
+    sanSang.sources.find((x) => x.source === "CS_CASE")!.domainActions > 0,
+    "case CSKH đóng được ngay trên dòng — nếu con số này về 0 thì hàng đợi đã mất đường ghi về miền",
+  );
+  assert.ok(
+    !sanSang.gaps.sourcesWithoutRealAction.includes(WORK_SOURCE_SPEC.MANUAL_TASK.label),
+    "việc tay không cần nút miền — trạng thái của nó nằm ngay ở lớp công việc, không được tính là lỗ hổng",
+  );
 
   console.log(
     `✓ Hệ điều hành công việc: ${WORK_SOURCES.length} nguồn khai đủ (bản đồ trạng thái phủ hết ${CS_STATUSES.length} trạng thái CSKH + ${CARE_STATUSES.length} trạng thái care) · ${cuoi.items.length} việc chiếu, 0 khoá trùng · đóng ở nguồn thì việc tự biến mất · hàng đợi KHÔNG đóng được việc của miền (chặn ở cả ứng dụng lẫn CSDL) · lớp ghi chú không đụng nguồn · việc định kỳ chạy lại không nhân đôi · 7 rổ xếp đúng, hoãn không xoá được hạn · sức khoẻ theo TỶ LỆ không theo số lượng · ${METRIC_KEYS.length} chỉ số có hàm đọc, chưa đo được là null · thẻ điểm 6 trục không gộp khi chưa khai trọng số · kỳ đã chốt bất biến (${openTruoc} việc giữ nguyên khi số sống đã đổi)`,

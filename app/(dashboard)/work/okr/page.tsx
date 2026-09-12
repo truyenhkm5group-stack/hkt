@@ -13,7 +13,7 @@ import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { OkrToolbar } from "@/app/(dashboard)/work/okr/toolbar";
 import { AddBscMetric, DeleteBscMetric } from "@/components/work/bsc-editor";
-import { AddKeyResult, CheckinKeyResult, DeleteKeyResult, DeleteObjective } from "@/components/work/okr-editor";
+import { AddKeyResult, CheckinKeyResult, DeleteKeyResult, DeleteObjective, ObjectiveStatus } from "@/components/work/okr-editor";
 import { listDepartments } from "@/lib/queries/work";
 
 export const metadata = { title: "Mục tiêu · OKR & BSC" };
@@ -114,6 +114,7 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
                           {o.measuredCount}/{o.totalCount} KR đo được
                         </p>
                       </div>
+                      <ObjectiveStatus id={o.id} status={o.status} canManage={canManage} />
                       {canManage ? (
                         <span className="flex items-center gap-0.5">
                           <AddKeyResult objectiveId={o.id} />

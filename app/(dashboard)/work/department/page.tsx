@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { formatVND } from "@/lib/format";
-import { buildDepartmentQueue, departmentsOfUser, getDepartmentCockpit, DEPT_HEALTH_LABEL, DEPT_HEALTH_TONE } from "@/lib/queries/work";
+import { buildDepartmentQueue, CLOSED_WINDOW_DAYS, departmentsOfUser, getDepartmentCockpit, DEPT_HEALTH_LABEL, DEPT_HEALTH_TONE } from "@/lib/queries/work";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -41,11 +41,16 @@ export default async function DepartmentWorkPage({ searchParams }: { searchParam
   const allowed = crossDept || mine.some((d) => d.code === selected);
   const dept: DepartmentCode = allowed ? selected : fallback;
 
-  const [{ items }, cockpit] = await Promise.all([
-    collectWorkItems({ includeClosed: true }),
-    crossDept ? getDepartmentCockpit() : Promise.resolve(null),
-  ]);
   const now = new Date();
+  /*
+    Cửa sổ 30 ngày việc ĐÃ ĐÓNG đi kèm toàn bộ việc đang mở: thước "xử lý nhanh chậm" và "đóng
+    đúng hẹn không" không đọc được từ tập việc còn đang mở. Không dùng `includeClosed` — cái đó
+    kéo cả lịch sử và làm trung vị nói về chuyện của năm ngoái.
+  */
+  const [{ items }, cockpit] = await Promise.all([
+    collectWorkItems({ now, closedSince: new Date(now.getTime() - CLOSED_WINDOW_DAYS * 24 * 3_600_000) }),
+    crossDept ? getDepartmentCockpit({ now }) : Promise.resolve(null),
+  ]);
   const all = items.filter((i) => i.department === dept);
   const open = all.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
   const queue = buildDepartmentQueue(dept, all, open, now);
@@ -104,6 +109,43 @@ export default async function DepartmentWorkPage({ searchParams }: { searchParam
             value: queue.slaOnTime === null ? "—" : `${Math.round(queue.slaOnTime * 100)}%`,
             note: queue.slaOnTime === null ? "không việc nào có hạn" : "trên việc CÓ đặt hạn",
             hint: "Mẫu số chỉ gồm việc CÓ ĐẶT HẠN. Gộp cả việc không đặt hạn vào thì tỷ lệ này được thổi lên bằng chính những việc không ai đo.",
+          },
+        ]}
+      />
+
+      {/*
+        BA CON SỐ VỀ VIỆC ĐÃ ĐÓNG, ĐỨNG RIÊNG KHỎI ẢNH CHỤP HIỆN TẠI.
+
+        Dải trên nói phòng đang GÁNH gì; dải này nói phòng có XỬ LÝ ĐƯỢC hay không. Gộp chung thì
+        một phòng tồn đọng ít vì không ai giao việc trông y hệt một phòng chạy tốt.
+      */}
+      <StatStrip
+        columns={4}
+        items={[
+          {
+            label: "Đã đóng",
+            value: queue.closed.count,
+            note: `trong ${queue.closed.windowDays} ngày`,
+            hint: "Con số này KHÔNG phải thước năng suất và không dùng để xếp hạng ai. Nó là mẫu số của ba ô còn lại: ba ô kia nói lên điều gì phụ thuộc vào việc chúng đứng trên bao nhiêu ca.",
+          },
+          {
+            label: "Thời gian xử lý",
+            value: queue.closed.medianHours === null ? "—" : `${queue.closed.medianHours} giờ`,
+            note: queue.closed.slowestHours === null ? "chưa đóng ca nào" : `chậm nhất ${queue.closed.slowestHours} giờ`,
+            hint: "TRUNG VỊ, không phải trung bình: một ca để quên ba tuần sẽ kéo trung bình của cả tháng lên và che mất việc phòng xử lý phần lớn ca trong vài giờ. Ô “chậm nhất” đứng cạnh để cái đuôi đó không bị giấu.",
+          },
+          {
+            label: "Đóng đúng hẹn",
+            value: queue.closed.slaHitRate === null ? "—" : `${Math.round(queue.closed.slaHitRate * 100)}%`,
+            tone: queue.closed.slaHitRate !== null && queue.closed.slaHitRate < 0.7 ? "rose" : "muted",
+            note: queue.closed.slaSample ? `trên ${queue.closed.slaSample} ca có đặt hạn` : "chưa ca nào có hạn",
+            hint: "Khác ô “Trong hạn” ở dải trên: ô kia nói việc ĐANG MỞ chưa vỡ hạn, ô này nói việc ĐÃ ĐÓNG có kịp hẹn không. Một phòng có thể 100% việc đang mở còn trong hạn mà vẫn thường xuyên đóng muộn.",
+          },
+          {
+            label: "Tiền đã cứu được",
+            value: queue.closed.moneyRecovered ? formatVND(queue.closed.moneyRecovered, { compact: true }) : "—",
+            note: queue.closed.moneyRecoveredUnknown ? `${queue.closed.moneyRecoveredUnknown} ca chưa tra được` : "đã tra được hết",
+            hint: "CHỈ cộng phần ĐO ĐƯỢC từ chứng từ. Ước tính không được trộn vào một con số mà chủ shop sẽ đọc như tiền thật — ca chưa tra được hiện ngay cạnh, không bị coi là 0đ.",
           },
         ]}
       />

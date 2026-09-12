@@ -1,11 +1,14 @@
 import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ageLabel, caseScore, priorityOf, slaFor, type CaseType } from "@/lib/constants/action-queue";
+import { ageLabel, caseScore, priorityOf, slaFor } from "@/lib/constants/action-queue";
 import { CS_STATUSES, type CsStatus } from "@/lib/constants/cs";
 import { csDomainOf } from "@/lib/constants/cs-domain";
 import { departmentOfTeam, type DepartmentCode } from "@/lib/constants/departments";
-import { actionsOf, ALERT_STATUS_TO_WORK, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 import { MONEY_UNKNOWN, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
+import { departmentFor } from "@/lib/constants/work-ownership";
+import { slaDueAt } from "@/lib/constants/work-sla";
+import { getWorkConfig, type WorkConfig } from "@/lib/queries/work-config";
 import { getActionQueue } from "@/lib/queries/action-queue";
 import { ADS_ACTION_LABEL } from "@/lib/constants/ads-decision";
 import { getAdsDecision } from "@/lib/queries/ads-decision";
@@ -38,36 +41,13 @@ import { resolvePeriod } from "@/lib/search-params";
 
 /* ═══════════════════ CHỐNG ĐẾM HAI LẦN GIỮA CÁC NGUỒN ═══════════════════ */
 
-/**
- * Loại cảnh báo được nguồn CHUYÊN BIỆT sở hữu — bỏ khỏi nguồn `ALERT` để một sự việc không sinh
- * hai dòng. Đây là danh sách duy nhất; thêm một nguồn chuyên biệt thì thêm vào đây.
- *
- * Luật gộp: **cùng một gốc Ở CÙNG MỘT ĐỘ MỊN** thì mới là trùng.
- *
- * `ADS_ANOMALY` CỐ Ý không nằm trong danh sách dù đã có nguồn `ADS_DECISION`: cảnh báo đó nói về
- * chi tiêu TOÀN SHOP so với doanh thu, còn `ADS_DECISION` nói về từng chiến dịch. Chi toàn shop
- * có thể bất thường mà không chiến dịch nào riêng lẻ vượt ngưỡng — bỏ nó đi là mất đúng tín hiệu
- * mức tổng.
- */
-export const ALERT_KINDS_OWNED_ELSEWHERE: CaseType[] = [
-  // `cs_cases` là nguồn — cùng độ mịn (một case).
-  "CS_CASE",
-  "CS_BACKLOG",
-  // `shipment_care` là nguồn — cùng độ mịn (một kiện hàng).
-  "DELIVERY_FAILED",
-  "DELIVERY_STALE",
-  "RETURNING",
-  // `getFulfillmentBottleneckQueue` là nguồn — cùng độ mịn (một đơn đứng trước lúc gửi).
-  "ORDER_CONFIRMATION_STALE",
-];
-
-/** Cảnh báo được ĐỔI TÊN NGUỒN (không bỏ): cùng bảng `notifications`, nhưng phòng ban và SLA khác. */
-export const ALERT_KIND_TO_SOURCE: Partial<Record<CaseType, WorkSource>> = {
-  COD_OVERDUE: "COD_EXCEPTION",
-  LOW_STOCK_RISK: "INVENTORY_EXCEPTION",
-  STOCKOUT_RISK: "INVENTORY_EXCEPTION",
-  RETURN_RECEIVED_PENDING_INSPECTION: "RETURN_INSPECTION",
-};
+/*
+  Hai bảng "cảnh báo nào thuộc nguồn nào" nay nằm ở `lib/constants/work-sources.ts` cùng sổ đăng ký
+  thẩm quyền: chúng là HẰNG SỐ khai báo, không phải truy vấn, và bảng cấu hình hạn xử lý
+  (`lib/constants/work-sla.ts`) cần đọc chúng mà không được kéo `getDb` vào. Xuất lại ở đây để mã
+  gọi cũ và `tests/work-os.test.ts` không phải đổi đường dẫn.
+*/
+export { ALERT_KINDS_OWNED_ELSEWHERE, ALERT_KIND_TO_SOURCE } from "@/lib/constants/work-sources";
 
 /* ═══════════════════ LỚP GHI CHÚ (overlay) ═══════════════════ */
 
@@ -236,6 +216,7 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       key: workKey("CS_CASE", r.id),
       sourceType: "CS_CASE",
       sourceKey: r.id,
+      kind: null,  // Một nguồn, một loại việc — hạn và phòng ban đặt ở mức nguồn.
       title: r.title,
       summary: r.detail || `${r.customerName} ${r.customerPhone}`.trim(),
       department: "SALES",
@@ -289,6 +270,7 @@ export async function adaptShipmentCare(now: Date, closedSince: Date | null = nu
         key: workKey("SHIPMENT_CARE", c.shipmentId),
         sourceType: "SHIPMENT_CARE",
         sourceKey: c.shipmentId,
+        kind: null,
         title: `${c.reasonLabel} · ${c.tracking}`,
         summary: c.reasonDetail,
         department: "LOGISTICS" as DepartmentCode,
@@ -328,6 +310,7 @@ export async function adaptFulfillment(): Promise<WorkItem[]> {
       key: workKey("FULFILLMENT_EXCEPTION", c.orderId),
       sourceType: "FULFILLMENT_EXCEPTION",
       sourceKey: c.orderId,
+      kind: c.reason,  // Bốn lý do tắc có hạn khác nhau và một trong bốn thuộc phòng khác.
       title: `${c.reasonLabel} · ${c.orderLabel}`,
       summary: c.reasonDetail,
       department: departmentOfTeam(c.team),
@@ -374,6 +357,7 @@ export async function adaptBank(now: Date): Promise<WorkItem[]> {
       key: workKey("BANK_EXCEPTION", r.id),
       sourceType: "BANK_EXCEPTION",
       sourceKey: r.id,
+      kind: null,
       title: `${r.amount < 0 ? "Tiền ra" : "Tiền vào"} chưa phân loại · ${r.counterparty || r.description.slice(0, 60) || r.bankRef}`,
       summary: r.description,
       department: "FINANCE" as DepartmentCode,
@@ -435,6 +419,7 @@ export async function adaptAdsDecisions(now: Date): Promise<WorkItem[]> {
         key: workKey("ADS_DECISION", `campaign:${r.key}`),
         sourceType: "ADS_DECISION",
         sourceKey: `campaign:${r.key}`,
+        kind: r.action,
         title: `${ADS_ACTION_LABEL[r.action]} · ${r.name}`,
         summary: r.reason,
         department: "MARKETING" as DepartmentCode,
@@ -476,13 +461,14 @@ export async function adaptAlerts(now: Date): Promise<WorkItem[]> {
   const items: WorkItem[] = [];
   for (const c of queue.cases) {
     if (ALERT_KINDS_OWNED_ELSEWHERE.includes(c.type)) continue;
-    const source: WorkSource = ALERT_KIND_TO_SOURCE[c.type] ?? "ALERT";
+    const source: WorkSource = sourceOfAlert(c.type);
     const spec = WORK_SOURCE_SPEC[source];
     const status = ALERT_STATUS_TO_WORK[c.status];
     items.push({
       key: workKey(source, c.id),
       sourceType: source,
       sourceKey: c.id,
+      kind: c.type,  // Loại cảnh báo quyết định hạn và phòng ban, không phải tên nguồn.
       title: c.title,
       summary: c.reason,
       department: spec.department ?? departmentOfTeam(c.team),
@@ -573,6 +559,8 @@ export async function adaptOwnedWork(now: Date, includeClosed: boolean, closedSi
       key: workKey(r.sourceType, r.sourceKey),
       sourceType: r.sourceType,
       sourceKey: r.sourceKey,
+      // Việc tay không có loại con: hạn của nó là hạn người giao đặt, phòng ban do người giao chọn.
+      kind: null,
       title: r.title,
       summary: r.summary,
       department: (r.departmentCode as DepartmentCode | null) ?? "MANAGEMENT",
@@ -603,6 +591,29 @@ export async function adaptOwnedWork(now: Date, includeClosed: boolean, closedSi
       recommendedAction: r.summary.slice(0, 200),
     };
   });
+}
+
+/* ═══════════════════ ÁP CẤU HÌNH CỦA CHỦ SHOP ═══════════════════ */
+
+/**
+ * MỘT LƯỢT DUY NHẤT ĐẶT LẠI HẠN VÀ PHÒNG BAN THEO BẢNG CẤU HÌNH.
+ *
+ * Vì sao làm ở đây chứ không trong từng adapter: adapter chỉ được phép ĐỔI HÌNH DẠNG (luật ở đầu
+ * tệp). Nếu mỗi adapter tự đọc cấu hình thì bảy nơi cùng phải nhớ thứ tự ưu tiên, và nơi nào quên
+ * sẽ lệch âm thầm. Một lượt ở đây thì thứ tự ưu tiên chỉ tồn tại một chỗ.
+ *
+ * KHÔNG ĐỔI SỐ KHI CHƯA AI GHI ĐÈ. Mặc định trong `lib/constants/work-sla.ts` được LẤY LẠI từ
+ * chính hằng số mà adapter đang dùng (`CASE_SLA_HOURS`, `CARE_SLA`, `BOTTLENECK_SLA_HOURS`), nên
+ * lượt này tính ra đúng con số cũ. Nó chỉ khác đi khi có người thật sự sửa cấu hình.
+ *
+ * Việc tay và việc định kỳ: HẠN NGƯỜI GIAO ĐẶT LUÔN THẮNG. Cấu hình chỉ đỡ khi ô hạn bỏ trống.
+ */
+export function applyWorkConfig(item: WorkItem, cfg: WorkConfig): WorkItem {
+  const department = departmentFor(item.sourceType, item.kind, item.department, cfg.ownership);
+  const theoCauHinh = slaDueAt(item.sourceType, item.kind, item.createdAt, cfg.sla);
+  const slaAt = item.statusAuthority === "WORK" ? (item.dueAt ?? theoCauHinh) : theoCauHinh;
+  if (department === item.department && slaAt?.getTime() === item.slaAt?.getTime()) return item;
+  return { ...item, department, slaAt };
 }
 
 /* ═══════════════════ GOM TẤT CẢ ═══════════════════ */
@@ -670,6 +681,12 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     }
   };
 
+  /*
+    Cấu hình đọc TRƯỚC, một lần, ngoài vòng adapter: nó là một dòng `settings` có đệm 60 giây, và
+    để mỗi adapter tự đọc thì bảy lượt truy vấn giống nhau đi kèm mỗi lần mở màn hình.
+  */
+  const cfg = await getWorkConfig();
+
   const groups = await Promise.all([
     want("CS_CASE") ? guard("CS_CASE", () => adaptCsCases(now, closedSince)) : [],
     want("SHIPMENT_CARE") ? guard("SHIPMENT_CARE", () => adaptShipmentCare(now, closedSince)) : [],
@@ -681,7 +698,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 
-  let items = groups.flat();
+  let items = groups.flat().map((i) => applyWorkConfig(i, cfg));
   if (opts.sources) items = items.filter((i) => opts.sources!.includes(i.sourceType as WorkSource));
 
   const overlays = await loadOverlays(items.filter((i) => i.statusAuthority === "SOURCE").map((i) => i.key));

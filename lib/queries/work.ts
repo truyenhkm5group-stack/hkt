@@ -91,6 +91,55 @@ export async function departmentsOfUser(userId: string): Promise<{ code: Departm
   return rows.map((r) => ({ ...r, code: r.code as DepartmentCode, roleInDept: r.roleInDept as DepartmentRole }));
 }
 
+/**
+ * ═══════ SƠ ĐỒ TỔ CHỨC THẬT: TỪNG NGƯỜI, PHÒNG NÀO ═══════
+ *
+ * Trả về MỌI tài khoản đang hoạt động, kể cả người CHƯA thuộc phòng nào — và đó là điểm chính.
+ * `assignableMembers()` cũng liệt kê người, nhưng nó gộp tên phòng thành một chuỗi để đổ vào ô
+ * chọn; ở đây cần khoá phòng và vai trong phòng để gán/bỏ được ngay trên màn hình.
+ *
+ * KHÔNG ĐOÁN PHÒNG BAN CHO AI. `ROLE_DEPARTMENT_HINT` chỉ là GỢI Ý hiện cạnh ô chọn; không hàm
+ * nào ở đây ghi nó vào CSDL. Một người bị máy xếp nhầm phòng sẽ nhận nhầm việc suốt nhiều tuần
+ * trước khi ai đó phát hiện, còn một người chưa xếp phòng thì hiện rõ ở danh sách "chưa có phòng
+ * ban" và có người xử lý trong ngày.
+ */
+export type OrgPerson = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  departments: { id: string; code: DepartmentCode; name: string; roleInDept: DepartmentRole }[];
+};
+
+export async function listOrgPeople(): Promise<OrgPerson[]> {
+  const db = await getDb();
+  const [users, rows] = await Promise.all([
+    db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, role: schema.users.role })
+      .from(schema.users)
+      .where(eq(schema.users.active, true))
+      .orderBy(asc(schema.users.name)),
+    db
+      .select({
+        userId: schema.departmentMembers.userId,
+        id: schema.departments.id,
+        code: schema.departments.code,
+        name: schema.departments.name,
+        roleInDept: schema.departmentMembers.roleInDept,
+        sortOrder: schema.departments.sortOrder,
+      })
+      .from(schema.departmentMembers)
+      .innerJoin(schema.departments, eq(schema.departments.id, schema.departmentMembers.departmentId))
+      .where(and(eq(schema.departmentMembers.active, true), eq(schema.departments.active, true)))
+      .orderBy(asc(schema.departments.sortOrder)),
+  ]);
+  const byUser = new Map<string, OrgPerson["departments"]>();
+  for (const r of rows) {
+    byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), { id: r.id, code: r.code as DepartmentCode, name: r.name, roleInDept: r.roleInDept as DepartmentRole }]);
+  }
+  return users.map((u) => ({ ...u, departments: byUser.get(u.id) ?? [] }));
+}
+
 /* ═══════════════════ NHẬN DIỆN "VIỆC CỦA TÔI" ═══════════════════ */
 
 /**
@@ -219,7 +268,73 @@ export type DepartmentQueue = {
   money: ReturnType<typeof sumMoney>;
   workload: WorkloadRow[];
   bySource: { source: WorkSource; label: string; count: number; overdue: number }[];
+  /** Đo trên việc ĐÃ ĐÓNG trong 30 ngày — xem `closedStats`. */
+  closed: ClosedStats;
 };
+
+/**
+ * ═══════ BA CON SỐ VỀ VIỆC ĐÃ ĐÓNG — KHÁC HẲN BA CON SỐ VỀ VIỆC ĐANG MỞ ═══════
+ *
+ * Ảnh chụp hiện tại ("đang mở bao nhiêu, quá hạn bao nhiêu") nói phòng đang GÁNH gì. Nó không nói
+ * phòng có XỬ LÝ ĐƯỢC hay không: một phòng đóng mọi việc trong hai giờ và một phòng để mỗi việc
+ * ba tuần có thể có cùng số việc đang mở vào cùng một buổi sáng.
+ *
+ *  · `medianHours` — TRUNG VỊ thời gian từ lúc việc xuất hiện tới lúc đóng. Trung vị chứ không
+ *    trung bình: một ca để quên ba tuần kéo trung bình của cả tháng lên và che mất việc phòng đó
+ *    xử lý phần lớn ca trong vài giờ.
+ *  · `slaHitRate`  — tỷ lệ việc đóng TRƯỚC hạn, mẫu số chỉ gồm việc CÓ ĐẶT HẠN. Đây là thước
+ *    "đúng hẹn" thật; `slaOnTime` ở trên chỉ nói việc đang mở CHƯA vỡ hạn, hai chuyện khác nhau.
+ *  · `moneyRecovered` — tiền lấy lại / tạo thêm được nhờ đóng những việc đó, và CHỈ cộng phần
+ *    `MEASURED`. Ước tính không được trộn vào một con số mà chủ shop sẽ đọc như tiền thật; số
+ *    việc không tra được đi kèm để người đọc biết con số đứng trên bao nhiêu phần.
+ */
+export type ClosedStats = {
+  count: number;
+  medianHours: number | null;
+  slowestHours: number | null;
+  slaHitRate: number | null;
+  slaSample: number;
+  moneyRecovered: number;
+  moneyRecoveredUnknown: number;
+  windowDays: number;
+};
+
+/** Cửa sổ đo việc đã đóng. 30 ngày: đủ dài để có mẫu số ở shop nhỏ, đủ ngắn để nói về hiện tại. */
+export const CLOSED_WINDOW_DAYS = 30;
+
+export function closedStats(all: WorkItem[], now: Date): ClosedStats {
+  const since = now.getTime() - CLOSED_WINDOW_DAYS * 24 * 3_600_000;
+  const done = all.filter((i) => i.status === "DONE" && i.completedAt !== null && i.completedAt.getTime() >= since);
+
+  const hours = done
+    .map((i) => (i.completedAt!.getTime() - i.createdAt.getTime()) / 3_600_000)
+    .filter((h) => h >= 0)
+    .sort((a, b) => a - b);
+  const mid = Math.floor(hours.length / 2);
+  const median = hours.length ? (hours.length % 2 ? hours[mid] : (hours[mid - 1] + hours[mid]) / 2) : null;
+
+  const withSla = done.filter((i) => (i.slaAt ?? i.dueAt) !== null);
+  const hit = withSla.filter((i) => i.completedAt!.getTime() <= (i.slaAt ?? i.dueAt)!.getTime()).length;
+
+  // Chỉ `MEASURED` mới được cộng: ước tính trộn vào đây là biến một phỏng đoán thành "tiền đã thu".
+  let moneyRecovered = 0;
+  let moneyRecoveredUnknown = 0;
+  for (const i of done) {
+    if (i.money.confidence === "MEASURED" && i.money.recoverable !== null) moneyRecovered += i.money.recoverable;
+    else moneyRecoveredUnknown += 1;
+  }
+
+  return {
+    count: done.length,
+    medianHours: median === null ? null : Math.round(median * 10) / 10,
+    slowestHours: hours.length ? Math.round(hours[hours.length - 1] * 10) / 10 : null,
+    slaHitRate: withSla.length ? hit / withSla.length : null,
+    slaSample: withSla.length,
+    moneyRecovered,
+    moneyRecoveredUnknown,
+    windowDays: CLOSED_WINDOW_DAYS,
+  };
+}
 
 /**
  * MỘT PHÒNG, MỘT BỨC TRANH.
@@ -230,7 +345,12 @@ export type DepartmentQueue = {
  */
 export async function getDepartmentQueue(department: DepartmentCode, opts: CollectOptions = {}): Promise<DepartmentQueue> {
   const now = opts.now ?? new Date();
-  const { items } = await collectWorkItems({ ...opts, now, includeClosed: true });
+  /*
+    `closedSince` chứ KHÔNG phải `includeClosed`. Cái sau kéo toàn bộ lịch sử của những nguồn đọc
+    được — vừa chậm vừa làm trung vị thời gian xử lý nói về một năm trước. Cái này mở đúng cửa sổ
+    30 ngày mà `closedStats` cần, và vẫn giữ nguyên toàn bộ việc đang mở.
+  */
+  const { items } = await collectWorkItems({ ...opts, now, closedSince: opts.closedSince ?? new Date(now.getTime() - CLOSED_WINDOW_DAYS * 24 * 3_600_000) });
   const all = items.filter((i) => i.department === department);
   const open = all.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
   return buildDepartmentQueue(department, all, open, now);
@@ -274,6 +394,7 @@ export function buildDepartmentQueue(department: DepartmentCode, all: WorkItem[]
     blocked: open.filter((i) => i.status === "BLOCKED").length,
     waiting: open.filter((i) => i.status === "WAITING").length,
     completedRecent: all.filter((i) => i.status === "DONE" && i.completedAt !== null && i.completedAt.getTime() >= sevenDaysAgo).length,
+    closed: closedStats(all, now),
     slaOnTime: withSla.length ? onTime.length / withSla.length : null,
     money: sumMoney(open),
     workload,

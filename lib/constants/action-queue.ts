@@ -127,6 +127,13 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
 };
 
 /**
+ * Danh sách CHẠY ĐƯỢC của `CaseType`. Lấy khoá của `CASE_TYPE_LABEL` chứ không gõ lại một mảng:
+ * bảng nhãn là `Record<CaseType, string>` nên `tsc` đã bắt buộc nó phủ đủ union, và danh sách này
+ * thừa hưởng điều đó. Một mảng gõ tay thì thiếu một loại cũng không ai biết.
+ */
+export const CASE_TYPES = Object.keys(CASE_TYPE_LABEL) as CaseType[];
+
+/**
  * KHẢ NĂNG CỨU ĐƯỢC (0–1): hành động bây giờ còn thay đổi được kết quả bao nhiêu.
  * Đây là yếu tố phân biệt hàng đợi việc với danh sách cảnh báo thông thường.
  */

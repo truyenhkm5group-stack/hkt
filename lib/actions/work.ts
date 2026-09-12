@@ -6,6 +6,9 @@ import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
 import { WORK_PRIORITIES, WORK_STATUSES } from "@/lib/constants/work";
+import { DEFAULT_OWNERSHIP_MAP, WORK_OWNERSHIP_KEY } from "@/lib/constants/work-ownership";
+import { DEFAULT_SLA_MAP, SLA_HOURS_MAX, SLA_HOURS_MIN, WORK_SLA_KEY } from "@/lib/constants/work-sla";
+import { getWorkConfig, saveOwnershipOverrides, saveSlaOverrides } from "@/lib/queries/work-config";
 import * as svc from "@/lib/work/service";
 
 /**
@@ -22,7 +25,7 @@ import * as svc from "@/lib/work/service";
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
 function revalidate() {
-  for (const p of ["/work", "/work/department", "/work/all", "/work/performance", "/"]) revalidatePath(p);
+  for (const p of ["/work", "/work/department", "/work/all", "/work/performance", "/work/settings", "/work/review", "/"]) revalidatePath(p);
 }
 
 function actorOf(user: SessionUser): svc.WorkActor {
@@ -275,6 +278,57 @@ export async function removeDepartmentMember(input: unknown): Promise<Result> {
   const r = await svc.removeDepartmentMember(parsed.data.departmentId, parsed.data.userId);
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "DEPARTMENT_MEMBER_REMOVE", entity: "DEPARTMENT", entityId: parsed.data.departmentId, detail: { userId: parsed.data.userId } });
+  revalidate();
+  return { ok: true };
+}
+
+/* ═══════════════════ CẤU HÌNH HẠN XỬ LÝ & PHÒNG BAN CHỊU TRÁCH NHIỆM ═══════════════════ */
+
+/**
+ * LƯU MỘT Ô, KHÔNG LƯU CẢ BẢNG.
+ *
+ * Mỗi lần bấm chỉ gửi MỘT khoá. Gửi cả bảng thì hai người sửa hai ô khác nhau cùng lúc sẽ đè lên
+ * nhau — và ở màn hình này người sửa là trưởng phòng, đúng nhóm hay mở song song nhiều tab.
+ *
+ * `hours === null` nghĩa là CỐ Ý KHÔNG ĐẶT HẠN, khác hẳn `reset: true` nghĩa là TRẢ VỀ MẶC ĐỊNH
+ * của mã. Gộp hai thứ đó lại thì không ai gỡ được một ô đã lỡ đặt sai.
+ */
+export async function setSlaRule(input: unknown): Promise<Result> {
+  const { user, error } = await authorize("work:admin");
+  if (error) return { error };
+  const parsed = z
+    .object({
+      key: z.string().trim().min(2).max(120),
+      hours: z.number().int().min(SLA_HOURS_MIN).max(SLA_HOURS_MAX).nullable(),
+      reset: z.boolean().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: `Hạn phải từ ${SLA_HOURS_MIN} tới ${SLA_HOURS_MAX} giờ, hoặc bỏ trống` };
+  if (!DEFAULT_SLA_MAP[parsed.data.key]) return { error: "Không có loại việc nào mang khoá này" };
+
+  const cfg = await getWorkConfig();
+  const next = { ...cfg.sla };
+  if (parsed.data.reset) delete next[parsed.data.key];
+  else next[parsed.data.key] = parsed.data.hours;
+  await saveSlaOverrides(next);
+  await audit({ userId: user.id, userEmail: user.email, action: "WORK_SLA_SET", entity: "SETTING", entityId: WORK_SLA_KEY, detail: { key: parsed.data.key, hours: parsed.data.hours, reset: parsed.data.reset ?? false } });
+  revalidate();
+  return { ok: true };
+}
+
+export async function setOwnershipRule(input: unknown): Promise<Result> {
+  const { user, error } = await authorize("work:admin");
+  if (error) return { error };
+  const parsed = z.object({ key: z.string().trim().min(2).max(120), department: z.enum(DEPARTMENT_CODES).nullable(), reset: z.boolean().optional() }).safeParse(input);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  if (!DEFAULT_OWNERSHIP_MAP[parsed.data.key]) return { error: "Không có loại việc nào mang khoá này" };
+
+  const cfg = await getWorkConfig();
+  const next = { ...cfg.ownership };
+  if (parsed.data.reset || parsed.data.department === null) delete next[parsed.data.key];
+  else next[parsed.data.key] = parsed.data.department;
+  await saveOwnershipOverrides(next);
+  await audit({ userId: user.id, userEmail: user.email, action: "WORK_OWNERSHIP_SET", entity: "SETTING", entityId: WORK_OWNERSHIP_KEY, detail: { key: parsed.data.key, department: parsed.data.department, reset: parsed.data.reset ?? false } });
   revalidate();
   return { ok: true };
 }

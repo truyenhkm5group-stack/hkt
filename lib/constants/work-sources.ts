@@ -199,6 +199,44 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
   },
 };
 
+/* ═══════════════════ CẢNH BÁO: NGUỒN NÀO SỞ HỮU LOẠI NÀO ═══════════════════ */
+
+/**
+ * Loại cảnh báo được nguồn CHUYÊN BIỆT sở hữu — bỏ khỏi nguồn `ALERT` để một sự việc không sinh
+ * hai dòng. Đây là danh sách duy nhất; thêm một nguồn chuyên biệt thì thêm vào đây.
+ *
+ * Luật gộp: **cùng một gốc Ở CÙNG MỘT ĐỘ MỊN** thì mới là trùng.
+ *
+ * `ADS_ANOMALY` CỐ Ý không nằm trong danh sách dù đã có nguồn `ADS_DECISION`: cảnh báo đó nói về
+ * chi tiêu TOÀN SHOP so với doanh thu, còn `ADS_DECISION` nói về từng chiến dịch. Chi toàn shop
+ * có thể bất thường mà không chiến dịch nào riêng lẻ vượt ngưỡng — bỏ nó đi là mất đúng tín hiệu
+ * mức tổng.
+ */
+export const ALERT_KINDS_OWNED_ELSEWHERE: CaseType[] = [
+  // `cs_cases` là nguồn — cùng độ mịn (một case).
+  "CS_CASE",
+  "CS_BACKLOG",
+  // `shipment_care` là nguồn — cùng độ mịn (một kiện hàng).
+  "DELIVERY_FAILED",
+  "DELIVERY_STALE",
+  "RETURNING",
+  // `getFulfillmentBottleneckQueue` là nguồn — cùng độ mịn (một đơn đứng trước lúc gửi).
+  "ORDER_CONFIRMATION_STALE",
+];
+
+/** Cảnh báo được ĐỔI TÊN NGUỒN (không bỏ): cùng bảng `notifications`, nhưng phòng ban và SLA khác. */
+export const ALERT_KIND_TO_SOURCE: Partial<Record<CaseType, WorkSource>> = {
+  COD_OVERDUE: "COD_EXCEPTION",
+  LOW_STOCK_RISK: "INVENTORY_EXCEPTION",
+  STOCKOUT_RISK: "INVENTORY_EXCEPTION",
+  RETURN_RECEIVED_PENDING_INSPECTION: "RETURN_INSPECTION",
+};
+
+/** Nguồn thật của một loại cảnh báo: nguồn chuyên biệt nếu có, còn lại là `ALERT`. */
+export function sourceOfAlert(type: CaseType): WorkSource {
+  return ALERT_KIND_TO_SOURCE[type] ?? "ALERT";
+}
+
 /** Nguồn mà `work_items` giữ trạng thái. Chỉ những nguồn này được ghi cột `status`. */
 export const WORK_OWNED_SOURCES: WorkSource[] = WORK_SOURCES.filter((s) => WORK_SOURCE_SPEC[s].statusAuthority === "WORK");
 

@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Building2 } from "lucide-react";
 import { WorkList } from "@/components/work/work-list";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
@@ -6,7 +6,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import { MY_WORK_BUCKET_HINT, MY_WORK_BUCKET_LABEL } from "@/lib/constants/work";
 import { formatVND } from "@/lib/format";
-import { getMyWork } from "@/lib/queries/work";
+import { departmentsOfUser, getMyWork } from "@/lib/queries/work";
 
 export const metadata = { title: "Việc của tôi" };
 
@@ -22,8 +22,12 @@ export const metadata = { title: "Việc của tôi" };
  */
 export default async function MyWorkPage() {
   const user = await requirePermission("work:view");
-  const my = await getMyWork({ id: user.id, name: user.name, email: user.email });
+  const [my, phongCuaToi] = await Promise.all([
+    getMyWork({ id: user.id, name: user.name, email: user.email }),
+    departmentsOfUser(user.id),
+  ]);
   const canAct = can(user, "work:manage");
+  const upcoming = my.groups.find((g) => g.bucket === "UPCOMING");
 
   return (
     <div className="space-y-5">
@@ -33,6 +37,26 @@ export default async function MyWorkPage() {
         description={my.total ? `${my.total} việc đang cầm · ${my.overdue} việc quá hạn` : "Không còn việc nào được giao cho bạn."}
         hint="Việc ở đây gom từ mọi hàng đợi của ERP: case CSKH, care vận đơn, kiểm đếm hàng hoàn, dòng tiền chưa phân loại, quyết định quảng cáo, cảnh báo vận hành, và việc quản lý giao tay. Trạng thái nghiệp vụ vẫn thuộc về module gốc — bấm nút ở đây là gọi đúng hành động của module đó, không phải đánh dấu xong."
       />
+
+      {/*
+        CHƯA CÓ PHÒNG BAN THÌ HÀNG ĐỢI TRỐNG — VÀ PHẢI NÓI RÕ VÌ SAO.
+
+        Phòng ban quyết định người này thấy việc nào. Người chưa được xếp phòng mở trang lên chỉ
+        thấy một danh sách rỗng, và một danh sách rỗng trông hệt như "hôm nay hết việc". Đo trên
+        production trước bản này: 1 trong 2 tài khoản đang ở đúng tình trạng đó.
+      */}
+      {phongCuaToi.length === 0 ? (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <Building2 className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">Bạn chưa được xếp vào phòng ban nào</p>
+            <p className="text-xs">
+              Việc của các phòng sẽ không tới tay bạn cho tới khi quản trị viên xếp phòng ở <strong>Công việc → Cấu hình → Nhân sự và phòng ban</strong>.
+              Danh sách trống bên dưới KHÔNG có nghĩa là hôm nay hết việc.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {my.failedSources.length ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -60,8 +84,15 @@ export default async function MyWorkPage() {
         ]}
       />
 
+      {/*
+        NĂM RỔ MỞ SẴN, RỔ THỨ SÁU GẤP LẠI.
+
+        "Sắp tới" là việc hạn còn xa — theo định nghĩa nó KHÔNG phải việc của hôm nay. Mở sẵn nó
+        thì nó đẩy năm rổ thật xuống dưới nếp gấp và cạnh tranh sự chú ý với việc quá hạn. Gấp lại
+        chứ không giấu: số việc vẫn in ở nhãn, một cú bấm là thấy.
+      */}
       {my.groups
-        .filter((g) => g.count > 0)
+        .filter((g) => g.count > 0 && g.bucket !== "UPCOMING")
         .map((g) => (
           <SectionCard
             key={g.bucket}
@@ -69,9 +100,21 @@ export default async function MyWorkPage() {
             description={MY_WORK_BUCKET_HINT[g.bucket]}
             padded={false}
           >
-            <WorkList items={g.items} showDepartment emptyTitle="Không có việc nào" canAct={canAct} />
+            <WorkList items={g.items} compact showDepartment emptyTitle="Không có việc nào" canAct={canAct} />
           </SectionCard>
         ))}
+
+      {upcoming && upcoming.count > 0 ? (
+        <details className="rounded-xl border bg-card">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+            {MY_WORK_BUCKET_LABEL.UPCOMING} · {upcoming.count}
+            <span className="ml-2 text-xs font-normal text-muted-foreground">{MY_WORK_BUCKET_HINT.UPCOMING} — bấm để mở</span>
+          </summary>
+          <div className="border-t">
+            <WorkList items={upcoming.items} compact showDepartment emptyTitle="Không có việc nào" canAct={canAct} />
+          </div>
+        </details>
+      ) : null}
 
       {my.total === 0 ? (
         <SectionCard title="Hàng đợi trống">

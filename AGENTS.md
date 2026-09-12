@@ -99,6 +99,25 @@ deploy dừng, không phải cảnh báo.
 21. **KỲ REVIEW ĐÃ CHỐT LÀ BẤT BIẾN**: `review_cycles.status = 'FINAL'` thì mọi con số đọc từ
     `snapshot`, không truy vấn lại. Sửa công thức tháng sau không được làm đổi số của kỳ đã chốt
     (mục 8.9). Ràng buộc `review_cycles_final_check` không cho chốt mà thiếu ảnh chụp.
+22. **HẠN XỬ LÝ VÀ PHÒNG CHỊU TRÁCH NHIỆM Ở ĐÚNG HAI BẢNG** (`lib/constants/work-sla.ts` +
+    `lib/constants/work-ownership.ts`): khoá dạng `<nguồn>` hoặc `<nguồn>:<loại>`, ghi đè của chủ
+    shop nằm ở `settings` (`work.sla`, `work.ownership`) và đọc qua `getWorkConfig()`. **Mặc định
+    phải LẤY LẠI từ hằng số đang chạy** (`CASE_SLA_HOURS`, `CARE_SLA`, `BOTTLENECK_SLA_HOURS`,
+    `CASE_TEAM`) — gõ lại một con số là mở đường cho hai nơi nói hai số khác nhau. Không hard-code
+    một số giờ hay một phòng ban mới ở bất cứ đâu khác; `applyWorkConfig()` trong
+    `lib/queries/work-adapters.ts` là lượt duy nhất áp chúng lên việc. **Luật sở hữu chỉ trỏ tới
+    PHÒNG BAN, không bao giờ tới một cá nhân**: máy không biết hôm nay ai nghỉ, và một việc mang
+    tên người không làm được nó sẽ biến mất khỏi hàng đợi phòng.
+23. **MẪU OKR / BSC KHÔNG TỰ KÍCH HOẠT** (`lib/constants/okr-templates.ts`,
+    `lib/constants/bsc.ts::DEFAULT_TEMPLATES`): mẫu chỉ chạy khi NGƯỜI bấm; mục tiêu sinh ra ở
+    trạng thái `DRAFT`, và ĐÍCH do người bấm nhập — KR không có đích thì không được tạo. Đơn vị và
+    chiều của ô lấy từ `METRIC_BINDINGS`, không ghi cứng: ghi cứng `UP` làm điểm ĐẢO NGƯỢC với mọi
+    chỉ số càng-thấp-càng-tốt (tỷ lệ hoàn, việc quá hạn, dòng tiền chưa phân loại).
+24. **KHÔNG CHẤM ĐIỂM AI BẰNG THỨ HỌ KHÔNG QUYẾT ĐƯỢC** (`lib/constants/department-performance.ts`):
+    thẻ điểm cá nhân chỉ tính việc THUỘC PHÒNG của người đó, và nguồn nào có kết quả do bên ngoài
+    quyết thì khai `outcomeAttributable: false`. Chỉ số chủ shop muốn mà ERP chưa đọc được ở độ mịn
+    NGƯỜI phải khai `UNAVAILABLE` kèm lý do và hiện ra màn hình — không giấu đi, không thay bằng
+    một truy vấn gần đúng.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

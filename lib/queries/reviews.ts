@@ -1,8 +1,10 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { getScorecard, type Scorecard } from "@/lib/queries/bsc";
 import { listObjectives, type ObjectiveView } from "@/lib/queries/okr";
+import { slaStateOf } from "@/lib/constants/work";
+import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { getDepartmentCockpit, type DepartmentHealth } from "@/lib/queries/work";
 import { getPerformance, type WorkerScorecard } from "@/lib/queries/work-performance";
 import type { Period } from "@/lib/search-params";
@@ -30,8 +32,38 @@ export const REVIEW_KIND_LABEL: Record<ReviewKind, string> = {
   QUARTERLY: "Review quý",
 };
 
-/** Phiên bản logic dựng ảnh chụp. Đổi cấu trúc `ReviewSnapshot` thì TĂNG số này. */
-export const SNAPSHOT_VERSION = 1;
+/**
+ * Phiên bản logic dựng ảnh chụp. Đổi cấu trúc `ReviewSnapshot` thì TĂNG số này.
+ *
+ * v2 thêm `totals` · `bottleneck` · `topIssues` để cuộc họp tuần đọc được trên MỘT màn hình. Ảnh
+ * chụp v1 vẫn đọc được: `normalizeSnapshot` dựng lại `totals` và `bottleneck` từ bảng phòng ban
+ * (dữ liệu v1 đã có đủ), còn `topIssues` để rỗng kèm lời nói rõ — KHÔNG tính lại từ hôm nay, vì
+ * tính lại là sửa ngầm một kỳ đã chốt.
+ */
+export const SNAPSHOT_VERSION = 2;
+
+/** Con số toàn kỳ, cộng từ bảng phòng ban — để dòng đầu cuộc họp không phải tự cộng nhẩm. */
+export type ReviewTotals = {
+  open: number;
+  overdue: number;
+  blocked: number;
+  unassigned: number;
+  moneyAtRisk: number;
+  /** Số việc CHƯA TRA ĐƯỢC tiền. `moneyAtRisk` đứng trên phần còn lại, và người đọc phải biết. */
+  moneyUnknown: number;
+};
+
+/**
+ * NÚT THẮT: phòng đang chặn cả guồng, và VÌ SAO là phòng đó.
+ *
+ * Không chọn theo số việc nhiều nhất — phòng đông việc nhất thường là phòng bận nhất, không phải
+ * phòng kẹt nhất. Chọn theo TỶ LỆ QUÁ HẠN, cùng thước mà `healthOf` đã dùng, để hai chỗ không nói
+ * hai câu khác nhau về cùng một phòng.
+ */
+export type ReviewBottleneck = { department: DepartmentCode; label: string; reason: string; overdue: number; open: number; blocked: number } | null;
+
+/** Việc đáng mang ra họp: gấp nhất, giữ nhiều tiền nhất, và AI đang cầm nó. */
+export type ReviewIssue = { key: string; title: string; department: DepartmentCode; owner: string; moneyAtRisk: number | null; overdue: boolean; url: string; source: string };
 
 export type ReviewSnapshot = {
   version: number;
@@ -44,7 +76,59 @@ export type ReviewSnapshot = {
   people: WorkerScorecard[];
   /** Nguồn không đọc được lúc chụp. Ảnh chụp thiếu mảng nào thì phải nói ra, không im lặng. */
   failedSources: string[];
+  /* ───── v2 ───── */
+  totals: ReviewTotals;
+  bottleneck: ReviewBottleneck;
+  topIssues: ReviewIssue[];
 };
+
+export function totalsOf(departments: DepartmentHealth[]): ReviewTotals {
+  return departments.reduce<ReviewTotals>(
+    (acc, d) => ({
+      open: acc.open + d.open,
+      overdue: acc.overdue + d.overdue,
+      blocked: acc.blocked + d.blocked,
+      unassigned: acc.unassigned + d.unassigned,
+      moneyAtRisk: acc.moneyAtRisk + d.money.atRisk,
+      moneyUnknown: acc.moneyUnknown + d.money.unknown,
+    }),
+    { open: 0, overdue: 0, blocked: 0, unassigned: 0, moneyAtRisk: 0, moneyUnknown: 0 },
+  );
+}
+
+export function bottleneckOf(departments: DepartmentHealth[]): ReviewBottleneck {
+  const ungVien = departments.filter((d) => d.open > 0 && (d.overdue > 0 || d.blocked > 0));
+  if (!ungVien.length) return null;
+  const worst = [...ungVien].sort((a, b) => b.overdue / b.open - a.overdue / a.open || b.blocked - a.blocked)[0];
+  const tyLe = Math.round((worst.overdue / worst.open) * 100);
+  return {
+    department: worst.department,
+    label: worst.label,
+    reason:
+      worst.blocked >= 5
+        ? `${worst.blocked} việc BỊ CHẶN — nút thắt nội bộ, gỡ được ngay trong cuộc họp này`
+        : `${tyLe}% việc của phòng đã quá hạn (${worst.overdue}/${worst.open})`,
+    overdue: worst.overdue,
+    open: worst.open,
+    blocked: worst.blocked,
+  };
+}
+
+/**
+ * Đọc một ảnh chụp bất kỳ phiên bản nào về hình dạng hiện tại.
+ *
+ * Trường v2 thiếu thì DỰNG LẠI TỪ CHÍNH ẢNH CHỤP (bảng phòng ban đã có đủ số), tuyệt đối không
+ * truy vấn lại hôm nay: một kỳ đã chốt mà đọc số của hôm nay là đúng thứ AGENTS.md mục 8.9 cấm.
+ * `topIssues` không dựng lại được từ v1 nên để rỗng — giao diện nói rõ "ảnh chụp đời cũ".
+ */
+export function normalizeSnapshot(raw: ReviewSnapshot): ReviewSnapshot {
+  return {
+    ...raw,
+    totals: raw.totals ?? totalsOf(raw.departments ?? []),
+    bottleneck: raw.bottleneck ?? bottleneckOf(raw.departments ?? []),
+    topIssues: raw.topIssues ?? [],
+  };
+}
 
 export type ReviewView = {
   id: string;
@@ -64,27 +148,60 @@ export type ReviewView = {
   nextActions: string;
   finalizedAt: Date | null;
   finalizedByName: string;
+  /** Kỳ ĐÃ CHỐT gần nhất cùng loại và cùng phạm vi. `null` = chưa có kỳ nào để so. */
+  previous: { period: string; totals: ReviewTotals } | null;
 };
 
 /** Dựng ảnh chụp của một kỳ từ dữ liệu HIỆN TẠI. Chỉ gọi khi kỳ còn `DRAFT` hoặc lúc chốt. */
 export async function buildSnapshot(opts: { from: Date; to: Date; department: DepartmentCode | null; departmentId: string | null; okrPeriod: string }): Promise<ReviewSnapshot> {
   const metricPeriod: Period = { key: "custom", from: opts.from, to: opts.to, label: "Kỳ review", fromKey: null, toKey: null };
-  const [cockpit, objectives, scorecard, people] = await Promise.all([
+  const [cockpit, objectives, scorecard, people, queue] = await Promise.all([
     getDepartmentCockpit(),
     listObjectives({ period: opts.okrPeriod, departmentId: opts.departmentId ?? undefined }, metricPeriod),
     getScorecard({ scope: opts.department ? "DEPARTMENT" : "COMPANY", departmentId: opts.departmentId, period: opts.okrPeriod }, metricPeriod),
     getPerformance({ from: opts.from, to: opts.to, department: opts.department }),
+    collectWorkItems(),
   ]);
+  const departments = opts.department ? cockpit.rows.filter((r) => r.department === opts.department) : cockpit.rows;
+
+  /*
+    TOP ISSUE: VIỆC MANG RA HỌP, KÈM TÊN NGƯỜI.
+
+    Xếp theo ĐIỂM ƯU TIÊN (đã gộp mức nghiêm trọng, tuổi việc, tiền và khả năng cứu được) chứ không
+    theo số tiền: việc giữ nhiều tiền nhưng đã hết cứu được thì mang ra họp cũng không đổi được gì.
+    Năm dòng, vì một cuộc họp tuần không xử lý nổi hơn năm việc — danh sách dài hơn là danh sách
+    không ai làm.
+  */
+  const topIssues: ReviewIssue[] = queue.items
+    .filter((i) => (opts.department ? i.department === opts.department : true))
+    .filter((i) => i.status !== "DONE" && i.status !== "CANCELLED")
+    .filter((i) => slaStateOf(i.slaAt ?? i.dueAt, opts.to) === "BREACHED" || i.priority === "URGENT" || i.status === "BLOCKED")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((i) => ({
+      key: i.key,
+      title: i.title,
+      department: i.department,
+      owner: i.assignee?.name ?? "",
+      moneyAtRisk: i.money.atRisk,
+      overdue: slaStateOf(i.slaAt ?? i.dueAt, opts.to) === "BREACHED",
+      url: i.sourceUrl,
+      source: i.sourceType,
+    }));
+
   return {
     version: SNAPSHOT_VERSION,
     builtAt: new Date().toISOString(),
     periodFrom: opts.from.toISOString(),
     periodTo: opts.to.toISOString(),
-    departments: opts.department ? cockpit.rows.filter((r) => r.department === opts.department) : cockpit.rows,
+    departments,
     objectives,
     scorecard,
     people,
     failedSources: cockpit.failedSources.map((f) => `${f.source}: ${f.error}`),
+    totals: totalsOf(departments),
+    bottleneck: bottleneckOf(departments),
+    topIssues,
   };
 }
 
@@ -102,10 +219,32 @@ export async function getReview(id: string): Promise<ReviewView | null> {
     Đây là toàn bộ lý do bảng này tồn tại. Gọi `buildSnapshot` ở đây cho kỳ `FINAL` là xoá sạch giá
     trị của việc chốt kỳ — và làm nó một cách vô hình.
   */
-  const snapshot =
+  const snapshot = normalizeSnapshot(
     row.status === "FINAL" && row.snapshot
       ? (row.snapshot as ReviewSnapshot)
-      : await buildSnapshot({ from: row.periodStart, to: row.periodEnd, department: deptCode, departmentId: row.departmentId, okrPeriod: row.period });
+      : await buildSnapshot({ from: row.periodStart, to: row.periodEnd, department: deptCode, departmentId: row.departmentId, okrPeriod: row.period }),
+  );
+
+  /*
+    ═══ SO VỚI KỲ TRƯỚC — CON SỐ QUAN TRỌNG NHẤT CỦA MỘT CUỘC HỌP TUẦN ═══
+
+    "38 việc quá hạn" không nói lên điều gì. "38, tuần trước 52" nói rằng phòng đang gỡ được; "38,
+    tuần trước 19" nói rằng đang hỏng. Chỉ so với kỳ CÙNG LOẠI và CÙNG PHẠM VI — so tuần với quý
+    là so hai thứ khác nhau — và chỉ với kỳ ĐÃ CHỐT: một kỳ nháp tính sống, nên "kỳ trước" của nó
+    sẽ đổi mỗi lần mở trang và cái mũi tên tăng/giảm thành vô nghĩa.
+  */
+  const truoc = await db.query.reviewCycles.findFirst({
+    where: and(
+      eq(schema.reviewCycles.kind, row.kind),
+      eq(schema.reviewCycles.status, "FINAL"),
+      row.departmentId ? eq(schema.reviewCycles.departmentId, row.departmentId) : isNull(schema.reviewCycles.departmentId),
+      lt(schema.reviewCycles.periodStart, row.periodStart),
+    ),
+    orderBy: [desc(schema.reviewCycles.periodStart)],
+  });
+  const previous = truoc?.snapshot
+    ? { period: truoc.period, totals: normalizeSnapshot(truoc.snapshot as ReviewSnapshot).totals }
+    : null;
 
   return {
     id: row.id,
@@ -124,6 +263,7 @@ export async function getReview(id: string): Promise<ReviewView | null> {
     nextActions: row.nextActions,
     finalizedAt: row.finalizedAt,
     finalizedByName: finalizedBy?.name ?? "",
+    previous,
   };
 }
 

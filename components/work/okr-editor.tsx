@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,8 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { METRIC_BINDINGS, METRIC_TRUST_LABEL, METRIC_UNIT_LABEL, METRIC_UNITS } from "@/lib/constants/metric-bindings";
-import { KR_CONFIDENCES, KR_CONFIDENCE_LABEL } from "@/lib/constants/okr";
-import { checkinKeyResult, deleteKeyResult, deleteObjective, saveKeyResult } from "@/lib/actions/okr";
+import { KR_CONFIDENCES, KR_CONFIDENCE_LABEL, OKR_STATUS_LABEL, type OkrStatus } from "@/lib/constants/okr";
+import { checkinKeyResult, deleteKeyResult, deleteObjective, saveKeyResult, setObjectiveStatus } from "@/lib/actions/okr";
 
 /**
  * Sửa Key Result ngay trên trang Mục tiêu.
@@ -201,5 +202,48 @@ export function DeleteObjective({ id, title }: { id: string; title: string }) {
     >
       <Trash2 className="size-3.5" />
     </Button>
+  );
+}
+
+/**
+ * ═══════ NHÃN TRẠNG THÁI + NÚT BẬT MỘT MỤC TIÊU NHÁP ═══════
+ *
+ * Mục tiêu dựng từ mẫu ra đời ở trạng thái NHÁP và nằm yên ở đó cho tới khi người phụ trách đọc
+ * lại rồi bấm bật. Không có nút này thì bản nháp là ngõ cụt: người dùng dựng mẫu xong, thấy nó
+ * không vào bảng tổng hợp, và không có gì trên màn hình nói cho họ biết còn thiếu bước nào.
+ */
+export function ObjectiveStatus({ id, status, canManage }: { id: string; status: OkrStatus; canManage: boolean }) {
+  const [pending, start] = useTransition();
+  const router = useRouter();
+
+  const doi = (to: OkrStatus, ok: string) =>
+    start(async () => {
+      const r = await setObjectiveStatus({ id, status: to });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(ok);
+      router.refresh();
+    });
+
+  if (status === "ACTIVE") return null;
+
+  return (
+    <span className="flex items-center gap-1">
+      <Badge variant="secondary" className="text-[11px]">{OKR_STATUS_LABEL[status]}</Badge>
+      {canManage && status === "DRAFT" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={pending}
+          title="Bật thành mục tiêu đang chạy. Từ lúc này nó vào mọi bảng tổng hợp và vào thẻ điểm của người phụ trách."
+          onClick={() => doi("ACTIVE", "Đã bật mục tiêu")}
+        >
+          Bật
+        </Button>
+      ) : null}
+    </span>
   );
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Lock } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { formatDate, formatDateTime, formatVND } from "@/lib/format";
 import { getReview, listReviews, REVIEW_KIND_LABEL, type ReviewKind } from "@/lib/queries/reviews";
+import { StatStrip } from "@/components/stat-tile";
 import { listDepartments } from "@/lib/queries/work";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,30 @@ export const metadata = { title: "Kỳ review" };
  * dựng bằng truy vấn của tháng 11 thì mỗi lần ai đó sửa một công thức, con số tháng 9 âm thầm đổi —
  * và cuộc họp tháng 10 đã diễn ra trên một con số không còn tồn tại.
  */
+
+/**
+ * ═══════ MŨI TÊN SO VỚI KỲ TRƯỚC ═══════
+ *
+ * Hướng TỐT phụ thuộc chỉ số: quá hạn giảm là tốt, việc đóng tăng là tốt. Nên hàm nhận `goodWhen`
+ * thay vì tự đoán — đoán sai thì một cột đỏ rực trông như tin mừng.
+ *
+ * Không có kỳ trước thì KHÔNG vẽ mũi tên nào. Vẽ "0%" khi chưa có gì để so là bịa ra một sự ổn định.
+ */
+function Delta({ now, before, goodWhen }: { now: number; before: number | undefined; goodWhen: "LOWER" | "HIGHER" }) {
+  if (before === undefined) return <span className="text-[11px] text-muted-foreground">chưa có kỳ trước để so</span>;
+  const d = now - before;
+  if (d === 0) return <span className="text-[11px] text-muted-foreground">không đổi so kỳ trước ({before})</span>;
+  const tot = goodWhen === "LOWER" ? d < 0 : d > 0;
+  const Icon = d > 0 ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className={cn("inline-flex items-center gap-0.5 text-[11px] font-medium", tot ? "text-success" : "text-destructive")} title={`Kỳ trước: ${before}`}>
+      <Icon className="size-3" />
+      {d > 0 ? "+" : ""}
+      {d} so kỳ trước
+    </span>
+  );
+}
+
 export default async function ReviewPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("performance:view");
   const raw = await searchParams;
@@ -83,6 +108,96 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
       {current ? (
         <>
+          {/*
+            ═══════ BẢNG HỌP: MỘT MÀN HÌNH, CHÍN CÂU TRẢ LỜI ═══════
+
+            Mục tiêu · thực tế · thay đổi so kỳ trước · nút thắt · quá hạn · tiền · việc nóng nhất
+            kèm người cầm · hành động kỳ tới. Tất cả ở đây, theo đúng thứ tự người ta hỏi trong
+            phòng họp — KHÔNG dựng thêm một dashboard nào khác, vì trang này đã là chỗ đúng.
+          */}
+          <StatStrip
+            columns={4}
+            items={[
+              {
+                label: "Việc đang mở",
+                value: current.snapshot.totals.open,
+                note: current.previous ? `kỳ trước ${current.previous.totals.open}` : "chưa có kỳ trước",
+              },
+              {
+                label: "Quá hạn",
+                value: current.snapshot.totals.overdue,
+                tone: current.snapshot.totals.overdue ? "rose" : "muted",
+                note: current.previous ? `kỳ trước ${current.previous.totals.overdue}` : "chưa có kỳ trước",
+                hint: "Con số một mình không nói gì: 38 việc quá hạn là tin mừng nếu kỳ trước là 52, và là báo động nếu kỳ trước là 19.",
+              },
+              {
+                label: "Bị chặn",
+                value: current.snapshot.totals.blocked,
+                tone: current.snapshot.totals.blocked ? "amber" : "muted",
+                note: current.previous ? `kỳ trước ${current.previous.totals.blocked}` : "chưa có kỳ trước",
+                hint: "Bị chặn ≠ đang chờ bên ngoài. Bị chặn là nút thắt NỘI BỘ — đúng thứ gỡ được ngay trong cuộc họp này.",
+              },
+              {
+                label: "Tiền đang treo",
+                value: current.snapshot.totals.moneyAtRisk ? formatVND(current.snapshot.totals.moneyAtRisk, { compact: true }) : "—",
+                note: current.snapshot.totals.moneyUnknown ? `${current.snapshot.totals.moneyUnknown} việc chưa tra được tiền` : "đã tra được hết",
+                hint: "Chỉ cộng việc TRA ĐƯỢC số tiền. Việc chưa tra được không bị coi là 0đ — số việc đó hiện ngay cạnh để bạn biết tổng này đứng trên bao nhiêu phần.",
+              },
+            ]}
+          />
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <SectionCard title="Nút thắt của kỳ" description="Phòng đang chặn guồng, chọn theo TỶ LỆ quá hạn — không theo số việc nhiều nhất.">
+              {current.snapshot.bottleneck ? (
+                <div className="space-y-1">
+                  <Link href={`/work/department?dept=${current.snapshot.bottleneck.department}`} className="text-sm font-semibold hover:underline">
+                    {current.snapshot.bottleneck.label} <ArrowRight className="inline size-3.5" />
+                  </Link>
+                  <p className="text-sm text-muted-foreground">{current.snapshot.bottleneck.reason}</p>
+                  <p className="text-xs text-muted-foreground">
+                    <Delta now={current.snapshot.totals.overdue} before={current.previous?.totals.overdue} goodWhen="LOWER" /> · quá hạn toàn kỳ
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Không phòng nào đang quá hạn hay bị chặn. Cuộc họp này nói về mục tiêu, không về chữa cháy.</p>
+              )}
+            </SectionCard>
+
+            <SectionCard
+              title="Việc nóng nhất · ai đang cầm"
+              description="Năm dòng, xếp theo điểm ưu tiên — một cuộc họp tuần không xử lý nổi hơn năm việc."
+              padded={false}
+            >
+              {current.snapshot.topIssues.length ? (
+                <ul className="divide-y">
+                  {current.snapshot.topIssues.map((it) => (
+                    <li key={it.key} className="flex items-start justify-between gap-2 px-3 py-2">
+                      <div className="min-w-0">
+                        <Link href={it.url || "/work/all"} className="block truncate text-sm hover:underline" title={it.title}>
+                          {it.title}
+                        </Link>
+                        <p className="text-[11px] text-muted-foreground">
+                          {DEPARTMENT_LABEL[it.department as DepartmentCode] ?? it.department} · {it.owner || "chưa ai nhận"}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        {it.overdue ? <Badge variant="secondary" className="bg-rose-100 text-[10px] text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">quá hạn</Badge> : null}
+                        {/* `null` = CHƯA TRA ĐƯỢC, không phải 0đ. */}
+                        <p className="text-[11px] tabular-nums text-muted-foreground">{it.moneyAtRisk === null ? "chưa tra được" : formatVND(it.moneyAtRisk, { compact: true })}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-3 py-4 text-sm text-muted-foreground">
+                  {current.frozen && current.snapshot.version < 2
+                    ? "Ảnh chụp đời cũ không lưu danh sách này. Không dựng lại từ dữ liệu hôm nay — làm thế là sửa ngầm một kỳ đã chốt."
+                    : "Không việc nào đang quá hạn, gấp hoặc bị chặn."}
+                </p>
+              )}
+            </SectionCard>
+          </div>
+
           <SectionCard
             title={`${REVIEW_KIND_LABEL[current.kind]} · ${current.period} · ${current.departmentName}`}
             description={

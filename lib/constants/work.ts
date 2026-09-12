@@ -205,6 +205,17 @@ export type WorkItem = {
   key: string;
   sourceType: string;
   sourceKey: string;
+  /**
+   * LOẠI VIỆC BÊN TRONG NGUỒN — thứ quyết định hạn xử lý và phòng ban khi một nguồn gom nhiều
+   * loại việc rất khác nhau.
+   *
+   * `ALERT` gom 17 loại cảnh báo có hạn từ 6 tới 168 giờ; `FULFILLMENT_EXCEPTION` gom bốn lý do
+   * tắc mà một trong bốn thuộc phòng khác. Không có trường này thì mọi cấu hình chỉ đặt được ở
+   * mức nguồn, và mức nguồn quá thô để nói đúng bất cứ điều gì về hai nguồn đó.
+   *
+   * `null` = nguồn chỉ có một loại việc (case CSKH, care vận đơn, dòng tiền chưa phân loại).
+   */
+  kind: string | null;
   title: string;
   summary: string;
   department: DepartmentCode;

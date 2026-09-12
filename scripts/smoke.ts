@@ -115,6 +115,15 @@ const ROUTES = [
   "/work/department",
   "/work/all",
   "/work/okr",
+  /*
+    `/work/settings` vào danh sách từ bản vận hành: nó chạy `getReadiness()`, tức là dựng lại TOÀN
+    BỘ phép chiếu một lần nữa để đếm lỗ hổng khai báo. Đây là trang cấu hình nên chậm vài trăm mili
+    giây là chấp nhận được — nhưng nếu nó đổ thì admin mất đúng màn hình để xếp phòng ban cho nhân
+    viên, và không có đường nào khác làm việc đó.
+  */
+  "/work/settings",
+  "/work/performance",
+  "/work/review",
 ];
 
 /**
