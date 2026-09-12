@@ -32,6 +32,7 @@ import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
 import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
+import { testFinanceTruth } from "./finance-truth.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -1386,6 +1387,9 @@ async function main() {
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
   await testFulfillmentBottleneck(db);
+  // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
+  // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
+  await testFinanceTruth(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

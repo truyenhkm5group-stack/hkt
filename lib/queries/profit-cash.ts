@@ -67,7 +67,11 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
         net: sql<number>`coalesce(sum(${b.totalAmount}), 0)`,
         codGross: sql<number>`coalesce(sum(case when ${b.codGross} > 0 then ${b.codGross} else ${b.totalAmount} end), 0)`,
         feeTotal: sql<number>`coalesce(sum(${b.feeTotal}), 0)`,
-        shipmentsLinked: sql<number>`coalesce(sum((select count(*) from shipments sh where sh.cod_batch_id = ${b.id})), 0)`,
+        // `"cod_batches"."id"` viết nguyên, KHÔNG `${b.id}`: trong DANH SÁCH CỘT drizzle dựng cột
+        // không kèm tên bảng, nên `${b.id}` ra chữ `"id"` và bám vào `sh.id` của chính truy vấn con
+        // — điều kiện thành `sh.cod_batch_id = sh.id`, luôn sai, và số vận đơn đã ghép LUÔN bằng 0
+        // mà không có lỗi nào. Xem khối chú thích trong lib/queries/finance-ledger.ts.
+        shipmentsLinked: sql<number>`coalesce(sum((select count(*) from shipments sh where sh.cod_batch_id = "cod_batches"."id")), 0)`,
       })
       .from(b)
       .where(between(b.receivedAt, period.from, period.to)),
