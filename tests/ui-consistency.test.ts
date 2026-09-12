@@ -184,6 +184,7 @@ export function testNavigationCoverage() {
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
     // Work OS: MỘT mục sidebar (`/work`), năm góc nhìn là tab bên trong `app/(dashboard)/work/tabs.tsx`.
     // Sáu mục menu cho một bàn làm việc sẽ bắt người dùng chọn góc nhìn trước khi nhìn thấy gì.
+    "/work/today": "tab 'Hôm nay' của bàn làm việc /work — màn hình sáng của trưởng phòng",
     "/work/department": "tab 'Phòng ban' của bàn làm việc /work",
     "/work/all": "tab 'Tất cả công việc' của bàn làm việc /work",
     "/work/okr": "tab 'Mục tiêu' của bàn làm việc /work",

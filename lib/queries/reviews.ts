@@ -35,12 +35,16 @@ export const REVIEW_KIND_LABEL: Record<ReviewKind, string> = {
 /**
  * Phiên bản logic dựng ảnh chụp. Đổi cấu trúc `ReviewSnapshot` thì TĂNG số này.
  *
- * v2 thêm `totals` · `bottleneck` · `topIssues` để cuộc họp tuần đọc được trên MỘT màn hình. Ảnh
- * chụp v1 vẫn đọc được: `normalizeSnapshot` dựng lại `totals` và `bottleneck` từ bảng phòng ban
- * (dữ liệu v1 đã có đủ), còn `topIssues` để rỗng kèm lời nói rõ — KHÔNG tính lại từ hôm nay, vì
- * tính lại là sửa ngầm một kỳ đã chốt.
+ * v2 thêm `totals` · `bottleneck` · `topIssues` để cuộc họp tuần đọc được trên MỘT màn hình.
+ * v3 thêm `scoreboard` (đích → thực tế → chênh, kèm người chịu trách nhiệm) và `nextActions`
+ * (việc kỳ tới, suy từ nút thắt và việc nóng — đề xuất, người chủ trì vẫn sửa được).
+ *
+ * Ảnh chụp đời cũ vẫn đọc được: `normalizeSnapshot` dựng lại phần thiếu TỪ CHÍNH ẢNH CHỤP khi dữ
+ * liệu trong đó đủ (v1 có bảng phòng ban nên dựng lại được `totals`/`bottleneck`; v2 có
+ * `objectives` nên dựng lại được `scoreboard`), và để rỗng khi không đủ — KHÔNG tính lại từ hôm
+ * nay, vì tính lại là sửa ngầm một kỳ đã chốt.
  */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 /** Con số toàn kỳ, cộng từ bảng phòng ban — để dòng đầu cuộc họp không phải tự cộng nhẩm. */
 export type ReviewTotals = {
@@ -65,6 +69,32 @@ export type ReviewBottleneck = { department: DepartmentCode; label: string; reas
 /** Việc đáng mang ra họp: gấp nhất, giữ nhiều tiền nhất, và AI đang cầm nó. */
 export type ReviewIssue = { key: string; title: string; department: DepartmentCode; owner: string; moneyAtRisk: number | null; overdue: boolean; url: string; source: string };
 
+/**
+ * ĐÍCH → THỰC TẾ → CHÊNH, MỘT DÒNG MỖI KEY RESULT.
+ *
+ * `delta` là khoảng cách tới đích tính theo ĐƠN VỊ CỦA CHÍNH CHỈ SỐ, không phải phần trăm: "còn
+ * thiếu 12 triệu" hành động được, "đạt 78%" thì không. Dấu đã tính theo chiều: với chỉ số
+ * càng-thấp-càng-tốt, `delta` âm nghĩa là đang tốt hơn đích.
+ *
+ * `actual = null` là CHƯA ĐO ĐƯỢC, và khi đó `delta` cũng `null` — không suy ra 0.
+ */
+export type ScoreboardRow = {
+  objective: string;
+  keyResult: string;
+  owner: string;
+  department: string;
+  target: number;
+  actual: number | null;
+  delta: number | null;
+  progress: number | null;
+  unit: string;
+  direction: "UP" | "DOWN";
+  trust: string;
+};
+
+/** Việc kỳ tới — ĐỀ XUẤT sinh từ số liệu, không phải quyết định. Người chủ trì sửa được ở ô biên bản. */
+export type SuggestedAction = { text: string; owner: string; why: string };
+
 export type ReviewSnapshot = {
   version: number;
   builtAt: string;
@@ -80,7 +110,88 @@ export type ReviewSnapshot = {
   totals: ReviewTotals;
   bottleneck: ReviewBottleneck;
   topIssues: ReviewIssue[];
+  /* ───── v3 ───── */
+  scoreboard: ScoreboardRow[];
+  nextActions: SuggestedAction[];
 };
+
+/** Bảng đích/thực tế của kỳ, dựng từ chính các Objective ĐANG CHẠY của kỳ đó. */
+export function scoreboardOf(objectives: ObjectiveView[]): ScoreboardRow[] {
+  const ra: ScoreboardRow[] = [];
+  for (const o of objectives) {
+    // Mục tiêu NHÁP không vào bảng họp: nó chưa được ai bật, nên chưa phải cam kết của kỳ này.
+    if (o.status !== "ACTIVE" && o.status !== "CLOSED") continue;
+    for (const kr of o.keyResults) {
+      const actual = kr.current;
+      ra.push({
+        objective: o.title,
+        keyResult: kr.title,
+        owner: kr.ownerName || o.ownerName || o.departmentName || "chưa có người",
+        department: o.departmentName || "Toàn shop",
+        target: kr.target,
+        actual,
+        // Chiều đã tính vào dấu: số DƯƠNG luôn nghĩa là "còn thiếu ngần này mới tới đích".
+        delta: actual === null ? null : Math.round((kr.direction === "UP" ? kr.target - actual : actual - kr.target) * 100) / 100,
+        progress: kr.progress === null ? null : Math.round(kr.progress),
+        unit: kr.unit,
+        direction: kr.direction,
+        trust: kr.trust,
+      });
+    }
+  }
+  return ra;
+}
+
+/**
+ * VIỆC KỲ TỚI — SUY TỪ SỐ, KHÔNG PHẢI TỪ MẪU CÂU.
+ *
+ * Mỗi đề xuất phải trỏ tới một con số CỤ THỂ đang hỏng và một người CÓ THẬT. Một câu chung chung
+ * ("cải thiện tỷ lệ giao thành công") không phải việc — nó là điều ai cũng đã biết, và nó làm
+ * biên bản họp dài ra mà không ai làm gì.
+ *
+ * Đây là ĐỀ XUẤT: ô "Việc tiếp theo" của biên bản vẫn do người chủ trì gõ, và cái họ gõ mới là
+ * cái được chốt.
+ */
+export function suggestActions(snapshot: Pick<ReviewSnapshot, "bottleneck" | "topIssues" | "scoreboard" | "totals">): SuggestedAction[] {
+  const ra: SuggestedAction[] = [];
+
+  if (snapshot.bottleneck) {
+    ra.push({
+      text: `Gỡ nút thắt ở ${snapshot.bottleneck.label}: ${snapshot.bottleneck.overdue}/${snapshot.bottleneck.open} việc đã quá hạn`,
+      owner: snapshot.bottleneck.label,
+      why: snapshot.bottleneck.reason,
+    });
+  }
+
+  // KR chệch xa nhất — tính theo PHẦN TRĂM tiến độ để so được giữa các đơn vị khác nhau.
+  const lech = snapshot.scoreboard.filter((r) => r.progress !== null && r.progress < 70).sort((a, b) => (a.progress ?? 0) - (b.progress ?? 0))[0];
+  if (lech) {
+    ra.push({
+      text: `${lech.keyResult}: mới ${lech.progress}% đích${lech.delta !== null && lech.delta > 0 ? `, còn thiếu ${lech.delta}` : ""}`,
+      owner: lech.owner,
+      why: `Mục tiêu "${lech.objective}" — đây là Key Result chệch xa nhất trong kỳ`,
+    });
+  }
+
+  const chan = snapshot.topIssues.filter((i) => !i.owner);
+  if (chan.length) {
+    ra.push({
+      text: `Giao người cho ${chan.length} việc nóng chưa ai cầm`,
+      owner: "Trưởng phòng liên quan",
+      why: "Việc nóng không có chủ thì tuần sau vẫn nằm đó — và vẫn là việc nóng",
+    });
+  }
+
+  if (snapshot.totals.blocked > 0) {
+    ra.push({
+      text: `Xử lý ${snapshot.totals.blocked} việc đang bị chặn`,
+      owner: "Ban điều hành",
+      why: "Bị chặn là nút thắt NỘI BỘ — không ai ngoài shop gỡ hộ, và nó không tự hết",
+    });
+  }
+
+  return ra.slice(0, 5);
+}
 
 export function totalsOf(departments: DepartmentHealth[]): ReviewTotals {
   return departments.reduce<ReviewTotals>(
@@ -122,11 +233,18 @@ export function bottleneckOf(departments: DepartmentHealth[]): ReviewBottleneck 
  * `topIssues` không dựng lại được từ v1 nên để rỗng — giao diện nói rõ "ảnh chụp đời cũ".
  */
 export function normalizeSnapshot(raw: ReviewSnapshot): ReviewSnapshot {
+  const totals = raw.totals ?? totalsOf(raw.departments ?? []);
+  const bottleneck = raw.bottleneck ?? bottleneckOf(raw.departments ?? []);
+  const topIssues = raw.topIssues ?? [];
+  // `scoreboard` dựng lại được từ `objectives` mà mọi phiên bản ảnh chụp đều có.
+  const scoreboard = raw.scoreboard ?? scoreboardOf(raw.objectives ?? []);
   return {
     ...raw,
-    totals: raw.totals ?? totalsOf(raw.departments ?? []),
-    bottleneck: raw.bottleneck ?? bottleneckOf(raw.departments ?? []),
-    topIssues: raw.topIssues ?? [],
+    totals,
+    bottleneck,
+    topIssues,
+    scoreboard,
+    nextActions: raw.nextActions ?? suggestActions({ totals, bottleneck, topIssues, scoreboard }),
   };
 }
 
@@ -202,6 +320,8 @@ export async function buildSnapshot(opts: { from: Date; to: Date; department: De
     totals: totalsOf(departments),
     bottleneck: bottleneckOf(departments),
     topIssues,
+    scoreboard: scoreboardOf(objectives),
+    nextActions: suggestActions({ totals: totalsOf(departments), bottleneck: bottleneckOf(departments), topIssues, scoreboard: scoreboardOf(objectives) }),
   };
 }
 

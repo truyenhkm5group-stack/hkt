@@ -235,6 +235,76 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
             </div>
           </SectionCard>
 
+          {/*
+            ═══ ĐÍCH → THỰC TẾ → CHÊNH → NGƯỜI ═══
+
+            `delta` tính theo ĐƠN VỊ CỦA CHÍNH CHỈ SỐ chứ không theo phần trăm: "còn thiếu 12
+            triệu" hành động được, "đạt 78%" thì không. Dấu đã tính theo chiều — số dương luôn
+            nghĩa là còn thiếu ngần đó mới tới đích, kể cả với chỉ số càng-thấp-càng-tốt.
+          */}
+          {current.snapshot.scoreboard.length ? (
+            <SectionCard
+              title="Đích và thực tế của kỳ"
+              description="Một dòng mỗi Key Result đang chạy, kèm người chịu trách nhiệm. Mục tiêu còn ở trạng thái Nháp không vào bảng này — chưa ai bật thì chưa phải cam kết của kỳ."
+              padded={false}
+            >
+              <div className="overflow-x-auto">
+                <Table className="min-w-[840px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Key Result</TableHead>
+                      <TableHead className="w-[150px]">Người chịu trách nhiệm</TableHead>
+                      <TableHead className="w-[110px] text-right">Đích</TableHead>
+                      <TableHead className="w-[110px] text-right">Thực tế</TableHead>
+                      <TableHead className="w-[130px] text-right">Còn thiếu</TableHead>
+                      <TableHead className="w-[100px] text-right">Tiến độ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {current.snapshot.scoreboard.map((r, i) => (
+                      <TableRow key={`${r.keyResult}-${i}`}>
+                        <TableCell>
+                          <p className="text-sm font-medium">{r.keyResult}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {r.objective}
+                            {r.trust !== "MEASURED" ? ` · ${r.trust === "MANUAL" ? "nhập tay" : "ước tính"}` : ""}
+                          </p>
+                        </TableCell>
+                        <TableCell className="text-sm">{r.owner}</TableCell>
+                        <TableCell className="text-right tabular-nums">{r.target.toLocaleString("vi-VN")}</TableCell>
+                        {/* `null` = CHƯA ĐO ĐƯỢC, không phải 0. */}
+                        <TableCell className="text-right tabular-nums">{r.actual === null ? <span className="text-xs text-muted-foreground">chưa đo được</span> : r.actual.toLocaleString("vi-VN")}</TableCell>
+                        <TableCell className={cn("text-right tabular-nums", r.delta !== null && r.delta > 0 && "font-semibold text-destructive")}>
+                          {r.delta === null ? "—" : r.delta > 0 ? r.delta.toLocaleString("vi-VN") : <span className="text-success">đã vượt đích</span>}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{r.progress === null ? "—" : `${r.progress}%`}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          ) : null}
+
+          {current.snapshot.nextActions.length ? (
+            <SectionCard
+              title="Việc kỳ tới · đề xuất từ số liệu"
+              description="Mỗi dòng trỏ tới một con số cụ thể đang hỏng và một người có thật. Đây là ĐỀ XUẤT — cái được chốt là cái bạn gõ ở ô “Việc tiếp theo” bên dưới."
+              padded={false}
+            >
+              <ul className="divide-y">
+                {current.snapshot.nextActions.map((a, i) => (
+                  <li key={`${a.text}-${i}`} className="px-3 py-2">
+                    <p className="text-sm font-medium">{a.text}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.owner} — {a.why}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          ) : null}
+
           {current.snapshot.objectives.length ? (
             <SectionCard title="Mục tiêu trong kỳ" padded={false}>
               <ul className="divide-y">

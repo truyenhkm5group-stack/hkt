@@ -37,6 +37,7 @@ import { testFinancialTruth } from "./financial-truth.test";
 import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
+import { testWorkforce } from "./workforce.test";
 import { testDeployScript } from "./deploy-script.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
@@ -1413,6 +1414,7 @@ async function main() {
     gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
   */
   await testWorkOs(db);
+  await testWorkforce(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

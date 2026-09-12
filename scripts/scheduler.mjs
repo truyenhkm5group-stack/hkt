@@ -38,6 +38,16 @@ const JOBS = [
     nhiên (recurrence_id, occurrence_key) chặn ở CSDL.
   */
   { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
+  /*
+    LEO THANG SLA — 30 phút/lần, và nó là job ĐỌC.
+
+    Nó không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc, xem
+    `lib/work/escalation.ts`) và không tạo cảnh báo nào. Việc duy nhất nó làm có hậu quả ra bên
+    ngoài là gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ chưa ai nhận — và sổ chống
+    gửi lại giới hạn đúng một tin mỗi phòng mỗi ngày. Chạy dày hơn cũng không gửi thêm tin nào;
+    30 phút chỉ để tin đầu ngày tới sớm.
+  */
+  { job: "work-escalation", every: minutes("WORK_ESCALATION_EVERY_MINUTES", 30), offset: 11 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới

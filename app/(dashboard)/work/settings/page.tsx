@@ -7,13 +7,19 @@ import { SectionCard } from "@/components/ui-bits";
 import { DepartmentsPanel, RecurrencePanel } from "@/app/(dashboard)/work/settings/panels";
 import { PeoplePanel } from "@/app/(dashboard)/work/settings/people-panel";
 import { WorkRulesPanel, type RuleRow } from "@/app/(dashboard)/work/settings/rules-panel";
+import { StaffingPanel, type StaffRow } from "@/app/(dashboard)/work/settings/staffing-panel";
+import { WeightsPanel } from "@/app/(dashboard)/work/settings/weights-panel";
 import { requirePermission } from "@/lib/auth/session";
 import { getDb, schema } from "@/db";
 import { DEFAULT_OWNERSHIP_MAP } from "@/lib/constants/work-ownership";
 import { effectiveSlaRules } from "@/lib/constants/work-sla";
 import { assignableMembers, listDepartmentMembers, listDepartments, listOrgPeople } from "@/lib/queries/work";
-import { getWorkConfig } from "@/lib/queries/work-config";
+import { getScoreWeights, getWorkConfig } from "@/lib/queries/work-config";
 import { getReadiness } from "@/lib/queries/work-readiness";
+import { collectWorkItems } from "@/lib/queries/work-adapters";
+import { buildCapacity, getStaffing } from "@/lib/queries/workforce";
+import { DEFAULT_WIP_LIMIT } from "@/lib/constants/workforce";
+import { WORK_SOURCES } from "@/lib/constants/work-sources";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { asc } from "drizzle-orm";
@@ -30,14 +36,31 @@ export const metadata = { title: "Cấu hình công việc" };
 export default async function WorkSettingsPage() {
   await requirePermission("work:admin");
   const db = await getDb();
-  const [departments, members, people, cfg, readiness, recurrences] = await Promise.all([
+  const now = new Date();
+  const [departments, members, people, cfg, readiness, staffing, queue, weights, recurrences] = await Promise.all([
     listDepartments(true),
     assignableMembers(),
     listOrgPeople(),
     getWorkConfig(),
-    getReadiness(),
+    getReadiness(now),
+    getStaffing(),
+    collectWorkItems({ now }),
+    getScoreWeights(),
     db.select().from(schema.workRecurrences).orderBy(asc(schema.workRecurrences.title)),
   ]);
+  const openItems = queue.items.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
+  const capacity = buildCapacity(people, openItems, staffing, now);
+  const staffRows: StaffRow[] = capacity.map((c) => ({
+    userId: c.userId,
+    name: c.name,
+    email: c.email,
+    departments: c.departments,
+    load: c.load,
+    limit: c.limit,
+    limitIsOwn: typeof staffing.userWip[c.userId] === "number",
+    skills: c.skills,
+    away: c.away,
+  }));
   const membersByDept = await Promise.all(departments.map(async (d) => ({ id: d.id, members: await listDepartmentMembers(d.id) })));
 
   /*
@@ -200,12 +223,35 @@ export default async function WorkSettingsPage() {
       </SectionCard>
 
       <SectionCard
+        title="Sức chứa và phân việc"
+        description="Một người cầm được bao nhiêu việc, ai làm loại việc gì, ai đang nghỉ — ba thứ máy phân việc cần mà CSDL nghiệp vụ không biết."
+        hint={`Trần mặc định ${DEFAULT_WIP_LIMIT} việc là một con số KHAI BÁO, không phải số đo: hàng đợi chưa chạy đủ lâu để đo được. Nó tồn tại để khi hết chỗ thì máy phân việc DỪNG và báo thiếu người, thay vì nhồi cho hết. Phân việc tự động mặc định TẮT ở mọi phòng — nút bấm tay luôn dùng được và luôn cho xem trước. Leo thang SLA mặc định BẬT vì nó chỉ đổi thứ tự đọc, không đổi chủ của việc nào.`}
+        padded={false}
+      >
+        <StaffingPanel
+          rows={staffRows}
+          departmentWip={staffing.departmentWip}
+          autoAssign={staffing.autoAssign}
+          escalationOff={staffing.escalationOff}
+          sources={[...WORK_SOURCES]}
+        />
+      </SectionCard>
+
+      <SectionCard
         title="Luật việc · ai làm và trong bao lâu"
         description="Hạn xử lý và phòng chịu trách nhiệm của từng loại việc. Sửa ở đây có hiệu lực ngay, không cần deploy."
         hint="Con số mặc định được lấy lại từ chính hằng số mà các module đang chạy (hàng đợi cần xử lý, care vận đơn, nút thắt kho), không gõ lại — nên khi chưa ai sửa thì mọi báo cáo giữ nguyên số cũ. Bỏ trống ô hạn nghĩa là CỐ Ý không đặt hạn: loại việc đó không sinh ra “quá hạn”, khác hẳn với 0 giờ."
         padded={false}
       >
         <WorkRulesPanel rows={rules} />
+      </SectionCard>
+
+      <SectionCard
+        title="Trọng số điểm tổng"
+        description="Bốn ô, tất cả bắt đầu rỗng. Rỗng hết = màn hình Hiệu suất KHÔNG có cột điểm tổng — và đó là trạng thái mặc định lâu dài."
+        hint="Sáu trục của thẻ điểm nói về sáu thứ khác nhau. Gộp chúng thành một số chỉ có nghĩa khi có người CHỊU TRÁCH NHIỆM chọn tỉ lệ. Ghi sẵn một bộ mặc định là lén quyết định thay chủ shop, rồi ba tháng sau không ai nhớ ai chọn các con số đó."
+      >
+        <WeightsPanel weights={weights} />
       </SectionCard>
 
       <SectionCard title="Phòng ban" description="Thêm phòng, đổi trưởng phòng, ngừng dùng một phòng." padded={false}>

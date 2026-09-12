@@ -118,6 +118,24 @@ deploy dừng, không phải cảnh báo.
     quyết thì khai `outcomeAttributable: false`. Chỉ số chủ shop muốn mà ERP chưa đọc được ở độ mịn
     NGƯỜI phải khai `UNAVAILABLE` kèm lý do và hiện ra màn hình — không giấu đi, không thay bằng
     một truy vấn gần đúng.
+25. **MÁY PHÂN VIỆC KHÔNG BAO GIỜ NHỒI QUÁ TRẦN** (`lib/work/distribution.ts`): hàm dựng kế hoạch
+    là hàm THUẦN (không đọc/ghi CSDL) và mặc định CHẠY THỬ — `apply: true` mới ghi. Hết người còn
+    chỗ thì việc còn lại NẰM LẠI hàng đợi phòng kèm lý do (`NO_CANDIDATE` · `NO_CAPACITY` ·
+    `NO_SKILL` · `ALL_AWAY`) và lối ra; tuyệt đối không cắt bớt im lặng. Kế hoạch phải ỔN ĐỊNH
+    (chạy hai lần ra cùng kết quả) và phải chiếm chỗ ngay trong bản nháp, nếu không nó dồn hết cho
+    người rảnh nhất lúc bắt đầu. Máy KHÔNG lấy việc khỏi tay người đang cầm — đó là `reassignWork`,
+    do người quyết. Phân việc tự động mặc định TẮT ở mọi phòng.
+26. **LEO THANG SLA TÍNH LÚC ĐỌC, KHÔNG GHI VÀO CSDL** (`lib/work/escalation.ts`): mức leo thang
+    là hàm của thời gian và cái hạn, nên nó luôn đúng tới từng giây, tốn 0 dòng `work_items`, và
+    KHÔNG BAO GIỜ ghi đè mức ưu tiên người đặt tay — `effectivePriority` chỉ NÂNG, không bao giờ
+    hạ. Phần "tự báo" là MỘT tin cho mỗi phòng mỗi NGÀY, ngưỡng `STALE` (vỡ hạn > 24 giờ **và**
+    chưa ai cầm) chứ không phải `BREACH`; không tạo một dòng `notifications` cho mỗi việc, vì cảnh
+    báo lại là một việc và hàng đợi sẽ tự nhân bản.
+27. **ĐIỂM TỔNG NHÂN VIÊN CHỈ TỒN TẠI KHI CHỦ SHOP KHAI TRỌNG SỐ** (`work.score-weights`): không
+    có bộ mặc định, và không được thêm. Khi có điểm thì ĐỘ PHỦ luôn đứng cạnh. Chỉ số mà bên ngoài
+    đồng quyết định (ĐVVC giao được hay không, hàng hỏng trên đường về) phải mang cờ `shared` và
+    hiện nhãn "kết quả chung" — đọc làm bối cảnh, không phải điểm chấm người.
+
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

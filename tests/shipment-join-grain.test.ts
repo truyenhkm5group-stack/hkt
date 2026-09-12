@@ -46,6 +46,16 @@ const MIEN_TRU: Record<string, string> = {
   // lần gửi thứ hai của cùng một đơn). Nối orders chỉ để lấy tên / SĐT khách, không cộng tiền theo đơn.
   "lib/queries/care-workbench.ts": "grain là KIỆN CẦN CARE — lần gửi thứ hai cũng là một kiện phải gọi; nối orders chỉ lấy tên/SĐT",
   "lib/queries/care-report.ts": "grain là KIỆN giao hụt / kiện có can thiệp; kết cục đọc theo SHIPMENT_DELIVERED của chính kiện đó",
+  /*
+    Hiệu suất giao vận đo theo KIỆN NGƯỜI ĐÓ ĐÃ CARE, và nguồn của nó là `care_case_events` —
+    mỗi sự kiện trỏ tới đúng một `shipment_id`. Nối `shipments` là tra chính kiện đó chứ không
+    phải mở rộng từ đơn, nên không có chỗ nào để nhân lên. Kết quả đơn cũng nối theo
+    `canonical_order_outcome.shipment_id` (đúng độ mịn của bảng đó), không nối theo `order_id`.
+
+    Và KHÔNG được thêm `PRIMARY_ATTEMPT` ở đây: lần gửi thứ hai của một đơn là một kiện có thật
+    mà người care đã gọi điện, đã gửi yêu cầu ĐVVC. Lọc nó đi là xoá công của họ.
+  */
+  "lib/queries/dept-performance.ts": "grain là KIỆN người đó đã care (nguồn là care_case_events, mỗi sự kiện một shipment_id); kết quả đơn nối theo shipment_id đúng độ mịn",
 };
 
 /** Nối `orders → shipments` ở mọi cách viết đang dùng trong kho (Drizzle builder và SQL thô). */

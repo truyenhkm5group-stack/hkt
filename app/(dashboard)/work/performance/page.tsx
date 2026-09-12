@@ -7,7 +7,10 @@ import { DEPT_PERF } from "@/lib/constants/department-performance";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode } from "@/lib/constants/departments";
 import { formatVND } from "@/lib/format";
 import { departmentsOfUser } from "@/lib/queries/work";
-import { getPerformance, type ScoreAxis } from "@/lib/queries/work-performance";
+import { combineScore, getPerformance, type ScoreAxis } from "@/lib/queries/work-performance";
+import { getDeptPerformance, type MetricValue } from "@/lib/queries/dept-performance";
+import { getScoreWeights, SCORE_AXIS_LABEL } from "@/lib/queries/work-config";
+import { listOrgPeople } from "@/lib/queries/work";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +58,18 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
   const from = period.from ?? new Date(Date.now() - 30 * 24 * 3_600_000);
   const to = period.to ?? new Date();
-  const rows = await getPerformance({ from, to, department });
+  const [rows, weights, orgPeople] = await Promise.all([getPerformance({ from, to, department }), getScoreWeights(), listOrgPeople()]);
+
+  /*
+    CHỈ SỐ RIÊNG CỦA PHÒNG chỉ tính khi ĐANG XEM MỘT PHÒNG. Ở góc nhìn toàn shop chúng vô nghĩa:
+    "đóng ca care trong hạn" không nói gì về người kho, và xếp bảy phòng cạnh nhau trong một bảng
+    thì mỗi cột rỗng năm phần sáu.
+  */
+  const deptPeople = department ? orgPeople.filter((p) => p.departments.some((d) => d.code === department)) : [];
+  const deptPerf = department ? await getDeptPerformance({ department, from, to, people: deptPeople.map((p) => ({ id: p.id, name: p.name, email: p.email })) }) : null;
+
+  // Điểm tổng CHỈ hiện khi chủ shop đã tự khai trọng số — xem `SCORE_WEIGHTS_KEY`.
+  const hasWeights = Object.keys(weights).length > 0;
 
   return (
     <div className="space-y-5">
@@ -80,6 +94,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                   <TableHead className="w-[130px]">Thời gian xử lý</TableHead>
                   <TableHead className="w-[110px]">OKR</TableHead>
                   <TableHead className="w-[130px]">Tiền cứu được</TableHead>
+                  {hasWeights ? <TableHead className="w-[110px]">Điểm tổng</TableHead> : null}
                   <TableHead className="w-[150px] text-right">Đang cầm</TableHead>
                 </TableRow>
               </TableHeader>
@@ -125,6 +140,21 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                         <span className="text-xs text-muted-foreground" title="Chưa ca nào đóng trong kỳ có số tiền ĐO ĐƯỢC từ chứng từ">chưa đo được</span>
                       )}
                     </TableCell>
+                    {hasWeights ? (
+                      <TableCell>
+                        {(() => {
+                          const c = combineScore(r, weights);
+                          if (c.score === null) return <span className="text-xs text-muted-foreground">chưa đo được</span>;
+                          return (
+                            <span className="whitespace-nowrap tabular-nums" title={`Gộp từ ${Object.entries(weights).map(([k, v]) => `${SCORE_AXIS_LABEL[k as keyof typeof SCORE_AXIS_LABEL]} ×${v}`).join(" · ")}`}>
+                              <span className={cn("font-medium", c.score >= 90 ? "text-success" : c.score < 60 ? "text-destructive" : "")}>{c.score}</span>
+                              {/* ĐỘ PHỦ luôn đi cùng điểm: gộp 2/4 trục rồi gọi là điểm tổng thì con số đó nói về 50% sự thật. */}
+                              <span className="ml-1 text-[11px] text-muted-foreground">phủ {Math.round(c.coverage * 100)}%</span>
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
+                    ) : null}
                     <TableCell className="text-right">
                       <span className="tabular-nums">{r.openNow}</span>
                       {r.overdueNow ? <Badge variant="secondary" className="ml-1.5 bg-rose-100 text-[11px] text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">{r.overdueNow} quá hạn</Badge> : null}
@@ -154,6 +184,15 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           />
         )}
       </SectionCard>
+
+      {deptPerf ? <DeptMetricCards perf={deptPerf} /> : null}
+
+      {!hasWeights ? (
+        <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Bảng này CỐ Ý không có cột điểm tổng. Muốn có một con số duy nhất thì chủ shop phải tự khai trọng số cho từng trục ở{" "}
+          <strong>Cấu hình → Trọng số điểm tổng</strong> — không có bộ mặc định nào, vì một bộ trọng số mặc định sẽ được đọc như thể nó có căn cứ.
+        </p>
+      ) : null}
 
       {/*
         MỖI PHÒNG ĐO BẰNG THỨ HỌ QUYẾT ĐƯỢC — VÀ NÓI THẲNG CÁI GÌ CHƯA ĐO ĐƯỢC.
@@ -211,5 +250,109 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         </ul>
       </SectionCard>
     </div>
+  );
+}
+
+/**
+ * ═══════ CHỈ SỐ RIÊNG CỦA PHÒNG — ĐỌC THẲNG TỪ CHỨNG TỪ ═══════
+ *
+ * Mỗi ô mang theo MẪU SỐ và CĂN CỨ. Ô có cờ "kết quả chung" là ô mà bên ngoài đồng quyết định
+ * (ĐVVC giao được hay không, hàng có hỏng trên đường về không) — đọc làm bối cảnh, không phải
+ * điểm chấm người. Đó là luật "không phạt nhân viên vì thứ họ không quyết được", thực thi ngay
+ * trên nhãn chứ không chỉ trong tài liệu.
+ */
+function MetricCell({ m }: { m: MetricValue }) {
+  if (m.value === null) {
+    return (
+      <span className="text-xs text-muted-foreground" title={m.basis}>
+        chưa đo được
+      </span>
+    );
+  }
+  const text =
+    m.unit === "PERCENT" ? `${m.value}%` : m.unit === "VND" ? formatVND(m.value, { compact: true }) : m.unit === "DAYS" ? `${m.value} ngày` : m.unit === "HOURS" ? `${m.value} giờ` : String(m.value);
+  return (
+    <span className="whitespace-nowrap tabular-nums" title={m.basis}>
+      <span className={cn("font-medium", m.unit === "PERCENT" && !m.shared ? (m.value >= 90 ? "text-success" : m.value < 60 ? "text-destructive" : "") : "")}>{text}</span>
+      <span className="ml-1 text-[11px] text-muted-foreground">/{m.sample}</span>
+    </span>
+  );
+}
+
+function DeptMetricCards({ perf }: { perf: Awaited<ReturnType<typeof getDeptPerformance>> }) {
+  const keys: { key: string; label: string; shared: boolean }[] = [];
+  for (const p of perf.people) for (const m of p.metrics) if (!keys.some((k) => k.key === m.key)) keys.push({ key: m.key, label: m.label, shared: m.shared });
+
+  return (
+    <>
+      {perf.team.length ? (
+        <SectionCard title={`${perf.label} · chỉ số mức phòng`} description="Đo được ở mức SỔ, không quy về cá nhân — một dòng tiền có thể do nhiều người chạm.">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {perf.team.map((m) => (
+              <div key={m.key} className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">{m.label}</p>
+                <p className="mt-0.5 text-lg font-semibold">
+                  <MetricCell m={m} />
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{m.basis}</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
+
+      <SectionCard
+        title={`${perf.label} · chỉ số riêng của phòng`}
+        description="Đọc thẳng từ bảng nghiệp vụ của phòng (case CSKH, nhật ký care, phiếu kiểm hoàn, nhật ký đối soát) — không phải số việc đã đóng."
+        padded={false}
+      >
+        {keys.length ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[720px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Người</TableHead>
+                  {keys.map((k) => (
+                    <TableHead key={k.key} className="w-[150px]">
+                      {k.label}
+                      {k.shared ? <span className="block text-[10px] font-normal text-muted-foreground">kết quả chung</span> : null}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {perf.people.map((p) => (
+                  <TableRow key={p.userId}>
+                    <TableCell className="font-medium">{p.name}</TableCell>
+                    {keys.map((k) => {
+                      const m = p.metrics.find((x) => x.key === k.key);
+                      return <TableCell key={k.key}>{m ? <MetricCell m={m} /> : <span className="text-xs text-muted-foreground">chưa có ca nào</span>}</TableCell>;
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <EmptyState
+            title="Chưa ai trong phòng có ca nào trong kỳ"
+            description="Chỉ số của phòng đọc từ chứng từ thật (case đã đóng, ca care đã kết, phiếu kiểm hoàn, lượt đối soát). Kỳ này chưa có bản ghi nào mang tên người trong phòng."
+            className="border-0"
+          />
+        )}
+        {perf.missing.length ? (
+          <div className="border-t p-3">
+            <p className="text-xs font-medium">Chỉ số chưa đo được ở độ mịn NGƯỜI</p>
+            <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+              {perf.missing.map((m) => (
+                <li key={m.label}>
+                  <strong className="text-foreground">{m.label}</strong> — {m.note}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </SectionCard>
+    </>
   );
 }

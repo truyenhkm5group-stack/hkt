@@ -112,6 +112,8 @@ const ROUTES = [
     danh sách chéo phòng, và thẻ điểm mục tiêu (nơi mọi chỉ số OKR/BSC được đọc sống).
   */
   "/work",
+  // Màn hình sáng của trưởng phòng: dựng phép chiếu + bảng sức chứa + năm việc cần can thiệp.
+  "/work/today",
   "/work/department",
   "/work/all",
   "/work/okr",

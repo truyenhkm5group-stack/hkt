@@ -10,6 +10,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { generateRecurringTasks } from "@/lib/work/service";
+import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
@@ -164,6 +165,18 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     run: () => warmDashboard(),
+  },
+  "work-escalation": {
+    label: "Leo thang việc quá hạn",
+    source: "ALL",
+    description:
+      "Quét hàng đợi công việc, đếm việc sắp vỡ hạn / đã vỡ hạn, và gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ mà vẫn chưa ai nhận. " +
+      "CHỈ ĐỌC dữ liệu nghiệp vụ: không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc), không tạo cảnh báo nào. " +
+      "Một phòng chỉ nhận một tin mỗi ngày — sổ chống gửi lại nằm ở settings 'work.escalation.sent'.",
+    run: async () => {
+      const r = await runEscalationDigest();
+      return { ok: true, ...r };
+    },
   },
   "work-recurrence": {
     label: "Sinh việc định kỳ",
