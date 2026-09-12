@@ -184,6 +184,11 @@ export async function getFulfillmentBottleneckQueue(): Promise<FulfillmentBottle
         -- Sales Funnel/CSKH, không thuộc nút thắt này. CANCELLED/DELETED bị loại tuyệt đối — không
         -- được tạo cảnh báo giả cho đơn đã huỷ hoặc chưa sẵn sàng.
         where o.stage in ('CONFIRMED','PACKING','READY_TO_SHIP')
+          -- ĐƠN RỖNG KHÔNG PHẢI VIỆC KHO: đối chiếu production 12/09/2026 thấy 9/214 ca là đơn
+          -- CONFIRMED không có dòng hàng nào và giá trị 0 (lên nhầm / chưa chọn hàng) — không có gì
+          -- để đóng gói hay tạo vận đơn, đưa vào hàng đợi chỉ tạo việc giả. Đơn có dòng hàng nhưng
+          -- giá 0 (tặng, đổi hàng) VẪN là việc kho.
+          and (coalesce(o.total_price_after_discount, 0) > 0 or exists (select 1 from order_items oi where oi.order_id = o.id))
           -- "Chưa rời kho": không có vận đơn nào, HOẶC vận đơn còn PENDING. Vận đơn đã qua PENDING
           -- (PICKED_UP trở lên) nghĩa là đã rời kho — không phải việc của nút thắt này nữa, dù
           -- order.stage trên Pancake có kịp cập nhật hay chưa (đồng bộ có độ trễ vài phút).

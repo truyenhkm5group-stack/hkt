@@ -92,6 +92,9 @@ export async function testFulfillmentBottleneck(db: Db) {
   // ───────── KHÔNG ĐƯỢC XUẤT HIỆN: đơn chưa xác nhận (việc của Sales Funnel/CSKH) ─────────
   await seedOrder("fb-chua-xac-nhan", { stage: "NEW", statusHoursAgo: 30 });
 
+  // ───────── KHÔNG ĐƯỢC XUẤT HIỆN: đơn RỖNG (không dòng hàng, giá trị 0) — không có gì để gửi ─────────
+  await seedOrder("fb-don-rong", { stage: "CONFIRMED", statusHoursAgo: 30, value: 0 });
+
   // ───────── TUỔI TÍNH TỪ LÚC ĐỨNG Ở TRẠNG THÁI, KHÔNG TỪ LÚC TẠO ĐƠN ─────────
   // insertedAt mặc định 240 giờ trước (xem seedOrder) nhưng vừa được xác nhận 1 giờ trước.
   await seedOrder("fb-vua-chot", { stage: "CONFIRMED", statusHoursAgo: 1 });
@@ -134,6 +137,7 @@ export async function testFulfillmentBottleneck(db: Db) {
   assert.ok(!byId.has("fb-da-roi-kho"), "vận đơn đã rời kho (PICKED_UP) thì không còn là nút thắt fulfillment");
   assert.ok(!byId.has("fb-da-huy"), "đơn đã huỷ không được tạo cảnh báo giả, kể cả khi còn vận đơn PENDING treo lại");
   assert.ok(!byId.has("fb-chua-xac-nhan"), "đơn chưa xác nhận thuộc phạm vi Sales Funnel/CSKH, không phải nút thắt này");
+  assert.ok(!byId.has("fb-don-rong"), "đơn không có dòng hàng và giá trị 0 thì không có gì để đóng gói — không phải việc kho");
 
   // TUỔI TÍNH TỪ LÚC XÁC NHẬN, KHÔNG TỪ LÚC LÊN ĐƠN — bẫy chính của bài toán này.
   const vuaChot = find("fb-vua-chot");
