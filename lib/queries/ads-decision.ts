@@ -1,9 +1,10 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { spendPeriod } from "@/lib/queries/ads-roas";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
@@ -167,13 +168,6 @@ export type AdsDecision = {
   };
 };
 
-function spendPeriod(from: Date | null, to: Date | null) {
-  const conds = [eq(schema.adSpends.excluded, false)];
-  if (from) conds.push(gte(schema.adSpends.spendDate, from));
-  if (to) conds.push(lte(schema.adSpends.spendDate, to));
-  return and(...conds);
-}
-
 /** Khoá gộp của từng cấp. `adset` lấy từ `fb_ads` vì đơn chỉ mang `ad_id`. */
 function groupKeyFor(dimension: AdsDimension) {
   if (dimension === "campaign") return sql`coalesce(${ORDER_CAMPAIGN_ID}, ${o.adId})`;
@@ -313,10 +307,10 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
   // Giá vốn theo ĐÚNG bậc thang chung (AGENTS.md mục 13): phiếu nhập ERP gần nhất → giá vốn Pancake
   // trên đơn → giá nhập mẫu mã — tính một lần cho mỗi mẫu mã (xem variantLastCostSubquery).
   const lastCost = variantLastCostSubquery(db);
-  const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
+  const productKeyExpr = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const facts = db
     .select({
-      key: sql<string>`${PID}`.as("p_key"),
+      key: sql<string>`${productKeyExpr}`.as("p_key"),
       name: sql<string>`coalesce(nullif(${schema.products.name}, ''), ${i.productName})`.as("p_name"),
       lineRevenue: sql<number>`coalesce(${i.lineTotal}, 0)`.as("p_line_revenue"),
       lineCogs: sql<number>`${i.quantity} * ${lineUnitCost(lastCost)}`.as("p_line_cogs"),

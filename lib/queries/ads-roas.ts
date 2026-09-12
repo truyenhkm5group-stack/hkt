@@ -90,7 +90,8 @@ export type AdsRoas = {
   };
 };
 
-function spendPeriod(from: Date | null, to: Date | null) {
+/** Dùng chung với bảng quyết định quảng cáo (ads-decision.ts) — MỘT định nghĩa cho kỳ chi tiêu. */
+export function spendPeriod(from: Date | null, to: Date | null) {
   const conds = [eq(schema.adSpends.excluded, false)];
   if (from) conds.push(gte(schema.adSpends.spendDate, from));
   if (to) conds.push(lte(schema.adSpends.spendDate, to));
