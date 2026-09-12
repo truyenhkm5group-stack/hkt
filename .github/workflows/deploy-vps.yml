@@ -86,7 +86,11 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
         run: |
           IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
-          docker build -t "$IMAGE_LC" .
+          # Heap cho `next build` TRONG image. Mặc định trong Dockerfile là 1024 để bảo vệ đường
+          # dựng-trên-VPS (máy ~1,9 GB, sự cố #208/#227/#228); ở đây máy có 7 GB và chỉ dựng một
+          # image, nên nới ra. Deploy #239 chết vì 1024 vừa đủ cho bản trước và hết đủ khi lược đồ
+          # drizzle có thêm một bảng — đo lại thì 2048 đã qua, lấy 4096 cho có biên.
+          docker build --build-arg BUILD_HEAP_MB=4096 -t "$IMAGE_LC" .
           docker push "$IMAGE_LC"
           echo "ERP_IMAGE=$IMAGE_LC" >> "$GITHUB_ENV"
           echo "Đã đẩy $IMAGE_LC"
