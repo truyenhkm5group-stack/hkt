@@ -18,6 +18,7 @@ import { ageLabel } from "@/lib/constants/action-queue";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { PLAN_STATUS_LABEL } from "@/lib/constants/planning";
 import { FB_ACCOUNT_STATUS_LABEL, FB_DISABLE_REASON_LABEL, NOTIFICATION_KIND_LABEL } from "@/lib/constants/alerts";
+import { maskAccountNumber } from "@/lib/constants/bank";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
@@ -787,6 +788,55 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     }
   } catch {
     // chưa có dữ liệu vận đơn
+  }
+
+  // ───────── TÀI KHOẢN NGÂN HÀNG MỚI CHỜ XÁC NHẬN ─────────
+  //
+  // Webhook SePay tự khai tài khoản lạ để KHÔNG MẤT GIAO DỊCH, nhưng nó KHÔNG được tự kết luận
+  // "đúng là tài khoản của shop" — trạng thái luôn dừng ở UNCONFIRMED (khoá ở
+  // `lib/integrations/bank/sepay-ingest.ts`, canh ở mức mã nguồn trong tests/bank-accounts.test.ts).
+  //
+  // Trước đây việc xác nhận chỉ có một dòng cảnh báo THỤ ĐỘNG trên chính trang /bank?tab=tai-khoan —
+  // ai không mở tab đó thì không bao giờ biết có tài khoản đang chờ. Tiền vẫn vào sổ đầy đủ nên
+  // không mất dữ liệu, nhưng "tiền đã vào sổ shop" và "chủ shop biết và công nhận tài khoản đó" là
+  // hai việc khác nhau — một khoảng trống có thể kéo dài vô thời hạn nếu không ai chủ động vào xem.
+  //
+  // MỘT VIỆC MỘT TÀI KHOẢN (giống SHIPMENT_FAILED): tài khoản mới hiếm khi xuất hiện nhiều cùng lúc,
+  // nên không cần gộp như nhóm hàng hoàn. `refresh: true` để cập nhật lại mốc "gói tin gần nhất" tại
+  // chỗ thay vì đóng rồi mở việc mới mỗi khi có giao dịch tiếp theo đổ vào tài khoản đang chờ.
+  if (cfg.enabled.bankAccountUnconfirmed) {
+    activeKinds.push("BANK_ACCOUNT_UNCONFIRMED");
+    try {
+      const rows = await db
+        .select({
+          id: schema.bankAccounts.id,
+          gateway: schema.bankAccounts.gateway,
+          accountNumber: schema.bankAccounts.accountNumber,
+          subAccount: schema.bankAccounts.subAccount,
+          label: schema.bankAccounts.label,
+          provider: schema.bankAccounts.provider,
+          lastSeenAt: schema.bankAccounts.lastSeenAt,
+          createdAt: schema.bankAccounts.createdAt,
+        })
+        .from(schema.bankAccounts)
+        .where(eq(schema.bankAccounts.status, "UNCONFIRMED"));
+      for (const r of rows) {
+        candidates.push({
+          kind: "BANK_ACCOUNT_UNCONFIRMED",
+          severity: "warning",
+          title: `Tài khoản ngân hàng mới cần xác nhận · ${r.gateway || "?"} ${maskAccountNumber(r.accountNumber)}${r.subAccount ? ` · VA ${r.subAccount}` : ""}`,
+          body: `${r.provider || "Webhook"} tự phát hiện tài khoản này (${r.label || "chưa đặt tên"}) — giao dịch vẫn được ghi đầy đủ trong lúc chờ. Vào Sổ ngân hàng → Tài khoản ngân hàng để đặt tên và xác nhận đúng là tài khoản của shop.`,
+          href: "/bank?tab=tai-khoan",
+          entityType: "BANK_ACCOUNT",
+          entityId: r.id,
+          dedupeKey: `bank-account-unconfirmed:${r.id}`,
+          occurredAt: r.lastSeenAt ?? r.createdAt,
+          refresh: true,
+        });
+      }
+    } catch {
+      // chưa có bảng tài khoản ngân hàng
+    }
   }
 
   // ───────── QUẢNG CÁO BẤT THƯỜNG ─────────

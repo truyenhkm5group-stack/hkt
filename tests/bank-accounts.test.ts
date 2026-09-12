@@ -4,11 +4,13 @@ import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from "@/lib/auth/permissions";
+import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, resolvePermissions } from "@/lib/auth/permissions";
+import { can, type SessionUser } from "@/lib/auth/session";
+import { collectCandidates } from "@/lib/alerts/rules";
 import { BANK_ACCOUNT_STATUSES, BANK_ACCOUNT_STATUS_LABEL, BANK_TABS, BANK_TAB_LABEL, maskAccountNumber } from "@/lib/constants/bank";
 import { ingestSepayTransaction, resolveBankAccount } from "@/lib/integrations/bank/sepay-ingest";
 import { parseSepayPayload } from "@/lib/integrations/bank/sepay";
-import { listBankAccounts, unconfirmedBankAccountCount } from "@/lib/queries/bank";
+import { listBankAccounts, sepayLastReconciliation, unconfirmedBankAccountCount } from "@/lib/queries/bank";
 
 /**
  * ═══════ TÀI KHOẢN NGÂN HÀNG: XÁC NHẬN, NGỪNG DÙNG, VÀ THỨ KHÔNG ĐƯỢC ĐỤNG ═══════
@@ -157,45 +159,127 @@ export async function testBankAccounts(db: Db) {
   const sauGoiLai = await db.select({ n: sql<number>`count(*)` }).from(a);
   assert.equal(Number(sauGoiLai[0].n), Number(truocGoiLai[0].n), "11. gọi lại không khai thêm tài khoản trùng");
 
+  // ═══ 12. HAI TÀI KHOẢN KHÁC NHAU CÙNG MỘT NGÂN HÀNG KHÔNG BỊ GỘP ═══
+  // Test 11 đã tách theo NGÂN HÀNG KHÁC (Vietcombank) và theo TÀI KHOẢN ẢO (VA). Trường hợp phổ
+  // biến hơn cả trong thực tế lại là trường hợp còn thiếu: hai tài khoản MBBank THẬT, số khác nhau,
+  // của cùng một shop (ví dụ một tài khoản kinh doanh, một tài khoản nhận COD riêng).
+  const mb2 = await ingestSepayTransaction(db, payload({ id: 90012, accountNumber: "8888777766", referenceCode: "FT-ACC-MB2", transferAmount: 500_000 }));
+  assert.notEqual(mb2.bankAccountId, lan1.bankAccountId, "12. cùng ngân hàng nhưng khác số tài khoản ⇒ tài khoản nội bộ khác");
+  assert.equal(mb2.accountUnmapped, true, "12. tài khoản MBBank thứ hai cũng phải tự chờ xác nhận riêng, không thừa hưởng trạng thái của tài khoản MBBank thứ nhất");
+  const soMBBank = (await listBankAccounts()).filter((x) => x.gateway === "MBBank").length;
+  assert.equal(soMBBank, 3, "12. có đúng 3 tài khoản mang gateway MBBank: tài khoản gốc, tài khoản ảo (VA99), và tài khoản số khác này — không cái nào bị gộp vào cái nào");
 
-  // ═══ 12. CANH Ở MỨC MÃ NGUỒN ═══
+  // ═══ 13. "CHƯA PHÂN LOẠI" ĐẾM ĐÚNG THEO TỪNG TÀI KHOẢN, KHÔNG PHẢI CẢ SỔ ═══
+  // `unclassifiedBankCount()` đã trả lời "cả sổ còn bao nhiêu dòng chưa phân loại". Nhưng màn hình
+  // Tài khoản ngân hàng cần trả lời một câu khác: TÀI KHOẢN NÀO đang tồn việc — không có con số
+  // riêng này thì hai tài khoản đều tồn đọng như nhau trên giao diện dù một cái nặng hơn hẳn.
+  await db.update(b).set({ accountingGroup: "COD_SETTLEMENT", classifiedBy: "test@shop", classifiedAt: new Date() }).where(sql`${b.providerTxnId} in ('90001','90002')`);
+  const dsSauPhanLoai = await listBankAccounts();
+  const dongLan1SauPhanLoai = dsSauPhanLoai.find((x) => x.id === lan1.bankAccountId);
+  assert.equal(dongLan1SauPhanLoai?.soGiaoDich, 5, "13. tổng giao dịch không đổi — phân loại không xoá dòng nào");
+  assert.equal(dongLan1SauPhanLoai?.chuaPhanLoai, 3, "13. còn đúng 3/5 dòng CHƯA phân loại sau khi gán nhãn cho 2 dòng");
+  const dongMb2 = dsSauPhanLoai.find((x) => x.id === mb2.bankAccountId);
+  assert.equal(dongMb2?.chuaPhanLoai, 1, "13. tài khoản MBBank thứ hai có đúng 1 dòng, vẫn CHƯA phân loại — không bị đếm nhầm sang tài khoản khác");
+
+  // ═══ 14. NGỪNG DÙNG RỒI DÙNG LẠI (RE-ENABLE) ═══
+  // Luật nghiệp vụ không cấm dùng lại một tài khoản đã ngừng dùng. `updateBankAccount` xem trạng
+  // thái nào cũng chuyển được sang trạng thái khác — nút "Xác nhận" trên giao diện hiện lại bất cứ
+  // khi nào trạng thái khác ACTIVE, kể cả DISABLED. Bài kiểm này khoá đúng hành vi đó.
+  const [truocKhiBatLai] = await db.select().from(a).where(eq(a.id, lan1.bankAccountId));
+  assert.equal(truocKhiBatLai.status, "DISABLED", "14. tài khoản đang ở trạng thái NGỪNG DÙNG từ bước 9 — đúng điều kiện cần trước khi bật lại");
+  // Ở bước này còn hai tài khoản KHÁC (vcb, mb2) đang thật sự UNCONFIRMED, nên không thể so với 0 —
+  // canh đúng điều cần canh: bật lại một tài khoản ĐÃ TỪNG XÁC NHẬN không được đổi số đếm đó.
+  const dangChoTruocKhiBatLai = await unconfirmedBankAccountCount();
+  await db.update(a).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(a.id, lan1.bankAccountId));
+  const [sauKhiBatLai] = await db.select().from(a).where(eq(a.id, lan1.bankAccountId));
+  assert.equal(sauKhiBatLai.status, "ACTIVE", "14. bật lại (re-enable) thành công");
+  assert.equal(await unconfirmedBankAccountCount(), dangChoTruocKhiBatLai, "14. bật lại một tài khoản ĐÃ TỪNG xác nhận (không phải UNCONFIRMED) không làm đổi số tài khoản đang chờ xác nhận của CÁC tài khoản khác");
+  const [demSauBatLai] = await db.select({ n: sql<number>`count(*)` }).from(b).where(eq(b.bankAccountId, lan1.bankAccountId));
+  assert.equal(Number(demSauBatLai.n), 5, "14. bật lại không xoá và không đẻ thêm giao dịch nào");
+  const khiDaBatLai = await ingestSepayTransaction(db, payload({ id: 90013, referenceCode: "FT-ACC-0006", transferAmount: 321_000 }));
+  assert.equal(khiDaBatLai.bankAccountId, lan1.bankAccountId, "14. sau khi bật lại, giao dịch mới vẫn map đúng tài khoản cũ");
+  assert.equal(khiDaBatLai.accountUnmapped, false, "14. tài khoản đang ACTIVE nên giao dịch mới không mang cờ chờ xác nhận");
+
+  // ═══ 15. `can()` TỪ CHỐI THẬT — KHÔNG CHỈ KHAI BÁO TRONG MA TRẬN ═══
+  // Test 1 khoá bảng MA TRẬN quyền mặc định (dữ liệu tĩnh). Ở đây gọi THẲNG hàm `can()` — đúng hàm
+  // mà `guardAccounts()` trong lib/actions/bank.ts dùng để chặn — với người dùng giả lập.
+  // KHÔNG gọi trực tiếp `updateBankAccount()` được trong môi trường bài kiểm này vì nó bắt đầu bằng
+  // `requireUser()`, hàm đọc cookie phiên đăng nhập qua `next/headers` — chỉ có trong một request
+  // Next.js thật, không có trong tiến trình `tsx` chạy thẳng bài kiểm. `can()` là hàm thuần nên kiểm
+  // được ngay, và đó chính xác là đoạn quyết định "được phép" hay "Không có quyền" bên trong action.
+  const ketToanGia: SessionUser = { id: "test-accountant", email: "ketoan@shop.test", name: "Kế toán", role: "ACCOUNTANT", permissions: resolvePermissions("ACCOUNTANT", null) };
+  const quanTriGia: SessionUser = { id: "test-admin", email: "admin@shop.test", name: "Admin", role: "ADMIN", permissions: resolvePermissions("ADMIN", null) };
+  assert.equal(can(ketToanGia, "bank:accounts"), false, "15. kế toán bị TỪ CHỐI xác nhận tài khoản qua đúng hàm guardAccounts() dùng");
+  assert.equal(can(ketToanGia, "bank:write"), true, "15. nhưng kế toán vẫn nhập & phân loại sao kê được như cũ");
+  assert.equal(can(quanTriGia, "bank:accounts"), true, "15. admin được phép xác nhận tài khoản");
+
+  // ═══ 16. TÀI KHOẢN MỚI CHỜ XÁC NHẬN PHẢI SINH VIỆC TRONG HÀNG ĐỢI CẢNH BÁO ═══
+  // Trước đây tài khoản mới chỉ có MỘT dòng cảnh báo THỤ ĐỘNG trên chính trang Tài khoản ngân hàng —
+  // ai không mở tab đó thì không bao giờ biết có việc đang chờ. `vcb` (tạo ở bước 11) vẫn UNCONFIRMED.
+  const { candidates: truocXacNhanVcb } = await collectCandidates();
+  const viecVcb = truocXacNhanVcb.find((c) => c.dedupeKey === `bank-account-unconfirmed:${vcb.bankAccountId}`);
+  assert.ok(viecVcb, "16. tài khoản Vietcombank chưa xác nhận phải sinh MỘT việc trong hàng đợi cảnh báo");
+  assert.equal(viecVcb?.kind, "BANK_ACCOUNT_UNCONFIRMED", "16. đúng loại việc");
+  assert.equal(viecVcb?.href, "/bank?tab=tai-khoan", "16. việc dẫn thẳng tới màn hình xác nhận");
+
+  await db.update(a).set({ status: "ACTIVE", updatedAt: new Date() }).where(eq(a.id, vcb.bankAccountId));
+  const { candidates: sauXacNhanVcb } = await collectCandidates();
+  assert.ok(
+    !sauXacNhanVcb.some((c) => c.dedupeKey === `bank-account-unconfirmed:${vcb.bankAccountId}`),
+    "16. sau khi xác nhận, tài khoản không còn sinh việc mới — lượt quét thật (evaluateAlerts) sẽ tự đóng việc cũ vì khoá này không còn trong danh sách ứng viên",
+  );
+
+  // ═══ 17. CANH Ở MỨC MÃ NGUỒN ═══
   //
   // Ba điều dưới đây KHÔNG bài kiểm chạy nào bắt được, vì chúng chỉ sai khi ai đó sửa mã về sau:
   // đổi guard sang `bank:write`, hoặc cho action đổi trạng thái đụng vào bảng giao dịch. Cả hai đều
   // chạy trơn tru và xanh hết mọi bài kiểm hành vi — chỉ có người đọc mã mới thấy.
   const nguonAction = readFileSync(path.join(__dirname, "..", "lib/actions/bank.ts"), "utf8");
   const than = nguonAction.slice(nguonAction.indexOf("async function guardAccounts"), nguonAction.indexOf("// ───────────────────────── Phân loại"));
-  assert.ok(than.length > 200, "12. tìm được khối tài khoản trong lib/actions/bank.ts");
+  assert.ok(than.length > 200, "17. tìm được khối tài khoản trong lib/actions/bank.ts");
 
   assert.ok(
     /can\(\s*user\s*,\s*"bank:accounts"\s*\)/.test(than),
-    "12. action phải hỏi ĐÚNG quyền `bank:accounts` — không được hạ xuống `bank:write`",
+    "17. action phải hỏi ĐÚNG quyền `bank:accounts` — không được hạ xuống `bank:write`",
   );
   assert.ok(
     !/bankTransactions/.test(than),
-    "12. action đổi trạng thái tài khoản KHÔNG được nhắc tới `bankTransactions`: cấu hình không được viết lại chứng từ tiền",
+    "17. action đổi trạng thái tài khoản KHÔNG được nhắc tới `bankTransactions`: cấu hình không được viết lại chứng từ tiền",
   );
-  assert.ok(/audit\(/.test(than), "12. mọi thay đổi phải ghi nhật ký — ai làm, lúc nào, đổi từ gì sang gì");
-  assert.ok(/before:/.test(than) && /after:/.test(than), "12. nhật ký phải ghi CẢ giá trị trước và sau");
+  assert.ok(/audit\(/.test(than), "17. mọi thay đổi phải ghi nhật ký — ai làm, lúc nào, đổi từ gì sang gì");
+  assert.ok(/before:/.test(than) && /after:/.test(than), "17. nhật ký phải ghi CẢ giá trị trước và sau");
   assert.ok(
     /maskAccountNumber\(/.test(than),
-    "12. số tài khoản trong nhật ký phải được che — nhật ký cũng là chỗ người khác đọc được",
+    "17. số tài khoản trong nhật ký phải được che — nhật ký cũng là chỗ người khác đọc được",
   );
 
   // Đường ghi tự động KHÔNG BAO GIỜ được đặt ACTIVE. Đây là lời hứa lớn nhất của cả màn hình này,
   // và nó nằm ở một dòng duy nhất trong `sepay-ingest.ts` — dễ sửa nhầm, khó thấy khi sửa nhầm.
   const nguonIngest = readFileSync(path.join(__dirname, "..", "lib/integrations/bank/sepay-ingest.ts"), "utf8");
-  assert.ok(/status:\s*"UNCONFIRMED"/.test(nguonIngest), "12. webhook khai tài khoản mới với trạng thái UNCONFIRMED");
+  assert.ok(/status:\s*"UNCONFIRMED"/.test(nguonIngest), "17. webhook khai tài khoản mới với trạng thái UNCONFIRMED");
   assert.ok(
     !/status:\s*"ACTIVE"/.test(nguonIngest),
-    "12. KHÔNG dòng nào trong đường ghi tự động được đặt ACTIVE — xác nhận là việc của con người",
+    "17. KHÔNG dòng nào trong đường ghi tự động được đặt ACTIVE — xác nhận là việc của con người",
   );
 
+  // ═══ 18. ĐỐI CHIẾU API SEPAY: CHƯA CHẠY LÀ `null`, KHÔNG PHẢI MỘT MỐC GIẢ ═══
+  // Đối chiếu quét TOÀN BỘ giao dịch của mọi tài khoản SePay trong MỘT lượt (không tách theo từng
+  // tài khoản) — nên đây là mốc DÙNG CHUNG. `null` khi chưa từng chạy phải giữ nguyên là `null`,
+  // không được suy diễn thành "vừa chạy xong" hay hiện một ngày bất kỳ.
+  assert.equal(await sepayLastReconciliation(), null, "18. chưa từng chạy `sepay_reconcile` thì phải trả về null, không phải một mốc giả");
+  const mocDoiChieu = new Date("2026-09-12T02:00:00Z");
+  await db.insert(schema.syncRuns).values({ source: "SEPAY", job: "sepay_reconcile", status: "OK", trigger: "MANUAL", actor: "test", startedAt: mocDoiChieu, finishedAt: mocDoiChieu, detail: "test" });
+  const ganNhat = await sepayLastReconciliation();
+  assert.ok(ganNhat, "18. có lượt chạy đã hoàn tất thì phải đọc ra được");
+  assert.equal(ganNhat?.finishedAt.getTime(), mocDoiChieu.getTime(), "18. đúng mốc của lượt chạy gần nhất");
+  assert.equal(ganNhat?.status, "OK", "18. đọc đúng trạng thái của lượt chạy");
+  await db.delete(schema.syncRuns).where(sql`${schema.syncRuns.source} = 'SEPAY' and ${schema.syncRuns.job} = 'sepay_reconcile'`);
+
   // Dọn dẹp — bài kiểm khác dùng chung bảng.
-  await db.delete(b).where(sql`${b.providerTxnId} in ('90001','90002','90003','90004','90005','90010','90011')`);
+  await db.delete(b).where(sql`${b.providerTxnId} in ('90001','90002','90003','90004','90005','90010','90011','90012','90013')`);
   await db.delete(a).where(eq(a.provider, "SEPAY"));
 
   console.log(
-    "✓ Tài khoản ngân hàng: quyền xác nhận tách khỏi quyền nhập sao kê · webhook KHÔNG bao giờ tự ACTIVE · chưa xác nhận vẫn nhận đủ giao dịch · đổi trạng thái không đụng một đồng nào · ngừng dùng không xoá và không chặn tiền · số tài khoản che còn 4 số cuối",
+    "✓ Tài khoản ngân hàng: quyền xác nhận tách khỏi quyền nhập sao kê · webhook KHÔNG bao giờ tự ACTIVE · chưa xác nhận vẫn nhận đủ giao dịch · đổi trạng thái không đụng một đồng nào · ngừng dùng không xoá và không chặn tiền · bật lại dùng được bình thường · số tài khoản che còn 4 số cuối · chưa phân loại đếm đúng theo từng tài khoản · tài khoản mới chờ xác nhận sinh việc actionable trong hàng đợi cảnh báo",
   );
 }

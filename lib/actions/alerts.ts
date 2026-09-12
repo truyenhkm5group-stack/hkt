@@ -53,6 +53,7 @@ const configSchema = z.object({
     adsAnomaly: z.boolean().default(true),
     cancelledButShipping: z.boolean().default(true),
     addressNotNormalized: z.boolean().default(true),
+    bankAccountUnconfirmed: z.boolean().default(true),
   }),
 });
 

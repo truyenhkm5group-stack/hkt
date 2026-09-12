@@ -8,7 +8,7 @@ import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { BANK_TABS, type BankTab } from "@/lib/constants/bank";
-import { listBankAccounts, listBankRules, unclassifiedBankCount, unconfirmedBankAccountCount } from "@/lib/queries/bank";
+import { listBankAccounts, listBankRules, sepayLastReconciliation, unclassifiedBankCount, unconfirmedBankAccountCount } from "@/lib/queries/bank";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Sổ ngân hàng" };
@@ -33,11 +33,12 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
   const tab = (BANK_TABS.includes(requested as BankTab) ? requested : "giao-dich") as BankTab;
 
   // Số tài khoản chờ xác nhận luôn được đếm: nó là con số trên tab, phải đúng ở mọi tab.
-  const [unclassified, unconfirmedAccounts, rules, accounts] = await Promise.all([
+  const [unclassified, unconfirmedAccounts, rules, accounts, lastReconciliation] = await Promise.all([
     unclassifiedBankCount(),
     unconfirmedBankAccountCount(),
     tab === "quy-tac" ? listBankRules() : Promise.resolve([]),
     tab === "tai-khoan" ? listBankAccounts() : Promise.resolve([]),
+    tab === "tai-khoan" ? sepayLastReconciliation() : Promise.resolve(null),
   ]);
 
   return (
@@ -51,7 +52,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
       <BankTabs active={tab} unclassified={unclassified} unconfirmedAccounts={unconfirmedAccounts} />
 
       {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}
-      {tab === "tai-khoan" ? <BankAccountsTab accounts={accounts} canManage={canManageAccounts} /> : null}
+      {tab === "tai-khoan" ? <BankAccountsTab accounts={accounts} canManage={canManageAccounts} lastReconciliation={lastReconciliation} /> : null}
       {tab === "doi-khop" ? <BankMatchTab canWrite={canWrite} /> : null}
       {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} /> : null}
       {tab === "quy-tac" ? <BankRulesTab rules={rules} canWrite={canWrite} /> : null}
