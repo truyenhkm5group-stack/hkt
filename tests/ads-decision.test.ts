@@ -221,7 +221,7 @@ export async function testAdsDecision(db: Db) {
   assert.equal(camp.deliveredRevenue, 2_000_000, "đơn hoàn KHÔNG được tính vào doanh thu giao thành công");
   assert.equal(camp.cashReceived, 1_800_000, "tiền về là số THỰC THU có chứng từ, không phải COD khai báo");
   assert.equal(camp.successRate, 66.7, "GTC = 2 ÷ 3 đơn đã kết thúc, giữ một chữ số thập phân như successRate()");
-  // Cước tính trên CẢ BA đơn (đơn hoàn vẫn tốn cước) = 90.000đ.
+  // Cước của đơn đã giao (2) + đơn hoàn (1) = 90.000đ; đơn hoàn không có return_fee trong fixture.
   assert.equal(camp.shippingCost, 90_000, "cước phải tính cả trên đơn hoàn");
 
   // ───────── Bất biến của mọi dòng, mọi cấp ─────────

@@ -4,6 +4,8 @@ import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { lineUnitCost } from "@/lib/queries/cogs";
+import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
@@ -241,6 +243,7 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
       revenue: sql<number>`coalesce(${o.totalPriceAfterDiscount}, 0)`.as("d_revenue"),
       cogs: sql<number>`${orderCogsFast()}`.as("d_cogs"),
       shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("d_shipping"),
+      returnFee: sql<number>`coalesce(${o.returnFee}, 0)`.as("d_return_fee"),
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("d_cash"),
       outcome: ORDER_OUTCOME_FAST.as("d_outcome"),
     })
@@ -276,10 +279,13 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
         cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${delivered}), 0)`,
         cogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${delivered}), 0)`,
         /**
-         * CƯỚC TÍNH TRÊN MỌI ĐƠN, kể cả đơn hoàn: đơn hoàn vẫn tốn cước, và đó chính là phần làm
-         * biên lợi nhuận tụt. Bỏ nó ra ngoài sẽ cho một điểm hoà vốn đẹp hơn sự thật.
+         * CƯỚC THEO ĐÚNG BẬC THANG SỰ THẬT TÀI CHÍNH (financial-truth.ts, docs/metrics-contract.md):
+         * cước của đơn ĐÃ GIAO và đơn HOÀN, cộng phí hoàn của đơn hoàn. Đơn hoàn vẫn tốn cước — đó
+         * chính là phần làm biên lợi nhuận tụt, bỏ ra sẽ cho điểm hoà vốn đẹp hơn sự thật. Nhưng
+         * đơn HUỶ / chưa gửi / đang đi thì CHƯA có cước thật: `orders.partner_fee` ở đó chỉ là
+         * cước Pancake ước tính lúc lên đơn, cộng vào là gánh tiền chưa hề chi.
          */
-        shipping: sql<number>`coalesce(sum(${facts.shipping}), 0)`,
+        shipping: sql<number>`coalesce(sum(${facts.shipping}) filter (where ${delivered} or ${returned}), 0) + coalesce(sum(${facts.returnFee}) filter (where ${returned}), 0)`,
       })
       .from(facts)
       .groupBy(facts.key),
@@ -304,16 +310,20 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
  */
 async function aggregateByProduct(period: Period): Promise<Agg[]> {
   const db = await getDb();
+  // Giá vốn theo ĐÚNG bậc thang chung (AGENTS.md mục 13): phiếu nhập ERP gần nhất → giá vốn Pancake
+  // trên đơn → giá nhập mẫu mã — tính một lần cho mỗi mẫu mã (xem variantLastCostSubquery).
+  const lastCost = variantLastCostSubquery(db);
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const facts = db
     .select({
       key: sql<string>`${PID}`.as("p_key"),
       name: sql<string>`coalesce(nullif(${schema.products.name}, ''), ${i.productName})`.as("p_name"),
       lineRevenue: sql<number>`coalesce(${i.lineTotal}, 0)`.as("p_line_revenue"),
-      lineCogs: sql<number>`${i.quantity} * coalesce(nullif(${i.unitCost}, 0), ${pv.lastImportedPrice}, 0)`.as("p_line_cogs"),
+      lineCogs: sql<number>`${i.quantity} * ${lineUnitCost(lastCost)}`.as("p_line_cogs"),
       /** Tỷ trọng doanh thu dòng trong đơn — CĂN CỨ PHÂN BỔ cước, khai rõ ở chú thích trên. */
       shipShare: sql<number>`coalesce(${i.lineTotal}, 0) / nullif(sum(coalesce(${i.lineTotal}, 0)) over (partition by ${o.id}), 0)`.as("p_ship_share"),
       shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("p_shipping"),
+      returnFee: sql<number>`coalesce(${o.returnFee}, 0)`.as("p_return_fee"),
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("p_cash"),
       orderId: sql<string>`${o.id}`.as("p_order_id"),
       outcome: ORDER_OUTCOME_FAST.as("p_outcome"),
@@ -322,6 +332,7 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .innerJoin(i, eq(i.orderId, o.id))
     .leftJoin(pv, eq(pv.id, i.variantId))
+    .leftJoin(lastCost, eq(lastCost.variantId, i.variantId))
     .leftJoin(schema.products, eq(schema.products.id, sql`coalesce(${pv.productId}, ${i.productId})`))
     .where(metricScope(period, "confirmed"))
     .offset(OUTCOME_FENCE)
@@ -347,7 +358,8 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
         deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered}), 0)`,
         cash: sql<number>`coalesce(sum(${facts.cash} * coalesce(${facts.shipShare}, 0)) filter (where ${delivered}), 0)`,
         cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
-        shipping: sql<number>`coalesce(sum(${facts.shipping} * coalesce(${facts.shipShare}, 0)), 0)`,
+        // Cùng bậc thang cước như cấp chiến dịch: chỉ đơn đã giao + đơn hoàn, cộng phí hoàn của đơn hoàn.
+        shipping: sql<number>`coalesce(sum((${facts.shipping} + case when ${returned} then ${facts.returnFee} else 0 end) * coalesce(${facts.shipShare}, 0)) filter (where ${delivered} or ${returned}), 0)`,
       })
       .from(facts)
       .groupBy(facts.key),
@@ -577,10 +589,12 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
    * sẽ trông như "không có đơn nào", một kết luận sai hoàn toàn.
    */
   let spendWithoutOrders = 0;
+  const withoutOrders = new Set<string>();
   if (spendKnown) {
     for (const [key, value] of spend) {
       if (seen.has(key) || value.spend <= 0) continue;
       spendWithoutOrders += value.spend;
+      withoutOrders.add(key);
       rows.push(
         buildDecisionRow(
           {
@@ -628,7 +642,9 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
   );
 
   const pending = {
-    spendInsufficientData: rows.filter((r) => r.action === "INSUFFICIENT_DATA").reduce((t, r) => t + r.spend, 0),
+    // Hai nhóm này phải RỜI NHAU: dòng "có chi mà không có đơn" cũng rơi vào INSUFFICIENT_DATA (0 đơn
+    // kết thúc), cộng cả hai là đếm cùng một đồng hai lần trên thẻ "Tiền chưa kết luận được".
+    spendInsufficientData: rows.filter((r) => r.action === "INSUFFICIENT_DATA" && !withoutOrders.has(r.key)).reduce((t, r) => t + r.spend, 0),
     spendWithoutOrders,
     openOrders: rows.reduce((t, r) => t + r.openOrders, 0),
   };

@@ -67,11 +67,14 @@ trở lên, sai lệch này nhỏ; ở kỳ vài ngày thì KHÔNG được dùn
 
 ---
 
-## 3. Cước tính trên MỌI đơn, kể cả đơn hoàn
+## 3. Cước theo bậc thang Sự thật tài chính: đơn đã giao + đơn hoàn, cộng phí hoàn
 
-`shippingCost` KHÔNG lọc theo `delivered`. Đơn hoàn vẫn tốn cước — thường là cước cả hai chiều — và
-đó chính là phần làm biên lợi nhuận tụt. Lọc nó ra sẽ cho một điểm hoà vốn đẹp hơn sự thật, tức là
-đúng loại sai nguy hiểm nhất: con số trông hợp lý mà dẫn tới quyết định sai.
+`shippingCost` = cước (`coalesce(shipping_fee vận đơn, partner_fee đơn)`) của đơn **đã giao thành
+công** và đơn **hoàn**, cộng `orders.return_fee` của đơn hoàn — đúng bậc thang `financial-truth.ts`
+và `docs/metrics-contract.md`. Đơn hoàn vẫn tốn cước — đó chính là phần làm biên lợi nhuận tụt; lọc
+nó ra sẽ cho một điểm hoà vốn đẹp hơn sự thật. Nhưng đơn huỷ / chưa gửi / đang đi thì CHƯA có cước
+thật: `partner_fee` ở đó chỉ là cước Pancake ước tính lúc lên đơn, cộng vào là gánh tiền chưa hề chi
+(bản đầu của trang này từng cộng cả nó — sửa ở vòng tích hợp 12/09/2026).
 
 Hệ quả phải chấp nhận: `marginRate` là biên **đã gánh sẵn phần hoàn**, nên nó thấp hơn biên của
 riêng một đơn giao thành công. Đó là con số đúng để quyết định ngân sách.

@@ -12,7 +12,8 @@ import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 export const metadata = { title: "Quảng cáo" };
 
 function isDimension(value: string): value is AdsDimension {
-  return value in ADS_DIMENSION_LABEL;
+  // Object.hasOwn: `in` nhận cả khoá kế thừa (?dim=toString) rồi làm vỡ trang ở bảng quyết định.
+  return Object.hasOwn(ADS_DIMENSION_LABEL, value);
 }
 
 /**

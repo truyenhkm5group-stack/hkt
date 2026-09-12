@@ -6,7 +6,7 @@ import { InfoHint } from "@/components/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { successTone } from "@/lib/constants/returns";
-import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DIMENSION_LABEL } from "@/lib/constants/ads-decision";
+import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL } from "@/lib/constants/ads-decision";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,9 @@ function Ratio({ value, suffix = "×" }: { value: number | null; suffix?: string
  */
 function headroomTone(value: number | null) {
   if (value === null) return "text-muted-foreground";
-  if (value >= 1.3) return "text-emerald-600 dark:text-emerald-400";
+  if (value >= ADS_DECISION_RULE.scaleAbove) return "text-emerald-600 dark:text-emerald-400";
   if (value >= 1) return "text-sky-600 dark:text-sky-400";
-  if (value >= 0.8) return "text-amber-600 dark:text-amber-400";
+  if (value >= ADS_DECISION_RULE.cutBelow) return "text-amber-600 dark:text-amber-400";
   return "text-rose-600 dark:text-rose-400";
 }
 
