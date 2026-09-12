@@ -34,6 +34,8 @@ export type BankFilters = {
   group?: string[];
   /** Mã danh mục chi tiết của app sao kê */
   category?: string[];
+  /** Lọc theo một tài khoản ngân hàng cụ thể (bank_accounts.id) */
+  account?: string[];
 };
 
 export type BankListOptions = {
@@ -46,6 +48,7 @@ export function bankListWhere(params: ListParams, options: BankListOptions): SQL
   const groups = (params.filters.group ?? []).filter(isBankGroup);
   if (groups.length) conds.push(inArray(b.accountingGroup, groups));
   if (params.filters.category?.length) conds.push(inArray(b.categoryCode, params.filters.category));
+  if (params.filters.account?.length) conds.push(inArray(b.bankAccountId, params.filters.account));
   if (options.direction === "IN") conds.push(sql`${b.amount} > 0`);
   if (options.direction === "OUT") conds.push(sql`${b.amount} < 0`);
   if (options.onlyUnclassified) conds.push(eq(b.accountingGroup, "UNCLASSIFIED"));
@@ -197,6 +200,9 @@ export async function listBankAccounts() {
       tienRa: sql<number>`coalesce(sum(case when ${b.amount} < 0 then -${b.amount} else 0 end), 0)`.as("tien_ra"),
       lanVaoGanNhat: sql<Date | null>`max(${b.txnAt}) filter (where ${b.amount} > 0)`.as("lan_vao_gan_nhat"),
       lanRaGanNhat: sql<Date | null>`max(${b.txnAt}) filter (where ${b.amount} < 0)`.as("lan_ra_gan_nhat"),
+      // Đếm riêng cho TÀI KHOẢN này — số tổng ở `unclassifiedBankCount()` là của cả sổ, không giúp
+      // chủ shop biết tài khoản nào đang tồn đọng việc phân loại.
+      chuaPhanLoai: sql<number>`count(*) filter (where ${b.accountingGroup} = 'UNCLASSIFIED')`.as("chua_phan_loai"),
     })
     .from(b)
     .where(isNotNull(b.bankAccountId))
@@ -221,6 +227,7 @@ export async function listBankAccounts() {
       tienRa: sql<number>`coalesce(${soLieu.tienRa}, 0)`,
       lanVaoGanNhat: soLieu.lanVaoGanNhat,
       lanRaGanNhat: soLieu.lanRaGanNhat,
+      chuaPhanLoai: sql<number>`coalesce(${soLieu.chuaPhanLoai}, 0)`,
     })
     .from(a)
     .leftJoin(soLieu, eq(soLieu.bankAccountId, a.id))
@@ -232,10 +239,27 @@ export async function listBankAccounts() {
     soGiaoDich: Number(r.soGiaoDich),
     tienVao: Number(r.tienVao),
     tienRa: Number(r.tienRa),
+    chuaPhanLoai: Number(r.chuaPhanLoai),
   }));
 }
 
 export type BankAccountRow = Awaited<ReturnType<typeof listBankAccounts>>[number];
+
+/**
+ * Lần đối chiếu API SePay gần nhất — job `sepay_reconcile` quét TOÀN BỘ giao dịch của mọi tài
+ * khoản SePay trong một lượt (không tách theo từng tài khoản), nên đây là một mốc DÙNG CHUNG cho
+ * mọi tài khoản `provider = 'SEPAY'`. Tài khoản khai tay (sao kê tải file) không có đối chiếu tự
+ * động — `null` ở đó nghĩa là "không áp dụng", không phải "chưa từng chạy".
+ */
+export async function sepayLastReconciliation(): Promise<{ finishedAt: Date; status: string } | null> {
+  const db = await getDb();
+  const row = await db.query.syncRuns.findFirst({
+    where: and(eq(schema.syncRuns.source, "SEPAY"), eq(schema.syncRuns.job, "sepay_reconcile"), isNotNull(schema.syncRuns.finishedAt)),
+    orderBy: [desc(schema.syncRuns.finishedAt)],
+    columns: { status: true, finishedAt: true },
+  });
+  return row?.finishedAt ? { finishedAt: row.finishedAt, status: row.status } : null;
+}
 
 /** Số tài khoản đang chờ người xác nhận — để gắn số lên tab, đúng cách `giao-dich` đang làm. */
 export async function unconfirmedBankAccountCount(): Promise<number> {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, Loader2, Pencil, Power } from "lucide-react";
 import { toast } from "sonner";
@@ -29,7 +30,16 @@ import { cn } from "@/lib/utils";
  * Tiền vẫn vào sổ đầy đủ trong lúc chờ — xác nhận là việc ĐẶT TÊN và nhận trách nhiệm, không phải
  * việc cứu giao dịch bị chặn.
  */
-export function BankAccountsTab({ accounts, canManage }: { accounts: BankAccountRow[]; canManage: boolean }) {
+export function BankAccountsTab({
+  accounts,
+  canManage,
+  lastReconciliation,
+}: {
+  accounts: BankAccountRow[];
+  canManage: boolean;
+  /** Mốc chạy `sepay_reconcile` gần nhất — DÙNG CHUNG cho mọi tài khoản SePay, không phải riêng từng tài khoản. */
+  lastReconciliation: { finishedAt: Date; status: string } | null;
+}) {
   const [pending, startTransition] = useTransition();
   const [dang, setDang] = useState<BankAccountRow | null>(null);
   const [ten, setTen] = useState("");
@@ -84,6 +94,7 @@ export function BankAccountsTab({ accounts, canManage }: { accounts: BankAccount
                   <TableHead>Nguồn</TableHead>
                   <TableHead>Trạng thái</TableHead>
                   <TableHead className="text-right">Giao dịch</TableHead>
+                  <TableHead className="text-right">Chưa phân loại</TableHead>
                   <TableHead className="text-right">Tiền vào / ra</TableHead>
                   <TableHead>Gần nhất</TableHead>
                   {canManage ? <TableHead className="text-right">Thao tác</TableHead> : null}
@@ -107,7 +118,27 @@ export function BankAccountsTab({ accounts, canManage }: { accounts: BankAccount
                           {BANK_ACCOUNT_STATUS_LABEL[status]}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums">{formatNumber(a.soGiaoDich)}</TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {a.soGiaoDich > 0 ? (
+                          <Link href={`/bank?tab=giao-dich&account=${a.id}`} className="hover:underline">
+                            {formatNumber(a.soGiaoDich)}
+                          </Link>
+                        ) : (
+                          formatNumber(a.soGiaoDich)
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {a.chuaPhanLoai > 0 ? (
+                          <Link
+                            href={`/bank?tab=giao-dich&account=${a.id}&chuaphanloai=1`}
+                            className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-800 hover:underline dark:bg-amber-950/40 dark:text-amber-200"
+                          >
+                            {formatNumber(a.chuaPhanLoai)}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-[12px] tabular-nums">
                         <div className="text-emerald-700 dark:text-emerald-400">+{formatVND(a.tienVao, { compact: true })}</div>
                         <div className="text-rose-700 dark:text-rose-400">−{formatVND(a.tienRa, { compact: true })}</div>
@@ -116,6 +147,11 @@ export function BankAccountsTab({ accounts, canManage }: { accounts: BankAccount
                         <div>{a.lastSeenAt ? `gói tin ${formatDateTime(a.lastSeenAt)}` : "chưa nhận gói tin nào"}</div>
                         {a.lanVaoGanNhat ? <div>vào {formatDateTime(a.lanVaoGanNhat)}</div> : null}
                         {a.lanRaGanNhat ? <div>ra {formatDateTime(a.lanRaGanNhat)}</div> : null}
+                        {a.provider === "SEPAY" ? (
+                          <div>{lastReconciliation ? `đối chiếu API ${formatDateTime(lastReconciliation.finishedAt)}` : "chưa đối chiếu API lần nào"}</div>
+                        ) : (
+                          <div>không đối chiếu tự động (sao kê tay)</div>
+                        )}
                       </TableCell>
                       {canManage ? (
                         <TableCell className="text-right">
@@ -154,6 +190,8 @@ export function BankAccountsTab({ accounts, canManage }: { accounts: BankAccount
         <p className="text-[11.5px] text-muted-foreground">
           Ngừng dùng một tài khoản <b>không xoá và không ẩn</b> giao dịch đã có — tiền đã vào sổ là chứng từ, không phải cấu hình.
           Gói tin mới vẫn được ghi để không mất dữ liệu; nhãn chỉ giúp người đọc báo cáo hiểu vì sao dòng tiền dừng lại.
+          Mốc “đối chiếu API” là của <b>một lượt quét chung cho mọi tài khoản SePay</b>, không tách riêng theo từng tài khoản —
+          tài khoản khai tay (sao kê tải file) không có đường đối chiếu tự động.
         </p>
       </div>
 

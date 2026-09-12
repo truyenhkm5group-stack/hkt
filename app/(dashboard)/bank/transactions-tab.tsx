@@ -6,25 +6,32 @@ import { BankTransactionsTable } from "@/app/(dashboard)/bank/transactions-table
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
-import { BANK_SORTABLE, bankFacets, bankSummary, listBankTransactions, type BankListOptions } from "@/lib/queries/bank";
+import { BANK_SORTABLE, bankFacets, bankSummary, listBankAccounts, listBankTransactions, type BankListOptions } from "@/lib/queries/bank";
 import { formatNumber, formatVND } from "@/lib/format";
 import { param, parseListParams, type Period, type SearchParams } from "@/lib/search-params";
-import type { BankDirection } from "@/lib/constants/bank";
+import { maskAccountNumber, type BankDirection } from "@/lib/constants/bank";
 
 export async function BankTransactionsTab({ raw, period, canWrite }: { raw: SearchParams; period: Period; canWrite: boolean }) {
-  const params = parseListParams(raw, { defaultSort: "txnAt", filterKeys: ["group", "category"], sortable: BANK_SORTABLE, defaultPeriod: "month", defaultPageSize: 50 });
+  const params = parseListParams(raw, { defaultSort: "txnAt", filterKeys: ["group", "category", "account"], sortable: BANK_SORTABLE, defaultPeriod: "month", defaultPageSize: 50 });
   const direction = (["IN", "OUT"].includes(param(raw, "chieu")) ? param(raw, "chieu") : "ANY") as BankDirection;
   const onlyUnclassified = param(raw, "chuaphanloai") === "1";
   const options: BankListOptions = { direction, onlyUnclassified };
 
-  const [{ rows, total, pageCount }, summary, facets, unfilteredSummary] = await Promise.all([
+  const [{ rows, total, pageCount }, summary, facets, unfilteredSummary, accounts] = await Promise.all([
     listBankTransactions(params, options),
     bankSummary(params, options),
     bankFacets(params, options),
     // Số "chưa phân loại" trên nút bấm phải là số của CẢ KỲ, không phải của bộ lọc đang bật —
     // nếu không, bật nút xong con số tự đổi và không ai hiểu mình còn bao nhiêu việc.
     bankSummary({ ...params, filters: {}, q: "" }, { direction: "ANY", onlyUnclassified: false }),
+    // Chỉ để dựng bộ lọc "Tài khoản" — bảng tài khoản rất nhỏ nên không cần một truy vấn riêng.
+    listBankAccounts(),
   ]);
+  const accountOptions = accounts.map((a) => ({
+    value: a.id,
+    label: `${a.label || a.gateway || "?"} · ${maskAccountNumber(a.accountNumber)}`,
+    count: a.soGiaoDich,
+  }));
 
   /**
    * SỔ RỖNG LÀ "CHƯA NHẬP", KHÔNG PHẢI "KHÔNG CHI ĐỒNG NÀO".
@@ -94,6 +101,7 @@ export async function BankTransactionsTab({ raw, period, canWrite }: { raw: Sear
         searchPlaceholder="Nội dung, đối tác, mã GD…"
         period={{ defaultKey: "month" }}
         facets={[
+          ...(accountOptions.length > 1 ? [{ key: "account", label: "Tài khoản", options: accountOptions, single: true }] : []),
           { key: "group", label: "Nhóm kế toán", options: facets.groups },
           ...(facets.categories.length ? [{ key: "category", label: "Mã danh mục", options: facets.categories }] : []),
         ]}

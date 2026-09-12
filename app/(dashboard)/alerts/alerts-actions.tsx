@@ -393,6 +393,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2">
           <Checkbox checked={form.enabled.addressNotNormalized} onCheckedChange={(v) => toggle("addressNotNormalized", v === true)} /> Địa chỉ chưa chuẩn hoá nên chưa đẩy được sang đơn vị vận chuyển
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.bankAccountUnconfirmed} onCheckedChange={(v) => toggle("bankAccountUnconfirmed", v === true)} /> Tài khoản ngân hàng mới do webhook phát hiện, chưa ai xác nhận
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>
