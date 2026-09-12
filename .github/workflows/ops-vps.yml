@@ -14,6 +14,7 @@ on:
           - status              # trạng thái container + health
           - perf                # tài nguyên VPS (CPU/RAM từng container) và thời gian phản hồi vài trang
           - disk                # ổ đĩa còn bao nhiêu và ai đang chiếm chỗ (Docker, backup, log)
+          - docker-prune        # giải phóng ổ đĩa: gỡ ảnh Docker cũ (KHÔNG đụng dữ liệu, KHÔNG dừng dịch vụ)
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
@@ -140,6 +141,39 @@ jobs:
                 docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' | head -20; echo
                 echo "── Thư mục lớn ──"
                 du -sh /var/lib/docker /var/lib/containerd /root/backups /root/erp 2>/dev/null | sort -h ;;
+              docker-prune)
+                # ═══ GIẢI PHÓNG Ổ ĐĨA — CHỈ ẢNH DOCKER, KHÔNG ĐỤNG MỘT BYTE DỮ LIỆU NÀO ═══
+                #
+                # SỰ CỐ #242/#243 (12/09/2026): ổ đĩa đầy 100% (39G/39G, 0 byte trống). Deploy #242
+                # chết lúc giải nén image; #243 chết SỚM HƠN — `git pull` trên VPS không ghi nổi
+                # loose object. Tức là bản sửa nằm trong `install-vps.sh` KHÔNG THỂ tới được máy
+                # chủ, vì máy chủ quá đầy để tải nó về. Thao tác này là lối ra khỏi vòng luẩn quẩn
+                # đó: workflow vận hành nhúng thẳng script qua SSH, không cần `git pull`.
+                #
+                # NGUYÊN NHÂN: `docker image prune -f` chỉ xoá ảnh KHÔNG TAG, trong khi mỗi lần
+                # deploy để lại một ảnh `ghcr.io/<kho>:<sha>` CÓ TAG (~2,6 GB). Đo được ngày
+                # 12/09: 12 ảnh như vậy, 26,33 GB có thể thu hồi trên tổng 31,74 GB.
+                #
+                # VÌ SAO AN TOÀN: không có dữ liệu nào ở đây. CSDL nằm trong volume Docker (không
+                # đụng), sao lưu ở /root/backups (không đụng), mã nguồn ở /root/erp (không đụng).
+                # Ảnh Docker là hiện vật KÉO LẠI ĐƯỢC từ GHCR. Và Docker TỪ CHỐI xoá ảnh của
+                # container đang chạy, nên thao tác này không thể làm sập bản đang chạy.
+                echo "── TRƯỚC ──"; df -h /; docker system df; echo
+                # 1. Mọi tag theo SHA của kho này. Ảnh đang chạy sống tiếp nhờ tag `erp-app:local`.
+                { docker images --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr\.io/truyenhkm5group-stack/hkt:' || true; } | while read -r tag_cu; do
+                  echo "  gỡ tag $tag_cu"; docker rmi "$tag_cu" >/dev/null 2>&1 || echo "    (đang dùng, giữ lại)"
+                done
+                # 2. Ảnh của đường DỰNG-TRÊN-VPS cũ. Từ khi CI dựng image (deploy #228 trở đi) không
+                #    ai dùng chúng nữa; `docker rmi` sẽ từ chối nếu có container nào còn chạy từ đó.
+                for tag_cu in erp-app:latest erp-scheduler:latest; do
+                  docker rmi "$tag_cu" >/dev/null 2>&1 && echo "  gỡ $tag_cu" || true
+                done
+                # 3. Ảnh không tag + bộ nhớ đệm dựng. VPS KHÔNG còn dựng image nữa nên đệm là rác thuần.
+                docker image prune -f >/dev/null 2>&1 || true
+                docker builder prune -af >/dev/null 2>&1 || true
+                echo; echo "── SAU ──"; df -h /; docker system df; echo
+                echo "── Dịch vụ vẫn chạy? ──"; $C ps
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null; echo ;;
               logs)
                 $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
               sync-pancake-all)

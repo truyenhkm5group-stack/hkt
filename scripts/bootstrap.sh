@@ -32,7 +32,16 @@ git_retry() {
     sleep $((attempt * 10))
     attempt=$((attempt + 1))
   done
-  echo "::error::Không kết nối được github.com sau 4 lần thử. Kiểm tra mạng của VPS rồi chạy lại."
+  # HẾT ĐĨA TRÔNG HỆT MẤT MẠNG Ở ĐÂY — và #243 đã báo nhầm đúng như vậy: `git` chết với
+    # "No space left on device" nhưng thông báo lại bảo đi kiểm tra mạng. Người trực mất thời gian
+    # soi một đường mạng hoàn toàn bình thường. Nói đúng nguyên nhân thì rẻ hơn nhiều.
+    DISK_FREE_MB="$(df -Pm /root 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [ "${DISK_FREE_MB:-9999}" -lt 500 ]; then
+      echo "::error::HẾT Ổ ĐĨA (còn ${DISK_FREE_MB} MB) — git không ghi nổi, KHÔNG phải lỗi mạng."
+      echo "         Chạy Actions → 'Vận hành ERP trên VPS' → docker-prune để giải phóng, rồi deploy lại."
+      exit 1
+    fi
+    echo "::error::Không kết nối được github.com sau 4 lần thử. Kiểm tra mạng của VPS rồi chạy lại."
   return 1
 }
 
