@@ -162,6 +162,12 @@ export function applyOverlay(item: WorkItem, ov: WorkOverlay | undefined): WorkI
 
 const HOUR = 3_600_000;
 
+/**
+ * Hạn giờ cho MỘT adapter. 2,5 giây: đủ rộng cho mọi nguồn đọc thẳng từ bảng (đo được 50–260ms
+ * trên production), đủ hẹp để màn hình mở đầu ca không bao giờ phải chờ engine quảng cáo tính lại.
+ */
+const ADAPTER_TIMEOUT_MS = 2_500;
+
 function hoursSince(d: Date, now: number): number {
   return Math.max(0, (now - d.getTime()) / HOUR);
 }
@@ -631,12 +637,36 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
   const want = (s: WorkSource) => !opts.sources || opts.sources.includes(s);
   const failed: { source: WorkSource; error: string }[] = [];
 
+  /*
+    ═══ MỘT NGUỒN CHẬM KHÔNG ĐƯỢC GIỮ CẢ HÀNG ĐỢI LÀM CON TIN ═══
+
+    ĐO ĐƯỢC trên production 12/09/2026 (smoke sau deploy #245): `/ads` mất **6,1 giây** khi đệm
+    nguội — `getAdsDecision` là engine nặng nhất kho này. Và `adaptAdsDecisions` gọi ĐÚNG engine
+    đó. Trong lượt smoke, `/work` chỉ đạt 76ms vì `/ads` chạy trước đã làm nóng `memo()`.
+
+    Nhân viên mở `/work` ĐẦU CA — lúc đệm chắc chắn nguội. Tức là con số thật họ gặp không phải
+    76ms mà là khoảng sáu giây, trên đúng màn hình mở đầu ngày làm việc.
+
+    Nên: mỗi adapter có hạn giờ riêng. Quá hạn thì nguồn đó trả rỗng và ĐƯỢC NÊU TÊN ở `failed` —
+    giao diện đã có sẵn dải cảnh báo "Danh sách đang thiếu một phần". Mất một mảng việc kèm lời
+    nói rõ thì tốt hơn nhiều so với bắt cả đội chờ sáu giây mỗi sáng.
+
+    Lượt gọi quá hạn KHÔNG bị huỷ: nó chạy tiếp và làm nóng `memo()`, nên lần mở sau đã có đủ.
+  */
   const guard = async (source: WorkSource, run: () => Promise<WorkItem[]>): Promise<WorkItem[]> => {
+    let hetGio: NodeJS.Timeout | undefined;
     try {
-      return await run();
+      return await Promise.race([
+        run(),
+        new Promise<WorkItem[]>((_, reject) => {
+          hetGio = setTimeout(() => reject(new Error(`quá ${Math.round(ADAPTER_TIMEOUT_MS / 1000)}s — đang tính lại, mở lại sau ít giây là có`)), ADAPTER_TIMEOUT_MS);
+        }),
+      ]);
     } catch (e) {
       failed.push({ source, error: e instanceof Error ? e.message : String(e) });
       return [];
+    } finally {
+      if (hetGio) clearTimeout(hetGio);
     }
   };
 

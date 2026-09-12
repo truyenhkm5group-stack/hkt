@@ -428,7 +428,21 @@ export async function testWorkOs(db: Db) {
   const soDongChieu = await db.select({ n: sql<number>`count(*)::int` }).from(schema.workItems).where(eq(schema.workItems.authority, "SOURCE"));
   assert.ok(Number(soDongChieu[0].n) <= cuoi.items.length, "số dòng ghi chú KHÔNG được lớn hơn số việc — nó là lớp mỏng, không phải bản sao");
 
-  /* ═══════════ 19 · HOÃN PHẢI Ở TƯƠNG LAI ═══════════ */
+  /* ═══════════ 19 · MỘT NGUỒN CHẬM KHÔNG GIỮ CẢ HÀNG ĐỢI LÀM CON TIN ═══════════ */
+  /*
+    Đo trên production 12/09: `/ads` mất 6,1s khi đệm nguội, và `adaptAdsDecisions` gọi đúng engine
+    đó. Nhân viên mở `/work` đầu ca là lúc đệm chắc chắn nguội. Hạn giờ mỗi adapter biến "cả đội
+    chờ sáu giây" thành "mất một mảng việc, có nói rõ".
+  */
+  const { collectWorkItems: thu } = await import("@/lib/queries/work-adapters");
+  const batDau = Date.now();
+  const nhanh = await thu({ now: NOW, sources: ["MANUAL_TASK", "RECURRING_TASK"] });
+  assert.ok(Date.now() - batDau < 5_000, "hàng đợi chỉ đọc bảng phải trả về nhanh");
+  assert.deepEqual(nhanh.failed, [], "nguồn đọc thẳng từ bảng không được quá hạn");
+  // Nguồn quá hạn phải được NÊU TÊN, không im lặng biến mất — giao diện dựa vào `failed` để cảnh báo.
+  assert.ok(Array.isArray(nhanh.failed), "`failed` luôn là danh sách, kể cả khi rỗng");
+
+  /* ═══════════ 20 · HOÃN PHẢI Ở TƯƠNG LAI ═══════════ */
   const hoanSai = await snoozeWork(csKey, T(5), linh);
   assert.ok("error" in hoanSai, "hẹn về quá khứ là vô nghĩa, phải bị từ chối");
 
