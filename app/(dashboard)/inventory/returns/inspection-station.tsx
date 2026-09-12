@@ -13,7 +13,7 @@ import { scanReturnByCode, submitBulkInspection, submitReturnInspection } from "
 import { CONDITION_ACTION_LABEL, CONDITION_LABEL, CONDITION_NEEDS_NOTE, type ReturnCondition } from "@/lib/constants/returns-condition";
 import { formatNumber } from "@/lib/format";
 import type { InspectionItem } from "@/lib/returns/inspection";
-import type { ItemsBasis } from "@/lib/returns/product-context";
+import type { ItemsBasis, OrderLinkBasis } from "@/lib/returns/product-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -44,8 +44,17 @@ export type Row = {
   /** `null` = chưa ghép được đơn ⇒ CHƯA BIẾT số kỳ vọng, không phải 0. */
   expectedQty: number | null;
   itemsBasis: ItemsBasis;
+  linkBasis: OrderLinkBasis;
   ageDays: number;
   items: InspectionItem[];
+};
+
+/** Kiện không có dòng hàng để đếm: nói đúng VÌ SAO — chưa ghép được đơn khác hẳn đơn không còn hàng. */
+const KHONG_DONG_HANG: Record<OrderLinkBasis, string> = {
+  AMBIGUOUS: "Mã gốc lần ra NHIỀU đơn — ERP không chọn hộ. Đếm theo thực tế, ghi rõ mã hàng ở ô lý do; CS gắn đơn sau.",
+  UNRESOLVED: "Chưa lần ra đơn nào cho kiện này — đếm theo thực tế và ghi rõ mã hàng ở ô lý do.",
+  DIRECT: "Đơn không còn dòng hàng nào trong ERP — đếm theo thực tế và ghi rõ ở ô lý do.",
+  RETURN_LEG: "Đơn không còn dòng hàng nào trong ERP — đếm theo thực tế và ghi rõ ở ô lý do.",
 };
 
 const NHANH: { condition: ReturnCondition; icon: typeof Check; tone: string }[] = [
@@ -295,7 +304,7 @@ function KienHang({
           {/* Từng mã hàng kèm màu / size — thứ người đếm cần nhìn khi mở kiện ra. */}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {row.items.length === 0 ? (
-              <span className="text-[12px] text-muted-foreground">Đơn không còn dòng hàng nào trong ERP — đếm theo thực tế và ghi rõ ở ô lý do.</span>
+              <span className="text-[12px] text-muted-foreground">{KHONG_DONG_HANG[row.linkBasis]}</span>
             ) : (
               row.items.map((it, i) => (
                 <span key={`${it.sku}-${i}`} className="rounded-md border bg-muted/40 px-2 py-1 text-[12px]">
@@ -320,8 +329,9 @@ function KienHang({
             <Button size="sm" className="h-9 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => onKetLuan("RESTOCKABLE", soDem)} disabled={soDem <= 0}>
               <Check className="size-4" /> {thieu === null ? `Nhận ${soDem} (chưa có mốc kỳ vọng)` : thieu > 0 ? `Nhận ${soDem}, hụt ${thieu}` : "Nhận đủ"}
             </Button>
+            {/* Kiện chưa ghép được đơn: số "không bán được" là số ĐẾM TAY, không có mốc kỳ vọng nào để suy. */}
             {NHANH.filter((n) => n.condition !== "RESTOCKABLE").map(({ condition, icon: Icon }) => (
-              <Button key={condition} size="sm" variant="outline" className="h-9" onClick={() => onKetLuan(condition)}>
+              <Button key={condition} size="sm" variant="outline" className="h-9" onClick={() => onKetLuan(condition, row.expectedQty === null && soDem > 0 ? soDem : undefined)}>
                 <Icon className="size-4" /> {CONDITION_ACTION_LABEL[condition]}
               </Button>
             ))}

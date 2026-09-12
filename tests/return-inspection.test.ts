@@ -89,6 +89,22 @@ export async function testReturnInspection(db: Db) {
   assert.ok("error" in demLai, "đếm lại lần hai sẽ cộng tồn hai lần — phải bị chặn");
   assert.equal(await receiptQty(), 3, "không có phiếu tái nhập thứ hai");
 
+  // ───────── 6b. Hai lượt bấm CÙNG LÚC trên một kiện: đúng một lượt được ghi ─────────
+  // Trước đây đường đếm nhanh kiểm tra "đã đếm chưa" rồi mới ghi, hai bước rời nhau: hai người bấm
+  // trong cùng một giây thì cả hai qua được bước kiểm, và tồn cộng hai lần. Giờ khoá dòng kiện trong
+  // một giao dịch nên lượt sau phải chờ, thấy INSPECTED và dừng — không có phiếu kho thứ hai.
+  await db.insert(schema.shipments).values({ id: "ins-ship-race", orderId: "ins-order-1", vtpOrderNumber: "INS001R", stage: "RETURNED", returnedAt: new Date("2026-08-21T00:00:00Z") }).onConflictDoNothing();
+  await markReturnsArrived(["ins-ship-race"], "nguoi-be-hang");
+  const dua = await Promise.all([
+    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: "kho-a" }),
+    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: "kho-b" }),
+  ]);
+  assert.equal(dua.filter((r) => "ok" in r).length, 1, "hai lượt cùng lúc thì đúng MỘT lượt được ghi");
+  assert.equal(dua.filter((r) => "error" in r).length, 1, "lượt còn lại phải báo lỗi, không im lặng");
+  const raceRows = await db.select({ q: schema.stockReceiptItems.quantity }).from(schema.stockReceiptItems).where(eq(schema.stockReceiptItems.shipmentId, "ins-ship-race"));
+  assert.equal(raceRows.reduce((a, r) => a + Number(r.q ?? 0), 0), 2, "tồn chỉ tăng đúng 2 — không phải 4");
+  assert.equal(raceRows.length, 1, "chỉ MỘT phiếu tái nhập cho kiện đó");
+
   // ───────── 7. Đã đếm rồi thì không huỷ ngược được ─────────
   const undoSau = await undoReturnArrived(["ins-ship-1"]);
   assert.equal(undoSau.count, 0, "kiện đã đếm thì không huỷ ghi nhận được");

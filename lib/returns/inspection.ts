@@ -1,8 +1,8 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import type { ReturnCondition } from "@/lib/constants/returns-condition";
 import { ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, isItemCondition, itemHasDiscrepancy, type ItemCondition } from "@/lib/constants/return-lifecycle";
-import { returnProductContext, type ItemsBasis } from "@/lib/returns/product-context";
+import { returnProductContext, type ItemsBasis, type OrderLinkBasis } from "@/lib/returns/product-context";
 
 /**
  * ───────────── VÒNG ĐỜI KIỂM HÀNG HOÀN ─────────────
@@ -24,6 +24,8 @@ import { returnProductContext, type ItemsBasis } from "@/lib/returns/product-con
 
 const ins = schema.returnInspections;
 const s = schema.shipments;
+/** Nơi ghi phiếu: CSDL thường hoặc giao dịch đang mở — phiếu tái nhập phải nằm CÙNG giao dịch với việc lật trạng thái kiện. */
+type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 
 /**
@@ -103,30 +105,46 @@ export async function recordInspection(input: InspectionInput): Promise<Inspecti
   if (input.condition === "RESTOCKABLE" && restock <= 0) return { error: "Kết luận bán lại được thì phải đếm được ít nhất một món" };
   if (input.condition !== "RESTOCKABLE" && !note) return { error: "Kết luận không bán được thì phải ghi rõ vì sao" };
 
-  // CHỈ phần bán lại được mới sinh phiếu tái nhập — phiếu là nơi duy nhất tồn kho thay đổi.
-  const receiptId = restock > 0 ? await createRestockReceipt(row.orderId, input.shipmentId, restock, note, input.actor) : null;
+  // MỘT GIAO DỊCH, CÓ KHOÁ — giống hệt đường đếm theo món. Hai người (hoặc một người bấm đúp) cùng
+  // kết luận một kiện: người sau phải chờ khoá, thấy INSPECTED và dừng; phiếu kho của lượt sau bị huỷ
+  // cùng giao dịch nên tồn không cộng hai lần.
+  let receiptId: string | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      const [locked] = await tx.select({ status: ins.status }).from(ins).where(eq(ins.id, row.id)).for("update");
+      if (!locked || locked.status === "INSPECTED") throw new Error("DA_DEM_ROI");
 
-  await db
-    .update(ins)
-    .set({
-      status: "INSPECTED",
-      condition: input.condition,
-      restockQty: receiptId ? restock : 0,
-      unsellableQty: unsellable,
-      note,
-      inspectedAt: new Date(),
-      inspectedBy: input.actor,
-      stockReceiptId: receiptId,
-      updatedAt: new Date(),
-    })
-    .where(eq(ins.id, row.id));
+      // CHỈ phần bán lại được mới sinh phiếu tái nhập — phiếu là nơi duy nhất tồn kho thay đổi.
+      receiptId = restock > 0 ? await createRestockReceipt(tx, row.orderId, input.shipmentId, restock, note, input.actor) : null;
 
-  // Đóng kiện trên vận đơn: từ đây nó thôi nằm trong "hàng hoàn chờ xử lý", và phần đếm thiếu so với
-  // số đã xuất hiện ra thành HÀNG HỤT trên sổ kho thay vì biến mất.
-  await db
-    .update(s)
-    .set({ returnReceivedAt: new Date(), returnReceivedBy: input.actor, returnReceivedNote: note || null, updatedAt: new Date() })
-    .where(and(eq(s.id, input.shipmentId), isNull(s.returnReceivedAt)));
+      const flipped = await tx
+        .update(ins)
+        .set({
+          status: "INSPECTED",
+          condition: input.condition,
+          restockQty: receiptId ? restock : 0,
+          unsellableQty: unsellable,
+          note,
+          inspectedAt: new Date(),
+          inspectedBy: input.actor,
+          stockReceiptId: receiptId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(ins.id, row.id), eq(ins.status, "RECEIVED")))
+        .returning({ id: ins.id });
+      if (!flipped.length) throw new Error("DA_DEM_ROI");
+
+      // Đóng kiện trên vận đơn: từ đây nó thôi nằm trong "hàng hoàn chờ xử lý", và phần đếm thiếu so với
+      // số đã xuất hiện ra thành HÀNG HỤT trên sổ kho thay vì biến mất.
+      await tx
+        .update(s)
+        .set({ returnReceivedAt: new Date(), returnReceivedBy: input.actor, returnReceivedNote: note || null, updatedAt: new Date() })
+        .where(and(eq(s.id, input.shipmentId), isNull(s.returnReceivedAt)));
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message === "DA_DEM_ROI") return { error: "Kiện này vừa được người khác đếm — không ghi lại lần hai" };
+    throw e;
+  }
 
   return { ok: true, restocked: receiptId ? restock : 0, receiptId };
 }
@@ -138,9 +156,8 @@ export async function recordInspection(input: InspectionInput): Promise<Inspecti
  * Trả `null` khi không mẫu mã nào của đơn khớp được với danh mục ERP: thà không ghi còn hơn ghi vào
  * một mẫu mã đoán bừa — tồn sai một mẫu mã còn khó phát hiện hơn tồn thiếu.
  */
-async function createRestockReceipt(orderId: string | null, shipmentId: string, restock: number, note: string, actor: string): Promise<string | null> {
+async function createRestockReceipt(db: DbLike, orderId: string | null, shipmentId: string, restock: number, note: string, actor: string): Promise<string | null> {
   if (!orderId) return null;
-  const db = await getDb();
   const items = await db
     .select({ variantId: schema.orderItems.variantId, qty: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)` })
     .from(schema.orderItems)
@@ -196,6 +213,8 @@ export type PendingInspection = {
   expectedQty: number | null;
   /** Căn cứ của danh sách món: có phiếu trả từng dòng, hay chỉ suy từ cả đơn, hay không có gì. */
   itemsBasis: ItemsBasis;
+  /** Kiện ghép với đơn bằng cách nào — AMBIGUOUS/UNRESOLVED là "chưa ghép được", không phải "đơn trống". */
+  linkBasis: OrderLinkBasis;
   ageDays: number;
   /**
    * Từng dòng hàng của đơn: mã, tên, màu, size, số lượng.
@@ -295,6 +314,7 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
       // CHƯA BIẾT là null — không ép về 0, và không dùng `||` (nó nuốt luôn một số 0 thật).
       expectedQty: itemsBasis === "NONE" ? null : items.reduce((a, x) => a + x.quantity, 0),
       itemsBasis,
+      linkBasis: them?.basis ?? (r.orderId ? "DIRECT" : "UNRESOLVED"),
       ageDays: Math.floor((now - new Date(r.receivedAt).getTime()) / 86_400_000),
       items,
     };
