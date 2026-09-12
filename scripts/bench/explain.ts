@@ -63,6 +63,7 @@ async function main() {
   const { listOrders, orderSummary } = await import("@/lib/queries/orders");
   const { listShipments, shipmentSummary } = await import("@/lib/queries/shipments");
   const { getAdsRoas } = await import("@/lib/queries/ads-roas");
+  const { getAdsDecision } = await import("@/lib/queries/ads-decision");
   const { getAdsPerformance } = await import("@/lib/queries/ads-performance");
   const { getProductIntelligence } = await import("@/lib/queries/product-intelligence");
   const { dataQualitySummary } = await import("@/lib/queries/data-quality");
@@ -81,6 +82,7 @@ async function main() {
     { page: "Orders", run: () => Promise.all([listOrders(orderParams), orderSummary(orderParams)]) },
     { page: "Shipments", run: () => Promise.all([listShipments(shipmentParams), shipmentSummary(shipmentParams)]) },
     { page: "Ads", run: () => Promise.all([getAdsRoas(month, "campaign"), getAdsPerformance(month)]) },
+    { page: "AdsDecision", run: () => Promise.all([getAdsDecision(month, "campaign"), getAdsDecision(month, "product")]) },
     { page: "Product", run: () => getProductIntelligence({ period: month, limit: 50 }) },
     { page: "DataQuality", run: () => Promise.all([dataQualitySummary(all), getControlTower()]) },
     { page: "GTC", run: () => getReturnRateSummary(month, "") },

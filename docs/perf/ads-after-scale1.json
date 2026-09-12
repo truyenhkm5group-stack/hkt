@@ -1,0 +1,565 @@
+{
+  "label": "ads-after-scale1",
+  "scale": 1,
+  "rounds": 3,
+  "materialized": true,
+  "node": "v24.14.0",
+  "engine": "PGlite (Postgres 16 → WASM, một luồng)",
+  "measuredAt": "2026-09-12T04:05:45.100Z",
+  "rows": {
+    "products": 12,
+    "product_variants": 72,
+    "customers": 1000,
+    "orders": 1440,
+    "order_items": 2918,
+    "shipments": 1320,
+    "shipment_events": 5188,
+    "cod_statement_lines": 631,
+    "ad_spends": 1448,
+    "fb_ads": 32,
+    "stock_receipt_items": 480,
+    "expenses": 61,
+    "notifications": 300
+  },
+  "results": [
+    {
+      "name": "getAdsDecision(campaign)",
+      "note": "Bảng quyết định theo chiến dịch",
+      "coldMs": 22.6,
+      "warmMs": 0.2,
+      "p95Ms": 26.4,
+      "queries": 3,
+      "dbMs": 48.1,
+      "rows": 17,
+      "payloadKb": 5.8,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 18.92,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(\"ad_spends\".\"campaign_id\", \"ad_spends\".\"campaign\"), max(\"campaign\"), coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and \"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?) group by ",
+          "count": 1,
+          "ms": 16.1,
+          "rows": 8
+        },
+        {
+          "sql": "select \"d_key\", max(coalesce(nullif(\"d_campaign_name\", '?'), \"d_ad_id\")), count(*) filter (where \"d_outcome\" <> '?'), count(*) filter (where \"d_outcome\" = '?'), count(*) filter (where \"d_outcome\" in ('?','?')), count(*) filter (where \"d_out",
+          "count": 1,
+          "ms": 13.04,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "name": "getAdsDecision(product)",
+      "note": "Bảng quyết định theo mã hàng",
+      "coldMs": 13.3,
+      "warmMs": 0.1,
+      "p95Ms": 14.7,
+      "queries": 3,
+      "dbMs": 25.3,
+      "rows": 25,
+      "payloadKb": 8.4,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 10.03,
+          "rows": 1
+        },
+        {
+          "sql": "select \"ad_spends\".\"product_id\", max(\"campaign\"), coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and \"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?) group by \"ad_spends\".\"product_id\"",
+          "count": 1,
+          "ms": 8.03,
+          "rows": 12
+        },
+        {
+          "sql": "select \"p_key\", max(\"p_name\"), count(distinct \"p_order_id\") filter (where \"p_outcome\" <> '?'), count(distinct \"p_order_id\") filter (where \"p_outcome\" = '?'), count(distinct \"p_order_id\") filter (where \"p_outcome\" in ('?','?')), count(distin",
+          "count": 1,
+          "ms": 7.26,
+          "rows": 12
+        }
+      ]
+    },
+    {
+      "name": "getAdsDecision(adset)",
+      "note": "Bảng quyết định theo nhóm QC",
+      "coldMs": 13.3,
+      "warmMs": 0,
+      "p95Ms": 14.4,
+      "queries": 2,
+      "dbMs": 16.4,
+      "rows": 2,
+      "payloadKb": 0.5,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 9.23,
+          "rows": 1
+        },
+        {
+          "sql": "select \"d_key\", max(\"d_key\"), count(*) filter (where \"d_outcome\" <> '?'), count(*) filter (where \"d_outcome\" = '?'), count(*) filter (where \"d_outcome\" in ('?','?')), count(*) filter (where \"d_outcome\" in ('?','?','?')), coalesce(sum(\"d_rev",
+          "count": 1,
+          "ms": 7.14,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "name": "getAdsDecision(ad)",
+      "note": "Bảng quyết định theo mẩu QC",
+      "coldMs": 11.4,
+      "warmMs": 0,
+      "p95Ms": 12.6,
+      "queries": 2,
+      "dbMs": 18.5,
+      "rows": 23,
+      "payloadKb": 15.4,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 10.44,
+          "rows": 1
+        },
+        {
+          "sql": "select \"d_key\", max(coalesce(nullif(\"d_ad_name\", '?'), \"d_ad_id\")), count(*) filter (where \"d_outcome\" <> '?'), count(*) filter (where \"d_outcome\" = '?'), count(*) filter (where \"d_outcome\" in ('?','?')), count(*) filter (where \"d_outcome\" ",
+          "count": 1,
+          "ms": 8.08,
+          "rows": 22
+        }
+      ]
+    },
+    {
+      "name": "getAdsRoas(campaign)",
+      "note": "Bảng ROAS theo chiến dịch",
+      "coldMs": 21.1,
+      "warmMs": 0,
+      "p95Ms": 24.2,
+      "queries": 3,
+      "dbMs": 22.1,
+      "rows": 17,
+      "payloadKb": 3.4,
+      "slowest": [
+        {
+          "sql": "select \"f_key\", max(coalesce(nullif(\"f_campaign_name\", '?'), \"f_ad_id\")), count(*) filter (where \"f_outcome\" <> '?'), coalesce(sum(\"f_revenue\") filter (where \"f_outcome\" <> '?'), 0), count(*) filter (where \"f_outcome\" = '?'), coalesce(sum(\"",
+          "count": 1,
+          "ms": 12.4,
+          "rows": 8
+        },
+        {
+          "sql": "select count(*) filter (where not ((coalesce( (select fa.campaign_id from fb_ads fa where fa.id = \"orders\".\"ad_id\"), (select p.campaign_id from ( select fa.post_id, min(fa.campaign_id) as campaign_id from fb_ads fa where fa.post_id is not n",
+          "count": 1,
+          "ms": 8.28,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(\"campaign_id\", \"campaign\"), max(\"campaign\"), coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and \"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?) group by coalesce(\"ad_spends\".\"ca",
+          "count": 1,
+          "ms": 1.39,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "name": "getAdsRoas(ad)",
+      "note": "Bảng ROAS theo mẩu quảng cáo",
+      "coldMs": 11.5,
+      "warmMs": 0.1,
+      "p95Ms": 22.4,
+      "queries": 3,
+      "dbMs": 20,
+      "rows": 31,
+      "payloadKb": 8.2,
+      "slowest": [
+        {
+          "sql": "select \"f_key\", max(coalesce(nullif(\"f_ad_name\", '?'), \"f_ad_id\")), count(*) filter (where \"f_outcome\" <> '?'), coalesce(sum(\"f_revenue\") filter (where \"f_outcome\" <> '?'), 0), count(*) filter (where \"f_outcome\" = '?'), coalesce(sum(\"f_reve",
+          "count": 1,
+          "ms": 12.08,
+          "rows": 22
+        },
+        {
+          "sql": "select count(*) filter (where not (\"orders\".\"ad_id\" is not null and \"orders\".\"ad_id\" <> '?')), coalesce(sum(\"orders\".\"total_price_after_discount\") filter (where not (\"orders\".\"ad_id\" is not null and \"orders\".\"ad_id\" <> '?')), 0), count(*) f",
+          "count": 1,
+          "ms": 6.1,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(\"campaign_id\", \"campaign\"), max(\"campaign\"), coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and \"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?) group by coalesce(\"ad_spends\".\"ca",
+          "count": 1,
+          "ms": 1.85,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "name": "getAdsAttributionAudit",
+      "note": "Soát quy kết",
+      "coldMs": 9.1,
+      "warmMs": 4.7,
+      "p95Ms": 9.2,
+      "queries": 3,
+      "dbMs": 7.5,
+      "rows": 3,
+      "payloadKb": 3,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where \"orders\".\"ad_id\" is not null and \"orders\".\"ad_id\" <> '?'), count(*) filter (where \"orders\".\"ad_id\" is not null and \"orders\".\"ad_id\" <> '?' and exists (select 1 from fb_ads fa where fa.id = \"ad_id\")), ",
+          "count": 1,
+          "ms": 3.86,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*), coalesce(sum(\"spend\"), 0), count(*) filter (where \"account_id\" is not null and \"account_id\" <> '?'), count(*) filter (where \"campaign_id\" is not null and \"campaign_id\" <> '?'), count(*) filter (where \"product_id\" is not nul",
+          "count": 1,
+          "ms": 3.04,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*) filter (where \"missing\") from \"fb_ads\"",
+          "count": 1,
+          "ms": 0.56,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "name": "getAdsPerformance",
+      "note": "Theo marketer / mã hàng",
+      "coldMs": 183.6,
+      "warmMs": 0,
+      "p95Ms": 200,
+      "queries": 33,
+      "dbMs": 940.1,
+      "rows": 413,
+      "payloadKb": 8,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 9,
+          "ms": 159.7,
+          "rows": 0
+        },
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 6,
+          "ms": 144.86,
+          "rows": 6
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(greatest(coalesce(\"received\", 0) - coalesce(\"out_shipped\", 0), 0) * coalesce(nullif((select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id whe",
+          "count": 1,
+          "ms": 82.57,
+          "rows": 12
+        },
+        {
+          "sql": "select coalesce(sum(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\", 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coa",
+          "count": 1,
+          "ms": 80.48,
+          "rows": 1
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", max(\"products\".\"name\"), max(coalesce(\"products\".\"custom_id\", '?')), coalesce(sum(\"stock_receipt_items\".\"quantity\"), 0), coalesce(sum(\"stock_receipt_items\".\"quantity\" * \"stock_receipt_items\".\"unit_cost",
+          "count": 1,
+          "ms": 65.82,
+          "rows": 10
+        }
+      ]
+    },
+    {
+      "name": "  └ getMarketerReport",
+      "note": "Phụ thuộc của getAdsPerformance",
+      "coldMs": 193.9,
+      "warmMs": 0.1,
+      "p95Ms": 271.8,
+      "queries": 32,
+      "dbMs": 767.5,
+      "rows": 401,
+      "payloadKb": 21.7,
+      "slowest": [
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 6,
+          "ms": 141.48,
+          "rows": 6
+        },
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 9,
+          "ms": 120.42,
+          "rows": 0
+        },
+        {
+          "sql": "select coalesce(sum(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\", 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coa",
+          "count": 1,
+          "ms": 61.99,
+          "rows": 1
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(greatest(coalesce(\"received\", 0) - coalesce(\"out_shipped\", 0), 0) * coalesce(nullif((select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id whe",
+          "count": 1,
+          "ms": 59.52,
+          "rows": 12
+        },
+        {
+          "sql": "select avg(nullif(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\"), 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coal",
+          "count": 2,
+          "ms": 57.37,
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "    └ getNominalProfitReport",
+      "note": "Phụ thuộc của getMarketerReport",
+      "coldMs": 188.1,
+      "warmMs": 0.1,
+      "p95Ms": 190.7,
+      "queries": 20,
+      "dbMs": 570.7,
+      "rows": 222,
+      "payloadKb": 14.5,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 3,
+          "ms": 103.53,
+          "rows": 0
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(greatest(coalesce(\"received\", 0) - coalesce(\"out_shipped\", 0), 0) * coalesce(nullif((select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id whe",
+          "count": 1,
+          "ms": 75.67,
+          "rows": 12
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", max(\"products\".\"name\"), max(coalesce(\"products\".\"custom_id\", '?')), coalesce(sum(\"stock_receipt_items\".\"quantity\"), 0), coalesce(sum(\"stock_receipt_items\".\"quantity\" * \"stock_receipt_items\".\"unit_cost",
+          "count": 1,
+          "ms": 55.97,
+          "rows": 10
+        },
+        {
+          "sql": "select count(*) filter (where (coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coalesce(\"shipments\".\"id\", '?') and m.logic_version = ? -- DÒNG CŨ CŨNG PHẢI RƠI V",
+          "count": 1,
+          "ms": 51.9,
+          "rows": 1
+        },
+        {
+          "sql": "select \"orders\".\"id\", coalesce(\"product_variants\".\"product_id\", \"order_items\".\"product_id\", '?'), coalesce(sum(\"order_items\".\"line_total\"), 0), max(coalesce(\"orders\".\"total_price_after_discount\", 0)) from \"order_items\" inner join \"orders\" o",
+          "count": 1,
+          "ms": 50.7,
+          "rows": 153
+        }
+      ]
+    },
+    {
+      "name": "    └ salesByProductPage(delivered)",
+      "note": "Phụ thuộc của getMarketerReport",
+      "coldMs": 16.6,
+      "warmMs": 0,
+      "p95Ms": 16.9,
+      "queries": 5,
+      "dbMs": 21.4,
+      "rows": 144,
+      "payloadKb": 0,
+      "slowest": [
+        {
+          "sql": "select coalesce(\"product_variants\".\"product_id\", \"order_items\".\"product_id\", '?'), \"orders\".\"page_id\", \"orders\".\"ad_id\", coalesce(sum(\"order_items\".\"line_total\") filter (where coalesce( (select m.outcome from canonical_order_outcome m where",
+          "count": 1,
+          "ms": 10.44,
+          "rows": 121
+        },
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 3,
+          "ms": 7.03,
+          "rows": 0
+        },
+        {
+          "sql": "select \"id\", \"name\", \"adset_id\", \"campaign_id\", \"campaign_name\", \"account_id\", \"status\", \"missing\", \"post_id\", \"story_id\", \"fetched_at\", \"created_at\", \"updated_at\" from \"fb_ads\" where \"fb_ads\".\"id\" in (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,",
+          "count": 1,
+          "ms": 3.88,
+          "rows": 23
+        }
+      ]
+    },
+    {
+      "name": "    └ listEmployees",
+      "note": "Phụ thuộc của getMarketerReport",
+      "coldMs": 0.5,
+      "warmMs": 0.7,
+      "p95Ms": 0.7,
+      "queries": 1,
+      "dbMs": 0.4,
+      "rows": 0,
+      "payloadKb": 0,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 1,
+          "ms": 0.42,
+          "rows": 0
+        }
+      ]
+    },
+    {
+      "name": "adsAttributionCoverage",
+      "note": "Độ phủ quy kết",
+      "coldMs": 4.5,
+      "warmMs": 0,
+      "p95Ms": 4.7,
+      "queries": 1,
+      "dbMs": 3.8,
+      "rows": 1,
+      "payloadKb": 0.1,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 3.8,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "name": "adsAttributionCoverageByDay",
+      "note": "Độ phủ theo ngày",
+      "coldMs": 5.9,
+      "warmMs": 0,
+      "p95Ms": 6.3,
+      "queries": 1,
+      "dbMs": 5.5,
+      "rows": 31,
+      "payloadKb": 3.7,
+      "slowest": [
+        {
+          "sql": "select to_char((\"inserted_at\" at time zone '?')::date, '?'), count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id fr",
+          "count": 1,
+          "ms": 5.47,
+          "rows": 31
+        }
+      ]
+    },
+    {
+      "name": "TRANG — PHẦN CHỜ (sau)",
+      "note": "Người dùng đợi bấy nhiêu trước khi thấy bảng quyết định",
+      "coldMs": 19.9,
+      "warmMs": 0,
+      "p95Ms": 23.2,
+      "queries": 3,
+      "dbMs": 49.8,
+      "rows": 17,
+      "payloadKb": 5.8,
+      "slowest": [
+        {
+          "sql": "select count(*), count(*) filter (where (\"orders\".\"ad_id\" is not null and exists (select 1 from fb_ads f2 where f2.id = \"orders\".\"ad_id\")) or exists (select 1 from ( select fa.post_id from fb_ads fa where fa.post_id is not null and fa.post_",
+          "count": 1,
+          "ms": 19.71,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(\"ad_spends\".\"campaign_id\", \"ad_spends\".\"campaign\"), max(\"campaign\"), coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and \"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?) group by ",
+          "count": 1,
+          "ms": 16.19,
+          "rows": 8
+        },
+        {
+          "sql": "select \"d_key\", max(coalesce(nullif(\"d_campaign_name\", '?'), \"d_ad_id\")), count(*) filter (where \"d_outcome\" <> '?'), count(*) filter (where \"d_outcome\" = '?'), count(*) filter (where \"d_outcome\" in ('?','?')), count(*) filter (where \"d_out",
+          "count": 1,
+          "ms": 13.93,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "name": "TRANG — PHẦN CHỜ (trước)",
+      "note": "Trang cũ chờ cả ba khối rồi mới vẽ",
+      "coldMs": 341.9,
+      "warmMs": 15.2,
+      "p95Ms": 366.5,
+      "queries": 39,
+      "dbMs": 2102.1,
+      "rows": 433,
+      "payloadKb": 14.5,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 9,
+          "ms": 337.99,
+          "rows": 0
+        },
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 6,
+          "ms": 281.24,
+          "rows": 6
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(greatest(coalesce(\"received\", 0) - coalesce(\"out_shipped\", 0), 0) * coalesce(nullif((select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id whe",
+          "count": 1,
+          "ms": 129.4,
+          "rows": 12
+        },
+        {
+          "sql": "select coalesce(sum(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\", 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coa",
+          "count": 1,
+          "ms": 125.86,
+          "rows": 1
+        },
+        {
+          "sql": "select avg(nullif(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\"), 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coal",
+          "count": 2,
+          "ms": 122.1,
+          "rows": 2
+        }
+      ]
+    },
+    {
+      "name": "TRANG — TOÀN BỘ (sau)",
+      "note": "Cả trang mới, gồm phần điền vào sau",
+      "coldMs": 391.8,
+      "warmMs": 7.3,
+      "p95Ms": 515.5,
+      "queries": 42,
+      "dbMs": 3374.2,
+      "rows": 450,
+      "payloadKb": 20.3,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 9,
+          "ms": 606.34,
+          "rows": 0
+        },
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 6,
+          "ms": 399.4,
+          "rows": 6
+        },
+        {
+          "sql": "select coalesce(sum(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\", 0)) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coa",
+          "count": 1,
+          "ms": 213.14,
+          "rows": 1
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(greatest(coalesce(\"received\", 0) - coalesce(\"out_shipped\", 0), 0) * coalesce(nullif((select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id whe",
+          "count": 1,
+          "ms": 204.74,
+          "rows": 12
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", max(\"products\".\"name\"), max(coalesce(\"products\".\"custom_id\", '?')), coalesce(sum(\"stock_receipt_items\".\"quantity\"), 0), coalesce(sum(\"stock_receipt_items\".\"quantity\" * \"stock_receipt_items\".\"unit_cost",
+          "count": 1,
+          "ms": 169.09,
+          "rows": 10
+        }
+      ]
+    }
+  ]
+}
