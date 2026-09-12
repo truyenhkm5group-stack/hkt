@@ -54,6 +54,14 @@ export type WorkerScorecard = {
   sla: ScoreAxis;
   /** Việc đã đóng trong kỳ — LUÔN đọc cùng `avgDifficulty` và `avgMoney`. */
   productivity: { closed: number; avgDifficulty: number | null; avgMoney: number | null; note: string };
+  /**
+   * THỜI GIAN XỬ LÝ — giờ từ lúc việc xuất hiện tới lúc người này đóng nó, lấy TRUNG VỊ.
+   *
+   * Trung vị chứ không trung bình: một ca để quên ba tuần sẽ kéo trung bình của cả kỳ lên và che
+   * mất việc người đó xử lý phần lớn ca trong vài giờ. `null` = chưa đóng việc nào đo được mốc bắt
+   * đầu.
+   */
+  resolutionHours: { median: number | null; sample: number; slowest: number | null };
   /** Tiến độ OKR cá nhân (0–100). `null` khi người này chưa có KR nào đo được. */
   okr: ScoreAxis;
 
@@ -171,6 +179,19 @@ export async function getPerformance(q: PerformanceQuery): Promise<WorkerScoreca
           sample: closedWithSla.length,
           note: closedWithSla.length < myClosed.length ? `${myClosed.length - closedWithSla.length} việc không đặt hạn, không vào mẫu số` : "",
         },
+        resolutionHours: (() => {
+          const hours = myClosed
+            .map((e) => {
+              const item = itemByKey.get(e.workKey);
+              return item ? (e.createdAt.getTime() - item.createdAt.getTime()) / 3_600_000 : null;
+            })
+            .filter((h): h is number => h !== null && h >= 0)
+            .sort((a, b) => a - b);
+          if (!hours.length) return { median: null, sample: 0, slowest: null };
+          const mid = Math.floor(hours.length / 2);
+          const median = hours.length % 2 ? hours[mid] : (hours[mid - 1] + hours[mid]) / 2;
+          return { median: Math.round(median * 10) / 10, sample: hours.length, slowest: Math.round(hours[hours.length - 1] * 10) / 10 };
+        })(),
         productivity: {
           closed: myClosed.length,
           avgDifficulty: difficulties.length ? Math.round(difficulties.reduce((a, b) => a + b, 0) / difficulties.length) : null,

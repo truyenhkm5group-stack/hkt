@@ -68,7 +68,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <SectionCard padded={false}>
         {rows.length ? (
           <div className="overflow-x-auto">
-            <Table className="min-w-[900px]">
+            <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Người</TableHead>
@@ -76,6 +76,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                   <TableHead className="w-[110px]">Chất lượng</TableHead>
                   <TableHead className="w-[110px]">Đúng hạn</TableHead>
                   <TableHead className="w-[170px]">Năng suất</TableHead>
+                  <TableHead className="w-[130px]">Thời gian xử lý</TableHead>
                   <TableHead className="w-[110px]">OKR</TableHead>
                   <TableHead className="w-[150px] text-right">Đang cầm</TableHead>
                 </TableRow>
@@ -97,6 +98,17 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                         {r.productivity.avgDifficulty === null ? "chưa đo được độ khó" : `độ khó TB ${r.productivity.avgDifficulty}`}
                         {r.productivity.avgMoney !== null ? ` · ${formatVND(r.productivity.avgMoney, { compact: true })}/việc` : ""}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                      {r.resolutionHours.median === null ? (
+                        <span className="text-xs text-muted-foreground">chưa đo được</span>
+                      ) : (
+                        <>
+                          <span className="tabular-nums">{r.resolutionHours.median} giờ</span>
+                          {/* Trung vị đứng cạnh ca CHẬM NHẤT — một con số giữa không nói gì về đuôi. */}
+                          <span className="block text-[11px] text-muted-foreground">chậm nhất {r.resolutionHours.slowest} giờ · {r.resolutionHours.sample} ca</span>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell><AxisCell axis={r.okr} /></TableCell>
                     <TableCell className="text-right">
@@ -124,6 +136,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           <li><strong className="text-foreground">Chất lượng</strong> — phần việc đóng rồi KHÔNG phải mở lại.</li>
           <li><strong className="text-foreground">Đúng hạn</strong> — chỉ tính việc CÓ ĐẶT HẠN. Việc không đặt hạn rơi khỏi cả tử lẫn mẫu.</li>
           <li><strong className="text-foreground">Năng suất</strong> — số việc đã đóng, LUÔN đọc cùng độ khó trung bình. Số lượng một mình không phải năng suất.</li>
+          <li><strong className="text-foreground">Thời gian xử lý</strong> — TRUNG VỊ số giờ từ lúc việc xuất hiện tới lúc đóng. Trung vị chứ không trung bình: một ca để quên ba tuần sẽ kéo trung bình lên và che mất phần lớn ca xử lý trong vài giờ. Ca chậm nhất đứng ngay cạnh vì một con số giữa không nói gì về đuôi.</li>
           <li><strong className="text-foreground">OKR</strong> — tiến độ Key Result cá nhân, chỉ tính KR đo được.</li>
           <li><strong className="text-foreground">&ldquo;chưa đo được&rdquo;</strong> — chưa có quan sát nào, KHÔNG phải điểm 0.</li>
         </ul>

@@ -366,6 +366,11 @@ export async function testWorkOs(db: Db) {
   const theMai = cards.find((c) => c.userId === `${P}u-mai`);
   assert.ok(theMai, "Mai đã đóng việc tay trong kỳ nên phải có thẻ điểm");
   assert.ok(theMai!.productivity.closed >= 1, "đóng việc phải được ghi nhận ở trục năng suất");
+  // Thời gian xử lý: trung vị, và phải đứng cạnh ca chậm nhất — một con số giữa không nói gì về đuôi.
+  assert.ok(theMai!.resolutionHours.median !== null, "đóng việc trong kỳ thì phải đo được thời gian xử lý");
+  assert.ok(theMai!.resolutionHours.median! >= 0, "thời gian xử lý không âm");
+  assert.equal(theMai!.resolutionHours.sample, theMai!.productivity.closed, "mẫu số của thời gian xử lý phải bằng số việc đã đóng đo được mốc bắt đầu");
+  assert.ok(theMai!.resolutionHours.slowest !== null && theMai!.resolutionHours.slowest >= theMai!.resolutionHours.median!, "ca chậm nhất không thể nhanh hơn trung vị");
   // Trục nào chưa có quan sát thì là `null`, KHÔNG phải 0 điểm.
   const rong = cards.find((c) => c.productivity.closed === 0);
   if (rong) assert.equal(rong.outcome.value, null, "chưa đóng việc nào thì trục Kết quả là CHƯA ĐO ĐƯỢC, không phải 0");
