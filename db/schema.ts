@@ -105,12 +105,60 @@ export const csCases = pgTable(
      * `NULL` với case thuộc loại khác hoặc case sinh bởi luật cũ — CHƯA BIẾT, không phải 0.
      */
     infoCompleteAt: ts("info_complete_at"),
+    /**
+     * ═══ HẸN QUAY LẠI CASE ═══
+     *
+     * `NULL` = CHƯA HẸN, không phải "hẹn ngay bây giờ". Hàng đợi phân biệt hai thứ đó: case chưa
+     * hẹn xếp theo tuổi, case đã hẹn chỉ nổi lên khi tới giờ. Gộp lại thì mọi case đều "đến hạn"
+     * và cái hẹn mất hết ý nghĩa.
+     */
+    followUpAt: ts("follow_up_at"),
     createdBy: text("created_by").notNull().default(""),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId)],
+  (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId), index("cs_cases_follow_up_idx").on(t.followUpAt)],
+);
+
+/**
+ * ═══════════ LỊCH SỬ MỘT CASE CSKH — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ ═══════════
+ *
+ * Trước bảng này, toàn bộ thứ một người CSKH làm với case chỉ để lại DUY NHẤT trạng thái cuối
+ * cùng: ai gọi, gọi lúc nào, khách nói gì, vì sao hẹn lại — mất sạch. `resolution` là một ô chữ bị
+ * ghi đè mỗi lần, nên hai lần liên hệ trong một ngày chỉ còn lại lần sau.
+ *
+ * Cùng hình dạng với `care_case_events` của care vận đơn (actor · nguồn · hành động · trạng thái
+ * trước/sau · người trước/sau · hẹn) để hai bàn làm việc đọc được như nhau — và để một case đi qua
+ * cả hai miền vẫn kể được một câu chuyện liền mạch.
+ *
+ * `audit_logs` KHÔNG thay được bảng này: audit là nhật ký AN NINH (ai đụng vào cái gì), còn đây là
+ * nhật ký NGHIỆP VỤ mà người xử lý ca sau phải đọc được ngay trên dòng.
+ */
+export const csCaseEvents = pgTable(
+  "cs_case_events",
+  {
+    id: id(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => csCases.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Tên hiển thị lúc xảy ra — ảnh chụp, vì người dùng có thể đổi tên hoặc nghỉ việc. */
+    actorName: text("actor_name").notNull().default(""),
+    /** `UI` · `API` · `AI` · `SYSTEM`. */
+    source: text("source").notNull().default("UI"),
+    /** `NOTE` · `STATUS` · `ASSIGN` · `FOLLOW_UP` — xem `CS_EVENT_ACTIONS`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousAssignee: text("previous_assignee"),
+    nextAssignee: text("next_assignee"),
+    followUpAt: ts("follow_up_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("cs_case_events_case_idx").on(t.caseId, t.createdAt), index("cs_case_events_actor_idx").on(t.actorEmail, t.createdAt)],
 );
 
 /** Danh sách khách cần nhắn: chăm sóc khách băn khoăn chưa mua (NURTURE) / bán chéo cho khách đã nhận hàng (CROSS_SELL) */
@@ -1957,10 +2005,12 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
 export const orderStatusHistoryRelations = relations(orderStatusHistory, ({ one }) => ({ order: one(orders, { fields: [orderStatusHistory.orderId], references: [orders.id] }) }));
 export const orderReturnsRelations = relations(orderReturns, ({ one }) => ({ order: one(orders, { fields: [orderReturns.orderId], references: [orders.id] }) }));
 
-export const csCasesRelations = relations(csCases, ({ one }) => ({
+export const csCasesRelations = relations(csCases, ({ one, many }) => ({
   order: one(orders, { fields: [csCases.orderId], references: [orders.id] }),
   customer: one(customers, { fields: [csCases.customerId], references: [customers.id] }),
+  events: many(csCaseEvents),
 }));
+export const csCaseEventsRelations = relations(csCaseEvents, ({ one }) => ({ case: one(csCases, { fields: [csCaseEvents.caseId], references: [csCases.id] }) }));
 
 export const outreachTargetsRelations = relations(outreachTargets, ({ one }) => ({
   order: one(orders, { fields: [outreachTargets.orderId], references: [orders.id] }),

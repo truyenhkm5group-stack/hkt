@@ -17,7 +17,7 @@ import { combineImpact, getRecoveryRates, type MoneyImpact } from "@/lib/queries
 import { getLogisticsFreshness, type LogisticsFreshness } from "@/lib/queries/logistics-freshness";
 import { getReturnPipeline } from "@/lib/queries/return-pipeline";
 import { rowsOf } from "@/lib/sql-rows";
-import { CS_CASE_SLA_HOURS } from "@/lib/queries/cs";
+import { CS_CASE_SLA_HOURS, csCustomerCondRaw } from "@/lib/queries/cs";
 
 /**
  * ═══════════ SỨC KHOẺ TỪNG KHÂU VẬN HÀNH ═══════════
@@ -263,13 +263,17 @@ async function loadKindRows(): Promise<KindRow[]> {
 }
 
 /**
- * TỒN ĐỌNG CASE CSKH ĐẾM BẰNG CASE GỐC, KHÔNG BẰNG THÔNG BÁO TỔNG HỢP.
+ * TỒN ĐỌNG CASE CSKH ĐẾM BẰNG CASE GỐC, KHÔNG BẰNG THÔNG BÁO TỔNG HỢP — VÀ CHỈ CASE CỦA CSKH.
  *
  * Từ 11/09/2026 phần lớn case CSKH được gom thành một thông báo theo (loại · người phụ trách)
  * để hàng đợi không ngập. Nhưng bảng điều hành đo KHỐI LƯỢNG VIỆC: 183 case giao hụt là 183 case,
  * không phải 2 thông báo. Nên dòng `CS_CASE_GROUP` đọc từ notifications bị thay bằng dòng này —
  * cùng hình dạng (tồn đọng, quá hạn, chưa ai nhận, tuổi, tiền đơn gắn vào case), tính trên mọi case
  * đang mở CHƯA có dòng việc riêng (case có dòng riêng đã được đếm ở `CS_CASE`).
+ *
+ * CHỈ MIỀN CSKH (`csCustomerCondRaw`). Case sinh từ trạng thái vận chuyển đã được đếm ở khâu giao vận
+ * theo chính KIỆN hàng; đếm lại ở khâu này thì cùng một sự việc làm tắc hai khâu trên bảng điều
+ * hành, và không khâu nào chỉ đúng chỗ phải thông.
  */
 async function loadCsBacklogRow(): Promise<KindRow | null> {
   const db = await getDb();
@@ -293,7 +297,7 @@ async function loadCsBacklogRow(): Promise<KindRow | null> {
              ${agingSql}
         from cs_cases c
         left join orders o on o.id = c.order_id
-       where c.status = 'OPEN'
+       where c.status = 'OPEN' and ${csCustomerCondRaw("c")}
          and not exists (select 1 from notifications n where n.entity_type = 'CS_CASE' and n.entity_id = c.id and n.resolved_at is null)`),
   );
   return row && Number(row.n) > 0 ? row : null;

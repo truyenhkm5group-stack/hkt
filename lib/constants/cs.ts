@@ -83,6 +83,17 @@ export type CsStatus = (typeof CS_STATUSES)[number];
 export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", DONE: "Đã xong", AUTO_RESOLVED: "Tự đóng", CANCELLED: "Huỷ" };
 
 /**
+ * TRẠNG THÁI NGƯỜI ĐƯỢC TỰ CHỌN. `AUTO_RESOLVED` KHÔNG nằm trong danh sách.
+ *
+ * Nó là kết luận của MÁY ("điều kiện phát hiện không còn" / "luật đã đổi"), và giá trị duy nhất
+ * của nó là phân biệt với công của người. Để nó trong ô chọn thì sớm muộn có người bấm cho nhanh,
+ * và từ đó con số năng suất CSKH không còn nói được gì — đúng thứ mà khối chú thích ở trên dựng
+ * `AUTO_RESOLVED` lên để tránh. Case đang ở trạng thái này vẫn hiển thị bình thường, chỉ là không
+ * ai đặt tay vào được.
+ */
+export const CS_HUMAN_STATUSES: readonly CsStatus[] = CS_STATUSES.filter((s) => s !== "AUTO_RESOLVED");
+
+/**
  * VÌ SAO một case được đóng tự động. Bắt buộc có khi `status = AUTO_RESOLVED`.
  *
  * Đóng mà không nói vì sao là xoá bằng chứng lặng lẽ: sáu tháng sau không ai trả lời được "180 case

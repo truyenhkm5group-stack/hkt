@@ -36,6 +36,7 @@ import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
 import { testCsCaseGrouping } from "./cs-case-grouping.test";
+import { testCsWorkqueue } from "./cs-workqueue.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testConversionFunnel } from "./conversion-funnel.test";
@@ -1290,6 +1291,7 @@ async function main() {
   await testProductVerdict(db);
   await testActionQueue(db);
   await testCsCaseGrouping(db);
+  await testCsWorkqueue(db);
   await testSalesFunnel(db);
   await testStaffPerformance(db);
   /*

@@ -5,6 +5,7 @@ import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
@@ -115,7 +116,18 @@ async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { fail
 
 type WrongInfoRow = { shipment_id: string; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
 
-/** Case CSKH sai địa chỉ / SĐT còn mở, gắn với lần gửi đang chạy của đơn ⇒ kiện cần sửa thông tin. */
+/**
+ * Case CSKH sai địa chỉ / SĐT còn phải làm, gắn với lần gửi ĐANG CHẠY của đơn ⇒ kiện cần sửa thông
+ * tin, và care vận đơn là chủ sở hữu của nó.
+ *
+ * Loại case và tập trạng thái lấy thẳng từ `lib/constants/cs-domain.ts` — đúng bộ mà trang CSKH
+ * dùng để LOẠI chúng khỏi hàng đợi của mình. Gõ lại `'WRONG_ADDRESS', 'WRONG_PHONE'` ở đây là mở
+ * đường cho hai bên lệch nhau: một loại case mới được thêm vào luật phân miền sẽ biến mất khỏi CSKH
+ * mà không xuất hiện ở đây, và việc đó không còn ai làm.
+ *
+ * `IN_PROGRESS` cũng phải nằm trong tập: người bấm "Đang xử lý" trên một case sai địa chỉ không làm
+ * kiện hàng hết cần sửa — bỏ trạng thái đó ra thì case tự bốc hơi khỏi cả hai bàn làm việc.
+ */
 async function loadWrongInfoCases(excludeIds: Set<string>): Promise<WrongInfoRow[]> {
   const db = await getDb();
   const rows = rowsOf<WrongInfoRow>(
@@ -133,7 +145,7 @@ async function loadWrongInfoCases(excludeIds: Set<string>): Promise<WrongInfoRow
         from cs_cases c
         join orders o on o.id = c.order_id
         join shipments s on s.order_id = o.id and s.is_final = false
-       where c.status = 'OPEN' and c.kind in ('WRONG_ADDRESS', 'WRONG_PHONE')
+       where c.status in ${CS_ACTIONABLE_STATUSES} and c.kind in ${CS_LIFECYCLE_KINDS}
        order by s.id, c.created_at desc
     `),
   );

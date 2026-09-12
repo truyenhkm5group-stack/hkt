@@ -31,6 +31,7 @@ export async function testCsCaseGrouping(db: Db) {
     { id: "csg-5", kind: "DELIVERY_FAILED", title: "Bot đã nhắn", customerPhone: "0900000005", createdAt: gio(6), assignee: "Bot ERP" },
     { id: "csg-6", kind: "ORDER_NOT_CREATED", title: "Khách đủ thông tin", customerPhone: "0900000006", createdAt: gio(6), assignee: "" },
     { id: "csg-7", kind: "ORDER_NOT_CREATED", title: "Khách đủ thông tin · cũ", customerPhone: "0900000007", createdAt: gio(200), assignee: "" },
+    { id: "csg-8", kind: "EXCHANGE_SIZE", title: "Khách muốn đổi size — Lan đang lo", customerPhone: "0900000008", createdAt: gio(1), assignee: "Lan" },
   ];
   await db.insert(schema.csCases).values(rows.map((r) => ({ ...r, status: "OPEN", source: "MANUAL", dedupeKey: `test:${r.id}` })));
 
@@ -56,10 +57,18 @@ export async function testCsCaseGrouping(db: Db) {
   assert.equal(nhomTra.href, "/cs?kind=EXCHANGE_COLOR&status=OPEN");
   assert.equal(nhomTra.severity, "warning", "có case quá hạn thì mức cảnh báo");
   assert.equal((await open("cs-group:EXCHANGE_COLOR:Lan")).length, 0, "case của Lan đã tách riêng nên không còn nhóm của Lan");
-  const [nhomBot] = await open("cs-group:DELIVERY_FAILED:Bot ERP");
-  assert.ok(nhomBot && nhomBot.href.includes("assignee=Bot"), "nhóm theo người phụ trách trỏ đúng bộ lọc");
+  const [nhomLan] = await open("cs-group:EXCHANGE_SIZE:Lan");
+  assert.ok(nhomLan && nhomLan.href.includes("assignee=Lan"), "nhóm theo người phụ trách trỏ đúng bộ lọc");
+  /*
+    CASE GIAO VẬN KHÔNG SINH VIỆC CSKH — dù riêng hay tổng hợp.
+
+    `DELIVERY_FAILED` sinh thẳng từ `shipments.stage`; chính KIỆN đó đã có việc của nó ở hàng đợi
+    care và ở thông báo `SHIPMENT_FAILED`. Thêm một dòng CSKH nữa là hai người cùng được giao một
+    việc. Luật phân miền: `lib/constants/cs-domain.ts`.
+  */
+  assert.equal((await open("cs-group:DELIVERY_FAILED:Bot ERP")).length, 0, "case giao vận không được đẻ thêm việc CSKH");
   const tatCaCsCase = await db.select().from(schema.notifications).where(and(like(schema.notifications.dedupeKey, "cs-case:csg-%"), isNull(schema.notifications.resolvedAt)));
-  assert.equal(tatCaCsCase.length, 3, "7 case → 3 dòng riêng + các dòng tổng hợp, không phải 7 dòng");
+  assert.equal(tatCaCsCase.length, 3, "8 case → 3 dòng riêng + các dòng tổng hợp, không phải 8 dòng");
 
   // ── Hàng đợi việc: việc tổng hợp có tiền, không có hạn riêng ──
   clearMemo();
@@ -75,7 +84,9 @@ export async function testCsCaseGrouping(db: Db) {
   const funnel = await getFunnelHealth();
   const lead = funnel.stages.find((s) => s.key === "LEAD");
   assert.ok(lead, "khâu khách nhắn phải có");
-  assert.ok(lead.backlog >= 7, `tồn đọng khâu CSKH phải đếm cả 7 case gốc, đang thấy ${lead.backlog}`);
+  // 8 case gốc, trong đó 7 thuộc miền CSKH — case giao vận (csg-5) đã được đếm ở khâu giao vận
+  // theo chính kiện hàng, đếm lại ở đây là làm tắc hai khâu bằng một sự việc.
+  assert.ok(lead.backlog >= 7, `tồn đọng khâu CSKH phải đếm các case gốc của miền CSKH, đang thấy ${lead.backlog}`);
 
   // ── Nội dung tổng hợp đổi theo số, khoá không đổi; hết case thì tự đóng ──
   await db.update(schema.csCases).set({ status: "DONE", resolvedAt: new Date() }).where(eq(schema.csCases.id, "csg-3"));
