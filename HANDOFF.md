@@ -6,6 +6,26 @@ Cập nhật: 06/09/2026 · Repo: `truyenhkm5group-stack/hkt` (GitHub, **PUBLIC*
 
 ---
 
+## 0. BẢN MỚI NHẤT — HỆ ĐIỀU HÀNH CÔNG VIỆC (12/09/2026)
+
+> Phần còn lại của tệp này viết ngày 06/09/2026 và **đã cũ ở vài chỗ** (mục 5 nói migration mới
+> nhất là 0020; thực tế là **0069**). Đọc `docs/` cho trạng thái hiện tại.
+
+Bản 12/09 thêm tầng công việc và tầng mục tiêu. Đọc theo thứ tự này:
+
+1. `docs/work-management-os.md` — kiến trúc. **Điểm phải hiểu trước khi sửa bất cứ gì ở `/work`:**
+   hàng đợi là **PHÉP CHIẾU** lên sáu hàng đợi đã có, KHÔNG phải bản sao. `work_items` chỉ có dòng
+   cho việc TAY / ĐỊNH KỲ, hoặc khi có người chạm vào một việc chiếu.
+2. `AGENTS.md` mục 19–21 — ba luật mới, không thương lượng.
+3. `docs/release-2026-09-12-work-os.md` — biên bản: đã giao gì, chưa làm gì và vì sao.
+4. `docs/navigation-review.md` — rà soát điều hướng, ba đề xuất **chờ chủ shop quyết**.
+
+Bảng mới (migration `0069_work_management_os`, chỉ cộng thêm): `departments` ·
+`department_members` · `work_items` · `work_item_events` · `work_recurrences` · `okr_objectives` ·
+`okr_key_results` · `okr_checkins` · `bsc_scorecards` · `bsc_metrics` · `review_cycles`.
+
+Kiểm thử: `tests/work-os.test.ts` (chạy cuối khối dữ liệu, tự dọn bằng tiền tố `wos-`).
+
 ## 1. Mục tiêu tổng thể
 
 ERP nội bộ cho shop thời trang bán online (chủ yếu qua Facebook/livestream + landing page), đơn lên trên **Pancake POS**, giao bằng **Viettel Post** (COD). Mục tiêu: **số liệu ra quyết định phải đúng thực tế** — giao thành công / hoàn, doanh thu thực thu COD, lợi nhuận, dòng tiền, tồn kho, kế hoạch sản xuất, hiệu quả quảng cáo theo marketer, lương & hoa hồng — và tự động hoá vận hành (cảnh báo, CSKH, chăm sóc khách).
