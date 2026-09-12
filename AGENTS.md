@@ -135,6 +135,32 @@ deploy dừng, không phải cảnh báo.
     có bộ mặc định, và không được thêm. Khi có điểm thì ĐỘ PHỦ luôn đứng cạnh. Chỉ số mà bên ngoài
     đồng quyết định (ĐVVC giao được hay không, hàng hỏng trên đường về) phải mang cờ `shared` và
     hiện nhãn "kết quả chung" — đọc làm bối cảnh, không phải điểm chấm người.
+28. **BA CHIỀU QUYỀN TRUY CẬP, KHÔNG SUY RA LẪN NHAU** (`lib/constants/access-scope.ts`):
+    **VAI TRÒ** = được làm gì (`users.role` + `access_roles`) · **CHỨC DANH** = làm chức gì
+    (`positions`) · **PHẠM VI** = trên dữ liệu nào (`users.data_scope`). Phép cộng ba chiều chỉ có
+    MỘT chỗ: `lib/auth/access.ts`. Không màn hình nào, không truy vấn nào được tự cộng lại.
+29. **CHỨC DANH KHÔNG SINH QUYỀN, KHÔNG BAO GIỜ.** Nối chức danh vào quyền là biến việc ĐỔI TÊN
+    MỘT CÁI NHÃN thành một lượt leo thang quyền. `tests/access-model.test.ts` quét mã nguồn: hai
+    tệp tính quyền không được nhắc tới chức danh, và không lời gọi nào truyền chức danh vào một
+    hàm tính quyền.
+30. **PHẠM VI CHỈ THU HẸP.** Danh sách ĐÓNG năm giá trị (`SELF` · `ASSIGNED` · `TEAM` ·
+    `DEPARTMENT` · `ALL`), có `CHECK` ở CSDL — không có ô gõ tự do, vì chuỗi lạ buộc code phải
+    chọn giữa khoá nhầm người và lộ dữ liệu. Quyền thuộc **VÙNG NHẠY CẢM** (Tài chính · Nhân sự ·
+    Điều hành) chỉ có hiệu lực khi người đó có phạm vi `ALL` hoặc là **thành viên phòng ban sở
+    hữu** vùng đó. Mặc định `ALL` để không tài khoản nào mất quyền vì một lần triển khai.
+31. **VAI TRÒ TUỲ CHỈNH KHÔNG CẤP ĐƯỢC `users:manage`** và không lấy `ADMIN` làm nền — đó là cửa
+    để tự dựng một vai trò toàn quyền rồi gán cho chính mình. Chặn ở lược đồ đầu vào VÀ chặn lại
+    lúc tính. Vai trò bị tắt rơi về mẫu vai trò hệ thống, **không bao giờ** rơi về toàn quyền:
+    mọi nhánh lỗi phải rơi về phía HẸP HƠN.
+32. **MỘT ĐƯỜNG ĐỌC, MỘT ĐƯỜNG GHI CHO TƯ CÁCH THÀNH VIÊN** (`lib/org/membership.ts`): chỉ tệp đó
+    (và `lib/auth/access.ts`, vì nó là máy tính quyền) được chạm thẳng `department_members`. "Còn
+    hiệu lực" = dòng thành viên còn bật VÀ phòng ban còn bật — một mệnh đề duy nhất.
+    `ORG_DEPENDENT_PATHS` (`lib/constants/org-surfaces.ts`) là danh sách màn hình phải làm mới sau
+    mỗi lượt ghi; không server action nào được tự liệt kê.
+33. **ĐỔI PHÒNG BAN KHÔNG TỰ GIAO LẠI VIỆC.** Xem trước tác động (`lib/org/impact.ts`) → người bấm
+    quyết định → giao lại từng việc. Số việc phải đếm bằng ĐÚNG phép chiếu mà hàng đợi của người
+    đó dùng, không đếm `work_items` (bảng ấy chỉ giữ việc tay và việc định kỳ, nên ra gần như luôn
+    bằng 0 — một cảnh báo báo 0 còn tệ hơn không có cảnh báo).
 
 
 ## 4. Database
