@@ -209,8 +209,15 @@ export async function testInventoryDecision(db: Db) {
   //            tiếp tục không bán. Dọn sạch ở cuối để không đổi tồn của khối kiểm thử khác. ─────────
   const REF = "test-inv-decision-backtest";
   const { schema } = await import("@/db");
-  const { eq } = await import("drizzle-orm");
-  const [variant] = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).limit(1);
+  const { eq, sql } = await import("drizzle-orm");
+  // Chọn mẫu mã CHƯA có đơn giao thành công nào trước mốc cắt — không dựa vào thứ tự ngẫu nhiên của `limit 1`.
+  const [variant] =
+    (await db
+      .select({ id: schema.productVariants.id })
+      .from(schema.productVariants)
+      .where(sql`not exists (select 1 from order_items oi where oi.variant_id = ${schema.productVariants.id})`)
+      .orderBy(schema.productVariants.id)
+      .limit(1)) ?? [];
   assert.ok(variant, "fixture phải có ít nhất một mẫu mã");
   const [receipt] = await db
     .insert(schema.stockReceipts)

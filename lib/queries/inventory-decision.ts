@@ -98,6 +98,8 @@ export type InventoryDecisionReport = {
     /** Cam kết với xưởng: tổng số món và tiền của đơn sản xuất SENT. */
     openPoUnits: number;
     openPoCapital: number;
+    /** Đơn SENT chưa khai giá xưởng — CHƯA BIẾT tiền, không cộng 0đ vào openPoCapital. */
+    openPoCapitalUnknownOrders: number;
     /** Món trong đơn SENT không ghép được về mẫu mã (thiếu product_id / lệch màu-size). */
     openPoUnmappedUnits: number;
   };
@@ -107,8 +109,16 @@ export type InventoryDecisionReport = {
     costKnownPct: number;
     returnRateOwnPct: number;
     leadTimeOverridePct: number;
+    /** Mẫu mã có sổ kho đủ `DECISION_RULE.minHistoryDays` ngày — dưới ngưỡng thì mọi kết luận về nhịp bán còn non. */
+    historyKnownPct: number;
   };
-  used: { coverDays: number; leadTimeDays: number; shopReturnRate: number };
+  /**
+   * BETA / DỮ LIỆU CHƯA ĐỦ. Đối chiếu production 12/09/2026: 41 mẫu mã, 30 có phiếu nhập và TẤT CẢ
+   * đều nhập trong 14 ngày gần nhất, 0 đơn sản xuất SENT, cấu hình kế hoạch chưa khai. Bộ máy đọc
+   * được nhưng chưa có lịch sử để tin — trang chỉ tham khảo, KHÔNG làm căn cứ tự động.
+   */
+  dataGate: { state: "BETA" | "DATA_INSUFFICIENT"; reasons: string[] };
+  used: { coverDays: number; leadTimeDays: number; shopReturnRate: number; minHistoryDays: number };
 };
 
 const norm = (v: string) => v.trim().toLowerCase();
@@ -139,9 +149,12 @@ export async function openPoQtyByVariant() {
   let unmappedUnits = 0;
   let units = 0;
   let capital = 0;
+  let capitalUnknownOrders = 0;
   for (const row of rows) {
     units += Number(row.totalQty ?? 0);
-    capital += Number(row.totalQty ?? 0) * Number(row.unitCost ?? 0);
+    // Giá xưởng chưa khai (0/null) là CHƯA BIẾT — không được cộng 0đ rồi hiện như đã tính.
+    if (Number(row.unitCost ?? 0) > 0) capital += Number(row.totalQty ?? 0) * Number(row.unitCost);
+    else capitalUnknownOrders += 1;
     const cells = (row.cells ?? {}) as Record<string, number>;
     for (const [key, rawQty] of Object.entries(cells)) {
       const qty = Math.max(0, Number(rawQty ?? 0));
@@ -154,7 +167,7 @@ export async function openPoQtyByVariant() {
       else unmappedUnits += qty;
     }
   }
-  return { qtyByVariant, unmappedUnits, units, capital };
+  return { qtyByVariant, unmappedUnits, units, capital, capitalUnknownOrders };
 }
 
 /** Tuổi mẫu mã = hôm nay − phiếu NHẬP đầu tiên. Chưa có phiếu nhập thì tuổi CHƯA BIẾT. */
@@ -204,6 +217,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
   let costKnownCount = 0;
   let returnOwnCount = 0;
   let leadOverrideCount = 0;
+  let historyKnownCount = 0;
 
   for (const r of plan.rows) {
     const unitCost = r.unitCost > 0 ? r.unitCost : null;
@@ -218,6 +232,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
     const daysSinceLastSale = lastSale.get(r.variantId) ?? null;
 
     if (r.stockKnown) stockKnownCount += 1;
+    if (ageDays !== null && ageDays >= DECISION_RULE.minHistoryDays) historyKnownCount += 1;
     if (unitCost !== null) costKnownCount += 1;
     if (ownSample) returnOwnCount += 1;
     if (leadTimeSource === "override") leadOverrideCount += 1;
@@ -320,6 +335,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       grossImpactEstimate: Math.round(grossImpactEstimate),
       openPoUnits: openPo.units,
       openPoCapital: Math.round(openPo.capital),
+      openPoCapitalUnknownOrders: openPo.capitalUnknownOrders,
       openPoUnmappedUnits: openPo.unmappedUnits,
     },
     coverage: {
@@ -327,9 +343,26 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       costKnownPct: pct(costKnownCount),
       returnRateOwnPct: pct(returnOwnCount),
       leadTimeOverridePct: pct(leadOverrideCount),
+      historyKnownPct: pct(historyKnownCount),
     },
-    used: { coverDays: plan.used.coverDays, leadTimeDays: a.leadTimeDays, shopReturnRate },
+    dataGate: dataGateOf({ stockKnownPct: pct(stockKnownCount), costKnownPct: pct(costKnownCount), historyKnownPct: pct(historyKnownCount), total }),
+    used: { coverDays: plan.used.coverDays, leadTimeDays: a.leadTimeDays, shopReturnRate, minHistoryDays: DECISION_RULE.minHistoryDays },
   };
+}
+
+/**
+ * CỔNG DỮ LIỆU của cả trang. Ngưỡng ở DECISION_RULE.gate — đây là ngưỡng QUAN SÁT (đủ nền để đọc),
+ * không phải ngưỡng nghiệp vụ. Không đủ thì trang tự xưng DỮ LIỆU CHƯA ĐỦ; đủ thì vẫn là BETA cho
+ * tới khi chủ shop đối chiếu một chu kỳ đặt hàng thật với đề xuất của nó.
+ */
+export function dataGateOf(c: { stockKnownPct: number; costKnownPct: number; historyKnownPct: number; total: number }): InventoryDecisionReport["dataGate"] {
+  const g = DECISION_RULE.gate;
+  const reasons: string[] = [];
+  if (c.total === 0) reasons.push("Chưa có mẫu mã nào để theo dõi.");
+  if (c.stockKnownPct < g.minStockKnownPct) reasons.push(`Tồn chỉ tính được ở ${c.stockKnownPct}% mẫu mã (cần ≥ ${g.minStockKnownPct}%): còn mẫu chưa có phiếu nhập kho nào.`);
+  if (c.costKnownPct < g.minCostKnownPct) reasons.push(`Giá nhập chỉ có ở ${c.costKnownPct}% mẫu mã (cần ≥ ${g.minCostKnownPct}%): tiền vốn của phần còn lại chưa tính được.`);
+  if (c.historyKnownPct < g.minHistoryKnownPct) reasons.push(`Chỉ ${c.historyKnownPct}% mẫu mã có sổ kho đủ ${DECISION_RULE.minHistoryDays} ngày (cần ≥ ${g.minHistoryKnownPct}%): nhịp bán và ngày hết hàng còn non.`);
+  return { state: reasons.length ? "DATA_INSUFFICIENT" : "BETA", reasons };
 }
 
 export async function getInventoryDecisionReport(): Promise<InventoryDecisionReport> {

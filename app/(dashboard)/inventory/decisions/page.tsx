@@ -52,6 +52,32 @@ export default async function InventoryDecisionsPage() {
         }
       />
 
+      <div
+        className={cn(
+          "flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px]",
+          report.dataGate.state === "DATA_INSUFFICIENT"
+            ? "border-amber-300/70 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
+            : "border-sky-300/70 bg-sky-50/60 dark:border-sky-900/60 dark:bg-sky-950/20",
+        )}
+      >
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div className="space-y-1">
+          <p>
+            <b>{report.dataGate.state === "DATA_INSUFFICIENT" ? "DỮ LIỆU CHƯA ĐỦ" : "BETA"}</b> — trang chỉ để tham khảo, <b>không phải căn cứ đặt hàng</b>. Mỗi đề xuất
+            đặt/xả phải được người quyết định đối chiếu với Kế hoạch SX và thực tế xưởng; ERP không tự tạo đơn sản xuất và không tự sửa tồn.
+          </p>
+          {report.dataGate.reasons.length ? (
+            <ul className="list-disc pl-5 text-muted-foreground">
+              {report.dataGate.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">Nền dữ liệu đủ để đọc; chuyển khỏi BETA khi chủ shop đã đối chiếu một chu kỳ đặt hàng thật với đề xuất ở đây.</p>
+          )}
+        </div>
+      </div>
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Vốn cần cho đề xuất đặt"
@@ -80,7 +106,7 @@ export default async function InventoryDecisionsPage() {
         <MetricCard
           label="Đang cam kết với xưởng"
           value={formatNumber(sm.openPoUnits)}
-          note={`${formatVND(sm.openPoCapital, { compact: true })} theo đơn SX đã gửi, chưa nhận${sm.openPoUnmappedUnits ? ` · ${formatNumber(sm.openPoUnmappedUnits)} món không ghép được về mẫu mã` : ""}`}
+          note={`${formatVND(sm.openPoCapital, { compact: true })} theo đơn SX đã gửi, chưa nhận${sm.openPoCapitalUnknownOrders ? ` · ${formatNumber(sm.openPoCapitalUnknownOrders)} đơn CHƯA KHAI GIÁ XƯỞNG nên chưa tính tiền` : ""}${sm.openPoUnmappedUnits ? ` · ${formatNumber(sm.openPoUnmappedUnits)} món không ghép được về mẫu mã` : ""}`}
           hint="Đơn sản xuất trạng thái ĐÃ GỬI XƯỞNG. Số này được TRỪ khỏi đề xuất đặt của từng mẫu mã — không trừ thì mẫu đã đặt 500 cái vẫn bị kêu đặt thêm. Món không ghép được (đơn thiếu mã hàng hoặc lệch màu/size) được đếm riêng, không chia đều."
           icon={Factory}
           tone={sm.openPoUnits ? "primary" : "slate"}
@@ -88,7 +114,7 @@ export default async function InventoryDecisionsPage() {
       </section>
 
       <p className="text-xs text-muted-foreground">
-        Độ phủ dữ liệu: tồn tính được {cov.stockKnownPct}% mẫu mã · giá nhập có ở {cov.costKnownPct}% · tỷ lệ hoàn đủ mẫu riêng ở {cov.returnRateOwnPct}% (còn lại dùng số toàn shop {Math.round(report.used.shopReturnRate * 100)}%) · thời gian sản xuất khai riêng ở {cov.leadTimeOverridePct}% (còn lại dùng giả định chung {report.used.leadTimeDays} ngày). {formatNumber(report.holdCount)} mẫu mã đang ổn định (giữ nguyên) không hiện trong bảng.
+        Độ phủ dữ liệu: tồn tính được {cov.stockKnownPct}% mẫu mã · sổ kho đủ {report.used.minHistoryDays} ngày ở {cov.historyKnownPct}% · giá nhập có ở {cov.costKnownPct}% · tỷ lệ hoàn đủ mẫu riêng ở {cov.returnRateOwnPct}% (còn lại dùng số toàn shop {Math.round(report.used.shopReturnRate * 100)}%) · thời gian sản xuất khai riêng ở {cov.leadTimeOverridePct}% (còn lại dùng giả định chung {report.used.leadTimeDays} ngày). {formatNumber(report.holdCount)} mẫu mã đang ổn định (giữ nguyên) không hiện trong bảng.
       </p>
 
       {GROUP_ORDER.map((kind) => {

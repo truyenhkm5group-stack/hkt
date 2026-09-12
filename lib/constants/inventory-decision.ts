@@ -78,6 +78,12 @@ export const DECISION_RULE = {
    */
   minHistoryDays: 14,
   /**
+   * CỔNG DỮ LIỆU CỦA CẢ TRANG (ngưỡng quan sát, không phải ngưỡng nghiệp vụ): dưới mức này trang tự
+   * xưng "DỮ LIỆU CHƯA ĐỦ" và không được dùng làm căn cứ đặt hàng. Đối chiếu production 12/09/2026:
+   * 30/41 mẫu có phiếu nhập nhưng 0/41 có sổ kho đủ 14 ngày ⇒ trang ra mắt ở trạng thái này.
+   */
+  gate: { minStockKnownPct: 80, minCostKnownPct: 80, minHistoryKnownPct: 50 },
+  /**
    * Bán 30 ngày dưới ngần này món thì tốc độ bán là DẤU HIỆU chứ chưa phải bằng chứng —
    * mọi kết luận dựa trên tốc độ bị hạ tin cậy.
    */
