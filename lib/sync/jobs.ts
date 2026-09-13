@@ -26,6 +26,7 @@ import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
+import { reconcileOrderNotCreated } from "@/lib/cs/reconcile-order-created";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
@@ -224,9 +225,18 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "PANCAKE",
     description: "Đọc hội thoại & thẻ chat Pancake (PANCAKE_ACCESS_TOKEN) trong N giờ gần nhất (hours=48) → tạo case: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng…",
     run: async (o) => {
+      /*
+        ĐỐI CHIẾU TRƯỚC, QUÉT SAU.
+
+        Case "đủ thông tin · chưa tạo đơn" mang một điều kiện SỐNG — nó hết đúng ngay khi ai đó lên
+        đơn. Chạy đối chiếu TRƯỚC lượt quét để hàng đợi phản ánh thực tế tại thời điểm quét, thay
+        vì để người trực mở ra và gọi cho một khách đã mua hàng từ tuần trước.
+        Đo production 13/09/2026: 8/29 case đang mở đã có đơn sinh ra từ chính hội thoại của chúng.
+      */
+      const docSoat = await reconcileOrderNotCreated({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
-      return r;
+      return { ...r, reconciled: docSoat?.closedTotal ?? 0 };
     },
   },
   "ads-billing": {
