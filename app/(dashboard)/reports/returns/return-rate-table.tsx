@@ -2,6 +2,7 @@
 
 import { returnRateColumns } from "@/app/(dashboard)/reports/returns/columns";
 import { DataTable } from "@/components/data-table/data-table";
+import { projectedRateOf } from "@/lib/constants/projected-delivery";
 import { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 import type { ReturnRateRow } from "@/lib/queries/return-rate";
 
@@ -35,11 +36,14 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
             `failed` của nó VẪN nằm ở mẫu số, nên dòng gộp lạc quan hơn tổng các dòng con.
 
             Nay mỗi mẫu mã mang sẵn tử số và mẫu số THÔ của cùng một hợp đồng, nên dòng gộp chỉ
-            việc cộng rồi chia — đúng con số mà hợp đồng sẽ ra nếu được hỏi thẳng ở cấp nhóm này.
+            việc cộng rồi đưa qua ĐÚNG hàm `projectedRateOf` — cùng luật loại đơn ngoài ước tính khỏi
+            mẫu số và cùng ngưỡng "ngoài ước tính quá lớn ⇒ chưa đo được" như mọi nơi khác.
           */
           const projectedSent = sum((r) => r.projectedSent);
           const projectedDelivered = sum((r) => r.projectedDelivered);
-          const projectedRate = projectedSent ? Math.round((projectedDelivered / projectedSent) * 1000) / 10 : null;
+          const projectedActive = sum((r) => r.projectedActive);
+          const unmodelledActive = sum((r) => r.unmodelledActive);
+          const projectedRate = projectedRateOf({ projectedDelivered, eligibleSent: projectedSent, active: projectedActive, unmodelledActive });
           return {
             ...rows[0],
             key: `group:${key}`,
@@ -63,7 +67,8 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
             expectedSuccessRate: projectedRate,
             projectedSent,
             projectedDelivered,
-            unmodelledActive: sum((r) => r.unmodelledActive),
+            projectedActive,
+            unmodelledActive,
           };
         },
       }}

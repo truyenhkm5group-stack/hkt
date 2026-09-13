@@ -166,8 +166,10 @@ export const returnRateColumns: ColumnDef<ReturnRateRow, unknown>[] = [
     là ước tính còn cột bên cạnh là số đếm.
 
     Đúng luật "không để một metric heuristic trông như business truth": GỠ khỏi bảng mặc định.
-    Hàm `failedToReturnRate()` và trường `expectedSuccessRate` GIỮ NGUYÊN — trang Kịch bản dùng
-    chúng đúng chỗ (ở đó nó được gọi tên là giả định và có ô chỉnh tay).
+    `failedToReturnRate()` đã bị XOÁ (13/09/2026): nó ghi cứng 60% khi thiếu mẫu, tốn 2,9 giây mỗi
+    lượt mở trang và không trang nào còn đọc. Trường `expectedSuccessRate` nay đến từ hợp đồng
+    `PROJECTED_GTC_V3` (mỗi đơn cân theo xác suất của chính trạng thái ĐVVC nó đang ở) và vẫn có
+    trong tệp xuất CSV; trên bảng nó hiện ở dòng gộp theo sản phẩm.
   */
   {
     id: "lostRevenue",

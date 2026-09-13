@@ -211,15 +211,23 @@ liệu*, không phải *nhập 0 cái*.
 Dự phòng là **ước tính**. Hàng hỏng / xả lỗ **thực tế** phải vào sổ bằng phiếu kho `ADJUSTMENT` +
 khoản chi thật — không được để dự phòng đứng thay chứng từ.
 
-## Hai bảng, hai cơ sở, mỗi bảng nhất quán với chính nó
+## Hai bảng, MỘT con số rủi ro
 
 | Bảng | Trừ tiền hàng bằng | ⇒ Trừ rủi ro bằng |
 |---|---|---|
-| Lợi nhuận danh nghĩa (bảng chính) | giá vốn hàng bán ra | `inventoryRisk` = % × giá vốn hàng bán |
-| Lợi nhuận theo tổng giá trị hàng nhập | **trọn** giá trị hàng nhập trong kỳ | `inventoryRiskOnPurchase` = % × giá trị hàng nhập |
+| Lợi nhuận danh nghĩa (bảng chính) | giá vốn hàng bán ra | `inventoryRisk` = % × giá vốn hàng bán ra trong kỳ |
+| Lợi nhuận theo tổng giá trị hàng nhập | **trọn** giá trị hàng nhập trong kỳ | **cũng `inventoryRisk`** — cùng một con số với bảng trên |
 
-Bảng thứ hai **cố ý** giữ cơ sở cũ: nó đã trừ trọn giá trị lô thì phải trừ trọn phần rủi ro đi kèm.
-Dùng lẫn hai cơ sở giữa hai bảng mới là sai.
+Bản cũ của đoạn này nói bảng thứ hai "cố ý giữ cơ sở cũ" (trừ `inventoryRiskOnPurchase` = % × giá
+trị hàng nhập). Đó là điều **mã nguồn đã bỏ** (`profit-nominal.ts`, công thức `profitOnPurchase`, khoá
+bởi `tests/reporting-parity.test.ts::testInventoryRiskIsPeriodExpense`) và là điều **luật 14 cấm**:
+nhập hàng là sự kiện một lần, ném trọn rủi ro cả lô vào kỳ chứa phiếu nhập thì tuần bán 1/10 lô vẫn
+gánh đủ dự phòng cả lô, còn tuần không nhập gì thì rủi ro bằng đúng 0. `inventoryRiskOnPurchase` vẫn
+được tính và hiện ở cột "Rủi ro cả lô nhập (ghi chú)" — là **ghi chú**, không trừ vào lợi nhuận.
+
+Khi **không biết giá vốn** (sản phẩm không có phiếu nhập, không giá Pancake) hay **phiếu nhập không
+ghi đơn giá**, cột rủi ro / giá trị hàng nhập in **"—"** kèm lý do (`cogsKnown`, `purchaseCostKnown`),
+không in 0 ₫: 0 là "đã đo và bằng không", còn ở đây là chưa biết.
 
 ## Chia một tổng cho nhiều mã: Σ phải BẰNG ĐÚNG tổng
 
