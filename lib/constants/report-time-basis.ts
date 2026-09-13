@@ -41,32 +41,15 @@ export const TIME_BASIS_QUESTION: Record<TimeBasis, string> = {
 /**
  * ═══ MỐC ĐVVC TIẾP NHẬN KIỆN (`carrier_handoff_at`) ═══
  *
- * Đo production 13/09/2026: 2.103 vận đơn, 1.417 có `picked_up_at`, **494 đã rời kho mà cột mốc
- * vẫn rỗng** (webhook lấy hàng không về, hoặc vận đơn dựng từ tệp nhập). Lọc thẳng theo
- * `picked_up_at` sẽ âm thầm đánh rơi 494 kiện — bảng vẫn ra số, chỉ thiếu một phần tư.
+ * Định nghĩa nằm ở `lib/constants/carrier-handoff.ts` — một hợp đồng, một chỗ, kèm số đo
+ * production và bản sinh đôi bằng TypeScript để kiểm thử được. Tệp này chỉ chuyển tiếp để những
+ * nơi gọi cũ không phải đổi đường nhập.
  *
- * HAI BẬC CHỨNG CỨ, CẢ HAI ĐỀU TỪ ĐVVC:
- *   1. `picked_up_at`                    — ĐVVC xác nhận đã lấy hàng. Mạnh nhất.
- *   2. sự kiện ĐVVC ĐẦU TIÊN của vận đơn — kiện đã vào mạng lưới ĐVVC, chỉ thiếu mốc lấy hàng.
- *
- * ─── VÀ KHÔNG CÓ BẬC THỨ BA ───
- *
- * `shipments.created_at` CỐ Ý KHÔNG được dùng làm bậc dự phòng, dù nó luôn có giá trị. Nó là mốc
- * ERP TẠO DÒNG — người bán bấm nút tạo vận đơn — chứ không phải mốc ĐVVC cầm hàng. Hai thứ cách
- * nhau nhiều ngày, và lấy nó lấp vào chỗ trống sẽ tạo ra một cohort trông đầy đủ mà sai: kiện
- * chưa ai lấy vẫn nằm trong "lô hàng gửi tuần này".
- *
- * Dùng TÊN BẢNG ĐẦY ĐỦ `"shipments"` chứ không phải bí danh `s`: Drizzle phát ra tên bảng thật
- * trong câu lệnh, nên một chuỗi SQL thô mang bí danh sẽ hỏng với "missing FROM-clause entry".
- *
- * Không có chứng cứ ⇒ `NULL` ⇒ kiện đó KHÔNG vào cohort, và báo cáo nói rõ có bao nhiêu kiện rơi
- * ra vì lý do này. Một con số thiếu mà BIẾT là thiếu dùng được; một con số đầy đủ giả thì không.
+ * Bản trước định nghĩa mốc ngay tại đây bằng `coalesce(picked_up_at, <sự kiện bất kỳ có chặng>)`.
+ * Vế thứ hai nhận cả `PENDING` và `CANCELLED`, nên "lấy hàng thất bại" và "shop huỷ lấy" cũng
+ * được đóng dấu đã bàn giao — đo trên production ngày 13/09/2026 là 120 vận đơn.
  */
-export const CARRIER_HANDOFF_AT_SQL = `coalesce(
-  "shipments"."picked_up_at",
-  (select min(e.occurred_at) from shipment_events e
-    where e.shipment_id = "shipments"."id" and e.source in ('VTP_WEBHOOK','VTP_IMPORT','VTP_POLL') and e.normalized_stage is not null)
-)`;
+export { CARRIER_HANDOFF_AT_SQL, CARRIER_HANDOFF_BASIS_SQL, CARRIER_HANDOFF_STAGES, HANDOFF_BASIS_LABEL, HANDOFF_BASIS_HINT, type HandoffBasis } from "@/lib/constants/carrier-handoff";
 
 /**
  * ═══ MỐC KẾT QUẢ CUỐI (`final_outcome_at`) ═══

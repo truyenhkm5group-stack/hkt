@@ -126,6 +126,7 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
+import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
@@ -1414,6 +1415,9 @@ async function main() {
   await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testFormatNullSafety();
+  testHandoffStageSet();
+  testHandoffPureFunction();
+  await testHandoffSqlMatchesTypescript(db);
   testUiConsistency();
   testNavigationCoverage();
   testLoadingUxContract();
