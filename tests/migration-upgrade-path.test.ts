@@ -25,7 +25,7 @@ import path from "node:path";
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
 /** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0071_performance_snapshots";
+const MOI = "0072_shipment_return_reason";
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -57,7 +57,7 @@ export async function testMigrationUpgradePath() {
 
     const truoc = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(truoc, cu.entries.length, "bước 1: số migration đã áp phải khớp sổ đã cắt");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'performance_snapshots'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'shipment_return_reasons'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -113,55 +113,36 @@ export async function testMigrationUpgradePath() {
     );
 
     /*
-      ═══ ẢNH CHỤP HIỆU SUẤT (0071) ═══
+      ═══ LÝ DO HOÀN DO NGƯỜI XÁC ĐỊNH (0072) ═══
 
-      Điều kiện tiên quyết vẫn là điều kiện cũ: tài khoản có từ TRƯỚC migration không mất gì.
-      Cột `data_scope` do 0070 thêm đã có ở bước 1, nên ở đây kiểm nó vẫn nguyên `ALL`.
+      Điều kiện tiên quyết không đổi qua mọi migration: tài khoản có TRƯỚC bản này không mất gì.
     */
     const cu1 = (await client.query<{ data_scope: string }>("select data_scope from users where id = 'up-u1'")).rows[0];
     assert.equal(cu1.data_scope, "ALL", "tài khoản có từ trước phải giữ phạm vi ALL qua mọi migration sau đó");
 
-    // Bảng mới rỗng: migration KHÔNG được tự dựng lịch sử hiệu suất cho những kỳ đã qua.
-    assert.equal(await dem("select count(*)::int as n from performance_snapshots"), 0, "migration không được tự chụp ngược lịch sử — số đó sẽ là số bịa");
+    // Bảng mới rỗng: migration KHÔNG được tự gán lý do hoàn cho vận đơn nào — đó sẽ là lý do bịa.
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "migration không được tự gán lý do cho lịch sử");
 
-    const chup = (k: string, v: string) =>
-      client.query(
-        `insert into performance_snapshots (id, kind, period, period_start, period_end, subject_type, subject_id, metric_label, metric_key, value, unit, sample, confidence, linkage)
-         values ('${k}', 'WEEKLY', '2026-W37', now() - interval '7 days', now(), 'PERSON', 'up-u1', 'SLA', 'care_sla', ${v}, 'PERCENT', 10, 'MEDIUM', 'USER_ID')`,
-      );
-    await chup("ps1", "91");
+    await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s1', 'UPS1', 'RETURNED')`);
+    await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, note, actor_email) values ('rr1', 'up-s1', 'WRONG_ADDRESS', 'Gọi khách, nhà chuyển đi', 'nv@t.local')`);
 
-    // BẤT BIẾN: cùng (kỳ, chủ thể, chỉ số) thì lần ghi thứ hai phải bị chặn ở mức CSDL.
+    // MỘT vận đơn chỉ có MỘT lý do đang hiệu lực — lần ghi thứ hai phải bị CSDL chặn.
     await assert.rejects(
-      () => chup("ps2", "42"),
-      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("performance_snapshots_uq"),
-      "số đã chụp của một kỳ không được ghi đè — nếu ghi đè được thì 'lịch sử' chỉ là ảnh chụp của lần chạy gần nhất",
+      () => client.query(`insert into shipment_return_reasons (id, shipment_id, reason) values ('rr2', 'up-s1', 'DAMAGED')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("shipment_return_reasons_shipment_id_unique"),
+      "hai lý do cùng hiệu lực trên một vận đơn thì báo cáo đếm hai lần — ràng buộc phải chặn",
     );
 
-    // Chụp một con số mà quên mẫu số là chụp một thứ không kiểm chứng được.
-    await assert.rejects(
-      () =>
-        client.query(
-          `insert into performance_snapshots (id, kind, period, period_start, period_end, subject_type, subject_id, metric_label, metric_key, value, unit, sample, confidence, linkage)
-           values ('ps3', 'WEEKLY', '2026-W38', now(), now(), 'PERSON', 'up-u1', 'SLA', 'care_sla', 91, 'PERCENT', 0, 'MEDIUM', 'USER_ID')`,
-        ),
-      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("performance_snapshots_sample_check"),
-      "có giá trị thì phải có mẫu số — ràng buộc phải chặn",
-    );
-
-    // `null` = CHƯA ĐO ĐƯỢC vẫn ghi được, và đó là điểm khác biệt với 0.
-    await client.query(
-      `insert into performance_snapshots (id, kind, period, period_start, period_end, subject_type, subject_id, metric_label, metric_key, value, unit, sample, confidence, linkage)
-       values ('ps4', 'WEEKLY', '2026-W38', now(), now(), 'PERSON', 'up-u1', 'SLA', 'care_sla', null, 'PERCENT', 0, 'UNKNOWN', 'USER_ID')`,
-    );
-    assert.equal(await dem("select count(*)::int as n from performance_snapshots where value is null"), 1, "CHƯA ĐO ĐƯỢC phải lưu được là NULL, không bị ép thành 0");
+    // Xoá vận đơn thì lý do đi theo: không để lại dòng mồ côi trỏ vào hư không.
+    await client.query(`delete from shipments where id = 'up-s1'`);
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "xoá vận đơn phải cuốn theo lý do của nó");
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
     assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
-    assert.equal(await dem("select count(*)::int as n from performance_snapshots"), 2, "chạy lại migration KHÔNG được đụng tới ảnh chụp đã ghi");
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "chạy lại migration KHÔNG được sinh lý do nào");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · ảnh chụp hiệu suất bất biến (ghi đè bị CSDL chặn) · work_items rỗng (phép chiếu, không bản sao) · 5 ràng buộc chặn đúng · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · lý do hoàn: một vận đơn một lý do, xoá vận đơn thì cuốn theo · work_items rỗng (phép chiếu, không bản sao) · 5 ràng buộc chặn đúng · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

@@ -9,6 +9,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Textarea } from "@/components/ui/textarea";
 import { addCareNote, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import { CARE_STATUS_LABEL, type CareStatus } from "@/lib/constants/care";
+import { RETURN_REASON_LABEL } from "@/lib/constants/return-reason";
+import { setReturnReason } from "@/lib/actions/return-reason";
 
 /**
  * ═══════════ "TẤT CẢ VẬN ĐƠN" CŨNG LÀ BÀN LÀM VIỆC ═══════════
@@ -34,11 +36,14 @@ export function CareRowActions({
   tracking,
   staff,
   canManage,
+  isReturned,
 }: {
   shipmentId: string;
   tracking: string;
   staff: { id: string; name: string }[];
   canManage: boolean;
+  /** Chỉ vận đơn ĐÃ HOÀN mới hỏi lý do hoàn — hỏi trên kiện đang giao là mời người ta đoán. */
+  isReturned: boolean;
 }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
@@ -99,6 +104,24 @@ export function CareRowActions({
               <UserPlus className="size-3.5" /> {p.name}
             </DropdownMenuItem>
           ))}
+          {isReturned ? (
+            /*
+              LÝ DO HOÀN DO NGƯỜI XÁC ĐỊNH.
+
+              Suy luận từ chứng từ ĐVVC chỉ phủ ~22% vận đơn hoàn — phần lớn kiện, ĐVVC chỉ báo
+              "đã chuyển hoàn" mà không nói vì sao. Người vừa gọi cho khách thì biết. Ghi ở đây đè
+              lên suy luận và vào nhật ký kèm lý do cũ.
+            */
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">Lý do hoàn</DropdownMenuLabel>
+              {(["CUSTOMER_REFUSED", "CUSTOMER_UNREACHABLE", "WRONG_ADDRESS", "WRONG_PHONE", "CUSTOMER_CHANGED_MIND", "DAMAGED"] as const).map((r) => (
+                <DropdownMenuItem key={r} onSelect={() => chay(() => setReturnReason({ shipmentId, reason: r, note: "" }), `${tracking}: ${RETURN_REASON_LABEL[r]}`)}>
+                  {RETURN_REASON_LABEL[r]}
+                </DropdownMenuItem>
+              ))}
+            </>
+          ) : null}
           {!canManage ? (
             /*
               CHỈ ĐỌC MỚI LÀ ĐIỀU CẦN NÓI. Thao tác care chỉ cần `shipments:view`; thao tác gửi yêu

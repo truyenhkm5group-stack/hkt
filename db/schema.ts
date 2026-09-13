@@ -3105,6 +3105,46 @@ export const performanceSnapshots = pgTable(
 
 export type PerformanceSnapshot = typeof performanceSnapshots.$inferSelect;
 
+/**
+ * ═══════════ LÝ DO HOÀN DO NGƯỜI XÁC ĐỊNH — GHI ĐÈ SUY LUẬN, CÓ VẾT ═══════════
+ *
+ * Lý do hoàn mặc định được SUY từ chứng từ ĐVVC (`lib/queries/return-reason.ts`). Đo trên
+ * production 13/09/2026: chỉ **208/956** vận đơn hoàn có sự kiện "Tồn - …" mang lý do thật; phần
+ * còn lại ĐVVC không nêu lý do nào. Đó là một sự thật về dữ liệu, không phải một lỗi cần giấu.
+ *
+ * Người xử lý thường BIẾT lý do — họ vừa gọi cho khách xong. Bảng này là chỗ ghi lại điều đó, và
+ * nó ghi đè suy luận vì bằng chứng của con người mạnh hơn suy luận của máy.
+ *
+ * ─── VÌ SAO KHÔNG GHI THẲNG VÀO `shipments` ───
+ *
+ * Một cột `return_reason` trên `shipments` sẽ không phân biệt được "máy suy ra" với "người xác
+ * nhận", và mỗi lần sửa là mất giá trị cũ. Bảng riêng giữ được cả hai vế: lý do cũ, lý do mới, ai
+ * đổi, lúc nào, vì sao. Với một con số đi vào báo cáo hiệu suất mã hàng, vết đó là bắt buộc.
+ */
+export const shipmentReturnReasons = pgTable(
+  "shipment_return_reasons",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .unique()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    /** Khoá trong `lib/constants/return-reason.ts::RETURN_REASONS`. */
+    reason: text("reason").notNull(),
+    /** Ghi chú của người xác định — bằng chứng để người sau đọc lại hiểu vì sao. */
+    note: text("note").notNull().default(""),
+    /** Lý do máy suy ra tại thời điểm ghi đè, chép lại để so được. */
+    inferredReason: text("inferred_reason").notNull().default(""),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("shipment_return_reasons_reason_idx").on(t.reason)],
+);
+
+export type ShipmentReturnReason = typeof shipmentReturnReasons.$inferSelect;
+
 export type Department = typeof departments.$inferSelect;
 export type DepartmentMember = typeof departmentMembers.$inferSelect;
 export type WorkItemRow = typeof workItems.$inferSelect;

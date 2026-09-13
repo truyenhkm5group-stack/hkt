@@ -31,7 +31,15 @@ export function buildShipmentColumns(opts: {
     {
       id: "care",
       header: "Xử lý",
-      cell: ({ row }) => <CareRowActions shipmentId={row.original.id} tracking={row.original.vtpOrderNumber ?? row.original.trackingCode ?? row.original.id} staff={opts.staff} canManage={opts.canManage} />,
+      cell: ({ row }) => (
+        <CareRowActions
+          shipmentId={row.original.id}
+          tracking={row.original.vtpOrderNumber ?? row.original.trackingCode ?? row.original.id}
+          staff={opts.staff}
+          canManage={opts.canManage}
+          isReturned={row.original.outcome === "RETURNED" || row.original.outcome === "RETURNED_BY_RULE"}
+        />
+      ),
     },
     ...shipmentColumns,
   ];

@@ -34,6 +34,7 @@ import {
 } from "@/lib/queries/return-rate";
 import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/queries/order-source";
 import { logisticsPerformance } from "@/lib/queries/logistics";
+import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
@@ -60,7 +61,7 @@ export default async function ReturnRatePage({
   const params = parseListParams(raw, {
     defaultSort: "successRate",
     defaultDir: "asc",
-    filterKeys: ["min"],
+    filterKeys: ["min", "product"],
     sortable: RETURN_RATE_SORTABLE,
     defaultPeriod: "90d",
     defaultPageSize: 50,
@@ -476,6 +477,14 @@ export default async function ReturnRatePage({
           </SectionCard>
         </div>
       ) : null}
+
+      {/*
+        VÌ SAO ĐƠN BỊ HOÀN — đặt trong CHÍNH trang này, không dựng trang thứ hai.
+
+        Mẫu số, kỳ lọc và công thức đều là của báo cáo này. Một trang riêng nói về cùng một thứ là
+        cách chắc chắn nhất để hai con số "tỷ lệ hoàn" cùng tồn tại mà không ai biết tin cái nào.
+      */}
+      <ReturnReasonSection period={params.period} codes={params.filters.product} />
     </div>
   );
 }
