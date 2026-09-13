@@ -37,7 +37,6 @@ import { rowsOf } from "@/lib/sql-rows";
  */
 
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
-const FINISHED_OUTCOMES = sql`('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 const NGAY_MS = 86_400_000;
 
 /** Trạng thái con của một SỰ KIỆN hành trình (không có `stage` để rơi về — sự kiện nói gì thì là nấy). */
@@ -61,6 +60,106 @@ function kienDaKetThuc(dk: SQL[]): SQL {
     offset 0`;
 }
 
+/* ═══════════════════ KHO DỮ LIỆU HỌC: TẢI MỘT LẦN, DÙNG CHO MỌI MỐC CẮT ═══════════════════ */
+
+type LabelledShipment = { id: string; outcome: string; handoffAt: Date; finalAt: Date | null };
+type CarrierEventLite = { at: Date; con: string };
+type Corpus = {
+  loadedAt: Date;
+  /** Kiện có mốc ĐVVC nhận trong cửa sổ nhìn lại, nhãn theo ORDER_OUTCOME. */
+  shipments: LabelledShipment[];
+  /** Sự kiện ĐVVC của các kiện đó, mỗi kiện một danh sách TĂNG DẦN theo thời gian. */
+  events: Map<string, CarrierEventLite[]>;
+  /** Đơn chốt trong cửa sổ (cho P(chưa gửi)), nhãn theo ORDER_OUTCOME. */
+  orders: { insertedAt: Date; outcome: string }[];
+};
+
+/**
+ * ─── VÌ SAO TẢI MỘT LẦN ───
+ *
+ * Huấn luyện sống + thử ngược 3 tháng = 4 lần đo cửa sổ chín + 4 lần học + 3 lần chấm, và bản đầu
+ * chạy mỗi lần một câu `kienDaKetThuc` (ORDER_OUTCOME + hai truy vấn con tương quan trên mọi kiện).
+ * Đo bằng bench scale 4: câu đó chạy 7 lần, 5,9 giây — trang GTC tải lạnh từ 0,5 s lên 7 s.
+ *
+ * Nay: MỘT lần gán nhãn cho mọi kiện có mốc ĐVVC nhận trong cửa sổ nhìn lại (cửa sổ học + số tháng
+ * thử ngược), MỘT lần kéo sự kiện của đúng các kiện đó, MỘT lần đọc đơn chốt; mọi mốc cắt sau đó
+ * là phép lọc trong bộ nhớ. Kết quả từng mốc giống hệt SQL cũ: cùng nhãn, cùng điều kiện lọc.
+ */
+const CORPUS_LOOKBACK_DAYS = TRAINING_WINDOW.windowDays + BACKTEST_MONTHS * 31 + 7;
+const EVENT_ID_CHUNK = 1000;
+
+function toDate(v: unknown): Date | null {
+  if (v === null || v === undefined) return null;
+  const d = v instanceof Date ? v : new Date(v as string);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+async function taiKho(): Promise<Corpus> {
+  return memo(`projection-corpus:${PROJECTED_GTC_VERSION}:${CORPUS_LOOKBACK_DAYS}`, 600_000, async () => {
+    const db = await getDb();
+    const loadedAt = new Date();
+    const since = new Date(loadedAt.getTime() - CORPUS_LOOKBACK_DAYS * NGAY_MS);
+    const kien = rowsOf<{ id: string; outcome: string; handoff_at: unknown; final_at: unknown }>(
+      await db.execute(kienDaKetThuc([sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${since}`])),
+    );
+    const shipments: LabelledShipment[] = [];
+    for (const r of kien) {
+      const handoffAt = toDate(r.handoff_at);
+      if (!handoffAt) continue;
+      shipments.push({ id: r.id, outcome: r.outcome, handoffAt, finalAt: toDate(r.final_at) });
+    }
+    const events = new Map<string, CarrierEventLite[]>();
+    const ids = shipments.map((s) => s.id);
+    for (let i = 0; i < ids.length; i += EVENT_ID_CHUNK) {
+      const chunk = ids.slice(i, i + EVENT_ID_CHUNK);
+      const rows = rowsOf<{ shipment_id: string; occurred_at: unknown; con: string }>(
+        await db.execute(sql`
+          select e.shipment_id, e.occurred_at, ${CON_SU_KIEN} as con
+            from shipment_events e
+           where e.source in (${sql.raw(EVENT_SOURCES)})
+             and e.shipment_id in (${sql.join(chunk.map((id) => sql`${id}`), sql`, `)})
+           order by e.shipment_id, e.occurred_at
+        `),
+      );
+      for (const r of rows) {
+        const at = toDate(r.occurred_at);
+        if (!at) continue;
+        const list = events.get(r.shipment_id) ?? [];
+        list.push({ at, con: r.con });
+        events.set(r.shipment_id, list);
+      }
+    }
+    const donRows = rowsOf<{ inserted_at: unknown; outcome: string }>(
+      await db.execute(sql`
+        select k.inserted_at, k.outcome
+          from (
+            select "orders"."inserted_at" as inserted_at, ${ORDER_OUTCOME_FAST} as outcome
+              from "orders"
+              left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+             where ${REPORTABLE_ORDER} and "orders"."inserted_at" >= ${since}
+            offset 0
+          ) k
+         where k.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')
+      `),
+    );
+    const orders = donRows.flatMap((r) => {
+      const insertedAt = toDate(r.inserted_at);
+      return insertedAt ? [{ insertedAt, outcome: r.outcome }] : [];
+    });
+    return { loadedAt, shipments, events, orders };
+  });
+}
+
+/** `percentile_cont` của PostgreSQL: nội suy tuyến tính giữa hai phần tử kề nhau. */
+function percentileCont(values: number[], q: number): number | null {
+  if (!values.length) return null;
+  const v = [...values].sort((a, b) => a - b);
+  const pos = (v.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return lo === hi ? v[lo] : v[lo] + (v[hi] - v[lo]) * (pos - lo);
+}
+
 export type MaturityWindow = {
   /** Số ngày sau khi ĐVVC nhận để một kiện được coi là "đủ chín" để học. */
   maturityDays: number;
@@ -80,23 +179,19 @@ export type MaturityWindow = {
  *
  * `cutoff` (thử ngược): chỉ nhìn dữ liệu có TRƯỚC mốc đó, như thể đang đứng ở ngày ấy.
  */
-async function doCuaSoChin(cutoff: Date | null): Promise<MaturityWindow> {
-  const db = await getDb();
-  const moc = cutoff ?? new Date();
+function doCuaSoChin(kho: Corpus, cutoff: Date | null): MaturityWindow {
+  const moc = cutoff ?? kho.loadedAt;
   const tu = new Date(moc.getTime() - TRAINING_WINDOW.windowDays * NGAY_MS);
-  const dk: SQL[] = [sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${tu}`, sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} <= ${moc}`];
-  const [row] = rowsOf<{ ngay: string | number | null; mau: string | number }>(
-    await db.execute(sql`
-      select percentile_cont(${TRAINING_WINDOW.maturityQuantile}) within group (order by extract(epoch from (k.final_at - k.handoff_at)) / 86400.0) as ngay,
-             count(*)::int as mau
-        from (${kienDaKetThuc(dk)}) k
-       where k.outcome in ('RETURNED','RETURNED_BY_RULE')
-         and k.final_at is not null and k.final_at >= k.handoff_at
-         ${cutoff ? sql`and k.final_at < ${cutoff}` : sql``}
-    `),
-  );
-  const mau = Number(row?.mau ?? 0);
-  const doDuoc = row?.ngay === null || row?.ngay === undefined ? null : Number(row.ngay);
+  const ngay: number[] = [];
+  for (const k of kho.shipments) {
+    if (k.handoffAt < tu || k.handoffAt > moc) continue;
+    if (k.outcome !== "RETURNED" && k.outcome !== "RETURNED_BY_RULE") continue;
+    if (!k.finalAt || k.finalAt < k.handoffAt) continue;
+    if (cutoff && !(k.finalAt < cutoff)) continue;
+    ngay.push((k.finalAt.getTime() - k.handoffAt.getTime()) / NGAY_MS);
+  }
+  const mau = ngay.length;
+  const doDuoc = percentileCont(ngay, TRAINING_WINDOW.maturityQuantile);
   const duMau = mau >= TRAINING_WINDOW.minReturnedForMaturity && doDuoc !== null && Number.isFinite(doDuoc);
   const maturityDays = duMau ? Math.min(TRAINING_WINDOW.maturityCapDays, Math.max(1, Math.ceil(doDuoc))) : TRAINING_WINDOW.maturityDefaultDays;
   return {
@@ -134,7 +229,7 @@ export type StateProbabilities = {
  *
  * Một vận đơn "chờ phát lại" có thể sinh năm sự kiện: Viettel Post thử lại webhook tới 5 lần, và
  * ERP cũng nhận cùng trạng thái qua cả tra API lẫn nhập tệp. Đếm theo SỰ KIỆN nghĩa là để số lần
- * thử lại quyết định xác suất. `select distinct e.shipment_id, con` cắt đúng chỗ đó.
+ * thử lại quyết định xác suất. Mỗi kiện gom trạng thái vào một `Set` — đúng vai của `distinct` cũ.
  *
  * ─── NHÃN LÀ `ORDER_OUTCOME`, KHÔNG PHẢI `stage` ───
  *
@@ -143,35 +238,26 @@ export type StateProbabilities = {
  * luật nhưng được dạy cho mô hình là "giao được"; (2) kiện 503 tiêu huỷ có `stage = CANCELLED` nên
  * biến mất khỏi mẫu số — mô hình không bao giờ thấy chúng hỏng. Nay nhãn đọc thẳng `ORDER_OUTCOME`.
  */
-async function hocXacSuat(cutoff: Date | null): Promise<StateProbabilities> {
-  const db = await getDb();
-  const window = await doCuaSoChin(cutoff);
-  const dk: SQL[] = [sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${window.trainedFrom}`, sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} <= ${window.trainedUntil}`];
-  const rows = rowsOf<{ con: string; mau: string | number; giao: string | number }>(
-    await db.execute(sql`
-      with kien as (${kienDaKetThuc(dk)}),
-      chin as (
-        select k.id, k.outcome from kien k
-         where k.outcome in ${FINISHED_OUTCOMES}
-           ${cutoff ? sql`and k.final_at is not null and k.final_at < ${cutoff}` : sql``}
-      ),
-      quan_sat as (
-        -- MỘT vận đơn × MỘT trạng thái = MỘT quan sát, bất kể bao nhiêu sự kiện.
-        select distinct e.shipment_id, ${CON_SU_KIEN} as con
-          from shipment_events e
-          join chin k on k.id = e.shipment_id
-         where e.source in (${sql.raw(EVENT_SOURCES)})
-           ${cutoff ? sql`and e.occurred_at < ${cutoff}` : sql``}
-      )
-      select q.con,
-             count(*)::int as mau,
-             count(*) filter (where k.outcome = 'DELIVERED')::int as giao
-        from quan_sat q
-        join chin k on k.id = q.shipment_id
-       group by q.con
-    `),
-  );
-  const theoCon = new Map(rows.map((r) => [r.con, { mau: Number(r.mau), giao: Number(r.giao) }]));
+function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
+  const window = doCuaSoChin(kho, cutoff);
+  const theoCon = new Map<string, { mau: number; giao: number }>();
+  for (const k of kho.shipments) {
+    if (k.handoffAt < window.trainedFrom || k.handoffAt > window.trainedUntil) continue;
+    if (!FINISHED_SET.has(k.outcome)) continue;
+    if (cutoff && !(k.finalAt && k.finalAt < cutoff)) continue;
+    // MỘT vận đơn × MỘT trạng thái = MỘT quan sát, bất kể bao nhiêu sự kiện.
+    const cons = new Set<string>();
+    for (const e of kho.events.get(k.id) ?? []) {
+      if (cutoff && !(e.at < cutoff)) continue;
+      cons.add(e.con);
+    }
+    for (const con of cons) {
+      const cur = theoCon.get(con) ?? { mau: 0, giao: 0 };
+      cur.mau += 1;
+      if (k.outcome === "DELIVERED") cur.giao += 1;
+      theoCon.set(con, cur);
+    }
+  }
   const dong = (substate: ProjectedState, label: string, r: { mau: number; giao: number }): StateProbability => ({
     substate,
     label,
@@ -186,26 +272,21 @@ async function hocXacSuat(cutoff: Date | null): Promise<StateProbabilities> {
     ĐƠN CHƯA GỬI: học từ đơn CHỐT trong cửa sổ và đã kết thúc, KỂ CẢ HUỶ — vì đơn chưa gửi vẫn có
     thể bị huỷ, và huỷ thì doanh thu bằng 0. Đây là trạng thái của DOANH THU, không vào tỷ lệ GTC.
   */
-  const [ns] = rowsOf<{ mau: string | number; giao: string | number }>(
-    await db.execute(sql`
-      select count(*)::int as mau, count(*) filter (where k.outcome = 'DELIVERED')::int as giao
-        from (
-          select ${ORDER_OUTCOME_FAST} as outcome
-            from "orders"
-            left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
-           where ${REPORTABLE_ORDER}
-             and "orders"."inserted_at" >= ${window.trainedFrom} and "orders"."inserted_at" <= ${window.trainedUntil}
-          offset 0
-        ) k
-       where k.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')
-    `),
-  );
-  const notShipped = dong(NOT_SHIPPED_STATE, "Chưa gửi ĐVVC", { mau: Number(ns?.mau ?? 0), giao: Number(ns?.giao ?? 0) });
+  let nsMau = 0;
+  let nsGiao = 0;
+  for (const o of kho.orders) {
+    if (o.insertedAt < window.trainedFrom || o.insertedAt > window.trainedUntil) continue;
+    nsMau += 1;
+    if (o.outcome === "DELIVERED") nsGiao += 1;
+  }
+  const notShipped = dong(NOT_SHIPPED_STATE, "Chưa gửi ĐVVC", { mau: nsMau, giao: nsGiao });
   return { version: PROJECTED_GTC_VERSION, states, notShipped, totalSample: states.reduce((a, s) => a + s.sample, 0), window };
 }
 
+const FINISHED_SET = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE"]);
+
 export async function getStateDeliveryProbabilities(): Promise<StateProbabilities> {
-  return memo(`state-delivery-prob:${PROJECTED_GTC_VERSION}`, 600_000, () => hocXacSuat(null));
+  return memo(`state-delivery-prob:${PROJECTED_GTC_VERSION}`, 600_000, async () => hocXacSuat(await taiKho(), null));
 }
 
 export type ProbabilityLookup = {
@@ -282,8 +363,8 @@ export type ProjectionBacktest = {
  */
 export async function getProjectionBacktest(): Promise<ProjectionBacktest> {
   return memo(`projection-backtest:${PROJECTED_GTC_VERSION}:${BACKTEST_MONTHS}:${BACKTEST_SNAPSHOT_OFFSETS_DAYS.join(",")}`, 600_000, async () => {
-    const db = await getDb();
-    const now = new Date();
+    const kho = await taiKho();
+    const now = kho.loadedAt;
     const dauThang = (lui: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - lui, 1));
     const points: { shipmentId: string; p: number; y: 0 | 1; con: ProjectedState }[] = [];
     let snapshots = 0;
@@ -293,38 +374,32 @@ export async function getProjectionBacktest(): Promise<ProjectionBacktest> {
     for (let lui = BACKTEST_MONTHS - 1; lui >= 0; lui -= 1) {
       const tu = dauThang(lui);
       const den = dauThang(lui - 1);
-      const moHinh = dungBangTra(await hocXacSuat(tu));
+      const moHinh = dungBangTra(hocXacSuat(kho, tu));
       maturityDays = moHinh.window.maturityDays;
       // Chỉ chấm kiện đã đủ chín tính tới HÔM NAY — nếu không, tập chấm nghiêng về kiện xong nhanh.
       const denChin = new Date(Math.min(den.getTime(), now.getTime() - moHinh.window.maturityDays * NGAY_MS));
       if (denChin.getTime() <= tu.getTime()) continue;
       months.push(`${tu.getUTCFullYear()}-${String(tu.getUTCMonth() + 1).padStart(2, "0")}`);
-      const dk: SQL[] = [sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} >= ${tu}`, sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} < ${denChin}`];
-      const rows = rowsOf<{ shipment_id: string; k_ngay: number; da_giao: boolean; con: string | null }>(
-        await db.execute(sql`
-          with kien as (${kienDaKetThuc(dk)}),
-          xong as (select k.* from kien k where k.outcome in ${FINISHED_OUTCOMES}),
-          moc as (
-            select x.id, x.outcome, x.final_at, o.k_ngay, x.handoff_at + (o.k_ngay * interval '1 day') as t
-              from xong x
-             cross join unnest(array[${sql.join(BACKTEST_SNAPSHOT_OFFSETS_DAYS.map((d) => sql`${d}::int`), sql`, `)}]) as o(k_ngay)
-          )
-          select m.id as shipment_id, m.k_ngay, (m.outcome = 'DELIVERED') as da_giao,
-                 (select ${CON_SU_KIEN}
-                    from shipment_events e
-                   where e.shipment_id = m.id and e.source in (${sql.raw(EVENT_SOURCES)}) and e.occurred_at <= m.t
-                   order by e.occurred_at desc limit 1) as con
-            from moc m
-           where m.final_at is null or m.t < m.final_at
-        `),
-      );
-      for (const r of rows) {
-        // Chưa có sự kiện nào tới mốc t, hoặc đang ở trạng thái cuối ⇒ không có gì để dự báo.
-        if (!r.con || !isModelledSubstate(r.con)) continue;
-        snapshots += 1;
-        const tra = moHinh.of(r.con);
-        if (tra.p === null) continue;
-        points.push({ shipmentId: r.shipment_id, p: tra.p, y: r.da_giao ? 1 : 0, con: r.con });
+      for (const x of kho.shipments) {
+        if (x.handoffAt < tu || !(x.handoffAt < denChin)) continue;
+        if (!FINISHED_SET.has(x.outcome)) continue;
+        const suKien = kho.events.get(x.id) ?? [];
+        for (const kNgay of BACKTEST_SNAPSHOT_OFFSETS_DAYS) {
+          const t = new Date(x.handoffAt.getTime() + kNgay * NGAY_MS);
+          if (x.finalAt !== null && !(t < x.finalAt)) continue;
+          // Trạng thái = sự kiện ĐVVC MỚI NHẤT có occurred_at ≤ t (danh sách đã tăng dần).
+          let con: string | null = null;
+          for (const e of suKien) {
+            if (e.at <= t) con = e.con;
+            else break;
+          }
+          // Chưa có sự kiện nào tới mốc t, hoặc đang ở trạng thái cuối ⇒ không có gì để dự báo.
+          if (!con || !isModelledSubstate(con)) continue;
+          snapshots += 1;
+          const tra = moHinh.of(con);
+          if (tra.p === null) continue;
+          points.push({ shipmentId: x.id, p: tra.p, y: x.outcome === "DELIVERED" ? 1 : 0, con });
+        }
       }
     }
 
