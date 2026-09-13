@@ -282,3 +282,42 @@ migration cần kiểm đã áp — phần backfill của nó không bao giờ �
   tính thứ hai. Chuyển nó là một bản refactor giao diện riêng, không trộn vào bản nền dữ liệu này.
 * **Chưa có chỉ số nào ở mức MÃ HÀNG**, nên phạm vi đích `PRODUCT` chưa mở. Mở cùng lúc với chỉ số
   đầu tiên đọc được ở mức đó.
+
+---
+
+## 11 · `TASK_9_BLOCKED_BY_SOURCE_ACCESS` — đối soát hàng hoàn từ Google Sheet
+
+**Trạng thái: CHẶN VÌ KHÔNG TRUY CẬP ĐƯỢC NGUỒN. Không chặn bản phát hành này.**
+
+Bằng chứng, đo trong chính phiên làm việc 13/09/2026:
+
+```
+curl https://docs.google.com/  →  curl: (56) CONNECT tunnel failed, response 403
+```
+
+Chính sách ra mạng của môi trường agent chặn `docs.google.com`. Không có cách nào đọc được bảng
+tính, kể cả bản xuất CSV công khai.
+
+**Vì sao dừng chứ không làm tiếp.** Việc này là một phép ÁNH XẠ CỘT: cột nào của bảng tính là mã vận
+đơn, cột nào là số lượng thực nhận, cột nào là lý do hoàn, ngày ghi theo múi giờ nào. Không nhìn
+thấy bảng thì mọi ánh xạ đều là phỏng đoán — và phỏng đoán ở đây đi thẳng vào TỒN KHO qua phiếu
+`RETURN` (luật 10: hàng hoàn chỉ quay lại tồn khi kho lập phiếu với số đếm thực tế). Một cột đọc
+nhầm là một lô hàng vào kho bằng số không ai đếm. Viết sẵn một importer "chắc là đúng" rồi để chủ
+shop bấm nút là cách hỏng tệ nhất: nó trông như đã xong.
+
+**Cần gì để mở khoá** — một trong hai, không cần cả hai:
+
+1. Chủ shop dán **20 dòng đầu của bảng tính** (kể cả dòng tiêu đề) vào phiên làm việc. Đủ để chốt
+   ánh xạ cột và viết bài kiểm bằng dữ liệu thật.
+2. Hoặc mở `docs.google.com` cho môi trường agent, rồi đưa **đường dẫn xuất CSV công khai**
+   (`.../export?format=csv&gid=...`).
+
+**Hình dạng công việc khi mở khoá** (đã khảo sát, chưa viết mã):
+
+* Kho mã đã có sẵn đường đọc Google Sheet bằng CSV công khai — `lib/constants/landing.ts` dùng đúng
+  cách đó, và AGENTS.md §5 chốt "chỉ CSV export công khai, không thêm Google API key". Dùng lại,
+  không dựng đường thứ hai.
+* Điểm vào là **bàn nhận hàng hoàn** đã có trong bản này (`135aa6d`), không phải một trang mới:
+  bảng tính chỉ là một NGUỒN GỢI Ý cho phiếu kiểm, người kho vẫn đếm và vẫn bấm. Nhập thẳng thành
+  phiếu `RETURN` là đi vòng qua đúng cái luật 10 dựng ra để chặn.
+* Khoá tự nhiên để không nhân đôi khi nhập lại: mã vận đơn + ngày dòng, cùng kiểu `landing_orders.row_key`.
