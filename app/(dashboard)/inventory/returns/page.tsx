@@ -12,6 +12,7 @@ import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
+import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
 
@@ -24,12 +25,25 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
  * Bảng điều khiển ở đầu trang tách "chờ nhận" khỏi "chờ đếm" cũng vì lý do đó: hai việc tắc ở hai
  * chỗ khác nhau và thuộc hai người khác nhau. Gộp một con số thì không biết phải đi giục ai.
  */
-export default async function ReturnInspectionPage() {
+export default async function ReturnInspectionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  /*
+    Ô TÌM KIỆN ĐI LÊN MÁY CHỦ, KHÔNG LỌC TẠI CHỖ.
+
+    Trước bản này trang gọi hàng đợi mà KHÔNG truyền ô tìm, rồi trình duyệt
+    lọc trên đúng 400 dòng đã tải. Phần lọc phía máy chủ có sẵn trong truy vấn nhưng chưa ai gọi.
+
+    Hậu quả ở đúng lúc tệ nhất: người kho cầm một kiện, gõ mã vận đơn, và nếu kiện đó nằm ngoài 400
+    dòng cũ nhất thì màn hình nói "0 kiện". Người đứng ở kho đọc câu đó là "kiện này không có trong
+    hệ thống" — rồi chọn đại một dòng gần giống hoặc lập phiếu mới. Đây là kiểu hỏng mà màn hình
+    trông hoàn toàn bình thường: không lỗi, không cảnh báo, chỉ là một danh sách rỗng.
+  */
+  const sp = await searchParams;
+  const timKien = param(sp, "kien") ?? "";
   const { user, decision } = await requireResource("RETURNS", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400 })]);
+  const [bang, pending, choNhan] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien })]);
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -144,6 +158,8 @@ export default async function ReturnInspectionPage() {
               </div>
             ) : null}
             <ReceiveQueue
+              searching={Boolean(timKien.trim())}
+              loaded={choNhan.loaded}
               total={choNhan.total}
               canWrite={canWrite}
               rows={choNhan.rows.map((r) => ({
@@ -152,6 +168,7 @@ export default async function ReturnInspectionPage() {
                 receiverName: r.receiverName,
                 receiverPhone: r.receiverPhone,
                 codAmount: r.codAmount,
+                stage: r.stage,
                 returnedAt: r.returnedAt ? r.returnedAt.toISOString() : null,
                 ageDays: r.ageDays,
                 ctx: r.ctx,
