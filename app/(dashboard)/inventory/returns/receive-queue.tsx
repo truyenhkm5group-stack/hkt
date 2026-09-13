@@ -2,7 +2,8 @@
 
 import { RECEIVE_SLA_DAYS } from "@/lib/constants/return-lifecycle";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { parseAsString, useQueryState } from "nuqs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PackageCheck, Search, TriangleAlert } from "lucide-react";
@@ -16,6 +17,8 @@ import { confirmReturnReceived } from "@/lib/actions/returns-warehouse";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import type { ItemsBasis, OrderLinkBasis, ReturnItem, ReturnProductContext } from "@/lib/returns/product-context";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
+import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import type { ShipmentStage } from "@/db/schema";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,6 +37,8 @@ export type QueueRow = {
   receiverName: string;
   receiverPhone: string;
   codAmount: number;
+  /** ĐVVC đang nói gì về kiện này — để người kho đối chiếu với cái nhãn đang cầm trên tay. */
+  stage: string;
   returnedAt: string | null;
   ageDays: number | null;
   ctx: ReturnProductContext;
@@ -79,15 +84,32 @@ function ItemLine({ it }: { it: ReturnItem }) {
   );
 }
 
-export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; total: number; canWrite: boolean }) {
+export function ReceiveQueue({ rows, total, loaded, searching, canWrite }: { rows: QueueRow[]; total: number; loaded: number; searching: boolean; canWrite: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [q, setQ] = useState("");
+  /*
+    Ô TÌM ĐI LÊN MÁY CHỦ (nuqs, `shallow: false`), KHÔNG chỉ lọc mảng đang có.
+
+    Danh sách bị chặn ở 400 dòng cũ nhất. Lọc tại chỗ thì kiện nằm ngoài trần đó KHÔNG BAO GIỜ tìm
+    ra được, và màn hình trả lời "0 kiện" — câu mà người kho sẽ đọc thành "kiện này không có trong
+    hệ thống". Gõ xong 400 ms mới đi, để mỗi ký tự không thành một lượt truy vấn.
+  */
+  const [urlQ, setUrlQ] = useQueryState("kien", parseAsString.withDefault("").withOptions({ shallow: false, history: "replace" }));
+  const [q, setQ] = useState(urlQ);
+  useEffect(() => setQ(urlQ), [urlQ]);
+  useEffect(() => {
+    if (q === urlQ) return;
+    const t = setTimeout(() => void setUrlQ(q || null), 400);
+    return () => clearTimeout(t);
+  }, [q, urlQ, setUrlQ]);
   const [open, setOpen] = useState<QueueRow | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
 
-  // Lọc tại chỗ: danh sách đã bị chặn ở phía máy chủ nên đây là vài trăm dòng, gõ tới đâu thấy tới
-  // đó, không phải đi vòng lên máy chủ cho mỗi ký tự.
+  /*
+    Lọc thêm TẠI CHỖ trên phần máy chủ đã trả về — chỉ để gõ tới đâu thấy tới đó trong lúc chờ, và
+    để bắt được MÃ HÀNG / TÊN SẢN PHẨM: hai thứ đó nằm ở đơn nối qua nhiều bước nên truy vấn không
+    lọc được, phải ghép xong mới so. Máy chủ vẫn là nơi quyết định tập kiện nào được xét.
+  */
   const visible = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return rows;
@@ -128,9 +150,23 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mã vận đơn, mã đơn, SĐT, tên khách, mã hàng…" className="h-8 w-full pl-8 sm:w-80" />
         </div>
-        <span className="text-[12px] text-muted-foreground">
-          {formatNumber(visible.length)}/{formatNumber(total)} kiện
+        {/*
+          BỘ ĐẾM PHẢI NÓI ĐÚNG NÓ ĐANG ĐẾM GÌ.
+
+          Bản cũ in `đang hiện / TỔNG TOÀN BỘ`, nên khi tìm một mã cụ thể nó hiện "0/612 kiện" —
+          đọc ra là "không có kiện nào khớp trong 612 kiện", trong khi sự thật là chỉ 400 kiện được
+          xét. Nay đang tìm thì mẫu số là SỐ KIỆN THẬT SỰ ĐƯỢC XÉT.
+        */}
+        <span className="text-[12px] text-muted-foreground" title={searching ? "Máy chủ đã lọc trên TOÀN BỘ kiện đang chờ nhận, không chỉ phần đang hiện" : undefined}>
+          {searching
+            ? `${formatNumber(visible.length)} kiện khớp (tìm trên toàn bộ ${formatNumber(total)})`
+            : `${formatNumber(visible.length)}/${formatNumber(total)} kiện`}
         </span>
+        {!searching && loaded < total ? (
+          <span className="rounded bg-warning/15 px-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            đang hiện {formatNumber(loaded)} kiện cũ nhất — gõ mã để tìm trong cả {formatNumber(total)}
+          </span>
+        ) : null}
         {selected.size && canWrite ? (
           <Button size="sm" className="ml-auto h-8" disabled={pending} onClick={confirm}>
             <PackageCheck className="size-3.5" /> Đã nhận {selected.size} kiện
@@ -147,6 +183,7 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
               <th className="px-2 py-2 text-left">Đơn · khách</th>
               <th className="px-2 py-2 text-left">Hàng kỳ vọng trong kiện</th>
               <th className="px-2 py-2 text-right">SL</th>
+              <th className="px-2 py-2 text-left">ĐVVC báo</th>
               <th className="px-2 py-2 text-right">COD</th>
               <th className="px-2 py-2 text-right">Tuổi</th>
             </tr>
@@ -194,6 +231,15 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
                   </td>
                   {/* CHƯA BIẾT hiện là "—", không phải 0. Số 0 ở đây đọc thành "kiện rỗng". */}
                   <td className="numeric px-2 py-2 text-right font-semibold">{c.expectedQty === null ? "—" : formatNumber(c.expectedQty)}</td>
+                  {/*
+                    TRẠNG THÁI ĐVVC ĐANG NÓI, đặt cạnh ngày báo trả về. Người kho cầm kiện trên tay
+                    cần đối chiếu được với cái nhãn: kiện "đã hoàn" và kiện "đang hoàn" trông giống
+                    hệt nhau trong danh sách nếu không in trạng thái ra.
+                  */}
+                  <td className="px-2 py-2 text-[11px] text-muted-foreground">
+                    <div>{SHIPMENT_STAGE_LABEL[r.stage as ShipmentStage] ?? r.stage}</div>
+                    {r.returnedAt ? <div>{formatDate(r.returnedAt)}</div> : <div>chưa có ngày báo về</div>}
+                  </td>
                   <td className="numeric px-2 py-2 text-right text-muted-foreground">{formatVND(r.codAmount, { compact: true })}</td>
                   <td className={cn("numeric px-2 py-2 text-right", (r.ageDays ?? 0) >= RECEIVE_SLA_DAYS && "font-semibold text-rose-600 dark:text-rose-400")}>
                     {r.ageDays === null ? "—" : `${r.ageDays}n`}
