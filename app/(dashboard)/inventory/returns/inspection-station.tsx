@@ -169,11 +169,13 @@ export function InspectionStation({ rows: initial, canWrite }: { rows: Row[]; ca
       toast.error(r.error);
       return;
     }
-    // Kiện nào hỏng thì QUAY LẠI danh sách kèm tên — không nuốt lỗi.
+    // Kiện nào hỏng thì QUAY LẠI danh sách kèm tên — không nuốt lỗi. Lý do đã gộp theo số kiện ở
+    // máy chủ, nên 200 kiện cùng một lý do là MỘT dòng, không phải 200.
     if (r.failed.length) {
       const hong = new Set(r.failed.map((f) => f.shipmentId));
       setRows((prev) => [...giuLai.filter((x) => hong.has(x.shipmentId)), ...prev]);
-      toast.error(`${r.message}: ${r.failed.slice(0, 3).map((f) => f.error).join(" · ")}`);
+      if (r.done) toast.success(`Đã kiểm ${r.done} kiện`);
+      toast.error(r.message, { duration: 10_000 });
     } else {
       toast.success(r.message);
     }

@@ -1,7 +1,7 @@
 import { RECEIVE_SLA_DAYS } from "@/lib/constants/return-lifecycle";
 import { and, asc, desc, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { IS_RETURN_NOT_RECEIVED } from "@/lib/queries/return-rate";
+import { IS_RETURN_AWAITING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { returnProductContext, summarizeReturnItems, EMPTY_CONTEXT, type ReturnProductContext } from "@/lib/returns/product-context";
 
 /**
@@ -61,7 +61,7 @@ const days = (d: Date | null) => (d ? Math.floor((Date.now() - d.getTime()) / 86
 export async function receiveQueue({ limit = 400, q = "" }: { limit?: number; q?: string } = {}): Promise<ReceiveQueue> {
   const db = await getDb();
   const term = q.trim();
-  const conds: SQL[] = [IS_RETURN_NOT_RECEIVED as SQL];
+  const conds: SQL[] = [IS_RETURN_AWAITING_WAREHOUSE as SQL];
   // Lọc ở CSDL những gì CSDL biết (mã, tên, SĐT). Mã hàng / tên sản phẩm nằm ở đơn nối qua nhiều
   // bước nên lọc sau khi đã ghép — xem bên dưới.
   if (term) {

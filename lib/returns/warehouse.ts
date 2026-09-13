@@ -1,16 +1,13 @@
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Actor } from "@/lib/constants/actor";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
+import { IS_RETURN_AWAITING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { markReturnsArrived, undoReturnArrived } from "@/lib/returns/inspection";
 
 const s = schema.shipments;
-
-/**
- * Kiện CHƯA được ghi nhận đã về. Kiện đã ghi nhận nằm ở hàng đợi ĐẾM (`listPendingInspections`),
- * không còn là việc của người nhận hàng — nếu không tách, bấm "xác nhận hàng loạt" sẽ lặp lại mãi
- * trên cùng một đống kiện.
- */
-const NOT_YET_ARRIVED = sql`not exists (select 1 from return_inspections ri where ri.shipment_id = ${s.id})`;
+const ins = schema.returnInspections;
+/** Nơi ghi: CSDL thường hoặc giao dịch đang mở — đóng kiện phải nằm CÙNG giao dịch với phiếu kho. */
+type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /**
  * Kho GHI NHẬN kiện hàng hoàn đã về tới nơi.
@@ -57,26 +54,23 @@ export async function undoReturnReceived(ids: string[]) {
 /**
  * Hàng hoàn ĐÃ VỀ TỚI SHOP mà kho chưa xác nhận.
  *
- * Chỉ tính vận đơn ở trạng thái RETURNED — tức Viettel Post đã trả hàng xong cho người gửi
- * (mã 504). Vận đơn RETURNING vẫn đang trên đường về, xác nhận nhận hàng lúc đó là bịa dữ liệu.
+ * Vị ngữ dùng chung `IS_RETURN_AWAITING_WAREHOUSE` (`lib/queries/return-rate.ts`) — cùng một điều
+ * kiện với bàn nhận hàng và thẻ "Chờ kho nhận", để ba nơi không bao giờ nói ba con số.
  *
  * Đây là phần tồn kho đang bị hụt: hàng có thật trong kho nhưng ERP chưa cộng lại, nên kế hoạch
  * đặt hàng sẽ đặt thừa.
  *
- * Đếm CẢ hàng tặng: chúng cũng nằm trong kiện hàng quay về và cách tính tồn của ERP đã tính,
- * nên số món ở đây phải khớp với mức tồn tăng lên sau khi xác nhận.
- *
- * Chỉ tính vận đơn CÓ GẮN ĐƠN. Viettel Post tạo vận đơn riêng cho chiều hoàn (mã ...1P1) và khi
- * nó phát thành công về shop thì vận đơn đó cũng ở trạng thái RETURNED — nhưng nó không có đơn
- * nào, không có món hàng nào, nên đưa vào hàng chờ kho chỉ tạo ra hàng trăm dòng rỗng. Hàng hoàn
- * của đơn đã nằm ở chính vận đơn gốc.
+ * Số món đếm CẢ hàng tặng (chúng cũng nằm trong kiện và cách tính tồn đã trừ chúng), nhưng CHỈ cộng
+ * cho kiện mang sẵn khoá đơn. Vận đơn chiều về (`order_id` null) vẫn được đếm là KIỆN — nó là hàng
+ * thật đã về tới shop — nhưng số món của nó nằm ở `unknownParcels`, KHÔNG được ước lượng thành 0.
  */
 export async function pendingReturnedForWarehouse() {
   const db = await getDb();
   const [row] = await db
     .select({
       count: sql<number>`count(*)`,
-      items: sql<number>`coalesce(sum((select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})), 0)`,
+      items: sql<number>`coalesce(sum((select coalesce(sum(oi.quantity), 0) from order_items oi where oi.order_id = ${s.orderId})) filter (where ${s.orderId} is not null), 0)`,
+      unknownParcels: sql<number>`count(*) filter (where ${s.orderId} is null)`,
       oldestAt: sql<Date | null>`min(${s.returnedAt})`,
       /**
        * VỐN ĐANG NẰM NGOÀI SỔ — tính theo GIÁ NHẬP của chính các món trong kiện.
@@ -89,15 +83,17 @@ export async function pendingReturnedForWarehouse() {
         select coalesce(sum(oi.quantity * coalesce(nullif(pv.last_imported_price, 0), 0)), 0)
         from order_items oi left join product_variants pv on pv.id = oi.variant_id
         where oi.order_id = ${s.orderId}
-      )), 0)`,
+      )) filter (where ${s.orderId} is not null), 0)`,
       /** Quá 30 ngày: nhóm có nguy cơ không bao giờ được đếm. */
       stale: sql<number>`count(*) filter (where ${s.returnedAt} < now() - interval '30 days')`,
     })
     .from(s)
-    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), isNotNull(s.orderId), NOT_YET_ARRIVED));
+    .where(IS_RETURN_AWAITING_WAREHOUSE);
   return {
     count: Number(row?.count ?? 0),
     items: Number(row?.items ?? 0),
+    /** Kiện chưa mang khoá đơn — số món của chúng CHƯA BIẾT, không nằm trong `items`. */
+    unknownParcels: Number(row?.unknownParcels ?? 0),
     oldestAt: row?.oldestAt ?? null,
     value: Number(row?.value ?? 0),
     stale: Number(row?.stale ?? 0),
@@ -107,70 +103,103 @@ export async function pendingReturnedForWarehouse() {
 /** Danh sách vận đơn hoàn đã về tới shop, cũ nhất trước — dùng cho thao tác xác nhận hàng loạt. */
 export async function listPendingReturnedIds(limit: number) {
   const db = await getDb();
-  const rows = await db
-    .select({ id: s.id })
-    .from(s)
-    .where(and(eq(s.stage, "RETURNED"), isNull(s.returnReceivedAt), isNotNull(s.orderId), NOT_YET_ARRIVED))
-    .orderBy(asc(s.returnedAt))
-    .limit(limit);
+  const rows = await db.select({ id: s.id }).from(s).where(IS_RETURN_AWAITING_WAREHOUSE).orderBy(asc(s.returnedAt)).limit(limit);
   return rows.map((r) => r.id);
 }
 
-/**
- * Khi kho lập PHIẾU TÁI NHẬP, đóng các vận đơn hoàn đang chờ tương ứng — cũ nhất trước — cho tới khi
- * đủ số lượng vừa đếm được của từng mẫu mã.
- *
- * Vì sao cần: "hoàn chờ nhận" là hàng ERP biết phải quay về nhưng chưa có trong tồn. Không đóng thì
- * con số này phình mãi và kho không biết lô nào đã xử lý. Đóng theo số ĐẾM THỰC TẾ (không phải theo
- * số suy ra từ vận đơn) nên phần đếm thiếu hiện ra thành hàng hụt thay vì bị giấu.
- *
- * Một vận đơn có nhiều mẫu mã: đóng vận đơn đó thì mọi mẫu mã trong kiện được tính là đã xử lý —
- * đúng thực tế vì cả kiện hàng quay về cùng lúc.
- */
-export async function settleReturnsForVariants(counts: { variantId: string; quantity: number }[], actor: string, note?: string) {
-  const wanted = new Map<string, number>();
-  for (const c of counts) if (c.quantity > 0) wanted.set(c.variantId, (wanted.get(c.variantId) ?? 0) + c.quantity);
-  if (!wanted.size) return { shipmentIds: [] as string[], firstByVariant: new Map<string, string>() };
-  const db = await getDb();
-  const rows = await db
-    .select({
-      shipmentId: s.id,
-      variantId: schema.orderItems.variantId,
-      quantity: schema.orderItems.quantity,
-      returnedAt: s.returnedAt,
-    })
-    .from(s)
-    .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, s.orderId))
-    .where(
-      and(
-        isNull(s.returnReceivedAt),
-        inArray(schema.orderItems.variantId, [...wanted.keys()]),
-        // Chỉ đóng kiện ĐÃ VỀ TỚI SHOP. Vận đơn còn RETURNING vẫn đang trên đường về; đóng lúc đó
-        // là bịa dữ liệu. Số kho đếm được vẫn vào tồn qua phiếu, chỉ là chưa gạch được kiện nào.
-        sql`(${s.stage} in ('RETURNED','CANCELLED') or exists (select 1 from orders o2 where o2.id = ${s.orderId} and o2.stage in ('CANCELLED','DELETED')))`,
-      ),
-    )
-    .orderBy(asc(s.returnedAt));
+export type ReturnReceiptLine = { variantId: string; quantity: number; shipmentId: string | null };
 
-  const closed = new Set<string>();
-  const firstByVariant = new Map<string, string>();
-  for (const [variantId, want] of wanted) {
-    let remaining = want;
-    for (const row of rows) {
-      if (remaining <= 0) break;
-      if (row.variantId !== variantId) continue;
-      if (!firstByVariant.has(variantId)) firstByVariant.set(variantId, row.shipmentId);
-      if (!closed.has(row.shipmentId)) closed.add(row.shipmentId);
-      remaining -= Number(row.quantity ?? 0);
+export type SettleReturnsResult = { ok: true; settledShipmentIds: string[] } | { error: string };
+
+/**
+ * PHIẾU TÁI NHẬP LẬP TAY (ở trang Nhập kho) đóng ĐÚNG những vận đơn mà từng dòng phiếu chỉ tên.
+ *
+ * Trước đây hàm này đoán: gom số đếm theo mẫu mã rồi gạch các vận đơn hoàn CŨ NHẤT có mẫu mã đó cho
+ * tới khi đủ số (FIFO). Kho đếm được 3 áo đỏ thì ERP tự kết luận "ba kiện cũ nhất đã về" — không
+ * ai nhìn thấy ba kiện đó, không có biên bản đếm, và người ký là một chuỗi email. Kiện thật sự về
+ * có thể là kiện thứ tư; kiện cũ nhất có thể đã mất trên đường. Sổ từ đó nói dối một cách gọn gàng.
+ *
+ * Từ nay:
+ *  · Dòng phiếu KHÔNG nêu vận đơn ⇒ KHÔNG gạch kiện nào. Phiếu vẫn cộng tồn đúng số đã đếm (đó là
+ *    một phiếu đếm có người ký), chỉ là chưa nói được kiện nào đã xử lý — và hàng chờ vẫn hiện.
+ *  · Dòng nêu vận đơn ⇒ đóng đúng vận đơn ấy, kèm một phiếu kiểm `return_inspections` ở trạng thái
+ *    ĐÃ ĐẾM, người nhận = người đếm = `actor` (khoá tài khoản, luật 34), trỏ về phiếu kho.
+ *  · Vận đơn đã có phiếu ĐÃ ĐẾM ⇒ từ chối cả phiếu: đếm lần hai là cộng tồn hai lần.
+ *
+ * Chạy TRONG giao dịch của phiếu kho: đóng kiện mà phiếu không ghi được (hoặc ngược lại) thì cả hai
+ * cùng huỷ.
+ */
+export async function settleReturnsForReceipt(
+  tx: DbLike,
+  input: { receiptId: string; lines: ReturnReceiptLine[]; actor: Actor; note?: string },
+): Promise<SettleReturnsResult> {
+  const qtyByShipment = new Map<string, number>();
+  for (const line of input.lines) {
+    const id = line.shipmentId?.trim();
+    if (!id || line.quantity <= 0) continue;
+    qtyByShipment.set(id, (qtyByShipment.get(id) ?? 0) + line.quantity);
+  }
+  if (!qtyByShipment.size) return { ok: true, settledShipmentIds: [] };
+
+  const ids = [...qtyByShipment.keys()];
+  const found = await tx.select({ id: s.id, orderId: s.orderId, code: s.vtpOrderNumber }).from(s).where(inArray(s.id, ids));
+  const missing = ids.filter((id) => !found.some((f) => f.id === id));
+  if (missing.length) return { error: `Vận đơn không có trong ERP: ${missing.join(", ")}` };
+
+  const existing = await tx.select({ id: ins.id, shipmentId: ins.shipmentId, status: ins.status }).from(ins).where(inArray(ins.shipmentId, ids));
+  const daDem = existing.filter((e) => e.status === "INSPECTED");
+  if (daDem.length) {
+    const codes = daDem.map((e) => found.find((f) => f.id === e.shipmentId)?.code ?? e.shipmentId);
+    return { error: `Kiện đã được đếm rồi, không tái nhập lần hai: ${codes.join(", ")} — muốn sửa số thì lập phiếu điều chỉnh kho` };
+  }
+
+  const now = new Date();
+  const note = input.note?.trim() ?? "";
+  const label = input.actor.label.trim();
+  if (!label) return { error: "Thiếu người kiểm" };
+
+  for (const sh of found) {
+    const restock = qtyByShipment.get(sh.id) ?? 0;
+    const daNhan = existing.find((e) => e.shipmentId === sh.id);
+    const inspected = {
+      status: "INSPECTED" as const,
+      condition: "RESTOCKABLE",
+      restockQty: restock,
+      unsellableQty: 0,
+      note,
+      inspectedAt: now,
+      inspectedBy: label,
+      inspectedByUserId: input.actor.id,
+      stockReceiptId: input.receiptId,
+      updatedAt: now,
+    };
+    if (daNhan) {
+      // Đã bấm "đã nhận" trước đó: giữ nguyên người nhận, chỉ lật sang ĐÃ ĐẾM. Lật CÓ ĐIỀU KIỆN —
+      // một lượt khác vừa đếm xong thì không đè.
+      const flipped = await tx
+        .update(ins)
+        .set(inspected)
+        .where(and(eq(ins.id, daNhan.id), eq(ins.status, "RECEIVED")))
+        .returning({ id: ins.id });
+      if (!flipped.length) return { error: `Kiện ${sh.code ?? sh.id} vừa được người khác đếm — không ghi lại lần hai` };
+    } else {
+      await tx.insert(ins).values({
+        shipmentId: sh.id,
+        orderId: sh.orderId,
+        receivedAt: now,
+        receivedBy: label,
+        receivedByUserId: input.actor.id,
+        ...inspected,
+      });
     }
   }
-  if (closed.size) {
-    await db
-      .update(s)
-      .set({ returnReceivedAt: new Date(), returnReceivedBy: actor, returnReceivedNote: note?.trim() || null, updatedAt: new Date() })
-      .where(and(inArray(s.id, [...closed]), isNull(s.returnReceivedAt)));
-  }
-  return { shipmentIds: [...closed], firstByVariant };
+
+  await tx
+    .update(s)
+    .set({ returnReceivedAt: now, returnReceivedBy: label, returnReceivedNote: note || null, updatedAt: now })
+    .where(and(inArray(s.id, ids), isNull(s.returnReceivedAt)));
+
+  return { ok: true, settledShipmentIds: ids };
 }
 
 /** Hàng hoàn đang chờ kho nhận, gộp theo mẫu mã — để phiếu tái nhập biết dự kiến bao nhiêu món. */

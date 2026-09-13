@@ -205,7 +205,9 @@ export async function testInspectionCarriesActorKey(db: Db) {
   const phieu = await db.query.returnInspections.findFirst({ where: eq(schema.returnInspections.shipmentId, "attr-s1") });
   assert.equal(phieu?.receivedByUserId, "attr-u1", "người kho nhận kiện phải được nối bằng khoá, không chỉ bằng email");
 
-  const kiem = await recordInspection({ shipmentId: "attr-s1", condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "", actor: { id: "attr-u2", label: "Người B" } });
+  // Kiện này không gắn đơn nên KHÔNG có mẫu mã để cộng tồn — kết luận "bán lại được" bị từ chối
+  // (đúng luật: không ghi "0 món" lặng lẽ). Bài này chỉ kiểm KHOÁ NGƯỜI, nên dùng kết luận không vào tồn.
+  const kiem = await recordInspection({ shipmentId: "attr-s1", condition: "DAMAGED", restockQty: 0, unsellableQty: 1, note: "rách hộp", actor: { id: "attr-u2", label: "Người B" } });
   assert.ok("ok" in kiem, "ghi phiếu kiểm phải thành công");
   const sau = await db.query.returnInspections.findFirst({ where: eq(schema.returnInspections.shipmentId, "attr-s1") });
   assert.equal(sau?.inspectedByUserId, "attr-u2", "người ĐẾM có thể khác người NHẬN — hai khoá riêng");

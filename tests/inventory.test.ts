@@ -182,15 +182,17 @@ export async function testInventory(db: Db) {
   ]);
 
   // Vận đơn chiều hoàn do Viettel Post tự tạo (mã ...1P1) cũng ở trạng thái RETURNED khi phát
-  // thành công về shop, nhưng không gắn đơn và không có món hàng nào — không được lọt vào hàng
-  // chờ kho, nếu không danh sách sẽ đầy dòng rỗng.
+  // thành công về shop. Nó KHÔNG gắn đơn (luật 7) nhưng là hàng THẬT đã về tới shop — bàn nhận hàng,
+  // xác nhận hàng loạt và thẻ "Chờ kho nhận" dùng CÙNG một vị ngữ (`IS_RETURN_AWAITING_WAREHOUSE`)
+  // nên nó phải hiện ở cả ba, dưới nhãn "chưa xác định đơn", với số món CHƯA BIẾT chứ không phải 0.
   await db.insert(schema.shipments).values({ id: "bulk-ship-chieu-hoan", orderReference: "PKE-GOC", stage: "RETURNED", returnedAt: new Date() });
 
   const cho = await pendingReturnedForWarehouse();
   const ids = await listPendingReturnedIds(500);
   assert.ok(ids.includes("bulk-ship-da-ve"), "vận đơn Viettel Post đã trả xong phải nằm trong danh sách chờ kho");
   assert.ok(!ids.includes("bulk-ship-dang-ve"), "vận đơn còn đang trên đường về KHÔNG được xác nhận hàng loạt");
-  assert.ok(!ids.includes("bulk-ship-chieu-hoan"), "vận đơn chiều hoàn không gắn đơn không được vào hàng chờ kho");
+  assert.ok(ids.includes("bulk-ship-chieu-hoan"), "vận đơn chiều hoàn đã phát về shop là kiện thật — phải nằm trong hàng chờ kho, cùng vị ngữ với bàn nhận hàng");
+  assert.ok(cho.unknownParcels >= 1, "kiện chưa ghép được đơn phải được đếm riêng là CHƯA RÕ, không ước lượng thành 0 món");
   assert.ok(cho.count >= 1);
   assert.ok(cho.items >= 5, "số món phải khớp cách tính tồn của ERP, gồm cả hàng tặng");
   assert.ok(cho.oldestAt && Date.now() - new Date(cho.oldestAt).getTime() >= 19 * 86_400_000, "phải nêu được kiện chờ lâu nhất");
