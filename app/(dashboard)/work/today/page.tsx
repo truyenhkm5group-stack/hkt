@@ -6,7 +6,9 @@ import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AutoAssignButton, ReassignSelect } from "@/app/(dashboard)/work/today/panels";
-import { can, requirePermission } from "@/lib/auth/session";
+import { ScopeDenied } from "@/components/scope-denied";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER } from "@/lib/constants/departments";
 import { INTERVENTION_ACTION, INTERVENTION_LABEL, getManagerDay, scopeFor } from "@/lib/queries/manager-day";
 import { departmentsOfUser } from "@/lib/queries/work";
@@ -29,7 +31,9 @@ export const metadata = { title: "Hôm nay" };
  * của trưởng phòng.
  */
 export default async function ManagerDayPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("work:department");
+  // Hàng đợi phòng chứa việc CHƯA GIAO CHO AI — người phạm vi Chỉ của mình / Việc được giao bị từ chối kèm lý do.
+  const { user, decision } = await requireResource("WORK", "work:department");
+  if (decision.allow === "NONE") return <ScopeDenied title="Hôm nay" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const crossDept = can(user, "work:all");
   const mine = (await departmentsOfUser(user.id)).map((d) => d.code);

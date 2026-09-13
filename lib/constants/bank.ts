@@ -346,6 +346,13 @@ export function isBankGroup(value: string): value is BankGroup {
 /** Tiền tố mã tham chiếu khi đẩy giao dịch sang bảng Chi phí — dùng để chống đẩy trùng */
 export const BANK_EXPENSE_PREFIX = "MB ";
 
+/**
+ * Hạn phân loại một dòng tiền chưa có nhóm kế toán (giờ). Ba ngày: đủ để kế toán gom cuối tuần,
+ * đủ ngắn để lợi nhuận tháng không đóng trên một sổ còn dòng chưa biết thuộc khoản nào.
+ * Nguồn việc `BANK_EXCEPTION` (`lib/constants/work-sources.ts`) đọc lại đúng con số này.
+ */
+export const BANK_UNCLASSIFIED_SLA_HOURS = 72;
+
 export const BANK_DIRECTIONS = ["ANY", "IN", "OUT"] as const;
 export type BankDirection = (typeof BANK_DIRECTIONS)[number];
 

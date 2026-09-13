@@ -137,8 +137,15 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     writePermission: "cs:manage",
     routes: ["/cs"],
     table: "cs_cases",
-    rowOwner: { by: "EMAIL", column: "created_by" },
-    rowAssignee: { by: "EMAIL", column: "assignee" },
+    /*
+      KHOÁ TÀI KHOẢN, KHÔNG PHẢI Ô CHỮ. `cs_cases.assignee` là TÊN HIỂN THỊ ("Linh CSKH"), không
+      phải email — nối theo email ở đó thì mệnh đề không khớp dòng nào và người phạm vi "Chỉ của
+      mình" mở trang lên thấy trống. `assignee_user_id` / `created_by_user_id` là khoá thật
+      (migration 0073). Dòng cũ chưa nối khoá thì KHÔNG hiện với phạm vi hẹp — đó là sự thật của
+      dữ liệu (AGENTS.md mục 35: không đoán người cho dòng lịch sử), không phải lỗi của bộ lọc.
+    */
+    rowOwner: { by: "USER_ID", column: "created_by_user_id" },
+    rowAssignee: { by: "USER_ID", column: "assignee_user_id" },
     rowDepartmentColumn: null,
     ownedBy: "SALES",
     sensitive: false,
@@ -167,11 +174,23 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     writePermission: "work:manage",
     routes: ["/work", "/work/today", "/work/department", "/work/all"],
     table: "work_items",
-    rowOwner: { by: "USER_ID", column: "owner_id" },
-    rowAssignee: { by: "USER_ID", column: "assignee_id" },
-    rowDepartmentColumn: "department_id",
+    /*
+      KHÔNG khai cột dòng dù `work_items` có `owner_id` / `assignee_id`: hai cột đó chỉ phủ việc
+      tay và việc định kỳ, còn mười nguồn kia không có dòng nào ở bảng này. Một mệnh đề SQL trên
+      `work_items` sẽ trông như "đã thu hẹp" trong khi hàng đợi thật không đi qua nó — sổ khai một
+      luật không nơi nào thi hành là đúng lỗ hổng mà tệp này sinh ra để đóng.
+
+      Thu hẹp thật nằm ở `decideScope`: người phạm vi SELF / ASSIGNED chỉ được vào hàng đợi CÁ NHÂN
+      (`/work`, lọc bằng `isMine` trên khoá tài khoản), còn hàng đợi phòng / toàn shop và quyền giao
+      việc bị TỪ CHỐI kèm lý do — vì danh sách "việc chưa giao cho ai" không thu hẹp được theo người.
+    */
+    rowOwner: null,
+    rowAssignee: null,
+    rowDepartmentColumn: null,
     ownedBy: "MANAGEMENT",
     sensitive: false,
+    noRowOwnerReason:
+      "Hàng đợi là PHÉP CHIẾU trên mười một nguồn; `work_items.assignee_id` chỉ phủ việc tay / định kỳ. Phạm vi hẹp được thi hành ở lớp chiếu: hàng đợi cá nhân lọc bằng khoá tài khoản (`isMine`), hàng đợi phòng / toàn shop từ chối người phạm vi SELF / ASSIGNED.",
   },
   {
     key: "FINANCE",

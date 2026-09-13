@@ -31,7 +31,9 @@
  * là `NONE` — đóng, không phải mở. Xem `tests/scope-enforcement.test.ts`.
  */
 import { sql, type SQL } from "drizzle-orm";
+import { getDb } from "@/db";
 import { getCurrentUser, requirePermission, type SessionUser } from "@/lib/auth/session";
+import { rowsOf } from "@/lib/sql-rows";
 import { membershipOf } from "@/lib/org/membership";
 import { SCOPE_RESOURCE_BY_KEY, hasRowOwnership, type OwnerLink, type ScopeResource } from "@/lib/constants/data-scope-policy";
 import { ACCESS_SCOPE_LABEL } from "@/lib/constants/access-scope";
@@ -72,7 +74,18 @@ function nhanLienKet(link: OwnerLink) {
  * `viewer` truyền vào được để kiểm thử gọi thẳng mà không cần dựng phiên; bỏ trống thì lấy người
  * đang đăng nhập. Không có ai ⇒ `NONE`.
  */
-export async function decideScope(resourceKey: string, viewer?: SessionUser | null): Promise<ScopeDecision> {
+/**
+ * Quyền nào của HÀNG ĐỢI CÔNG VIỆC mở ra việc của NGƯỜI KHÁC.
+ *
+ * `work:view` là hàng đợi cá nhân — lớp chiếu đã lọc bằng `isMine` trên khoá tài khoản, nên phạm
+ * vi SELF / ASSIGNED tự thoả. Ba khoá dưới mở hàng đợi phòng, hàng đợi toàn shop và quyền giao
+ * việc cho người khác: chúng chứa việc CHƯA GIAO CHO AI, và "việc chưa của ai" không thu hẹp được
+ * theo người. Người phạm vi hẹp cầm một trong ba khoá này là một cấu hình mâu thuẫn — từ chối và
+ * nói rõ, không cho xem cả phòng cũng không trả rỗng lặng lẽ.
+ */
+const WORK_CROSS_PERSON_PERMISSIONS: readonly string[] = ["work:department", "work:all", "work:assign"];
+
+export async function decideScope(resourceKey: string, viewer?: SessionUser | null, permission?: string): Promise<ScopeDecision> {
   const res = SCOPE_RESOURCE_BY_KEY[resourceKey];
   if (!res) {
     return {
@@ -130,6 +143,13 @@ export async function decideScope(resourceKey: string, viewer?: SessionUser | nu
     `tests/scope-enforcement.test.ts` buộc mỗi loại dữ liệu phải chỉ đích danh nơi thi hành.
   */
   if (res.enforcement === "PROJECTION") {
+    if ((user.scope === "SELF" || user.scope === "ASSIGNED") && permission && WORK_CROSS_PERSON_PERMISSIONS.includes(permission)) {
+      return {
+        allow: "NONE",
+        reason: `${res.label}: phạm vi của ${user.name} là "${ACCESS_SCOPE_LABEL[user.scope]}", mà màn hình / thao tác này (\`${permission}\`) chứa việc CHƯA GIAO CHO AI và việc của người khác — không thu hẹp được theo người.`,
+        fix: "Hàng đợi cá nhân (Công việc → Việc của tôi) vẫn mở bình thường. Nếu người này thật sự điều phối việc của phòng, nới phạm vi lên Cả phòng ban; nếu không, bỏ quyền hàng đợi phòng / giao việc của họ.",
+      };
+    }
     return { allow: "ALL", explain: `${res.label}: lớp phép chiếu của hàng đợi tự lọc theo người và theo phòng (\`lib/queries/work.ts\`).` };
   }
   if (res.enforcement === "OWN_LINE") {
@@ -220,6 +240,24 @@ export function andScope(where: SQL | undefined, decision: ScopeDecision): SQL |
 }
 
 /**
+ * MỘT DÒNG CỤ THỂ có nằm trong phạm vi không — dành cho THAO TÁC GHI.
+ *
+ * Đọc đã lọc bằng `andScope`, nhưng một Server Action nhận `id` từ client thì không đi qua danh
+ * sách nào: người bị thu hẹp vẫn gõ được id của case người khác vào nút "Nhận việc". Nên trước khi
+ * ghi, hỏi lại đúng câu mà danh sách đã hỏi — cùng mệnh đề, không viết lại.
+ *
+ * `ALL` ⇒ đúng; `NONE` ⇒ sai (không có dòng nào là của họ); `ROWS` ⇒ chạy mệnh đề trên chính dòng đó.
+ */
+export async function rowInScope(decision: ScopeDecision, table: string, idColumn: string, id: string): Promise<boolean> {
+  if (decision.allow === "ALL") return true;
+  if (decision.allow === "NONE") return false;
+  const idCol = cot(table, idColumn); // kiểm tên bảng / cột trước khi ghép vào SQL thô
+  const db = await getDb();
+  const rows = rowsOf<{ ok: number }>(await db.execute(sql`select 1 as ok from ${sql.raw(`"${table}"`)} where ${idCol} = ${id} and (${decision.where}) limit 1`));
+  return rows.length > 0;
+}
+
+/**
  * Cổng vào của một trang: kiểm QUYỀN trước, rồi tính PHẠM VI.
  *
  * Thứ tự đó không đổi được. Quyền trả lời "có được xem loại dữ liệu này không"; phạm vi trả lời
@@ -241,6 +279,6 @@ export async function requireResource(
   const resource = SCOPE_RESOURCE_BY_KEY[resourceKey];
   if (!resource) throw new Error(`Loại dữ liệu "${resourceKey}" chưa khai trong lib/constants/data-scope-policy.ts`);
   const user = await requirePermission(permission);
-  const decision = await decideScope(resourceKey, user);
+  const decision = await decideScope(resourceKey, user, permission);
   return { user, decision, resource };
 }

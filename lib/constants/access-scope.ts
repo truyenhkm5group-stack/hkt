@@ -61,8 +61,14 @@ export function isAccessScope(value: unknown): value is AccessScope {
   return typeof value === "string" && (ACCESS_SCOPES as readonly string[]).includes(value);
 }
 
-/** Chuỗi lạ (dữ liệu cũ, gõ tay vào DB) → phạm vi hẹp nhất an toàn, không phải `ALL`. */
-export function normalizeScope(value: unknown, fallback: AccessScope = "ALL"): AccessScope {
+/**
+ * Chuỗi lạ (dữ liệu cũ, gõ tay vào DB) → phạm vi HẸP NHẤT, không phải `ALL`.
+ *
+ * `users.data_scope` và `access_roles.default_scope` đều `NOT NULL DEFAULT 'ALL'` kèm `CHECK`, nên
+ * nhánh dự phòng này chỉ chạy khi có dữ liệu hỏng. Mà dữ liệu hỏng thì phải rơi về phía HẸP HƠN
+ * (AGENTS.md mục 31): một chuỗi lạ mở toàn công ty là đúng kiểu lỗ hổng im lặng mà không ai thấy.
+ */
+export function normalizeScope(value: unknown, fallback: AccessScope = "SELF"): AccessScope {
   return isAccessScope(value) ? value : fallback;
 }
 

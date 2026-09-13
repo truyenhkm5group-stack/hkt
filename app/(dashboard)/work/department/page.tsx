@@ -6,8 +6,10 @@ import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requirePermission } from "@/lib/auth/session";
-import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
+import { ScopeDenied } from "@/components/scope-denied";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
+import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode } from "@/lib/constants/departments";
 import { formatVND } from "@/lib/format";
 import { buildDepartmentQueue, CLOSED_WINDOW_DAYS, departmentsOfUser, getDepartmentCockpit, DEPT_HEALTH_LABEL, DEPT_HEALTH_TONE } from "@/lib/queries/work";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
@@ -29,12 +31,30 @@ export const metadata = { title: "Công việc theo phòng ban" };
  * Không nhồi bảng dài ở đầu trang: dải sức khoẻ là bảy ô bấm được, chi tiết nằm sau cú bấm.
  */
 export default async function DepartmentWorkPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("work:department");
+  const { user, decision } = await requireResource("WORK", "work:department");
+  if (decision.allow === "NONE") return <ScopeDenied title="Công việc theo phòng ban" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const crossDept = can(user, "work:all");
 
   const mine = await departmentsOfUser(user.id);
-  const fallback: DepartmentCode = mine[0]?.code ?? "MANAGEMENT";
+  /*
+    CHƯA THUỘC PHÒNG NÀO THÌ KHÔNG CÓ "PHÒNG CỦA TÔI" — và không được lặng lẽ mở phòng Điều hành.
+
+    Trước bản này người chưa xếp phòng rơi về `MANAGEMENT`: họ thấy hàng đợi của phòng Điều hành
+    như thể đó là phòng mình, và không ai hiểu vì sao một nhân viên CSKH nhìn thấy việc của chủ
+    shop. Người có `work:all` thì đúng là xem chéo được nên chọn phòng đầu bảng; người không có
+    thì nhận đúng câu giải thích và lối ra.
+  */
+  if (!crossDept && mine.length === 0) {
+    return (
+      <ScopeDenied
+        title="Công việc theo phòng ban"
+        reason={`${user.name} chưa được xếp vào phòng ban nào, nên chưa có "phòng của tôi" để mở hàng đợi.`}
+        fix="Quản trị viên xếp phòng ở Công việc → Cấu hình → Nhân sự và phòng ban. Việc của riêng bạn vẫn ở tab Việc của tôi."
+      />
+    );
+  }
+  const fallback: DepartmentCode = mine[0]?.code ?? DEPARTMENT_ORDER[0];
   const selected = (param(raw, "dept", fallback) as DepartmentCode) ?? fallback;
 
   // Trưởng phòng chỉ mở được phòng mình — hàng đợi không được là cửa sau xem việc phòng khác.

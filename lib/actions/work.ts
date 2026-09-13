@@ -4,12 +4,14 @@ import { revalidatePath } from "next/cache";
 import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
+import { decideScope } from "@/lib/auth/scope-guard";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
 import { WORK_PRIORITIES, WORK_STATUSES } from "@/lib/constants/work";
 import { DEFAULT_OWNERSHIP_MAP, WORK_OWNERSHIP_KEY } from "@/lib/constants/work-ownership";
 import { DEFAULT_SLA_MAP, SLA_HOURS_MAX, SLA_HOURS_MIN, WORK_SLA_KEY } from "@/lib/constants/work-sla";
 import { getWorkConfig, saveOwnershipOverrides, saveSlaOverrides } from "@/lib/queries/work-config";
+import { assignByAuthority } from "@/lib/work/assign";
 import * as svc from "@/lib/work/service";
 
 /**
@@ -48,14 +50,33 @@ async function authorize(permission: "work:manage" | "work:assign" | "work:admin
 
 const keySchema = z.string().trim().min(3).max(300);
 
+/**
+ * PHẠM VI DỮ LIỆU ÁP CẢ LÊN THAO TÁC GHI, không chỉ lên danh sách.
+ *
+ * Người phạm vi "Chỉ của mình" không thấy hàng đợi phòng — nhưng một Server Action nhận khoá việc
+ * từ client thì không đi qua danh sách nào. Hỏi lại `decideScope` với đúng khoá quyền của thao
+ * tác, và `NONE` thì dừng kèm lý do (`lib/auth/scope-guard.ts`).
+ */
+async function scopeError(user: SessionUser, permission: string): Promise<string | null> {
+  const d = await decideScope("WORK", user, permission);
+  return d.allow === "NONE" ? `${d.reason} ${d.fix}` : null;
+}
+
 /* ═══════════════════ GIAO VIỆC / NHẬN VIỆC ═══════════════════ */
 
+/**
+ * Cả hai hàm dưới đi qua `assignByAuthority` (`lib/work/assign.ts`): nguồn nào giữ người phụ trách
+ * trong bảng nghiệp vụ (case CSKH, care vận đơn) thì lượt ghi đi tới Server Action của miền đó,
+ * còn lại mới ghi lớp `work_items`. Không có nhánh nào ở đây tự chọn chỗ ghi.
+ */
 export async function claimWork(key: string): Promise<Result> {
   const { user, error } = await authorize("work:manage");
   if (error) return { error };
   const parsed = keySchema.safeParse(key);
   if (!parsed.success) return { error: "Khoá việc không hợp lệ" };
-  const r = await svc.assignWork(parsed.data, user.id, actorOf(user));
+  const ngoaiPhamVi = await scopeError(user, "work:manage");
+  if (ngoaiPhamVi) return { error: ngoaiPhamVi };
+  const r = await assignByAuthority(parsed.data, user.id, user, { claim: true });
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "WORK_CLAIM", entity: "WORK_ITEM", entityId: parsed.data, detail: {} });
   revalidate();
@@ -67,7 +88,9 @@ export async function assignWork(input: unknown): Promise<Result> {
   if (error) return { error };
   const parsed = z.object({ key: keySchema, assigneeId: z.string().trim().min(1).nullable() }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
-  const r = await svc.assignWork(parsed.data.key, parsed.data.assigneeId, actorOf(user));
+  const ngoaiPhamVi = await scopeError(user, "work:assign");
+  if (ngoaiPhamVi) return { error: ngoaiPhamVi };
+  const r = await assignByAuthority(parsed.data.key, parsed.data.assigneeId, user);
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "WORK_ASSIGN", entity: "WORK_ITEM", entityId: parsed.data.key, detail: { assigneeId: parsed.data.assigneeId } });
   revalidate();
@@ -253,7 +276,7 @@ export async function saveDepartment(input: unknown): Promise<Result<{ id: strin
     })
     .safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const r = await svc.saveDepartment(parsed.data);
+  const r = await svc.saveDepartment(parsed.data, actorOf(user));
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "DEPARTMENT_SAVE", entity: "DEPARTMENT", entityId: r.id, detail: { code: parsed.data.code, name: parsed.data.name } });
   revalidate();
@@ -265,7 +288,8 @@ export async function setDepartmentMember(input: unknown): Promise<Result> {
   if (error) return { error };
   const parsed = z.object({ departmentId: z.string().min(1), userId: z.string().min(1), roleInDept: z.enum(["LEAD", "MEMBER"]), title: z.string().trim().max(100).optional() }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
-  const r = await svc.setDepartmentMember(parsed.data.departmentId, parsed.data.userId, parsed.data.roleInDept, parsed.data.title ?? "");
+  // Truyền người bấm: thiếu nó thì nhật ký kiểm toán ghi "system" cho một thao tác do người làm.
+  const r = await svc.setDepartmentMember(parsed.data.departmentId, parsed.data.userId, parsed.data.roleInDept, parsed.data.title ?? "", actorOf(user));
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "DEPARTMENT_MEMBER_SET", entity: "DEPARTMENT", entityId: parsed.data.departmentId, detail: { userId: parsed.data.userId, roleInDept: parsed.data.roleInDept } });
   revalidate();
@@ -277,7 +301,7 @@ export async function removeDepartmentMember(input: unknown): Promise<Result> {
   if (error) return { error };
   const parsed = z.object({ departmentId: z.string().min(1), userId: z.string().min(1) }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
-  const r = await svc.removeDepartmentMember(parsed.data.departmentId, parsed.data.userId);
+  const r = await svc.removeDepartmentMember(parsed.data.departmentId, parsed.data.userId, actorOf(user));
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "DEPARTMENT_MEMBER_REMOVE", entity: "DEPARTMENT", entityId: parsed.data.departmentId, detail: { userId: parsed.data.userId } });
   revalidate();

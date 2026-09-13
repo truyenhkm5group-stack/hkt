@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
-import { assignMembership, removeMembership } from "@/lib/org/membership";
+import { assignMembership, removeMembership, setDepartmentLead } from "@/lib/org/membership";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { canTransition, parseWorkKey, WORK_STATUSES, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
-import { authorityOf, isWorkSource, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { assigneeAuthorityOf, authorityOf, isWorkSource, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 
 /**
  * ═══════════ GHI VÀO LỚP CÔNG VIỆC ═══════════
@@ -110,6 +110,17 @@ export async function assignWork(key: string, assigneeId: string | null, actor: 
   const db = await getDb();
   const parsed = parseWorkKey(key);
   if (!parsed) return { error: "Khoá việc không hợp lệ" };
+  /*
+    BỨC TƯỜNG THỨ HAI: NGƯỜI PHỤ TRÁCH.
+
+    Case CSKH và care vận đơn có cột người phụ trách ngay trong bảng nguồn, và trang của miền đó
+    ghi vào cột ấy. Ghi thêm `work_items.assignee_id` ở đây là tạo sự thật thứ hai cho cùng một
+    câu "ai đang cầm". Giao / nhận việc cho hai nguồn này đi qua `lib/work/assign.ts`, nơi gọi
+    đúng Server Action của miền (kiểm quyền của miền, lịch sử của miền).
+  */
+  if (assigneeAuthorityOf(parsed.sourceType) === "SOURCE") {
+    return { error: `Người phụ trách của ${WORK_SOURCE_SPEC[parsed.sourceType as WorkSource].label} do miền nghiệp vụ giữ — giao / nhận việc qua hành động của chính miền đó (lib/work/assign.ts), không ghi vào lớp công việc` };
+  }
 
   if (assigneeId) {
     const u = await db.query.users.findFirst({ where: eq(schema.users.id, assigneeId), columns: { id: true, active: true } });
@@ -550,41 +561,70 @@ export async function deleteRecurrence(id: string): Promise<WorkResult> {
 
 /* ═══════════════════ PHÒNG BAN ═══════════════════ */
 
-export async function saveDepartment(input: { id?: string; code: string; name: string; description?: string; leadUserId?: string | null; sortOrder?: number; active?: boolean }, actor?: WorkActor): Promise<WorkResult<{ id: string }>> {
+/**
+ * Lưu phòng ban. TRƯỞNG PHÒNG KHÔNG ghi ở đây.
+ *
+ * `departments.lead_user_id` và vai `LEAD` trong `department_members` là HAI vế của một sự thật, và
+ * chỉ `setDepartmentLead` (`lib/org/membership.ts`) ghi cả hai trong một thao tác. Trước bản này
+ * hàm này ghi vế thứ nhất rồi gọi thêm `assignMembership(LEAD)` cho vế thứ hai — hai lượt ghi rời
+ * là hai cách để lệch: đổi trưởng phòng ở đây thì người cũ vẫn giữ vai LEAD, và phòng có hai
+ * trưởng trong bảng thành viên. Nay lệch đó là một dòng trong báo cáo `membershipDrift`
+ * (`MULTIPLE_LEAD_ROWS`), và đường ghi chỉ còn một.
+ *
+ * `actor` BẮT BUỘC: mọi lượt đổi tổ chức phải nêu đúng người bấm trong nhật ký kiểm toán.
+ */
+export async function saveDepartment(input: { id?: string; code: string; name: string; description?: string; leadUserId?: string | null; sortOrder?: number; active?: boolean }, actor: WorkActor): Promise<WorkResult<{ id: string }>> {
   const db = await getDb();
   const code = input.code.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]{1,30}$/.test(code)) return { error: "Mã phòng chỉ gồm chữ HOA, số và gạch dưới" };
   const name = input.name.trim();
   if (name.length < 2) return { error: "Tên phòng quá ngắn" };
-  const values = { code, name, description: input.description?.trim() ?? "", leadUserId: input.leadUserId ?? null, sortOrder: input.sortOrder ?? 100, active: input.active ?? true, updatedAt: new Date() };
+  const values = { code, name, description: input.description?.trim() ?? "", sortOrder: input.sortOrder ?? 100, active: input.active ?? true, updatedAt: new Date() };
+  const membershipActor = { id: actor.id, email: actor.email };
   if (input.id) {
+    const truoc = await db.query.departments.findFirst({ where: eq(schema.departments.id, input.id), columns: { id: true, leadUserId: true } });
+    if (!truoc) return { error: "Không tìm thấy phòng ban" };
     await db.update(schema.departments).set(values).where(eq(schema.departments.id, input.id));
-    // Trưởng phòng phải là thành viên của chính phòng đó, nếu không "việc của phòng tôi" sẽ rỗng.
-    if (values.leadUserId) await setDepartmentMember(input.id, values.leadUserId, "LEAD", "", actor);
+    // `undefined` = ô trưởng phòng không gửi lên ⇒ giữ nguyên. `null` = cố ý bỏ trống ghế.
+    if (input.leadUserId !== undefined && (input.leadUserId ?? null) !== truoc.leadUserId) {
+      const r = await setDepartmentLead({ departmentId: input.id, userId: input.leadUserId ?? null }, membershipActor);
+      if ("error" in r) return r;
+    }
     return { ok: true, id: input.id };
   }
   const dup = await db.query.departments.findFirst({ where: eq(schema.departments.code, code), columns: { id: true } });
   if (dup) return { error: `Mã phòng "${code}" đã tồn tại` };
   const id = crypto.randomUUID();
-  await db.insert(schema.departments).values({ id, ...values });
-  if (values.leadUserId) await setDepartmentMember(id, values.leadUserId, "LEAD", "", actor);
+  await db.insert(schema.departments).values({ id, ...values, leadUserId: null });
+  if (input.leadUserId) {
+    const r = await setDepartmentLead({ departmentId: id, userId: input.leadUserId }, membershipActor);
+    if ("error" in r) return r;
+  }
   return { ok: true, id };
 }
 
 /**
  * ỦY QUYỀN CHO `lib/org/membership.ts` — cửa ghi DUY NHẤT của sự thật tổ chức.
  *
- * Giữ chữ ký cũ để mã gọi hiện có và kiểm thử không phải đổi, nhưng phần thân không còn tự ghi:
- * ba đường ghi cho cùng một sự thật là ba cách để chúng lệch nhau. Nơi gọi nào có người thật đứng
- * sau thì truyền `actor` để nhật ký kiểm toán nêu đúng tên; không có thì ghi là hệ thống.
+ * Giữ chữ ký cũ để mã gọi hiện có không phải đổi hình dạng, nhưng phần thân không còn tự ghi: ba
+ * đường ghi cho cùng một sự thật là ba cách để chúng lệch nhau.
+ *
+ * `roleInDept = "LEAD"` đi qua `setDepartmentLead` — vai LEAD không tồn tại tách rời ghế trưởng
+ * phòng. `actor` BẮT BUỘC: trước bản này nơi gọi bỏ trống và nhật ký ghi "system" cho một thao tác
+ * do người bấm, tức là mất dấu ai đã xếp ai vào phòng nào.
  */
-export async function setDepartmentMember(departmentId: string, userId: string, roleInDept: "LEAD" | "MEMBER", title = "", actor?: WorkActor): Promise<WorkResult> {
-  const r = await assignMembership({ departmentId, userId, roleInDept, title }, { id: actor?.id ?? "", email: actor?.email ?? "system" });
+export async function setDepartmentMember(departmentId: string, userId: string, roleInDept: "LEAD" | "MEMBER", title: string, actor: WorkActor): Promise<WorkResult> {
+  const membershipActor = { id: actor.id, email: actor.email };
+  if (roleInDept === "LEAD") {
+    const r = await setDepartmentLead({ departmentId, userId, title: title.trim() || undefined }, membershipActor);
+    return "error" in r ? r : { ok: true };
+  }
+  const r = await assignMembership({ departmentId, userId, roleInDept, title }, membershipActor);
   return "error" in r ? r : { ok: true };
 }
 
-export async function removeDepartmentMember(departmentId: string, userId: string, actor?: WorkActor): Promise<WorkResult> {
-  const r = await removeMembership({ departmentId, userId }, { id: actor?.id ?? "", email: actor?.email ?? "system" });
+export async function removeDepartmentMember(departmentId: string, userId: string, actor: WorkActor): Promise<WorkResult> {
+  const r = await removeMembership({ departmentId, userId }, { id: actor.id, email: actor.email });
   return "error" in r ? r : { ok: true };
 }
 

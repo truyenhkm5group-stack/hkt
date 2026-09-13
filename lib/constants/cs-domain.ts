@@ -71,6 +71,15 @@ export const CS_DOMAINS: readonly CsDomain[] = ["CUSTOMER", "LOGISTICS"];
 
 /** Loại case luôn thuộc giao vận, bất kể đơn có vận đơn hay không. */
 export const CS_LOGISTICS_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] === "LOGISTICS");
+/**
+ * Loại case NGƯỜI được tạo tay / luật từ khoá được trỏ tới.
+ *
+ * Loại miền `LOGISTICS` sinh ra TỪ CHỨNG TỪ ĐVVC (`lib/cs/failed-delivery.ts` đọc `shipments.stage`),
+ * không từ một câu chat hay một thẻ đơn. Cho người gõ tay một case "giao không thành" — hay cho
+ * luật từ khoá tự tạo nó — là dựng một case giao vận không gắn với kiện nào, nằm ngoài hàng đợi
+ * care và không ai xử lý được ở đâu cả. `lib/actions/cs.ts` chặn ở lược đồ đầu vào.
+ */
+export const CS_HUMAN_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] !== "LOGISTICS");
 /** Loại case mà miền phụ thuộc vòng đời gửi hàng. */
 export const CS_LIFECYCLE_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] === "BY_SHIPMENT");
 
@@ -111,10 +120,36 @@ export function humanAssignee(assignee: string | null | undefined): string {
 }
 
 /**
+ * ═══ Ô LỌC "PHỤ TRÁCH" ĐI BẰNG KHOÁ TÀI KHOẢN, KHÔNG BẰNG Ô CHỮ ═══
+ *
+ * Giá trị của ô lọc là `users.id`, cộng đúng HAI rổ đặc biệt cho dòng không nối được về tài khoản:
+ * bot (máy làm — không phải người, không phải "chưa ai") và tên gõ tay chưa nối (AGENTS.md mục
+ * 34–36). Gom theo ô chữ như trước thì "Lan", "lan" và "Lan CS" là ba người và Bot ERP đứng chung
+ * hàng với nhân viên.
+ */
+export const CS_ASSIGNEE_FACET_BOT = "__BOT__";
+export const CS_ASSIGNEE_FACET_UNLINKED = "__UNLINKED__";
+export const CS_ASSIGNEE_FACET_LABEL: Record<string, string> = {
+  [CS_ASSIGNEE_FACET_BOT]: "Bot ERP (máy)",
+  [CS_ASSIGNEE_FACET_UNLINKED]: "Tên gõ tay · chưa nối tài khoản",
+};
+
+/**
  * Hạn xử lý một case CSKH (giờ) — MỘT con số, lấy từ bảng hạn chung của hàng đợi việc.
  *
  * Nằm ở `lib/constants/*` chứ không ở `lib/queries/*` vì bảng CSKH (client component) cũng phải
  * biết dòng nào quá hạn để tô đỏ, mà client KHÔNG được import `lib/queries/*` (AGENTS.md mục 2).
  * `lib/queries/cs.ts` xuất lại đúng hằng này để nơi gọi cũ không phải sửa.
  */
-export const CS_CASE_SLA_HOURS = CASE_SLA_HOURS.CS_CASE ?? 4;
+export const CS_CASE_SLA_HOURS: number = requireSla(CASE_SLA_HOURS.CS_CASE);
+
+/**
+ * KHÔNG có con số dự phòng. `CASE_SLA_HOURS.CS_CASE` là hằng trong mã nguồn; nếu một ngày ai đó đặt
+ * nó thành `null` ("loại việc này cố ý không đặt hạn") thì mọi phép tính quá hạn của CSKH phải đổ
+ * ngay lúc nạp, chứ không được âm thầm chạy bằng một số gõ ở đây — hai nơi nói hai số khác nhau là
+ * đúng thứ AGENTS.md mục 22 cấm.
+ */
+function requireSla(h: number | null): number {
+  if (h === null) throw new Error("CASE_SLA_HOURS.CS_CASE đang là null — CSKH bắt buộc có hạn xử lý");
+  return h;
+}

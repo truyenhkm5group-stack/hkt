@@ -2,10 +2,10 @@ import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ageLabel, caseScore, priorityOf, slaFor } from "@/lib/constants/action-queue";
 import { CS_STATUSES, type CsStatus } from "@/lib/constants/cs";
-import { csDomainOf } from "@/lib/constants/cs-domain";
+import { csDomainOf, isBotAssignee } from "@/lib/constants/cs-domain";
 import { departmentOfTeam, type DepartmentCode } from "@/lib/constants/departments";
-import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
-import { MONEY_UNKNOWN, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
+import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, assigneeAuthorityOf, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { MONEY_UNKNOWN, WORK_TAG_MACHINE_HELD, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
 import { departmentFor } from "@/lib/constants/work-ownership";
 import { slaDueAt } from "@/lib/constants/work-sla";
 import { getWorkConfig, type WorkConfig } from "@/lib/queries/work-config";
@@ -123,10 +123,18 @@ export async function loadOverlays(keys: string[]): Promise<Map<string, WorkOver
 export function applyOverlay(item: WorkItem, ov: WorkOverlay | undefined): WorkItem {
   if (!ov) return item;
   const blocked = ov.blockedReason.trim().length > 0;
+  /*
+    NGUỒN GIỮ NGƯỜI PHỤ TRÁCH THÌ LỚP GHI CHÚ KHÔNG ĐƯỢC ĐÈ.
+
+    `cs_cases.assignee_user_id` / `shipment_care.owner_id` là sự thật; một dòng `work_items` còn
+    mang `assignee_id` cho các nguồn này là di sản của thời hai nút "Nhận việc" ghi hai chỗ. Đọc nó
+    đè lên nguồn thì trang CSKH nói một tên, hàng đợi nói tên khác. Xem `assigneeAuthority`.
+  */
+  const sourceOwnsAssignee = assigneeAuthorityOf(item.sourceType) === "SOURCE";
   return {
     ...item,
     // Người nguồn đã gán vẫn được giữ nếu lớp công việc chưa gán ai — không xoá thông tin đang có.
-    assignee: ov.assignee ?? item.assignee,
+    assignee: sourceOwnsAssignee ? item.assignee : (ov.assignee ?? item.assignee),
     department: ov.departmentCode ?? item.department,
     priority: ov.priority ?? item.priority,
     dueAt: ov.dueAt ?? item.dueAt,
@@ -187,6 +195,7 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       customerName: c.customerName,
       customerPhone: c.customerPhone,
       assignee: c.assignee,
+      assigneeUserId: c.assigneeUserId,
       chatUrl: c.chatUrl,
       followUpAt: c.followUpAt,
       resolvedAt: c.resolvedAt,
@@ -212,6 +221,16 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
     const status = CS_STATUS_TO_WORK[(CS_STATUSES as readonly string[]).includes(r.status) ? (r.status as CsStatus) : "OPEN"];
     const ageHours = hoursSince(r.createdAt, t);
     const score = caseScore({ severity: "warning", ageHours, amount: r.orderValue ?? null, type: "CS_CASE" });
+    /*
+      BA RỔ CỦA Ô PHỤ TRÁCH, KHÔNG GỘP (AGENTS.md mục 34–36):
+        · có `assignee_user_id`     ⇒ người thật, quy kết bằng KHOÁ — `isMine` khớp chính xác.
+        · tên là một JOB (`Bot ERP`) ⇒ MÁY đã chạm vào, KHÔNG ai người đang cầm: `assignee = null`
+                                        kèm nhãn máy, để bảng tải không đếm bot thành một nhân viên.
+        · chỉ có tên gõ tay          ⇒ dòng cũ chưa nối khoá; giữ `id: null` để hàng đợi cá nhân
+                                        còn nhận ra bằng tên (rộng rãi có chủ đích, xem `isMine`).
+    */
+    const botHeld = !r.assigneeUserId && isBotAssignee(r.assignee);
+    const assignee = r.assigneeUserId ? { id: r.assigneeUserId, email: "", name: r.assignee } : botHeld || !r.assignee ? null : { id: null, email: "", name: r.assignee };
     items.push({
       key: workKey("CS_CASE", r.id),
       sourceType: "CS_CASE",
@@ -220,8 +239,7 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       title: r.title,
       summary: r.detail || `${r.customerName} ${r.customerPhone}`.trim(),
       department: "SALES",
-      // `cs_cases.assignee` là một ô CHỮ (tên/bí danh), không phải khoá người dùng — nên `id` là null.
-      assignee: r.assignee ? { id: null, email: "", name: r.assignee } : null,
+      assignee,
       status,
       statusAuthority: "SOURCE",
       priority: priorityOf(score),
@@ -237,8 +255,8 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       sourceUrl: `/cs?q=${encodeURIComponent(r.id)}`,
       // Giá trị đơn là tiền ĐANG TREO ở case: khách chưa nhận được thứ họ hỏi thì đơn chưa chắc thành.
       money: measured(r.orderValue ?? null, "Giá trị đơn gắn với case (orders.total_price_after_discount)"),
-      tags: [r.kind],
-      evidence: { source: "Case CSKH", detail: `Nguồn ${r.source} · tạo ${ageLabel(ageHours)}` },
+      tags: botHeld ? [r.kind, WORK_TAG_MACHINE_HELD] : [r.kind],
+      evidence: { source: "Case CSKH", detail: `Nguồn ${r.source} · tạo ${ageLabel(ageHours)}${botHeld ? " · bot đã nhắn, chưa ai nhận" : ""}` },
       blockedReason: "",
       creationSource: r.source === "MANUAL" ? "MANUAL" : "AUTO",
       actions: actionsOf("CS_CASE"),

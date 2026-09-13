@@ -4,7 +4,7 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
-import { decideScope, type ScopeDecision } from "@/lib/auth/scope-guard";
+import { decideScope, rowInScope, type ScopeDecision } from "@/lib/auth/scope-guard";
 import { SCOPE_RESOURCES, hasRowOwnership } from "@/lib/constants/data-scope-policy";
 
 /**
@@ -98,27 +98,53 @@ export async function testScopeDecisions(db: Db) {
   assert.equal((await decideScope("ORDERS", null)).allow, "NONE", "không có phiên hợp lệ ⇒ ĐÓNG, không phải mở");
   assert.equal((await decideScope("KHONG_CO_LOAI_NAY", nguoi())).allow, "NONE", "loại dữ liệu chưa khai ⇒ ĐÓNG");
 
-  /* ═══ 6 · CSKH: mệnh đề SQL phải LỌC THẬT, không chỉ tồn tại ═══ */
+  /* ═══ 6 · CSKH: mệnh đề SQL phải LỌC THẬT, VÀ LỌC BẰNG KHOÁ TÀI KHOẢN ═══ */
+  /*
+    SỰ CỐ ĐÃ CÓ: sổ phạm vi từng nối CSKH theo EMAIL trên cột `assignee` — mà cột đó chứa TÊN HIỂN
+    THỊ ("Linh CSKH"), không phải email. Mệnh đề không khớp dòng nào, và người phạm vi "Chỉ của
+    mình" mở trang CSKH thấy trống trơn. Khoá thật là `assignee_user_id` / `created_by_user_id`.
+  */
   await db.insert(schema.csCases).values([
-    { id: `${P}c1`, kind: "OTHER", status: "OPEN", title: "Của A", createdBy: `${P}a@t.local`, assignee: "" },
-    { id: `${P}c2`, kind: "OTHER", status: "OPEN", title: "Của B", createdBy: `${P}b@t.local`, assignee: "" },
-    { id: `${P}c3`, kind: "OTHER", status: "OPEN", title: "Giao cho A", createdBy: `${P}b@t.local`, assignee: `${P}A@T.LOCAL` },
+    { id: `${P}c1`, kind: "OTHER", status: "OPEN", title: "Của A", createdBy: `${P}a@t.local`, createdByUserId: `${P}u1`, assignee: "" },
+    { id: `${P}c2`, kind: "OTHER", status: "OPEN", title: "Của B", createdBy: `${P}b@t.local`, createdByUserId: `${P}u2`, assignee: "" },
+    // Giao cho A: ô chữ mang TÊN (đúng như trang CSKH ghi), khoá mang tài khoản.
+    { id: `${P}c3`, kind: "OTHER", status: "OPEN", title: "Giao cho A", createdBy: `${P}b@t.local`, createdByUserId: `${P}u2`, assignee: "Người A", assigneeUserId: `${P}u1` },
+    // Dòng cũ chỉ có tên gõ tay, CHƯA nối khoá: không đoán người (AGENTS.md mục 35) ⇒ không hiện với phạm vi hẹp.
+    { id: `${P}c4`, kind: "OTHER", status: "OPEN", title: "Tên gõ tay", createdBy: "pancake-bot", assignee: "Người A" },
   ]);
 
-  const csSelf = await decideScope("CS", nguoi({ id: `${P}u1`, email: `${P}a@t.local`, scope: "SELF" }));
+  const csSelf = await decideScope("CS", nguoi({ id: `${P}u1`, email: `${P}a@t.local`, name: "Người A", scope: "SELF" }));
   assert.equal(csSelf.allow, "ROWS", "CSKH có cột người ⇒ lọc được theo dòng");
+  assert.match(csSelf.allow === "ROWS" ? csSelf.explain : "", /khoá tài khoản/, "câu giải thích phải nói lọc bằng KHOÁ, không phải email");
   const dem = async (w: ScopeDecision) => {
     if (w.allow !== "ROWS") throw new Error("cần ROWS");
     const r = await db.execute(sql`select count(*)::int as n from cs_cases where id like ${P + "%"} and (${w.where})`);
     return Number((r as unknown as { rows: { n: number }[] }).rows[0]?.n ?? 0);
   };
-  assert.equal(await dem(csSelf), 1, "SELF: chỉ case do chính người đó tạo");
+  assert.equal(await dem(csSelf), 1, "SELF: chỉ case do chính người đó tạo (created_by_user_id)");
 
-  const csAssigned = await decideScope("CS", nguoi({ id: `${P}u1`, email: `${P}a@t.local`, scope: "ASSIGNED" }));
-  assert.equal(await dem(csAssigned), 2, "ASSIGNED: case được giao CỘNG case của chính mình — và khớp email KHÔNG phân biệt hoa thường");
+  const csAssigned = await decideScope("CS", nguoi({ id: `${P}u1`, email: `${P}a@t.local`, name: "Người A", scope: "ASSIGNED" }));
+  assert.equal(await dem(csAssigned), 2, "ASSIGNED: case được giao (assignee_user_id) CỘNG case của chính mình — case ghi tên 'Người A' mà không có khoá KHÔNG được tính");
 
-  const csKhac = await decideScope("CS", nguoi({ id: `${P}u2`, email: `${P}b@t.local`, scope: "SELF" }));
+  const csKhac = await decideScope("CS", nguoi({ id: `${P}u2`, email: `${P}b@t.local`, name: "Người B", scope: "SELF" }));
   assert.equal(await dem(csKhac), 2, "người khác thấy đúng phần của họ, không thấy phần của A");
+
+  /* ═══ 6b · THAO TÁC GHI HỎI LẠI ĐÚNG MỆNH ĐỀ ĐÓ ═══ */
+  assert.equal(await rowInScope(csAssigned, "cs_cases", "id", `${P}c3`), true, "case được giao cho A nằm trong phạm vi ghi của A");
+  assert.equal(await rowInScope(csAssigned, "cs_cases", "id", `${P}c2`), false, "case của B KHÔNG nằm trong phạm vi ghi của A — dù A biết id");
+  assert.equal(await rowInScope({ allow: "ALL", explain: "" }, "cs_cases", "id", `${P}c2`), true);
+  assert.equal(await rowInScope({ allow: "NONE", reason: "", fix: "" }, "cs_cases", "id", `${P}c3`), false, "NONE ⇒ không dòng nào là của họ");
+  await assert.rejects(() => rowInScope(csAssigned, "cs_cases; drop table users", "id", "x"), "tên bảng lạ phải bị chặn trước khi ghép vào SQL");
+
+  /* ═══ 7 · CÔNG VIỆC: hàng đợi cá nhân mở, hàng đợi phòng / giao việc đóng với phạm vi hẹp ═══ */
+  const nvHep = nguoi({ id: `${P}u1`, email: `${P}a@t.local`, scope: "SELF" });
+  assert.equal((await decideScope("WORK", nvHep, "work:view")).allow, "ALL", "SELF vẫn mở hàng đợi CÁ NHÂN — lớp chiếu lọc bằng isMine");
+  for (const perm of ["work:department", "work:all", "work:assign"]) {
+    const d = await decideScope("WORK", nvHep, perm);
+    assert.equal(d.allow, "NONE", `SELF + ${perm} ⇒ TỪ CHỐI: hàng đợi phòng chứa việc chưa giao cho ai, không thu hẹp theo người được`);
+    assert.ok(d.allow === "NONE" && d.fix.includes("Việc của tôi"), "lời từ chối phải chỉ về hàng đợi cá nhân");
+  }
+  assert.equal((await decideScope("WORK", nguoi({ id: `${P}u1`, email: `${P}a@t.local`, scope: "DEPARTMENT" }), "work:department")).allow, "ALL", "DEPARTMENT mở hàng đợi phòng — trang tự giới hạn về phòng của họ");
 
   /*
     DỌN DẸP. `tests/sync-fixtures.test.ts` dùng CHUNG một CSDL cho mọi khối, và nhiều khối đếm
@@ -131,7 +157,7 @@ export async function testScopeDecisions(db: Db) {
   await db.execute(sql`delete from users where id like ${P + "%"}`);
 
   console.log(
-    `✓ Phạm vi dữ liệu chặn thật: ${SCOPE_RESOURCES.length} loại · phòng khác bị từ chối kèm lối ra · SELF/ASSIGNED trên bảng không có chủ dòng KHÔNG rơi về "xem hết" · TEAM không trưởng phòng thì hẹp lại · không phiên ⇒ đóng · mệnh đề SQL của CSKH lọc đúng 1/2/2 dòng`,
+    `✓ Phạm vi dữ liệu chặn thật: ${SCOPE_RESOURCES.length} loại · phòng khác bị từ chối kèm lối ra · SELF/ASSIGNED trên bảng không có chủ dòng KHÔNG rơi về "xem hết" · TEAM không trưởng phòng thì hẹp lại · không phiên ⇒ đóng · CSKH lọc bằng KHOÁ TÀI KHOẢN đúng 1/2/2 dòng, tên gõ tay không đoán · thao tác ghi hỏi lại cùng mệnh đề · hàng đợi phòng từ chối phạm vi hẹp`,
   );
 }
 
@@ -147,8 +173,9 @@ export function testEveryScopedRouteIsGuarded() {
   const khongXuLyTuChoi: string[] = [];
 
   for (const res of SCOPE_RESOURCES) {
-    // Hai loại này được thi hành ở lớp khác và sổ đã khai đích danh lớp đó.
-    if (res.enforcement === "PROJECTION" || res.enforcement === "OWN_LINE") continue;
+    // Bảng lương được thi hành bởi quyền `payroll:view-own`; sổ đã khai đích danh lớp đó.
+    // Hàng đợi công việc (PROJECTION) VẪN phải gọi cổng: cổng là nơi từ chối người phạm vi hẹp mở hàng đợi phòng.
+    if (res.enforcement === "OWN_LINE") continue;
     for (const route of res.routes) {
       const p = path.join(goc, "app/(dashboard)", route.replace(/^\//, ""), "page.tsx");
       if (!fs.existsSync(p)) {
@@ -179,6 +206,13 @@ export function testEveryScopedRouteIsGuarded() {
     }
     if (res.enforcement === "SQL_ROWS") {
       assert.ok(hasRowOwnership(res), `${res.key}: khai SQL_ROWS thì phải có cột chủ dòng`);
+      for (const link of [res.rowOwner, res.rowAssignee]) {
+        // Cột EMAIL chỉ khớp được khi cột đó THẬT SỰ chứa email. `cs_cases.assignee` chứa tên hiển thị.
+        if (link?.by === "EMAIL") assert.ok(!/^(assignee|assigned_to|owner)$/.test(link.column), `${res.key}: cột ${link.column} là ô TÊN, không nối theo email được`);
+      }
+    }
+    if (res.enforcement === "PROJECTION") {
+      assert.ok(!hasRowOwnership(res) && (res.noRowOwnerReason ?? "").length > 30, `${res.key}: phép chiếu không lọc bằng SQL trên một bảng — khai cột dòng ở đây là khai một luật không nơi nào thi hành`);
     }
   }
 

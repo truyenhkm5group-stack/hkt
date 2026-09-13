@@ -32,10 +32,13 @@ import { getReadiness } from "@/lib/queries/work-readiness";
 import { bottleneckOf, normalizeSnapshot, totalsOf } from "@/lib/queries/reviews";
 import { applyWorkConfig } from "@/lib/queries/work-adapters";
 import { closedStats, listOrgPeople } from "@/lib/queries/work";
-import { MONEY_UNKNOWN, slaStateOf, sumMoney, WORK_STATUSES, workKey, type WorkItem } from "@/lib/constants/work";
+import { isMachineHeld, MONEY_UNKNOWN, slaStateOf, sumMoney, WORK_STATUSES, WORK_TAG_MACHINE_HELD, workKey, type WorkItem } from "@/lib/constants/work";
+import { setCsCaseFields } from "@/lib/cs/workqueue";
+import { holderKeyOf } from "@/lib/queries/workforce";
 import { WORK_ACTION, WORK_ACTION_KEYS } from "@/lib/constants/work-actions";
 import {
   ALERT_STATUS_TO_WORK,
+  ASSIGNEE_OWNED_BY_SOURCE,
   CARE_STATUS_TO_WORK,
   CS_STATUS_TO_WORK,
   PROJECTED_SOURCES,
@@ -160,15 +163,23 @@ export async function testWorkOs(db: Db) {
     { id: `${P}u-tuan`, email: `${P}tuan@shop.vn`, name: "Tuấn Kế toán", passwordHash: "x", role: "ACCOUNTANT" },
     { id: `${P}u-mai`, email: `${P}mai@shop.vn`, name: "Mai Quản lý", passwordHash: "x", role: "MANAGER" },
   ]).onConflictDoNothing();
-  await setDepartmentMember(sales.id, `${P}u-linh`, "LEAD");
-  await setDepartmentMember(finance.id, `${P}u-tuan`, "MEMBER");
-
   const linh = { id: `${P}u-linh`, email: `${P}linh@shop.vn`, name: "Linh CSKH" };
   const mai = { id: `${P}u-mai`, email: `${P}mai@shop.vn`, name: "Mai Quản lý" };
+
+  // Người bấm BẮT BUỘC: nhật ký kiểm toán phải nêu đúng ai xếp ai vào phòng, không ghi "system".
+  await setDepartmentMember(sales.id, `${P}u-linh`, "LEAD", "", mai);
+  await setDepartmentMember(finance.id, `${P}u-tuan`, "MEMBER", "", mai);
+  const gheSales = await db.query.departments.findFirst({ where: eq(schema.departments.id, sales.id), columns: { leadUserId: true } });
+  assert.equal(gheSales?.leadUserId, `${P}u-linh`, "vai LEAD đi qua setDepartmentLead: ghế trưởng phòng và vai LEAD cùng được ghi");
 
   // Một case CSKH thật (miền CUSTOMER), một kiện care, một dòng tiền chưa phân loại.
   await db.insert(schema.orders).values({ id: `${P}o1`, stage: "CONFIRMED", status: 2, insertedAt: T(30), billFullName: "Khách A", billPhone: "0900000001", totalPriceAfterDiscount: 450_000 }).onConflictDoNothing();
   await db.insert(schema.csCases).values({ id: `${P}c1`, orderId: `${P}o1`, kind: "EXCHANGE_SIZE", status: "OPEN", title: "Khách xin đổi size", assignee: "Linh CSKH", createdAt: T(30), source: "PANCAKE_CHAT", dedupeKey: `${P}c1-dedupe` }).onConflictDoNothing();
+  // Case bot đã nhắn (`Bot ERP` là một JOB) và case đã nối KHOÁ tài khoản — ba rổ của ô phụ trách.
+  await db.insert(schema.csCases).values([
+    { id: `${P}c-bot`, kind: "PHONE_VERIFY", status: "OPEN", title: "✅ Đã nhắn khách · SĐT mới", assignee: "Bot ERP", createdAt: T(5), source: "AUTO_PHONE_VERIFY", dedupeKey: `${P}c-bot-dedupe` },
+    { id: `${P}c-key`, kind: "COMPLAINT", status: "IN_PROGRESS", title: "Khiếu nại đường may", assignee: "Tuấn Kế toán", assigneeUserId: `${P}u-tuan`, createdAt: T(4), source: "MANUAL", dedupeKey: `${P}c-key-dedupe` },
+  ]).onConflictDoNothing();
   await db.insert(schema.bankTransactions).values({ id: `${P}b1`, txnAt: T(100), amount: -2_500_000, bankRef: `${P}REF1`, description: "CK di dong", accountingGroup: "UNCLASSIFIED" }).onConflictDoNothing();
 
   clearMemo();
@@ -187,6 +198,17 @@ export async function testWorkOs(db: Db) {
   const bankItem = byKey.get(workKey("BANK_EXCEPTION", `${P}b1`));
   assert.ok(bankItem, "dòng tiền chưa phân loại phải thành một việc của kế toán");
   assert.equal(bankItem!.department, "FINANCE");
+
+  /* ═══════════ 2b · BA RỔ CỦA Ô PHỤ TRÁCH: KHOÁ · MÁY · TÊN GÕ TAY ═══════════ */
+  const botItem = byKey.get(workKey("CS_CASE", `${P}c-bot`))!;
+  assert.ok(botItem, "case bot nhắn vẫn là một việc — khách vẫn cần một người theo dõi");
+  assert.equal(botItem.assignee, null, "`Bot ERP` là một JOB, không phải người: việc KHÔNG có người cầm");
+  assert.ok(botItem.tags.includes(WORK_TAG_MACHINE_HELD) && isMachineHeld(botItem), "nhưng phải mang nhãn máy đã chạm — tách khỏi rổ 'chưa ai nhận' và 'tên gõ tay'");
+  assert.equal(holderKeyOf(botItem), null, "bảng tải nhân lực không được đếm bot thành một nhân viên (AGENTS.md mục 36)");
+  const keyItem = byKey.get(workKey("CS_CASE", `${P}c-key`))!;
+  assert.equal(keyItem.assignee?.id, `${P}u-tuan`, "case đã nối khoá thì phép chiếu mang KHOÁ, không rơi về so tên");
+  assert.equal(holderKeyOf(keyItem), `${P}u-tuan`);
+  assert.equal(csItem!.assignee?.id, null, "case cũ chỉ có tên gõ tay giữ `id: null` — hàng đợi cá nhân còn nhận ra bằng tên, thẻ điểm thì không");
 
   /* ═══════════ 3 · TIỀN: `null` LÀ CHƯA BIẾT ═══════════ */
   assert.equal(csItem!.money.atRisk, 450_000, "tiền của case là giá trị đơn — con số CÓ THẬT ở nguồn");
@@ -222,22 +244,41 @@ export async function testWorkOs(db: Db) {
     "ràng buộc CSDL phải chặn, không tin vào kỷ luật của tầng ứng dụng",
   );
 
-  /* ═══════════ 6 · LỚP GHI CHÚ KHÔNG ĐỤNG NGUỒN ═══════════ */
+  /* ═══════════ 6 · LỚP GHI CHÚ KHÔNG ĐỤNG NGUỒN — VÀ KHÔNG GIỮ SỰ THẬT THỨ HAI VỀ NGƯỜI PHỤ TRÁCH ═══════════ */
   const csKey = workKey("CS_CASE", `${P}c1`);
-  assert.ok(!("error" in (await assignWork(csKey, `${P}u-linh`, mai))), "giao việc cho một việc chiếu phải được");
+  /*
+    `cs_cases.assignee_user_id` là nơi DUY NHẤT giữ "ai đang cầm case". Lớp công việc từ chối ghi
+    `work_items.assignee_id` cho nguồn này; giao / nhận việc đi qua `lib/work/assign.ts` tới Server
+    Action của miền. Trước bản này hai nút "Nhận việc" (hàng đợi và trang CSKH) ghi hai chỗ.
+  */
+  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SHIPMENT_CARE"], "hai nguồn có cột người phụ trách trong bảng nghiệp vụ");
+  const giaoOverlay = await assignWork(csKey, `${P}u-linh`, mai);
+  assert.ok("error" in giaoOverlay, "lớp công việc KHÔNG được ghi người phụ trách cho case CSKH — đó là sự thật thứ hai");
+  assert.match(giaoOverlay.error, /miền nghiệp vụ/, "lời từ chối phải chỉ sang đúng nơi giữ người phụ trách");
+  const giaoNguon = await setCsCaseFields({ id: `${P}c1`, assigneeUserId: `${P}u-linh` }, { id: mai.id, email: mai.email, name: mai.name, source: "API" });
+  assert.ok("ok" in giaoNguon, "giao việc đi qua miền CSKH thì được");
   assert.ok(!("error" in (await blockWork(csKey, "chờ khách gửi ảnh sản phẩm", linh))), "báo bị chặn phải được");
   assert.ok(!("error" in (await addWorkNote(csKey, "đã gọi khách lúc 9h", linh))), "ghi chú phải được");
   const caseSauGhiChu = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, `${P}c1`) });
   assert.equal(caseSauGhiChu!.status, "OPEN", "lớp công việc KHÔNG được sửa trạng thái nghiệp vụ ở nguồn");
+  // Dòng overlay cũ còn mang `assignee_id` (di sản thời ghi hai chỗ) KHÔNG được đè lên nguồn.
+  await db.update(schema.workItems).set({ assigneeId: `${P}u-mai` }).where(sql`${schema.workItems.sourceType} = 'CS_CASE' and ${schema.workItems.sourceKey} = ${`${P}c1`}`);
   clearMemo();
   const sauChan = await collectWorkItems({ now: NOW });
   const csSauChan = sauChan.items.find((i) => i.key === csKey)!;
   assert.equal(csSauChan.status, "BLOCKED", "có lý do chặn ở lớp công việc ⇒ HIỂN THỊ là bị chặn");
   assert.equal(csSauChan.blockedReason, "chờ khách gửi ảnh sản phẩm");
-  assert.equal(csSauChan.assignee?.id, `${P}u-linh`, "người nhận ở lớp công việc đè lên ô chữ của nguồn");
+  assert.equal(csSauChan.assignee?.id, `${P}u-linh`, "người phụ trách đọc từ NGUỒN (cs_cases.assignee_user_id); overlay cũ không đè được");
   const lichSu = await db.query.workItemEvents.findMany({ where: eq(schema.workItemEvents.workKey, csKey) });
-  assert.ok(lichSu.length >= 3, "mỗi thao tác để lại một dòng lịch sử chỉ-thêm");
+  assert.ok(lichSu.length >= 2, "mỗi thao tác của lớp công việc để lại một dòng lịch sử chỉ-thêm");
   await blockWork(csKey, "", linh);
+
+  // Lá chắn mã nguồn: Server Action giao việc phải đi qua bộ dẫn đường, không gọi thẳng lớp overlay.
+  for (const f of ["lib/actions/work.ts", "lib/actions/workforce.ts"]) {
+    const src = readFileSync(f, "utf8");
+    assert.ok(!/svc\.assignWork\(/.test(src), `${f}: không được gọi thẳng svc.assignWork — đi qua assignByAuthority (lib/work/assign.ts)`);
+    assert.ok(src.includes("assignByAuthority"), `${f}: phải giao việc qua assignByAuthority`);
+  }
 
   /* ═══════════ 7 · VIỆC TAY ═══════════ */
   const tay = await saveManualTask({ title: `${P}Gọi xưởng chốt ngày giao`, department: "WAREHOUSE", assigneeId: `${P}u-mai`, priority: "HIGH", dueAt: T(-5) }, mai);

@@ -65,6 +65,17 @@ export async function saveObjective(input: unknown): Promise<Result<{ id: string
   if (d.level !== "COMPANY" && !d.department && !d.ownerUserId) return { error: "Mục tiêu cấp phòng / cá nhân phải nói rõ của phòng nào hoặc của ai" };
 
   const db = await getDb();
+  /*
+    MẶC ĐỊNH LÀ BẢN NHÁP (AGENTS.md mục 23). Một mục tiêu chỉ chảy vào bảng tổng hợp và thẻ điểm
+    khi có người CỐ Ý bật — và bật thì phải đã có KR có đích. Tạo mới mà đòi `ACTIVE` ngay là bật
+    một mục tiêu chưa có KR nào: từ chối, nói rõ, không âm thầm hạ về DRAFT.
+  */
+  const status = d.status ?? "DRAFT";
+  if (status === "ACTIVE") {
+    if (!d.id) return { error: "Mục tiêu mới tạo ở trạng thái Nháp — thêm ít nhất một KR có đích rồi mới bật" };
+    const krs = await db.query.okrKeyResults.findMany({ where: eq(schema.okrKeyResults.objectiveId, d.id), columns: { id: true } });
+    if (!krs.length) return { error: "Mục tiêu chưa có Key Result nào — thêm ít nhất một KR có đích rồi mới bật được" };
+  }
   const departmentId = await departmentIdOf(d.department);
   const range = quarterRange(d.period);
   // Kỳ dạng tháng / năm không có `quarterRange`; suy từ chính chuỗi kỳ, giờ Việt Nam.
@@ -79,7 +90,7 @@ export async function saveObjective(input: unknown): Promise<Result<{ id: string
     period: d.period,
     periodStart: start,
     periodEnd: end,
-    status: d.status ?? "ACTIVE",
+    status,
     sortOrder: d.sortOrder ?? 100,
     updatedAt: new Date(),
   };
@@ -175,12 +186,18 @@ export async function saveKeyResult(input: unknown): Promise<Result<{ id: string
   if (d.baseline !== null && d.baseline !== undefined && d.baseline === d.target) return { error: "Đích phải khác mốc xuất phát, nếu không không tính được phần trăm" };
 
   const db = await getDb();
+  /*
+    ĐƠN VỊ VÀ CHIỀU LẤY TỪ SỔ ĐĂNG KÝ, KHÔNG NHẬN TỪ CLIENT (AGENTS.md mục 23). Ghi cứng `UP` cho
+    một chỉ số càng-thấp-càng-tốt (tỷ lệ hoàn, việc quá hạn) là ĐẢO NGƯỢC điểm của KR đó. Chỉ ô
+    `MANUAL` mới cần người khai đơn vị / chiều.
+  */
+  const rang = metricBinding(d.metricSource);
   const values = {
     objectiveId: d.objectiveId,
     title: d.title,
     metricSource: d.metricSource,
-    unit: d.unit ?? "NUMBER",
-    direction: d.direction ?? "UP",
+    unit: rang ? rang.unit : (d.unit ?? "NUMBER"),
+    direction: rang ? rang.direction : (d.direction ?? "UP"),
     baseline: d.baseline ?? null,
     target: d.target,
     ownerUserId: d.ownerUserId ?? null,
@@ -394,13 +411,15 @@ export async function saveBscMetric(input: unknown): Promise<Result<{ id: string
   const d = parsed.data;
   if (!isMetricKey(d.metricSource)) return { error: `Chỉ số "${d.metricSource}" không có trong sổ đăng ký` };
   const db = await getDb();
+  // Cùng luật với KR: ô nối chỉ số lấy đơn vị / chiều từ sổ đăng ký, không ghi cứng `UP`.
+  const rang = metricBinding(d.metricSource);
   const values = {
     scorecardId: d.scorecardId,
     perspective: d.perspective,
     label: d.label,
     metricSource: d.metricSource,
-    unit: d.unit ?? "NUMBER",
-    direction: d.direction ?? "UP",
+    unit: rang ? rang.unit : (d.unit ?? "NUMBER"),
+    direction: rang ? rang.direction : (d.direction ?? "UP"),
     target: d.target ?? null,
     // Giá trị nhập tay chỉ có nghĩa với ô `MANUAL`; ô nối chỉ số đọc sống nên bỏ qua.
     manualValue: d.metricSource === "MANUAL" ? (d.manualValue ?? null) : null,
