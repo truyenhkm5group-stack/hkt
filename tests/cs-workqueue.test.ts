@@ -5,10 +5,10 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CS_KINDS, classifyFailedReason } from "@/lib/constants/cs";
 import { CS_QUICK_ACTIONS_BY_KIND, CS_QUICK_ACTION, CS_MUTATE_ACTIONS, type CsQuickActionKey } from "@/lib/constants/cs-actions";
-import { CS_KIND_DOMAIN, csDomainOf, humanAssignee, isBotAssignee } from "@/lib/constants/cs-domain";
+import { CS_ASSIGNEE_FACET_BOT, CS_HUMAN_KINDS, CS_KIND_DOMAIN, csDomainOf, humanAssignee, isBotAssignee } from "@/lib/constants/cs-domain";
 import { addCsNote, applyCsQuickAction, setCsCaseFields, type CsActor } from "@/lib/cs/workqueue";
 import { getCareQueue } from "@/lib/queries/care-workbench";
-import { csCasesToSurface, csSummary, listCsCases, openCsGroups } from "@/lib/queries/cs";
+import { botMessageFailuresByShipment, csCasesToSurface, csFacets, csSummary, listCsCases, openCsGroups } from "@/lib/queries/cs";
 import { getFunnelHealth } from "@/lib/queries/stage-health";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
@@ -45,6 +45,11 @@ export async function testCsWorkqueue(db: Db) {
     for (const a of CS_QUICK_ACTIONS_BY_KIND[k] as readonly CsQuickActionKey[]) assert.ok(CS_QUICK_ACTION[a], `loại case ${k} khai hành động không tồn tại: ${a}`);
   }
   assert.ok(!CS_MUTATE_ACTIONS.includes("OPEN_POS"), "nút chỉ mở đường dẫn không được nằm trong tập hành động ghi dữ liệu");
+  // Người / luật từ khoá không sinh được case giao vận — loại đó đến từ chứng từ ĐVVC.
+  assert.ok(!CS_HUMAN_KINDS.includes("DELIVERY_FAILED") && CS_HUMAN_KINDS.includes("COMPLAINT"), "CS_HUMAN_KINDS loại đúng miền giao vận");
+  const csActionSrc = readFileSync("lib/actions/cs.ts", "utf8");
+  assert.match(csActionSrc.slice(csActionSrc.indexOf("const rulesSchema")), /kind: HUMAN_KIND/, "luật từ khoá chỉ được trỏ tới loại của người");
+  assert.ok(!/z\.enum\(CS_STATUSES\)/.test(csActionSrc), "người không đặt được trạng thái của máy (AUTO_RESOLVED) — dùng CS_HUMAN_STATUSES");
 
   // ═════════ FIXTURE ═════════
   // (1) Giao không thành — chứng từ ĐVVC, kiện còn chạy.
@@ -164,6 +169,17 @@ export async function testCsWorkqueue(db: Db) {
   assert.ok(suKien5.some((e) => e.action === "STATUS" && e.previousStatus === "OPEN" && e.nextStatus === "IN_PROGRESS"));
   assert.ok(suKien5.some((e) => e.action === "ASSIGN" && e.nextAssignee === "Linh CSKH"));
 
+  // ───────── 8b · Ô lọc "Phụ trách" đi bằng KHOÁ tài khoản, bot và tên gõ tay là hai rổ riêng ─────────
+  clearMemo();
+  const facets = await csFacets(paramsOf());
+  const rieng = facets.assignees.find((a) => a.value === "csq-user");
+  assert.ok(rieng && rieng.label === "Linh CSKH" && rieng.count >= 1, "người phụ trách hiện theo khoá tài khoản với tên đọc từ `users`");
+  const botBucket = facets.assignees.find((a) => a.value === CS_ASSIGNEE_FACET_BOT);
+  assert.ok(botBucket && botBucket.count >= 1, "Bot ERP đứng ở rổ MÁY, không đứng chung hàng với nhân viên");
+  assert.ok(!facets.assignees.some((a) => a.value === "Bot ERP" || a.value === "Linh CSKH"), "không còn mục nào là ô chữ trần");
+  const theoKhoa = await listIds({ assignee: "csq-user" });
+  assert.ok(theoKhoa.includes("csq-c5") && !theoKhoa.includes("csq-c12"), "lọc theo khoá ra đúng case của người đó, không lẫn case bot");
+
   // ───────── 9 · Ghi chú nhanh ─────────
   const truocGhiChu = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, "csq-c4") });
   const ghiChu = await addCsNote({ id: "csq-c4", note: "Gọi lần 1, khách đang bận, hẹn gọi lại chiều." }, actor);
@@ -205,6 +221,13 @@ export async function testCsWorkqueue(db: Db) {
   assert.equal(dongBot.createdBy, "phone-verify-bot", "người tạo giữ nguyên, tách hẳn khỏi người phụ trách");
   assert.ok(!(await csCasesToSurface()).some((c) => c.id === "csq-c12"), "việc gán cho bot không được tính là việc của một người cụ thể");
 
+  // ───────── 12b · Bot KHÔNG NHẮN ĐƯỢC: kết luận nằm ở dòng ẩn, bàn care phải tra ra được theo kiện ─────────
+  const botBoTay = await botMessageFailuresByShipment(["csq-s1", "csq-s2", "csq-s4"]);
+  assert.ok(botBoTay.has("csq-s2"), "kiện mà bot không nhắn được (⛔, chưa ai — người lẫn máy — chạm tới khách) phải tra ra được theo shipmentId");
+  assert.equal(botBoTay.get("csq-s2")?.caseId, "csq-c2");
+  assert.ok(!botBoTay.has("csq-s1"), "kiện bot ĐÃ nhắn được (assignee = Bot ERP) không phải thất bại");
+  assert.ok(!botBoTay.has("csq-s4"), "kiện không có case giao hụt thì không có gì để báo");
+
   // ───────── 13 · Số liệu không đếm hai lần ─────────
   clearMemo();
   const truoc = await csSummary();
@@ -217,10 +240,15 @@ export async function testCsWorkqueue(db: Db) {
   await db.insert(schema.shipmentEvents).values({ shipmentId: "csq-s13", source: "VTP_WEBHOOK", status: "502", statusName: "Phát không thành công", note: "Khách từ chối nhận", occurredAt: gio(4), normalizedStage: "DELIVERY_FAILED", legType: "OUTBOUND" });
   await db.insert(schema.csCases).values({ id: "csq-c13", kind: "DELIVERY_FAILED", orderId: "csq-o13", source: "AUTO_FAILED_DELIVERY", status: "OPEN", title: "✅ Đã nhắn khách · Khách từ chối nhận · đơn #13", customerPhone: "0911000013", assignee: "Bot ERP", createdBy: "failed-delivery-bot", createdAt: gio(4), dedupeKey: "test:csq-c13" });
 
+  // Và một dòng bot BÓ TAY (assignee rỗng, ⛔) cũng KHÔNG phải việc của người CSKH: nó là việc của bàn care.
+  await db.insert(schema.csCases).values({ id: "csq-c14", kind: "DELIVERY_FAILED", orderId: "csq-o13", source: "AUTO_FAILED_DELIVERY", status: "OPEN", title: "⛔ Chưa xử lý · Khách từ chối nhận · đơn #13", customerPhone: "0911000013", assignee: "", createdBy: "failed-delivery-bot", createdAt: gio(3), dedupeKey: "failed-delivery:csq-s13:2026-09-13" });
+
   clearMemo();
   const sau = await csSummary();
   assert.equal(sau.open, truoc.open, "một kiện giao hụt mới KHÔNG được làm tăng khối lượng việc của CSKH");
-  assert.equal(sau.logistics, truoc.logistics + 1, "nhưng vẫn phải đếm được là đã chuyển sang miền giao vận — không im lặng biến mất");
+  assert.equal(sau.unassigned, truoc.unassigned, "dòng bot bó tay (assignee rỗng) KHÔNG được đếm thành 'chưa ai nhận' của CSKH — nó thuộc bàn care");
+  assert.equal(sau.logistics, truoc.logistics + 2, "cả hai dòng giao vận đều đếm được ở phía giao vận — không im lặng biến mất");
+  assert.equal((await botMessageFailuresByShipment(["csq-s13"])).get("csq-s13")?.caseId, "csq-c14", "khoá ghép chính là dedupe_key dạng failed-delivery:<shipmentId>:<ngày>");
   const leadSau = (await getFunnelHealth()).stages.find((s) => s.key === "LEAD")?.backlog ?? 0;
   assert.equal(leadSau, leadTruoc, "bảng điều hành: khâu CSKH không được tắc thêm vì một sự việc của khâu giao vận");
   clearMemo();

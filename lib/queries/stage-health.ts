@@ -43,7 +43,7 @@ import { CS_CASE_SLA_HOURS, csCustomerCondRaw } from "@/lib/queries/cs";
  */
 
 /** Ngưỡng tồn đọng để gọi là đang kẹt. Đặt một chỗ; sửa ở đây là sửa mọi khâu. */
-const NGUONG = { canhBao: 10, kẹt: 40 } as const;
+const NGUONG = { canhBao: 10, blocked: 40 } as const;
 
 export type StageStatus = "OK" | "WARNING" | "BLOCKED" | "UNKNOWN";
 
@@ -356,7 +356,7 @@ async function loadSourceStatus(db: Awaited<ReturnType<typeof getDb>>, tuoi: Log
 function statusOf(spec: StageSpec, backlog: number, breached: number, source: SourceStatus): StageStatus {
   if (source === "DATA_UNAVAILABLE") return "UNKNOWN";
   if (!spec.caseTypes.length) return "UNKNOWN";
-  if (backlog >= NGUONG.kẹt || breached > 0) return "BLOCKED";
+  if (backlog >= NGUONG.blocked || breached > 0) return "BLOCKED";
   if (backlog >= NGUONG.canhBao) return "WARNING";
   return "OK";
 }
@@ -560,8 +560,8 @@ export async function getFunnelHealth(): Promise<FunnelHealth> {
     }
     for (const load of teams.values()) load.worstStage = nangNhat.get(load.team)?.label ?? null;
 
-    const kẹt = stages.filter((s) => s.status === "BLOCKED" || s.status === "WARNING");
-    const worst = kẹt.slice().sort((a, b) => b.impact.moneyAtRisk - a.impact.moneyAtRisk || b.backlog - a.backlog)[0] ?? null;
+    const stuckStages = stages.filter((s) => s.status === "BLOCKED" || s.status === "WARNING");
+    const worst = stuckStages.slice().sort((a, b) => b.impact.moneyAtRisk - a.impact.moneyAtRisk || b.backlog - a.backlog)[0] ?? null;
     const coUocTinh = stages.some((s) => s.impact.estimatedRecoverable !== null);
 
     const khongTuoi = tuoiVanDon.byClass.STALE + tuoiVanDon.byClass.CRITICAL_STALE;

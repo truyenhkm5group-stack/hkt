@@ -3,7 +3,9 @@ import { WorkList } from "@/components/work/work-list";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { ScopeDenied } from "@/components/scope-denied";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
 import { MY_WORK_BUCKET_HINT, MY_WORK_BUCKET_LABEL } from "@/lib/constants/work";
 import { formatVND } from "@/lib/format";
 import { departmentsOfUser, getMyWork } from "@/lib/queries/work";
@@ -21,7 +23,10 @@ export const metadata = { title: "Việc của tôi" };
  * sách, và mỗi dòng làm được việc ngay tại chỗ.
  */
 export default async function MyWorkPage() {
-  const user = await requirePermission("work:view");
+  // Hàng đợi cá nhân: lớp chiếu lọc bằng `isMine` trên khoá tài khoản, nên phạm vi hẹp tự thoả —
+  // cổng vẫn gọi để tuyến này khai đích danh nơi thi hành (tests/scope-enforcement.test.ts).
+  const { user, decision } = await requireResource("WORK", "work:view");
+  if (decision.allow === "NONE") return <ScopeDenied title="Việc của tôi" reason={decision.reason} fix={decision.fix} />;
   const [my, phongCuaToi] = await Promise.all([
     getMyWork({ id: user.id, name: user.name, email: user.email }),
     departmentsOfUser(user.id),

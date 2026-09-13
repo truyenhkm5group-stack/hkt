@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
-import { CS_ACTIONABLE_STATUSES, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
+import { CS_ACTIONABLE_STATUSES, CS_ASSIGNEE_FACET_BOT, CS_ASSIGNEE_FACET_LABEL, CS_ASSIGNEE_FACET_UNLINKED, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
 import { rowsOf } from "@/lib/sql-rows";
 import { decideScope } from "@/lib/auth/scope-guard";
 import type { ListParams } from "@/lib/search-params";
@@ -69,6 +69,22 @@ function statusesOf(params: ListParams): string[] {
 type FacetKey = "kind" | "status" | "assignee" | "domain";
 
 /**
+ * Ô LỌC "PHỤ TRÁCH" — giá trị là KHOÁ TÀI KHOẢN, cộng hai rổ đặc biệt (`lib/constants/cs-domain.ts`).
+ *
+ * Trước bản này ô này lọc theo ô chữ `assignee`: bốn cách gõ tên một người là bốn mục, và "Bot ERP"
+ * đứng chung hàng với nhân viên. Mệnh đề dưới và câu đếm facet dùng CÙNG một cách phân rổ
+ * (`assigneeBucketExpr`), để con số cạnh mỗi mục đúng bằng số dòng bấm vào thấy.
+ */
+function assigneeBucketExpr(): SQL<string | null> {
+  const c = schema.csCases;
+  return sql<string | null>`coalesce(${c.assigneeUserId}, case when ${c.assignee} in ${CS_BOT_ASSIGNEES} then ${CS_ASSIGNEE_FACET_BOT} when ${c.assignee} <> '' then ${CS_ASSIGNEE_FACET_UNLINKED} end)`;
+}
+
+function assigneeFilterCond(values: string[]): SQL {
+  return sql`${assigneeBucketExpr()} in ${values}`;
+}
+
+/**
  * `skip` bỏ đúng một điều kiện để đếm facet của chính nó: đếm "Đã xong" bằng bộ lọc đang có (vốn
  * loại trạng thái đóng) thì con số luôn bằng 0 và người dùng không bao giờ bấm vào được.
  */
@@ -101,7 +117,7 @@ async function whereOf(params: ListParams, skip?: FacetKey) {
   }
   if (skip !== "status") conds.push(inArray(c.status, statusesOf(params)));
   if (skip !== "kind" && params.filters.kind?.length) conds.push(inArray(c.kind, params.filters.kind));
-  if (skip !== "assignee" && params.filters.assignee?.length) conds.push(inArray(c.assignee, params.filters.assignee));
+  if (skip !== "assignee" && params.filters.assignee?.length) conds.push(assigneeFilterCond(params.filters.assignee));
   const term = params.q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -195,7 +211,14 @@ export async function csFacets(params: ListParams) {
   const [kinds, statuses, assignees, domains] = await Promise.all([
     db.select({ value: c.kind, count: count() }).from(c).where(await whereOf(params, "kind")).groupBy(c.kind),
     db.select({ value: c.status, count: count() }).from(c).where(await whereOf(params, "status")).groupBy(c.status),
-    db.select({ value: c.assignee, count: count() }).from(c).where(and(await whereOf(params, "assignee"), sql`${c.assignee} <> ''`)).groupBy(c.assignee),
+    // Gom theo VỊ TRÍ CỘT: lặp lại biểu thức trong `group by` thì drizzle sinh tham số mới và Postgres
+    // không nhận ra đó là cùng một biểu thức với cột đang chọn.
+    db
+      .select({ value: assigneeBucketExpr(), label: schema.users.name, count: count() })
+      .from(c)
+      .leftJoin(schema.users, eq(schema.users.id, c.assigneeUserId))
+      .where(and(await whereOf(params, "assignee"), sql`${assigneeBucketExpr()} is not null`))
+      .groupBy(sql`1`, sql`2`),
     Promise.all(
       CS_DOMAINS.map(async (d) => {
         const [row] = await db.select({ n: count() }).from(c).where(and(await whereOf(params, "domain"), csDomainCond(d)));
@@ -206,7 +229,9 @@ export async function csFacets(params: ListParams) {
   return {
     kinds: kinds.map((k) => ({ value: k.value, label: CS_KIND_LABEL[k.value as CsKind] ?? k.value, count: Number(k.count) })),
     statuses: statuses.map((k) => ({ value: k.value, label: CS_STATUS_LABEL[k.value as CsStatus] ?? k.value, count: Number(k.count) })),
-    assignees: assignees.map((k) => ({ value: k.value, label: k.value, count: Number(k.count) })),
+    assignees: assignees
+      .filter((k): k is typeof k & { value: string } => k.value !== null)
+      .map((k) => ({ value: k.value, label: CS_ASSIGNEE_FACET_LABEL[k.value] ?? k.label ?? k.value, count: Number(k.count) })),
     domains,
   };
 }
@@ -247,6 +272,47 @@ export async function csSummary() {
     logistics: Number(logistics?.n ?? 0),
     followUpDue: Number(followUpDue?.n ?? 0),
   };
+}
+
+export type BotMessageFailure = { caseId: string; shipmentId: string; orderId: string | null; title: string; detail: string; createdAt: Date };
+
+/**
+ * ═══════════ BOT KHÔNG NHẮN ĐƯỢC KHÁCH — THEO TỪNG KIỆN ═══════════
+ *
+ * `lib/cs/failed-delivery.ts` giữ chỗ một dòng `cs_cases` (loại `DELIVERY_FAILED`, miền GIAO VẬN)
+ * cho mỗi lần Viettel Post báo giao hụt, rồi nhắn khách qua Pancake. Nhắn ĐƯỢC thì dòng mang
+ * `assignee = 'Bot ERP'` (máy đã làm phần của máy). Nhắn KHÔNG ĐƯỢC (không có hội thoại Pancake,
+ * Facebook chặn ngoài 24h, chưa cấu hình token) thì dòng ở `OPEN` với `assignee = ''` và tiêu đề
+ * "⛔ Chưa xử lý" — tức là KHÔNG AI, người lẫn máy, đã chạm tới khách. Đo production 13/09/2026:
+ * 339 dòng DELIVERY_FAILED còn mở, và kết luận "bot bó tay" chỉ nằm trong chính dòng ẩn đó.
+ *
+ * Hàng đợi CSKH cố ý không hiện loại này (miền giao vận); bàn care vận đơn là nơi phải thấy nó.
+ * Hàm này trả về đúng thông tin ấy theo `shipmentId` để `lib/queries/care-workbench.ts` ghép vào
+ * từng ca. Khoá ghép là `dedupe_key` (`failed-delivery:<shipmentId>:<ngày>`) — chính xác tới
+ * kiện; dòng không mang khoá dạng đó thì ghép theo đơn, chỉ khi kiện ấy CHƯA kết thúc.
+ *
+ * KHÔNG hàm tổng hợp nào đếm các dòng này thành việc của người: `csSummary` / `openCsGroups` /
+ * `csCasesToSurface` đều lọc `csCustomerCond()`, và `tests/cs-workqueue.test.ts` khoá điều đó.
+ */
+export async function botMessageFailuresByShipment(shipmentIds: string[]): Promise<Map<string, BotMessageFailure>> {
+  const out = new Map<string, BotMessageFailure>();
+  if (!shipmentIds.length) return out;
+  const db = await getDb();
+  const rows = rowsOf<{ case_id: string; shipment_id: string; order_id: string | null; title: string; detail: string; created_at: string }>(
+    await db.execute(sql`
+      select distinct on (s.id) c.id as case_id, s.id as shipment_id, c.order_id, c.title, c.detail, c.created_at
+        from shipments s
+        join cs_cases c
+          on c.kind = 'DELIVERY_FAILED'
+         and c.status = 'OPEN'
+         and c.assignee = ''
+         and c.title like '⛔%'
+         and (c.dedupe_key like 'failed-delivery:' || s.id || ':%' or (coalesce(c.dedupe_key, '') not like 'failed-delivery:%' and c.order_id = s.order_id and s.is_final = false))
+       where s.id in ${shipmentIds}
+       order by s.id, c.created_at desc`),
+  );
+  for (const r of rows) out.set(r.shipment_id, { caseId: r.case_id, shipmentId: r.shipment_id, orderId: r.order_id, title: r.title, detail: r.detail, createdAt: new Date(r.created_at) });
+  return out;
 }
 
 /** Case đang mở (cho cảnh báo) */

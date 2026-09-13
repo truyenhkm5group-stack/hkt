@@ -4,7 +4,9 @@ import { WorkFilters } from "@/app/(dashboard)/work/all/filters";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { ScopeDenied } from "@/components/scope-denied";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
 import { type DepartmentCode } from "@/lib/constants/departments";
 import { slaStateOf, type SlaState, type WorkStatus } from "@/lib/constants/work";
 import type { WorkSource } from "@/lib/constants/work-sources";
@@ -25,7 +27,8 @@ const PAGE_SIZE = 150;
  * sách mở lên đã có hàng nghìn dòng `DONE` thì người dùng phải lọc trước khi làm được gì.
  */
 export default async function AllWorkPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("work:all");
+  const { user, decision } = await requireResource("WORK", "work:all");
+  if (decision.allow === "NONE") return <ScopeDenied title="Tất cả công việc" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const filter = {
     department: (param(raw, "dept") || undefined) as DepartmentCode | undefined,

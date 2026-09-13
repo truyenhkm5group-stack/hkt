@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
-import { can, requireUser, type SessionUser } from "@/lib/auth/session";
+import { decideScope } from "@/lib/auth/scope-guard";
+import { can, requireUser } from "@/lib/auth/session";
 import { DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 import { WIP_MAX, WIP_MIN, type StaffingConfig } from "@/lib/constants/workforce";
 import { staffingSchema } from "@/lib/validation/workforce";
@@ -13,14 +14,16 @@ import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { buildCapacity, getStaffing, holderKeyOf, saveStaffing } from "@/lib/queries/workforce";
 import { saveScoreWeights } from "@/lib/queries/work-config";
 import { listOrgPeople } from "@/lib/queries/work";
-import * as svc from "@/lib/work/service";
+import { assignByAuthority } from "@/lib/work/assign";
 
 /**
  * ═══════════ PHÂN VIỆC: XEM TRƯỚC RỒI MỚI GHI ═══════════
  *
- * Mọi hành động ở đây đi qua đúng một cửa ghi: `svc.assignWork`. Không có đường tắt nào cập nhật
- * thẳng `work_items`, nên mỗi lần đổi chủ đều để lại một dòng ở `work_item_events` — và một việc
- * bị giao nhầm luôn truy ngược được về người bấm nút.
+ * Mọi hành động ở đây đi qua đúng một cửa ghi: `assignByAuthority` (`lib/work/assign.ts`). Nguồn
+ * nào giữ người phụ trách trong bảng nghiệp vụ thì lượt ghi tới Server Action của miền đó (case
+ * CSKH → `cs_cases.assignee_user_id`, care → `shipment_care.owner_id`); còn lại mới ghi
+ * `work_items`. Không có đường tắt nào cập nhật thẳng bảng, nên mỗi lần đổi chủ đều để lại một
+ * dòng lịch sử ở đúng miền — và một việc bị giao nhầm luôn truy ngược được về người bấm nút.
  *
  * ─── VÌ SAO `apply` PHẢI KHAI TƯỜNG MINH ───
  *
@@ -36,14 +39,16 @@ function revalidate() {
   revalidatePath("/", "layout");
 }
 
-function actorOf(user: SessionUser): svc.WorkActor {
-  return { id: user.id, email: user.email, name: user.name, source: "UI" };
-}
-
 async function authorize(permission: "work:assign" | "work:admin") {
   const user = await requireUser();
   const labels = { "work:assign": "giao việc cho người khác", "work:admin": "cấu hình nhân lực" };
-  return { user, error: can(user, permission) ? null : `Bạn không có quyền ${labels[permission]}` };
+  if (!can(user, permission)) return { user, error: `Bạn không có quyền ${labels[permission]}` };
+  // Phạm vi hẹp (Chỉ của mình / Việc được giao) không giao được việc cho người khác — xem `decideScope`.
+  if (permission === "work:assign") {
+    const d = await decideScope("WORK", user, permission);
+    if (d.allow === "NONE") return { user, error: `${d.reason} ${d.fix}` };
+  }
+  return { user, error: null };
 }
 
 /* ═══════════════════ CẤU HÌNH NHÂN LỰC ═══════════════════ */
@@ -132,7 +137,7 @@ export async function bulkAssign(input: unknown): Promise<Result<{ assigned: num
   let assigned = 0;
   let skipped = 0;
   for (const key of keys) {
-    const r = await svc.assignWork(key, userId, actorOf(user));
+    const r = await assignByAuthority(key, userId, user);
     if ("error" in r) skipped += 1;
     else assigned += 1;
   }
@@ -155,7 +160,7 @@ export async function reassignWork(input: unknown): Promise<Result> {
   if (error) return { error };
   const parsed = z.object({ key: z.string().min(3), userId: z.string().min(1).nullable() }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
-  const r = await svc.assignWork(parsed.data.key, parsed.data.userId, actorOf(user));
+  const r = await assignByAuthority(parsed.data.key, parsed.data.userId, user);
   if ("error" in r) return r;
   await audit({ userId: user.id, userEmail: user.email, action: "WORK_REASSIGN", entity: "WORK_ITEM", entityId: parsed.data.key, detail: { to: parsed.data.userId } });
   revalidate();
@@ -199,7 +204,7 @@ export async function autoAssign(input: unknown): Promise<Result<AutoAssignResul
   let failed = 0;
   if (apply) {
     for (const a of plan.assignments) {
-      const r = await svc.assignWork(a.key, a.userId, actorOf(user));
+      const r = await assignByAuthority(a.key, a.userId, user);
       if ("error" in r) failed += 1;
       else applied += 1;
     }

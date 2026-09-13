@@ -52,13 +52,13 @@ export async function runEscalationDigest(now: Date = new Date()): Promise<Escal
   const homNay = vnDay(now);
   const sent: EscalationRunResult["sent"] = [];
   const skipped: EscalationRunResult["skipped"] = [];
-  const sổ: Record<string, string> = { ...sentRaw };
+  const sentLedger: Record<string, string> = { ...sentRaw };
   const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
 
   for (const c of counts) {
     const digest = escalationDigest(c, appUrl);
     if (!digest) continue;
-    if (sổ[c.department] === homNay) {
+    if (sentLedger[c.department] === homNay) {
       skipped.push({ department: c.department, reason: "đã gửi hôm nay" });
       continue;
     }
@@ -68,7 +68,7 @@ export async function runEscalationDigest(now: Date = new Date()): Promise<Escal
     }
     const r = await sendLark(alertCfg.larkWebhookUrl, alertCfg.larkSecret, digest.title, digest.lines).catch((e) => ({ ok: false, error: String(e) }));
     if (r.ok) {
-      sổ[c.department] = homNay;
+      sentLedger[c.department] = homNay;
       sent.push({ department: c.department, stale: c.stale });
     } else {
       // Gửi hỏng thì KHÔNG ghi sổ: lượt sau phải thử lại, không được im lặng bỏ qua cả ngày.
@@ -76,7 +76,7 @@ export async function runEscalationDigest(now: Date = new Date()): Promise<Escal
     }
   }
 
-  if (sent.length) await setSettingJson(SENT_KEY, sổ);
+  if (sent.length) await setSettingJson(SENT_KEY, sentLedger);
 
   const warn = counts.reduce((s, c) => s + c.warn, 0);
   const breach = counts.reduce((s, c) => s + c.breach, 0);

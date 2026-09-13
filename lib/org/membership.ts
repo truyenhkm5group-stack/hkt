@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { DEPARTMENT_LABEL, type DepartmentCode, type DepartmentRole } from "@/lib/constants/departments";
@@ -147,6 +147,23 @@ export async function assignMembership(
   input: { departmentId: string; userId: string; roleInDept?: DepartmentRole; title?: string },
   actor: MembershipActor,
 ): Promise<OrgResult<{ changed: boolean }>> {
+  /*
+    VAI `LEAD` KHÔNG ĐẶT ĐƯỢC TỪ ĐÂY.
+
+    Trưởng phòng là HAI vế của một sự thật: `departments.lead_user_id` (ai ngồi ghế) và vai LEAD
+    trong `department_members` (để họ thấy việc của phòng). Cho phép ghi vế thứ hai rời ra thì có
+    ngày phòng có hai dòng LEAD mà ghế trỏ tới người thứ ba — đúng lệch đo được trên production
+    13/09/2026. Chỉ `setDepartmentLead` ghi cả hai vế, trong một thao tác.
+  */
+  if (input.roleInDept === "LEAD") return { error: "Đặt trưởng phòng phải qua setDepartmentLead — vai LEAD không tách rời ghế trưởng phòng" };
+  return writeMembership(input, actor);
+}
+
+/** Thân ghi thật. Chỉ `assignMembership` (MEMBER) và `setDepartmentLead` (LEAD) được gọi. */
+async function writeMembership(
+  input: { departmentId: string; userId: string; roleInDept?: DepartmentRole; title?: string },
+  actor: MembershipActor,
+): Promise<OrgResult<{ changed: boolean }>> {
   const db = await getDb();
   const [dept, user] = await Promise.all([
     db.query.departments.findFirst({ where: eq(schema.departments.id, input.departmentId), columns: { id: true, code: true, name: true, active: true } }),
@@ -158,12 +175,13 @@ export async function assignMembership(
   if (!user.active) return { error: `Tài khoản ${user.name || user.email} đã ngừng hoạt động — bật lại tài khoản trước` };
 
   const roleInDept = input.roleInDept ?? "MEMBER";
-  const title = (input.title ?? "").trim().slice(0, 100);
 
   const truoc = await db.query.departmentMembers.findFirst({
     where: and(eq(schema.departmentMembers.departmentId, input.departmentId), eq(schema.departmentMembers.userId, input.userId)),
     columns: { roleInDept: true, title: true, active: true },
   });
+  // Ô chức danh không gửi lên (`undefined`) thì GIỮ chức danh cũ — đổi vai không phải là xoá nhãn.
+  const title = (input.title ?? truoc?.title ?? "").trim().slice(0, 100);
 
   await db
     .insert(schema.departmentMembers)
@@ -235,22 +253,24 @@ export async function removeMembership(input: { departmentId: string; userId: st
  *
  * `userId = null` là bỏ trống ghế trưởng phòng; người đó VẪN là thành viên.
  */
-export async function setDepartmentLead(input: { departmentId: string; userId: string | null }, actor: MembershipActor): Promise<OrgResult> {
+export async function setDepartmentLead(input: { departmentId: string; userId: string | null; title?: string }, actor: MembershipActor): Promise<OrgResult> {
   const db = await getDb();
   const dept = await db.query.departments.findFirst({ where: eq(schema.departments.id, input.departmentId), columns: { id: true, code: true, name: true, active: true, leadUserId: true } });
   if (!dept) return { error: "Không tìm thấy phòng ban" };
 
   if (input.userId) {
-    const r = await assignMembership({ departmentId: input.departmentId, userId: input.userId, roleInDept: "LEAD" }, actor);
+    const r = await writeMembership({ departmentId: input.departmentId, userId: input.userId, roleInDept: "LEAD", title: input.title }, actor);
     if ("error" in r) return r;
   }
-  // Trưởng phòng CŨ lùi về thành viên thường, không bị đá khỏi phòng.
-  if (dept.leadUserId && dept.leadUserId !== input.userId) {
-    await db
-      .update(schema.departmentMembers)
-      .set({ roleInDept: "MEMBER", updatedAt: new Date() })
-      .where(and(eq(schema.departmentMembers.departmentId, input.departmentId), eq(schema.departmentMembers.userId, dept.leadUserId)));
-  }
+  /*
+    MỌI dòng LEAD khác lùi về thành viên thường — không chỉ người đang ngồi ghế. Một phòng chỉ có
+    một trưởng; dòng LEAD mồ côi (do thời còn ghi rời hai vế) được dọn ngay ở đây thay vì nằm mãi
+    trong báo cáo lệch. Người cũ KHÔNG bị đá khỏi phòng.
+  */
+  await db
+    .update(schema.departmentMembers)
+    .set({ roleInDept: "MEMBER", updatedAt: new Date() })
+    .where(and(eq(schema.departmentMembers.departmentId, input.departmentId), eq(schema.departmentMembers.roleInDept, "LEAD"), input.userId ? ne(schema.departmentMembers.userId, input.userId) : undefined));
   await db.update(schema.departments).set({ leadUserId: input.userId, updatedAt: new Date() }).where(eq(schema.departments.id, input.departmentId));
 
   await audit({
@@ -276,7 +296,10 @@ export async function transferMembership(
   actor: MembershipActor,
 ): Promise<OrgResult> {
   if (input.fromDepartmentId === input.toDepartmentId) return { error: "Phòng đi và phòng đến giống nhau" };
-  const them = await assignMembership({ departmentId: input.toDepartmentId, userId: input.userId, roleInDept: input.roleInDept }, actor);
+  // Chuyển sang làm trưởng phòng mới: vào phòng trước, rồi đặt ghế bằng đúng một cửa ghi của ghế.
+  const them = input.roleInDept === "LEAD"
+    ? await setDepartmentLead({ departmentId: input.toDepartmentId, userId: input.userId }, actor)
+    : await assignMembership({ departmentId: input.toDepartmentId, userId: input.userId, roleInDept: input.roleInDept }, actor);
   if ("error" in them) return them;
   const roi = await removeMembership({ departmentId: input.fromDepartmentId, userId: input.userId }, actor);
   if ("error" in roi) return roi;
@@ -294,7 +317,7 @@ export async function transferMembership(
 /* ═══════════════════ TÁC ĐỘNG & LỆCH DỮ LIỆU ═══════════════════ */
 
 export type MembershipDrift = {
-  kind: "LEAD_NOT_MEMBER" | "LEAD_INACTIVE_MEMBER" | "MEMBER_OF_INACTIVE_DEPT" | "INACTIVE_USER_ACTIVE_MEMBER" | "DUPLICATE_ROW";
+  kind: "LEAD_NOT_MEMBER" | "LEAD_INACTIVE_MEMBER" | "MEMBER_OF_INACTIVE_DEPT" | "INACTIVE_USER_ACTIVE_MEMBER" | "DUPLICATE_ROW" | "MULTIPLE_LEAD_ROWS";
   label: string;
   fix: string;
   departmentId: string;
@@ -309,6 +332,7 @@ export const DRIFT_LABEL: Record<MembershipDrift["kind"], string> = {
   MEMBER_OF_INACTIVE_DEPT: "Còn là thành viên của phòng đã ngừng dùng",
   INACTIVE_USER_ACTIVE_MEMBER: "Tài khoản đã tắt nhưng vẫn là thành viên đang hoạt động",
   DUPLICATE_ROW: "Hai dòng thành viên cho cùng một người trong cùng một phòng",
+  MULTIPLE_LEAD_ROWS: "Vai LEAD trong bảng thành viên không khớp ghế trưởng phòng",
 };
 
 /**
@@ -329,6 +353,7 @@ export async function membershipDrift(): Promise<MembershipDrift[]> {
       leadUserId: schema.departments.leadUserId,
       memberUserId: schema.departmentMembers.userId,
       memberActive: schema.departmentMembers.active,
+      memberRole: schema.departmentMembers.roleInDept,
       userName: schema.users.name,
       userEmail: schema.users.email,
       userActive: schema.users.active,
@@ -351,6 +376,16 @@ export async function membershipDrift(): Promise<MembershipDrift[]> {
       } else if (!lead.memberActive) {
         ra.push({ kind: "LEAD_INACTIVE_MEMBER", label: DRIFT_LABEL.LEAD_INACTIVE_MEMBER, fix: "Thêm lại họ vào phòng, hoặc chọn trưởng phòng khác", departmentId: deptId, department: d.deptName, userId: d.leadUserId, userName: ten });
       }
+    }
+    /*
+      HAI VẾ CỦA GHẾ TRƯỞNG PHÒNG PHẢI KHỚP. Dòng LEAD còn hoạt động mà người đó KHÔNG ngồi ghế
+      (`lead_user_id` trỏ người khác, hoặc trống) là di sản của thời hai nơi ghi rời nhau: người
+      ấy vẫn thấy "việc của phòng tôi" như một trưởng phòng dù đã bị thay. Mỗi dòng lệch là một
+      dòng báo cáo — sửa bằng cách đặt lại trưởng phòng (dọn mọi dòng LEAD thừa) hoặc hạ vai.
+    */
+    for (const r of list) {
+      if (!r.memberUserId || !r.memberActive || r.memberRole !== "LEAD" || r.memberUserId === d.leadUserId) continue;
+      ra.push({ kind: "MULTIPLE_LEAD_ROWS", label: DRIFT_LABEL.MULTIPLE_LEAD_ROWS, fix: d.leadUserId ? "Đặt lại trưởng phòng (mọi dòng LEAD thừa sẽ lùi về thành viên), hoặc hạ người này về thành viên" : "Ghế trưởng phòng đang trống: đặt người này làm trưởng phòng, hoặc hạ họ về thành viên", departmentId: deptId, department: d.deptName, userId: r.memberUserId, userName: r.userName || r.userEmail || "" });
     }
     for (const r of list) {
       if (!r.memberUserId || !r.memberActive) continue;

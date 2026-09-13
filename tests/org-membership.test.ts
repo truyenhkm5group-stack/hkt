@@ -26,10 +26,10 @@ import { ORG_DEPENDENT_PATHS } from "@/lib/constants/org-surfaces";
  */
 
 /*
-  `id: ""` CỐ Ý — đây là hình dạng mà mã gọi từ hệ thống truyền vào (`setDepartmentMember` không
-  có actor). `audit_logs.user_id` có khoá ngoại tới `users.id`, nên chuỗi rỗng làm lượt ghi nhật
-  ký đổ, và `audit()` nuốt lỗi để không chặn nghiệp vụ — thao tác xong mà KHÔNG để lại dấu nào.
-  Khối 2 bên dưới khoá đúng chỗ đó.
+  `id: ""` CỐ Ý — đây là hình dạng mà mã gọi từ job / script truyền vào (không có người bấm).
+  `audit_logs.user_id` có khoá ngoại tới `users.id`, nên chuỗi rỗng làm lượt ghi nhật ký đổ, và
+  `audit()` nuốt lỗi để không chặn nghiệp vụ — thao tác xong mà KHÔNG để lại dấu nào. Khối 2 bên
+  dưới khoá đúng chỗ đó. (Server Action của người thì BẮT BUỘC truyền người bấm — `lib/actions/work.ts`.)
 */
 const ACTOR = { id: "", email: "test@local" };
 
@@ -203,13 +203,17 @@ export async function testOrgMembership(db: Db) {
   assert.equal(vaoLai.length, 1, "vào lại phòng cũ KHÔNG được tạo dòng thứ hai");
   assert.equal(vaoLai[0].active, true);
 
-  /* ═══ 5 · TRƯỞNG PHÒNG: ghi CẢ HAI vế ═══ */
+  /* ═══ 5 · TRƯỞNG PHÒNG: ghi CẢ HAI vế — và CHỈ qua một cửa ═══ */
+  const leadRoi = await assignMembership({ departmentId: d1, userId: uid, roleInDept: "LEAD" }, ACTOR);
+  assert.ok("error" in leadRoi && /setDepartmentLead/.test(leadRoi.error), "vai LEAD KHÔNG đặt được rời ghế trưởng phòng — hai vế của một sự thật phải cùng đổi");
+  await assignMembership({ departmentId: d1, userId: uid, title: "Chuyên viên" }, ACTOR);
   const l1 = await setDepartmentLead({ departmentId: d1, userId: uid }, ACTOR);
   assert.ok("ok" in l1);
   const dept1 = await db.query.departments.findFirst({ where: eq(schema.departments.id, d1) });
   assert.equal(dept1?.leadUserId, uid, "ghế trưởng phòng phải được ghi");
   const vai = await db.query.departmentMembers.findFirst({ where: and(eq(schema.departmentMembers.departmentId, d1), eq(schema.departmentMembers.userId, uid)) });
   assert.equal(vai?.roleInDept, "LEAD", "VÀ vai LEAD trong chính phòng đó — thiếu vế này thì 'việc của phòng tôi' của họ rỗng");
+  assert.equal(vai?.title, "Chuyên viên", "đổi vai không xoá chức danh đã khai — ô không gửi lên thì giữ nguyên");
 
   // Đổi trưởng phòng: người cũ LÙI VỀ thành viên, không bị đá khỏi phòng.
   await setDepartmentLead({ departmentId: d1, userId: uid2 }, ACTOR);
@@ -254,6 +258,20 @@ export async function testOrgMembership(db: Db) {
   // Và nó KHÔNG được tự sửa: đọc lại vẫn thấy đúng cái lệch đó.
   assert.equal((await db.query.departments.findFirst({ where: eq(schema.departments.id, d2) }))?.leadUserId, uid2, "báo cáo là CHẠY THỬ — không được sửa gì");
 
+  /*
+    LỆCH THỨ HAI CỦA GHẾ: dòng LEAD trong bảng thành viên mà người đó KHÔNG ngồi ghế. Di sản của
+    thời `saveDepartment` ghi ghế rồi gọi rời một lượt `assignMembership(LEAD)`: đổi trưởng phòng
+    ở màn kia thì dòng LEAD cũ nằm lại. Dựng thẳng vào bảng (không đi qua cửa ghi) để mô phỏng.
+  */
+  await db.update(schema.departmentMembers).set({ roleInDept: "LEAD" }).where(and(eq(schema.departmentMembers.departmentId, d2), eq(schema.departmentMembers.userId, uid)));
+  const lech2 = (await membershipDrift()).filter((x) => x.departmentId === d2);
+  assert.ok(lech2.some((x) => x.kind === "MULTIPLE_LEAD_ROWS" && x.userId === uid), "dòng LEAD của người không ngồi ghế phải bị báo là lệch");
+  // Đặt lại trưởng phòng bằng đúng cửa ghi thì mọi dòng LEAD thừa lùi về thành viên — lệch tự hết.
+  await assignMembership({ departmentId: d2, userId: uid2 }, ACTOR);
+  await setDepartmentLead({ departmentId: d2, userId: uid2 }, ACTOR);
+  assert.ok(!(await membershipDrift()).some((x) => x.departmentId === d2 && x.kind === "MULTIPLE_LEAD_ROWS"), "sau khi đặt lại ghế, không còn dòng LEAD mồ côi");
+  assert.equal((await db.query.departmentMembers.findFirst({ where: and(eq(schema.departmentMembers.departmentId, d2), eq(schema.departmentMembers.userId, uid)) }))?.roleInDept, "MEMBER");
+
   /* ═══ DỌN ═══ */
   await db.delete(schema.departmentMembers).where(eq(schema.departmentMembers.userId, uid));
   await db.delete(schema.departmentMembers).where(eq(schema.departmentMembers.userId, uid2));
@@ -265,7 +283,7 @@ export async function testOrgMembership(db: Db) {
 
   console.log(
     "✓ Sự thật tổ chức: một cửa ghi duy nhất · gán lại không sinh dòng trùng · rời phòng giữ lịch sử · vào lại bật dòng cũ · " +
-      "trưởng phòng ghi CẢ ghế lẫn vai LEAD, người cũ lùi về thành viên · chuyển phòng một thao tác · chặn tài khoản tắt và phòng ngừng dùng · " +
-      "báo cáo lệch phát hiện nhưng KHÔNG tự sửa",
+      "trưởng phòng ghi CẢ ghế lẫn vai LEAD qua MỘT cửa, người cũ lùi về thành viên · chuyển phòng một thao tác · chặn tài khoản tắt và phòng ngừng dùng · " +
+      "báo cáo lệch phát hiện (kể cả dòng LEAD mồ côi) nhưng KHÔNG tự sửa",
   );
 }

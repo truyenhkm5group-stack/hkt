@@ -1,4 +1,5 @@
 import { CASE_SLA_HOURS, CASE_TEAM, type CaseStatus, type CaseType } from "@/lib/constants/action-queue";
+import { BANK_UNCLASSIFIED_SLA_HOURS } from "@/lib/constants/bank";
 import { CARE_SLA, type CareStatus } from "@/lib/constants/care";
 import type { CsStatus } from "@/lib/constants/cs";
 import { TEAM_DEPARTMENT, type DepartmentCode } from "@/lib/constants/departments";
@@ -46,12 +47,30 @@ export type WorkSource = (typeof WORK_SOURCES)[number];
 
 export type StatusAuthority = "SOURCE" | "WORK";
 
+/**
+ * AI GIỮ Ô "NGƯỜI PHỤ TRÁCH" — tách khỏi ai giữ trạng thái, vì hai câu này có câu trả lời khác nhau.
+ *
+ * Case CSKH và care vận đơn có cột người phụ trách NGAY TRONG bảng nguồn
+ * (`cs_cases.assignee_user_id`, `shipment_care.owner_id`), và trang của miền đó đọc/ghi cột ấy.
+ * Nếu lớp công việc ghi thêm `work_items.assignee_id` cho cùng một case thì ERP có HAI sự thật về
+ * một câu hỏi "ai đang cầm" — và người đọc trang CSKH thấy một tên, người đọc hàng đợi thấy tên
+ * khác. Đo trên production 13/09/2026: nút "Nhận việc" trên hàng đợi ghi vào `work_items`, nút
+ * "Nhận việc" trên trang CSKH ghi vào `cs_cases` — hai nút cùng tên, hai chỗ ghi.
+ *
+ *  · `SOURCE` — bảng nguồn giữ người phụ trách. Lớp công việc KHÔNG ghi `assignee_id` cho nguồn
+ *    này; giao / nhận việc đi qua Server Action của miền (`lib/work/assign.ts` dẫn đường).
+ *  · `WORK`   — nguồn không có cột người; `work_items.assignee_id` là nơi duy nhất.
+ */
+export type AssigneeAuthority = "SOURCE" | "WORK";
+
 export type WorkSourceSpec = {
   key: WorkSource;
   label: string;
   /** Vì sao nguồn này là một việc phải làm, chứ không phải một con số để ngắm. */
   why: string;
   statusAuthority: StatusAuthority;
+  /** Ai giữ ô người phụ trách — xem `AssigneeAuthority`. */
+  assigneeAuthority: AssigneeAuthority;
   /** Phòng ban mặc định. `null` = suy theo từng dòng (việc tay, cảnh báo suy theo `CASE_TEAM`). */
   department: DepartmentCode | null;
   /** Thực thể nghiệp vụ đứng sau: `ORDER` · `SHIPMENT` · `BANK_TXN` · `CAMPAIGN` · `VARIANT` · `NONE`. */
@@ -76,6 +95,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Case CSKH",
     why: "Có một khách thật đang chờ trả lời ở đầu kia.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "SOURCE",
     department: "SALES",
     businessEntity: "ORDER",
     slaHours: CASE_SLA_HOURS.CS_CASE,
@@ -87,6 +107,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Care vận đơn",
     why: "Kiện hàng đang mắc ở đâu đó ngoài kho; mỗi giờ trôi qua là gần hơn tới một đơn hoàn.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "SOURCE",
     department: "LOGISTICS",
     businessEntity: "SHIPMENT",
     slaHours: CARE_SLA.resolveHours,
@@ -100,6 +121,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Hàng hoàn chờ kiểm đếm",
     why: "ĐVVC đã trả hàng về nhưng kho chưa lập phiếu — hàng hoàn KHÔNG tự vào tồn, nên đây là vốn đang không ai đếm.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "WAREHOUSE",
     businessEntity: "SHIPMENT",
     slaHours: CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION,
@@ -111,6 +133,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Nút thắt fulfillment",
     why: "Đơn đã chốt nhưng chưa ra khỏi kho. Hàng còn trong tay shop, nên đây là nhóm cứu được trọn vẹn.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "WAREHOUSE",
     businessEntity: "ORDER",
     slaHours: CASE_SLA_HOURS.ORDER_CONFIRMATION_STALE,
@@ -122,9 +145,10 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Dòng tiền chưa phân loại",
     why: "Chưa phân loại thì khoản tiền đó không vào được báo cáo nào — số dư khớp nhưng lợi nhuận sai.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "FINANCE",
     businessEntity: "BANK_TXN",
-    slaHours: 72,
+    slaHours: BANK_UNCLASSIFIED_SLA_HOURS,
     outcomeAttributable: true,
     actions: ["BANK_CLASSIFY", "BANK_LINK", "BANK_OPEN"],
   },
@@ -133,6 +157,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "COD quá hạn chưa về",
     why: "Hàng đã giao nhưng tiền chưa về — tiền của shop đang nằm ở ĐVVC.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "FINANCE",
     businessEntity: "SHIPMENT",
     slaHours: CASE_SLA_HOURS.COD_OVERDUE,
@@ -144,6 +169,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Quyết định quảng cáo",
     why: "Một dòng đang đốt tiền hoặc đang bị bỏ phí — để thêm một ngày là mất thêm đúng một ngày chi phí.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "MARKETING",
     businessEntity: "CAMPAIGN",
     slaHours: CASE_SLA_HOURS.ADS_ANOMALY,
@@ -157,6 +183,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Cảnh báo tồn kho",
     why: "Sắp hết hàng hoặc đang mất đơn vì hết hàng — đặt sản xuất kịp thì không mất doanh thu nào.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     department: "WAREHOUSE",
     businessEntity: "VARIANT",
     slaHours: CASE_SLA_HOURS.STOCKOUT_RISK,
@@ -168,6 +195,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Cảnh báo vận hành",
     why: "Việc do job cảnh báo phát hiện, chưa thuộc hàng đợi chuyên biệt nào.",
     statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
     // Suy theo `CASE_TEAM` của từng loại việc — xem `departmentOfAlert`.
     department: null,
     businessEntity: "NONE",
@@ -180,6 +208,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Việc giao tay",
     why: "Việc do quản lý giao, không sinh ra từ một sự kiện nghiệp vụ nào.",
     statusAuthority: "WORK",
+    assigneeAuthority: "WORK",
     department: null,
     businessEntity: "NONE",
     slaHours: null,
@@ -191,6 +220,7 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     label: "Việc định kỳ",
     why: "Việc lặp theo lịch: đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công.",
     statusAuthority: "WORK",
+    assigneeAuthority: "WORK",
     department: null,
     businessEntity: "NONE",
     slaHours: null,
@@ -249,6 +279,13 @@ export function isWorkSource(s: string): s is WorkSource {
 
 export function authorityOf(source: WorkSource): StatusAuthority {
   return WORK_SOURCE_SPEC[source].statusAuthority;
+}
+
+/** Nguồn mà BẢNG NGUỒN giữ người phụ trách — lớp công việc không được ghi `assignee_id` cho chúng. */
+export const ASSIGNEE_OWNED_BY_SOURCE: WorkSource[] = WORK_SOURCES.filter((s) => WORK_SOURCE_SPEC[s].assigneeAuthority === "SOURCE");
+
+export function assigneeAuthorityOf(source: string): AssigneeAuthority {
+  return isWorkSource(source) ? WORK_SOURCE_SPEC[source].assigneeAuthority : "WORK";
 }
 
 /** Bộ nút của một nguồn: nút riêng của nguồn + bốn nút chung. Thứ tự: việc chuyên môn trước. */

@@ -55,6 +55,13 @@ export async function assignUserToDepartment(input: unknown): Promise<Result<{ c
   if (error) return { error };
   const parsed = z.object({ departmentId: idSchema, userId: idSchema, roleInDept: z.enum(["LEAD", "MEMBER"]).optional(), title: z.string().max(100).optional() }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  // Vai LEAD là ghế trưởng phòng — đi qua cửa ghi của ghế, để hai vế (ghế + vai) luôn cùng đổi.
+  if (parsed.data.roleInDept === "LEAD") {
+    const r = await setDepartmentLead({ departmentId: parsed.data.departmentId, userId: parsed.data.userId, title: parsed.data.title }, actorOf(user));
+    if ("error" in r) return r;
+    revalidate();
+    return { ok: true, changed: true };
+  }
   const r = await assignMembership(parsed.data, actorOf(user));
   if ("error" in r) return r;
   revalidate();

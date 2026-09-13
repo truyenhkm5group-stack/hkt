@@ -247,6 +247,21 @@ export type WorkItem = {
   recommendedAction: string;
 };
 
+/**
+ * NHÃN "MÁY ĐANG CẦM" — cho việc mà ô phụ trách ở nguồn ghi tên một JOB chứ không phải một người
+ * (`Bot ERP`, xem `CS_BOT_ASSIGNEES`).
+ *
+ * Việc như vậy mang `assignee = null` (không ai NGƯỜI đang cầm — nó vẫn cần một người) và thêm nhãn
+ * này để màn hình nói được "bot đã chạm vào". Tách hẳn khỏi hai rổ kia: "tên gõ tay chưa nối" và
+ * "chưa ai nhận". AGENTS.md mục 36: gộp bot vào người thì báo cáo nói 187 việc đang có người làm
+ * trong khi con số thật là 0.
+ */
+export const WORK_TAG_MACHINE_HELD = "BOT_HELD";
+
+export function isMachineHeld(item: Pick<WorkItem, "tags">): boolean {
+  return item.tags.includes(WORK_TAG_MACHINE_HELD);
+}
+
 export function workKey(sourceType: string, sourceKey: string): string {
   return `${sourceType}:${sourceKey}`;
 }
