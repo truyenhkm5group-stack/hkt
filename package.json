@@ -27,7 +27,8 @@
     "bench": "tsx --tsconfig tsconfig.json scripts/bench-reports.ts",
     "bench:http": "tsx --tsconfig tsconfig.json scripts/bench-http.ts",
     "bench:explain": "tsx --tsconfig tsconfig.json scripts/bench/explain.ts",
-    "returns:hmt": "tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts"
+    "returns:hmt": "tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts",
+    "bench:cs": "tsx --tsconfig tsconfig.json scripts/bench-cs-queue.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
