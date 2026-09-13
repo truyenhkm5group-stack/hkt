@@ -6,6 +6,7 @@ import { parseAsString, useQueryStates } from "nuqs";
 import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
+import { CopyButton } from "@/components/misc";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -686,9 +687,17 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
       </td>
       <td className="px-2 py-2">
         <div className="flex items-center gap-1.5">
+          {/*
+            SAO CHÉP NGAY CẠNH MÃ — bàn care là nơi thao tác này diễn ra nhiều nhất: mở trang Viettel
+            Post tra kiện, dán mã vào chat với ĐVVC, ghi vào sổ. Bôi đen một chuỗi 13 ký tự trong ô
+            hẹp là thao tác dễ trượt và dễ thiếu ký tự. Bảng "Tất cả vận đơn" đã có nút này từ trước;
+            bàn care thì chưa, tức là đúng chỗ làm việc cả ngày lại là chỗ thiếu.
+            `CopyButton` có sẵn `stopPropagation` nên bấm nó KHÔNG mở ngăn kéo.
+          */}
           <CareOpenButton shipmentId={c.shipmentId} className="font-mono text-[12.5px] font-semibold">
             {c.tracking}
           </CareOpenButton>
+          {c.tracking ? <CopyButton value={c.tracking} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           {c.orderSystemId ? (
             <Link href={`/orders/${c.orderId}`} className="text-[11px] text-muted-foreground hover:underline">
               #{c.orderSystemId}
@@ -718,9 +727,14 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
       <td className="px-2 py-2">
         <div className="font-medium">{c.customer}</div>
         {c.phone ? (
-          <a href={`tel:${c.phone}`} className="numeric inline-flex items-center gap-1 text-[11.5px] text-primary hover:underline">
-            <Phone className="size-3" /> {c.phone}
-          </a>
+          // Gọi được thì bấm; nhắn Zalo / dán vào Pancake thì cần sao chép. Hai việc khác nhau nên
+          // phải có hai nút — một cái link `tel:` không giúp gì cho người đang mở cửa sổ chat.
+          <span className="inline-flex items-center gap-0.5">
+            <a href={`tel:${c.phone}`} className="numeric inline-flex items-center gap-1 text-[11.5px] text-primary hover:underline">
+              <Phone className="size-3" /> {c.phone}
+            </a>
+            <CopyButton value={c.phone} className="size-5 shrink-0 [&_svg]:size-3" />
+          </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">chưa có SĐT</span>
         )}

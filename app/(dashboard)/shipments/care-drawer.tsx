@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Phone, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { CopyButton } from "@/components/misc";
 import { openCopilot } from "@/components/ai-copilot";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -170,15 +171,25 @@ export function CareDrawer({
             </div>
           ) : (
             <div className="space-y-4 px-4 pb-8">
-              {/* ───── Gọi được ngay, không phải copy số ───── */}
+              {/* ───── Gọi được ngay, và sao chép được khi việc là nhắn chứ không phải gọi ───── */}
               <div className="flex flex-wrap items-center gap-2">
                 {data.phone ? (
-                  <a href={`tel:${data.phone}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] font-semibold hover:bg-accent">
-                    <Phone className="size-3.5" /> {data.phone}
-                  </a>
+                  <span className="inline-flex items-center gap-0.5 rounded-lg border bg-card pr-1">
+                    <a href={`tel:${data.phone}`} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-semibold hover:bg-accent">
+                      <Phone className="size-3.5" /> {data.phone}
+                    </a>
+                    <CopyButton value={data.phone} className="size-6 shrink-0" />
+                  </span>
                 ) : (
                   <span className="rounded-lg border px-2.5 py-1.5 text-[12.5px] text-muted-foreground">Chưa có SĐT</span>
                 )}
+                {/* Mã vận đơn: việc thường xuyên nhất sau khi gọi là dán mã sang trang ĐVVC. */}
+                {data.tracking ? (
+                  <span className="inline-flex items-center gap-0.5 rounded-lg border bg-card pl-2.5 pr-1">
+                    <span className="font-mono text-[12.5px]">{data.tracking}</span>
+                    <CopyButton value={data.tracking} className="size-6 shrink-0" />
+                  </span>
+                ) : null}
                 {data.chatUrl ? (
                   <a href={data.chatUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
                     <MessageSquare className="size-3.5" /> Mở chat Pancake
