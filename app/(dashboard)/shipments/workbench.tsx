@@ -9,7 +9,10 @@ import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, markCarrierManualDone, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import type { BulkOutcome, BulkResult } from "@/lib/care/service";
+import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
+import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -77,6 +80,20 @@ function reviveState(s: CareState): CareState {
   return { ...s, followUpAt: d(s.followUpAt), lastNoteAt: d(s.lastNoteAt), firstResponseAt: d(s.firstResponseAt), doneAt: d(s.doneAt), updatedAt: d(s.updatedAt) };
 }
 
+/** Nhãn kết quả từng kiện. Bốn lối ra, và chúng KHÔNG được gộp: mỗi cái dẫn tới một việc khác. */
+const BULK_LABEL: Record<BulkOutcome, string> = {
+  SUCCESS: "ĐÃ GỬI",
+  MANUAL_REQUIRED: "LÀM TAY",
+  SKIPPED: "BỎ QUA",
+  FAILED: "TỪ CHỐI",
+};
+const BULK_TONE: Record<BulkOutcome, string> = {
+  SUCCESS: "text-emerald-600 dark:text-emerald-400",
+  MANUAL_REQUIRED: "text-amber-600 dark:text-amber-400",
+  SKIPPED: "text-muted-foreground",
+  FAILED: "text-rose-600 dark:text-rose-400",
+};
+
 export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, canManage }: Props) {
   const [cases, setCases] = useState<CareCase[]>(() => initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
   // Mẫu note dùng chung cho mọi dòng: sửa ở một dòng, dòng khác thấy ngay.
@@ -85,7 +102,13 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   const [q, setQ] = useState("");
   const [owner, setOwner] = useState("");
   const [reason, setReason] = useState("");
+  /** CHIỀU ĐVVC — bộ lọc RIÊNG, không trộn với lý do cần care và không trộn với trạng thái xử lý. */
+  const [substate, setSubstate] = useState<CarrierSubstate | "">("");
   const [pending, start] = useTransition();
+  /** Kết quả TỪNG KIỆN của lượt gửi hàng loạt gần nhất. `null` = chưa chạy lượt nào. */
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  /** Hành động đang chờ xác nhận. Chống bấm hai lần: nút xác nhận khoá trong lúc `pending`. */
+  const [confirmAction, setConfirmAction] = useState<CarrierActionKey | null>(null);
 
   const patch = (shipmentId: string, care: CareState, extra: Partial<CareCase> = {}) =>
     setCases((prev) =>
@@ -110,15 +133,31 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         c.view === view &&
         (!owner || (owner === "none" ? !c.care.owner : c.care.owner?.id === owner)) &&
         (!reason || c.reason === reason) &&
+        (!substate || c.carrier.substate === substate) &&
         (!term || [c.tracking, c.customer, c.phone, String(c.orderSystemId ?? "")].some((x) => x.toLowerCase().includes(term))),
     );
-  }, [cases, view, owner, reason, q]);
+  }, [cases, view, owner, reason, substate, q]);
 
   const reasons = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of cases) if (c.view === view) m.set(c.reason, (m.get(c.reason) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [cases, view]);
+
+  /* Đếm theo TRẠNG THÁI ĐVVC trên tập đang xem (đã áp mọi bộ lọc khác trừ chính nó) — để con số
+     trên chip là số dòng sẽ hiện ra khi bấm, không phải một con số của tập khác. */
+  const substates = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    const m = new Map<CarrierSubstate, number>();
+    for (const c of cases) {
+      if (c.view !== view) continue;
+      if (owner && (owner === "none" ? Boolean(c.care.owner) : c.care.owner?.id !== owner)) continue;
+      if (reason && c.reason !== reason) continue;
+      if (term && ![c.tracking, c.customer, c.phone, String(c.orderSystemId ?? "")].some((x) => x.toLowerCase().includes(term))) continue;
+      m.set(c.carrier.substate, (m.get(c.carrier.substate) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [cases, view, owner, reason, q]);
 
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
@@ -148,6 +187,47 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       setSelected(new Set());
       toast.success(`Đã giao ${ids.length} kiện`);
     });
+
+  /*
+    ═══ GỬI LỆNH ĐVVC CHO NHIỀU KIỆN: THÀNH CÔNG MỘT PHẦN LÀ KẾT QUẢ HỢP LỆ ═══
+
+    Máy chủ xét điều kiện TỪNG KIỆN và chỉ gửi lệnh cho kiện đủ điều kiện — kiện không đủ không
+    sinh một gói tin nào. Ở đây chỉ hiển thị kết quả trả về, KHÔNG tự đoán: một lượt 40 kiện có thể
+    ra 12 thành công, 9 bỏ qua, 19 phải làm tay, và cả ba con số đều đúng.
+
+    KHÔNG tự đặt trạng thái lạc quan cho dòng: lệnh được NHẬN không phải hàng đã đi tiếp. Chỉ sự
+    kiện hành trình của ĐVVC mới đổi được chiều ĐVVC, nên trang được làm mới từ máy chủ.
+  */
+  const bulkCarrier = (actionKey: CarrierActionKey) =>
+    start(async () => {
+      const ids = [...selected];
+      const r = await bulkRequestCarrierAction({ shipmentIds: ids, actionKey, note: "" });
+      setConfirmAction(null);
+      if ("error" in r) {
+        toast.error(r.error, { duration: 8000 });
+        return;
+      }
+      setBulkResult(r.data);
+      const { SUCCESS, MANUAL_REQUIRED, SKIPPED, FAILED } = r.data.counts;
+      const cau = [SUCCESS ? `${SUCCESS} đã gửi` : "", MANUAL_REQUIRED ? `${MANUAL_REQUIRED} phải làm tay` : "", SKIPPED ? `${SKIPPED} bỏ qua` : "", FAILED ? `${FAILED} bị từ chối` : ""].filter(Boolean).join(" · ");
+      toast[FAILED ? "warning" : "success"](`${CARRIER_ACTION_LABEL[actionKey]}: ${cau}`, { duration: 9000 });
+      setSelected(new Set());
+    });
+
+  /* Bao nhiêu kiện trong tập đã chọn THẬT SỰ gửi lệnh được — hiện TRƯỚC khi bấm, không phải sau. */
+  const duDieuKien = (actionKey: CarrierActionKey) =>
+    [...selected]
+      .map((id) => cases.find((c) => c.shipmentId === id))
+      .filter((c): c is CareCase => Boolean(c))
+      /*
+        XÉT BẰNG ĐÚNG HÀM CỦA MÁY CHỦ, trên đúng dữ liệu thô máy chủ dùng (mã + chữ + chặng).
+
+        Hai tham số cuối cố ý coi như "có": màn hình không biết ERP đã khai tài khoản API chưa, và
+        kiện thuộc tài khoản khác KHÔNG bị chặn — nó đi đường làm tay. Nên con số này trả lời đúng
+        một câu: *bao nhiêu kiện đang ở ĐÚNG TRẠNG THÁI để làm việc này*. Hộp xác nhận nói tiếp
+        phần còn lại, và máy chủ mới là nơi quyết định.
+      */
+      .filter((c) => canRequestCarrierAction(actionKey, { stage: c.carrier.stage, vtpStatus: c.carrier.vtpStatus, vtpStatusName: c.carrier.rawStatus, orderNumber: c.tracking, trackingCapability: "API_TRACKABLE", configured: true }).ok).length;
 
   const toggleAll = () => setSelected((s) => (s.size === visible.length ? new Set() : new Set(visible.map((c) => c.shipmentId))));
 
@@ -193,6 +273,30 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         </div>
       ) : null}
 
+      {/*
+        ═══ HAI HÀNG CHIP, HAI CHIỀU, KHÔNG TRỘN ═══
+
+        Hàng trên: VÌ SAO kiện cần người (rổ care). Hàng dưới: ĐVVC ĐANG LÀM GÌ (chứng từ).
+        Trước bản này chỉ có hàng trên, nên "chờ phát lại" và "tồn - khách nghỉ" — hai việc khác
+        hẳn nhau — không có cách nào lọc tách ra.
+      */}
+      {substates.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">ĐVVC báo</span>
+          {substates.map(([k, n]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setSubstate(substate === k ? "" : k)}
+              title={`Trạng thái của đơn vị vận chuyển, đọc từ mã và tên trạng thái gốc. Khác với “vì sao cần care” ở hàng trên và khác với trạng thái xử lý của đội.`}
+              className={cn("rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] hover:bg-accent", substate === k && "border-solid border-primary bg-accent font-semibold")}
+            >
+              {CARRIER_SUBSTATE_LABEL[k]} <span className="numeric text-muted-foreground">{n}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {selected.size ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
           <span className="font-semibold">{selected.size} kiện đã chọn</span>
@@ -210,9 +314,65 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
               </option>
             ))}
           </select>
+          {canManage ? (
+            <>
+              <span className="text-muted-foreground">|</span>
+              {(["redeliver", "approve-return"] as CarrierActionKey[]).map((k) => (
+                <Button key={k} size="sm" variant="secondary" className="h-7 px-2 text-xs" disabled={pending} onClick={() => setConfirmAction(k)}>
+                  <Truck className="size-3.5" /> {CARRIER_ACTION_LABEL[k]} <span className="numeric opacity-70">{duDieuKien(k)}/{selected.size}</span>
+                </Button>
+              ))}
+            </>
+          ) : null}
           <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setSelected(new Set())}>
             Bỏ chọn
           </Button>
+        </div>
+      ) : null}
+
+      {/* XÁC NHẬN TRƯỚC KHI GỬI: nói rõ bao nhiêu kiện SẼ gửi và bao nhiêu kiện sẽ bị bỏ qua. */}
+      {confirmAction ? (
+        <div className="rounded-lg border border-amber-300/70 bg-amber-50/60 px-3 py-2.5 text-xs dark:border-amber-900/60 dark:bg-amber-950/20">
+          <p className="font-semibold">
+            Gửi “{CARRIER_ACTION_LABEL[confirmAction]}” lên Viettel Post? {duDieuKien(confirmAction)} / {selected.size} kiện đã chọn đang ở đúng trạng thái để làm việc này.
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {selected.size - duDieuKien(confirmAction)} kiện còn lại sẽ được <b>bỏ qua</b> — ERP không gửi lệnh nào cho chúng. Kiện thuộc tài khoản
+            Viettel Post khác sẽ được ghi là <b>phải làm tay</b> kèm đường dẫn, cũng không gửi lệnh. Lệnh được ĐVVC nhận <b>không</b> có nghĩa hàng đã đi tiếp:
+            chỉ sự kiện hành trình mới xác nhận điều đó.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" className="h-7 px-2.5 text-xs" disabled={pending} onClick={() => bulkCarrier(confirmAction)}>
+              {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Gửi
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs" disabled={pending} onClick={() => setConfirmAction(null)}>
+              Huỷ
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* KẾT QUẢ TỪNG MÃ VẬN ĐƠN — không gộp thành một câu "đã xong". */}
+      {bulkResult ? (
+        <div className="rounded-lg border text-xs">
+          <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
+            <span className="font-semibold">Kết quả lượt gửi gần nhất</span>
+            <span className="text-muted-foreground">
+              {bulkResult.counts.SUCCESS} đã gửi · {bulkResult.counts.MANUAL_REQUIRED} phải làm tay · {bulkResult.counts.SKIPPED} bỏ qua · {bulkResult.counts.FAILED} bị từ chối
+            </span>
+            <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-xs" onClick={() => setBulkResult(null)}>
+              Đóng
+            </Button>
+          </div>
+          <ul className="max-h-64 divide-y overflow-y-auto">
+            {bulkResult.rows.map((r) => (
+              <li key={r.shipmentId} className="flex gap-2 px-3 py-1.5">
+                <span className={cn("shrink-0 font-semibold", BULK_TONE[r.outcome])}>{BULK_LABEL[r.outcome]}</span>
+                <span className="shrink-0 font-mono text-[11px]">{r.tracking}</span>
+                <span className="min-w-0 flex-1 text-muted-foreground">{r.message}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

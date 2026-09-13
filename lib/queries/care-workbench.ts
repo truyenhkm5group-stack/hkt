@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
+import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
@@ -12,6 +13,7 @@ import { env } from "@/lib/env";
 import { getDeliveryTower, type TowerRow } from "@/lib/queries/delivery-tower";
 import { getShipmentQuickView } from "@/lib/queries/shipment-quickview";
 import { rowsOf } from "@/lib/sql-rows";
+import type { ShipmentStage } from "@/db/schema";
 
 export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 export { careViewOf, slaOf } from "@/lib/care/view";
@@ -163,6 +165,12 @@ function carrierCapabilityOf(capability: string): "API" | "MANUAL" {
 }
 
 type TrackingCapability = CareCase["carrier"]["trackingCapability"];
+
+/** Trạng thái con của ĐVVC cho một dòng care — mã trước, chữ sau, chặng chỉ là lưới an toàn cuối. */
+function substateOf(c: { stage: string; vtpStatus?: number | null; rawStatus: string }): { substate: CarrierSubstate; substateLabel: string } {
+  const { substate } = carrierSubstate({ code: c.vtpStatus ?? null, text: c.rawStatus, stage: c.stage as ShipmentStage });
+  return { substate, substateLabel: CARRIER_SUBSTATE_LABEL[substate] };
+}
 function asTrackingCapability(v: string | undefined): TrackingCapability {
   return v === "API_TRACKABLE" || v === "WEBHOOK_ONLY" ? v : "UNKNOWN_CAPABILITY";
 }
@@ -201,7 +209,9 @@ async function buildQueue(): Promise<CareQueue> {
             phone: sql<string>`coalesce(${schema.orders.billPhone}, ${schema.shipments.receiverPhone}, '')`,
             codAmount: schema.shipments.codAmount,
             stage: schema.shipments.stage,
+            vtpStatus: schema.shipments.vtpStatus,
             rawStatus: schema.shipments.vtpStatusName,
+            pickedUpAt: schema.shipments.pickedUpAt,
           })
           .from(schema.shipments)
           .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
@@ -216,13 +226,15 @@ async function buildQueue(): Promise<CareQueue> {
   };
 
   const all: CareCase[] = [];
-  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier"> & { carrier: Omit<CareCase["carrier"], "trackingCapability"> }) => {
+  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
     const care = toCareState(careMap.get(base.shipmentId));
     const { view, reopened } = careViewOf(care, base.queueSince, now);
     const capability = facts.get(base.shipmentId)?.capability;
     all.push({
       ...base,
-      carrier: { ...base.carrier, trackingCapability: asTrackingCapability(capability) },
+      // TRẠNG THÁI CON TÍNH Ở ĐÚNG MỘT CHỖ — mọi nguồn dòng (tháp, case sai thông tin, kiện đã
+      // đóng) đi qua đây, nên không nguồn nào có thể dùng một luật khác.
+      carrier: { ...base.carrier, ...substateOf(base.carrier), trackingCapability: asTrackingCapability(capability) },
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
@@ -242,7 +254,7 @@ async function buildQueue(): Promise<CareQueue> {
       customer: r.customer,
       phone: r.phone,
       codAmount: r.codAmount,
-      carrier: { stage: r.stage, stageLabel: r.stageLabel, rawStatus: r.rawStatus, ageHours: r.lastEventAgeHours, failedAttempts: r.failedAttempts },
+      carrier: { stage: r.stage, stageLabel: r.stageLabel, vtpStatus: r.rawStatusCode, rawStatus: r.rawStatus, ageHours: r.lastEventAgeHours, failedAttempts: r.failedAttempts, leftWarehouse: r.leftWarehouse },
       reason: r.bucket,
       reasonLabel: CARE_REASON_LABEL[r.bucket],
       reasonDetail: r.reasonLabel,
@@ -260,7 +272,7 @@ async function buildQueue(): Promise<CareQueue> {
       customer: w.customer || "Khách chưa có tên",
       phone: w.phone,
       codAmount: Number(w.cod_amount ?? 0),
-      carrier: { stage: w.stage, stageLabel: SHIPMENT_STAGE_LABEL[w.stage as keyof typeof SHIPMENT_STAGE_LABEL] ?? w.stage, rawStatus: w.vtp_status_name || "Chưa có trạng thái", ageHours: w.tuoi_gio === null ? null : Number(w.tuoi_gio), failedAttempts: Number(w.lan_hut ?? 0) },
+      carrier: { stage: w.stage, stageLabel: SHIPMENT_STAGE_LABEL[w.stage as keyof typeof SHIPMENT_STAGE_LABEL] ?? w.stage, vtpStatus: null, rawStatus: w.vtp_status_name || "Chưa có trạng thái", ageHours: w.tuoi_gio === null ? null : Number(w.tuoi_gio), failedAttempts: Number(w.lan_hut ?? 0), leftWarehouse: false },
       reason: "WRONG_INFO",
       reasonLabel: CARE_REASON_LABEL.WRONG_INFO,
       reasonDetail: w.title,
@@ -279,7 +291,7 @@ async function buildQueue(): Promise<CareQueue> {
       customer: d.customer || "Khách chưa có tên",
       phone: d.phone,
       codAmount: Number(d.codAmount ?? 0),
-      carrier: { stage: d.stage, stageLabel: SHIPMENT_STAGE_LABEL[d.stage] ?? d.stage, rawStatus: d.rawStatus || "—", ageHours: null, failedAttempts: 0 },
+      carrier: { stage: d.stage, stageLabel: SHIPMENT_STAGE_LABEL[d.stage] ?? d.stage, vtpStatus: d.vtpStatus, rawStatus: d.rawStatus || "—", ageHours: null, failedAttempts: 0, leftWarehouse: d.pickedUpAt !== null },
       reason: "CARE_TODAY",
       reasonLabel: "Đã rời điều kiện cần care",
       reasonDetail: "Kiện không còn trong điều kiện cần care",

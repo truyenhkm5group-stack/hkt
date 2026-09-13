@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE } from "@/lib/constants/carrier-substate";
 import { FULFILLMENT_BUCKETS, FULFILLMENT_BUCKET_LABEL, getOrderFulfillmentBucket, isActivelyShippedOrder, kiemTraBangRo, pickAttempt, type AttemptFacts } from "@/lib/constants/fulfillment-bucket";
 import { canApproveReturn, canRequestCarrierAction, canRequestRedelivery } from "@/lib/care/redelivery-eligibility";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { getFulfillmentBuckets, tongRoDayDu } from "@/lib/queries/fulfillment-buckets";
-import { loiNghiepVu } from "@/lib/integrations/http";
+import { IntegrationError, loiNghiepVu } from "@/lib/integrations/http";
+import { setViettelPostClientForTests } from "@/lib/integrations/viettelpost/client";
+import { bulkRequestCarrierAction } from "@/lib/care/service";
 import { getDeliveryTower } from "@/lib/queries/delivery-tower";
 import { clearMemo } from "@/lib/cache";
 
@@ -306,6 +308,71 @@ export function test21LoiTuChoiDocDuoc() {
   assert.equal(loiNghiepVu(null, "<html>502</html>").message, "<html>502</html>");
 }
 
+/* ───── 22 · Gửi hàng loạt: thành công MỘT PHẦN, kết quả TỪNG KIỆN ───── */
+export async function test22GuiHangLoatThanhCongMotPhan(db: Db) {
+  const ca = [
+    // Đủ điều kiện, tài khoản sở hữu kiện ⇒ gửi thật.
+    { o: "bk-o1", s: "bk-s1", num: "BULK-OK", stage: "DELIVERY_FAILED" as const, chu: "Chờ phát lại", cap: "API_TRACKABLE", mong: "SUCCESS" },
+    // Đã giao xong ⇒ BỎ QUA, và tuyệt đối không gửi gói tin nào.
+    { o: "bk-o2", s: "bk-s2", num: "BULK-DONE", stage: "DELIVERED" as const, chu: "Giao thành công", cap: "API_TRACKABLE", mong: "SKIPPED" },
+    // Tài khoản không sở hữu kiện ⇒ ghi vết, chỉ đường làm tay, KHÔNG gửi.
+    { o: "bk-o3", s: "bk-s3", num: "BULK-OTHER", stage: "DELIVERY_FAILED" as const, chu: "Chờ phát lại", cap: "WEBHOOK_ONLY", mong: "MANUAL_REQUIRED" },
+    // ĐVVC từ chối ⇒ lưu đúng câu ĐVVC nói.
+    { o: "bk-o4", s: "bk-s4", num: "BULK-DENIED", stage: "DELIVERY_FAILED" as const, chu: "Chờ phát lại", cap: "API_TRACKABLE", mong: "FAILED" },
+  ];
+  for (const c of ca) {
+    await db.insert(schema.orders).values({ id: c.o, stage: "SHIPPED", status: 2, insertedAt: moc(72) }).onConflictDoNothing();
+    await db
+      .insert(schema.shipments)
+      .values({ id: c.s, orderId: c.o, carrier: "Viettel Post", vtpOrderNumber: c.num, stage: c.stage, vtpStatusName: c.chu, codAmount: 200_000, trackingCapability: c.cap, pickedUpAt: moc(60) })
+      .onConflictDoNothing();
+  }
+
+  let goiApi = 0;
+  const daGoi: string[] = [];
+  setViettelPostClientForTests({
+    configured: true,
+    getOrderDetail: async () => null,
+    updateOrder: async (orderNumber: string) => {
+      goiApi += 1;
+      daGoi.push(orderNumber);
+      if (orderNumber === "BULK-DENIED") throw new IntegrationError("ViettelPost: Vận đơn không thuộc tài khoản", 200, false, null, { status: 203, message: "Vận đơn không thuộc tài khoản" });
+      return { error: false, status: 200, message: "Cập nhật thành công", data: null };
+    },
+  } as never);
+  try {
+    const r = await bulkRequestCarrierAction({ id: null, email: "cs@test", name: "CS", source: "API" }, { shipmentIds: ca.map((c) => c.s), actionKey: "redeliver", note: "" });
+    assert.ok("ok" in r && r.ok, "một phần hỏng KHÔNG được làm hỏng cả lượt");
+    const theoId = new Map(r.data.rows.map((x) => [x.shipmentId, x]));
+    for (const c of ca) assert.equal(theoId.get(c.s)?.outcome, c.mong, `${c.num}: kết quả phải là ${c.mong}`);
+
+    // KIỆN KHÔNG ĐỦ ĐIỀU KIỆN KHÔNG SINH MỘT GÓI TIN NÀO.
+    assert.equal(goiApi, 2, "chỉ 2 kiện đủ điều kiện + sở hữu được gửi lên ĐVVC");
+    assert.ok(!daGoi.includes("BULK-DONE"), "kiện đã giao xong không được gửi lệnh");
+    assert.ok(!daGoi.includes("BULK-OTHER"), "kiện thuộc tài khoản khác không được gửi lệnh");
+
+    // Câu từ chối của ĐVVC phải đọc được, không phải một mã HTTP.
+    assert.match(theoId.get("bk-s4")!.message, /không thuộc tài khoản/i);
+    assert.match(theoId.get("bk-s2")!.message, /đã giao|kết thúc/i, "bỏ qua phải nói lý do CỦA CHÍNH kiện đó");
+    assert.deepEqual(r.data.counts, { SUCCESS: 1, MANUAL_REQUIRED: 1, SKIPPED: 1, FAILED: 1 });
+
+    // Lời từ chối phải được LƯU LẠI — bảng rỗng chính là lý do câu hỏi "vì sao 400" từng không trả
+    // lời được bằng dữ liệu.
+    const [luu] = await db.select().from(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, "bk-s4"));
+    assert.ok(luu, "lệnh thất bại vẫn phải để lại một dòng");
+    assert.match(String(luu.error), /không thuộc tài khoản/i);
+  } finally {
+    setViettelPostClientForTests(null);
+  }
+
+  await db.delete(schema.carrierActionRequests).where(inArray(schema.carrierActionRequests.shipmentId, ca.map((c) => c.s)));
+  await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ca.map((c) => c.s)));
+  await db.delete(schema.shipmentCare).where(inArray(schema.shipmentCare.shipmentId, ca.map((c) => c.s)));
+  await db.delete(schema.shipments).where(inArray(schema.shipments.id, ca.map((c) => c.s)));
+  await db.delete(schema.orders).where(inArray(schema.orders.id, ca.map((c) => c.o)));
+  clearMemo();
+}
+
 export async function testCareStates(db: Db) {
   test01ChoPhatLaiKhongPhaiGiaoHong();
   test02ChoXuLyKhongPhaiGiaoHong();
@@ -328,5 +395,6 @@ export async function testCareStates(db: Db) {
   await test16TongRoBangTongDon(db);
   await test17ChoXuLyDaRoiKhoPhaiHienRa(db);
   await test18HaiTinhHuongHaiRo(db);
-  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 21 kiểm thử · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
+  await test22GuiHangLoatThanhCongMotPhan(db);
+  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 22 kiểm thử · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
 }

@@ -29,6 +29,8 @@ export function orderSearchCondition(q: string): SQL | undefined {
   return or(...conds);
 }
 
+import { ORDER_BUCKET_SCALAR } from "@/lib/queries/fulfillment-buckets";
+
 function getShipmentSearch(like: string) {
   return sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and (s.tracking_code ilike ${like} or s.vtp_order_number ilike ${like}))`;
 }
@@ -51,6 +53,13 @@ export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?:
   if (filters.address?.includes("normalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') <> ''`);
   if (filters.payment?.includes("cod")) conds.push(sql`${schema.orders.moneyToCollect} > 0`);
   if (filters.payment?.includes("prepaid")) conds.push(sql`${schema.orders.moneyToCollect} = 0`);
+  /*
+    RỔ GIAO VẬN THEO CHỨNG TỪ ĐVVC — dùng CHUNG biểu thức với thẻ đếm trên trang chủ.
+
+    Bấm vào thẻ "Đã gửi" phải mở ra ĐÚNG chừng ấy dòng. Cách chắc chắn duy nhất để hai con số không
+    bao giờ lệch là hai nơi dùng cùng MỘT biểu thức, chứ không phải hai câu lệnh cùng ý.
+  */
+  if (filters.fulfillment?.length) conds.push(sql`${ORDER_BUCKET_SCALAR} in ${filters.fulfillment}`);
   conds.push(orderSearchCondition(q));
   const defined = conds.filter((c): c is SQL => Boolean(c));
   return defined.length ? and(...defined) : undefined;

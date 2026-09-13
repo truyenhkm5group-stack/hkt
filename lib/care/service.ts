@@ -471,3 +471,103 @@ export async function markCarrierManualDone(user: CareActor, input: z.input<type
   clearMemo();
   return { ok: true, data: toView(row) };
 }
+
+/* ═══════════════════ GỬI LỆNH ĐVVC CHO NHIỀU KIỆN MỘT LƯỢT ═══════════════════ */
+
+export const bulkRequestSchema = z.object({
+  shipmentIds: z.array(z.string().min(1)).min(1, "Chưa chọn kiện nào").max(200, "Tối đa 200 kiện một lượt"),
+  actionKey: z.enum(CARRIER_ACTION_KEYS),
+  note: z.string().trim().max(300).default(""),
+});
+
+export type BulkOutcome = "SUCCESS" | "MANUAL_REQUIRED" | "SKIPPED" | "FAILED";
+
+export type BulkResultRow = {
+  shipmentId: string;
+  /** Mã vận đơn để người đọc đối chiếu với trang Viettel Post. */
+  tracking: string;
+  outcome: BulkOutcome;
+  /** Lý do CỤ THỂ của chính kiện này — không phải một câu chung cho cả lượt. */
+  message: string;
+};
+
+export type BulkResult = {
+  rows: BulkResultRow[];
+  counts: Record<BulkOutcome, number>;
+};
+
+/**
+ * ═══════════ THÀNH CÔNG MỘT PHẦN LÀ KẾT QUẢ HỢP LỆ, KHÔNG PHẢI LỖI ═══════════
+ *
+ * Chọn 40 kiện rồi bấm "Phát tiếp": 12 kiện đủ điều kiện, 9 kiện đã giao xong từ hôm qua, 19 kiện
+ * thuộc tài khoản Viettel Post khác. Một hàm "tất cả hoặc không" sẽ hoặc bỏ cả 12 kiện làm được,
+ * hoặc gửi 40 lệnh trong đó 28 chắc chắn hỏng. Cả hai đều sai.
+ *
+ * Nên mỗi kiện đi riêng và mang KẾT QUẢ RIÊNG:
+ *   · `SUCCESS`         — ĐVVC đã nhận lệnh (chưa phải "hàng đã đi tiếp" — chờ sự kiện xác nhận);
+ *   · `MANUAL_REQUIRED` — không gửi API được, đã ghi vết, phải làm tay trên web;
+ *   · `SKIPPED`         — không đủ điều kiện, KHÔNG gửi lệnh nào lên ĐVVC;
+ *   · `FAILED`          — đã gửi và ĐVVC từ chối, kèm đúng câu ĐVVC nói.
+ *
+ * KIỆN KHÔNG ĐỦ ĐIỀU KIỆN KHÔNG SINH MỘT REQUEST NÀO. Điều kiện được xét TRƯỚC, bằng cùng hàm với
+ * nút đơn lẻ và với màn hình — không có đường nào gửi một lệnh đã biết trước là hỏng.
+ *
+ * Tuần tự chứ không song song: `getViettelPostClient()` tự giới hạn nhịp gọi, và bắn 200 lệnh cùng
+ * lúc lên ĐVVC là cách nhanh nhất để bị chặn.
+ */
+export async function bulkRequestCarrierAction(user: CareActor, input: z.input<typeof bulkRequestSchema>): Promise<Result<BulkResult>> {
+  const parsed = bulkRequestSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { shipmentIds, actionKey, note } = parsed.data;
+  const db = await getDb();
+  const configured = getViettelPostClient().configured;
+
+  const dsKien = await db
+    .select({ id: schema.shipments.id, vtpOrderNumber: schema.shipments.vtpOrderNumber, trackingCode: schema.shipments.trackingCode, stage: schema.shipments.stage, trackingCapability: schema.shipments.trackingCapability, vtpStatus: schema.shipments.vtpStatus, vtpStatusName: schema.shipments.vtpStatusName })
+    .from(schema.shipments)
+    .where(inArray(schema.shipments.id, [...new Set(shipmentIds)]));
+  const theoId = new Map(dsKien.map((k) => [k.id, k]));
+
+  const rows: BulkResultRow[] = [];
+  for (const id of [...new Set(shipmentIds)]) {
+    const k = theoId.get(id);
+    if (!k) {
+      rows.push({ shipmentId: id, tracking: id, outcome: "SKIPPED", message: "Không tìm thấy vận đơn" });
+      continue;
+    }
+    const tracking = k.vtpOrderNumber ?? k.trackingCode ?? id;
+    const duDieuKien = canRequestCarrierAction(actionKey, {
+      stage: k.stage,
+      vtpStatus: k.vtpStatus,
+      vtpStatusName: k.vtpStatusName,
+      orderNumber: k.vtpOrderNumber ?? k.trackingCode,
+      trackingCapability: k.trackingCapability,
+      configured,
+    });
+    // BỎ QUA TỪ TRƯỚC — không một gói tin nào rời ERP cho kiện này.
+    if (!duDieuKien.ok) {
+      rows.push({ shipmentId: id, tracking, outcome: "SKIPPED", message: duDieuKien.reason });
+      continue;
+    }
+    const r = await requestCarrierAction(user, { shipmentId: id, actionKey, note });
+    if ("error" in r) {
+      rows.push({ shipmentId: id, tracking, outcome: "FAILED", message: r.error });
+      continue;
+    }
+    const manual = r.data.request.status === "MANUAL_REQUIRED";
+    rows.push({ shipmentId: id, tracking, outcome: manual ? "MANUAL_REQUIRED" : "SUCCESS", message: r.data.message });
+  }
+
+  const counts: Record<BulkOutcome, number> = { SUCCESS: 0, MANUAL_REQUIRED: 0, SKIPPED: 0, FAILED: 0 };
+  for (const r of rows) counts[r.outcome] += 1;
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "VTP_ORDER_ACTION_BULK",
+    entity: "SHIPMENT",
+    entityId: `bulk:${actionKey}:${rows.length}`,
+    detail: { actionKey, note, counts, trackings: rows.map((r) => ({ tracking: r.tracking, outcome: r.outcome })) },
+  });
+  clearMemo();
+  return { ok: true, data: { rows, counts } };
+}

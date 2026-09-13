@@ -7,6 +7,7 @@ import { stockRiskSummary } from "@/lib/queries/stock";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { getControlTower } from "@/lib/queries/control-tower";
+import { getFulfillmentBuckets } from "@/lib/queries/fulfillment-buckets";
 import type { OrderStage } from "@/db/schema";
 import { vnDateKey } from "@/lib/format";
 import { previousPeriod, type Period } from "@/lib/search-params";
@@ -130,6 +131,7 @@ async function getDashboardDataUncached(period: Period) {
     orderTotalRows,
     current,
     previous,
+    fulfillment,
   ] = await Promise.all([
     // Trạng thái đơn theo giai đoạn
     db
@@ -202,6 +204,10 @@ async function getDashboardDataUncached(period: Period) {
     db.select({ count: count() }).from(schema.orders),
     currentPromise,
     previousPromise,
+    // HÀNG ĐANG Ở ĐÂU theo CHỨNG TỪ ĐVVC — khối này KHÔNG đọc trạng thái Pancake. Nó đứng cạnh
+    // "Luồng đơn hàng" (nhãn Pancake) chứ không thay thế: chênh lệch giữa hai khối chính là việc
+    // tồn đọng của khâu bàn giao, và nó chỉ nhìn thấy được khi cả hai cùng có mặt.
+    getFulfillmentBuckets(period),
   ]);
 
   const byStage = Object.fromEntries(stageRows.map((r) => [r.stage, { count: Number(r.count), revenue: Number(r.revenue ?? 0) }])) as Record<OrderStage, { count: number; revenue: number }>;
@@ -242,6 +248,7 @@ async function getDashboardDataUncached(period: Period) {
     kpi: current,
     previous,
     byStage,
+    fulfillment,
     daily,
     channels,
     realized: { amount: realized, count: codCash.codPaid.source === "statements" ? codCash.codPaid.batches.count : codCash.codPaid.count, source: codCash.codPaid.source, net: codCash.cashInCod },

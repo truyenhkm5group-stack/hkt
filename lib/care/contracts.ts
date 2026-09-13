@@ -1,3 +1,4 @@
+import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
 
 /**
@@ -74,11 +75,22 @@ export type CareCase = {
   carrier: {
     stage: string;
     stageLabel: string;
+    /**
+     * ĐVVC ĐANG LÀM GÌ — chiều thứ hai, độc lập với `stage` và độc lập với trạng thái xử lý của
+     * shop. `stage` gộp "chờ phát lại" với "tồn - khách nghỉ" thành một nhãn, và gộp "chờ xử lý"
+     * của kiện đã đi nửa đường với kiện còn trong kho. Xem lib/constants/carrier-substate.ts.
+     */
+    substate: CarrierSubstate;
+    substateLabel: string;
+    /** Mã trạng thái gốc của ĐVVC. Giữ nguyên bên cạnh chữ để màn hình xét lại được đúng luật máy chủ. */
+    vtpStatus: number | null;
     rawStatus: string;
     ageHours: number | null;
     failedAttempts: number;
     /** Tài khoản API có đọc được kiện này không. */
     trackingCapability: "API_TRACKABLE" | "WEBHOOK_ONLY" | "UNKNOWN_CAPABILITY";
+    /** CHỨNG TỪ nói gói hàng đã rời kho — không suy từ câu chữ trạng thái. */
+    leftWarehouse: boolean;
   };
   reason: CareReasonKey;
   reasonClass: CareReasonClass;

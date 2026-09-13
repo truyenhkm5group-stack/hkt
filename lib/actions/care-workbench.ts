@@ -44,6 +44,14 @@ export async function requestCarrierAction(input: z.input<typeof svc.requestSche
   const a = await actor("shipments:manage");
   return a ? svc.requestCarrierAction(a, input) : { error: "Không có quyền thao tác vận đơn" as const };
 }
+/**
+ * Gửi lệnh ĐVVC cho nhiều kiện một lượt. Kết quả TỪNG KIỆN, không phải một câu chung — xem
+ * `bulkRequestCarrierAction`. Kiện không đủ điều kiện KHÔNG sinh yêu cầu nào lên ĐVVC.
+ */
+export async function bulkRequestCarrierAction(input: z.input<typeof svc.bulkRequestSchema>) {
+  const a = await actor("shipments:manage");
+  return a ? svc.bulkRequestCarrierAction(a, input) : { error: "Không có quyền thao tác vận đơn" as const };
+}
 export async function markCarrierManualDone(input: z.input<typeof svc.manualSchema>) {
   const a = await actor("shipments:manage");
   return a ? svc.markCarrierManualDone(a, input) : { error: "Không có quyền thao tác vận đơn" as const };

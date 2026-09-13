@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
@@ -56,6 +56,21 @@ export const FULFILLMENT_BUCKET_EXPR = fulfillmentBucketSql({
   daRoiKho: DA_ROI_KHO,
 });
 
+/**
+ * RỔ CỦA MỘT ĐƠN, dưới dạng MỘT GIÁ TRỊ dùng được ở cả câu đếm lẫn câu lọc.
+ *
+ * Đây là lý do thẻ trên trang chủ và danh sách mở ra khi bấm vào thẻ luôn khớp nhau: chúng không
+ * phải hai câu lệnh "cùng ý"; chúng là CÙNG MỘT biểu thức. Hai câu viết riêng rồi cùng đúng hôm nay
+ * là hai câu sẽ lệch nhau vào một ngày không ai để ý.
+ *
+ * `coalesce` bắt trường hợp đơn KHÔNG có dòng vận đơn nào: truy vấn con không trả dòng nào nên giá
+ * trị là NULL, và ở đó chỉ trạng thái Pancake mới nói được điều gì — huỷ/xoá, hay chưa bàn giao.
+ */
+export const ORDER_BUCKET_SCALAR = sql<string>`coalesce(
+  (select ${FULFILLMENT_BUCKET_EXPR} from shipments where shipments.order_id = ${o.id} and ${PRIMARY_ATTEMPT} limit 1),
+  case when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED' else 'NOT_SHIPPED' end
+)`;
+
 export type FulfillmentSummary = {
   counts: Record<FulfillmentBucket, number>;
   /** Tiền LÊN ĐƠN của mỗi rổ. KHÔNG phải tiền sẽ thu — rổ "đang hoàn" có COD nhưng COD đó đã mất. */
@@ -74,10 +89,8 @@ export async function getFulfillmentBuckets(period: Period): Promise<Fulfillment
     const db = await getDb();
     const dieuKien = [period.from ? gte(o.insertedAt, period.from) : undefined, period.to ? lte(o.insertedAt, period.to) : undefined].filter(Boolean);
     const rows = await db
-      .select({ bucket: sql<string>`${FULFILLMENT_BUCKET_EXPR}`, count: sql<number>`count(*)`, revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)` })
+      .select({ bucket: ORDER_BUCKET_SCALAR, count: sql<number>`count(*)`, revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)` })
       .from(o)
-      // MỖI ĐƠN MỘT DÒNG — cùng luật chọn lần gửi với ORDER_OUTCOME, không viết lại.
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(dieuKien.length ? and(...dieuKien) : undefined)
       .groupBy(sql`1`);
 

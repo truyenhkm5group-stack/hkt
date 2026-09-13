@@ -4,6 +4,8 @@ import { AlertTriangle, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, 
 import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FULFILLMENT_BUCKET_HINT, FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_ORDER } from "@/lib/constants/fulfillment-bucket";
+import { tongRoDayDu } from "@/lib/queries/fulfillment-buckets";
 import { StatStrip } from "@/components/stat-tile";
 import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
@@ -38,6 +40,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const successRate = data.kpi.successRate;
   const margin = data.finance.netRevenue ? (data.finance.estimatedProfit / data.finance.netRevenue) * 100 : 0;
   const maxStage = Math.max(1, ...ORDER_STAGE_ORDER.map((s) => data.byStage[s]?.count ?? 0));
+  const maxFulfillment = Math.max(1, ...FULFILLMENT_BUCKET_ORDER.map((b) => data.fulfillment.counts[b]));
+  const buckedCheck = tongRoDayDu(data.fulfillment);
   const maxChannel = Math.max(1, ...data.channels.map((c) => c.revenue));
 
   return (
@@ -242,7 +246,65 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         NHÀ của nó: vận đơn ở /shipments, COD ở /cod, đơn mới ở /orders.
       */}
       <section className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
-        <SectionCard title="Luồng đơn hàng" description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)">
+        {/*
+          ═══ HAI KHỐI TRẠNG THÁI, CỐ Ý ĐỨNG CẠNH NHAU ═══
+
+          "Luồng đơn hàng" đếm theo NHÃN PANCAKE — mười ba trạng thái do người bán bấm tay.
+          "Hàng đang ở đâu" đếm theo CHỨNG TỪ ĐVVC. Hai khối trả lời hai câu hỏi khác nhau và
+          KHÔNG thay thế cho nhau; chênh lệch giữa chúng chính là việc tồn đọng của khâu bàn giao
+          (đơn bấm "đã gửi" mà chưa ai lấy, đơn đã tới tay khách mà chưa ai bấm sang "đã nhận").
+        */}
+        <SectionCard
+          title="Hàng đang ở đâu"
+          description="Theo chứng từ đơn vị vận chuyển — không đọc trạng thái Pancake, không đọc tiền"
+          actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{formatNumber(data.fulfillment.total)} đơn</span>}
+        >
+          <div className="space-y-2.5">
+            {FULFILLMENT_BUCKET_ORDER.filter((b) => data.fulfillment.counts[b] > 0).map((bucket) => {
+              const so = data.fulfillment.counts[bucket];
+              return (
+                <Link
+                  key={bucket}
+                  href={`/orders?fulfillment=${bucket}&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey}&to=${period.toKey}` : ""}`}
+                  className="group flex items-center gap-3 text-sm"
+                  title={FULFILLMENT_BUCKET_HINT[bucket]}
+                >
+                  <span className={`w-40 shrink-0 truncate text-xs group-hover:text-foreground ${bucket === "IN_FLIGHT" ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}>
+                    {FULFILLMENT_BUCKET_LABEL[bucket]}
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div className={`h-full rounded-full transition-all ${bucket === "IN_FLIGHT" ? "bg-primary" : "bg-primary/40"}`} style={{ width: `${Math.max(so ? 2 : 0, (so / maxFulfillment) * 100)}%` }} />
+                  </div>
+                  <span className="numeric w-12 shrink-0 text-right text-xs font-semibold">{formatNumber(so)}</span>
+                  <span className="numeric hidden w-20 shrink-0 text-right text-xs text-muted-foreground sm:block">{formatVND(data.fulfillment.bookedRevenue[bucket], { compact: true })}</span>
+                </Link>
+              );
+            })}
+          </div>
+          {/*
+            TỔNG KIỂM HIỆN RA MÀN HÌNH, KHÔNG GIẤU TRONG LOG.
+
+            Các rổ loại trừ nhau theo cấu trúc nên tổng của chúng phải bằng tổng đơn. Một biểu thức
+            `case` thiếu nhánh sẽ trả NULL và con số biến mất mà không lỗi nào phát ra — dòng này là
+            chỗ nó lộ ra, trước mặt người đọc chứ không trong một tệp log không ai mở.
+          */}
+          {!buckedCheck.ok ? (
+            <p className="mt-3 rounded-lg border border-rose-300/70 bg-rose-50/60 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
+              {formatNumber(Math.abs(buckedCheck.chenh))} đơn không rổ nào nhận (tổng rổ {formatNumber(buckedCheck.tongRo)} / tổng đơn {formatNumber(data.fulfillment.total)}). Con số bên trên đang thiếu — báo cho người dựng ERP.
+            </p>
+          ) : null}
+          <p className="mt-3 border-t pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            <b>“Đã gửi”</b> ở đây nghĩa là <b>đơn vị vận chuyển đã cầm được hàng và kiện vẫn đang trên đường tới khách</b>. Nó KHÔNG
+            gồm hàng còn trong kho, hàng bưu tá tới mà không lấy được, đơn đã giao tới khách, đơn đang hoàn hay đã hoàn, và đơn đã
+            huỷ. Đây là số kiện <b>đang đi ngay lúc này</b>, không phải tổng đã gửi trong kỳ. Căn cứ chỉ là chứng từ của đơn vị vận
+            chuyển — trạng thái Pancake, tiền thu hộ và đối soát không tham gia. Bấm một dòng để mở đúng những đơn đã sinh ra con số đó.
+          </p>
+        </SectionCard>
+        <SectionCard
+          title="Luồng đơn hàng"
+          description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)"
+          hint="Đây là nhãn do NGƯỜI BÁN bấm trên Pancake, không phải kết luận từ chứng từ vận chuyển. “Đã gửi hàng” ở khối này nghĩa là ai đó đã bấm nút — muốn biết gói hàng thật sự đang ở đâu thì đọc khối “Hàng đang ở đâu” bên cạnh."
+        >
           <div className="space-y-2.5">
             {ORDER_STAGE_ORDER.filter((s) => s !== "DELETED" || (data.byStage[s]?.count ?? 0) > 0).map((stage) => {
               const row = data.byStage[stage] ?? { count: 0, revenue: 0 };
