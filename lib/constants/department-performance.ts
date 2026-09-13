@@ -134,3 +134,53 @@ export const DEPT_PERF: Record<DepartmentCode, DeptPerfSpec> = {
 
 /** Lá chắn khai báo: mọi phòng phải có phần chú giải riêng. Kiểm ở `tests/work-os.test.ts`. */
 export const DEPARTMENTS_WITHOUT_PERF: DepartmentCode[] = DEPARTMENT_CODES.filter((d) => !DEPT_PERF[d]);
+
+/**
+ * ═══════════ DANH MỤC CHỈ SỐ MÁY ĐỌC ĐƯỢC — ĐỂ "CHƯA ĐO ĐƯỢC" KHÁC "CHƯA CHẠY" ═══════════
+ *
+ * `DEPT_PERF` ở trên là bản chú giải cho người đọc. Bảng này là bản cho máy, và nó tồn tại vì một
+ * lý do rất cụ thể:
+ *
+ * Các hàm đo chỉ trả về dòng cho người CÓ hoạt động trong kỳ. Nếu ảnh chụp cũng chỉ ghi từng ấy
+ * dòng thì một kỳ trống sẽ không để lại dấu vết nào — và sau này không phân biệt được **"kỳ đó
+ * người này chưa đo được gì"** với **"kỳ đó job chưa chạy"**. Hai chuyện khác hẳn nhau: cái thứ
+ * nhất là một sự thật về công việc, cái thứ hai là một lỗ hổng dữ liệu.
+ *
+ * Có danh mục này thì ảnh chụp ghi đủ mọi chỉ số của phòng cho mọi người trong phòng, và kỳ trống
+ * là một hàng `value = null` nói rõ điều đó.
+ *
+ * KHÔNG chứa chỉ số `UNAVAILABLE` — thứ ERP chưa đọc được ở độ mịn người thì không chụp, vì chụp
+ * một cột rỗng vĩnh viễn chỉ làm bảng dài thêm.
+ */
+export type DeptMetricSpec = { key: string; label: string; unit: "PERCENT" | "COUNT" | "VND" | "HOURS" | "DAYS"; denominatorLabel: string; owner: "PERSON" | "DEPARTMENT" };
+
+export const DEPT_METRIC_KEYS: Partial<Record<DepartmentCode, DeptMetricSpec[]>> = {
+  SALES: [
+    { key: "sales_followup_sla", label: "Trả lời / đóng case trong hạn", unit: "PERCENT", denominatorLabel: "case CSKH CÓ ĐẶT HẠN mà người này đã đóng trong kỳ", owner: "PERSON" },
+    { key: "sales_conversion", label: "Hội thoại ra đơn", unit: "PERCENT", denominatorLabel: "case có mã hội thoại", owner: "PERSON" },
+    { key: "sales_delivered_quality", label: "Đơn từ case này giao thành công", unit: "PERCENT", denominatorLabel: "đơn sinh từ hội thoại của case, chỉ tính đơn ĐÃ kết thúc", owner: "PERSON" },
+    { key: "sales_contribution", label: "Doanh thu giao thành công từ case", unit: "VND", denominatorLabel: "đơn giao thành công sinh từ case người này đóng", owner: "PERSON" },
+  ],
+  LOGISTICS: [
+    { key: "care_sla", label: "Đóng ca care trong hạn", unit: "PERCENT", denominatorLabel: "ca care người này đã đóng trong kỳ", owner: "PERSON" },
+    { key: "care_recovered", label: "Kiện cứu được (giao thành công sau khi care)", unit: "COUNT", denominatorLabel: "kiện có ca care do người này đóng, chỉ kiện ĐÃ kết thúc", owner: "PERSON" },
+    { key: "care_cod_recovered", label: "Tiền COD về được từ kiện đã care", unit: "VND", denominatorLabel: "kiện giao thành công sau khi người này đóng ca", owner: "PERSON" },
+  ],
+  WAREHOUSE: [
+    { key: "inspection_sla", label: "Kiểm đếm hàng hoàn trong hạn", unit: "PERCENT", denominatorLabel: "lượt kiểm hàng hoàn người này thực hiện trong kỳ", owner: "PERSON" },
+    { key: "inspection_discrepancy", label: "Kiện có lệch (hàng hỏng / không bán lại được)", unit: "PERCENT", denominatorLabel: "món hàng hoàn người này đã kiểm trong kỳ", owner: "PERSON" },
+  ],
+  FINANCE: [
+    { key: "finance_actions", label: "Lượt phân loại / nối chứng từ", unit: "COUNT", denominatorLabel: "lượt phân loại / nối chứng từ ghi trong nhật ký hệ thống", owner: "PERSON" },
+    { key: "reconciliation_completeness", label: "Độ đầy đủ đối soát", unit: "PERCENT", denominatorLabel: "dòng sao kê trong kỳ (mức SỔ, không quy về cá nhân)", owner: "DEPARTMENT" },
+    { key: "unresolved_aging", label: "Dòng tiền treo lâu nhất", unit: "DAYS", denominatorLabel: "dòng sao kê chưa phân loại còn treo", owner: "DEPARTMENT" },
+  ],
+};
+
+/** Cách nối dòng dữ liệu về người, theo từng phòng. Sự thật lịch sử, không phải lựa chọn. */
+export const DEPT_LINKAGE: Partial<Record<DepartmentCode, "USER_ID" | "EMAIL" | "FREE_TEXT">> = {
+  SALES: "FREE_TEXT",
+  LOGISTICS: "USER_ID",
+  WAREHOUSE: "EMAIL",
+  FINANCE: "USER_ID",
+};

@@ -48,6 +48,15 @@ const JOBS = [
     30 phút chỉ để tin đầu ngày tới sớm.
   */
   { job: "work-escalation", every: minutes("WORK_ESCALATION_EVERY_MINUTES", 30), offset: 11 },
+  /*
+    CHỤP ẢNH HIỆU SUẤT — mỗi 6 giờ, và đó là con số chọn có lý do.
+
+    Job chỉ chụp kỳ ĐÃ ĐÓNG và không bao giờ ghi đè, nên chạy dày hơn không tạo thêm dòng nào:
+    24 lần trong tuần đều bị chặn ở mệnh đề "kỳ chưa đóng", lần đầu sau nửa đêm Chủ nhật mới ghi.
+    Chạy dày là để KHÔNG BỎ LỠ một kỳ nếu máy chủ tình cờ tắt đúng lúc giao tuần — bỏ lỡ một tuần
+    thì mất hẳn, vì kỳ đó sẽ không bao giờ được chụp lại.
+  */
+  { job: "work-snapshot", every: minutes("WORK_SNAPSHOT_EVERY_MINUTES", 360), offset: 19 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới

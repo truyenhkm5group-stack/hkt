@@ -5,6 +5,7 @@ import { CARE_SLA } from "@/lib/constants/care";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { DEPT_PERF } from "@/lib/constants/department-performance";
 import { rowsOf } from "@/lib/sql-rows";
+import { metricConfidence, rankable, type MetricConfidence, type PersonLinkage } from "@/lib/constants/metric-provenance";
 
 /**
  * ═══════════ HIỆU SUẤT THẬT CỦA TỪNG PHÒNG — ĐỌC TỪ CHỨNG TỪ, KHÔNG ĐẾM TASK ═══════════
@@ -31,7 +32,8 @@ import { rowsOf } from "@/lib/sql-rows";
  *    ca nào trong kỳ không phải là người làm sai 100%.
  */
 
-export type MetricValue = {
+/** Phần các hàm đo TỰ KHAI. Phần xuất xứ do `hoanThien()` gắn vào — xem bên dưới. */
+export type MetricInput = {
   key: string;
   label: string;
   /** `null` = chưa có quan sát nào trong kỳ. KHÔNG BAO GIỜ thay bằng 0. */
@@ -43,9 +45,54 @@ export type MetricValue = {
   shared: boolean;
   /** Nguồn số liệu, để người đọc kiểm chứng được. */
   basis: string;
+  /** Mẫu số này ĐẾM CÁI GÌ. "trên 12" vô nghĩa nếu không nói 12 cái gì. */
+  denominatorLabel: string;
+};
+
+/**
+ * Chỉ số đã ĐỦ XUẤT XỨ để một người ngoài đọc và kiểm chứng được.
+ *
+ * Sáu trường cuối KHÔNG do hàm đo tự điền. Chúng được gắn ở một chỗ duy nhất (`hoanThien`), nên
+ * một chỉ số mới thêm vào ngày mai không thể quên khai — nó lấy xuất xứ tự động hoặc không biên
+ * dịch được.
+ */
+export type MetricValue = MetricInput & {
+  /** `UNKNOWN` = không có quan sát nào. Cố ý KHÔNG gộp với "kết quả kém". */
+  status: "MEASURED" | "UNKNOWN";
+  confidence: MetricConfidence;
+  /** Con số này nói về MỘT NGƯỜI hay về CẢ PHÒNG. */
+  owner: "PERSON" | "DEPARTMENT";
+  period: { from: Date; to: Date };
+  /** Cách nối dòng dữ liệu về con người — quyết định khả năng nhầm người. */
+  linkage: PersonLinkage;
+  /** Một câu: phần nào của con số này KHÔNG do người đó quyết được. */
+  attribution: string;
+  /** Đủ mẫu để xếp hạng người với người chưa. */
+  rankable: boolean;
 };
 
 export type PersonMetrics = { userId: string; name: string; email: string; metrics: MetricValue[] };
+
+/**
+ * Gắn xuất xứ vào một chỉ số thô. MỘT chỗ duy nhất, nên không chỉ số nào thiếu được.
+ *
+ * `attribution` lấy từ `DEPT_PERF[phòng].notAttributed` — nghĩa là luật "không phạt ai vì thứ họ
+ * không quyết được" đi THEO TỪNG CON SỐ tới tận giao diện, chứ không nằm yên trong tài liệu.
+ */
+function hoanThien(m: MetricInput, ctx: { owner: "PERSON" | "DEPARTMENT"; from: Date; to: Date; linkage: PersonLinkage; attribution: string }): MetricValue {
+  const confidence = metricConfidence({ value: m.value, sample: m.sample, linkage: ctx.linkage, shared: m.shared });
+  return {
+    ...m,
+    status: m.value === null ? "UNKNOWN" : "MEASURED",
+    confidence,
+    owner: ctx.owner,
+    period: { from: ctx.from, to: ctx.to },
+    linkage: ctx.linkage,
+    attribution: ctx.attribution,
+    // Chưa đo được thì không xếp hạng; đo được nhưng mẫu bé cũng không.
+    rankable: m.value !== null && rankable(m.sample),
+  };
+}
 
 export type DeptPerformance = {
   department: DepartmentCode;
@@ -56,6 +103,8 @@ export type DeptPerformance = {
   people: PersonMetrics[];
   /** Chỉ số chủ shop muốn mà ERP chưa đọc được ở độ mịn NGƯỜI — lấy từ sổ khai báo. */
   missing: { label: string; note: string }[];
+  /** Câu quy kết của phòng — để chỗ chụp ảnh gắn được vào cả những dòng CHƯA ĐO ĐƯỢC. */
+  missingAttribution: string;
   from: Date;
   to: Date;
 };
@@ -76,7 +125,7 @@ type SalesRow = { who: string; closed: number; on_time: number; with_conv: numbe
  * thừa, không phân biệt hoa thường), đúng cách `isMine` đang làm ở hàng đợi. Người không khớp tài
  * khoản nào vẫn ra một dòng — họ có làm việc thật, giấu đi thì tổng của phòng sai.
  */
-async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricValue[]>> {
+async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricInput[]>> {
   const db = await getDb();
   const rows = rowsOf<SalesRow>(
     await db.execute(sql`
@@ -129,7 +178,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricVal
     `),
   );
 
-  const out = new Map<string, MetricValue[]>();
+  const out = new Map<string, MetricInput[]>();
   for (const r of rows) {
     const ketThuc = Number(r.delivered) + Number(r.returned);
     out.set(r.who, [
@@ -141,6 +190,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricVal
         sample: Number(r.closed),
         shared: false,
         basis: `cs_cases: đóng trong ${CASE_SLA_HOURS.CS_CASE} giờ kể từ lúc case xuất hiện`,
+        denominatorLabel: "case CSKH CÓ ĐẶT HẠN mà người này đã đóng trong kỳ",
       },
       {
         key: "sales_conversion",
@@ -150,6 +200,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricVal
         sample: Number(r.with_conv),
         shared: false,
         basis: "cs_cases.conversation_id → orders.conversation_id. Mẫu số chỉ gồm case CÓ mã hội thoại; case không có thì không nối được và rơi khỏi cả tử lẫn mẫu",
+        denominatorLabel: "case có mã hội thoại (case không có mã thì không nối được và rơi khỏi cả tử lẫn mẫu)",
       },
       {
         key: "sales_delivered_quality",
@@ -160,6 +211,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricVal
         // KẾT QUẢ CHUNG: người chốt không quyết được bưu tá có giao được không.
         shared: true,
         basis: "ORDER_OUTCOME của đơn sinh từ hội thoại của case, chỉ đơn ĐÃ kết thúc",
+        denominatorLabel: "đơn sinh từ hội thoại của case, chỉ tính đơn ĐÃ kết thúc",
       },
       {
         key: "sales_contribution",
@@ -169,6 +221,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricVal
         sample: Number(r.delivered),
         shared: true,
         basis: "Tổng giá trị đơn giao thành công sinh từ hội thoại của case người này đã đóng",
+        denominatorLabel: "đơn giao thành công sinh từ case người này đóng",
       },
     ]);
   }
@@ -186,7 +239,7 @@ type CareRow = { user_id: string; resolved: number; on_time: number; delivered: 
  * chỉ nhớ người cuối, và người đóng ca có thể không phải người cuối được gán. Nhật ký thì ghi
  * đúng AI BẤM ĐÓNG, và không bị viết lại.
  */
-async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, MetricValue[]>> {
+async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, MetricInput[]>> {
   const db = await getDb();
   const rows = rowsOf<CareRow>(
     await db.execute(sql`
@@ -230,7 +283,7 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
   );
   const mauSo = new Map(coSla.map((r) => [r.user_id, Number(r.n)]));
 
-  const out = new Map<string, MetricValue[]>();
+  const out = new Map<string, MetricInput[]>();
   for (const r of rows) {
     const n = mauSo.get(r.user_id) ?? 0;
     out.set(r.user_id, [
@@ -242,6 +295,7 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
         sample: n,
         shared: false,
         basis: `care_case_events: mốc đóng ca ≤ hạn đóng đã chụp lúc đó (${CARE_SLA.resolveHours} giờ kể từ khi ca vào hàng đợi)`,
+        denominatorLabel: "ca care người này đã đóng trong kỳ",
       },
       {
         key: "care_recovered",
@@ -252,6 +306,7 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
         // KẾT QUẢ CHUNG: bưu tá quyết chuyến giao cuối. Người care quyết việc họ làm, đo ở dòng trên.
         shared: true,
         basis: "Ca người này đóng, đối chiếu ORDER_OUTCOME của đơn gắn với kiện đó",
+        denominatorLabel: "kiện có ca care do người này đóng, chỉ kiện ĐÃ kết thúc",
       },
       {
         key: "care_cod_recovered",
@@ -261,6 +316,7 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
         sample: Number(r.delivered),
         shared: true,
         basis: "Thực thu COD (hoặc COD khai) của kiện giao thành công sau khi người này đóng ca",
+        denominatorLabel: "kiện giao thành công sau khi người này đóng ca",
       },
     ]);
   }
@@ -271,7 +327,7 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
 
 type WhRow = { who: string; inspected: number; on_time: number; with_issue: number; unsellable: string | number };
 
-async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, MetricValue[]>> {
+async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, MetricInput[]>> {
   const db = await getDb();
   const gio = CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION ?? 72;
   const rows = rowsOf<WhRow>(
@@ -288,7 +344,7 @@ async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, Metri
       group by lower(btrim(i.inspected_by))
     `),
   );
-  const out = new Map<string, MetricValue[]>();
+  const out = new Map<string, MetricInput[]>();
   for (const r of rows) {
     out.set(r.who, [
       {
@@ -299,6 +355,7 @@ async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, Metri
         sample: Number(r.inspected),
         shared: false,
         basis: `return_inspections: kiểm xong trong ${gio} giờ kể từ lúc ghi nhận đã về`,
+        denominatorLabel: "lượt kiểm hàng hoàn người này thực hiện trong kỳ",
       },
       {
         key: "inspection_discrepancy",
@@ -310,6 +367,7 @@ async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, Metri
         // HÀNG, không nói về người — nhưng phải đọc được theo người để biết ai đang gặp lô xấu.
         shared: true,
         basis: `return_inspections: ${Number(r.unsellable)} món không bán lại được trong kỳ`,
+        denominatorLabel: "món hàng hoàn người này đã kiểm trong kỳ",
       },
     ]);
   }
@@ -320,7 +378,7 @@ async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, Metri
 
 type FinRow = { user_id: string; actions: number };
 
-async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<string, MetricValue[]>; team: MetricValue[] }> {
+async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<string, MetricInput[]>; team: MetricInput[] }> {
   const db = await getDb();
   const [byUser, tong] = await Promise.all([
     db.execute(sql`
@@ -340,7 +398,7 @@ async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<strin
     `),
   ]);
 
-  const people = new Map<string, MetricValue[]>();
+  const people = new Map<string, MetricInput[]>();
   for (const r of rowsOf<FinRow>(byUser)) {
     people.set(r.user_id, [
       {
@@ -353,6 +411,7 @@ async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<strin
         // CỐ Ý là số đếm, KHÔNG phải điểm. Nó đứng cạnh độ đầy đủ của cả sổ ở bảng phòng — một
         // mình nó không nói ai làm tốt hơn ai, vì một dòng khó bằng mười dòng dễ.
         basis: "audit_logs: BANK_CLASSIFY + BANK_LINK trong kỳ. Là SỐ LƯỢT, không phải điểm chất lượng",
+        denominatorLabel: "lượt phân loại / nối chứng từ ghi trong nhật ký hệ thống",
       },
     ]);
   }
@@ -363,7 +422,7 @@ async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<strin
     oldest_days: 0,
     pending: 0,
   };
-  const team: MetricValue[] = [
+  const team: MetricInput[] = [
     {
       key: "reconciliation_completeness",
       label: "Độ đầy đủ đối soát",
@@ -372,6 +431,7 @@ async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<strin
       sample: Number(t.total),
       shared: false,
       basis: "bank_transactions trong kỳ: đã phân loại ÷ tổng số dòng. Mức SỔ — một dòng có thể do nhiều người chạm nên không quy về cá nhân",
+      denominatorLabel: "dòng sao kê trong kỳ (mức SỔ, không quy về cá nhân)",
     },
     {
       key: "unresolved_aging",
@@ -381,6 +441,7 @@ async function financeMetrics(from: Date, to: Date): Promise<{ people: Map<strin
       sample: Number(t.pending),
       shared: false,
       basis: "Tuổi của dòng tiền CHƯA phân loại cũ nhất trong kỳ. `null` = không còn dòng nào treo",
+      denominatorLabel: "dòng sao kê chưa phân loại còn treo",
     },
   ];
   return { people, team };
@@ -393,7 +454,7 @@ export type DeptPerfQuery = { department: DepartmentCode; from: Date; to: Date; 
 export async function getDeptPerformance(q: DeptPerfQuery): Promise<DeptPerformance> {
   const spec = DEPT_PERF[q.department];
   const missing = spec.metrics.filter((m) => m.availability === "UNAVAILABLE").map((m) => ({ label: m.label, note: m.note }));
-  const base: DeptPerformance = { department: q.department, label: DEPARTMENT_LABEL[q.department], team: [], people: [], missing, from: q.from, to: q.to };
+  const base: DeptPerformance = { department: q.department, label: DEPARTMENT_LABEL[q.department], team: [], people: [], missing, missingAttribution: spec.notAttributed, from: q.from, to: q.to };
 
   /*
     GHÉP NGƯỜI: mỗi phòng một khoá khác nhau, và đó là sự thật lịch sử không sửa được trong bản này.
@@ -403,19 +464,40 @@ export async function getDeptPerformance(q: DeptPerfQuery): Promise<DeptPerforma
   const byName = (n: string) => n.trim().toLowerCase();
   const byEmail = (e: string) => e.trim().toLowerCase();
 
+  /*
+    ═══ XUẤT XỨ GẮN Ở ĐÚNG MỘT CHỖ ═══
+
+    `linkage` khác nhau theo phòng và đó là sự thật lịch sử: Kinh doanh ghép theo TÊN GÕ TAY
+    (`cs_cases.assignee` là ô chữ), Kho và Kế toán theo EMAIL, Giao vận theo KHOÁ TÀI KHOẢN. Nó
+    không phải chi tiết kỹ thuật — nó là lý do một con số 95% của phòng Kinh doanh đáng tin ít hơn
+    95% của phòng Giao vận, và người đọc thẻ điểm phải thấy điều đó.
+
+    `attribution` lấy thẳng từ `DEPT_PERF[phòng].notAttributed`, nên luật "không phạt ai vì thứ họ
+    không quyết được" đi theo từng con số ra tới giao diện thay vì nằm yên trong tài liệu.
+  */
+  const ctx = (linkage: PersonLinkage, owner: "PERSON" | "DEPARTMENT" = "PERSON") => ({
+    owner,
+    from: q.from,
+    to: q.to,
+    linkage,
+    attribution: spec.notAttributed,
+  });
+  const gan = (list: MetricInput[], linkage: PersonLinkage, owner: "PERSON" | "DEPARTMENT" = "PERSON") => list.map((m) => hoanThien(m, ctx(linkage, owner)));
+
   if (q.department === "SALES") {
     const m = await salesMetrics(q.from, q.to);
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: m.get(byName(p.name)) ?? [] }));
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(byName(p.name)) ?? [], "FREE_TEXT") }));
   } else if (q.department === "LOGISTICS") {
     const m = await logisticsMetrics(q.from, q.to);
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: m.get(p.id) ?? [] }));
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(p.id) ?? [], "USER_ID") }));
   } else if (q.department === "WAREHOUSE") {
     const m = await warehouseMetrics(q.from, q.to);
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: m.get(byEmail(p.email)) ?? [] }));
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(byEmail(p.email)) ?? [], "EMAIL") }));
   } else if (q.department === "FINANCE") {
     const { people, team } = await financeMetrics(q.from, q.to);
-    base.team = team;
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: people.get(p.id) ?? [] }));
+    // Chỉ số mức SỔ: chủ thể là PHÒNG, không phải người — nói rõ thay vì để người đọc tự suy.
+    base.team = gan(team, "USER_ID", "DEPARTMENT");
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(people.get(p.id) ?? [], "USER_ID") }));
   } else {
     // MARKETING · MANAGEMENT · HR: chưa có nguồn nào ở độ mịn NGƯỜI. Bảng `missing` đã nói vì sao,
     // và để trống ở đây trung thực hơn một cột số dựng từ việc giao tay.

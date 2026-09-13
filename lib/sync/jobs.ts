@@ -10,6 +10,7 @@ import {
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
 import { generateRecurringTasks } from "@/lib/work/service";
+import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
@@ -165,6 +166,25 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     run: () => warmDashboard(),
+  },
+  "work-snapshot": {
+    label: "Chụp ảnh hiệu suất kỳ đã đóng",
+    source: "ALL",
+    description:
+      "Chụp thẻ điểm của TUẦN VỪA ĐÓNG (và, khi chạy đầu tháng, cả THÁNG vừa đóng) thành dòng bất biến trong `performance_snapshots`. " +
+      "GHI MỘT LẦN: chạy lại bao nhiêu lần cũng không ghi đè số đã chụp, nên số lịch sử không đổi vì truy vấn hôm nay đổi. " +
+      "KHÔNG chụp kỳ đang chạy dở — đóng băng một con số nửa vời thành 'sự thật của tuần đó' là thứ sau này không sửa được. " +
+      "Kỳ không có quan sát nào vẫn ghi dòng `value = null`, để phân biệt 'chưa đo được' với 'chưa từng chạy job'.",
+    run: async () => {
+      const tuan = await snapshotPerformance({ kind: "WEEKLY" });
+      /*
+        Tháng chỉ chụp trong 7 ngày đầu tháng. Chạy mỗi ngày thì 24 lần đầu đều bị chặn vì kỳ chưa
+        đóng — vô hại nhưng làm nhật ký job đầy tiếng ồn, và tiếng ồn là thứ khiến người ta thôi đọc.
+      */
+      const homNay = new Date();
+      const thang = homNay.getUTCDate() <= 7 ? await snapshotPerformance({ kind: "MONTHLY" }) : null;
+      return { ok: true, tuan, thang };
+    },
   },
   "work-escalation": {
     label: "Leo thang việc quá hạn",

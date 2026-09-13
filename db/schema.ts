@@ -3038,6 +3038,73 @@ export const bscMetricsRelations = relations(bscMetrics, ({ one }) => ({
   scorecard: one(bscScorecards, { fields: [bscMetrics.scorecardId], references: [bscScorecards.id] }),
 }));
 
+/**
+ * ẢNH CHỤP HIỆU SUẤT — SỐ LỊCH SỬ KHÔNG ĐƯỢC ĐỔI VÌ TRUY VẤN HÔM NAY ĐỔI.
+ *
+ * Thẻ điểm sống (`lib/queries/dept-performance.ts`) tính lại mỗi lần mở. Điều đó đúng cho "tuần
+ * này đang thế nào", và SAI cho "quý trước chị Lan đạt bao nhiêu": chỉ cần ai đó sửa một mệnh đề
+ * `WHERE` là con số của quý trước đổi theo — lặng lẽ, và không ai đối chiếu được với bản in ra
+ * hồi đó. Một kỳ đã chốt mà số còn trôi thì mọi cuộc nói chuyện về hiệu suất đều mất căn cứ.
+ *
+ * Nên mỗi kỳ được chụp lại thành DÒNG, không phải một khối JSON: có dòng thì so được kỳ này với
+ * kỳ trước ngay trong SQL, mà đó chính là thứ "xu hướng" cần.
+ *
+ * ─── BẤT BIẾN: GHI MỘT LẦN, KHÔNG GHI ĐÈ ───
+ *
+ * Khoá duy nhất `(period, subject_type, subject_id, metric_key)` cộng với `onConflictDoNothing`:
+ * chạy lại job bao nhiêu lần cũng không đổi được số đã chụp. Đổi công thức thì `definition_version`
+ * của những kỳ SAU sẽ khác — và chênh lệch đó đọc được, thay vì biến mất.
+ */
+export const performanceSnapshots = pgTable(
+  "performance_snapshots",
+  {
+    id: id(),
+    /** `WEEKLY` · `MONTHLY`. */
+    kind: text("kind").notNull(),
+    /** Khoá kỳ người đọc được: `2026-W37`, `2026-09`. */
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `PERSON` · `DEPARTMENT` — chủ thể của con số. */
+    subjectType: text("subject_type").notNull(),
+    /** Khoá người dùng hoặc khoá phòng ban. KHÔNG đặt khoá ngoại: ảnh chụp phải sống sót cả khi tài khoản bị xoá. */
+    subjectId: text("subject_id").notNull(),
+    /** Tên tại thời điểm chụp — người đổi tên sau đó không làm sai lịch sử. */
+    subjectLabel: text("subject_label").notNull().default(""),
+    departmentCode: text("department_code").notNull().default(""),
+
+    metricKey: text("metric_key").notNull(),
+    metricLabel: text("metric_label").notNull(),
+    /** `null` = CHƯA ĐO ĐƯỢC trong kỳ đó. Không bao giờ là 0. */
+    value: doublePrecision("value"),
+    unit: text("unit").notNull(),
+    sample: integer("sample").notNull().default(0),
+    denominatorLabel: text("denominator_label").notNull().default(""),
+
+    /** `HIGH` · `MEDIUM` · `LOW` · `UNKNOWN`. */
+    confidence: text("confidence").notNull(),
+    /** `USER_ID` · `EMAIL` · `FREE_TEXT` — cách nối dòng dữ liệu về người, tại thời điểm chụp. */
+    linkage: text("linkage").notNull(),
+    shared: boolean("shared").notNull().default(false),
+    /** Câu quy kết đang có hiệu lực lúc chụp. */
+    attribution: text("attribution").notNull().default(""),
+    /** Nguồn số liệu lúc chụp. */
+    basis: text("basis").notNull().default(""),
+
+    calculatedAt: ts("calculated_at").notNull().defaultNow(),
+    /** Phiên bản công thức lúc chụp — `lib/constants/metric-provenance.ts::METRIC_DEFINITION_VERSION`. */
+    definitionVersion: integer("definition_version").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("performance_snapshots_uq").on(t.period, t.subjectType, t.subjectId, t.metricKey),
+    index("performance_snapshots_subject_idx").on(t.subjectType, t.subjectId, t.metricKey, t.periodStart),
+    index("performance_snapshots_period_idx").on(t.kind, t.periodStart),
+  ],
+);
+
+export type PerformanceSnapshot = typeof performanceSnapshots.$inferSelect;
+
 export type Department = typeof departments.$inferSelect;
 export type DepartmentMember = typeof departmentMembers.$inferSelect;
 export type WorkItemRow = typeof workItems.$inferSelect;

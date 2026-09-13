@@ -39,6 +39,7 @@ import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
+import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
 import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testScopeDecisions } from "./scope-enforcement.test";
 import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
 import { testDeployScript } from "./deploy-script.test";
@@ -1421,6 +1422,7 @@ async function main() {
   await testOrgMembership(db);
   await testAccessModel(db);
   await testScopeDecisions(db);
+  await testSnapshotImmutability(db);
   testNoEmptyValueSelect();
   testOneMembershipReadPath();
   testNoAutoReassignOnOrgChange();
@@ -1428,6 +1430,8 @@ async function main() {
   testRoleBuilderCannotEscalate();
   testEveryScopedRouteIsGuarded();
   testAuthSecretHasNoProdFallback();
+  testMetricConfidenceIsAFunction();
+  testPeriodKeys();
   testScopeOnlyNarrows();
   testDisabledRoleFallsBackNarrow();
 

@@ -5,10 +5,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { DEPT_PERF } from "@/lib/constants/department-performance";
 import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode } from "@/lib/constants/departments";
-import { formatVND } from "@/lib/format";
+import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { departmentsOfUser } from "@/lib/queries/work";
 import { combineScore, getPerformance, type ScoreAxis } from "@/lib/queries/work-performance";
 import { getDeptPerformance, type MetricValue } from "@/lib/queries/dept-performance";
+import { CONFIDENCE_LABEL, LINKAGE_NOTE, SAMPLE_FLOOR } from "@/lib/constants/metric-provenance";
+import { latestSnapshotPeriod, metricTrend } from "@/lib/queries/performance-history";
 import { getScoreWeights, SCORE_AXIS_LABEL } from "@/lib/queries/work-config";
 import { listOrgPeople } from "@/lib/queries/work";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -187,6 +189,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
       {deptPerf ? <DeptMetricCards perf={deptPerf} /> : null}
 
+      {department ? <TrendSection people={deptPeople.map((p) => ({ id: p.id, name: p.name }))} /> : null}
+
       {!hasWeights ? (
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           Bảng này CỐ Ý không có cột điểm tổng. Muốn có một con số duy nhất thì chủ shop phải tự khai trọng số cho từng trục ở{" "}
@@ -262,20 +266,106 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
  * trên nhãn chứ không chỉ trong tài liệu.
  */
 function MetricCell({ m }: { m: MetricValue }) {
-  if (m.value === null) {
+  /*
+    XUẤT XỨ ĐẦY ĐỦ nằm trong `title`, không phải trong một trang tài liệu riêng. Người đọc thẻ
+    điểm sẽ không đi tìm tài liệu; họ sẽ tự đoán. Sáu dòng ở đây là sáu câu họ định đoán.
+  */
+  const xuatXu = [
+    `Nguồn: ${m.basis}`,
+    `Chủ thể: ${m.owner === "PERSON" ? "một người" : "cả phòng"}`,
+    `Kỳ: ${formatDate(m.period.from)} → ${formatDate(m.period.to)}`,
+    `Mẫu số: ${m.sample} ${m.denominatorLabel}`,
+    `Độ tin cậy: ${CONFIDENCE_LABEL[m.confidence]} · ${LINKAGE_NOTE[m.linkage]}`,
+    `Quy kết: ${m.attribution}`,
+  ].join("\n");
+
+  if (m.status === "UNKNOWN") {
+    // CHƯA ĐO ĐƯỢC ≠ KÉM. Không có quan sát nào thì không có gì để kết luận, kể cả kết luận xấu.
     return (
-      <span className="text-xs text-muted-foreground" title={m.basis}>
+      <span className="text-xs text-muted-foreground" title={xuatXu}>
         chưa đo được
       </span>
     );
   }
   const text =
     m.unit === "PERCENT" ? `${m.value}%` : m.unit === "VND" ? formatVND(m.value, { compact: true }) : m.unit === "DAYS" ? `${m.value} ngày` : m.unit === "HOURS" ? `${m.value} giờ` : String(m.value);
+  /*
+    MẪU QUÁ BÉ THÌ KHÔNG TÔ MÀU. Tô đỏ một con số 50% đứng trên 2 quan sát là nói với người đọc
+    rằng người này làm kém, trong khi thứ duy nhất kết luận được là "chưa đủ dữ liệu".
+  */
+  const toMau = m.unit === "PERCENT" && !m.shared && m.rankable;
   return (
-    <span className="whitespace-nowrap tabular-nums" title={m.basis}>
-      <span className={cn("font-medium", m.unit === "PERCENT" && !m.shared ? (m.value >= 90 ? "text-success" : m.value < 60 ? "text-destructive" : "") : "")}>{text}</span>
+    <span className="whitespace-nowrap tabular-nums" title={xuatXu}>
+      <span className={cn("font-medium", toMau ? (m.value! >= 90 ? "text-success" : m.value! < 60 ? "text-destructive" : "") : "")}>{text}</span>
       <span className="ml-1 text-[11px] text-muted-foreground">/{m.sample}</span>
+      {!m.rankable ? <span className="ml-1 text-[10px] text-amber-600" title={`Mẫu dưới ${SAMPLE_FLOOR.medium} — chưa đủ để so người với người.`}>mẫu bé</span> : null}
+      {m.confidence === "LOW" && m.rankable ? <span className="ml-1 text-[10px] text-amber-600">{CONFIDENCE_LABEL.LOW.toLowerCase()}</span> : null}
     </span>
+  );
+}
+
+/**
+ * ═══════════ XU HƯỚNG: ĐỌC TỪ ẢNH CHỤP, KHÔNG TÍNH LẠI ═══════════
+ *
+ * Một người ở 68 và đang LÊN khác hẳn một người ở 68 và đang XUỐNG — và đó là khác biệt quyết
+ * định người quản lý nên nói gì với họ. Số của kỳ trước lấy từ `performance_snapshots`, không
+ * tính lại: tính lại thì mỗi lần ai sửa công thức là "xu hướng" lại đo mức độ thay đổi của mã
+ * nguồn thay vì của công việc.
+ */
+async function TrendSection({ people }: { people: { id: string; name: string }[] }) {
+  const moc = await latestSnapshotPeriod("WEEKLY");
+  if (!moc) {
+    return (
+      <SectionCard title="Xu hướng theo tuần" description="Chưa có ảnh chụp nào.">
+        <p className="text-xs text-muted-foreground">
+          Job <code>work-snapshot</code> chụp thẻ điểm của tuần VỪA ĐÓNG, mỗi 6 giờ một lần. Kỳ đầu tiên sẽ xuất hiện sau lần giao tuần kế tiếp — trước đó bảng này trống là
+          đúng, không phải hỏng.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  const xu = await Promise.all(people.map(async (p) => ({ person: p, trends: await metricTrend({ subjectType: "PERSON", subjectId: p.id, kind: "WEEKLY" }) })));
+  const coSo = xu.filter((x) => x.trends.some((t) => t.latest !== null));
+
+  return (
+    <SectionCard
+      title="Xu hướng theo tuần"
+      description={`Kỳ gần nhất đã chụp: ${moc.period} · ${formatNumber(moc.rows)} dòng · chụp lúc ${formatDate(moc.calculatedAt, true)}`}
+      hint="Số ở đây KHÔNG được tính lại: chúng là ảnh chụp bất biến của từng kỳ. Nhờ vậy con số của tuần trước hôm nay vẫn đúng bằng con số đã in ra hồi đó, kể cả khi công thức đã đổi — và nếu hai kỳ dùng hai phiên bản công thức khác nhau thì dòng đó nói rõ."
+    >
+      {coSo.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Kỳ {moc.period} chưa có chỉ số nào đo được cho người của phòng này — đó là một sự thật đã được ghi lại, không phải thiếu dữ liệu.</p>
+      ) : (
+        <div className="space-y-3">
+          {coSo.map(({ person, trends }) => (
+            <div key={person.id}>
+              <div className="text-xs font-semibold">{person.name}</div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {trends
+                  .filter((t) => t.latest !== null)
+                  .map((t) => (
+                    <span key={t.metricKey} className="rounded-md border px-2 py-1 text-[11.5px]" title={`${t.metricLabel} · mẫu ${t.latest!.sample} · kỳ ${t.latest!.period}`}>
+                      {t.metricLabel}: <strong className="tabular-nums">{t.unit === "VND" ? formatVND(t.latest!.value!, { compact: true }) : t.latest!.value}</strong>
+                      {t.delta === null ? (
+                        <span className="ml-1 text-muted-foreground">chưa có kỳ trước để so</span>
+                      ) : t.definitionChanged ? (
+                        // Đổi công thức thì chênh lệch KHÔNG đọc là tốt/xấu được. Nói ra thay vì vẽ mũi tên.
+                        <span className="ml-1 text-amber-600">đổi cách tính giữa hai kỳ</span>
+                      ) : (
+                        <span className={cn("ml-1 tabular-nums", t.delta > 0 ? "text-success" : t.delta < 0 ? "text-destructive" : "text-muted-foreground")}>
+                          {t.delta > 0 ? "+" : ""}
+                          {t.delta}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
