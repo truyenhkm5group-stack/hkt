@@ -25,7 +25,7 @@ import path from "node:path";
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
 /** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0073_attribution_identity";
+const MOI = "0074_return_reason_group";
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -57,7 +57,7 @@ export async function testMigrationUpgradePath() {
 
     const truoc = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(truoc, cu.entries.length, "bước 1: số migration đã áp phải khớp sổ đã cắt");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'metric_targets'"), 0, "bước 1: bảng mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'reason_group'"), 0, "bước 1: cột mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -113,7 +113,7 @@ export async function testMigrationUpgradePath() {
     );
 
     /*
-      ═══ QUY KẾT BẰNG KHOÁ (0073) ═══
+      ═══ NHÓM LÝ DO HOÀN (0074) ═══
 
       Điều kiện tiên quyết không đổi qua mọi migration: tài khoản có TRƯỚC bản này không mất gì.
     */
@@ -133,6 +133,27 @@ export async function testMigrationUpgradePath() {
 
     // Bảng đích rỗng: ERP KHÔNG đặt sẵn đích nào cho ai.
     assert.equal(await dem("select count(*)::int as n from metric_targets"), 0, "migration không được đặt sẵn đích — đích là quyết định kinh doanh của chủ shop");
+
+    /*
+      BA CỘT MỚI CỦA 0074 CÓ MẶC ĐỊNH — và đó KHÔNG phải một phép đoán về dữ liệu cũ.
+
+      `shipment_return_reasons` rỗng trên production (0 dòng, đo 13/09/2026), nên mặc định không
+      gán nhãn sai cho bất kỳ dòng nào đang có. Nếu bảng đã có dữ liệu thì mặc định `UNKNOWN` cho
+      `reason_group` mới là lựa chọn đúng: chưa xếp nhóm, không phải xếp nhầm nhóm.
+    */
+    for (const cot of ["reason_group", "source", "confidence"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = '${cot}' and column_default is not null`), 1, `cột ${cot} phải có mặc định`);
+    }
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "migration KHÔNG được tự sinh lý do hoàn nào — lý do chi tiết chỉ có khi NGƯỜI ghi");
+
+    // Nguồn lạ bị CSDL chặn: chỉ ba giá trị có nghĩa, và mỗi cái nói một mức thẩm quyền khác nhau.
+    await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s2', 'UPS2', 'RETURNED')`);
+    await assert.rejects(
+      () => client.query(`insert into shipment_return_reasons (id, shipment_id, reason, source) values ('rr-x', 'up-s2', 'QUALITY_FABRIC_BAD', 'GUESS')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("shipment_return_reasons_source_check"),
+      "nguồn lạ phải bị chặn ở CSDL — 'đoán' không phải một nguồn",
+    );
+    await client.query(`delete from shipments where id = 'up-s2'`);
 
     // Ảnh chụp cũ nhận phiên bản nguồn mặc định 1, không phải NULL: kỳ cũ vẫn so sánh được.
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'performance_snapshots' and column_name = 'source_version' and column_default is not null"), 1, "ảnh chụp cũ phải có phiên bản nguồn mặc định, không để NULL");
@@ -167,6 +188,7 @@ export async function testMigrationUpgradePath() {
     await migrate(db, { migrationsFolder: thuMucSo });
     assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
     assert.equal(await dem("select count(*)::int as n from metric_targets"), 0, "chạy lại migration KHÔNG được sinh đích nào");
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
 
     console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng, ba ràng buộc chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · chạy lại không nhân đôi`);

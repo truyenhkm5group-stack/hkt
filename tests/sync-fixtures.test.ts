@@ -96,6 +96,15 @@ import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testActionWiring } from "./action-wiring.test";
+import {
+  testKpiCohortUsesHandoffDate,
+  testMachineNeverInventsHumanReason,
+  testNoHandoffEvidenceStaysOut,
+  testReasonReportDefaultsToOutcomeDate,
+  testReasonTaxonomy,
+  testRescueRateNeverFakesZero,
+  testTimeBasisHasNoSilentFallback,
+} from "./kpi-clarity.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
 import { testDeliveryTower } from "./delivery-tower.test";
@@ -1347,6 +1356,15 @@ async function main() {
   testFastPathWiring();
   testBankMatch();
   testActionWiring();
+
+  // ═══ RÕ NGHĨA CHỈ SỐ VẬN ĐƠN + BÁO CÁO LÝ DO HOÀN ═══
+  testReasonTaxonomy();
+  testMachineNeverInventsHumanReason();
+  testRescueRateNeverFakesZero();
+  testTimeBasisHasNoSilentFallback();
+  await testKpiCohortUsesHandoffDate(db);
+  await testNoHandoffEvidenceStaysOut(db);
+  await testReasonReportDefaultsToOutcomeDate();
   testUseServerExports();
   testClientBoundaryExports();
   testSmokeCoverage();

@@ -6,6 +6,7 @@ import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
+import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
@@ -496,6 +497,8 @@ const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '
 
 export type ReturnRateQuery = {
   period: Period;
+  /** Mốc lọc cohort. Mặc định `SHIPPED` — xem `baseWhere`. */
+  basis?: TimeBasis;
   q: string;
   minShipped: number;
   sort: string;
@@ -534,10 +537,28 @@ export type ReturnRateRow = {
 
 export { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 
-function baseWhere(period: Period, q: string): SQL | undefined {
+/**
+ * ═══ COHORT CỦA BẢNG HIỆU QUẢ THEO MÃ: NGÀY ĐVVC TIẾP NHẬN, KHÔNG PHẢI NGÀY TẠO ĐƠN ═══
+ *
+ * Bảng này có cột đầu tiên tên "Đã gửi" rồi tách ra Giao thành công / Không thành công / Đang
+ * giao. Câu hỏi nó trả lời là "lô hàng gửi đi trong khoảng này đã đi tới đâu". Lọc theo ngày TẠO
+ * ĐƠN trả lời một câu khác, và người đọc không có cách nào biết.
+ *
+ * Đo production 13/09/2026: 1.411 vận đơn có cả hai mốc, **1.038 (73,6%) rơi vào hai ngày khác
+ * nhau**, lệch trung bình 4,5 ngày, cao nhất 26 ngày. Nên hai cách lọc chọn ra hai tập gần như
+ * khác hẳn — đây không phải khác biệt lý thuyết.
+ *
+ * Vận đơn KHÔNG có chứng cứ ĐVVC tiếp nhận thì `carrier_handoff_at` là `NULL` và kiện đó nằm
+ * ngoài cohort. CỐ Ý không rơi về `created_at`: mốc đó là lúc người bán bấm nút tạo vận đơn, và
+ * lấy nó lấp vào chỗ trống sẽ nhét kiện chưa ai lấy vào "lô hàng gửi tuần này".
+ */
+function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED"): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false), REPORTABLE_ORDER];
-  if (period.from) conds.push(gte(o.insertedAt, period.from));
-  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
+  if (period.from) conds.push(sql`${moc} >= ${period.from}`);
+  if (period.to) conds.push(sql`${moc} <= ${period.to}`);
+  // Mốc rỗng ⇒ ngoài cohort. Chỉ áp khi CÓ lọc kỳ: xem "tất cả" thì không loại ai.
+  if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -568,7 +589,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     .innerJoin(o, eq(o.id, i.orderId))
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(baseWhere(query.period, query.q))
+    .where(baseWhere(query.period, query.q, query.basis ?? "SHIPPED"))
     .offset(OUTCOME_FENCE)
     .as("variant_base");
 
@@ -716,13 +737,21 @@ export async function failedToReturnRate(): Promise<{ rate: number; sample: numb
 }
 
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
-export async function getReturnRateSummary(period: Period, q: string): Promise<ReturnRateSummary> {
+export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<ReturnRateSummary> {
   const db = await getDb();
-  // Phạm vi đơn dùng chung — nếu thiếu, trang Tỷ lệ giao thành công sẽ đếm cả đơn "Mới"
-  // và ra tổng đơn khác Tổng quan trong cùng một kỳ.
+  /*
+    CÙNG MỐC VỚI BẢNG BÊN DƯỚI — nếu không thì khối tổng đầu trang và bảng theo mã nói hai con số
+    khác nhau trong cùng một màn hình, và người đọc không có cách nào biết cái nào đúng. Đây đúng
+    là kiểu lỗi mà một bản "chỉ đổi bảng" dễ để lại.
+
+    Phạm vi đơn dùng chung (`REPORTABLE_ORDER`) — nếu thiếu, trang này sẽ đếm cả đơn "Mới" và ra
+    tổng đơn khác Tổng quan trong cùng một kỳ.
+  */
   const conds: SQL[] = [REPORTABLE_ORDER];
-  if (period.from) conds.push(gte(o.insertedAt, period.from));
-  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
+  if (period.from) conds.push(sql`${moc} >= ${period.from}`);
+  if (period.to) conds.push(sql`${moc} <= ${period.to}`);
+  if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;

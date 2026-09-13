@@ -25,7 +25,58 @@
  * hai thông tin khác nhau, để cạnh nhau, không trộn.
  */
 
+/**
+ * ═══════════ TAXONOMY CỦA SHOP, KHÔNG PHẢI CỦA ĐVVC ═══════════
+ *
+ * Bảng lý do dưới đây chép đúng bảng Excel chủ shop đang dùng (13/09/2026). Điểm quan trọng nhất
+ * về NGUỒN, phải đọc trước khi sửa bất cứ gì:
+ *
+ *   "Vải xấu", "Chật", "Không giống mẫu", "Vải nóng" — Viettel Post KHÔNG BAO GIỜ nói những câu
+ *   này. ĐVVC không biết vải nóng hay dày. Đây là lý do do NGƯỜI CỦA SHOP hỏi khách rồi ghi lại.
+ *
+ * Hệ quả thiết kế: nhóm lý do chi tiết CHỈ có thể đến từ `shipment_return_reasons` (người xác
+ * định). Máy suy từ chữ trạng thái ĐVVC chỉ với tới được những lý do THÔ (không liên lạc được,
+ * sai địa chỉ, từ chối nhận) — và đó là lý do bảng báo cáo phải hiện độ phủ thật, không được để
+ * người đọc tưởng cột 0 nghĩa là "không có ca nào".
+ *
+ * Đo production 13/09/2026: 854 vận đơn hoàn, 128 có chữ lý do từ ĐVVC, 0 có người xác định.
+ * Bảng Excel của shop có 454 dòng với lý do chi tiết — tức là dữ liệu đó đang sống NGOÀI ERP.
+ */
 export const RETURN_REASONS = [
+  /* ─── Chất lượng kém ─── */
+  "QUALITY_POOR",
+  "QUALITY_COLOR_BAD",
+  "QUALITY_FABRIC_BAD",
+  "QUALITY_SEWING_BAD",
+  "QUALITY_NOT_AS_PICTURED",
+  "QUALITY_FABRIC_HOT",
+  "QUALITY_TOO_THICK",
+  "QUALITY_FABRIC_THIN",
+  "QUALITY_DEFECT",
+  "QUALITY_LOOKS_BAD_ON",
+  /* ─── Sai kích thước ─── */
+  "SIZE_TIGHT",
+  "SIZE_TIGHT_TOP",
+  "SIZE_TIGHT_BOTTOM",
+  "SIZE_LOOSE",
+  "SIZE_LOOSE_TOP",
+  "SIZE_LOOSE_BOTTOM",
+  "SIZE_SALES_ADVICE_WRONG",
+  "SIZE_DOES_NOT_FIT",
+  /* ─── Giao lâu ─── */
+  "SLOW_DELIVERY",
+  "CUSTOMER_AWAY",
+  /* ─── Cố ý boom hàng ─── */
+  "BOOM_NO_REASON",
+  "BOOM_MULTIPLE_ATTEMPTS",
+  "CARRIER_NO_SUPPORT",
+  /* ─── Lý do khác ─── */
+  "WAREHOUSE_PACKED_WRONG",
+  "SALES_CONFIRMED_WRONG",
+  "CANCELLED_BEFORE_SHIP",
+  "DUPLICATE_ORDER",
+  /* ─── Lý do có từ trước: GIỮ NGUYÊN KHOÁ ───
+     Chúng đã được máy suy ra và có thể đã nằm trong CSDL. Đổi tên khoá là làm mồ côi dữ liệu cũ. */
   "CUSTOMER_REFUSED",
   "CUSTOMER_UNREACHABLE",
   "WRONG_PHONE",
@@ -43,6 +94,33 @@ export const RETURN_REASONS = [
 export type ReturnReason = (typeof RETURN_REASONS)[number];
 
 export const RETURN_REASON_LABEL: Record<ReturnReason, string> = {
+  QUALITY_POOR: "Chất lượng kém",
+  QUALITY_COLOR_BAD: "Màu xấu",
+  QUALITY_FABRIC_BAD: "Vải xấu",
+  QUALITY_SEWING_BAD: "May xấu",
+  QUALITY_NOT_AS_PICTURED: "Không giống mẫu",
+  QUALITY_FABRIC_HOT: "Vải nóng",
+  QUALITY_TOO_THICK: "Dày quá",
+  QUALITY_FABRIC_THIN: "Vải mỏng",
+  QUALITY_DEFECT: "Sản phẩm lỗi",
+  QUALITY_LOOKS_BAD_ON: "Khách mặc xấu",
+  SIZE_TIGHT: "Chật",
+  SIZE_TIGHT_TOP: "Chật áo",
+  SIZE_TIGHT_BOTTOM: "Chật quần",
+  SIZE_LOOSE: "Rộng",
+  SIZE_LOOSE_TOP: "Rộng áo",
+  SIZE_LOOSE_BOTTOM: "Rộng quần",
+  SIZE_SALES_ADVICE_WRONG: "SALE tư vấn sai size",
+  SIZE_DOES_NOT_FIT: "Mặc không vừa",
+  SLOW_DELIVERY: "Giao hàng quá lâu",
+  CUSTOMER_AWAY: "Khách đi vắng",
+  BOOM_NO_REASON: "Trả hàng không lí do / cố ý boom hàng",
+  BOOM_MULTIPLE_ATTEMPTS: "Giao nhiều lần không nhận / bưu cục tự hoàn",
+  CARRIER_NO_SUPPORT: "Bưu tá không hỗ trợ giao hàng",
+  WAREHOUSE_PACKED_WRONG: "Kho đóng sai",
+  SALES_CONFIRMED_WRONG: "Sale chốt sai",
+  CANCELLED_BEFORE_SHIP: "Huỷ trước khi ship",
+  DUPLICATE_ORDER: "Trùng đơn",
   CUSTOMER_REFUSED: "Khách từ chối nhận",
   CUSTOMER_UNREACHABLE: "Không liên lạc được khách",
   WRONG_PHONE: "Sai số điện thoại",
@@ -60,6 +138,35 @@ export const RETURN_REASON_LABEL: Record<ReturnReason, string> = {
 
 /** Ai chịu trách nhiệm chính — để báo cáo nói được "sửa ở đâu", không chỉ "hỏng ở đâu". */
 export const RETURN_REASON_OWNER: Record<ReturnReason, "SALES" | "LOGISTICS" | "WAREHOUSE" | "CUSTOMER" | "CARRIER" | "UNKNOWN"> = {
+  // Chất lượng là việc của NGƯỜI MUA HÀNG / sản xuất, không phải của người bán hay người giao.
+  QUALITY_POOR: "WAREHOUSE",
+  QUALITY_COLOR_BAD: "WAREHOUSE",
+  QUALITY_FABRIC_BAD: "WAREHOUSE",
+  QUALITY_SEWING_BAD: "WAREHOUSE",
+  QUALITY_NOT_AS_PICTURED: "SALES",
+  QUALITY_FABRIC_HOT: "WAREHOUSE",
+  QUALITY_TOO_THICK: "WAREHOUSE",
+  QUALITY_FABRIC_THIN: "WAREHOUSE",
+  QUALITY_DEFECT: "WAREHOUSE",
+  QUALITY_LOOKS_BAD_ON: "CUSTOMER",
+  // Sai size: phần lớn là tư vấn, nên thuộc KINH DOANH — trừ khi khách tự chọn sai.
+  SIZE_TIGHT: "SALES",
+  SIZE_TIGHT_TOP: "SALES",
+  SIZE_TIGHT_BOTTOM: "SALES",
+  SIZE_LOOSE: "SALES",
+  SIZE_LOOSE_TOP: "SALES",
+  SIZE_LOOSE_BOTTOM: "SALES",
+  SIZE_SALES_ADVICE_WRONG: "SALES",
+  SIZE_DOES_NOT_FIT: "CUSTOMER",
+  SLOW_DELIVERY: "CARRIER",
+  CUSTOMER_AWAY: "CUSTOMER",
+  BOOM_NO_REASON: "CUSTOMER",
+  BOOM_MULTIPLE_ATTEMPTS: "CUSTOMER",
+  CARRIER_NO_SUPPORT: "CARRIER",
+  WAREHOUSE_PACKED_WRONG: "WAREHOUSE",
+  SALES_CONFIRMED_WRONG: "SALES",
+  CANCELLED_BEFORE_SHIP: "SALES",
+  DUPLICATE_ORDER: "SALES",
   CUSTOMER_REFUSED: "CUSTOMER",
   CUSTOMER_UNREACHABLE: "SALES",
   WRONG_PHONE: "SALES",
@@ -74,6 +181,117 @@ export const RETURN_REASON_OWNER: Record<ReturnReason, "SALES" | "LOGISTICS" | "
   OTHER: "UNKNOWN",
   UNKNOWN: "UNKNOWN",
 };
+
+/**
+ * ═══════════ NHÓM LÝ DO LỚN — ĐỌC ĐỂ RA QUYẾT ĐỊNH, KHÔNG PHẢI ĐỂ ĐẾM ═══════════
+ *
+ * Ba mươi lý do chi tiết là thứ NGƯỜI XỬ LÝ cần khi ghi một ca. Chủ shop đọc báo cáo thì không
+ * quyết định gì được từ ba mươi dòng — quyết định nằm ở tầng nhóm: "hoàn vì chất lượng" đi tới
+ * xưởng, "hoàn vì sai size" đi tới bảng size và cách tư vấn, "hoàn vì giao lâu" đi tới ĐVVC.
+ *
+ * Nên báo cáo có HAI TẦNG, và tầng nhóm là tầng mặc định mở.
+ *
+ * `UNKNOWN` CỐ Ý đứng riêng, KHÔNG nằm trong "Lý do khác": "lý do khác" nghĩa là đã hỏi và biết,
+ * chỉ không thuộc nhóm nào; "chưa xác định được" nghĩa là CHƯA AI HỎI. Gộp hai thứ đó lại thì
+ * một khoảng trống dữ liệu trông như một nhóm nguyên nhân đã hiểu rõ.
+ */
+/** Lý do mà chứng từ ĐVVC (mã hoặc chữ trạng thái) với tới được. Mọi lý do khác cần NGƯỜI ghi. */
+const MACHINE_READABLE_REASONS = new Set<ReturnReason>([
+  "CUSTOMER_REFUSED",
+  "CUSTOMER_UNREACHABLE",
+  "WRONG_PHONE",
+  "WRONG_ADDRESS",
+  "CUSTOMER_RESCHEDULE_FAILED",
+  "CUSTOMER_CHANGED_MIND",
+  "DELIVERY_ATTEMPTS_EXHAUSTED",
+  "SHOP_REQUESTED_RETURN",
+  "DAMAGED",
+  "WRONG_ITEM",
+  "CARRIER_EXCEPTION",
+  "SLOW_DELIVERY",
+  "CUSTOMER_AWAY",
+  "UNKNOWN",
+]);
+
+export const RETURN_REASON_GROUPS = ["QUALITY", "SIZE", "SLOW", "BOOM", "OTHER", "UNKNOWN"] as const;
+export type ReturnReasonGroup = (typeof RETURN_REASON_GROUPS)[number];
+
+export const RETURN_REASON_GROUP_LABEL: Record<ReturnReasonGroup, string> = {
+  QUALITY: "Chất lượng kém",
+  SIZE: "Sai kích thước",
+  SLOW: "Giao lâu",
+  BOOM: "Cố ý boom hàng",
+  OTHER: "Lý do khác",
+  UNKNOWN: "Chưa xác định được",
+};
+
+/** Một câu: nhóm này hỏng ở đâu thì sửa ở đâu. Hiện trên tooltip của dòng nhóm. */
+export const RETURN_REASON_GROUP_ACTION: Record<ReturnReasonGroup, string> = {
+  QUALITY: "Đi tới nguồn hàng và khâu kiểm trước khi đóng gói — không sửa được bằng cách chăm khách kỹ hơn.",
+  SIZE: "Đi tới bảng size trên trang bán và cách tư vấn chốt đơn. Nhóm này thường sửa được bằng thông tin, không bằng đổi hàng.",
+  SLOW: "Đi tới đơn vị vận chuyển và mốc bàn giao của kho. Khách không đổi ý, họ chỉ đợi quá lâu.",
+  BOOM: "Đi tới khâu xác nhận đơn: gọi xác nhận trước khi gửi, hoặc yêu cầu đặt cọc với khách có lịch sử boom.",
+  OTHER: "Mỗi lý do trong nhóm này có chỗ sửa riêng — xổ nhóm ra để thấy.",
+  UNKNOWN: "KHÔNG phải một nguyên nhân. Đây là số ca chưa ai hỏi vì sao; sửa bằng cách ghi lý do khi xử lý ca hoàn.",
+};
+
+export const RETURN_REASON_GROUP_OF: Record<ReturnReason, ReturnReasonGroup> = {
+  QUALITY_POOR: "QUALITY",
+  QUALITY_COLOR_BAD: "QUALITY",
+  QUALITY_FABRIC_BAD: "QUALITY",
+  QUALITY_SEWING_BAD: "QUALITY",
+  QUALITY_NOT_AS_PICTURED: "QUALITY",
+  QUALITY_FABRIC_HOT: "QUALITY",
+  QUALITY_TOO_THICK: "QUALITY",
+  QUALITY_FABRIC_THIN: "QUALITY",
+  QUALITY_DEFECT: "QUALITY",
+  QUALITY_LOOKS_BAD_ON: "QUALITY",
+  SIZE_TIGHT: "SIZE",
+  SIZE_TIGHT_TOP: "SIZE",
+  SIZE_TIGHT_BOTTOM: "SIZE",
+  SIZE_LOOSE: "SIZE",
+  SIZE_LOOSE_TOP: "SIZE",
+  SIZE_LOOSE_BOTTOM: "SIZE",
+  SIZE_SALES_ADVICE_WRONG: "SIZE",
+  SIZE_DOES_NOT_FIT: "SIZE",
+  SLOW_DELIVERY: "SLOW",
+  CUSTOMER_AWAY: "SLOW",
+  BOOM_NO_REASON: "BOOM",
+  BOOM_MULTIPLE_ATTEMPTS: "BOOM",
+  CARRIER_NO_SUPPORT: "BOOM",
+  WAREHOUSE_PACKED_WRONG: "OTHER",
+  SALES_CONFIRMED_WRONG: "OTHER",
+  CANCELLED_BEFORE_SHIP: "OTHER",
+  DUPLICATE_ORDER: "OTHER",
+  /* ─── Lý do máy suy ra được từ chữ của ĐVVC ─── */
+  CUSTOMER_UNREACHABLE: "SLOW",
+  CUSTOMER_RESCHEDULE_FAILED: "SLOW",
+  CUSTOMER_REFUSED: "BOOM",
+  CUSTOMER_CHANGED_MIND: "BOOM",
+  DELIVERY_ATTEMPTS_EXHAUSTED: "BOOM",
+  DAMAGED: "QUALITY",
+  WRONG_ITEM: "OTHER",
+  WRONG_PHONE: "OTHER",
+  WRONG_ADDRESS: "OTHER",
+  SHOP_REQUESTED_RETURN: "OTHER",
+  CARRIER_EXCEPTION: "SLOW",
+  OTHER: "OTHER",
+  UNKNOWN: "UNKNOWN",
+};
+
+/**
+ * LÝ DO NÀO MÁY SUY RA ĐƯỢC, LÝ DO NÀO BẮT BUỘC PHẢI CÓ NGƯỜI GHI.
+ *
+ * Đây là ranh giới quan trọng nhất của cả taxonomy này, và nó quyết định con số nào trong báo cáo
+ * đáng tin. Viettel Post biết kiện đi tới đâu và vì sao không phát được; ĐVVC KHÔNG biết vải nóng,
+ * không biết khách mặc có vừa không. Những lý do đó chỉ có nếu người của shop hỏi khách rồi ghi.
+ *
+ * Báo cáo dùng bảng này để nói thẳng: nhóm lý do nào đang ở 0 vì THẬT SỰ không có ca nào, và nhóm
+ * nào đang ở 0 vì CHƯA AI GHI. Hai chuyện khác hẳn nhau.
+ */
+export const REASON_NEEDS_HUMAN: Record<ReturnReason, boolean> = Object.fromEntries(
+  RETURN_REASONS.map((r) => [r, !MACHINE_READABLE_REASONS.has(r)]),
+) as Record<ReturnReason, boolean>;
 
 /**
  * MÃ LÝ DO CỦA ĐVVC → phân loại của shop.

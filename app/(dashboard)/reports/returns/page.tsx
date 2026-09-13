@@ -36,6 +36,7 @@ import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
+import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
@@ -61,18 +62,27 @@ export default async function ReturnRatePage({
   const params = parseListParams(raw, {
     defaultSort: "successRate",
     defaultDir: "asc",
-    filterKeys: ["min", "product"],
+    filterKeys: ["min", "product", "basis", "group", "reason"],
     sortable: RETURN_RATE_SORTABLE,
     defaultPeriod: "90d",
     defaultPageSize: 50,
   });
   const minShipped = Math.max(1, Number(params.filters.min?.[0] ?? "1") || 1);
   const variantKey = param(raw, "variant");
+  /*
+    MỐC LỌC LÀ MỘT LỰA CHỌN CÓ TÊN, KHÔNG PHẢI MỘT GIẢ ĐỊNH NGẦM.
+
+    Mặc định `SHIPPED` vì bảng này có cột "Đã gửi" — nó trả lời "lô hàng gửi trong khoảng này đi
+    tới đâu rồi". Người muốn hỏi câu khác ("đơn chốt tuần này ra sao") đổi sang `ORDERED`, và màn
+    hình nói rõ đang ở mốc nào.
+  */
+  const basis: TimeBasis = TIME_BASES.includes((params.filters.basis?.[0] ?? "") as TimeBasis) ? (params.filters.basis![0] as TimeBasis) : "SHIPPED";
 
   const [{ rows, total, pageCount, all }, summary, variantOrders, theoNguon] =
     await Promise.all([
       getReturnRateByVariant({
         period: params.period,
+        basis,
         q: params.q,
         minShipped,
         sort: params.sort,
@@ -80,7 +90,7 @@ export default async function ReturnRatePage({
         page: params.page,
         pageSize: params.pageSize,
       }),
-      getReturnRateSummary(params.period, params.q),
+      getReturnRateSummary(params.period, params.q, basis),
       variantKey
         ? listOrdersForVariant(variantKey, params.period)
         : Promise.resolve([]),
@@ -112,7 +122,7 @@ export default async function ReturnRatePage({
       <PageHeader
         eyebrow="Tài chính"
         title="Tỷ lệ giao thành công theo mã hàng"
-        description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.delivered)} giao thành công (COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })}) · ${formatNumber(summary.returned)} không thành công · tính trên đơn lên trong kỳ`}
+        description={`${params.period.label} · ${formatNumber(summary.shipped)} đơn đã gửi · ${formatNumber(summary.delivered)} giao thành công (COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })}) · ${formatNumber(summary.returned)} không thành công`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* Tỷ lệ giao thành công là đòn bẩy lợi nhuận mạnh nhất — mở thẳng sang chỗ tính thử */}
@@ -346,9 +356,28 @@ export default async function ReturnRatePage({
             options: MIN_OPTIONS,
             single: true,
           },
+          {
+            // MỐC LỌC LÀ MỘT BỘ LỌC THẬT, không phải một dòng chữ chỉ để đọc: đổi được ngay tại chỗ.
+            key: "basis",
+            label: "Mốc thời gian",
+            options: TIME_BASES.map((b) => ({ value: b, label: TIME_BASIS_LABEL[b] })),
+            single: true,
+          },
         ]}
         resultLabel={`${formatNumber(total)} mã hàng · bấm vào một dòng để xem danh sách đơn`}
       />
+
+      {/*
+        ĐANG LỌC THEO MỐC NÀO — NÓI THẲNG, KHÔNG ĐỂ ĐOÁN.
+
+        Đây là dòng sửa một cái bẫy có thật: bảng có cột "Đã gửi" nhưng trước bản này lọc theo
+        NGÀY TẠO ĐƠN. Đo production: 73,6% vận đơn có hai mốc rơi vào hai ngày khác nhau, lệch
+        trung bình 4,5 ngày. Người đọc thấy chữ "đã gửi" và tin rằng đang xem lô hàng gửi tuần này.
+      */}
+      <p className="-mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">Đang lọc theo: {TIME_BASIS_LABEL[basis]}</span>
+        <span title={TIME_BASIS_QUESTION[basis]}>{TIME_BASIS_QUESTION[basis]}</span>
+      </p>
       <ReturnRateTable
         rows={rows}
         pageCount={pageCount}

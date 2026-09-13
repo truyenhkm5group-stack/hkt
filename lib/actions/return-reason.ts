@@ -15,12 +15,19 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { RETURN_REASONS } from "@/lib/constants/return-reason";
+import { RETURN_REASON_GROUP_OF, RETURN_REASONS } from "@/lib/constants/return-reason";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
 
 const schemaInput = z.object({
   shipmentId: z.string().min(1),
   reason: z.enum(RETURN_REASONS),
+  /**
+   * GHI CHÚ TỰ DO — KHÔNG PHẢI LÝ DO.
+   *
+   * `reason` là danh mục để đếm; `note` là câu chuyện cho người sau đọc. Nơi gọi KHÔNG được nhét
+   * lý do vào đây: "vải mỏng quá khách kêu" nằm trong ô ghi chú thì báo cáo không bao giờ đếm
+   * được nó. Ô chọn lý do là bắt buộc, ô ghi chú là tuỳ.
+   */
   note: z.string().trim().max(500).default(""),
 });
 
@@ -39,12 +46,30 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
   // Lý do ĐANG có hiệu lực trước khi ghi đè — chép vào nhật ký để so được về sau.
   const truoc = (await reasonsForShipments([shipmentId])).get(shipmentId);
 
+  /*
+    NHÓM LỚN LƯU KÈM, KHÔNG SUY LÚC ĐỌC.
+
+    Suy lúc đọc thì ngày nào đó một lý do được xếp sang nhóm khác là toàn bộ lịch sử đổi theo,
+    lặng lẽ — báo cáo quý trước in ra hồi đó không còn khớp với chính nó nữa.
+  */
+  const reasonGroup = RETURN_REASON_GROUP_OF[reason];
   await db
     .insert(schema.shipmentReturnReasons)
-    .values({ shipmentId, reason, note, inferredReason: truoc?.manual ? "" : (truoc?.reason ?? "UNKNOWN"), actorId: user.id, actorEmail: user.email })
+    .values({
+      shipmentId,
+      reason,
+      reasonGroup,
+      note,
+      inferredReason: truoc?.manual ? "" : (truoc?.reason ?? "UNKNOWN"),
+      source: "MANUAL",
+      confidence: "CONFIRMED",
+      actorId: user.id,
+      actorEmail: user.email,
+    })
     .onConflictDoUpdate({
       target: schema.shipmentReturnReasons.shipmentId,
-      set: { reason, note, actorId: user.id, actorEmail: user.email, updatedAt: new Date() },
+      // Sửa lại lý do VẪN là người xác định — giữ `source`/`confidence`, chỉ đổi nội dung và người.
+      set: { reason, reasonGroup, note, source: "MANUAL", confidence: "CONFIRMED", actorId: user.id, actorEmail: user.email, updatedAt: new Date() },
     });
 
   await audit({
@@ -56,7 +81,7 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     detail: {
       tracking: vanDon.vtpOrderNumber,
       before: { reason: truoc?.reason ?? "UNKNOWN", confidence: truoc?.confidence ?? "NONE", evidence: truoc?.evidence ?? "" },
-      after: { reason, note },
+      after: { reason, reasonGroup, note },
     },
   });
 

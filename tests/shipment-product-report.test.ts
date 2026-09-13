@@ -73,10 +73,17 @@ export async function testShipmentProductReport(db: Db) {
   ]).onConflictDoNothing();
 
   await db.insert(schema.shipments).values([
-    { id: `${P}s1`, orderId: `${P}o1`, vtpOrderNumber: `${P}T1`, trackingCode: `${P}T1`, stage: "DELIVERED", codCollected: 500_000, deliveredAt: ngay("2026-08-10"), createdAt: ngay("2026-08-01"), isFinal: true },
-    { id: `${P}s2`, orderId: `${P}o2`, vtpOrderNumber: `${P}T2`, trackingCode: `${P}T2`, stage: "RETURNED", createdAt: ngay("2026-08-02"), isFinal: true },
-    { id: `${P}s3`, orderId: `${P}o3`, vtpOrderNumber: `${P}T3`, trackingCode: `${P}T3`, stage: "RETURNED", createdAt: ngay("2026-08-03"), isFinal: true },
-    { id: `${P}s4`, orderId: `${P}o4`, vtpOrderNumber: `${P}T4`, trackingCode: `${P}T4`, stage: "RETURNED", createdAt: ngay("2026-08-04"), isFinal: true },
+    /*
+      MỐC ĐVVC TIẾP NHẬN (`pickedUpAt`) và MỐC KẾT QUẢ CUỐI (`deliveredAt`/`returnedAt`) là thứ
+      production LUÔN có. Fixture thiếu chúng thì bài kiểm xanh trên một hình dạng dữ liệu không
+      tồn tại thật — và bản đổi mốc lọc sẽ đi qua cổng rồi hỏng trên máy chủ.
+
+      Cố ý đặt ngày gửi LỆCH ngày tạo đơn vài ngày, đúng như production (lệch trung bình 4,5 ngày).
+    */
+    { id: `${P}s1`, orderId: `${P}o1`, vtpOrderNumber: `${P}T1`, trackingCode: `${P}T1`, stage: "DELIVERED", codCollected: 500_000, pickedUpAt: ngay("2026-08-06"), deliveredAt: ngay("2026-08-10"), createdAt: ngay("2026-08-01"), isFinal: true },
+    { id: `${P}s2`, orderId: `${P}o2`, vtpOrderNumber: `${P}T2`, trackingCode: `${P}T2`, stage: "RETURNED", pickedUpAt: ngay("2026-08-06"), returnedAt: ngay("2026-08-12"), createdAt: ngay("2026-08-02"), isFinal: true },
+    { id: `${P}s3`, orderId: `${P}o3`, vtpOrderNumber: `${P}T3`, trackingCode: `${P}T3`, stage: "RETURNED", pickedUpAt: ngay("2026-08-07"), returnedAt: ngay("2026-08-13"), createdAt: ngay("2026-08-03"), isFinal: true },
+    { id: `${P}s4`, orderId: `${P}o4`, vtpOrderNumber: `${P}T4`, trackingCode: `${P}T4`, stage: "RETURNED", pickedUpAt: ngay("2026-08-08"), returnedAt: ngay("2026-08-14"), createdAt: ngay("2026-08-04"), isFinal: true },
     // VẬN ĐƠN CHIỀU VỀ `…1P1`: order_id NULL. Phải nằm NGOÀI mọi KPI của đơn bán gốc.
     { id: `${P}sLeg`, orderId: null, orderReference: `${P}T2`, vtpOrderNumber: `${P}T21P1`, trackingCode: `${P}T21P1`, stage: "RETURNED", createdAt: ngay("2026-08-09"), isFinal: true },
   ]).onConflictDoNothing();
@@ -158,9 +165,27 @@ export async function testShipmentProductReport(db: Db) {
   assert.equal(q002Row!.returned, 2);
   assert.equal(q002Row!.returnRate, 66.7);
 
-  // TRÙNG KHỚP: tổng theo lý do phải bằng tổng đơn hoàn.
-  const tongTheoLyDo = bc.reasons.reduce((a, r) => a + r.count, 0);
-  assert.equal(tongTheoLyDo, bc.returned, "cộng các lý do phải ra đúng tổng đơn hoàn — lệch nghĩa là có đơn rơi mất hoặc bị đếm hai lần");
+  /*
+    TRÙNG KHỚP TỔNG ↔ SUBTOTAL NHÓM ↔ DÒNG CHI TIẾT.
+
+    Bảng hai tầng hỏng theo một kiểu rất khó thấy: nhóm cộng đúng nhưng tổng lại lấy từ chỗ khác,
+    hoặc một lý do lọt vào hai nhóm. Bài này cộng ngược từ dòng chi tiết lên.
+  */
+  const tongChiTiet = bc.groups.reduce((a, g) => a + g.details.reduce((n, d) => n + d.count, 0), 0);
+  const tongNhom = bc.groups.reduce((a, g) => a + g.count, 0);
+  assert.equal(tongChiTiet, tongNhom, "cộng dòng chi tiết phải ra đúng subtotal nhóm");
+  assert.equal(tongNhom, bc.reasonCoverage.known, "cộng các nhóm phải ra đúng số đơn hoàn ĐÃ BIẾT lý do (UNKNOWN đứng riêng, không nằm trong nhóm nào)");
+  assert.equal(bc.reasonCoverage.known + bc.reasonCoverage.unknown, bc.returned, "biết + chưa biết phải bằng tổng đơn hoàn");
+
+  // Mỗi lý do chỉ thuộc ĐÚNG MỘT nhóm — lọt hai nhóm thì tỷ trọng cộng lại vượt 100%.
+  const moiLyDo = bc.groups.flatMap((g) => g.details.map((d) => d.reason));
+  assert.equal(new Set(moiLyDo).size, moiLyDo.length, "một lý do không được xuất hiện ở hai nhóm");
+
+  // TỶ TRỌNG cộng lại đúng 100% (trên mẫu số đã-biết-lý-do), không phải trên tổng hoàn.
+  if (bc.reasonCoverage.known > 0) {
+    const tongTyTrong = bc.groups.reduce((a, g) => a + g.share, 0);
+    assert.ok(Math.abs(tongTyTrong - 100) < 0.05, `tỷ trọng các nhóm phải cộng lại 100%, đang là ${tongTyTrong}`);
+  }
 
   /* ═══ 10 · ĐƠN NHIỀU MÃ KHÔNG BỊ GÁN LÝ DO GIẢ CHO TỪNG MÃ ═══ */
   const q004Row = cuaTa.find((p) => p.code === "SPRQ004");

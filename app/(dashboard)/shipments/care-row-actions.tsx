@@ -5,11 +5,11 @@ import { Loader2, MessageSquarePlus, MoreHorizontal, UserPlus } from "lucide-rea
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { addCareNote, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import { CARE_STATUS_LABEL, type CareStatus } from "@/lib/constants/care";
-import { RETURN_REASON_LABEL } from "@/lib/constants/return-reason";
+import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
 import { setReturnReason } from "@/lib/actions/return-reason";
 
 /**
@@ -31,6 +31,16 @@ import { setReturnReason } from "@/lib/actions/return-reason";
  * nhiệm xử lý nó — nên "Nhận việc" ghi ĐÚNG người đang bấm vào ô chủ, và ô chủ trống nghĩa là
  * chưa ai nhận, không phải "hệ thống đang giữ".
  */
+/** Nhóm → các lý do của nó, dựng một lần ở mức module chứ không mỗi lần mở menu. */
+const REASONS_BY_GROUP = (Object.keys(RETURN_REASON_GROUP_OF) as ReturnReason[]).reduce(
+  (acc, r) => {
+    const g = RETURN_REASON_GROUP_OF[r];
+    if (r !== "UNKNOWN" && r !== "OTHER") (acc[g] ??= []).push(r);
+    return acc;
+  },
+  {} as Record<ReturnReasonGroup, ReturnReason[]>,
+);
+
 export function CareRowActions({
   shipmentId,
   tracking,
@@ -115,10 +125,27 @@ export function CareRowActions({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">Lý do hoàn</DropdownMenuLabel>
-              {(["CUSTOMER_REFUSED", "CUSTOMER_UNREACHABLE", "WRONG_ADDRESS", "WRONG_PHONE", "CUSTOMER_CHANGED_MIND", "DAMAGED"] as const).map((r) => (
-                <DropdownMenuItem key={r} onSelect={() => chay(() => setReturnReason({ shipmentId, reason: r, note: "" }), `${tracking}: ${RETURN_REASON_LABEL[r]}`)}>
-                  {RETURN_REASON_LABEL[r]}
-                </DropdownMenuItem>
+              {/*
+                HAI TẦNG: nhóm → lý do chi tiết.
+
+                Ba mươi lý do đổ thẳng vào một menu thì người xử lý phải đọc hết mới tìm được cái
+                mình cần, và họ sẽ bấm đại cái đầu tiên trông gần đúng. Nhóm trước thì chọn hai
+                lần nhưng lần nào cũng ngắn — và cái được chọn đúng hơn.
+
+                Chỉ hiện lý do CẦN NGƯỜI GHI cộng với vài lý do thô hay dùng; danh sách đầy đủ nằm
+                ở ngăn kéo chi tiết của kiện.
+              */}
+              {RETURN_REASON_GROUPS.filter((g) => g !== "UNKNOWN").map((g) => (
+                <DropdownMenuSub key={g}>
+                  <DropdownMenuSubTrigger className="text-[13px]">{RETURN_REASON_GROUP_LABEL[g]}</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="max-h-[320px] overflow-y-auto">
+                    {REASONS_BY_GROUP[g].map((r) => (
+                      <DropdownMenuItem key={r} onSelect={() => chay(() => setReturnReason({ shipmentId, reason: r, note: "" }), `${tracking}: ${RETURN_REASON_LABEL[r]}`)}>
+                        {RETURN_REASON_LABEL[r]}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               ))}
             </>
           ) : null}

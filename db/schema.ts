@@ -3221,16 +3221,42 @@ export const shipmentReturnReasons = pgTable(
       .references(() => shipments.id, { onDelete: "cascade" }),
     /** Khoá trong `lib/constants/return-reason.ts::RETURN_REASONS`. */
     reason: text("reason").notNull(),
-    /** Ghi chú của người xác định — bằng chứng để người sau đọc lại hiểu vì sao. */
+    /**
+     * NHÓM LỚN, LƯU KÈM chứ không chỉ suy từ `reason` lúc đọc.
+     *
+     * Suy lúc đọc thì ngày nào đó một lý do được xếp sang nhóm khác là toàn bộ LỊCH SỬ đổi theo,
+     * lặng lẽ: báo cáo quý trước in ra hồi đó không còn khớp với chính nó nữa. Lưu kèm thì dòng
+     * cũ giữ nhóm nó được xếp lúc ghi, và đổi cách xếp nhóm chỉ ảnh hưởng dòng mới.
+     */
+    reasonGroup: text("reason_group").notNull().default("UNKNOWN"),
+    /**
+     * GHI CHÚ TỰ DO — TÁCH HẲN KHỎI `reason`.
+     *
+     * `reason` là DANH MỤC để đếm; `note` là câu chuyện để người sau đọc. Gộp hai thứ vào một ô
+     * chữ là cách chắc chắn nhất để không bao giờ đếm được gì: "vải xấu, khách bảo mỏng quá, đã
+     * xin lỗi" không nhóm được với "vải xấu".
+     */
     note: text("note").notNull().default(""),
     /** Lý do máy suy ra tại thời điểm ghi đè, chép lại để so được. */
     inferredReason: text("inferred_reason").notNull().default(""),
+    /**
+     * `MANUAL` — người của shop hỏi khách rồi ghi. CÓ THẨM QUYỀN.
+     * `AUTO`   — máy suy từ chứng từ ĐVVC. Chỉ với tới được lý do THÔ.
+     * `IMPORT` — nhập một lần từ tệp lịch sử, có đối chiếu định danh mạnh.
+     */
+    source: text("source").notNull().default("MANUAL"),
+    /** `CONFIRMED` · `CARRIER_CODE` · `CARRIER_TEXT` · `IMPORTED` — xem `ReasonConfidence`. */
+    confidence: text("confidence").notNull().default("CONFIRMED"),
     actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
     actorEmail: text("actor_email").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("shipment_return_reasons_reason_idx").on(t.reason)],
+  (t) => [
+    index("shipment_return_reasons_reason_idx").on(t.reason),
+    index("shipment_return_reasons_group_idx").on(t.reasonGroup),
+    check("shipment_return_reasons_source_check", sql`${t.source} IN ('MANUAL', 'AUTO', 'IMPORT')`),
+  ],
 );
 
 export type ShipmentReturnReason = typeof shipmentReturnReasons.$inferSelect;
