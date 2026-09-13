@@ -4,21 +4,25 @@ import path from "node:path";
 import { inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { CARRIER_SUBSTATES } from "@/lib/constants/carrier-substate";
-import { confidenceOf, CONFIDENCE_THRESHOLDS, PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
+import { confidenceOf, CONFIDENCE_THRESHOLDS, MODELLED_SUBSTATES, PROJECTED_GTC_VERSION, projectedRateOf } from "@/lib/constants/projected-delivery";
 import { inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { adsRatio, PROFIT_ASSUMPTIONS_KEY } from "@/lib/constants/profit";
-import { backtestProjectedDelivery, getProbabilityLookup, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
+import { getProbabilityLookup, getProjectionBacktest, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
 
 /**
  * ═══════════ CÙNG MỘT CHỈ SỐ PHẢI RA CÙNG MỘT SỐ Ở MỌI TRANG ═══════════
  *
  * Bài này khoá mô hình dự báo giao thành công: học từ lịch sử thật, một vận đơn một quan sát, kiện
  * chưa kết thúc không vào mẫu số, và không có con số nào được ghi cứng.
+ *
+ * Đây là bài kiểm CÔNG THỨC (formula test), không phải contract test nghiệp vụ: đổi hợp đồng thì đổi
+ * kỳ vọng ở đây, kèm phiên bản.
  */
 
 const P = "par-";
 const gio = (h: number) => new Date(Date.now() - h * 3600_000);
+/** Mốc ĐỦ CHÍN: xa hơn cửa sổ trưởng thành mặc định (14 ngày), để kiện vào tập huấn luyện. */
+const CHIN = 24 * 30;
 
 /* ───── 1 · Không một con số xác suất nào được ghi cứng trong mã ───── */
 export function testNoHardcodedProbability() {
@@ -30,44 +34,49 @@ export function testNoHardcodedProbability() {
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.MEDIUM), "MEDIUM");
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.LOW), "LOW");
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.LOW - 1), "INSUFFICIENT_DATA", "dưới ngưỡng thì một kiện đổi kết cục làm tỷ lệ nhảy hơn 10 điểm — đó là tiếng ồn, không phải xác suất");
-  assert.equal(PROJECTED_GTC_VERSION, "PROJECTED_GTC_V2", "đổi công thức phải đổi phiên bản, để kỳ cũ không bị đọc bằng luật mới");
+  assert.equal(PROJECTED_GTC_VERSION, "PROJECTED_GTC_V3", "đổi công thức phải đổi phiên bản, để kỳ cũ không bị đọc bằng luật mới");
 }
 
 /* ───── 2 · Xác suất học từ lịch sử: một vận đơn một quan sát ───── */
 export async function testProbabilityFromHistory(db: Db) {
-  // Ba kiện "chờ phát lại" đã kết thúc: 2 giao được, 1 hoàn ⇒ p = 2/3.
+  // Ba kiện "chờ phát lại" đã kết thúc: 2 giao được, 1 hoàn ⇒ p = 2/3. Gửi 30 ngày trước: ĐỦ CHÍN.
   const ca: { id: string; stage: "DELIVERED" | "RETURNED"; soSuKien: number }[] = [
     { id: "h1", stage: "DELIVERED", soSuKien: 5 },
     { id: "h2", stage: "DELIVERED", soSuKien: 1 },
     { id: "h3", stage: "RETURNED", soSuKien: 3 },
   ];
   for (const c of ca) {
-    await db.insert(schema.orders).values({ id: `${P}o-${c.id}`, stage: "SHIPPED", status: 2, insertedAt: gio(200) }).onConflictDoNothing();
-    await db.insert(schema.shipments).values({ id: `${P}${c.id}`, orderId: `${P}o-${c.id}`, carrier: "Viettel Post", vtpOrderNumber: `${P}${c.id}`.toUpperCase(), stage: c.stage, isFinal: true }).onConflictDoNothing();
+    await db.insert(schema.orders).values({ id: `${P}o-${c.id}`, stage: "SHIPPED", status: 2, insertedAt: gio(CHIN + 24) }).onConflictDoNothing();
+    await db
+      .insert(schema.shipments)
+      .values({ id: `${P}${c.id}`, orderId: `${P}o-${c.id}`, carrier: "Viettel Post", vtpOrderNumber: `${P}${c.id}`.toUpperCase(), stage: c.stage, isFinal: true, pickedUpAt: gio(CHIN), codAmount: 499_000, codCollected: c.stage === "DELIVERED" ? 499_000 : 0 })
+      .onConflictDoNothing();
     // NHIỀU sự kiện CÙNG một trạng thái — đúng cách Viettel Post thử lại webhook tới 5 lần.
     for (let i = 0; i < c.soSuKien; i++) {
       await db
         .insert(schema.shipmentEvents)
-        .values({ shipmentId: `${P}${c.id}`, source: "VTP_WEBHOOK", status: "", statusName: "Chờ phát lại", occurredAt: new Date(gio(150).getTime() + i * 60_000) })
+        .values({ shipmentId: `${P}${c.id}`, source: "VTP_WEBHOOK", status: "", statusName: "Chờ phát lại", normalizedStage: "DELIVERY_FAILED", occurredAt: new Date(gio(CHIN - 24).getTime() + i * 60_000) })
         .onConflictDoNothing();
     }
   }
   // Một kiện CHƯA kết thúc, cũng "chờ phát lại" — KHÔNG được vào mẫu số.
-  await db.insert(schema.orders).values({ id: `${P}o-h4`, stage: "SHIPPED", status: 2, insertedAt: gio(50) }).onConflictDoNothing();
-  await db.insert(schema.shipments).values({ id: `${P}h4`, orderId: `${P}o-h4`, carrier: "Viettel Post", vtpOrderNumber: `${P}H4`, stage: "DELIVERY_FAILED", isFinal: false }).onConflictDoNothing();
-  await db.insert(schema.shipmentEvents).values({ shipmentId: `${P}h4`, source: "VTP_WEBHOOK", status: "", statusName: "Chờ phát lại", occurredAt: gio(40) }).onConflictDoNothing();
+  await db.insert(schema.orders).values({ id: `${P}o-h4`, stage: "SHIPPED", status: 2, insertedAt: gio(CHIN) }).onConflictDoNothing();
+  await db.insert(schema.shipments).values({ id: `${P}h4`, orderId: `${P}o-h4`, carrier: "Viettel Post", vtpOrderNumber: `${P}H4`, stage: "DELIVERY_FAILED", isFinal: false, pickedUpAt: gio(CHIN) }).onConflictDoNothing();
+  await db.insert(schema.shipmentEvents).values({ shipmentId: `${P}h4`, source: "VTP_WEBHOOK", status: "", statusName: "Chờ phát lại", normalizedStage: "DELIVERY_FAILED", occurredAt: gio(CHIN - 24) }).onConflictDoNothing();
 
   clearMemo();
-  const { states, version } = await getStateDeliveryProbabilities();
+  const { states, version, window } = await getStateDeliveryProbabilities();
   assert.equal(version, PROJECTED_GTC_VERSION);
   const cpl = states.find((s) => s.substate === "WAITING_REDELIVERY")!;
   assert.equal(cpl.sample, 3, "chín sự kiện của ba vận đơn phải cho ĐÚNG BA quan sát — số lần webhook lặp không được quyết định xác suất");
   assert.equal(cpl.delivered, 2);
   assert.ok(cpl.p !== null && Math.abs(cpl.p - 2 / 3) < 1e-9, "p = 2/3");
+  assert.ok(window.maturityDays >= 1 && window.trainedUntil.getTime() < Date.now(), "cửa sổ huấn luyện phải loại kiện chưa đủ chín");
 
-  // Mọi trạng thái đều có mặt trong bảng, kể cả trạng thái chưa có mẫu nào.
-  assert.equal(states.length, CARRIER_SUBSTATES.length, "bảng xác suất phải phủ hết trạng thái, không im lặng bỏ trạng thái chưa gặp");
+  // Mọi trạng thái ĐƯỢC DỰ BÁO đều có mặt trong bảng, kể cả trạng thái chưa có mẫu nào — và KHÔNG có trạng thái cuối.
+  assert.equal(states.length, MODELLED_SUBSTATES.length, "bảng xác suất phải phủ hết trạng thái dự báo được, không im lặng bỏ trạng thái chưa gặp");
   for (const s of states) {
+    assert.ok(!["DELIVERED", "RETURNED", "CANCELLED", "RETURNING"].includes(s.substate), `${s.substate}: trạng thái cuối không được là trạng thái dự báo — P = 1 ở đó là lộ đáp án`);
     if (s.sample === 0) assert.equal(s.p, null, `${s.substate}: chưa có mẫu ⇒ CHƯA ĐO ĐƯỢC (null), không phải 0`);
   }
 }
@@ -85,20 +94,26 @@ export async function testLowSampleNotAuthoritative() {
   const chuaGap = lookup.of("PICKUP_FAILED");
   assert.equal(chuaGap.p, null);
   assert.equal(chuaGap.confidence, "INSUFFICIENT_DATA");
+  // Trạng thái cuối hỏi bảng tra thì cũng KHÔNG có xác suất — không phải 1, không phải 0.
+  assert.equal(lookup.of("DELIVERED").p, null);
 }
 
 /* ───── 4 · Đối chiếu ngược chạy được và không bịa số khi thiếu dữ liệu ───── */
 export async function testBacktestHonest() {
   clearMemo();
-  const b = await backtestProjectedDelivery();
-  if (b.sample === 0) {
-    assert.equal(b.mae, null, "không mẫu nào ⇒ không có sai số để báo, KHÔNG in 0");
-    assert.equal(b.bias, null);
+  const b = await getProjectionBacktest();
+  assert.equal(b.version, PROJECTED_GTC_VERSION);
+  if (b.overall.n === 0) {
+    assert.equal(b.overall.mae, null, "không mẫu nào ⇒ không có sai số để báo, KHÔNG in 0");
+    assert.equal(b.overall.bias, null);
+    assert.equal(b.confidence, "INSUFFICIENT_DATA", "chưa thử được thì là CHƯA ĐỦ DỮ LIỆU — không phải tin cậy cao, cũng không phải sai");
   } else {
-    assert.ok(b.mae !== null && b.mae >= 0 && b.mae <= 1, "sai số tuyệt đối trung bình nằm trong [0,1]");
-    assert.ok(b.bias !== null && b.bias >= -1 && b.bias <= 1);
+    assert.ok(b.overall.mae !== null && b.overall.mae >= 0 && b.overall.mae <= 1, "sai số tuyệt đối trung bình nằm trong [0,1]");
+    assert.ok(b.overall.bias !== null && b.overall.bias >= -1 && b.overall.bias <= 1);
+    assert.ok(b.overall.brier !== null && b.overall.brier >= 0 && b.overall.brier <= 1);
   }
   assert.ok(b.coverage === null || (b.coverage >= 0 && b.coverage <= 100));
+  assert.ok(b.months.length <= 3, "thử ngược cuộn tối đa ba tháng gần nhất");
 }
 
 /* ───── 5 · Chỉ số ước tính chạy được trên dữ liệu thật và tự nhất quán ───── */
@@ -115,45 +130,36 @@ export async function testProjectedMetricsConsistent() {
     assert.equal(dangChay, r.active, `${r.code}: phân rã trạng thái phải cộng đúng bằng số đơn đang chạy`);
     if (r.actualRate !== null) assert.ok(r.actualRate >= 0 && r.actualRate <= 100);
     if (r.projectedRate !== null) assert.ok(r.projectedRate >= 0 && r.projectedRate <= 100);
+    // MỘT công thức: dòng nào cũng phải bằng đúng hàm chung.
+    assert.equal(r.projectedRate, projectedRateOf(r), `${r.code}: tỷ lệ ước tính phải là ĐÚNG hàm projectedRateOf`);
   }
   // Đơn chưa lần được mã KHÔNG bị nhét vào một mã nào đó cho đủ bảng.
   assert.ok(m.unmappedOrders >= 0 && m.totalOrders >= m.unmappedOrders);
   assert.equal(m.version, PROJECTED_GTC_VERSION);
 
   /*
-    CON SỐ TOÀN SHOP PHẢI Ở GRAIN ĐƠN, KHÔNG PHẢI TỔNG CÁC DÒNG THEO MÃ.
-
-    Cộng các dòng theo mã sai ở CẢ HAI đầu phân số, và hai cái sai không triệt tiêu nhau:
-      · đơn hai mã hàng được cộng cho cả hai mã — đúng cho cột theo mã, nhưng làm mẫu số lớn hơn
-        số đơn thật;
-      · đơn chưa lần được về mã nào bị BỎ HẲN khỏi các dòng theo mã.
-    Nên "đang giao N đơn" cộng kiểu đó có thể vừa thừa vừa thiếu cùng lúc.
+    CON SỐ TOÀN SHOP PHẢI Ở GRAIN ĐƠN, KHÔNG PHẢI TỔNG CÁC DÒNG THEO MÃ: đơn hai mã hàng được cộng
+    cho cả hai mã (mẫu số phình), đơn chưa lần được về mã nào bị BỎ HẲN (mẫu số hụt).
   */
   const od = m.orderLevel;
   const dangGiao = Object.values(od.activeByState).reduce<number>((a, n) => a + (n ?? 0), 0);
   assert.equal(dangGiao, od.active, "phân rã trạng thái phải cộng đúng bằng số đơn đang giao");
   assert.equal(od.eligibleSent, od.deliveredActual + od.failedActual + od.active, "ở grain đơn cũng không rổ nào được rơi ra");
   /*
-    Mẫu số ở grain đơn phải là ĐÚNG số đơn trong cohort — đơn chưa lần được về mã nào VẪN nằm
-    trong đó. Bỏ chúng ra là im lặng thu hẹp cohort: tỷ lệ vẫn ra một con số trông bình thường,
-    chỉ là nó nói về một tập đơn nhỏ hơn tập mà người đọc tưởng mình đang xem.
+    Mẫu số ở grain đơn = ĐÚNG số đơn ĐÃ GỬI trong cohort — đơn chưa lần được về mã nào VẪN nằm trong
+    đó; đơn huỷ / chưa gửi / không dấu vết ĐVVC được đếm RIÊNG, không trộn vào.
   */
-  assert.equal(od.eligibleSent, m.totalOrders, "mỗi đơn trong cohort đếm ĐÚNG MỘT LẦN, kể cả đơn chưa lần được mã");
+  assert.equal(od.eligibleSent + od.cancelled + od.unknown + od.pending, m.totalOrders, "mỗi đơn trong cohort đếm ĐÚNG MỘT LẦN: đã gửi + huỷ + không dấu vết + chưa gửi");
   assert.ok(od.unmodelledActive >= 0 && od.unmodelledActive <= od.active, "phần chưa dự báo được là một TẬP CON của phần đang giao");
   assert.ok(od.projectedDelivered >= od.deliveredActual - 1e-9, "ước tính không được THẤP HƠN số đã giao thật");
   assert.ok(od.projectedDelivered <= od.eligibleSent + 1e-9, "ước tính không được vượt quá số đơn đã gửi");
+  assert.equal(od.projectedRate, projectedRateOf(od), "grain đơn cũng đi qua ĐÚNG một hàm");
   if (od.projectedRate !== null) assert.ok(od.projectedRate >= 0 && od.projectedRate <= 100);
-  else assert.equal(od.eligibleSent, 0, "chỉ được CHƯA ĐO ĐƯỢC khi cohort rỗng — có đơn mà trả null là đang giấu số");
+  else assert.ok(od.eligibleSent - od.unmodelledActive === 0 || od.unmodelledActive / Math.max(1, od.active) > 0.5, "chỉ được CHƯA ĐO ĐƯỢC khi mẫu số rỗng hoặc phần ngoài ước tính quá lớn — có đơn dự báo được mà trả null là đang giấu số");
 }
 
 /* ───── 6 · Rủi ro tồn kho là CHI PHÍ CỦA KỲ, không phải của lô nhập ───── */
 export function testInventoryRiskIsPeriodExpense() {
-  /*
-    Bài này khoá bằng ĐỌC MÃ NGUỒN, vì chỗ hỏng nằm ở CHỌN BIẾN NÀO chứ không ở phép tính: bảng
-    "lợi nhuận theo hàng nhập" từng trừ `inventoryRiskOnPurchase` (rủi ro CẢ ĐỜI của lô) vào lợi
-    nhuận kỳ chứa phiếu nhập. Hệ quả đo được trên production: kỳ 7 ngày không có phiếu nhập nào ⇒
-    cột rủi ro bằng ĐÚNG 0, và bảng nói hàng đang bán không mang rủi ro nào.
-  */
   const nguon = readFileSync(path.join(process.cwd(), "lib/queries/profit-nominal.ts"), "utf8");
   const dongLoiNhuan = nguon.split("\n").filter((l) => l.includes("profitOnPurchase =") || l.includes("const profitOnPurchase"));
   assert.ok(dongLoiNhuan.length >= 2, "phải tìm thấy cả công thức từng dòng lẫn công thức tổng");
@@ -172,19 +178,11 @@ export function testInventoryRiskIsPeriodExpense() {
 
 /* ───── 7 · Hai tỷ lệ quảng cáo: mẫu số 0 ⇒ N/A, không phải 0% ───── */
 export function testAdsRatios() {
-  // Đúng ví dụ trong đặc tả.
   assert.equal(adsRatio(10_000_000, 100_000_000), 10, "10tr / 100tr = 10%");
   assert.equal(adsRatio(10_000_000, 50_000_000), 20, "10tr / 50tr = 20%");
-  /*
-    MẪU SỐ 0 ⇒ `null`, KHÔNG phải 0%.
-
-    Chưa bán được đồng nào mà hiện "0%" sẽ bị đọc thành "quảng cáo không tốn gì" — ngược hoàn toàn
-    sự thật, và ngược đúng vào lúc nguy hiểm nhất (mã mới chạy, chưa ra đơn).
-  */
   assert.equal(adsRatio(10_000_000, 0), null, "mẫu số 0 ⇒ chưa tính được, không phải 0%");
   assert.equal(adsRatio(0, 0), null);
   assert.equal(adsRatio(10_000_000, -5), null, "mẫu số âm cũng không chia");
-  // Chi 0 đồng quảng cáo mà CÓ doanh số thì 0% là con số THẬT — không được biến nó thành N/A.
   assert.equal(adsRatio(0, 100_000_000), 0, "không chi quảng cáo mà vẫn bán được ⇒ 0% là sự thật");
 }
 
@@ -192,8 +190,7 @@ export async function testReportingParity(db: Db) {
   testNoHardcodedProbability();
   /*
     THỨ TỰ CÓ Ý NGHĨA: khối 2 và 3 khoá cỡ mẫu của trạng thái "chờ phát lại" bằng con số ĐÚNG BA.
-    Mọi khối gieo thêm vận đơn vào trạng thái ấy phải chạy SAU chúng, nếu không thì bài không hỏng
-    vì mã sai mà hỏng vì bài đứng nhầm chỗ.
+    Mọi khối gieo thêm vận đơn vào trạng thái ấy phải chạy SAU chúng.
   */
   await testProbabilityFromHistory(db);
   await testLowSampleNotAuthoritative();
@@ -222,8 +219,8 @@ export async function testReportingParity(db: Db) {
   await db.delete(schema.products).where(inArray(schema.products.id, [`${X}p`]));
 
   clearMemo();
-  console.log("✓ Một hợp đồng cho “TL GTC ước tính”: xác suất học từ lịch sử · một vận đơn một quan sát · kiện chưa kết thúc ngoài mẫu số · mẫu nhỏ KHÔNG thành xác suất · không con số nào ghi cứng · rủi ro tồn kho là chi phí CỦA KỲ · mẫu số 0 ⇒ N/A không phải 0%");
-  console.log("✓ Parity chéo hai trang: cùng mã + cùng kỳ + cùng mốc ⇒ CÙNG MỘT SỐ · hai grain khớp nhau · đổi mốc thì đổi cohort (không ghim cứng) · ghi đè tay THẮNG mô hình");
+  console.log("✓ Một hợp đồng cho “TL GTC ước tính” (V3): xác suất học từ lịch sử theo ORDER_OUTCOME · một vận đơn một quan sát · kiện chưa kết thúc / chưa đủ chín ngoài mẫu số · trạng thái cuối không dự báo · mẫu nhỏ KHÔNG thành xác suất · rủi ro tồn kho là chi phí CỦA KỲ · mẫu số 0 ⇒ N/A");
+  console.log("✓ Parity chéo hai trang: cùng mã + cùng kỳ + cùng mốc ⇒ CÙNG MỘT SỐ · DT GTC ƯT cân theo từng đơn · hai grain khớp nhau · đổi mốc thì đổi cohort · ghi đè tay THẮNG mô hình");
 }
 
 /* ───── 8 · CÙNG MÃ + CÙNG KỲ + CÙNG MỐC ⇒ CÙNG MỘT SỐ Ở HAI TRANG ───── */
@@ -233,11 +230,8 @@ const X = "parx-";
 const MA = "PARX-GTC";
 
 /**
- * Dựng một mã hàng có kết cục ĐÃ NGÃ NGŨ HẾT: 1 giao thành công, 1 hoàn, 0 đơn đang chạy.
- *
- * Chọn "hết đơn đang chạy" là cố ý: khi ấy tỷ lệ ước tính KHÔNG phụ thuộc bảng xác suất học được
- * (vốn đổi theo dữ liệu của các khối khác trong cùng CSDL dùng chung), nên bài này khoá đúng một
- * thứ — HAI TRANG CÓ CÙNG MỘT SỐ HAY KHÔNG — chứ không khoá kèm giá trị của mô hình.
+ * Dựng một mã hàng có kết cục ĐÃ NGÃ NGŨ HẾT: 1 giao thành công, 1 hoàn, 0 đơn đang chạy — khi ấy
+ * tỷ lệ ước tính KHÔNG phụ thuộc bảng xác suất, nên bài khoá đúng một thứ: hai trang có cùng số.
  */
 async function dungFixtureParity(db: Db, luc: Date) {
   await db.insert(schema.products).values({ id: `${X}p`, name: "Hàng kiểm parity", customId: MA }).onConflictDoNothing();
@@ -262,14 +256,13 @@ async function dungFixtureParity(db: Db, luc: Date) {
         vtpStatusName: d.giao ? "Giao thành công" : "Chuyển hoàn",
         stage: d.giao ? "DELIVERED" : "RETURNED",
         isFinal: true,
-        // COD thực thu > 100K cho đơn giao được: bảng lợi nhuận đếm "đã giao" theo TIỀN, không theo stage.
         codAmount: 500_000,
         codCollected: d.giao ? 500_000 : 0,
         pickedUpAt: luc,
         deliveredAt: d.giao ? luc : null,
       })
       .onConflictDoNothing();
-    await db.insert(schema.shipmentEvents).values({ shipmentId: `${X}s-${d.id}`, source: "VTP_WEBHOOK", status: d.giao ? "501" : "504", statusName: d.giao ? "Giao thành công" : "Chuyển hoàn", occurredAt: luc }).onConflictDoNothing();
+    await db.insert(schema.shipmentEvents).values({ shipmentId: `${X}s-${d.id}`, source: "VTP_WEBHOOK", status: d.giao ? "501" : "504", statusName: d.giao ? "Giao thành công" : "Chuyển hoàn", legType: "OUTBOUND", occurredAt: luc }).onConflictDoNothing();
   }
 }
 
@@ -287,40 +280,37 @@ export async function testCrossReportParity(db: Db) {
   const hopDong = await getProjectedDeliveryMetrics(ky, "ORDERED", "PRODUCT");
   const dongHopDong = hopDong.rows.find((r) => r.code === MA);
   assert.ok(dongHopDong, "hợp đồng phải thấy mã fixture — nếu không thì bài này rỗng và không khoá được gì");
+  assert.equal(dongHopDong.key, `${X}p`, "grain PRODUCT khoá theo product_id — đúng khoá bảng lợi nhuận dùng");
   assert.equal(dongHopDong.eligibleSent, 2);
   assert.equal(dongHopDong.active, 0, "fixture cố ý KHÔNG có đơn đang chạy, để số không phụ thuộc bảng xác suất");
   assert.equal(dongHopDong.projectedRate, 50, "1 giao / 2 gửi = 50%");
+  assert.equal(dongHopDong.projectedDeliveredRevenue, 500_000, "DT GTC ước tính = DT đơn đã giao (cân theo từng đơn)");
 
   const nominal = await getNominalProfitReport(ky);
   const dongLoiNhuan = nominal.rows.find((r) => r.code === MA);
   assert.ok(dongLoiNhuan, "bảng lợi nhuận phải thấy mã fixture");
 
   /*
-    ĐÂY LÀ BẤT BIẾN CHÍNH CỦA CẢ BẢN NÀY.
-
-    Trước bản này bảng lợi nhuận tự trộn `(hoàn + chờ_phát_lại × p + chưa_rõ × giả_định) ÷ tổng_đơn`
-    còn trang hiệu quả theo mã trộn một kiểu khác — bốn khác biệt độc lập (mẫu số, cách xử lý nhóm
-    chưa rõ, mốc cohort, grain) nhân nhau thành hai con số không bao giờ gặp nhau.
-
-    Bài này so THẲNG hai đầu ra, không so hai công thức: dù ai sửa chỗ nào, hai trang vẫn phải nói
-    cùng một câu về cùng một mã trong cùng một kỳ.
+    BẤT BIẾN CHÍNH: so THẲNG hai đầu ra, không so hai công thức — dù ai sửa chỗ nào, hai trang vẫn
+    phải nói cùng một câu về cùng một mã trong cùng một kỳ.
   */
   assert.equal(dongLoiNhuan.deliveryRate, dongHopDong.projectedRate, "TL GTC ước tính của bảng lợi nhuận phải TRÙNG KHÍT con số của hợp đồng — cùng mã, cùng kỳ, cùng mốc");
-  assert.equal(dongLoiNhuan.returnRate, Math.round((100 - dongHopDong.projectedRate) * 10) / 10);
+  assert.equal(dongLoiNhuan.returnRate, Math.round((100 - dongHopDong.projectedRate!) * 10) / 10);
   assert.equal(dongLoiNhuan.returnRateSource, "projected", "phải khai đúng nguồn: con số này do mô hình dựng, không phải tỷ lệ lịch sử của mã");
   assert.ok(dongLoiNhuan.projection && dongLoiNhuan.projection.eligibleSent === 2, "phải mang theo xuất xứ để màn hình nói ra được");
+  assert.equal(dongLoiNhuan.revenueBasis, "ORDER_LEVEL", "nguồn projected ⇒ tiền cân theo TỪNG ĐƠN, không phải doanh số × tỷ lệ");
+  assert.equal(dongLoiNhuan.expectedRevenue, dongHopDong.projectedDeliveredRevenue, "DT GTC ƯT của bảng lợi nhuận = ĐÚNG doanh thu cân theo đơn của hợp đồng");
+  assert.equal(dongLoiNhuan.expectedCogs, dongHopDong.projectedCogs, "giá vốn ước tính cũng cân theo đơn");
+  assert.equal(dongLoiNhuan.expectedCogs, 200_000, "chỉ đơn đã giao mang giá vốn");
 
   /* ─── Trang hiệu quả theo mã: cùng hợp đồng, chỉ khác grain và mốc ─── */
   const { getReturnRateSummary, getReturnRateByVariant } = await import("@/lib/queries/return-rate");
   const tong = await getReturnRateSummary(ky, "", "SHIPPED");
   const hopDongGui = await getProjectedDeliveryMetrics(ky, "SHIPPED", "PRODUCT");
-  /*
-    So với con số Ở GRAIN ĐƠN, không phải tổng các dòng theo mã. Cộng các dòng theo mã vừa thừa
-    (đơn nhiều mã cộng cho mọi mã) vừa thiếu (đơn chưa lần được mã bị bỏ) — đúng phép cộng đó đã
-    làm bài này đỏ với 43,1% trong khi sự thật là 50%.
-  */
+  assert.equal(tong.projectionError, null, "không có lỗi thì trường lỗi phải rỗng");
   assert.equal(tong.expectedSuccessRate, hopDongGui.orderLevel.projectedRate, "thẻ “Tỷ lệ giao thành công” phải là ĐÚNG con số của hợp đồng ở cùng mốc, không phải một phép trộn riêng");
   assert.ok(tong.projection !== null && tong.projection.version === PROJECTED_GTC_VERSION, "thẻ phải mang theo phiên bản hợp đồng để màn hình khai ra");
+  assert.ok(tong.projection.backtest !== null || tong.projection.backtestError !== null, "nhãn tin cậy (hoặc lỗi thử ngược) phải đi kèm con số ước tính");
 
   /* ─── Grain MẪU MÃ: cùng hợp đồng, dòng của mã fixture phải khớp ─── */
   const bang = await getReturnRateByVariant({ period: ky, basis: "SHIPPED", q: "", minShipped: 0, sort: "successRate", dir: "asc", page: 1, pageSize: 50 });
@@ -333,13 +323,6 @@ export async function testCrossReportParity(db: Db) {
 
 /* ───── 9 · MỐC LỌC ĐI THEO NGƯỜI DÙNG CHỌN, KHÔNG GHIM CỨNG ───── */
 export async function testBasisFlowsThrough(db: Db) {
-  /*
-    Đơn CHỐT trong kỳ nhưng ĐVVC mới cầm hàng TRƯỚC kỳ. Đo production 13/09/2026: 73,6% vận đơn có
-    hai mốc rơi vào hai ngày khác nhau, lệch trung bình 4,5 ngày — nên đây không phải ca hiếm.
-
-    Trang hiệu quả theo mã cho người dùng đổi mốc. Nếu bảng lọc theo mốc đang chọn mà con số ước
-    tính vẫn ghim "ngày gửi", màn hình sẽ in một bảng của lô này kèm một tỷ lệ của lô khác.
-  */
   const luc = gio(72);
   await db.insert(schema.orders).values({ id: `${X}o-lech`, stage: "SHIPPED", status: 2, insertedAt: luc, totalPriceAfterDiscount: 500_000 }).onConflictDoNothing();
   await db.insert(schema.orderItems).values({ id: `${X}i-lech`, orderId: `${X}o-lech`, variantId: `${X}v`, productId: `${X}p`, sku: `${MA}-S`, productName: "Hàng kiểm parity", variationDetail: "S", quantity: 1, lineTotal: 500_000, unitCost: 200_000, isBonus: false }).onConflictDoNothing();
@@ -383,25 +366,25 @@ export async function testBasisFlowsThrough(db: Db) {
 
 /* ───── 10 · GHI ĐÈ TAY THẮNG MÔ HÌNH ───── */
 export async function testOverrideBeatsModel() {
-  /*
-    Chủ shop gõ một tỷ lệ cho mã là một QUYẾT ĐỊNH, không phải một ước lượng cần được cải thiện.
-    Khi nối mô hình vào bảng lợi nhuận, nhánh mới rất dễ đè lên nhánh ghi đè — và hỏng theo kiểu
-    khó thấy nhất: ô nhập vẫn nhận số, vẫn lưu, mà bảng không đổi.
-  */
   const { getSettingJson, setSettingJson } = await import("@/lib/settings");
   const cu = await getSettingJson<Record<string, unknown>>(PROFIT_ASSUMPTIONS_KEY, {});
-  // Khoá ĐÚNG như `ProfitAssumptions` khai: `overrides`, đánh theo `productId` (không phải mã hàng).
   const overrides = { ...(cu.overrides as Record<string, number> | undefined) };
   await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...cu, overrides: { ...overrides, [`${X}p`]: 12.5 } });
 
   const ky = { from: gio(24 * 30), to: new Date(), key: "30d", label: "30 ngày" } as never;
   clearMemo();
   const { getNominalProfitReport } = await import("@/lib/queries/profit-nominal");
-  const dong = (await getNominalProfitReport(ky)).rows.find((r) => r.code === MA);
+  const bao = await getNominalProfitReport(ky);
+  const dong = bao.rows.find((r) => r.code === MA);
   assert.ok(dong);
   assert.equal(dong.returnRateSource, "override", "ghi đè tay phải THẮNG mô hình");
   assert.equal(dong.returnRate, 12.5, "và giữ nguyên con số chủ shop đã gõ, không bị mô hình làm tròn lại");
   assert.equal(dong.projection, null, "nguồn là ghi đè ⇒ không được khai xuất xứ mô hình cho một con số mô hình không sinh ra");
+  assert.equal(dong.revenueBasis, "RATE", "ghi đè ⇒ tiền tính theo tỷ lệ, và nhãn phải nói “ước tính theo tỷ lệ”");
+  assert.equal(dong.expectedRevenue, Math.round(dong.grossSales * (1 - 0.125)), "ghi đè: DT = doanh số POS × (1 − r)");
+  // Thẻ tổng của trang KHÔNG đổi theo ghi đè: nó là con số của hợp đồng ở grain đơn.
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  assert.equal(bao.totals.weightedDeliveryRate, (await getProjectedDeliveryMetrics(ky, "ORDERED", "PRODUCT")).orderLevel.projectedRate, "thẻ TL GTC ước tính toàn shop = orderLevel.projectedRate của hợp đồng, kể cả khi có ghi đè");
 
   // Trả lại đúng trạng thái cũ: khối khác đọc chung cấu hình này.
   await setSettingJson(PROFIT_ASSUMPTIONS_KEY, cu);

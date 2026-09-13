@@ -1,6 +1,5 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
-import { memo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
@@ -521,12 +520,12 @@ export type ReturnRateRow = {
   inTransit: number;
   /** Đang chờ phát lại (giao thất bại chưa kết thúc) */
   failed: number;
-  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V2`. */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V3`. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG (%) = giao thành công (COD thực > 100K) ÷ (giao thành công + không thành công) trên đơn đã kết thúc; null nếu chưa có đơn kết thúc */
   successRate: number | null;
   /**
-   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V2` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
    * suất của CHÍNH trạng thái ĐVVC nó đang ở. `null` = CHƯA ĐO ĐƯỢC, không phải 0%.
    */
   expectedSuccessRate: number | null;
@@ -534,7 +533,9 @@ export type ReturnRateRow = {
   projectedSent: number;
   /** Tử số thô (có phần lẻ: đơn đang chạy đóng góp xác suất của nó). */
   projectedDelivered: number;
-  /** Đơn đang chạy mà mô hình chưa dự báo được (trạng thái chưa đủ mẫu). */
+  /** Đơn đang chạy trong cohort ước tính — để dòng gộp áp cùng luật "ngoài ước tính quá lớn". */
+  projectedActive: number;
+  /** Đơn đang chạy mà mô hình chưa dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
   unmodelledActive: number;
   cancelled: number;
   returnedQty: number;
@@ -577,7 +578,7 @@ function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED"): SQL
 }
 
 /** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
-export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[] }> {
+export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; projectionError: string | null }> {
   const db = await getDb();
   // 11 cột gộp trên cùng một biểu thức kết quả đơn ⇒ tính một lần cho mỗi dòng bằng bảng dẫn xuất.
   const base = db
@@ -603,7 +604,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     .as("variant_base");
 
   const RETURNED_ANY = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
-  // Cùng lý do và cùng cách bọc như `getReturnRateSummary`: chỉ câu lệnh cuối, `failedToReturnRate()`
+  // Cùng lý do và cùng cách bọc như `getReturnRateSummary`: chỉ câu lệnh cuối, hợp đồng ước tính
   // nằm ngoài giao dịch. Đo được 7.066ms nguội cho hàm này.
   const raw = await chayKhongJit(db, (tx) => tx
     .select({
@@ -643,8 +644,19 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     tệp này, import tĩnh hai chiều sẽ tạo vòng và vòng import ESM hỏng im lặng.
   */
   const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
-  const duBao = await getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT").catch(() => null);
-  const duBaoTheoKhoa = new Map((duBao?.rows ?? []).map((x) => [x.code, x]));
+  /*
+    LỖI LÀ LỖI, KHÔNG PHẢI "CHƯA ĐỦ DỮ LIỆU". Bản trước `.catch(() => null)`: một câu SQL hỏng làm
+    mọi ô ước tính in "chưa đo được" — người đọc tưởng thiếu dữ liệu trong khi mô hình không chạy.
+    Nay lỗi được giữ lại và trả lên màn hình bằng tên của nó.
+  */
+  let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
+  let projectionError: string | null = null;
+  try {
+    duBao = await getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT");
+  } catch (e) {
+    projectionError = e instanceof Error ? e.message : String(e);
+  }
+  const duBaoTheoKhoa = new Map((duBao?.rows ?? []).map((x) => [x.key, x]));
 
   const all: ReturnRateRow[] = raw
     .map((r) => {
@@ -654,6 +666,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       const d = duBaoTheoKhoa.get(r.key);
       const projectedSent = d?.eligibleSent ?? 0;
       const projectedDelivered = d?.projectedDelivered ?? 0;
+      const projectedActive = d?.active ?? 0;
       const expectedRate = d && d.projectedRate !== null ? Math.round((100 - d.projectedRate) * 10) / 10 : null;
       return {
         key: r.key,
@@ -675,6 +688,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         // mã 200 đơn. Cộng tử số và mẫu số rồi mới chia thì không.
         projectedSent,
         projectedDelivered,
+        projectedActive,
         unmodelledActive: d?.unmodelledActive ?? 0,
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
@@ -700,7 +714,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
   const total = all.length;
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
   const start = (query.page - 1) * query.pageSize;
-  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all };
+  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all, projectionError };
 }
 
 export type ReturnRateSummary = {
@@ -722,8 +736,8 @@ export type ReturnRateSummary = {
   /** TỶ LỆ GIAO THÀNH CÔNG chung (%) = giao thành công ÷ (giao thành công + không thành công) */
   successRate: number | null;
   /**
-   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V2`, xem `lib/constants/projected-delivery.ts`.
-   * `null` = CHƯA ĐO ĐƯỢC (cohort rỗng hoặc mô hình chưa dự báo được đơn nào), KHÔNG phải 0%.
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3`, xem `lib/constants/projected-delivery.ts`.
+   * `null` = CHƯA ĐO ĐƯỢC (cohort rỗng, mô hình chưa dự báo được, hoặc phần ngoài ước tính quá lớn), KHÔNG phải 0%.
    */
   expectedSuccessRate: number | null;
   /** Xuất xứ con số ước tính, để màn hình nói ra thay vì để người đọc đoán. `null` = không tính được. */
@@ -733,57 +747,27 @@ export type ReturnRateSummary = {
     eligibleSent: number;
     /** Đơn chưa có kết cục — phần mà con số này đang DỰ BÁO. */
     active: number;
-    /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu). */
+    /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
     unmodelledActive: number;
+    /** Đơn huỷ / không dấu vết ĐVVC — ngoài cohort, đếm riêng để tổng khớp trang khác. */
+    cancelled: number;
+    unknown: number;
     /** "Đang giao" tách theo trạng thái ĐVVC, ĐẾM THEO ĐƠN — kèm xác suất và độ tin cậy của từng nhóm. */
     byState: { substate: string; label: string; orders: number; p: number | null; sample: number; confidence: string }[];
+    /** Cửa sổ huấn luyện đang dùng — để màn hình khai "học từ kiện gửi trước N ngày". */
+    maturityDays: number;
+    maturitySource: "MEASURED" | "DEFAULT";
+    /** Kết quả thử ngược của mô hình — nhãn tin cậy đứng cạnh con số. `null` khi thử ngược lỗi. */
+    backtest: import("@/lib/queries/projected-delivery").BacktestSummary | null;
+    backtestError: string | null;
   } | null;
-  /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
-  failedToReturnPct: number;
-  failedSample: number;
+  /** Lỗi khi tính ước tính (câu SQL hỏng, CSDL…) — hiện đúng là LỖI, không hiện "chưa đủ dữ liệu". */
+  projectionError: string | null;
   /** Đơn đã kết thúc (giao / hoàn) mà vận đơn chưa có trạng thái Viettel Post thật — đang tính theo trạng thái Pancake */
   finishedNoVtp: number;
   /** Đơn đang kết luận bằng số TẠM TÍNH: chưa có chứng từ tiền, số sẽ đổi khi bảng kê về. */
   provisional: number;
 };
-
-/** Xác suất một vận đơn đã từng giao thất bại cuối cùng thành hoàn (180 ngày gần nhất); dưới 15 mẫu dùng 60% */
-export async function failedToReturnRate(): Promise<{ rate: number; sample: number }> {
-  return memo("failedToReturnRate", 300_000, async () => {
-    const db = await getDb();
-    /*
-      JIT TẮT — HÀM NÀY LÀ CHI PHÍ CÒN LẠI LỚN NHẤT, VÀ TÔI ĐÃ ĐỂ SÓT NÓ.
-
-      Lượt sửa trước cố ý để `failedToReturnRate()` NGOÀI giao dịch của hai hàm gọi nó (đúng, vì nó
-      tự mở kết nối riêng — bọc vào là khoá chết). Nhưng để ngoài không có nghĩa là để nguyên: nó
-      cần giao dịch của CHÍNH NÓ.
-
-      Kế hoạch thực thi trên production nói rõ: chi phí ước lượng 599.692 — gấp sáu lần ngưỡng
-      `jit_above_cost` mặc định (100.000) nên JIT bật. Cùng phép quét ấy chạy riêng bằng psql chỉ
-      **127ms** (`shared hit=2594, read=0`), còn trong câu này là **2.900ms**.
-
-      Đã loại hai giả thuyết khác bằng số liệu trước khi kết luận:
-       · KHÔNG phải đọc đĩa — tỷ lệ trúng đệm của `shipment_events` là 100% (18,4 triệu hit / 2.544 read);
-       · KHÔNG phải tra cứu kết quả đơn đã tính sẵn — nó chỉ tốn 0,003ms × 649 lượt ≈ 2ms, và nhánh
-         nhanh thắng 2.520/2.521 lượt.
-    */
-    const [row] = await chayKhongJit(db, (tx) => tx
-      .select({
-        // Theo DOANH THU chứ không theo trạng thái: Viettel Post ghi "giao thành công" cho cả
-        // chiều hoàn, nên đếm bằng stage thô sẽ làm tỷ lệ "giao thất bại → hoàn" thấp giả tạo
-        // và khiến báo cáo lợi nhuận / kế hoạch sản xuất lạc quan quá mức.
-        returned: sql<number>`count(*) filter (where ${SHIPMENT_RETURNED})`,
-        delivered: sql<number>`count(*) filter (where ${SHIPMENT_DELIVERED})`,
-      })
-      .from(sql`(select distinct e.shipment_id from shipment_events e where e.occurred_at >= now() - interval '180 days' and (e.status in ('505','506','507','510') or e.status_name ilike '%thất bại%' or e.status_name ilike '%hẹn%' or e.status_name ilike '%không liên lạc%')) f`)
-      .innerJoin(s, sql`${s.id} = f.shipment_id`)
-      .leftJoin(o, eq(o.id, s.orderId)));
-    const returned = Number(row?.returned ?? 0);
-    const delivered = Number(row?.delivered ?? 0);
-    const sample = returned + delivered;
-    return { rate: sample >= 15 ? returned / sample : 0.6, sample };
-  });
-}
 
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
 export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<ReturnRateSummary> {
@@ -832,7 +816,7 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
     JIT ↔ 26ms tắt JIT, CÙNG số khối đệm.
 
     Chỉ bọc câu lệnh CUỐI. Bảng dẫn xuất `base` chỉ là mảnh SQL nên dựng bằng `db` hay `tx` đều
-    như nhau; `failedToReturnRate()` bên dưới tự mở kết nối riêng nên PHẢI nằm ngoài giao dịch —
+    như nhau; hợp đồng ước tính bên dưới tự mở kết nối riêng nên PHẢI nằm ngoài giao dịch —
     bọc nó vào là khoá chết (đã dẫm phải một lần ở báo cáo lương).
   */
   const [row] = await chayKhongJit(db, (tx) => tx
@@ -855,36 +839,28 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   const delivered = Number(row?.delivered ?? 0);
   const returned = Number(row?.returned ?? 0);
   const failed = Number(row?.failed ?? 0);
-  const p = await failedToReturnRate();
   /*
     ═══ TỶ LỆ GTC ƯỚC TÍNH LẤY TỪ HỢP ĐỒNG CHUNG ═══
 
-    Công thức cũ ngay dưới đây chỉ cân nhóm `failed` (chờ phát lại) với một xác suất CỦA CẢ SHOP,
-    và bỏ qua mọi đơn đang chạy khác. Trang lợi nhuận thì cân TẤT CẢ đơn chưa rõ bằng một tỷ lệ giả
-    định. Hai cách khác nhau ⇒ hai con số cho cùng một kỳ, và không màn hình nào nói ra mình đang
-    dùng cách nào.
+    Cả trang này lẫn bảng lợi nhuận đọc `getProjectedDeliveryMetrics` — cùng bảng xác suất học từ
+    lịch sử thật, mỗi đơn cân theo ĐÚNG trạng thái ĐVVC đang báo về chính nó. Mốc cohort đi theo
+    `basis` mà người dùng đang chọn trên chính trang này, không ghim cứng.
 
-    Nay cả hai đọc `getProjectedDeliveryMetrics` — cùng bảng xác suất học từ lịch sử thật, mỗi đơn
-    cân theo ĐÚNG trạng thái ĐVVC đang báo về chính nó. Mốc cohort đi theo `basis` mà người dùng
-    đang chọn trên chính trang này, không ghim cứng.
-  */
-  /*
-    NẠP LÚC GỌI, KHÔNG NẠP LÚC DỊCH: `projected-delivery.ts` import `PRIMARY_ATTEMPT` từ chính tệp
-    này. Import tĩnh hai chiều sẽ tạo vòng, và vòng import trong ESM hỏng theo kiểu tệ nhất — một
-    trong hai module thấy `undefined` tuỳ thứ tự nạp, không lỗi nào phát ra lúc dịch.
+    NẠP LÚC GỌI, KHÔNG NẠP LÚC DỊCH: `projected-delivery.ts` import từ chính tệp này; import tĩnh hai
+    chiều tạo vòng, và vòng import ESM hỏng im lặng.
+
+    LỖI LÀ LỖI: không `.catch(() => null)`. Một câu SQL hỏng phải hiện ra là lỗi trên màn hình, không
+    hiện ra là "chưa đủ dữ liệu".
   */
   const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
-  // Truyền THẲNG mốc mà trang đang hiển thị xuống: bảng số liệu và con số ước tính phải cắt cùng
-  // một tập đơn. Ghim cứng "SHIPPED" ở đây thì người đổi sang "Ngày tạo đơn" sẽ thấy một bảng của
-  // cohort này kèm một tỷ lệ ước tính của cohort khác — đúng kiểu lệch mà bản này đang đi xoá.
-  const duBao = await getProjectedDeliveryMetrics(period, basis).catch(() => null);
-  /*
-    LẤY THẲNG CON SỐ Ở GRAIN ĐƠN, KHÔNG CỘNG CÁC DÒNG THEO MÃ.
-
-    Cộng các dòng theo mã sai ở CẢ HAI đầu phân số, và hai cái sai không triệt tiêu nhau: đơn hai
-    mã hàng được cộng cho cả hai mã (làm mẫu số lớn hơn số đơn thật), còn đơn chưa lần được về mã
-    nào thì bị bỏ hẳn. Thẻ này nói về ĐƠN, nên nó phải hỏi hợp đồng ở grain đơn.
-  */
+  let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
+  let projectionError: string | null = null;
+  try {
+    duBao = await getProjectedDeliveryMetrics(period, basis);
+  } catch (e) {
+    projectionError = e instanceof Error ? e.message : String(e);
+  }
+  // LẤY THẲNG CON SỐ Ở GRAIN ĐƠN, KHÔNG CỘNG CÁC DÒNG THEO MÃ (đơn nhiều mã phình mẫu số, đơn chưa lần được mã bị bỏ).
   const mucDon = duBao?.orderLevel ?? null;
   const tyLeDuBao = mucDon?.projectedRate ?? null;
   return {
@@ -901,8 +877,7 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
     rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
     expectedRate: tyLeDuBao === null ? null : Math.round((100 - tyLeDuBao) * 10) / 10,
     successRate: delivered + returned ? (delivered / (delivered + returned)) * 100 : null,
-    // MỘT NGUỒN: cùng hàm, cùng bảng xác suất với trang lợi nhuận. Mô hình chưa đo được ⇒ `null`,
-    // và màn hình in "chưa đo được" thay vì một con số đoán.
+    // MỘT NGUỒN: cùng hàm, cùng bảng xác suất với trang lợi nhuận. Mô hình chưa đo được ⇒ `null`.
     expectedSuccessRate: tyLeDuBao,
     projection: duBao && mucDon
       ? {
@@ -910,14 +885,19 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
           eligibleSent: mucDon.eligibleSent,
           active: mucDon.active,
           unmodelledActive: mucDon.unmodelledActive,
+          cancelled: mucDon.cancelled,
+          unknown: mucDon.unknown,
           byState: duBao.probabilities
-            .filter((x) => (mucDon.activeByState[x.substate] ?? 0) > 0)
-            .map((x) => ({ substate: x.substate, label: x.label, orders: mucDon.activeByState[x.substate] ?? 0, p: x.p, sample: x.sample, confidence: x.confidence }))
+            .filter((x) => (mucDon.activeByState[x.substate as keyof typeof mucDon.activeByState] ?? 0) > 0)
+            .map((x) => ({ substate: x.substate, label: x.label, orders: mucDon.activeByState[x.substate as keyof typeof mucDon.activeByState] ?? 0, p: x.p, sample: x.sample, confidence: x.confidence }))
             .sort((a, b) => b.orders - a.orders),
+          maturityDays: duBao.window.maturityDays,
+          maturitySource: duBao.window.maturitySource,
+          backtest: duBao.backtest,
+          backtestError: duBao.backtestError,
         }
       : null,
-    failedToReturnPct: Math.round(p.rate * 100),
-    failedSample: p.sample,
+    projectionError,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),
     provisional: Number(row?.provisional ?? 0),
   };

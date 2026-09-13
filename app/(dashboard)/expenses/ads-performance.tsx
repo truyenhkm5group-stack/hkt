@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Award, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { successTone } from "@/lib/constants/returns";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { AdsPerformance, PerfRating, PerfRow } from "@/lib/queries/ads-performance";
 import { cn } from "@/lib/utils";
@@ -90,8 +91,8 @@ function PerfTable({ rows, kind, avgRoas, totals }: { rows: PerfRow[]; kind: "ma
                 {kind === "product" ? (
                   <TableCell className="text-right tabular-nums text-xs">
                     {r.delivered !== undefined ? <div>{formatNumber(r.delivered)} / {formatNumber(r.returned ?? 0)}</div> : <div>—</div>}
-                    <div className={cn((r.successRate ?? r.expectedSuccessRate ?? 1) < 0.65 ? "text-rose-600" : "text-emerald-700")} title="Tỷ lệ giao thành công thực tế trên đơn đã kết thúc · dự kiến (đã trộn đơn chưa kết thúc)">
-                      {r.successRate !== null && r.successRate !== undefined ? pct(r.successRate) : "—"}{r.expectedSuccessRate !== undefined ? <span className="text-muted-foreground"> · dự kiến {pct(r.expectedSuccessRate)}</span> : null}
+                    <div className={successTone((r.successRate ?? r.expectedSuccessRate ?? null) === null ? null : (r.successRate ?? r.expectedSuccessRate ?? 0) * 100)} title="Tỷ lệ giao thành công thực tế trên đơn đã kết thúc · ước tính (hợp đồng PROJECTED_GTC, từng đơn đang giao cân theo xác suất của trạng thái nó đang ở; “—” = chưa đo được)">
+                      {r.successRate !== null && r.successRate !== undefined ? pct(r.successRate) : "—"}{r.expectedSuccessRate !== undefined ? <span className="text-muted-foreground"> · ước tính {r.expectedSuccessRate === null ? "—" : pct(r.expectedSuccessRate)}</span> : null}
                     </div>
                   </TableCell>
                 ) : (

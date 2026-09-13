@@ -20,7 +20,9 @@ const schema = z.object({
   defaultReturnRate: z.number().min(0).max(100),
   minFinishedOrders: z.number().int().min(1).max(10_000),
   overrides: z.record(z.string(), z.number().min(0).max(100)),
-  inventoryRiskPercent: z.number().min(0).max(100).default(5),
+  // MỘT mặc định duy nhất (`DEFAULT_PROFIT_ASSUMPTIONS`): trước đây ở đây ghi 5 trong khi hằng số
+  // ghi 10 — hai nơi nói hai số, và giá trị nào thắng tuỳ vào việc biểu mẫu có gửi trường này hay không.
+  inventoryRiskPercent: z.number().min(0).max(100).default(DEFAULT_PROFIT_ASSUMPTIONS.inventoryRiskPercent),
   taxPercent: z.number().min(0).max(50).default(1.5),
   otherCostPercentOfAds: z.number().min(0).max(50).default(1.1),
   failedToReturnPercent: z.number().min(0).max(100).default(0),

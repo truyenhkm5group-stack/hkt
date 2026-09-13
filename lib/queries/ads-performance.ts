@@ -10,13 +10,14 @@
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
+import { SUCCESS_RATE_OK } from "@/lib/constants/returns";
 import { getMarketerReport } from "@/lib/queries/payroll";
 import type { Period } from "@/lib/search-params";
 
 export type PerfRating = "GOOD" | "AVERAGE" | "POOR" | "NONE";
 
 export type PerfRow = {
-  id: string; // marketerId | productId | "__test__" | "__none__"
+  id: string; // marketerId | productId | UNATTRIBUTED_ID | "__none__"
   name: string;
   code: string;
   spend: number;
@@ -35,12 +36,12 @@ export type PerfRow = {
   roasConfirmed: number | null;
   profit: number;
   margin: number | null;
-  /** Mã hàng: tỷ lệ hoàn dự kiến (phân số 0–1, đã trộn đơn chưa kết thúc) / đã giao / đã hoàn / tỷ lệ hoàn thực tế trên đơn đã kết thúc */
-  returnRate?: number;
+  /** Mã hàng: tỷ lệ hoàn ước tính (phân số 0–1, hợp đồng PROJECTED_GTC; `null` = chưa đo được) / đã giao / đã hoàn / tỷ lệ hoàn thực tế trên đơn đã kết thúc */
+  returnRate?: number | null;
   actualReturnRate?: number | null;
-  /** Tỷ lệ GIAO THÀNH CÔNG (phân số 0–1): thực tế trên đơn đã kết thúc (GTC = COD thực > 100K) và dự kiến (= 1 − tỷ lệ hoàn dự kiến) */
+  /** Tỷ lệ GIAO THÀNH CÔNG (phân số 0–1): thực tế trên đơn đã kết thúc (GTC = COD thực > 100K) và ước tính (= 1 − tỷ lệ hoàn ước tính; `null` = chưa đo được) */
   successRate?: number | null;
-  expectedSuccessRate?: number;
+  expectedSuccessRate?: number | null;
   delivered?: number;
   returned?: number;
   /** Marketer: tiền QC test không thuộc mã */
@@ -48,6 +49,14 @@ export type PerfRow = {
   rating: PerfRating;
   reason: string;
 };
+
+/**
+ * Tiền quảng cáo CHƯA QUY KẾT được về mã hàng nào (chiến dịch chưa ghép mã, hoặc chiến dịch test).
+ * Trước đây gọi là "Chi phí test" — sai tên: phần lớn là chiến dịch chưa ghép, không phải test. Nó
+ * đứng riêng một dòng, KHÔNG rải đều vào các mã.
+ */
+export const UNATTRIBUTED_ID = "__unattributed__";
+export const UNATTRIBUTED_LABEL = "Chưa quy kết (QC chưa ghép mã hàng)";
 
 export type AdsPerformance = {
   marketers: PerfRow[];
@@ -103,7 +112,7 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
     return m;
   };
   const fbByMarketer = agg((r) => r.marketerId ?? "__none__");
-  const fbByProduct = agg((r) => r.productId ?? "__test__");
+  const fbByProduct = agg((r) => r.productId ?? UNATTRIBUTED_ID);
 
   const totalSpend = report.marketers.reduce((s, m) => s + m.totalSpend, 0);
   const totalRevenue = report.nominal.totals.expectedRevenue;
@@ -224,10 +233,13 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       const { rating, reason } = rate(roas, avgRoas, r.netProfit, r.adSpend, minSpend);
       const finished = r.delivered + r.returned;
       const actualReturnRate = finished ? r.returned / finished : null;
-      const returnRate = Math.min(Math.max(r.returnRate, 0), 100) / 100; // báo cáo danh nghĩa trả %, quy về phân số
+      // Báo cáo danh nghĩa trả % (hoặc `null` = chưa đo được), quy về phân số. Không lấp `null` bằng một con số.
+      const returnRate = r.returnRate === null ? null : Math.min(Math.max(r.returnRate, 0), 100) / 100;
       const successRate = finished ? r.delivered / finished : null;
-      const expectedSuccessRate = 1 - returnRate;
-      const lowSuccess = (successRate ?? expectedSuccessRate) < 0.65;
+      const expectedSuccessRate = returnRate === null ? null : 1 - returnRate;
+      const tyLeDeXet = successRate ?? expectedSuccessRate;
+      // Ngưỡng dùng chung toàn ERP (`lib/constants/returns.ts`), không ghi cứng một con số riêng ở đây.
+      const lowSuccess = tyLeDeXet !== null && tyLeDeXet < SUCCESS_RATE_OK / 100;
       return {
         id: r.productId,
         name: r.productName,
@@ -253,14 +265,14 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
         delivered: r.delivered,
         returned: r.returned,
         rating: r.adSpend ? rating : "NONE",
-        reason: r.adSpend ? (lowSuccess && rating !== "GOOD" ? `${reason} · tỷ lệ giao thành công ${Math.round((successRate ?? expectedSuccessRate) * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
+        reason: r.adSpend ? (lowSuccess && rating !== "GOOD" && tyLeDeXet !== null ? `${reason} · tỷ lệ giao thành công ${Math.round(tyLeDeXet * 100)}%` : reason) : "Bán không cần QC (đơn tự nhiên / khách cũ)",
       };
     });
   if (report.nominal.unmatchedAdSpend > 0) {
-    const f = fbByProduct.get("__test__");
+    const f = fbByProduct.get(UNATTRIBUTED_ID);
     products.push({
-      id: "__test__",
-      name: "Chi phí test (không thuộc mã)",
+      id: UNATTRIBUTED_ID,
+      name: UNATTRIBUTED_LABEL,
       code: "",
       spend: report.nominal.unmatchedAdSpend,
       spendShare: totalSpend ? report.nominal.unmatchedAdSpend / totalSpend : 0,
@@ -277,12 +289,12 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       profit: -report.nominal.unmatchedAdSpend,
       margin: null,
       rating: "NONE",
-      reason: "Chiến dịch có chữ TEST hoặc chưa ghép mã — trừ vào lợi nhuận tổng",
+      reason: "Chưa quy kết: chiến dịch có chữ TEST hoặc chưa ghép mã — trừ vào lợi nhuận tổng, không rải vào mã nào",
     });
   }
   const byProfit = (a: PerfRow, b: PerfRow) => b.profit - a.profit;
   marketers.sort((a, b) => (a.id === "__none__" ? 1 : b.id === "__none__" ? -1 : byProfit(a, b)));
-  products.sort((a, b) => (a.id === "__test__" ? 1 : b.id === "__test__" ? -1 : byProfit(a, b)));
+  products.sort((a, b) => (a.id === UNATTRIBUTED_ID ? 1 : b.id === UNATTRIBUTED_ID ? -1 : byProfit(a, b)));
   const rated = (rows: PerfRow[]) => rows.filter((r) => r.spend >= minSpend && !r.id.startsWith("__"));
   const rm = rated(marketers);
   const rp = rated(products);

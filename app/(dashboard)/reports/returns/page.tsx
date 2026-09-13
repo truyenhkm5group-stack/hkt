@@ -33,7 +33,8 @@ import {
   RETURN_RATE_SORTABLE,
 } from "@/lib/queries/return-rate";
 import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/queries/order-source";
-import { logisticsPerformance } from "@/lib/queries/logistics";
+import { logisticsPerformance, SUCCESS_RATE_TERMINAL_LABEL } from "@/lib/queries/logistics";
+import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
@@ -79,7 +80,7 @@ export default async function ReturnRatePage({
   */
   const basis: TimeBasis = TIME_BASES.includes((params.filters.basis?.[0] ?? "") as TimeBasis) ? (params.filters.basis![0] as TimeBasis) : "SHIPPED";
 
-  const [{ rows, total, pageCount, all }, summary, variantOrders, theoNguon] =
+  const [{ rows, total, pageCount, all, projectionError: loiBang }, summary, variantOrders, theoNguon] =
     await Promise.all([
       getReturnRateByVariant({
         period: params.period,
@@ -130,10 +131,12 @@ export default async function ReturnRatePage({
     Và khi mô hình chưa dự báo được đơn nào thì in "chưa đo được", KHÔNG in 0%.
   */
   const pj = summary.projection;
-  const duKienNote =
-    summary.expectedSuccessRate === null || pj === null
-      ? "Giao TC / (giao TC + không TC) · chưa đủ dữ liệu để ước tính phần đang giao"
-      : `Ước tính ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(pj.active)} đơn đang giao kết thúc — mỗi đơn cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${pj.version}, mốc ${TIME_BASIS_LABEL[basis].toLowerCase()})${pj.unmodelledActive ? ` · ${formatNumber(pj.unmodelledActive)} đơn chưa dự báo được` : ""}`;
+  const loiUocTinh = summary.projectionError ?? loiBang;
+  const duKienNote = loiUocTinh
+    ? `Giao TC / (giao TC + không TC) · LỖI khi tính ước tính: ${loiUocTinh}`
+    : summary.expectedSuccessRate === null || pj === null
+      ? `Giao TC / (giao TC + không TC) · chưa đo được phần đang giao${pj ? ` (${formatNumber(pj.unmodelledActive)}/${formatNumber(pj.active)} đơn ở trạng thái chưa đủ mẫu — ngoài ước tính)` : ""}`
+      : `Ước tính ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(pj.active)} đơn đang giao kết thúc — mỗi đơn cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${pj.version}, mốc ${TIME_BASIS_LABEL[basis].toLowerCase()}, học từ kiện gửi trước ≥ ${pj.maturityDays} ngày${pj.maturitySource === "MEASURED" ? " — đo từ đơn hoàn thật" : " — mặc định"})${pj.unmodelledActive ? ` · ${formatNumber(pj.unmodelledActive)} đơn ngoài ước tính` : ""}`;
 
   return (
     <div className="space-y-5">
@@ -193,9 +196,18 @@ export default async function ReturnRatePage({
         />
         <MetricCard
           label="Tỷ lệ giao thành công"
+          hint={`Thực tế = giao thành công ÷ (giao thành công + không thành công) theo ORDER_OUTCOME — đơn đang giao KHÔNG ở mẫu số. Ước tính (${pj?.version ?? "hợp đồng chung"}) = (đã giao thật + Σ đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở) ÷ (đã gửi − đơn ngoài ước tính). Cùng hợp đồng với thẻ cùng tên ở Báo cáo lợi nhuận; khác mốc thời gian thì khác cohort. Nhãn tin cậy đến từ thử ngược trên vận đơn đã kết thúc.`}
           value={
-            <span className={successTone(summary.successRate)}>
-              {summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <span className={successTone(summary.successRate)}>
+                {summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}
+              </span>
+              {pj ? (
+                <span className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground" title="Tỷ lệ giao thành công ƯỚC TÍNH khi đơn đang giao kết thúc">
+                  → ước tính <span className={successTone(summary.expectedSuccessRate)}>{summary.expectedSuccessRate === null ? "—" : `${summary.expectedSuccessRate.toFixed(1)}%`}</span>
+                  <ProjectionConfidence backtest={pj.backtest} error={pj.backtestError} />
+                </span>
+              ) : null}
             </span>
           }
           note={`${duKienNote}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
@@ -214,6 +226,15 @@ export default async function ReturnRatePage({
         Mỗi dòng khai luôn cỡ mẫu và độ tin cậy của xác suất nó đang dùng. Nhóm chưa đủ mẫu in
         "chưa đủ mẫu" và nằm NGOÀI phần ước tính — không bịa một con số trông như đã đo.
       */}
+      {loiUocTinh ? (
+        <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <b>Mô hình ước tính không chạy được</b> — đây là LỖI, không phải thiếu dữ liệu. Các ô ước tính trên trang đang trống vì thế. Chi tiết: <code className="text-xs">{loiUocTinh}</code>
+          </span>
+        </div>
+      ) : null}
+
       {pj && pj.byState.length ? (
         <SectionCard
           title={`Đang giao: ${formatNumber(pj.active)} đơn, tách theo trạng thái Viettel Post`}
@@ -320,12 +341,12 @@ export default async function ReturnRatePage({
 
       <SectionCard
         title="Hiệu suất giao vận"
-        description="Tính theo mốc thời gian của từng sự kiện Viettel Post."
-        hint="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại."
+        description="Tính theo mốc thời gian của từng sự kiện Viettel Post — chỉ số GIAO VẬN, không phải kết quả đơn."
+        hint="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại. Ô đầu tiên đếm SỰ KIỆN phát thành công của ĐVVC (kể cả 501 chiều hoàn, kể cả kiện thu 30.000đ) nên nó KHÔNG phải tỷ lệ giao thành công của ERP — con số đó ở thẻ đầu trang, theo ORDER_OUTCOME."
       >
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border p-4">
-            <p className="text-[13px] font-medium text-muted-foreground">Tỷ lệ giao thành công</p>
+            <p className="text-[13px] font-medium text-muted-foreground" title="Đếm sự kiện phát thành công của Viettel Post trong hành trình — kể cả 501 chiều hoàn. Không phải kết quả đơn.">{SUCCESS_RATE_TERMINAL_LABEL}</p>
             <p className="numeric mt-1 text-2xl font-bold">{logistics.successRateTerminal === null ? "—" : `${logistics.successRateTerminal}%`}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               trên {formatNumber(logistics.terminal)} vận đơn ĐÃ KẾT THÚC · {logistics.successRateAll === null ? "—" : `${logistics.successRateAll}%`} nếu tính trên cả{" "}

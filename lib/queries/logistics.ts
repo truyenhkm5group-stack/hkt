@@ -6,6 +6,9 @@ import type { Period } from "@/lib/search-params";
 
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
+/** Tên đúng của `successRateTerminal` trên màn hình — xem chú thích ở kiểu `LogisticsPerformance`. */
+export const SUCCESS_RATE_TERMINAL_LABEL = "Phát thành công theo sự kiện ĐVVC";
+
 /**
  * HIỆU SUẤT GIAO VẬN TÍNH TỪ HÀNH TRÌNH, KHÔNG TỪ TRẠNG THÁI HIỆN TẠI.
  *
@@ -25,12 +28,19 @@ export type LogisticsPerformance = {
   tracked: number;
   delivered: number;
   returned: number;
-  /** Đã kết thúc = giao thành công + hoàn. Mẫu số của tỷ lệ giao thành công. */
+  /** Đã kết thúc = có sự kiện phát thành công + có sự kiện hoàn. Mẫu số của `successRateTerminal`. */
   terminal: number;
   inFlight: number;
-  /** Giao thành công ÷ đã kết thúc (%). null khi chưa có đơn nào kết thúc. */
+  /**
+   * PHÁT THÀNH CÔNG THEO SỰ KIỆN ĐVVC ÷ đã kết thúc (%). null khi chưa có đơn nào kết thúc.
+   *
+   * ĐÂY KHÔNG PHẢI "TỶ LỆ GIAO THÀNH CÔNG" của ERP. Con số này đếm sự kiện `DELIVERED` trong hành
+   * trình — kể cả 501 chiều hoàn, kể cả kiện thu 30.000đ — nên nó là chỉ số GIAO VẬN (bưu tá phát
+   * được bao nhiêu lần), không phải KẾT QUẢ ĐƠN. Kết quả đơn chỉ có một nguồn: `ORDER_OUTCOME`.
+   * Màn hình phải gọi nó bằng `SUCCESS_RATE_TERMINAL_LABEL`, không được gọi là "giao thành công".
+   */
   successRateTerminal: number | null;
-  /** Giao thành công ÷ tất cả vận đơn có hành trình (%) — mẫu số rộng hơn, luôn thấp hơn. */
+  /** Phát thành công theo sự kiện ÷ tất cả vận đơn có hành trình (%) — mẫu số rộng hơn, luôn thấp hơn. */
   successRateAll: number | null;
   /**
    * Phát thành công ngay lần đầu ÷ tổng đơn đã giao (%) — không có bước phát thất bại nào trước đó.

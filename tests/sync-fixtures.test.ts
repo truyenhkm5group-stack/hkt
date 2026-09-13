@@ -131,6 +131,7 @@ import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
+import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -344,7 +345,8 @@ async function main() {
   assert.equal(row.cancelled, 1, "huỷ 1");
   assert.equal(row.rate, 5 / 7 * 100, "tỷ lệ hoàn 5/(2+5)");
   assert.equal(row.successRate, 2 / 7 * 100, "tỷ lệ giao thành công 2/(2+5)");
-  assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
+  // PROJECTED_GTC_V3: hai đơn đang giao của mã này ở trạng thái chưa đủ mẫu ⇒ ước tính có thể là CHƯA ĐO ĐƯỢC (null); khi có số thì GTC = 100 − hoàn.
+  assert.ok(row.expectedSuccessRate === null ? row.expectedRate === null : Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn (hoặc cả hai cùng chưa đo được)");
   const summary = await getReturnRateSummary(all, "RR-001");
   assert.equal(summary.returned, 5);
   assert.equal(summary.delivered, 2);
@@ -779,8 +781,9 @@ async function main() {
   assert.equal(perf.totals.orders, nominal.totals.ordersDistinct);
   assert.equal(perf.totals.confirmedSales, nominal.totals.salesAfterDiscount);
   for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
-    assert.ok(p.returnRate !== undefined && p.returnRate >= 0 && p.returnRate <= 1, "tỷ lệ hoàn dự kiến là phân số");
-    assert.ok(p.expectedSuccessRate !== undefined && Math.abs(p.expectedSuccessRate - (1 - (p.returnRate ?? 0))) < 1e-9, "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
+    // PROJECTED_GTC_V3: `null` = chưa đo được, hợp lệ; có số thì là phân số và GTC = 1 − hoàn.
+    assert.ok(p.returnRate !== undefined && (p.returnRate === null || (p.returnRate >= 0 && p.returnRate <= 1)), "tỷ lệ hoàn dự kiến là phân số hoặc chưa đo được");
+    assert.ok(p.expectedSuccessRate !== undefined && (p.returnRate === null ? p.expectedSuccessRate === null : p.expectedSuccessRate !== null && Math.abs(p.expectedSuccessRate - (1 - p.returnRate)) < 1e-9), "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
     if (p.successRate !== null && p.successRate !== undefined) assert.ok(p.successRate >= 0 && p.successRate <= 1);
     if (p.actualReturnRate !== null && p.actualReturnRate !== undefined) assert.ok(p.actualReturnRate >= 0 && p.actualReturnRate <= 1);
     if (p.margin !== null) assert.ok(Math.abs(p.margin) <= 50, "biên là phân số");
@@ -1462,6 +1465,7 @@ async function main() {
   // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
   // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
   await testReportingParity(db);
+  await testProjectedDeliveryV3(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
   await testFulfillmentBottleneck(db);

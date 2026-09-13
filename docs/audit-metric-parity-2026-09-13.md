@@ -139,3 +139,86 @@ Mô hình hiện học xác suất theo **trạng thái con của toàn shop**. 
 cho từng mã — là xác suất theo (mã hàng × trạng thái), với cùng luật lùi bậc: chưa đủ mẫu cho mã thì
 lùi về xác suất toàn shop, chưa đủ cả hai thì `null`. Hợp đồng đã có `ProbabilityBasis` để khai bậc
 nào đang được dùng, nên việc mở rộng không phải viết lại công thức.
+
+---
+
+# PROJECTED_GTC_V3 — hợp đồng, thử ngược, và những gì đã sửa (13/09/2026, phiên chiều)
+
+## Vì sao phải có V3 ngay sau V2
+
+V2 nối hai trang vào một hàm, nhưng hàm ấy vẫn **gán nhãn bằng `shipments.stage` / mã ĐVVC thô** thay
+vì `ORDER_OUTCOME`. Đo production 13/09 (chỉ đọc), cohort 30 ngày theo mốc ĐVVC nhận:
+
+| Mã | Đơn có `stage = DELIVERED` nhưng `ORDER_OUTCOME ≠ DELIVERED` |
+|---|---:|
+| Q002 | **134 / 799** |
+| Q003 | **40 / 525** |
+| Q004 | 9 / 96 |
+| Q005 | 0 / 21 |
+
+Theo mã ĐVVC: 119 kiện từng mang **501** có `stage` "đã giao" đủ 119, nhưng `ORDER_OUTCOME` chỉ công
+nhận **87** — 27% là 501 của **chiều hoàn**. Sự kiện **không mã số** (1.370 kiện): stage nói 752 giao,
+`ORDER_OUTCOME` nói 488. Mô hình V2 học từ những nhãn ấy nên vừa **lạc quan** (kiện thu 30.000đ,
+kiện 50K–100K được dạy là "giao được") vừa **mù** với 503 tiêu huỷ (stage `CANCELLED` ⇒ rơi khỏi mẫu
+số). Thử ngược của V2 lại chấm bằng chính trạng thái `DELIVERED` (P = 1) trên chính dữ liệu đã học.
+
+## Hợp đồng V3 (`lib/constants/projected-delivery.ts`)
+
+```
+TL GTC thực tế     = Delivered ÷ (Delivered + Failed)                  — theo ORDER_OUTCOME, pending ngoài mẫu số
+Ước tính giao được  = Delivered + Σ ActiveCount(s) × P(final DELIVERED │ s)
+TL GTC ước tính     = Ước tính giao được ÷ (EligibleSent − UnmodelledActive)
+DT GTC ước tính     = Σ DT(đơn DELIVERED) + Σ DT(đơn đang giao) × P(s) + Σ DT(đơn chưa gửi) × P(NOT_SHIPPED)
+```
+
+* **Nhãn và cohort đọc `ORDER_OUTCOME_FAST`** (bảng `canonical_order_outcome`, logic_version 2, 2.967
+  dòng, làm mới liên tục — an toàn để nối). `DELIVERED` ⇒ giao; `RETURNED | RETURNED_BY_RULE` ⇒ hỏng;
+  `CANCELLED` / `UNKNOWN` / `NOT_SHIPPED` ⇒ ngoài cohort tỷ lệ, đếm riêng. Trạng thái con ĐVVC **chỉ**
+  dùng để chọn P(s) cho đơn `IN_TRANSIT`.
+* **Trạng thái được dự báo** (`MODELLED_SUBSTATES`): 9 trạng thái chưa kết thúc; `WAITING_PROCESSING`
+  và `WAITING_REDELIVERY` riêng. `DELIVERED / RETURNED / CANCELLED / RETURNING` không bao giờ là
+  trạng thái dự báo (P = 1/0 là lộ đáp án).
+* **Cửa sổ huấn luyện** (`TRAINING_WINDOW`): kiện ĐVVC nhận trong 180 ngày, **và** trước hôm nay ít
+  nhất H ngày; H = p95 "ĐVVC nhận → kết cục" của đơn HOÀN, đo từ dữ liệu (≥ 30 đơn hoàn), trần 21,
+  mặc định 14. Đo production: giao được p50 2,8 / p95 5,7 ngày; hoàn p50 7,0 / **p95 13,1** ngày.
+* **Đơn ngoài ước tính** (trạng thái < 10 mẫu) rời khỏi mẫu số và được nêu riêng; quá **50%** phần
+  đang giao ⇒ tỷ lệ là `null` (chưa đo được), không phải một con số tính trên nửa tập.
+* **P(NOT_SHIPPED)** chỉ phục vụ doanh thu của cohort theo ngày chốt (bảng lợi nhuận); học từ đơn
+  chốt trong cửa sổ đã kết thúc **kể cả huỷ**. Không vào tỷ lệ GTC.
+
+## Thử ngược (`getProjectionBacktest`)
+
+Tách theo thời gian: với mỗi tháng M trong 3 tháng gần nhất, huấn luyện lại bằng dữ liệu có kết cục
+**trước** M (`cutoff`), rồi chấm các kiện đã kết thúc và **đủ chín** có mốc ĐVVC nhận trong M. Mỗi kiện
+chụp ở k ∈ {1, 3, 5, 7, 10} ngày sau mốc nhận; trạng thái tại t = sự kiện ĐVVC mới nhất có
+`occurred_at ≤ t`; ảnh chụp sau mốc kết cục hoặc ở trạng thái cuối bị loại. Báo: n (theo vận đơn, không
+theo ảnh chụp), lệch, Brier, MAE, bảng hiệu chuẩn theo thập phân vị, độ dốc hiệu chuẩn, độ phủ.
+Nhãn: `HIGH` n≥100 ∧ |lệch|≤0,03 ∧ dốc 0,8–1,2 · `MEDIUM` n≥30 ∧ |lệch|≤0,07 · `LOW` n≥10 · còn lại
+`INSUFFICIENT_DATA` (= chưa kiểm chứng, **không** = sai). Huy hiệu + ⓘ đứng cạnh con số ước tính ở cả
+`/reports/returns` lẫn `/reports?tab=nominal` (`app/(dashboard)/reports/projection-confidence.tsx`).
+
+## Những chỗ đã sửa cùng bản này
+
+| # | Chỗ | Trước | Sau |
+|---|---|---|---|
+| 1–2 | `projected-delivery.ts` | nhãn/chấm theo `stage` / 501 | theo `ORDER_OUTCOME`; 503 vào mẫu số |
+| 3 | thử ngược | trong mẫu, lộ `DELIVERED` | tách thời gian, ảnh chụp đúng lúc, hiện trên màn hình |
+| 4 | tỷ lệ | ngoài ước tính ở mẫu số (P = 0 ngầm) | rời mẫu số; > 50% ⇒ `null` |
+| 5 | `profit-nominal.ts` | DT GTC ƯT = doanh số × (1 − r) | tiền cân theo từng đơn (`revenueBasis = ORDER_LEVEL`); ×(1 − r) chỉ cho ghi đè / lịch sử / mặc định, nhãn "ước tính theo tỷ lệ" |
+| 6 | cohort | huỷ = hỏng, không lọc `REPORTABLE_ORDER` | `REPORTABLE_ORDER`; huỷ / không dấu vết / chưa gửi đếm riêng |
+| 7 | thẻ tổng | bình quân tỷ lệ từng dòng (gồm ghi đè) | `orderLevel.projectedRate` của hợp đồng; bình quân cũ ở `assumedDeliveryRate` |
+| 8 | huấn luyện | không cửa sổ | 180 ngày + H đo được, có trong khoá đệm và xuất xứ |
+| 9 | `return-rate.ts` | `.catch(() => null)` | `projectionError` hiện là LỖI trên trang |
+| 10 | dòng chưa đo được | lùi về lịch sử / 40% | `unmeasured`, in "—"; khoá dòng theo `product_id` |
+| 11 | tỷ lệ QC | hai mẫu số cùng tên | `adsRatios()` trả ba tỷ lệ; thẻ = tổng chi, dòng tổng = đã quy kết; "chưa quy kết" đứng riêng |
+| 12 | rủi ro TK | giá vốn 0 ⇒ rủi ro 0 | `cogsKnown` / `purchaseCostKnown`, in "—"; một mặc định 10% |
+| 13 | ngưỡng | 55/70 · 60/75 · 0,65 | `SUCCESS_RATE_OK/GOOD` ở mọi nơi |
+| 14 | `failedToReturnRate` | ghi cứng 60%, 2,9 s mỗi lượt mở trang | xoá |
+| 15 | nhãn | "Tỷ lệ giao thành công" cho chỉ số sự kiện | "Phát thành công theo sự kiện ĐVVC"; "Chi phí test" → "Chưa quy kết" |
+
+Kỳ vọng số học và thứ tự nguồn khoá ở `tests/projected-delivery.test.ts` và
+`tests/reporting-parity.test.ts`; contract test `tests/contract-order-outcome.test.ts` không đổi.
+
+## Ba câu đo production (chỉ đọc) để so trước / sau cho Q002–Q005, 30 ngày, mốc ĐVVC nhận
+
+Xem mục "Truy vấn đối chiếu" ở cuối báo cáo bàn giao của bản này.
