@@ -132,6 +132,7 @@ import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testReturnReceiveSelector } from "./return-receive-selector.test";
 import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
 import { testCsOrderReconcile } from "./cs-order-reconcile.test";
+import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
 import { testProductNotes } from "./product-notes.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
@@ -1435,6 +1436,8 @@ async function main() {
   testSearchTermParsing();
   await testShipmentSearch(db);
   await testCsOrderReconcile(db);
+  testOutreachErrorClassify();
+  await testOutreachIdempotentSend(db);
   await testProductNotes(db);
   testUiConsistency();
   testNavigationCoverage();

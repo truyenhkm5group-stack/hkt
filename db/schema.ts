@@ -270,8 +270,17 @@ export const outreachTargets = pgTable(
     offer: text("offer").notNull().default(""),
     /** PENDING · SENT · FAILED · SKIPPED */
     /** PENDING · SENT (đã gửi hết kịch bản) · FAILED · SKIPPED · CONVERTED (khách đã đặt đơn) · REPLIED (khách trả lời, nhân viên tiếp quản) */
+    /** `PENDING` · `SENDING` (đang giữ chỗ) · `SENT` · `FAILED` · `SKIPPED` · `CONVERTED` · `REPLIED`. */
     status: text("status").notNull().default("PENDING"),
     error: text("error").notNull().default(""),
+    /** Nguyên văn lỗi đã được phân loại (`lib/constants/outreach-errors.ts`). `NULL` = chưa lỗi lần nào. */
+    errorKind: text("error_kind"),
+    /** Mã tin nhắn do nhà cung cấp trả về. CÓ mã = họ đã NHẬN tin, không phải ta đoán là đã gửi. */
+    providerMessageId: text("provider_message_id"),
+    /** Lúc nhà cung cấp chấp nhận. Khác `sent_at` (lúc ta bấm) — hai mốc, hai ý nghĩa. */
+    acceptedAt: ts("accepted_at"),
+    /** Đã thử mấy lần. Phân biệt "lỗi một lần" với "lỗi mãi" — `0` = chưa thử lần nào. */
+    attemptCount: integer("attempt_count").notNull().default(0),
     /** Bước kịch bản tiếp theo sẽ gửi (0-based); băn khoăn nhiều bước, bán chéo một bước */
     step: integer("step").notNull().default(0),
     /** Số tin đã gửi cho khách này */

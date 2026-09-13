@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0076_care_active_invariant", "0077_metric_target_bands", "0078_product_notes"] as const;
+const MOI = ["0076_care_active_invariant", "0077_metric_target_bands", "0078_product_notes", "0079_outreach_send_evidence"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -261,6 +261,27 @@ export async function testMigrationUpgradePath() {
     const conLai = (await client.query<{ actor_user_id: string | null; actor_name: string }>("select actor_user_id, actor_name from product_notes where id = 'up-n3'")).rows[0];
     assert.equal(conLai.actor_user_id, null, "0078: gỡ tài khoản thì khoá về null");
     assert.equal(conLai.actor_name, "An Kho", "0078: nhưng ảnh chụp tên còn lại — ghi chú vẫn đọc được, chỉ là không quy kết được nữa");
+
+    /*
+      ═══ 0079: CHỨNG TỪ CỦA MỘT LƯỢT GỬI ═══
+
+      Bốn cột NULLABLE, không mặc định — dòng cũ KHÔNG được đoán. Một dòng đã gửi từ trước mà điền
+      đại `attempt_count = 1` là bịa ra một con số chưa ai đo.
+    */
+    for (const cot of ["provider_message_id", "accepted_at", "error_kind", "attempt_count"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.columns where table_name = 'outreach_targets' and column_name = '${cot}'`), 1, `0079: thiếu cột ${cot}`);
+    }
+    await client.query(`insert into outreach_targets (id, segment, status, message, dedupe_key) values ('up-ot1', 'CROSS_SELL', 'SENDING', 'x', 'up-ot1')`);
+    const ot = (await client.query<{ attempt_count: number; provider_message_id: string | null }>("select attempt_count, provider_message_id from outreach_targets where id = 'up-ot1'")).rows[0];
+    assert.equal(ot.attempt_count, 0, "0079: chưa thử lần nào là 0, không phải 1");
+    assert.equal(ot.provider_message_id, null, "0079: chưa có mã tin của nhà cung cấp ⇒ NULL, không phải chuỗi rỗng");
+    // `SENDING` phải là trạng thái HỢP LỆ — không có nó thì cơ chế giành chỗ không ghi được.
+    await assert.rejects(
+      () => client.query(`insert into outreach_targets (id, segment, status, message, dedupe_key) values ('up-ot2', 'CROSS_SELL', 'LUNG_TUNG', 'x', 'up-ot2')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("outreach_targets_status_check"),
+      "0079: trạng thái lạ phải bị chặn — danh sách đóng",
+    );
+    await client.query(`delete from outreach_targets where id = 'up-ot1'`);
 
     /*
       BA CỘT MỚI CỦA 0074 CÓ MẶC ĐỊNH — và đó KHÔNG phải một phép đoán về dữ liệu cũ.
