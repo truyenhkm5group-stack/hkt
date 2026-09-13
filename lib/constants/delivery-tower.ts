@@ -28,6 +28,7 @@ export type BucketKey =
   | "NO_CONTACT"
   | "DELIVERY_FAILED"
   | "AWAITING_REDELIVERY"
+  | "AWAITING_PICKUP"
   | "WAITING_CARRIER"
   | "STALE_NO_UPDATE"
   | "RETURNING"
@@ -113,9 +114,40 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
     tone: "amber",
   },
   {
+    /*
+      RỔ MỚI 13/09/2026 — KIỆN CHƯA BAO GIỜ RỜI KHO, VÀ KHÔNG RỔ NÀO BẮT ĐƯỢC.
+
+      Đo production: 106 đơn mang kết quả `IN_TRANSIT` mà toàn bộ chứng từ ĐVVC của chúng là "giao
+      cho bưu tá đi nhận" (104), "đơn hàng chờ xử lý" (102), "phân công bưu tá nhận hàng", "khách
+      hàng chưa chuẩn bị xong hàng". 61.451.999đ COD nằm trên những gói còn trong kho.
+
+      VÌ SAO KHÔNG RỔ NÀO THẤY CHÚNG:
+        · `WAITING_CARRIER` đòi CHỨNG TỪ đã rời kho — cố ý, vì không ai nên gọi bưu cục hỏi về một
+          gói nằm trong chính kho của mình.
+        · `STALE_NO_UPDATE` đếm IM LẶNG, và nhóm này KHÔNG im lặng: ĐVVC vẫn đều đặn gửi "phân công
+          bưu tá", nên đồng hồ im lặng cứ bị đặt lại. Đo được: **0/106 kiện im lặng quá 96 giờ.**
+          Chúng có thể nằm đó vĩnh viễn mà không rổ nào chạm tới.
+
+      Nên đồng hồ của rổ này đếm TUỔI TỪ LÚC TẠO VẬN ĐƠN, không đếm im lặng — im lặng là câu hỏi
+      "ERP có biết tin gì không", còn đây là câu hỏi "gói hàng đã đi chưa".
+
+      NGƯỠNG DÙNG LẠI `FRESHNESS_BY_STAGE.PENDING.critical` (96 giờ), không gõ số mới: lý do của nó
+      viết sẵn ở đó — "quá 4 ngày thì kiện có thể đã thất lạc trước khi rời kho". Đo được 40 kiện
+      vượt ngưỡng, 26.348.999đ COD — một buổi sáng làm hết.
+    */
+    key: "AWAITING_PICKUP",
+    label: "ĐVVC chưa tới lấy hàng",
+    order: 5,
+    team: "LOGISTICS",
+    question: "Kiện nào đã có vận đơn mà bưu tá vẫn chưa tới lấy?",
+    nextAction: "Gọi bưu cục giục lấy hàng; nếu ĐVVC ghi “khách chưa chuẩn bị xong hàng” thì hỏi kho trước — có thể hàng chưa đóng chứ không phải bưu tá chậm.",
+    moneyMeaning: "COD đang treo trên gói hàng CHƯA RỜI KHO. Khác mọi rổ khác: ở đây hàng vẫn nằm trong tay shop, nên cứu được gần như trọn vẹn — miễn là có người đi giục.",
+    tone: "amber",
+  },
+  {
     key: "STALE_NO_UPDATE",
     label: "Quá lâu không cập nhật",
-    order: 5,
+    order: 6,
     team: "LOGISTICS",
     question: "Kiện nào ERP không biết đang ở đâu?",
     nextAction: "Tra mã trên trang Viettel Post; có mốc mới thì nhập tay để vá lại lịch sử, không có thì mở khiếu nại.",
@@ -125,7 +157,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "RETURNING",
     label: "Đang chuyển hoàn",
-    order: 6,
+    order: 7,
     team: "LOGISTICS",
     question: "Hàng nào đang trên đường về shop?",
     nextAction: "Theo dõi tới khi kho nhận; quá 7 ngày chưa về thì hỏi bưu cục — hàng hoàn cũng thất lạc được.",
@@ -135,7 +167,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "RETURN_AT_SHOP",
     label: "Hoàn đã về shop, chờ kiểm đếm",
-    order: 7,
+    order: 8,
     team: "WAREHOUSE",
     question: "Hàng nào đã về mà chưa ai đếm?",
     nextAction: "Kho lập phiếu kiểm đếm. Hàng hoàn KHÔNG tự vào tồn cho tới khi có phiếu.",
@@ -145,7 +177,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "DATA_GAP",
     label: "Chưa rõ / thiếu dữ liệu",
-    order: 8,
+    order: 9,
     team: "LOGISTICS",
     question: "Kiện nào ERP chưa từng nhận được tin gì?",
     nextAction: "Kiểm tra vận đơn có thật trên Viettel Post không; webhook có tới không.",

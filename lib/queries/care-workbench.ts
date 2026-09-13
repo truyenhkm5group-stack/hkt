@@ -43,6 +43,8 @@ const REASON_CLASS: Record<CareReasonKey, CareReasonClass> = {
   AWAITING_REDELIVERY: "CARRIER_ACTION",
   // Việc nằm ở phía ĐVVC: shop gọi bưu cục, không gọi khách.
   WAITING_CARRIER: "CARRIER_ACTION",
+  // ĐVVC chưa tới lấy ⇒ việc nằm ở phía đối tác vận chuyển, không phải phía khách.
+  AWAITING_PICKUP: "CARRIER_ACTION",
   WRONG_INFO: "CUSTOMER_ACTION",
   STALE_NO_UPDATE: "DATA_FRESHNESS",
   DATA_GAP: "DATA_FRESHNESS",

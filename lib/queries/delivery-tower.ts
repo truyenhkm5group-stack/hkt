@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { TEAM_LABEL } from "@/lib/constants/action-queue";
 import { CARE_ACTION_LABEL, DELIVERY_BUCKETS, EXCLUSIVE_BUCKETS, type BucketKey, type BucketSpec, type CareActionKind } from "@/lib/constants/delivery-tower";
-import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { CARRIER_SUBSTATE_LABEL, SUBSTATE_IMPLIES_PICKED_UP, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { classifyFailedReason } from "@/lib/constants/cs";
 import { classifyFreshness, thresholdFor, type FreshnessClass } from "@/lib/constants/logistics-freshness";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -119,6 +119,8 @@ type Raw = {
   bill_name: string | null;
   bill_phone: string | null;
   tuoi_gio: string | number | null;
+  /** Giờ kể từ lúc TẠO vận đơn. Khác `tuoi_gio` (im lặng) — xem rổ AWAITING_PICKUP. */
+  tuoi_tao_gio: string | number | null;
   lan_hut: number;
   cs_action: string | null;
   cs_action_at: string | null;
@@ -145,7 +147,7 @@ type Raw = {
  * này** — vì `PENDING` không khớp nhánh nào và chưa đủ cũ để vào rổ "quá lâu". Chúng cần người gọi
  * bưu cục, và trước bản này không ai biết chúng tồn tại.
  */
-function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass, con: CarrierSubstate, daRoiKho: boolean): { bucket: BucketKey; reason: string } | null {
+function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass, con: CarrierSubstate, daRoiKho: boolean, tuoiTao: number | null): { bucket: BucketKey; reason: string } | null {
   const ma = r.vtp_reason_code;
   const chu = [r.vtp_note, r.event_note, r.vtp_status_name];
 
@@ -173,6 +175,28 @@ function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass, con: Carri
     bưu tá — hàng còn trong kho), 56 cái đã có mốc lấy và sự kiện sau đó. Đưa cả 225 vào rổ việc là
     bắt người gọi bưu cục về những gói còn nằm trong chính kho của mình.
   */
+  /*
+    CHƯA RỜI KHO VÀ ĐÃ QUÁ LÂU — phải xét TRƯỚC `WAITING_CARRIER`.
+
+    Hai rổ này là hai vế của cùng một câu "ĐVVC chưa làm gì tiếp": `WAITING_CARRIER` cho gói ĐÃ rời
+    kho, rổ này cho gói CHƯA. Việc phải làm khác hẳn nhau — một bên gọi bưu cục hỏi gói đang nằm
+    đâu, một bên giục bưu tá tới lấy (hoặc hỏi kho xem hàng đã đóng xong chưa) — nên trộn chúng là
+    đưa người ta đi gọi nhầm chỗ.
+
+    Đồng hồ ở đây là TUỔI TỪ LÚC TẠO VẬN ĐƠN, không phải im lặng: đo production 13/09/2026, 0/106
+    kiện của nhóm này im lặng quá 96 giờ, vì ĐVVC vẫn đều đặn gửi "phân công bưu tá". Dùng đồng hồ
+    im lặng thì rổ này vĩnh viễn rỗng trong khi 106 gói nằm im trong kho.
+
+    HAI VẾ, KHÔNG PHẢI MỘT. Thiếu chứng từ rời kho (`daRoiKho`) là CHƯA ĐỦ: một kiện "đang đi giao"
+    im lặng 100 giờ cũng thiếu chứng từ ấy nếu webhook mốc lấy hàng chưa từng tới, nhưng chính
+    trạng thái con của nó đã nói bưu tá đang cầm hàng — nó thuộc rổ "quá lâu không cập nhật", không
+    phải rổ này. Nên vế thứ hai đọc `SUBSTATE_IMPLIES_PICKED_UP`, cùng bảng mà vòng đời care và chỉ
+    số "Đã gửi" dùng. Bản nháp đầu thiếu vế này và bài kiểm tháp giao vận bắt được ngay.
+  */
+  if (SUBSTATE_IMPLIES_PICKED_UP[con] !== "YES" && !daRoiKho && con !== "CANCELLED" && tuoiTao !== null && tuoiTao > thresholdFor("PENDING").critical) {
+    return { bucket: "AWAITING_PICKUP", reason: `Tạo vận đơn ${Math.round(tuoiTao / 24)} ngày trước, ĐVVC ghi “${r.vtp_status_name || "chờ lấy hàng"}” — chưa có chứng từ rời kho` };
+  }
+
   // CÙNG MỘT LUẬT với vòng đời care (`careEntryFor`): tháp và hàng đợi không được nói hai điều khác nhau.
   if (con === "WAITING_PROCESSING" && careEntryFor(con, daRoiKho).enters) return { bucket: "WAITING_CARRIER", reason: `Đã rời kho nhưng ĐVVC ghi “${r.vtp_status_name || "chờ xử lý"}”` };
 
@@ -248,6 +272,7 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
                o.bill_full_name as bill_name,
                o.bill_phone,
                extract(epoch from (now() - ev.moc)) / 3600 as tuoi_gio,
+               extract(epoch from (now() - s.created_at)) / 3600 as tuoi_tao_gio,
                coalesce(ev.lan_hut, 0) as lan_hut,
                /*
                  CHỨNG TỪ RỜI KHO — hai bậc, cả hai đều là chứng từ của ĐVVC:
@@ -304,7 +329,8 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
       const hang = classifyFreshness(tuoi, r.stage);
       const { substate, basis } = carrierSubstate({ code: r.vtp_status, text: r.vtp_status_name, stage: r.stage });
       const daRoiKho = Boolean(r.da_roi_kho);
-      const xep = xepRo(r, tuoi, hang, substate, daRoiKho);
+      const tuoiTao = r.tuoi_tao_gio === null ? null : Number(r.tuoi_tao_gio);
+      const xep = xepRo(r, tuoi, hang, substate, daRoiKho, tuoiTao);
       if (!xep) continue;
       ngoaiLe += 1;
       const spec = DELIVERY_BUCKETS.find((b) => b.key === xep.bucket)!;

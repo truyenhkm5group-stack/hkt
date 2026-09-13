@@ -131,7 +131,14 @@ export const CARE_VIEW_HINT: Record<CareView, string> = {
   all: "Toàn bộ vận đơn để tra cứu, có bộ lọc trạng thái ĐVVC / COD / kỳ.",
 };
 
-/** Rổ của tháp giao vận là ĐIỀU KIỆN CẦN CARE. Rổ hàng hoàn thuộc đường ống kho, không vào đây. */
+/**
+ * Rổ của tháp giao vận là ĐIỀU KIỆN CẦN CARE. Rổ hàng hoàn thuộc đường ống kho, không vào đây.
+ *
+ * `AWAITING_PICKUP` CỐ Ý KHÔNG có mặt. Đó là việc GIỤC ĐVVC TỚI LẤY (hoặc hỏi kho xem hàng đã đóng
+ * xong chưa) — không có khách nào để gọi, nên nó không phải việc của bàn chăm sóc. Nó hiện ở THÁP
+ * GIAO VẬN, nơi đội logistics làm việc. Thêm nó vào đây sẽ đẩy 40 kiện vào hàng đợi care cùng đồng
+ * hồ SLA của bàn đó, làm lệch chính những con số đo hiệu quả chăm khách.
+ */
 export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAITING_REDELIVERY", "WAITING_CARRIER", "STALE_NO_UPDATE", "DATA_GAP"];
 
 /** Lý do kiện cần care — rổ tháp hoặc case CSKH cần sửa thông tin. */
@@ -141,6 +148,7 @@ export const CARE_REASON_LABEL: Record<CareReasonKey, string> = {
   NO_CONTACT: "Khách không nghe máy",
   DELIVERY_FAILED: "Giao thất bại",
   AWAITING_REDELIVERY: "Chờ phát lại",
+  AWAITING_PICKUP: "ĐVVC chưa tới lấy hàng",
   WAITING_CARRIER: "ĐVVC để treo, chưa xử lý",
   STALE_NO_UPDATE: "Im lặng quá ngưỡng",
   RETURNING: "Đang chuyển hoàn",

@@ -44,7 +44,7 @@ export async function testDeliveryTower(db: Db) {
       .values({ id, systemId: sysId, billFullName: `Khách ${sysId}`, billPhone: `090000${sysId}`, totalPriceAfterDiscount: 500000, insertedAt: gio(200), stage: "CONFIRMED" })
       .onConflictDoNothing();
   };
-  type Kien = { id: string; stage: "PENDING" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED"; reason?: number; note?: string; tuoi: number | null; final?: boolean; cod?: number };
+  type Kien = { id: string; stage: "PENDING" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED"; reason?: number; note?: string; tuoi: number | null; final?: boolean; cod?: number; tuoiTao?: number };
   const kien: Kien[] = [
     { id: "dt-nocontact", stage: "DELIVERY_FAILED", reason: 36, tuoi: 5, cod: 700000 },
     { id: "dt-hen", stage: "DELIVERY_FAILED", reason: 35, tuoi: 5, cod: 300000 },
@@ -56,6 +56,15 @@ export async function testDeliveryTower(db: Db) {
     { id: "dt-hoan-di", stage: "RETURNING", tuoi: 10, cod: 100000 },
     { id: "dt-hoan-ve", stage: "RETURNED", tuoi: 10, final: true, cod: 100000 },
     { id: "dt-mu", stage: "IN_TRANSIT", tuoi: null, cod: 800000 },
+    /*
+      ĐVVC CHƯA TỚI LẤY — hai kiện, chỉ khác TUỔI TỪ LÚC TẠO VẬN ĐƠN.
+
+      Cả hai đều có sự kiện mới (im lặng 3 giờ), nên đồng hồ IM LẶNG không bao giờ chạm ngưỡng —
+      đúng như production: đo 13/09/2026, 0/106 kiện nhóm này im lặng quá 96 giờ vì ĐVVC vẫn đều
+      đặn gửi "phân công bưu tá". Nếu rổ mới đếm im lặng thì cả hai sẽ vô hình.
+    */
+    { id: "dt-cho-lay-cu", stage: "PENDING", tuoi: 3, cod: 524000, tuoiTao: 200 },
+    { id: "dt-cho-lay-moi", stage: "PENDING", tuoi: 3, cod: 499000, tuoiTao: 10 },
   ];
   let i = 1;
   for (const k of kien) {
@@ -77,7 +86,7 @@ export async function testDeliveryTower(db: Db) {
         codAmount: k.cod ?? 0,
         receiverName: `Khách ${9000 + i}`,
         receiverPhone: `090000${i}`,
-        createdAt: gio(240),
+        createdAt: gio(k.tuoiTao ?? 240),
         updatedAt: new Date(),
       })
       .onConflictDoNothing();
@@ -111,6 +120,23 @@ export async function testDeliveryTower(db: Db) {
   assert.equal(roCua("dt-note-nocontact"), "NO_CONTACT", "không có mã thì đọc ghi chú bưu tá");
   assert.equal(roCua("dt-tuchoi"), "DELIVERY_FAILED", "khách từ chối KHÔNG phải nhóm hẹn lại — khả năng cứu khác hẳn");
   assert.equal(roCua("dt-stale"), "STALE_NO_UPDATE", "đang đi giao im 100 giờ (ngưỡng 48) phải vào rổ cũ nghiêm trọng");
+
+  /* ═══ ĐVVC CHƯA TỚI LẤY: rổ riêng, và HAI VẾ mới vào được ═══
+
+     Đo production 13/09/2026: 106 đơn chưa có chứng từ rời kho mang nhãn "đang giao", 61.451.999đ
+     COD, và KHÔNG rổ nào bắt được — `WAITING_CARRIER` đòi đã rời kho, `STALE_NO_UPDATE` đếm im
+     lặng mà nhóm này không im. */
+  assert.equal(roCua("dt-cho-lay-cu"), "AWAITING_PICKUP", "tạo 200 giờ trước, chưa chứng từ rời kho ⇒ phải có người đi giục");
+  assert.equal(roCua("dt-cho-lay-moi"), null, "mới tạo 10 giờ thì chờ lấy hàng là bình thường — chưa phải việc");
+
+  /* VẾ THỨ HAI KHÔNG ĐƯỢC QUÊN: thiếu chứng từ rời kho là CHƯA ĐỦ.
+
+     `dt-stale` đang đi giao, im 100 giờ, và cũng KHÔNG có chứng từ rời kho trong fixture này (sự
+     kiện của nó mang normalized_stage NULL). Bản nháp đầu của rổ mới chỉ xét `!daRoiKho` + tuổi,
+     nên nó cướp luôn kiện này khỏi rổ "quá lâu không cập nhật" — bài kiểm ngay dưới bắt được.
+     Vế thứ hai đọc `SUBSTATE_IMPLIES_PICKED_UP`: trạng thái con đã nói bưu tá đang cầm hàng. */
+  assert.notEqual(roCua("dt-stale"), "AWAITING_PICKUP", "kiện ĐANG ĐI GIAO không bao giờ là 'chưa tới lấy', dù thiếu chứng từ rời kho");
+  assert.notEqual(roCua("dt-hoan-di"), "AWAITING_PICKUP", "hàng đang trên đường về shop thì đã từng rời kho");
   assert.equal(roCua("dt-hoan-di"), "RETURNING");
   assert.equal(roCua("dt-hoan-ve"), "RETURN_AT_SHOP", "hoàn đã về shop mà kho chưa đếm vẫn phải thấy, dù ĐVVC coi là xong");
   assert.equal(roCua("dt-mu"), "DATA_GAP", "chưa từng có sự kiện nào ⇒ lỗ hổng dữ liệu, KHÔNG phải kiện khoẻ");
