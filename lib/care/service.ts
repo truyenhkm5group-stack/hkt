@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
+import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { slaOf } from "@/lib/care/view";
 import {
   CARE_STATUSES,
@@ -11,7 +12,6 @@ import {
   CARRIER_ACTION_KEYS,
   CARRIER_ACTION_LABEL,
   canTransition,
-  carrierActionAllowed,
   type CareEventAction,
   type CareEventSource,
   type CareStatus,
@@ -343,11 +343,29 @@ export async function requestCarrierAction(user: CareActor, input: z.input<typeo
   const { shipmentId, actionKey, note, edit } = parsed.data;
   if (actionKey === "edit" && !edit) return { error: "Thiếu thông tin người nhận" };
   const db = await getDb();
-  const s = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, vtpOrderNumber: true, trackingCode: true, stage: true, trackingCapability: true } });
+  const s = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, vtpOrderNumber: true, trackingCode: true, stage: true, trackingCapability: true, vtpStatus: true, vtpStatusName: true } });
   if (!s) return { error: "Không tìm thấy vận đơn" };
   const number = s.vtpOrderNumber ?? s.trackingCode;
   if (!number) return { error: "Vận đơn chưa có mã Viettel Post" };
-  if (!carrierActionAllowed(actionKey, s.stage)) return { error: `“${CARRIER_ACTION_LABEL[actionKey]}” không áp dụng cho kiện đang ở chặng ${s.stage}` };
+
+  /*
+    ĐIỀU KIỆN XÉT TRÊN TRẠNG THÁI CON, KHÔNG PHẢI `stage`.
+
+    `stage` gộp "chờ phát lại" (bưu tá sẽ quay lại) với "tồn - khách nghỉ" (chưa hẹn được) thành
+    `DELIVERY_FAILED`, và gộp "chờ xử lý" của kiện đã đi nửa đường với kiện còn trong kho thành
+    `PENDING`. Một luật đọc `stage` vì thế vừa cho phép nhầm, vừa chặn nhầm.
+
+    Cùng một hàm với nút trên màn hình và với thao tác hàng loạt — xem `lib/care/redelivery-eligibility.ts`.
+  */
+  const duDieuKien = canRequestCarrierAction(actionKey, {
+    stage: s.stage,
+    vtpStatus: s.vtpStatus,
+    vtpStatusName: s.vtpStatusName,
+    orderNumber: number,
+    trackingCapability: s.trackingCapability,
+    configured: getViettelPostClient().configured,
+  });
+  if (!duDieuKien.ok) return { error: duDieuKien.reason };
 
   const careRow = await ensureCareRow(shipmentId, user.email);
   const vtpType = VTP_ORDER_ACTIONS.find((a) => a.key === actionKey)?.type ?? null;
@@ -362,10 +380,8 @@ export async function requestCarrierAction(user: CareActor, input: z.input<typeo
   const key = existing ? `${idempotencyKey}:${Date.now()}` : idempotencyKey;
 
   const client = getViettelPostClient();
-  const configured = client.configured;
-  const capable = configured && s.trackingCapability === "API_TRACKABLE";
-  if (!capable) {
-    const error = configured ? "Tài khoản API Viettel Post của ERP không sở hữu vận đơn này (vận đơn Pancake tạo)." : "ERP chưa cấu hình tài khoản API Viettel Post.";
+  if (!duDieuKien.callsApi) {
+    const error = duDieuKien.reason;
     const [row] = await db
       .insert(schema.carrierActionRequests)
       .values({ shipmentId, orderNumber: number, actionKey, status: "MANUAL_REQUIRED", idempotencyKey: key, payload, error, actorId: user.id, actorEmail: user.email, note, finishedAt: new Date() })
@@ -415,8 +431,16 @@ export async function requestCarrierAction(user: CareActor, input: z.input<typeo
       await sleep(300 * attempts);
     }
   }
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  const unsupported = /quy[eề]n|permission|không tồn tại|not exist|not support|không hỗ trợ/i.test(message);
+  /*
+    LƯU ĐÚNG CÂU VIETTEL POST NÓI, không phải câu ERP dịch lại.
+
+    `carrier.message` là lời từ chối nghiệp vụ đã tách khỏi mã HTTP (xem `loiNghiepVu` ở
+    lib/integrations/http.ts). Trước đây nó bị gói vào một chuỗi "HTTP 400 …" rồi mới lưu — người
+    đọc lịch sử không có cách nào tách ra được việc phải làm.
+  */
+  const loiDvvc = lastError instanceof IntegrationError ? lastError.carrier : undefined;
+  const message = loiDvvc?.message || (lastError instanceof Error ? lastError.message : String(lastError));
+  const unsupported = /quy[eề]n|permission|không tồn tại|not exist|not support|không hỗ trợ|kh[ôo]ng thu[ộo]c/i.test(message);
   const [failed] = await db
     .update(schema.carrierActionRequests)
     .set({ status: unsupported ? "UNSUPPORTED" : "FAILED", error: message, attempts, finishedAt: new Date() })
@@ -424,7 +448,7 @@ export async function requestCarrierAction(user: CareActor, input: z.input<typeo
     .returning();
   if (careRow) await recordCareEvent(user, careRow, { action: "CARRIER_RESULT", payload: { requestId: failed.id, actionKey, status: failed.status, error: message, attempts } });
   clearMemo();
-  return { error: unsupported ? `Viettel Post không cho tài khoản này thao tác kiện (${message}). Phải làm tay trên viettelpost.vn.` : `Viettel Post từ chối sau ${attempts} lần gửi: ${message}` };
+  return { error: unsupported ? `Viettel Post từ chối: ${message} — tài khoản API của ERP không thao tác được kiện này. Phải làm tay trên viettelpost.vn rồi bấm “Đã làm tay”.` : `Viettel Post từ chối: ${message} (đã gửi ${attempts} lần).` };
 }
 
 export const manualSchema = z.object({ requestId: z.string().min(1), note: z.string().trim().max(300).default("") });

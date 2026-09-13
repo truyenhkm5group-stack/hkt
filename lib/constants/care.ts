@@ -117,7 +117,7 @@ export const CARE_VIEW_HINT: Record<CareView, string> = {
 };
 
 /** Rổ của tháp giao vận là ĐIỀU KIỆN CẦN CARE. Rổ hàng hoàn thuộc đường ống kho, không vào đây. */
-export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAITING_REDELIVERY", "STALE_NO_UPDATE", "DATA_GAP"];
+export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAITING_REDELIVERY", "WAITING_CARRIER", "STALE_NO_UPDATE", "DATA_GAP"];
 
 /** Lý do kiện cần care — rổ tháp hoặc case CSKH cần sửa thông tin. */
 export type CareReasonKey = BucketKey | "WRONG_INFO";
@@ -126,6 +126,7 @@ export const CARE_REASON_LABEL: Record<CareReasonKey, string> = {
   NO_CONTACT: "Khách không nghe máy",
   DELIVERY_FAILED: "Giao thất bại",
   AWAITING_REDELIVERY: "Chờ phát lại",
+  WAITING_CARRIER: "ĐVVC để treo, chưa xử lý",
   STALE_NO_UPDATE: "Im lặng quá ngưỡng",
   RETURNING: "Đang chuyển hoàn",
   RETURN_AT_SHOP: "Hoàn đã về shop",

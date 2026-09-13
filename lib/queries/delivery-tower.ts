@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { TEAM_LABEL } from "@/lib/constants/action-queue";
 import { CARE_ACTION_LABEL, DELIVERY_BUCKETS, EXCLUSIVE_BUCKETS, type BucketKey, type BucketSpec, type CareActionKind } from "@/lib/constants/delivery-tower";
+import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { classifyFailedReason } from "@/lib/constants/cs";
 import { classifyFreshness, thresholdFor, type FreshnessClass } from "@/lib/constants/logistics-freshness";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -53,6 +54,18 @@ export type TowerRow = {
   /** Trạng thái CHUẨN HOÁ của ERP. Hai cột đứng cạnh nhau để lệch là thấy ngay. */
   stage: ShipmentStage;
   stageLabel: string;
+  /**
+   * CHIỀU THỨ HAI, ĐỘC LẬP VỚI `stage`: ĐVVC đang làm gì với kiện này.
+   *
+   * `stage` gộp ba tình huống khác hẳn nhau vào `DELIVERY_FAILED` và hai tình huống vào `PENDING`.
+   * Trạng thái con tách chúng ra mà KHÔNG đụng vào enum canonical — xem lib/constants/carrier-substate.ts.
+   */
+  carrierSubstate: CarrierSubstate;
+  carrierSubstateLabel: string;
+  /** Kết luận trạng thái con dựa vào đâu: mã ĐVVC, chữ, chặng ERP, hay không rõ. */
+  substateBasis: "code" | "text" | "stage" | "unknown";
+  /** CHỨNG TỪ nói gói hàng đã rời kho — không suy từ câu chữ. */
+  leftWarehouse: boolean;
   /** Giờ kể từ sự kiện ĐVVC gần nhất. `null` = chưa từng có sự kiện nào. */
   lastEventAgeHours: number | null;
   freshness: FreshnessClass;
@@ -110,14 +123,36 @@ type Raw = {
   cs_action_at: string | null;
   cs_boi_nguoi: boolean | null;
   event_note: string | null;
+  da_roi_kho: boolean | null;
 };
 
-/** Một kiện rơi vào rổ NÀO — xét theo thứ tự, dừng ở rổ đầu tiên khớp. */
-function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass): { bucket: BucketKey; reason: string } | null {
+/**
+ * ═══════════ MỘT KIỆN RƠI VÀO RỔ NÀO ═══════════
+ *
+ * Xét theo THỨ TỰ, dừng ở rổ đầu tiên khớp. Căn cứ là TRẠNG THÁI CON của ĐVVC, không phải `stage`.
+ *
+ * ─── VÌ SAO ĐỔI ───
+ *
+ * `stage` chỉ có mười giá trị. Ba tình huống cần ba cách xử lý khác nhau đang mang cùng một nhãn
+ * `DELIVERY_FAILED`, và hai tình huống nữa mang cùng nhãn `PENDING`. Đo production 13/09/2026:
+ *
+ *   "Chờ phát lại"                       39 vận đơn · 38 đã có bằng chứng lấy hàng
+ *   "Tồn - Khách hàng nghỉ, không có nhà" 11 vận đơn · cùng nhãn DELIVERY_FAILED với dòng trên
+ *   "Chờ xử lý" / "Đơn hàng chờ xử lý"   225 vận đơn · 56 đã rời kho, nhưng ERP ghi PENDING
+ *
+ * 56 kiện cuối là gói hàng đã đi khỏi kho, đang nằm chờ ở bưu cục, và **không xuất hiện trong tháp
+ * này** — vì `PENDING` không khớp nhánh nào và chưa đủ cũ để vào rổ "quá lâu". Chúng cần người gọi
+ * bưu cục, và trước bản này không ai biết chúng tồn tại.
+ */
+function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass, con: CarrierSubstate, daRoiKho: boolean): { bucket: BucketKey; reason: string } | null {
   const ma = r.vtp_reason_code;
   const chu = [r.vtp_note, r.event_note, r.vtp_status_name];
 
-  if (r.stage === "DELIVERY_FAILED") {
+  // ĐÃ HẸN PHÁT LẠI — còn cửa giao, và việc của shop là NHẮC KHÁCH, không phải xử lý sự cố.
+  if (con === "WAITING_REDELIVERY") return { bucket: "AWAITING_REDELIVERY", reason: `ĐVVC ghi “${r.vtp_status_name || "chờ phát lại"}”` };
+
+  // VƯỚNG KHI ĐANG PHÁT — phân loại tiếp theo lý do, vì mỗi lý do một việc khác nhau.
+  if (con === "DELIVERY_EXCEPTION") {
     // Mã lý do của ĐVVC là CHỨNG TỪ, đứng trên ghi chú tự do của bưu tá.
     if (ma !== null && MA_KHONG_LIEN_LAC.has(ma)) return { bucket: "NO_CONTACT", reason: "Không liên lạc được khách (mã ĐVVC)" };
     if (ma !== null && MA_HEN_LAI.has(ma)) return { bucket: "AWAITING_REDELIVERY", reason: "Đã hẹn phát lại (mã ĐVVC)" };
@@ -127,9 +162,19 @@ function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass): { bucket:
     return { bucket: "DELIVERY_FAILED", reason: `Giao hụt · ${ly === "OTHER" ? (r.vtp_status_name ?? "chưa rõ lý do") : ly}` };
   }
 
-  if (r.stage === "RETURNED") return { bucket: "RETURN_AT_SHOP", reason: "ĐVVC đã trả hàng về, kho chưa kiểm đếm" };
-  if (r.stage === "RETURNING") return { bucket: "RETURNING", reason: "Đang trên đường về shop" };
-  if (r.stage === "UNKNOWN" || tuoi === null) return { bucket: "DATA_GAP", reason: tuoi === null ? "Chưa nhận được sự kiện nào từ ĐVVC" : "Trạng thái ĐVVC chưa dịch được" };
+  if (con === "RETURNED") return { bucket: "RETURN_AT_SHOP", reason: "ĐVVC đã trả hàng về, kho chưa kiểm đếm" };
+  if (con === "RETURNING") return { bucket: "RETURNING", reason: "Đang trên đường về shop" };
+
+  /*
+    ĐVVC ĐỂ TREO — và chỉ khi CHỨNG TỪ nói gói hàng đã rời kho.
+
+    "Chờ xử lý" xuất hiện ở CẢ HAI phía mốc lấy hàng: 169/225 mang mã 102 (dải tạo đơn / điều phối
+    bưu tá — hàng còn trong kho), 56 cái đã có mốc lấy và sự kiện sau đó. Đưa cả 225 vào rổ việc là
+    bắt người gọi bưu cục về những gói còn nằm trong chính kho của mình.
+  */
+  if (con === "WAITING_PROCESSING" && daRoiKho) return { bucket: "WAITING_CARRIER", reason: `Đã rời kho nhưng ĐVVC ghi “${r.vtp_status_name || "chờ xử lý"}”` };
+
+  if (con === "UNKNOWN" || tuoi === null) return { bucket: "DATA_GAP", reason: tuoi === null ? "Chưa nhận được sự kiện nào từ ĐVVC" : "Trạng thái ĐVVC chưa dịch được" };
 
   /*
     ═══ CHỈ "CŨ NGHIÊM TRỌNG" MỚI VÀO RỔ VIỆC ═══
@@ -202,6 +247,13 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
                o.bill_phone,
                extract(epoch from (now() - ev.moc)) / 3600 as tuoi_gio,
                coalesce(ev.lan_hut, 0) as lan_hut,
+               /*
+                 CHỨNG TỪ RỜI KHO — hai bậc, cả hai đều là chứng từ của ĐVVC:
+                   1. mốc lấy hàng;
+                   2. một sự kiện hành trình mang chặng SAU mốc lấy.
+                 KHÔNG suy từ câu chữ trạng thái: "chờ xử lý" nằm ở cả hai phía mốc lấy hàng.
+               */
+               (s.picked_up_at is not null or ev.co_chang_sau_lay) as da_roi_kho,
                ev.ghi_chu as event_note,
                coalesce(nguoi.nhan, cham.nhan) as cs_action,
                coalesce(nguoi.luc, cham.luc) as cs_action_at,
@@ -211,7 +263,8 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
           left join lateral (
             select max(e.occurred_at) filter (where e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION')) as moc,
                    count(*) filter (where e.normalized_stage = 'DELIVERY_FAILED')::int as lan_hut,
-                   (array_agg(e.note order by e.occurred_at desc) filter (where e.note <> ''))[1] as ghi_chu
+                   (array_agg(e.note order by e.occurred_at desc) filter (where e.note <> ''))[1] as ghi_chu,
+                   bool_or(e.normalized_stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED','DELIVERY_FAILED','RETURNING','RETURNED')) as co_chang_sau_lay
               from shipment_events e
              where e.shipment_id = s.id
           ) ev on true
@@ -247,7 +300,9 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
     for (const r of rows) {
       const tuoi = r.tuoi_gio === null || r.tuoi_gio === undefined ? null : Number(r.tuoi_gio);
       const hang = classifyFreshness(tuoi, r.stage);
-      const xep = xepRo(r, tuoi, hang);
+      const { substate, basis } = carrierSubstate({ code: r.vtp_status, text: r.vtp_status_name, stage: r.stage });
+      const daRoiKho = Boolean(r.da_roi_kho);
+      const xep = xepRo(r, tuoi, hang, substate, daRoiKho);
       if (!xep) continue;
       ngoaiLe += 1;
       const spec = DELIVERY_BUCKETS.find((b) => b.key === xep.bucket)!;
@@ -264,6 +319,10 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
         rawStatusCode: r.vtp_status,
         stage: r.stage,
         stageLabel: SHIPMENT_STAGE_LABEL[r.stage] ?? r.stage,
+        carrierSubstate: substate,
+        carrierSubstateLabel: CARRIER_SUBSTATE_LABEL[substate],
+        substateBasis: basis,
+        leftWarehouse: daRoiKho,
         lastEventAgeHours: tuoi,
         freshness: hang,
         failedAttempts: Number(r.lan_hut ?? 0),

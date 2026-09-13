@@ -10,6 +10,26 @@ let lastCallAt = 0;
 
 export type VtpEnvelope = { status: number; error: boolean; message: string; data: unknown };
 
+/**
+ * ═══════════ "HTTP 400" MÀ MẠNG KHÔNG HỀ TRẢ VỀ 400 ═══════════
+ *
+ * Viettel Post từ chối một thao tác bằng cách trả **HTTP 200** với `error: true` trong phong bì —
+ * đúng như `AGENTS.md` mục 5 cảnh báo: đọc `error`/`status` trong phong bì, đừng tin mã HTTP.
+ *
+ * Bản cũ bắt đúng chỗ đó rồi... lại ném ra `status = 400`. Nên mọi lời từ chối nghiệp vụ ("vận đơn
+ * không thuộc tài khoản", "đơn đã phát không phát tiếp được") đều hiện lên màn hình dưới dạng một
+ * con số HTTP — che mất chính câu cần đọc, và gửi người đi tra sai hướng (tưởng lỗi mạng / lỗi
+ * payload). Đo được 13/09/2026: `carrier_action_requests` RỖNG, nên không một lời từ chối nào của
+ * Viettel Post từng được lưu lại để đọc.
+ *
+ * Nay mã giữ nguyên mã phong bì của ĐVVC, và câu từ chối đi trong `carrier.message` để màn hình in
+ * thẳng "Viettel Post từ chối: …".
+ */
+function tuChoiNghiepVu(res: VtpEnvelope): IntegrationError {
+  const cau = res.message?.trim() || `Viettel Post trả mã ${res.status} nhưng không kèm lý do`;
+  return new IntegrationError(`ViettelPost: ${cau}`, res.status || 200, false, res, { status: res.status || null, message: cau });
+}
+
 export type VtpTrackingRecord = {
   orderNumber: string;
   orderReference: string;
@@ -217,7 +237,7 @@ export class ViettelPostClient {
    */
   async updateOrder(orderNumber: string, type: VtpOrderActionType, note = "", date?: string) {
     const res = await this.call("order/UpdateOrder", { method: "POST", body: { TYPE: type, ORDER_NUMBER: orderNumber, NOTE: note, DATE: date ?? new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Ho_Chi_Minh" }) } });
-    if (res.error) throw new IntegrationError(`ViettelPost: ${res.message || `mã ${res.status}`}`, 400, false, res);
+    if (res.error) throw tuChoiNghiepVu(res);
     return res;
   }
 
@@ -231,7 +251,7 @@ export class ViettelPostClient {
     if (fields.note !== undefined) body.ORDER_NOTE = fields.note;
     if (fields.productName !== undefined) body.PRODUCT_NAME = fields.productName;
     const res = await this.call("order/edit", { method: "POST", body });
-    if (res.error) throw new IntegrationError(`ViettelPost: ${res.message || `mã ${res.status}`}`, 400, false, res);
+    if (res.error) throw tuChoiNghiepVu(res);
     return res;
   }
 

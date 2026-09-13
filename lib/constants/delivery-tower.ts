@@ -28,6 +28,7 @@ export type BucketKey =
   | "NO_CONTACT"
   | "DELIVERY_FAILED"
   | "AWAITING_REDELIVERY"
+  | "WAITING_CARRIER"
   | "STALE_NO_UPDATE"
   | "RETURNING"
   | "RETURN_AT_SHOP"
@@ -92,9 +93,29 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
     tone: "amber",
   },
   {
+    /*
+      RỔ MỚI 13/09/2026 — SINH RA TỪ MỘT NHÓM KIỆN TRƯỚC ĐÂY KHÔNG AI NHÌN THẤY.
+
+      Viettel Post ghi "Chờ xử lý" cho 225 vận đơn, trong đó 56 cái ĐÃ có mốc lấy hàng và có sự
+      kiện hành trình sau đó — gói hàng đã rời kho và đang nằm chờ một quyết định ở bưu cục. ERP
+      xếp cả 225 vào chặng `PENDING` (= chưa lấy hàng), nên tháp giao vận không bắt được cái nào:
+      chúng không phải giao hụt, không phải đang hoàn, và chưa đủ cũ để vào rổ "quá lâu".
+
+      Kiện nằm ở đây KHÔNG hỏng. Nó đang chờ — và cái chờ đó không tự hết.
+    */
+    key: "WAITING_CARRIER",
+    label: "ĐVVC để treo, chưa xử lý",
+    order: 4,
+    team: "LOGISTICS",
+    question: "Kiện nào đã rời kho nhưng bưu cục đang để đó?",
+    nextAction: "Gọi bưu cục hỏi kiện đang nằm ở đâu và khi nào đi tiếp; quá 48 giờ mà không có mốc mới thì mở khiếu nại.",
+    moneyMeaning: "COD đang treo. Chưa mất, nhưng cũng chưa đi tới đâu — và mỗi ngày chờ là một ngày gần hơn tới hoàn.",
+    tone: "amber",
+  },
+  {
     key: "STALE_NO_UPDATE",
     label: "Quá lâu không cập nhật",
-    order: 4,
+    order: 5,
     team: "LOGISTICS",
     question: "Kiện nào ERP không biết đang ở đâu?",
     nextAction: "Tra mã trên trang Viettel Post; có mốc mới thì nhập tay để vá lại lịch sử, không có thì mở khiếu nại.",
@@ -104,7 +125,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "RETURNING",
     label: "Đang chuyển hoàn",
-    order: 5,
+    order: 6,
     team: "LOGISTICS",
     question: "Hàng nào đang trên đường về shop?",
     nextAction: "Theo dõi tới khi kho nhận; quá 7 ngày chưa về thì hỏi bưu cục — hàng hoàn cũng thất lạc được.",
@@ -114,7 +135,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "RETURN_AT_SHOP",
     label: "Hoàn đã về shop, chờ kiểm đếm",
-    order: 6,
+    order: 7,
     team: "WAREHOUSE",
     question: "Hàng nào đã về mà chưa ai đếm?",
     nextAction: "Kho lập phiếu kiểm đếm. Hàng hoàn KHÔNG tự vào tồn cho tới khi có phiếu.",
@@ -124,7 +145,7 @@ export const DELIVERY_BUCKETS: BucketSpec[] = [
   {
     key: "DATA_GAP",
     label: "Chưa rõ / thiếu dữ liệu",
-    order: 7,
+    order: 8,
     team: "LOGISTICS",
     question: "Kiện nào ERP chưa từng nhận được tin gì?",
     nextAction: "Kiểm tra vận đơn có thật trên Viettel Post không; webhook có tới không.",
