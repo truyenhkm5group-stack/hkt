@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { METRIC_BY_KEY } from "@/lib/constants/metric-catalog";
+import { canTargetPerson, metricOf } from "@/lib/constants/metric-registry";
 import { targetDelete, targetInput } from "@/lib/validation/metric-targets";
 
 /**
@@ -27,12 +27,22 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const d = parsed.data;
 
-  const spec = METRIC_BY_KEY[d.metricKey];
-  if (!spec) return { error: "Chỉ số không có trong danh mục" };
-  if (spec.direction === "CONTEXT") return { error: `"${spec.label}" là chỉ số đọc bối cảnh, không có chiều tốt/xấu nên không đặt đích được` };
-  if (d.scope === "COMPANY" && d.scopeRef) return { error: "Đích toàn công ty không gắn với phòng hay chức danh nào" };
-  if (d.scope !== "COMPANY" && !d.scopeRef) return { error: "Phải chọn phòng ban hoặc chức danh" };
+  const spec = metricOf(d.metricKey);
+  if (!spec) return { error: "Chỉ số không có trong sổ" };
+  if (!spec.targetable) return { error: spec.missingWhat ?? `"${spec.label}" chưa đo được nên không đặt đích được` };
+  if (d.scope === "COMPANY" && d.scopeRef) return { error: "Đích toàn công ty không gắn với phòng, chức danh hay cá nhân nào" };
+  if (d.scope !== "COMPANY" && !d.scopeRef) return { error: "Phải chọn phòng ban, chức danh hoặc người" };
+  /*
+    ĐÍCH CHO MỘT CÁ NHÂN bị chặn ở đây VÀ ở lược đồ đầu vào. Chỉ số mức công ty gắn tên một người
+    là chấm người đó bằng kết quả của cả shop; chỉ số mang cờ `shared` (ĐVVC giao được hay không)
+    là chấm người bằng thứ họ không quyết được — AGENTS.md mục 24 và 27.
+  */
+  if (d.scope === "USER") {
+    const duoc = canTargetPerson(d.metricKey);
+    if (!duoc.ok) return { error: duoc.reason ?? "Chỉ số này không đặt đích cho một cá nhân được" };
+  }
   if (spec.unit === "PERCENT" && (d.target < 0 || d.target > 100)) return { error: "Đích theo phần trăm phải nằm trong 0–100" };
+  if (spec.unit === "PERCENT" && d.targetMax !== null && (d.targetMax < 0 || d.targetMax > 100)) return { error: "Cận trên theo phần trăm phải nằm trong 0–100" };
 
   const db = await getDb();
   const ref = d.scope === "COMPANY" ? null : d.scopeRef;
@@ -44,10 +54,23 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
     .where(and(eq(schema.metricTargets.metricKey, d.metricKey), eq(schema.metricTargets.scope, d.scope), sql`coalesce(${schema.metricTargets.scopeRef}, '') = ${ref ?? ""}`, eq(schema.metricTargets.effectiveFrom, d.effectiveFrom)))
     .limit(1);
 
+  const chung = {
+    target: d.target,
+    targetMax: d.targetMax,
+    warningAt: d.warningAt,
+    criticalAt: d.criticalAt,
+    periodKind: d.periodKind,
+    note: d.note,
+    effectiveTo: d.effectiveTo,
+    ownerDepartment: d.ownerDepartment,
+  };
+
   if (cu) {
-    await db.update(schema.metricTargets).set({ target: d.target, note: d.note, setBy: user.id, setByEmail: user.email, updatedAt: new Date() }).where(eq(schema.metricTargets.id, cu.id));
+    // Sửa một đích ĐÃ CÓ là một quyết định mới về cùng một cam kết, nên số phiên bản đi lên —
+    // nhật ký giữ lại cả con số cũ để kỳ sau đọc được vì sao nó đổi.
+    await db.update(schema.metricTargets).set({ ...chung, version: cu.version + 1, setBy: user.id, setByEmail: user.email, updatedAt: new Date() }).where(eq(schema.metricTargets.id, cu.id));
   } else {
-    await db.insert(schema.metricTargets).values({ metricKey: d.metricKey, scope: d.scope, scopeRef: ref, target: d.target, note: d.note, effectiveFrom: d.effectiveFrom, setBy: user.id, setByEmail: user.email });
+    await db.insert(schema.metricTargets).values({ ...chung, metricKey: d.metricKey, scope: d.scope, scopeRef: ref, effectiveFrom: d.effectiveFrom, setBy: user.id, setByEmail: user.email });
   }
 
   await audit({
@@ -56,8 +79,8 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
     action: "METRIC_TARGET_SET",
     entity: "METRIC_TARGET",
     entityId: `${d.metricKey}:${d.scope}:${ref ?? ""}`,
-    before: cu ? { target: cu.target, note: cu.note } : null,
-    after: { target: d.target, note: d.note, effectiveFrom: d.effectiveFrom.toISOString(), unit: spec.unit, direction: spec.direction },
+    before: cu ? { target: cu.target, targetMax: cu.targetMax, note: cu.note, periodKind: cu.periodKind, version: cu.version } : null,
+    after: { ...chung, effectiveFrom: d.effectiveFrom.toISOString(), effectiveTo: d.effectiveTo?.toISOString() ?? null, unit: spec.unit, direction: spec.direction, version: (cu?.version ?? 0) + 1 },
     reason: "Đặt đích cho chỉ số hiệu suất",
   });
   revalidatePath("/work/performance");
@@ -82,7 +105,7 @@ export async function deleteMetricTarget(input: unknown): Promise<Result> {
     action: "METRIC_TARGET_DELETE",
     entity: "METRIC_TARGET",
     entityId: `${cu.metricKey}:${cu.scope}:${cu.scopeRef ?? ""}`,
-    before: { target: cu.target, note: cu.note, effectiveFrom: cu.effectiveFrom.toISOString() },
+    before: { target: cu.target, targetMax: cu.targetMax, note: cu.note, effectiveFrom: cu.effectiveFrom.toISOString(), version: cu.version },
     after: null,
     reason: "Bỏ đích — chỉ số quay về hiện thực tế mà không kết luận đạt/không đạt",
   });

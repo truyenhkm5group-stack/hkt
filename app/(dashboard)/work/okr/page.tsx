@@ -55,6 +55,21 @@ function KrRow({ kr, canManage }: { kr: KeyResultView; canManage: boolean }) {
           {formatValue(kr.current, kr.unit)} / {formatValue(kr.target, kr.unit)}
           {kr.unit !== "PERCENT" && kr.unit !== "VND" ? ` ${METRIC_UNIT_LABEL[kr.unit].toLowerCase()}` : ""}
         </span>
+        {/*
+          ĐÍCH CỦA KR NÀY KHÁC ĐÍCH CÓ THẨM QUYỀN CỦA CHÍNH CHỈ SỐ ĐÓ.
+
+          `okr_key_results.target` là con số người tạo KR gõ vào, không đi qua sổ đích — nên cùng
+          một chỉ số có thể mang hai đích ở hai màn hình mà không ai biết. Chỉ BÁO, không tự ghi
+          đè: đích của một KR đang chạy là cam kết đã thống nhất trong kỳ.
+        */}
+        {kr.targetConflict ? (
+          <span
+            className="rounded bg-warning/15 px-1 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+            title={`Sổ đích đang khai ${formatValue(kr.authoritativeTarget, kr.unit)} cho chỉ số này, khác đích ${formatValue(kr.target, kr.unit)} của KR. ERP KHÔNG tự sửa đích của một KR đang chạy — người quyết.`}
+          >
+            lệch sổ đích: {formatValue(kr.authoritativeTarget, kr.unit)}
+          </span>
+        ) : null}
         <span className={cn("w-14 text-right text-sm font-semibold tabular-nums", (!measured || thieuMau) && "text-muted-foreground")} title={thieuMau ? `${METRIC_STATE_LABEL.DATA_INSUFFICIENT} — mới ${kr.sample} quan sát` : undefined}>
           {measured ? `${Math.round(kr.progress!)}%` : "—"}
         </span>
