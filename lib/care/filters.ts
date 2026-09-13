@@ -78,13 +78,25 @@ export function careSlaBucket(c: Pick<CareCase, "queueSince" | "care" | "sla">, 
 /* ─────────────────────────── TIỀN COD TREO ─────────────────────────── */
 
 /**
- * Dải COD để lọc "kiện nào đáng cứu trước". Mốc chia là mốc TRÌNH BÀY (xếp việc theo tiền), không
- * phải ngưỡng nghiệp vụ kết luận đơn — ngưỡng đó nằm ở `RETURN_RULE` và không được nhân bản ở đây.
+ * DẢI COD — MỐC CHIA ĐẶT VÀO KHE THẬT CỦA DỮ LIỆU, KHÔNG ĐẶT VÀO SỐ TRÒN CHO ĐẸP.
+ *
+ * Mốc chia ở đây là mốc TRÌNH BÀY (xếp việc theo tiền), KHÔNG phải ngưỡng nghiệp vụ kết luận đơn —
+ * ngưỡng đó nằm ở `RETURN_RULE` và không được nhân bản ở chỗ này.
+ *
+ * Đo production 13/09/2026 trên 332 vận đơn đang đi (`PENDING`…`DELIVERY_FAILED`): chỉ có 22 mức
+ * giá, và chúng đứng thành cụm rõ rệt — 0 (2 kiện) · 359K–470K (22) · 499K–524K (265, tức 80%) ·
+ * 699K–999.999 (42) · 1.250.000 (1). Bản đầu tiên của bảng này chia 300K/600K theo trực giác: dải
+ * "< 300K" RỖNG HOÀN TOÀN, còn 287/332 kiện dồn vào một dải — một bộ lọc chia 86% dữ liệu vào một
+ * ô thì không lọc được gì, nó chỉ chiếm chỗ trên màn hình.
+ *
+ * Mốc hiện tại đặt vào khe: 500K (khe 470K→499K) và 600K (khe 524K→699K, khe rộng nhất). Kết quả
+ * đo được: 2 · 98 · 189 · 42 · 1. Mix hàng đổi thì ĐO LẠI rồi sửa ở đây — đừng đoán, và đừng để
+ * một dải rỗng nằm lại (màn hình giấu rổ 0 kiện, nên dải chết sẽ im lặng biến mất chứ không kêu).
  */
 export const CARE_COD_BANDS = [
   { key: "0", label: "Không thu hộ", min: 0, max: 0 },
-  { key: "lt300", label: "< 300K", min: 1, max: 299_999 },
-  { key: "300-600", label: "300K – 600K", min: 300_000, max: 599_999 },
+  { key: "lt500", label: "< 500K", min: 1, max: 499_999 },
+  { key: "500-600", label: "500K – 600K", min: 500_000, max: 599_999 },
   { key: "600-1m", label: "600K – 1tr", min: 600_000, max: 999_999 },
   { key: "gte1m", label: "≥ 1tr", min: 1_000_000, max: Number.POSITIVE_INFINITY },
 ] as const;

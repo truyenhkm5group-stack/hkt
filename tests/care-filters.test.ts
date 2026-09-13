@@ -99,14 +99,34 @@ const RONG: CareFilters = { view: "care", q: "", owner: "", reason: "", substate
 export function testCareFilters() {
   /* ═══════════ 1. DẢI TIỀN VÀ DẢI LẦN PHÁT: BIÊN LÀ CHỖ DỄ SAI NHẤT ═══════════ */
   assert.equal(careCodBand(0), "0");
-  assert.equal(careCodBand(1), "lt300");
-  assert.equal(careCodBand(299_999), "lt300");
-  assert.equal(careCodBand(300_000), "300-600", "đúng 300K phải thuộc dải 300–600, không rơi xuống dải dưới");
-  assert.equal(careCodBand(599_999), "300-600");
+  assert.equal(careCodBand(1), "lt500");
+  assert.equal(careCodBand(499_000), "lt500", "mức giá đông nhất dưới mốc — 76 kiện thật ở đúng con số này");
+  assert.equal(careCodBand(499_999), "lt500");
+  assert.equal(careCodBand(500_000), "500-600", "đúng 500K phải thuộc dải trên, không rơi xuống dải dưới");
+  assert.equal(careCodBand(524_000), "500-600", "mức giá đông nhất của shop — 162 kiện thật");
+  assert.equal(careCodBand(599_999), "500-600");
   assert.equal(careCodBand(600_000), "600-1m");
-  assert.equal(careCodBand(999_999), "600-1m");
+  assert.equal(careCodBand(999_999), "600-1m", "có kiện thật ở đúng con số này trên production");
   assert.equal(careCodBand(1_000_000), "gte1m", "đúng 1tr phải thuộc dải ≥ 1tr");
   assert.equal(careCodBand(99_000_000), "gte1m");
+
+  /*
+    MỖI DẢI PHẢI CÓ KIỆN THẬT. Đo production 13/09/2026 (332 vận đơn đang đi) rồi đếm lại bằng chính
+    `careCodBand`: bản đầu tiên của bảng dải có một dải RỖNG HOÀN TOÀN và một dải ôm 86% dữ liệu.
+    Bài kiểm này giữ cho lần sửa mốc sau không lặng lẽ dựng lại một dải chết.
+  */
+  const doDuoc: [number, number][] = [
+    [0, 2], [359_000, 1], [370_000, 1], [379_000, 1], [399_000, 10], [424_000, 4], [424_150, 1], [450_000, 3], [470_000, 1],
+    [499_000, 76], [519_000, 27], [524_000, 162], [699_000, 1], [749_000, 5], [760_000, 1], [770_000, 1], [800_000, 6],
+    [849_000, 25], [850_000, 1], [998_000, 1], [999_999, 1], [1_250_000, 1],
+  ];
+  const theoDai = new Map<string, number>();
+  for (const [tien, n] of doDuoc) theoDai.set(careCodBand(tien), (theoDai.get(careCodBand(tien)) ?? 0) + n);
+  assert.equal([...theoDai.values()].reduce((a, b) => a + b, 0), 332, "tổng phải khớp số kiện đã đo trên production");
+  assert.deepEqual([...CARE_COD_BAND_KEYS].map((k) => [k, theoDai.get(k) ?? 0]), [["0", 2], ["lt500", 98], ["500-600", 189], ["600-1m", 42], ["gte1m", 1]], "phân bố theo dải phải khớp số đo production");
+  for (const k of CARE_COD_BAND_KEYS) assert.ok((theoDai.get(k) ?? 0) > 0, `dải ${k} không có kiện thật nào trên dữ liệu đã đo — một dải rỗng chỉ chiếm chỗ trên màn hình`);
+  const donNhat = Math.max(...[...theoDai.values()]);
+  assert.ok(donNhat / 332 < 0.7, `dải đông nhất ôm ${Math.round((donNhat / 332) * 100)}% dữ liệu — chia kiểu đó thì bộ lọc không lọc được gì`);
   // Mọi dải phải phủ kín, không chồng nhau: mỗi số tiền rơi vào đúng MỘT rổ.
   for (const v of [0, 1, 150_000, 300_000, 450_000, 600_000, 800_000, 1_000_000, 5_000_000]) {
     assert.ok(CARE_COD_BAND_KEYS.includes(careCodBand(v)), `COD ${v} rơi ra ngoài mọi dải`);
@@ -183,7 +203,7 @@ export function testCareFilters() {
   const now = gio(19);
   const tap = [
     ca({ id: "1", cod: 0, hut: 0, vaoLuc: 0, ownerId: "u1", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", products: ["SKU-A"] }),
-    ca({ id: "2", cod: 250_000, hut: 1, vaoLuc: 2, ownerId: null, reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", products: ["SKU-A", "SKU-B"] }),
+    ca({ id: "2", cod: 524_000, hut: 1, vaoLuc: 2, ownerId: null, reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", products: ["SKU-A", "SKU-B"] }),
     ca({ id: "3", cod: 450_000, hut: 2, vaoLuc: 10, ownerId: "u1", reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 11, status: "IN_PROGRESS", products: ["SKU-B"] }),
     ca({ id: "4", cod: 800_000, hut: 3, vaoLuc: 18, ownerId: "u2", reason: "AWAITING_REDELIVERY", substate: "WAITING_REDELIVERY", products: [] }),
     ca({ id: "5", cod: 2_400_000, hut: 0, vaoLuc: 18.9, ownerId: null, reason: "WAITING_CARRIER", substate: "WAITING_PROCESSING", products: ["SKU-C"] }),
@@ -212,7 +232,7 @@ export function testCareFilters() {
     { ...RONG, attempts: "3plus" },
     { ...RONG, sku: "sku-a" },
     { ...RONG, owner: "u1", reason: "DELIVERY_FAILED" },
-    { ...RONG, sla: "breached", cod: "lt300", attempts: "1" },
+    { ...RONG, sla: "breached", cod: "500-600", attempts: "1" },
     { ...RONG, q: "VD5", sla: "ok" },
   ];
 
