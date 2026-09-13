@@ -161,6 +161,29 @@ deploy dừng, không phải cảnh báo.
     quyết định → giao lại từng việc. Số việc phải đếm bằng ĐÚNG phép chiếu mà hàng đợi của người
     đó dùng, không đếm `work_items` (bảng ấy chỉ giữ việc tay và việc định kỳ, nên ra gần như luôn
     bằng 0 — một cảnh báo báo 0 còn tệ hơn không có cảnh báo).
+34. **PHẠM VI DỮ LIỆU PHẢI ĐƯỢC THI HÀNH, KHÔNG CHỈ ĐƯỢC KHAI** (`lib/constants/data-scope-policy.ts`
+    + `lib/auth/scope-guard.ts`): mỗi loại dữ liệu khai rõ nó thu hẹp được THEO DÒNG hay chỉ THEO
+    PHÒNG SỞ HỮU, và khai ở MỘT chỗ. Trang gọi `requireResource(loại, khoá-quyền-CỦA-TRANG)` —
+    khoá truyền tường minh, không lấy "khoá đại diện" của sổ, vì mỗi tuyến có khoá riêng và áp
+    nhầm là thoái lui quyền. Loại nào thu hẹp được theo dòng thì mệnh đề SQL nằm TRONG
+    `lib/queries/*` nữa, kể cả ở truy vấn ĐẾM: một con số tổng cũng là rò rỉ.
+35. **PHẠM VI HẸP HƠN THỨ DỮ LIỆU BIỂU DIỄN ĐƯỢC ⇒ TỪ CHỐI, KHÔNG PHẢI CHO XEM HẾT.** Phần lớn
+    bảng nghiệp vụ không có cột chủ dòng (`orders.seller_name` là chuỗi tên Pancake, không phải
+    tài khoản). Cho xem hết là lỗ hổng im lặng; trả rỗng là ngõ cụt. Từ chối kèm LÝ DO và LỐI RA.
+    `NONE` trong truy vấn trả `false`, không phải `undefined`. Không có phiên TRONG một yêu cầu
+    HTTP ⇒ đóng; chạy NGOÀI mọi yêu cầu (job, script) ⇒ mở — hai tình huống khác nhau, gộp lại
+    theo hướng mở là biến cookie hỏng thành toàn quyền.
+36. **MỖI CHỈ SỐ HIỆU SUẤT MANG ĐỦ XUẤT XỨ** (`lib/constants/metric-provenance.ts`): nguồn · chủ
+    thể · kỳ · mẫu số (đếm CÁI GÌ) · độ tin cậy · luật quy kết. Độ tin cậy là HÀM của cỡ mẫu +
+    cách nối người + kết quả có chung hay không, không phải nhãn gõ tay: nối bằng TÊN GÕ TAY thì
+    mẫu bao nhiêu cũng chỉ ở mức YẾU. Mẫu dưới ngưỡng thì KHÔNG xếp hạng và KHÔNG tô màu. Xuất xứ
+    được gắn ở ĐÚNG MỘT chỗ nên chỉ số mới không thể quên khai.
+37. **LỊCH SỬ HIỆU SUẤT LÀ ẢNH CHỤP BẤT BIẾN** (`performance_snapshots`): ghi một lần, không bao
+    giờ ghi đè (khoá duy nhất + `ON CONFLICT DO NOTHING`). KHÔNG chụp kỳ chưa đóng. Kỳ không có
+    quan sát nào vẫn ghi dòng `value = null` — nếu bỏ trống thì "chưa đo được" trông y hệt "job
+    chưa chạy", mà một cái là sự thật về công việc còn cái kia là lỗ hổng dữ liệu. Đổi công thức
+    thì tăng `METRIC_DEFINITION_VERSION`; xu hướng bắc qua hai phiên bản phải NÓI RA thay vì vẽ
+    một mũi tên như thật.
 
 
 ## 4. Database
