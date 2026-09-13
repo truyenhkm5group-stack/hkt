@@ -131,3 +131,111 @@ campaign-mapping, role-matrix, receipt-dialog, bank-import-dialog, work/today pa
 cuộn 200–300px trong khung thì tiêu đề vẫn ở mốc 0 và cột tiêu đề/thân lệch 0px sau khi cuộn ngang
 150px; thanh "Đã chọn" nằm trên tiêu đề; menu dòng mở ra không bị cắt và nằm trên tiêu đề
 (elementFromPoint trả về menu); phân trang sang trang 2 hoạt động. Ảnh chụp lưu ở thư mục QA của phiên.
+
+## 4. Thẻ điểm các release gần đây (review lại implementation của các model trước)
+
+Thang: GOOD (giữ nguyên) · NEEDS_FIX (đúng hướng, có lỗi phải sửa) · INCOMPLETE (mới có nửa) · WRONG
+(sai luật, đã làm lại) · REPLACE (bỏ đường cũ).
+
+| Workstream | Trạng thái | Ý định | Bằng chứng production / mã | Vấn đề | Đã sửa trong bản này |
+|---|---|---|---|---|---|
+| Shipment Care / VTP lifecycle (`b043fe0`, `ee8c8f8`, `4b9a2bc`) | **WRONG → sửa** | Cần care = WAITING_PROCESSING ∪ WAITING_REDELIVERY; ĐVVC mở/đóng ca | 106/106 ca mở cho hàng CHƯA rời kho, 6/48 ca cho hàng đang chờ ở bưu cục; lifecycle đọc mã 501 không phân biệt chiều; RESOLVED/CANCELLED vẫn `active` | hai định nghĩa "cần care" (tháp ≠ vòng đời); 501 chiều hoàn = "cứu được"; từ chối điều kiện vẫn ghi quyết định; WAITING không hẹn biến mất; hai nghĩa "đã đóng" | một luật vào care (`lib/care/entry.ts`) dùng chung tháp + vòng đời; đóng theo chặng leg-aware; đối chiếu độ phủ 10 phút/lần; migration 0076 sửa cờ; hộp thoại Duyệt hoàn / Đổi; SLA đọc từ sổ; quy kết qua ASSIGN event |
+| Rescue performance / PIC (`56f6853`) | **NEEDS_FIX → sửa** | Tỷ lệ cứu = cứu được / (cứu được + thất bại), pending ngoài mẫu số | 6 ca chốt (5 thất bại, 1 cứu) đều có người; 106 PENDING + 76 NULL bị lọc mất theo `outcome_at` | thẻ "chưa có kết quả" luôn 0 khi có kỳ; "được giao trong kỳ" lấy owner hiện tại; RETURNING/huỷ trước lấy hàng tính là thất bại | đếm pending tính đến cuối kỳ; chỉ mã cuối mới chốt; huỷ trước lấy hàng = ngoài điều kiện care; báo cáo nhân sự khoá theo `users.id` |
+| Return reason report (`c22b5bf`, `7308ada`) | **GOOD** | taxonomy 40 lý do, theo mã hàng, người ghi đè suy luận | 603 vận đơn hoàn 90 ngày, 100% có mốc kết quả; 26/40 lý do chỉ có khi người ghi (test khoá) | thiếu `key` trên Fragment (cảnh báo console) | sửa key; bảng dùng hợp đồng dính |
+| Product/SKU shipment filters (`619dac3`) | **GOOD** | lọc vận đơn theo mã hàng qua quan hệ thật | join qua `order_items → product_variants` | facet care đếm cả đợt đã đóng | facet chỉ đợt đang mở |
+| Projected GTC (`575cc77`, `f3767a4`, `1ac6a9a`, `a08b292`) | **WRONG → làm lại V3** | một hợp đồng, xác suất từ lịch sử, cùng số trên hai trang | 134/799 đơn Q002 `stage=DELIVERED` nhưng outcome ≠ DELIVERED; 27% sự kiện 501 là chiều hoàn; backtest in-sample và rò rỉ trạng thái cuối; profit tab vẫn POS × (1−r) | nhãn học từ `stage` (vi phạm luật 2); đơn chưa mô hình hoá bị coi P=0; huỷ nằm trong mẫu số; không cửa sổ chín | V3: nhãn và cohort theo ORDER_OUTCOME; cửa sổ chín p95 (14 ngày); backtest tách thời gian (bias, Brier, calibration, độ phủ) + mức tin cậy hiện trên cả hai trang; mẫu số trừ phần "ngoài ước tính"; DT GTC ƯT theo từng đơn |
+| Profit / CPQC / rủi ro tồn kho (`c7ab0a9`, `dcaed9d`, `c23b16c`, `d70171d`) | **NEEDS_FIX → sửa** | hai tỷ lệ CPQC, rủi ro theo giá vốn hàng bán ra | production rủi ro TK ≠ 0 ở cả 3 kỳ (đã đúng); giá vốn rơi về 0 âm thầm; hai mẫu số CPQC/DT GTC trên cùng tab | ngưỡng màu hard-code hai bộ khác nhau; 40% mặc định thay chỗ "chưa đo được"; `failedToReturnRate` chết vẫn chạy 2,9 s | một helper `adsRatios`; cờ `cogsKnown`/`purchaseCostKnown` hiện "—"; nguồn `unmeasured`; một bộ ngưỡng; xoá hàm chết |
+| Finance truth / Bank / SePay (`release-2026-09-12-finance`) | **NEEDS_FIX → sửa** | sao kê không tạo chi phí; mối nối là đối chiếu | webhook SePay: chữ ký/idempotency/đa tài khoản đúng; nhưng đường "nhập sao kê → chi phí" vẫn sống (21 khoản chi `MB `, 12 thuộc thẩm quyền nguồn khác); 80 dòng nhập file không tài khoản; bảng kê `cod=0` ghi `cod_collected = cod_amount` (chưa gây hại: 0 kiện) | trần mối nối chỉ một phía; xoá chi phí để lại mối nối mồ côi; UNCLASSIFIED tính vào "kinh doanh" | gỡ dialog + action; `cost_source='BANK_IMPORT'`, từ chối nhóm nguồn khác; trần hai phía + transaction; chuẩn hoá `bank_ref`, không đè số tiền im lặng, bắt chọn tài khoản; UNCLASSIFIED thành khoang riêng; tạo khoản chi cũng qua duyệt hai người |
+| Work OS / OKR / BSC (`b3f5d98`…`dc65681`) | **GOOD (nền) · NEEDS_FIX (giao việc)** | hàng đợi là phép chiếu; assignment có một sự thật | 19 luật khoá bằng test; nhưng `assignWork` ghi overlay `work_items.assignee_id` trong khi CS_CLAIM ghi `cs_cases.assignee_user_id`; Bot ERP thành "người" trong tải phòng ban | hai người phụ trách cho một ca; KR mặc định UP; objective tạo ra đã ACTIVE; lead hai nguồn sự thật | giao việc đi qua miền sở hữu (`lib/work/assign.ts`); bot = máy; hướng KR từ sổ chỉ số; DRAFT mặc định; một lead |
+| Roles / positions / scopes (`efd4610`, `a6716d4`) | **GOOD · một lỗi HIGH** | ba chiều không suy ra nhau | chức danh không vào quyền (test quét mã); scope CHECK ở CSDL; nhưng phạm vi CSKH khớp cột TÊN bằng EMAIL ⇒ SELF/ASSIGNED thấy 0 dòng; WORK khai scope mà không ai áp | fallback `ALL`; mutation không kiểm scope | khớp bằng `users.id`; fallback `SELF`; `rowInScope` cho mutation; WORK áp ở ranh giới phép chiếu |
+| CSKH workqueue (`release-2026-09-12-cskh-workqueue`) | **NEEDS_FIX → sửa** | logistics ra khỏi CSKH | màn CSKH lọc đúng miền; nhưng 339 dòng DELIVERY_FAILED vẫn sống trong `cs_cases`, 236 "bot không nhắn được" không tới hàng đợi nào; dialog lưu xoá người phụ trách | server nhận loại logistics từ người; facet theo chữ | bàn care hiện cờ bot; enum loại/trạng thái cho người; sự kiện STATUS/ASSIGN từ dialog; facet theo `assignee_user_id` |
+| Inventory returns (`return-item-inspection`) | **WRONG ở đường đếm nhanh** | hàng hoàn chỉ vào tồn theo số đếm thật | 0 dòng `return_inspections` (chưa dùng); nhưng đường "cả kiện" chia số đếm theo tỷ lệ; vận đơn chiều về ghi 0 im lặng; phiếu tái nhập tay gạch kiện theo FIFO | ba định nghĩa "chờ kho" | chỉ đếm khi một mẫu mã, còn lại bắt "kiểm từng món"; phiếu tay chỉ đóng kiện được chỉ tên; một vị ngữ `IS_RETURN_AWAITING_WAREHOUSE`; `pendingItems` null khi chưa rõ |
+| Attribution identity (`a0178b6`) | **GOOD** | quy kết bằng khoá tài khoản | `care_case_events` 63 ASSIGN đều có `actor_id`/`next_owner_id` | vài báo cáo cũ còn khoá theo chữ | care-report theo `users.id` |
+| AI copilot (`handoff-ai-copilot`) | **GOOD** | tool có quyền, ghi phải xác nhận | HMAC token theo (user, tool, input), re-check quyền, audit | tool ghi care chỉ cần `shipments:view` | nâng lên `shipments:manage` |
+| Perf / UI shell (`erp-ui-redesign-opus5`, `ec6fc9d`) | **NEEDS_FIX (sticky) → sửa** | bảng dùng được, tiêu đề dính | 22 màn hình; lỗi đè dữ liệu/không dính do scrollport | `Select` item-aligned (menu bay y=6787); ngày in theo UTC; tăng chi phí tô xanh | hợp đồng dính (mục 3); popper mặc định; `formatDate`; `goodWhen` |
+| Bảo mật route | **NEEDS_FIX → sửa** | server-side authoritative | webhook VTP mở toang khi thiếu secret; `?secret=` trên URL; GET chạy job; không chặn dò mật khẩu | | 503 khi thiếu secret (prod); so bí mật hằng thời gian; POST-only + `fix/apply` cần `settings:manage`; chặn dò 5 lần/15 phút |
+
+## 5. Những phần của bản trước LÀM TỐT (giữ nguyên, có bằng chứng)
+
+- `ORDER_OUTCOME` một công thức, bảng dẫn xuất có phiên bản + guard cũ (`return-rate.ts` 213–257, 340–357).
+- Webhook SePay: HMAC trên byte gốc, cửa sổ 300 s, UNIQUE ở CSDL, gửi lại không nhân đôi (test đồng thời).
+- Webhook VTP/Pancake: 200 nhanh, xử lý trong `after()`, dedupe theo mã+trạng thái+mốc ĐVVC.
+- Lời từ chối của VTP đi thẳng ra màn hình (`tuChoiNghiepVu`, `IntegrationError.carrier`); endpoint/payload
+  `order/UpdateOrder` đúng tài liệu; bulk xét điều kiện trước, kết quả từng kiện, audit.
+- Ràng buộc "một đợt care đang mở" ở CSDL (`shipment_care_active_uidx`), không ở `if`.
+- Cost engine một đường (`getOperatingCost`/`getRecognizedCosts`), test quét mã nguồn chặn cộng tay.
+- Phân trang có tie-breaker ở mọi danh sách; memo key mang đủ tham số; `sql.raw` chỉ hằng compile-time.
+- Access: chức danh không vào quyền (test quét mã), vai trò tuỳ chỉnh không cấp `users:manage`, scope CHECK.
+- Kỳ review FINAL đóng băng ảnh chụp; phân việc thuần, chạy thử mặc định; leo thang tính lúc đọc.
+- Hàng hoàn: mapping theo định danh (`legBaseCode`), AMBIGUOUS/UNRESOLVED là giá trị hợp lệ, đường
+  kiểm từng món đúng luật 10.
+
+## 6. Kết quả sau khi sửa — đo trên cùng máy, cùng dữ liệu
+
+### 6.1 Hiệu năng (bench scale 4, tải lạnh / ấm, ms) — trước → sau
+
+| Trang | Trước | Sau | Ghi chú |
+|---|---:|---:|---|
+| Tổng quan | 2.416 / 0,1 | 2.364 / 0,1 | |
+| Vận đơn | 2.110 / 65,9 | 2.024 / 42,5 | facet care chỉ đợt đang mở |
+| Quảng cáo | 1.984 / 11,2 | 2.447 / 11,6 | +0,46 s tải lạnh cho V3 + thử ngược (memo 10 phút) |
+| Tỷ lệ giao thành công | 521 / 70,4 | 925 / 67,8 | bản gộp đầu tiên 7.033 ms — đã sửa (`taiKho()` tải cohort một lần) |
+| GTC theo mẫu mã | 472 / 79,0 | 944 / 79,5 | như trên |
+| Báo cáo lợi nhuận | 874 / 0,1 | 839 / 0,1 | |
+| Sản phẩm & tồn kho | 1.675 / 384,8 | 1.652 / 392,7 | chưa tối ưu (P1 dưới) |
+
+### 6.2 Kiểm thử
+
+`npm run typecheck` · `npm run lint` · `npm test` ("TẤT CẢ KIỂM THỬ ĐẠT") · `npm run build` — chạy trên
+bản gộp và chạy lại trên checkout SẠCH theo SHA ứng viên (AGENTS mục 9). Kiểm thử mới / mở rộng:
+
+| Tệp | Khoá gì |
+|---|---|
+| `tests/care-os.test.ts` (viết lại, 60 assertion) | 102 chưa rời kho không mở ca; 501 chiều hoàn = RESCUE_FAILED; từ chối điều kiện không ghi gì; WAITING không hẹn = tới hạn; đóng ⇔ inactive; reopen; đối chiếu 48→48 / đóng 106; pending tính đến cuối kỳ; huỷ trước lấy hàng = ngoài care |
+| `tests/care-states.test.ts` | luật vào care, ánh xạ leg-aware |
+| `tests/projected-delivery.test.ts` (mới, 388 dòng) | nhãn/cohort theo ORDER_OUTCOME; cửa sổ chín; ngoài ước tính rời mẫu số; DT/giá vốn theo từng đơn; tổng hai trang cùng số; thử ngược tách thời gian; một hàm ba tỷ lệ QC; một bộ ngưỡng |
+| `tests/reporting-parity.test.ts` | parity với đơn ĐANG GIAO và dòng RETURNED_BY_RULE |
+| `tests/return-inspection.test.ts` (+3 khối) | nhiều mẫu mã bị từ chối (đơn lẻ + hàng loạt); đếm vượt bị chặn; chiều về cộng đúng mẫu mã và đóng chiều đi; phiếu tay chỉ đóng kiện được chỉ tên |
+| `tests/scope-enforcement.test.ts` | phạm vi CSKH khớp bằng `users.id`; `rowInScope` từ chối identifier lạ; WORK áp ở phép chiếu |
+| `tests/work-os.test.ts` | giao việc đi qua miền sở hữu (không overlay); bot không phải người |
+| `tests/org-membership.test.ts` | một lead, drift `MULTIPLE_LEAD_ROWS` |
+| `tests/cs-workqueue.test.ts` | bot không đổi `open`/`unassigned`; enum loại/trạng thái cho người |
+| `tests/bank-ledger.test.ts`, `finance-truth.test.ts`, `finance-cockpit.test.ts`, `finance-invariants.test.ts` | `cost_source='BANK_IMPORT'` + từ chối nhóm nguồn khác; trần mối nối hai phía; chuẩn hoá `bank_ref`, không đè số tiền; UNCLASSIFIED ngoài "kinh doanh"; quét mã: không tệp `app/`/`lib/actions` nào import đường nhập sao kê → chi phí |
+| `tests/sync-fixtures.test.ts` | bảng kê dòng chỉ cước không ghi `cod_collected` |
+| `tests/login-throttle.test.ts` (mới) | chặn dò mật khẩu theo email và IP; so bí mật hằng thời gian |
+| `tests/migration-upgrade-path.test.ts` | 75 → 76 migration |
+
+Migration mới: **`0076_care_active_invariant`** — sửa cờ `active` cho đợt RESOLVED/CANCELLED (không backfill người, không đoán kết quả).
+
+## 7. Còn lại (P1, không làm trong bản này — có lý do)
+
+1. **`carrier_handoff_at` vật chất hoá** (`shipments` + chỉ mục): mốc "ngày ĐVVC nhận" hiện là
+   `coalesce(picked_up_at, min(events))` tương quan, không dùng chỉ mục được; mọi báo cáo theo cohort
+   gửi hàng quét toàn bảng (ấm ~70–80 ms ở scale 4, tuyến tính theo số vận đơn). Cần migration + job
+   backfill có báo cáo chạy thử (luật 35) — để riêng một release.
+2. **Trang Sản phẩm & tồn kho ấm 390 ms**: `listProducts` join ba truy vấn con theo trang, chưa memo.
+3. **`formatVND(null)` / `formatPercent(null)` in `0 ₫` / `0.0%`** (`lib/format.ts`): vi phạm luật
+   "NULL là chưa biết" ở tầng helper. Không đổi trong bản này vì hàng trăm chỗ gọi truyền `null` cho
+   tổng rỗng hợp lệ; cần rà từng chỗ.
+4. **Ngưỡng màu hard-code** ở `/returns`, `/customers`, `expenses/columns` (ROAS 3/1,5), coverage
+   0,8/0,5 — luật 38 đòi đọc `metric_targets`; đã gom về một bộ hằng ở phần lợi nhuận/GTC, phần còn
+   lại chờ chủ shop khai đích.
+5. **Bot giao hụt vẫn ghi `cs_cases`** (miền giao vận): đã hiện cờ trên bàn care; chuyển hẳn kết luận
+   của bot sang `care_case_events` là việc của release CSKH kế tiếp.
+6. **Phiếu tái nhập ở `/inventory/receipts`** chưa có ô chọn vận đơn cho từng dòng (dialog đang bỏ
+   `shipmentId`): phiếu vẫn cộng tồn đúng số đếm nhưng không đóng kiện nào — đường đóng kiện là trạm
+   `/inventory/returns`. Cần bộ chọn vận đơn trong dialog.
+7. **Đường nhập sao kê MB → chi phí** chỉ còn ở script/ops (`import-bank-ledger`); nên gỡ hẳn sau khi
+   chủ shop xác nhận không dùng.
+8. **Duyệt hoàn / Đổi** ở bàn care đã có hộp thoại nhưng `care_business_actions` production = 0: cần
+   chủ shop cho đội dùng thật một tuần rồi đo lại tỷ lệ cứu.
+
+## 8. UNKNOWN / UNATTRIBUTED / INSUFFICIENT_DATA còn hiện trên màn hình (đúng chủ đích)
+
+- 76 đợt care lịch sử `care_outcome NULL` — không quy kết, không vào tỷ lệ cứu (luật 35).
+- Tỷ lệ cứu đơn: mới 6 ca chốt ⇒ mức tin cậy thấp; pending 106 hiện riêng.
+- TL GTC ước tính: trạng thái chưa đủ 10 mẫu ⇒ "chưa đo được", đơn ở trạng thái đó là "ngoài ước
+  tính" và rời mẫu số; mức tin cậy của thử ngược in cạnh số (HIGH/MEDIUM/LOW/INSUFFICIENT_DATA).
+- Giá vốn chưa biết ⇒ "—" kèm số sản phẩm không có đơn giá, không phải 0.
+- Kiểm đếm hàng hoàn: kiện chưa lần được đơn ⇒ "chưa rõ hàng", không đếm 0 món.
+- Dòng tiền chưa phân loại: khoang riêng, in "còn N dòng / X ₫ chưa phân loại" cạnh headline.
