@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { CareReportSection } from "@/app/(dashboard)/shipments/care-report";
+import { RescueReportSection } from "@/app/(dashboard)/shipments/rescue-report";
 import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -85,7 +86,15 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
 
       {view === "report" ? (
         <>
-          <DataTableToolbar period={{ defaultKey: "30d" }} resultLabel="Kết cục tính theo chứng từ Viettel Post; can thiệp tính theo hành động care của người." />
+          <DataTableToolbar period={{ defaultKey: "30d" }} resultLabel="Kết cục tính theo chứng từ Viettel Post; can thiệp tính theo hành động care của người. Tỷ lệ cứu đơn đọc theo NGÀY CHỐT kết quả, khối lượng việc đọc theo NGÀY MỞ ca." />
+          {/*
+            HAI KHỐI, HAI CÂU HỎI. Khối cứu đơn trả lời "đội có cứu được đơn không" theo CHỨNG TỪ
+            ĐVVC; khối hiệu quả care cũ trả lời "đội đã chạm vào bao nhiêu kiện". Cái trên đứng
+            trước vì nó là thứ ra quyết định được.
+          */}
+          <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+            <RescueReportSection period={resolvePeriod(raw, "30d")} />
+          </Suspense>
           <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
             <CareReportSection period={resolvePeriod(raw, "30d")} />
           </Suspense>
@@ -107,7 +116,7 @@ async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUse
   */
   const params = parseListParams(raw, {
     defaultSort: "createdAt",
-    filterKeys: ["product", "stage", "care", "carrier", "cod", "owner", "source", "final", "linked"],
+    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked"],
     sortable: SHIPMENT_SORTABLE,
     defaultPeriod: "30d",
   });
@@ -123,6 +132,9 @@ async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUse
         facets={[
           { key: "product", label: "Mã hàng", options: facets.products },
           { key: "stage", label: "Trạng thái VTP", options: facets.stages },
+          /* Chiều ĐVVC ở mức CHI TIẾT: "chờ phát lại" và "tồn - khách nghỉ" là hai việc khác nhau
+             nhưng `stage` gộp cả hai thành một nhãn. Cùng nguồn với module chăm sóc và báo cáo. */
+          { key: "carrierState", label: "ĐVVC báo", options: facets.carrierStates },
           { key: "care", label: "Xử lý", options: facets.careStatuses },
           { key: "carrier", label: "ĐVVC", options: facets.carriers },
           { key: "cod", label: "COD", options: facets.codStatuses },

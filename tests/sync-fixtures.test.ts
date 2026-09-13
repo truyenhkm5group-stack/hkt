@@ -129,6 +129,7 @@ import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testCareStates } from "./care-states.test";
+import { testCareOs } from "./care-os.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1439,6 +1440,9 @@ async function main() {
   // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một
   // đệm memo và bài này cố tình xoá đệm giữa chừng.
   await testCareStates(db);
+  // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
+  // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
+  await testCareOs(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
   await testFulfillmentBottleneck(db);

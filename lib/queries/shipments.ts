@@ -6,6 +6,8 @@ import { ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/quer
 import type { CodStatus, ShipmentStage } from "@/db/schema";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import { CARE_STATUS_LABEL } from "@/lib/constants/care";
+import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL } from "@/lib/constants/carrier-substate";
+import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import type { ListParams } from "@/lib/search-params";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 
@@ -70,6 +72,17 @@ export async function shipmentListWhere(params: ListParams) {
   if (filters.cod?.length) conds.push(inArray(schema.shipments.codStatus, filters.cod as CodStatus[]));
   if (filters.final?.includes("active")) conds.push(eq(schema.shipments.isFinal, false));
   else if (filters.final?.includes("done")) conds.push(eq(schema.shipments.isFinal, true));
+  /*
+    TRẠNG THÁI CON CỦA ĐVVC — cùng MỘT biểu thức với module chăm sóc và với báo cáo.
+
+    Không viết lại luật ở đây: `carrierSubstateSql` dựng câu SQL từ chính bảng hằng số mà bản
+    TypeScript dùng. Nhờ vậy "báo cáo nói Q004 có 6 kiện chờ xử lý" và "bấm vào ra 6 dòng" không
+    thể lệch nhau — chúng hỏi cùng một câu.
+  */
+  if (filters.carrierState?.length) {
+    const con = carrierSubstateSql(sql`${schema.shipments.vtpStatus}`, sql`${schema.shipments.vtpStatusName}`, sql`${schema.shipments.stage}::text`);
+    conds.push(sql`${con} in ${filters.carrierState}`);
+  }
   if (filters.linked?.includes("pancake")) conds.push(isNotNull(schema.shipments.orderId));
   else if (filters.linked?.includes("external")) conds.push(isNull(schema.shipments.orderId));
   /*
@@ -228,6 +241,12 @@ async function shipmentFacetsUncached(params: ListParams) {
     .where(base)
     .groupBy(schema.shipmentCare.careStatus);
 
+  const conRows = await db
+    .select({ value: sql<string>`${carrierSubstateSql(sql`${schema.shipments.vtpStatus}`, sql`${schema.shipments.vtpStatusName}`, sql`${schema.shipments.stage}::text`)}`, count: count() })
+    .from(schema.shipments)
+    .where(base)
+    .groupBy(sql`1`);
+
   const ownerRows = await db
     .select({ value: schema.shipmentCare.ownerId, name: schema.users.name, count: count() })
     .from(schema.shipments)
@@ -254,6 +273,8 @@ async function shipmentFacetsUncached(params: ListParams) {
   return {
     products: productRows.filter((r) => r.value).map((r) => ({ value: r.value as string, label: `${r.value} · ${r.name}`, count: Number(r.count) })),
     careStatuses: careRows.map((r) => ({ value: r.value, label: CARE_STATUS_LABEL[r.value as keyof typeof CARE_STATUS_LABEL] ?? r.value, count: Number(r.count) })),
+    // Chiều ĐVVC, TÁCH HẲN khỏi chiều xử lý ở trên — hai câu hỏi khác nhau, hai bộ lọc khác nhau.
+    carrierStates: CARRIER_SUBSTATES.map((k) => ({ value: k, label: CARRIER_SUBSTATE_LABEL[k], count: Number(conRows.find((r) => r.value === k)?.count ?? 0) })).filter((r) => r.count > 0),
     owners: [
       ...(Number(chuaAiNhan?.count ?? 0) > 0 ? [{ value: "none", label: "Chưa ai nhận", count: Number(chuaAiNhan!.count) }] : []),
       ...ownerRows.filter((r) => r.value).map((r) => ({ value: r.value as string, label: r.name ?? "(không rõ)", count: Number(r.count) })),
