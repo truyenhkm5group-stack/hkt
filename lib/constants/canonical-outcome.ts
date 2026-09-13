@@ -18,4 +18,16 @@
  * Bỏ qua bước đó thì dòng cũ không bao giờ được điền, và cột mới im lặng vô tác dụng đúng với những
  * bản ghi cần nó nhất.
  */
-export const CANONICAL_OUTCOME_VERSION = 2;
+/*
+ * ─── v3 (13/09/2026): thêm kết quả `AWAITING_PICKUP` ───
+ *
+ * `ORDER_OUTCOME` ĐỔI NGHĨA, nên đây đúng là trường hợp bắt buộc tăng số — không phải ca "thêm cột
+ * mà luật không đổi" nói ở trên. 106 đơn đang mang `IN_TRANSIT` trong bảng vật chất hoá sẽ được
+ * dựng lại thành `AWAITING_PICKUP`; giữ nguyên phiên bản thì bảng âm thầm phục vụ kết luận cũ và cả
+ * bản sửa này vô hình.
+ *
+ * Chi phí đã lường: mọi dòng thành cũ cùng lúc, bộ lập lịch dựng lại theo lô 2.000 (≈ hai lượt).
+ * Trong lúc đó báo cáo chạy đường tính trực tiếp — chậm hơn nhưng ĐÚNG, vì `ORDER_OUTCOME_FAST` rơi
+ * về chính công thức mới.
+ */
+export const CANONICAL_OUTCOME_VERSION = 3;
