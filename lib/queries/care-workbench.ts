@@ -76,7 +76,9 @@ async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>
     .select({ care: schema.shipmentCare, ownerName: schema.users.name })
     .from(schema.shipmentCare)
     .leftJoin(schema.users, eq(schema.users.id, schema.shipmentCare.ownerId))
-    .where(inArray(schema.shipmentCare.shipmentId, shipmentIds));
+    // CHỈ ĐỢT ĐANG MỞ. Map khoá theo `shipmentId` nên nếu lấy cả đợt đã đóng thì đợt nào ghi sau
+    // sẽ thắng — và màn hình hiện trạng thái của một đợt kết thúc từ tháng trước.
+    .where(and(inArray(schema.shipmentCare.shipmentId, shipmentIds), eq(schema.shipmentCare.active, true)));
   return new Map(rows.map((r) => [r.care.shipmentId, { ...r.care, ownerName: r.ownerName }]));
 }
 

@@ -9,10 +9,11 @@ import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import type { BulkOutcome, BulkResult } from "@/lib/care/service";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { BUSINESS_ACTIONS, BUSINESS_ACTION_HINT, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -498,6 +499,30 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
       setNote("");
       setNoteOpen(false);
     });
+  /*
+    ═══ QUYẾT ĐỊNH NGHIỆP VỤ — KHÁC HẲN TRẠNG THÁI XỬ LÝ ═══
+
+    Trạng thái xử lý nói ĐỘI ĐANG Ở ĐÂU ("đang xử lý", "chờ khách"). Quyết định nghiệp vụ nói ĐỘI
+    ĐÃ CHỌN LÀM GÌ ("duyệt hoàn", "phát tiếp"). Trước bản này cả hai nằm chung một menu, nên
+    "Duyệt hoàn" đứng cạnh "Đang xử lý" như thể cùng loại — và lịch sử đọc lên không thành câu
+    chuyện nào.
+
+    KHÔNG tự đổi chiều ĐVVC ở đây: máy chủ chỉ ghi quyết định và gửi yêu cầu; kết quả do sự kiện
+    hành trình chốt (`lib/care/lifecycle.ts`).
+  */
+  const doBusiness = (action: BusinessAction, extra: { reasonCode?: string; followUpAt?: Date } = {}) =>
+    start(async () => {
+      const r = await recordBusinessAction({ shipmentId: c.shipmentId, action, note: vtpNote, ...extra });
+      setVtpOpen(false);
+      setVtpNote("");
+      if ("error" in r) {
+        toast.error(r.error, { duration: 9000 });
+        return;
+      }
+      onPatch(r.data.care, r.data.request ? { carrierRequest: { ...r.data.request, at: new Date(r.data.request.at) } } : {});
+      toast.success(r.data.message, { duration: 9000 });
+    });
+
   const carrier = (actionKey: CarrierActionKey) =>
     start(async () => {
       const r = await requestCarrierAction({ shipmentId: c.shipmentId, actionKey, note: vtpNote });
@@ -703,7 +728,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
           <Popover open={vtpOpen} onOpenChange={setVtpOpen}>
             <PopoverTrigger asChild>
               <button type="button" className="inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent" title={c.carrierCapability === "API" ? "Gửi thẳng lên Viettel Post bằng tài khoản đối tác" : "Tài khoản API không sở hữu kiện này — ERP ghi yêu cầu và bạn làm tay trên viettelpost.vn"}>
-                <Truck className="size-3" /> Thao tác VTP
+                <Truck className="size-3" /> Xử lý
                 <span className={cn("rounded px-1", c.carrierCapability === "API" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300")}>
                   {c.carrierCapability === "API" ? "API" : "làm tay"}
                 </span>
@@ -716,13 +741,37 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
                   : "Tài khoản API của ERP không sở hữu kiện này (vận đơn Pancake tạo). ERP ghi yêu cầu là PHẢI LÀM TAY; làm trên viettelpost.vn rồi bấm “Đã làm tay”."}
               </p>
               <Textarea value={vtpNote} onChange={(e) => setVtpNote(e.target.value)} placeholder="Ghi chú cho bưu cục (tuỳ chọn)" className="min-h-[48px] text-[12px]" />
-              <div className="flex flex-wrap gap-1">
-                {allowed.map((k) => (
-                  <Button key={k} size="sm" variant={k === "cancel" ? "destructive" : "outline"} className="h-7 px-2 text-xs" disabled={pending} onClick={() => carrier(k)}>
-                    {CARRIER_ACTION_LABEL[k]}
-                  </Button>
+              {/*
+                BỐN QUYẾT ĐỊNH ĐỨNG RIÊNG, mỗi cái kèm một dòng nói rõ nó KHÔNG làm gì — vì đúng
+                bốn hiểu nhầm đó là thứ làm hỏng số liệu: duyệt hoàn ≠ đã hoàn, phát tiếp ≠ đã cứu,
+                đổi ≠ đơn thay thế thành công, theo dõi ≠ đã xử lý.
+              */}
+              <div className="space-y-1.5 border-t pt-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Xử lý</p>
+                {BUSINESS_ACTIONS.map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    disabled={pending}
+                    title={BUSINESS_ACTION_HINT[a]}
+                    onClick={() => (a === "APPROVE_RETURN" || a === "EXCHANGE" ? (window.location.href = `/shipments/${c.shipmentId}`) : doBusiness(a, a === "CONTINUE_MONITORING" ? { followUpAt: new Date(Date.now() + 2 * 3600_000) } : {}))}
+                    className="flex w-full items-start gap-2 rounded-md border px-2 py-1.5 text-left text-[11.5px] hover:bg-accent disabled:opacity-50"
+                  >
+                    <span className="shrink-0 font-semibold">{BUSINESS_ACTION_LABEL[a]}</span>
+                    <span className="min-w-0 flex-1 text-muted-foreground">{a === "APPROVE_RETURN" ? "cần chọn lý do hoàn" : a === "EXCHANGE" ? "cần vận đơn đơn đổi" : a === "CONTINUE_MONITORING" ? "hẹn lại sau 2 giờ" : "gửi lệnh lên ĐVVC"}</span>
+                  </button>
                 ))}
               </div>
+              <details className="text-[11px]">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Lệnh ĐVVC khác</summary>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {allowed.map((k) => (
+                    <Button key={k} size="sm" variant={k === "cancel" ? "destructive" : "outline"} className="h-7 px-2 text-xs" disabled={pending} onClick={() => carrier(k)}>
+                      {CARRIER_ACTION_LABEL[k]}
+                    </Button>
+                  ))}
+                </div>
+              </details>
               <a href={`https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(c.tracking)}&orderType=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
                 <ExternalLink className="size-3" /> Mở trên viettelpost.vn
               </a>

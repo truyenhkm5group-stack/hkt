@@ -85,8 +85,8 @@ export async function shipmentListWhere(params: ListParams) {
   if (filters.care?.length) {
     const muon = filters.care;
     const coNew = muon.includes("NEW");
-    const khop = sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.care_status in ${muon})`;
-    conds.push(coNew ? or(khop, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id})`) : khop);
+    const khop = sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.active and sc.care_status in ${muon})`;
+    conds.push(coNew ? or(khop, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.active)`) : khop);
   }
 
   // NGƯỜI XỬ LÝ. `none` = chưa ai nhận.
@@ -94,8 +94,8 @@ export async function shipmentListWhere(params: ListParams) {
     const ids = filters.owner.filter((x) => x !== "none");
     const coTrong = filters.owner.includes("none");
     const parts: SQL[] = [];
-    if (ids.length) parts.push(sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id in ${ids})`);
-    if (coTrong) parts.push(sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id is not null)`);
+    if (ids.length) parts.push(sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.active and sc.owner_id in ${ids})`);
+    if (coTrong) parts.push(sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.active and sc.owner_id is not null)`);
     if (parts.length) conds.push(or(...parts));
   }
 
@@ -240,7 +240,7 @@ async function shipmentFacetsUncached(params: ListParams) {
   const [chuaAiNhan] = await db
     .select({ count: count() })
     .from(schema.shipments)
-    .where(and(base, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id is not null)`));
+    .where(and(base, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.active and sc.owner_id is not null)`));
 
   const sourceRows = await db
     .select({ value: schema.orders.source, count: count() })

@@ -52,6 +52,17 @@ export async function bulkRequestCarrierAction(input: z.input<typeof svc.bulkReq
   const a = await actor("shipments:manage");
   return a ? svc.bulkRequestCarrierAction(a, input) : { error: "Không có quyền thao tác vận đơn" as const };
 }
+/**
+ * Bốn QUYẾT ĐỊNH nghiệp vụ: Duyệt hoàn · Phát tiếp · Đổi · Theo dõi tiếp.
+ *
+ * Tách khỏi `setCareStatus` có chủ đích: trạng thái xử lý nói ĐỘI ĐANG Ở ĐÂU, quyết định nghiệp vụ
+ * nói ĐỘI ĐÃ CHỌN LÀM GÌ. Trộn chung một menu thì "Duyệt hoàn" nằm cạnh "Đang xử lý" như thể cùng
+ * loại, và không ai đọc được lịch sử ra thành một câu chuyện.
+ */
+export async function recordBusinessAction(input: z.input<typeof svc.businessActionSchema>) {
+  const a = await actor("shipments:manage");
+  return a ? svc.recordBusinessAction(a, input) : { error: "Không có quyền thao tác vận đơn" as const };
+}
 export async function markCarrierManualDone(input: z.input<typeof svc.manualSchema>) {
   const a = await actor("shipments:manage");
   return a ? svc.markCarrierManualDone(a, input) : { error: "Không có quyền thao tác vận đơn" as const };

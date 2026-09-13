@@ -10,6 +10,7 @@ import { publish } from "@/lib/realtime/bus";
 import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/sync/runner";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { settleCarrierRequests } from "@/lib/care/carrier-requests";
+import { applyCarrierEventToCare, settleExchangeOutcome } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 /**
@@ -203,6 +204,29 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   const stageNow = (finalState.after as ShipmentStage) ?? shipment.stage;
   // Yêu cầu đã gửi ĐVVC (phát tiếp / duyệt hoàn…) chỉ thành SUCCESS khi sự kiện hành trình xác nhận.
   await settleCarrierRequests(db, shipment.id, meta.stage ?? stageNow, statusDate).catch(() => undefined);
+  /*
+    ═══ ĐVVC MỞ CA, VÀ ĐVVC ĐÓNG CA ═══
+
+    Sự cố ("chờ xử lý" / "chờ phát lại") mở một đợt chăm sóc; kết cục cuối (đã giao / hoàn / huỷ)
+    chốt kết quả của đợt đó. Người ở GIỮA — không thao tác nào của nhân viên mở hay đóng được một
+    đợt, vì bấm nút không làm gói hàng di chuyển.
+
+    Đặt ở ĐÂY, sau khi trạng thái đã được dựng lại từ lịch sử, nên cả ba đường vào đều đi qua:
+    webhook realtime, tra API định kỳ, và nhập tệp. Không đường nào có luật riêng.
+
+    `.catch` cố ý: vòng đời care KHÔNG được phép làm hỏng đường ghi chứng từ ĐVVC. Mất một lần mở
+    ca thì lần cập nhật sau mở lại được; mất một sự kiện hành trình thì mất vĩnh viễn.
+  */
+  await applyCarrierEventToCare(db, {
+    shipmentId: shipment.id,
+    orderId: shipment.orderId,
+    trackingNumber: shipment.vtpOrderNumber ?? shipment.trackingCode,
+    stage: stageNow,
+    vtpStatus: record.status,
+    vtpStatusName: record.statusName,
+    occurredAt: statusDate,
+  }).catch(() => undefined);
+  await settleExchangeOutcome(db, shipment.id, stageNow, statusDate).catch(() => undefined);
   // "Đã áp dụng" chỉ đúng khi trạng thái thực sự tiến triển. Gói tin lặp đi qua nhánh này (cùng
   // mốc thời gian nên vẫn được coi là không cũ hơn) nhưng không được đếm như một lần cập nhật.
   // So với ảnh chụp TRƯỚC khi ghi, vì đến lúc này bản ghi đã bị cập nhật rồi.
