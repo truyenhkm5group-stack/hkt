@@ -199,7 +199,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
-        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K) trộn theo trạng thái thật: đã giao TC 100%, không thành công 0%, chờ xử lý / chờ phát lại ${100 - t.failedToReturnPct}% (học từ lịch sử), còn lại theo tỷ lệ ${report.assumptions.returnRateWindowDays} ngày của mã. Bấm mã để xem theo ngày.`}
+        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K) dùng CÙNG mô hình với báo cáo giao vận (${PROJECTED_GTC_VERSION}): mỗi đơn chưa có kết cục được cân theo xác suất của CHÍNH trạng thái Viettel Post nó đang ở, học từ vận đơn đã kết thúc. Mã nào mô hình chưa dự báo được thì lùi về tỷ lệ hoàn ${report.assumptions.returnRateWindowDays} ngày của mã — cột nhỏ dưới mỗi tỷ lệ nói rõ nguồn. Bấm mã để xem theo ngày.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -621,6 +621,8 @@ export async function NominalTab({
                 <TableHead className="text-right">Đơn</TableHead>
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH. Doanh thu ước tính dùng CÙNG mô hình dự báo với báo cáo giao vận: từng đơn chưa kết thúc được cân theo xác suất giao thành công của chính trạng thái nó đang ở. Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
                 <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
                 <TableHead className="text-right" title="CHI PHÍ CỦA KỲ NÀY, không phải rủi ro cả đời của lô: % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ — cùng MỘT con số với bảng trên. Trước bản này cột lấy % × giá trị hàng NHẬP, nên kỳ có phiếu nhập thì gánh rủi ro của hàng sẽ bán nhiều tháng sau, còn kỳ không nhập gì thì bằng đúng 0 và bảng nói hàng đang bán không có rủi ro nào. Rủi ro cả đời của lô nhập vẫn tính và hiện ở cột bên cạnh — là GHI CHÚ, không trừ vào lợi nhuận.">CP rủi ro TK phân bổ kỳ này</TableHead>
@@ -641,6 +643,8 @@ export async function NominalTab({
                   <TableCell className="numeric text-right">{formatNumber(r.orders)}</TableCell>
                   <TableCell className="text-right"><Money value={r.expectedRevenue} /></TableCell>
                   <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.salesAfterDiscount)} tone={false} /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.expectedRevenue)} tone={false} /></TableCell>
                   <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
@@ -659,6 +663,8 @@ export async function NominalTab({
                 <TableCell className="numeric text-right">{formatNumber(t.orders)}</TableCell>
                 <TableCell className="text-right"><Money value={t.expectedRevenue} /></TableCell>
                 <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.salesAfterDiscount)} tone={false} /></TableCell>
+                <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.expectedRevenue)} tone={false} /></TableCell>
                 <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
                 <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
