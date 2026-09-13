@@ -1,4 +1,5 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { rowsOf } from "@/lib/sql-rows";
 import { getDb, schema } from "@/db";
 
 /**
@@ -31,6 +32,21 @@ import { getDb, schema } from "@/db";
  *                                 (`orders.conversation_id`). Đây là mối nối MÁY, đúng thứ cột đó
  *                                 sinh ra để làm.
  *   2. `PHONE_ORDERED_AFTER`    — số điện thoại của case đã lên đơn SAU khi case đủ thông tin.
+ *   3. `SHIPMENT_CREATED`       — có VẬN ĐƠN gửi tới chính số điện thoại đó, tạo SAU khi case đủ
+ *                                 thông tin. Hàng đã rời kho thì đơn chắc chắn đã tồn tại — kể cả
+ *                                 khi đơn được lên bằng một số khác (số người nhận hộ) nên hai bậc
+ *                                 trên không lần ra.
+ *
+ * ─── "CÓ VẬN ĐƠN THÌ ĐÓNG" — ĐÚNG MỘT NỬA, VÀ NỬA CÒN LẠI LÀ CÁI BẪY ───
+ *
+ * Trên màn hình, một case `ORDER_NOT_CREATED` có thể hiện kèm cả `Đơn #xxxx` LẪN một mã `PKE15…`.
+ * Đọc nguyên văn thì "đã có vận đơn ⇒ đóng". Nhưng cả hai thứ đó đến từ `cs_cases.order_id`, mà
+ * cột ấy là ĐƠN GẦN NHẤT CỦA KHÁCH — tức lần mua TRƯỚC (xem khối bên dưới). Đóng theo nó là đóng
+ * đúng những case đáng làm.
+ *
+ * Nên bậc 3 KHÔNG đọc `cs_cases.order_id` và KHÔNG đọc vận đơn của đơn ấy. Nó đọc
+ * `shipments.receiver_phone` — số điện thoại người nhận trên chính chứng từ ĐVVC — và vẫn ràng
+ * buộc thời gian y hệt hai bậc trên.
  *
  * ─── VÌ SAO `cs_cases.order_id` KHÔNG PHẢI MỘT BẬC CHỨNG CỨ ───
  *
@@ -53,12 +69,13 @@ import { getDb, schema } from "@/db";
  * KHÔNG có bậc nào đóng case chỉ vì số điện thoại từng xuất hiện ở đâu đó.
  */
 
-export const RECONCILE_REASONS = ["CONVERSATION_HAS_ORDER", "PHONE_ORDERED_AFTER"] as const;
+export const RECONCILE_REASONS = ["CONVERSATION_HAS_ORDER", "PHONE_ORDERED_AFTER", "SHIPMENT_CREATED"] as const;
 export type ReconcileReason = (typeof RECONCILE_REASONS)[number];
 
 export const RECONCILE_REASON_LABEL: Record<ReconcileReason, string> = {
   CONVERSATION_HAS_ORDER: "Hội thoại đã sinh ra đơn sau khi case mở",
   PHONE_ORDERED_AFTER: "Số điện thoại đã lên đơn sau khi case đủ thông tin",
+  SHIPMENT_CREATED: "Đã có vận đơn gửi tới số điện thoại này sau khi case đủ thông tin",
 };
 
 /** Người/máy đứng tên thao tác này. KHÔNG phải một tài khoản người — đây là máy đối chiếu. */
@@ -101,7 +118,23 @@ const SDT_LEN_DON_SAU = sql`(${c.customerPhone} <> '' and exists (
     and o.inserted_at >= coalesce(${c.infoCompleteAt}, ${c.createdAt})
 ))`;
 
-const CO_CHUNG_CU = sql`(${HOI_THOAI_CO_DON} or ${SDT_LEN_DON_SAU})`;
+/**
+ * Có VẬN ĐƠN gửi tới chính số điện thoại của case, tạo SAU khi case đủ thông tin.
+ *
+ * Hàng đã rời kho là chứng cứ mạnh hơn cả một dòng `orders`: nó nói đơn không những tồn tại mà đã
+ * được đóng gói và bàn giao. Bậc này bắt được đúng phần hai bậc trên bỏ sót — đơn lên bằng số của
+ * người nhận hộ, hoặc hội thoại không được gắn vào đơn.
+ *
+ * Đọc `shipments.receiver_phone` (chứng từ ĐVVC), KHÔNG đọc vận đơn của `cs_cases.order_id`: cột
+ * đó trỏ tới lần mua TRƯỚC, và mọi khách mua lần hai đều có sẵn một vận đơn cũ ở đó.
+ */
+const CO_VAN_DON_SAU = sql`(${c.customerPhone} <> '' and exists (
+  select 1 from shipments sh
+  where sh.receiver_phone = ${c.customerPhone}
+    and sh.created_at >= coalesce(${c.infoCompleteAt}, ${c.createdAt})
+))`;
+
+const CO_CHUNG_CU = sql`(${HOI_THOAI_CO_DON} or ${SDT_LEN_DON_SAU} or ${CO_VAN_DON_SAU})`;
 // Chưa ai chạm vào = chưa ai nhận VÀ chưa ai ghi kết luận. Hai điều kiện, không phải một.
 const CHUA_AI_CHAM = and(or(sql`${c.assignee} = ''`, sql`${c.assignee} is null`), eq(c.resolution, ""));
 
@@ -123,6 +156,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
       // nếu không tổng các bậc sẽ lớn hơn số case và bảng báo cáo tự mâu thuẫn.
       convHasOrder: sql<number>`count(*) filter (where ${HOI_THOAI_CO_DON} and ${CHUA_AI_CHAM})`,
       phoneAfter: sql<number>`count(*) filter (where not ${HOI_THOAI_CO_DON} and ${SDT_LEN_DON_SAU} and ${CHUA_AI_CHAM})`,
+      shipmentCreated: sql<number>`count(*) filter (where not ${HOI_THOAI_CO_DON} and not ${SDT_LEN_DON_SAU} and ${CO_VAN_DON_SAU} and ${CHUA_AI_CHAM})`,
       humanTouched: sql<number>`count(*) filter (where ${CO_CHUNG_CU} and not (${CHUA_AI_CHAM}))`,
       stillPending: sql<number>`count(*) filter (where not ${CO_CHUNG_CU})`,
     })
@@ -132,11 +166,12 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
   const closed: Record<ReconcileReason, number> = {
     CONVERSATION_HAS_ORDER: Number(dem?.convHasOrder ?? 0),
     PHONE_ORDERED_AFTER: Number(dem?.phoneAfter ?? 0),
+    SHIPMENT_CREATED: Number(dem?.shipmentCreated ?? 0),
   };
   const ket: ReconcileResult = {
     openBefore: Number(dem?.openBefore ?? 0),
     closed,
-    closedTotal: closed.CONVERSATION_HAS_ORDER + closed.PHONE_ORDERED_AFTER,
+    closedTotal: RECONCILE_REASONS.reduce((t, r) => t + closed[r], 0),
     humanTouched: Number(dem?.humanTouched ?? 0),
     stillPending: Number(dem?.stillPending ?? 0),
   };
@@ -147,6 +182,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
   const buoc: { reason: ReconcileReason; cond: ReturnType<typeof and> }[] = [
     { reason: "CONVERSATION_HAS_ORDER", cond: and(dangMo, HOI_THOAI_CO_DON, CHUA_AI_CHAM) },
     { reason: "PHONE_ORDERED_AFTER", cond: and(dangMo, sql`not ${HOI_THOAI_CO_DON}`, SDT_LEN_DON_SAU, CHUA_AI_CHAM) },
+    { reason: "SHIPMENT_CREATED", cond: and(dangMo, sql`not ${HOI_THOAI_CO_DON}`, sql`not ${SDT_LEN_DON_SAU}`, CO_VAN_DON_SAU, CHUA_AI_CHAM) },
   ];
   for (const b of buoc) {
     if (!closed[b.reason]) continue;
@@ -162,4 +198,56 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
       .where(b.cond);
   }
   return ket;
+}
+
+/**
+ * ═══════════ MỘT LUẬT, HAI NƠI ĐỌC: SỬA CẢ NƠI ĐỌC LẪN NƠI SINH ═══════════
+ *
+ * Đóng mềm case cũ mới chỉ dọn hậu quả. Nếu `chat-detect` vẫn tạo lại case cho hội thoại đã có đơn
+ * thì mỗi lượt quét lại đẻ ra đúng những case vừa đóng — `dedupe_key` của loại này mang NGÀY, nên
+ * hôm sau là một khoá mới và không có gì chặn.
+ *
+ * Hàm này là ĐÚNG vị từ ở trên, chạy ngược: cho một danh sách ứng viên, trả về những ứng viên THẬT
+ * SỰ CÒN TREO. `lib/cs/chat-detect.ts` gọi nó ngay trước khi ghi.
+ *
+ * ─── ĐUA GIỮA MÁY QUÉT VÀ NGƯỜI LÊN ĐƠN ───
+ *
+ * Kịch bản có thật: máy quét thấy đủ thông tin lúc 10:00:00, nhân viên lên đơn lúc 10:00:01, case
+ * được ghi lúc 10:00:02. Vị từ này chạy TẠI THỜI ĐIỂM GHI nên nó thấy đơn vừa tạo và loại ứng viên
+ * đó ra — case không bao giờ ra đời. Nếu vẫn lọt (đơn về sau khi ghi), lượt đối chiếu ngay sau đó
+ * trong cùng job sẽ đóng nó, và lượt quét kế tiếp không tạo lại.
+ *
+ * MỘT truy vấn cho cả danh sách — không đặt truy vấn trong vòng lặp hội thoại.
+ */
+export type OrderNotCreatedCandidate = { key: string; conversationId: string | null; phone: string; infoCompleteAt: Date | null };
+
+export async function stillPendingOrderNotCreated(candidates: OrderNotCreatedCandidate[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const hopLe = candidates.filter((x) => x.conversationId || x.phone);
+  if (!hopLe.length) return out;
+  const db = await getDb();
+
+  /*
+    Mốc so sánh phải là mốc của CHÍNH ứng viên, không phải một mốc chung: hai hội thoại đủ thông
+    tin cách nhau ba ngày mà dùng chung một mốc thì một trong hai bị kết luận sai.
+
+    Dựng bằng `values` để cả danh sách đi trong MỘT câu lệnh. Mọi giá trị đều là tham số ràng buộc
+    (drizzle `sql` nội suy thành placeholder), không nối chuỗi.
+  */
+  const dong = hopLe.map(
+    (x) => sql`(${x.key}, ${x.conversationId ?? ""}::text, ${x.phone}::text, ${x.infoCompleteAt ?? new Date(0)}::timestamptz)`,
+  );
+  const rows = await db.execute<{ key: string; co_chung_cu: boolean }>(sql`
+    with ung_vien(key, conversation_id, phone, moc) as (values ${sql.join(dong, sql`, `)})
+    select uv.key,
+           (
+             exists (select 1 from orders o where uv.conversation_id <> '' and o.conversation_id = uv.conversation_id and o.inserted_at >= uv.moc)
+             or exists (select 1 from orders o where uv.phone <> '' and o.bill_phone = uv.phone and o.inserted_at >= uv.moc)
+             or exists (select 1 from shipments sh where uv.phone <> '' and sh.receiver_phone = uv.phone and sh.created_at >= uv.moc)
+           ) as co_chung_cu
+      from ung_vien uv`);
+  const list = rowsOf<{ key: string; co_chung_cu: boolean }>(rows);
+  const coChungCu = new Set(list.filter((r) => r.co_chung_cu).map((r) => r.key));
+  for (const x of hopLe) if (!coChungCu.has(x.key)) out.add(x.key);
+  return out;
 }

@@ -8,6 +8,7 @@ import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { loadCsRules, stripIgnored } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { buildConversationFunnelRow, upsertConversationFunnel, type ConversationFunnelRow } from "@/lib/cs/conversation-funnel";
+import { stillPendingOrderNotCreated } from "@/lib/cs/reconcile-order-created";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { normalize, stripHtml } from "@/lib/text";
 
@@ -430,7 +431,21 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
           const from = duThongTin.at ? new Date(duThongTin.at.getTime() - 30 * 60_000) : null;
           const hasNewOrder = Boolean(order?.insertedAt && from && new Date(order.insertedAt) >= from);
           if (hasNewOrder) daCoDon += 1;
-          if (!hasNewOrder) {
+          /*
+            HỎI LẠI ĐÚNG VỊ TỪ CỦA MÁY ĐỐI CHIẾU, NGAY TRƯỚC KHI GHI.
+
+            `hasNewOrder` ở trên chỉ nhìn ĐƠN GẦN NHẤT mà lượt quét này lần ra. Máy đối chiếu
+            (`lib/cs/reconcile-order-created.ts`) biết thêm hai bậc nữa — đơn của cùng SĐT lên bằng
+            đường khác, và VẬN ĐƠN gửi tới chính số đó. Không hỏi lại thì mỗi lượt quét đẻ ra đúng
+            những case mà lượt đối chiếu ngay sau đó phải đóng: `dedupe_key` của loại này mang NGÀY
+            nên hôm sau là một khoá mới và không có gì chặn.
+
+            Đây cũng là chỗ chặn CUỘC ĐUA giữa máy quét và người lên đơn: vị từ chạy TẠI THỜI ĐIỂM
+            GHI, nên một đơn vừa được tạo giữa lúc quét và lúc ghi vẫn được nhìn thấy.
+          */
+          const conTreo = !hasNewOrder && (await stillPendingOrderNotCreated([{ key: conv.id, conversationId: conv.id, phone: duThongTin.phone || phones[0] || "", infoCompleteAt: duThongTin.at }])).has(conv.id);
+          if (!hasNewOrder && !conTreo) daCoDon += 1;
+          if (conTreo) {
           /*
             CASE PHẢI MANG ĐỦ BẰNG CHỨNG ĐỂ LÀM ĐƯỢC NGAY.
 
