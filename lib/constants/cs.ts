@@ -116,13 +116,34 @@ export const CS_RESOLUTION_LABEL: Record<CsResolution, string> = {
  * Ghi số này vào case để sau còn phân biệt được case nào sinh bởi luật nào.
  */
 export const ORDER_NOT_CREATED_RULE_VERSION = 2;
+/**
+ * ═══ MÀU TRẠNG THÁI CSKH — CÙNG TỪ VỰNG VỚI BÀN CARE ═══
+ *
+ * `CARE_STATUS_TONE` đã chốt: **hồng = chưa ai xử lý · lam = đang làm · xanh lá = xong · xám =
+ * máy/đã bỏ**. Hai bàn làm việc dùng chung một bộ từ vựng màu thì người chuyển qua lại giữa chúng
+ * không phải học lại.
+ *
+ * Sắc độ theo đúng chuẩn của `tests/care-ui-contrast.test.ts`: nền `-100` / chữ `-900` ở chế độ
+ * SÁNG, nền `-950/60` / chữ `-200` ở chế độ TỐI. Bản cũ dùng chữ `-700` trên nền `-50` — đủ đọc
+ * trên một nhãn nhỏ, nhưng khi cùng bộ lớp này được dùng làm nút bấm của ô chọn thì nó nhạt tới
+ * mức trạng thái không còn đọc lướt được.
+ */
 export const CS_STATUS_TONE: Record<CsStatus, string> = {
-  OPEN: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
-  IN_PROGRESS: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  DONE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  // Màu trung tính, cố ý: tự đóng KHÔNG phải công của ai.
+  OPEN: "bg-rose-100 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200",
+  IN_PROGRESS: "bg-cyan-100 text-cyan-900 dark:bg-cyan-950/60 dark:text-cyan-200",
+  DONE: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
+  // Màu trung tính, cố ý: tự đóng KHÔNG phải công của ai (xem CS_HUMAN_STATUSES).
   AUTO_RESOLVED: "bg-muted text-muted-foreground",
-  CANCELLED: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+  CANCELLED: "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-200",
+};
+
+/** Một câu cho từng trạng thái — hiện trong tooltip của ô chọn, để người mới vào ca không phải đoán. */
+export const CS_STATUS_HINT: Record<CsStatus, string> = {
+  OPEN: "Chưa ai nhận và chưa ai chạm vào.",
+  IN_PROGRESS: "Đã có người cầm và đang làm.",
+  DONE: "Người xử lý đã làm xong phần việc của mình.",
+  AUTO_RESOLVED: "MÁY đóng vì điều kiện phát hiện không còn — không ai làm gì cả.",
+  CANCELLED: "Bỏ case: tạo nhầm, hoặc không còn cần xử lý.",
 };
 
 export const CS_SOURCE_LABEL: Record<string, string> = {

@@ -60,3 +60,33 @@ export const APP_HEADER_OFFSET = "var(--app-header-height)";
  * DOM nên vẽ đè lên tiêu đề cột; dropdown/popover là portal ở `z-50` nên không cần nâng nữa.
  */
 export const STICKY_TOOLBAR = "sticky top-[var(--app-header-height)] z-10";
+
+/**
+ * ═══════════ DÒNG BUNG RA VÀ DÒNG ĐANG CHỌN — MỘT HỢP ĐỒNG, MỌI BẢNG DÙNG CHUNG ═══════════
+ *
+ * ─── LỖI ĐÃ ĐO ĐƯỢC ───
+ *
+ * Khối bung của bảng gom (CSKH theo khách, care theo kiện) dùng `bg-muted/30`. Ở CHẾ ĐỘ TỐI, nền
+ * thẻ là `oklch(0.192 …)` còn `muted` ở 30% alpha gần như trùng với nó: người đọc không phân biệt
+ * được đâu là dòng cha, đâu là danh sách con, và một bảng gom mà không thấy ranh giới gom thì
+ * không hơn gì một bảng phẳng.
+ *
+ * ─── BỐN THỨ LÀM NÊN RANH GIỚI, KHÔNG PHẢI MỘT ───
+ *
+ *   1. NỀN khác hẳn (`--row-nested`, khai tường minh cho cả hai chế độ ở `app/globals.css`);
+ *   2. THỤT VÀO + một đường dọc ở mép trái — mắt bắt được cấu trúc trước khi đọc chữ;
+ *   3. ĐƯỜNG KẺ giữa các dòng con, nhạt hơn viền bao;
+ *   4. TRẠNG THÁI DI CHUỘT riêng cho dòng con, khác dòng cha.
+ *
+ * Chỉ đổi nền là chưa đủ: một khối nền khác nhưng không thụt vào vẫn đọc như một dòng ngang hàng.
+ */
+export const ROW_EXPANDED = "bg-row-nested border-l-2 border-l-primary/40";
+
+/** Một dòng CON bên trong khối bung. Đường kẻ dùng `border-t` để dòng đầu không có kẻ thừa. */
+export const NESTED_ROW = "border-t border-[color:var(--hairline)] first:border-t-0 transition-colors hover:bg-row-hover";
+
+/** Dòng đang được chọn (bấm hàng loạt). Màu riêng, KHÔNG dùng lại màu di chuột — chọn và rê chuột là hai trạng thái khác nhau. */
+export const ROW_SELECTED = "bg-row-selected";
+
+/** Dòng CHA của một nhóm bung được. Con trỏ tay + trạng thái di chuột, để người dùng biết bấm được. */
+export const ROW_PARENT = "cursor-pointer transition-colors hover:bg-row-hover";

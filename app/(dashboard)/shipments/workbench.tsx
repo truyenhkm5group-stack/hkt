@@ -60,6 +60,7 @@ import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
+import { StatusSelect } from "@/components/status-select";
 import { cn } from "@/lib/utils";
 
 /**
@@ -754,20 +755,22 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
               Mở lại
             </button>
           ) : null}
-          <select
+          {/*
+            Ô CHỌN CỦA HỆ, KHÔNG PHẢI `<select>` GỐC.
+
+            `<select>` gốc cho `<option>` kế thừa nền của chính nó, nên mở menu ra thì MỌI lựa chọn
+            mang đúng một màu — màu của trạng thái đang chọn. Mười một mục trông y hệt nhau và
+            người trực phải đọc chữ từng dòng. Xem `components/status-select.tsx`.
+          */}
+          <StatusSelect
             value={c.care.status}
             disabled={pending || terminal}
-            onChange={(e) => changeStatus(e.target.value as CareStatus)}
+            onChange={(v) => changeStatus(v)}
+            className="h-7 w-[9.5rem] border-0 px-1.5 text-[11.5px]"
+            ariaLabel="Trạng thái care"
             title={CARE_STATUS_HINT[c.care.status]}
-            className={cn("h-7 rounded-md border-0 px-1.5 text-[11.5px] font-semibold", CARE_STATUS_TONE[c.care.status])}
-            aria-label="Trạng thái care"
-          >
-            {CARE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {CARE_STATUS_LABEL[s]}
-              </option>
-            ))}
-          </select>
+            options={CARE_STATUSES.map((s) => ({ value: s, label: CARE_STATUS_LABEL[s], tone: CARE_STATUS_TONE[s], hint: CARE_STATUS_HINT[s] }))}
+          />
           <select value={c.care.owner?.id ?? ""} disabled={pending} onChange={(e) => changeOwner(e.target.value)} className="h-7 max-w-[120px] rounded-md border bg-background px-1.5 text-[11.5px]" aria-label="Người care">
             <option value="">Chưa ai nhận</option>
             {staff.map((u) => (

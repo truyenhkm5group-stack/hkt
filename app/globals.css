@@ -53,6 +53,12 @@
   --hairline: oklch(0.93 0.005 250);
   --table-head: oklch(0.972 0.004 250);
   --row-hover: oklch(0.965 0.006 250);
+  /* ─── Dòng CON của một dòng bung ra, và dòng ĐANG CHỌN ───
+     `bg-muted/30` từng được dùng cho khối bung: ở chế độ tối nó gần như trùng nền thẻ, nên người
+     đọc không thấy đâu là dòng cha đâu là dòng con. Hai biến này khai TƯỜNG MINH cho cả hai chế
+     độ và cách nền thẻ đủ xa để phân biệt được, nhưng không chói. */
+  --row-nested: oklch(0.958 0.006 250);
+  --row-selected: oklch(0.935 0.035 250);
   --shadow-card: 0 1px 2px -1px oklch(0.2 0.03 260 / 8%), 0 1px 3px oklch(0.2 0.03 260 / 5%);
   /* Hợp đồng bảng dùng chung — xem lib/constants/table-ux.ts. Ba biến này là nguồn duy nhất cho mọi mốc dính. */
   --app-header-height: 3.5rem;
@@ -105,6 +111,9 @@
   --hairline: oklch(1 0 0 / 8%);
   --table-head: oklch(0.215 0.017 265);
   --row-hover: oklch(1 0 0 / 4%);
+  /* Nền thẻ ở chế độ tối là 0.192 — khối bung phải SÁNG hơn nó, không phải tối hơn. */
+  --row-nested: oklch(0.243 0.018 265);
+  --row-selected: oklch(0.295 0.042 265);
   --shadow-card: 0 1px 2px oklch(0 0 0 / 30%);
   --shadow-raised: 0 12px 32px -12px oklch(0 0 0 / 60%), 0 2px 8px -2px oklch(0 0 0 / 40%);
 }
@@ -156,6 +165,8 @@
   --color-hairline: var(--hairline);
   --color-table-head: var(--table-head);
   --color-row-hover: var(--row-hover);
+  --color-row-nested: var(--row-nested);
+  --color-row-selected: var(--row-selected);
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }

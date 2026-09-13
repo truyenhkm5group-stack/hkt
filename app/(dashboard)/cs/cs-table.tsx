@@ -10,10 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StatusSelect } from "@/components/status-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { addCsCaseNote, csQuickAction, deleteCsCase, getCsCaseHistory, runCsDetection, updateCsCaseQuick } from "@/lib/actions/cs";
-import { CS_HUMAN_STATUSES, CS_KIND_LABEL, CS_SOURCE_LABEL, CS_STATUS_LABEL, CS_STATUS_TONE, type CsKind, type CsStatus } from "@/lib/constants/cs";
+import { CS_HUMAN_STATUSES, CS_KIND_LABEL, CS_SOURCE_LABEL, CS_STATUS_HINT, CS_STATUS_LABEL, CS_STATUS_TONE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_EVENT_ACTION_LABEL, CS_QUICK_ACTION, CS_QUICK_ACTIONS_BY_KIND, CS_SNOOZE_PRESETS, type CsQuickActionKey } from "@/lib/constants/cs-actions";
 import { CS_CASE_SLA_HOURS, isBotAssignee } from "@/lib/constants/cs-domain";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
@@ -207,11 +208,15 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
 
                 <TableCell className="align-top">
                   {canWrite ? (
-                    <Select value={status} onValueChange={(v) => run(r.id, { status: v }, () => updateCsCaseQuick({ id: r.id, status: v }))} disabled={busy}>
-                      <SelectTrigger className={cn("h-8 w-full", CS_STATUS_TONE[status as CsStatus])}><SelectValue /></SelectTrigger>
-                      {/* AUTO_RESOLVED không có ở đây: máy đóng khác người đóng, xem CS_HUMAN_STATUSES. */}
-                      <SelectContent>{CS_HUMAN_STATUSES.map((s) => <SelectItem key={s} value={s}>{CS_STATUS_LABEL[s]}</SelectItem>)}</SelectContent>
-                    </Select>
+                    /* AUTO_RESOLVED không có trong danh sách: máy đóng khác người đóng (CS_HUMAN_STATUSES).
+                       Ô chọn của hệ tô màu TỪNG lựa chọn — xem components/status-select.tsx. */
+                    <StatusSelect
+                      value={status as CsStatus}
+                      onChange={(v) => run(r.id, { status: v }, () => updateCsCaseQuick({ id: r.id, status: v }))}
+                      disabled={busy}
+                      ariaLabel="Trạng thái case"
+                      options={CS_HUMAN_STATUSES.map((s) => ({ value: s, label: CS_STATUS_LABEL[s], tone: CS_STATUS_TONE[s], hint: CS_STATUS_HINT[s] }))}
+                    />
                   ) : <span className={cn("rounded px-1.5 py-0.5 text-xs", CS_STATUS_TONE[status as CsStatus])}>{CS_STATUS_LABEL[status as CsStatus] ?? status}</span>}
                 </TableCell>
 
