@@ -17,7 +17,9 @@ import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { successTone } from "@/lib/constants/returns";
 import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
+import { ProductNotes } from "@/app/(dashboard)/products/[id]/product-notes";
+import { listProductNotes } from "@/lib/queries/product-notes";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
 
@@ -28,7 +30,7 @@ function stockTone(remain: number) {
 }
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("products:view");
+  const user = await requirePermission("products:view");
   const { id } = await params;
   const product = await getProductDetail(id);
   if (!product) {
@@ -39,7 +41,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const { totals, warehouses } = product;
   // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
   const matrixPeriod = resolvePeriod({}, "90d");
-  const matrix = await getProductMatrix(id, matrixPeriod);
+  const [matrix, ghiChu] = await Promise.all([getProductMatrix(id, matrixPeriod), listProductNotes(id)]);
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
@@ -278,10 +280,44 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                   { label: "Số mẫu mã", value: `${formatNumber(product.variants.length)} (${formatNumber(totals.selling)} đang bán)` },
                   { label: "Tạo trên Pancake", value: formatDateTime(product.insertedAt) },
                   { label: "Đồng bộ lần cuối", value: formatDateTime(product.syncedAt) },
-                  { label: "Ghi chú", value: product.note || "—", span: true },
+                  {
+                    label: "Ghi chú từ Pancake",
+                    // Cột này ĐỒNG BỘ TỪ PANCAKE và bị ghi đè ở mỗi lần đồng bộ. Nói thẳng điều đó
+                    // ra, nếu không người dùng sẽ đi tìm chỗ sửa nó và không bao giờ thấy.
+                    value: product.note ? <span className="text-muted-foreground">{product.note}</span> : <span className="text-muted-foreground">— (ô này đồng bộ từ Pancake, không sửa được ở ERP)</span>,
+                    span: true,
+                  },
                 ]}
               />
             </div>
+          </SectionCard>
+
+          {/*
+            GHI CHÚ VẬN HÀNH — đường ghi thật, khác hẳn ô "Ghi chú từ Pancake" ở trên.
+
+            Ô kia đồng bộ từ Pancake và bị ghi đè mỗi lần đồng bộ; nó hiện ra nhưng không ai trong
+            shop viết vào được. Khối này ghi vào bảng riêng, mỗi dòng mang khoá tài khoản người
+            viết và mốc thời gian, và KHÔNG con số nào của ERP đọc nó.
+          */}
+          <SectionCard
+            title="Ghi chú vận hành"
+            description={ghiChu.length ? `${formatNumber(ghiChu.length)} ghi chú · mới nhất trước` : "Điều cần nhớ về mã hàng này mà không con số nào nói ra"}
+            hint="Bối cảnh cho người đọc: vì sao lô này hay bị đổi, size nào khách kêu chật, xưởng nào giao chậm. Ghi chú KHÔNG tham gia vào tồn kho, giá vốn hay bất kỳ báo cáo nào."
+          >
+            <ProductNotes
+              productId={product.id}
+              canWrite={can(user, "inventory:write")}
+              variants={product.variants.map((v) => ({ id: v.id, sku: v.sku }))}
+              notes={ghiChu.map((x) => ({
+                id: x.id,
+                variantSku: x.variantSku,
+                category: x.category,
+                body: x.body,
+                actorUserId: x.actorUserId,
+                actorName: x.actorName,
+                createdAt: x.createdAt.toISOString(),
+              }))}
+            />
           </SectionCard>
 
           <SectionCard title="Nhật ký kho gần đây" description="30 giao dịch mới nhất của các mẫu mã" actions={<Link href={`/inventory?q=${encodeURIComponent(product.name)}&period=all`} className="text-xs font-semibold text-primary hover:underline">Xem tất cả</Link>} padded={false}>
