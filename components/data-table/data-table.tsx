@@ -19,6 +19,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Inbox } 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { STICKY_TOOLBAR } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 import { DataTablePagination } from "@/components/data-table/pagination";
 
@@ -180,7 +181,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       {selectable && selectedRows.length > 0 && bulkActions ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+        <div className={cn(STICKY_TOOLBAR, "flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-card px-3 py-2 text-sm shadow-[var(--shadow-card)]")}>
           <span className="font-semibold">Đã chọn {selectedRows.length}</span>
           <div className="flex flex-wrap items-center gap-2">{bulkActions(selectedRows, clearSelection)}</div>
           <Button variant="ghost" size="sm" className="ml-auto" onClick={clearSelection}>
@@ -196,26 +197,15 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
         </div>
       ) : null}
       {/*
-        TIÊU ĐỀ CỘT DÍNH LẠI KHI CUỘN. Bảng ERP hay dài 50 dòng; cuộn tới dòng 30 mà mất hàng tiêu
-        đề thì phải cuộn ngược lên chỉ để biết cột đang đọc là cột gì. Trần chiều cao chỉ đặt khi
-        bảng THỰC SỰ dài (> 12 dòng) — bảng ngắn giữ nguyên dòng chảy của trang, không sinh thêm
-        một thanh cuộn lồng nhau không cần thiết. Vùng cuộn nằm TRONG thẻ nên thanh phân trang luôn
-        thấy được, không phải cuộn xuống đáy mới bấm sang trang sau.
+        TIÊU ĐỀ CỘT DÍNH LẠI KHI CUỘN — luật nằm ở primitive `components/ui/table.tsx` và
+        `lib/constants/table-ux.ts`: khung bảng luôn là khung cuộn có trần chiều cao (biến
+        `--table-max-height`), tiêu đề dính ở mép trên khung. Bảng ngắn hơn trần thì không có thanh
+        cuộn, bảng dài thì cuộn bên trong và thanh phân trang luôn thấy được. Không còn ngưỡng "12
+        dòng": trước đây bảng ≤ 12 dòng chảy theo trang với mốc 3.5rem, và mốc đó đẩy tiêu đề đè lên
+        hai dòng đầu (xem giải thích ở table-ux.ts).
       */}
       <div className={cn("overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
-          {/*
-            Luật dính đã chuyển vào `components/ui/table.tsx` (primitive dùng chung) — ở đây chỉ còn
-            khai bảng này CÓ khung cuộn dọc riêng hay không, để primitive chọn đúng mốc dính.
-
-            Bảng ngắn (≤ 12 dòng) cuộn theo CẢ TRANG, nên mốc là 3.5rem — đúng dưới thanh tiêu đề
-            ứng dụng. Bảng dài có trần chiều cao, tự cuộn, nên mốc là 0. Trước bản này cả hai đều
-            dùng mốc 0, và bảng ngắn có tiêu đề trượt xuống dưới thanh điều hướng rồi biến mất.
-          */}
-          <Table
-            className={cn(dense && "[&_td]:py-1.5")}
-            scrollable={data.length > 12}
-            containerClassName={cn(data.length > 12 && "max-h-[calc(100vh-15rem)] min-h-[20rem]")}
-          >
+          <Table className={cn(dense && "[&_td]:py-1.5")}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="border-0 hover:bg-transparent">

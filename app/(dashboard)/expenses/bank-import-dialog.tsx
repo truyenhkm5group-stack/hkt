@@ -175,8 +175,8 @@ export function BankImportDialog() {
                 </label>
               </div>
             ) : null}
-            <div className="max-h-[50vh] overflow-auto rounded-md border">
-              <Table>
+            <div className="rounded-md border">
+              <Table containerClassName="max-h-[50vh]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8" />

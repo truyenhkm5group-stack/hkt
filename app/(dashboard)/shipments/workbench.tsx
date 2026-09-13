@@ -36,7 +36,7 @@ import {
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
-import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -383,7 +383,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
           {view === "care" ? "Không có kiện nào đang cần care — mọi kiện đang chạy đúng lịch hoặc đã có người theo." : `Không có kiện nào ở “${CARE_VIEW_LABEL[view]}”.`}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border">
+        <div className={cn(TABLE_SCROLL, "rounded-xl border")}>
           <table className="w-full min-w-[1180px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>

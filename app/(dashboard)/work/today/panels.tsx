@@ -107,8 +107,8 @@ export function AutoAssignButton({ department, unassigned }: { department: Depar
           ) : null}
 
           {rows.length ? (
-            <div className="max-h-[40vh] overflow-y-auto rounded-lg border">
-              <Table>
+            <div className="rounded-lg border">
+              <Table containerClassName="max-h-[40vh]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Việc</TableHead>

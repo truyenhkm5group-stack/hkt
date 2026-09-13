@@ -15,7 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { confirmReturnReceived } from "@/lib/actions/returns-warehouse";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import type { ItemsBasis, OrderLinkBasis, ReturnItem, ReturnProductContext } from "@/lib/returns/product-context";
-import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -138,7 +138,7 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border">
+      <div className={cn(TABLE_SCROLL, "rounded-xl border")}>
         <table className="w-full text-[12.5px]">
           <thead className={cn(STICKY_HEAD, "text-[11px] uppercase tracking-wide text-muted-foreground")}>
             <tr>

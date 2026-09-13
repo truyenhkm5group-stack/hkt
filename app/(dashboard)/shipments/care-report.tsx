@@ -1,6 +1,6 @@
 import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
-import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getCareReport } from "@/lib/queries/care-report";
@@ -79,7 +79,7 @@ export async function CareReportSection({ period }: { period: Period }) {
 
       {r.backlog.byOwner.length ? (
         <SectionCard title="Khối lượng đang cầm" hint="Kiện đang mở (kể cả đang chờ / escalated) theo người nhận, tính lúc này. Để chia lại việc, không phải để xếp hạng." padded={false}>
-          <div className="overflow-x-auto">
+          <div className={TABLE_SCROLL}>
             <table className="w-full min-w-[480px] text-[12.5px]">
               <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>
@@ -113,7 +113,7 @@ export async function CareReportSection({ period }: { period: Period }) {
         {r.staff.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Chưa có hành động care nào trong kỳ.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={TABLE_SCROLL}>
             <table className="w-full min-w-[820px] text-[12.5px]">
               <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>

@@ -220,7 +220,7 @@ export function InspectionStation({ rows: initial, canWrite }: { rows: Row[]; ca
 
       {/* ── THANH HÀNG LOẠT ── */}
       {chon.size > 0 && canWrite ? (
-        <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 p-3 shadow-sm">
+        <div className="sticky top-[calc(var(--app-header-height)+0.5rem)] z-10 flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 p-3 shadow-sm">
           <span className="text-sm font-semibold">Đã chọn {chon.size} kiện</span>
           {NHANH.map(({ condition, icon: Icon, tone }) => (
             <Button key={condition} size="sm" className={cn("h-9", tone)} variant={condition === "RESTOCKABLE" ? "default" : "outline"} disabled={dangChay} onClick={() => hangLoat(condition)}>

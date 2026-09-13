@@ -2,6 +2,8 @@ import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
 import { ReasonGroupTable } from "@/app/(dashboard)/reports/returns/reason-group-table";
 import { TIME_BASIS_LABEL } from "@/lib/constants/report-time-basis";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
+import { cn } from "@/lib/utils";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
@@ -62,9 +64,9 @@ export async function ReturnReasonSection({ period, codes }: { period: Period; c
         hint="Một đơn nhiều mã hàng mà bị hoàn thì KHÔNG có gì trong dữ liệu nói mã nào gây hoàn. Đơn đó được tính cho cả hai mã (cả hai đều bị ảnh hưởng) và lý do của nó xếp vào nhóm 'lý do khác' thay vì gán bừa cho một mã."
         padded={false}
       >
-        <div className="overflow-x-auto">
+        <div className={TABLE_SCROLL}>
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="border-b bg-muted/50 text-[11.5px] uppercase tracking-wide text-muted-foreground">
+            <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Mã hàng</th>
                 <th className="px-3 py-2 text-right font-semibold">Đơn có kết quả</th>

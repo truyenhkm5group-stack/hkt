@@ -1,7 +1,7 @@
 import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
-import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL, CARE_OUTCOME_HINT, CARE_OUTCOME_LABEL } from "@/lib/constants/care-outcome";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { formatNumber } from "@/lib/format";
@@ -79,7 +79,7 @@ export async function RescueReportSection({ period }: { period: Period }) {
         actions={<InfoHint>Một ca qua tay nhiều người thì cộng kết quả cho tất cả sẽ đếm một ca thành nhiều lần trong tỷ lệ tổng. Số THAO TÁC của từng người đếm riêng ở các cột bên phải để thấy ai đã đóng góp — nhưng nó KHÔNG tham gia tỷ lệ cứu đơn.</InfoHint>}
         padded={false}
       >
-        <div className="overflow-x-auto">
+        <div className={TABLE_SCROLL}>
           <table className="w-full min-w-[980px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
@@ -139,7 +139,7 @@ export async function RescueReportSection({ period }: { period: Period }) {
           {formatNumber(theoMa.totalCases)} ca trong kỳ · <b>{formatNumber(theoMa.multiCodeCases)}</b> ca thuộc đơn nhiều mã (được cộng cho từng mã) ·{" "}
           <b>{formatNumber(theoMa.unmappedCases)}</b> ca chưa lần được về mã nào
         </p>
-        <div className="overflow-x-auto">
+        <div className={TABLE_SCROLL}>
           <table className="w-full min-w-[720px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>

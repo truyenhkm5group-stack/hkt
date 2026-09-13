@@ -6,7 +6,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
 import { RESCUE_STATE_LABEL } from "@/lib/constants/return-rescue";
 import type { ReasonGroupRow, ReasonDetailRow } from "@/lib/queries/return-reason-report";
-import { STICKY_HEAD } from "@/lib/constants/table-ux";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -53,7 +53,7 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
   const tongCuu = groups.reduce((n, g) => n + g.rescued, 0);
 
   return (
-    <div className="overflow-x-auto">
+    <div className={TABLE_SCROLL}>
       <table className="w-full min-w-[760px] text-sm">
         <thead className={cn(STICKY_HEAD, "border-b text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
           <tr>

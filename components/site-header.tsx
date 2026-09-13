@@ -21,7 +21,7 @@ export function SiteHeader({ user }: { user: NavUserLike }) {
   const detail = segments.length > 1 && !NAV_TITLES[`/${segments.slice(0, 2).join("/")}`] ? segments.slice(1).join(" / ") : null;
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4">
+    <header className="sticky top-0 z-20 flex h-[var(--app-header-height)] shrink-0 items-center gap-2 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 h-4" />
       <Breadcrumb>
