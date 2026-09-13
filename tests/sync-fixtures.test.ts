@@ -130,6 +130,7 @@ import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
+import { testReportingParity } from "./reporting-parity.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -727,7 +728,22 @@ async function main() {
       assert.equal(r.inventoryRisk, 0, `mã ${r.code} nhập hàng nhưng chưa bán ⇒ chưa ghi dự phòng vào kỳ`);
       assert.ok(r.inventoryRiskOnPurchase > 0, `rủi ro cả lô của ${r.code} vẫn hiện ở bảng theo hàng nhập`);
     }
-    assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRiskOnPurchase - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
+    /*
+      ĐỔI CÔNG THỨC CÓ CHỦ Ý (13/09/2026) — không phải nới lỏng bài kiểm để CI xanh.
+
+      TRƯỚC: trừ `inventoryRiskOnPurchase` — rủi ro CẢ ĐỜI của lô nhập — vào lợi nhuận của kỳ chứa
+      phiếu nhập. Nó sai theo HAI hướng ngược nhau và cả hai đều đo được:
+        · kỳ CÓ phiếu nhập  ⇒ gánh rủi ro của hàng sẽ bán trong nhiều tháng tới;
+        · kỳ KHÔNG nhập gì  ⇒ rủi ro bằng ĐÚNG 0, bảng nói hàng đang bán không mang rủi ro nào.
+          Đây chính là cột 0 chủ shop nhìn thấy trên kỳ 7 ngày.
+
+      SAU: trừ `inventoryRisk` — phần dự phòng PHÂN BỔ CHO KỲ theo giá vốn hàng BÁN RA, đúng
+      `AGENTS.md` mục 14, và là CÙNG MỘT con số với bảng lợi nhuận chính.
+
+      Rủi ro cả đời của lô vẫn được tính và vẫn hiện ra, nhưng là GHI CHÚ — hai dòng assert ngay
+      bên trên vẫn khoá nó, nên nó không thể biến mất trong im lặng.
+    */
+    assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
   }
   // Σ phần phân bổ của các mã = ĐÚNG tổng của shop (largest remainder), không lệch vì làm tròn từng dòng.
   if (nominal.totals.grossSales > 0) {
@@ -1443,6 +1459,9 @@ async function main() {
   // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
   // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
   await testCareOs(db);
+  // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
+  // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
+  await testReportingParity(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
   await testFulfillmentBottleneck(db);

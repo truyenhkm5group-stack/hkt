@@ -521,12 +521,21 @@ export type ReturnRateRow = {
   inTransit: number;
   /** Đang chờ phát lại (giao thất bại chưa kết thúc) */
   failed: number;
-  /** Tỷ lệ hoàn dự kiến (%) = (hoàn + chờ phát lại × xác suất thành hoàn) ÷ (giao thật + hoàn + chờ phát lại) */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V2`. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG (%) = giao thành công (COD thực > 100K) ÷ (giao thành công + không thành công) trên đơn đã kết thúc; null nếu chưa có đơn kết thúc */
   successRate: number | null;
-  /** Tỷ lệ giao thành công dự kiến (%) khi các đơn chờ phát lại kết thúc = 100 − tỷ lệ hoàn dự kiến */
+  /**
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V2` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
+   * suất của CHÍNH trạng thái ĐVVC nó đang ở. `null` = CHƯA ĐO ĐƯỢC, không phải 0%.
+   */
   expectedSuccessRate: number | null;
+  /** Mẫu số thô của ước tính — để dòng GỘP cộng được thay vì bình quân các tỷ lệ. */
+  projectedSent: number;
+  /** Tử số thô (có phần lẻ: đơn đang chạy đóng góp xác suất của nó). */
+  projectedDelivered: number;
+  /** Đơn đang chạy mà mô hình chưa dự báo được (trạng thái chưa đủ mẫu). */
+  unmodelledActive: number;
   cancelled: number;
   returnedQty: number;
   lostRevenue: number;
@@ -618,14 +627,34 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     .from(base)
     .groupBy(base.key));
 
-  const p = await failedToReturnRate();
+  /*
+    ═══ MỘT HỢP ĐỒNG, HAI GRAIN ═══
+
+    Công thức cũ ngay đây là `(hoàn + chờ_phát_lại × p) ÷ (đã_kết_thúc + chờ_phát_lại)` với `p` là
+    tỷ lệ "phát hỏng rồi thành hoàn" CỦA CẢ SHOP. Nó chỉ nhìn nhóm "chờ phát lại" và bỏ qua mọi
+    đơn đang chạy khác, nên mã có 20 đơn vừa rời kho và 0 đơn chờ phát lại sẽ ra "dự kiến = tỷ lệ
+    thực tế" — như thể 20 đơn kia chắc chắn giao được.
+
+    Nay lấy từ `getProjectedDeliveryMetrics(..., "VARIANT")`: cùng hàm, cùng bảng xác suất, cùng
+    cohort với bảng lợi nhuận — chỉ khác khoá gộp. Mẫu mã nào mô hình chưa dự báo được thì `null`
+    (CHƯA ĐO ĐƯỢC), không rơi về một con số đoán.
+
+    Nạp lúc gọi chứ không nạp lúc dịch — `projected-delivery.ts` import `PRIMARY_ATTEMPT` từ chính
+    tệp này, import tĩnh hai chiều sẽ tạo vòng và vòng import ESM hỏng im lặng.
+  */
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  const duBao = await getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT").catch(() => null);
+  const duBaoTheoKhoa = new Map((duBao?.rows ?? []).map((x) => [x.code, x]));
+
   const all: ReturnRateRow[] = raw
     .map((r) => {
       const delivered = Number(r.delivered);
       const returned = Number(r.returned);
       const finished = delivered + returned;
-      const failedN = Number(r.failed);
-      const expectedRate = finished + failedN ? ((returned + failedN * p.rate) / (finished + failedN)) * 100 : null;
+      const d = duBaoTheoKhoa.get(r.key);
+      const projectedSent = d?.eligibleSent ?? 0;
+      const projectedDelivered = d?.projectedDelivered ?? 0;
+      const expectedRate = d && d.projectedRate !== null ? Math.round((100 - d.projectedRate) * 10) / 10 : null;
       return {
         key: r.key,
         variantId: r.variantId,
@@ -641,7 +670,12 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         failed: Number(r.failed),
         expectedRate,
         successRate: finished ? (delivered / finished) * 100 : null,
-        expectedSuccessRate: expectedRate === null ? null : 100 - expectedRate,
+        expectedSuccessRate: d?.projectedRate ?? null,
+        // Đếm THÔ để dòng gộp cộng được: gộp bằng cách bình quân các tỷ lệ sẽ cân mã 2 đơn ngang
+        // mã 200 đơn. Cộng tử số và mẫu số rồi mới chia thì không.
+        projectedSent,
+        projectedDelivered,
+        unmodelledActive: d?.unmodelledActive ?? 0,
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
         lostRevenue: Number(r.lostRevenue),
@@ -683,12 +717,27 @@ export type ReturnRateSummary = {
   cancelled: number;
   lostRevenue: number;
   rate: number | null;
-  /** Tỷ lệ hoàn dự kiến khi các đơn chờ phát lại kết thúc (theo xác suất lịch sử) */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`. Cùng hợp đồng, cùng cohort. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG chung (%) = giao thành công ÷ (giao thành công + không thành công) */
   successRate: number | null;
-  /** Tỷ lệ giao thành công dự kiến (%) khi đơn chờ phát lại kết thúc */
+  /**
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V2`, xem `lib/constants/projected-delivery.ts`.
+   * `null` = CHƯA ĐO ĐƯỢC (cohort rỗng hoặc mô hình chưa dự báo được đơn nào), KHÔNG phải 0%.
+   */
   expectedSuccessRate: number | null;
+  /** Xuất xứ con số ước tính, để màn hình nói ra thay vì để người đọc đoán. `null` = không tính được. */
+  projection: {
+    version: string;
+    /** Mẫu số: đơn trong cohort đã bàn giao ĐVVC. */
+    eligibleSent: number;
+    /** Đơn chưa có kết cục — phần mà con số này đang DỰ BÁO. */
+    active: number;
+    /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu). */
+    unmodelledActive: number;
+    /** "Đang giao" tách theo trạng thái ĐVVC, ĐẾM THEO ĐƠN — kèm xác suất và độ tin cậy của từng nhóm. */
+    byState: { substate: string; label: string; orders: number; p: number | null; sample: number; confidence: string }[];
+  } | null;
   /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
   failedToReturnPct: number;
   failedSample: number;
@@ -807,6 +856,37 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   const returned = Number(row?.returned ?? 0);
   const failed = Number(row?.failed ?? 0);
   const p = await failedToReturnRate();
+  /*
+    ═══ TỶ LỆ GTC ƯỚC TÍNH LẤY TỪ HỢP ĐỒNG CHUNG ═══
+
+    Công thức cũ ngay dưới đây chỉ cân nhóm `failed` (chờ phát lại) với một xác suất CỦA CẢ SHOP,
+    và bỏ qua mọi đơn đang chạy khác. Trang lợi nhuận thì cân TẤT CẢ đơn chưa rõ bằng một tỷ lệ giả
+    định. Hai cách khác nhau ⇒ hai con số cho cùng một kỳ, và không màn hình nào nói ra mình đang
+    dùng cách nào.
+
+    Nay cả hai đọc `getProjectedDeliveryMetrics` — cùng bảng xác suất học từ lịch sử thật, mỗi đơn
+    cân theo ĐÚNG trạng thái ĐVVC đang báo về chính nó. Mốc cohort đi theo `basis` mà người dùng
+    đang chọn trên chính trang này, không ghim cứng.
+  */
+  /*
+    NẠP LÚC GỌI, KHÔNG NẠP LÚC DỊCH: `projected-delivery.ts` import `PRIMARY_ATTEMPT` từ chính tệp
+    này. Import tĩnh hai chiều sẽ tạo vòng, và vòng import trong ESM hỏng theo kiểu tệ nhất — một
+    trong hai module thấy `undefined` tuỳ thứ tự nạp, không lỗi nào phát ra lúc dịch.
+  */
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  // Truyền THẲNG mốc mà trang đang hiển thị xuống: bảng số liệu và con số ước tính phải cắt cùng
+  // một tập đơn. Ghim cứng "SHIPPED" ở đây thì người đổi sang "Ngày tạo đơn" sẽ thấy một bảng của
+  // cohort này kèm một tỷ lệ ước tính của cohort khác — đúng kiểu lệch mà bản này đang đi xoá.
+  const duBao = await getProjectedDeliveryMetrics(period, basis).catch(() => null);
+  /*
+    LẤY THẲNG CON SỐ Ở GRAIN ĐƠN, KHÔNG CỘNG CÁC DÒNG THEO MÃ.
+
+    Cộng các dòng theo mã sai ở CẢ HAI đầu phân số, và hai cái sai không triệt tiêu nhau: đơn hai
+    mã hàng được cộng cho cả hai mã (làm mẫu số lớn hơn số đơn thật), còn đơn chưa lần được về mã
+    nào thì bị bỏ hẳn. Thẻ này nói về ĐƠN, nên nó phải hỏi hợp đồng ở grain đơn.
+  */
+  const mucDon = duBao?.orderLevel ?? null;
+  const tyLeDuBao = mucDon?.projectedRate ?? null;
   return {
     orders: Number(row?.orders ?? 0),
     shipped: Number(row?.shipped ?? 0),
@@ -819,9 +899,23 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
     cancelled: Number(row?.cancelled ?? 0),
     lostRevenue: Number(row?.lostRevenue ?? 0),
     rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
-    expectedRate: delivered + returned + failed ? ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
+    expectedRate: tyLeDuBao === null ? null : Math.round((100 - tyLeDuBao) * 10) / 10,
     successRate: delivered + returned ? (delivered / (delivered + returned)) * 100 : null,
-    expectedSuccessRate: delivered + returned + failed ? 100 - ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
+    // MỘT NGUỒN: cùng hàm, cùng bảng xác suất với trang lợi nhuận. Mô hình chưa đo được ⇒ `null`,
+    // và màn hình in "chưa đo được" thay vì một con số đoán.
+    expectedSuccessRate: tyLeDuBao,
+    projection: duBao && mucDon
+      ? {
+          version: duBao.version,
+          eligibleSent: mucDon.eligibleSent,
+          active: mucDon.active,
+          unmodelledActive: mucDon.unmodelledActive,
+          byState: duBao.probabilities
+            .filter((x) => (mucDon.activeByState[x.substate] ?? 0) > 0)
+            .map((x) => ({ substate: x.substate, label: x.label, orders: mucDon.activeByState[x.substate] ?? 0, p: x.p, sample: x.sample, confidence: x.confidence }))
+            .sort((a, b) => b.orders - a.orders),
+        }
+      : null,
     failedToReturnPct: Math.round(p.rate * 100),
     failedSample: p.sample,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),

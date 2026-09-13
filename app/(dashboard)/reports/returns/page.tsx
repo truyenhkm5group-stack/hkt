@@ -37,6 +37,7 @@ import { logisticsPerformance } from "@/lib/queries/logistics";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
+import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
@@ -117,6 +118,23 @@ export default async function ReturnRatePage({
     .filter((r) => r.successRate !== null && r.shipped >= 5)
     .sort((a, b) => (a.successRate ?? 0) - (b.successRate ?? 0))[0];
 
+  /*
+    ═══ CHÚ THÍCH PHẢI MÔ TẢ ĐÚNG CÔNG THỨC ĐANG CHẠY ═══
+
+    Chú thích cũ ở đây viết: "Dự kiến X% khi N đơn chờ phát lại kết thúc (xác suất thành hoàn P%)".
+    Câu đó mô tả công thức CŨ — chỉ cân nhóm "chờ phát lại" bằng MỘT xác suất của cả shop, bỏ qua
+    mọi đơn đang chạy khác. Con số nay đến từ `PROJECTED_GTC_V2`: MỌI đơn chưa có kết cục đều được
+    cân theo xác suất CỦA CHÍNH trạng thái ĐVVC nó đang ở. Giữ nguyên câu cũ thì màn hình đang
+    khai sai nguồn của chính con số nó in ra — đúng cái lỗi mà bản này đi xoá, chỉ đổi chỗ.
+
+    Và khi mô hình chưa dự báo được đơn nào thì in "chưa đo được", KHÔNG in 0%.
+  */
+  const pj = summary.projection;
+  const duKienNote =
+    summary.expectedSuccessRate === null || pj === null
+      ? "Giao TC / (giao TC + không TC) · chưa đủ dữ liệu để ước tính phần đang giao"
+      : `Ước tính ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(pj.active)} đơn đang giao kết thúc — mỗi đơn cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${pj.version}, mốc ${TIME_BASIS_LABEL[basis].toLowerCase()})${pj.unmodelledActive ? ` · ${formatNumber(pj.unmodelledActive)} đơn chưa dự báo được` : ""}`;
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -180,11 +198,42 @@ export default async function ReturnRatePage({
               {summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}
             </span>
           }
-          note={`${summary.expectedSuccessRate !== null ? `Dự kiến ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(summary.failed)} đơn chờ phát lại kết thúc (xác suất thành hoàn ${summary.failedToReturnPct}%${summary.failedSample >= 15 ? `, học từ ${formatNumber(summary.failedSample)} vận đơn` : ", mặc định"})` : "Giao TC / (giao TC + không TC)"}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
+          note={`${duKienNote}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
           icon={Percent}
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
       </section>
+
+      {/*
+        ───────── "ĐANG GIAO" TÁCH RA THÌ MỚI ĐỌC ĐƯỢC ─────────
+
+        Một con số "đang giao 120 đơn" không nói gì cho người quyết định. "90 đang luân chuyển ·
+        30 chờ phát lại" thì nói rất nhiều: hai nhóm đó có triển vọng khác hẳn nhau, và đó chính
+        là lý do mô hình cân TỪNG đơn thay vì nhân tổng doanh số với một tỷ lệ.
+
+        Mỗi dòng khai luôn cỡ mẫu và độ tin cậy của xác suất nó đang dùng. Nhóm chưa đủ mẫu in
+        "chưa đủ mẫu" và nằm NGOÀI phần ước tính — không bịa một con số trông như đã đo.
+      */}
+      {pj && pj.byState.length ? (
+        <SectionCard
+          title={`Đang giao: ${formatNumber(pj.active)} đơn, tách theo trạng thái Viettel Post`}
+          description={`Mỗi nhóm mang xác suất giao được của riêng nó, học từ vận đơn đã kết thúc. Đây là toàn bộ phần mà con số ước tính ${summary.expectedSuccessRate === null ? "" : `${summary.expectedSuccessRate.toFixed(1)}% `}đang dự báo.`}
+        >
+          <div className="flex flex-wrap gap-2 p-3">
+            {pj.byState.map((x) => (
+              <div key={x.substate} className="rounded-lg border border-hairline px-3 py-2">
+                <div className="text-[12.5px] font-medium">{x.label}</div>
+                <div className="numeric text-lg font-semibold">{formatNumber(x.orders)}</div>
+                <div className="text-[10.5px] text-muted-foreground">
+                  {x.p === null
+                    ? `chưa đủ mẫu (${formatNumber(x.sample)} vận đơn) — ngoài phần ước tính`
+                    : `${(x.p * 100).toFixed(1)}% giao được · học từ ${formatNumber(x.sample)} vận đơn · ${CONFIDENCE_LABEL[x.confidence as ProbabilityConfidence] ?? x.confidence}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
 
       {/* ───────── Hiệu suất giao vận tính từ hành trình Viettel Post ───────── */}
       <SectionCard

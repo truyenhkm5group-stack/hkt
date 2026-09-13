@@ -28,10 +28,41 @@ import { formatNumber, formatVND } from "@/lib/format";
 import {
   getNominalDailyForProduct,
   getNominalProfitReport,
+  type NominalRow,
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
+import { adsRatio } from "@/lib/constants/profit";
+import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
 import { cn } from "@/lib/utils";
+
+/*
+  ═══════════ CHÚ THÍCH PHẢI KHAI ĐÚNG NGUỒN CỦA CHÍNH CON SỐ NÓ ĐỨNG CẠNH ═══════════
+
+  Chú thích cũ ở cột này viết ra từng vế của công thức TRỘN đã bị gỡ:
+    "chờ xử lý / phát lại N (×X% thành công) · chưa có kết quả M (×Y% lịch sử)".
+  Không vế nào trong đó còn chạy. Tỷ lệ nay đến từ `PROJECTED_GTC_V2`: mỗi đơn chưa có kết cục được
+  cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở, học từ lịch sử vận đơn thật.
+
+  Và bốn nguồn phải phân biệt được bằng mắt, vì chúng KHÔNG cùng độ tin cậy: một con số chủ shop
+  gõ tay, một con số mô hình dựng từ trạng thái thật, một tỷ lệ lịch sử của mã, và một giả định
+  chung của shop — gộp cả bốn vào chữ "lịch sử" là xoá đúng thông tin mà người đọc cần.
+*/
+const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => string> = {
+  override: () => "ghi đè",
+  projected: (r) => (r.projection ? `${formatNumber(r.projection.eligibleSent)} đơn` : "mô hình"),
+  history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn`,
+  default: () => "mặc định",
+};
+
+function moTaUocTinh(r: NominalRow): string {
+  const dem = `Đã giao TC ${formatNumber(r.delivered)} · không thành công ${formatNumber(r.returned)} · đang giao ${formatNumber(Math.max(0, r.orders - r.delivered - r.returned))}`;
+  if (r.returnRateSource === "override") return `${dem} — tỷ lệ do chủ shop gõ tay, thắng mọi nguồn khác`;
+  if (r.returnRateSource === "projected" && r.projection)
+    return `${dem} — mỗi đơn đang giao cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn trong kỳ)${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn chưa dự báo được` : ""}`;
+  if (r.returnRateSource === "history") return `${dem} — mô hình chưa dự báo được mã này, dùng tỷ lệ hoàn lịch sử của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc)`;
+  return `${dem} — chưa có lịch sử lẫn dự báo cho mã này, dùng giả định chung của shop`;
+}
 
 function Pct({
   value,
@@ -168,7 +199,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
-        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K) trộn theo trạng thái thật: đã giao TC 100%, không thành công 0%, chờ xử lý / chờ phát lại ${100 - t.failedToReturnPct}% (học từ lịch sử), còn lại theo tỷ lệ ${report.assumptions.returnRateWindowDays} ngày của mã. Bấm mã để xem theo ngày.`}
+        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K) dùng CÙNG mô hình với báo cáo giao vận (${PROJECTED_GTC_VERSION}): mỗi đơn chưa có kết cục được cân theo xác suất của CHÍNH trạng thái Viettel Post nó đang ở, học từ vận đơn đã kết thúc. Mã nào mô hình chưa dự báo được thì lùi về tỷ lệ hoàn ${report.assumptions.returnRateWindowDays} ngày của mã — cột nhỏ dưới mỗi tỷ lệ nói rõ nguồn. Bấm mã để xem theo ngày.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -180,6 +211,15 @@ export async function NominalTab({
                 <TableHead className="text-right">SP</TableHead>
                 <TableHead className="text-right">Doanh số POS</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
+                {/*
+                  HAI TỶ LỆ QUẢNG CÁO — MẪU SỐ KHÁC NHAU CÓ CHỦ ĐÍCH, KHÔNG THAY THẾ CHO NHAU.
+
+                  Một bên chia cho tiền khách CHỐT, một bên chia cho tiền dự kiến THẬT SỰ TỚI TAY
+                  KHÁCH. Tỷ lệ đầu luôn đẹp hơn vì mẫu số chưa trừ đơn hoàn; đọc nhầm nó thành
+                  hiệu quả quảng cáo là lý do người ta tăng ngân sách cho một mã đang lỗ.
+                */}
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH. Doanh thu ước tính dùng CÙNG mô hình dự báo với báo cáo giao vận: từng đơn chưa kết thúc được cân theo xác suất giao thành công của chính trạng thái nó đang ở. Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
                 <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K)">TL GTC ƯT</TableHead>
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">Giá vốn</TableHead>
@@ -203,7 +243,7 @@ export async function NominalTab({
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={22}
+                    colSpan={24}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -262,6 +302,8 @@ export async function NominalTab({
                         }
                       />
                     </TableCell>
+                    <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.salesAfterDiscount)} tone={false} /></TableCell>
+                    <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.expectedRevenue)} tone={false} /></TableCell>
                     <TableCell className="text-right">
                       <span
                         className={cn(
@@ -273,14 +315,10 @@ export async function NominalTab({
                               : "text-emerald-700",
                         )}
                       >
-                        <span title={`Đã giao TC ${r.delivered} · không thành công ${r.returned} · chờ xử lý / phát lại ${r.failed} (×${100 - t.failedToReturnPct}% thành công) · chưa có kết quả ${Math.max(0, r.orders - r.delivered - r.returned - r.failed)} (×${(100 - r.baseReturnRate).toFixed(0)}% lịch sử)`}>{r.deliveryRate.toFixed(1)}%</span>
+                        <span title={moTaUocTinh(r)}>{r.deliveryRate.toFixed(1)}%</span>
                       </span>
                       <div className="text-[10.5px] text-muted-foreground">
-                        {r.returnRateSource === "override"
-                          ? "ghi đè"
-                          : r.returnRateSource === "history"
-                            ? `${r.historyFinished} đơn`
-                            : "mặc định"}
+                        {NHAN_NGUON[r.returnRateSource](r)}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -369,6 +407,8 @@ export async function NominalTab({
                   <TableCell className="text-right">
                     <Money value={t.adSpend} className="text-rose-600" />
                   </TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.salesAfterDiscount)} tone={false} /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.expectedRevenue)} tone={false} /></TableCell>
                   <TableCell className="text-right">
                     <Pct value={t.weightedDeliveryRate} tone={false} />
                   </TableCell>
@@ -446,7 +486,7 @@ export async function NominalTab({
         <div id="ma-hang">
           <SectionCard
             title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate.toFixed(1)}% (${selected.returnRateSource === "override" ? "ghi đè" : selected.returnRateSource === "history" ? `lịch sử ${selected.historyFinished} đơn kết thúc` : "mặc định"}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
+            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate.toFixed(1)}% (${moTaUocTinh(selected)}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
             actions={
               <div className="flex items-center gap-3">
                 <ReturnRateOverride
@@ -568,7 +608,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
-        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − rủi ro TK của cả lô nhập − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − CP rủi ro tồn kho phân bổ cho kỳ (theo giá vốn hàng BÁN RA, cùng một con số với bảng trên — không theo giá trị hàng nhập) − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -581,9 +621,12 @@ export async function NominalTab({
                 <TableHead className="text-right">Đơn</TableHead>
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH. Doanh thu ước tính dùng CÙNG mô hình dự báo với báo cáo giao vận: từng đơn chưa kết thúc được cân theo xác suất giao thành công của chính trạng thái nó đang ở. Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
                 <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
-                <TableHead className="text-right" title="Bảng này đã trừ TRỌN giá trị hàng nhập trong kỳ nên cũng trừ TRỌN phần rủi ro của lô đó (% × giá trị hàng nhập). Bảng trên đi theo hàng bán ra nên chỉ trừ phần dự phòng đã giải phóng — hai bảng, hai cơ sở, mỗi bảng nhất quán với chính nó.">Rủi ro TK cả lô nhập</TableHead>
+                <TableHead className="text-right" title="CHI PHÍ CỦA KỲ NÀY, không phải rủi ro cả đời của lô: % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ — cùng MỘT con số với bảng trên. Trước bản này cột lấy % × giá trị hàng NHẬP, nên kỳ có phiếu nhập thì gánh rủi ro của hàng sẽ bán nhiều tháng sau, còn kỳ không nhập gì thì bằng đúng 0 và bảng nói hàng đang bán không có rủi ro nào. Rủi ro cả đời của lô nhập vẫn tính và hiện ở cột bên cạnh — là GHI CHÚ, không trừ vào lợi nhuận.">CP rủi ro TK phân bổ kỳ này</TableHead>
+                <TableHead className="text-right" title="GHI CHÚ, KHÔNG trừ vào lợi nhuận: rủi ro CẢ ĐỜI của lô hàng nhập trong kỳ (% × giá trị hàng nhập). Đây là phơi nhiễm TẠI MỘT THỜI ĐIỂM, không phải chi phí CỦA MỘT KỲ.">Rủi ro cả lô nhập (ghi chú)</TableHead>
                 <TableHead className="text-right">Thuế</TableHead>
                 <TableHead className="text-right">CP khác</TableHead>
                 <TableHead className="text-right">LN theo hàng nhập</TableHead>
@@ -600,9 +643,12 @@ export async function NominalTab({
                   <TableCell className="numeric text-right">{formatNumber(r.orders)}</TableCell>
                   <TableCell className="text-right"><Money value={r.expectedRevenue} /></TableCell>
                   <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.salesAfterDiscount)} tone={false} /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.expectedRevenue)} tone={false} /></TableCell>
                   <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.inventoryRiskOnPurchase} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRiskOnPurchase} className="text-muted-foreground/70 italic" /></TableCell>
                   <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} /></TableCell>
@@ -617,9 +663,12 @@ export async function NominalTab({
                 <TableCell className="numeric text-right">{formatNumber(t.orders)}</TableCell>
                 <TableCell className="text-right"><Money value={t.expectedRevenue} /></TableCell>
                 <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
+                <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.salesAfterDiscount)} tone={false} /></TableCell>
+                <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.expectedRevenue)} tone={false} /></TableCell>
                 <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
-                <TableCell className="text-right"><Money value={t.inventoryRiskOnPurchase} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRiskOnPurchase} className="text-muted-foreground/70 italic" /></TableCell>
                 <TableCell className="text-right"><Money value={t.tax} /></TableCell>
                 <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} /></TableCell>
