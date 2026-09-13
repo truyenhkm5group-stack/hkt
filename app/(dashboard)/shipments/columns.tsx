@@ -8,6 +8,34 @@ import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
 import { Money } from "@/components/ui-bits";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { ShipmentListRow } from "@/lib/queries/shipments";
+import type { ShipmentProductCodes } from "@/lib/queries/product-code";
+import { ProductCell } from "@/app/(dashboard)/shipments/product-cell";
+import { CareRowActions } from "@/app/(dashboard)/shipments/care-row-actions";
+
+/**
+ * Cột dựng bằng HÀM chứ không phải hằng số: cột mã hàng và cột xử lý cần dữ liệu chỉ có ở phía
+ * máy chủ (mã hàng của đúng trang đang xem, danh sách nhân sự, quyền thao tác). Truyền qua tham số
+ * thay vì nhét vào từng dòng dữ liệu — dòng vận đơn không nên phình ra vì nhu cầu hiển thị.
+ */
+export function buildShipmentColumns(opts: {
+  productCodes: Record<string, ShipmentProductCodes>;
+  staff: { id: string; name: string }[];
+  canManage: boolean;
+}): ColumnDef<ShipmentListRow, unknown>[] {
+  return [
+    {
+      id: "product",
+      header: "Mã hàng",
+      cell: ({ row }) => <ProductCell data={opts.productCodes[row.original.id]} />,
+    },
+    {
+      id: "care",
+      header: "Xử lý",
+      cell: ({ row }) => <CareRowActions shipmentId={row.original.id} tracking={row.original.vtpOrderNumber ?? row.original.trackingCode ?? row.original.id} staff={opts.staff} canManage={opts.canManage} />,
+    },
+    ...shipmentColumns,
+  ];
+}
 
 export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
   {

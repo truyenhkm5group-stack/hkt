@@ -5,7 +5,9 @@ import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
+import { CARE_STATUS_LABEL } from "@/lib/constants/care";
 import type { ListParams } from "@/lib/search-params";
+import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 
 export const SHIPMENT_SORTABLE = ["createdAt", "vtpStatusDate", "codAmount", "deliveredAt"];
 
@@ -45,8 +47,20 @@ export function shipmentSearchCondition(q: string): SQL | undefined {
   return or(...conds);
 }
 
-/** Điều kiện lọc chung cho danh sách vận đơn (kỳ tính theo ngày tạo vận đơn) */
-export function shipmentListWhere(params: ListParams) {
+/**
+ * Điều kiện lọc chung cho danh sách vận đơn (kỳ tính theo NGÀY TẠO VẬN ĐƠN).
+ *
+ * ─── MÃ HÀNG ĐI QUA QUAN HỆ, KHÔNG QUA CHUỖI ───
+ *
+ * Xem `lib/queries/product-code.ts`: SKU của bốn mã hàng đang bán có bốn quy ước đặt tên khác
+ * nhau, và `sku ilike '%Q002%'` trả về 0 dòng cho chính mã bán chạy nhất. Ở đây mã hàng được
+ * phân giải thành danh sách MẪU MÃ rồi hỏi `exists` trên `order_items` — không nhân dòng, và
+ * không phụ thuộc vào cách ai đó gõ tên SKU.
+ *
+ * Hàm thành `async` vì phải tra danh mục mã hàng. Danh mục được đệm 5 phút nên hầu hết lượt gọi
+ * không chạm CSDL.
+ */
+export async function shipmentListWhere(params: ListParams) {
   const conds: (SQL | undefined)[] = [];
   const { period, filters, q } = params;
   if (period.from) conds.push(gte(schema.shipments.createdAt, period.from));
@@ -58,6 +72,38 @@ export function shipmentListWhere(params: ListParams) {
   else if (filters.final?.includes("done")) conds.push(eq(schema.shipments.isFinal, true));
   if (filters.linked?.includes("pancake")) conds.push(isNotNull(schema.shipments.orderId));
   else if (filters.linked?.includes("external")) conds.push(isNull(schema.shipments.orderId));
+  /*
+    MÃ HÀNG. Mã không tồn tại trong danh mục ⇒ `false`, tức KHÔNG DÒNG NÀO — đúng nghĩa "không có
+    hàng nào mang mã này", khác hẳn với việc bỏ qua bộ lọc và trả về cả kho.
+  */
+  if (filters.product?.length) {
+    const { variantIds } = await variantIdsOfCodes(filters.product);
+    conds.push(orderHasProductCode(sql`${schema.shipments.orderId}`, variantIds));
+  }
+
+  // TRẠNG THÁI CHĂM SÓC — đọc từ `shipment_care`; vận đơn chưa có ca nào coi như `NEW`.
+  if (filters.care?.length) {
+    const muon = filters.care;
+    const coNew = muon.includes("NEW");
+    const khop = sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.care_status in ${muon})`;
+    conds.push(coNew ? or(khop, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id})`) : khop);
+  }
+
+  // NGƯỜI XỬ LÝ. `none` = chưa ai nhận.
+  if (filters.owner?.length) {
+    const ids = filters.owner.filter((x) => x !== "none");
+    const coTrong = filters.owner.includes("none");
+    const parts: SQL[] = [];
+    if (ids.length) parts.push(sql`exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id in ${ids})`);
+    if (coTrong) parts.push(sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id is not null)`);
+    if (parts.length) conds.push(or(...parts));
+  }
+
+  // NGUỒN ĐƠN (Pancake `orders.source`).
+  if (filters.source?.length) {
+    conds.push(sql`exists (select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and o.source in ${filters.source})`);
+  }
+
   conds.push(shipmentSearchCondition(q));
   const defined = conds.filter((c): c is SQL => Boolean(c));
   return defined.length ? and(...defined) : undefined;
@@ -67,7 +113,7 @@ const orderColumns = { id: true, systemId: true, billFullName: true, billPhone: 
 
 export async function listShipments(params: ListParams) {
   const db = await getDb();
-  const where = shipmentListWhere(params);
+  const where = await shipmentListWhere(params);
   const sortMap: Record<string, AnyPgColumn> = {
     createdAt: schema.shipments.createdAt,
     vtpStatusDate: schema.shipments.vtpStatusDate,
@@ -142,7 +188,7 @@ export async function shipmentFacets(params: ListParams) {
 
 async function shipmentFacetsUncached(params: ListParams) {
   const db = await getDb();
-  const base = shipmentListWhere({ ...params, filters: {} });
+  const base = await shipmentListWhere({ ...params, filters: {} });
   const [stages, carriers, cods, finals, linked] = await Promise.all([
     db.select({ value: schema.shipments.stage, count: count() }).from(schema.shipments).where(base).groupBy(schema.shipments.stage),
     db.select({ value: schema.shipments.carrier, count: count() }).from(schema.shipments).where(base).groupBy(schema.shipments.carrier).orderBy(desc(count())),
@@ -160,8 +206,59 @@ async function shipmentFacetsUncached(params: ListParams) {
   for (const f of finals) finalCount[f.value ? "done" : "active"] += Number(f.count);
   const linkedCount = { pancake: 0, external: 0 };
   for (const l of linked) linkedCount[l.value ? "external" : "pancake"] += Number(l.count);
+  /*
+    MÃ HÀNG. Đếm theo VẬN ĐƠN (`count(distinct s.id)`), không theo dòng hàng: một đơn ba dòng Q002
+    vẫn là một vận đơn. Danh mục chỉ có 6 mã nên truy vấn này rẻ, và nó chạy trên CÙNG mệnh đề nền
+    với các mặt khác để con số trong ô chọn khớp với con số trong bảng.
+  */
+  const productRows = await db
+    .select({ value: schema.products.customId, name: schema.products.name, count: sql<number>`count(distinct ${schema.shipments.id})::int` })
+    .from(schema.shipments)
+    .innerJoin(schema.orderItems, sql`${schema.orderItems.orderId} = ${schema.shipments.orderId} and ${schema.orderItems.isBonus} = false`)
+    .innerJoin(schema.productVariants, sql`${schema.productVariants.id} = ${schema.orderItems.variantId}`)
+    .innerJoin(schema.products, sql`${schema.products.id} = ${schema.productVariants.productId} and coalesce(${schema.products.customId}, '') <> ''`)
+    .where(base)
+    .groupBy(schema.products.customId, schema.products.name)
+    .orderBy(desc(sql`count(distinct ${schema.shipments.id})`));
+
+  const careRows = await db
+    .select({ value: schema.shipmentCare.careStatus, count: count() })
+    .from(schema.shipments)
+    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id}`)
+    .where(base)
+    .groupBy(schema.shipmentCare.careStatus);
+
+  const ownerRows = await db
+    .select({ value: schema.shipmentCare.ownerId, name: schema.users.name, count: count() })
+    .from(schema.shipments)
+    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id} and ${schema.shipmentCare.ownerId} is not null`)
+    .leftJoin(schema.users, sql`${schema.users.id} = ${schema.shipmentCare.ownerId}`)
+    .where(base)
+    .groupBy(schema.shipmentCare.ownerId, schema.users.name)
+    .orderBy(desc(count()));
+
+  const [chuaAiNhan] = await db
+    .select({ count: count() })
+    .from(schema.shipments)
+    .where(and(base, sql`not exists (select 1 from ${schema.shipmentCare} sc where sc.shipment_id = ${schema.shipments.id} and sc.owner_id is not null)`));
+
+  const sourceRows = await db
+    .select({ value: schema.orders.source, count: count() })
+    .from(schema.shipments)
+    .innerJoin(schema.orders, sql`${schema.orders.id} = ${schema.shipments.orderId}`)
+    .where(base)
+    .groupBy(schema.orders.source)
+    .orderBy(desc(count()));
+
   const codOrder: CodStatus[] = ["PENDING", "COLLECTED", "RECONCILED", "PAID_TO_BANK", "DISPUTED", "NOT_APPLICABLE"];
   return {
+    products: productRows.filter((r) => r.value).map((r) => ({ value: r.value as string, label: `${r.value} · ${r.name}`, count: Number(r.count) })),
+    careStatuses: careRows.map((r) => ({ value: r.value, label: CARE_STATUS_LABEL[r.value as keyof typeof CARE_STATUS_LABEL] ?? r.value, count: Number(r.count) })),
+    owners: [
+      ...(Number(chuaAiNhan?.count ?? 0) > 0 ? [{ value: "none", label: "Chưa ai nhận", count: Number(chuaAiNhan!.count) }] : []),
+      ...ownerRows.filter((r) => r.value).map((r) => ({ value: r.value as string, label: r.name ?? "(không rõ)", count: Number(r.count) })),
+    ],
+    sources: sourceRows.filter((r) => r.value).map((r) => ({ value: r.value as string, label: r.value as string, count: Number(r.count) })),
     stages: SHIPMENT_STAGE_ORDER.map((stage) => ({ value: stage, label: SHIPMENT_STAGE_LABEL[stage], count: stageCount[stage] ?? 0 })).filter((s) => s.count > 0 || params.filters.stage?.includes(s.value)),
     carriers: carriers.filter((c) => c.value).map((c) => ({ value: c.value, label: c.value, count: Number(c.count) })),
     codStatuses: codOrder.map((status) => ({ value: status, label: COD_STATUS_LABEL[status], count: codCount[status] ?? 0 })).filter((s) => s.count > 0 || params.filters.cod?.includes(s.value)),
@@ -176,7 +273,7 @@ export async function shipmentSummary(params: ListParams) {
 
 async function shipmentSummaryUncached(params: ListParams) {
   const db = await getDb();
-  const where = shipmentListWhere(params);
+  const where = await shipmentListWhere(params);
   const s = schema.shipments;
   const [row] = await db
     .select({

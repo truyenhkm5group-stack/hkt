@@ -10,13 +10,14 @@ import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignableUsers } from "@/lib/actions/alerts";
-import { can,  } from "@/lib/auth/session";
+import { can, type SessionUser } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getCareNotePresets, getCareWorkbench } from "@/lib/queries/care-workbench";
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
+import { productCodesOfShipments, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -90,7 +91,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           </Suspense>
         </>
       ) : view === "all" ? (
-        <AllShipments raw={raw} />
+        <AllShipments raw={raw} user={user} />
       ) : (
         <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} canManage={can(user, "shipments:manage")} />
       )}
@@ -98,24 +99,47 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   );
 }
 
-async function AllShipments({ raw }: { raw: SearchParams }) {
-  const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["stage", "carrier", "cod", "final", "linked"], sortable: SHIPMENT_SORTABLE, defaultPeriod: "30d" });
-  const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listShipments(params), shipmentFacets(params), shipmentSummary(params)]);
+async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUser }) {
+  /*
+    MỌI bộ lọc nằm trong query param và được áp Ở MÁY CHỦ. Không tải cả kho về rồi lọc ở trình
+    duyệt: tải lại trang là mất bộ lọc, sao chép đường dẫn cho người khác thì ra kết quả khác, và
+    với vài nghìn vận đơn thì trình duyệt phải gánh thứ mà CSDL làm bằng một chỉ mục.
+  */
+  const params = parseListParams(raw, {
+    defaultSort: "createdAt",
+    filterKeys: ["product", "stage", "care", "carrier", "cod", "owner", "source", "final", "linked"],
+    sortable: SHIPMENT_SORTABLE,
+    defaultPeriod: "30d",
+  });
+  const [{ rows, total, pageCount }, facets, summary, staff] = await Promise.all([listShipments(params), shipmentFacets(params), shipmentSummary(params), assignableUsers()]);
+  const productCodes = await productCodesOfShipments(rows.map((r) => r.id));
+  const maKhongTonTai = params.filters.product?.length ? (await variantIdsOfCodes(params.filters.product)).unknown : [];
+
   return (
     <>
       <DataTableToolbar
         searchPlaceholder="Mã vận đơn, mã VTP, SĐT, tên người nhận, mã đơn…"
         period={{ defaultKey: "30d" }}
         facets={[
+          { key: "product", label: "Mã hàng", options: facets.products },
           { key: "stage", label: "Trạng thái VTP", options: facets.stages },
+          { key: "care", label: "Xử lý", options: facets.careStatuses },
           { key: "carrier", label: "ĐVVC", options: facets.carriers },
           { key: "cod", label: "COD", options: facets.codStatuses },
+          { key: "owner", label: "Người xử lý", options: facets.owners },
+          { key: "source", label: "Nguồn đơn", options: facets.sources },
           { key: "final", label: "Theo dõi", options: facets.finals, single: true },
-          { key: "linked", label: "Nguồn đơn", options: facets.linked, single: true },
+          { key: "linked", label: "Kênh", options: facets.linked, single: true },
         ]}
         resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} giao thành công · ${formatNumber(summary.returning)} hoàn / không thu được tiền · COD chưa thu ${formatVND(summary.codPending, { compact: true })}`}
       />
-      <ShipmentsTable rows={rows} pageCount={pageCount} total={total} />
+      {maKhongTonTai.length ? (
+        // Mã không có trong danh mục ⇒ 0 dòng là ĐÚNG. Nói ra, thay vì để người dùng tưởng lọc hỏng.
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          Không có mã hàng {maKhongTonTai.join(", ")} trong danh mục sản phẩm — nên danh sách trống. Mã hàng lấy từ ô &ldquo;Mã hàng&rdquo;, không gõ vào ô tìm kiếm.
+        </p>
+      ) : null}
+      <ShipmentsTable rows={rows} pageCount={pageCount} total={total} productCodes={Object.fromEntries(productCodes)} staff={staff} canManage={can(user, "shipments:manage")} />
     </>
   );
 }
