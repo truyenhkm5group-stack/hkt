@@ -58,13 +58,21 @@ export default async function ReturnInspectionPage() {
           label="Chờ kho nhận"
           value={formatNumber(bang.awaitingArrival)}
           note="ĐVVC đã trả về shop, chưa ai bấm “đã nhận”"
+          hint="Cùng một điều kiện với bảng “Chờ kho nhận” bên dưới và nút xác nhận hàng loạt: vận đơn Viettel Post đã trả xong (504, hoặc phát thành công chiều hoàn), kho chưa bấm nhận. Vận đơn chiều về (mã gốc + 1P1) cũng được tính khi vận đơn chiều đi chưa tự nằm trong danh sách."
           icon={Timer}
           tone={bang.awaitingArrival ? "amber" : "green"}
         />
         <MetricCard
           label="Chờ đếm"
           value={formatNumber(bang.pendingInspection)}
-          note={`${formatNumber(bang.pendingItems)} món đang KHÔNG được tính vào tồn`}
+          /* CHƯA BIẾT hiện là "—", không phải 0: kiện chưa ghép được đơn thì không ai biết trong đó có mấy món. */
+          note={[
+            `${bang.pendingItems === null ? "—" : formatNumber(bang.pendingItems)} món đang KHÔNG được tính vào tồn`,
+            bang.unknownParcels ? `${formatNumber(bang.unknownParcels)} kiện chưa rõ hàng` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          hint="Số món KỲ VỌNG theo đơn gốc của các kiện đã về mà chưa đếm. Kiện chưa ghép được đơn không có số kỳ vọng — chúng được đếm riêng là “chưa rõ hàng”, không được ước lượng thành 0."
           icon={ClipboardCheck}
           tone={bang.pendingInspection ? "amber" : "green"}
         />

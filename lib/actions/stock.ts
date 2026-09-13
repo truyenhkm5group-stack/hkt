@@ -1,24 +1,28 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import type { Actor } from "@/lib/constants/actor";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
-import { settleReturnsForVariants } from "@/lib/returns/warehouse";
+import { settleReturnsForReceipt } from "@/lib/returns/warehouse";
 import { stockReceiptSchema } from "@/lib/validation/stock";
 
 export type ActionResult = { ok: true; id?: string } | { error: string };
+
+/** Lỗi nghiệp vụ khi đóng kiện hoàn — ném ra để huỷ giao dịch rồi trả `{ error }` cho màn hình, không phải lỗi hệ thống. */
+class SettleError extends Error {}
 
 function firstIssue(error: { issues: { message: string }[] }) {
   return error.issues[0]?.message ?? "Dữ liệu không hợp lệ";
 }
 
 function revalidate() {
-  for (const path of ["/inventory/receipts", "/products", "/inventory", "/"]) revalidatePath(path);
+  for (const path of ["/inventory/receipts", "/inventory/returns", "/products", "/inventory", "/"]) revalidatePath(path);
 }
 
 /** Tạo phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê). Giá nhập > 0 trên phiếu NHẬP MỚI sẽ cập nhật giá vốn gần nhất của mẫu mã. */
@@ -70,33 +74,56 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     }
   }
 
-  const [receipt] = await db
-    .insert(schema.stockReceipts)
-    .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: data.supplier, note: data.note, totalQuantity, totalCost, createdBy: user.email })
-    .returning({ id: schema.stockReceipts.id });
-  await db
-    .insert(schema.stockReceiptItems)
-    .values(items.map((i) => ({ receiptId: receipt.id, variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost, shipmentId: i.shipmentId?.trim() || null })));
-  if (data.kind === "RETURN") {
-    // Đóng các vận đơn hoàn đang chờ theo đúng số vừa đếm được: hàng thôi nằm ở "hoàn chờ nhận",
-    // phần đếm thiếu so với số đã xuất hiện ra thành hàng hụt thay vì treo mãi ở danh sách chờ.
-    const settled = await settleReturnsForVariants(items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })), user.email, data.note);
-    for (const [variantId, shipmentId] of settled.firstByVariant) {
-      await db
-        .update(schema.stockReceiptItems)
-        .set({ shipmentId })
-        .where(and(eq(schema.stockReceiptItems.receiptId, receipt.id), eq(schema.stockReceiptItems.variantId, variantId)));
-    }
+  /**
+   * NGƯỜI LẬP PHIẾU = KHOÁ TÀI KHOẢN + TÊN (luật 34). Phiếu kiểm hàng hoàn sinh ra từ phiếu tái nhập
+   * phải nối được về một tài khoản; một chuỗi email thì đổi email là mất dấu.
+   */
+  const actor: Actor = { id: user.id, label: user.name || user.email };
+  const lines = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost, shipmentId: i.shipmentId?.trim() || null }));
+
+  // MỘT GIAO DỊCH: phiếu · dòng phiếu · đóng kiện hoàn. Phiếu ghi được mà kiện không đóng được (hay
+  // ngược lại) thì tồn và hàng chờ nói hai chuyện khác nhau — nên hỏng giữa chừng là huỷ cả.
+  let receiptId = "";
+  let settledShipmentIds: string[] = [];
+  try {
+    await db.transaction(async (tx) => {
+      const [receipt] = await tx
+        .insert(schema.stockReceipts)
+        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: data.supplier, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
+        .returning({ id: schema.stockReceipts.id });
+      receiptId = receipt.id;
+      await tx.insert(schema.stockReceiptItems).values(lines.map((l) => ({ receiptId: receipt.id, ...l })));
+      if (data.kind === "RETURN") {
+        /*
+          Đóng ĐÚNG những vận đơn mà dòng phiếu chỉ tên — không đoán kiện nào theo mẫu mã (FIFO) như
+          trước. Dòng không nêu vận đơn thì phiếu vẫn cộng tồn theo số đếm, nhưng KHÔNG gạch kiện nào
+          khỏi hàng chờ: ERP không biết kiện nào đã về, và nói bừa còn tệ hơn nói "chưa biết".
+        */
+        const settled = await settleReturnsForReceipt(tx, { receiptId: receipt.id, lines, actor, note: data.note });
+        if ("error" in settled) throw new SettleError(settled.error);
+        settledShipmentIds = settled.settledShipmentIds;
+      }
+      if (data.kind === "RECEIPT") {
+        for (const item of items) {
+          if (item.unitCost > 0) await tx.update(schema.productVariants).set({ lastImportedPrice: item.unitCost, updatedAt: new Date() }).where(eq(schema.productVariants.id, item.variantId));
+        }
+      }
+    });
+  } catch (e) {
+    if (e instanceof SettleError) return { error: e.message };
+    throw e;
   }
-  if (data.kind === "RECEIPT") {
-    for (const item of items) {
-      if (item.unitCost > 0) await db.update(schema.productVariants).set({ lastImportedPrice: item.unitCost, updatedAt: new Date() }).where(eq(schema.productVariants.id, item.variantId));
-    }
-  }
-  await audit({ userId: user.id, userEmail: user.email, action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : data.kind === "RETURN" ? "STOCK_RETURN_CREATE" : data.kind === "ISSUE" ? "STOCK_ISSUE_CREATE" : "STOCK_ADJUST_CREATE", entity: "STOCK_RECEIPT", entityId: receipt.id, detail: { ...data, items, totalQuantity, totalCost } });
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : data.kind === "RETURN" ? "STOCK_RETURN_CREATE" : data.kind === "ISSUE" ? "STOCK_ISSUE_CREATE" : "STOCK_ADJUST_CREATE",
+    entity: "STOCK_RECEIPT",
+    entityId: receiptId,
+    detail: { ...data, items: lines, totalQuantity, totalCost, settledShipmentIds },
+  });
   for (const id of variantIds) publish({ type: "stock", variantId: id });
   revalidate();
-  return { ok: true, id: receipt.id };
+  return { ok: true, id: receiptId };
 }
 
 export async function deleteStockReceipt(id: string): Promise<ActionResult> {

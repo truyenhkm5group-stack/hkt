@@ -29,7 +29,7 @@ const schema = z.object({
 });
 
 function revalidate() {
-  for (const path of ["/data-quality", "/products", "/inventory", "/inventory/planning", "/shipments", "/"]) revalidatePath(path);
+  for (const path of ["/data-quality", "/products", "/inventory", "/inventory/returns", "/inventory/planning", "/shipments", "/"]) revalidatePath(path);
 }
 
 /**
@@ -167,7 +167,14 @@ const bulkInspectSchema = z.object({
 });
 
 export type BulkInspectionActionResult =
-  | { ok: true; done: number; failed: { shipmentId: string; error: string }[]; message: string }
+  | {
+      ok: true;
+      done: number;
+      failed: { shipmentId: string; code: string | null; error: string }[];
+      /** Lý do bỏ qua, gộp theo số kiện — để một lượt 200 kiện không in 200 dòng lỗi giống nhau. */
+      skipped: { reason: string; count: number }[];
+      message: string;
+    }
   | { error: string };
 
 /**
@@ -178,6 +185,10 @@ export type BulkInspectionActionResult =
  *
  * KHÔNG có ô nhập số ở đường hàng loạt: "nhận đủ" nghĩa là ĐÚNG BẰNG số ERP đã xuất. Muốn khai một
  * con số khác thì phải đếm từng kiện, vì đó là lúc người đếm thật sự nhìn vào trong kiện.
+ *
+ * "Nhận đủ" hàng loạt CHỈ áp cho kiện MỘT mẫu mã đã ghép được đơn (cùng luật với `recordInspection`).
+ * Kiện nhiều mẫu mã hay chưa ghép được đơn bị BỎ QUA và nêu lý do theo số kiện — không phân bổ,
+ * không ghi 0 lặng lẽ.
  *
  * Kiện nào hỏng thì báo tên kiện đó, không nuốt lỗi: 197/200 thành công mà im lặng về 3 kiện còn
  * lại là cách chắc chắn nhất để ba kiện ấy biến mất khỏi sổ.
@@ -200,12 +211,16 @@ export async function submitBulkInspection(input: unknown): Promise<BulkInspecti
     detail: { condition, requested: shipmentIds.length, done: r.done, failed: r.failed.length, note },
   });
   revalidate();
+  const grouped = new Map<string, number>();
+  for (const f of r.failed) grouped.set(f.error, (grouped.get(f.error) ?? 0) + 1);
+  const skipped = [...grouped.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
   return {
     ok: true,
     done: r.done,
     failed: r.failed,
+    skipped,
     message: r.failed.length
-      ? `Đã kiểm ${r.done} kiện · ${r.failed.length} kiện KHÔNG xử lý được`
+      ? `Đã kiểm ${r.done} kiện · ${r.failed.length} kiện KHÔNG xử lý được: ${skipped.map((x) => `${x.count} kiện — ${x.reason}`).join(" · ")}`
       : `Đã kiểm ${r.done} kiện với kết luận “${CONDITION_LABEL[condition]}”`,
   };
 }

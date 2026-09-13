@@ -469,6 +469,34 @@ export const SHIPMENT_LEFT_WAREHOUSE = sql`(${s.pickedUpAt} is not null
 export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
 
 /**
+ * KIỆN HOÀN ĐÃ VỀ TỚI SHOP, KHO CHƯA GHI NHẬN — vị ngữ DUY NHẤT cho "chờ kho nhận".
+ *
+ * Trước đây ba nơi (bàn nhận hàng, xác nhận hàng loạt, thẻ "Chờ kho nhận") tự viết ba điều kiện
+ * khác nhau: nơi thì lấy cả RETURNING, nơi thì loại vận đơn chiều về, nơi thì quên loại kiện đã bấm
+ * "đã nhận" (mốc `return_received_at` chỉ được đóng lúc ĐẾM, còn "đã nhận" nằm ở
+ * `return_inspections`). Ba con số cho cùng một câu hỏi thì cả ba mất giá trị.
+ *
+ * Bốn mệnh đề, không hơn:
+ *  1. `RETURNED` — Viettel Post đã trả hàng xong cho shop (504, hoặc 501 trên chiều hoàn).
+ *     RETURNING vẫn đang trên đường về; ghi nhận lúc đó là bịa dữ liệu.
+ *  2. Kho chưa đóng kiện (`return_received_at` null) và chưa bấm "đã nhận" (chưa có phiếu kiểm).
+ *  3. Vận đơn CHIỀU VỀ (`order_id` null, `order_reference` = mã gốc — luật 7) VẪN ĐƯỢC TÍNH: nó
+ *     là bằng chứng duy nhất khi vận đơn chiều đi chưa nhận mã kết thúc. Bối cảnh sản phẩm ghép
+ *     bằng định danh ở `lib/returns/product-context.ts`.
+ *  4. ...nhưng KHÔNG tính khi vận đơn chiều đi cùng mã gốc đã tự nằm trong hàng chờ, hoặc đã được
+ *     kho nhận / đếm: cùng một kiện vật lý mà hiện hai dòng thì kho đếm hai lần, tồn cộng hai lần.
+ */
+export const IS_RETURN_AWAITING_WAREHOUSE = sql`(${s.stage} = 'RETURNED'
+  and ${s.returnReceivedAt} is null
+  and not exists (select 1 from return_inspections ri where ri.shipment_id = ${s.id})
+  and (${s.orderId} is not null or not exists (
+    select 1 from shipments g
+    where g.id <> ${s.id} and g.order_id is not null
+      and nullif(upper(trim(coalesce(${s.orderReference}, ''))), '') in (upper(g.vtp_order_number), upper(g.tracking_code))
+      and (g.stage = 'RETURNED' or g.return_received_at is not null or exists (select 1 from return_inspections ri2 where ri2.shipment_id = g.id))
+  )))`;
+
+/**
  * Hàng hoàn ở GRAIN ĐƠN (cần orders LEFT JOIN shipments) — dùng cho tồn kho.
  * Rộng hơn IS_RETURN_NOT_RECEIVED vì phủ cả RETURNED_BY_RULE (vận đơn báo "giao thành công"
  * nhưng khách chỉ trả phí, hàng vẫn quay về). Kho chưa xác nhận nhận → hàng CHƯA có trong tồn.

@@ -135,8 +135,10 @@ export async function testDataQuality(db: Db) {
   const waiting = await returnsAwaitingWarehouse(1, 50, "");
   assert.equal(waiting.total, summary.returnRiskShipments, "số vận đơn chờ nhận hoàn khớp KPI");
   assert.ok(waiting.rows.every((r) => r.returnReceivedAt === null), "danh sách chờ chỉ gồm vận đơn chưa xác nhận");
-  const target = waiting.rows[0];
-  assert.ok(target, "phải có ít nhất một vận đơn hoàn đang chờ kho");
+  // Đường đếm nhanh cả kiện chỉ cộng tồn cho kiện MỘT mẫu mã đã ghép được đơn (xem
+  // `lib/returns/inspection.ts::singleVariantForParcel`); kiện nhiều mẫu mã phải đếm từng món.
+  const target = waiting.rows.find((r) => r.orderId && r.items.length === 1 && r.items[0].qty >= 1);
+  assert.ok(target, "phải có ít nhất một vận đơn hoàn một mẫu mã đang chờ kho");
   // Kho nhìn danh sách là biết kiện chứa gì: kiện nối được đơn phải mang mặt hàng (tên · mẫu · số lượng).
   const coDon = waiting.rows.filter((r) => r.orderId);
   assert.ok(coDon.length > 0, "fixture phải có kiện chờ kho nhận nối được đơn");
