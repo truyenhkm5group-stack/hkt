@@ -24,17 +24,24 @@ import path from "node:path";
 
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
-/** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0076_care_active_invariant";
+/**
+ * Migration mới của bản phát hành này — phần mà production CHƯA có.
+ *
+ * Là một DANH SÁCH chứ không phải một chuỗi: một bản phát hành có thể mang nhiều migration, và
+ * lúc đó đường nâng cấp thật là "áp cả nhóm lên trạng thái cũ", không phải "áp từng cái lên một
+ * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
+ * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
+ */
+const MOI = ["0076_care_active_invariant", "0077_metric_target_bands"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
   const so = JSON.parse(readFileSync(path.join(goc, "meta/_journal.json"), "utf8")) as { entries: Entry[] };
-  const moi = so.entries.filter((e) => e.tag === MOI);
-  assert.equal(moi.length, 1, `sổ phải có đúng một mục "${MOI}" — đổi tên migration thì đổi luôn hằng số MOI ở đây`);
+  const moi = so.entries.filter((e) => (MOI as readonly string[]).includes(e.tag));
+  assert.equal(moi.length, MOI.length, `sổ phải có đúng ${MOI.length} mục mới — đổi tên migration thì đổi luôn danh sách MOI ở đây`);
   // Mốc phải MUỘN HƠN mọi mốc cũ, nếu không drizzle bỏ qua nó trên máy đã chạy các migration kia.
-  const mocCu = Math.max(...so.entries.filter((e) => e.tag !== MOI).map((e) => e.when));
-  assert.ok(moi[0].when > mocCu, `mốc của ${MOI} (${moi[0].when}) phải muộn hơn mọi mốc đã có (${mocCu})`);
+  const mocCu = Math.max(...so.entries.filter((e) => !(MOI as readonly string[]).includes(e.tag)).map((e) => e.when));
+  for (const m of moi) assert.ok(m.when > mocCu, `mốc của ${m.tag} (${m.when}) phải muộn hơn mọi mốc đã có (${mocCu})`);
 
   const tmp = mkdtempSync(path.join(tmpdir(), "upgrade-"));
   const thuMucSo = path.join(tmp, "drizzle");
@@ -51,7 +58,7 @@ export async function testMigrationUpgradePath() {
 
   try {
     // ══ BƯỚC 1: dựng đúng trạng thái production hôm nay — sổ CẮT trước migration mới ══
-    const cu = { ...so, entries: so.entries.filter((e) => e.tag !== MOI) };
+    const cu = { ...so, entries: so.entries.filter((e) => !(MOI as readonly string[]).includes(e.tag)) };
     writeFileSync(soFile, JSON.stringify(cu, null, 2) + "\n");
     await migrate(db, { migrationsFolder: thuMucSo });
 
@@ -82,7 +89,7 @@ export async function testMigrationUpgradePath() {
     await migrate(db, { migrationsFolder: thuMucSo });
 
     const sau = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
-    assert.equal(sau - truoc, 1, `bước 2: phải áp thêm ĐÚNG 1 migration, thực tế ${sau - truoc}`);
+    assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
 
     /*
       ═══ 0076: ĐÓNG ⇔ active = false — SỬA CỜ, KHÔNG BACKFILL ═══
@@ -157,6 +164,47 @@ export async function testMigrationUpgradePath() {
 
     // Bảng đích rỗng: ERP KHÔNG đặt sẵn đích nào cho ai.
     assert.equal(await dem("select count(*)::int as n from metric_targets"), 0, "migration không được đặt sẵn đích — đích là quyết định kinh doanh của chủ shop");
+
+    /*
+      ═══ 0077: ĐÍCH CÓ KỲ, CÓ DẢI, CÓ HẠN — VÀ VẪN KHÔNG CÓ ĐÍCH NÀO ═══
+
+      Bảng rỗng trên production (0 dòng, đo 13/09/2026), nên các cột thêm vào có mặc định mà không
+      phải đoán gì về dữ liệu cũ. `period_kind = 'ANY'` nghĩa là CHƯA KHAI KỲ, không phải "mỗi
+      tháng": một đích 500 đơn mà máy tự gán cho một tháng sẽ chấm sai gấp bốn khi người ta xem
+      theo tuần, và màn hình trông hoàn toàn bình thường.
+    */
+    for (const cot of ["target_max", "warning_at", "critical_at", "period_kind", "effective_to", "version", "owner_department"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.columns where table_name = 'metric_targets' and column_name = '${cot}'`), 1, `0077: thiếu cột ${cot}`);
+    }
+
+    await client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-t1', 'care_sla', 'USER', 'up-u1', 85, 'thử', now(), 'a@shop.vn')`);
+    const t1 = (await client.query<{ period_kind: string; version: number; target_max: number | null }>("select period_kind, version, target_max from metric_targets where id = 'up-t1'")).rows[0];
+    assert.equal(t1.period_kind, "ANY", "0077: mặc định là CHƯA KHAI KỲ, không phải một kỳ do máy chọn hộ");
+    assert.equal(t1.version, 1, "0077: đích mới là phiên bản 1");
+    assert.equal(t1.target_max, null, "0077: không có cận trên ⇒ đích một chiều, không phải dải");
+
+    // Phạm vi CÁ NHÂN nay hợp lệ ở mức CSDL — nhưng vẫn là DANH SÁCH ĐÓNG, không phải ô gõ tự do.
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-t2', 'care_sla', 'PRODUCT', 'p1', 5, 'x', now(), 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_scope_check"),
+      "0077: phạm vi lạ phải bị CSDL chặn — chuỗi tự do buộc mã nguồn chọn giữa khoá nhầm người và lộ dữ liệu",
+    );
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, target, note, effective_from, period_kind, set_by_email) values ('up-t3', 'care_sla', 'COMPANY', 5, 'x', now(), 'MOI_NGAY', 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_period_check"),
+      "0077: hình dạng kỳ lạ phải bị chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, target, target_max, note, effective_from, set_by_email) values ('up-t4', 'care_sla', 'COMPANY', 50, 20, 'x', now(), 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_range_check"),
+      "0077: dải có cận trên NHỎ HƠN cận dưới thì không đích nào áp được — chặn ngay ở CSDL",
+    );
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, target, note, effective_from, effective_to, set_by_email) values ('up-t5', 'care_sla', 'COMPANY', 50, 'x', now(), now() - interval '1 day', 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_window_check"),
+      "0077: khoảng hiệu lực rỗng thì đích không bao giờ áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao",
+    );
+    await client.query(`delete from metric_targets where id = 'up-t1'`);
 
     /*
       BA CỘT MỚI CỦA 0074 CÓ MẶC ĐỊNH — và đó KHÔNG phải một phép đoán về dữ liệu cũ.
@@ -255,7 +303,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+1) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng, ba ràng buộc chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

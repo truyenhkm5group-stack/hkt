@@ -105,13 +105,21 @@ export function testMetricTrust() {
   console.log("✓ Bốn mức dùng được: CHƯA ĐO ĐƯỢC · YẾU (mẫu bé hoặc nối bằng ô chữ) · DÙNG ĐƯỢC · CHƯA CÓ NGUỒN — ba cái đầu KHÔNG cái nào nghĩa là 'làm kém'");
 }
 
+/**
+ * Dựng một dòng đích với phần "chưa khai" ở mặc định. Bài kiểm chỉ nêu thứ nó đang nói tới, nên
+ * thêm một cột mới vào hợp đồng không biến mọi fixture thành nhiễu.
+ */
+function dich(p: Partial<TargetRow> & Pick<TargetRow, "metricKey" | "scope" | "target">): TargetRow {
+  return { scopeRef: null, targetMax: null, warningAt: null, criticalAt: null, periodKind: "ANY", note: "", effectiveTo: null, version: 1, ownerDepartment: null, effectiveFrom: new Date("2026-01-01"), ...p };
+}
+
 /* ───────── 5 · Đích: ba tầng, tầng hẹp thắng, và ba lối ra KHÔNG phải "không đạt" ───────── */
 export function testTargetResolution() {
   const now = new Date("2026-09-30T00:00:00Z");
   const rows: TargetRow[] = [
-    { metricKey: "care_sla", scope: "COMPANY", scopeRef: null, target: 80, note: "mặc định", effectiveFrom: new Date("2026-01-01") },
-    { metricKey: "care_sla", scope: "DEPARTMENT", scopeRef: "LOGISTICS", target: 85, note: "phòng", effectiveFrom: new Date("2026-01-01") },
-    { metricKey: "care_sla", scope: "POSITION", scopeRef: "pos-lead", target: 92, note: "trưởng nhóm", effectiveFrom: new Date("2026-01-01") },
+    dich({ metricKey: "care_sla", scope: "COMPANY", target: 80, note: "mặc định" }),
+    dich({ metricKey: "care_sla", scope: "DEPARTMENT", scopeRef: "LOGISTICS", target: 85, note: "phòng" }),
+    dich({ metricKey: "care_sla", scope: "POSITION", scopeRef: "pos-lead", target: 92, note: "trưởng nhóm" }),
   ];
 
   assert.equal(resolveTarget(rows, { metricKey: "care_sla", departmentCode: "SALES", positionId: null, at: now })?.target, 80, "không thuộc phòng nào có đích riêng ⇒ rơi về tầng công ty");
@@ -122,11 +130,11 @@ export function testTargetResolution() {
   /*
     KHÔNG CHẤM LẠI KỲ ĐÃ CHỐT. Đích đặt hôm nay không được áp cho một quý đã in ra và đã họp.
   */
-  const sau: TargetRow[] = [{ metricKey: "care_sla", scope: "COMPANY", scopeRef: null, target: 99, note: "đặt sau", effectiveFrom: new Date("2026-10-01") }];
+  const sau: TargetRow[] = [dich({ metricKey: "care_sla", scope: "COMPANY", target: 99, note: "đặt sau", effectiveFrom: new Date("2026-10-01") })];
   assert.equal(resolveTarget([...rows, ...sau], { metricKey: "care_sla", departmentCode: "SALES", positionId: null, at: now })?.target, 80, "đích có hiệu lực SAU mốc kỳ không được dùng để chấm kỳ đó");
 
   // Cùng tầng thì bản MỚI NHẤT còn hiệu lực thắng.
-  const moi: TargetRow[] = [{ metricKey: "care_sla", scope: "COMPANY", scopeRef: null, target: 88, note: "nâng", effectiveFrom: new Date("2026-06-01") }];
+  const moi: TargetRow[] = [dich({ metricKey: "care_sla", scope: "COMPANY", target: 88, note: "nâng", effectiveFrom: new Date("2026-06-01") })];
   assert.equal(resolveTarget([...rows, ...moi], { metricKey: "care_sla", departmentCode: "SALES", positionId: null, at: now })?.target, 88);
 
   // BA LỐI RA không phải "không đạt".

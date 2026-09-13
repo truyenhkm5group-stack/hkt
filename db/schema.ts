@@ -2944,6 +2944,35 @@ export const metricTargets = pgTable(
     scopeRef: text("scope_ref"),
     /** Đích. Đơn vị lấy từ danh mục, không lưu lại ở đây — hai chỗ lưu là hai chỗ lệch nhau. */
     target: doublePrecision("target").notNull(),
+    /**
+     * Cận TRÊN của một đích dạng DẢI (số ngày đủ bán, tồn khoẻ mạnh…). `NULL` = đích một chiều.
+     * Chiều `RANGE` được SUY RA từ chỗ cột này có giá trị hay không, không khai thêm một cột
+     * `direction` thứ hai: chiều của chỉ số đã nằm trong sổ, ghi lại là mở đường cho hai nơi nói
+     * hai điều khác nhau (AGENTS.md mục 23).
+     */
+    targetMax: doublePrecision("target_max"),
+    /** Bắt đầu đáng lo. `NULL` = chủ shop chưa khai, và màn hình KHÔNG tự nghĩ ra một ngưỡng. */
+    warningAt: doublePrecision("warning_at"),
+    /** Đã hỏng. Cùng nguyên tắc: không có mặc định do người viết code đặt. */
+    criticalAt: doublePrecision("critical_at"),
+    /**
+     * Đích này áp cho kỳ hình dạng nào: `ANY` · `WEEK` · `MONTH` · `QUARTER` · `YEAR`.
+     *
+     * Một đích "500 đơn" không có nghĩa nếu không nói 500 đơn MỘT TUẦN hay MỘT THÁNG. `ANY` nghĩa
+     * là CHƯA KHAI (áp cho mọi kỳ) — không phải "mỗi tháng"; đoán hộ một kỳ còn tệ hơn để trống.
+     */
+    periodKind: text("period_kind").notNull().default("ANY"),
+    /** Hết hiệu lực. `NULL` = còn hiệu lực tới khi có bản mới hơn thay. */
+    effectiveTo: ts("effective_to"),
+    /** Lần đổi thứ mấy của CÙNG một đích. Để đọc lại lịch sử quyết định, không chỉ con số cuối. */
+    version: integer("version").notNull().default(1),
+    /**
+     * Phòng ban CHỊU TRÁCH NHIỆM về đích này — khác người ĐẶT đích (`set_by`).
+     *
+     * Trỏ tới PHÒNG BAN, không bao giờ tới một cá nhân: máy không biết hôm nay ai nghỉ, và một
+     * đích mang tên người đã nghỉ việc sẽ biến mất khỏi mọi màn hình (AGENTS.md mục 22).
+     */
+    ownerDepartment: text("owner_department"),
     /** Vì sao đặt con số này. Bắt buộc: một đích không có lý do thì kỳ sau không ai dám sửa. */
     note: text("note").notNull().default(""),
     /** Có hiệu lực từ. Kỳ đã chốt trước mốc này KHÔNG bị chấm lại theo đích mới. */
@@ -2957,7 +2986,13 @@ export const metricTargets = pgTable(
     // Một tầng · một chỉ số · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì không ai biết cái nào thắng.
     uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.effectiveFrom),
     index("metric_targets_lookup_idx").on(t.metricKey, t.effectiveFrom),
-    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION')`),
+    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION', 'USER')`),
+    check("metric_targets_period_check", sql`${t.periodKind} IN ('ANY', 'WEEK', 'MONTH', 'QUARTER', 'YEAR')`),
+    // Khoảng hiệu lực rỗng thì đích không áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao thẻ
+    // điểm không thấy đích mình vừa đặt.
+    check("metric_targets_window_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} > ${t.effectiveFrom}`),
+    check("metric_targets_range_check", sql`${t.targetMax} IS NULL OR ${t.targetMax} > ${t.target}`),
+    check("metric_targets_version_check", sql`${t.version} >= 1`),
     // Tầng công ty KHÔNG được có tham chiếu; hai tầng kia BẮT BUỘC có.
     check("metric_targets_ref_check", sql`(${t.scope} = 'COMPANY' AND ${t.scopeRef} IS NULL) OR (${t.scope} <> 'COMPANY' AND ${t.scopeRef} IS NOT NULL AND length(trim(${t.scopeRef})) > 0)`),
   ],

@@ -1,6 +1,6 @@
 import { desc } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import type { TargetRow, TargetScope } from "@/lib/constants/metric-targets";
+import type { PeriodKind, TargetRow, TargetScope } from "@/lib/constants/metric-targets";
 
 /**
  * Đọc TOÀN BỘ đích một lần rồi giải trong bộ nhớ.
@@ -15,7 +15,7 @@ import type { TargetRow, TargetScope } from "@/lib/constants/metric-targets";
 export async function listTargets(): Promise<TargetRow[]> {
   const db = await getDb();
   const rows = await db.select().from(schema.metricTargets).orderBy(desc(schema.metricTargets.effectiveFrom));
-  return rows.map((r) => ({ metricKey: r.metricKey, scope: r.scope as TargetScope, scopeRef: r.scopeRef, target: r.target, note: r.note, effectiveFrom: r.effectiveFrom }));
+  return rows.map(toRow);
 }
 
 export type TargetAdminRow = TargetRow & { id: string; setByEmail: string; updatedAt: Date };
@@ -24,15 +24,24 @@ export type TargetAdminRow = TargetRow & { id: string; setByEmail: string; updat
 export async function listTargetsForAdmin(): Promise<TargetAdminRow[]> {
   const db = await getDb();
   const rows = await db.select().from(schema.metricTargets).orderBy(desc(schema.metricTargets.effectiveFrom));
-  return rows.map((r) => ({
-    id: r.id,
+  return rows.map((r) => ({ ...toRow(r), id: r.id, setByEmail: r.setByEmail, updatedAt: r.updatedAt }));
+}
+
+/** Một chỗ duy nhất dịch dòng CSDL sang hợp đồng — hai chỗ dịch là hai chỗ quên một cột mới. */
+function toRow(r: typeof schema.metricTargets.$inferSelect): TargetRow {
+  return {
     metricKey: r.metricKey,
     scope: r.scope as TargetScope,
     scopeRef: r.scopeRef,
     target: r.target,
+    targetMax: r.targetMax,
+    warningAt: r.warningAt,
+    criticalAt: r.criticalAt,
+    periodKind: r.periodKind as PeriodKind,
     note: r.note,
     effectiveFrom: r.effectiveFrom,
-    setByEmail: r.setByEmail,
-    updatedAt: r.updatedAt,
-  }));
+    effectiveTo: r.effectiveTo,
+    version: r.version,
+    ownerDepartment: r.ownerDepartment,
+  };
 }
