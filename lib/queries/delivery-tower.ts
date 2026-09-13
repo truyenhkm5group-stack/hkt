@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { careEntryFor, LEFT_WAREHOUSE_EVENT_STAGES } from "@/lib/care/entry";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { TEAM_LABEL } from "@/lib/constants/action-queue";
@@ -172,7 +173,8 @@ function xepRo(r: Raw, tuoi: number | null, tuoiHang: FreshnessClass, con: Carri
     bưu tá — hàng còn trong kho), 56 cái đã có mốc lấy và sự kiện sau đó. Đưa cả 225 vào rổ việc là
     bắt người gọi bưu cục về những gói còn nằm trong chính kho của mình.
   */
-  if (con === "WAITING_PROCESSING" && daRoiKho) return { bucket: "WAITING_CARRIER", reason: `Đã rời kho nhưng ĐVVC ghi “${r.vtp_status_name || "chờ xử lý"}”` };
+  // CÙNG MỘT LUẬT với vòng đời care (`careEntryFor`): tháp và hàng đợi không được nói hai điều khác nhau.
+  if (con === "WAITING_PROCESSING" && careEntryFor(con, daRoiKho).enters) return { bucket: "WAITING_CARRIER", reason: `Đã rời kho nhưng ĐVVC ghi “${r.vtp_status_name || "chờ xử lý"}”` };
 
   if (con === "UNKNOWN" || tuoi === null) return { bucket: "DATA_GAP", reason: tuoi === null ? "Chưa nhận được sự kiện nào từ ĐVVC" : "Trạng thái ĐVVC chưa dịch được" };
 
@@ -264,7 +266,7 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
             select max(e.occurred_at) filter (where e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION')) as moc,
                    count(*) filter (where e.normalized_stage = 'DELIVERY_FAILED')::int as lan_hut,
                    (array_agg(e.note order by e.occurred_at desc) filter (where e.note <> ''))[1] as ghi_chu,
-                   bool_or(e.normalized_stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED','DELIVERY_FAILED','RETURNING','RETURNED')) as co_chang_sau_lay
+                   bool_or(e.normalized_stage in ${LEFT_WAREHOUSE_EVENT_STAGES}) as co_chang_sau_lay
               from shipment_events e
              where e.shipment_id = s.id
           ) ev on true

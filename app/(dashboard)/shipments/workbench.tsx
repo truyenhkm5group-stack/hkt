@@ -7,13 +7,16 @@ import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import type { BulkOutcome, BulkResult } from "@/lib/care/service";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
-import { BUSINESS_ACTIONS, BUSINESS_ACTION_HINT, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
+import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_HINT, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
+import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
   CARE_REASON_LABEL,
@@ -26,7 +29,8 @@ import {
   CARRIER_REQUEST_LABEL,
   CARRIER_REQUEST_TONE,
   FOLLOW_UP_PRESETS,
-  carrierActionAllowed,
+  CARE_WAITING_STATUSES,
+  defaultFollowUpAt,
   type CareStatus,
   type CareView,
   type CarrierActionKey,
@@ -168,7 +172,8 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   const bulkStatus = (status: CareStatus) =>
     start(async () => {
       const ids = [...selected];
-      const r = await setCareStatus({ shipmentIds: ids, status });
+      // Trạng thái CHỜ bắt buộc có giờ xem lại — bấm nhanh thì lấy mặc định, không để ca chìm.
+      const r = await setCareStatus({ shipmentIds: ids, status, followUpAt: CARE_WAITING_STATUSES.includes(status) ? defaultFollowUpAt() : undefined });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -445,7 +450,8 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
 
   const changeStatus = (status: CareStatus) =>
     start(async () => {
-      const r = await setCareStatus({ shipmentIds: [c.shipmentId], status });
+      // Trạng thái CHỜ bắt buộc có giờ xem lại: giữ giờ đang có, không có thì lấy mặc định.
+      const r = await setCareStatus({ shipmentIds: [c.shipmentId], status, followUpAt: CARE_WAITING_STATUSES.includes(status) ? (c.care.followUpAt ?? defaultFollowUpAt()) : undefined });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -510,7 +516,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
     KHÔNG tự đổi chiều ĐVVC ở đây: máy chủ chỉ ghi quyết định và gửi yêu cầu; kết quả do sự kiện
     hành trình chốt (`lib/care/lifecycle.ts`).
   */
-  const doBusiness = (action: BusinessAction, extra: { reasonCode?: string; followUpAt?: Date } = {}) =>
+  const doBusiness = (action: BusinessAction, extra: { reasonCode?: string; followUpAt?: Date; replacementShipmentId?: string } = {}) =>
     start(async () => {
       const r = await recordBusinessAction({ shipmentId: c.shipmentId, action, note: vtpNote, ...extra });
       setVtpOpen(false);
@@ -547,7 +553,15 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
     });
 
   const breached = c.sla.firstResponseBreached || c.sla.resolveBreached;
-  const allowed = CARRIER_MENU.filter((k) => carrierActionAllowed(k, c.carrier.stage));
+  /*
+    MỘT LUẬT CHO MỌI NÚT: cùng `canRequestCarrierAction` mà máy chủ dùng, trên đúng dữ liệu thô
+    (mã + chữ + chặng + năng lực tài khoản). Trước đây bàn care lọc bằng `carrierActionAllowed`
+    (chặng thô), trang chi tiết có danh sách chặng riêng, còn máy chủ xét trạng thái con — ba câu
+    trả lời cho một câu hỏi. Nút không đủ điều kiện vẫn HIỆN nhưng khoá, kèm lý do trong tooltip.
+  */
+  const eligibility = (k: CarrierActionKey) => canRequestCarrierAction(k, { stage: c.carrier.stage, vtpStatus: c.carrier.vtpStatus, vtpStatusName: c.carrier.rawStatus, orderNumber: c.tracking, trackingCapability: c.carrier.trackingCapability, configured: true });
+  const businessEligibility = (a: BusinessAction) => (ACTION_CALLS_CARRIER[a] ? eligibility(a === "APPROVE_RETURN" ? "approve-return" : "redeliver") : null);
+  const [dialogFor, setDialogFor] = useState<"APPROVE_RETURN" | "EXCHANGE" | null>(null);
   const req = c.carrierRequest;
 
   return (
@@ -724,7 +738,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
             ) : null}
           </div>
         ) : null}
-        {canManage && allowed.length ? (
+        {canManage ? (
           <Popover open={vtpOpen} onOpenChange={setVtpOpen}>
             <PopoverTrigger asChild>
               <button type="button" className="inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent" title={c.carrierCapability === "API" ? "Gửi thẳng lên Viettel Post bằng tài khoản đối tác" : "Tài khoản API không sở hữu kiện này — ERP ghi yêu cầu và bạn làm tay trên viettelpost.vn"}>
@@ -748,28 +762,44 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
               */}
               <div className="space-y-1.5 border-t pt-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Xử lý</p>
-                {BUSINESS_ACTIONS.map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    disabled={pending}
-                    title={BUSINESS_ACTION_HINT[a]}
-                    onClick={() => (a === "APPROVE_RETURN" || a === "EXCHANGE" ? (window.location.href = `/shipments/${c.shipmentId}`) : doBusiness(a, a === "CONTINUE_MONITORING" ? { followUpAt: new Date(Date.now() + 2 * 3600_000) } : {}))}
-                    className="flex w-full items-start gap-2 rounded-md border px-2 py-1.5 text-left text-[11.5px] hover:bg-accent disabled:opacity-50"
-                  >
-                    <span className="shrink-0 font-semibold">{BUSINESS_ACTION_LABEL[a]}</span>
-                    <span className="min-w-0 flex-1 text-muted-foreground">{a === "APPROVE_RETURN" ? "cần chọn lý do hoàn" : a === "EXCHANGE" ? "cần vận đơn đơn đổi" : a === "CONTINUE_MONITORING" ? "hẹn lại sau 2 giờ" : "gửi lệnh lên ĐVVC"}</span>
-                  </button>
-                ))}
+                {BUSINESS_ACTIONS.map((a) => {
+                  const e = businessEligibility(a);
+                  const khoa = e !== null && !e.ok;
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      disabled={pending || khoa}
+                      title={khoa ? e.reason : BUSINESS_ACTION_HINT[a]}
+                      onClick={() => {
+                        if (a === "APPROVE_RETURN" || a === "EXCHANGE") {
+                          setVtpOpen(false);
+                          setDialogFor(a);
+                          return;
+                        }
+                        doBusiness(a, a === "CONTINUE_MONITORING" ? { followUpAt: new Date(Date.now() + 2 * 3600_000) } : {});
+                      }}
+                      className="flex w-full items-start gap-2 rounded-md border px-2 py-1.5 text-left text-[11.5px] hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="shrink-0 font-semibold">{BUSINESS_ACTION_LABEL[a]}</span>
+                      <span className="min-w-0 flex-1 text-muted-foreground">
+                        {khoa ? "không đủ điều kiện — xem lý do" : a === "APPROVE_RETURN" ? "chọn lý do hoàn" : a === "EXCHANGE" ? "nối vận đơn đơn đổi" : a === "CONTINUE_MONITORING" ? "hẹn lại sau 2 giờ" : e?.callsApi ? "gửi lệnh lên ĐVVC" : "làm tay, ERP ghi vết"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <details className="text-[11px]">
                 <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Lệnh ĐVVC khác</summary>
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {allowed.map((k) => (
-                    <Button key={k} size="sm" variant={k === "cancel" ? "destructive" : "outline"} className="h-7 px-2 text-xs" disabled={pending} onClick={() => carrier(k)}>
-                      {CARRIER_ACTION_LABEL[k]}
-                    </Button>
-                  ))}
+                  {CARRIER_MENU.map((k) => {
+                    const e = eligibility(k);
+                    return (
+                      <Button key={k} size="sm" variant={k === "cancel" ? "destructive" : "outline"} className="h-7 px-2 text-xs" disabled={pending || !e.ok} title={e.ok ? e.reason || CARRIER_ACTION_LABEL[k] : e.reason} onClick={() => carrier(k)}>
+                        {CARRIER_ACTION_LABEL[k]}
+                      </Button>
+                    );
+                  })}
                 </div>
               </details>
               <a href={`https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(c.tracking)}&orderType=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
@@ -782,8 +812,74 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
             Chi tiết
           </Link>
         )}
+        <BusinessActionDialog
+          action={dialogFor}
+          tracking={c.tracking}
+          pending={pending}
+          onClose={() => setDialogFor(null)}
+          onSubmit={(extra) => {
+            setDialogFor(null);
+            if (extra.action === "APPROVE_RETURN") doBusiness("APPROVE_RETURN", { reasonCode: extra.reasonCode });
+            else doBusiness("EXCHANGE", { replacementShipmentId: extra.replacementShipmentId });
+          }}
+        />
       </td>
     </tr>
+  );
+}
+
+/**
+ * HAI QUYẾT ĐỊNH CẦN THÊM MỘT DỮ KIỆN: "Duyệt hoàn" cần LÝ DO theo danh mục (không có thì báo cáo
+ * lý do hoàn rỗng vĩnh viễn), "Đổi" cần MÃ VẬN ĐƠN của đơn thay thế (không có thì "cứu bằng đơn đổi"
+ * chỉ đoán được). Trước bản này hai nút chuyển sang trang chi tiết — nơi chỉ có lệnh ĐVVC thô, không
+ * có chỗ nào ghi quyết định; đo 13/09/2026: `care_business_actions` có 0 dòng.
+ */
+function BusinessActionDialog({ action, tracking, pending, onClose, onSubmit }: { action: "APPROVE_RETURN" | "EXCHANGE" | null; tracking: string; pending: boolean; onClose: () => void; onSubmit: (extra: { action: "APPROVE_RETURN"; reasonCode: string } | { action: "EXCHANGE"; replacementShipmentId: string }) => void }) {
+  const [reason, setReason] = useState<ReturnReason | "">("");
+  const [replacement, setReplacement] = useState("");
+  const nhom = RETURN_REASON_GROUPS.filter((g) => g !== "UNKNOWN");
+  const ok = action === "APPROVE_RETURN" ? reason !== "" : replacement.trim().length > 0;
+  return (
+    <Dialog open={action !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md" onClick={(e) => e.stopPropagation()}>
+        <DialogHeader>
+          <DialogTitle>
+            {action ? BUSINESS_ACTION_LABEL[action] : ""} · <span className="font-mono">{tracking}</span>
+          </DialogTitle>
+          <DialogDescription>{action ? BUSINESS_ACTION_HINT[action] : ""}</DialogDescription>
+        </DialogHeader>
+        {action === "APPROVE_RETURN" ? (
+          <select value={reason} onChange={(e) => setReason(e.target.value as ReturnReason | "")} className="h-9 w-full rounded-md border bg-background px-2 text-[13px]" aria-label="Lý do hoàn">
+            <option value="">Chọn lý do hoàn…</option>
+            {nhom.map((g) => (
+              <optgroup key={g} label={RETURN_REASON_GROUP_LABEL[g]}>
+                {RETURN_REASONS.filter((r) => RETURN_REASON_GROUP_OF[r] === g && r !== "UNKNOWN").map((r) => (
+                  <option key={r} value={r}>
+                    {RETURN_REASON_LABEL[r]}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        ) : action === "EXCHANGE" ? (
+          <Input value={replacement} onChange={(e) => setReplacement(e.target.value)} placeholder="Mã vận đơn của đơn đổi (VD: 1234567890)" aria-label="Vận đơn đơn đổi" />
+        ) : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={pending}>
+            Huỷ
+          </Button>
+          <Button
+            disabled={pending || !ok}
+            onClick={() => {
+              if (action === "APPROVE_RETURN" && reason) onSubmit({ action, reasonCode: reason });
+              if (action === "EXCHANGE" && replacement.trim()) onSubmit({ action, replacementShipmentId: replacement.trim() });
+            }}
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" /> : null} Xác nhận
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

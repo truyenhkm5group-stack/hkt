@@ -28,6 +28,8 @@ import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landi
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
+import { reconcileCareCoverage } from "@/lib/care/lifecycle";
+import { getDb } from "@/db";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
@@ -105,7 +107,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Trạng thái vận đơn Viettel Post",
     source: "VIETTELPOST",
     description: "Tra cứu các vận đơn Viettel Post chưa kết thúc và cập nhật hành trình.",
-    run: (o) => syncViettelPostShipments({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), includeFinal: o.params?.all === "1" }),
+    run: async (o) => {
+      const r = await syncViettelPostShipments({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), includeFinal: o.params?.all === "1" });
+      // Đối chiếu độ phủ care (10 phút/lần): mở đợt cho kiện cần care bị sót, đóng đợt máy mở cho
+      // kiện chưa rời kho, chốt đợt treo trên kiện đã kết thúc. Không phụ thuộc khoảnh khắc webhook.
+      const careReconcile = await reconcileCareCoverage(await getDb()).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+      return { ...r, careReconcile };
+    },
   },
   "vtp-import": {
     label: "Nhập vận đơn từ Viettel Post",

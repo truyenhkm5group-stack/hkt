@@ -77,6 +77,20 @@ export function rescueRates(c: RescueCounts): { direct: number | null; withExcha
   };
 }
 
+/* ───────────────────────── QUYẾT ĐỊNH ĐÓNG ĐỢT ───────────────────────── */
+
+/**
+ * `shipment_care.resolution` — QUYẾT ĐỊNH, không phải kết cục logistics.
+ *
+ *   · `RETURN_APPROVED`    — shop duyệt hoàn. Kết cục vẫn do ĐVVC chốt.
+ *   · `NOT_CARE_CONDITION` — máy đóng vì kiện KHÔNG (hoặc không còn) trong điều kiện cần care:
+ *                            mã 102 trước khi lấy hàng rồi chuyển sang đang đi, huỷ trước khi rời
+ *                            kho… Đợt như vậy mang `care_outcome = NULL` — nó không phải cứu được,
+ *                            không phải không cứu được, và KHÔNG BAO GIỜ vào tỷ lệ cứu đơn.
+ */
+export const CARE_RESOLUTIONS = ["RETURN_APPROVED", "NOT_CARE_CONDITION"] as const;
+export type CareResolution = (typeof CARE_RESOLUTIONS)[number];
+
 /* ───────────────────────── TRẠNG THÁI XỬ LÝ CỦA SHOP ───────────────────────── */
 
 /**

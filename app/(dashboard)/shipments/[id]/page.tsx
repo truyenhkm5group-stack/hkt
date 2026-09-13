@@ -57,7 +57,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <>
             {isVtp ? <SyncOrderButton shipmentId={s.id} label="Cập nhật từ Viettel Post" /> : null}
             {isVtp ? <RepushButton shipmentId={s.id} /> : null}
-            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
+            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} vtpStatus={s.vtpStatus} rawStatus={s.vtpStatusName} tracking={number} trackingCapability={s.trackingCapability} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
             {vtpUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={vtpUrl} target="_blank" rel="noreferrer">

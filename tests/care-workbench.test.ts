@@ -200,7 +200,8 @@ export async function testCareWorkbench(db: Db) {
   assert.ok(report.recovery.failedIntervened >= 1, "s1 có note của người trước kết cục ⇒ có can thiệp");
   assert.ok(report.backlog.byReason.length >= 1 && report.backlog.dataGaps >= 1, "báo cáo mang backlog theo lý do và số kiện thiếu dữ liệu riêng");
   assert.ok(report.carrierRequests.total >= 4 && report.carrierRequests.success >= 1 && report.carrierRequests.manualDone >= 1 && report.carrierRequests.unsupported >= 1);
-  const me = report.staff.find((s) => s.actor === "cs@test");
+  const me = report.staff.find((s) => s.userId === actor.id);
+  assert.ok(!report.staff.some((s) => s.actor === "cs@test"), "dòng nhân viên quy kết bằng khoá tài khoản, không bằng email");
   assert.ok(me && me.recovered <= me.intervened, "cứu được không thể lớn hơn số kiện can thiệp");
 
   clearMemo();
