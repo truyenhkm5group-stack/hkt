@@ -12,6 +12,8 @@ import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
+import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
+import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
@@ -43,7 +45,7 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien })]);
+  const [bang, pending, choNhan, hmt] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary()]);
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -54,6 +56,9 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
         description="Bắn mã → kiện nhảy lên đầu → một chạm ra kết luận. Hàng hoàn CHỈ vào lại tồn khi có người đếm thực tế."
         hint="Ghi nhận kiện đã về là một việc; đếm được bao nhiêu món còn bán được là việc khác. ERP không bao giờ tự cộng hàng hoàn vào tồn."
       />
+
+      {/* Nguồn thứ ba của bàn này: sổ hàng hoàn viết tay. Chưa đối soát lần nào thì khối không hiện. */}
+      <HmtSourceSection run={hmt} />
 
       {/*
         ĐƯỜNG ỐNG ĐẶT TRƯỚC TRẠM ĐẾM, CỐ Ý.

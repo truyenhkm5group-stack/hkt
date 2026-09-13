@@ -5,6 +5,8 @@ import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/carrier-handoff";
 import { DQ_CHECK_SPECS, isFixable, type DqCheck, type DqCheckSpec } from "@/lib/constants/data-quality-issues";
 import { TARGETABLE_METRICS } from "@/lib/constants/metric-registry";
 import { IS_MISSING_COGS } from "@/lib/queries/data-quality";
+import { csCustomerCond } from "@/lib/queries/cs";
+import { reconcileOrderNotCreated } from "@/lib/cs/reconcile-order-created";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
 /**
@@ -109,6 +111,82 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
     const nguong = Date.now() - 24 * 3600_000;
     const dung24h = cu.filter((r) => r.lastOk && new Date(r.lastOk).getTime() < nguong);
 
+    /* ───── CSKH · "chưa tạo đơn" đã hết lý do tồn tại ─────
+       Đọc bằng CHÍNH máy đối chiếu (`reconcileOrderNotCreated` ở chế độ chạy thử), không viết lại
+       ba bậc chứng cứ ở đây. Hai bản luật song song sẽ lệch, và cái lệch chỉ lộ ra khi có người
+       ngồi so hai màn hình. Con số báo ở đây là phần máy KHÔNG tự đóng được (đã có người nhận
+       hoặc đã ghi kết luận) — đó mới là việc của người. */
+    const donChuaTao = await reconcileOrderNotCreated({ dryRun: true });
+
+    /* ───── CSKH · một khách chiếm nhiều dòng ───── */
+    const cs2 = schema.csCases;
+    const khoaKhach = sql`case when ${cs2.customerId} is not null then 'c:' || ${cs2.customerId} when ${cs2.customerPhone} <> '' then 'p:' || ${cs2.customerPhone} else 'x:' || ${cs2.id} end`;
+    const trungKhach = await db
+      .select({ khoa: sql<string>`${khoaKhach}`, n: sql<number>`count(*)` })
+      .from(cs2)
+      .where(and(sql`${cs2.status} in ('OPEN','IN_PROGRESS')`, csCustomerCond()))
+      .groupBy(khoaKhach)
+      .having(sql`count(*) > 1`);
+    // Đếm số DÒNG THỪA (tổng case của các nhóm trùng, trừ đi một dòng mỗi nhóm) — đó là con số
+    // thật sự dư ra trong hàng đợi, không phải số nhóm.
+    const dongThua = trungKhach.reduce((t, r) => t + Number(r.n) - 1, 0);
+
+    /* ───── Hàng hoàn · kết quả lượt đối soát sổ viết tay ─────
+       Bảng rỗng (chưa chạy đối soát lần nào) ⇒ đếm 0, KHÔNG phải `null`: 0 ở đây là câu trả lời
+       đúng — chưa có dòng nguồn nào thì chưa có dòng nào không khớp. */
+    const hmt = schema.hmtReturnReconciliation;
+    const [doiSoat] = await db
+      .select({
+        khongCoKien: sql<number>`count(*) filter (where ${hmt.matchStatus} = 'UNMATCHED_TRACKING')`,
+        khongRaMauMa: sql<number>`count(*) filter (where ${hmt.matchStatus} in ('AMBIGUOUS_SKU','SKU_MISMATCH'))`,
+        lechSo: sql<number>`count(*) filter (where ${hmt.matchStatus} in ('QUANTITY_CONFLICT','DUPLICATE_SOURCE_ROW','CONFLICT'))`,
+        lastSeen: sql<Date | null>`max(${hmt.processedAt})`,
+      })
+      .from(hmt);
+    const hmtMau = await db
+      .select({ status: hmt.matchStatus, sheet: hmt.sheet, row: hmt.sourceRow, tracking: hmt.trackingRaw, detail: hmt.detail })
+      .from(hmt)
+      .where(sql`${hmt.matchStatus} <> 'MATCHED' and ${hmt.matchStatus} <> 'ALREADY_RECEIVED'`)
+      .orderBy(desc(hmt.processedAt))
+      .limit(15);
+    /** Ví dụ của MỘT nhóm lỗi, viết đủ để người mở bảng tính nhảy thẳng tới đúng dòng. */
+    const mauTheoNhom = (nhom: string[]) =>
+      hmtMau
+        .filter((r) => nhom.includes(r.status))
+        .slice(0, 5)
+        .map((r) => `${r.sheet} dòng ${r.row} · ${r.tracking || "(trống)"} · ${r.detail}`);
+
+    /* ───── Một kiện hoàn có NHIỀU phiếu tái nhập ─────
+       Mỗi phiếu cộng tồn một lần; hai phiếu cho một kiện là tồn ảo không hiện ra ở đâu. */
+    const sri = schema.stockReceiptItems;
+    const trungPhieu = await db
+      .select({ shipmentId: sri.shipmentId, n: sql<number>`count(distinct ${sri.receiptId})` })
+      .from(sri)
+      .where(isNotNull(sri.shipmentId))
+      .groupBy(sri.shipmentId)
+      .having(sql`count(distinct ${sri.receiptId}) > 1`);
+
+    /* ───── Kiện đã nhận mà không biết trong đó có gì ─────
+       `RECEIVED` (chưa đếm) và vận đơn không lần ra dòng hàng nào — kể cả qua mã gốc của vận đơn
+       chiều về. Người kho đứng trước kiện và không có gì để so. */
+    const ri = schema.returnInspections;
+    const khongBietHang = sql`${ri.status} = 'RECEIVED' and not exists (
+      select 1 from shipments sh
+      join order_items oi2 on oi2.order_id = coalesce(
+        sh.order_id,
+        (select g.order_id from shipments g where g.vtp_order_number = sh.order_reference and g.order_id is not null limit 1)
+      )
+      where sh.id = ${ri.shipmentId}
+    )`;
+    const [muMo] = await db.select({ n: sql<number>`count(*) filter (where ${khongBietHang})`, lastSeen: sql<Date | null>`max(${ri.receivedAt}) filter (where ${khongBietHang})` }).from(ri);
+    const muMoMau = await db
+      .select({ code: s.vtpOrderNumber, ref: s.orderReference })
+      .from(ri)
+      .innerJoin(s, eq(s.id, ri.shipmentId))
+      .where(khongBietHang)
+      .orderBy(desc(ri.receivedAt))
+      .limit(5);
+
     return [
       dung("shipment-no-handoff", { count: num(handoff?.n), lastSeen: handoff?.lastSeen ?? null, sample: handoffMau.map((r) => `${r.code ?? "(chưa có mã)"} · ${r.stage}`) }),
       dung("shipment-order-ambiguous", { count: num(ambiguous?.n), lastSeen: ambiguous?.lastSeen ?? null, sample: ambiguousMau.map((r) => `${r.code ?? "?"} ← mã gốc ${r.ref ?? "?"}`) }),
@@ -118,6 +196,28 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       dung("variant-unmapped", { count: num(variant?.n), sample: variantMau.map((r) => `${r.sku || "(không mã)"} · ${r.name}`) }),
       dung("metric-target-missing", { count: thieuDich.length, sample: thieuDich.slice(0, 5).map((m) => m.label) }),
       dung("integration-stale", { count: dung24h.length, lastSeen: dung24h.length ? new Date(Math.max(...dung24h.map((r) => new Date(r.lastOk!).getTime()))) : null, sample: dung24h.slice(0, 5).map((r) => r.kind) }),
+      dung("cs-stale-order-not-created", {
+        count: donChuaTao.humanTouched,
+        sample: [
+          `${donChuaTao.openBefore} case đang mở · ${donChuaTao.closedTotal} máy tự đóng được`,
+          `hội thoại đã có đơn: ${donChuaTao.closed.CONVERSATION_HAS_ORDER}`,
+          `SĐT đã lên đơn sau: ${donChuaTao.closed.PHONE_ORDERED_AFTER}`,
+          `đã có vận đơn gửi tới SĐT: ${donChuaTao.closed.SHIPMENT_CREATED}`,
+          `còn treo thật (không chứng cứ): ${donChuaTao.stillPending}`,
+        ],
+      }),
+      dung("cs-duplicate-actionable-customer", {
+        count: dongThua,
+        sample: trungKhach
+          .sort((a, b) => Number(b.n) - Number(a.n))
+          .slice(0, 5)
+          .map((r) => `${r.khoa} · ${r.n} việc`),
+      }),
+      dung("return-tracking-not-found", { count: Number(doiSoat?.khongCoKien ?? 0), lastSeen: doiSoat?.lastSeen ?? null, sample: mauTheoNhom(["UNMATCHED_TRACKING"]) }),
+      dung("return-sku-unresolved", { count: Number(doiSoat?.khongRaMauMa ?? 0), lastSeen: doiSoat?.lastSeen ?? null, sample: mauTheoNhom(["AMBIGUOUS_SKU", "SKU_MISMATCH"]) }),
+      dung("return-qty-mismatch", { count: Number(doiSoat?.lechSo ?? 0), lastSeen: doiSoat?.lastSeen ?? null, sample: mauTheoNhom(["QUANTITY_CONFLICT", "DUPLICATE_SOURCE_ROW", "CONFLICT"]) }),
+      dung("return-duplicate-receipt", { count: trungPhieu.length, sample: trungPhieu.slice(0, 5).map((r) => `${r.shipmentId} · ${r.n} phiếu`) }),
+      dung("return-received-without-expected-item", { count: num(muMo?.n), lastSeen: muMo?.lastSeen ?? null, sample: muMoMau.map((r) => `${r.code ?? "(chưa có mã)"}${r.ref ? ` ← gốc ${r.ref}` : ""}`) }),
     ];
   });
 }

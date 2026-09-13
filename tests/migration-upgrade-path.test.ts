@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0076_care_active_invariant", "0077_metric_target_bands", "0078_product_notes", "0079_outreach_send_evidence"] as const;
+const MOI = ["0080_hmt_return_reconciliation"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -69,9 +69,8 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_care' and column_name = 'active'"), 1, "bước 1: 0075 phải đã áp — cột active có sẵn");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
-    await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now())`);
+    await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome) values ('up-care-2', 'up-s8', 'NEW', 'PENDING')`);
-    assert.equal(await dem("select count(*)::int as n from shipment_care where id = 'up-care-1' and active"), 1, "bước 1: dòng đã đóng vẫn active = true — đúng lỗ hổng mà bản này sửa");
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -92,19 +91,53 @@ export async function testMigrationUpgradePath() {
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
 
     /*
-      ═══ 0076: ĐÓNG ⇔ active = false — SỬA CỜ, KHÔNG BACKFILL ═══
+      ═══ 0080: CHỨNG CỨ ĐỐI SOÁT SỔ HÀNG HOÀN — BẢNG MỚI, KHÔNG ĐỤNG GÌ CŨ ═══
 
-      Dòng đã đóng rời hàng đợi (`active = false`, `done_at` điền từ mốc có sẵn) nhưng KHÔNG được
-      đoán thêm gì: `care_outcome` vẫn NULL, `owner_at_resolution` vẫn NULL. Dòng đang mở không bị đụng.
+      0076–0079 nay nằm trong "trạng thái production hôm nay" (bước 1) chứ không còn là migration
+      mới; đường nâng cấp của chúng đã chạy thật trên máy chủ. Phần còn phải chứng minh ở bản này
+      là 0080, và ba ràng buộc của nó — vì chính chúng là ranh giới giữa "đã đối chiếu" và "đã đổi
+      dữ liệu".
     */
-    const dong = (await client.query<{ active: boolean; care_outcome: string | null; owner_at_resolution: string | null; done_at: string | null }>("select active, care_outcome, owner_at_resolution, done_at from shipment_care where id = 'up-care-1'")).rows[0];
-    assert.equal(dong.active, false, "0076: đợt RESOLVED phải rời trạng thái đang mở");
-    assert.equal(dong.care_outcome, null, "0076 KHÔNG được đoán kết quả cho đợt cũ");
-    assert.equal(dong.owner_at_resolution, null, "0076 KHÔNG được đoán người cho đợt cũ");
-    assert.ok(dong.done_at, "0076: done_at điền từ mốc cập nhật có sẵn, không để rỗng");
-    const mo = (await client.query<{ active: boolean; care_outcome: string | null }>("select active, care_outcome from shipment_care where id = 'up-care-2'")).rows[0];
-    assert.equal(mo.active, true, "0076: đợt đang mở KHÔNG bị đụng");
-    assert.equal(mo.care_outcome, "PENDING");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_return_reconciliation'"), 1, "0080: bảng chứng cứ phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from hmt_return_reconciliation"), 0, "0080: KHÔNG gieo sẵn dòng nào — đối soát là một lượt chạy tay, không phải một backfill");
+
+    await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s7', 'UPS7', 'RETURNED')`);
+    await client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, tracking_key, match_status, idempotency_key, shipment_id, written) values ('up-h1', 'wb', 'Chi tiết đơn hoàn', 'FULL_RETURN_ITEMS', 'UPS7', 'MATCHED', 'wb|FULL|UPS7|x|#1', 'up-s7', true)`);
+
+    // Khoá chống trùng: chạy lại lượt đối soát KHÔNG được sinh thêm dòng nào.
+    await assert.rejects(
+      () => client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, tracking_key, match_status, idempotency_key) values ('up-h2', 'wb', 'Chi tiết đơn hoàn', 'FULL_RETURN_ITEMS', 'UPS7', 'MATCHED', 'wb|FULL|UPS7|x|#1')`),
+      (e: unknown) => /idempotency|unique|duplicate/i.test(String((e as { message?: string })?.message ?? e)),
+      "0080: cùng một dòng nguồn ghi lần hai phải bị chặn — nếu không, chạy lại là nhân đôi chứng cứ",
+    );
+    // Trạng thái lạ bị chặn: danh sách PHẢI khớp `HMT_MATCH_STATUSES` ở mã nguồn.
+    await assert.rejects(
+      () => client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, match_status, idempotency_key) values ('up-h3', 'wb', 's', 'FULL_RETURN_ITEMS', 'GAN_KHOP', 'k3')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("hmt_return_rec_status_check"),
+      "0080: 'gần khớp' không tồn tại — một dòng hoặc khớp đủ hai định danh hoặc không",
+    );
+    /*
+      RÀNG BUỘC QUAN TRỌNG NHẤT CỦA 0080: chỉ dòng KHỚP mới được đánh dấu đã ghi.
+
+      Chặn ở CSDL chứ không tin vào kỷ luật của mã nguồn — đây là ranh giới giữa "đã đối chiếu" và
+      "đã đổi dữ liệu", và một dòng `written = true` mang trạng thái khác là một lượt ghi không ai
+      giải thích được.
+    */
+    await assert.rejects(
+      () => client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, match_status, idempotency_key, written) values ('up-h4', 'wb', 's', 'FULL_RETURN_ITEMS', 'AMBIGUOUS_SKU', 'k4', true)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("hmt_return_rec_written_check"),
+      "0080: dòng KHÔNG khớp mà đánh dấu đã ghi là một lượt ghi không có căn cứ",
+    );
+    // Ô mã vận đơn trống mà khai một cách kế thừa không tồn tại thì bị chặn: ba giá trị, danh sách đóng.
+    await assert.rejects(
+      () => client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, match_status, idempotency_key, inheritance) values ('up-h5', 'wb', 's', 'FULL_RETURN_ITEMS', 'MATCHED', 'k5', 'DOAN_TU_DONG_TREN')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("hmt_return_rec_inheritance_check"),
+      "0080: 'đoán từ dòng trên' không phải một cách kế thừa hợp lệ",
+    );
+    // Xoá kiện thì chứng cứ đi theo; nhưng chứng cứ KHÔNG giữ kiện lại.
+    await client.query(`delete from shipments where id = 'up-s7'`);
+    assert.equal(await dem("select count(*)::int as n from hmt_return_reconciliation where id = 'up-h1'"), 0, "0080: xoá kiện thì dòng chứng cứ của nó đi theo, không để lại dòng mồ côi");
+
     // Kiện đã có đợt đóng nay mở được đợt mới — điều mà cờ sai đã chặn ở chỉ mục duy nhất từng phần.
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, episode_no) values ('up-care-3', 'up-s9', 'NEW', 'PENDING', 2)`);
 
