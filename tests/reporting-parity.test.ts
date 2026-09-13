@@ -7,6 +7,7 @@ import { clearMemo } from "@/lib/cache";
 import { CARRIER_SUBSTATES } from "@/lib/constants/carrier-substate";
 import { confidenceOf, CONFIDENCE_THRESHOLDS, PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
+import { adsRatio } from "@/lib/constants/profit";
 import { backtestProjectedDelivery, getProbabilityLookup, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
 
 /**
@@ -144,6 +145,24 @@ export function testInventoryRiskIsPeriodExpense() {
   assert.equal(congDon, inventoryRiskOnSold(giaTriLo, 10), "bán hết lô qua 10 tuần ⇒ cộng lại đúng bằng dự phòng cả lô, không hơn không kém");
 }
 
+/* ───── 7 · Hai tỷ lệ quảng cáo: mẫu số 0 ⇒ N/A, không phải 0% ───── */
+export function testAdsRatios() {
+  // Đúng ví dụ trong đặc tả.
+  assert.equal(adsRatio(10_000_000, 100_000_000), 10, "10tr / 100tr = 10%");
+  assert.equal(adsRatio(10_000_000, 50_000_000), 20, "10tr / 50tr = 20%");
+  /*
+    MẪU SỐ 0 ⇒ `null`, KHÔNG phải 0%.
+
+    Chưa bán được đồng nào mà hiện "0%" sẽ bị đọc thành "quảng cáo không tốn gì" — ngược hoàn toàn
+    sự thật, và ngược đúng vào lúc nguy hiểm nhất (mã mới chạy, chưa ra đơn).
+  */
+  assert.equal(adsRatio(10_000_000, 0), null, "mẫu số 0 ⇒ chưa tính được, không phải 0%");
+  assert.equal(adsRatio(0, 0), null);
+  assert.equal(adsRatio(10_000_000, -5), null, "mẫu số âm cũng không chia");
+  // Chi 0 đồng quảng cáo mà CÓ doanh số thì 0% là con số THẬT — không được biến nó thành N/A.
+  assert.equal(adsRatio(0, 100_000_000), 0, "không chi quảng cáo mà vẫn bán được ⇒ 0% là sự thật");
+}
+
 export async function testReportingParity(db: Db) {
   testNoHardcodedProbability();
   await testProbabilityFromHistory(db);
@@ -151,6 +170,7 @@ export async function testReportingParity(db: Db) {
   await testBacktestHonest();
   await testProjectedMetricsConsistent();
   testInventoryRiskIsPeriodExpense();
+  testAdsRatios();
 
   const ids = [`${P}h1`, `${P}h2`, `${P}h3`, `${P}h4`];
   await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ids));
@@ -158,5 +178,5 @@ export async function testReportingParity(db: Db) {
   await db.delete(schema.shipments).where(inArray(schema.shipments.id, ids));
   await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
   clearMemo();
-  console.log("✓ Một hợp đồng cho “TL GTC ước tính”: xác suất học từ lịch sử · một vận đơn một quan sát · kiện chưa kết thúc ngoài mẫu số · mẫu nhỏ KHÔNG thành xác suất · không con số nào ghi cứng · rủi ro tồn kho là chi phí CỦA KỲ");
+  console.log("✓ Một hợp đồng cho “TL GTC ước tính”: xác suất học từ lịch sử · một vận đơn một quan sát · kiện chưa kết thúc ngoài mẫu số · mẫu nhỏ KHÔNG thành xác suất · không con số nào ghi cứng · rủi ro tồn kho là chi phí CỦA KỲ · mẫu số 0 ⇒ N/A không phải 0%");
 }

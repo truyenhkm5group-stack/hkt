@@ -30,6 +30,7 @@ import {
   getNominalProfitReport,
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
+import { adsRatio } from "@/lib/constants/profit";
 import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
 import { cn } from "@/lib/utils";
 
@@ -180,6 +181,15 @@ export async function NominalTab({
                 <TableHead className="text-right">SP</TableHead>
                 <TableHead className="text-right">Doanh số POS</TableHead>
                 <TableHead className="text-right">CPQC</TableHead>
+                {/*
+                  HAI TỶ LỆ QUẢNG CÁO — MẪU SỐ KHÁC NHAU CÓ CHỦ ĐÍCH, KHÔNG THAY THẾ CHO NHAU.
+
+                  Một bên chia cho tiền khách CHỐT, một bên chia cho tiền dự kiến THẬT SỰ TỚI TAY
+                  KHÁCH. Tỷ lệ đầu luôn đẹp hơn vì mẫu số chưa trừ đơn hoàn; đọc nhầm nó thành
+                  hiệu quả quảng cáo là lý do người ta tăng ngân sách cho một mã đang lỗ.
+                */}
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
+                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH. Doanh thu ước tính dùng CÙNG mô hình dự báo với báo cáo giao vận: từng đơn chưa kết thúc được cân theo xác suất giao thành công của chính trạng thái nó đang ở. Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
                 <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính (đơn GTC = COD thực > 100K)">TL GTC ƯT</TableHead>
                 <TableHead className="text-right">DT GTC ƯT</TableHead>
                 <TableHead className="text-right">Giá vốn</TableHead>
@@ -203,7 +213,7 @@ export async function NominalTab({
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={22}
+                    colSpan={24}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -262,6 +272,8 @@ export async function NominalTab({
                         }
                       />
                     </TableCell>
+                    <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.salesAfterDiscount)} tone={false} /></TableCell>
+                    <TableCell className="text-right"><Pct value={adsRatio(r.adSpend, r.expectedRevenue)} tone={false} /></TableCell>
                     <TableCell className="text-right">
                       <span
                         className={cn(
@@ -369,6 +381,8 @@ export async function NominalTab({
                   <TableCell className="text-right">
                     <Money value={t.adSpend} className="text-rose-600" />
                   </TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.salesAfterDiscount)} tone={false} /></TableCell>
+                  <TableCell className="text-right"><Pct value={adsRatio(t.adSpend, t.expectedRevenue)} tone={false} /></TableCell>
                   <TableCell className="text-right">
                     <Pct value={t.weightedDeliveryRate} tone={false} />
                   </TableCell>

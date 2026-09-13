@@ -48,3 +48,45 @@ là chỗ duy nhất còn tính rủi ro theo hàng NHẬP — và vì thế v�
 **Không cần phát minh mô hình rủi ro mới.** Mô hình đúng đã có sẵn và đã phân bổ theo kỳ bằng chính
 cấu tạo của nó (đi theo hàng BÁN RA trong kỳ). Việc phải làm là để bảng hàng nhập dùng lại nó, và
 đổi tên cột cho khớp với thứ nó thật sự đo.
+
+---
+
+# ĐO PRODUCTION — xác nhận bằng số thật (ops run #700, db-query CHỈ ĐỌC)
+
+| Mục | Giá trị |
+|---|---|
+| Phiếu nhập 7 ngày | **1** |
+| Phiếu nhập 30 ngày | 3 |
+| **Giá trị hàng nhập 7 ngày** | **0 ₫** |
+| `inventoryRiskPercent` đã khai | **10** |
+| `defaultReturnRate` đã khai | **40** |
+| Vận đơn chưa kết thúc | **448** |
+| Mẫu học xác suất (vận đơn đã kết thúc có sự kiện ĐVVC) | **1.363** |
+
+## Chốt nguyên nhân "Rủi ro TK cả lô nhập = 0"
+
+**KHÔNG phải vì % chưa khai.** Dữ liệu nói rõ: `inventoryRiskPercent = 10`.
+
+Nguyên nhân là **giá trị hàng nhập trong kỳ 7 ngày bằng 0 ₫** — có đúng một phiếu nhập nhưng
+`Σ(số lượng × giá nhập)` của nó bằng 0. Nhân 10% với 0 thì ra 0.
+
+Nên cột đó không nói "hàng không có rủi ro". Nó nói "tuần này không nhập hàng" — hai câu hoàn toàn
+khác nhau, và bảng lợi nhuận đang in câu thứ nhất.
+
+Với cách tính mới (rủi ro theo GIÁ VỐN HÀNG BÁN RA, `AGENTS.md` mục 14), kỳ 7 ngày vẫn có hàng bán
+ra nên vẫn có dự phòng — và kỳ có phiếu nhập lớn cũng thôi bị nhảy vọt.
+
+## Chốt nguyên nhân "TL GTC ước tính lệch nhau"
+
+`defaultReturnRate = 40`. Đây chính là con số giả định được áp cho nhóm **chưa rõ** ở bảng nominal
+và **không** áp ở bảng returns. Không ai gõ 22% vào mã nguồn — nhưng một giả định 40% nhân với
+nhóm chưa rõ tạo ra đúng loại chênh lệch mà chủ shop nhìn thấy.
+
+**448 vận đơn chưa kết thúc** là tập bị hai báo cáo đối xử khác nhau: một bên loại hẳn khỏi phép
+tính, một bên nhân với 40%.
+
+## Mô hình xác suất có đủ dữ liệu để học
+
+**1.363 vận đơn đã kết thúc** có sự kiện ĐVVC — vượt xa ngưỡng tin cậy cao (100 mẫu) cho tổng thể.
+Cỡ mẫu của từng trạng thái con sẽ được in ra cạnh mỗi xác suất, và trạng thái nào dưới 10 mẫu thì
+trả `null` chứ không trả một con số đoán.
