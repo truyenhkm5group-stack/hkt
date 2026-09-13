@@ -18,7 +18,7 @@ import { addCsCaseNote, csBulkAction, csQuickAction } from "@/lib/actions/cs";
 import { CS_KIND_LABEL, CS_STATUS_LABEL, CS_STATUS_TONE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_QUICK_ACTION, CS_QUICK_ACTIONS_BY_KIND, CS_SNOOZE_PRESETS, type CsQuickActionKey } from "@/lib/constants/cs-actions";
 import { CS_SLA_BUCKET_HINT, CS_SLA_BUCKET_LABEL, CS_SLA_BUCKET_TONE, csSlaLabel, type CsNextActionKey, type CsSlaBucket } from "@/lib/constants/cs-next-action";
-import { NESTED_ROW, ROW_EXPANDED, ROW_PARENT, ROW_SELECTED, STICKY_HEAD, STICKY_TOOLBAR, TABLE_SCROLL } from "@/lib/constants/table-ux";
+import { NESTED_ROW, ROW_EXPANDED, ROW_PARENT, ROW_SELECTED, STICKY_ACTIONS, STICKY_ACTIONS_HEAD, STICKY_ACTIONS_SELECTED, STICKY_HEAD, STICKY_TOOLBAR, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { CsStaff } from "@/app/(dashboard)/cs/cs-table";
@@ -177,18 +177,20 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
         />
       ) : null}
       <div className={cn(TABLE_SCROLL)}>
-        <Table className="min-w-[1180px]">
+        <Table className="min-w-[1000px]">
           <TableHeader className={STICKY_HEAD}>
             <TableRow>
               {canWrite ? <TableHead className="w-9" /> : null}
               <TableHead className="w-8" />
-              <TableHead className="min-w-[190px]">Khách</TableHead>
-              <TableHead className="w-28 text-right">Việc đang mở</TableHead>
-              <TableHead className="min-w-[180px]">Loại việc</TableHead>
-              <TableHead className="w-[130px]">Hạn</TableHead>
-              <TableHead className="w-[130px]">Phụ trách</TableHead>
-              <TableHead className="min-w-[220px]">Việc nên làm tiếp</TableHead>
-              <TableHead className="w-[280px]">Hành động</TableHead>
+              <TableHead className="min-w-[170px]">Khách</TableHead>
+              <TableHead className="w-[76px] text-right">Việc</TableHead>
+              <TableHead className="w-[132px]">Loại việc</TableHead>
+              <TableHead className="w-[125px]">Hạn</TableHead>
+              {/* KHÔNG có cột "Phụ trách" riêng: nó nằm ngay dưới tên khách. Một cột nữa ở đây đẩy
+                  cột Hành động ra khỏi màn hình 1440px — và cột đó là lý do tồn tại của bảng này. */}
+              <TableHead className="min-w-[176px]">Việc nên làm tiếp</TableHead>
+              {/* Cột hành động KHÔNG được co lại: nó là lý do tồn tại của bảng này. */}
+              <TableHead className={cn("w-[268px]", STICKY_ACTIONS_HEAD)}>Hành động</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -201,7 +203,7 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
               const caseChinh = r.cases.find((c) => c.id === r.nextAction.caseId) ?? openCases[0] ?? null;
               return (
                 <>
-                  <TableRow key={r.key} className={cn(ROW_PARENT, daChon && ROW_SELECTED, busy && "opacity-70")} onClick={() => bung(r.key)}>
+                  <TableRow key={r.key} className={cn("group", ROW_PARENT, daChon && ROW_SELECTED, busy && "opacity-70")} onClick={() => bung(r.key)}>
                     {canWrite ? (
                       <TableCell className="px-2" onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={daChon} onCheckedChange={() => doiChon(r.key)} aria-label={`Chọn ${r.customerName || r.customerPhone}`} />
@@ -219,18 +221,41 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                         // KHÔNG bịa số: dòng không có định danh khách phải nói thẳng là chưa nối được.
                         <div className="text-xs text-muted-foreground">chưa nối được khách</div>
                       )}
+                      {/* Người phụ trách đứng ngay dưới tên: cùng một câu hỏi ("ai lo khách này"),
+                          nên cùng một chỗ nhìn. Bot nhắn KHÔNG phải đã có người (AGENTS.md mục 36). */}
+                      {r.owners.length ? (
+                        <div className="truncate text-[11px] text-foreground/70" title={`Đang cầm: ${r.owners.join(", ")}`}>
+                          {r.owners.join(", ")}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] font-medium text-warning">chưa ai nhận</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className="numeric font-semibold">{formatNumber(r.openCount)}</span>
-                      {r.overdueCount > 0 ? <div className="text-[11px] font-medium text-rose-700 dark:text-rose-300">{formatNumber(r.overdueCount)} quá hạn</div> : null}
+                      <span className="numeric font-semibold" title={`${r.openCount} việc đang mở`}>{formatNumber(r.openCount)}</span>
+                      {r.overdueCount > 0 ? (
+                        <div className="text-[11px] font-medium text-rose-700 dark:text-rose-300" title={`${r.overdueCount} việc đã quá hạn`}>
+                          {formatNumber(r.overdueCount)} trễ
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
+                      {/*
+                        TỐI ĐA HAI NHÃN RỒI "+N". Một khách bốn loại việc làm ô này xuống ba dòng và
+                        đẩy chiều cao dòng lên gấp đôi — hàng đợi chỉ còn hiện được hai khách một màn
+                        hình. Bung dòng ra là thấy đủ từng loại, nên không mất thông tin nào.
+                      */}
                       <div className="flex flex-wrap gap-1">
-                        {r.kinds.map((k) => (
-                          <Badge key={k} variant="secondary" className="text-[10px]">
+                        {r.kinds.slice(0, 2).map((k) => (
+                          <Badge key={k} variant="secondary" className="max-w-[140px] truncate text-[10px]" title={CS_KIND_LABEL[k as CsKind] ?? k}>
                             {CS_KIND_LABEL[k as CsKind] ?? k}
                           </Badge>
                         ))}
+                        {r.kinds.length > 2 ? (
+                          <Badge variant="outline" className="text-[10px]" title={r.kinds.map((k) => CS_KIND_LABEL[k as CsKind] ?? k).join(" · ")}>
+                            +{r.kinds.length - 2}
+                          </Badge>
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -239,20 +264,14 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                         mở từ {formatDate(r.oldestAt)}
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs">
-                      {r.owners.length ? (
-                        <span className="text-foreground/80">{r.owners.join(", ")}</span>
-                      ) : (
-                        // Bot nhắn KHÔNG phải là đã có người nhận (AGENTS.md mục 36).
-                        <span className="font-medium text-warning">chưa ai nhận</span>
-                      )}
-                    </TableCell>
                     <TableCell>
                       <div className="text-sm font-medium">{r.nextAction.label}</div>
                       <div className="text-[11px] text-muted-foreground">{r.nextAction.reason}</div>
                     </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex flex-wrap items-center gap-1">
+                    <TableCell className={cn(STICKY_ACTIONS, daChon && STICKY_ACTIONS_SELECTED)} onClick={(e) => e.stopPropagation()}>
+                      {/* MỘT HÀNG, KHÔNG XUỐNG DÒNG: nút xuống dòng làm dòng cao gấp ba và hàng đợi
+                          chỉ còn hiện được hai khách. Nút phụ đi bằng biểu tượng + tooltip. */}
+                      <div className="flex flex-nowrap items-center gap-1">
                         {canWrite ? (
                           <>
                             {/* CTA của việc nên làm tiếp — nút đầu tiên, vì nó là câu trả lời của cả dòng. */}
@@ -270,7 +289,7 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                               <Button
                                 size="sm"
                                 variant="secondary"
-                                className="h-8"
+                                className="h-7 shrink-0 whitespace-nowrap px-2"
                                 disabled={busy}
                                 title={`Nhận ${openIds.length} việc đang mở của khách này về mình`}
                                 onClick={() => chay(r.key, () => csBulkAction({ ids: openIds, action: "CLAIM" }).then((x) => ("error" in x ? x : { ok: true as const })), `Đã nhận ${openIds.length} việc`)}
@@ -279,13 +298,13 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                               </Button>
                             ) : null}
                             {r.chatUrl ? (
-                              <Button asChild size="sm" variant="outline" className="h-8" title={CS_QUICK_ACTION.CHAT.hint}>
+                              <Button asChild size="sm" variant="outline" className="h-7 w-7 shrink-0 px-0" title={CS_QUICK_ACTION.CHAT.hint} aria-label="Chat Pancake">
                                 <a href={r.chatUrl} target="_blank" rel="noreferrer">
-                                  <MessageCircle className="size-3.5" /> Chat
+                                  <MessageCircle className="size-3.5" />
                                 </a>
                               </Button>
                             ) : null}
-                            {openIds.length ? <SnoozeButton busy={busy} label={`Hẹn lại (${openIds.length})`} onPick={(at) => chay(r.key, () => csBulkAction({ ids: openIds, action: "SNOOZE", followUpAt: at.toISOString() }).then((x) => ("error" in x ? x : { ok: true as const })), `Đã hẹn lại ${formatDateTime(at)}`)} /> : null}
+                            {openIds.length ? <SnoozeButton busy={busy} iconOnly label={`Hẹn lại ${openIds.length} việc`} onPick={(at) => chay(r.key, () => csBulkAction({ ids: openIds, action: "SNOOZE", followUpAt: at.toISOString() }).then((x) => ("error" in x ? x : { ok: true as const })), `Đã hẹn lại ${formatDateTime(at)}`)} /> : null}
                             {caseChinh ? <NoteButton caseId={caseChinh.id} busy={busy} /> : null}
                             {/*
                               "Đã xử lý" CHỈ khi khách còn đúng MỘT việc đang mở. Nhiều hơn một thì nút
@@ -295,7 +314,7 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                             {openCases.length === 1 ? (
                               <Button
                                 size="sm"
-                                className="h-8"
+                                className="h-7 shrink-0 whitespace-nowrap px-2"
                                 disabled={busy}
                                 title={`Đóng: ${CS_KIND_LABEL[openCases[0].kind as CsKind] ?? openCases[0].kind}`}
                                 onClick={() => chay(r.key, () => csQuickAction({ id: openCases[0].id, action: "DONE" }), "Đã đóng case")}
@@ -310,7 +329,7 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                   </TableRow>
                   {dangMo ? (
                     <TableRow key={`${r.key}-chi-tiet`}>
-                      <TableCell colSpan={canWrite ? 9 : 8} className={cn("p-0", ROW_EXPANDED)}>
+                      <TableCell colSpan={canWrite ? 8 : 7} className={cn("p-0", ROW_EXPANDED)}>
                         <div className="pl-6 pr-3 py-1">
                           {r.cases.map((c) => (
                             <CaseLine key={c.id} c={c} canWrite={canWrite} busy={busy} currentUser={currentUser} onRun={(call, msg) => chay(r.key, call, msg)} />
@@ -387,7 +406,7 @@ function CaseActionButton({
     if (!href) return null;
     const external = href.startsWith("http");
     return (
-      <Button asChild size="sm" variant={emphasis ? "default" : "outline"} className="h-8" title={spec.hint}>
+      <Button asChild size="sm" variant={emphasis ? "default" : "outline"} className="h-7 shrink-0 whitespace-nowrap px-2" title={spec.hint}>
         {external ? (
           <a href={href} target="_blank" rel="noreferrer">
             {actionKey === "OPEN_CARE" ? <Truck className="size-3.5" /> : <MessageCircle className="size-3.5" />} {spec.label}
@@ -399,14 +418,14 @@ function CaseActionButton({
     );
   }
   if (actionKey === "SNOOZE") {
-    return <SnoozeButton busy={busy} label={spec.label} onPick={(at) => onRun(() => csQuickAction({ id: caseRow.id, action: "SNOOZE", followUpAt: at.toISOString() }), `Đã hẹn lại ${formatDateTime(at)}`)} />;
+    return <SnoozeButton busy={busy} iconOnly label={spec.label} onPick={(at) => onRun(() => csQuickAction({ id: caseRow.id, action: "SNOOZE", followUpAt: at.toISOString() }), `Đã hẹn lại ${formatDateTime(at)}`)} />;
   }
   const message = actionKey === "CONTACTED" ? "Đã ghi nhận liên hệ" : actionKey === "CLAIM" ? "Đã nhận việc" : "Đã đóng case";
   return (
     <Button
       size="sm"
       variant={emphasis ? "default" : actionKey === "DONE" || actionKey === "INFO_FIXED" ? "default" : "outline"}
-      className="h-8"
+      className="h-7 shrink-0 whitespace-nowrap px-2"
       disabled={busy}
       title={spec.hint}
       onClick={() => onRun(() => csQuickAction({ id: caseRow.id, action: actionKey }), message)}
@@ -416,7 +435,7 @@ function CaseActionButton({
   );
 }
 
-function SnoozeButton({ busy, label, onPick }: { busy: boolean; label: string; onPick: (at: Date) => Promise<boolean> }) {
+function SnoozeButton({ busy, label, iconOnly, onPick }: { busy: boolean; label: string; iconOnly?: boolean; onPick: (at: Date) => Promise<boolean> }) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const luu = async (at: Date) => {
@@ -425,8 +444,9 @@ function SnoozeButton({ busy, label, onPick }: { busy: boolean; label: string; o
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button size="sm" variant="outline" className="h-8" disabled={busy} title={CS_QUICK_ACTION.SNOOZE.hint}>
-          <AlarmClock className="size-3.5" /> {label}
+        <Button size="sm" variant="outline" className={cn("h-7 shrink-0", iconOnly ? "w-7 px-0" : "px-2")} disabled={busy} title={`${label} — ${CS_QUICK_ACTION.SNOOZE.hint}`} aria-label={label}>
+          <AlarmClock className="size-3.5" />
+          {iconOnly ? null : label}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 space-y-2">
@@ -484,7 +504,7 @@ function NoteButton({ caseId, busy }: { caseId: string; busy: boolean }) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button size="sm" variant="ghost" className="h-8 px-2" disabled={busy} aria-label="Ghi chú nhanh" title="Ghi chú nhanh — không mở trang khác">
+        <Button size="sm" variant="outline" className="h-7 w-7 shrink-0 px-0" disabled={busy} aria-label="Ghi chú nhanh" title="Ghi chú nhanh — không mở trang khác">
           <MessageSquarePlus className="size-4" />
         </Button>
       </PopoverTrigger>

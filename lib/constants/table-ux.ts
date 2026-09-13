@@ -90,3 +90,28 @@ export const ROW_SELECTED = "bg-row-selected";
 
 /** Dòng CHA của một nhóm bung được. Con trỏ tay + trạng thái di chuột, để người dùng biết bấm được. */
 export const ROW_PARENT = "cursor-pointer transition-colors hover:bg-row-hover";
+
+/**
+ * ═══════════ CỘT HÀNH ĐỘNG GHIM Ở MÉP PHẢI ═══════════
+ *
+ * Một bảng HÀNG ĐỢI tồn tại để người ta bấm nút trên nó. Nếu cột nút trôi ra ngoài khung nhìn khi
+ * màn hình hẹp — hoặc khi người dùng phóng to 110% để đọc cho đỡ mỏi mắt — thì thao tác nào cũng
+ * tốn thêm một lần cuộn ngang, và người dùng quay lại làm bằng cách mở từng case.
+ *
+ * Đo được ở QA trình duyệt: ở mức phóng 110% (khung nhìn hiệu dụng ~1309px) cột hành động bị cắt
+ * mất nút cuối. Thu hẹp các cột khác chỉ đẩy vấn đề sang mức phóng cao hơn — ghim mới là sửa.
+ *
+ * NỀN PHẢI ĐẶC. Ô ghim vẽ đè lên phần bảng đang trượt bên dưới nó; nền trong suốt thì chữ của cột
+ * khác chạy xuyên qua nút. Và vì nền đặc che mất màu di chuột của dòng, ô ghim phải tự nhận màu đó
+ * qua `group-hover` — nếu không, rê chuột lên dòng sẽ thấy một mảng lệch màu ở mép phải.
+ *
+ * `z-[5]` THẤP HƠN `z-10` của tiêu đề cột (tiêu đề không bị nút che khi cuộn dọc) và thấp hơn mọi
+ * portal (dropdown, popover ở z-50).
+ */
+export const STICKY_ACTIONS = "sticky right-0 z-[5] bg-card group-hover:bg-row-hover shadow-[inset_1px_0_0_0_var(--color-border)]";
+
+/** Bản cho ô tiêu đề của chính cột đó: nền của tiêu đề, không phải nền của dòng. */
+export const STICKY_ACTIONS_HEAD = "sticky right-0 bg-table-head shadow-[inset_1px_0_0_0_var(--color-border)]";
+
+/** Dòng đang chọn: ô ghim phải mang màu chọn, nếu không mép phải lệch màu với phần còn lại của dòng. */
+export const STICKY_ACTIONS_SELECTED = "bg-row-selected group-hover:bg-row-selected";
