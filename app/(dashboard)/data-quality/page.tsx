@@ -26,6 +26,9 @@ import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/co
 import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments, type ReturnItemSummary } from "@/lib/queries/data-quality";
+import { getDataQualityIssues } from "@/lib/queries/data-quality-issues";
+import { DQ_SEVERITY_LABEL, DQ_SEVERITY_TONE, UNKNOWN_KIND_HINT, UNKNOWN_KIND_LABEL } from "@/lib/constants/data-quality-issues";
+import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_LABEL, SEVERITY_TONE, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -61,7 +64,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   // NĂM TRUY VẤN ĐỘC LẬP, KHÔNG ĐỨNG CHỜ NHAU. Trước đây chúng chạy nối tiếp nên thời gian dựng
   // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
   // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
-  const [summary, tower, towerDrill, drill, backlog, adsCoverage] = await Promise.all([
+  const [summary, tower, towerDrill, drill, backlog, adsCoverage, dqIssues] = await Promise.all([
     dataQualitySummary(params.period),
     getControlTower(),
     towerRule ? controlTowerDrill(towerRule, page, PAGE_SIZE) : Promise.resolve(null),
@@ -77,6 +80,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     issue === "return-not-received" ? pendingReturnedForWarehouse() : Promise.resolve(null),
     // Độ phủ quy kết quảng cáo 30 ngày — chỉ số theo dõi dữ liệu MỚI có tốt lên hay không.
     adsAttributionCoverage(new Date(Date.now() - 30 * 86_400_000), new Date()),
+    getDataQualityIssues(),
   ]);
   const warehouseBacklog = backlog
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
@@ -145,6 +149,71 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
             tone={adsCoverage.withTrackingCode > 0 ? "green" : "slate"}
             note={adsCoverage.withTrackingCode > 0 ? "Đường duy nhất để độ phủ tăng thật" : "Chưa mẩu quảng cáo nào gắn mã theo dõi riêng"}
           />
+        </div>
+      </SectionCard>
+
+      {/*
+        ───────── SỔ LỖ HỔNG DỮ LIỆU ─────────
+
+        Một bảng chỉ in con số là một bảng không ai mở lần thứ hai: người đọc thấy "412 đơn thiếu
+        giá vốn" rồi không biết ai sửa, sửa ở đâu. Nên mỗi dòng mang đủ VIỆC PHẢI LÀM và PHÒNG làm
+        việc đó.
+
+        Cột "Loại chỗ trống" là cột quan trọng nhất. Không phải mọi UNKNOWN đều là lỗi: phần lớn
+        vận đơn thiếu mốc bàn giao là kiện ĐVVC CHƯA lấy được — đó là sự thật. Gộp chúng vào rồi đi
+        "giảm số UNKNOWN" là cách chắc chắn nhất để ai đó lấp chỗ trống bằng một phép đoán.
+      */}
+      <SectionCard
+        title="Sổ lỗ hổng dữ liệu"
+        description={`${formatNumber(dqIssues.filter((i) => i.fixable && (i.count ?? 0) > 0).length)} nhóm sửa được / ${formatNumber(dqIssues.length)} nhóm đang theo dõi`}
+        hint="Sửa được = dữ liệu ĐÃ CÓ nhưng chưa nối, hoặc đường ống chưa chạy lại. Nhóm 'không có chứng cứ' và 'nhiều ứng viên' KHÔNG phải việc phải làm — giữ nguyên là câu trả lời đúng."
+      >
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Lỗ hổng</TableHead>
+                <TableHead className="text-right">Đếm được</TableHead>
+                <TableHead>Loại chỗ trống</TableHead>
+                <TableHead>Mức</TableHead>
+                <TableHead>Gần nhất</TableHead>
+                <TableHead>Việc phải làm</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dqIssues.map((i) => (
+                <TableRow key={i.key}>
+                  <TableCell className="align-top">
+                    <div className="font-medium">
+                      {i.href ? (
+                        <Link href={i.href} className="underline-offset-2 hover:underline">
+                          {i.label}
+                        </Link>
+                      ) : (
+                        i.label
+                      )}
+                    </div>
+                    <div className="max-w-[420px] text-[11px] text-muted-foreground">{i.why}</div>
+                    {i.sample.length ? <div className="mt-1 max-w-[420px] truncate text-[11px] text-muted-foreground" title={i.sample.join("\n")}>Ví dụ: {i.sample.slice(0, 2).join(" · ")}</div> : null}
+                  </TableCell>
+                  {/* `null` = CHƯA ĐẾM ĐƯỢC, khác hẳn 0 = đã đếm và không có gì. */}
+                  <TableCell className="text-right align-top tabular-nums font-medium">{formatNumber(i.count)}</TableCell>
+                  <TableCell className="align-top text-[11px]" title={UNKNOWN_KIND_HINT[i.kind]}>
+                    {UNKNOWN_KIND_LABEL[i.kind]}
+                    {i.fixable ? <Badge variant="secondary" className="ml-1 text-[10px]">sửa được</Badge> : null}
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <Badge variant="secondary" className={cn("text-[10px]", DQ_SEVERITY_TONE[i.severity])}>{DQ_SEVERITY_LABEL[i.severity]}</Badge>
+                  </TableCell>
+                  <TableCell className="align-top text-[11px] text-muted-foreground">{i.lastSeen ? formatDateTime(i.lastSeen) : "—"}</TableCell>
+                  <TableCell className="max-w-[380px] align-top text-[11px]">
+                    <div>{i.action}</div>
+                    <div className="mt-0.5 text-muted-foreground">Phòng: {DEPARTMENT_LABEL[i.owner]} · Nguồn: {i.source}</div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </SectionCard>
 
