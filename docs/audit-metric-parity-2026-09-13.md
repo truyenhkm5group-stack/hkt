@@ -90,3 +90,52 @@ tính, một bên nhân với 40%.
 **1.363 vận đơn đã kết thúc** có sự kiện ĐVVC — vượt xa ngưỡng tin cậy cao (100 mẫu) cho tổng thể.
 Cỡ mẫu của từng trạng thái con sẽ được in ra cạnh mỗi xác suất, và trạng thái nào dưới 10 mẫu thì
 trả `null` chứ không trả một con số đoán.
+
+---
+
+# Đo lại sau khi nối hợp đồng (ops #701, #702 — chỉ đọc, 13/09/2026)
+
+## Cohort 30 ngày theo NGÀY CHỐT ĐƠN, tách theo mã hàng
+
+Đếm theo mã VTP thuần tuý (bậc chứng từ cao nhất), để thấy phần nào đã ngã ngũ và phần nào còn treo:
+
+| Mã | Đơn | Đã giao (501) | Hỏng (504/101/107/201/503) | Đang chạy | Chưa có mã VTP số |
+|---|---:|---:|---:|---:|---:|
+| Q002 | 458 | 16 | 15 | 46 | 381 |
+| Q003 | 359 | 15 | 19 | 98 | 227 |
+| Q004 | 96 | 4 | 0 | 75 | 17 |
+| Q005 | 21 | 0 | 1 | 20 | 0 |
+| (chưa có mã) | 3 | 0 | 0 | 3 | 0 |
+| Q001 | 2 | 0 | 0 | 0 | 2 |
+
+## 627 vận đơn "chưa có mã VTP số" rơi về đâu
+
+Câu hỏi quan trọng nhất của bản này: nếu phần lớn cohort không có `vtp_status` thì mô hình đang dự
+báo trên cái gì? Đo thẳng:
+
+| `stage` | `vtp_status_name` | Số kiện | Luật chữ / chặng bắt được | Trạng thái con |
+|---|---|---:|---|---|
+| DELIVERED | Giao thành công | 240 | `%giao thanh cong%` | `DELIVERED` |
+| RETURNED | Đã trả | 193 | (không khớp luật chữ) → chặng `RETURNED` | `RETURNED` |
+| RETURNING | Đang chuyển hoàn | 59 | `%chuyen hoan%` | `RETURNING` |
+| PENDING | Chờ xử lý | 49 | `%cho xu ly%` | `WAITING_PROCESSING` |
+| DELIVERY_FAILED | Chờ phát lại | 30 | `%cho phat lai%` | `WAITING_REDELIVERY` |
+| IN_TRANSIT | Đang vận chuyển | 27 | `%dang van chuyen%` | `IN_TRANSIT` |
+| OUT_FOR_DELIVERY | Đang giao hàng | 26 | `%dang giao hang%` | `OUT_FOR_DELIVERY` |
+| OUT_FOR_DELIVERY | Phát tiếp | 1 | `%phat tiep%` | `OUT_FOR_DELIVERY` |
+| DELIVERED | (rỗng) | 1 | (rỗng) → chặng `DELIVERED` | `DELIVERED` |
+| RETURNING | Đã duyệt hoàn | 1 | `%duyet hoan%` | `RETURNING` |
+
+**Không dòng nào rơi vào `UNKNOWN`.** Và **433/627 (69%) đã có kết cục cuối** (240 giao + 193 hoàn)
+— tức phần mà mô hình phải *dự báo* nhỏ hơn nhiều so với cột "chưa có mã VTP số" gợi ý. Cột đó đo
+việc **thiếu mã số**, không đo việc **thiếu thông tin**.
+
+Đây cũng là lý do `SUBSTATE_IMPLIES_PICKED_UP.WAITING_PROCESSING` phải là `AMBIGUOUS`: 49 kiện
+"Chờ xử lý" ở đây không có mã số nào để nói chúng đã rời kho hay chưa.
+
+## Việc còn lại sau bản này
+
+Mô hình hiện học xác suất theo **trạng thái con của toàn shop**. Bước tiếp theo hợp lý — khi đủ mẫu
+cho từng mã — là xác suất theo (mã hàng × trạng thái), với cùng luật lùi bậc: chưa đủ mẫu cho mã thì
+lùi về xác suất toàn shop, chưa đủ cả hai thì `null`. Hợp đồng đã có `ProbabilityBasis` để khai bậc
+nào đang được dùng, nên việc mở rộng không phải viết lại công thức.
