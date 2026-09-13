@@ -663,6 +663,48 @@ export const products = pgTable(
   (t) => [index("products_name_idx").on(t.name)],
 );
 
+/**
+ * ═══════════ GHI CHÚ VẬN HÀNH CHO SẢN PHẨM / MẪU MÃ ═══════════
+ *
+ * Cột `products.note` đã có, nhưng nó là ô ghi chú ĐỒNG BỘ TỪ PANCAKE: màn hình hiện nó ra và
+ * không có đường nào để người trong shop viết vào. Viết đè lên cột đó sai hai lần — lần đồng bộ
+ * sau ghi đè mất, và không ai biết ai viết lúc nào.
+ *
+ * Bảng này CHỈ THÊM. Ghi chú là thứ người ta đọc để hiểu bối cảnh ("lô này vải mỏng hơn mẫu",
+ * "size L hay bị chật"), nên sửa đè lên một dòng cũ là xoá mất điều ai đó đã quan sát được.
+ *
+ * ─── GHI CHÚ KHÔNG ĐƯỢC CHẠM VÀO MỘT CON SỐ NÀO ───
+ *
+ * Không truy vấn báo cáo nào được đọc bảng này. Một ô chữ tự do mà ảnh hưởng tới tồn kho, giá vốn
+ * hay lợi nhuận là đường ngắn nhất để một câu ghi vội thành một con số trong báo cáo tài chính.
+ * `tests/product-notes.test.ts` quét mã nguồn và khoá điều đó lại.
+ */
+export const productNotes = pgTable(
+  "product_notes",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** `NULL` = ghi chú cho cả sản phẩm; có giá trị = ghi chú riêng cho một mẫu mã. */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Danh sách ĐÓNG — ô gõ tự do sẽ sinh ra ba cách viết cho cùng một nhóm. */
+    category: text("category").notNull().default("OTHER"),
+    body: text("body").notNull(),
+    /** `users.id`. `NULL` = job/nhập liệu máy, KHÁC HẲN "chưa biết ai" (lib/constants/actor.ts). */
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN để người đọc. Do MÁY CHỦ đọc từ `users`, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("product_notes_product_idx").on(t.productId, t.createdAt),
+    check("product_notes_category_check", sql`${t.category} IN ('QUALITY', 'SIZING', 'SUPPLIER', 'PRICING', 'PACKAGING', 'OTHER')`),
+    // Ghi chú rỗng là nhiễu vĩnh viễn: nó chiếm chỗ "ghi chú mới nhất" và đẩy ghi chú thật xuống.
+    check("product_notes_body_check", sql`length(btrim(${t.body})) > 0`),
+  ],
+);
+
 export const productVariants = pgTable(
   "product_variants",
   {

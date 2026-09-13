@@ -540,6 +540,13 @@
       "when": 1789301935620,
       "tag": "0077_metric_target_bands",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789305535620,
+      "tag": "0078_product_notes",
+      "breakpoints": true
     }
   ]
 }
