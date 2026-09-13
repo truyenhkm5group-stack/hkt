@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
+import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
+import { CS_CUSTOMER_WAITING_KINDS, CS_DUE_SOON_HOURS, CS_KIND_SEVERITY, CS_SLA_BUCKETS, CS_SLA_BUCKET_LABEL, csCasePriority, csDueAt, csSlaBucket, getCustomerNextAction, type CsNextAction, type CsSlaBucket } from "@/lib/constants/cs-next-action";
 import { CS_ACTIONABLE_STATUSES, CS_ASSIGNEE_FACET_BOT, CS_ASSIGNEE_FACET_LABEL, CS_ASSIGNEE_FACET_UNLINKED, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
 import { rowsOf } from "@/lib/sql-rows";
 import { decideScope } from "@/lib/auth/scope-guard";
@@ -66,7 +67,36 @@ function statusesOf(params: ListParams): string[] {
   return params.filters.status?.length ? params.filters.status : [...CS_ACTIONABLE_STATUSES];
 }
 
-type FacetKey = "kind" | "status" | "assignee" | "domain";
+/**
+ * ═══ LỌC THEO HẠN — CÙNG MỘT ĐỊNH NGHĨA VỚI CHIP TRÊN DÒNG ═══
+ *
+ * `csSlaBucket` (TypeScript, chạy ở trình duyệt để tô màu) và mệnh đề dưới đây (SQL, chạy để lọc)
+ * phải nói CÙNG một điều, nếu không con số trên chip lọc sẽ khác số dòng bảng hiện ra — và người
+ * dùng không biết con số nào đúng.
+ *
+ * Hai bên cùng đọc `CS_CASE_SLA_HOURS` và cùng công thức hạn (`coalesce(hẹn, tạo + SLA)`), nên
+ * chúng không thể lệch về ĐỊNH NGHĨA. "Hôm nay" ở SQL tính theo ngày lịch của MÁY CHỦ, ở trình
+ * duyệt theo ngày lịch của người dùng — cả hai đều chạy giờ Việt Nam nên trùng nhau; đây là chỗ
+ * duy nhất hai bên có thể lệch, và nó lệch nhiều nhất là một dòng quanh nửa đêm.
+ */
+function slaCond(bucket: string): SQL {
+  const han = dueAtSql();
+  const soon = sql.raw(String(CS_DUE_SOON_HOURS));
+  switch (bucket) {
+    case "OVERDUE":
+      return sql`${han} <= now()`;
+    case "DUE_SOON":
+      return sql`${han} > now() and ${han} <= now() + (${soon} * interval '1 hour')`;
+    case "DUE_TODAY":
+      return sql`${han} > now() + (${soon} * interval '1 hour') and ${han}::date = now()::date`;
+    case "NOT_DUE":
+      return sql`${han} > now() + (${soon} * interval '1 hour') and ${han}::date > now()::date`;
+    default:
+      return sql`true`;
+  }
+}
+
+type FacetKey = "kind" | "status" | "assignee" | "domain" | "sla";
 
 /**
  * Ô LỌC "PHỤ TRÁCH" — giá trị là KHOÁ TÀI KHOẢN, cộng hai rổ đặc biệt (`lib/constants/cs-domain.ts`).
@@ -118,6 +148,10 @@ async function whereOf(params: ListParams, skip?: FacetKey) {
   if (skip !== "status") conds.push(inArray(c.status, statusesOf(params)));
   if (skip !== "kind" && params.filters.kind?.length) conds.push(inArray(c.kind, params.filters.kind));
   if (skip !== "assignee" && params.filters.assignee?.length) conds.push(assigneeFilterCond(params.filters.assignee));
+  if (skip !== "sla" && params.filters.sla?.length) {
+    const chon = params.filters.sla.filter((b) => (CS_SLA_BUCKETS as readonly string[]).includes(b));
+    if (chon.length) conds.push(or(...chon.map((b) => slaCond(b))));
+  }
   const term = params.q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -208,7 +242,7 @@ export type CsCaseRow = Awaited<ReturnType<typeof listCsCases>>["rows"][number];
 export async function csFacets(params: ListParams) {
   const db = await getDb();
   const c = schema.csCases;
-  const [kinds, statuses, assignees, domains] = await Promise.all([
+  const [kinds, statuses, assignees, domains, slas] = await Promise.all([
     db.select({ value: c.kind, count: count() }).from(c).where(await whereOf(params, "kind")).groupBy(c.kind),
     db.select({ value: c.status, count: count() }).from(c).where(await whereOf(params, "status")).groupBy(c.status),
     // Gom theo VỊ TRÍ CỘT: lặp lại biểu thức trong `group by` thì drizzle sinh tham số mới và Postgres
@@ -225,6 +259,16 @@ export async function csFacets(params: ListParams) {
         return { value: d as string, label: CS_DOMAIN_LABEL[d], count: Number(row?.n ?? 0) };
       }),
     ),
+    // Bốn mức hạn: đếm bằng CHÍNH mệnh đề mà bộ lọc dùng, nên "số trên chip = số dòng khi bấm vào".
+    (async () => {
+      const nen = await whereOf(params, "sla");
+      return Promise.all(
+        CS_SLA_BUCKETS.map(async (b) => {
+          const [row] = await db.select({ n: count() }).from(c).where(and(nen, slaCond(b)));
+          return { value: b as string, label: CS_SLA_BUCKET_LABEL[b], count: Number(row?.n ?? 0) };
+        }),
+      );
+    })(),
   ]);
   return {
     kinds: kinds.map((k) => ({ value: k.value, label: CS_KIND_LABEL[k.value as CsKind] ?? k.value, count: Number(k.count) })),
@@ -233,6 +277,7 @@ export async function csFacets(params: ListParams) {
       .filter((k): k is typeof k & { value: string } => k.value !== null)
       .map((k) => ({ value: k.value, label: CS_ASSIGNEE_FACET_LABEL[k.value] ?? k.label ?? k.value, count: Number(k.count) })),
     domains,
+    slas,
   };
 }
 
@@ -485,22 +530,80 @@ export type CsCustomerGroup = {
   customerPhone: string;
   /** Số case ĐANG MỞ của khách này. */
   openCount: number;
+  /** Số case đã quá hạn — con số quyết định dòng có đỏ hay không. */
+  overdueCount: number;
   /** Loại việc đang mở, đã bỏ trùng — để nhìn một dòng biết cần chuẩn bị gì trước khi gọi. */
   kinds: string[];
   oldestAt: Date;
   latestAt: Date;
+  /** Hạn SỚM NHẤT trong các case còn mở. `null` = không case nào còn hạn sống. */
+  dueAt: Date | null;
+  slaBucket: CsSlaBucket;
+  /** Điểm ưu tiên của khách = điểm của case gấp nhất. Chỉ để xếp thứ tự, không phải chỉ số. */
+  priority: number;
   /** Đã có ai nhận ÍT NHẤT một case chưa. */
   anyAssigned: boolean;
-  cases: { id: string; kind: string; status: string; source: string; orderId: string | null; title: string; createdAt: Date; assignee: string }[];
+  /** Người thật đang cầm việc của khách này (bỏ trùng, bỏ bot). */
+  owners: string[];
+  /** VIỆC NÊN LÀM TIẾP — luật xác định ở `lib/constants/cs-next-action.ts`. */
+  nextAction: CsNextAction;
+  /** Hội thoại Pancake của khách, nếu lần ra được từ bất kỳ case nào. */
+  chatUrl: string | null;
+  cases: CsCustomerCase[];
 };
+
+export type CsCustomerCase = {
+  id: string;
+  kind: string;
+  status: string;
+  source: string;
+  orderId: string | null;
+  orderSystemId: number | null;
+  title: string;
+  createdAt: Date;
+  followUpAt: Date | null;
+  assignee: string;
+  assigneeUserId: string | null;
+  dueAt: Date | null;
+  slaBucket: CsSlaBucket;
+  /** Đường mở đúng hội thoại Pancake của case. `null` = đơn landing/sheet, không có hội thoại. */
+  chatUrl: string | null;
+};
+
+/**
+ * ═══ XẾP HÀNG ĐỢI THEO ĐỘ GẤP, KHÔNG THEO "AI NHIỀU VIỆC NHẤT" ═══
+ *
+ * Bản trước xếp theo `count(*) desc` — khách có nhiều việc nhất lên đầu. Nghe hợp lý, nhưng nó đẩy
+ * một khiếu nại đơn lẻ đã quá hạn ba ngày xuống dưới một khách có bốn case tư vấn size còn mới.
+ *
+ * Ở đây phép xếp đi theo HẠN và MỨC NGHIÊM TRỌNG, và cả hai lấy từ CHÍNH hằng số mà giao diện
+ * dùng: `CS_CASE_SLA_HOURS` và `CS_KIND_SEVERITY` được nội suy vào SQL chứ không gõ lại. Viết
+ * lại thang điểm bằng tay ở đây là dựng nguồn thứ hai, và nó sẽ lệch ngay lần đầu ai đó chỉnh một
+ * con số.
+ *
+ * SQL lo THỨ TỰ TRANG (phải phân trang được); `csCasePriority` lo thứ tự CHÍNH XÁC trong trang.
+ * Hai lớp cùng đọc một bộ hằng nên chúng không thể mâu thuẫn về hướng.
+ */
+function severitySql(): SQL<number> {
+  const c = schema.csCases;
+  const nhanh = (CS_KINDS as readonly string[]).map((k) => sql`when ${c.kind} = ${k} then ${CS_KIND_SEVERITY[k as CsKind] ?? 20}`);
+  return sql<number>`(case ${sql.join(nhanh, sql` `)} else 20 end)`;
+}
+
+/** Hạn của một case, ĐÚNG định nghĩa `csDueAt`: có hẹn thì hạn là cái hẹn, không thì tạo + SLA. */
+function dueAtSql(): SQL<Date> {
+  const c = schema.csCases;
+  return sql<Date>`coalesce(${c.followUpAt}, ${c.createdAt} + (${CS_CASE_SLA_HOURS} * interval '1 hour'))`;
+}
 
 /**
  * Hàng đợi CSKH gom theo khách.
  *
  * Hai lượt truy vấn cố định: một lượt lấy khoá của trang (có phân trang), một lượt lấy TOÀN BỘ case
- * của đúng những khoá đó. Không có truy vấn nào nằm trong vòng lặp dòng.
+ * của đúng những khoá đó kèm đơn. Không có truy vấn nào nằm trong vòng lặp dòng — 296 khách vẫn là
+ * hai câu lệnh, y như 3 khách.
  */
-export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: CsCustomerGroup[]; total: number; pageCount: number }> {
+export async function listCsCustomerQueue(params: ListParams, now = new Date()): Promise<{ rows: CsCustomerGroup[]; total: number; pageCount: number }> {
   const db = await getDb();
   const c = schema.csCases;
   const where = await whereOf(params);
@@ -512,6 +615,7 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
     else 'x:' || ${c.id}
   end`;
 
+  const HAN = dueAtSql();
   const [keys, [{ total }]] = await Promise.all([
     db
       .select({
@@ -519,12 +623,15 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
         openCount: sql<number>`count(*)`,
         oldestAt: sql<Date>`min(${c.createdAt})`,
         latestAt: sql<Date>`max(${c.createdAt})`,
+        // Khoá xếp của TRANG: quá hạn trước, rồi tới mức nghiêm trọng cao nhất, rồi hạn sớm nhất.
+        overdue: sql<number>`count(*) filter (where ${HAN} <= now())`,
+        severity: sql<number>`max(${severitySql()})`,
+        dueAt: sql<Date>`min(${HAN})`,
       })
       .from(c)
       .where(where)
       .groupBy(KHOA)
-      // Khách có NHIỀU việc nhất lên trước: đó là người mà một cuộc gọi giải quyết được nhiều nhất.
-      .orderBy(sql`count(*) desc`, sql`min(${c.createdAt}) asc`)
+      .orderBy(sql`count(*) filter (where ${HAN} <= now()) desc`, sql`max(${severitySql()}) desc`, sql`min(${HAN}) asc`)
       .limit(params.pageSize)
       .offset((params.page - 1) * params.pageSize),
     db.select({ total: sql<number>`count(distinct ${KHOA})` }).from(c).where(where),
@@ -533,6 +640,7 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
   if (!keys.length) return { rows: [], total: Number(total), pageCount: 1 };
 
   const danhSachKhoa = keys.map((k) => k.key);
+  const o = schema.orders;
   const cases = await db
     .select({
       key: KHOA.as("k"),
@@ -543,12 +651,20 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
       orderId: c.orderId,
       title: c.title,
       createdAt: c.createdAt,
+      followUpAt: c.followUpAt,
       assignee: c.assignee,
+      assigneeUserId: c.assigneeUserId,
+      chatUrl: c.chatUrl,
+      conversationId: c.conversationId,
       customerId: c.customerId,
       customerName: c.customerName,
       customerPhone: c.customerPhone,
+      orderSystemId: o.systemId,
+      orderPageId: o.pageId,
+      orderConversationId: o.conversationId,
     })
     .from(c)
+    .leftJoin(o, eq(o.id, c.orderId))
     .where(and(where, sql`${KHOA} in ${danhSachKhoa}`))
     .orderBy(desc(c.createdAt));
 
@@ -559,9 +675,39 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
     theoKhoa.set(r.key, list);
   }
 
+  /**
+   * Đường mở hội thoại Pancake. `chat_url` do máy quét ghi sẵn là chắc nhất; thiếu thì dựng từ
+   * (page · conversation) của đơn — ĐÚNG cách bảng theo-case dựng, không phải một cách thứ hai.
+   * Không có cả hai ⇒ `null`, và giao diện KHÔNG vẽ nút: một nút bấm vào không đi đâu làm người
+   * dùng mất tin vào cả hàng nút còn lại.
+   */
+  const chatCua = (r: (typeof cases)[number]): string | null =>
+    r.chatUrl || (r.orderPageId && r.orderConversationId ? `https://pancake.vn/${r.orderPageId}?c_id=${r.orderConversationId}` : null);
+
   const rows: CsCustomerGroup[] = keys.map((k) => {
     const list = theoKhoa.get(k.key) ?? [];
     const dau = list[0];
+    const chiTiet: CsCustomerCase[] = list.map((x) => {
+      const dueAt = csDueAt({ kind: x.kind, status: x.status, createdAt: x.createdAt, followUpAt: x.followUpAt, assignee: x.assignee });
+      return {
+        id: x.id,
+        kind: x.kind,
+        status: x.status,
+        source: x.source,
+        orderId: x.orderId,
+        orderSystemId: x.orderSystemId ?? null,
+        title: x.title,
+        createdAt: x.createdAt,
+        followUpAt: x.followUpAt,
+        assignee: x.assignee,
+        assigneeUserId: x.assigneeUserId,
+        dueAt,
+        slaBucket: csSlaBucket(dueAt, now),
+        chatUrl: chatCua(x),
+      };
+    });
+    const dangMo = chiTiet.filter((x) => (CS_ACTIONABLE_STATUSES as readonly string[]).includes(x.status));
+    const hanSom = dangMo.map((x) => x.dueAt).filter((d): d is Date => Boolean(d)).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
     return {
       key: k.key,
       customerId: dau?.customerId ?? null,
@@ -569,13 +715,96 @@ export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: C
       customerName: list.find((x) => x.customerName)?.customerName ?? "",
       customerPhone: list.find((x) => x.customerPhone)?.customerPhone ?? "",
       openCount: Number(k.openCount),
+      overdueCount: dangMo.filter((x) => x.slaBucket === "OVERDUE").length,
       kinds: [...new Set(list.map((x) => x.kind))],
       oldestAt: new Date(k.oldestAt),
       latestAt: new Date(k.latestAt),
+      dueAt: hanSom,
+      slaBucket: csSlaBucket(hanSom, now),
+      priority: Math.max(0, ...list.map((x) => csCasePriority({ kind: x.kind, status: x.status, createdAt: x.createdAt, followUpAt: x.followUpAt, assignee: x.assignee }, now))),
       anyAssigned: list.some((x) => Boolean(humanAssignee(x.assignee))),
-      cases: list.map((x) => ({ id: x.id, kind: x.kind, status: x.status, source: x.source, orderId: x.orderId, title: x.title, createdAt: x.createdAt, assignee: x.assignee })),
+      owners: [...new Set(list.map((x) => humanAssignee(x.assignee)).filter(Boolean))],
+      nextAction: getCustomerNextAction(
+        list.map((x) => ({ id: x.id, kind: x.kind, status: x.status, createdAt: x.createdAt, followUpAt: x.followUpAt, assignee: x.assignee })),
+        now,
+      ),
+      chatUrl: list.map(chatCua).find(Boolean) ?? null,
+      cases: chiTiet,
     };
   });
 
+  /*
+    XẾP CHÍNH XÁC TRONG TRANG bằng đúng hàm mà giao diện dùng để tô màu. SQL đã đưa đúng tập dòng
+    của trang này lên (theo cùng bộ hằng), việc còn lại là xếp lại cho khớp tới từng điểm.
+  */
+  rows.sort((a, b) => b.priority - a.priority || (a.dueAt?.getTime() ?? Infinity) - (b.dueAt?.getTime() ?? Infinity) || a.key.localeCompare(b.key));
+
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
+}
+
+/**
+ * ═══════════ KHỐI LƯỢNG VIỆC THEO NGƯỜI — ĐỂ ĐIỀU PHỐI, KHÔNG ĐỂ CHẤM ĐIỂM ═══════════
+ *
+ * Trưởng ca cần biết ai đang gánh bao nhiêu để chia lại việc trong ca. Đó là toàn bộ mục đích.
+ *
+ * KHÔNG dùng để thưởng/phạt (AGENTS.md mục 24, 27): "đã đóng hôm nay" phụ thuộc loại case rơi vào
+ * tay ai, và "thời gian xử lý" phụ thuộc khách có bắt máy hay không — hai thứ người trực không
+ * quyết được. Bảng này cố ý KHÔNG có cột xếp hạng và KHÔNG có điểm tổng.
+ *
+ * Gom theo KHOÁ TÀI KHOẢN (AGENTS.md mục 34): dòng chỉ có tên gõ tay đứng riêng ở nhóm "chưa nối
+ * tài khoản", và bot đứng ở nhóm "máy" — gộp chúng vào người là báo cáo nói có người làm trong khi
+ * thực tế chưa ai nhận.
+ */
+export type CsOwnerLoad = {
+  /** `users.id`, hoặc rổ đặc biệt `__BOT__` / `__UNLINKED__` / `__NONE__`. */
+  key: string;
+  label: string;
+  open: number;
+  overdue: number;
+  waitingCustomer: number;
+  completedToday: number;
+  /** Trung vị thời gian từ lúc mở tới lúc đóng, tính bằng GIỜ, trên các case đã đóng 30 ngày qua. `null` = chưa đủ mẫu. */
+  medianResolutionHours: number | null;
+};
+
+export async function csOwnerLoad(now = new Date()): Promise<CsOwnerLoad[]> {
+  const db = await getDb();
+  const c = schema.csCases;
+  const pv = await phamViCs();
+  const ro = sql<string>`coalesce(${c.assigneeUserId}, case when ${c.assignee} in ${CS_BOT_ASSIGNEES} then ${CS_ASSIGNEE_FACET_BOT} when ${c.assignee} <> '' then ${CS_ASSIGNEE_FACET_UNLINKED} else '__NONE__' end)`;
+  const rows = await db
+    .select({
+      key: ro.as("ro"),
+      label: schema.users.name,
+      email: schema.users.email,
+      open: sql<number>`count(*) filter (where ${c.status} in ('OPEN','IN_PROGRESS'))`,
+      overdue: sql<number>`count(*) filter (where ${c.status} in ('OPEN','IN_PROGRESS') and ${dueAtSql()} <= now())`,
+      waiting: sql<number>`count(*) filter (where ${c.status} in ('OPEN','IN_PROGRESS') and ${c.kind} in ${CS_CUSTOMER_WAITING_KINDS})`,
+      completedToday: sql<number>`count(*) filter (where ${c.status} = 'DONE' and ${c.resolvedAt} >= date_trunc('day', now()))`,
+      medianHours: sql<number | null>`percentile_cont(0.5) within group (order by extract(epoch from (${c.resolvedAt} - ${c.createdAt})) / 3600) filter (where ${c.status} = 'DONE' and ${c.resolvedAt} >= now() - interval '30 days')`,
+    })
+    .from(c)
+    .leftJoin(schema.users, eq(schema.users.id, c.assigneeUserId))
+    .where(and(csCustomerCond(), pv))
+    .groupBy(sql`1`, sql`2`, sql`3`);
+
+  void now;
+  return rows
+    .map((r) => ({
+      key: r.key,
+      label: CS_ASSIGNEE_FACET_LABEL[r.key] ?? (r.key === "__NONE__" ? "Chưa ai nhận" : r.label || r.email || r.key),
+      open: Number(r.open),
+      overdue: Number(r.overdue),
+      waitingCustomer: Number(r.waiting),
+      completedToday: Number(r.completedToday),
+      /*
+        TRUNG VỊ CHƯA ĐỦ MẪU LÀ `null`, KHÔNG PHẢI 0 (AGENTS.md mục 42).
+
+        Một người đóng đúng hai case trong 30 ngày thì trung vị của họ không nói lên điều gì; in ra
+        "0,5 giờ" cạnh tên một người khác có 40 case là mời người đọc so hai thứ không so được.
+      */
+      medianResolutionHours: r.medianHours === null || Number(r.completedToday) + Number(r.open) === 0 ? null : Number(r.medianHours),
+    }))
+    .filter((r) => r.open > 0 || r.completedToday > 0)
+    .sort((a, b) => b.overdue - a.overdue || b.open - a.open || a.label.localeCompare(b.label, "vi"));
 }

@@ -293,3 +293,85 @@ export async function saveCsRules(input: unknown): Promise<Result> {
   revalidate();
   return { ok: true };
 }
+
+/**
+ * ═══════════ BẤM HÀNG LOẠT — CHỈ NHỮNG VIỆC CÓ CÙNG NGHĨA TRÊN MỌI LOẠI CASE ═══════════
+ *
+ * Hàng đợi theo khách cho chọn nhiều dòng, mỗi dòng là một khách với N case. Nhận việc cho mười
+ * khách là một thao tác thật (người trực gom một loạt để gọi trong ca), và bắt họ bấm bốn mươi lần
+ * là lý do người ta bỏ hàng đợi mà quay lại làm bằng Excel.
+ *
+ * NHƯNG chỉ ba việc được phép: **nhận việc · gán người · hẹn lại**. Cả ba nói về AI LÀM và LÀM LÚC
+ * NÀO — nghĩa của chúng không đổi dù case là khiếu nại hay đổi size.
+ *
+ * "Đã xử lý" thì KHÔNG bao giờ. Đóng một lượt 40 case thuộc bảy loại là khẳng định bảy việc khác
+ * nhau đều đã hoàn tất; không ai kiểm được câu đó, và nó xoá luôn hàng đợi thật. Danh sách được
+ * khai ở `lib/constants/cs-next-action.ts::CS_BULK_ACTIONS` và chặn ở CẢ lược đồ đầu vào LẪN lúc
+ * tính — `tests/cs-customer-queue.test.ts` khoá lại.
+ */
+const bulkSchema = z.object({
+  /**
+   * Trần 200 case một lượt. Không phải để bảo vệ máy chủ mà để bảo vệ NGƯỜI BẤM: một thao tác
+   * chạm tới nhiều hơn thế thì họ không còn kiểm được mình vừa làm gì, và không có nút hoàn tác.
+   */
+  ids: z.array(z.string().min(1)).min(1).max(200),
+  action: z.enum(["CLAIM", "SNOOZE", "ASSIGN"]),
+  followUpAt: z.string().datetime({ offset: true }).optional(),
+  assigneeUserId: z.string().trim().max(60).nullable().optional(),
+});
+
+export type CsBulkResult = Result<{ done: number; skipped: number; message: string }>;
+
+export async function csBulkAction(input: unknown): Promise<CsBulkResult> {
+  const { user, error } = await authorize();
+  if (error) return { error };
+  const parsed = bulkSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { action } = parsed.data;
+  const ids = [...new Set(parsed.data.ids)];
+  if (action === "SNOOZE" && !parsed.data.followUpAt) return { error: "Chưa chọn thời điểm hẹn lại" };
+  if (action === "ASSIGN" && !parsed.data.assigneeUserId) return { error: "Chưa chọn người phụ trách" };
+
+  /*
+    PHẠM VI LỌC BẰNG MỘT TRUY VẤN, KHÔNG PHẢI 200 TRUY VẤN.
+
+    `rowInScope` hỏi từng dòng — đúng cho một nút trên một dòng, sai cho một lượt hàng loạt. Ở đây
+    mệnh đề phạm vi được nhúng thẳng vào một câu lệnh lọc cả danh sách, nên chi phí không phụ thuộc
+    số case người dùng chọn.
+  */
+  const d = await decideScope("CS", user);
+  if (d.allow === "NONE") return { error: `${d.reason} ${d.fix}` };
+  const db = await getDb();
+  const trongPhamVi =
+    d.allow === "ALL"
+      ? ids
+      : (await db.select({ id: schema.csCases.id }).from(schema.csCases).where(sql`${schema.csCases.id} in ${ids} and (${d.where})`)).map((r) => r.id);
+  const boQua = ids.length - trongPhamVi.length;
+  if (!trongPhamVi.length) return { error: "Không case nào trong danh sách nằm trong phạm vi dữ liệu của bạn" };
+
+  const actor = actorOf(user);
+  const followUpAt = parsed.data.followUpAt ? new Date(parsed.data.followUpAt) : null;
+  let done = 0;
+  const loi: string[] = [];
+  for (const id of trongPhamVi) {
+    // Đi qua ĐÚNG đường ghi của một nút đơn lẻ: cùng luật, cùng dòng lịch sử, cùng cách xử lý lỗi.
+    // Một lối ghi hàng loạt viết riêng là một lối ghi thứ hai, và nó sẽ quên một trường.
+    const res =
+      action === "ASSIGN"
+        ? await setCsCaseFields({ id, assigneeUserId: parsed.data.assigneeUserId ?? null }, actor)
+        : await applyCsQuickAction({ id, action, followUpAt }, actor);
+    if ("error" in res) loi.push(res.error);
+    else done += 1;
+  }
+  await audit({ userId: user.id, userEmail: user.email, action: "CS_CASE_UPDATE", entity: "CS_CASE", entityId: `bulk:${action}`, detail: { action, requested: ids.length, done, outOfScope: boQua, errors: loi.slice(0, 5) } });
+  revalidate();
+  const nhan = action === "CLAIM" ? "nhận việc" : action === "ASSIGN" ? "giao việc" : "hẹn lại";
+  return {
+    ok: true,
+    done,
+    skipped: boQua + loi.length,
+    // Nói THẲNG phần không làm được. Một thông báo "đã xong" khi 12/40 case bị bỏ qua là thông báo
+    // dạy người dùng đừng tin cái nút.
+    message: `Đã ${nhan} ${done} case${boQua ? ` · ${boQua} ngoài phạm vi` : ""}${loi.length ? ` · ${loi.length} lỗi: ${loi[0]}` : ""}`,
+  };
+}
