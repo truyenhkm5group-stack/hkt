@@ -38,16 +38,19 @@ quy trình mục 17 và 31 của yêu cầu — chỉ thiếu đúng cái tệp.
 **Cách mở khoá (một trong hai):** đặt tệp `.xlsx` vào máy chạy lệnh, HOẶC mở chính sách mạng cho
 `docs.google.com` rồi đưa đường dẫn xuất CSV công khai.
 
-### 0.2 Production — không đo được, không deploy được từ phiên này
+### 0.2 Production — KHÔNG ĐO ĐƯỢC (nhưng deploy được)
 
-`erp.vnxcommerce.com` cũng bị chặn ở cùng tầng proxy (403 CONNECT), và không có `DATABASE_URL` của
+`erp.vnxcommerce.com` bị chặn ở cùng tầng proxy (403 CONNECT), và không có `DATABASE_URL` của
 production trong môi trường. Nên **mọi mục "đo production" của bản này để trống**: không có số
-trước/sau thật, không chạy `db-query`, không xác minh `/api/health`.
+trước/sau thật, không chạy `db-query` được.
 
 Những con số production trích trong mã nguồn và tài liệu dưới đây là **số của phiên trước** (đo
 13/09/2026), được dẫn lại làm bối cảnh và ghi rõ nguồn — không phải số đo mới.
 
-Cổng phát hành đã chạy đủ trên bản checkout SẠCH; phần còn lại là một lượt deploy từ máy có mạng.
+**Deploy thì vẫn làm được**, qua GitHub Actions: workflow tự chạy lại toàn bộ cổng trên máy CI rồi
+tự xác minh `/api/health` trả về đúng 12 ký tự đầu của SHA, và fail nếu không khớp. Đó là bằng
+chứng "đúng bản đã kiểm đang chạy" — thay cho phép đo trực tiếp mà môi trường này không làm được.
+Xem mục 10.
 
 ---
 
@@ -251,8 +254,32 @@ hợp nhất `origin/main` mới nhất:
 Migration mới: **0080** `hmt_return_reconciliation` — CHỈ cộng thêm một bảng, không đổi kiểu, không
 xoá cột, không đụng `return_inspections` / `shipments` / `stock_receipts`.
 
-**Chưa chạy được:** QA trình duyệt (không có mạng tới bản chạy thật để đối chiếu, và không dựng
-được phiên đăng nhập trong môi trường này) và mọi phép đo production.
+### QA trình duyệt — đã chạy, và nó tìm ra ba lỗi
+
+Không đối chiếu được với bản chạy thật (mạng chặn), nhưng **dựng được bản production tại chỗ**:
+`next build` + `next start` trên PGlite có dữ liệu mẫu (22 khách · 39 case, đủ loại việc và đủ mức
+hạn), rồi lái Chromium bằng Playwright.
+
+**3 trang × 3 mức phóng (90% · 100% · 110%) × 2 chế độ màu = 18 ảnh.** Kết quả: không lỗi console,
+không lỗi HTTP, không trang nào tràn ngang ở mức trang.
+
+Ba lỗi bố cục lộ ra và đã sửa (commit `056d2f7`):
+
+| lỗi | hậu quả đo được | sửa |
+|---|---|---|
+| Sáu nút trong ô `flex-wrap` xếp ba hàng | mỗi khách ~150px, một màn hình chỉ hiện **2 khách** | một hàng `flex-nowrap`, nút 28px, nút phụ đi bằng biểu tượng + tooltip |
+| Bốn nhãn loại việc xuống ba dòng | ô cao gấp đôi | tối đa 2 nhãn rồi `+N` (tooltip đủ, bung dòng thấy hết) |
+| Cột hành động trôi khỏi màn hình ở 110% | nút cuối bị cắt | **ghim cột hành động ở mép phải** (`STICKY_ACTIONS`, hợp đồng dùng chung) |
+
+Cột "Phụ trách" riêng bị bỏ — người phụ trách nay nằm dưới tên khách. Một cột nữa chính là thứ đẩy
+cột hành động ra ngoài.
+
+> Bài học ghi lại: bản đầu qua sạch typecheck · lint · 226 khối kiểm thử · build, và vẫn hỏng ở
+> đúng chỗ quan trọng nhất — cột nút. Không bài kiểm nào bắt được "dòng cao gấp ba"; chỉ có chụp
+> màn hình mới bắt được.
+
+**Vẫn chưa chạy được:** mọi phép đo production (không có mạng tới `erp.vnxcommerce.com`, không có
+`DATABASE_URL`).
 
 ---
 
@@ -262,6 +289,23 @@ xoá cột, không đụng `return_inspections` / `shipments` / `stock_receipts`
 |---|---|
 | Chạy đối soát HMT trên dữ liệu thật | không có tệp, mạng chặn `docs.google.com` (mục 0.1) |
 | Đo production trước/sau | không có mạng tới `erp.vnxcommerce.com`, không có `DATABASE_URL` |
-| Deploy | như trên — cần chạy từ máy có mạng, trên đúng SHA đã qua cổng |
-| QA trình duyệt ở 90% / 100% / 110% | cần bản chạy có phiên đăng nhập |
 | Bộ lọc đầy đủ của `/inventory/returns` (mục 21 của yêu cầu) | mới thêm chiều **nguồn gốc**; các chiều lọc còn lại (màu, size, tuổi, loại hoàn) là một bản riêng — nhồi vào bản này thì phần đã làm không được rà kỹ |
+| Đưa kịch bản QA trình duyệt vào kho mã | cần thêm Playwright làm phụ thuộc phát triển — một quyết định riêng, không nhét kèm |
+
+---
+
+## 10. Deploy
+
+| lượt | SHA | kết quả |
+|---|---|---|
+| #262 | `1c3d9c0` | thành công — bước "Kiểm tra HTTPS từ bên ngoài" xác nhận `/api/health` trả đúng commit đó |
+| #263 | `056d2f7` | bản sửa bố cục tìm ra ở QA trình duyệt |
+
+Hai lượt, không phải một: lượt đầu đã qua toàn bộ cổng và đang chạy thì QA trình duyệt mới tìm ra
+ba lỗi bố cục. Ghi thẳng ra đây vì nó tốn một lượt deploy thứ hai, và vì thứ tự đúng lẽ ra là QA
+TRƯỚC deploy.
+
+Cả hai lượt đều chạy lại đầy đủ toàn vẹn kho mã · typecheck · lint · kiểm thử · build TRÊN MÁY CHỦ
+CI trước khi chạm tới VPS, rồi tự xác minh `/api/health` trả về đúng 12 ký tự đầu của SHA và fail
+nếu không khớp — đó là bằng chứng "đúng bản đã kiểm đang chạy", thay cho phép đo trực tiếp mà môi
+trường này không làm được.
