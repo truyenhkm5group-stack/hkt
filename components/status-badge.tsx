@@ -5,6 +5,7 @@ import { OUTCOME_LABEL, OUTCOME_TONE, type OrderOutcome } from "@/lib/constants/
 import { VERIFIED_OUTCOME_LABEL, type VerifiedOutcome } from "@/lib/constants/data-quality";
 import { TRUTH_DIMENSIONS, type TruthDimension } from "@/lib/constants/truth";
 import { cn } from "@/lib/utils";
+import { CUSTOMER_OUTCOME_HINT, CUSTOMER_OUTCOME_LABEL, CUSTOMER_OUTCOME_TONE, outreachEligibility, type CustomerOutcome } from "@/lib/constants/outreach-segment";
 
 const base = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
 
@@ -154,4 +155,25 @@ export function RunStatusBadge({ status }: { status: string }) {
   };
   const [label, tone] = map[status] ?? [status, "bg-muted text-muted-foreground"];
   return <span className={cn(base, tone)}>{label}</span>;
+}
+
+/**
+ * Nhãn KẾT QUẢ LOGISTICS CỦA MỘT KHÁCH HÀNG — khác hẳn `<OrderOutcomeBadge/>` (kết quả của MỘT
+ * ĐƠN). Ở đây grain là con người: đơn GẦN NHẤT ĐÃ CÓ KẾT QUẢ của họ đã kết thúc thế nào.
+ *
+ * Đặt cùng chỗ với các nhãn khác vì cùng một lý do: vẽ tay ở từng trang thì mỗi trang một kiểu, và
+ * người đọc mất dấu hiệu phân biệt.
+ */
+export function CustomerOutcomeBadge({ outcome, className }: { outcome: CustomerOutcome; className?: string }) {
+  const chinhSach = outreachEligibility(outcome);
+  return (
+    <span
+      className={cn("inline-block rounded px-1 text-[10px] font-medium", CUSTOMER_OUTCOME_TONE[outcome], className)}
+      title={`${CUSTOMER_OUTCOME_HINT[outcome]}\n\n${chinhSach.reason}`}
+    >
+      {CUSTOMER_OUTCOME_LABEL[outcome]}
+      {chinhSach.campaign === "RECOVERY" ? " · hỏi lý do trước" : ""}
+      {!chinhSach.allowed ? " · chưa nên nhắn" : ""}
+    </span>
+  );
 }
