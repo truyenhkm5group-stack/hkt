@@ -3025,8 +3025,16 @@ export const metricTargets = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    // Một tầng · một chỉ số · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì không ai biết cái nào thắng.
-    uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.effectiveFrom),
+    /*
+      Một tầng · một chỉ số · một HÌNH DẠNG KỲ · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì
+      không ai biết cái nào thắng.
+
+      `period_kind` PHẢI nằm trong khoá. Thiếu nó thì "500 đơn mỗi TUẦN" và "2.000 đơn mỗi THÁNG"
+      của cùng một chỉ số không thể cùng tồn tại — dòng thứ hai bị ràng buộc chặn, và tệ hơn: lượt
+      ghi thứ hai tra dòng cũ KHÔNG theo kỳ nên nó SỬA ĐÈ đích tuần thành đích tháng. Chủ shop mất
+      một đích đã đặt mà không có một dòng cảnh báo nào.
+    */
+    uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.periodKind, t.effectiveFrom),
     index("metric_targets_lookup_idx").on(t.metricKey, t.effectiveFrom),
     check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION', 'USER')`),
     check("metric_targets_period_check", sql`${t.periodKind} IN ('ANY', 'WEEK', 'MONTH', 'QUARTER', 'YEAR')`),

@@ -204,6 +204,25 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_window_check"),
       "0077: khoảng hiệu lực rỗng thì đích không bao giờ áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao",
     );
+    /*
+      ĐÍCH THEO TUẦN VÀ ĐÍCH THEO THÁNG PHẢI CÙNG TỒN TẠI ĐƯỢC.
+
+      `resolveTarget` lọc theo `period_kind`, tức nó giả định hai đích khác hình dạng kỳ sống song
+      song. Nếu `period_kind` không nằm trong khoá duy nhất thì dòng thứ hai bị chặn — và tệ hơn,
+      lượt ghi thứ hai tra dòng cũ không theo kỳ nên nó SỬA ĐÈ đích tuần thành đích tháng. Chủ shop
+      mất một đích đã đặt, không một dòng cảnh báo nào.
+    */
+    await client.query(`insert into metric_targets (id, metric_key, scope, target, note, effective_from, period_kind, set_by_email) values ('up-tw', 'delivered_orders', 'COMPANY', 500, 'tuần', '2026-01-01', 'WEEK', 'a@shop.vn')`);
+    await client.query(`insert into metric_targets (id, metric_key, scope, target, note, effective_from, period_kind, set_by_email) values ('up-tm', 'delivered_orders', 'COMPANY', 2000, 'tháng', '2026-01-01', 'MONTH', 'a@shop.vn')`);
+    assert.equal(await dem("select count(*)::int as n from metric_targets where metric_key = 'delivered_orders'"), 2, "0077: đích theo TUẦN và theo THÁNG của cùng một chỉ số phải cùng tồn tại");
+    // Nhưng TRÙNG HOÀN TOÀN (cùng kỳ, cùng mốc) thì vẫn phải bị chặn — nếu không, không ai biết
+    // màn hình đang chấm theo dòng nào.
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, target, note, effective_from, period_kind, set_by_email) values ('up-tm2', 'delivered_orders', 'COMPANY', 2500, 'trùng', '2026-01-01', 'MONTH', 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_uq"),
+      "0077: hai đích cùng chỉ số, cùng tầng, CÙNG kỳ, cùng mốc thì phải bị chặn",
+    );
+    await client.query(`delete from metric_targets where id in ('up-tw','up-tm')`);
     await client.query(`delete from metric_targets where id = 'up-t1'`);
 
     /*
