@@ -15,10 +15,12 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_STATUSES } from "@/lib/constants/cs";
 import { CS_DOMAIN_LABEL, CS_DOMAINS } from "@/lib/constants/cs-domain";
 import { formatNumber } from "@/lib/format";
-import { CS_SORTABLE, csFacets, csSummary, listCsCases } from "@/lib/queries/cs";
+import { CS_SORTABLE, csFacets, csSummary, listCsCases, listCsCustomerQueue } from "@/lib/queries/cs";
+import { CustomerQueueTable } from "@/app/(dashboard)/cs/customer-queue-table";
 import { listEmployees } from "@/lib/queries/payroll";
 import { listUsers } from "@/lib/queries/users";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "CSKH" };
 
@@ -37,7 +39,25 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
   const canWrite = can(user, "cs:manage");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain"], sortable: CS_SORTABLE, defaultPeriod: "all" });
-  const [{ rows, total, pageCount }, facets, summary, employees, users] = await Promise.all([listCsCases(params), csFacets(params), csSummary(), listEmployees(), listUsers()]);
+  /*
+    HAI CÁCH XẾP CÙNG MỘT HÀNG ĐỢI.
+
+    `theo-khach` (mặc định) gom mỗi khách thành MỘT dòng — đo production 13/09/2026: 426 việc đang
+    mở nhưng chỉ 296 khách, tức gần một phần ba hàng đợi là cùng người với một dòng khác. Người
+    trực gọi cho họ ba lần, hoặc gọi một lần rồi vẫn thấy hai dòng đỏ còn lại.
+
+    `theo-case` giữ nguyên bảng cũ: vẫn cần khi đi tìm MỘT case cụ thể. Cả hai dùng CHUNG bộ lọc,
+    nên số ở chip và số dòng không thể lệch nhau.
+  */
+  const xem = (raw.view === "theo-case" ? "theo-case" : "theo-khach") as "theo-khach" | "theo-case";
+  const [{ rows, total, pageCount }, nhom, facets, summary, employees, users] = await Promise.all([
+    listCsCases(params),
+    xem === "theo-khach" ? listCsCustomerQueue(params) : Promise.resolve(null),
+    csFacets(params),
+    csSummary(),
+    listEmployees(),
+    listUsers(),
+  ]);
   /*
     NGƯỜI NHẬN VIỆC = TÀI KHOẢN ERP, không phải một danh sách TÊN gộp từ ba nguồn.
 
@@ -102,12 +122,43 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
           { key: "kind", label: "Loại", options: CS_KINDS.map((k) => ({ value: k, label: CS_KIND_LABEL[k], count: facets.kinds.find((x) => x.value === k)?.count ?? 0 })) },
           { key: "assignee", label: "Phụ trách", options: facets.assignees },
         ]}
-        resultLabel={`${formatNumber(total)} case phù hợp`}
+        resultLabel={xem === "theo-khach" && nhom ? `${formatNumber(nhom.total)} khách · ${formatNumber(total)} việc` : `${formatNumber(total)} case phù hợp`}
       />
+      <div className="flex flex-wrap gap-2">
+        {([
+          { key: "theo-khach", label: "Theo khách", note: nhom ? `${formatNumber(nhom.total)} khách` : "" },
+          { key: "theo-case", label: "Theo từng việc", note: `${formatNumber(total)} việc` },
+        ] as const).map((t) => {
+          const sp = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (typeof v === "string" ? [[k, v] as [string, string]] : [])));
+          sp.set("view", t.key);
+          sp.delete("page");
+          return (
+            <Link
+              key={t.key}
+              href={`/cs?${sp.toString()}`}
+              className={cn("rounded-full border px-4 py-1.5 text-sm font-medium transition", t.key === xem ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted")}
+            >
+              {t.label}
+              {t.note ? ` · ${t.note}` : ""}
+            </Link>
+          );
+        })}
+      </div>
       <SectionCard padded={false}>
-        <CsTable rows={rows} staff={staff} canWrite={canWrite} currentUser={user.name || user.email} currentUserId={user.id} />
+        {xem === "theo-khach" && nhom ? (
+          <CustomerQueueTable
+            rows={nhom.rows.map((r) => ({
+              ...r,
+              oldestAt: r.oldestAt.toISOString(),
+              latestAt: r.latestAt.toISOString(),
+              cases: r.cases.map((c) => ({ ...c, createdAt: c.createdAt.toISOString() })),
+            }))}
+          />
+        ) : (
+          <CsTable rows={rows} staff={staff} canWrite={canWrite} currentUser={user.name || user.email} currentUserId={user.id} />
+        )}
         <div className="border-t px-4 py-2">
-          <UrlPagination pageCount={pageCount} total={total} />
+          <UrlPagination pageCount={xem === "theo-khach" && nhom ? nhom.pageCount : pageCount} total={xem === "theo-khach" && nhom ? nhom.total : total} />
         </div>
       </SectionCard>
     </div>

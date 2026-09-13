@@ -441,3 +441,141 @@ export async function findOrderForCase(term: string) {
     .orderBy(desc(o.insertedAt))
     .limit(8);
 }
+
+/* ═══════════════════ MỘT KHÁCH — MỘT DÒNG VIỆC ═══════════════════ */
+
+/**
+ * ═══════════ GOM VIỆC THEO KHÁCH, KHÔNG PHẢI THEO CASE ═══════════
+ *
+ * ─── VẤN ĐỀ ───
+ *
+ * Hàng đợi CSKH liệt kê theo CASE, nên một khách có ba vấn đề chiếm ba dòng. Người trực gọi cho họ
+ * ba lần, hoặc gọi một lần rồi vẫn thấy hai dòng đỏ còn lại và không biết đã xử lý tới đâu.
+ *
+ * ĐO PRODUCTION 13/09/2026
+ *   426 dòng việc đang mở  ·  296 khách duy nhất  ·  228 case thuộc SĐT có từ 2 case trở lên
+ *
+ * Tức 130 dòng là cùng người với một dòng khác — gần một phần ba hàng đợi.
+ *
+ * ─── DANH TÍNH CHUẨN ───
+ *
+ * Ưu tiên `customer_id`; thiếu thì rơi về SĐT. SĐT trong CSDL đã chuẩn hoá ở đường ghi (đo: 0 dòng
+ * lệch chuẩn), nên không cần bóc số lúc đọc.
+ *
+ * Case KHÔNG có cả hai thì đứng RIÊNG một dòng theo chính mã case — KHÔNG gom chúng lại thành một
+ * nhóm "không rõ khách". Gộp những người không quen biết vào một dòng là tạo ra một khách hàng
+ * không tồn tại.
+ *
+ * ─── KHÔNG MẤT GÌ ───
+ *
+ * Không xoá, không sửa, không gộp case. Mỗi case giữ nguyên mã, loại, đơn, nguồn, mốc tạo, trạng
+ * thái và nhật ký của nó; dòng gom chỉ là một PHÉP CHIẾU để đọc. Đóng một case không đóng những
+ * case còn lại — dòng gom vẫn mở chừng nào còn việc chưa xong.
+ *
+ * ─── KHÔNG DÙNG ĐỂ GHÉP ĐƠN ─── VỚI ─── VẬN ĐƠN ───
+ *
+ * Gom theo SĐT chỉ để XẾP MÀN HÌNH. Tuyệt đối không dùng nó làm căn cứ nối đơn với vận đơn: một
+ * khách mua nhiều lần sẽ ghép nhầm mà trông vẫn như thật (xem `lib/returns/product-context.ts`).
+ */
+export type CsCustomerGroup = {
+  /** Khoá gom: `c:<customer_id>` · `p:<sđt>` · `x:<mã case>` khi không có định danh nào. */
+  key: string;
+  customerId: string | null;
+  customerName: string;
+  customerPhone: string;
+  /** Số case ĐANG MỞ của khách này. */
+  openCount: number;
+  /** Loại việc đang mở, đã bỏ trùng — để nhìn một dòng biết cần chuẩn bị gì trước khi gọi. */
+  kinds: string[];
+  oldestAt: Date;
+  latestAt: Date;
+  /** Đã có ai nhận ÍT NHẤT một case chưa. */
+  anyAssigned: boolean;
+  cases: { id: string; kind: string; status: string; source: string; orderId: string | null; title: string; createdAt: Date; assignee: string }[];
+};
+
+/**
+ * Hàng đợi CSKH gom theo khách.
+ *
+ * Hai lượt truy vấn cố định: một lượt lấy khoá của trang (có phân trang), một lượt lấy TOÀN BỘ case
+ * của đúng những khoá đó. Không có truy vấn nào nằm trong vòng lặp dòng.
+ */
+export async function listCsCustomerQueue(params: ListParams): Promise<{ rows: CsCustomerGroup[]; total: number; pageCount: number }> {
+  const db = await getDb();
+  const c = schema.csCases;
+  const where = await whereOf(params);
+
+  // Khoá gom — CÙNG biểu thức ở cả hai lượt, nếu không trang hai sẽ gom khác trang một.
+  const KHOA = sql<string>`case
+    when ${c.customerId} is not null then 'c:' || ${c.customerId}
+    when ${c.customerPhone} <> '' then 'p:' || ${c.customerPhone}
+    else 'x:' || ${c.id}
+  end`;
+
+  const [keys, [{ total }]] = await Promise.all([
+    db
+      .select({
+        key: KHOA.as("k"),
+        openCount: sql<number>`count(*)`,
+        oldestAt: sql<Date>`min(${c.createdAt})`,
+        latestAt: sql<Date>`max(${c.createdAt})`,
+      })
+      .from(c)
+      .where(where)
+      .groupBy(KHOA)
+      // Khách có NHIỀU việc nhất lên trước: đó là người mà một cuộc gọi giải quyết được nhiều nhất.
+      .orderBy(sql`count(*) desc`, sql`min(${c.createdAt}) asc`)
+      .limit(params.pageSize)
+      .offset((params.page - 1) * params.pageSize),
+    db.select({ total: sql<number>`count(distinct ${KHOA})` }).from(c).where(where),
+  ]);
+
+  if (!keys.length) return { rows: [], total: Number(total), pageCount: 1 };
+
+  const danhSachKhoa = keys.map((k) => k.key);
+  const cases = await db
+    .select({
+      key: KHOA.as("k"),
+      id: c.id,
+      kind: c.kind,
+      status: c.status,
+      source: c.source,
+      orderId: c.orderId,
+      title: c.title,
+      createdAt: c.createdAt,
+      assignee: c.assignee,
+      customerId: c.customerId,
+      customerName: c.customerName,
+      customerPhone: c.customerPhone,
+    })
+    .from(c)
+    .where(and(where, sql`${KHOA} in ${danhSachKhoa}`))
+    .orderBy(desc(c.createdAt));
+
+  const theoKhoa = new Map<string, typeof cases>();
+  for (const r of cases) {
+    const list = theoKhoa.get(r.key) ?? [];
+    list.push(r);
+    theoKhoa.set(r.key, list);
+  }
+
+  const rows: CsCustomerGroup[] = keys.map((k) => {
+    const list = theoKhoa.get(k.key) ?? [];
+    const dau = list[0];
+    return {
+      key: k.key,
+      customerId: dau?.customerId ?? null,
+      // Tên có thể trống ở vài case; lấy tên ĐẦU TIÊN khác rỗng thay vì để trống cả dòng.
+      customerName: list.find((x) => x.customerName)?.customerName ?? "",
+      customerPhone: list.find((x) => x.customerPhone)?.customerPhone ?? "",
+      openCount: Number(k.openCount),
+      kinds: [...new Set(list.map((x) => x.kind))],
+      oldestAt: new Date(k.oldestAt),
+      latestAt: new Date(k.latestAt),
+      anyAssigned: list.some((x) => Boolean(humanAssignee(x.assignee))),
+      cases: list.map((x) => ({ id: x.id, kind: x.kind, status: x.status, source: x.source, orderId: x.orderId, title: x.title, createdAt: x.createdAt, assignee: x.assignee })),
+    };
+  });
+
+  return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
+}

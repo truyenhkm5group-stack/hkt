@@ -134,6 +134,7 @@ import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.tes
 import { testCsOrderReconcile } from "./cs-order-reconcile.test";
 import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
+import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testProductNotes } from "./product-notes.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
@@ -1441,6 +1442,7 @@ async function main() {
   await testOutreachIdempotentSend(db);
   testOutreachEligibility();
   await testOutreachOutcomeFacet(db);
+  await testCsCustomerQueue(db);
   await testProductNotes(db);
   testUiConsistency();
   testNavigationCoverage();
