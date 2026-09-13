@@ -247,8 +247,16 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                       */}
                       <div className="flex flex-wrap gap-1">
                         {r.kinds.slice(0, 2).map((k) => (
-                          <Badge key={k} variant="secondary" className="max-w-[140px] truncate text-[10px]" title={CS_KIND_LABEL[k as CsKind] ?? k}>
-                            {CS_KIND_LABEL[k as CsKind] ?? k}
+                          /*
+                            `truncate` PHẢI nằm ở thẻ con, không nằm trên chính Badge.
+
+                            Badge là `inline-flex … justify-center overflow-hidden`; đặt `truncate`
+                            lên nó thì `text-overflow` không có tác dụng lên một nút văn bản trần,
+                            và chữ bị cắt ở CẢ HAI đầu do canh giữa — "ĐT mới · xác nhận số" hiện
+                            thành "T mới · xác nhận s", không có dấu ba chấm nào báo là đã cắt.
+                          */
+                          <Badge key={k} variant="secondary" className="max-w-[140px] justify-start text-[10px]" title={CS_KIND_LABEL[k as CsKind] ?? k}>
+                            <span className="truncate">{CS_KIND_LABEL[k as CsKind] ?? k}</span>
                           </Badge>
                         ))}
                         {r.kinds.length > 2 ? (
