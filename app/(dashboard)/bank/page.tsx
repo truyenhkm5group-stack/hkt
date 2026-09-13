@@ -42,7 +42,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
     unclassifiedBankCount(),
     unconfirmedBankAccountCount(),
     tab === "quy-tac" ? listBankRules() : Promise.resolve([]),
-    tab === "tai-khoan" ? listBankAccounts() : Promise.resolve([]),
+    tab === "tai-khoan" || tab === "nhap-sao-ke" ? listBankAccounts() : Promise.resolve([]),
     tab === "tai-khoan" ? sepayLastReconciliation() : Promise.resolve(null),
   ]);
 
@@ -60,7 +60,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
       {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}
       {tab === "tai-khoan" ? <BankAccountsTab accounts={accounts} canManage={canManageAccounts} lastReconciliation={lastReconciliation} /> : null}
       {tab === "doi-khop" ? <BankMatchTab canWrite={canWrite} /> : null}
-      {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} /> : null}
+      {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} accounts={accounts.map((a) => ({ id: a.id, label: a.label, gateway: a.gateway, accountNumber: a.accountNumber, status: a.status }))} /> : null}
       {tab === "quy-tac" ? <BankRulesTab rules={rules} canWrite={canWrite} /> : null}
       {tab === "doi-chieu" ? <BankReconcileTab period={period} /> : null}
     </div>

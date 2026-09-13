@@ -18,21 +18,35 @@ import { BANK_GROUPS, BANK_GROUP_SPEC, type BankGroup } from "@/lib/constants/ba
  * sản và đặt cọc nhà cung cấp là ĐẦU TƯ, không phải vận hành.
  */
 
-export const CASHFLOW_SECTIONS = ["OPERATING", "INVESTING", "FINANCING", "EXCLUDED"] as const;
+/**
+ * ─── KHOANG THỨ NĂM: CHƯA PHÂN LOẠI ───
+ *
+ * Bản trước xếp dòng chưa phân loại vào VẬN HÀNH với lý do "tiền đã vào/ra thật". Đúng là tiền
+ * thật — nhưng "vận hành" là một KẾT LUẬN, và dòng chưa phân loại là dòng CHƯA AI KẾT LUẬN. Cộng nó
+ * vào headline "tiền ra kinh doanh" là trình bày cái chưa biết như cái đã biết: 3,3 triệu chưa ai xem
+ * hiện ra như 3,3 triệu chi phí vận hành đã xác nhận, và không ai đi tìm nữa.
+ *
+ * Nên nó là khoang RIÊNG: vẫn nằm trong `movementAll` (đẳng thức đầu kỳ + phát sinh = cuối kỳ không
+ * vỡ), vẫn có mặt trên báo cáo, nhưng đứng CẠNH headline dưới dạng "còn N dòng · X ₫ chưa phân loại".
+ */
+export const CASHFLOW_SECTIONS = ["OPERATING", "INVESTING", "FINANCING", "UNCLASSIFIED", "EXCLUDED"] as const;
 export type CashflowSection = (typeof CASHFLOW_SECTIONS)[number];
 
 export const CASHFLOW_SECTION_LABEL: Record<CashflowSection, string> = {
   OPERATING: "Hoạt động kinh doanh",
   INVESTING: "Đầu tư",
   FINANCING: "Vốn & vay",
+  UNCLASSIFIED: "Chưa phân loại",
   EXCLUDED: "Không tính vào dòng tiền",
 };
 
 export const CASHFLOW_SECTION_HINT: Record<CashflowSection, string> = {
   OPERATING:
-    "Tiền sinh ra từ việc bán hàng và chi cho việc bán hàng. Đây là khoang DUY NHẤT nói lên shop có tự nuôi được mình không — vay tiền về hay bơm vốn vào đều không nằm ở đây.",
+    "Tiền sinh ra từ việc bán hàng và chi cho việc bán hàng. Đây là khoang DUY NHẤT nói lên shop có tự nuôi được mình không — vay tiền về hay bơm vốn vào đều không nằm ở đây, và dòng chưa phân loại cũng chưa được tính vào đây.",
   INVESTING: "Mua tài sản dùng nhiều năm và tiền cọc nhà cung cấp. Tiền ra hôm nay nhưng không phải chi phí của hôm nay.",
   FINANCING: "Góp vốn, nhận vay, trả gốc, rút lợi nhuận. KHÔNG phải doanh thu và KHÔNG phải chi phí — chỉ là tiền đổi chủ.",
+  UNCLASSIFIED:
+    "Tiền thật đã vào/ra nhưng CHƯA AI gán nhóm. Chưa biết thuộc việc gì thì chưa được cộng vào vận hành — mọi con số phía trên đang THIẾU đúng khoản này cho tới khi nó được phân loại.",
   EXCLUDED:
     "Chuyển giữa hai tài khoản của mình và chi tiêu không thuộc kinh doanh. Gộp hai đầu của một lần chuyển nội bộ thì tổng bằng 0; nếu KHÔNG bằng 0 thì sổ đang thiếu một đầu.",
 };
@@ -46,10 +60,11 @@ export function sectionOf(group: BankGroup): CashflowSection {
     case "BUSINESS_INFLOW":
     case "BUSINESS_OUTFLOW":
     case "TAX":
-    // Chưa phân loại VẪN là tiền đã vào / ra tài khoản, nên vẫn thuộc dòng tiền vận hành. Đẩy nó
-    // ra khỏi báo cáo sẽ khiến đầu kỳ + vào − ra ≠ cuối kỳ, và phần lệch không có chỗ nào giải thích.
-    case "UNCLASSIFIED":
       return "OPERATING";
+    // Chưa phân loại VẪN là tiền đã vào / ra tài khoản (nằm trong `movementAll` nên đẳng thức đầu kỳ +
+    // phát sinh = cuối kỳ không vỡ), nhưng nó CHƯA BIẾT thuộc việc gì ⇒ khoang riêng, không phải vận hành.
+    case "UNCLASSIFIED":
+      return "UNCLASSIFIED";
     case "CAPITAL":
     case "OWNER":
       return "FINANCING";

@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { removeLinksToTarget } from "@/lib/finance/linkage";
 import { vnStartOfDay } from "@/lib/format";
 import { adSpendSchema, allocationSchema, expenseSchema } from "@/lib/validation/expenses";
 
@@ -27,6 +28,20 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
   // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
   if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
     return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
+  }
+  {
+    // Tạo một khoản chi lớn đổi kết quả kinh doanh của kỳ y như sửa hay xoá nó — bản trước chỉ gác
+    // hai đường sau, nên một người vẫn dựng được khoản 50 triệu mà không ai duyệt. Cùng nhóm, cùng ngưỡng.
+    const cong = await guardSecondApproval({
+      group: "EXPENSE_EDIT",
+      action: "expense.create",
+      entity: "EXPENSE",
+      summary: `Tạo khoản chi ${data.description} · ${data.amount}đ`,
+      amount: Math.abs(data.amount),
+      payload: data,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
   }
   const db = await getDb();
   const [row] = await db
@@ -162,8 +177,13 @@ export async function deleteExpense(id: string): Promise<ActionResult> {
     if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
     if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
   }
+  // Gỡ mối nối tiền ↔ khoản chi TRƯỚC khi xoá: để lại là để lại dòng tiền "đã đối chiếu" với một
+  // chứng từ không còn tồn tại, và sổ nghĩa vụ vẫn cộng nó vào "đã trả". Đi qua `lib/finance/linkage`
+  // để ảnh chụp `linked_type/linked_id` của dòng tiền được dựng lại.
+  const goNoi = await removeLinksToTarget("EXPENSE", id);
   await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt } });
+  await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, linksRemoved: goNoi } });
+  if (goNoi) revalidatePath("/bank");
   for (const p of ["/expenses", "/ads"]) revalidatePath(p);
   revalidatePath("/reports");
   revalidatePath("/");

@@ -19,6 +19,7 @@ import { BANK_GROUP_SPEC, BANK_GROUPS, type BankGroup } from "@/lib/constants/ba
 import { codMatchStatus, matchEmployeeByText, type FinanceOpsCodStatus } from "@/lib/constants/finance-ops";
 import { matchInternalTransferPairs, type InternalTransferTxn } from "@/lib/integrations/bank/internal-transfer";
 import { getMatchOverview } from "@/lib/queries/bank-match";
+import { expenseUnpaidCond } from "@/lib/queries/expense-payment";
 import { listBankAccounts, type BankAccountRow } from "@/lib/queries/bank";
 import { listEmployees } from "@/lib/queries/payroll";
 
@@ -93,10 +94,8 @@ export async function expensesWithoutPayment(limit = 100): Promise<ExpenseNoPaym
     await db.execute(sql`
       select e.id, e.description, e.amount, e.occurred_at, e.category, e.reference
       from expenses e
-      -- ĐỌC BẢNG NỐI, KHÔNG ĐỌC linked_type/linked_id: hai cột đó chỉ là ẢNH CHỤP mối nối LỚN NHẤT
-      -- của mỗi dòng tiền. Một chuyển khoản 30 triệu trả hai hoá đơn 20 + 10 chỉ chụp được hoá đơn
-      -- 20, nên hoá đơn 10 sẽ nằm mãi trong hàng đợi "chưa có tiền" dù đã trả xong.
-      where not exists (select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id)
+      -- Mệnh đề "chưa có tiền nối vào" dùng CHUNG với Tổng quan tài chính (lib/queries/expense-payment.ts).
+      where ${expenseUnpaidCond("e")}
       order by e.occurred_at desc
       limit ${limit}
     `),
@@ -107,7 +106,7 @@ export async function expensesWithoutPayment(limit = 100): Promise<ExpenseNoPaym
 export async function countExpensesWithoutPayment(): Promise<number> {
   const db = await getDb();
   const [row] = rowsOf<{ n: number }>(
-    await db.execute(sql`select count(*)::int as n from expenses e where not exists (select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id)`),
+    await db.execute(sql`select count(*)::int as n from expenses e where ${expenseUnpaidCond("e")}`),
   );
   return Number(row?.n ?? 0);
 }

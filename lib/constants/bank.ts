@@ -110,7 +110,7 @@ export const BANK_GROUP_SPEC: Record<BankGroup, BankGroupSpec> = {
     direction: "ANY",
     cashClass: "UNCLASSIFIED",
     linkTo: null,
-    hint: "Chưa gán nhóm nên KHÔNG vào lãi lỗ. Vẫn tính vào dòng tiền vì tiền đã thật sự vào/ra tài khoản.",
+    hint: "Chưa gán nhóm nên KHÔNG vào lãi lỗ và KHÔNG vào dòng tiền kinh doanh — đây là tiền thật đã vào/ra nhưng CHƯA BIẾT thuộc việc gì. Báo cáo nêu riêng số dòng và số tiền chưa phân loại cạnh mọi tổng.",
   },
   SALES_REVENUE: {
     label: "Doanh thu bán hàng",
@@ -288,9 +288,15 @@ export const BANK_GROUP_SPEC: Record<BankGroup, BankGroupSpec> = {
  * Chuyển giữa hai tài khoản của mình mà tính vào thì cùng một đồng vừa là tiền ra vừa là tiền vào:
  * chênh lệch vẫn đúng nhưng cả hai con số tổng đều bị thổi phồng.
  */
+/**
+ * Dòng tiền KINH DOANH = tiền vào/ra kinh doanh + thuế. KHÔNG gồm chưa phân loại: chưa phân loại là
+ * CHƯA BIẾT, và một con số mang nhãn "kinh doanh" mà gồm cả phần chưa ai xem xét là trình bày cái
+ * chưa biết như cái đã biết. Mọi màn hình cộng dòng tiền kinh doanh phải hiện phần chưa phân loại
+ * ĐỨNG CẠNH (số dòng · số tiền), không lẫn vào và không bỏ đi.
+ */
 export function isBusinessCash(group: BankGroup): boolean {
   const c = BANK_GROUP_SPEC[group].cashClass;
-  return c === "BUSINESS_INFLOW" || c === "BUSINESS_OUTFLOW" || c === "TAX" || c === "UNCLASSIFIED";
+  return c === "BUSINESS_INFLOW" || c === "BUSINESS_OUTFLOW" || c === "TAX";
 }
 
 /**

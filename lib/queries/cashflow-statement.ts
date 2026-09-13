@@ -62,8 +62,10 @@ export type CashflowStatement = {
   closingConfidence: BalanceConfidence;
   sections: CashflowSectionBlock[];
   /**
-   * Tiền vào / ra KINH DOANH — khoang `OPERATING`. Đã loại chuyển nội bộ, VÀ loại vốn góp / tiền
-   * vay / rút vốn: đó là tiền đổi chủ, không phải tiền shop làm ra. Hai con số dùng để so kỳ.
+   * Tiền vào / ra KINH DOANH — khoang `OPERATING`. Đã loại chuyển nội bộ, loại vốn góp / tiền vay /
+   * rút vốn (tiền đổi chủ, không phải tiền shop làm ra), VÀ loại dòng chưa phân loại (chưa biết thuộc
+   * việc gì thì chưa được kết luận là vận hành). Hai con số dùng để so kỳ; `unclassified` phải hiện
+   * CẠNH chúng dưới dạng "còn N dòng · X ₫ chưa phân loại".
    */
   moneyIn: number;
   moneyOut: number;
@@ -71,7 +73,10 @@ export type CashflowStatement = {
   /** Tổng phát sinh của MỌI dòng, kể cả chuyển nội bộ — dùng cho phép kiểm đẳng thức. */
   movementAll: number;
   txnCount: number;
-  /** Dòng chưa phân loại: vẫn là tiền thật, nhưng chưa biết thuộc việc gì. */
+  /**
+   * Dòng chưa phân loại: vẫn là tiền thật (nằm trong `movementAll`), nhưng chưa biết thuộc việc gì
+   * nên KHÔNG nằm trong `moneyIn` / `moneyOut`. Màn hình hiện nó cạnh headline, không được giấu.
+   */
   unclassified: { count: number; moneyIn: number; moneyOut: number };
   /**
    * Đầu kỳ + phát sinh − cuối kỳ. `0` = sổ liền mạch. `null` = chưa đủ mốc số dư để kiểm.

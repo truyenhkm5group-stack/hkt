@@ -8,6 +8,7 @@
  * được bỏ qua và báo lại cho người dùng.
  */
 import type { ExpenseCategory } from "@/db/schema";
+import { EXPENSE_CATEGORIES_NOT_OWNED } from "@/lib/constants/cost-sources";
 import { normalize } from "@/lib/text";
 
 export type LedgerTxn = {
@@ -23,8 +24,12 @@ export type LedgerTxn = {
 
 export type PlanStatus = "new" | "duplicate" | "inflow" | "non_pl" | "not_operating";
 
-/** Nhóm không nhập từ sao kê: quảng cáo đã lấy từ tài khoản QC, nhập hàng đã nằm trong giá vốn / phiếu nhập */
-export const NON_OPERATING_CATEGORIES: ExpenseCategory[] = ["ADS", "PURCHASE"];
+/**
+ * Nhóm không nhập từ sao kê — SUY RA từ sổ thẩm quyền chi phí (`lib/constants/cost-sources.ts`), không
+ * gõ tay: quảng cáo đã lấy từ tài khoản QC, tiền hàng đã nằm trong phiếu nhập, cước và phí hoàn đã
+ * nằm trên vận đơn / bảng kê ĐVVC. Gõ tay `["ADS","PURCHASE"]` đã từng bỏ sót hai nhóm cước.
+ */
+export const NON_OPERATING_CATEGORIES: ExpenseCategory[] = [...EXPENSE_CATEGORIES_NOT_OWNED];
 
 export type PlannedRow = {
   key: string;

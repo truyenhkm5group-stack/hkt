@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -6,6 +8,8 @@ import { BANK_CASH_CLASSES, BANK_GROUPS, BANK_GROUP_SPEC, BANK_LINK_TYPES, isBus
 import { COST_AUTHORITY, ECONOMIC_COSTS, EXPENSE_CATEGORIES_NOT_OWNED, EXPENSE_CATEGORY_ECONOMIC, expensesOwnCategory } from "@/lib/constants/cost-sources";
 import { matchRule, ruleMatches, ruleMayOverwrite, type BankRuleLike } from "@/lib/integrations/bank/rules";
 import { bankRefFor, dedupeByRef, LEDGER_TO_BANK_GROUP, statementInstant, toBankRow } from "@/lib/integrations/bank/statement";
+import { importStatementRows } from "@/lib/integrations/bank/statement-import";
+import { normalizeBankRef } from "@/lib/integrations/bank/sepay";
 import * as XLSX from "xlsx";
 import { parseCsv, parseLedger } from "@/lib/integrations/bank/ledger";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
@@ -48,6 +52,10 @@ export async function testBankLedger(db: Db) {
   assert.equal(txns.length, 5, "2. đọc đủ 5 dòng CSV");
   const rows = txns.map(toBankRow);
   assert.equal(rows[0].bankRef, "FT26246948262000", "2. có mã GD thì dùng thẳng làm khoá");
+  // CÙNG KHOÁ VỚI WEBHOOK: file ghi " ft26246948262000 " và SePay gửi "FT26246948262000" là MỘT bút toán.
+  // Bản trước chỉ trim() ⇒ hai dòng, một giao dịch đếm hai lần, lưới match_key chỉ nêu chứ không gộp.
+  assert.equal(bankRefFor({ ...txns[0], bankRef: " ft26246948262000 " }), "FT26246948262000", "2. mã bút toán trong file chuẩn hoá y hệt webhook");
+  assert.equal(bankRefFor({ ...txns[0], bankRef: " ft26246948262000 " }), normalizeBankRef("FT26246948262000"), "2. cùng hàm chuẩn hoá với đường SePay");
   const khongMa = bankRefFor({ ...txns[0], bankRef: "" });
   assert.ok(khongMa.startsWith("NOREF:2026-09-03:"), "2. không có mã GD thì dựng khoá từ ngày + giờ + tiền + nội dung");
   assert.equal(khongMa, bankRefFor({ ...txns[0], bankRef: "" }), "2. cùng một dòng luôn cho cùng một khoá");
@@ -87,7 +95,9 @@ export async function testBankLedger(db: Db) {
   assert.equal(isBusinessCash("INTERNAL_TRANSFER"), false, "4. chuyển nội bộ không phải dòng tiền kinh doanh");
   assert.equal(isBusinessCash("LOAN_PRINCIPAL"), false, "4. trả nợ gốc không phải dòng tiền kinh doanh");
   assert.equal(isBusinessCash("OWNER_DRAW"), false, "4. rút vốn không phải dòng tiền kinh doanh");
-  assert.equal(isBusinessCash("UNCLASSIFIED"), true, "4. chưa phân loại vẫn là tiền thật đã vào/ra tài khoản");
+  // CHƯA PHÂN LOẠI LÀ CHƯA BIẾT. Cộng nó vào "kinh doanh" là trình bày cái chưa ai xem xét như cái đã
+  // xác nhận; nó phải được ĐẾM RIÊNG và hiện cạnh tổng (xem nhóm 6 bên dưới), không lẫn, không mất.
+  assert.equal(isBusinessCash("UNCLASSIFIED"), false, "4. chưa phân loại KHÔNG được tính là dòng tiền kinh doanh — nó là CHƯA BIẾT");
 
   // Hợp đồng thẩm quyền chi phí sống ở nơi khác và KHÔNG dính vào sổ ngân hàng.
   for (const cost of ECONOMIC_COSTS) assert.ok(COST_AUTHORITY[cost], `4. ${cost} phải khai nguồn có thẩm quyền`);
@@ -146,10 +156,13 @@ export async function testBankLedger(db: Db) {
   const tong = await bankSummary(params, { direction: "ANY", onlyUnclassified: false });
   assert.equal(tong.moneyIn, 51_329_620, "6. tổng tiền vào thô");
   assert.equal(tong.moneyOut, 6_000_000 + 34_400_000 + 1_000_000 + 2_366_200, "6. tổng tiền ra thô");
-  // Chuyển nội bộ 1.000.000 và trả nợ gốc 2.366.200 KHÔNG phải dòng tiền kinh doanh.
-  assert.equal(tong.businessOut, 6_000_000 + 34_400_000, "6. tiền ra kinh doanh loại chuyển nội bộ và trả nợ gốc");
+  // Chuyển nội bộ 1.000.000 và trả nợ gốc 2.366.200 KHÔNG phải dòng tiền kinh doanh; 6.000.000 CHƯA
+  // PHÂN LOẠI cũng không được cộng vào — nó đứng riêng ở `unclassified` / `unclassifiedAmount`.
+  assert.equal(tong.businessOut, 34_400_000, "6. tiền ra kinh doanh loại chuyển nội bộ, trả nợ gốc VÀ dòng chưa phân loại");
   assert.ok(tong.businessOut < tong.moneyOut, "6. loại đúng các nhóm không phải dòng tiền kinh doanh");
   assert.equal(tong.unclassified, 1, "6. đếm dòng chưa phân loại");
+  assert.equal(tong.unclassifiedAmount, 6_000_000, "6. số tiền chưa phân loại hiện RIÊNG cạnh tổng — không lẫn vào, không mất");
+  assert.equal(tong.businessOut + tong.unclassifiedAmount + 1_000_000 + 2_366_200, tong.moneyOut, "6. kinh doanh + chưa phân loại + không-kinh-doanh = toàn bộ tiền ra: không đồng nào rơi mất");
   assert.equal(await unclassifiedBankCount(), 1, "6. huy hiệu tab đếm đúng");
 
   const nhom = await bankByGroup(ALL);
@@ -176,7 +189,60 @@ export async function testBankLedger(db: Db) {
   assert.equal(giuNhan.accountingGroup, "PACKAGING", "6. nhập lại sao kê KHÔNG xoá phân loại người dùng đã làm");
   assert.equal(giuNhan.classifiedBy, "chu@shop.vn", "6. giữ nguyên người đã phân loại");
 
+  /**
+   * ───────── 6b. NHẬP SAO KÊ KHÔNG VIẾT LẠI CHỨNG TỪ ĐÃ CÓ ─────────
+   *
+   * Bản trước `ON CONFLICT … SET amount, txn_at`: một sao kê tải nhầm viết lại số tiền của dòng
+   * webhook đã nối chứng từ, mối nối thành nối vượt mà không ai thấy. Và 80 dòng IMPORT trên
+   * production (13/09/2026) không biết mình thuộc tài khoản nào.
+   */
+  await db.insert(schema.bankAccounts).values([
+    { id: "bank-test-acc-a", provider: "", gateway: "MBBank", accountNumber: "9990009999", label: "MB kiểm thử", status: "ACTIVE" },
+    { id: "bank-test-acc-b", provider: "", gateway: "ACB", accountNumber: "9990008888", label: "ACB kiểm thử", status: "ACTIVE" },
+  ]);
+  const lanMot = await importStatementRows(db, [...rows, { ...rows[0], bankRef: "BANK-TEST-NEW", amount: -123_000, description: "dong moi" }], { bankAccountId: "bank-test-acc-a", filename: "sao-ke-thang-9.csv" });
+  assert.equal(lanMot.inserted, 1, "6b. chỉ dòng mới được chèn");
+  assert.equal(lanMot.updated, 5, "6b. năm dòng đã có chỉ được làm giàu, không tạo thêm");
+  assert.equal(lanMot.conflicts.length, 0, "6b. cùng số tiền thì không có mâu thuẫn");
+  const [gan] = await db.select().from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "FT26246948262000"));
+  assert.equal(gan.bankAccountId, "bank-test-acc-a", "6b. dòng đã có nay biết mình thuộc tài khoản nào (chỉ điền khi trước đó chưa biết)");
+  assert.equal(gan.lastSeenSource, "IMPORT", "6b. ghi đường vào gần nhất");
+  assert.equal((gan.seenSources as unknown[]).length, 1, "6b. provenance có đúng một mục cho lượt nhập này");
+  assert.equal((gan.seenSources as { ref: string }[])[0]?.ref, "sao-ke-thang-9.csv", "6b. mục provenance mang tên tệp để truy nguyên");
+  assert.equal(gan.accountingGroup, "PACKAGING", "6b. nhãn người dùng đã gán vẫn sống sót");
+  const [moi] = await db.select().from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "BANK-TEST-NEW"));
+  assert.equal(moi.bankAccountId, "bank-test-acc-a", "6b. dòng mới gắn đúng tài khoản người nhập chọn");
+  assert.equal(moi.source, "IMPORT");
+
+  // File nói KHÁC số tiền ⇒ giữ dòng cũ, KHÔNG ghi đè, và mâu thuẫn được nêu ra.
+  const lanHai = await importStatementRows(db, [{ ...rows[0], amount: -7_000_000, description: "so tien bi sua" }], { bankAccountId: "bank-test-acc-a", filename: "sao-ke-sai.csv" });
+  assert.equal(lanHai.inserted + lanHai.updated, 0, "6b. dòng lệch số tiền không được ghi");
+  assert.equal(lanHai.conflicts.length, 1, "6b. mâu thuẫn được đếm");
+  assert.equal(lanHai.conflicts[0].reason, "AMOUNT_MISMATCH");
+  assert.equal(lanHai.conflicts[0].existingAmount, -6_000_000, "6b. nói rõ sổ đang có bao nhiêu");
+  assert.equal(lanHai.conflicts[0].incomingAmount, -7_000_000, "6b. và file nói bao nhiêu");
+  assert.ok(lanHai.warnings.some((w) => /không ghi đè/i.test(w)), "6b. kết quả mang cảnh báo cho người nhập");
+  const [giuNguyen] = await db.select().from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "FT26246948262000"));
+  assert.equal(giuNguyen.amount, -6_000_000, "6b. số tiền trong sổ KHÔNG bị viết lại");
+  assert.equal(giuNguyen.description, gan.description, "6b. dòng mâu thuẫn không được làm giàu nửa vời");
+  assert.equal((giuNguyen.seenSources as unknown[]).length, 1, "6b. lượt nhập bị từ chối không ghi provenance");
+
+  // Cùng bút toán nhưng nhập cho tài khoản KHÁC ⇒ mâu thuẫn tài khoản, không lặng lẽ đổi tài khoản.
+  const lanBa = await importStatementRows(db, [rows[0]], { bankAccountId: "bank-test-acc-b", filename: "sao-ke-acb.csv" });
+  assert.equal(lanBa.conflicts.length, 1);
+  assert.equal(lanBa.conflicts[0].reason, "ACCOUNT_MISMATCH", "6b. dòng đã thuộc tài khoản A không bị kéo sang B");
+  const [vanA] = await db.select({ acc: schema.bankTransactions.bankAccountId }).from(schema.bankTransactions).where(eq(schema.bankTransactions.bankRef, "FT26246948262000"));
+  assert.equal(vanA.acc, "bank-test-acc-a");
+
+  // Không chọn tài khoản: vẫn ghi được (sổ có thể chưa có tài khoản nào) nhưng phải CẢNH BÁO.
+  const khongTk = await importStatementRows(db, [{ ...rows[0], bankRef: "BANK-TEST-NOACC", amount: -1 }], { bankAccountId: null, filename: "x.csv" });
+  assert.equal(khongTk.inserted, 1);
+  assert.ok(khongTk.warnings.some((w) => /không gắn tài khoản/i.test(w)), "6b. nhập không tài khoản phải nói ra hậu quả");
+
+  await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.bankRef} in ('BANK-TEST-NEW', 'BANK-TEST-NOACC')`);
   await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.id} like 'bank-test-%'`);
+  await db.delete(schema.bankAccounts).where(sql`${schema.bankAccounts.id} like 'bank-test-%'`);
+  console.log("✓ Nhập sao kê: cùng khoá với webhook · dòng đã có không bị đổi số tiền (mâu thuẫn được nêu) · gắn tài khoản · provenance nối thêm");
 
   /**
    * ───────── SỔ RỖNG LÀ "CHƯA BIẾT", KHÔNG PHẢI "CHI 0đ" ─────────
@@ -269,6 +335,31 @@ export async function testBankLedger(db: Db) {
   assert.deepEqual(excel, mb, "8e. .xlsx và .csv của cùng một sao kê phải cho ra cùng một danh sách giao dịch");
 
   console.log("✓ Sao kê ngân hàng chính thức: tìm tiêu đề sau phần đầu thư · ngày+giờ chung ô · ô trống \"37\" của MB không thành 37₫ · .xlsx = .csv");
+
+  /**
+   * ───────── 9. SAO KÊ KHÔNG TẠO CHI PHÍ TỪ GIAO DIỆN — KHOÁ Ở MỨC MÃ NGUỒN ─────────
+   *
+   * AGENTS.md 3.17. Ngày 13/09/2026 trang Chi phí vẫn còn nút "Nhập sao kê" gọi hai Server Action
+   * (`previewBankLedger` / `importBankLedger`) ghi thẳng vào `expenses`, gác bằng `expenses:write`
+   * — MARKETING / LEADER đọc được trọn sao kê mà không cần `bank:view`. Đã gỡ. Bài này quét mã để
+   * không ai nối lại: KHÔNG tệp nào dưới `app/` hay `lib/actions/` được import đường ghi khoản chi
+   * từ sao kê; đường đó chỉ còn cho `scripts/import-bank-ledger.ts`.
+   */
+  const goc = path.resolve(__dirname, "..");
+  const quet = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+      const full = path.join(dir, d.name);
+      if (d.isDirectory()) return d.name === "node_modules" || d.name === ".next" ? [] : quet(full);
+      return /\.(ts|tsx)$/.test(d.name) ? [full] : [];
+    });
+  const viPham = [...quet(path.join(goc, "app")), ...quet(path.join(goc, "lib", "actions"))].filter((f) => {
+    const src = readFileSync(f, "utf8");
+    return /integrations\/bank\/import["']/.test(src) || /insertLedgerExpenses/.test(src);
+  });
+  assert.deepEqual(viPham.map((f) => path.relative(goc, f)), [], "9. không Server Action / trang nào được ghi khoản chi từ sao kê");
+  assert.ok(!existsSync(path.join(goc, "lib", "actions", "bank-import.ts")), "9. lib/actions/bank-import.ts đã gỡ, không được thêm lại");
+  assert.ok(!existsSync(path.join(goc, "app", "(dashboard)", "expenses", "bank-import-dialog.tsx")), "9. nút Nhập sao kê trên trang Chi phí đã gỡ");
+  console.log("✓ Sao kê không tạo chi phí: không Server Action / trang nào import đường ghi khoản chi từ sao kê");
 
   console.log("✓ Đối soát sao kê: 5 khoản mục (thêm cước & lương lấy từ Profit Engine) · kỳ chưa nhập sao kê là CHƯA BIẾT chứ không phải chênh lệch");
 }

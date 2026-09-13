@@ -36,8 +36,9 @@ import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { BANK_CASH_CLASS_LABEL, BANK_GROUP_SPEC, isBankGroup, type BankCashClass, type BankGroup } from "@/lib/constants/bank";
+import { BANK_CASH_CLASS_LABEL, BANK_GROUP_SPEC, isBankGroup, isBusinessCash, type BankCashClass, type BankGroup } from "@/lib/constants/bank";
 import { getCashPosition, type AccountBalance } from "@/lib/queries/cash-position";
+import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import type { Period } from "@/lib/search-params";
@@ -52,11 +53,16 @@ function khoangThoiGian(column: AnyPgColumn, from: Date | null, to: Date | null)
   return conds;
 }
 
-/** Nhóm KHÔNG thuộc dòng tiền kinh doanh — chuyển nội bộ, vốn/vay, rút vốn, ngoài kinh doanh. */
-const NON_BUSINESS: BankGroup[] = (Object.keys(BANK_GROUP_SPEC) as BankGroup[]).filter((g) => {
-  const c = BANK_GROUP_SPEC[g].cashClass;
-  return c !== "BUSINESS_INFLOW" && c !== "BUSINESS_OUTFLOW" && c !== "TAX" && c !== "UNCLASSIFIED";
-});
+/**
+ * Nhóm KHÔNG thuộc dòng tiền kinh doanh — chuyển nội bộ, vốn/vay, rút vốn, ngoài kinh doanh, VÀ
+ * chưa phân loại. Dùng đúng `isBusinessCash()` của `lib/constants/bank.ts` thay vì viết lại điều
+ * kiện: hai định nghĩa cho "kinh doanh" là hai con số trên hai màn hình.
+ *
+ * CHƯA PHÂN LOẠI KHÔNG PHẢI KINH DOANH — nó là CHƯA BIẾT. Bản trước cộng nó vào tiền vào/ra kinh
+ * doanh; 3,3 triệu chưa ai xem xét hiện ra như 3,3 triệu chi phí vận hành đã được xác nhận. Nó vẫn
+ * được đếm và nêu riêng ở `unclassified` để đứng CẠNH con số headline, không lẫn vào.
+ */
+const NON_BUSINESS: BankGroup[] = (Object.keys(BANK_GROUP_SPEC) as BankGroup[]).filter((g) => !isBusinessCash(g));
 
 export type CashLedger = {
   period: Period;
@@ -67,7 +73,10 @@ export type CashLedger = {
   inflow: number;
   outflow: number;
   net: number;
-  /** Đã loại chuyển nội bộ, vốn/vay, rút vốn, ngoài kinh doanh. Đây là con số để ra quyết định. */
+  /**
+   * Đã loại chuyển nội bộ, vốn/vay, rút vốn, ngoài kinh doanh VÀ chưa phân loại. Đây là con số để ra
+   * quyết định — phần chưa phân loại đứng riêng ở `unclassified`, màn hình phải hiện nó CẠNH số này.
+   */
   businessInflow: number;
   businessOutflow: number;
   businessNet: number;
@@ -232,11 +241,16 @@ export async function getCashLedger(period: Period): Promise<CashLedger> {
 /**
  * ═══════ NGHĨA VỤ ĐÃ PHÁT SINH ↔ TIỀN ĐÃ TRẢ ═══════
  *
- * Ba cặp câu hỏi mà trước đây không màn hình nào đặt cạnh nhau được:
+ * Năm cặp câu hỏi mà trước đây không màn hình nào đặt cạnh nhau được:
  *
- *   CHI PHÍ: kỳ này ghi nhận bao nhiêu ↔ đã có bao nhiêu đồng tiền thật nối vào.
- *   COD:     ĐVVC phải trả bao nhiêu   ↔ đã về tài khoản bao nhiêu.
- *   LƯƠNG:   kỳ này nợ nhân sự bao nhiêu ↔ đã chi trả bao nhiêu.
+ *   CHI PHÍ:   kỳ này ghi nhận bao nhiêu chi phí vận hành ↔ đã có bao nhiêu đồng tiền thật nối vào.
+ *   GIÁ VỐN:   giá vốn đơn giao thành công của kỳ ↔ tiền hàng đã trả (nối tới phiếu nhập).
+ *   QUẢNG CÁO: chi tiêu QC của kỳ ↔ tiền đã trả Meta (nối tới chi tiêu QC).
+ *   COD:       ĐVVC phải trả bao nhiêu   ↔ đã về tài khoản bao nhiêu.
+ *   LƯƠNG:     kỳ này nợ nhân sự bao nhiêu ↔ đã chi trả bao nhiêu.
+ *
+ * MỖI DÒNG SO HAI VẾ CÙNG PHẠM VI. Nghĩa vụ vận hành chỉ so với tiền nối tới khoản chi vận hành;
+ * gộp cả tiền hàng vào vế "đã trả" thì dòng chi phí báo trả vượt trong khi mặt bằng chưa trả gì.
  *
  * PHẦN CHÊNH KHÔNG PHẢI LỖI. Lương tháng 9 trả ngày 05/10 thì tháng 9 luôn có nghĩa vụ chưa trả —
  * đó là hoạt động bình thường, không phải cảnh báo. Con số này trả lời "còn phải chi bao nhiêu",
@@ -247,7 +261,7 @@ export async function getCashLedger(period: Period): Promise<CashLedger> {
  * sinh ra để chặn.
  */
 export type ObligationLine = {
-  key: "EXPENSE" | "COD" | "PAYROLL";
+  key: "EXPENSE" | "COGS" | "ADS" | "COD" | "PAYROLL";
   label: string;
   /** Nghĩa vụ đã phát sinh trong kỳ, theo sổ có thẩm quyền. */
   obligation: number;
@@ -276,8 +290,36 @@ async function obligationLedgerUncached(period: Period): Promise<ObligationLedge
     return Number(row?.amount ?? 0);
   };
 
-  const [chiPhiTra, codVe, luongTra] = await Promise.all([
-    daNoi(["EXPENSE", "STOCK_RECEIPT", "AD_SPEND"]),
+  /*
+    CÙNG PHẠM VI Ở HAI VẾ, NẾU KHÔNG PHÉP TRỪ VÔ NGHĨA.
+
+    Bản trước: vế "nghĩa vụ" là `operatingTotal` (chỉ chi phí VẬN HÀNH theo luật thẩm quyền), còn vế
+    "đã trả" cộng mọi mối nối tới khoản chi + phiếu nhập + chi tiêu QC. Trả 100 triệu tiền hàng thì
+    dòng "chi phí vận hành" báo đã trả VƯỢT nghĩa vụ — trong khi mặt bằng chưa trả đồng nào.
+
+    Nay: EXPENSE chỉ đếm mối nối tới khoản chi mà bảng Chi phí CÓ THẨM QUYỀN (`operatingExpenseCond`,
+    cùng mệnh đề Cost Engine dùng để dựng `operatingTotal`); giá vốn và quảng cáo tách thành hai dòng
+    riêng với nghĩa vụ đọc từ đúng thành phần của engine.
+  */
+  const chiPhiTraVanHanh = async () => {
+    const conds: SQL[] = [
+      eq(l.targetType, "EXPENSE"),
+      operatingExpenseCond({ payrollCovered: chiPhi.payroll.coverage === "COMPLETE" }),
+      ...khoangThoiGian(b.txnAt, period.from, period.to),
+    ];
+    const [row] = await db
+      .select({ amount: sql<number>`coalesce(sum(${l.amount}), 0)` })
+      .from(l)
+      .innerJoin(b, eq(b.id, l.txnId))
+      .innerJoin(schema.expenses, eq(schema.expenses.id, l.targetId))
+      .where(and(...conds));
+    return Number(row?.amount ?? 0);
+  };
+
+  const [chiPhiTra, giaVonTra, quangCaoTra, codVe, luongTra] = await Promise.all([
+    chiPhiTraVanHanh(),
+    daNoi(["STOCK_RECEIPT"]),
+    daNoi(["AD_SPEND"]),
     daNoi(["COD_BATCH"]),
     daNoi(["PAYROLL_PERIOD"]),
   ]);
@@ -294,8 +336,28 @@ async function obligationLedgerUncached(period: Period): Promise<ObligationLedge
       settled: chiPhiTra,
       outstanding: chiPhi.operatingTotal - chiPhiTra,
       obligationSource: "Profit Engine (kỳ hưởng lợi ích)",
-      settledSource: "Mối nối tới khoản chi / phiếu nhập / chi tiêu QC",
-      note: "Chi phí ghi theo kỳ HƯỞNG LỢI ÍCH, tiền đi theo ngày TRẢ. Hai mốc lệch nhau là bình thường — phần chênh là khoản còn phải chi, không phải lỗi.",
+      settledSource: "Mối nối tới khoản chi mà bảng Chi phí có thẩm quyền",
+      note: "Chi phí ghi theo kỳ HƯỞNG LỢI ÍCH, tiền đi theo ngày TRẢ. Hai mốc lệch nhau là bình thường — phần chênh là khoản còn phải chi, không phải lỗi. Tiền hàng và quảng cáo có dòng riêng bên dưới.",
+    },
+    {
+      key: "COGS",
+      label: "Giá vốn hàng bán",
+      obligation: chiPhi.components.COGS.amount,
+      settled: giaVonTra,
+      outstanding: chiPhi.components.COGS.amount - giaVonTra,
+      obligationSource: "Profit Engine · giá vốn đơn giao thành công theo chứng từ",
+      settledSource: "Mối nối tới phiếu nhập kho",
+      note: "Tiền hàng trả MỘT LẦN cho cả lô, giá vốn rải theo từng đơn bán được. Trả vượt nghĩa vụ của kỳ là hàng đang nằm trong tồn kho, không phải lỗi.",
+    },
+    {
+      key: "ADS",
+      label: "Quảng cáo",
+      obligation: chiPhi.components.ADS.amount,
+      settled: quangCaoTra,
+      outstanding: chiPhi.components.ADS.amount - quangCaoTra,
+      obligationSource: "Tài khoản quảng cáo (chi tiêu theo ngày)",
+      settledSource: "Mối nối tới chi tiêu quảng cáo",
+      note: "Meta trừ tiền theo ngưỡng thanh toán, không theo ngày chạy, nên tiền ra thường gộp nhiều ngày chi tiêu vào một dòng sao kê.",
     },
     {
       key: "COD",

@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { getCashPosition, type CashPosition } from "@/lib/queries/cash-position";
+import { expenseUnpaidCond } from "@/lib/queries/expense-payment";
 import { getCashflowStatement, type CashflowStatement } from "@/lib/queries/cashflow-statement";
 import { codSettlementSummary, type CodSettlementSummary } from "@/lib/queries/cod-settlement";
 import { getRecognizedCosts, type RecognizedCosts } from "@/lib/queries/cost-engine";
@@ -60,11 +60,15 @@ export async function getFinanceOverview(period: Period): Promise<FinanceOvervie
 }
 
 /**
- * NGOẠI LỆ TÀI CHÍNH — MỘT CÂU LỆNH, KHÔNG PHẢI SÁU CÂU.
+ * NGOẠI LỆ TÀI CHÍNH — MỘT CÂU LỆNH, KHÔNG PHẢI NĂM CÂU.
  *
- * Sáu phép đếm độc lập, nhưng gộp vào một câu vì bể kết nối chỉ có 5 và trang này còn gọi bốn
+ * Năm phép đếm độc lập, nhưng gộp vào một câu vì bể kết nối chỉ có 5 và trang này còn gọi bốn
  * engine khác song song. Mỗi phép đếm là một truy vấn con vô hướng — Postgres chạy chúng một lượt
- * trên cùng một kết nối, thay vì giữ sáu kết nối cho một khối màn hình duy nhất.
+ * trên cùng một kết nối, thay vì giữ nhiều kết nối cho một khối màn hình duy nhất.
+ *
+ * "Đơn đã giao quá hạn mà chưa thấy tiền" KHÔNG còn đếm ở đây: bản trước dùng `cod_status` +
+ * `delivered_at` — tức là suy "đã giao" từ trạng thái vận đơn, đúng thứ AGENTS.md mục 0.1 cấm.
+ * Con số đó đọc lại từ `codSettlementSummary().quaHan`, nơi đã đi qua `ORDER_OUTCOME`.
  */
 async function demNgoaiLe(period: Period) {
   const db = await getDb();
@@ -78,8 +82,6 @@ async function demNgoaiLe(period: Period) {
     cod_chua_ghep_tien: number;
     chi_chua_doi_khop: number;
     chi_chua_doi_khop_tien: number;
-    cod_qua_han: number;
-    cod_qua_han_tien: number;
   }>(
     await db.execute(sql`
       select
@@ -98,32 +100,17 @@ async function demNgoaiLe(period: Period) {
           Va chi tinh khi so ngan hang DA co du lieu — so rong thi 100% khoan chi 'chua doi khop',
           mot bao dong do THIEU DU LIEU trinh bay y nhu mot bao dong do lech so.
 
-          ĐỌC bang bank_transaction_links, KHÔNG ĐỌC linked_type/linked_id. Hai cột đó nay chỉ là ẢNH
-          CHỤP mối nối LỚN NHẤT của mỗi dòng tiền (xem lib/finance/linkage.ts::syncPrimaryLink).
-          Một chuyển khoản 30 triệu trả hai hoá đơn 20 + 10 chỉ chụp được hoá đơn 20; hoá đơn 10 sẽ
-          hiện "chưa đối khớp" dù tiền đã trả xong, và người dùng đi tìm một khoản không tồn tại.
+          Menh de "chua co tien noi vao" dung CHUNG voi Hang doi tac vu tai chinh
+          (lib/queries/expense-payment.ts) — doc bang bank_transaction_links, khong doc anh chup.
         */
         (select count(*) from expenses e
           where e.cost_source = 'MANUAL' ${tuNgay} ${denNgay}
             and exists (select 1 from bank_transactions limit 1)
-            and not exists (
-              select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id
-            )) as chi_chua_doi_khop,
+            and ${expenseUnpaidCond("e")}) as chi_chua_doi_khop,
         (select coalesce(sum(e.amount), 0) from expenses e
           where e.cost_source = 'MANUAL' ${tuNgay} ${denNgay}
             and exists (select 1 from bank_transactions limit 1)
-            and not exists (
-              select 1 from bank_transaction_links tl where tl.target_type = 'EXPENSE' and tl.target_id = e.id
-            )) as chi_chua_doi_khop_tien,
-        -- Đơn đã giao quá hạn đối soát mà chưa thấy đồng nào: tiền có khả năng phải đi đòi.
-        (select count(*) from shipments s
-          where s.cod_status = 'PENDING' and coalesce(s.cod_collected, 0) = 0 and coalesce(s.cod_amount, 0) > 0
-            and s.delivered_at is not null
-            and s.delivered_at < now() - (${COD_OVERDUE_DAYS} * interval '1 day')) as cod_qua_han,
-        (select coalesce(sum(s.cod_amount), 0) from shipments s
-          where s.cod_status = 'PENDING' and coalesce(s.cod_collected, 0) = 0 and coalesce(s.cod_amount, 0) > 0
-            and s.delivered_at is not null
-            and s.delivered_at < now() - (${COD_OVERDUE_DAYS} * interval '1 day')) as cod_qua_han_tien
+            and ${expenseUnpaidCond("e")}) as chi_chua_doi_khop_tien
     `),
   );
   const r = rows[0];
@@ -136,8 +123,6 @@ async function demNgoaiLe(period: Period) {
     codChuaGhepTien: n(r?.cod_chua_ghep_tien),
     chiChuaDoiKhop: n(r?.chi_chua_doi_khop),
     chiChuaDoiKhopTien: n(r?.chi_chua_doi_khop_tien),
-    codQuaHan: n(r?.cod_qua_han),
-    codQuaHanTien: n(r?.cod_qua_han_tien),
   };
 }
 
@@ -192,14 +177,21 @@ async function build(period: Period): Promise<FinanceOverview> {
       href: "/bank?tab=doi-chieu",
     });
   }
-  if (ngoaiLe.codQuaHan > 0) {
+  /*
+    "ĐÃ GIAO" Ở ĐÂY LÀ KẾT LUẬN CỦA `ORDER_OUTCOME`, KHÔNG PHẢI `cod_status` / `delivered_at`.
+
+    `cod.quaHan` đọc từ `codSettlementSummary` — cùng một máy đối soát mà trang /cod dùng, nên con số
+    trên Tổng quan và trên Đối soát COD là MỘT. Bản trước tự đếm bằng trạng thái vận đơn: một đơn
+    ĐVVC báo "phát thành công" nhưng thực chất là chiều hoàn cũng bị coi là "phải đi đòi".
+  */
+  if (cod.quaHan.count > 0) {
     exceptions.push({
       key: "cod-overdue",
-      title: `Đơn đã giao quá ${COD_OVERDUE_DAYS} ngày mà chưa thấy tiền`,
-      count: ngoaiLe.codQuaHan,
-      amount: ngoaiLe.codQuaHanTien,
+      title: `Đơn đã giao quá ${cod.overdueDays} ngày mà chưa thấy tiền`,
+      count: cod.quaHan.count,
+      amount: cod.quaHan.amount,
       severity: "high",
-      impact: "Hàng đã tới tay khách, tiền vẫn chưa về và đã quá kỳ đối soát thông thường. Đây là khoản phải đi đòi, không phải khoản chờ.",
+      impact: "Hàng đã tới tay khách (theo kết quả đơn), tiền vẫn chưa về và đã quá kỳ đối soát thông thường. Đây là khoản phải đi đòi, không phải khoản chờ.",
       href: "/cod",
     });
   }

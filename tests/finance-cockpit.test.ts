@@ -58,8 +58,10 @@ export async function testFinanceCockpit(db: Db) {
     BANK_GROUPS.length,
     "1. tổng số nhóm trong bốn khoang phải bằng đúng số nhóm kế toán — thừa hoặc thiếu đều là tiền sai chỗ",
   );
-  // Chưa phân loại VẪN phải nằm trong dòng tiền vận hành: đẩy nó ra thì đẳng thức đầu/cuối kỳ vỡ.
-  assert.equal(sectionOf("UNCLASSIFIED"), "OPERATING", "1. dòng chưa phân loại vẫn là tiền đã vào/ra, phải ở trong báo cáo");
+  // Chưa phân loại là CHƯA BIẾT: khoang riêng, KHÔNG phải vận hành. Nó vẫn nằm trong `movementAll`
+  // nên đẳng thức đầu/cuối kỳ không vỡ (kiểm ở nhóm 2), nhưng không được lẫn vào headline kinh doanh.
+  assert.equal(sectionOf("UNCLASSIFIED"), "UNCLASSIFIED", "1. dòng chưa phân loại có khoang riêng — không được trình bày như vận hành");
+  assert.ok(CASHFLOW_SECTIONS.includes("UNCLASSIFIED"), "1. khoang chưa phân loại có mặt trên báo cáo, không bị giấu");
 
   // ── Dựng một tháng có đủ bốn khoang ──
   await db.insert(schema.bankAccounts).values([
@@ -114,17 +116,21 @@ export async function testFinanceCockpit(db: Db) {
     `INVESTING` và `FINANCING` không mất đi: chúng vẫn là khoang riêng ngay dưới đây.
   */
   assert.equal(bc.moneyIn, 30_000_000, "3. tiền vào kinh doanh = 30tr COD. KHÔNG gồm 20tr vay, KHÔNG gồm 15tr chuyển nội bộ");
-  assert.equal(bc.moneyOut, 14_000_000, "3. tiền ra kinh doanh = 8 + 5 + 1 triệu. KHÔNG gồm 6tr mua tài sản (đầu tư)");
-  assert.equal(bc.net, 16_000_000, "3. dòng tiền kinh doanh ròng = 30 − 14");
+  assert.equal(bc.moneyOut, 13_000_000, "3. tiền ra kinh doanh = 8 + 5 triệu. KHÔNG gồm 6tr mua tài sản (đầu tư), KHÔNG gồm 1tr chưa phân loại (chưa biết)");
+  assert.equal(bc.net, 17_000_000, "3. dòng tiền kinh doanh ròng = 30 − 13");
 
   const khoang = new Map(bc.sections.map((s) => [s.section, s]));
   // Con số headline PHẢI đúng bằng khoang vận hành — nếu lệch thì nhãn "kinh doanh" đang nói dối.
   assert.equal(bc.net, khoang.get("OPERATING")!.net, "3. headline và khoang vận hành là MỘT con số, không phải hai");
-  assert.equal(khoang.get("OPERATING")!.net, 16_000_000, "3. vận hành: +30 − 8 − 5 − 1");
+  assert.equal(khoang.get("OPERATING")!.net, 17_000_000, "3. vận hành: +30 − 8 − 5");
   assert.equal(khoang.get("FINANCING")!.net, 20_000_000, "3. vay tiền về KHÔNG được nằm trong vận hành");
   assert.equal(khoang.get("INVESTING")!.net, -6_000_000, "3. mua tài sản là đầu tư, không phải chi phí vận hành");
   assert.equal(khoang.get("EXCLUDED")!.net, 0, "3. hai đầu chuyển nội bộ triệt tiêu về 0");
+  // CHƯA BIẾT KHÔNG PHẢI ĐÃ BIẾT: 1 triệu chưa ai xem xét đứng riêng, cạnh headline, không lẫn và không mất.
+  assert.equal(khoang.get("UNCLASSIFIED")!.net, -1_000_000, "3. dòng chưa phân loại có khoang riêng trên báo cáo");
   assert.equal(bc.unclassified.count, 1, "3. dòng chưa phân loại được đếm riêng để thành việc cần làm");
+  assert.equal(bc.unclassified.moneyOut, 1_000_000, "3. và số tiền của nó hiện ra cạnh headline: 'còn 1 dòng · 1.000.000 ₫ chưa phân loại'");
+  assert.equal(bc.moneyIn - bc.moneyOut + khoang.get("UNCLASSIFIED")!.net + khoang.get("FINANCING")!.net + khoang.get("INVESTING")!.net + khoang.get("EXCLUDED")!.net, bc.movementAll, "3. năm khoang cộng lại đúng bằng tổng phát sinh — không đồng nào rơi mất khi tách khoang chưa phân loại");
 
   // ═══ 4. SỔ THIẾU GIAO DỊCH PHẢI BỊ NÊU RA, KHÔNG ĐƯỢC LÀM NGƠ ═══
   /*

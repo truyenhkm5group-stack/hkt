@@ -139,18 +139,34 @@ export async function applyStatementDetail(summary: StatementSummary, rows: Stat
   const now = new Date();
   let updatedShipments = 0;
   for (const m of matched) {
-    await db
-      .update(schema.shipments)
-      .set({
-        codStatus: "PAID_TO_BANK",
-        codPaidToBankAt: batch.receivedAt,
-        codBatchId: batch.id,
-        codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${now})`,
-        codCollected: m.cod > 0 ? m.cod : sql`case when ${schema.shipments.codCollected} = 0 then ${schema.shipments.codAmount} else ${schema.shipments.codCollected} end`,
-        shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
-        updatedAt: now,
-      })
-      .where(eq(schema.shipments.id, m.shipmentId as string));
+    /*
+      CHỈ DÒNG CÓ TIỀN COD THẬT (> 0) MỚI ĐƯỢC GHI "ĐÃ VỀ NGÂN HÀNG".
+
+      Bảng kê Viettel Post có cả dòng CHỈ TRỪ CƯỚC (COD = 0): vận đơn hoàn, giao một phần, cước
+      chiều về. Bản trước ghi `cod_status = PAID_TO_BANK` và `cod_collected = cod_amount` cho MỌI dòng
+      ghép được — tức là bịa ra "đã thu đủ tiền" cho một đơn mà ĐVVC không trả đồng nào, và
+      `ORDER_OUTCOME` (nhánh tiền) kết luận đơn đó GIAO THÀNH CÔNG. AGENTS.md mục 3.6:
+      `cod_collected` chỉ ghi khi có số thực thu > 0. Dòng chỉ cước ⇒ chỉ cập nhật cước.
+    */
+    if (m.cod > 0) {
+      await db
+        .update(schema.shipments)
+        .set({
+          codStatus: "PAID_TO_BANK",
+          codPaidToBankAt: batch.receivedAt,
+          codBatchId: batch.id,
+          codReconciledAt: sql`coalesce(${schema.shipments.codReconciledAt}, ${now})`,
+          codCollected: m.cod,
+          shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee,
+          updatedAt: now,
+        })
+        .where(eq(schema.shipments.id, m.shipmentId as string));
+    } else {
+      await db
+        .update(schema.shipments)
+        .set({ shippingFee: m.fee > 0 ? m.fee : schema.shipments.shippingFee, updatedAt: now })
+        .where(eq(schema.shipments.id, m.shipmentId as string));
+    }
     if (m.orderId && m.fee > 0) await db.update(schema.orders).set({ partnerFee: m.fee }).where(eq(schema.orders.id, m.orderId));
     updatedShipments += 1;
   }

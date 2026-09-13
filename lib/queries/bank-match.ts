@@ -23,6 +23,11 @@ import {
  *
  * PHẠM VI ỨNG VIÊN: chỉ nạp chứng từ trong cửa sổ ±30 ngày quanh giao dịch. Rộng hơn thì số ứng
  * viên trùng tiền tăng vọt và mọi thứ thành NHẬP NHẰNG; hẹp hơn thì bỏ sót khoản trả trễ.
+ *
+ * CHỈ CHỨNG TỪ CÒN CHỖ. Chứng từ đã được tiền thật phủ đủ (tổng mối nối ≥ số tiền) không còn là ứng
+ * viên: nếu vẫn nạp, hai dòng tiền cùng số tiền cùng mã sẽ cùng khớp `EXACT` và nút "tự nối" nối cả
+ * hai vào một khoản chi — cùng một nghĩa vụ được đánh dấu trả hai lần. `createLink` cũng chặn ở tầng
+ * ghi, nhưng gợi ý sai vẫn là gợi ý sai.
  */
 
 const CUA_SO_NGAY = 30;
@@ -88,25 +93,32 @@ export async function getMatchOverview(limit = 100): Promise<MatchOverview> {
    * `identifiers` là những mã CÓ THỂ xuất hiện trong nội dung chuyển khoản. Máy đối khớp chỉ nhận mã
    * dài từ 5 ký tự, nên mã ngắn đưa vào cũng vô hại.
    */
+  // Phần đã được tiền thật phủ lên chứng từ — đọc bảng nối, cùng nguồn với `settledAmountByTarget`.
+  const daPhu = (type: string, idExpr: string) =>
+    sql`coalesce((select sum(tl.amount) from bank_transaction_links tl where tl.target_type = ${type} and tl.target_id = ${sql.raw(idExpr)}), 0)`;
   const [codBatches, expenses, receipts, adSpends] = await Promise.all([
     db.execute(sql`
       select id, total_amount as amount, received_at as at, coalesce(nullif(reference, ''), id) as code,
              coalesce(nullif(reference, ''), 'Đợt COD') as label
       from cod_batches where received_at between ${tuNgay} and ${denNgay}
+        and abs(total_amount) > ${daPhu("COD_BATCH", "cod_batches.id")}
     `),
     db.execute(sql`
       select id, amount, occurred_at as at, coalesce(nullif(reference, ''), id) as code, coalesce(description, '') as label
       from expenses where occurred_at between ${tuNgay} and ${denNgay}
+        and abs(amount) > ${daPhu("EXPENSE", "expenses.id")}
     `),
     db.execute(sql`
       select id, total_cost as amount, received_at as at, coalesce(nullif(reference, ''), id) as code,
              coalesce(nullif(supplier, ''), coalesce(reference, '')) as label
       from stock_receipts where kind = 'RECEIPT' and received_at between ${tuNgay} and ${denNgay}
+        and abs(total_cost) > ${daPhu("STOCK_RECEIPT", "stock_receipts.id")}
     `),
     db.execute(sql`
       select id::text as id, spend as amount, spend_date as at, id::text as code,
              coalesce(nullif(campaign, ''), nullif(account_name, ''), 'Chi tiêu quảng cáo') as label
       from ad_spends where excluded = false and spend_date between ${tuNgay} and ${denNgay}
+        and abs(spend) > ${daPhu("AD_SPEND", "ad_spends.id::text")}
     `),
   ]);
 
