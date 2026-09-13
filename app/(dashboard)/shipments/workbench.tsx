@@ -35,6 +35,7 @@ import {
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
+import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -383,7 +384,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       ) : (
         <div className="overflow-x-auto rounded-xl border">
           <table className="w-full min-w-[1180px] text-[12px]">
-            <thead className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+            <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="w-8 px-2 py-2">
                   <input type="checkbox" aria-label="Chọn tất cả" checked={selected.size > 0 && selected.size === visible.length} onChange={toggleAll} />

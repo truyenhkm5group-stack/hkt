@@ -15,6 +15,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { confirmReturnReceived } from "@/lib/actions/returns-warehouse";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import type { ItemsBasis, OrderLinkBasis, ReturnItem, ReturnProductContext } from "@/lib/returns/product-context";
+import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -139,7 +140,7 @@ export function ReceiveQueue({ rows, total, canWrite }: { rows: QueueRow[]; tota
 
       <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-[12.5px]">
-          <thead className="bg-table-head text-[11px] uppercase tracking-wide text-muted-foreground">
+          <thead className={cn(STICKY_HEAD, "text-[11px] uppercase tracking-wide text-muted-foreground")}>
             <tr>
               {canWrite ? <th className="w-8 px-2 py-2" /> : null}
               <th className="px-2 py-2 text-left">Kiện</th>

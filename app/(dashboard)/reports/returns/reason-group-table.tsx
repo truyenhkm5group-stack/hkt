@@ -6,6 +6,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
 import { RESCUE_STATE_LABEL } from "@/lib/constants/return-rescue";
 import type { ReasonGroupRow, ReasonDetailRow } from "@/lib/queries/return-reason-report";
+import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 /**
@@ -54,7 +55,7 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-sm">
-        <thead className="border-b bg-muted/50 text-[11.5px] uppercase tracking-wide text-muted-foreground">
+        <thead className={cn(STICKY_HEAD, "border-b text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
           <tr>
             <th className="px-3 py-2 text-left font-semibold">Nhóm lý do</th>
             <th className="px-3 py-2 text-left font-semibold">Lý do hoàn</th>

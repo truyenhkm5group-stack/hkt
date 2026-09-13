@@ -2247,10 +2247,25 @@ export const shipmentCare = pgTable(
     id: id(),
     shipmentId: text("shipment_id")
       .notNull()
-      .unique()
       .references(() => shipments.id, { onDelete: "cascade" }),
+    /**
+     * ĐỢT THỨ MẤY. Ràng buộc UNIQUE cũ trên `shipment_id` đã được gỡ (migration 0075): kiện hỏng
+     * lần hai thì đội xử lý lần hai, và lần đó KHÔNG được ghi đè lên lần trước.
+     *
+     * Tối đa MỘT đợt đang mở cho mỗi kiện — do chỉ mục duy nhất từng phần `shipment_care_active_uidx`
+     * giữ, không do mã nguồn tự canh. Nhờ vậy webhook phát lại không thể sinh đợt thứ hai: lệnh chèn
+     * bị CSDL từ chối, chứ không phải bị một câu `if` nào đó bỏ sót.
+     */
+    episodeNo: integer("episode_no").notNull().default(1),
+    active: boolean("active").notNull().default(true),
     /** Vòng đời ở `lib/constants/care.ts::CARE_TRANSITIONS` — chỉ đi theo bảng chuyển trạng thái. */
     careStatus: text("care_status").notNull().default("NEW"),
+    /** Bối cảnh LÚC MỞ ĐỢT, cố ý không tính lại: "đợt này bắt đầu vì ĐVVC báo gì". */
+    entryCarrierState: text("entry_carrier_state"),
+    sourceTrigger: text("source_trigger"),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    trackingNumber: text("tracking_number"),
+    priority: text("priority"),
     ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
     ownerEmail: text("owner_email").notNull().default(""),
     /** Hẹn theo dõi lại. Tới hạn thì kiện quay về "Cần care" dù đang "chờ kết quả". */
@@ -2262,6 +2277,36 @@ export const shipmentCare = pgTable(
     firstResponseAt: ts("first_response_at"),
     doneAt: ts("done_at"),
     escalatedAt: ts("escalated_at"),
+    /*
+      MỖI BÁO CÁO HỎI MỘT CÂU KHÁC NHAU NÊN PHẢI CÓ ĐỦ MỐC.
+
+        khối lượng việc  → `openedAt`    (đợt mở lúc nào)
+        hiệu suất người  → `outcomeAt`   (kết cục chốt lúc nào)
+        số thao tác      → mốc của từng dòng `care_business_actions`
+
+      Dùng chung một cột cho cả ba là cách chắc chắn nhất để một báo cáo trả lời câu hỏi của báo
+      cáo khác mà không ai nhận ra.
+    */
+    openedAt: ts("opened_at"),
+    assignedAt: ts("assigned_at"),
+    firstActionAt: ts("first_action_at"),
+    lastActionAt: ts("last_action_at"),
+    outcomeAt: ts("outcome_at"),
+    /**
+     * `resolution` là QUYẾT ĐỊNH của shop; `finalCarrierState` / `finalLogisticsOutcome` là CHỨNG
+     * TỪ của ĐVVC. Hai cột riêng, cố ý: "duyệt hoàn" KHÔNG phải "đã hoàn".
+     */
+    resolution: text("resolution"),
+    finalCarrierState: text("final_carrier_state"),
+    finalLogisticsOutcome: text("final_logistics_outcome"),
+    /** `RESCUED_DIRECT` · `RESCUED_EXCHANGE` · `RESCUE_FAILED` · `PENDING` · `UNATTRIBUTED`. */
+    careOutcome: text("care_outcome"),
+    /** Người CHỊU TRÁCH NHIỆM lúc chốt kết quả — khác `ownerId` (người đang cầm ca). */
+    ownerAtResolution: text("owner_at_resolution").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    initialOwnerId: text("initial_owner_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /** Đơn đổi nối với ca này. Không có nó thì "cứu bằng đơn đổi" chỉ đoán được, không đo được. */
+    replacementOrderId: text("replacement_order_id").references((): AnyPgColumn => orders.id, { onDelete: "set null" }),
+    replacementShipmentId: text("replacement_shipment_id").references((): AnyPgColumn => shipments.id, { onDelete: "set null" }),
     /** Số lần kiện quay lại hàng đợi SAU khi đã đóng. */
     reopenCount: integer("reopen_count").notNull().default(0),
     updatedBy: text("updated_by").notNull().default(""),
@@ -2271,6 +2316,11 @@ export const shipmentCare = pgTable(
   (t) => [
     index("shipment_care_status_idx").on(t.careStatus, t.followUpAt),
     index("shipment_care_owner_idx").on(t.ownerId, t.careStatus),
+    // TỐI ĐA MỘT ĐỢT ĐANG MỞ cho mỗi kiện — ràng buộc nằm ở CSDL, không ở mã nguồn.
+    uniqueIndex("shipment_care_active_uidx").on(t.shipmentId).where(sql`${t.active}`),
+    index("shipment_care_outcome_idx").on(t.careOutcome, t.outcomeAt),
+    index("shipment_care_resolution_owner_idx").on(t.ownerAtResolution, t.outcomeAt),
+    check("shipment_care_outcome_check", sql`${t.careOutcome} IS NULL OR ${t.careOutcome} IN ('RESCUED_DIRECT', 'RESCUED_EXCHANGE', 'RESCUE_FAILED', 'PENDING', 'UNATTRIBUTED')`),
     check("shipment_care_status_check", sql`${t.careStatus} IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'WAITING_CARRIER', 'WAITING_REDELIVERY', 'RESOLVED', 'ESCALATED', 'CANCELLED')`),
   ],
 );
@@ -2328,6 +2378,54 @@ export const carrierActionRequests = pgTable(
  * trạng thái nào sang trạng thái nào, SLA lúc đó ra sao, nguồn (UI / API / AI / hệ thống). Bảng này
  * là nguồn cho "thời gian phản hồi đầu", "mở lại", "workload" — không ai được viết lại quá khứ.
  */
+/**
+ * ═══════════ BỐN QUYẾT ĐỊNH NGHIỆP VỤ — GHI THÊM, KHÔNG BAO GIỜ GHI ĐÈ ═══════════
+ *
+ * Khác `care_actions` (ghi việc chăm sóc thô: đã gọi, đã nhắn) và khác `care_case_events` (ghi mọi
+ * lần đổi trạng thái / giao người / ghi chú). Bảng này ghi đúng bốn QUYẾT ĐỊNH mà người xử lý đưa
+ * ra — Duyệt hoàn · Phát tiếp · Đổi · Theo dõi tiếp — kèm đủ bối cảnh để nhật ký trả lời được:
+ *
+ *   ai · lúc nào · trên kiện nào · quyết định gì · trạng thái xử lý trước và sau ·
+ *   gửi lệnh gì sang ĐVVC · ĐVVC trả lời ra sao · ghi chú gì.
+ *
+ * `ownerIdAtAction` là ẢNH CHỤP người đang cầm ca lúc đó, không tính lại theo người cầm hôm nay:
+ * A nhận ca rồi chuyển B thì việc A đã làm vẫn là của A.
+ */
+export const careBusinessActions = pgTable(
+  "care_business_actions",
+  {
+    id: id(),
+    careCaseId: text("care_case_id")
+      .notNull()
+      .references(() => shipmentCare.id, { onDelete: "cascade" }),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    ownerIdAtAction: text("owner_id_at_action").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /** `APPROVE_RETURN` · `REQUEST_REDELIVERY` · `EXCHANGE` · `CONTINUE_MONITORING`. */
+    actionType: text("action_type").notNull(),
+    /** Lý do theo DANH MỤC (đếm được) — tách khỏi `reasonNote` là ô chữ tự do (không đếm được). */
+    reasonCode: text("reason_code"),
+    reasonNote: text("reason_note").notNull().default(""),
+    requestedAt: ts("requested_at").notNull().defaultNow(),
+    /** Nối sang sổ lệnh ĐVVC. NULL với hai hành động không gửi lệnh (Đổi, Theo dõi tiếp). */
+    carrierCommandId: text("carrier_command_id").references(() => carrierActionRequests.id, { onDelete: "set null" }),
+    carrierResult: text("carrier_result"),
+    previousCareStatus: text("previous_care_status"),
+    nextCareStatus: text("next_care_status"),
+    metadata: jsonb("metadata"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("care_business_actions_case_idx").on(t.careCaseId, t.createdAt),
+    index("care_business_actions_actor_idx").on(t.actorUserId, t.createdAt),
+    index("care_business_actions_shipment_idx").on(t.shipmentId, t.createdAt),
+    check("care_business_actions_type_check", sql`${t.actionType} IN ('APPROVE_RETURN', 'REQUEST_REDELIVERY', 'EXCHANGE', 'CONTINUE_MONITORING')`),
+  ],
+);
+
 export const careCaseEvents = pgTable(
   "care_case_events",
   {

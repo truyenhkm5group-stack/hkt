@@ -25,7 +25,7 @@ import path from "node:path";
 type Entry = { idx: number; tag: string; when: number; version: string; breakpoints: boolean };
 
 /** Migration mới của bản phát hành này — phần mà production CHƯA có. */
-const MOI = "0074_return_reason_group";
+const MOI = "0075_care_episode";
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -57,7 +57,15 @@ export async function testMigrationUpgradePath() {
 
     const truoc = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(truoc, cu.entries.length, "bước 1: số migration đã áp phải khớp sổ đã cắt");
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'reason_group'"), 0, "bước 1: cột mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_care' and column_name = 'care_outcome'"), 0, "bước 1: cột mới CHƯA được tồn tại — nếu có thì bài này đang tự lừa mình");
+    // Trước 0075, một kiện chỉ được có ĐÚNG MỘT dòng care, mãi mãi. Chứng minh ràng buộc đó có thật
+    // rồi mới chứng minh được rằng bản này gỡ đúng nó.
+    await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
+    await client.query(`insert into shipment_care (id, shipment_id) values ('up-care-1', 'up-s9')`);
+    await assert.rejects(
+      () => client.query(`insert into shipment_care (id, shipment_id) values ('up-care-2', 'up-s9')`),
+      "bước 1: ràng buộc CŨ (một kiện một dòng care) phải còn đó, nếu không bài này không chứng minh được gì",
+    );
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -169,6 +177,48 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_ref_check"),
       "đích cấp phòng mà không nói phòng nào — ràng buộc phải chặn",
     );
+
+    /*
+      ═══ CA CHĂM SÓC THEO ĐỢT (0075) ═══
+
+      Ba điều phải đúng cùng lúc, và cả ba đều kiểm ở mức CSDL chứ không tin vào kỷ luật mã nguồn.
+    */
+    // 1. Dòng care CÓ TỪ TRƯỚC không mất gì, và được nhận mốc mở đợt từ chính mốc tạo của nó.
+    //    Đây KHÔNG phải suy đoán kết quả — chỉ là chép một mốc đã có sang đúng cột của nó.
+    const careCu = (await client.query<{ active: boolean; episode_no: number; opened_at: string | null; care_outcome: string | null }>(
+      "select active, episode_no, opened_at, care_outcome from shipment_care where id = 'up-care-1'",
+    )).rows[0];
+    assert.equal(careCu.active, true, "dòng care cũ là đợt đang mở của kiện đó");
+    assert.equal(careCu.episode_no, 1, "dòng care cũ là đợt thứ nhất");
+    assert.ok(careCu.opened_at, "dòng care cũ phải có mốc mở đợt");
+    assert.equal(careCu.care_outcome, null, "KHÔNG backfill kết quả logistics cho ca cũ — NULL là CHƯA BIẾT");
+
+    // 2. Đợt THỨ HAI mở được — nhưng chỉ khi đợt trước đã đóng.
+    await assert.rejects(
+      () => client.query(`insert into shipment_care (id, shipment_id, episode_no) values ('up-care-3', 'up-s9', 2)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("shipment_care_active_uidx"),
+      "hai đợt CÙNG MỞ trên một kiện thì webhook phát lại sinh ra ca trùng — chỉ mục phải chặn",
+    );
+    await client.query(`update shipment_care set active = false, care_outcome = 'RESCUE_FAILED' where id = 'up-care-1'`);
+    await client.query(`insert into shipment_care (id, shipment_id, episode_no) values ('up-care-3', 'up-s9', 2)`);
+    assert.equal(await dem("select count(*)::int as n from shipment_care where shipment_id = 'up-s9'"), 2, "kiện hỏng lần hai phải có đợt thứ hai, KHÔNG ghi đè đợt một");
+
+    // 3. Kết quả lạ bị chặn: năm giá trị, mỗi cái dẫn tới một kết luận khác nhau về đội chăm sóc.
+    await assert.rejects(
+      () => client.query(`update shipment_care set care_outcome = 'RESCUED' where id = 'up-care-3'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("shipment_care_outcome_check"),
+      "kết quả ngoài danh mục phải bị CSDL chặn",
+    );
+    // Thao tác nghiệp vụ ngoài bốn quyết định cũng bị chặn — "đã gọi khách" không phải một quyết định.
+    await assert.rejects(
+      () => client.query(`insert into care_business_actions (id, care_case_id, shipment_id, action_type) values ('ba-x', 'up-care-3', 'up-s9', 'CALL')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("care_business_actions_type_check"),
+      "chỉ bốn quyết định nghiệp vụ được ghi vào sổ này",
+    );
+    assert.equal(await dem("select count(*)::int as n from care_business_actions"), 0, "migration KHÔNG được tự sinh thao tác nào");
+
+    await client.query(`delete from shipment_care where shipment_id = 'up-s9'`);
+    await client.query(`delete from shipments where id = 'up-s9'`);
 
     // Một tầng · một chỉ số · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì không ai biết cái nào thắng.
     await client.query(`insert into metric_targets (id, metric_key, scope, target, effective_from) values ('mt-1', 'care_sla', 'COMPANY', 80, '2026-01-01')`);

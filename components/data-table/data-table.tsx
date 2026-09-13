@@ -203,11 +203,20 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
         thấy được, không phải cuộn xuống đáy mới bấm sang trang sau.
       */}
       <div className={cn("overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
+          {/*
+            Luật dính đã chuyển vào `components/ui/table.tsx` (primitive dùng chung) — ở đây chỉ còn
+            khai bảng này CÓ khung cuộn dọc riêng hay không, để primitive chọn đúng mốc dính.
+
+            Bảng ngắn (≤ 12 dòng) cuộn theo CẢ TRANG, nên mốc là 3.5rem — đúng dưới thanh tiêu đề
+            ứng dụng. Bảng dài có trần chiều cao, tự cuộn, nên mốc là 0. Trước bản này cả hai đều
+            dùng mốc 0, và bảng ngắn có tiêu đề trượt xuống dưới thanh điều hướng rồi biến mất.
+          */}
           <Table
             className={cn(dense && "[&_td]:py-1.5")}
+            scrollable={data.length > 12}
             containerClassName={cn(data.length > 12 && "max-h-[calc(100vh-15rem)] min-h-[20rem]")}
           >
-            <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-table-head [&_th]:after:absolute [&_th]:after:inset-x-0 [&_th]:after:bottom-0 [&_th]:after:h-px [&_th]:after:bg-border">
+            <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="border-0 hover:bg-transparent">
                   {headerGroup.headers.map((header) => {

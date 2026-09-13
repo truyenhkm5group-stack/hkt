@@ -1,9 +1,11 @@
 import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
+import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getCareReport } from "@/lib/queries/care-report";
 import type { Period } from "@/lib/search-params";
+import { cn } from "@/lib/utils";
 
 /**
  * HIỆU QUẢ CARE — cho quản lý. Không xếp hạng theo số lần bấm: cột đầu là COD cứu được, rồi tới
@@ -79,7 +81,7 @@ export async function CareReportSection({ period }: { period: Period }) {
         <SectionCard title="Khối lượng đang cầm" hint="Kiện đang mở (kể cả đang chờ / escalated) theo người nhận, tính lúc này. Để chia lại việc, không phải để xếp hạng." padded={false}>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] text-[12.5px]">
-              <thead className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>
                   <th className="px-4 py-2">Người</th>
                   <th className="px-3 py-2 text-right">Đang mở</th>
@@ -113,7 +115,7 @@ export async function CareReportSection({ period }: { period: Period }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[820px] text-[12.5px]">
-              <thead className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>
                   <th className="px-4 py-2">Người</th>
                   <th className="px-3 py-2 text-right">COD cứu được</th>
