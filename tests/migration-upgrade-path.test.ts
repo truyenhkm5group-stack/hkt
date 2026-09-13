@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0076_care_active_invariant", "0077_metric_target_bands"] as const;
+const MOI = ["0076_care_active_invariant", "0077_metric_target_bands", "0078_product_notes"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -205,6 +205,43 @@ export async function testMigrationUpgradePath() {
       "0077: khoảng hiệu lực rỗng thì đích không bao giờ áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao",
     );
     await client.query(`delete from metric_targets where id = 'up-t1'`);
+
+    /*
+      ═══ 0078: GHI CHÚ VẬN HÀNH — BẢNG MỚI, KHÔNG ĐỤNG GÌ TỚI DỮ LIỆU CŨ ═══
+
+      Cột `products.note` (đồng bộ từ Pancake) phải còn nguyên: bản này KHÔNG chuyển nó sang bảng
+      mới. Chuyển là hai cái sai cùng lúc — lần đồng bộ Pancake sau ghi đè lại cột đó, và một ghi
+      chú của Pancake bỗng mang tên một người trong shop.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'product_notes'"), 1, "0078: bảng ghi chú phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from product_notes"), 0, "0078: KHÔNG chuyển ghi chú Pancake sang bảng mới — cột cũ giữ nguyên vai của nó");
+    await client.query(`insert into products (id, name, note) values ('up-p1', 'Đầm cũ', 'ghi chú của Pancake')`);
+    const spCu = (await client.query<{ note: string }>("select note from products where id = 'up-p1'")).rows[0];
+    assert.equal(spCu.note, "ghi chú của Pancake", "0078: cột note cũ không bị đụng tới");
+
+    await assert.rejects(
+      () => client.query(`insert into product_notes (id, product_id, body) values ('up-n1', 'up-p1', '   ')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("product_notes_body_check"),
+      "0078: ghi chú rỗng chiếm chỗ 'ghi chú mới nhất' và đẩy ghi chú thật xuống — chặn ở CSDL",
+    );
+    await assert.rejects(
+      () => client.query(`insert into product_notes (id, product_id, body, category) values ('up-n2', 'up-p1', 'x y z', 'LUNG_TUNG')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("product_notes_category_check"),
+      "0078: nhóm lạ phải bị chặn — ô gõ tự do sinh ra ba cách viết cho cùng một nhóm",
+    );
+    /*
+      Người viết bị gỡ tài khoản thì ghi chú KHÔNG biến mất — chỉ mất khoá, ảnh chụp tên còn lại.
+
+      Dùng một tài khoản RIÊNG (`up-u9`) chứ không mượn `up-u1`: khối kiểm đích phía dưới còn cần
+      `up-u1` sống để chứng minh xoá người đặt không cuốn theo đích. Xoá sớm ở đây thì bài kiểm kia
+      đỏ vì khoá ngoại, và nguyên nhân thật nằm cách đó hai trăm dòng.
+    */
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u9', 'kho@shop.vn', 'An Kho', 'x', 'WAREHOUSE')`);
+    await client.query(`insert into product_notes (id, product_id, body, actor_user_id, actor_name) values ('up-n3', 'up-p1', 'Lô này vải mỏng', 'up-u9', 'An Kho')`);
+    await client.query(`delete from users where id = 'up-u9'`);
+    const conLai = (await client.query<{ actor_user_id: string | null; actor_name: string }>("select actor_user_id, actor_name from product_notes where id = 'up-n3'")).rows[0];
+    assert.equal(conLai.actor_user_id, null, "0078: gỡ tài khoản thì khoá về null");
+    assert.equal(conLai.actor_name, "An Kho", "0078: nhưng ảnh chụp tên còn lại — ghi chú vẫn đọc được, chỉ là không quy kết được nữa");
 
     /*
       BA CỘT MỚI CỦA 0074 CÓ MẶC ĐỊNH — và đó KHÔNG phải một phép đoán về dữ liệu cũ.
