@@ -206,6 +206,48 @@ deploy dừng, không phải cảnh báo.
     "đổi nguồn giữa hai kỳ", không vẽ mũi tên xu hướng.
 
 
+41. **MỐC BÀN GIAO CHỈ TÍNH KHI ĐVVC THẬT SỰ CẦM HÀNG** (`lib/constants/carrier-handoff.ts`):
+    `carrier_handoff_at` = **sớm nhất** trong các chứng cứ CÓ THẬT, bằng `least()` chứ không phải
+    `coalesce()` theo một thứ tự bậc. Chỉ sự kiện mang chặng trong `CARRIER_HANDOFF_STAGES` được
+    tính — `PENDING` (chờ lấy · điều phối · **lấy hàng thất bại**) và `CANCELLED` (**shop huỷ
+    lấy** · VTP huỷ · tiêu huỷ) TUYỆT ĐỐI không. `orders.inserted_at`, `shipments.created_at`,
+    trạng thái Pancake và MỌI chứng từ tiền đều không được dùng làm mốc bàn giao. Thiếu chứng cứ
+    ⇒ `NULL` ⇒ kiện nằm NGOÀI cohort, và số kiện rơi ra phải in ra cạnh bảng. Tập chặng phải ĐÓNG
+    dưới phép quy đổi chiều hoàn — mất tính chất đó thì SQL (đọc thẳng `normalized_stage`) và
+    TypeScript (có quy đổi) lặng lẽ nói hai điều khác nhau.
+
+42. **CHƯA BIẾT KHÔNG ĐƯỢC IN RA THÀNH 0** (`lib/format.ts`): ba trạng thái, ba cách in — 0 THẬT
+    → `0 ₫`; CHƯA BIẾT → `—`; KHÔNG ÁP DỤNG → `N/A`. `NaN`, `Infinity` và chuỗi rỗng đi cùng nhánh
+    CHƯA BIẾT. Không bao giờ đặt lại `Number(value ?? 0)` trong hàm định dạng: nơi nào `null` thật
+    sự có nghĩa là KHÔNG thì viết `?? 0` **ngay tại chỗ gọi** — một lời khẳng định đọc được và
+    grep được, khác hẳn mặc định ẩn. Mẫu số 0 dùng `pctOrNull` (ra `null`), `pct` chỉ để vẽ.
+
+43. **ĐÍCH NHẬN KHOÁ CỦA CẢ HAI SỔ CHỈ SỐ** (`lib/constants/metric-registry.ts`): `metric_targets`
+    nhận khoá dẫn xuất từ `METRIC_CATALOG` + `METRIC_BINDINGS`, để một KR và một ô thẻ điểm nói về
+    cùng một chỉ số thì đọc CÙNG một đích. Sổ gộp KHÔNG khai thêm chỉ số nào — thêm chỉ số vẫn chỉ
+    làm ở hai sổ gốc, và hai không gian khoá phải không giao nhau (có kiểm thử). Đích cho MỘT CÁ
+    NHÂN chỉ được khi chỉ số đọc được ở mức NGƯỜI, KHÔNG mang cờ `shared`, và thật sự đo được —
+    chặn ở cả lược đồ đầu vào lẫn server action. `period_kind = 'ANY'` nghĩa là CHƯA KHAI KỲ, không
+    phải "mỗi tháng". Không có bộ ngưỡng mặc định và không được thêm.
+
+44. **MỘT ĐƯỜNG TÍNH CHO MỘT Ô THẺ ĐIỂM** (`lib/metrics/scorecard.ts::evaluateMetric`): mọi màn
+    hình đọc đích đi qua đây, và nó KHÔNG tự đi đo — công thức từng chỉ số vẫn ở `lib/queries/*`.
+    Phần trăm đạt đích của chỉ số CÀNG THẤP CÀNG TỐT là `target/value` (chia ngược thì 10 lỗi trên
+    đích 5 lỗi ra 200%); xu hướng quy theo chiều (tỷ lệ hoàn TĂNG là XẤU ĐI). `canConclude = false`
+    ⇒ hiện thực tế, KHÔNG tô màu, KHÔNG xếp hạng, KHÔNG gắn nhãn.
+
+45. **BỐN LOẠI CHỖ TRỐNG, CHỈ HAI LOẠI LÀ VIỆC PHẢI LÀM** (`lib/constants/data-quality-issues.ts`):
+    `TRUE_UNKNOWN` (không chứng cứ nào tồn tại — GIỮ NGUYÊN) · `RESOLVABLE` · `STALE` ·
+    `AMBIGUOUS` (người quyết). `fixable` SUY RA từ loại, không khai tay. Không bao giờ "giảm số
+    UNKNOWN" bằng một heuristic yếu: con số chưa biết TĂNG sau khi thôi khẳng định thứ không chứng
+    minh được là ĐÚNG HƯỚNG. Mỗi lỗ hổng phải khai đủ nguồn thật · việc phải làm · phòng chịu trách
+    nhiệm — một bảng chỉ in con số là bảng không ai mở lần thứ hai.
+
+46. **GHI CHÚ KHÔNG BAO GIỜ CHẠM VÀO MỘT CON SỐ** (`product_notes`): ô chữ tự do là bối cảnh cho
+    người đọc, không phải đầu vào của phép tính. Không truy vấn báo cáo / tồn kho / giá vốn / lợi
+    nhuận nào được đọc bảng này (`tests/product-notes.test.ts` quét mã nguồn đã vào kho). Cột
+    `products.note` là ô ĐỒNG BỘ TỪ PANCAKE — không ghi đè lên nó.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
