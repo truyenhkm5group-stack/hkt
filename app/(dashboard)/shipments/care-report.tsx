@@ -131,8 +131,8 @@ export async function CareReportSection({ period }: { period: Period }) {
               </thead>
               <tbody className="divide-y">
                 {r.staff.map((s) => (
-                  <tr key={s.actor}>
-                    <td className="px-4 py-2 font-medium">{s.actor}</td>
+                  <tr key={s.userId ?? "none"}>
+                    <td className={s.userId ? "px-4 py-2 font-medium" : "px-4 py-2 italic text-muted-foreground"} title={s.userId ? undefined : "Hành động / ca chỉ có ô chữ, không nối được về tài khoản — không ghi công cho ai"}>{s.actor}</td>
                     <td className="numeric px-3 py-2 text-right font-semibold">{formatVND(s.recoveredCod, { compact: true })}</td>
                     <td className="numeric px-3 py-2 text-right">
                       {formatNumber(s.recovered)}/{formatNumber(s.intervened)} · {rate(s.recovered, s.intervened)}

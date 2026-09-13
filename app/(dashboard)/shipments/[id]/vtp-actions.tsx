@@ -10,12 +10,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { vtpEditOrder, vtpOrderAction } from "@/lib/actions/shipments-vtp";
+import { canRequestCarrierAction, type Eligibility } from "@/lib/care/redelivery-eligibility";
+import type { CarrierActionKey } from "@/lib/constants/care";
 import { VTP_ORDER_ACTIONS, type VtpOrderActionType } from "@/lib/constants/viettelpost";
 
 type Receiver = { name: string; phone: string; address: string; cod: number; note: string };
 
-/** Nút thao tác Viettel Post trên trang vận đơn: phát tiếp, duyệt hoàn, gửi lại, duyệt, huỷ, sửa đơn */
-export function VtpActions({ shipmentId, stage, receiver }: { shipmentId: string; stage: string; receiver: Receiver }) {
+/**
+ * Nút thao tác Viettel Post trên trang vận đơn: phát tiếp, duyệt hoàn, gửi lại, duyệt, huỷ, sửa đơn.
+ *
+ * ĐIỀU KIỆN XÉT BẰNG ĐÚNG HÀM CỦA MÁY CHỦ (`canRequestCarrierAction`) trên mã + chữ + chặng + năng
+ * lực tài khoản — không còn danh sách chặng ghi cứng riêng của trang này. Nút không đủ điều kiện vẫn
+ * hiện nhưng khoá, tooltip nói vì sao; tài khoản không sở hữu kiện thì nút vẫn bấm được và đi
+ * đường làm tay có ghi vết.
+ */
+export function VtpActions({ shipmentId, stage, vtpStatus, rawStatus, tracking, trackingCapability, receiver }: { shipmentId: string; stage: string; vtpStatus: number | null; rawStatus: string | null; tracking: string | null; trackingCapability: string; receiver: Receiver }) {
   const [pending, start] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -23,7 +32,9 @@ export function VtpActions({ shipmentId, stage, receiver }: { shipmentId: string
   const [note, setNote] = useState("");
   const [form, setForm] = useState(receiver);
   const router = useRouter();
-  const final = ["DELIVERED", "RETURNED", "CANCELLED"].includes(stage);
+  const facts = { stage, vtpStatus, vtpStatusName: rawStatus, orderNumber: tracking, trackingCapability, configured: true };
+  const eligibility = (key: string): Eligibility => canRequestCarrierAction(key as CarrierActionKey, facts);
+  const editOk = eligibility("edit");
   const run = (type: VtpOrderActionType) => {
     const a = VTP_ORDER_ACTIONS.find((x) => x.type === type)!;
     setBusy(a.key);
@@ -39,25 +50,19 @@ export function VtpActions({ shipmentId, stage, receiver }: { shipmentId: string
       }
     });
   };
-  const visible = VTP_ORDER_ACTIONS.filter((a) => {
-    if (a.type === 3 || a.type === 2) return ["DELIVERY_FAILED", "OUT_FOR_DELIVERY", "IN_TRANSIT", "PICKED_UP"].includes(stage);
-    if (a.type === 5) return ["RETURNING", "RETURNED", "CANCELLED", "DELIVERY_FAILED"].includes(stage);
-    if (a.type === 1) return stage === "PENDING";
-    if (a.type === 4) return !final && stage !== "OUT_FOR_DELIVERY";
-    return true;
-  });
   return (
     <>
-      {visible.map((a) => (
-        <Button key={a.key} size="sm" variant={a.tone === "destructive" ? "destructive" : a.tone === "secondary" ? "secondary" : "default"} title={a.hint} disabled={pending} onClick={() => setNoteFor(a.type)}>
-          {busy === a.key ? <Loader2 className="size-4 animate-spin" /> : <Truck className="size-4" />} {a.label}
-        </Button>
-      ))}
-      {!final ? (
-        <Button size="sm" variant="outline" disabled={pending} onClick={() => setEditOpen(true)} title="Sửa người nhận, SĐT, địa chỉ, tiền thu hộ trên Viettel Post">
-          <Pencil className="size-4" /> Sửa đơn VTP
-        </Button>
-      ) : null}
+      {VTP_ORDER_ACTIONS.map((a) => {
+        const e = eligibility(a.key);
+        return (
+          <Button key={a.key} size="sm" variant={a.tone === "destructive" ? "destructive" : a.tone === "secondary" ? "secondary" : "default"} title={e.ok ? (e.callsApi ? a.hint : e.reason) : e.reason} disabled={pending || !e.ok} onClick={() => setNoteFor(a.type)}>
+            {busy === a.key ? <Loader2 className="size-4 animate-spin" /> : <Truck className="size-4" />} {a.label}
+          </Button>
+        );
+      })}
+      <Button size="sm" variant="outline" disabled={pending || !editOk.ok} onClick={() => setEditOpen(true)} title={editOk.ok ? "Sửa người nhận, SĐT, địa chỉ, tiền thu hộ trên Viettel Post" : editOk.reason}>
+        <Pencil className="size-4" /> Sửa đơn VTP
+      </Button>
 
       <Dialog open={noteFor !== null} onOpenChange={(o) => !o && setNoteFor(null)}>
         <DialogContent>

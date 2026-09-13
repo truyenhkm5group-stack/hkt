@@ -4,6 +4,7 @@ import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { careSlaHours } from "@/lib/care/sla";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
@@ -179,6 +180,8 @@ function asTrackingCapability(v: string | undefined): TrackingCapability {
 
 async function buildQueue(): Promise<CareQueue> {
   const now = new Date();
+  // Ngưỡng SLA đọc qua sổ hạn xử lý (luật 22) — chủ shop đổi ở cấu hình, không phải đổi mã.
+  const slaHours = await careSlaHours();
   const tower = await getDeliveryTower();
   const towerRows: TowerRow[] = tower.buckets.filter((b) => (CARE_BUCKETS as string[]).includes(b.key)).flatMap((b) => b.rows);
   const towerIds = new Set(towerRows.map((r) => r.shipmentId));
@@ -190,7 +193,7 @@ async function buildQueue(): Promise<CareQueue> {
     .select({ care: schema.shipmentCare, ownerName: schema.users.name })
     .from(schema.shipmentCare)
     .leftJoin(schema.users, eq(schema.users.id, schema.shipmentCare.ownerId))
-    .where(and(inArray(schema.shipmentCare.careStatus, CARE_TERMINAL_STATUSES), gte(schema.shipmentCare.doneAt, new Date(now.getTime() - CARE_SLA.doneWindowDays * 86_400_000))))
+    .where(and(eq(schema.shipmentCare.active, false), inArray(schema.shipmentCare.careStatus, CARE_TERMINAL_STATUSES), gte(schema.shipmentCare.doneAt, new Date(now.getTime() - CARE_SLA.doneWindowDays * 86_400_000))))
     .orderBy(desc(schema.shipmentCare.doneAt))
     .limit(300);
   const doneOnlyIds = doneRows.map((r) => r.care.shipmentId).filter((id) => !towerIds.has(id) && !wrongInfo.some((w) => w.shipment_id === id));
@@ -220,9 +223,18 @@ async function buildQueue(): Promise<CareQueue> {
           .where(inArray(schema.shipments.id, doneOnlyIds))
       : Promise.resolve([]),
   ]);
-  for (const r of doneRows) careMap.set(r.care.shipmentId, { ...r.care, ownerName: r.ownerName });
+  // ĐỢT ĐANG MỞ THẮNG ĐỢT ĐÃ ĐÓNG. Kiện vừa hỏng lại (đợt 2 đang mở) mà đợt 1 đóng trong 7 ngày:
+  // ghi đè bằng đợt 1 là màn hình hiện "Đã xong" cho một kiện đang cần người.
+  for (const r of doneRows) if (!careMap.has(r.care.shipmentId)) careMap.set(r.care.shipmentId, { ...r.care, ownerName: r.ownerName });
 
+  /*
+    MỐC VÀO HÀNG ĐỢI: `opened_at` của đợt (lúc ĐVVC báo sự cố mở đợt này) khi có; đợt cũ chưa có mốc
+    thì suy từ lần giao hụt gần nhất → tin cuối. Cùng thứ tự với `lib/care/service.ts::queueSinceOf`
+    để SLA trên màn hình và SLA chụp vào sự kiện là một con số.
+  */
   const queueSinceOf = (id: string, fallback: Date | null) => {
+    const c = careMap.get(id);
+    if (c?.active && c.openedAt) return c.openedAt;
     const f = facts.get(id);
     return f?.failedAt ?? f?.lastAt ?? fallback ?? f?.createdAt ?? now;
   };
@@ -240,7 +252,7 @@ async function buildQueue(): Promise<CareQueue> {
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
-      sla: slaOf(base.queueSince, care, now),
+      sla: slaOf(base.queueSince, care, now, slaHours),
       carrierRequest: reqMap.get(base.shipmentId) ?? null,
       carrierCapability: carrierCapabilityOf(capability ?? "UNKNOWN_CAPABILITY"),
       view,
@@ -388,7 +400,9 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
   const facts = await loadQueueFacts([shipmentId]);
   const f = facts.get(shipmentId);
   const care = toCareState(careRows.get(shipmentId));
-  const queueSince = f?.failedAt ?? f?.lastAt ?? null;
+  const dot = careRows.get(shipmentId);
+  const queueSince = (dot?.active ? dot.openedAt : null) ?? f?.failedAt ?? f?.lastAt ?? null;
+  const slaHours = await careSlaHours();
   const tracking = s.vtpOrderNumber ?? s.trackingCode ?? qv.tracking;
   return {
     shipment: {
@@ -408,7 +422,7 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
     journey: qv.timeline,
     care,
     queueSince,
-    sla: queueSince ? slaOf(queueSince, care) : null,
+    sla: queueSince ? slaOf(queueSince, care, new Date(), slaHours) : null,
     events,
     careActions: qv.careActions,
     carrierRequests: requests.map(toRequestView),

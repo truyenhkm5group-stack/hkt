@@ -4,6 +4,7 @@ import { schema, type Db } from "@/db";
 import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE } from "@/lib/constants/carrier-substate";
 import { FULFILLMENT_BUCKETS, FULFILLMENT_BUCKET_LABEL, getOrderFulfillmentBucket, isActivelyShippedOrder, kiemTraBangRo, pickAttempt, type AttemptFacts } from "@/lib/constants/fulfillment-bucket";
 import { canApproveReturn, canRequestCarrierAction, canRequestRedelivery } from "@/lib/care/redelivery-eligibility";
+import { CARE_ENTRY_SUBSTATES, careEntryFor, legAwareStage, legAwareSubstate } from "@/lib/care/entry";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { getFulfillmentBuckets, tongRoDayDu } from "@/lib/queries/fulfillment-buckets";
 import { IntegrationError, loiNghiepVu } from "@/lib/integrations/http";
@@ -373,8 +374,34 @@ export async function test22GuiHangLoatThanhCongMotPhan(db: Db) {
   clearMemo();
 }
 
+/* ───── 23 · "CẦN CARE" LÀ MỘT HÀM — chờ xử lý chỉ vào khi có chứng từ rời kho ───── */
+export function test23LuatVaoCareMotHam() {
+  // Đo production 13/09/2026: 106 kiện mã 102 CHƯA lấy hàng có đợt (sai), 48 kiện đã lấy chỉ 6 có đợt (sót).
+  assert.equal(careEntryFor("WAITING_PROCESSING", false).enters, false, "mã 102 còn trong kho KHÔNG phải việc của đội chăm sóc");
+  assert.equal(careEntryFor("WAITING_PROCESSING", true).enters, true, "chờ xử lý đã rời kho ⇒ cần người gọi bưu cục");
+  assert.equal(careEntryFor("WAITING_REDELIVERY", false).enters, true, "chờ phát lại luôn vào: phát hụt thì chắc chắn đã cầm hàng");
+  assert.equal(careEntryFor("DELIVERY_EXCEPTION", false).enters, true, "tồn - khách nghỉ vào care: cùng việc với chờ phát lại, chỉ chưa có giờ hẹn");
+  for (const s of ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "RETURNING", "RETURNED", "CANCELLED", "AWAITING_PICKUP", "UNKNOWN"] as const) {
+    assert.equal(careEntryFor(s, true).enters, false, `${s} không phải điều kiện cần care`);
+  }
+  assert.deepEqual([...CARE_ENTRY_SUBSTATES].sort(), ["DELIVERY_EXCEPTION", "WAITING_PROCESSING", "WAITING_REDELIVERY"], "tập điều kiện vào care khai tường minh — thêm bớt phải qua bài này");
+}
+
+/* ───── 24 · Cùng một mã, hai chiều: 501 chiều hoàn là HÀNG VỀ SHOP ───── */
+export function test24MotMaHaiChieu() {
+  assert.equal(legAwareStage("DELIVERED", "RETURN"), "RETURNED", "501 + IS_RETURNING = phát thành công CHIỀU HOÀN = đơn hoàn (luật 2a)");
+  assert.equal(legAwareStage("DELIVERED", "OUTBOUND"), "DELIVERED");
+  assert.equal(legAwareStage("DELIVERED", null), "DELIVERED", "không có cờ thì không đoán — chặng đã dựng từ lịch sử là lưới an toàn");
+  assert.equal(legAwareStage("OUT_FOR_DELIVERY", "RETURN"), "RETURNING", "đang đi phát trên chiều hoàn là đang về shop");
+  assert.equal(legAwareSubstate({ code: 501, text: "Thành công - Phát thành công", stage: "RETURNED" }).valueOf(), "RETURNED", "trạng thái con phải nói cùng một điều với chặng leg-aware");
+  assert.equal(legAwareSubstate({ code: 506, text: "Tồn - Khách hàng nghỉ", stage: "RETURNING" }), "RETURNING", "sự cố trên chiều hoàn không phải sự cố cần care");
+  assert.equal(legAwareSubstate({ code: 506, text: "Tồn - Khách hàng nghỉ", stage: "DELIVERY_FAILED" }), "DELIVERY_EXCEPTION");
+}
+
 export async function testCareStates(db: Db) {
   test01ChoPhatLaiKhongPhaiGiaoHong();
+  test23LuatVaoCareMotHam();
+  test24MotMaHaiChieu();
   test02ChoXuLyKhongPhaiGiaoHong();
   test03MaThangChu();
   test04MauCuTheTruocMauChung();
@@ -396,5 +423,5 @@ export async function testCareStates(db: Db) {
   await test17ChoXuLyDaRoiKhoPhaiHienRa(db);
   await test18HaiTinhHuongHaiRo(db);
   await test22GuiHangLoatThanhCongMotPhan(db);
-  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 22 kiểm thử · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
+  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 24 kiểm thử · luật vào care một hàm · 501 chiều hoàn = hàng về shop · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
 }

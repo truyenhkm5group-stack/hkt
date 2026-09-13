@@ -234,10 +234,12 @@ async function shipmentFacetsUncached(params: ListParams) {
     .groupBy(schema.products.customId, schema.products.name)
     .orderBy(desc(sql`count(distinct ${schema.shipments.id})`));
 
+  // CHỈ ĐỢT ĐANG MỞ. Một kiện có nhiều đợt (0075); nối mọi đợt thì một kiện đếm vào hai trạng thái
+  // và tổng ô lọc lớn hơn số dòng bảng mở ra khi bấm.
   const careRows = await db
     .select({ value: schema.shipmentCare.careStatus, count: count() })
     .from(schema.shipments)
-    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id}`)
+    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id} and ${schema.shipmentCare.active}`)
     .where(base)
     .groupBy(schema.shipmentCare.careStatus);
 
@@ -250,7 +252,7 @@ async function shipmentFacetsUncached(params: ListParams) {
   const ownerRows = await db
     .select({ value: schema.shipmentCare.ownerId, name: schema.users.name, count: count() })
     .from(schema.shipments)
-    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id} and ${schema.shipmentCare.ownerId} is not null`)
+    .innerJoin(schema.shipmentCare, sql`${schema.shipmentCare.shipmentId} = ${schema.shipments.id} and ${schema.shipmentCare.active} and ${schema.shipmentCare.ownerId} is not null`)
     .leftJoin(schema.users, sql`${schema.users.id} = ${schema.shipmentCare.ownerId}`)
     .where(base)
     .groupBy(schema.shipmentCare.ownerId, schema.users.name)

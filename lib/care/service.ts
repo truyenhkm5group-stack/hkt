@@ -1,19 +1,24 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
+import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
-import { BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
+import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
+import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { slaOf } from "@/lib/care/view";
 import {
   CARE_STATUSES,
   CARE_TERMINAL_STATUSES,
+  CARE_WAITING_STATUSES,
   CARRIER_ACTION_KEYS,
   CARRIER_ACTION_LABEL,
   canTransition,
+  CARE_FOLLOW_UP_DEFAULT_HOURS,
+  defaultFollowUpAt,
   type CareEventAction,
   type CareEventSource,
   type CareStatus,
@@ -43,13 +48,20 @@ type CareRow = typeof schema.shipmentCare.$inferSelect;
 
 const EMPTY: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "" };
 
+/**
+ * Trạng thái care của một kiện để trả về màn hình sau mỗi thao tác: đợt ĐANG MỞ, hoặc — khi không
+ * còn đợt nào mở — đợt GẦN NHẤT (vừa đóng). Người vừa bấm "Đã xong" phải thấy dòng đổi thành "Đã
+ * xong", không phải thấy một ca NEW trống.
+ */
 export async function loadCareState(shipmentId: string): Promise<CareState> {
   const db = await getDb();
   const [r] = await db
     .select({ care: schema.shipmentCare, ownerName: schema.users.name })
     .from(schema.shipmentCare)
     .leftJoin(schema.users, eq(schema.users.id, schema.shipmentCare.ownerId))
-    .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+    .where(eq(schema.shipmentCare.shipmentId, shipmentId))
+    .orderBy(desc(schema.shipmentCare.active), desc(schema.shipmentCare.episodeNo))
+    .limit(1);
   if (!r) return EMPTY;
   return {
     status: r.care.careStatus as CareStatus,
@@ -77,7 +89,11 @@ export async function loadCareState(shipmentId: string): Promise<CareState> {
  * là lấy một đợt bất kỳ — có thể là đợt đã đóng từ tháng trước. Mọi thao tác sau đó sẽ ghi vào
  * đúng đợt sai đó, im lặng.
  *
- * Nên ở đây lấy ĐÚNG đợt đang mở. Không có đợt nào đang mở thì mở đợt mới và đánh số tiếp.
+ * Nên ở đây lấy ĐÚNG đợt đang mở. Không có đợt nào đang mở thì:
+ *   · đợt gần nhất do NGƯỜI hoặc MÁY đã đóng ⇒ trả về đợt đó — người ghi chú / hẹn lên một ca đã
+ *     đóng thì ghi lên chính ca đó, còn đổi trạng thái thường thì bị bảng chuyển từ chối ("dùng mở
+ *     lại"); KHÔNG lặng lẽ mở đợt mới thay họ;
+ *   · chưa từng có đợt nào ⇒ mở đợt mới (MANUAL) và đánh số tiếp.
  */
 async function ensureCareRow(shipmentId: string, actor: string): Promise<CareRow | null> {
   const db = await getDb();
@@ -89,6 +105,8 @@ async function ensureCareRow(shipmentId: string, actor: string): Promise<CareRow
 
   const dangMo = await db.query.shipmentCare.findFirst({ where: and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)) });
   if (dangMo) return dangMo;
+  const ganNhat = await db.query.shipmentCare.findFirst({ where: eq(schema.shipmentCare.shipmentId, shipmentId), orderBy: [desc(schema.shipmentCare.episodeNo)] });
+  if (ganNhat && CARE_TERMINAL_STATUSES.includes(ganNhat.careStatus as CareStatus)) return ganNhat;
 
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.shipmentCare).where(eq(schema.shipmentCare.shipmentId, shipmentId)); // ĐẾM MỌI ĐỢT, kể cả đã đóng — số đợt tiếp theo phải nối tiếp lịch sử, không đếm lại từ 1.
   const { substate } = carrierSubstate({ code: s.vtpStatus, text: s.vtpStatusName, stage: s.stage });
@@ -113,8 +131,15 @@ async function ensureCareRow(shipmentId: string, actor: string): Promise<CareRow
   return row ?? null;
 }
 
-/** Mốc kiện vào điều kiện cần care — dùng để chụp SLA vào sự kiện. Lần giao hụt gần nhất, rồi tin cuối, rồi lúc mở case. */
-async function queueSinceOf(shipmentId: string, fallback: Date): Promise<Date> {
+/**
+ * Mốc kiện vào điều kiện cần care — dùng để chụp SLA vào sự kiện.
+ *
+ * ĐỢT CÓ `opened_at` THÌ ĐÓ LÀ MỐC: nó là lúc ĐVVC báo sự cố mở đợt này (hoặc mốc trạng thái ĐVVC
+ * khi đối chiếu mở), tức đúng câu hỏi "kiện chờ người từ bao giờ". Suy từ sự kiện giao hụt gần
+ * nhất chỉ dành cho đợt cũ chưa có mốc — cùng thứ tự với bàn care (`care-workbench.ts`).
+ */
+async function queueSinceOf(shipmentId: string, fallback: Date, openedAt: Date | null = null): Promise<Date> {
+  if (openedAt) return openedAt;
   const db = await getDb();
   const [f] = await db
     .select({ at: schema.shipmentEvents.occurredAt })
@@ -135,8 +160,8 @@ async function recordCareEvent(
 ) {
   const db = await getDb();
   const now = new Date();
-  const queueSince = await queueSinceOf(before.shipmentId, before.createdAt);
-  const sla = slaOf(queueSince, { status: before.careStatus as CareStatus, followUpAt: before.followUpAt, doneAt: before.doneAt, firstResponseAt: before.firstResponseAt }, now);
+  const queueSince = await queueSinceOf(before.shipmentId, before.createdAt, before.openedAt);
+  const sla = slaOf(queueSince, { status: before.careStatus as CareStatus, followUpAt: before.followUpAt, doneAt: before.doneAt, firstResponseAt: before.firstResponseAt }, now, await careSlaHours());
   await db.insert(schema.careCaseEvents).values({
     shipmentId: before.shipmentId,
     actorId: user.id,
@@ -179,21 +204,38 @@ function firstResponse(row: CareRow, now: Date) {
 
 // ───────────────────────────── ĐỔI TRẠNG THÁI ─────────────────────────────
 
-export const statusSchema = z.object({ shipmentIds: z.array(z.string().min(1)).min(1).max(200), status: z.enum(CARE_STATUSES), note: z.string().trim().max(500).default("") });
+export const statusSchema = z
+  .object({
+    shipmentIds: z.array(z.string().min(1)).min(1).max(200),
+    status: z.enum(CARE_STATUSES),
+    note: z.string().trim().max(500).default(""),
+    /** Bắt buộc khi đích là trạng thái CHỜ: một cái hẹn không có giờ không phải một cái hẹn. */
+    followUpAt: z.coerce.date().optional(),
+  })
+  .refine((v) => !(CARE_WAITING_STATUSES as string[]).includes(v.status) || v.followUpAt instanceof Date, {
+    message: `Chuyển sang trạng thái chờ phải kèm giờ xem lại — không có giờ thì ca biến mất khỏi Cần care (mặc định +${CARE_FOLLOW_UP_DEFAULT_HOURS} giờ nếu bấm nhanh)`,
+    path: ["followUpAt"],
+  });
 
 /**
  * Đổi trạng thái theo bảng chuyển. Kiện không đổi được (đi sai đường) thì bị bỏ qua và nêu tên trong
  * `skipped` — hàng loạt không được vì một kiện mà hỏng cả mẻ. Vào RESOLVED / CANCELLED ở đây chỉ
  * được từ trạng thái mở; mở lại phải qua `reopenCase`.
+ *
+ * ĐÓNG = RỜI HÀNG ĐỢI, KHÔNG PHẢI KẾT QUẢ. Trạng thái kết thúc đi cùng `active = false` (một mệnh đề,
+ * hai cột không được nói hai điều khác nhau — production 13/09/2026 có 13 đợt RESOLVED/CANCELLED mà
+ * vẫn `active`). `care_outcome` vẫn PENDING: chỉ chứng từ ĐVVC mới chốt được cứu hay không, và vòng
+ * đời sẽ chốt lên đúng đợt này dù nó đã đóng.
  */
 export async function setCareStatus(user: CareActor, input: z.input<typeof statusSchema>): Promise<Result<{ states: Record<string, CareState>; skipped: { shipmentId: string; reason: string }[] }>> {
   const parsed = statusSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { shipmentIds, status, note } = parsed.data;
+  const { shipmentIds, status, note, followUpAt } = parsed.data;
   const db = await getDb();
   const now = new Date();
   const states: Record<string, CareState> = {};
   const skipped: { shipmentId: string; reason: string }[] = [];
+  const waiting = CARE_WAITING_STATUSES.includes(status);
   for (const shipmentId of [...new Set(shipmentIds)]) {
     const before = await ensureCareRow(shipmentId, user.email);
     if (!before) {
@@ -201,7 +243,7 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
       continue;
     }
     const from = before.careStatus as CareStatus;
-    if (from === status && !note) {
+    if (from === status && !note && !followUpAt) {
       states[shipmentId] = await loadCareState(shipmentId);
       continue;
     }
@@ -210,21 +252,23 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
       continue;
     }
     const terminal = CARE_TERMINAL_STATUSES.includes(status);
+    const nextFollowUp = terminal ? null : waiting ? (followUpAt ?? before.followUpAt ?? defaultFollowUpAt(now)) : before.followUpAt;
     await db
       .update(schema.shipmentCare)
       .set({
         careStatus: status,
+        active: !terminal,
         firstResponseAt: firstResponse(before, now),
         doneAt: terminal ? now : before.doneAt,
         escalatedAt: status === "ESCALATED" ? now : before.escalatedAt,
-        followUpAt: terminal ? null : before.followUpAt,
+        followUpAt: nextFollowUp,
         ...(note ? { lastNote: note, lastNoteAt: now, lastNoteBy: user.email } : {}),
         updatedBy: user.email,
         updatedAt: now,
       })
-      .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+      .where(eq(schema.shipmentCare.id, before.id));
     if (note) await db.insert(schema.careActions).values({ shipmentId, actorId: user.id, actorEmail: user.email, kind: "OTHER", note, stageAtAction: "" });
-    await recordCareEvent(user, before, { action: status === "RESOLVED" ? "RESOLVE" : status === "CANCELLED" ? "CANCEL" : "STATUS", note, nextStatus: status, followUpAt: terminal ? null : undefined });
+    await recordCareEvent(user, before, { action: status === "RESOLVED" ? "RESOLVE" : status === "CANCELLED" ? "CANCEL" : "STATUS", note, nextStatus: status, followUpAt: terminal || waiting ? nextFollowUp : undefined });
     states[shipmentId] = await loadCareState(shipmentId);
   }
   clearMemo();
@@ -233,21 +277,44 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
 
 export const reopenSchema = z.object({ shipmentId: z.string().min(1), note: z.string().trim().max(500).default("") });
 
-/** Mở lại case đã đóng: về ASSIGNED nếu còn người, không thì NEW; đếm một lần mở lại. */
+/**
+ * Mở lại case đã đóng: KÍCH HOẠT LẠI đợt gần nhất (về ASSIGNED nếu còn người, không thì NEW), đếm
+ * một lần mở lại. Không mở đợt mới — "mở lại" là tiếp tục đúng đợt đó, giữ nguyên lịch sử của nó.
+ *
+ * Bản trước gọi `ensureCareRow`, hàm này thấy không còn đợt đang mở nên MỞ ĐỢT MỚI (MANUAL, NEW) rồi
+ * mới kiểm "đã đóng chưa" — và trả lỗi "case chưa đóng" trên chính đợt vừa tự tạo. Kết quả: không
+ * bao giờ mở lại được, và mỗi lần bấm để lại một đợt rác.
+ */
 export async function reopenCase(user: CareActor, input: z.input<typeof reopenSchema>): Promise<Result<CareState>> {
   const parsed = reopenSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const { shipmentId, note } = parsed.data;
   const db = await getDb();
-  const before = await ensureCareRow(shipmentId, user.email);
-  if (!before) return { error: "Không tìm thấy vận đơn" };
-  if (!CARE_TERMINAL_STATUSES.includes(before.careStatus as CareStatus)) return { error: "Case chưa đóng — không có gì để mở lại" };
+  const before = await db.query.shipmentCare.findFirst({ where: eq(schema.shipmentCare.shipmentId, shipmentId), orderBy: [desc(schema.shipmentCare.episodeNo)] });
+  if (!before) return { error: "Kiện này chưa có đợt chăm sóc nào — không có gì để mở lại" };
+  if (before.active || !CARE_TERMINAL_STATUSES.includes(before.careStatus as CareStatus)) return { error: "Case chưa đóng — không có gì để mở lại" };
   const next: CareStatus = before.ownerId ? "ASSIGNED" : "NEW";
   const now = new Date();
-  await db
+  const [row] = await db
     .update(schema.shipmentCare)
-    .set({ careStatus: next, reopenCount: before.reopenCount + 1, doneAt: before.doneAt, ...(note ? { lastNote: note, lastNoteAt: now, lastNoteBy: user.email } : {}), updatedBy: user.email, updatedAt: now })
-    .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+    .set({
+      active: true,
+      careStatus: next,
+      reopenCount: before.reopenCount + 1,
+      doneAt: before.doneAt,
+      // Máy từng đóng vì "không phải điều kiện care" mà người mở lại ⇒ người biết hơn máy: đợt này
+      // là ca thật, kết quả quay về chờ chứng từ. Quyết định khác (duyệt hoàn) giữ nguyên.
+      resolution: before.resolution === NOT_CARE_CONDITION ? null : before.resolution,
+      careOutcome: before.careOutcome ?? "PENDING",
+      ...(note ? { lastNote: note, lastNoteAt: now, lastNoteBy: user.email } : {}),
+      updatedBy: user.email,
+      updatedAt: now,
+    })
+    // Chỉ mục duy nhất từng phần chặn nếu một đợt khác đã kịp mở — báo lỗi thay vì có hai đợt.
+    .where(and(eq(schema.shipmentCare.id, before.id), eq(schema.shipmentCare.active, false)))
+    .returning({ id: schema.shipmentCare.id })
+    .catch(() => []);
+  if (!row) return { error: "Kiện đã có đợt chăm sóc khác đang mở — làm tiếp trên đợt đó" };
   await recordCareEvent(user, before, { action: "REOPEN", note, nextStatus: next, reason: "Mở lại case đã đóng" });
   clearMemo();
   return { ok: true, data: await loadCareState(shipmentId) };
@@ -278,8 +345,18 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
     const next: CareStatus = from === "NEW" && owner ? "ASSIGNED" : from === "ASSIGNED" && !owner ? "NEW" : from;
     await db
       .update(schema.shipmentCare)
-      .set({ ownerId: owner?.id ?? null, ownerEmail: owner?.email ?? "", careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
-      .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+      .set({
+        ownerId: owner?.id ?? null,
+        ownerEmail: owner?.email ?? "",
+        careStatus: next,
+        firstResponseAt: firstResponse(before, now),
+        // Mốc giao và NGƯỜI ĐƯỢC GIAO ĐẦU TIÊN — ghi một lần, không viết lại khi chuyển tay (luật 34).
+        assignedAt: owner ? (before.assignedAt ?? now) : before.assignedAt,
+        initialOwnerId: owner ? (before.initialOwnerId ?? owner.id) : before.initialOwnerId,
+        updatedBy: user.email,
+        updatedAt: now,
+      })
+      .where(eq(schema.shipmentCare.id, before.id));
     await recordCareEvent(user, before, { action: "ASSIGN", nextStatus: next, nextOwner: owner?.email ?? null, nextOwnerId: owner?.id ?? null, payload: { ownerId: owner?.id ?? null, ownerName: owner?.name ?? null } });
     states[shipmentId] = await loadCareState(shipmentId);
   }
@@ -310,7 +387,7 @@ export async function setCareFollowUp(user: CareActor, input: z.input<typeof fol
   await db
     .update(schema.shipmentCare)
     .set({ followUpAt: at, careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
-    .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+    .where(eq(schema.shipmentCare.id, before.id));
   await recordCareEvent(user, before, { action: "FOLLOW_UP", nextStatus: next, followUpAt: at });
   clearMemo();
   return { ok: true, data: await loadCareState(shipmentId) };
@@ -336,7 +413,7 @@ export async function addCareNote(user: CareActor, input: z.input<typeof noteSch
   await db
     .update(schema.shipmentCare)
     .set({ lastNote: note, lastNoteAt: now, lastNoteBy: user.email, careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
-    .where(and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)));
+    .where(eq(schema.shipmentCare.id, before.id));
   await recordCareEvent(user, before, { action: "NOTE", note, nextStatus: next, payload: { kind } });
   clearMemo();
   return { ok: true, data: await loadCareState(shipmentId) };
@@ -652,6 +729,41 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
   if (action === "EXCHANGE" && !replacementShipmentId) return { error: "Chọn vận đơn của đơn đổi — không có nó thì “cứu bằng đơn đổi” không đo được, chỉ đoán được" };
 
   const db = await getDb();
+
+  /*
+    ĐIỀU KIỆN XÉT TRƯỚC, VÀ XÉT BẰNG CÙNG MỘT HÀM VỚI NÚT TRÊN MÀN HÌNH.
+
+    Bản trước gọi thẳng `requestCarrierAction`; hàm đó từ chối vì SAI TRẠNG THÁI (kiện đã giao,
+    chưa có mã…) nhưng chỗ này vẫn ghi quyết định, đẩy ca sang "chờ ĐVVC" và báo "Đã gửi yêu cầu".
+    Một lời từ chối của CHÍNH ERP không phải một lời từ chối của ĐVVC: không có gì để ghi vào sổ.
+  */
+  const kien = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, vtpOrderNumber: true, trackingCode: true, stage: true, trackingCapability: true, vtpStatus: true, vtpStatusName: true } });
+  if (!kien) return { error: "Không tìm thấy vận đơn" };
+  if (ACTION_CALLS_CARRIER[action]) {
+    const actionKey: CarrierActionKey = action === "APPROVE_RETURN" ? "approve-return" : "redeliver";
+    const duDieuKien = canRequestCarrierAction(actionKey, {
+      stage: kien.stage,
+      vtpStatus: kien.vtpStatus,
+      vtpStatusName: kien.vtpStatusName,
+      orderNumber: kien.vtpOrderNumber ?? kien.trackingCode,
+      trackingCapability: kien.trackingCapability,
+      configured: getViettelPostClient().configured,
+    });
+    if (!duDieuKien.ok) return { error: duDieuKien.reason };
+  }
+
+  /* Đơn đổi: nhận cả id lẫn mã vận đơn — người xử lý biết mã, không biết id. */
+  let replacementId: string | null = null;
+  if (replacementShipmentId) {
+    const thayThe = await db.query.shipments.findFirst({
+      where: or(eq(schema.shipments.id, replacementShipmentId), eq(schema.shipments.vtpOrderNumber, replacementShipmentId), eq(schema.shipments.trackingCode, replacementShipmentId)),
+      columns: { id: true },
+    });
+    if (!thayThe) return { error: `Không tìm thấy vận đơn đơn đổi “${replacementShipmentId}” — tạo vận đơn thay thế trước rồi nối` };
+    if (thayThe.id === shipmentId) return { error: "Đơn đổi phải là một vận đơn KHÁC kiện đang gặp sự cố" };
+    replacementId = thayThe.id;
+  }
+
   const careRow = await ensureCareRow(shipmentId, user.email);
   if (!careRow) return { error: "Không tìm thấy vận đơn" };
   const truoc = careRow.careStatus as CareStatus;
@@ -659,11 +771,12 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
   /* ───── Hai hành động GỬI LỆNH sang ĐVVC ───── */
   let request: CarrierRequestView | null = null;
   let carrierResult: string | null = null;
-  if (action === "APPROVE_RETURN" || action === "REQUEST_REDELIVERY") {
+  if (ACTION_CALLS_CARRIER[action]) {
     const actionKey: CarrierActionKey = action === "APPROVE_RETURN" ? "approve-return" : "redeliver";
     const r = await requestCarrierAction(user, { shipmentId, actionKey, note });
     if ("error" in r) {
-      // ĐVVC từ chối KHÔNG làm mất quyết định của shop: vẫn ghi vào sổ, kèm đúng câu ĐVVC nói.
+      // ĐVVC (không phải ERP) từ chối KHÔNG làm mất quyết định của shop: vẫn ghi vào sổ, kèm đúng
+      // câu ĐVVC nói — điều kiện của ERP đã được xét ở trên nên tới đây chỉ còn lời của ĐVVC.
       carrierResult = r.error;
     } else {
       request = r.data.request;
@@ -671,19 +784,25 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
     }
   }
 
+  /*
+    HẸN XEM LẠI MẶC ĐỊNH cho ba hành động đưa ca vào trạng thái chờ mà không có giờ: một cái hẹn không
+    có giờ không phải một cái hẹn, và ca "chờ ĐVVC" không có hạn là ca biến mất khỏi Cần care.
+  */
+  const now = new Date();
+  const henXemLai = followUpAt ?? careRow.followUpAt ?? defaultFollowUpAt(now);
+
   /* ───── Trạng thái xử lý đi tới đâu ───── */
   const sau: CareStatus =
     action === "APPROVE_RETURN" ? "WAITING_CARRIER" : action === "REQUEST_REDELIVERY" ? "WAITING_CARRIER" : action === "EXCHANGE" ? "WAITING_CARRIER" : "WAITING_REDELIVERY";
 
-  const now = new Date();
   await db
     .update(schema.shipmentCare)
     .set({
       careStatus: canTransition(truoc, sau) ? sau : truoc,
       // `resolution` là QUYẾT ĐỊNH, KHÔNG phải kết cục logistics. Nó không đụng tới `care_outcome`.
       resolution: action === "APPROVE_RETURN" ? "RETURN_APPROVED" : careRow.resolution,
-      followUpAt: followUpAt ?? careRow.followUpAt,
-      replacementShipmentId: replacementShipmentId ?? careRow.replacementShipmentId,
+      followUpAt: henXemLai,
+      replacementShipmentId: replacementId ?? careRow.replacementShipmentId,
       firstActionAt: careRow.firstActionAt ?? now,
       lastActionAt: now,
       firstResponseAt: careRow.firstResponseAt ?? now,
@@ -693,7 +812,7 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
       updatedBy: user.email,
       updatedAt: now,
     })
-    .where(and(eq(schema.shipmentCare.id, careRow.id), eq(schema.shipmentCare.active, true)));
+    .where(eq(schema.shipmentCare.id, careRow.id));
 
   // LỊCH SỬ CHỈ THÊM — không lệnh `update` nào chạm vào dòng đã ghi.
   await db.insert(schema.careBusinessActions).values({
@@ -710,10 +829,10 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
     carrierResult,
     previousCareStatus: truoc,
     nextCareStatus: sau,
-    metadata: { followUpAt: followUpAt?.toISOString() ?? null, replacementShipmentId: replacementShipmentId ?? null },
+    metadata: { followUpAt: henXemLai.toISOString(), followUpDefaulted: !followUpAt && !careRow.followUpAt, replacementShipmentId: replacementId ?? null },
   });
 
-  await recordCareEvent(user, careRow, { action: "CARRIER_REQUEST", note, followUpAt, payload: { businessAction: action, reasonCode: reasonCode ?? null, carrierResult } });
+  await recordCareEvent(user, careRow, { action: "CARRIER_REQUEST", note, followUpAt: henXemLai, payload: { businessAction: action, reasonCode: reasonCode ?? null, carrierResult } });
   await audit({ userId: user.id, userEmail: user.email, action: "CARE_BUSINESS_ACTION", entity: "SHIPMENT", entityId: shipmentId, detail: { action, reasonCode, carrierResult, previous: truoc, next: sau } });
   clearMemo();
 

@@ -147,6 +147,20 @@ export const CARE_SLA = {
   doneWindowDays: 7,
 } as const;
 
+/**
+ * HẸN THEO DÕI MẶC ĐỊNH khi một thao tác đưa ca vào trạng thái CHỜ mà người không chọn giờ.
+ *
+ * Đo production 13/09/2026: `follow_up_at` NULL trên toàn bộ 182 đợt đang mở, trong đó 16 đợt ở
+ * trạng thái chờ — và `careViewOf` đưa chúng ra khỏi "Cần care" vĩnh viễn vì "chưa tới hạn" của
+ * một cái hạn không tồn tại. Một cái hẹn không có giờ không phải một cái hẹn; 24 giờ là mốc mà
+ * kiện giao hụt rơi thành hoàn nhanh nhất (cùng căn cứ với `resolveHours`).
+ */
+export const CARE_FOLLOW_UP_DEFAULT_HOURS = 24;
+
+export function defaultFollowUpAt(from = new Date()): Date {
+  return new Date(from.getTime() + CARE_FOLLOW_UP_DEFAULT_HOURS * 3_600_000);
+}
+
 /** Bốn kiểu hẹn theo dõi bấm một phát — không mở lịch. */
 export const FOLLOW_UP_PRESETS: { key: string; label: string; hours: number }[] = [
   { key: "2h", label: "+2 giờ", hours: 2 },

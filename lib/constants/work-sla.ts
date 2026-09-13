@@ -138,6 +138,14 @@ const SOURCE_RULES: SlaRule[] = [
     department: "LOGISTICS",
     alsoShownOn: "Vận đơn & care",
   },
+  {
+    key: "SHIPMENT_CARE:FIRST_RESPONSE",
+    label: "Care vận đơn (phản hồi đầu)",
+    hours: CARE_SLA.firstResponseHours,
+    why: "Kiện giao hụt mà hai giờ chưa ai gọi khách thì bưu tá đã đi tuyến khác — lần phát lại trượt sang ngày sau.",
+    department: "LOGISTICS",
+    alsoShownOn: "Vận đơn & care",
+  },
 
   /* ───── Kho ───── */
   {

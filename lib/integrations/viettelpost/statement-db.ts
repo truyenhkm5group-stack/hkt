@@ -4,6 +4,7 @@ import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
 import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type CodPaymentSummary, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
@@ -481,7 +482,9 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         detail: { before, snapshot, disposition, sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null } });
       // Trạng thái cuối cùng luôn do lịch sử sự kiện quyết định, không phụ thuộc luồng nào ghi sau.
       // Nhờ vậy dòng tệp đến muộn không kéo lùi trạng thái mà vẫn được lưu vào hành trình.
-      await materializeShipmentState(tx as unknown as Parameters<typeof materializeShipmentState>[0], current.id);
+      const dung = await materializeShipmentState(tx as unknown as Parameters<typeof materializeShipmentState>[0], current.id);
+      // Trạng thái đổi thì vòng đời care đi theo (mở / đóng đợt, chốt kết quả) — cùng một cửa với webhook.
+      if (dung.changed) await afterShipmentStateChange(tx as unknown as Parameters<typeof afterShipmentStateChange>[0], current.id, { source: "VTP_IMPORT" }).catch(() => undefined);
       if (disposition !== "applied") return disposition;
       return isLeg ? "leg" : m.matchKind === "phone" ? "linked" : "updated";
     });

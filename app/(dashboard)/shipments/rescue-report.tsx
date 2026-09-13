@@ -176,9 +176,10 @@ export async function RescueReportSection({ period }: { period: Period }) {
       </SectionCard>
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        <b>Kết quả lấy từ đâu.</b> Ca mở khi ĐVVC báo <b>{CARRIER_SUBSTATE_LABEL["WAITING_PROCESSING" as CarrierSubstate]}</b> hoặc{" "}
-        <b>{CARRIER_SUBSTATE_LABEL["WAITING_REDELIVERY" as CarrierSubstate]}</b>, và chốt khi ĐVVC báo kết cục cuối. Không thao tác nào của nhân viên mở hay đóng được một ca —
-        bấm nút không làm gói hàng di chuyển. {CARE_OUTCOME_LABEL.RESCUED_DIRECT}: {CARE_OUTCOME_HINT.RESCUED_DIRECT}
+        <b>Kết quả lấy từ đâu.</b> Ca mở khi ĐVVC báo <b>{CARRIER_SUBSTATE_LABEL["WAITING_PROCESSING" as CarrierSubstate]}</b> (chỉ khi có chứng từ rời kho — mã 102 trước lúc lấy hàng
+        không phải việc của đội), <b>{CARRIER_SUBSTATE_LABEL["WAITING_REDELIVERY" as CarrierSubstate]}</b> hoặc <b>{CARRIER_SUBSTATE_LABEL["DELIVERY_EXCEPTION" as CarrierSubstate]}</b>, và chốt khi ĐVVC báo kết cục cuối theo
+        CHIỀU ĐI / CHIỀU HOÀN (501 chiều hoàn là hàng về shop, không phải giao thành công). Không thao tác nào của nhân viên mở hay chốt được kết quả một ca — bấm nút không làm gói hàng di chuyển.
+        Ca máy đóng vì kiện không phải điều kiện care nằm ngoài mọi con số ở đây. {CARE_OUTCOME_LABEL.RESCUED_DIRECT}: {CARE_OUTCOME_HINT.RESCUED_DIRECT}
       </p>
     </div>
   );

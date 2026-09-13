@@ -10,8 +10,12 @@ import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
 import { setSettingJson } from "@/lib/settings";
 
 /**
- * Lớp mỏng: kiểm quyền rồi giao cho `lib/care/service.ts`. Đổi trạng thái / note / giao việc cần
- * `shipments:view`; gửi yêu cầu tới Viettel Post cần `shipments:manage`.
+ * Lớp mỏng: kiểm quyền rồi giao cho `lib/care/service.ts`.
+ *
+ * Ghi chú cần `shipments:view` (ai nhìn thấy kiện cũng được ghi lại việc mình vừa làm). Mọi thao tác
+ * ĐỔI DỮ LIỆU CA — đổi trạng thái, giao người, hẹn, mở lại, gửi ĐVVC, quyết định nghiệp vụ — cần
+ * `shipments:manage`: CS và LEADER đã có quyền đó (lib/auth/permissions.ts), còn VIEWER / MARKETING
+ * chỉ xem thì không được đóng ca của người khác.
  */
 async function actor(permission: "shipments:view" | "shipments:manage"): Promise<svc.CareActor | null> {
   const user = await requireUser();
@@ -21,19 +25,19 @@ async function actor(permission: "shipments:view" | "shipments:manage"): Promise
 const DENIED = { error: "Không có quyền" } as const;
 
 export async function setCareStatus(input: z.input<typeof svc.statusSchema>) {
-  const a = await actor("shipments:view");
+  const a = await actor("shipments:manage");
   return a ? svc.setCareStatus(a, input) : DENIED;
 }
 export async function reopenCase(input: z.input<typeof svc.reopenSchema>) {
-  const a = await actor("shipments:view");
+  const a = await actor("shipments:manage");
   return a ? svc.reopenCase(a, input) : DENIED;
 }
 export async function setCareOwner(input: z.input<typeof svc.ownerSchema>) {
-  const a = await actor("shipments:view");
+  const a = await actor("shipments:manage");
   return a ? svc.setCareOwner(a, input) : DENIED;
 }
 export async function setCareFollowUp(input: z.input<typeof svc.followUpSchema>) {
-  const a = await actor("shipments:view");
+  const a = await actor("shipments:manage");
   return a ? svc.setCareFollowUp(a, input) : DENIED;
 }
 export async function addCareNote(input: z.input<typeof svc.noteSchema>) {

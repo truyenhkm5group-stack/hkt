@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { CARE_SLA } from "@/lib/constants/care";
+import { careSlaHours } from "@/lib/care/sla";
 import { getCareQueue } from "@/lib/queries/care-workbench";
 import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
@@ -23,6 +23,12 @@ import type { Period } from "@/lib/search-params";
  */
 
 export type CareStaffRow = {
+  /**
+   * KHOÁ tài khoản (`users.id`). `null` = dòng "chưa nối tài khoản": hành động / ca lịch sử chỉ có ô
+   * chữ, không quy kết được cho ai (luật 34–35). Không bao giờ ghi công cho một người từ ô chữ.
+   */
+  userId: string | null;
+  /** Tên hiển thị đọc từ `users` — ảnh chụp để người đọc, không phải khoá. */
   actor: string;
   actions: number;
   reached: number;
@@ -92,6 +98,8 @@ export async function getCareReport(period: Period): Promise<CareReport> {
 async function build(period: Period): Promise<CareReport> {
   const db = await getDb();
   const wb = await getCareQueue();
+  // Ngưỡng SLA qua sổ hạn xử lý (luật 22), không gõ số ở đây.
+  const sla = await careSlaHours();
 
   // ── Kiện giao hụt trong kỳ: có ai can thiệp không, kết cục ra sao ──
   const failed = rowsOf<{ shipment_id: string; intervened: boolean; delivered: boolean; returned: boolean; cod: string | number; revenue: string | number }>(
@@ -173,8 +181,8 @@ async function build(period: Period): Promise<CareReport> {
   // ── Phản hồi đầu / đóng việc theo SLA (trên bảng care) ──
   const careRows = rowsOf<{ first_hours: string | null; resolve_hours: string | null; done: boolean; reopened: boolean }>(
     await db.execute(sql`
-      select extract(epoch from (c.first_response_at - c.created_at)) / 3600 as first_hours,
-             extract(epoch from (c.done_at - c.created_at)) / 3600 as resolve_hours,
+      select extract(epoch from (c.first_response_at - coalesce(c.opened_at, c.created_at))) / 3600 as first_hours,
+             extract(epoch from (c.done_at - coalesce(c.opened_at, c.created_at))) / 3600 as resolve_hours,
              (c.care_status in ('RESOLVED','CANCELLED') and ${between("c.done_at", period)}) as done,
              (c.reopen_count > 0) as reopened
         from shipment_care c
@@ -191,20 +199,29 @@ async function build(period: Period): Promise<CareReport> {
   const doneRows = careRows.filter((r) => r.done);
   const resolveHours = doneRows.map((r) => (r.resolve_hours === null ? null : Number(r.resolve_hours))).filter((x): x is number => x !== null && x >= 0);
 
-  // ── Theo nhân viên: kết quả, không phải số lần bấm ──
-  const staffRows = rowsOf<{ actor: string; actions: number; reached: number; cases_done: number; intervened: number; recovered: number; recovered_cod: string | number; returned_after: number; overdue_owned: number; first_hours: unknown }>(
+  // ── Theo nhân viên: kết quả, không phải số lần bấm — và QUY KẾT BẰNG KHOÁ TÀI KHOẢN ──
+  /*
+    Bản trước nối bốn bảng bằng ô CHỮ (`actor_email`, `updated_by`, `owner_email`). Email đổi là
+    mất dấu, chuỗi `''` với `NULL` trông giống nhau, và `updated_by = 'SYSTEM'` từng được xếp thành
+    một "nhân viên". Nay mọi nhánh khoá theo `users.id`; dòng không có khoá gom vào MỘT dòng
+    "chưa nối tài khoản" — hiện ra, nhưng không ghi công cho ai (luật 34–35).
+  */
+  const staffRows = rowsOf<{ user_id: string | null; name: string | null; actions: number; reached: number; cases_done: number; intervened: number; recovered: number; recovered_cod: string | number; returned_after: number; overdue_owned: number; first_hours: unknown }>(
     await db.execute(sql`
       with hd as (
-        select a.actor_email as actor, count(*)::int as actions,
+        select a.actor_id as uid, count(*)::int as actions,
                count(*) filter (where a.kind in ('CALLED_REACHED','MESSAGED','ADDRESS_FIXED','RESCHEDULED','CUSTOMER_REFUSED'))::int as reached
-          from care_actions a where ${between("a.created_at", period)} group by a.actor_email
+          from care_actions a where ${between("a.created_at", period)} group by a.actor_id
       ),
       xong as (
-        select c.updated_by as actor, count(*)::int as cases_done
-          from shipment_care c where c.care_status in ('RESOLVED','CANCELLED') and ${between("c.done_at", period)} group by c.updated_by
+        -- Người ĐÓNG ca = người bấm RESOLVE / CANCEL (sổ sự kiện, có khoá). Máy đóng (SYSTEM) không phải người.
+        select e.actor_id as uid, count(*)::int as cases_done
+          from care_case_events e
+         where e.action in ('RESOLVE','CANCEL') and e.source <> 'SYSTEM' and ${between("e.created_at", period)}
+         group by e.actor_id
       ),
       ket as (
-        select a.actor_email as actor,
+        select a.actor_id as uid,
                count(distinct a.shipment_id)::int as intervened,
                count(distinct a.shipment_id) filter (where (${SHIPMENT_DELIVERED}))::int as recovered,
                coalesce(sum(shipments.cod_amount) filter (where (${SHIPMENT_DELIVERED})), 0) as recovered_cod,
@@ -216,35 +233,49 @@ async function build(period: Period): Promise<CareReport> {
            and exists (select 1 from shipment_events e where e.shipment_id = a.shipment_id and e.normalized_stage = 'DELIVERY_FAILED' and e.occurred_at <= a.created_at)
            -- Chỉ tính công khi hành động đi TRƯỚC kết cục: ghi note sau khi kiện đã giao / hoàn thì không.
            and not exists (select 1 from shipment_events e2 where e2.shipment_id = a.shipment_id and e2.normalized_stage in ('DELIVERED','RETURNED') and e2.occurred_at < a.created_at)
-         group by a.actor_email
+         group by a.actor_id
       ),
       tre as (
-        select c.owner_email as actor, count(*)::int as overdue_owned
+        select c.owner_id as uid, count(*)::int as overdue_owned
           from shipment_care c
-         where c.care_status in ('NEW','ASSIGNED','IN_PROGRESS','WAITING_CUSTOMER','WAITING_CARRIER','WAITING_REDELIVERY') and c.first_response_at is null and c.created_at < now() - (${CARE_SLA.firstResponseHours} || ' hours')::interval
-         group by c.owner_email
+         where c.active and c.care_status in ('NEW','ASSIGNED','IN_PROGRESS','WAITING_CUSTOMER','WAITING_CARRIER','WAITING_REDELIVERY')
+           and c.first_response_at is null and coalesce(c.opened_at, c.created_at) < now() - (${sla.firstResponseHours} || ' hours')::interval
+         group by c.owner_id
       ),
       ph as (
-        select c.updated_by as actor, array_agg(extract(epoch from (c.first_response_at - c.created_at)) / 3600) as first_hours
-          from shipment_care c where c.first_response_at is not null and ${between("c.first_response_at", period)} group by c.updated_by
+        -- Phản hồi đầu thuộc về NGƯỜI ĐẦU TIÊN động vào đợt (sự kiện có khoá sớm nhất), không phải người sửa gần nhất.
+        select dau.uid, array_agg(extract(epoch from (c.first_response_at - coalesce(c.opened_at, c.created_at))) / 3600) as first_hours
+          from shipment_care c
+          left join lateral (
+            select e.actor_id as uid from care_case_events e
+             where e.shipment_id = c.shipment_id and e.actor_id is not null and e.created_at >= coalesce(c.opened_at, c.created_at)
+             order by e.created_at asc limit 1
+          ) dau on true
+         where c.first_response_at is not null and ${between("c.first_response_at", period)}
+         group by dau.uid
+      ),
+      ids as (
+        select uid from hd union select uid from xong union select uid from ket union select uid from tre union select uid from ph
       )
-      select coalesce(hd.actor, xong.actor, ket.actor, tre.actor, ph.actor) as actor,
+      select ids.uid as user_id, u.name,
              coalesce(hd.actions, 0) as actions, coalesce(hd.reached, 0) as reached,
              coalesce(xong.cases_done, 0) as cases_done,
              coalesce(ket.intervened, 0) as intervened, coalesce(ket.recovered, 0) as recovered, coalesce(ket.recovered_cod, 0) as recovered_cod, coalesce(ket.returned_after, 0) as returned_after,
              coalesce(tre.overdue_owned, 0) as overdue_owned,
              ph.first_hours
-        from hd
-        full join xong on xong.actor = hd.actor
-        full join ket on ket.actor = coalesce(hd.actor, xong.actor)
-        full join tre on tre.actor = coalesce(hd.actor, xong.actor, ket.actor)
-        full join ph on ph.actor = coalesce(hd.actor, xong.actor, ket.actor, tre.actor)
-       where coalesce(hd.actor, xong.actor, ket.actor, tre.actor, ph.actor) <> ''
+        from ids
+        left join users u on u.id = ids.uid
+        left join hd on hd.uid is not distinct from ids.uid
+        left join xong on xong.uid is not distinct from ids.uid
+        left join ket on ket.uid is not distinct from ids.uid
+        left join tre on tre.uid is not distinct from ids.uid
+        left join ph on ph.uid is not distinct from ids.uid
     `),
   );
   const staff: CareStaffRow[] = staffRows
     .map((r) => ({
-      actor: r.actor,
+      userId: r.user_id,
+      actor: r.user_id ? r.name || r.user_id : "Chưa nối tài khoản",
       actions: Number(r.actions),
       reached: Number(r.reached),
       casesDone: Number(r.cases_done),
@@ -255,13 +286,14 @@ async function build(period: Period): Promise<CareReport> {
       overdueOwned: Number(r.overdue_owned),
       medianFirstResponseHours: median(pgArray(r.first_hours).filter((x) => x >= 0)),
     }))
-    .sort((a, b) => b.recoveredCod - a.recoveredCod || b.recovered - a.recovered || b.casesDone - a.casesDone);
+    // Dòng "chưa nối tài khoản" xuống cuối: nó là bối cảnh, không phải một người để xếp hạng.
+    .sort((a, b) => Number(a.userId === null) - Number(b.userId === null) || b.recoveredCod - a.recoveredCod || b.recovered - a.recovered || b.casesDone - a.casesDone);
 
   return {
     period,
     backlog: { care: wb.counts.care, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk, byReason: wb.byReason, byOwner: wb.byOwner, dataGaps: wb.dataGaps.length },
-    firstResponse: { medianHours: median(firstHours), withinSla: firstHours.filter((h) => h <= CARE_SLA.firstResponseHours).length, measured: firstHours.length },
-    done: { count: doneRows.length, reopened: careRows.filter((r) => r.reopened).length, medianResolveHours: median(resolveHours), withinSla: resolveHours.filter((h) => h <= CARE_SLA.resolveHours).length },
+    firstResponse: { medianHours: median(firstHours), withinSla: firstHours.filter((h) => h <= sla.firstResponseHours).length, measured: firstHours.length },
+    done: { count: doneRows.length, reopened: careRows.filter((r) => r.reopened).length, medianResolveHours: median(resolveHours), withinSla: resolveHours.filter((h) => h <= sla.resolveHours).length },
     recovery,
     redelivery,
     carrierRequests: { total: Number(cr?.total ?? 0), success: Number(cr?.success ?? 0), ack: Number(cr?.ack ?? 0), failed: Number(cr?.failed ?? 0), unsupported: Number(cr?.unsupported ?? 0), manual: Number(cr?.manual ?? 0), manualDone: Number(cr?.manual_done ?? 0) },

@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { addCareNote, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
-import { CARE_STATUS_LABEL, type CareStatus } from "@/lib/constants/care";
+import { CARE_STATUS_LABEL, CARE_WAITING_STATUSES, defaultFollowUpAt, type CareStatus } from "@/lib/constants/care";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
 import { setReturnReason } from "@/lib/actions/return-reason";
 
@@ -79,8 +79,9 @@ export function CareRowActions({
       sau?.();
     });
 
+  // Trạng thái CHỜ bắt buộc có giờ xem lại — menu bấm nhanh lấy mặc định, không để ca chìm khỏi Cần care.
   const doiTrangThai = (status: CareStatus) =>
-    chay(() => setCareStatus({ shipmentIds: [shipmentId], status, note: "" }), `${tracking}: ${CARE_STATUS_LABEL[status]}`, () => setTrangThai(status));
+    chay(() => setCareStatus({ shipmentIds: [shipmentId], status, note: "", followUpAt: CARE_WAITING_STATUSES.includes(status) ? defaultFollowUpAt() : undefined }), `${tracking}: ${CARE_STATUS_LABEL[status]}`, () => setTrangThai(status));
 
   return (
     <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>

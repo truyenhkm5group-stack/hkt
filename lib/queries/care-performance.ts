@@ -1,7 +1,9 @@
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { CARE_OUTCOMES, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
+import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
+import { rowsOf } from "@/lib/sql-rows";
+import { CARE_OUTCOMES, OUTCOME_IS_FINAL, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -29,6 +31,13 @@ import type { Period } from "@/lib/search-params";
  * Ca chưa có kết cục thì CHƯA BIẾT cứu được hay không. Đẩy vào mẫu số là ép một câu trả lời chưa
  * tồn tại thành "chưa cứu được", và tỷ lệ tụt xuống chỉ vì hôm nay có nhiều ca mới. Số ca PENDING
  * luôn được trả về cạnh tỷ lệ để người đọc biết phần chưa biết lớn tới đâu.
+ *
+ * ─── "CHƯA CÓ KẾT QUẢ" ĐẾM TẠI THỜI ĐIỂM CUỐI KỲ ───
+ *
+ * Ca treo không có `outcome_at`, nên lọc theo cột đó thì với BẤT KỲ kỳ nào thẻ "Chưa có kết quả"
+ * cũng ra 0 và cảnh báo thiếu chứng cứ không bao giờ hiện — đúng lỗi của bản trước. Câu hỏi đúng
+ * là "tính tới cuối kỳ, bao nhiêu ca đã mở mà chưa chốt": `opened_at <= cuối kỳ` và (`outcome_at`
+ * rỗng hoặc sau cuối kỳ). Đợt máy đóng vì `NOT_CARE_CONDITION` không bao giờ vào đây.
  */
 
 const sc = schema.shipmentCare;
@@ -63,15 +72,39 @@ function trongKy(basis: CareTimeBasis, period: Period) {
   return [period.from ? gte(cot, period.from) : undefined, period.to ? lte(cot, period.to) : undefined].filter(Boolean);
 }
 
+/** Đợt đóng vì không phải điều kiện care (`NOT_CARE_CONDITION`) nằm ngoài mọi thống kê cứu đơn. */
+const LA_CA_CARE = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`);
+
+const KET_CUC_CUOI = (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => OUTCOME_IS_FINAL[o]);
+
+/** Ca ĐÃ CHỐT trong kỳ (theo `outcome_at`). */
+function daChotTrongKy(period: Period): SQL {
+  return and(LA_CA_CARE, inArray(sc.careOutcome, KET_CUC_CUOI), ...trongKy("OUTCOME", period))!;
+}
+
+/** Ca CHƯA CHỐT tính tới cuối kỳ: mở trước cuối kỳ, kết cục rỗng hoặc sau cuối kỳ. */
+function chuaChotCuoiKy(period: Period): SQL {
+  return and(
+    LA_CA_CARE,
+    or(isNull(sc.careOutcome), inArray(sc.careOutcome, (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => !OUTCOME_IS_FINAL[o]))),
+    period.to ? lte(sc.openedAt, period.to) : undefined,
+    period.to ? or(isNull(sc.outcomeAt), gt(sc.outcomeAt, period.to)) : isNull(sc.outcomeAt),
+  )!;
+}
+
+/** Tập ca của báo cáo hiệu suất: đã chốt trong kỳ ∪ chưa chốt tính tới cuối kỳ. */
+function tapCaHieuSuat(period: Period): SQL {
+  return or(daChotTrongKy(period), chuaChotCuoiKy(period))!;
+}
+
 /** Tổng quan tỷ lệ cứu đơn của cả shop. */
 export async function getRescueSummary(period: Period, basis: CareTimeBasis = "OUTCOME"): Promise<RescueSummary> {
   return memo(`rescue-summary:${basis}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`, 90_000, async () => {
     const db = await getDb();
-    const dk = trongKy(basis, period);
     const rows = await db
       .select({ outcome: sc.careOutcome, n: sql<number>`count(*)::int` })
       .from(sc)
-      .where(dk.length ? and(...dk) : undefined)
+      .where(basis === "OUTCOME" ? tapCaHieuSuat(period) : and(LA_CA_CARE, ...trongKy("OPENED", period)))
       .groupBy(sc.careOutcome);
     const c = roCounts();
     let total = 0;
@@ -82,16 +115,16 @@ export async function getRescueSummary(period: Period, basis: CareTimeBasis = "O
     const mo = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(sc)
-      .where(and(...trongKy("OPENED", period)));
+      .where(and(LA_CA_CARE, ...trongKy("OPENED", period)));
     const t = rescueRates(c);
-    return { ...c, total, directRate: t.direct, rateWithExchange: t.withExchange, finished: t.finished, openedInPeriod: Number(mo[0]?.n ?? 0) };
+    return { ...c, total: basis === "OUTCOME" ? t.finished : total, directRate: t.direct, rateWithExchange: t.withExchange, finished: t.finished, openedInPeriod: Number(mo[0]?.n ?? 0) };
   });
 }
 
 export type PicRow = RescueCounts & {
   userId: string | null;
   name: string;
-  /** Ca được GIAO cho người này (theo `owner_id` hiện tại) — khác số ca họ CHỐT. */
+  /** Ca được GIAO cho người này TRONG KỲ — đếm từ sự kiện ASSIGN (`care_case_events.next_owner_id`), không phải người đang cầm hôm nay. */
   assigned: number;
   finished: number;
   directRate: number | null;
@@ -119,29 +152,40 @@ export type PicRow = RescueCounts & {
 export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]> {
   return memo(`care-perf-pic:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`, 90_000, async () => {
     const db = await getDb();
-    const dk = trongKy("OUTCOME", period);
 
-    const ketQua = await db
-      .select({
-        userId: sc.ownerAtResolution,
-        name: sql<string>`coalesce(max(${schema.users.name}), '')`,
-        outcome: sc.careOutcome,
-        n: sql<number>`count(*)::int`,
-        // Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì
-        // về ngày làm việc bình thường của người đó.
-        pResponse: sql<number | null>`percentile_cont(0.5) within group (order by extract(epoch from (${sc.firstActionAt} - ${sc.openedAt})) / 60) filter (where ${sc.firstActionAt} is not null and ${sc.openedAt} is not null)`,
-        pResolve: sql<number | null>`percentile_cont(0.5) within group (order by extract(epoch from (${sc.outcomeAt} - ${sc.openedAt})) / 60) filter (where ${sc.outcomeAt} is not null and ${sc.openedAt} is not null)`,
-      })
-      .from(sc)
-      .leftJoin(schema.users, eq(schema.users.id, sc.ownerAtResolution))
-      .where(dk.length ? and(...dk) : undefined)
-      .groupBy(sc.ownerAtResolution, sc.careOutcome);
+    // Ca đã chốt quy về `owner_at_resolution`; ca còn treo quy về người ĐANG cầm — để cột "đang
+    // treo" của mỗi người nói đúng khối việc họ đang giữ. Khoá quy kết tính MỘT LẦN trong CTE:
+    // Postgres không nhận ra hai biểu thức có tham số khác số thứ tự là cùng một biểu thức GROUP BY.
+    const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number; p_response: number | null; p_resolve: number | null }>(
+      await db.execute(sql`
+        with ca as (
+          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+                 ${sc.careOutcome} as outcome, ${sc.firstActionAt} as first_action_at, ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
+            from ${sc}
+           where ${tapCaHieuSuat(period)}
+        )
+        select ca.uid as user_id, coalesce(max(u.name), '') as name, ca.outcome, count(*)::int as n,
+               -- Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì
+               -- về ngày làm việc bình thường của người đó.
+               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_action_at - ca.opened_at)) / 60) filter (where ca.first_action_at is not null and ca.opened_at is not null) as p_response,
+               percentile_cont(0.5) within group (order by extract(epoch from (ca.outcome_at - ca.opened_at)) / 60) filter (where ca.outcome_at is not null and ca.opened_at is not null) as p_resolve
+          from ca left join users u on u.id = ca.uid
+         group by ca.uid, ca.outcome
+      `),
+    );
 
+    /*
+      "ĐƯỢC GIAO TRONG KỲ" = sự kiện GIAO xảy ra trong kỳ, đếm theo KHOÁ tài khoản người được giao.
+      Bản trước đếm `owner_id` hiện tại của ca mở trong kỳ: A nhận rồi chuyển B thì A mất dấu, và ca
+      mở tháng trước giao tháng này không tính cho ai. Một ca giao đi giao lại cho cùng người trong
+      kỳ đếm một lần.
+    */
+    const ev = schema.careCaseEvents;
     const giao = await db
-      .select({ userId: sc.ownerId, n: sql<number>`count(*)::int` })
-      .from(sc)
-      .where(and(...trongKy("OPENED", period)))
-      .groupBy(sc.ownerId);
+      .select({ userId: ev.nextOwnerId, n: sql<number>`count(distinct ${ev.shipmentId})::int` })
+      .from(ev)
+      .where(and(eq(ev.action, "ASSIGN"), sql`${ev.nextOwnerId} is not null`, ...[period.from ? gte(ev.createdAt, period.from) : undefined, period.to ? lte(ev.createdAt, period.to) : undefined].filter(Boolean)))
+      .groupBy(ev.nextOwnerId);
 
     const thaoTac = await db
       .select({ userId: schema.careBusinessActions.actorUserId, actionType: schema.careBusinessActions.actionType, n: sql<number>`count(*)::int` })
@@ -171,10 +215,10 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     };
 
     for (const r of ketQua) {
-      const row = lay(r.userId, r.name);
+      const row = lay(r.user_id, r.name);
       cong(row, r.outcome, Number(r.n));
-      if (r.pResponse !== null && r.pResponse !== undefined) row.medianFirstResponseMin = Math.round(Number(r.pResponse));
-      if (r.pResolve !== null && r.pResolve !== undefined) row.medianResolveMin = Math.round(Number(r.pResolve));
+      if (r.p_response !== null && r.p_response !== undefined) row.medianFirstResponseMin = Math.round(Number(r.p_response));
+      if (r.p_resolve !== null && r.p_resolve !== undefined) row.medianResolveMin = Math.round(Number(r.p_resolve));
     }
     for (const r of giao) lay(r.userId, "").assigned += Number(r.n);
     for (const r of thaoTac) {
@@ -227,12 +271,11 @@ export type ProductCareReport = {
 export async function getCarePerformanceByProduct(period: Period): Promise<ProductCareReport> {
   return memo(`care-perf-product:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`, 90_000, async () => {
     const db = await getDb();
-    const dk = trongKy("OUTCOME", period);
 
     const cases = await db
       .select({ id: sc.id, shipmentId: sc.shipmentId, outcome: sc.careOutcome })
       .from(sc)
-      .where(dk.length ? and(...dk) : undefined);
+      .where(tapCaHieuSuat(period));
     if (!cases.length) return { rows: [], multiCodeCases: 0, unmappedCases: 0, totalCases: 0 };
 
     const ma = await db
@@ -288,7 +331,7 @@ export async function getCarePerformanceByProduct(period: Period): Promise<Produ
 /** Danh sách ca của một người / một mã — để bấm vào con số là mở ra đúng những ca đã sinh ra nó. */
 export async function listCareCases(period: Period, filter: { ownerId?: string | null; outcome?: CareOutcome; limit?: number } = {}) {
   const db = await getDb();
-  const dk = [...trongKy("OUTCOME", period)];
+  const dk: (SQL | undefined)[] = [tapCaHieuSuat(period)];
   if (filter.ownerId !== undefined) dk.push(filter.ownerId === null ? sql`${sc.ownerAtResolution} is null` : eq(sc.ownerAtResolution, filter.ownerId));
   if (filter.outcome) dk.push(eq(sc.careOutcome, filter.outcome));
   return db
