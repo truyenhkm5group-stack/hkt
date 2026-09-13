@@ -25,9 +25,21 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
           const returned = sum((r) => r.returned);
           const failed = sum((r) => r.failed);
           const finished = delivered + returned;
-          // xác suất chờ phát lại thành hoàn: suy ngược từ dự kiến của các mẫu mã (bình quân có trọng số), không có thì 0
-          const pFailNum = rows.reduce((t, r) => (r.expectedRate !== null && r.failed ? t + ((r.expectedRate / 100) * (r.delivered + r.returned + r.failed) - r.returned) : t), 0);
-          const pFail = failed ? Math.min(1, Math.max(0, pFailNum / failed)) : 0;
+          /*
+            ═══ DÒNG GỘP CỘNG TỬ SỐ VÀ MẪU SỐ, KHÔNG SUY NGƯỢC MỘT THAM SỐ ═══
+
+            Bản cũ ở đây lấy `expectedRate` của từng mẫu mã rồi GIẢI NGƯỢC ra `pFail` — tham số đầu
+            vào của chính công thức đã sinh ra nó — bằng một phép chia có `Math.min(1, Math.max(0,
+            …))` bọc ngoài để chặn kết quả vô nghĩa. Cái kẹp đó là bằng chứng: một đại lượng suy
+            ngược đúng thì không cần kẹp. Mẫu mã có `expectedRate = null` bị bỏ khỏi tử số nhưng
+            `failed` của nó VẪN nằm ở mẫu số, nên dòng gộp lạc quan hơn tổng các dòng con.
+
+            Nay mỗi mẫu mã mang sẵn tử số và mẫu số THÔ của cùng một hợp đồng, nên dòng gộp chỉ
+            việc cộng rồi chia — đúng con số mà hợp đồng sẽ ra nếu được hỏi thẳng ở cấp nhóm này.
+          */
+          const projectedSent = sum((r) => r.projectedSent);
+          const projectedDelivered = sum((r) => r.projectedDelivered);
+          const projectedRate = projectedSent ? Math.round((projectedDelivered / projectedSent) * 1000) / 10 : null;
           return {
             ...rows[0],
             key: `group:${key}`,
@@ -46,9 +58,12 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
             lostRevenue: sum((r) => r.lostRevenue),
             deliveredRevenue: sum((r) => r.deliveredRevenue),
             rate: finished ? (returned / finished) * 100 : null,
-            expectedRate: finished + failed ? ((returned + failed * pFail) / (finished + failed)) * 100 : null,
+            expectedRate: projectedRate === null ? null : Math.round((100 - projectedRate) * 10) / 10,
             successRate: finished ? (delivered / finished) * 100 : null,
-            expectedSuccessRate: finished + failed ? 100 - ((returned + failed * pFail) / (finished + failed)) * 100 : null,
+            expectedSuccessRate: projectedRate,
+            projectedSent,
+            projectedDelivered,
+            unmodelledActive: sum((r) => r.unmodelledActive),
           };
         },
       }}

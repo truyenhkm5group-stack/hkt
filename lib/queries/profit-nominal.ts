@@ -10,6 +10,7 @@ import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
+import { getProjectedDeliveryMetrics } from "@/lib/queries/projected-delivery";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 
 const o = schema.orders;
@@ -147,11 +148,19 @@ export type NominalRow = {
   /** Doanh số ĐƠN sau giảm giá phân bổ cho mã theo tỷ trọng tiền hàng — cộng mọi mã = thẻ "Doanh số đơn đã xác nhận" */
   salesAfterDiscount: number;
   adSpend: number;
-  /** Tỷ lệ hoàn ước tính (%) đã trộn: đơn đã hoàn + đơn chờ xử lý / chờ phát lại × xác suất thành hoàn + đơn đang giao / chưa gửi × tỷ lệ lịch sử */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `deliveryRate`. Xem `returnRateSource` để biết nó từ đâu ra. */
   returnRate: number;
-  /** TỶ LỆ GIAO THÀNH CÔNG ước tính (%) = 100 − tỷ lệ hoàn ước tính — chỉ số hiển thị chính */
+  /** TỶ LỆ GIAO THÀNH CÔNG ước tính (%) — chỉ số hiển thị chính. */
   deliveryRate: number;
-  returnRateSource: "override" | "history" | "default";
+  /**
+   * `override`  — chủ shop gõ tay, THẮNG mọi nguồn khác.
+   * `projected` — hợp đồng `PROJECTED_GTC_V2`: mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở.
+   * `history`   — tỷ lệ hoàn lịch sử của mã (dùng khi mô hình chưa dự báo được mã này).
+   * `default`   — giả định chung của shop; yếu nhất.
+   */
+  returnRateSource: "override" | "projected" | "history" | "default";
+  /** Xuất xứ con số ước tính — để màn hình nói ra thay vì để người đọc đoán. */
+  projection: { eligibleSent: number; active: number; unmodelledActive: number } | null;
   /** Tỷ lệ hoàn lịch sử / mặc định dùng cho phần đơn chưa có kết quả (%) */
   baseReturnRate: number;
   historyFinished: number;
@@ -346,7 +355,15 @@ async function stockValueByProduct(): Promise<Map<string, number>> {
 async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
-  const [history, failedProb, purchases, stockValues] = await Promise.all([productReturnHistory(assumptions.returnRateWindowDays), failedToReturnRate(), purchaseByProduct(period), stockValueByProduct()]);
+  const [history, failedProb, purchases, stockValues, duBaoGiaoVan] = await Promise.all([
+    productReturnHistory(assumptions.returnRateWindowDays),
+    failedToReturnRate(),
+    purchaseByProduct(period),
+    stockValueByProduct(),
+    // MỘT NGUỒN cho tỷ lệ GTC ước tính — xem lib/constants/projected-delivery.ts.
+    getProjectedDeliveryMetrics(period, "ORDERED"),
+  ]);
+  const projected = new Map(duBaoGiaoVan.rows.map((x) => [x.code, x]));
   const rescueRate = Number(assumptions.rescueRatePercent ?? 10);
   const pFail = assumptions.failedToReturnPercent > 0 ? Math.min(1, assumptions.failedToReturnPercent / 100) : failedProb.rate;
   const taxPct = Math.max(0, Number(assumptions.taxPercent ?? 0)) / 100;
@@ -457,14 +474,41 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         returnRate = h.rate;
         returnRateSource = "history";
       }
-      // trộn theo trạng thái thực tế: đã hoàn = 100%, đã giao = 0%, chờ xử lý / chờ phát lại = xác suất thành hoàn, còn lại = tỷ lệ lịch sử
-      const delivered = Number(r.delivered);
-      const returned = Number(r.returned);
-      const failed = Number(r.failed);
-      const unknown = Math.max(0, base.orders - delivered - returned - failed);
+      /*
+        ═══ TỶ LỆ GTC ƯỚC TÍNH LẤY TỪ HỢP ĐỒNG CHUNG, KHÔNG TỰ TRỘN Ở ĐÂY ═══
+
+        Công thức cũ ngay chỗ này là nguyên nhân chính khiến trang lợi nhuận và trang hiệu quả theo
+        mã nói hai con số cho cùng một mã, cùng một kỳ:
+
+            blended = (returned + failed × pFail + unknown × tỷ_lệ_giả_định) / TỔNG_SỐ_ĐƠN
+
+        Ba chỗ sai, và cả ba đều không phát ra tiếng:
+          · nhóm `unknown` bị nhân với một GIẢ ĐỊNH (`defaultReturnRate`, đo production 13/09/2026 =
+            **40**) — trang kia loại hẳn nhóm này khỏi phép tính;
+          · mọi đơn chưa kết thúc chịu CHUNG một xác suất, bất kể ĐVVC đang báo gì về chính nó;
+          · mẫu số là MỌI đơn, trong khi trang kia dùng cohort vận đơn.
+
+        Nay gọi `getProjectedDeliveryMetrics` — cùng hàm, cùng bảng xác suất học từ 1.363 vận đơn
+        thật, cùng cách xử lý đơn đang chạy. Mốc cohort là THAM SỐ (`ORDERED` ở đây vì doanh số POS
+        và chi phí quảng cáo của bảng này đều đi theo ngày chốt đơn), và giao diện khai rõ mốc đó.
+
+        Mã nào mô hình chưa dự báo được (trạng thái chưa đủ mẫu) thì GIỮ NGUYÊN tỷ lệ lịch sử /
+        giả định như cũ — không bịa, và `returnRateSource` nói ra điều đó.
+      */
+      const duBao = projected.get((r.code ?? "").trim());
       const baseReturnRate = returnRate;
-      const blended = base.orders ? ((returned + failed * pFail + unknown * (baseReturnRate / 100)) / base.orders) * 100 : baseReturnRate;
-      returnRate = Math.round(blended * 10) / 10;
+      /*
+        GHI ĐÈ TAY THẮNG MÔ HÌNH. Chủ shop gõ một tỷ lệ cho mã nào đó là một QUYẾT ĐỊNH, không phải
+        một ước lượng thiếu chính xác cần được cải thiện. Để mô hình đè lên nó thì ô nhập trên giao
+        diện vẫn nhận số, vẫn lưu, mà bảng không đổi — hỏng im lặng, kiểu khó thấy nhất.
+      */
+      const dungDuBao = returnRateSource !== "override" && duBao && duBao.projectedRate !== null && duBao.eligibleSent > 0;
+      if (dungDuBao) {
+        returnRate = Math.round((100 - duBao!.projectedRate!) * 10) / 10;
+        returnRateSource = "projected";
+      } else if (returnRateSource !== "override") {
+        returnRate = Math.round(baseReturnRate * 10) / 10;
+      }
       const calc = applyAssumptions(base, returnRate, assumptions);
       return {
         productId: r.productId,
@@ -475,6 +519,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         returnRate,
         deliveryRate: Math.round((100 - returnRate) * 10) / 10,
         returnRateSource,
+        projection: dungDuBao ? { eligibleSent: duBao!.eligibleSent, active: duBao!.active, unmodelledActive: duBao!.unmodelledActive } : null,
         baseReturnRate,
         historyFinished: h?.finished ?? 0,
         ...calc,
@@ -483,7 +528,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         delivered: Number(r.delivered),
         returned: Number(r.returned),
         inTransit: Number(r.inTransit),
-        failed,
+        failed: Number(r.failed),
         pending: Number(r.pending),
         actualRevenue: Number(r.actualRevenue),
         operatingAlloc: 0,
@@ -515,7 +560,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     if (rows.some((r) => r.productId === pid)) continue;
     rows.push({
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
-      returnRate: 0, deliveryRate: 100, returnRateSource: "default", baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      returnRate: 0, deliveryRate: 100, returnRateSource: "default", projection: null, baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
       // nằm nguyên ở phần CÒN TREO trên hàng tồn.

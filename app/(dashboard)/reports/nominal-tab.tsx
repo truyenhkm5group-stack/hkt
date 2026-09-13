@@ -28,11 +28,41 @@ import { formatNumber, formatVND } from "@/lib/format";
 import {
   getNominalDailyForProduct,
   getNominalProfitReport,
+  type NominalRow,
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
 import { adsRatio } from "@/lib/constants/profit";
+import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
 import { cn } from "@/lib/utils";
+
+/*
+  ═══════════ CHÚ THÍCH PHẢI KHAI ĐÚNG NGUỒN CỦA CHÍNH CON SỐ NÓ ĐỨNG CẠNH ═══════════
+
+  Chú thích cũ ở cột này viết ra từng vế của công thức TRỘN đã bị gỡ:
+    "chờ xử lý / phát lại N (×X% thành công) · chưa có kết quả M (×Y% lịch sử)".
+  Không vế nào trong đó còn chạy. Tỷ lệ nay đến từ `PROJECTED_GTC_V2`: mỗi đơn chưa có kết cục được
+  cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở, học từ lịch sử vận đơn thật.
+
+  Và bốn nguồn phải phân biệt được bằng mắt, vì chúng KHÔNG cùng độ tin cậy: một con số chủ shop
+  gõ tay, một con số mô hình dựng từ trạng thái thật, một tỷ lệ lịch sử của mã, và một giả định
+  chung của shop — gộp cả bốn vào chữ "lịch sử" là xoá đúng thông tin mà người đọc cần.
+*/
+const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => string> = {
+  override: () => "ghi đè",
+  projected: (r) => (r.projection ? `${formatNumber(r.projection.eligibleSent)} đơn` : "mô hình"),
+  history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn`,
+  default: () => "mặc định",
+};
+
+function moTaUocTinh(r: NominalRow): string {
+  const dem = `Đã giao TC ${formatNumber(r.delivered)} · không thành công ${formatNumber(r.returned)} · đang giao ${formatNumber(Math.max(0, r.orders - r.delivered - r.returned))}`;
+  if (r.returnRateSource === "override") return `${dem} — tỷ lệ do chủ shop gõ tay, thắng mọi nguồn khác`;
+  if (r.returnRateSource === "projected" && r.projection)
+    return `${dem} — mỗi đơn đang giao cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn trong kỳ)${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn chưa dự báo được` : ""}`;
+  if (r.returnRateSource === "history") return `${dem} — mô hình chưa dự báo được mã này, dùng tỷ lệ hoàn lịch sử của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc)`;
+  return `${dem} — chưa có lịch sử lẫn dự báo cho mã này, dùng giả định chung của shop`;
+}
 
 function Pct({
   value,
@@ -285,14 +315,10 @@ export async function NominalTab({
                               : "text-emerald-700",
                         )}
                       >
-                        <span title={`Đã giao TC ${r.delivered} · không thành công ${r.returned} · chờ xử lý / phát lại ${r.failed} (×${100 - t.failedToReturnPct}% thành công) · chưa có kết quả ${Math.max(0, r.orders - r.delivered - r.returned - r.failed)} (×${(100 - r.baseReturnRate).toFixed(0)}% lịch sử)`}>{r.deliveryRate.toFixed(1)}%</span>
+                        <span title={moTaUocTinh(r)}>{r.deliveryRate.toFixed(1)}%</span>
                       </span>
                       <div className="text-[10.5px] text-muted-foreground">
-                        {r.returnRateSource === "override"
-                          ? "ghi đè"
-                          : r.returnRateSource === "history"
-                            ? `${r.historyFinished} đơn`
-                            : "mặc định"}
+                        {NHAN_NGUON[r.returnRateSource](r)}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -460,7 +486,7 @@ export async function NominalTab({
         <div id="ma-hang">
           <SectionCard
             title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate.toFixed(1)}% (${selected.returnRateSource === "override" ? "ghi đè" : selected.returnRateSource === "history" ? `lịch sử ${selected.historyFinished} đơn kết thúc` : "mặc định"}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
+            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate.toFixed(1)}% (${moTaUocTinh(selected)}) · giá vốn ${selected.items ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - selected.returnRate / 100, 0.01) / selected.items)) : "—"}/sp`}
             actions={
               <div className="flex items-center gap-3">
                 <ReturnRateOverride

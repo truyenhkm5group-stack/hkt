@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { confidenceOf, PROJECTED_GTC_VERSION, type ProbabilityBasis, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
-import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/report-time-basis";
+import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
@@ -215,8 +215,23 @@ export async function backtestProjectedDelivery(): Promise<Backtest> {
 
 export type ActiveBreakdown = Partial<Record<CarrierSubstate, number>>;
 
+/**
+ * ═══ GRAIN LÀ THAM SỐ, CÔNG THỨC THÌ KHÔNG ═══
+ *
+ * `PRODUCT` — gộp theo mã hàng của shop (`products.custom_id`). Bảng lợi nhuận dùng grain này.
+ * `VARIANT` — gộp theo mẫu mã, ĐÚNG khoá `VARIANT_KEY` của bảng hiệu quả theo mã
+ *             (`coalesce(order_items.variant_id, 'sku:'||sku||'|'||product_name||'|'||detail)`),
+ *             để mỗi dòng trên bảng đó có con số ước tính của CHÍNH nó.
+ *
+ * Hai grain là hai lát cắt khác nhau của cùng một tập đơn — chúng ĐƯỢC PHÉP ra số khác nhau. Cái
+ * không được phép là hai CÔNG THỨC, và đó là thứ bản này xoá: cả hai đi qua đúng một vòng lặp cân
+ * xác suất bên dưới, chỉ khác khoá gộp.
+ */
+export const PROJECTED_GRAINS = ["PRODUCT", "VARIANT"] as const;
+export type ProjectedGrain = (typeof PROJECTED_GRAINS)[number];
+
 export type ProjectedProductRow = {
-  /** Mã hàng của shop (`products.custom_id`). `""` = chưa lần được về mã nào. */
+  /** Khoá gộp: mã hàng (`PRODUCT`) hoặc khoá mẫu mã (`VARIANT`). `""` = chưa lần được về đâu. */
   code: string;
   name: string;
   /** Đơn đã bàn giao ĐVVC trong cohort — mẫu số của tỷ lệ ước tính. */
@@ -270,30 +285,65 @@ export type ProjectedMetrics = {
  * `multiCodeOrders` nói ra phần chồng lấn đó. KHÔNG chia số đơn theo tỷ lệ: một đơn hỏng thì cả
  * hai mã trong đơn đều bị ảnh hưởng, không phải mỗi mã hỏng một nửa.
  */
-export async function getProjectedDeliveryMetrics(period: { from: Date | null; to: Date | null }): Promise<ProjectedMetrics> {
-  const key = `projected-metrics:${PROJECTED_GTC_VERSION}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`;
+export async function getProjectedDeliveryMetrics(
+  period: { from: Date | null; to: Date | null },
+  basis: TimeBasis = "SHIPPED",
+  grain: ProjectedGrain = "PRODUCT",
+): Promise<ProjectedMetrics> {
+  const key = `projected-metrics:${PROJECTED_GTC_VERSION}:${basis}:${grain}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`;
   return memo(key, 90_000, async () => {
     const db = await getDb();
     const lookup = await getProbabilityLookup();
     const con = carrierSubstateSql(sql`"shipments"."vtp_status"`, sql`"shipments"."vtp_status_name"`, sql`"shipments"."stage"::text`);
 
     /*
-      COHORT = NGÀY ĐVVC TIẾP NHẬN, giống hệt bảng hiệu quả theo mã.
+      ═══ MỐC COHORT LÀ THAM SỐ, KHÔNG PHẢI MỘT KHÁC BIỆT NGẦM ═══
 
-      Đây là một trong bốn khác biệt đã làm hai báo cáo lệch nhau. Chốt ở đây, dùng chung ở cả hai
-      nơi, thì nó thôi là một khác biệt.
+      Hai báo cáo hỏi hai câu khác nhau và cần hai cohort khác nhau — đó KHÔNG phải lỗi:
+
+        `SHIPPED` — "lô hàng GỬI ĐI trong khoảng này đã đi tới đâu". Bảng hiệu quả theo mã mặc định
+                    mốc này; cột đầu của nó tên "Đã gửi" nên bất kỳ mốc nào khác đều là một cái bẫy.
+        `ORDERED` — "đơn CHỐT trong khoảng này sinh ra bao nhiêu tiền". Bảng lợi nhuận dùng mốc này,
+                    vì doanh số POS, chi phí quảng cáo và giá vốn của nó đều đi theo ngày chốt đơn.
+        `OUTCOME` — "trong khoảng này chốt xong bao nhiêu ca". Cohort này gần như chỉ gồm kiện ĐÃ
+                    kết thúc, nên phần "ước tính" tự nhiên teo về 0 và số dự báo trùng số thật.
+                    Đó là câu trả lời ĐÚNG cho câu hỏi đó, không phải một lỗi cần vá.
+
+      Cái SAI trước bản này không phải là nhiều cohort — mà là nhiều CÔNG THỨC, mỗi bên xử lý nhóm
+      đơn chưa rõ một kiểu, và không màn hình nào nói ra mình đang dùng mốc nào. Nay công thức chỉ
+      còn MỘT, mốc là tham số hiện rõ, và mỗi trang truyền xuống ĐÚNG mốc mà nó đang hiển thị.
+
+      Ba mốc dùng lại đúng ba biểu thức của `lib/constants/report-time-basis.ts` — bảng số liệu và
+      con số ước tính của cùng một trang phải cắt cùng một tập đơn, nếu không thì "tỷ lệ ước tính"
+      lại nói về một lô hàng khác với lô đang nằm trên bảng.
     */
-    const moc = sql.raw(CARRIER_HANDOFF_AT_SQL);
+    const MOC_THEO_BASIS: Record<TimeBasis, { expr: SQL; coTheRong: boolean }> = {
+      // `orders.inserted_at` là cột NOT NULL ⇒ không cần lọc rỗng; hai mốc kia là `coalesce(...)`
+      // của các cột chứng từ ĐVVC và CÓ THỂ rỗng khi chưa có chứng từ nào.
+      ORDERED: { expr: sql`"orders"."inserted_at"`, coTheRong: false },
+      SHIPPED: { expr: sql.raw(CARRIER_HANDOFF_AT_SQL), coTheRong: true },
+      OUTCOME: { expr: sql.raw(FINAL_OUTCOME_AT_SQL), coTheRong: true },
+    };
+    const { expr: moc, coTheRong } = MOC_THEO_BASIS[basis];
     const dk: SQL[] = [sql`"shipments"."order_id" is not null`];
     if (period.from) dk.push(sql`${moc} >= ${period.from}`);
     if (period.to) dk.push(sql`${moc} <= ${period.to}`);
-    if (period.from || period.to) dk.push(sql`${moc} is not null`);
+    if ((period.from || period.to) && coTheRong) dk.push(sql`${moc} is not null`);
+
+    /*
+      Khoá gộp của grain `VARIANT` phải là ĐÚNG biểu thức `VARIANT_KEY` ở `return-rate.ts` — chép
+      lệch một dấu nối thì hai bảng gộp ra hai tập dòng khác nhau và con số lại rời nhau, đúng thứ
+      bản này đang đi xoá. Tên hiển thị lấy `sku` (rơi về tên sản phẩm khi mẫu mã không có SKU) để
+      trùng cách bảng kia đặt nhãn dòng.
+    */
+    const khoa = grain === "VARIANT" ? sql`coalesce(oi.variant_id, 'sku:' || oi.sku || '|' || oi.product_name || '|' || oi.variation_detail)` : sql`p.custom_id`;
+    const ten = grain === "VARIANT" ? sql`coalesce(nullif(oi.sku, ''), oi.product_name)` : sql`p.name`;
 
     const rows = rowsOf<{ order_id: string; code: string | null; name: string | null; line_total: string | number; order_total: string | number; stage: string; con: string }>(
       await db.execute(sql`
         select "orders"."id" as order_id,
-               p.custom_id as code,
-               p.name as name,
+               ${khoa} as code,
+               ${ten} as name,
                coalesce(sum(oi.line_total), 0) as line_total,
                max("orders"."total_price_after_discount") as order_total,
                max("shipments"."stage"::text) as stage,
@@ -304,7 +354,7 @@ export async function getProjectedDeliveryMetrics(period: { from: Date | null; t
           left join product_variants pv on pv.id = oi.variant_id
           left join products p on p.id = pv.product_id
          where ${and(...dk)}
-         group by "orders"."id", p.custom_id, p.name
+         group by "orders"."id", ${khoa}, ${ten}
       `),
     );
 

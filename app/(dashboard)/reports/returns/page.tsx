@@ -117,6 +117,23 @@ export default async function ReturnRatePage({
     .filter((r) => r.successRate !== null && r.shipped >= 5)
     .sort((a, b) => (a.successRate ?? 0) - (b.successRate ?? 0))[0];
 
+  /*
+    ═══ CHÚ THÍCH PHẢI MÔ TẢ ĐÚNG CÔNG THỨC ĐANG CHẠY ═══
+
+    Chú thích cũ ở đây viết: "Dự kiến X% khi N đơn chờ phát lại kết thúc (xác suất thành hoàn P%)".
+    Câu đó mô tả công thức CŨ — chỉ cân nhóm "chờ phát lại" bằng MỘT xác suất của cả shop, bỏ qua
+    mọi đơn đang chạy khác. Con số nay đến từ `PROJECTED_GTC_V2`: MỌI đơn chưa có kết cục đều được
+    cân theo xác suất CỦA CHÍNH trạng thái ĐVVC nó đang ở. Giữ nguyên câu cũ thì màn hình đang
+    khai sai nguồn của chính con số nó in ra — đúng cái lỗi mà bản này đi xoá, chỉ đổi chỗ.
+
+    Và khi mô hình chưa dự báo được đơn nào thì in "chưa đo được", KHÔNG in 0%.
+  */
+  const pj = summary.projection;
+  const duKienNote =
+    summary.expectedSuccessRate === null || pj === null
+      ? "Giao TC / (giao TC + không TC) · chưa đủ dữ liệu để ước tính phần đang giao"
+      : `Ước tính ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(pj.active)} đơn đang giao kết thúc — mỗi đơn cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${pj.version}, mốc ${TIME_BASIS_LABEL[basis].toLowerCase()})${pj.unmodelledActive ? ` · ${formatNumber(pj.unmodelledActive)} đơn chưa dự báo được` : ""}`;
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -180,7 +197,7 @@ export default async function ReturnRatePage({
               {summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}
             </span>
           }
-          note={`${summary.expectedSuccessRate !== null ? `Dự kiến ${summary.expectedSuccessRate.toFixed(1)}% khi ${formatNumber(summary.failed)} đơn chờ phát lại kết thúc (xác suất thành hoàn ${summary.failedToReturnPct}%${summary.failedSample >= 15 ? `, học từ ${formatNumber(summary.failedSample)} vận đơn` : ", mặc định"})` : "Giao TC / (giao TC + không TC)"}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
+          note={`${duKienNote}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
           icon={Percent}
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
