@@ -95,9 +95,41 @@ export async function testCsCustomerQueue(db: Db) {
       assert.equal(g.customerPhone, "", "và không bịa ra số điện thoại");
     }
 
-    // Khách nhiều việc nhất lên đầu: một cuộc gọi giải quyết được nhiều nhất.
+    /*
+      ═══ XẾP THEO ĐỘ GẤP, KHÔNG THEO "AI NHIỀU VIỆC NHẤT" ═══
+
+      Luật CŨ (tới 13/09/2026): `count(*) desc` — khách nhiều việc nhất lên đầu. Nghe hợp lý, nhưng
+      nó đẩy một KHIẾU NẠI quá hạn xuống dưới một khách có bốn case tư vấn size còn mới. Chủ shop
+      chốt đổi sang xếp theo ĐỘ GẤP (mục 7 của bản phát hành).
+    
+      Fixture: khách 1 có BA việc (đổi size · sai địa chỉ · đổi size), khách 2 có HAI việc nhưng
+      một trong đó là KHIẾU NẠI. Theo luật cũ khách 1 đứng trước; theo luật mới khách 2 phải đứng
+      trước, vì khiếu nại là mức nghiêm trọng cao nhất (`CS_KIND_SEVERITY`).
+    */
     const cuaMinh = kq.rows.filter((r) => r.key.includes(P) || r.cases.some((x) => x.id.startsWith(P)));
-    assert.equal(cuaMinh[0]?.openCount, 3, "khách có nhiều việc nhất đứng trước");
+    const viTriKh1 = cuaMinh.findIndex((r) => r.key === `c:${P}kh1`);
+    const viTriKh2 = cuaMinh.findIndex((r) => r.customerPhone === "0922222222");
+    assert.ok(viTriKh2 >= 0 && viTriKh1 >= 0, "cả hai khách của fixture phải có mặt");
+    assert.ok(viTriKh2 < viTriKh1, "khách có KHIẾU NẠI phải đứng trước khách có nhiều việc hơn nhưng nhẹ hơn");
+
+    /*
+      ═══ VIỆC NÊN LÀM TIẾP LÀ MỘT LUẬT XÁC ĐỊNH, KHÔNG PHẢI MỘT LỜI KHUYÊN ═══
+
+      Và nó KHÔNG được tạo ra một case mới — hàng đợi tự nhân đôi là cách nhanh nhất để người ta
+      đóng cái gợi ý rồi tưởng đã xử lý việc thật.
+    */
+    const soCaseTruoc = (await db.select({ n: sql<number>`count(*)` }).from(schema.csCases).where(sql`${schema.csCases.id} like ${`${P}%`}`))[0];
+    const khachKhieuNai = cuaMinh[viTriKh2];
+    assert.equal(khachKhieuNai.nextAction.key, "COMPLAINT_CRITICAL", "khách có khiếu nại thì việc nên làm tiếp là gọi xử lý khiếu nại");
+    assert.ok(khachKhieuNai.nextAction.reason.length > 0, "lời khuyên phải kèm CĂN CỨ — không có câu đó thì không ai tin cái nhãn");
+    assert.ok(khachKhieuNai.nextAction.caseId, "và phải trỏ tới đúng case, để nút mở đúng chỗ");
+    const soCaseSau = (await db.select({ n: sql<number>`count(*)` }).from(schema.csCases).where(sql`${schema.csCases.id} like ${`${P}%`}`))[0];
+    assert.equal(Number(soCaseSau.n), Number(soCaseTruoc.n), "tính việc nên làm tiếp KHÔNG được sinh thêm dòng nào");
+
+    // HẠN: case tạo từ 1–7/08/2026 đều đã quá hạn xử lý — chip phải nói "quá hạn", không nói "chưa đến hạn".
+    assert.equal(khachKhieuNai.slaBucket, "OVERDUE", "case cũ hàng tháng phải rơi vào nhóm quá hạn");
+    assert.ok(khachKhieuNai.overdueCount >= 1, "và số việc quá hạn phải đếm được ngay trên dòng");
+    assert.ok(khachKhieuNai.dueAt instanceof Date, "hạn phải là một mốc thật, không phải chữ");
 
     /*
       ĐÓNG MỘT VIỆC KHÔNG ĐÓNG CẢ DÒNG.
@@ -117,7 +149,7 @@ export async function testCsCustomerQueue(db: Db) {
     assert.equal(daDong.status, "DONE");
     assert.equal(daDong.kind, "WRONG_ADDRESS", "không xoá, không sửa, không gộp — case giữ nguyên mọi thứ của nó");
 
-    console.log("✓ Hàng đợi CSKH theo khách: 3 việc một khách thành 1 dòng · gom bằng customer_id rồi tới SĐT · case không định danh đứng RIÊNG · việc miền GIAO VẬN không lọt vào · đóng một việc không làm mất dòng, không mất lịch sử");
+    console.log("✓ Hàng đợi CSKH theo khách: 3 việc một khách thành 1 dòng · gom bằng customer_id rồi tới SĐT · case không định danh đứng RIÊNG · việc miền GIAO VẬN không lọt vào · xếp theo ĐỘ GẤP (khiếu nại trước) chứ không theo số việc · việc nên làm tiếp có căn cứ và không sinh case mới · đóng một việc không làm mất dòng, không mất lịch sử");
   } finally {
     await db.delete(schema.csCases).where(sql`${schema.csCases.id} like ${`${P}%`}`);
     await db.delete(schema.customers).where(sql`${schema.customers.id} like ${`${P}%`}`);

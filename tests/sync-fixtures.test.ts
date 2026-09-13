@@ -60,6 +60,8 @@ import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
 import { testCsCaseGrouping } from "./cs-case-grouping.test";
 import { testCsWorkqueue } from "./cs-workqueue.test";
+import { testCsNextAction } from "./cs-next-action.test";
+import { testCsUiContrast } from "./cs-ui-contrast.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testConversionFunnel } from "./conversion-funnel.test";
@@ -73,6 +75,7 @@ import { testInventoryForecast } from "./inventory-forecast.test";
 import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
+import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
 import { testReturnProductContext } from "./return-product-context.test";
 import { testShipmentProductReport } from "./shipment-product-report.test";
 import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
@@ -1440,6 +1443,8 @@ async function main() {
   testSearchTermParsing();
   await testShipmentSearch(db);
   await testCsOrderReconcile(db);
+  testCsNextAction();
+  testCsUiContrast();
   testOutreachErrorClassify();
   await testOutreachIdempotentSend(db);
   testOutreachEligibility();
@@ -1529,6 +1534,7 @@ async function main() {
   await testReturnProductContext(db);
   await testShipmentProductReport(db);
   await testReturnItemInspection(db);
+  await testHmtReturnReconcile(db);
   // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);

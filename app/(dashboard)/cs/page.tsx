@@ -15,8 +15,9 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_STATUSES } from "@/lib/constants/cs";
 import { CS_DOMAIN_LABEL, CS_DOMAINS } from "@/lib/constants/cs-domain";
 import { formatNumber } from "@/lib/format";
-import { CS_SORTABLE, csFacets, csSummary, listCsCases, listCsCustomerQueue } from "@/lib/queries/cs";
+import { CS_SORTABLE, csFacets, csOwnerLoad, csSummary, listCsCases, listCsCustomerQueue } from "@/lib/queries/cs";
 import { CustomerQueueTable } from "@/app/(dashboard)/cs/customer-queue-table";
+import { OwnerLoadSection } from "@/app/(dashboard)/cs/owner-load-section";
 import { listEmployees } from "@/lib/queries/payroll";
 import { listUsers } from "@/lib/queries/users";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -38,7 +39,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
   if (decision.allow === "NONE") return <ScopeDenied title="CSKH" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "cs:manage");
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain"], sortable: CS_SORTABLE, defaultPeriod: "all" });
+  const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain", "sla"], sortable: CS_SORTABLE, defaultPeriod: "all" });
   /*
     HAI CÁCH XẾP CÙNG MỘT HÀNG ĐỢI.
 
@@ -50,13 +51,14 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
     nên số ở chip và số dòng không thể lệch nhau.
   */
   const xem = (raw.view === "theo-case" ? "theo-case" : "theo-khach") as "theo-khach" | "theo-case";
-  const [{ rows, total, pageCount }, nhom, facets, summary, employees, users] = await Promise.all([
+  const [{ rows, total, pageCount }, nhom, facets, summary, employees, users, workload] = await Promise.all([
     listCsCases(params),
     xem === "theo-khach" ? listCsCustomerQueue(params) : Promise.resolve(null),
     csFacets(params),
     csSummary(),
     listEmployees(),
     listUsers(),
+    csOwnerLoad(),
   ]);
   /*
     NGƯỜI NHẬN VIỆC = TÀI KHOẢN ERP, không phải một danh sách TÊN gộp từ ba nguồn.
@@ -121,6 +123,8 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
           { key: "status", label: "Trạng thái", options: CS_STATUSES.map((s) => ({ value: s, label: CS_STATUS_LABEL[s], count: facets.statuses.find((x) => x.value === s)?.count ?? 0 })) },
           { key: "kind", label: "Loại", options: CS_KINDS.map((k) => ({ value: k, label: CS_KIND_LABEL[k], count: facets.kinds.find((x) => x.value === k)?.count ?? 0 })) },
           { key: "assignee", label: "Phụ trách", options: facets.assignees },
+          // Hạn xử lý: bốn mức, đếm bằng CHÍNH mệnh đề bộ lọc dùng (`lib/queries/cs.ts::slaCond`).
+          { key: "sla", label: "Hạn", options: facets.slas },
         ]}
         resultLabel={xem === "theo-khach" && nhom ? `${formatNumber(nhom.total)} khách · ${formatNumber(total)} việc` : `${formatNumber(total)} case phù hợp`}
       />
@@ -146,12 +150,46 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
       </div>
       <SectionCard padded={false}>
         {xem === "theo-khach" && nhom ? (
+          /*
+            NGÀY THÁNG QUA RANH GIỚI MÁY CHỦ → TRÌNH DUYỆT DƯỚI DẠNG CHUỖI ISO.
+
+            Không phải vì `Date` không đi qua được, mà vì nó đi qua rồi thành một `Date` mang múi
+            giờ của MÁY CHỦ trong khi mọi phép in giờ của ERP tính theo giờ Việt Nam
+            (`lib/format.ts`). Một chuỗi ISO thì không có chỗ nào để hiểu nhầm.
+          */
           <CustomerQueueTable
+            canWrite={canWrite}
+            currentUser={user.name || user.email}
+            staff={staff}
             rows={nhom.rows.map((r) => ({
-              ...r,
+              key: r.key,
+              customerName: r.customerName,
+              customerPhone: r.customerPhone,
+              openCount: r.openCount,
+              overdueCount: r.overdueCount,
+              kinds: r.kinds,
               oldestAt: r.oldestAt.toISOString(),
-              latestAt: r.latestAt.toISOString(),
-              cases: r.cases.map((c) => ({ ...c, createdAt: c.createdAt.toISOString() })),
+              dueAt: r.dueAt ? r.dueAt.toISOString() : null,
+              slaBucket: r.slaBucket,
+              owners: r.owners,
+              anyAssigned: r.anyAssigned,
+              nextAction: r.nextAction,
+              chatUrl: r.chatUrl,
+              cases: r.cases.map((c) => ({
+                id: c.id,
+                kind: c.kind,
+                status: c.status,
+                source: c.source,
+                orderId: c.orderId,
+                orderSystemId: c.orderSystemId,
+                title: c.title,
+                createdAt: c.createdAt.toISOString(),
+                followUpAt: c.followUpAt ? c.followUpAt.toISOString() : null,
+                assignee: c.assignee,
+                dueAt: c.dueAt ? c.dueAt.toISOString() : null,
+                slaBucket: c.slaBucket,
+                chatUrl: c.chatUrl,
+              })),
             }))}
           />
         ) : (
@@ -161,6 +199,8 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
           <UrlPagination pageCount={xem === "theo-khach" && nhom ? nhom.pageCount : pageCount} total={xem === "theo-khach" && nhom ? nhom.total : total} />
         </div>
       </SectionCard>
+
+      <OwnerLoadSection rows={workload} />
     </div>
   );
 }
