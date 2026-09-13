@@ -136,6 +136,7 @@ import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreac
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testCareUiContrast } from "./care-ui-contrast.test";
+import { testCareFilters } from "./care-filters.test";
 import { testProductNotes } from "./product-notes.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
@@ -1445,6 +1446,7 @@ async function main() {
   await testOutreachOutcomeFacet(db);
   await testCsCustomerQueue(db);
   testCareUiContrast();
+  testCareFilters();
   await testProductNotes(db);
   testUiConsistency();
   testNavigationCoverage();

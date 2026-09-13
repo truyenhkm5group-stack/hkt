@@ -163,6 +163,20 @@ export const CARE_SLA = {
 } as const;
 
 /**
+ * VÙNG CẢNH BÁO TRƯỚC KHI VỠ HẠN — tỷ lệ, không phải số giờ.
+ *
+ * Bàn care cần phân biệt "còn thời gian" với "sắp hết giờ", nhưng gõ thêm một con số giờ ở đây là
+ * dựng một ngưỡng thứ hai phải nhớ sửa mỗi lần chủ shop đổi hạn ở `settings.work.sla` (luật 22) —
+ * và lần quên đầu tiên thì màn hình cảnh báo theo một cái hạn không còn ai dùng. Một TỶ LỆ của
+ * chính cái hạn đang hiệu lực thì đi theo hạn ấy: hạn 2 giờ cảnh báo từ phút 90, hạn 24 giờ cảnh
+ * báo từ giờ thứ 18.
+ *
+ * Đây là ngưỡng TRÌNH BÀY (tô màu, xếp việc), không phải đích đạt/không đạt của luật 38 — kết luận
+ * "vỡ hạn" vẫn chỉ do `slaOf()` đưa ra.
+ */
+export const CARE_SLA_SOON_FRACTION = 0.75;
+
+/**
  * HẸN THEO DÕI MẶC ĐỊNH khi một thao tác đưa ca vào trạng thái CHỜ mà người không chọn giờ.
  *
  * Đo production 13/09/2026: `follow_up_at` NULL trên toàn bộ 182 đợt đang mở, trong đó 16 đợt ở

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { CARE_STATUSES, CARE_STATUS_LABEL, CARE_STATUS_TONE } from "@/lib/constants/care";
 import { BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL, BUSINESS_ACTION_TONE, CARE_WORKFLOW_LABEL } from "@/lib/constants/care-outcome";
+import { CARE_SLA_BUCKETS, CARE_SLA_BUCKET_HINT, CARE_SLA_BUCKET_LABEL, CARE_SLA_BUCKET_TONE } from "@/lib/care/filters";
 
 /**
  * ═══════ MÀU PHẢI PHÂN BIỆT ĐƯỢC THỨ ĐÒI HÀNH ĐỘNG KHÁC NHAU ═══════
@@ -48,5 +49,23 @@ export function testCareUiContrast() {
   // Hai chiều phải phủ đủ nhãn — thiếu một nhãn là một ô trống trên màn hình.
   for (const s of CARE_STATUSES) assert.ok(CARE_WORKFLOW_LABEL[s], `${s}: thiếu nhãn trong CARE_WORKFLOW_LABEL`);
 
-  console.log("✓ Màu care: ba kiểu 'chờ' ba màu khác nhau · leo thang tách khỏi chờ ĐVVC · đủ nền+chữ cho chế độ tối · quyết định nghiệp vụ không trùng dải màu trạng thái");
+  /* ───── Chip HẠN là bộ điều khiển, không phải nhãn của dòng ─────
+
+     Màn hình care đã có hai dải NỀN ĐẶC nói về dòng: trạng thái xử lý và quyết định nghiệp vụ. Chip
+     hạn nói về BỘ LỌC. Cho nó một cái nền đặc nữa là dựng thứ ba trông y hệt hai thứ kia nhưng
+     thuộc hạng mục khác — người đọc lại phải đọc chữ mới biết mình đang nhìn cái gì. */
+  const mauHan = CARE_SLA_BUCKETS.map((k) => CARE_SLA_BUCKET_TONE[k]);
+  assert.equal(new Set(mauHan).size, CARE_SLA_BUCKETS.length, "ba mức hạn đòi ba mức khẩn khác nhau nên phải ba màu khác nhau");
+  for (const k of CARE_SLA_BUCKETS) {
+    assert.ok(CARE_SLA_BUCKET_LABEL[k], `${k}: thiếu nhãn tiếng Việt`);
+    assert.ok(CARE_SLA_BUCKET_HINT[k], `${k}: thiếu câu giải thích — người dùng phải đoán 'sắp quá hạn' là bao lâu`);
+    assert.doesNotMatch(CARE_SLA_BUCKET_TONE[k], /\bbg-/, `${k}: chip hạn không được có nền đặc, nếu không nó lẫn với nhãn trạng thái trên từng dòng`);
+    if (CARE_SLA_BUCKET_TONE[k].includes("text-muted-foreground")) continue; // token của hệ, tự lo hai chế độ
+    assert.match(CARE_SLA_BUCKET_TONE[k], /dark:text-/, `${k}: thiếu màu chữ cho chế độ tối`);
+  }
+  // Và không được trùng với dải màu của trạng thái xử lý — cùng lý do như quyết định nghiệp vụ.
+  const hanTrungTrangThai = CARE_SLA_BUCKETS.filter((k) => (CARE_STATUSES as readonly string[]).some((st) => CARE_STATUS_TONE[st as (typeof CARE_STATUSES)[number]] === CARE_SLA_BUCKET_TONE[k]));
+  assert.deepEqual(hanTrungTrangThai, [], `chip hạn trùng màu với trạng thái xử lý: ${hanTrungTrangThai.join(", ")}`);
+
+  console.log("✓ Màu care: ba kiểu 'chờ' ba màu khác nhau · leo thang tách khỏi chờ ĐVVC · đủ nền+chữ cho chế độ tối · quyết định nghiệp vụ và chip hạn đều không trùng dải màu trạng thái");
 }

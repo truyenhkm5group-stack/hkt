@@ -1,4 +1,5 @@
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
+import type { CareSlaHours } from "@/lib/care/view";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
 
 /**
@@ -92,6 +93,12 @@ export type CareCase = {
     /** CHỨNG TỪ nói gói hàng đã rời kho — không suy từ câu chữ trạng thái. */
     leftWarehouse: boolean;
   };
+  /**
+   * MẶT HÀNG TRONG KIỆN — mã hàng và tên hàng, để lọc "kiện nào chứa mẫu này". Rỗng khi kiện chưa
+   * ghép được với đơn (vận đơn nhập từ tài khoản ĐVVC, vận đơn chiều hoàn): KHÔNG BIẾT có gì bên
+   * trong, khác hẳn "không có hàng nào".
+   */
+  products: string[];
   reason: CareReasonKey;
   reasonClass: CareReasonClass;
   reasonLabel: string;
@@ -132,6 +139,12 @@ export type CareQueue = {
   moneyAtRisk: number;
   overdue: number;
   unassigned: number;
+  /**
+   * NGƯỠNG SLA ĐANG HIỆU LỰC, đi kèm hàng đợi xuống trình duyệt. Trước bản này máy chủ đọc ghi đè
+   * của chủ shop (`settings.work.sla`) còn trình duyệt tính lại bằng mặc định dựng sẵn sau mỗi
+   * thao tác — cùng một kiện đổi hạn giữa chừng chỉ vì ai đó bấm một nút.
+   */
+  slaHours: CareSlaHours;
   measuredAt: Date;
 };
 

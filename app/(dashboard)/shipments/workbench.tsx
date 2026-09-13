@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { parseAsString, useQueryStates } from "nuqs";
 import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
@@ -18,6 +19,23 @@ import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/ca
 import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_HINT, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { careViewOf, slaOf } from "@/lib/care/view";
+import {
+  CARE_ATTEMPT_BANDS,
+  CARE_COD_BANDS,
+  CARE_SLA_BUCKETS,
+  CARE_SLA_BUCKET_HINT,
+  CARE_SLA_BUCKET_LABEL,
+  CARE_SLA_BUCKET_TONE,
+  careAttemptBand,
+  careCodBand,
+  careFacet,
+  careSlaBucket,
+  matchesCareFilters,
+  type CareAttemptBand,
+  type CareCodBand,
+  type CareFilters,
+  type CareSlaBucket,
+} from "@/lib/care/filters";
 import {
   CARE_REASON_LABEL,
   CARE_STATUSES,
@@ -105,11 +123,33 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   // Mẫu note dùng chung cho mọi dòng: sửa ở một dòng, dòng khác thấy ngay.
   const [presets, setPresets] = useState<CareNotePreset[]>(initialPresets);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [q, setQ] = useState("");
-  const [owner, setOwner] = useState("");
-  const [reason, setReason] = useState("");
-  /** CHIỀU ĐVVC — bộ lọc RIÊNG, không trộn với lý do cần care và không trộn với trạng thái xử lý. */
-  const [substate, setSubstate] = useState<CarrierSubstate | "">("");
+  /*
+    ═══ BỘ LỌC SỐNG TRÊN ĐƯỜNG DẪN, KHÔNG SỐNG TRONG BỘ NHỚ MÀN HÌNH ═══
+
+    Trước bản này bộ lọc là `useState`: tải lại trang là mất, gửi đường dẫn cho đồng nghiệp thì họ
+    mở ra thấy một danh sách khác, và mở một kiện rồi quay lại là phải lọc lại từ đầu. Đưa vào query
+    param thì cả ba thứ đó tự hết.
+
+    `shallow: true` (mặc định) — hàng đợi đã nằm sẵn ở trình duyệt, đổi bộ lọc KHÔNG cần hỏi lại máy
+    chủ. `history: "replace"` để gõ một từ khoá không sinh mười lượt Back.
+  */
+  const [f, setF] = useQueryStates(
+    {
+      q: parseAsString.withDefault(""),
+      nguoi: parseAsString.withDefault(""),
+      lydo: parseAsString.withDefault(""),
+      dvvc: parseAsString.withDefault(""),
+      han: parseAsString.withDefault(""),
+      tien: parseAsString.withDefault(""),
+      hut: parseAsString.withDefault(""),
+      hang: parseAsString.withDefault(""),
+    },
+    { history: "replace", clearOnDefault: true },
+  );
+  const filters: CareFilters = useMemo(
+    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang }),
+    [view, f],
+  );
   const [pending, start] = useTransition();
   /** Kết quả TỪNG KIỆN của lượt gửi hàng loạt gần nhất. `null` = chưa chạy lượt nào. */
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
@@ -122,7 +162,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         if (c.shipmentId !== shipmentId) return c;
         const revived = reviveState(care);
         const { view: v, reopened } = careViewOf(revived, c.queueSince);
-        return { ...c, ...extra, care: revived, view: v, reopened, sla: slaOf(c.queueSince, revived) };
+        return { ...c, ...extra, care: revived, view: v, reopened, sla: slaOf(c.queueSince, revived, new Date(), initial.slaHours) };
       }),
     );
 
@@ -132,38 +172,47 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
     return k;
   }, [cases]);
 
-  const visible = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return cases.filter(
-      (c) =>
-        c.view === view &&
-        (!owner || (owner === "none" ? !c.care.owner : c.care.owner?.id === owner)) &&
-        (!reason || c.reason === reason) &&
-        (!substate || c.carrier.substate === substate) &&
-        (!term || [c.tracking, c.customer, c.phone, String(c.orderSystemId ?? "")].some((x) => x.toLowerCase().includes(term))),
-    );
-  }, [cases, view, owner, reason, substate, q]);
+  /*
+    ═══ MỘT LUẬT LỌC CHO CẢ BẢNG LẪN CON SỐ TRÊN CHIP ═══
 
-  const reasons = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of cases) if (c.view === view) m.set(c.reason, (m.get(c.reason) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [cases, view]);
+    `matchesCareFilters` (thuần, ở `lib/care/filters.ts`) quyết định bảng hiện gì; `careFacet` gọi
+    ĐÚNG hàm đó với một chiều bị tắt để đếm chip. Trước bản này là hai đoạn mã song song, nên mỗi
+    lần thêm một bộ lọc phải nhớ sửa cả hai — quên đoạn nào thì chip nói một số, bảng hiện một số.
 
-  /* Đếm theo TRẠNG THÁI ĐVVC trên tập đang xem (đã áp mọi bộ lọc khác trừ chính nó) — để con số
-     trên chip là số dòng sẽ hiện ra khi bấm, không phải một con số của tập khác. */
-  const substates = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    const m = new Map<CarrierSubstate, number>();
-    for (const c of cases) {
-      if (c.view !== view) continue;
-      if (owner && (owner === "none" ? Boolean(c.care.owner) : c.care.owner?.id !== owner)) continue;
-      if (reason && c.reason !== reason) continue;
-      if (term && ![c.tracking, c.customer, c.phone, String(c.orderSystemId ?? "")].some((x) => x.toLowerCase().includes(term))) continue;
-      m.set(c.carrier.substate, (m.get(c.carrier.substate) ?? 0) + 1);
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [cases, view, owner, reason, q]);
+    Giờ chốt MỘT LẦN mỗi lượt vẽ: SLA là hàm của thời gian, đọc `new Date()` bên trong vòng lặp thì
+    hai dòng cạnh nhau được xét ở hai thời điểm, và tổng các chip lệch khỏi tổng bảng đúng vào lúc
+    một ca vừa chạm hạn.
+  */
+  const [now, setNow] = useState(() => new Date());
+  // Hạn xử lý là hàm của THỜI GIAN: đứng yên thì một ca vỡ hạn lúc 10:02 vẫn hiện "bình thường" cho
+  // tới khi ai đó tải lại trang. Nhịp một phút đủ mịn cho hạn tính bằng giờ và đủ thưa để không phí.
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const hours = initial.slaHours;
+
+  const visible = useMemo(() => cases.filter((c) => matchesCareFilters(c, filters, now, hours)), [cases, filters, now, hours]);
+
+  const reasons = useMemo(() => careFacet(cases, filters, "reason", (c) => c.reason, now, hours).sort((a, b) => b[1] - a[1]), [cases, filters, now, hours]);
+  const substates = useMemo(() => careFacet(cases, filters, "substate", (c) => c.carrier.substate, now, hours).sort((a, b) => b[1] - a[1]), [cases, filters, now, hours]);
+  const slaBuckets = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "sla", (c) => careSlaBucket(c, now, hours), now, hours));
+    return CARE_SLA_BUCKETS.map((k) => [k, m.get(k) ?? 0] as const).filter(([, n]) => n > 0);
+  }, [cases, filters, now, hours]);
+  const codBands = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "cod", (c) => careCodBand(c.codAmount), now, hours));
+    return CARE_COD_BANDS.map((b) => [b, m.get(b.key) ?? 0] as const).filter(([, n]) => n > 0);
+  }, [cases, filters, now, hours]);
+  const attemptBands = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "attempts", (c) => careAttemptBand(c.carrier.failedAttempts), now, hours));
+    return CARE_ATTEMPT_BANDS.map((b) => [b, m.get(b.key) ?? 0] as const).filter(([, n]) => n > 0);
+  }, [cases, filters, now, hours]);
+
+  /* Đếm và gỡ bộ lọc: người lọc bốn chiều rồi thấy bảng rỗng phải có một nút để ra, không phải sửa
+     đường dẫn bằng tay. `view` không nằm trong đây — nó là cái TAB, không phải bộ lọc. */
+  const daLoc = Object.values(f).filter((v) => v !== "").length;
+  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "" });
 
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
@@ -249,11 +298,18 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         {overdue ? <span className="font-semibold text-rose-600 dark:text-rose-400">· {formatNumber(overdue)} vỡ SLA</span> : null}
         <span className="text-muted-foreground">· chưa ai nhận {formatNumber(visible.filter((c) => !c.care.owner).length)}</span>
         <InfoHint>
-          SLA: phản hồi đầu trong 2 giờ, đóng hoặc escalate trong 24 giờ, tính từ lúc kiện VÀO điều kiện cần care (lần giao hụt gần nhất / tin cuối). Kiện rời danh sách khi điều kiện hết (đã giao, đã hoàn…) — lịch sử giữ nguyên.
+          {/* Số giờ đọc từ ngưỡng ĐANG HIỆU LỰC máy chủ gửi xuống — chủ shop đổi hạn ở cấu hình thì câu này đổi theo, không phải sửa mã. */}
+          SLA: phản hồi đầu trong {formatNumber(hours.firstResponseHours)} giờ, đóng hoặc escalate trong {formatNumber(hours.resolveHours)} giờ, tính từ lúc kiện VÀO điều kiện cần care (lần giao hụt gần nhất / tin cuối). Kiện rời danh sách khi điều kiện hết (đã giao, đã hoàn…) — lịch sử giữ nguyên.
         </InfoHint>
+        {daLoc ? (
+          <button type="button" onClick={xoaLoc} className="rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent">
+            Bỏ {formatNumber(daLoc)} bộ lọc
+          </button>
+        ) : null}
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mã · SĐT · tên · #đơn" className="h-7 w-40 rounded-md border bg-background px-2 text-xs" />
-          <select value={owner} onChange={(e) => setOwner(e.target.value)} className="h-7 rounded-md border bg-background px-1.5 text-xs" aria-label="Lọc theo người care">
+          <input value={f.q} onChange={(e) => setF({ q: e.target.value })} placeholder="Mã · SĐT · tên · #đơn" className="h-7 w-40 rounded-md border bg-background px-2 text-xs" aria-label="Tìm theo mã vận đơn, số điện thoại, tên khách hoặc số đơn" />
+          <input value={f.hang} onChange={(e) => setF({ hang: e.target.value })} placeholder="Mã hàng · mẫu mã" className="h-7 w-36 rounded-md border bg-background px-2 text-xs" aria-label="Lọc theo mã hàng hoặc mẫu mã trong kiện" />
+          <select value={f.nguoi} onChange={(e) => setF({ nguoi: e.target.value })} className="h-7 rounded-md border bg-background px-1.5 text-xs" aria-label="Lọc theo người care">
             <option value="">Mọi người</option>
             <option value="none">Chưa ai nhận</option>
             {staff.map((u) => (
@@ -271,8 +327,8 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
             <button
               key={k}
               type="button"
-              onClick={() => setReason(reason === k ? "" : k)}
-              className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", reason === k && "border-primary bg-accent font-semibold")}
+              onClick={() => setF({ lydo: f.lydo === k ? "" : k })}
+              className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.lydo === k && "border-primary bg-accent font-semibold")}
             >
               {CARE_REASON_LABEL[k as keyof typeof CARE_REASON_LABEL] ?? k} <span className="numeric text-muted-foreground">{n}</span>
             </button>
@@ -294,13 +350,72 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
             <button
               key={k}
               type="button"
-              onClick={() => setSubstate(substate === k ? "" : k)}
+              onClick={() => setF({ dvvc: f.dvvc === k ? "" : k })}
               title={`Trạng thái của đơn vị vận chuyển, đọc từ mã và tên trạng thái gốc. Khác với “vì sao cần care” ở hàng trên và khác với trạng thái xử lý của đội.`}
-              className={cn("rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] hover:bg-accent", substate === k && "border-solid border-primary bg-accent font-semibold")}
+              className={cn("rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.dvvc === k && "border-solid border-primary bg-accent font-semibold")}
             >
-              {CARRIER_SUBSTATE_LABEL[k]} <span className="numeric text-muted-foreground">{n}</span>
+              {CARRIER_SUBSTATE_LABEL[k as CarrierSubstate]} <span className="numeric text-muted-foreground">{n}</span>
             </button>
           ))}
+        </div>
+      ) : null}
+
+      {/*
+        ═══ HÀNG THỨ BA: XẾP VIỆC — GẤP TỚI ĐÂU · BAO NHIÊU TIỀN · ĐÃ HỤT MẤY LẦN ═══
+
+        Ba chiều này không nói kiện VÌ SAO cần care (hàng một) và cũng không nói ĐVVC đang làm gì
+        (hàng hai) — chúng trả lời "sáng nay làm cái nào trước". Rổ 0 kiện không hiện: một chip bấm
+        vào ra bảng rỗng là một cái bẫy.
+      */}
+      {slaBuckets.length > 1 || codBands.length > 1 || attemptBands.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {slaBuckets.length > 1 ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Hạn</span>
+              {slaBuckets.map(([k, n]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setF({ han: f.han === k ? "" : k })}
+                  title={CARE_SLA_BUCKET_HINT[k]}
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", CARE_SLA_BUCKET_TONE[k], f.han === k && "border-primary bg-accent font-semibold")}
+                >
+                  {CARE_SLA_BUCKET_LABEL[k]} <span className="numeric opacity-70">{n}</span>
+                </button>
+              ))}
+            </span>
+          ) : null}
+          {codBands.length > 1 ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">COD</span>
+              {codBands.map(([b, n]) => (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => setF({ tien: f.tien === b.key ? "" : b.key })}
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.tien === b.key && "border-primary bg-accent font-semibold")}
+                >
+                  {b.label} <span className="numeric text-muted-foreground">{n}</span>
+                </button>
+              ))}
+            </span>
+          ) : null}
+          {attemptBands.length > 1 ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Lần phát</span>
+              {attemptBands.map(([b, n]) => (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => setF({ hut: f.hut === b.key ? "" : b.key })}
+                  title="Số lần Viettel Post phát hụt, đếm từ chứng từ hành trình — không đọc từ câu chữ trạng thái."
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.hut === b.key && "border-primary bg-accent font-semibold")}
+                >
+                  {b.label} <span className="numeric text-muted-foreground">{n}</span>
+                </button>
+              ))}
+            </span>
+          ) : null}
         </div>
       ) : null}
 

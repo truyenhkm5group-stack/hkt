@@ -122,6 +122,31 @@ async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { fail
   return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability }]));
 }
 
+/**
+ * MẶT HÀNG TRONG TỪNG KIỆN — mã hàng, tên hàng, mô tả mẫu mã — cho bộ lọc "kiện nào chứa mẫu này".
+ *
+ * MỘT truy vấn cho cả hàng đợi, không một câu cho mỗi dòng. Kiện chưa ghép được với đơn (vận đơn
+ * nhập từ tài khoản ĐVVC, vận đơn chiều hoàn) không có dòng `order_items` nào nên danh sách rỗng:
+ * đó là CHƯA BIẾT bên trong có gì, nên bộ lọc mã hàng cố ý KHÔNG nhận chúng — nhận vào là nói với
+ * người dùng "kiện này chứa mẫu anh tìm" bằng một thứ chưa ai đọc được.
+ */
+async function loadProducts(shipmentIds: string[]): Promise<Map<string, string[]>> {
+  if (!shipmentIds.length) return new Map();
+  const db = await getDb();
+  const rows = rowsOf<{ shipment_id: string; nhan: string[] | null }>(
+    await db.execute(sql`
+      select s.id as shipment_id,
+             array_agg(distinct x.nhan) filter (where x.nhan <> '') as nhan
+        from shipments s
+        join order_items oi on oi.order_id = s.order_id
+        cross join lateral (values (oi.sku), (oi.product_name), (oi.variation_detail)) as x(nhan)
+       where s.id in ${shipmentIds}
+       group by s.id
+    `),
+  );
+  return new Map(rows.map((r) => [r.shipment_id, r.nhan ?? []]));
+}
+
 type WrongInfoRow = { shipment_id: string; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
 
 /**
@@ -200,10 +225,11 @@ async function buildQueue(): Promise<CareQueue> {
   const doneOnlyIds = doneRows.map((r) => r.care.shipmentId).filter((id) => !towerIds.has(id) && !wrongInfo.some((w) => w.shipment_id === id));
 
   const allIds = [...towerIds, ...wrongInfo.map((w) => w.shipment_id), ...doneOnlyIds];
-  const [careMap, reqMap, facts, doneShipments] = await Promise.all([
+  const [careMap, reqMap, facts, productMap, doneShipments] = await Promise.all([
     loadCareRows(allIds),
     loadLatestRequests(allIds),
     loadQueueFacts(allIds),
+    loadProducts(allIds),
     doneOnlyIds.length
       ? db
           .select({
@@ -241,7 +267,7 @@ async function buildQueue(): Promise<CareQueue> {
   };
 
   const all: CareCase[] = [];
-  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
+  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
     const care = toCareState(careMap.get(base.shipmentId));
     const { view, reopened } = careViewOf(care, base.queueSince, now);
     const capability = facts.get(base.shipmentId)?.capability;
@@ -250,6 +276,7 @@ async function buildQueue(): Promise<CareQueue> {
       // TRẠNG THÁI CON TÍNH Ở ĐÚNG MỘT CHỖ — mọi nguồn dòng (tháp, case sai thông tin, kiện đã
       // đóng) đi qua đây, nên không nguồn nào có thể dùng một luật khác.
       carrier: { ...base.carrier, ...substateOf(base.carrier), trackingCapability: asTrackingCapability(capability) },
+      products: productMap.get(base.shipmentId) ?? [],
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
@@ -361,6 +388,9 @@ async function buildQueue(): Promise<CareQueue> {
     moneyAtRisk: careCases.reduce((a, c) => a + c.codAmount, 0),
     overdue: careCases.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length,
     unassigned: careCases.filter((c) => !c.care.owner).length,
+    // Ngưỡng đang hiệu lực đi cùng dữ liệu: trình duyệt vá lại SLA sau mỗi thao tác bằng ĐÚNG bộ số
+    // máy chủ vừa dùng, không phải bằng mặc định dựng sẵn.
+    slaHours,
     measuredAt: now,
   };
 }
