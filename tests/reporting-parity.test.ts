@@ -97,11 +97,32 @@ export async function testBacktestHonest() {
   assert.ok(b.coverage === null || (b.coverage >= 0 && b.coverage <= 100));
 }
 
+/* ───── 5 · Chỉ số ước tính chạy được trên dữ liệu thật và tự nhất quán ───── */
+export async function testProjectedMetricsConsistent() {
+  clearMemo();
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  const m = await getProjectedDeliveryMetrics({ from: null, to: null });
+  for (const r of m.rows) {
+    assert.equal(r.eligibleSent, r.deliveredActual + r.failedActual + r.active, `${r.code}: đã gửi phải bằng đã giao + hoàn + đang chạy — không rổ nào rơi ra`);
+    assert.ok(r.projectedDelivered >= r.deliveredActual - 1e-9, `${r.code}: ước tính không được THẤP HƠN số đã giao thật`);
+    assert.ok(r.projectedDelivered <= r.eligibleSent + 1e-9, `${r.code}: ước tính không được vượt quá số đã gửi`);
+    assert.ok(r.projectedDeliveredRevenue >= r.deliveredRevenueActual - 1, `${r.code}: doanh thu ước tính không được thấp hơn doanh thu đã giao thật`);
+    const dangChay = Object.values(r.activeByState).reduce((a, n) => a + (n ?? 0), 0);
+    assert.equal(dangChay, r.active, `${r.code}: phân rã trạng thái phải cộng đúng bằng số đơn đang chạy`);
+    if (r.actualRate !== null) assert.ok(r.actualRate >= 0 && r.actualRate <= 100);
+    if (r.projectedRate !== null) assert.ok(r.projectedRate >= 0 && r.projectedRate <= 100);
+  }
+  // Đơn chưa lần được mã KHÔNG bị nhét vào một mã nào đó cho đủ bảng.
+  assert.ok(m.unmappedOrders >= 0 && m.totalOrders >= m.unmappedOrders);
+  assert.equal(m.version, PROJECTED_GTC_VERSION);
+}
+
 export async function testReportingParity(db: Db) {
   testNoHardcodedProbability();
   await testProbabilityFromHistory(db);
   await testLowSampleNotAuthoritative();
   await testBacktestHonest();
+  await testProjectedMetricsConsistent();
 
   const ids = [`${P}h1`, `${P}h2`, `${P}h3`, `${P}h4`];
   await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ids));

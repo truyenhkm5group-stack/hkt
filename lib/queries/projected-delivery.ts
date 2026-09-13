@@ -1,9 +1,11 @@
-import { sql } from "drizzle-orm";
+import { and, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { confidenceOf, PROJECTED_GTC_VERSION, type ProbabilityBasis, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
+import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/report-time-basis";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -207,4 +209,194 @@ export async function backtestProjectedDelivery(): Promise<Backtest> {
       .map(([substate, c]) => ({ substate, sample: c.n, predicted: Math.round((c.duBao / c.n) * 1000) / 1000, actual: Math.round((c.that / c.n) * 1000) / 1000 }))
       .sort((a, b) => b.sample - a.sample),
   };
+}
+
+/* ═══════════════════ CHỈ SỐ GIAO VẬN ƯỚC TÍNH — MỘT NGUỒN CHO MỌI BÁO CÁO ═══════════════════ */
+
+export type ActiveBreakdown = Partial<Record<CarrierSubstate, number>>;
+
+export type ProjectedProductRow = {
+  /** Mã hàng của shop (`products.custom_id`). `""` = chưa lần được về mã nào. */
+  code: string;
+  name: string;
+  /** Đơn đã bàn giao ĐVVC trong cohort — mẫu số của tỷ lệ ước tính. */
+  eligibleSent: number;
+  deliveredActual: number;
+  failedActual: number;
+  /** Đơn chưa có kết cục, tách theo ĐÚNG trạng thái ĐVVC đang báo. */
+  active: number;
+  activeByState: ActiveBreakdown;
+  /** Tỷ lệ GTC THỰC TẾ: chỉ trên đơn ĐÃ KẾT THÚC. `null` = chưa đơn nào kết thúc. */
+  actualRate: number | null;
+  /** Ước tính giao được = đã giao thật + Σ(đang ở trạng thái s × P(s)). */
+  projectedDelivered: number;
+  projectedRate: number | null;
+  deliveredRevenueActual: number;
+  /** Doanh thu GTC ước tính — cân THEO TỪNG ĐƠN, không nhân tổng doanh số với một tỷ lệ. */
+  projectedDeliveredRevenue: number;
+  /** Số đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu). */
+  unmodelledActive: number;
+};
+
+export type ProjectedMetrics = {
+  version: string;
+  rows: ProjectedProductRow[];
+  /** Đơn chưa lần được về mã hàng nào — CHƯA BIẾT, không gộp vào "mã khác". */
+  unmappedOrders: number;
+  /** Đơn thuộc nhiều mã: được cộng cho MỌI mã, nên tổng theo mã > tổng đơn thật. */
+  multiCodeOrders: number;
+  totalOrders: number;
+  probabilities: StateProbability[];
+};
+
+/**
+ * ═══════════ DOANH THU GTC ƯỚC TÍNH CÂN THEO TỪNG ĐƠN ═══════════
+ *
+ * Cách cũ ở `profit-nominal.ts:289` là `grossSales × (1 − r)`: nhân TOÀN BỘ doanh số của mã với
+ * MỘT tỷ lệ. Nó coi mọi đơn chưa kết thúc như nhau — đơn vừa rời kho sáng nay và đơn đã "chờ phát
+ * lại" ba ngày có cùng triển vọng. Chúng không có.
+ *
+ * Ở đây mỗi đơn mang xác suất của CHÍNH trạng thái nó đang ở:
+ *
+ *     DT ước tính = DT các đơn ĐÃ GIAO + Σ(DT đơn đang chạy × P(trạng thái của nó))
+ *
+ * Đơn đang ở trạng thái chưa đủ mẫu KHÔNG bị gán một xác suất đoán: nó nằm ngoài phần ước tính và
+ * được đếm riêng ở `unmodelledActive`, để người đọc biết phần chưa dự báo được lớn tới đâu.
+ *
+ * ─── GRAIN ───
+ *
+ * Đơn có nhiều mã hàng: doanh thu chia theo `line_total` của từng dòng hàng (đúng cách bảng lợi
+ * nhuận đang chia), còn SỐ ĐƠN thì cộng cho mọi mã — nên tổng theo mã lớn hơn tổng đơn thật, và
+ * `multiCodeOrders` nói ra phần chồng lấn đó. KHÔNG chia số đơn theo tỷ lệ: một đơn hỏng thì cả
+ * hai mã trong đơn đều bị ảnh hưởng, không phải mỗi mã hỏng một nửa.
+ */
+export async function getProjectedDeliveryMetrics(period: { from: Date | null; to: Date | null }): Promise<ProjectedMetrics> {
+  const key = `projected-metrics:${PROJECTED_GTC_VERSION}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`;
+  return memo(key, 90_000, async () => {
+    const db = await getDb();
+    const lookup = await getProbabilityLookup();
+    const con = carrierSubstateSql(sql`"shipments"."vtp_status"`, sql`"shipments"."vtp_status_name"`, sql`"shipments"."stage"::text`);
+
+    /*
+      COHORT = NGÀY ĐVVC TIẾP NHẬN, giống hệt bảng hiệu quả theo mã.
+
+      Đây là một trong bốn khác biệt đã làm hai báo cáo lệch nhau. Chốt ở đây, dùng chung ở cả hai
+      nơi, thì nó thôi là một khác biệt.
+    */
+    const moc = sql.raw(CARRIER_HANDOFF_AT_SQL);
+    const dk: SQL[] = [sql`"shipments"."order_id" is not null`];
+    if (period.from) dk.push(sql`${moc} >= ${period.from}`);
+    if (period.to) dk.push(sql`${moc} <= ${period.to}`);
+    if (period.from || period.to) dk.push(sql`${moc} is not null`);
+
+    const rows = rowsOf<{ order_id: string; code: string | null; name: string | null; line_total: string | number; order_total: string | number; stage: string; con: string }>(
+      await db.execute(sql`
+        select "orders"."id" as order_id,
+               p.custom_id as code,
+               p.name as name,
+               coalesce(sum(oi.line_total), 0) as line_total,
+               max("orders"."total_price_after_discount") as order_total,
+               max("shipments"."stage"::text) as stage,
+               max(${con}) as con
+          from "shipments"
+          join "orders" on "orders"."id" = "shipments"."order_id" and ${PRIMARY_ATTEMPT}
+          left join order_items oi on oi.order_id = "orders"."id" and oi.is_bonus = false
+          left join product_variants pv on pv.id = oi.variant_id
+          left join products p on p.id = pv.product_id
+         where ${and(...dk)}
+         group by "orders"."id", p.custom_id, p.name
+      `),
+    );
+
+    type Acc = ProjectedProductRow & { _revActive: number };
+    const theoMa = new Map<string, Acc>();
+    const maCuaDon = new Map<string, Set<string>>();
+    let unmappedOrders = 0;
+
+    const lay = (code: string, name: string): Acc => {
+      const cu = theoMa.get(code);
+      if (cu) return cu;
+      const moi: Acc = {
+        code,
+        name,
+        eligibleSent: 0,
+        deliveredActual: 0,
+        failedActual: 0,
+        active: 0,
+        activeByState: {},
+        actualRate: null,
+        projectedDelivered: 0,
+        projectedRate: null,
+        deliveredRevenueActual: 0,
+        projectedDeliveredRevenue: 0,
+        unmodelledActive: 0,
+        _revActive: 0,
+      };
+      theoMa.set(code, moi);
+      return moi;
+    };
+
+    for (const r of rows) {
+      const code = (r.code ?? "").trim();
+      if (!code) {
+        unmappedOrders += 1;
+        continue;
+      }
+      const set = maCuaDon.get(r.order_id) ?? new Set<string>();
+      set.add(code);
+      maCuaDon.set(r.order_id, set);
+
+      const row = lay(code, r.name ?? "");
+      // Doanh thu của mã trong đơn = tổng dòng hàng của mã đó; không có dòng nào thì lấy tiền đơn.
+      const doanhThu = Number(r.line_total ?? 0) || Number(r.order_total ?? 0);
+      const substate = r.con as CarrierSubstate;
+      row.eligibleSent += 1;
+
+      if (substate === "DELIVERED") {
+        row.deliveredActual += 1;
+        row.deliveredRevenueActual += doanhThu;
+        row.projectedDelivered += 1;
+        row.projectedDeliveredRevenue += doanhThu;
+      } else if (substate === "RETURNED" || substate === "CANCELLED") {
+        row.failedActual += 1;
+      } else {
+        row.active += 1;
+        row.activeByState[substate] = (row.activeByState[substate] ?? 0) + 1;
+        const tra = lookup.of(substate);
+        if (tra.p === null) {
+          // KHÔNG gán một xác suất đoán. Đơn này nằm ngoài phần ước tính và được nói ra.
+          row.unmodelledActive += 1;
+        } else {
+          row.projectedDelivered += tra.p;
+          row.projectedDeliveredRevenue += doanhThu * tra.p;
+        }
+      }
+    }
+
+    let multiCodeOrders = 0;
+    for (const set of maCuaDon.values()) if (set.size > 1) multiCodeOrders += 1;
+
+    const ket: ProjectedProductRow[] = [...theoMa.values()].map((r) => {
+      const ketThuc = r.deliveredActual + r.failedActual;
+      const { _revActive, ...rest } = r;
+      void _revActive;
+      return {
+        ...rest,
+        actualRate: ketThuc ? Math.round((r.deliveredActual / ketThuc) * 1000) / 10 : null,
+        projectedDelivered: Math.round(r.projectedDelivered * 100) / 100,
+        // Làm tròn CHỈ Ở ĐÂY, sau khi cộng xong: làm tròn từng bước sẽ tích luỹ sai số.
+        projectedRate: r.eligibleSent ? Math.round((r.projectedDelivered / r.eligibleSent) * 1000) / 10 : null,
+        projectedDeliveredRevenue: Math.round(r.projectedDeliveredRevenue),
+      };
+    });
+
+    return {
+      version: lookup.version,
+      rows: ket.sort((a, b) => b.eligibleSent - a.eligibleSent || a.code.localeCompare(b.code)),
+      unmappedOrders,
+      multiCodeOrders,
+      totalOrders: maCuaDon.size + unmappedOrders,
+      probabilities: lookup.states,
+    };
+  });
 }
