@@ -47,11 +47,26 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
   const db = await getDb();
   const ref = d.scope === "COMPANY" ? null : d.scopeRef;
 
-  // Đặt lại đích cho ĐÚNG cùng một mốc hiệu lực là SỬA, không phải thêm dòng thứ hai.
+  /*
+    Đặt lại đích cho ĐÚNG cùng một mốc hiệu lực VÀ cùng hình dạng kỳ là SỬA, không phải thêm dòng
+    thứ hai.
+
+    `periodKind` bắt buộc nằm trong mệnh đề tra: thiếu nó thì đặt "2.000 đơn mỗi THÁNG" sẽ tìm thấy
+    dòng "500 đơn mỗi TUẦN" và SỬA ĐÈ lên nó — chủ shop mất một đích đã đặt mà không có cảnh báo
+    nào. Khoá duy nhất `metric_targets_uq` khai đúng bốn cột này.
+  */
   const [cu] = await db
     .select()
     .from(schema.metricTargets)
-    .where(and(eq(schema.metricTargets.metricKey, d.metricKey), eq(schema.metricTargets.scope, d.scope), sql`coalesce(${schema.metricTargets.scopeRef}, '') = ${ref ?? ""}`, eq(schema.metricTargets.effectiveFrom, d.effectiveFrom)))
+    .where(
+      and(
+        eq(schema.metricTargets.metricKey, d.metricKey),
+        eq(schema.metricTargets.scope, d.scope),
+        sql`coalesce(${schema.metricTargets.scopeRef}, '') = ${ref ?? ""}`,
+        eq(schema.metricTargets.periodKind, d.periodKind),
+        eq(schema.metricTargets.effectiveFrom, d.effectiveFrom),
+      ),
+    )
     .limit(1);
 
   const chung = {

@@ -127,7 +127,7 @@ import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
 import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
-import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
+import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
 import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testReturnReceiveSelector } from "./return-receive-selector.test";
 import { testProductNotes } from "./product-notes.test";
@@ -1427,6 +1427,7 @@ async function main() {
   testTargetWindowAndPeriod();
   testRangeAndBands();
   testScorecardEvaluator();
+  testScorecardContract();
   testDataQualityIssues();
   await testReturnReceiveSelector(db);
   await testProductNotes(db);

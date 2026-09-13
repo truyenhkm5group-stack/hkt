@@ -72,3 +72,18 @@ BEGIN
     ALTER TABLE "metric_targets" ADD CONSTRAINT "metric_targets_version_check" CHECK ("version" >= 1);
   END IF;
 END $$;
+
+--> statement-breakpoint
+
+-- KHOÁ DUY NHẤT PHẢI CHỨA HÌNH DẠNG KỲ.
+--
+-- Bản đầu của migration này giữ nguyên khoá cũ (chỉ số · tầng · tham chiếu · mốc hiệu lực). Nhưng
+-- `resolveTarget` lọc theo `period_kind`, tức là nó GIẢ ĐỊNH một đích theo TUẦN và một đích theo
+-- THÁNG của cùng chỉ số có thể cùng tồn tại. Với khoá cũ thì không: dòng thứ hai bị chặn, và lượt
+-- ghi thứ hai tra dòng cũ không theo kỳ nên nó SỬA ĐÈ đích tuần thành đích tháng — chủ shop mất
+-- một đích đã đặt, không một dòng cảnh báo nào.
+--
+-- Bảng rỗng trên production (0 dòng, đo 13/09/2026) nên dựng lại chỉ mục không đụng dữ liệu nào.
+DROP INDEX IF EXISTS "metric_targets_uq";
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "metric_targets_uq" ON "metric_targets" ("metric_key", "scope", coalesce("scope_ref", ''), "period_kind", "effective_from");

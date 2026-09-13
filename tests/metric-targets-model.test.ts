@@ -102,6 +102,19 @@ export function testTargetWindowAndPeriod() {
   const theoThang = [dich({ metricKey: "delivered_orders", scope: "COMPANY", target: 500, periodKind: "MONTH" })];
   assert.equal(resolveTarget(theoThang, { metricKey: "delivered_orders", departmentCode: null, positionId: null, at: cuoiKy, periodKind: "MONTH" })?.target, 500);
   assert.equal(resolveTarget(theoThang, { metricKey: "delivered_orders", departmentCode: null, positionId: null, at: cuoiKy, periodKind: "WEEK" }), null, "đích khai theo THÁNG không được đem chấm một TUẦN");
+  /*
+    HAI ĐÍCH KHÁC HÌNH DẠNG KỲ SỐNG SONG SONG — và mỗi kỳ chọn đúng cái của mình.
+
+    Đây là lý do `period_kind` PHẢI nằm trong khoá duy nhất của bảng. Thiếu nó thì hai dòng này
+    không cùng tồn tại được, và bài kiểm dưới đây sẽ không bao giờ chạy được trên dữ liệu thật.
+  */
+  const haiKy = [
+    dich({ metricKey: "delivered_orders", scope: "COMPANY", target: 500, periodKind: "WEEK" }),
+    dich({ metricKey: "delivered_orders", scope: "COMPANY", target: 2000, periodKind: "MONTH" }),
+  ];
+  assert.equal(resolveTarget(haiKy, { metricKey: "delivered_orders", departmentCode: null, positionId: null, at: cuoiKy, periodKind: "WEEK" })?.target, 500, "xem theo TUẦN thì lấy đích tuần");
+  assert.equal(resolveTarget(haiKy, { metricKey: "delivered_orders", departmentCode: null, positionId: null, at: cuoiKy, periodKind: "MONTH" })?.target, 2000, "xem theo THÁNG thì lấy đích tháng — KHÔNG phải đích tuần nhân bốn");
+
   const moiKy = [dich({ metricKey: "delivered_orders", scope: "COMPANY", target: 500, periodKind: "ANY" })];
   assert.equal(resolveTarget(moiKy, { metricKey: "delivered_orders", departmentCode: null, positionId: null, at: cuoiKy, periodKind: "WEEK" })?.target, 500, "'ANY' nghĩa là chưa khai kỳ ⇒ áp cho mọi kỳ");
   assert.ok(PERIOD_KINDS.includes("QUARTER"));
@@ -206,4 +219,45 @@ export function testScorecardEvaluator() {
   assert.equal(evaluateMetric(nen({ metricKey: "khong-co-that" })), null, "chỉ số không có trong sổ thì không dựng ô nào");
 
   console.log("✓ Thẻ điểm dùng chung: CHƯA ĐO ĐƯỢC và CHƯA ĐẶT ĐÍCH tách hẳn khỏi ĐANG HỎNG · mẫu 0 không thành một con số · ngưỡng chỉ có khi chủ shop khai và chạy đúng chiều");
+}
+
+/* ───── 6 · Hợp đồng API của evaluator — khoá lại trước khi có nơi gọi thứ hai ───── */
+export function testScorecardContract() {
+  /*
+    `/work/performance` HIỆN VẪN dùng đường tính riêng (xem docs/p1.2-work-performance-evaluator.md).
+    Việc chuyển nó là một bản giao diện độc lập. Nhưng hợp đồng của evaluator phải đứng yên TỪ BÂY
+    GIỜ — nếu nó còn đổi hình dạng thì bản chuyển kia sẽ phải sửa cả hai đầu cùng lúc, và mất luôn
+    khả năng chạy song song hai đường để đối chiếu.
+  */
+  const nen: ScorecardInput = {
+    metricKey: "sales_followup_sla",
+    value: 90,
+    sample: 100,
+    trust: "TRUSTED",
+    targets: [dich({ metricKey: "sales_followup_sla", scope: "COMPANY", target: 85 })],
+    subject: { departmentCode: "SALES", positionId: null, userId: "u1" },
+    period: { endsAt: new Date("2026-09-30"), kind: "MONTH", label: "Tháng 9" },
+  };
+  const o = evaluateMetric(nen)!;
+
+  // Chín câu mà mỗi ô PHẢI trả lời — thiếu một trường là màn hình phải tự bịa phần còn lại.
+  for (const truong of ["metric", "value", "sample", "trust", "target", "direction", "verdict", "status", "delta", "attainmentPct", "trend", "owner", "periodKind", "periodLabel", "basis", "canConclude", "reason"]) {
+    assert.ok(truong in o, `hợp đồng ScorecardCell thiếu trường "${truong}"`);
+  }
+
+  // Evaluator KHÔNG tự đi đo: cùng đầu vào ⇒ cùng đầu ra, không phụ thuộc thứ tự hay số lần gọi.
+  const lan2 = evaluateMetric(nen)!;
+  assert.deepEqual({ ...lan2, metric: null }, { ...o, metric: null }, "hàm phải THUẦN — gọi hai lần ra đúng một kết quả");
+
+  // `canConclude` là cờ một-lần-đọc cho mọi màn hình. Bốn lối ra, chỉ một cái cho phép kết luận.
+  assert.equal(evaluateMetric({ ...nen })!.canConclude, true);
+  assert.equal(evaluateMetric({ ...nen, value: null, sample: 0 })!.canConclude, false, "chưa đo được ⇒ không kết luận");
+  assert.equal(evaluateMetric({ ...nen, trust: "WEAK" })!.canConclude, false, "mẫu yếu ⇒ không kết luận");
+  assert.equal(evaluateMetric({ ...nen, targets: [] })!.canConclude, false, "chưa có đích ⇒ không kết luận");
+
+  // Chỉ số KẾT QUẢ CHUNG không được thành điểm chấm người — cửa chặn nằm ở sổ, evaluator đọc lại.
+  assert.equal(metricOf("sales_delivered_quality")?.shared, true);
+  assert.equal(canTargetPerson("sales_delivered_quality").ok, false);
+
+  console.log("✓ Hợp đồng evaluator: 17 trường đầy đủ · hàm THUẦN · canConclude chỉ bật khi đo được + đủ tin + có đích (đường chuyển /work/performance ghi ở docs/p1.2-work-performance-evaluator.md)");
 }
