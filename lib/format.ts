@@ -1,7 +1,73 @@
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
-export function formatVND(value: number | null | undefined, opts: { compact?: boolean; sign?: boolean } = {}) {
-  const n = Number(value ?? 0);
+/**
+ * ═══════════ HỢP ĐỒNG HIỂN THỊ: CHƯA BIẾT KHÔNG ĐƯỢC IN RA THÀNH 0 ═══════════
+ *
+ * ─── LỖI ĐÃ SỬA ───
+ *
+ * Suốt tầng truy vấn, kho mã này giữ `NULL` rất cẩn thận: `metricTrust` tách `UNKNOWN` khỏi
+ * `WEAK`, `verdict()` có `NOT_MEASURED` riêng, `stockKnown = false` thay vì số 0, `cogsKnown`,
+ * `reasonCoverage`… Rồi ở đúng một phân đoạn cuối cùng — lúc in ra màn hình — cả công trình đó bị
+ * xoá bởi một biểu thức:
+ *
+ *     const n = Number(value ?? 0);   // formatVND, bản cũ
+ *
+ * `formatVND(null)` in ra `0 ₫`. `formatNumber(null)` in ra `0`. `formatPercent(null)` in ra
+ * `0.0%`. Người đọc thấy một con số dứt khoát ở chỗ đáng lẽ phải thấy "chưa có dữ liệu".
+ *
+ * Đó là vi phạm thẳng AGENTS.md mục 0.3 ("`NULL` là CHƯA BIẾT, không phải 0") và mục 8.5
+ * ("Unknown phải là UNKNOWN, không đổi thành 0"), và nó nguy hiểm hơn một ô trống: một ô trống làm
+ * người ta đi hỏi, còn `0 ₫` làm người ta kết luận. "Giá vốn 0 ₫" đọc ra là "hàng không tốn tiền
+ * vốn"; "tỷ lệ hoàn 0.0%" đọc ra là "không đơn nào hoàn" trong khi sự thật là "chưa đơn nào có kết
+ * quả cuối để tính".
+ *
+ * ─── BA TRẠNG THÁI, BA CÁCH IN ───
+ *
+ *   0 THẬT          →  `0 ₫` · `0` · `0.0%`     đã đo, và kết quả bằng không
+ *   CHƯA BIẾT       →  `—`                       chưa có chứng từ / chưa có mẫu số / chưa đo
+ *   KHÔNG ÁP DỤNG   →  `N/A`                     dòng này không có khái niệm đó
+ *
+ * `NaN` và `Infinity` đi cùng nhánh CHƯA BIẾT: chúng luôn là dấu vết của một phép chia cho 0 hoặc
+ * một giá trị hỏng, và `NaN ₫` thì vừa sai vừa khó truy.
+ *
+ * ─── CÁCH GỌI ───
+ *
+ * Nơi nào `null` thật sự CÓ NGHĨA LÀ KHÔNG (chưa chi đồng nào, chưa có việc nào) thì viết
+ * `?? 0` NGAY TẠI CHỖ GỌI: `formatVND(x ?? 0)`. Viết ra như vậy là một lời khẳng định đọc được và
+ * tìm được bằng grep, khác hẳn một mặc định ẩn nằm trong hàm định dạng.
+ */
+
+/** CHƯA BIẾT / chưa có dữ liệu. Khác hẳn 0. */
+export const MISSING_TEXT = "—";
+
+/** KHÔNG ÁP DỤNG cho dòng này — khác hẳn "chưa biết". */
+export const NOT_APPLICABLE_TEXT = "N/A";
+
+/** Câu giải thích dùng chung cho tooltip của một ô `—`. */
+export const MISSING_HINT = "Chưa có dữ liệu — không phải 0";
+
+export type MissingOpt = {
+  /** Chữ thay cho `—` khi giá trị chưa biết (ví dụ "chưa đo được"). KHÔNG dùng để in "0". */
+  missing?: string;
+};
+
+/**
+ * Quy về một con số HỮU HẠN, hoặc `null`.
+ *
+ * Nhận cả chuỗi vì tầng truy vấn có chỗ khai `sql<number>` nhưng trình điều khiển trả về chuỗi
+ * (kiểu `numeric` của Postgres). Chuỗi rỗng là CHƯA BIẾT chứ không phải 0 — `Number("")` ra 0 là
+ * đúng cái bẫy đang sửa.
+ */
+function finiteOrNull(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function formatVND(value: number | null | undefined, opts: { compact?: boolean; sign?: boolean } & MissingOpt = {}) {
+  const n = finiteOrNull(value);
+  if (n === null) return opts.missing ?? MISSING_TEXT;
   if (opts.compact) {
     const abs = Math.abs(n);
     const sign = n < 0 ? "-" : opts.sign && n > 0 ? "+" : "";
@@ -19,12 +85,16 @@ function trimZero(value: string) {
   return value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
-export function formatNumber(value: number | null | undefined) {
-  return new Intl.NumberFormat("vi-VN").format(Number(value ?? 0));
+export function formatNumber(value: number | null | undefined, opts: MissingOpt = {}) {
+  const n = finiteOrNull(value);
+  if (n === null) return opts.missing ?? MISSING_TEXT;
+  return new Intl.NumberFormat("vi-VN").format(n);
 }
 
-export function formatPercent(value: number | null | undefined, digits = 1) {
-  return `${Number(value ?? 0).toFixed(digits)}%`;
+export function formatPercent(value: number | null | undefined, digits = 1, opts: MissingOpt = {}) {
+  const n = finiteOrNull(value);
+  if (n === null) return opts.missing ?? MISSING_TEXT;
+  return `${n.toFixed(digits)}%`;
 }
 
 export function toDate(value: string | Date | null | undefined): Date | null {
@@ -97,8 +167,29 @@ export function clampInt(value: unknown, fallback = 0) {
   return Math.max(-2_147_483_647, Math.min(2_147_483_647, Math.round(n)));
 }
 
+/**
+ * Tỷ lệ phần trăm dùng cho TÍNH TOÁN (bề rộng thanh biểu đồ, ngưỡng so sánh). Mẫu số 0 ⇒ 0, vì một
+ * thanh biểu đồ dài 0 là đúng khi chưa có gì để vẽ.
+ *
+ * ĐỪNG dùng hàm này cho một con số ĐỌC ĐƯỢC trên màn hình khi mẫu số có thể bằng 0 — ở đó "0%"
+ * nói rằng đã đo và kết quả bằng không, trong khi sự thật là CHƯA CÓ MẪU SỐ. Chỗ đó dùng
+ * `pctOrNull` rồi để `formatPercent` in ra `—`.
+ */
 export function pct(part: number, total: number) {
   return total ? (part / total) * 100 : 0;
+}
+
+/**
+ * Tỷ lệ phần trăm dùng để HIỂN THỊ. Mẫu số 0 ⇒ `null` = CHƯA CÓ MẪU SỐ, không phải 0%.
+ *
+ * "Tỷ lệ hoàn 0.0%" trên một kỳ chưa đơn nào có kết quả cuối là một câu khẳng định sai: nó nói
+ * không đơn nào hoàn. `—` nói đúng thứ đang có: chưa đủ dữ liệu để trả lời.
+ */
+export function pctOrNull(part: number | null | undefined, total: number | null | undefined): number | null {
+  const t = typeof total === "number" && Number.isFinite(total) ? total : null;
+  const p = typeof part === "number" && Number.isFinite(part) ? part : null;
+  if (t === null || p === null || t === 0) return null;
+  return (p / t) * 100;
 }
 
 export function initials(name: string) {
