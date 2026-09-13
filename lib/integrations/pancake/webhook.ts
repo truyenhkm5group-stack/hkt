@@ -63,12 +63,25 @@ export async function storeWebhook(
   const dedupeKey = options.dedupeKey || null;
   const occurredAt = options.occurredAt ?? null;
   if (dedupeKey) {
-    const [bumped] = await db
-      .update(schema.webhookEvents)
-      .set({ deliveryCount: sql`${schema.webhookEvents.deliveryCount} + 1`, receivedAt: new Date() })
-      .where(eq(schema.webhookEvents.dedupeKey, dedupeKey))
-      .returning({ id: schema.webhookEvents.id, deliveryCount: schema.webhookEvents.deliveryCount });
-    if (bumped) return { id: bumped.id, duplicate: true, deliveryCount: Number(bumped.deliveryCount) };
+    /*
+      MỘT CÂU LỆNH, KHÔNG PHẢI "CẬP NHẬT RỒI CHÈN".
+
+      `webhook_events_dedupe_uq` (migration 0032) đã là UNIQUE trên `dedupe_key`. Bản trước cập nhật
+      trước, không thấy thì chèn: hai lần gửi lại tới CÙNG LÚC đều không thấy, cùng chèn, một cái vỡ
+      ràng buộc ⇒ HTTP 500 cho Viettel Post (bên đòi 200 trong 1 giây) hoặc một lần thử lại thừa
+      cho SePay. `ON CONFLICT … DO UPDATE` để Postgres phân xử: kẻ tới sau chỉ đếm thêm một lượt.
+      `xmax = 0` là cách Postgres cho biết hàng vừa được CHÈN (chứ không phải cập nhật).
+    */
+    const [row] = await db
+      .insert(schema.webhookEvents)
+      .values({ source, eventType, externalId, payload, headers, dedupeKey, occurredAt })
+      .onConflictDoUpdate({
+        target: schema.webhookEvents.dedupeKey,
+        set: { deliveryCount: sql`${schema.webhookEvents.deliveryCount} + 1`, receivedAt: new Date() },
+      })
+      .returning({ id: schema.webhookEvents.id, deliveryCount: schema.webhookEvents.deliveryCount, inserted: sql<boolean>`(xmax = 0)` });
+    const duplicate = !row.inserted;
+    return { id: row.id, duplicate, deliveryCount: Number(row.deliveryCount) };
   }
   const [row] = await db
     .insert(schema.webhookEvents)

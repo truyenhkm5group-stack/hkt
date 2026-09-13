@@ -428,6 +428,26 @@ async function main() {
   assert.equal(fresh.length, 3);
   const imported = await insertLedgerExpenses(fresh.map((r) => ({ reference: r.reference, date: r.date, amount: r.amount, category: r.category, description: r.description })), "test");
   assert.equal(imported.inserted, 3);
+  assert.equal(imported.refused, 0);
+  // AGENTS.md 3.17: sao kê không tạo chi phí qua giao diện; đường script/ops còn lại phải ĐÁNH DẤU nguồn
+  // để Cost Engine / Tổng quan tài chính phân biệt được với khoản gõ tay.
+  const importedRows = await db.select({ costSource: schema.expenses.costSource }).from(schema.expenses).where(inArray(schema.expenses.id, imported.ids));
+  assert.equal(importedRows.length, 3);
+  assert.ok(importedRows.every((r) => r.costSource === "BANK_IMPORT"), "khoản chi sinh từ sao kê mang cost_source = BANK_IMPORT");
+  // Nhóm mà bảng Chi phí KHÔNG có thẩm quyền (cước, phí hoàn, quảng cáo, tiền hàng) bị TỪ CHỐI dù được truyền thẳng:
+  // nguồn chuyên biệt đã tính, ghi thêm là trừ hai lần.
+  const tuChoi = await insertLedgerExpenses(
+    [
+      { reference: "MB FT-REFUSE-1", date: "2026-08-20", amount: 17000, category: "SHIPPING", description: "VTP cuoc" },
+      { reference: "MB FT-REFUSE-2", date: "2026-08-20", amount: 30000, category: "RETURN_FEE", description: "VTP hoan" },
+      { reference: "MB FT-REFUSE-3", date: "2026-08-20", amount: 1000000, category: "ADS", description: "Meta" },
+      { reference: "MB FT-REFUSE-4", date: "2026-08-20", amount: 5000000, category: "PURCHASE", description: "Xuong" },
+    ],
+    "test",
+  );
+  assert.equal(tuChoi.inserted, 0, "không ghi khoản thuộc nguồn khác");
+  assert.equal(tuChoi.refused, 4, "đếm đủ 4 dòng bị từ chối để báo lại cho người chạy script");
+  assert.equal((await existingLedgerReferences(["MB FT-REFUSE-1", "MB FT-REFUSE-2", "MB FT-REFUSE-3", "MB FT-REFUSE-4"])).size, 0, "dòng bị từ chối không để lại vết trong bảng Chi phí");
   const again = planImport(txns, await existingLedgerReferences(txns.map(referenceFor)), employees);
   assert.equal(again.filter((r) => r.status === "duplicate").length, 3, "nhập lại → toàn bộ trùng");
   const csvTxns = parseLedger(ledgerCsv);
@@ -439,7 +459,7 @@ async function main() {
   assert.equal(csvPlan.find((r) => r.bankRef === "FT7")?.status, "non_pl");
   const ledgerRows = await db.select().from(schema.expenses).where(eq(schema.expenses.reference, "MB FT3"));
   assert.equal(ledgerRows[0]?.amount, 1340000);
-  console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi vận hành, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
+  console.log(`✓ Nhập sao kê (script/ops): ${imported.inserted} khoản chi vận hành mang cost_source BANK_IMPORT, từ chối ${tuChoi.refused} dòng thuộc nguồn khác, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
 
   // Bảng kê tiền COD Viettel Post
   const summaries = parseStatementSummaryText("PCOD-A-GLMTQY04-2609-55\t04/09/2026 01:00:29\t24.059.000 ₫\t563.757 ₫\t23.495.243 ₫\nPCOD-A-GLMTQY03-2609-44 03/09/2026 08:47:32 58.136.001 ₫ 6.806.381 ₫ 51.329.620 ₫\ndòng rác\n");
@@ -464,7 +484,32 @@ async function main() {
   const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, "PCOD-A-TEST") });
   assert.equal(batch?.codGross, 700000, "tổng COD trên bảng kê (kể cả dòng không ghép được)");
   assert.equal(batch?.totalAmount, 675000, "tiền thu về = COD − cước");
-  console.log(`✓ Bảng kê Viettel Post: ${summaries.length} dòng tổng hợp, chi tiết ghép ${stmtApplied.matched}/${stmtRows.length} vận đơn, đợt ${batch?.reference} thu về ${batch?.totalAmount}`);
+  /*
+    DÒNG CHỈ CƯỚC (COD = 0) KHÔNG ĐƯỢC BIẾN THÀNH "ĐÃ THU ĐỦ TIỀN".
+
+    Bảng kê Viettel Post có dòng chỉ trừ cước cho vận đơn hoàn / giao một phần. Bản trước ghi
+    `cod_status = PAID_TO_BANK` và `cod_collected = cod_amount` cho MỌI dòng ghép được — bịa ra
+    "đã thu 499.000đ" cho một đơn ĐVVC không trả đồng nào, và nhánh tiền của ORDER_OUTCOME kết luận
+    giao thành công. Đo production 13/09/2026 (chỉ-đọc, điều kiện chặt: PAID_TO_BANK, cod_collected =
+    cod_amount, có dòng bảng kê nhưng KHÔNG dòng nào cod > 0): 0 vận đơn — lỗi đường ghi là thật
+    nhưng chưa làm hỏng dữ liệu, nên chỉ sửa mã + khoá bằng kiểm thử, không sửa dữ liệu.
+    AGENTS.md 3.6: `cod_collected` chỉ ghi khi có số thực thu > 0.
+  */
+  const rr3 = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9003") });
+  assert.ok(rr3, "có vận đơn RR-9003 (499.000đ thu hộ, có vận đơn hoàn)");
+  const rr3Truoc = { codStatus: rr3.codStatus, codCollected: rr3.codCollected };
+  assert.notEqual(rr3Truoc.codStatus, "PAID_TO_BANK", "tiền đề: RR-9003 chưa được ghi nhận tiền về");
+  const feeOnlyRows = parseStatementDetail("Bảng kê PCOD-A-FEEONLY\nSTT,Mã vận đơn,Người nhận,Tiền COD,Tổng cước,Thực nhận\n1,PKE1509000003,Khách C,0,\"31.000\",\"-31.000\"\n", "bang-ke-cuoc.csv");
+  assert.equal(feeOnlyRows.length, 1);
+  assert.equal(feeOnlyRows[0].cod, 0);
+  const feeOnlyApplied = await applyStatementDetail({ reference: "PCOD-A-FEEONLY", receivedAt: "2026-09-05", codGross: 0, feeTotal: 0, netAmount: 0 }, feeOnlyRows, "test");
+  assert.equal(feeOnlyApplied.matched, 1, "dòng chỉ cước vẫn ghép được vận đơn");
+  const rr3Sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, rr3.id) });
+  assert.equal(rr3Sau?.codStatus, rr3Truoc.codStatus, "dòng chỉ cước KHÔNG nâng cod_status lên PAID_TO_BANK");
+  assert.equal(rr3Sau?.codCollected, rr3Truoc.codCollected, "dòng chỉ cước KHÔNG ghi cod_collected (không được bịa ra tiền thực thu)");
+  assert.equal(rr3Sau?.codPaidToBankAt, null, "dòng chỉ cước không có mốc tiền về ngân hàng");
+  assert.equal(rr3Sau?.shippingFee, 31000, "nhưng cước thực tế trên bảng kê VẪN được ghi");
+  console.log(`✓ Bảng kê Viettel Post: ${summaries.length} dòng tổng hợp, chi tiết ghép ${stmtApplied.matched}/${stmtRows.length} vận đơn, đợt ${batch?.reference} thu về ${batch?.totalAmount}; dòng chỉ cước (COD = 0) chỉ ghi cước, không bịa tiền về`);
 
   // Cảnh báo vận hành: giao thất bại → thông báo; giao thành công → tự đóng
   const failedShipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9004") });

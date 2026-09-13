@@ -11,7 +11,7 @@
  */
 import type { BankGroup } from "@/lib/constants/bank";
 import type { LedgerTxn } from "@/lib/integrations/bank/ledger";
-import { bankMatchKey } from "@/lib/integrations/bank/sepay";
+import { bankMatchKey, normalizeBankRef } from "@/lib/integrations/bank/sepay";
 
 /**
  * Mã danh mục của app sao kê → nhóm kế toán ERP.
@@ -76,12 +76,15 @@ export function statementInstant(txn: Pick<LedgerTxn, "date" | "time">): Date {
 /**
  * KHOÁ TỰ NHIÊN của một giao dịch.
  *
- * Ưu tiên mã giao dịch của ngân hàng (ổn định tuyệt đối). Không có mã thì dựng khoá từ ngày + giờ +
- * số tiền + đầu nội dung: đủ để hai lần tải cùng một dòng cho ra cùng một khoá, mà hai giao dịch
- * khác nhau trong cùng một ngày vẫn tách được.
+ * Ưu tiên mã giao dịch của ngân hàng (ổn định tuyệt đối), CHUẨN HOÁ y hệt gói tin SePay
+ * (`normalizeBankRef`: in hoa, chỉ giữ chữ số / chữ cái / gạch nối). Bản trước chỉ `trim()`, nên
+ * cùng một bút toán tới từ file ("ft26246948262000 ") và từ webhook ("FT26246948262000") thành hai
+ * dòng — một giao dịch bị đếm hai lần. Không có mã thì dựng khoá từ ngày + giờ + số tiền + đầu nội
+ * dung: đủ để hai lần tải cùng một dòng cho ra cùng một khoá, mà hai giao dịch khác nhau trong cùng
+ * một ngày vẫn tách được (khoá dựng không đi qua chuẩn hoá — nó không bao giờ tới từ webhook).
  */
 export function bankRefFor(txn: LedgerTxn): string {
-  const ref = txn.bankRef.trim();
+  const ref = normalizeBankRef(txn.bankRef);
   if (ref) return ref;
   const desc = txn.description.replace(/\s+/g, " ").trim().slice(0, 40);
   return `NOREF:${txn.date}:${txn.time || "00:00"}:${txn.amount}:${desc}`;

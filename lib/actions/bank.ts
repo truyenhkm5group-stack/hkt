@@ -8,16 +8,17 @@
  * hàng ghi. Dòng gõ tay (`MANUAL`) là ngoại lệ duy nhất và được đánh dấu rõ để không lẫn.
  */
 import { revalidatePath } from "next/cache";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { BANK_ACCOUNT_STATUSES, BANK_GROUPS, maskAccountNumber } from "@/lib/constants/bank";
 import { LINK_TARGET_TYPES } from "@/lib/constants/finance-truth";
-import { autoLinkActor, createLink, removeAllLinks } from "@/lib/finance/linkage";
+import { autoLinkActor, createLink, removeAllLinks, removeLinksToTarget } from "@/lib/finance/linkage";
 import { parseLedgerFile } from "@/lib/integrations/bank/statement-file";
 import { dedupeByRef, toBankRow } from "@/lib/integrations/bank/statement";
+import { importStatementRows } from "@/lib/integrations/bank/statement-import";
 import { applyBankRules as runBankRules } from "@/lib/integrations/bank/apply-rules";
 
 const MAX_TEXT = 5_000_000;
@@ -39,6 +40,9 @@ const importInputSchema = z.union([
   }),
 ]);
 export type BankImportInput = z.infer<typeof importInputSchema>;
+/** Tài khoản ngân hàng mà sao kê này thuộc về. `null` chỉ hợp lệ khi sổ CHƯA có tài khoản nào. */
+const importOptionsSchema = z.object({ bankAccountId: z.string().trim().min(1).max(100).nullable().default(null) });
+export type BankImportOptions = z.input<typeof importOptionsSchema>;
 const b = schema.bankTransactions;
 
 function revalidateAll() {
@@ -61,22 +65,42 @@ async function guard(): Promise<Guard> {
 /**
  * Nhập file sao kê vào sổ giao dịch.
  *
- * Dòng đã có (theo mã giao dịch) được GIỮ NGUYÊN nhãn — không ghi đè phân loại người dùng đã làm,
- * chỉ cập nhật những trường mô tả có thể được ngân hàng bổ sung muộn. Đây là lý do dùng
- * `DO UPDATE` có chọn lọc thay vì `DO NOTHING`: sao kê tải lại thường đầy đủ hơn bản tải sớm.
+ * Dòng đã có (theo mã giao dịch) được GIỮ NGUYÊN nhãn, số tiền và mốc giờ — chỉ làm giàu mô tả và
+ * provenance (`seen_sources`). File nói KHÁC số tiền ⇒ giữ dòng cũ, báo mâu thuẫn. Người nhập phải
+ * chọn tài khoản ngân hàng khi sổ đã có tài khoản. Toàn bộ luật ở
+ * `lib/integrations/bank/statement-import.ts`; hành động này chỉ lo quyền, zod, kiểm toán, làm mới.
  */
 export async function importBankStatement(
   input: BankImportInput,
-): Promise<{ ok: true; inserted: number; updated: number; duplicates: number; labelled: number } | { error: string }> {
+  options?: BankImportOptions,
+): Promise<{ ok: true; inserted: number; updated: number; duplicates: number; labelled: number; conflicts: number; warnings: string[] } | { error: string }> {
   const g = await guard();
   if (g.error !== undefined) return { error: g.error };
   const parsedInput = importInputSchema.safeParse(input);
   if (!parsedInput.success) return { error: parsedInput.error.issues[0]?.message ?? "Không đọc được dữ liệu gửi lên" };
+  const parsedOptions = importOptionsSchema.safeParse(options ?? {});
+  if (!parsedOptions.success) return { error: parsedOptions.error.issues[0]?.message ?? "Tài khoản ngân hàng không hợp lệ" };
+
+  const db = await getDb();
+  // Tài khoản: phải là tài khoản có thật và chưa ngừng dùng. Sổ ĐÃ có tài khoản mà không chọn ⇒ từ
+  // chối — 80 dòng IMPORT trên production (13/09/2026) không biết mình thuộc tài khoản nào.
+  const accounts = await db.select({ id: schema.bankAccounts.id, status: schema.bankAccounts.status }).from(schema.bankAccounts);
+  const usable = accounts.filter((a) => a.status !== "DISABLED");
+  const bankAccountId = parsedOptions.data.bankAccountId;
+  if (bankAccountId) {
+    const chon = accounts.find((a) => a.id === bankAccountId);
+    if (!chon) return { error: "Không tìm thấy tài khoản ngân hàng đã chọn" };
+    if (chon.status === "DISABLED") return { error: "Tài khoản này đã ngừng dùng — chọn tài khoản khác hoặc bật lại ở tab Tài khoản" };
+  } else if (usable.length) {
+    return { error: "Chọn tài khoản ngân hàng mà sao kê này thuộc về" };
+  }
 
   let rows;
+  let filename = "";
   try {
     const source =
       typeof parsedInput.data === "string" ? parsedInput.data : Buffer.from(parsedInput.data.base64, "base64");
+    filename = typeof parsedInput.data === "string" ? "dán nội dung" : parsedInput.data.filename;
     const parsed = parseLedgerFile(source);
     if (!parsed.length) return { error: "Không tìm thấy giao dịch nào trong file" };
     rows = dedupeByRef(parsed.map(toBankRow));
@@ -85,42 +109,27 @@ export async function importBankStatement(
   }
   if (rows.rows.length > 20_000) return { error: "Tối đa 20.000 giao dịch mỗi lần nhập" };
 
-  const db = await getDb();
-  const refs = rows.rows.map((r) => r.bankRef);
-  const existing = new Set(
-    (await db.select({ ref: b.bankRef }).from(b).where(inArray(b.bankRef, refs))).map((r) => r.ref),
-  );
-
-  // Ghi theo mẻ để một sao kê vài nghìn dòng không dựng câu lệnh dài quá giới hạn tham số của driver.
-  const CHUNK = 500;
-  for (let i = 0; i < rows.rows.length; i += CHUNK) {
-    const chunk = rows.rows.slice(i, i + CHUNK);
-    await db
-      .insert(b)
-      .values(chunk.map((r) => ({ ...r, source: "IMPORT" as const })))
-      .onConflictDoUpdate({
-        target: b.bankRef,
-        set: {
-          // Chỉ làm giàu phần MÔ TẢ. Nhãn (`accounting_group`, `note`, `classified_by`) không đụng tới.
-          description: sql`excluded.description`,
-          counterparty: sql`excluded.counterparty`,
-          txnAt: sql`excluded.txn_at`,
-          amount: sql`excluded.amount`,
-          updatedAt: new Date(),
-        },
-      });
-  }
-  const inserted = rows.rows.filter((r) => !existing.has(r.bankRef)).length;
+  const kq = await importStatementRows(db, rows.rows, { bankAccountId, filename });
   const labelled = await applyRulesInternal();
   await audit({
     userId: g.user.id,
     userEmail: g.user.email,
     action: "BANK_STATEMENT_IMPORT",
     entity: "BANK_TRANSACTION",
-    detail: { inserted, updated: rows.rows.length - inserted, duplicatesInFile: rows.duplicates, labelledByRule: labelled },
+    detail: {
+      inserted: kq.inserted,
+      updated: kq.updated,
+      duplicatesInFile: rows.duplicates,
+      labelledByRule: labelled,
+      bankAccountId,
+      filename,
+      // Mâu thuẫn được GHI LẠI chứ không được giải quyết im lặng: người xem nhật ký thấy dòng nào, số nào.
+      conflicts: kq.conflicts.slice(0, 200),
+      conflictCount: kq.conflicts.length,
+    },
   });
   revalidateAll();
-  return { ok: true, inserted, updated: rows.rows.length - inserted, duplicates: rows.duplicates, labelled };
+  return { ok: true, inserted: kq.inserted, updated: kq.updated, duplicates: rows.duplicates, labelled, conflicts: kq.conflicts.length, warnings: kq.warnings };
 }
 
 
@@ -304,8 +313,12 @@ export async function deleteBankTransaction(id: string): Promise<{ ok: true } | 
   const [row] = await db.select().from(b).where(eq(b.id, id));
   if (!row) return { error: "Không tìm thấy giao dịch" };
   if (row.source !== "MANUAL") return { error: "Giao dịch từ sao kê là chứng từ ngân hàng, không xoá được. Gán nhóm “Không thuộc kinh doanh” nếu không muốn nó vào báo cáo." };
+  // Gỡ mối nối qua `removeLink` để chân đối ứng của một cặp chuyển nội bộ cũng được gỡ và ảnh chụp
+  // của nó dựng lại — xoá thẳng thì chân kia còn mang `linked_id` trỏ vào một dòng đã mất, và cặp
+  // "đã ghép" đó vẫn được đếm là đã ghép.
+  const goNoi = (await removeAllLinks(id)) + (await removeLinksToTarget("BANK_TRANSACTION", id));
   await db.delete(b).where(eq(b.id, id));
-  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_DELETE", entity: "BANK_TRANSACTION", entityId: id, before: { amount: row.amount, group: row.accountingGroup, description: row.description } });
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_DELETE", entity: "BANK_TRANSACTION", entityId: id, before: { amount: row.amount, group: row.accountingGroup, description: row.description, links: goNoi } });
   revalidateAll();
   return { ok: true };
 }

@@ -14,6 +14,13 @@
  *     khống một lần chuyển tiền; ghép một chiều thôi thì chân còn lại vẫn thổi phồng dòng tiền.
  *  4. **Mối nối luôn có người chịu trách nhiệm.** `confirmedBy` không bao giờ rỗng, và chỉ mức
  *     `EXACT` được để máy tự nối.
+ *  5. **Không nối vượt số tiền của CHỨNG TỪ.** Trần ở cả hai phía: dòng tiền (luật 1) và chứng từ.
+ *     Một khoản chi 20 triệu nhận 60 triệu tiền thật là ba dòng tiền cùng đánh dấu một nghĩa vụ đã
+ *     trả — sổ nghĩa vụ nói "xong" trong khi hai dòng kia thật ra trả cho khoản khác chưa ai ghi.
+ *     Ngoại lệ duy nhất là kỳ lương (không có một con số để tra).
+ *  6. **Kiểm rồi ghi trong MỘT giao dịch, khoá dòng tiền bằng `FOR UPDATE`.** Hai người (hay nút
+ *     "tự nối" chạy hai lần) cùng nối một dòng tiền: cả hai đọc "còn 30 triệu", cả hai ghi, và dòng
+ *     tiền bị nối 60 triệu — luật 1 bị vượt mà không ai vi phạm ở mức mã. Khoá là cách duy nhất.
  *
  * NỐI KHÔNG PHẢI GHI NHẬN. Không hàm nào ở đây tạo chi phí, doanh thu, hay đổi kết quả đơn. Tệp này
  * nằm ngoài `lib/queries` vì nó GHI; quyền, zod và `audit()` vẫn thuộc về Server Action gọi nó
@@ -22,7 +29,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { LINK_AUTO_ACTOR, LINK_TARGET_LABEL, type LinkConfidence, type LinkMethod, type LinkTargetType } from "@/lib/constants/finance-truth";
-import { targetExists, txnAllocation } from "@/lib/queries/finance-linkage";
+import { settledAmountByTarget, targetAmount, targetExists, txnAllocation } from "@/lib/queries/finance-linkage";
 
 const b = schema.bankTransactions;
 const l = schema.bankTransactionLinks;
@@ -48,11 +55,27 @@ export type LinkResult = { ok: true; id: string; amount: number } | { error: str
  * vẫn nằm trong dòng tiền kinh doanh và cùng một đồng vẫn bị đếm một lần thừa.
  */
 export async function createLink(input: LinkInput, dbIn?: Db): Promise<LinkResult> {
-  const db = dbIn ?? (await getDb());
   const confirmedBy = input.confirmedBy.trim();
   if (!confirmedBy) return { error: "Mối nối phải có người xác nhận" };
+  const root = dbIn ?? (await getDb());
+  // Kiểm và ghi trong MỘT giao dịch (luật 6). `dbIn` đã là một giao dịch thì đây là savepoint lồng.
+  return root.transaction((tx) => createLinkInTx(input, confirmedBy, tx as unknown as Db));
+}
 
-  const [txn] = await db.select({ id: b.id, amount: b.amount }).from(b).where(eq(b.id, input.txnId));
+async function createLinkInTx(input: LinkInput, confirmedBy: string, db: Db): Promise<LinkResult> {
+  // KHOÁ dòng tiền trước khi đọc phần còn lại: hai lượt nối song song phải xếp hàng, không cùng
+  // đọc một con số "còn lại" rồi cùng ghi. Chân kia của chuyển nội bộ cũng khoá — theo THỨ TỰ MÃ để
+  // hai lượt ghép (A→B) và (B→A) không khoá chéo nhau.
+  const khoa = async (ids: string[]) => {
+    const rows: { id: string; amount: number }[] = [];
+    for (const id of [...new Set(ids)].sort()) {
+      const [r] = await db.select({ id: b.id, amount: b.amount }).from(b).where(eq(b.id, id)).for("update");
+      if (r) rows.push({ id: r.id, amount: Number(r.amount) });
+    }
+    return rows;
+  };
+  const daKhoa = await khoa(input.targetType === "BANK_TRANSACTION" ? [input.txnId, input.targetId] : [input.txnId]);
+  const txn = daKhoa.find((r) => r.id === input.txnId);
   if (!txn) return { error: "Không tìm thấy giao dịch" };
 
   if (!(await targetExists(input.targetType, input.targetId, db))) {
@@ -70,19 +93,37 @@ export async function createLink(input: LinkInput, dbIn?: Db): Promise<LinkResul
   // ── Chuyển nội bộ: hai chân phải NGƯỢC CHIỀU ──
   let doiUng: { id: string; amount: number } | null = null;
   if (input.targetType === "BANK_TRANSACTION") {
-    const [kia] = await db.select({ id: b.id, amount: b.amount }).from(b).where(eq(b.id, input.targetId));
+    const kia = daKhoa.find((r) => r.id === input.targetId);
     if (!kia) return { error: "Không tìm thấy giao dịch ở chân kia" };
-    if (Math.sign(Number(kia.amount)) === Math.sign(Number(txn.amount))) {
+    if (Math.sign(kia.amount) === Math.sign(txn.amount)) {
       return { error: "Hai chân của một lần chuyển nội bộ phải ngược chiều (một ra, một vào)" };
     }
-    doiUng = { id: kia.id, amount: Number(kia.amount) };
+    doiUng = { id: kia.id, amount: kia.amount };
   }
 
-  // Số tiền: mặc định là phần còn lại; có chuyển nội bộ thì lấy phần nhỏ hơn của hai chân.
-  const yeuCau = input.amount === undefined ? cur.remaining : Math.abs(Math.round(input.amount));
+  // ── Trần phía CHỨNG TỪ (luật 5): chứng từ đã được phủ bao nhiêu, còn nhận được bao nhiêu ──
+  // Chân kia của chuyển nội bộ tự có trần riêng (`kiaCon` bên dưới) nên không tra ở đây.
+  let chungTuCon: number | null = null;
+  if (input.targetType !== "BANK_TRANSACTION") {
+    const tran = await targetAmount(input.targetType, input.targetId, db);
+    if (tran !== null) {
+      const daPhu = (await settledAmountByTarget(input.targetType, [input.targetId], db)).get(input.targetId) ?? 0;
+      chungTuCon = tran - daPhu;
+      if (chungTuCon <= 0) {
+        return { error: `${LINK_TARGET_LABEL[input.targetType]} này đã được tiền thật phủ đủ ${daPhu.toLocaleString("vi-VN")} ₫, không nhận thêm mối nối` };
+      }
+    }
+  }
+
+  // Số tiền: mặc định là phần còn lại NHỎ HƠN giữa dòng tiền và chứng từ; khai số thì phải nằm trong
+  // cả hai trần — vượt là TỪ CHỐI, không cắt bớt im lặng (xem `remainingCapacity`).
+  const yeuCau = input.amount === undefined ? Math.min(cur.remaining, chungTuCon ?? cur.remaining) : Math.abs(Math.round(input.amount));
   if (yeuCau <= 0) return { error: "Số tiền phân bổ phải lớn hơn 0" };
   if (yeuCau > cur.remaining) {
     return { error: `Chỉ còn ${cur.remaining.toLocaleString("vi-VN")} ₫ chưa nối; không thể nối ${yeuCau.toLocaleString("vi-VN")} ₫` };
+  }
+  if (chungTuCon !== null && yeuCau > chungTuCon) {
+    return { error: `${LINK_TARGET_LABEL[input.targetType]} chỉ còn ${chungTuCon.toLocaleString("vi-VN")} ₫ chưa được phủ; không thể nối ${yeuCau.toLocaleString("vi-VN")} ₫` };
   }
   let amount = yeuCau;
   if (doiUng) {
@@ -148,6 +189,21 @@ export async function removeLink(linkId: string, dbIn?: Db): Promise<{ ok: true;
 export async function removeAllLinks(txnId: string, dbIn?: Db): Promise<number> {
   const db = dbIn ?? (await getDb());
   const rows = await db.select({ id: l.id }).from(l).where(eq(l.txnId, txnId));
+  for (const r of rows) await removeLink(r.id, db);
+  return rows.length;
+}
+
+/**
+ * Gỡ MỌI mối nối TRỎ TỚI một chứng từ — gọi khi chứng từ đó bị xoá.
+ *
+ * Xoá khoản chi mà để lại mối nối là để lại một dòng tiền "đã đối chiếu" với một thứ không còn tồn
+ * tại: nó biến mất khỏi hàng đợi "chưa nối", ảnh chụp `linked_id` trỏ vào khoảng không, và sổ nghĩa
+ * vụ vẫn cộng số tiền đó vào "đã trả". Đi qua `removeLink` để chuyển nội bộ vẫn gỡ đủ hai chân và
+ * ảnh chụp mối nối chính được dựng lại.
+ */
+export async function removeLinksToTarget(targetType: LinkTargetType, targetId: string, dbIn?: Db): Promise<number> {
+  const db = dbIn ?? (await getDb());
+  const rows = await db.select({ id: l.id }).from(l).where(and(eq(l.targetType, targetType), eq(l.targetId, targetId)));
   for (const r of rows) await removeLink(r.id, db);
   return rows.length;
 }

@@ -222,6 +222,8 @@ export async function testFinanceInvariants(db: Db) {
   assert.ok(cau.reasons.length > 0, "9. còn phần chưa giải thích thì phải nói CỤ THỂ vì sao");
 
   // ══════════ 10. GIAO DỊCH CHƯA PHÂN LOẠI VẪN ĐƯỢC GIỮ, KHÔNG BIẾN THÀNH 0 HAY NHÓM GIẢ ══════════
+  clearMemo();
+  const truocUnknown = await getCashLedger(KY);
   await db.insert(b).values(txn("inv-txn-unknown", -3_300_000, "2027-06-22", "UNCLASSIFIED", "inv-acc-a"));
   clearMemo();
   const soCuoi = await getCashLedger(KY);
@@ -229,8 +231,12 @@ export async function testFinanceInvariants(db: Db) {
   assert.ok(soCuoi.unclassified.amount >= 3_300_000, "10. và số tiền của nó phải hiện ra, không thành 0");
   const [conNguyen] = await db.select({ g: b.accountingGroup }).from(b).where(eq(b.id, "inv-txn-unknown"));
   assert.equal(conNguyen.g, "UNCLASSIFIED", "10. KHÔNG đường tự động nào được gán cho nó một nhóm giả");
-  // Chưa phân loại vẫn nằm trong dòng tiền kinh doanh: tiền đã thật sự rời tài khoản.
-  assert.ok(soCuoi.businessOutflow >= 3_300_000, "10. tiền đã ra là đã ra — chưa phân loại không phải lý do bỏ nó khỏi dòng tiền");
+  // Tiền đã ra là đã ra — nhưng CHƯA BIẾT không phải ĐÃ BIẾT: nó nằm trong tổng tiền ra (`outflow`)
+  // và trong `unclassified`, KHÔNG nằm trong `businessOutflow` (con số ra quyết định). Bản trước cộng
+  // 3,3 triệu chưa ai xem xét vào "tiền ra kinh doanh" như thể đã được xác nhận là chi phí vận hành.
+  assert.equal(soCuoi.outflow - truocUnknown.outflow, 3_300_000, "10. tiền đã ra là đã ra — tổng tiền ra vẫn gồm dòng chưa phân loại");
+  assert.equal(soCuoi.businessOutflow, truocUnknown.businessOutflow, "10. nhưng KHÔNG được lẫn vào tiền ra kinh doanh: chưa phân loại là chưa biết");
+  assert.equal(soCuoi.unclassified.amount - truocUnknown.unclassified.amount, 3_300_000, "10. nó đứng riêng ở 'chưa phân loại' để hiện cạnh headline");
 
   // ══════════ 10b. "ĐÃ TRẢ CHƯA" PHẢI ĐỌC BẢNG NỐI, KHÔNG ĐỌC ẢNH CHỤP ══════════
   //

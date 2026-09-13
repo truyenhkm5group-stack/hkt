@@ -70,21 +70,21 @@ export async function BankTransactionsTab({ raw, period, canWrite }: { raw: Sear
         <MetricCard
           label={`Tiền vào · ${period.label.toLowerCase()}`}
           value={formatVND(summary.businessIn, { compact: true })}
-          note={summary.businessIn !== summary.moneyIn ? `Đã loại ${formatVND(summary.moneyIn - summary.businessIn, { compact: true })} chuyển nội bộ / vốn vay` : `${formatNumber(summary.count)} giao dịch`}
+          note={summary.businessIn !== summary.moneyIn ? `Đã loại ${formatVND(summary.moneyIn - summary.businessIn, { compact: true })} chuyển nội bộ / vốn vay / chưa phân loại` : `${formatNumber(summary.count)} giao dịch`}
           icon={ArrowDownLeft}
           tone="green"
         />
         <MetricCard
           label="Tiền ra"
           value={formatVND(summary.businessOut, { compact: true })}
-          note={summary.businessOut !== summary.moneyOut ? `Đã loại ${formatVND(summary.moneyOut - summary.businessOut, { compact: true })} chuyển nội bộ / trả gốc` : "Chi thực từ tài khoản"}
+          note={summary.businessOut !== summary.moneyOut ? `Đã loại ${formatVND(summary.moneyOut - summary.businessOut, { compact: true })} chuyển nội bộ / trả gốc / chưa phân loại` : "Chi thực từ tài khoản"}
           icon={ArrowUpRight}
           tone="rose"
         />
         <MetricCard
           label="Chênh lệch"
           value={<span className={summary.businessNet >= 0 ? "text-success" : "text-destructive"}>{formatVND(summary.businessNet, { compact: true })}</span>}
-          note="Tiền vào − tiền ra của dòng tiền kinh doanh. Đây KHÔNG phải lợi nhuận: tiền hàng trả trước và tiền COD về trễ đều rơi vào kỳ khác."
+          note={`Tiền vào − tiền ra của dòng tiền kinh doanh${summary.unclassified ? ` · còn ${formatNumber(summary.unclassified)} dòng · ${formatVND(summary.unclassifiedAmount, { compact: true })} chưa phân loại, chưa tính vào đây` : ""}. Đây KHÔNG phải lợi nhuận: tiền hàng trả trước và tiền COD về trễ đều rơi vào kỳ khác.`}
           icon={ReceiptText}
           tone={summary.businessNet >= 0 ? "green" : "rose"}
         />

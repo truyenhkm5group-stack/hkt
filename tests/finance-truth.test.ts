@@ -8,7 +8,8 @@ import { parseSepayPayload } from "@/lib/integrations/bank/sepay";
 import { ingestSepayTransaction } from "@/lib/integrations/bank/sepay-ingest";
 import { toBankRow } from "@/lib/integrations/bank/statement";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
-import { createLink, removeLink } from "@/lib/finance/linkage";
+import { createLink, removeLink, removeLinksToTarget } from "@/lib/finance/linkage";
+import { getMatchOverview } from "@/lib/queries/bank-match";
 import { settledAmountByTarget, txnAllocation } from "@/lib/queries/finance-linkage";
 import { getCashLedger, getObligationLedger } from "@/lib/queries/finance-ledger";
 import { getProfitCashBridge } from "@/lib/queries/profit-cash-bridge";
@@ -229,7 +230,12 @@ export async function testFinanceTruth(db: Db) {
     description: "CUSTOMER thanh toan phan mem", counterparty: "CONG TY PM", bankRef: "FT27142000111", categoryCode: "", note: "",
   });
   await db.insert(b).values({ ...dongFile, id: "ft-txn-file", source: "IMPORT", accountingGroup: "SOFTWARE", classifiedBy: "ketoan@shop.vn", bankAccountId: "ft-acc-a" });
-  await createLink({ txnId: "ft-txn-file", targetType: "EXPENSE", targetId: "ft-exp-soft-b", amount: 3_000_000, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  // Nối vào một khoản chi CÒN CHỖ. Bản trước nối 3tr vào Phần mềm B (10tr) dù nó đã được ft-txn-multi
+  // phủ trọn 10tr ở nhóm 6 — đúng kiểu nối vượt phía chứng từ mà nhóm 13 nay khoá lại.
+  // Nhóm ĐÓNG GÓI để không chạm mốc "phần mềm = 30 triệu" mà nhóm này khoá ngay bên dưới.
+  await db.insert(schema.expenses).values({ id: "ft-exp-pack-file", category: "PACKAGING", description: "Thùng đóng gói tháng 5", amount: 3_000_000, occurredAt: d("2027-05-21"), costSource: "MANUAL" });
+  const noiFile = await createLink({ txnId: "ft-txn-file", targetType: "EXPENSE", targetId: "ft-exp-pack-file", amount: 3_000_000, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  assert.ok("ok" in noiFile, "8. nối được dòng nhập từ file với khoản chi còn chỗ");
 
   const goiTin = parseSepayPayload({
     id: 770001, gateway: "MBBank", transactionDate: "2027-05-22 10:15:00", accountNumber: "9990001111", subAccount: null,
@@ -305,10 +311,51 @@ export async function testFinanceTruth(db: Db) {
   const [sauGo] = await db.select({ t: b.linkedType }).from(b).where(eq(b.id, "ft-txn-tf-out"));
   assert.equal(sauGo.t, "", "12. ảnh chụp mối nối chính được dọn theo");
 
+  // ═══════════ 13. TRẦN PHÍA CHỨNG TỪ: MỘT KHOẢN CHI KHÔNG NHẬN QUÁ SỐ TIỀN CỦA NÓ ═══════════
+  //
+  // Luật 1 chặn dòng tiền bị nối vượt; nhưng một khoản chi 5 triệu vẫn có thể bị BA dòng tiền cùng
+  // nối 5 triệu — sổ nghĩa vụ báo "đã trả" trong khi hai dòng kia thật ra trả cho khoản khác.
+  await db.insert(schema.expenses).values({ id: "ft-exp-cap", category: "PACKAGING", description: "Thùng carton", amount: 5_000_000, occurredAt: d("2027-05-20"), costSource: "MANUAL" });
+  await db.insert(b).values([
+    txn("ft-txn-over-1", -8_000_000, "2027-05-21", "PACKAGING", "ft-acc-a"),
+    txn("ft-txn-over-2", -5_000_000, "2027-05-22", "PACKAGING", "ft-acc-a"),
+  ]);
+  const vuaKhit = await createLink({ txnId: "ft-txn-over-1", targetType: "EXPENSE", targetId: "ft-exp-cap", confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  assert.ok("ok" in vuaKhit, "13. nối được khi chứng từ còn chỗ");
+  assert.equal(vuaKhit.amount, 5_000_000, "13. bỏ trống số tiền ⇒ nối phần NHỎ HƠN giữa dòng tiền còn lại (8tr) và chứng từ còn nhận (5tr)");
+  const vuotChungTu = await createLink({ txnId: "ft-txn-over-2", targetType: "EXPENSE", targetId: "ft-exp-cap", confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  assert.ok("error" in vuotChungTu, "13. chứng từ đã được phủ đủ thì mối nối thứ hai bị TỪ CHỐI, không cắt bớt im lặng");
+  const vuotMotPhan = await createLink({ txnId: "ft-txn-over-2", targetType: "EXPENSE", targetId: "ft-exp-rent", amount: 1, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  assert.ok("error" in vuotMotPhan, "13. mặt bằng 20tr đã phủ 20tr (nhóm 5) ⇒ thêm 1đ cũng bị từ chối");
+  assert.equal((await settledAmountByTarget("EXPENSE", ["ft-exp-cap"], db)).get("ft-exp-cap"), 5_000_000, "13. chứng từ không bao giờ được phủ vượt số tiền của nó");
+  // Kỳ lương KHÔNG có trần (bảng Lương là cấu hình, không có một con số để tra) — luật cũ giữ nguyên.
+  const luongThem = await createLink({ txnId: "ft-txn-over-2", targetType: "PAYROLL_PERIOD", targetId: "2027-04", amount: 1_000_000, confidence: "MANUAL", method: "MANUAL", confirmedBy: "ketoan@shop.vn" });
+  assert.ok("ok" in luongThem, "13. kỳ lương không bị trần chứng từ chặn");
+
+  // ═══════════ 14. GỢI Ý ĐỐI KHỚP KHÔNG ĐƯA CHỨNG TỪ ĐÃ PHỦ ĐỦ LÀM ỨNG VIÊN ═══════════
+  //
+  // Phần mềm A (20tr) đã được ft-txn-multi phủ trọn ở nhóm 6. Một dòng tiền mới −20tr có mã chứng
+  // từ trong nội dung sẽ khớp EXACT với nó và nút "tự nối" nối thêm lần nữa — createLink chặn được,
+  // nhưng gợi ý sai vẫn là gợi ý sai và người đọc sẽ đi xác nhận một thứ không nên tồn tại.
+  await db.insert(b).values(txn("ft-txn-exact", -20_000_000, "2027-05-23", "SOFTWARE", "ft-acc-a", { description: "thanh toan ft-exp-soft-a" }));
+  clearMemo();
+  const goiY = await getMatchOverview(500);
+  const chiTro = goiY.suggestions.filter((s) => s.target?.id === "ft-exp-soft-a" || s.others.some((o) => o.id === "ft-exp-soft-a"));
+  assert.equal(chiTro.length, 0, "14. chứng từ đã phủ đủ KHÔNG còn là ứng viên đối khớp");
+  const dongExact = goiY.suggestions.find((s) => s.txnId === "ft-txn-exact");
+  assert.ok(dongExact && dongExact.target?.id !== "ft-exp-soft-a", "14. dòng tiền có mã chứng từ đã đủ vẫn phải chờ người quyết, không tự khớp EXACT vào nó");
+
+  // ═══════════ 15. XOÁ CHỨNG TỪ THÌ MỐI NỐI TRỎ TỚI NÓ PHẢI ĐI THEO ═══════════
+  const goTheo = await removeLinksToTarget("EXPENSE", "ft-exp-cap", db);
+  assert.equal(goTheo, 1, "15. gỡ đúng mối nối trỏ tới chứng từ");
+  assert.equal((await txnAllocation("ft-txn-over-1", db)).links.length, 0, "15. dòng tiền không còn 'đã đối chiếu' với một thứ đã mất");
+  const [anhChupOver] = await db.select({ t: b.linkedType, i: b.linkedId }).from(b).where(eq(b.id, "ft-txn-over-1"));
+  assert.equal(anhChupOver.t, "", "15. ảnh chụp mối nối chính được dọn — không trỏ vào khoảng không");
+
   // ══════════ DỌN ══════════
   await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [] });
   await db.delete(l).where(and(sql`true`, sql`${l.txnId} like 'ft-%'`));
   await donDep(db);
-  console.log("✓ Sự thật tài chính & mối nối: 12 nhóm");
+  console.log("✓ Sự thật tài chính & mối nối: 15 nhóm (thêm trần phía chứng từ · ứng viên đã phủ đủ bị loại · xoá chứng từ gỡ mối nối)");
 }

@@ -86,7 +86,7 @@ lib/actions/                         server actions theo module
 lib/integrations/pancake/            client.ts · sync.ts · mapper.ts · webhook.ts · pages.ts (Pages API: chat, reply_inbox)
 lib/integrations/viettelpost/        client.ts (partner API) · sync.ts · statement.ts (parse Excel/CSV) · statement-db.ts (ghi DB)
 lib/integrations/facebook/           client.ts · sync.ts (chi tiêu) · billing.ts (ngưỡng thanh toán) · mapping.ts · match.ts
-lib/integrations/bank/               import.ts · ledger.ts (sao kê MB Bank → chi phí vận hành)
+lib/integrations/bank/               statement.ts · sepay*.ts (sao kê / SePay → sổ ngân hàng) · import.ts · ledger.ts (chỉ cho script/ops `import-bank-ledger`; UI đã gỡ)
 lib/alerts/                          rules.ts (quy tắc cảnh báo) · risk.ts · lark.ts · telegram.ts · config.ts
 lib/cs/                              detect.ts · chat-detect.ts · failed-delivery.ts · phone-verify.ts
 lib/landing/                         sheet.ts (đọc Google Sheet, ghép đơn POS) · pos.ts (tạo đơn Pancake)
@@ -245,7 +245,7 @@ Cảnh báo `ORDER_INCOMPLETE` (đơn NEW/WAITING/CONFIRMED/PACKING/READY_TO_SHI
 | Viettel Post Excel / bảng kê | Danh sách vận đơn (xlsx/csv), bảng kê tổng hợp (dán bảng) & chi tiết (file) | `statement.ts`, `statement-db.ts`, `app/(dashboard)/cod/statement-dialog.tsx` |
 | Facebook Marketing API | System User token; chi tiêu theo ngày × chiến dịch mọi tài khoản trong BM; ngưỡng thanh toán; ad index (ad_id → page/campaign) | `lib/integrations/facebook/*` |
 | Google Sheets | CSV export công khai (link "Bất kỳ ai có liên kết – Người xem") | `lib/landing/sheet.ts` |
-| MB Bank | nhập sao kê JSON/CSV thủ công → chi phí vận hành | `lib/integrations/bank/*` |
+| MB Bank | nhập sao kê JSON/CSV/XLSX → sổ ngân hàng `/bank` (phân loại → nối chứng từ; KHÔNG tạo chi phí). Script/ops `import-bank-ledger` là đường tường minh duy nhất còn ghi khoản chi, gắn `cost_source = BANK_IMPORT` | `lib/integrations/bank/*` |
 | Lark Suite / Telegram | Custom Bot webhook gửi cảnh báo (URL lưu trong `settings.alerts.config`) | `lib/alerts/lark.ts`, `telegram.ts` |
 
 Đã thử và **loại bỏ**: tự động đăng nhập web viettelpost.vn (SSO `id.viettelpost.vn`, supperapp endpoints trả `EXPIRED_TOKEN`); OIDC password grant thất bại. Không quay lại hướng này trừ khi Viettel Post mở API cho mã khách của shop.

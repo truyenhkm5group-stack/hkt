@@ -104,6 +104,29 @@ export async function settledTotalByType(targetType: LinkTargetType, from: Date 
 }
 
 /**
+ * SỐ TIỀN CỦA CHỨNG TỪ ĐÍCH — trần cho phía chứng từ khi nối.
+ *
+ * `null` = không có trần: kỳ lương không có một con số duy nhất để tra (bảng Lương là cấu hình), và
+ * chứng từ không tồn tại cũng trả `null` để `targetExists` là nơi duy nhất nói "không có thật".
+ * Phía chứng từ cũng phải có trần: một khoản chi 20 triệu mà được nối 60 triệu tiền thật là ba dòng
+ * tiền cùng nhận một nghĩa vụ — sổ nghĩa vụ báo "đã trả" trong khi hai dòng kia thật ra trả cho
+ * khoản khác chưa ai ghi.
+ */
+export async function targetAmount(targetType: LinkTargetType, targetId: string, dbIn?: Db): Promise<number | null> {
+  if (targetType === "PAYROLL_PERIOD") return null;
+  const db = dbIn ?? (await getDb());
+  const one = async (rows: Promise<{ amount: unknown }[]>) => {
+    const [r] = await rows;
+    return r ? Math.abs(Number(r.amount ?? 0)) : null;
+  };
+  if (targetType === "EXPENSE") return one(db.select({ amount: schema.expenses.amount }).from(schema.expenses).where(eq(schema.expenses.id, targetId)).limit(1));
+  if (targetType === "COD_BATCH") return one(db.select({ amount: schema.codBatches.totalAmount }).from(schema.codBatches).where(eq(schema.codBatches.id, targetId)).limit(1));
+  if (targetType === "STOCK_RECEIPT") return one(db.select({ amount: schema.stockReceipts.totalCost }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
+  if (targetType === "AD_SPEND") return one(db.select({ amount: schema.adSpends.spend }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
+  return one(db.select({ amount: b.amount }).from(b).where(eq(b.id, targetId)).limit(1));
+}
+
+/**
  * Chứng từ đích có thật không.
  *
  * `PAYROLL_PERIOD` không có bảng để tra — bảng Lương là cấu hình. Khoá tự nhiên là tháng, nên

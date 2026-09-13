@@ -149,14 +149,11 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/** Bấm thử URL trên trình duyệt phải nói được endpoint sống hay chưa cấu hình. */
+/**
+ * Bấm thử URL trên trình duyệt chỉ cần biết endpoint SỐNG. Bản trước in ra cả phương thức xác thực
+ * và việc đã/chưa cấu hình secret cho BẤT KỲ AI gọi GET — đó là bản đồ cho người muốn giả gói tin.
+ * Trạng thái cấu hình xem ở trang Kết nối dữ liệu (đã đăng nhập), không phải ở một URL công khai.
+ */
 export async function GET() {
-  return NextResponse.json({
-    success: true,
-    message: env.sepay.webhookSecret
-      ? "Webhook SePay sẵn sàng (HMAC-SHA256)."
-      : env.sepay.webhookApiKey
-        ? "Webhook SePay sẵn sàng (API key). Nên chuyển sang HMAC-SHA256 cho production."
-        : "Chưa cấu hình SEPAY_WEBHOOK_SECRET — mọi gói tin sẽ bị từ chối 401.",
-  });
+  return NextResponse.json({ success: true });
 }
