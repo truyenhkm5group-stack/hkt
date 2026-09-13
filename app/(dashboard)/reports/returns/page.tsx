@@ -37,6 +37,7 @@ import { logisticsPerformance } from "@/lib/queries/logistics";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
+import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
@@ -202,6 +203,37 @@ export default async function ReturnRatePage({
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
       </section>
+
+      {/*
+        ───────── "ĐANG GIAO" TÁCH RA THÌ MỚI ĐỌC ĐƯỢC ─────────
+
+        Một con số "đang giao 120 đơn" không nói gì cho người quyết định. "90 đang luân chuyển ·
+        30 chờ phát lại" thì nói rất nhiều: hai nhóm đó có triển vọng khác hẳn nhau, và đó chính
+        là lý do mô hình cân TỪNG đơn thay vì nhân tổng doanh số với một tỷ lệ.
+
+        Mỗi dòng khai luôn cỡ mẫu và độ tin cậy của xác suất nó đang dùng. Nhóm chưa đủ mẫu in
+        "chưa đủ mẫu" và nằm NGOÀI phần ước tính — không bịa một con số trông như đã đo.
+      */}
+      {pj && pj.byState.length ? (
+        <SectionCard
+          title={`Đang giao: ${formatNumber(pj.active)} đơn, tách theo trạng thái Viettel Post`}
+          description={`Mỗi nhóm mang xác suất giao được của riêng nó, học từ vận đơn đã kết thúc. Đây là toàn bộ phần mà con số ước tính ${summary.expectedSuccessRate === null ? "" : `${summary.expectedSuccessRate.toFixed(1)}% `}đang dự báo.`}
+        >
+          <div className="flex flex-wrap gap-2 p-3">
+            {pj.byState.map((x) => (
+              <div key={x.substate} className="rounded-lg border border-hairline px-3 py-2">
+                <div className="text-[12.5px] font-medium">{x.label}</div>
+                <div className="numeric text-lg font-semibold">{formatNumber(x.orders)}</div>
+                <div className="text-[10.5px] text-muted-foreground">
+                  {x.p === null
+                    ? `chưa đủ mẫu (${formatNumber(x.sample)} vận đơn) — ngoài phần ước tính`
+                    : `${(x.p * 100).toFixed(1)}% giao được · học từ ${formatNumber(x.sample)} vận đơn · ${CONFIDENCE_LABEL[x.confidence as ProbabilityConfidence] ?? x.confidence}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
 
       {/* ───────── Hiệu suất giao vận tính từ hành trình Viettel Post ───────── */}
       <SectionCard

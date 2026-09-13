@@ -119,6 +119,31 @@ export async function testProjectedMetricsConsistent() {
   // Đơn chưa lần được mã KHÔNG bị nhét vào một mã nào đó cho đủ bảng.
   assert.ok(m.unmappedOrders >= 0 && m.totalOrders >= m.unmappedOrders);
   assert.equal(m.version, PROJECTED_GTC_VERSION);
+
+  /*
+    CON SỐ TOÀN SHOP PHẢI Ở GRAIN ĐƠN, KHÔNG PHẢI TỔNG CÁC DÒNG THEO MÃ.
+
+    Cộng các dòng theo mã sai ở CẢ HAI đầu phân số, và hai cái sai không triệt tiêu nhau:
+      · đơn hai mã hàng được cộng cho cả hai mã — đúng cho cột theo mã, nhưng làm mẫu số lớn hơn
+        số đơn thật;
+      · đơn chưa lần được về mã nào bị BỎ HẲN khỏi các dòng theo mã.
+    Nên "đang giao N đơn" cộng kiểu đó có thể vừa thừa vừa thiếu cùng lúc.
+  */
+  const od = m.orderLevel;
+  const dangGiao = Object.values(od.activeByState).reduce<number>((a, n) => a + (n ?? 0), 0);
+  assert.equal(dangGiao, od.active, "phân rã trạng thái phải cộng đúng bằng số đơn đang giao");
+  assert.equal(od.eligibleSent, od.deliveredActual + od.failedActual + od.active, "ở grain đơn cũng không rổ nào được rơi ra");
+  /*
+    Mẫu số ở grain đơn phải là ĐÚNG số đơn trong cohort — đơn chưa lần được về mã nào VẪN nằm
+    trong đó. Bỏ chúng ra là im lặng thu hẹp cohort: tỷ lệ vẫn ra một con số trông bình thường,
+    chỉ là nó nói về một tập đơn nhỏ hơn tập mà người đọc tưởng mình đang xem.
+  */
+  assert.equal(od.eligibleSent, m.totalOrders, "mỗi đơn trong cohort đếm ĐÚNG MỘT LẦN, kể cả đơn chưa lần được mã");
+  assert.ok(od.unmodelledActive >= 0 && od.unmodelledActive <= od.active, "phần chưa dự báo được là một TẬP CON của phần đang giao");
+  assert.ok(od.projectedDelivered >= od.deliveredActual - 1e-9, "ước tính không được THẤP HƠN số đã giao thật");
+  assert.ok(od.projectedDelivered <= od.eligibleSent + 1e-9, "ước tính không được vượt quá số đơn đã gửi");
+  if (od.projectedRate !== null) assert.ok(od.projectedRate >= 0 && od.projectedRate <= 100);
+  else assert.equal(od.eligibleSent, 0, "chỉ được CHƯA ĐO ĐƯỢC khi cohort rỗng — có đơn mà trả null là đang giấu số");
 }
 
 /* ───── 6 · Rủi ro tồn kho là CHI PHÍ CỦA KỲ, không phải của lô nhập ───── */
@@ -289,10 +314,12 @@ export async function testCrossReportParity(db: Db) {
   const { getReturnRateSummary, getReturnRateByVariant } = await import("@/lib/queries/return-rate");
   const tong = await getReturnRateSummary(ky, "", "SHIPPED");
   const hopDongGui = await getProjectedDeliveryMetrics(ky, "SHIPPED", "PRODUCT");
-  const tuSo = hopDongGui.rows.reduce((a, r) => a + r.projectedDelivered, 0);
-  const mauSo = hopDongGui.rows.reduce((a, r) => a + r.eligibleSent, 0);
-  const mongDoi = mauSo > 0 ? Math.round((tuSo / mauSo) * 1000) / 10 : null;
-  assert.equal(tong.expectedSuccessRate, mongDoi, "thẻ “Tỷ lệ giao thành công” phải là ĐÚNG con số của hợp đồng ở cùng mốc, không phải một phép trộn riêng");
+  /*
+    So với con số Ở GRAIN ĐƠN, không phải tổng các dòng theo mã. Cộng các dòng theo mã vừa thừa
+    (đơn nhiều mã cộng cho mọi mã) vừa thiếu (đơn chưa lần được mã bị bỏ) — đúng phép cộng đó đã
+    làm bài này đỏ với 43,1% trong khi sự thật là 50%.
+  */
+  assert.equal(tong.expectedSuccessRate, hopDongGui.orderLevel.projectedRate, "thẻ “Tỷ lệ giao thành công” phải là ĐÚNG con số của hợp đồng ở cùng mốc, không phải một phép trộn riêng");
   assert.ok(tong.projection !== null && tong.projection.version === PROJECTED_GTC_VERSION, "thẻ phải mang theo phiên bản hợp đồng để màn hình khai ra");
 
   /* ─── Grain MẪU MÃ: cùng hợp đồng, dòng của mã fixture phải khớp ─── */
@@ -349,8 +376,8 @@ export async function testBasisFlowsThrough(db: Db) {
   const { getReturnRateSummary } = await import("@/lib/queries/return-rate");
   const gui = await getReturnRateSummary(ky, "", "SHIPPED");
   const chot = await getReturnRateSummary(ky, "", "ORDERED");
-  assert.equal(gui.projection?.eligibleSent, (await getProjectedDeliveryMetrics(ky, "SHIPPED", "PRODUCT")).rows.reduce((a, r) => a + r.eligibleSent, 0));
-  assert.equal(chot.projection?.eligibleSent, (await getProjectedDeliveryMetrics(ky, "ORDERED", "PRODUCT")).rows.reduce((a, r) => a + r.eligibleSent, 0));
+  assert.equal(gui.projection?.eligibleSent, (await getProjectedDeliveryMetrics(ky, "SHIPPED", "PRODUCT")).orderLevel.eligibleSent);
+  assert.equal(chot.projection?.eligibleSent, (await getProjectedDeliveryMetrics(ky, "ORDERED", "PRODUCT")).orderLevel.eligibleSent);
   assert.notEqual(gui.projection?.eligibleSent, chot.projection?.eligibleSent, "đổi mốc phải đổi cohort — ghim cứng thì hai con số này bằng nhau");
 }
 

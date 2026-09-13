@@ -262,6 +262,35 @@ export type ProjectedMetrics = {
   multiCodeOrders: number;
   totalOrders: number;
   probabilities: StateProbability[];
+  /**
+   * ═══ CON SỐ TOÀN SHOP ĐƯỢC TÍNH Ở GRAIN ĐƠN, KHÔNG PHẢI BẰNG CÁCH CỘNG CÁC DÒNG THEO MÃ ═══
+   *
+   * Cộng các dòng theo mã ra một tỷ lệ SAI ở cả hai đầu của phân số, và hai cái sai không triệt
+   * tiêu nhau:
+   *   · đơn hai mã hàng được cộng cho CẢ HAI mã (đúng cho cột theo mã: một đơn hỏng thì cả hai mã
+   *     đều bị ảnh hưởng — nhưng nó làm mẫu số lớn hơn số đơn thật);
+   *   · đơn chưa lần được về mã nào bị BỎ HẲN khỏi các dòng theo mã.
+   *
+   * Ở đây mỗi đơn được đếm đúng một lần, kể cả đơn chưa lần được mã — vì "đang giao bao nhiêu đơn"
+   * và "ước tính giao được bao nhiêu phần trăm" là câu hỏi về ĐƠN, không phải về mã hàng.
+   */
+  orderLevel: {
+    eligibleSent: number;
+    deliveredActual: number;
+    failedActual: number;
+    active: number;
+    projectedDelivered: number;
+    /** `null` = CHƯA ĐO ĐƯỢC (cohort rỗng), không phải 0%. */
+    projectedRate: number | null;
+    /** Đơn đang chạy mà mô hình chưa dự báo được — nằm NGOÀI phần ước tính. */
+    unmodelledActive: number;
+    /**
+     * "Đang giao" tách theo trạng thái ĐVVC. "Đang giao 120 đơn" không nói gì; "90 đang luân
+     * chuyển · 30 chờ phát lại" thì nói rất nhiều — hai nhóm có triển vọng khác hẳn nhau, và đó
+     * chính là lý do mô hình cân TỪNG đơn thay vì nhân tổng doanh số với một tỷ lệ.
+     */
+    activeByState: ActiveBreakdown;
+  };
 };
 
 /**
@@ -361,7 +390,18 @@ export async function getProjectedDeliveryMetrics(
     type Acc = ProjectedProductRow & { _revActive: number };
     const theoMa = new Map<string, Acc>();
     const maCuaDon = new Map<string, Set<string>>();
-    let unmappedOrders = 0;
+    // Trạng thái ĐVVC theo ĐƠN — một đơn chỉ có một vận đơn chính (`PRIMARY_ATTEMPT`), nên mọi
+    // dòng-mã của cùng một đơn mang cùng `con`; ghi vào Map là đủ để đếm đơn đúng một lần.
+    const trangThaiCuaDon = new Map<string, CarrierSubstate>();
+    /*
+      ĐẾM ĐƠN CHƯA LẦN ĐƯỢC MÃ THEO ĐƠN, KHÔNG THEO DÒNG.
+
+      Truy vấn trả về một dòng cho mỗi (đơn × mã). Bản trước cộng `unmappedOrders += 1` cho mỗi
+      DÒNG không có mã, nên một đơn hai món hàng đều thiếu mã bị đếm thành hai đơn — và một đơn có
+      một món khai mã, một món không, bị đếm CẢ ở `maCuaDon` lẫn ở đây, làm `totalOrders` vượt số
+      đơn thật. Đo trên bộ dữ liệu kiểm thử: 142 so với 141 đơn có thật.
+    */
+    const donThieuMa = new Set<string>();
 
     const lay = (code: string, name: string): Acc => {
       const cu = theoMa.get(code);
@@ -387,9 +427,10 @@ export async function getProjectedDeliveryMetrics(
     };
 
     for (const r of rows) {
+      trangThaiCuaDon.set(r.order_id, r.con as CarrierSubstate);
       const code = (r.code ?? "").trim();
       if (!code) {
-        unmappedOrders += 1;
+        donThieuMa.add(r.order_id);
         continue;
       }
       const set = maCuaDon.get(r.order_id) ?? new Set<string>();
@@ -425,6 +466,29 @@ export async function getProjectedDeliveryMetrics(
 
     let multiCodeOrders = 0;
     for (const set of maCuaDon.values()) if (set.size > 1) multiCodeOrders += 1;
+    // Chỉ tính là "chưa lần được mã" khi đơn KHÔNG có mã nào cả — đơn có một món khai mã thì đã
+    // nằm trong bảng theo mã rồi, đếm thêm ở đây là đếm hai lần.
+    let unmappedOrders = 0;
+    for (const id of donThieuMa) if (!maCuaDon.has(id)) unmappedOrders += 1;
+
+    // Cùng một vòng cân xác suất, chỉ đổi grain sang ĐƠN — không có công thức thứ hai ở đây.
+    const dangGiaoTheoTrangThai: ActiveBreakdown = {};
+    const mucDon = { eligibleSent: 0, deliveredActual: 0, failedActual: 0, active: 0, projectedDelivered: 0, unmodelledActive: 0 };
+    for (const con of trangThaiCuaDon.values()) {
+      mucDon.eligibleSent += 1;
+      if (con === "DELIVERED") {
+        mucDon.deliveredActual += 1;
+        mucDon.projectedDelivered += 1;
+      } else if (con === "RETURNED" || con === "CANCELLED") {
+        mucDon.failedActual += 1;
+      } else {
+        mucDon.active += 1;
+        dangGiaoTheoTrangThai[con] = (dangGiaoTheoTrangThai[con] ?? 0) + 1;
+        const tra = lookup.of(con);
+        if (tra.p === null) mucDon.unmodelledActive += 1;
+        else mucDon.projectedDelivered += tra.p;
+      }
+    }
 
     const ket: ProjectedProductRow[] = [...theoMa.values()].map((r) => {
       const ketThuc = r.deliveredActual + r.failedActual;
@@ -447,6 +511,12 @@ export async function getProjectedDeliveryMetrics(
       multiCodeOrders,
       totalOrders: maCuaDon.size + unmappedOrders,
       probabilities: lookup.states,
+      orderLevel: {
+        ...mucDon,
+        projectedDelivered: Math.round(mucDon.projectedDelivered * 100) / 100,
+        projectedRate: mucDon.eligibleSent ? Math.round((mucDon.projectedDelivered / mucDon.eligibleSent) * 1000) / 10 : null,
+        activeByState: dangGiaoTheoTrangThai,
+      },
     };
   });
 }

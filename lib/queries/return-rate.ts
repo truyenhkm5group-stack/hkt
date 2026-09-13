@@ -735,6 +735,8 @@ export type ReturnRateSummary = {
     active: number;
     /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu). */
     unmodelledActive: number;
+    /** "Đang giao" tách theo trạng thái ĐVVC, ĐẾM THEO ĐƠN — kèm xác suất và độ tin cậy của từng nhóm. */
+    byState: { substate: string; label: string; orders: number; p: number | null; sample: number; confidence: string }[];
   } | null;
   /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
   failedToReturnPct: number;
@@ -877,16 +879,14 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   // cohort này kèm một tỷ lệ ước tính của cohort khác — đúng kiểu lệch mà bản này đang đi xoá.
   const duBao = await getProjectedDeliveryMetrics(period, basis).catch(() => null);
   /*
-    Cộng ở cấp ĐƠN, không bình quân các tỷ lệ theo mã: một mã 2 đơn và một mã 200 đơn không được
-    cân bằng nhau. Và cộng `projectedDelivered` (số đơn) rồi mới chia — chia trước rồi bình quân
-    sẽ ra một con số không ứng với bất kỳ tập đơn nào.
+    LẤY THẲNG CON SỐ Ở GRAIN ĐƠN, KHÔNG CỘNG CÁC DÒNG THEO MÃ.
 
-    Mẫu số dùng `totalOrders` (số ĐƠN thật) chứ không cộng `eligibleSent` theo mã: đơn có hai mã
-    hàng được cộng cho cả hai mã, nên tổng theo mã lớn hơn tổng đơn. Tử số cũng vậy — nhưng một
-    đơn hai mã đóng góp xác suất y hệt vào cả hai dòng, nên tỷ số vẫn đúng khi lấy cùng grain.
+    Cộng các dòng theo mã sai ở CẢ HAI đầu phân số, và hai cái sai không triệt tiêu nhau: đơn hai
+    mã hàng được cộng cho cả hai mã (làm mẫu số lớn hơn số đơn thật), còn đơn chưa lần được về mã
+    nào thì bị bỏ hẳn. Thẻ này nói về ĐƠN, nên nó phải hỏi hợp đồng ở grain đơn.
   */
-  const tongDuBao = duBao?.rows.reduce((a: { sent: number; del: number; act: number; un: number }, r) => ({ sent: a.sent + r.eligibleSent, del: a.del + r.projectedDelivered, act: a.act + r.active, un: a.un + r.unmodelledActive }), { sent: 0, del: 0, act: 0, un: 0 }) ?? null;
-  const tyLeDuBao = tongDuBao && tongDuBao.sent > 0 ? Math.round((tongDuBao.del / tongDuBao.sent) * 1000) / 10 : null;
+  const mucDon = duBao?.orderLevel ?? null;
+  const tyLeDuBao = mucDon?.projectedRate ?? null;
   return {
     orders: Number(row?.orders ?? 0),
     shipped: Number(row?.shipped ?? 0),
@@ -904,7 +904,18 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
     // MỘT NGUỒN: cùng hàm, cùng bảng xác suất với trang lợi nhuận. Mô hình chưa đo được ⇒ `null`,
     // và màn hình in "chưa đo được" thay vì một con số đoán.
     expectedSuccessRate: tyLeDuBao,
-    projection: duBao && tongDuBao ? { version: duBao.version, eligibleSent: tongDuBao.sent, active: tongDuBao.act, unmodelledActive: tongDuBao.un } : null,
+    projection: duBao && mucDon
+      ? {
+          version: duBao.version,
+          eligibleSent: mucDon.eligibleSent,
+          active: mucDon.active,
+          unmodelledActive: mucDon.unmodelledActive,
+          byState: duBao.probabilities
+            .filter((x) => (mucDon.activeByState[x.substate] ?? 0) > 0)
+            .map((x) => ({ substate: x.substate, label: x.label, orders: mucDon.activeByState[x.substate] ?? 0, p: x.p, sample: x.sample, confidence: x.confidence }))
+            .sort((a, b) => b.orders - a.orders),
+        }
+      : null,
     failedToReturnPct: Math.round(p.rate * 100),
     failedSample: p.sample,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),
