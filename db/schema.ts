@@ -1591,6 +1591,71 @@ export const returnInspectionItems = pgTable(
 );
 
 /**
+ * ═══════ CHỨNG CỨ ĐỐI SOÁT SỔ HÀNG HOÀN VIẾT TAY (một lần) ═══════
+ *
+ * Một lượt đối soát giữa bảng tính hàng hoàn của kho và ERP để lại một dòng cho MỖI dòng nguồn —
+ * kể cả dòng KHÔNG khớp. Dòng không khớp mới là phần đáng đọc: nó nói hai sổ lệch nhau ở đâu, và
+ * nếu chỉ lưu dòng khớp thì lần sau lại phải mở bảng tính ra mới biết đã bỏ qua những gì.
+ *
+ * `idempotency_key` bám vào NỘI DUNG dòng (bảng tính · sheet · mã vận đơn · dòng chữ sản phẩm ·
+ * lần xuất hiện thứ mấy), KHÔNG bám vào số dòng: chèn thêm một dòng ở đầu tệp không được biến cả
+ * lượt chạy lại thành một lượt ghi mới.
+ *
+ * BẢNG NÀY KHÔNG ĐỤNG TỒN KHO và không đụng vòng đời kiện. Nó chỉ ghi lại lượt đối soát đã kết
+ * luận gì. Việc ghi nhận kiện đã về vẫn đi qua `return_inspections` như mọi đường khác.
+ */
+export const hmtReturnReconciliation = pgTable(
+  "hmt_return_reconciliation",
+  {
+    id: id(),
+    /** Nhãn bảng tính nguồn — nhiều lượt đối soát từ nhiều tệp phải phân biệt được. */
+    workbook: text("workbook").notNull(),
+    sheet: text("sheet").notNull(),
+    sheetRole: text("sheet_role").notNull(),
+    /** Số dòng như Excel hiện, để người mở tệp nhảy được tới đúng chỗ. */
+    sourceRow: integer("source_row").notNull().default(0),
+    trackingRaw: text("tracking_raw").notNull().default(""),
+    trackingKey: text("tracking_key").notNull().default(""),
+    /** OWN_CELL · MERGED_CELL · NONE — vì sao dòng này mang mã vận đơn đó. */
+    inheritance: text("inheritance").notNull().default("OWN_CELL"),
+    productText: text("product_text").notNull().default(""),
+    productCode: text("product_code").notNull().default(""),
+    color: text("color").notNull().default(""),
+    size: text("size").notNull().default(""),
+    /** Mẫu mã lần ra được. `NULL` = chưa lần ra — KHÁC hẳn với "không có mẫu mã nào". */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    sku: text("sku").notNull().default(""),
+    quantity: integer("quantity").notNull().default(0),
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
+    matchStatus: text("match_status").notNull(),
+    detail: text("detail").notNull().default(""),
+    /** Dòng này có dẫn tới một lượt ghi vào ERP hay không. Chỉ `MATCHED` được `true`. */
+    written: boolean("written").notNull().default(false),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorLabel: text("actor_label").notNull().default(""),
+    processedAt: ts("processed_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("hmt_return_rec_shipment_idx").on(t.shipmentId),
+    index("hmt_return_rec_status_idx").on(t.matchStatus),
+    index("hmt_return_rec_tracking_idx").on(t.trackingKey),
+    /* Danh sách PHẢI khớp `HMT_MATCH_STATUSES` ở lib/constants/hmt-returns.ts — đã có tiền lệ lệch
+       giữa hằng số TypeScript và ràng buộc SQL (`WRONG_ITEM` của bảng kiểm cả kiện). */
+    check(
+      "hmt_return_rec_status_check",
+      sql`${t.matchStatus} IN ('MATCHED', 'ALREADY_RECEIVED', 'AMBIGUOUS_TRACKING', 'AMBIGUOUS_SKU', 'SKU_MISMATCH', 'QUANTITY_CONFLICT', 'UNMATCHED_TRACKING', 'DUPLICATE_SOURCE_ROW', 'CONFLICT')`,
+    ),
+    check("hmt_return_rec_inheritance_check", sql`${t.inheritance} IN ('OWN_CELL', 'MERGED_CELL', 'NONE')`),
+    /* Chỉ dòng KHỚP mới được đánh dấu đã ghi. Chặn ở CSDL vì đây là ranh giới giữa "đã đối chiếu"
+       và "đã đổi dữ liệu" — một dòng `written = true` mang trạng thái khác là một lượt ghi không
+       ai giải thích được. */
+    check("hmt_return_rec_written_check", sql`${t.written} = false OR ${t.matchStatus} = 'MATCHED'`),
+  ],
+);
+
+/**
  * ═══════ BẰNG CHỨNG HÀNH ĐỘNG — CÔNG CỦA ĐỘI, ĐO ĐƯỢC ═══════
  *
  * Câu chưa trả lời được: *CSKH đã cứu bao nhiêu doanh thu? Kế toán đòi về bao nhiêu COD? Kho giải
