@@ -23,13 +23,23 @@
 - **Outbound leg / Return leg** — chiều đi tới khách / chiều mang hàng về shop. Viettel Post gửi cờ
   `IS_RETURNING`; ERP lưu ở `shipment_events.leg_type` = `OUTBOUND` | `RETURN`.
 - **Verified money** — tiền CÓ CHỨNG TỪ: số thực thu trên bảng kê COD, hoặc tiền đã về ngân hàng.
-- **Order outcome** — kết luận cuối dùng cho MỌI báo cáo: `NOT_SHIPPED`, `UNKNOWN`, `IN_TRANSIT`,
-  `DELIVERED`, `RETURNED`, `RETURNED_BY_RULE`, `CANCELLED`.
+- **Order outcome** — kết luận cuối dùng cho MỌI báo cáo: `NOT_SHIPPED`, `UNKNOWN`,
+  `AWAITING_PICKUP`, `IN_TRANSIT`, `DELIVERED`, `RETURNED`, `RETURNED_BY_RULE`, `CANCELLED`.
 - **`UNKNOWN`** (chủ shop chốt 08/09/2026) — ERP KHÔNG có bất kỳ dấu vết nào của ĐVVC cho đơn này:
   không mã vận đơn, không mã tra cứu, không một sự kiện hành trình nào. Tách hẳn khỏi `IN_TRANSIT`
   vì "đang giao" là một khẳng định về vị trí gói hàng — phải có chứng từ mới nói được. Cũng khác
   `NOT_SHIPPED`, chỗ đó dành cho đơn chưa hề tạo vận đơn. `UNKNOWN` thuộc nhóm CHƯA KẾT THÚC nên
   không nằm trong tử số lẫn mẫu số của tỷ lệ giao thành công.
+- **`AWAITING_PICKUP`** (chủ shop chốt 13/09/2026) — ĐÃ tạo vận đơn và ĐVVC ĐÃ biết đến kiện, nhưng
+  KHÔNG có một chứng từ nào nói họ đã cầm hàng. Gói hàng còn trong kho shop, hoặc đang chờ bưu tá
+  tới lấy. Đây là bước thứ ba của cùng một nguyên tắc mà `UNKNOWN` dựng lên: **"đang giao" là khẳng
+  định về VỊ TRÍ gói hàng — phải có chứng từ mới nói được.** Khác `NOT_SHIPPED` (chỗ đó là đơn chưa
+  hề tạo vận đơn: không có gì để theo dõi, không có ai để giục) và khác `IN_TRANSIT` (đã có chứng từ
+  bàn giao). Thuộc nhóm CHƯA KẾT THÚC, và **KHÔNG nằm trong tập "đã gửi"** — kiện chưa rời kho thì
+  chưa được gửi.
+
+  Chứng cứ bàn giao đọc bằng ĐÚNG vị từ của hợp đồng mốc bàn giao
+  (`lib/constants/carrier-handoff.ts::CARRIER_HANDOFF_KNOWN_SQL`), không có bản thứ hai.
 
 ## 3. Thứ tự nguồn tin (cao xuống thấp)
 
@@ -69,7 +79,8 @@ chiều hoàn, không sửa doanh thu → **giao thành công**.
 
 | Logistics | Payment | Kết quả |
 |---|---|---|
-| `IN_TRANSIT` / `PICKED_UP` / `OUT_FOR_DELIVERY` / `DELIVERY_FAILED` | bất kỳ, kể cả đã thu > 100K | `IN_TRANSIT` |
+| có sự kiện ĐVVC nhưng **KHÔNG có chứng từ bàn giao** (chưa `picked_up_at`, chưa sự kiện chặng đã-cầm-hàng) | bất kỳ | **`AWAITING_PICKUP`** — không phải `IN_TRANSIT`, không phải `NOT_SHIPPED` |
+| `IN_TRANSIT` / `PICKED_UP` / `OUT_FOR_DELIVERY` / `DELIVERY_FAILED` **và có chứng từ bàn giao** | bất kỳ, kể cả đã thu > 100K | `IN_TRANSIT` |
 | `RETURNING` / `RETURNED` | bất kỳ, kể cả `PAID_TO_BANK` | `RETURNED` |
 | `CANCELLED` | bất kỳ | `CANCELLED` |
 | `DELIVERED` + có vận đơn chiều hoàn **hoặc** sửa doanh thu sau giao | bất kỳ | `RETURNED` |

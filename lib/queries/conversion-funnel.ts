@@ -200,7 +200,7 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
         lvl5: sql<number>`count(*) filter (where ${level} >= 5)`,
         cancelled: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED')`,
         cancelledAfterConfirm: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and ${facts.confirmedStage})`,
-        unfinished: sql<number>`count(*) filter (where ${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))`,
+        unfinished: sql<number>`count(*) filter (where ${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN','AWAITING_PICKUP'))`,
         deliveredWithoutShipment: sql<number>`count(*) filter (where ${facts.outcome} = 'DELIVERED' and not ${facts.hasShipment})`,
         shipmentWithoutConfirm: sql<number>`count(*) filter (where ${facts.hasShipment} and not ${facts.confirmedStage})`,
         noStatusHistory: sql<number>`count(*) filter (where ${facts.confirmedStage} and ${facts.confirmedAt} is null)`,
@@ -402,7 +402,7 @@ export async function getConversionByDimension(
         leftWarehouse: sql<number>`count(*) filter (where ${level} >= 4)`,
         delivered: sql<number>`count(*) filter (where ${level} >= 5)`,
         returned: sql<number>`count(*) filter (where ${facts.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
-        unfinished: sql<number>`count(*) filter (where ${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))`,
+        unfinished: sql<number>`count(*) filter (where ${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN','AWAITING_PICKUP'))`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED'), 0)`,
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,
       })

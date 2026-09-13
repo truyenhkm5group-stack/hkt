@@ -24,12 +24,26 @@ export const RETURN_RULE = {
  * `UNKNOWN` = ERP KHÔNG có bất kỳ dấu vết nào của ĐVVC cho vận đơn này (không mã, không sự kiện).
  * Cố ý tách khỏi `IN_TRANSIT`: "đang giao" là một khẳng định về vị trí gói hàng, phải có chứng từ
  * mới nói được. Cũng khác `NOT_SHIPPED` — chỗ đó là đơn chưa hề tạo vận đơn.
+ *
+ * `AWAITING_PICKUP` (chủ shop chốt 13/09/2026) = ĐÃ tạo vận đơn, ĐVVC ĐÃ biết đến kiện — nhưng
+ * CHƯA CÓ MỘT CHỨNG TỪ NÀO nói họ đã cầm hàng. Đây là bước thứ ba của cùng một nguyên tắc mà
+ * `UNKNOWN` đã dựng lên: **"đang giao" là khẳng định về VỊ TRÍ gói hàng, phải có chứng từ mới nói
+ * được.** Kiện ở đây nằm trong kho của shop, hoặc đang chờ bưu tá tới lấy.
+ *
+ * Vì sao KHÔNG dùng lại `NOT_SHIPPED`: chỗ đó dành cho đơn **chưa hề tạo vận đơn** — không có gì để
+ * theo dõi, không có ai để giục. Kiện `AWAITING_PICKUP` thì có mã, có đối tác, và có người phải đi
+ * hỏi. Gộp hai thứ lại là mất đúng cái phân biệt khiến việc này làm được.
+ *
+ * Đo production 13/09/2026: 106 đơn, 61.451.999đ COD treo, tuổi trung bình 3,2 ngày (cao nhất 9
+ * ngày, 16 đơn quá 7 ngày). Trước đó chúng mang nhãn `IN_TRANSIT` — chủ shop tưởng 106 gói đang
+ * trên đường tới khách trong khi chúng chưa rời kho.
  */
-export type OrderOutcome = "NOT_SHIPPED" | "UNKNOWN" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
+export type OrderOutcome = "NOT_SHIPPED" | "UNKNOWN" | "AWAITING_PICKUP" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" | "RETURNED_BY_RULE" | "CANCELLED";
 
 export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "Chưa gửi",
   UNKNOWN: "Chưa có chứng từ ĐVVC",
+  AWAITING_PICKUP: "Chờ ĐVVC lấy hàng",
   IN_TRANSIT: "Đang giao",
   DELIVERED: "Giao thành công (thu > 100K)",
   RETURNED: "Hoàn · hàng về kho (thu < 50K)",
@@ -40,6 +54,9 @@ export const OUTCOME_LABEL: Record<OrderOutcome, string> = {
 export const OUTCOME_TONE: Record<OrderOutcome, string> = {
   NOT_SHIPPED: "bg-muted text-muted-foreground",
   UNKNOWN: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  // Tím: KHÔNG phải xanh của "đang giao" (kiện chưa đi), cũng KHÔNG phải xám của "chưa gửi"
+  // (kiện này có mã và có người phải đi giục). Một màu riêng cho một tình trạng riêng.
+  AWAITING_PICKUP: "bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
   IN_TRANSIT: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   DELIVERED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
   RETURNED: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",

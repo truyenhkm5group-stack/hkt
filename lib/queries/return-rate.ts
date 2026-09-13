@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
@@ -205,6 +206,16 @@ const HAS_RETURN_LEG = sql`(${s.vtpOrderNumber} is not null and exists (
 const GOODS_CAME_BACK = sql`(${HAS_RETURN_LEG} or ${REVENUE_EDITED_AFTER_DELIVERY})`;
 
 /**
+ * ĐVVC ĐÃ CẦM HÀNG CHƯA — dùng lại ĐÚNG vị từ của hợp đồng mốc bàn giao
+ * (`lib/constants/carrier-handoff.ts`), không viết bản thứ hai ở đây.
+ *
+ * Viết lại danh sách chặng ở tệp này là dựng một định nghĩa "đã bàn giao" thứ hai; ngày nào đó một
+ * người sửa một danh sách mà quên danh sách kia, và báo cáo theo mốc gửi sẽ nói khác kết quả đơn về
+ * cùng một kiện hàng. Một câu hỏi thì một chỗ trả lời.
+ */
+const CARRIER_TOOK_PACKAGE = sql.raw(CARRIER_HANDOFF_KNOWN_SQL);
+
+/**
  * NGUỒN CHÂN LÝ DUY NHẤT của kết quả đơn hàng cho toàn bộ ERP.
  * Đặc tả bắt buộc: docs/business-rules/ORDER_OUTCOME.md — đọc trước khi sửa.
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
@@ -239,6 +250,22 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'CANCELLED' then 'CANCELLED'
+  -- ĐÃ CÓ VẬN ĐƠN NHƯNG ĐVVC CHƯA CẦM HÀNG ⇒ 'AWAITING_PICKUP', KHÔNG PHẢI 'ĐANG GIAO'.
+  --
+  -- Cùng một nguyên tắc với nhánh 'UNKNOWN' ở đầu bảng, chỉ khác mức bằng chứng: ở đó ERP không
+  -- biết gì về gói hàng; ở đây ERP biết có gói hàng, biết mã, biết ĐVVC đã nhận yêu cầu — nhưng
+  -- KHÔNG có một chứng từ nào nói họ đã cầm nó. "Đang giao" vẫn là một khẳng định về VỊ TRÍ, và
+  -- những sự kiện duy nhất của nhóm này nói ngược lại: bưu tá ĐANG TỚI LẤY, kho CHƯA ĐÓNG XONG,
+  -- hoặc ĐVVC đang chờ shop xác nhận.
+  --
+  -- Đo production 13/09/2026: 106 đơn, 61.451.999đ COD, tuổi trung bình 3,2 ngày (16 đơn quá 7
+  -- ngày, cao nhất 9 ngày). Trước bản này chúng rơi vào đúng nhánh 'IN_TRANSIT' ngay bên dưới, nên
+  -- chủ shop tưởng 106 gói đang trên đường tới khách trong khi chúng còn nằm trong kho — và vì
+  -- không màn hình nào gọi tên tình trạng đó, không ai đi hỏi vì sao bưu tá chưa tới.
+  --
+  -- Phải đứng SAU mọi nhánh kết cục (giao / hoàn / huỷ): một kiện đã tới tay khách thì chuyện mốc
+  -- lấy hàng có được ghi lại hay không cũng không làm nó thành "chờ lấy".
+  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${o.stage} not in ('CANCELLED','DELETED') then 'AWAITING_PICKUP'
   when ${HAS_VTP_EVIDENCE} and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} then 'DELIVERED'
@@ -246,6 +273,17 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} > ${MAX_COD} then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
+  -- NHÁNH NÀY CỐ Ý KHÔNG CÓ GUARD "chưa cầm hàng" — và đây là một quyết định có số đo, không phải
+  -- một chỗ bỏ sót.
+  --
+  -- Tới đây là kiện KHÔNG có sự kiện ĐVVC nào mà chặng vẫn nói "đang chạy". Bản nháp đầu có thêm
+  -- guard cho đối xứng với nhánh trên. Đo production 13/09/2026 thì nhóm đó RỖNG: cả 106 kiện chưa
+  -- bàn giao đều CÓ sự kiện, 0 kiện nào không có. Thêm guard là phát hành một luật chưa từng chạy
+  -- trên dòng dữ liệu nào.
+  --
+  -- Và nó sẽ sai ở đúng ca mà kho mã đã chốt từ trước (fixture rr-9007): vận đơn chưa có sự kiện
+  -- nhưng COD đã về theo bảng kê > 100K. Tiền về được là bằng chứng gói hàng ĐÃ đi — bảng kê chỉ
+  -- tồn tại khi ĐVVC đã thu hộ. Gọi kiện đó là "chờ lấy hàng" là đoán ngược lại một chứng từ.
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
@@ -517,6 +555,14 @@ export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED
 const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
 const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
+/**
+ * "ĐÃ GỬI" — `AWAITING_PICKUP` CỐ Ý KHÔNG CÓ TRONG DANH SÁCH NÀY.
+ *
+ * Kiện chờ ĐVVC tới lấy thì chưa rời kho, nên nó chưa được gửi. Đo production 13/09/2026: thêm nó
+ * vào đây sẽ nhét 106 kiện chưa từng rời kho vào mẫu số của mọi báo cáo "đã gửi" — đúng con số mà
+ * bản phát hành này sinh ra để loại. Ai thấy danh sách thiếu một giá trị và định thêm cho "đủ" thì
+ * đọc dòng này trước.
+ */
 const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */

@@ -21,7 +21,7 @@ const KET_QUA_KHACH = sql<string>`(
   select case
     when k.outcome = 'DELIVERED' then 'DELIVERED'
     when k.outcome in ('RETURNED','RETURNED_BY_RULE') then 'RETURNED'
-    when k.outcome in ('IN_TRANSIT','NOT_SHIPPED') then 'PENDING'
+    when k.outcome in ('IN_TRANSIT','NOT_SHIPPED','AWAITING_PICKUP') then 'PENDING'
     else 'UNKNOWN'
   end
   from canonical_order_outcome k

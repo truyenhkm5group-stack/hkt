@@ -190,6 +190,27 @@ const EVIDENCE = `(select
 export const CARRIER_HANDOFF_AT_SQL = `(select least(ev.doc_at, ev.manual_at, "shipments"."picked_up_at") from ${EVIDENCE} ev)`;
 
 /**
+ * ĐÃ CÓ CHỨNG TỪ BÀN GIAO CHƯA — dạng BOOLEAN, cùng một câu hỏi với `CARRIER_HANDOFF_AT_SQL`.
+ *
+ * `ORDER_OUTCOME` chỉ cần biết CÓ hay KHÔNG, không cần biết lúc nào. Viết `(...) is not null` quanh
+ * biểu thức mốc ở trên cũng ra đúng kết quả, nhưng nó bắt Postgres chạy `min()` trên toàn bộ sự
+ * kiện của kiện rồi mới so `NULL` — trong khi `exists` dừng ngay ở dòng khớp đầu tiên. Biểu thức
+ * này nằm trong `where` của những báo cáo quét cả kho vận đơn, nên khác biệt đó có thật.
+ *
+ * Danh sách chặng và danh sách nguồn LẤY TỪ CÙNG hằng số với biểu thức mốc, nên không có đường nào
+ * để hai câu trả lời lệch nhau: sửa `CARRIER_HANDOFF_STAGES` là cả hai đổi theo.
+ *
+ * `picked_up_at` nằm trong phép hoặc vì nó là mốc lấy hàng của ĐVVC được chuyển tiếp qua khâu đồng
+ * bộ — cùng tập chứng cứ mà `least()` ở trên dùng.
+ */
+export const CARRIER_HANDOFF_KNOWN_SQL = `("shipments"."picked_up_at" is not null or exists (
+  select 1 from shipment_events e
+  where e.shipment_id = "shipments"."id"
+    and e.source in (${ALL_SOURCES})
+    and e.normalized_stage::text in (${STAGE_LIST})
+))`;
+
+/**
  * Nguồn nào ĐẠT mốc sớm nhất. Bằng nhau thì chứng từ máy thắng — nó giải thích được, còn ảnh chụp
  * thì không mang theo xuất xứ của chính nó.
  *
