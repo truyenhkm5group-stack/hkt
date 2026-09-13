@@ -296,14 +296,19 @@ cột hành động ra ngoài.
 
 ## 10. Deploy
 
-| lượt | SHA | kết quả |
+| lượt | SHA | nội dung |
 |---|---|---|
-| #262 | `1c3d9c0` | thành công — bước "Kiểm tra HTTPS từ bên ngoài" xác nhận `/api/health` trả đúng commit đó |
-| #263 | `056d2f7` | bản sửa bố cục tìm ra ở QA trình duyệt |
+| #262 | `1c3d9c0` | bản chính — thành công, `/api/health` trả đúng commit đó |
+| #263 | `056d2f7` | ba lỗi bố cục tìm ra ở QA trình duyệt (nút xuống dòng · nhãn tràn · cột hành động trôi khỏi màn hình) |
+| #264 | `ccbad76` | nhãn loại việc bị cắt cụt cả hai đầu — cũng do QA trình duyệt |
 
-Hai lượt, không phải một: lượt đầu đã qua toàn bộ cổng và đang chạy thì QA trình duyệt mới tìm ra
-ba lỗi bố cục. Ghi thẳng ra đây vì nó tốn một lượt deploy thứ hai, và vì thứ tự đúng lẽ ra là QA
-TRƯỚC deploy.
+BA lượt, không phải một. Nguyên nhân gốc và bài học: **QA trình duyệt chạy SAU lượt deploy đầu**.
+Cổng mã nguồn (typecheck · lint · 226 khối kiểm thử · build) sạch hoàn toàn ở cả ba lượt — nó không
+bắt được, và không thể bắt được, "dòng cao gấp ba" hay "cột nút trôi khỏi khung nhìn ở mức phóng
+110%". Chỉ có chụp màn hình mới bắt được.
+
+Lần sau: dựng bản production tại chỗ và chụp màn hình **trước** khi bấm deploy. Chi phí là ~4 phút;
+giá phải trả khi bỏ qua là hai lượt deploy.
 
 Cả hai lượt đều chạy lại đầy đủ toàn vẹn kho mã · typecheck · lint · kiểm thử · build TRÊN MÁY CHỦ
 CI trước khi chạm tới VPS, rồi tự xác minh `/api/health` trả về đúng 12 ký tự đầu của SHA và fail
