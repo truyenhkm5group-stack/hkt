@@ -239,3 +239,63 @@ Migration mới: **`0076_care_active_invariant`** — sửa cờ `active` cho đ
 - Giá vốn chưa biết ⇒ "—" kèm số sản phẩm không có đơn giá, không phải 0.
 - Kiểm đếm hàng hoàn: kiện chưa lần được đơn ⇒ "chưa rõ hàng", không đếm 0 món.
 - Dòng tiền chưa phân loại: khoang riêng, in "còn N dòng / X ₫ chưa phân loại" cạnh headline.
+
+## 9. Sau deploy — đo lại trên production (13:00–13:07 UTC, SHA `77b46e5`)
+
+| Phép đo | Trước | Sau |
+|---|---|---|
+| `/api/health` commit | `d70171d5` | `77b46e5e9bae` (branch main) |
+| Deploy run | #34751228382 | **#34757906537** thành công (gate + build + SSH + HTTPS) |
+| Migration | 0075 | **0076_care_active_invariant** |
+| Smoke | 50/50, 0 chậm | 50/50, 0 lỗi, 1 chậm lúc nguội (`/data-quality?issue=unlinked-shipment` 3,7 s) |
+| KPI đơn | 2.698 đơn · GTC 488 · hoàn 979 · 33,3% | 2.709 · 492 · 988 · 33,2% (ORDER_OUTCOME không đổi — chỉ có đơn mới) |
+| Care: Chờ xử lý CHƯA rời kho | 106/106 ca (sai) | 106 → **0** ca (đóng NOT_CARE_CONDITION, không quy kết) |
+| Care: Chờ xử lý ĐÃ rời kho | 6/48 ca | **46/46** ca (RECONCILE, `opened_at` = mốc ĐVVC) |
+| Care: Tồn 506/507 | 11/17 | **17/17** |
+| Care: Chờ phát lại | 29/29 | 26/26 |
+| Hợp cần care (đã rời kho) | — | **89 kiện · 34 có người · 55 chưa ai nhận** |
+| Bất biến đóng ⇔ inactive | 13 vi phạm | **0** |
+| Rescued nhưng kiện đã hoàn | 0 | 0 (lỗi 501 chiều hoàn đã chặn trước khi phát nổ) |
+| Kết cục care | 5 thất bại · 1 cứu | 8 thất bại (7 có người) · 2 cứu (2 có người) · 49 PENDING · 72 lịch sử NULL |
+| WAITING không hẹn | 16 | 15 (nay hiện là "tới hạn" trong Cần care) |
+| Bảng kê `cod=0` ghi tiền | 0 | 0 |
+| Webhook sau deploy | — | Pancake 10 gói, VTP 1 gói, 0 lỗi (đóng cửa khi thiếu secret không ảnh hưởng vì secret có sẵn) |
+| Kết nối | — | Pancake ✓ · VTP token ✓ · Facebook ✓ · AI ✓ · SePay không giao dịch 24h (đối chiếu định kỳ SUCCESS) |
+
+### 9.1 Parity Q002–Q005, cohort 30 ngày theo ngày ĐVVC nhận, nhãn ORDER_OUTCOME (nguồn duy nhất của cả hai trang)
+
+| Mã | Đã gửi | Giao TC | Không TC | Đang giao | Huỷ | `stage=DELIVERED` (cũ) | GTC thực tế % |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Q002 | 771 | 184 | 493 | 94 | 8 | 300 | 27,2 |
+| Q003 | 594 | 207 | 230 | 157 | 5 | 244 | 47,4 |
+| Q004 | 96 | 8 | 4 | 84 | 1 | 9 | 66,7 (mẫu 12) |
+| Q005 | 25 | 0 | 0 | 25 | 2 | 0 | chưa có kết quả |
+
+Cột `stage=DELIVERED` cho thấy độ lệch mà V2 từng tính là "giao được": Q002 300 so với 184 thật.
+Đang giao tách theo trạng thái ĐVVC (mô hình cân riêng): Q002 chờ xử lý 26 · chờ phát lại 13 · tồn 7;
+Q003 chờ xử lý 14 · chờ phát lại 11 · tồn 8 (+53 mã 102 chưa rời kho, ngoài care nhưng trong dự báo
+với P(chờ lấy hàng)); Q004 39 đang đóng bảng kê.
+
+### 9.2 Lợi nhuận danh nghĩa (profit-verify, cùng hàm giao diện gọi) — thay đổi CÓ CHỦ ĐÍCH
+
+| Kỳ | LN ròng trước | LN ròng sau | Vì sao |
+|---|---:|---:|---|
+| Trọn tháng 9 | +17.997.481 | **−55.607.676** | trước: DT ước tính = POS 343 tr × (1 − 40% mặc định) ≈ 206 tr; sau: DT giao thật 48,6 tr + đơn đang giao × P(trạng thái) + đơn chưa gửi × P(chưa gửi) ≈ 56 tr — đúng với GTC thực tế 27–47% theo mã |
+| Tuần 1 | +24.758.997 | −28.953.755 | như trên |
+| Tuần 2 | −6.300.337 | −26.653.922 | như trên |
+
+Giá vốn (32,7 → 14,3 tr) và cước (13,8 → 10,8 tr) cũng đi theo từng đơn thay vì × (1 − r). Năm phép
+kiểm của script vẫn đạt. Con số cũ là giả định 60% giao được; con số mới là điều dữ liệu nói.
+
+### 9.3 CSKH · Work · Hàng hoàn · Tài chính
+
+- `cs_cases` DELIVERY_FAILED: 237 OPEN không ai giữ (bot không nhắn được) — **76** trong số đó nay
+  nằm trên kiện có ca care đang mở và hiện cờ "bot không nhắn được"; 99 IN_PROGRESS bot. Case người:
+  86 mở, chưa case nào có `assignee_user_id` (chưa ai nhận).
+- Work: 7 phòng ban, 11 thành viên; **MANAGEMENT có 2 dòng LEAD** (drift `MULTIPLE_LEAD_ROWS` nay
+  được báo — chủ shop cần chọn một); 38 dòng overlay `assignee_id` cũ trên việc chiếu (bị bỏ qua
+  đúng luật mới, không xoá); 0 objective ACTIVE thiếu KR. 7 tài khoản, tất cả `ALL`, đủ phòng ban.
+- Hàng hoàn: "chờ kho nhận" theo vị ngữ mới **870** (trước 619 — nay tính cả vận đơn chiều về),
+  0 kiện đóng không chứng từ, 0 phiếu kiểm (trạm chưa được dùng).
+- Ngân hàng: 0 giao dịch 24h, 0 chưa phân loại, 80 dòng nhập file không tài khoản (P1), 0 tài khoản
+  chưa xác nhận.
