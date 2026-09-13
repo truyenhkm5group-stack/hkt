@@ -9,12 +9,15 @@ import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { customerFacets, customerSummary, CUSTOMER_SORTABLE, listCustomers } from "@/lib/queries/customers";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Khách hàng" };
 
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("customers:view");
+  const { decision } = await requireResource("CUSTOMERS", "customers:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Khách hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "lastOrderAt", filterKeys: ["province", "tier"], sortable: CUSTOMER_SORTABLE, defaultPeriod: "all" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listCustomers(params), customerFacets(params), customerSummary(params)]);

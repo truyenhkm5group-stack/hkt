@@ -9,7 +9,9 @@ import { UrlPagination } from "@/components/data-table/url-pagination";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_STATUSES } from "@/lib/constants/cs";
 import { CS_DOMAIN_LABEL, CS_DOMAINS } from "@/lib/constants/cs-domain";
 import { formatNumber } from "@/lib/format";
@@ -28,7 +30,10 @@ export const metadata = { title: "CSKH" };
  * được bằng bộ lọc Miền, chỉ là không chiếm chỗ trong hàng đợi của người đang ngồi trả lời khách.
  */
 export default async function CsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("cs:view");
+  const { user, decision } = await requireResource("CS", "cs:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  // (Trường hợp thu hẹp ĐƯỢC thì mệnh đề SQL nằm trong `lib/queries/cs.ts` — cả hai lớp, không một.)
+  if (decision.allow === "NONE") return <ScopeDenied title="CSKH" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "cs:manage");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain"], sortable: CS_SORTABLE, defaultPeriod: "all" });

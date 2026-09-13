@@ -4,7 +4,8 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { getAttributionCoverage, getFunnelBySource, getSalesFunnel } from "@/lib/queries/sales-funnel";
@@ -29,7 +30,9 @@ function pct(value: number | null) {
 }
 
 export default async function FunnelPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("reports:returns");
+  const { decision } = await requireResource("REPORTS", "reports:returns");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Phễu vận hành" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", sortable: [], defaultPeriod: "30d" });
   const roleParam = typeof raw.role === "string" ? raw.role : "";

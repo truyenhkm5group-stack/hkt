@@ -5,7 +5,8 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { VERDICT_LABEL, VERDICT_RULES, VERDICT_TONE, classifyProduct, type ProductVerdict } from "@/lib/constants/product-verdict";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-intelligence";
@@ -18,7 +19,9 @@ export const metadata = { title: "Hiệu quả mẫu mã" };
 const CHANNELS: OrderSourceKey[] = ["FACEBOOK", "LANDING", "OTHER"];
 
 export default async function ProductPerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("reports:returns");
+  const { decision } = await requireResource("REPORTS", "reports:returns");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Hiệu quả mã hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, {
     defaultSort: "deliveredRevenue",

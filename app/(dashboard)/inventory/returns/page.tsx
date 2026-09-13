@@ -7,7 +7,9 @@ import { receiveQueue, RECEIVE_SLA_DAYS } from "@/lib/returns/receive-queue";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
 
@@ -23,7 +25,9 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
  * chỗ khác nhau và thuộc hai người khác nhau. Gộp một con số thì không biết phải đi giục ai.
  */
 export default async function ReturnInspectionPage() {
-  const user = await requirePermission("products:view");
+  const { user, decision } = await requireResource("RETURNS", "products:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const [bang, pending, choNhan] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400 })]);
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;

@@ -5,7 +5,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { CONFIDENCE_LABEL } from "@/lib/constants/recommendation";
 import { MAX_UNMEASURABLE_FOR_HIGH, RISK_BAND_LABEL, RISK_BAND_TONE, RISK_SIGNAL_LABEL, RISK_SIGNALS, RISK_THRESHOLDS } from "@/lib/constants/preship-risk";
 import { formatNumber } from "@/lib/format";
@@ -29,7 +30,9 @@ export const metadata = { title: "Đơn cần xác minh trước khi giao" };
  *  · không im lặng khi thiếu dữ liệu — số tín hiệu chưa tra được hiện thành một cột riêng.
  */
 export default async function VerifyOrdersPage() {
-  await requirePermission("orders:read");
+  const { decision } = await requireResource("ORDERS", "orders:read");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Đối chiếu đơn" reason={decision.reason} fix={decision.fix} />;
   const [rows, kiemDinh] = await Promise.all([listPreshipRisk({ limit: 300 }), getPreshipRiskBacktest(resolvePeriod({ period: "90d" }, "90d")).catch(() => null)]);
   const tk = summarizePreshipRisk(rows);
   const chuaKiemChung = !kiemDinh || kiemDinh.verdict !== "PHÂN BIỆT ĐƯỢC";

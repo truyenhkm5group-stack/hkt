@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_ACTIONABLE_STATUSES, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
 import { rowsOf } from "@/lib/sql-rows";
+import { decideScope } from "@/lib/auth/scope-guard";
 import type { ListParams } from "@/lib/search-params";
 
 export const CS_SORTABLE = ["createdAt", "updatedAt", "status", "kind", "followUpAt"];
@@ -71,7 +72,25 @@ type FacetKey = "kind" | "status" | "assignee" | "domain";
  * `skip` bỏ đúng một điều kiện để đếm facet của chính nó: đếm "Đã xong" bằng bộ lọc đang có (vốn
  * loại trạng thái đóng) thì con số luôn bằng 0 và người dùng không bao giờ bấm vào được.
  */
-function whereOf(params: ListParams, skip?: FacetKey) {
+/**
+ * ═══════════ PHẠM VI DỮ LIỆU, ÁP NGAY TRONG TRUY VẤN ═══════════
+ *
+ * Trang `/cs` đã từ chối trước khi gọi tới đây khi phạm vi không biểu diễn được. Mệnh đề này là
+ * LỚP THỨ HAI, và nó cố ý thừa: một hàm truy vấn phải an toàn dù ai gọi nó từ đâu. Nếu mai có
+ * một route mới, một hành động, một lối xuất CSV gọi thẳng `listCsCases` mà quên cổng trang, thì
+ * chỗ này vẫn chặn — thay vì lộ toàn bộ case của shop.
+ *
+ * `NONE` ở đây trả về `false` (không dòng nào), KHÔNG phải `undefined` (mọi dòng). Nhầm hai thứ
+ * đó là cách một lá chắn biến thành một cánh cửa.
+ */
+async function phamViCs(): Promise<SQL | undefined> {
+  const quyet = await decideScope("CS");
+  if (quyet.allow === "ALL") return undefined;
+  if (quyet.allow === "ROWS") return quyet.where;
+  return sql`false`;
+}
+
+async function whereOf(params: ListParams, skip?: FacetKey) {
   const c = schema.csCases;
   const conds: (SQL | undefined)[] = [];
   if (params.period.from) conds.push(gte(c.createdAt, params.period.from));
@@ -88,6 +107,7 @@ function whereOf(params: ListParams, skip?: FacetKey) {
     const like = `%${term}%`;
     conds.push(or(ilike(c.title, like), ilike(c.detail, like), ilike(c.customerName, like), ilike(c.customerPhone, like), ilike(c.assignee, like)));
   }
+  conds.push(await phamViCs());
   const defined = conds.filter((x): x is SQL => Boolean(x));
   return defined.length ? and(...defined) : undefined;
 }
@@ -139,7 +159,7 @@ async function loadActiveShipments(ids: string[]) {
 export async function listCsCases(params: ListParams) {
   const db = await getDb();
   const c = schema.csCases;
-  const where = whereOf(params);
+  const where = await whereOf(params);
   const sortCol = params.sort === "updatedAt" ? c.updatedAt : params.sort === "status" ? c.status : params.sort === "kind" ? c.kind : params.sort === "followUpAt" ? c.followUpAt : c.createdAt;
   const [base, [{ total }]] = await Promise.all([
     db.query.csCases.findMany({
@@ -173,12 +193,12 @@ export async function csFacets(params: ListParams) {
   const db = await getDb();
   const c = schema.csCases;
   const [kinds, statuses, assignees, domains] = await Promise.all([
-    db.select({ value: c.kind, count: count() }).from(c).where(whereOf(params, "kind")).groupBy(c.kind),
-    db.select({ value: c.status, count: count() }).from(c).where(whereOf(params, "status")).groupBy(c.status),
-    db.select({ value: c.assignee, count: count() }).from(c).where(and(whereOf(params, "assignee"), sql`${c.assignee} <> ''`)).groupBy(c.assignee),
+    db.select({ value: c.kind, count: count() }).from(c).where(await whereOf(params, "kind")).groupBy(c.kind),
+    db.select({ value: c.status, count: count() }).from(c).where(await whereOf(params, "status")).groupBy(c.status),
+    db.select({ value: c.assignee, count: count() }).from(c).where(and(await whereOf(params, "assignee"), sql`${c.assignee} <> ''`)).groupBy(c.assignee),
     Promise.all(
       CS_DOMAINS.map(async (d) => {
-        const [row] = await db.select({ n: count() }).from(c).where(and(whereOf(params, "domain"), csDomainCond(d)));
+        const [row] = await db.select({ n: count() }).from(c).where(and(await whereOf(params, "domain"), csDomainCond(d)));
         return { value: d as string, label: CS_DOMAIN_LABEL[d], count: Number(row?.n ?? 0) };
       }),
     ),
@@ -201,19 +221,22 @@ export async function csFacets(params: ListParams) {
 export async function csSummary() {
   const db = await getDb();
   const c = schema.csCases;
+  // Cả BA truy vấn tổng hợp dưới đây đều phải mang phạm vi: một con số đếm trên toàn shop cũng là
+  // rò rỉ — nó nói cho người xem biết có bao nhiêu case họ không được thấy.
+  const pv = await phamViCs();
   const rows = await db
     .select({ kind: c.kind, status: c.status, assignee: c.assignee, count: count() })
     .from(c)
-    .where(and(isNull(c.resolvedAt), csCustomerCond()))
+    .where(and(isNull(c.resolvedAt), csCustomerCond(), pv))
     .groupBy(c.kind, c.status, c.assignee);
   const open = rows.filter((r) => (CS_ACTIONABLE_STATUSES as readonly string[]).includes(r.status));
   const byKind: Record<string, number> = {};
   for (const r of open) byKind[r.kind] = (byKind[r.kind] ?? 0) + Number(r.count);
-  const [logistics] = await db.select({ n: count() }).from(c).where(and(inArray(c.status, [...CS_ACTIONABLE_STATUSES]), csLogisticsCond()));
+  const [logistics] = await db.select({ n: count() }).from(c).where(and(inArray(c.status, [...CS_ACTIONABLE_STATUSES]), csLogisticsCond(), pv));
   const [followUpDue] = await db
     .select({ n: count() })
     .from(c)
-    .where(and(inArray(c.status, [...CS_ACTIONABLE_STATUSES]), csCustomerCond(), sql`${c.followUpAt} is not null and ${c.followUpAt} <= now()`));
+    .where(and(inArray(c.status, [...CS_ACTIONABLE_STATUSES]), csCustomerCond(), pv, sql`${c.followUpAt} is not null and ${c.followUpAt} <= now()`));
   return {
     open: open.reduce((a, r) => a + Number(r.count), 0),
     new: rows.filter((r) => r.status === "OPEN").reduce((a, r) => a + Number(r.count), 0),

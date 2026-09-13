@@ -7,7 +7,9 @@ import { BankRulesTab } from "@/app/(dashboard)/bank/rules-tab";
 import { BankTransactionsTab } from "@/app/(dashboard)/bank/transactions-tab";
 import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { BANK_TABS, type BankTab } from "@/lib/constants/bank";
 import { listBankAccounts, listBankRules, sepayLastReconciliation, unclassifiedBankCount, unconfirmedBankAccountCount } from "@/lib/queries/bank";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -24,7 +26,9 @@ export const metadata = { title: "Sổ ngân hàng" };
  */
 export default async function BankPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requirePermission("bank:view");
+  const { user, decision } = await requireResource("FINANCE", "bank:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Sổ ngân hàng" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "bank:write");
   // Quyền RIÊNG: xác nhận tài khoản là quyết định "tiền của tài khoản này vào sổ shop",
   // cao hơn hẳn việc gán nhãn một dòng đã có.

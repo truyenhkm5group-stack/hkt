@@ -6,7 +6,9 @@ import { ExpenseTabs } from "@/app/(dashboard)/expenses/expense-tabs";
 import { ExpensesTab } from "@/app/(dashboard)/expenses/expenses-tab";
 import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { isExpenseTab, type ExpenseTab } from "@/lib/constants/expense-tabs";
 import { getExpenseReport } from "@/lib/queries/expense-report";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -25,7 +27,9 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     }
     redirect(`/ads${q.size ? `?${q.toString()}` : ""}`);
   }
-  const user = await requirePermission("expenses:view");
+  const { user, decision } = await requireResource("FINANCE", "expenses:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Chi phí" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "expenses:write");
   const period = resolvePeriod(raw, "month");
   const requested = param(raw, "tab", "danh-sach");

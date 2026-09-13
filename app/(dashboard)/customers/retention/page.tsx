@@ -6,7 +6,8 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { CRM_RULE, CRM_SEGMENT_ACTION, CRM_SEGMENT_LABEL, CRM_SEGMENT_TONE } from "@/lib/constants/crm";
 import { formatDate, formatNumber } from "@/lib/format";
 import { getRetentionCohorts, getRetentionReport } from "@/lib/queries/crm";
@@ -20,7 +21,9 @@ function pctText(value: number | null) {
 }
 
 export default async function RetentionPage() {
-  await requirePermission("customers:view");
+  const { decision } = await requireResource("CUSTOMERS", "customers:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Khách quay lại" reason={decision.reason} fix={decision.fix} />;
   const r = await getRetentionReport();
   const cov = r.coverage;
 

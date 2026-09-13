@@ -12,8 +12,21 @@ export const env = {
   get appUrl() {
     return read("APP_URL", "http://localhost:3000").replace(/\/$/, "");
   },
+  /**
+   * Khoá ký phiên đăng nhập.
+   *
+   * Giá trị dự phòng chỉ dùng cho máy của người viết code. Trên PRODUCTION mà thiếu biến này thì
+   * mọi phiên đăng nhập được ký bằng một chuỗi NẰM CÔNG KHAI TRONG KHO MÃ — ai đọc kho cũng tự ký
+   * được một cookie quản trị. Thà app không khởi động còn hơn khởi động với cửa mở: hỏng thì thấy
+   * ngay, còn cửa mở thì không ai thấy.
+   */
   get authSecret() {
-    return read("AUTH_SECRET", "dev-secret-change-me-please-32-chars-min");
+    const value = read("AUTH_SECRET");
+    if (value) return value;
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Thiếu AUTH_SECRET trên production — phiên đăng nhập sẽ được ký bằng khoá công khai trong kho mã. Đặt biến này trong .env của máy chủ.");
+    }
+    return "dev-secret-change-me-please-32-chars-min";
   },
   get cronSecret() {
     return read("CRON_SECRET");

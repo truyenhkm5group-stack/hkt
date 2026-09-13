@@ -13,6 +13,9 @@ import { ACCESS_SOURCE_LABEL, departmentCodesOfMany, effectiveAccess, toCustomRo
 import { ALL_PERMISSIONS, PERMISSION_LABEL } from "@/lib/auth/permissions";
 import { loadPermissionSnapshots, loadRoleTemplates } from "@/lib/auth/session";
 import { normalizeScope, SENSITIVE_AREAS, type AccessScope } from "@/lib/constants/access-scope";
+import { SCOPE_RESOURCES } from "@/lib/constants/data-scope-policy";
+import { decideScope } from "@/lib/auth/scope-guard";
+import { membershipOf } from "@/lib/org/membership";
 
 export type AccessRoleRow = CustomRole & { description: string; sortOrder: number; usedBy: number };
 export type PositionRow = { id: string; code: string; name: string; description: string; departmentId: string | null; departmentName: string; active: boolean; sortOrder: number; usedBy: number };
@@ -112,6 +115,24 @@ export type EffectivePreview = EffectiveAccess & {
   granted: { key: string; label: string }[];
   /** Vùng nhạy cảm và người này có chạm được vào không. */
   sensitive: { area: string; department: string; reason: string; allowed: boolean }[];
+  /** Phòng ban người này đang thuộc — chiều thứ ba, và là thứ mở được vùng nhạy cảm. */
+  departments: { code: string; name: string; isLead: boolean }[];
+  /**
+   * CÂU TRẢ LỜI CUỐI CÙNG mà chủ shop thật sự muốn: từng loại dữ liệu, người này ĐỌC được gì và
+   * SỬA được gì, sau khi đã cộng cả quyền lẫn phạm vi.
+   *
+   * Tính bằng CHÍNH máy quyết định mà máy chủ dùng (`decideScope`), không tính lại theo cách
+   * khác — màn xem trước nói một đằng còn hệ thống làm một nẻo là thứ tệ hơn không có xem trước.
+   */
+  resources: {
+    key: string;
+    label: string;
+    read: boolean;
+    write: boolean;
+    sensitive: boolean;
+    /** Vì sao đọc được / không đọc được — câu chữ lấy thẳng từ máy quyết định. */
+    note: string;
+  }[];
 };
 
 /**
@@ -141,6 +162,7 @@ export async function effectivePreview(
     loadPermissionSnapshots(),
   ]);
   const departmentCodes = deptMap[userId] ?? [];
+  const thanhVien = await membershipOf(userId);
   const access = effectiveAccess({
     role: user.role,
     userCustom: user.permissions,
@@ -152,10 +174,50 @@ export async function effectivePreview(
   });
 
   const con = new Set(access.permissions);
+
+  /*
+    Dựng một "người xem giả lập" đúng bằng lựa chọn đang xem trước, rồi hỏi máy quyết định thật.
+    Không dựng phiên đăng nhập, không đụng cookie — `decideScope` nhận người xem qua tham số đúng
+    để phục vụ việc này.
+  */
+  const giaLap = {
+    id: userId,
+    email: "",
+    name: "Người đang xem trước",
+    role: user.role,
+    permissions: access.permissions,
+    scope,
+    departmentCodes,
+    positionId: null,
+  } as const;
+
+  const resources = await Promise.all(
+    SCOPE_RESOURCES.map(async (r) => {
+      const coKhoa = r.readPermissions.some((p) => con.has(p));
+      const quyet = coKhoa ? await decideScope(r.key, giaLap) : null;
+      const read = coKhoa && quyet !== null && quyet.allow !== "NONE";
+      return {
+        key: r.key,
+        label: r.label,
+        read,
+        // Sửa được thì đương nhiên phải đọc được trước: không có màn hình nào cho sửa mù.
+        write: read && r.writePermission !== null && con.has(r.writePermission),
+        sensitive: r.sensitive,
+        note: !coKhoa
+          ? "Không có quyền nào mở được loại dữ liệu này."
+          : quyet!.allow === "NONE"
+            ? quyet!.reason
+            : quyet!.explain,
+      };
+    }),
+  );
+
   return {
     ...access,
     userId,
     sourceLabel: ACCESS_SOURCE_LABEL[access.source],
+    departments: thanhVien.map((m) => ({ code: m.code as string, name: m.name, isLead: m.isLead })),
+    resources,
     granted: (ALL_PERMISSIONS as string[]).filter((p) => con.has(p)).map((key) => ({ key, label: PERMISSION_LABEL[key] ?? key })),
     sensitive: SENSITIVE_AREAS.map((area) => ({
       area: area.label,

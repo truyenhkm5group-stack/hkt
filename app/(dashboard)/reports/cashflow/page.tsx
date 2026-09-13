@@ -5,7 +5,8 @@ import { StatementTab } from "@/app/(dashboard)/reports/cashflow/statement-tab";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { isCashflowTab, type CashflowTab } from "@/lib/constants/cashflow-tabs";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
@@ -29,7 +30,9 @@ export const metadata = { title: "Dòng tiền" };
  */
 export default async function CashflowPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  await requirePermission("reports:cash");
+  const { decision } = await requireResource("FINANCE", "reports:cash");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Báo cáo dòng tiền" reason={decision.reason} fix={decision.fix} />;
   const period = resolvePeriod(raw, "month");
   const requested = param(raw, "tab", "thuc-te");
   const tab = (isCashflowTab(requested) ? requested : "thuc-te") as CashflowTab;

@@ -5,7 +5,9 @@ import { AdsCoverageSection, RoasSection } from "@/app/(dashboard)/ads/roas-sect
 import { AdsDecisionSection } from "@/app/(dashboard)/ads/decision-section";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { ADS_DIMENSION_LABEL, type AdsDimension } from "@/lib/constants/ads-decision";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 
@@ -36,7 +38,9 @@ function isDimension(value: string): value is AdsDimension {
  */
 export default async function AdsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requirePermission("expenses:view");
+  const { user, decision } = await requireResource("ADS", "expenses:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Quảng cáo" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "expenses:write");
   const canManageEmployees = can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");

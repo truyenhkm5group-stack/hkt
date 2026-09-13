@@ -8,7 +8,9 @@ import {
   UnconfirmedAccountsSection,
 } from "@/app/(dashboard)/finance-ops/sections";
 import { PageHeader } from "@/components/page-header";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Hàng đợi tác vụ tài chính" };
 
@@ -24,7 +26,9 @@ export const metadata = { title: "Hàng đợi tác vụ tài chính" };
  * Tài khoản ngân hàng — xem chi tiết ở `lib/queries/finance-ops.ts`.
  */
 export default async function FinanceOpsPage() {
-  const user = await requirePermission("bank:view");
+  const { user, decision } = await requireResource("FINANCE", "bank:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Vận hành tài chính" reason={decision.reason} fix={decision.fix} />;
   const canBank = can(user, "bank:write");
   const canExpense = can(user, "expenses:write");
   const canAccounts = can(user, "bank:accounts");

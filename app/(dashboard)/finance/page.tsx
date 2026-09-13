@@ -7,7 +7,8 @@ import { FinanceNav } from "@/components/finance-nav";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { BALANCE_CONFIDENCE_LABEL } from "@/lib/queries/cash-position";
 import { getFinanceOverview } from "@/lib/queries/finance-overview";
@@ -42,7 +43,9 @@ export const metadata = { title: "Tổng quan tài chính" };
  */
 export default async function FinancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  await requirePermission("bank:view");
+  const { decision } = await requireResource("FINANCE", "bank:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Tài chính" reason={decision.reason} fix={decision.fix} />;
   const period = resolvePeriod(raw, "month");
   const r = await getFinanceOverview(period);
 

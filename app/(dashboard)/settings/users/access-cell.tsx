@@ -36,6 +36,8 @@ type PreviewState = {
   granted: { key: string; label: string }[];
   sensitive: { area: string; department: string; reason: string; allowed: boolean }[];
   departmentCodes: string[];
+  departments: { code: string; name: string; isLead: boolean }[];
+  resources: { key: string; label: string; read: boolean; write: boolean; sensitive: boolean; note: string }[];
 };
 
 export function AccessCell({
@@ -190,8 +192,38 @@ function AccessDialog({
             <div className="mt-2 space-y-3">
               <p className="text-xs text-muted-foreground">
                 Nguồn bó quyền: <strong>{preview.sourceLabel}</strong> · {preview.permissions.length} quyền còn hiệu lực
-                {preview.departmentCodes.length ? ` · thuộc phòng ${preview.departmentCodes.join(", ")}` : " · chưa thuộc phòng ban nào"}
+                {preview.departments.length
+                  ? ` · ${preview.departments.map((d) => (d.isLead ? `${d.name} (trưởng phòng)` : d.name)).join(" · ")}`
+                  : " · chưa thuộc phòng ban nào"}
               </p>
+
+              {/*
+                BẢNG NÀY LÀ CÂU TRẢ LỜI CUỐI CÙNG. Danh sách quyền ở dưới nói người này CẦM những
+                khoá nào; bảng này nói những khoá ấy MỞ ĐƯỢC CÁI GÌ sau khi phạm vi đã cắt. Chủ shop
+                hỏi câu thứ hai, không phải câu thứ nhất.
+              */}
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Thực tế đọc / sửa được gì</div>
+                <div className="mt-1 overflow-hidden rounded-md border">
+                  <table className="w-full text-[11.5px]">
+                    <tbody className="divide-y">
+                      {preview.resources.map((r) => (
+                        <tr key={r.key} className={cn(!r.read && "opacity-55")}>
+                          <td className="w-[38%] px-2 py-1 font-medium">
+                            {r.label}
+                            {r.sensitive ? <span className="ml-1 text-[10px] font-semibold text-amber-600">nhạy cảm</span> : null}
+                          </td>
+                          <td className="w-[86px] px-2 py-1 whitespace-nowrap">
+                            {r.read ? <span className="text-emerald-700 dark:text-emerald-400">đọc</span> : <span className="text-muted-foreground">—</span>}
+                            {r.write ? <span className="ml-1 text-amber-700 dark:text-amber-400">· sửa</span> : null}
+                          </td>
+                          <td className="px-2 py-1 text-[10.5px] leading-snug text-muted-foreground">{r.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Vùng nhạy cảm</div>

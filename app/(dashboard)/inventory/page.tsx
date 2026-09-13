@@ -7,12 +7,15 @@ import { SyncButton } from "@/components/sync-button";
 import { formatNumber } from "@/lib/format";
 import { inventoryFacets, inventorySummary, INVENTORY_SORTABLE, listInventory } from "@/lib/queries/inventory";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Nhật ký kho" };
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("products:view");
+  const { decision } = await requireResource("INVENTORY", "products:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Tồn kho" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["warehouse", "table", "direction"], sortable: INVENTORY_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listInventory(params), inventoryFacets(params), inventorySummary(params)]);

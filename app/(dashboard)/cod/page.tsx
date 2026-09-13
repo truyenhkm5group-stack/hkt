@@ -14,7 +14,8 @@ import { SyncButton } from "@/components/sync-button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { SETTLEMENT_HINT, SETTLEMENT_LABEL, SETTLEMENT_TONE, type SettlementStatus } from "@/lib/constants/cod";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import {
@@ -33,7 +34,9 @@ export const metadata = { title: "Đối soát COD" };
 const TINH_TRANG_HOP_LE = new Set<string>(["QUA_HAN", "CHUA_TRA", "TRA_THIEU", "DA_TRA_DU", "CHUA_GIAO", "GIAO_NHUNG_HOAN", "KHONG_PHAI_TRA", "ALL"]);
 
 export default async function CodPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("cod:view");
+  const { decision } = await requireResource("FINANCE", "cod:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Đối soát COD" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "deliveredAt", sortable: [], defaultPeriod: "all" });
   const tt = param(raw, "tt");

@@ -17,6 +17,8 @@ import { FinancialTruthTab } from "@/app/(dashboard)/reports/financial-truth-tab
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { can, requireUser } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -138,6 +140,11 @@ export default async function ReportsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const raw = await searchParams;
+  /*
+    Trang này CỐ Ý không dùng `requirePermission`: bốn tab có bốn quyền khác nhau và người chỉ có
+    một tab vẫn phải vào được. Nên cổng phạm vi áp bằng khoá của tab RỘNG NHẤT mà họ có, sau khi
+    đã biết họ có tab nào.
+  */
   const user = await requireUser();
   const allowed = {
     pnl: can(user, "reports:delivered"),
@@ -153,6 +160,9 @@ export default async function ReportsPage({
   // không có quyền tab đang xin → chuyển sang tab đầu tiên được phép; không được tab nào → về trang chủ
   const firstAllowed = (["pnl", "truth", "cash", "nominal"] as const).find((t) => allowed[t]);
   if (!firstAllowed) redirect("/?forbidden=1");
+  const { decision } = await requireResource("REPORTS", allowed.pnl ? "reports:delivered" : allowed.cash ? "reports:cash" : "reports:nominal");
+  // Báo cáo là số TỔNG HỢP toàn shop — không tách lại theo người được, nên phạm vi hẹp phải TỪ CHỐI.
+  if (decision.allow === "NONE") return <ScopeDenied title="Báo cáo lợi nhuận" reason={decision.reason} fix={decision.fix} />;
   const tab: "pnl" | "cash" | "nominal" | "truth" = allowed[wanted] ? wanted : firstAllowed;
   if (tab !== wanted && tabParam) redirect(`/reports?tab=${tab}`);
   const productParam = param(raw, "product");

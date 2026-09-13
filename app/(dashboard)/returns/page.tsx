@@ -7,12 +7,15 @@ import { SyncButton } from "@/components/sync-button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listReturns, returnFacets, returnSummary, RETURN_SORTABLE } from "@/lib/queries/returns";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Đổi / trả hàng" };
 
 export default async function ReturnsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("returns:view");
+  const { decision } = await requireResource("RETURNS", "returns:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Đổi / trả hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["type"], sortable: RETURN_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listReturns(params), returnFacets(params), returnSummary(params)]);

@@ -10,7 +10,9 @@ import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignableUsers } from "@/lib/actions/alerts";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getCareNotePresets, getCareWorkbench } from "@/lib/queries/care-workbench";
@@ -27,7 +29,9 @@ export const metadata = { title: "Vận đơn & care" };
  * Năm tab một hàng, chữ giải thích nằm trong ⓘ.
  */
 export default async function ShipmentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const user = await requirePermission("shipments:view");
+  const { user, decision } = await requireResource("SHIPMENTS", "shipments:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Vận đơn" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const viewRaw = typeof raw.view === "string" ? raw.view : "care";
   const view: CareView | "report" = viewRaw === "report" ? "report" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";

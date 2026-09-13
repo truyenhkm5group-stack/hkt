@@ -9,7 +9,13 @@ export async function middleware(request: NextRequest) {
   if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next();
 
   const token = request.cookies.get(COOKIE)?.value;
-  const secret = process.env.AUTH_SECRET?.trim() || "dev-secret-change-me-please-32-chars-min";
+  /*
+    Cùng luật với `lib/env.ts`: trên production thiếu AUTH_SECRET là cửa mở, không phải bất tiện.
+    Middleware chạy ở Edge nên không import được `lib/env`; luật phải chép lại đúng ở đây, và
+    `tests/scope-enforcement.test.ts` kiểm hai chỗ nói cùng một câu.
+  */
+  const secret = process.env.AUTH_SECRET?.trim() || (process.env.NODE_ENV === "production" ? "" : "dev-secret-change-me-please-32-chars-min");
+  if (!secret) return NextResponse.json({ error: "Máy chủ chưa cấu hình AUTH_SECRET" }, { status: 500 });
   let valid = false;
   if (token) {
     try {

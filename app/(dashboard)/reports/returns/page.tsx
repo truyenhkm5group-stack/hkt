@@ -36,7 +36,8 @@ import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
 
@@ -52,7 +53,9 @@ export default async function ReturnRatePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requirePermission("reports:returns");
+  const { decision } = await requireResource("REPORTS", "reports:returns");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, {
     defaultSort: "successRate",

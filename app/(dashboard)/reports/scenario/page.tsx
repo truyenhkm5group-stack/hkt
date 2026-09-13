@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { SCENARIO_LEVER_LABEL, SCENARIO_LEVER_NOTE, SCENARIO_LEVER_UNIT, SCENARIO_LIMIT, type ScenarioLeverKey } from "@/lib/constants/scenario";
 import { formatNumber } from "@/lib/format";
 import { getScenario, type ScenarioLevers } from "@/lib/queries/scenario";
@@ -21,7 +22,9 @@ function one(value: string | string[] | undefined): string {
 }
 
 export default async function ScenarioPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("reports:nominal");
+  const { decision } = await requireResource("REPORTS", "reports:nominal");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Kịch bản" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const period = resolvePeriod(raw, "30d");
   const levers: Partial<ScenarioLevers> = Object.fromEntries(LEVERS.map((k) => [k, Number(one(raw[k])) || 0])) as Partial<ScenarioLevers>;
