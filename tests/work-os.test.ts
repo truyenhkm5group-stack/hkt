@@ -505,7 +505,9 @@ export async function testWorkOs(db: Db) {
   assert.equal(slaHoursFor("ALERT", "RISKY_ORDER", { ALERT: 99, "ALERT:RISKY_ORDER": 3 }), 3, "ghi đè mức LOẠI thắng ghi đè mức nguồn");
   assert.equal(slaHoursFor("ALERT", "RISKY_ORDER", { "ALERT:RISKY_ORDER": null }), null, "ghi đè null = CỐ Ý không đặt hạn, không phải quên");
   assert.equal(slaHoursFor("KHONG_CO_NGUON_NAY", null, null), null, "nguồn lạ thì không đặt hạn, không bịa ra một con số");
-  assert.equal(slaDueAt("CS_CASE", null, T(0), { CS_CASE: 5 })?.getTime(), T(0).getTime() + 5 * 3_600_000, "mốc hết hạn = lúc việc xuất hiện + số giờ");
+  // Cùng lý do như khối 22: chốt mốc một lần thay vì gọi `T(0)` hai lần và so hai đồng hồ.
+  const MOC_0 = T(0);
+  assert.equal(slaDueAt("CS_CASE", null, MOC_0, { CS_CASE: 5 })?.getTime(), MOC_0.getTime() + 5 * 3_600_000, "mốc hết hạn = lúc việc xuất hiện + số giờ");
   assert.equal(slaDueAt("ADS_DECISION", null, T(0), null), null, "loại việc cố ý không đặt hạn thì không sinh mốc nào");
 
   // Màn hình cấu hình phải phân biệt "đang dùng mặc định" với "người đã sửa".
@@ -543,17 +545,31 @@ export async function testWorkOs(db: Db) {
   assert.deepEqual(sanitizeOwnership({ CS_CASE: "SALES", X: "KHONG_CO_PHONG_NAY" }), { CS_CASE: "SALES" }, "mã phòng không có thật bị bỏ");
 
   /* ═══════════ 22 · ÁP CẤU HÌNH LÊN VIỆC ═══════════ */
-  const viecMau: WorkItem = mau({ sourceType: "ALERT", kind: "RISKY_ORDER", department: "MANAGEMENT", statusAuthority: "SOURCE", createdAt: T(10) });
+  /*
+    MỐC THỜI GIAN CHỐT MỘT LẦN, KHÔNG GỌI `T()` HAI LẦN CHO CÙNG MỘT MỐC.
+
+    `T(h)` đọc `Date.now()` tại thời điểm gọi. Khối này trước đây dựng việc bằng `T(10)` rồi so
+    sánh với một `T(10)` KHÁC ở dòng assert — hai lời gọi cách nhau vài chỉ thị máy. Trùng nhau
+    khi bộ kiểm chạy nhanh; lệch đúng 1 ms khi một mili-giây kịp trôi qua giữa hai dòng, và bài
+    kiểm đỏ vì đồng hồ chứ không vì mã sai.
+
+    Đây là bài kiểm ĐỎ NGẪU NHIÊN — kiểu hỏng tệ nhất, vì lần sau nó xanh và người ta học được
+    thói quen chạy lại thay vì đọc. Chốt mốc vào một hằng số thì phép so sánh chỉ còn nói về
+    `applyWorkConfig`, đúng thứ nó định nói. Không assertion nào bị nới lỏng.
+  */
+  const MOC_TAO = T(10);
+  const MOC_HAN_TAY = T(-5);
+  const viecMau: WorkItem = mau({ sourceType: "ALERT", kind: "RISKY_ORDER", department: "MANAGEMENT", statusAuthority: "SOURCE", createdAt: MOC_TAO });
   // Không ai ghi đè ⇒ con số phải ĐÚNG BẰNG số đang chạy, không được đổi lặng lẽ.
   const mocDinh = applyWorkConfig(viecMau, { sla: {}, ownership: {} });
-  assert.equal(mocDinh.slaAt?.getTime(), T(10).getTime() + CASE_SLA_HOURS.RISKY_ORDER! * 3_600_000, "chưa ai sửa cấu hình thì hạn giữ nguyên số cũ");
+  assert.equal(mocDinh.slaAt?.getTime(), MOC_TAO.getTime() + CASE_SLA_HOURS.RISKY_ORDER! * 3_600_000, "chưa ai sửa cấu hình thì hạn giữ nguyên số cũ");
   assert.equal(mocDinh.department, TEAM_DEPARTMENT.CS, "phòng ban cũng giữ nguyên phân công đang chạy");
   const daSua = applyWorkConfig(viecMau, { sla: { "ALERT:RISKY_ORDER": 1 }, ownership: { "ALERT:RISKY_ORDER": "FINANCE" } });
-  assert.equal(daSua.slaAt?.getTime(), T(10).getTime() + 3_600_000, "sửa cấu hình có hiệu lực ngay, không cần deploy");
+  assert.equal(daSua.slaAt?.getTime(), MOC_TAO.getTime() + 3_600_000, "sửa cấu hình có hiệu lực ngay, không cần deploy");
   assert.equal(daSua.department, "FINANCE");
   // Việc tay: HẠN NGƯỜI GIAO ĐẶT LUÔN THẮNG cấu hình.
-  const viecTay: WorkItem = mau({ sourceType: "MANUAL_TASK", kind: null, statusAuthority: "WORK", createdAt: T(10), dueAt: T(-5) });
-  assert.equal(applyWorkConfig(viecTay, { sla: { MANUAL_TASK: 1 }, ownership: {} }).slaAt?.getTime(), T(-5).getTime(), "hạn người giao đặt thắng hạn dự phòng của cấu hình");
+  const viecTay: WorkItem = mau({ sourceType: "MANUAL_TASK", kind: null, statusAuthority: "WORK", createdAt: MOC_TAO, dueAt: MOC_HAN_TAY });
+  assert.equal(applyWorkConfig(viecTay, { sla: { MANUAL_TASK: 1 }, ownership: {} }).slaAt?.getTime(), MOC_HAN_TAY.getTime(), "hạn người giao đặt thắng hạn dự phòng của cấu hình");
 
   /* ═══════════ 23 · VIỆC ĐÃ ĐÓNG: TRUNG VỊ, ĐÚNG HẸN, TIỀN ĐO ĐƯỢC ═══════════ */
   const H = 3_600_000;

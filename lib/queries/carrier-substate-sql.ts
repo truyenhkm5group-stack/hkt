@@ -40,9 +40,17 @@ function mauLike(m: string): string {
  */
 export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased, chang: SQL | SQL.Aliased): SQL {
   const theoMa = Object.entries(VTP_CODE_TO_SUBSTATE).map(([code, s]) => sql`when ${ma} = ${Number(code)} then ${s}`);
-  const daBoDau = boDauSql(chu);
+  /*
+    BỎ DẤU TÍNH ĐÚNG MỘT LẦN.
+
+    12 luật chữ × trung bình 6 mẫu = hơn 70 phép so sánh `like`. Viết `translate(lower(…), …)`
+    thẳng vào từng vế nghĩa là Postgres gọi `translate` với hai chuỗi 67 ký tự hơn bảy mươi lần
+    CHO MỖI DÒNG, và câu lệnh in ra phình thêm gần 10 KB.
+
+    Đặt nó vào một bảng con một dòng rồi tham chiếu `v.chu` — cùng kết quả, một lần tính.
+  */
   const theoChu = SUBSTATE_TEXT_RULES.map(
-    (luat) => sql`when ${sql.join(luat.match.map((m) => sql`${daBoDau} like ${mauLike(m)}`), sql` or `)} then ${luat.substate}`,
+    (luat) => sql`when ${sql.join(luat.match.map((m) => sql`v.chu like ${mauLike(m)}`), sql` or `)} then ${luat.substate}`,
   );
   const theoChang: [string, CarrierSubstate][] = [
     ["PENDING", "AWAITING_PICKUP"],
@@ -57,11 +65,12 @@ export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased
   ];
   const chang2 = theoChang.map(([st, s]) => sql`when ${chang} = ${st} then ${s}`);
 
-  return sql`case
+  return sql`(select case
     ${sql.join(theoMa, sql` `)}
-    ${sql.join(theoChu.map((c) => sql`${c}`), sql` `)}
+    ${sql.join(theoChu, sql` `)}
     ${sql.join(chang2, sql` `)}
-    else 'UNKNOWN' end`;
+    else 'UNKNOWN' end
+    from (select ${boDauSql(chu)} as chu) v)`;
 }
 
 /**
@@ -80,19 +89,29 @@ export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased
 export function fulfillmentBucketSql(input: { ma: SQL | SQL.Aliased; chu: SQL | SQL.Aliased; chang: SQL | SQL.Aliased; coDauVetDvvc: SQL; coVanDon: SQL; changDon: SQL | SQL.Aliased; daRoiKho: SQL }): SQL {
   const huyTrenPancake = sql`${input.changDon} in ('CANCELLED','DELETED')`;
   const con = carrierSubstateSql(input.ma, input.chu, input.chang);
+
+  /*
+    TRẠNG THÁI CON TÍNH ĐÚNG MỘT LẦN.
+
+    Bản đầu viết `when ${con} = 'X' then …` chín lần. Đúng về kết quả, nhưng nó NHÂN BẢN cả biểu
+    thức `case` (29 mã + 12 luật chữ) chín lượt: câu lệnh in ra dài 180 KB, và Postgres tính lại
+    cùng một giá trị chín lần cho TỪNG đơn. Trên trang chủ đó là chín lần × số đơn trong kỳ.
+
+    `select … from (select <biểu thức> as con)` tính một lần rồi dùng lại — cùng kết quả, một phần
+    chín kích thước, và câu lệnh đọc được bằng mắt người.
+  */
   return sql`case
     when not ${input.coVanDon} then (case when ${huyTrenPancake} then 'CANCELLED' else 'NOT_SHIPPED' end)
     when not ${input.coDauVetDvvc} then (case when ${huyTrenPancake} then 'CANCELLED' else 'UNKNOWN' end)
-    when ${con} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','WAITING_REDELIVERY','DELIVERY_EXCEPTION') then 'IN_FLIGHT'
-    -- MƠ HỒ: "chờ xử lý" nằm ở CẢ HAI phía mốc lấy hàng, nên chứng từ quyết định chứ không phải chữ.
-    when ${con} = 'WAITING_PROCESSING' then (case when ${input.daRoiKho} then 'IN_FLIGHT' else 'NOT_SHIPPED' end)
-    when ${con} = 'AWAITING_PICKUP' then 'NOT_SHIPPED'
-    when ${con} = 'PICKUP_FAILED' then 'PICKUP_FAILED'
-    when ${con} = 'DELIVERED' then 'DELIVERED'
-    when ${con} = 'RETURNING' then 'RETURNING'
-    when ${con} = 'RETURNED' then 'RETURNED'
-    when ${con} = 'CANCELLED' then 'CANCELLED'
-    else 'UNKNOWN' end`;
+    else (select case
+      when t.con in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','WAITING_REDELIVERY','DELIVERY_EXCEPTION') then 'IN_FLIGHT'
+      -- MƠ HỒ: "chờ xử lý" nằm ở CẢ HAI phía mốc lấy hàng, nên chứng từ quyết định chứ không phải chữ.
+      when t.con = 'WAITING_PROCESSING' then (case when ${input.daRoiKho} then 'IN_FLIGHT' else 'NOT_SHIPPED' end)
+      when t.con = 'AWAITING_PICKUP' then 'NOT_SHIPPED'
+      when t.con in ('PICKUP_FAILED','DELIVERED','RETURNING','RETURNED','CANCELLED') then t.con
+      else 'UNKNOWN' end
+      from (select ${con} as con) t)
+    end`;
 }
 
 /** Danh sách rổ, để câu đếm sinh đúng một cột cho mỗi rổ và không rổ nào bị bỏ quên. */
