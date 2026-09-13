@@ -94,6 +94,8 @@ export type OrgPerson = {
   name: string;
   email: string;
   role: string;
+  /** Chức danh (`positions.id`). Chỉ là NHÃN — không tham gia phép tính quyền; dùng để giải đích chỉ số. */
+  positionId: string | null;
   departments: { id: string; code: DepartmentCode; name: string; roleInDept: DepartmentRole }[];
 };
 
@@ -101,7 +103,7 @@ export async function listOrgPeople(): Promise<OrgPerson[]> {
   const db = await getDb();
   const [users, byUser] = await Promise.all([
     db
-      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, role: schema.users.role })
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, role: schema.users.role, positionId: schema.users.positionId })
       .from(schema.users)
       .where(eq(schema.users.active, true))
       .orderBy(asc(schema.users.name)),
@@ -116,16 +118,16 @@ export async function listOrgPeople(): Promise<OrgPerson[]> {
 /* ═══════════════════ NHẬN DIỆN "VIỆC CỦA TÔI" ═══════════════════ */
 
 /**
- * Ai đang cầm việc này — và vì sao không so bằng một trường duy nhất.
+ * Ai đang cầm việc này — và vì sao VẪN so cả hai chiều dù đã có khoá ở mọi miền.
  *
- * Ba miền ghi người phụ trách theo ba kiểu khác nhau, và đó là sự thật lịch sử không sửa được
- * trong bản này: `notifications.assigned_to` và `shipment_care.owner_id` là KHOÁ NGƯỜI DÙNG, còn
- * `cs_cases.assignee` là một ô CHỮ (tên hoặc bí danh, kể cả tên bot). Ép cả ba về một kiểu nghĩa
- * là phải migrate dữ liệu CSKH đang chạy — việc đó nằm ngoài phạm vi và sẽ làm mất người phụ trách
- * của những case mà tên không khớp tài khoản nào.
+ * Từ migration 0073 cả ba miền đều có khoá tài khoản (`notifications.assigned_to`,
+ * `shipment_care.owner_id`, `cs_cases.assignee_user_id`). Nhưng DÒNG CŨ thì không, và chúng vẫn
+ * đang nằm trong hàng đợi: bỏ vế so theo TÊN ở đây sẽ làm một loạt việc cũ biến mất khỏi "việc
+ * của tôi" ngay giữa ca làm.
  *
- * Nên so cả hai chiều: khớp khoá thì chắc chắn; không có khoá thì khớp TÊN, phân biệt hoa thường
- * và khoảng trắng. Chỗ nào không khớp được thì việc vẫn nằm ở hàng đợi phòng — không biến mất.
+ * Khác biệt quan trọng với thẻ điểm: HÀNG ĐỢI được phép rộng rãi (thà hiện thừa một việc còn hơn
+ * giấu mất một việc), còn THẺ ĐIỂM thì không (quy nhầm công của người này cho người kia là hỏng
+ * hẳn). Nên hai nơi cố ý dùng hai mức chặt chẽ khác nhau.
  */
 export function isMine(item: WorkItem, me: { id: string; name: string; email: string }): boolean {
   const a = item.assignee;

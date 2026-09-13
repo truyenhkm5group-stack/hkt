@@ -1,5 +1,7 @@
 "use server";
 
+import type { Actor } from "@/lib/constants/actor";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
@@ -8,6 +10,16 @@ import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
 import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
 import { findPendingByCode, recordInspection, recordInspectionBulk, recordItemInspection, type PendingInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
+
+/**
+ * NGƯỜI KHO = KHOÁ TÀI KHOẢN + TÊN.
+ *
+ * Trước bản này các đường ghi chỉ truyền `user.email`, nên phiếu kiểm hoàn không nối được về một
+ * tài khoản: đổi email là mất dấu, và chỉ số "kiểm trong hạn" của phòng Kho đứng trên một ô chữ.
+ */
+function khoActor(user: { id: string; email: string; name: string }): Actor {
+  return { id: user.id, label: user.name || user.email };
+}
 
 export type ReturnReceiveResult = { ok: true; count: number; message: string } | { error: string };
 
@@ -32,7 +44,7 @@ export async function confirmReturnReceived(input: unknown): Promise<ReturnRecei
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const { count, ids } = await markReturnReceived(parsed.data.ids, user.email, parsed.data.note);
+  const { count, ids } = await markReturnReceived(parsed.data.ids, khoActor(user), parsed.data.note);
   if (!count) return { ok: true, count: 0, message: "Các vận đơn đã được ghi nhận trước đó, không thay đổi gì." };
   await audit({ userId: user.id, userEmail: user.email, action: "return.received", entity: "shipments", entityId: ids.join(","), detail: { count, note: parsed.data.note ?? "" } });
   revalidate();
@@ -81,7 +93,7 @@ export async function confirmAllReturnedReceived(input: unknown): Promise<Return
   const ids = await listPendingReturnedIds(BULK_LIMIT);
   if (!ids.length) return { ok: true, count: 0, message: "Không còn hàng hoàn nào chờ kho xác nhận." };
 
-  const { count, ids: done } = await markReturnReceived(ids, user.email, parsed.data.note);
+  const { count, ids: done } = await markReturnReceived(ids, khoActor(user), parsed.data.note);
   await audit({ userId: user.id, userEmail: user.email, action: "return.received.bulk", entity: "shipments", entityId: done.join(","), detail: { count, note: parsed.data.note ?? "" } });
   revalidate();
   const remaining = (await listPendingReturnedIds(BULK_LIMIT)).length;
@@ -125,7 +137,7 @@ export async function submitReturnInspection(input: unknown): Promise<Inspection
   const parsed = inspectionSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const result = await recordInspection({ ...parsed.data, actor: user.email });
+  const result = await recordInspection({ ...parsed.data, actor: khoActor(user) });
   if ("error" in result) return { error: result.error };
 
   await audit({
@@ -178,7 +190,7 @@ export async function submitBulkInspection(input: unknown): Promise<BulkInspecti
   const { shipmentIds, condition, note } = parsed.data;
   if (CONDITION_NEEDS_NOTE[condition] && !note) return { error: `Kết luận “${CONDITION_LABEL[condition]}” phải ghi rõ lý do` };
 
-  const r = await recordInspectionBulk(shipmentIds, condition, note, user.email);
+  const r = await recordInspectionBulk(shipmentIds, condition, note, khoActor(user));
   await audit({
     userId: user.id,
     userEmail: user.email,
@@ -253,7 +265,7 @@ export async function submitItemInspection(input: unknown): Promise<ItemInspecti
   const parsed = itemInspectionSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: user.email, orderOnlyConfirmed: parsed.data.orderOnlyConfirmed });
+  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: khoActor(user), orderOnlyConfirmed: parsed.data.orderOnlyConfirmed });
   if ("error" in result) return { error: result.error };
 
   await audit({

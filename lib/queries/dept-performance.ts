@@ -118,21 +118,29 @@ function pct(num: number, den: number): number | null {
 type SalesRow = { who: string; closed: number; on_time: number; with_conv: number; converted: number; delivered: number; returned: number; revenue: string | number };
 
 /**
- * Một hàng cho mỗi người xử lý case, ghép theo Ô CHỮ `cs_cases.assignee`.
+ * Một hàng cho mỗi người xử lý case, ghép theo KHOÁ TÀI KHOẢN `cs_cases.assignee_user_id`.
  *
- * Ô đó là TÊN hoặc bí danh do Pancake ghi, không phải khoá người dùng — đo trên production
- * 12/09/2026: 88/384 case đang mở có tên ở đó. Nên ghép bằng tên đã chuẩn hoá (bỏ khoảng trắng
- * thừa, không phân biệt hoa thường), đúng cách `isMine` đang làm ở hàng đợi. Người không khớp tài
- * khoản nào vẫn ra một dòng — họ có làm việc thật, giấu đi thì tổng của phòng sai.
+ * ─── VÌ SAO BỎ CÁCH GHÉP CŨ (Ô CHỮ `assignee`) ───
+ *
+ * Bản trước ghép bằng TÊN đã chuẩn hoá. Đo lại trên production 13/09/2026 thì cách đó không những
+ * yếu — nó SAI: `cs_cases` có 785 dòng, và ô phụ trách chỉ chứa ĐÚNG MỘT chuỗi khác rỗng, là
+ * `Bot ERP` (187 dòng). Tức là cách ghép cũ đang dựng một "người" tên Bot ERP với 187 case và
+ * chấm điểm nó, trong khi số người thật được đo là 0.
+ *
+ * Nay ghép bằng khoá. Hệ quả trung thực: chừng nào chưa ai giao case cho người thật thì phòng
+ * Kinh doanh KHÔNG có chỉ số cá nhân, và màn hình nói đúng như vậy thay vì hiện một cái tên máy.
+ *
+ * Dòng cũ KHÔNG bị xoá: chúng vẫn còn nguyên trong bảng, vẫn tra được ở màn CSKH, chỉ là không
+ * vào thẻ điểm — vì không có gì nối chúng về một con người.
  */
 async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricInput[]>> {
   const db = await getDb();
   const rows = rowsOf<SalesRow>(
     await db.execute(sql`
       with da_dong as (
-        select lower(btrim(c.assignee)) as who, c.id, c.created_at, c.resolved_at, c.conversation_id
+        select c.assignee_user_id as who, c.id, c.created_at, c.resolved_at, c.conversation_id
         from cs_cases c
-        where c.status = 'DONE' and c.resolved_at between ${from} and ${to} and btrim(c.assignee) <> ''
+        where c.status = 'DONE' and c.resolved_at between ${from} and ${to} and c.assignee_user_id is not null
       ),
       ghep_don as (
         select d.*, o.id as order_id, coalesce(o.value, 0) as order_value,
@@ -327,12 +335,19 @@ async function logisticsMetrics(from: Date, to: Date): Promise<Map<string, Metri
 
 type WhRow = { who: string; inspected: number; on_time: number; with_issue: number; unsellable: string | number };
 
+/**
+ * Ghép theo KHOÁ TÀI KHOẢN `inspected_by_user_id`, không theo email.
+ *
+ * Email đọc được nhưng không quy kết được: người đổi email là mất dấu toàn bộ phiếu cũ. Phiếu
+ * lập trước migration 0073 không có khoá nên không vào thẻ điểm — và đó là câu trả lời đúng, vì
+ * không có gì trong dữ liệu nối chúng chắc chắn về một tài khoản.
+ */
 async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, MetricInput[]>> {
   const db = await getDb();
   const gio = CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION ?? 72;
   const rows = rowsOf<WhRow>(
     await db.execute(sql`
-      select lower(btrim(i.inspected_by)) as who,
+      select i.inspected_by_user_id as who,
              count(*)::int as inspected,
              count(*) filter (where i.inspected_at <= i.received_at + (${gio} || ' hours')::interval)::int as on_time,
              -- LỆCH = kiện không về nguyên vẹn: có hàng không bán lại được, hoặc kết luận khác 'OK'.
@@ -340,8 +355,8 @@ async function warehouseMetrics(from: Date, to: Date): Promise<Map<string, Metri
              coalesce(sum(i.unsellable_qty), 0) as unsellable
       from return_inspections i
       where i.status = 'INSPECTED' and i.inspected_at between ${from} and ${to}
-        and i.inspected_by is not null and btrim(i.inspected_by) <> ''
-      group by lower(btrim(i.inspected_by))
+        and i.inspected_by_user_id is not null
+      group by i.inspected_by_user_id
     `),
   );
   const out = new Map<string, MetricInput[]>();
@@ -457,20 +472,24 @@ export async function getDeptPerformance(q: DeptPerfQuery): Promise<DeptPerforma
   const base: DeptPerformance = { department: q.department, label: DEPARTMENT_LABEL[q.department], team: [], people: [], missing, missingAttribution: spec.notAttributed, from: q.from, to: q.to };
 
   /*
-    GHÉP NGƯỜI: mỗi phòng một khoá khác nhau, và đó là sự thật lịch sử không sửa được trong bản này.
-    Kinh doanh ghép theo TÊN (`cs_cases.assignee` là ô chữ), Kho và Kế toán theo EMAIL, Giao vận
-    theo KHOÁ NGƯỜI DÙNG. Ép cả bốn về một kiểu nghĩa là migrate dữ liệu đang chạy của bốn module.
+    GHÉP NGƯỜI: BỐN PHÒNG, MỘT KIỂU KHOÁ.
+
+    Trước migration 0073 mỗi phòng ghép một kiểu — Kinh doanh theo TÊN GÕ TAY, Kho theo EMAIL,
+    Giao vận và Kế toán theo KHOÁ. Ba kiểu khoá nghĩa là ba mức "có thể nhầm người" khác nhau
+    trong cùng một bảng, và người đọc không có cách nào biết ô nào đáng tin hơn ô nào.
+
+    Nay cả bốn đi bằng `users.id`. Cái giá là dòng CŨ không có khoá thì không vào thẻ điểm —
+    nhưng dòng cũ không có khoá vốn đã không quy kết được; trước đây chúng chỉ TRÔNG như quy kết
+    được.
   */
-  const byName = (n: string) => n.trim().toLowerCase();
-  const byEmail = (e: string) => e.trim().toLowerCase();
 
   /*
     ═══ XUẤT XỨ GẮN Ở ĐÚNG MỘT CHỖ ═══
 
-    `linkage` khác nhau theo phòng và đó là sự thật lịch sử: Kinh doanh ghép theo TÊN GÕ TAY
-    (`cs_cases.assignee` là ô chữ), Kho và Kế toán theo EMAIL, Giao vận theo KHOÁ TÀI KHOẢN. Nó
-    không phải chi tiết kỹ thuật — nó là lý do một con số 95% của phòng Kinh doanh đáng tin ít hơn
-    95% của phòng Giao vận, và người đọc thẻ điểm phải thấy điều đó.
+    Từ migration 0073 cả bốn phòng ghép bằng `users.id`, nên `linkage` là `USER_ID` ở khắp nơi.
+    Trường này KHÔNG bị bỏ đi: nó vẫn là chỗ khai, và nếu ngày mai có một nguồn mới chỉ nối được
+    bằng email hay bằng tên thì nó phải khai đúng như vậy ở đây — chứ không im lặng mượn độ tin
+    cậy của những nguồn xung quanh.
 
     `attribution` lấy thẳng từ `DEPT_PERF[phòng].notAttributed`, nên luật "không phạt ai vì thứ họ
     không quyết được" đi theo từng con số ra tới giao diện thay vì nằm yên trong tài liệu.
@@ -486,13 +505,13 @@ export async function getDeptPerformance(q: DeptPerfQuery): Promise<DeptPerforma
 
   if (q.department === "SALES") {
     const m = await salesMetrics(q.from, q.to);
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(byName(p.name)) ?? [], "FREE_TEXT") }));
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(p.id) ?? [], "USER_ID") }));
   } else if (q.department === "LOGISTICS") {
     const m = await logisticsMetrics(q.from, q.to);
     base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(p.id) ?? [], "USER_ID") }));
   } else if (q.department === "WAREHOUSE") {
     const m = await warehouseMetrics(q.from, q.to);
-    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(byEmail(p.email)) ?? [], "EMAIL") }));
+    base.people = q.people.map((p) => ({ userId: p.id, name: p.name, email: p.email, metrics: gan(m.get(p.id) ?? [], "USER_ID") }));
   } else if (q.department === "FINANCE") {
     const { people, team } = await financeMetrics(q.from, q.to);
     // Chỉ số mức SỔ: chủ thể là PHÒNG, không phải người — nói rõ thay vì để người đọc tự suy.

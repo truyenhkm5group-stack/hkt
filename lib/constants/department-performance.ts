@@ -1,3 +1,5 @@
+import { metricsOf } from "@/lib/constants/metric-catalog";
+import type { PersonLinkage } from "@/lib/constants/metric-provenance";
 import { DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 
 /**
@@ -154,33 +156,33 @@ export const DEPARTMENTS_WITHOUT_PERF: DepartmentCode[] = DEPARTMENT_CODES.filte
  */
 export type DeptMetricSpec = { key: string; label: string; unit: "PERCENT" | "COUNT" | "VND" | "HOURS" | "DAYS"; denominatorLabel: string; owner: "PERSON" | "DEPARTMENT" };
 
-export const DEPT_METRIC_KEYS: Partial<Record<DepartmentCode, DeptMetricSpec[]>> = {
-  SALES: [
-    { key: "sales_followup_sla", label: "Trả lời / đóng case trong hạn", unit: "PERCENT", denominatorLabel: "case CSKH CÓ ĐẶT HẠN mà người này đã đóng trong kỳ", owner: "PERSON" },
-    { key: "sales_conversion", label: "Hội thoại ra đơn", unit: "PERCENT", denominatorLabel: "case có mã hội thoại", owner: "PERSON" },
-    { key: "sales_delivered_quality", label: "Đơn từ case này giao thành công", unit: "PERCENT", denominatorLabel: "đơn sinh từ hội thoại của case, chỉ tính đơn ĐÃ kết thúc", owner: "PERSON" },
-    { key: "sales_contribution", label: "Doanh thu giao thành công từ case", unit: "VND", denominatorLabel: "đơn giao thành công sinh từ case người này đóng", owner: "PERSON" },
-  ],
-  LOGISTICS: [
-    { key: "care_sla", label: "Đóng ca care trong hạn", unit: "PERCENT", denominatorLabel: "ca care người này đã đóng trong kỳ", owner: "PERSON" },
-    { key: "care_recovered", label: "Kiện cứu được (giao thành công sau khi care)", unit: "COUNT", denominatorLabel: "kiện có ca care do người này đóng, chỉ kiện ĐÃ kết thúc", owner: "PERSON" },
-    { key: "care_cod_recovered", label: "Tiền COD về được từ kiện đã care", unit: "VND", denominatorLabel: "kiện giao thành công sau khi người này đóng ca", owner: "PERSON" },
-  ],
-  WAREHOUSE: [
-    { key: "inspection_sla", label: "Kiểm đếm hàng hoàn trong hạn", unit: "PERCENT", denominatorLabel: "lượt kiểm hàng hoàn người này thực hiện trong kỳ", owner: "PERSON" },
-    { key: "inspection_discrepancy", label: "Kiện có lệch (hàng hỏng / không bán lại được)", unit: "PERCENT", denominatorLabel: "món hàng hoàn người này đã kiểm trong kỳ", owner: "PERSON" },
-  ],
-  FINANCE: [
-    { key: "finance_actions", label: "Lượt phân loại / nối chứng từ", unit: "COUNT", denominatorLabel: "lượt phân loại / nối chứng từ ghi trong nhật ký hệ thống", owner: "PERSON" },
-    { key: "reconciliation_completeness", label: "Độ đầy đủ đối soát", unit: "PERCENT", denominatorLabel: "dòng sao kê trong kỳ (mức SỔ, không quy về cá nhân)", owner: "DEPARTMENT" },
-    { key: "unresolved_aging", label: "Dòng tiền treo lâu nhất", unit: "DAYS", denominatorLabel: "dòng sao kê chưa phân loại còn treo", owner: "DEPARTMENT" },
-  ],
-};
+/**
+ * ═══ DẪN XUẤT TỪ SỔ, KHÔNG PHẢI MỘT DANH SÁCH THỨ HAI ═══
+ *
+ * Trước đây đây là một mảng gõ tay, và nó là BẢN THỨ BA mô tả cùng một chỉ số (sau câu SQL tính
+ * nó và `DEPT_PERF` chú giải nó). Ba bản thì tới ngày chúng nói khác nhau — và cái sai sẽ là cái
+ * nói rằng CÓ số, trong khi thật ra không có.
+ *
+ * Nay nó đọc thẳng `METRIC_CATALOG`. Thêm một chỉ số vào sổ là nó tự vào ảnh chụp; khai một chỉ
+ * số là `UNAVAILABLE` là nó tự biến mất khỏi đây — không phải nhớ sửa hai chỗ.
+ */
+export const DEPT_METRIC_KEYS: Partial<Record<DepartmentCode, DeptMetricSpec[]>> = Object.fromEntries(
+  DEPARTMENT_CODES.map((code) => [code, metricsOf(code).map((m) => ({ key: m.key, label: m.label, unit: m.unit, denominatorLabel: m.denominator, owner: m.grain }))]).filter(([, list]) => (list as DeptMetricSpec[]).length > 0),
+) as Partial<Record<DepartmentCode, DeptMetricSpec[]>>;
 
-/** Cách nối dòng dữ liệu về người, theo từng phòng. Sự thật lịch sử, không phải lựa chọn. */
-export const DEPT_LINKAGE: Partial<Record<DepartmentCode, "USER_ID" | "EMAIL" | "FREE_TEXT">> = {
-  SALES: "FREE_TEXT",
-  LOGISTICS: "USER_ID",
-  WAREHOUSE: "EMAIL",
-  FINANCE: "USER_ID",
-};
+/**
+ * Cách nối dòng dữ liệu về người, theo từng phòng — cũng dẫn xuất từ sổ.
+ *
+ * Phòng lấy cách nối YẾU NHẤT trong các chỉ số của nó. Một phòng có ba chỉ số nối bằng khoá và
+ * một chỉ số nối bằng ô chữ thì thẻ điểm của phòng đó vẫn có thể quy nhầm người — lấy cái mạnh
+ * nhất là tự khen mình.
+ */
+const LINKAGE_RANK: Record<PersonLinkage, number> = { FREE_TEXT: 0, EMAIL: 1, USER_ID: 2 };
+
+export const DEPT_LINKAGE: Partial<Record<DepartmentCode, PersonLinkage>> = Object.fromEntries(
+  DEPARTMENT_CODES.map((code) => {
+    const list = metricsOf(code, "PERSON");
+    if (!list.length) return [code, null];
+    return [code, list.reduce<PersonLinkage>((yeu, m) => (LINKAGE_RANK[m.linkage] < LINKAGE_RANK[yeu] ? m.linkage : yeu), "USER_ID")];
+  }).filter(([, v]) => v !== null),
+) as Partial<Record<DepartmentCode, PersonLinkage>>;

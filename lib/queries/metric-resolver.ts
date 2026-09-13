@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { METRIC_BINDINGS, type MetricValue } from "@/lib/constants/metric-bindings";
+import { KR_DEFAULT_MINIMUM_SAMPLE, METRIC_BINDINGS, metricStateOf, type MetricValue } from "@/lib/constants/metric-bindings";
 import { slaStateOf } from "@/lib/constants/work";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, metricScope, successRate } from "@/lib/queries/metrics";
@@ -50,29 +50,39 @@ const CARRIER_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
 /* ═══════════════════ TỪNG CHỈ SỐ ═══════════════════ */
 
-const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | "at" | "trust">>> = {
+/*
+  MỖI HÀM ĐỌC PHẢI KHAI CỠ MẪU.
+
+  `sample` là BẮT BUỘC (có thể là `null`) chứ không phải tuỳ chọn — nhờ vậy một chỉ số thêm vào
+  ngày mai KHÔNG THỂ quên khai, nó sẽ không biên dịch được. `null` là câu trả lời đúng cho chỉ số
+  không đếm quan sát (tiền, số dư): ở đó "cỡ mẫu" không có nghĩa gì.
+*/
+const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | "at" | "trust" | "state"> & { sample: number | null }>> = {
   async delivery_success_rate({ period }) {
     const a = await outcomeAggregate(period);
-    return { value: successRate(a.delivered, a.returned) };
+    // Mẫu của một TỶ LỆ là mẫu số của chính nó: đơn ĐÃ kết thúc. Đơn đang đi chưa nói được gì.
+    return { value: successRate(a.delivered, a.returned), sample: a.delivered + a.returned };
   },
   async return_rate({ period }) {
     const a = await outcomeAggregate(period);
     const finished = a.delivered + a.returned;
-    return { value: finished ? Math.round((a.returned / finished) * 1000) / 10 : null };
+    return { value: finished ? Math.round((a.returned / finished) * 1000) / 10 : null, sample: finished };
   },
   async delivered_revenue({ period }) {
-    return { value: (await outcomeAggregate(period)).revenue };
+    // TIỀN không có cỡ mẫu: 40 triệu là 40 triệu, không phải "40 triệu trên n quan sát".
+    return { value: (await outcomeAggregate(period)).revenue, sample: null };
   },
   async delivered_orders({ period }) {
     const a = await outcomeAggregate(period);
     // Chưa đơn nào kết thúc thì "0 đơn giao thành công" là SỰ THẬT, không phải chưa biết.
-    return { value: a.delivered };
+    // Đây là SỐ ĐẾM, không phải tỷ lệ ⇒ không có ngưỡng mẫu để so.
+    return { value: a.delivered, sample: null };
   },
   async delivered_contribution({ period }) {
     const a = await outcomeAggregate(period);
-    if (!a.delivered) return { value: null, coverage: null, note: "Chưa có đơn giao thành công nào trong kỳ" };
+    if (!a.delivered) return { value: null, coverage: null, sample: 0, note: "Chưa có đơn giao thành công nào trong kỳ" };
     const coverage = a.cogsKnown / a.delivered;
-    return { value: a.revenue - a.cogs, coverage, note: coverage < 1 ? `Chỉ ${Math.round(coverage * 100)}% đơn giao thành công tra được giá vốn` : "" };
+    return { value: a.revenue - a.cogs, coverage, sample: null, note: coverage < 1 ? `Chỉ ${Math.round(coverage * 100)}% đơn giao thành công tra được giá vốn` : "" };
   },
 
   async return_inspection_backlog() {
@@ -90,13 +100,13 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
           and not exists (select 1 from return_inspections ri where ri.shipment_id = s.id)
       `),
     );
-    return { value: Number(rows[0]?.n ?? 0) };
+    return { value: Number(rows[0]?.n ?? 0), sample: null };
   },
 
   async unclassified_bank_txns() {
     const db = await getDb();
     const rows = await db.select({ n: sql<number>`count(*)::int` }).from(schema.bankTransactions).where(eq(schema.bankTransactions.accountingGroup, "UNCLASSIFIED"));
-    return { value: Number(rows[0]?.n ?? 0) };
+    return { value: Number(rows[0]?.n ?? 0), sample: null };
   },
 
   async cod_outstanding() {
@@ -112,7 +122,7 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
         where s.stage = 'DELIVERED' and coalesce(s.cod_collected, 0) > 0 and s.cod_status <> 'PAID_TO_BANK'
       `),
     );
-    return { value: Number(rows[0]?.v ?? 0) };
+    return { value: Number(rows[0]?.v ?? 0), sample: null };
   },
 
   async ads_spend({ period }) {
@@ -121,39 +131,39 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
     if (period.from) conds.push(sql`a.spend_date >= ${period.from}`);
     if (period.to) conds.push(sql`a.spend_date <= ${period.to}`);
     const rows = rowsOf<{ v: number }>(await db.execute(sql`select coalesce(sum(a.spend), 0)::bigint as v from ad_spends a where ${sql.join(conds, sql` and `)}`));
-    return { value: Number(rows[0]?.v ?? 0) };
+    return { value: Number(rows[0]?.v ?? 0), sample: null };
   },
 
   async profit_after_ads({ period }) {
     const { getAdsDecision } = await import("@/lib/queries/ads-decision");
     const d = await getAdsDecision(period, "campaign");
     const known = d.rows.filter((r) => r.spendKnown);
-    if (!known.length) return { value: null, coverage: 0, note: "Không dòng nào biết số chi — Facebook chỉ trả chi tiêu ở cấp chiến dịch" };
-    return { value: known.reduce((s, r) => s + r.profitAfterAds, 0), coverage: known.length / d.rows.length, note: known.length < d.rows.length ? `${d.rows.length - known.length} dòng không biết số chi, KHÔNG tính vào tổng` : "" };
+    if (!known.length) return { value: null, coverage: 0, sample: 0, note: "Không dòng nào biết số chi — Facebook chỉ trả chi tiêu ở cấp chiến dịch" };
+    return { value: known.reduce((s, r) => s + r.profitAfterAds, 0), coverage: known.length / d.rows.length, sample: null, note: known.length < d.rows.length ? `${d.rows.length - known.length} dòng không biết số chi, KHÔNG tính vào tổng` : "" };
   },
 
   async work_overdue({ department }) {
     const { items } = await collectWorkItems();
     const now = new Date();
     const list = department ? items.filter((i) => i.department === department) : items;
-    return { value: list.filter((i) => slaStateOf(i.slaAt ?? i.dueAt, now) === "BREACHED").length };
+    return { value: list.filter((i) => slaStateOf(i.slaAt ?? i.dueAt, now) === "BREACHED").length, sample: null };
   },
   async work_open({ department }) {
     const { items } = await collectWorkItems();
-    return { value: (department ? items.filter((i) => i.department === department) : items).length };
+    return { value: (department ? items.filter((i) => i.department === department) : items).length, sample: null };
   },
   async work_unassigned({ department }) {
     const { items } = await collectWorkItems();
     const list = department ? items.filter((i) => i.department === department) : items;
-    return { value: list.filter((i) => !i.assignee).length };
+    return { value: list.filter((i) => !i.assignee).length, sample: null };
   },
   async work_sla_on_time({ department }) {
     const { items } = await collectWorkItems();
     const now = new Date();
     const list = (department ? items.filter((i) => i.department === department) : items).filter((i) => (i.slaAt ?? i.dueAt) !== null);
     // KHÔNG việc nào có hạn ⇒ không có tỷ lệ nào để nói. `null`, không phải 100%.
-    if (!list.length) return { value: null, note: "Không việc nào trong phạm vi này có đặt hạn" };
-    return { value: Math.round((list.filter((i) => slaStateOf(i.slaAt ?? i.dueAt, now) !== "BREACHED").length / list.length) * 1000) / 10 };
+    if (!list.length) return { value: null, sample: 0, note: "Không việc nào trong phạm vi này có đặt hạn" };
+    return { value: Math.round((list.filter((i) => slaStateOf(i.slaAt ?? i.dueAt, now) !== "BREACHED").length / list.length) * 1000) / 10, sample: list.length };
   },
 };
 
@@ -161,15 +171,22 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
 export async function resolveMetric(key: string, ctx: Ctx): Promise<MetricValue> {
   const binding = METRIC_BINDINGS[key];
   const at = new Date();
-  if (!binding) return { key, value: null, at, trust: "MANUAL", note: "Chỉ số không có trong sổ đăng ký — nhập tay" };
+  if (!binding) return { key, value: null, at, trust: "MANUAL", state: "UNKNOWN", note: "Chỉ số không có trong sổ đăng ký — nhập tay" };
   const run = RESOLVERS[key];
-  if (!run) return { key, value: null, at, trust: binding.trust, note: "Chỉ số đã khai nhưng chưa có hàm đọc" };
+  if (!run) return { key, value: null, at, trust: binding.trust, state: "UNKNOWN", note: "Chỉ số đã khai nhưng chưa có hàm đọc" };
   try {
     const r = await run(ctx);
-    return { key, at, trust: binding.trust, ...r };
+    /*
+      TRẠNG THÁI TÍNH Ở ĐÂY, MỘT CHỖ.
+
+      Để từng hàm đọc tự chấm "đủ hay chưa đủ" thì sớm muộn hai hàm dùng hai ngưỡng khác nhau, và
+      không ai phát hiện vì cả hai đều trả về một con số trông hợp lý.
+    */
+    const state = metricStateOf({ value: r.value, sample: r.sample, minimumSample: binding.minimumSample ?? KR_DEFAULT_MINIMUM_SAMPLE });
+    return { key, at, trust: binding.trust, state, ...r };
   } catch (e) {
     // Một chỉ số hỏng KHÔNG được làm sập cả trang mục tiêu — và cũng không được biến thành 0.
-    return { key, value: null, at, trust: binding.trust, note: `Chưa đọc được: ${e instanceof Error ? e.message : String(e)}` };
+    return { key, value: null, at, trust: binding.trust, state: "UNKNOWN", note: `Chưa đọc được: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

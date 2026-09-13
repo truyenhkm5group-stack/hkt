@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import type { Actor } from "@/lib/constants/actor";
 import { getDb, schema } from "@/db";
 import { markReturnsArrived, undoReturnArrived } from "@/lib/returns/inspection";
 
@@ -23,7 +24,7 @@ const NOT_YET_ARRIVED = sql`not exists (select 1 from return_inspections ri wher
  *
  * Idempotent: kiện đã ghi nhận rồi thì bấm lại không tạo thêm phiếu.
  */
-export async function markReturnReceived(ids: string[], actor: string, note?: string) {
+export async function markReturnReceived(ids: string[], actor: Actor, note?: string) {
   return markReturnsArrived(ids, actor, note);
 }
 

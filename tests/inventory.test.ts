@@ -66,14 +66,14 @@ export async function testInventory(db: Db) {
 
     // GHI NHẬN ĐÃ VỀ KHÔNG PHẢI LÀ VÀO TỒN. Người nhận hàng chưa mở kiện ra đếm, nên ERP chưa được
     // phép khẳng định có bao nhiêu món còn bán được.
-    await markReturnReceived([target], "test-kho-inventory");
+    await markReturnReceived([target], { id: null, label: "test-kho-inventory" });
     clearMemo();
     const daVe = await productRow("rr-var");
     assert.equal(daVe.erpStock, before.erpStock, "ghi nhận kiện đã về KHÔNG được cộng tồn — chưa ai đếm");
     assert.equal(daVe.returnIn, before.returnIn, "chưa đếm thì chưa có phiếu tái nhập nào");
 
     // ĐẾM XONG mới vào tồn, và chỉ đúng phần đếm được.
-    const inspected = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm đủ", actor: "test-kho-inventory" });
+    const inspected = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm đủ", actor: { id: null, label: "test-kho-inventory" } });
     assert.ok("ok" in inspected, "kiện đã ghi nhận về thì đếm được");
     clearMemo();
     const after = await productRow("rr-var");
@@ -83,7 +83,7 @@ export async function testInventory(db: Db) {
     assert.equal(after.shipped, before.shipped, "đã xuất không đổi — nhận hoàn không phải là xuất thêm");
 
     // Đếm lại lần hai bị chặn: nếu không, phiếu tái nhập cộng tồn hai lần.
-    const lai = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm lại", actor: "test-kho-inventory-2" });
+    const lai = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm lại", actor: { id: null, label: "test-kho-inventory-2" } });
     assert.ok("error" in lai, "kiện đã đếm rồi thì không được đếm lại");
     clearMemo();
     const twice = await productRow("rr-var");
@@ -202,13 +202,13 @@ export async function testInventory(db: Db) {
 
   clearMemo();
   const truoc = await productRow("rr-var");
-  await markReturnReceived(["bulk-ship-da-ve"], "test-kho-hang-loat");
+  await markReturnReceived(["bulk-ship-da-ve"], { id: null, label: "test-kho-hang-loat" });
   clearMemo();
   const moiVe = await productRow("rr-var");
   assert.equal(moiVe.erpStock, truoc.erpStock, "ghi nhận hàng loạt KHÔNG cộng tồn — hàng trăm kiện chưa ai mở ra");
 
   // Kho đếm được 4/5 món: một món hỏng. Chỉ 4 món vào tồn, món còn lại hiện ra thành hàng hụt.
-  const demXong = await recordInspection({ shipmentId: "bulk-ship-da-ve", condition: "RESTOCKABLE", restockQty: 4, unsellableQty: 1, note: "1 áo bẩn không bán lại được", actor: "test-kho-hang-loat" });
+  const demXong = await recordInspection({ shipmentId: "bulk-ship-da-ve", condition: "RESTOCKABLE", restockQty: 4, unsellableQty: 1, note: "1 áo bẩn không bán lại được", actor: { id: null, label: "test-kho-hang-loat" } });
   assert.ok("ok" in demXong && demXong.restocked === 4, "chỉ số ĐẾM ĐƯỢC mới vào tồn");
   clearMemo();
   const sau = await productRow("rr-var");
@@ -216,12 +216,12 @@ export async function testInventory(db: Db) {
   assert.equal(sau.returnIn, truoc.returnIn + 4, "phiếu tái nhập ghi đúng 4 món");
 
   // Kiện đang trên đường về vẫn nằm ngoài tồn cho tới khi Viettel Post trả hàng xong.
-  await markReturnReceived(ids, "test-kho-hang-loat-2");
+  await markReturnReceived(ids, { id: null, label: "test-kho-hang-loat-2" });
   clearMemo();
   const sauTatCa = await productRow("rr-var");
   assert.ok(sauTatCa.erpStock < truoc.erpStock + 4 + 7, "7 món của kiện đang trên đường về không được cộng vào tồn");
   assert.equal((await listPendingReturnedIds(500)).length, 0, "xác nhận hàng loạt xong thì không còn kiện nào chờ");
-  assert.equal((await markReturnReceived(ids, "test-lap-lai")).count, 0, "bấm lại lần hai không cộng trùng tồn");
+  assert.equal((await markReturnReceived(ids, { id: null, label: "test-lap-lai" })).count, 0, "bấm lại lần hai không cộng trùng tồn");
 
   // ───────── 9. Hàng xuất tay (không qua ĐVVC) trừ tồn như hàng gửi ĐVVC ─────────
   clearMemo();

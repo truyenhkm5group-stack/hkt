@@ -24,7 +24,14 @@ const caseSchema = z.object({
   detail: z.string().trim().max(2000).default(""),
   customerName: z.string().trim().max(200).default(""),
   customerPhone: z.string().trim().max(30).default(""),
-  assignee: z.string().trim().max(100).default(""),
+  /**
+    NGƯỜI PHỤ TRÁCH ĐI BẰNG KHOÁ TÀI KHOẢN, không phải ô chữ.
+
+    Trước bản này ô Phụ trách nhận bất kỳ chuỗi nào. Bốn cách gõ tên một người là bốn người khác
+    nhau với máy, nên công của họ bị chia nhỏ tới mức mẫu nào cũng quá bé để nói được gì.
+    `null` = CHƯA GIAO CHO AI.
+  */
+  assigneeUserId: z.string().trim().max(60).nullable().default(null),
   resolution: z.string().trim().max(2000).default(""),
 });
 
@@ -59,13 +66,20 @@ export async function saveCsCase(input: unknown): Promise<Result<{ id: string }>
     if (!data.customerName) data.customerName = order.billFullName ?? "";
     if (!data.customerPhone) data.customerPhone = order.billPhone ?? "";
   }
+  // Tên hiển thị đọc từ `users` ở MÁY CHỦ. Nhận tên từ client thì khoá nói một đằng, chữ nói một nẻo.
+  let assigneeName = "";
+  if (data.assigneeUserId) {
+    const u = await db.query.users.findFirst({ where: eq(schema.users.id, data.assigneeUserId), columns: { id: true, name: true, email: true } });
+    if (!u) return { error: "Không tìm thấy người phụ trách" };
+    assigneeName = u.name || u.email;
+  }
   const resolvedAt = data.status === "DONE" || data.status === "CANCELLED" ? new Date() : null;
   if (data.id) {
     const existing = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, data.id) });
     if (!existing) return { error: "Không tìm thấy case" };
     await db
       .update(schema.csCases)
-      .set({ orderId: data.orderId ?? existing.orderId, customerId: customerId ?? existing.customerId, kind: data.kind, status: data.status, title: data.title, detail: data.detail, customerName: data.customerName, customerPhone: data.customerPhone, assignee: data.assignee, resolution: data.resolution, resolvedAt: resolvedAt ?? (data.status === "OPEN" || data.status === "IN_PROGRESS" ? null : existing.resolvedAt), updatedAt: new Date() })
+      .set({ orderId: data.orderId ?? existing.orderId, customerId: customerId ?? existing.customerId, kind: data.kind, status: data.status, title: data.title, detail: data.detail, customerName: data.customerName, customerPhone: data.customerPhone, assignee: assigneeName, assigneeUserId: data.assigneeUserId, resolution: data.resolution, resolvedAt: resolvedAt ?? (data.status === "OPEN" || data.status === "IN_PROGRESS" ? null : existing.resolvedAt), updatedAt: new Date() })
       .where(eq(schema.csCases.id, data.id));
     await audit({ userId: user.id, userEmail: user.email, action: "CS_CASE_UPDATE", entity: "CS_CASE", entityId: data.id, detail: { before: { status: existing.status, kind: existing.kind, assignee: existing.assignee }, after: data } });
     revalidate();
@@ -73,18 +87,18 @@ export async function saveCsCase(input: unknown): Promise<Result<{ id: string }>
   }
   const [row] = await db
     .insert(schema.csCases)
-    .values({ orderId: data.orderId ?? null, customerId, kind: data.kind, status: data.status, source: "MANUAL", title: data.title, detail: data.detail, customerName: data.customerName, customerPhone: data.customerPhone, assignee: data.assignee, resolution: data.resolution, createdBy: user.email, resolvedAt })
+    .values({ orderId: data.orderId ?? null, customerId, kind: data.kind, status: data.status, source: "MANUAL", title: data.title, detail: data.detail, customerName: data.customerName, customerPhone: data.customerPhone, assignee: assigneeName, assigneeUserId: data.assigneeUserId, resolution: data.resolution, createdBy: user.email, createdByUserId: user.id, resolvedAt })
     .returning({ id: schema.csCases.id });
   await audit({ userId: user.id, userEmail: user.email, action: "CS_CASE_CREATE", entity: "CS_CASE", entityId: row.id, detail: data });
   revalidate();
   return { ok: true, id: row.id };
 }
 
-/** Đổi nhanh trạng thái / người phụ trách từ hai ô chọn trên dòng. */
-export async function updateCsCaseQuick(input: { id: string; status?: string; assignee?: string }): Promise<Result> {
+/** Đổi nhanh trạng thái / người phụ trách từ hai ô chọn trên dòng. Người đi bằng khoá, `null` = gỡ người. */
+export async function updateCsCaseQuick(input: { id: string; status?: string; assigneeUserId?: string | null }): Promise<Result> {
   const { user, error } = await authorize();
   if (error) return { error };
-  const parsed = z.object({ id: z.string().min(1), status: z.enum(CS_STATUSES).optional(), assignee: z.string().trim().max(100).optional() }).safeParse(input);
+  const parsed = z.object({ id: z.string().min(1), status: z.enum(CS_STATUSES).optional(), assigneeUserId: z.string().trim().max(60).nullable().optional() }).safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
   const res = await setCsCaseFields(parsed.data, actorOf(user));
   if ("error" in res) return res;

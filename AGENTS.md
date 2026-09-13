@@ -162,6 +162,49 @@ deploy dừng, không phải cảnh báo.
     đó dùng, không đếm `work_items` (bảng ấy chỉ giữ việc tay và việc định kỳ, nên ra gần như luôn
     bằng 0 — một cảnh báo báo 0 còn tệ hơn không có cảnh báo).
 
+34. **QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN, KHÔNG BẰNG Ô CHỮ.** Mọi đường ghi gắn một việc với một người
+    phải lưu `users.id`: `cs_cases.assignee_user_id`, `return_inspections.received_by_user_id` /
+    `inspected_by_user_id`, `shipment_care.owner_id`, `care_case_events.actor_id` /
+    `next_owner_id`, `work_item_events.actor_id`. Cột CHỮ đi kèm vẫn được ghi nhưng chỉ là ẢNH
+    CHỤP TÊN để người đọc, và TÊN do MÁY CHỦ đọc từ `users` — không nhận từ client, vì client gửi
+    tên khác với khoá thì dòng dữ liệu nói một đằng còn quy kết một nẻo. Dịch vụ nhận người thao
+    tác qua kiểu `Actor` (`lib/constants/actor.ts`) với `id` BẮT BUỘC; `id: null` là hợp lệ và có
+    nghĩa rõ ràng — MÁY làm, khác hẳn "chưa biết ai".
+
+35. **KHÔNG ĐOÁN NGƯỜI CHO DÒNG LỊCH SỬ.** Migration KHÔNG backfill, KHÔNG đặt mặc định. Ánh xạ
+    tên → tài khoản chỉ được làm khi XÁC ĐỊNH (đúng một tài khoản khớp) và phải có báo cáo chạy
+    thử trước. Dòng cũ không có khoá thì KHÔNG vào thẻ điểm — trước đây chúng chỉ TRÔNG như quy
+    kết được. Không xoá dữ liệu cũ: nó vẫn tra được ở màn hình nghiệp vụ.
+
+36. **TÊN MỘT JOB KHÔNG PHẢI MỘT CON NGƯỜI.** `Bot ERP` (xem `CS_BOT_ASSIGNEES`) đứng ở cột "là
+    máy", tách hẳn khỏi "chỉ có chữ" LẪN "chưa ai nhận". Đo production 13/09/2026: `cs_cases` có
+    ĐÚNG MỘT chuỗi khác rỗng trong ô phụ trách và chuỗi đó là `Bot ERP` — gộp nó vào nhóm người
+    thì báo cáo nói có 187 việc đang được người làm trong khi con số thật là 0.
+
+37. **SỔ CHỈ SỐ LÀ BẢN KHAI DUY NHẤT** (`lib/constants/metric-catalog.ts`). Mười hai trường bắt
+    buộc mỗi chỉ số; `DEPT_METRIC_KEYS` và `DEPT_LINKAGE` DẪN XUẤT từ sổ, không phải danh sách thứ
+    hai. Chỉ thêm chỉ số có nguồn THẬT (`source` trỏ tới bảng/cột có thật); chưa có nguồn thì khai
+    `availability: "UNAVAILABLE"` kèm `missingWhat` cụ thể tới mức sửa được, và nó KHÔNG nối được
+    vào KR. **Khoá chỉ số không được đổi** — `performance_snapshots.metric_key` đã lưu chúng, đổi
+    là làm mồ côi toàn bộ lịch sử.
+
+38. **ĐÍCH LÀ QUYẾT ĐỊNH KINH DOANH, KHÔNG PHẢI HẰNG SỐ.** Không hard-code ngưỡng đạt/không đạt ở
+    bất kỳ đâu, kể cả trong màu sắc của một ô. Đích nằm ở bảng `metric_targets`, ba tầng (công ty →
+    phòng ban → chức danh, tầng hẹp đè tầng rộng), có người đặt và LÝ DO. Chưa có đích thì hiện
+    THỰC TẾ và KHÔNG kết luận đạt/không đạt. Đích chỉ áp cho kỳ kết thúc SAU `effective_from` —
+    không chấm lại kỳ đã chốt.
+
+39. **BỐN MỨC DÙNG ĐƯỢC, BA MỨC KHÔNG PHẢI "LÀM KÉM"** (`metricTrust`): `TRUSTED` · `WEAK` (mẫu
+    dưới ngưỡng hoặc nối bằng ô chữ) · `UNKNOWN` (không quan sát nào) · `UNAVAILABLE` (chưa có
+    nguồn). KR dùng `MetricState`: `DATA_INSUFFICIENT` tách hẳn khỏi `UNKNOWN` vì một cái là "đợi
+    thêm vài tuần", cái kia là "đi lấy dữ liệu". Màn hình phải để người quản lý phân biệt được LÀM
+    KÉM với CHƯA ĐỦ DỮ LIỆU; không auto-label "nhân viên yếu" ở bất kỳ đâu.
+
+40. **ĐỔI NGUỒN LÀ MỘT PHIÊN BẢN RIÊNG.** `METRIC_SOURCE_VERSION` tách khỏi
+    `METRIC_DEFINITION_VERSION`: đổi CÔNG THỨC là cùng dữ liệu ra số khác, đổi NGUỒN là cùng công
+    thức đọc chỗ khác. Hai kỳ khác `source_version` đứng trên hai TẬP DÒNG khác nhau — màn hình in
+    "đổi nguồn giữa hai kỳ", không vẽ mũi tên xu hướng.
+
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.

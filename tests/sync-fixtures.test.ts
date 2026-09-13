@@ -40,6 +40,18 @@ import { testWorkOs } from "./work-os.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
 import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
+import {
+  testCoverageSeparatesMachineFromPerson,
+  testCsAssignmentUsesKey,
+  testDeptKeysDeriveFromCatalog,
+  testInspectionCarriesActorKey,
+  testKrDataInsufficient,
+  testMetricCatalogIsComplete,
+  testMetricTrust,
+  testObservedLinkage,
+  testSourceVersionIsTracked,
+  testTargetResolution,
+} from "./attribution.test";
 import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testScopeDecisions } from "./scope-enforcement.test";
 import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
 import { testDeployScript } from "./deploy-script.test";
@@ -353,20 +365,20 @@ async function main() {
     .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
     .where(and(inArray(schema.orders.id, ["rr-9002", "rr-9009"]), isNull(schema.shipments.returnReceivedAt)));
   assert.equal(pendingReturns.length, 2, "hai vận đơn hoàn đang chờ kho nhận");
-  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Hai kiện đã về, chờ đếm");
+  await markReturnReceived(pendingReturns.map((r) => r.id), { id: null, label: "test-kho" }, "Hai kiện đã về, chờ đếm");
   const afterArrival = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
   assert.equal(afterArrival?.currentStock, 1, "ghi nhận đã về CHƯA cộng tồn — chưa ai mở kiện ra đếm");
 
   // Kho đếm từng kiện: mỗi kiện 1 món còn bán được → tồn 1 + 2 = 3.
   for (const r of pendingReturns) {
-    const done = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ", actor: "test-kho" });
+    const done = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ", actor: { id: null, label: "test-kho" } });
     assert.ok("ok" in done, "kiện đã ghi nhận về thì đếm được");
   }
   const afterReceive = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
   assert.equal(afterReceive?.currentStock, 3, "kho đếm 2 kiện hoàn → tồn 1 + 2 = 3");
   // Đếm lần hai bị chặn, nếu không phiếu tái nhập sẽ cộng tồn hai lần.
   for (const r of pendingReturns) {
-    const again = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Bấm nhầm lần hai", actor: "test-kho" });
+    const again = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Bấm nhầm lần hai", actor: { id: null, label: "test-kho" } });
     assert.ok("error" in again, "kiện đã đếm rồi thì không đếm lại được");
   }
   const afterTwice = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
@@ -1436,6 +1448,18 @@ async function main() {
   testPeriodKeys();
   testScopeOnlyNarrows();
   testDisabledRoleFallsBackNarrow();
+
+  // ═══ PHASE 3.1 · QUY KẾT & DANH MỤC CHỈ SỐ CÓ THẨM QUYỀN ═══
+  testMetricCatalogIsComplete();
+  testDeptKeysDeriveFromCatalog();
+  testObservedLinkage();
+  testMetricTrust();
+  testTargetResolution();
+  testKrDataInsufficient();
+  testSourceVersionIsTracked();
+  await testCsAssignmentUsesKey(db);
+  await testInspectionCarriesActorKey(db);
+  await testCoverageSeparatesMachineFromPerson(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

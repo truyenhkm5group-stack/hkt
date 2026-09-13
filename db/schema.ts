@@ -151,7 +151,22 @@ export const csCases = pgTable(
     detail: text("detail").notNull().default(""),
     customerName: text("customer_name").notNull().default(""),
     customerPhone: text("customer_phone").notNull().default(""),
+    /**
+     * TÊN HIỂN THỊ của người phụ trách — GIỮ NGUYÊN, không xoá.
+     *
+     * Ô chữ này là dữ liệu lịch sử có thật: phần lớn case đang mở mang tên ở đây và nhiều dòng đến
+     * từ Pancake chứ không từ một tài khoản ERP. Xoá nó là xoá thứ duy nhất nói ai đã làm case đó.
+     * Nhưng nó KHÔNG phải danh tính: trùng tên, viết tắt, sai chính tả đều nối nhầm người.
+     */
     assignee: text("assignee").notNull().default(""),
+    /**
+     * DANH TÍNH của người phụ trách. `NULL` = CHƯA NỐI ĐƯỢC VỀ MỘT TÀI KHOẢN, không phải "không có ai".
+     *
+     * Đây là cột quyết định độ tin cậy: chỉ số tính trên cột này đạt `USER_ID`, còn tính trên
+     * `assignee` thì trần là `LOW` dù mẫu bao nhiêu (xem `metricConfidence`). Dòng cũ chỉ được điền
+     * khi ánh xạ là XÁC ĐỊNH (đúng một tài khoản khớp) — không đoán để lấp chỗ trống.
+     */
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
     resolution: text("resolution").notNull().default(""),
     /** Khoá chống tạo trùng khi tự phát hiện */
     dedupeKey: text("dedupe_key").unique(),
@@ -181,6 +196,8 @@ export const csCases = pgTable(
      */
     followUpAt: ts("follow_up_at"),
     createdBy: text("created_by").notNull().default(""),
+    /** Danh tính người tạo case. `NULL` với case do JOB tự phát hiện — đó là sự thật, không phải lỗ hổng. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1407,8 +1424,12 @@ export const returnInspections = pgTable(
     status: text("status").notNull().default("RECEIVED"),
     receivedAt: ts("received_at").notNull(),
     receivedBy: text("received_by").notNull().default(""),
+    /** Danh tính người kho nhận kiện. `NULL` = chưa nối được về tài khoản (dòng cũ, hoặc job ghi hộ). */
+    receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
     inspectedAt: ts("inspected_at"),
     inspectedBy: text("inspected_by"),
+    /** Danh tính người đếm. Ràng buộc `inspected_check` vẫn đứng trên cột CHỮ vì dòng lịch sử không có id. */
+    inspectedByUserId: text("inspected_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /** RESTOCKABLE · UNSELLABLE · DAMAGED · MISSING — chỉ có khi đã kiểm. */
     condition: text("condition"),
     /** Số món ĐẾM ĐƯỢC và bán lại được — đây là số duy nhất được cộng vào tồn. */
@@ -1497,6 +1518,7 @@ export const returnInspectionItems = pgTable(
     condition: text("condition").notNull(),
     note: text("note").notNull().default(""),
     inspectedBy: text("inspected_by").notNull().default(""),
+    inspectedByUserId: text("inspected_by_user_id").references(() => users.id, { onDelete: "set null" }),
     inspectedAt: ts("inspected_at").notNull(),
     createdAt: createdAt(),
   },
@@ -2324,6 +2346,12 @@ export const careCaseEvents = pgTable(
     nextStatus: text("next_status"),
     previousOwner: text("previous_owner"),
     nextOwner: text("next_owner"),
+    /**
+     * CHỦ VIỆC BẰNG KHOÁ. Hai cột `*_owner` ở trên lưu EMAIL — đọc được nhưng người đổi email là
+     * mất dấu, và `""` với `NULL` trông giống nhau. `NULL` ở đây nghĩa là CHƯA AI NHẬN (UNASSIGNED).
+     */
+    previousOwnerId: text("previous_owner_id").references(() => users.id, { onDelete: "set null" }),
+    nextOwnerId: text("next_owner_id").references(() => users.id, { onDelete: "set null" }),
     followUpAt: ts("follow_up_at"),
     /** Ảnh chụp SLA lúc xảy ra: mốc vào hàng đợi, hạn phản hồi đầu, hạn đóng, đã vỡ chưa. */
     sla: jsonb("sla"),
@@ -2788,6 +2816,55 @@ export const workRecurrences = pgTable(
  * Objective KHÔNG có số; số nằm ở Key Result. Trộn hai thứ là cách nhanh nhất biến OKR thành
  * một danh sách KPI đội lốt.
  */
+/**
+ * ═══════════ ĐÍCH CỦA CHỈ SỐ — BA TẦNG, KHÔNG HARD-CODE ═══════════
+ *
+ * "Đóng case trong hạn phải đạt 90%" là một quyết định KINH DOANH. Viết 90 vào mã nguồn có hai
+ * hậu quả: chủ shop muốn đổi thì phải chờ deploy, và không ai còn biết con số đó do AI đặt, đặt
+ * lúc nào, vì sao.
+ *
+ * Ba tầng, tầng sau đè tầng trước:
+ *   1. CÔNG TY   — mặc định cho mọi người
+ *   2. PHÒNG BAN — phòng có đặc thù riêng
+ *   3. CHỨC DANH — trưởng phòng và nhân viên mới không cùng một thước đo
+ *
+ * KHÔNG có đích thì màn hình hiện THỰC TẾ và không kết luận đạt/không đạt. Một chỉ số không có
+ * đích vẫn là một con số đọc được; bịa ra đích để có màu xanh đỏ mới là cái sai.
+ */
+export const metricTargets = pgTable(
+  "metric_targets",
+  {
+    id: id(),
+    /** Khoá trong `lib/constants/metric-catalog.ts::METRIC_CATALOG`. Không nhận khoá lạ. */
+    metricKey: text("metric_key").notNull(),
+    /** `COMPANY` · `DEPARTMENT` · `POSITION` — tầng của đích này. */
+    scope: text("scope").notNull(),
+    /**
+     * Mã phòng ban (`DepartmentCode`) hoặc `positions.id`. `NULL` với tầng công ty.
+     * KHÔNG đặt khoá ngoại tới `positions`: đích đã đặt phải sống sót khi chức danh bị đổi tên.
+     */
+    scopeRef: text("scope_ref"),
+    /** Đích. Đơn vị lấy từ danh mục, không lưu lại ở đây — hai chỗ lưu là hai chỗ lệch nhau. */
+    target: doublePrecision("target").notNull(),
+    /** Vì sao đặt con số này. Bắt buộc: một đích không có lý do thì kỳ sau không ai dám sửa. */
+    note: text("note").notNull().default(""),
+    /** Có hiệu lực từ. Kỳ đã chốt trước mốc này KHÔNG bị chấm lại theo đích mới. */
+    effectiveFrom: ts("effective_from").notNull(),
+    setBy: text("set_by").references(() => users.id, { onDelete: "set null" }),
+    setByEmail: text("set_by_email").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Một tầng · một chỉ số · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì không ai biết cái nào thắng.
+    uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.effectiveFrom),
+    index("metric_targets_lookup_idx").on(t.metricKey, t.effectiveFrom),
+    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION')`),
+    // Tầng công ty KHÔNG được có tham chiếu; hai tầng kia BẮT BUỘC có.
+    check("metric_targets_ref_check", sql`(${t.scope} = 'COMPANY' AND ${t.scopeRef} IS NULL) OR (${t.scope} <> 'COMPANY' AND ${t.scopeRef} IS NOT NULL AND length(trim(${t.scopeRef})) > 0)`),
+  ],
+);
+
 export const okrObjectives = pgTable(
   "okr_objectives",
   {
@@ -3094,6 +3171,19 @@ export const performanceSnapshots = pgTable(
     calculatedAt: ts("calculated_at").notNull().defaultNow(),
     /** Phiên bản công thức lúc chụp — `lib/constants/metric-provenance.ts::METRIC_DEFINITION_VERSION`. */
     definitionVersion: integer("definition_version").notNull().default(1),
+    /**
+     * PHIÊN BẢN NGUỒN lúc chụp — `lib/constants/metric-catalog.ts::METRIC_SOURCE_VERSION`.
+     *
+     * TÁCH KHỎI `definition_version` vì hai thứ hỏng theo hai kiểu khác nhau:
+     *   · đổi CÔNG THỨC  — cùng dữ liệu, ra số khác (sửa mệnh đề WHERE, đổi mẫu số)
+     *   · đổi NGUỒN      — cùng công thức, đọc chỗ khác (case nối bằng `assignee_user_id` thay vì
+     *                      ô chữ `assignee`)
+     *
+     * Kỳ trước đo trên ô chữ và kỳ này đo trên khoá tài khoản là HAI TẬP NGƯỜI KHÁC NHAU. Vẽ một
+     * mũi tên xu hướng giữa hai kỳ đó là nói dối bằng đồ thị. Hai cột này cho màn hình biết khi
+     * nào phải in "đổi nguồn giữa hai kỳ" thay vì một mũi tên.
+     */
+    sourceVersion: integer("source_version").notNull().default(1),
     createdAt: createdAt(),
   },
   (t) => [

@@ -43,7 +43,7 @@ import type { OrgPerson } from "@/lib/queries/work";
 const H = 3_600_000;
 
 function nguoi(id: string, name: string, ...depts: DepartmentCode[]): OrgPerson {
-  return { id, name, email: `${id}@t.local`, role: "CS", departments: depts.map((code) => ({ id: `d-${code}`, code, name: code, roleInDept: "MEMBER" as const })) };
+  return { id, name, email: `${id}@t.local`, role: "CS", positionId: null, departments: depts.map((code) => ({ id: `d-${code}`, code, name: code, roleInDept: "MEMBER" as const })) };
 }
 
 export async function testWorkforce(db: Db) {
@@ -249,7 +249,7 @@ export async function testWorkforce(db: Db) {
   /* ═══════════ 8 · BẢNG ĐÍCH / THỰC TẾ CỦA HỌP TUẦN ═══════════ */
   const kr = (over: Partial<{ title: string; target: number; current: number | null; direction: "UP" | "DOWN"; progress: number | null }>) => ({
     id: "k", title: "KR", metricSource: "delivered_revenue", metricLabel: "l", trust: "MEASURED" as const, basis: "", unit: "VND" as const,
-    direction: "UP" as const, baseline: null, target: 100, current: 60, currentAt: null, progress: 60, confidence: "UNKNOWN" as const, ownerName: "An", note: "", ...over,
+    direction: "UP" as const, baseline: null, target: 100, current: 60, currentAt: null, progress: 60, confidence: "UNKNOWN" as const, ownerName: "An", note: "", sample: null, state: "OK" as const, ...over,
   });
   const objs = [
     { id: "o", level: "COMPANY" as const, title: "Mục tiêu", description: "", departmentCode: null, departmentName: "Toàn shop", ownerName: "An", period: "2026-Q3", status: "ACTIVE" as const, keyResults: [kr({}), kr({ direction: "DOWN", target: 10, current: 25, progress: 40 })], progress: 50, measuredCount: 2, totalCount: 2 },

@@ -38,7 +38,17 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain"], sortable: CS_SORTABLE, defaultPeriod: "all" });
   const [{ rows, total, pageCount }, facets, summary, employees, users] = await Promise.all([listCsCases(params), csFacets(params), csSummary(), listEmployees(), listUsers()]);
-  const assignees = [...new Set([...employees.filter((e) => e.active).map((e) => e.shortName || e.name), ...users.rows.filter((u) => u.active).map((u) => u.name), ...facets.assignees.map((a) => a.value)])].filter(Boolean).sort();
+  /*
+    NGƯỜI NHẬN VIỆC = TÀI KHOẢN ERP, không phải một danh sách TÊN gộp từ ba nguồn.
+
+    Danh sách cũ trộn nhân sự bảng lương, tài khoản ERP và những chuỗi đã từng xuất hiện trong ô
+    chữ — ba sổ danh tính khác nhau đổ chung vào một ô chọn. Chọn một cái tên trong đó không nói
+    được case này thuộc về TÀI KHOẢN nào, nên thẻ điểm không quy kết được.
+
+    `employees` (bảng lương) vẫn giữ cho phần khác của trang; chỉ ô giao việc là đi bằng khoá.
+  */
+  const staff = users.rows.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name || u.email })).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  void employees;
   const kindCount = (...kinds: string[]) => kinds.reduce((a, k) => a + (summary.byKind[k] ?? 0), 0);
 
   return (
@@ -48,7 +58,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
         title="CSKH · Case chăm sóc khách hàng"
         description="Việc bán hàng và chăm khách: chốt đơn, đổi mẫu, sai thông tin trước khi gửi, khiếu nại, giục giao."
         hint="Case sinh từ TRẠNG THÁI VẬN CHUYỂN (giao không thành, chờ phát lại, sai địa chỉ khi kiện đang trên đường) thuộc trang Vận đơn & care — nơi có nút phát lại, duyệt hoàn và sửa người nhận. Chúng không bị xoá: mở bộ lọc Miền để tra. Case tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay."
-        actions={canWrite ? (<><DetectButton /><CaseDialog assignees={assignees} /></>) : null}
+        actions={canWrite ? (<><DetectButton /><CaseDialog staff={staff} /></>) : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Còn phải làm" value={formatNumber(summary.open)} note={`${formatNumber(summary.unassigned)} chưa ai nhận (bot nhắn không tính là đã nhận)`} icon={Inbox} tone={summary.unassigned ? "rose" : "slate"} />
@@ -95,7 +105,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
         resultLabel={`${formatNumber(total)} case phù hợp`}
       />
       <SectionCard padded={false}>
-        <CsTable rows={rows} assignees={assignees} canWrite={canWrite} currentUser={user.name || user.email} />
+        <CsTable rows={rows} staff={staff} canWrite={canWrite} currentUser={user.name || user.email} currentUserId={user.id} />
         <div className="border-t px-4 py-2">
           <UrlPagination pageCount={pageCount} total={total} />
         </div>

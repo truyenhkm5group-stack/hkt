@@ -19,7 +19,13 @@ import type { CsEventAction, CsEventSource, CsQuickActionKey } from "@/lib/const
  */
 export type CsActor = { id: string | null; email: string; name: string; source: CsEventSource };
 
-/** Tên hiển thị của người thao tác — dùng làm `assignee` khi họ nhận việc. */
+/**
+ * TÊN HIỂN THỊ của người thao tác — dùng làm `assignee` khi họ nhận việc.
+ *
+ * Tên là để NGƯỜI đọc trên dòng. Danh tính đi ở `assignee_user_id` (`actor.id`). Hai thứ tách hẳn
+ * nhau: đổi tên hiển thị không được làm mất dấu ai đã làm case, và trùng tên không được làm hai
+ * người thành một trong thẻ điểm.
+ */
 export function actorLabel(actor: CsActor) {
   return actor.name || actor.email;
 }
@@ -74,13 +80,25 @@ export async function applyCsQuickAction(
   const db = await getDb();
   const before = await db.query.csCases.findFirst({
     where: eq(schema.csCases.id, input.id),
-    columns: { id: true, status: true, assignee: true, resolution: true, resolvedAt: true, followUpAt: true },
+    columns: { id: true, status: true, assignee: true, assigneeUserId: true, resolution: true, resolvedAt: true, followUpAt: true },
   });
   if (!before) return { error: "Không tìm thấy case" };
 
   const me = actorLabel(actor);
   let status = before.status as CsStatus;
   let assignee = before.assignee;
+  /*
+    DANH TÍNH ĐI CÙNG TÊN, KHÔNG BAO GIỜ LỆCH.
+
+    Mọi nhánh dưới đây gán `assignee = me` đều phải gán kèm `assigneeUserId = actor.id`. Để lệch
+    một nhánh là tạo ra một case mang tên một người nhưng quy kết về người khác (hoặc về không
+    ai) — và lỗi đó im lặng cho tới lúc ai đó bị chấm sai trên thẻ điểm.
+  */
+  let assigneeUserId = before.assigneeUserId;
+  const nhanViec = () => {
+    assignee = me;
+    assigneeUserId = actor.id;
+  };
   let followUpAt: Date | null = before.followUpAt;
   let resolution = before.resolution;
   let eventAction: CsEventAction = "STATUS";
@@ -90,24 +108,24 @@ export async function applyCsQuickAction(
     case "CLAIM":
       // Nhận việc = gán MÌNH. Không nhận tên người khác từ nơi gọi: giao việc cho người khác là
       // thao tác khác, đi qua ô Phụ trách và ghi một sự kiện ASSIGN riêng.
-      assignee = me;
+      nhanViec();
       if (status === "OPEN") status = "IN_PROGRESS";
       eventAction = "ASSIGN";
       break;
     case "CONTACTED":
       status = "IN_PROGRESS";
-      assignee = me;
+      nhanViec();
       eventAction = "NOTE";
       note = note || "Đã liên hệ khách";
       break;
     case "INFO_FIXED":
       status = "DONE";
       resolution = resolution || "Khách đã cho thông tin đúng, đã cập nhật trước khi gửi hàng.";
-      if (!assignee) assignee = me;
+      if (!assignee) nhanViec();
       break;
     case "DONE":
       status = "DONE";
-      if (!assignee) assignee = me;
+      if (!assignee) nhanViec();
       break;
     case "SNOOZE": {
       if (!input.followUpAt) return { error: "Chưa chọn thời điểm hẹn lại" };
@@ -118,7 +136,7 @@ export async function applyCsQuickAction(
       if (at.getTime() <= Date.now()) return { error: "Thời điểm hẹn lại phải ở tương lai" };
       followUpAt = at;
       if (status === "OPEN") status = "IN_PROGRESS";
-      if (!assignee) assignee = me;
+      if (!assignee) nhanViec();
       eventAction = "FOLLOW_UP";
       break;
     }
@@ -126,7 +144,7 @@ export async function applyCsQuickAction(
 
   await db
     .update(schema.csCases)
-    .set({ status, assignee, followUpAt, resolution, resolvedAt: resolvedAtFor(status, before.resolvedAt), updatedAt: new Date() })
+    .set({ status, assignee, assigneeUserId, followUpAt, resolution, resolvedAt: resolvedAtFor(status, before.resolvedAt), updatedAt: new Date() })
     .where(eq(schema.csCases.id, input.id));
   await recordCsEvent({
     caseId: input.id,
@@ -159,22 +177,53 @@ export async function addCsNote(input: { id: string; note: string }, actor: CsAc
   return { ok: true, data: { note, at, by: actorLabel(actor) } };
 }
 
-/** Đổi nhanh trạng thái / người phụ trách từ hai ô chọn trên dòng. */
-export async function setCsCaseFields(input: { id: string; status?: CsStatus; assignee?: string }, actor: CsActor): Promise<CsQuickResult> {
+/**
+ * ĐỔI NHANH TRẠNG THÁI / NGƯỜI PHỤ TRÁCH từ hai ô chọn trên dòng.
+ *
+ * ─── GIAO VIỆC BẰNG KHOÁ, KHÔNG BẰNG TÊN GÕ TAY ───
+ *
+ * Ô Phụ trách trước đây là một ô CHỮ: gõ gì cũng được. Hệ quả không thấy ngay: "Lan", "lan",
+ * "Lan CS" và "Nguyễn Thị Lan" là bốn người khác nhau với máy, nên thẻ điểm chia công của một
+ * người thành bốn phần, mỗi phần mẫu quá bé để kết luận gì.
+ *
+ * Nay nơi gọi truyền `assigneeUserId` (khoá tài khoản ERP, `null` = gỡ người). TÊN HIỂN THỊ do
+ * MÁY CHỦ đọc từ `users`, không nhận từ client — client gửi tên khác với khoá thì dòng dữ liệu
+ * nói một đằng, quy kết một nẻo.
+ *
+ * `assignee` (ô chữ) vẫn được ghi, làm ẢNH CHỤP TÊN lúc giao việc: người nghỉ việc và tài khoản
+ * bị xoá thì dòng vẫn còn đọc được ai đã làm.
+ */
+export async function setCsCaseFields(input: { id: string; status?: CsStatus; assigneeUserId?: string | null }, actor: CsActor): Promise<CsQuickResult> {
   const db = await getDb();
-  const before = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, input.id), columns: { id: true, status: true, assignee: true, resolvedAt: true, followUpAt: true } });
+  const before = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, input.id), columns: { id: true, status: true, assignee: true, assigneeUserId: true, resolvedAt: true, followUpAt: true } });
   if (!before) return { error: "Không tìm thấy case" };
   const status = input.status ?? (before.status as CsStatus);
-  const assignee = input.assignee ?? before.assignee;
+
+  let assignee = before.assignee;
+  let assigneeUserId = before.assigneeUserId;
+  if (input.assigneeUserId !== undefined) {
+    if (input.assigneeUserId === null) {
+      // GỠ NGƯỜI: xoá cả khoá LẪN tên. Giữ lại tên mà bỏ khoá sẽ tạo đúng thứ vừa bỏ đi — một
+      // case mang tên một người mà không quy kết được về ai.
+      assignee = "";
+      assigneeUserId = null;
+    } else {
+      const u = await db.query.users.findFirst({ where: eq(schema.users.id, input.assigneeUserId), columns: { id: true, name: true, email: true } });
+      if (!u) return { error: "Không tìm thấy người phụ trách" };
+      assignee = u.name || u.email;
+      assigneeUserId = u.id;
+    }
+  }
+
   await db
     .update(schema.csCases)
-    .set({ status, assignee, resolvedAt: resolvedAtFor(status, before.resolvedAt), updatedAt: new Date() })
+    .set({ status, assignee, assigneeUserId, resolvedAt: resolvedAtFor(status, before.resolvedAt), updatedAt: new Date() })
     .where(eq(schema.csCases.id, input.id));
   if (input.status && input.status !== before.status) {
     await recordCsEvent({ caseId: input.id, actor, action: "STATUS", previousStatus: before.status, nextStatus: input.status });
   }
-  if (input.assignee !== undefined && input.assignee !== before.assignee) {
-    await recordCsEvent({ caseId: input.id, actor, action: "ASSIGN", previousAssignee: before.assignee, nextAssignee: input.assignee });
+  if (input.assigneeUserId !== undefined && assigneeUserId !== before.assigneeUserId) {
+    await recordCsEvent({ caseId: input.id, actor, action: "ASSIGN", previousAssignee: before.assignee, nextAssignee: assignee });
   }
   return { ok: true, data: { status, assignee, followUpAt: before.followUpAt } };
 }

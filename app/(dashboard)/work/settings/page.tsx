@@ -9,6 +9,9 @@ import { PeoplePanel } from "@/app/(dashboard)/work/settings/people-panel";
 import { WorkRulesPanel, type RuleRow } from "@/app/(dashboard)/work/settings/rules-panel";
 import { StaffingPanel, type StaffRow } from "@/app/(dashboard)/work/settings/staffing-panel";
 import { WeightsPanel } from "@/app/(dashboard)/work/settings/weights-panel";
+import { TargetsPanel } from "@/app/(dashboard)/work/settings/targets-panel";
+import { listTargetsForAdmin } from "@/lib/queries/metric-targets";
+import { getPersonAttributionCoverage, keyedShare } from "@/lib/queries/attribution-coverage";
 import { requirePermission } from "@/lib/auth/session";
 import { getDb, schema } from "@/db";
 import { DEFAULT_OWNERSHIP_MAP } from "@/lib/constants/work-ownership";
@@ -23,7 +26,7 @@ import { DEFAULT_WIP_LIMIT } from "@/lib/constants/workforce";
 import { WORK_SOURCES } from "@/lib/constants/work-sources";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 export const metadata = { title: "Cấu hình công việc" };
 
@@ -48,6 +51,11 @@ export default async function WorkSettingsPage() {
     collectWorkItems({ now }),
     getScoreWeights(),
     db.select().from(schema.workRecurrences).orderBy(asc(schema.workRecurrences.title)),
+  ]);
+  const [targets, positions, coverage] = await Promise.all([
+    listTargetsForAdmin(),
+    db.select({ id: schema.positions.id, name: schema.positions.name }).from(schema.positions).where(eq(schema.positions.active, true)).orderBy(asc(schema.positions.sortOrder)),
+    getPersonAttributionCoverage(),
   ]);
   // BÁO CÁO LỆCH — chạy thử, không sửa gì. Cố ý không có nút "sửa hàng loạt": xem `membershipDrift`.
   const drift = await membershipDrift();
@@ -276,6 +284,59 @@ export default async function WorkSettingsPage() {
         hint="Sáu trục của thẻ điểm nói về sáu thứ khác nhau. Gộp chúng thành một số chỉ có nghĩa khi có người CHỊU TRÁCH NHIỆM chọn tỉ lệ. Ghi sẵn một bộ mặc định là lén quyết định thay chủ shop, rồi ba tháng sau không ai nhớ ai chọn các con số đó."
       >
         <WeightsPanel weights={weights} />
+      </SectionCard>
+
+      <SectionCard
+        title="Đích của chỉ số"
+        description="Ba tầng: công ty → phòng ban → chức danh. Tầng hẹp hơn đè tầng rộng hơn."
+        hint="Bảng này bắt đầu rỗng và ở rỗng cho tới khi chủ shop tự điền — ERP KHÔNG đặt sẵn đích nào. Chưa có đích thì màn hình Hiệu suất vẫn hiện số thực tế, chỉ là không kết luận đạt hay không đạt; một con số không có đích vẫn đọc được, còn bịa ra đích để có màu xanh đỏ thì không."
+      >
+        <TargetsPanel rows={targets} positions={positions} />
+      </SectionCard>
+
+      <SectionCard
+        title="Quy kết được bao nhiêu phần công việc"
+        description="Thẻ điểm chỉ đáng tin bằng phần dữ liệu nối được về đúng một tài khoản. Bảng này ĐẾM trên chính dữ liệu, không đọc một bản khai."
+        hint="“Là máy” tách riêng khỏi “chưa ai nhận”: việc đã được chạm, chỉ là chạm bởi một job chứ không phải người. Gộp hai cột đó lại thì báo cáo nói có người đang làm trong khi con số thật là không ai."
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Miền</TableHead>
+                <TableHead className="text-right">Tổng</TableHead>
+                <TableHead className="text-right">Có khoá</TableHead>
+                <TableHead className="text-right">Chỉ có chữ</TableHead>
+                <TableHead className="text-right">Là máy</TableHead>
+                <TableHead className="text-right">Chưa ai</TableHead>
+                <TableHead className="text-right">Quy kết được</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {coverage.map((c) => {
+                const phan = keyedShare(c);
+                return (
+                  <TableRow key={c.key}>
+                    <TableCell className="text-sm">
+                      <div className="font-medium">{c.label}</div>
+                      <div className="text-[11px] text-muted-foreground" title={c.meaning}>{c.source}</div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{c.total}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">{c.withKey}</TableCell>
+                    <TableCell className={cn("text-right tabular-nums", c.textOnly > 0 && "text-amber-600 dark:text-amber-400")}>{c.textOnly}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">{c.machine || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">{c.unassigned}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {/* 0/0 KHÔNG phải 0% — chưa có dòng nào thì chưa biết, không phải quy kết kém. */}
+                      {phan === null ? <span className="text-xs text-muted-foreground">chưa có dòng nào</span> : <span className={cn("font-medium", phan >= 100 ? "text-success" : phan < 60 ? "text-destructive" : "")}>{phan}%</span>}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       </SectionCard>
 
       <SectionCard title="Phòng ban" description="Thêm phòng, đổi trưởng phòng, ngừng dùng một phòng." padded={false}>

@@ -147,11 +147,17 @@ export async function testCsWorkqueue(db: Db) {
   assert.ok(!csKh.has("csq-c7") && !(await listIds()).includes("csq-c7"), "DONE / CANCELLED không nằm trong hàng đợi mặc định");
 
   // ───────── 8 · Đổi trạng thái / người phụ trách ngay trên dòng ─────────
-  const doi = await setCsCaseFields({ id: "csq-c5", status: "IN_PROGRESS", assignee: "Linh CSKH" }, actor);
+  // Giao việc đi bằng KHOÁ tài khoản; TÊN hiển thị do máy chủ đọc từ `users`, không nhận từ nơi gọi.
+  const doi = await setCsCaseFields({ id: "csq-c5", status: "IN_PROGRESS", assigneeUserId: "csq-user" }, actor);
   assert.ok("ok" in doi, "đổi trạng thái + người phụ trách phải thành công");
   const sauDoi = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, "csq-c5") });
   assert.equal(sauDoi?.status, "IN_PROGRESS");
-  assert.equal(sauDoi?.assignee, "Linh CSKH");
+  assert.equal(sauDoi?.assigneeUserId, "csq-user", "người phụ trách phải được nối bằng khoá tài khoản");
+  assert.equal(sauDoi?.assignee, "Linh CSKH", "tên hiển thị là ảnh chụp lấy từ `users`, không phải chuỗi nơi gọi gửi lên");
+
+  // Khoá lạ thì TỪ CHỐI — không im lặng ghi một khoá trỏ tới hư không.
+  const khoaLa = await setCsCaseFields({ id: "csq-c5", assigneeUserId: "khong-ton-tai" }, actor);
+  assert.ok("error" in khoaLa, "giao việc cho một khoá không có trong `users` phải bị từ chối");
   assert.equal(sauDoi?.resolvedAt, null, "chuyển sang Đang xử lý phải xoá mốc đóng");
   const suKien5 = await db.select().from(schema.csCaseEvents).where(eq(schema.csCaseEvents.caseId, "csq-c5"));
   assert.equal(suKien5.length, 2, "đổi hai thứ thì ghi hai dòng lịch sử (trạng thái và người), không gộp thành một");

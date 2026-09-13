@@ -92,7 +92,7 @@ async function queueSinceOf(shipmentId: string, fallback: Date): Promise<Date> {
 async function recordCareEvent(
   user: CareActor,
   before: CareRow,
-  input: { action: CareEventAction; note?: string; nextStatus?: CareStatus | null; nextOwner?: string | null; followUpAt?: Date | null; payload?: unknown; reason?: string },
+  input: { action: CareEventAction; note?: string; nextStatus?: CareStatus | null; nextOwner?: string | null; nextOwnerId?: string | null; followUpAt?: Date | null; payload?: unknown; reason?: string },
 ) {
   const db = await getDb();
   const now = new Date();
@@ -109,6 +109,15 @@ async function recordCareEvent(
     nextStatus: input.nextStatus === undefined ? before.careStatus : input.nextStatus,
     previousOwner: before.ownerEmail || null,
     nextOwner: input.nextOwner === undefined ? before.ownerEmail || null : input.nextOwner,
+    /*
+      CHỦ VIỆC BẰNG KHOÁ, ĐI CÙNG HAI CỘT EMAIL Ở TRÊN.
+
+      Sổ sự kiện là thứ trả lời "ai đã cầm kiện này lúc nào". Email trả lời được cho NGƯỜI đọc,
+      nhưng không quy kết được: đổi email là mất dấu, và `''` với `NULL` trông giống nhau. `NULL`
+      ở đây có đúng một nghĩa: CHƯA AI NHẬN.
+    */
+    previousOwnerId: before.ownerId,
+    nextOwnerId: input.nextOwnerId === undefined ? before.ownerId : input.nextOwnerId,
     followUpAt: input.followUpAt === undefined ? before.followUpAt : input.followUpAt,
     sla: { queueSince: queueSince.toISOString(), firstResponseDueAt: sla.firstResponseDueAt.toISOString(), resolveDueAt: sla.resolveDueAt.toISOString(), firstResponseBreached: sla.firstResponseBreached, resolveBreached: sla.resolveBreached },
     payload: input.payload ?? null,
@@ -232,7 +241,7 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
       .update(schema.shipmentCare)
       .set({ ownerId: owner?.id ?? null, ownerEmail: owner?.email ?? "", careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
       .where(eq(schema.shipmentCare.shipmentId, shipmentId));
-    await recordCareEvent(user, before, { action: "ASSIGN", nextStatus: next, nextOwner: owner?.email ?? null, payload: { ownerId: owner?.id ?? null, ownerName: owner?.name ?? null } });
+    await recordCareEvent(user, before, { action: "ASSIGN", nextStatus: next, nextOwner: owner?.email ?? null, nextOwnerId: owner?.id ?? null, payload: { ownerId: owner?.id ?? null, ownerName: owner?.name ?? null } });
     states[shipmentId] = await loadCareState(shipmentId);
   }
   clearMemo();

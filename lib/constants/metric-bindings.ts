@@ -65,6 +65,8 @@ export type MetricBinding = {
   department: DepartmentCode | null;
   /** Nguồn số liệu, viết để người đọc kiểm chứng được. */
   basis: string;
+  /** Dưới ngần này quan sát thì KR mang trạng thái `DATA_INSUFFICIENT`. Bỏ trống = `KR_DEFAULT_MINIMUM_SAMPLE`. */
+  minimumSample?: number;
 };
 
 export const METRIC_BINDINGS: Record<string, MetricBinding> = {
@@ -222,7 +224,44 @@ export function metricBinding(k: string): MetricBinding | null {
  * `coverage` chỉ có với chỉ số `ESTIMATED`: phần dữ liệu tra được (0–1). Dưới ngưỡng thì giao diện
  * phải nói thẳng là con số đang đứng trên một mẫu nhỏ, thay vì hiện nó như một sự thật.
  */
-export type MetricValue = { key: string; value: number | null; at: Date; trust: MetricTrust; coverage?: number | null; note?: string };
+export type MetricValue = { key: string; value: number | null; at: Date; trust: MetricTrust; coverage?: number | null; note?: string; sample?: number | null; state?: MetricState };
+
+/**
+ * ═══════════ CHƯA ĐỦ DỮ LIỆU KHÔNG PHẢI LÀ ĐANG THẤT BẠI ═══════════
+ *
+ *   OK                — có số, đứng trên đủ quan sát. Đọc và quyết định được.
+ *   DATA_INSUFFICIENT — CÓ số nhưng mẫu dưới ngưỡng. Số vẫn hiện, KHÔNG chấm đạt/không đạt.
+ *   UNKNOWN           — không có quan sát nào. `value = null`, không bao giờ là 0.
+ *
+ * Vì sao `DATA_INSUFFICIENT` phải là một trạng thái riêng chứ không gộp vào `UNKNOWN`: hai thứ
+ * này dẫn tới hai hành động khác nhau. `UNKNOWN` là "đi lấy dữ liệu"; `DATA_INSUFFICIENT` là
+ * "đợi thêm vài tuần, đường ống đang chạy đúng". Gộp lại thì cả hai đều thành "hỏng".
+ *
+ * Và vì sao vẫn HIỆN con số thay vì giấu: giấu đi thì người đọc tưởng chưa có gì chạy. Hiện kèm
+ * cỡ mẫu để họ tự thấy "75% trên 4 quan sát" là câu chưa nói được gì.
+ */
+export type MetricState = "OK" | "DATA_INSUFFICIENT" | "UNKNOWN";
+
+export const METRIC_STATE_LABEL: Record<MetricState, string> = {
+  OK: "Đủ dữ liệu",
+  DATA_INSUFFICIENT: "Chưa đủ dữ liệu để kết luận",
+  UNKNOWN: "Chưa đo được",
+};
+
+/**
+ * Cỡ mẫu tối thiểu để một KR được chấm. Mặc định lấy đúng ngưỡng của thẻ điểm hiệu suất
+ * (`SAMPLE_FLOOR.medium`) — hai chỗ dùng hai ngưỡng khác nhau là hai câu trả lời cho cùng một
+ * câu hỏi. Chỉ số nào cần ngưỡng riêng thì khai `minimumSample` ở chính dòng của nó.
+ */
+export const KR_DEFAULT_MINIMUM_SAMPLE = 20;
+
+export function metricStateOf(input: { value: number | null; sample: number | null | undefined; minimumSample: number }): MetricState {
+  if (input.value === null) return "UNKNOWN";
+  // Chỉ số không đếm quan sát (tiền, số dư, số lượt) thì không có ngưỡng nào để so — đọc thẳng.
+  if (input.sample === null || input.sample === undefined) return "OK";
+  if (input.sample <= 0) return "UNKNOWN";
+  return input.sample < input.minimumSample ? "DATA_INSUFFICIENT" : "OK";
+}
 
 /**
  * Phần trăm hoàn thành một KR. `null` khi CHƯA ĐO ĐƯỢC.

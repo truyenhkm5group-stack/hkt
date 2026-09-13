@@ -19,6 +19,8 @@ export type SnapshotPoint = {
   sample: number;
   confidence: MetricConfidence;
   definitionVersion: number;
+  /** Phiên bản NGUỒN lúc chụp — xem `METRIC_SOURCE_VERSION`. Khác `definitionVersion`: đổi chỗ đọc, không đổi công thức. */
+  sourceVersion: number;
 };
 
 export type MetricTrend = {
@@ -40,6 +42,11 @@ export type MetricTrend = {
    * hay "xấu đi" được. Nói ra thay vì im lặng vẽ một mũi tên.
    */
   definitionChanged: boolean;
+  /**
+   * Hai kỳ ĐỌC TỪ HAI NGUỒN khác nhau (ví dụ: case nối bằng ô chữ → nối bằng khoá tài khoản).
+   * Cùng công thức nhưng khác TẬP DÒNG, nên chênh lệch cũng không đọc thành xu hướng được.
+   */
+  sourceChanged: boolean;
 };
 
 export async function metricTrend(input: {
@@ -61,6 +68,7 @@ export async function metricTrend(input: {
       sample: t.sample,
       confidence: t.confidence,
       definitionVersion: t.definitionVersion,
+      sourceVersion: t.sourceVersion,
     })
     .from(t)
     .where(and(eq(t.subjectType, input.subjectType), eq(t.subjectId, input.subjectId), eq(t.kind, input.kind ?? "WEEKLY")))
@@ -71,7 +79,7 @@ export async function metricTrend(input: {
   for (const r of rows) {
     const cur =
       theoChiSo.get(r.metricKey) ??
-      ({ metricKey: r.metricKey, metricLabel: r.metricLabel, unit: r.unit, points: [], latest: null, previous: null, delta: null, definitionChanged: false } as MetricTrend);
+      ({ metricKey: r.metricKey, metricLabel: r.metricLabel, unit: r.unit, points: [], latest: null, previous: null, delta: null, definitionChanged: false, sourceChanged: false } as MetricTrend);
     cur.points.push({
       period: r.period,
       periodStart: r.periodStart,
@@ -79,6 +87,7 @@ export async function metricTrend(input: {
       sample: r.sample,
       confidence: r.confidence as MetricConfidence,
       definitionVersion: r.definitionVersion,
+      sourceVersion: r.sourceVersion,
     });
     theoChiSo.set(r.metricKey, cur);
   }
@@ -90,6 +99,14 @@ export async function metricTrend(input: {
     tr.previous = doDuoc[1] ?? null;
     tr.delta = tr.latest && tr.previous ? Math.round((tr.latest.value! - tr.previous.value!) * 10) / 10 : null;
     tr.definitionChanged = Boolean(tr.latest && tr.previous && tr.latest.definitionVersion !== tr.previous.definitionVersion);
+    /*
+      ĐỔI NGUỒN GIỮA HAI KỲ — KHÔNG VẼ MŨI TÊN.
+
+      Kỳ trước gom case nối bằng TÊN GÕ TAY, kỳ này chỉ gom case nối bằng KHOÁ tài khoản: hai kỳ
+      đứng trên hai TẬP DÒNG khác nhau. Con số tụt xuống không nói người đó làm kém đi, nó nói
+      phép đo vừa hẹp lại. Vẽ một mũi tên đi xuống ở đây là nói dối bằng đồ thị.
+    */
+    tr.sourceChanged = Boolean(tr.latest && tr.previous && tr.latest.sourceVersion !== tr.previous.sourceVersion);
     tr.points.reverse();
   }
 

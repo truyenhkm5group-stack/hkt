@@ -19,6 +19,7 @@ import { getDb, schema } from "@/db";
 import { DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 import { DEPT_LINKAGE, DEPT_METRIC_KEYS, type DeptMetricSpec } from "@/lib/constants/department-performance";
 import { METRIC_DEFINITION_VERSION, periodKey, periodRange } from "@/lib/constants/metric-provenance";
+import { METRIC_SOURCE_VERSION } from "@/lib/constants/metric-catalog";
 import { getDeptPerformance } from "@/lib/queries/dept-performance";
 import { activeMembershipsByUser } from "@/lib/org/membership";
 
@@ -164,6 +165,7 @@ function dong(m: Awaited<ReturnType<typeof getDeptPerformance>>["people"][number
     basis: m.basis,
     calculatedAt: new Date(),
     definitionVersion: METRIC_DEFINITION_VERSION,
+    sourceVersion: METRIC_SOURCE_VERSION,
   };
 }
 
@@ -191,6 +193,7 @@ function trong(spec: DeptMetricSpec, linkage: "USER_ID" | "EMAIL" | "FREE_TEXT",
     basis: "Không có quan sát nào trong kỳ — dòng này ghi lại rằng ĐÃ ĐO và kết quả là chưa biết, khác với chưa từng chạy.",
     calculatedAt: new Date(),
     definitionVersion: METRIC_DEFINITION_VERSION,
+    sourceVersion: METRIC_SOURCE_VERSION,
   };
 }
 

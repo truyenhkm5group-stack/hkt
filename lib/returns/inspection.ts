@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
+import type { Actor } from "@/lib/constants/actor";
 import type { ReturnCondition } from "@/lib/constants/returns-condition";
 import { ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, isItemCondition, itemHasDiscrepancy, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import { returnProductContext, type ItemsBasis, type OrderLinkBasis } from "@/lib/returns/product-context";
@@ -34,7 +35,7 @@ type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
  * Idempotent: `shipment_id` là khoá duy nhất nên bấm lại lần hai không tạo thêm phiếu và không đè
  * mốc/người nhận của lần đầu. Trả về đúng số kiện được ghi nhận MỚI trong lần gọi này.
  */
-export async function markReturnsArrived(ids: string[], actor: string, note?: string) {
+export async function markReturnsArrived(ids: string[], actor: Actor, note?: string) {
   const unique = [...new Set(ids.filter((id) => id.trim()))];
   if (!unique.length) return { count: 0, ids: [] as string[] };
   const db = await getDb();
@@ -50,7 +51,8 @@ export async function markReturnsArrived(ids: string[], actor: string, note?: st
         orderId: sh.orderId,
         status: "RECEIVED" as const,
         receivedAt: now,
-        receivedBy: actor,
+        receivedBy: actor.label,
+        receivedByUserId: actor.id,
         note: note?.trim() ?? "",
       })),
     )
@@ -82,7 +84,7 @@ export type InspectionInput = {
   /** Số món về nhưng không bán lại được (rách, bẩn, thiếu phụ kiện). */
   unsellableQty: number;
   note: string;
-  actor: string;
+  actor: Actor;
 };
 
 export type InspectionResult = { ok: true; restocked: number; receiptId: string | null } | { error: string };
@@ -126,7 +128,8 @@ export async function recordInspection(input: InspectionInput): Promise<Inspecti
           unsellableQty: unsellable,
           note,
           inspectedAt: new Date(),
-          inspectedBy: input.actor,
+          inspectedBy: input.actor.label,
+          inspectedByUserId: input.actor.id,
           stockReceiptId: receiptId,
           updatedAt: new Date(),
         })
@@ -138,7 +141,7 @@ export async function recordInspection(input: InspectionInput): Promise<Inspecti
       // số đã xuất hiện ra thành HÀNG HỤT trên sổ kho thay vì biến mất.
       await tx
         .update(s)
-        .set({ returnReceivedAt: new Date(), returnReceivedBy: input.actor, returnReceivedNote: note || null, updatedAt: new Date() })
+        .set({ returnReceivedAt: new Date(), returnReceivedBy: input.actor.label, returnReceivedNote: note || null, updatedAt: new Date() })
         .where(and(eq(s.id, input.shipmentId), isNull(s.returnReceivedAt)));
     });
   } catch (e) {
@@ -156,7 +159,7 @@ export async function recordInspection(input: InspectionInput): Promise<Inspecti
  * Trả `null` khi không mẫu mã nào của đơn khớp được với danh mục ERP: thà không ghi còn hơn ghi vào
  * một mẫu mã đoán bừa — tồn sai một mẫu mã còn khó phát hiện hơn tồn thiếu.
  */
-async function createRestockReceipt(db: DbLike, orderId: string | null, shipmentId: string, restock: number, note: string, actor: string): Promise<string | null> {
+async function createRestockReceipt(db: DbLike, orderId: string | null, shipmentId: string, restock: number, note: string, actor: Actor): Promise<string | null> {
   if (!orderId) return null;
   const items = await db
     .select({ variantId: schema.orderItems.variantId, qty: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)` })
@@ -176,7 +179,7 @@ async function createRestockReceipt(db: DbLike, orderId: string | null, shipment
       note,
       totalQuantity: restock,
       totalCost: 0,
-      createdBy: actor,
+      createdBy: actor.label,
     })
     .returning({ id: schema.stockReceipts.id });
 
@@ -460,7 +463,7 @@ export async function recordInspectionBulk(
   shipmentIds: string[],
   condition: ReturnCondition,
   note: string,
-  actor: string,
+  actor: Actor,
 ): Promise<BulkInspectionResult> {
   const ids = [...new Set(shipmentIds.filter((x) => x.trim()))];
   if (!ids.length) return { done: 0, failed: [] };
@@ -528,7 +531,7 @@ export type ItemInspectionResult =
  * đếm được, không phân bổ theo tỷ lệ dòng hàng của đơn. Phân bổ theo tỷ lệ là phép đoán chấp nhận
  * được khi chỉ biết tổng số; khi đã biết từng món mà vẫn đoán thì là làm hỏng dữ liệu tốt hơn.
  */
-export async function recordItemInspection(input: { shipmentId: string; items: InspectedItemInput[]; actor: string; orderOnlyConfirmed?: boolean }): Promise<ItemInspectionResult> {
+export async function recordItemInspection(input: { shipmentId: string; items: InspectedItemInput[]; actor: Actor; orderOnlyConfirmed?: boolean }): Promise<ItemInspectionResult> {
   const db = await getDb();
   const [row] = await db.select().from(ins).where(eq(ins.shipmentId, input.shipmentId));
   if (!row) return { error: "Kiện này chưa được ghi nhận đã về kho" };
@@ -543,8 +546,8 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
     return { error: "Đơn này không có phiếu trả từng món — danh sách kỳ vọng chỉ suy từ cả đơn. Xác nhận đã đối chiếu thực tế rồi mới lưu." };
   }
 
-  const actor = input.actor.trim();
-  if (!actor) return { error: "Thiếu người kiểm" };
+  const actor: Actor = { id: input.actor.id, label: input.actor.label.trim() };
+  if (!actor.label) return { error: "Thiếu người kiểm" };
 
   // Làm sạch + kiểm TOÀN BỘ trước khi ghi bất cứ thứ gì: một món sai thì cả kiện không ghi, chứ
   // không ghi được nửa rồi bỏ dở.
@@ -597,7 +600,7 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
           note: `Đếm theo từng món · ${byVariant.size} mẫu mã`,
           totalQuantity: restockTotal,
           totalCost: 0,
-          createdBy: actor,
+          createdBy: actor.label,
         })
         .returning({ id: schema.stockReceipts.id });
       receiptId = receipt?.id ?? null;
@@ -622,7 +625,8 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
         actualQty: it.actualQty,
         condition: it.condition,
         note: it.note,
-        inspectedBy: actor,
+        inspectedBy: actor.label,
+        inspectedByUserId: actor.id,
         inspectedAt: now,
       })),
     );
@@ -659,7 +663,8 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
         unsellableQty: unsellableTotal,
         note: summary,
         inspectedAt: now,
-        inspectedBy: actor,
+        inspectedBy: actor.label,
+        inspectedByUserId: actor.id,
         stockReceiptId: receiptId,
         updatedAt: now,
       })
@@ -671,7 +676,7 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
 
     await tx
       .update(s)
-      .set({ returnReceivedAt: now, returnReceivedBy: actor, returnReceivedNote: summary || null, updatedAt: now })
+      .set({ returnReceivedAt: now, returnReceivedBy: actor.label, returnReceivedNote: summary || null, updatedAt: now })
       .where(and(eq(s.id, input.shipmentId), isNull(s.returnReceivedAt)));
 
     });

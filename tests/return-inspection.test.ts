@@ -46,15 +46,15 @@ export async function testReturnInspection(db: Db) {
   };
 
   // ───────── 1. Chưa ghi nhận đã về thì không đếm được ─────────
-  const chuaVe = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 4, unsellableQty: 0, note: "", actor: "kho" });
+  const chuaVe = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 4, unsellableQty: 0, note: "", actor: { id: null, label: "kho" } });
   assert.ok("error" in chuaVe, "kiện chưa ghi nhận về kho thì không được đếm — nếu không, ERP cộng tồn cho hàng chưa ai thấy");
 
   // ───────── 2. Ghi nhận đã về: KHÔNG sinh phiếu, KHÔNG cộng tồn ─────────
-  const arrived = await markReturnsArrived(["ins-ship-1"], "nguoi-nhan-hang", "Kiện về cùng lô ngày 20/8");
+  const arrived = await markReturnsArrived(["ins-ship-1"], { id: null, label: "nguoi-nhan-hang" }, "Kiện về cùng lô ngày 20/8");
   assert.equal(arrived.count, 1, "ghi nhận được kiện đã về");
   assert.equal(await receiptQty(), 0, "ghi nhận đã về KHÔNG được sinh phiếu tái nhập nào");
 
-  const lai = await markReturnsArrived(["ins-ship-1"], "nguoi-khac");
+  const lai = await markReturnsArrived(["ins-ship-1"], { id: null, label: "nguoi-khac" });
   assert.equal(lai.count, 0, "ghi nhận lại lần hai không tạo thêm phiếu");
 
   const pending = await listPendingInspections(50);
@@ -64,18 +64,18 @@ export async function testReturnInspection(db: Db) {
   assert.equal(row.receivedBy, "nguoi-nhan-hang", "giữ nguyên người ghi nhận lần đầu");
 
   // ───────── 3. Kết luận không bán được thì BẮT BUỘC có lý do ─────────
-  const khongLyDo = await recordInspection({ shipmentId: "ins-ship-1", condition: "DAMAGED", restockQty: 0, unsellableQty: 4, note: "   ", actor: "kho" });
+  const khongLyDo = await recordInspection({ shipmentId: "ins-ship-1", condition: "DAMAGED", restockQty: 0, unsellableQty: 4, note: "   ", actor: { id: null, label: "kho" } });
   assert.ok("error" in khongLyDo, "hàng hỏng mà không ghi lý do thì phần mất biến mất không dấu vết");
 
   // ───────── 4. Huỷ ghi nhận khi CHƯA đếm thì được ─────────
   const undo = await undoReturnArrived(["ins-ship-1"]);
   assert.equal(undo.count, 1, "kiện chưa đếm thì huỷ ghi nhận được");
   assert.equal(undo.blocked, 0);
-  await markReturnsArrived(["ins-ship-1"], "nguoi-nhan-hang");
+  await markReturnsArrived(["ins-ship-1"], { id: null, label: "nguoi-nhan-hang" });
 
   // ───────── 5. ĐẾM XONG: chỉ phần đếm được vào tồn ─────────
   // Kho mở kiện: 3 món còn bán được, 1 món bẩn. Tồn chỉ được tăng 3.
-  const done = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 3, unsellableQty: 1, note: "1 áo dính bẩn", actor: "nguoi-dem" });
+  const done = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 3, unsellableQty: 1, note: "1 áo dính bẩn", actor: { id: null, label: "nguoi-dem" } });
   assert.ok("ok" in done, "kiện đã ghi nhận về thì đếm được");
   assert.equal("ok" in done && done.restocked, 3, "chỉ 3 món vào tồn, không phải 4 món đã xuất");
   assert.equal(await receiptQty(), 3, "phiếu tái nhập ghi đúng 3 món kho đếm được");
@@ -85,7 +85,7 @@ export async function testReturnInspection(db: Db) {
   assert.equal(ship.by, "nguoi-dem", "mốc kho nhận ghi tên người ĐẾM, không phải người bê hàng vào");
 
   // ───────── 6. Đếm lần hai bị chặn ─────────
-  const demLai = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 3, unsellableQty: 0, note: "đếm lại", actor: "nguoi-dem" });
+  const demLai = await recordInspection({ shipmentId: "ins-ship-1", condition: "RESTOCKABLE", restockQty: 3, unsellableQty: 0, note: "đếm lại", actor: { id: null, label: "nguoi-dem" } });
   assert.ok("error" in demLai, "đếm lại lần hai sẽ cộng tồn hai lần — phải bị chặn");
   assert.equal(await receiptQty(), 3, "không có phiếu tái nhập thứ hai");
 
@@ -94,10 +94,10 @@ export async function testReturnInspection(db: Db) {
   // trong cùng một giây thì cả hai qua được bước kiểm, và tồn cộng hai lần. Giờ khoá dòng kiện trong
   // một giao dịch nên lượt sau phải chờ, thấy INSPECTED và dừng — không có phiếu kho thứ hai.
   await db.insert(schema.shipments).values({ id: "ins-ship-race", orderId: "ins-order-1", vtpOrderNumber: "INS001R", stage: "RETURNED", returnedAt: new Date("2026-08-21T00:00:00Z") }).onConflictDoNothing();
-  await markReturnsArrived(["ins-ship-race"], "nguoi-be-hang");
+  await markReturnsArrived(["ins-ship-race"], { id: null, label: "nguoi-be-hang" });
   const dua = await Promise.all([
-    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: "kho-a" }),
-    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: "kho-b" }),
+    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: { id: null, label: "kho-a" } }),
+    recordInspection({ shipmentId: "ins-ship-race", condition: "RESTOCKABLE", restockQty: 2, unsellableQty: 0, note: "", actor: { id: null, label: "kho-b" } }),
   ]);
   assert.equal(dua.filter((r) => "ok" in r).length, 1, "hai lượt cùng lúc thì đúng MỘT lượt được ghi");
   assert.equal(dua.filter((r) => "error" in r).length, 1, "lượt còn lại phải báo lỗi, không im lặng");
@@ -143,14 +143,14 @@ export async function testReturnInspection(db: Db) {
   // HÀNG LOẠT: nhiều kiện cùng kết luận, và "nhận đủ" = đúng bằng số ERP đã xuất.
   const loat = kienChoDem.slice(0, 2).map((r) => r.shipmentId);
   const tonTruocLoat = await tongTaiNhap();
-  const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", "kho@test");
+  const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" });
   assert.equal(kqLoat.done, loat.length, "mọi kiện hợp lệ trong lượt phải được xử lý");
   assert.equal(kqLoat.failed.length, 0, "không kiện nào được phép hỏng im lặng");
   const congThem = kienChoDem.slice(0, 2).reduce((t, r) => t + (r.expectedQty ?? 0), 0);
   assert.equal(await tongTaiNhap(), tonTruocLoat + congThem, "hàng loạt “nhận đủ” cộng ĐÚNG BẰNG số ERP đã xuất, không hơn không kém");
 
   // Chạy lại đúng lượt đó: đã đếm rồi thì bị chặn, và LỖI PHẢI HIỆN RA kèm tên kiện.
-  const lanHai = await recordInspectionBulk(loat, "RESTOCKABLE", "", "kho@test");
+  const lanHai = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" });
   assert.equal(lanHai.done, 0, "kiện đã đếm không được đếm lại qua đường hàng loạt");
   assert.equal(lanHai.failed.length, loat.length, "kiện bị chặn phải được nêu tên, không nuốt lỗi");
 
@@ -158,7 +158,7 @@ export async function testReturnInspection(db: Db) {
   const conLai = (await listPendingInspections(50))[0];
   if (conLai) {
     const tonTruocHong = await tongTaiNhap();
-    const hong = await recordInspectionBulk([conLai.shipmentId], "DAMAGED", "vỡ khi vận chuyển", "kho@test");
+    const hong = await recordInspectionBulk([conLai.shipmentId], "DAMAGED", "vỡ khi vận chuyển", { id: null, label: "kho@test" });
     assert.equal(hong.done, 1, "kết luận hỏng có lý do thì ghi được");
     assert.equal(await tongTaiNhap(), tonTruocHong, "kết luận HỎNG tuyệt đối không cộng tồn");
   }

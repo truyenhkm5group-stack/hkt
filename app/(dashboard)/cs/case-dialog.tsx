@@ -13,18 +13,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { saveCsCase, searchOrdersForCase } from "@/lib/actions/cs";
 import { CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_STATUSES, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import type { CsCaseRow } from "@/lib/queries/cs";
+import type { CsStaff } from "./cs-table";
 import { formatVND } from "@/lib/format";
 
 type OrderHit = { id: string; systemId: number | null; name: string | null; phone: string | null; total: number };
 
 /** Tạo / sửa case CSKH. Không truyền `caseRow` → nút “Thêm case”. */
-export function CaseDialog({ caseRow, assignees, open, onOpenChange }: { caseRow?: CsCaseRow | null; assignees: string[]; open?: boolean; onOpenChange?: (v: boolean) => void }) {
+export function CaseDialog({ caseRow, staff, open, onOpenChange }: { caseRow?: CsCaseRow | null; staff: CsStaff[]; open?: boolean; onOpenChange?: (v: boolean) => void }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const empty = { orderId: "", orderLabel: "", kind: "EXCHANGE_SIZE" as CsKind, status: "OPEN" as CsStatus, title: "", detail: "", customerName: "", customerPhone: "", assignee: "", resolution: "" };
+  const empty = { orderId: "", orderLabel: "", kind: "EXCHANGE_SIZE" as CsKind, status: "OPEN" as CsStatus, title: "", detail: "", customerName: "", customerPhone: "", assigneeUserId: "" as string, resolution: "" };
   const [form, setForm] = useState(empty);
   const [term, setTerm] = useState("");
   const [hits, setHits] = useState<OrderHit[]>([]);
@@ -41,7 +42,7 @@ export function CaseDialog({ caseRow, assignees, open, onOpenChange }: { caseRow
         detail: caseRow.detail,
         customerName: caseRow.customerName,
         customerPhone: caseRow.customerPhone,
-        assignee: caseRow.assignee,
+        assigneeUserId: caseRow.assigneeUserId ?? "",
         resolution: caseRow.resolution,
       });
     } else setForm(empty);
@@ -60,7 +61,7 @@ export function CaseDialog({ caseRow, assignees, open, onOpenChange }: { caseRow
   const submit = () =>
     startTransition(async () => {
       const title = form.title.trim() || `${CS_KIND_LABEL[form.kind]}${form.orderLabel ? ` · ${form.orderLabel}` : ""}${form.customerName ? ` · ${form.customerName}` : ""}`;
-      const r = await saveCsCase({ id: caseRow?.id, orderId: form.orderId || null, kind: form.kind, status: form.status, title, detail: form.detail, customerName: form.customerName, customerPhone: form.customerPhone, assignee: form.assignee, resolution: form.resolution });
+      const r = await saveCsCase({ id: caseRow?.id, orderId: form.orderId || null, kind: form.kind, status: form.status, title, detail: form.detail, customerName: form.customerName, customerPhone: form.customerPhone, assigneeUserId: form.assigneeUserId || null, resolution: form.resolution });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(caseRow ? "Đã cập nhật case" : "Đã tạo case");
@@ -120,8 +121,20 @@ export function CaseDialog({ caseRow, assignees, open, onOpenChange }: { caseRow
             </div>
             <div className="space-y-1">
               <Label>Người phụ trách</Label>
-              <Input list="cs-assignees" value={form.assignee} onChange={(e) => setForm({ ...form, assignee: e.target.value })} placeholder="Tên nhân viên" />
-              <datalist id="cs-assignees">{assignees.map((a) => <option key={a} value={a} />)}</datalist>
+              {/*
+                CHỌN TỪ DANH SÁCH TÀI KHOẢN, không gõ tay. Ô chữ cũ cho phép gõ bất kỳ tên nào, và
+                mỗi cách gõ khác nhau tạo ra một "người" mới trong thẻ điểm.
+              */}
+              <Select value={form.assigneeUserId || "__none__"} onValueChange={(v) => setForm({ ...form, assigneeUserId: v === "__none__" ? "" : v })}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Chưa giao cho ai" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Chưa giao cho ai</SelectItem>
+                  {staff.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {caseRow && !caseRow.assigneeUserId && caseRow.assignee ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">Dòng cũ ghi tên “{caseRow.assignee}” bằng chữ, chưa nối về tài khoản nào. Chọn lại một lần để case này vào được thẻ điểm.</p>
+              ) : null}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

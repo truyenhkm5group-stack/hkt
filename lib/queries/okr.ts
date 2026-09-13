@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { DepartmentCode } from "@/lib/constants/departments";
-import { krProgress, metricBinding, type MetricTrust, type MetricUnit } from "@/lib/constants/metric-bindings";
+import { krProgress, metricBinding, type MetricState, type MetricTrust, type MetricUnit } from "@/lib/constants/metric-bindings";
 import { resolveMetrics } from "@/lib/queries/metric-resolver";
 import { KR_CONFIDENCES, OKR_LEVELS, OKR_STATUSES, type KrConfidence, type OkrLevel, type OkrStatus } from "@/lib/constants/okr";
 import type { Period } from "@/lib/search-params";
@@ -41,6 +41,14 @@ export type KeyResultView = {
   ownerName: string;
   /** Cảnh báo độ phủ của chỉ số `ESTIMATED`; rỗng khi không có gì phải cảnh báo. */
   note: string;
+  /** Con số này đứng trên bao nhiêu quan sát. `null` = chỉ số không đếm quan sát (tiền, số dư). */
+  sample: number | null;
+  /**
+   * `DATA_INSUFFICIENT` = CÓ số nhưng mẫu dưới ngưỡng. Tách hẳn khỏi `UNKNOWN` vì hai thứ dẫn tới
+   * hai hành động khác nhau: một cái là "đợi thêm vài tuần, đường ống đang chạy đúng", cái kia là
+   * "đi lấy dữ liệu". Gộp lại thì cả hai đều thành "hỏng".
+   */
+  state: MetricState;
 };
 
 export type ObjectiveView = {
@@ -73,11 +81,23 @@ export type ObjectiveView = {
   totalCount: number;
 };
 
-function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: number | null; note?: string } | undefined, ownerName: string): KeyResultView {
+function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: number | null; note?: string; sample?: number | null; state?: MetricState } | undefined, ownerName: string): KeyResultView {
   const binding = metricBinding(kr.metricSource);
   // Chỉ số có trong sổ ⇒ đọc SỐ SỐNG. Chỉ số `MANUAL` ⇒ giá trị người nhập gần nhất.
   const current = binding ? (live?.value ?? null) : kr.current;
+  /*
+    CHƯA ĐỦ DỮ LIỆU KHÔNG PHẢI LÀ ĐANG THẤT BẠI.
+
+    Một KR đọc 75% trên 4 quan sát và một KR đọc 75% trên 400 quan sát hiện ra giống hệt nhau nếu
+    chỉ vẽ thanh tiến độ. Cái thứ nhất chưa nói được gì; đọc nó như một kết quả là ra quyết định
+    trên may rủi. Nên trạng thái đi RA TỚI giao diện, không dừng ở tầng truy vấn.
+
+    KR nhập tay không có cỡ mẫu để so ⇒ `OK` nếu có số. Người nhập đã tự chịu trách nhiệm cho nó.
+  */
+  const state: MetricState = binding ? (live?.state ?? (current === null ? "UNKNOWN" : "OK")) : current === null ? "UNKNOWN" : "OK";
   return {
+    sample: live?.sample ?? null,
+    state,
     id: kr.id,
     title: kr.title,
     metricSource: kr.metricSource,

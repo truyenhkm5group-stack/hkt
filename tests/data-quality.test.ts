@@ -146,13 +146,13 @@ export async function testDataQuality(db: Db) {
     assert.ok(r.items.every((i) => i.name && i.qty > 0), "mỗi dòng mặt hàng có tên và số lượng dương");
   }
   assert.ok(waiting.rows.filter((r) => !r.orderId && !r.orderReference).every((r) => r.items.length === 0), "kiện không nối được đơn ⇒ danh sách mặt hàng rỗng, không đoán");
-  const first = await markReturnReceived([target.id], "test-kho", "Kiện đã về");
+  const first = await markReturnReceived([target.id], { id: null, label: "test-kho" }, "Kiện đã về");
   assert.equal(first.count, 1);
-  const second = await markReturnReceived([target.id], "test-kho-2");
+  const second = await markReturnReceived([target.id], { id: null, label: "test-kho-2" });
   assert.equal(second.count, 0, "ghi nhận lần hai không ghi đè, không tạo thêm phiếu");
 
   // Chỉ lúc ĐẾM XONG kiện mới rời khỏi danh sách chờ và mới có mốc kho nhận trên vận đơn.
-  const inspected = await recordInspection({ shipmentId: target.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ hàng", actor: "test-kho" });
+  const inspected = await recordInspection({ shipmentId: target.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ hàng", actor: { id: null, label: "test-kho" } });
   assert.ok("ok" in inspected, "kiện đã ghi nhận về thì đếm được");
   const [after] = await db.select({ by: schema.shipments.returnReceivedBy }).from(schema.shipments).where(eq(schema.shipments.id, target.id));
   assert.equal(after.by, "test-kho", "mốc kho nhận ghi tên người ĐẾM");

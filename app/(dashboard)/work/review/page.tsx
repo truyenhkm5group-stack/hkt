@@ -11,6 +11,7 @@ import { formatDate, formatDateTime, formatVND } from "@/lib/format";
 import { getReview, listReviews, REVIEW_KIND_LABEL, type ReviewKind } from "@/lib/queries/reviews";
 import { StatStrip } from "@/components/stat-tile";
 import { listDepartments } from "@/lib/queries/work";
+import { getPersonAttributionCoverage } from "@/lib/queries/attribution-coverage";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -53,7 +54,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   const user = await requirePermission("performance:view");
   const raw = await searchParams;
   const id = param(raw, "id");
-  const [reviews, departments] = await Promise.all([listReviews(), listDepartments()]);
+  const [reviews, departments, coverage] = await Promise.all([listReviews(), listDepartments(), getPersonAttributionCoverage()]);
   const current = id ? await getReview(id) : reviews.length ? await getReview(reviews[0].id) : null;
   const canManage = can(user, "review:manage");
 
@@ -66,6 +67,48 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
         hint="Chốt kỳ là ĐÓNG BĂNG: sau khi chốt, mọi con số của kỳ đó đọc từ ảnh chụp và không tính lại. Sửa công thức tháng sau không làm đổi con số của kỳ đã chốt — nếu không thì biên bản họp tháng trước sẽ nói về những con số không còn tồn tại."
         actions={canManage ? <ReviewToolbar departments={departments.map((d) => ({ code: d.code, name: d.name }))} /> : null}
       />
+
+      {/*
+        ═══ ĐỌC TRƯỚC KHI NÓI VỀ NGƯỜI ═══
+
+        Khối này đứng TRƯỚC bảng số vì thứ tự đọc quyết định kết luận: đọc bảng trước rồi mới thấy
+        "phòng này chưa quy kết được ai" thì người chủ trì đã kịp hình thành ý kiến về một con
+        người dựa trên một con số không nói về họ.
+
+        Nó CỐ Ý không xếp hạng ai và không gắn nhãn "yếu" cho ai. Nó chỉ trả lời một câu: kỳ này
+        nói về CÁ NHÂN được tới đâu.
+      */}
+      <SectionCard
+        title="Kỳ này nói về cá nhân được tới đâu"
+        description="Chỉ số cá nhân chỉ đáng mang ra họp khi việc nối được về đúng một tài khoản. Miền chưa có dòng nào thì câu trả lời là CHƯA CÓ DỮ LIỆU — không phải kết quả kém."
+        padded={false}
+      >
+        <ul className="divide-y">
+          {coverage.map((c) => {
+            const nguoi = c.withKey + c.textOnly;
+            return (
+              <li key={c.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-3 py-2 text-sm">
+                <span className="font-medium">{c.label}</span>
+                <span className="text-xs text-muted-foreground" title={c.meaning}>
+                  {c.total === 0 ? (
+                    // KHÔNG CÓ DỮ LIỆU: nói thẳng, và nói luôn hệ quả — chứ không để một ô trống.
+                    <span className="text-amber-600 dark:text-amber-400">chưa có bản ghi nào — chỉ số của miền này không mang ra họp được</span>
+                  ) : nguoi === 0 ? (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      {c.total} bản ghi, nhưng chưa cái nào thuộc về một người ({c.machine ? `${c.machine} do máy · ` : ""}{c.unassigned} chưa ai nhận)
+                    </span>
+                  ) : (
+                    <>
+                      {c.withKey}/{nguoi} bản ghi của người nối được bằng khoá
+                      {c.textOnly ? <span className="ml-1 text-amber-600 dark:text-amber-400">· {c.textOnly} chỉ có tên, không quy kết được</span> : null}
+                    </>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </SectionCard>
 
       {reviews.length ? (
         <SectionCard title="Các kỳ đã mở" padded={false}>

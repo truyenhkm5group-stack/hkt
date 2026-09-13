@@ -47,7 +47,10 @@ export function DetectButton() {
  */
 
 /** Thay đổi đã vẽ lên dòng nhưng máy chủ có thể chưa xác nhận. */
-type Patch = { status?: string; assignee?: string; followUpAt?: string | null; note?: { lastNote: string; lastNoteBy: string; lastNoteAt: Date; noteCount: number } };
+type Patch = { status?: string; assignee?: string; assigneeUserId?: string | null; followUpAt?: string | null; note?: { lastNote: string; lastNoteBy: string; lastNoteAt: Date; noteCount: number } };
+
+/** Người nhận việc được của ERP: khoá tài khoản + tên để hiện. Danh sách này thay hẳn ô chữ cũ. */
+export type CsStaff = { id: string; name: string };
 type QuickResult = { ok: true } | { error: string };
 
 const isClosed = (s: string) => s === "DONE" || s === "CANCELLED" || s === "AUTO_RESOLVED";
@@ -61,7 +64,7 @@ function snoozeTarget(hours: number): Date {
   return d;
 }
 
-export function CsTable({ rows, assignees, canWrite, currentUser }: { rows: CsCaseRow[]; assignees: string[]; canWrite: boolean; currentUser: string }) {
+export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: { rows: CsCaseRow[]; staff: CsStaff[]; canWrite: boolean; currentUser: string; currentUserId: string }) {
   const [editing, setEditing] = useState<CsCaseRow | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [patches, setPatches] = useState<Record<string, Patch>>({});
@@ -108,6 +111,12 @@ export function CsTable({ rows, assignees, canWrite, currentUser }: { rows: CsCa
             const patch = patches[r.id] ?? {};
             const status = patch.status ?? r.status;
             const assignee = patch.assignee ?? r.assignee;
+            /*
+              KHOÁ TÀI KHOẢN, không phải chữ trong ô. Dòng CŨ có tên mà không có khoá là chuyện
+              bình thường và phải đọc ra được: nó nói "có người làm, nhưng chưa nối được về tài
+              khoản nào" — khác hẳn "chưa ai nhận".
+            */
+            const assigneeUserId = patch.assigneeUserId !== undefined ? patch.assigneeUserId : r.assigneeUserId;
             const followUpAt = patch.followUpAt !== undefined ? (patch.followUpAt ? new Date(patch.followUpAt) : null) : r.followUpAt;
             const note = patch.note ?? r.note;
             const owner = isBotAssignee(assignee) ? "" : assignee;
@@ -147,16 +156,30 @@ export function CsTable({ rows, assignees, canWrite, currentUser }: { rows: CsCa
                 <TableCell className="align-top">
                   {canWrite ? (
                     owner ? (
-                      <Select value={owner} onValueChange={(v) => run(r.id, { assignee: v === "__none__" ? "" : v }, () => updateCsCaseQuick({ id: r.id, assignee: v === "__none__" ? "" : v }))} disabled={busy}>
-                        <SelectTrigger className="h-8 w-full"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Bỏ gán</SelectItem>
-                          {assignees.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <div className="space-y-1">
+                        <Select
+                          value={assigneeUserId ?? "__none__"}
+                          onValueChange={(v) => {
+                            const id = v === "__none__" ? null : v;
+                            run(r.id, { assigneeUserId: id, assignee: id ? (staff.find((x) => x.id === id)?.name ?? "") : "" }, () => updateCsCaseQuick({ id: r.id, assigneeUserId: id }));
+                          }}
+                          disabled={busy}
+                        >
+                          <SelectTrigger className="h-8 w-full"><SelectValue placeholder={owner} /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Bỏ gán</SelectItem>
+                            {staff.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        {/*
+                          Dòng lịch sử: có TÊN nhưng chưa có KHOÁ. Không tự đoán khoá từ tên — nói
+                          thẳng là chưa nối được, và chọn lại một lần là xong.
+                        */}
+                        {!assigneeUserId ? <div className="text-[11px] text-amber-700 dark:text-amber-400" title="Tên này được gõ tay, chưa nối về tài khoản ERP nào nên không vào được thẻ điểm">{owner} · chưa nối tài khoản</div> : null}
+                      </div>
                     ) : (
                       <div className="space-y-1">
-                        <Button size="sm" variant="secondary" className="h-8 w-full" disabled={busy} title={CS_QUICK_ACTION.CLAIM.hint} onClick={() => run(r.id, { assignee: currentUser, status: status === "OPEN" ? "IN_PROGRESS" : status }, () => csQuickAction({ id: r.id, action: "CLAIM" }), "Đã nhận việc")}>
+                        <Button size="sm" variant="secondary" className="h-8 w-full" disabled={busy} title={CS_QUICK_ACTION.CLAIM.hint} onClick={() => run(r.id, { assignee: currentUser, assigneeUserId: currentUserId, status: status === "OPEN" ? "IN_PROGRESS" : status }, () => csQuickAction({ id: r.id, action: "CLAIM" }), "Đã nhận việc")}>
                           {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} {CS_QUICK_ACTION.CLAIM.label}
                         </Button>
                         {/*
@@ -210,6 +233,7 @@ export function CsTable({ rows, assignees, canWrite, currentUser }: { rows: CsCa
                             caseId={r.id}
                             status={status}
                             currentUser={currentUser}
+                            currentUserId={currentUserId}
                             onMutate={run}
                           />
                         ))
@@ -228,7 +252,7 @@ export function CsTable({ rows, assignees, canWrite, currentUser }: { rows: CsCa
           })}
         </TableBody>
       </Table>
-      {editing ? <CaseDialog caseRow={editing} assignees={assignees} open onOpenChange={(v) => { if (!v) setEditing(null); }} /> : null}
+      {editing ? <CaseDialog caseRow={editing} staff={staff} open onOpenChange={(v) => { if (!v) setEditing(null); }} /> : null}
     </div>
   );
 }
@@ -244,6 +268,7 @@ function QuickButton({
   caseId,
   status,
   currentUser,
+  currentUserId,
   onMutate,
 }: {
   actionKey: CsQuickActionKey;
@@ -253,6 +278,7 @@ function QuickButton({
   caseId: string;
   status: string;
   currentUser: string;
+  currentUserId: string;
   onMutate: RunFn;
 }) {
   const spec = CS_QUICK_ACTION[actionKey];
@@ -275,7 +301,7 @@ function QuickButton({
 
   const patch: Patch =
     actionKey === "CONTACTED"
-      ? { status: "IN_PROGRESS", assignee: currentUser }
+      ? { status: "IN_PROGRESS", assignee: currentUser, assigneeUserId: currentUserId }
       : actionKey === "DONE" || actionKey === "INFO_FIXED"
         ? { status: "DONE" }
         : {};

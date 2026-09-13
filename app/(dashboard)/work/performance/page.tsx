@@ -10,6 +10,9 @@ import { departmentsOfUser } from "@/lib/queries/work";
 import { combineScore, getPerformance, type ScoreAxis } from "@/lib/queries/work-performance";
 import { getDeptPerformance, type MetricValue } from "@/lib/queries/dept-performance";
 import { CONFIDENCE_LABEL, LINKAGE_NOTE, SAMPLE_FLOOR } from "@/lib/constants/metric-provenance";
+import { METRIC_BY_KEY, TRUST_LABEL, metricTrust } from "@/lib/constants/metric-catalog";
+import { delta as targetDelta, resolveTarget, VERDICT_LABEL, verdict, type ResolvedTarget } from "@/lib/constants/metric-targets";
+import { listTargets } from "@/lib/queries/metric-targets";
 import { latestSnapshotPeriod, metricTrend } from "@/lib/queries/performance-history";
 import { getScoreWeights, SCORE_AXIS_LABEL } from "@/lib/queries/work-config";
 import { listOrgPeople } from "@/lib/queries/work";
@@ -60,7 +63,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
   const from = period.from ?? new Date(Date.now() - 30 * 24 * 3_600_000);
   const to = period.to ?? new Date();
-  const [rows, weights, orgPeople] = await Promise.all([getPerformance({ from, to, department }), getScoreWeights(), listOrgPeople()]);
+  const [rows, weights, orgPeople, targets] = await Promise.all([getPerformance({ from, to, department }), getScoreWeights(), listOrgPeople(), listTargets()]);
 
   /*
     CHỈ SỐ RIÊNG CỦA PHÒNG chỉ tính khi ĐANG XEM MỘT PHÒNG. Ở góc nhìn toàn shop chúng vô nghĩa:
@@ -187,7 +190,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         )}
       </SectionCard>
 
-      {deptPerf ? <DeptMetricCards perf={deptPerf} /> : null}
+      {deptPerf ? <DeptMetricCards perf={deptPerf} targets={targets} people={deptPeople} at={to} /> : null}
 
       {department ? <TrendSection people={deptPeople.map((p) => ({ id: p.id, name: p.name }))} /> : null}
 
@@ -265,13 +268,28 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
  * điểm chấm người. Đó là luật "không phạt nhân viên vì thứ họ không quyết được", thực thi ngay
  * trên nhãn chứ không chỉ trong tài liệu.
  */
-function MetricCell({ m }: { m: MetricValue }) {
+function MetricCell({ m, target }: { m: MetricValue; target?: ResolvedTarget | null }) {
+  const spec = METRIC_BY_KEY[m.key] ?? null;
+  const huong = spec?.direction ?? "CONTEXT";
+  const dich = target?.target ?? null;
+  const ketLuan = verdict({ value: m.value, target: dich, direction: huong });
+  const chenh = targetDelta({ value: m.value, target: dich, direction: huong });
+  /*
+    LÀM KÉM ≠ CHƯA ĐỦ DỮ LIỆU — VÀ MÀN HÌNH PHẢI NÓI RÕ CÁI NÀO.
+
+    Đây là chỗ dễ hại người nhất trong cả hệ thống. Một ô đỏ nói với người quản lý rằng nhân viên
+    này đang làm kém; nếu con số đó đứng trên 3 quan sát thì câu duy nhất đúng là "chưa đủ dữ
+    liệu", và người quản lý vừa nhận một thông tin sai về một con người.
+  */
+  const mucDung = spec ? metricTrust({ spec, value: m.value, sample: m.sample, linkage: m.linkage }) : m.status === "UNKNOWN" ? "UNKNOWN" : "WEAK";
   /*
     XUẤT XỨ ĐẦY ĐỦ nằm trong `title`, không phải trong một trang tài liệu riêng. Người đọc thẻ
     điểm sẽ không đi tìm tài liệu; họ sẽ tự đoán. Sáu dòng ở đây là sáu câu họ định đoán.
   */
   const xuatXu = [
     `Nguồn: ${m.basis}`,
+    `Mức dùng được: ${TRUST_LABEL[mucDung]}`,
+    dich === null ? "Đích: CHƯA ĐẶT — màn hình không kết luận đạt/không đạt" : `Đích: ${dich} (${target?.scope === "COMPANY" ? "toàn công ty" : target?.scope === "DEPARTMENT" ? "phòng ban" : "chức danh"}) · ${target?.note ?? ""}`,
     `Chủ thể: ${m.owner === "PERSON" ? "một người" : "cả phòng"}`,
     `Kỳ: ${formatDate(m.period.from)} → ${formatDate(m.period.to)}`,
     `Mẫu số: ${m.sample} ${m.denominatorLabel}`,
@@ -293,13 +311,30 @@ function MetricCell({ m }: { m: MetricValue }) {
     MẪU QUÁ BÉ THÌ KHÔNG TÔ MÀU. Tô đỏ một con số 50% đứng trên 2 quan sát là nói với người đọc
     rằng người này làm kém, trong khi thứ duy nhất kết luận được là "chưa đủ dữ liệu".
   */
-  const toMau = m.unit === "PERCENT" && !m.shared && m.rankable;
+  /*
+    TÔ MÀU CHỈ KHI CÓ ĐÍCH VÀ ĐỦ MẪU.
+
+    Trước bản này màu đỏ/xanh bám vào hai con số 90 và 60 ghi cứng trong màn hình — tức là ERP tự
+    đặt chuẩn thay chủ shop, ở một chỗ không ai nhìn thấy. Nay màu CHỈ đến từ đích chủ shop đã
+    đặt; chưa đặt đích thì con số đứng trung tính, và đó là trạng thái đúng.
+  */
+  const toMau = mucDung === "TRUSTED" && !m.shared && (ketLuan === "MET" || ketLuan === "MISSED");
   return (
     <span className="whitespace-nowrap tabular-nums" title={xuatXu}>
-      <span className={cn("font-medium", toMau ? (m.value! >= 90 ? "text-success" : m.value! < 60 ? "text-destructive" : "") : "")}>{text}</span>
+      <span className={cn("font-medium", toMau ? (ketLuan === "MET" ? "text-success" : "text-destructive") : "")}>{text}</span>
       <span className="ml-1 text-[11px] text-muted-foreground">/{m.sample}</span>
-      {!m.rankable ? <span className="ml-1 text-[10px] text-amber-600" title={`Mẫu dưới ${SAMPLE_FLOOR.medium} — chưa đủ để so người với người.`}>mẫu bé</span> : null}
-      {m.confidence === "LOW" && m.rankable ? <span className="ml-1 text-[10px] text-amber-600">{CONFIDENCE_LABEL.LOW.toLowerCase()}</span> : null}
+      {dich !== null ? (
+        <span className="ml-1 text-[10px] text-muted-foreground" title={`Đích ${dich}${m.unit === "PERCENT" ? "%" : ""} · ${VERDICT_LABEL[ketLuan]}`}>
+          đích {dich}
+          {chenh !== null ? <span className={cn("ml-0.5", toMau ? (chenh >= 0 ? "text-success" : "text-destructive") : "")}>({chenh >= 0 ? "+" : ""}{Math.round(chenh * 10) / 10})</span> : null}
+        </span>
+      ) : null}
+      {/* Mẫu bé được nói THÀNH LỜI, không chỉ bằng cách không tô màu — im lặng thì người đọc tự kết luận. */}
+      {mucDung === "WEAK" ? (
+        <span className="ml-1 text-[10px] text-amber-600" title={m.rankable ? `Nối người bằng ${LINKAGE_NOTE[m.linkage]} — ${CONFIDENCE_LABEL[m.confidence].toLowerCase()}` : `Mẫu dưới ${SAMPLE_FLOOR.medium} — chưa đủ để kết luận về một con người, kể cả kết luận xấu.`}>
+          {m.rankable ? "nối yếu" : "chưa đủ dữ liệu"}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -352,6 +387,13 @@ async function TrendSection({ people }: { people: { id: string; name: string }[]
                       ) : t.definitionChanged ? (
                         // Đổi công thức thì chênh lệch KHÔNG đọc là tốt/xấu được. Nói ra thay vì vẽ mũi tên.
                         <span className="ml-1 text-amber-600">đổi cách tính giữa hai kỳ</span>
+                      ) : t.sourceChanged ? (
+                        /*
+                          Đổi NGUỒN: cùng công thức, khác TẬP DÒNG. Kỳ trước gom cả case nối bằng
+                          tên gõ tay, kỳ này chỉ gom case nối bằng khoá tài khoản — số tụt xuống
+                          không nói người đó làm kém đi, nó nói phép đo vừa hẹp lại.
+                        */
+                        <span className="ml-1 text-amber-600">đổi nguồn đo giữa hai kỳ</span>
                       ) : (
                         <span className={cn("ml-1 tabular-nums", t.delta > 0 ? "text-success" : t.delta < 0 ? "text-destructive" : "text-muted-foreground")}>
                           {t.delta > 0 ? "+" : ""}
@@ -369,7 +411,23 @@ async function TrendSection({ people }: { people: { id: string; name: string }[]
   );
 }
 
-function DeptMetricCards({ perf }: { perf: Awaited<ReturnType<typeof getDeptPerformance>> }) {
+/**
+ * ĐÍCH ĐƯỢC GIẢI Ở ĐÂY, MỘT LẦN CHO MỖI (người × chỉ số).
+ *
+ * `at` là mốc KẾT THÚC KỲ chứ không phải "bây giờ": một đích đặt hôm nay không được dùng để chấm
+ * lại một kỳ đã chốt. Đó là luật "không sửa ngầm kỳ đã chốt", áp cho đích.
+ */
+function DeptMetricCards({
+  perf,
+  targets,
+  people,
+  at,
+}: {
+  perf: Awaited<ReturnType<typeof getDeptPerformance>>;
+  targets: Awaited<ReturnType<typeof listTargets>>;
+  people: { id: string; positionId?: string | null }[];
+  at: Date;
+}) {
   const keys: { key: string; label: string; shared: boolean }[] = [];
   for (const p of perf.people) for (const m of p.metrics) if (!keys.some((k) => k.key === m.key)) keys.push({ key: m.key, label: m.label, shared: m.shared });
 
@@ -382,7 +440,7 @@ function DeptMetricCards({ perf }: { perf: Awaited<ReturnType<typeof getDeptPerf
               <div key={m.key} className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">{m.label}</p>
                 <p className="mt-0.5 text-lg font-semibold">
-                  <MetricCell m={m} />
+                  <MetricCell m={m} target={resolveTarget(targets, { metricKey: m.key, departmentCode: perf.department, positionId: null, at })} />
                 </p>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">{m.basis}</p>
               </div>
@@ -416,7 +474,8 @@ function DeptMetricCards({ perf }: { perf: Awaited<ReturnType<typeof getDeptPerf
                     <TableCell className="font-medium">{p.name}</TableCell>
                     {keys.map((k) => {
                       const m = p.metrics.find((x) => x.key === k.key);
-                      return <TableCell key={k.key}>{m ? <MetricCell m={m} /> : <span className="text-xs text-muted-foreground">chưa có ca nào</span>}</TableCell>;
+                      const dich = resolveTarget(targets, { metricKey: k.key, departmentCode: perf.department, positionId: people.find((x) => x.id === p.userId)?.positionId ?? null, at });
+                      return <TableCell key={k.key}>{m ? <MetricCell m={m} target={dich} /> : <span className="text-xs text-muted-foreground">chưa có ca nào</span>}</TableCell>;
                     })}
                   </TableRow>
                 ))}

@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { METRIC_STATE_LABEL } from "@/lib/constants/metric-bindings";
 import { requirePermission, can } from "@/lib/auth/session";
 import { METRIC_TRUST_LABEL, METRIC_UNIT_LABEL } from "@/lib/constants/metric-bindings";
 import { formatVND } from "@/lib/format";
@@ -36,6 +37,15 @@ function formatValue(v: number | null, unit: string): string {
 
 function KrRow({ kr, canManage }: { kr: KeyResultView; canManage: boolean }) {
   const measured = kr.progress !== null;
+  /*
+    CHƯA ĐỦ DỮ LIỆU ≠ ĐANG THẤT BẠI.
+
+    Một KR ở 75% trên 4 quan sát và một KR ở 75% trên 400 quan sát vẽ ra cùng một thanh tiến độ.
+    Cái thứ nhất chưa nói được gì, nhưng người đọc sẽ đọc nó như một kết quả và ra quyết định
+    trên đó. Nên mẫu bé được nói THÀNH LỜI, và thanh tiến độ chuyển sang mờ thay vì biến mất —
+    biến mất thì trông như "chưa chạy gì", cũng sai.
+  */
+  const thieuMau = kr.state === "DATA_INSUFFICIENT";
   return (
     <li className="space-y-1.5 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -45,7 +55,7 @@ function KrRow({ kr, canManage }: { kr: KeyResultView; canManage: boolean }) {
           {formatValue(kr.current, kr.unit)} / {formatValue(kr.target, kr.unit)}
           {kr.unit !== "PERCENT" && kr.unit !== "VND" ? ` ${METRIC_UNIT_LABEL[kr.unit].toLowerCase()}` : ""}
         </span>
-        <span className={cn("w-14 text-right text-sm font-semibold tabular-nums", !measured && "text-muted-foreground")}>
+        <span className={cn("w-14 text-right text-sm font-semibold tabular-nums", (!measured || thieuMau) && "text-muted-foreground")} title={thieuMau ? `${METRIC_STATE_LABEL.DATA_INSUFFICIENT} — mới ${kr.sample} quan sát` : undefined}>
           {measured ? `${Math.round(kr.progress!)}%` : "—"}
         </span>
         {canManage ? (
@@ -56,10 +66,15 @@ function KrRow({ kr, canManage }: { kr: KeyResultView; canManage: boolean }) {
         ) : null}
       </div>
       {/* Chưa đo được thì KHÔNG vẽ thanh: thanh rỗng trông hệt như đang ở 0%. */}
-      {measured ? <Progress value={Math.min(100, kr.progress!)} className="h-1.5" /> : null}
+      {measured ? <Progress value={Math.min(100, kr.progress!)} className={cn("h-1.5", thieuMau && "opacity-40")} /> : null}
       <p className="text-[11px] text-muted-foreground">
         <span className={cn("mr-1.5 font-medium", kr.trust === "MANUAL" && "text-amber-600 dark:text-amber-400")}>{METRIC_TRUST_LABEL[kr.trust]}</span>
         {kr.basis || (kr.trust === "MANUAL" ? "ERP chưa đo được chỉ số này — người phụ trách tự nhập" : "")}
+        {thieuMau ? (
+          <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">
+            · {METRIC_STATE_LABEL.DATA_INSUFFICIENT} (mới {kr.sample} quan sát)
+          </span>
+        ) : null}
         {kr.note ? <span className="ml-1 text-amber-600 dark:text-amber-400">· {kr.note}</span> : null}
       </p>
     </li>
