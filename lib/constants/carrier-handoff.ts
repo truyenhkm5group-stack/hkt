@@ -13,8 +13,41 @@ import { CARRIER_DOCUMENT_SOURCES, MANUAL_VERIFICATION_SOURCE, sqlSourceList } f
  *   2.108 vận đơn
  *     · 2.083 có mốc theo LUẬT CŨ
  *     · 1.963 có mốc theo luật này
- *     · **120 kiện mất mốc** — và không kiện nào được thêm
+ *     · **120 kiện mất mốc**
  *     · 1.487 có `picked_up_at`; 1.957 có sự kiện chứng minh; 1.101 cái HAI GIÁ TRỊ LỆCH NHAU
+ *
+ * ─── ĐO LẠI TRƯỚC KHI DEPLOY (cùng ngày, 2.349 vận đơn — kho đã lớn thêm) ───
+ *
+ * Bản đầu của đoạn này viết "và không kiện nào được thêm". Câu đó SAI, và lượt đo trước deploy đã
+ * bắt được: **3 kiện ĐƯỢC THÊM mốc**. Cả ba có đúng một sự kiện, nguồn `VTP_UI_MANUAL_VERIFICATION`
+ * chặng `DELIVERED` — chứng từ Viettel Post do người của shop mở trang web đọc rồi chép lại. Luật cũ
+ * chỉ nhìn ba nguồn máy (`VTP_WEBHOOK` · `VTP_IMPORT` · `VTP_POLL`) nên không thấy chúng; luật này
+ * CÓ nhìn, và một kiện đã giao tới tay khách thì đương nhiên đã từng được bàn giao. Thêm chúng vào
+ * là đúng, không phải một lỗ rò.
+ *
+ * Số đo trước/sau theo kết quả đơn (`canonical_order_outcome`), 2.349 vận đơn:
+ *
+ *   kết quả       trước   sau   mất mốc   thêm mốc   lệch giờ
+ *   DELIVERED       492   492         0          0         31
+ *   RETURNED        988   988         0          0         39
+ *   IN_TRANSIT      318   212       106          0         15
+ *   NOT_SHIPPED     266   190        76          0         28
+ *   CANCELLED        14     1        13          0          0
+ *   (chưa tính)     271   273         1          3          0
+ *
+ * **HAI LÔ QUYẾT ĐỊNH MỌI BÁO CÁO — `DELIVERED` và `RETURNED` — KHÔNG ĐỔI MỘT KIỆN NÀO.** Tỷ lệ
+ * giao thành công, doanh thu, lương, quảng cáo: tử số và mẫu số y nguyên.
+ *
+ * 196 kiện rơi ra đều chưa từng được bàn giao. Toàn bộ sự kiện của chúng, không sót một dòng:
+ *   119 "Giao cho Bưu tá đi nhận" (104) · 108 "Đơn hàng chờ xử lý" (102) · 181 "Phân công bưu tá
+ *   nhận hàng" · 53 "Khách hàng chưa chuẩn bị xong hàng" · 36 "Phối hợp khách hàng xác nhận đơn
+ *   hàng" · 9 "Phân công bưu cục nhận hàng" · 2 "Tiếp nhận đơn hàng từ đối tác" · 2 "Đối tác yêu
+ *   cầu hủy qua API" (107).
+ * Đọc thành lời: bưu tá ĐANG TỚI LẤY, kho CHƯA ĐÓNG XONG, hoặc shop ĐÃ HUỶ. Không dòng nào nói
+ * ĐVVC đã cầm hàng.
+ *
+ * 113 kiện chỉ LỆCH GIỜ (không đổi lô): `least()` lấy chứng cứ sớm hơn ảnh chụp. Cohort không mất
+ * ai, nên báo cáo theo kỳ chỉ dịch vài mốc trong cùng một lô.
  *
  * ─── LỖI THỨ NHẤT: "CÓ SỰ KIỆN" BỊ HIỂU THÀNH "ĐÃ BÀN GIAO" ───
  *

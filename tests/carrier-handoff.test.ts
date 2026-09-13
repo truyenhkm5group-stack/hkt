@@ -8,6 +8,7 @@ import {
   CARRIER_HANDOFF_STAGES,
   carrierHandoffFrom,
   HANDOFF_BASIS_LABEL,
+  HANDOFF_KNOWN,
   type HandoffBasis,
   type HandoffEvent,
 } from "@/lib/constants/carrier-handoff";
@@ -137,6 +138,20 @@ export function testHandoffPureFunction() {
   const chepTay = carrierHandoffFrom([ev("VTP_UI_MANUAL_VERIFICATION", "PICKED_UP", "2026-08-19T02:00:00Z")], t("2026-08-21T02:00:00Z"));
   assert.equal(chepTay.basis, "MANUAL_DOCUMENT");
   assert.equal(chepTay.at?.toISOString(), "2026-08-19T02:00:00.000Z");
+
+  /*
+    BẢN CHÉP TAY MỘT MÌNH VẪN LÀ CĂN CỨ ĐỦ — và đây là điểm luật này KHÁC luật cũ theo chiều THÊM.
+
+    Luật cũ chỉ nhìn ba nguồn máy, nên một kiện mà bằng chứng duy nhất là dòng chủ shop chép từ
+    trang Viettel Post thì KHÔNG có mốc bàn giao. Đo production trước deploy 13/09/2026: đúng 3
+    kiện như vậy, cả ba mang một sự kiện `VTP_UI_MANUAL_VERIFICATION` chặng `DELIVERED`. Một kiện
+    đã tới tay khách thì đương nhiên đã từng được bàn giao — bỏ nó ra là giả vờ không biết một điều
+    đang nằm trong kho dữ liệu.
+  */
+  const chiCoChepTay = carrierHandoffFrom([ev("VTP_UI_MANUAL_VERIFICATION", "DELIVERED", "2026-08-22T02:00:00Z")], null);
+  assert.equal(chiCoChepTay.basis, "MANUAL_DOCUMENT", "chỉ có bản chép tay, không có picked_up_at, không có chứng từ máy — vẫn phải ra mốc");
+  assert.equal(chiCoChepTay.at?.toISOString(), "2026-08-22T02:00:00.000Z");
+  assert.ok(HANDOFF_KNOWN.includes(chiCoChepTay.basis), "và bậc đó phải nằm trong tập đủ để vào cohort 'Đã gửi'");
 
   // ── PHÁT LẠI KHÔNG ĐỔI KẾT QUẢ ──
   // Viettel Post thử lại tối đa 5 lần và gói tin có thể trùng/thừa. Hàm là hàm THUẦN của TẬP sự

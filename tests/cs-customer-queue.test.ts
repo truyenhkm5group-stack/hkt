@@ -50,6 +50,15 @@ export async function testCsCustomerQueue(db: Db) {
     // cách GOM, không nói về cách phân miền.
     await mk(`${P}c1`, { kind: "EXCHANGE_COLOR", day: 6 });
     await mk(`${P}c2`, { kind: "EXCHANGE_COLOR", day: 7 });
+    /*
+      VIỆC MIỀN GIAO VẬN KHÔNG ĐƯỢC LỌT VÀO HÀNG ĐỢI CSKH.
+
+      Đo production 13/09/2026: 447 việc còn làm, trong đó **362 là `DELIVERY_FAILED`** — miền
+      LOGISTICS, chủ sở hữu là bàn Vận đơn & care. Nếu phép gom theo khách bỏ qua luật phân miền
+      thì hàng đợi CSKH phình từ 85 lên 447 dòng và đội CSKH đi làm việc của đội giao vận. Gắn
+      thêm cùng SĐT với khách 1 để nếu có rò rỉ thì nó rò vào ĐÚNG dòng đang được kiểm.
+    */
+    await mk(`${P}x1`, { customerId: `${P}kh1`, phone: "0911111111", kind: "DELIVERY_FAILED", day: 2 });
 
     const params = parseListParams({ pageSize: "50" });
     const kq = await listCsCustomerQueue(params);
@@ -57,7 +66,9 @@ export async function testCsCustomerQueue(db: Db) {
 
     const kh1 = cua(`c:${P}kh1`);
     assert.ok(kh1, "ba việc của cùng một khách phải gom thành MỘT dòng");
-    assert.equal(kh1.openCount, 3);
+    assert.equal(kh1.openCount, 3, "ĐÚNG BA — việc `DELIVERY_FAILED` của chính khách này thuộc miền giao vận, không được cộng vào đây");
+    assert.ok(!kh1.cases.some((x) => x.id === `${P}x1`), "việc miền giao vận không được nằm trong dòng gom của CSKH");
+    assert.ok(!kq.rows.some((r) => r.cases.some((x) => x.id === `${P}x1`)), "và không được nằm trong BẤT KỲ dòng nào của hàng đợi CSKH");
     assert.deepEqual(kh1.cases.map((x) => x.id).sort(), [`${P}a1`, `${P}a2`, `${P}a3`], "và dòng gom giữ ĐỦ mã của từng case — không mất việc nào");
     assert.deepEqual(kh1.kinds.sort(), ["EXCHANGE_SIZE", "WRONG_ADDRESS"], "loại việc bỏ trùng: hai lần đổi size vẫn là một loại");
     assert.equal(kh1.customerName, "Chị Ba", "tên lấy từ case đầu tiên CÓ tên — không để trống cả dòng vì một case thiếu tên");
@@ -106,7 +117,7 @@ export async function testCsCustomerQueue(db: Db) {
     assert.equal(daDong.status, "DONE");
     assert.equal(daDong.kind, "WRONG_ADDRESS", "không xoá, không sửa, không gộp — case giữ nguyên mọi thứ của nó");
 
-    console.log("✓ Hàng đợi CSKH theo khách: 3 việc một khách thành 1 dòng · gom bằng customer_id rồi tới SĐT · case không định danh đứng RIÊNG · đóng một việc không làm mất dòng, không mất lịch sử");
+    console.log("✓ Hàng đợi CSKH theo khách: 3 việc một khách thành 1 dòng · gom bằng customer_id rồi tới SĐT · case không định danh đứng RIÊNG · việc miền GIAO VẬN không lọt vào · đóng một việc không làm mất dòng, không mất lịch sử");
   } finally {
     await db.delete(schema.csCases).where(sql`${schema.csCases.id} like ${`${P}%`}`);
     await db.delete(schema.customers).where(sql`${schema.customers.id} like ${`${P}%`}`);
