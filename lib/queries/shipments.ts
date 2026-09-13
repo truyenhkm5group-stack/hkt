@@ -10,6 +10,7 @@ import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL } from "@/lib/constants/carri
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import type { ListParams } from "@/lib/search-params";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
+import { parseSearchTerm } from "@/lib/queries/search-terms";
 
 export const SHIPMENT_SORTABLE = ["createdAt", "vtpStatusDate", "codAmount", "deliveredAt"];
 
@@ -28,23 +29,63 @@ export function orderByNullsLast(column: AnyPgColumn, dir: "asc" | "desc") {
   return dir === "asc" ? sql`${column} asc nulls last` : sql`${column} desc nulls last`;
 }
 
-/** Tìm theo mã vận đơn / mã VTP / SĐT, tên người nhận / mã đơn Pancake */
+/**
+ * Tìm vận đơn theo mã vận đơn · mã VTP · mã gốc · SĐT · tên khách · mã đơn · mã hàng / SKU.
+ *
+ * ─── SĐT ĐI QUA CHUẨN HOÁ, KHÔNG GHÉP THẲNG ───
+ *
+ * `normalizePhone` được áp ở đường GHI (mapper Pancake), nên trong CSDL số luôn ở dạng
+ * `0xxxxxxxxx`. Đường ĐỌC trước đây ghép thẳng chuỗi người gõ vào `ilike '%…%'`, nên copy số từ
+ * Pancake hay từ tin nhắn — dạng `+84 912 345 678` hay `84912345678` — cho ra danh sách RỖNG
+ * trong khi vận đơn nằm ngay đó. Ô tìm kiếm không báo lỗi, nó chỉ nói "không có gì", và người
+ * dùng kết luận ERP thiếu dữ liệu.
+ *
+ * Nay từ khoá trông như số điện thoại được nở ra thành các biến thể (xem `search-terms.ts`) và
+ * so bằng `in`, đồng thời VẪN giữ phép `ilike` theo bản gốc — để một dòng cũ lưu sai chuẩn vẫn
+ * tìm được.
+ *
+ * ─── MÃ HÀNG / SKU ───
+ *
+ * Gõ `Q004` hay một SKU vào ô tìm trước đây ra rỗng: mã hàng chỉ có ở BỘ LỌC riêng. Nhưng người
+ * dùng không phân biệt hai ô đó — họ gõ vào chỗ nào đang nhấp nháy. Ở đây tìm thẳng trên dòng
+ * hàng của đơn.
+ */
 export function shipmentSearchCondition(q: string): SQL | undefined {
-  const term = q.trim();
-  if (!term) return undefined;
-  const like = `%${term}%`;
+  const t = parseSearchTerm(q);
+  if (!t) return undefined;
+  const like = `%${t.raw}%`;
   const conds: SQL[] = [
-    eq(schema.shipments.id, term),
+    eq(schema.shipments.id, t.raw),
     ilike(schema.shipments.trackingCode, like),
     ilike(schema.shipments.vtpOrderNumber, like),
     ilike(schema.shipments.orderReference, like),
     ilike(schema.shipments.receiverPhone, like),
     ilike(schema.shipments.receiverName, like),
     exists(sql`(select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and (o.bill_phone ilike ${like} or o.bill_full_name ilike ${like}))`),
+    // Mã đơn Pancake là chuỗi (có thể vượt 2^53) — so BẰNG, không `ilike`, để khỏi quét toàn bảng.
+    exists(sql`(select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and o.id = ${t.raw})`),
+    // Mã hàng / SKU / tên sản phẩm trên dòng hàng của đơn.
+    exists(sql`(select 1 from ${schema.orderItems} oi where oi.order_id = ${schema.shipments.orderId}
+      and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`),
   ];
-  const numeric = Number(term.replace(/^#/, ""));
-  if (Number.isFinite(numeric) && numeric > 0 && Number.isInteger(numeric)) {
-    conds.push(exists(sql`(select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and o.system_id = ${numeric})`));
+  /*
+    SO BẰNG DANH SÁCH BIẾN THỂ, KHÔNG DÙNG BIỂU THỨC BÓC SỐ TRÊN TỪNG DÒNG.
+
+    Cách "chắc ăn" là `right(regexp_replace(phone,'[^0-9]','','g'), 9) = …` để bắt cả dòng cũ lưu
+    sai chuẩn. Đo production 13/09/2026 trước khi viết: 1.843 số đều ở dạng `0xxxxxxxxx`, 0 dòng
+    bắt đầu bằng `84`, 0 dòng có dấu `+`, 0 dòng có khoảng trắng hay gạch; `orders.bill_phone`
+    cũng 0 dòng lệch chuẩn. Kho đã sạch vì `normalizePhone` chạy ở đường ghi.
+
+    Nên biểu thức bóc số kia sẽ tốn một lượt regex cho MỖI DÒNG để bắt một tập RỖNG. Bỏ nó đi.
+    Dòng lệch chuẩn nếu xuất hiện sau này sẽ hiện ở Sổ lỗ hổng dữ liệu, không im lặng.
+  */
+  if (t.phones.length) {
+    const ds = sql.join(t.phones.map((p) => sql`${p}`), sql`, `);
+    conds.push(sql`${schema.shipments.receiverPhone} in (${ds})`);
+    conds.push(exists(sql`(select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and o.bill_phone in (${ds}))`));
+  }
+  if (t.orderNo !== null) {
+    conds.push(exists(sql`(select 1 from ${schema.orders} o where o.id = ${schema.shipments.orderId} and o.system_id = ${t.orderNo})`));
   }
   return or(...conds);
 }

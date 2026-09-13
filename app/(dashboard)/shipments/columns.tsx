@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
+import { CopyButton } from "@/components/misc";
 import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
 import { Money } from "@/components/ui-bits";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
@@ -55,9 +56,17 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       const number = s.vtpOrderNumber ?? s.trackingCode;
       return (
         <div className="min-w-[130px]">
-          <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
-            {number ?? "—"}
-          </RowLink>
+          {/*
+            NÚT SAO CHÉP NGAY CẠNH MÃ. Người trực đơn phải dán mã vận đơn sang Viettel Post / chat
+            hàng chục lần mỗi ngày; bôi đen một chuỗi 13 ký tự trong ô hẹp là thao tác dễ trượt và
+            dễ thiếu ký tự. `CopyButton` đã có `stopPropagation` nên bấm nó KHÔNG mở dòng.
+          */}
+          <div className="flex items-center gap-0.5">
+            <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
+              {number ?? "—"}
+            </RowLink>
+            {number ? <CopyButton value={number} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+          </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <Truck className="size-3.5 shrink-0" />
             <span className="truncate">{s.carrier || "ĐVVC"}</span>
@@ -118,9 +127,14 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       return (
         <div className="min-w-[150px] max-w-[220px]">
           <div className="truncate font-medium">{name}</div>
-          <div className="truncate text-xs text-muted-foreground" title={s.receiverAddress || undefined}>
-            {phone}
-            {s.receiverAddress ? ` · ${s.receiverAddress}` : ""}
+          <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
+            {/* Giá trị sao chép là SỐ THẬT đang hiển thị — không phải bản che. Người đang xem đã
+                được phép thấy nó, nên sao chép ra một chuỗi khác là bẫy người dùng. */}
+            <span className="truncate" title={s.receiverAddress || undefined}>
+              {phone || "—"}
+              {s.receiverAddress ? ` · ${s.receiverAddress}` : ""}
+            </span>
+            {phone ? <CopyButton value={phone} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           </div>
         </div>
       );

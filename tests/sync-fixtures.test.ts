@@ -130,6 +130,7 @@ import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffSt
 import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
 import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testReturnReceiveSelector } from "./return-receive-selector.test";
+import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
 import { testProductNotes } from "./product-notes.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
@@ -1430,6 +1431,8 @@ async function main() {
   testScorecardContract();
   testDataQualityIssues();
   await testReturnReceiveSelector(db);
+  testSearchTermParsing();
+  await testShipmentSearch(db);
   await testProductNotes(db);
   testUiConsistency();
   testNavigationCoverage();
