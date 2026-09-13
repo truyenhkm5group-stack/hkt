@@ -201,6 +201,13 @@ export type NominalRow = {
    * Rủi ro trên TOÀN BỘ hàng nhập trong kỳ (% × `purchaseCost`) — chỉ dùng cho bảng "LN theo hàng
    * nhập", nơi đã trừ trọn giá trị hàng nhập nên phải trừ trọn phần rủi ro đi kèm.
    */
+  /**
+   * GHI CHÚ, KHÔNG TRỪ VÀO LỢI NHUẬN: rủi ro CẢ ĐỜI của lô hàng nhập trong kỳ.
+   *
+   * Có ích để biết lô vừa nhập đang mang bao nhiêu rủi ro, nhưng nó là phơi nhiễm TẠI MỘT THỜI
+   * ĐIỂM chứ không phải chi phí CỦA MỘT KỲ. Trừ nó vào lợi nhuận kỳ chứa phiếu nhập là bắt tuần
+   * đó gánh rủi ro của hàng sẽ bán trong nhiều tháng tới.
+   */
   inventoryRiskOnPurchase: number;
   /** Giá trị hàng còn trong kho của mã (chỉ mẫu mã đã có phiếu nhập) */
   stockValue: number;
@@ -528,9 +535,28 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   });
   for (const r of rows) {
     r.opexTotal = r.operatingAlloc + r.packingCost + r.opsStaffCost + r.fixedAlloc;
-    // Bảng "LN theo hàng nhập" trừ TRỌN giá trị hàng nhập trong kỳ ⇒ phải trừ TRỌN phần rủi ro của
-    // lô đó, không phải phần đã giải phóng theo hàng bán. Hai bảng, hai cơ sở, mỗi bảng nhất quán.
-    r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRiskOnPurchase - r.tax - r.otherCost;
+    /*
+      ═══ RỦI RO TỒN KHO LÀ CHI PHÍ CỦA KỲ, KHÔNG PHẢI CỦA LÔ ═══
+
+      Bản cũ trừ TRỌN rủi ro cả đời của lô nhập vào đúng kỳ chứa phiếu nhập. Lý lẽ khi đó nghe hợp
+      lý: "bảng này trừ trọn giá trị hàng nhập thì cũng trừ trọn rủi ro của lô". Nhưng nó tạo ra hai
+      con số sai theo hai hướng ngược nhau:
+
+        · KỲ CÓ PHIẾU NHẬP  — gánh rủi ro của hàng sẽ bán trong nhiều tháng tới. Tuần bán 1/10 lô
+          vẫn chịu đủ dự phòng cả lô.
+        · KỲ KHÔNG NHẬP GÌ  — rủi ro bằng ĐÚNG 0, và bảng nói hàng đang bán không có rủi ro nào.
+          Đây chính là cột 0 mà chủ shop nhìn thấy: không phải % chưa khai (mặc định là 10%), mà là
+          `purchaseByProduct(period)` không tìm thấy phiếu nhập nào trong kỳ 7 ngày.
+
+      `AGENTS.md` mục 14 đã chốt luật cho đúng chuyện này: *dự phòng rủi ro tồn kho đi theo GIÁ VỐN
+      HÀNG BÁN RA, không theo giá trị hàng nhập trong kỳ*. Bảng chính đã làm đúng từ đầu; bảng này
+      là chỗ duy nhất còn sót.
+
+      Nay cả hai bảng dùng CÙNG MỘT con số rủi ro (`inventoryRisk`, phân bổ theo hàng bán trong kỳ).
+      Rủi ro cả đời của lô nhập vẫn được tính và vẫn hiện ra — nhưng là GHI CHÚ, không trừ vào lợi
+      nhuận kỳ nào. Xem `inventoryRiskOnPurchase`.
+    */
+    r.profitOnPurchase = r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost;
     r.marginOnPurchase = r.expectedRevenue ? (r.profitOnPurchase / r.expectedRevenue) * 100 : null;
     r.otherCostsTotal = r.opexTotal + r.inventoryRisk + r.tax + r.otherCost;
     r.opexPerOrder = r.orders ? Math.round(r.otherCostsTotal / r.orders) : null;
@@ -579,7 +605,8 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
   const opexTotal = operatingExpenses + totals.packingCost + totals.opsStaffCost + fixedCost;
   const otherCostsTotal = opexTotal + totals.inventoryRisk + totals.tax + otherCostAll;
   const netProfit = expectedProfitAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
-  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRiskOnPurchase - totals.tax - otherCostAll;
+  // Cùng lý do như từng dòng: rủi ro tính theo HÀNG BÁN RA trong kỳ, không theo lô nhập.
+  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   const expectedDeliveredAll = rows.reduce((t, r) => t + r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100), 0);
   return {
     assumptions,

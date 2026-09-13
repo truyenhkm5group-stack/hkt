@@ -568,7 +568,7 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
-        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − rủi ro TK của cả lô nhập − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − CP rủi ro tồn kho phân bổ cho kỳ (theo giá vốn hàng BÁN RA, cùng một con số với bảng trên — không theo giá trị hàng nhập) − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -583,7 +583,8 @@ export async function NominalTab({
                 <TableHead className="text-right">CPQC</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
                 <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
-                <TableHead className="text-right" title="Bảng này đã trừ TRỌN giá trị hàng nhập trong kỳ nên cũng trừ TRỌN phần rủi ro của lô đó (% × giá trị hàng nhập). Bảng trên đi theo hàng bán ra nên chỉ trừ phần dự phòng đã giải phóng — hai bảng, hai cơ sở, mỗi bảng nhất quán với chính nó.">Rủi ro TK cả lô nhập</TableHead>
+                <TableHead className="text-right" title="CHI PHÍ CỦA KỲ NÀY, không phải rủi ro cả đời của lô: % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ — cùng MỘT con số với bảng trên. Trước bản này cột lấy % × giá trị hàng NHẬP, nên kỳ có phiếu nhập thì gánh rủi ro của hàng sẽ bán nhiều tháng sau, còn kỳ không nhập gì thì bằng đúng 0 và bảng nói hàng đang bán không có rủi ro nào. Rủi ro cả đời của lô nhập vẫn tính và hiện ở cột bên cạnh — là GHI CHÚ, không trừ vào lợi nhuận.">CP rủi ro TK phân bổ kỳ này</TableHead>
+                <TableHead className="text-right" title="GHI CHÚ, KHÔNG trừ vào lợi nhuận: rủi ro CẢ ĐỜI của lô hàng nhập trong kỳ (% × giá trị hàng nhập). Đây là phơi nhiễm TẠI MỘT THỜI ĐIỂM, không phải chi phí CỦA MỘT KỲ.">Rủi ro cả lô nhập (ghi chú)</TableHead>
                 <TableHead className="text-right">Thuế</TableHead>
                 <TableHead className="text-right">CP khác</TableHead>
                 <TableHead className="text-right">LN theo hàng nhập</TableHead>
@@ -602,7 +603,8 @@ export async function NominalTab({
                   <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
                   <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.inventoryRiskOnPurchase} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRisk} className="text-muted-foreground" /></TableCell>
+                  <TableCell className="text-right"><Money value={r.inventoryRiskOnPurchase} className="text-muted-foreground/70 italic" /></TableCell>
                   <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
                   <TableCell className="text-right"><Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} /></TableCell>
@@ -619,7 +621,8 @@ export async function NominalTab({
                 <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
                 <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
-                <TableCell className="text-right"><Money value={t.inventoryRiskOnPurchase} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRisk} /></TableCell>
+                <TableCell className="text-right"><Money value={t.inventoryRiskOnPurchase} className="text-muted-foreground/70 italic" /></TableCell>
                 <TableCell className="text-right"><Money value={t.tax} /></TableCell>
                 <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
                 <TableCell className="text-right"><Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} /></TableCell>

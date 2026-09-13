@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CARRIER_SUBSTATES } from "@/lib/constants/carrier-substate";
 import { confidenceOf, CONFIDENCE_THRESHOLDS, PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
+import { inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { backtestProjectedDelivery, getProbabilityLookup, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
 
 /**
@@ -117,12 +120,37 @@ export async function testProjectedMetricsConsistent() {
   assert.equal(m.version, PROJECTED_GTC_VERSION);
 }
 
+/* ───── 6 · Rủi ro tồn kho là CHI PHÍ CỦA KỲ, không phải của lô nhập ───── */
+export function testInventoryRiskIsPeriodExpense() {
+  /*
+    Bài này khoá bằng ĐỌC MÃ NGUỒN, vì chỗ hỏng nằm ở CHỌN BIẾN NÀO chứ không ở phép tính: bảng
+    "lợi nhuận theo hàng nhập" từng trừ `inventoryRiskOnPurchase` (rủi ro CẢ ĐỜI của lô) vào lợi
+    nhuận kỳ chứa phiếu nhập. Hệ quả đo được trên production: kỳ 7 ngày không có phiếu nhập nào ⇒
+    cột rủi ro bằng ĐÚNG 0, và bảng nói hàng đang bán không mang rủi ro nào.
+  */
+  const nguon = readFileSync(path.join(process.cwd(), "lib/queries/profit-nominal.ts"), "utf8");
+  const dongLoiNhuan = nguon.split("\n").filter((l) => l.includes("profitOnPurchase =") || l.includes("const profitOnPurchase"));
+  assert.ok(dongLoiNhuan.length >= 2, "phải tìm thấy cả công thức từng dòng lẫn công thức tổng");
+  for (const d of dongLoiNhuan) {
+    assert.ok(!d.includes("inventoryRiskOnPurchase"), `lợi nhuận theo hàng nhập KHÔNG được trừ rủi ro cả đời của lô: ${d.trim()}`);
+    assert.ok(d.includes("inventoryRisk"), `phải trừ phần rủi ro PHÂN BỔ CHO KỲ: ${d.trim()}`);
+  }
+
+  // Luật 14 của AGENTS.md, kiểm ở mức số học: rủi ro đi theo hàng BÁN RA.
+  const giaTriLo = 100_000_000;
+  assert.equal(inventoryRiskOnSold(0, 10), 0, "kỳ không bán được gì ⇒ chưa giải phóng đồng dự phòng nào");
+  let congDon = 0;
+  for (let tuan = 0; tuan < 10; tuan += 1) congDon += inventoryRiskOnSold(giaTriLo / 10, 10);
+  assert.equal(congDon, inventoryRiskOnSold(giaTriLo, 10), "bán hết lô qua 10 tuần ⇒ cộng lại đúng bằng dự phòng cả lô, không hơn không kém");
+}
+
 export async function testReportingParity(db: Db) {
   testNoHardcodedProbability();
   await testProbabilityFromHistory(db);
   await testLowSampleNotAuthoritative();
   await testBacktestHonest();
   await testProjectedMetricsConsistent();
+  testInventoryRiskIsPeriodExpense();
 
   const ids = [`${P}h1`, `${P}h2`, `${P}h3`, `${P}h4`];
   await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ids));
@@ -130,5 +158,5 @@ export async function testReportingParity(db: Db) {
   await db.delete(schema.shipments).where(inArray(schema.shipments.id, ids));
   await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
   clearMemo();
-  console.log("✓ Một hợp đồng cho “TL GTC ước tính”: xác suất học từ lịch sử · một vận đơn một quan sát · kiện chưa kết thúc ngoài mẫu số · mẫu nhỏ KHÔNG thành xác suất · không con số nào ghi cứng");
+  console.log("✓ Một hợp đồng cho “TL GTC ước tính”: xác suất học từ lịch sử · một vận đơn một quan sát · kiện chưa kết thúc ngoài mẫu số · mẫu nhỏ KHÔNG thành xác suất · không con số nào ghi cứng · rủi ro tồn kho là chi phí CỦA KỲ");
 }
