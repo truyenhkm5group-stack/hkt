@@ -3,6 +3,8 @@ import { getDb, schema } from "@/db";
 import type { DepartmentCode } from "@/lib/constants/departments";
 import { krProgress, metricBinding, type MetricState, type MetricTrust, type MetricUnit } from "@/lib/constants/metric-bindings";
 import { resolveMetrics } from "@/lib/queries/metric-resolver";
+import { resolveTarget, type TargetRow } from "@/lib/constants/metric-targets";
+import { listTargets } from "@/lib/queries/metric-targets";
 import { KR_CONFIDENCES, OKR_LEVELS, OKR_STATUSES, type KrConfidence, type OkrLevel, type OkrStatus } from "@/lib/constants/okr";
 import type { Period } from "@/lib/search-params";
 
@@ -49,6 +51,22 @@ export type KeyResultView = {
    * "đi lấy dữ liệu". Gộp lại thì cả hai đều thành "hỏng".
    */
   state: MetricState;
+  /**
+   * ĐÍCH CÓ THẨM QUYỀN cho chính chỉ số này, đọc từ bảng `metric_targets`.
+   *
+   * `okr_key_results.target` là con số người tạo KR gõ vào — nó KHÔNG đi qua sổ đích, nên "tỷ lệ
+   * hoàn ≤ 8%" ở màn hình mục tiêu và "tỷ lệ hoàn ≤ 5%" ở thẻ điểm có thể cùng tồn tại mà không ai
+   * biết. `null` = chưa ai đặt đích có thẩm quyền cho chỉ số này.
+   */
+  authoritativeTarget: number | null;
+  /**
+   * Đích của KR KHÁC đích có thẩm quyền.
+   *
+   * CỐ Ý chỉ báo, KHÔNG tự ghi đè: đích của một KR đang chạy là cam kết người ta đã thống nhất
+   * trong kỳ, và lặng lẽ đổi nó giữa kỳ là sửa lại luật chơi sau khi trận đấu đã bắt đầu. Màn
+   * hình nói ra chỗ lệch, người quyết định.
+   */
+  targetConflict: boolean;
 };
 
 export type ObjectiveView = {
@@ -81,7 +99,7 @@ export type ObjectiveView = {
   totalCount: number;
 };
 
-function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: number | null; note?: string; sample?: number | null; state?: MetricState } | undefined, ownerName: string): KeyResultView {
+function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: number | null; note?: string; sample?: number | null; state?: MetricState } | undefined, ownerName: string, dichCoThamQuyen: TargetRow[], kyKetThuc: Date): KeyResultView {
   const binding = metricBinding(kr.metricSource);
   // Chỉ số có trong sổ ⇒ đọc SỐ SỐNG. Chỉ số `MANUAL` ⇒ giá trị người nhập gần nhất.
   const current = binding ? (live?.value ?? null) : kr.current;
@@ -95,6 +113,9 @@ function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: num
     KR nhập tay không có cỡ mẫu để so ⇒ `OK` nếu có số. Người nhập đã tự chịu trách nhiệm cho nó.
   */
   const state: MetricState = binding ? (live?.state ?? (current === null ? "UNKNOWN" : "OK")) : current === null ? "UNKNOWN" : "OK";
+  // Đích có thẩm quyền chỉ tra được cho KR ĐÃ nối vào một chỉ số trong sổ; KR nhập tay không có
+  // chỉ số nào để tra, nên không có gì để so và cũng không có xung đột nào.
+  const dich = binding ? resolveTarget(dichCoThamQuyen, { metricKey: kr.metricSource, departmentCode: null, positionId: null, at: kyKetThuc }) : null;
   return {
     sample: live?.sample ?? null,
     state,
@@ -114,6 +135,8 @@ function toView(kr: typeof schema.okrKeyResults.$inferSelect, live: { value: num
     confidence: kr.confidence as KrConfidence,
     ownerName,
     note: live?.note ?? "",
+    authoritativeTarget: dich?.target ?? null,
+    targetConflict: dich !== null && dich.target !== kr.target,
   };
 }
 
@@ -160,9 +183,15 @@ export async function listObjectives(q: OkrQuery, metricPeriod: Period): Promise
 
   // Một lượt đọc cho mọi chỉ số của mọi KR — không N+1.
   const values = await resolveMetrics(krs.map((k) => k.metricSource), { period: metricPeriod });
+  // Một lượt đọc cho toàn bộ sổ đích — bảng này nhỏ theo bản chất và luật chọn đích cần nhìn thấy
+  // cả bốn tầng cùng lúc mới quyết được.
+  const dichCoThamQuyen = await listTargets();
+  // Kỳ không khai mốc kết thúc thì lấy BÂY GIỜ — không lấy vô cực. Mốc này quyết định đích nào còn
+  // hiệu lực, nên một mốc quá xa sẽ kéo cả những đích đặt cho tương lai vào kỳ đang xem.
+  const kyKetThuc = metricPeriod.to ?? new Date();
 
   return objectives.map((o) => {
-    const list = krs.filter((k) => k.objectiveId === o.id).map((k) => toView(k, values.get(k.metricSource), k.ownerUserId ? (ownerName.get(k.ownerUserId) ?? "") : ""));
+    const list = krs.filter((k) => k.objectiveId === o.id).map((k) => toView(k, values.get(k.metricSource), k.ownerUserId ? (ownerName.get(k.ownerUserId) ?? "") : "", dichCoThamQuyen, kyKetThuc));
     const measured = list.filter((k) => k.progress !== null);
     return {
       id: o.id,
