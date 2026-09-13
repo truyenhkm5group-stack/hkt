@@ -12,7 +12,7 @@ import { deleteMetricTarget, setMetricTarget } from "@/lib/actions/metric-target
 import { METRIC_CATALOG, type MetricSpec } from "@/lib/constants/metric-catalog";
 import { TARGET_SCOPE_LABEL, type TargetScope } from "@/lib/constants/metric-targets";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
-import { formatDate } from "@/lib/format";
+import { formatDate, todayVN } from "@/lib/format";
 
 /**
  * ═══════════ ĐẶT ĐÍCH — BA TẦNG, KHÔNG CÓ SẴN CON SỐ NÀO ═══════════
@@ -38,7 +38,7 @@ export function TargetsPanel({ rows, positions }: { rows: Row[]; positions: { id
   const [scopeRef, setScopeRef] = useState("");
   const [target, setTarget] = useState("");
   const [note, setNote] = useState("");
-  const [from, setFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => todayVN());
   const [pending, start] = useTransition();
   const router = useRouter();
 

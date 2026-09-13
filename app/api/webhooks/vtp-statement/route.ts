@@ -9,6 +9,7 @@ import { recordStatementMailContact } from "@/lib/integrations/viettelpost/state
 import { staleMemo } from "@/lib/cache";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { publish } from "@/lib/realtime/bus";
+import { anySecretMatches } from "@/lib/auth/secret-compare";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ ok: false, error: "Body không phải JSON" }, { status: 400 });
   }
-  if (!secretsFrom(request, body).includes(expected)) {
+  if (!anySecretMatches(secretsFrom(request, body), expected)) {
     console.warn(`[vtp-statement] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"}`);
     return NextResponse.json({ ok: false, error: "Sai tham số bí mật" }, { status: 401 });
   }

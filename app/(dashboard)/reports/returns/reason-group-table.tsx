@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
@@ -97,8 +97,8 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
           {groups.map((g) => {
             const xo = mo[g.group] ?? true;
             return (
-              <>
-                <tr key={g.group} className="cursor-pointer bg-muted/10 font-medium hover:bg-muted/30" onClick={() => setMo({ ...mo, [g.group]: !xo })}>
+              <Fragment key={g.group}>
+                <tr className="cursor-pointer bg-muted/10 font-medium hover:bg-muted/30" onClick={() => setMo({ ...mo, [g.group]: !xo })}>
                   <td className="px-3 py-1.5">
                     <span className="inline-flex items-center gap-1" title={RETURN_REASON_GROUP_ACTION[g.group]}>
                       <ChevronRight className={cn("size-3.5 transition-transform", xo && "rotate-90")} />
@@ -144,7 +144,7 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
                       </tr>
                     ))
                   : null}
-              </>
+              </Fragment>
             );
           })}
         </tbody>

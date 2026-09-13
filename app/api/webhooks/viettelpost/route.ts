@@ -7,6 +7,7 @@ import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { staleMemo } from "@/lib/cache";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
+import { anySecretMatches } from "@/lib/auth/secret-compare";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,15 @@ export async function POST(request: NextRequest) {
   }
 
   const expected = env.viettelPost.webhookSecret;
-  if (expected && !extractSecret(request, body).includes(expected)) {
+  // THIẾU BÍ MẬT LÀ ĐÓNG CỬA, không phải mở toang. Trước đây `expected` rỗng ⇒ mọi POST nặc danh
+  // đều được nhận và được phép TẠO vận đơn / đổi trạng thái — tức là ghi thẳng vào kết quả đơn.
+  // scripts/install-vps.sh luôn sinh VIETTELPOST_WEBHOOK_SECRET khi cài, nên production không bao
+  // giờ rơi vào nhánh này; máy dev không đặt biến thì vẫn chạy để thử webhook bằng tay.
+  if (!expected && process.env.NODE_ENV === "production") {
+    console.error("[vtp-webhook] 503 chưa cấu hình VIETTELPOST_WEBHOOK_SECRET — từ chối mọi gói tin");
+    return NextResponse.json({ status: 503, error: true, message: "Chưa cấu hình tham số bí mật webhook" }, { status: 503 });
+  }
+  if (expected && !anySecretMatches(extractSecret(request, body), expected)) {
     // Gói tin bị chặn KHÔNG được ghi vào webhook_events (ai cũng POST được thì bảng sẽ phình vô
     // hạn). Nhưng im lặng hoàn toàn thì cấu hình sai secret sẽ làm mất sạch dữ liệu mà không ai
     // biết — nên để lại một dòng log tra được bằng `docker logs`.

@@ -23,6 +23,7 @@ import {
 import { RECOMMENDATION_CONFIDENCE } from "@/lib/constants/recommendation";
 import { getActionQueue } from "@/lib/queries/action-queue";
 import { rowsOf } from "@/lib/sql-rows";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 /**
  * ═══════════ HÀNG ĐỢI RÒ RỈ DOANH THU ═══════════
@@ -156,7 +157,10 @@ export async function getSalesLeakageQueue(options: { limit?: number; bucket?: L
               from orders o
              where o.page_id is not null
                and o.inserted_at >= now() - interval '90 days'
-               and o.stage in ('DELIVERED','PAID')
+               -- "Đã giao" theo ORDER_OUTCOME (bảng dẫn xuất), không theo trạng thái Pancake:
+               -- "Đã nhận / Đã thanh toán" của Pancake là trạng thái bán hàng, không phải chứng từ giao.
+               and exists (select 1 from canonical_order_outcome m
+                            where m.order_id = o.id and m.logic_version = ${CANONICAL_OUTCOME_VERSION} and m.outcome = 'DELIVERED')
              group by o.page_id
             having count(*) >= ${MIN_ORDERS_FOR_PAGE_MEDIAN}
           `),

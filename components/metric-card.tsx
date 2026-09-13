@@ -33,6 +33,7 @@ export function MetricCard({
   hint,
   change,
   changeLabel = "so với kỳ trước",
+  goodWhen = "up",
   icon: Icon,
   tone = "primary",
   size = "md",
@@ -46,6 +47,11 @@ export function MetricCard({
   hint?: React.ReactNode;
   change?: number | null;
   changeLabel?: string;
+  /**
+   * Chiều TỐT của chỉ số. Mặc định `up` (doanh thu, đơn, GTC). Chi phí, tỷ lệ hoàn, việc quá hạn là
+   * `down`: tăng phải tô đỏ, không tô xanh. `neutral` chỉ hiện số, không phán xét (AGENTS mục 38).
+   */
+  goodWhen?: "up" | "down" | "neutral";
   icon?: LucideIcon;
   tone?: MetricTone;
   /** `lg` dành cho vài con số dẫn dắt cả trang; `md` cho phần còn lại. */
@@ -71,7 +77,7 @@ export function MetricCard({
       <p className={cn("numeric mt-2 font-bold tracking-tight", size === "lg" ? "text-[28px] leading-9 sm:text-[32px]" : "text-2xl sm:text-[26px]")}>{value}</p>
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         {hasChange ? (
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold", change >= 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold", goodWhen === "neutral" ? "bg-muted text-muted-foreground" : (goodWhen === "up" ? change >= 0 : change <= 0) ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
             {change >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
             {change >= 0 ? "+" : ""}
             {change.toFixed(1)}%

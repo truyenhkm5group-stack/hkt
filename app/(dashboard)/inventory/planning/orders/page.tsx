@@ -4,7 +4,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requirePermission } from "@/lib/auth/session";
 import { PRODUCTION_STATUS_LABEL, PRODUCTION_STATUS_TONE } from "@/lib/constants/production";
-import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { listProductionOrders } from "@/lib/queries/production";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +36,7 @@ export default async function ProductionOrdersPage() {
                 <TableCell>{r.productCode ? `${r.productCode} · ` : ""}{r.productName}</TableCell>
                 <TableCell className="text-right font-semibold tabular-nums">{formatNumber(r.totalQty)}</TableCell>
                 <TableCell className="text-right tabular-nums">{r.unitCost ? formatVND(r.totalQty * r.unitCost, { compact: true }) : "—"}</TableCell>
-                <TableCell className="text-sm">{r.supplier || "—"}{r.dueDate ? ` · ${new Date(r.dueDate).toLocaleDateString("vi-VN")}` : ""}</TableCell>
+                <TableCell className="text-sm">{r.supplier || "—"}{r.dueDate ? ` · ${formatDate(r.dueDate)}` : ""}</TableCell>
                 <TableCell><span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", PRODUCTION_STATUS_TONE[r.status])}>{PRODUCTION_STATUS_LABEL[r.status] ?? r.status}</span></TableCell>
                 <TableCell className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}<div>{r.createdBy}</div></TableCell>
               </TableRow>

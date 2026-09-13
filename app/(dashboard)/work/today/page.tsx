@@ -11,7 +11,7 @@ import { DEPARTMENT_LABEL, DEPARTMENT_ORDER } from "@/lib/constants/departments"
 import { INTERVENTION_ACTION, INTERVENTION_LABEL, getManagerDay, scopeFor } from "@/lib/queries/manager-day";
 import { departmentsOfUser } from "@/lib/queries/work";
 import { autoAssignOn } from "@/lib/constants/workforce";
-import { formatVND } from "@/lib/format";
+import { formatDate, formatVND } from "@/lib/format";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +141,7 @@ export default async function ManagerDayPage({ searchParams }: { searchParams: P
                         {c.load}/{c.limit}
                       </span>
                       {c.away ? (
-                        <Badge variant="secondary" className="ml-1.5 text-[10px]">nghỉ tới {new Date(c.away.until).toLocaleDateString("vi-VN")}</Badge>
+                        <Badge variant="secondary" className="ml-1.5 text-[10px]">nghỉ tới {formatDate(c.away.until)}</Badge>
                       ) : c.overloaded ? (
                         <Badge variant="secondary" className="ml-1.5 bg-rose-100 text-[10px] text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">quá tải</Badge>
                       ) : c.nearFull ? (

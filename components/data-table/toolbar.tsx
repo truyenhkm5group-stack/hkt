@@ -175,7 +175,7 @@ export function PeriodFilter({ defaultKey = "all", options = PERIOD_OPTIONS }: {
     return () => clearTimeout(timer);
   }, [draft, state.from, state.to, setState]);
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Select value={state.period} onValueChange={(v) => void setState({ period: v === defaultKey ? null : v, page: null })}>
         <SelectTrigger size="sm" className="h-8 w-[150px]">
           <CalendarDays className="size-3.5 text-muted-foreground" />

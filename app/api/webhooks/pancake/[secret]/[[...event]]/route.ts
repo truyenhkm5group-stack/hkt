@@ -5,12 +5,13 @@ import { staleMemo } from "@/lib/cache";
 import { env } from "@/lib/env";
 import { str } from "@/lib/integrations/http";
 import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
+import { secretEquals } from "@/lib/auth/secret-compare";
 
 export const dynamic = "force-dynamic";
 
 function secretOk(secret: string) {
   const expected = env.pancake.webhookSecret;
-  return Boolean(expected) && secret === expected;
+  return secretEquals(secret, expected);
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ secret: string; event?: string[] }> }) {

@@ -112,14 +112,16 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
   async cod_outstanding() {
     const db = await getDb();
     /*
-      Tiền THỰC THU trên vận đơn đã giao mà chưa ghi nhận về ngân hàng. Dùng `cod_collected` —
-      con số CÓ CHỨNG TỪ — chứ không dùng `cod_amount` (số khai): số khai chưa phải tiền.
+      Tiền THỰC THU chưa ghi nhận về ngân hàng. Dùng `cod_collected` — con số CÓ CHỨNG TỪ — chứ không
+      dùng `cod_amount` (số khai): số khai chưa phải tiền. Cố ý KHÔNG lọc theo `stage`: tiền và
+      logistics là hai chiều riêng (AGENTS mục 0.1); vận đơn có tiền thực thu mà stage còn cũ hay
+      đang ở chiều hoàn vẫn là tiền chưa về, bỏ nó ra là đếm thiếu.
     */
     const rows = rowsOf<{ v: number }>(
       await db.execute(sql`
         select coalesce(sum(s.cod_collected), 0)::bigint as v
         from shipments s
-        where s.stage = 'DELIVERED' and coalesce(s.cod_collected, 0) > 0 and s.cod_status <> 'PAID_TO_BANK'
+        where coalesce(s.cod_collected, 0) > 0 and s.cod_status <> 'PAID_TO_BANK'
       `),
     );
     return { value: Number(rows[0]?.v ?? 0), sample: null };

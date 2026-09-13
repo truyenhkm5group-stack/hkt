@@ -1,5 +1,5 @@
 import { SectionCard } from "@/components/ui-bits";
-import { formatNumber, formatVND } from "@/lib/format";
+import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { getCareEffectiveness } from "@/lib/queries/care-effectiveness";
 
 /**
@@ -16,7 +16,7 @@ export async function CareEffectivenessSection() {
   return (
     <SectionCard
       title="E · Chăm sóc có cứu được đơn không"
-      description={e.since ? `Đo từ ${e.since.toLocaleDateString("vi-VN")} — ngày ghi nhận chăm sóc đầu tiên.` : "Chưa bắt đầu đo được."}
+      description={e.since ? `Đo từ ${formatDate(e.since)} — ngày ghi nhận chăm sóc đầu tiên.` : "Chưa bắt đầu đo được."}
       hint="Cohort: kiện có sự kiện GIAO HỤT kể từ mốc bắt đầu đo, chia hai nhóm theo việc CÓ ghi nhận chăm sóc sau lần hụt đó hay không. Mẫu số là đơn ĐÃ NGÃ NGŨ — đơn còn đang chạy chưa nói được gì. Cố ý KHÔNG dựng lại quá khứ: dữ liệu cũ không biết ai đã gọi."
     >
       {!e.since ? (

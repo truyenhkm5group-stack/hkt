@@ -142,6 +142,11 @@ export function UsersTable({
           </TableRow>
         </TableHeader>
         <TableBody>
+          {users.length === 0 ? (
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={12} className="h-24 text-center text-sm text-muted-foreground">Không có tài khoản nào khớp bộ lọc.</TableCell>
+            </TableRow>
+          ) : null}
           {users.map((u) => {
             const isSelf = u.id === currentUserId;
             const isLastAdmin = u.role === "ADMIN" && u.active && activeAdmins <= 1;

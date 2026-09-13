@@ -1,5 +1,6 @@
 import { cellKey, colorSwatch, matrixTotals } from "@/lib/constants/production";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format";
 
 export type SheetData = { code: string; productCode: string; productName: string; colors: string[]; sizes: string[]; cells: Record<string, number>; images: { color: string; url: string }[]; note: string; dueDate: Date | null; supplier: string };
 
@@ -51,7 +52,7 @@ export function ProductionSheet({ data, compact = false }: { data: SheetData; co
       {(data.note || data.dueDate || data.supplier) ? (
         <div className="space-y-0.5 text-sm text-zinc-800">
           {data.supplier ? <p><b>Xưởng:</b> {data.supplier}</p> : null}
-          {data.dueDate ? <p><b>Ngày cần hàng:</b> {new Date(data.dueDate).toLocaleDateString("vi-VN")}</p> : null}
+          {data.dueDate ? <p><b>Ngày cần hàng:</b> {formatDate(data.dueDate)}</p> : null}
           {data.note ? <p className="whitespace-pre-wrap"><b>Ghi chú:</b> {data.note}</p> : null}
         </div>
       ) : null}
