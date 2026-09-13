@@ -128,6 +128,7 @@ import { testAuditTrail } from "./audit-trail.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
 import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
 import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
+import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
@@ -1424,6 +1425,7 @@ async function main() {
   testTargetWindowAndPeriod();
   testRangeAndBands();
   testScorecardEvaluator();
+  testDataQualityIssues();
   testUiConsistency();
   testNavigationCoverage();
   testLoadingUxContract();
