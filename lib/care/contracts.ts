@@ -104,6 +104,12 @@ export type CareCase = {
   care: CareState;
   reopened: boolean;
   lastCareAction: { label: string; at: Date; byHuman: boolean } | null;
+  /**
+   * Bot nhắn khách sau giao hụt KHÔNG thành công (không có hội thoại Pancake, ngoài 24h, thiếu token).
+   * Kết luận này trước đây chỉ nằm trong một dòng `cs_cases` miền giao vận mà không hàng đợi nào hiện
+   * — tức là không ai, người lẫn máy, đã chạm tới khách. Bàn care là nơi phải thấy nó.
+   */
+  botMessageFailure: { caseId: string; title: string; detail: string; at: Date } | null;
   carrierRequest: CarrierRequestView | null;
   /** Rút gọn: có gửi thẳng API được không. Chi tiết từng hành động ở `getCareCaseDetail().capabilities`. */
   carrierCapability: "API" | "MANUAL";

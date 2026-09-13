@@ -8,6 +8,7 @@ import { careSlaHours } from "@/lib/care/sla";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
+import { botMessageFailuresByShipment } from "@/lib/queries/cs";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
@@ -275,6 +276,7 @@ async function buildQueue(): Promise<CareQueue> {
       nextAction: BUCKET_BY_KEY[r.bucket].nextAction,
       queueSince: queueSinceOf(r.shipmentId, null),
       lastCareAction: r.lastCsAction ? { label: r.lastCsAction, at: r.lastCsActionAt ?? now, byHuman: r.lastCsActionByHuman } : null,
+      botMessageFailure: null,
     });
   }
   for (const w of wrongInfo) {
@@ -293,6 +295,7 @@ async function buildQueue(): Promise<CareQueue> {
       nextAction: "Xác nhận lại với khách rồi sửa người nhận / địa chỉ trên Viettel Post trước khi bưu tá đi phát.",
       queueSince: new Date(w.opened_at),
       lastCareAction: null,
+      botMessageFailure: null,
     });
   }
   for (const d of doneShipments) {
@@ -312,11 +315,19 @@ async function buildQueue(): Promise<CareQueue> {
       nextAction: "Không còn việc gì — theo dõi ở Tất cả vận đơn nếu cần.",
       queueSince: c?.createdAt ?? now,
       lastCareAction: null,
+      botMessageFailure: null,
     });
   }
 
   // Cần care: tiền lớn trước, rồi kiện vào hàng đợi lâu nhất. Người làm buổi sáng đi từ trên xuống.
   all.sort((a, b) => b.codAmount - a.codAmount || a.queueSince.getTime() - b.queueSince.getTime());
+
+  // Bot không nhắn được khách: gắn vào đúng kiện, KHÔNG sinh dòng việc mới (cùng grain kiện).
+  const botFail = await botMessageFailuresByShipment(all.map((c) => c.shipmentId));
+  for (const c of all) {
+    const f = botFail.get(c.shipmentId);
+    c.botMessageFailure = f ? { caseId: f.caseId, title: f.title, detail: f.detail, at: f.createdAt } : null;
+  }
 
   const dataGaps = all.filter((c) => c.reasonClass === "DATA_FRESHNESS");
   const cases = all.filter((c) => c.reasonClass !== "DATA_FRESHNESS");

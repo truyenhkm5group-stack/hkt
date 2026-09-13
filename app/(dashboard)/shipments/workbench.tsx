@@ -585,6 +585,11 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
             {c.reasonLabel}
           </span>
           {c.reopened ? <span className="rounded bg-violet-100 px-1.5 py-px text-[10.5px] font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">mở lại</span> : null}
+          {c.botMessageFailure ? (
+            <span className="rounded bg-amber-100 px-1.5 py-px text-[10.5px] font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300" title={`${c.botMessageFailure.title}\n${c.botMessageFailure.detail}`}>
+              bot không nhắn được — gọi / Zalo thủ công
+            </span>
+          ) : null}
           {breached ? (
             <span className="rounded bg-rose-100 px-1.5 py-px text-[10.5px] font-semibold text-rose-800 dark:bg-rose-950/60 dark:text-rose-300" title={`Phản hồi đầu hạn ${formatDateTime(c.sla.firstResponseDueAt)} · đóng hạn ${formatDateTime(c.sla.resolveDueAt)}`}>
               vỡ SLA
