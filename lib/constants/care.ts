@@ -65,15 +65,30 @@ export const CARE_STATUS_HINT: Record<CareStatus, string> = {
   CANCELLED: "Case không còn ý nghĩa (đơn huỷ, trùng, khách tự xử lý). Kiện vẫn theo chứng từ ĐVVC.",
 };
 
+/**
+ * MÀU PHẢI PHÂN BIỆT ĐƯỢC BA KIỂU "CHỜ" — chúng đòi ba hành động khác nhau.
+ *
+ * Bản trước tô CÙNG MỘT màu hổ phách cho `WAITING_CUSTOMER`, `WAITING_CARRIER` và
+ * `WAITING_REDELIVERY`. Người trực nhìn hàng đợi thấy một mảng vàng và phải đọc chữ từng dòng mới
+ * biết nên gọi KHÁCH, gọi ĐVVC, hay chỉ chờ tới giờ hẹn. Màu mà không phân biệt được thì nó chỉ
+ * còn là trang trí.
+ *
+ * Bảng màu theo đúng yêu cầu của chủ shop: chờ khách HỔ PHÁCH · chờ ĐVVC TÍM · theo dõi tiếp CHÀM
+ * · leo thang CAM (tách khỏi tím để không lẫn với "chờ ĐVVC") · đã giao người XANH DƯƠNG · đang xử
+ * lý XANH LƠ.
+ *
+ * Mỗi ô khai riêng nền và chữ cho chế độ tối — dùng chung một sắc độ cho cả hai chế độ là cách
+ * nhanh nhất để chữ xám trên nền xám.
+ */
 export const CARE_STATUS_TONE: Record<CareStatus, string> = {
-  NEW: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
-  ASSIGNED: "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300",
-  IN_PROGRESS: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
-  WAITING_CUSTOMER: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  WAITING_CARRIER: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  WAITING_REDELIVERY: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  RESOLVED: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
-  ESCALATED: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
+  NEW: "bg-rose-100 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200",
+  ASSIGNED: "bg-blue-100 text-blue-900 dark:bg-blue-950/60 dark:text-blue-200",
+  IN_PROGRESS: "bg-cyan-100 text-cyan-900 dark:bg-cyan-950/60 dark:text-cyan-200",
+  WAITING_CUSTOMER: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
+  WAITING_CARRIER: "bg-violet-100 text-violet-900 dark:bg-violet-950/60 dark:text-violet-200",
+  WAITING_REDELIVERY: "bg-indigo-100 text-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-200",
+  RESOLVED: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
+  ESCALATED: "bg-orange-100 text-orange-900 dark:bg-orange-950/60 dark:text-orange-200",
   CANCELLED: "bg-muted text-muted-foreground",
 };
 

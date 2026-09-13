@@ -145,3 +145,25 @@ export const ACTION_CALLS_CARRIER: Record<BusinessAction, boolean> = {
   EXCHANGE: false,
   CONTINUE_MONITORING: false,
 };
+
+/**
+ * MÀU CHO QUYẾT ĐỊNH NGHIỆP VỤ — cố ý KHÁC dải màu của trạng thái xử lý.
+ *
+ * "Duyệt hoàn" và "Đang xử lý" là hai loại thông tin khác nhau: một cái là QUYẾT ĐỊNH của shop,
+ * cái kia là ĐỘI ĐANG Ở ĐÂU. Nếu chúng dùng chung dải màu thì người đọc lại phải đọc chữ mới phân
+ * biệt được — đúng vấn đề mà việc tách hai chiều sinh ra để giải quyết.
+ *
+ * `APPROVE_RETURN` mang màu ĐỎ vì nó là quyết định TỐN TIỀN và khó đảo: một khi đã thôi cứu, kiện
+ * đi tiếp đường hoàn và shop chịu cước hai chiều. Cố ý KHÔNG dùng hồng — hồng là màu của trạng
+ * thái "Chưa xử lý", và hai thứ đó đứng cạnh nhau suốt trong hàng đợi.
+ *
+ * `CONTINUE_MONITORING` dùng TÍA chứ không dùng chàm của `WAITING_REDELIVERY`, dù hai cái cùng
+ * nghĩa "theo dõi tiếp": một cái là TRẠNG THÁI đội đang ở đâu, cái kia là QUYẾT ĐỊNH vừa bấm. Cho
+ * chúng cùng màu là xoá mất ranh giới mà việc tách hai chiều sinh ra để dựng.
+ */
+export const BUSINESS_ACTION_TONE: Record<BusinessAction, string> = {
+  APPROVE_RETURN: "bg-red-100 text-red-900 dark:bg-red-950/60 dark:text-red-200",
+  REQUEST_REDELIVERY: "bg-teal-100 text-teal-900 dark:bg-teal-950/60 dark:text-teal-200",
+  EXCHANGE: "bg-fuchsia-100 text-fuchsia-900 dark:bg-fuchsia-950/60 dark:text-fuchsia-200",
+  CONTINUE_MONITORING: "bg-purple-100 text-purple-900 dark:bg-purple-950/60 dark:text-purple-200",
+};
