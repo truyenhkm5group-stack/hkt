@@ -160,9 +160,21 @@ case "$DIR" in /root/erp|/root/erp/*) bad "thư mục $DIR NẰM TRONG thư mụ
 #     song song với ứng dụng đang phục vụ khách là đúng cách bị nhân OOM giết (deploy #208, #227 đã
 #     chết vì hai `next build` chạy cùng lúc). Hết đĩa cũng đã giết một lượt deploy (sự cố #242).
 #
-#     Ngưỡng: 1200 MB khả dụng (RAM trống + đệm thu hồi được) và 8 GB đĩa trống. Dưới ngưỡng thì
-#     DỪNG — chờ lúc vắng khách, hoặc dọn `docker system prune` trước.
-MEM_MIN_MB="${STAGING_MIN_MEM_MB:-1200}"
+#     HAI NGƯỠNG, VÌ CÓ HAI CÂU HỎI KHÁC NHAU:
+#
+#       · RAM khả dụng ≥ 600 MB — bản chạy thử ở trạng thái ổn định tốn ~485 MB (app ~255 + db ~230,
+#         đo theo chính production), và `mem_limit` chặn trần ở 960 MB nên nó không phình hơn được.
+#       · RAM khả dụng + SWAP TRỐNG ≥ 1200 MB — đệm để lúc cao điểm không ai bị giết.
+#
+#     Ngưỡng 1200 MB ban đầu viết cho một máy KHÔNG CÓ SWAP: lúc ấy hết RAM là nhân gọi OOM killer
+#     ngay, nên phải chừa cả vùng đệm bằng RAM thật. Có swap 2 GB rồi thì phép tính đổi — thiếu RAM
+#     nghĩa là CHẬM LẠI, không phải một tiến trình bị giết. Đây là lý do thêm swap, nên không tính
+#     nó vào là bỏ đi chính thứ vừa thêm.
+#
+#     `--build-here` thì vẫn cần ngưỡng cũ: `next build` ngốn hơn 1 GB RAM THẬT và swap không cứu
+#     được một lượt build (nó sẽ bò, rồi vẫn chết).
+MEM_MIN_MB="${STAGING_MIN_MEM_MB:-600}"
+MEM_PLUS_SWAP_MIN_MB="${STAGING_MIN_MEM_SWAP_MB:-1200}"
 DISK_MIN_GB="${STAGING_MIN_DISK_GB:-8}"
 
 say ""
@@ -170,10 +182,21 @@ say "── Tài nguyên máy ──"
 if command -v free >/dev/null 2>&1; then
   free -m | sed 's/^/  /'
   KHA_DUNG="$(free -m | awk '/^Mem:/ {print ($7 != "" ? $7 : $4)}')"
+  SWAP_TRONG="$(free -m | awk '/^Swap:/ {print $4}')"
+  SWAP_TRONG="${SWAP_TRONG:-0}"
+  TONG=$(( ${KHA_DUNG:-0} + SWAP_TRONG ))
   if [ -n "$KHA_DUNG" ] && [ "$KHA_DUNG" -lt "$MEM_MIN_MB" ] 2>/dev/null; then
-    bad "chỉ còn ${KHA_DUNG} MB RAM khả dụng (cần ≥ ${MEM_MIN_MB} MB) — dựng bây giờ có thể làm OOM giết container production"
+    bad "chỉ còn ${KHA_DUNG} MB RAM khả dụng (cần ≥ ${MEM_MIN_MB} MB cho ~485 MB của bản chạy thử)"
   else
     ok "RAM khả dụng ${KHA_DUNG:-?} MB ≥ ${MEM_MIN_MB} MB"
+  fi
+  if [ "$TONG" -lt "$MEM_PLUS_SWAP_MIN_MB" ] 2>/dev/null; then
+    bad "RAM khả dụng + swap trống = ${TONG} MB (cần ≥ ${MEM_PLUS_SWAP_MIN_MB} MB) — không còn đệm, nhân sẽ giết tiến trình lớn nhất"
+  else
+    ok "RAM khả dụng + swap trống = ${TONG} MB (${KHA_DUNG:-?} + ${SWAP_TRONG}) ≥ ${MEM_PLUS_SWAP_MIN_MB} MB"
+  fi
+  if [ "$SWAP_TRONG" -eq 0 ] 2>/dev/null; then
+    warn "KHÔNG CÓ SWAP — hết RAM là nhân giết ngay tiến trình lớn nhất. Chạy scripts/vps-add-swap.sh."
   fi
 else
   warn "không có lệnh free — không đo được RAM, tự kiểm bằng tay trước khi dựng"

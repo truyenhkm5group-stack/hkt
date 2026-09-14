@@ -38,7 +38,13 @@ if [ -z "$PREFLIGHT" ]; then
     "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-preflight.sh?ref=${BRANCH}" > "$PREFLIGHT" \
     || { say "✗ Không tải được kiểm tra an toàn. DỪNG — không dựng khi chưa kiểm được va chạm."; exit 1; }
 fi
-STAGING_DIR="$DIR" STAGING_PORT="$PORT" bash "$PREFLIGHT"
+# Dựng ảnh TẠI CHỖ cần RAM THẬT: `next build` ngốn hơn 1 GB và swap chỉ làm nó bò rồi vẫn chết.
+# Nên đường `--build-here` nâng ngưỡng lên, còn đường kéo ảnh thì dùng ngưỡng thường.
+if [ "$BUILD_HERE" = "1" ]; then
+  STAGING_DIR="$DIR" STAGING_PORT="$PORT" STAGING_MIN_MEM_MB=1500 bash "$PREFLIGHT"
+else
+  STAGING_DIR="$DIR" STAGING_PORT="$PORT" bash "$PREFLIGHT"
+fi
 say "Kiểm tra an toàn ĐẠT."
 
 say ""
