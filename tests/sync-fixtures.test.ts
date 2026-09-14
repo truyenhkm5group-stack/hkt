@@ -25,6 +25,8 @@ import { testActionQueue } from "./action-queue.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testUiConsistency } from "./ui-consistency.test";
+import { testAiPlatform } from "./ai-platform.test";
+import { testSalesAgent } from "./sales-agent.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1116,6 +1118,8 @@ async function main() {
   await testVtpCodPaymentColumn();
   await testStatementDedupAcrossFilenames();
   await testStatementDetailMatching(db);
+  await testAiPlatform(db);
+  await testSalesAgent(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
