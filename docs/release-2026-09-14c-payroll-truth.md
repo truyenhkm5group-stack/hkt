@@ -189,6 +189,33 @@ chỗ sai và một đường dẫn sang LN1 giữ nguyên kỳ đang xem.
 chỉ không được ÂM THẦM trở thành căn cứ trả tiền cho người. Mặc định vẫn là LN1 như trước, không
 đổi một con số nào.
 
+### 1.9 Bảng lương không có danh tính kỳ, nên mọi thứ sau con số đều trôi
+
+`/payroll` tính lại từ đầu mỗi lần mở. Hệ quả: đổi một tỷ lệ thưởng, đổi người phụ trách một
+fanpage, nhập thêm một phiếu kho — và bảng lương **THÁNG TRƯỚC** đổi theo, **sau khi tiền đã trả**.
+Không chỗ nào ghi shop đã trả bao nhiêu, theo cơ sở nào, với tỷ lệ nào. Con số vẫn ra, vẫn trông
+hợp lý, và không ai thấy.
+
+**`payroll_periods`** (migration `0088`, CHỈ THÊM BẢNG) — cùng hình dạng và cùng bộ ràng buộc với
+`review_cycles` (`AGENTS.md` mục 21): `DRAFT` tính sống · `FINAL` đọc `snapshot`, KHÔNG truy vấn lại.
+
+Ảnh chụp giữ đủ để **dựng lại câu trả lời**, không chỉ đủ để in một con số: cơ sở lợi nhuận đã dùng,
+**tỷ lệ của từng người TẠI LÚC CHỐT**, lương cứng khai và phần thuộc kỳ, độ phủ nguồn quy kết, và
+nguyên văn cảnh báo của máy chi phí. `calc_version` tách khỏi nội dung — hai kỳ mang hai số thì màn
+hình in "đổi công thức giữa hai kỳ" thay vì vẽ một mũi tên xu hướng.
+
+**Kỳ đã chốt không được viết lại, nhưng cũng không được nói dối.** Chứng từ vẫn về sau ngày chốt.
+Tính lại đè lên ảnh chụp là viết lại một kỳ đã trả tiền, im lặng; giấu hẳn phần chênh là để chủ shop
+không bao giờ biết có gì đã đổi. Nên phần tính lại hôm nay đứng **cạnh** bảng đã chốt như một **đề
+xuất điều chỉnh** — và im lặng khi không có gì đổi. Cố ý **không** có đường "mở lại".
+
+Bốn cửa trước khi chốt: quyền `payroll:manage` · kỳ phải có mốc đầu/cuối · cơ sở phải **đủ điều
+kiện** · **không con số nào được CHƯA BIẾT** (chốt lúc đó là đóng băng một chỗ trống rồi gọi nó là
+kết quả). Nút "Chốt kỳ" chỉ hiện khi cả bốn cửa đã qua.
+
+> **Chưa kỳ nào được chốt.** Bảng rỗng sau khi triển khai và mọi màn hình chạy y như trước, cho tới
+> khi chủ shop tự bấm — đúng yêu cầu "không tự chốt bảng lương".
+
 ---
 
 ## 2. Công thức đang áp dụng (không đổi trong bản này)
@@ -365,7 +392,8 @@ Hai đợt phát hành:
 |---|---|---|
 | #286 | `8076fd1` | bốn lỗi mục 1.1–1.4 · lỗi quy kết fanpage 1.5 · tài liệu migration |
 | #288 | `77b262a` | mục 1.6 (đã trả · cảnh báo chi phí · khoá mồ côi) · 1.7 (xuất CSV) · ba đoạn mô tả lỗi thời · bất biến độ phủ |
-| #289 | (đợt kế) | mục 1.8 (sổ đăng ký cơ sở lương + dải cảnh báo) · README nói đúng cơ sở đang chạy |
+| #289 | `f41a87a` | mục 1.8 (sổ đăng ký cơ sở lương + dải cảnh báo) · README/HANDOFF/chú giải quyền nói đúng luật đang chạy · nhắc khai email đăng nhập |
+| #290 | `0bf4a08` | mục 1.9 (kỳ lương: migration `0088`, ảnh chụp bất biến, đề xuất điều chỉnh) |
 
 Kiểm thử mới / mở rộng:
 - `tests/fanpage-attribution.test.ts` mục **7c** (cầu nối đơn huỷ) và **7d** (cửa sổ không trượt
@@ -515,6 +543,8 @@ Không nhánh nào được triển khai đè lên nhánh kia. Việc này thu�
 | Cơ sở dòng tiền khi lỗ | /payroll?basis=cash, chọn một kỳ ngắn | Dải cảnh báo vàng + cột LN cá nhân "—", không phải 0 ₫ |
 | Quyền xem lương | Đăng nhập tài khoản chỉ có "Lương: xem của mình" | Chỉ thấy dòng của chính mình; chưa khai email thì thấy câu chỉ đường |
 | Trùng đơn | /marketing/fanpages | Mỗi dòng trùng đơn đều có CĂN CỨ và điểm ≥ 4 |
+| Kỳ lương | /payroll (kỳ có mốc đầu/cuối, cơ sở LN1) | Có nút "Chốt kỳ"; kỳ "Toàn bộ" hoặc cơ sở khác LN1 thì KHÔNG có nút |
+| Kỳ đã chốt | /payroll sau khi chốt một kỳ | Dải xanh "đã CHỐT", bảng đọc ảnh chụp, và khối "Chênh lệch phát sinh SAU khi chốt" nếu dữ liệu đã đổi |
 | Căn cứ quy kết | /payroll (quyền xem toàn bộ) | Khối "Doanh thu chia cho marketer bằng căn cứ nào" — bốn nhóm cộng lại bằng tổng; phần "bảng gán phẳng" càng nhỏ càng tốt |
 | Đã trừ đủ chi phí chưa | /payroll | Khối "Lợi nhuận này đã trừ đủ chi phí chưa?" — cảnh báo của máy chi phí, kèm việc phải làm |
 
