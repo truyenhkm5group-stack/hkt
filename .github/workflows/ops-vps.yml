@@ -72,6 +72,7 @@ on:
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
           - ai-staging-page-token # sinh page_access_token cho MỘT page (arg = PAGE_ID) rồi ghi vào .env.staging
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
+          - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -635,12 +636,17 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npm run ai:ingest -- ${ARG:---hours=24 --max=20}
                 echo ""
-                echo "── Bằng chứng KHÔNG gửi gì cho khách ──"
-                docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
-                  -c "select '  tin đã gửi: ' || count(*) || ' (phải 0)' from sales_suggestions where sent;" \
-                  -c "select '  tin do máy soạn nằm trong bảng tin nhắn: ' || count(*) || ' (phải 0)' from sales_messages where from_agent;" \
-                  -c "select '  hội thoại: ' || count(*) from sales_conversations;" \
-                  -c "select '  tin nhắn: ' || count(*) from sales_messages;" ;;
+                echo "════════ BÁO CÁO CHẤT LƯỢNG LƯỢT NẠP ════════"
+                # SQL nằm trong kho mã chứ không nhúng vào YAML: sửa một câu truy vấn là sửa xong,
+                # không phải dựng lại ảnh tám phút. Toàn bộ là câu SELECT.
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-report.sql?ref=${STAGING_BRANCH}" \
+                  | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
+
+              ai-staging-report)
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-report.sql?ref=${STAGING_BRANCH}" \
+                  | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
 
               ai-staging-status)
                 echo "── container bản chạy thử ──"
