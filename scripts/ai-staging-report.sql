@@ -20,6 +20,16 @@ select
   (select count(*) from ai_runs where subject_type = 'CONVERSATION')     as "lượt chạy";
 
 \echo ''
+\echo '(14 bảng của nhân sự AI — liệt kê ĐÍCH DANH, không dò theo mẫu tên:'
+\echo ' mẫu ai\_% còn khớp ai_interactions của AI Copilot bên main và làm số đếm ra 15/14)'
+select count(*) || '/14' as "bảng nhân sự AI có mặt"
+from information_schema.tables
+where table_schema = 'public' and table_name in (
+  'ai_agents','ai_agent_versions','ai_events','ai_tasks','ai_runs','ai_tool_calls',
+  'ai_model_calls','ai_approvals','ai_errors','sales_conversations','sales_messages',
+  'sales_suggestions','sales_followups','sales_review_labels');
+
+\echo ''
 \echo '════════ 2. PHÂN BIỆT KHÁCH / NHÂN VIÊN / BOT ════════'
 \echo '(sender_type UNKNOWN nhiều = bộ phân loại chưa nhận ra nguồn tin, phải xem lại)'
 select

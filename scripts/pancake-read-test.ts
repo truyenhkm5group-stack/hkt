@@ -134,10 +134,12 @@ async function main() {
   console.log("\n───────── 3. TIN NHẮN ─────────");
   const first = conversations[0];
   const customerId = String(arr(first.customers)[0]?.id ?? (first.customer as Record<string, unknown>)?.id ?? "");
+  // Tham số khớp ĐÚNG `PancakePagesClient.listMessages` (`current_count`, không phải `page_number`).
+  // Bài kiểm gọi khác connector thì nó kiểm một đường mà lượt nạp đi một đường khác.
   const msg = await get(`pages/${pageId}/conversations/${String(first.id)}/messages`, {
     [key]: token,
     customer_id: customerId,
-    page_number: 1,
+    current_count: 0,
     page_size: 10,
   });
   if (msg.status >= 400) {
