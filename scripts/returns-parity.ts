@@ -138,39 +138,43 @@ async function tuMayTinh(): Promise<Dong[]> {
 /** Vì sao không bóc được — in ra thay vì chỉ báo "—". Một phép kiểm im lặng là một phép kiểm vô dụng. */
 const viSao: string[] = [];
 
+/** Bảng "Rủi ro theo mã hàng" CÓ trên trang không — tách hẳn khỏi việc bóc được số hay không. */
+let khoiCoMat = false;
+
 function bocSo(html: string, code: string): { giao: number; hoan: number } | null {
   /*
-    NEO VÀO ĐÚNG BẢNG TRƯỚC ĐÃ.
+    ═══ ĐỌC CHÚ GIẢI, KHÔNG BÒ THEO Ô ═══
 
-    Trang có HAI bảng theo mã hàng, và chúng khác thứ tự cột: "Rủi ro theo mã hàng" (đã gửi · GTC
-    thực tế · GTC ước tính · tỷ lệ hoàn) đứng TRƯỚC "Hoàn theo mã hàng" (đơn có kết quả · giao TC ·
-    hoàn · tỷ lệ hoàn). Tìm `>Q001<` từ đầu tài liệu sẽ trúng bảng thứ nhất và đọc ra hai con số
-    hoàn toàn khác — một phép đối chiếu tự lừa mình.
+    Bản đầu dò các ô mang lớp `tabular-nums` rồi đếm theo thứ tự cột. Chẩn đoán trên production cho
+    thấy cách đó gãy vì hai lẽ: trang có NHIỀU bảng theo mã hàng với thứ tự cột khác nhau, và ô số
+    nào cũng có thể mang thêm thuộc tính nên phép dò theo vị trí rất mong manh.
+
+    Bảng "Rủi ro theo mã hàng" đã in SẴN cả hai con số vào chú giải của ô "Đã gửi":
+
+        title="274 giao TC · 771 hoàn · 68 chưa kết thúc"
+
+    Đọc thẳng câu đó vừa CHÍNH XÁC (không đếm cột, không đoán thứ tự) vừa đúng chỗ người đọc thật
+    sự nhìn: đây là bảng chủ shop mở ra để quyết, không phải một bảng phụ.
   */
-  const bang = html.indexOf("Hoàn theo mã hàng");
+  const bang = html.indexOf("Rủi ro theo mã hàng");
   if (bang < 0) {
-    viSao.push(`${code}: KHÔNG thấy tiêu đề "Hoàn theo mã hàng" trong ${html.length} ký tự HTML`);
+    viSao.push(`${code}: KHÔNG thấy bảng "Rủi ro theo mã hàng" trong ${html.length} ký tự HTML`);
     return null;
   }
-  // Dòng của mã bắt đầu bằng ô mã hàng; lấy đoạn từ đó tới hết thẻ `</tr>` rồi đọc các ô số.
   const moc = html.indexOf(`>${code}<`, bang);
   if (moc < 0) {
     viSao.push(`${code}: thấy bảng ở ${bang} nhưng KHÔNG thấy ô mã ">${code}<" sau đó`);
     return null;
   }
-  const het = html.indexOf("</tr>", moc);
-  const doan = html.slice(moc, het < 0 ? moc + 4000 : het);
-  const oSo = [...doan.matchAll(/tabular-nums[^>]*>([\d.,]+)</g)].map((m) => Number(m[1].replace(/[.,]/g, "")));
-  // Thứ tự cột của bảng: đơn có kết quả · giao TC · hoàn · tỷ lệ hoàn.
-  if (oSo.length < 3) {
-    viSao.push(`${code}: thấy ô mã nhưng chỉ đọc được ${oSo.length} ô số trong dòng — đoạn: ${doan.slice(0, 200).replace(/\s+/g, " ")}`);
+  const doan = html.slice(moc, moc + 3000);
+  const m = /title="([\d.,]+) giao TC · ([\d.,]+) hoàn/.exec(doan);
+  if (!m) {
+    viSao.push(`${code}: thấy ô mã nhưng KHÔNG thấy chú giải "… giao TC · … hoàn" — đoạn: ${doan.slice(0, 180).replace(/\s+/g, " ")}`);
     return null;
   }
-  return { giao: oSo[1], hoan: oSo[2] };
+  const soVN = (x: string) => Number(x.replace(/[.,\s]/g, ""));
+  return { giao: soVN(m[1]), hoan: soVN(m[2]) };
 }
-
-/** Khối "Hoàn theo mã hàng" CÓ trên trang không — tách hẳn khỏi việc bóc được số hay không. */
-let khoiCoMat = false;
 
 async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>> {
   const secret = (process.env.AUTH_SECRET ?? "").trim();
@@ -192,7 +196,7 @@ async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>>
   // Bị đá về trang đăng nhập vẫn là HTTP 200 — bắt đúng cái bẫy đã làm một lượt QA xanh giả.
   if (/name="password"/.test(html)) throw new Error("Nhận được MÀN ĐĂNG NHẬP chứ không phải báo cáo — phiên không hợp lệ");
   if (/Application error/.test(html)) throw new Error("Màn hình có lỗi runtime");
-  khoiCoMat = html.includes("Hoàn theo mã hàng");
+  khoiCoMat = html.includes("Rủi ro theo mã hàng");
   const out = new Map<string, { giao: number; hoan: number }>();
   for (const c of MA) {
     const v = bocSo(html, c);
@@ -237,7 +241,7 @@ async function main() {
   console.log("");
   for (const v of viSao) console.log(`  ⚠ ${v}`);
   if (!khoiCoMat) {
-    console.error('✗ KHỐI "Hoàn theo mã hàng" KHÔNG CÓ trên trang, dù trang trả HTTP 200. Đây đúng là cách hỏng mà bài này sinh ra để bắt.');
+    console.error('✗ BẢNG "Rủi ro theo mã hàng" KHÔNG CÓ trên trang, dù trang trả HTTP 200. Đây đúng là cách hỏng mà bài này sinh ra để bắt.');
     process.exit(1);
   }
   if (lech) {
