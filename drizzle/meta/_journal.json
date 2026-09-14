@@ -596,6 +596,13 @@
       "when": 1789334335620,
       "tag": "0085_return_reason_raw_text",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1789337935620,
+      "tag": "0086_fanpage_marketer_attribution",
+      "breakpoints": true
     }
   ]
 }

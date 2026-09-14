@@ -2201,6 +2201,156 @@ export const adSpends = pgTable(
   (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate), uniqueIndex("ad_spends_external_key_uq").on(t.externalKey), index("ad_spends_product_idx").on(t.productId), index("ad_spends_marketer_idx").on(t.marketerId)],
 );
 
+// ───────────────────── Quy kết fanpage → marketer ─────────────────────
+//
+// Hợp đồng, lý lẽ và mọi ngưỡng: `lib/constants/fanpage-attribution.ts`. Ba bảng, ba việc rời nhau:
+// SỔ FANPAGE (page nào tồn tại) · SỔ PHÂN CÔNG (ai phụ trách, TỪ KHI NÀO ĐẾN KHI NÀO) · ẢNH CHỤP
+// QUY KẾT (đơn nào đã được tính cho ai, bằng dòng phân công nào).
+
+/**
+ * SỔ FANPAGE — một dòng cho mỗi Page Facebook từng tạo ra đơn.
+ *
+ * Khoá tự nhiên là `external_page_id` (Facebook Page ID), KHÔNG phải tên: tên page đổi được bất cứ
+ * lúc nào và shop này đã đổi. `name` chỉ là ảnh chụp tên để người đọc nhận ra, không tham gia vào
+ * bất kỳ phép so khớp nào.
+ *
+ * Dòng được MÁY phát hiện từ `orders.page_id` (job `fanpage-attribution`), không ai phải gõ tay.
+ */
+export const fanpages = pgTable(
+  "fanpages",
+  {
+    id: id(),
+    /** Facebook Page ID — khoá tự nhiên, bất biến. */
+    externalPageId: text("external_page_id").notNull(),
+    /** Tên page tại lần đồng bộ gần nhất. Rỗng = chưa đọc được tên từ Pancake (chỉ có ID). */
+    name: text("name").notNull().default(""),
+    platform: text("platform").notNull().default("facebook"),
+    /**
+     * `false` = page không còn dùng. KHÔNG ảnh hưởng tới đơn cũ: quy kết đã chụp vẫn giữ nguyên,
+     * vì tắt một page không làm doanh thu tháng trước biến mất.
+     */
+    active: boolean("active").notNull().default(true),
+    /** Đơn sớm nhất / muộn nhất từng thấy trên page — để người khai biết nên đặt mốc hiệu lực từ đâu. */
+    firstOrderAt: ts("first_order_at"),
+    lastOrderAt: ts("last_order_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("fanpages_external_uq").on(t.externalPageId), index("fanpages_active_idx").on(t.active)],
+);
+
+/**
+ * SỔ PHÂN CÔNG — ai phụ trách fanpage nào, TRONG KHOẢNG NÀO.
+ *
+ * `marketer_id` là id nhân sự trong `settings["payroll.employees"]` — CÙNG không gian khoá với
+ * `ad_spends.marketer_id` và `marketing_ideas.marketer_id`. Dựng một không gian khoá thứ hai ở đây
+ * sẽ làm báo cáo quảng cáo và báo cáo fanpage nói về hai tập "marketer" khác nhau mà nhìn thì
+ * giống hệt. Người bấm nút thì lưu bằng `users.id` (`created_by_user_id`) — đó là quy kết THAO TÁC,
+ * khác hẳn quy kết NGHIỆP VỤ (AGENTS.md mục 34).
+ *
+ * `effective_to = NULL` nghĩa là CÒN HIỆU LỰC, không phải "hết hạn ngay". Khoảng là nửa mở
+ * `[from, to)`: người cũ kết thúc đúng lúc người mới bắt đầu thì không có giây nào thuộc về cả hai.
+ */
+export const fanpageMarketerAssignments = pgTable(
+  "fanpage_marketer_assignments",
+  {
+    id: id(),
+    fanpageId: text("fanpage_id")
+      .notNull()
+      .references(() => fanpages.id, { onDelete: "cascade" }),
+    /** Id nhân sự (sổ lương). Không đặt khoá ngoại vì sổ nhân sự nằm trong `settings`, không phải bảng. */
+    marketerId: text("marketer_id").notNull(),
+    effectiveFrom: ts("effective_from").notNull(),
+    /** `NULL` = còn hiệu lực. */
+    effectiveTo: ts("effective_to"),
+    /** `false` = dòng khai SAI, bị thu hồi. Không tham gia quy kết; không xoá để còn truy được. */
+    active: boolean("active").notNull().default(true),
+    note: text("note").notNull().default(""),
+    /** Người BẤM NÚT (tài khoản ERP), đọc từ phiên đăng nhập ở máy chủ — không nhận từ client. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("fanpage_assign_page_idx").on(t.fanpageId, t.effectiveFrom),
+    index("fanpage_assign_marketer_idx").on(t.marketerId),
+    // Khoảng phải có chiều xuôi. `to <= from` không mô tả khoảng nào cả nhưng vẫn lọt qua mọi phép
+    // đọc, và âm thầm làm đơn trong khoảng đó mất người phụ trách.
+    check("fanpage_assign_period_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} > ${t.effectiveFrom}`),
+    check("fanpage_assign_marketer_check", sql`${t.marketerId} <> ''`),
+    // Một fanpage chỉ có MỘT dòng đang mở tại một thời điểm. Chồng lấn có mốc kết thúc được chặn
+    // trong `lib/attribution/fanpage.ts`; chồng lấn ở khoảng MỞ thì chặn ngay ở CSDL, vì đó là ca
+    // duy nhất mà hai lượt ghi chạy song song có thể cùng lọt qua phép kiểm ở tầng ứng dụng.
+    uniqueIndex("fanpage_assign_open_uq").on(t.fanpageId).where(sql`effective_to is null and active`),
+  ],
+);
+
+/**
+ * ẢNH CHỤP QUY KẾT — mỗi đơn ĐÚNG MỘT dòng.
+ *
+ * Vì sao là bảng riêng chứ không phải cột trên `orders`: `orders` là bảng ĐỒNG BỘ từ Pancake, mỗi
+ * lượt `pancake-reconcile` ghi đè cả dòng. Kết quả TÍNH RA không được nằm chung chỗ với dữ liệu
+ * CHÉP VỀ. Cùng lý do và cùng hình dạng với `canonical_order_outcome`.
+ *
+ * Khoá duy nhất trên `order_id` là thứ làm phép đối soát IDEMPOTENT: chạy lại bao nhiêu lần cũng
+ * chỉ có một dòng, nên không có đường nào để doanh thu bị cộng hai lần.
+ */
+export const orderAttributions = pgTable(
+  "order_attributions",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** Page của đơn tại lúc quy kết — chép từ `orders.page_id`, KHÔNG diễn giải. `NULL` = đơn không có page. */
+    sourcePageId: text("source_page_id"),
+    fanpageId: text("fanpage_id").references(() => fanpages.id, { onDelete: "set null" }),
+    /** `NULL` = CHƯA QUY KẾT ĐƯỢC (chưa gán, không có page, hoặc trùng đơn) — không phải "không ai". */
+    marketerId: text("marketer_id"),
+    /** CHÍNH dòng phân công đã dùng. Giữ lại để truy nguyên: vì sao đơn này về tay người này. */
+    assignmentId: text("assignment_id").references(() => fanpageMarketerAssignments.id, { onDelete: "set null" }),
+    /** Một trong `ATTRIBUTION_STATUSES`. */
+    status: text("status").notNull(),
+    /** MỐC ĐƠN PHÁT SINH TẠI NGUỒN đã dùng để chọn dòng phân công (`orders.inserted_at`). */
+    sourceOrderAt: ts("source_order_at").notNull(),
+    /** Khoá gộp trùng đơn. `NULL` = không đủ căn cứ để xét trùng ⇒ đơn KHÔNG bao giờ bị loại vì trùng. */
+    dedupeKey: text("dedupe_key"),
+    /** Đơn thắng quy kết khi dòng này là bản nhập lại. `NULL` với mọi tình trạng khác. */
+    duplicateOfOrderId: text("duplicate_of_order_id").references(() => orders.id, { onDelete: "set null" }),
+    /**
+     * ĐIỂM CHỨNG CỨ và CÁC DẤU HIỆU đã dùng để kết luận trùng đơn (`DUPLICATE_SIGNALS`).
+     *
+     * Một kết luận "trùng đơn" đang lấy doanh thu khỏi tên một người thật. Không lưu lại căn cứ thì
+     * sáu tháng sau không ai kiểm chứng được, và người bị mất đơn không có gì để cãi. `NULL` với
+     * mọi tình trạng khác — chỉ dòng `DUPLICATE` mới có căn cứ để ghi.
+     */
+    duplicateScore: integer("duplicate_score"),
+    duplicateReason: text("duplicate_reason"),
+    /** Phiên bản luật đã dùng. Luật đổi ⇒ dòng cũ thành cũ và TÌM RA ĐƯỢC. */
+    ruleVersion: integer("rule_version").notNull().default(1),
+    computedAt: ts("computed_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("order_attribution_order_uq").on(t.orderId),
+    index("order_attribution_marketer_idx").on(t.marketerId),
+    check("order_attribution_status_check", sql`${t.status} IN ('ATTRIBUTED', 'NO_PAGE', 'NO_ASSIGNMENT', 'DUPLICATE')`),
+    /*
+      CHỈ MỘT TÌNH TRẠNG ĐƯỢC MANG TÊN MỘT NGƯỜI, và tình trạng ấy BẮT BUỘC phải có tên. Không có
+      ràng buộc này thì một lỗi lập trình ghi được `marketer_id` lên một dòng `DUPLICATE` và doanh
+      thu bị đếm hai lần, trong khi báo cáo trông vẫn hoàn toàn bình thường.
+    */
+    check("order_attribution_marketer_check", sql`(${t.status} = 'ATTRIBUTED') = (${t.marketerId} IS NOT NULL)`),
+    check("order_attribution_duplicate_check", sql`(${t.status} = 'DUPLICATE') = (${t.duplicateOfOrderId} IS NOT NULL)`),
+    check("order_attribution_self_check", sql`${t.duplicateOfOrderId} IS NULL OR ${t.duplicateOfOrderId} <> ${t.orderId}`),
+    // Căn cứ đi CÙNG kết luận: dòng trùng đơn phải có điểm, dòng không trùng thì không được có.
+    check("order_attribution_evidence_check", sql`(${t.status} = 'DUPLICATE') = (${t.duplicateScore} IS NOT NULL)`),
+    index("order_attribution_page_idx").on(t.sourcePageId),
+    index("order_attribution_status_idx").on(t.status),
+    index("order_attribution_dedupe_idx").on(t.dedupeKey),
+    index("order_attribution_version_idx").on(t.ruleVersion),
+  ],
+);
+
 // ───────────────────────── Đồng bộ & tích hợp ─────────────────────────
 
 export const syncRuns = pgTable(
@@ -2285,6 +2435,15 @@ export const usersRelations = relations(users, ({ many }) => ({ auditLogs: many(
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({ user: one(users, { fields: [auditLogs.userId], references: [users.id] }) }));
 
 export const customersRelations = relations(customers, ({ many }) => ({ orders: many(orders) }));
+export const fanpagesRelations = relations(fanpages, ({ many }) => ({ assignments: many(fanpageMarketerAssignments) }));
+export const fanpageMarketerAssignmentsRelations = relations(fanpageMarketerAssignments, ({ one }) => ({
+  fanpage: one(fanpages, { fields: [fanpageMarketerAssignments.fanpageId], references: [fanpages.id] }),
+}));
+export const orderAttributionsRelations = relations(orderAttributions, ({ one }) => ({
+  order: one(orders, { fields: [orderAttributions.orderId], references: [orders.id] }),
+  fanpage: one(fanpages, { fields: [orderAttributions.fanpageId], references: [fanpages.id] }),
+  assignment: one(fanpageMarketerAssignments, { fields: [orderAttributions.assignmentId], references: [fanpageMarketerAssignments.id] }),
+}));
 export const warehousesRelations = relations(warehouses, ({ many }) => ({ stocks: many(variantStocks), orders: many(orders) }));
 
 export const productsRelations = relations(products, ({ many }) => ({ variants: many(productVariants) }));

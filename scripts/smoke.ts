@@ -99,6 +99,11 @@ const ROUTES = [
   "/outreach",
   "/landing",
   "/ideas",
+  // QUY KẾT FANPAGE → MARKETER. Ba tab đọc ba đường khác nhau trên cùng ảnh chụp `order_attributions`,
+  // nên mở mỗi tab một lần mới phủ hết: bảng theo người · danh sách từng đơn · màn hình khai báo.
+  "/marketing/fanpages",
+  "/marketing/fanpages?tab=orders",
+  "/marketing/fanpages?tab=assign",
   "/products/performance",
   "/reports/funnel",
   "/reports/cashflow",

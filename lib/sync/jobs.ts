@@ -17,6 +17,7 @@ import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
 import { trongJobNen } from "@/lib/cache";
 import { buildOutreachTargets } from "@/lib/outreach/build";
+import { runFanpageAttributionJob } from "@/lib/attribution/fanpage";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
 import { backfillWarnings, runCanonicalBackfill } from "@/lib/sync/backfill";
@@ -292,6 +293,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "PANCAKE",
     description: "Khách nhắn Pancake chưa đặt đơn (băn khoăn, cửa sổ 24h/7 ngày theo cấu hình; hours=N để ghi đè) và khách đã nhận hàng 3–14 ngày (bán chéo) → danh sách chờ gửi ở trang Chăm sóc & bán chéo; đồng thời rà kịch bản đang chạy (đã mua / khách trả lời). Chỉ lập danh sách, không tự gửi.",
     run: (o) => buildOutreachTargets({ windowHours: num(o.params?.hours) }),
+  },
+  "fanpage-attribution": {
+    label: "Quy kết fanpage → marketer",
+    source: "PANCAKE",
+    description:
+      "Phát hiện fanpage mới từ page_id của đơn, rồi dựng lại ảnh chụp quy kết (đơn → fanpage → marketer phụ trách TẠI MỐC ĐƠN LÊN) và đánh dấu đơn bị nhập lại. Chỉ ghi bảng order_attributions; không đụng đơn, vận đơn, tiền hay tồn kho. Chạy lại bao nhiêu lần cũng ra một kết quả — dryRun=1 để xem trước số đơn sẽ đổi.",
+    run: (o) => runFanpageAttributionJob({ dryRun: o.params?.dryRun === "1", actor: o.actor }),
   },
   all: {
     label: "Đồng bộ tất cả",
