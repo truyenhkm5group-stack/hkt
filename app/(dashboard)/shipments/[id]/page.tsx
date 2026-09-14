@@ -4,6 +4,7 @@ import { ExternalLink, MapPin, Phone, ShoppingBag, User } from "lucide-react";
 import { PushHistoryPanel } from "@/app/(dashboard)/shipments/[id]/push-history";
 import { RepushButton } from "@/app/(dashboard)/shipments/[id]/repush-button";
 import { VtpActions } from "@/app/(dashboard)/shipments/[id]/vtp-actions";
+import { ReturnReasonPanel } from "@/app/(dashboard)/shipments/[id]/reason-panel";
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
@@ -15,7 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
-import { getShipmentDetail } from "@/lib/queries/shipments";
+import { getShipmentDetail, outcomeOfShipment } from "@/lib/queries/shipments";
+import { reasonsForShipments } from "@/lib/queries/return-reason";
 import { can, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -30,6 +32,19 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   const s = await getShipmentDetail(id);
   if (!s) notFound();
+  /*
+    LÝ DO HOÀN CHỈ HỎI TRÊN KIỆN ĐÃ HOÀN.
+
+    Hỏi "vì sao hoàn" trên một kiện đang đi là mời người ta đoán, và một lý do đoán ra thì không
+    phân biệt được với một lý do đã xác minh.
+
+    "Đã hoàn" đọc từ `ORDER_OUTCOME` — nguồn duy nhất — chứ KHÔNG so `shipments.stage` bằng tay:
+    `stage` là chặng của hãng vận, và `RETURNED_BY_RULE` (hoàn theo luật tiền) không có mặt ở đó
+    chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
+  */
+  const outcome = await outcomeOfShipment(s.id);
+  const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
+  const lyDo = daHoan ? (await reasonsForShipments([s.id])).get(s.id) : undefined;
   const number = s.vtpOrderNumber ?? s.trackingCode;
   const isVtp = Boolean(s.vtpOrderNumber) || /viettel/i.test(s.carrier);
   const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
@@ -160,7 +175,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                 { label: "Dự kiến giao", value: s.expectedDelivery || "—" },
                 { label: "Trạng thái VTP", value: s.vtpStatus !== null ? `${s.vtpStatusName ?? ""} (${s.vtpStatus})` : s.vtpStatusName ?? "—" },
                 { label: "Vị trí hiện tại", value: s.vtpLocation || "—" },
-                { label: "Lý do", value: reason ?? "—", span: true },
+                { label: "Lý do ĐVVC khai", value: reason ?? "—", span: true },
                 { label: "Ghi chú ĐVVC", value: s.vtpNote || "—", span: true },
                 { label: "Trạng thái trên Pancake", value: partner ?? "—" },
                 { label: "Mã tham chiếu", value: s.orderReference ? <span className="font-mono text-xs">{s.orderReference}</span> : "—" },
@@ -172,6 +187,22 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
               ]}
             />
           </SectionCard>
+
+          {lyDo ? (
+            <SectionCard title="Lý do hoàn" description="Chọn từ danh mục để báo cáo đếm được. Ghi chú chi tiết là tuỳ.">
+              <ReturnReasonPanel
+                shipmentId={s.id}
+                tracking={number ?? s.id}
+                reason={lyDo.reason}
+                coverage={lyDo.coverage}
+                source={lyDo.source}
+                rawReason={lyDo.rawReason}
+                evidence={lyDo.evidence}
+                actorEmail={lyDo.actorEmail}
+                canEdit={can(user, "shipments:view")}
+              />
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Người nhận">
             <div className="space-y-3 text-sm">
