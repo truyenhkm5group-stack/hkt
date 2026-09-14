@@ -172,6 +172,17 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
           Tính lại theo dữ liệu hôm nay ra ĐÚNG con số đã chốt — chưa có chứng từ nào phát sinh sau ngày chốt làm đổi kỳ này.
         </p>
       )}
+
+      {/*
+        RANH GIỚI PHẢI NÓI RA. Các khối phân tích bên dưới (lợi nhuận theo mã hàng, chi tiết theo
+        marketer) tính SỐNG mỗi lần mở — chúng KHÔNG nằm trong ảnh chụp. Để chúng đứng ngay dưới một
+        bảng đã chốt mà không nói gì là mời người đọc tưởng cả trang đều bất biến, rồi một hôm thấy
+        số đổi và mất tin vào chính bảng lương ở trên.
+      */}
+      <p className="text-[11.5px] leading-5 text-muted-foreground">
+        Các khối phân tích bên dưới (lợi nhuận theo mã hàng · chi tiết theo marketer) <b>tính sống</b> theo dữ liệu hôm nay và KHÔNG thuộc ảnh chụp của kỳ
+        đã chốt. Chúng ở lại để đối chiếu; con số của kỳ nằm ở bảng trên.
+      </p>
     </div>
   );
 }
