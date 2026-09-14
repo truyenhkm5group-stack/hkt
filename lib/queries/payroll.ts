@@ -582,18 +582,57 @@ export type PayrollReport = {
    * trong hồ sơ. `bounded = false` ⇒ kỳ không có mốc đầu/cuối ⇒ lương cứng của kỳ là CHƯA BIẾT.
    */
   fixedBasis: { bounded: boolean; days: number; monthlyTotal: number };
+  /**
+   * TIỀN LƯƠNG ĐÃ RA KHỎI TÚI TRONG KỲ — đọc `expenses` nhóm "Lương" theo NGÀY PHÁT SINH thô.
+   * Chiều khác hẳn "phải trả"; `perPerson: false` vì không chứng từ chi nào mang khoá tài khoản.
+   */
+  paid: { amount: number; count: number; perPerson: false; missingWhat: string };
   marketers: MarketerReport;
 };
+
+/**
+ * ═══════ TIỀN LƯƠNG ĐÃ THẬT SỰ RA KHỎI TÚI TRONG KỲ ═══════
+ *
+ * "PHẢI TRẢ" và "ĐÃ TRẢ" là hai chiều khác nhau, và gộp chúng lại là cách làm mất dấu một tháng
+ * lương. Phải trả là phép TÍNH trên kỳ làm việc; đã trả là một SỰ KIỆN TIỀN có ngày của riêng nó —
+ * lương tháng 8 trả ngày 05/09 là tiền ra của tháng 9 nhưng là chi phí của tháng 8 (AGENTS.md mục
+ * 17). Nên hàm này đọc theo `occurred_at` THÔ, không qua phép phân bổ theo kỳ.
+ *
+ * ─── VÌ SAO KHÔNG TÁCH ĐƯỢC THEO TỪNG NGƯỜI ───
+ *
+ * `expenses` không có cột nào trỏ tới một tài khoản: chỉ có `description` là ô chữ tự do. Bổ đôi
+ * chuỗi ấy để đoán tên người là đúng thứ AGENTS.md mục 34 cấm — quy kết đi bằng KHOÁ TÀI KHOẢN,
+ * không bằng ô chữ. Nên con số này là MỨC TOÀN SHOP và nói thẳng ra như vậy, thay vì chia bừa rồi
+ * in ra một cột "đã trả" cạnh tên từng người mà không ai kiểm lại được.
+ */
+async function salaryPaidInPeriod(period: Period): Promise<{ amount: number; count: number; perPerson: false; missingWhat: string }> {
+  const db = await getDb();
+  const e = schema.expenses;
+  const conds: SQL[] = [eq(e.category, "SALARY")];
+  if (period.from) conds.push(gte(e.occurredAt, period.from));
+  if (period.to) conds.push(lte(e.occurredAt, period.to));
+  const [row] = await db
+    .select({ amount: sql<number>`coalesce(sum(${e.amount}), 0)`, count: sql<number>`count(*)` })
+    .from(e)
+    .where(and(...conds));
+  return {
+    amount: Number(row?.amount ?? 0),
+    count: Number(row?.count ?? 0),
+    perPerson: false,
+    missingWhat: "Khoản chi nhóm “Lương” không có cột nào trỏ tới một tài khoản nhân sự (chỉ có ô mô tả tự do), nên ERP không tách được “đã trả cho ai”. Muốn có con số ấy thì mỗi lần trả phải ghi kèm khoá tài khoản người nhận.",
+  };
+}
 
 /** Bảng lương theo kỳ: lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân (thưởng chỉ tính khi số dương) */
 export async function getPayrollReport(
   period: Period,
   basis: PayrollBasis,
 ): Promise<PayrollReport> {
-  const [marketers, employees, cash] = await Promise.all([
+  const [marketers, employees, cash, paid] = await Promise.all([
     getMarketerReport(period, basis),
     listEmployees(),
     basis === "cash" ? getCashProfitReport(period) : Promise.resolve(null),
+    salaryPaidInPeriod(period),
   ]);
   const nominalTotal = marketers.nominal.totals.expectedProfit;
   const modelTotal = marketers.totals.profit;
@@ -675,6 +714,7 @@ export async function getPayrollReport(
     nominalTotal,
     cashRatio,
     cashRatioReason,
+    paid,
     lines,
     totalSalary: fixedBounded && lines.every((l) => l.salary !== null) ? lines.reduce((s, l) => s + (l.salary ?? 0), 0) : null,
     fixedBasis: {

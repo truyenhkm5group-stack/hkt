@@ -146,7 +146,7 @@ export default async function PayrollPage({
       ) : null}
       {viewAll ? <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} /> : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Lợi nhuận tổng kỳ"
           value={
@@ -168,6 +168,25 @@ export default async function PayrollPage({
           note={`${formatNumber(lines.length)} người · lương cứng ${fixedTotal === null ? "—" : formatVND(fixedTotal, { compact: true })} (${fixedNote})`}
           icon={HandCoins}
           tone="primary"
+        />
+        {/*
+          BA CON SỐ RIÊNG, KHÔNG GỘP: phải trả (phép tính trên kỳ làm việc) · đã trả (sự kiện tiền,
+          có ngày của riêng nó) · chênh lệch. Lương tháng 8 trả ngày 05/09 là tiền ra của tháng 9
+          nhưng là chi phí của tháng 8 — gộp lại là mất dấu một tháng lương.
+        */}
+        <MetricCard
+          label="Đã trả trong kỳ"
+          value={formatVND(report.paid.amount, { compact: true })}
+          note={
+            viewAll
+              ? `${formatNumber(report.paid.count)} khoản chi nhóm “Lương”, theo NGÀY PHÁT SINH · ${
+                  totalSalary === null ? "chưa so được với phải trả (một phần chưa biết)" : `phải trả ${formatVND(totalSalary, { compact: true })} · chênh ${formatVND(report.paid.amount - totalSalary, { compact: true })}`
+                } · toàn shop, KHÔNG tách được theo người`
+              : "Con số toàn shop — ERP chưa tách được tiền đã trả theo từng người."
+          }
+          hint={`Tiền lương THẬT SỰ ra khỏi túi trong kỳ: tổng khoản chi nhóm “Lương” ở bảng Chi phí, đọc theo NGÀY PHÁT SINH thô (không qua phép phân bổ theo kỳ). Đây là chiều khác hẳn “phải trả” — lương tháng 8 trả ngày 05/09 là tiền ra của tháng 9 nhưng là chi phí của tháng 8. ${report.paid.missingWhat}`}
+          icon={Banknote}
+          tone="slate"
         />
         <MetricCard
           label="Chi phí QC test"

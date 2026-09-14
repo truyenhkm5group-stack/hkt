@@ -241,6 +241,28 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(bangLuongCu.marketers.payrollCovered, false, "8. lùi nguồn thì bảng lương cũng phải biết là đang lùi");
   await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "PAYROLL" });
 
+  /* ══ TEST 9 — "PHẢI TRẢ" VÀ "ĐÃ TRẢ" LÀ HAI CHIỀU, KHÔNG ĐƯỢC GỘP ══
+   *
+   * `dc-exp-salary` là khoản chi 9.000.000đ ghi ngày 05/01/2027. Đó là TIỀN RA của tháng 1 — một
+   * sự kiện tiền có ngày của riêng nó — và nó KHÔNG phải "lương phải trả của tháng 1" (con số ấy
+   * là phép tính trên kỳ làm việc). Gộp hai thứ là cách làm mất dấu một tháng lương khi shop trả
+   * lương tháng trước vào tháng sau (AGENTS.md mục 17).
+   *
+   * Và nó phải đọc theo NGÀY PHÁT SINH THÔ: kỳ tháng 4/2027 không có khoản chi nào ⇒ đã trả = 0,
+   * dù lương cứng phải trả của tháng ấy vẫn là 9.000.000đ.
+   */
+  clearMemo();
+  const luongThang1 = await getPayrollReport(KY, "profit1");
+  assert.equal(luongThang1.paid.amount, 9_000_000, "9. đã trả tháng 1 = khoản chi nhóm Lương ghi trong tháng 1");
+  assert.equal(luongThang1.paid.count, 1, "9. và đếm đúng số chứng từ");
+  assert.equal(luongThang1.paid.perPerson, false, "9. KHÔNG được nhận là tách được theo người — chứng từ chi không mang khoá tài khoản");
+  assert.ok(luongThang1.paid.missingWhat.length > 20, "9. và phải nói CỤ THỂ thiếu gì thì mới tách được, không chỉ ghi 'chưa có'");
+
+  clearMemo();
+  const luongThang4 = await getPayrollReport(THANG30, "profit1");
+  assert.equal(luongThang4.paid.amount, 0, "9. tháng 4 không có chứng từ chi nào ⇒ ĐÃ TRẢ = 0 (đây là 0 THẬT, không phải chưa biết)");
+  assert.equal(luongThang4.lines.find((l) => l.employee.id === "dc-emp-1")?.fixed, 9_000_000, "9. nhưng PHẢI TRẢ của tháng 4 vẫn là trọn lương tháng — hai chiều đứng riêng");
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -260,6 +282,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều",
   );
 }
