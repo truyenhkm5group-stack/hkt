@@ -49,6 +49,8 @@ export const TIME_BASIS_QUESTION: Record<TimeBasis, string> = {
  * Vế thứ hai nhận cả `PENDING` và `CANCELLED`, nên "lấy hàng thất bại" và "shop huỷ lấy" cũng
  * được đóng dấu đã bàn giao — đo trên production ngày 13/09/2026 là 120 vận đơn.
  */
+import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/carrier-handoff";
+
 export { CARRIER_HANDOFF_AT_SQL, CARRIER_HANDOFF_BASIS_SQL, CARRIER_HANDOFF_STAGES, HANDOFF_BASIS_LABEL, HANDOFF_BASIS_HINT, type HandoffBasis } from "@/lib/constants/carrier-handoff";
 
 /**
@@ -62,3 +64,18 @@ export { CARRIER_HANDOFF_AT_SQL, CARRIER_HANDOFF_BASIS_SQL, CARRIER_HANDOFF_STAG
  * và báo cáo tháng này bỗng có thêm những ca đã đóng từ lâu.
  */
 export const FINAL_OUTCOME_AT_SQL = `coalesce("shipments"."delivered_at", "shipments"."returned_at", "shipments"."vtp_status_date")`;
+
+/**
+ * CỘT MỐC CỦA MỘT CÁCH LỌC, dạng chuỗi SQL thô — MỘT bản khai cho mọi báo cáo.
+ *
+ * Trước bản 14/09 hàm này được chép ở hai tệp truy vấn (`return-reason-report.ts` và
+ * `return-intelligence.ts`). Hai bản đang đồng ý với nhau, nhưng sửa một mốc là một lượt sửa hai
+ * chỗ — và `tests/duplicate-metrics.test.ts` bắt đúng lớp lỗi đó ở mức mã nguồn.
+ *
+ * Dùng TÊN BẢNG ĐẦY ĐỦ (`"orders"` / `"shipments"`) vì hai biểu thức mốc kia cũng vậy: một chuỗi
+ * SQL thô mang bí danh sẽ hỏng với "missing FROM-clause entry".
+ */
+export function timeBasisColumnSql(basis: TimeBasis): string {
+  if (basis === "ORDERED") return `"orders"."inserted_at"`;
+  return basis === "SHIPPED" ? CARRIER_HANDOFF_AT_SQL : FINAL_OUTCOME_AT_SQL;
+}

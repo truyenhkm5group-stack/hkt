@@ -1,15 +1,28 @@
 "use client";
 
-import { returnRateColumns } from "@/app/(dashboard)/reports/returns/columns";
+import { makeReturnRateColumns, type StateProb } from "@/app/(dashboard)/reports/returns/columns";
 import { DataTable } from "@/components/data-table/data-table";
 import { projectedRateOf } from "@/lib/constants/projected-delivery";
 import { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 import type { ReturnRateRow } from "@/lib/queries/return-rate";
 
-export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: ReturnRateRow[]; pageCount: number; total: number; baseQuery: string }) {
+export function ReturnRateTable({
+  rows,
+  pageCount,
+  total,
+  baseQuery,
+  probabilities,
+}: {
+  rows: ReturnRateRow[];
+  pageCount: number;
+  total: number;
+  baseQuery: string;
+  /** Bảng xác suất từng trạng thái, để ô "GTC ước tính" in ra được phép tính của chính nó. */
+  probabilities: StateProb[];
+}) {
   return (
     <DataTable
-      columns={returnRateColumns}
+      columns={makeReturnRateColumns(probabilities)}
       data={rows}
       pageCount={pageCount}
       total={total}
@@ -69,6 +82,12 @@ export function ReturnRateTable({ rows, pageCount, total, baseQuery }: { rows: R
             projectedDelivered,
             projectedActive,
             unmodelledActive,
+            // Cộng số đơn đang chạy của MỌI mẫu mã con theo từng trạng thái, để tooltip của dòng
+            // gộp nói đúng thứ nó đang gộp thay vì mượn breakdown của mẫu mã đầu tiên.
+            activeByState: rows.reduce<Record<string, number>>((acc, r) => {
+              for (const [k, n] of Object.entries(r.activeByState)) acc[k] = (acc[k] ?? 0) + (n ?? 0);
+              return acc;
+            }, {}),
           };
         },
       }}

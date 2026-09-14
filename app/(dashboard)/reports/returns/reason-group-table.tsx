@@ -1,12 +1,14 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, List } from "lucide-react";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
 import { RESCUE_STATE_LABEL } from "@/lib/constants/return-rescue";
 import type { ReasonGroupRow, ReasonDetailRow } from "@/lib/queries/return-reason-report";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
+import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,12 +49,61 @@ function RescueCell({ r, count, rescued }: { r: ReasonDetailRow["rescue"]; count
   );
 }
 
-export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; known: number }) {
+/**
+ * ═══ BỐN CHỈ SỐ KHÁC NHAU, BỐN CÁI TÊN KHÁC NHAU ═══
+ *
+ * Chủ shop chốt 14/09/2026 — và đây là chỗ dễ trộn nhất trong cả báo cáo:
+ *
+ *   SỐ ĐƠN        — tần suất thô của lý do.
+ *   TỶ TRỌNG      — ca của lý do ÷ ca hoàn ĐÃ BIẾT lý do. Cộng lại đúng 100%.
+ *   TRÊN ĐÃ GỬI   — ca của lý do ÷ TOÀN BỘ lô hàng đã bàn giao ĐVVC. Đây mới là con số trả lời
+ *                   "cứ 100 kiện gửi đi thì bao nhiêu hỏng vì lý do này".
+ *   TỶ LỆ CỨU     — chỉ áp cho ca ĐÃ ĐƯỢC CHĂM SÓC trước khi ngã ngũ. KHÔNG phải một chỉ số về lý do.
+ *
+ * Hai cột giữa hay bị gọi lẫn: "vải xấu 40%" (tỷ trọng) và "vải xấu 9%" (trên đã gửi) là cùng một
+ * hiện tượng. Dùng nhầm cột đầu để nói về quy mô là phóng đại hơn bốn lần.
+ */
+export function ReasonGroupTable({
+  groups,
+  known,
+  eligibleSent,
+  drilldownHref,
+}: {
+  groups: ReasonGroupRow[];
+  known: number;
+  /** Mẫu số của cột "trên đã gửi". 0 ⇒ cột đó in "—", không in 0%. */
+  eligibleSent: number;
+  /** Dựng đường mở danh sách vận đơn của một lý do, GIỮ NGUYÊN mọi bộ lọc đang bật. */
+  drilldownHref: (reason: string) => string;
+}) {
   const [mo, setMo] = useState<Record<string, boolean>>({});
+  /*
+    DÒNG 0 ĐƠN BỊ GẤP MẶC ĐỊNH, KHÔNG BỊ XOÁ.
+
+    Bảng 40 dòng mà 30 dòng bằng 0 là bảng không ai đọc hết. Nhưng xoá hẳn chúng thì mất đúng cái
+    thông tin quý nhất: lý do `needsHuman` bằng 0 nghĩa là CHƯA AI GHI, không phải không có ca nào.
+    Nên: gấp lại, và có nút mở ra để rà soát sổ phân loại.
+  */
+  const [hienSoKhong, setHienSoKhong] = useState(false);
   const tong = groups.reduce((n, g) => n + g.count, 0);
   const tongCuu = groups.reduce((n, g) => n + g.rescued, 0);
+  const tongMat = groups.reduce((n, g) => n + g.lostRevenue, 0);
+  const soDongKhong = groups.reduce((n, g) => n + g.details.filter((d) => d.count === 0).length, 0);
 
   return (
+    <>
+      {soDongKhong ? (
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setHienSoKhong((v) => !v)}
+            className="rounded-md border border-hairline px-2 py-1 text-[11.5px] text-muted-foreground hover:bg-muted"
+            title="Lý do 0 đơn được gấp lại cho bảng đọc được. Mở ra khi cần rà soát SỔ PHÂN LOẠI: lý do máy không đọc được mà bằng 0 nghĩa là chưa ai ghi, không phải không có ca nào."
+          >
+            {hienSoKhong ? "Ẩn" : "Hiện"} {soDongKhong} lý do 0 đơn
+          </button>
+        </div>
+      ) : null}
     <div className={TABLE_SCROLL}>
       <table className="w-full min-w-[760px] text-sm">
         <thead className={cn(STICKY_HEAD, "border-b text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
@@ -75,8 +126,15 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
               Tỷ lệ cứu đơn
             </th>
             <th className="px-3 py-2 text-right font-semibold" title="Số đơn của lý do ÷ tổng đơn hoàn ĐÃ XÁC ĐỊNH ĐƯỢC LÝ DO. Cộng lại đúng 100%. Phần chưa ai hỏi được báo riêng ở khối độ phủ phía trên.">
-              Tỷ trọng
+              Tỷ trọng trên hoàn
             </th>
+            <th className="px-3 py-2 text-right font-semibold" title="Số đơn của lý do ÷ TOÀN BỘ lô hàng đã bàn giao ĐVVC trong kỳ. Khác hẳn cột bên trái: đây là quy mô thật của lý do trên cả lô hàng, không phải tỷ trọng trong nhóm đã biết.">
+              Tỷ lệ trên đã gửi
+            </th>
+            <th className="px-3 py-2 text-right font-semibold" title="Tổng giá trị đơn của các ca mang lý do này. Doanh thu ĐÃ MẤT, không phải doanh thu treo.">
+              Doanh thu mất
+            </th>
+            <th className="px-3 py-2 text-right font-semibold" />
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -92,6 +150,9 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
               <RescueCell r={{ value: tong + tongCuu ? (tongCuu / (tong + tongCuu)) * 100 : null, state: tongCuu > 0 ? "MEASURED" : tong > 0 ? "NOT_TRACKED" : "NO_CASES" }} count={tong} rescued={tongCuu} />
             </td>
             <td className="px-3 py-2 text-right tabular-nums">{known ? "100%" : "—"}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{eligibleSent ? formatPercent((tong / eligibleSent) * 100) : "—"}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{formatVND(tongMat, { compact: true })}</td>
+            <td className="px-3 py-2" />
           </tr>
 
           {groups.map((g) => {
@@ -112,10 +173,15 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
                     <RescueCell r={g.rescue} count={g.count} rescued={g.rescued} />
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatPercent(g.share)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" title={eligibleSent ? `${g.count} ÷ ${eligibleSent} kiện đã gửi` : undefined}>
+                    {g.incidence === null ? "—" : formatPercent(g.incidence)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{formatVND(g.lostRevenue, { compact: true })}</td>
+                  <td className="px-3 py-1.5" />
                 </tr>
 
                 {xo
-                  ? g.details.map((d) => (
+                  ? g.details.filter((d) => hienSoKhong || d.count > 0).map((d) => (
                       <tr key={`${g.group}-${d.reason}`} className={cn("text-[13px]", d.count === 0 && "text-muted-foreground")}>
                         <td className="px-3 py-1" />
                         <td className="px-3 py-1 pl-8">
@@ -141,6 +207,17 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
                         <td className="px-3 py-1 text-right tabular-nums" title={d.count ? `${d.count} ÷ ${known} đơn đã biết lý do = ${formatPercent(d.share)}` : undefined}>
                           {formatPercent(d.share)}
                         </td>
+                        <td className="px-3 py-1 text-right tabular-nums" title={d.count && eligibleSent ? `${d.count} ÷ ${eligibleSent} kiện đã gửi = ${formatPercent(d.incidence)}` : undefined}>
+                          {d.incidence === null ? "—" : formatPercent(d.incidence)}
+                        </td>
+                        <td className="px-3 py-1 text-right tabular-nums">{d.lostRevenue ? formatVND(d.lostRevenue, { compact: true }) : "—"}</td>
+                        <td className="px-3 py-1 text-right">
+                          {d.count ? (
+                            <Link href={drilldownHref(d.reason)} className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline" title="Mở danh sách vận đơn của đúng lý do này, giữ nguyên mọi bộ lọc đang bật.">
+                              <List className="size-3" /> {formatNumber(d.count)} vận đơn
+                            </Link>
+                          ) : null}
+                        </td>
                       </tr>
                     ))
                   : null}
@@ -150,5 +227,6 @@ export function ReasonGroupTable({ groups, known }: { groups: ReasonGroupRow[]; 
         </tbody>
       </table>
     </div>
+    </>
   );
 }

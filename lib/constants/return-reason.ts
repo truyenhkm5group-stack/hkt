@@ -358,6 +358,24 @@ export const RETURN_REASON_TEXT_RULES: { match: string; reason: ReturnReason }[]
   { match: "khong lien lac", reason: "CUSTOMER_UNREACHABLE" },
   { match: "khach hang den buu cuc nhan", reason: "CUSTOMER_RESCHEDULE_FAILED" },
   { match: "hen phat lai", reason: "CUSTOMER_RESCHEDULE_FAILED" },
+  /*
+    ─── MỘT CÁM DỖ ĐÃ THỬ VÀ ĐÃ BỊ CHẶN, GHI LẠI ĐỂ KHÔNG AI THỬ LẠI ───
+
+    Đo trên production 14/09/2026, sự kiện của đơn hoàn có hai chuỗi mang tín hiệu rất hấp dẫn:
+      · "Khách từ chối nhận - Không hài lòng về sản phẩm"  ~24 kiện
+      · "Khách từ chối nhận - Sai thông tin đơn hàng"     ~150 kiện
+
+    Bản nháp của phiên 14/09 thêm hai luật đọc chữ để đưa chúng về `QUALITY_POOR` và
+    `SALES_CONFIRMED_WRONG`. `tests/kpi-clarity.test.ts` đỏ ngay, và bài kiểm ĐÚNG: hai lý do đó
+    nằm trong nhóm CHỈ NGƯỜI MỚI BIẾT. Một bưu tá gõ "không hài lòng" vào máy không phải là shop
+    đã xác minh vải xấu — và một khi con số ấy vào cột "Chất lượng kém", nó trông y hệt một ca đã
+    có người gọi cho khách.
+
+    Nên cả hai vẫn là `CUSTOMER_REFUSED` (khách từ chối — một QUAN SÁT, không phải một kết luận),
+    và chuỗi gốc vẫn hiện nguyên văn ở cột "Căn cứ lý do" của bảng chi tiết để người xử lý đọc rồi
+    XÁC NHẬN. Đường tăng độ phủ lý do đi qua `shipment_return_reasons` — bảng đó đang RỖNG trên
+    production, và đó mới là việc phải làm.
+  */
   { match: "tu choi", reason: "CUSTOMER_REFUSED" },
   { match: "khong cho xem hang", reason: "CUSTOMER_REFUSED" },
   { match: "khong co nhu cau", reason: "CUSTOMER_CHANGED_MIND" },

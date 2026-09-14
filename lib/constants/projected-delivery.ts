@@ -75,19 +75,80 @@ export const CONFIDENCE_TONE: Record<ProbabilityConfidence, string> = {
 };
 
 /**
+ * ═══════════ TUỔI KIỆN LÀ MỘT CHIỀU RIÊNG, KHÔNG PHẢI MỘT CHI TIẾT ═══════════
+ *
+ * Hai kiện cùng mang trạng thái "Chờ xử lý" nhưng một cái mới 6 giờ còn một cái đã 9 ngày KHÔNG có
+ * cùng triển vọng. Gộp chúng vào một xác suất là để kiện mới kéo kiện treo lên, và kiện treo kéo
+ * kiện mới xuống — con số ra đúng trung bình và sai cho cả hai.
+ *
+ * Ranh giới lấy theo chính nhịp giao hàng đo được trên production (13/09/2026, "ĐVVC nhận → kết cục
+ * cuối"): giao được p50 2,8 ngày · p95 5,7 ngày; hoàn p50 7,0 ngày · p95 13,1 ngày. Nghĩa là qua
+ * mốc 72 giờ mà chưa tới tay khách thì kiện đã rời khỏi vùng "bình thường" của đơn giao được.
+ */
+export const AGE_BUCKETS = [
+  { key: "H0_24", label: "< 24h", fromHours: 0, toHours: 24 },
+  { key: "H24_48", label: "24–48h", fromHours: 24, toHours: 48 },
+  { key: "H48_72", label: "48–72h", fromHours: 48, toHours: 72 },
+  { key: "H72_PLUS", label: "> 72h", fromHours: 72, toHours: Number.POSITIVE_INFINITY },
+] as const;
+export type AgeBucket = (typeof AGE_BUCKETS)[number]["key"];
+
+export const AGE_BUCKET_LABEL: Record<AgeBucket, string> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, b.label])) as Record<AgeBucket, string>;
+
+/** Tuổi (giờ) → rổ. Tuổi âm (mốc bàn giao muộn hơn mốc quan sát) rơi vào rổ đầu — không có rổ "âm". */
+export function ageBucketOf(hours: number): AgeBucket {
+  for (const b of AGE_BUCKETS) if (hours < b.toHours) return b.key;
+  return "H72_PLUS";
+}
+
+/**
+ * MỐC CHỤP ẢNH KHI HUẤN LUYỆN — mỗi rổ tuổi một mốc đại diện, cộng thêm ba mốc cho rổ cuối vì rổ
+ * đó mở tới vô hạn và là chỗ mọi kiện treo nằm lại.
+ *
+ * Vì sao phải chụp ảnh chứ không đọc "kiện từng đi qua trạng thái nào": mô hình được DÙNG để trả
+ * lời "kiện đang ở trạng thái s, tuổi a — bao nhiêu phần trăm tới được tay khách". Học từ "từng đi
+ * qua s" là học một câu hỏi khác, và bài thử ngược (vốn đã chấm bằng ảnh chụp) sẽ đo lệch chính
+ * thứ nó đang chấm.
+ */
+export const TRAINING_SNAPSHOT_OFFSETS_HOURS = [12, 36, 60, 96, 144, 240] as const;
+
+/**
  * THỨ TỰ LÙI KHI MẪU KHÔNG ĐỦ — hẹp trước, rộng sau, và cuối cùng là THỪA NHẬN KHÔNG BIẾT.
  *
  * Cố ý KHÔNG có bậc nào trả về một con số mặc định. Hết bậc thì kết quả là `null`, và màn hình in
  * "chưa đo được" — khác hẳn 0% (đã đo và bằng không) và khác hẳn một con số đoán trông như đã đo.
+ *
+ * ─── VÌ SAO KHÔNG CÓ BẬC "DÒNG SẢN PHẨM" ───
+ *
+ * Chủ shop gọi hàng bằng `products.custom_id` (`Q001`…`X001`) và mỗi mã đã là MỘT dòng sản phẩm
+ * với 15–20 mẫu mã bên dưới. Dựng thêm một tầng "họ sản phẩm" phía trên sáu mã hiện có là dựng một
+ * tầng có đúng một phần tử — nó không thêm mẫu, chỉ thêm một cái tên.
+ *
+ * Kiện thuộc NHIỀU mã hàng không được điều kiện hoá theo mã: không có gì trong dữ liệu nói mã nào
+ * quyết định kết cục, nên nó đi thẳng xuống bậc toàn shop thay vì được đếm hai lần ở hai mã.
  */
-export const PROBABILITY_FALLBACK = ["PRODUCT_STATE", "GLOBAL_STATE", "NONE"] as const;
+export const PROBABILITY_FALLBACK = ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "GLOBAL_STATE_AGE", "GLOBAL_STATE", "NONE"] as const;
 export type ProbabilityBasis = (typeof PROBABILITY_FALLBACK)[number];
 
 export const BASIS_LABEL: Record<ProbabilityBasis, string> = {
+  PRODUCT_STATE_AGE: "theo mã hàng + trạng thái + tuổi kiện",
   PRODUCT_STATE: "theo mã hàng + trạng thái",
+  GLOBAL_STATE_AGE: "theo trạng thái + tuổi kiện (toàn shop)",
   GLOBAL_STATE: "theo trạng thái (toàn shop)",
   NONE: "chưa đo được",
 };
+
+/**
+ * CỠ MẪU TỐI THIỂU CỦA MỘT Ô ĐIỀU KIỆN HOÁ.
+ *
+ * Bằng `CONFIDENCE_THRESHOLDS.LOW` — đúng ngưỡng mà dưới nó một kiện đổi kết cục làm tỷ lệ nhảy
+ * hơn 10 điểm. Một ô 6 quan sát vẫn cho ra "66,7%", và con số đó in ra trông y hệt một con số đo
+ * từ 600 quan sát; bậc lùi tồn tại để chuyện đó không xảy ra.
+ *
+ * Sửa số này là đổi mô hình: phải chạy lại `scripts/bench/projection-backtest.ts` và chép số đo
+ * (MAE · bias · độ phủ) vào chú thích, không được đổi bằng cảm giác.
+ */
+export const MIN_CELL_SAMPLE = CONFIDENCE_THRESHOLDS.LOW;
 
 /**
  * TRẠNG THÁI ĐƯỢC PHÉP DỰ BÁO — chỉ những trạng thái mà một đơn ĐANG GIAO (`ORDER_OUTCOME =

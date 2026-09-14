@@ -3,17 +3,22 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import {
+  AGE_BUCKET_LABEL,
+  ageBucketOf,
   BACKTEST_MONTHS,
   BACKTEST_SNAPSHOT_OFFSETS_DAYS,
   backtestConfidenceOf,
   confidenceOf,
   isModelledSubstate,
+  MIN_CELL_SAMPLE,
   MODELLED_SUBSTATES,
   NOT_SHIPPED_STATE,
   PROJECTED_GTC_VERSION,
   projectedRateOf,
   summarizeBacktest,
+  TRAINING_SNAPSHOT_OFFSETS_HOURS,
   TRAINING_WINDOW,
+  type AgeBucket,
   type BacktestStats,
   type ProbabilityBasis,
   type ProbabilityConfidence,
@@ -62,7 +67,7 @@ function kienDaKetThuc(dk: SQL[]): SQL {
 
 /* ═══════════════════ KHO DỮ LIỆU HỌC: TẢI MỘT LẦN, DÙNG CHO MỌI MỐC CẮT ═══════════════════ */
 
-type LabelledShipment = { id: string; outcome: string; handoffAt: Date; finalAt: Date | null };
+type LabelledShipment = { id: string; outcome: string; handoffAt: Date; finalAt: Date | null; productCode: string | null };
 type CarrierEventLite = { at: Date; con: string };
 type Corpus = {
   loadedAt: Date;
@@ -106,7 +111,7 @@ async function taiKho(): Promise<Corpus> {
     for (const r of kien) {
       const handoffAt = toDate(r.handoff_at);
       if (!handoffAt) continue;
-      shipments.push({ id: r.id, outcome: r.outcome, handoffAt, finalAt: toDate(r.final_at) });
+      shipments.push({ id: r.id, outcome: r.outcome, handoffAt, finalAt: toDate(r.final_at), productCode: null });
     }
     const events = new Map<string, CarrierEventLite[]>();
     const ids = shipments.map((s) => s.id);
@@ -129,6 +134,31 @@ async function taiKho(): Promise<Corpus> {
         events.set(r.shipment_id, list);
       }
     }
+    /*
+      MÃ HÀNG CỦA KIỆN — chỉ khi kiện thuộc ĐÚNG MỘT mã.
+
+      Kiện hai mã thì không có gì trong dữ liệu nói mã nào quyết định kết cục; đếm nó vào cả hai ô
+      điều kiện hoá là nhân đôi một quan sát, còn chọn bừa một mã là bịa. Nó xuống bậc toàn shop.
+    */
+    const maTheoKien = new Map<string, string>();
+    for (let i = 0; i < ids.length; i += EVENT_ID_CHUNK) {
+      const chunk = ids.slice(i, i + EVENT_ID_CHUNK);
+      const rows = rowsOf<{ shipment_id: string; code: string | null }>(
+        await db.execute(sql`
+          select s.id as shipment_id,
+                 case when count(distinct p.custom_id) = 1 then min(p.custom_id) else null end as code
+            from shipments s
+            join order_items oi on oi.order_id = s.order_id and oi.is_bonus = false
+            join product_variants pv on pv.id = oi.variant_id
+            join products p on p.id = pv.product_id and coalesce(p.custom_id, '') <> ''
+           where s.id in (${sql.join(chunk.map((id) => sql`${id}`), sql`, `)})
+           group by s.id
+        `),
+      );
+      for (const r of rows) if (r.code) maTheoKien.set(r.shipment_id, r.code);
+    }
+    for (const k of shipments) k.productCode = maTheoKien.get(k.id) ?? null;
+
     const donRows = rowsOf<{ inserted_at: unknown; outcome: string }>(
       await db.execute(sql`
         select k.inserted_at, k.outcome
@@ -207,7 +237,7 @@ function doCuaSoChin(kho: Corpus, cutoff: Date | null): MaturityWindow {
 export type StateProbability = {
   substate: ProjectedState;
   label: string;
-  /** Số vận đơn TỪNG ở trạng thái này và ĐÃ có kết cục cuối (theo ORDER_OUTCOME). */
+  /** Số vận đơn ĐÃ CÓ KẾT CỤC được quan sát đang ở trạng thái này tại ít nhất một mốc chụp ảnh. */
   sample: number;
   delivered: number;
   /** `null` khi mẫu bằng 0 — CHƯA ĐO ĐƯỢC, không phải 0%. */
@@ -215,50 +245,132 @@ export type StateProbability = {
   confidence: ProbabilityConfidence;
 };
 
+/** Một Ô ĐIỀU KIỆN HOÁ của mô hình: bậc nào, khoá nào, và nó học từ bao nhiêu quan sát. */
+export type ProbabilityCell = {
+  basis: ProbabilityBasis;
+  substate: ProjectedState;
+  productCode: string | null;
+  age: AgeBucket | null;
+  sample: number;
+  delivered: number;
+  p: number | null;
+  confidence: ProbabilityConfidence;
+};
+
 export type StateProbabilities = {
   version: string;
   states: StateProbability[];
+  /** Mọi ô của bốn bậc — bậc hẹp dùng trước, và màn hình đọc được ô nào đang đỡ con số nào. */
+  cells: ProbabilityCell[];
   /** P(giao thành công │ đơn chốt nhưng chưa gửi) — chỉ dùng cho doanh thu cohort theo ngày chốt. */
   notShipped: StateProbability;
   totalSample: number;
   window: MaturityWindow;
 };
 
+/** Khoá của một ô. `null` in ra thành chuỗi rỗng — hai khoá khác bậc không bao giờ trùng nhau. */
+function khoaO(basis: ProbabilityBasis, substate: string, productCode: string | null, age: AgeBucket | null): string {
+  return `${basis}|${substate}|${productCode ?? ""}|${age ?? ""}`;
+}
+
 /**
- * ─── VÌ SAO `distinct` LÀ PHẦN QUAN TRỌNG NHẤT CỦA CÂU LỆNH NÀY ───
+ * TRẠNG THÁI CỦA MỘT KIỆN TẠI MỘT MỐC THỜI GIAN = sự kiện ĐVVC MỚI NHẤT có `occurred_at ≤ t`.
  *
- * Một vận đơn "chờ phát lại" có thể sinh năm sự kiện: Viettel Post thử lại webhook tới 5 lần, và
- * ERP cũng nhận cùng trạng thái qua cả tra API lẫn nhập tệp. Đếm theo SỰ KIỆN nghĩa là để số lần
- * thử lại quyết định xác suất. Mỗi kiện gom trạng thái vào một `Set` — đúng vai của `distinct` cũ.
+ * `cutoff` (thử ngược): chỉ được nhìn sự kiện đã tồn tại trước mốc ấy, như thể đang đứng ở ngày đó.
+ * Danh sách sự kiện đã sắp tăng dần nên vòng lặp dừng ngay khi vượt `t`.
+ */
+function trangThaiTaiMoc(suKien: readonly CarrierEventLite[], t: Date, cutoff: Date | null): string | null {
+  let con: string | null = null;
+  for (const e of suKien) {
+    if (e.at > t) break;
+    if (cutoff && !(e.at < cutoff)) continue;
+    con = e.con;
+  }
+  return con;
+}
+
+type OAcc = { mau: number; giao: number };
+
+/**
+ * ═══════════ HỌC BẰNG ẢNH CHỤP, ĐÚNG CÂU HỎI MÔ HÌNH SẼ ĐƯỢC HỎI ═══════════
  *
- * ─── NHÃN LÀ `ORDER_OUTCOME`, KHÔNG PHẢI `stage` ───
+ * ─── BẢN TRƯỚC HỌC MỘT CÂU HỎI KHÁC ───
  *
- * Bản V2 gán nhãn "giao được" = `stage = 'DELIVERED'` và "đã kết thúc" = `stage in (DELIVERED,
- * RETURNED)`. Hai lỗi đo được: (1) kiện 501 chiều hoàn / thu 30.000đ / thu 50K–100K là ĐƠN HOÀN theo
- * luật nhưng được dạy cho mô hình là "giao được"; (2) kiện 503 tiêu huỷ có `stage = CANCELLED` nên
- * biến mất khỏi mẫu số — mô hình không bao giờ thấy chúng hỏng. Nay nhãn đọc thẳng `ORDER_OUTCOME`.
+ * V3 bản đầu học từ "kiện TỪNG đi qua trạng thái s" — gom mọi trạng thái của cả vòng đời vào một
+ * `Set` rồi đếm. Nhưng mô hình được DÙNG để trả lời "kiện đang ở s LÚC NÀY thì bao nhiêu phần trăm
+ * tới được tay khách", và bài thử ngược cũng chấm bằng ảnh chụp. Học một câu, chấm một câu khác.
+ *
+ * Nay huấn luyện dùng CHÍNH cấu trúc ảnh chụp của bài thử ngược: với mỗi kiện đã có kết cục, chụp
+ * ở các mốc `TRAINING_SNAPSHOT_OFFSETS_HOURS` sau khi ĐVVC nhận; trạng thái tại mốc là sự kiện mới
+ * nhất trước đó. Ảnh chụp sau khi kiện đã ngã ngũ bị bỏ — lúc ấy không còn gì để dự báo.
+ *
+ * ─── MỘT KIỆN KHÔNG BAO GIỜ ĐƯỢC ĐẾM HAI LẦN TRONG CÙNG MỘT Ô ───
+ *
+ * Webhook Viettel Post thử lại tới 5 lần và ERP còn nhận cùng trạng thái qua tra API lẫn tệp nhập.
+ * Mỗi ô giữ một `Set` khoá kiện: một kiện góp ĐÚNG MỘT quan sát cho mỗi ô, dù bao nhiêu sự kiện
+ * hay bao nhiêu mốc rơi vào cùng ô đó.
+ *
+ * ─── BỐN BẬC, SINH TRONG CÙNG MỘT VÒNG ───
+ *
+ * `PRODUCT_STATE_AGE` · `PRODUCT_STATE` · `GLOBAL_STATE_AGE` · `GLOBAL_STATE`. Bậc mã hàng chỉ nhận
+ * kiện thuộc ĐÚNG MỘT mã (xem `taiKho`). Bậc nào dưới `MIN_CELL_SAMPLE` quan sát thì không được
+ * dùng và người gọi tự lùi xuống bậc rộng hơn.
  */
 function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
   const window = doCuaSoChin(kho, cutoff);
-  const theoCon = new Map<string, { mau: number; giao: number }>();
+  const o = new Map<string, OAcc>();
+  const daDem = new Map<string, Set<string>>();
+
+  const ghi = (basis: ProbabilityBasis, substate: string, code: string | null, age: AgeBucket | null, kienId: string, giao: boolean) => {
+    const k = khoaO(basis, substate, code, age);
+    const set = daDem.get(k) ?? new Set<string>();
+    if (set.has(kienId)) return;
+    set.add(kienId);
+    daDem.set(k, set);
+    const cur = o.get(k) ?? { mau: 0, giao: 0 };
+    cur.mau += 1;
+    if (giao) cur.giao += 1;
+    o.set(k, cur);
+  };
+
   for (const k of kho.shipments) {
     if (k.handoffAt < window.trainedFrom || k.handoffAt > window.trainedUntil) continue;
     if (!FINISHED_SET.has(k.outcome)) continue;
     if (cutoff && !(k.finalAt && k.finalAt < cutoff)) continue;
-    // MỘT vận đơn × MỘT trạng thái = MỘT quan sát, bất kể bao nhiêu sự kiện.
-    const cons = new Set<string>();
-    for (const e of kho.events.get(k.id) ?? []) {
-      if (cutoff && !(e.at < cutoff)) continue;
-      cons.add(e.con);
-    }
-    for (const con of cons) {
-      const cur = theoCon.get(con) ?? { mau: 0, giao: 0 };
-      cur.mau += 1;
-      if (k.outcome === "DELIVERED") cur.giao += 1;
-      theoCon.set(con, cur);
+    const suKien = kho.events.get(k.id) ?? [];
+    const giao = k.outcome === "DELIVERED";
+    for (const gio of TRAINING_SNAPSHOT_OFFSETS_HOURS) {
+      const t = new Date(k.handoffAt.getTime() + gio * 3_600_000);
+      // Đã ngã ngũ trước mốc ⇒ không còn gì để dự báo. Ngoài tầm nhìn của lượt thử ngược ⇒ bỏ.
+      if (k.finalAt !== null && !(t < k.finalAt)) continue;
+      if (cutoff && !(t < cutoff)) continue;
+      const con = trangThaiTaiMoc(suKien, t, cutoff);
+      if (!con || !isModelledSubstate(con)) continue;
+      const age = ageBucketOf(gio);
+      ghi("GLOBAL_STATE", con, null, null, k.id, giao);
+      ghi("GLOBAL_STATE_AGE", con, null, age, k.id, giao);
+      if (k.productCode) {
+        ghi("PRODUCT_STATE", con, k.productCode, null, k.id, giao);
+        ghi("PRODUCT_STATE_AGE", con, k.productCode, age, k.id, giao);
+      }
     }
   }
-  const dong = (substate: ProjectedState, label: string, r: { mau: number; giao: number }): StateProbability => ({
+
+  const cells: ProbabilityCell[] = [...o.entries()].map(([key, r]) => {
+    const [basis, substate, code, age] = key.split("|");
+    return {
+      basis: basis as ProbabilityBasis,
+      substate: substate as ProjectedState,
+      productCode: code || null,
+      age: (age || null) as AgeBucket | null,
+      sample: r.mau,
+      delivered: r.giao,
+      p: r.mau > 0 ? r.giao / r.mau : null,
+      confidence: confidenceOf(r.mau),
+    };
+  });
+
+  const dong = (substate: ProjectedState, label: string, r: OAcc): StateProbability => ({
     substate,
     label,
     sample: r.mau,
@@ -266,7 +378,7 @@ function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
     p: r.mau > 0 ? r.giao / r.mau : null,
     confidence: confidenceOf(r.mau),
   });
-  const states = MODELLED_SUBSTATES.map((k) => dong(k, CARRIER_SUBSTATE_LABEL[k], theoCon.get(k) ?? { mau: 0, giao: 0 }));
+  const states = MODELLED_SUBSTATES.map((s) => dong(s, CARRIER_SUBSTATE_LABEL[s], o.get(khoaO("GLOBAL_STATE", s, null, null)) ?? { mau: 0, giao: 0 }));
 
   /*
     ĐƠN CHƯA GỬI: học từ đơn CHỐT trong cửa sổ và đã kết thúc, KỂ CẢ HUỶ — vì đơn chưa gửi vẫn có
@@ -274,13 +386,13 @@ function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
   */
   let nsMau = 0;
   let nsGiao = 0;
-  for (const o of kho.orders) {
-    if (o.insertedAt < window.trainedFrom || o.insertedAt > window.trainedUntil) continue;
+  for (const don of kho.orders) {
+    if (don.insertedAt < window.trainedFrom || don.insertedAt > window.trainedUntil) continue;
     nsMau += 1;
-    if (o.outcome === "DELIVERED") nsGiao += 1;
+    if (don.outcome === "DELIVERED") nsGiao += 1;
   }
   const notShipped = dong(NOT_SHIPPED_STATE, "Chưa gửi ĐVVC", { mau: nsMau, giao: nsGiao });
-  return { version: PROJECTED_GTC_VERSION, states, notShipped, totalSample: states.reduce((a, s) => a + s.sample, 0), window };
+  return { version: PROJECTED_GTC_VERSION, states, cells, notShipped, totalSample: states.reduce((a, s) => a + s.sample, 0), window };
 }
 
 const FINISHED_SET = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE"]);
@@ -289,33 +401,72 @@ export async function getStateDeliveryProbabilities(): Promise<StateProbabilitie
   return memo(`state-delivery-prob:${PROJECTED_GTC_VERSION}`, 600_000, async () => hocXacSuat(await taiKho(), null));
 }
 
+/** Bối cảnh của một đơn đang chạy, để chọn ô điều kiện hoá hẹp nhất còn đủ mẫu. */
+export type ProbabilityContext = {
+  /** Mã hàng, chỉ khi đơn thuộc ĐÚNG MỘT mã. `null` ⇒ bỏ qua hai bậc theo mã. */
+  productCode?: string | null;
+  /** Tuổi kiện (giờ) tính từ mốc ĐVVC nhận. `null` ⇒ bỏ qua hai bậc theo tuổi. */
+  ageHours?: number | null;
+};
+
+export type ProbabilityHit = { p: number | null; basis: ProbabilityBasis; confidence: ProbabilityConfidence; sample: number };
+
 export type ProbabilityLookup = {
   version: string;
-  /** Xác suất cho một trạng thái, kèm căn cứ và độ tin cậy. `p === null` ⇒ CHƯA ĐO ĐƯỢC. */
-  of: (state: string) => { p: number | null; basis: ProbabilityBasis; confidence: ProbabilityConfidence; sample: number };
+  /** Xác suất cho một trạng thái trong một bối cảnh. `p === null` ⇒ CHƯA ĐO ĐƯỢC. */
+  of: (state: string, ctx?: ProbabilityContext) => ProbabilityHit;
   states: StateProbability[];
+  cells: ProbabilityCell[];
   notShipped: StateProbability;
   window: MaturityWindow;
 };
 
 function dungBangTra(bang: StateProbabilities): ProbabilityLookup {
-  const theo = new Map<string, StateProbability>(bang.states.map((s) => [s.substate, s]));
-  theo.set(NOT_SHIPPED_STATE, bang.notShipped);
+  const theoO = new Map<string, ProbabilityCell>();
+  for (const c of bang.cells) theoO.set(khoaO(c.basis, c.substate, c.productCode, c.age), c);
+
+  const chuaDoDuoc = (sample: number, confidence: ProbabilityConfidence): ProbabilityHit => ({ p: null, basis: "NONE", confidence, sample });
+
   return {
     version: bang.version,
     states: bang.states,
+    cells: bang.cells,
     notShipped: bang.notShipped,
     window: bang.window,
-    of: (state) => {
-      const s = theo.get(state);
-      if (!s || s.p === null || s.confidence === "INSUFFICIENT_DATA") {
-        /*
-          TRẢ `null`, KHÔNG trả con số thô. Mẫu 3 kiện vẫn có một tỷ lệ (2/3) — nhưng một con số đoán
-          in ra trông Y HỆT một con số đo được. `sample` vẫn trả về để màn hình nói "mới 3 ca".
-        */
-        return { p: null, basis: "NONE", confidence: s?.confidence ?? "INSUFFICIENT_DATA", sample: s?.sample ?? 0 };
+    of: (state, ctx) => {
+      /*
+        ĐƠN CHƯA GỬI không có trạng thái ĐVVC và cũng không có tuổi kiện — nó nằm ngoài mọi bậc điều
+        kiện hoá và đọc thẳng ô riêng của nó.
+      */
+      if (state === NOT_SHIPPED_STATE) {
+        const ns = bang.notShipped;
+        if (ns.p === null || ns.confidence === "INSUFFICIENT_DATA") return chuaDoDuoc(ns.sample, ns.confidence);
+        return { p: ns.p, basis: "GLOBAL_STATE", confidence: ns.confidence, sample: ns.sample };
       }
-      return { p: s.p, basis: "GLOBAL_STATE", confidence: s.confidence, sample: s.sample };
+
+      const code = ctx?.productCode ?? null;
+      const age = typeof ctx?.ageHours === "number" && Number.isFinite(ctx.ageHours) ? ageBucketOf(ctx.ageHours) : null;
+
+      /*
+        HẸP TRƯỚC, RỘNG SAU — và ô nào dưới `MIN_CELL_SAMPLE` quan sát thì KHÔNG được dùng, kể cả
+        khi nó có một tỷ lệ trông rất hợp lý. Mẫu 3 kiện vẫn ra "66,7%", và con số đó in ra trông y
+        hệt một con số đo từ 600 quan sát.
+      */
+      const bacs: { basis: ProbabilityBasis; key: string }[] = [];
+      if (code && age) bacs.push({ basis: "PRODUCT_STATE_AGE", key: khoaO("PRODUCT_STATE_AGE", state, code, age) });
+      if (code) bacs.push({ basis: "PRODUCT_STATE", key: khoaO("PRODUCT_STATE", state, code, null) });
+      if (age) bacs.push({ basis: "GLOBAL_STATE_AGE", key: khoaO("GLOBAL_STATE_AGE", state, null, age) });
+      bacs.push({ basis: "GLOBAL_STATE", key: khoaO("GLOBAL_STATE", state, null, null) });
+
+      let rong: ProbabilityCell | undefined;
+      for (const b of bacs) {
+        const c = theoO.get(b.key);
+        if (b.basis === "GLOBAL_STATE") rong = c;
+        if (!c || c.p === null || c.sample < MIN_CELL_SAMPLE) continue;
+        return { p: c.p, basis: b.basis, confidence: c.confidence, sample: c.sample };
+      }
+      // Hết bậc: trả `null` kèm cỡ mẫu của bậc rộng nhất, để màn hình nói được "mới N ca".
+      return chuaDoDuoc(rong?.sample ?? 0, rong?.confidence ?? "INSUFFICIENT_DATA");
     },
   };
 }
@@ -327,6 +478,9 @@ function dungBangTra(bang: StateProbabilities): ProbabilityLookup {
 export async function getProbabilityLookup(): Promise<ProbabilityLookup> {
   return dungBangTra(await getStateDeliveryProbabilities());
 }
+
+/** Nhãn rổ tuổi — để màn hình in "mã hàng + trạng thái + < 24h" thay vì một khoá kỹ thuật. */
+export { AGE_BUCKET_LABEL };
 
 /* ═══════════════════ THỬ NGƯỢC: MÔ HÌNH NÀY CÓ ĐÚNG KHÔNG ═══════════════════ */
 
@@ -388,15 +542,16 @@ export async function getProjectionBacktest(): Promise<ProjectionBacktest> {
           const t = new Date(x.handoffAt.getTime() + kNgay * NGAY_MS);
           if (x.finalAt !== null && !(t < x.finalAt)) continue;
           // Trạng thái = sự kiện ĐVVC MỚI NHẤT có occurred_at ≤ t (danh sách đã tăng dần).
-          let con: string | null = null;
-          for (const e of suKien) {
-            if (e.at <= t) con = e.con;
-            else break;
-          }
+          const con = trangThaiTaiMoc(suKien, t, null);
           // Chưa có sự kiện nào tới mốc t, hoặc đang ở trạng thái cuối ⇒ không có gì để dự báo.
           if (!con || !isModelledSubstate(con)) continue;
           snapshots += 1;
-          const tra = moHinh.of(con);
+          /*
+            CHẤM ĐÚNG MÔ HÌNH ĐANG CHẠY: truyền cả mã hàng lẫn tuổi kiện, để bài thử ngược đi qua
+            ĐÚNG bậc điều kiện hoá mà báo cáo sẽ dùng. Chấm bằng bậc toàn shop rồi công bố nhãn tin
+            cậy cho một mô hình có bốn bậc là chấm một mô hình khác.
+          */
+          const tra = moHinh.of(con, { productCode: x.productCode, ageHours: kNgay * 24 });
           if (tra.p === null) continue;
           points.push({ shipmentId: x.id, p: tra.p, y: x.outcome === "DELIVERED" ? 1 : 0, con });
         }
@@ -536,7 +691,11 @@ function accMoi(): Acc {
  * MỘT vòng cân cho MỌI grain. Phân loại theo `ORDER_OUTCOME` TRƯỚC; trạng thái con ĐVVC chỉ dùng để
  * chọn P(s) cho đơn `IN_TRANSIT`. Không có nhánh nào đọc `stage` hay mã ĐVVC để kết luận đã giao.
  */
-function canMotDon(acc: Acc, don: { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number }, lookup: ProbabilityLookup) {
+function canMotDon(
+  acc: Acc,
+  don: { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null },
+  lookup: ProbabilityLookup,
+) {
   acc.cogsUnknownQty += don.cogsUnknownQty;
   switch (don.outcome) {
     case "DELIVERED":
@@ -576,7 +735,7 @@ function canMotDon(acc: Acc, don: { outcome: string; con: string; revenue: numbe
       acc.active += 1;
       const con = don.con as CarrierSubstate;
       acc.activeByState[con] = (acc.activeByState[con] ?? 0) + 1;
-      const tra = isModelledSubstate(con) ? lookup.of(con) : null;
+      const tra = isModelledSubstate(con) ? lookup.of(con, { productCode: don.productCode, ageHours: don.ageHours }) : null;
       if (!tra || tra.p === null) {
         acc.unmodelledActive += 1;
         acc.unmodelledRevenue += don.revenue;
@@ -658,22 +817,38 @@ export async function getProjectedDeliveryMetrics(
     const ma = grain === "VARIANT" ? khoa : sql`coalesce("products"."custom_id", '')`;
     const ten = grain === "VARIANT" ? sql`coalesce(nullif("order_items"."sku", ''), "order_items"."product_name")` : sql`coalesce("products"."name", "order_items"."product_name")`;
 
-    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string }>(
+    /*
+      ═══ TUỔI KIỆN ĐI CÙNG ĐƠN, KHÔNG TÍNH LẠI Ở NƠI KHÁC ═══
+
+      Mô hình chọn ô điều kiện hoá theo (mã hàng, trạng thái, TUỔI). Tuổi phải đo từ ĐÚNG mốc mà
+      mô hình đã học: `carrier_handoff_at`. Lấy `shipments.created_at` hay `orders.inserted_at` cho
+      tiện sẽ đẩy mọi kiện sang rổ tuổi già hơn thực tế — đo được trên production, hai mốc lệch
+      trung bình 4,5 ngày.
+
+      `age_hours` là `NULL` khi chưa có chứng cứ bàn giao; lúc đó `of()` tự bỏ hai bậc theo tuổi.
+
+      MÃ HÀNG ĐỂ ĐIỀU KIỆN HOÁ được đếm ở TẦNG ỨNG DỤNG, không phải bằng hàm cửa sổ: Postgres không
+      nhận `count(distinct …) over (…)`, và các dòng của cùng một đơn đã nằm sẵn trong tay sau vòng
+      gộp bên dưới — đếm ở đó vừa đúng vừa không tốn thêm một lượt quét nào.
+    */
+    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
       await db.execute(sql`
         with don as (
           select "orders"."id" as order_id,
                  coalesce("orders"."total_price_after_discount", 0) as order_total,
                  ${con} as con,
-                 ${ORDER_OUTCOME_FAST} as outcome
+                 ${ORDER_OUTCOME_FAST} as outcome,
+                 extract(epoch from (now() - ${sql.raw(CARRIER_HANDOFF_AT_SQL)})) / 3600 as age_hours
             from "orders"
             left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
            where ${and(...dk)}
           offset 0
         )
-        select d.order_id, d.order_total, d.con, d.outcome,
+        select d.order_id, d.order_total, d.con, d.outcome, d.age_hours,
                ${khoa} as key,
                ${ma} as code,
                ${ten} as name,
+               max(coalesce("products"."custom_id", '')) as product_code,
                coalesce(sum("order_items"."line_total"), 0) as line_total,
                coalesce(sum("order_items"."quantity" * ${LINE_UNIT_COST}), 0) as line_cogs,
                coalesce(sum("order_items"."quantity") filter (where ${LINE_UNIT_COST} = 0), 0) as cogs_unknown_qty
@@ -681,7 +856,7 @@ export async function getProjectedDeliveryMetrics(
           left join "order_items" on "order_items"."order_id" = d.order_id and "order_items"."is_bonus" = false
           left join "product_variants" on "product_variants"."id" = "order_items"."variant_id"
           left join "products" on "products"."id" = coalesce("product_variants"."product_id", "order_items"."product_id")
-         group by d.order_id, d.order_total, d.con, d.outcome, ${khoa}, ${ma}, ${ten}
+         group by d.order_id, d.order_total, d.con, d.outcome, d.age_hours, ${khoa}, ${ma}, ${ten}
       `),
     );
 
@@ -689,14 +864,36 @@ export async function getProjectedDeliveryMetrics(
     const maCuaDon = new Map<string, Set<string>>();
     const donThieuMa = new Set<string>();
     // Mỗi đơn ĐÚNG MỘT dòng ở grain đơn: tất cả dòng-mã của cùng đơn mang cùng `con`/`outcome`/`order_total`.
-    const donTheoId = new Map<string, { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number }>();
+    const donTheoId = new Map<string, { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null }>();
+    /* Mã hàng THẬT (custom_id) của từng đơn — để biết đơn thuộc đúng một mã hay nhiều mã. */
+    const maHangCuaDon = new Map<string, Set<string>>();
+    /* Dòng-mã chờ cân: phải đợi quét hết mới biết đơn có mấy mã, mà mã quyết định bậc điều kiện hoá. */
+    const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; orderId: string }[] = [];
 
     for (const r of rows) {
       const cogs = Number(r.line_cogs ?? 0);
-      const cu = donTheoId.get(r.order_id) ?? { outcome: r.outcome, con: r.con, revenue: Number(r.order_total ?? 0), cogs: 0, cogsUnknownQty: 0 };
+      const tuoi = r.age_hours === null || r.age_hours === undefined ? null : Number(r.age_hours);
+      const cu =
+        donTheoId.get(r.order_id) ??
+        {
+          outcome: r.outcome,
+          con: r.con,
+          revenue: Number(r.order_total ?? 0),
+          cogs: 0,
+          cogsUnknownQty: 0,
+          productCode: null,
+          ageHours: tuoi !== null && Number.isFinite(tuoi) ? tuoi : null,
+        };
       cu.cogs += cogs;
       cu.cogsUnknownQty += Number(r.cogs_unknown_qty ?? 0);
       donTheoId.set(r.order_id, cu);
+
+      const maHang = (r.product_code ?? "").trim();
+      if (maHang) {
+        const set = maHangCuaDon.get(r.order_id) ?? new Set<string>();
+        set.add(maHang);
+        maHangCuaDon.set(r.order_id, set);
+      }
 
       const key = (r.key ?? "").trim();
       if (!key) {
@@ -707,14 +904,27 @@ export async function getProjectedDeliveryMetrics(
       set.add(key);
       maCuaDon.set(r.order_id, set);
 
-      let row = theoMa.get(key);
-      if (!row) {
-        row = { ...accMoi(), key, code: (r.code ?? "").trim() || key, name: r.name ?? "" };
-        theoMa.set(key, row);
-      }
+      if (!theoMa.has(key)) theoMa.set(key, { ...accMoi(), key, code: (r.code ?? "").trim() || key, name: r.name ?? "" });
       // Doanh thu của mã trong đơn = tổng dòng hàng của mã đó; không có dòng nào thì lấy tiền đơn.
       const doanhThu = Number(r.line_total ?? 0) || Number(r.order_total ?? 0);
-      canMotDon(row, { outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0) }, lookup);
+      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id });
+    }
+
+    /*
+      MÃ HÀNG DÙNG ĐỂ ĐIỀU KIỆN HOÁ chỉ tồn tại khi đơn thuộc ĐÚNG MỘT mã — cùng luật với kho huấn
+      luyện (`taiKho`). Đơn hai mã đi xuống bậc toàn shop: không có gì trong dữ liệu nói mã nào
+      quyết định kết cục, và dùng một trong hai là gán xác suất của mã này cho kiện của mã kia.
+    */
+    const maDuyNhat = (orderId: string): string | null => {
+      const set = maHangCuaDon.get(orderId);
+      return set && set.size === 1 ? [...set][0] : null;
+    };
+    for (const [id, d] of donTheoId) d.productCode = maDuyNhat(id);
+    for (const x of choCan) {
+      const row = theoMa.get(x.key);
+      if (!row) continue;
+      const d = donTheoId.get(x.orderId);
+      canMotDon(row, { outcome: x.outcome, con: x.con, revenue: x.revenue, cogs: x.cogs, cogsUnknownQty: x.cogsUnknownQty, productCode: d?.productCode ?? null, ageHours: d?.ageHours ?? null }, lookup);
     }
 
     let multiCodeOrders = 0;

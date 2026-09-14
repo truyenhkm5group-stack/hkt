@@ -607,6 +607,14 @@ export type ReturnRateRow = {
   projectedActive: number;
   /** Đơn đang chạy mà mô hình chưa dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
   unmodelledActive: number;
+  /**
+   * ĐƠN ĐANG CHẠY TÁCH THEO TRẠNG THÁI ĐVVC — thứ làm cho ô "GTC ước tính" giải thích được.
+   *
+   * Không có nó thì tooltip chỉ nói được "70 đơn chưa kết thúc", trong khi câu hỏi thật của chủ shop
+   * là "trong 70 đơn ấy bao nhiêu đang CHỜ XỬ LÝ, bao nhiêu CHỜ PHÁT LẠI" — hai nhóm có triển vọng
+   * khác hẳn nhau và là hai nhóm duy nhất người trực can thiệp được.
+   */
+  activeByState: Partial<Record<string, number>>;
   cancelled: number;
   returnedQty: number;
   lostRevenue: number;
@@ -760,6 +768,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         projectedDelivered,
         projectedActive,
         unmodelledActive: d?.unmodelledActive ?? 0,
+        activeByState: d?.activeByState ?? {},
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
         lostRevenue: Number(r.lostRevenue),
