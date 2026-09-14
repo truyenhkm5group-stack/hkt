@@ -356,10 +356,103 @@ Kiểm thử thêm/sửa: `tests/cs-workqueue.test.ts` (khối 14 — 10 điểm
 
 ---
 
-## 9. Còn lại cho lượt sau
+## 9. Sau deploy — đo trên bản chạy thật
+
+Deploy **#265** thành công lúc 02:48:12 UTC (14,6 phút). Bước "Kiểm tra HTTPS từ bên ngoài" của
+chính workflow xác nhận `/api/health` trả `{"ok":true,"commit":"3454fff90e6f","branch":"main"}` —
+**bản đang chạy đúng bằng bản đã qua cổng**, không phải "còn thở là được".
+
+### 9.1 Hàng đợi CSKH — kiểm trên HTML THẬT của production
+
+`smoke` (bản mới, có bảng `EXPECT`): **51/51 tuyến đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 chậm ·
+0 chưa kiểm**, cả lượt 214s.
+
+Ba tuyến đi qua hợp đồng mới, tức HTML trả về từ máy chủ thật có chứa đúng các nhãn ấy:
+
+| tuyến | dấu hiệu bắt buộc | kết quả |
+|---|---|---|
+| `/cs` | `aria-label="Sao chép SĐT"` | ✓ SUCCESS 514kB (94ms) |
+| `/cs?view=theo-case` | `aria-label="Sao chép SĐT"` **và** `aria-label="Sao chép mã vận đơn"` | ✓ SUCCESS 574kB (87ms) |
+| `/shipments` | `aria-label="Sao chép mã vận đơn"` | ✓ SUCCESS 1368kB (54ms) |
+
+Môi trường của phiên này không mở được trình duyệt tới `erp.vnxcommerce.com`, nên đây là cách
+kiểm "nút có thật trên bản chạy thật hay không" — và nó mạnh hơn một lần nhìn bằng mắt, vì từ nay
+nó chạy lại được.
+
+### 9.2 Đối chiếu KPI trước / sau
+
+| | trước (02:32 UTC, script cũ) | sau (02:57 UTC, script mới) |
+|---|---|---|
+| tổng đơn | 2.732 | 2.736 |
+| giao thành công | 493 | 494 |
+| hoàn | 1.002 | 1.006 |
+| đang giao | 197 | 192 |
+| **chờ ĐVVC lấy** | **(không có ô — 106 đơn vô hình)** | **106** |
+| chưa rõ | 13 | 13 |
+| chưa gửi | 262 | 266 |
+| huỷ | 659 | 659 |
+| **cộng các phần** | **2.626 ≠ 2.732** | **2.736 = 2.736** ✓ |
+
+Các ô nhúc nhích vài đơn là dữ liệu sống chạy trong 25 phút giữa hai lượt đo (4 đơn mới vào, vài
+kiện đi tiếp), không phải công thức đổi. Tiền đi cùng chiều và cùng lượng: lên đơn +1.023.000đ,
+giao thành công +499.000đ, COD chờ +499.000đ, thực nhận có chứng từ **y nguyên** 218.215.000đ.
+
+Điểm đáng kể nhất: **bất biến `tổng = tổng các phần` KHÔNG ném lỗi** — đây là lần đầu ảnh chụp KPI
+cộng đủ.
+
+### 9.3 Dòng mồ côi đã sạch, và giá vốn đã chốt không bị đụng
+
+| | trước | sau |
+|---|---|---|
+| dòng mồ côi | **266** | **0** |
+| trong đó mang ghi nhận đã chốt (phải giữ lại) | 0 | 0 |
+| dòng mang `logic_version` cũ | 266 | **0** |
+| dòng bảng dẫn xuất / đơn khác nhau | 2.998 / 2.732 (đếm đôi 266) | **2.735 / 2.735** (khớp đúng) |
+
+Bộ lập lịch (`outcome-materialize`, 5 phút một lượt) tự dọn — không cần một lệnh xoá tay nào trên
+production.
+
+**Giá vốn đã chốt còn nguyên**: 497 dòng có căn cứ, 488 dòng có số, tổng **77.802.000đ**. Kỳ đã
+chốt bất biến, đo chứ không tin (`AGENTS.md` mục 21).
+
+(2.737 đơn / 2.735 dòng: hai đơn vừa vào chưa tới lượt vật chất hoá — bình thường, lượt sau là hết.)
+
+### 9.4 Cohort "Đã gửi" KHÔNG xê dịch một kiện nào
+
+| | trước deploy | sau deploy |
+|---|---|---|
+| tổng vận đơn | 2.108 | 2.108 |
+| **có chứng từ bàn giao (Đã gửi)** | **1.966** | **1.966** |
+| ngoài cohort | 142 | 142 |
+
+Bản này gom bốn bản sao của danh sách "đã gửi" về một chỗ. Nếu việc gom làm lệch dù một kiện thì
+con số ở đây đã đổi. Nó không đổi.
+
+---
+
+## 10. Còn lại cho lượt sau
 
 | việc | vì sao chưa làm |
 |---|---|
 | Chạy đối soát HMT trên tệp thật | thiếu biến `HMT_WORKBOOK_URL` — một thao tác của chủ shop (mục 7.2) |
 | Giục ĐVVC lấy 80 kiện `AWAITING_PICKUP` quá 4 ngày (61,4 triệu COD treo) | việc vận hành, không phải việc mã nguồn |
 | Đưa kịch bản QA trình duyệt vào kho mã | cần Playwright làm phụ thuộc phát triển — một quyết định riêng, không nhét kèm |
+
+---
+
+## 11. P1 DATA FOUNDATION — ĐÓNG
+
+| điều kiện | bằng chứng |
+|---|---|
+| `carrier_handoff_at` chỉ từ chứng cứ ĐVVC thật sự cầm hàng | 106/106 kiện `AWAITING_PICKUP` có sự kiện gần nhất mang chặng `PENDING`; `CARRIER_HANDOFF_STAGES` không chứa `PENDING`/`CANCELLED` (mục 1.1) |
+| `AWAITING_PICKUP` tách khỏi `IN_TRANSIT` trên bản chạy thật | 106 đơn, phiên bản luật 3, hiện ở cả bảng dẫn xuất lẫn ảnh chụp KPI (mục 1 · 9.2) |
+| kết cục cuối không đổi ngoài chứng cứ | `DELIVERED` / `RETURNED` chỉ nhúc nhích theo dữ liệu sống; cohort "Đã gửi" 1.966 → 1.966 (mục 9.2 · 9.4) |
+| "Đã gửi" có MỘT hợp đồng, mọi báo cáo dùng lại | `ELIGIBLE_SENT_OUTCOMES`; contract test quét `git ls-files` chặn gõ lại (mục 2) |
+| bảng dẫn xuất không còn nợ | 0 dòng mồ côi, 0 dòng luật cũ, số dòng = số đơn (mục 9.3) |
+| công cụ đối chiếu nhìn thấy đủ | ảnh chụp KPI có ô `cho_dvvc_lay` + bất biến tổng-bằng-tổng-các-phần (mục 4 · 9.2) |
+
+**Không còn báo cáo nào dùng định nghĩa "Đã gửi" cũ.** Bốn chỗ gõ tay đã gom về một hằng số, và
+bài kiểm nguồn chặn đường quay lại. **P1 = CLOSED.**
+
+Việc duy nhất còn treo thuộc về ĐỐI SOÁT HMT (mục 7.2), không thuộc P1: nó cần một biến kho mã do
+chủ shop khai, và đó là một quyết định công bố dữ liệu chứ không phải một bước kỹ thuật.
