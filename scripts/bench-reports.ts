@@ -94,6 +94,7 @@ async function main() {
   const { getControlTower } = await import("@/lib/queries/control-tower");
   const { getReturnRateSummary, getReturnRateByVariant } = await import("@/lib/queries/return-rate");
   const { getReturnReasonReport } = await import("@/lib/queries/return-reason-report");
+  const { returnWarehouseKpi, returnThroughput, returnByInspector, returnBySku } = await import("@/lib/queries/return-warehouse-kpi");
   const { getReturnIntelligence } = await import("@/lib/queries/return-intelligence");
   const { getFinancialTruth } = await import("@/lib/queries/financial-truth");
   const { getCashPosition } = await import("@/lib/queries/cash-position");
@@ -136,6 +137,12 @@ async function main() {
       sẵn, nên nếu đo chung thì con số sẽ giấu mất việc cùng một tập ca có bị dựng hai lần hay không.
     */
     { page: "Lý do hoàn (Reason report)", run: () => getReturnReasonReport({ period: month, basis: "SHIPPED" }) },
+    {
+      // Đúng bộ truy vấn mà trang Kiểm đếm hàng hoàn chạy cho khối đo hiệu suất — đo cả gói một
+      // lượt, vì trang gọi chúng song song trong cùng một `Promise.all`.
+      page: "Hiệu suất kho hàng hoàn (Warehouse KPI)",
+      run: () => Promise.all([returnWarehouseKpi(), returnThroughput(30), returnByInspector(30), returnBySku(90)]),
+    },
     {
       page: "Tầng quyết định hoàn (Intelligence)",
       run: async () => {

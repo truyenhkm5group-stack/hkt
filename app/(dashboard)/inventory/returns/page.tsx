@@ -1,4 +1,11 @@
-import { Boxes, ClipboardCheck, PackageX, ScanLine, Timer, TriangleAlert } from "lucide-react";
+import {
+  Boxes,
+  ClipboardCheck,
+  PackageX,
+  ScanLine,
+  Timer,
+  TriangleAlert,
+} from "lucide-react";
 import { Suspense } from "react";
 import { InspectionStation } from "@/app/(dashboard)/inventory/returns/inspection-station";
 import { ReturnPipelineSection } from "@/app/(dashboard)/inventory/returns/pipeline-section";
@@ -7,20 +14,51 @@ import { receiveQueue, RECEIVE_SLA_DAYS } from "@/lib/returns/receive-queue";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
-import { can,  } from "@/lib/auth/session";
+import { can } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
-import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
+import {
+  inspectionDashboard,
+  listPendingInspections,
+} from "@/lib/returns/inspection";
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
 import { latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
 import { ExceptionQueues } from "@/app/(dashboard)/inventory/returns/exception-queues";
 import { ReturnQualityCounters } from "@/app/(dashboard)/inventory/returns/quality-counters";
-import { returnDataQuality, returnExceptionQueues } from "@/lib/queries/return-exceptions";
+import {
+  returnDataQuality,
+  returnExceptionQueues,
+} from "@/lib/queries/return-exceptions";
+import {
+  returnByInspector,
+  returnBySku,
+  returnThroughput,
+  returnWarehouseKpi,
+} from "@/lib/queries/return-warehouse-kpi";
+import {
+  WarehouseKpiBlock,
+  WarehouseKpiGaps,
+  WarehouseToday,
+} from "@/app/(dashboard)/inventory/returns/warehouse-kpi";
+import {
+  WarehouseBySku,
+  WarehousePeople,
+  WarehouseThroughput,
+} from "@/app/(dashboard)/inventory/returns/warehouse-people";
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
+
+/*
+  KỲ ĐO KHAI MỘT CHỖ. Ba khối dưới trang nhìn ba kỳ khác nhau, cố ý: năng suất đọc theo tháng để
+  thấy xu hướng, người đếm theo tháng để đủ mẫu, mẫu mã theo quý vì hàng hoàn của một mẫu mã thưa
+  hơn nhiều. Con số nào lên màn hình thì cũng lấy từ đây, nên nhãn không bao giờ nói khác truy vấn.
+*/
+const TREND_DAYS = 30;
+const PEOPLE_DAYS = 30;
+const SKU_DAYS = 90;
 
 /**
  * TRẠM ĐẾM HÀNG HOÀN.
@@ -31,7 +69,11 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
  * Bảng điều khiển ở đầu trang tách "chờ nhận" khỏi "chờ đếm" cũng vì lý do đó: hai việc tắc ở hai
  * chỗ khác nhau và thuộc hai người khác nhau. Gộp một con số thì không biết phải đi giục ai.
  */
-export default async function ReturnInspectionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function ReturnInspectionPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   /*
     Ô TÌM KIỆN ĐI LÊN MÁY CHỦ, KHÔNG LỌC TẠI CHỖ.
 
@@ -47,9 +89,40 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   const timKien = param(sp, "kien") ?? "";
   const { user, decision } = await requireResource("RETURNS", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
-  if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
+  if (decision.allow === "NONE")
+    return (
+      <ScopeDenied
+        title="Hàng hoàn về kho"
+        reason={decision.reason}
+        fix={decision.fix}
+      />
+    );
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbookMeta(), returnExceptionQueues(), returnDataQuality()]);
+  const [
+    bang,
+    pending,
+    choNhan,
+    hmt,
+    soGiay,
+    ngoaiLe,
+    chatLuong,
+    kpi,
+    nangSuat,
+    nguoiDem,
+    theoMauMa,
+  ] = await Promise.all([
+    inspectionDashboard(),
+    listPendingInspections(300),
+    receiveQueue({ limit: 400, q: timKien }),
+    hmtRunSummary(),
+    latestHmtWorkbookMeta(),
+    returnExceptionQueues(),
+    returnDataQuality(),
+    returnWarehouseKpi(),
+    returnThroughput(TREND_DAYS),
+    returnByInspector(PEOPLE_DAYS),
+    returnBySku(SKU_DAYS),
+  ]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
 
@@ -62,7 +135,16 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
     khách vào HTML của mỗi lượt tải trang, đọc được toàn bộ sổ hàng hoàn bằng "xem nguồn". Tên ·
     băm · dung lượng · ai tải · lúc nào là đủ cho màn hình.
   */
-  const hmtUpload = soGiay ? { filename: soGiay.filename, sha256: soGiay.sha256, bytes: soGiay.bytes, uploadedBy: soGiay.uploadedBy, uploadedAt: soGiay.uploadedAt ?? new Date(), lastUsedAt: soGiay.lastUsedAt } : null;
+  const hmtUpload = soGiay
+    ? {
+        filename: soGiay.filename,
+        sha256: soGiay.sha256,
+        bytes: soGiay.bytes,
+        uploadedBy: soGiay.uploadedBy,
+        uploadedAt: soGiay.uploadedAt ?? new Date(),
+        lastUsedAt: soGiay.lastUsedAt,
+      }
+    : null;
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -84,6 +166,8 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
         DUY NHẤT trên trang này cần một quyết định của người. Đẩy nó xuống dưới bảng số liệu là
         cách chắc chắn nhất để không ai cuộn tới.
       */}
+      <WarehouseToday kpi={kpi} />
+
       <ExceptionQueues data={ngoaiLe} canWrite={canWrite} />
       <ReturnQualityCounters rows={chatLuong} />
 
@@ -114,7 +198,9 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
           /* CHƯA BIẾT hiện là "—", không phải 0: kiện chưa ghép được đơn thì không ai biết trong đó có mấy món. */
           note={[
             `${bang.pendingItems === null ? "—" : formatNumber(bang.pendingItems)} món đang KHÔNG được tính vào tồn`,
-            bang.unknownParcels ? `${formatNumber(bang.unknownParcels)} kiện chưa rõ hàng` : "",
+            bang.unknownParcels
+              ? `${formatNumber(bang.unknownParcels)} kiện chưa rõ hàng`
+              : "",
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -122,33 +208,41 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
           icon={ClipboardCheck}
           tone={bang.pendingInspection ? "amber" : "green"}
         />
-        <MetricCard label="Đã vào lại tồn" value={formatNumber(bang.restocked)} note={`${formatNumber(bang.restockedQty)} món`} icon={Boxes} tone="green" />
-        <MetricCard label="Hỏng" value={formatNumber(bang.damaged)} note="Về tới nơi nhưng không bán lại được" icon={PackageX} tone={bang.damaged ? "rose" : "slate"} />
-        <MetricCard label="Thiếu / mất" value={formatNumber(bang.missing)} note="Đếm hụt so với số ERP đã xuất" icon={TriangleAlert} tone={bang.missing ? "rose" : "slate"} />
+        <MetricCard
+          label="Đã vào lại tồn"
+          value={formatNumber(bang.restocked)}
+          note={`${formatNumber(bang.restockedQty)} món`}
+          icon={Boxes}
+          tone="green"
+        />
+        <MetricCard
+          label="Hỏng"
+          value={formatNumber(bang.damaged)}
+          note="Về tới nơi nhưng không bán lại được"
+          icon={PackageX}
+          tone={bang.damaged ? "rose" : "slate"}
+        />
+        <MetricCard
+          label="Thiếu / mất"
+          value={formatNumber(bang.missing)}
+          note="Đếm hụt so với số ERP đã xuất"
+          icon={TriangleAlert}
+          tone={bang.missing ? "rose" : "slate"}
+        />
         <MetricCard
           label="Không đúng hàng"
           value={formatNumber(bang.wrongItem)}
-          note={hao ? `Tổng ${formatNumber(hao)} kiện không vào lại tồn` : "Khách trả về món khác"}
+          note={
+            hao
+              ? `Tổng ${formatNumber(hao)} kiện không vào lại tồn`
+              : "Khách trả về món khác"
+          }
           icon={ScanLine}
           tone={bang.wrongItem ? "amber" : "slate"}
         />
       </div>
 
-      {/* TUỔI TỒN ĐỌNG: hàng nằm càng lâu thì sổ càng sai lâu, nên nó phải nhìn thấy được. */}
-      {bang.pendingInspection > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2 text-[12.5px]">
-          <span className="font-medium">Tuổi kiện chờ đếm:</span>
-          <span className="rounded-md bg-muted px-2 py-0.5">dưới 1 ngày · {formatNumber(bang.aging.duoi1Ngay)}</span>
-          <span className="rounded-md bg-muted px-2 py-0.5">1–3 ngày · {formatNumber(bang.aging.tu1Den3Ngay)}</span>
-          <span className={bang.aging.tu3Den7Ngay ? "rounded-md bg-amber-100 px-2 py-0.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200" : "rounded-md bg-muted px-2 py-0.5"}>
-            3–7 ngày · {formatNumber(bang.aging.tu3Den7Ngay)}
-          </span>
-          <span className={bang.aging.tren7Ngay ? "rounded-md bg-rose-100 px-2 py-0.5 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" : "rounded-md bg-muted px-2 py-0.5"}>
-            trên 7 ngày · {formatNumber(bang.aging.tren7Ngay)}
-          </span>
-          <span className="text-muted-foreground">kiện cũ nhất đã chờ {formatNumber(bang.aging.cuNhatNgay)} ngày</span>
-        </div>
-      ) : null}
+      <WarehouseKpiBlock kpi={kpi} />
 
       {/*
         BƯỚC 1 NẰM NGAY TRÊN BƯỚC 2. Trước đây "kho đã nhận" ở trang Chất lượng dữ liệu, "đếm" ở đây:
@@ -167,8 +261,12 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
             */
             [
               `${formatNumber(choNhan.summary.expectedUnits)} sản phẩm dự kiến từ ${formatNumber(choNhan.summary.mapped)} kiện đã ghép được đơn`,
-              choNhan.summary.unmapped ? `${formatNumber(choNhan.summary.unmapped)} kiện chưa xác định đơn` : "",
-              choNhan.summary.overdue ? `${formatNumber(choNhan.summary.overdue)} kiện quá ${RECEIVE_SLA_DAYS} ngày` : "",
+              choNhan.summary.unmapped
+                ? `${formatNumber(choNhan.summary.unmapped)} kiện chưa xác định đơn`
+                : "",
+              choNhan.summary.overdue
+                ? `${formatNumber(choNhan.summary.overdue)} kiện quá ${RECEIVE_SLA_DAYS} ngày`
+                : "",
             ]
               .filter(Boolean)
               .join(" · ")
@@ -179,14 +277,23 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
           <div className="space-y-3 p-3">
             {choNhan.summary.topSkus.length ? (
               <div className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
-                <span className="text-muted-foreground">Dự kiến theo mã hàng:</span>
+                <span className="text-muted-foreground">
+                  Dự kiến theo mã hàng:
+                </span>
                 {choNhan.summary.topSkus.slice(0, 8).map((x) => (
-                  <span key={x.sku || x.name} className="rounded-md bg-muted px-1.5 py-0.5">
+                  <span
+                    key={x.sku || x.name}
+                    className="rounded-md bg-muted px-1.5 py-0.5"
+                  >
                     <span className="font-medium">{x.sku || x.name}</span>
                     <span className="numeric"> · {formatNumber(x.qty)}</span>
                   </span>
                 ))}
-                {choNhan.summary.topSkus.length > 8 ? <span className="text-muted-foreground">+{choNhan.summary.topSkus.length - 8} mã nữa</span> : null}
+                {choNhan.summary.topSkus.length > 8 ? (
+                  <span className="text-muted-foreground">
+                    +{choNhan.summary.topSkus.length - 8} mã nữa
+                  </span>
+                ) : null}
               </div>
             ) : null}
             <ReceiveQueue
@@ -208,26 +315,48 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
             />
             {choNhan.total > choNhan.loaded ? (
               <p className="text-[11.5px] text-muted-foreground">
-                Đang hiện {formatNumber(choNhan.loaded)} kiện cũ nhất trong tổng {formatNumber(choNhan.total)}. Xử lý bớt thì phần còn lại tự lên.
+                Đang hiện {formatNumber(choNhan.loaded)} kiện cũ nhất trong tổng{" "}
+                {formatNumber(choNhan.total)}. Xử lý bớt thì phần còn lại tự
+                lên.
               </p>
             ) : null}
           </div>
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title={`Kiện đã về, chờ đếm${pending.length ? ` · ${formatNumber(pending.length)}` : ""}`}
-        description={
-          canWrite
-            ? "Cũ nhất trước. Bắn mã để nhảy thẳng tới kiện đang cầm trên tay; chọn nhiều kiện cùng kết luận để xử lý một lượt."
-            : "Bạn không có quyền cập nhật kho nên chỉ xem được danh sách."
-        }
-        padded={false}
-      >
-        <div className="p-3">
-          <InspectionStation rows={pending} canWrite={canWrite} />
-        </div>
-      </SectionCard>
+      {/* `scroll-mt` chừa chỗ cho thanh tiêu đề dính trên: không có nó thì nhảy neo xong tiêu đề bảng bị che. */}
+      <div id="tram-dem" className="scroll-mt-20">
+        <SectionCard
+          title={`Kiện đã về, chờ đếm${pending.length ? ` · ${formatNumber(pending.length)}` : ""}`}
+          description={
+            canWrite
+              ? "Cũ nhất trước. Bắn mã để nhảy thẳng tới kiện đang cầm trên tay; chọn nhiều kiện cùng kết luận để xử lý một lượt."
+              : "Bạn không có quyền cập nhật kho nên chỉ xem được danh sách."
+          }
+          padded={false}
+        >
+          <div className="p-3">
+            <InspectionStation rows={pending} canWrite={canWrite} />
+          </div>
+        </SectionCard>
+      </div>
+
+      {/*
+        ĐO HIỆU SUẤT NẰM SAU CHỖ LÀM VIỆC, CỐ Ý.
+
+        Người kho mở trang này để ĐẾM HÀNG; đẩy bốn khối số liệu lên trên trạm đếm là bắt họ cuộn
+        qua báo cáo mỗi lần bắn một mã. Người quản lý thì đọc từ trên xuống và dừng ở đâu cũng được —
+        "hôm nay" đã nằm ngay đầu trang cho họ.
+      */}
+      <WarehouseThroughput data={nangSuat} days={TREND_DAYS} />
+      <WarehousePeople
+        rows={nguoiDem.rows}
+        unattributed={nguoiDem.unattributed}
+        days={PEOPLE_DAYS}
+        slaHours={kpi.slaHours.receiveToInspect}
+      />
+      <WarehouseBySku rows={theoMauMa} days={SKU_DAYS} />
+      <WarehouseKpiGaps />
     </div>
   );
 }
