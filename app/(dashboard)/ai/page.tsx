@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Bot, CircleSlash, Coins, HandHelping, MessageSquareText } from "lucide-react";
 import { AiRunsTable } from "@/app/(dashboard)/ai/runs-table";
 import { MetricCard } from "@/components/metric-card";
@@ -26,6 +27,11 @@ export default async function AiPage() {
         eyebrow="Nền tảng"
         title="Nhân sự AI"
         description="7 ngày gần nhất · mọi quyết định của máy đều mở ra đọc lại được"
+        actions={
+          <Link href="/ai/review" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted">
+            Màn hình soát &amp; chấm tay
+          </Link>
+        }
         hint={
           <>
             <p className="font-semibold">Nấc chạy ngầm (SHADOW) nghĩa là gì</p>

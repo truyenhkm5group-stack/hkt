@@ -6,6 +6,7 @@ import {
   BarChart3,
   BellRing,
   Bot,
+  ClipboardCheck,
   Factory,
   FileSpreadsheet,
   FileUp,
@@ -88,7 +89,10 @@ const groups: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "Nhân sự AI",
-    items: [{ href: "/ai", label: "Nhân sự AI", icon: Bot, permission: "ai:view" }],
+    items: [
+      { href: "/ai", label: "Nhân sự AI", icon: Bot, permission: "ai:view" },
+      { href: "/ai/review", label: "Soát & chấm tay", icon: ClipboardCheck, permission: "ai:view" },
+    ],
   },
   {
     label: "Hệ thống",
