@@ -402,9 +402,10 @@ export async function testFanpageAttribution() {
  */
 export function testDuplicateEvidencePure() {
   const KEY = "k";
+  // `hours` nhận cả số lẻ (0,0834 h = 5 phút) — `Date.UTC` cắt cụt tham số nên phải cộng bằng mili giây.
   const base = (id: string, hours: number, over: Partial<DedupeCandidate> = {}): DedupeCandidate => ({
     orderId: id,
-    sourceOrderAt: new Date(Date.UTC(2024, 2, 1, hours)),
+    sourceOrderAt: new Date(Date.UTC(2024, 2, 1) + Math.round(hours * 3_600_000)),
     dedupeKey: KEY,
     alive: true,
     conversationId: null,
@@ -470,8 +471,45 @@ export function testDuplicateEvidencePure() {
   assert.ok((dongTrung?.score ?? 0) >= DUPLICATE_SCORE_THRESHOLD, `đơn đại diện bị loại vẫn phải mang điểm ĐẠT NGƯỠNG, không phải 0 (thực tế ${dongTrung?.score})`);
   assert.ok(dongTrung?.signals.includes("CANCELLED_SIBLING"), "và căn cứ phải nói đúng lý do: một đơn đã huỷ, đơn kia còn sống");
 
+  /* ── 7c · ĐƠN ĐÃ HUỶ KHÔNG ĐƯỢC LÀM CẦU NỐI GIỮA HAI ĐƠN CÒN SỐNG ──
+   *
+   * SỰ CỐ THẬT (rà soát 14/09/2026, main e2cc4295): A đã huỷ 09:00 · B còn sống 09:05 · C còn
+   * sống 10:00 — cùng khoá, cùng giá trị 499.000đ, không có hội thoại / bài viết / định danh
+   * khách, Pancake không đánh dấu trùng.
+   *
+   * Cụm nhận thành viên bằng cách chấm với đơn SỚM NHẤT: A–B đạt ngưỡng nhờ `CANCELLED_SIBLING`,
+   * A–C cũng đạt nhờ chính dấu hiệu đó. Nhưng đơn GIỮ QUY KẾT là B, và B–C chỉ có đúng một điểm
+   * `SAME_VALUE` — dưới ngưỡng 4. C vẫn bị ghi là trùng của B với điểm 1: một lần bán có thật bị
+   * xoá khỏi doanh thu của người bán nó, bằng một kết luận mà chính chứng cứ của nó bác bỏ.
+   *
+   * Bất biến: chứng cứ NHẬN VÀO CỤM phải chấm với đúng đơn mà kết luận sẽ trỏ tới.
+   */
+  const cauNoiDaHuy = resolveDuplicates([
+    base("a", 0, { alive: false, orderValue: 499_000 }),
+    base("b", 5 / 60, { orderValue: 499_000 }), // 09:05 — 5 phút sau A
+    base("c", 1, { orderValue: 499_000 }), // 10:00 — 55 phút sau B
+  ]);
+  assert.equal(dupOf(cauNoiDaHuy, "a"), "b", "đơn đã huỷ vẫn nhường quy kết cho đơn còn sống sớm nhất");
+  assert.equal(dupOf(cauNoiDaHuy, "b"), null, "đơn giữ quy kết không bao giờ tự là trùng của chính mình");
+  assert.equal(
+    dupOf(cauNoiDaHuy, "c"),
+    null,
+    "C chỉ nối với B qua MỘT điểm cùng-giá-trị — một đơn ĐÃ HUỶ không được làm cầu nối biến hai đơn còn sống thành một",
+  );
+
+  /* ── 7d · và cửa sổ vẫn KHÔNG trượt theo người giữ quy kết ──
+   * A huỷ 00:00 (mở cụm) · B sống 00:00+ε giữ quy kết · C cùng hội thoại với B, 25 giờ sau A.
+   * Nếu cửa sổ đo từ B thì C lọt vào; phải đo từ đơn SỚM NHẤT của cụm.
+   */
+  const khongTruotTheoNguoiGiu = resolveDuplicates([
+    base("a", 0, { alive: false, conversationId: "c1" }),
+    base("b", 0.5, { conversationId: "c1" }),
+    base("c", 25, { conversationId: "c1" }),
+  ]);
+  assert.equal(dupOf(khongTruotTheoNguoiGiu, "c"), null, "quá 24 giờ tính từ đơn sớm nhất ⇒ cụm mới, dù cùng hội thoại với người giữ quy kết");
+
   // Bất biến ấy phải đúng trên MỌI kịch bản bài này dựng, không riêng ca vừa thử.
-  for (const ketQua of [chiGanNhau, cungHoiThoai, huyRoiTao, ba, bon, khacGio, quaCuaSo, truot, hoa1, hoa2, daiDienThua]) {
+  for (const ketQua of [chiGanNhau, cungHoiThoai, huyRoiTao, ba, bon, khacGio, quaCuaSo, truot, hoa1, hoa2, daiDienThua, cauNoiDaHuy, khongTruotTheoNguoiGiu]) {
     for (const v of ketQua) {
       if (!v.duplicateOfOrderId) continue;
       assert.ok((v.score ?? 0) >= DUPLICATE_SCORE_THRESHOLD, `dòng trùng ${v.orderId} mang điểm ${v.score} — dưới ngưỡng thì không được kết luận trùng`);
