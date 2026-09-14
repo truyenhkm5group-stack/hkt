@@ -66,7 +66,14 @@ export type CarrierCapabilityView = {
 /** Một kiện trong hàng đợi care. */
 export type CareCase = {
   shipmentId: string;
+  /** Mã ĐANG HIỂN THỊ: mã Viettel Post nếu có, không thì mã Pancake, không nữa thì id ERP. */
   tracking: string;
+  /**
+   * MÃ VIETTEL POST THẬT — chỉ `shipments.vtp_order_number`, `null` khi chưa có. Đứng riêng khỏi
+   * `tracking` vì `tracking` có thể đang là mã Pancake (`extend_code`) hoặc id ERP: tra cứu trên
+   * viettelpost.vn bằng hai thứ đó ra "không tìm thấy", nên chỉ cột này được phép dựng liên kết.
+   */
+  vtpOrderNumber: string | null;
   orderId: string | null;
   orderSystemId: number | null;
   customer: string;

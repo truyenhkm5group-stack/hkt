@@ -120,6 +120,7 @@ import {
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
+import { testVtpTrackingLink } from "./vtp-tracking-link.test";
 import { testDeliveryTower } from "./delivery-tower.test";
 import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
@@ -1497,6 +1498,7 @@ async function main() {
   await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();
+  testVtpTrackingLink();
   testSmokeCoverage();
   testOperatingFunnel();
   testLogisticsFreshness();

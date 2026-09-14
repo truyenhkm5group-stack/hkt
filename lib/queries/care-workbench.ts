@@ -107,21 +107,22 @@ async function loadLatestRequests(shipmentIds: string[]): Promise<Map<string, Ca
 }
 
 /** Mốc vào hàng đợi + năng lực API, một lượt cho cả tập kiện. */
-async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { failedAt: Date | null; lastAt: Date | null; createdAt: Date; capability: string }>> {
+async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { failedAt: Date | null; lastAt: Date | null; createdAt: Date; capability: string; vtpOrderNumber: string | null }>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string }>(
+  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string; vtp_order_number: string | null }>(
     await db.execute(sql`
       select s.id,
              s.created_at,
              s.tracking_capability as capability,
+             nullif(s.vtp_order_number, '') as vtp_order_number,
              (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED') as failed_at,
              (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id) as last_at
         from shipments s
        where s.id in ${shipmentIds}
     `),
   );
-  return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability }]));
+  return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability, vtpOrderNumber: r.vtp_order_number }]));
 }
 
 /**
@@ -269,12 +270,19 @@ async function buildQueue(): Promise<CareQueue> {
   };
 
   const all: CareCase[] = [];
-  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
+  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "vtpOrderNumber"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
     const care = toCareState(careMap.get(base.shipmentId));
     const { view, reopened } = careViewOf(care, base.queueSince, now);
     const capability = facts.get(base.shipmentId)?.capability;
     all.push({
       ...base,
+      /*
+        MÃ VIETTEL POST lấy từ ĐÚNG LƯỢT ĐỌC `shipments` đã chạy cho cả hàng đợi, nên ba nguồn dòng
+        (tháp giao vận, case sai thông tin, kiện đã đóng) không thể nói ba con số khác nhau — và
+        không tốn thêm một truy vấn nào. Cần riêng vì `tracking` đã bị `coalesce` sang mã Pancake /
+        id ERP: liên kết tra cứu ĐVVC chỉ được dựng từ cột này.
+      */
+      vtpOrderNumber: facts.get(base.shipmentId)?.vtpOrderNumber ?? null,
       // TRẠNG THÁI CON TÍNH Ở ĐÚNG MỘT CHỖ — mọi nguồn dòng (tháp, case sai thông tin, kiện đã
       // đóng) đi qua đây, nên không nguồn nào có thể dùng một luật khác.
       carrier: { ...base.carrier, ...substateOf(base.carrier), trackingCapability: asTrackingCapability(capability) },
@@ -469,7 +477,8 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
     events,
     careActions: qv.careActions,
     carrierRequests: requests.map(toRequestView),
-    capabilities: carrierCapabilitiesFor({ stage: s.stage, trackingCapability: s.trackingCapability, configured: vtpConfigured(), tracking }),
+    // Địa chỉ "làm tay trên web" dựng từ MÃ VIETTEL POST, không phải `tracking` (có thể là mã Pancake).
+    capabilities: carrierCapabilitiesFor({ stage: s.stage, trackingCapability: s.trackingCapability, configured: vtpConfigured(), vtpOrderNumber: s.vtpOrderNumber }),
   };
 }
 
