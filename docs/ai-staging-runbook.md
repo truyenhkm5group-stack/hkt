@@ -305,13 +305,18 @@ validate` chạy trước để một lỗi cú pháp không bao giờ tới đ�
 **Chưa kiểm chứng được từ phiên này** (không có quyền DNS, và không truy vấn được từ container).
 Bản ghi cần có:
 
+**Đo 14/09/2026:** `erp.vnxcommerce.com` → **14.225.198.146**. `ai-staging.vnxcommerce.com`
+**không phân giải được** — chưa có bản ghi nào.
+
 ```
-Loại : A
-Tên  : ai-staging            (thành ai-staging.vnxcommerce.com)
-Giá trị: <đúng IP VPS đang chạy erp.vnxcommerce.com>
-TTL  : 300
-Proxy: TẮT (DNS only) nếu dùng Cloudflare — Caddy cần tự xin chứng chỉ Let's Encrypt
+Loại   : A
+Tên    : ai-staging            (thành ai-staging.vnxcommerce.com)
+Giá trị: 14.225.198.146        (đúng IP mà erp.vnxcommerce.com đang trỏ tới)
+TTL    : 300
+Proxy  : TẮT (DNS only) nếu dùng Cloudflare — Caddy cần tự xin chứng chỉ Let's Encrypt
 ```
+
+Chưa có bản ghi thì **không thêm khối Caddy** — và cũng chưa cần: đường hầm SSH cho đúng kết quả.
 
 Chưa trỏ DNS thì **dừng ở mục 8**, đừng thêm khối Caddy: Caddy sẽ xin chứng chỉ thất bại lặp lại
 và bị Let's Encrypt hạn chế tần suất.
