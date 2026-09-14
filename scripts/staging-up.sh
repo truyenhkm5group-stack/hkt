@@ -143,7 +143,7 @@ docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
 
 say ""
 say "── Production PHẢI không đổi ──"
-docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-' || say "  (không thấy container erp-*)"
+docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null | grep '^erp-' | sed 's/^/  /' || say "  (docker ps không liệt kê được — xem phán xét bên dưới)"
 if docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
   say "  ✓ production vẫn khoẻ"
 else

@@ -710,7 +710,7 @@ jobs:
                 echo "── migration trên CSDL bản chạy thử ──"
                 docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
                   -c "select 'đã áp: ' || count(*) from drizzle.__drizzle_migrations;" \
-                  -c "select 'bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and (table_name like 'ai\_%' or table_name like 'sales\_%');" \
+                  -c "select 'bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and table_name in ('ai_agents','ai_agent_versions','ai_events','ai_tasks','ai_runs','ai_tool_calls','ai_model_calls','ai_approvals','ai_errors','sales_conversations','sales_messages','sales_suggestions','sales_followups','sales_review_labels');" \
                   -c "select 'tin đã gửi cho khách: ' || count(*) from sales_suggestions where sent;" 2>&1 || echo "  (chưa có container CSDL bản chạy thử)"
                 echo ""
                 kiem_production ;;
