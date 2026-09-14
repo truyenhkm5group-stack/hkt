@@ -41,8 +41,11 @@ services:
     # TRẦN BỘ NHỚ — đây là lớp bảo vệ PRODUCTION, không phải lớp bảo vệ bản chạy thử.
     # Chạm trần thì Docker giết container NÀY. Không có trần thì nhân chọn tiến trình lớn nhất toàn
     # máy, và tiến trình lớn nhất đang là ERP phục vụ khách.
+    #
+    # CỐ Ý KHÔNG khai `memswap_limit`: nó cần nhân bật swap accounting, mà nhiều nhân VPS tắt sẵn —
+    # khai vào là rước một cảnh báo (hoặc một lỗi) ở đúng lúc đang dựng. Không khai thì Docker tự
+    # cho phép dùng thêm swap bằng đúng phần RAM, và swap chính là thứ vừa thêm vào để làm đệm.
     mem_limit: 320m
-    memswap_limit: 512m
     volumes:
       - vnx_ai_staging_pgdata:/var/lib/postgresql/data
     # KHÔNG publish cổng: chỉ app trong cùng mạng nội bộ mới nói chuyện được với CSDL này.
@@ -104,7 +107,6 @@ services:
     # TRẦN BỘ NHỚ, cùng lý do với CSDL: chạm trần thì Docker giết container NÀY chứ không để nhân
     # chọn nạn nhân trên toàn máy. 640 MB dư cho một tiến trình Next.js chỉ phục vụ vài người soát.
     mem_limit: 640m
-    memswap_limit: 1g
     # RESTART CÓ GIỚI HẠN. `unless-stopped` mà gặp vòng lặp OOM thì nó dựng lại mãi và đốt CPU của
     # một máy 2 lõi đang phục vụ khách. Hỏng 3 lần thì đứng yên để người xem log — một bản chạy thử
     # nằm im không hại ai, một bản chạy thử quay vòng thì có.
