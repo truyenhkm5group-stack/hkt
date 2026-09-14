@@ -2,9 +2,10 @@ import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import type { ReturnCondition } from "@/lib/constants/returns-condition";
-import { ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, isItemCondition, itemHasDiscrepancy, type ItemCondition } from "@/lib/constants/return-lifecycle";
+import { INSPECT_AGE_DAYS, ITEM_CONDITION_LABEL, ITEM_CONDITION_NEEDS_NOTE, ITEM_CONDITION_RESTOCKS, isItemCondition, itemHasDiscrepancy, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import { IS_RETURN_AWAITING_WAREHOUSE } from "@/lib/queries/return-rate";
 import { returnProductContext, type ItemsBasis, type OrderLinkBasis, type ReturnProductContext } from "@/lib/returns/product-context";
+import type { StationRow } from "@/lib/returns/inspection-filter";
 
 /**
  * ───────────── VÒNG ĐỜI KIỂM HÀNG HOÀN ─────────────
@@ -256,6 +257,14 @@ export type PendingInspection = {
   customerName: string;
   customerPhone: string;
   receivedAt: Date;
+  /**
+   * Lúc ĐVVC trả kiện về shop. `null` = chưa có chứng từ — KHÔNG lùi về `receivedAt`.
+   *
+   * Hai mốc trả lời hai câu khác nhau và không suy ra nhau: `receivedAt` là lúc ERP biết, mốc này
+   * là lúc kiện thật sự quay về. Một lượt đối soát sổ giấy ghi nhận cả trăm kiện trong một giây,
+   * nên `receivedAt` của chúng gần như bằng nhau — chỉ mốc ĐVVC mới sắp được chúng theo thời gian.
+   */
+  returnedAt: Date | null;
   receivedBy: string;
   /** Số món KỲ VỌNG quay về. `null` = CHƯA BIẾT (không ghép được đơn) — không phải 0. */
   expectedQty: number | null;
@@ -319,6 +328,7 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
       customerName: sql<string>`coalesce((select coalesce(nullif(o2.bill_full_name, ''), nullif(o2.ship_full_name, ''), '') from orders o2 where o2.id = ${ins.orderId}), '')`,
       customerPhone: sql<string>`coalesce((select coalesce(nullif(o2.bill_phone, ''), nullif(o2.ship_phone, ''), '') from orders o2 where o2.id = ${ins.orderId}), '')`,
       receivedAt: ins.receivedAt,
+      returnedAt: s.returnedAt,
       receivedBy: ins.receivedBy,
       expectedQty: sql<number>`coalesce((select sum(oi.quantity) from order_items oi where oi.order_id = ${ins.orderId}), 0)`,
       items: ITEMS_JSON,
@@ -358,6 +368,7 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
       customerName: r.customerName ?? "",
       customerPhone: r.customerPhone ?? "",
       receivedAt: r.receivedAt,
+      returnedAt: r.returnedAt ?? null,
       receivedBy: r.receivedBy,
       // CHƯA BIẾT là null — không ép về 0, và không dùng `||` (nó nuốt luôn một số 0 thật).
       expectedQty: itemsBasis === "NONE" ? null : items.reduce((a, x) => a + x.quantity, 0),
@@ -367,6 +378,36 @@ export async function listPendingInspections(limit = 100): Promise<PendingInspec
       items,
     };
   });
+}
+
+/**
+ * MỘT HÌNH DUY NHẤT ĐI QUA RANH GIỚI MÁY CHỦ → TRÌNH DUYỆT.
+ *
+ * Trạm đếm nhận dòng từ HAI đường: danh sách dựng lúc vẽ trang, và kết quả bắn mã trả về từ server
+ * action. Hai đường phải cho ra đúng một hình, nếu không thì kiện vừa bắn hiển thị khác kiện có sẵn
+ * — và bộ lọc, phép sắp xếp đọc trúng chỗ trống.
+ *
+ * `Date` → chuỗi ISO là chỗ dễ trượt nhất: RSC chuyển được `Date` nên bản dựng lúc vẽ trang trả về
+ * `Date`, còn nhánh nào lỡ đi qua JSON lại trả về chuỗi. Hai kiểu ấy so sánh và định dạng khác nhau
+ * mà TypeScript không kêu, vì `any` từ ranh giới đã nuốt mất. Ép về chuỗi ở ĐÚNG một chỗ này.
+ */
+export function toStationRow(p: PendingInspection): StationRow {
+  return {
+    shipmentId: p.shipmentId,
+    code: p.code,
+    orderId: p.orderId,
+    orderCode: p.orderCode,
+    customerName: p.customerName,
+    customerPhone: p.customerPhone,
+    receivedBy: p.receivedBy,
+    receivedAt: p.receivedAt.toISOString(),
+    returnedAt: p.returnedAt ? p.returnedAt.toISOString() : null,
+    expectedQty: p.expectedQty,
+    itemsBasis: p.itemsBasis,
+    linkBasis: p.linkBasis,
+    ageDays: p.ageDays,
+    items: p.items.map((it) => ({ variantId: it.variantId ?? null, sku: it.sku, name: it.name, color: it.color, size: it.size, quantity: it.quantity })),
+  };
 }
 
 /**
@@ -441,7 +482,7 @@ export async function inspectionSummary(): Promise<InspectionSummary> {
     db
       .select({
         pending: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED')`,
-        stale: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '3 days')`,
+        stale: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - make_interval(days => ${INSPECT_AGE_DAYS.TON_DONG}))`,
         inspected: sql<number>`count(*) filter (where ${ins.status} = 'INSPECTED')`,
         restockedQty: sql<number>`coalesce(sum(${ins.restockQty}), 0)`,
         unsellableQty: sql<number>`coalesce(sum(${ins.unsellableQty}), 0)`,
@@ -499,10 +540,10 @@ export async function inspectionDashboard(): Promise<InspectionDashboard> {
         missing: sql<number>`count(*) filter (where ${ins.condition} = 'MISSING')`,
         wrongItem: sql<number>`count(*) filter (where ${ins.condition} = 'WRONG_ITEM')`,
         unsellable: sql<number>`count(*) filter (where ${ins.condition} = 'UNSELLABLE')`,
-        d1: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} >= now() - interval '1 day')`,
-        d13: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '1 day' and ${ins.receivedAt} >= now() - interval '3 days')`,
-        d37: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '3 days' and ${ins.receivedAt} >= now() - interval '7 days')`,
-        d7: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - interval '7 days')`,
+        d1: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} >= now() - make_interval(days => ${INSPECT_AGE_DAYS.TUOI}))`,
+        d13: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - make_interval(days => ${INSPECT_AGE_DAYS.TUOI}) and ${ins.receivedAt} >= now() - make_interval(days => ${INSPECT_AGE_DAYS.TON_DONG}))`,
+        d37: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - make_interval(days => ${INSPECT_AGE_DAYS.TON_DONG}) and ${ins.receivedAt} >= now() - make_interval(days => ${INSPECT_AGE_DAYS.QUA_HAN}))`,
+        d7: sql<number>`count(*) filter (where ${ins.status} = 'RECEIVED' and ${ins.receivedAt} < now() - make_interval(days => ${INSPECT_AGE_DAYS.QUA_HAN}))`,
         oldest: sql<number>`coalesce(extract(day from now() - min(${ins.receivedAt}) filter (where ${ins.status} = 'RECEIVED')), 0)`,
       })
       .from(ins),
@@ -531,6 +572,90 @@ export async function inspectionDashboard(): Promise<InspectionDashboard> {
   };
 }
 
+/**
+ * ═══════════ "NHẬN ĐỦ" CHO KIỆN NHIỀU MẪU MÃ ═══════════
+ *
+ * ─── VÌ SAO ĐƯỜNG ĐẾM NHANH TỪ CHỐI KIỆN NHIỀU MẪU MÃ, VÀ VÌ SAO CHỖ NÀY KHÁC ───
+ *
+ * `singleVariantForParcel` chặn kiện nhiều mẫu mã vì đường đó nhận MỘT CON SỐ TỔNG. Kiện 2 áo đỏ +
+ * 1 áo đen mà người đếm gõ "2" thì không ai biết 2 đó là món nào — và mọi cách chia đều là đoán.
+ * Luật ấy đúng và không được nới.
+ *
+ * Nhưng **"nhận đủ" KHÔNG phải một con số tổng**. Nó là một khẳng định về TỪNG DÒNG: mọi dòng hàng
+ * kỳ vọng đều quay về, đúng bằng số kỳ vọng của chính nó. Phân bổ được xác định hoàn toàn bởi danh
+ * sách hàng kỳ vọng — không còn gì để đoán.
+ *
+ * ─── NÊN NÓ KHÔNG PHẢI MỘT ĐƯỜNG GHI MỚI ───
+ *
+ * Hàm này CHỈ dựng danh sách món (mỗi dòng: thực nhận = kỳ vọng, kết luận `OK`) rồi giao cho
+ * `recordItemInspection` — đường đếm từng món đã có. Nhờ vậy nó thừa hưởng nguyên vẹn: một giao
+ * dịch, khoá dòng chống bấm đúp, MỘT phiếu tái nhập với MỘT DÒNG MỖI MẪU MÃ, chặn đếm lần hai, và
+ * đóng cả vận đơn chiều đi khi kiện đi qua vận đơn chiều về.
+ *
+ * Đo trên production 14/09/2026: 300 kiện chờ đếm, phần lớn có 2 mẫu mã — với luật cũ thì mỗi kiện
+ * phải mở ngăn kéo đếm từng món, tức 300 lần mở ngăn kéo cho những kiện còn nguyên seal.
+ *
+ * ─── BỐN THỨ VẪN CHẶN ───
+ *
+ *  1. Kiện chưa ghép được đơn (`UNRESOLVED`) — không có danh sách kỳ vọng thì không có gì để "đủ".
+ *  2. Mã gốc lần ra NHIỀU đơn (`AMBIGUOUS`) — nhiều danh sách kỳ vọng, ERP không chọn hộ.
+ *  3. Dòng hàng chưa ghép được mẫu mã — món đó không biết cộng vào đâu, và ghi "đủ" cho nó là ghi
+ *     một món vào sổ mà tồn không bao giờ nhận được.
+ *  4. Danh sách chỉ SUY TỪ CẢ ĐƠN (`ORDER_ONLY`) — người đếm phải nói rõ đã đối chiếu thực tế
+ *     (`orderOnlyConfirmed`), nếu không một kiện hoàn MỘT PHẦN sẽ được ghi là về đủ.
+ */
+export type FullReturnResult = { ok: true; restocked: number; receiptId: string | null; variants: number } | { error: string };
+
+export async function recordFullReturnInspection(input: {
+  shipmentId: string;
+  actor: Actor;
+  note?: string;
+  orderOnlyConfirmed?: boolean;
+  /** Bối cảnh đã ghép sẵn — chỉ để chạy hàng loạt không N+1. */
+  ctx?: ReturnProductContext;
+}): Promise<FullReturnResult> {
+  const ctx = input.ctx ?? (await returnProductContext([input.shipmentId])).get(input.shipmentId);
+  if (!ctx || ctx.basis === "UNRESOLVED") {
+    return { error: "Kiện này chưa ghép được đơn nên không có danh sách hàng kỳ vọng — đếm từng món và ghi rõ mã hàng." };
+  }
+  if (ctx.basis === "AMBIGUOUS") {
+    return { error: `Mã gốc ${ctx.viaBaseCode ?? ""} lần ra ${ctx.candidateOrderIds.length} đơn khác nhau — ERP không chọn hộ. CS gắn đúng đơn trước.` };
+  }
+  // Dòng số lượng 0 không phải một món quay về; bỏ ra thay vì để `recordItemInspection` từ chối cả kiện.
+  const items = ctx.items.filter((it) => it.quantity > 0);
+  if (!items.length) return { error: "Đơn của kiện này không còn dòng hàng nào — đếm từng món và ghi rõ." };
+
+  const chuaGhep = items.filter((it) => !it.variantId);
+  if (chuaGhep.length) {
+    return {
+      error: `${chuaGhep.length} dòng hàng chưa ghép được mẫu mã (${chuaGhep.map((it) => it.sku || it.name).join(", ")}) — ghi "đủ" cho chúng là ghi một món mà tồn không bao giờ nhận được. Đồng bộ sản phẩm từ Pancake rồi đếm lại.`,
+    };
+  }
+
+  const res = await recordItemInspection({
+    shipmentId: input.shipmentId,
+    actor: input.actor,
+    orderOnlyConfirmed: input.orderOnlyConfirmed,
+    ctx,
+    items: items.map((it) => ({
+      expectedVariantId: it.variantId,
+      expectedSku: it.sku,
+      expectedName: it.name,
+      expectedColor: it.color,
+      expectedSize: it.size,
+      expectedQty: it.quantity,
+      // THỰC NHẬN = KỲ VỌNG. Đây chính là nội dung của hai chữ "nhận đủ", viết ra thành số.
+      actualVariantId: it.variantId,
+      actualSku: it.sku,
+      actualQty: it.quantity,
+      condition: "OK" as const,
+      note: "",
+    })),
+  });
+  if ("error" in res) return res;
+  return { ok: true, restocked: res.restocked, receiptId: res.receiptId, variants: new Set(items.map((it) => it.variantId)).size };
+}
+
 export type BulkInspectionResult = {
   done: number;
   /** Kiện KHÔNG xử lý được, kèm mã kiện để người đếm nhận ra và lý do để biết làm gì tiếp. */
@@ -555,6 +680,13 @@ export async function recordInspectionBulk(
   condition: ReturnCondition,
   note: string,
   actor: Actor,
+  /**
+   * Người đếm xác nhận ĐÃ ĐỐI CHIẾU THỰC TẾ với những kiện mà danh sách món chỉ SUY TỪ CẢ ĐƠN.
+   *
+   * Bắt buộc phải là một lựa chọn tường minh trên màn hình, không phải mặc định: thiếu nó thì một
+   * kiện hoàn MỘT PHẦN sẽ được ghi là về đủ, và phần chênh biến mất khỏi sổ.
+   */
+  orderOnlyConfirmed = false,
 ): Promise<BulkInspectionResult> {
   const ids = [...new Set(shipmentIds.filter((x) => x.trim()))];
   if (!ids.length) return { done: 0, failed: [] };
@@ -570,32 +702,30 @@ export async function recordInspectionBulk(
     const row = byId.get(id);
     const ctx = contexts.get(id);
     const code = row?.code ?? null;
-    // "Nhận đủ" hàng loạt = đúng bằng số kỳ vọng. Chưa biết số kỳ vọng thì không có gì để "đủ" —
-    // kiện đó phải được đếm tay, không được suy ra 0 rồi ghi "bán lại được, 0 món".
+    /*
+      "NHẬN ĐỦ" HÀNG LOẠT ĐI QUA ĐƯỜNG ĐẾM TỪNG MÓN, KHÔNG QUA ĐƯỜNG SỐ TỔNG.
+
+      Trước bản này nó gọi `singleVariantForParcel` nên MỌI kiện nhiều mẫu mã đều bị từ chối — đo
+      trên production 14/09/2026: phần lớn trong 300 kiện chờ đếm có 2 mẫu mã, tức thao tác hàng
+      loạt gần như không dùng được cho đúng nhóm đông nhất.
+
+      "Đủ" là khẳng định theo TỪNG DÒNG chứ không phải một con số tổng, nên phân bổ được xác định
+      hoàn toàn — không có gì để đoán. `recordFullReturnInspection` dựng đúng danh sách đó rồi giao
+      cho đường đếm từng món; mọi ràng buộc của đường ấy giữ nguyên.
+    */
     if (condition === "RESTOCKABLE") {
       if (!row || row.expectedQty === null) {
         failed.push({ shipmentId: id, code, error: "chưa ghép được đơn nên không biết số kỳ vọng — đếm tay từng kiện" });
         continue;
       }
-      const one = singleVariantForParcel(ctx);
-      if ("error" in one) {
-        failed.push({ shipmentId: id, code, error: one.error });
-        continue;
-      }
+      const r = await recordFullReturnInspection({ shipmentId: id, actor, note, orderOnlyConfirmed, ctx });
+      if ("error" in r) failed.push({ shipmentId: id, code, error: r.error });
+      else done += 1;
+      continue;
     }
     const qty = row?.expectedQty ?? 0;
-    const r = await recordInspectionWithContext(
-      {
-        shipmentId: id,
-        condition,
-        // Mọi kết luận khác "nhận đủ" KHÔNG cộng tồn.
-        restockQty: condition === "RESTOCKABLE" ? qty : 0,
-        unsellableQty: condition === "RESTOCKABLE" ? 0 : qty,
-        note,
-        actor,
-      },
-      ctx,
-    );
+    // Tới đây chắc chắn KHÔNG phải "nhận đủ" — mọi kết luận còn lại đều KHÔNG cộng tồn.
+    const r = await recordInspectionWithContext({ shipmentId: id, condition, restockQty: 0, unsellableQty: qty, note, actor }, ctx);
     if ("error" in r) failed.push({ shipmentId: id, code, error: r.error });
     else done += 1;
   }
@@ -643,7 +773,20 @@ export type ItemInspectionResult =
  * đếm được, không phân bổ theo tỷ lệ dòng hàng của đơn. Phân bổ theo tỷ lệ là phép đoán chấp nhận
  * được khi chỉ biết tổng số; khi đã biết từng món mà vẫn đoán thì là làm hỏng dữ liệu tốt hơn.
  */
-export async function recordItemInspection(input: { shipmentId: string; items: InspectedItemInput[]; actor: Actor; orderOnlyConfirmed?: boolean }): Promise<ItemInspectionResult> {
+export async function recordItemInspection(input: {
+  shipmentId: string;
+  items: InspectedItemInput[];
+  actor: Actor;
+  orderOnlyConfirmed?: boolean;
+  /**
+   * Bối cảnh đã ghép sẵn — CHỈ để tránh N+1 khi chạy hàng loạt.
+   *
+   * Không truyền thì hàm tự tra như cũ. Truyền vào thì nơi gọi phải lấy nó từ CHÍNH
+   * `returnProductContext`, không được tự dựng: đây là căn cứ quyết định món nào vào tồn, và một
+   * bối cảnh tự chế là một đường vòng qua toàn bộ bậc thang chứng cứ của `product-context.ts`.
+   */
+  ctx?: ReturnProductContext;
+}): Promise<ItemInspectionResult> {
   const db = await getDb();
   const [row] = await db.select().from(ins).where(eq(ins.shipmentId, input.shipmentId));
   if (!row) return { error: "Kiện này chưa được ghi nhận đã về kho" };
@@ -653,7 +796,7 @@ export async function recordItemInspection(input: { shipmentId: string; items: I
   // CĂN CỨ DANH SÁCH MÓN. "Chỉ suy từ cả đơn" (không có phiếu trả từng dòng) không được mặc định
   // là đủ: người kho phải nói rõ đã đối chiếu thực tế, nếu không một kiện hoàn một phần sẽ cộng
   // tồn cả đơn.
-  const ctx = (await returnProductContext([input.shipmentId])).get(input.shipmentId);
+  const ctx = input.ctx ?? (await returnProductContext([input.shipmentId])).get(input.shipmentId);
   if (ctx?.itemsBasis === "ORDER_ONLY" && !input.orderOnlyConfirmed) {
     return { error: "Đơn này không có phiếu trả từng món — danh sách kỳ vọng chỉ suy từ cả đơn. Xác nhận đã đối chiếu thực tế rồi mới lưu." };
   }

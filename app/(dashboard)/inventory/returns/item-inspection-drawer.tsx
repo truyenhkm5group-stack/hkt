@@ -53,6 +53,7 @@ export function ItemInspectionDrawer({
   disabled,
   onDone,
   itemsBasis,
+  highlight,
 }: {
   shipmentId: string;
   code: string | null;
@@ -62,6 +63,13 @@ export function ItemInspectionDrawer({
   onDone?: () => void;
   /** Căn cứ danh sách kỳ vọng: có phiếu trả từng món, hay chỉ suy từ cả đơn. Mặc định ORDER_ONLY (thận trọng). */
   itemsBasis?: ItemsBasis;
+  /**
+   * Đây là lối đi DUY NHẤT cho kiện đang xử lý (kiện nhiều mẫu mã đếm không khớp kỳ vọng).
+   *
+   * Khi đường nhanh đã bị chặn, một nút viền mờ đứng cuối hàng không đọc ra là "bấm vào đây" — nó
+   * đọc ra là "còn một nút nữa". Nổi lên để người đếm không đứng lại nhìn cái nút đang mờ.
+   */
+  highlight?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [daDoiChieu, setDaDoiChieu] = React.useState(false);
@@ -125,7 +133,7 @@ export function ItemInspectionDrawer({
 
   return (
     <>
-      <Button size="sm" variant="outline" className="h-8" disabled={disabled} onClick={() => setOpen(true)}>
+      <Button size="sm" variant={highlight ? "default" : "outline"} className={cn("h-8", highlight && "ring-2 ring-primary/30")} disabled={disabled} onClick={() => setOpen(true)}>
         <ClipboardCheck className="size-3.5" /> Kiểm từng món
       </Button>
 

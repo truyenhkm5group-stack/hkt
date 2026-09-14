@@ -76,6 +76,8 @@ import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
 import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
+import { testInspectionFilter } from "./inspection-filter.test";
+import { testReturnFullReceive } from "./return-full-receive.test";
 import { testReturnProductContext } from "./return-product-context.test";
 import { testShipmentProductReport } from "./shipment-product-report.test";
 import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
@@ -1560,6 +1562,8 @@ async function main() {
   await testShipmentProductReport(db);
   await testReturnItemInspection(db);
   await testHmtReturnReconcile(db);
+  testInspectionFilter();
+  await testReturnFullReceive(db);
   // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);

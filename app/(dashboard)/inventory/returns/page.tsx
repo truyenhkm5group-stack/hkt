@@ -11,7 +11,8 @@ import { can,  } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
-import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
+import { inspectionDashboard, listPendingInspections, toStationRow } from "@/lib/returns/inspection";
+import { PENDING_STATION_CAP } from "@/lib/returns/inspection-filter";
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
 import { latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
@@ -49,11 +50,30 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbookMeta(), returnExceptionQueues(), returnDataQuality()]);
+  /*
+    TẢI TRỌN HÀNG ĐỢI ĐẾM (tới trần), KHÔNG PHẢI MỘT TRANG.
+
+    Bộ lọc mã hàng / màu / size của trạm đếm chạy ở trình duyệt — buộc phải vậy, vì danh sách món
+    trong kiện do `returnProductContext` dựng sau truy vấn chứ không nằm ở một cột nào. Lọc trong
+    trình duyệt trên một danh sách bị cắt là đúng cái bẫy mô tả ngay trên kia: màn hình nói "0 kiện"
+    và người đứng ở kho đọc câu đó thành "kiện này không có trong hệ thống".
+
+    Nên: tải tới `PENDING_STATION_CAP`, và truyền xuống cả TỔNG THẬT để trạm đếm tự nói ra khi phần
+    đang lọc không phải toàn bộ. Trần vẫn phải có — vẽ vài nghìn thẻ thì trình duyệt đứng hình.
+  */
+  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([
+    inspectionDashboard(),
+    listPendingInspections(PENDING_STATION_CAP),
+    receiveQueue({ limit: 400, q: timKien }),
+    hmtRunSummary(),
+    latestHmtWorkbookMeta(),
+    returnExceptionQueues(),
+    returnDataQuality(),
+  ]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
 
-Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý không kéo cột `content`
+    Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý không kéo cột `content`
     (base64 ~80 KB). Kéo về rồi giải mã chỉ để hiện tên tệp là bắt MỌI lượt mở trang trả tiền cho
     một khối byte không ai đọc — và vì Node chạy một luồng, phép giải mã đồng bộ ấy chặn luôn các
     yêu cầu khác đang chờ.
@@ -216,16 +236,18 @@ Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý khô
       ) : null}
 
       <SectionCard
-        title={`Kiện đã về, chờ đếm${pending.length ? ` · ${formatNumber(pending.length)}` : ""}`}
+        title={`Kiện đã về, chờ đếm${bang.pendingInspection ? ` · ${formatNumber(bang.pendingInspection)}` : ""}`}
         description={
           canWrite
-            ? "Cũ nhất trước. Bắn mã để nhảy thẳng tới kiện đang cầm trên tay; chọn nhiều kiện cùng kết luận để xử lý một lượt."
+            ? "Lọc theo mã hàng / màu / size để gom cả sọt rồi đếm một lượt. Bắn mã để nhảy thẳng tới kiện đang cầm trên tay; chọn nhiều kiện cùng kết luận để xử lý hàng loạt."
             : "Bạn không có quyền cập nhật kho nên chỉ xem được danh sách."
         }
+        hint="“Nhận đủ” = mỗi dòng hàng của kiện về đúng số kỳ vọng của nó, kể cả kiện nhiều mẫu mã. Đếm THIẾU trên kiện nhiều mẫu mã thì phải mở “Kiểm từng món”: một con số tổng không nói được mẫu nào hụt, và ghi bừa làm sai tồn của nhiều mẫu mã cùng lúc."
         padded={false}
       >
         <div className="p-3">
-          <InspectionStation rows={pending} canWrite={canWrite} />
+          {/* Tiêu đề đếm TỔNG THẬT; danh sách chỉ tải tới trần — trạm đếm nói ra chênh lệch đó. */}
+          <InspectionStation rows={pending.map(toStationRow)} canWrite={canWrite} total={bang.pendingInspection} />
         </div>
       </SectionCard>
     </div>

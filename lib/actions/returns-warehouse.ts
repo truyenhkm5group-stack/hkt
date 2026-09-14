@@ -8,7 +8,8 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
 import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
-import { findPendingByCode, recordInspection, recordInspectionBulk, recordItemInspection, type PendingInspection } from "@/lib/returns/inspection";
+import { findPendingByCode, recordFullReturnInspection, recordInspection, recordInspectionBulk, recordItemInspection, toStationRow } from "@/lib/returns/inspection";
+import type { StationRow } from "@/lib/returns/inspection-filter";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
 
 /**
@@ -160,10 +161,60 @@ export async function submitReturnInspection(input: unknown): Promise<Inspection
   };
 }
 
+/**
+ * MỘT KIỆN, KẾT LUẬN "NHẬN ĐỦ" — kể cả kiện nhiều mẫu mã.
+ *
+ * Tách khỏi `submitReturnInspection` (đường nhận MỘT CON SỐ) vì hai đường trả lời hai câu khác
+ * nhau: "tôi đếm được N món" cần biết N vào mẫu mã nào, còn "về đủ" thì danh sách kỳ vọng đã nói
+ * hết. Trộn hai thứ vào một hành động là để một ngày nào đó một con số tổng đi lạc vào nhánh không
+ * kiểm tra phân bổ.
+ */
+const fullReturnSchema = z.object({
+  shipmentId: z.string().min(1).max(100),
+  note: z.string().trim().max(500).default(""),
+  orderOnlyConfirmed: z.boolean().default(false),
+});
+
+export type FullReturnActionResult = { ok: true; restocked: number; variants: number; message: string } | { error: string };
+
+export async function submitFullReturn(input: unknown): Promise<FullReturnActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = fullReturnSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const r = await recordFullReturnInspection({ ...parsed.data, actor: khoActor(user) });
+  if ("error" in r) return { error: r.error };
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected",
+    entity: "shipments",
+    entityId: parsed.data.shipmentId,
+    detail: { condition: "RESTOCKABLE", full: true, restockQty: r.restocked, variants: r.variants, receiptId: r.receiptId ?? "", orderOnlyConfirmed: parsed.data.orderOnlyConfirmed },
+  });
+  revalidate();
+  return {
+    ok: true,
+    restocked: r.restocked,
+    variants: r.variants,
+    message: `Đã nhận đủ: ${r.restocked} món của ${r.variants} mẫu mã vào lại tồn.`,
+  };
+}
+
 const bulkInspectSchema = z.object({
   shipmentIds: z.array(z.string().min(1).max(100)).min(1, "Chưa chọn kiện nào").max(200, "Tối đa 200 kiện mỗi lượt"),
   condition: z.enum(RETURN_CONDITIONS),
   note: z.string().trim().max(500).default(""),
+  /**
+   * Người đếm khẳng định ĐÃ ĐỐI CHIẾU THỰC TẾ với kiện mà danh sách món chỉ suy từ CẢ ĐƠN.
+   *
+   * Mặc định `false`, và phải là một ô tick tường minh trên màn hình. Kiện hoàn MỘT PHẦN có danh
+   * sách kỳ vọng bằng cả đơn; ghi "đủ" cho nó mà chưa ai mở ra xem là cộng vào tồn phần hàng khách
+   * vẫn đang giữ.
+   */
+  orderOnlyConfirmed: z.boolean().default(false),
 });
 
 export type BulkInspectionActionResult =
@@ -186,9 +237,10 @@ export type BulkInspectionActionResult =
  * KHÔNG có ô nhập số ở đường hàng loạt: "nhận đủ" nghĩa là ĐÚNG BẰNG số ERP đã xuất. Muốn khai một
  * con số khác thì phải đếm từng kiện, vì đó là lúc người đếm thật sự nhìn vào trong kiện.
  *
- * "Nhận đủ" hàng loạt CHỈ áp cho kiện MỘT mẫu mã đã ghép được đơn (cùng luật với `recordInspection`).
- * Kiện nhiều mẫu mã hay chưa ghép được đơn bị BỎ QUA và nêu lý do theo số kiện — không phân bổ,
- * không ghi 0 lặng lẽ.
+ * "Nhận đủ" hàng loạt áp được cho CẢ kiện nhiều mẫu mã (`recordFullReturnInspection`): "đủ" là
+ * khẳng định theo TỪNG DÒNG nên phân bổ được xác định hoàn toàn, không còn gì để đoán. Kiện chưa
+ * ghép được đơn, kiện mã gốc ra nhiều đơn, và kiện có dòng hàng chưa ghép mẫu mã vẫn bị BỎ QUA và
+ * nêu lý do theo số kiện — không phân bổ, không ghi 0 lặng lẽ.
  *
  * Kiện nào hỏng thì báo tên kiện đó, không nuốt lỗi: 197/200 thành công mà im lặng về 3 kiện còn
  * lại là cách chắc chắn nhất để ba kiện ấy biến mất khỏi sổ.
@@ -198,17 +250,17 @@ export async function submitBulkInspection(input: unknown): Promise<BulkInspecti
   if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
   const parsed = bulkInspectSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { shipmentIds, condition, note } = parsed.data;
+  const { shipmentIds, condition, note, orderOnlyConfirmed } = parsed.data;
   if (CONDITION_NEEDS_NOTE[condition] && !note) return { error: `Kết luận “${CONDITION_LABEL[condition]}” phải ghi rõ lý do` };
 
-  const r = await recordInspectionBulk(shipmentIds, condition, note, khoActor(user));
+  const r = await recordInspectionBulk(shipmentIds, condition, note, khoActor(user), orderOnlyConfirmed);
   await audit({
     userId: user.id,
     userEmail: user.email,
     action: "return.inspected.bulk",
     entity: "shipments",
     entityId: "",
-    detail: { condition, requested: shipmentIds.length, done: r.done, failed: r.failed.length, note },
+    detail: { condition, requested: shipmentIds.length, done: r.done, failed: r.failed.length, note, orderOnlyConfirmed },
   });
   revalidate();
   const grouped = new Map<string, number>();
@@ -225,7 +277,14 @@ export async function submitBulkInspection(input: unknown): Promise<BulkInspecti
   };
 }
 
-export type ScanResult = { ok: true; found: PendingInspection } | { error: string };
+/**
+ * Trả về ĐÚNG hình mà trạm đếm đang vẽ (`StationRow`), không phải hình thô của tầng truy vấn.
+ *
+ * Trước bản này action trả `PendingInspection` (có `Date`) rồi trình duyệt ép kiểu sang hình của
+ * bảng — một lời khẳng định kiểu mà trình biên dịch không kiểm được, và kiện vừa bắn có mốc thời
+ * gian khác kiểu với mọi kiện khác trong danh sách.
+ */
+export type ScanResult = { ok: true; found: StationRow } | { error: string };
 
 /** QUÉT MÃ → ra đúng một kiện. Không thấy thì nói rõ vì sao, đừng để người đếm bắn lại vô ích. */
 export async function scanReturnByCode(code: string): Promise<ScanResult> {
@@ -235,7 +294,7 @@ export async function scanReturnByCode(code: string): Promise<ScanResult> {
   if (!q) return { error: "Chưa có mã nào" };
   const found = await findPendingByCode(q);
   if (!found) return { error: `Không thấy kiện “${q}” trong danh sách chờ đếm — có thể kiện này chưa được bấm “kho đã nhận”, hoặc đã đếm rồi.` };
-  return { ok: true, found };
+  return { ok: true, found: toStationRow(found) };
 }
 
 /**
