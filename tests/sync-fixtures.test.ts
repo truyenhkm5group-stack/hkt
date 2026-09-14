@@ -76,6 +76,8 @@ import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
 import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
+import { testInspectionFilter } from "./inspection-filter.test";
+import { testReturnFullReceive } from "./return-full-receive.test";
 import { testReturnProductContext } from "./return-product-context.test";
 import { testShipmentProductReport } from "./shipment-product-report.test";
 import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
@@ -120,6 +122,7 @@ import {
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
+import { testVtpTrackingLink } from "./vtp-tracking-link.test";
 import { testDeliveryTower } from "./delivery-tower.test";
 import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
@@ -1499,6 +1502,7 @@ async function main() {
   await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();
+  testVtpTrackingLink();
   testSmokeCoverage();
   testOperatingFunnel();
   testLogisticsFreshness();
@@ -1559,6 +1563,8 @@ async function main() {
   await testShipmentProductReport(db);
   await testReturnItemInspection(db);
   await testHmtReturnReconcile(db);
+  testInspectionFilter();
+  await testReturnFullReceive(db);
   // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);

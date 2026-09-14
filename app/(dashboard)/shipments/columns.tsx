@@ -6,6 +6,7 @@ import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { CopyButton } from "@/components/misc";
 import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
+import { VtpTrackingLink } from "@/components/vtp-tracking-link";
 import { Money } from "@/components/ui-bits";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { ShipmentListRow } from "@/lib/queries/shipments";
@@ -66,6 +67,12 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
               {number ?? "—"}
             </RowLink>
             {number ? <CopyButton value={number} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+            {/*
+              TRA CỨU THẲNG TRÊN VIETTELPOST — cùng hàm dựng địa chỉ với nút ở trang chi tiết, nên
+              hai nơi luôn mở ra đúng một trang. Chỉ hiện khi có MÃ VIETTEL POST: mã đang vẽ ở trên
+              có thể là `tracking_code` của Pancake, tra bằng nó thì trang ĐVVC báo không tìm thấy.
+            */}
+            <VtpTrackingLink code={s.vtpOrderNumber} className="size-5 shrink-0 [&_svg]:size-3" />
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <Truck className="size-3.5 shrink-0" />

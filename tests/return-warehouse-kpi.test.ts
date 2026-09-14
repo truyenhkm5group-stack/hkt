@@ -5,6 +5,7 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { AGE_BUCKETS, INSPECT_TO_RESTOCK_SLA_HOURS, RECEIVE_TO_INSPECT_SLA_HOURS, RETURN_KPI_GAPS } from "@/lib/constants/return-kpi";
 import { CASE_SLA_HOURS } from "@/lib/constants/action-queue";
+import { INSPECT_AGE_DAYS } from "@/lib/constants/return-lifecycle";
 import { RETURN_STAGE_BY_KEY } from "@/lib/constants/return-pipeline";
 import { inspectionDashboard } from "@/lib/returns/inspection";
 import { returnByInspector, returnBySku, returnThroughput, returnWarehouseKpi } from "@/lib/queries/return-warehouse-kpi";
@@ -44,6 +45,23 @@ export async function testReturnWarehouseKpi(db: Db) {
     AGE_BUCKETS[AGE_BUCKETS.length - 1].fromHours,
     RECEIVE_TO_INSPECT_SLA_HOURS,
     "ranh giới nhóm cuối phải TRÙNG hạn xử lý, nếu không ô 'quá hạn' và nhóm tuổi cuối sẽ nói hai tập kiện khác nhau trên cùng màn hình",
+  );
+
+  /*
+    ═══ HAI BỘ MỐC TUỔI SỐNG CẠNH NHAU — PHẢI ĐỒNG Ý VỚI NHAU Ở CHỖ "TRỄ" BẮT ĐẦU ═══
+
+    Trang này có hai thứ đo tuổi, và cả hai đều có lý do tồn tại:
+     · `AGE_BUCKETS` (GIỜ) — dải HIỂN THỊ, gắn thẳng vào hạn xử lý;
+     · `INSPECT_AGE_DAYS` (NGÀY) — bộ lọc ở trạm đếm, người kho chọn "chờ ≥ 3 ngày".
+
+    Chúng đang trùng nhau ở mốc "trễ" (3 ngày = 72 giờ), nhưng đó mới chỉ là TRÙNG HỢP: không có gì
+    giữ cho một bên đổi mà bên kia đổi theo. Khi đó màn hình sẽ gọi một kiện là quá hạn ở dải trên
+    còn bộ lọc thì không — và người kho tin bộ lọc.
+  */
+  assert.equal(
+    INSPECT_AGE_DAYS.TON_DONG * 24,
+    RECEIVE_TO_INSPECT_SLA_HOURS,
+    "mốc 'tồn đọng' của bộ lọc trạm đếm phải bằng đúng hạn nhận→đếm, nếu không dải tuổi và bộ lọc sẽ gọi hai tập kiện khác nhau là 'trễ'",
   );
 
   /* ═══════════ 3 · FIXTURE: MỘT KIỆN BA MÓN, MỘT KIỆN QUÁ HẠN ═══════════ */

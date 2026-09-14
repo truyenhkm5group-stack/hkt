@@ -132,3 +132,23 @@ export function itemHasDiscrepancy(item: { expectedQty: number; actualQty: numbe
  * (AGENTS.md mục 7). Ở `lib/constants` để cả truy vấn máy chủ lẫn bảng ở trình duyệt dùng chung.
  */
 export const RECEIVE_SLA_DAYS = 3;
+
+/**
+ * ═══════════ TUỔI KIỆN CHỜ ĐẾM — MỘT BỘ MỐC, DÙNG Ở BA CHỖ ═══════════
+ *
+ * Cùng ba con số này xuất hiện ở: dải "tuổi kiện chờ đếm" đầu trang (đếm bằng SQL), thẻ "kiện quá
+ * hạn chưa đếm" (`inspectionSummary.stale`), và bộ lọc tuổi ở trạm đếm (lọc trong trình duyệt).
+ * Trước bản này chúng nằm rời trong ba câu lệnh — sửa một chỗ thì hai chỗ kia lặng lẽ nói số khác,
+ * và người đọc không có cách nào biết ba khối trên cùng một màn hình đang đo ba thứ.
+ *
+ * Đây là MỐC TRÌNH BÀY (chia nhóm để nhìn), không phải ngưỡng nghiệp vụ tính ra tiền — nhưng vẫn
+ * chỉ được đổi ở đúng chỗ này.
+ */
+export const INSPECT_AGE_DAYS = {
+  /** Mới về trong vòng một ngày. */
+  TUOI: 1,
+  /** Quá mốc này mà chưa đếm ⇒ "tồn đọng": hàng nằm trong kho mà sổ chưa biết. */
+  TON_DONG: 3,
+  /** Quá mốc này ⇒ đỏ. */
+  QUA_HAN: 7,
+} as const;

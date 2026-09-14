@@ -166,3 +166,27 @@ export const SHIPMENT_DIRECTION_LABEL: Record<string, string> = {
   RETURN: "Chiều hoàn",
   REPLACEMENT: "Gửi thay thế",
 };
+
+/**
+ * ═══════════ MỘT ĐƯỜNG DỰNG ĐỊA CHỈ TRA CỨU TRÊN viettelpost.vn ═══════════
+ *
+ * Trước bản này cùng một chuỗi địa chỉ được gõ lại ở BỐN nơi (trang chi tiết vận đơn, trang chi
+ * tiết đơn hàng, bàn care, ma trận năng lực ĐVVC) — và chúng đã lệch nhau: nơi thì bọc
+ * `encodeURIComponent`, nơi thì ghép thẳng. Mã vận đơn hiện chỉ có chữ và số nên chưa ai thấy hậu
+ * quả, nhưng một mã lạ (khoảng trắng thừa, dấu `&` do dán nhầm) là đủ để hai nơi mở ra hai trang
+ * khác nhau từ cùng một dòng dữ liệu.
+ *
+ * ─── LẤY MÃ NÀO ───
+ *
+ * CHỈ `shipments.vtp_order_number`. `tracking_code` là mã do Pancake cấp (`extend_code`) và có thể
+ * KHÁC hẳn mã Viettel Post — xem `lib/integrations/pancake/mapper.ts`: `trackingCode = extend_code
+ * ?? order_id_ghn ?? vtpNumber`. Tra cứu bằng mã Pancake trên trang Viettel Post ra "không tìm
+ * thấy" (hoặc tệ hơn, ra đơn của người khác), nên KHÔNG có đường lui sang mã khác: chưa có mã
+ * Viettel Post thì trả `null` và nơi gọi KHÔNG vẽ liên kết. Một liên kết sai tệ hơn không có liên
+ * kết — người trực đơn tin vào nó rồi báo sai cho khách.
+ */
+export function getViettelPostTrackingUrl(vtpOrderNumber: string | null | undefined): string | null {
+  const code = vtpOrderNumber?.trim();
+  if (!code) return null;
+  return `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(code)}&orderType=1`;
+}

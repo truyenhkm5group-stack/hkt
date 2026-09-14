@@ -59,6 +59,8 @@ import {
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
+import { VtpTrackingLink } from "@/components/vtp-tracking-link";
+import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { StatusSelect } from "@/components/status-select";
 import { cn } from "@/lib/utils";
@@ -677,6 +679,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
     trả lời cho một câu hỏi. Nút không đủ điều kiện vẫn HIỆN nhưng khoá, kèm lý do trong tooltip.
   */
   const eligibility = (k: CarrierActionKey) => canRequestCarrierAction(k, { stage: c.carrier.stage, vtpStatus: c.carrier.vtpStatus, vtpStatusName: c.carrier.rawStatus, orderNumber: c.tracking, trackingCapability: c.carrier.trackingCapability, configured: true });
+  const vtpUrl = getViettelPostTrackingUrl(c.vtpOrderNumber);
   const businessEligibility = (a: BusinessAction) => (ACTION_CALLS_CARRIER[a] ? eligibility(a === "APPROVE_RETURN" ? "approve-return" : "redeliver") : null);
   const [dialogFor, setDialogFor] = useState<"APPROVE_RETURN" | "EXCHANGE" | null>(null);
   const req = c.carrierRequest;
@@ -699,6 +702,9 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
             {c.tracking}
           </CareOpenButton>
           {c.tracking ? <CopyButton value={c.tracking} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+          {/* Cùng biểu tượng, cùng hàm dựng địa chỉ với bảng "Tất cả vận đơn" và trang chi tiết —
+              bàn care là nơi thao tác "mở trang Viettel Post tra kiện" diễn ra nhiều nhất. */}
+          <VtpTrackingLink code={c.vtpOrderNumber} className="size-5 shrink-0 [&_svg]:size-3" />
           {c.orderSystemId ? (
             <Link href={`/orders/${c.orderId}`} className="text-[11px] text-muted-foreground hover:underline">
               #{c.orderSystemId}
@@ -939,9 +945,11 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
                   })}
                 </div>
               </details>
-              <a href={`https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(c.tracking)}&orderType=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
-                <ExternalLink className="size-3" /> Mở trên viettelpost.vn
-              </a>
+              {vtpUrl ? (
+                <a href={vtpUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+                  <ExternalLink className="size-3" /> Mở trên viettelpost.vn
+                </a>
+              ) : null}
             </PopoverContent>
           </Popover>
         ) : (

@@ -54,6 +54,7 @@ function ca(d: Dung): CareCase {
   return {
     shipmentId: d.id,
     tracking: `VD${d.id}`,
+    vtpOrderNumber: `VD${d.id}`,
     orderId: null,
     orderSystemId: null,
     customer: `Khách ${d.id}`,

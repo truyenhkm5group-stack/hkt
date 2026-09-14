@@ -149,14 +149,33 @@ export async function testReturnInspection(db: Db) {
   assert.ok(duDieuKien.length > 0, "fixture: phải có kiện một mẫu mã để kiểm đường hàng loạt");
   const loat = duDieuKien.map((r) => r.shipmentId);
   const tonTruocLoat = await tongTaiNhap();
-  const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" });
-  assert.equal(kqLoat.done, loat.length, "mọi kiện hợp lệ trong lượt phải được xử lý");
+
+  /*
+    ─── "NHẬN ĐỦ" HÀNG LOẠT KHÔNG NHẬN MỘT CON SỐ ĐẾM NÀO, NÊN NÓ CẦN MỘT LỜI KHAI ───
+
+    Đường đếm MỘT kiện có ô số: người kho gõ số họ đếm được, và một kiện hoàn một phần tự lộ ra ở
+    con số đó. Đường HÀNG LOẠT không có ô số nào — bấm một cái là khẳng định "cả lô này về đủ theo
+    đơn". Với kiện chưa có phiếu trả từng món (`ORDER_ONLY`) thì đó là khẳng định thay cho một thứ
+    ERP không biết, và một kiện hoàn một phần sẽ cộng tồn dư mà không để lại dấu vết.
+
+    Trước bản 14/09/2026 đường này không hỏi gì (nó chỉ chạy được cho kiện MỘT mẫu mã, nên phạm vi
+    hẹp hơn và cái lỗ ít lộ ra). Nay nó chạy cho cả kiện nhiều mẫu mã, nên cái lỗ ấy phải bịt: máy
+    chủ từ chối kèm LÝ DO, và người kho tick một ô nói rõ mình đã mở kiện đối chiếu thật.
+  */
+  const chuaKhai = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" });
+  assert.equal(chuaKhai.done, 0, "chưa khai đã đối chiếu thì kiện ORDER_ONLY không được ghi 'về đủ' hàng loạt");
+  assert.equal(chuaKhai.failed.length, loat.length, "và mỗi kiện bị chặn phải được nêu tên — không bỏ qua im lặng");
+  assert.match(chuaKhai.failed[0].error, /đối chiếu/, "lý do phải nói rõ người kho cần làm gì, không chỉ 'không hợp lệ'");
+  assert.equal(await tongTaiNhap(), tonTruocLoat, "lượt bị từ chối KHÔNG được cộng một món nào vào tồn");
+
+  const kqLoat = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" }, true);
+  assert.equal(kqLoat.done, loat.length, "khai đã đối chiếu thực tế ⇒ mọi kiện hợp lệ trong lượt phải được xử lý");
   assert.equal(kqLoat.failed.length, 0, "không kiện nào được phép hỏng im lặng");
   const congThem = duDieuKien.reduce((t, r) => t + (r.expectedQty ?? 0), 0);
   assert.equal(await tongTaiNhap(), tonTruocLoat + congThem, "hàng loạt “nhận đủ” cộng ĐÚNG BẰNG số ERP đã xuất, không hơn không kém");
 
   // Chạy lại đúng lượt đó: đã đếm rồi thì bị chặn, và LỖI PHẢI HIỆN RA kèm tên kiện.
-  const lanHai = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" });
+  const lanHai = await recordInspectionBulk(loat, "RESTOCKABLE", "", { id: null, label: "kho@test" }, true);
   assert.equal(lanHai.done, 0, "kiện đã đếm không được đếm lại qua đường hàng loạt");
   assert.equal(lanHai.failed.length, loat.length, "kiện bị chặn phải được nêu tên, không nuốt lỗi");
 
@@ -181,10 +200,21 @@ export async function testReturnInspection(db: Db) {
   );
 
   /**
-   * ───────── 10. KIỆN NHIỀU MẪU MÃ: đường đếm nhanh KHÔNG được phân bổ, KHÔNG được ghi 0 ─────────
+   * ───────── 10. KIỆN NHIỀU MẪU MÃ: MỘT CON SỐ TỔNG KHÔNG PHÂN BỔ ĐƯỢC, "VỀ ĐỦ" THÌ CÓ ─────────
    *
    * Trước đây kiện 1 áo đỏ + 1 áo đen, kho bấm "nhận đủ" ⇒ ERP chia 2 món theo tỷ lệ dòng hàng rồi
-   * làm tròn — một phép đoán ghi vào sổ như đã đếm. Nay: từ chối kèm lý do, chỉ đường đếm từng món.
+   * làm tròn — một phép đoán ghi vào sổ như đã đếm.
+   *
+   * Ranh giới đúng KHÔNG nằm ở "kiện mấy mẫu mã" mà ở **con số đầu vào nói được gì**:
+   *
+   *  · MỘT SỐ TỔNG (`recordInspection`) trên kiện nhiều mẫu mã ⇒ vẫn TỪ CHỐI. Đếm được 2 trong kiện
+   *    1 đỏ + 1 đen có thể là "2 đỏ" hoặc "1 đỏ 1 đen"; ghi bừa làm sai tồn HAI mẫu mã ngược chiều.
+   *  · "VỀ ĐỦ" (`recordFullReturnInspection`) ⇒ CHẠY ĐƯỢC. Đó là khẳng định TỪNG DÒNG — mỗi mẫu mã
+   *    về đúng số kỳ vọng của nó — nên phân bổ hoàn toàn xác định, không còn gì để đoán.
+   *
+   * Đo trên production 14/09/2026: 300 kiện vào hàng đợi đếm bằng lượt đối soát sổ giấy, phần lớn
+   * là kiện hai mẫu mã. Ranh giới cũ bắt mở ngăn kéo đếm từng món ba trăm lần cho một kết luận
+   * luôn giống nhau.
    */
   await db
     .insert(schema.productVariants)
@@ -211,16 +241,38 @@ export async function testReturnInspection(db: Db) {
   const [mvRow] = await db.select({ status: schema.returnInspections.status }).from(schema.returnInspections).where(eq(schema.returnInspections.shipmentId, "ins-ship-mv"));
   assert.equal(mvRow.status, "RECEIVED", "kiện vẫn CHỜ ĐẾM — không có phiếu 'bán lại được, 0 món' lặng lẽ");
 
-  // Hàng loạt "nhận đủ" cũng đi qua đúng lá chắn ấy: bỏ qua kèm lý do, đếm được theo số kiện.
-  const loatNhieuMau = await recordInspectionBulk(["ins-ship-mv"], "RESTOCKABLE", "", { id: null, label: "kho" });
-  assert.equal(loatNhieuMau.done, 0, "hàng loạt không được 'nhận đủ' một kiện nhiều mẫu mã");
-  assert.equal(loatNhieuMau.failed.length, 1, "kiện bị bỏ qua phải được nêu tên");
-  assert.equal(loatNhieuMau.failed[0].code, "INSMV01", "nêu MÃ KIỆN để người đếm nhận ra, không chỉ id");
-  assert.ok(loatNhieuMau.failed[0].error.includes("Kiểm từng món"), "và lý do nói rõ phải làm gì");
+  // Hàng loạt "nhận đủ" trên kiện chưa có phiếu trả từng món: chặn kèm LÝ DO, không bỏ qua im lặng.
+  const loatChuaKhai = await recordInspectionBulk(["ins-ship-mv"], "RESTOCKABLE", "", { id: null, label: "kho" });
+  assert.equal(loatChuaKhai.done, 0, "chưa khai đã đối chiếu thì không được ghi 'về đủ' hàng loạt");
+  assert.equal(loatChuaKhai.failed.length, 1, "kiện bị bỏ qua phải được nêu tên");
+  assert.equal(loatChuaKhai.failed[0].code, "INSMV01", "nêu MÃ KIỆN để người đếm nhận ra, không chỉ id");
+  assert.match(loatChuaKhai.failed[0].error, /đối chiếu/, "và lý do nói rõ phải làm gì");
+  assert.equal((await phieuTaiNhapCua("ins-ship-mv")).length, 0, "lượt bị từ chối không để lại phiếu kho");
 
-  // Kết luận KHÔNG vào tồn thì kiện nhiều mẫu mã vẫn ghi được — không có gì để phân bổ.
-  const hongNhieuMau = await recordInspection({ shipmentId: "ins-ship-mv", condition: "DAMAGED", restockQty: 0, unsellableQty: 2, note: "ướt cả kiện", actor: { id: null, label: "kho" } });
+  // Khai đã đối chiếu ⇒ chạy, và vào ĐÚNG từng mẫu mã — đây là điều bản 14/09/2026 mở ra.
+  const loatNhieuMau = await recordInspectionBulk(["ins-ship-mv"], "RESTOCKABLE", "", { id: null, label: "kho" }, true);
+  assert.equal(loatNhieuMau.done, 1, "kiện nhiều mẫu mã 'về đủ' phải chạy được qua đường hàng loạt");
+  assert.equal(loatNhieuMau.failed.length, 0);
+  const dongMv = await phieuTaiNhapCua("ins-ship-mv");
+  assert.equal(dongMv.length, 2, "MỖI mẫu mã một dòng phiếu — không gộp 2 món vào một mẫu mã rồi mất dấu");
+  assert.equal(dongMv.find((d) => d.v === "ins-var")?.q, 1, "mẫu đỏ về đúng 1, không phải nửa của 2 làm tròn");
+  assert.equal(dongMv.find((d) => d.v === "ins-var-2")?.q, 1, "mẫu đen về đúng 1");
+
+  // Kết luận KHÔNG vào tồn trên kiện nhiều mẫu mã: vẫn ghi được, và vẫn không cộng tồn.
+  // (Kiện `ins-ship-mv` đã đếm xong ở trên nên dựng một kiện riêng — đếm lại lần hai bị chặn, đúng luật.)
+  await db.insert(schema.orders).values({ id: "ins-order-mv2", stage: "SHIPPED", status: 3, insertedAt: new Date("2026-08-03T00:00:00Z") }).onConflictDoNothing();
+  await db
+    .insert(schema.orderItems)
+    .values([
+      { id: "ins-item-mv2-1", orderId: "ins-order-mv2", variantId: "ins-var", productId: "ins-prod", productName: "Áo kiểm hàng hoàn", sku: "INS-001", quantity: 1, unitPrice: 300000, lineTotal: 300000 },
+      { id: "ins-item-mv2-2", orderId: "ins-order-mv2", variantId: "ins-var-2", productId: "ins-prod", productName: "Áo kiểm hàng hoàn", sku: "INS-002", quantity: 1, unitPrice: 300000, lineTotal: 300000 },
+    ])
+    .onConflictDoNothing();
+  await db.insert(schema.shipments).values({ id: "ins-ship-mv2", orderId: "ins-order-mv2", vtpOrderNumber: "INSMV02", stage: "RETURNED", returnedAt: new Date("2026-08-22T00:00:00Z") }).onConflictDoNothing();
+  await markReturnsArrived(["ins-ship-mv2"], { id: null, label: "nguoi-nhan-hang" });
+  const hongNhieuMau = await recordInspection({ shipmentId: "ins-ship-mv2", condition: "DAMAGED", restockQty: 0, unsellableQty: 2, note: "ướt cả kiện", actor: { id: null, label: "kho" } });
   assert.ok("ok" in hongNhieuMau && hongNhieuMau.restocked === 0, "kết luận hỏng không cần biết mẫu mã nào — ghi được, 0 món vào tồn");
+  assert.equal((await phieuTaiNhapCua("ins-ship-mv2")).length, 0, "kết luận hỏng tuyệt đối không sinh phiếu kho");
 
   // Đếm được NHIỀU HƠN kỳ vọng trên kiện một mẫu mã cũng không đi đường tắt.
   await db.insert(schema.orders).values({ id: "ins-order-over", stage: "SHIPPED", status: 3, insertedAt: new Date("2026-08-03T00:00:00Z") }).onConflictDoNothing();
