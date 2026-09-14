@@ -161,15 +161,31 @@ function bocSo(html: string, code: string): { giao: number; hoan: number } | nul
     viSao.push(`${code}: KHÔNG thấy bảng "Rủi ro theo mã hàng" trong ${html.length} ký tự HTML`);
     return null;
   }
-  const moc = html.indexOf(`>${code}<`, bang);
-  if (moc < 0) {
+  /*
+    DUYỆT MỌI LẦN XUẤT HIỆN CỦA MÃ, không chỉ lần đầu.
+
+    Mã hàng còn xuất hiện ở Ô CHỌN BỘ LỌC ("Q001 · 8 mẫu mã") đứng trước dòng bảng. Lấy lần đầu
+    thì với mã đầu bảng chữ cái ta đọc trúng cái chip ấy và kết luận "không bóc được" — đúng thứ
+    đã xảy ra với Q001 trong khi Q002–Q004 chạy tốt.
+  */
+  const re = /title="([\d.,]+) giao TC · ([\d.,]+) hoàn/;
+  let m: RegExpExecArray | null = null;
+  let cuoi = "";
+  for (let i = html.indexOf(`>${code}<`, bang); i >= 0; i = html.indexOf(`>${code}<`, i + 1)) {
+    const doan = html.slice(i, i + 3000);
+    cuoi = doan;
+    const thu = re.exec(doan);
+    if (thu) {
+      m = thu;
+      break;
+    }
+  }
+  if (!cuoi) {
     viSao.push(`${code}: thấy bảng ở ${bang} nhưng KHÔNG thấy ô mã ">${code}<" sau đó`);
     return null;
   }
-  const doan = html.slice(moc, moc + 3000);
-  const m = /title="([\d.,]+) giao TC · ([\d.,]+) hoàn/.exec(doan);
   if (!m) {
-    viSao.push(`${code}: thấy ô mã nhưng KHÔNG thấy chú giải "… giao TC · … hoàn" — đoạn: ${doan.slice(0, 180).replace(/\s+/g, " ")}`);
+    viSao.push(`${code}: thấy ô mã nhưng KHÔNG lần nào có chú giải "… giao TC · … hoàn" — đoạn cuối: ${cuoi.slice(0, 180).replace(/\s+/g, " ")}`);
     return null;
   }
   const soVN = (x: string) => Number(x.replace(/[.,\s]/g, ""));
