@@ -22,6 +22,10 @@ lương và tỷ lệ thưởng giữ nguyên). Một migration DUY NHẤT (`008
 | 1.9 | Bảng lương không có danh tính kỳ ⇒ kỳ đã trả tiền tự viết lại chính nó | **CÓ** |
 | 1.9b | Hai kỳ đã chốt chồng lấn NGÀY ⇒ hoa hồng những ngày ấy ghi nhận hai lần | Chưa — bịt trước khi kỳ đầu tiên được chốt |
 
+Ngoài mười lỗi trên, bản này còn **bác bỏ một chẩn đoán sai lâu nay** về màn hình `/ads` chậm
+6,5 giây (mục 4b) và bàn giao nó kèm bước tiếp theo cụ thể ở **mục 5.5** — chưa sửa, và nêu rõ là
+chưa sửa.
+
 ---
 
 ## 1. Mười lỗi thật, và nguyên nhân gốc của từng cái
@@ -485,6 +489,41 @@ select (select count(*) from information_schema.tables where table_name='payroll
           from order_attributions) as diem_thap_nhat
 ```
 
+## 3a-3. XÁC MINH SAU TRIỂN KHAI — đợt 3 (deploy #291, SHA `2c70455`, 14/09 20:54)
+
+Đợt này **không** mang migration nào: nó chở bản vá chặn hai kỳ chốt chồng lấn ngày (mục 1.9b) và
+phần còn lại của biên bản. Xác minh bằng `ops smoke` — mở THẬT 54 màn hình bằng một phiên đăng
+nhập hợp lệ, tức đo "trang có nội dung", không phải đo "HTTP 200":
+
+```
+smoke #901 (20:56, ngay sau deploy)   54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 hết phiên · 1 CHẬM
+smoke #902 (21:07, máy đã ổn định)    54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 hết phiên · 1 CHẬM
+
+                        #901      #902
+/payroll               117 ms    112 ms
+/marketing/fanpages    126 ms    169 ms
+…?tab=assign            93 ms     64 ms
+/reports               160 ms      —
+/landing               158 ms     71 ms
+/ads                   6,5 s     6,5 s   ← màn hình CHẬM duy nhất, xem mục 4b và 5.5
+```
+
+`/payroll` nay mang đủ bảy khối (bảng lương · độ phủ quy kết · cảnh báo chi phí · đã trả trong kỳ ·
+nhắc khai email · nút xuất CSV · nút chốt kỳ khi đủ bốn cửa) và đo được **112–117 ms**.
+
+> **ĐỌC CON SỐ 112 ms NÀY CHO ĐÚNG — nó là số ĐỆM NÓNG, không phải giá thật của trang.**
+> Trong `scripts/smoke.ts`, `/payroll` đứng NGAY SAU `/ads`. Hai trang dùng CHUNG một mục đệm
+> `getMarketerReport:<kỳ>:profit1` (`memo`, 120 giây), và `/ads` mở trước nên **`/ads` trả tiền,
+> `/payroll` đọc ké**. Cả lượt smoke chạy 195–205 giây nên `/payroll` luôn rơi vào trong hạn đệm.
+> Vậy 112 ms chứng minh được rằng **bảy khối mới không thêm chi phí đáng kể** — đó là điều bản này
+> cần chứng minh và nó đã chứng minh xong — nhưng **không** chứng minh được `/payroll` mở nguội là
+> nhanh. Giá nguội của `/payroll` hiện **chưa ai đo**, vì thứ tự trong smoke không cho phép đo.
+
+**Màn hình CHẬM duy nhất là `/ads`, và nó chậm ở CẢ HAI lượt** — kể cả lượt chạy 17 phút sau
+deploy, khi 53 màn hình còn lại đều 49–182 ms. Đó là điều buộc tôi phải sửa lại một chẩn đoán của
+chính mình ở mục 4b: `/ads` không chậm vì "đo trúng lúc đồng bộ lại sau deploy", nó chậm vì đệm
+`memo()` hết hạn sau 60–120 giây — và nó đã chậm như vậy từ trước phiên này.
+
 ## 3b. Việc chủ shop nên làm ngay sau bản này
 
 1. **Khai mốc hiệu lực cho fanpage còn thiếu** — Marketing → Fanpage & quy kết → gán marketer với
@@ -567,20 +606,92 @@ một vấn đề đã có từ trước và đã được ghi trong `docs/erp-p
 lại chạy **ngay sau khi deploy xong**, đúng lúc bộ lập lịch vừa khởi động và đang đồng bộ lại —
 chính `scripts/smoke.ts` cảnh báo về ca này.
 
-**Chạy lại smoke trên hệ thống ĐÃ ỔN ĐỊNH — và nó xác nhận đúng điều đó:**
+**Chạy lại smoke trên hệ thống đã ổn định:**
 
 ```
 54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 CHẬM · 0 chưa kiểm · 0 hết phiên
 /payroll                         281 kB   91 ms
-/ads                           2.592 kB   81 ms   ← 6.374 ms → 81 ms, không sửa một dòng mã nào
+/ads                           2.592 kB   81 ms
 /marketing/fanpages              165 kB   53 ms
 /marketing/fanpages?tab=orders   281 kB   49 ms
 /marketing/fanpages?tab=assign   262 kB   50 ms
 /reports                         300 kB  102 ms
 ```
 
-`/ads` đi từ 6.374 ms xuống **81 ms** mà không ai sửa gì — đó là dấu vân tay của việc đo trúng lúc
-máy chủ đang đồng bộ lại sau deploy, không phải của một hồi quy. **Không màn hình nào CHẬM.**
+### SỬA MỘT CHẨN ĐOÁN SAI CỦA CHÍNH TÔI
+
+Đọc một mình, lượt đo trên trông như bằng chứng rằng `/ads` chỉ chậm vì đo trúng lúc máy chủ đồng
+bộ lại sau deploy. **Tôi đã viết đúng như thế ở bản nháp trước của mục này, và nó SAI.** Đo tiếp
+hai lượt nữa thì con số không chịu:
+
+| lượt | lúc nào | `/ads` |
+|---|---|---|
+| smoke sau #289 | ngay sau deploy | 6.374 ms |
+| smoke sau #289 (lượt 2) | máy đã chạy một lúc | **81 ms** |
+| smoke #901, sau #291 | ngay sau deploy | 6.456 ms |
+| smoke #902, sau #291 | **17 phút** sau deploy, mọi trang khác 49–182 ms | **6,5 s** |
+
+Lượt 81 ms mới là NGOẠI LỆ, không phải quy luật — và cơ chế thật không phải "đồng bộ lại sau
+deploy" mà là **đệm `memo()` 60–120 giây**: lượt đo 81 ms chạy ngay sau một lượt smoke khác vừa
+mở `/ads`, nên nó đọc đệm còn nóng. Chính kho mã này đã ghi lại đúng cơ chế ấy ở một bản phát hành
+trước: *"`/work` chỉ đạt 76ms vì `/ads` chạy trước đã làm nóng `memo()`"*
+(`docs/release-2026-09-12-work-os.md`).
+
+**Hệ quả thật cho chủ shop:** đệm sống 60–120 giây, nên ai mở `/ads` cách lần mở trước quá hai
+phút — tức gần như mọi lần mở trong ngày làm việc bình thường — đều **chờ khoảng 6,5 giây**.
+
+**Và nó KHÔNG phải hồi quy của bản này.** Bằng chứng không nằm ở một phép đo mà ở cả chuỗi biên
+bản đã có trong kho, từ trước phiên này:
+
+```
+11/09  release-2026-09-11-integration.md        /ads 6,0 s  "P1, việc hiệu năng đã ghi từ vòng 4"
+12/09  release-2026-09-12-finance.md            /ads 6,6–7,6 s  "KHÔNG do bản này"
+12/09  release-2026-09-12-work-os.md            /ads 6,1 s  "CHẬM TỪ TRƯỚC bản này"
+12/09  release-2026-09-12-workforce-v2.md       /ads 6,8 s  "có từ trước"
+14/09  release-2026-09-14-return-exception…md   /ads 7,195 ms
+```
+
+`ops perf-probe` (xoá đệm trước mỗi phép đo) chỉ ra tám câu SQL chậm nhất và **không câu nào là
+`salesByProductPage`** — phép nối `order_attributions` mà bản này thêm vào không nằm trong đó.
+
+### VÀ GIẢI THÍCH LÂU NAY VỀ NGUYÊN NHÂN CŨNG SAI
+
+Kho mã này (`docs/erp-performance-p0-3-report.md`) và cả bản nháp trước của chính mục này đều nói
+gốc của `/ads` là **nhánh dự phòng `ORDER_OUTCOME` chạy vì `canonical_order_outcome` chưa phủ**.
+Tôi định chép lại câu đó. Trước khi chép thì đi đo, và cả ba cách đo đều bác nó:
+
+| đo gì (ops `db-query`, chỉ đọc, 14/09 21:12–21:13) | kết quả |
+|---|---|
+| đơn có dòng dựng sẵn | **2.835 / 2.835** — phủ đủ, không thiếu dòng nào |
+| dòng mang luật cũ (`logic_version < 3`) | **0** |
+| cặp (đơn, vận đơn) mà **đường nhanh dùng được** (`computed_at` còn mới hơn cả `orders.updated_at` lẫn `shipments.updated_at`) | **2.835 / 2.835** |
+| rơi về tính trực tiếp vì đơn mới hơn ảnh chụp | **0** |
+| rơi về tính trực tiếp vì vận đơn mới hơn ảnh chụp | **0** |
+
+Và `EXPLAIN (ANALYZE)` của chính câu chậm nhất cho thấy đường nhanh **đang được dùng thật**:
+
+```
+-> Seq Scan on orders  (actual time=2496.899..2498.754 rows=2652 loops=1)
+   SubPlan 1
+   -> Index Scan using canonical_outcome_order_idx on canonical_order_outcome m
+        (actual time=0.002..0.003 rows=1 loops=2652)     ← 2.652 lượt × 0,003 ms ≈ 8 ms TỔNG
+   SubPlan 3
+   -> Seq Scan on shipment_events ev                     (never executed)   ← dự phòng KHÔNG chạy
+Execution Time: 2974.650 ms
+```
+
+Bảng dựng sẵn đang làm đúng việc của nó: tra chỉ mục, 8 ms cho cả 2.652 đơn, và nhánh dự phòng
+**không hề chạy** (`never executed`). Vậy mà câu lệnh vẫn mất 3–4,7 giây, với ~2,5 giây nằm ở
+**thời gian KHỞI ĐỘNG của một Seq Scan trên đúng 2.652 dòng `orders`** — một bảng bé.
+
+**Kết luận trung thực:** chi phí KHÔNG phải là nhánh dự phòng `ORDER_OUTCOME`, KHÔNG phải thiếu
+độ phủ, KHÔNG phải thiếu chỉ mục trên `canonical_order_outcome`, và KHÔNG phải phép nối bản này
+thêm vào. Nó nằm ở chỗ khác trong cùng câu lệnh ấy, và bản `EXPLAIN` mà `perf-probe` in ra bị cắt
+(SubPlan 7 · 9 · 10 chỉ còn cái tên) nên **chưa đủ để chỉ mặt**. Tôi dừng ở đây thay vì đoán tiếp:
+ba giả thuyết nghe hợp lý đã lần lượt chết dưới phép đo trong đúng một giờ vừa rồi, và giả thuyết
+thứ tư không viết ra thì hơn.
+
+Việc còn lại nằm ở **mục 5.5**.
 
 ---
 
@@ -693,6 +804,44 @@ ai-workforce-sales-v1   0084_ai_workforce_foundation   (idx 84) ← trùng số 
 Tôi **không chạm** vào nhánh ấy: chỉ đọc sổ của nó để ghi lại đây. Phiên đang giữ nhánh quyết cách
 đánh số lại, và phải chạy `tests/migration-upgrade-path.test.ts` sau khi đánh số để chứng minh
 đường nâng cấp từ trạng thái production hôm nay vẫn chạy.
+
+### 5.5 `/ads` chậm 6,5 giây — đã bác ba giả thuyết, cần một phiên riêng để đóng
+
+**Trạng thái:** CHƯA SỬA. Có từ trước phiên này, không phải hồi quy của bản này (chứng cứ ở mục 4b).
+
+**Vì sao nó đáng làm:** đệm `memo()` sống 60–120 giây, nên gần như mọi lần mở `/ads` trong một
+ngày làm việc bình thường đều là mở nguội — tức **chờ ~6,5 giây**. Đây là màn hình CHẬM duy nhất
+trong 54 màn hình; 53 màn còn lại đều 49–182 ms.
+
+**Đã loại trừ bằng phép đo, không phải bằng suy luận** (chi tiết và nguyên văn `EXPLAIN` ở mục 4b):
+
+1. ~~`canonical_order_outcome` chưa phủ~~ → phủ **2.835/2.835**, **0** dòng luật cũ.
+2. ~~Ảnh chụp cũ hơn dữ liệu nên đường nhanh trượt~~ → đường nhanh dùng được cho **2.835/2.835** cặp.
+3. ~~Nhánh dự phòng `ORDER_OUTCOME` đang chạy~~ → `EXPLAIN` in `never executed` cho đúng nhánh ấy;
+   đường nhanh tra chỉ mục hết ~8 ms cho cả 2.652 đơn.
+4. ~~Phép nối `order_attributions` bản này thêm vào~~ → không nằm trong tám câu chậm nhất.
+
+**Còn lại:** ~2,5 giây nằm ở *thời gian khởi động* của một `Seq Scan` trên 2.652 dòng `orders`.
+Bản `EXPLAIN` do `perf-probe` in ra bị cắt (SubPlan 7 · 9 · 10 chỉ còn tên) nên chưa chỉ được mặt.
+
+**Bước tiếp theo cụ thể**, cho phiên nào nhận việc này:
+
+1. Chạy `EXPLAIN (ANALYZE, VERBOSE, BUFFERS)` **đầy đủ, không cắt** cho đúng câu lệnh đã nêu, để
+   đọc được SubPlan 7 · 9 · 10 — đó là chỗ duy nhất còn giấu 2,5 giây.
+2. Nghi vấn đáng xem trước: các truy vấn con tương quan **khác** trong cùng câu (giá vốn
+   `orderCogsFast()`, tiền COD) chứ **không phải** `ORDER_OUTCOME` — vì `ORDER_OUTCOME` nay đã
+   được chứng minh là rẻ.
+3. **KHÔNG** chạy `canonical-backfill` với `apply=1` để "chữa" việc này: bảng đã phủ đủ 100%, chạy
+   lại không đổi gì, và đó là ghi hàng loạt lên production nên theo `AGENTS.md` mục 7 phải do chủ
+   shop quyết.
+4. Đo lại bằng `ops smoke` **hai lượt cách nhau > 2 phút** — một lượt thôi sẽ đọc đệm nóng của
+   lượt trước và cho một con số đẹp nhưng vô nghĩa (đúng cái bẫy đã làm bản nháp trước của biên
+   bản này kết luận sai).
+
+**Cảnh báo kèm theo cho người đo:** trong `scripts/smoke.ts`, `/payroll` đứng ngay sau `/ads` và
+hai trang dùng chung mục đệm `getMarketerReport:<kỳ>:profit1`. Nên `/ads` trả tiền còn `/payroll`
+đọc ké: **con số `/payroll` trong mọi lượt smoke đều là số đệm nóng.** Muốn biết giá nguội thật
+của `/payroll` thì phải đo tách khỏi `/ads`, việc mà danh sách smoke hiện nay không cho phép.
 
 ---
 
