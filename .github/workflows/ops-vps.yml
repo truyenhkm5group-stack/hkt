@@ -44,6 +44,7 @@ on:
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - returns-parity      # báo cáo hoàn: MÀN HÌNH THẬT = máy tính kết quả = SQL viết độc lập từ đặc tả (chỉ đọc; arg: "Q001,Q002" mã hàng)
           - reason-backfill     # rút quan sát lý do hoàn từ dữ liệu đã có (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
+          - reason-coverage     # độ phủ lý do hoàn: máy tính báo cáo = MÀN HÌNH THẬT (chỉ đọc)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
@@ -231,6 +232,12 @@ jobs:
                 # thứ tự. KHÔNG đụng một dòng đơn / vận đơn / tiền nào — chỉ thêm dòng quan sát.
                 fetch_script return-reason-backfill.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/return-reason-backfill.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/return-reason-backfill.ts $ARG ;;
+              reason-coverage)
+                # CHỈ ĐỌC. In ba phần độ phủ (đã xác định · có chứng từ chưa xếp · chưa có chứng từ),
+                # top lý do thật và lý do lớn nhất của từng mã hàng — rồi mở MÀN HÌNH THẬT để chứng
+                # minh khối ấy có render, chứ không chỉ có trong máy tính.
+                fetch_script reason-coverage.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/reason-coverage.ts'
+                docker exec erp-app sh -c "COVERAGE_PERIOD='${ARG:-all}' npx tsx --tsconfig tsconfig.json scripts/reason-coverage.ts" ;;
               returns-parity)
                 # CHỈ ĐỌC. Tải thật /reports/returns bằng phiên hợp lệ rồi BÓC SỐ TỪ HTML, so với
                 # máy tính kết quả và với một câu SQL viết độc lập từ đặc tả. Đây là phép kiểm duy
