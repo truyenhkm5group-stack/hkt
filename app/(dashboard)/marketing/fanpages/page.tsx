@@ -16,7 +16,8 @@ import {
   ATTRIBUTION_STATUS_HINT,
   ATTRIBUTION_STATUS_LABEL,
   ATTRIBUTION_STATUS_TONE,
-  DUPLICATE_WINDOW_HOURS,
+  DUPLICATE_CANDIDATE_WINDOW_HOURS,
+  DUPLICATE_SCORE_THRESHOLD,
 } from "@/lib/constants/fanpage-attribution";
 import { formatDateTime, formatNumber, formatVND, pctOrNull } from "@/lib/format";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
@@ -125,7 +126,7 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
 
           <SectionCard
             title="Độ phủ quy kết"
-            description={`Mỗi đơn thuộc đúng một nhóm — cộng bốn nhóm bằng tổng số đơn của kỳ. Cửa sổ gộp trùng đơn: ${DUPLICATE_WINDOW_HOURS} giờ.`}
+            description={`Mỗi đơn thuộc đúng một nhóm — cộng bốn nhóm bằng tổng số đơn của kỳ. Trùng đơn cần ĐỦ CHỨNG CỨ (≥ ${DUPLICATE_SCORE_THRESHOLD} điểm), tìm trong cửa sổ ${DUPLICATE_CANDIDATE_WINDOW_HOURS} giờ — riêng cửa sổ không bao giờ đủ để kết luận.`}
           >
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {ATTRIBUTION_STATUSES.map((s) => {
@@ -286,6 +287,11 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                           <Link className="underline" href={`/orders/${r.duplicateOfOrderId}`}>
                             đơn trước
                           </Link>
+                          {r.duplicateSignals.length ? (
+                            <div className="mt-0.5">
+                              căn cứ ({r.duplicateScore} điểm): {r.duplicateSignals.join(" · ")}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </td>

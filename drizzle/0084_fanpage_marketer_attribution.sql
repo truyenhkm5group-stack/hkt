@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS "order_attributions" (
   "source_order_at" timestamp with time zone NOT NULL,
   "dedupe_key" text,
   "duplicate_of_order_id" text,
+  "duplicate_score" integer,
+  "duplicate_reason" text,
   "rule_version" integer NOT NULL DEFAULT 1,
   "computed_at" timestamp with time zone DEFAULT now() NOT NULL
 );--> statement-breakpoint
@@ -148,6 +150,13 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
 DO $$ BEGIN
   ALTER TABLE "order_attributions" ADD CONSTRAINT "order_attribution_duplicate_check"
     CHECK (("status" = 'DUPLICATE') = ("duplicate_of_order_id" IS NOT NULL));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
+
+-- CĂN CỨ ĐI CÙNG KẾT LUẬN. Một dòng "trùng đơn" đang lấy doanh thu khỏi tên một người thật; không
+-- lưu điểm chứng cứ thì sáu tháng sau không ai kiểm chứng được, và người bị mất đơn không có gì để cãi.
+DO $$ BEGIN
+  ALTER TABLE "order_attributions" ADD CONSTRAINT "order_attribution_evidence_check"
+    CHECK (("status" = 'DUPLICATE') = ("duplicate_score" IS NOT NULL));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;--> statement-breakpoint
 
 -- Đơn không được trùng với chính nó — một chuỗi trùng đơn tự trỏ vào mình là một vòng lặp vô tận

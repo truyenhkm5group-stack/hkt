@@ -22,11 +22,12 @@ import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import {
   ATTRIBUTION_STATUSES,
-  DUPLICATE_WINDOW_HOURS,
+  DUPLICATE_CANDIDATE_WINDOW_HOURS,
+  DUPLICATE_SCORE_THRESHOLD,
   FANPAGE_ATTRIBUTION_RULE_VERSION,
   buildDedupeKey,
   pickAssignment,
-  resolveDuplicateChains,
+  resolveDuplicates,
   windowsOverlap,
   type AssignmentWindow,
   type AttributionStatus,
@@ -191,7 +192,10 @@ export type AttributionRebuild = {
   /** Số dòng thật sự đổi nội dung. Chạy lần hai trên cùng dữ liệu phải ra 0 — đó là phép thử idempotent. */
   changed: number;
   ruleVersion: number;
+  /** Cửa sổ TÌM ỨNG VIÊN đã dùng — không phải điều kiện kết luận. */
   windowHours: number;
+  /** Điểm chứng cứ tối thiểu để kết luận trùng đơn. */
+  scoreThreshold: number;
 };
 
 type OrderRow = {
@@ -202,6 +206,12 @@ type OrderRow = {
   phone: string | null;
   name: string | null;
   address: string | null;
+  /* Dấu hiệu nguồn dùng để CHẤM chứng cứ trùng đơn — xem `DUPLICATE_SIGNALS`. */
+  conversationId: string | null;
+  postId: string | null;
+  customerId: string | null;
+  orderValue: number;
+  pancakeDuplicateFlag: boolean;
 };
 
 const emptyByStatus = (): Record<AttributionStatus, number> => Object.fromEntries(ATTRIBUTION_STATUSES.map((s) => [s, 0])) as Record<AttributionStatus, number>;
@@ -228,9 +238,17 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
         phone: sql<string | null>`nullif(coalesce(nullif(${O.shipPhone}, ''), ${O.billPhone}), '')`,
         name: sql<string | null>`nullif(coalesce(nullif(${O.shipFullName}, ''), ${O.billFullName}), '')`,
         address: sql<string | null>`nullif(coalesce(nullif(${O.shipFullAddress}, ''), ${O.shipAddress}), '')`,
+        conversationId: sql<string | null>`nullif(coalesce(${O.conversationId}, ''), '')`,
+        postId: sql<string | null>`nullif(coalesce(${O.postId}, ''), '')`,
+        customerId: O.customerId,
+        orderValue: sql<number>`coalesce(${O.totalPriceAfterDiscount}, 0)`,
+        // `duplicated_phone` của Pancake — cờ boolean, có mặt trên cả 2.830 đơn của production.
+        // Đọc thẳng từ `raw`: nó là dấu hiệu của NGUỒN, không phải kết luận của ERP, nên không
+        // dựng một cột riêng để rồi phải nhớ đồng bộ hai chỗ.
+        pancakeDuplicateFlag: sql<boolean>`coalesce((${O.raw} -> 'duplicated_phone')::text = 'true', false)`,
       })
       .from(O)
-  ).map((r) => ({ ...r, insertedAt: new Date(r.insertedAt) }));
+  ).map((r) => ({ ...r, insertedAt: new Date(r.insertedAt), orderValue: Number(r.orderValue), pancakeDuplicateFlag: Boolean(r.pancakeDuplicateFlag) }));
 
   const items = await d
     .select({ orderId: OI.orderId, variantId: OI.variantId, productId: OI.productId, sku: OI.sku, productName: OI.productName, quantity: OI.quantity })
@@ -247,9 +265,14 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
     sourceOrderAt: o.insertedAt,
     alive: !DEAD_STAGES.has(o.stage),
     dedupeKey: buildDedupeKey({ phone: o.phone, name: o.name, address: o.address, items: itemsByOrder.get(o.id) ?? [] }),
+    conversationId: o.conversationId,
+    postId: o.postId,
+    customerId: o.customerId,
+    orderValue: o.orderValue,
+    pancakeDuplicateFlag: o.pancakeDuplicateFlag,
   }));
   const dedupeByOrder = new Map(candidates.map((c) => [c.orderId, c]));
-  const verdict = new Map(resolveDuplicateChains(candidates, DUPLICATE_WINDOW_HOURS).map((v) => [v.orderId, v.duplicateOfOrderId]));
+  const verdict = new Map(resolveDuplicates(candidates, DUPLICATE_CANDIDATE_WINDOW_HOURS).map((v) => [v.orderId, v]));
 
   // Sổ fanpage + sổ phân công, nạp MỘT LẦN rồi tra trong bộ nhớ: mỗi đơn tra một lần là vài nghìn
   // truy vấn con trên hai bảng nhỏ — đúng lớp lỗi hiệu năng mà `lib/queries/order-marketer.ts` đã ghi lại.
@@ -264,7 +287,9 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
     else windowsByPage.set(a.fanpageId, [w]);
   }
 
-  const prior = await d.select({ orderId: OA.orderId, marketerId: OA.marketerId, status: OA.status, duplicateOfOrderId: OA.duplicateOfOrderId, assignmentId: OA.assignmentId, ruleVersion: OA.ruleVersion }).from(OA);
+  const prior = await d
+    .select({ orderId: OA.orderId, marketerId: OA.marketerId, status: OA.status, duplicateOfOrderId: OA.duplicateOfOrderId, duplicateScore: OA.duplicateScore, assignmentId: OA.assignmentId, ruleVersion: OA.ruleVersion })
+    .from(OA);
   const priorByOrder = new Map(prior.map((p) => [p.orderId, p]));
 
   const byStatus = emptyByStatus();
@@ -274,7 +299,8 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
   for (const o of orders) {
     const pageId = o.pageId && o.pageId.trim() ? o.pageId.trim() : null;
     const fanpageId = pageId ? (pageIdByExternal.get(pageId) ?? null) : null;
-    const duplicateOf = verdict.get(o.id) ?? null;
+    const dup = verdict.get(o.id);
+    const duplicateOf = dup?.duplicateOfOrderId ?? null;
     const assignment = fanpageId ? pickAssignment(windowsByPage.get(fanpageId) ?? [], o.insertedAt) : null;
 
     // Thứ tự XÉT là thứ tự LUẬT, không phải thứ tự tiện tay:
@@ -294,6 +320,7 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
       before.status !== status ||
       before.marketerId !== marketerId ||
       before.duplicateOfOrderId !== duplicateOf ||
+      before.duplicateScore !== (duplicateOf ? (dup?.score ?? 0) : null) ||
       before.assignmentId !== (status === "ATTRIBUTED" ? (assignment as AssignmentWindow).id : null) ||
       before.ruleVersion !== FANPAGE_ATTRIBUTION_RULE_VERSION
     ) {
@@ -310,6 +337,8 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
       sourceOrderAt: o.insertedAt,
       dedupeKey: dedupeByOrder.get(o.id)?.dedupeKey ?? null,
       duplicateOfOrderId: duplicateOf,
+      duplicateScore: duplicateOf ? (dup?.score ?? 0) : null,
+      duplicateReason: duplicateOf ? (dup?.signals ?? []).join(",") : null,
       ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION,
       computedAt: new Date(),
     });
@@ -333,6 +362,8 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
             sourceOrderAt: sql`excluded.source_order_at`,
             dedupeKey: sql`excluded.dedupe_key`,
             duplicateOfOrderId: sql`excluded.duplicate_of_order_id`,
+            duplicateScore: sql`excluded.duplicate_score`,
+            duplicateReason: sql`excluded.duplicate_reason`,
             ruleVersion: sql`excluded.rule_version`,
             computedAt: sql`excluded.computed_at`,
           },
@@ -341,7 +372,7 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
     // Đơn đã bị xoá khỏi `orders` thì dòng quy kết đi theo (khoá ngoại CASCADE); không cần dọn tay.
   }
 
-  return { scanned: orders.length, byStatus, changed, ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION, windowHours: DUPLICATE_WINDOW_HOURS };
+  return { scanned: orders.length, byStatus, changed, ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION, windowHours: DUPLICATE_CANDIDATE_WINDOW_HOURS, scoreThreshold: DUPLICATE_SCORE_THRESHOLD };
 }
 
 /**
@@ -361,7 +392,7 @@ export async function runFanpageAttributionJob(options?: { dryRun?: boolean; act
       entity: "SETTINGS",
       entityId: "fanpage-attribution",
       reason: `Dựng lại quy kết fanpage: ${attribution.changed}/${attribution.scanned} đơn đổi kết quả`,
-      detail: { registry, byStatus: attribution.byStatus, ruleVersion: attribution.ruleVersion, windowHours: attribution.windowHours },
+      detail: { registry, byStatus: attribution.byStatus, ruleVersion: attribution.ruleVersion, windowHours: attribution.windowHours, scoreThreshold: attribution.scoreThreshold },
     });
   }
   return { registry, attribution };

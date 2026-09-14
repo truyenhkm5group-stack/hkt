@@ -7,7 +7,7 @@ import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testIdeas } from "./ideas.test";
 import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
-import { testDuplicateChainPure, testFanpageAttribution } from "./fanpage-attribution.test";
+import { testDuplicateEvidencePure, testFanpageAttribution } from "./fanpage-attribution.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
@@ -1530,7 +1530,7 @@ async function main() {
   await testInventoryDecision(db);
   await testCodReconciliation();
   await testOrderSource();
-  testDuplicateChainPure();
+  testDuplicateEvidencePure();
   await testFanpageAttribution();
   await testIdeas();
   await testPermissions();

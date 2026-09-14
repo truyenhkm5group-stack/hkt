@@ -55,19 +55,82 @@
 export const FANPAGE_ATTRIBUTION_RULE_VERSION = 1;
 
 /**
- * ───────────── CỬA SỔ TRÙNG ĐƠN ─────────────
+ * ───────────── CỬA SỔ TÌM ỨNG VIÊN — KHÔNG PHẢI ĐIỀU KIỆN ĐỦ ─────────────
  *
  * NGƯỠNG NGHIỆP VỤ — chỉ chủ shop mới được đổi (AGENTS.md mục 7), và chỉ đổi ở ĐÂY.
  *
- * Vì sao phải có một cửa sổ: nếu không có, "cùng khách + cùng mã + cùng số lượng" sẽ gộp luôn cả
- * lần khách mua lại sau một tháng — và người bán được lần thứ hai mất trắng đơn của mình. Đó là
- * tình huống 4 trong đặc tả, và nó là tình huống THẬT với shop thời trang bán hàng lặp lại.
+ * Con số này CHỈ dùng để THU HẸP chỗ phải tìm. Nó KHÔNG bao giờ tự mình kết luận trùng đơn: quá
+ * cửa sổ thì thôi không xét nữa, còn trong cửa sổ thì mới bắt đầu xét CHỨNG CỨ (xem
+ * `DUPLICATE_SIGNALS`). Hai đơn cùng khách, cùng giỏ hàng, cách nhau 3 tiếng mà không có một dấu
+ * hiệu nguồn nào nối chúng lại thì vẫn là HAI LẦN BÁN.
  *
- * Vì sao là 24 giờ: một đơn bị nhập lại do nhầm lẫn vận hành (khách nhắn lại page khác, nhân viên
- * khác chốt lại) xảy ra trong cùng ca hoặc cùng ngày. Qua một đêm mà khách vẫn đặt đúng giỏ ấy thì
- * khả năng là một lần mua thật cao hơn hẳn — và khi không chắc, luật là KHÔNG loại.
+ * Vì sao vẫn cần một cửa sổ: nó là thứ chặn khách mua lại sau một tháng bị nuốt mất, và nó giữ cho
+ * phép tìm ứng viên có biên (không phải so mọi đơn với mọi đơn).
  */
-export const DUPLICATE_WINDOW_HOURS = 24;
+export const DUPLICATE_CANDIDATE_WINDOW_HOURS = 24;
+
+/**
+ * ═══════════ CHỨNG CỨ NÓI HAI ĐƠN LÀ MỘT LẦN ĐẶT BỊ NHẬP LẠI ═══════════
+ *
+ * ─── VÌ SAO KHÔNG DÙNG "CÙNG KHÁCH + CÙNG GIỎ + TRONG 24 GIỜ" LÀM KẾT LUẬN ───
+ *
+ * Vì mệnh đề đó mô tả ĐÚNG cả một chuyện hoàn toàn bình thường: khách đặt thêm một bộ giống hệt cho
+ * người nhà trong cùng buổi chiều. Lấy nó làm kết luận là biến "ngăn đếm hai lần một đơn" thành
+ * "ngăn khách mua lần thứ hai" — và người bán được lần thứ hai mất trắng đơn của mình.
+ *
+ * Nên nó chỉ là ỨNG VIÊN. Kết luận phải đứng trên một DẤU HIỆU NGUỒN: thứ mà chỉ một lần nhập lại
+ * mới sinh ra được.
+ *
+ * ─── ĐO TRÊN PRODUCTION 14/09/2026 (2.830 đơn) — chọn dấu hiệu bằng số, không bằng cảm giác ───
+ *
+ *   `conversation_id`   2.156/2.830 (76%)  ✓ dùng — hai đơn từ CÙNG một cuộc trò chuyện
+ *   `post_id`           2.127/2.830 (75%)  ✓ dùng — cùng một bài quảng cáo dẫn tới
+ *   `customer_id`       2.802/2.830 (99%)  ✓ dùng — cùng một khách theo định danh Pancake
+ *   `duplicated_phone`  186 đơn `true`     ✓ dùng — CHÍNH PANCAKE đánh dấu SĐT này trùng
+ *   `duplicated_ip`     0 đơn `true`       ✗ BỎ — không có tín hiệu nào, giữ lại là tự lừa mình
+ *   `pke_mkter`         0 đơn có giá trị   ✗ BỎ — shop không dùng trường này
+ *
+ * ─── HAI DẤU HIỆU QUYẾT ĐỊNH, VÀ VÌ SAO CHÚNG ĐỦ SỨC ĐỨNG MỘT MÌNH ───
+ *
+ * `CANCELLED_SIBLING` — một trong hai đơn đã huỷ/xoá, đơn kia còn sống, cùng giỏ cùng người nhận
+ *   trong cửa sổ. Đây LÀ hình dạng của "huỷ rồi tạo lại", và nó là cách đơn bị nhập lại phổ biến
+ *   nhất ở shop này. Một khách đặt lại y hệt ngay sau khi chính đơn đó bị huỷ là chuyện hiếm.
+ *
+ * `SAME_CONVERSATION` — hai đơn sinh ra từ CÙNG một cuộc trò chuyện. Không phải suy đoán: Pancake
+ *   gắn `conversation_id` lúc nhân viên chốt đơn trong chat. Cùng một chat, cùng một giỏ, trong
+ *   cùng một ngày mà thành hai đơn thì gần như chắc chắn là chốt nhầm hai lần.
+ *
+ * ─── ĐƯỜNG THỨ HAI: BỐN DẤU HIỆU YẾU CỘNG LẠI ───
+ *
+ * Không có dấu hiệu quyết định nào thì phải gom đủ **bốn** dấu hiệu yếu. Đó là một cái cổng cao có
+ * chủ đích, vì đây là đường duy nhất có thể bắt nhầm một lần mua thật. Luật của đề bài: **không đủ
+ * chắc thì tính cả hai đơn** — lề an toàn nghiêng hẳn về BỎ SÓT.
+ *
+ * Hệ quả phải nói thẳng: một đơn bị nhập lại ở PAGE KHÁC thường không có `conversation_id` chung
+ * (hội thoại thuộc về một page), nên nó phải đi đường bốn-dấu-hiệu và có thể LỌT. Đo trên
+ * production: 0 ca trùng khác page tồn tại, nên hôm nay điều đó không mất gì. Ngày nào có ca thật,
+ * chỗ phải sửa là bảng này, không phải cửa sổ thời gian.
+ */
+export const DUPLICATE_SIGNALS = {
+  CANCELLED_SIBLING: { weight: 4, label: "Một đơn đã huỷ, đơn kia còn sống", hint: "Hình dạng của 'huỷ rồi tạo lại' — đơn còn hiệu lực giữ quy kết." },
+  SAME_CONVERSATION: { weight: 4, label: "Cùng một cuộc trò chuyện", hint: "Pancake gắn conversation_id lúc chốt đơn trong chat; cùng chat + cùng giỏ = chốt nhầm hai lần." },
+  SAME_CUSTOMER_ID: { weight: 1, label: "Cùng khách theo định danh Pancake", hint: "Mạnh hơn so khớp chuỗi SĐT, nhưng khách mua lại cũng cùng định danh." },
+  SAME_POST: { weight: 1, label: "Cùng bài quảng cáo", hint: "Hai đơn cùng đến từ một bài viết." },
+  SAME_VALUE: { weight: 1, label: "Cùng giá trị đơn", hint: "Một lần nhập lại mang đúng số tiền cũ." },
+  PANCAKE_DUPLICATE_FLAG: { weight: 1, label: "Pancake đánh dấu SĐT trùng", hint: "duplicated_phone = true — chính nguồn đã nghi ngờ." },
+  MINUTES_APART: { weight: 1, label: "Cách nhau dưới 30 phút", hint: "Khoảng cách của một lần gõ lại, không phải của một lần mua mới." },
+} as const;
+
+export type DuplicateSignal = keyof typeof DUPLICATE_SIGNALS;
+export const DUPLICATE_SIGNAL_KEYS = Object.keys(DUPLICATE_SIGNALS) as DuplicateSignal[];
+
+/**
+ * ĐIỂM TỐI THIỂU ĐỂ KẾT LUẬN TRÙNG ĐƠN.
+ *
+ * Bằng đúng trọng số của một dấu hiệu quyết định — nên một dấu hiệu quyết định là đủ, còn không thì
+ * phải gom bốn dấu hiệu yếu. Đổi con số này là đổi luật nghiệp vụ: chỉ chủ shop mới được đổi.
+ */
+export const DUPLICATE_SCORE_THRESHOLD = 4;
 
 /** Tình trạng quy kết của một đơn. Đúng MỘT giá trị cho mỗi đơn — không có đơn nào mang hai. */
 export const ATTRIBUTION_STATUSES = ["ATTRIBUTED", "NO_PAGE", "NO_ASSIGNMENT", "DUPLICATE"] as const;
@@ -84,7 +147,7 @@ export const ATTRIBUTION_STATUS_HINT: Record<AttributionStatus, string> = {
   ATTRIBUTED: "Đơn phát sinh trên một fanpage đã có người phụ trách tại thời điểm đơn lên.",
   NO_PAGE: "Pancake không gửi `page_id` cho đơn này — đơn nhập tay, đơn landing, hoặc nguồn khác.",
   NO_ASSIGNMENT: "Đơn có fanpage nhưng tại MỐC ĐƠN LÊN chưa có ai được phân công fanpage đó.",
-  DUPLICATE: "Cùng người nhận, cùng giỏ hàng, trong cửa sổ trùng đơn với một đơn có trước. Đơn trước giữ quy kết.",
+  DUPLICATE: "Có ĐỦ DẤU HIỆU NGUỒN nói đây là một lần đặt bị nhập lại (cùng hội thoại, hoặc huỷ rồi tạo lại, hoặc đủ bốn dấu hiệu yếu). Đơn còn hiệu lực sớm nhất giữ quy kết.",
 };
 
 /** Việc phải làm để lấp từng loại chỗ trống. Bảng chỉ in con số là bảng không ai mở lần thứ hai. */
@@ -92,7 +155,7 @@ export const ATTRIBUTION_STATUS_FIX: Record<AttributionStatus, string> = {
   ATTRIBUTED: "",
   NO_PAGE: "Không sửa được từ ERP: đơn vốn không sinh ra từ fanpage nào. Nếu đây là đơn landing, doanh thu của nó thuộc kênh landing chứ không thuộc marketer nào.",
   NO_ASSIGNMENT: "Vào Marketing → Fanpage & quy kết, gán marketer cho fanpage với mốc hiệu lực TRÙM được ngày đơn lên, rồi chạy lại đối soát.",
-  DUPLICATE: "Không phải lỗi — đây là kết quả đúng. Mở đơn gốc để đối chiếu nếu nghi ngờ.",
+  DUPLICATE: "Không phải lỗi — đây là kết quả đúng. Mỗi dòng ghi rõ CĂN CỨ đã dùng; mở đơn gốc để đối chiếu nếu thấy căn cứ chưa thuyết phục.",
 };
 
 export const ATTRIBUTION_STATUS_TONE: Record<AttributionStatus, string> = {
@@ -189,70 +252,131 @@ export type DedupeCandidate = {
   orderId: string;
   /** MỐC ĐƠN PHÁT SINH TẠI NGUỒN (`orders.inserted_at` = `inserted_at` của Pancake), KHÔNG phải mốc ERP đọc được. */
   sourceOrderAt: Date;
+  /** Khoá ỨNG VIÊN: người nhận + giỏ hàng. `null` = không đủ căn cứ ⇒ đơn không bao giờ bị loại. */
   dedupeKey: string | null;
   /**
-   * Đơn còn SỐNG (chưa huỷ, chưa xoá).
-   *
-   * Vì sao cờ này tồn tại — và đây là chỗ luật "đơn trước thắng" phải được nói cho đủ. Cách đơn bị
-   * nhập lại PHỔ BIẾN NHẤT ở shop này không phải hai page cùng chốt một khách, mà là: nhân viên huỷ
-   * đơn cũ rồi tạo lại đơn mới. Nếu đơn ĐÃ HUỶ thắng quy kết thì nó đóng góp 0đ (đơn huỷ không nằm
-   * trong `CONFIRMED_STAGES`) còn đơn thật bị đánh dấu trùng và cũng 0đ — một đơn có thật biến mất
-   * khỏi báo cáo của cả hai người.
-   *
-   * Nên trong một chuỗi, người thắng là đơn SỐNG sớm nhất. Cả chuỗi đều đã huỷ thì đơn sớm nhất
-   * thắng như thường — chuỗi vẫn gộp lại, chỉ là gộp về một con số 0 đúng nghĩa.
+   * Đơn còn SỐNG (chưa huỷ, chưa xoá) — vừa là một DẤU HIỆU (`CANCELLED_SIBLING`), vừa là thứ
+   * quyết định ai thắng trong một cụm: đơn đã huỷ đóng góp 0đ, nên để nó thắng là làm một đơn có
+   * thật biến mất khỏi báo cáo của cả hai người.
    */
   alive: boolean;
+  /* ── Dấu hiệu nguồn, chép thô từ Pancake. Rỗng/null = KHÔNG CÓ dấu hiệu, không phải dấu hiệu âm. ── */
+  conversationId: string | null;
+  postId: string | null;
+  customerId: string | null;
+  /** `total_price_after_discount`. 0 ⇒ không dùng làm dấu hiệu (không phân biệt được gì). */
+  orderValue: number;
+  /** `raw->duplicated_phone` của Pancake. */
+  pancakeDuplicateFlag: boolean;
 };
 
-export type DedupeVerdict = { orderId: string; duplicateOfOrderId: string | null };
+export type DuplicateEvidence = { score: number; signals: DuplicateSignal[] };
+
+/** Khoảng cách để dấu hiệu `MINUTES_APART` bật. */
+const MINUTES_APART_MS = 30 * 60_000;
 
 /**
- * ĐƠN NÀO THẮNG QUY KẾT — hai bước, và hai bước ấy trả lời hai câu hỏi khác nhau.
+ * CHẤM CHỨNG CỨ CHO MỘT CẶP ĐƠN — hàm THUẦN, không đọc CSDL, không đọc đồng hồ.
  *
- * ─── BƯỚC 1 · CHIA CHUỖI, bằng THỜI GIAN ───
+ * Nơi gọi đã bảo đảm hai đơn cùng khoá ứng viên và trong cửa sổ; hàm này chỉ trả lời một câu: có
+ * dấu hiệu NGUỒN nào nói chúng là một lần đặt bị nhập lại không.
  *
- * Cùng khoá trùng đơn vẫn chưa đủ: còn phải gần nhau về thời gian. Đo cửa sổ từ đơn ĐẦU CHUỖI giữ
- * cho chuỗi có biên — đo từ đơn liền trước sẽ cho một dãy đơn cách nhau 23 giờ trượt dài vô tận
- * thành "một lần đặt". Quá cửa sổ thì mở chuỗi MỚI, và đó chính là điều làm khách mua lại sau một
- * tháng không bao giờ bị nuốt mất.
- *
- * ─── BƯỚC 2 · CHỌN NGƯỜI THẮNG TRONG CHUỖI, bằng ĐƠN SỐNG SỚM NHẤT ───
- *
- * Bằng giây thì so tiếp bằng `order_id` (khoá Pancake, so như CHUỖI để id vượt 2^53 vẫn đúng). Cần
- * một cái chốt hạ như thế, nếu không hai lần chạy đối soát có thể ra hai kết quả khác nhau và doanh
- * thu của hai người đổi chỗ cho nhau mà không ai làm gì cả.
- *
- * Đơn thứ ba trong chuỗi trỏ về ĐƠN THẮNG, không trỏ về đơn liền trước — chuỗi truy ngược luôn sâu
- * đúng một bậc.
+ * Trả về cả danh sách dấu hiệu chứ không chỉ điểm số, vì một kết luận "trùng đơn" mà không nói
+ * được VÌ SAO là một kết luận không ai kiểm chứng lại được — và nó đang lấy doanh thu khỏi tên
+ * một người thật.
  */
-export function resolveDuplicateChains(candidates: DedupeCandidate[], windowHours = DUPLICATE_WINDOW_HOURS): DedupeVerdict[] {
+export function scoreDuplicatePair(a: DedupeCandidate, b: DedupeCandidate): DuplicateEvidence {
+  const signals: DuplicateSignal[] = [];
+  if (a.alive !== b.alive) signals.push("CANCELLED_SIBLING");
+  if (a.conversationId && b.conversationId && a.conversationId === b.conversationId) signals.push("SAME_CONVERSATION");
+  if (a.customerId && b.customerId && a.customerId === b.customerId) signals.push("SAME_CUSTOMER_ID");
+  if (a.postId && b.postId && a.postId === b.postId) signals.push("SAME_POST");
+  if (a.orderValue > 0 && a.orderValue === b.orderValue) signals.push("SAME_VALUE");
+  // Cờ của Pancake trên BẤT KỲ đơn nào trong cặp: nó nói "SĐT này còn ở đơn khác", và ở đây đơn
+  // khác đó chính là đơn kia.
+  if (a.pancakeDuplicateFlag || b.pancakeDuplicateFlag) signals.push("PANCAKE_DUPLICATE_FLAG");
+  if (Math.abs(a.sourceOrderAt.getTime() - b.sourceOrderAt.getTime()) <= MINUTES_APART_MS) signals.push("MINUTES_APART");
+  const score = signals.reduce((t, k) => t + DUPLICATE_SIGNALS[k].weight, 0);
+  return { score, signals };
+}
+
+export type DedupeVerdict = {
+  orderId: string;
+  duplicateOfOrderId: string | null;
+  /** Điểm chứng cứ so với đơn ĐẠI DIỆN của cụm. `null` với đơn không bị loại. */
+  score: number | null;
+  /** Các dấu hiệu đã bật, theo thứ tự trong sổ đăng ký. `[]` với đơn không bị loại. */
+  signals: DuplicateSignal[];
+};
+
+/**
+ * ĐƠN NÀO THẮNG QUY KẾT — ba bước, và mỗi bước trả lời một câu khác nhau.
+ *
+ * ─── BƯỚC 1 · ỨNG VIÊN, bằng KHOÁ và THỜI GIAN ───
+ *
+ * Cùng người nhận + cùng giỏ hàng + trong cửa sổ. Khác mã hàng hay khác số lượng ⇒ khác khoá ⇒
+ * KHÔNG BAO GIỜ gặp nhau, nên "khác SKU thì tính cả hai" đúng mà không cần một luật riêng.
+ *
+ * ─── BƯỚC 2 · CHỨNG CỨ, và đây mới là chỗ kết luận ───
+ *
+ * Ứng viên chỉ thành cụm khi `scoreDuplicatePair` với đơn ĐẠI DIỆN (đơn sớm nhất của cụm) đạt
+ * ngưỡng. Không đạt ⇒ mở cụm MỚI ⇒ cả hai đơn đều được tính. Đó là điều làm "khách mua lại trong
+ * cùng buổi chiều" không bị nuốt mất.
+ *
+ * So với ĐẠI DIỆN chứ không so với đơn liền trước: nếu so với đơn liền trước thì một dãy đơn mỗi
+ * cái cách nhau 23 giờ sẽ trượt dài vô tận thành "một lần đặt".
+ *
+ * ─── BƯỚC 3 · CHỌN NGƯỜI THẮNG TRONG CỤM ───
+ *
+ * Đơn còn SỐNG sớm nhất thắng; cả cụm đã huỷ thì đơn sớm nhất thắng. "Sớm nhất" đo bằng mốc của
+ * NGUỒN (Pancake), và bằng giây thì chốt hạ bằng `order_id` so như CHUỖI (id Pancake vượt 2^53).
+ * Cần cái chốt hạ đó, nếu không hai lần chạy đối soát có thể đổi chỗ doanh thu của hai người mà
+ * không ai làm gì cả.
+ *
+ * TẤT ĐỊNH và IDEMPOTENT: kết quả là hàm thuần của dữ liệu vào; chạy lại bao nhiêu lần cũng thế.
+ */
+export function resolveDuplicates(candidates: DedupeCandidate[], windowHours = DUPLICATE_CANDIDATE_WINDOW_HOURS): DedupeVerdict[] {
   const windowMs = Math.max(0, windowHours) * 3_600_000;
   const byKey = new Map<string, DedupeCandidate[]>();
   const out: DedupeVerdict[] = [];
+  const notDuplicate = (orderId: string): DedupeVerdict => ({ orderId, duplicateOfOrderId: null, score: null, signals: [] });
+
   for (const c of candidates) {
     if (!c.dedupeKey) {
-      out.push({ orderId: c.orderId, duplicateOfOrderId: null });
+      out.push(notDuplicate(c.orderId));
       continue;
     }
     const list = byKey.get(c.dedupeKey);
     if (list) list.push(c);
     else byKey.set(c.dedupeKey, [c]);
   }
-  const earlier = (a: DedupeCandidate, b: DedupeCandidate) => a.sourceOrderAt.getTime() - b.sourceOrderAt.getTime() || (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0);
+
+  const earlier = (a: DedupeCandidate, b: DedupeCandidate) =>
+    a.sourceOrderAt.getTime() - b.sourceOrderAt.getTime() || (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0);
+
   for (const list of byKey.values()) {
     const sorted = [...list].sort(earlier);
-    // Bước 1 — chia chuỗi theo cửa sổ, mốc là đơn đầu chuỗi.
-    const chains: DedupeCandidate[][] = [];
+    /** Mỗi cụm: đơn đại diện (sớm nhất) + các thành viên kèm chứng cứ đã dùng để nhận chúng vào. */
+    const clusters: { rep: DedupeCandidate; members: { c: DedupeCandidate; ev: DuplicateEvidence }[] }[] = [];
     for (const c of sorted) {
-      const current = chains[chains.length - 1];
-      if (current && c.sourceOrderAt.getTime() - current[0].sourceOrderAt.getTime() <= windowMs) current.push(c);
-      else chains.push([c]);
+      let joined = false;
+      for (const cl of clusters) {
+        if (c.sourceOrderAt.getTime() - cl.rep.sourceOrderAt.getTime() > windowMs) continue;
+        const ev = scoreDuplicatePair(cl.rep, c);
+        if (ev.score < DUPLICATE_SCORE_THRESHOLD) continue;
+        cl.members.push({ c, ev });
+        joined = true;
+        break;
+      }
+      if (!joined) clusters.push({ rep: c, members: [{ c, ev: { score: 0, signals: [] } }] });
     }
-    // Bước 2 — đơn SỐNG sớm nhất thắng; cả chuỗi đã huỷ thì đơn sớm nhất thắng.
-    for (const chain of chains) {
-      const winner = chain.find((c) => c.alive) ?? chain[0];
-      for (const c of chain) out.push({ orderId: c.orderId, duplicateOfOrderId: c.orderId === winner.orderId ? null : winner.orderId });
+    for (const cl of clusters) {
+      const members = cl.members;
+      const winner = members.find((m) => m.c.alive)?.c ?? members[0].c;
+      for (const m of members) {
+        if (m.c.orderId === winner.orderId) out.push(notDuplicate(m.c.orderId));
+        else out.push({ orderId: m.c.orderId, duplicateOfOrderId: winner.orderId, score: m.ev.score, signals: m.ev.signals });
+      }
     }
   }
   return out;

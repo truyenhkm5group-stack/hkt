@@ -24,7 +24,7 @@ import { and, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { ATTRIBUTION_STATUSES, type AttributionStatus } from "@/lib/constants/fanpage-attribution";
+import { ATTRIBUTION_STATUSES, DUPLICATE_SIGNALS, type AttributionStatus, type DuplicateSignal } from "@/lib/constants/fanpage-attribution";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 import type { ListParams, Period } from "@/lib/search-params";
 
@@ -172,6 +172,19 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
   });
 }
 
+/**
+ * Khoá dấu hiệu → nhãn đọc được. Khoá lạ (dòng do một phiên bản luật cũ ghi) được GIỮ NGUYÊN chứ
+ * không bị bỏ đi: một căn cứ không đọc được vẫn là một căn cứ, giấu nó đi mới là mất dấu.
+ */
+function signalLabels(reason: string | null): string[] {
+  if (!reason) return [];
+  return reason
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean)
+    .map((k) => DUPLICATE_SIGNALS[k as DuplicateSignal]?.label ?? k);
+}
+
 export type AttributionOrderRow = {
   orderId: string;
   systemId: number | null;
@@ -182,6 +195,9 @@ export type AttributionOrderRow = {
   marketerLabel: string;
   status: AttributionStatus;
   duplicateOfOrderId: string | null;
+  /** Các dấu hiệu đã dùng để kết luận trùng đơn, đã dịch sang nhãn đọc được. `[]` với đơn không trùng. */
+  duplicateSignals: string[];
+  duplicateScore: number | null;
   stage: string;
   confirmed: boolean;
   revenue: number;
@@ -235,6 +251,8 @@ export async function listAttributionOrders(params: ListParams, filters: Attribu
       marketerId: OA.marketerId,
       status: OA.status,
       duplicateOfOrderId: OA.duplicateOfOrderId,
+      duplicateScore: OA.duplicateScore,
+      duplicateReason: OA.duplicateReason,
       stage: sql<string>`${O.stage}::text`,
       confirmed: sql<boolean>`(${CONFIRMED})`,
       revenue: sql<number>`${CONFIRMED_ORDER_VALUE}::bigint`,
@@ -264,6 +282,8 @@ export async function listAttributionOrders(params: ListParams, filters: Attribu
       marketerLabel: r.marketerId ? marketerLabel(r.marketerId, names) : ATTR_UNATTRIBUTED_LABEL,
       status: r.status as AttributionStatus,
       duplicateOfOrderId: r.duplicateOfOrderId,
+      duplicateSignals: signalLabels(r.duplicateReason),
+      duplicateScore: r.duplicateScore,
       stage: r.stage,
       confirmed: Boolean(r.confirmed),
       revenue: Number(r.revenue),
@@ -317,6 +337,8 @@ export async function listDuplicateSiblings(orderId: string): Promise<Attributio
       marketerId: OA.marketerId,
       status: OA.status,
       duplicateOfOrderId: OA.duplicateOfOrderId,
+      duplicateScore: OA.duplicateScore,
+      duplicateReason: OA.duplicateReason,
       stage: sql<string>`${O.stage}::text`,
       confirmed: sql<boolean>`(${CONFIRMED})`,
       revenue: sql<number>`${CONFIRMED_ORDER_VALUE}::bigint`,
@@ -340,6 +362,8 @@ export async function listDuplicateSiblings(orderId: string): Promise<Attributio
     marketerLabel: r.marketerId ? marketerLabel(r.marketerId, names) : ATTR_UNATTRIBUTED_LABEL,
     status: r.status as AttributionStatus,
     duplicateOfOrderId: r.duplicateOfOrderId,
+    duplicateSignals: signalLabels(r.duplicateReason),
+    duplicateScore: r.duplicateScore,
     stage: r.stage,
     confirmed: Boolean(r.confirmed),
     revenue: Number(r.revenue),

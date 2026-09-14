@@ -2317,6 +2317,15 @@ export const orderAttributions = pgTable(
     dedupeKey: text("dedupe_key"),
     /** Đơn thắng quy kết khi dòng này là bản nhập lại. `NULL` với mọi tình trạng khác. */
     duplicateOfOrderId: text("duplicate_of_order_id").references(() => orders.id, { onDelete: "set null" }),
+    /**
+     * ĐIỂM CHỨNG CỨ và CÁC DẤU HIỆU đã dùng để kết luận trùng đơn (`DUPLICATE_SIGNALS`).
+     *
+     * Một kết luận "trùng đơn" đang lấy doanh thu khỏi tên một người thật. Không lưu lại căn cứ thì
+     * sáu tháng sau không ai kiểm chứng được, và người bị mất đơn không có gì để cãi. `NULL` với
+     * mọi tình trạng khác — chỉ dòng `DUPLICATE` mới có căn cứ để ghi.
+     */
+    duplicateScore: integer("duplicate_score"),
+    duplicateReason: text("duplicate_reason"),
     /** Phiên bản luật đã dùng. Luật đổi ⇒ dòng cũ thành cũ và TÌM RA ĐƯỢC. */
     ruleVersion: integer("rule_version").notNull().default(1),
     computedAt: ts("computed_at").notNull().defaultNow(),
@@ -2333,6 +2342,8 @@ export const orderAttributions = pgTable(
     check("order_attribution_marketer_check", sql`(${t.status} = 'ATTRIBUTED') = (${t.marketerId} IS NOT NULL)`),
     check("order_attribution_duplicate_check", sql`(${t.status} = 'DUPLICATE') = (${t.duplicateOfOrderId} IS NOT NULL)`),
     check("order_attribution_self_check", sql`${t.duplicateOfOrderId} IS NULL OR ${t.duplicateOfOrderId} <> ${t.orderId}`),
+    // Căn cứ đi CÙNG kết luận: dòng trùng đơn phải có điểm, dòng không trùng thì không được có.
+    check("order_attribution_evidence_check", sql`(${t.status} = 'DUPLICATE') = (${t.duplicateScore} IS NOT NULL)`),
     index("order_attribution_page_idx").on(t.sourcePageId),
     index("order_attribution_status_idx").on(t.status),
     index("order_attribution_dedupe_idx").on(t.dedupeKey),

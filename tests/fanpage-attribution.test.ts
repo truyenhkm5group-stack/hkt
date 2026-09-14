@@ -6,13 +6,17 @@ import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import {
   buildDedupeKey,
-  DUPLICATE_WINDOW_HOURS,
+  DUPLICATE_CANDIDATE_WINDOW_HOURS,
+  DUPLICATE_SCORE_THRESHOLD,
+  DUPLICATE_SIGNALS,
   normalizeAttrPhone,
   normalizeAttrText,
   pickAssignment,
-  resolveDuplicateChains,
+  resolveDuplicates,
+  scoreDuplicatePair,
   windowsOverlap,
   type AssignmentWindow,
+  type DedupeCandidate,
 } from "@/lib/constants/fanpage-attribution";
 import { assignFanpageMarketer, rebuildFanpageAttribution, revokeFanpageAssignment, syncFanpageRegistry } from "@/lib/attribution/fanpage";
 import { getMarketerAttributionReport, listAttributionOrders } from "@/lib/queries/fanpage-attribution";
@@ -42,8 +46,26 @@ type ItemSpec = { sku: string; qty: number };
 
 async function themDon(
   db: Awaited<ReturnType<typeof getDb>>,
-  spec: { id: string; pageId: string | null; at: Date; phone: string; name: string; address: string; items: ItemSpec[]; stage?: "NEW" | "CONFIRMED" | "CANCELLED"; revenue?: number },
+  spec: {
+    id: string;
+    pageId: string | null;
+    at: Date;
+    phone: string;
+    name: string;
+    address: string;
+    items: ItemSpec[];
+    stage?: "NEW" | "CONFIRMED" | "CANCELLED";
+    revenue?: number;
+    /* Dấu hiệu nguồn — mặc định KHÔNG có, để mỗi bài phải tự khai dấu hiệu nó đang thử. */
+    conversationId?: string;
+    postId?: string;
+    dupFlag?: boolean;
+    customerId?: string;
+  },
 ) {
+  if (spec.customerId) {
+    await db.insert(schema.customers).values({ id: spec.customerId, name: spec.name }).onConflictDoNothing();
+  }
   await db
     .insert(schema.orders)
     .values({
@@ -60,6 +82,10 @@ async function themDon(
       shipAddress: spec.address,
       totalPriceAfterDiscount: spec.revenue ?? 500_000,
       source: "Facebook",
+      customerId: spec.customerId ?? null,
+      conversationId: spec.conversationId ?? null,
+      postId: spec.postId ?? null,
+      raw: { duplicated_phone: spec.dupFlag === true },
     })
     .onConflictDoNothing();
   await db
@@ -151,21 +177,49 @@ export async function testFanpageAttribution() {
   assert.equal(qk1?.assignmentId, (gan1 as { assignmentId: string }).assignmentId, "ảnh chụp phải giữ CHÍNH dòng phân công đã dùng — đó là thứ truy ngược được");
   assert.equal((await donCua(AN)).orders, 1, "An có đúng 1 đơn");
 
-  /* ═══ TÌNH HUỐNG 2 · Cùng khách, cùng Q001, nhập lại ở page B sau 5 phút ⇒ An giữ quy kết ═══ */
+  /* ═══ TÌNH HUỐNG 2 · Nhập lại ở page B — VÀ CHỈ KHI CÓ ĐỦ CHỨNG CỨ ═══
+   *
+   * Đây là chỗ luật phải phân biệt được hai chuyện trông GIỐNG HỆT nhau: một lần đặt bị gõ lại, và
+   * một khách mua thêm bộ nữa trong cùng buổi chiều. "Cùng khách + cùng giỏ + trong 24 giờ" mô tả
+   * đúng cả hai, nên nó không được phép tự kết luận.
+   *
+   * 2a — KHÔNG có dấu hiệu nguồn nào ngoài giá trị đơn và khoảng cách gần: TÍNH CẢ HAI.
+   */
 
-  await themDon(db, { id: `${P}o2-dup`, pageId: PAGE_B, at: at(5, 9, 5), phone: "0911000001", name: "Khách X", address: "12 Lê Lợi", items: [{ sku: "FPA-Q001", qty: 1 }] });
+  await themDon(db, { id: `${P}o2-mua-them`, pageId: PAGE_B, at: at(5, 9, 5), phone: "0911000001", name: "Khách X", address: "12 Lê Lợi", items: [{ sku: "FPA-Q001", qty: 1 }] });
   await doiSoat();
-  const dup = await quyKet(`${P}o2-dup`);
-  assert.equal(dup?.status, "DUPLICATE", "đơn nhập lại phải bị đánh dấu trùng");
-  assert.equal(dup?.duplicateOfOrderId, `${P}o1`, "và phải chỉ đích danh đơn nào thắng — một kết luận không chỉ được đích là kết luận không kiểm chứng được");
+  const muaThem = await quyKet(`${P}o2-mua-them`);
+  assert.equal(muaThem?.status, "ATTRIBUTED", "cùng khách + cùng giỏ + 5 phút NHƯNG không dấu hiệu nguồn nào ⇒ KHÔNG kết luận trùng, tính cả hai");
+  assert.equal(muaThem?.marketerId, BINH, "và đơn ấy thuộc về người phụ trách page bán được nó");
+  assert.equal((await donCua(BINH)).orders, 1, "Bình được tính đơn này");
+
+  /* 2b — CÙNG DỮ KIỆN ẤY nhưng có đủ bốn dấu hiệu yếu (cùng định danh khách · cùng bài viết ·
+   * cùng giá trị · Pancake đánh dấu SĐT trùng) ⇒ mới kết luận trùng, và đơn TRƯỚC thắng. */
+
+  await themDon(db, { id: `${P}o2b-goc`, pageId: PAGE_A, at: at(6, 9, 0), phone: "0911000002", name: "Khách Y", address: "20 Lê Lợi", items: [{ sku: "FPA-Q002", qty: 1 }], customerId: `${P}cust-y`, postId: "post-y" });
+  await themDon(db, { id: `${P}o2b-nhap-lai`, pageId: PAGE_B, at: at(6, 9, 5), phone: "0911000002", name: "Khách Y", address: "20 Lê Lợi", items: [{ sku: "FPA-Q002", qty: 1 }], customerId: `${P}cust-y`, postId: "post-y", dupFlag: true });
+  await doiSoat();
+  const dup = await quyKet(`${P}o2b-nhap-lai`);
+  assert.equal(dup?.status, "DUPLICATE", "đủ bốn dấu hiệu yếu ⇒ kết luận trùng");
+  assert.equal(dup?.duplicateOfOrderId, `${P}o2b-goc`, "đơn TRƯỚC (mốc nguồn sớm hơn) thắng quy kết");
   assert.equal(dup?.marketerId, null, "đơn trùng KHÔNG mang tên ai");
   assert.equal(dup?.sourcePageId, PAGE_B, "vẫn giữ page gốc để còn đối chiếu — loại quy kết khác hẳn với xoá dấu vết");
-  assert.equal((await donCua(AN)).orders, 1, "An vẫn đúng 1 đơn");
-  assert.equal((await donCua(BINH)).orders, 0, "Bình KHÔNG nhận đơn trùng");
-  assert.equal((await donCua(BINH)).revenue, 0, "và cũng không nhận đồng doanh thu nào từ đơn trùng");
-  // Đơn gốc KHÔNG bị xoá khỏi ERP — chỉ bị loại khỏi quy kết.
-  const [conNguyen] = await db.select({ id: schema.orders.id }).from(schema.orders).where(eq(schema.orders.id, `${P}o2-dup`)).limit(1);
+  assert.ok((dup?.duplicateScore ?? 0) >= DUPLICATE_SCORE_THRESHOLD, "phải lưu ĐIỂM chứng cứ");
+  assert.ok((dup?.duplicateReason ?? "").includes("SAME_CUSTOMER_ID"), "và lưu RÕ đã dùng dấu hiệu nào — không có căn cứ thì không ai cãi lại được");
+  assert.equal((await quyKet(`${P}o2b-goc`))?.marketerId, AN, "An giữ đơn gốc");
+  assert.equal((await donCua(BINH)).revenue, 500_000, "Bình chỉ có doanh thu của đơn 2a, KHÔNG có đồng nào từ đơn trùng");
+  // Đơn bị loại KHÔNG bị xoá khỏi ERP — chỉ bị loại khỏi quy kết.
+  const [conNguyen] = await db.select({ id: schema.orders.id }).from(schema.orders).where(eq(schema.orders.id, `${P}o2b-nhap-lai`)).limit(1);
   assert.ok(conNguyen, "đơn trùng vẫn nằm nguyên trong ERP");
+
+  /* 2c — CÙNG HỘI THOẠI là dấu hiệu QUYẾT ĐỊNH: một mình nó đủ. */
+
+  await themDon(db, { id: `${P}o2c-goc`, pageId: PAGE_A, at: at(6, 14, 0), phone: "0911000003", name: "Khách Z", address: "30 Lê Lợi", items: [{ sku: "FPA-Q003", qty: 1 }], conversationId: "conv-z", revenue: 111_000 });
+  await themDon(db, { id: `${P}o2c-lai`, pageId: PAGE_A, at: at(6, 19, 0), phone: "0911000003", name: "Khách Z", address: "30 Lê Lợi", items: [{ sku: "FPA-Q003", qty: 1 }], conversationId: "conv-z", revenue: 222_000 });
+  await doiSoat();
+  const convDup = await quyKet(`${P}o2c-lai`);
+  assert.equal(convDup?.status, "DUPLICATE", "cùng một cuộc trò chuyện ⇒ đủ sức kết luận một mình, dù khác giá trị và cách nhau 5 tiếng");
+  assert.equal(convDup?.duplicateReason, "SAME_CONVERSATION", "và căn cứ ghi đúng MỘT dấu hiệu ấy, không kèm dấu hiệu không bật");
 
   /* ═══ TÌNH HUỐNG 3 · Cùng khách, KHÁC mã hàng, hai page ⇒ tính cả hai ═══ */
 
@@ -174,8 +228,10 @@ export async function testFanpageAttribution() {
   const q004 = await quyKet(`${P}o3-q004`);
   assert.equal(q004?.status, "ATTRIBUTED", "khác mã hàng KHÔNG phải trùng đơn, dù cùng khách cùng giờ");
   assert.equal(q004?.marketerId, BINH, "Bình nhận đơn Q004 của chính page mình");
-  assert.equal((await donCua(AN)).orders, 1, "An giữ Q001");
-  assert.equal((await donCua(BINH)).orders, 1, "Bình được Q004");
+  // Sổ tại đây: An = o1 · o2b-goc · o2c-goc (o2c-lai bị loại vì trùng).
+  //             Bình = o2-mua-them · o3-q004.
+  assert.equal((await donCua(AN)).orders, 3, "An giữ ba đơn của page A, KHÔNG mất đơn nào vì luật trùng");
+  assert.equal((await donCua(BINH)).orders, 2, "Bình được cả đơn mua thêm (2a) lẫn đơn khác mã (Q004)");
 
   /* ═══ TÌNH HUỐNG 4 · Cùng khách, cùng Q001, 30 ngày sau ⇒ KHÔNG phải trùng ═══ */
 
@@ -184,7 +240,7 @@ export async function testFanpageAttribution() {
   const muaLai = await quyKet(`${P}o4-mua-lai`);
   assert.equal(muaLai?.status, "ATTRIBUTED", "khách mua lại sau 30 ngày là một lần bán THẬT, không phải bản nhập lại");
   assert.equal(muaLai?.marketerId, BINH, "và nó thuộc về người phụ trách page bán được lần đó");
-  assert.equal((await donCua(BINH)).orders, 2, "Bình có Q004 và lần mua lại");
+  assert.equal((await donCua(BINH)).orders, 3, "Bình có thêm lần mua lại — cộng vào hai đơn trước đó");
 
   /* ═══ TÌNH HUỐNG 5 · Đổi người phụ trách KHÔNG được viết lại lịch sử ═══ */
 
@@ -322,46 +378,86 @@ export async function testFanpageAttribution() {
   assert.ok(code.includes("CONFIRMED_STAGES"), "phải dùng LẠI phạm vi đơn đã xác nhận dùng chung, không tự viết điều kiện stage");
 
   console.log(
-    `✓ Quy kết fanpage → marketer: ${bao.totalOrders} đơn trong kỳ · ${bao.byStatus.ATTRIBUTED} quy kết được · ${bao.byStatus.DUPLICATE} trùng đơn (cửa sổ ${DUPLICATE_WINDOW_HOURS}h) · ${bao.byStatus.NO_ASSIGNMENT} chưa gán · ${bao.byStatus.NO_PAGE} không có page · idempotent sau 4 lượt chạy`,
+    `✓ Quy kết fanpage → marketer: ${bao.totalOrders} đơn trong kỳ · ${bao.byStatus.ATTRIBUTED} quy kết được · ${bao.byStatus.DUPLICATE} trùng đơn (ngưỡng ${DUPLICATE_SCORE_THRESHOLD} điểm chứng cứ) · ${bao.byStatus.NO_ASSIGNMENT} chưa gán · ${bao.byStatus.NO_PAGE} không có page · idempotent sau 4 lượt chạy`,
   );
 }
 
-/** Hàm thuần chia chuỗi — tách riêng để chạy được không cần CSDL. */
-export function testDuplicateChainPure() {
-  const key = "k";
-  const c = (id: string, hours: number, alive = true) => ({ orderId: id, sourceOrderAt: new Date(Date.UTC(2024, 2, 1, hours)), dedupeKey: key, alive });
+/**
+ * Hàm thuần chấm chứng cứ và gom cụm — chạy được không cần CSDL.
+ *
+ * Đây là nơi khoá điều quan trọng nhất của cả bản này: **cửa sổ thời gian KHÔNG BAO GIỜ tự mình
+ * kết luận trùng đơn**. Nếu một ngày nào đó có người "đơn giản hoá" nó về lại "cùng khoá + trong
+ * 24 giờ", bài này đỏ ngay.
+ */
+export function testDuplicateEvidencePure() {
+  const KEY = "k";
+  const base = (id: string, hours: number, over: Partial<DedupeCandidate> = {}): DedupeCandidate => ({
+    orderId: id,
+    sourceOrderAt: new Date(Date.UTC(2024, 2, 1, hours)),
+    dedupeKey: KEY,
+    alive: true,
+    conversationId: null,
+    postId: null,
+    customerId: null,
+    orderValue: 500_000,
+    pancakeDuplicateFlag: false,
+    ...over,
+  });
+  const dupOf = (out: ReturnType<typeof resolveDuplicates>, id: string) => out.find((v) => v.orderId === id)?.duplicateOfOrderId ?? null;
 
-  // Chuỗi ba đơn trong cửa sổ: đơn thứ ba trỏ về ĐƠN THẮNG, không trỏ về đơn liền trước.
-  const ba = resolveDuplicateChains([c("a", 0), c("b", 1), c("c", 2)], 24);
-  assert.equal(ba.find((v) => v.orderId === "b")?.duplicateOfOrderId, "a");
-  assert.equal(ba.find((v) => v.orderId === "c")?.duplicateOfOrderId, "a", "chuỗi truy ngược luôn sâu đúng một bậc");
+  /* ── 1 · CỬA SỔ MỘT MÌNH KHÔNG ĐỦ ── */
+  const chiGanNhau = resolveDuplicates([base("a", 0), base("b", 1)]);
+  assert.equal(dupOf(chiGanNhau, "b"), null, "cùng khoá + cách 1 giờ + cùng giá trị vẫn KHÔNG đủ — đây là luật chống 'ngăn khách mua lại'");
+  assert.equal(scoreDuplicatePair(base("a", 0), base("b", 1)).score, DUPLICATE_SIGNALS.SAME_VALUE.weight, "chỉ có đúng dấu hiệu giá trị");
 
-  // Quá cửa sổ ⇒ chuỗi MỚI. Đây là điều giữ cho khách mua lại không bị nuốt mất.
-  const xa = resolveDuplicateChains([c("a", 0), c("b", 25)], 24);
-  assert.equal(xa.find((v) => v.orderId === "b")?.duplicateOfOrderId, null);
+  /* ── 2 · HAI DẤU HIỆU QUYẾT ĐỊNH, mỗi cái đủ đứng một mình ── */
+  const cungHoiThoai = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("b", 6, { conversationId: "c1", orderValue: 900_000 })]);
+  assert.equal(dupOf(cungHoiThoai, "b"), "a", "cùng hội thoại ⇒ trùng, dù khác giá trị và cách 6 giờ");
 
-  // Mốc đo là ĐƠN ĐẦU CHUỖI, không phải đơn liền trước: nếu đo từ đơn liền trước thì dãy dưới đây
-  // trượt dài thành "một lần đặt" vô tận.
-  const truot = resolveDuplicateChains([c("a", 0), c("b", 20), c("c", 39)], 24);
-  assert.equal(truot.find((v) => v.orderId === "b")?.duplicateOfOrderId, "a");
-  assert.equal(truot.find((v) => v.orderId === "c")?.duplicateOfOrderId, null, "39h từ đầu chuỗi ⇒ chuỗi mới, dù chỉ cách đơn liền trước 19h");
+  const huyRoiTao = resolveDuplicates([base("a", 0, { alive: false }), base("b", 3)]);
+  assert.equal(dupOf(huyRoiTao, "b"), null, "đơn CÒN SỐNG không bao giờ bị đánh dấu trùng khi nó là đơn thắng");
+  assert.equal(dupOf(huyRoiTao, "a"), "b", "đơn ĐÃ HUỶ là bản bị thay thế — không được chiếm quy kết");
 
-  // Bằng giây ⇒ chốt hạ bằng order_id, để hai lần chạy không đổi chỗ doanh thu của hai người.
-  const hoa = resolveDuplicateChains([c("z", 0), c("a", 0)], 24);
-  assert.equal(hoa.find((v) => v.orderId === "z")?.duplicateOfOrderId, "a", "bằng giây thì id nhỏ hơn thắng — kết quả phải tất định");
+  /* ── 3 · ĐƯỜNG BỐN DẤU HIỆU YẾU ── */
+  const ba = resolveDuplicates([base("a", 0, { customerId: "c", postId: "p" }), base("b", 5, { customerId: "c", postId: "p" })]);
+  assert.equal(dupOf(ba, "b"), null, "ba dấu hiệu yếu (khách · bài viết · giá trị) CHƯA đủ — cổng cao là có chủ đích");
+  const bon = resolveDuplicates([base("a", 0, { customerId: "c", postId: "p" }), base("b", 5, { customerId: "c", postId: "p", pancakeDuplicateFlag: true })]);
+  assert.equal(dupOf(bon, "b"), "a", "bốn dấu hiệu yếu thì mới đủ");
 
-  // Đơn huỷ không được thắng trong khi còn đơn sống.
-  const coHuy = resolveDuplicateChains([c("a", 0, false), c("b", 1, true)], 24);
-  assert.equal(coHuy.find((v) => v.orderId === "b")?.duplicateOfOrderId, null, "đơn SỐNG thắng");
-  assert.equal(coHuy.find((v) => v.orderId === "a")?.duplicateOfOrderId, "b");
+  /* ── 4 · KHÁC GIỎ HÀNG ⇒ KHÁC KHOÁ ⇒ không bao giờ gặp nhau ── */
+  const khacGio = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("b", 1, { conversationId: "c1", dedupeKey: "k2" })]);
+  assert.equal(dupOf(khacGio, "b"), null, "khác mã hàng thì dù cùng hội thoại vẫn là hai đơn — 'khác SKU tính cả' không cần luật riêng");
 
-  // Cả chuỗi đều huỷ ⇒ vẫn gộp, chỉ là gộp về một con số 0 đúng nghĩa.
-  const toanHuy = resolveDuplicateChains([c("a", 0, false), c("b", 1, false)], 24);
-  assert.equal(toanHuy.find((v) => v.orderId === "b")?.duplicateOfOrderId, "a");
+  /* ── 5 · QUÁ CỬA SỔ ⇒ thôi xét, dù chứng cứ mạnh ── */
+  const quaCuaSo = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("b", 25, { conversationId: "c1" })]);
+  assert.equal(dupOf(quaCuaSo, "b"), null, "quá 24 giờ ⇒ mở cụm MỚI: khách mua lại trong cùng một hội thoại dài KHÔNG bị nuốt");
 
-  // Không có khoá ⇒ KHÔNG bao giờ bị loại vì trùng (lề an toàn nghiêng về bỏ sót).
-  const khongKhoa = resolveDuplicateChains([{ orderId: "x", sourceOrderAt: new Date(), dedupeKey: null, alive: true }], 24);
+  /* ── 6 · SO VỚI ĐƠN ĐẠI DIỆN, không so với đơn liền trước ── */
+  const truot = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("b", 20, { conversationId: "c1" }), base("c", 39, { conversationId: "c1" })]);
+  assert.equal(dupOf(truot, "b"), "a");
+  assert.equal(dupOf(truot, "c"), null, "39 giờ tính từ ĐẠI DIỆN ⇒ cụm mới, dù chỉ cách đơn liền trước 19 giờ — nếu không, một dãy đơn sẽ trượt dài vô tận");
+
+  /* ── 7 · TẤT ĐỊNH: bằng giây thì chốt hạ bằng order_id, và chạy lại ra y hệt ── */
+  const hoa1 = resolveDuplicates([base("z", 0, { conversationId: "c1" }), base("a", 0, { conversationId: "c1" })]);
+  const hoa2 = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("z", 0, { conversationId: "c1" })]);
+  assert.equal(dupOf(hoa1, "z"), "a", "bằng giây thì id nhỏ hơn thắng");
+  assert.deepEqual(hoa1.map((v) => [v.orderId, v.duplicateOfOrderId]).sort(), hoa2.map((v) => [v.orderId, v.duplicateOfOrderId]).sort(), "đổi thứ tự đầu vào KHÔNG được đổi kết quả");
+
+  /* ── 8 · THIẾU CĂN CỨ ⇒ không bao giờ bị loại ── */
+  const khongKhoa = resolveDuplicates([{ ...base("x", 0), dedupeKey: null }]);
   assert.equal(khongKhoa[0].duplicateOfOrderId, null);
+  assert.equal(khongKhoa[0].score, null, "đơn không bị loại thì KHÔNG mang điểm chứng cứ");
 
-  console.log("✓ Chia chuỗi trùng đơn: cửa sổ, chốt hạ tất định, đơn sống thắng, thiếu căn cứ thì không loại");
+  /* ── 9 · Sổ dấu hiệu phải tự nhất quán ── */
+  const quyetDinh = Object.entries(DUPLICATE_SIGNALS).filter(([, v]) => v.weight >= DUPLICATE_SCORE_THRESHOLD);
+  assert.equal(quyetDinh.length, 2, "đúng hai dấu hiệu quyết định (cùng hội thoại · huỷ-rồi-tạo-lại)");
+  const yeu = Object.entries(DUPLICATE_SIGNALS).filter(([, v]) => v.weight < DUPLICATE_SCORE_THRESHOLD);
+  assert.ok(yeu.length >= DUPLICATE_SCORE_THRESHOLD, "phải có đủ dấu hiệu yếu để đường thứ hai tồn tại được");
+  for (const [k, v] of Object.entries(DUPLICATE_SIGNALS)) {
+    assert.ok(v.label && v.hint, `dấu hiệu ${k} phải nói được nó là gì và vì sao — một điểm số không giải thích được thì không ai kiểm lại`);
+  }
+
+  console.log(
+    `✓ Chứng cứ trùng đơn: cửa sổ ${DUPLICATE_CANDIDATE_WINDOW_HOURS}h CHỈ tìm ứng viên · ngưỡng ${DUPLICATE_SCORE_THRESHOLD} điểm · 2 dấu hiệu quyết định + ${yeu.length} dấu hiệu yếu · khác giỏ không bao giờ gặp nhau · tất định khi đổi thứ tự đầu vào`,
+  );
 }

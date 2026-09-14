@@ -29,26 +29,52 @@
 `order.page_id` (`lib/integrations/pancake/mapper.ts:489`) và đang phủ 88% số đơn. Không phải
 dựng lại đường lấy dữ liệu, không phải đổi một dòng nào của phần đồng bộ.
 
-### Luật trùng đơn: đo tác động THẬT trước khi bật
+### Luật trùng đơn: CHỨNG CỨ, không phải đồng hồ
 
-Chạy thử đúng luật (người nhận + giỏ hàng, cửa sổ 24 giờ) trên toàn bộ dữ liệu production:
+Bản đầu kết luận trùng đơn bằng "cùng người nhận + cùng giỏ hàng + trong 24 giờ". Mệnh đề đó mô tả
+**đúng** cả một chuyện hoàn toàn bình thường — khách đặt thêm một bộ giống hệt cho người nhà trong
+cùng buổi chiều — nên nó ngăn khách mua lại chứ không ngăn đếm hai lần một đơn. Đã thay hẳn.
+
+Nay 24 giờ **chỉ là cửa sổ tìm ứng viên**. Kết luận phải đứng trên một **dấu hiệu nguồn**:
+
+| Dấu hiệu | Điểm | Phủ trên production |
+|---|---:|---|
+| Một đơn đã huỷ, đơn kia còn sống (`CANCELLED_SIBLING`) | **4** — quyết định | — |
+| Cùng một cuộc trò chuyện (`SAME_CONVERSATION`) | **4** — quyết định | `conversation_id` 2.156/2.830 (76%) |
+| Cùng khách theo định danh Pancake | 1 | `customer_id` 2.802/2.830 (99%) |
+| Cùng bài quảng cáo | 1 | `post_id` 2.127/2.830 (75%) |
+| Cùng giá trị đơn | 1 | — |
+| Pancake đánh dấu SĐT trùng (`duplicated_phone`) | 1 | 186 đơn `true` |
+| Cách nhau dưới 30 phút | 1 | — |
+
+Ngưỡng **4 điểm**: một dấu hiệu quyết định là đủ; không có thì phải gom đủ **bốn** dấu hiệu yếu.
+Mỗi dòng trùng đơn lưu lại `duplicate_score` và `duplicate_reason` — một kết luận đang lấy doanh thu
+khỏi tên một người thật thì phải nói được vì sao.
+
+Hai trường đã **loại** sau khi đo: `duplicated_ip` (0 đơn `true`) và `pke_mkter` (0 đơn có giá trị).
+Giữ lại một dấu hiệu không có tín hiệu là tự lừa mình.
+
+#### Tác động thật, đo lại bằng chính luật mới
 
 | | |
 |---|---:|
 | Đơn đủ căn cứ xét trùng (có SĐT **và** có dòng hàng) | 2.446 |
-| Đơn KHÔNG đủ căn cứ (thiếu SĐT hoặc thiếu dòng hàng) ⇒ không bao giờ bị loại vì trùng | 383 |
-| **Đơn bị loại vì trùng** | **84** (3,4% số đơn xét được) |
-| Doanh thu xác nhận KHÔNG được tính cho ai | 33.165.000đ |
-| Trong đó trùng **khác page** | **0** |
+| Đơn KHÔNG đủ căn cứ ⇒ không bao giờ bị loại vì trùng | 383 |
+| Ứng viên (cùng khoá, trong 24 giờ) | 84 |
+| → **kết luận trùng** (đủ ≥ 4 điểm) | **83** |
+| → **được THA** vì không đủ chứng cứ | **1** |
+| Doanh thu xác nhận không tính cho ai | 33.165.000đ |
+| Trong đó kết luận nhờ "huỷ rồi tạo lại" | 57 |
+| Trong đó kết luận nhờ "cùng hội thoại" | 12 |
 
-> Con số cuối cùng là con số phải nói ra. Tình huống mà đề bài lo nhất — khách đặt ở page A rồi
-> bị nhập lại ở page B, hai marketer cùng nhận một đơn — **chưa từng xảy ra** trên dữ liệu thật.
-> Toàn bộ 84 đơn trùng là nhập lại trên CÙNG một page (huỷ rồi tạo lại). Luật vẫn cần, vì không
-> có nó thì một marketer được cộng đôi 33 triệu; nhưng nó không phải đang chữa cái bệnh mà đề bài
-> hình dung.
+**Nói thẳng điều này**: luật cũ bắt 84, luật mới bắt 83 — chênh đúng **một đơn**. Trên dữ liệu hôm
+nay, luật cũ gần như đúng. Nhưng nó đúng do **may**, không do có căn cứ: nó không phân biệt được
+"gõ lại" với "mua thêm", nên ngày nào có khách đặt hai lần cùng thứ trong một buổi chiều là ngày đó
+một marketer mất đơn mà không ai biết. Luật mới trả lời được câu "vì sao" cho cả 83 đơn.
 
-Phép đo trên chưa bỏ dấu tiếng Việt (SQL trên máy chủ không có `unaccent`), còn mã ERP có bỏ dấu — nên số
-thật sẽ **bằng hoặc nhỉnh hơn** 84 một chút, không bao giờ ít hơn.
+Hệ quả phải nói ra: đơn bị nhập lại ở **page khác** thường không có `conversation_id` chung (hội
+thoại thuộc về một page), nên nó phải đi đường bốn-dấu-hiệu-yếu và **có thể lọt**. Trên production
+hiện có **0 ca trùng khác page**, nên hôm nay điều đó không mất gì.
 
 ## 2. ERP trước đó đã có gì, và vì sao vẫn chưa đủ
 
@@ -86,12 +112,11 @@ nhau và không cộng vào nhau.
   `lib/actions/fanpage-attribution.ts` · màn hình `/marketing/fanpages` (3 tab).
 - Job `fanpage-attribution`, lịch 30 phút.
 
-### Ngưỡng MỚI cần chủ shop xác nhận
+### Hai ngưỡng MỚI cần chủ shop xác nhận
 
-`DUPLICATE_WINDOW_HOURS = 24`. Đây là ngưỡng nghiệp vụ mới, do đề bài bắt buộc phải có (tình huống
-4: khách mua lại sau 30 ngày KHÔNG được coi là trùng). Chọn 24 giờ vì một đơn bị nhập lại do nhầm
-lẫn vận hành xảy ra trong cùng ca hoặc cùng ngày. Đổi ở **đúng một chỗ**:
-`lib/constants/fanpage-attribution.ts`.
+`DUPLICATE_CANDIDATE_WINDOW_HOURS = 24` (cửa sổ TÌM ứng viên) và `DUPLICATE_SCORE_THRESHOLD = 4`
+(điểm chứng cứ tối thiểu để KẾT LUẬN). Cả hai ở **đúng một chỗ**:
+`lib/constants/fanpage-attribution.ts`. Trọng số từng dấu hiệu cũng ở đó.
 
 ## 4. Còn phải làm
 
