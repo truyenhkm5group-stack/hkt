@@ -351,6 +351,7 @@ async function testWritePath(db: Db) {
     adDescription: "",
     postUrl: "",
     attachmentTypes: [],
+    adMediaUrl: "",
   });
 
   /* ── Mốc phản hồi = tin shop SAU tin đầu của khách ── */

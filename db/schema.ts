@@ -2650,6 +2650,12 @@ export const salesMessages = pgTable(
     adDescription: text("ad_description").notNull().default(""),
     /** ad_click · photo · share · video_inline … — loại đính kèm, để biết vì sao có/không có ad_id. */
     attachmentTypes: text("attachment_types").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * Ảnh / đường dẫn của chính đính kèm (`attachments[].url`). Dùng để NGƯỜI nhìn ra mẫu hàng
+     * trên màn hình ánh xạ — danh mục chỉ có tên dạng mã ("Đầm Q004") nên đọc chữ không đủ để
+     * biết quảng cáo đang bán cái gì; nhìn ảnh thì biết ngay.
+     */
+    adMediaUrl: text("ad_media_url").notNull().default(""),
     sentAt: ts("sent_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),

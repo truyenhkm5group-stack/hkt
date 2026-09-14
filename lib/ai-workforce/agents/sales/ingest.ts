@@ -40,6 +40,7 @@ export type NormalizedMessage = {
   adDescription?: string;
   postUrl?: string;
   attachmentTypes?: string[];
+  adMediaUrl?: string;
   raw: Record<string, unknown>;
 };
 
@@ -281,6 +282,7 @@ export async function ingestMessage(
       adDescription: message.adDescription ?? "",
       postUrl: message.postUrl ?? "",
       attachmentTypes: message.attachmentTypes ?? [],
+      adMediaUrl: message.adMediaUrl ?? "",
       platform: conversation.platform,
       ingestSource,
       contentHash: fingerprint,
@@ -496,6 +498,7 @@ function toNormalizedMessage(m: PancakeMessage): NormalizedMessage {
     adDescription: m.adDescription,
     postUrl: m.postUrl,
     attachmentTypes: m.attachmentTypes,
+    adMediaUrl: m.adMediaUrl,
     raw: {},
   };
 }

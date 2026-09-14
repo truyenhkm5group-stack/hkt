@@ -1,0 +1,216 @@
+/**
+ * THU CHỨNG CỨ CHO TỪNG MÃ QUẢNG CÁO, rồi chỉ LƯU khi chứng cứ là XÁC ĐỊNH.
+ *
+ *   npx tsx scripts/ai-ad-evidence.ts --page=<PAGE_ID> [--backfill] [--apply]
+ *
+ * Mặc định CHẠY THỬ: in bảng đề xuất và không ghi một dòng nào. `--apply` mới lưu, và CHỈ lưu
+ * những dòng đạt mức `CONFIRMED`.
+ *
+ * VÌ SAO KHÔNG ĐỂ MÁY ĐOÁN. Danh mục page này đặt tên sản phẩm bằng chính mã hàng ("Đầm Q004"),
+ * còn quảng cáo viết theo lối tiếp thị ("TINH KHÔI", "ĐẦM ĐỎ ĐÔ"). Hai vốn từ ấy không giao nhau,
+ * nên mọi phép "khớp gần đúng" ở đây đều là bịa có vẻ hợp lý. Một ánh xạ sai không dừng lại ở một
+ * hội thoại: nó gắn SAI cho TOÀN BỘ chiến dịch, và không ai biết cho tới lúc đọc lại đơn.
+ *
+ * BỐN MỨC, và chỉ mức đầu được tự lưu:
+ *   · CONFIRMED  — chứng cứ XÁC ĐỊNH: nhân viên trong chính các hội thoại đến từ quảng cáo ấy đã
+ *                  gõ ĐÚNG MỘT mã hàng / SKU có thật, và không mã nào khác cạnh tranh.
+ *   · PROPOSED   — có dấu hiệu (câu quảng cáo gợi tới một mẫu) nhưng KHÔNG xác định ⇒ để người duyệt.
+ *   · AMBIGUOUS  — nhiều mã cùng xuất hiện ⇒ máy không được chọn hộ.
+ *   · UNKNOWN    — không có chứng cứ nào.
+ */
+import "dotenv/config";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { getDb, schema, type Db } from "@/db";
+import { ensureMigrated } from "@/db/migrate";
+import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
+import { normalize } from "@/lib/text";
+
+type Muc = "CONFIRMED" | "PROPOSED" | "AMBIGUOUS" | "UNKNOWN";
+
+type Khoa = {
+  adKey: string;
+  soHoiThoai: number;
+  cau: string;
+  postUrl: string;
+  mediaUrl: string;
+  loai: string[];
+  hoiThoaiIds: string[];
+};
+
+async function backfill(db: Db, pageId: string) {
+  const client = getPancakePagesClient();
+  const ds = await db.query.salesConversations.findMany({
+    where: pageId ? eq(schema.salesConversations.pageId, pageId) : undefined,
+    columns: { id: true, externalId: true, pageId: true, pancakeCustomerId: true },
+    limit: 200,
+  });
+  let n = 0;
+  for (const ht of ds) {
+    try {
+      const tin = await client.listMessages(ht.pageId, ht.externalId, ht.pancakeCustomerId, 30);
+      for (const m of tin) {
+        if (!m.adId && !m.adMediaUrl && !m.postUrl) continue;
+        const r = await db
+          .update(schema.salesMessages)
+          .set({ adId: m.adId, adDescription: m.adDescription, postUrl: m.postUrl, attachmentTypes: m.attachmentTypes, adMediaUrl: m.adMediaUrl })
+          .where(and(eq(schema.salesMessages.conversationId, ht.id), eq(schema.salesMessages.externalId, m.id), eq(schema.salesMessages.adMediaUrl, "")))
+          .returning({ id: schema.salesMessages.id });
+        n += r.length;
+      }
+    } catch { /* hội thoại đọc lỗi thì bỏ qua, đã có bài đo báo riêng */ }
+  }
+  console.log(`  Backfill: điền thêm ${n} tin`);
+}
+
+async function main() {
+  const pageId = process.argv.find((a) => a.startsWith("--page="))?.split("=")[1] ?? "";
+  const apDung = process.argv.includes("--apply");
+  await ensureMigrated();
+  const db = await getDb();
+
+  if (process.argv.includes("--backfill")) {
+    console.log("\n───────── BACKFILL ─────────");
+    await backfill(db, pageId);
+  }
+
+  // ───── danh mục: mã hàng + SKU của mẫu mã ─────
+  const sp = await db
+    .select({ id: schema.products.id, name: schema.products.name, code: schema.products.customId })
+    .from(schema.products)
+    .where(and(eq(schema.products.isRemoved, false), eq(schema.products.isHidden, false)));
+  const mauMa = await db
+    .select({ id: schema.productVariants.id, productId: schema.productVariants.productId, sku: schema.productVariants.sku, custom: schema.productVariants.customId })
+    .from(schema.productVariants)
+    .where(eq(schema.productVariants.isRemoved, false));
+
+  console.log(`\n───────── DANH MỤC ĐỐI CHIẾU ─────────`);
+  for (const p of sp) console.log(`  ${(p.code || "(chưa mã)").padEnd(8)} ${p.name}`);
+
+  // ───── các khoá quảng cáo có thật trong dữ liệu ─────
+  const rows = await db
+    .select({
+      adKey: schema.salesMessages.adId,
+      cau: sql<string>`max(${schema.salesMessages.adDescription})`,
+      postUrl: sql<string>`max(${schema.salesMessages.postUrl})`,
+      mediaUrl: sql<string>`max(${schema.salesMessages.adMediaUrl})`,
+      loai: sql<string[]>`array_agg(distinct t) filter (where t is not null)`,
+      soHoiThoai: sql<number>`count(distinct ${schema.salesMessages.conversationId})::int`,
+      hoiThoaiIds: sql<string[]>`array_agg(distinct ${schema.salesMessages.conversationId})`,
+    })
+    .from(schema.salesMessages)
+    .leftJoin(sql`lateral unnest(${schema.salesMessages.attachmentTypes}) as t`, sql`true`)
+    .where(sql`${schema.salesMessages.adId} <> ''`)
+    .groupBy(schema.salesMessages.adId)
+    .orderBy(sql`count(distinct ${schema.salesMessages.conversationId}) desc`);
+
+  const khoas: Khoa[] = rows.map((r) => ({
+    adKey: r.adKey,
+    soHoiThoai: Number(r.soHoiThoai ?? 0),
+    cau: (r.cau ?? "").replace(/\s+/g, " ").trim(),
+    postUrl: r.postUrl ?? "",
+    mediaUrl: r.mediaUrl ?? "",
+    loai: r.loai ?? [],
+    hoiThoaiIds: r.hoiThoaiIds ?? [],
+  }));
+
+  console.log(`\n───────── ${khoas.length} MÃ QUẢNG CÁO CÓ TRONG DỮ LIỆU ─────────`);
+
+  const ketQua: { k: Khoa; muc: Muc; productId: string | null; code: string; evidence: string; confidence: number }[] = [];
+
+  for (const k of khoas) {
+    // ── CHỨNG CỨ XÁC ĐỊNH: nhân viên gõ mã hàng / SKU trong chính các hội thoại đến từ quảng cáo này ──
+    const tinNV = k.hoiThoaiIds.length
+      ? await db
+          .select({ text: schema.salesMessages.text })
+          .from(schema.salesMessages)
+          .where(and(inArray(schema.salesMessages.conversationId, k.hoiThoaiIds), eq(schema.salesMessages.senderType, "PAGE_HUMAN")))
+          .limit(500)
+      : [];
+    const gap = new Map<string, number>();
+    for (const t of tinNV) {
+      const kho = normalize(t.text);
+      for (const p of sp) {
+        const ma = normalize(p.code ?? "").trim();
+        if (ma && kho.includes(` ${ma} `)) gap.set(p.id, (gap.get(p.id) ?? 0) + 1);
+      }
+      for (const v of mauMa) {
+        for (const s of [v.sku, v.custom]) {
+          const ma = normalize(s ?? "").trim();
+          if (ma.length >= 4 && kho.includes(` ${ma} `)) gap.set(v.productId, (gap.get(v.productId) ?? 0) + 1);
+        }
+      }
+    }
+
+    let muc: Muc = "UNKNOWN";
+    let productId: string | null = null;
+    let evidence = "";
+    let confidence = 0;
+
+    if (gap.size === 1) {
+      const [id, lan] = [...gap.entries()][0];
+      productId = id;
+      muc = "CONFIRMED";
+      confidence = 1;
+      const p = sp.find((x) => x.id === id);
+      evidence = `Nhân viên gõ đúng mã "${p?.code}" ${lan} lần trong ${k.soHoiThoai} hội thoại đến từ quảng cáo này; không mã nào khác xuất hiện`;
+    } else if (gap.size > 1) {
+      muc = "AMBIGUOUS";
+      const ten = [...gap.entries()].map(([id, n]) => `${sp.find((x) => x.id === id)?.code}×${n}`).join(" · ");
+      evidence = `Nhiều mã cùng xuất hiện trong tin nhân viên: ${ten} — máy KHÔNG chọn hộ`;
+    } else if (k.cau) {
+      muc = "PROPOSED";
+      evidence = `Chỉ có câu quảng cáo, không mã nào xuất hiện. Câu: "${k.cau.slice(0, 80)}"`;
+    } else {
+      evidence = "Không có câu quảng cáo, không có mã nào trong tin nhân viên";
+    }
+
+    ketQua.push({ k, muc, productId, code: sp.find((x) => x.id === productId)?.code ?? "", evidence, confidence });
+  }
+
+  // ───── BẢNG ĐỀ XUẤT ─────
+  for (const r of ketQua) {
+    console.log(`\n  AD/POST ID   : ${r.k.adKey}`);
+    console.log(`  Câu quảng cáo: ${r.k.cau.slice(0, 96) || "(không có)"}`);
+    console.log(`  Hội thoại    : ${r.k.soHoiThoai}   loại đính kèm: ${r.k.loai.join(", ") || "(không)"}`);
+    console.log(`  Bài viết     : ${r.k.postUrl ? r.k.postUrl.slice(0, 90) : "(không có)"}`);
+    console.log(`  Ảnh          : ${r.k.mediaUrl ? "có" : "(không có)"}`);
+    console.log(`  Mẫu đề xuất  : ${r.code || "—"}`);
+    console.log(`  Căn cứ       : ${r.evidence}`);
+    console.log(`  TRẠNG THÁI   : ${r.muc}${r.muc === "CONFIRMED" ? ` (tin cậy ${r.confidence})` : ""}`);
+  }
+
+  const chac = ketQua.filter((r) => r.muc === "CONFIRMED" && r.productId);
+  console.log(`\n───────── TỔNG ─────────`);
+  for (const m of ["CONFIRMED", "PROPOSED", "AMBIGUOUS", "UNKNOWN"] as Muc[]) {
+    const ds = ketQua.filter((r) => r.muc === m);
+    console.log(`  ${m.padEnd(10)} ${String(ds.length).padStart(2)} khoá · ${ds.reduce((s, r) => s + r.k.soHoiThoai, 0)} hội thoại`);
+  }
+
+  if (!apDung) {
+    console.log(`\n--dry-run (mặc định): KHÔNG ghi gì. Thêm --apply để lưu ${chac.length} dòng CONFIRMED.`);
+    return;
+  }
+
+  let daLuu = 0;
+  for (const r of chac) {
+    const [dangCo] = await db
+      .select({ id: schema.salesAdProductMap.id, source: schema.salesAdProductMap.source })
+      .from(schema.salesAdProductMap)
+      .where(and(eq(schema.salesAdProductMap.pageId, pageId), eq(schema.salesAdProductMap.adKey, r.k.adKey)))
+      .limit(1);
+    // Dòng do NGƯỜI đặt là sự thật — máy không đụng vào.
+    if (dangCo?.source === "HUMAN") continue;
+    if (dangCo) {
+      await db.update(schema.salesAdProductMap).set({ productId: r.productId, source: "AD_DESCRIPTION", confidence: 1, evidence: r.evidence, adDescription: r.k.cau.slice(0, 1000), updatedAt: new Date() }).where(eq(schema.salesAdProductMap.id, dangCo.id));
+    } else {
+      await db.insert(schema.salesAdProductMap).values({
+        pageId, adKey: r.k.adKey, keyKind: "AD", productId: r.productId,
+        source: "AD_DESCRIPTION", confidence: 1, evidence: r.evidence, adDescription: r.k.cau.slice(0, 1000),
+      });
+    }
+    daLuu += 1;
+  }
+  console.log(`\nĐã lưu ${daLuu} ánh xạ XÁC ĐỊNH. Các khoá PROPOSED/AMBIGUOUS/UNKNOWN để nguyên cho người duyệt ở /ai/ad-map.`);
+}
+
+main().catch((e) => { console.error("HỎNG:", (e as Error).message); process.exit(1); });

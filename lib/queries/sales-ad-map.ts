@@ -20,6 +20,8 @@ export type AdMapRow = {
   source: string;
   confidence: number;
   adDescription: string;
+  mediaUrl: string;
+  evidence: string;
   conversations: number;
 };
 
@@ -28,6 +30,9 @@ export type UnmappedRow = {
   adKey: string;
   keyKind: string;
   adDescription: string;
+  /** Ảnh của quảng cáo — danh mục đặt tên bằng mã nên người phải NHÌN mới trỏ đúng được. */
+  mediaUrl: string;
+  postUrl: string;
   conversations: number;
   messages: number;
 };
@@ -45,6 +50,8 @@ export async function listAdMappings(): Promise<AdMapRow[]> {
       source: schema.salesAdProductMap.source,
       confidence: schema.salesAdProductMap.confidence,
       adDescription: schema.salesAdProductMap.adDescription,
+      evidence: schema.salesAdProductMap.evidence,
+      mediaUrl: sql<string>`(select max(m.ad_media_url) from sales_messages m where m.ad_id = ${schema.salesAdProductMap.adKey})`,
       conversations: sql<number>`(
         select count(distinct m.conversation_id)::int from sales_messages m
         where m.ad_id = ${schema.salesAdProductMap.adKey} or m.post_url = ${schema.salesAdProductMap.adKey}
@@ -58,6 +65,7 @@ export async function listAdMappings(): Promise<AdMapRow[]> {
     ...r,
     productName: r.productName ?? "",
     productCode: r.productCode ?? "",
+    mediaUrl: r.mediaUrl ?? "",
     conversations: Number(r.conversations ?? 0),
   }));
 }
@@ -73,6 +81,8 @@ export async function listUnmappedAdKeys(): Promise<UnmappedRow[]> {
       pageId: schema.salesMessages.platform,
       adKey: schema.salesMessages.adId,
       adDescription: sql<string>`max(${schema.salesMessages.adDescription})`,
+      mediaUrl: sql<string>`max(${schema.salesMessages.adMediaUrl})`,
+      postUrl: sql<string>`max(${schema.salesMessages.postUrl})`,
       conversations: sql<number>`count(distinct ${schema.salesMessages.conversationId})::int`,
       messages: sql<number>`count(*)::int`,
       pageReal: sql<string>`max(c.page_id)`,
@@ -94,6 +104,8 @@ export async function listUnmappedAdKeys(): Promise<UnmappedRow[]> {
     adKey: r.adKey,
     keyKind: "AD",
     adDescription: r.adDescription ?? "",
+    mediaUrl: r.mediaUrl ?? "",
+    postUrl: r.postUrl ?? "",
     conversations: Number(r.conversations ?? 0),
     messages: Number(r.messages ?? 0),
   }));

@@ -17,7 +17,7 @@ export type PancakeConversation = { id: string; pageId: string; type: string; ta
 export type PancakeMessage = {
   id: string; text: string; fromId: string; fromName: string; fromPage: boolean;
   insertedAt: Date | null; hasAttachment: boolean; attachmentCount: number;
-  adId: string; adDescription: string; postUrl: string; attachmentTypes: string[];
+  adId: string; adDescription: string; postUrl: string; attachmentTypes: string[]; adMediaUrl: string;
 };
 
 function toDate(value: unknown): Date | null {
@@ -154,6 +154,8 @@ export class PancakePagesClient {
         adDescription: baiViet.map((b) => str(b.description)).find(Boolean) ?? "",
         postUrl: baiViet.map((b) => str(b.url)).find(Boolean) ?? "",
         attachmentTypes: [...new Set([...dinhKem.map((a) => str(a.type)), ...baiViet.map((b) => str(b.type))].filter(Boolean))],
+        // Ảnh của đính kèm — để người nhìn ra mẫu hàng trên màn hình ánh xạ.
+        adMediaUrl: dinhKem.map((a) => str(a.url)).find(Boolean) ?? "",
       };
     });
   }

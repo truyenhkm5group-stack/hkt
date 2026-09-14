@@ -75,6 +75,7 @@ on:
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
+          - ai-staging-ad-evidence # thu chứng cứ cho từng mã quảng cáo; mặc định CHẠY THỬ, "--apply" mới lưu
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -727,6 +728,14 @@ jobs:
                 fetch_staging_script ai-resolver-benchmark.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-resolver-benchmark.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-resolver-benchmark.ts ${ARG:-} ;;
+
+              ai-staging-ad-evidence)
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-ad-evidence.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-ad-evidence.ts'
+                # Mặc định CHẠY THỬ. Chỉ dòng CONFIRMED (nhân viên đã gõ đúng một mã) mới được lưu,
+                # và chỉ khi có "--apply" trong ô arg.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-ad-evidence.ts ${ARG:-} ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \

@@ -1147,7 +1147,7 @@ async function main() {
     assert.equal(byConv?.matchedBy, "conversation", "không có mã khách thì khớp theo hội thoại");
     assert.equal(await previousOrderHint({ id: "don-cu", customerId: "cust-cu", conversationId: "conv-suong", billPhone: "0949947123", insertedAt: before(7 * 86_400_000) }), null, "không lấy ngược đơn mới hơn làm gợi ý");
 
-    const msg = (id: string, text: string, fromPage: boolean, at: Date) => ({ id, text, fromId: fromPage ? "page" : "cus", fromName: fromPage ? "Shop" : "Khách", fromPage, insertedAt: at, hasAttachment: false, attachmentCount: 0, adId: "", adDescription: "", postUrl: "", attachmentTypes: [] });
+    const msg = (id: string, text: string, fromPage: boolean, at: Date) => ({ id, text, fromId: fromPage ? "page" : "cus", fromName: fromPage ? "Shop" : "Khách", fromPage, insertedAt: at, hasAttachment: false, attachmentCount: 0, adId: "", adDescription: "", postUrl: "", attachmentTypes: [], adMediaUrl: "" });
     /*
       ═══ "ĐÃ CHỐT" = KHÁCH CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══
 
