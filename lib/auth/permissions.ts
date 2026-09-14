@@ -67,7 +67,7 @@ export const PERMISSION_GROUPS = [
   {
     module: "Lương & hoa hồng",
     items: [
-      { key: "payroll:view-own", label: "Lương: xem của mình", hint: "Chỉ dòng lương / lợi nhuận cá nhân của chính mình (khớp email hoặc tên nhân sự)" },
+      { key: "payroll:view-own", label: "Lương: xem của mình", hint: "Chỉ dòng lương / lợi nhuận cá nhân của chính mình. Khớp bằng KHOÁ TÀI KHOẢN: ô “Email đăng nhập ERP” trong hồ sơ nhân sự phải trùng email phiên đăng nhập — KHÔNG so tên (hai người trùng tên sẽ đọc được lương của nhau). Chưa khai email ⇒ người đó thấy bảng rỗng kèm câu chỉ đường." },
       { key: "payroll:view", label: "Lương: xem toàn bộ", hint: "Lương và lợi nhuận của mọi nhân sự (trưởng nhóm, kế toán)" },
       { key: "payroll:manage", label: "Lương: khai báo nhân sự & chia mã", hint: "Cơ chế lương, người phụ trách mã, % chủ mã, fanpage → marketer" },
     ],
