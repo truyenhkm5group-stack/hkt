@@ -18,6 +18,17 @@ import { z } from "zod";
 import { modeAtLeast, type AgentMode } from "@/lib/constants/ai";
 import { TOOL_CATALOG, TOOL_TIMEOUT_MS, type ToolName, type ToolOutcome } from "@/lib/constants/ai-tools";
 import type { RunRecorder } from "@/lib/ai/runs";
+import { getAgent } from "@/lib/ai/registry";
+
+/** Nấc quyền hạn THẬT của một nhân sự, đọc từ CSDL. `null` = không đọc được ⇒ phải từ chối. */
+async function verifiedMode(agentKey: string): Promise<AgentMode | null> {
+  try {
+    const agent = await getAgent(agentKey);
+    return agent?.mode ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export type ToolContext = {
   agentKey: string;
@@ -92,6 +103,24 @@ export async function callTool<T = unknown>(ctx: ToolContext, name: ToolName, ra
     const reason = `${name} cần nấc ${declaration.minMode}, đang chạy ở nấc ${ctx.mode}`;
     await record("DENIED", null, reason);
     return { ok: false, outcome: "DENIED", error: reason };
+  }
+
+  // CHỐT CHẶN CỨNG cho công cụ GHI: nấc quyền hạn đọc lại từ CSDL, KHÔNG tin `ctx.mode` mà nơi
+  // gọi đưa xuống. Chốt trên đã đủ cho luồng bình thường; chốt này bịt trường hợp `ctx` bị dựng
+  // sai ở đâu đó — vì với công cụ ghi, một lần lọt là một hành động thật trên dữ liệu của khách.
+  // Đọc CSDL hỏng cũng là TỪ CHỐI: mọi nhánh lỗi phải rơi về phía hẹp hơn.
+  if (declaration.kind === "WRITE") {
+    const verified = await verifiedMode(ctx.agentKey);
+    if (!verified) {
+      const reason = `Không xác minh được nấc quyền hạn của "${ctx.agentKey}" từ CSDL — từ chối ${name}`;
+      await record("DENIED", null, reason);
+      return { ok: false, outcome: "DENIED", error: reason };
+    }
+    if (!modeAtLeast(verified, declaration.minMode)) {
+      const reason = `${name}: nấc thật trong CSDL là ${verified}, cần ${declaration.minMode}`;
+      await record("DENIED", null, reason);
+      return { ok: false, outcome: "DENIED", error: reason };
+    }
   }
 
   const parsed = definition.input.safeParse(rawArgs);
