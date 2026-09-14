@@ -44,6 +44,21 @@ PY
 
 upsert PANCAKE_ACCESS_TOKEN "$PANCAKE_ACCESS_TOKEN"
 upsert PANCAKE_PAGE_ID "$PANCAKE_PAGE_ID"
+
+# KHOÁ POS — CHỈ để đồng bộ DANH MỤC SẢN PHẨM vào CSDL riêng của bản chạy thử.
+#
+# Vì sao cần: nhân sự AI khớp sản phẩm qua cổng công cụ `product.search`, và CSDL bản chạy thử là
+# CSDL TRẮNG. Không có danh mục thì mọi hội thoại đều rơi về "không nhận ra sản phẩm" và lượt chạy
+# thử không nói lên điều gì về chất lượng nhận diện — nó chỉ chứng minh bảng sản phẩm đang rỗng.
+#
+# Job `pancake-products` CHỈ ĐỌC từ Pancake POS và CHỈ GHI vào CSDL bản chạy thử. Không đụng CSDL
+# production, không gọi một endpoint ghi nào của Pancake.
+if [ -n "${PANCAKE_API_KEY:-}" ]; then
+  upsert PANCAKE_API_KEY "$PANCAKE_API_KEY"
+  say "  PANCAKE_API_KEY      = (${#PANCAKE_API_KEY} ký tự) — để đồng bộ danh mục sản phẩm"
+fi
+[ -n "${PANCAKE_SHOP_ID:-}" ] && upsert PANCAKE_SHOP_ID "$PANCAKE_SHOP_ID"
+
 chmod 600 "$ENV_FILE"
 
 say "Đã ghi vào $ENV_FILE (quyền $(stat -c '%a' "$ENV_FILE"), chủ sở hữu $(stat -c '%U' "$ENV_FILE")):"

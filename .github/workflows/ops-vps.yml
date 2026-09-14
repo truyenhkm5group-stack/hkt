@@ -72,6 +72,7 @@ on:
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
+          - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
           - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
@@ -225,6 +226,10 @@ jobs:
           # xuống đĩa VPS. GitHub che giá trị trong log; ô "arg" thì KHÔNG, nên token tuyệt đối
           # không được đi qua đó.
           PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+          # Khoá POS — CHỈ để kéo DANH MỤC SẢN PHẨM vào CSDL riêng của bản chạy thử. Không có danh
+          # mục thì `product.search` trả rỗng và lượt chạy thử chỉ chứng minh bảng sản phẩm rỗng.
+          PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+          PANCAKE_SHOP_ID: ${{ vars.PANCAKE_SHOP_ID || '408063069' }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -232,7 +237,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN,PANCAKE_API_KEY,PANCAKE_SHOP_ID
           script: |
             set -e
             cd /root/erp
@@ -643,6 +648,17 @@ jobs:
                 # bài kiểm chỉ đọc.
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/pancake-read-test.ts ${ARG:-} ;;
+
+              ai-staging-catalog)
+                cd /opt/vnx-ai-staging
+                # `pancake-products` CHỈ ĐỌC từ Pancake POS, CHỈ GHI vào CSDL bản chạy thử.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npm run sync -- pancake-products
+                echo ""
+                echo "── Danh mục đã vào CSDL bản chạy thử ──"
+                docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
+                  -c "select '  sản phẩm: ' || count(*) from products;" \
+                  -c "select '  mẫu mã: '   || count(*) from product_variants;" ;;
 
               ai-staging-page-token)
                 # `arg` = MÃ PAGE. Mã page không phải bí mật (nó nằm trên URL của chính trang ấy).
