@@ -9,7 +9,7 @@ import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirement
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { guardGeneratedText, moneyMentions, renderOrderReview } from "@/lib/ai-workforce/agents/sales/generate";
-import { ingestMessage, normalizeChatWebhook } from "@/lib/ai-workforce/agents/sales/ingest";
+import { ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
@@ -494,6 +494,59 @@ export async function testSalesAgent(db: Db) {
   // Năm tin của shop trong lượt đầu: lời chào bot · ba tin nhân viên · một tin bot.
   assert.equal(firstTurn.shopReplies.length, 5, "bản đầy đủ giữ CẢ tin bot lẫn tin nhân viên để đọc lại bối cảnh");
   assert.equal(firstTurn.shopReplies.filter((r) => r.senderType === "PAGE_HUMAN").length, 3);
+
+  // ═════════ 6D-bis. THỨ TỰ CỦA ĐƯỜNG NẠP THEO LÔ ═════════
+  //
+  // Khối 6D ở trên dựng gợi ý TRƯỚC rồi mới ghi tin nhân viên — đúng thứ tự của webhook, và vì
+  // vậy nó xanh kể cả khi đường nạp theo LÔ hỏng hoàn toàn. Lô đi ngược: ghi hết lịch sử, xong
+  // mới chạy máy. Đo trên bản chạy thử 14/09/2026: 148 tin nhân viên, 36 gợi ý, nối được 0.
+  //
+  // Bài kiểm này dựng đúng thứ tự của lô: tin khách và tin nhân viên vào CSDL trước, gợi ý sinh
+  // sau, rồi mới gọi bước nối lại.
+  const loConversation = await ingestMessage(
+    { pageId: "page-lo", externalId: "hoi-thoai-lo", pancakeCustomerId: "kh-lo", customerName: "Chị Lô", phone: "", platform: "facebook" },
+    { externalId: "lo-k1", text: "Chị ơi mẫu này còn size M không", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Lô", sentAt: new Date("2026-09-14T02:00:00Z"), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  assert.ok(loConversation.conversationId);
+  for (const [i, text] of ["Dạ còn size M ạ", "Chị cho em xin số điện thoại nhé"].entries()) {
+    await ingestMessage(
+      { pageId: "page-lo", externalId: "hoi-thoai-lo", pancakeCustomerId: "kh-lo", customerName: "Chị Lô", phone: "", platform: "facebook" },
+      { externalId: `lo-nv${i}`, text, fromPage: true, senderType: "PAGE_HUMAN", fromName: "Chị Hà", sentAt: new Date(`2026-09-14T02:0${i + 1}:00Z`), hasAttachment: false, attachmentCount: 0, raw: {} },
+      "test",
+      db,
+    );
+  }
+  const loTrigger = await db.query.salesMessages.findFirst({ where: eq(schema.salesMessages.externalId, "lo-k1") });
+  assert.ok(loTrigger);
+  const [loSuggestion] = await db
+    .insert(schema.salesSuggestions)
+    .values({
+      conversationId: loConversation.conversationId,
+      triggerMessageId: loTrigger.id,
+      stageBefore: "NEW_LEAD",
+      stageAfter: "NEW_LEAD",
+      action: "ASK_PRODUCT",
+      suggestedReply: "Dạ chị đang xem mẫu nào ạ?",
+    })
+    .returning({ id: schema.salesSuggestions.id });
+
+  const chuaNoi = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, loSuggestion.id) });
+  assert.equal(chuaNoi?.humanReply, "", "gợi ý sinh sau tin nhân viên thì lúc mới tạo phải RỖNG — đây chính là cảnh của lô");
+
+  const ketQua = await relinkHumanReplies({ pageId: "page-lo" }, db);
+  assert.equal(ketQua.linked, 1, "bước nối lại phải cứu được đúng một gợi ý");
+  const daNoi = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, loSuggestion.id) });
+  assert.equal(daNoi?.humanReply, "Dạ còn size M ạ", "giữ câu ĐẦU TIÊN của lượt");
+  assert.equal(daNoi?.humanReplyCount, 2, "đếm đủ cả hai tin nhân viên");
+  assert.equal(daNoi?.humanResponseSeconds, 60, "thời gian phản hồi tính từ tin khách tới câu đầu");
+
+  // CHẠY LẠI KHÔNG ĐƯỢC CỘNG DỒN: lượt nạp thứ hai trên cùng dữ liệu phải ra y hệt, và không ghi.
+  const lanHai = await relinkHumanReplies({ pageId: "page-lo" }, db);
+  assert.equal(lanHai.updated, 0, "chạy lại trên dữ liệu không đổi thì không được ghi dòng nào");
+  const sauLanHai = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, loSuggestion.id) });
+  assert.equal(sauLanHai?.humanReplyCount, 2, "số câu nhân viên phải TÍNH LẠI, không cộng dồn");
 
   // ═════════ 6E. CHỐNG TRÙNG CHÉO KÊNH ═════════
   //

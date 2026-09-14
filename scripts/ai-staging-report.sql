@@ -106,6 +106,16 @@ select tool as "công cụ", outcome as "kết cục", count(*) as "lần",
 from ai_tool_calls group by tool, outcome order by count(*) desc;
 
 \echo ''
+\echo 'product.search: "OK" chỉ nghĩa là CHẠY XONG, không phải TÌM RA. Đếm riêng số lần ra rỗng:'
+\echo '(cột "ra rỗng" cao mà "kết cục OK" cũng cao = công cụ chạy tốt nhưng danh mục không khớp gì)'
+select
+  count(*)                                                                   as "lần gọi",
+  count(*) filter (where jsonb_array_length(coalesce(result->'products', '[]'::jsonb)) = 0) as "ra RỖNG",
+  count(*) filter (where jsonb_array_length(coalesce(result->'products', '[]'::jsonb)) > 0)  as "có ứng viên",
+  count(*) filter (where (result->>'bestIsUnique')::boolean)                  as "khoá được đúng 1"
+from ai_tool_calls where tool = 'product.search';
+
+\echo ''
 \echo '════════ 9. LỖI GHI NHẬN ĐƯỢC ════════'
 select scope as "phạm vi", left(message, 90) as "thông báo", count(*) as "lần"
 from ai_errors group by scope, left(message, 90) order by count(*) desc limit 15;

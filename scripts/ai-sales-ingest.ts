@@ -20,7 +20,7 @@ import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { aiEnv, getAiSettings } from "@/lib/ai-workforce/config";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
-import { syncSalesConversations } from "@/lib/ai-workforce/agents/sales/ingest";
+import { relinkHumanReplies, syncSalesConversations } from "@/lib/ai-workforce/agents/sales/ingest";
 import { drainSalesTasks } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 
@@ -95,6 +95,12 @@ async function main() {
 
   const ran = await drainSalesTasks(max * 5, db);
   console.log(`  Lượt chạy AI       : ${"ran" in ran ? ran.ran : 0}`);
+
+  // PHẢI chạy SAU khi máy đã sinh gợi ý. Nạp theo lô ghi hết lịch sử trước rồi mới chạy máy, nên
+  // lúc từng tin của nhân viên được ghi thì chưa có gợi ý nào để nối vào — không có bước này thì
+  // cột "câu nhân viên thật" vĩnh viễn rỗng và nấc SHADOW không so sánh được với ai.
+  const noiLai = await relinkHumanReplies({ pageId }, db);
+  console.log(`  Nối câu nhân viên  : ${noiLai.linked} gợi ý có câu người (${noiLai.updated} dòng đổi)`);
 
   // ───────── CHỨNG MINH, KHÔNG KHẲNG ĐỊNH ─────────
   const since = new Date(Date.now() - 3_600_000);

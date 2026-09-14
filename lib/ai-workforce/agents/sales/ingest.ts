@@ -374,6 +374,79 @@ async function linkHumanReply(conversationId: string, shopMessageId: string, mes
   void shopMessageId;
 }
 
+/**
+ * NỐI LẠI CÂU NHÂN VIÊN SAU KHI MÁY ĐÃ CHẠY — bắt buộc cho đường nạp theo LÔ.
+ *
+ * `linkHumanReply` ở trên chạy NGAY lúc ghi từng tin, và nó đúng cho webhook: tin khách tới ⇒ máy
+ * chạy ⇒ có gợi ý ⇒ rồi nhân viên mới trả lời. Đường nạp theo lô đi NGƯỢC thứ tự ấy: cả lịch sử
+ * hội thoại được ghi trước, `drainSalesTasks` mới sinh gợi ý sau. Nên lúc mỗi tin của nhân viên
+ * được ghi, bảng gợi ý còn TRỐNG, `if (!suggestion) return` bắn ra, và không một câu nào được nối.
+ *
+ * Đo trên bản chạy thử 14/09/2026: 148 tin `PAGE_HUMAN` nằm sẵn trong CSDL, 36 gợi ý — nối được 0.
+ * Mất phần này thì nấc SHADOW mất luôn lý do tồn tại: không có câu người thật để đặt cạnh câu máy.
+ *
+ * Hàm TÍNH LẠI từ đầu chứ không cộng dồn, nên chạy bao nhiêu lần cũng ra một kết quả, và nó chỉ
+ * ghi khi số liệu thật sự đổi.
+ */
+export async function relinkHumanReplies(options: { pageId?: string } = {}, db?: Db) {
+  const conn = db ?? (await getDb());
+  const conversations = await conn.query.salesConversations.findMany({
+    where: options.pageId ? eq(schema.salesConversations.pageId, options.pageId) : undefined,
+    columns: { id: true },
+  });
+  let updated = 0;
+  let linked = 0;
+  for (const conversation of conversations) {
+    const suggestions = await conn.query.salesSuggestions.findMany({
+      where: eq(schema.salesSuggestions.conversationId, conversation.id),
+      columns: { id: true, triggerMessageId: true, humanReply: true, humanReplyCount: true, humanResponseSeconds: true },
+    });
+    if (!suggestions.length) continue;
+    const messages = await conn.query.salesMessages.findMany({
+      where: eq(schema.salesMessages.conversationId, conversation.id),
+      orderBy: (m, { asc }) => [asc(m.sentAt), asc(m.createdAt)],
+      columns: { id: true, fromPage: true, senderType: true, text: true, sentAt: true },
+    });
+
+    // Một lượt = tin của khách, rồi mọi tin NHÂN VIÊN cho tới tin khách kế tiếp.
+    const luot = new Map<string, { text: string; at: Date; seconds: number | null }[]>();
+    let moc: { id: string; at: Date | null } | null = null;
+    for (const message of messages) {
+      if (!message.fromPage) {
+        moc = { id: message.id, at: message.sentAt };
+        continue;
+      }
+      // Tin bot không phải câu nhân viên trả lời; tin rỗng không so sánh được với câu nào.
+      if (message.senderType !== "PAGE_HUMAN" || !message.text.trim() || !moc) continue;
+      const at = message.sentAt ?? new Date();
+      const seconds = moc.at ? Math.max(0, Math.round((at.getTime() - moc.at.getTime()) / 1000)) : null;
+      const danhSach = luot.get(moc.id) ?? [];
+      danhSach.push({ text: message.text, at, seconds });
+      luot.set(moc.id, danhSach);
+    }
+
+    for (const suggestion of suggestions) {
+      const danhSach = suggestion.triggerMessageId ? (luot.get(suggestion.triggerMessageId) ?? []) : [];
+      const dau = danhSach[0] ?? null;
+      const moi = {
+        humanReply: dau ? dau.text.slice(0, 4000) : "",
+        humanRepliedAt: dau ? dau.at : null,
+        humanResponseSeconds: dau ? dau.seconds : null,
+        humanReplyCount: danhSach.length,
+      };
+      const giongCu =
+        (suggestion.humanReply ?? "") === moi.humanReply &&
+        (suggestion.humanReplyCount ?? 0) === moi.humanReplyCount &&
+        (suggestion.humanResponseSeconds ?? null) === moi.humanResponseSeconds;
+      if (giongCu) continue;
+      await conn.update(schema.salesSuggestions).set(moi).where(eq(schema.salesSuggestions.id, suggestion.id));
+      updated += 1;
+      if (dau) linked += 1;
+    }
+  }
+  return { conversations: conversations.length, updated, linked };
+}
+
 /** Nạp từ gói tin webhook. Trả lý do đọc được khi không nạp được — không nuốt lặng. */
 export async function ingestChatWebhook(payload: unknown, db?: Db): Promise<IngestResult | { conversationId: null; reason: string }> {
   const settings = await getAiSettings();
