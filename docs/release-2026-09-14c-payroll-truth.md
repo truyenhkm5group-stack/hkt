@@ -578,6 +578,24 @@ Ngoài trùng số với `main`, sổ của nhánh ấy còn có **hai mục cù
 mình** (chưa áp ở đâu) cho nối tiếp vào cuối sổ `main`, không đụng tới bốn migration đã vào `main`.
 Không nhánh nào được triển khai đè lên nhánh kia. Việc này thuộc phiên đang giữ nhánh ấy.
 
+**Cập nhật 14/09 20:40** — `main` nay đã có thêm `0088_payroll_periods` (bản này), nên khoảng cần
+đánh số lại của nhánh AI là **0089 trở đi**, không phải 0088. Kiểm tra lại
+`drizzle/meta/_journal.json` của `main` ngay trước khi đánh số, vì con số này còn tiếp tục nhích:
+
+```
+main  (14/09 20:40)   … 0086_fanpage_marketer_attribution
+                        0087_return_reason_observations
+                        0088_payroll_periods              ← mới, bản này
+ai-workforce-sales-v1   0084_ai_workforce_foundation   (idx 84) ← trùng số với main
+                        0085_sales_shadow_validation   (idx 85) ← trùng số với main
+                        0086_product_resolver_v2       (idx 85) ← TRÙNG idx với dòng trên
+                        0087_ad_media_url              (idx 86) ← trùng số với main
+```
+
+Tôi **không chạm** vào nhánh ấy: chỉ đọc sổ của nó để ghi lại đây. Phiên đang giữ nhánh quyết cách
+đánh số lại, và phải chạy `tests/migration-upgrade-path.test.ts` sau khi đánh số để chứng minh
+đường nâng cấp từ trạng thái production hôm nay vẫn chạy.
+
 ---
 
 ## 6. Chủ shop kiểm tra thế nào
