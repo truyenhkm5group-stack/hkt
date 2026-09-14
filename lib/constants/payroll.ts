@@ -75,8 +75,20 @@ export function shareFor(config: Pick<PayrollConfig, "productShares" | "ownerSha
   return { ownerPct: clampPct(s?.ownerPct, 100), crossPct: clampPct(s?.crossPct, defaultCross) };
 }
 
-/** Một phần doanh số của mã đã gán được (hoặc chưa) cho marketer: theo ad_id → chiến dịch, hoặc theo fanpage */
-export type PageBucket = { pageId: string | null; value: number; /** marketer đã nhận diện từ ad_id của đơn (ưu tiên hơn fanpage) */ adMarketerId?: string | null };
+/** Một phần doanh số của mã đã gán được (hoặc chưa) cho marketer */
+export type PageBucket = {
+  pageId: string | null;
+  value: number;
+  /** marketer nhận diện từ `ad_id` của đơn. CHỈ dùng khi fanpage không nói được gì — xem `attributionShares`. */
+  adMarketerId?: string | null;
+  /**
+   * NGƯỜI PHỤ TRÁCH FANPAGE ĐÃ CHỤP LẠI TẠI MỐC ĐƠN PHÁT SINH (`order_attributions.marketer_id`).
+   *
+   * Đây là nguồn CÓ THẨM QUYỀN cho câu "đơn này của ai", vì nó là hàm của (page, MỐC ĐƠN LÊN) chứ
+   * không phải của (page, HÔM NAY) — xem `lib/constants/fanpage-attribution.ts`, luật bất biến 1.
+   */
+  snapshotMarketerId?: string | null;
+};
 export type AttributionMode = "page" | "ads" | "owner" | "none";
 export type Attribution = {
   /** marketerId → tỷ trọng (0–1), tổng = 1 khi có người nhận */
@@ -86,28 +98,61 @@ export type Attribution = {
   unmappedValue: number;
   /** Phần giá trị ghi nhận đúng theo fanpage */
   mappedValue: number;
+  /** Trong `mappedValue`: phần đi bằng ẢNH CHỤP có mốc thời gian — con số đo ĐỘ PHỦ của nguồn đúng. */
+  snapshotValue: number;
+  /** Trong `mappedValue`: phần còn phải dùng bảng gán PHẲNG (không có mốc hiệu lực). */
+  legacyPageValue: number;
 };
 
 /**
- * Ghi nhận đơn & doanh thu của một mã cho marketer:
- *  0. theo AD_ID của đơn (quảng cáo tạo ra đơn → chiến dịch → marketer) — chính xác từng đơn, kể cả chạy chung fanpage;
- *  1. theo FANPAGE phát sinh đơn (pageMarketers) — mỗi page thuộc một marketer;
- *  2. đơn trên page chưa gán / không có page: chia theo tỷ trọng tiền QC trên mã, không có QC thì về chủ mã,
- *     không có chủ mã thì chia theo tỷ trọng đã ghi nhận theo page;
- *  3. mã không có page nào gán: chia theo QC (như cũ), rồi chủ mã, rồi không ai.
+ * ═══════ GHI NHẬN ĐƠN & DOANH THU CỦA MỘT MÃ CHO MARKETER ═══════
+ *
+ * THỨ TỰ CĂN CỨ (chủ shop chốt: đơn/doanh thu marketer bám theo FANPAGE):
+ *
+ *  1. **ẢNH CHỤP người phụ trách fanpage tại MỐC ĐƠN PHÁT SINH** (`order_attributions`) — có thẩm
+ *     quyền, vì nó là hàm của (page, mốc đơn lên).
+ *  2. **Bảng gán PHẲNG `payroll.config.pageMarketers`** — chỉ để lấp chỗ đơn chưa có ảnh chụp.
+ *  3. **`ad_id` → chiến dịch → marketer** — CHỈ khi fanpage không nói được gì.
+ *  4. đơn trên page chưa gán / không có page: chia theo tỷ trọng tiền QC trên mã, không có QC thì
+ *     về chủ mã, không có chủ mã thì chia theo tỷ trọng đã ghi nhận theo page;
+ *  5. mã không có page nào gán: chia theo QC, rồi chủ mã, rồi không ai.
+ *
+ * ─── VÌ SAO ẢNH CHỤP PHẢI ĐỨNG TRƯỚC BẢNG PHẲNG ───
+ *
+ * `pageMarketers` là một ánh xạ `page → người`, KHÔNG có mốc hiệu lực. Fanpage A giao cho An từ
+ * 01/09 rồi chuyển cho Bình từ 10/09: chủ shop sửa ô ấy hôm nay, và bảng lương THÁNG TRƯỚC lập tức
+ * chuyển toàn bộ doanh thu của An sang Bình — một kỳ đã trả tiền tự viết lại chính nó. Ảnh chụp
+ * đứng yên vì nó ghi lại người phụ trách TẠI LÚC ĐƠN LÊN.
+ *
+ * ─── VÌ SAO QUẢNG CÁO TỤT XUỐNG SAU FANPAGE ───
+ *
+ * `ad_id` trước đây đứng TRÊN fanpage. Nó chính xác tới từng mẩu quảng cáo, nhưng nó trả lời câu
+ * hỏi KHÁC: "tiền quảng cáo nào tạo ra đơn này". Chủ shop chấm marketer theo FANPAGE họ phụ trách,
+ * nên hiệu quả quảng cáo không được ghi đè người được tính đơn. Nó vẫn lấp chỗ fanpage im lặng.
+ *
+ * Đơn bị kết luận TRÙNG mang `marketer_id = NULL` (ràng buộc `order_attribution_marketer_check`)
+ * nên rơi xuống bậc 2 — CỐ Ý: doanh thu ở đây là doanh thu GIAO THÀNH CÔNG, tiền thật đã về; bỏ nó
+ * ra khỏi phần chia sẽ làm Σ các marketer không còn bằng tổng của shop. Loại trùng đơn là việc của
+ * chỉ số MARKETING (`/marketing/fanpages`), đo ở mốc chốt đơn.
  */
 export function attributionShares(input: { byPage: PageBucket[]; pageMarketers: Record<string, string>; adShares: Map<string | null, number>; ownerId: string | null }): Attribution {
   const total = input.byPage.reduce((t, b) => t + Math.max(0, b.value), 0);
   const mapped = new Map<string | null, number>();
   let mappedValue = 0;
   let unmappedValue = 0;
+  let snapshotValue = 0;
+  let legacyPageValue = 0;
   for (const b of input.byPage) {
     const v = Math.max(0, b.value);
-    // ưu tiên marketer nhận diện từ ad_id (chiến dịch tạo ra đơn), rồi tới fanpage
-    const mid = b.adMarketerId || (b.pageId ? input.pageMarketers[b.pageId] : undefined);
+    // Ảnh chụp có mốc thời gian TRƯỚC, rồi bảng gán phẳng, rồi mới tới quảng cáo (xem khối trên).
+    const snapshot = b.snapshotMarketerId || undefined;
+    const flat = b.pageId ? input.pageMarketers[b.pageId] : undefined;
+    const mid = snapshot || flat || b.adMarketerId || undefined;
     if (mid) {
       mapped.set(mid, (mapped.get(mid) ?? 0) + v);
       mappedValue += v;
+      if (snapshot) snapshotValue += v;
+      else if (flat) legacyPageValue += v;
     } else unmappedValue += v;
   }
   const adTotal = [...input.adShares.values()].reduce((t, v) => t + v, 0);
@@ -120,17 +165,17 @@ export function attributionShares(input: { byPage: PageBucket[]; pageMarketers: 
       else if (input.ownerId) shares.set(input.ownerId, (shares.get(input.ownerId) ?? 0) + w);
       else for (const [mid, v] of mapped) shares.set(mid, (shares.get(mid) ?? 0) + (w * v) / mappedValue);
     }
-    return { shares, mode: "page", unmappedValue, mappedValue };
+    return { shares, mode: "page", unmappedValue, mappedValue, snapshotValue, legacyPageValue };
   }
   if (adTotal > 0) {
     for (const [mid, sh] of input.adShares) shares.set(mid, sh / adTotal);
-    return { shares, mode: "ads", unmappedValue, mappedValue };
+    return { shares, mode: "ads", unmappedValue, mappedValue, snapshotValue, legacyPageValue };
   }
   if (input.ownerId) {
     shares.set(input.ownerId, 1);
-    return { shares, mode: "owner", unmappedValue, mappedValue };
+    return { shares, mode: "owner", unmappedValue, mappedValue, snapshotValue, legacyPageValue };
   }
-  return { shares, mode: "none", unmappedValue, mappedValue };
+  return { shares, mode: "none", unmappedValue, mappedValue, snapshotValue, legacyPageValue };
 }
 
 /**

@@ -186,6 +186,53 @@ export default async function PayrollPage({
         nguồn, hay một nguồn chi phí chưa phủ đủ, làm lợi nhuận CAO HƠN thực tế — và thưởng theo %
         lợi nhuận cao theo.
       */}
+      {/*
+        DOANH THU CHIA CHO MARKETER BẰNG CĂN CỨ NÀO — bốn nhóm, cộng lại đúng tổng đem chia.
+
+        "Bảng gán phẳng" là ánh xạ page → người KHÔNG có mốc hiệu lực: đổi người phụ trách hôm nay
+        thì phần doanh thu ấy của kỳ TRƯỚC cũng đổi chủ. Nên phần đi bằng nó phải hiện ra, và việc
+        cần làm là khai mốc hiệu lực ở Marketing → Fanpage & quy kết rồi chạy lại đối soát.
+      */}
+      {viewAll && report.marketers.attributionCoverage.total > 0 ? (
+        <SectionCard
+          title="Doanh thu chia cho marketer bằng căn cứ nào"
+          description="Doanh thu GIAO THÀNH CÔNG của kỳ, tách theo nguồn đã dùng để quyết định ai được tính. Bốn nhóm cộng lại bằng tổng đem chia."
+        >
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {(
+              [
+                ["Ảnh chụp theo mốc đơn lên", report.marketers.attributionCoverage.snapshot, "Người phụ trách fanpage TẠI LÚC ĐƠN PHÁT SINH. Nguồn có thẩm quyền — đổi người hôm nay không làm đổi số của kỳ đã qua.", "emerald"],
+                ["Bảng gán phẳng (cũ)", report.marketers.attributionCoverage.legacyPage, "Ánh xạ fanpage → người KHÔNG có mốc hiệu lực. Đổi người phụ trách hôm nay sẽ làm đổi cả số của kỳ trước. Khai mốc hiệu lực ở Marketing → Fanpage & quy kết rồi chạy “Đối soát lại”.", "amber"],
+                ["Theo quảng cáo (lấp chỗ)", report.marketers.attributionCoverage.ads, "Fanpage không nói được gì nên lấy `ad_id` → chiến dịch → marketer. Quảng cáo KHÔNG ghi đè người được tính theo fanpage.", "slate"],
+                ["Chưa có căn cứ", report.marketers.attributionCoverage.unmapped, "Không nguồn nào nói được ai: chia theo tỷ trọng tiền quảng cáo trên mã, về chủ mã, hoặc không thuộc về ai.", "slate"],
+              ] as const
+            ).map(([label, value, hint, tone]) => (
+              <div key={label} className="rounded-lg border p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[11.5px] font-medium">{label}</span>
+                  <span className={cn("numeric text-sm font-semibold", tone === "emerald" && "text-success", tone === "amber" && "text-amber-600 dark:text-amber-400")}>
+                    {formatVND(value, { compact: true })}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {report.marketers.attributionCoverage.total > 0 ? `${Math.round((value / report.marketers.attributionCoverage.total) * 100)}% · ` : ""}
+                  {hint}
+                </p>
+              </div>
+            ))}
+          </div>
+          {report.marketers.attributionCoverage.legacyPage > 0 ? (
+            <p className="mt-3 text-[11.5px] leading-5 text-amber-700 dark:text-amber-400">
+              Còn {formatVND(report.marketers.attributionCoverage.legacyPage)} đi bằng bảng gán phẳng.{" "}
+              <Link href="/marketing/fanpages?tab=assign" className="underline">
+                Khai mốc hiệu lực cho các fanpage ấy
+              </Link>{" "}
+              rồi chạy “Đối soát lại” để phần này chuyển sang ảnh chụp.
+            </p>
+          ) : null}
+        </SectionCard>
+      ) : null}
+
       {viewAll && report.marketers.costWarnings.length ? (
         <SectionCard
           title="Lợi nhuận này đã trừ đủ chi phí chưa?"

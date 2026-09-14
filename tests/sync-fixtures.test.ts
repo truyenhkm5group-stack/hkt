@@ -918,8 +918,34 @@ async function main() {
   const a2 = attributionShares({ byPage: [{ pageId: "P1", value: 600 }, { pageId: "P9", value: 200 }, { pageId: null, value: 200 }], pageMarketers: pm, adShares: new Map([["B", 1]]), ownerId: "A" });
   assert.ok(Math.abs((a2.shares.get("A") ?? 0) - 0.6) < 1e-9 && Math.abs((a2.shares.get("B") ?? 0) - 0.4) < 1e-9, "page chưa gán / không page (40%) chia theo QC → B");
   assert.equal(a2.unmappedValue, 400);
+  /*
+    QUẢNG CÁO KHÔNG GHI ĐÈ NGƯỜI ĐƯỢC TÍNH ĐƠN THEO FANPAGE (chủ shop chốt 14/09/2026).
+
+    Trước đây `ad_id` đứng TRÊN fanpage, nên B chạy quảng cáo vào page của A thì B lấy phần doanh
+    thu ấy. `ad_id` trả lời câu hỏi KHÁC — "tiền quảng cáo nào tạo ra đơn này" — và câu ấy vẫn được
+    trả lời ở báo cáo Hiệu quả quảng cáo. Chủ shop chấm marketer theo FANPAGE họ phụ trách.
+  */
   const a4 = attributionShares({ byPage: [{ pageId: "P1", value: 400, adMarketerId: "B" }, { pageId: "P1", value: 600 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
-  assert.ok(Math.abs((a4.shares.get("B") ?? 0) - 0.4) < 1e-9 && Math.abs((a4.shares.get("A") ?? 0) - 0.6) < 1e-9, "ad_id của đơn thắng fanpage: B chạy chung page của A vẫn được ghi nhận đúng 40%");
+  assert.ok(Math.abs((a4.shares.get("A") ?? 0) - 1) < 1e-9 && !a4.shares.has("B"), "fanpage quyết định: cả 1.000 về A, quảng cáo của B KHÔNG cướp phần của page A");
+  assert.equal(a4.legacyPageValue, 1000, "và phần ấy đi bằng bảng gán PHẲNG — chưa có mốc hiệu lực");
+
+  /* ẢNH CHỤP THEO MỐC ĐƠN LÊN ĐỨNG TRÊN BẢNG GÁN PHẲNG.
+     Page P1 hôm nay gán cho A. Đơn cũ đã chụp lại là của C ⇒ phần ấy VĨNH VIỄN của C; đổi người
+     phụ trách hôm nay không được viết lại kỳ đã qua. */
+  const aSnap = attributionShares({
+    byPage: [{ pageId: "P1", value: 600, snapshotMarketerId: "C" }, { pageId: "P1", value: 400 }],
+    pageMarketers: pm,
+    adShares: new Map(),
+    ownerId: "A",
+  });
+  assert.ok(Math.abs((aSnap.shares.get("C") ?? 0) - 0.6) < 1e-9, "ảnh chụp thắng bảng phẳng: 60% về C dù hôm nay P1 đang gán cho A");
+  assert.ok(Math.abs((aSnap.shares.get("A") ?? 0) - 0.4) < 1e-9, "phần chưa có ảnh chụp mới rơi về bảng phẳng");
+  assert.equal(aSnap.snapshotValue, 600, "độ phủ: 600 đi bằng nguồn có thẩm quyền");
+  assert.equal(aSnap.legacyPageValue, 400, "và 400 còn phải dùng bảng gán phẳng");
+  assert.equal(aSnap.snapshotValue + aSnap.legacyPageValue + aSnap.unmappedValue, 1000, "bốn nhóm độ phủ cộng lại bằng tổng đem chia");
+  // Ảnh chụp cũng thắng quảng cáo — cùng một lý do.
+  const aSnapAd = attributionShares({ byPage: [{ pageId: "P1", value: 500, snapshotMarketerId: "C", adMarketerId: "B" }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
+  assert.equal(aSnapAd.shares.get("C"), 1, "ảnh chụp fanpage thắng cả quảng cáo");
   const a3 = attributionShares({ byPage: [{ pageId: "P9", value: 500 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
   assert.equal(a3.mode, "owner", "không page gán, không QC → về chủ mã");
   assert.equal(attributionShares({ byPage: [], pageMarketers: pm, adShares: new Map([["A", 0.2], ["B", 0.8]]), ownerId: null }).shares.get("B"), 0.8, "không có page → theo QC như cũ");

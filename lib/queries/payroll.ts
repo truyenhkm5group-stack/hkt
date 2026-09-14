@@ -118,6 +118,23 @@ export type MarketerReport = {
   costWarnings: CostEngineWarning[];
   /** Bảng Lương có đang cầm quyền ghi nhận chi phí nhân sự không (xem `lib/queries/payroll-cost.ts`). */
   payrollCovered: boolean;
+  /**
+   * ĐỘ PHỦ CỦA NGUỒN QUY KẾT — doanh thu giao thành công đã chia cho marketer BẰNG CĂN CỨ NÀO.
+   *
+   * Một con số lương không nói được nó dựa trên căn cứ nào là một con số không ai kiểm lại được.
+   * Bốn nhóm cộng lại đúng bằng tổng doanh thu đem chia.
+   */
+  attributionCoverage: {
+    /** Ảnh chụp người phụ trách fanpage tại MỐC ĐƠN LÊN — nguồn có thẩm quyền. */
+    snapshot: number;
+    /** Bảng gán PHẲNG `payroll.config.pageMarketers` (không có mốc hiệu lực) — nguồn lấp chỗ. */
+    legacyPage: number;
+    /** `ad_id` → chiến dịch → marketer, chỉ khi fanpage im lặng. */
+    ads: number;
+    /** Không căn cứ nào nói được ai: chia theo tỷ trọng QC / về chủ mã / không ai. */
+    unmapped: number;
+    total: number;
+  };
 };
 
 export async function loadPayrollConfig(): Promise<PayrollConfig> {
@@ -147,21 +164,40 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
     const pv = schema.productVariants;
     const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
     const cond = mode === "delivered" ? sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
+    /*
+      ẢNH CHỤP NGƯỜI PHỤ TRÁCH FANPAGE TẠI MỐC ĐƠN LÊN.
+
+      `order_attributions` giữ, cho từng đơn, CHÍNH người phụ trách fanpage tại lúc đơn phát sinh
+      (và chính dòng phân công đã dùng). Một-một với `orders` (`order_attribution_order_uq`) nên
+      phép nối này không nhân dòng.
+
+      Trước bản này, bảng lương chia doanh thu bằng `payroll.config.pageMarketers` — một ánh xạ
+      `page → người` KHÔNG có mốc hiệu lực. Chủ shop đổi người phụ trách một fanpage hôm nay là
+      bảng lương THÁNG TRƯỚC chuyển doanh thu sang người mới, tức một kỳ đã trả tiền tự viết lại
+      chính nó. Bảng phẳng nay chỉ còn là nguồn LẤP CHỖ cho đơn chưa có ảnh chụp.
+    */
+    const oa = schema.orderAttributions;
     const rows = await db
-      .select({ productId: productKey, pageId: o.pageId, adId: o.adId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
+      .select({ productId: productKey, pageId: o.pageId, adId: o.adId, snapshotMarketerId: oa.marketerId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
+      .leftJoin(oa, eq(oa.orderId, o.id))
       .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
-      .groupBy(sql`1`, o.pageId, o.adId);
-    // ad_id → marketer (chiến dịch tạo ra đơn); đơn không có / chưa tra được ad_id thì để fanpage quyết định
+      .groupBy(sql`1`, o.pageId, o.adId, oa.marketerId);
+    // ad_id → marketer (chiến dịch tạo ra đơn). CHỈ lấp chỗ khi fanpage không nói được gì.
     const adMap = await adMarketerMap(rows.map((r) => r.adId).filter((x): x is string => Boolean(x)));
     const map = new Map<string, PageBucket[]>();
     for (const r of rows) {
       if (!r.productId) continue;
       const list = map.get(r.productId) ?? [];
-      list.push({ pageId: r.pageId || null, value: Number(r.value), adMarketerId: r.adId ? (adMap.get(r.adId) ?? null) : null });
+      list.push({
+        pageId: r.pageId || null,
+        value: Number(r.value),
+        adMarketerId: r.adId ? (adMap.get(r.adId) ?? null) : null,
+        snapshotMarketerId: r.snapshotMarketerId || null,
+      });
       map.set(r.productId, list);
     }
     return map;
@@ -368,6 +404,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, months: econ.months, testSpend: 0, profit: 0 };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
+  const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
 
   for (const row of econ.rows) {
     const spend = byProduct.get(row.productId);
@@ -388,6 +425,11 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     const adShares = new Map<string | null, number>();
     if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
     const attribution = attributionShares({ byPage: byPage.get(row.productId) ?? [], pageMarketers: config.pageMarketers, adShares, ownerId });
+    coverage.snapshot += attribution.snapshotValue;
+    coverage.legacyPage += attribution.legacyPageValue;
+    coverage.ads += Math.max(0, attribution.mappedValue - attribution.snapshotValue - attribution.legacyPageValue);
+    coverage.unmapped += attribution.unmappedValue;
+    coverage.total += attribution.mappedValue + attribution.unmappedValue;
     const shares = attribution.shares;
     if (!shares.size) {
       unattributedProfit += profit;
@@ -467,7 +509,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   for (const e of employees) if (e.active && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
   const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
   products.sort((a, b) => b.profit - a.profit);
-  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained, costWarnings: econ.costWarnings, payrollCovered: econ.payrollCovered };
+  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained, costWarnings: econ.costWarnings, payrollCovered: econ.payrollCovered, attributionCoverage: coverage };
 }
 
 /**
