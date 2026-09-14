@@ -67,6 +67,13 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    module: "Nhân sự AI",
+    items: [
+      { key: "ai:view", label: "Nhân sự AI: xem", hint: "Lượt chạy, quyết định, công cụ đã gọi, token & chi phí — màn hình quan sát nhân sự AI" },
+      { key: "ai:manage", label: "Nhân sự AI: cấu hình", hint: "Bật/tắt nhân sự, đổi nấc quyền hạn (chạy ngầm / trợ lý / tự động), đơn giá mô hình" },
+    ],
+  },
+  {
     module: "Hệ thống",
     items: [
       { key: "integrations:view", label: "Kết nối dữ liệu: xem" },
@@ -88,7 +95,7 @@ export const LEGACY_IMPLIES: Record<string, string[]> = {
   "orders:read": ["orders:export", "cs:view", "outreach:view", "landing:view"],
   "shipments:view": ["alerts:view"],
   "cs:manage": ["cs:view", "outreach:send", "landing:manage", "shipments:manage"],
-  "settings:manage": ["cs:config", "outreach:config", "alerts:manage", "integrations:manage", "landing:config"],
+  "settings:manage": ["cs:config", "outreach:config", "alerts:manage", "integrations:manage", "landing:config", "ai:manage"],
   "expenses:write": ["reports:assumptions"],
   "products:view": ["planning:view"],
   "inventory:write": ["planning:write"],
@@ -108,10 +115,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
   // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
-  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run"],
+  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "ai:view"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "ai:view"],
   MARKETING: [...VIEW_ALL, "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

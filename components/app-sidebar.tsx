@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BellRing,
+  Bot,
   Factory,
   FileSpreadsheet,
   FileUp,
@@ -84,6 +85,10 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/data-quality", label: "Chất lượng dữ liệu", icon: ShieldCheck, permission: "dashboard:view" },
       { href: "/payroll", label: "Lương & hoa hồng", icon: HandCoins, permission: "payroll:view-own", anyOf: ["payroll:view-own", "payroll:view"] },
     ],
+  },
+  {
+    label: "Nhân sự AI",
+    items: [{ href: "/ai", label: "Nhân sự AI", icon: Bot, permission: "ai:view" }],
   },
   {
     label: "Hệ thống",
