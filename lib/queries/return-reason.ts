@@ -122,7 +122,7 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
     /*
       NGƯỜI ĐÈ LÊN MÁY, NHƯNG KHÔNG XOÁ CHỨNG TỪ CỦA MÁY.
 
-      `raw_reason` là chữ ĐVVC nói lúc người đó bấm xác nhận (cột ghi từ 0084; dòng cũ để rỗng,
+      `raw_reason` là chữ ĐVVC nói lúc người đó bấm xác nhận (cột ghi từ 0085; dòng cũ để rỗng,
       KHÔNG backfill). Thiếu nó thì rơi về chữ máy đang đọc được — vẫn không bịa ra gì.
     */
     out.set(m.shipmentId, {

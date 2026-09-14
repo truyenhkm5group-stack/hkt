@@ -3604,7 +3604,7 @@ export const shipmentReturnReasons = pgTable(
      *
      * Người đè lên máy thì chữ của ĐVVC biến mất khỏi màn hình, và cùng với nó là đường kiểm
      * chứng: một ca xếp "vải xấu" mà ĐVVC ghi "khách hẹn giao lại" là một ca đáng hỏi lại — nhưng
-     * chỉ thấy được nếu chữ gốc còn đó. Rỗng = chưa có chứng từ nào (dòng ghi trước 0084 cũng
+     * chỉ thấy được nếu chữ gốc còn đó. Rỗng = chưa có chứng từ nào (dòng ghi trước 0085 cũng
      * rỗng: KHÔNG backfill, vì đoán hộ chữ gốc là bịa ra một chứng từ).
      */
     rawReason: text("raw_reason").notNull().default(""),

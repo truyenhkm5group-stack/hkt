@@ -23,7 +23,7 @@ do cũng vậy.
 ### 2.1 Mục tiêu chỉ số (`metric_targets`)
 
 - Ô chọn chỉ số đọc **sổ gộp** `TARGETABLE_METRICS` (28 khoá của cả hai sổ) thay vì một sổ.
-- Thêm tầng **`PRODUCT`** (migration `0083`, chỉ nới ràng buộc `CHECK`, không đụng một dòng dữ liệu).
+- Thêm tầng **`PRODUCT`** (migration `0084`, chỉ nới ràng buộc `CHECK`, không đụng một dòng dữ liệu).
   `scope_ref` = `products.custom_id`, **cố ý không khoá ngoại** để đích sống sót khi mã bị ẩn/đổi tên.
 - `PRODUCT` là **trục riêng**, không phải tầng hẹp hơn `USER`: chủ thể NGƯỜI không mang mã hàng nên
   mọi đích của mã bị loại khỏi phép chấm một con người (có kiểm thử).
@@ -41,7 +41,7 @@ chỉ riêng nhãn đạt/không đạt là không kết luận, và màn hình 
 
 | Lớp | Là gì | Có được sửa không |
 |---|---|---|
-| `raw_reason` (migration `0084`) | Chữ ĐVVC ghi, **nguyên văn** | Không bao giờ |
+| `raw_reason` (migration `0085`) | Chữ ĐVVC ghi, **nguyên văn** | Không bao giờ |
 | `reason` | Danh mục để đếm | Người xác nhận đè được, có nhật ký |
 | nhóm | Cách shop nhìn | **Sửa bất cứ lúc nào**, suy lúc ĐỌC |
 
@@ -99,7 +99,7 @@ trước khi nghi ngờ máy tính kết quả.
   quả và với SQL độc lập. Lý do tồn tại: ngày 14/09 một hàm bị truyền qua ranh giới client, cả khối
   lý do hoàn biến mất mà trang vẫn trả HTTP 200 — không phép kiểm nào dưới tầng render thấy được.
 - `testProductTargetGuard` · `testReasonGroupContract` · `testReasonRegroupAndThreeLevelDrilldown`.
-- Bài đường nâng cấp kiểm `0083` và `0084` trên **trạng thái production thật**.
+- Bài đường nâng cấp kiểm `0084` và `0085` trên **trạng thái production thật**.
 
 ## 5. Việc cần chủ shop quyết
 

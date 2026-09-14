@@ -1,4 +1,4 @@
--- ĐÍCH CHỈ SỐ CÓ THÊM MỘT TẦNG: MÃ HÀNG.
+-- ĐÍCH CHỈ SỐ CÓ THÊM MỘT TẦNG: MÃ HÀNG (migration 0084).
 --
 -- Chủ shop chốt 14/09/2026: "mục tiêu có thể cấu hình theo toàn shop và override theo mã hàng nếu
 -- cần". Trước bản này `metric_targets.scope` chỉ nhận bốn giá trị nói về CON NGƯỜI
