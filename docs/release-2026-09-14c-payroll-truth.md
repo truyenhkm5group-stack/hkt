@@ -99,6 +99,34 @@ lương ra soi.
 lương thành `null` → màn hình in "—" và một dải cảnh báo nói rõ lý do, chỉ sang cơ sở LN1.
 Cơ sở LN1 / LN2 / danh nghĩa không đi qua phép quy đổi nào nên **không đổi một số nào**.
 
+### 1.5 Đổi người phụ trách fanpage hôm nay viết lại bảng lương THÁNG TRƯỚC
+
+`lib/constants/payroll.ts::attributionShares` + `lib/queries/payroll.ts::salesByProductPage`
+
+Bảng lương chia doanh thu cho marketer bằng `payroll.config.pageMarketers` — một ánh xạ
+`page → người` **không có mốc hiệu lực**. Fanpage A giao cho An từ 01/09 rồi chuyển cho Bình từ
+10/09: chủ shop sửa ô ấy hôm nay và bảng lương THÁNG TRƯỚC chuyển toàn bộ doanh thu của An sang
+Bình. Một kỳ đã trả tiền tự viết lại chính nó.
+
+ERP đã có đúng thứ để chống điều đó — `fanpage_marketer_assignments` (có khoảng hiệu lực) và
+`order_attributions` (ảnh chụp người phụ trách **tại mốc đơn phát sinh**, một dòng mỗi đơn). Bảng
+lương chỉ chưa bao giờ đọc tới chúng.
+
+Lỗi thứ hai trong cùng thứ tự căn cứ: **`ad_id` đứng TRÊN fanpage**. Quảng cáo trả lời câu hỏi
+khác ("tiền quảng cáo nào tạo ra đơn này") và câu ấy vẫn được trả lời ở báo cáo Hiệu quả quảng cáo.
+Chủ shop chấm marketer theo FANPAGE họ phụ trách.
+
+**Thứ tự căn cứ nay là:** ảnh chụp theo mốc đơn lên → bảng gán phẳng (lấp chỗ) → `ad_id` (lấp chỗ)
+→ tỷ trọng tiền quảng cáo → chủ mã → không ai.
+
+Đơn bị kết luận TRÙNG mang `marketer_id = NULL` nên rơi xuống bậc sau — **cố ý**: doanh thu ở bảng
+lương là doanh thu GIAO THÀNH CÔNG, tiền thật đã về; bỏ nó khỏi phần chia sẽ làm Σ các marketer
+không còn bằng tổng của shop. Loại trùng đơn là việc của chỉ số MARKETING, đo ở mốc chốt đơn.
+
+`/payroll` thêm khối **"Doanh thu chia cho marketer bằng căn cứ nào"**: bốn nhóm (ảnh chụp · bảng
+phẳng · quảng cáo lấp chỗ · chưa có căn cứ) cộng lại đúng tổng đem chia, kèm đường dẫn sang
+Marketing → Fanpage & quy kết để khai mốc hiệu lực cho phần còn đi bằng bảng phẳng.
+
 ---
 
 ## 2. Công thức đang áp dụng (không đổi trong bản này)
@@ -149,7 +177,38 @@ kết (còn sống) nên `CANCELLED_SIBLING` bật, và nó có thể được x
 không. Đơn đã huỷ đóng góp **0đ** doanh thu xác nhận nên **không đồng doanh thu nào đổi chỗ**; chỉ
 nhãn tình trạng của đơn huỷ đổi. Xác minh lại sau khi triển khai bằng đúng câu truy vấn trên.
 
+**Quy kết marketer — mức phơi nhiễm của bảng gán phẳng** (30 ngày gần nhất, đơn chưa huỷ):
+
+```
+đơn trong kỳ                                          1.243
+  có ẢNH CHỤP người phụ trách tại mốc đơn lên           972   (78%)
+  chưa có ảnh chụp (bảng gán phẳng cũng trống)          271   (22%)
+  bảng gán phẳng và ảnh chụp nói HAI người khác nhau      0
+  chỉ bảng gán phẳng có tên, ảnh chụp không                0
+  đơn bị kết luận trùng                                   13
+```
+
+Đọc ra: `payroll.config.pageMarketers` thực tế **RỖNG** với mọi fanpage đang có đơn, trong khi
+`order_attributions` đã quy kết được 972/1.243 đơn. Bảng lương trước bản này **không dùng tới nguồn
+quy kết ấy một chút nào** — doanh thu của 972 đơn đi bằng các nhánh lấp chỗ (quảng cáo · chia theo
+tỷ trọng tiền quảng cáo · về chủ mã). Sau bản này chúng về đúng người phụ trách fanpage tại lúc đơn
+lên. Vì bảng phẳng rỗng, **không có ca nào hai nguồn nói hai người khác nhau**, nên không ai bị
+"mất" đơn sang tay người khác — chỉ có phần trước đây chia nhầm bằng tỷ trọng nay được gọi đúng tên.
+
+271 đơn còn lại (fanpage chưa khai mốc hiệu lực, hoặc đơn không có fanpage) hiện ra ở nhóm "chưa có
+căn cứ" trên màn hình, kèm lối ra — không bị giấu đi.
+
 ---
+
+## 3b. Việc chủ shop nên làm ngay sau bản này
+
+1. **Khai mốc hiệu lực cho fanpage còn thiếu** — Marketing → Fanpage & quy kết → gán marketer với
+   khoảng hiệu lực TRÙM ngày đơn lên, rồi bấm "Đối soát lại". 271/1.243 đơn của 30 ngày gần nhất
+   đang nằm ở nhóm "chưa có căn cứ"; mỗi fanpage khai xong là một phần doanh thu chuyển từ "chia
+   theo tỷ trọng" sang "đúng tên người".
+2. **Khai email đăng nhập ERP cho nhân sự** — Lương & hoa hồng → sửa nhân sự. Chỉ cần cho người có
+   quyền "Lương: xem của mình"; thiếu thì họ thấy bảng rỗng kèm câu chỉ đường.
+3. **Đọc khối cảnh báo chi phí trên /payroll** trước khi dùng con số lợi nhuận để trả lương.
 
 ## 4. Cổng đã chạy
 
@@ -252,6 +311,8 @@ Không nhánh nào được triển khai đè lên nhánh kia. Việc này thu�
 | Cơ sở dòng tiền khi lỗ | /payroll?basis=cash, chọn một kỳ ngắn | Dải cảnh báo vàng + cột LN cá nhân "—", không phải 0 ₫ |
 | Quyền xem lương | Đăng nhập tài khoản chỉ có "Lương: xem của mình" | Chỉ thấy dòng của chính mình; chưa khai email thì thấy câu chỉ đường |
 | Trùng đơn | /marketing/fanpages | Mỗi dòng trùng đơn đều có CĂN CỨ và điểm ≥ 4 |
+| Căn cứ quy kết | /payroll (quyền xem toàn bộ) | Khối "Doanh thu chia cho marketer bằng căn cứ nào" — bốn nhóm cộng lại bằng tổng; phần "bảng gán phẳng" càng nhỏ càng tốt |
+| Đã trừ đủ chi phí chưa | /payroll | Khối "Lợi nhuận này đã trừ đủ chi phí chưa?" — cảnh báo của máy chi phí, kèm việc phải làm |
 
 Câu truy vấn xác minh sau triển khai (ops `db-query`, chỉ đọc) — chạy lại đối soát fanpage trước,
 rồi so với bảng ở mục 3:
