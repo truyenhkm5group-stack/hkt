@@ -415,6 +415,51 @@ Ba điều đọc ra:
    vẫn khép kín sau khi đổi thuật toán gom cụm.
 3. **Ngưỡng không đổi**: cửa sổ vẫn 24 giờ, ngưỡng vẫn 4 điểm — máy chủ tự in ra để đối chiếu.
 
+## 3a-2. XÁC MINH SAU TRIỂN KHAI — đợt 2 (deploy #290, SHA `0bf4a08`, 14/09 20:29)
+
+Đợt này mang theo migration `0088_payroll_periods` (kỳ lương có danh tính và trạng thái). Sau khi
+deploy báo thành công, chạy `ops db-query` (chỉ đọc) trên production lúc 20:30:40:
+
+```
+ bang_ky_luong_co | so_ky_da_chot | so_rang_buoc_check | migration_da_ap | trung_don | trung_don_duoi_nguong | trung_don_khong_can_cu | diem_thap_nhat
+------------------+---------------+--------------------+-----------------+-----------+-----------------------+------------------------+----------------
+                1 |             0 |                 14 |              89 |        83 |                     0 |                      0 |              4
+```
+
+Sáu điều đọc ra:
+
+1. **`bang_ky_luong_co = 1`** — bảng `payroll_periods` đã có thật trên production; migration tự áp
+   lúc app khởi động đúng như quy ước, không cần thao tác tay.
+2. **`migration_da_ap = 89`** — 0000…0088, tức `0088_payroll_periods` là migration mới nhất đã
+   chạy. Không có khoảng trống.
+3. **`so_rang_buoc_check = 14`** — các ràng buộc `CHECK` (trạng thái, cơ sở, khoảng ngày, và
+   `payroll_periods_final_check`) đã vào cùng bảng. Bất biến của kỳ đã chốt được CSDL giữ, không
+   chỉ được mã ứng dụng giữ.
+4. **`so_ky_da_chot = 0`** — **chưa một kỳ lương nào được chốt**, đúng như chủ shop dặn: máy dựng
+   sẵn cơ chế, người bấm nút. Không có bảng lương nào bị tự chốt, tự trả hay tự gửi.
+5. **`trung_don_duoi_nguong = 0`** và **`diem_thap_nhat = 4`** — trong 83 đơn đang mang nhãn
+   `DUPLICATE`, **không đơn nào** có điểm dưới ngưỡng 4. Đây là kiểm chứng trực tiếp cho lỗi 1.1:
+   trước bản vá, một đơn chỉ có 1 điểm vẫn bị gỡ ra khỏi doanh thu vì đi qua cầu nối là đơn đã huỷ.
+6. **`trung_don_khong_can_cu = 0`** — mọi nhãn trùng đều có câu căn cứ kèm theo, không dòng nào
+   "bị gỡ mà không nói vì sao".
+
+Câu lệnh đã chạy (một câu, enum cast `::text` theo quy ước ops):
+
+```sql
+select (select count(*) from information_schema.tables where table_name='payroll_periods') as bang_ky_luong_co,
+       (select count(*) from payroll_periods) as so_ky_da_chot,
+       (select count(*) from information_schema.table_constraints
+         where table_name='payroll_periods' and constraint_type='CHECK') as so_rang_buoc_check,
+       (select count(*) from drizzle.__drizzle_migrations) as migration_da_ap,
+       (select count(*) filter (where status='DUPLICATE') from order_attributions) as trung_don,
+       (select count(*) filter (where status='DUPLICATE' and coalesce(duplicate_score,0)<4)
+          from order_attributions) as trung_don_duoi_nguong,
+       (select count(*) filter (where status='DUPLICATE' and coalesce(duplicate_reason,'')='')
+          from order_attributions) as trung_don_khong_can_cu,
+       (select min(duplicate_score) filter (where status='DUPLICATE')
+          from order_attributions) as diem_thap_nhat
+```
+
 ## 3b. Việc chủ shop nên làm ngay sau bản này
 
 1. **Khai mốc hiệu lực cho fanpage còn thiếu** — Marketing → Fanpage & quy kết → gán marketer với
