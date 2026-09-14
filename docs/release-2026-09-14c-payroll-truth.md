@@ -213,6 +213,37 @@ A **không** đổi sang COD trong bản này. B và C **không** bị đồng n
 
 ---
 
+## 2b. Kiểm kê chi phí — mỗi khoản một nguồn, một cách phân bổ
+
+Sổ đăng ký thật nằm ở `lib/constants/cost-authority.ts` và mọi báo cáo đọc qua
+`lib/queries/cost-engine.ts::getRecognizedCosts()`. Bảng dưới là bản đọc của nó, để chủ shop đối
+chiếu mà không phải mở mã nguồn.
+
+| khoản | nguồn có thẩm quyền | ghi nhận theo | chống trùng |
+|---|---|---|---|
+| Giá vốn hàng bán | Phiếu kho (`stock_receipt_items`) | theo ĐƠN giao thành công, giá vốn CHỐT tại thời điểm giao | khoản "Nhập hàng" gõ tay bị loại |
+| Quảng cáo | Tài khoản QC (`ad_spends`) | theo NGÀY CHI THẬT | khoản "Quảng cáo" gõ tay bị loại |
+| Cước chiều đi | Vận đơn / bảng kê ĐVVC | theo từng VẬN ĐƠN | khoản gõ tay bị loại, trừ khi khai `MANUAL_ADJUSTMENT` kèm lý do |
+| Phí hoàn | Vận đơn / bảng kê ĐVVC | theo từng VẬN ĐƠN | như trên |
+| **Lương cố định** | bảng Lương *(khi bật)* → **mặc định: bảng Chi phí** | **chia theo SỐ NGÀY chồng lấn** | bật bảng Lương thì khoản "Lương" gõ tay bị loại — **xem cảnh báo mục 5.1** |
+| **Hoa hồng** | *(chưa chốt được cơ sở)* → bảng Chi phí | chưa xác định | `COMMISSION_BASIS_NEEDS_REVIEW` |
+| Mặt bằng · điện nước | bảng Chi phí | chia theo SỐ NGÀY chồng lấn | — |
+| Phần mềm · dịch vụ | bảng Chi phí | chia theo SỐ NGÀY chồng lấn | — |
+| Dự phòng rủi ro tồn kho | Giả định (`profit.assumptions`) | % × **giá vốn hàng BÁN RA**, không phải hàng nhập | phần hàng chưa bán hiện riêng ở dòng "còn treo" |
+| Vận hành khác | bảng Chi phí | theo NGÀY PHÁT SINH | — |
+
+Ba điều bảng này KHÔNG nói, và phải nói ra:
+
+1. **Sao kê ngân hàng không tạo chi phí.** Nó quyết định LOẠI DÒNG TIỀN; nối tiền với chứng từ là
+   ĐỐI CHIẾU, không phải ghi nhận (`AGENTS.md` mục 17). Tiền mua hàng chưa bán, trả nợ gốc, chuyển
+   nội bộ, góp/rút vốn **không** trở thành chi phí của lợi nhuận tính lương.
+2. **Phí đã bị ĐVVC khấu trừ trong COD ròng không trừ thêm lần nữa** — `lib/queries/profit-cash.ts`
+   chuyển sang chế độ `statement` khi kỳ có bảng kê và bỏ hẳn ước tính cước.
+3. **Đóng gói và nhân sự vận đơn** tính theo SỐ ĐƠN GỬI của từng mã (`opsCosts`), không phải theo
+   doanh thu — nên một mã nhiều đơn nhỏ vẫn gánh đúng phần của nó.
+
+---
+
 ## 3. Đo trên production (ops `db-query`, chỉ đọc, 14/09/2026)
 
 **Trùng đơn — hiện trạng và mức phơi nhiễm**
