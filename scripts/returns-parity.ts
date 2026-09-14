@@ -47,7 +47,9 @@ with ma as (
     from order_items oi
     join product_variants pv on pv.id = oi.variant_id
     join products p on p.id = pv.product_id
-   where oi.is_bonus = false and p.custom_id = any(${MA})
+   -- DANH SÁCH TƯỜNG MINH, KHÔNG dùng "= any(tham-số)": Postgres không suy được kiểu của tham số
+   -- mảng (lỗi make_scalar_array_op), và lỗi ấy chỉ lộ ra lúc CHẠY THẬT trên máy chủ, không lộ ở tsc.
+   where oi.is_bonus = false and p.custom_id in (${sql.join(MA.map((c) => sql`${c}`), sql`, `)})
 ), kien as (
   select s.id, s.order_id, s.cod_collected,
          (s.picked_up_at is not null or exists (
