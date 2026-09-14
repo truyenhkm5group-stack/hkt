@@ -74,6 +74,7 @@ on:
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
+          - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -719,6 +720,13 @@ jobs:
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/${TEP}?ref=${STAGING_BRANCH}" \
                   | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
+
+              ai-staging-resolver)
+                cd /opt/vnx-ai-staging
+                # Đẩy script vào container thay vì dựng lại ảnh — cùng khuôn với ai-staging-read-test.
+                fetch_staging_script ai-resolver-benchmark.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-resolver-benchmark.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-resolver-benchmark.ts ${ARG:-} ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
