@@ -24,6 +24,11 @@ import {
   toStationRow,
 } from "@/lib/returns/inspection";
 import { PENDING_STATION_CAP } from "@/lib/returns/inspection-filter";
+import { inspectionTruth } from "@/lib/queries/inspection-truth";
+import {
+  InspectionTruthSection,
+  RecoveredValueSection,
+} from "@/app/(dashboard)/inventory/returns/inspection-truth-section";
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
 import { latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
@@ -123,6 +128,7 @@ export default async function ReturnInspectionPage({
     nangSuat,
     nguoiDem,
     theoMauMa,
+    suThat,
   ] = await Promise.all([
     inspectionDashboard(),
     listPendingInspections(PENDING_STATION_CAP),
@@ -135,6 +141,7 @@ export default async function ReturnInspectionPage({
     returnThroughput(TREND_DAYS),
     returnByInspector(PEOPLE_DAYS),
     returnBySku(SKU_DAYS),
+    inspectionTruth(),
   ]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
@@ -254,6 +261,8 @@ export default async function ReturnInspectionPage({
           tone={bang.wrongItem ? "amber" : "slate"}
         />
       </div>
+
+      <InspectionTruthSection truth={suThat} />
 
       <WarehouseKpiBlock kpi={kpi} />
 
@@ -375,6 +384,7 @@ export default async function ReturnInspectionPage({
         slaHours={kpi.slaHours.receiveToInspect}
       />
       <WarehouseBySku rows={theoMauMa} days={SKU_DAYS} />
+      <RecoveredValueSection truth={suThat} />
       <WarehouseKpiGaps />
     </div>
   );

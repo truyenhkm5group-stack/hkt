@@ -133,6 +133,7 @@ import { testSmokeCoverage } from "./smoke-coverage.test";
 import { testReturnPipeline } from "./return-pipeline.test";
 import { testReturnExceptions } from "./return-exceptions.test";
 import { testReturnWarehouseKpi } from "./return-warehouse-kpi.test";
+import { testInspectionTruth } from "./inspection-truth.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
@@ -1575,6 +1576,8 @@ async function main() {
   await testReturnExceptions(db);
   // Dựng fixture riêng và TỰ DỌN ở cuối, nên tổng của các bài sau không đổi.
   await testReturnWarehouseKpi(db);
+  // Dựng fixture riêng và TỰ DỌN ở cuối; đo bằng ĐỘ CHÊNH nên bài trước không làm nó đỏ.
+  await testInspectionTruth(db);
   await testDeliveryTower(db);
   // Ngay sau tháp giao vận: bài này cũng dựng rổ giao vận, và nó TỰ DỌN mọi dòng nó thêm vào nên
   // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một
