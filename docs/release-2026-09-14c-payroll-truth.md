@@ -204,6 +204,30 @@ căn cứ" trên màn hình, kèm lối ra — không bị giấu đi.
 
 ---
 
+## 3a. XÁC MINH SAU TRIỂN KHAI — đợt 1 (deploy #286, SHA `8076fd1`, 14/09 18:43)
+
+Chạy `ops run-job "fanpage-attribution --dryRun=1"` trên **chính bản đã triển khai**:
+
+```
+Quy kết fanpage → marketer (fanpage-attribution) { dryRun: '1' }
+  quét            2.835 đơn
+  ATTRIBUTED      2.349      (83%)
+  NO_PAGE           276
+  NO_ASSIGNMENT     127
+  DUPLICATE          83
+  changed             0      ← BẢN VÁ KHÔNG ĐỔI MỘT DÒNG NÀO
+  ruleVersion 1 · windowHours 24 · scoreThreshold 4
+```
+
+Ba điều đọc ra:
+
+1. **`changed: 0`** — luật trùng đơn mới chạy trên toàn bộ 2.835 đơn của production và ra ĐÚNG kết
+   luận cũ. Không một đồng doanh thu nào đổi chỗ, không một đơn nào đổi chủ. Đây là bằng chứng
+   mạnh nhất có được rằng bản vá là PHÒNG, không phải sửa số.
+2. **2.349 + 276 + 127 + 83 = 2.835** — bốn nhóm cộng lại đúng bằng số đơn quét, tức phép chiếu
+   vẫn khép kín sau khi đổi thuật toán gom cụm.
+3. **Ngưỡng không đổi**: cửa sổ vẫn 24 giờ, ngưỡng vẫn 4 điểm — máy chủ tự in ra để đối chiếu.
+
 ## 3b. Việc chủ shop nên làm ngay sau bản này
 
 1. **Khai mốc hiệu lực cho fanpage còn thiếu** — Marketing → Fanpage & quy kết → gán marketer với
