@@ -37,9 +37,19 @@ export class PancakePagesClient {
     return rec;
   }
 
+  /** Có đang chạy bằng token của MỘT page (không có token người dùng) hay không. */
+  private get singlePageOnly() {
+    return Boolean(env.pancake.pageId && env.pancake.pageAccessToken) && !this.accessToken;
+  }
+
   /** Danh sách page có quyền */
   async listPages(): Promise<PancakePage[]> {
-    if (!this.accessToken) throw new IntegrationError("Chưa cấu hình PANCAKE_ACCESS_TOKEN", 400, false);
+    // Chạy bằng token của một page thì không liệt kê được page nào khác — và cũng không cần.
+    // Trả về đúng page đã khai để mọi luồng bên trên (vốn viết cho NHIỀU page) chạy y nguyên.
+    if (this.singlePageOnly) {
+      return [{ id: env.pancake.pageId, name: `Page ${env.pancake.pageId}`, platform: "" }];
+    }
+    if (!this.accessToken) throw new IntegrationError("Chưa cấu hình PANCAKE_ACCESS_TOKEN hoặc PANCAKE_PAGE_ID + PANCAKE_PAGE_ACCESS_TOKEN", 400, false);
     const rec = await this.call("pages", { access_token: this.accessToken });
     const categorized = asRecord(rec.categorized);
     const list = [...asArray(categorized.activated), ...asArray(rec.pages), ...asArray(rec.data)];
@@ -52,6 +62,11 @@ export class PancakePagesClient {
 
   /** page_access_token cho một page (sinh mới nếu chưa có) */
   async pageToken(pageId: string): Promise<{ key: "page_access_token" | "access_token"; value: string }> {
+    // Token của chính page đã khai sẵn thì dùng thẳng: không gọi mạng để sinh token, và không cần
+    // token người dùng tồn tại.
+    if (env.pancake.pageAccessToken && env.pancake.pageId === pageId) {
+      return { key: "page_access_token", value: env.pancake.pageAccessToken };
+    }
     const cached = this.pageTokens.get(pageId);
     if (cached) return { key: "page_access_token", value: cached };
     try {
@@ -183,7 +198,14 @@ export class PancakePagesClient {
 
   async testConnection() {
     const pages = await this.listPages();
-    return { pages, tokenLength: this.accessToken.length, pageCount: int(pages.length) };
+    return {
+      pages,
+      // Chỉ in ĐỘ DÀI token, không bao giờ in token. Kho mã này là PUBLIC.
+      tokenLength: this.accessToken.length,
+      pageTokenLength: env.pancake.pageAccessToken.length,
+      mode: this.singlePageOnly ? "token của một page" : "token người dùng",
+      pageCount: int(pages.length),
+    };
   }
 }
 

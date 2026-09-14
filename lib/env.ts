@@ -41,6 +41,18 @@ export const env = {
     get pagesBaseUrl() {
       return read("PANCAKE_PAGES_BASE_URL", "https://pages.fm/api/v1").replace(/\/$/, "");
     },
+    /**
+     * MỘT PAGE + TOKEN CỦA CHÍNH PAGE ĐÓ — đủ để đọc hội thoại mà KHÔNG cần access token người dùng.
+     * Token người dùng mở được mọi page của tài khoản; token của một page chỉ mở đúng page ấy. Với
+     * một bản chạy thử cắm vào dữ liệu thật, phạm vi hẹp hơn là phạm vi đúng.
+     * Để trống cả hai thì mọi thứ chạy y như cũ bằng `PANCAKE_ACCESS_TOKEN`.
+     */
+    get pageId() {
+      return read("PANCAKE_PAGE_ID");
+    },
+    get pageAccessToken() {
+      return read("PANCAKE_PAGE_ACCESS_TOKEN");
+    },
   },
   facebook: {
     get accessToken() {
@@ -80,7 +92,7 @@ export const env = {
 export function integrationStatus() {
   return {
     pancake: Boolean(env.pancake.apiKey && env.pancake.shopId),
-    pancakePages: Boolean(env.pancake.pagesAccessToken),
+    pancakePages: Boolean(env.pancake.pagesAccessToken || (env.pancake.pageId && env.pancake.pageAccessToken)),
     viettelPost: Boolean(env.viettelPost.apiKey || (env.viettelPost.username && env.viettelPost.password)),
     facebook: Boolean(env.facebook.accessToken),
     pancakeWebhook: Boolean(env.pancake.webhookSecret),
