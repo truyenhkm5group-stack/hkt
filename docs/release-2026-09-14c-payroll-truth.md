@@ -131,6 +131,42 @@ sai số.
 phẳng · quảng cáo lấp chỗ · chưa có căn cứ) cộng lại đúng tổng đem chia, kèm đường dẫn sang
 Marketing → Fanpage & quy kết để khai mốc hiệu lực cho phần còn đi bằng bảng phẳng.
 
+### 1.6 Ba thứ bảng lương đáng lẽ phải nói mà không nói
+
+Không phải lỗi tính sai, mà là **thiếu hẳn một chiều** — và cái thiếu đó buộc người đọc tự suy,
+nửa số lần sẽ suy sai.
+
+**(a) "Đã trả" không có ở đâu cả.** Bảng lương chỉ có "Tổng lương kỳ" = PHẢI TRẢ. Lương tháng 8
+trả ngày 05/09 là TIỀN RA của tháng 9 nhưng là CHI PHÍ của tháng 8 (`AGENTS.md` mục 17) — một màn
+hình chỉ có một con số buộc người đọc tự gán nó cho một trong hai chiều. Nay có thẻ **"Đã trả
+trong kỳ"**: tổng khoản chi nhóm "Lương", đọc theo NGÀY PHÁT SINH THÔ, kèm số chứng từ và chênh
+lệch với phải trả. Và nó mang cờ `perPerson: false` cùng câu `missingWhat` cụ thể: `expenses` không
+có cột nào trỏ tới một tài khoản nhân sự, nên ERP **không tách được "đã trả cho ai"** — chia bừa
+theo tỷ trọng rồi in một cột cạnh tên từng người là dựng ra con số không ai kiểm lại được.
+
+**(b) Lời khai của máy chi phí bị bỏ lại giữa đường.** `getOperatingCost` trả về con số LẪN cảnh
+báo ("N khoản cước gõ tay bị loại vì trùng vận đơn", "khoản lương ở bảng Chi phí đang bị BỎ QUA,
+kể cả phần hoa hồng nằm lẫn trong đó"). `productEconomics` chỉ lấy `.amount`. Nên `/expenses` biết
+chi phí đang thiếu gì còn `/payroll` thì không — dù /payroll mới là nơi con số ấy thành tiền trả
+cho người thật. Nay có khối **"Lợi nhuận này đã trừ đủ chi phí chưa?"** ngay trên bảng lương.
+
+**(c) Khoá quy kết mồ côi đội lốt "Chưa gán marketer".** `order_attributions.marketer_id` không có
+khoá ngoại sang sổ nhân sự (sổ ấy nằm trong `settings`). Một dòng phân công trỏ tới người đã gỡ
+khỏi sổ lương sẽ hiện tên "Chưa gán marketer" — trùng đúng tên mà `id = null` đang dùng, nên hai id
+lạ khác nhau thành hai dòng cùng tên và phần doanh thu ấy trông như chưa thuộc về ai. Ba trạng thái
+nay ba tên: tên người · `Nhân sự đã gỡ khỏi sổ lương (<id>)` · `Chưa gán marketer`.
+
+### 1.7 Trang Lương là trang tài chính duy nhất không xuất được
+
+Mọi đối chiếu ngoài ERP đều phải chép tay từ màn hình. Thêm `/api/export/payroll`, gọi ĐÚNG
+`getPayrollReport(period, basis)` mà trang gọi với y nguyên tham số URL của trang — một tệp xuất tự
+cộng lại theo cách riêng là cách chắc chắn để hai con số của cùng một khoản lương đi hai ngả.
+
+Cổng hẹp **đúng bằng** cổng màn hình: `payroll:view` thấy tất, `payroll:view-own` chỉ thấy dòng của
+chính mình (lọc bằng chính `employeeMatchesUser`), còn lại 403. Ô CHƯA BIẾT để **trống** kèm cột
+"Ghi chú" — ghi 0 vào đó là để một bảng tính sau này cộng nó vào tổng tiền phải trả. Hai dòng cuối
+tệp ghi kỳ, cơ sở lợi nhuận, số ngày đã dùng để chia lương cứng và phạm vi xem.
+
 ---
 
 ## 2. Công thức đang áp dụng (không đổi trong bản này)
@@ -242,13 +278,29 @@ Ba điều đọc ra:
 
 `npm run typecheck` · `npm run lint` · `npm test` → **"TẤT CẢ KIỂM THỬ ĐẠT"** · `npm run build`.
 
+Hai đợt phát hành:
+
+| đợt | SHA | nội dung |
+|---|---|---|
+| #286 | `8076fd1` | bốn lỗi mục 1.1–1.4 · lỗi quy kết fanpage 1.5 · tài liệu migration |
+| #288 | `77b262a` | mục 1.6 (đã trả · cảnh báo chi phí · khoá mồ côi) · 1.7 (xuất CSV) · ba đoạn mô tả lỗi thời · bất biến độ phủ |
+
 Kiểm thử mới / mở rộng:
 - `tests/fanpage-attribution.test.ts` mục **7c** (cầu nối đơn huỷ) và **7d** (cửa sổ không trượt
   theo người giữ quy kết) — cả hai ĐỎ trên mã cũ, xanh trên mã mới.
 - `tests/cost-double-count.test.ts` mục **6** (bảng lương = máy chi phí) và **7** (mẫu số ≤ 0 ⇒
   chưa biết, không phải 0).
-- `tests/scope-enforcement.test.ts::testPayrollOwnLineNeedsAccountKey` — sáu ca hành vi cộng một lá
-  chắn mã nguồn: thân `employeeMatchesUser` nhắc tới `e.name` / `e.shortName` / `user.name` là đỏ.
+- `tests/cost-double-count.test.ts` mục **8** (cảnh báo nguồn chi phí đi tới tận bảng lương —
+  `deepEqual` theo `rule`) và **9** (PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều; cờ `perPerson` không
+  được lật thành true).
+- `tests/sync-fixtures.test.ts` — ca `a4` đổi theo LUẬT MỚI (quảng cáo của B trên page của A nay về
+  A, nêu lý do tại chỗ), hai ca mới cho ảnh chụp thắng bảng phẳng / thắng quảng cáo, và một BẤT
+  BIẾN chạy trên cả bốn cơ sở lợi nhuận: bốn nhóm độ phủ là một PHÂN HOẠCH, cộng lại bằng tổng
+  đem chia, không nhóm nào âm.
+- `tests/scope-enforcement.test.ts::testPayrollOwnLineNeedsAccountKey` — sáu ca hành vi cộng ba lá
+  chắn mã nguồn: thân `employeeMatchesUser` nhắc tới `e.name` / `e.shortName` / `user.name` là đỏ;
+  khối chi tiết marketer phải tra trong danh sách ĐÃ LỌC (`?marketer=<id>` không mở được lương
+  người khác); và `/api/export/payroll` phải hỏi đúng hai quyền rồi lọc bằng chính hàm ấy.
 
 ---
 
