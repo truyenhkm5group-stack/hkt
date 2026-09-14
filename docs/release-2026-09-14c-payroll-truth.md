@@ -7,7 +7,7 @@ Nhánh: `claude/trusting-noether-fh23sk` · Đã phát hành: #286 `8076fd1` · 
 lỗi thời. **Không đổi một ngưỡng nghiệp vụ nào** (cửa sổ trùng đơn 24 giờ, ngưỡng 4 điểm, mọi mức
 lương và tỷ lệ thưởng giữ nguyên). Một migration DUY NHẤT (`0088`) và nó CHỈ THÊM BẢNG.
 
-## 0. ĐỌC NHANH — chín lỗi, và cái nào đang làm sai số ngay hôm nay
+## 0. ĐỌC NHANH — mười lỗi, và cái nào đang làm sai số ngay hôm nay
 
 | # | Lỗi | Hôm nay đang sai không? |
 |---|---|---|
@@ -20,10 +20,11 @@ lương và tỷ lệ thưởng giữ nguyên). Một migration DUY NHẤT (`008
 | 1.7 | Trang Lương không xuất được | **CÓ** (thiếu chức năng) |
 | 1.8 | Ba trong bốn cơ sở lương không được phép chốt lương mà ô chọn giống hệt nhau | Rủi ro bấm nhầm |
 | 1.9 | Bảng lương không có danh tính kỳ ⇒ kỳ đã trả tiền tự viết lại chính nó | **CÓ** |
+| 1.9b | Hai kỳ đã chốt chồng lấn NGÀY ⇒ hoa hồng những ngày ấy ghi nhận hai lần | Chưa — bịt trước khi kỳ đầu tiên được chốt |
 
 ---
 
-## 1. Chín lỗi thật, và nguyên nhân gốc của từng cái
+## 1. Mười lỗi thật, và nguyên nhân gốc của từng cái
 
 ### 1.1 Đơn ĐÃ HUỶ làm CẦU NỐI biến hai lần bán thật thành một đơn trùng
 
@@ -232,6 +233,30 @@ kết quả). Nút "Chốt kỳ" chỉ hiện khi cả bốn cửa đã qua.
 
 > **Chưa kỳ nào được chốt.** Bảng rỗng sau khi triển khai và mọi màn hình chạy y như trước, cho tới
 > khi chủ shop tự bấm — đúng yêu cầu "không tự chốt bảng lương".
+
+### 1.9b Hai kỳ lương đã chốt CHỒNG LẤN NGÀY — khoá tự nhiên chỉ chặn trùng KHOÁ
+
+Khoá tự nhiên của một kỳ là `(periodKey, basis)`, với `periodKey = "2026-08-01..2026-08-31"`. Nó
+chặn được việc chốt **cùng một kỳ** hai lần. Nó **không** chặn được việc chốt `01/08..31/08` rồi
+chốt tiếp `15/08..15/09`: hai chuỗi khoá khác nhau, `ON CONFLICT` không kêu, và mười bảy ngày giữa
+tháng tám nằm trong **hai** kỳ đã chốt cùng lúc — cùng những đơn ấy, cùng những marketer ấy, hoa
+hồng ghi nhận **hai lần**. Không màn hình nào báo, vì mỗi kỳ đọc ảnh chụp của chính nó và mỗi ảnh
+chụp đều đúng khi đứng một mình.
+
+Gốc của nó là một nhầm lẫn về phạm vi: một bất biến **giữa các dòng** ("không ngày nào thuộc hai
+kỳ đã chốt") không thể canh bằng một ràng buộc **trên một dòng** (`UNIQUE`, `CHECK`). Cái sau chỉ
+nhìn thấy chính nó.
+
+`finalizePayrollPeriod` nay hỏi `finalizedPeriodsOverlapping(from, to)` trước khi ghi — một câu
+`lte(period_start, to) AND gte(period_end, from)`, phép giao khoảng chuẩn — và từ chối kèm **tên
+kỳ đang chồng lấn** để người bấm sửa được ngay, thay vì chỉ nói "không hợp lệ". Phép kiểm chạy
+trên **cùng cơ sở lẫn khác cơ sở**: chốt tháng tám bằng LN1 rồi chốt nửa cuối tháng tám bằng một
+cơ sở khác vẫn là trả hai lần cho cùng những ngày ấy.
+
+Kiểm thử: `tests/payroll-period.test.ts` mục **7b** — sau khi chốt cả tháng 6/2027, hỏi kỳ
+`10/06..20/06` phải trả về **đúng một** kỳ chồng lấn kèm cơ sở của nó (để câu từ chối gọi được
+đích danh), còn hỏi tháng 7 phải trả về **rỗng**: phép kiểm không được kêu bừa, và kỳ **liền kề**
+vẫn chốt được bình thường.
 
 ---
 
@@ -474,7 +499,8 @@ select (select count(*) from information_schema.tables where table_name='payroll
 
 `npm run typecheck` · `npm run lint` · `npm test` → **"TẤT CẢ KIỂM THỬ ĐẠT"** · `npm run build`.
 
-Hai đợt phát hành:
+Năm đợt phát hành — mỗi đợt chạy cổng trên **bản checkout SẠCH theo đúng SHA ứng viên**
+(`git worktree add --detach` + `npm ci`), không chạy trên cây làm việc đang mở:
 
 | đợt | SHA | nội dung |
 |---|---|---|
@@ -482,6 +508,7 @@ Hai đợt phát hành:
 | #288 | `77b262a` | mục 1.6 (đã trả · cảnh báo chi phí · khoá mồ côi) · 1.7 (xuất CSV) · ba đoạn mô tả lỗi thời · bất biến độ phủ |
 | #289 | `f41a87a` | mục 1.8 (sổ đăng ký cơ sở lương + dải cảnh báo) · README/HANDOFF/chú giải quyền nói đúng luật đang chạy · nhắc khai email đăng nhập |
 | #290 | `0bf4a08` | mục 1.9 (kỳ lương: migration `0088`, ảnh chụp bất biến, đề xuất điều chỉnh) |
+| #291 | `2c70455` | hai kỳ đã chốt thôi chồng lấn NGÀY (mục 1.9b) · biên bản: đối soát cùng phạm vi, ranh giới sống/ảnh chụp, xác minh sau deploy #290 |
 
 Kiểm thử mới / mở rộng:
 - `tests/fanpage-attribution.test.ts` mục **7c** (cầu nối đơn huỷ) và **7d** (cửa sổ không trượt
@@ -709,3 +736,5 @@ from order_attributions;
 ```
 
 `duoi_nguong` và `khong_can_cu` phải là **0**. Nếu khác 0 thì bản vá chưa lên.
+
+**Đã chạy 14/09/2026 20:30 trên production** (sau deploy #290): `tong_trung = 83` · `duoi_nguong = 0` · `khong_can_cu = 0` · `diem_min = 4`. Đạt — xem mục 3a-2.
