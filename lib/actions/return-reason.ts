@@ -9,7 +9,7 @@
  * Nhật ký ghi CẢ lý do cũ lẫn lý do máy suy ra tại thời điểm ghi đè: một con số đi vào báo cáo
  * hiệu suất mã hàng thì phải lần ngược được về người đã quyết và bằng chứng họ dựa vào.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -47,12 +47,19 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
   const truoc = (await reasonsForShipments([shipmentId])).get(shipmentId);
 
   /*
-    NHÓM LỚN LƯU KÈM, KHÔNG SUY LÚC ĐỌC.
-
-    Suy lúc đọc thì ngày nào đó một lý do được xếp sang nhóm khác là toàn bộ lịch sử đổi theo,
-    lặng lẽ — báo cáo quý trước in ra hồi đó không còn khớp với chính nó nữa.
+    NHÓM LƯU KÈM LÀ ẢNH CHỤP LÚC GHI, không phải nguồn của phép gộp: báo cáo suy nhóm lúc ĐỌC qua
+    `effectiveGroupOf` để chủ shop chỉnh được cách xếp mà không phải viết lại lịch sử. Cột này
+    giữ lại câu "hồi đó xếp vào đâu".
   */
   const reasonGroup = RETURN_REASON_GROUP_OF[reason];
+  /*
+    CHỮ GỐC CỦA ĐVVC ĐƯỢC CHÉP LẠI, NGUYÊN VĂN.
+
+    Người đè lên máy thì chữ ĐVVC biến mất khỏi màn hình. Chép nó vào đây giữ cả hai vế cạnh nhau:
+    ca xếp "vải xấu" mà chứng từ ĐVVC nói "khách hẹn giao lại" là ca đáng hỏi lại — và chỉ thấy
+    được nếu chữ gốc còn đó. Máy không có chữ nào thì để RỖNG, không bịa.
+  */
+  const rawReason = (truoc?.rawReason ?? "").slice(0, 500);
   await db
     .insert(schema.shipmentReturnReasons)
     .values({
@@ -60,6 +67,7 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
       reason,
       reasonGroup,
       note,
+      rawReason,
       inferredReason: truoc?.manual ? "" : (truoc?.reason ?? "UNKNOWN"),
       source: "MANUAL",
       confidence: "CONFIRMED",
@@ -68,8 +76,24 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     })
     .onConflictDoUpdate({
       target: schema.shipmentReturnReasons.shipmentId,
-      // Sửa lại lý do VẪN là người xác định — giữ `source`/`confidence`, chỉ đổi nội dung và người.
-      set: { reason, reasonGroup, note, source: "MANUAL", confidence: "CONFIRMED", actorId: user.id, actorEmail: user.email, updatedAt: new Date() },
+      /*
+        Sửa lại lý do VẪN là người xác định — giữ `source`/`confidence`, chỉ đổi nội dung và người.
+
+        `raw_reason` chỉ ĐIỀN VÀO CHỖ TRỐNG (`nullif(…, '')`), không ghi đè: lần xác nhận thứ hai
+        đọc lại chữ của chính dòng đó (máy nay thấy `CONFIRMED`), nên ghi đè sẽ xoá mất chứng từ
+        ĐVVC gốc bằng một bản sao của chính nó — hoặc bằng chuỗi rỗng.
+      */
+      set: {
+        reason,
+        reasonGroup,
+        note,
+        rawReason: sql`coalesce(nullif(${schema.shipmentReturnReasons.rawReason}, ''), ${rawReason})`,
+        source: "MANUAL",
+        confidence: "CONFIRMED",
+        actorId: user.id,
+        actorEmail: user.email,
+        updatedAt: new Date(),
+      },
     });
 
   await audit({
@@ -80,8 +104,8 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     entityId: shipmentId,
     detail: {
       tracking: vanDon.vtpOrderNumber,
-      before: { reason: truoc?.reason ?? "UNKNOWN", confidence: truoc?.confidence ?? "NONE", evidence: truoc?.evidence ?? "" },
-      after: { reason, reasonGroup, note },
+      before: { reason: truoc?.reason ?? "UNKNOWN", confidence: truoc?.confidence ?? "NONE", evidence: truoc?.evidence ?? "", rawReason: truoc?.rawReason ?? "" },
+      after: { reason, reasonGroup, note, rawReason },
     },
   });
 

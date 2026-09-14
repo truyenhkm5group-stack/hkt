@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PERIOD_KINDS } from "@/lib/constants/metric-targets";
-import { metricOf, TARGET_SCOPES } from "@/lib/constants/metric-registry";
+import { metricOf, scopesFor, TARGET_SCOPES } from "@/lib/constants/metric-registry";
 
 /**
  * Lược đồ ở tệp riêng vì tệp `"use server"` KHÔNG được xuất hằng số — đã vấp một lần và mọi lượt
@@ -30,6 +30,14 @@ export const targetInput = z
     effectiveFrom: z.coerce.date(),
     effectiveTo: z.coerce.date().nullable().default(null),
     ownerDepartment: z.string().trim().max(60).nullable().default(null),
+  })
+  /*
+    PHẠM VI PHẢI HỢP LỆ VỚI CHÍNH CHỈ SỐ ĐÓ — chặn ở lược đồ VÀ chặn lại trong server action.
+    `scopesFor()` là một danh sách, nên thêm một phạm vi mới không tạo ra một nhánh thứ hai ở đây.
+  */
+  .refine((d) => scopesFor(d.metricKey).includes(d.scope), {
+    message: "Chỉ số này không đặt đích ở phạm vi đó được",
+    path: ["scope"],
   })
   .refine((d) => d.targetMax === null || d.targetMax > d.target, { message: "Cận trên của dải phải lớn hơn cận dưới", path: ["targetMax"] })
   .refine((d) => d.effectiveTo === null || d.effectiveTo.getTime() > d.effectiveFrom.getTime(), { message: "Hạn kết thúc phải sau mốc hiệu lực", path: ["effectiveTo"] });

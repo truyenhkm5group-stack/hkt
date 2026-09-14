@@ -1,6 +1,6 @@
 # Quy kết Fanpage → Marketer → Đơn → Doanh thu xác nhận
 
-*14/09/2026 · nhánh `claude/zen-einstein-anelyz` · migration 0084 · CHƯA deploy*
+*14/09/2026 · nhánh `claude/zen-einstein-anelyz` · migration 0086 · ĐÃ deploy*
 
 ## 1. Đo trước khi sửa (production, ops `db-query`, chỉ đọc)
 
@@ -105,7 +105,7 @@ nhau và không cộng vào nhau.
 
 - `lib/constants/fanpage-attribution.ts` — hợp đồng + hàm thuần: 4 tình trạng, chuẩn hoá người
   nhận, khoá trùng đơn, chia chuỗi theo cửa sổ, chọn khoảng hiệu lực.
-- **Migration 0084** (viết tay, idempotent như 0033–0083) — ba bảng CHỈ CỘNG THÊM:
+- **Migration 0086** (viết tay, idempotent như 0033–0083) — ba bảng CHỈ CỘNG THÊM:
   `fanpages` · `fanpage_marketer_assignments` (khoảng hiệu lực nửa mở) · `order_attributions`
   (ảnh chụp, mỗi đơn đúng một dòng).
 - `lib/attribution/fanpage.ts` · `lib/queries/fanpage-attribution.ts` ·

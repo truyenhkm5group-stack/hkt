@@ -123,15 +123,28 @@ export function testMigrationAppendOnly() {
     console.log("⊘ Bỏ qua kiểm sổ migration: không đọc được sổ ở HEAD");
     return;
   }
-  const previous = read("HEAD~1");
-  if (!previous) {
+  /*
+    ═══ SO VỚI MỌI CHA, KHÔNG CHỈ CHA THỨ NHẤT ═══
+
+    Ở một commit HỢP NHẤT, `HEAD~1` là cha THỨ NHẤT — nhánh của mình. Mọi migration mà nhánh KIA
+    mang sang đều "mới" đối với cha ấy, kể cả migration đã chạy thật trên máy chủ từ hôm trước.
+    Bài kiểm vì thế đỏ ở mỗi lượt nhập main về, và câu nó bảo phải làm ("nâng mốc lên") là điều
+    NGUY HIỂM NHẤT có thể làm: sửa mốc của một migration ĐÃ ÁP.
+
+    Câu hỏi thật là "mục này có mới với KHO MÃ không", nên tập nền là HỢP của mọi cha, và mốc nền
+    cũng là mốc lớn nhất trong hợp đó — production nằm trên một trong các cha, nên mọi thứ có thể
+    đã áp đều nằm trong hợp ấy.
+  */
+  const parents = execSync("git rev-list --parents -n 1 HEAD", { encoding: "utf8" }).trim().split(/\s+/).slice(1);
+  const previousList = parents.map((p) => read(p)).filter((x): x is NonNullable<typeof x> => x !== null);
+  if (!previousList.length) {
     // Kho vừa được clone nông (fetch-depth: 1) hoặc đây là commit đầu tiên — không có gì để so.
     console.log("⊘ Bỏ qua kiểm 'chỉ nối vào cuối': không có commit trước để đối chiếu");
     return;
   }
 
-  const before = new Set(previous.entries.map((e) => e.tag));
-  const maxWhenBefore = Math.max(...previous.entries.map((e) => e.when));
+  const before = new Set(previousList.flatMap((p) => p.entries.map((e) => e.tag)));
+  const maxWhenBefore = Math.max(...previousList.flatMap((p) => p.entries.map((e) => e.when)));
   const added = current.entries.filter((e) => !before.has(e.tag));
 
   for (const e of added) {

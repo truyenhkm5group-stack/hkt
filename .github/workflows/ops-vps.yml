@@ -42,6 +42,7 @@ on:
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
+          - returns-parity      # báo cáo hoàn: MÀN HÌNH THẬT = máy tính kết quả = SQL viết độc lập từ đặc tả (chỉ đọc; arg: "Q001,Q002" mã hàng)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
@@ -223,6 +224,13 @@ jobs:
                 # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
                 fetch_script outcome-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/outcome-parity.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/outcome-parity.ts $ARG ;;
+              returns-parity)
+                # CHỈ ĐỌC. Tải thật /reports/returns bằng phiên hợp lệ rồi BÓC SỐ TỪ HTML, so với
+                # máy tính kết quả và với một câu SQL viết độc lập từ đặc tả. Đây là phép kiểm duy
+                # nhất đứng TRÊN tầng render: một khối biến mất sau lớp bắt lỗi vẫn trả HTTP 200,
+                # và chỉ HTML mới nói ra điều đó (đã xảy ra thật 14/09/2026).
+                fetch_script returns-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/returns-parity.ts'
+                docker exec erp-app sh -c "PARITY_CODES='${ARG:-Q001,Q002,Q003,Q004}' npx tsx --tsconfig tsconfig.json scripts/returns-parity.ts" ;;
               perf-probe)
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;

@@ -119,6 +119,8 @@ import {
   testRiskBadgeReadsTargets,
   testActionEngineGates,
   testReasonDenominatorsAndFilters,
+  testReasonGroupContract,
+  testReasonRegroupAndThreeLevelDrilldown,
   testIntelligenceRuns,
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
@@ -147,7 +149,7 @@ import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
 import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
-import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
+import { testMetricRegistry, testPersonTargetGuard, testProductTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
 import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testReturnReceiveSelector } from "./return-receive-selector.test";
 import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
@@ -1452,6 +1454,7 @@ async function main() {
   await testHandoffSqlMatchesTypescript(db);
   testMetricRegistry();
   testPersonTargetGuard();
+  testProductTargetGuard();
   testTargetWindowAndPeriod();
   testRangeAndBands();
   testScorecardEvaluator();
@@ -1501,6 +1504,8 @@ async function main() {
   testRiskBadgeReadsTargets();
   testActionEngineGates();
   await testReasonDenominatorsAndFilters(db);
+  testReasonGroupContract();
+  await testReasonRegroupAndThreeLevelDrilldown(db);
   await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();

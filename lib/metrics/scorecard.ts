@@ -55,7 +55,7 @@ export const CELL_STATUS_LABEL: Record<CellStatus, string> = {
   GOOD: "Đạt",
   WARNING: "Cần chú ý",
   CRITICAL: "Đang hỏng",
-  NO_TARGET: "Chưa đặt đích",
+  NO_TARGET: "Chưa đặt mục tiêu",
   UNKNOWN: "Chưa đo được",
 };
 
@@ -198,7 +198,7 @@ export function evaluateMetric(input: ScorecardInput): ScorecardCell | null {
           : input.trust === "WEAK"
             ? "Mẫu dưới ngưỡng hoặc nối người bằng ô chữ — đọc làm bối cảnh, không kết luận về một con người"
             : target === null
-              ? "Chưa ai đặt đích cho chỉ số này ở phạm vi đang xem"
+              ? "Chưa ai đặt mục tiêu cho chỉ số này ở phạm vi đang xem"
               : null;
 
   return {

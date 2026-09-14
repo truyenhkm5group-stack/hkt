@@ -9,9 +9,9 @@
  * ra sẽ được đọc như một chuẩn của shop. Rồi ai đó bị chấm là không đạt vì một con số không ai
  * trong shop từng đồng ý.
  */
-import { TARGET_PRECEDENCE, type TargetDirection, type TargetScope } from "@/lib/constants/metric-registry";
+import { normProductCode, TARGET_PRECEDENCE, type TargetDirection, type TargetScope } from "@/lib/constants/metric-registry";
 
-export { TARGET_PRECEDENCE, TARGET_SCOPE_LABEL, TARGET_SCOPES, type TargetDirection, type TargetScope } from "@/lib/constants/metric-registry";
+export { normProductCode, TARGET_PRECEDENCE, TARGET_SCOPE_LABEL, TARGET_SCOPES, type TargetDirection, type TargetScope } from "@/lib/constants/metric-registry";
 
 /**
  * Hình dạng kỳ mà một đích áp vào. `ANY` = chưa khai, áp cho mọi kỳ — KHÔNG phải "mỗi tháng".
@@ -62,7 +62,7 @@ export type ResolvedTarget = Omit<TargetRow, "metricKey">;
  */
 export function resolveTarget(
   rows: TargetRow[],
-  input: { metricKey: string; departmentCode: string | null; positionId: string | null; userId?: string | null; at: Date; periodKind?: PeriodKind },
+  input: { metricKey: string; departmentCode: string | null; positionId: string | null; userId?: string | null; productCode?: string | null; at: Date; periodKind?: PeriodKind },
 ): ResolvedTarget | null {
   const kyDangXem = input.periodKind ?? "ANY";
   const hopLe = rows.filter(
@@ -79,6 +79,14 @@ export function resolveTarget(
     if (r.scope === "DEPARTMENT" && r.scopeRef !== input.departmentCode) continue;
     if (r.scope === "POSITION" && r.scopeRef !== input.positionId) continue;
     if (r.scope === "USER" && r.scopeRef !== (input.userId ?? null)) continue;
+    /*
+      ĐÍCH RIÊNG CHO MỘT MÃ HÀNG.
+
+      Chủ thể KHÔNG mang mã hàng (một người, một phòng) thì `productCode` là `undefined`/`null` và
+      MỌI đích tầng `PRODUCT` bị loại ở đây — không có đường nào để một đích đặt cho mã Q004 lọt
+      vào phép chấm một con người.
+    */
+    if (r.scope === "PRODUCT" && normProductCode(r.scopeRef) !== normProductCode(input.productCode)) continue;
     if (!best) {
       best = r;
       continue;
@@ -109,7 +117,7 @@ export type TargetVerdict = "MET" | "MISSED" | "NO_TARGET" | "NOT_MEASURED";
 export const VERDICT_LABEL: Record<TargetVerdict, string> = {
   MET: "Đạt",
   MISSED: "Chưa đạt",
-  NO_TARGET: "Chưa đặt đích",
+  NO_TARGET: "Chưa đặt mục tiêu",
   NOT_MEASURED: "Chưa đo được",
 };
 

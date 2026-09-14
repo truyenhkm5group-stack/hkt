@@ -47,6 +47,8 @@ export type TargetableMetric = {
   basis: string;
   /** Đo được ở mức NGƯỜI không? Quyết định việc có cho đặt đích cho một cá nhân hay không. */
   personGrain: boolean;
+  /** Đo được ở mức MÃ HÀNG không? Quyết định việc có cho đặt đích riêng cho một mã hay không. */
+  productGrain: boolean;
   /** Kết quả do bên ngoài đồng quyết định (ĐVVC giao được hay không, hàng hỏng trên đường về). */
   shared: boolean;
   /** Chưa có nguồn thật ⇒ KHÔNG nối được vào đích, y như không nối được vào KR. */
@@ -67,6 +69,8 @@ const fromCatalog = (m: MetricSpec): TargetableMetric => ({
   department: m.department,
   basis: m.source,
   personGrain: m.grain === "PERSON",
+  // Sổ hiệu suất đo ở mức NGƯỜI / PHÒNG — không chỉ số nào của nó đọc được trên một mã hàng.
+  productGrain: false,
   shared: m.shared,
   targetable: m.availability === "MEASURED" && m.direction !== "CONTEXT",
   missingWhat: m.availability === "UNAVAILABLE" ? m.missingWhat : m.direction === "CONTEXT" ? "Chỉ số đọc bối cảnh, không có chiều tốt/xấu nên không đặt đích được" : undefined,
@@ -85,6 +89,7 @@ const fromBinding = (key: string): TargetableMetric => {
     // Chỉ số kinh doanh đo ở mức CÔNG TY / PHÒNG. Không cái nào đọc được ở mức một con người,
     // nên không cái nào được phép trở thành đích chấm một cá nhân.
     personGrain: false,
+    productGrain: b.productGrain === true,
     shared: false,
     // `MANUAL` = ERP chưa đo được. Đặt đích cho nó là đặt đích cho một con số người tự gõ.
     targetable: b.trust !== "MANUAL",
@@ -107,11 +112,12 @@ export function metricOf(key: string): TargetableMetric | null {
 /**
  * ═══ PHẠM VI CỦA MỘT ĐÍCH ═══
  *
- * `PRODUCT` CỐ Ý KHÔNG CÓ. Không sổ nào đang khai một chỉ số đọc được ở mức mã hàng, nên thêm
- * phạm vi đó là mở một ô cho một thứ chưa có nguồn — đúng điều AGENTS.md mục 37 cấm. Khi nào có
- * chỉ số mức mã hàng thật thì thêm cả hai cùng lúc.
+ * `PRODUCT` chỉ được thêm CÙNG LÚC với cờ `productGrain` ở sổ chỉ số — mở một phạm vi mà không sổ
+ * nào khai được chỉ số đọc ở mức ấy là mở ô cho một thứ chưa có nguồn (AGENTS.md mục 37). Hiện
+ * `delivery_success_rate` và `return_rate` khai `productGrain` vì cả tử số lẫn mẫu số đều đếm trên
+ * đúng tập vận đơn của một mã; `canTargetProduct()` chặn mọi khoá còn lại.
  */
-export const TARGET_SCOPES = ["COMPANY", "DEPARTMENT", "POSITION", "USER"] as const;
+export const TARGET_SCOPES = ["COMPANY", "DEPARTMENT", "POSITION", "USER", "PRODUCT"] as const;
 export type TargetScope = (typeof TARGET_SCOPES)[number];
 
 export const TARGET_SCOPE_LABEL: Record<TargetScope, string> = {
@@ -119,10 +125,24 @@ export const TARGET_SCOPE_LABEL: Record<TargetScope, string> = {
   DEPARTMENT: "Phòng ban",
   POSITION: "Chức danh",
   USER: "Cá nhân",
+  PRODUCT: "Mã hàng",
 };
 
-/** Tầng HẸP hơn thắng. Không cộng, không trung bình — hai đích chồng nhau thì cái RIÊNG hơn là cái đúng. */
-export const TARGET_PRECEDENCE: Record<TargetScope, number> = { COMPANY: 1, DEPARTMENT: 2, POSITION: 3, USER: 4 };
+/**
+ * ═══ TẦNG HẸP HƠN THẮNG — VÀ `PRODUCT` LÀ MỘT TRỤC RIÊNG ═══
+ *
+ * Không cộng, không trung bình: hai đích chồng nhau thì cái RIÊNG hơn là cái đúng.
+ *
+ * `PRODUCT` đứng cao nhất nhưng nó KHÔNG cạnh tranh với `DEPARTMENT`/`POSITION`/`USER` — ba tầng ấy
+ * nói về CON NGƯỜI, còn `PRODUCT` nói về MỘT MÃ HÀNG. Một dòng mã hàng không có phòng ban, nên khi
+ * chấm nó chỉ có hai ứng viên: đích toàn công ty và đích của chính mã đó. Đặt `PRODUCT` cao nhất là
+ * để "mã Q004 mới ra mắt, chấp nhận 55%" thắng "toàn shop 65%" — đúng thứ chủ shop cần khi một mã
+ * có đặc thù riêng.
+ *
+ * Ngược lại, một dòng NGƯỜI không bao giờ mang `productCode`, nên `PRODUCT` không thể lọt vào phép
+ * chấm một con người bằng đường vòng.
+ */
+export const TARGET_PRECEDENCE: Record<TargetScope, number> = { COMPANY: 1, DEPARTMENT: 2, POSITION: 3, USER: 4, PRODUCT: 5 };
 
 /**
  * ĐƯỢC PHÉP ĐẶT ĐÍCH CHO MỘT CON NGƯỜI CỤ THỂ KHÔNG?
@@ -144,10 +164,40 @@ export function canTargetPerson(key: string): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
+/**
+ * ĐƯỢC PHÉP ĐẶT ĐÍCH RIÊNG CHO MỘT MÃ HÀNG KHÔNG?
+ *
+ * Chỉ khi sổ chỉ số KHAI `productGrain` — tức tử số và mẫu số đều đếm được trên đúng tập đơn của
+ * mã đó. Một chỉ số mức công ty gắn vào một mã là chấm mã ấy bằng kết quả của cả shop; một chỉ số
+ * PHÂN BỔ (tiền quảng cáo chia theo tỷ trọng) gắn vào một mã là đặt đích cho một phép chia.
+ */
+export function canTargetProduct(key: string): { ok: boolean; reason?: string } {
+  const m = metricOf(key);
+  if (!m) return { ok: false, reason: "Chỉ số không có trong sổ" };
+  if (!m.targetable) return { ok: false, reason: m.missingWhat ?? "Chỉ số chưa đo được" };
+  if (!m.productGrain) return { ok: false, reason: `"${m.label}" không đọc được ở mức một mã hàng — đặt đích toàn công ty thay vì gán cho một mã` };
+  return { ok: true };
+}
+
+/**
+ * CHUẨN HOÁ MÃ HÀNG DÙNG LÀM `scopeRef`.
+ *
+ * `products.custom_id` do người gõ tay vào Pancake, nên cùng một mã đã từng xuất hiện dưới hai
+ * cách viết. Nếu đích lưu "Q004" mà báo cáo đọc lên "q004" thì `resolveTarget` không khớp, và màn
+ * hình nói "chưa đặt mục tiêu" trong khi chủ shop vừa đặt xong — im lặng, không lỗi, không dấu vết.
+ *
+ * Nên CẢ đường ghi (server action) LẪN đường đọc (`resolveTarget`) đi qua đúng hàm này.
+ */
+export function normProductCode(s: string | null | undefined): string | null {
+  const v = (s ?? "").trim().toUpperCase();
+  return v ? v : null;
+}
+
 /** Phạm vi nào hợp lệ cho một chỉ số. Dùng chung cho lược đồ đầu vào VÀ lúc dựng ô chọn. */
 export function scopesFor(key: string): TargetScope[] {
   const m = metricOf(key);
   if (!m?.targetable) return [];
   const base: TargetScope[] = ["COMPANY", "DEPARTMENT", "POSITION"];
-  return canTargetPerson(key).ok ? [...base, "USER"] : base;
+  const co: TargetScope[] = canTargetPerson(key).ok ? [...base, "USER"] : base;
+  return canTargetProduct(key).ok ? [...co, "PRODUCT"] : co;
 }

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { canTargetPerson, metricOf } from "@/lib/constants/metric-registry";
+import { canTargetPerson, canTargetProduct, metricOf, normProductCode } from "@/lib/constants/metric-registry";
 import { targetDelete, targetInput } from "@/lib/validation/metric-targets";
 
 /**
@@ -31,7 +31,7 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
   if (!spec) return { error: "Chỉ số không có trong sổ" };
   if (!spec.targetable) return { error: spec.missingWhat ?? `"${spec.label}" chưa đo được nên không đặt đích được` };
   if (d.scope === "COMPANY" && d.scopeRef) return { error: "Đích toàn công ty không gắn với phòng, chức danh hay cá nhân nào" };
-  if (d.scope !== "COMPANY" && !d.scopeRef) return { error: "Phải chọn phòng ban, chức danh hoặc người" };
+  if (d.scope !== "COMPANY" && !d.scopeRef) return { error: "Phải chọn phòng ban, chức danh, người hoặc mã hàng" };
   /*
     ĐÍCH CHO MỘT CÁ NHÂN bị chặn ở đây VÀ ở lược đồ đầu vào. Chỉ số mức công ty gắn tên một người
     là chấm người đó bằng kết quả của cả shop; chỉ số mang cờ `shared` (ĐVVC giao được hay không)
@@ -41,11 +41,37 @@ export async function setMetricTarget(input: unknown): Promise<Result> {
     const duoc = canTargetPerson(d.metricKey);
     if (!duoc.ok) return { error: duoc.reason ?? "Chỉ số này không đặt đích cho một cá nhân được" };
   }
+  /*
+    ĐÍCH RIÊNG CHO MỘT MÃ HÀNG. Hai cửa, cả hai đều cần:
+
+     1. Chỉ số phải đọc được ở mức mã (`canTargetProduct`) — không thì đích ấy chấm một mã bằng
+        con số của cả shop.
+     2. Mã phải CÓ THẬT trong `products.custom_id`. Gõ nhầm một mã không tồn tại không báo lỗi ở
+        đâu cả: dòng đích nằm im trong bảng, `resolveTarget` không bao giờ khớp, và màn hình vẫn
+        nói "chưa đặt mục tiêu" trong khi chủ shop tin là đã đặt rồi. Đó là loại im lặng tệ nhất.
+
+    Cố ý KHÔNG có khoá ngoại tới `products`: mã hàng do Pancake đồng bộ, một lần đổi `custom_id`
+    hay một lần xoá mềm sẽ kéo theo mất đích đã đặt. Kiểm tra lúc GHI, còn dòng đã ghi thì giữ.
+  */
+  if (d.scope === "PRODUCT") {
+    const duoc = canTargetProduct(d.metricKey);
+    if (!duoc.ok) return { error: duoc.reason ?? "Chỉ số này không đặt đích riêng cho một mã hàng được" };
+    const ma = normProductCode(d.scopeRef) ?? "";
+    const dbKiem = await getDb();
+    const [co] = await dbKiem
+      .select({ n: sql<number>`1` })
+      .from(schema.products)
+      .where(sql`upper(trim(coalesce(${schema.products.customId}, ''))) = ${ma}`)
+      .limit(1);
+    if (!co) return { error: `Không có mã hàng "${ma}" trong danh mục sản phẩm — kiểm tra lại mã` };
+  }
   if (spec.unit === "PERCENT" && (d.target < 0 || d.target > 100)) return { error: "Đích theo phần trăm phải nằm trong 0–100" };
   if (spec.unit === "PERCENT" && d.targetMax !== null && (d.targetMax < 0 || d.targetMax > 100)) return { error: "Cận trên theo phần trăm phải nằm trong 0–100" };
 
   const db = await getDb();
-  const ref = d.scope === "COMPANY" ? null : d.scopeRef;
+  // Mã hàng chuẩn hoá về CHỮ HOA ĐÃ CẮT KHOẢNG TRẮNG: báo cáo tra đích bằng `products.custom_id`
+  // đọc lên từ truy vấn, và "q004" gõ tay sẽ không bao giờ khớp "Q004".
+  const ref = d.scope === "COMPANY" ? null : d.scope === "PRODUCT" ? normProductCode(d.scopeRef) : d.scopeRef;
 
   /*
     Đặt lại đích cho ĐÚNG cùng một mốc hiệu lực VÀ cùng hình dạng kỳ là SỬA, không phải thêm dòng

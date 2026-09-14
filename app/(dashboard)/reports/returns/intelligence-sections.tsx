@@ -107,11 +107,11 @@ export function ProductRiskTable({ rows, hasTarget }: { rows: ReturnIntelligence
     <>
       {!hasTarget ? (
         <p className="mb-2 rounded-md border border-hairline bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
-          Chưa ai đặt đích cho chỉ số <b>Tỷ lệ giao thành công</b>, nên bảng này <b>hiện thực tế và không kết luận</b> mã nào đạt hay không đạt. Đặt đích ở{" "}
-          <Link className="underline underline-offset-2" href="/okr/targets">
-            Mục tiêu → Đích chỉ số
+          Chưa ai đặt mục tiêu cho chỉ số <b>Tỷ lệ giao thành công</b>, nên bảng này <b>hiện thực tế và vẫn xếp hạng</b> nhưng không kết luận mã nào đạt hay không đạt. Đặt mục tiêu ở{" "}
+          <Link className="underline underline-offset-2" href="/work/settings#muc-tieu-chi-so">
+            Công việc → Cấu hình → Mục tiêu chỉ số
           </Link>
-          .
+          {" "}— đặt một mức chung cho cả shop, và mức riêng cho từng mã nếu mã đó có đặc thù.
         </p>
       ) : null}
       <div className={TABLE_SCROLL}>

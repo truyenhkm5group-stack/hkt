@@ -68,6 +68,7 @@ export function ReasonGroupTable({
   known,
   eligibleSent,
   drilldownHref,
+  groupHref,
 }: {
   groups: ReasonGroupRow[];
   known: number;
@@ -82,6 +83,14 @@ export function ReasonGroupTable({
    * khối lý do hoàn biến mất sau một lớp bắt lỗi — trang vẫn 200, chỉ thiếu mất một mục.
    */
   drilldownHref: Record<string, string>;
+  /**
+   * Đường mở drilldown cho CẢ NHÓM — tầng đầu tiên của ba tầng (nhóm → mã hàng → vận đơn).
+   *
+   * Bản trước chỉ mở được ở tầng lý do CHI TIẾT, nên câu hỏi thật của chủ shop ("hoàn vì sai size
+   * là vấn đề của cả shop hay của đúng một mã?") phải trả lời bằng cách bấm lần lượt tám lý do
+   * con rồi tự cộng.
+   */
+  groupHref: Record<string, string>;
 }) {
   const [mo, setMo] = useState<Record<string, boolean>>({});
   /*
@@ -184,7 +193,18 @@ export function ReasonGroupTable({
                     {g.incidence === null ? "—" : formatPercent(g.incidence)}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatVND(g.lostRevenue, { compact: true })}</td>
-                  <td className="px-3 py-1.5" />
+                  <td className="px-3 py-1.5 text-right">
+                    {g.count ? (
+                      <Link
+                        href={groupHref[g.group] ?? "#"}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                        title="Mở cả nhóm: xem mã hàng nào dính nhóm lý do này, rồi xuống tới từng vận đơn."
+                      >
+                        <List className="size-3" /> {formatNumber(g.count)} vận đơn
+                      </Link>
+                    ) : null}
+                  </td>
                 </tr>
 
                 {xo

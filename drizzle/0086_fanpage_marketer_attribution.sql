@@ -3,7 +3,16 @@
 -- CHỈ CỘNG THÊM BA BẢNG. Không đổi kiểu, không xoá cột, không đổi tên, không đụng một dòng dữ liệu
 -- nào của `orders` / `shipments` / `ad_spends` / `settings`.
 --
--- Viết tay và idempotent (`IF NOT EXISTS`) như 0033–0083: ảnh chụp (`drizzle/meta/*_snapshot.json`)
+-- ĐÁNH SỐ LẠI 0084 → 0086 (14/09/2026): trong lúc nhánh này đang chạy, `main` đã lấy 0084 và 0085
+-- cho hai migration khác và chúng đã chạy thật trên máy chủ. Số hiệu của một migration ĐÃ ÁP là
+-- bất khả xâm phạm, nên thứ phải dời là cái CHƯA vào main — tức tệp này. Mốc cũng dời lên sau mọi
+-- mốc đã có, nếu không drizzle bỏ qua nó trên máy đã chạy hai migration kia.
+--
+-- Tệp này TỪNG chạy trên production dưới số hiệu 0084 (bản phát hành lúc 15:26). Áp lại dưới số
+-- hiệu mới là AN TOÀN và KHÔNG mất dữ liệu, đúng vì mọi câu lệnh ở đây đều idempotent — đó là lý do
+-- kho mã này viết migration theo lối ấy.
+--
+-- Viết tay và idempotent (`IF NOT EXISTS`) như 0033–0085: ảnh chụp (`drizzle/meta/*_snapshot.json`)
 -- của kho này đã cũ từ 0032, nên `drizzle-kit generate` sinh ra một bản dựng lại TOÀN BỘ lược đồ —
 -- chạy bản đó lên production sẽ hỏng ngay ở câu lệnh đầu tiên.
 --

@@ -36,12 +36,28 @@ export type ReasonVerdict = {
   confidence: ReasonConfidence;
   /** Chứng từ cụ thể dẫn tới kết luận — để người đọc kiểm chứng được, không phải tin lời. */
   evidence: string;
+  /**
+   * ═══ CHỮ GỐC, NGUYÊN VĂN, KHÔNG CHUẨN HOÁ ═══
+   *
+   * Đây là thứ ĐVVC (hoặc người của shop) THẬT SỰ ghi, chép lại không sửa một ký tự: "Tồn - Khách
+   * từ chối nhận - Không hài lòng về sản phẩm". `reason` chỉ là cách shop XẾP nó vào danh mục.
+   *
+   * Giữ riêng hai thứ này là điều kiện để làm được hai việc mà bản trước không làm được:
+   *
+   *  1. NGƯỜI ĐỌC KIỂM CHỨNG ĐƯỢC. Một ca xếp vào "khách từ chối" mà chữ gốc nói "không hài lòng
+   *     về sản phẩm" là một ca đáng đi hỏi lại — nhưng chỉ thấy được nếu chữ gốc còn đó.
+   *  2. XẾP LẠI ĐƯỢC VỀ SAU. Đổi cách xếp nhóm không cần sửa một dòng lịch sử nào, vì quan sát
+   *     (chữ gốc) và cách xếp (danh mục + nhóm) là hai lớp riêng.
+   *
+   * Rỗng = KHÔNG CÓ CHỨNG TỪ NÀO, khác hẳn với "có chứng từ nhưng không khớp danh mục".
+   */
+  rawReason: string;
   /** `true` = người xác nhận, đè lên suy luận của máy. */
   manual: boolean;
   actorEmail: string;
 };
 
-const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", manual: false, actorEmail: "" };
+const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "" };
 
 /** Phân loại một chuỗi trạng thái ĐVVC. Trả `null` khi chuỗi chỉ là BƯỚC ĐI chứ không phải lý do. */
 export function reasonFromStatusText(statusName: string): ReturnReason | null {
@@ -85,6 +101,7 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
       reason: r,
       confidence: "CARRIER_TEXT",
       evidence: `Sự kiện ĐVVC: “${e.statusName}”`,
+      rawReason: (e.statusName ?? "").trim(),
       manual: false,
       actorEmail: "",
     });
@@ -95,15 +112,24 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
     if (s.code === null || s.code === undefined) continue;
     const r = VTP_REASON_TO_RETURN_REASON[s.code];
     if (!r) continue;
-    out.set(s.id, { reason: r, confidence: "CARRIER_CODE", evidence: `Mã lý do ĐVVC ${s.code}`, manual: false, actorEmail: "" });
+    // Chữ gốc của bậc CHỮ vẫn được giữ khi mã đè lên: hai chứng từ nói về cùng một kiện, mất một
+    // cái là mất đường kiểm chứng xem chúng có mâu thuẫn nhau không.
+    out.set(s.id, { reason: r, confidence: "CARRIER_CODE", evidence: `Mã lý do ĐVVC ${s.code}`, rawReason: out.get(s.id)?.rawReason || `Mã lý do ĐVVC ${s.code}`, manual: false, actorEmail: "" });
   }
 
   // Bậc 1 — người xác nhận. Đè lên tất cả: người vừa gọi cho khách biết nhiều hơn mọi suy luận.
   for (const m of thuCong) {
+    /*
+      NGƯỜI ĐÈ LÊN MÁY, NHƯNG KHÔNG XOÁ CHỨNG TỪ CỦA MÁY.
+
+      `raw_reason` là chữ ĐVVC nói lúc người đó bấm xác nhận (cột ghi từ 0085; dòng cũ để rỗng,
+      KHÔNG backfill). Thiếu nó thì rơi về chữ máy đang đọc được — vẫn không bịa ra gì.
+    */
     out.set(m.shipmentId, {
       reason: m.reason as ReturnReason,
       confidence: "CONFIRMED",
       evidence: m.note ? `${m.actorEmail} xác nhận: ${m.note}` : `${m.actorEmail} xác nhận`,
+      rawReason: (m.rawReason || "").trim() || out.get(m.shipmentId)?.rawReason || "",
       manual: true,
       actorEmail: m.actorEmail,
     });
