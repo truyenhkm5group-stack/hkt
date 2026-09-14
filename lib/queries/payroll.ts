@@ -453,13 +453,27 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained };
 }
 
-/** Nhân sự có phải là người dùng đang đăng nhập không (email khai báo, hoặc trùng tên đầy đủ / tên ngắn) */
+/**
+ * ─────────── NHÂN SỰ NÀY CÓ PHẢI CHÍNH NGƯỜI ĐANG ĐĂNG NHẬP KHÔNG ───────────
+ *
+ * Đây là CỔNG của quyền "Lương: xem của mình": nó quyết định một người thấy dòng lương nào. Nên nó
+ * chỉ được nhận MỘT bằng chứng — LIÊN KẾT TÀI KHOẢN mà quản trị khai đích danh trong hồ sơ nhân sự
+ * (ô "Email đăng nhập ERP"), so khớp ĐÚNG với email phiên đăng nhập.
+ *
+ * VÌ SAO BỎ NHÁNH SO TÊN. Bản cũ, khi email không khớp (hoặc bỏ trống), rơi xuống so TÊN ĐẦY ĐỦ và
+ * TÊN NGẮN đã bỏ dấu. Hai người cùng tên — "Nguyễn Văn Nam" và "Nguyen Van Nam", hay hai nhân sự
+ * cùng tên ngắn "Nam" — là chuyện bình thường ở một shop; ở đây nó thành một người đọc được bảng
+ * lương của người kia. Tên là Ô CHỮ HIỂN THỊ, đổi được bất cứ lúc nào và không ai coi việc đổi tên
+ * hiển thị là một lượt cấp quyền. AGENTS.md mục 34: quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô
+ * chữ; mục 31: mọi nhánh lỗi phải rơi về phía HẸP HƠN.
+ *
+ * Chưa khai email ⇒ KHÔNG khớp ai. Đó là mất quyền xem, không phải lộ dữ liệu — và màn hình nói
+ * thẳng phải làm gì để có lại ("nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự").
+ */
 export function employeeMatchesUser(e: Pick<Employee, "name" | "shortName" | "userEmail">, user: { email: string; name: string }): boolean {
-  const email = (e.userEmail ?? "").trim().toLowerCase();
-  if (email && email === user.email.trim().toLowerCase()) return true;
-  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/\s+/g, " ").trim();
-  const u = norm(user.name || "");
-  return Boolean(u) && (norm(e.name) === u || (Boolean(e.shortName) && norm(e.shortName) === u));
+  const declared = (e.userEmail ?? "").trim().toLowerCase();
+  const signedIn = (user.email ?? "").trim().toLowerCase();
+  return Boolean(declared) && Boolean(signedIn) && declared === signedIn;
 }
 
 export type PayrollLine = {

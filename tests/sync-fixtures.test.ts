@@ -53,7 +53,7 @@ import {
   testSourceVersionIsTracked,
   testTargetResolution,
 } from "./attribution.test";
-import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testScopeDecisions } from "./scope-enforcement.test";
+import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testPayrollOwnLineNeedsAccountKey, testScopeDecisions } from "./scope-enforcement.test";
 import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
 import { testDeployScript } from "./deploy-script.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
@@ -1626,6 +1626,7 @@ async function main() {
   testPositionGrantsNothing();
   testRoleBuilderCannotEscalate();
   testEveryScopedRouteIsGuarded();
+  testPayrollOwnLineNeedsAccountKey();
   testAuthSecretHasNoProdFallback();
   testMetricConfidenceIsAFunction();
   testPeriodKeys();

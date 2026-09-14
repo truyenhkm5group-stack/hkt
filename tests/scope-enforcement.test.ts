@@ -6,6 +6,7 @@ import { schema, type Db } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { decideScope, rowInScope, type ScopeDecision } from "@/lib/auth/scope-guard";
 import { SCOPE_RESOURCES, hasRowOwnership } from "@/lib/constants/data-scope-policy";
+import { employeeMatchesUser } from "@/lib/queries/payroll";
 
 /**
  * ═══════════════ PHẠM VI DỮ LIỆU PHẢI THẬT SỰ CHẶN ═══════════════
@@ -252,4 +253,69 @@ export function testAuthSecretHasNoProdFallback() {
   }
 
   console.log("✓ Khoá ký phiên: production thiếu AUTH_SECRET thì app dừng, không ký bằng khoá công khai trong kho mã");
+}
+
+/**
+ * ═══ "LƯƠNG: XEM CỦA MÌNH" ĐI BẰNG KHOÁ TÀI KHOẢN, KHÔNG BẰNG Ô CHỮ ═══
+ *
+ * `employeeMatchesUser` là CỔNG duy nhất của quyền `payroll:view-own`: nó quyết định người đăng
+ * nhập thấy dòng lương nào ở `/payroll`. Bản cũ, khi email không khớp hoặc bỏ trống, rơi xuống so
+ * TÊN ĐẦY ĐỦ và TÊN NGẮN đã bỏ dấu — nên hai nhân sự cùng tên (hay cùng tên ngắn "Nam") đọc được
+ * bảng lương của nhau, và đổi một ô chữ hiển thị trở thành một lượt cấp quyền.
+ *
+ * AGENTS.md mục 34 (quy kết đi bằng khoá tài khoản) và mục 31 (mọi nhánh lỗi rơi về phía HẸP HƠN).
+ */
+export function testPayrollOwnLineNeedsAccountKey() {
+  const ns = (over: Partial<{ name: string; shortName: string; userEmail: string }>) => ({
+    name: "Nguyễn Văn Nam",
+    shortName: "Nam",
+    userEmail: "",
+    ...over,
+  });
+
+  // ── Bằng chứng DUY NHẤT được chấp nhận: liên kết tài khoản quản trị khai đích danh ──
+  assert.equal(
+    employeeMatchesUser(ns({ userEmail: "nam@shop.vn" }), { email: "nam@shop.vn", name: "Nguyễn Văn Nam" }),
+    true,
+    "email khai đích danh, khớp đúng phiên đăng nhập ⇒ thấy dòng của mình",
+  );
+  assert.equal(
+    employeeMatchesUser(ns({ userEmail: " NAM@Shop.VN " }), { email: "nam@shop.vn", name: "x" }),
+    true,
+    "khoảng trắng và hoa/thường không làm người ta mất quyền xem lương của chính mình",
+  );
+
+  // ── HAI NGƯỜI CÙNG TÊN: đây là ca đã mở cửa cho nhau ở bản cũ ──
+  assert.equal(
+    employeeMatchesUser(ns({ userEmail: "nam.a@shop.vn" }), { email: "nam.b@shop.vn", name: "Nguyễn Văn Nam" }),
+    false,
+    "trùng TÊN ĐẦY ĐỦ nhưng khác tài khoản ⇒ KHÔNG được đọc lương người kia",
+  );
+  assert.equal(
+    employeeMatchesUser(ns({ userEmail: "nam.a@shop.vn" }), { email: "nam.b@shop.vn", name: "Nam" }),
+    false,
+    "trùng TÊN NGẮN cũng không phải bằng chứng",
+  );
+  assert.equal(
+    employeeMatchesUser(ns({ userEmail: "nam.a@shop.vn" }), { email: "nam.b@shop.vn", name: "Nguyen Van Nam" }),
+    false,
+    "bỏ dấu rồi trùng lại càng không — bỏ dấu làm hai cái tên khác nhau trông giống nhau",
+  );
+
+  // ── CHƯA KHAI LIÊN KẾT ⇒ KHÔNG KHỚP AI. Mất quyền xem, không phải lộ dữ liệu. ──
+  assert.equal(employeeMatchesUser(ns({}), { email: "nam@shop.vn", name: "Nguyễn Văn Nam" }), false, "chưa khai email ⇒ không khớp ai, dù tên trùng khít");
+  assert.equal(employeeMatchesUser(ns({ userEmail: "" }), { email: "", name: "Nguyễn Văn Nam" }), false, "phiên không có email cũng không mở được gì");
+
+  /*
+    LÁ CHẮN MÃ NGUỒN: nhánh so tên đã bị bỏ thì không được lặng lẽ quay lại. Hàm này chỉ được
+    chạm tới `userEmail` — chạm tới `name`/`shortName` là dấu hiệu ô chữ đang tham gia tính quyền.
+  */
+  const src = fs.readFileSync(path.resolve(__dirname, "..", "lib/queries/payroll.ts"), "utf8");
+  const than = src.slice(src.indexOf("export function employeeMatchesUser"));
+  const body = than.slice(than.indexOf("{"), than.indexOf("\n}") + 2);
+  for (const oChu of ["e.name", "e.shortName", "user.name"]) {
+    assert.ok(!body.includes(oChu), `employeeMatchesUser không được đọc ô chữ ${oChu} — quyền xem lương đi bằng khoá tài khoản`);
+  }
+
+  console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai");
 }
