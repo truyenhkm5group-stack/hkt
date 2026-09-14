@@ -293,6 +293,82 @@ Sau đó: Actions → "Vận hành ERP trên VPS" → `returns-hmt`, ô `arg` **
 đủ bảng kiểm đếm nguồn + bảng phân loại + ví dụ từng nhóm lỗi. Chỉ khi hai bảng đó đúng mới chạy
 lại với `arg = --apply`.
 
+### 7.2b KIỂM ĐẾM NGUỒN — ĐÃ ĐỌC TỆP THẬT (14/09/2026)
+
+Chủ shop đính kèm thẳng tệp `Bản sao của Hàng hoàn HMT.xlsx` (45.029 byte, sha256
+`c5616055b7f18e7b…`). Đọc bằng **chính bộ đọc của bộ máy** (`readHmtWorkbook`), không phải một
+bản phân tích thứ hai — nên mọi con số dưới đây đúng bằng cái lượt chạy thử sẽ in ra.
+
+**Ba sheet, đúng ba tên đã khai. Không có sheet lạ.**
+
+| | MVĐ hoàn, 1 phần | Chi tiết đơn hoàn | Chi tiết đơn 1 phần |
+|---|---|---|---|
+| vai trò | `TRACKING_INDEX` (chỉ đối chiếu độ phủ) | `FULL_RETURN_ITEMS` (được ghi) | `PARTIAL_RETURN_ITEMS` (được ghi) |
+| vùng khai báo | A1:C834 | A1:C1000 | A1:D1000 |
+| tiêu đề | Ngày vào sl · MVĐ · Trang thái | Mã vận đơn · Sản phẩm · Thời gian trả | Mã vận đơn · Sản phẩm · Thời gian trả |
+| dòng quét | 833 | 999 | 999 |
+| **dòng có dữ liệu** | **833** | **507** | **243** |
+| dòng có mã vận đơn | 833 | 506 | 243 |
+| **mã khác nhau** | **817** | **452** | **222** |
+| mã lặp | 16 | 52 | 19 |
+| **hậu tố 1P1** | **237** | **0** | **220** |
+| ô mã trống | 0 | 55 → kế thừa ô gộp 54, **KHÔNG suy được 1** | 20 → kế thừa 20, không suy được 0 |
+| vùng ô gộp | 0 | 52 | 18 |
+| dòng trùng (mã+sản phẩm) | — | 5 | 5 |
+| dòng không đọc được mã hàng | — | 14 | 9 |
+
+**Phân giải sản phẩm** (`Đầm Q002 / Màu: Đỏ / Size: L` → mã · màu · size):
+
+| | Chi tiết đơn hoàn | Chi tiết đơn 1 phần |
+|---|---|---|
+| mã hàng | Q002×401 · Q003×92 | Q002×210 · Q003×24 |
+| màu | Đỏ×387 · Đen×82 · Xanh×24 | Đỏ×190 · Đen×40 · Xanh×4 |
+| size | L×213 · XL×138 · M×81 · 2XL×75 | L×100 · XL×60 · M×44 · 2XL×39 |
+
+**750 dòng món**, trong đó **727 đọc được cả mã hàng lẫn màu**; 23 dòng không có mã hàng (ví dụ
+dòng 437: `Quần định hình / Size: L` — không có mã, và cũng là dòng duy nhất không suy được mã
+vận đơn).
+
+**Độ phủ giữa ba sheet:**
+
+- sheet tổng 817 mã · hai sheet chi tiết gộp lại **674 mã**;
+- **144 mã có trong sheet tổng nhưng KHÔNG có dòng món nào** ⇒ không ghi nhận được món cho chúng;
+- 1 mã có ở chi tiết mà không có ở sheet tổng;
+- **0 mã xuất hiện ở cả hai sheet chi tiết** — hai sheet tách sạch, không có kiện nào vừa "hoàn
+  toàn phần" vừa "hoàn một phần".
+
+**1P1 tách đúng chiều, và đây là dấu hiệu tệp nhất quán**: sheet "hoàn toàn phần" có **0/452** mã
+mang hậu tố `[số]P[số]`, sheet "một phần" có **220/222**. Dạng mã (`PKE1511614327`,
+`PKE15088979461P1`) khớp đúng dạng `vtp_order_number` trên production.
+
+**Cột "Trạng thái" của sheet tổng RỖNG toàn bộ** (833/833 ô trống) — không mang thông tin nào,
+nên không dùng để kết luận gì.
+
+### 7.2c VÌ SAO LƯỢT CHẠY THẬT VẪN CHƯA XẢY RA
+
+Bộ máy đã sẵn sàng, tệp đã có, nhưng **không có đường truyền tệp từ phiên làm việc này sang máy
+chủ**. Đã thử đủ và ghi lại để lần sau không dò lại:
+
+| đường | kết quả |
+|---|---|
+| `docs.google.com` | chặn ở tầng proxy (403 CONNECT) — và chủ shop cũng đã loại bỏ đường này |
+| `erp.vnxcommerce.com` | chặn ở tầng proxy |
+| ô `arg` của workflow | **cố ý không dùng**: kho mã PUBLIC, ô này hiện công khai trên trang mỗi lần chạy |
+| bí mật kho mã (được che trong log) | môi trường phiên chặn dùng khoá cho lời gọi API ngoài git |
+| commit vào git | chủ shop cấm, và cũng là công khai |
+
+Nên bản này bỏ hẳn phụ thuộc vào link: **`returns-hmt` nay ưu tiên tệp NẰM SẴN trên máy chủ**
+(`/root/hmt/*.xlsx`). Chủ shop chép lên đúng một lần, không cần chia sẻ bảng tính ra ngoài,
+không cần khai biến nào:
+
+```
+scp "Bản sao của Hàng hoàn HMT.xlsx" root@<máy chủ>:/root/hmt/
+```
+
+rồi Actions → "Vận hành ERP trên VPS" → `returns-hmt`, ô `arg` **để trống** (chạy thử) → đọc
+bảng → chạy lại với `arg = --apply`. Lượt chạy in `sha256` của tệp để đối chiếu chạy thử và
+lượt ghi là cùng một bản.
+
 ### 7.3 Nền đối soát — đo sẵn để đọc kết quả chạy thử
 
 | thứ | số đo (14/09/2026) |

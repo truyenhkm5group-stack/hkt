@@ -287,39 +287,67 @@ jobs:
                 # kho" — TỒN KHO KHÔNG ĐỔI MỘT MÓN NÀO (AGENTS.md mục 10: hàng hoàn chỉ vào tồn
                 # khi người kho lập phiếu RETURN với số đếm thực tế).
                 #
-                # TỆP NGUỒN KHÔNG VÀO KHO MÃ VÀ KHÔNG Ở LẠI MÁY CHỦ: tải vào thư mục tạm, chạy,
-                # xoá — kể cả khi lệnh hỏng giữa chừng, nhờ `trap`. Kho mã này PUBLIC (AGENTS.md
-                # mục 5), và một bảng tính hàng hoàn có mã vận đơn của khách thật.
-                if [ -z "${HMT_WORKBOOK_URL:-}" ]; then
-                  echo "::error::Chưa khai biến HMT_WORKBOOK_URL. Vào Settings → Secrets and variables → Actions → tab Variables → New repository variable, tên HMT_WORKBOOK_URL, giá trị là đường dẫn TẢI .xlsx của bảng tính."
-                  echo "Với Google Sheet, đường dẫn tải có dạng: https://docs.google.com/spreadsheets/d/<id>/export?format=xlsx"
-                  echo "Bảng tính phải ở chế độ ai-có-link-cũng-xem-được, vì máy chủ tải bằng một lượt gọi không đăng nhập."
-                  echo "CỐ Ý không nhận đường dẫn qua ô \"arg\": ô đó hiện công khai trên trang lần chạy, và in link vào đó là công bố nó vĩnh viễn."
+                # ─── HAI CÁCH ĐƯA TỆP VÀO, ƯU TIÊN CÁCH KHÔNG CẦN MẠNG ───
+                #
+                #  1. TỆP ĐÃ NẰM SẴN TRÊN MÁY CHỦ ở /root/hmt/*.xlsx (khuyến nghị). Chủ shop chép
+                #     lên đúng một lần:
+                #         scp "Bản sao của Hàng hoàn HMT.xlsx" root@<máy chủ>:/root/hmt/
+                #     Không cần link, không cần chia sẻ bảng tính ra ngoài, không cần khai biến —
+                #     tệp đi thẳng từ máy chủ shop sang máy chủ ERP.
+                #  2. Tải từ `HMT_WORKBOOK_URL` (biến kho mã) nếu thư mục trên trống.
+                #
+                # CẢ HAI ĐƯỜNG ĐỀU KHÔNG NHẬN TỆP QUA Ô "arg": ô đó hiện công khai trên trang của
+                # mỗi lần chạy, mà kho mã này PUBLIC (AGENTS.md mục 5). Đẩy nội dung một bảng tính
+                # hàng hoàn qua đó là công bố nó vĩnh viễn — xoá lần chạy cũng không rút lại được.
+                mkdir -p /root/hmt
+                HMT_LOCAL="$(ls -t /root/hmt/*.xlsx 2>/dev/null | head -1 || true)"
+                if [ -z "$HMT_LOCAL" ] && [ -z "${HMT_WORKBOOK_URL:-}" ]; then
+                  echo "::error::Không tìm thấy bảng tính. Chọn MỘT trong hai cách:"
+                  echo "  (1) KHUYẾN NGHỊ — chép tệp lên máy chủ, một lần:  scp 'Bản sao của Hàng hoàn HMT.xlsx' root@<máy chủ>:/root/hmt/  rồi chạy lại thao tác này."
+                  echo "  (2) Khai biến HMT_WORKBOOK_URL (Settings → Secrets and variables → Actions → Variables) trỏ tới đường dẫn TẢI .xlsx."
+                  echo "CỐ Ý không nhận tệp/đường dẫn qua ô \"arg\": ô đó hiện công khai trên trang lần chạy."
                   exit 1
                 fi
-                # Ô "arg" chỉ còn nhận cờ. Danh sách ĐÓNG để không ai chèn được lệnh vào đây.
+                # Ô "arg" chỉ nhận cờ. Danh sách ĐÓNG để không ai chèn được lệnh vào đây.
                 case "${ARG:-}" in
                   "") HMT_FLAGS="" ;;
                   "--apply") HMT_FLAGS="--apply" ;;
                   *) echo "::error::Ô \"arg\" chỉ nhận rỗng (chạy thử) hoặc --apply. Nhận được: $ARG"; exit 1 ;;
                 esac
                 TMP="$(mktemp -d)"
+                # Chỉ dọn BẢN SAO tạm (thư mục tạm + bản trong container). Tệp gốc ở /root/hmt là
+                # của chủ shop — máy KHÔNG tự xoá tài sản của người khác; in lời nhắc ở cuối.
                 trap 'rm -rf "$TMP"; docker exec erp-app rm -f /tmp/hmt-reconcile.xlsx >/dev/null 2>&1 || true' EXIT
-                # KHÔNG in đường dẫn. Chỉ in kết quả tải được hay không.
-                if ! curl -fsSL --max-time 180 -o "$TMP/hmt.xlsx" "$HMT_WORKBOOK_URL"; then
-                  echo "::error::Không tải được bảng tính từ HMT_WORKBOOK_URL. Kiểm tra biến có đúng đường dẫn TẢI (không phải đường dẫn /edit) và bảng tính đã ở chế độ ai-có-link-cũng-xem-được chưa."
-                  exit 1
+                if [ -n "$HMT_LOCAL" ]; then
+                  # Tệp chủ shop đã chép lên máy chủ. In TÊN TỆP (để biết đang đối soát bản nào),
+                  # không in nội dung.
+                  echo "Nguồn: tệp trên máy chủ · $(basename "$HMT_LOCAL")"
+                  cp "$HMT_LOCAL" "$TMP/hmt.xlsx"
+                else
+                  # KHÔNG in đường dẫn. Chỉ in kết quả tải được hay không.
+                  echo "Nguồn: tải từ biến HMT_WORKBOOK_URL"
+                  if ! curl -fsSL --max-time 180 -o "$TMP/hmt.xlsx" "$HMT_WORKBOOK_URL"; then
+                    echo "::error::Không tải được bảng tính từ HMT_WORKBOOK_URL. Kiểm tra biến có đúng đường dẫn TẢI (không phải đường dẫn /edit) và bảng tính đã ở chế độ ai-có-link-cũng-xem-được chưa."
+                    exit 1
+                  fi
                 fi
                 # Google trả về TRANG ĐĂNG NHẬP kèm HTTP 200 khi bảng tính chưa chia sẻ — `curl -f`
                 # không bắt được. Chữ ký ZIP thì bắt được, và nói đúng nguyên nhân.
                 if [ "$(head -c 2 "$TMP/hmt.xlsx")" != "PK" ]; then
-                  echo "::error::Tệp tải về KHÔNG phải .xlsx (thiếu chữ ký ZIP 'PK'). Nguyên nhân thường gặp nhất: bảng tính chưa được chia sẻ nên Google trả về trang đăng nhập thay vì tệp."
+                  echo "::error::Tệp KHÔNG phải .xlsx (thiếu chữ ký ZIP 'PK'). Nếu tải từ URL: thường là bảng tính chưa được chia sẻ nên Google trả về trang đăng nhập thay vì tệp."
                   exit 1
                 fi
-                echo "Đã tải bảng tính: $(wc -c < "$TMP/hmt.xlsx") byte · sha256 $(sha256sum "$TMP/hmt.xlsx" | cut -c1-16)…"
+                # `sha256` in ra để đối chiếu ĐÚNG BẢN NÀO đã được đối soát — lượt chạy thử và lượt
+                # `--apply` phải cùng một con số, nếu không là đã đổi tệp giữa chừng.
+                echo "Bảng tính: $(wc -c < "$TMP/hmt.xlsx") byte · sha256 $(sha256sum "$TMP/hmt.xlsx" | cut -c1-16)…"
                 docker cp "$TMP/hmt.xlsx" erp-app:/tmp/hmt-reconcile.xlsx
                 fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
-                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS ;;
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS
+                if [ -n "$HMT_LOCAL" ] && [ "$HMT_FLAGS" = "--apply" ]; then
+                  echo ""
+                  echo "▸ Đã ghi xong. Bản sao tạm trong container đã xoá. Tệp gốc vẫn nằm ở $HMT_LOCAL —"
+                  echo "  xoá khi không cần nữa:  ssh root@<máy chủ> 'rm -f \"$HMT_LOCAL\"'"
+                fi ;;
               cs-cleanup)
                 fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;
