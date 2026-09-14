@@ -46,9 +46,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
   }
   // Danh tính nghiệp vụ của gói tin chat là MÃ TIN NHẮN: Pancake đẩy lại cùng một tin thì đây là
   // cùng một sự việc, dù mốc nhận khác nhau.
-  const stored = await storeWebhook("PANCAKE_CHAT", "chat.message", normalized?.message.externalId ?? null, payload, headers, {
-    dedupeKey: webhookDedupeKey("PANCAKE_CHAT", [normalized?.conversation.externalId, normalized?.message.externalId]),
-    occurredAt: normalized?.message.sentAt ?? null,
+  const stored = await storeWebhook("PANCAKE_CHAT", "chat.message", normalized.ok ? normalized.message.externalId : null, payload, headers, {
+    dedupeKey: normalized.ok ? webhookDedupeKey("PANCAKE_CHAT", [normalized.conversation.externalId, normalized.message.externalId]) : null,
+    occurredAt: normalized.ok ? normalized.message.sentAt : null,
   });
 
   after(async () => {
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
     }
   });
 
-  return NextResponse.json({ ok: true, id: stored.id, duplicate: stored.duplicate, recognized: Boolean(normalized) });
+  return NextResponse.json({ ok: true, id: stored.id, duplicate: stored.duplicate, recognized: normalized.ok });
 }
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ secret: string }> }) {
