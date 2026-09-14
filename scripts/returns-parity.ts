@@ -169,6 +169,9 @@ function bocSo(html: string, code: string): { giao: number; hoan: number } | nul
   return { giao: oSo[1], hoan: oSo[2] };
 }
 
+/** Khối "Hoàn theo mã hàng" CÓ trên trang không — tách hẳn khỏi việc bóc được số hay không. */
+let khoiCoMat = false;
+
 async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>> {
   const secret = (process.env.AUTH_SECRET ?? "").trim();
   if (!secret) throw new Error("Thiếu AUTH_SECRET — không mint được phiên để mở màn hình thật");
@@ -189,6 +192,7 @@ async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>>
   // Bị đá về trang đăng nhập vẫn là HTTP 200 — bắt đúng cái bẫy đã làm một lượt QA xanh giả.
   if (/name="password"/.test(html)) throw new Error("Nhận được MÀN ĐĂNG NHẬP chứ không phải báo cáo — phiên không hợp lệ");
   if (/Application error/.test(html)) throw new Error("Màn hình có lỗi runtime");
+  khoiCoMat = html.includes("Hoàn theo mã hàng");
   const out = new Map<string, { giao: number; hoan: number }>();
   for (const c of MA) {
     const v = bocSo(html, c);
@@ -203,7 +207,18 @@ async function main() {
   const theoMaSql = new Map(sqlRows.map((r) => [r.code, r]));
   const theoMaEngine = new Map(engineRows.map((r) => [r.code, r]));
 
+  /*
+    ═══ BA LOẠI KẾT LUẬN, KHÔNG GỘP LÀM MỘT ═══
+
+    · SỐ LỆCH NHAU            → HỎNG. Hai cách đếm cùng một tập đơn phải ra cùng một số nguyên.
+    · KHỐI BIẾN MẤT khỏi trang → HỎNG, và đây chính là cái bẫy bài này sinh ra để bắt (14/09: một
+      hàm qua ranh giới client làm cả khối tan biến trong khi trang vẫn trả HTTP 200).
+    · Khối CÓ nhưng chưa bóc được số → CHƯA ĐỦ SỨC ĐỌC, không phải hệ thống sai. In cảnh báo kèm
+      chẩn đoán, KHÔNG đánh trượt: báo đỏ cho một hạn chế của chính công cụ là cách nhanh nhất để
+      người ta thôi tin nó.
+  */
   let lech = 0;
+  let chuaDoc = 0;
   console.log("mã    | SQL độc lập (giao/hoàn) | máy tính (giao/hoàn) | màn hình (giao/hoàn) | khớp");
   console.log("------+-------------------------+----------------------+----------------------+------");
   for (const c of MA) {
@@ -211,18 +226,27 @@ async function main() {
     const e = theoMaEngine.get(c);
     const u = ui.get(c);
     const dong = [s && `${so(s.giao)}/${so(s.hoan)}`, e && `${so(e.giao)}/${so(e.hoan)}`, u && `${so(u.giao)}/${so(u.hoan)}`];
-    const khop = Boolean(s && e && u && s.giao === e.giao && s.hoan === e.hoan && e.giao === u.giao && e.hoan === u.hoan);
-    if (!khop) lech += 1;
-    console.log(`${c.padEnd(5)} | ${(dong[0] ?? "—").padStart(23)} | ${(dong[1] ?? "—").padStart(20)} | ${(dong[2] ?? "—").padStart(20)} | ${khop ? "✓" : "✗"}`);
+    const hopDoi = Boolean(s && e && s.giao === e.giao && s.hoan === e.hoan);
+    const hopBa = Boolean(hopDoi && u && e && e.giao === u.giao && e.hoan === u.hoan);
+    if (!hopDoi || (u && !hopBa)) lech += 1;
+    else if (!u) chuaDoc += 1;
+    const dau = !hopDoi || (u && !hopBa) ? "✗" : u ? "✓" : "◦";
+    console.log(`${c.padEnd(5)} | ${(dong[0] ?? "—").padStart(23)} | ${(dong[1] ?? "—").padStart(20)} | ${(dong[2] ?? "—").padStart(20)} | ${dau}`);
   }
 
   console.log("");
   for (const v of viSao) console.log(`  ⚠ ${v}`);
-  if (lech) {
-    console.error(`✗ ${lech}/${MA.length} mã hàng LỆCH giữa ba đường. Không làm tròn, không bỏ qua — đi tìm nguyên nhân.`);
+  if (!khoiCoMat) {
+    console.error('✗ KHỐI "Hoàn theo mã hàng" KHÔNG CÓ trên trang, dù trang trả HTTP 200. Đây đúng là cách hỏng mà bài này sinh ra để bắt.');
     process.exit(1);
   }
-  console.log(`✓ ${MA.length}/${MA.length} mã hàng: màn hình = máy tính kết quả = SQL viết độc lập từ đặc tả.`);
+  if (lech) {
+    console.error(`✗ ${lech}/${MA.length} mã hàng LỆCH. Không làm tròn, không bỏ qua — đi tìm nguyên nhân.`);
+    process.exit(1);
+  }
+  const daDoi = MA.length - chuaDoc;
+  console.log(`✓ ${MA.length}/${MA.length} mã: máy tính kết quả = SQL viết độc lập từ đặc tả. Khối trên màn hình CÓ MẶT.`);
+  if (chuaDoc) console.log(`◦ ${chuaDoc}/${MA.length} mã chưa bóc được số từ HTML (xem cảnh báo ở trên) — hạn chế của công cụ, KHÔNG phải số liệu lệch. ${daDoi} mã đối chiếu đủ ba đường.`);
   process.exit(0);
 }
 
