@@ -389,12 +389,23 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   }
   const useDeliveredCogs = basis !== "profit2";
   const nameOf = (id: string | null) => (id ? employees.find((e) => e.id === id) : null);
+  /*
+    BA THỨ KHÁC NHAU, BA CÁI TÊN KHÁC NHAU.
+
+    `id = null`  ⇒ KHÔNG AI nhận phần này — "Chưa gán marketer".
+    `id` có mà không tìm thấy trong sổ nhân sự ⇒ dòng phân công còn trỏ tới một người ĐÃ GỠ khỏi
+    sổ lương. Gọi nó là "Chưa gán marketer" thì hai (hoặc ba) id lạ khác nhau cùng mang một cái
+    tên trên màn hình, và phần doanh thu ấy trông như chưa thuộc về ai trong khi nó ĐANG thuộc về
+    một khoá cụ thể — chỉ là khoá ấy mồ côi. Nêu thẳng id để chủ shop tra được và khai lại.
+  */
+  const labelOf = (id: string | null, emp: Employee | null | undefined) =>
+    emp ? emp.shortName || emp.name : id ? `Nhân sự đã gỡ khỏi sổ lương (${id})` : "Chưa gán marketer";
   const marketers = new Map<string | null, MarketerProfit>();
   const ensure = (id: string | null) => {
     let m = marketers.get(id);
     if (!m) {
       const emp = nameOf(id);
-      m = { marketerId: id, name: emp ? emp.shortName || emp.name : "Chưa gán marketer", adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
+      m = { marketerId: id, name: labelOf(id, emp), adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
       marketers.set(id, m);
     }
     return m;
@@ -904,7 +915,8 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
       let m = rows.get(id);
       if (!m) {
         const emp = id ? employees.find((e) => e.id === id) : null;
-        m = { marketerId: id, name: emp ? emp.shortName || emp.name : "Chưa gán marketer", ownedProducts: [], adSpend: 0, testSpend: 0, otherCost: 0, attributedOrders: 0, attributedRevenue: 0, profitBeforeAds: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, personalNet: 0, products: [] };
+        // Cùng ba trạng thái như `getMarketerReportUncached`: có người · khoá mồ côi · không ai.
+        m = { marketerId: id, name: emp ? emp.shortName || emp.name : id ? `Nhân sự đã gỡ khỏi sổ lương (${id})` : "Chưa gán marketer", ownedProducts: [], adSpend: 0, testSpend: 0, otherCost: 0, attributedOrders: 0, attributedRevenue: 0, profitBeforeAds: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, personalNet: 0, products: [] };
         rows.set(id, m);
       }
       return m;
