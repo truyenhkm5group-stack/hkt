@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { env, integrationStatus } from "@/lib/env";
+import { aiEnv } from "@/lib/ai/config";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
 import { HEALTH_LABEL, HEALTH_TONE, getIntegrationHealth } from "@/lib/queries/integration-health";
@@ -64,6 +65,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const pancakeWebhookUrl = `${appUrl}/api/webhooks/pancake/${env.pancake.webhookSecret || "<PANCAKE_WEBHOOK_SECRET>"}`;
   const vtpWebhookUrl = `${appUrl}/api/webhooks/viettelpost`;
   const vtpStatementMailUrl = `${appUrl}/api/webhooks/vtp-statement`;
+  const chatWebhookUrl = `${appUrl}/api/webhooks/pancake-chat/${aiEnv.chatWebhookSecret || "<PANCAKE_CHAT_WEBHOOK_SECRET>"}`;
   const isLocal = /localhost|127\.0\.0\.1|^http:\/\//.test(appUrl);
   const backfillDays = backfill?.days ?? env.pancake.backfillDays;
   const backfillProgress = (() => {
@@ -211,12 +213,14 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             { label: "Access token", value: status.pancakePages ? <span className="font-mono">{maskKey(env.pancake.pagesAccessToken)}</span> : <span className="text-muted-foreground">Chưa cấu hình PANCAKE_ACCESS_TOKEN</span> },
             { label: "Base URL", value: <span className="font-mono text-xs">{env.pancake.pagesBaseUrl}</span> },
             { label: "Lịch", value: `Mỗi ${minutesEnv("SYNC_CHAT_EVERY_MINUTES", 15)} phút · đọc hội thoại 48 giờ gần nhất` },
+            { label: "Webhook hội thoại (nhân sự AI)", value: aiEnv.chatWebhookSecret ? <span className="font-mono">{maskKey(aiEnv.chatWebhookSecret)}</span> : <span className="text-muted-foreground">Chưa đặt PANCAKE_CHAT_WEBHOOK_SECRET</span> },
             { label: "Cách lấy token", value: <span className="text-xs text-muted-foreground">pancake.vn → Cài đặt → Công cụ (Tools) → API / Access token → sao chép token người dùng có quyền trên các page bán hàng.</span>, span: true },
           ]}
           footer={
             <div className="flex flex-wrap gap-2">
               <TestConnectionButton provider="pancake-pages" disabled={!status.pancakePages} />
               <SyncButton job="cs-chat" label="Quét hội thoại ngay" />
+              <SyncButton job="ai-sales-ingest" label="Nạp hội thoại cho nhân sự AI" />
             </div>
           }
         />
@@ -385,6 +389,19 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               "Dán URL bên trên vào ô Webhook URL.",
               "Tick các sự kiện: Đơn hàng / Khách hàng / Tồn kho (variations_warehouses).",
               "Bấm Lưu. Tạo thử một đơn trên Pancake và kiểm tra bảng “Webhook đã nhận” bên dưới.",
+            ]}
+          />
+          <WebhookGuide
+            title="Pancake — hội thoại (nhân sự AI)"
+            url={chatWebhookUrl}
+            configured={Boolean(aiEnv.chatWebhookSecret)}
+            received={webhookCount("PANCAKE_CHAT")}
+            warning={!aiEnv.chatWebhookSecret ? "Đặt PANCAKE_CHAT_WEBHOOK_SECRET trong .env rồi thay vào cuối URL. Chưa đặt thì webhook trả 401 — đóng, không phải mở toang." : null}
+            steps={[
+              "Đường này TÁCH RIÊNG khỏi webhook đơn hàng: hội thoại là tính năng mới, không được đặt chung ống với dữ liệu đơn hàng đang nuôi mọi báo cáo.",
+              "Pancake (pages.fm) → Cấu hình page → Webhook / Kết nối bên thứ 3 → thêm URL bên trên cho sự kiện tin nhắn mới.",
+              "Không cấu hình được webhook chat thì vẫn chạy được: job “Nạp hội thoại Pancake cho nhân viên bán hàng AI” đọc bù qua Pages API, chống trùng nằm ở tầng dữ liệu nên hai đường chạy song song vô hại.",
+              "Ở nấc chạy ngầm, tin nhắn vào chỉ sinh ra GỢI Ý trong ERP — không câu nào được gửi cho khách.",
             ]}
           />
           <WebhookGuide

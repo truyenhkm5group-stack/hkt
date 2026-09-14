@@ -20,6 +20,8 @@ import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
+import { syncSalesConversations } from "@/lib/ai/agents/sales/ingest";
+import { drainSalesTasks } from "@/lib/ai/agents/sales/pipeline";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import type { SyncTrigger } from "@/lib/sync/runner";
@@ -181,6 +183,23 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const recheck = await runCanonicalBackfill({ apply: false, batchSize: num(o.params?.batch), resume: o.params?.resume === "1", actor: o.actor });
       return { mode: "GHI THAT", ...applied, idempotent: recheck.changed === 0, stillDrifted: recheck.changed };
     },
+  },
+  "ai-sales-ingest": {
+    label: "Nạp hội thoại Pancake cho nhân viên bán hàng AI",
+    source: "PANCAKE",
+    description:
+      "Đọc hội thoại & tin nhắn Pancake (PANCAKE_ACCESS_TOKEN) trong N giờ gần nhất (hours=6) → ghi vào miền bán hàng của ERP và tạo việc cho nhân sự AI. Chống trùng ở tầng dữ liệu nên chạy song song với webhook chat vẫn an toàn. Ở nấc SHADOW chỉ sinh GỢI Ý, không gửi gì cho khách.",
+    run: async (o) => {
+      const ingested = await syncSalesConversations({ hours: num(o.params?.hours), limit: num(o.params?.limit) });
+      const ran = await drainSalesTasks(num(o.params?.batch) ?? 50);
+      return { ingested, ran };
+    },
+  },
+  "ai-sales-run": {
+    label: "Chạy nhân viên bán hàng AI cho việc đang chờ",
+    source: "PANCAKE",
+    description: "Lấy các việc đang chờ trong hàng đợi nhân sự AI và chạy dây chuyền bán hàng. Không tự nạp hội thoại mới. Dùng khi webhook đã ghi việc nhưng dây chuyền chưa chạy xong.",
+    run: (o) => drainSalesTasks(num(o.params?.batch) ?? 50),
   },
   "outreach-build": {
     label: "Lập danh sách chăm sóc khách & bán chéo",

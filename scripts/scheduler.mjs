@@ -23,6 +23,10 @@ const JOBS = [
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới
   { job: "landing-sheet", every: minutes("SYNC_LANDING_EVERY_MINUTES", 10), offset: 8.5 }, // đầy đủ: ghép lại theo SĐT, cập nhật dòng đã sửa
+  // NHÂN SỰ AI — CỐ Ý CHƯA BẬT. Đổi lịch chạy là việc phải hỏi chủ shop (AGENTS.md §7), và ở nấc
+  // chạy ngầm job này tốn thêm lượt gọi Pancake Pages mà chưa mang lại gì cho vận hành hằng ngày.
+  // Bật bằng cách bỏ dấu chú thích dòng dưới; webhook hội thoại vẫn chạy độc lập không cần job này.
+  // { job: "ai-sales-ingest", every: minutes("SYNC_AI_SALES_EVERY_MINUTES", 10), offset: 9 },
 ];
 
 const DAILY = [

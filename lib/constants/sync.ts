@@ -37,6 +37,7 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
 
 export const SYNC_SOURCE_LABEL: Record<string, string> = {
   PANCAKE: "Pancake POS",
+  PANCAKE_CHAT: "Pancake — hội thoại",
   VIETTELPOST: "Viettel Post",
   FACEBOOK: "Facebook Ads",
   ALL: "Tất cả",
