@@ -15,6 +15,38 @@
 # nên bước `validate` ở trên là thứ biến "chắc là ổn" thành "đã kiểm".
 #
 # Quay lui: xoá khối này khỏi /etc/caddy/Caddyfile rồi reload lại.
+#
+# ═══ ĐỊA CHỈ ĐÍCH: KHÔNG PHẢI 127.0.0.1 ═══
+#
+# Caddy chạy TRONG container `erp-caddy`, nên `127.0.0.1` ở đây là chính container ấy, không phải
+# máy chủ. Khối production trỏ `app:3000` được là vì `app` và `caddy` cùng một compose project nên
+# cùng một mạng Docker — bản chạy thử là project KHÁC, mạng khác, không phân giải được tên đó.
+#
+# Ba đường, và lý do chỉ chọn đường thứ nhất:
+#
+#   1. ĐỊA CHỈ CỔNG (gateway) CỦA MẠNG BRIDGE — bản chạy thử đã publish `127.0.0.1:3100` trên máy
+#      chủ, và container nhìn thấy máy chủ qua địa chỉ cổng của mạng nó đang nối. ĐO nó, đừng đoán:
+#
+#        docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' erp-caddy
+#
+#      Thường là 172.x.0.1. Thay vào dòng `reverse_proxy` bên dưới. Không sửa gì của production.
+#
+#      Kèm điều kiện: cổng 3100 đang chỉ nghe trên 127.0.0.1 nên container KHÔNG với tới được. Phải
+#      đổi `docker-compose.staging.yml` thành `"<địa chỉ cổng>:3100:3000"` rồi `up -d` LẠI BẢN CHẠY
+#      THỬ (không đụng production). Đừng đổi thành `0.0.0.0:3100` — thế là mở thẳng ra Internet,
+#      bỏ qua cả Caddy lẫn mật khẩu.
+#
+#   2. Nối `erp-caddy` vào mạng của bản chạy thử. LÀM ĐƯỢC nhưng phải `docker network connect` vào
+#      một container ĐANG PHỤC VỤ KHÁCH, và từ đó hai ngăn xếp dính nhau — gỡ bản chạy thử sẽ phải
+#      nhớ gỡ cả mạng. Không đáng.
+#
+#   3. Thêm `extra_hosts: host.docker.internal:host-gateway` cho service caddy. Phải sửa
+#      `docker-compose.prod.yml` và DỰNG LẠI container Caddy — tức làm đứt tên miền production một
+#      nhịp. Loại.
+#
+# Và vì cả ba đường đều động vào một thứ gì đó, GIAI ĐOẠN NÀY KHUYÊN KHÔNG DÙNG CADDY: đường hầm
+# SSH (`ssh -L 3100:127.0.0.1:3100`) cho đúng kết quả, không sửa một dòng cấu hình nào của
+# production, và không mở thêm một bề mặt nào ra Internet.
 
 ai-staging.vnxcommerce.com {
 	encode gzip zstd
@@ -25,7 +57,9 @@ ai-staging.vnxcommerce.com {
 		staging $2a$14$THAY_BANG_CHUOI_BAM_THAT
 	}
 
-	reverse_proxy 127.0.0.1:3100 {
+	# THAY bằng địa chỉ cổng mạng bridge ĐO ĐƯỢC ở phần đầu tệp — `127.0.0.1` ở trong container
+	# Caddy là chính nó, không phải máy chủ.
+	reverse_proxy 172.17.0.1:3100 {
 		# SSE realtime (/api/events) cần giữ kết nối lâu — giống cấu hình của production
 		flush_interval -1
 		transport http {

@@ -15,6 +15,11 @@ PORT="${STAGING_PORT:-3100}"
 BRANCH="${STAGING_BRANCH:-claude/ai-workforce-sales-v1}"
 REPO="${STAGING_REPO:-https://github.com/truyenhkm5group-stack/hkt.git}"
 COMPOSE="docker compose -f docker-compose.staging.yml --env-file .env.staging"
+# Cờ DUY NHẤT của script, và nó chỉ NỚI một việc: dựng ảnh tại chỗ. Không có cờ nào bỏ qua kiểm
+# tra an toàn — một cờ như thế sẽ được dùng đúng vào lúc không nên dùng.
+BUILD_HERE=0
+for a in "$@"; do [ "$a" = "--build-here" ] && BUILD_HERE=1; done
+export STAGING_IMAGE="${STAGING_IMAGE:-}"
 
 say() { printf '%s\n' "$*"; }
 
@@ -58,8 +63,31 @@ else
 fi
 
 say ""
-say "═════════ BƯỚC 4/5 · DỰNG VÀ KHỞI ĐỘNG ═════════"
-$COMPOSE up -d --build
+say "═════════ BƯỚC 4/5 · LẤY ẢNH VÀ KHỞI ĐỘNG ═════════"
+#
+# MẶC ĐỊNH KHÔNG DỰNG TRÊN MÁY NÀY. VPS có 1.963 MB RAM / 949 MB khả dụng / SWAP 0 (đo 14/09/2026);
+# `next build` ở đó nhiều khả năng làm nhân OOM giết container production. Ảnh dựng sẵn ở workflow
+# "Dựng ảnh bản chạy thử nhân sự AI" rồi kéo về — thao tác cần vài trăm MB thay vì vài GB.
+if [ "$BUILD_HERE" = "1" ]; then
+  say "⚠ --build-here: DỰNG ẢNH NGAY TRÊN MÁY NÀY. Chỉ làm khi kiểm tra an toàn ở bước 1 báo đủ RAM."
+  $COMPOSE build
+elif [ -n "${STAGING_IMAGE:-}" ]; then
+  say "Kéo ảnh $STAGING_IMAGE …"
+  docker pull "$STAGING_IMAGE"
+elif docker image inspect vnx-ai-staging-app:local >/dev/null 2>&1; then
+  say "Dùng ảnh vnx-ai-staging-app:local đã có sẵn trên máy."
+else
+  say "✗ CHƯA CÓ ẢNH để chạy, và script này KHÔNG tự dựng trên máy chủ."
+  say ""
+  say "  Cách đúng (dựng ở nơi có RAM, VPS chỉ kéo về):"
+  say "    1. GitHub → Actions → \"Dựng ảnh bản chạy thử nhân sự AI\" → Run workflow"
+  say "    2. STAGING_IMAGE=ghcr.io/truyenhkm5group-stack/hkt-ai-staging:latest bash $0"
+  say ""
+  say "  Nếu CHẮC CHẮN máy này đủ RAM (kiểm tra an toàn ở bước 1 đã nói), dựng tại chỗ bằng:"
+  say "    bash $0 --build-here"
+  exit 1
+fi
+$COMPOSE up -d
 say "Đợi CSDL và ứng dụng sẵn sàng…"
 for i in $(seq 1 60); do
   if curl -fsS -m 5 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null | grep -q '"ok":true'; then

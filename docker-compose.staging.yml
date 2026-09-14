@@ -38,10 +38,21 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   app:
+    # ẢNH DỰNG SẴN, KHÔNG DỰNG TRÊN VPS.
+    #
+    # Đo ngày 14/09/2026: VPS có 1.963 MB RAM, 949 MB khả dụng, SWAP = 0, 2 lõi. `next build` cần
+    # hơn thế, và kho mã này đã ghi hai lượt deploy chết vì SIGKILL khi hai `next build` chạy cùng
+    # lúc trên chính máy ấy. Dựng ảnh của bản chạy thử ngay cạnh production đang phục vụ khách là
+    # đặt cược cửa hàng vào một lượt build — nên ảnh được dựng ở máy chạy GitHub (7 GB RAM, không
+    # phục vụ ai) rồi VPS chỉ `docker pull`.
+    #
+    # `build: .` vẫn giữ làm đường lùi cho máy dư RAM (máy của lập trình viên), nhưng `staging-up.sh`
+    # KHÔNG tự dựng: phải gõ `--build-here`, và `staging-preflight.sh` chặn nếu RAM không đủ.
+    #
+    # TÊN ẢNH mặc định khai rõ để không bao giờ đụng `erp-app:local` của production — trùng tên ảnh
+    # là một lần `up --build` của bên này ghi đè ảnh mà container bên kia đang chạy.
+    image: ${STAGING_IMAGE:-vnx-ai-staging-app:local}
     build: .
-    # TÊN IMAGE khai rõ, không để compose tự đặt: production dùng `erp-app:local`, và một lần
-    # trùng tên image là một lần `docker compose up` của bên này ghi đè image bên kia đang chạy.
-    image: vnx-ai-staging-app:local
     container_name: vnx-ai-staging-app
     restart: unless-stopped
     env_file: .env.staging

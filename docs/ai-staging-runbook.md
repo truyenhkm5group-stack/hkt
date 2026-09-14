@@ -12,7 +12,8 @@
 | Tệp | Việc của nó |
 |---|---|
 | `scripts/staging-preflight.sh` | **Chỉ đọc.** Chụp hiện trạng production rồi kiểm 7 lớp va chạm. Thoát 1 = DỪNG. |
-| `scripts/staging-up.sh` | Dựng bản chạy thử. Gọi preflight trước và **không có cờ nào bỏ qua nó**. |
+| `scripts/staging-up.sh` | Dựng bản chạy thử. Gọi preflight trước và **không có cờ nào bỏ qua nó**. Mặc định KÉO ảnh, không dựng. |
+| `.github/workflows/ai-staging-image.yml` | Dựng ảnh ở máy chạy GitHub rồi đẩy lên GHCR — VPS không đủ RAM để `next build`. |
 | `docker-compose.staging.yml` | Ngăn xếp riêng: project `vnx-ai-staging`, 2 container, volume riêng, cổng localhost. |
 | `.env.staging.example` | Mẫu tệp môi trường. Toàn giá trị rỗng — `.env.staging` thật nằm trong `.gitignore`. |
 | `deploy/Caddyfile.ai-staging` | Khối Caddy cho tên miền công khai. **Chưa áp dụng**, và chỉ áp dụng ở mục 8. |
@@ -42,6 +43,49 @@ Ba điều phải biết đi kèm:
    cho hệ này mà đọc chung thì hệ kia hiểu sai, và cái sai ấy im lặng. Không khai biến riêng thì
    `AI_PROVIDER` chỉ được nhận khi nó là tên nhà cung cấp mà nhân sự AI thật sự có, còn lại rơi về
    `stub` (không gọi mạng).
+
+## 0.2 Số đo VPS ngày 14/09/2026, và điều nó quyết định
+
+Đọc read-only qua workflow **Vận hành ERP trên VPS** (`status` · `disk` · `perf`), không chạm gì:
+
+| | Số đo |
+|---|---|
+| Container production | `erp-app` · `erp-db` (healthy, 8 ngày) · `erp-scheduler` · `erp-caddy` (10 ngày) |
+| Cổng publish ra máy chủ | **chỉ Caddy**: 80, 443 (tcp+udp). `erp-app` và `erp-db` chỉ `expose`, không publish |
+| Ảnh | `erp-app:local` 2,81 GB · `postgres:16-alpine` · `caddy:2-alpine` |
+| Tên miền trong Caddyfile | **một khối duy nhất**: `{$ERP_DOMAIN}` = `erp.vnxcommerce.com` |
+| Thư mục triển khai | `/root/erp` (74 MB) ⇒ compose project `erp` ⇒ volume `erp_erp_pgdata` |
+| Đĩa | 39 GB tổng, **28 GB trống** (30% dùng). Docker 5,9 GB ảnh + 2,3 GB đệm build |
+| **RAM** | **1.963 MB tổng · 949 MB khả dụng · SWAP = 0** |
+| CPU | **2 lõi**, load 1,05 / 1,41 / 1,51 |
+| Sức khoẻ | `{"ok":true, commit 38ca351a2c8d, branch main}` |
+
+**Không có va chạm danh tính nào.** Tên container, tên ảnh, tên project, volume, cổng 3100 và tên
+miền `ai-staging` đều trống. Đĩa cũng thừa.
+
+**Nhưng RAM thì không.** 949 MB khả dụng, **không có swap**, và `next build` của kho mã này cần hơn
+thế nhiều — chính kho mã đã ghi hai lượt deploy chết vì SIGKILL khi có hai `next build` chạy cùng
+lúc trên đúng máy này (#208, #227). Không swap nghĩa là nhân không có đệm: nó giết tiến trình lớn
+nhất, và tiến trình lớn nhất đang là ERP phục vụ khách.
+
+Nên bộ dựng này **không dựng ảnh trên VPS**:
+
+1. Ảnh dựng ở máy chạy GitHub (7 GB RAM, không phục vụ ai) qua workflow **Dựng ảnh bản chạy thử
+   nhân sự AI**, đẩy lên GHCR. Workflow ấy chạy `tsc --noEmit` và `npm test` trước khi đẩy — một
+   ảnh chạy thử dựng từ mã chưa qua kiểm thử thì mọi con số đo trên nó đều vô nghĩa.
+2. VPS chỉ `docker pull` rồi `up -d`: vài trăm MB thay vì vài GB.
+3. `staging-preflight.sh` vẫn chặn nếu RAM khả dụng < 1.200 MB hoặc đĩa trống < 8 GB.
+4. `staging-up.sh --build-here` là đường lùi cho máy dư RAM (máy lập trình viên), không phải cho VPS.
+
+**Còn một quyết định của chủ shop.** Kể cả khi không dựng ảnh, chạy thêm hai container (ứng dụng
+~255 MB + Postgres ~230 MB, đo theo chính production) là thêm khoảng **485 MB** vào một máy còn
+949 MB và không có swap. Ba lựa chọn:
+
+| | Việc phải làm | Rủi ro với production |
+|---|---|---|
+| **A. Thêm swap 2 GB rồi dựng** (khuyến nghị) | `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`, ghi vào `/etc/fstab` | Thấp — swap là đệm, không đụng container nào |
+| **B. Dựng thẳng, không thêm swap** | chạy `staging-up.sh` luôn | **Thật** — hết RAM thì nhân giết tiến trình lớn nhất, và đó đang là ERP |
+| **C. Nâng VPS lên 4 GB** | nhà cung cấp, có khởi động lại | Một nhịp gián đoạn có kế hoạch |
 
 ## 1. Danh tính tách khỏi production
 
@@ -205,6 +249,24 @@ cat mau.json | $COMPOSE exec -T app npm run ai:size-rules -- --stdin --apply    
 
 Script kiểm bằng zod, đối chiếu mã sản phẩm/mẫu mã với ERP, cảnh báo khi hai size khai dải trùng
 nhau, và tự thử một phép gợi ý ở giữa dải trước khi ghi.
+
+## 7b. Đúng một lệnh khi đã được duyệt
+
+```bash
+# 1. GitHub → Actions → "Dựng ảnh bản chạy thử nhân sự AI" → Run workflow  (nhánh claude/ai-workforce-sales-v1)
+#    Workflow chạy typecheck + npm test rồi đẩy ghcr.io/truyenhkm5group-stack/hkt-ai-staging:latest
+
+# 2. Trên VPS — một lệnh, và nó tự chạy kiểm tra an toàn trước, tự dừng nếu có va chạm:
+STAGING_IMAGE=ghcr.io/truyenhkm5group-stack/hkt-ai-staging:latest \
+  bash <(curl -fsSL https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/claude/ai-workforce-sales-v1/scripts/staging-up.sh)
+```
+
+Lệnh ấy: chạy `staging-preflight.sh` (7 lớp va chạm + RAM + đĩa) → tải mã về `/opt/vnx-ai-staging`
+→ sinh bí mật tại chỗ bằng `openssl` vào `.env.staging` quyền 600 → kéo ảnh → `up -d` → đợi
+`/api/health` → in trạng thái bản chạy thử VÀ kiểm lại sức khoẻ production.
+
+Nếu gói GHCR để riêng tư, VPS phải đăng nhập một lần trước:
+`echo <token read:packages> | docker login ghcr.io -u <tài khoản> --password-stdin`
 
 ## 8. Tên miền công khai — chỉ sau khi localhost đã xanh
 

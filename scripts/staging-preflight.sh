@@ -131,6 +131,37 @@ else
 fi
 case "$DIR" in /root/erp|/root/erp/*) bad "thư mục $DIR NẰM TRONG thư mục production";; *) ok "thư mục nằm ngoài /root/erp";; esac
 
+# 6b. TÀI NGUYÊN MÁY — lớp chặn quan trọng nhất, và là lớp duy nhất bảo vệ production khỏi chính
+#     lượt dựng này. Bản chạy thử phải chạy `next build`, và trên VPS nhỏ thì một lượt build thứ hai
+#     song song với ứng dụng đang phục vụ khách là đúng cách bị nhân OOM giết (deploy #208, #227 đã
+#     chết vì hai `next build` chạy cùng lúc). Hết đĩa cũng đã giết một lượt deploy (sự cố #242).
+#
+#     Ngưỡng: 1200 MB khả dụng (RAM trống + đệm thu hồi được) và 8 GB đĩa trống. Dưới ngưỡng thì
+#     DỪNG — chờ lúc vắng khách, hoặc dọn `docker system prune` trước.
+MEM_MIN_MB="${STAGING_MIN_MEM_MB:-1200}"
+DISK_MIN_GB="${STAGING_MIN_DISK_GB:-8}"
+
+say ""
+say "── Tài nguyên máy ──"
+if command -v free >/dev/null 2>&1; then
+  free -m | sed 's/^/  /'
+  KHA_DUNG="$(free -m | awk '/^Mem:/ {print ($7 != "" ? $7 : $4)}')"
+  if [ -n "$KHA_DUNG" ] && [ "$KHA_DUNG" -lt "$MEM_MIN_MB" ] 2>/dev/null; then
+    bad "chỉ còn ${KHA_DUNG} MB RAM khả dụng (cần ≥ ${MEM_MIN_MB} MB) — dựng bây giờ có thể làm OOM giết container production"
+  else
+    ok "RAM khả dụng ${KHA_DUNG:-?} MB ≥ ${MEM_MIN_MB} MB"
+  fi
+else
+  warn "không có lệnh free — không đo được RAM, tự kiểm bằng tay trước khi dựng"
+fi
+
+TRONG_GB="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
+if [ -n "$TRONG_GB" ] && [ "$TRONG_GB" -lt "$DISK_MIN_GB" ] 2>/dev/null; then
+  bad "chỉ còn ${TRONG_GB} GB đĩa trống (cần ≥ ${DISK_MIN_GB} GB cho ảnh + đệm build + CSDL riêng)"
+else
+  ok "đĩa trống ${TRONG_GB:-?} GB ≥ ${DISK_MIN_GB} GB"
+fi
+
 # 7. Production còn khoẻ không — để so sánh lại sau khi dựng
 say ""
 say "── Sức khoẻ production TRƯỚC khi dựng bản chạy thử ──"
