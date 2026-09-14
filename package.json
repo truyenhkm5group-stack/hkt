@@ -22,7 +22,10 @@
     "import:vtp-statements": "tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts",
     "set:setting": "tsx --tsconfig tsconfig.json scripts/set-setting.ts",
     "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "ai:ingest": "tsx --tsconfig tsconfig.json scripts/ai-sales-ingest.ts",
+    "ai:size-rules": "tsx --tsconfig tsconfig.json scripts/import-size-rules.ts",
+    "ai:probe": "tsx --tsconfig tsconfig.json scripts/pancake-chat-probe.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

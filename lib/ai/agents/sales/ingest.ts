@@ -419,11 +419,16 @@ function toNormalizedMessage(m: PancakeMessage): NormalizedMessage {
  * Job nạp bù: đọc hội thoại cập nhật trong N giờ gần nhất qua Pages API.
  * Chạy được song song với webhook vì chống trùng nằm ở tầng dữ liệu.
  */
-export async function syncSalesConversations(options: { hours?: number; limit?: number } = {}) {
+export async function syncSalesConversations(
+  options: { hours?: number; limit?: number; pageId?: string; maxConversations?: number } = {},
+) {
   const settings = await getAiSettings();
-  if (!settings.enabled || !settings.ingestEnabled) return { skipped: true, reason: "Nạp hội thoại đang tắt", conversations: 0, messages: 0, events: 0 };
+  if (!settings.enabled || !settings.ingestEnabled) return { skipped: true, reason: "Nạp hội thoại đang tắt", conversations: 0, messages: 0, events: 0, pages: [] as string[], errors: [] as string[] };
   const hours = Math.min(Math.max(options.hours ?? 6, 1), 24 * 7);
   const limit = Math.min(Math.max(options.limit ?? 60, 1), 300);
+  // TRẦN CỨNG số hội thoại xử lý trong một lượt. Lần chạy thử đầu tiên phải NHỎ: nạp cả tài khoản
+  // rồi mới phát hiện ánh xạ sai là dọn dẹp hàng nghìn dòng, còn nạp 20 hội thoại thì đọc hết bằng mắt.
+  const maxConversations = Math.min(Math.max(options.maxConversations ?? 1_000, 1), 1_000);
   const db = await getDb();
   const client = getPancakePagesClient();
   const until = new Date();
@@ -433,7 +438,12 @@ export async function syncSalesConversations(options: { hours?: number; limit?: 
   let events = 0;
   const errors: string[] = [];
 
-  const pages = await client.listPages();
+  const allPages = await client.listPages();
+  // Chọn ĐÚNG MỘT page khi được chỉ định. Lần chạy thử đầu tiên chỉ nên chạm vào một page.
+  const pages = options.pageId ? allPages.filter((p) => p.id === options.pageId) : allPages;
+  if (options.pageId && !pages.length) {
+    return { skipped: true, reason: `Không thấy page ${options.pageId} trong các page đọc được`, conversations: 0, messages: 0, events: 0, pages: allPages.map((p) => p.id), errors: [] as string[] };
+  }
   for (const page of pages) {
     let conversationList: Awaited<ReturnType<typeof client.listConversations>> = [];
     try {
@@ -445,6 +455,7 @@ export async function syncSalesConversations(options: { hours?: number; limit?: 
       continue;
     }
     for (const conversation of conversationList) {
+      if (conversations >= maxConversations) break;
       conversations += 1;
       try {
         const fetched = await client.listMessages(page.id, conversation.id, conversation.customerId, 30);
@@ -475,5 +486,5 @@ export async function syncSalesConversations(options: { hours?: number; limit?: 
       }
     }
   }
-  return { skipped: false, hours, conversations, messages, events, errors: errors.slice(0, 20) };
+  return { skipped: false, hours, conversations, messages, events, pages: pages.map((p) => p.id), errors: errors.slice(0, 20) };
 }
