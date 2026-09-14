@@ -297,6 +297,18 @@ export async function testReasonDenominatorsAndFilters(db: Db) {
   */
   const nhomCoCa = tatCa.groups.filter((g) => g.count > 0);
   const tongTyTrong = nhomCoCa.reduce((n, g) => n + g.share, 0);
+  /*
+    ─── BA PHẦN ĐỘ PHỦ PHẢI CỘNG LẠI ĐÚNG BẰNG HAI PHẦN CŨ ───
+
+    `known` + `rawOnly` + `noEvidence` = tổng đơn hoàn, và `rawOnly` + `noEvidence` = `unknown`.
+    Hai phép đếm ấy chạy trên hai vòng lặp khác nhau; lệch nhau là màn hình nói một đằng mà mẫu số
+    của bảng phía dưới nói một nẻo — và không ai đối chiếu hai con số ở hai khối khác nhau.
+  */
+  const dp = tatCa.reasonCoverage;
+  assert.equal(dp.rawOnly + dp.noEvidence, dp.unknown, "hai phần chưa biết phải cộng lại đúng bằng tổng chưa biết");
+  assert.equal(dp.known + dp.unknown, tatCa.returned, "độ phủ phải phủ kín ĐÚNG tập đơn hoàn, không thừa không thiếu");
+  assert.ok(dp.rawOnly >= 0 && dp.noEvidence >= 0, "không phần nào được âm");
+
   if (tatCa.reasonCoverage.known > 0) {
     assert.ok(Math.abs(tongTyTrong - 100) < 0.5, `tỷ trọng của các nhóm phải cộng lại đúng 100% trên ca ĐÃ BIẾT lý do, đang là ${tongTyTrong.toFixed(1)}%`);
   }
