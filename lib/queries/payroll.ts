@@ -15,7 +15,7 @@ import {
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
-import { distributeProportionally } from "@/lib/constants/cost-allocation";
+import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -467,11 +467,21 @@ export type PayrollLine = {
   totalProfit: number;
   personalProfit: number | null;
   personalRevenue: number | null;
-  fixed: number;
+  /** Lương cứng KHAI BÁO mỗi tháng — con số trong hồ sơ nhân sự, không phụ thuộc kỳ đang xem. */
+  fixedMonthly: number;
+  /**
+   * Lương cứng THUỘC KỲ ĐANG XEM, chia theo số ngày chồng lấn của từng tháng
+   * (`prorateMonthlyAmount`, AGENTS.md mục 14 và 16 — lương cố định đi theo THỜI GIAN).
+   *
+   * `null` = kỳ KHÔNG có mốc đầu/cuối ("Toàn bộ") nên không chia theo ngày được. CHƯA BIẾT, không
+   * phải 0 (AGENTS.md mục 42).
+   */
+  fixed: number | null;
   bonusTotal: number;
   bonusPersonal: number;
   bonusRevenue: number;
-  salary: number;
+  /** `null` khi `fixed` chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
+  salary: number | null;
 };
 
 export type PayrollReport = {
@@ -482,7 +492,13 @@ export type PayrollReport = {
   /** Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi cơ sở danh nghĩa) */
   cashRatio: number;
   lines: PayrollLine[];
-  totalSalary: number;
+  /** `null` khi lương cứng của kỳ chưa biết — xem `PayrollLine.fixed`. */
+  totalSalary: number | null;
+  /**
+   * CĂN CỨ CHIA LƯƠNG CỨNG, để màn hình nói được vì sao cột "lương cứng" không bằng con số khai
+   * trong hồ sơ. `bounded = false` ⇒ kỳ không có mốc đầu/cuối ⇒ lương cứng của kỳ là CHƯA BIẾT.
+   */
+  fixedBasis: { bounded: boolean; days: number; monthlyTotal: number };
   marketers: MarketerReport;
 };
 
@@ -501,6 +517,11 @@ export async function getPayrollReport(
   const totalProfit = basis === "cash" && cash ? cash.net : basis === "nominal" ? nominalTotal : modelTotal;
   // Cơ sở dòng tiền: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng) — tiền COD về theo bảng kê không tách được theo mã / người
   const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : 0) : 1;
+  // Kỳ "Toàn bộ" không có mốc đầu/cuối ⇒ không chia lương tháng theo ngày được ⇒ CHƯA BIẾT.
+  const fixedBounded = Boolean(period.from && period.to);
+  // Đếm ngày THEO LỊCH VIỆT NAM bằng đúng hàm mà `prorateMonthlyAmount` dùng: chia phút giây cho
+  // 86.400.000 rồi làm tròn sẽ lệch một ngày ở mốc cuối 23:59:59.
+  const fixedDays = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
   const lines: PayrollLine[] = employees
     .filter((e) => e.active)
     .map((e) => {
@@ -516,16 +537,32 @@ export async function getPayrollReport(
       const bonusRevenue = Math.round(
         Math.max(personalRevenue ?? 0, 0) * (e.percentRevenue / 100),
       );
+      const fixedMonthly = Math.max(0, Math.round(Number(e.fixed) || 0));
+      /*
+        LƯƠNG CỨNG THUỘC KỲ, KHÔNG PHẢI LƯƠNG CỨNG MỘT THÁNG.
+
+        Trước đây cột này chép thẳng `e.fixed` — con số khai theo THÁNG — vào bất kỳ kỳ nào người
+        dùng chọn. Xem 7 ngày: bảng cộng đủ một tháng lương vào kỳ bảy ngày. Xem quý: bảng cộng
+        đúng MỘT tháng lương cho ba tháng làm việc. Cùng lúc ấy `lib/queries/payroll-cost.ts` —
+        cửa mà Profit Engine hỏi chi phí nhân sự — đã chia theo ngày bằng `prorateMonthlyAmount`.
+        Hai nơi trong cùng một kho mã nói hai con số khác nhau về cùng một khoản lương, và nơi
+        chủ shop nhìn để TRẢ TIỀN lại là nơi sai.
+
+        Nay cả hai đi cùng một hàm, cùng luật: chia theo số ngày chồng lấn của TỪNG THÁNG THẬT
+        (AGENTS.md mục 14 · 16). Cộng đủ một tháng vẫn ra đúng khoản tháng, không dư không thiếu.
+      */
+      const fixed = fixedBounded ? prorateMonthlyAmount(fixedMonthly, period.from, period.to) : null;
       return {
         employee: e,
         totalProfit,
         personalProfit,
         personalRevenue,
-        fixed: e.fixed,
+        fixedMonthly,
+        fixed,
         bonusTotal,
         bonusPersonal,
         bonusRevenue,
-        salary: e.fixed + bonusTotal + bonusPersonal + bonusRevenue,
+        salary: fixed === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
       };
     });
   return {
@@ -534,7 +571,12 @@ export async function getPayrollReport(
     nominalTotal,
     cashRatio,
     lines,
-    totalSalary: lines.reduce((s, l) => s + l.salary, 0),
+    totalSalary: fixedBounded ? lines.reduce((s, l) => s + (l.salary ?? 0), 0) : null,
+    fixedBasis: {
+      bounded: fixedBounded,
+      days: fixedDays,
+      monthlyTotal: lines.reduce((s, l) => s + l.fixedMonthly, 0),
+    },
     marketers,
   };
 }

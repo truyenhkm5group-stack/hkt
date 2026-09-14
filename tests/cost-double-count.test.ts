@@ -6,6 +6,7 @@ import { clearMemo } from "@/lib/cache";
 import { prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { getPayrollReport } from "@/lib/queries/payroll";
 import { getRecognizedPayrollCost, PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
@@ -146,6 +147,43 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(prorateMonthlyAmount(9_000_000, d("2027-02-01"), dEnd("2027-02-28")), 9_000_000, "5. tháng 2 đủ 28 ngày vẫn là trọn lương tháng");
   assert.equal(prorateMonthlyAmount(9_000_000, null, null), 0, "5. kỳ không có mốc ⇒ không chia bừa");
 
+  /* ══ TEST 6 — BẢNG LƯƠNG VÀ MÁY CHI PHÍ PHẢI NÓI CÙNG MỘT CON SỐ ══
+   *
+   * SỰ CỐ THẬT (rà soát 14/09/2026): `getPayrollReport` chép thẳng `employee.fixed` — con số khai
+   * theo THÁNG — vào cột "Lương cứng" của BẤT KỲ kỳ nào người dùng chọn, trong khi
+   * `getRecognizedPayrollCost` (cửa mà Profit Engine hỏi) đã chia theo ngày. Xem 7 ngày: màn hình
+   * trả tiền nói 9.000.000đ còn lợi nhuận trừ 2.100.000đ. Xem một quý: màn hình nói MỘT tháng
+   * lương cho BA tháng làm việc.
+   *
+   * Bất biến: Σ lương cứng trên bảng lương = lương cứng máy chi phí ghi nhận, cùng kỳ, cùng luật.
+   */
+  clearMemo();
+  const bangLuongTuan = await getPayrollReport(TUAN30, "profit1");
+  const dongTuan = bangLuongTuan.lines.find((l) => l.employee.id === "dc-emp-1");
+  assert.equal(dongTuan?.fixedMonthly, 9_000_000, "6. cột khai báo vẫn là lương THÁNG, không đổi");
+  assert.equal(dongTuan?.fixed, 2_100_000, "6. cột lương cứng của kỳ = 9tr × 7/30, không phải trọn 9tr");
+  assert.equal(dongTuan?.salary, 2_100_000, "6. tổng lương đi theo lương cứng đã chia (thưởng = 0 ở ca này)");
+  assert.equal(bangLuongTuan.fixedBasis.bounded, true, "6. kỳ có mốc đầu/cuối thì chia được");
+  assert.equal(bangLuongTuan.fixedBasis.days, 7, "6. và nói rõ chia theo mấy ngày");
+  const chiPhiTuan = await getRecognizedPayrollCost(TUAN30);
+  assert.equal(
+    bangLuongTuan.lines.reduce((t, l) => t + (l.fixed ?? 0), 0),
+    chiPhiTuan.fixedSalary,
+    "6. Σ lương cứng trên BẢNG LƯƠNG = lương cứng MÁY CHI PHÍ ghi nhận — hai nơi không được nói hai số",
+  );
+
+  clearMemo();
+  const bangLuongThang = await getPayrollReport(THANG30, "profit1");
+  assert.equal(bangLuongThang.lines.find((l) => l.employee.id === "dc-emp-1")?.fixed, 9_000_000, "6. trọn tháng ⇒ trọn lương tháng, không dư không thiếu");
+
+  /* Kỳ "Toàn bộ" không có mốc đầu/cuối: CHƯA BIẾT, không phải 0 (AGENTS.md mục 42). Ghi 0 ở đây là
+     nói với chủ shop rằng kỳ ấy shop không trả đồng lương nào. */
+  clearMemo();
+  const bangLuongToanBo = await getPayrollReport({ key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null }, "profit1");
+  assert.equal(bangLuongToanBo.fixedBasis.bounded, false, "6. kỳ Toàn bộ không chia theo ngày được");
+  assert.equal(bangLuongToanBo.lines.find((l) => l.employee.id === "dc-emp-1")?.fixed, null, "6. lương cứng kỳ Toàn bộ là CHƯA BIẾT (null), không phải 0");
+  assert.equal(bangLuongToanBo.totalSalary, null, "6. một phần chưa biết thì tổng lương cũng chưa biết");
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -165,6 +203,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0",
   );
 }

@@ -83,7 +83,14 @@ export default async function PayrollPage({
   const selectedMarketer = selected
     ? marketersVisible.find((x) => (x.marketerId ?? "none") === selected)
     : null;
-  const totalSalary = viewAll ? report.totalSalary : lines.reduce((t, l) => t + l.salary, 0);
+  // `null` = lương cứng của kỳ CHƯA BIẾT (kỳ không có mốc đầu/cuối) ⇒ tổng lương cũng chưa biết.
+  const totalSalary = !report.fixedBasis.bounded ? null : viewAll ? report.totalSalary : lines.reduce((t, l) => t + (l.salary ?? 0), 0);
+  const fixedTotal = report.fixedBasis.bounded ? lines.reduce((t, l) => t + (l.fixed ?? 0), 0) : null;
+  const fixedMonthlyTotal = lines.reduce((t, l) => t + l.fixedMonthly, 0);
+  /** Lương cứng khai theo THÁNG nhưng bảng hiện phần THUỘC KỲ — nói thẳng căn cứ, đừng để người đọc tự đoán. */
+  const fixedNote = report.fixedBasis.bounded
+    ? `khai ${formatVND(fixedMonthlyTotal, { compact: true })}/tháng, chia theo ${formatNumber(report.fixedBasis.days)} ngày của kỳ`
+    : `khai ${formatVND(fixedMonthlyTotal, { compact: true })}/tháng — kỳ “Toàn bộ” không có mốc đầu/cuối nên chưa chia theo ngày được`;
 
   return (
     <div className="space-y-5">
@@ -139,11 +146,8 @@ export default async function PayrollPage({
         />
         <MetricCard
           label="Tổng lương kỳ"
-          value={formatVND(totalSalary, { compact: true })}
-          note={`${formatNumber(lines.length)} người · lương cứng ${formatVND(
-            lines.reduce((s, l) => s + l.fixed, 0),
-            { compact: true },
-          )}`}
+          value={totalSalary === null ? "—" : formatVND(totalSalary, { compact: true })}
+          note={`${formatNumber(lines.length)} người · lương cứng ${fixedTotal === null ? "—" : formatVND(fixedTotal, { compact: true })} (${fixedNote})`}
           icon={HandCoins}
           tone="primary"
         />
@@ -181,7 +185,9 @@ export default async function PayrollPage({
                 <TableHead>Cơ chế</TableHead>
                 <TableHead className="text-right">LN tổng</TableHead>
                 <TableHead className="text-right">LN cá nhân</TableHead>
-                <TableHead className="text-right">Lương cứng</TableHead>
+                <TableHead className="text-right" title="Lương cứng khai theo THÁNG, chia theo số ngày chồng lấn của kỳ đang xem">
+                  Lương cứng <span className="font-normal text-muted-foreground">(thuộc kỳ)</span>
+                </TableHead>
                 <TableHead className="text-right">Thưởng % tổng</TableHead>
                 <TableHead className="text-right">Thưởng % cá nhân</TableHead>
                 <TableHead className="text-right">Thưởng % DT</TableHead>
@@ -264,10 +270,20 @@ export default async function PayrollPage({
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Money
-                        value={l.fixed}
-                        className={l.fixed ? "" : "text-muted-foreground"}
-                      />
+                      {l.fixed === null ? (
+                        <span className="text-xs text-muted-foreground" title="Kỳ “Toàn bộ” không có mốc đầu/cuối nên không chia lương tháng theo ngày được">
+                          —
+                        </span>
+                      ) : (
+                        <>
+                          <Money value={l.fixed} className={l.fixed ? "" : "text-muted-foreground"} />
+                          {l.fixedMonthly && l.fixed !== l.fixedMonthly ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              {formatVND(l.fixedMonthly, { compact: true })}/tháng × {formatNumber(report.fixedBasis.days)} ngày
+                            </div>
+                          ) : null}
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Money
@@ -292,7 +308,7 @@ export default async function PayrollPage({
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Money value={l.salary} className="text-base font-bold" />
+                      {l.salary === null ? <span className="text-xs text-muted-foreground">—</span> : <Money value={l.salary} className="text-base font-bold" />}
                     </TableCell>
                     {canManage ? (
                       <TableCell>
@@ -312,9 +328,7 @@ export default async function PayrollPage({
                 <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
                   <TableCell colSpan={4}>Tổng</TableCell>
                   <TableCell className="text-right">
-                    <Money
-                      value={lines.reduce((s, l) => s + l.fixed, 0)}
-                    />
+                    {fixedTotal === null ? <span className="text-xs font-normal text-muted-foreground">—</span> : <Money value={fixedTotal} />}
                   </TableCell>
                   <TableCell className="text-right">
                     <Money
@@ -338,7 +352,7 @@ export default async function PayrollPage({
                     />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Money value={totalSalary} className="text-base" />
+                    {totalSalary === null ? <span className="text-xs font-normal text-muted-foreground">—</span> : <Money value={totalSalary} className="text-base" />}
                   </TableCell>
                   {canManage ? <TableCell /> : null}
                 </TableRow>
