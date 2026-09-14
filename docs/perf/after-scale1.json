@@ -1,0 +1,556 @@
+{
+  "label": "SAU scale1",
+  "scale": 1,
+  "rounds": 3,
+  "seedMs": 4216,
+  "node": "v24.14.0",
+  "engine": "PGlite (Postgres 16 → WASM, một luồng)",
+  "measuredAt": "2026-09-09T09:24:53.985Z",
+  "rows": {
+    "products": 12,
+    "product_variants": 72,
+    "customers": 1000,
+    "orders": 1440,
+    "order_items": 2918,
+    "shipments": 1320,
+    "shipment_events": 5188,
+    "cod_statement_lines": 631,
+    "ad_spends": 1448,
+    "fb_ads": 32,
+    "stock_receipt_items": 480,
+    "expenses": 61,
+    "notifications": 300
+  },
+  "results": [
+    {
+      "page": "Tổng quan (Dashboard)",
+      "coldMs": 370.8,
+      "warmMs": 0.1,
+      "p50Ms": 370.8,
+      "p95Ms": 391,
+      "queries": 55,
+      "dbMs": 4736.22,
+      "rows": 186,
+      "payloadKb": 10.5,
+      "slowest": [
+        {
+          "sql": "select \"variant_id\", max(\"sku\"), max(\"product_id\"), max(\"product_name\"), coalesce(max(\"color\"), '?'), coalesce(max(\"size\"), '?'), max(\"image\"), coalesce(sum(\"quantity\") filter (where \"outcome\" <> '?'), 0), coalesce(sum(\"quantity\") filter (w",
+          "count": 1,
+          "ms": 170.22,
+          "rows": 6
+        },
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 1,
+          "ms": 169.95,
+          "rows": 0
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code, '?' || coalesce(s.cod_amount, 0)::text || '?' || to_char(coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) at time zone '?', '?') as",
+          "count": 1,
+          "ms": 154.27,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(o.custom_id, '?'), o.id) as code, o.items_count::text || '?' as evidence, o.inserted_at as at, o.id as entity_id from orders o where o.items_count > 0 and coalesce(o.total_price_after_d",
+          "count": 1,
+          "ms": 153.57,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(i.sku, '?'), i.product_name, i.id) as code, '?' || coalesce(nullif(o.custom_id, '?'), o.id) || '?' || coalesce(nullif(i.product_name, '?'), '?') as evidence, o.inserted_at as at, o.id a",
+          "count": 1,
+          "ms": 152.87,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "Quảng cáo (Ads)",
+      "coldMs": 305.1,
+      "warmMs": 4.4,
+      "p50Ms": 305.1,
+      "p95Ms": 314.6,
+      "queries": 31,
+      "dbMs": 1862.57,
+      "rows": 351,
+      "payloadKb": 14.5,
+      "slowest": [
+        {
+          "sql": "select \"key\", \"value\", \"updated_at\" from \"settings\" \"settings\" where \"settings\".\"key\" = ? limit ?",
+          "count": 7,
+          "ms": 358.41,
+          "rows": 0
+        },
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 2,
+          "ms": 153.55,
+          "rows": 2
+        },
+        {
+          "sql": "select avg(nullif(coalesce(nullif(\"shipments\".\"shipping_fee\", 0), \"orders\".\"partner_fee\"), 0)) filter (where case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?'. -- -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã",
+          "count": 2,
+          "ms": 125.6,
+          "rows": 2
+        },
+        {
+          "sql": "select coalesce(\"product_variants\".\"product_id\", \"order_items\".\"product_id\", '?'), \"orders\".\"page_id\", \"orders\".\"ad_id\", coalesce(sum(\"order_items\".\"line_total\") filter (where case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?",
+          "count": 1,
+          "ms": 110.15,
+          "rows": 94
+        },
+        {
+          "sql": "select \"product_variants\".\"product_id\", coalesce(sum(\"stock_receipt_items\".\"quantity\" * \"stock_receipt_items\".\"unit_cost\"), 0) from \"stock_receipt_items\" inner join \"stock_receipts\" on \"stock_receipts\".\"id\" = \"stock_receipt_items\".\"receipt_",
+          "count": 1,
+          "ms": 99.14,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "page": "Chất lượng dữ liệu (Data Quality)",
+      "coldMs": 294.7,
+      "warmMs": 0.2,
+      "p50Ms": 294.7,
+      "p95Ms": 297.9,
+      "queries": 29,
+      "dbMs": 6210.43,
+      "rows": 41,
+      "payloadKb": 4.1,
+      "slowest": [
+        {
+          "sql": "select count(*)::int as n from (select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code, '?' || coalesce(s.cod_amount, 0)::text || '?' || to_char(coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) at time zone '?', '?') as",
+          "count": 1,
+          "ms": 277.57,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(o.custom_id, '?'), o.id) as code, o.items_count::text || '?' as evidence, o.inserted_at as at, o.id as entity_id from orders o where o.items_count > 0 and coalesce(o.total_price_after_d",
+          "count": 1,
+          "ms": 277.01,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(i.sku, '?'), i.product_name, i.id) as code, '?' || coalesce(nullif(o.custom_id, '?'), o.id) || '?' || coalesce(nullif(i.product_name, '?'), '?') as evidence, o.inserted_at as at, o.id a",
+          "count": 1,
+          "ms": 276.42,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code, '?' as evidence, coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) as at, s.id as entity_id from shipments s where s.stage = '?' and",
+          "count": 1,
+          "ms": 275.93,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(w.external_id, w.id) as code, w.status || coalesce('?' || w.error, '?') as evidence, w.received_at as at, w.id as entity_id from webhook_events w where w.status = '?' or (w.status = '?' and w.",
+          "count": 1,
+          "ms": 275.03,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "Sản phẩm & tồn kho (Products)",
+      "coldMs": 209,
+      "warmMs": 58.9,
+      "p50Ms": 209,
+      "p95Ms": 224.3,
+      "queries": 9,
+      "dbMs": 1112.43,
+      "rows": 30,
+      "payloadKb": 16.6,
+      "slowest": [
+        {
+          "sql": "select \"id\", \"name\" from \"warehouses\" order by \"warehouses\".\"name\" asc",
+          "count": 1,
+          "ms": 219.93,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*) filter (where (\"product_variants\".\"is_removed\" = ? and \"product_variants\".\"is_hidden\" = ? and \"product_variants\".\"is_locked\" = ? and \"products\".\"is_removed\" = ? and \"products\".\"is_hidden\" = ?)), count(*) filter (where (\"prod",
+          "count": 1,
+          "ms": 219.19,
+          "rows": 1
+        },
+        {
+          "sql": "select \"variant_stocks\".\"variant_id\", \"variant_stocks\".\"warehouse_id\", \"warehouses\".\"name\", \"variant_stocks\".\"remain_quantity\", \"variant_stocks\".\"actual_remain_quantity\", \"variant_stocks\".\"pending_quantity\", \"variant_stocks\".\"returning_quan",
+          "count": 1,
+          "ms": 163.35,
+          "rows": 0
+        },
+        {
+          "sql": "select count(*) filter (where (\"product_variants\".\"is_removed\" = ? and \"product_variants\".\"is_hidden\" = ? and \"product_variants\".\"is_locked\" = ? and \"products\".\"is_removed\" = ? and \"products\".\"is_hidden\" = ?)), count(*) filter (where not ((",
+          "count": 1,
+          "ms": 136.7,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*) filter (where ( coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = \"product_variants\".\"id\"), 0) - coalesce((select sum(\"order_items\".\"quantity\") from \"order_items\" join \"orders\" on \"orders\".\"",
+          "count": 1,
+          "ms": 136.15,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "Báo cáo lợi nhuận (Profit)",
+      "coldMs": 111.4,
+      "warmMs": 0.1,
+      "p50Ms": 111.4,
+      "p95Ms": 122.9,
+      "queries": 17,
+      "dbMs": 1244.7,
+      "rows": 55,
+      "payloadKb": 5.5,
+      "slowest": [
+        {
+          "sql": "select \"category\", coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?'",
+          "count": 2,
+          "ms": 173.93,
+          "rows": 5
+        },
+        {
+          "sql": "select sum(\"spend\"), sum(\"orders\"), sum(\"revenue\") from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and (\"ad_spends\".\"spend_date\" >= ?::timestamptz and \"ad_spends\".\"spend_date\" <= ?::timestamptz))",
+          "count": 2,
+          "ms": 172.65,
+          "rows": 2
+        },
+        {
+          "sql": "select count(*) filter (where \"order_facts\".\"stage\" not in ('?','?')), count(*) filter (where \"outcome\" = '?'), coalesce(sum(\"total_price_after_discount\") filter (where \"outcome\" = '?'), 0), coalesce(sum(\"order_cogs\") filter (where \"outcome",
+          "count": 2,
+          "ms": 170.68,
+          "rows": 2
+        },
+        {
+          "sql": "select to_char(\"spend_date\" at time zone '?', '?'), sum(\"spend\") from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and (\"ad_spends\".\"spend_date\" >= ?::timestamptz and \"ad_spends\".\"spend_date\" <= ?::timestamptz)) group by 1",
+          "count": 1,
+          "ms": 108.84,
+          "rows": 9
+        },
+        {
+          "sql": "select \"day\", count(*) filter (where \"order_facts\".\"stage\" not in ('?','?')), count(*) filter (where \"outcome\" = '?'), coalesce(sum(\"total_price_after_discount\") filter (where \"outcome\" = '?'), 0), coalesce(sum(\"order_cogs\") filter (where \"",
+          "count": 1,
+          "ms": 108.19,
+          "rows": 9
+        }
+      ]
+    },
+    {
+      "page": "Vận đơn (Shipments)",
+      "coldMs": 64.5,
+      "warmMs": 18.8,
+      "p50Ms": 64.5,
+      "p95Ms": 64.7,
+      "queries": 9,
+      "dbMs": 175.9,
+      "rows": 62,
+      "payloadKb": 22.1,
+      "slowest": [
+        {
+          "sql": "select count(*), coalesce(sum(case when \"shipments\".\"cod_status\" = '?' then \"shipments\".\"cod_amount\" else 0 end), 0), coalesce(sum(case when \"shipments\".\"cod_status\" = '?' then 1 else 0 end), 0), coalesce(sum(case when \"shipments\".\"stage\" i",
+          "count": 1,
+          "ms": 57.56,
+          "rows": 1
+        },
+        {
+          "sql": "select \"shipments\".\"id\", case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?'. -- -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của -- Viettel Post: ERP không biết gói hàng ở đâu, ",
+          "count": 1,
+          "ms": 56.33,
+          "rows": 25
+        },
+        {
+          "sql": "select \"order_id\" is null, count(*) from \"shipments\" group by \"shipments\".\"order_id\" is null",
+          "count": 1,
+          "ms": 11.2,
+          "rows": 1
+        },
+        {
+          "sql": "select \"is_final\", count(*) from \"shipments\" group by \"shipments\".\"is_final\"",
+          "count": 1,
+          "ms": 10.66,
+          "rows": 2
+        },
+        {
+          "sql": "select \"cod_status\", count(*) from \"shipments\" group by \"shipments\".\"cod_status\"",
+          "count": 1,
+          "ms": 10.05,
+          "rows": 3
+        }
+      ]
+    },
+    {
+      "page": "Đơn hàng (Orders)",
+      "coldMs": 47.5,
+      "warmMs": 7.9,
+      "p50Ms": 47.5,
+      "p95Ms": 47.7,
+      "queries": 7,
+      "dbMs": 102.24,
+      "rows": 40,
+      "payloadKb": 20.9,
+      "slowest": [
+        {
+          "sql": "select count(*), coalesce(sum(case when \"orders\".\"stage\" not in ('?','?') then \"orders\".\"total_price_after_discount\" else 0 end), 0), coalesce(sum(case when \"orders\".\"stage\" not in ('?','?') then \"orders\".\"money_to_collect\" else 0 end), 0),",
+          "count": 1,
+          "ms": 46.03,
+          "rows": 1
+        },
+        {
+          "sql": "select \"seller_name\", count(*) from \"orders\" where \"orders\".\"seller_name\" <> '?' group by \"orders\".\"seller_name\" order by count(*) desc limit ?",
+          "count": 1,
+          "ms": 12.6,
+          "rows": 4
+        },
+        {
+          "sql": "select \"shipments\".\"carrier\", count(*) from \"shipments\" inner join \"orders\" on \"shipments\".\"order_id\" = \"orders\".\"id\" group by \"shipments\".\"carrier\" order by count(*) desc",
+          "count": 1,
+          "ms": 11.92,
+          "rows": 1
+        },
+        {
+          "sql": "select \"source\", count(*) from \"orders\" group by \"orders\".\"source\" order by count(*) desc",
+          "count": 1,
+          "ms": 10.9,
+          "rows": 4
+        },
+        {
+          "sql": "select \"stage\", count(*) from \"orders\" group by \"orders\".\"stage\"",
+          "count": 1,
+          "ms": 9.33,
+          "rows": 4
+        }
+      ]
+    },
+    {
+      "page": "Chân lý tài chính (Truth)",
+      "coldMs": 46.3,
+      "warmMs": 0,
+      "p50Ms": 46.3,
+      "p95Ms": 49.1,
+      "queries": 5,
+      "dbMs": 44.07,
+      "rows": 5,
+      "payloadKb": 2.4,
+      "slowest": [
+        {
+          "sql": "select coalesce(sum(\"orders\".\"total_price_after_discount\") filter (where case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?'. -- -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của ",
+          "count": 1,
+          "ms": 34.79,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(sum(\"shipments\".\"cod_amount\") filter (where \"shipments\".\"cod_status\" = '?'), 0), count(*) filter (where \"shipments\".\"cod_status\" = '?'), coalesce(sum(\"shipments\".\"cod_amount\") filter (where \"shipments\".\"cod_status\" = '?'), 0",
+          "count": 1,
+          "ms": 7.87,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(sum((case when \"expenses\".\"allocation_method\" = '?' and \"expenses\".\"period_start\" is not null and \"expenses\".\"period_end\" is not null then greatest(0, (case when (least(((\"expenses\".\"period_end\") at time zone '?')::date, coa",
+          "count": 1,
+          "ms": 0.63,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*), coalesce(sum(\"total_amount\"), 0), coalesce(sum(\"fee_total\"), 0) from \"cod_batches\" where (\"cod_batches\".\"received_at\" >= ? and \"cod_batches\".\"received_at\" <= ?)",
+          "count": 1,
+          "ms": 0.42,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(sum(\"spend\"), 0) from \"ad_spends\" where (\"ad_spends\".\"excluded\" = ? and (\"ad_spends\".\"spend_date\" >= ? and \"ad_spends\".\"spend_date\" <= ?))",
+          "count": 1,
+          "ms": 0.37,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "Trung tâm điều khiển (22 luật)",
+      "coldMs": 26.2,
+      "warmMs": 0,
+      "p50Ms": 26.2,
+      "p95Ms": 27.4,
+      "queries": 25,
+      "dbMs": 269.42,
+      "rows": 37,
+      "payloadKb": 3.5,
+      "slowest": [
+        {
+          "sql": "select count(*)::int as n from (select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code, '?' || coalesce(s.cod_amount, 0)::text || '?' || to_char(coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) at time zone '?', '?') as",
+          "count": 1,
+          "ms": 20.66,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(o.custom_id, '?'), o.id) as code, o.items_count::text || '?' as evidence, o.inserted_at as at, o.id as entity_id from orders o where o.items_count > 0 and coalesce(o.total_price_after_d",
+          "count": 1,
+          "ms": 20.09,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(nullif(i.sku, '?'), i.product_name, i.id) as code, '?' || coalesce(nullif(o.custom_id, '?'), o.id) || '?' || coalesce(nullif(i.product_name, '?'), '?') as evidence, o.inserted_at as at, o.id a",
+          "count": 1,
+          "ms": 19.49,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code, '?' as evidence, coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) as at, s.id as entity_id from shipments s where s.stage = '?' and",
+          "count": 1,
+          "ms": 18.98,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*)::int as n from (select coalesce(w.external_id, w.id) as code, w.status || coalesce('?' || w.error, '?') as evidence, w.received_at as at, w.id as entity_id from webhook_events w where w.status = '?' or (w.status = '?' and w.",
+          "count": 1,
+          "ms": 18.05,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "GTC theo mẫu mã",
+      "coldMs": 24.8,
+      "warmMs": 12.7,
+      "p50Ms": 24.8,
+      "p95Ms": 24.8,
+      "queries": 2,
+      "dbMs": 23.58,
+      "rows": 62,
+      "payloadKb": 39.6,
+      "slowest": [
+        {
+          "sql": "select count(*) filter (where (case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?'. -- -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của -- Viettel Post: ERP không biết gói hàng ở",
+          "count": 1,
+          "ms": 12.02,
+          "rows": 1
+        },
+        {
+          "sql": "select \"variant_key\", max(\"variant_id\"), max(\"sku\"), max(\"product_name\"), max(\"variation_detail\"), max(\"image\"), count(distinct \"id\") filter (where \"outcome\" in ('?','?','?','?')), count(distinct \"id\") filter (where \"outcome\" = '?'), count(",
+          "count": 1,
+          "ms": 11.55,
+          "rows": 61
+        }
+      ]
+    },
+    {
+      "page": "Tỷ lệ giao thành công (GTC)",
+      "coldMs": 22.6,
+      "warmMs": 11,
+      "p50Ms": 22.6,
+      "p95Ms": 25.6,
+      "queries": 2,
+      "dbMs": 21.75,
+      "rows": 2,
+      "payloadKb": 0.3,
+      "slowest": [
+        {
+          "sql": "select count(*) filter (where (case -- CHƯA CÓ BẤT KỲ DẤU VẾT NÀO CỦA ĐVVC ⇒ '?', KHÔNG PHẢI '?'. -- -- Vận đơn tồn tại trong ERP nhưng không mã vận đơn, không mã tra cứu, không một sự kiện nào của -- Viettel Post: ERP không biết gói hàng ở",
+          "count": 1,
+          "ms": 11.06,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*), count(*) filter (where \"outcome\" in ('?','?','?','?')), count(*) filter (where \"outcome\" = '?'), count(*) filter (where \"outcome\" in ('?','?')), count(*) filter (where \"outcome\" = '?'), count(*) filter (where \"outcome\" = '?",
+          "count": 1,
+          "ms": 10.69,
+          "rows": 1
+        }
+      ]
+    },
+    {
+      "page": "Hiệu quả mẫu mã (Product)",
+      "coldMs": 18,
+      "warmMs": 0,
+      "p50Ms": 18,
+      "p95Ms": 20,
+      "queries": 1,
+      "dbMs": 16.55,
+      "rows": 50,
+      "payloadKb": 20.2,
+      "slowest": [
+        {
+          "sql": "select \"variant_id\", max(\"sku\"), max(\"product_id\"), max(\"product_name\"), coalesce(max(\"color\"), '?'), coalesce(max(\"size\"), '?'), max(\"image\"), coalesce(sum(\"quantity\") filter (where \"outcome\" <> '?'), 0), coalesce(sum(\"quantity\") filter (w",
+          "count": 1,
+          "ms": 16.55,
+          "rows": 50
+        }
+      ]
+    },
+    {
+      "page": "Hàng đợi việc (Action Queue)",
+      "coldMs": 6.7,
+      "warmMs": 5,
+      "p50Ms": 6.7,
+      "p95Ms": 8.9,
+      "queries": 3,
+      "dbMs": 14.8,
+      "rows": 296,
+      "payloadKb": 157.4,
+      "slowest": [
+        {
+          "sql": "select \"notifications\".\"id\", \"notifications\".\"kind\", \"notifications\".\"severity\", \"notifications\".\"title\", \"notifications\".\"body\", \"notifications\".\"href\", \"notifications\".\"entity_type\", \"notifications\".\"entity_id\", \"notifications\".\"occurred_",
+          "count": 1,
+          "ms": 7.55,
+          "rows": 146
+        },
+        {
+          "sql": "select \"kind\", count(*) from \"notifications\" where \"notifications\".\"resolved_at\" is null group by \"notifications\".\"kind\"",
+          "count": 1,
+          "ms": 5.54,
+          "rows": 4
+        },
+        {
+          "sql": "select \"id\", \"kind\", \"severity\", \"title\", \"body\", \"href\", \"read_by\", \"created_at\", \"occurred_at\", \"notified_at\" from \"notifications\" where \"notifications\".\"resolved_at\" is null order by \"notifications\".\"created_at\" desc limit ?",
+          "count": 1,
+          "ms": 1.71,
+          "rows": 146
+        }
+      ]
+    },
+    {
+      "page": "Tồn kho (Inventory)",
+      "coldMs": 2.6,
+      "warmMs": 1.2,
+      "p50Ms": 2.6,
+      "p95Ms": 3,
+      "queries": 6,
+      "dbMs": 8.97,
+      "rows": 3,
+      "payloadKb": 0.3,
+      "slowest": [
+        {
+          "sql": "select count(*), coalesce(sum(case when \"quantity\" > 0 then \"quantity\" else 0 end), 0), coalesce(sum(case when \"quantity\" < 0 then -\"quantity\" else 0 end), 0), count(*) filter (where \"quantity\" > 0), count(*) filter (where \"quantity\" < 0), ",
+          "count": 1,
+          "ms": 2.11,
+          "rows": 1
+        },
+        {
+          "sql": "select count(*) filter (where \"quantity\" > 0), count(*) filter (where \"quantity\" < 0) from \"inventory_histories\"",
+          "count": 1,
+          "ms": 1.83,
+          "rows": 1
+        },
+        {
+          "sql": "select coalesce(nullif(\"table_name\", '?'), '?'), count(*) from \"inventory_histories\" group by 1 order by count(*) desc",
+          "count": 1,
+          "ms": 1.64,
+          "rows": 0
+        },
+        {
+          "sql": "select \"warehouses\".\"id\", \"warehouses\".\"name\", count(*) from \"inventory_histories\" inner join \"warehouses\" on \"inventory_histories\".\"warehouse_id\" = \"warehouses\".\"id\" group by \"warehouses\".\"id\", \"warehouses\".\"name\" order by count(*) desc",
+          "count": 1,
+          "ms": 1.41,
+          "rows": 0
+        },
+        {
+          "sql": "select count(*) from \"inventory_histories\"",
+          "count": 1,
+          "ms": 1.1,
+          "rows": 1
+        }
+      ]
+    }
+  ]
+}

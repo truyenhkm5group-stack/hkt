@@ -13,7 +13,7 @@ import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
-import { COD_STATUS_LABEL, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
+import { COD_STATUS_LABEL, getViettelPostTrackingUrl, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail } from "@/lib/queries/shipments";
 import { can, requirePermission } from "@/lib/auth/session";
@@ -32,7 +32,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   if (!s) notFound();
   const number = s.vtpOrderNumber ?? s.trackingCode;
   const isVtp = Boolean(s.vtpOrderNumber) || /viettel/i.test(s.carrier);
-  const vtpUrl = s.vtpOrderNumber ? `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(s.vtpOrderNumber)}&orderType=1` : null;
+  const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
   const order = s.order;
   const partner = s.partnerStatus ? (PANCAKE_PARTNER_STATUS[s.partnerStatus]?.name ?? s.partnerStatus) : null;
   const reason = s.vtpReasonCode !== null ? `${VTP_REASON_CODES[s.vtpReasonCode] ?? "Mã lý do"} (${s.vtpReasonCode})` : null;
@@ -47,7 +47,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         title={
           <span className="flex flex-wrap items-center gap-3">
             <span className="font-mono">{number ?? "Chưa có mã"}</span>
-            {number ? <CopyButton value={number} /> : null}
+            {number ? <CopyButton value={number} what="mã vận đơn" /> : null}
             <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
             {s.isFinal ? <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">Đã kết thúc</span> : null}
           </span>
@@ -57,7 +57,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <>
             {isVtp ? <SyncOrderButton shipmentId={s.id} label="Cập nhật từ Viettel Post" /> : null}
             {isVtp ? <RepushButton shipmentId={s.id} /> : null}
-            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
+            {isVtp && canManage ? <VtpActions shipmentId={s.id} stage={s.stage} vtpStatus={s.vtpStatus} rawStatus={s.vtpStatusName} tracking={number} trackingCapability={s.trackingCapability} receiver={{ name: s.order?.shipFullName || s.order?.billFullName || "", phone: s.order?.shipPhone || s.order?.billPhone || "", address: s.order?.shipAddress || "", cod: s.codAmount || s.order?.cod || 0, note: s.order?.note || "" }} /> : null}
             {vtpUrl ? (
               <Button asChild variant="outline" size="sm">
                 <a href={vtpUrl} target="_blank" rel="noreferrer">
@@ -176,7 +176,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <SectionCard title="Người nhận">
             <div className="space-y-3 text-sm">
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{receiverName}</p>
-              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{receiverPhone || "—"} {receiverPhone ? <CopyButton value={receiverPhone} /> : null}</p>
+              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{receiverPhone || "—"} {receiverPhone ? <CopyButton value={receiverPhone} what="SĐT" /> : null}</p>
               <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{receiverAddress}</span></p>
             </div>
           </SectionCard>

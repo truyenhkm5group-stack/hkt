@@ -4,6 +4,7 @@ import { BackfillForm } from "@/app/(dashboard)/integrations/backfill-form";
 import { SyncRunsTable } from "@/app/(dashboard)/integrations/sync-runs-table";
 import { TestConnectionButton } from "@/app/(dashboard)/integrations/test-connection-button";
 import { WebhookEventsTable } from "@/app/(dashboard)/integrations/webhook-events-table";
+import { WebhookHealthPanel } from "@/app/(dashboard)/integrations/webhook-health";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { CopyButton } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
@@ -14,8 +15,9 @@ import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
+import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
 import { env, integrationStatus } from "@/lib/env";
-import { aiEnv } from "@/lib/ai/config";
+import { aiEnv } from "@/lib/ai-workforce/config";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
 import { HEALTH_LABEL, HEALTH_TONE, getIntegrationHealth } from "@/lib/queries/integration-health";
@@ -44,6 +46,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const user = await requirePermission("integrations:view");
   const canSync = can(user, "sync:run");
   const status = integrationStatus();
+  const aiProvider = resolveProviderName();
   const running = runningJobKeys();
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
@@ -95,6 +98,9 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
         description="Pancake POS, Viettel Post, webhook thời gian thực và lịch đồng bộ tự động"
         actions={canSync ? <SyncButton job="all" label="Đồng bộ tất cả" variant="default" /> : null}
       />
+
+      {/* Sức khoẻ đường truyền đứng TRƯỚC cấu hình: câu hỏi thường gặp là "có đang chạy không", không phải "khoá là gì". */}
+      <WebhookHealthPanel />
 
       {!status.pancake || !status.viettelPost ? (
         <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
@@ -224,6 +230,22 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             </div>
           }
         />
+        <ConnectionCard
+          initials="AI"
+          tone="bg-violet-600"
+          title="AI Copilot"
+          description="Trợ lý đọc số ERP qua tool; hành động ghi chỉ chạy sau khi người xác nhận"
+          hint="AI không truy vấn CSDL, không tự tính KPI. Mọi lượt hỏi ghi vào ai_interactions (ai hỏi, tool nào, đề nghị gì, đã chạy gì). Khoá API chỉ SDK đọc từ .env, không hiển thị, không log."
+          configured={Boolean(aiProvider)}
+          items={[
+            { label: "Provider", value: aiProvider ? <span className="font-mono">{aiProvider}</span> : <span className="text-muted-foreground">{aiDisabledReason()}</span> },
+            { label: "Model copilot", value: aiProvider ? <span className="font-mono">{modelFor(aiProvider, "copilot")}</span> : <span className="text-muted-foreground">—</span> },
+            { label: "Routine / phân tích", value: aiProvider ? <span className="font-mono text-xs">{MODEL_BY_TIER[aiProvider].routine} · {MODEL_BY_TIER[aiProvider].analysis}</span> : <span className="text-muted-foreground">—</span>, span: true },
+            { label: "OPENAI_API_KEY", value: env.ai.openaiConfigured ? <span className="text-emerald-700 dark:text-emerald-300">đã đặt</span> : <span className="text-muted-foreground">chưa đặt</span> },
+            { label: "ANTHROPIC_API_KEY", value: env.ai.anthropicConfigured ? <span className="text-emerald-700 dark:text-emerald-300">đã đặt</span> : <span className="text-muted-foreground">chưa đặt</span> },
+          ]}
+          footer={<TestConnectionButton provider="ai" disabled={!aiProvider} />}
+        />
       </section>
 
       {/* ───────── Sức khoẻ TẤT CẢ tích hợp ───────── */}
@@ -256,8 +278,33 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
                   <TableCell className="whitespace-nowrap text-xs">
                     {c.lastEventAt ? formatTimeAgo(c.lastEventAt) : "—"}
                     {c.lagHours === null ? null : <span className="block text-[11px] text-muted-foreground">trễ {c.lagHours}h</span>}
+                    {/*
+                      NHỊP TIM của bên gửi. Script Gmail chỉ gọi sang khi có bảng kê mới, nên nếu
+                      không có dòng này thì "Viettel Post chưa gửi gì" và "script đã tắt" trông y
+                      hệt nhau — và thẻ vẫn xanh trong cả hai trường hợp.
+                    */}
+                    {c.heartbeat ? (
+                      <span className={cn("block text-[11px]", c.heartbeat.stale ? "text-warning" : "text-muted-foreground")} title={c.heartbeat.note}>
+                        {c.heartbeat.label}: {c.heartbeat.at ? formatTimeAgo(c.heartbeat.at) : "chưa từng báo sống"}
+                      </span>
+                    ) : null}
                   </TableCell>
-                  <TableCell className="numeric text-right text-xs">{c.eventsPerHour}</TableCell>
+                  <TableCell className="numeric text-right text-xs">
+                    {c.eventsPerHour}
+                    {/*
+                      Tách theo TỪNG BÊN GỬI. Gộp chung thì một đường chết vẫn thấy "có dữ liệu" —
+                      đúng chuyện đã xảy ra: Poscake bị 401 gần ba ngày mà tổng số vẫn khác 0.
+                    */}
+                    {c.senders?.length ? (
+                      <span className="block text-left text-[11px] font-normal text-muted-foreground">
+                        {c.senders.map((s) => (
+                          <span key={s.label} className="block whitespace-nowrap">
+                            {s.label}: {formatNumber(s.events24h)}/24h · {s.lastAt ? formatTimeAgo(s.lastAt) : "chưa từng"}
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right text-xs">
                     {c.failed || c.unprocessed || c.unknownMappings ? (
                       <span className="text-warning">
@@ -323,11 +370,17 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           </div>
           <div className="rounded-xl border p-4">
             <p className="text-[13px] font-medium text-muted-foreground">Đối chiếu qua API</p>
-            <p className={cn("mt-1 text-2xl font-bold", vtpHealth.apiBlind && "text-destructive")}>{vtpHealth.apiBlind ? "Không dùng được" : vtpHealth.lastPoll ? formatTimeAgo(vtpHealth.lastPoll.finishedAt) : "—"}</p>
+            <p className={cn("mt-1 text-2xl font-bold", vtpHealth.lastPoll?.status === "FAILED" && "text-destructive")}>
+              {vtpHealth.capability.apiTrackable === 0 && vtpHealth.capability.unknown === 0 && vtpHealth.capability.webhookOnly > 0
+                ? "Ngoài phạm vi"
+                : vtpHealth.lastPoll
+                  ? formatTimeAgo(vtpHealth.lastPoll.finishedAt)
+                  : "—"}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {vtpHealth.apiBlind
-                ? "Tài khoản API không sở hữu các vận đơn này — xem cảnh báo bên dưới."
-                : vtpHealth.lastPoll?.detail || "Chưa chạy đối chiếu lần nào"}
+              {formatNumber(vtpHealth.capability.apiTrackable)} tra được qua API · {formatNumber(vtpHealth.capability.webhookOnly)} chỉ nhận webhook
+              {vtpHealth.capability.unknown ? ` · ${formatNumber(vtpHealth.capability.unknown)} đang dò` : ""}
+              {vtpHealth.apiBlind ? " · tài khoản API không sở hữu vận đơn Pancake tạo — chúng khoẻ theo webhook, không cần đối chiếu API" : ""}
             </p>
           </div>
           <div className="rounded-xl border p-4">
@@ -348,15 +401,15 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           </div>
         </div>
 
-        {vtpHealth.apiBlind || vtpHealth.lastPoll?.error ? (
+        {vtpHealth.lastPoll?.status === "FAILED" || (vtpHealth.lastPoll?.status === "PARTIAL" && vtpHealth.lastPoll.error) ? (
           <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
             <div className="text-xs leading-5">
-              <p className="font-medium text-foreground">Đối chiếu qua API Viettel Post không chạy được</p>
-              <p className="mt-1 text-muted-foreground">{vtpHealth.lastPoll?.error || "Tài khoản API không thấy vận đơn nào của shop."}</p>
+              <p className="font-medium text-foreground">Đối chiếu qua API Viettel Post đang hụt</p>
+              <p className="mt-1 text-muted-foreground">{vtpHealth.lastPoll?.error}</p>
               <p className="mt-1 text-muted-foreground">
-                Trong lúc chờ Viettel Post gắn mã khách hàng vào tài khoản API, nguồn thật là <strong className="text-foreground">webhook</strong> (thời gian thực) và{" "}
-                <strong className="text-foreground">file bảng kê / danh sách vận đơn</strong> tải từ viettelpost.vn. ERP đã tự giảm nhịp gọi API và sẽ chạy lại đầy đủ ngay khi API thấy vận đơn.
+                Chỉ vận đơn tra được qua API bị ảnh hưởng. Vận đơn chỉ nhận webhook vẫn cập nhật bình thường qua <strong className="text-foreground">webhook</strong> (thời gian thực) và{" "}
+                <strong className="text-foreground">file bảng kê / danh sách vận đơn</strong> tải từ viettelpost.vn.
               </p>
             </div>
           </div>

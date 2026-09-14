@@ -4,7 +4,7 @@ import type { RiskAssessment } from "@/lib/alerts/risk";
 import { memo, periodKey } from "@/lib/cache";
 import { pushBlockOf, type DuplicateHit, type LandingStatus, type PushBlock } from "@/lib/constants/landing";
 import type { OrderOutcome } from "@/lib/constants/returns";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const l = schema.landingOrders;
@@ -101,7 +101,7 @@ function conds(f: LandingFilters): SQL[] {
   if (f.status?.length) out.push(inArray(l.status, f.status));
   if (f.outcome?.length) {
     const parts: SQL[] = [];
-    for (const oc of f.outcome) parts.push(oc === "NONE" ? isNull(l.orderId) : sql`(${l.orderId} is not null and ${ORDER_OUTCOME} = ${oc})`);
+    for (const oc of f.outcome) parts.push(oc === "NONE" ? isNull(l.orderId) : sql`(${l.orderId} is not null and ${ORDER_OUTCOME_FAST} = ${oc})`);
     out.push(or(...parts) as SQL);
   }
   if (f.pos?.length) out.push(inArray(POS_STATE, f.pos));
@@ -166,7 +166,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
           and o2.stage not in ('DELETED') and (${l.orderId} is null or o2.id <> ${l.orderId})
           and o2.inserted_at >= now() - interval '90 days'
         order by o2.inserted_at desc limit 1)`,
-      outcome: sql<OrderOutcome | null>`case when ${l.orderId} is null then null else ${ORDER_OUTCOME} end`,
+      outcome: sql<OrderOutcome | null>`case when ${l.orderId} is null then null else ${ORDER_OUTCOME_FAST} end`,
       shipmentStage: s.stage,
       tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${s.trackingCode})`,
       pancakeSystemId: l.pancakeSystemId,
@@ -181,7 +181,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
     })
     .from(l)
     .leftJoin(o, eq(o.id, l.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(pv, eq(pv.id, l.variantId))
     .leftJoin(p, eq(p.id, pv.productId))
     .where(and(...conds(f)))
@@ -221,15 +221,15 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
       .where(where);
     const statusRows = await db.select({ status: l.status, n: sql<number>`count(*)` }).from(l).where(where).groupBy(l.status);
     const outcomeRows = await db
-      .select({ oc: sql<string>`case when ${l.orderId} is null then 'NONE' else ${ORDER_OUTCOME} end`, n: sql<number>`count(*)` })
+      .select({ oc: sql<string>`case when ${l.orderId} is null then 'NONE' else ${ORDER_OUTCOME_FAST} end`, n: sql<number>`count(*)` })
       .from(l)
       .leftJoin(o, eq(o.id, l.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(where)
       .groupBy(sql`1`);
     const byStatus: Record<LandingStatus, number> = { NEW: 0, CONFIRMED: 0, PUSHED: 0, CANCELLED: 0 };
     for (const r of statusRows) byStatus[r.status as LandingStatus] = Number(r.n);
-    const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, UNKNOWN: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };
+    const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, UNKNOWN: 0, AWAITING_PICKUP: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };
     for (const r of outcomeRows) byOutcome[r.oc as OrderOutcome | "NONE"] = Number(r.n);
     return { total: Number(row?.total ?? 0), byStatus, byOutcome, duplicates: Number(row?.duplicates ?? 0), risky: Number(row?.risky ?? 0), noVariant: Number(row?.noVariant ?? 0), pushErrors: Number(row?.pushErrors ?? 0),
       missingInfo: Number(row?.missingInfo ?? 0), lastImportAt: row?.lastImportAt ? new Date(row.lastImportAt) : null };

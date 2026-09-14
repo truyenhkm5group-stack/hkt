@@ -16,6 +16,8 @@ import { PERMISSION_LABEL, type RolePermissionMap } from "@/lib/auth/permissions
 import { ROLE_LABEL, ROLE_TONE } from "@/lib/constants/roles";
 import { formatDateTime, formatTimeAgo, initials } from "@/lib/format";
 import type { UserRow } from "@/lib/queries/users";
+import { DepartmentCell, type UserDept } from "@/app/(dashboard)/settings/users/department-cell";
+import { AccessCell, type AccessOption, type UserAccessView } from "@/app/(dashboard)/settings/users/access-cell";
 import { cn } from "@/lib/utils";
 
 const badge = "inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-semibold leading-5";
@@ -106,13 +108,33 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
   );
 }
 
-export function UsersTable({ users, currentUserId, activeAdmins, templates }: { users: UserRow[]; currentUserId: string; activeAdmins: number; templates: RolePermissionMap }) {
+export function UsersTable({
+  users,
+  currentUserId,
+  activeAdmins,
+  templates,
+  departmentsByUser,
+  allDepartments,
+  accessByUser,
+  roleOptions,
+  positionOptions,
+}: {
+  users: UserRow[];
+  currentUserId: string;
+  activeAdmins: number;
+  templates: RolePermissionMap;
+  departmentsByUser: Record<string, UserDept[]>;
+  allDepartments: { id: string; name: string }[];
+  accessByUser: Record<string, UserAccessView>;
+  roleOptions: AccessOption[];
+  positionOptions: AccessOption[];
+}) {
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[820px]">
+      <Table className="min-w-[1240px]">
         <TableHeader className="bg-muted/50">
           <TableRow className="hover:bg-transparent">
-            {["Người dùng", "Email", "Vai trò", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""].map((h, i) => (
+            {["Người dùng", "Email", "Vai trò", "Phòng ban", "Quyền & phạm vi", "Trạng thái", "Đăng nhập gần nhất", "Tạo lúc", ""].map((h, i) => (
               <TableHead key={i} className="h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {h}
               </TableHead>
@@ -120,6 +142,11 @@ export function UsersTable({ users, currentUserId, activeAdmins, templates }: { 
           </TableRow>
         </TableHeader>
         <TableBody>
+          {users.length === 0 ? (
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={12} className="h-24 text-center text-sm text-muted-foreground">Không có tài khoản nào khớp bộ lọc.</TableCell>
+            </TableRow>
+          ) : null}
           {users.map((u) => {
             const isSelf = u.id === currentUserId;
             const isLastAdmin = u.role === "ADMIN" && u.active && activeAdmins <= 1;
@@ -147,6 +174,34 @@ export function UsersTable({ users, currentUserId, activeAdmins, templates }: { 
                       Tuỳ chỉnh · {u.permissions.length} quyền
                     </div>
                   ) : null}
+                </TableCell>
+                {/*
+                  PHÒNG BAN SỬA ĐƯỢC NGAY TỪ ĐÂY — cùng Server Action với màn Cấu hình công việc.
+                  Một sự thật, hai lối vào; trước đây chỉ có một lối và khi nó hỏng thì hết đường.
+                */}
+                <TableCell>
+                  <DepartmentCell
+                    userId={u.id}
+                    userName={u.name}
+                    userActive={u.active}
+                    departments={departmentsByUser[u.id] ?? []}
+                    all={allDepartments}
+                  />
+                </TableCell>
+                {/*
+                  BA CHIỀU CỦA QUYỀN TRUY CẬP trong một ô: vai trò (được làm gì) · chức danh (làm
+                  chức gì) · phạm vi (trên dữ liệu nào). Bấm vào mở hộp thoại có XEM TRƯỚC quyền
+                  thực tế — chủ shop thấy hậu quả trước khi lưu, không phải sau.
+                */}
+                <TableCell>
+                  <AccessCell
+                    userId={u.id}
+                    userName={u.name}
+                    isAdmin={u.role === "ADMIN"}
+                    view={accessByUser[u.id] ?? { accessRoleId: null, accessRoleName: "", positionId: null, positionName: "", scope: "ALL" }}
+                    roles={roleOptions}
+                    positions={positionOptions}
+                  />
                 </TableCell>
                 <TableCell>
                   {u.active ? (

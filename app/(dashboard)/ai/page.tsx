@@ -9,9 +9,9 @@ import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/constants/sales-agent"
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { aiSummary, listAiAgents, listAiRuns, recentAiErrors, salesStageBreakdown } from "@/lib/queries/ai";
-import { ensureAgents } from "@/lib/ai/registry";
-import { getAiSettings } from "@/lib/ai/config";
-import { effectiveMode } from "@/lib/ai/config";
+import { ensureAgents } from "@/lib/ai-workforce/registry";
+import { getAiSettings } from "@/lib/ai-workforce/config";
+import { effectiveMode } from "@/lib/ai-workforce/config";
 
 export const metadata = { title: "Nhân sự AI" };
 

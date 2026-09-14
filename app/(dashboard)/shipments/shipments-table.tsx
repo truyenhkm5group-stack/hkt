@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { shipmentColumns } from "@/app/(dashboard)/shipments/columns";
+import { buildShipmentColumns } from "@/app/(dashboard)/shipments/columns";
 import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
 import type { ShipmentListRow } from "@/lib/queries/shipments";
+import type { ShipmentProductCodes } from "@/lib/queries/product-code";
 
 type RefreshResponse = { ok?: boolean; error?: string; message?: string; summary?: { imported: number; updated: number; skipped: number; failed: number; detail: string } };
 
@@ -42,11 +43,26 @@ function RefreshShipmentsButton({ ids, onDone }: { ids: string[]; onDone: () => 
   );
 }
 
-export function ShipmentsTable({ rows, pageCount, total }: { rows: ShipmentListRow[]; pageCount: number; total: number }) {
+export function ShipmentsTable({
+  rows,
+  pageCount,
+  total,
+  productCodes,
+  staff,
+  canManage,
+}: {
+  rows: ShipmentListRow[];
+  pageCount: number;
+  total: number;
+  productCodes: Record<string, ShipmentProductCodes>;
+  staff: { id: string; name: string }[];
+  canManage: boolean;
+}) {
+  const columns = useMemo(() => buildShipmentColumns({ productCodes, staff, canManage }), [productCodes, staff, canManage]);
   return (
     <DataTable
       defaultSort="createdAt"
-      columns={shipmentColumns}
+      columns={columns}
       data={rows}
       pageCount={pageCount}
       total={total}

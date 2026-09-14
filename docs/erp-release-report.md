@@ -1649,3 +1649,109 @@ lượt này; chỉ phần chênh **−4.566.000đ** là đo được chính xá
 
 `npm test` **TẤT CẢ KIỂM THỬ ĐẠT** · **15/15** bất biến · typecheck sạch · lint 0 lỗi ·
 Chất lượng dữ liệu: **0 NGHIÊM TRỌNG**.
+
+## 10o. DATA TRUTH RELEASE LÊN PRODUCTION + LÔ CHỨNG TỪ CHÉP TAY — 08/09/2026
+
+### Đính chính quan trọng trước khi ghi: "Giao thành công" không phải kết luận cuối
+
+Chủ shop mở chi tiết `PKE1484463365` trên viettelpost.vn và phát hiện tiêu đề nói *"Giao thành
+công"* nhưng hành trình của chính ĐVVC ghi:
+
+> Tồn - Giao không thành công · yêu cầu giao 1 phần · **Thu hộ: 30.000** · **Trọng lượng hoàn:
+> 1.000** · Cod gốc: 474.000 — và có **Đơn hàng hoàn: `PKE14844633651P1`**
+
+Tức khách chỉ trả **30.000đ tiền xem hàng** rồi không nhận; toàn bộ hàng bán quay về shop theo vận
+đơn hoàn. **Đây là đơn HOÀN. 474.000đ không phải doanh thu. 30.000đ là tiền ĐVVC thực thu, không
+phải doanh thu bán hàng.**
+
+Lô chưa apply nên sửa thẳng dữ liệu lô, không cần chứng từ đính chính. Bản ghi nay giữ **nguyên văn**
+chứng từ: COD khai báo, số thực thu, cờ giao một phần, khối lượng hoàn, mã vận đơn hoàn liên kết, và
+chiều `OUTBOUND` / `RETURN`.
+
+**Không cần kiến trúc mới.** Chiều vận đơn đã có sẵn qua `leg_type` + `onReturnLeg()`, và
+`HAS_RETURN_LEG` đã ghép vận đơn hoàn với vận đơn gốc qua `order_reference`. Nhờ vậy `ORDER_OUTCOME`
+kết luận HOÀN qua **hai đường độc lập**: có vận đơn chiều hoàn, và thực thu 30.000đ < ngưỡng 50K.
+
+Rà lại cả 18 mã theo yêu cầu: **ba vận đơn đuôi `1P1`** trong lô chính là bằng chứng hàng đã quay về
+cho ba vận đơn gốc `PKE1484463403`, `PKE1484463365`, `PKE1484463380`. Cơ chế vận đơn chiều hoàn tự
+kết luận khi cả hai được ghi — đã kiểm chứng sau khi apply: cả ba đều trỏ đúng về vận đơn gốc.
+
+### Ràng buộc cơ sở dữ liệu đã làm đúng việc của nó
+
+Lần ghi đầu bị `shipment_events_verified_check` chặn: mọi dòng đánh dấu `VERIFIED` phải nêu **nguồn
+hợp lệ, ai xác minh, lúc nào**. Script thiếu `verified_at` / `verified_by`.
+
+Migration **0035** (viết tay, idempotent, `NOT VALID`) thêm `VTP_UI_MANUAL_VERIFICATION` vào danh
+sách nguồn được mang dấu `VERIFIED`. **Cố ý không nới** các điều kiện còn lại. Script nay khai
+`verified_at` = mốc lô và `verified_by = SHOP_OWNER`, nên dấu `VERIFIED` có nghĩa thật.
+
+### Release lên production
+
+| | |
+|---|---|
+| Commit đang chạy | **`32283778744f`** · nhánh **`main`** |
+| Deploy | run #154 (`a145b11`) rồi #155 (`3228377`, mang migration 0035) |
+| Smoke | `/login` 200 · `/api/health` 200 · `GET` webhook 200 · **POST token sai → 401** |
+| Pancake realtime | 17 gói / 30 phút · 0 lỗi 24h |
+| Poscake chuyển tiếp VTP | 3 gói / 30 phút · 0 lỗi 24h |
+
+### Lô `HISTORICAL_VTP_MANUAL_VERIFY_2026_09_08` — 18/18 đã ghi
+
+| | |
+|---|---|
+| Chứng từ ghi được | **18/18**, tất cả `verification_status = VERIFIED` |
+| Vận đơn đã có sẵn | 2 (`PKE1511633400` → đơn 3621 · `PKE1508908614` → đơn 3176) |
+| Vận đơn tạo mới | 16 |
+| **Đơn bị đoán** | **0** — mọi vận đơn mới đều `order_id` NULL |
+
+Trạng thái sau khi dựng lại từ lịch sử:
+
+- **6 `CANCELLED`** — các vận đơn "Shop hủy lấy";
+- **6 `DELIVERED`** chiều đi;
+- **3 `RETURNED`** — vận đơn chiều hoàn, mỗi cái trỏ đúng về vận đơn gốc;
+- `PKE1508908614` giữ `RETURNING`, `PKE1511633400` giữ `DELIVERED` — **hai đơn đã ghép không đổi
+  kết quả**, không có hồi quy.
+
+`PKE1484463365`: `cod_amount` 474.000 · **`cod_collected` 30.000** · có vận đơn hoàn
+`PKE14844633651P1` → hai bằng chứng độc lập cùng cho ra HOÀN.
+
+### KPI — trước release → sau release + lô chứng từ
+
+| Kết quả đơn | Trước | Sau |
+|---|---|---|
+| `DELIVERED` | 421 | **416** |
+| `RETURNED` | 772 | **784** |
+| **`UNKNOWN`** | — | **13** |
+| `IN_TRANSIT` | 218 | 292 |
+| `NOT_SHIPPED` | 250 | 156 |
+| `CANCELLED` | 293 | 293 |
+| Tỷ lệ GTC | 35,29% | **34,67%** |
+
+Hai lần đo cách nhau khoảng ba giờ **có lưu lượng webhook thật chạy suốt** (≈124 gói/giờ) cộng một
+lần nhập lại tệp, nên không phải toàn bộ chênh lệch thuộc về bản phát hành. Phần **quy được cho
+release** là chắc chắn: **13 đơn vào `UNKNOWN`** (9 rời `DELIVERED`, 4 rời `RETURNED`). Các dịch
+chuyển `NOT_SHIPPED` → `IN_TRANSIT` (−94 / +74) là do vận đơn nhận được chứng từ ĐVVC mới trong
+khoảng thời gian đó, không phải do đổi công thức.
+
+`noEvidence` trong chạy thử canonical giảm **109 → 15**: lô chép tay lấp đúng chỗ lịch sử còn trống.
+
+### Chất lượng dữ liệu sau khi ghi
+
+**0 NGHIÊM TRỌNG** · 432 cảnh báo:
+
+| Luật | Số |
+|---|---|
+| `SHIPMENT_WITHOUT_ORDER` | 264 |
+| `ORDER_SHIPMENT_CONFLICT` | 73 |
+| `SHIPMENT_STATE_DRIFT` | 70 |
+| **`AMBIGUOUS_ORDER_SHIPMENT_MAPPING`** | **12** |
+| `COD_OVERDUE_UNPAID` | 11 |
+| `STALE_SHIPMENT` | 2 |
+
+`SHIPMENT_WITHOUT_ORDER` tăng 248 → 264 đúng bằng 16 vận đơn mới — chúng **cố ý** chưa ghép đơn.
+
+### Nhập nhằng: giữ nguyên, không ép ghép
+
+Vẫn **13 vận đơn chưa có mã**. Lô chứng từ **không** làm giảm con số này, và đó là kết quả đúng: mã
+vận đơn là danh tính, SĐT chỉ là dữ liệu đối chiếu. Đã phân loại ở mục 10n — **0 nhóm** mà cách ghép
+khác nhau cho ra tổng hợp khác nhau, nên không có việc gì phải đẩy sang chủ shop.

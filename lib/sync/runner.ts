@@ -1,9 +1,10 @@
 import { and, eq, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { clearMemo } from "@/lib/cache";
+import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
 
-export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK";
+/** `ERP`: job nội bộ (dựng lại bảng dẫn xuất…) — cũng phải có bản ghi chạy, nếu không hỏng là không ai biết. */
+export type SyncSource = "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ERP" | "SEPAY";
 export type SyncTrigger = "MANUAL" | "CRON" | "WEBHOOK";
 
 export type SyncSummary = {
@@ -28,6 +29,8 @@ export type SyncContext = {
 };
 
 const runningJobs = new Map<string, Promise<unknown>>();
+/** Đồng hồ canh cho từng job đang chạy — dọn khi job kết thúc để không giữ tiến trình sống. */
+const jobWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Bản ghi RUNNING mồ côi: `runningJobs` chỉ nằm trong bộ nhớ tiến trình, nên deploy hay khởi động
@@ -35,6 +38,31 @@ const runningJobs = new Map<string, Promise<unknown>>();
  * mất lần chạy hỏng. Đóng chúng lại mỗi khi bắt đầu một lần chạy mới.
  */
 const ORPHAN_RUN_AFTER_MS = 30 * 60_000;
+
+/**
+ * ĐỒNG HỒ CANH JOB TREO.
+ *
+ * Khoá job nằm trong bộ nhớ tiến trình và chỉ được nhả trong `finally`. Nếu một job TREO — mạng
+ * không timeout, bên thứ ba không trả lời, vòng lặp không thoát — thì `finally` không bao giờ chạy,
+ * khoá không bao giờ nhả, và job đó KHÔNG CÒN CHẠY ĐƯỢC NỮA cho tới khi khởi động lại container.
+ * Phần dọn bản ghi RUNNING mồ côi chỉ sửa dòng trong CSDL, không chạm tới khoá trong bộ nhớ.
+ *
+ * Hệ quả thật: một job đồng bộ treo lúc nửa đêm thì cả ngày hôm sau không có dữ liệu mới, mà giao
+ * diện vẫn báo "đang chạy" — im lặng và rất khó phát hiện.
+ *
+ * Sau ngưỡng này, khoá được nhả và lần chạy được đánh dấu hỏng. Job cũ có thể vẫn còn chạy nền,
+ * nhưng mọi job ở đây đều idempotent (ghi theo khoá tự nhiên), nên chạy chồng an toàn hơn hẳn so
+ * với việc đứng im vĩnh viễn.
+ */
+const JOB_WATCHDOG_MS = 30 * 60_000;
+
+/** Nhả khoá và huỷ đồng hồ canh của một job. */
+function releaseJob(key: string) {
+  runningJobs.delete(key);
+  const timer = jobWatchdogs.get(key);
+  if (timer) clearTimeout(timer);
+  jobWatchdogs.delete(key);
+}
 
 export function isJobRunning(key: string) {
   return runningJobs.has(key);
@@ -102,7 +130,16 @@ export async function runSyncJob<T>(
         .update(schema.syncRuns)
         .set({ status, imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed, detail: summary.detail || logs.at(-1) || "", error: errorText?.slice(0, 2000) ?? null, finishedAt: new Date() })
         .where(eq(schema.syncRuns.id, run.id));
-      publish({ type: "sync", source: options.source, job: options.job, status });
+      /*
+        CHỈ BÁO KHI CÓ GÌ ĐỂ BÁO.
+
+        Mỗi sự kiện `sync` khiến MỌI trình duyệt đang mở làm mới trang trên máy chủ. Job đồng bộ
+        đơn chạy 3 phút một lần và phần lớn lượt chạy không đổi một dòng nào — phát sự kiện cho lượt
+        đó là bắt máy chủ 2 nhân dựng lại trang cho từng người xem mà không có gì mới để xem.
+        Vẫn báo khi: có dòng đổi · có cảnh báo/lỗi · hoặc chính NGƯỜI bấm chạy (họ đang chờ kết quả).
+      */
+      const coGiDeBao = summary.imported + summary.updated + summary.failed > 0 || status !== "SUCCESS" || (options.trigger ?? "MANUAL") === "MANUAL";
+      if (coGiDeBao) publish({ type: "sync", source: options.source, job: options.job, status });
       return { run: { id: run.id, status }, summary, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -113,12 +150,40 @@ export async function runSyncJob<T>(
       publish({ type: "sync", source: options.source, job: options.job, status: "FAILED" });
       throw error;
     } finally {
-      clearMemo();
-      runningJobs.delete(key);
+      /*
+        ĐÁNH DẤU CŨ, KHÔNG XOÁ HẲN — đây là job nền, không ai ngồi chờ nó.
+
+        SỰ CỐ THẬT (10/09/2026, sửa dở): bản vá "trả số cũ ngay, làm mới phía sau" chỉ đổi `audit()`,
+        còn dòng này vẫn xoá sạch đệm sau MỌI job — đơn 3 phút, vận đơn 10 phút, cảnh báo 10 phút.
+        Job giữ ấm 4 phút một lần thua cuộc, và người mở trang chủ vẫn trả giá lượt tính nguội
+        (đo trên production 11/09: 3,3 giây bảng điều khiển + 3,8 giây tóm tắt + 3 giây sự thật
+        tài chính). Người vừa bấm "Đồng bộ" nhận số của phút trước ngay lập tức, và được kéo lên số
+        mới bằng sự kiện `memo` khi lượt tính lại xong (xem lib/cache.ts).
+      */
+      staleMemo();
+      releaseJob(key);
     }
   })();
 
   runningJobs.set(key, promise);
+  // Nhả khoá sau ngưỡng canh, kể cả khi job không bao giờ kết thúc.
+  const watchdog = setTimeout(() => {
+    if (!runningJobs.has(key)) return;
+    runningJobs.delete(key);
+    jobWatchdogs.delete(key);
+    void db
+      .update(schema.syncRuns)
+      .set({
+        status: "FAILED",
+        error: `Job chạy quá ${Math.round(JOB_WATCHDOG_MS / 60_000)} phút mà không kết thúc — đã nhả khoá để lần chạy sau không bị chặn.`,
+        finishedAt: new Date(),
+      })
+      .where(and(eq(schema.syncRuns.id, run.id), eq(schema.syncRuns.status, "RUNNING")))
+      .catch(() => undefined);
+  }, JOB_WATCHDOG_MS);
+  // `unref` để đồng hồ canh không giữ tiến trình sống (quan trọng với script chạy một lần).
+  watchdog.unref?.();
+  jobWatchdogs.set(key, watchdog);
   return promise;
 }
 

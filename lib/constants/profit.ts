@@ -90,3 +90,46 @@ export function rescuedFromRate(orders: number, ratePct: number): number {
 export function fixedCostForPeriod(monthly: number, months: number): number {
   return Math.round(Math.max(0, monthly || 0) * Math.max(0, months));
 }
+
+/**
+ * ───────────── HAI TỶ LỆ QUẢNG CÁO ─────────────
+ *
+ * MỘT công thức duy nhất cho cả Báo cáo lợi nhuận và Bảng điều khiển. Trước đây chỉ có ở báo cáo;
+ * chép sang bảng điều khiển là mở đường cho hai trang cho ra hai con số của cùng một chỉ số.
+ *
+ * MẪU SỐ 0 ⇒ `null`, KHÔNG phải 0%: chưa bán được đồng nào mà hiện "0%" sẽ bị đọc thành "quảng cáo
+ * không tốn gì", ngược hoàn toàn sự thật.
+ */
+export function adsRatio(adSpend: number, denominator: number): number | null {
+  if (!(denominator > 0)) return null;
+  return (adSpend / denominator) * 100;
+}
+
+/**
+ * ───────────── BA TỶ LỆ QUẢNG CÁO, MỘT HÀM ─────────────
+ *
+ * Trước bản này bảng lợi nhuận tính "CPQC / DT GTC" bằng HAI mẫu số khác nhau ở hai chỗ: thẻ tổng
+ * chia cho doanh thu ĐÃ GIAO THẬT, còn từng dòng và dòng tổng của bảng chia cho DT GTC ƯỚC TÍNH.
+ * Cùng một tên cột, hai con số. Nay mọi nơi gọi đúng hàm này và in đúng tên mẫu số:
+ *
+ *   · `overPosSales`          = CPQC ÷ doanh số POS đã chốt (chưa trừ hoàn)
+ *   · `overDeliveredActual`   = CPQC ÷ doanh thu ĐÃ GIAO THẬT theo ORDER_OUTCOME (tới hôm nay)
+ *   · `overProjectedRevenue`  = CPQC ÷ DT GTC ƯỚC TÍNH (đã giao + đang giao × P, cân theo từng đơn)
+ *
+ * Tử số là CPQC ĐÃ QUY KẾT về đúng mã / đúng tổng đang xét. Tiền quảng cáo chưa ghép được mã hàng
+ * KHÔNG được rải đều vào các dòng — nó đứng riêng với nhãn "chưa quy kết". Mẫu số 0 hay chưa đo được
+ * ⇒ `null`, không bao giờ 0%.
+ */
+export type AdsRatios = {
+  overPosSales: number | null;
+  overDeliveredActual: number | null;
+  overProjectedRevenue: number | null;
+};
+
+export function adsRatios(input: { adSpend: number; posSales: number; deliveredRevenueActual: number; projectedDeliveredRevenue: number | null }): AdsRatios {
+  return {
+    overPosSales: adsRatio(input.adSpend, input.posSales),
+    overDeliveredActual: adsRatio(input.adSpend, input.deliveredRevenueActual),
+    overProjectedRevenue: input.projectedDeliveredRevenue === null ? null : adsRatio(input.adSpend, input.projectedDeliveredRevenue),
+  };
+}

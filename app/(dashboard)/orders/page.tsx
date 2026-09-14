@@ -1,20 +1,26 @@
-import { Download } from "lucide-react";
+import Link from "next/link";
+import { Download, ShieldAlert } from "lucide-react";
 import { OrdersTable } from "@/app/(dashboard)/orders/orders-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
+import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listOrders, orderFacets, orderSummary, ORDER_SORTABLE } from "@/lib/queries/orders";
+import { FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_ORDER } from "@/lib/constants/fulfillment-bucket";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Đơn hàng" };
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("orders:read");
+  const { decision } = await requireResource("ORDERS", "orders:read");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Đơn hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
+  const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment"], sortable: ORDER_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listOrders(params), orderFacets(params), orderSummary(params)]);
   const exportQuery = new URLSearchParams(Object.entries(raw).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : v ? [[k, v]] : []))).toString();
 
@@ -23,9 +29,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Bán hàng"
         title="Đơn hàng"
-        description={`${formatNumber(summary.orders)} đơn · doanh thu ${formatVND(summary.revenue)} · ${formatNumber(summary.success)} giao thành công · COD ${formatVND(summary.cod, { compact: true })}`}
         actions={
           <>
+            {/*
+              LỐI VÀO DANH SÁCH SOÁT TRƯỚC KHI GỬI.
+
+              Đặt ở đây chứ không thêm một mục menu mới: nó là một GÓC NHÌN của chính danh sách đơn
+              (đơn còn trong kho, xếp theo khả năng hoàn), không phải một module riêng — cùng khuôn với
+              "Bổ sung danh sách vận đơn" trên trang Đối soát COD.
+            */}
+            <Button asChild variant="outline" size="sm">
+              <Link href="/orders/verify">
+                <ShieldAlert className="size-4" /> Cần xác minh trước khi giao
+              </Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/orders?${exportQuery}`}>
                 <Download className="size-4" /> Xuất CSV
@@ -35,6 +52,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
+      {/*
+        BỐN CON SỐ CỦA BỘ LỌC HIỆN TẠI, ĐỌC ĐƯỢC BẰNG MẮT LƯỚT.
+        Trước đây cùng bốn số này nằm trong một câu chữ xám dưới tiêu đề — "1.234 đơn · doanh thu
+        … · 900 giao thành công · COD …" — muốn lấy một số phải đọc cả câu. Dải ô cho mỗi số một
+        chỗ đứng, và số đơn không còn bị nhắc lại lần nữa ở dòng kết quả bên dưới.
+      */}
+      <StatStrip
+        items={[
+          { label: "Đơn trong bộ lọc", value: formatNumber(summary.orders), note: `${formatNumber(summary.quantity)} sản phẩm` },
+          { label: "Doanh thu lên đơn", value: formatVND(summary.revenue, { compact: true }), hint: "Tiền khách chốt lúc lên đơn, chưa nói gì về việc giao được hay thu được tiền." },
+          { label: "Giao thành công", value: formatNumber(summary.success), tone: "green", hint: "Kết luận theo chứng từ Viettel Post rồi tới COD thực thu — không theo trạng thái Pancake." },
+          { label: "COD", value: formatVND(summary.cod, { compact: true }), hint: "Tổng tiền thu hộ khai báo trên các đơn đang lọc. Đã thu được bao nhiêu thì xem Đối soát COD." },
+        ]}
+      />
       <DataTableToolbar
         searchPlaceholder="Mã đơn, SĐT, tên khách, mã vận đơn, SKU…"
         period={{ defaultKey: "30d" }}
@@ -42,10 +73,19 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           { key: "stage", label: "Trạng thái", options: facets.stages },
           { key: "source", label: "Kênh bán", options: facets.sources },
           { key: "carrier", label: "ĐVVC", options: facets.carriers },
+          /*
+            HAI BỘ LỌC TRẠNG THÁI ĐỨNG CẠNH NHAU, CÓ CHỦ ĐÍCH.
+
+            "Trạng thái" là nhãn Pancake — do người bán bấm. "Hàng đang ở đâu" là kết luận từ chứng
+            từ ĐVVC. Chênh lệch giữa hai cột chính là việc tồn đọng của khâu bàn giao, và nó chỉ
+            nhìn thấy được khi cả hai cùng có mặt.
+          */
+          { key: "fulfillment", label: "Hàng đang ở đâu (ĐVVC)", options: FULFILLMENT_BUCKET_ORDER.map((b) => ({ value: b, label: FULFILLMENT_BUCKET_LABEL[b] })) },
           { key: "payment", label: "Thanh toán", options: [{ value: "cod", label: "Thu hộ COD" }, { value: "prepaid", label: "Đã thanh toán trước" }], single: true },
+          { key: "address", label: "Địa chỉ", options: [{ value: "unnormalized", label: `Chưa chuẩn hoá · không giao được (${formatNumber(summary.unnormalizedAddress)})` }, { value: "normalized", label: "Đã chuẩn hoá" }], single: true },
           ...(facets.sellers.length ? [{ key: "seller", label: "Nhân viên", options: facets.sellers }] : []),
         ]}
-        resultLabel={`${formatNumber(total)} đơn phù hợp · ${formatNumber(summary.quantity)} sản phẩm`}
+        resultLabel={total === summary.orders ? undefined : `${formatNumber(total)} đơn phù hợp`}
       />
       <OrdersTable rows={rows} pageCount={pageCount} total={total} />
     </div>

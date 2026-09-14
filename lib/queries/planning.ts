@@ -1,9 +1,9 @@
-import { asc, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
 import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { getSettingJson } from "@/lib/settings";
 
 const pv = schema.productVariants;
@@ -14,7 +14,7 @@ const s = schema.shipments;
 
 export async function loadPlanningAssumptions(): Promise<PlanningAssumptions> {
   const cfg = await getSettingJson<PlanningAssumptions>(PLANNING_KEY, DEFAULT_PLANNING);
-  return { ...DEFAULT_PLANNING, ...cfg, leadTimeOverrides: cfg.leadTimeOverrides ?? {} };
+  return { ...DEFAULT_PLANNING, ...cfg, leadTimeOverrides: cfg.leadTimeOverrides ?? {}, minOrderQtyOverrides: cfg.minOrderQtyOverrides ?? {} };
 }
 
 export type PlanRow = PlanOutput & {
@@ -36,6 +36,12 @@ export type PlanRow = PlanOutput & {
   sold7: number;
   sold30: number;
   soldInWindow: number;
+  /** Giao thành công theo ORDER_OUTCOME (toàn lịch sử) — để tính tỷ lệ hoàn của riêng mẫu mã. */
+  delivered: number;
+  /** Đơn hoàn theo ORDER_OUTCOME (toàn lịch sử). */
+  returned: number;
+  /** Số lượng bán của ngày mạnh nhất trong cửa sổ — căn cứ nhận ra đột biến. */
+  peakDayQty: number;
   leadTimeDays: number;
   unitCost: number;
   retailPrice: number;
@@ -72,24 +78,58 @@ function demandSubquery(db: Awaited<ReturnType<typeof getDb>>, days: number, ali
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
-    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
     .groupBy(oi.variantId)
     .as(`demand_${alias}`);
 }
 
-async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanReport> {
-  const db = await getDb();
-  const saved = await loadPlanningAssumptions();
-  const coverDays = Number.isFinite(opt.coverDays) ? Math.min(365, Math.max(0, Math.round(opt.coverDays as number))) : saved.coverDays;
-  const countIncoming = opt.countIncoming !== false;
-  const a: PlanningAssumptions = { ...saved, coverDays };
+/**
+ * NGÀY BÁN MẠNH NHẤT của từng mẫu mã trong cửa sổ tính tốc độ.
+ *
+ * Dùng để nhận ra đột biến: một buổi livestream bán 60 cái trong 14 ngày đẩy tốc độ lên 4,3
+ * cái/ngày, và kế hoạch sẽ đặt sản xuất theo nhịp đó cho cả tháng sau. Xem `computeVelocity`.
+ *
+ * Ngày tính theo GIỜ VIỆT NAM: một buổi live tối muộn không được tách làm hai ngày.
+ */
+function peakDaySubquery(db: Awaited<ReturnType<typeof getDb>>, days: number) {
+  const daily = db
+    .select({
+      variantId: oi.variantId,
+      day: sql<string>`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`.as("sale_day"),
+      qty: sql<number>`coalesce(sum(${oi.quantity}), 0)`.as("day_qty"),
+    })
+    .from(oi)
+    .innerJoin(o, eq(o.id, oi.orderId))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`)
+    .groupBy(oi.variantId, sql`((${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh')::date)`)
+    .as("daily_sales");
+
+  return db
+    .select({ variantId: daily.variantId, peak: sql<number>`coalesce(max(${daily.qty}), 0)`.as("peak_day_qty") })
+    .from(daily)
+    .groupBy(daily.variantId)
+    .as("peak_day");
+}
+
+/**
+ * ═══════ CÂU LỆNH DÒNG KẾ HOẠCH — TÁCH RA ĐỂ ĐO ĐƯỢC ═══════
+ *
+ * Trước đây câu này dựng ngay trong `getReplenishmentPlanUncached`, nên công cụ chẩn đoán muốn
+ * `EXPLAIN` nó thì phải CHÉP TAY lại SQL — và chép tay nghĩa là đo một câu khác với câu đang chạy
+ * thật. Tách ra ở đây, không đổi một dấu nào của truy vấn.
+ *
+ * `scripts/explain-stock.ts` gọi đúng hàm này.
+ */
+export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: PlanningAssumptions) {
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
   const d7 = demandSubquery(db, 7, "d7");
   const d30 = demandSubquery(db, 30, "d30");
   const dw = demandSubquery(db, Math.max(1, a.velocityWindowDays), "dw");
-  const rows = await db
+  const peak = peakDaySubquery(db, Math.max(1, a.velocityWindowDays));
+  return db
     .select({
       variantId: pv.id,
       productId: pv.productId,
@@ -112,6 +152,7 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
       sold7: sql<number>`coalesce(${d7.qty}, 0)`,
       sold30: sql<number>`coalesce(${d30.qty}, 0)`,
       soldInWindow: sql<number>`coalesce(${dw.qty}, 0)`,
+      peakDayQty: sql<number>`coalesce(${peak.peak}, 0)`,
       unitCost: sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`,
       retailPrice: pv.retailPrice,
     })
@@ -122,8 +163,20 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
     .leftJoin(d7, eq(d7.variantId, pv.id))
     .leftJoin(d30, eq(d30.variantId, pv.id))
     .leftJoin(dw, eq(dw.variantId, pv.id))
+    .leftJoin(peak, eq(peak.variantId, pv.id))
     .where(sql`${pv.isRemoved} = false and ${p.isRemoved} = false`)
     .orderBy(asc(p.name), asc(pv.sku));
+}
+
+async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanReport> {
+  const db = await getDb();
+  const saved = await loadPlanningAssumptions();
+  const coverDays = Number.isFinite(opt.coverDays) ? Math.min(365, Math.max(0, Math.round(opt.coverDays as number))) : saved.coverDays;
+  const countIncoming = opt.countIncoming !== false;
+  const a: PlanningAssumptions = { ...saved, coverDays };
+  // JIT tắt trong đúng giao dịch này: đo được 8.578ms → 26ms cho một truy vấn cùng loại, toàn bộ
+  // chênh lệch là thời gian biên dịch. Xem `chayKhongJit`.
+  const rows = await chayKhongJit(db, (tx) => buildPlanRowsQuery(tx, a));
 
   // Tỷ lệ nhập lại được kho: hàng hoàn đã lập phiếu tái nhập ÷ hàng hoàn đã xử lý, tính trên toàn
   // shop (mẫu từng mẫu mã quá nhỏ). Chưa có dữ liệu thì coi như về đủ — đó là mặc định vật lý.
@@ -140,7 +193,7 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
     const leadTimeDays = a.leadTimeOverrides[r.productId] ?? a.leadTimeDays;
     const ketThuc = Number(r.delivered ?? 0) + Number(r.returned ?? 0);
     const returnRate = ketThuc >= MIN_RETURN_RATE_SAMPLE ? Number(r.returned ?? 0) / ketThuc : shopReturnRate;
-    const plan = computePlan({ stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo), inTransit: Number(r.inTransit ?? 0), awaitingReturn: Number(r.awaitingReturn ?? 0), returnRate, returnRecoveryRate, countIncoming });
+    const plan = computePlan({ stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo), peakDayQty: Number(r.peakDayQty ?? 0), minOrderQty: a.minOrderQtyOverrides?.[r.productId] ?? a.minOrderQty, inTransit: Number(r.inTransit ?? 0), awaitingReturn: Number(r.awaitingReturn ?? 0), returnRate, returnRecoveryRate, countIncoming });
     const unitCost = Number(r.unitCost ?? 0);
     return {
       ...plan,
@@ -161,6 +214,9 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
       sold7: Number(r.sold7 ?? 0),
       sold30: Number(r.sold30 ?? 0),
       soldInWindow: Number(r.soldInWindow ?? 0),
+      delivered: Number(r.delivered ?? 0),
+      returned: Number(r.returned ?? 0),
+      peakDayQty: Number(r.peakDayQty ?? 0),
       leadTimeDays,
       unitCost,
       retailPrice: Number(r.retailPrice ?? 0),

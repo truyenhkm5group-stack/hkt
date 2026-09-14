@@ -1,17 +1,23 @@
+import { Suspense } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Banknote, BellRing, Boxes, CircleDollarSign, Clock, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
+import { AlertTriangle, Banknote, BellRing, Boxes, CircleDollarSign, Megaphone, PackageCheck, ShoppingBag, TrendingUp, Truck } from "lucide-react";
 import { RevenueChart } from "@/components/charts/revenue-chart";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FULFILLMENT_BUCKET_HINT, FULFILLMENT_BUCKET_LABEL, FULFILLMENT_BUCKET_ORDER } from "@/lib/constants/fulfillment-bucket";
+import { tongRoDayDu } from "@/lib/queries/fulfillment-buckets";
+import { StatStrip } from "@/components/stat-tile";
+import { TopActions } from "@/app/(dashboard)/top-actions";
+import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
+import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { PageHeader } from "@/components/page-header";
-import { OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
+import { SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
-import { Money, SectionCard } from "@/components/ui-bits";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SectionCard } from "@/components/ui-bits";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
-import { SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
 import { integrationStatus } from "@/lib/env";
-import { formatDateTime, formatNumber, formatTimeAgo, formatVND, pct } from "@/lib/format";
+import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { requirePermission } from "@/lib/auth/session";
@@ -34,15 +40,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const successRate = data.kpi.successRate;
   const margin = data.finance.netRevenue ? (data.finance.estimatedProfit / data.finance.netRevenue) * 100 : 0;
   const maxStage = Math.max(1, ...ORDER_STAGE_ORDER.map((s) => data.byStage[s]?.count ?? 0));
+  const maxFulfillment = Math.max(1, ...FULFILLMENT_BUCKET_ORDER.map((b) => data.fulfillment.counts[b]));
+  const buckedCheck = tongRoDayDu(data.fulfillment);
   const maxChannel = Math.max(1, ...data.channels.map((c) => c.revenue));
-
-  const codSteps = [
-    { key: "PENDING", label: "Chưa thu", tone: "bg-amber-400" },
-    { key: "COLLECTED", label: "Đã thu (chờ ĐVVC đối soát)", tone: "bg-sky-500" },
-    { key: "RECONCILED", label: "ĐVVC đã đối soát", tone: "bg-indigo-500" },
-    { key: "PAID_TO_BANK", label: "Đã về ngân hàng", tone: "bg-emerald-500" },
-    { key: "DISPUTED", label: "Có chênh lệch", tone: "bg-rose-500" },
-  ];
 
   return (
     <div className="space-y-6">
@@ -77,133 +77,234 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       ) : null}
 
       {/*
-        BUỒNG LÁI RA QUYẾT ĐỊNH.
+        BUỒNG LÁI RA QUYẾT ĐỊNH — BA BẬC, KHÔNG PHẢI MƯỜI THẺ BẰNG NHAU.
+
         Ba con số tiền được tách rõ bằng chính NHÃN, vì trước đây cả ba đều được gọi là "doanh thu":
         LÊN ĐƠN (khách chốt) → GIAO THÀNH CÔNG (tới tay khách) → THỰC NHẬN (đã vào tài khoản).
         Mỗi thẻ bấm được và mở đúng TẬP ĐƠN đã sinh ra con số đó.
+
+        Trước đây cả mười chỉ số nằm trên cùng một lưới, cùng một cỡ chữ: mắt không biết đọc từ đâu
+        và "dữ liệu sai nghiêm trọng" to ngang "doanh thu". Nay KÍCH THƯỚC nói ra thứ tự quan trọng:
+          bậc 1 — dây chuyền tiền, ba con số dẫn dắt cả trang;
+          bậc 2 — lợi nhuận và tiền/việc đang treo, thứ cần quyết hôm nay;
+          bậc 3 — tỷ lệ theo dõi định kỳ, gom vào một dải mảnh.
+        Cùng chừng ấy thông tin, không bỏ con số nào.
       */}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Link href={`/orders?period=${period.key}`} className="block">
-          <MetricCard
-            label="① Doanh thu LÊN ĐƠN"
-            value={formatVND(data.money.booked, { compact: true })}
-            change={change(data.kpi.revenue, data.previous?.revenue)}
-            note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn · chưa nói gì về việc giao được hay thu được tiền`}
-            icon={ShoppingBag}
-            tone="blue"
-          />
-        </Link>
-        <Link href={`/reports/returns?period=${period.key}`} className="block">
-          <MetricCard
-            label="② Doanh thu GIAO THÀNH CÔNG"
-            value={formatVND(data.money.delivered, { compact: true })}
-            change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
-            note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`} trên đơn đã kết thúc`}
-            icon={PackageCheck}
-            tone="green"
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="③ TIỀN THỰC NHẬN"
-            value={formatVND(data.money.cashReceived, { compact: true })}
-            note={`Đã vào tài khoản theo bảng kê + khách chuyển trước · KHÁC hẳn hai con số bên trái`}
-            icon={Banknote}
-            tone="green"
-          />
-        </Link>
-        <Link href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`} className="block">
-          <MetricCard
-            label="Viettel Post còn giữ"
-            value={formatVND(data.money.codOutstanding, { compact: true })}
-            note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa thấy đồng nào trên bảng kê`}
-            icon={Truck}
-            tone="amber"
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="Lợi nhuận góp"
-            value={formatVND(data.money.contribution, { compact: true })}
-            note="Doanh thu giao TC − giá vốn − cước − phí hoàn − quảng cáo (chưa trừ vận hành)"
-            icon={CircleDollarSign}
-            tone={data.money.contribution >= 0 ? "primary" : "rose"}
-          />
-        </Link>
-        <Link href={`/reports?tab=truth&period=${period.key}`} className="block">
-          <MetricCard
-            label="Lợi nhuận ước tính"
-            value={formatVND(data.finance.estimatedProfit, { compact: true })}
-            note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công · ước tính theo đơn, KHÔNG phải tiền trong tài khoản`}
-            icon={TrendingUp}
-            tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
-          />
-        </Link>
-        <Link href="/alerts" className="block">
-          <MetricCard
-            label="Việc cần xử lý"
-            value={formatNumber(data.attention.newOrders + data.attention.failedDelivery + data.attention.staleShipments)}
-            note={`${formatNumber(data.attention.newOrders)} đơn mới · ${formatNumber(data.attention.failedDelivery)} giao thất bại / đang hoàn · ${formatNumber(data.attention.staleShipments)} treo lâu`}
-            icon={BellRing}
-            tone="amber"
-          />
-        </Link>
-        <Link href="/data-quality" className="block">
-          <MetricCard
-            label="Dữ liệu sai nghiêm trọng"
-            value={formatNumber(data.dataIssues.critical)}
-            note={
-              data.dataIssues.critical
-                ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm — số liệu trên trang này có thể chưa đúng`
-                : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`
-            }
-            icon={AlertTriangle}
-            tone={data.dataIssues.critical ? "rose" : "slate"}
-          />
-        </Link>
+      <section className="grid gap-4 lg:grid-cols-3">
+        <MetricCard
+          size="lg"
+          href={`/orders?period=${period.key}`}
+          label="① Doanh thu LÊN ĐƠN"
+          value={formatVND(data.money.booked, { compact: true })}
+          change={change(data.kpi.revenue, data.previous?.revenue)}
+          note={`${formatNumber(data.kpi.orders)} đơn đã xác nhận · TB ${formatVND(data.kpi.aov, { compact: true })}/đơn`}
+          hint="Tiền khách chốt lúc lên đơn — chưa nói gì về việc giao được hay thu được tiền. Bấm thẻ để mở đúng tập đơn."
+          icon={ShoppingBag}
+          tone="blue"
+        />
+        <MetricCard
+          size="lg"
+          href={`/reports/returns?period=${period.key}`}
+          label="② Doanh thu GIAO THÀNH CÔNG"
+          value={formatVND(data.money.delivered, { compact: true })}
+          change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
+          note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} chưa có chứng từ` : ""}`}
+          hint="Kết luận theo chứng từ Viettel Post, rồi tới tiền COD thực thu; không suy từ trạng thái Pancake. GTC tính trên đơn đã kết thúc. Đơn chưa có chứng từ là CHƯA BIẾT, không tính vào mẫu số."
+          icon={PackageCheck}
+          tone="green"
+        />
+        <MetricCard
+          size="lg"
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="③ TIỀN THỰC NHẬN"
+          value={formatVND(data.money.cashReceived, { compact: true })}
+          note="Bảng kê Viettel Post + khách chuyển trước"
+          hint="Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
+          icon={Banknote}
+          tone="green"
+        />
       </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="Lợi nhuận ước tính"
+          value={formatVND(data.finance.estimatedProfit, { compact: true })}
+          note={`Biên ${margin.toFixed(1)}% trên doanh thu giao thành công`}
+          hint="Ước tính THEO ĐƠN trong kỳ, đã trừ chi phí vận hành phân bổ theo kỳ. KHÔNG phải tiền trong tài khoản — phần lớn còn nằm ở Viettel Post."
+          icon={TrendingUp}
+          tone={data.finance.estimatedProfit >= 0 ? "primary" : "rose"}
+        />
+        <MetricCard
+          href={`/reports?tab=truth&period=${period.key}`}
+          label="Lợi nhuận góp"
+          value={formatVND(data.money.contribution, { compact: true })}
+          note="Trước chi phí vận hành"
+          hint="Doanh thu giao thành công − giá vốn − cước − phí hoàn − quảng cáo. Chưa trừ chi phí vận hành cố định."
+          icon={CircleDollarSign}
+          tone={data.money.contribution >= 0 ? "primary" : "rose"}
+        />
+        <MetricCard
+          href={`/cod?cod=COLLECTED,RECONCILED&period=${period.key}`}
+          label="Viettel Post còn giữ"
+          value={formatVND(data.money.codOutstanding, { compact: true })}
+          note={`${formatNumber(data.money.codOutstandingCount)} đơn giao thành công chưa có trên bảng kê`}
+          hint="Đơn giao thành công mà chưa dòng bảng kê nào nhắc tới — tiền cần đòi Viettel Post. Bấm thẻ để mở danh sách."
+          icon={Truck}
+          tone="amber"
+        />
+        <MetricCard
+          href="/alerts"
+          label="Việc cần xử lý"
+          value={formatNumber(data.attention.newOrders + data.attention.failedDelivery + data.attention.staleShipments)}
+          note={`${formatNumber(data.attention.newOrders)} đơn mới · ${formatNumber(data.attention.failedDelivery)} giao thất bại / đang hoàn · ${formatNumber(data.attention.staleShipments)} treo lâu`}
+          icon={BellRing}
+          tone="amber"
+        />
+      </section>
+
+      {/* HAI TỶ LỆ QUẢNG CÁO — mẫu số khác nhau có chủ đích, không thay thế cho nhau:
+          một bên là số khách chốt, một bên là số hàng thật sự tới tay khách. */}
+      <StatStrip
+        columns={3}
+        items={[
+          {
+            label: "QC / Doanh số POS",
+            value: data.money.adsOverBooked === null ? "—" : `${data.money.adsOverBooked.toFixed(1)}%`,
+            note: `${formatVND(data.finance.adSpend, { compact: true })} chi quảng cáo / doanh thu lên đơn`,
+            hint: "Mẫu số là doanh thu LÊN ĐƠN, chưa trừ đơn hoàn — đây là tỷ lệ lạc quan nhất, dùng để so với ngưỡng chốt đơn của marketer.",
+            icon: Megaphone,
+            href: `/ads?period=${period.key}`,
+          },
+          {
+            label: "QC / DT giao thành công",
+            value: data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`,
+            note: "Chi quảng cáo / doanh thu đã tới tay khách",
+            hint: "Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép.",
+            icon: Megaphone,
+            tone: data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? ("rose" as const) : ("default" as const),
+            href: `/ads?period=${period.key}`,
+          },
+          {
+            label: "Dữ liệu sai nghiêm trọng",
+            value: formatNumber(data.dataIssues.critical),
+            note: data.dataIssues.critical
+              ? `${formatNumber(data.dataIssues.firing)}/${formatNumber(data.dataIssues.ruleCount)} luật đối soát đang có vi phạm`
+              : `${formatNumber(data.dataIssues.ruleCount)} luật đối soát đều sạch`,
+            hint: "Vi phạm nghiêm trọng nghĩa là số liệu trên trang này có thể chưa đúng. Bấm ô để xem luật nào và sửa ở đâu.",
+            icon: AlertTriangle,
+            tone: data.dataIssues.critical ? ("rose" as const) : ("muted" as const),
+            href: "/data-quality",
+          },
+        ]}
+      />
+
+      {/*
+        HAI KHỐI DƯỚI ĐÂY CHẢY VỀ SAU, KHÔNG CHẶN CÁC THẺ TIỀN Ở TRÊN.
+        "Tóm tắt & rủi ro" và "Việc cần làm hôm nay" kéo theo hàng đợi việc và kế hoạch tồn kho —
+        nặng hơn hẳn phần còn lại của trang và KHÔNG phải thứ chủ shop nhìn đầu tiên. Bọc trong
+        Suspense thì ba con số tiền hiện ngay, hai khối này điền vào sau cùng khung xương của chính
+        chúng. Trước đây cả trang phải đợi khối chậm nhất.
+      */}
+      {/* Độ tươi đứng TRƯỚC mọi con số: biết số cũ hay mới là điều kiện để đọc số. */}
+      <Suspense fallback={<Skeleton className="h-9 rounded-xl" />}>
+        <DataFreshnessStrip />
+      </Suspense>
+
+      <Suspense fallback={<Skeleton className="h-32 rounded-xl" />}>
+        <BusinessBriefSection period={period} />
+      </Suspense>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
         <SectionCard title="Doanh thu theo ngày" description="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
           <RevenueChart data={data.daily} />
         </SectionCard>
-        <SectionCard title="Cần xử lý" description="Ưu tiên trong ca làm việc" padded={false}>
-          <div className="divide-y">
-            <AttentionRow href="/orders?stage=NEW" icon={BellRing} tone="bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300" title={`${formatNumber(data.attention.newOrders)} đơn mới chờ xác nhận`} note="Đơn ở trạng thái Mới trên Pancake" />
-            <AttentionRow href="/shipments?stage=DELIVERY_FAILED,RETURNING" icon={AlertTriangle} tone="bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title={`${formatNumber(data.attention.failedDelivery)} vận đơn giao thất bại / đang hoàn`} note="Cần gọi khách hoặc yêu cầu phát tiếp" />
-            <AttentionRow href="/shipments?stage=PICKED_UP,IN_TRANSIT,OUT_FOR_DELIVERY" icon={Clock} tone="bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" title={`${formatNumber(data.attention.staleShipments)} vận đơn quá 4 ngày chưa giao`} note="Không có cập nhật mới từ ĐVVC" />
-            <AttentionRow href="/cod?cod=COLLECTED,RECONCILED" icon={CircleDollarSign} tone="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" title={`${formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về tài khoản`} note={`${formatNumber(data.attention.codWaiting.count)} vận đơn đã giao, chưa nhận tiền`} />
-            <AttentionRow
-              href="/inventory/planning"
-              icon={Boxes}
-              tone="bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-              title={`${formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp`}
-              note={`${formatNumber(data.stockRisk.out)} đã hết · ${formatNumber(data.stockRisk.critical)} sẽ hết trước khi lô mới về · ${formatNumber(data.stockRisk.low)} sắp thiếu${data.stockRisk.unknown ? ` · ${formatNumber(data.stockRisk.unknown)} chưa có phiếu nhập nên chưa tính được` : ""}`}
-            />
-          </div>
-          <div className="m-4 rounded-xl bg-sidebar p-4 text-sidebar-foreground">
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-sidebar-foreground/60">Đồng bộ gần nhất</p>
-            {data.lastSyncRows.length ? (
-              <ul className="mt-2 space-y-1.5 text-xs">
-                {data.lastSyncRows.map((run) => (
-                  <li key={run.id} className="flex items-center justify-between gap-2">
-                    <span className="truncate">{run.source === "PANCAKE" ? "Pancake" : "Viettel Post"} · {run.job}</span>
-                    <span className={run.status === "SUCCESS" ? "text-emerald-300" : run.status === "FAILED" ? "text-rose-300" : "text-amber-300"}>{formatTimeAgo(run.finishedAt)}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-xs text-sidebar-foreground/70">Chưa chạy đồng bộ lần nào.</p>
-            )}
-            <Link href="/integrations" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary-foreground/90 hover:underline">
-              Kết nối dữ liệu <ArrowRight className="size-3" />
-            </Link>
+        <SectionCard
+          title="Việc cần làm hôm nay"
+          description="Xếp theo cùng công thức ưu tiên của toàn ERP"
+          hint="Trước đây ô này liệt kê các NHÓM việc kèm số đếm; đọc xong vẫn phải mở từng trang để biết bắt đầu từ đâu. Nay hiện đúng những việc cụ thể đứng đầu hàng đợi, kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa."
+          actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
+          padded={false}
+        >
+          <Suspense fallback={<div className="space-y-2 p-5">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>}>
+            <TopActions />
+          </Suspense>
+          {/* Số đếm theo nhóm giữ lại ở dạng gọn: nó trả lời "tình hình chung thế nào", còn danh
+              sách trên trả lời "bắt đầu từ đâu". Hai câu hỏi khác nhau. */}
+          <div className="border-t px-5 py-2.5 text-[11px] text-muted-foreground">
+            {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
+            {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
+            {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
           </div>
         </SectionCard>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-2">
-        <SectionCard title="Luồng đơn hàng" description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)">
+      {/*
+        BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
+        của trang Đối soát COD) và "Đơn hàng mới nhất" (bản chép 8 cột của trang Đơn hàng). Cùng số
+        ở hai nơi là hai chỗ để lệch, và ba truy vấn nữa mỗi lần mở trang chủ. Mỗi khối chỉ còn ở
+        NHÀ của nó: vận đơn ở /shipments, COD ở /cod, đơn mới ở /orders.
+      */}
+      <section className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+        {/*
+          ═══ HAI KHỐI TRẠNG THÁI, CỐ Ý ĐỨNG CẠNH NHAU ═══
+
+          "Luồng đơn hàng" đếm theo NHÃN PANCAKE — mười ba trạng thái do người bán bấm tay.
+          "Hàng đang ở đâu" đếm theo CHỨNG TỪ ĐVVC. Hai khối trả lời hai câu hỏi khác nhau và
+          KHÔNG thay thế cho nhau; chênh lệch giữa chúng chính là việc tồn đọng của khâu bàn giao
+          (đơn bấm "đã gửi" mà chưa ai lấy, đơn đã tới tay khách mà chưa ai bấm sang "đã nhận").
+        */}
+        <SectionCard
+          title="Hàng đang ở đâu"
+          description="Theo chứng từ đơn vị vận chuyển — không đọc trạng thái Pancake, không đọc tiền"
+          actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{formatNumber(data.fulfillment.total)} đơn</span>}
+        >
+          <div className="space-y-2.5">
+            {FULFILLMENT_BUCKET_ORDER.filter((b) => data.fulfillment.counts[b] > 0).map((bucket) => {
+              const so = data.fulfillment.counts[bucket];
+              return (
+                <Link
+                  key={bucket}
+                  href={`/orders?fulfillment=${bucket}&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey}&to=${period.toKey}` : ""}`}
+                  className="group flex items-center gap-3 text-sm"
+                  title={FULFILLMENT_BUCKET_HINT[bucket]}
+                >
+                  <span className={`w-40 shrink-0 truncate text-xs group-hover:text-foreground ${bucket === "IN_FLIGHT" ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}>
+                    {FULFILLMENT_BUCKET_LABEL[bucket]}
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div className={`h-full rounded-full transition-all ${bucket === "IN_FLIGHT" ? "bg-primary" : "bg-primary/40"}`} style={{ width: `${Math.max(so ? 2 : 0, (so / maxFulfillment) * 100)}%` }} />
+                  </div>
+                  <span className="numeric w-12 shrink-0 text-right text-xs font-semibold">{formatNumber(so)}</span>
+                  <span className="numeric hidden w-20 shrink-0 text-right text-xs text-muted-foreground sm:block">{formatVND(data.fulfillment.bookedRevenue[bucket], { compact: true })}</span>
+                </Link>
+              );
+            })}
+          </div>
+          {/*
+            TỔNG KIỂM HIỆN RA MÀN HÌNH, KHÔNG GIẤU TRONG LOG.
+
+            Các rổ loại trừ nhau theo cấu trúc nên tổng của chúng phải bằng tổng đơn. Một biểu thức
+            `case` thiếu nhánh sẽ trả NULL và con số biến mất mà không lỗi nào phát ra — dòng này là
+            chỗ nó lộ ra, trước mặt người đọc chứ không trong một tệp log không ai mở.
+          */}
+          {!buckedCheck.ok ? (
+            <p className="mt-3 rounded-lg border border-rose-300/70 bg-rose-50/60 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
+              {formatNumber(Math.abs(buckedCheck.chenh))} đơn không rổ nào nhận (tổng rổ {formatNumber(buckedCheck.tongRo)} / tổng đơn {formatNumber(data.fulfillment.total)}). Con số bên trên đang thiếu — báo cho người dựng ERP.
+            </p>
+          ) : null}
+          <p className="mt-3 border-t pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            <b>“Đã gửi”</b> ở đây nghĩa là <b>đơn vị vận chuyển đã cầm được hàng và kiện vẫn đang trên đường tới khách</b>. Nó KHÔNG
+            gồm hàng còn trong kho, hàng bưu tá tới mà không lấy được, đơn đã giao tới khách, đơn đang hoàn hay đã hoàn, và đơn đã
+            huỷ. Đây là số kiện <b>đang đi ngay lúc này</b>, không phải tổng đã gửi trong kỳ. Căn cứ chỉ là chứng từ của đơn vị vận
+            chuyển — trạng thái Pancake, tiền thu hộ và đối soát không tham gia. Bấm một dòng để mở đúng những đơn đã sinh ra con số đó.
+          </p>
+        </SectionCard>
+        <SectionCard
+          title="Luồng đơn hàng"
+          description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)"
+          hint="Đây là nhãn do NGƯỜI BÁN bấm trên Pancake, không phải kết luận từ chứng từ vận chuyển. “Đã gửi hàng” ở khối này nghĩa là ai đó đã bấm nút — muốn biết gói hàng thật sự đang ở đâu thì đọc khối “Hàng đang ở đâu” bên cạnh."
+        >
           <div className="space-y-2.5">
             {ORDER_STAGE_ORDER.filter((s) => s !== "DELETED" || (data.byStage[s]?.count ?? 0) > 0).map((stage) => {
               const row = data.byStage[stage] ?? { count: 0, revenue: 0 };
@@ -245,33 +346,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
           )}
         </SectionCard>
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-2">
-        <SectionCard title="Vận đơn & COD" description="Toàn bộ vận đơn đang theo dõi (Pancake + Viettel Post)">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {SHIPMENT_STAGE_ORDER.filter((s) => s !== "UNKNOWN").map((stage) => (
-              <Link key={stage} href={`/shipments?stage=${stage}`} className="rounded-lg border bg-background p-2.5 hover:border-primary/50">
-                <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{SHIPMENT_STAGE_LABEL[stage]}</p>
-                <p className="numeric mt-1 text-lg font-bold">{formatNumber(data.shipmentsByStage[stage]?.count ?? 0)}</p>
-              </Link>
-            ))}
-          </div>
-          <div className="mt-5 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tiền thu hộ (COD)</p>
-            {codSteps.map((step) => {
-              const row = data.cod[step.key] ?? { count: 0, amount: 0 };
-              return (
-                <Link key={step.key} href={`/cod?cod=${step.key}`} className="flex items-center gap-3 rounded-lg px-1 py-1 text-sm hover:bg-muted/60">
-                  <span className={`size-2.5 rounded-full ${step.tone}`} />
-                  <span className="flex-1 text-xs font-medium">{step.label}</span>
-                  <span className="text-xs text-muted-foreground">{formatNumber(row.count)} vđ</span>
-                  <span className="numeric w-24 text-right text-xs font-semibold">{formatVND(row.amount, { compact: true })}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </SectionCard>
         <SectionCard title="Sản phẩm bán chạy" description="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
@@ -306,69 +380,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </SectionCard>
       </section>
 
-      <SectionCard title="Đơn hàng mới nhất" description="Cập nhật tức thì khi Pancake gửi webhook" actions={<Link href="/orders" className="text-xs font-semibold text-primary hover:underline">Xem tất cả</Link>} padded={false}>
-        <div className="overflow-x-auto">
-          <Table className="min-w-[860px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Mã đơn</TableHead>
-                <TableHead>Khách hàng</TableHead>
-                <TableHead>Sản phẩm</TableHead>
-                <TableHead>Kênh</TableHead>
-                <TableHead>Trạng thái</TableHead>
-                <TableHead>Vận chuyển</TableHead>
-                <TableHead className="text-right">Tổng tiền</TableHead>
-                <TableHead>Thời gian</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.recentOrders.length ? (
-                data.recentOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell>
-                      <Link href={`/orders/${order.id}`} className="font-bold hover:text-primary hover:underline">
-                        #{order.systemId ?? order.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">{order.billFullName || "—"}</div>
-                      <div className="text-xs text-muted-foreground">{order.billPhone}</div>
-                    </TableCell>
-                    <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground">
-                      {order.items.map((i) => `${i.productName}${i.variationDetail ? ` (${i.variationDetail})` : ""} ×${i.quantity}`).join(", ")}
-                      {order.itemsCount > 2 ? ` +${order.itemsCount - 2}` : ""}
-                    </TableCell>
-                    <TableCell><SourceBadge source={order.source} /></TableCell>
-                    <TableCell><OrderStageBadge stage={order.stage} /></TableCell>
-                    <TableCell>{order.shipment ? <span className="inline-flex items-center gap-1.5 text-xs"><Truck className="size-3.5 text-muted-foreground" /><ShipmentStageBadge stage={order.shipment.stage} /></span> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
-                    <TableCell className="text-right font-bold"><Money value={order.totalPriceAfterDiscount} /></TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(order.insertedAt)}</TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">Chưa có đơn hàng.</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </SectionCard>
     </div>
-  );
-}
-
-function AttentionRow({ href, icon: Icon, tone, title, note }: { href: string; icon: typeof BellRing; tone: string; title: string; note: string }) {
-  return (
-    <Link href={href} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/50">
-      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold">{title}</p>
-        <p className="truncate text-xs text-muted-foreground">{note}</p>
-      </div>
-      <ArrowRight className="size-4 text-muted-foreground" />
-    </Link>
   );
 }

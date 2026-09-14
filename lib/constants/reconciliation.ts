@@ -32,9 +32,14 @@ export type ReconciliationRuleKey =
   | "DELIVERED_WITHOUT_DATE"
   | "ORDER_SHIPMENT_CONFLICT"
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
+  | "ORDER_WITH_MULTIPLE_SHIPMENTS"
+  | "COGS_BASIS_UNVERIFIED"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
-  | "COD_OVERDUE_UNPAID";
+  | "COD_OVERDUE_UNPAID"
+  | "EXPENSE_NEEDS_ALLOCATION_REVIEW"
+  | "NEGATIVE_STOCK"
+  | "STOCK_MISSING_OPENING_BALANCE";
 
 /** Loại đối tượng mà một vi phạm trỏ tới — quyết định drill-down mở trang nào. */
 export type IssueEntity = "shipment" | "order" | "order_item" | "webhook_event" | "shipment_event";
@@ -64,6 +69,58 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     reason: "`shipments.stage` khác trạng thái dựng lại từ `shipment_events`. Ảnh chụp đã bị một luồng nào đó ghi sai, hoặc còn sót từ trước khi trạng thái được tính từ lịch sử.",
     suggestedAction: "Dựng lại ảnh chụp từ lịch sử — lịch sử là nguồn sự thật.",
     autoRepair: { from: "lịch sử sự kiện Viettel Post (materializeShipmentState)" },
+  },
+  /**
+   * MỘT ĐƠN CÓ HƠN MỘT VẬN ĐƠN GẮN VÀO.
+   *
+   * Vì sao đây là luật đối soát chứ không phải chuyện nhỏ: gần như MỌI báo cáo đều
+   * `orders left join shipments`, nên một đơn hai vận đơn sẽ được đếm HAI LẦN — doanh thu cộng đôi,
+   * số đơn cộng đôi, tỷ lệ giao thành công lệch, lợi nhuận sai.
+   *
+   * Đo trên production 09/09/2026: 2.430 đơn, **0 đơn** rơi vào trường hợp này. Số liệu đang đúng.
+   * Không phải may: luật 7 (`AGENTS.md`) bắt vận đơn chiều hoàn mang `order_id NULL` nên nguồn sinh
+   * vận đơn thứ hai phổ biến nhất không lọt vào phép nối.
+   *
+   * Nhưng nó IM LẶNG: ngày đầu tiên có một ca, mọi con số tiền sai mà không gì báo. Luật này tồn tại
+   * để ngày đó có người biết — và để KHÔNG ai phải đổi grain báo cáo trước khi có ca thật.
+   */
+  /**
+   * GIÁ VỐN SUY NGƯỢC TỪ PHIẾU NHẬP LẬP SAU NGÀY GIAO.
+   *
+   * Đo trên production 09/09/2026: shop có đúng 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
+   * sớm nhất từ 22/01; 0/2.495 dòng hàng có giá vốn Pancake, 0/37 mẫu mã có giá nhập. Nghĩa là giá
+   * vốn của 368/407 đơn đã giao — 58 triệu — đang được suy ngược từ hai phiếu của tháng 9.
+   *
+   * Con số đó KHÔNG sai theo nghĩa tính nhầm; nó chỉ là chưa có căn cứ. Nhưng nó đang nằm trong lợi
+   * nhuận như thể đã được kiểm chứng, và đó mới là vấn đề. Luật này để chủ shop nhìn thấy đúng phần
+   * lợi nhuận đang dựa trên phỏng đoán.
+   *
+   * CỐ Ý KHÔNG "sửa" bằng cách dựng lại giá vốn về ngày giao: làm vậy sẽ đưa 368 đơn về 0đ và thổi
+   * lợi nhuận lịch sử lên 58 triệu — sai nặng hơn hiện tại.
+   */
+  COGS_BASIS_UNVERIFIED: {
+    key: "COGS_BASIS_UNVERIFIED",
+    entity: "order",
+    severity: "WARNING",
+    label: "Giá vốn đã giao chưa có chứng từ kho tại thời điểm giao",
+    reason:
+      "Đơn đã giao nhưng tại thời điểm giao KHÔNG có phiếu nhập nào cho mẫu mã đó. Giá vốn đang TẠM TÍNH (phiếu lập sau, hoặc giá Pancake / giá nhập mẫu mã) hoặc CHƯA BIẾT (báo cáo tính 0). Lợi nhuận của nhóm đơn này chưa có căn cứ.",
+    suggestedAction:
+      "Nhập phiếu nhập cũ với ngày nhập THẬT nếu còn chứng từ: giá vốn được chốt lại đúng MỘT lần, có nhật ký, rồi đóng băng. Nếu không còn, đây là giới hạn của dữ liệu lịch sử — cần biết để không đọc lợi nhuận kỳ cũ như số đã kiểm chứng.",
+    autoRepair: false,
+  },
+  ORDER_WITH_MULTIPLE_SHIPMENTS: {
+    key: "ORDER_WITH_MULTIPLE_SHIPMENTS",
+    entity: "order",
+    severity: "WARNING",
+    label: "Một đơn đang có hai lần gửi cùng chạy",
+    reason:
+      "Gửi lại sau khi giao thất bại là bình thường và ERP lưu đủ mọi lần gửi. Nhưng ở đây có HAI lần gửi cùng đang sống — chưa lần nào huỷ, hoàn hay giao xong. Hoặc là ghép nhầm vận đơn vào đơn, hoặc là hai gói hàng thật đang cùng đi tới một khách, và cả hai đều tốn cước.",
+    suggestedAction:
+      "Mở đơn, xem hai mã vận đơn. Ghép nhầm thì gỡ khỏi đơn. Gửi trùng thật thì gọi Viettel Post thu hồi một gói trước khi cả hai tới nơi.",
+    // KHÔNG tự sửa: máy không biết vận đơn nào là thật, và đoán sai là xoá mất một lần gửi hàng có
+    // thật khỏi sổ.
+    autoRepair: false,
   },
   COD_NOT_APPLICABLE_WITH_AMOUNT: {
     key: "COD_NOT_APPLICABLE_WITH_AMOUNT",
@@ -106,8 +163,9 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
     entity: "shipment",
     severity: "WARNING",
     label: "Vận đơn chưa ghép được với đơn nào",
-    reason: "Vận đơn có trên Viettel Post nhưng chưa ghép được đơn ERP. Không vào doanh thu, lợi nhuận, tồn kho, marketing.",
-    suggestedAction: "Ghép tay theo số điện thoại / mã tham chiếu ở trang Chất lượng dữ liệu.",
+    reason:
+      "Vận đơn có trên Viettel Post nhưng chưa ghép được đơn ERP. Không vào doanh thu, lợi nhuận, tồn kho, marketing. CỐ Ý không đếm vận đơn CHIỀU HOÀN (chúng là dòng riêng, không có đơn — đúng thiết kế) và gói tin TEST của ĐVVC.",
+    suggestedAction: "Ghép tay theo mã tham chiếu ở trang Chất lượng dữ liệu. Số điện thoại KHÔNG đủ làm danh tính.",
     autoRepair: false,
   },
   DUPLICATE_TRACKING: {
@@ -164,6 +222,38 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
       "Cùng một số điện thoại có nhiều đơn chưa gắn được mã vận đơn, và bằng chứng của ĐVVC không phân biệt được đơn nào ứng với vận đơn nào. Máy CỐ Ý không đoán: gán bừa là bịa ra chứng từ.",
     suggestedAction:
       "Chỉ cần xử lý khi các cách ghép hợp lệ cho ra KẾT QUẢ KHÁC NHAU (ví dụ một vận đơn giao thành công, một vận đơn hoàn). Nếu mọi cách ghép đều cho cùng kết quả thì tổng hợp đã đúng, không cần làm gì.",
+    autoRepair: false,
+  },
+  NEGATIVE_STOCK: {
+    key: "NEGATIVE_STOCK",
+    entity: "order",
+    severity: "WARNING",
+    label: "Tồn kho âm",
+    reason:
+      "Sổ kho tính tồn = phiếu kho − đã xuất qua ĐVVC. Ra số âm nghĩa là hàng đã xuất nhiều hơn số từng nhập — gần như luôn do THIẾU SỐ DƯ ĐẦU KỲ, không phải do bán quá.",
+    suggestedAction:
+      "Kiểm kê thực tế rồi lập phiếu nhập ghi rõ 'số dư đầu kỳ theo kiểm kê ngày …'. TUYỆT ĐỐI không lập phiếu bù cho khớp số: bịa một con số vào sổ kho đúng là loại sai mà ERP sinh ra để chống.",
+    autoRepair: false,
+  },
+  STOCK_MISSING_OPENING_BALANCE: {
+    key: "STOCK_MISSING_OPENING_BALANCE",
+    entity: "order",
+    severity: "WARNING",
+    label: "Mẫu mã đã xuất hàng nhưng chưa có phiếu nhập nào",
+    reason:
+      "Có đơn đã xuất hàng của mẫu mã này nhưng sổ kho chưa từng ghi một phiếu nhập nào cho nó. Mọi con số tồn của mẫu mã đó đều vô nghĩa cho tới khi có số dư đầu kỳ.",
+    suggestedAction: "Đếm thực tế và lập phiếu nhập số dư đầu kỳ. ERP hiện 'Chưa có phiếu nhập' thay vì hiện số, nên không ai bị lừa bởi số 0.",
+    autoRepair: false,
+  },
+  EXPENSE_NEEDS_ALLOCATION_REVIEW: {
+    key: "EXPENSE_NEEDS_ALLOCATION_REVIEW",
+    entity: "order",
+    severity: "WARNING",
+    label: "Khoản chi theo kỳ chưa khai kỳ hiệu lực",
+    reason:
+      "Thuê mặt bằng, lương và phần mềm là chi phí THEO KỲ. Chưa khai kỳ thì báo cáo buộc phải ghi trọn khoản vào đúng ngày phát sinh, nên lợi nhuận của một tuần hay một khoảng ngắn sẽ sai — hoặc gánh cả tháng, hoặc bằng 0.",
+    suggestedAction:
+      "Mở Chi phí, sửa khoản này và điền kỳ hiệu lực (từ ngày → đến ngày). ERP CỐ Ý không tự đoán kỳ: một khoản phần mềm có thể là tháng, quý hay năm.",
     autoRepair: false,
   },
   ORDER_SHIPMENT_CONFLICT: {

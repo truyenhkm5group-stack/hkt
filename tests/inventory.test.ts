@@ -7,6 +7,7 @@ import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProducts, productSummary } from "@/lib/queries/products";
 import { RETURN_PENDING_WAREHOUSE } from "@/lib/queries/return-rate";
+import { recordInspection } from "@/lib/returns/inspection";
 import { listPendingReturnedIds, markReturnReceived, pendingReturnedForWarehouse, pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { stockRiskSummary } from "@/lib/queries/stock";
 import { getDashboardData } from "@/lib/queries/dashboard";
@@ -62,19 +63,31 @@ export async function testInventory(db: Db) {
       .where(and(eq(schema.shipments.id, target), eq(schema.orderItems.variantId, "rr-var")));
     const before = await productRow("rr-var");
     clearMemo();
-    await markReturnReceived([target], "test-kho-inventory");
+
+    // GHI NHẬN ĐÃ VỀ KHÔNG PHẢI LÀ VÀO TỒN. Người nhận hàng chưa mở kiện ra đếm, nên ERP chưa được
+    // phép khẳng định có bao nhiêu món còn bán được.
+    await markReturnReceived([target], { id: null, label: "test-kho-inventory" });
+    clearMemo();
+    const daVe = await productRow("rr-var");
+    assert.equal(daVe.erpStock, before.erpStock, "ghi nhận kiện đã về KHÔNG được cộng tồn — chưa ai đếm");
+    assert.equal(daVe.returnIn, before.returnIn, "chưa đếm thì chưa có phiếu tái nhập nào");
+
+    // ĐẾM XONG mới vào tồn, và chỉ đúng phần đếm được.
+    const inspected = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm đủ", actor: { id: null, label: "test-kho-inventory" } });
+    assert.ok("ok" in inspected, "kiện đã ghi nhận về thì đếm được");
     clearMemo();
     const after = await productRow("rr-var");
-    assert.equal(after.returnIn, before.returnIn + Number(qty), "phiếu tái nhập ghi đúng số món kho nhận về");
-    assert.equal(after.erpStock, before.erpStock + Number(qty), "tồn tăng đúng số lượng kho vừa nhận");
-    assert.equal(after.awaitingReturn, before.awaitingReturn - Number(qty), "hoàn chờ nhận giảm đúng bằng số đã nhận");
+    assert.equal(after.returnIn, before.returnIn + Number(qty), "phiếu tái nhập ghi đúng số món kho ĐẾM ĐƯỢC");
+    assert.equal(after.erpStock, before.erpStock + Number(qty), "tồn tăng đúng số lượng kho vừa đếm");
+    assert.equal(after.awaitingReturn, before.awaitingReturn - Number(qty), "hoàn chờ nhận giảm đúng bằng số đã xử lý");
     assert.equal(after.shipped, before.shipped, "đã xuất không đổi — nhận hoàn không phải là xuất thêm");
 
-    // Bấm lại lần hai không được cộng tồn thêm lần nữa.
-    await markReturnReceived([target], "test-kho-inventory-2");
+    // Đếm lại lần hai bị chặn: nếu không, phiếu tái nhập cộng tồn hai lần.
+    const lai = await recordInspection({ shipmentId: target, condition: "RESTOCKABLE", restockQty: Number(qty), unsellableQty: 0, note: "Đếm lại", actor: { id: null, label: "test-kho-inventory-2" } });
+    assert.ok("error" in lai, "kiện đã đếm rồi thì không được đếm lại");
     clearMemo();
     const twice = await productRow("rr-var");
-    assert.equal(twice.erpStock, after.erpStock, "xác nhận lại không cộng trùng tồn");
+    assert.equal(twice.erpStock, after.erpStock, "đếm lại không cộng trùng tồn");
   }
 
   // ───────── 4. Chưa có phiếu nhập ⇒ tồn là KHÔNG BIẾT, không phải 0 ─────────
@@ -169,15 +182,17 @@ export async function testInventory(db: Db) {
   ]);
 
   // Vận đơn chiều hoàn do Viettel Post tự tạo (mã ...1P1) cũng ở trạng thái RETURNED khi phát
-  // thành công về shop, nhưng không gắn đơn và không có món hàng nào — không được lọt vào hàng
-  // chờ kho, nếu không danh sách sẽ đầy dòng rỗng.
+  // thành công về shop. Nó KHÔNG gắn đơn (luật 7) nhưng là hàng THẬT đã về tới shop — bàn nhận hàng,
+  // xác nhận hàng loạt và thẻ "Chờ kho nhận" dùng CÙNG một vị ngữ (`IS_RETURN_AWAITING_WAREHOUSE`)
+  // nên nó phải hiện ở cả ba, dưới nhãn "chưa xác định đơn", với số món CHƯA BIẾT chứ không phải 0.
   await db.insert(schema.shipments).values({ id: "bulk-ship-chieu-hoan", orderReference: "PKE-GOC", stage: "RETURNED", returnedAt: new Date() });
 
   const cho = await pendingReturnedForWarehouse();
   const ids = await listPendingReturnedIds(500);
   assert.ok(ids.includes("bulk-ship-da-ve"), "vận đơn Viettel Post đã trả xong phải nằm trong danh sách chờ kho");
   assert.ok(!ids.includes("bulk-ship-dang-ve"), "vận đơn còn đang trên đường về KHÔNG được xác nhận hàng loạt");
-  assert.ok(!ids.includes("bulk-ship-chieu-hoan"), "vận đơn chiều hoàn không gắn đơn không được vào hàng chờ kho");
+  assert.ok(ids.includes("bulk-ship-chieu-hoan"), "vận đơn chiều hoàn đã phát về shop là kiện thật — phải nằm trong hàng chờ kho, cùng vị ngữ với bàn nhận hàng");
+  assert.ok(cho.unknownParcels >= 1, "kiện chưa ghép được đơn phải được đếm riêng là CHƯA RÕ, không ước lượng thành 0 món");
   assert.ok(cho.count >= 1);
   assert.ok(cho.items >= 5, "số món phải khớp cách tính tồn của ERP, gồm cả hàng tặng");
   assert.ok(cho.oldestAt && Date.now() - new Date(cho.oldestAt).getTime() >= 19 * 86_400_000, "phải nêu được kiện chờ lâu nhất");
@@ -189,19 +204,26 @@ export async function testInventory(db: Db) {
 
   clearMemo();
   const truoc = await productRow("rr-var");
-  await markReturnReceived(["bulk-ship-da-ve"], "test-kho-hang-loat");
+  await markReturnReceived(["bulk-ship-da-ve"], { id: null, label: "test-kho-hang-loat" });
+  clearMemo();
+  const moiVe = await productRow("rr-var");
+  assert.equal(moiVe.erpStock, truoc.erpStock, "ghi nhận hàng loạt KHÔNG cộng tồn — hàng trăm kiện chưa ai mở ra");
+
+  // Kho đếm được 4/5 món: một món hỏng. Chỉ 4 món vào tồn, món còn lại hiện ra thành hàng hụt.
+  const demXong = await recordInspection({ shipmentId: "bulk-ship-da-ve", condition: "RESTOCKABLE", restockQty: 4, unsellableQty: 1, note: "1 áo bẩn không bán lại được", actor: { id: null, label: "test-kho-hang-loat" } });
+  assert.ok("ok" in demXong && demXong.restocked === 4, "chỉ số ĐẾM ĐƯỢC mới vào tồn");
   clearMemo();
   const sau = await productRow("rr-var");
-  assert.equal(sau.erpStock, truoc.erpStock + 5, "kiện đã về cộng đúng 5 món (3 bán + 2 tặng) — hàng tặng cũng nằm trong kiện quay về");
-  assert.equal(sau.returnIn, truoc.returnIn + 5, "phiếu tái nhập ghi đúng 5 món");
+  assert.equal(sau.erpStock, truoc.erpStock + 4, "tồn tăng đúng 4 món đếm được, không phải 5 món đã xuất");
+  assert.equal(sau.returnIn, truoc.returnIn + 4, "phiếu tái nhập ghi đúng 4 món");
 
   // Kiện đang trên đường về vẫn nằm ngoài tồn cho tới khi Viettel Post trả hàng xong.
-  await markReturnReceived(ids, "test-kho-hang-loat-2");
+  await markReturnReceived(ids, { id: null, label: "test-kho-hang-loat-2" });
   clearMemo();
   const sauTatCa = await productRow("rr-var");
-  assert.ok(sauTatCa.erpStock < truoc.erpStock + 5 + 7, "7 món của kiện đang trên đường về không được cộng vào tồn");
+  assert.ok(sauTatCa.erpStock < truoc.erpStock + 4 + 7, "7 món của kiện đang trên đường về không được cộng vào tồn");
   assert.equal((await listPendingReturnedIds(500)).length, 0, "xác nhận hàng loạt xong thì không còn kiện nào chờ");
-  assert.equal((await markReturnReceived(ids, "test-lap-lai")).count, 0, "bấm lại lần hai không cộng trùng tồn");
+  assert.equal((await markReturnReceived(ids, { id: null, label: "test-lap-lai" })).count, 0, "bấm lại lần hai không cộng trùng tồn");
 
   // ───────── 9. Hàng xuất tay (không qua ĐVVC) trừ tồn như hàng gửi ĐVVC ─────────
   clearMemo();
@@ -234,8 +256,20 @@ export async function testInventory(db: Db) {
   clearMemo();
   const dash = await getDashboardData(ALL_PERIOD);
   assert.equal(dash.attention.lowStock, risk.atRisk, "Tổng quan phải dùng cảnh báo theo rủi ro, không dùng ngưỡng 'tồn <= 5'");
-  assert.equal(dash.stockRisk.out, risk.out);
-  assert.equal(dash.stockRisk.critical, risk.critical);
+  /*
+    SỔ KHO CÓ HẠN CHỜ TRÊN TRANG CHỦ, VÀ QUÁ HẠN LÀ `null` — KHÔNG PHẢI 0.
+
+    Trên production sổ kho từng mất 61 giây và kéo cả trang chủ quá hạn 60 giây, nên trang chủ nay
+    bỏ qua mục này sau 3 giây. Với dữ liệu kiểm thử thì nó luôn kịp, nên ở đây phải CÓ số — nếu bài
+    kiểm này bắt đầu thấy `null`, nghĩa là ngay cả bộ dữ liệu nhỏ cũng đã quá 3 giây và sổ kho đã
+    hỏng nặng hơn nhiều so với lúc viết dòng này.
+
+    Điều quan trọng phải giữ: quá hạn thì là CHƯA BIẾT. Trả 0 sẽ đọc thành "không mẫu nào cần sản
+    xuất gấp" — một câu nói dối đúng theo hướng dễ chịu, đúng loại sai mà sổ kho cấm.
+  */
+  assert.notEqual(dash.stockRisk, null, "với dữ liệu kiểm thử, sổ kho phải kịp hạn 3 giây của trang chủ");
+  assert.equal(dash.stockRisk?.out, risk.out);
+  assert.equal(dash.stockRisk?.critical, risk.critical);
   // Cảnh báo vận hành cũng phải cùng bộ máy: cùng số mẫu mã OUT + CRITICAL.
   const planNow = await getReplenishmentPlan();
   assert.equal(risk.atRisk, planNow.summary.out + planNow.summary.critical, "Tổng quan, Kế hoạch SX và cảnh báo phải cùng một bộ máy days-of-cover");

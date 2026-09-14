@@ -56,6 +56,15 @@ if [ -f .env ]; then
   upsert_env VIETTELPOST_USERNAME "${VIETTELPOST_USERNAME:-}"
   upsert_env VIETTELPOST_PASSWORD "${VIETTELPOST_PASSWORD:-}"
   upsert_env PANCAKE_API_KEY "${PANCAKE_API_KEY:-}"
+  # AI Copilot: CHỈ ghi khi Secret có giá trị — secret chưa đặt không được xoá khoá đang dùng trên máy.
+  [ -n "${OPENAI_API_KEY:-}" ] && upsert_env OPENAI_API_KEY "${OPENAI_API_KEY}"
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && upsert_env ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY}"
+  [ -n "${AI_PROVIDER:-}" ] && upsert_env AI_PROVIDER "${AI_PROVIDER}"
+  # Webhook SePay: cũng CHỈ ghi khi Secret có giá trị. Secret chưa đặt mà ghi đè rỗng là làm
+  # chết đường realtime đang chạy — mọi gói tin sau đó bị từ chối 401 mà không ai hiểu vì sao.
+  [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && upsert_env SEPAY_WEBHOOK_SECRET "${SEPAY_WEBHOOK_SECRET}"
+  [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && upsert_env SEPAY_WEBHOOK_API_KEY "${SEPAY_WEBHOOK_API_KEY}"
+  [ -n "${SEPAY_API_TOKEN:-}" ] && upsert_env SEPAY_API_TOKEN "${SEPAY_API_TOKEN}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
@@ -98,6 +107,14 @@ VIETTELPOST_USERNAME="${VIETTELPOST_USERNAME:-}"
 VIETTELPOST_PASSWORD="${VIETTELPOST_PASSWORD:-}"
 VIETTELPOST_BASE_URL="https://partner.viettelpost.vn/v2"
 VIETTELPOST_WEBHOOK_SECRET="vtp_$(rand 16)"
+
+# Webhook SePay — biến động số dư ngân hàng realtime. Secret do SePay sinh khi tạo webhook
+# (my.sepay.vn → Webhooks → Bảo mật: HMAC-SHA256), KHÔNG phải ERP sinh. Rỗng = chưa cấu hình.
+SEPAY_WEBHOOK_SECRET="${SEPAY_WEBHOOK_SECRET:-}"
+SEPAY_WEBHOOK_API_KEY="${SEPAY_WEBHOOK_API_KEY:-}"
+# Token API v2 — cho đường ĐỐI CHIẾU (vá gói tin webhook đã mất). Rỗng = đường đối chiếu tắt,
+# đường realtime vẫn chạy bình thường.
+SEPAY_API_TOKEN="${SEPAY_API_TOKEN:-}"
 
 FACEBOOK_ACCESS_TOKEN="${FACEBOOK_ACCESS_TOKEN:-}"
 FACEBOOK_BUSINESS_ID="${FACEBOOK_BUSINESS_ID:-336423739082347}"
@@ -175,7 +192,136 @@ else
   warn "Không đọc được POSTGRES_PASSWORD trong .env — bỏ qua bước đồng bộ mật khẩu CSDL."
 fi
 
+# ═════════════ DỰNG IMAGE: KIỂM TRƯỚC, ĐỪNG ĐỂ BỊ GIẾT GIỮA CHỪNG ═════════════
+#
+# SỰ CỐ THẬT (deploy #208, 10/09/2026):
+#
+#   #13 215.7 Next.js build worker exited with code: null and signal: SIGKILL
+#   target scheduler: failed to solve: process "/bin/sh -c npm run build" ... exit code: 1
+#
+# `SIGKILL` giữa lúc `next build` là hết RAM. Máy có ~1,9 GB và đang chạy Postgres + ứng dụng +
+# bộ lập lịch + Caddy, rồi `next build` chạy bên trong Docker — mà compose dựng HAI image (app và
+# scheduler) từ cùng một Dockerfile. Cùng SHA đó chạy lại ở #209 thì thành công: đang ở sát mép.
+# Deploy #227 (11/09/2026) chết lại đúng chỗ đó khi bản dựng nặng thêm (SDK AI). Từ đó
+# docker-compose.prod.yml khai MỘT image `erp-app:local`: app dựng, scheduler dùng lại — chỉ còn
+# một `next build` tại một thời điểm.
+#
+# "Chạy lại thấy được" KHÔNG phải giải pháp. Ba việc dưới đây, theo thứ tự rẻ nhất trước:
+#
+#  1. DỌN RÁC AN TOÀN. Chỉ xoá image/cache KHÔNG còn container nào dùng (`-f` không có `-a`, nên
+#     image đang chạy không bị đụng tới). Đây là chỗ lấy lại nhiều dung lượng và bộ nhớ đệm nhất
+#     mà không rủi ro.
+#  2. GIỚI HẠN BỘ NHỚ TRÌNH DỰNG. `NODE_OPTIONS=--max-old-space-size` bắt Node dọn rác thay vì
+#     phình ra tới lúc bị giết. Chọn 1024 MB: đủ cho bản dựng này, còn chừa chỗ cho Postgres.
+#  3. CHẶN SỚM KHI KHÔNG ĐỦ. Thà dừng với một dòng nói rõ còn bao nhiêu RAM, hơn là để bị SIGKILL
+#     rồi phải đi đọc log Docker mới hiểu.
+#
+# KHÔNG dừng ứng dụng đang chạy để lấy RAM: mất dịch vụ mà chưa chắc dựng nổi thì tệ hơn nhiều.
+say "Dọn image và bộ nhớ đệm dựng không còn dùng"
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+
+# ═══ ẢNH CŨ CỦA CHÍNH KHO NÀY — THỦ PHẠM LÀM ĐẦY Ổ ĐĨA ═══
+#
+# SỰ CỐ THẬT (deploy #242, 12/09/2026): bước kéo image chết với `no space left on device` khi giải
+# nén layer. Ba lần thử lại đều hỏng; bản đang chạy không bị đụng tới, nhưng bản mới KHÔNG lên được.
+#
+# NGUYÊN NHÂN GỐC, và nó đã âm thầm tích luỹ suốt 240 lần deploy: `docker image prune -f` ở trên
+# CHỈ xoá ảnh KHÔNG CÓ TAG. Mỗi lần deploy kéo về một ảnh `ghcr.io/<kho>:<sha>` **có tag**, gắn
+# thêm tag `erp-app:local` rồi đi tiếp — tag `ghcr.io/...:<sha>` ở lại VĨNH VIỄN. Ảnh cũ chỉ mất
+# tag `erp-app:local` (nên nó thành dangling và được dọn), còn tag theo SHA thì không ai gỡ.
+#
+# Nói cách khác: mỗi lần deploy để lại một ảnh ~1 GB trên đĩa, và lệnh dọn ở trên nhìn thẳng qua nó.
+#
+# Ở đây gỡ mọi tag theo SHA của kho này. `docker rmi` trên một TAG chỉ gỡ tag; ảnh đang chạy không
+# bao giờ bị xoá (Docker từ chối), nên thao tác này không thể làm sập bản đang chạy.
+#
+# `|| true` Ở ĐÂY LÀ BẮT BUỘC, KHÔNG PHẢI CHO CHẮC.
+#
+# Script này chạy với `set -euo pipefail` (dòng 6). Một `grep` KHÔNG TÌM THẤY GÌ trả về trạng thái
+# 1; với `pipefail` thì cả đường ống mang trạng thái 1, và `set -e` giết script ngay tại đó.
+#
+# Mà "không tìm thấy gì" chính là trạng thái BÌNH THƯỜNG ở đây — đúng vào lúc máy chủ đã sạch.
+# Deploy #244 chết đúng dòng này, ngay sau khi `docker-prune` vừa dọn hết ảnh cũ: bản sửa cho việc
+# đĩa đầy tự giết mình vì đĩa đã hết đầy. `bash -n` không bắt được (cú pháp hoàn toàn hợp lệ) —
+# đây là lỗi TRẠNG THÁI THOÁT, chỉ lộ lúc chạy.
+#
+# Nên: thay đường ống-vào-`while` bằng một phép thế lệnh có `|| true`, rồi lặp trên biến. Không
+# đường ống nào còn có thể làm đổ script, và "danh sách rỗng" chỉ đơn giản là lặp 0 lần.
+if [ -n "${ERP_IMAGE:-}" ]; then
+  ERP_REPO="${ERP_IMAGE%%:*}"
+  ANH_CU="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${ERP_REPO}:" || true)"
+  for tag_cu in $ANH_CU; do
+    # Giữ đúng ảnh sắp dùng; ảnh không tag để `docker image prune` dọn.
+    if [ "$tag_cu" != "$ERP_IMAGE" ] && [ "$tag_cu" != "${ERP_REPO}:<none>" ]; then
+      docker rmi "$tag_cu" >/dev/null 2>&1 || true
+    fi
+  done
+  docker image prune -f >/dev/null 2>&1 || true
+fi
+
+# ═══ CỔNG Ổ ĐĨA — CÙNG LỐI VỚI CỔNG BỘ NHỚ Ở DƯỚI ═══
+#
+# Hỏng vì hết đĩa GIỮA LÚC giải nén để lại một lớp snapshot dở dang và một thông báo containerd
+# khó đọc. Chặn TRƯỚC, với một câu nói rõ còn bao nhiêu và ai đang ăn chỗ, thì người vận hành biết
+# phải làm gì. 3 GB đo từ chính lần hỏng: ảnh nén ~400 MB nhưng giải nén cần vài GB.
+DISK_MB="$(df -Pm /var/lib 2>/dev/null | awk 'NR==2 {print $4}')"
+say "Ổ đĩa còn trống: ${DISK_MB:-?} MB"
+if [ "${DISK_MB:-0}" -lt 3000 ]; then
+  echo "::error::Không đủ ổ đĩa để kéo image: còn ${DISK_MB} MB (cần ≥3000 MB). Bản đang chạy KHÔNG bị đụng tới."
+  echo "         Chỗ đang bị chiếm nhiều nhất:"
+  docker system df 2>/dev/null || true
+  du -sh /var/lib/docker /var/lib/containerd /root/backups 2>/dev/null || true
+  exit 1
+fi
+
+# ═══ ĐƯỜNG CHÍNH: IMAGE ĐÃ DỰNG Ở CI (GHCR) — VPS CHỈ KÉO VỀ ═══
+# Deploy #228 chứng minh máy này không còn dựng nổi bản hiện tại kể cả khi chỉ dựng MỘT image.
+# Workflow dựng image trên máy chạy GitHub, đẩy lên ghcr.io theo đúng SHA rồi truyền tên qua
+# ERP_IMAGE; ở đây kéo về, gắn tag `erp-app:local` (tên compose dùng) và khởi động lại — không build.
+if [ -n "${ERP_IMAGE:-}" ]; then
+  say "Kéo image đã dựng ở CI: $ERP_IMAGE"
+  if [ -n "${GHCR_TOKEN:-}" ]; then
+    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null 2>&1 || warn "Đăng nhập ghcr.io thất bại — thử kéo image công khai"
+  fi
+  PULLED=0
+  for i in 1 2 3; do
+    if docker pull "$ERP_IMAGE"; then PULLED=1; break; fi
+    warn "Kéo image hỏng (lần $i/3) — thử lại sau $((i * 15))s"; sleep $((i * 15))
+  done
+  docker logout ghcr.io >/dev/null 2>&1 || true
+  if [ "$PULLED" != "1" ]; then
+    echo "::error::Không kéo được $ERP_IMAGE. Bản đang chạy KHÔNG bị đụng tới."
+    exit 1
+  fi
+  docker tag "$ERP_IMAGE" erp-app:local
+  # GỠ TAG THEO SHA NGAY SAU KHI ĐÃ CÓ `erp-app:local`.
+  # Ảnh vẫn sống (tag kia trỏ vào nó); chỉ cái tên thừa biến mất. Không có dòng này thì mỗi lần
+  # deploy lại bỏ thêm một ảnh có tag lên đĩa, và ba tháng nữa sự cố #242 quay lại y nguyên.
+  docker rmi "$ERP_IMAGE" >/dev/null 2>&1 || true
+  $COMPOSE up -d
+else
+
+TONG_MB="$(free -m | awk '/^Mem:/ {print $2}')"
+CON_MB="$(free -m | awk '/^Mem:/ {print $7}')"     # available: gồm cả phần đệm lấy lại được
+SWAP_MB="$(free -m | awk '/^Swap:/ {print $2}')"
+say "Bộ nhớ trước khi dựng: còn dùng được ${CON_MB} MB / ${TONG_MB} MB · swap ${SWAP_MB} MB"
+
+# Ngưỡng 700 MB đo từ chính lần hỏng: bản dựng cần khoảng 600–900 MB đỉnh.
+if [ "${CON_MB:-0}" -lt 700 ] && [ "${SWAP_MB:-0}" -lt 512 ]; then
+  echo "::error::Không đủ bộ nhớ để dựng: còn ${CON_MB} MB, swap ${SWAP_MB} MB (cần ≥700 MB hoặc ≥512 MB swap)."
+  echo "         Bản đang chạy KHÔNG bị đụng tới. Xem docs/erp-performance-p0-5-report.md phụ lục 4."
+  exit 1
+fi
+if [ "${SWAP_MB:-0}" -lt 512 ]; then
+  warn "Máy chủ KHÔNG có swap (hoặc dưới 512 MB). Bản dựng đang chạy sát mép RAM — xem kế hoạch chuyển sang dựng image ở CI."
+fi
+
+# Giới hạn bộ nhớ của trình dựng nằm trong Dockerfile (trên chính dòng RUN), KHÔNG ở đây: biến môi
+# trường của shell không đi vào bản dựng Docker.
+
 $COMPOSE up -d --build
+fi
 
 say "Chờ ERP sẵn sàng"
 for i in $(seq 1 60); do
@@ -183,6 +329,15 @@ for i in $(seq 1 60); do
   sleep 3
 done
 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true' && say "ERP đã chạy" || warn "ERP chưa phản hồi, xem log: $COMPOSE logs -f app"
+
+say "Đối chiếu sổ migration với cơ sở dữ liệu thật"
+# Migration có mốc cũ hơn mốc đã áp bị drizzle bỏ qua VĨNH VIỄN, không lỗi, không cảnh báo.
+# Bài kiểm nào dựng CSDL mới từ đầu cũng không thấy được — chỉ CSDL đã chạy mới lộ ra.
+# Đã xảy ra hai lần trong ngày 09/09/2026 (0038 và 0041), xem scripts/verify-migrations.ts.
+if ! docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/verify-migrations.ts; then
+  warn "SỔ MIGRATION KHÔNG KHỚP CSDL — xem danh sách ở trên."
+  MIGRATIONS_UNAPPLIED=1
+fi
 
 say "Smoke test các màn hình chính (đăng nhập thật, không chỉ /api/health)"
 # /api/health chỉ chứng minh tiến trình sống + CSDL kết nối được; nó KHÔNG bắt được
@@ -230,6 +385,11 @@ INFO
 
 # Smoke test hỏng => deploy phải BÁO ĐỎ. Trước đây workflow chỉ cảnh báo nên một lần
 # deploy làm ERP crash-loop vẫn được ghi là thành công và không ai biết production đang sập.
+if [ "${MIGRATIONS_UNAPPLIED:-0}" = "1" ]; then
+  warn "Deploy KHÔNG đạt: có migration trong sổ chưa được áp lên cơ sở dữ liệu."
+  exit 1
+fi
+
 if [ "${SMOKE_FAILED:-0}" = "1" ]; then
   warn "Deploy KHÔNG đạt: smoke test có màn hình lỗi."
   exit 1

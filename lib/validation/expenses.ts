@@ -10,6 +10,16 @@ export const expenseSchema = z.object({
   amount: z.number({ error: "Nhập số tiền" }).int("Số tiền phải là số nguyên").min(1, "Số tiền phải lớn hơn 0").max(2_000_000_000, "Số tiền quá lớn"),
   occurredAt: dateKey,
   reference: z.string().trim().max(200, "Tham chiếu tối đa 200 ký tự"),
+  /**
+   * NGUỒN khoản chi. Với nhóm đã có nguồn chuyên biệt (cước, phí hoàn), chỉ khoản khai là
+   * `MANUAL_ADJUSTMENT` mới được tính vào lợi nhuận — khoản thường bị loại vì vận đơn đã bao trọn.
+   *
+   * Ràng buộc "điều chỉnh phải có lý do" đặt ở Server Action và ở CSDL (`expenses_adjustment_reason_check`),
+   * không đặt bằng `.refine()` ở đây: `.refine` biến schema thành ZodEffects và làm hỏng kiểu của
+   * `zodResolver` trên biểu mẫu.
+   */
+  costSource: z.enum(["MANUAL", "MANUAL_ADJUSTMENT"]),
+  reason: z.string().trim().max(500, "Lý do tối đa 500 ký tự"),
 });
 export type ExpenseInput = z.infer<typeof expenseSchema>;
 
@@ -24,3 +34,17 @@ export const adSpendSchema = z.object({
   note: z.string().trim().max(500, "Ghi chú tối đa 500 ký tự"),
 });
 export type AdSpendInput = z.infer<typeof adSpendSchema>;
+
+/**
+ * KHAI KỲ HIỆU LỰC cho một khoản chi.
+ *
+ * `EVENT_DATE` là câu trả lời hợp lệ, không phải "chưa trả lời": nó nghĩa là khoản này đúng là chi
+ * một lần cho ngày ghi sổ. Chỉ `PERIOD_PRORATA` mới bắt buộc hai ngày kỳ.
+ */
+export const allocationSchema = z.object({
+  id: z.string().min(1, "Thiếu mã khoản chi"),
+  allocationMethod: z.enum(["EVENT_DATE", "PERIOD_PRORATA"], { error: "Chọn cách phân bổ" }),
+  periodStart: dateKey.optional().nullable(),
+  periodEnd: dateKey.optional().nullable(),
+});
+export type AllocationInput = z.infer<typeof allocationSchema>;

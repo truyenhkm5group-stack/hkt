@@ -1,5 +1,7 @@
+import { sql as sqlRaw } from "drizzle-orm";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { probeActive, recordQuery } from "@/lib/perf/probe";
 import * as schema from "./schema";
 
 export type Db = NodePgDatabase<typeof schema>;
@@ -64,14 +66,74 @@ async function createPglite(): Promise<Db> {
     }
   }
   const client = new PGlite(dir);
+  instrumentQueries(client as unknown as QueryClient);
   holder.__erpDb!.pglite = client;
   return drizzle(client, { schema }) as unknown as Db;
 }
 
 function createPg(): Db {
-  const pool = new Pool({ connectionString: databaseUrl(), max: 10 });
+  /**
+   * BỂ KẾT NỐI PHẢI VỪA VỚI SỐ NHÂN CPU, KHÔNG PHẢI VỪA VỚI SỐ TRUY VẤN.
+   *
+   * Đo trên production 10/09/2026: VPS có **2 nhân**, `erp-db` ghim 105% CPU, load 15 phút 5,47.
+   * Trang chủ bắn 181 lượt truy vấn cùng lúc (76 của bảng điều khiển + 105 của bản tóm tắt). Với
+   * `max: 10`, mười tiến trình Postgres cùng tranh 2 nhân — mỗi câu 300ms thành 9 giây, và tổng
+   * thời gian TĂNG so với chạy ít luồng hơn.
+   *
+   * Đây là chỗ trực giác đánh lừa: thêm luồng KHÔNG làm nhanh hơn khi CPU đã bão hoà, nó chỉ chia
+   * nhỏ cùng một lượng CPU thành nhiều phần và cộng thêm chi phí chuyển ngữ cảnh.
+   *
+   * Cho phép chỉnh bằng `PGPOOL_MAX` để không phải deploy lại khi đổi cấu hình máy.
+   */
+  const max = Math.max(2, Number(process.env.PGPOOL_MAX) || 5);
+  /*
+    ═══ BỂ CẠN PHẢI BÁO LỖI, KHÔNG ĐƯỢC CHỜ VÔ HẠN ═══
+
+    Mặc định `pg` chờ MÃI khi hết kết nối. Trên bể 5 kết nối của máy hai nhân, một lúc nhiều báo
+    cáo nặng cùng chạy là chuyện thường — và mỗi giao dịch (`chayKhongJit`) giữ một kết nối suốt
+    thời gian câu lệnh chạy.
+
+    Chờ vô hạn nghĩa là trang treo mà KHÔNG có gì báo động: không lỗi, không log, không cảnh báo.
+    Hôm nay đã dẫm phải đúng hình dạng đó hai lần (bộ đệm `memo` và giao dịch ôm nhầm hàm). Thà
+    hỏng ồn ào còn hơn treo im lặng: 15 giây không xin được kết nối thì ném lỗi, và lỗi đó vào log
+    kèm tên trang.
+  */
+  const pool = new Pool({ connectionString: databaseUrl(), max, connectionTimeoutMillis: 15_000 });
+  instrumentQueries(pool as unknown as QueryClient);
   holder.__erpDb!.pool = pool;
   return drizzlePg(pool, { schema });
+}
+
+type QueryClient = { query: (...args: unknown[]) => Promise<unknown> };
+
+/**
+ * Bọc `client.query` để đếm SỐ CÂU và thời gian của từng câu trong một lần dựng trang.
+ * Cả hai driver (node-postgres và PGlite) đều đi qua đúng hàm này, nên chỉ cần bọc một chỗ.
+ *
+ * CHỈ bật khi ERP_PERF_PROBE=1 (script đo dùng). Production không bọc gì cả: lớp CSDL là chỗ
+ * không được thêm rủi ro để đổi lấy một con số.
+ */
+function instrumentQueries(client: QueryClient) {
+  if (process.env.ERP_PERF_PROBE !== "1") return;
+  const original = client.query.bind(client) as QueryClient["query"];
+  client.query = async (...args: unknown[]) => {
+    if (!probeActive()) return original(...args);
+    const started = performance.now();
+    try {
+      const result = (await original(...args)) as { rows?: unknown[] } | undefined;
+      recordQuery(queryText(args[0]), performance.now() - started, result?.rows?.length ?? 0);
+      return result;
+    } catch (error) {
+      recordQuery(queryText(args[0]), performance.now() - started, -1);
+      throw error;
+    }
+  };
+}
+
+function queryText(first: unknown) {
+  if (typeof first === "string") return first;
+  if (first && typeof first === "object" && "text" in first) return String((first as { text: unknown }).text);
+  return "(không rõ)";
 }
 
 function isProcessAlive(pid: number) {
@@ -101,3 +163,53 @@ export async function getDb(): Promise<Db> {
 }
 
 export { schema };
+
+/**
+ * ═══════ CHẠY MỘT BÁO CÁO NẶNG MÀ KHÔNG BẬT JIT ═══════
+ *
+ * ĐO ĐƯỢC trên production 10/09/2026, cùng câu, cùng dữ liệu, cùng kế hoạch:
+ *
+ *   vsales · JIT BẬT   thực thi 8.578,82 ms   biên dịch JIT 17.036,85 ms (465 hàm)
+ *   vsales · JIT TẮT   thực thi     26,02 ms   không biên dịch
+ *
+ * Số khối đệm giống hệt nhau (47.802 và 47.796) — cùng một khối lượng công việc. Toàn bộ chênh
+ * lệch là THỜI GIAN BIÊN DỊCH. PostgreSQL bật JIT khi chi phí ước lượng vượt `jit_above_cost`
+ * (mặc định 100.000), mà các báo cáo tồn kho có chi phí ước lượng hàng triệu vì chúng nối nhiều
+ * bảng dẫn xuất. Trên máy 2 nhân, biên dịch 465 hàm tốn nhiều hơn chính phép tính hàng trăm lần.
+ *
+ * ─── VÌ SAO KHÔNG TẮT JIT TOÀN MÁY CHỦ ───
+ *
+ * Tắt ở `postgresql.conf` sẽ đổi hành vi cho MỌI thứ chạm vào CSDL này, kể cả những truy vấn chưa
+ * ai đo. Ở đây chỉ tắt trong ĐÚNG giao dịch của báo cáo đang chạy: `set local` hết hiệu lực khi
+ * giao dịch kết thúc, không rò sang phiên khác, không đụng cấu hình.
+ *
+ * ─── VÌ SAO CÓ NHÁNH DỰ PHÒNG ───
+ *
+ * Bộ kiểm thử chạy trên PGlite (PostgreSQL biên dịch sang WASM) và không phải bản dựng nào cũng
+ * nhận `set local jit`. Không đặt được thì vẫn chạy tiếp — chậm hơn thì chấp nhận, còn hơn để báo
+ * cáo đổ vỡ vì một tinh chỉnh hiệu năng.
+ */
+export async function chayKhongJit<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
+  /*
+    PGLITE KHÔNG CÓ JIT, VÀ KHÔNG ĐƯỢC MỞ GIAO DỊCH Ở ĐÂY.
+
+    PGlite là PostgreSQL biên dịch sang WASM, không có LLVM nên không có trình biên dịch để tắt —
+    tối ưu này vô nghĩa ở đó. Quan trọng hơn: bản đầu vẫn mở giao dịch trên PGlite và nó KHÔNG BAO
+    GIỜ kết thúc. Không lỗi, không treo lộ liễu — vòng lặp sự kiện cạn và Node thoát với mã 0, cắt
+    cụt bộ kiểm thử ở giữa chừng mà vẫn báo "thành công".
+
+    Đúng dạng hỏng nguy hiểm nhất, và là lần thứ hai trong cùng một ngày (xem `memo` trong
+    lib/cache.ts): một lời hứa không bao giờ settle thì không có gì báo động cả.
+  */
+  if (isPglite()) return fn(db);
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sqlRaw.raw("set local jit = off"));
+      return fn(tx as unknown as Db);
+    });
+  } catch (error) {
+    // Chỉ rơi về đường thường khi chính việc TẮT JIT hỏng. Lỗi của báo cáo phải ném lên như cũ.
+    if (!(error instanceof Error) || !/jit/i.test(error.message)) throw error;
+    return fn(db);
+  }
+}

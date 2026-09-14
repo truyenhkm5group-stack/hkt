@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CARRIER_DOCUMENT_SOURCES, isFinishedOutcome, LOGISTICS_DECIDING_SOURCES, LOGISTICS_EVIDENCE_AUTHORITY, OUTCOME_GROUP, SHIPMENT_STAGE_WRITERS } from "@/lib/constants/truth";
@@ -18,6 +19,7 @@ import { repairReconciliation } from "@/lib/sync/consistency";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
+import { DELIVERED_REVENUE } from "@/lib/queries/metrics";
 import { availableStockExpr, erpStockExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 
@@ -281,6 +283,20 @@ export async function testBusinessInvariants(db: Db) {
     assert.equal(mapped.shipment.isFinal, false, `13. không có chứng từ ĐVVC thì vận đơn chưa kết thúc`);
   }
 
+  // Pancake chuyển tiếp "đã giao" KÈM `partner.cod` (COD ĐĂNG KÝ với ĐVVC — đặc tả §8: không phải
+  // verified money). Trước đây số này bị ghi vào `cod_collected` và `Math.max` ở lần đồng bộ sau đè
+  // lên số thực thu 30.000đ của bảng kê: đơn hoàn tự lật thành giao thành công.
+  const relayed = mapOrder({
+    id: `inv-map-relay-${++seq}`,
+    status: 3,
+    cod: 474_000,
+    money_to_collect: 474_000,
+    inserted_at: "2026-09-01T00:00:00",
+    partner: { partner_name: "Viettel Post", order_number_vtp: nextCode(), extend_code: null, partner_status: "delivered", cod: 474_000, updated_at: "2026-09-03T10:00:00" },
+  });
+  assert.ok(relayed?.shipment, "13. đơn có partner_status phải sinh vận đơn");
+  assert.equal(relayed.shipment.codCollected, 0, "13. partner.cod là COD ĐĂNG KÝ, không phải tiền đã thu — Pancake không bao giờ là nguồn tiền thực thu");
+
   // ══ 14. THANG THẨM QUYỀN CHỈ CÓ MỘT BẢN ══
   assert.deepEqual(
     [...LOGISTICS_DECIDING_SOURCES].sort(),
@@ -326,7 +342,96 @@ export async function testBusinessInvariants(db: Db) {
   await db.update(schema.shipments).set({ orderId: movingOrder }).where(eq(schema.shipments.id, movingShip.id));
   assert.equal(await outcomeOf(movingOrder), "IN_TRANSIT", "15. có chứng từ ĐVVC thì ĐANG GIAO vẫn dùng được");
 
+  // ══ 16. "GIAO THÀNH CÔNG" CỦA ĐVVC KHÔNG PHẢI LÀ KẾT LUẬN CUỐI ══
+  // Ca thật PKE1484463365: tiêu đề "Giao thành công", COD khai 474.000đ, nhưng hành trình ghi
+  // "Tồn - Giao không thành công · giao 1 phần · Thu hộ 30.000 · Trọng lượng hoàn 1.000", và có
+  // vận đơn hoàn PKE14844633651P1 đã giao VỀ SHOP. Khách chỉ trả tiền xem hàng rồi không nhận.
+  const partialOrder = `inv-order-${++seq}`;
+  const partialCode = nextCode();
+  await db.insert(schema.orders).values({ id: partialOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.insert(schema.shipments).values({
+    orderId: partialOrder, carrier: "Viettel Post", vtpOrderNumber: partialCode, trackingCode: partialCode,
+    stage: "DELIVERED", codAmount: 474_000, codCollected: 30_000, codStatus: "COLLECTED",
+    deliveredAt: new Date("2026-08-08T03:10:19Z"), vtpStatusDate: new Date("2026-08-08T03:10:19Z"),
+  });
+  // Vận đơn hoàn là DÒNG RIÊNG, trỏ về vận đơn gốc qua `order_reference` — đúng quy ước sẵn có.
+  await db.insert(schema.shipments).values({
+    carrier: "Viettel Post", vtpOrderNumber: `${partialCode}1P1`, trackingCode: `${partialCode}1P1`,
+    orderReference: partialCode, stage: "RETURNED", codAmount: 0, codStatus: "NOT_APPLICABLE",
+  });
+  assert.equal(await outcomeOf(partialOrder), "RETURNED",
+    "16. hàng quay về theo vận đơn hoàn ⇒ đơn HOÀN, dù ĐVVC ghi 'Giao thành công'");
+  // 30.000đ là tiền ĐVVC thu được lúc cho xem hàng — KHÔNG phải doanh thu bán hàng.
+  const [partialRow] = await db.select({ v: DELIVERED_REVENUE }).from(schema.orders)
+    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    .where(eq(schema.orders.id, partialOrder));
+  assert.equal(Number(partialRow?.v ?? 0), 0, "16. đơn hoàn không đóng góp một đồng doanh thu nào");
+  // Ngay cả khi KHÔNG có vận đơn hoàn, số thực thu 30.000đ (< 50K) cũng đủ kết luận HOÀN.
+  const thinOrder = `inv-order-${++seq}`;
+  const thinCode = nextCode();
+  await db.insert(schema.orders).values({ id: thinOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.insert(schema.shipments).values({ orderId: thinOrder, carrier: "Viettel Post", vtpOrderNumber: thinCode,
+    stage: "DELIVERED", codAmount: 474_000, codCollected: 30_000, codStatus: "COLLECTED",
+    vtpStatusDate: new Date("2026-08-08T03:10:19Z") });
+  assert.equal(await outcomeOf(thinOrder), "RETURNED", "16. thực thu 30.000đ trên đơn khai 474.000đ ⇒ HOÀN, không phải giao thành công");
+
+  // Vận đơn CHIỀU HOÀN mang trạng thái "Giao thành công" nghĩa là hàng về tới shop — tuyệt đối
+  // không được cộng vào số đơn giao thành công cho khách.
+  const legCode = `${nextCode()}1P1`;
+  await applyVtpTracking(trackingPayload(legCode, 501, "Thành công - Phát thành công", "09/08/2026 10:10:00", { IS_RETURNING: true }), "VTP_WEBHOOK", { allowCreate: true });
+  const [legShip] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, legCode));
+  assert.equal(legShip.stage, "RETURNED", "16. 501 trên CHIỀU HOÀN = hàng về shop, không phải giao cho khách");
+  assert.notEqual(legShip.stage, "DELIVERED");
+
+  // ══ 17. MỘT ĐƠN CÓ NHIỀU LẦN GỬI — LẦN SAU KHÔNG XOÁ LỊCH SỬ LẦN TRƯỚC ══
+  // Hình mẫu thật của shop: tạo vận đơn → "Shop hủy lấy" → tạo lại vận đơn thay thế → giao thành
+  // công. Cả hai lần gửi đều là chứng từ có thật và phải cùng tồn tại trong ERP.
+  const multiCode1 = nextCode();
+  const multiCode2 = nextCode();
+  await applyVtpTracking(trackingPayload(multiCode1, 107, "Huỷ - Shop hủy lấy", "02/08/2026 18:19:00"), "VTP_WEBHOOK", { allowCreate: true });
+  await applyVtpTracking(trackingPayload(multiCode2, 501, "Thành công - Phát thành công", "05/08/2026 09:00:00", { IS_RETURNING: false }), "VTP_WEBHOOK", { allowCreate: true });
+  const [lanGui1] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, multiCode1));
+  const [lanGui2] = await db.select().from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, multiCode2));
+  assert.ok(lanGui1 && lanGui2, "17. hai lần gửi phải là HAI dòng vận đơn, không đè lên nhau");
+  assert.notEqual(lanGui1.id, lanGui2.id, "17. lần gửi sau KHÔNG được ghi đè lần gửi trước");
+  assert.equal(lanGui1.stage, "CANCELLED", "17. lần gửi bị huỷ giữ nguyên kết cục của nó");
+  assert.equal(lanGui2.stage, "DELIVERED", "17. lần gửi thay thế giữ nguyên kết cục của nó");
+  /**
+   * MỘT ĐƠN, NHIỀU LẦN GỬI — và tiền vẫn chỉ đếm một lần.
+   *
+   * Từ 10/09/2026 `shipments.order_id` KHÔNG còn UNIQUE, nên giao thất bại rồi gửi lại, huỷ rồi tạo
+   * lại, hay gửi hàng thay thế đều được lưu thành lần gửi riêng thay vì ghi đè lên lần trước.
+   *
+   * Nghĩa vụ đi kèm — và là điều bất biến này khoá: mọi đường tính TIỀN phải ở grain ĐƠN. Nếu không,
+   * ngay lần gửi lại đầu tiên doanh thu và số đơn bị đếm HAI LẦN, trong im lặng. Xem `PRIMARY_ATTEMPT`
+   * trong lib/queries/return-rate.ts.
+   */
+  const multiOrder = `inv-order-${++seq}`;
+  await db.insert(schema.orders).values({ id: multiOrder, stage: "DELIVERED", cod: 474_000, prepaid: 0, insertedAt: new Date() });
+  await db.update(schema.shipments).set({ orderId: multiOrder, attemptNo: 2, direction: "OUTBOUND" }).where(eq(schema.shipments.id, lanGui2.id));
+  await db.update(schema.shipments).set({ orderReference: multiCode2 }).where(eq(schema.shipments.id, lanGui1.id));
+  // CASE E: cùng một đơn nhận được lần gửi thứ hai — CSDL phải CHẤP NHẬN.
+  await db.update(schema.shipments).set({ orderId: multiOrder, attemptNo: 1, direction: "OUTBOUND" }).where(eq(schema.shipments.id, lanGui1.id));
+  const soLanGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, multiOrder));
+  assert.equal(soLanGui.length, 2, "17. CASE E: một đơn phải giữ được CẢ HAI lần gửi — lần sau không nuốt lần trước");
+
+  // ĐƯỜNG TÍNH TIỀN vẫn phải thấy ĐÚNG MỘT dòng cho đơn đó. Đây là nửa còn lại của việc mở 1:N:
+  // mô hình cho phép nhiều lần gửi, và tiền vẫn đếm một lần.
+  const [{ n: dongTinhTien }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.orders)
+    .leftJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}`)
+    .where(eq(schema.orders.id, multiOrder));
+  assert.equal(Number(dongTinhTien), 1, "17. đơn hai lần gửi vẫn chỉ ra MỘT dòng ở đường tính tiền — không nhân đôi doanh thu");
+  const canGui = await db.select().from(schema.shipments).where(eq(schema.shipments.orderReference, multiCode2));
+  assert.equal(canGui.length, 1, "17. lần gửi trước vẫn còn nguyên như dòng riêng, không bị xoá");
+  // Lịch sử của từng lần gửi vẫn nguyên vẹn, không lần nào nuốt sự kiện của lần kia.
+  for (const sp of [lanGui1, lanGui2]) {
+    const evs = await db.select().from(schema.shipmentEvents).where(eq(schema.shipmentEvents.shipmentId, sp.id));
+    assert.ok(evs.length >= 1, "17. mỗi lần gửi giữ lịch sử riêng");
+  }
+
   console.log(
-    `✓ Bất biến nghiệp vụ: 15/15 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao')`,
+    `✓ Bất biến nghiệp vụ: 17/17 điều được khoá (tiền không tạo ra 'đã giao' · chứng từ mới kết luận · mã lạ không thành công · KPI xác định · lặp & muộn vô hại · dữ liệu gốc còn nguyên · dựng lại = thời gian thực · tồn kho cân · hai chiều tách rời · sửa tay có nhật ký · trạng thái đơn Pancake không tạo ra 'đã giao' · thang thẩm quyền một bản · không chứng từ thì CHƯA BIẾT chứ không 'đang giao' · giao một phần rồi hoàn KHÔNG phải giao thành công · một đơn giữ được nhiều lần gửi)`,
   );
 }

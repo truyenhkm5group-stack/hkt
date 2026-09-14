@@ -13,6 +13,7 @@ import {
 } from "@/app/(dashboard)/payroll/employee-dialog";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -92,6 +93,7 @@ export default async function PayrollPage({
         description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         actions={canManage ? <EmployeeDialog accounts={accounts} /> : null}
       />
+      <FinanceNav />
 
       <DataTableToolbar
         period={{ defaultKey: "month" }}

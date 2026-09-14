@@ -13,6 +13,8 @@ on:
         options:
           - status              # trạng thái container + health
           - perf                # tài nguyên VPS (CPU/RAM từng container) và thời gian phản hồi vài trang
+          - disk                # ổ đĩa còn bao nhiêu và ai đang chiếm chỗ (Docker, backup, log)
+          - docker-prune        # giải phóng ổ đĩa: gỡ ảnh Docker cũ (KHÔNG đụng dữ liệu, KHÔNG dừng dịch vụ)
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
@@ -34,17 +36,33 @@ on:
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
+          - explain-stock       # EXPLAIN ANALYZE truy vấn sổ kho — kế hoạch thực thi của câu chậm nhất
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
+          - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
+          - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
+          - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
+          - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
+          - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
+          - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
+          - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
+          - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
+          - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
+          - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
+          - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
+          - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
+          - cs-stale            # đối chiếu hàng đợi CSKH với thực tế hiện tại (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
+          - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
+          - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -54,8 +72,16 @@ on:
         type: string
         default: ""
 
+# MỘT THAO TÁC CHẠM VPS TẠI MỘT THỜI ĐIỂM.
+#
+# Trước đây deploy và vận hành dùng hai nhóm riêng, nên một lệnh vận hành có thể chạy ĐÈ lên giữa
+# lúc deploy đang dựng ảnh và khởi động lại container — đúng lúc máy chủ yếu nhất. Nay dùng CHUNG
+# một nhóm: việc thứ hai xếp hàng chờ.
+#
+# `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê, dựng
+# lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
 concurrency:
-  group: ops-vps
+  group: vps-operations
   cancel-in-progress: false
 
 jobs:
@@ -68,6 +94,25 @@ jobs:
           ACTION: ${{ inputs.action }}
           DAYS: ${{ inputs.days }}
           ARG: ${{ inputs.arg }}
+          # Chỉ dùng cho apply-ai-env. Secret được GitHub che trong log; KHÔNG bao giờ truyền khoá qua ô "arg".
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          # Chỉ dùng cho apply-sepay-env. Cùng nguyên tắc: GitHub che secret trong log, và tuyệt
+          # đối KHÔNG truyền qua ô "arg" — ô đó được in nguyên văn vào log của mọi lần chạy.
+          SEPAY_WEBHOOK_SECRET: ${{ secrets.SEPAY_WEBHOOK_SECRET }}
+          SEPAY_WEBHOOK_API_KEY: ${{ secrets.SEPAY_WEBHOOK_API_KEY }}
+          # Token API v2 — dùng cho đường ĐỐI CHIẾU. Khác secret webhook: secret để xác minh gói tin
+          # SePay đẩy sang, token này để ERP chủ động hỏi lại SePay.
+          SEPAY_API_TOKEN: ${{ secrets.SEPAY_API_TOKEN }}
+          # Chỉ dùng cho returns-hmt. ĐƯỜNG DẪN TẢI BẢNG TÍNH HÀNG HOÀN, khai ở Settings →
+          # Secrets and variables → Actions → Variables.
+          #
+          # VÌ SAO LÀ BIẾN CHỨ KHÔNG PHẢI Ô "arg": kho mã này PUBLIC, nên log của Actions và ô
+          # nhập của mỗi lần chạy ai cũng đọc được. Một đường dẫn dạng "ai có link cũng xem được"
+          # in vào đó là công bố nó vĩnh viễn — không rút lại được kể cả khi xoá lần chạy. Biến
+          # thì chỉ đi vào môi trường của tiến trình và không bao giờ được in ra.
+          HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -75,7 +120,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -95,6 +140,50 @@ jobs:
                   echo "$path: ${t} ms"
                 done
                 $C exec -T db psql -U erp -d erp -P pager=off -c "select count(*) as active, count(*) filter (where state='active') running from pg_stat_activity where datname='erp';" -c "select relname, n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 8;" ;;
+              disk)
+                # SỰ CỐ #242 (12/09/2026): deploy chết vì hết đĩa, và KHÔNG thao tác vận hành nào
+                # nhìn thấy được ổ đĩa — người trực chỉ có một thông báo containerd khó đọc trong
+                # log deploy. Ổ đĩa là tài nguyên duy nhất trong bốn thứ (CPU / RAM / đĩa / mạng)
+                # chưa có chỗ xem, nên nó là thứ duy nhất hỏng mà không ai thấy trước.
+                df -h /; echo
+                echo "── Docker chiếm chỗ ──"; docker system df; echo
+                echo "── Ảnh đang có (mới nhất trước) ──"
+                docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' | head -20; echo
+                echo "── Thư mục lớn ──"
+                du -sh /var/lib/docker /var/lib/containerd /root/backups /root/erp 2>/dev/null | sort -h ;;
+              docker-prune)
+                # ═══ GIẢI PHÓNG Ổ ĐĨA — CHỈ ẢNH DOCKER, KHÔNG ĐỤNG MỘT BYTE DỮ LIỆU NÀO ═══
+                #
+                # SỰ CỐ #242/#243 (12/09/2026): ổ đĩa đầy 100% (39G/39G, 0 byte trống). Deploy #242
+                # chết lúc giải nén image; #243 chết SỚM HƠN — `git pull` trên VPS không ghi nổi
+                # loose object. Tức là bản sửa nằm trong `install-vps.sh` KHÔNG THỂ tới được máy
+                # chủ, vì máy chủ quá đầy để tải nó về. Thao tác này là lối ra khỏi vòng luẩn quẩn
+                # đó: workflow vận hành nhúng thẳng script qua SSH, không cần `git pull`.
+                #
+                # NGUYÊN NHÂN: `docker image prune -f` chỉ xoá ảnh KHÔNG TAG, trong khi mỗi lần
+                # deploy để lại một ảnh `ghcr.io/<kho>:<sha>` CÓ TAG (~2,6 GB). Đo được ngày
+                # 12/09: 12 ảnh như vậy, 26,33 GB có thể thu hồi trên tổng 31,74 GB.
+                #
+                # VÌ SAO AN TOÀN: không có dữ liệu nào ở đây. CSDL nằm trong volume Docker (không
+                # đụng), sao lưu ở /root/backups (không đụng), mã nguồn ở /root/erp (không đụng).
+                # Ảnh Docker là hiện vật KÉO LẠI ĐƯỢC từ GHCR. Và Docker TỪ CHỐI xoá ảnh của
+                # container đang chạy, nên thao tác này không thể làm sập bản đang chạy.
+                echo "── TRƯỚC ──"; df -h /; docker system df; echo
+                # 1. Mọi tag theo SHA của kho này. Ảnh đang chạy sống tiếp nhờ tag `erp-app:local`.
+                { docker images --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr\.io/truyenhkm5group-stack/hkt:' || true; } | while read -r tag_cu; do
+                  echo "  gỡ tag $tag_cu"; docker rmi "$tag_cu" >/dev/null 2>&1 || echo "    (đang dùng, giữ lại)"
+                done
+                # 2. Ảnh của đường DỰNG-TRÊN-VPS cũ. Từ khi CI dựng image (deploy #228 trở đi) không
+                #    ai dùng chúng nữa; `docker rmi` sẽ từ chối nếu có container nào còn chạy từ đó.
+                for tag_cu in erp-app:latest erp-scheduler:latest; do
+                  docker rmi "$tag_cu" >/dev/null 2>&1 && echo "  gỡ $tag_cu" || true
+                done
+                # 3. Ảnh không tag + bộ nhớ đệm dựng. VPS KHÔNG còn dựng image nữa nên đệm là rác thuần.
+                docker image prune -f >/dev/null 2>&1 || true
+                docker builder prune -af >/dev/null 2>&1 || true
+                echo; echo "── SAU ──"; df -h /; docker system df; echo
+                echo "── Dịch vụ vẫn chạy? ──"; $C ps
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null; echo ;;
               logs)
                 $C logs --tail=200 app scheduler caddy 2>&1 | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' ;;
               sync-pancake-all)
@@ -123,6 +212,30 @@ jobs:
               vtp-statements-autolink)
                 fetch_script vtp-statement-autolink.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-autolink.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-statement-autolink.ts $ARG ;;
+              profit-verify)
+                fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
+              cogs-drift)
+                fetch_script cogs-drift.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cogs-drift.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cogs-drift.ts ;;
+              outcome-parity)
+                # Mặc định CHỈ ĐO. "--apply" dựng lại bảng dẫn xuất — KHÔNG đụng đơn, vận đơn, sự
+                # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
+                fetch_script outcome-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/outcome-parity.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/outcome-parity.ts $ARG ;;
+              perf-probe)
+                fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
+              smoke)
+                # Chạy smoke trên hệ thống ĐANG ỔN ĐỊNH. Khác hẳn smoke lúc deploy: lúc đó scheduler
+                # vừa khởi động và đang đồng bộ toàn bộ đơn, nên trang nặng bị tranh CPU. Chạy tay ở
+                # đây trả lời được câu "người dùng thật có phải chờ không", tách khỏi chi phí deploy.
+                fetch_script smoke.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/smoke.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/smoke.ts || true ;;
+              kpi-snapshot)
+                # Dùng bản script mới nhất trên main; công thức kết quả đơn lấy từ lib trong image.
+                fetch_script kpi-snapshot.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/kpi-snapshot.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/kpi-snapshot.ts ;;
               vtp-rebuild-state)
                 fetch_script vtp-rebuild-state.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-rebuild-state.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-rebuild-state.ts $ARG ;;
@@ -144,6 +257,9 @@ jobs:
               vtp-manual-verify)
                 fetch_script vtp-manual-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-manual-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-manual-verify.ts $ARG ;;
+              explain-stock)
+                fetch_script explain-stock.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/explain-stock.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/explain-stock.ts ;;
               outcome-explain)
                 fetch_script order-outcome-explain.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/order-outcome-explain.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/order-outcome-explain.ts $ARG ;;
@@ -164,9 +280,87 @@ jobs:
               pages-debug)
                 fetch_script pages-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
+              returns-hmt)
+                # ═══ ĐỐI SOÁT SỔ HÀNG HOÀN VIẾT TAY (HMT) ↔ ERP ═══
+                #
+                # MẶC ĐỊNH CHẠY THỬ. Ô "arg" để trống = chỉ đọc và in bảng phân loại; "--apply"
+                # mới ghi, và chỉ ghi những dòng MATCHED. Lượt ghi duy nhất là "kiện đã về tới
+                # kho" — TỒN KHO KHÔNG ĐỔI MỘT MÓN NÀO (AGENTS.md mục 10: hàng hoàn chỉ vào tồn
+                # khi người kho lập phiếu RETURN với số đếm thực tế).
+                #
+                # ─── BA CÁCH ĐƯA TỆP VÀO, XẾP THEO ĐỘ DỄ CHO NGƯỜI DÙNG ───
+                #
+                #  1. KHUYẾN NGHỊ — TẢI LÊN QUA CHÍNH ERP: mở Kiểm đếm hàng hoàn → kéo tệp .xlsx
+                #     vào ô "Sổ hàng hoàn viết tay". Tệp đi qua HTTPS bằng phiên đăng nhập của
+                #     người dùng và nằm lại trong CSDL production. Không khoá SSH, không console,
+                #     không link công khai. Thao tác này KHÔNG cần gì ở đây — cứ chạy, script tự
+                #     đọc bản mới nhất.
+                #  2. TỆP TRÊN MÁY CHỦ ở /root/hmt/*.xlsx — dành cho người đang ngồi trên máy chủ.
+                #  3. Tải từ `HMT_WORKBOOK_URL` (biến kho mã) nếu hai cách trên đều trống.
+                #
+                # CẢ HAI ĐƯỜNG ĐỀU KHÔNG NHẬN TỆP QUA Ô "arg": ô đó hiện công khai trên trang của
+                # mỗi lần chạy, mà kho mã này PUBLIC (AGENTS.md mục 5). Đẩy nội dung một bảng tính
+                # hàng hoàn qua đó là công bố nó vĩnh viễn — xoá lần chạy cũng không rút lại được.
+                mkdir -p /root/hmt
+                HMT_LOCAL="$(ls -t /root/hmt/*.xlsx 2>/dev/null | head -1 || true)"
+                # Ô "arg" chỉ nhận cờ. Danh sách ĐÓNG để không ai chèn được lệnh vào đây.
+                case "${ARG:-}" in
+                  "") HMT_FLAGS="" ;;
+                  "--apply") HMT_FLAGS="--apply" ;;
+                  *) echo "::error::Ô \"arg\" chỉ nhận rỗng (chạy thử) hoặc --apply. Nhận được: $ARG"; exit 1 ;;
+                esac
+                # ═══ KHÔNG CÓ TỆP Ở MÁY CHỦ VÀ KHÔNG CÓ URL ⇒ ĐỌC BẢN TẢI LÊN QUA ERP ═══
+                #
+                # Đây là đường MẶC ĐỊNH từ 14/09/2026. Script tự đọc bản mới nhất trong CSDL, nên ở
+                # đây không phải chép gì cả — và nếu CSDL cũng trống thì chính script in ra hướng
+                # dẫn đúng (kéo tệp vào màn hình Kiểm đếm hàng hoàn), không phải một lỗi shell.
+                if [ -z "$HMT_LOCAL" ] && [ -z "${HMT_WORKBOOK_URL:-}" ]; then
+                  echo "Nguồn: bản tải lên qua ERP (CSDL production)"
+                  fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
+                  docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts $HMT_FLAGS
+                  exit 0
+                fi
+                TMP="$(mktemp -d)"
+                # Chỉ dọn BẢN SAO tạm (thư mục tạm + bản trong container). Tệp gốc ở /root/hmt là
+                # của chủ shop — máy KHÔNG tự xoá tài sản của người khác; in lời nhắc ở cuối.
+                trap 'rm -rf "$TMP"; docker exec erp-app rm -f /tmp/hmt-reconcile.xlsx >/dev/null 2>&1 || true' EXIT
+                if [ -n "$HMT_LOCAL" ]; then
+                  # Tệp chủ shop đã chép lên máy chủ. In TÊN TỆP (để biết đang đối soát bản nào),
+                  # không in nội dung.
+                  echo "Nguồn: tệp trên máy chủ · $(basename "$HMT_LOCAL")"
+                  cp "$HMT_LOCAL" "$TMP/hmt.xlsx"
+                else
+                  # KHÔNG in đường dẫn. Chỉ in kết quả tải được hay không.
+                  echo "Nguồn: tải từ biến HMT_WORKBOOK_URL"
+                  if ! curl -fsSL --max-time 180 -o "$TMP/hmt.xlsx" "$HMT_WORKBOOK_URL"; then
+                    echo "::error::Không tải được bảng tính từ HMT_WORKBOOK_URL. Kiểm tra biến có đúng đường dẫn TẢI (không phải đường dẫn /edit) và bảng tính đã ở chế độ ai-có-link-cũng-xem-được chưa."
+                    exit 1
+                  fi
+                fi
+                # Google trả về TRANG ĐĂNG NHẬP kèm HTTP 200 khi bảng tính chưa chia sẻ — `curl -f`
+                # không bắt được. Chữ ký ZIP thì bắt được, và nói đúng nguyên nhân.
+                if [ "$(head -c 2 "$TMP/hmt.xlsx")" != "PK" ]; then
+                  echo "::error::Tệp KHÔNG phải .xlsx (thiếu chữ ký ZIP 'PK'). Nếu tải từ URL: thường là bảng tính chưa được chia sẻ nên Google trả về trang đăng nhập thay vì tệp."
+                  exit 1
+                fi
+                # `sha256` in ra để đối chiếu ĐÚNG BẢN NÀO đã được đối soát — lượt chạy thử và lượt
+                # `--apply` phải cùng một con số, nếu không là đã đổi tệp giữa chừng.
+                echo "Bảng tính: $(wc -c < "$TMP/hmt.xlsx") byte · sha256 $(sha256sum "$TMP/hmt.xlsx" | cut -c1-16)…"
+                docker cp "$TMP/hmt.xlsx" erp-app:/tmp/hmt-reconcile.xlsx
+                fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS
+                if [ -n "$HMT_LOCAL" ] && [ "$HMT_FLAGS" = "--apply" ]; then
+                  echo ""
+                  echo "▸ Đã ghi xong. Bản sao tạm trong container đã xoá. Tệp gốc vẫn nằm ở $HMT_LOCAL —"
+                  echo "  xoá khi không cần nữa:  ssh root@<máy chủ> 'rm -f \"$HMT_LOCAL\"'"
+                fi ;;
               cs-cleanup)
                 fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;
+              cs-rule-update)
+                # Mặc định CHỈ ĐẾM. Truyền arg "--apply" mới ghi thật.
+                fetch_script cs-rule-update.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-rule-update.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-rule-update.ts $ARG ;;
               bank-ledger-prune)
                 fetch_script import-bank-ledger.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts --prune-non-operating ;;
@@ -186,6 +380,86 @@ jobs:
                 grep -qE "^PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"" .env && grep -qE "^VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"" .env && echo "Đã tạo secret webhook mới (xem tại ERP → Kết nối dữ liệu)."
                 $C up -d app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              apply-ai-env)
+                # Ghi khoá AI từ Secrets vào .env (chỉ khi có giá trị), khởi động lại, rồi thử kết nối thật.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                CHANGED=0
+                [ -n "${OPENAI_API_KEY:-}" ] && { upsert_env OPENAI_API_KEY "$OPENAI_API_KEY"; CHANGED=1; echo "OPENAI_API_KEY: đã ghi (${#OPENAI_API_KEY} ký tự)"; }
+                [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; CHANGED=1; echo "ANTHROPIC_API_KEY: đã ghi (${#ANTHROPIC_API_KEY} ký tự)"; }
+                [ -n "${AI_PROVIDER:-}" ] && { upsert_env AI_PROVIDER "$AI_PROVIDER"; CHANGED=1; echo "AI_PROVIDER=$AI_PROVIDER"; }
+                if [ "$CHANGED" = "0" ]; then echo "Không có Secret OPENAI_API_KEY / ANTHROPIC_API_KEY nào trong repo — chưa ghi gì. Thêm Secret ở Settings → Secrets and variables → Actions rồi chạy lại."; exit 1; fi
+                $C up -d app scheduler
+                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --ai ;;
+              ai-check)
+                fetch_script ai-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ai-check.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ai-check.ts $ARG ;;
+              apply-sepay-env)
+                # Ghi secret webhook SePay từ Secrets vào .env rồi khởi động lại app.
+                #
+                # GIÁ TRỊ SECRET KHÔNG BAO GIỜ ĐƯỢC IN. Chỉ in ĐỘ DÀI để biết đã ghi được gì.
+                # GitHub cũng tự che secret trong log, nhưng không dựa vào một lớp bảo vệ duy nhất.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                if [ -z "${SEPAY_WEBHOOK_SECRET:-}" ] && [ -z "${SEPAY_WEBHOOK_API_KEY:-}" ]; then
+                  echo "Chưa có Secret SEPAY_WEBHOOK_SECRET trong repo — KHÔNG ghi gì (ghi đè rỗng sẽ giết đường realtime đang chạy)."
+                  echo "Thêm ở Settings → Secrets and variables → Actions rồi chạy lại."; exit 1
+                fi
+                # CHỈ ghi khi có giá trị: Secret trống không được phép xoá khoá đang dùng trên máy.
+                [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && { upsert_env SEPAY_WEBHOOK_SECRET "$SEPAY_WEBHOOK_SECRET"; echo "SEPAY_WEBHOOK_SECRET: đã ghi (${#SEPAY_WEBHOOK_SECRET} ký tự)"; }
+                [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && { upsert_env SEPAY_WEBHOOK_API_KEY "$SEPAY_WEBHOOK_API_KEY"; echo "SEPAY_WEBHOOK_API_KEY: đã ghi (${#SEPAY_WEBHOOK_API_KEY} ký tự)"; }
+                [ -n "${SEPAY_API_TOKEN:-}" ] && { upsert_env SEPAY_API_TOKEN "$SEPAY_API_TOKEN"; echo "SEPAY_API_TOKEN: đã ghi (${#SEPAY_API_TOKEN} ký tự)"; }
+                $C up -d app scheduler
+                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                # ĐỌC QUA CONTAINER, KHÔNG QUA HOST. Cổng 3000 KHÔNG mở ra host trên production
+                # (Caddy đi qua mạng docker) — gọi 127.0.0.1:3000 từ máy chủ luôn "Connection refused".
+                echo "── GET /api/webhooks/sepay ──"
+                docker exec erp-app wget -qO- http://127.0.0.1:3000/api/webhooks/sepay; echo
+
+                # ═══ THỬ CHỮ KÝ MÀ KHÔNG GHI MỘT ĐỒNG TIỀN GIẢ NÀO VÀO SỔ ═══
+                # Chi tiết vì sao gói tin thử CỐ Ý sai định dạng: xem đầu scripts/sepay-hmac-check.ts.
+                # Chạy TRONG container nên secret không bao giờ phải đi qua dòng lệnh: nó đã nằm sẵn
+                # trong môi trường của tiến trình, và script chỉ in ĐỘ DÀI chứ không in giá trị.
+                fetch_script sepay-hmac-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-hmac-check.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-hmac-check.ts ;;
+              sepay-verify)
+                # Kiểm chứng trên máy chủ THẬT. Phép phát lại dùng đúng mã giao dịch SePay đã có nên ràng buộc
+                # UNIQUE ở CSDL chặn dòng thứ hai; script vẫn đếm trước/sau và báo đỏ nếu số dòng đổi.
+                fetch_script sepay-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-verify.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-verify.ts ;;
+              sepay-reconcile)
+                # MẶC ĐỊNH CHẠY THỬ: chỉ nói sẽ vá gì, không ghi. Truyền `--apply` ở ô "arg" mới ghi.
+                # Bộ đọc API này chưa từng chạy với API thật, nên phải NHÌN một lượt trước khi cho ghi.
+                fetch_script sepay-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-reconcile.ts'
+                docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/sepay-reconcile.ts $ARG" ;;
+              cs-stale)
+                # MẶC ĐỊNH CHẠY THỬ: in kết luận cho từng loại case và 20 mẫu thật, KHÔNG ghi một dòng
+                # nào. Truyền `--apply` ở ô "arg" mới đóng mềm. Máy chỉ đóng case mà CHỨNG TỪ nghiệp vụ
+                # nói rõ điều kiện không còn VÀ chưa ai cầm; case có người chạm vào thì để người quyết.
+                fetch_script cs-stale.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-stale.ts'
+                docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/cs-stale.ts $ARG" ;;
+              sepay-schedule)
+                # Bật / tắt lịch đối chiếu định kỳ. `AGENTS.md` mục 7: đổi lịch scheduler phải do chủ
+                # shop quyết, nên nó là một thao tác TƯỜNG MINH chứ không phải mặc định trong mã.
+                #
+                # `arg` ở đây là SỐ PHÚT, không phải bí mật — in ra log là đúng và cần thiết.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                PHUT="$(echo "${ARG:-}" | tr -dc '0-9')"
+                if [ "${ARG:-}" = "off" ] || [ -z "$PHUT" ] || [ "$PHUT" = "0" ]; then
+                  upsert_env SYNC_SEPAY_EVERY_MINUTES "0"
+                  upsert_env SYNC_SEPAY_APPLY "0"
+                  echo "Đã TẮT lịch đối chiếu SePay định kỳ."
+                else
+                  upsert_env SYNC_SEPAY_EVERY_MINUTES "$PHUT"
+                  # Bật lịch mà để CHẠY THỬ thì job chạy mỗi giờ và không vá gì — vô nghĩa.
+                  upsert_env SYNC_SEPAY_APPLY "1"
+                  echo "Đã BẬT lịch đối chiếu SePay: mỗi $PHUT phút, quét 2 ngày gần nhất, GHI THẬT."
+                fi
+                grep -E "^SYNC_SEPAY_" .env
+                # Bộ lập lịch đọc .env lúc khởi động, nên phải dựng lại tiến trình thì lịch mới đổi.
+                $C up -d scheduler
+                sleep 8
+                docker logs --tail 20 erp-scheduler 2>&1 | grep -i "lịch chạy" || docker logs --tail 10 erp-scheduler 2>&1 ;;
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;

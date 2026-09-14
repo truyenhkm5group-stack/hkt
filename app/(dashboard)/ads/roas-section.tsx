@@ -1,9 +1,13 @@
 import { InfoHint } from "@/components/info-hint";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatNumber, formatVND } from "@/lib/format";
-import { ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
+import { formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { getAdsAttributionAudit } from "@/lib/queries/ads-attribution";
+import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
+import { CAC_HINT, CAC_LABEL, ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
 import { successTone } from "@/lib/constants/returns";
+import { RoasLevelTabs } from "@/app/(dashboard)/ads/roas-level-tabs";
+import type { RoasLevel } from "@/lib/queries/ads-roas";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -23,19 +27,32 @@ function Roas({ value }: { value: number | null }) {
  * BỐN MỨC ROAS. Với shop bán COD, ROAS theo doanh thu lên đơn là con số vô nghĩa: đơn có thể hoàn,
  * và tiền còn nằm ở ĐVVC. Bốn cột dưới đây luôn giảm dần, và chỗ tụt nhiều nhất chính là vấn đề.
  */
-export async function RoasSection({ period }: { period: Period }) {
-  const r = await getAdsRoas(period, "campaign");
+export async function RoasSection({ period, level = "campaign" }: { period: Period; level?: RoasLevel }) {
+  const r = await getAdsRoas(period, level);
   if (!r.rows.length && !r.unmapped.ordersWithoutAd) return null;
+  const byAd = level === "ad";
 
   return (
     <SectionCard
-      title="ROAS theo kết quả đơn"
-      description={`${period.label} · chi ${formatVND(r.totals.spend)} · lợi nhuận góp ${formatVND(r.totals.contribution)}`}
-      hint="Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là vấn đề cần sửa."
+      title={byAd ? "Kết quả đơn theo mẩu quảng cáo" : "ROAS theo kết quả đơn"}
+      description={
+        byAd
+          ? `${period.label} · ${formatNumber(r.rows.length)} mẩu quảng cáo · doanh thu giao thành công ${formatVND(r.totals.deliveredRevenue)}`
+          : `${period.label} · chi ${formatVND(r.totals.spend)} · lợi nhuận góp ${formatVND(r.totals.contribution)}`
+      }
+      hint="Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là vấn đề cần sửa. Cấp mẩu quảng cáo KHÔNG có chi tiêu riêng nên không có ROAS ở cấp đó — xem docs/ads-attribution-audit.md."
+      actions={<RoasLevelTabs current={level} />}
       padded={false}
     >
+      {byAd ? (
+        <p className="border-b bg-sky-50 px-5 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+          Facebook chỉ cho ERP số chi tiêu theo CHIẾN DỊCH/ngày, nên ở cấp mẩu quảng cáo không có tiền chi và do đó không có
+          ROAS/CAC. Bảng này xếp theo doanh thu GIAO THÀNH CÔNG: mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước.
+          Cố ý KHÔNG chia đều tiền chiến dịch cho các mẩu — chia đều làm tổng khớp trong khi từng dòng đều sai.
+        </p>
+      ) : null}
       <div className="overflow-x-auto">
-        <Table className="min-w-[900px]">
+        <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead>Chiến dịch</TableHead>
@@ -50,23 +67,34 @@ export async function RoasSection({ period }: { period: Period }) {
                   </span>
                 </TableHead>
               ))}
+              {(["cacBooked", "cacDelivered"] as const).map((key) => (
+                <TableHead key={key} className="text-right whitespace-nowrap">
+                  <span className="inline-flex items-center gap-1">
+                    {CAC_LABEL[key]}
+                    <InfoHint>{CAC_HINT[key]}</InfoHint>
+                  </span>
+                </TableHead>
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {r.rows.slice(0, 40).map((row) => (
               <TableRow key={row.key}>
                 <TableCell className="max-w-[280px] truncate" title={row.name}>{row.name}</TableCell>
-                <TableCell className="numeric text-right whitespace-nowrap">{formatVND(row.spend)}</TableCell>
+                <TableCell className="numeric text-right whitespace-nowrap">{row.spendKnown ? formatVND(row.spend) : <span className="text-muted-foreground" title="Facebook không cung cấp chi tiêu ở cấp này">—</span>}</TableCell>
                 <TableCell className="numeric text-right">
                   {formatNumber(row.deliveredOrders)}/{formatNumber(row.bookedOrders)}
                 </TableCell>
                 <TableCell className={cn("numeric text-right", successTone(row.successRate))}>
                   {row.successRate === null ? "—" : `${row.successRate}%`}
                 </TableCell>
-                <TableCell className="text-right"><Roas value={row.orderRoas} /></TableCell>
+                <TableCell className="text-right">{row.spendKnown ? <Roas value={row.orderRoas} /> : <span className="text-muted-foreground" title="Không có chi tiêu ở cấp này">—</span>}</TableCell>
                 <TableCell className="text-right"><Roas value={row.deliveredRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.cashRoas} /></TableCell>
                 <TableCell className="text-right"><Roas value={row.contributionRoas} /></TableCell>
+                <TableCell className="numeric text-right whitespace-nowrap">{row.cacBooked === null ? "—" : formatVND(row.cacBooked)}</TableCell>
+                {/* CAC giao thành công luôn cao hơn CAC lên đơn; khoảng cách chính là tiền trả cho đơn hoàn. */}
+                <TableCell className="numeric text-right whitespace-nowrap font-medium">{row.cacDelivered === null ? "—" : formatVND(row.cacDelivered)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -80,6 +108,71 @@ export async function RoasSection({ period }: { period: Period }) {
           </li>
           {r.unmapped.ordersWithUnknownAd ? <li>{formatNumber(r.unmapped.ordersWithUnknownAd)} đơn có ad_id nhưng chưa tra được mẩu quảng cáo trên Facebook.</li> : null}
           {r.unmapped.spendWithoutOrders ? <li>{formatVND(r.unmapped.spendWithoutOrders)} tiền quảng cáo của chiến dịch không có đơn nào gắn vào.</li> : null}
+        </ul>
+      </div>
+    </SectionCard>
+  );
+}
+
+/**
+ * ĐỘ PHỦ QUY KẾT — đứng ngay cạnh ROAS, cố ý.
+ *
+ * Nếu chỉ 30% đơn có mã quảng cáo thì "ROAS 4,2" là ROAS của 30% đó. Con số vẫn đúng, nhưng đọc nó
+ * như thể nó nói về toàn shop là tự lừa mình. Đặc tả: docs/ads-attribution-audit.md.
+ */
+export async function AdsCoverageSection({ period }: { period: Period }) {
+  const audit = await getAdsAttributionAudit(period);
+  const ceiling = audit.rows.find((r) => r.key === "order.ad");
+  if (!ceiling || ceiling.total === 0) return null;
+  const low = ceiling.coverage * 100 < LOW_COVERAGE_PCT;
+
+  return (
+    <SectionCard
+      title="Độ phủ quy kết — đọc trước khi tin con số ROAS"
+      description={`${formatPercent(ceiling.coverage * 100)} đơn trong kỳ có mã quảng cáo. Đây là TRẦN của mọi chỉ số ROAS ở trên.`}
+      hint="Quy kết không nối được thì KHÔNG chia đều cho các chiến dịch — chia đều làm tổng khớp trong khi từng dòng đều sai. Ba cấp phân tích không có dữ liệu được nêu tên ở cuối khối này để không ai mất công đi tìm rồi tự dựng số thay thế."
+      padded={false}
+    >
+      {low ? (
+        <p className="border-b bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          Độ phủ dưới {LOW_COVERAGE_PCT}%: bảng ROAS ở trên mô tả đúng phần đơn có mã quảng cáo, KHÔNG mô tả toàn shop.
+        </p>
+      ) : null}
+      <div className="overflow-x-auto">
+        <Table className="min-w-[720px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Mắt xích</TableHead>
+              <TableHead className="text-right">Nối được</TableHead>
+              <TableHead className="text-right">Độ phủ</TableHead>
+              <TableHead>Phần còn lại là gì</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {audit.rows.map((r) => (
+              <TableRow key={r.key}>
+                <TableCell className="font-medium">{r.label}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {formatNumber(r.matched)} / {formatNumber(r.total)}
+                  <span className="ml-1 text-xs text-muted-foreground">{r.unit === "spend" ? "dòng chi" : "đơn"}</span>
+                </TableCell>
+                <TableCell className={cn("text-right tabular-nums", r.total > 0 && r.coverage * 100 < LOW_COVERAGE_PCT && "font-semibold text-amber-600 dark:text-amber-400")}>
+                  {r.total > 0 ? formatPercent(r.coverage * 100) : "—"}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">{r.note}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="border-t px-5 py-3 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">Ba cấp KHÔNG phân tích được (nêu tên để không ai đi tìm):</p>
+        <ul className="mt-1 space-y-0.5">
+          {audit.unavailableLevels.map((l) => (
+            <li key={l.level}>
+              <span className="font-medium">{l.level}</span> — {l.reason}
+            </li>
+          ))}
         </ul>
       </div>
     </SectionCard>

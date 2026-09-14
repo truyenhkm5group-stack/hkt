@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { createContext, useContext, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, RefreshCw, Save, Send } from "lucide-react";
+import { Check, Loader2, Play, RefreshCw, Save, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { acknowledgeCase, assignCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram } from "@/lib/actions/alerts";
+import { acknowledgeCase, assignCase, ignoreCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendTestLark, sendTestLarkBilling, sendTestTelegram, startCase, unignoreCase } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
+import type { CaseStatus } from "@/lib/constants/action-queue";
 
 export function RunAlertsButton() {
   const [pending, startTransition] = useTransition();
@@ -24,7 +25,7 @@ export function RunAlertsButton() {
           const r = await runAlertsNow();
           if ("error" in r) toast.error(r.error);
           else {
-            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
+            toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng${r.reclassified ? ` · ${r.reclassified} phân loại lại` : ""} · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
             router.refresh();
           }
         })
@@ -123,6 +124,132 @@ export function ResolveButton({ id }: { id: string }) {
   );
 }
 
+/** BẮT ĐẦU LÀM — khác "tôi nhận": giơ tay không phải là đang chạy. */
+export function StartButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await startCase(id);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Bắt đầu
+    </Button>
+  );
+}
+
+/**
+ * BỎ QUA — bắt buộc ghi lý do.
+ *
+ * Không dùng `window.confirm` vì nó không lấy được lý do; và bỏ qua mà không nói vì sao thì đúng
+ * bằng việc xoá bằng chứng. Người bấm phải gõ ra được câu trả lời cho "tại sao không làm".
+ */
+export function IgnoreButton({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  if (!open) {
+    return (
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setOpen(true)}>
+        <X className="size-3.5" /> Bỏ qua
+      </Button>
+    );
+  }
+  return (
+    <div className="flex w-full items-center gap-1 sm:w-auto">
+      <Input
+        autoFocus
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Vì sao không làm việc này?"
+        className="h-7 w-full text-xs sm:w-56"
+      />
+      <Button
+        size="sm"
+        className="h-7 px-2 text-xs"
+        disabled={pending || reason.trim().length < 5}
+        onClick={() =>
+          startTransition(async () => {
+            const r = await ignoreCase(id, reason);
+            if ("error" in r) toast.error(r.error);
+            else {
+              setOpen(false);
+              setReason("");
+              router.refresh();
+            }
+          })
+        }
+      >
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Lưu
+      </Button>
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setOpen(false)}>
+        Huỷ
+      </Button>
+    </div>
+  );
+}
+
+/** Bỏ đánh dấu "bỏ qua" — đưa việc trở lại hàng đợi. Lý do cũ vẫn nằm trong nhật ký. */
+export function UnignoreButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const r = await unignoreCase(id);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />} Làm lại
+    </Button>
+  );
+}
+
+/** GIAO VIỆC cho người khác — không chỉ tự nhận. Việc không có chủ là việc trôi. */
+export function AssignSelect({ id, users, current }: { id: string; users: { id: string; name: string }[]; current: string | null }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  if (!users.length) return null;
+  return (
+    <select
+      className="h-7 rounded-md border bg-background px-1.5 text-xs"
+      value={current ?? ""}
+      disabled={pending}
+      onChange={(e) =>
+        startTransition(async () => {
+          const r = await assignCase(id, e.target.value || null);
+          if ("error" in r) toast.error(r.error);
+          else router.refresh();
+        })
+      }
+    >
+      <option value="">Chưa ai nhận</option>
+      {users.map((u) => (
+        <option key={u.id} value={u.id}>
+          {u.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
 export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: AlertConfig; hasToken: boolean; hasLarkSecret?: boolean }) {
   const [form, setForm] = useState({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "" });
@@ -204,10 +331,23 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <div className="space-y-1">
           <Label>Vận đơn treo không cập nhật quá (ngày)</Label>
           <Input type="number" min={1} value={form.staleDays} onChange={(e) => setForm({ ...form, staleDays: Number(e.target.value) || 4 })} />
+          {/*
+            Ngưỡng này là TRẦN CHUNG, không phải ngưỡng duy nhất: mỗi chặng có ngưỡng riêng ngặt hơn
+            (đang đi giao 48 giờ, đã lấy hàng 72 giờ) vì im lặng ở mỗi chặng có ý nghĩa khác nhau.
+            Hạ số này xuống sẽ siết TẤT CẢ các chặng; nâng lên quá ngưỡng chặng thì chặng vẫn thắng.
+          */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Trần chung. Từng chặng còn ngưỡng riêng ngặt hơn (đang đi giao 48 giờ, đã lấy hàng 72 giờ) — bên nào ngặt hơn thì bên đó tính.
+          </p>
         </div>
         <div className="space-y-1">
           <Label>Chỉ xét đơn phát sinh trong (ngày)</Label>
           <Input type="number" min={1} value={form.lookbackDays} onChange={(e) => setForm({ ...form, lookbackDays: Number(e.target.value) || 14 })} />
+        </div>
+        {/* Hàng hoàn vừa về hôm qua chưa kịp kiểm đếm là bình thường — chỉ báo sau ngưỡng này. */}
+        <div className="space-y-1">
+          <Label>Hàng hoàn về quá (ngày) mà chưa tái nhập</Label>
+          <Input type="number" min={1} value={form.returnInspectionDays} onChange={(e) => setForm({ ...form, returnInspectionDays: Number(e.target.value) || 3 })} />
         </div>
       </div>
       <div className="flex flex-wrap gap-4">
@@ -235,6 +375,27 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.risk} onCheckedChange={(v) => toggle("risk", v === true)} /> Đơn của khách rủi ro (hoàn nhiều / bị chặn) → CSKH xin cọc trước khi gửi
         </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.incomplete} onCheckedChange={(v) => toggle("incomplete", v === true)} /> Đơn thiếu SĐT / địa chỉ (chưa gửi ĐVVC được)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.returnInspection} onCheckedChange={(v) => toggle("returnInspection", v === true)} /> Hàng hoàn đã về mà kho chưa lập phiếu tái nhập
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.customerRecovery} onCheckedChange={(v) => toggle("customerRecovery", v === true)} /> Mất khách quen (khách từng mua thành công nay hoàn đơn) → gọi lại
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.adsAnomaly} onCheckedChange={(v) => toggle("adsAnomaly", v === true)} /> Quảng cáo bất thường & chiến dịch đang lỗ
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.cancelledButShipping} onCheckedChange={(v) => toggle("cancelledButShipping", v === true)} /> Đơn đã huỷ nhưng hàng vẫn đang đi tới khách
+        </label>
+        <label className="flex items-center gap-2">
+          <Checkbox checked={form.enabled.addressNotNormalized} onCheckedChange={(v) => toggle("addressNotNormalized", v === true)} /> Địa chỉ chưa chuẩn hoá nên chưa đẩy được sang đơn vị vận chuyển
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.bankAccountUnconfirmed} onCheckedChange={(v) => toggle("bankAccountUnconfirmed", v === true)} /> Tài khoản ngân hàng mới do webhook phát hiện, chưa ai xác nhận
+        </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" onClick={save} disabled={pending}>
@@ -251,6 +412,39 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
         </Button>
         <span className="text-xs text-muted-foreground">Cảnh báo quét mỗi 10 phút và ngay sau webhook Pancake / Viettel Post; mỗi vấn đề chỉ báo một lần, tự đóng khi đơn đã được xử lý.</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * ───────────── MỘT THÀNH PHẦN CHO CẢ CỤM NÚT CỦA MỘT VIỆC ─────────────
+ *
+ * Đo trên production 11/09/2026: /alerts nặng 602kB cho 50 việc — mỗi dòng sáu thành phần phía
+ * trình duyệt, và ô "giao cho" mang nguyên danh sách nhân sự LẶP LẠI 50 lần trong gói dữ liệu.
+ * Nay danh sách nhân sự đi qua context (một lần cho cả trang), mỗi dòng chỉ còn một thành phần.
+ */
+const StaffContext = createContext<{ id: string; name: string }[]>([]);
+
+export function StaffProvider({ staff, children }: { staff: { id: string; name: string }[]; children: React.ReactNode }) {
+  return <StaffContext.Provider value={staff}>{children}</StaffContext.Provider>;
+}
+
+export function CaseActions({ id, status, ownerId }: { id: string; status: CaseStatus; ownerId: string | null }) {
+  const users = useContext(StaffContext);
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1">
+      {status === "IGNORED" ? (
+        <UnignoreButton id={id} />
+      ) : (
+        <>
+          <AssignSelect id={id} users={users} current={ownerId} />
+          {status === "OPEN" ? <AcknowledgeButton id={id} /> : null}
+          {status !== "IN_PROGRESS" ? <StartButton id={id} /> : null}
+          {ownerId ? <UnassignButton id={id} /> : null}
+          <IgnoreButton id={id} />
+        </>
+      )}
+      <ResolveButton id={id} />
     </div>
   );
 }

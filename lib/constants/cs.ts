@@ -1,9 +1,10 @@
+import { normalize } from "@/lib/text";
 /** Case chăm sóc khách hàng (CSKH) */
 export const CS_KINDS = ["ORDER_NOT_CREATED", "EXCHANGE_SIZE", "EXCHANGE_COLOR", "WRONG_ADDRESS", "WRONG_PHONE", "RETURN", "COMPLAINT", "SIZE_ADVICE", "WRONG_PRICE", "URGE_DELIVERY", "DELIVERY_FAILED", "PHONE_VERIFY", "OTHER"] as const;
 export type CsKind = (typeof CS_KINDS)[number];
 
 export const CS_KIND_LABEL: Record<CsKind, string> = {
-  ORDER_NOT_CREATED: "Đã chốt trong chat · chưa tạo đơn",
+  ORDER_NOT_CREATED: "Đủ thông tin tạo đơn · chưa tạo đơn",
   EXCHANGE_SIZE: "Đổi size",
   EXCHANGE_COLOR: "Đổi màu / mẫu",
   WRONG_ADDRESS: "Sai địa chỉ",
@@ -18,14 +19,146 @@ export const CS_KIND_LABEL: Record<CsKind, string> = {
   OTHER: "Khác",
 };
 
-export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
+/**
+ * ═══════ CASE NÀO LÊN HÀNG ĐỢI RIÊNG, CASE NÀO GOM ═══════
+ *
+ * Đo trên production 11/09/2026: 232 case đang mở, trong đó 183 "giao không thành" do bot tự nhắn,
+ * 14 "giục giao", 12 "trả hàng" — mỗi case một dòng trong hàng đợi việc, cùng tiêu đề, cùng hành
+ * động "trả lời khách". Ba trăm dòng giống nhau không phải ba trăm việc: nó là MỘT khối tồn đọng
+ * và người mở hàng đợi không đọc nổi phần còn lại.
+ *
+ *  · `EACH`  — lỗi CỤ THỂ trên một đơn, phải can thiệp từng đơn trước khi gửi hàng: sai địa chỉ,
+ *              sai SĐT. Mỗi case là một việc riêng.
+ *  · `GROUP` — gom thành MỘT việc tổng hợp theo (loại · người phụ trách): số case, số quá hạn, cũ
+ *              nhất, tiền đơn liên quan, đường xem danh sách. Toàn bộ case gốc vẫn nằm trong bảng
+ *              `cs_cases` để đếm tồn đọng, tuổi, hạn, phân công và tra ngược — gom là gom THÔNG
+ *              BÁO, không gom việc.
+ *
+ * Ngoại lệ có chủ đích: case xác nhận SĐT mà bot KHÔNG gửi được (tiêu đề bắt đầu bằng "⛔") cũng
+ * là việc từng đơn — không ai nhắn thì đơn đó không được gửi.
+ */
+export const CS_SURFACE_MODE: Record<CsKind, "EACH" | "GROUP"> = {
+  WRONG_ADDRESS: "EACH",
+  WRONG_PHONE: "EACH",
+  ORDER_NOT_CREATED: "GROUP",
+  EXCHANGE_SIZE: "GROUP",
+  EXCHANGE_COLOR: "GROUP",
+  RETURN: "GROUP",
+  COMPLAINT: "GROUP",
+  SIZE_ADVICE: "GROUP",
+  WRONG_PRICE: "GROUP",
+  URGE_DELIVERY: "GROUP",
+  DELIVERY_FAILED: "GROUP",
+  PHONE_VERIFY: "GROUP",
+  OTHER: "GROUP",
+};
+
+/**
+ * CASE TRONG NHÓM VẪN ĐƯỢC TÁCH RA RIÊNG KHI THẬT SỰ ĐẾN HẠN CẦN NGƯỜI LÀM.
+ *
+ * Hai điều kiện, cái nào đúng cũng tách:
+ *  · khách ĐANG CHỜ CÂU TRẢ LỜI (các loại dưới) mà case đã quá hạn xử lý và còn TRONG CỬA SỔ
+ *    `CS_ESCALATE_WINDOW_HOURS` — quá cửa sổ thì trả lời cũng không còn cứu được gì, nó ở lại
+ *    trong tổng hợp với tư cách tồn đọng;
+ *  · case đã CÓ NGƯỜI nhận (không phải bot) mà quá hạn — việc của một người cụ thể thì phải hiện
+ *    trong hàng đợi của người đó.
+ */
+export const CS_ESCALATE_KINDS: readonly CsKind[] = ["ORDER_NOT_CREATED", "URGE_DELIVERY", "COMPLAINT", "WRONG_PRICE"];
+export const CS_ESCALATE_WINDOW_HOURS = 72;
+/** Người phụ trách là máy, không phải người: việc gán cho nó không được tách ra thành việc của "ai đó". */
+export const CS_BOT_ASSIGNEES: readonly string[] = ["Bot ERP"];
+
+/**
+ * ═══════ "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM" ═══════
+ *
+ * `DONE` là công của người: có ai đó ngồi xử lý xong. `AUTO_RESOLVED` là điều kiện tự hết hoặc
+ * luật phát hiện đổi — KHÔNG ai làm gì cả.
+ *
+ * Gộp hai thứ này lại là cách nhanh nhất để biến con số năng suất CSKH thành vô nghĩa: đóng 180
+ * case sai luật sẽ trông y hệt 180 lần có người gọi khách. Bảng `notifications` đã học bài này rồi
+ * (xem `resolution` ở đó); bảng case học lại đúng một lần nữa.
+ */
+export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "NEEDS_REVIEW", "DONE", "AUTO_RESOLVED", "CANCELLED"] as const;
 export type CsStatus = (typeof CS_STATUSES)[number];
-export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", DONE: "Đã xong", CANCELLED: "Huỷ" };
+export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", NEEDS_REVIEW: "Chờ người xem lại", DONE: "Đã xong", AUTO_RESOLVED: "Tự đóng", CANCELLED: "Huỷ" };
+
+/**
+ * ═══════ "CHƯA CHẮC" LÀ MỘT TRẠNG THÁI RIÊNG, KHÔNG PHẢI MỘT VIỆC PHẢI LÀM ═══════
+ *
+ * Tầng ngữ nghĩa (`lib/cs/semantic-case.ts`) trả về ba mức tin cậy. Mức GIỮA là chỗ nguy hiểm
+ * nhất: ép nó thành việc thì hàng đợi lại đầy việc giả, bỏ nó đi thì mất luôn dấu vết của thứ
+ * đáng ngờ. Nên nó nằm ở đây — GHI LẠI ĐỦ để người mở bộ lọc ra xem, nhưng KHÔNG nằm trong
+ * `CS_ACTIONABLE_STATUSES` nên không chiếm chỗ trong hàng đợi của người đang trực.
+ *
+ * Máy đặt, người gỡ: không có trong `CS_HUMAN_STATUSES` (người không tự đẩy việc của mình vào
+ * đây), nhưng người xem xong thì chuyển nó sang Mới / Huỷ như mọi case khác.
+ */
+
+/**
+ * TRẠNG THÁI NGƯỜI ĐƯỢC TỰ CHỌN. `AUTO_RESOLVED` KHÔNG nằm trong danh sách.
+ *
+ * Nó là kết luận của MÁY ("điều kiện phát hiện không còn" / "luật đã đổi"), và giá trị duy nhất
+ * của nó là phân biệt với công của người. Để nó trong ô chọn thì sớm muộn có người bấm cho nhanh,
+ * và từ đó con số năng suất CSKH không còn nói được gì — đúng thứ mà khối chú thích ở trên dựng
+ * `AUTO_RESOLVED` lên để tránh. Case đang ở trạng thái này vẫn hiển thị bình thường, chỉ là không
+ * ai đặt tay vào được.
+ */
+export const CS_HUMAN_STATUSES: readonly CsStatus[] = CS_STATUSES.filter((s) => s !== "AUTO_RESOLVED" && s !== "NEEDS_REVIEW");
+
+/**
+ * VÌ SAO một case được đóng tự động. Bắt buộc có khi `status = AUTO_RESOLVED`.
+ *
+ * Đóng mà không nói vì sao là xoá bằng chứng lặng lẽ: sáu tháng sau không ai trả lời được "180 case
+ * đó đi đâu".
+ */
+export const CS_RESOLUTIONS = ["INVALIDATED_BY_RULE_UPDATE", "CONDITION_GONE"] as const;
+export type CsResolution = (typeof CS_RESOLUTIONS)[number];
+export const CS_RESOLUTION_LABEL: Record<CsResolution, string> = {
+  INVALIDATED_BY_RULE_UPDATE: "Luật phát hiện đã đổi — case cũ không còn đúng",
+  CONDITION_GONE: "Điều kiện phát hiện không còn",
+};
+
+/**
+ * PHIÊN BẢN LUẬT PHÁT HIỆN "đủ thông tin · chưa tạo đơn".
+ *
+ *  · v1 — tìm từ khoá "chốt đơn"/"em chốt" trong tin của SHOP. **SAI**: kịch bản bán hàng chứa sẵn
+ *         chữ đó trong câu MỜI chốt, nên gần như mọi hội thoại có tư vấn đều bị đánh dấu.
+ *  · v2 — KHÁCH đã cho đủ SĐT và địa chỉ (chủ shop chốt 10/09/2026). Quan sát được, không suy đoán.
+ *
+ * Ghi số này vào case để sau còn phân biệt được case nào sinh bởi luật nào.
+ */
+export const ORDER_NOT_CREATED_RULE_VERSION = 2;
+/**
+ * ═══ MÀU TRẠNG THÁI CSKH — CÙNG TỪ VỰNG VỚI BÀN CARE ═══
+ *
+ * `CARE_STATUS_TONE` đã chốt: **hồng = chưa ai xử lý · lam = đang làm · xanh lá = xong · xám =
+ * máy/đã bỏ**. Hai bàn làm việc dùng chung một bộ từ vựng màu thì người chuyển qua lại giữa chúng
+ * không phải học lại.
+ *
+ * Sắc độ theo đúng chuẩn của `tests/care-ui-contrast.test.ts`: nền `-100` / chữ `-900` ở chế độ
+ * SÁNG, nền `-950/60` / chữ `-200` ở chế độ TỐI. Bản cũ dùng chữ `-700` trên nền `-50` — đủ đọc
+ * trên một nhãn nhỏ, nhưng khi cùng bộ lớp này được dùng làm nút bấm của ô chọn thì nó nhạt tới
+ * mức trạng thái không còn đọc lướt được.
+ */
 export const CS_STATUS_TONE: Record<CsStatus, string> = {
-  OPEN: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
-  IN_PROGRESS: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  DONE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  CANCELLED: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+  OPEN: "bg-rose-100 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200",
+  IN_PROGRESS: "bg-cyan-100 text-cyan-900 dark:bg-cyan-950/60 dark:text-cyan-200",
+  // Hổ phách = "máy thấy nghi, người quyết". Cố ý KHÁC hồng (chưa ai xử lý) để không lẫn với việc thật.
+  NEEDS_REVIEW: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
+  DONE: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
+  // Màu trung tính, cố ý: tự đóng KHÔNG phải công của ai (xem CS_HUMAN_STATUSES).
+  AUTO_RESOLVED: "bg-muted text-muted-foreground",
+  CANCELLED: "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-200",
+};
+
+/** Một câu cho từng trạng thái — hiện trong tooltip của ô chọn, để người mới vào ca không phải đoán. */
+export const CS_STATUS_HINT: Record<CsStatus, string> = {
+  OPEN: "Chưa ai nhận và chưa ai chạm vào.",
+  IN_PROGRESS: "Đã có người cầm và đang làm.",
+  NEEDS_REVIEW: "MÁY thấy dấu hiệu nhưng chưa đủ chắc — người xem rồi quyết, KHÔNG nằm trong hàng đợi phải làm.",
+  DONE: "Người xử lý đã làm xong phần việc của mình.",
+  AUTO_RESOLVED: "MÁY đóng vì điều kiện phát hiện không còn — không ai làm gì cả.",
+  CANCELLED: "Bỏ case: tạo nhầm, hoặc không còn cần xử lý.",
 };
 
 export const CS_SOURCE_LABEL: Record<string, string> = {
@@ -91,7 +224,6 @@ export type CsRules = {
    * Cụm trong tin nhắn của SHOP nghĩa là đã chốt đơn với khách (không dấu, thường). Nếu hội thoại có cụm này mà chưa
    * thấy đơn mới thì mở case "đã chốt chưa tạo đơn" — hay gặp với khách cũ mua lại, chỉ nhắn "gửi địa chỉ cũ".
    */
-  closingKeywords: string[];
 };
 
 export const CS_RULES_KEY = "cs.rules";
@@ -182,7 +314,6 @@ export const DEFAULT_CS_RULES: CsRules = {
   ],
   chatLookbackHours: 48,
   chatPageIds: [],
-  closingKeywords: ["em chot", "chot don", "chot cho minh", "chot them", "da chot", "em len don", "len don cho", "gui ve dia chi cu", "dia chi cu"],
   ignorePatterns: ["bot da tu dong sua", "bot da tu dong", "tu dong sua lai dia chi"],
   failedDeliveryAuto: true,
   failedDeliveryShopName: "Shop",
@@ -212,3 +343,21 @@ export const DEFAULT_CS_RULES: CsRules = {
       "Dạ chào {ten} ơi, đơn {san_pham} (mã {ma_van_don}) bưu tá giao tới nhưng chưa thành công ạ (bưu tá ghi: {ly_do}). Mình cho shop hỏi lý do và giờ thuận tiện để bưu tá {buu_ta} – {sdt_buu_ta} giao lại nhé. Hàng được kiểm tra trước khi thanh toán ạ 💛",
   },
 };
+
+/**
+ * Phân loại lý do giao hụt từ ghi chú bưu tá / tên trạng thái (ưu tiên ghi chú mới nhất).
+ *
+ * Nằm ở hằng số dùng chung, KHÔNG nằm cạnh bộ nhắn tin: tháp điều khiển giao vận cũng cần đúng
+ * định nghĩa "khách không nghe máy" này. Hai bộ regex song song sẽ lệch nhau, và cái lệch chỉ lộ
+ * ra khi có người đối chiếu hai màn hình.
+ */
+export function classifyFailedReason(texts: (string | null | undefined)[]): FailedReason {
+  const n = normalize(texts.filter(Boolean).join(" | "));
+  if (/hen phat lai|hen giao|hen lai|khach hen|phat lai luc|giao lai luc/.test(n)) return "RESCHEDULED";
+  if (/tu choi|khong nhan|ko nhan|khong lay|khong dat|khong mua|doi y|huy don|boom|bom hang|khong dong y/.test(n)) return "REFUSED";
+  if (/khong lien lac|ko lien lac|khong nghe may|ko nghe may|thue bao|khong bat may|sai so|so dien thoai sai|khong goi duoc/.test(n)) return "NO_CONTACT";
+  if (/sai dia chi|khong tim thay dia chi|dia chi khong|khong ro dia chi|khong dung dia chi|dia chi sai|khong tim duoc/.test(n)) return "WRONG_ADDRESS";
+  if (/khong co nha|di vang|khong co nguoi nhan|khach nghi|vang nha|khong co mat|di lam|di cong tac/.test(n)) return "NOT_HOME";
+  if (/khong du tien|chua co tien|khong co tien|tien cod|kiem hang|dong kiem|xem hang|phi ship|cuoc/.test(n)) return "COD_ISSUE";
+  return "OTHER";
+}

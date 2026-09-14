@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { RefreshingBadge } from "@/components/nav-progress";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,6 +14,8 @@ export function PageHeader({ title, description, hint, eyebrow, actions, classNa
         <div className="flex min-w-0 items-center gap-1.5">
           <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">{title}</h1>
           {hint ? <InfoHint>{hint}</InfoHint> : null}
+          {/* Đang đổi kỳ / bộ lọc: số cũ vẫn hiện (mờ đi), nhãn này nói rõ số mới đang được tính. */}
+          <RefreshingBadge />
         </div>
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
       </div>

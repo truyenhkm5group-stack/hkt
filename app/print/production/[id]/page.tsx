@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/app/print/production/[id]/print-button";
+import { BrandMark } from "@/components/brand";
 import { ProductionSheet } from "@/components/production-sheet";
 import { requirePermission } from "@/lib/auth/session";
 import { getProductionOrder } from "@/lib/queries/production";
 import type { SearchParams } from "@/lib/search-params";
+import { formatDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +19,10 @@ export default async function PrintProductionOrder({ params, searchParams }: { p
     <main className="mx-auto max-w-[900px] bg-white p-6 text-zinc-900 print:p-0">
       <div className="mb-4 flex items-start justify-between gap-3 print:mb-3">
         <div>
+          {/* Xưởng nhận tờ giấy này — để logo lên đầu cho biết bảng chốt đến từ đâu */}
+          <BrandMark className="mb-2 h-3.5 text-brand [print-color-adjust:exact]" />
           <h1 className="text-xl font-bold">Bảng chốt số lượng đặt hàng · {o.code}</h1>
-          <p className="text-sm text-zinc-600">{o.productCode ? `${o.productCode} · ` : ""}{o.productName} · {new Date(o.createdAt).toLocaleDateString("vi-VN")}{o.supplier ? ` · Xưởng: ${o.supplier}` : ""}</p>
+          <p className="text-sm text-zinc-600">{o.productCode ? `${o.productCode} · ` : ""}{o.productName} · {formatDate(o.createdAt)}{o.supplier ? ` · Xưởng: ${o.supplier}` : ""}</p>
         </div>
         <PrintButton auto={raw.auto === "1"} />
       </div>

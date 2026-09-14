@@ -124,7 +124,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         <span>
           Rủi ro tồn kho{" "}
           <b className="numeric">{assumptions.inventoryRiskPercent ?? 10}%</b>
-          <span className="text-muted-foreground"> tổng giá trị hàng nhập trong kỳ</span>
+          <span className="text-muted-foreground"> giá trị lô hàng · ghi dần theo hàng bán ra</span>
         </span>
         <span>
           Thuế <b className="numeric">{assumptions.taxPercent ?? 1.5}%</b>
@@ -240,7 +240,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             />
           </div>
           <div className="space-y-1">
-            <Label>Rủi ro tồn kho (% tổng giá trị hàng nhập trong kỳ)</Label>
+            <Label title="Tỷ lệ giá trị lô hàng cuối cùng sẽ mất vì lỗi, tồn lâu phải xả, thất thoát. Ghi vào lãi lỗ THEO HÀNG BÁN RA từng kỳ (không ném trọn vào kỳ nhập hàng); bán hết lô thì tổng đúng bằng % × giá trị lô.">Rủi ro tồn kho (% giá trị lô hàng, ghi dần theo hàng bán ra)</Label>
             <Input
               type="number"
               inputMode="decimal"

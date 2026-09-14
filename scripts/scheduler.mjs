@@ -10,6 +10,16 @@ const minutes = (name, fallback) => {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
+// ĐỐI CHIẾU SEPAY — CỐ Ý TẮT MẶC ĐỊNH.
+//
+// `AGENTS.md` mục 7: đổi lịch scheduler phải hỏi chủ shop. Nên job này chỉ chạy khi chủ shop tự
+// đặt `SYNC_SEPAY_EVERY_MINUTES` (gợi ý 60). Chưa đặt thì lịch hiện tại không thêm một mục nào.
+//
+// Và nó chạy CHẠY THỬ: `apply=1` phải khai tường minh. Một job tự ghi vào sổ tiền mỗi giờ là thứ
+// phải bật bằng tay sau khi đã nhìn ít nhất một lượt chạy thử.
+const sepayEvery = Number(process.env.SYNC_SEPAY_EVERY_MINUTES) || 0;
+const sepayApply = process.env.SYNC_SEPAY_APPLY === "1" ? "&apply=1" : "";
+
 const JOBS = [
   { job: "pancake-orders", every: minutes("SYNC_ORDERS_EVERY_MINUTES", 3), offset: 0.2 },
   { job: "vtp-tracking", every: minutes("SYNC_VTP_EVERY_MINUTES", 10), offset: 1 },
@@ -19,10 +29,52 @@ const JOBS = [
   { job: "pancake-inventory", every: minutes("SYNC_INVENTORY_EVERY_MINUTES", 60), offset: 8 },
   { job: "facebook-ads", every: minutes("SYNC_ADS_EVERY_MINUTES", 60), offset: 10 },
   { job: "alerts", every: minutes("ALERTS_EVERY_MINUTES", 10), offset: 3 },
+  /*
+    VIỆC ĐỊNH KỲ PHẢI CÓ AI ĐÓ SINH RA NÓ.
+
+    Định nghĩa việc lặp nằm trong `work_recurrences`, nhưng bản thân nó không tự thành việc. Chạy
+    15 phút một lần chứ không một lần mỗi ngày: định nghĩa khai giờ sinh riêng (8 giờ, 17 giờ…), và
+    một lượt chạy mỗi ngày sẽ bỏ lỡ mọi giờ không trùng lượt đó. Sinh trùng thì vô hại — khoá tự
+    nhiên (recurrence_id, occurrence_key) chặn ở CSDL.
+  */
+  { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
+  /*
+    LEO THANG SLA — 30 phút/lần, và nó là job ĐỌC.
+
+    Nó không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc, xem
+    `lib/work/escalation.ts`) và không tạo cảnh báo nào. Việc duy nhất nó làm có hậu quả ra bên
+    ngoài là gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ chưa ai nhận — và sổ chống
+    gửi lại giới hạn đúng một tin mỗi phòng mỗi ngày. Chạy dày hơn cũng không gửi thêm tin nào;
+    30 phút chỉ để tin đầu ngày tới sớm.
+  */
+  { job: "work-escalation", every: minutes("WORK_ESCALATION_EVERY_MINUTES", 30), offset: 11 },
+  /*
+    CHỤP ẢNH HIỆU SUẤT — mỗi 6 giờ, và đó là con số chọn có lý do.
+
+    Job chỉ chụp kỳ ĐÃ ĐÓNG và không bao giờ ghi đè, nên chạy dày hơn không tạo thêm dòng nào:
+    24 lần trong tuần đều bị chặn ở mệnh đề "kỳ chưa đóng", lần đầu sau nửa đêm Chủ nhật mới ghi.
+    Chạy dày là để KHÔNG BỎ LỠ một kỳ nếu máy chủ tình cờ tắt đúng lúc giao tuần — bỏ lỡ một tuần
+    thì mất hẳn, vì kỳ đó sẽ không bao giờ được chụp lại.
+  */
+  { job: "work-snapshot", every: minutes("WORK_SNAPSHOT_EVERY_MINUTES", 360), offset: 19 },
   { job: "cs-chat", every: minutes("SYNC_CHAT_EVERY_MINUTES", 15), offset: 5 },
   { job: "ads-billing", every: minutes("SYNC_ADS_BILLING_EVERY_MINUTES", 30), offset: 12 },
   { job: "landing-sheet", query: "new=1", every: minutes("SYNC_LANDING_FAST_EVERY_MINUTES", 1), offset: 7 }, // near-realtime: nạp nhanh dòng mới
   { job: "landing-sheet", every: minutes("SYNC_LANDING_EVERY_MINUTES", 10), offset: 8.5 }, // đầy đủ: ghép lại theo SĐT, cập nhật dòng đã sửa
+  // LỚP TĂNG TỐC PHẢI CÓ NGƯỜI LÀM MỚI, nếu không nó tự mục.
+  //
+  // `canonical_order_outcome` chỉ được coi là dùng được khi nó MỚI HƠN đơn và vận đơn của nó; đơn cũ
+  // hơn thì báo cáo tự tính lại (chậm chứ không sai). Mà `pancake-orders` chạy 3 phút một lần và
+  // chạm vào `orders.updated_at`, nên số dòng cũ chỉ có tăng.
+  //
+  // Đo trên production 09/09/2026: sau 73 phút không ai dựng lại, 80/2.433 dòng đã cũ. Cứ thế thì
+  // vài tuần nữa gần như mọi đơn rơi về đường chậm và trang chủ quay lại mức 60 giây của trước P0.3.
+  { job: "outcome-materialize", every: minutes("OUTCOME_MATERIALIZE_EVERY_MINUTES", 5), offset: 1.5 },
+  // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 4 phút — ngắn hơn TTL 300
+  // giây của bảng điều khiển, nên đệm không bao giờ kịp nguội và người mở trang không phải trả giá.
+  { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
+  // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
+  ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
   // NHÂN SỰ AI — CỐ Ý CHƯA BẬT. Đổi lịch chạy là việc phải hỏi chủ shop (AGENTS.md §7), và ở nấc
   // chạy ngầm job này tốn thêm lượt gọi Pancake Pages mà chưa mang lại gì cho vận hành hằng ngày.
   // Bật bằng cách bỏ dấu chú thích dòng dưới; webhook hội thoại vẫn chạy độc lập không cần job này.
@@ -35,6 +87,14 @@ const DAILY = [
   { job: "pancake-warehouses", hour: 3, minute: 30 },
   { job: "facebook-ads", hour: 4, minute: 0, query: "days=30" },
   { job: "outreach-build", hour: 8, minute: 30 }, // lập danh sách chăm sóc khách & bán chéo mỗi sáng // đối chiếu lại 30 ngày (Facebook có thể điều chỉnh số liệu muộn)
+  // QUÉT đối soát mỗi sáng, CHỈ ĐỌC — cố ý KHÔNG truyền fix=1.
+  //
+  // Trước đây lệch dữ liệu chỉ lộ ra khi có người bấm tay, nên 70 vận đơn lệch ảnh chụp nằm im
+  // nhiều ngày. Quét tự động thì chúng hiện ra ở Chất lượng dữ liệu ngay hôm sau.
+  //
+  // Vì sao KHÔNG tự sửa: sửa dữ liệu production không có người xem là đúng loại việc phải hỏi chủ
+  // shop (AGENTS.md mục 7). Máy phát hiện, người quyết định.
+  { job: "data-check", hour: 6, minute: 30 },
 ];
 
 const log = (...args) => console.log(new Date().toISOString(), "[scheduler]", ...args);

@@ -5,77 +5,117 @@
 
 :root {
   --radius: 0.625rem;
+  /* Cam VNXcommerce lấy thẳng từ logo (#F4431C). `--brand` là màu logo,
+     `--brand-bright` dùng trên nền tối (sidebar), `--primary` là bản đủ tương phản cho nút. */
+  --brand: oklch(0.64 0.219 33);
+  --brand-bright: oklch(0.73 0.18 34);
   --background: oklch(0.985 0.002 250);
   --foreground: oklch(0.18 0.02 260);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.02 260);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.18 0.02 260);
-  --primary: oklch(0.5 0.19 15);
-  --primary-foreground: oklch(0.985 0.01 15);
-  --secondary: oklch(0.955 0.006 250);
+  --primary: oklch(0.57 0.2 33);
+  --primary-foreground: oklch(0.99 0.01 60);
+  --secondary: oklch(0.96 0.005 250);
   --secondary-foreground: oklch(0.25 0.02 260);
-  --muted: oklch(0.955 0.006 250);
+  --muted: oklch(0.96 0.005 250);
   --muted-foreground: oklch(0.5 0.02 260);
-  --accent: oklch(0.95 0.02 15);
-  --accent-foreground: oklch(0.35 0.15 15);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0.008 250);
-  --input: oklch(0.91 0.008 250);
-  --ring: oklch(0.6 0.15 15);
-  --chart-1: oklch(0.55 0.19 15);
+  --accent: oklch(0.958 0.012 40);
+  --accent-foreground: oklch(0.4 0.16 33);
+  --destructive: oklch(0.55 0.225 16);
+  --border: oklch(0.915 0.006 250);
+  --input: oklch(0.9 0.008 250);
+  --ring: oklch(0.64 0.19 33);
+  --chart-1: oklch(0.64 0.219 33);
   --chart-2: oklch(0.55 0.13 250);
   --chart-3: oklch(0.65 0.14 160);
-  --chart-4: oklch(0.75 0.15 75);
+  --chart-4: oklch(0.78 0.15 80);
   --chart-5: oklch(0.6 0.15 300);
-  --sidebar: oklch(0.2 0.03 265);
+  --sidebar: oklch(0.19 0.025 265);
   --sidebar-foreground: oklch(0.9 0.01 260);
-  --sidebar-primary: oklch(0.6 0.18 15);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.27 0.03 265);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.3 0.03 265);
-  --sidebar-ring: oklch(0.6 0.15 15);
+  --sidebar-primary: oklch(0.68 0.2 33);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.26 0.028 265);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.29 0.028 265);
+  --sidebar-ring: oklch(0.68 0.18 33);
   --success: oklch(0.6 0.15 160);
   --warning: oklch(0.75 0.16 75);
   --info: oklch(0.6 0.14 250);
+  /* ─── Lớp bề mặt: nền trang < thẻ < thẻ nổi. Ba mức, không nhiều hơn. ───
+     Trước đây mọi khối đều là `bg-card` nên ngăn kéo, popover và thẻ nằm chồng nhau mà nhìn
+     phẳng như một. Ba mức này là toàn bộ chiều sâu của hệ thống. */
+  --surface-sunken: oklch(0.965 0.004 250);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(1 0 0);
+  /* Đường kẻ trong một khối (giữa các dòng) nhạt hơn viền bao quanh khối. */
+  --hairline: oklch(0.93 0.005 250);
+  --table-head: oklch(0.972 0.004 250);
+  --row-hover: oklch(0.965 0.006 250);
+  /* ─── Dòng CON của một dòng bung ra, và dòng ĐANG CHỌN ───
+     `bg-muted/30` từng được dùng cho khối bung: ở chế độ tối nó gần như trùng nền thẻ, nên người
+     đọc không thấy đâu là dòng cha đâu là dòng con. Hai biến này khai TƯỜNG MINH cho cả hai chế
+     độ và cách nền thẻ đủ xa để phân biệt được, nhưng không chói. */
+  --row-nested: oklch(0.958 0.006 250);
+  --row-selected: oklch(0.935 0.035 250);
+  --shadow-card: 0 1px 2px -1px oklch(0.2 0.03 260 / 8%), 0 1px 3px oklch(0.2 0.03 260 / 5%);
+  /* Hợp đồng bảng dùng chung — xem lib/constants/table-ux.ts. Ba biến này là nguồn duy nhất cho mọi mốc dính. */
+  --app-header-height: 3.5rem;
+  --table-head-top: 0px;
+  --table-max-height: max(20rem, calc(100dvh - var(--app-header-height) - 6rem));
+  --shadow-raised: 0 8px 24px -12px oklch(0.2 0.03 260 / 22%), 0 2px 6px -2px oklch(0.2 0.03 260 / 10%);
 }
 
 .dark {
-  --background: oklch(0.15 0.015 260);
-  --foreground: oklch(0.95 0.01 260);
-  --card: oklch(0.2 0.02 260);
-  --card-foreground: oklch(0.95 0.01 260);
-  --popover: oklch(0.2 0.02 260);
-  --popover-foreground: oklch(0.95 0.01 260);
-  --primary: oklch(0.68 0.17 15);
-  --primary-foreground: oklch(0.15 0.02 15);
+  --brand: oklch(0.7 0.2 34);
+  --brand-bright: oklch(0.75 0.18 34);
+  --background: oklch(0.145 0.014 265);
+  --foreground: oklch(0.96 0.008 260);
+  --card: oklch(0.192 0.016 265);
+  --card-foreground: oklch(0.96 0.008 260);
+  --popover: oklch(0.225 0.018 265);
+  --popover-foreground: oklch(0.96 0.008 260);
+  --primary: oklch(0.7 0.19 34);
+  --primary-foreground: oklch(0.16 0.03 34);
   --secondary: oklch(0.27 0.02 260);
   --secondary-foreground: oklch(0.95 0.01 260);
-  --muted: oklch(0.27 0.02 260);
-  --muted-foreground: oklch(0.7 0.02 260);
-  --accent: oklch(0.3 0.04 15);
-  --accent-foreground: oklch(0.95 0.01 15);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.6 0.15 15);
-  --chart-1: oklch(0.68 0.17 15);
+  --muted: oklch(0.255 0.018 265);
+  /* 0.70 trên nền 0.145 cho ~6:1 — chữ phụ vẫn đọc được ở bảng dày chữ. */
+  --muted-foreground: oklch(0.715 0.018 262);
+  --accent: oklch(0.3 0.045 34);
+  --accent-foreground: oklch(0.95 0.02 40);
+  --destructive: oklch(0.7 0.2 18);
+  --border: oklch(1 0 0 / 13%);
+  --input: oklch(1 0 0 / 17%);
+  --ring: oklch(0.68 0.18 34);
+  --chart-1: oklch(0.7 0.19 34);
   --chart-2: oklch(0.65 0.13 250);
   --chart-3: oklch(0.7 0.14 160);
   --chart-4: oklch(0.8 0.15 75);
   --chart-5: oklch(0.65 0.15 300);
   --sidebar: oklch(0.17 0.02 265);
   --sidebar-foreground: oklch(0.9 0.01 260);
-  --sidebar-primary: oklch(0.68 0.17 15);
+  --sidebar-primary: oklch(0.7 0.19 34);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.25 0.03 265);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.6 0.15 15);
+  --sidebar-ring: oklch(0.68 0.18 34);
   --success: oklch(0.7 0.15 160);
   --warning: oklch(0.8 0.16 75);
   --info: oklch(0.7 0.14 250);
+  --surface-sunken: oklch(0.125 0.012 265);
+  --surface: oklch(0.192 0.016 265);
+  --surface-raised: oklch(0.225 0.018 265);
+  --hairline: oklch(1 0 0 / 8%);
+  --table-head: oklch(0.215 0.017 265);
+  --row-hover: oklch(1 0 0 / 4%);
+  /* Nền thẻ ở chế độ tối là 0.192 — khối bung phải SÁNG hơn nó, không phải tối hơn. */
+  --row-nested: oklch(0.243 0.018 265);
+  --row-selected: oklch(0.295 0.042 265);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow-raised: 0 12px 32px -12px oklch(0 0 0 / 60%), 0 2px 8px -2px oklch(0 0 0 / 40%);
 }
 
 @theme inline {
@@ -83,6 +123,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-brand: var(--brand);
+  --color-brand-bright: var(--brand-bright);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -117,6 +159,14 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
+  --color-table-head: var(--table-head);
+  --color-row-hover: var(--row-hover);
+  --color-row-nested: var(--row-nested);
+  --color-row-selected: var(--row-selected);
   --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -131,6 +181,35 @@
   }
   .numeric {
     font-variant-numeric: tabular-nums;
+  }
+  /* Bôi đen văn bản theo màu thương hiệu */
+  ::selection {
+    background: color-mix(in oklab, var(--brand) 22%, transparent);
+  }
+  /* Thanh cuộn mảnh, không cắt ngang bố cục ở bảng dài và ở sidebar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 30%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+    background-clip: content-box;
+  }
+  [data-slot="sidebar"] {
+    scrollbar-color: color-mix(in oklab, var(--sidebar-foreground) 30%, transparent) transparent;
   }
 }
 

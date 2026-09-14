@@ -35,6 +35,7 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
         <span>Tốc độ bán tính theo <b>{assumptions.velocityWindowDays} ngày</b> gần nhất</span>
         <span>Tồn an toàn <b>{assumptions.safetyDays} ngày</b> bán</span>
         {assumptions.roundTo > 1 ? <span>Làm tròn bội số <b>{assumptions.roundTo}</b></span> : null}
+        {assumptions.minOrderQty > 1 ? <span>Xưởng nhận từ <b>{assumptions.minOrderQty}</b> cái</span> : null}
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
             <Settings2 className="size-4" /> {open ? "Đóng" : "Sửa giả định"}
@@ -43,12 +44,14 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
       </div>
       {open ? (
         <div className="mt-4 space-y-3 border-t pt-4">
-          <div className="grid gap-3 sm:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-6">
             <div className="space-y-1"><Label>Thời gian SX (ngày)</Label><Input type="number" min={1} value={form.leadTimeDays} onChange={(e) => setForm({ ...form, leadTimeDays: num(e.target.value, 7) })} /></div>
             <div className="space-y-1"><Label>Đủ bán thêm (ngày)</Label><Input type="number" min={0} value={form.coverDays} onChange={(e) => setForm({ ...form, coverDays: num(e.target.value, 14) })} /></div>
             <div className="space-y-1"><Label>Cửa sổ tốc độ bán (ngày)</Label><Input type="number" min={3} value={form.velocityWindowDays} onChange={(e) => setForm({ ...form, velocityWindowDays: num(e.target.value, 14) })} /></div>
             <div className="space-y-1"><Label>Tồn an toàn (ngày bán)</Label><Input type="number" min={0} value={form.safetyDays} onChange={(e) => setForm({ ...form, safetyDays: num(e.target.value, 3) })} /></div>
             <div className="space-y-1"><Label>Làm tròn bội số</Label><Input type="number" min={1} value={form.roundTo} onChange={(e) => setForm({ ...form, roundTo: num(e.target.value, 1) })} /></div>
+            {/* Mức đặt tối thiểu của xưởng: đề xuất 5 cái trong khi xưởng chỉ nhận từ 50 là con số không đặt được. */}
+            <div className="space-y-1"><Label>Xưởng nhận từ (cái)</Label><Input type="number" min={0} value={form.minOrderQty} onChange={(e) => setForm({ ...form, minOrderQty: num(e.target.value, 0) })} /></div>
           </div>
           <div>
             <Label className="mb-1 block">Thời gian SX riêng theo mã hàng (để trống = dùng chung)</Label>

@@ -250,15 +250,351 @@
     {
       "idx": 35,
       "version": "7",
-      "when": 1789375264923,
-      "tag": "0035_ai_workforce_foundation",
+      "when": 1788839387150,
+      "tag": "0035_manual_verification_source",
       "breakpoints": true
     },
     {
       "idx": 36,
       "version": "7",
+      "when": 1788839388150,
+      "tag": "0036_expense_cost_allocation",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788839389150,
+      "tag": "0037_action_queue_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788839390150,
+      "tag": "0039_marketing_ideas",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788839391150,
+      "tag": "0038_fb_ads_post_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788839392150,
+      "tag": "0043_return_inspections",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788945576898,
+      "tag": "0042_bank_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788945577898,
+      "tag": "0044_cost_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788945578898,
+      "tag": "0041_shipment_return_leg_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788945579898,
+      "tag": "0045_case_resolution_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788945580898,
+      "tag": "0046_attribution_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788945581898,
+      "tag": "0047_canonical_order_outcome",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1788945582898,
+      "tag": "0048_canonical_cogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1788945583898,
+      "tag": "0049_recognized_cogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1788945584898,
+      "tag": "0050_shipment_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1788945585898,
+      "tag": "0051_approval_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1788945645898,
+      "tag": "0052_return_condition_wrong_item",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788945705898,
+      "tag": "0053_action_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788945765898,
+      "tag": "0054_cs_info_complete",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788945825898,
+      "tag": "0055_tracking_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1789032000000,
+      "tag": "0056_care_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1789096520287,
+      "tag": "0057_audit_entity_id_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1789100258399,
+      "tag": "0058_shipments_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1789107349696,
+      "tag": "0059_cogs_true_up",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1789119873605,
+      "tag": "0060_shipment_care",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1789124788305,
+      "tag": "0061_care_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1789125588546,
+      "tag": "0062_ai_interactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1789125648546,
+      "tag": "0063_bank_sepay_webhook",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1789125708546,
+      "tag": "0064_bank_balance_zero_is_unknown",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1789125768546,
+      "tag": "0065_conversation_funnel",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1789125828546,
+      "tag": "0066_return_inspection_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789125888546,
+      "tag": "0067_cs_workqueue",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789125948546,
+      "tag": "0068_bank_transaction_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1789212380905,
+      "tag": "0069_work_management_os",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1789238086777,
+      "tag": "0070_access_role_position_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789238146777,
+      "tag": "0071_performance_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789238206777,
+      "tag": "0072_shipment_return_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789238266777,
+      "tag": "0073_attribution_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1789238326777,
+      "tag": "0074_return_reason_group",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789241926777,
+      "tag": "0075_care_episode",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1789298335620,
+      "tag": "0076_care_active_invariant",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789301935620,
+      "tag": "0077_metric_target_bands",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789305535620,
+      "tag": "0078_product_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789309135620,
+      "tag": "0079_outreach_send_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789312735620,
+      "tag": "0080_hmt_return_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789316335620,
+      "tag": "0081_cs_case_semantic",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789319935620,
+      "tag": "0082_hmt_workbook_upload",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1789323535620,
+      "tag": "0083_hmt_exception_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789375264923,
+      "tag": "0084_ai_workforce_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
       "when": 1789380923786,
-      "tag": "0036_sales_shadow_validation",
+      "tag": "0085_sales_shadow_validation",
       "breakpoints": true
     }
   ]

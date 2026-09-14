@@ -1,11 +1,11 @@
 import { and, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import {
@@ -14,6 +14,8 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
+import { distributeProportionally } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -137,12 +139,12 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
     const s = schema.shipments;
     const pv = schema.productVariants;
     const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
-    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
+    const cond = mode === "delivered" ? sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'` : sql`${o.stage} not in ('CANCELLED','DELETED')`;
     const rows = await db
       .select({ productId: productKey, pageId: o.pageId, adId: o.adId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
       .groupBy(sql`1`, o.pageId, o.adId);
@@ -207,8 +209,29 @@ async function productEconomics(period: Period) {
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
   // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
   const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
-  const [sales, receipts, [exp], assumptions] = await Promise.all([
-    db
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY.
+
+    Cùng họ truy vấn với `vsales` (order_items × orders × shipments kèm tra kết quả đơn), và họ đó
+    đã đo được trên production: 8.578ms với JIT, 26ms không JIT, cùng số khối đệm. Trang Lương quá
+    hạn 60 giây ở lượt smoke nguội trong khi lượt trước nó 91ms — đúng dấu hiệu chi phí biên dịch
+    chỉ phải trả khi đệm rỗng.
+
+    Không đổi một phép tính nào: `set local` chỉ tắt trình biên dịch, kế hoạch và kết quả y nguyên.
+  */
+  /*
+    CHỈ BỌC HAI TRUY VẤN NẶNG, KHÔNG BỌC CẢ `Promise.all`.
+
+    Bản đầu bọc cả `getOperatingCost()` và `resolveAssumptions()` — hai hàm tự mở kết nối RIÊNG.
+    Giao dịch giữ một kết nối rồi chờ hai hàm kia, hai hàm kia chờ kết nối: khoá chết. Trên PGlite
+    (một kết nối duy nhất) nó treo tuyệt đối, và treo im lặng — Node thoát mã 0, bộ kiểm thử bị cắt
+    cụt ở giữa mà vẫn báo thành công.
+
+    Luật rút ra: giao dịch chỉ được ôm những câu lệnh chạy TRÊN CHÍNH nó.
+  */
+  const [[sales, receipts], exp, assumptions] = await Promise.all([
+    chayKhongJit(db, (tx) => Promise.all([
+    tx
       .select({
         productId: productKey,
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
@@ -217,33 +240,32 @@ async function productEconomics(period: Period) {
         sentOrders: sql<number>`count(distinct ${o.id}) filter (where ${s.id} is not null and ${o.stage} not in ('CANCELLED','DELETED') and ${s.stage} not in ('CANCELLED','PENDING'))`,
         firstAt: sql<string | null>`min(${o.insertedAt})`,
         lastAt: sql<string | null>`max(${o.insertedAt})`,
-        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
-        shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
+        deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
       })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       .where(and(eq(i.isBonus, false), ...periodConds(o.insertedAt, period)))
       .groupBy(sql`1`),
-    db
+    tx
       .select({ productId: pv.productId, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
       .from(schema.stockReceiptItems)
       .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
       .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
-    db
-      .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
-      .from(schema.expenses)
-      .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, ...periodConds(schema.expenses.occurredAt, period))),
+    ])),
+    // Nền chi phí của bảng lương phải là CÙNG con số với báo cáo lợi nhuận, nên đi chung engine.
+    getOperatingCost(period),
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
-  const operatingEntered = Number(exp?.amount ?? 0);
+  const operatingEntered = exp.amount;
   // chi phí cố định (văn phòng, điện nước…) theo giả định báo cáo lợi nhuận, quy đổi theo số ngày của kỳ
   const dates = (v: (string | null)[]) => v.map((x) => (x ? new Date(x) : null)).filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
   const now = new Date();
@@ -264,8 +286,11 @@ async function productEconomics(period: Period) {
   const perOrderTotal = rows.reduce((a, r) => a + r.packingCost + r.opsStaffCost, 0);
   // CP vận hành phân bổ của mã = (đã nhập + cố định) theo tỷ trọng doanh thu GTC + đóng hàng & NV vận đơn theo đơn của chính mã
   const operating = operatingEntered + fixedCost + perOrderTotal;
+  // Chia bằng largest remainder ⇒ Σ phần phân bổ của các mã = ĐÚNG (đã nhập + cố định), không lệch
+  // vì làm tròn từng dòng; lương/hoa hồng cộng lại phải khớp tổng chi phí của shop.
+  const sharedParts = distributeProportionally(operatingEntered + fixedCost, rows.map((r) => r.revenue));
   return {
-    rows: rows.map((r) => ({ ...r, operatingAlloc: (revenueTotal ? Math.round(((operatingEntered + fixedCost) * r.revenue) / revenueTotal) : 0) + r.packingCost + r.opsStaffCost })),
+    rows: rows.map((r, idx) => ({ ...r, operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
     operating,
     operatingEntered,
     fixedCost,

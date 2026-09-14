@@ -61,7 +61,10 @@ export async function testAuditTrail(db: Db) {
   assert.equal(detail.token, "***", "bí mật lọt vào detail vẫn phải bị che trước khi ghi");
 
   // ───────── 3. Mọi hành động quan trọng đều có nhãn tiếng Việt ─────────
-  for (const action of ["reconcile.repair", "backfill.canonical-state", "webhook.replay", "case.assign", "case.acknowledge", "case.resolve", "STOCK_RECEIPT_CREATE", "COD_RECONCILE"]) {
+  // Mọi hành động ĐỔI SỰ THẬT NGHIỆP VỤ phải có tên trong danh mục — kể cả hành động chạy một lần
+  // như nạp chứng từ ĐVVC chép tay: chạy một lần không có nghĩa là không cần truy nguyên, ngược lại
+  // mới đúng, vì nó ghi thẳng chứng từ vào lịch sử mà không có hệ thống ngoài nào đối chứng.
+  for (const action of ["reconcile.repair", "backfill.canonical-state", "webhook.replay", "case.assign", "case.acknowledge", "case.resolve", "STOCK_RECEIPT_CREATE", "COD_RECONCILE", "VTP_MANUAL_VERIFICATION", "VTP_ORDER_LIST_IMPORT"]) {
     assert.notEqual(auditActionLabel(action), action, `hành động ${action} phải có nhãn tiếng Việt`);
   }
   for (const entity of ["SHIPMENT", "ORDER", "NOTIFICATION", "WEBHOOK_EVENT", "STOCK_RECEIPT"]) {

@@ -1,3 +1,4 @@
+import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
@@ -67,6 +68,10 @@ export type InventoryListRow = Awaited<ReturnType<typeof listInventory>>["rows"]
 
 /** Số giao dịch theo kho / bảng tham chiếu trong kỳ (cho bộ lọc) */
 export async function inventoryFacets(params: ListParams) {
+  return memo(`inventoryFacets:${listKey(params, false)}`, 30_000, () => inventoryFacetsUncached(params));
+}
+
+async function inventoryFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = inventoryListWhere({ ...params, filters: {} });
   const [warehouses, tables, [direction]] = await Promise.all([
@@ -99,6 +104,10 @@ export async function inventoryFacets(params: ListParams) {
 }
 
 export async function inventorySummary(params: ListParams) {
+  return memo(`inventorySummary:${listKey(params)}`, 30_000, () => inventorySummaryUncached(params));
+}
+
+async function inventorySummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = inventoryListWhere(params);
   const [row] = await db

@@ -1,18 +1,23 @@
-import { Repeat, RotateCcw, UserPlus, Users } from "lucide-react";
+import Link from "next/link";
+import { HeartHandshake, RotateCcw, UserPlus, Users } from "lucide-react";
 import { CustomersTable } from "@/app/(dashboard)/customers/customers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
+import { Button } from "@/components/ui/button";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { customerFacets, customerSummary, CUSTOMER_SORTABLE, listCustomers } from "@/lib/queries/customers";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
-import { requirePermission } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 
 export const metadata = { title: "Khách hàng" };
 
 export default async function CustomersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requirePermission("customers:view");
+  const { decision } = await requireResource("CUSTOMERS", "customers:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Khách hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "lastOrderAt", filterKeys: ["province", "tier"], sortable: CUSTOMER_SORTABLE, defaultPeriod: "all" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listCustomers(params), customerFacets(params), customerSummary(params)]);
@@ -24,13 +29,24 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         eyebrow="Vận hành"
         title="Khách hàng"
         description={`${formatNumber(summary.total)} khách · ${formatNumber(summary.withOrders)} khách đã mua · tổng mua ${formatVND(summary.amount, { compact: true })} · số liệu Pancake kết hợp đơn hàng trong ERP`}
-        actions={<SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
+            </Button>
+            <SyncButton job="pancake-customers" label="Đồng bộ khách hàng" />
+          </div>
+        }
       />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/*
+        KHÔNG CÒN THẺ "KHÁCH MUA LẠI" Ở ĐÂY. Nó đếm theo đơn ĐÃ ĐẶT (kể cả đơn hoàn) và tự ghi chú
+        rằng con số thật nằm ở trang Giữ chân khách — tức là một KPI biết mình sai mà vẫn đứng đó.
+        Một chỉ số, một định nghĩa (đơn giao thành công), một chỗ: trang Giữ chân khách.
+      */}
+      <section className="grid gap-4 sm:grid-cols-3">
         <MetricCard label="Tổng khách hàng" value={formatNumber(summary.total)} note={`${formatNumber(summary.withOrders)} khách có đơn · ${formatNumber(summary.orders)} đơn`} icon={Users} tone="blue" />
         <MetricCard label="Khách mới" value={formatNumber(summary.newInPeriod)} note={`Tạo trên Pancake ${summary.newLabel}`} icon={UserPlus} tone="green" />
-        <MetricCard label="Khách mua lại" value={formatNumber(summary.repeat)} note={`Từ 2 đơn trở lên · ${pct(summary.repeat, summary.withOrders).toFixed(1)}% khách đã mua`} icon={Repeat} tone="primary" />
         <MetricCard label="Tỷ lệ hoàn" value={`${returnRate.toFixed(1)}%`} note={`${formatNumber(summary.returned)} đơn hoàn / ${formatNumber(summary.orders)} đơn`} icon={RotateCcw} tone={returnRate >= 10 ? "rose" : "amber"} />
       </section>
 

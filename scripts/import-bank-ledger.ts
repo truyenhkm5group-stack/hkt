@@ -1,5 +1,9 @@
 /**
- * Nhập sao kê MB Bank (JSON/CSV từ app "Quản lý giao dịch") thành chi phí ERP, không cần giao diện.
+ * Nhập sao kê MB Bank (JSON/CSV từ app "Quản lý giao dịch") thành chi phí ERP — ĐƯỜNG DUY NHẤT còn lại.
+ * Nút "Nhập sao kê" trên trang Chi phí đã gỡ (AGENTS.md mục 3.17: sao kê không tạo chi phí); chỉ chủ
+ * shop chạy script này / ops `import-bank-ledger` một cách tường minh. Dòng ghi mang
+ * `cost_source = 'BANK_IMPORT'`; nhóm thuộc nguồn khác (quảng cáo, tiền hàng, cước, phí hoàn) bị từ chối.
+ * Người dùng bình thường: /bank?tab=nhap-sao-ke → phân loại → nối chứng từ.
  *   npm run import:bank -- ./giao-dich.csv            # đường dẫn file
  *   cat giao-dich.json | npm run import:bank -- --stdin
  *   npm run import:bank -- ./file.json --dry-run       # chỉ in kế hoạch, không ghi
@@ -67,7 +71,9 @@ async function main() {
     fresh.map((r) => ({ reference: r.reference, date: r.date, amount: r.amount, category: r.category, description: r.description })),
     "import:bank",
   );
-  console.log(`Đã ghi ${result.inserted} khoản chi vào ERP${result.skipped ? ` (bỏ qua ${result.skipped} dòng trùng)` : ""}.`);
+  console.log(
+    `Đã ghi ${result.inserted} khoản chi vào ERP (cost_source = BANK_IMPORT)${result.skipped ? ` · bỏ qua ${result.skipped} dòng trùng` : ""}${result.refused ? ` · từ chối ${result.refused} dòng thuộc nguồn khác` : ""}.`,
+  );
 }
 
 main()

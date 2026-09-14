@@ -18,10 +18,10 @@ import "dotenv/config";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
-import { aiEnv, getAiSettings } from "@/lib/ai/config";
-import { ensureAgents, getAgent } from "@/lib/ai/registry";
-import { syncSalesConversations } from "@/lib/ai/agents/sales/ingest";
-import { drainSalesTasks } from "@/lib/ai/agents/sales/pipeline";
+import { aiEnv, getAiSettings } from "@/lib/ai-workforce/config";
+import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
+import { syncSalesConversations } from "@/lib/ai-workforce/agents/sales/ingest";
+import { drainSalesTasks } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 
 function arg(name: string): string {

@@ -53,7 +53,10 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
+  // `popper` mở menu NGAY DƯỚI ô chọn như dropdown. `item-aligned` (mặc định của Radix) đặt menu
+  // sao cho mục đang chọn đè lên ô — khi `value` không có trong danh sách, menu bị đẩy đi rất xa
+  // (đã đo y=6787 trên production 12/09, xem components/picker-menu.tsx).
+  position = "popper",
   align = "center",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {

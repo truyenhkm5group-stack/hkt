@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_TITLES } from "@/components/app-sidebar";
+import { NAV_TITLES, type NavUserLike } from "@/components/app-sidebar";
+import { BrandWordmark } from "@/components/brand";
 import { RealtimeIndicator } from "@/components/realtime-provider";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Suspense } from "react";
+import { AiCopilot } from "@/components/ai-copilot";
 import { GlobalSearch } from "@/components/global-search";
 import { NotificationBell } from "@/components/notification-bell";
 
-export function SiteHeader() {
+export function SiteHeader({ user }: { user: NavUserLike }) {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
   const first = segments.length ? `/${segments[0]}` : "/";
@@ -18,14 +21,16 @@ export function SiteHeader() {
   const detail = segments.length > 1 && !NAV_TITLES[`/${segments.slice(0, 2).join("/")}`] ? segments.slice(1).join(" / ") : null;
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-4">
+    <header className="sticky top-0 z-20 flex h-[var(--app-header-height)] shrink-0 items-center gap-2 border-b border-border/70 bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 sm:px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 h-4" />
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem className="hidden sm:block">
             <BreadcrumbLink asChild>
-              <Link href="/">Shop Control</Link>
+              <Link href="/" aria-label="VNXcommerce">
+                <BrandWordmark className="text-[13px] text-brand" />
+              </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator className="hidden sm:block" />
@@ -49,7 +54,10 @@ export function SiteHeader() {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
-        <GlobalSearch />
+        <GlobalSearch user={user} />
+        <Suspense fallback={null}>
+          <AiCopilot />
+        </Suspense>
         <NotificationBell />
         <RealtimeIndicator />
       </div>

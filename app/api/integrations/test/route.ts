@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { env, integrationStatus } from "@/lib/env";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
+import { testAiConnection } from "@/lib/ai/provider";
+import { aiDisabledReason, resolveProviderName } from "@/lib/ai/router";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -12,7 +14,7 @@ export const maxDuration = 120;
 /** Che các khoá bí mật nếu vô tình lọt vào thông báo lỗi */
 function scrub(message: string) {
   let out = message;
-  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret, env.facebook.accessToken]) {
+  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret, env.facebook.accessToken, process.env.OPENAI_API_KEY, process.env.ANTHROPIC_API_KEY]) {
     if (secret && secret.length >= 6) out = out.split(secret).join("***");
   }
   return out;
@@ -20,8 +22,11 @@ function scrub(message: string) {
 
 /** Kiểm tra kết nối tới Pancake POS / Viettel Post. Không bao giờ trả về khoá API. */
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  // Bấm thử kết nối là gọi thật sang Pancake / Viettel Post bằng khoá của shop — chỉ người được
+  // giao trang Kết nối dữ liệu mới được làm.
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Chưa đăng nhập" }, { status: 401 });
+  if (!can(user, "integrations:view")) return NextResponse.json({ ok: false, error: "Không có quyền kiểm tra kết nối" }, { status: 403 });
   const body = (await request.json().catch(() => ({}))) as { provider?: string };
   const provider = body.provider;
   const status = integrationStatus();
@@ -77,7 +82,12 @@ export async function POST(request: NextRequest) {
         detail: { pages: result.pages, message: `Token hợp lệ · ${result.pages.length} page: ${result.pages.map((p) => `${p.name} (${p.id})`).join(", ") || "không có page nào"}` },
       });
     }
-    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages)" }, { status: 400 });
+    if (provider === "ai") {
+      if (!resolveProviderName()) return NextResponse.json({ ok: false, error: `AI chưa được cấu hình: ${aiDisabledReason() ?? "thiếu khoá API"}` });
+      const r = await testAiConnection();
+      return NextResponse.json({ ok: true, detail: { provider: r.provider, model: r.model, latencyMs: r.latencyMs, message: `${r.provider} · ${r.model} trả lời "${r.answer}" sau ${r.latencyMs} ms` } });
+    }
+    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages | ai)" }, { status: 400 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ ok: false, error: scrub(message) });

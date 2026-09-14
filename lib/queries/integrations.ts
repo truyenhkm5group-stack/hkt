@@ -96,7 +96,7 @@ export async function viettelPostHealth() {
   const now = Date.now();
   const since = (hours: number) => new Date(now - hours * 3600_000);
 
-  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved, unknownStatuses] = await Promise.all([
+  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved, unknownStatuses, capabilityRows] = await Promise.all([
     db.query.webhookEvents.findFirst({
       where: eq(schema.webhookEvents.source, "VIETTELPOST"),
       orderBy: [desc(schema.webhookEvents.receivedAt)],
@@ -178,7 +178,20 @@ export async function viettelPostHealth() {
       .groupBy(schema.shipmentEvents.status)
       .orderBy(sql`count(*) desc`)
       .limit(20),
+    // NĂNG LỰC TRA CỨU của vận đơn đang chạy: tài khoản API đọc được bao nhiêu, bao nhiêu chỉ nhận
+    // webhook (Pancake tạo, ngoài phạm vi tài khoản), bao nhiêu chưa kết luận.
+    db
+      .select({ capability: schema.shipments.trackingCapability, n: sql<number>`count(*)` })
+      .from(schema.shipments)
+      .where(and(eq(schema.shipments.isFinal, false), isNotNull(schema.shipments.vtpOrderNumber)))
+      .groupBy(schema.shipments.trackingCapability),
   ]);
+  const capability = { apiTrackable: 0, webhookOnly: 0, unknown: 0 };
+  for (const r of capabilityRows) {
+    if (r.capability === "API_TRACKABLE") capability.apiTrackable += Number(r.n);
+    else if (r.capability === "WEBHOOK_ONLY") capability.webhookOnly += Number(r.n);
+    else capability.unknown += Number(r.n);
+  }
 
   const data = latest?.payload && typeof latest.payload === "object" ? ((latest.payload as Record<string, unknown>).DATA as Record<string, unknown> | undefined) : undefined;
   const apiScope = (scope?.value ?? null) as { missingStreak: number; lastFoundAt: string | null; lastCheckedAt: string | null } | null;
@@ -197,8 +210,14 @@ export async function viettelPostHealth() {
     },
     lastPoll: lastPoll ?? null,
     apiScope,
-    /** API đang KHÔNG thấy vận đơn nào của shop — đối chiếu qua API coi như không có. */
+    /**
+     * API đang KHÔNG thấy vận đơn nào của shop. Đây là NĂNG LỰC của tài khoản API (vận đơn Pancake
+     * tạo thuộc tài khoản khác), không phải lỗi: vận đơn đã kết luận `WEBHOOK_ONLY` khoẻ theo webhook.
+     * Chỉ `API_TRACKABLE` mới cần đối chiếu qua API.
+     */
     apiBlind: (apiScope?.missingStreak ?? 0) >= 3,
+    /** Vận đơn đang chạy chia theo năng lực tra cứu. */
+    capability,
     openShipments: { total: Number(pending[0].n), stale48h: Number(pending[0].stale48) },
     stageMismatch: Number(mismatch[0].n),
     /** Vận đơn có webhook mới hơn trạng thái đang lưu — webhook về nhưng không được áp dụng. */

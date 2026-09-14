@@ -25,22 +25,42 @@ function toForm(expense?: ExpenseRow | null): Partial<ExpenseInput> {
     amount: expense?.amount,
     occurredAt: expense ? vnDateKey(expense.occurredAt) : todayVN(),
     reference: expense?.reference ?? "",
+    costSource: (expense?.costSource === "MANUAL_ADJUSTMENT" ? "MANUAL_ADJUSTMENT" : "MANUAL") as ExpenseInput["costSource"],
+    reason: expense?.reason ?? "",
   };
 }
 
 /**
  * Dialog thêm/sửa chi phí. Không truyền `open` → tự quản lý trạng thái và hiện nút “Thêm chi phí”.
+ *
+ * `defaultValues` / `onCreated` phục vụ nơi gọi muốn ĐIỀN SẴN một vài trường (vd từ một dòng sao kê
+ * ngân hàng đang chờ xử lý ở Hàng đợi tác vụ tài chính) rồi làm thêm việc SAU KHI tạo xong (vd nối
+ * khoản chi vừa tạo với đúng dòng sao kê đó). Không đổi hành vi của nơi gọi cũ: hai prop đều tuỳ
+ * chọn, bỏ qua thì y hệt trước.
  */
-export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: ExpenseRow | null; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+export function ExpenseDialog({
+  expense,
+  open,
+  onOpenChange,
+  defaultValues,
+  onCreated,
+}: {
+  expense?: ExpenseRow | null;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  defaultValues?: Partial<ExpenseInput>;
+  onCreated?: (id: string) => void | Promise<void>;
+}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const form = useForm<ExpenseInput>({ resolver: zodResolver(expenseSchema), defaultValues: toForm(expense) });
+  const form = useForm<ExpenseInput>({ resolver: zodResolver(expenseSchema), defaultValues: { ...toForm(expense), ...defaultValues } });
 
   useEffect(() => {
-    if (isOpen) form.reset(toForm(expense));
+    if (isOpen) form.reset({ ...toForm(expense), ...defaultValues });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, expense, form]);
 
   const submit = (values: ExpenseInput) => {
@@ -50,7 +70,11 @@ export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: Expen
         toast.error(result.error);
         return;
       }
-      toast.success(expense ? "Đã cập nhật chi phí" : "Đã thêm chi phí");
+      if (!expense && onCreated && result.id) {
+        await onCreated(result.id);
+      } else {
+        toast.success(expense ? "Đã cập nhật chi phí" : "Đã thêm chi phí");
+      }
       setOpen(false);
       router.refresh();
     });
@@ -150,6 +174,53 @@ export function ExpenseDialog({ expense, open, onOpenChange }: { expense?: Expen
                   </FormItem>
                 )}
               />
+              {/*
+                KHOẢN ĐIỀU CHỈNH — lối thoát DUY NHẤT của luật chống trừ hai lần.
+                Cước và phí hoàn của từng đơn đã được tính theo vận đơn, nên khoản gõ tay trong hai nhóm đó bị
+                loại. Nhưng đền bù, phí ngoại lệ, cước chuyến gom hàng không gắn được vận đơn nào vẫn là tiền
+                thật — khai là "điều chỉnh" kèm lý do thì được tính.
+              */}
+              <FormField
+                control={form.control}
+                name="costSource"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nguồn khoản chi</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="MANUAL">Khoản chi thông thường</SelectItem>
+                        <SelectItem value="MANUAL_ADJUSTMENT">Điều chỉnh thủ công (ngoài cước theo vận đơn)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Nhóm “Phí giao hàng” và “Phí hoàn” đã được tính theo từng vận đơn. Khoản gõ tay trong hai
+                      nhóm đó chỉ vào lợi nhuận khi chọn <b>Điều chỉnh thủ công</b> và ghi rõ lý do.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {form.watch("costSource") === "MANUAL_ADJUSTMENT" ? (
+                <FormField
+                  control={form.control}
+                  name="reason"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Lý do điều chỉnh</FormLabel>
+                      <FormControl>
+                        <Input placeholder="VD: đền bù kiện vỡ, không thuộc bảng kê nào" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
               <FormField
                 control={form.control}
                 name="reference"

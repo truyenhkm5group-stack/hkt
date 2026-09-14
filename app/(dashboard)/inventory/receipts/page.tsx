@@ -7,7 +7,9 @@ import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { can, requirePermission } from "@/lib/auth/session";
+import { can,  } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { pendingReturnsByVariant } from "@/lib/returns/warehouse";
 import { listStockReceipts, listVariantsForReceipt, stockReceiptSummary } from "@/lib/queries/stock";
@@ -19,7 +21,9 @@ export const metadata = { title: "Nhập hàng & kiểm kê" };
 
 export default async function StockReceiptsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
-  const user = await requirePermission("products:view");
+  const { user, decision } = await requireResource("INVENTORY", "products:view");
+  // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
+  if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
   const [receipts, summary, variants, pendingMap] = await Promise.all([

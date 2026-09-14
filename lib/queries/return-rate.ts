@@ -1,10 +1,12 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
-import { memo } from "@/lib/cache";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
-import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
+import { ELIGIBLE_SENT_SQL, RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
+import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 
 /** Danh sách nguồn sự kiện dùng trong SQL — định nghĩa duy nhất ở lib/constants/truth.ts. */
@@ -204,6 +206,16 @@ const HAS_RETURN_LEG = sql`(${s.vtpOrderNumber} is not null and exists (
 const GOODS_CAME_BACK = sql`(${HAS_RETURN_LEG} or ${REVENUE_EDITED_AFTER_DELIVERY})`;
 
 /**
+ * ĐVVC ĐÃ CẦM HÀNG CHƯA — dùng lại ĐÚNG vị từ của hợp đồng mốc bàn giao
+ * (`lib/constants/carrier-handoff.ts`), không viết bản thứ hai ở đây.
+ *
+ * Viết lại danh sách chặng ở tệp này là dựng một định nghĩa "đã bàn giao" thứ hai; ngày nào đó một
+ * người sửa một danh sách mà quên danh sách kia, và báo cáo theo mốc gửi sẽ nói khác kết quả đơn về
+ * cùng một kiện hàng. Một câu hỏi thì một chỗ trả lời.
+ */
+const CARRIER_TOOK_PACKAGE = sql.raw(CARRIER_HANDOFF_KNOWN_SQL);
+
+/**
  * NGUỒN CHÂN LÝ DUY NHẤT của kết quả đơn hàng cho toàn bộ ERP.
  * Đặc tả bắt buộc: docs/business-rules/ORDER_OUTCOME.md — đọc trước khi sửa.
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
@@ -238,6 +250,22 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'DELIVERED' then 'DELIVERED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${HAS_VTP_EVIDENCE} and ${s.stage} = 'CANCELLED' then 'CANCELLED'
+  -- ĐÃ CÓ VẬN ĐƠN NHƯNG ĐVVC CHƯA CẦM HÀNG ⇒ 'AWAITING_PICKUP', KHÔNG PHẢI 'ĐANG GIAO'.
+  --
+  -- Cùng một nguyên tắc với nhánh 'UNKNOWN' ở đầu bảng, chỉ khác mức bằng chứng: ở đó ERP không
+  -- biết gì về gói hàng; ở đây ERP biết có gói hàng, biết mã, biết ĐVVC đã nhận yêu cầu — nhưng
+  -- KHÔNG có một chứng từ nào nói họ đã cầm nó. "Đang giao" vẫn là một khẳng định về VỊ TRÍ, và
+  -- những sự kiện duy nhất của nhóm này nói ngược lại: bưu tá ĐANG TỚI LẤY, kho CHƯA ĐÓNG XONG,
+  -- hoặc ĐVVC đang chờ shop xác nhận.
+  --
+  -- Đo production 13/09/2026: 106 đơn, 61.451.999đ COD, tuổi trung bình 3,2 ngày (16 đơn quá 7
+  -- ngày, cao nhất 9 ngày). Trước bản này chúng rơi vào đúng nhánh 'IN_TRANSIT' ngay bên dưới, nên
+  -- chủ shop tưởng 106 gói đang trên đường tới khách trong khi chúng còn nằm trong kho — và vì
+  -- không màn hình nào gọi tên tình trạng đó, không ai đi hỏi vì sao bưu tá chưa tới.
+  --
+  -- Phải đứng SAU mọi nhánh kết cục (giao / hoàn / huỷ): một kiện đã tới tay khách thì chuyện mốc
+  -- lấy hàng có được ghi lại hay không cũng không làm nó thành "chờ lấy".
+  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${o.stage} not in ('CANCELLED','DELETED') then 'AWAITING_PICKUP'
   when ${HAS_VTP_EVIDENCE} and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} then 'DELIVERED'
@@ -245,6 +273,17 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} > ${MAX_COD} then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${OUTCOME_MONEY} < ${RETURN_COD} then 'RETURNED'
   when ${s.stage} = 'DELIVERED' then 'RETURNED_BY_RULE'
+  -- NHÁNH NÀY CỐ Ý KHÔNG CÓ GUARD "chưa cầm hàng" — và đây là một quyết định có số đo, không phải
+  -- một chỗ bỏ sót.
+  --
+  -- Tới đây là kiện KHÔNG có sự kiện ĐVVC nào mà chặng vẫn nói "đang chạy". Bản nháp đầu có thêm
+  -- guard cho đối xứng với nhánh trên. Đo production 13/09/2026 thì nhóm đó RỖNG: cả 106 kiện chưa
+  -- bàn giao đều CÓ sự kiện, 0 kiện nào không có. Thêm guard là phát hành một luật chưa từng chạy
+  -- trên dòng dữ liệu nào.
+  --
+  -- Và nó sẽ sai ở đúng ca mà kho mã đã chốt từ trước (fixture rr-9007): vận đơn chưa có sự kiện
+  -- nhưng COD đã về theo bảng kê > 100K. Tiền về được là bằng chứng gói hàng ĐÃ đi — bảng kê chỉ
+  -- tồn tại khi ĐVVC đã thu hộ. Gọi kiện đó là "chờ lấy hàng" là đoán ngược lại một chứng từ.
   when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
@@ -255,6 +294,116 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   else 'NOT_SHIPPED' end`;
 
 /**
+ * ─────────────── TÍNH KẾT QUẢ ĐƠN ĐÚNG MỘT LẦN CHO MỖI DÒNG ───────────────
+ *
+ * BẰNG CHỨNG (EXPLAIN ANALYZE, xem docs/erp-performance-p0-report.md): Postgres NỘI TUYẾN cả biểu
+ * thức `ORDER_OUTCOME` — kèm 13 truy vấn con tương quan bên trong — vào TỪNG cột gộp có
+ * `filter (where ORDER_OUTCOME = …)`. Một truy vấn 10 cột gộp sinh ra hơn 100 `SubPlan`, và mỗi
+ * `SubPlan` chạy lại cho từng dòng. Trên bảng hiệu quả mẫu mã (4.260 dòng): quét dữ liệu mất 93 ms,
+ * còn khâu gộp mất 27.706 ms — 99,7% thời gian là tính đi tính lại cùng một giá trị.
+ *
+ * CÁCH SỬA: đưa `ORDER_OUTCOME` xuống một bảng dẫn xuất, gộp bên ngoài trên cột đã tính sẵn.
+ * `OUTCOME_FENCE` (`offset 0`) là RÀO tối ưu hoá chuẩn của Postgres: không có nó, bộ tối ưu "kéo
+ * subquery lên" (subquery pull-up) và nội tuyến lại y như cũ — đã đo, không nhanh hơn một mili-giây.
+ *
+ * QUAN TRỌNG: đây là đổi HÌNH DẠNG truy vấn, KHÔNG đổi công thức. Cùng biểu thức `ORDER_OUTCOME`,
+ * cùng dữ liệu vào, cùng con số ra — đo từng dòng bằng `scripts/bench/outcome-shape.ts` và khoá
+ * bằng `tests/metric-shape-consistency.test.ts`.
+ */
+// Drizzle khai báo `.offset()` nhận `number`, và nó BỎ QUA số 0 (0 là giá trị falsy) nên không thể
+// truyền 0 trực tiếp. Một biểu thức SQL thì được in ra nguyên vẹn. Ép kiểu đúng MỘT chỗ ở đây thay
+// vì rải `as unknown as number` khắp các truy vấn.
+export const OUTCOME_FENCE = sql`0` as unknown as number;
+
+/**
+ * ───────────── BIỂU THỨC BÁO CÁO DÙNG: ĐỌC KẾT QUẢ ĐÃ TÍNH SẴN ─────────────
+ *
+ * Đọc `canonical_order_outcome`; **thiếu dòng thì tính tại chỗ bằng chính `ORDER_OUTCOME` ở trên**.
+ *
+ * Vì sao phải có nhánh dự phòng thay vì tin bảng: bảng có thể trống (chưa dựng lần đầu), thiếu dòng
+ * (đơn vừa đồng bộ về), hoặc mang phiên bản luật cũ (vừa sửa luật xong). Cả ba trường hợp, một báo
+ * cáo tin bảng sẽ trả số SAI mà trông vẫn hợp lý — kiểu sai tệ nhất. `coalesce` khiến chuyện đó
+ * không xảy ra được: thiếu dòng thì tự tính, chỉ CHẬM chứ không SAI.
+ *
+ * Postgres tính `coalesce` theo thứ tự và dừng ở giá trị khác NULL đầu tiên, nên khi bảng đầy đủ thì
+ * biểu thức đắt tiền phía sau không hề chạy: một lần tra chỉ mục duy nhất (~0,01ms) thay cho ~2,4ms.
+ *
+ * `logic_version` là chốt an toàn cuối — sửa luật mà quên dựng lại thì hệ thống TỰ quay về luật mới.
+ */
+/**
+ * ───────────── LẦN GỬI QUYẾT ĐỊNH KẾT QUẢ CỦA ĐƠN ─────────────
+ *
+ * Từ 10/09/2026 một đơn có thể có NHIỀU lần gửi (giao thất bại rồi gửi lại, huỷ rồi tạo lại, gửi
+ * hàng thay thế). Mọi báo cáo TIỀN đều `orders left join shipments` rồi cộng trên từng dòng — nên
+ * ngay lần gửi lại đầu tiên, doanh thu và số đơn của đơn đó bị đếm HAI LẦN, trong im lặng.
+ *
+ * Điều kiện nối này bảo đảm **mỗi đơn đúng một dòng**: chọn lần gửi quyết định.
+ *
+ * Thứ tự chọn, và lý do:
+ *  1. **Lần gửi tới tay khách thắng.** Khách đã nhận được hàng ở lần nào thì đơn đó là giao thành
+ *     công — lần huỷ trước đó không xoá được sự thật ấy.
+ *  2. Chưa lần nào tới tay khách thì lấy **lần gửi mới nhất**: đó là tình trạng hiện thời của đơn.
+ *  3. Cuối cùng chốt bằng `id` để kết quả ổn định giữa hai lần chạy — số liệu không được đổi chỉ vì
+ *     Postgres trả dòng theo thứ tự khác.
+ *
+ * Với dữ liệu hôm nay (mỗi đơn một vận đơn) điều kiện này chọn đúng dòng duy nhất, nên KHÔNG con số
+ * nào đổi.
+ */
+/**
+ * ĐƯỜNG TẮT CHO CA PHỔ BIẾN — và nó là cả sự khác biệt giữa 40 giây và 100 mili giây.
+ *
+ * Bản đầu chỉ có vế sau: một truy vấn con tương quan mang `order by … limit 1` ĐẶT TRONG ĐIỀU KIỆN
+ * NỐI. Postgres không dùng được nó làm khoá nối, nên nó rơi về lặp lồng và SẮP XẾP LẠI cho từng cặp
+ * dòng ứng viên. Đo trên production 10/09/2026, câu sổ kho theo mẫu mã mất **39.960ms** và chạy hai
+ * lần trong một lần mở trang chủ — trang chủ vì thế quá hạn 60 giây.
+ *
+ * Vế trước là một phép PHẢN NỐI rẻ: "đơn này có lần gửi nào KHÁC không?". Hôm nay production có
+ * **0 đơn nhiều lần gửi**, nên vế trước đúng với 100% dữ liệu và vế sau không bao giờ phải chạy.
+ *
+ * KHÔNG phải tối ưu đánh đổi tính đúng: hai vế nối bằng `or`, nên đơn nhiều lần gửi vẫn đi qua đúng
+ * luật chọn lần gửi quyết định như cũ. Nó chỉ thôi bắt 2.433 đơn một-lần-gửi trả giá cho một luật
+ * sinh ra vì thiểu số.
+ */
+export const PRIMARY_ATTEMPT = sql`(
+  not exists (select 1 from shipments sh0 where sh0.order_id = ${o.id} and sh0.id <> ${s.id})
+  or ${s.id} = (
+    select sh.id from shipments sh
+    where sh.order_id = ${o.id}
+    order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+    limit 1
+  )
+)`;
+
+export const ORDER_OUTCOME_FAST = sql`coalesce(
+  (select m.outcome from canonical_order_outcome m
+    where m.order_id = ${o.id}
+      and coalesce(m.shipment_id, '') = coalesce(${s.id}, '')
+      and m.logic_version = ${CANONICAL_OUTCOME_VERSION}
+      -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU.
+      --
+      -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà
+      -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử,
+      -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ
+      -- là con số sai.
+      --
+      -- Hai phép so mốc thời gian là đủ và gần như miễn phí; đổi lại "chậm chứ không sai" trở thành
+      -- đúng cho CẢ trường hợp dữ liệu vừa đổi.
+      and m.computed_at >= ${o.updatedAt}
+      and (${s.id} is null or m.computed_at >= ${s.updatedAt})),
+  ${ORDER_OUTCOME}
+)`;
+
+/**
+ * Cột kết quả đơn của bảng dẫn xuất. Luôn đặt tên `outcome` để mọi nơi đọc giống nhau.
+ *
+ * Dùng biểu thức ĐỌC BẢNG ĐÃ TÍNH SẴN: đây là điểm chung của gần như mọi báo cáo, nên đổi ở đây là
+ * đổi cho tất cả cùng lúc — và vì có nhánh dự phòng nên không nơi nào có thể trả số sai.
+ */
+export function outcomeColumn() {
+  return ORDER_OUTCOME_FAST.as("outcome");
+}
+
+/**
  * ───────── Quy tắc THỰC TẾ (Data Truth) — dùng cho trang Chất lượng dữ liệu ─────────
  * Khác ORDER_OUTCOME legacy ở đúng một điểm: trạng thái Pancake/Viettel Post KHÔNG được
  * coi là bằng chứng doanh thu. Không có số tiền thực thu → UNVERIFIED ("Chưa xác minh"),
@@ -262,11 +411,19 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
  */
 
 /**
- * TIỀN COD ĐÃ THỰC THU. Ưu tiên số thực thu; nếu chưa có số nhưng Viettel Post đã xác nhận
- * trạng thái thu tiền thì lấy COD khai báo trên vận đơn. COD khai báo đơn thuần KHÔNG phải bằng chứng.
+ * TIỀN COD ĐÃ THỰC THU — chỉ có MỘT nguồn: số thực thu ghi từ chứng từ (`cod_collected`).
+ *
+ * Bản trước còn một nhánh dự phòng: chưa có số nhưng `cod_status` ∈ {COLLECTED, RECONCILED,
+ * PAID_TO_BANK} thì lấy COD KHAI BÁO. Mà `COLLECTED` được đặt từ CHIỀU LOGISTICS (trạng thái
+ * "đã giao" của Pancake / tệp danh sách VTP — lib/integrations/viettelpost/sync.ts, pancake/mapper.ts),
+ * nên nhánh đó là: giao → COLLECTED → "tiền có chứng từ = COD khai báo" → ORDER_OUTCOME_VERIFIED
+ * = DELIVERED. Đúng vòng suy luận mà đặc tả §1 cấm ("Payment không suy từ trạng thái giao") và §8
+ * liệt kê ("`cod_status` đơn thuần" không phải verified money). Hệ quả đo được: `provenCash` /
+ * `verifiedRevenue` trên trang Chất lượng dữ liệu phồng lên, số "chưa xác minh" hụt.
+ *
+ * Chưa có số thực thu thì là CHƯA XÁC MINH, không phải 0 và không phải COD khai báo.
  */
-export const CASH_COLLECTED = sql<number>`coalesce(nullif(${s.codCollected}, 0),
-  case when ${s.codStatus} in ('COLLECTED','RECONCILED','PAID_TO_BANK') then nullif(${s.codAmount}, 0) end, 0)`;
+export const CASH_COLLECTED = sql<number>`coalesce(nullif(${s.codCollected}, 0), 0)`;
 
 /** Tổng tiền CÓ BẰNG CHỨNG của đơn: COD đã thu + tiền khách chuyển trước đã ghi nhận. */
 export const VERIFIED_CASH = sql<number>`(${CASH_COLLECTED} + ${PREPAID})`;
@@ -349,23 +506,68 @@ export const SHIPMENT_LEFT_WAREHOUSE = sql`(${s.pickedUpAt} is not null
 export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
 
 /**
+ * KIỆN HOÀN ĐÃ VỀ TỚI SHOP, KHO CHƯA GHI NHẬN — vị ngữ DUY NHẤT cho "chờ kho nhận".
+ *
+ * Trước đây ba nơi (bàn nhận hàng, xác nhận hàng loạt, thẻ "Chờ kho nhận") tự viết ba điều kiện
+ * khác nhau: nơi thì lấy cả RETURNING, nơi thì loại vận đơn chiều về, nơi thì quên loại kiện đã bấm
+ * "đã nhận" (mốc `return_received_at` chỉ được đóng lúc ĐẾM, còn "đã nhận" nằm ở
+ * `return_inspections`). Ba con số cho cùng một câu hỏi thì cả ba mất giá trị.
+ *
+ * Bốn mệnh đề, không hơn:
+ *  1. `RETURNED` — Viettel Post đã trả hàng xong cho shop (504, hoặc 501 trên chiều hoàn).
+ *     RETURNING vẫn đang trên đường về; ghi nhận lúc đó là bịa dữ liệu.
+ *  2. Kho chưa đóng kiện (`return_received_at` null) và chưa bấm "đã nhận" (chưa có phiếu kiểm).
+ *  3. Vận đơn CHIỀU VỀ (`order_id` null, `order_reference` = mã gốc — luật 7) VẪN ĐƯỢC TÍNH: nó
+ *     là bằng chứng duy nhất khi vận đơn chiều đi chưa nhận mã kết thúc. Bối cảnh sản phẩm ghép
+ *     bằng định danh ở `lib/returns/product-context.ts`.
+ *  4. ...nhưng KHÔNG tính khi vận đơn chiều đi cùng mã gốc đã tự nằm trong hàng chờ, hoặc đã được
+ *     kho nhận / đếm: cùng một kiện vật lý mà hiện hai dòng thì kho đếm hai lần, tồn cộng hai lần.
+ */
+export const IS_RETURN_AWAITING_WAREHOUSE = sql`(${s.stage} = 'RETURNED'
+  and ${s.returnReceivedAt} is null
+  and not exists (select 1 from return_inspections ri where ri.shipment_id = ${s.id})
+  and (${s.orderId} is not null or not exists (
+    select 1 from shipments g
+    where g.id <> ${s.id} and g.order_id is not null
+      and nullif(upper(trim(coalesce(${s.orderReference}, ''))), '') in (upper(g.vtp_order_number), upper(g.tracking_code))
+      and (g.stage = 'RETURNED' or g.return_received_at is not null or exists (select 1 from return_inspections ri2 where ri2.shipment_id = g.id))
+  )))`;
+
+/**
  * Hàng hoàn ở GRAIN ĐƠN (cần orders LEFT JOIN shipments) — dùng cho tồn kho.
  * Rộng hơn IS_RETURN_NOT_RECEIVED vì phủ cả RETURNED_BY_RULE (vận đơn báo "giao thành công"
  * nhưng khách chỉ trả phí, hàng vẫn quay về). Kho chưa xác nhận nhận → hàng CHƯA có trong tồn.
  */
-export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
+/**
+ * CHỖ NÀY TỪNG LÀ CẢ 40 GIÂY CỦA TRANG CHỦ.
+ *
+ * Vị ngữ này nằm trong SÁU bộ lọc của truy vấn sổ kho (`variantSalesSubquery`), chạy trên 2.495 dòng
+ * hàng. Khi nó dùng `ORDER_OUTCOME` BẢN SỐNG, mỗi dòng phải dựng lại kết luận đơn — kèm cả các truy
+ * vấn con quét `shipment_events` bằng ILIKE. Đo trên production 10/09/2026: câu sổ kho **39.960ms**,
+ * chạy hai lần trong một lần mở trang chủ.
+ *
+ * Nó lọt lưới vì lá chắn `tests/fast-path-wiring.test.ts` miễn trừ CẢ TỆP `return-rate.ts` với lý do
+ * "đây là nơi định nghĩa". Đúng là nơi định nghĩa — nhưng những VỊ NGỮ DẪN XUẤT trong cùng tệp thì
+ * không có lý do gì được dùng bản chậm. Miễn trừ quá rộng là chỗ lỗi chui qua.
+ */
+export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
 
-const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
-const IS_FAILED = sql`${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
-const IS_PENDING = sql`${ORDER_OUTCOME} = 'NOT_SHIPPED'`;
-const IS_SHIPPED = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
+/**
+ * "ĐÃ GỬI" — danh sách khai ở `ELIGIBLE_SENT_OUTCOMES` (`lib/constants/returns.ts`), đọc lời giải
+ * thích đầy đủ ở đó. `AWAITING_PICKUP` CỐ Ý không có mặt: kiện chờ ĐVVC tới lấy thì chưa rời kho.
+ */
+const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
 const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
 
 export type ReturnRateQuery = {
   period: Period;
+  /** Mốc lọc cohort. Mặc định `SHIPPED` — xem `baseWhere`. */
+  basis?: TimeBasis;
   q: string;
   minShipped: number;
   sort: string;
@@ -388,12 +590,31 @@ export type ReturnRateRow = {
   inTransit: number;
   /** Đang chờ phát lại (giao thất bại chưa kết thúc) */
   failed: number;
-  /** Tỷ lệ hoàn dự kiến (%) = (hoàn + chờ phát lại × xác suất thành hoàn) ÷ (giao thật + hoàn + chờ phát lại) */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V3`. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG (%) = giao thành công (COD thực > 100K) ÷ (giao thành công + không thành công) trên đơn đã kết thúc; null nếu chưa có đơn kết thúc */
   successRate: number | null;
-  /** Tỷ lệ giao thành công dự kiến (%) khi các đơn chờ phát lại kết thúc = 100 − tỷ lệ hoàn dự kiến */
+  /**
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
+   * suất của CHÍNH trạng thái ĐVVC nó đang ở. `null` = CHƯA ĐO ĐƯỢC, không phải 0%.
+   */
   expectedSuccessRate: number | null;
+  /** Mẫu số thô của ước tính — để dòng GỘP cộng được thay vì bình quân các tỷ lệ. */
+  projectedSent: number;
+  /** Tử số thô (có phần lẻ: đơn đang chạy đóng góp xác suất của nó). */
+  projectedDelivered: number;
+  /** Đơn đang chạy trong cohort ước tính — để dòng gộp áp cùng luật "ngoài ước tính quá lớn". */
+  projectedActive: number;
+  /** Đơn đang chạy mà mô hình chưa dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
+  unmodelledActive: number;
+  /**
+   * ĐƠN ĐANG CHẠY TÁCH THEO TRẠNG THÁI ĐVVC — thứ làm cho ô "GTC ước tính" giải thích được.
+   *
+   * Không có nó thì tooltip chỉ nói được "70 đơn chưa kết thúc", trong khi câu hỏi thật của chủ shop
+   * là "trong 70 đơn ấy bao nhiêu đang CHỜ XỬ LÝ, bao nhiêu CHỜ PHÁT LẠI" — hai nhóm có triển vọng
+   * khác hẳn nhau và là hai nhóm duy nhất người trực can thiệp được.
+   */
+  activeByState: Partial<Record<string, number>>;
   cancelled: number;
   returnedQty: number;
   lostRevenue: number;
@@ -404,10 +625,28 @@ export type ReturnRateRow = {
 
 export { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
 
-function baseWhere(period: Period, q: string): SQL | undefined {
+/**
+ * ═══ COHORT CỦA BẢNG HIỆU QUẢ THEO MÃ: NGÀY ĐVVC TIẾP NHẬN, KHÔNG PHẢI NGÀY TẠO ĐƠN ═══
+ *
+ * Bảng này có cột đầu tiên tên "Đã gửi" rồi tách ra Giao thành công / Không thành công / Đang
+ * giao. Câu hỏi nó trả lời là "lô hàng gửi đi trong khoảng này đã đi tới đâu". Lọc theo ngày TẠO
+ * ĐƠN trả lời một câu khác, và người đọc không có cách nào biết.
+ *
+ * Đo production 13/09/2026: 1.411 vận đơn có cả hai mốc, **1.038 (73,6%) rơi vào hai ngày khác
+ * nhau**, lệch trung bình 4,5 ngày, cao nhất 26 ngày. Nên hai cách lọc chọn ra hai tập gần như
+ * khác hẳn — đây không phải khác biệt lý thuyết.
+ *
+ * Vận đơn KHÔNG có chứng cứ ĐVVC tiếp nhận thì `carrier_handoff_at` là `NULL` và kiện đó nằm
+ * ngoài cohort. CỐ Ý không rơi về `created_at`: mốc đó là lúc người bán bấm nút tạo vận đơn, và
+ * lấy nó lấp vào chỗ trống sẽ nhét kiện chưa ai lấy vào "lô hàng gửi tuần này".
+ */
+function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED"): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false), REPORTABLE_ORDER];
-  if (period.from) conds.push(gte(o.insertedAt, period.from));
-  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
+  if (period.from) conds.push(sql`${moc} >= ${period.from}`);
+  if (period.to) conds.push(sql`${moc} <= ${period.to}`);
+  // Mốc rỗng ⇒ ngoài cohort. Chỉ áp khi CÓ lọc kỳ: xem "tất cả" thì không loại ai.
+  if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -417,41 +656,96 @@ function baseWhere(period: Period, q: string): SQL | undefined {
 }
 
 /** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
-export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[] }> {
+export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; projectionError: string | null }> {
   const db = await getDb();
-  const raw = await db
+  // 11 cột gộp trên cùng một biểu thức kết quả đơn ⇒ tính một lần cho mỗi dòng bằng bảng dẫn xuất.
+  const base = db
     .select({
-      key: VARIANT_KEY,
-      variantId: sql<string | null>`max(${i.variantId})`,
-      sku: sql<string>`max(${i.sku})`,
-      productName: sql<string>`max(${i.productName})`,
-      variationDetail: sql<string>`max(${i.variationDetail})`,
-      image: sql<string | null>`max(${i.image})`,
-      shipped: sql<number>`count(distinct ${o.id}) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
-      returnedByRule: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
-      inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(distinct ${o.id}) filter (where ${IS_FAILED})`,
-      cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      returnedQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${IS_RETURNED}), 0)`,
-      lostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${IS_RETURNED}), 0)`,
-      deliveredRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      key: VARIANT_KEY.as("variant_key"),
+      orderId: o.id,
+      variantId: i.variantId,
+      sku: i.sku,
+      productName: i.productName,
+      variationDetail: i.variationDetail,
+      image: i.image,
+      quantity: i.quantity,
+      lineTotal: i.lineTotal,
+      shipmentStage: s.stage,
+      outcome: outcomeColumn(),
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
-    .where(baseWhere(query.period, query.q))
-    .groupBy(VARIANT_KEY);
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(baseWhere(query.period, query.q, query.basis ?? "SHIPPED"))
+    .offset(OUTCOME_FENCE)
+    .as("variant_base");
 
-  const p = await failedToReturnRate();
+  const RETURNED_ANY = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  // Cùng lý do và cùng cách bọc như `getReturnRateSummary`: chỉ câu lệnh cuối, hợp đồng ước tính
+  // nằm ngoài giao dịch. Đo được 7.066ms nguội cho hàm này.
+  const raw = await chayKhongJit(db, (tx) => tx
+    .select({
+      key: base.key,
+      variantId: sql<string | null>`max(${base.variantId})`,
+      sku: sql<string>`max(${base.sku})`,
+      productName: sql<string>`max(${base.productName})`,
+      variationDetail: sql<string>`max(${base.variationDetail})`,
+      image: sql<string | null>`max(${base.image})`,
+      shipped: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+      delivered: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(distinct ${base.orderId}) filter (where ${RETURNED_ANY})`,
+      returnedByRule: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+      cancelled: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'CANCELLED')`,
+      returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED_ANY}), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED_ANY}), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+    })
+    .from(base)
+    .groupBy(base.key));
+
+  /*
+    ═══ MỘT HỢP ĐỒNG, HAI GRAIN ═══
+
+    Công thức cũ ngay đây là `(hoàn + chờ_phát_lại × p) ÷ (đã_kết_thúc + chờ_phát_lại)` với `p` là
+    tỷ lệ "phát hỏng rồi thành hoàn" CỦA CẢ SHOP. Nó chỉ nhìn nhóm "chờ phát lại" và bỏ qua mọi
+    đơn đang chạy khác, nên mã có 20 đơn vừa rời kho và 0 đơn chờ phát lại sẽ ra "dự kiến = tỷ lệ
+    thực tế" — như thể 20 đơn kia chắc chắn giao được.
+
+    Nay lấy từ `getProjectedDeliveryMetrics(..., "VARIANT")`: cùng hàm, cùng bảng xác suất, cùng
+    cohort với bảng lợi nhuận — chỉ khác khoá gộp. Mẫu mã nào mô hình chưa dự báo được thì `null`
+    (CHƯA ĐO ĐƯỢC), không rơi về một con số đoán.
+
+    Nạp lúc gọi chứ không nạp lúc dịch — `projected-delivery.ts` import `PRIMARY_ATTEMPT` từ chính
+    tệp này, import tĩnh hai chiều sẽ tạo vòng và vòng import ESM hỏng im lặng.
+  */
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  /*
+    LỖI LÀ LỖI, KHÔNG PHẢI "CHƯA ĐỦ DỮ LIỆU". Bản trước `.catch(() => null)`: một câu SQL hỏng làm
+    mọi ô ước tính in "chưa đo được" — người đọc tưởng thiếu dữ liệu trong khi mô hình không chạy.
+    Nay lỗi được giữ lại và trả lên màn hình bằng tên của nó.
+  */
+  let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
+  let projectionError: string | null = null;
+  try {
+    duBao = await getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT");
+  } catch (e) {
+    projectionError = e instanceof Error ? e.message : String(e);
+  }
+  const duBaoTheoKhoa = new Map((duBao?.rows ?? []).map((x) => [x.key, x]));
+
   const all: ReturnRateRow[] = raw
     .map((r) => {
       const delivered = Number(r.delivered);
       const returned = Number(r.returned);
       const finished = delivered + returned;
-      const failedN = Number(r.failed);
-      const expectedRate = finished + failedN ? ((returned + failedN * p.rate) / (finished + failedN)) * 100 : null;
+      const d = duBaoTheoKhoa.get(r.key);
+      const projectedSent = d?.eligibleSent ?? 0;
+      const projectedDelivered = d?.projectedDelivered ?? 0;
+      const projectedActive = d?.active ?? 0;
+      const expectedRate = d && d.projectedRate !== null ? Math.round((100 - d.projectedRate) * 10) / 10 : null;
       return {
         key: r.key,
         variantId: r.variantId,
@@ -467,7 +761,14 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
         failed: Number(r.failed),
         expectedRate,
         successRate: finished ? (delivered / finished) * 100 : null,
-        expectedSuccessRate: expectedRate === null ? null : 100 - expectedRate,
+        expectedSuccessRate: d?.projectedRate ?? null,
+        // Đếm THÔ để dòng gộp cộng được: gộp bằng cách bình quân các tỷ lệ sẽ cân mã 2 đơn ngang
+        // mã 200 đơn. Cộng tử số và mẫu số rồi mới chia thì không.
+        projectedSent,
+        projectedDelivered,
+        projectedActive,
+        unmodelledActive: d?.unmodelledActive ?? 0,
+        activeByState: d?.activeByState ?? {},
         cancelled: Number(r.cancelled),
         returnedQty: Number(r.returnedQty),
         lostRevenue: Number(r.lostRevenue),
@@ -492,7 +793,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
   const total = all.length;
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
   const start = (query.page - 1) * query.pageSize;
-  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all };
+  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all, projectionError };
 }
 
 export type ReturnRateSummary = {
@@ -509,79 +810,138 @@ export type ReturnRateSummary = {
   cancelled: number;
   lostRevenue: number;
   rate: number | null;
-  /** Tỷ lệ hoàn dự kiến khi các đơn chờ phát lại kết thúc (theo xác suất lịch sử) */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`. Cùng hợp đồng, cùng cohort. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG chung (%) = giao thành công ÷ (giao thành công + không thành công) */
   successRate: number | null;
-  /** Tỷ lệ giao thành công dự kiến (%) khi đơn chờ phát lại kết thúc */
+  /**
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3`, xem `lib/constants/projected-delivery.ts`.
+   * `null` = CHƯA ĐO ĐƯỢC (cohort rỗng, mô hình chưa dự báo được, hoặc phần ngoài ước tính quá lớn), KHÔNG phải 0%.
+   */
   expectedSuccessRate: number | null;
-  /** Xác suất đơn giao thất bại → hoàn, học từ lịch sử (%) và cỡ mẫu */
-  failedToReturnPct: number;
-  failedSample: number;
+  /** Xuất xứ con số ước tính, để màn hình nói ra thay vì để người đọc đoán. `null` = không tính được. */
+  projection: {
+    version: string;
+    /** Mẫu số: đơn trong cohort đã bàn giao ĐVVC. */
+    eligibleSent: number;
+    /** Đơn chưa có kết cục — phần mà con số này đang DỰ BÁO. */
+    active: number;
+    /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
+    unmodelledActive: number;
+    /** Đơn huỷ / không dấu vết ĐVVC — ngoài cohort, đếm riêng để tổng khớp trang khác. */
+    cancelled: number;
+    unknown: number;
+    /** "Đang giao" tách theo trạng thái ĐVVC, ĐẾM THEO ĐƠN — kèm xác suất và độ tin cậy của từng nhóm. */
+    byState: { substate: string; label: string; orders: number; p: number | null; sample: number; confidence: string }[];
+    /** Cửa sổ huấn luyện đang dùng — để màn hình khai "học từ kiện gửi trước N ngày". */
+    maturityDays: number;
+    maturitySource: "MEASURED" | "DEFAULT";
+    /** Kết quả thử ngược của mô hình — nhãn tin cậy đứng cạnh con số. `null` khi thử ngược lỗi. */
+    backtest: import("@/lib/queries/projected-delivery").BacktestSummary | null;
+    backtestError: string | null;
+  } | null;
+  /** Lỗi khi tính ước tính (câu SQL hỏng, CSDL…) — hiện đúng là LỖI, không hiện "chưa đủ dữ liệu". */
+  projectionError: string | null;
   /** Đơn đã kết thúc (giao / hoàn) mà vận đơn chưa có trạng thái Viettel Post thật — đang tính theo trạng thái Pancake */
   finishedNoVtp: number;
   /** Đơn đang kết luận bằng số TẠM TÍNH: chưa có chứng từ tiền, số sẽ đổi khi bảng kê về. */
   provisional: number;
 };
 
-/** Xác suất một vận đơn đã từng giao thất bại cuối cùng thành hoàn (180 ngày gần nhất); dưới 15 mẫu dùng 60% */
-export async function failedToReturnRate(): Promise<{ rate: number; sample: number }> {
-  return memo("failedToReturnRate", 300_000, async () => {
-    const db = await getDb();
-    const [row] = await db
-      .select({
-        // Theo DOANH THU chứ không theo trạng thái: Viettel Post ghi "giao thành công" cho cả
-        // chiều hoàn, nên đếm bằng stage thô sẽ làm tỷ lệ "giao thất bại → hoàn" thấp giả tạo
-        // và khiến báo cáo lợi nhuận / kế hoạch sản xuất lạc quan quá mức.
-        returned: sql<number>`count(*) filter (where ${SHIPMENT_RETURNED})`,
-        delivered: sql<number>`count(*) filter (where ${SHIPMENT_DELIVERED})`,
-      })
-      .from(sql`(select distinct e.shipment_id from shipment_events e where e.occurred_at >= now() - interval '180 days' and (e.status in ('505','506','507','510') or e.status_name ilike '%thất bại%' or e.status_name ilike '%hẹn%' or e.status_name ilike '%không liên lạc%')) f`)
-      .innerJoin(s, sql`${s.id} = f.shipment_id`)
-      .leftJoin(o, eq(o.id, s.orderId));
-    const returned = Number(row?.returned ?? 0);
-    const delivered = Number(row?.delivered ?? 0);
-    const sample = returned + delivered;
-    return { rate: sample >= 15 ? returned / sample : 0.6, sample };
-  });
-}
-
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
-export async function getReturnRateSummary(period: Period, q: string): Promise<ReturnRateSummary> {
+export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<ReturnRateSummary> {
   const db = await getDb();
-  // Phạm vi đơn dùng chung — nếu thiếu, trang Tỷ lệ giao thành công sẽ đếm cả đơn "Mới"
-  // và ra tổng đơn khác Tổng quan trong cùng một kỳ.
+  /*
+    CÙNG MỐC VỚI BẢNG BÊN DƯỚI — nếu không thì khối tổng đầu trang và bảng theo mã nói hai con số
+    khác nhau trong cùng một màn hình, và người đọc không có cách nào biết cái nào đúng. Đây đúng
+    là kiểu lỗi mà một bản "chỉ đổi bảng" dễ để lại.
+
+    Phạm vi đơn dùng chung (`REPORTABLE_ORDER`) — nếu thiếu, trang này sẽ đếm cả đơn "Mới" và ra
+    tổng đơn khác Tổng quan trong cùng một kỳ.
+  */
   const conds: SQL[] = [REPORTABLE_ORDER];
-  if (period.from) conds.push(gte(o.insertedAt, period.from));
-  if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
+  if (period.from) conds.push(sql`${moc} >= ${period.from}`);
+  if (period.to) conds.push(sql`${moc} <= ${period.to}`);
+  if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;
     conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
   }
-  const [row] = await db
+  // 13 cột gộp ⇒ trước đây `ORDER_OUTCOME` bị nội tuyến 13 lần cho mỗi đơn. Bảng dẫn xuất tính
+  // đúng một lần (xem OUTCOME_FENCE ở đầu file); công thức và con số không đổi.
+  const base = db
     .select({
-      orders: sql<number>`count(*)`,
-      shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      returnedByRule: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
-      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
-      pending: sql<number>`count(*) filter (where ${IS_PENDING})`,
-      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
-      // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
-      finishedNoVtp: sql<number>`count(*) filter (where ${s.id} is not null and ${s.vtpStatusDate} is null and ${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
-      provisional: sql<number>`count(*) filter (where ${IS_PROVISIONAL})`,
+      shipmentId: s.id,
+      vtpStatusDate: s.vtpStatusDate,
+      shipmentStage: s.stage,
+      revenue: o.totalPriceAfterDiscount,
+      provisional: sql<boolean>`${IS_PROVISIONAL}`.as("provisional"),
+      outcome: outcomeColumn(),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
-    .where(conds.length ? and(...conds) : undefined);
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(conds.length ? and(...conds) : undefined)
+    .offset(OUTCOME_FENCE)
+    .as("gtc_base");
+
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY — đo được, không đoán.
+
+    perf-probe trên production: `getReturnRateSummary` 6.465ms nguội, và câu lệnh gộp 13 cột này
+    một mình tốn 7.114ms cho hai lượt. Cùng họ với truy vấn đã đo tách bạch được JIT: 8.578ms bật
+    JIT ↔ 26ms tắt JIT, CÙNG số khối đệm.
+
+    Chỉ bọc câu lệnh CUỐI. Bảng dẫn xuất `base` chỉ là mảnh SQL nên dựng bằng `db` hay `tx` đều
+    như nhau; hợp đồng ước tính bên dưới tự mở kết nối riêng nên PHẢI nằm ngoài giao dịch —
+    bọc nó vào là khoá chết (đã dẫm phải một lần ở báo cáo lương).
+  */
+  const [row] = await chayKhongJit(db, (tx) => tx
+    .select({
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+      delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+      returnedByRule: sql<number>`count(*) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+      pending: sql<number>`count(*) filter (where ${base.outcome} = 'NOT_SHIPPED')`,
+      cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+      // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
+      finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      provisional: sql<number>`count(*) filter (where ${base.provisional})`,
+    })
+    .from(base));
   const delivered = Number(row?.delivered ?? 0);
   const returned = Number(row?.returned ?? 0);
   const failed = Number(row?.failed ?? 0);
-  const p = await failedToReturnRate();
+  /*
+    ═══ TỶ LỆ GTC ƯỚC TÍNH LẤY TỪ HỢP ĐỒNG CHUNG ═══
+
+    Cả trang này lẫn bảng lợi nhuận đọc `getProjectedDeliveryMetrics` — cùng bảng xác suất học từ
+    lịch sử thật, mỗi đơn cân theo ĐÚNG trạng thái ĐVVC đang báo về chính nó. Mốc cohort đi theo
+    `basis` mà người dùng đang chọn trên chính trang này, không ghim cứng.
+
+    NẠP LÚC GỌI, KHÔNG NẠP LÚC DỊCH: `projected-delivery.ts` import từ chính tệp này; import tĩnh hai
+    chiều tạo vòng, và vòng import ESM hỏng im lặng.
+
+    LỖI LÀ LỖI: không `.catch(() => null)`. Một câu SQL hỏng phải hiện ra là lỗi trên màn hình, không
+    hiện ra là "chưa đủ dữ liệu".
+  */
+  const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
+  let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
+  let projectionError: string | null = null;
+  try {
+    duBao = await getProjectedDeliveryMetrics(period, basis);
+  } catch (e) {
+    projectionError = e instanceof Error ? e.message : String(e);
+  }
+  // LẤY THẲNG CON SỐ Ở GRAIN ĐƠN, KHÔNG CỘNG CÁC DÒNG THEO MÃ (đơn nhiều mã phình mẫu số, đơn chưa lần được mã bị bỏ).
+  const mucDon = duBao?.orderLevel ?? null;
+  const tyLeDuBao = mucDon?.projectedRate ?? null;
   return {
     orders: Number(row?.orders ?? 0),
     shipped: Number(row?.shipped ?? 0),
@@ -594,11 +954,29 @@ export async function getReturnRateSummary(period: Period, q: string): Promise<R
     cancelled: Number(row?.cancelled ?? 0),
     lostRevenue: Number(row?.lostRevenue ?? 0),
     rate: delivered + returned ? (returned / (delivered + returned)) * 100 : null,
-    expectedRate: delivered + returned + failed ? ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
+    expectedRate: tyLeDuBao === null ? null : Math.round((100 - tyLeDuBao) * 10) / 10,
     successRate: delivered + returned ? (delivered / (delivered + returned)) * 100 : null,
-    expectedSuccessRate: delivered + returned + failed ? 100 - ((returned + failed * p.rate) / (delivered + returned + failed)) * 100 : null,
-    failedToReturnPct: Math.round(p.rate * 100),
-    failedSample: p.sample,
+    // MỘT NGUỒN: cùng hàm, cùng bảng xác suất với trang lợi nhuận. Mô hình chưa đo được ⇒ `null`.
+    expectedSuccessRate: tyLeDuBao,
+    projection: duBao && mucDon
+      ? {
+          version: duBao.version,
+          eligibleSent: mucDon.eligibleSent,
+          active: mucDon.active,
+          unmodelledActive: mucDon.unmodelledActive,
+          cancelled: mucDon.cancelled,
+          unknown: mucDon.unknown,
+          byState: duBao.probabilities
+            .filter((x) => (mucDon.activeByState[x.substate as keyof typeof mucDon.activeByState] ?? 0) > 0)
+            .map((x) => ({ substate: x.substate, label: x.label, orders: mucDon.activeByState[x.substate as keyof typeof mucDon.activeByState] ?? 0, p: x.p, sample: x.sample, confidence: x.confidence }))
+            .sort((a, b) => b.orders - a.orders),
+          maturityDays: duBao.window.maturityDays,
+          maturitySource: duBao.window.maturitySource,
+          backtest: duBao.backtest,
+          backtestError: duBao.backtestError,
+        }
+      : null,
+    projectionError,
     finishedNoVtp: Number(row?.finishedNoVtp ?? 0),
     provisional: Number(row?.provisional ?? 0),
   };
@@ -648,10 +1026,11 @@ export async function listOrdersForVariant(key: string, period: Period): Promise
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(and(...conds))
     .groupBy(o.id, s.id)
-    .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
+    .orderBy(sql`case when ${IS_RETURNED} then 0 when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 2 else 1 end`, desc(o.insertedAt))
     .limit(300);
   return rows.map((r) => ({ ...r, quantity: Number(r.quantity), lineTotal: Number(r.lineTotal), cod: Number(r.cod), fee: Number(r.fee) }));
 }
@@ -676,15 +1055,15 @@ export const SHIPMENT_COD = sql`coalesce(nullif(${s.codCollected}, 0), ${s.codAm
  * nên vận đơn chưa ghép đơn (order NULL) vẫn cho kết quả đúng theo dữ liệu của chính nó.
  * Yêu cầu FROM shipments LEFT JOIN orders.
  */
-export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME} = 'DELIVERED')`;
-export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`;
+export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME_FAST} = 'DELIVERED')`;
+export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`;
 
 /**
  * Vận đơn CÒN TIỀN COD ĐỂ THU. Vận đơn đã hoàn / huỷ thì khoản COD khai báo không bao giờ về nữa,
  * dù trạng thái COD chưa được cập nhật. Trước đây chỉ trang Đối soát COD lọc điều kiện này còn
  * Báo cáo dòng tiền thì không, nên hai trang báo "COD đã thu chờ về" khác nhau.
  */
-export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNED', 'CANCELLED'))`;
+export const COD_COLLECTABLE = sql`(${s.stage} not in ('RETURNING', 'RETURNED', 'CANCELLED'))`;
 
 export type ReturnRateBySource = {
   source: OrderSourceKey;
@@ -728,16 +1107,17 @@ export async function getReturnRateBySource(period: Period, q: string): Promise<
       source: ORDER_SOURCE,
       orders: sql<number>`count(*)`,
       shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
       failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
-      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
-      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
       lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(conds.length ? and(...conds) : undefined)
     .groupBy(ORDER_SOURCE);
 

@@ -5,8 +5,8 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Shop Control ERP", template: "%s · Shop Control ERP" },
-  description: "Hệ thống quản trị nội bộ cho shop thời trang bán hàng online — đồng bộ Pancake POS & Viettel Post.",
+  title: { default: "VNXcommerce ERP", template: "%s · VNXcommerce ERP" },
+  description: "Hệ thống quản trị nội bộ VNXcommerce cho shop thời trang bán hàng online — đồng bộ Pancake POS & Viettel Post.",
   icons: { icon: "/icon.svg" },
 };
 

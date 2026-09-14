@@ -11,6 +11,11 @@ import { orderSummary } from "@/lib/queries/orders";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import { getReturnRateSummary } from "@/lib/queries/return-rate";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { getDailyBreakdown, getProfitReport } from "@/lib/queries/reports";
+import { getMarketerReport } from "@/lib/queries/payroll";
 import { shipmentSummary } from "@/lib/queries/shipments";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { parseListParams, type Period } from "@/lib/search-params";
@@ -73,6 +78,27 @@ export async function testConsistency(db: Db) {
     dataQualitySummary(ALL),
   ]);
 
+  // ───────── ĐỊA CHỈ CHƯA CHUẨN HOÁ: ĐẾM PHẢI ĐỘC LẬP VỚI CHÍNH BỘ LỌC ĐÓ ─────────
+  //
+  // Pancake chỉ giao được khi đã ghép địa chỉ khách vào đơn vị hành chính. Không ghép được thì
+  // `ship_province` rỗng, đơn đứng im ở POS với dòng "Vui lòng cung cấp địa chỉ cần chuẩn hoá", và
+  // trước đây ERP KHÔNG hề báo. Đo trên production 09/09/2026: 386/2.423 đơn trong 60 ngày, 231 đơn
+  // còn sống.
+  //
+  // Con số trên NHÃN BỘ LỌC phải bỏ qua chính bộ lọc địa chỉ — nếu không, bấm vào "Chưa chuẩn hoá"
+  // rồi thì nhãn tự đổi theo lựa chọn của mình và không còn nói lên tổng nữa.
+  const [{ n: liveUnnormalized }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.orders)
+    .where(sql`coalesce(${schema.orders.shipProvince}, '') = '' and ${schema.orders.stage} not in ('CANCELLED','DELETED')`);
+  assert.equal(orders.unnormalizedAddress, Number(liveUnnormalized), "đếm địa chỉ chưa chuẩn hoá phải khớp đơn còn sống");
+  const locked = await orderSummary({ ...params, filters: { ...params.filters, address: ["normalized"] } });
+  assert.equal(
+    locked.unnormalizedAddress,
+    orders.unnormalizedAddress,
+    "nhãn bộ lọc phải giữ nguyên khi đang lọc 'đã chuẩn hoá' — nếu không nó đếm chính tập vừa lọc ra",
+  );
+
   assert.equal(gtc.delivered, t.delivered, "Báo cáo Tỷ lệ giao thành công phải khớp nguồn sự thật");
   assert.equal(orders.success, t.delivered, "KPI 'giao thành công' trang Đơn hàng phải khớp");
   assert.equal(ads.delivered, t.delivered, "Quảng cáo/Marketing phải khớp");
@@ -120,13 +146,14 @@ export async function testConsistency(db: Db) {
   const [{ n: badWaiting }] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.shipments)
-    .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} in ('RETURNED','CANCELLED')`);
+    .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} in ('RETURNING','RETURNED','CANCELLED')`);
   if (Number(badWaiting) > 0) {
     const [{ amount }] = await db
       .select({ amount: sql<number>`coalesce(sum(${schema.shipments.codAmount}), 0)` })
       .from(schema.shipments)
-      .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} not in ('RETURNED','CANCELLED')`);
-    assert.equal(cash.pending.codCollectedWaiting, Number(amount), "COD chờ về không được tính vận đơn đã hoàn/huỷ");
+      // Đang hoàn về cũng là tiền không bao giờ về — cùng định nghĩa với COD_COLLECTABLE.
+      .where(sql`${schema.shipments.codStatus} in ('COLLECTED','RECONCILED') and ${schema.shipments.stage} not in ('RETURNING','RETURNED','CANCELLED')`);
+    assert.equal(cash.pending.codCollectedWaiting, Number(amount), "COD chờ về không được tính vận đơn đang hoàn/đã hoàn/huỷ");
   }
 
   // ───────── 6. Tồn kho: hàng hoàn chưa về kho không được nằm trong tồn ─────────
@@ -165,6 +192,108 @@ export async function testConsistency(db: Db) {
     assert.ok(planned.sold30 <= Number(totalQty) - Number(returnedQty), "nhu cầu 30 ngày không được gồm đơn hoàn");
   }
 
+  // ───────── 8. MỘT con số "chi phí vận hành trong kỳ" cho MỌI màn hình ─────────
+  // Trước đây mỗi trang tự cộng `sum(expenses.amount) where occurred_at ...`, nên Bảng điều khiển,
+  // Sự thật tài chính, Báo cáo lợi nhuận, Dòng tiền và Lương cho tới BỐN con số khác nhau cho cùng
+  // một chỉ số. Khoản theo kỳ (thuê mặt bằng) là chỗ chúng lệch nhau nhiều nhất.
+  /**
+   * KỲ PHẢI ĐI THEO DỮ LIỆU, KHÔNG ĐI THEO NGÀY TRÊN LỊCH.
+   *
+   * Sự cố thật 10/09/2026: kỳ ở đây từng ghim cứng 01–07/09, còn đơn trong bộ dữ liệu mẫu lại dùng
+   * ngày TƯƠNG ĐỐI ("hôm nay trừ N ngày"). Qua nửa đêm, đơn rời khỏi cửa sổ ghim cứng, bảng lợi
+   * nhuận theo mã không còn dòng nào, và phép cộng phân bổ ra 0 — bài kiểm thử đỏ mà mã nguồn không
+   * đổi một dòng. Một cổng ra đỏ theo ngày trên lịch thì không ai còn tin nó nữa.
+   *
+   * Nay kỳ được dựng QUANH chính hôm nay, nên nó luôn chứa dữ liệu mẫu.
+   */
+  // Ranh giới NGÀY theo giờ Việt Nam — cắt giữa ngày sẽ đếm lệch một ngày và mọi con số prorata sai.
+  const ngay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(d);
+  const dauNgayVN = (key: string) => new Date(`${key}T00:00:00+07:00`);
+  const cuoiNgayVN = (key: string) => new Date(`${key}T23:59:59+07:00`);
+  const homNay = new Date();
+  const [nam, thang] = ngay(homNay).split("-").map(Number);
+  const dauThang = dauNgayVN(`${nam}-${String(thang).padStart(2, "0")}-01`);
+  const soNgayThang = new Date(Date.UTC(nam, thang, 0)).getUTCDate();
+  const cuoiThang = cuoiNgayVN(`${nam}-${String(thang).padStart(2, "0")}-${String(soNgayThang).padStart(2, "0")}`);
+  const kyThang: Period = { key: "custom", from: dauThang, to: cuoiThang, label: "Tháng này", fromKey: ngay(dauThang), toKey: ngay(cuoiThang) };
+  await db.insert(schema.expenses).values([
+    { id: "cs-rent", category: "RENT", description: "Thuê mặt bằng tháng này", amount: 3_000_000,
+      occurredAt: dauThang, allocationMethod: "PERIOD_PRORATA", periodStart: dauThang, periodEnd: cuoiThang },
+  ]);
+  clearMemo();
+  // Bảy ngày KẾT THÚC HÔM NAY, cắt trong tháng — luôn chứa đơn của bộ dữ liệu mẫu.
+  const tuanDenKey = ngay(homNay);
+  const tuanTuKey = ngay(new Date(dauNgayVN(tuanDenKey).getTime() - 6 * 86_400_000));
+  const tuanTu = new Date(Math.max(dauThang.getTime(), dauNgayVN(tuanTuKey).getTime()));
+  const tuanDen = cuoiNgayVN(tuanDenKey);
+  const soNgayTuan = Math.round((tuanDen.getTime() - tuanTu.getTime()) / 86_400_000);
+  const tuan1: Period = { key: "custom", from: tuanTu, to: tuanDen, label: `${soNgayTuan} ngày gần nhất`, fromKey: ngay(tuanTu), toKey: ngay(tuanDen) };
+  const [dashThang, truthThang, nominalThang, cashThang] = await Promise.all([
+    getDashboardData(kyThang), getFinancialTruth(kyThang), getNominalProfitReport(kyThang), getCashProfitReport(kyThang),
+  ]);
+  const opexThang = nominalThang.operatingExpenses;
+  assert.equal(dashThang.finance.expenses, opexThang, "Bảng điều khiển và Báo cáo lợi nhuận phải cùng một CP vận hành");
+  assert.equal(Math.abs(truthThang.waterfall.find((w) => w.key === "operating")?.amount ?? 0), opexThang, "Sự thật tài chính phải cùng một CP vận hành");
+  assert.equal(cashThang.cashOut.operating, opexThang, "Dòng tiền thực phải cùng một CP vận hành");
+  assert.ok(opexThang >= 3_000_000, "cả tháng ⇒ tiền thuê vào trọn khoản");
+
+  clearMemo();
+  const [dashTuan, truthTuan, nominalTuan] = await Promise.all([getDashboardData(tuan1), getFinancialTruth(tuan1), getNominalProfitReport(tuan1)]);
+  const opexTuan = nominalTuan.operatingExpenses;
+  assert.equal(dashTuan.finance.expenses, opexTuan, "xem một tuần: Bảng điều khiển vẫn khớp Báo cáo lợi nhuận");
+  assert.equal(Math.abs(truthTuan.waterfall.find((w) => w.key === "operating")?.amount ?? 0), opexTuan, "xem một tuần: Sự thật tài chính vẫn khớp");
+  assert.ok(opexTuan < opexThang, "một tuần phải NHỎ HƠN cả tháng — không được cộng nguyên khoản thuê vào tuần");
+  // Fixture chuẩn của hợp đồng: thuê 3.000.000đ / 30 ngày, lọc 7 ngày ⇒ MỌI nơi phải ra 700.000đ.
+  assert.equal(opexThang, 3_000_000, "cả tháng = trọn khoản thuê");
+  // Prorata theo SỐ NGÀY CHỒNG LẤN — tính từ chính cửa sổ, không ghim cứng theo tháng 9.
+  assert.equal(
+    opexTuan,
+    Math.round((3_000_000 * soNgayTuan) / soNgayThang),
+    `${soNgayTuan}/${soNgayThang} ngày của 3.000.000đ — con số này phải giống nhau ở mọi module`,
+  );
+
+  // BÁO CÁO TỔNG HỢP + BIỂU ĐỒ THEO NGÀY: cộng các cột trong khoảng phải bằng đúng phần phân bổ.
+  const [pnlThang, pnlTuan, ngayThang, ngayTuan] = await Promise.all([
+    getProfitReport(kyThang, "created"), getProfitReport(tuan1, "created"),
+    getDailyBreakdown(kyThang, "created"), getDailyBreakdown(tuan1, "created"),
+  ]);
+  assert.equal(pnlThang.current.operating, opexThang, "Báo cáo tổng hợp (tháng) phải cùng một CP vận hành");
+  assert.equal(pnlTuan.current.operating, opexTuan, "Báo cáo tổng hợp (tuần) phải cùng một CP vận hành");
+  const congNgayThang = ngayThang.reduce((t, r) => t + r.operating, 0);
+  const congNgayTuan = ngayTuan.reduce((t, r) => t + r.operating, 0);
+  assert.equal(congNgayThang, opexThang, "cộng 30 cột của biểu đồ theo ngày = đúng phần phân bổ của tháng");
+  assert.equal(congNgayTuan, opexTuan, "cộng các cột của biểu đồ theo ngày = đúng phần phân bổ của tuần");
+  // Không cột nào được ôm trọn khoản thuê: đó chính là hình dạng bug cũ.
+  const cotLonNhat = Math.max(0, ...ngayThang.map((r) => r.operating));
+  assert.ok(cotLonNhat < 200_000, `không ngày nào được ôm cả khoản thuê (cột lớn nhất ${cotLonNhat}đ)`);
+  assert.ok(ngayTuan.filter((r) => r.operating > 0).length >= 7, "mọi ngày trong tuần đều có chi phí, không phải chỉ ngày ghi sổ");
+
+  // LỢI NHUẬN THEO MÃ: phần phân bổ xuống từng mã cộng lại = đúng tổng của kỳ (largest remainder).
+  assert.equal(nominalTuan.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexTuan, "Σ phân bổ xuống mã (tuần) phải bằng đúng phần phân bổ của kỳ, không lệch vì làm tròn");
+  assert.equal(nominalThang.rows.reduce((a, r) => a + r.operatingAlloc, 0), opexThang, "Σ phân bổ xuống mã (tháng) = 3.000.000đ");
+
+  // LƯƠNG / HOA HỒNG: nền chi phí của bảng lương phải là CÙNG con số, không phải bản cộng thô riêng.
+  for (const basis of ["profit1", "nominal"] as const) {
+    const mk = await getMarketerReport(tuan1, basis);
+    assert.equal(mk.totals.operatingEntered, opexTuan, `bảng lương (${basis}) dùng chung CP vận hành đã phân bổ`);
+  }
+
+  // ── BẤT BIẾN CUỐI: engine là nguồn duy nhất, và Σ thành phần = tổng engine ──
+  const engineThang = await getRecognizedCosts(kyThang);
+  const engineTuan = await getRecognizedCosts(tuan1);
+  assert.equal(engineThang.operatingTotal, opexThang, "Profit Engine và Báo cáo lợi nhuận là CÙNG một con số (tháng)");
+  assert.equal(engineTuan.operatingTotal, opexTuan, "Profit Engine và Báo cáo lợi nhuận là CÙNG một con số (tuần)");
+  const congThanhPhan = Object.values(engineThang.components).reduce((t, c) => t + c.amount, 0);
+  assert.equal(congThanhPhan, engineThang.total, "Σ thành phần = tổng engine, không đồng nào rơi ngoài");
+  // Mỗi đồng thuộc ĐÚNG MỘT thành phần: khoản thuê chỉ được xuất hiện ở RENT.
+  assert.equal(engineThang.components.RENT.amount, 3_000_000, "khoản thuê nằm ở đúng thành phần Mặt bằng");
+  assert.equal(engineThang.components.OTHER_OPERATING.amount, 0, "và KHÔNG xuất hiện lần nữa ở Chi phí vận hành khác");
+  assert.equal(engineThang.components.UTILITIES.amount, 0, "điện nước chưa tách khỏi Mặt bằng ⇒ bằng 0, không đếm chồng");
+
+  await db.delete(schema.expenses).where(eq(schema.expenses.id, "cs-rent"));
+  clearMemo();
+
+  console.log(`✓ Nhất quán: chi phí vận hành ${opexThang}đ (tháng) / ${opexTuan}đ (tuần) GIỐNG NHAU ở Profit Engine · Bảng điều khiển · Sự thật tài chính · Lợi nhuận · Dòng tiền · Báo cáo tổng hợp · biểu đồ theo ngày · phân bổ theo mã · bảng lương`);
   console.log(`✓ Nhất quán: giao thành công ${t.delivered} khớp ở Đơn hàng / Vận đơn / GTC / Marketing / Chất lượng dữ liệu; hoàn ${t.returned}; GTC ${gtc.successRate}%`);
   console.log(`✓ Nhất quán: tồn kho khớp giữa Sản phẩm và Kế hoạch SX; nhu cầu SX không gồm đơn hoàn`);
 }

@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { ghiBangChung } from "@/lib/evidence/record";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
@@ -27,7 +28,33 @@ const configSchema = z.object({
   billingWarnPercent: z.number().int().min(10).max(100).default(80),
   riskMinReturned: z.number().int().min(1).max(50).default(2),
   riskReturnRatePct: z.number().int().min(1).max(100).default(40),
-  enabled: z.object({ failed: z.boolean(), pending: z.boolean(), stale: z.boolean(), returning: z.boolean(), cs: z.boolean().default(true), stock: z.boolean().default(true), billing: z.boolean().default(true), risk: z.boolean().default(true) }),
+  returnInspectionDays: z.number().int().min(1).max(60).default(3),
+  /**
+   * PHẢI KHAI ĐỦ MỌI CỜ Ở ĐÂY.
+   *
+   * `z.object()` CẮT BỎ khoá không khai báo. Cờ nào thiếu ở đây thì mỗi lần chủ shop bấm Lưu là nó
+   * biến mất khỏi settings, rồi `loadAlertConfig` lại trộn với mặc định — nên cảnh báo âm thầm bật
+   * lại như chưa từng bị tắt. Không có lỗi nào hiện ra, chỉ là cái nút không có tác dụng.
+   *
+   * `incomplete` từng thiếu đúng như vậy: chủ shop không bao giờ tắt được cảnh báo "đơn thiếu SĐT".
+   */
+  enabled: z.object({
+    failed: z.boolean(),
+    pending: z.boolean(),
+    stale: z.boolean(),
+    returning: z.boolean(),
+    cs: z.boolean().default(true),
+    stock: z.boolean().default(true),
+    billing: z.boolean().default(true),
+    risk: z.boolean().default(true),
+    incomplete: z.boolean().default(true),
+    returnInspection: z.boolean().default(true),
+    customerRecovery: z.boolean().default(true),
+    adsAnomaly: z.boolean().default(true),
+    cancelledButShipping: z.boolean().default(true),
+    addressNotNormalized: z.boolean().default(true),
+    bankAccountUnconfirmed: z.boolean().default(true),
+  }),
 });
 
 export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { error: string }> {
@@ -45,7 +72,7 @@ export async function sendTestTelegram(): Promise<{ ok: true } | { error: string
   const user = await requireUser();
   if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
-  const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `✅ <b>Shop Control ERP</b>: kết nối Telegram thành công. Cảnh báo đơn chờ xử lý / giao thất bại sẽ gửi vào đây.`);
+  const result = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, `✅ <b>VNXcommerce ERP</b>: kết nối Telegram thành công. Cảnh báo đơn chờ xử lý / giao thất bại sẽ gửi vào đây.`);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
@@ -53,17 +80,17 @@ export async function sendTestLark(): Promise<{ ok: true } | { error: string }> 
   const user = await requireUser();
   if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const cfg = await loadAlertConfig();
-  const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ Shop Control ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
+  const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ VNXcommerce ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 
 /** Chạy quy tắc cảnh báo ngay */
-export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; open: number; telegramError?: string; larkError?: string } | { error: string }> {
+export async function runAlertsNow(): Promise<{ ok: true; created: number; resolved: number; reclassified: number; open: number; telegramError?: string; larkError?: string } | { error: string }> {
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const r = await evaluateAlerts();
   revalidatePath("/alerts");
-  return { ok: true, created: r.created, resolved: r.resolved, open: r.open, telegramError: r.telegram.error, larkError: r.lark.error };
+  return { ok: true, created: r.created, resolved: r.resolved, reclassified: r.reclassified, open: r.open, telegramError: r.telegram.error, larkError: r.lark.error };
 }
 
 /** Đánh dấu đã đọc (ids rỗng = tất cả đang mở) */
@@ -85,8 +112,37 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   const user = await requireUser();
   if (!can(user, "shipments:view")) return { error: "Không có quyền" };
   const db = await getDb();
-  const [before] = await db.select({ title: schema.notifications.title, kind: schema.notifications.kind }).from(schema.notifications).where(eq(schema.notifications.id, id));
-  await db.update(schema.notifications).set({ resolvedAt: new Date() }).where(inArray(schema.notifications.id, [id]));
+  const n = schema.notifications;
+  const [before] = await db
+    .select({
+      title: n.title,
+      kind: n.kind,
+      entityType: n.entityType,
+      entityId: n.entityId,
+      occurredAt: n.occurredAt,
+      createdAt: n.createdAt,
+      startedAt: n.startedAt,
+    })
+    .from(n)
+    .where(eq(n.id, id));
+  const dongLuc = new Date();
+  // Ghi RÕ là người đóng: đây là công của đội, phải tách khỏi việc điều kiện tự hết.
+  await db.update(n).set({ resolvedAt: dongLuc, resolvedBy: user.id, resolution: "MANUAL" }).where(inArray(n.id, [id]));
+  // Bằng chứng hành động: chụp lại tiền đang treo và kết quả đơn NGAY LÚC ĐÓNG. Không chặn việc
+  // đóng nếu ghi hỏng — người vận hành không được trả giá cho một lớp đo lường.
+  if (before) {
+    await ghiBangChung({
+      notificationId: id,
+      kind: before.kind,
+      entityType: before.entityType,
+      entityId: before.entityId,
+      detectedAt: before.occurredAt ?? before.createdAt,
+      startedAt: before.startedAt,
+      completedAt: dongLuc,
+      actorId: user.id,
+      actorEmail: user.email,
+    }).catch((e) => console.error("[action-evidence]", e));
+  }
   // Đóng việc bằng tay là quyết định vận hành: ai đóng, đóng việc gì, lúc nào.
   await audit({ userId: user.id, userEmail: user.email, action: "case.resolve", entity: "NOTIFICATION", entityId: id, detail: { title: before?.title ?? "", kind: before?.kind ?? "" } });
   revalidatePath("/alerts");
@@ -132,6 +188,90 @@ export async function acknowledgeCase(id: string): Promise<{ ok: true } | { erro
   return { ok: true };
 }
 
+/**
+ * BẮT ĐẦU LÀM — khác TIẾP NHẬN. Giơ tay nhận việc không phải là đang chạy: nếu gộp hai thứ này
+ * thì nhìn hàng đợi không biết việc nào thật sự có người đang xử lý ngay lúc này.
+ * Bắt đầu làm mà chưa tiếp nhận thì tiếp nhận luôn — không ai bắt đầu một việc mình chưa nhận.
+ */
+export async function startCase(id: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ assignedTo: n.assignedTo, acknowledgedAt: n.acknowledgedAt, startedAt: n.startedAt, ignoredAt: n.ignoredAt, title: n.title }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  if (before.ignoredAt) return { error: "Việc này đã được bỏ qua — bỏ đánh dấu trước khi làm tiếp" };
+  if (before.startedAt) return { ok: true };
+  const at = new Date();
+  await db
+    .update(n)
+    .set({
+      startedAt: at,
+      startedBy: user.id,
+      acknowledgedAt: before.acknowledgedAt ?? at,
+      acknowledgedBy: before.acknowledgedAt ? undefined : user.id,
+      assignedTo: before.assignedTo ?? user.id,
+      assignedAt: before.assignedTo ? undefined : at,
+    })
+    .where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.start", entity: "NOTIFICATION", entityId: id, detail: { title: before.title } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/**
+ * BỎ QUA — "đã xem và quyết định KHÔNG làm", BẮT BUỘC kèm lý do.
+ *
+ * Trước đây không có trạng thái này nên người vận hành phải bấm "đã xong" cho việc mình cố ý không
+ * làm, khiến con số "đã xong" không còn nói lên điều gì. Lý do là bắt buộc vì gạt một việc đi mà
+ * không nói vì sao chính là xoá bằng chứng lặng lẽ; ràng buộc CHECK ở CSDL cũng chặn điều đó.
+ *
+ * KHÔNG đóng việc: việc bỏ qua vẫn nằm trong hàng đợi để còn lật lại được, chỉ là không tính vào
+ * số việc đang trôi và không cộng tiền vào tổng đang treo.
+ */
+export async function ignoreCase(id: string, reason: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const clean = reason.trim();
+  if (clean.length < 5) return { error: "Phải ghi lý do bỏ qua (ít nhất 5 ký tự)" };
+  if (clean.length > 500) return { error: "Lý do quá dài (tối đa 500 ký tự)" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ title: n.title, kind: n.kind, ignoredAt: n.ignoredAt }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  await db.update(n).set({ ignoredAt: new Date(), ignoredBy: user.id, ignoredReason: clean }).where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.ignore", entity: "NOTIFICATION", entityId: id, detail: { title: before.title, kind: before.kind, reason: clean } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/** Bỏ đánh dấu "bỏ qua" — đưa việc trở lại hàng đợi bình thường. Lý do cũ được giữ trong nhật ký. */
+export async function unignoreCase(id: string): Promise<{ ok: true } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền" };
+  const db = await getDb();
+  const n = schema.notifications;
+  const [before] = await db.select({ title: n.title, ignoredReason: n.ignoredReason }).from(n).where(eq(n.id, id));
+  if (!before) return { error: "Không tìm thấy việc" };
+  await db.update(n).set({ ignoredAt: null, ignoredBy: null, ignoredReason: "" }).where(eq(n.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "case.unignore", entity: "NOTIFICATION", entityId: id, detail: { title: before.title, previousReason: before.ignoredReason } });
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
+/** Danh sách người có thể nhận việc — để giao việc cho đúng người, không chỉ tự nhận. */
+export async function assignableUsers(): Promise<{ id: string; name: string }[]> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return [];
+  const db = await getDb();
+  const rows = await db
+    .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.active, true))
+    .limit(100);
+  return rows.map((r) => ({ id: r.id, name: r.name || r.email }));
+}
+
 /** Gửi tin thử vào nhóm Lark nhận cảnh báo ngưỡng thanh toán QC */
 export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
@@ -139,7 +279,7 @@ export async function sendTestLarkBilling(): Promise<{ ok: true } | { error: str
   const cfg = await loadAlertConfig();
   const url = cfg.larkBillingWebhookUrl || cfg.larkWebhookUrl;
   if (!url) return { error: "Chưa cấu hình webhook Lark" };
-  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 Shop Control ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/ads` }]]);
+  const result = await sendLark(url, cfg.larkBillingWebhookUrl ? cfg.larkBillingSecret : cfg.larkSecret, "💳 VNXcommerce ERP · cảnh báo ngưỡng thanh toán quảng cáo", [[{ text: `Nhóm này sẽ nhận cảnh báo khi dư nợ tài khoản quảng cáo đạt ${cfg.billingWarnPercent}% ngưỡng thanh toán hoặc tài khoản bị vô hiệu hoá. ` }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/ads` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
 }
 

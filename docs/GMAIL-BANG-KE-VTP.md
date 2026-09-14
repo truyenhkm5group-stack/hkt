@@ -40,7 +40,9 @@ function chayThuMotLan() { dongBoBangKeVTP(); }
 function dongBoBangKeVTP() {
   const nhan = GmailApp.getUserLabelByName(NHAN) || GmailApp.createLabel(NHAN);
   const threads = GmailApp.search(TIM + ' -label:' + NHAN, 0, 20);
-  if (!threads.length) { Logger.log('Không có thư mới.'); return; }
+  // NHỊP TIM: lượt không có thư mới vẫn báo sang ERP. Nếu không, những ngày Viettel Post không gửi
+  // bảng kê nào thì ERP im re — và "script đã tắt" trông y hệt "chưa có bảng kê".
+  if (!threads.length) { baoSong(); Logger.log('Không có thư mới.'); return; }
 
   for (const thread of threads) {
     const files = [];
@@ -66,7 +68,21 @@ function dongBoBangKeVTP() {
     if (code === 200) thread.addLabel(nhan);
   }
 }
+
+/** Báo cho ERP biết script còn sống dù không có gì để gửi. */
+function baoSong() {
+  UrlFetchApp.fetch(ERP_URL + '/api/webhooks/vtp-statement', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ files: [], ping: true, source: 'gmail', token: SECRET }),
+    muteHttpExceptions: true,
+  });
+}
 ```
+
+> **Vì sao có nhịp tim.** Ngày 12/09/2026 trang **Kết nối dữ liệu** báo *"67 giờ không nhận được gì"* trong khi trình kích hoạt bên Gmail vẫn chạy đủ mỗi 15 phút, tỷ lệ lỗi 0,22%. Không ai nói được bên nào đúng: ERP chỉ nhìn thấy những lượt CÓ tệp, nên một script đã chết và một hộp thư chưa có bảng kê mới trông giống hệt nhau. Từ nay mỗi lượt chạy đều báo sang, và trang Kết nối dữ liệu hiện riêng dòng **"Script Gmail lấy bảng kê"**.
+
+Đang dùng script bản cũ (không có `baoSong`) thì mọi thứ vẫn chạy y như trước, chỉ là ERP không biết script còn sống hay không — dòng nhịp tim sẽ ghi *"chưa từng báo sống"*.
 
 ## Sự cố thường gặp
 
@@ -75,6 +91,8 @@ function dongBoBangKeVTP() {
 | `HTTP 401 Sai tham số bí mật` | `SECRET` không khớp; lấy lại ở ERP → Kết nối dữ liệu |
 | `HTTP 503 Chưa cấu hình tham số bí mật` | `VIETTELPOST_WEBHOOK_SECRET` trống trong `.env` trên VPS |
 | `HTTP 400 Không có tệp nào` | Thư chỉ có PDF hoá đơn, không có `.xlsx` — script tự gắn nhãn bỏ qua |
+| Nhịp tim ghi *"chưa từng báo sống"* | Script còn ở bản cũ; dán lại đoạn trên (có hàm `baoSong`) |
+| Nhịp tim quá 2 giờ | Trình kích hoạt bị gỡ, hoặc `SECRET` đã đổi nên mọi lượt gửi bị 401 |
 | `HTTP 500` | ERP lỗi khi đọc tệp; xem chi tiết ở ERP → Kết nối dữ liệu. Thư **không** bị gắn nhãn nên lần sau tự thử lại |
 | Nhập rồi mà đối soát COD chưa đổi | Báo cáo có bộ nhớ đệm 60–120 giây, chờ rồi tải lại trang |
 

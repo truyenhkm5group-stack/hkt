@@ -13,6 +13,8 @@ const schema = z.object({
   velocityWindowDays: z.number().int().min(3).max(180),
   safetyDays: z.number().int().min(0).max(60),
   roundTo: z.number().int().min(1).max(1000),
+  minOrderQty: z.number().int().min(0).max(100_000).default(0),
+  minOrderQtyOverrides: z.record(z.string(), z.number().int().min(0).max(100_000)).default({}),
   leadTimeOverrides: z.record(z.string(), z.number().int().min(1).max(180)).default({}),
 });
 

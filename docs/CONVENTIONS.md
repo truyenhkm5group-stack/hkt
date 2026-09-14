@@ -1,4 +1,4 @@
-# Quy ước mã nguồn — Shop Control ERP
+# Quy ước mã nguồn — VNXcommerce ERP
 
 Next.js 15 (App Router, React 19, TypeScript strict) · Tailwind CSS v4 · shadcn/ui (Radix, style new-york-v4) · Drizzle ORM · PostgreSQL (hoặc PGlite nhúng) · TanStack Table v8 · nuqs (URL state) · Recharts (qua `components/ui/chart.tsx`) · lucide-react · sonner (toast).
 

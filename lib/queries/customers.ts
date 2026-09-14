@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
 
@@ -20,13 +20,14 @@ function orderAggregate(db: Db) {
       customerId: o.customerId,
       ordersErp: sql<number>`count(*) filter (where ${o.stage} not in ('CANCELLED','DELETED'))`.as("orders_erp"),
       // Giao thành công / hoàn theo KẾT QUẢ THẬT của đơn (COD thực thu), không theo trạng thái Pancake.
-      succeedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`.as("succeed_erp"),
-      returnedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`.as("returned_erp"),
+      succeedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`.as("succeed_erp"),
+      returnedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`.as("returned_erp"),
       revenueErp: sql<number>`coalesce(sum(case when ${o.stage} not in ('CANCELLED','DELETED') then ${o.totalPriceAfterDiscount} else 0 end), 0)`.as("revenue_erp"),
       lastOrderErp: sql<Date | string | null>`max(${o.insertedAt})`.as("last_order_erp"),
     })
     .from(o)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
     .where(isNotNull(o.customerId))
     .groupBy(o.customerId)
     .as("agg");
@@ -227,16 +228,17 @@ export async function getCustomerDetail(id: string) {
       .select({
         orders: sql<number>`count(*) filter (where ${notCancelled})`,
         allOrders: count(),
-        succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`,
+        succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
+        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
         cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
         revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
-        successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
+        successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
         firstOrderAt: sql<Date | string | null>`min(${o.insertedAt})`,
         lastOrderAt: sql<Date | string | null>`max(${o.insertedAt})`,
       })
       .from(o)
-      .leftJoin(schema.shipments, eq(schema.shipments.orderId, o.id))
+      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
       .where(eq(o.customerId, customer.id)),
     db.query.orders.findMany({
       where: eq(o.customerId, customer.id),

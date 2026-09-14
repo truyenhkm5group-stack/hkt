@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { saveRolePermissions } from "@/lib/actions/users";
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_GROUPS, rolePermissions, type RolePermissionMap } from "@/lib/auth/permissions";
 import { ROLE_LABEL, ROLE_ORDER, ROLE_TONE } from "@/lib/constants/roles";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 const EDITABLE = ROLE_ORDER.filter((r) => r !== "ADMIN");
@@ -46,9 +47,9 @@ export function RoleMatrix({ templates, canEdit }: { templates: RolePermissionMa
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-lg border">
+      <div className={cn(TABLE_SCROLL, "rounded-lg border")}>
         <table className="w-full text-sm">
-          <thead className="bg-muted/60 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+          <thead className={cn(STICKY_HEAD, "text-[11px] font-semibold tracking-wide text-muted-foreground uppercase")}>
             <tr>
               <th className="px-3 py-2 text-left">Quyền</th>
               <th className="px-2 py-2 text-center">

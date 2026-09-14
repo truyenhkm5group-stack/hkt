@@ -13,10 +13,10 @@
  *   • Không bao giờ nuốt lặng: gói tin không nhận dạng được vẫn được lưu để mở ra đọc.
  */
 import { NextResponse, after, type NextRequest } from "next/server";
-import { aiEnv } from "@/lib/ai/config";
-import { recordAiError } from "@/lib/ai/events";
-import { ingestChatWebhook, normalizeChatWebhook } from "@/lib/ai/agents/sales/ingest";
-import { drainSalesTasks } from "@/lib/ai/agents/sales/pipeline";
+import { aiEnv } from "@/lib/ai-workforce/config";
+import { recordAiError } from "@/lib/ai-workforce/events";
+import { ingestChatWebhook, normalizeChatWebhook } from "@/lib/ai-workforce/agents/sales/ingest";
+import { drainSalesTasks } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { parseWebhookBody, storeWebhook, webhookDedupeKey, markWebhook } from "@/lib/integrations/pancake/webhook";
 
 export const dynamic = "force-dynamic";

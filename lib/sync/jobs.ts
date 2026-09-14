@@ -9,7 +9,13 @@ import {
   syncProducts,
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
+import { generateRecurringTasks } from "@/lib/work/service";
+import { snapshotPerformance } from "@/lib/work/performance-snapshot";
+import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { evaluateAlerts } from "@/lib/alerts/rules";
+import { rematerializeStale } from "@/lib/queries/canonical-outcome";
+import { warmDashboard } from "@/lib/queries/warm";
+import { trongJobNen } from "@/lib/cache";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { syncAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { checkShipmentConsistency } from "@/lib/sync/consistency";
@@ -20,15 +26,32 @@ import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
-import { syncSalesConversations } from "@/lib/ai/agents/sales/ingest";
-import { drainSalesTasks } from "@/lib/ai/agents/sales/pipeline";
+import { applyStaleReconciliation } from "@/lib/cs/stale";
+import { syncSalesConversations } from "@/lib/ai-workforce/agents/sales/ingest";
+import { drainSalesTasks } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
-import type { SyncTrigger } from "@/lib/sync/runner";
+import { reconcileCareCoverage } from "@/lib/care/lifecycle";
+import { getDb } from "@/db";
+import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
+import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
-export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+  "sepay-reconcile": {
+    label: "Đối chiếu giao dịch ngân hàng qua API SePay",
+    source: "SEPAY",
+    description:
+      "Quét lại N ngày qua API SePay và vá những gói tin webhook không bao giờ tới. Webhook chỉ được SePay thử lại 7 lần trong 5 giờ; sự cố dài hơn thế làm mất hẳn giao dịch, và sổ thiếu tiền mà nhìn vào không thấy gì bất thường. MẶC ĐỊNH CHẠY THỬ — truyền apply=1 mới ghi.",
+    run: (o) =>
+      reconcileSepay({
+        days: num(o.params?.days),
+        apply: o.params?.apply === "1",
+        trigger: o.trigger,
+        actor: o.actor,
+      }),
+  },
   "pancake-orders": {
     label: "Đơn hàng mới cập nhật",
     source: "PANCAKE",
@@ -87,7 +110,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Trạng thái vận đơn Viettel Post",
     source: "VIETTELPOST",
     description: "Tra cứu các vận đơn Viettel Post chưa kết thúc và cập nhật hành trình.",
-    run: (o) => syncViettelPostShipments({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), includeFinal: o.params?.all === "1" }),
+    run: async (o) => {
+      const r = await syncViettelPostShipments({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), includeFinal: o.params?.all === "1" });
+      // Đối chiếu độ phủ care (10 phút/lần): mở đợt cho kiện cần care bị sót, đóng đợt máy mở cho
+      // kiện chưa rời kho, chốt đợt treo trên kiện đã kết thúc. Không phụ thuộc khoảnh khắc webhook.
+      const careReconcile = await reconcileCareCoverage(await getDb()).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+      return { ...r, careReconcile };
+    },
   },
   "vtp-import": {
     label: "Nhập vận đơn từ Viettel Post",
@@ -124,6 +153,69 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description: "Đơn Pancake có ad_id (quảng cáo tạo ra đơn) → tra Facebook lấy chiến dịch / tài khoản → ghi nhận đơn, doanh thu cho đúng marketer kể cả khi chạy chung fanpage. days=N số ngày đơn quét lùi (mặc định 120).",
     run: (o) => syncFacebookAdIndex({ days: num(o.params?.days) }),
   },
+  "outcome-materialize": {
+    label: "Dựng lại kết quả đơn đã tính sẵn",
+    source: "ALL",
+    description:
+      "Tính lại kết quả đơn cho những đơn có ĐẦU VÀO ĐÃ ĐỔI (đơn, vận đơn, sự kiện ĐVVC, dòng bảng kê) hoặc mang phiên bản luật cũ. Đây là LỚP TĂNG TỐC — không đụng dữ liệu nghiệp vụ, và báo cáo vẫn tự tính khi thiếu dòng nên chậm chứ không sai.",
+    /*
+      CHẠY QUA runSyncJob: có bản ghi sync_runs, có đồng hồ canh, có sự kiện khi dựng lại được dòng.
+      Trước đây job này chạy mù — hỏng (ví dụ lỗi SQL sau khi đổi phiên bản luật) thì mọi báo cáo
+      âm thầm rơi về đường tính sống, chậm dần, và trang Kết nối dữ liệu không có gì để nhìn.
+    */
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "outcome-materialize", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await rematerializeStale();
+        ctx.summary.updated = r.rebuilt;
+        ctx.summary.detail = r.remaining > 0 ? `dựng lại ${r.rebuilt} dòng · còn ${r.remaining} dòng cũ` : `dựng lại ${r.rebuilt} dòng · bảng đã tươi`;
+        return r;
+      }),
+  },
+  "dashboard-warm": {
+    label: "Giữ ấm bảng điều khiển",
+    source: "ALL",
+    description:
+      "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
+    run: () => warmDashboard(),
+  },
+  "work-snapshot": {
+    label: "Chụp ảnh hiệu suất kỳ đã đóng",
+    source: "ALL",
+    description:
+      "Chụp thẻ điểm của TUẦN VỪA ĐÓNG (và, khi chạy đầu tháng, cả THÁNG vừa đóng) thành dòng bất biến trong `performance_snapshots`. " +
+      "GHI MỘT LẦN: chạy lại bao nhiêu lần cũng không ghi đè số đã chụp, nên số lịch sử không đổi vì truy vấn hôm nay đổi. " +
+      "KHÔNG chụp kỳ đang chạy dở — đóng băng một con số nửa vời thành 'sự thật của tuần đó' là thứ sau này không sửa được. " +
+      "Kỳ không có quan sát nào vẫn ghi dòng `value = null`, để phân biệt 'chưa đo được' với 'chưa từng chạy job'.",
+    run: async () => {
+      const tuan = await snapshotPerformance({ kind: "WEEKLY" });
+      /*
+        Tháng chỉ chụp trong 7 ngày đầu tháng. Chạy mỗi ngày thì 24 lần đầu đều bị chặn vì kỳ chưa
+        đóng — vô hại nhưng làm nhật ký job đầy tiếng ồn, và tiếng ồn là thứ khiến người ta thôi đọc.
+      */
+      const homNay = new Date();
+      const thang = homNay.getUTCDate() <= 7 ? await snapshotPerformance({ kind: "MONTHLY" }) : null;
+      return { ok: true, tuan, thang };
+    },
+  },
+  "work-escalation": {
+    label: "Leo thang việc quá hạn",
+    source: "ALL",
+    description:
+      "Quét hàng đợi công việc, đếm việc sắp vỡ hạn / đã vỡ hạn, và gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ mà vẫn chưa ai nhận. " +
+      "CHỈ ĐỌC dữ liệu nghiệp vụ: không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc), không tạo cảnh báo nào. " +
+      "Một phòng chỉ nhận một tin mỗi ngày — sổ chống gửi lại nằm ở settings 'work.escalation.sent'.",
+    run: async () => {
+      const r = await runEscalationDigest();
+      return { ok: true, ...r };
+    },
+  },
+  "work-recurrence": {
+    label: "Sinh việc định kỳ",
+    source: "ALL",
+    description:
+      "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL.",
+    run: () => generateRecurringTasks(),
+  },
   alerts: {
     label: "Cảnh báo vận hành",
     source: "ALL",
@@ -135,9 +227,22 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "PANCAKE",
     description: "Đọc hội thoại & thẻ chat Pancake (PANCAKE_ACCESS_TOKEN) trong N giờ gần nhất (hours=48) → tạo case: tư vấn size chưa đúng, chốt sai giá, giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng…",
     run: async (o) => {
+      /*
+        ĐỐI CHIẾU TRƯỚC, QUÉT SAU.
+
+        MỌI case CSKH mang một điều kiện SỐNG, không riêng "đủ thông tin · chưa tạo đơn": câu giục
+        giao hết nghĩa khi hàng đã tới, lỗi địa chỉ hết nghĩa khi kiện đã giao. Chạy đối chiếu
+        TRƯỚC lượt quét để hàng đợi phản ánh thực tế TẠI THỜI ĐIỂM quét, thay vì để người trực mở
+        ra và gọi cho một khách đã nhận hàng từ tuần trước.
+
+        Đo production 13/09/2026: 8/29 case "chưa tạo đơn" đang mở đã có đơn sinh ra từ chính hội
+        thoại của chúng. `applyStaleReconciliation` phủ cả những loại còn lại bằng CÙNG bộ điều
+        kiện mà nơi SINH case dùng (`lib/constants/case-semantics.ts`) — một luật, hai đầu.
+      */
+      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
-      return r;
+      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null };
     },
   },
   "ads-billing": {
@@ -228,5 +333,6 @@ function num(value: string | undefined) {
 export async function runJob(job: string, options: JobOptions) {
   const definition = JOB_DEFINITIONS[job];
   if (!definition) throw new Error(`Không có job "${job}"`);
-  return definition.run(options);
+  // Đánh dấu ĐANG CHẠY JOB NỀN để `audit()` đánh dấu đệm là cũ thay vì xoá hẳn — xem lib/cache.ts.
+  return trongJobNen(() => definition.run(options));
 }

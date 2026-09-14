@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { getDailyBreakdown, parseBasis, REPORT_BASIS_LABEL } from "@/lib/queries/reports";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
@@ -12,8 +12,10 @@ function csvCell(value: unknown) {
 
 /** Xuất CSV lợi nhuận theo ngày (cùng bộ lọc kỳ / cơ sở tính với trang Báo cáo) */
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  // CSV lãi lỗ là toàn bộ doanh thu, giá vốn và lợi nhuận — cùng quyền với trang Báo cáo lợi nhuận.
+  const user = await getCurrentUser();
+  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  if (!(can(user, "reports:delivered") || can(user, "reports:nominal") || can(user, "reports:cash"))) return new Response("Không có quyền xuất dữ liệu này", { status: 403 });
   const sp: SearchParams = {};
   request.nextUrl.searchParams.forEach((value, key) => {
     sp[key] = value;

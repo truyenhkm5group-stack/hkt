@@ -14,6 +14,7 @@ import { createStockReceipt } from "@/lib/actions/stock";
 import { formatNumber, formatVND, todayVN } from "@/lib/format";
 import type { VariantPickerRow } from "@/lib/queries/stock";
 import { STOCK_RECEIPT_KIND_HINT, STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
+import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 type RowInput = { qty: string; cost: string; counted: string };
@@ -164,7 +165,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
 
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-muted/80 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase backdrop-blur">
+            <thead className={cn(STICKY_HEAD, "text-[11px] font-semibold tracking-wide text-muted-foreground uppercase")}>
               <tr>
                 <th className="px-5 py-2 text-left">Mẫu mã</th>
                 <th className="px-3 py-2 text-right">Tồn hiện tại</th>

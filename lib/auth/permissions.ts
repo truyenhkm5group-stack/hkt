@@ -46,6 +46,12 @@ export const PERMISSION_GROUPS = [
       { key: "cod:write", label: "Đối soát COD: cập nhật", hint: "Đánh dấu đã thu / đã về ngân hàng, nhập bảng kê, tạo đợt nhận tiền" },
       { key: "expenses:view", label: "Chi phí vận hành & Quảng cáo: xem", hint: "Module Chi phí (kê khai chi phí) và module Quảng cáo (hiệu suất theo mã / marketer, ngưỡng thanh toán)" },
       { key: "expenses:write", label: "Chi phí vận hành & Quảng cáo: sửa", hint: "Thêm chi phí, nhập sao kê, thêm chi tiêu QC, ghép chiến dịch, gán marketer" },
+      { key: "bank:view", label: "Sổ ngân hàng: xem", hint: "Giao dịch thu / chi thực trên sao kê, đối chiếu với sổ sách ERP" },
+      { key: "bank:write", label: "Sổ ngân hàng: nhập & phân loại", hint: "Nhập sao kê, gán nhóm kế toán, quy tắc gán nhãn, đẩy khoản chi sang bảng Chi phí" },
+      // CỐ Ý TÁCH KHỎI `bank:write`. Xác nhận một tài khoản ngân hàng là quyết định "tiền của tài
+      // khoản này được tính vào sổ của shop" — cao hơn hẳn việc gán nhãn cho một dòng đã có. Kế
+      // toán nhập sao kê hằng ngày không cần quyền đó; chủ shop cấp thêm khi muốn.
+      { key: "bank:accounts", label: "Sổ ngân hàng: xác nhận tài khoản", hint: "Đặt tên, xác nhận tài khoản ngân hàng mới do webhook phát hiện, hoặc ngừng dùng một tài khoản" },
     ],
   },
   {
@@ -64,6 +70,29 @@ export const PERMISSION_GROUPS = [
       { key: "payroll:view-own", label: "Lương: xem của mình", hint: "Chỉ dòng lương / lợi nhuận cá nhân của chính mình (khớp email hoặc tên nhân sự)" },
       { key: "payroll:view", label: "Lương: xem toàn bộ", hint: "Lương và lợi nhuận của mọi nhân sự (trưởng nhóm, kế toán)" },
       { key: "payroll:manage", label: "Lương: khai báo nhân sự & chia mã", hint: "Cơ chế lương, người phụ trách mã, % chủ mã, fanpage → marketer" },
+    ],
+  },
+  {
+    module: "Ý tưởng marketing",
+    items: [
+      { key: "ideas:view", label: "Ý tưởng: xem" },
+      { key: "ideas:write", label: "Ý tưởng: đăng & sửa", hint: "Đăng ý tưởng kèm ảnh, sửa hoặc xoá ý tưởng của chính mình" },
+      { key: "ideas:review", label: "Ý tưởng: nhận xét & duyệt", hint: "Quyền của quản lý: viết nhận xét và chốt Duyệt / Cần sửa / Không duyệt" },
+    ],
+  },
+  {
+    module: "Công việc & mục tiêu",
+    items: [
+      { key: "work:view", label: "Công việc: xem việc của mình", hint: "Hàng đợi Việc của tôi — việc được giao ở mọi phòng ban" },
+      { key: "work:manage", label: "Công việc: xử lý", hint: "Nhận việc, ghi chú, hoãn, báo bị chặn, đổi trạng thái việc tay" },
+      { key: "work:assign", label: "Công việc: giao cho người khác", hint: "Quyền của trưởng phòng: giao việc, đổi mức ưu tiên, đặt hạn cho người trong phòng" },
+      { key: "work:department", label: "Công việc: xem cả phòng", hint: "Hàng đợi của phòng mình: tồn đọng, quá hạn, chưa ai nhận, tải theo người" },
+      { key: "work:all", label: "Công việc: xem chéo phòng ban", hint: "Buồng lái điều hành — phòng nào đang kẹt, xem được việc của mọi phòng" },
+      { key: "work:admin", label: "Công việc: cấu hình phòng ban & việc định kỳ", hint: "Thêm/bớt phòng, trưởng phòng, thành viên, định nghĩa việc lặp" },
+      { key: "okr:view", label: "Mục tiêu: xem OKR & BSC" },
+      { key: "okr:manage", label: "Mục tiêu: đặt & chấm", hint: "Tạo Objective / Key Result, cấu hình thẻ điểm BSC và trọng số, chấm tiến độ" },
+      { key: "performance:view", label: "Hiệu suất: xem thẻ điểm nhân sự", hint: "Kết quả / chất lượng / SLA / năng suất / OKR của người trong phạm vi quyền" },
+      { key: "review:manage", label: "Kỳ review: lập & chốt", hint: "Review tuần / tháng / quý; chốt kỳ là đóng băng số liệu của kỳ đó" },
     ],
   },
   {
@@ -108,18 +137,20 @@ export const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap((g) => g.
 
 export const PERMISSION_LABEL: Record<string, string> = Object.fromEntries(PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label])));
 
-const VIEW_ALL: Permission[] = ["dashboard:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view"];
+// `work:view` + `work:manage` nằm trong mọi vai: một người không xem được việc của CHÍNH MÌNH thì
+// hàng đợi vô nghĩa với họ. Quyền leo thang nằm ở `work:assign` / `work:department` / `work:all`.
+const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view", "work:view", "work:manage", "okr:view"];
 
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
   // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
-  LEADER: [...VIEW_ALL, "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "ai:view"],
-  ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "ai:view"],
+  ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "ai:view"],
-  MARKETING: [...VIEW_ALL, "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
+  MARKETING: [...VIEW_ALL, "ideas:write", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };
 
@@ -143,11 +174,52 @@ export function rolePermissions(role: Role, templates?: RolePermissionMap | null
   return [...(DEFAULT_ROLE_PERMISSIONS[role] ?? DEFAULT_ROLE_PERMISSIONS.VIEWER)];
 }
 
-/** Quyền thực tế của một người dùng: tuỳ chỉnh riêng (nếu có) → mẫu vai trò. ADMIN luôn toàn quyền. */
-export function resolvePermissions(role: Role, custom: string[] | null | undefined, templates?: RolePermissionMap | null): string[] {
+export const USER_PERMISSION_SNAPSHOT_KEY = "users.permissionsKnown";
+
+/**
+ * Khoá quyền được thêm SAU khi ERP bắt đầu ghi lại "lúc lưu danh sách quyền tuỳ chỉnh thì hệ thống
+ * đang có những khoá nào". Các danh sách lưu trước đó chưa từng được hỏi về những khoá này.
+ *
+ * Chỉ dùng cho các bản lưu cũ; từ nay mỗi lần lưu quyền đều kèm ảnh chụp khoá hiện có nên danh
+ * sách này không cần dài thêm.
+ */
+export const PERMISSIONS_ADDED_AFTER_SNAPSHOT: string[] = ["ideas:view", "ideas:write", "ideas:review", "work:view", "work:manage", "work:assign", "work:department", "work:all", "work:admin", "okr:view", "okr:manage", "performance:view", "review:manage"];
+
+/** Bộ khoá quyền của thời điểm trước khi có ảnh chụp — dùng cho người chưa có ảnh chụp nào. */
+function khoaDaBietKieuCu(): Set<string> {
+  return new Set((ALL_PERMISSIONS as string[]).filter((p) => !PERMISSIONS_ADDED_AFTER_SNAPSHOT.includes(p)));
+}
+
+/**
+ * Quyền thực tế của một người dùng: tuỳ chỉnh riêng (nếu có) → mẫu vai trò. ADMIN luôn toàn quyền.
+ *
+ * DANH SÁCH TUỲ CHỈNH CHỈ NÓI VỀ NHỮNG KHOÁ ĐÃ TỒN TẠI LÚC LƯU.
+ *
+ * Trước đây danh sách tuỳ chỉnh được coi là câu trả lời cho mọi khoá, kể cả khoá sinh ra sau đó.
+ * Hậu quả: người từng được lưu quyền riêng bị đóng băng vĩnh viễn — mỗi module mới đều vô hình với
+ * họ, mà không ai biết vì menu chỉ đơn giản là không hiện. Đúng chuyện đã xảy ra với module Ý
+ * tưởng marketing: tài khoản Quản lý có danh sách 37 khoá lưu từ trước nên không thấy menu.
+ *
+ * Nay khoá nào CHƯA TỒN TẠI lúc người đó được lưu quyền thì áp mẫu của vai trò — vì chưa ai từng
+ * được hỏi về nó. Khoá đã tồn tại mà bị bỏ khỏi danh sách vẫn là quyết định có chủ ý, giữ nguyên.
+ *
+ * `known` là ảnh chụp bộ khoá tại thời điểm lưu; chưa có thì coi như bộ khoá của thời trước ảnh chụp.
+ */
+export function resolvePermissions(
+  role: Role,
+  custom: string[] | null | undefined,
+  templates?: RolePermissionMap | null,
+  known?: string[] | null,
+): string[] {
   if (role === "ADMIN") return [...ALL_PERMISSIONS];
-  if (Array.isArray(custom)) return expandLegacy(custom).filter((p) => (ALL_PERMISSIONS as string[]).includes(p));
-  return rolePermissions(role, templates);
+  if (!Array.isArray(custom)) return rolePermissions(role, templates);
+  const rieng = new Set(expandLegacy(custom).filter((p) => (ALL_PERMISSIONS as string[]).includes(p)));
+  const daBiet = Array.isArray(known) && known.length ? new Set(known) : khoaDaBietKieuCu();
+  const mau = new Set(rolePermissions(role, templates));
+  for (const p of ALL_PERMISSIONS as string[]) {
+    if (!daBiet.has(p) && mau.has(p)) rieng.add(p);
+  }
+  return [...rieng];
 }
 
 export function hasPermission(perms: readonly string[] | Set<string> | null | undefined, permission: string) {

@@ -81,7 +81,9 @@ cd ~/erp
 docker compose -f docker-compose.prod.yml logs -f app        # log ERP
 docker compose -f docker-compose.prod.yml logs -f caddy      # log HTTPS/chứng chỉ
 docker compose -f docker-compose.prod.yml ps                 # trạng thái container
-git pull && docker compose -f docker-compose.prod.yml up -d --build   # cập nhật phiên bản
+git pull && docker compose -f docker-compose.prod.yml up -d --build   # cập nhật phiên bản (cài tay — dựng trên máy, cần ≥700 MB RAM trống)
+# Đường chuẩn là workflow "Deploy ERP to VPS": image dựng ở GitHub Actions, đẩy lên ghcr.io theo SHA,
+# VPS chỉ `docker pull` rồi khởi động lại (từ 11/09/2026 — máy 1,9 GB không còn dựng nổi bản hiện tại).
 ```
 
 Migration cơ sở dữ liệu tự chạy khi container `app` khởi động.

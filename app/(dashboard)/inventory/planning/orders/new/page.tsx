@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { buildMatrixForProduct } from "@/lib/queries/production";
 import type { SearchParams } from "@/lib/search-params";
+import { addDays, todayVN } from "@/lib/format";
 
 export const metadata = { title: "Bảng chốt đặt hàng" };
 
@@ -20,7 +21,7 @@ export default async function NewProductionOrderPage({ searchParams }: { searchP
       })
     : null;
   if (!m) notFound();
-  const due = new Date(Date.now() + m.leadTimeDays * 86_400_000).toISOString().slice(0, 10);
+  const due = addDays(todayVN(), m.leadTimeDays);
   return (
     <div className="space-y-5">
       <PageHeader eyebrow="Kho" title={`Bảng chốt đặt hàng · ${m.product.code ? `${m.product.code} · ` : ""}${m.product.name}`} description={`Số lượng khởi tạo theo đề xuất của ERP cho ${m.coverDays} ngày bán — sửa rồi bấm Chốt.`}

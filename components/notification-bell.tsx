@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useNavTransition } from "@/components/nav-progress";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck } from "lucide-react";
@@ -17,7 +18,7 @@ type Item = { id: string; kind: string; severity: string; title: string; body: s
 export function NotificationBell() {
   const [items, setItems] = useState<Item[]>([]);
   const [unread, setUnread] = useState(0);
-  const [, startTransition] = useTransition();
+  const [, startTransition] = useNavTransition();
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -65,7 +66,7 @@ export function NotificationBell() {
           {unread > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span> : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[380px] p-0">
+      <DropdownMenuContent align="end" className="w-[min(380px,calc(100vw-1rem))] p-0">
         <DropdownMenuLabel className="flex items-center justify-between px-3 py-2">
           <span>Cần xử lý {items.length ? `(${items.length})` : ""}</span>
           {unread ? (

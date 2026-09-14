@@ -16,6 +16,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { OutreachRow } from "@/lib/queries/outreach";
 import { cn } from "@/lib/utils";
+import { CopyButton } from "@/components/misc";
+import { CustomerOutcomeBadge } from "@/components/status-badge";
+import type { CustomerOutcome } from "@/lib/constants/outreach-segment";
 
 export function BuildButton({ segment, defaultHours }: { segment: "NURTURE" | "CROSS_SELL"; defaultHours: number }) {
   const [pending, startTransition] = useTransition();
@@ -139,7 +142,18 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
                   {canWrite ? <TableCell>{isDue(r) ? <Checkbox checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} aria-label="Chọn" /> : null}</TableCell> : null}
                   <TableCell className="text-sm">
                     <div className="font-medium">{r.customerName || "—"}</div>
-                    <div className="font-mono text-xs text-muted-foreground">{r.phone || "—"}</div>
+                    <div className="flex items-center gap-0.5">
+                      <span className="font-mono text-xs text-muted-foreground">{r.phone || "—"}</span>
+                      {r.phone ? <CopyButton value={r.phone} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+                    </div>
+                    {/*
+                      KẾT QUẢ LOGISTICS THẬT của khách, đọc lại `ORDER_OUTCOME` — không phải trạng
+                      thái Pancake và không suy từ COD. Nhãn do `components/status-badge.tsx` vẽ:
+                      một chỗ duy nhất, đúng luật nhất quán giao diện.
+                    */}
+                    <div className="mt-0.5">
+                      <CustomerOutcomeBadge outcome={((r as { customerOutcome?: string }).customerOutcome ?? "UNKNOWN") as CustomerOutcome} />
+                    </div>
                     <div className="mt-0.5 flex flex-wrap gap-2 text-xs">
                       {r.order ? <Link href={`/orders/${r.order.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="size-3" /> Đơn #{r.order.systemId ?? r.order.id}</Link> : null}
                       {chatHref ? <a href={chatHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline"><MessageCircle className="size-3" /> Chat Pancake</a> : <span className="text-muted-foreground">Không có hội thoại</span>}

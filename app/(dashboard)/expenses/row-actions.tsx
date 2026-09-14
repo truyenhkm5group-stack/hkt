@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
+import { AllocationDialog } from "@/app/(dashboard)/expenses/allocation-dialog";
 import { ExpenseDialog } from "@/app/(dashboard)/expenses/expense-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,9 @@ export function ExpenseRowActions({ row }: { row: ExpenseRow }) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   return (
-    <>
+    <div className="flex items-center justify-end gap-1">
+      {/* Chỉ hiện ở khoản ĐANG CẦN khai kỳ — nút thừa trên mọi dòng sẽ thành nút không ai bấm. */}
+      {row.needsAllocationReview ? <AllocationDialog id={row.id} description={row.description} amount={row.amount} /> : null}
       <ActionMenu onEdit={() => setEditOpen(true)} onDelete={() => setDeleteOpen(true)} />
       <ExpenseDialog expense={row} open={editOpen} onOpenChange={setEditOpen} />
       <DeleteConfirm
@@ -94,7 +97,7 @@ export function ExpenseRowActions({ row }: { row: ExpenseRow }) {
         action={() => deleteExpense(row.id)}
         successMessage="Đã xoá chi phí"
       />
-    </>
+    </div>
   );
 }
 

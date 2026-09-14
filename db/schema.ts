@@ -1,7 +1,7 @@
-// Shop Control ERP — Drizzle schema (PostgreSQL)
+// VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint } from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -53,6 +53,63 @@ export type ExpenseCategory = (typeof expenseCategoryEnum.enumValues)[number];
 
 // ───────────────────────── Người dùng ─────────────────────────
 
+/**
+ * VAI TRÒ TUỲ CHỈNH — bó quyền do chủ shop tự đặt tên.
+ *
+ * Tám vai trò hệ thống (`roleEnum`) KHÔNG nằm trong bảng này: chúng là hằng số trong mã nguồn nên
+ * không ai xoá được, và mẫu quyền của chúng vẫn ở `settings["auth.rolePermissions"]` như cũ. Bảng
+ * này chỉ chứa vai trò SINH THÊM. Tách như vậy thì "vai trò hệ thống được bảo vệ" là một tính
+ * chất của CẤU TRÚC, không phải một cờ `is_system` mà một câu UPDATE nhỡ tay là mất.
+ *
+ * `base_role` là vai trò nền: `users.role` vẫn phải giữ một giá trị enum hợp lệ (mọi chỗ kiểm tra
+ * `requireUser([...])` và mọi nhãn hiển thị đang đọc nó), và nếu vai trò tuỳ chỉnh bị TẮT thì
+ * người dùng rơi về đúng mẫu quyền của vai trò nền — không bao giờ rơi về "toàn quyền".
+ */
+export const accessRoles = pgTable(
+  "access_roles",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Vai trò hệ thống dùng làm nền. KHÔNG được là `ADMIN` (xem `lib/auth/access.ts`). */
+    baseRole: roleEnum("base_role").notNull().default("VIEWER"),
+    /** Bó quyền của vai trò này (danh sách khoá quyền). */
+    permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
+    /** Phạm vi dữ liệu gợi ý khi gán vai trò này cho một người; người dùng vẫn đặt riêng được. */
+    defaultScope: text("default_scope").notNull().default("ALL"),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("access_roles_active_idx").on(t.active, t.sortOrder)],
+);
+
+/**
+ * CHỨC DANH — nhãn tổ chức. KHÔNG SINH QUYỀN, không bao giờ.
+ *
+ * Gắn được với một phòng ban để hiển thị và để gợi ý khi xếp người, nhưng bản thân việc có chức
+ * danh "Kế toán trưởng" không mở thêm một quyền nào. Xem phần đầu `lib/constants/access-scope.ts`.
+ */
+export const positions = pgTable(
+  "positions",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Phòng ban thường gắn với chức danh này (chỉ để hiển thị / gợi ý). */
+    departmentId: text("department_id").references((): AnyPgColumn => departments.id, { onDelete: "set null" }),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("positions_active_idx").on(t.active, t.sortOrder)],
+);
+
+
 export const users = pgTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
@@ -61,6 +118,16 @@ export const users = pgTable("users", {
   role: roleEnum("role").notNull().default("VIEWER"),
   /** Quyền tuỳ chỉnh riêng (danh sách khoá quyền); null = dùng mẫu quyền của vai trò */
   permissions: jsonb("permissions").$type<string[] | null>(),
+  /** Vai trò tuỳ chỉnh (`access_roles`); null = dùng mẫu quyền của vai trò hệ thống ở `role`. */
+  accessRoleId: text("access_role_id").references((): AnyPgColumn => accessRoles.id, { onDelete: "set null" }),
+  /** Chức danh (`positions`). Chỉ là nhãn — KHÔNG tham gia vào phép tính quyền. */
+  positionId: text("position_id").references((): AnyPgColumn => positions.id, { onDelete: "set null" }),
+  /**
+   * Phạm vi dữ liệu: `SELF` · `ASSIGNED` · `TEAM` · `DEPARTMENT` · `ALL`
+   * (`lib/constants/access-scope.ts`). Mặc định `ALL` để bản này không đổi hành vi của tài khoản
+   * nào đang chạy; thu hẹp là một quyết định chủ shop phải bấm.
+   */
+  dataScope: text("data_scope").notNull().default("ALL"),
   active: boolean("active").notNull().default(true),
   lastLoginAt: ts("last_login_at"),
   createdAt: createdAt(),
@@ -84,18 +151,114 @@ export const csCases = pgTable(
     detail: text("detail").notNull().default(""),
     customerName: text("customer_name").notNull().default(""),
     customerPhone: text("customer_phone").notNull().default(""),
+    /**
+     * TÊN HIỂN THỊ của người phụ trách — GIỮ NGUYÊN, không xoá.
+     *
+     * Ô chữ này là dữ liệu lịch sử có thật: phần lớn case đang mở mang tên ở đây và nhiều dòng đến
+     * từ Pancake chứ không từ một tài khoản ERP. Xoá nó là xoá thứ duy nhất nói ai đã làm case đó.
+     * Nhưng nó KHÔNG phải danh tính: trùng tên, viết tắt, sai chính tả đều nối nhầm người.
+     */
     assignee: text("assignee").notNull().default(""),
+    /**
+     * DANH TÍNH của người phụ trách. `NULL` = CHƯA NỐI ĐƯỢC VỀ MỘT TÀI KHOẢN, không phải "không có ai".
+     *
+     * Đây là cột quyết định độ tin cậy: chỉ số tính trên cột này đạt `USER_ID`, còn tính trên
+     * `assignee` thì trần là `LOW` dù mẫu bao nhiêu (xem `metricConfidence`). Dòng cũ chỉ được điền
+     * khi ánh xạ là XÁC ĐỊNH (đúng một tài khoản khớp) — không đoán để lấp chỗ trống.
+     */
+    assigneeUserId: text("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
     resolution: text("resolution").notNull().default(""),
     /** Khoá chống tạo trùng khi tự phát hiện */
     dedupeKey: text("dedupe_key").unique(),
     /** Link hội thoại Pancake (case từ chat) */
     chatUrl: text("chat_url").notNull().default(""),
+    /**
+     * Hội thoại Pancake sinh ra case. Tách khỏi `chat_url` vì URL là để NGƯỜI bấm, còn cái này là
+     * để MÁY ghép: nối case với đơn được tạo sau đó (`orders.conversation_id`).
+     */
+    conversationId: text("conversation_id"),
+    /**
+     * ═══ LÚC KHÁCH CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══
+     *
+     * KHÁC `created_at`: case được phát hiện lúc job quét (có thể vài giờ sau), còn mốc này là lúc
+     * khách thật sự đã đưa đủ thông tin để lên đơn. Đo "bao lâu từ đủ thông tin tới lúc có đơn" mà
+     * lấy `created_at` thì con số đó đo tốc độ của JOB QUÉT, không đo tốc độ của CSKH.
+     *
+     * `NULL` với case thuộc loại khác hoặc case sinh bởi luật cũ — CHƯA BIẾT, không phải 0.
+     */
+    infoCompleteAt: ts("info_complete_at"),
+    /**
+     * ═══ HẸN QUAY LẠI CASE ═══
+     *
+     * `NULL` = CHƯA HẸN, không phải "hẹn ngay bây giờ". Hàng đợi phân biệt hai thứ đó: case chưa
+     * hẹn xếp theo tuổi, case đã hẹn chỉ nổi lên khi tới giờ. Gộp lại thì mọi case đều "đến hạn"
+     * và cái hẹn mất hết ý nghĩa.
+     */
+    followUpAt: ts("follow_up_at"),
     createdBy: text("created_by").notNull().default(""),
+    /** Danh tính người tạo case. `NULL` với case do JOB tự phát hiện — đó là sự thật, không phải lỗ hổng. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * ═══ KẾT LUẬN CỦA TẦNG NGỮ NGHĨA, LƯU LẠI ĐỂ KIỂM CHỨNG ═══
+     *
+     * Máy phân loại chạy TRONG JOB QUÉT, không chạy lúc dựng trang (200 dòng × một lượt gọi model
+     * là một trang không bao giờ mở xong). Nên kết luận phải được lưu, nếu không màn hình và báo
+     * cáo đối chiếu chỉ còn "case này từ đâu ra thì không ai biết".
+     *
+     * Lưu ĐÚNG phần kiểm chứng được: loại việc, mức tin cậy, phạm vi thời gian, ý định người nói,
+     * một câu lý do, và TRÍCH NGUYÊN VĂN thuận / nghịch. **KHÔNG lưu dòng suy nghĩ riêng của
+     * model** — nó không kiểm chứng được, không ai đọc, và là chỗ dữ liệu khách hàng rò ra nhiều
+     * nhất. Hình dạng khai ở `lib/cs/semantic-case.ts::SemanticRecord`.
+     *
+     * `NULL` = case sinh trước bản này hoặc sinh bởi đường xác định (không qua model) — CHƯA BIẾT,
+     * không phải "model đã xem và không nói gì".
+     */
+    semantic: jsonb("semantic").$type<Record<string, unknown> | null>(),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId)],
+  (t) => [index("cs_cases_status_idx").on(t.status, t.createdAt), index("cs_cases_order_idx").on(t.orderId), index("cs_cases_follow_up_idx").on(t.followUpAt)],
+);
+
+/**
+ * ═══════════ LỊCH SỬ MỘT CASE CSKH — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ ═══════════
+ *
+ * Trước bảng này, toàn bộ thứ một người CSKH làm với case chỉ để lại DUY NHẤT trạng thái cuối
+ * cùng: ai gọi, gọi lúc nào, khách nói gì, vì sao hẹn lại — mất sạch. `resolution` là một ô chữ bị
+ * ghi đè mỗi lần, nên hai lần liên hệ trong một ngày chỉ còn lại lần sau.
+ *
+ * Cùng hình dạng với `care_case_events` của care vận đơn (actor · nguồn · hành động · trạng thái
+ * trước/sau · người trước/sau · hẹn) để hai bàn làm việc đọc được như nhau — và để một case đi qua
+ * cả hai miền vẫn kể được một câu chuyện liền mạch.
+ *
+ * `audit_logs` KHÔNG thay được bảng này: audit là nhật ký AN NINH (ai đụng vào cái gì), còn đây là
+ * nhật ký NGHIỆP VỤ mà người xử lý ca sau phải đọc được ngay trên dòng.
+ */
+export const csCaseEvents = pgTable(
+  "cs_case_events",
+  {
+    id: id(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => csCases.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Tên hiển thị lúc xảy ra — ảnh chụp, vì người dùng có thể đổi tên hoặc nghỉ việc. */
+    actorName: text("actor_name").notNull().default(""),
+    /** `UI` · `API` · `AI` · `SYSTEM`. */
+    source: text("source").notNull().default("UI"),
+    /** `NOTE` · `STATUS` · `ASSIGN` · `FOLLOW_UP` — xem `CS_EVENT_ACTIONS`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousAssignee: text("previous_assignee"),
+    nextAssignee: text("next_assignee"),
+    followUpAt: ts("follow_up_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("cs_case_events_case_idx").on(t.caseId, t.createdAt), index("cs_case_events_actor_idx").on(t.actorEmail, t.createdAt)],
 );
 
 /** Danh sách khách cần nhắn: chăm sóc khách băn khoăn chưa mua (NURTURE) / bán chéo cho khách đã nhận hàng (CROSS_SELL) */
@@ -123,8 +286,17 @@ export const outreachTargets = pgTable(
     offer: text("offer").notNull().default(""),
     /** PENDING · SENT · FAILED · SKIPPED */
     /** PENDING · SENT (đã gửi hết kịch bản) · FAILED · SKIPPED · CONVERTED (khách đã đặt đơn) · REPLIED (khách trả lời, nhân viên tiếp quản) */
+    /** `PENDING` · `SENDING` (đang giữ chỗ) · `SENT` · `FAILED` · `SKIPPED` · `CONVERTED` · `REPLIED`. */
     status: text("status").notNull().default("PENDING"),
     error: text("error").notNull().default(""),
+    /** Nguyên văn lỗi đã được phân loại (`lib/constants/outreach-errors.ts`). `NULL` = chưa lỗi lần nào. */
+    errorKind: text("error_kind"),
+    /** Mã tin nhắn do nhà cung cấp trả về. CÓ mã = họ đã NHẬN tin, không phải ta đoán là đã gửi. */
+    providerMessageId: text("provider_message_id"),
+    /** Lúc nhà cung cấp chấp nhận. Khác `sent_at` (lúc ta bấm) — hai mốc, hai ý nghĩa. */
+    acceptedAt: ts("accepted_at"),
+    /** Đã thử mấy lần. Phân biệt "lỗi một lần" với "lỗi mãi" — `0` = chưa thử lần nào. */
+    attemptCount: integer("attempt_count").notNull().default(0),
     /** Bước kịch bản tiếp theo sẽ gửi (0-based); băn khoăn nhiều bước, bán chéo một bước */
     step: integer("step").notNull().default(0),
     /** Số tin đã gửi cho khách này */
@@ -217,6 +389,24 @@ export const notifications = pgTable(
     readBy: jsonb("read_by").$type<string[]>().notNull().default([]),
     /** Tự đóng khi điều kiện không còn (đơn đã giao / đã xử lý) */
     resolvedAt: ts("resolved_at"),
+    /**
+     * AI ĐÓNG VIỆC NÀY — `NULL` nghĩa là HỆ THỐNG tự đóng, không phải người.
+     *
+     * Vì sao phải tách: trước đây cả hai đường đều chỉ ghi `resolved_at`, nên "điều kiện tự hết"
+     * và "có người ngồi làm xong" trông y hệt nhau. Production 09/09/2026 có 3.896 việc đã đóng mà
+     * không ai trả lời được bao nhiêu trong đó là công của đội. Lấy con số đó đo năng suất là đo
+     * nhầm.
+     */
+    resolvedBy: text("resolved_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * VÌ SAO ĐÓNG:
+     *  · `MANUAL` — người bấm đóng, đã làm xong.
+     *  · `AUTO`   — điều kiện phát hiện không còn (đơn đã giao, hàng đã về, tiền đã về).
+     *  · `STALE`  — loại cảnh báo này bị tắt nên việc cũ không còn ai theo dõi. KHÔNG phải đã xử lý.
+     *  · `UNKNOWN`— việc đã đóng TRƯỚC khi có cột này (3.896 dòng lịch sử). Không suy đoán ngược:
+     *               chưa biết ai đóng thì ghi là chưa biết, không gán bừa cho hệ thống hay cho người.
+     */
+    resolution: text("resolution"),
     /** Đã gửi Telegram lúc */
     notifiedAt: ts("notified_at"),
     /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
@@ -230,12 +420,121 @@ export const notifications = pgTable(
     /** ĐÃ TIẾP NHẬN: có người nhìn thấy và nhận xử lý — khác "đã đọc" và khác "đã xong". */
     acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
     acknowledgedAt: ts("acknowledged_at"),
+    /** ĐANG LÀM: đã bắt tay vào việc. Khác "đã tiếp nhận" — giơ tay không phải là đang chạy. */
+    startedAt: ts("started_at"),
+    startedBy: text("started_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * BỎ QUA: đã xem và quyết định KHÔNG làm. Bắt buộc kèm lý do (ràng buộc CHECK ở migration
+     * 0037) — gạt một việc đi mà không nói vì sao là xoá bằng chứng lặng lẽ.
+     */
+    ignoredAt: ts("ignored_at"),
+    ignoredBy: text("ignored_by").references(() => users.id, { onDelete: "set null" }),
+    ignoredReason: text("ignored_reason").notNull().default(""),
     createdAt: createdAt(),
   },
   (t) => [
     index("notifications_open_idx").on(t.resolvedAt, t.createdAt),
     index("notifications_kind_idx").on(t.kind),
     index("notifications_assigned_idx").on(t.assignedTo, t.resolvedAt),
+    index("notifications_workflow_idx").on(t.resolvedAt, t.ignoredAt, t.startedAt),
+    check("notifications_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('MANUAL', 'AUTO', 'STALE', 'UNKNOWN')`),
+    // Đã đóng thì phải nói được VÌ SAO đóng; và chỉ đóng tay mới có người đóng.
+    check("notifications_resolution_shape_check", sql`(${t.resolvedAt} IS NULL) = (${t.resolution} IS NULL)`),
+    check("notifications_resolver_check", sql`${t.resolvedBy} IS NULL OR ${t.resolution} = 'MANUAL'`),
+  ],
+);
+
+/**
+ * ───────────── KẾT QUẢ ĐƠN ĐÃ VẬT CHẤT HOÁ ─────────────
+ *
+ * Đây là LỚP TĂNG TỐC, KHÔNG phải nguồn sự thật. Nguồn sự thật vẫn là biểu thức `ORDER_OUTCOME`
+ * trong `lib/queries/return-rate.ts`; bảng này chỉ lưu lại kết quả của chính biểu thức đó để báo cáo
+ * khỏi tính lại.
+ *
+ * VÌ SAO CẦN: đo trên production 09/09/2026 — `ORDER_OUTCOME` là một biểu thức CASE chứa nhiều truy
+ * vấn con tương quan, tốn ~2,4ms cho mỗi đơn. Với 2.426 đơn, MỖI báo cáo phải trả ~6 giây chỉ để
+ * dựng lại cùng một kết luận; trang chủ vì thế mất 30–47 giây. Rào `OUTCOME_FENCE` đã hạ số lần tính
+ * từ "mỗi cột một lần" xuống "mỗi dòng một lần" — đây là bước tiếp theo: mỗi đơn một lần, và chỉ
+ * tính lại khi đầu vào đổi.
+ *
+ * GRAIN LÀ (ĐƠN × VẬN ĐƠN), CỐ Ý:
+ * mọi báo cáo hiện nay đều `orders LEFT JOIN shipments` rồi tính kết quả cho TỪNG dòng. Vật chất hoá
+ * ở grain khác sẽ đổi con số (một đơn hai vận đơn đang được đếm hai lần). Muốn đổi grain thì phải là
+ * một quyết định nghiệp vụ riêng, không phải hệ quả phụ của việc tăng tốc.
+ *
+ * `logic_version` để khi luật đổi thì phát hiện được dòng cũ và dựng lại có kiểm soát, thay vì trộn
+ * lẫn hai ngữ nghĩa mà không ai biết.
+ */
+export const canonicalOrderOutcome = pgTable(
+  "canonical_order_outcome",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** `NULL` = đơn chưa có vận đơn nào. Đúng dòng mà `LEFT JOIN` sinh ra. */
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
+    /** Kết quả do chính `ORDER_OUTCOME` sinh ra — chép lại, không diễn giải. */
+    outcome: text("outcome").notNull(),
+    /**
+     * Giá vốn cả đơn, do chính `ORDER_COGS` sinh ra.
+     *
+     * Đo trên production sau khi vật chất hoá kết quả đơn: đọc kết quả đã tính sẵn cho toàn bộ 2.431
+     * dòng chỉ mất **48ms**, nhưng báo cáo vẫn mất 5–10 giây. Thủ phạm còn lại là `ORDER_COGS` — một
+     * truy vấn con LỒNG HAI TẦNG: mỗi đơn duyệt từng dòng hàng, mỗi dòng hàng lại tra ngược phiếu
+     * nhập gần nhất. Cùng một bệnh, cùng một cách chữa, và ở cùng một bảng để chỉ có MỘT nơi phải
+     * dựng lại và MỘT phép đối chiếu.
+     */
+    cogs: money("cogs"),
+    /**
+     * ───────────── GIÁ VỐN ĐÃ CHỐT CHO KỲ ĐÃ GHI NHẬN ─────────────
+     *
+     * Ghi MỘT LẦN lúc đơn được ghi nhận là giao thành công, rồi **không đổi nữa**. Đây là thứ chặn
+     * việc lợi nhuận kỳ đã chốt tự đổi khi kho nhập lô mới — chuyện đang xảy ra vì `ORDER_COGS` lấy
+     * "phiếu nhập gần nhất tính theo hôm nay".
+     *
+     * `NULL` = đơn chưa được ghi nhận giao thành công. Không phải 0.
+     */
+    recognizedCogs: integer("recognized_cogs"),
+    /** Mốc ghi nhận doanh thu (ngày giao). `NULL` khi chưa giao. */
+    recognizedAt: ts("recognized_at"),
+    /**
+     * CĂN CỨ của giá vốn đã chốt — và đây là chỗ phải nói thật. Xếp theo độ mạnh giảm dần:
+     *
+     *  · `RECEIPT_BEFORE` — có phiếu nhập TRƯỚC hoặc ĐÚNG ngày giao. Căn cứ vững (có chứng từ).
+     *  · `RECEIPT_AFTER`  — chỉ có phiếu nhập lập SAU ngày giao: giá vốn suy ngược từ phiếu gần
+     *                       ngày giao nhất. Tạm tính, nhưng có chứng từ để bấu víu.
+     *  · `PROVISIONAL`    — chưa có phiếu nhập nào; lấy giá vốn Pancake ghi trên dòng hàng hoặc giá
+     *                       nhập lưu ở mẫu mã. Tạm tính, chưa có chứng từ kho.
+     *  · `NONE`           — không có nguồn nào. `recognized_cogs` là NULL = CHƯA BIẾT, **không phải 0**.
+     *
+     * Chủ shop chốt 11/09/2026: đơn đã giao KHÔNG được giữ giá vốn 0 chỉ vì phiếu nhập đến sau. Khi
+     * xuất hiện căn cứ MẠNH HƠN (phiếu nhập kho), giá vốn được chốt lại ĐÚNG MỘT LẦN, có nhật ký
+     * (`trued_up_*`), rồi đóng băng hẳn. Xem `rematerializeOutcomes()`.
+     *
+     * Đo trên production 09/09/2026: shop chỉ có 2 phiếu nhập, cả hai ngày 03/09, trong khi đơn giao
+     * sớm nhất từ 22/01; 0/2.495 dòng hàng có giá vốn Pancake, 0/37 mẫu mã có giá nhập. Nên
+     * **368/407 đơn đã giao mang căn cứ `RECEIPT_AFTER`** — 58 triệu giá vốn suy ngược. Con số đó
+     * phải HIỆN RA, không được lẫn vào lợi nhuận như thể đã kiểm chứng.
+     */
+    cogsBasis: text("cogs_basis"),
+    /**
+     * LẦN CHỐT LẠI DUY NHẤT. `NULL` = chưa từng chốt lại (vẫn còn quyền chốt lại một lần khi có chứng
+     * từ mạnh hơn). Khác NULL = đã dùng quyền đó, từ nay giá vốn đóng băng tuyệt đối.
+     */
+    truedUpAt: ts("trued_up_at"),
+    /** Giá vốn TRƯỚC lần chốt lại (để truy nguyên; NULL nếu trước đó là CHƯA BIẾT). */
+    truedUpFrom: integer("trued_up_from"),
+    /** Căn cứ TRƯỚC lần chốt lại. */
+    truedUpFromBasis: text("trued_up_from_basis"),
+    /** Phiên bản luật đã dùng để tính dòng này. Luật đổi ⇒ dòng cũ thành cũ, phát hiện được. */
+    logicVersion: integer("logic_version").notNull().default(1),
+    computedAt: ts("computed_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("canonical_outcome_order_idx").on(t.orderId),
+    index("canonical_outcome_value_idx").on(t.outcome),
+    index("canonical_outcome_version_idx").on(t.logicVersion),
   ],
 );
 
@@ -251,7 +550,66 @@ export const auditLogs = pgTable(
     detail: jsonb("detail"),
     createdAt: createdAt(),
   },
-  (t) => [index("audit_entity_created_idx").on(t.entity, t.createdAt), index("audit_created_idx").on(t.createdAt)],
+  (t) => [
+    index("audit_entity_created_idx").on(t.entity, t.createdAt),
+    index("audit_created_idx").on(t.createdAt),
+    // Dòng thời gian của đơn tra nhật ký theo `entity_id` (mã đơn + mã các vận đơn). Không có chỉ mục
+    // này là quét tuần tự bảng tăng nhanh nhất CSDL mỗi lần mở chi tiết đơn.
+    index("audit_entity_id_idx").on(t.entityId, t.createdAt),
+  ],
+);
+
+export const approvalStatusEnum = pgEnum("approval_status", ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "EXECUTED"]);
+
+/**
+ * ───────────── YÊU CẦU PHÊ DUYỆT HAI BƯỚC ─────────────
+ *
+ * Việc rủi ro không được thực hiện ngay: nó thành một YÊU CẦU, và chỉ chạy khi có người khác gật.
+ * Danh sách nhóm nào cần duyệt nằm ở `lib/constants/approval.ts`, không nằm rải rác trong từng trang.
+ *
+ * Bảng này là SỔ, không phải hàng đợi tạm: yêu cầu bị từ chối vẫn nằm lại. Ai xin làm gì, ai không
+ * cho, lúc nào — đó chính là thứ có giá trị khi cần nhìn lại, và xoá đi là mất sạch.
+ *
+ * `payload` giữ nguyên đầu vào đã được kiểm tra, để lúc duyệt chạy ĐÚNG việc đã xin — không phải một
+ * việc khác được sửa lại trong lúc chờ.
+ */
+export const approvalRequests = pgTable(
+  "approval_requests",
+  {
+    id: id(),
+    /** Nhóm việc (`ApprovalGroup`) — quyết định luật áp dụng. */
+    group: text("group").notNull(),
+    /** Thao tác cụ thể, ví dụ "stock.adjustment" — để chạy lại đúng hàm khi được duyệt. */
+    action: text("action").notNull(),
+    entity: text("entity").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Số tiền liên quan, dùng để đối chiếu ngưỡng. NULL = chưa biết, và chưa biết thì coi như vượt. */
+    amount: bigint("amount", { mode: "number" }),
+    /** Mô tả bằng tiếng Việt để người duyệt hiểu mình đang gật cái gì mà không phải đọc JSON. */
+    summary: text("summary").notNull(),
+    payload: jsonb("payload"),
+    status: approvalStatusEnum("status").notNull().default("PENDING"),
+    requestedBy: text("requested_by").references(() => users.id, { onDelete: "set null" }),
+    requestedByEmail: text("requested_by_email").notNull().default(""),
+    // Khai tường minh, KHÔNG dùng helper createdAt(): helper gắn cứng tên cột "created_at", còn
+    // migration khai "requested_at" — lệch tên là mọi phép chèn hỏng ngay ở câu lệnh đầu tiên.
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    /** NGƯỜI DUYỆT PHẢI KHÁC NGƯỜI XIN — cưỡng chế ở tầng ứng dụng và ở đây. */
+    decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedByEmail: text("decided_by_email"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    /** Lý do từ chối, hoặc ghi chú khi duyệt. */
+    note: text("note"),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    executionError: text("execution_error"),
+  },
+  (t) => [
+    index("approval_status_idx").on(t.status, t.requestedAt),
+    index("approval_group_idx").on(t.group, t.status),
+    // Người xin không được tự duyệt. Ứng dụng đã chặn; đây là hàng rào cuối, vì hàng rào ở tầng
+    // ứng dụng có thể bị một đường ghi mới nào đó đi vòng qua.
+    check("approval_khac_nguoi", sql`${t.decidedBy} is null or ${t.decidedBy} <> ${t.requestedBy}`),
+  ],
 );
 
 // ───────────────────────── Danh mục Pancake ─────────────────────────
@@ -328,6 +686,48 @@ export const products = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index("products_name_idx").on(t.name)],
+);
+
+/**
+ * ═══════════ GHI CHÚ VẬN HÀNH CHO SẢN PHẨM / MẪU MÃ ═══════════
+ *
+ * Cột `products.note` đã có, nhưng nó là ô ghi chú ĐỒNG BỘ TỪ PANCAKE: màn hình hiện nó ra và
+ * không có đường nào để người trong shop viết vào. Viết đè lên cột đó sai hai lần — lần đồng bộ
+ * sau ghi đè mất, và không ai biết ai viết lúc nào.
+ *
+ * Bảng này CHỈ THÊM. Ghi chú là thứ người ta đọc để hiểu bối cảnh ("lô này vải mỏng hơn mẫu",
+ * "size L hay bị chật"), nên sửa đè lên một dòng cũ là xoá mất điều ai đó đã quan sát được.
+ *
+ * ─── GHI CHÚ KHÔNG ĐƯỢC CHẠM VÀO MỘT CON SỐ NÀO ───
+ *
+ * Không truy vấn báo cáo nào được đọc bảng này. Một ô chữ tự do mà ảnh hưởng tới tồn kho, giá vốn
+ * hay lợi nhuận là đường ngắn nhất để một câu ghi vội thành một con số trong báo cáo tài chính.
+ * `tests/product-notes.test.ts` quét mã nguồn và khoá điều đó lại.
+ */
+export const productNotes = pgTable(
+  "product_notes",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** `NULL` = ghi chú cho cả sản phẩm; có giá trị = ghi chú riêng cho một mẫu mã. */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Danh sách ĐÓNG — ô gõ tự do sẽ sinh ra ba cách viết cho cùng một nhóm. */
+    category: text("category").notNull().default("OTHER"),
+    body: text("body").notNull(),
+    /** `users.id`. `NULL` = job/nhập liệu máy, KHÁC HẲN "chưa biết ai" (lib/constants/actor.ts). */
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN để người đọc. Do MÁY CHỦ đọc từ `users`, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("product_notes_product_idx").on(t.productId, t.createdAt),
+    check("product_notes_category_check", sql`${t.category} IN ('QUALITY', 'SIZING', 'SUPPLIER', 'PRICING', 'PACKAGING', 'OTHER')`),
+    // Ghi chú rỗng là nhiễu vĩnh viễn: nó chiếm chỗ "ghi chú mới nhất" và đẩy ghi chú thật xuống.
+    check("product_notes_body_check", sql`length(btrim(${t.body})) > 0`),
+  ],
 );
 
 export const productVariants = pgTable(
@@ -458,6 +858,24 @@ export const orders = pgTable(
     /** Hội thoại Pancake (để mở chat: https://pancake.vn/<page_id>?c_id=<conversation_id>) */
     conversationId: text("conversation_id"),
     adId: text("ad_id"),
+    /**
+     * ───────────── ĐỊNH DANH QUY KẾT THÔ, GIỮ NGUYÊN NHƯ NGUỒN GỬI ─────────────
+     *
+     * Đo trên production 09/09/2026: Pancake gửi `p_utm_campaign`, `p_utm_source` và
+     * `customer_referral_code` trên **mọi đơn** (2.425/2.425) nhưng cả ba **đều rỗng** — vì hiện
+     * chưa có gì gắn mã theo dõi vào liên kết quảng cáo. Ngày shop bắt đầu gắn, dữ liệu sẽ chảy về
+     * qua đúng ba trường này.
+     *
+     * Nên ERP giữ chúng NGAY TỪ BÂY GIỜ, thô, không diễn giải. Không có cột thì ngày đó dữ liệu
+     * chảy qua rồi mất, và độ phủ quy kết vẫn nằm ở trần cũ mà không ai hiểu vì sao.
+     *
+     * KHÔNG suy diễn: rỗng là rỗng, không bịa từ trường khác.
+     */
+    utmCampaign: text("utm_campaign"),
+    utmSource: text("utm_source"),
+    referralCode: text("referral_code"),
+    /** Mốc nguồn ghi nhận quy kết (nếu nguồn có gửi) — khác thời điểm ERP đọc được. */
+    attributionCapturedAt: ts("attribution_captured_at"),
     marketplaceId: text("marketplace_id"),
     sellerName: text("seller_name").notNull().default(""),
     careName: text("care_name").notNull().default(""),
@@ -487,6 +905,8 @@ export const orders = pgTable(
     index("orders_inserted_idx").on(t.insertedAt),
     index("orders_updated_ext_idx").on(t.updatedAtExternal),
     index("orders_customer_idx").on(t.customerId),
+    // Do migration 0065 tạo (chấm rủi ro theo tỉnh); khai ở đây để drizzle-kit không đề nghị xoá.
+    index("orders_ship_province_idx").on(t.shipProvince).where(sql`${t.shipProvince} <> ''`),
     index("orders_source_idx").on(t.source),
     index("orders_system_idx").on(t.systemId),
     index("orders_bill_phone_idx").on(t.billPhone),
@@ -582,6 +1002,86 @@ export const codBatches = pgTable(
 );
 
 /**
+ * Ý TƯỞNG MARKETING — bảng ý tưởng để marketer đăng bài mẫu và nhận nhận xét của quản lý.
+ *
+ * Mỗi dòng là một ý tưởng: ai phụ trách, ngày, nội dung, ảnh minh hoạ và quá trình trao đổi với
+ * quản lý. Cố ý KHÔNG dính gì tới đơn hàng / tiền — đây là chỗ làm việc của đội marketing, không
+ * phải một chiều báo cáo, nên không được lẫn vào các con số nghiệp vụ.
+ */
+export const ideaStatusEnum = pgEnum("idea_status", ["NEW", "REVIEWING", "CHANGES", "APPROVED", "REJECTED"]);
+
+export const marketingIdeas = pgTable(
+  "marketing_ideas",
+  {
+    id: id(),
+    /** Marketer phụ trách — id nhân sự trong cấu hình lương (có thể trống nếu nhập tay). */
+    marketerId: text("marketer_id"),
+    /** Tên marketer hiển thị; giữ lại tên tại thời điểm đăng để đổi cấu hình nhân sự không mất dấu. */
+    marketerName: text("marketer_name").notNull().default(""),
+    /** Ngày của ý tưởng (YYYY-MM-DD) — do người đăng chọn, không phải giờ hệ thống. */
+    ideaDate: text("idea_date").notNull(),
+    /** Nội dung ý tưởng; dòng đầu được dùng làm tiêu đề khi hiển thị danh sách. */
+    content: text("content").notNull().default(""),
+    status: ideaStatusEnum("status").notNull().default("NEW"),
+    createdBy: text("created_by").notNull().default(""),
+    createdByName: text("created_by_name").notNull().default(""),
+    /** Lần quản lý chốt trạng thái gần nhất. */
+    reviewedAt: ts("reviewed_at"),
+    reviewedBy: text("reviewed_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("marketing_ideas_date_idx").on(t.ideaDate), index("marketing_ideas_status_idx").on(t.status), index("marketing_ideas_marketer_idx").on(t.marketerId)],
+);
+
+/**
+ * Ảnh của ý tưởng, lưu thẳng trong CSDL.
+ *
+ * Máy chủ chỉ có ổ đĩa của CSDL là bền qua mỗi lần deploy nên ảnh nằm ở đây thay vì trên đĩa ứng
+ * dụng. Ảnh được thu nhỏ ngay trên trình duyệt trước khi gửi lên, và để BẢNG RIÊNG để truy vấn
+ * danh sách ý tưởng không bao giờ phải kéo theo dữ liệu ảnh.
+ */
+export const marketingIdeaImages = pgTable(
+  "marketing_idea_images",
+  {
+    id: id(),
+    ideaId: text("idea_id")
+      .notNull()
+      .references(() => marketingIdeas.id, { onDelete: "cascade" }),
+    contentType: text("content_type").notNull().default("image/jpeg"),
+    bytes: integer("bytes").notNull().default(0),
+    /** Nội dung ảnh dạng base64. */
+    data: text("data").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("marketing_idea_images_idea_idx").on(t.ideaId, t.sortOrder)],
+);
+
+/** Trao đổi giữa marketer và quản lý về một ý tưởng; giữ nguyên cả quá trình, không ghi đè. */
+export const marketingIdeaComments = pgTable(
+  "marketing_idea_comments",
+  {
+    id: id(),
+    ideaId: text("idea_id")
+      .notNull()
+      .references(() => marketingIdeas.id, { onDelete: "cascade" }),
+    authorEmail: text("author_email").notNull().default(""),
+    authorName: text("author_name").notNull().default(""),
+    body: text("body").notNull(),
+    /** Trạng thái mà nhận xét này đặt (nếu có) — để đọc lại vì sao ý tưởng đổi trạng thái. */
+    statusSet: ideaStatusEnum("status_set"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("marketing_idea_comments_idea_idx").on(t.ideaId, t.createdAt)],
+);
+
+export const marketingIdeasRelations = relations(marketingIdeas, ({ many }) => ({
+  images: many(marketingIdeaImages),
+  comments: many(marketingIdeaComments),
+}));
+
+/**
  * TỆP BẢNG KÊ GỐC — giữ nguyên nội dung tệp Viettel Post gửi qua email.
  *
  * Vì sao cần: Apps Script trong Gmail chỉ gửi thư CHƯA gắn nhãn "đã nhập", nên khi ERP đọc sai
@@ -674,9 +1174,31 @@ export const shipments = pgTable(
   "shipments",
   {
     id: id(),
-    orderId: text("order_id")
-      .unique()
-      .references(() => orders.id, { onDelete: "cascade" }),
+    /**
+     * MỘT ĐƠN CÓ THỂ CÓ NHIỀU LẦN GỬI.
+     *
+     * Trước 10/09/2026 cột này mang ràng buộc `UNIQUE` từ migration 0000, ép một đơn chỉ có một vận
+     * đơn. Cái giá không nhìn thấy: khi Pancake báo một mã vận đơn MỚI cho đơn đã có vận đơn, đường
+     * đồng bộ **ghi đè lên dòng cũ** — lần gửi đầu tiên biến mất khỏi sổ, không cảnh báo. Giao thất
+     * bại rồi gửi lại, huỷ rồi tạo lại, gửi hàng thay thế: cả ba đều mất dấu.
+     *
+     * Bỏ ràng buộc đó đi kèm một nghĩa vụ: **mọi đường tính TIỀN phải chuyển sang grain ĐƠN**. Báo
+     * cáo nối đơn với vận đơn rồi cộng trên từng dòng sẽ đếm đơn hai lần ngay lần gửi lại đầu tiên —
+     * và đếm sai trong im lặng. Hai việc đó cố ý đi cùng một lần phát hành.
+     */
+    orderId: text("order_id").references(() => orders.id, { onDelete: "cascade" }),
+    /** Lần gửi thứ mấy của đơn. 1 = lần đầu. Vận đơn không gắn đơn để `NULL`. */
+    attemptNo: integer("attempt_no"),
+    /**
+     * CHIỀU của lần gửi:
+     *  · `OUTBOUND`    — gửi tới khách;
+     *  · `RETURN`      — chiều hoàn về shop;
+     *  · `REPLACEMENT` — gửi hàng thay thế sau đổi/lỗi.
+     *
+     * Chiều KHÔNG được suy từ trạng thái: "phát thành công" của chiều hoàn nghĩa là hàng về tới
+     * shop, không phải tới tay khách. Nhầm chỗ này là thổi tỷ lệ giao thành công.
+     */
+    direction: text("direction"),
     carrier: text("carrier").notNull().default(""),
     partnerId: integer("partner_id"),
     trackingCode: text("tracking_code"),
@@ -723,6 +1245,22 @@ export const shipments = pgTable(
     cancelledAt: ts("cancelled_at"),
     isFinal: boolean("is_final").notNull().default(false),
     lastVtpSyncAt: ts("last_vtp_sync_at"),
+    /**
+     * ═══ TÀI KHOẢN API CÓ ĐỌC ĐƯỢC VẬN ĐƠN NÀY KHÔNG ═══
+     *
+     * `API_TRACKABLE` · `WEBHOOK_ONLY` · `UNKNOWN_CAPABILITY` (xem lib/constants/logistics-freshness.ts).
+     *
+     * Đo được 11/09/2026: nguồn `VTP_POLL` sinh ra **0 sự kiện** từ trước tới nay, trong khi
+     * `sync_runs` ghi "tài khoản API không thấy vận đơn nào — lượt thứ 548 liên tiếp". Vận đơn do
+     * Pancake tạo thuộc một tài khoản Viettel Post khác. ERP vẫn đều đặn gọi một API không bao giờ
+     * trả về gì: không sai số liệu, nhưng tốn request và làm log đầy tiếng ồn che mất lỗi thật.
+     *
+     * Kết luận theo TỪNG VẬN ĐƠN chứ không theo tài khoản — để ngày shop trỏ ERP về đúng tài khoản
+     * thì vận đơn mới tự được xếp lại đúng mà không cần sửa gì.
+     */
+    trackingCapability: text("tracking_capability").notNull().default("UNKNOWN_CAPABILITY"),
+    /** Số lần đã tra mà API trả "không thấy". Tới ngưỡng thì kết luận `WEBHOOK_ONLY`. */
+    capabilityProbes: integer("capability_probes").notNull().default(0),
     lastPancakeSyncAt: ts("last_pancake_sync_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),
@@ -730,12 +1268,15 @@ export const shipments = pgTable(
   },
   (t) => [
     index("shipments_order_idx").on(t.orderId),
+    // Trang Vận đơn lọc kỳ và sắp mặc định theo ngày tạo; năm bộ đếm facet dùng cùng vị ngữ.
+    index("shipments_created_idx").on(t.createdAt),
     index("shipments_vtp_number_idx").on(t.vtpOrderNumber),
     index("shipments_stage_idx").on(t.stage),
     index("shipments_cod_status_idx").on(t.codStatus),
     index("shipments_carrier_idx").on(t.carrier),
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
+    index("shipments_capability_idx").on(t.trackingCapability, t.isFinal),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
     // Đối soát COD quét "đã giao, có thu hộ, chưa thấy tiền" trên toàn bảng vận đơn mỗi lần mở
     // trang Cần xử lý và mỗi lần chạy cảnh báo.
@@ -745,6 +1286,12 @@ export const shipments = pgTable(
     // chạy cho từng dòng; không có index này thì mỗi dòng quét toàn bảng shipments → O(n²).
     // Điều kiện lọc cố ý KHÔNG chứa ngưỡng nghiệp vụ (10K) để index không phải sửa khi shop đổi ngưỡng.
     index("shipments_return_leg_idx").on(t.orderReference, t.vtpOrderNumber).where(sql`${t.stage} = 'DELIVERED' and ${t.codAmount} = 0`),
+    // HÀNG ĐÃ QUAY VỀ SHOP (`HAS_RETURN_LEG` trong ORDER_OUTCOME) hỏi "có vận đơn nào trỏ ngược
+    // về mã này không?" cho TỪNG dòng, và KHÔNG kèm điều kiện stage/COD nên index riêng phần ở
+    // trên không dùng được. Đo trên bộ dữ liệu 4.802 vận đơn: mỗi lần dựng trang Chất lượng dữ
+    // liệu chạy 7 lần "Seq Scan on shipments" × 3.245 vòng = 15,6 triệu lượt so sánh, 460.790
+    // khối đệm cho MỘT truy vấn — chi phí tăng theo BÌNH PHƯƠNG số vận đơn.
+    index("shipments_order_reference_lookup_idx").on(t.orderReference).where(sql`${t.orderReference} is not null`),
   ],
 );
 
@@ -783,7 +1330,7 @@ export const shipmentEvents = pgTable(
     check("shipment_events_verified_check", sql`${t.verificationStatus} IS DISTINCT FROM 'VERIFIED' OR (
       ${t.normalizedStage} IS NOT NULL AND ${t.normalizedStage} <> 'UNKNOWN'
       AND ${t.legType} IS NOT NULL AND ${t.legType} IN ('OUTBOUND', 'RETURN')
-      AND ${t.source} IN ('VTP_WEBHOOK', 'VTP_POLL', 'VTP_IMPORT', 'MANUAL')
+      AND ${t.source} IN ('VTP_WEBHOOK', 'VTP_POLL', 'VTP_IMPORT', 'MANUAL', 'VTP_UI_MANUAL_VERIFICATION')
       AND ${t.sourceReference} IS NOT NULL AND length(trim(${t.sourceReference})) > 0
       AND ${t.verifiedAt} IS NOT NULL AND ${t.verifiedBy} IS NOT NULL AND length(trim(${t.verifiedBy})) > 0)`),
   ],
@@ -915,6 +1462,310 @@ export const stockReceiptItems = pgTable(
 
 // ───────────────────────── Chi phí & marketing ─────────────────────────
 
+/**
+ * ───────────── KIỂM HÀNG HOÀN ─────────────
+ *
+ * "ĐVVC báo đã hoàn" KHÔNG có nghĩa là hàng đã về tồn. Giữa hai mốc đó là một quy trình có thật mà
+ * trước đây ERP nén thành một ô ngày duy nhất (`shipments.return_received_at`):
+ *
+ *   ĐÃ NHẬN  →  CHỜ KIỂM  →  ĐÃ KIỂM  →  {BÁN LẠI ĐƯỢC · KHÔNG BÁN ĐƯỢC · HỎNG · THIẾU}
+ *
+ * Vì sao phải tách: một kiện hàng về có thể thiếu món, rách, bẩn. Đánh dấu "đã nhận" rồi cộng
+ * nguyên số đã xuất trở lại tồn là ghi vào sổ một lượng hàng không có thật — và phần chênh đó sẽ
+ * không bao giờ ai tìm ra, vì nó nằm im trong số tồn.
+ *
+ * CHỈ khi kết luận BÁN LẠI ĐƯỢC với SỐ ĐẾM THỰC TẾ thì mới sinh phiếu tái nhập. Số không bán được
+ * ghi riêng để nhìn thấy phần mất, thay vì giấu nó bằng cách không cộng vào.
+ */
+export const returnInspections = pgTable(
+  "return_inspections",
+  {
+    id: id(),
+    /** Một vận đơn hoàn chỉ có MỘT phiếu kiểm — chống tạo trùng khi bấm hai lần. */
+    shipmentId: text("shipment_id")
+      .notNull()
+      .unique()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** RECEIVED (đã nhận, chờ kiểm) · INSPECTED (đã kiểm xong) */
+    status: text("status").notNull().default("RECEIVED"),
+    receivedAt: ts("received_at").notNull(),
+    receivedBy: text("received_by").notNull().default(""),
+    /** Danh tính người kho nhận kiện. `NULL` = chưa nối được về tài khoản (dòng cũ, hoặc job ghi hộ). */
+    receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    inspectedAt: ts("inspected_at"),
+    inspectedBy: text("inspected_by"),
+    /** Danh tính người đếm. Ràng buộc `inspected_check` vẫn đứng trên cột CHỮ vì dòng lịch sử không có id. */
+    inspectedByUserId: text("inspected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** RESTOCKABLE · UNSELLABLE · DAMAGED · MISSING — chỉ có khi đã kiểm. */
+    condition: text("condition"),
+    /** Số món ĐẾM ĐƯỢC và bán lại được — đây là số duy nhất được cộng vào tồn. */
+    restockQty: integer("restock_qty").notNull().default(0),
+    /** Số món về nhưng không bán lại được (rách, bẩn, thiếu phụ kiện). */
+    unsellableQty: integer("unsellable_qty").notNull().default(0),
+    /** Bằng chứng: ảnh, ghi chú của người kiểm. Bắt buộc khi kết luận không bán được. */
+    note: text("note").notNull().default(""),
+    /** Phiếu tái nhập được sinh ra khi kết luận bán lại được — để truy nguyên hai chiều. */
+    stockReceiptId: text("stock_receipt_id").references(() => stockReceipts.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("return_inspections_status_idx").on(t.status, t.receivedAt),
+    index("return_inspections_order_idx").on(t.orderId),
+    check("return_inspections_status_check", sql`${t.status} IN ('RECEIVED', 'INSPECTED')`),
+    /*
+      Danh sách này PHẢI khớp `RETURN_CONDITIONS` ở lib/constants/returns-condition.ts.
+
+      Đã lệch một lần: `WRONG_ITEM` (khách trả về một món KHÁC với món đã gửi) được thêm vào hằng
+      số và vào nút bấm của trạm kiểm đếm, nhưng ràng buộc này thì không — nên người kho bấm
+      "Không đúng hàng" là gặp lỗi ràng buộc, đúng lúc đang đứng đếm hàng. `tsc` không thấy được
+      loại lệch này vì một bên là TypeScript, một bên là chuỗi SQL.
+    */
+    check("return_inspections_condition_check", sql`${t.condition} IS NULL OR ${t.condition} IN ('RESTOCKABLE', 'UNSELLABLE', 'DAMAGED', 'MISSING', 'WRONG_ITEM')`),
+    // Đã kiểm thì PHẢI có kết luận, người kiểm và mốc kiểm — không có "đã kiểm" mà không biết ai kiểm.
+    check(
+      "return_inspections_inspected_check",
+      sql`${t.status} <> 'INSPECTED' OR (${t.condition} IS NOT NULL AND ${t.inspectedAt} IS NOT NULL AND ${t.inspectedBy} IS NOT NULL AND length(trim(${t.inspectedBy})) > 0)`,
+    ),
+    // Kết luận KHÔNG bán được thì phải nói vì sao — nếu không, phần hàng mất biến mất không dấu vết.
+    check(
+      "return_inspections_reason_check",
+      sql`${t.condition} IS NULL OR ${t.condition} = 'RESTOCKABLE' OR length(trim(${t.note})) > 0`,
+    ),
+    check("return_inspections_qty_check", sql`${t.restockQty} >= 0 AND ${t.unsellableQty} >= 0`),
+  ],
+);
+
+/**
+ * ───────────── KẾT QUẢ ĐẾM THEO TỪNG MÓN ─────────────
+ *
+ * VÌ SAO PHẢI LÀ BẢNG RIÊNG. `return_inspections` có grain MỘT DÒNG MỘT KIỆN: một `condition`, một
+ * `restock_qty` cho cả kiện. Một kiện ba món hoàn toàn có thể vừa đủ một món, vừa thiếu một món,
+ * vừa hỏng một món — ép cả kiện về một kết luận là vứt đúng phần thông tin mà người kho vừa bỏ
+ * công đếm ra, và sau đó không ai trả lời được "mã nào hay bị trả về hỏng".
+ *
+ * Nhét kết quả từng món vào cột `note` dạng JSON thì không đếm được, không lọc được, không ràng
+ * buộc được — và biến một cột đang có nghĩa "lý do người kiểm ghi" thành hai nghĩa. Nên là bảng.
+ *
+ * QUAN HỆ VỚI TỒN KHO: bảng này KHÔNG đụng tồn. Nó chỉ ghi lại người kho đã thấy gì. Tồn vẫn chỉ
+ * đổi qua `stock_receipts` / `stock_receipt_items` như mọi đường khác, và chỉ cho món kết luận `OK`.
+ *
+ * HÀNG KỲ VỌNG ĐƯỢC CHỤP LẠI TẠI LÚC KIỂM, không đọc sống từ đơn: đơn có thể bị sửa, mẫu mã có thể
+ * bị xoá hoặc đổi tên sau đó. Muốn biết "lúc đếm, kho tưởng sẽ nhận được gì" thì phải giữ đúng ảnh
+ * chụp ấy — nếu không, phần lệch sẽ tự biến mất khi dữ liệu gốc đổi.
+ */
+export const returnInspectionItems = pgTable(
+  "return_inspection_items",
+  {
+    id: id(),
+    inspectionId: text("inspection_id")
+      .notNull()
+      .references(() => returnInspections.id, { onDelete: "cascade" }),
+    /** Lặp lại để lọc/đếm theo kiện mà không phải nối bảng — kiện là thứ người kho cầm trên tay. */
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+
+    // ── Hàng KỲ VỌNG (ảnh chụp tại lúc kiểm) ──
+    expectedVariantId: text("expected_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    expectedSku: text("expected_sku").notNull().default(""),
+    expectedName: text("expected_name").notNull().default(""),
+    expectedColor: text("expected_color").notNull().default(""),
+    expectedSize: text("expected_size").notNull().default(""),
+    expectedQty: integer("expected_qty").notNull().default(0),
+
+    // ── Hàng THỰC NHẬN ──
+    /** Khác `expected_variant_id` khi khách trả về nhầm mẫu mã. */
+    actualVariantId: text("actual_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    actualSku: text("actual_sku").notNull().default(""),
+    actualQty: integer("actual_qty").notNull().default(0),
+
+    /** OK · SHORT · WRONG_ITEM · DAMAGED · DIRTY · UNSELLABLE · OTHER */
+    condition: text("condition").notNull(),
+    note: text("note").notNull().default(""),
+    inspectedBy: text("inspected_by").notNull().default(""),
+    inspectedByUserId: text("inspected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    inspectedAt: ts("inspected_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("return_inspection_items_inspection_idx").on(t.inspectionId),
+    index("return_inspection_items_shipment_idx").on(t.shipmentId),
+    /** Hỏi "mã Q002 bị trả về bao nhiêu, hỏng mấy cái" phải quét được theo mẫu mã. */
+    index("return_inspection_items_variant_idx").on(t.expectedVariantId),
+    /*
+      Danh sách PHẢI khớp `ITEM_CONDITIONS` ở lib/constants/return-lifecycle.ts.
+      Đã có tiền lệ lệch giữa hằng số TypeScript và ràng buộc SQL (`WRONG_ITEM` của bảng kiểm cả
+      kiện): người kho bấm một nút hợp lệ và nhận lỗi ràng buộc, đúng lúc đang đứng đếm hàng.
+    */
+    check("return_inspection_items_condition_check", sql`${t.condition} IN ('OK', 'SHORT', 'WRONG_ITEM', 'DAMAGED', 'DIRTY', 'UNSELLABLE', 'OTHER')`),
+    check("return_inspection_items_qty_check", sql`${t.expectedQty} >= 0 AND ${t.actualQty} >= 0`),
+    // Không "đủ" mà không nói vì sao thì phần hàng mất biến mất không dấu vết.
+    check("return_inspection_items_reason_check", sql`${t.condition} = 'OK' OR length(trim(${t.note})) > 0`),
+  ],
+);
+
+/**
+ * ═══════ CHỨNG CỨ ĐỐI SOÁT SỔ HÀNG HOÀN VIẾT TAY (một lần) ═══════
+ *
+ * Một lượt đối soát giữa bảng tính hàng hoàn của kho và ERP để lại một dòng cho MỖI dòng nguồn —
+ * kể cả dòng KHÔNG khớp. Dòng không khớp mới là phần đáng đọc: nó nói hai sổ lệch nhau ở đâu, và
+ * nếu chỉ lưu dòng khớp thì lần sau lại phải mở bảng tính ra mới biết đã bỏ qua những gì.
+ *
+ * `idempotency_key` bám vào NỘI DUNG dòng (bảng tính · sheet · mã vận đơn · dòng chữ sản phẩm ·
+ * lần xuất hiện thứ mấy), KHÔNG bám vào số dòng: chèn thêm một dòng ở đầu tệp không được biến cả
+ * lượt chạy lại thành một lượt ghi mới.
+ *
+ * BẢNG NÀY KHÔNG ĐỤNG TỒN KHO và không đụng vòng đời kiện. Nó chỉ ghi lại lượt đối soát đã kết
+ * luận gì. Việc ghi nhận kiện đã về vẫn đi qua `return_inspections` như mọi đường khác.
+ */
+export const hmtReturnReconciliation = pgTable(
+  "hmt_return_reconciliation",
+  {
+    id: id(),
+    /** Nhãn bảng tính nguồn — nhiều lượt đối soát từ nhiều tệp phải phân biệt được. */
+    workbook: text("workbook").notNull(),
+    sheet: text("sheet").notNull(),
+    sheetRole: text("sheet_role").notNull(),
+    /** Số dòng như Excel hiện, để người mở tệp nhảy được tới đúng chỗ. */
+    sourceRow: integer("source_row").notNull().default(0),
+    trackingRaw: text("tracking_raw").notNull().default(""),
+    trackingKey: text("tracking_key").notNull().default(""),
+    /** OWN_CELL · MERGED_CELL · NONE — vì sao dòng này mang mã vận đơn đó. */
+    inheritance: text("inheritance").notNull().default("OWN_CELL"),
+    productText: text("product_text").notNull().default(""),
+    productCode: text("product_code").notNull().default(""),
+    color: text("color").notNull().default(""),
+    size: text("size").notNull().default(""),
+    /** Mẫu mã lần ra được. `NULL` = chưa lần ra — KHÁC hẳn với "không có mẫu mã nào". */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    sku: text("sku").notNull().default(""),
+    quantity: integer("quantity").notNull().default(0),
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
+    matchStatus: text("match_status").notNull(),
+    detail: text("detail").notNull().default(""),
+    /** Dòng này có dẫn tới một lượt ghi vào ERP hay không. Chỉ `MATCHED` được `true`. */
+    written: boolean("written").notNull().default(false),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorLabel: text("actor_label").notNull().default(""),
+    processedAt: ts("processed_at").notNull().defaultNow(),
+
+    /*
+      ═══ KẾT LUẬN CỦA NGƯỜI, TÁCH HẲN KHỎI KẾT LUẬN CỦA MÁY ═══
+
+      `match_status` là MÁY đọc sổ giấy ra được gì. Bảy cột dưới đây là NGƯỜI nhìn hàng thật kết
+      luận gì. Ghi đè cái sau lên cái trước là mất dấu vì sao máy không khớp được — và lần sau
+      không ai sửa được luật đọc.
+
+      `NULL` = CHƯA AI XỬ LÝ, và đó là phần lớn. Nó KHÔNG phải "đã xem xong".
+
+      Ràng buộc ở CSDL (0083) giữ bốn điều: danh sách cách gỡ là ĐÓNG · gỡ rồi thì phải có người +
+      mốc + lý do · "đã nối kiện" phải chỉ đích danh một kiện và "đã chọn mẫu mã" phải chỉ đích
+      danh một mẫu mã · và dòng ĐÃ GHI (`written`) thì không gắn kết luận người lên được.
+    */
+    /** `LINKED_SHIPMENT` · `RESOLVED_SKU` · `DISMISSED` — xem `HMT_RESOLUTIONS`. */
+    resolution: text("resolution"),
+    resolvedShipmentId: text("resolved_shipment_id").references(() => shipments.id, { onDelete: "set null" }),
+    resolvedVariantId: text("resolved_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Ảnh chụp TÊN người gỡ — người nghỉ việc thì dòng vẫn đọc được. */
+    resolvedBy: text("resolved_by").notNull().default(""),
+    resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** BẮT BUỘC khi có kết luận: một dòng biến mất không lời giải thích sẽ quay lại làm phiền người sau. */
+    resolutionNote: text("resolution_note").notNull().default(""),
+    resolvedAt: ts("resolved_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("hmt_return_rec_shipment_idx").on(t.shipmentId),
+    index("hmt_return_rec_status_idx").on(t.matchStatus),
+    index("hmt_return_rec_tracking_idx").on(t.trackingKey),
+    /* Danh sách PHẢI khớp `HMT_MATCH_STATUSES` ở lib/constants/hmt-returns.ts — đã có tiền lệ lệch
+       giữa hằng số TypeScript và ràng buộc SQL (`WRONG_ITEM` của bảng kiểm cả kiện). */
+    check(
+      "hmt_return_rec_status_check",
+      sql`${t.matchStatus} IN ('MATCHED', 'ALREADY_RECEIVED', 'AMBIGUOUS_TRACKING', 'AMBIGUOUS_SKU', 'SKU_MISMATCH', 'QUANTITY_CONFLICT', 'UNMATCHED_TRACKING', 'DUPLICATE_SOURCE_ROW', 'CONFLICT')`,
+    ),
+    check("hmt_return_rec_inheritance_check", sql`${t.inheritance} IN ('OWN_CELL', 'MERGED_CELL', 'NONE')`),
+    /* Chỉ dòng KHỚP mới được đánh dấu đã ghi. Chặn ở CSDL vì đây là ranh giới giữa "đã đối chiếu"
+       và "đã đổi dữ liệu" — một dòng `written = true` mang trạng thái khác là một lượt ghi không
+       ai giải thích được. */
+    check("hmt_return_rec_written_check", sql`${t.written} = false OR ${t.matchStatus} = 'MATCHED'`),
+    index("hmt_return_rec_resolution_idx").on(t.resolution, t.matchStatus),
+    check("hmt_return_rec_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('LINKED_SHIPMENT', 'RESOLVED_SKU', 'DISMISSED')`),
+    check("hmt_return_rec_resolution_actor_check", sql`${t.resolution} IS NULL OR (${t.resolvedAt} IS NOT NULL AND ${t.resolvedBy} <> '' AND ${t.resolutionNote} <> '')`),
+    check("hmt_return_rec_resolution_target_check", sql`${t.resolution} IS DISTINCT FROM 'LINKED_SHIPMENT' OR ${t.resolvedShipmentId} IS NOT NULL`),
+    check("hmt_return_rec_resolution_sku_check", sql`${t.resolution} IS DISTINCT FROM 'RESOLVED_SKU' OR ${t.resolvedVariantId} IS NOT NULL`),
+    /* 724 dòng đã ghi là chứng cứ nhận hàng của 672 kiện — không viết đè lên chúng. */
+    check("hmt_return_rec_resolution_written_check", sql`${t.resolution} IS NULL OR ${t.written} = false`),
+  ],
+);
+
+/**
+ * ═══════ BẰNG CHỨNG HÀNH ĐỘNG — CÔNG CỦA ĐỘI, ĐO ĐƯỢC ═══════
+ *
+ * Câu chưa trả lời được: *CSKH đã cứu bao nhiêu doanh thu? Kế toán đòi về bao nhiêu COD? Kho giải
+ * phóng bao nhiêu vốn?*
+ *
+ * Không suy ngược từ lịch sử. Đo trên production 10/09/2026: 96 việc đã đóng có kết quả đơn, **cả
+ * 96 đều mang `resolution = 'UNKNOWN'`** — đóng từ trước khi có cột ghi nguồn gốc, không ca nào
+ * chứng minh được là có người xử lý. Lấy chúng tính "hiệu quả hành động" là đo một thứ khác rồi dán
+ * nhãn sai.
+ *
+ * Nên bảng này bắt đầu từ HÔM NAY, ghi một dòng mỗi lần MỘT NGƯỜI đóng một việc:
+ *
+ *   · ai đóng, lúc nào, mất bao lâu kể từ khi phát hiện;
+ *   · TIỀN ĐANG TREO tại thời điểm đóng — chụp lại, vì giá trị đơn có thể đổi sau;
+ *   · KẾT QUẢ ĐƠN tại thời điểm đóng — mốc để so về sau.
+ *
+ * `recovered_value` cố ý để TRỐNG lúc ghi. Lúc đóng việc thì đơn thường chưa ngã ngũ; điền một con
+ * số ở đó là đoán. Nó được tính sau, khi đơn đã có kết quả cuối, bằng cách so `outcome_at_close`
+ * với kết quả hiện tại. Chưa tính được thì là `NULL` = CHƯA BIẾT, không phải 0.
+ */
+export const actionEvidence = pgTable(
+  "action_evidence",
+  {
+    id: id(),
+    /** Việc trong hàng đợi. Không `references` để giữ bằng chứng khi việc cũ bị dọn. */
+    notificationId: text("notification_id").notNull(),
+    caseType: text("case_type").notNull(),
+    team: text("team").notNull().default(""),
+    entityType: text("entity_type").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Ai đóng. `NULL` nghĩa là dòng hỏng — bảng này chỉ ghi việc CÓ NGƯỜI đóng. */
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    detectedAt: ts("detected_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at").notNull(),
+    /** Số giờ từ lúc phát hiện tới lúc đóng. Chụp lại để khỏi tính lại từ hai mốc có thể bị sửa. */
+    hoursToClose: integer("hours_to_close"),
+    /**
+     * Tiền đang treo TẠI THỜI ĐIỂM ĐÓNG (đồng). Ảnh chụp, không phải giá trị hôm nay.
+     *
+     * Cố ý KHÔNG dùng helper `money()` (notNull default 0): việc không gắn với đơn hay vận đơn thì
+     * không có tiền để tra, và đó là CHƯA BIẾT — ghi 0 sẽ kéo mọi con số trung bình xuống bằng
+     * những dòng vốn không có gì để đo.
+     */
+    moneyAtRisk: bigint("money_at_risk", { mode: "number" }),
+    /** Kết quả đơn tại thời điểm đóng — mốc so sánh về sau. `NULL` = việc không gắn với đơn. */
+    outcomeAtClose: text("outcome_at_close"),
+    /**
+     * Tiền THẬT SỰ thu về, tính sau khi đơn ngã ngũ. `NULL` = CHƯA BIẾT, không phải 0.
+     */
+    recoveredValue: integer("recovered_value"),
+    recoveredAt: ts("recovered_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("action_evidence_actor_idx").on(t.actorId, t.completedAt),
+    index("action_evidence_type_idx").on(t.caseType, t.completedAt),
+    // Một việc đóng một lần: bấm hai lần không được đếm thành hai công.
+    uniqueIndex("action_evidence_notification_idx").on(t.notificationId),
+  ],
+);
+
 export const expenses = pgTable(
   "expenses",
   {
@@ -923,12 +1774,312 @@ export const expenses = pgTable(
     description: text("description").notNull(),
     amount: integer("amount").notNull(),
     occurredAt: ts("occurred_at").notNull(),
+    /**
+     * KỲ HIỆU LỰC của khoản chi — chỉ dùng khi `allocationMethod = 'PERIOD_PRORATA'`.
+     * Có kỳ thì báo cáo lấy đúng phần ngày chồng lấn, thay vì cộng nguyên khoản vào bất kỳ khoảng
+     * nào chứa `occurred_at`. Xem `lib/constants/cost-allocation.ts`.
+     */
+    periodStart: ts("period_start"),
+    periodEnd: ts("period_end"),
+    allocationMethod: text("allocation_method").notNull().default("EVENT_DATE"),
+    /** Khoản theo kỳ nhưng CHƯA khai kỳ — nêu ở Chất lượng dữ liệu, KHÔNG tự đoán kỳ giúp. */
+    needsAllocationReview: boolean("needs_allocation_review").notNull().default(false),
     reference: text("reference").notNull().default(""),
+    /**
+     * NGUỒN của khoản chi — quyết định nó có được tính vào lợi nhuận hay không khi nhóm của nó đã
+     * có nguồn chuyên biệt (cước, phí hoàn). `MANUAL_ADJUSTMENT` là khoản ĐIỀU CHỈNH có chứng cứ:
+     * đền bù, phí ngoại lệ, cước chuyến gom hàng không gắn được vận đơn nào — tiền thật, phải tính.
+     * Khoản `MANUAL` thông thường trong các nhóm đó bị loại vì vận đơn đã bao trọn.
+     */
+    costSource: text("cost_source").notNull().default("MANUAL"),
+    /** Bắt buộc với `MANUAL_ADJUSTMENT`: vì sao khoản này KHÔNG nằm trong cước theo vận đơn */
+    reason: text("reason").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt)],
+  (t) => [index("expenses_cat_occurred_idx").on(t.category, t.occurredAt), index("expenses_occurred_idx").on(t.occurredAt),
+    check("expenses_cost_source_check", sql`${t.costSource} IN ('MANUAL', 'MANUAL_ADJUSTMENT', 'BANK_IMPORT', 'PAYROLL')`),
+    // Khoản điều chỉnh mà không nói vì sao thì không kiểm chứng được ⇒ chặn ngay ở CSDL.
+    check("expenses_adjustment_reason_check", sql`${t.costSource} <> 'MANUAL_ADJUSTMENT' OR length(trim(${t.reason})) > 0`),
+    index("expenses_period_idx").on(t.periodStart, t.periodEnd),
+    check("expenses_allocation_check", sql`${t.allocationMethod} IN ('EVENT_DATE', 'PERIOD_PRORATA', 'ORDER_ATTRIBUTED', 'ACTUAL_DATED_SPEND')`),
+    // Chia theo ngày thì BẮT BUỘC có kỳ hợp lệ — không có kỳ mà đòi chia là không tính được.
+    check("expenses_period_check", sql`${t.allocationMethod} <> 'PERIOD_PRORATA' OR (
+      ${t.periodStart} IS NOT NULL AND ${t.periodEnd} IS NOT NULL AND ${t.periodEnd} >= ${t.periodStart})`),
+  ],
+);
+
+/**
+ * ═══════════ SỔ GIAO DỊCH NGÂN HÀNG — DÒNG TIỀN THU / CHI THỰC ═══════════
+ *
+ * Sao kê là nguồn TIỀN THẬT: mọi đồng vào ra tài khoản đều có một dòng ở đây, kể cả những dòng
+ * không ảnh hưởng lãi lỗ (chuyển giữa tài khoản của mình, trả nợ gốc, rút vốn).
+ *
+ * Bảng này CHỈ ghi nhận và phân loại. Việc một dòng có được trừ vào lợi nhuận hay không do
+ * `lib/constants/bank.ts::BANK_GROUP_SPEC` quyết định, dựa trên hợp đồng nguồn sự thật ở
+ * `lib/constants/cost-sources.ts` — tiền quảng cáo, tiền hàng, cước ĐVVC đã có nguồn chuyên biệt
+ * nên dòng sao kê tương ứng chỉ tính vào DÒNG TIỀN, không trừ lần thứ hai vào lãi lỗ.
+ */
+/**
+ * ════════════ TÀI KHOẢN NGÂN HÀNG ════════════
+ *
+ * Trước đây `bank_transactions.account` là một ô chữ tự do và luôn rỗng, vì sao kê tải tay không
+ * nói tài khoản nào — người nhập tự biết. Realtime thì không: một webhook SePay có thể tới từ bất
+ * kỳ tài khoản nào đã nối, nên phải có thực thể tài khoản thì mới trả lời được "đồng tiền này ở
+ * tài khoản nào" và "số dư từng tài khoản là bao nhiêu".
+ *
+ * KHOÁ TỰ NHIÊN = nhà cung cấp + cổng ngân hàng + số tài khoản + tài khoản phụ. `sub_account` là
+ * tài khoản ảo (VA) của SePay: cùng một số tài khoản gốc có thể sinh nhiều VA, và tiền vào VA là
+ * tiền vào tài khoản gốc — nhưng phải phân biệt được thì mới đối chiếu đơn hàng theo VA.
+ *
+ * `UNCONFIRMED` = ERP tự tạo khi thấy một tài khoản lạ trong gói tin đã xác thực chữ ký. Không
+ * chặn tiền lại: gói tin qua được HMAC nghĩa là nó đến từ chính tài khoản SePay của shop, nên tài
+ * khoản đó có thật. Việc của người là ĐẶT TÊN và xác nhận, không phải đi cứu giao dịch bị chặn.
+ */
+export const bankAccounts = pgTable(
+  "bank_accounts",
+  {
+    id: id(),
+    /** '' = tài khoản khai tay (sao kê tải về), 'SEPAY' = nhận diện từ gói tin SePay */
+    provider: text("provider").notNull().default(""),
+    /** Tên ngân hàng do nhà cung cấp đặt: MBBank, Vietcombank, ACB… KHÔNG hard-code ngân hàng nào. */
+    gateway: text("gateway").notNull().default(""),
+    accountNumber: text("account_number").notNull(),
+    /** Tài khoản ảo (VA) nếu có — '' là tài khoản gốc. */
+    subAccount: text("sub_account").notNull().default(""),
+    /** Tên người đọc hiểu. ERP tự sinh khi mới thấy, người sửa lại sau. */
+    label: text("label").notNull().default(""),
+    currency: text("currency").notNull().default("VND"),
+    /** ACTIVE = đã xác nhận · UNCONFIRMED = ERP tự thấy, chờ người đặt tên · DISABLED = ngừng dùng */
+    status: text("status").notNull().default("UNCONFIRMED"),
+    note: text("note").notNull().default(""),
+    /** Gói tin gần nhất chạm tới tài khoản này — để biết tài khoản còn sống hay đã ngừng đổ dữ liệu. */
+    lastSeenAt: ts("last_seen_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bank_accounts_natural_uq").on(t.provider, t.gateway, t.accountNumber, t.subAccount),
+    index("bank_accounts_status_idx").on(t.status),
+    check("bank_accounts_status_check", sql`${t.status} IN ('ACTIVE', 'UNCONFIRMED', 'DISABLED')`),
+  ],
+);
+
+export const bankTransactions = pgTable(
+  "bank_transactions",
+  {
+    id: id(),
+    /** Mốc giao dịch. Sao kê ghi giờ Việt Nam; mapper đổi sang UTC trước khi lưu. */
+    txnAt: ts("txn_at").notNull(),
+    /** DƯƠNG = tiền vào, ÂM = tiền ra. Một cột có dấu thay vì hai cột, để không bao giờ cộng nhầm cả hai. */
+    amount: integer("amount").notNull(),
+    description: text("description").notNull().default(""),
+    counterparty: text("counterparty").notNull().default(""),
+    /** Mã giao dịch của ngân hàng — KHOÁ TỰ NHIÊN chống nhập trùng khi tải lại sao kê. */
+    bankRef: text("bank_ref").notNull(),
+    /** Tài khoản / ngân hàng phát sinh (để sau này gộp nhiều tài khoản) */
+    account: text("account").notNull().default(""),
+    /** Nhóm kế toán — quyết định giao dịch này đi vào báo cáo nào */
+    accountingGroup: text("accounting_group").notNull().default("UNCLASSIFIED"),
+    /** Mã danh mục chi tiết của app sao kê (LUONG, THUE_MAT_BANG…) — giữ nguyên để truy nguyên */
+    categoryCode: text("category_code").notNull().default(""),
+    note: text("note").notNull().default(""),
+    /** Quy tắc đã tự gán nhãn dòng này (nếu có) — sửa tay thì xoá về NULL để quy tắc không ghi đè */
+    ruleId: text("rule_id"),
+    /** "" = chưa ai phân loại; "rule" = do quy tắc; còn lại là email người phân loại */
+    classifiedBy: text("classified_by").notNull().default(""),
+    classifiedAt: ts("classified_at"),
+    /**
+     * NGUỒN GỐC, KHÔNG PHẢI DANH TÍNH.
+     *
+     * Đường vào đã TẠO dòng này. Bất biến sau khi tạo. Cùng một giao dịch ngân hàng có thể được
+     * nhiều đường xác nhận (webhook báo trước, sao kê tải về sau) — nhưng chỉ có MỘT dòng, và
+     * `seen_sources` mới là nơi ghi đủ các đường đã xác nhận nó.
+     *
+     * IMPORT = sao kê · MANUAL = gõ tay · WEBHOOK = SePay đẩy realtime · API = truy vấn đối chiếu
+     */
+    source: text("source").notNull().default("IMPORT"),
+    /** Nhà cung cấp đã đẩy dòng này về: '' (sao kê tải tay) hoặc 'SEPAY'. */
+    provider: text("provider").notNull().default(""),
+    /**
+     * DANH TÍNH GIAO HÀNG của nhà cung cấp (`id` trong gói tin SePay) — KHÁC danh tính kinh tế.
+     *
+     * SePay gửi lại tối đa 7 lần trong 5 giờ. Ràng buộc DUY NHẤT trên cột này là thứ khiến gửi lại
+     * KHÔNG THỂ đẻ dòng thứ hai, kể cả hai gói tin tới cùng lúc — chống trùng bằng mã ứng dụng
+     * thôi thì vẫn thua điều kiện tranh chấp.
+     *
+     * NGƯỜI ĐẦU TIÊN THẮNG: đã có mã rồi thì gói tin sau không ghi đè. Hai mã SePay khác nhau cùng
+     * trỏ về một giao dịch ngân hàng là bất thường — phải nêu ra, không được im lặng thay mã.
+     */
+    providerTxnId: text("provider_txn_id").notNull().default(""),
+    /** Tài khoản ngân hàng phát sinh. NULL = chưa nhận diện được (sao kê tải tay đời cũ). */
+    bankAccountId: text("bank_account_id"),
+    /** Đường vào xác nhận dòng này gần nhất. */
+    lastSeenSource: text("last_seen_source").notNull().default(""),
+    /** Toàn bộ provenance: [{source, provider, at, ref}] — mỗi lần một đường xác nhận thì thêm một mục. */
+    seenSources: jsonb("seen_sources").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Số dư luỹ kế sau giao dịch, theo ngân hàng.
+     *
+     * NULL = CHƯA BIẾT, không phải 0. Đây là mỏ neo đối chiếu mạnh nhất của cả sổ: xếp theo thời
+     * gian thì `balance_after[i] − balance_after[i−1]` phải bằng `amount[i]`. Đứt chuỗi = thiếu
+     * giao dịch; bước không khớp = trùng giao dịch.
+     */
+    balanceAfter: integer("balance_after"),
+    /**
+     * LƯỚI AN TOÀN, KHÔNG PHẢI KHOÁ. Cố ý KHÔNG unique.
+     *
+     * Hai dòng cùng `match_key` mà khác `bank_ref` thì ERP nêu ra để người xem, TUYỆT ĐỐI không tự
+     * gộp: hai lần chuyển cùng số tiền cho cùng một người trong cùng một phút là chuyện có thật, và
+     * tự gộp là xoá tiền thật.
+     */
+    matchKey: text("match_key").notNull().default(""),
+    /**
+     * ĐỐI CHIẾU, KHÔNG PHẢI GHI NHẬN.
+     *
+     * Một dòng tiền ra KHÔNG tự sinh chi phí trong lãi lỗ — trả lương qua ngân hàng là tiền đi ra,
+     * nhưng chi phí lương đã được ghi nhận theo kỳ ở nguồn có thẩm quyền. Liên kết ở đây chỉ để nối
+     * TIỀN THẬT với CHỨNG TỪ đã có, phục vụ đối chiếu; không nhân đôi chi phí.
+     */
+    linkedType: text("linked_type").notNull().default(""),
+    linkedId: text("linked_id").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bank_txn_ref_idx").on(t.bankRef),
+    index("bank_txn_at_idx").on(t.txnAt),
+    index("bank_txn_group_idx").on(t.accountingGroup, t.txnAt),
+    index("bank_txn_linked_idx").on(t.linkedType, t.linkedId),
+    // ẢNH CHỤP MỐI NỐI CHÍNH, KHÔNG PHẢI NGUỒN SỰ THẬT. Nguồn là `bank_transaction_links` (nhiều–nhiều,
+    // có số tiền). Hai cột này giữ mối nối LỚN NHẤT để màn hình cũ và bộ lọc cũ chạy y nguyên; chúng
+    // được một hàm duy nhất ghi lại (`syncPrimaryLink`) và một bài kiểm khoá chúng luôn khớp bảng nối.
+    check("bank_txn_linked_check", sql`${t.linkedType} IN ('', 'EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION')`),
+    // Có loại thì phải có mã, và ngược lại — nửa vời thì đối chiếu không lần ra được gì.
+    check("bank_txn_linked_pair_check", sql`(${t.linkedType} = '' AND ${t.linkedId} = '') OR (${t.linkedType} <> '' AND length(${t.linkedId}) > 0)`),
+    // Số tiền 0 không phải giao dịch; chiều tiền phải rõ ràng.
+    check("bank_txn_amount_check", sql`${t.amount} <> 0`),
+    check("bank_txn_source_check", sql`${t.source} IN ('IMPORT', 'MANUAL', 'WEBHOOK', 'API')`),
+    // CHỐNG TRÙNG Ở TẦNG CSDL, không phải ở tầng ứng dụng: gói tin gửi lại (SePay thử tối đa 7 lần)
+    // hoặc hai gói tin cùng lúc đều không thể đẻ dòng thứ hai cho cùng một mã giao dịch nhà cung cấp.
+    uniqueIndex("bank_txn_provider_uq").on(t.provider, t.providerTxnId).where(sql`${t.providerTxnId} <> ''`),
+    index("bank_txn_match_idx").on(t.matchKey),
+    index("bank_txn_account_idx").on(t.bankAccountId, t.txnAt),
+  ],
+);
+
+/**
+ * QUY TẮC GÁN NHÃN TỰ ĐỘNG cho giao dịch sao kê.
+ *
+ * Quy tắc chỉ chạm vào dòng CHƯA ai sửa tay (`classified_by` rỗng hoặc = 'rule'). Người đã phân
+ * loại tay thì quy tắc không được ghi đè — nếu không, mỗi lần nhập sao kê mới lại xoá công sức
+ * phân loại của chủ shop.
+ */
+export const bankRules = pgTable(
+  "bank_rules",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    /** Số nhỏ chạy trước. Quy tắc đầu tiên khớp sẽ thắng — không cộng dồn nhiều quy tắc lên một dòng. */
+    priority: integer("priority").notNull().default(100),
+    /** IN = chỉ tiền vào, OUT = chỉ tiền ra, ANY = cả hai */
+    direction: text("direction").notNull().default("ANY"),
+    /** Khớp CHỨA, không phân biệt hoa thường và dấu tiếng Việt (chuẩn hoá bằng lib/text.ts) */
+    matchCounterparty: text("match_counterparty").notNull().default(""),
+    matchDescription: text("match_description").notNull().default(""),
+    /** Khoảng số tiền theo TRỊ TUYỆT ĐỐI (₫). `maxAmount` = 0 nghĩa là không giới hạn trên. */
+    minAmount: integer("min_amount").notNull().default(0),
+    maxAmount: integer("max_amount").notNull().default(0),
+    accountingGroup: text("accounting_group").notNull(),
+    categoryCode: text("category_code").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bank_rules_priority_idx").on(t.enabled, t.priority),
+    check("bank_rules_direction_check", sql`${t.direction} IN ('IN', 'OUT', 'ANY')`),
+    // Quy tắc không có điều kiện nào sẽ khớp MỌI dòng — chặn ngay ở CSDL.
+    check("bank_rules_match_check", sql`length(${t.matchCounterparty}) > 0 OR length(${t.matchDescription}) > 0 OR ${t.minAmount} > 0 OR ${t.maxAmount} > 0`),
+    check("bank_rules_amount_check", sql`${t.maxAmount} = 0 OR ${t.maxAmount} >= ${t.minAmount}`),
+  ],
+);
+
+/**
+ * ═══════════ MỐI NỐI GIỮA TIỀN THẬT VÀ CHỨNG TỪ ═══════════
+ *
+ * Hợp đồng: `docs/finance-truth-contract.md`. Hằng số: `lib/constants/finance-truth.ts`.
+ *
+ * VÌ SAO KHÔNG DÙNG `bank_transactions.linked_type/linked_id`. Hai cột đó chỉ chứa được MỘT mối nối
+ * không mang số tiền, nên ba tình huống thường ngày của shop không diễn tả được:
+ *
+ *   · một khoản chi 20 triệu trả làm ba lần → ba dòng tiền cùng trỏ về một khoản chi, mỗi dòng một phần;
+ *   · một chuyển khoản 30 triệu trả hai phiếu nhập 20 + 10 → một dòng tiền, hai chứng từ;
+ *   · trả một phần rồi còn nợ → phải biết đã trả bao nhiêu mới nói được "còn nợ bao nhiêu".
+ *
+ * Không có số tiền phân bổ thì "khoản chi này đã trả chưa" chỉ có hai câu trả lời đúng/sai, trong
+ * khi thực tế là một con số. Bảng này là quan hệ NHIỀU–NHIỀU CÓ SỐ TIỀN.
+ *
+ * MỐI NỐI KHÔNG TẠO RA TIỀN VÀ KHÔNG TẠO RA CHI PHÍ. Nó chỉ nói "đồng tiền này ứng với khoản kia".
+ * Không báo cáo nào được cộng số tiền ở đây vào doanh thu, chi phí, hay lợi nhuận — chúng đã được
+ * ghi nhận ở sổ có thẩm quyền của chúng. Cộng vào là đếm đôi, đúng thứ bảng này sinh ra để chặn.
+ *
+ * MỖI DÒNG LÀ MỘT KHẲNG ĐỊNH CÓ NGƯỜI CHỊU TRÁCH NHIỆM: `confirmed_by` không bao giờ rỗng. Máy tự
+ * nối thì ghi `auto:exact`, và CHỈ mức `EXACT` (có mã chứng từ trong nội dung chuyển khoản) mới
+ * được tự nối — mọi mức thấp hơn phải có người bấm. Lịch sử thay đổi nằm ở `audit_logs`.
+ */
+export const bankTransactionLinks = pgTable(
+  "bank_transaction_links",
+  {
+    id: id(),
+    txnId: text("txn_id").notNull(),
+    /** EXPENSE · COD_BATCH · STOCK_RECEIPT · AD_SPEND · PAYROLL_PERIOD · BANK_TRANSACTION */
+    targetType: text("target_type").notNull(),
+    /**
+     * Mã chứng từ đích. Với `PAYROLL_PERIOD` là tháng `YYYY-MM` — bảng Lương là cấu hình chứ không
+     * phải bảng dữ liệu nên khoá tự nhiên của một kỳ lương chính là tháng của nó.
+     */
+    targetId: text("target_id").notNull(),
+    /**
+     * Phần số tiền CỦA DÒNG TIỀN NÀY được phân bổ cho chứng từ kia. Luôn DƯƠNG: chiều tiền đã nằm ở
+     * dấu của `bank_transactions.amount`, lặp lại dấu ở đây chỉ tạo thêm một chỗ để cộng sai dấu.
+     *
+     * Tổng phân bổ của một dòng tiền không được vượt trị tuyệt đối số tiền của nó — vượt nghĩa là
+     * cùng một đồng đang đánh dấu hai nghĩa vụ đã trả. Ràng buộc này cần đọc các dòng anh em nên
+     * nằm ở tầng dịch vụ (`lib/queries/finance-linkage.ts`), có kiểm thử khoá.
+     */
+    amount: integer("amount").notNull(),
+    /** EXACT · HIGH_CONFIDENCE · MANUAL. Nhập nhằng KHÔNG được lưu — mối nối là một khẳng định. */
+    confidence: text("confidence").notNull().default("MANUAL"),
+    /** IDENTIFIER_MATCH · AMOUNT_DATE_MATCH · MANUAL · TRANSFER_PAIR */
+    method: text("method").notNull().default("MANUAL"),
+    /** Email người xác nhận, hoặc `auto:exact` khi máy tự nối. KHÔNG BAO GIỜ rỗng. */
+    confirmedBy: text("confirmed_by").notNull(),
+    confirmedAt: ts("confirmed_at").notNull().defaultNow(),
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Một dòng tiền nối tới cùng một chứng từ HAI lần là đếm đôi ngay trong chính bảng chống đếm đôi.
+    uniqueIndex("bank_txn_links_uq").on(t.txnId, t.targetType, t.targetId),
+    index("bank_txn_links_txn_idx").on(t.txnId),
+    // "Khoản chi này đã trả bao nhiêu" phải tra được từ phía CHỨNG TỪ, không chỉ từ phía dòng tiền.
+    index("bank_txn_links_target_idx").on(t.targetType, t.targetId),
+    check("bank_txn_links_amount_check", sql`${t.amount} > 0`),
+    check("bank_txn_links_target_type_check", sql`${t.targetType} IN ('EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION')`),
+    check("bank_txn_links_confidence_check", sql`${t.confidence} IN ('EXACT', 'HIGH_CONFIDENCE', 'MANUAL')`),
+    check("bank_txn_links_method_check", sql`${t.method} IN ('IDENTIFIER_MATCH', 'AMOUNT_DATE_MATCH', 'MANUAL', 'TRANSFER_PAIR')`),
+    // Khẳng định không có người chịu trách nhiệm thì không kiểm chứng được.
+    check("bank_txn_links_actor_check", sql`length(trim(${t.confirmedBy})) > 0`),
+    // Kỳ lương phải là tháng YYYY-MM; nối vào một chuỗi tự do thì không bao giờ tổng hợp lại được.
+    check("bank_txn_links_payroll_period_check", sql`${t.targetType} <> 'PAYROLL_PERIOD' OR ${t.targetId} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+    // Chân kia của một lần chuyển nội bộ không thể là chính nó.
+    check("bank_txn_links_self_check", sql`${t.targetType} <> 'BANK_TRANSACTION' OR ${t.targetId} <> ${t.txnId}`),
+    foreignKey({ columns: [t.txnId], foreignColumns: [bankTransactions.id], name: "bank_txn_links_txn_fk" }).onDelete("cascade"),
+  ],
 );
 
 /** Đơn landing page (khách điền form → Google Sheet → ERP): theo dõi trạng thái, lọc trùng, gửi đơn nháp lên Pancake POS */
@@ -1000,11 +2151,19 @@ export const fbAds = pgTable(
     status: text("status").notNull().default(""),
     /** Không tra được trên Facebook (đã xoá / không có quyền) */
     missing: boolean("missing").notNull().default(false),
+    /**
+     * BÀI VIẾT mà mẩu quảng cáo này quảng bá — mắt xích nối đơn chỉ có `post_id` về chiến dịch.
+     * Pancake ghi `orders.post_id` cho 82% đơn nhưng chỉ ghi `ad_id` cho 46%; nối qua bài viết là
+     * cách DUY NHẤT tăng độ phủ mà không phải suy đoán.
+     */
+    postId: text("post_id"),
+    /** Chuỗi gốc "<page_id>_<post_id>" của Facebook — giữ để truy nguyên. */
+    storyId: text("story_id"),
     fetchedAt: ts("fetched_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("fb_ads_campaign_idx").on(t.campaignId)],
+  (t) => [index("fb_ads_campaign_idx").on(t.campaignId), index("fb_ads_post_idx").on(t.postId)],
 );
 export type FbAd = typeof fbAds.$inferSelect;
 
@@ -1640,7 +2799,13 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   warehouse: one(warehouses, { fields: [orders.warehouseId], references: [warehouses.id] }),
   items: many(orderItems),
   statusHistory: many(orderStatusHistory),
+  /**
+   * GIỮ quan hệ một-vận-đơn cho các đường đã có (nó lấy MỘT dòng bất kỳ), nhưng từ 10/09/2026 một
+   * đơn có thể có NHIỀU lần gửi — dùng `attempts` khi cần đủ.
+   */
   shipment: one(shipments, { fields: [orders.id], references: [shipments.orderId] }),
+  /** Mọi lần gửi của đơn, gồm cả lần đã huỷ và lần gửi lại. */
+  attempts: many(shipments),
   returns: many(orderReturns),
 }));
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
@@ -1650,10 +2815,12 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
 export const orderStatusHistoryRelations = relations(orderStatusHistory, ({ one }) => ({ order: one(orders, { fields: [orderStatusHistory.orderId], references: [orders.id] }) }));
 export const orderReturnsRelations = relations(orderReturns, ({ one }) => ({ order: one(orders, { fields: [orderReturns.orderId], references: [orders.id] }) }));
 
-export const csCasesRelations = relations(csCases, ({ one }) => ({
+export const csCasesRelations = relations(csCases, ({ one, many }) => ({
   order: one(orders, { fields: [csCases.orderId], references: [orders.id] }),
   customer: one(customers, { fields: [csCases.customerId], references: [customers.id] }),
+  events: many(csCaseEvents),
 }));
+export const csCaseEventsRelations = relations(csCaseEvents, ({ one }) => ({ case: one(csCases, { fields: [csCaseEvents.caseId], references: [csCases.id] }) }));
 
 export const outreachTargetsRelations = relations(outreachTargets, ({ one }) => ({
   order: one(orders, { fields: [outreachTargets.orderId], references: [orders.id] }),
@@ -1691,8 +2858,1255 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type CodBatch = typeof codBatches.$inferSelect;
 export type CodStatementLine = typeof codStatementLines.$inferSelect;
 export type VtpStatementFile = typeof vtpStatementFiles.$inferSelect;
+export type HmtWorkbookRow = typeof hmtWorkbooks.$inferSelect;
+export type MarketingIdea = typeof marketingIdeas.$inferSelect;
+export type IdeaStatus = MarketingIdea["status"];
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;
+
+/**
+ * ═══════════ BẢNG TÍNH HÀNG HOÀN VIẾT TAY, ĐƯA VÀO BẰNG CHÍNH ERP ═══════════
+ *
+ * ─── VÌ SAO CÓ BẢNG NÀY ───
+ *
+ * Sổ hàng hoàn của kho là một tệp Excel nằm trên máy của chủ shop. Để đối soát nó với ERP, tệp
+ * phải tới được nơi có CSDL production. Ba đường từng thử và vì sao đều sai:
+ *
+ *  · **`scp` lên máy chủ** — cần khoá SSH mà máy của chủ shop không có, và bắt người vận hành mở
+ *    terminal cho một việc hàng tuần là cách chắc chắn nhất để việc đó không bao giờ được làm.
+ *  · **đường dẫn tải công khai** (`HMT_WORKBOOK_URL`) — "ai có link cũng xem được" là một cách nói
+ *    khác của "dữ liệu khách hàng nằm trên Internet".
+ *  · **đưa tệp vào kho mã** — kho mã này PUBLIC.
+ *
+ * Đường đúng là đường ERP **đã có sẵn** cho bảng kê Viettel Post (`vtp_statement_files`): người
+ * dùng đã đăng nhập kéo tệp vào màn hình của chính họ, tệp đi qua HTTPS bằng phiên của họ, và nằm
+ * lại trong CSDL production. Không SSH, không console, không khoá, không link công khai.
+ *
+ * ─── KHOÁ TỰ NHIÊN LÀ NỘI DUNG, KHÔNG PHẢI TÊN TỆP ───
+ *
+ * `sha256` là UNIQUE. Cùng một tệp tải lên mười lần vẫn là MỘT dòng — kể cả khi người dùng đổi tên
+ * tệp, mà họ luôn đổi ("Bản sao của…", "… (1).xlsx"). Ngược lại, hai tệp khác nội dung mà trùng
+ * tên là hai dòng khác nhau, đúng như phải thế: đối soát bằng nhầm bản là sai số tồn kho.
+ *
+ * Băm do MÁY CHỦ tính lại từ chính các byte đã nhận, KHÔNG nhận từ client (AGENTS.md mục 34: cột
+ * chữ đi kèm chỉ là ảnh chụp, khoá mới là danh tính).
+ */
+export const hmtWorkbooks = pgTable(
+  "hmt_workbooks",
+  {
+    id: id(),
+    filename: text("filename").notNull(),
+    /** Băm SHA-256 của NỘI DUNG, do máy chủ tính. Đây là danh tính của bản đối soát. */
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull().default(0),
+    /** Nội dung tệp, base64 — nguyên vẹn như lúc người dùng kéo vào, giống `vtp_statement_files`. */
+    content: text("content").notNull(),
+    /** Danh tính người tải lên. `NULL` = đưa vào bằng đường khác (script), không phải "không ai". */
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Ảnh chụp TÊN lúc tải lên — người nghỉ việc thì dòng vẫn đọc được. */
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    /** Lượt đối soát gần nhất ĐỌC bản này. `NULL` = đã tải lên nhưng chưa đối soát lần nào. */
+    lastUsedAt: ts("last_used_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("hmt_workbooks_sha_uq").on(t.sha256), index("hmt_workbooks_created_idx").on(t.createdAt)],
+);
+
+/**
+ * ═══════════ SỔ CHĂM SÓC ĐƠN GIAO HỤT ═══════════
+ *
+ * Câu hỏi bảng này sinh ra để trả lời: **gọi khách có cứu được đơn không, và cứu được bao nhiêu?**
+ *
+ * Trước đây không trả lời được. Bot tự nhắn thì có case CSKH, nhưng người nhấc máy gọi xong thì
+ * không có chỗ nào ghi — nên "đội CSKH cứu được bao nhiêu đơn" là một câu hỏi không có dữ liệu.
+ *
+ * ĐO TỪ HÔM NAY. Không dựng lại cohort quá khứ: dữ liệu cũ không mang actor, và suy ngược sẽ đẻ ra
+ * một tỷ lệ hiệu quả nghe rất thuyết phục mà không có gì đứng sau.
+ */
+/**
+ * ═══════════ TRẠNG THÁI CARE NỘI BỘ CỦA MỘT KIỆN — KHÔNG PHẢI TRẠNG THÁI VẬN CHUYỂN ═══════════
+ *
+ * `shipments.stage` là ĐVVC nói gì về kiện (chứng từ). Bảng này là ĐỘI nói gì về việc của mình với
+ * kiện đó: chưa xử lý · đang xử lý · chờ kết quả · escalate · đã xong. Hai chiều tách rời cố ý:
+ * đội bấm "đã xong" KHÔNG làm kiện thành "đã giao", và kiện được giao KHÔNG tự đóng việc của đội —
+ * kiện chỉ RỜI hàng đợi mặc định (điều kiện cần care hết), còn lịch sử ở đây và ở `care_actions`.
+ *
+ * Một dòng cho một kiện (khoá tự nhiên `shipment_id`). Không có dòng = CHƯA XỬ LÝ.
+ */
+export const shipmentCare = pgTable(
+  "shipment_care",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    /**
+     * ĐỢT THỨ MẤY. Ràng buộc UNIQUE cũ trên `shipment_id` đã được gỡ (migration 0075): kiện hỏng
+     * lần hai thì đội xử lý lần hai, và lần đó KHÔNG được ghi đè lên lần trước.
+     *
+     * Tối đa MỘT đợt đang mở cho mỗi kiện — do chỉ mục duy nhất từng phần `shipment_care_active_uidx`
+     * giữ, không do mã nguồn tự canh. Nhờ vậy webhook phát lại không thể sinh đợt thứ hai: lệnh chèn
+     * bị CSDL từ chối, chứ không phải bị một câu `if` nào đó bỏ sót.
+     */
+    episodeNo: integer("episode_no").notNull().default(1),
+    active: boolean("active").notNull().default(true),
+    /** Vòng đời ở `lib/constants/care.ts::CARE_TRANSITIONS` — chỉ đi theo bảng chuyển trạng thái. */
+    careStatus: text("care_status").notNull().default("NEW"),
+    /** Bối cảnh LÚC MỞ ĐỢT, cố ý không tính lại: "đợt này bắt đầu vì ĐVVC báo gì". */
+    entryCarrierState: text("entry_carrier_state"),
+    sourceTrigger: text("source_trigger"),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    trackingNumber: text("tracking_number"),
+    priority: text("priority"),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    ownerEmail: text("owner_email").notNull().default(""),
+    /** Hẹn theo dõi lại. Tới hạn thì kiện quay về "Cần care" dù đang "chờ kết quả". */
+    followUpAt: ts("follow_up_at"),
+    lastNote: text("last_note").notNull().default(""),
+    lastNoteAt: ts("last_note_at"),
+    lastNoteBy: text("last_note_by").notNull().default(""),
+    /** Lần đầu có NGƯỜI động vào (đổi trạng thái / ghi note / gọi). Đo thời gian phản hồi đầu. */
+    firstResponseAt: ts("first_response_at"),
+    doneAt: ts("done_at"),
+    escalatedAt: ts("escalated_at"),
+    /*
+      MỖI BÁO CÁO HỎI MỘT CÂU KHÁC NHAU NÊN PHẢI CÓ ĐỦ MỐC.
+
+        khối lượng việc  → `openedAt`    (đợt mở lúc nào)
+        hiệu suất người  → `outcomeAt`   (kết cục chốt lúc nào)
+        số thao tác      → mốc của từng dòng `care_business_actions`
+
+      Dùng chung một cột cho cả ba là cách chắc chắn nhất để một báo cáo trả lời câu hỏi của báo
+      cáo khác mà không ai nhận ra.
+    */
+    openedAt: ts("opened_at"),
+    assignedAt: ts("assigned_at"),
+    firstActionAt: ts("first_action_at"),
+    lastActionAt: ts("last_action_at"),
+    outcomeAt: ts("outcome_at"),
+    /**
+     * `resolution` là QUYẾT ĐỊNH của shop; `finalCarrierState` / `finalLogisticsOutcome` là CHỨNG
+     * TỪ của ĐVVC. Hai cột riêng, cố ý: "duyệt hoàn" KHÔNG phải "đã hoàn".
+     */
+    resolution: text("resolution"),
+    finalCarrierState: text("final_carrier_state"),
+    finalLogisticsOutcome: text("final_logistics_outcome"),
+    /** `RESCUED_DIRECT` · `RESCUED_EXCHANGE` · `RESCUE_FAILED` · `PENDING` · `UNATTRIBUTED`. */
+    careOutcome: text("care_outcome"),
+    /** Người CHỊU TRÁCH NHIỆM lúc chốt kết quả — khác `ownerId` (người đang cầm ca). */
+    ownerAtResolution: text("owner_at_resolution").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    initialOwnerId: text("initial_owner_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /** Đơn đổi nối với ca này. Không có nó thì "cứu bằng đơn đổi" chỉ đoán được, không đo được. */
+    replacementOrderId: text("replacement_order_id").references((): AnyPgColumn => orders.id, { onDelete: "set null" }),
+    replacementShipmentId: text("replacement_shipment_id").references((): AnyPgColumn => shipments.id, { onDelete: "set null" }),
+    /** Số lần kiện quay lại hàng đợi SAU khi đã đóng. */
+    reopenCount: integer("reopen_count").notNull().default(0),
+    updatedBy: text("updated_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("shipment_care_status_idx").on(t.careStatus, t.followUpAt),
+    index("shipment_care_owner_idx").on(t.ownerId, t.careStatus),
+    // TỐI ĐA MỘT ĐỢT ĐANG MỞ cho mỗi kiện — ràng buộc nằm ở CSDL, không ở mã nguồn.
+    uniqueIndex("shipment_care_active_uidx").on(t.shipmentId).where(sql`${t.active}`),
+    index("shipment_care_outcome_idx").on(t.careOutcome, t.outcomeAt),
+    index("shipment_care_resolution_owner_idx").on(t.ownerAtResolution, t.outcomeAt),
+    check("shipment_care_outcome_check", sql`${t.careOutcome} IS NULL OR ${t.careOutcome} IN ('RESCUED_DIRECT', 'RESCUED_EXCHANGE', 'RESCUE_FAILED', 'PENDING', 'UNATTRIBUTED')`),
+    check("shipment_care_status_check", sql`${t.careStatus} IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'WAITING_CARRIER', 'WAITING_REDELIVERY', 'RESOLVED', 'ESCALATED', 'CANCELLED')`),
+  ],
+);
+
+/**
+ * ═══════════ YÊU CẦU GỬI ĐVVC: VÒNG ĐỜI ĐẦY ĐỦ, KHÔNG GIẢ VỜ THÀNH CÔNG ═══════════
+ *
+ *   PENDING → SENT → ACKNOWLEDGED (API nhận) → SUCCESS (sự kiện ĐVVC xác nhận) | FAILED | UNSUPPORTED
+ *   MANUAL_REQUIRED (tài khoản API không có quyền trên kiện này) → MANUAL_DONE (người xác nhận đã làm tay)
+ *
+ * Mỗi yêu cầu có khoá idempotent, payload gửi đi, phản hồi nhận về, ai gửi, lúc nào. "Đã xử lý"
+ * không bao giờ được ghi trước khi ĐVVC xác nhận.
+ */
+export const carrierActionRequests = pgTable(
+  "carrier_action_requests",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderNumber: text("order_number").notNull().default(""),
+    /** `redeliver` · `approve-return` · `resend` · `approve` · `cancel` · `edit` — xem `lib/constants/care.ts`. */
+    actionKey: text("action_key").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    /** Dữ liệu nghiệp vụ của yêu cầu (loại, ghi chú, trường sửa). */
+    payload: jsonb("payload"),
+    /** Thân gói tin THÔ gửi đi và phản hồi THÔ nhận về — để truy lại đúng những gì ĐVVC nhìn thấy. */
+    rawRequest: jsonb("raw_request"),
+    response: jsonb("response"),
+    error: text("error"),
+    /** Số lần đã gọi API (retry hữu hạn, chỉ khi lỗi tạm thời). */
+    attempts: integer("attempts").notNull().default(0),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    note: text("note").notNull().default(""),
+    sentAt: ts("sent_at"),
+    ackAt: ts("ack_at"),
+    /** Mốc ĐVVC xác nhận bằng SỰ KIỆN (không phải bằng phản hồi API). */
+    confirmedAt: ts("confirmed_at"),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("carrier_action_shipment_idx").on(t.shipmentId, t.createdAt),
+    index("carrier_action_status_idx").on(t.status, t.createdAt),
+    check("carrier_action_status_check", sql`${t.status} IN ('PENDING', 'SENT', 'ACKNOWLEDGED', 'SUCCESS', 'FAILED', 'UNSUPPORTED', 'MANUAL_REQUIRED', 'MANUAL_DONE')`),
+  ],
+);
+
+/**
+ * ═══════════ LỊCH SỬ CASE — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ ═══════════
+ *
+ * Mỗi lần đổi trạng thái / giao người / note / hẹn / gửi ĐVVC là MỘT dòng: ai, lúc nào, làm gì, từ
+ * trạng thái nào sang trạng thái nào, SLA lúc đó ra sao, nguồn (UI / API / AI / hệ thống). Bảng này
+ * là nguồn cho "thời gian phản hồi đầu", "mở lại", "workload" — không ai được viết lại quá khứ.
+ */
+/**
+ * ═══════════ BỐN QUYẾT ĐỊNH NGHIỆP VỤ — GHI THÊM, KHÔNG BAO GIỜ GHI ĐÈ ═══════════
+ *
+ * Khác `care_actions` (ghi việc chăm sóc thô: đã gọi, đã nhắn) và khác `care_case_events` (ghi mọi
+ * lần đổi trạng thái / giao người / ghi chú). Bảng này ghi đúng bốn QUYẾT ĐỊNH mà người xử lý đưa
+ * ra — Duyệt hoàn · Phát tiếp · Đổi · Theo dõi tiếp — kèm đủ bối cảnh để nhật ký trả lời được:
+ *
+ *   ai · lúc nào · trên kiện nào · quyết định gì · trạng thái xử lý trước và sau ·
+ *   gửi lệnh gì sang ĐVVC · ĐVVC trả lời ra sao · ghi chú gì.
+ *
+ * `ownerIdAtAction` là ẢNH CHỤP người đang cầm ca lúc đó, không tính lại theo người cầm hôm nay:
+ * A nhận ca rồi chuyển B thì việc A đã làm vẫn là của A.
+ */
+export const careBusinessActions = pgTable(
+  "care_business_actions",
+  {
+    id: id(),
+    careCaseId: text("care_case_id")
+      .notNull()
+      .references(() => shipmentCare.id, { onDelete: "cascade" }),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    ownerIdAtAction: text("owner_id_at_action").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /** `APPROVE_RETURN` · `REQUEST_REDELIVERY` · `EXCHANGE` · `CONTINUE_MONITORING`. */
+    actionType: text("action_type").notNull(),
+    /** Lý do theo DANH MỤC (đếm được) — tách khỏi `reasonNote` là ô chữ tự do (không đếm được). */
+    reasonCode: text("reason_code"),
+    reasonNote: text("reason_note").notNull().default(""),
+    requestedAt: ts("requested_at").notNull().defaultNow(),
+    /** Nối sang sổ lệnh ĐVVC. NULL với hai hành động không gửi lệnh (Đổi, Theo dõi tiếp). */
+    carrierCommandId: text("carrier_command_id").references(() => carrierActionRequests.id, { onDelete: "set null" }),
+    carrierResult: text("carrier_result"),
+    previousCareStatus: text("previous_care_status"),
+    nextCareStatus: text("next_care_status"),
+    metadata: jsonb("metadata"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("care_business_actions_case_idx").on(t.careCaseId, t.createdAt),
+    index("care_business_actions_actor_idx").on(t.actorUserId, t.createdAt),
+    index("care_business_actions_shipment_idx").on(t.shipmentId, t.createdAt),
+    check("care_business_actions_type_check", sql`${t.actionType} IN ('APPROVE_RETURN', 'REQUEST_REDELIVERY', 'EXCHANGE', 'CONTINUE_MONITORING')`),
+  ],
+);
+
+export const careCaseEvents = pgTable(
+  "care_case_events",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** `UI` · `API` · `AI` · `SYSTEM` — xem `CARE_EVENT_SOURCES`. */
+    source: text("source").notNull().default("UI"),
+    /** `STATUS` · `ASSIGN` · `NOTE` · `FOLLOW_UP` · `RESOLVE` · `REOPEN` · `CANCEL` · `CARRIER_*` — xem `CARE_EVENT_ACTIONS`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousOwner: text("previous_owner"),
+    nextOwner: text("next_owner"),
+    /**
+     * CHỦ VIỆC BẰNG KHOÁ. Hai cột `*_owner` ở trên lưu EMAIL — đọc được nhưng người đổi email là
+     * mất dấu, và `""` với `NULL` trông giống nhau. `NULL` ở đây nghĩa là CHƯA AI NHẬN (UNASSIGNED).
+     */
+    previousOwnerId: text("previous_owner_id").references(() => users.id, { onDelete: "set null" }),
+    nextOwnerId: text("next_owner_id").references(() => users.id, { onDelete: "set null" }),
+    followUpAt: ts("follow_up_at"),
+    /** Ảnh chụp SLA lúc xảy ra: mốc vào hàng đợi, hạn phản hồi đầu, hạn đóng, đã vỡ chưa. */
+    sla: jsonb("sla"),
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("care_case_events_shipment_idx").on(t.shipmentId, t.createdAt),
+    index("care_case_events_actor_idx").on(t.actorEmail, t.createdAt),
+    check("care_case_events_source_check", sql`${t.source} IN ('UI', 'API', 'AI', 'SYSTEM')`),
+  ],
+);
+
+/**
+ * ═══════════ NHẬT KÝ TƯƠNG TÁC AI — AI KHÔNG ĐƯỢC LÀM GÌ MÀ KHÔNG ĐỂ LẠI DẤU ═══════════
+ *
+ * Mỗi lượt hỏi/đáp một dòng: ai hỏi, ở màn hình nào, model nào, gọi tool gì với input gì, hành
+ * động nào ĐƯỢC ĐỀ NGHỊ và hành động nào ĐÃ CHẠY (chỉ sau khi người xác nhận), token / chi phí /
+ * độ trễ. Không ghi secret, không ghi nguyên gói dữ liệu — chỉ tên tool + input + tóm tắt kết quả.
+ */
+export const aiInteractions = pgTable(
+  "ai_interactions",
+  {
+    id: id(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    userEmail: text("user_email").notNull().default(""),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    /** Bối cảnh màn hình: route + đối tượng đang xem. */
+    route: text("route").notNull().default(""),
+    entityType: text("entity_type").notNull().default(""),
+    entityId: text("entity_id").notNull().default(""),
+    /** Câu hỏi của người dùng (cắt 4000 ký tự). */
+    prompt: text("prompt").notNull().default(""),
+    /** Câu trả lời cuối của AI (cắt 8000 ký tự). */
+    answer: text("answer").notNull().default(""),
+    /** [{ name, input, kind, executed, ok, summary }] */
+    toolCalls: jsonb("tool_calls"),
+    /** Hành động ghi AI đề nghị, chờ người xác nhận: [{ token, name, input }]. */
+    actionsProposed: jsonb("actions_proposed"),
+    /** Hành động ghi ĐÃ chạy sau khi người xác nhận: [{ token, name, input, result }]. */
+    actionsExecuted: jsonb("actions_executed"),
+    usage: jsonb("usage"),
+    /** USD, 6 chữ số thập phân — ước tính theo bảng giá trong mã, không phải hoá đơn. */
+    costUsd: text("cost_usd").notNull().default("0"),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    rounds: integer("rounds").notNull().default(0),
+    status: text("status").notNull().default("OK"),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ai_interactions_user_idx").on(t.userId, t.createdAt),
+    index("ai_interactions_entity_idx").on(t.entityType, t.entityId, t.createdAt),
+    check("ai_interactions_status_check", sql`${t.status} IN ('OK', 'NEEDS_CONFIRMATION', 'REFUSED', 'ERROR')`),
+  ],
+);
+
+export const careActions = pgTable(
+  "care_actions",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Loại hành động — xem `CARE_ACTION_KINDS`. Ghi nhận việc ĐÃ LÀM, không phải việc định làm. */
+    kind: text("kind").notNull(),
+    note: text("note").notNull().default(""),
+    /*
+      ẢNH CHỤP BỐI CẢNH LÚC HÀNH ĐỘNG — cố ý không tính lại về sau.
+
+      So sánh "trước / sau khi có người chăm" phải đứng trên trạng thái LÚC ĐÓ. Tính lại theo trạng
+      thái hôm nay là hỏi "kiện này giờ ra sao" chứ không phải "việc chăm có tác dụng gì".
+    */
+    stageAtAction: text("stage_at_action").notNull().default(""),
+    bucketAtAction: text("bucket_at_action").notNull().default(""),
+    /** `NULL` = CHƯA BIẾT (vận đơn không gắn đơn), không phải 0đ. */
+    codAtAction: bigint("cod_at_action", { mode: "number" }),
+    eventAgeHoursAtAction: integer("event_age_hours_at_action"),
+    failedAttemptsAtAction: integer("failed_attempts_at_action"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("care_actions_shipment_idx").on(t.shipmentId, t.createdAt), index("care_actions_created_idx").on(t.createdAt)],
+);
+
+/**
+ * ═══════════ PHỄU HỘI THOẠI — GIỮ LẠI BẰNG CHỨNG ĐANG BỊ NÉM ĐI ═══════════
+ *
+ * Đặc tả: `docs/revenue-conversion-contract.md` · hằng số: `lib/constants/conversion.ts`.
+ *
+ * ─── VÌ SAO BẢNG NÀY CẦN TỒN TẠI ───
+ *
+ * `docs/sales-funnel-contract.md` kết luận hai bước đầu của phễu là KHÔNG ĐO ĐƯỢC vì "ERP không
+ * đồng bộ hội thoại Pancake". `lib/constants/operating-funnel.ts` nói ở khâu `LEAD`: *"Không có
+ * mốc phản hồi đầu tiên cho từng lead, nên tỷ lệ và thời gian phản hồi CHƯA đo được."*
+ *
+ * Nhưng job `cs-chat` vẫn gọi Pancake Pages API mỗi 15 phút, đọc hội thoại và tới 50 tin nhắn mỗi
+ * hội thoại, tính ra lúc khách cho SĐT và lúc khách cho địa chỉ — rồi **ném đi tất cả** trừ những
+ * ca sinh ra case CSKH.
+ *
+ * Hệ quả là MẪU SỐ BIẾN MẤT: `cs_cases` chỉ giữ ca đủ thông tin mà CHƯA có đơn (ca đã có đơn không
+ * sinh case). Không có mẫu số thì không có tỷ lệ chuyển đổi — chính `getOrderIntakeMetrics` phải tự
+ * cảnh báo rằng con số của nó "KHÔNG phải tỷ lệ chuyển của cả khâu". Đo trên chính lượt quét ngày
+ * 11/09/2026: 157 khách đủ thông tin, 136 đã có đơn, chỉ 21 ca thành case — nghĩa là 87% bằng chứng
+ * bị mất ngay tại chỗ.
+ *
+ * Bảng này KHÔNG thêm suy diễn nào. Nó chỉ ghi lại thứ job đã đọc được.
+ *
+ * ─── NULL LÀ CHƯA BIẾT ───
+ *
+ * Mọi mốc thời gian ở đây `NULL` nghĩa là **chưa quan sát được trong cửa sổ quét**, KHÔNG phải
+ * "không xảy ra". Hội thoại có thể đã có SĐT từ trước cửa sổ 48 giờ. Vì thế `scan_window_from` lưu
+ * mốc sớm nhất ta THẬT SỰ nhìn thấy — không có nó thì không phân biệt được "khách chưa cho số" với
+ * "ta chưa đọc tới đoạn khách cho số".
+ */
+export const conversationFunnel = pgTable(
+  "conversation_funnel",
+  {
+    id: id(),
+    /** Page Facebook của hội thoại. Khoá tự nhiên là (page_id, conversation_id). */
+    pageId: text("page_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    /** `customer_id` của Pancake trong hội thoại — cần để gọi lại API tin nhắn. */
+    pancakeCustomerId: text("pancake_customer_id").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    /** SĐT khách đã cho (chỉ chữ số). `NULL` = chưa thấy trong cửa sổ quét. */
+    phone: text("phone"),
+
+    /* ───── MỐC THỜI GIAN: NGUỒN DUY NHẤT CHO THỜI GIAN PHẢN HỒI ───── */
+    /** Tin ĐẦU TIÊN của khách mà ta nhìn thấy. Bước 1 của phễu. */
+    firstCustomerMessageAt: ts("first_customer_message_at"),
+    /**
+     * Tin ĐẦU TIÊN của shop SAU tin đầu của khách. Đây là thứ làm "thời gian phản hồi" đo được —
+     * mốc mà cả hai đặc tả phễu trước đây đều nói là không có.
+     */
+    firstShopReplyAt: ts("first_shop_reply_at"),
+    lastCustomerMessageAt: ts("last_customer_message_at"),
+    lastShopMessageAt: ts("last_shop_message_at"),
+    customerMessageCount: integer("customer_message_count").notNull().default(0),
+    shopMessageCount: integer("shop_message_count").notNull().default(0),
+
+    /*
+      ───── KHÔNG CÓ CỘT "Ý ĐỊNH MUA", VÀ ĐÓ LÀ MỘT QUYẾT ĐỊNH ─────
+
+      Kế hoạch ban đầu có một bước phễu "đủ điều kiện / có ý định mua". ERP KHÔNG có nguồn nào cho
+      nó. Mọi căn cứ nghĩ ra được đều là một trong hai thứ:
+
+       · chính SĐT hoặc địa chỉ khách đã cho — tức là ĐÚNG hai cột dưới đây, chỉ đổi tên. Đếm nó
+         thành một bước riêng là nhân đôi cùng một sự thật rồi gọi là hai bước;
+       · máy tìm từ khoá trong câu chữ — đúng loại suy diễn đã dựng ra 181 case sai
+         (xem `lib/cs/chat-detect.ts`).
+
+      Nên bước đó được khai là KHÔNG ĐO ĐƯỢC ở `UNMEASURABLE_STAGES`
+      (`lib/constants/conversion.ts`) và hiện thành một dòng "KHÔNG ĐO ĐƯỢC" có lý do trên màn hình.
+      Thứ ĐO ĐƯỢC và có ích hơn nằm ngay trên: `first_shop_reply_at` — khách đã được trả lời chưa.
+    */
+
+    /* ───── SĐT VÀ ĐỊA CHỈ ───── */
+    phoneAt: ts("phone_at"),
+    addressAt: ts("address_at"),
+    /** Nguyên văn đoạn khách gửi địa chỉ — người xử lý dán thẳng vào đơn, khỏi mở lại chat. */
+    addressText: text("address_text").notNull().default(""),
+    /** Lúc có ĐỦ cả SĐT và địa chỉ = mốc muộn hơn trong hai mốc trên. */
+    infoCompleteAt: ts("info_complete_at"),
+
+    /** Thẻ hội thoại Pancake — bằng chứng do NGƯỜI gắn, mạnh hơn máy suy từ câu chữ. */
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** Nhân viên đã trả lời hội thoại này (tên trên tin của page). '' = chưa ai trả lời. */
+    ownerName: text("owner_name").notNull().default(""),
+
+    /* ───── GHÉP SANG ĐƠN ───── */
+    matchedOrderId: text("matched_order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** `BY_CONVERSATION` · `BY_PHONE_UNIQUE` · `AMBIGUOUS` · `NONE` — ba mức của `matchOrderForConversation`. */
+    matchBasis: text("match_basis").notNull().default("NONE"),
+    /** Số đơn ứng viên khi ghép bằng SĐT. > 1 ⇒ nhập nhằng, KHÔNG kết luận. */
+    matchCandidates: integer("match_candidates").notNull().default(0),
+    /** Mốc lên đơn của đơn đã ghép — để đo "từ đủ thông tin tới có đơn" không phải join lại. */
+    matchedOrderAt: ts("matched_order_at"),
+    /**
+     * Lượt quét chạm TRẦN 200 hội thoại/page ⇒ page đó còn hội thoại chưa đọc. Không ghi cờ này thì
+     * một con số bị cắt trông y hệt một con số đầy đủ.
+     */
+    truncated: boolean("truncated").notNull().default(false),
+
+    /* ───── ĐỘ PHỦ: KHÔNG CÓ NÓ THÌ MỌI TỶ LỆ ĐỀU BỊA ───── */
+    /** Lần đầu ERP ghi được hội thoại này. */
+    firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+    lastScanAt: ts("last_scan_at").notNull().defaultNow(),
+    /**
+     * Mốc SỚM NHẤT ta thật sự đọc được tin trong hội thoại này. Tin cũ hơn mốc này chưa bao giờ
+     * được đọc, nên `NULL` ở các mốc trên có thể chỉ là chưa đọc tới — không phải chưa xảy ra.
+     */
+    scanWindowFrom: ts("scan_window_from"),
+    /** Nguyên văn đoạn làm căn cứ cho từng mốc: `{ intent, phone, address }`. Để người kiểm chứng được. */
+    evidence: jsonb("evidence"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("conversation_funnel_uq").on(t.pageId, t.conversationId),
+    index("conversation_funnel_first_msg_idx").on(t.firstCustomerMessageAt),
+    index("conversation_funnel_info_idx").on(t.infoCompleteAt),
+    index("conversation_funnel_order_idx").on(t.matchedOrderId),
+    index("conversation_funnel_unanswered_idx").on(t.firstShopReplyAt, t.lastCustomerMessageAt),
+    check("conversation_funnel_match_basis_check", sql`${t.matchBasis} IN ('BY_CONVERSATION','BY_PHONE_UNIQUE','AMBIGUOUS','NONE')`),
+  ],
+);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   HỆ ĐIỀU HÀNH CÔNG VIỆC (Work OS) — đặc tả: docs/work-management-os.md
+
+   Bảy bảng dưới đây KHÔNG chép dữ liệu nghiệp vụ. Chúng thêm đúng ba thứ ERP chưa từng có:
+   tầng tổ chức (phòng ban), lớp công việc (giao/hạn/hoãn/chặn cho việc đã tồn tại ở miền khác),
+   và tầng mục tiêu (OKR / BSC / kỳ review).
+
+   Việc sinh ra từ `cs_cases`, `shipment_care`, `bank_transactions`… KHÔNG có dòng ở đây trừ khi
+   có người chạm vào (giao cho ai, đặt hạn, hoãn, ghi chú). Hàng đợi là PHÉP CHIẾU, không phải bản
+   sao — xem `lib/queries/work-adapters.ts`.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export const departments = pgTable(
+  "departments",
+  {
+    id: id(),
+    /** `MANAGEMENT` · `MARKETING` · `SALES` · `LOGISTICS` · `WAREHOUSE` · `FINANCE` · `HR` — hoặc mã do chủ shop đặt. */
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    leadUserId: text("lead_user_id").references(() => users.id, { onDelete: "set null" }),
+    sortOrder: integer("sort_order").notNull().default(100),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("departments_active_idx").on(t.active, t.sortOrder)],
+);
+
+export const departmentMembers = pgTable(
+  "department_members",
+  {
+    id: id(),
+    departmentId: text("department_id")
+      .notNull()
+      .references(() => departments.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `LEAD` · `MEMBER`. Trưởng phòng thấy toàn bộ việc của phòng. */
+    roleInDept: text("role_in_dept").notNull().default("MEMBER"),
+    /** Chức danh hiển thị, tự do. Không dùng để phân quyền. */
+    title: text("title").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Một người ở một phòng đúng một dòng. Muốn ở hai phòng thì hai dòng — điều đó hợp lệ ở shop nhỏ.
+    uniqueIndex("department_members_uq").on(t.departmentId, t.userId),
+    index("department_members_user_idx").on(t.userId, t.active),
+    check("department_members_role_check", sql`${t.roleInDept} IN ('LEAD', 'MEMBER')`),
+  ],
+);
+
+/**
+ * ═══════════ LỚP CÔNG VIỆC ═══════════
+ *
+ * Bảng này giữ HAI loại dòng, và cột `authority` nói rõ dòng nào là loại nào:
+ *
+ *  · `authority = 'WORK'`   — việc tay / việc định kỳ. Không miền nào sở hữu, nên bảng này LÀ
+ *    nguồn: `status` bắt buộc có giá trị.
+ *  · `authority = 'SOURCE'` — LỚP GHI CHÚ cho một việc đã tồn tại ở miền nghiệp vụ (case CSKH,
+ *    kiện care, dòng tiền chưa phân loại…). Chỉ giữ thứ miền kia không có: người nhận ở tầng công
+ *    việc, ưu tiên đặt tay, hạn đặt tay, hoãn tới, lý do chặn. `status` bắt buộc `NULL`.
+ *
+ * Ràng buộc `work_items_authority_check` làm điều đó thành BẤT KHẢ THI ở mức CSDL, không phải một
+ * quy ước người ta nhớ hay quên. Nếu không có nó, một ngày nào đó `cs_cases.status = 'DONE'` sẽ
+ * đứng cạnh `work_items.status = 'IN_PROGRESS'` và không ai biết bên nào đúng.
+ *
+ * `(source_type, source_key)` UNIQUE: `source_key` là khoá tự nhiên TẠI NGUỒN, nên "hai việc cho
+ * cùng một gốc" là điều không biểu diễn được. Chống trùng ở đây là tính chất cấu trúc.
+ */
+export const workItems = pgTable(
+  "work_items",
+  {
+    id: id(),
+    /** Xem `lib/constants/work-sources.ts::WORK_SOURCES`. */
+    sourceType: text("source_type").notNull(),
+    /** Khoá tự nhiên tại nguồn (`cs_cases.id`, `shipment_care.shipment_id`, `bank_transactions.id`…). */
+    sourceKey: text("source_key").notNull(),
+    /** `SOURCE` | `WORK` — phải khớp `WORK_SOURCE_SPEC[sourceType].statusAuthority`; contract test khoá. */
+    authority: text("authority").notNull(),
+
+    /* ───── Nội dung: CHỈ điền cho dòng `WORK`. Dòng `SOURCE` đọc tiêu đề từ nguồn. ───── */
+    title: text("title").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    /** Người ĐANG CẦM việc ở tầng công việc. Khác người phụ trách ở nguồn — xem chú thích bảng. */
+    assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    assignedBy: text("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    assignedAt: ts("assigned_at"),
+    /** Người chịu trách nhiệm cuối (thường là trưởng phòng). Khác người làm. */
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+
+    /** `NULL` với dòng `SOURCE` — trạng thái nằm ở miền nghiệp vụ. Ràng buộc CHECK ép điều đó. */
+    status: text("status"),
+    /** Mức ưu tiên ĐẶT TAY, đè lên mức tính được. `NULL` = dùng mức tính được. */
+    priority: text("priority"),
+    /** Hạn cam kết của người làm. Khác SLA của loại việc: SLA là luật, cái này là lời hứa. */
+    dueAt: ts("due_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    completedBy: text("completed_by").references(() => users.id, { onDelete: "set null" }),
+    /** Hoãn tới. Việc không biến mất, chỉ thôi nổi lên trước giờ này. */
+    snoozedUntil: ts("snoozed_until"),
+    /** Bắt buộc khi `status = 'BLOCKED'` — chặn mà không nói vì sao thì không ai gỡ được. */
+    blockedReason: text("blocked_reason").notNull().default(""),
+
+    /* ───── Việc định kỳ ───── */
+    recurrenceId: text("recurrence_id"),
+    /** Kỳ mà dòng này đại diện (`2026-09-12`, `2026-W37`…). Cùng `recurrence_id` là khoá chống sinh hai lần. */
+    occurrenceKey: text("occurrence_key").notNull().default(""),
+
+    /* ───── Liên kết nghiệp vụ (CHỈ để mở đúng chỗ, không phải bản sao dữ liệu) ───── */
+    businessEntity: text("business_entity").notNull().default("NONE"),
+    businessEntityId: text("business_entity_id").notNull().default(""),
+
+    /**
+     * Tiền do NGƯỜI khai cho việc tay. `NULL` = CHƯA BIẾT, không phải 0đ (AGENTS.md mục 0.3).
+     * Việc chiếu từ miền nghiệp vụ KHÔNG dùng hai cột này — tiền của chúng tính sống từ nguồn.
+     */
+    moneyAtRisk: bigint("money_at_risk", { mode: "number" }),
+    moneyRecoverable: bigint("money_recoverable", { mode: "number" }),
+    /** `MEASURED` · `ESTIMATED` · `UNKNOWN`. Khác `UNKNOWN` thì `money_basis` bắt buộc có chữ. */
+    moneyConfidence: text("money_confidence").notNull().default("UNKNOWN"),
+    moneyBasis: text("money_basis").notNull().default(""),
+
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    checklist: jsonb("checklist").$type<{ text: string; done: boolean }[]>().notNull().default([]),
+
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    /** `AUTO` · `MANUAL` · `RECURRING`. */
+    creationSource: text("creation_source").notNull().default("MANUAL"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("work_items_source_uq").on(t.sourceType, t.sourceKey),
+    index("work_items_assignee_idx").on(t.assigneeId, t.status),
+    index("work_items_department_idx").on(t.departmentId, t.status),
+    index("work_items_due_idx").on(t.dueAt),
+    index("work_items_recurrence_idx").on(t.recurrenceId, t.occurrenceKey),
+    check("work_items_authority_enum_check", sql`${t.authority} IN ('SOURCE', 'WORK')`),
+    /*
+      ĐÂY LÀ RÀNG BUỘC QUAN TRỌNG NHẤT CỦA BẢNG.
+
+      Một dòng chiếu từ miền nghiệp vụ KHÔNG được giữ trạng thái, và một việc tay BẮT BUỘC phải
+      giữ. Viết bằng CHECK chứ không bằng quy ước, vì quy ước sẽ bị phá vào lúc không ai nhìn.
+    */
+    check("work_items_authority_check", sql`(${t.authority} = 'WORK') = (${t.status} IS NOT NULL)`),
+    check("work_items_status_check", sql`${t.status} IS NULL OR ${t.status} IN ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED', 'WAITING', 'DONE', 'CANCELLED')`),
+    check("work_items_priority_check", sql`${t.priority} IS NULL OR ${t.priority} IN ('URGENT', 'HIGH', 'NORMAL', 'LOW')`),
+    check("work_items_money_confidence_check", sql`${t.moneyConfidence} IN ('MEASURED', 'ESTIMATED', 'UNKNOWN')`),
+    // Nói một con số là đo được / ước tính thì phải nói ĐO BẰNG GÌ.
+    check("work_items_money_basis_check", sql`${t.moneyConfidence} = 'UNKNOWN' OR length(btrim(${t.moneyBasis})) > 0`),
+    // Chặn mà không nói vì sao là xoá bằng chứng lặng lẽ — cùng luật với `notifications.ignored_reason`.
+    check("work_items_blocked_reason_check", sql`${t.status} IS DISTINCT FROM 'BLOCKED' OR length(btrim(${t.blockedReason})) > 0`),
+    check("work_items_creation_source_check", sql`${t.creationSource} IN ('AUTO', 'MANUAL', 'RECURRING')`),
+  ],
+);
+
+/**
+ * Lịch sử một việc — CHỈ THÊM, KHÔNG SỬA, KHÔNG XOÁ.
+ *
+ * Cùng hình dạng với `cs_case_events` và `care_case_events` để ba bàn làm việc đọc được như nhau.
+ * `audit_logs` không thay được: audit là nhật ký AN NINH (ai đụng vào cái gì), đây là nhật ký
+ * NGHIỆP VỤ mà người nhận ca sau phải đọc được ngay trên dòng.
+ *
+ * Ghi được cho CẢ việc chiếu: `work_key` là `<sourceType>:<sourceKey>`, nên một ghi chú gắn vào
+ * một case CSKH không cần bảng `work_items` phải có dòng.
+ */
+export const workItemEvents = pgTable(
+  "work_item_events",
+  {
+    id: id(),
+    /** `<sourceType>:<sourceKey>` — ổn định kể cả khi chưa có dòng `work_items`. */
+    workKey: text("work_key").notNull(),
+    workItemId: text("work_item_id").references(() => workItems.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Ảnh chụp tên lúc xảy ra — người dùng có thể đổi tên hoặc nghỉ việc. */
+    actorName: text("actor_name").notNull().default(""),
+    /** `UI` · `API` · `SYSTEM` · `RECURRENCE`. */
+    source: text("source").notNull().default("UI"),
+    /** `CREATE` · `STATUS` · `ASSIGN` · `NOTE` · `SNOOZE` · `DUE` · `PRIORITY` · `BLOCK` · `DOMAIN_ACTION`. */
+    action: text("action").notNull(),
+    note: text("note").notNull().default(""),
+    previousStatus: text("previous_status"),
+    nextStatus: text("next_status"),
+    previousAssignee: text("previous_assignee"),
+    nextAssignee: text("next_assignee"),
+    /** Với `DOMAIN_ACTION`: tên hành động miền đã gọi và kết quả tóm tắt. */
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("work_item_events_key_idx").on(t.workKey, t.createdAt),
+    index("work_item_events_actor_idx").on(t.actorEmail, t.createdAt),
+    check("work_item_events_source_check", sql`${t.source} IN ('UI', 'API', 'SYSTEM', 'RECURRENCE')`),
+  ],
+);
+
+/**
+ * Định nghĩa việc lặp: đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công.
+ *
+ * KHÔNG dùng cron string. Bốn nhịp cố định phủ hết nhu cầu thật của shop và đọc được bằng tiếng
+ * Việt trên màn hình; một ô nhập cron là mời gọi sai lịch mà không ai phát hiện.
+ */
+export const workRecurrences = pgTable(
+  "work_recurrences",
+  {
+    id: id(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "set null" }),
+    priority: text("priority").notNull().default("NORMAL"),
+    /** `DAILY` · `WEEKDAYS` · `WEEKLY` · `MONTHLY`. */
+    cadence: text("cadence").notNull(),
+    /** Với `WEEKLY`: 1=thứ Hai … 7=Chủ nhật. Với `MONTHLY`: ngày trong tháng (1–28). */
+    cadenceDay: integer("cadence_day"),
+    /** Giờ trong ngày (0–23, giờ Việt Nam) mà việc của kỳ đó xuất hiện. */
+    hourOfDay: integer("hour_of_day").notNull().default(8),
+    /** Số giờ kể từ lúc sinh tới hạn. */
+    dueInHours: integer("due_in_hours").notNull().default(24),
+    checklist: jsonb("checklist").$type<{ text: string; done: boolean }[]>().notNull().default([]),
+    active: boolean("active").notNull().default(true),
+    lastGeneratedKey: text("last_generated_key").notNull().default(""),
+    lastGeneratedAt: ts("last_generated_at"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("work_recurrences_active_idx").on(t.active),
+    check("work_recurrences_cadence_check", sql`${t.cadence} IN ('DAILY', 'WEEKDAYS', 'WEEKLY', 'MONTHLY')`),
+    check("work_recurrences_priority_check", sql`${t.priority} IN ('URGENT', 'HIGH', 'NORMAL', 'LOW')`),
+    check("work_recurrences_hour_check", sql`${t.hourOfDay} BETWEEN 0 AND 23`),
+    // Ngày 29–31 không tồn tại ở mọi tháng: chặn ở CSDL thay vì để việc tháng 2 im lặng không sinh.
+    check("work_recurrences_day_check", sql`${t.cadenceDay} IS NULL OR (${t.cadence} = 'WEEKLY' AND ${t.cadenceDay} BETWEEN 1 AND 7) OR (${t.cadence} = 'MONTHLY' AND ${t.cadenceDay} BETWEEN 1 AND 28)`),
+  ],
+);
+
+/* ───────────────────────── MỤC TIÊU: OKR ───────────────────────── */
+
+/**
+ * Objective — ĐỊNH TÍNH. Ba tầng: công ty → phòng ban → cá nhân, nối bằng `parent_id`.
+ * Objective KHÔNG có số; số nằm ở Key Result. Trộn hai thứ là cách nhanh nhất biến OKR thành
+ * một danh sách KPI đội lốt.
+ */
+/**
+ * ═══════════ ĐÍCH CỦA CHỈ SỐ — BA TẦNG, KHÔNG HARD-CODE ═══════════
+ *
+ * "Đóng case trong hạn phải đạt 90%" là một quyết định KINH DOANH. Viết 90 vào mã nguồn có hai
+ * hậu quả: chủ shop muốn đổi thì phải chờ deploy, và không ai còn biết con số đó do AI đặt, đặt
+ * lúc nào, vì sao.
+ *
+ * Ba tầng, tầng sau đè tầng trước:
+ *   1. CÔNG TY   — mặc định cho mọi người
+ *   2. PHÒNG BAN — phòng có đặc thù riêng
+ *   3. CHỨC DANH — trưởng phòng và nhân viên mới không cùng một thước đo
+ *
+ * KHÔNG có đích thì màn hình hiện THỰC TẾ và không kết luận đạt/không đạt. Một chỉ số không có
+ * đích vẫn là một con số đọc được; bịa ra đích để có màu xanh đỏ mới là cái sai.
+ */
+export const metricTargets = pgTable(
+  "metric_targets",
+  {
+    id: id(),
+    /** Khoá trong `lib/constants/metric-catalog.ts::METRIC_CATALOG`. Không nhận khoá lạ. */
+    metricKey: text("metric_key").notNull(),
+    /** `COMPANY` · `DEPARTMENT` · `POSITION` — tầng của đích này. */
+    scope: text("scope").notNull(),
+    /**
+     * Mã phòng ban (`DepartmentCode`) hoặc `positions.id`. `NULL` với tầng công ty.
+     * KHÔNG đặt khoá ngoại tới `positions`: đích đã đặt phải sống sót khi chức danh bị đổi tên.
+     */
+    scopeRef: text("scope_ref"),
+    /** Đích. Đơn vị lấy từ danh mục, không lưu lại ở đây — hai chỗ lưu là hai chỗ lệch nhau. */
+    target: doublePrecision("target").notNull(),
+    /**
+     * Cận TRÊN của một đích dạng DẢI (số ngày đủ bán, tồn khoẻ mạnh…). `NULL` = đích một chiều.
+     * Chiều `RANGE` được SUY RA từ chỗ cột này có giá trị hay không, không khai thêm một cột
+     * `direction` thứ hai: chiều của chỉ số đã nằm trong sổ, ghi lại là mở đường cho hai nơi nói
+     * hai điều khác nhau (AGENTS.md mục 23).
+     */
+    targetMax: doublePrecision("target_max"),
+    /** Bắt đầu đáng lo. `NULL` = chủ shop chưa khai, và màn hình KHÔNG tự nghĩ ra một ngưỡng. */
+    warningAt: doublePrecision("warning_at"),
+    /** Đã hỏng. Cùng nguyên tắc: không có mặc định do người viết code đặt. */
+    criticalAt: doublePrecision("critical_at"),
+    /**
+     * Đích này áp cho kỳ hình dạng nào: `ANY` · `WEEK` · `MONTH` · `QUARTER` · `YEAR`.
+     *
+     * Một đích "500 đơn" không có nghĩa nếu không nói 500 đơn MỘT TUẦN hay MỘT THÁNG. `ANY` nghĩa
+     * là CHƯA KHAI (áp cho mọi kỳ) — không phải "mỗi tháng"; đoán hộ một kỳ còn tệ hơn để trống.
+     */
+    periodKind: text("period_kind").notNull().default("ANY"),
+    /** Hết hiệu lực. `NULL` = còn hiệu lực tới khi có bản mới hơn thay. */
+    effectiveTo: ts("effective_to"),
+    /** Lần đổi thứ mấy của CÙNG một đích. Để đọc lại lịch sử quyết định, không chỉ con số cuối. */
+    version: integer("version").notNull().default(1),
+    /**
+     * Phòng ban CHỊU TRÁCH NHIỆM về đích này — khác người ĐẶT đích (`set_by`).
+     *
+     * Trỏ tới PHÒNG BAN, không bao giờ tới một cá nhân: máy không biết hôm nay ai nghỉ, và một
+     * đích mang tên người đã nghỉ việc sẽ biến mất khỏi mọi màn hình (AGENTS.md mục 22).
+     */
+    ownerDepartment: text("owner_department"),
+    /** Vì sao đặt con số này. Bắt buộc: một đích không có lý do thì kỳ sau không ai dám sửa. */
+    note: text("note").notNull().default(""),
+    /** Có hiệu lực từ. Kỳ đã chốt trước mốc này KHÔNG bị chấm lại theo đích mới. */
+    effectiveFrom: ts("effective_from").notNull(),
+    setBy: text("set_by").references(() => users.id, { onDelete: "set null" }),
+    setByEmail: text("set_by_email").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    /*
+      Một tầng · một chỉ số · một HÌNH DẠNG KỲ · một mốc hiệu lực = MỘT đích. Hai dòng trùng thì
+      không ai biết cái nào thắng.
+
+      `period_kind` PHẢI nằm trong khoá. Thiếu nó thì "500 đơn mỗi TUẦN" và "2.000 đơn mỗi THÁNG"
+      của cùng một chỉ số không thể cùng tồn tại — dòng thứ hai bị ràng buộc chặn, và tệ hơn: lượt
+      ghi thứ hai tra dòng cũ KHÔNG theo kỳ nên nó SỬA ĐÈ đích tuần thành đích tháng. Chủ shop mất
+      một đích đã đặt mà không có một dòng cảnh báo nào.
+    */
+    uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.periodKind, t.effectiveFrom),
+    index("metric_targets_lookup_idx").on(t.metricKey, t.effectiveFrom),
+    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION', 'USER')`),
+    check("metric_targets_period_check", sql`${t.periodKind} IN ('ANY', 'WEEK', 'MONTH', 'QUARTER', 'YEAR')`),
+    // Khoảng hiệu lực rỗng thì đích không áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao thẻ
+    // điểm không thấy đích mình vừa đặt.
+    check("metric_targets_window_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} > ${t.effectiveFrom}`),
+    check("metric_targets_range_check", sql`${t.targetMax} IS NULL OR ${t.targetMax} > ${t.target}`),
+    check("metric_targets_version_check", sql`${t.version} >= 1`),
+    // Tầng công ty KHÔNG được có tham chiếu; hai tầng kia BẮT BUỘC có.
+    check("metric_targets_ref_check", sql`(${t.scope} = 'COMPANY' AND ${t.scopeRef} IS NULL) OR (${t.scope} <> 'COMPANY' AND ${t.scopeRef} IS NOT NULL AND length(trim(${t.scopeRef})) > 0)`),
+  ],
+);
+
+export const okrObjectives = pgTable(
+  "okr_objectives",
+  {
+    id: id(),
+    /** `COMPANY` · `DEPARTMENT` · `INDIVIDUAL`. */
+    level: text("level").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "set null" }),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    parentId: text("parent_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /** Kỳ: `2026-Q3` · `2026-09` · `2026`. Chuỗi để so sánh và nhóm được mà không cần bảng kỳ riêng. */
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `DRAFT` · `ACTIVE` · `CLOSED` · `CANCELLED`. */
+    status: text("status").notNull().default("DRAFT"),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("okr_objectives_period_idx").on(t.period, t.level),
+    index("okr_objectives_dept_idx").on(t.departmentId, t.period),
+    index("okr_objectives_owner_idx").on(t.ownerUserId, t.period),
+    foreignKey({ columns: [t.parentId], foreignColumns: [t.id], name: "okr_objectives_parent_fk" }).onDelete("set null"),
+    check("okr_objectives_level_check", sql`${t.level} IN ('COMPANY', 'DEPARTMENT', 'INDIVIDUAL')`),
+    check("okr_objectives_status_check", sql`${t.status} IN ('DRAFT', 'ACTIVE', 'CLOSED', 'CANCELLED')`),
+    // Objective cấp phòng / cá nhân phải nói rõ của phòng nào / của ai.
+    check("okr_objectives_scope_check", sql`${t.level} = 'COMPANY' OR ${t.departmentId} IS NOT NULL OR ${t.ownerUserId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Key Result — ĐỊNH LƯỢNG, và đây là chỗ dễ bịa nhất trong toàn bộ hệ OKR.
+ *
+ * `metric_source` chỉ nhận `MANUAL` hoặc một khoá CÓ THẬT trong `lib/constants/metric-bindings.ts`.
+ * Nối vào một khoá không tồn tại thì `current` sẽ mãi mãi là `NULL` và giao diện nói thẳng "chưa
+ * đo được" — KHÔNG rơi về 0, vì một KR hiện 0% trông hệt như một KR đang thất bại.
+ *
+ * `current` để `NULL` khi CHƯA ĐO: `NULL` là CHƯA BIẾT (AGENTS.md mục 0.3).
+ */
+export const okrKeyResults = pgTable(
+  "okr_key_results",
+  {
+    id: id(),
+    objectiveId: text("objective_id")
+      .notNull()
+      .references(() => okrObjectives.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    /** `MANUAL` hoặc khoá trong `METRIC_BINDINGS`. */
+    metricSource: text("metric_source").notNull().default("MANUAL"),
+    /** `NUMBER` · `VND` · `PERCENT` · `COUNT` · `DAYS` · `HOURS`. */
+    unit: text("unit").notNull().default("NUMBER"),
+    /** `UP` = càng cao càng tốt; `DOWN` = càng thấp càng tốt (tỷ lệ hoàn, số dòng chưa phân loại…). */
+    direction: text("direction").notNull().default("UP"),
+    baseline: doublePrecision("baseline"),
+    target: doublePrecision("target").notNull(),
+    /** Giá trị hiện tại. `NULL` = CHƯA ĐO ĐƯỢC, khác hẳn 0. */
+    current: doublePrecision("current"),
+    currentAt: ts("current_at"),
+    /** `ON_TRACK` · `AT_RISK` · `OFF_TRACK` · `UNKNOWN` — do người chấm, không suy máy móc từ %. */
+    confidence: text("confidence").notNull().default("UNKNOWN"),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("okr_key_results_objective_idx").on(t.objectiveId, t.sortOrder),
+    check("okr_key_results_unit_check", sql`${t.unit} IN ('NUMBER', 'VND', 'PERCENT', 'COUNT', 'DAYS', 'HOURS')`),
+    check("okr_key_results_direction_check", sql`${t.direction} IN ('UP', 'DOWN')`),
+    check("okr_key_results_confidence_check", sql`${t.confidence} IN ('ON_TRACK', 'AT_RISK', 'OFF_TRACK', 'UNKNOWN')`),
+    // Đích bằng mốc xuất phát thì phần trăm hoàn thành chia cho 0 — chặn ngay ở CSDL.
+    check("okr_key_results_target_check", sql`${t.baseline} IS NULL OR ${t.target} <> ${t.baseline}`),
+  ],
+);
+
+/** Lịch sử chấm KR — để có ĐƯỜNG XU HƯỚNG, không chỉ một con số hiện tại. Chỉ thêm. */
+export const okrCheckins = pgTable(
+  "okr_checkins",
+  {
+    id: id(),
+    keyResultId: text("key_result_id")
+      .notNull()
+      .references(() => okrKeyResults.id, { onDelete: "cascade" }),
+    value: doublePrecision("value"),
+    confidence: text("confidence").notNull().default("UNKNOWN"),
+    note: text("note").notNull().default(""),
+    /** `MANUAL` = người nhập; `AUTO` = đọc từ chỉ số ERP. Trộn hai nguồn thì không ai biết số từ đâu. */
+    source: text("source").notNull().default("MANUAL"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("okr_checkins_kr_idx").on(t.keyResultId, t.createdAt),
+    check("okr_checkins_source_check", sql`${t.source} IN ('MANUAL', 'AUTO')`),
+  ],
+);
+
+/* ───────────────────────── BSC ───────────────────────── */
+
+/**
+ * Thẻ điểm cân bằng. Bốn góc nhìn là cố định (đó là định nghĩa của BSC), nhưng chỉ số và TRỌNG SỐ
+ * do chủ shop khai — không hard-code "Marketing thì đo ROAS" thành chân lý.
+ */
+export const bscScorecards = pgTable(
+  "bsc_scorecards",
+  {
+    id: id(),
+    /** `COMPANY` · `DEPARTMENT`. */
+    scope: text("scope").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    period: text("period").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("bsc_scorecards_uq").on(t.scope, t.departmentId, t.period),
+    check("bsc_scorecards_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT')`),
+    check("bsc_scorecards_dept_check", sql`(${t.scope} = 'COMPANY') = (${t.departmentId} IS NULL)`),
+  ],
+);
+
+export const bscMetrics = pgTable(
+  "bsc_metrics",
+  {
+    id: id(),
+    scorecardId: text("scorecard_id")
+      .notNull()
+      .references(() => bscScorecards.id, { onDelete: "cascade" }),
+    /** `FINANCIAL` · `CUSTOMER` · `INTERNAL_PROCESS` · `LEARNING_GROWTH`. */
+    perspective: text("perspective").notNull(),
+    label: text("label").notNull(),
+    /** `MANUAL` hoặc khoá trong `METRIC_BINDINGS` — cùng sổ đăng ký với KR. */
+    metricSource: text("metric_source").notNull().default("MANUAL"),
+    unit: text("unit").notNull().default("NUMBER"),
+    direction: text("direction").notNull().default("UP"),
+    target: doublePrecision("target"),
+    /** Giá trị nhập tay khi `metric_source = 'MANUAL'`. `NULL` = chưa nhập. */
+    manualValue: doublePrecision("manual_value"),
+    manualValueAt: ts("manual_value_at"),
+    /** Trọng số trong góc nhìn. Tổng KHÔNG bắt buộc bằng 100 — chuẩn hoá lúc tính. */
+    weight: doublePrecision("weight").notNull().default(1),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bsc_metrics_card_idx").on(t.scorecardId, t.perspective, t.sortOrder),
+    check("bsc_metrics_perspective_check", sql`${t.perspective} IN ('FINANCIAL', 'CUSTOMER', 'INTERNAL_PROCESS', 'LEARNING_GROWTH')`),
+    check("bsc_metrics_unit_check", sql`${t.unit} IN ('NUMBER', 'VND', 'PERCENT', 'COUNT', 'DAYS', 'HOURS')`),
+    check("bsc_metrics_direction_check", sql`${t.direction} IN ('UP', 'DOWN')`),
+    check("bsc_metrics_weight_check", sql`${t.weight} > 0`),
+  ],
+);
+
+/**
+ * Kỳ review — và cột `snapshot` là lý do bảng này tồn tại.
+ *
+ * AGENTS.md mục 8.9: *không silent correction kỳ đã chốt*. Nếu báo cáo tháng 9 được tính lại bằng
+ * truy vấn của tháng 11 thì con số tháng 9 sẽ ÂM THẦM đổi mỗi lần ai đó sửa một công thức — và
+ * cuộc họp tháng 10 đã diễn ra trên một con số không còn tồn tại.
+ *
+ * Nên: `FINAL` là đóng băng. Sau đó mọi thứ đọc từ `snapshot`, không truy vấn lại.
+ */
+export const reviewCycles = pgTable(
+  "review_cycles",
+  {
+    id: id(),
+    /** `WEEKLY` · `MONTHLY` · `QUARTERLY`. */
+    kind: text("kind").notNull(),
+    /** `COMPANY` · `DEPARTMENT`. */
+    scope: text("scope").notNull(),
+    departmentId: text("department_id").references(() => departments.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `DRAFT` = tính sống mỗi lần mở; `FINAL` = đọc `snapshot`, không tính lại. */
+    status: text("status").notNull().default("DRAFT"),
+    /** Ảnh chụp toàn bộ số của kỳ. Bất biến sau khi `FINAL`. */
+    snapshot: jsonb("snapshot"),
+    /** Phiên bản logic lúc chụp — để biết ảnh cũ được dựng bằng công thức nào. */
+    snapshotVersion: integer("snapshot_version").notNull().default(1),
+    highlights: text("highlights").notNull().default(""),
+    issues: text("issues").notNull().default(""),
+    nextActions: text("next_actions").notNull().default(""),
+    finalizedAt: ts("finalized_at"),
+    finalizedBy: text("finalized_by").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("review_cycles_uq").on(t.kind, t.scope, t.departmentId, t.period),
+    index("review_cycles_period_idx").on(t.periodStart),
+    check("review_cycles_kind_check", sql`${t.kind} IN ('WEEKLY', 'MONTHLY', 'QUARTERLY')`),
+    check("review_cycles_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT')`),
+    check("review_cycles_dept_check", sql`(${t.scope} = 'COMPANY') = (${t.departmentId} IS NULL)`),
+    check("review_cycles_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    // Chốt kỳ mà không có ảnh chụp thì "chốt" không có nghĩa gì: lần mở sau vẫn tính lại.
+    check("review_cycles_final_check", sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`),
+  ],
+);
+
+export const departmentsRelations = relations(departments, ({ one, many }) => ({
+  lead: one(users, { fields: [departments.leadUserId], references: [users.id] }),
+  members: many(departmentMembers),
+}));
+
+export const departmentMembersRelations = relations(departmentMembers, ({ one }) => ({
+  department: one(departments, { fields: [departmentMembers.departmentId], references: [departments.id] }),
+  user: one(users, { fields: [departmentMembers.userId], references: [users.id] }),
+}));
+
+export const workItemsRelations = relations(workItems, ({ one, many }) => ({
+  department: one(departments, { fields: [workItems.departmentId], references: [departments.id] }),
+  assignee: one(users, { fields: [workItems.assigneeId], references: [users.id] }),
+  events: many(workItemEvents),
+}));
+
+export const workItemEventsRelations = relations(workItemEvents, ({ one }) => ({
+  item: one(workItems, { fields: [workItemEvents.workItemId], references: [workItems.id] }),
+}));
+
+export const okrObjectivesRelations = relations(okrObjectives, ({ one, many }) => ({
+  department: one(departments, { fields: [okrObjectives.departmentId], references: [departments.id] }),
+  owner: one(users, { fields: [okrObjectives.ownerUserId], references: [users.id] }),
+  keyResults: many(okrKeyResults),
+}));
+
+export const okrKeyResultsRelations = relations(okrKeyResults, ({ one, many }) => ({
+  objective: one(okrObjectives, { fields: [okrKeyResults.objectiveId], references: [okrObjectives.id] }),
+  checkins: many(okrCheckins),
+}));
+
+export const bscScorecardsRelations = relations(bscScorecards, ({ one, many }) => ({
+  department: one(departments, { fields: [bscScorecards.departmentId], references: [departments.id] }),
+  metrics: many(bscMetrics),
+}));
+
+export const bscMetricsRelations = relations(bscMetrics, ({ one }) => ({
+  scorecard: one(bscScorecards, { fields: [bscMetrics.scorecardId], references: [bscScorecards.id] }),
+}));
+
+/**
+ * ẢNH CHỤP HIỆU SUẤT — SỐ LỊCH SỬ KHÔNG ĐƯỢC ĐỔI VÌ TRUY VẤN HÔM NAY ĐỔI.
+ *
+ * Thẻ điểm sống (`lib/queries/dept-performance.ts`) tính lại mỗi lần mở. Điều đó đúng cho "tuần
+ * này đang thế nào", và SAI cho "quý trước chị Lan đạt bao nhiêu": chỉ cần ai đó sửa một mệnh đề
+ * `WHERE` là con số của quý trước đổi theo — lặng lẽ, và không ai đối chiếu được với bản in ra
+ * hồi đó. Một kỳ đã chốt mà số còn trôi thì mọi cuộc nói chuyện về hiệu suất đều mất căn cứ.
+ *
+ * Nên mỗi kỳ được chụp lại thành DÒNG, không phải một khối JSON: có dòng thì so được kỳ này với
+ * kỳ trước ngay trong SQL, mà đó chính là thứ "xu hướng" cần.
+ *
+ * ─── BẤT BIẾN: GHI MỘT LẦN, KHÔNG GHI ĐÈ ───
+ *
+ * Khoá duy nhất `(period, subject_type, subject_id, metric_key)` cộng với `onConflictDoNothing`:
+ * chạy lại job bao nhiêu lần cũng không đổi được số đã chụp. Đổi công thức thì `definition_version`
+ * của những kỳ SAU sẽ khác — và chênh lệch đó đọc được, thay vì biến mất.
+ */
+export const performanceSnapshots = pgTable(
+  "performance_snapshots",
+  {
+    id: id(),
+    /** `WEEKLY` · `MONTHLY`. */
+    kind: text("kind").notNull(),
+    /** Khoá kỳ người đọc được: `2026-W37`, `2026-09`. */
+    period: text("period").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /** `PERSON` · `DEPARTMENT` — chủ thể của con số. */
+    subjectType: text("subject_type").notNull(),
+    /** Khoá người dùng hoặc khoá phòng ban. KHÔNG đặt khoá ngoại: ảnh chụp phải sống sót cả khi tài khoản bị xoá. */
+    subjectId: text("subject_id").notNull(),
+    /** Tên tại thời điểm chụp — người đổi tên sau đó không làm sai lịch sử. */
+    subjectLabel: text("subject_label").notNull().default(""),
+    departmentCode: text("department_code").notNull().default(""),
+
+    metricKey: text("metric_key").notNull(),
+    metricLabel: text("metric_label").notNull(),
+    /** `null` = CHƯA ĐO ĐƯỢC trong kỳ đó. Không bao giờ là 0. */
+    value: doublePrecision("value"),
+    unit: text("unit").notNull(),
+    sample: integer("sample").notNull().default(0),
+    denominatorLabel: text("denominator_label").notNull().default(""),
+
+    /** `HIGH` · `MEDIUM` · `LOW` · `UNKNOWN`. */
+    confidence: text("confidence").notNull(),
+    /** `USER_ID` · `EMAIL` · `FREE_TEXT` — cách nối dòng dữ liệu về người, tại thời điểm chụp. */
+    linkage: text("linkage").notNull(),
+    shared: boolean("shared").notNull().default(false),
+    /** Câu quy kết đang có hiệu lực lúc chụp. */
+    attribution: text("attribution").notNull().default(""),
+    /** Nguồn số liệu lúc chụp. */
+    basis: text("basis").notNull().default(""),
+
+    calculatedAt: ts("calculated_at").notNull().defaultNow(),
+    /** Phiên bản công thức lúc chụp — `lib/constants/metric-provenance.ts::METRIC_DEFINITION_VERSION`. */
+    definitionVersion: integer("definition_version").notNull().default(1),
+    /**
+     * PHIÊN BẢN NGUỒN lúc chụp — `lib/constants/metric-catalog.ts::METRIC_SOURCE_VERSION`.
+     *
+     * TÁCH KHỎI `definition_version` vì hai thứ hỏng theo hai kiểu khác nhau:
+     *   · đổi CÔNG THỨC  — cùng dữ liệu, ra số khác (sửa mệnh đề WHERE, đổi mẫu số)
+     *   · đổi NGUỒN      — cùng công thức, đọc chỗ khác (case nối bằng `assignee_user_id` thay vì
+     *                      ô chữ `assignee`)
+     *
+     * Kỳ trước đo trên ô chữ và kỳ này đo trên khoá tài khoản là HAI TẬP NGƯỜI KHÁC NHAU. Vẽ một
+     * mũi tên xu hướng giữa hai kỳ đó là nói dối bằng đồ thị. Hai cột này cho màn hình biết khi
+     * nào phải in "đổi nguồn giữa hai kỳ" thay vì một mũi tên.
+     */
+    sourceVersion: integer("source_version").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("performance_snapshots_uq").on(t.period, t.subjectType, t.subjectId, t.metricKey),
+    index("performance_snapshots_subject_idx").on(t.subjectType, t.subjectId, t.metricKey, t.periodStart),
+    index("performance_snapshots_period_idx").on(t.kind, t.periodStart),
+  ],
+);
+
+export type PerformanceSnapshot = typeof performanceSnapshots.$inferSelect;
+
+/**
+ * ═══════════ LÝ DO HOÀN DO NGƯỜI XÁC ĐỊNH — GHI ĐÈ SUY LUẬN, CÓ VẾT ═══════════
+ *
+ * Lý do hoàn mặc định được SUY từ chứng từ ĐVVC (`lib/queries/return-reason.ts`). Đo trên
+ * production 13/09/2026: chỉ **208/956** vận đơn hoàn có sự kiện "Tồn - …" mang lý do thật; phần
+ * còn lại ĐVVC không nêu lý do nào. Đó là một sự thật về dữ liệu, không phải một lỗi cần giấu.
+ *
+ * Người xử lý thường BIẾT lý do — họ vừa gọi cho khách xong. Bảng này là chỗ ghi lại điều đó, và
+ * nó ghi đè suy luận vì bằng chứng của con người mạnh hơn suy luận của máy.
+ *
+ * ─── VÌ SAO KHÔNG GHI THẲNG VÀO `shipments` ───
+ *
+ * Một cột `return_reason` trên `shipments` sẽ không phân biệt được "máy suy ra" với "người xác
+ * nhận", và mỗi lần sửa là mất giá trị cũ. Bảng riêng giữ được cả hai vế: lý do cũ, lý do mới, ai
+ * đổi, lúc nào, vì sao. Với một con số đi vào báo cáo hiệu suất mã hàng, vết đó là bắt buộc.
+ */
+export const shipmentReturnReasons = pgTable(
+  "shipment_return_reasons",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .unique()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    /** Khoá trong `lib/constants/return-reason.ts::RETURN_REASONS`. */
+    reason: text("reason").notNull(),
+    /**
+     * NHÓM LỚN, LƯU KÈM chứ không chỉ suy từ `reason` lúc đọc.
+     *
+     * Suy lúc đọc thì ngày nào đó một lý do được xếp sang nhóm khác là toàn bộ LỊCH SỬ đổi theo,
+     * lặng lẽ: báo cáo quý trước in ra hồi đó không còn khớp với chính nó nữa. Lưu kèm thì dòng
+     * cũ giữ nhóm nó được xếp lúc ghi, và đổi cách xếp nhóm chỉ ảnh hưởng dòng mới.
+     */
+    reasonGroup: text("reason_group").notNull().default("UNKNOWN"),
+    /**
+     * GHI CHÚ TỰ DO — TÁCH HẲN KHỎI `reason`.
+     *
+     * `reason` là DANH MỤC để đếm; `note` là câu chuyện để người sau đọc. Gộp hai thứ vào một ô
+     * chữ là cách chắc chắn nhất để không bao giờ đếm được gì: "vải xấu, khách bảo mỏng quá, đã
+     * xin lỗi" không nhóm được với "vải xấu".
+     */
+    note: text("note").notNull().default(""),
+    /** Lý do máy suy ra tại thời điểm ghi đè, chép lại để so được. */
+    inferredReason: text("inferred_reason").notNull().default(""),
+    /**
+     * `MANUAL` — người của shop hỏi khách rồi ghi. CÓ THẨM QUYỀN.
+     * `AUTO`   — máy suy từ chứng từ ĐVVC. Chỉ với tới được lý do THÔ.
+     * `IMPORT` — nhập một lần từ tệp lịch sử, có đối chiếu định danh mạnh.
+     */
+    source: text("source").notNull().default("MANUAL"),
+    /** `CONFIRMED` · `CARRIER_CODE` · `CARRIER_TEXT` · `IMPORTED` — xem `ReasonConfidence`. */
+    confidence: text("confidence").notNull().default("CONFIRMED"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("shipment_return_reasons_reason_idx").on(t.reason),
+    index("shipment_return_reasons_group_idx").on(t.reasonGroup),
+    check("shipment_return_reasons_source_check", sql`${t.source} IN ('MANUAL', 'AUTO', 'IMPORT')`),
+  ],
+);
+
+export type ShipmentReturnReason = typeof shipmentReturnReasons.$inferSelect;
+
+export type Department = typeof departments.$inferSelect;
+export type DepartmentMember = typeof departmentMembers.$inferSelect;
+export type WorkItemRow = typeof workItems.$inferSelect;
+export type WorkItemEvent = typeof workItemEvents.$inferSelect;
+export type WorkRecurrence = typeof workRecurrences.$inferSelect;
+export type OkrObjective = typeof okrObjectives.$inferSelect;
+export type OkrKeyResult = typeof okrKeyResults.$inferSelect;
+export type OkrCheckin = typeof okrCheckins.$inferSelect;
+export type BscScorecard = typeof bscScorecards.$inferSelect;
+export type BscMetric = typeof bscMetrics.$inferSelect;
+export type ReviewCycle = typeof reviewCycles.$inferSelect;
+export type AccessRole = typeof accessRoles.$inferSelect;
+export type Position = typeof positions.$inferSelect;
 
 // ───────────────────────── Quan hệ & kiểu: nền tảng nhân sự AI ─────────────────────────
 

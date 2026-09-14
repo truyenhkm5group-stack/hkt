@@ -1,7 +1,10 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, metricScope, successRate } from "@/lib/queries/metrics";
+import { metricScope, successRate } from "@/lib/queries/metrics";
+import { orderCogsFast } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -33,6 +36,15 @@ export type RoasRow = {
   name: string;
   level: RoasLevel;
   spend: number;
+  /**
+   * Có biết chi tiêu của dòng này hay không.
+   *
+   * Ở cấp MẨU QUẢNG CÁO thì KHÔNG: Facebook Insights được đồng bộ ở cấp chiến dịch/ngày, nên
+   * không tồn tại con số chi tiêu cho từng mẩu. Khi đó `spend` = 0 chỉ có nghĩa "chưa biết", và
+   * mọi chỉ số chia cho chi tiêu đều là `null` — KHÔNG được chia đều tiền chiến dịch cho các mẩu
+   * để bảng trông đầy đủ.
+   */
+  spendKnown: boolean;
   bookedOrders: number;
   bookedRevenue: number;
   deliveredOrders: number;
@@ -47,6 +59,19 @@ export type RoasRow = {
   deliveredRoas: number | null;
   cashRoas: number | null;
   contributionRoas: number | null;
+  /**
+   * CHI PHÍ THU HÚT MỘT KHÁCH (đồng). Nghịch đảo của ROAS nhưng trả lời câu hỏi khác: "một đơn/một
+   * khách nhận hàng tốn bao nhiêu tiền quảng cáo". Chủ shop so nó với lãi gộp một đơn để biết còn
+   * chạy được không.
+   *
+   * `null` khi chưa có đơn nào — chia cho 0 là vô nghĩa, KHÔNG phải 0.
+   */
+  cacBooked: number | null;
+  /**
+   * Đắt hơn `cacBooked` đúng bằng phần đơn hoàn: đây mới là số tiền thật đã bỏ ra cho MỘT KHÁCH
+   * CẦM ĐƯỢC HÀNG. Với shop bán COD, khoảng cách giữa hai con số này thường là chỗ lỗ.
+   */
+  cacDelivered: number | null;
 };
 
 export type AdsRoas = {
@@ -65,7 +90,8 @@ export type AdsRoas = {
   };
 };
 
-function spendPeriod(from: Date | null, to: Date | null) {
+/** Dùng chung với bảng quyết định quảng cáo (ads-decision.ts) — MỘT định nghĩa cho kỳ chi tiêu. */
+export function spendPeriod(from: Date | null, to: Date | null) {
   const conds = [eq(schema.adSpends.excluded, false)];
   if (from) conds.push(gte(schema.adSpends.spendDate, from));
   if (to) conds.push(lte(schema.adSpends.spendDate, to));
@@ -74,33 +100,84 @@ function spendPeriod(from: Date | null, to: Date | null) {
 
 async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> {
   const db = await getDb();
+  // Chi tiêu CHỈ tồn tại ở cấp chiến dịch. Xem docs/ads-attribution-audit.md.
+  const spendKnown = level === "campaign";
   const scope = metricScope(period, "confirmed");
-  const HAS_AD = sql`${o.adId} is not null and ${o.adId} <> ''`;
-  // Tiền COD CÓ CHỨNG TỪ trên đơn — không lấy COD khai báo.
-  const CASH = sql<number>`coalesce(sum(coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)) filter (where ${IS_DELIVERED}), 0)`;
-
+  /**
+   * ĐƠN THUỘC VỀ QUẢNG CÁO: có `ad_id` Pancake gửi, HOẶC nối được về chiến dịch qua bài viết.
+   *
+   * Pancake chỉ gửi ad_id cho ~46% đơn nhưng gửi post_id cho ~82%; Facebook cho biết mẩu quảng cáo
+   * nào quảng bá bài nào, nên phần chênh nối được bằng dữ kiện thật. Chi tiết và ba ràng buộc:
+   * lib/queries/ads-attribution-link.ts.
+   *
+   * Ở cấp MẨU QUẢNG CÁO thì chỉ dùng `ad_id`: một bài có thể do nhiều mẩu chạy, chọn bừa một mẩu là
+   * bịa. Nối qua bài viết chỉ có nghĩa ở cấp CHIẾN DỊCH — cũng là cấp duy nhất có số chi tiêu.
+   */
+  const HAS_AD = level === "campaign" ? sql`(${ORDER_CAMPAIGN_ID} is not null)` : sql`${o.adId} is not null and ${o.adId} <> ''`;
   // ── Kết quả đơn gộp theo chiến dịch (hoặc theo từng mẩu quảng cáo) ──
-  const groupKey = level === "campaign" ? sql`coalesce(${schema.fbAds.campaignId}, ${o.adId})` : sql`${o.adId}`;
-  const groupName = level === "campaign" ? sql<string>`max(coalesce(nullif(${schema.fbAds.campaignName}, ''), ${o.adId}))` : sql<string>`max(coalesce(nullif(${schema.fbAds.name}, ''), ${o.adId}))`;
+  // Tiền mặt tính trong bảng dẫn xuất: COD CÓ CHỨNG TỪ trên đơn, không lấy COD khai báo.
+  const groupKey = level === "campaign" ? sql`coalesce(${ORDER_CAMPAIGN_ID}, ${o.adId})` : sql`${o.adId}`;
 
-  const orderRows = await db
+  /**
+   * ───────── MỖI ĐƠN TÍNH KẾT QUẢ MỘT LẦN, KHOÁ NHÓM CŨNG VẬY ─────────
+   *
+   * Đo trên production 09/09/2026: hàm này mất **25–27 giây**, và mất NHƯ NHAU cho 30 ngày lẫn toàn
+   * kỳ — dấu hiệu rõ ràng rằng chi phí không đi theo lượng dữ liệu mà theo số lần tính LẶP.
+   *
+   * Tám cột gộp ở dưới, cột nào cũng nội tuyến trọn `ORDER_OUTCOME`; riêng khoá nhóm còn chứa
+   * `ORDER_CAMPAIGN_ID` (một truy vấn con tương quan) và bị tính cả ở SELECT lẫn GROUP BY. Gói vào
+   * bảng dẫn xuất kèm rào thì mỗi đơn tính đúng một lần, khoá nhóm cũng chỉ dựng một lần.
+   *
+   * Đổi HÌNH DẠNG, KHÔNG đổi công thức. `tests/ads-roas.test.ts` và
+   * `tests/metric-shape-consistency.test.ts` giữ cho con số không đổi.
+   */
+  const facts = db
     .select({
-      key: sql<string>`${groupKey}`,
-      name: groupName,
-      bookedOrders: COUNT_BOOKED,
-      bookedRevenue: BOOKED_REVENUE,
-      deliveredOrders: COUNT_DELIVERED,
-      deliveredRevenue: DELIVERED_REVENUE,
-      returnedOrders: COUNT_RETURNED,
-      deliveredCogs: DELIVERED_COGS,
-      shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)), 0)`,
-      cash: CASH,
+      key: sql<string>`${groupKey}`.as("f_key"),
+      campaignName: sql<string>`${schema.fbAds.campaignName}`.as("f_campaign_name"),
+      adName: sql<string>`${schema.fbAds.name}`.as("f_ad_name"),
+      adId: sql<string>`${o.adId}`.as("f_ad_id"),
+      revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
+      cogs: sql<number>`${orderCogsFast()}`.as("f_cogs"),
+      shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("f_shipping"),
+      cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("f_cash"),
+      outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(schema.fbAds, eq(schema.fbAds.id, o.adId))
     .where(and(scope, HAS_AD))
-    .groupBy(sql`${groupKey}`);
+    .offset(OUTCOME_FENCE)
+    .as("ads_facts");
+
+  const fDelivered = sql`${facts.outcome} = 'DELIVERED'`;
+  const fReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const fBooked = sql`${facts.outcome} <> 'CANCELLED'`;
+
+  /*
+    JIT TAT - do duoc tren production: adsRoas 5.083ms (30 ngay) va 4.458ms (toan ky) nguoi, 0-1ms
+    am. Cung ho truy van da tach bach duoc JIT: 8.578ms bat / 26ms tat, cung so khoi dem.
+    Chi boc cau lenh nay; phan tien quang cao ben duoi chay rieng nhu cu.
+  */
+  const orderRows = await chayKhongJit(db, (tx) => tx
+    .select({
+      key: sql<string>`${facts.key}`,
+      name:
+        level === "campaign"
+          ? sql<string>`max(coalesce(nullif(${facts.campaignName}, ''), ${facts.adId}))`
+          : sql<string>`max(coalesce(nullif(${facts.adName}, ''), ${facts.adId}))`,
+      bookedOrders: sql<number>`count(*) filter (where ${fBooked})`,
+      bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${fBooked}), 0)`,
+      deliveredOrders: sql<number>`count(*) filter (where ${fDelivered})`,
+      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${fDelivered}), 0)`,
+      returnedOrders: sql<number>`count(*) filter (where ${fReturned})`,
+      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${fDelivered}), 0)`,
+      shipping: sql<number>`coalesce(sum(${facts.shipping}), 0)`,
+      cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${fDelivered}), 0)`,
+    })
+    .from(facts)
+    .groupBy(facts.key));
 
   // ── Tiền quảng cáo theo cùng khoá ──
   const spendRows = await db
@@ -121,20 +198,25 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
     const key = String(r.key ?? "");
     if (!key) continue;
     seen.add(key);
-    const spend = spendByKey.get(key)?.spend ?? 0;
+    const spend = spendKnown ? (spendByKey.get(key)?.spend ?? 0) : 0;
     const bookedRevenue = Number(r.bookedRevenue ?? 0);
     const deliveredRevenue = Number(r.deliveredRevenue ?? 0);
     const cash = Number(r.cash ?? 0);
     const contribution = deliveredRevenue - Number(r.deliveredCogs ?? 0) - Number(r.shipping ?? 0) - spend;
     const deliveredOrders = Number(r.deliveredOrders ?? 0);
     const returnedOrders = Number(r.returnedOrders ?? 0);
-    const ratio = (value: number) => (spend > 0 ? Math.round((value / spend) * 100) / 100 : null);
+    // Không biết chi tiêu ⇒ không có ROAS và không có CAC. Đây là chỗ dễ sai nhất: chia doanh thu
+    // cho 0 rồi hiện ra một con số sẽ bị đọc như thể quảng cáo đó miễn phí.
+    const ratio = (value: number) => (spendKnown && spend > 0 ? Math.round((value / spend) * 100) / 100 : null);
+    const perOrder = (count: number) => (spendKnown && count > 0 ? Math.round(spend / count) : null);
+    const bookedOrders = Number(r.bookedOrders ?? 0);
     rows.push({
       key,
       name: r.name || key,
       level,
       spend,
-      bookedOrders: Number(r.bookedOrders ?? 0),
+      spendKnown,
+      bookedOrders,
       bookedRevenue,
       deliveredOrders,
       deliveredRevenue,
@@ -146,12 +228,16 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       deliveredRoas: ratio(deliveredRevenue),
       cashRoas: ratio(cash),
       contributionRoas: ratio(contribution),
+      cacBooked: perOrder(bookedOrders),
+      cacDelivered: perOrder(deliveredOrders),
     });
   }
 
   // Chiến dịch có tiêu tiền nhưng KHÔNG có đơn nào gắn vào — vẫn phải hiện, đó là tiền đã mất.
+  // Chỉ xét ở cấp chiến dịch: ở cấp mẩu quảng cáo, khoá không cùng không gian nên mọi chiến dịch
+  // sẽ trông như "không có đơn nào", một kết luận sai hoàn toàn.
   let spendWithoutOrders = 0;
-  for (const [key, value] of spendByKey) {
+  for (const [key, value] of spendKnown ? spendByKey : new Map<string, { spend: number; name: string }>()) {
     if (seen.has(key)) continue;
     spendWithoutOrders += value.spend;
     if (value.spend > 0) {
@@ -160,6 +246,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
         name: value.name || key,
         level,
         spend: value.spend,
+        spendKnown: true,
         bookedOrders: 0,
         bookedRevenue: 0,
         deliveredOrders: 0,
@@ -172,11 +259,17 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
         deliveredRoas: 0,
         cashRoas: 0,
         contributionRoas: -1,
+        // Tiêu tiền mà không đơn nào: CAC là vô hạn, không phải một con số. Để `null` và hiện "—",
+        // vì in ra một số ở đây sẽ bị đọc nhầm thành "chi phí mỗi đơn".
+        cacBooked: null,
+        cacDelivered: null,
       });
     }
   }
 
-  rows.sort((a, b) => b.spend - a.spend);
+  // Cấp chiến dịch xếp theo tiền đã tiêu. Cấp mẩu quảng cáo KHÔNG có tiền, nên xếp theo doanh thu
+  // GIAO THÀNH CÔNG — mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước.
+  rows.sort((a, b) => (spendKnown ? b.spend - a.spend : b.deliveredRevenue - a.deliveredRevenue) || b.deliveredOrders - a.deliveredOrders);
 
   const [unmappedRow] = await db
     .select({
@@ -185,7 +278,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       ordersWithUnknownAd: sql<number>`count(*) filter (where ${HAS_AD} and not exists (select 1 from fb_ads fa where fa.id = ${o.adId}))`,
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(scope);
 
   const totals = rows.reduce(
@@ -215,6 +308,17 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
 export async function getAdsRoas(period: Period, level: RoasLevel = "campaign"): Promise<AdsRoas> {
   return memo(`adsRoas:${periodKey(period)}:${level}`, 90_000, () => roasUncached(period, level));
 }
+
+export const CAC_LABEL = {
+  cacBooked: "CAC lên đơn",
+  cacDelivered: "CAC giao thành công",
+} as const;
+
+export const CAC_HINT = {
+  cacBooked: "Chi quảng cáo ÷ số đơn đã lên. Trả lời 'một đơn tốn bao nhiêu tiền quảng cáo'.",
+  cacDelivered:
+    "Chi quảng cáo ÷ số đơn ĐÃ TỚI TAY KHÁCH. Đây mới là tiền thật bỏ ra cho một khách cầm được hàng; khoảng cách với CAC lên đơn chính là phần trả cho những đơn hoàn. So nó với lãi gộp một đơn để biết còn chạy được không.",
+} as const;
 
 export const ROAS_LABEL = {
   orderRoas: "ROAS lên đơn",

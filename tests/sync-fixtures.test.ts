@@ -4,27 +4,167 @@
  */
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
+import { testIdeas } from "./ideas.test";
+import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
+import { testCostAllocation } from "./cost-allocation.test";
+import { testBankLedger } from "./bank-ledger.test";
+import { testSepayWebhook } from "./sepay-webhook.test";
+import { testSepayApi } from "./sepay-api.test";
+import { testBankAccounts } from "./bank-accounts.test";
+import { testCashPosition } from "./cash-position.test";
+import { testFinanceCockpit } from "./finance-cockpit.test";
+import { testCostDoubleCount } from "./cost-double-count.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
+import { testVtpCapability } from "./vtp-capability.test";
+import { testCareWorkbench } from "./care-workbench.test";
+import { testAiCopilot } from "./ai-copilot.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
+import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
 import { testBackfill } from "./backfill.test";
 import { testBusinessInvariants } from "./business-invariants.test";
 import { testFinancialTruth } from "./financial-truth.test";
+import { testFinanceTruth } from "./finance-truth.test";
+import { testFinanceInvariants } from "./finance-invariants.test";
+import { testWorkOs } from "./work-os.test";
+import { testWorkforce } from "./workforce.test";
+import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
+import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
+import {
+  testCoverageSeparatesMachineFromPerson,
+  testCsAssignmentUsesKey,
+  testDeptKeysDeriveFromCatalog,
+  testInspectionCarriesActorKey,
+  testKrDataInsufficient,
+  testMetricCatalogIsComplete,
+  testMetricTrust,
+  testObservedLinkage,
+  testSourceVersionIsTracked,
+  testTargetResolution,
+} from "./attribution.test";
+import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testScopeDecisions } from "./scope-enforcement.test";
+import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
+import { testDeployScript } from "./deploy-script.test";
+import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
+import { testCsCaseGrouping } from "./cs-case-grouping.test";
+import { testCsWorkqueue } from "./cs-workqueue.test";
+import { testCsNextAction } from "./cs-next-action.test";
+import { testCsUiContrast } from "./cs-ui-contrast.test";
+import { testSalesFunnel } from "./sales-funnel.test";
+import { testStaffPerformance } from "./staff-performance.test";
+import { testConversionFunnel } from "./conversion-funnel.test";
+import { testPreshipRisk } from "./preship-risk.test";
+import { testAdsAttribution } from "./ads-attribution.test";
+import { testAdsAnomaly } from "./ads-anomaly.test";
+import { testAdsAttributionLink } from "./ads-attribution-link.test";
+import { testAdsIdentity } from "./ads-identity.test";
+import { testProductVerdict } from "./product-verdict.test";
+import { testInventoryForecast } from "./inventory-forecast.test";
+import { testInventoryDecision } from "./inventory-decision.test";
+import { testReturnInspection } from "./return-inspection.test";
+import { testReturnItemInspection } from "./return-item-inspection.test";
+import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
+import { testInspectionFilter } from "./inspection-filter.test";
+import { testReturnFullReceive } from "./return-full-receive.test";
+import { testReturnProductContext } from "./return-product-context.test";
+import { testShipmentProductReport } from "./shipment-product-report.test";
+import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
+import { testCanonicalOutcome } from "./canonical-outcome.test";
+import { testCogsRecognition } from "./cogs-recognition.test";
+import { testSlowMoving } from "./slow-moving.test";
+import { testDrilldownContract } from "./drilldown-contract.test";
+import { testBusinessBrief } from "./business-brief.test";
+import { testSearch } from "./search.test";
+import { testEntityTimeline } from "./entity-timeline.test";
+import { testAlertConfig } from "./alert-config.test";
+import { testMigrationJournal } from "./migration-journal.test";
+import { testMigrationUpgradePath } from "./migration-upgrade-path.test";
+import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity } from "./repo-integrity.test";
+import { testDuplicateMetrics } from "./duplicate-metrics.test";
+import { testLogisticsStatusBoundary } from "./logistics-status-boundary.test";
+import { testSchedulerCoverage } from "./scheduler-coverage.test";
+import { testShipmentJoinGrain } from "./shipment-join-grain.test";
+import { testFastPathWiring } from "./fast-path-wiring.test";
+import { testBankMatch } from "./bank-match.test";
+import { testBankPipeline } from "./bank-pipeline.test";
+import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
+import { testActionWiring } from "./action-wiring.test";
+import {
+  testKpiCohortUsesHandoffDate,
+  testMachineNeverInventsHumanReason,
+  testNoHandoffEvidenceStaysOut,
+  testReasonReportDefaultsToOutcomeDate,
+  testReasonTaxonomy,
+  testRescueRateNeverFakesZero,
+  testTimeBasisHasNoSilentFallback,
+} from "./kpi-clarity.test";
+import {
+  testConditioningHierarchy,
+  testNoDoubleCountAcrossEvents,
+  testMarketerAttributionGoesByKey,
+  testProblemClassification,
+  testRiskBadgeReadsTargets,
+  testActionEngineGates,
+  testReasonDenominatorsAndFilters,
+  testIntelligenceRuns,
+} from "./return-intelligence.test";
+import { testApproval } from "./approval.test";
+import { testClientBoundaryExports } from "./client-boundary-exports.test";
+import { testVtpTrackingLink } from "./vtp-tracking-link.test";
+import { testDeliveryTower } from "./delivery-tower.test";
+import { testLogisticsFreshness } from "./logistics-freshness.test";
+import { testOperatingFunnel } from "./operating-funnel.test";
+import { testMemoInflight } from "./memo-inflight.test";
+import { testCacheSemantics } from "./cache-semantics.test";
+import { testUseServerExports } from "./use-server-exports.test";
+import { testSmokeCoverage } from "./smoke-coverage.test";
+import { testReturnPipeline } from "./return-pipeline.test";
+import { testReturnExceptions } from "./return-exceptions.test";
+import { testReturnWarehouseKpi } from "./return-warehouse-kpi.test";
+import { testMultiAttemptMoney } from "./multi-attempt-money.test";
+import { testCashflow } from "./cashflow.test";
+import { testPurchasing } from "./purchasing.test";
+import { testCrm } from "./crm.test";
+import { testScenario } from "./scenario.test";
+import { testAccessControl } from "./access-control.test";
+import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
+import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
-import { testUiConsistency } from "./ui-consistency.test";
+import { testFormatNullSafety } from "./format-null-safety.test";
+import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
+import { testMetricRegistry, testPersonTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
+import { testDataQualityIssues } from "./data-quality-issues.test";
+import { testReturnReceiveSelector } from "./return-receive-selector.test";
+import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
+import { testCsOrderReconcile } from "./cs-order-reconcile.test";
+import { testCsSemantic } from "./cs-semantic.test";
+import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
+import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
+import { testCsCustomerQueue } from "./cs-customer-queue.test";
+import { testCareUiContrast } from "./care-ui-contrast.test";
+import { testCareFilters } from "./care-filters.test";
+import { testProductNotes } from "./product-notes.test";
+import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
+import { testLoadingUxContract } from "./loading-ux-contract.test";
+import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
+import { testCareStates } from "./care-states.test";
+import { testCareOs } from "./care-os.test";
+import { testReportingParity } from "./reporting-parity.test";
+import { testLoginThrottle } from "./login-throttle.test";
+import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAiPlatform } from "./ai-platform.test";
 import { testSalesAgent } from "./sales-agent.test";
 import assert from "node:assert/strict";
@@ -33,6 +173,7 @@ import path from "node:path";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import { parseJsonSafeInts } from "@/lib/integrations/http";
 import { mapOrder, mapProduct } from "@/lib/integrations/pancake/mapper";
@@ -41,7 +182,7 @@ import { detectKind, parseWebhookBody } from "@/lib/integrations/pancake/webhook
 import { normalizeTracking } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { evaluateAlerts } from "@/lib/alerts/rules";
-import { detectFromMessages, findClosingMessage } from "@/lib/cs/chat-detect";
+import { detectFromMessages, findCustomerOrderInfo, matchOrderForConversation } from "@/lib/cs/chat-detect";
 import { stripIgnored } from "@/lib/cs/detect";
 import { detectCsCases } from "@/lib/cs/detect";
 import { DEFAULT_CS_RULES } from "@/lib/constants/cs";
@@ -64,6 +205,7 @@ import type { OrderOutcome } from "@/lib/constants/returns";
 import { listVariantsForReceipt } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
+import { inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
@@ -238,7 +380,8 @@ async function main() {
   assert.equal(row.cancelled, 1, "huỷ 1");
   assert.equal(row.rate, 5 / 7 * 100, "tỷ lệ hoàn 5/(2+5)");
   assert.equal(row.successRate, 2 / 7 * 100, "tỷ lệ giao thành công 2/(2+5)");
-  assert.ok(row.expectedSuccessRate !== null && Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn");
+  // PROJECTED_GTC_V3: hai đơn đang giao của mã này ở trạng thái chưa đủ mẫu ⇒ ước tính có thể là CHƯA ĐO ĐƯỢC (null); khi có số thì GTC = 100 − hoàn.
+  assert.ok(row.expectedSuccessRate === null ? row.expectedRate === null : Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn (hoặc cả hai cùng chưa đo được)");
   const summary = await getReturnRateSummary(all, "RR-001");
   assert.equal(summary.returned, 5);
   assert.equal(summary.delivered, 2);
@@ -271,14 +414,25 @@ async function main() {
     .innerJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
     .where(and(inArray(schema.orders.id, ["rr-9002", "rr-9009"]), isNull(schema.shipments.returnReceivedAt)));
   assert.equal(pendingReturns.length, 2, "hai vận đơn hoàn đang chờ kho nhận");
-  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Kho đếm đủ 2 kiện");
+  await markReturnReceived(pendingReturns.map((r) => r.id), { id: null, label: "test-kho" }, "Hai kiện đã về, chờ đếm");
+  const afterArrival = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
+  assert.equal(afterArrival?.currentStock, 1, "ghi nhận đã về CHƯA cộng tồn — chưa ai mở kiện ra đếm");
+
+  // Kho đếm từng kiện: mỗi kiện 1 món còn bán được → tồn 1 + 2 = 3.
+  for (const r of pendingReturns) {
+    const done = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ", actor: { id: null, label: "test-kho" } });
+    assert.ok("ok" in done, "kiện đã ghi nhận về thì đếm được");
+  }
   const afterReceive = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
-  assert.equal(afterReceive?.currentStock, 3, "kho nhận 2 kiện hoàn → tồn 1 + 2 = 3");
-  // Xác nhận lần hai không được cộng thêm lần nữa (chống đếm trùng).
-  await markReturnReceived(pendingReturns.map((r) => r.id), "test-kho", "Bấm nhầm lần hai");
+  assert.equal(afterReceive?.currentStock, 3, "kho đếm 2 kiện hoàn → tồn 1 + 2 = 3");
+  // Đếm lần hai bị chặn, nếu không phiếu tái nhập sẽ cộng tồn hai lần.
+  for (const r of pendingReturns) {
+    const again = await recordInspection({ shipmentId: r.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Bấm nhầm lần hai", actor: { id: null, label: "test-kho" } });
+    assert.ok("error" in again, "kiện đã đếm rồi thì không đếm lại được");
+  }
   const afterTwice = (await listVariantsForReceipt()).find((v) => v.id === "rr-var");
-  assert.equal(afterTwice?.currentStock, 3, "xác nhận lại không cộng trùng tồn");
-  console.log(`✓ Tồn kho ERP RR-001: 1 khi 5 đơn hoàn chưa về kho → 3 sau khi kho nhận 2 kiện (chống cộng trùng)`);
+  assert.equal(afterTwice?.currentStock, 3, "đếm lại không cộng trùng tồn");
+  console.log(`✓ Tồn kho ERP RR-001: 1 khi 5 đơn hoàn chưa về kho → vẫn 1 khi mới ghi nhận đã về → 3 sau khi kho ĐẾM 2 kiện (chống cộng trùng)`);
 
   // Nhập sao kê MB Bank → chi phí
   const ledgerJson = JSON.stringify({
@@ -310,6 +464,26 @@ async function main() {
   assert.equal(fresh.length, 3);
   const imported = await insertLedgerExpenses(fresh.map((r) => ({ reference: r.reference, date: r.date, amount: r.amount, category: r.category, description: r.description })), "test");
   assert.equal(imported.inserted, 3);
+  assert.equal(imported.refused, 0);
+  // AGENTS.md 3.17: sao kê không tạo chi phí qua giao diện; đường script/ops còn lại phải ĐÁNH DẤU nguồn
+  // để Cost Engine / Tổng quan tài chính phân biệt được với khoản gõ tay.
+  const importedRows = await db.select({ costSource: schema.expenses.costSource }).from(schema.expenses).where(inArray(schema.expenses.id, imported.ids));
+  assert.equal(importedRows.length, 3);
+  assert.ok(importedRows.every((r) => r.costSource === "BANK_IMPORT"), "khoản chi sinh từ sao kê mang cost_source = BANK_IMPORT");
+  // Nhóm mà bảng Chi phí KHÔNG có thẩm quyền (cước, phí hoàn, quảng cáo, tiền hàng) bị TỪ CHỐI dù được truyền thẳng:
+  // nguồn chuyên biệt đã tính, ghi thêm là trừ hai lần.
+  const tuChoi = await insertLedgerExpenses(
+    [
+      { reference: "MB FT-REFUSE-1", date: "2026-08-20", amount: 17000, category: "SHIPPING", description: "VTP cuoc" },
+      { reference: "MB FT-REFUSE-2", date: "2026-08-20", amount: 30000, category: "RETURN_FEE", description: "VTP hoan" },
+      { reference: "MB FT-REFUSE-3", date: "2026-08-20", amount: 1000000, category: "ADS", description: "Meta" },
+      { reference: "MB FT-REFUSE-4", date: "2026-08-20", amount: 5000000, category: "PURCHASE", description: "Xuong" },
+    ],
+    "test",
+  );
+  assert.equal(tuChoi.inserted, 0, "không ghi khoản thuộc nguồn khác");
+  assert.equal(tuChoi.refused, 4, "đếm đủ 4 dòng bị từ chối để báo lại cho người chạy script");
+  assert.equal((await existingLedgerReferences(["MB FT-REFUSE-1", "MB FT-REFUSE-2", "MB FT-REFUSE-3", "MB FT-REFUSE-4"])).size, 0, "dòng bị từ chối không để lại vết trong bảng Chi phí");
   const again = planImport(txns, await existingLedgerReferences(txns.map(referenceFor)), employees);
   assert.equal(again.filter((r) => r.status === "duplicate").length, 3, "nhập lại → toàn bộ trùng");
   const csvTxns = parseLedger(ledgerCsv);
@@ -321,7 +495,7 @@ async function main() {
   assert.equal(csvPlan.find((r) => r.bankRef === "FT7")?.status, "non_pl");
   const ledgerRows = await db.select().from(schema.expenses).where(eq(schema.expenses.reference, "MB FT3"));
   assert.equal(ledgerRows[0]?.amount, 1340000);
-  console.log(`✓ Nhập sao kê: ${imported.inserted} khoản chi vận hành, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
+  console.log(`✓ Nhập sao kê (script/ops): ${imported.inserted} khoản chi vận hành mang cost_source BANK_IMPORT, từ chối ${tuChoi.refused} dòng thuộc nguồn khác, bỏ qua tiền vào/nội bộ/nhập hàng, chống trùng theo mã GD`);
 
   // Bảng kê tiền COD Viettel Post
   const summaries = parseStatementSummaryText("PCOD-A-GLMTQY04-2609-55\t04/09/2026 01:00:29\t24.059.000 ₫\t563.757 ₫\t23.495.243 ₫\nPCOD-A-GLMTQY03-2609-44 03/09/2026 08:47:32 58.136.001 ₫ 6.806.381 ₫ 51.329.620 ₫\ndòng rác\n");
@@ -346,7 +520,32 @@ async function main() {
   const batch = await db.query.codBatches.findFirst({ where: eq(schema.codBatches.reference, "PCOD-A-TEST") });
   assert.equal(batch?.codGross, 700000, "tổng COD trên bảng kê (kể cả dòng không ghép được)");
   assert.equal(batch?.totalAmount, 675000, "tiền thu về = COD − cước");
-  console.log(`✓ Bảng kê Viettel Post: ${summaries.length} dòng tổng hợp, chi tiết ghép ${stmtApplied.matched}/${stmtRows.length} vận đơn, đợt ${batch?.reference} thu về ${batch?.totalAmount}`);
+  /*
+    DÒNG CHỈ CƯỚC (COD = 0) KHÔNG ĐƯỢC BIẾN THÀNH "ĐÃ THU ĐỦ TIỀN".
+
+    Bảng kê Viettel Post có dòng chỉ trừ cước cho vận đơn hoàn / giao một phần. Bản trước ghi
+    `cod_status = PAID_TO_BANK` và `cod_collected = cod_amount` cho MỌI dòng ghép được — bịa ra
+    "đã thu 499.000đ" cho một đơn ĐVVC không trả đồng nào, và nhánh tiền của ORDER_OUTCOME kết luận
+    giao thành công. Đo production 13/09/2026 (chỉ-đọc, điều kiện chặt: PAID_TO_BANK, cod_collected =
+    cod_amount, có dòng bảng kê nhưng KHÔNG dòng nào cod > 0): 0 vận đơn — lỗi đường ghi là thật
+    nhưng chưa làm hỏng dữ liệu, nên chỉ sửa mã + khoá bằng kiểm thử, không sửa dữ liệu.
+    AGENTS.md 3.6: `cod_collected` chỉ ghi khi có số thực thu > 0.
+  */
+  const rr3 = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9003") });
+  assert.ok(rr3, "có vận đơn RR-9003 (499.000đ thu hộ, có vận đơn hoàn)");
+  const rr3Truoc = { codStatus: rr3.codStatus, codCollected: rr3.codCollected };
+  assert.notEqual(rr3Truoc.codStatus, "PAID_TO_BANK", "tiền đề: RR-9003 chưa được ghi nhận tiền về");
+  const feeOnlyRows = parseStatementDetail("Bảng kê PCOD-A-FEEONLY\nSTT,Mã vận đơn,Người nhận,Tiền COD,Tổng cước,Thực nhận\n1,PKE1509000003,Khách C,0,\"31.000\",\"-31.000\"\n", "bang-ke-cuoc.csv");
+  assert.equal(feeOnlyRows.length, 1);
+  assert.equal(feeOnlyRows[0].cod, 0);
+  const feeOnlyApplied = await applyStatementDetail({ reference: "PCOD-A-FEEONLY", receivedAt: "2026-09-05", codGross: 0, feeTotal: 0, netAmount: 0 }, feeOnlyRows, "test");
+  assert.equal(feeOnlyApplied.matched, 1, "dòng chỉ cước vẫn ghép được vận đơn");
+  const rr3Sau = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, rr3.id) });
+  assert.equal(rr3Sau?.codStatus, rr3Truoc.codStatus, "dòng chỉ cước KHÔNG nâng cod_status lên PAID_TO_BANK");
+  assert.equal(rr3Sau?.codCollected, rr3Truoc.codCollected, "dòng chỉ cước KHÔNG ghi cod_collected (không được bịa ra tiền thực thu)");
+  assert.equal(rr3Sau?.codPaidToBankAt, null, "dòng chỉ cước không có mốc tiền về ngân hàng");
+  assert.equal(rr3Sau?.shippingFee, 31000, "nhưng cước thực tế trên bảng kê VẪN được ghi");
+  console.log(`✓ Bảng kê Viettel Post: ${summaries.length} dòng tổng hợp, chi tiết ghép ${stmtApplied.matched}/${stmtRows.length} vận đơn, đợt ${batch?.reference} thu về ${batch?.totalAmount}; dòng chỉ cước (COD = 0) chỉ ghi cước, không bịa tiền về`);
 
   // Cảnh báo vận hành: giao thất bại → thông báo; giao thành công → tự đóng
   const failedShipment = await db.query.shipments.findFirst({ where: eq(schema.shipments.orderId, "rr-9004") });
@@ -365,6 +564,41 @@ async function main() {
   assert.ok(closed?.resolvedAt, "tự đóng khi đã giao");
   console.log(`✓ Cảnh báo: giao thất bại → thông báo (${run1.created} mới), giao xong → tự đóng`);
 
+  // ───────── ĐỊA CHỈ CHƯA CHUẨN HOÁ ─────────
+  //
+  // Đơn TRÔNG đầy đủ nhưng POS không đẩy sang ĐVVC được. Ba luật phải đúng, nếu sai thì hoặc bỏ sót
+  // hàng trăm đơn đang kẹt, hoặc báo nhầm hàng loạt đơn hoàn toàn hợp lệ.
+  // SĐT cố ý nằm NGOÀI dải 09000000xx: fixture chung dùng dải đó để kiểm thử ghép đơn landing theo
+  // số điện thoại, trùng vào là làm hỏng bài kiểm thử của người khác.
+  await db.insert(schema.orders).values([
+    // (a) kẹt thật: có địa chỉ, KHÔNG có tỉnh.
+    { id: "addr-ket", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000101", shipAddress: "123 đường ABC", shipProvince: "" },
+    // (b) HAI CẤP MỚI (tỉnh + xã, không quận/huyện) — ĐÚNG chuẩn từ 01/07/2025, KHÔNG được báo.
+    { id: "addr-hai-cap", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000102", shipAddress: "456 đường XYZ", shipProvince: "Hà Nội", shipDistrict: "", shipCommune: "Phường Láng" },
+    // (c) trống địa chỉ — thuộc ORDER_INCOMPLETE, không được đếm hai lần ở đây.
+    { id: "addr-trong", stage: "CONFIRMED", status: 1, insertedAt: new Date(), billPhone: "0977000103", shipAddress: "", shipProvince: "" },
+  ]).onConflictDoNothing();
+
+  await evaluateAlerts();
+  const addrCases = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "ORDER_ADDRESS_NOT_NORMALIZED"));
+  const addrIds = new Set(addrCases.map((c) => c.entityId));
+  assert.ok(addrIds.has("addr-ket"), "đơn có địa chỉ mà thiếu tỉnh PHẢI được báo — đây là đơn đang đứng im");
+  assert.ok(!addrIds.has("addr-hai-cap"), "địa chỉ hai cấp (tỉnh + xã) là ĐÚNG chuẩn mới, báo là báo nhầm hàng loạt");
+  assert.ok(!addrIds.has("addr-trong"), "đơn trống địa chỉ thuộc 'đơn thiếu thông tin', không được đếm hai lần");
+
+  // Chưa có vận đơn ⇒ đang chặn việc giao hàng ⇒ phải nêu rõ trong tiêu đề để nhìn là biết gấp.
+  const ketCase = addrCases.find((c) => c.entityId === "addr-ket");
+  assert.ok(ketCase?.title.includes("chưa có vận đơn"), "đơn chưa có vận đơn phải được nêu rõ là đang chặn giao hàng");
+  // ERP KHÔNG tự đoán địa chỉ: việc phải nói rõ là người mở đơn chọn tay.
+  assert.ok(/chọn tay|CHỌN TAY/i.test(ketCase?.body ?? ""), "việc phải yêu cầu NGƯỜI chọn tay, ERP không đoán hộ khách");
+
+  // Chạy lại không tạo trùng.
+  const truoc = addrCases.length;
+  await evaluateAlerts();
+  const sau = (await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "ORDER_ADDRESS_NOT_NORMALIZED"))).length;
+  assert.equal(sau, truoc, "quét lại không tạo việc trùng");
+  console.log(`✓ Địa chỉ chưa chuẩn hoá: ${truoc} việc · địa chỉ hai cấp KHÔNG bị báo nhầm · đơn trống địa chỉ không đếm hai lần · quét lại không trùng`);
+
   // Case CSKH tự phát hiện từ thẻ / ghi chú đơn Pancake
   await db.update(schema.orders).set({ tags: ["Trả hàng"], note: "khách nhận sai size, đổi size L cho khách" }).where(eq(schema.orders.id, "rr-9001"));
   const cs1 = await detectCsCases();
@@ -375,8 +609,10 @@ async function main() {
   const cs2 = await detectCsCases();
   assert.equal(cs2.created, 0, "quét lại không tạo trùng");
   const alertsWithCs = await evaluateAlerts();
-  const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE"));
-  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo");
+  // Trả hàng / đổi size thuộc nhóm GOM (lib/constants/cs.ts): lên chuông dưới dạng việc TỔNG HỢP
+  // theo loại, không phải mỗi case một dòng.
+  const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE_GROUP"));
+  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo dưới dạng việc tổng hợp theo loại");
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD
@@ -555,6 +791,7 @@ async function main() {
 
   // Các báo cáo lợi nhuận / lương chạy được trên CSDL thật (bắt lỗi SQL: enum, cột, join)
   const nominal = await getNominalProfitReport(all);
+  const riskPct = Number(nominal.assumptions.inventoryRiskPercent ?? 0);
   assert.ok(nominal.totals.orders >= 0 && Number.isFinite(nominal.totals.opexTotal), "báo cáo danh nghĩa có tổng vận hành");
   assert.equal(nominal.totals.opexTotal, nominal.operatingExpenses + nominal.totals.packingCost + nominal.totals.opsStaffCost + nominal.fixedCost, "tổng vận hành = đã nhập + đóng hàng + NV vận đơn + cố định");
   for (const r of nominal.rows) {
@@ -563,7 +800,39 @@ async function main() {
     assert.ok(r.rescued <= r.orders, "đơn cứu ≤ đơn");
     assert.equal(r.otherCostsTotal, r.opexTotal + r.inventoryRisk + r.tax + r.otherCost, `chi phí ngoài hàng-QC-VC ${r.code}`);
     if (r.orders) assert.equal(r.opexPerOrder, Math.round(r.otherCostsTotal / r.orders), `CP vận hành/đơn trước hoàn ${r.code}`);
+    // RỦI RO TỒN KHO ĐI THEO HÀNG BÁN RA, không theo hàng nhập trong kỳ.
+    assert.equal(r.inventoryRisk, inventoryRiskOnSold(r.expectedCogs, riskPct), `rủi ro TK ${r.code} tính trên giá vốn hàng bán`);
+    assert.equal(r.inventoryRiskOnPurchase, inventoryRiskOnSold(r.purchaseCost, riskPct), `rủi ro TK cả lô nhập ${r.code}`);
+    assert.equal(r.inventoryRiskPending, inventoryRiskExposure(r.stockValue, riskPct), `rủi ro còn treo ${r.code}`);
+    // Mã nhập hàng trong kỳ mà chưa bán được gì thì chưa giải phóng đồng dự phòng nào vào lãi lỗ —
+    // đây chính là ca chủ shop nêu: nhập 200 triệu, tuần chưa bán mấy mà gánh đủ 20 triệu.
+    if (r.purchaseCost > 0 && r.expectedCogs === 0) {
+      assert.equal(r.inventoryRisk, 0, `mã ${r.code} nhập hàng nhưng chưa bán ⇒ chưa ghi dự phòng vào kỳ`);
+      assert.ok(r.inventoryRiskOnPurchase > 0, `rủi ro cả lô của ${r.code} vẫn hiện ở bảng theo hàng nhập`);
+    }
+    /*
+      ĐỔI CÔNG THỨC CÓ CHỦ Ý (13/09/2026) — không phải nới lỏng bài kiểm để CI xanh.
+
+      TRƯỚC: trừ `inventoryRiskOnPurchase` — rủi ro CẢ ĐỜI của lô nhập — vào lợi nhuận của kỳ chứa
+      phiếu nhập. Nó sai theo HAI hướng ngược nhau và cả hai đều đo được:
+        · kỳ CÓ phiếu nhập  ⇒ gánh rủi ro của hàng sẽ bán trong nhiều tháng tới;
+        · kỳ KHÔNG nhập gì  ⇒ rủi ro bằng ĐÚNG 0, bảng nói hàng đang bán không mang rủi ro nào.
+          Đây chính là cột 0 chủ shop nhìn thấy trên kỳ 7 ngày.
+
+      SAU: trừ `inventoryRisk` — phần dự phòng PHÂN BỔ CHO KỲ theo giá vốn hàng BÁN RA, đúng
+      `AGENTS.md` mục 14, và là CÙNG MỘT con số với bảng lợi nhuận chính.
+
+      Rủi ro cả đời của lô vẫn được tính và vẫn hiện ra, nhưng là GHI CHÚ — hai dòng assert ngay
+      bên trên vẫn khoá nó, nên nó không thể biến mất trong im lặng.
+    */
+    assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
   }
+  // Σ phần phân bổ của các mã = ĐÚNG tổng của shop (largest remainder), không lệch vì làm tròn từng dòng.
+  if (nominal.totals.grossSales > 0) {
+    assert.equal(nominal.rows.reduce((a, r) => a + r.operatingAlloc, 0), nominal.operatingExpenses, "Σ CP vận hành phân bổ các mã = tổng CP vận hành của kỳ");
+    assert.equal(nominal.rows.reduce((a, r) => a + r.fixedAlloc, 0), nominal.fixedCost, "Σ CP cố định phân bổ các mã = tổng CP cố định của kỳ");
+  }
+  assert.equal(nominal.totals.inventoryRisk, nominal.rows.reduce((a, r) => a + r.inventoryRisk, 0), "tổng rủi ro TK = Σ các mã");
   assert.ok(nominal.assumptions.shipFeeReturnedUsed >= nominal.assumptions.shipFeeDeliveredUsed, "cước đơn hoàn ≥ cước gửi");
   for (const basis of ["profit1", "profit2", "nominal", "cash"] as const) {
     const mk = await getMarketerReport(all, basis);
@@ -592,8 +861,9 @@ async function main() {
   assert.equal(perf.totals.orders, nominal.totals.ordersDistinct);
   assert.equal(perf.totals.confirmedSales, nominal.totals.salesAfterDiscount);
   for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
-    assert.ok(p.returnRate !== undefined && p.returnRate >= 0 && p.returnRate <= 1, "tỷ lệ hoàn dự kiến là phân số");
-    assert.ok(p.expectedSuccessRate !== undefined && Math.abs(p.expectedSuccessRate - (1 - (p.returnRate ?? 0))) < 1e-9, "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
+    // PROJECTED_GTC_V3: `null` = chưa đo được, hợp lệ; có số thì là phân số và GTC = 1 − hoàn.
+    assert.ok(p.returnRate !== undefined && (p.returnRate === null || (p.returnRate >= 0 && p.returnRate <= 1)), "tỷ lệ hoàn dự kiến là phân số hoặc chưa đo được");
+    assert.ok(p.expectedSuccessRate !== undefined && (p.returnRate === null ? p.expectedSuccessRate === null : p.expectedSuccessRate !== null && Math.abs(p.expectedSuccessRate - (1 - p.returnRate)) < 1e-9), "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
     if (p.successRate !== null && p.successRate !== undefined) assert.ok(p.successRate >= 0 && p.successRate <= 1);
     if (p.actualReturnRate !== null && p.actualReturnRate !== undefined) assert.ok(p.actualReturnRate >= 0 && p.actualReturnRate <= 1);
     if (p.margin !== null) assert.ok(Math.abs(p.margin) <= 50, "biên là phân số");
@@ -876,17 +1146,74 @@ async function main() {
     assert.equal(await previousOrderHint({ id: "don-cu", customerId: "cust-cu", conversationId: "conv-suong", billPhone: "0949947123", insertedAt: before(7 * 86_400_000) }), null, "không lấy ngược đơn mới hơn làm gợi ý");
 
     const msg = (id: string, text: string, fromPage: boolean, at: Date) => ({ id, text, fromId: fromPage ? "page" : "cus", fromName: fromPage ? "Shop" : "Khách", fromPage, insertedAt: at, hasAttachment: false });
-    const msgs = [
-      msg("m1", "Chị lấy thêm 1 đầm màu đen nữa em giảm giá cho chị nhe", true, before(3_600_000)),
-      msg("m2", "Q002 L", false, before(1_800_000)),
-      msg("m3", "Dạ em chốt thêm 1 đầm Q002 màu Đen, size L giá 470k freeship gửi về địa chỉ cũ ạ", true, t0),
+    /*
+      ═══ "ĐÃ CHỐT" = KHÁCH CHO ĐỦ SĐT VÀ ĐỊA CHỈ ═══
+
+      SỰ CỐ THẬT (10/09/2026): trang CSKH có 181 case "Đã chốt trong chat · chưa tạo đơn" mà phần
+      lớn khách còn CHƯA cho số điện thoại. Luật cũ tìm từ khoá "chốt đơn" trong tin của SHOP, mà
+      kịch bản bán hàng có sẵn câu mời "để hỗ trợ chị chốt đơn, em xin…" — nên gần như mọi hội
+      thoại có tư vấn đều bị đánh dấu.
+
+      Ba dòng dưới đây lấy NGUYÊN VĂN từ ảnh chủ shop gửi. Chúng phải KHÔNG tạo case.
+    */
+    const kichBanBanHang = [
+      msg("s1", "Để hỗ trợ chị chốt đơn, em gửi chị bảng size ạ", true, before(3_600_000)),
+      msg("s2", "Chị cho em xin số điện thoại và địa chỉ để em lên đơn ạ", true, before(1_800_000)),
+      msg("s3", "Dạ 1 đầm 499.000đ + 25.000đ phí ship ạ", true, t0),
     ];
-    const close = findClosingMessage(msgs, DEFAULT_CS_RULES.closingKeywords);
-    assert.equal(close?.at?.getTime(), t0.getTime(), "bắt tin chốt mới nhất của shop");
-    assert.ok(close?.text.includes("chốt thêm"));
-    assert.equal(findClosingMessage(msgs.filter((m) => !m.fromPage), DEFAULT_CS_RULES.closingKeywords), null, "tin của khách không tính là shop đã chốt");
-    assert.equal(findClosingMessage(msgs, []), null, "không khai từ khoá thì không bắt");
-    console.log(`✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; bắt tin shop đã chốt để không sót đơn`);
+    assert.equal(findCustomerOrderInfo(kichBanBanHang), null, "shop MỜI chốt / đi xin SĐT không phải là khách đã chốt");
+
+    const chiCoSdt = [...kichBanBanHang, msg("c1", "0912345678", false, t0)];
+    assert.equal(findCustomerOrderInfo(chiCoSdt), null, "chỉ có SĐT, chưa có địa chỉ ⇒ chưa lên đơn được ⇒ chưa chốt");
+
+    const chiCoDiaChi = [...kichBanBanHang, msg("c2", "Số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy Hà Nội", false, t0)];
+    assert.equal(findCustomerOrderInfo(chiCoDiaChi), null, "chỉ có địa chỉ, chưa có SĐT ⇒ chưa chốt");
+
+    const duCa = [
+      ...kichBanBanHang,
+      msg("c3", "0912345678", false, before(600_000)),
+      msg("c4", "Số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy Hà Nội nhé em", false, t0),
+    ];
+    const du = findCustomerOrderInfo(duCa);
+    assert.ok(du, "khách cho ĐỦ SĐT và địa chỉ ⇒ đã chốt");
+    assert.equal(du?.phone, "0912345678", "phải lấy đúng số khách gửi");
+    assert.equal(du?.at?.getTime(), t0.getTime(), "mốc là tin MUỘN hơn trong hai tin — trước đó chưa đủ để lên đơn");
+
+    // Địa chỉ do CHÍNH SHOP nhắc lại không tính: đó là shop đọc lại, không phải khách cung cấp.
+    const shopNhacLai = [msg("s4", "Em gửi về số 12 ngõ 5 phường Dịch Vọng quận Cầu Giấy nhé chị", true, t0), msg("c5", "0912345678", false, t0)];
+    assert.equal(findCustomerOrderInfo(shopNhacLai), null, "địa chỉ trong tin của SHOP không tính là khách đã cho");
+
+    /*
+      ═══ GHÉP ĐƠN TRƯỚC KHI KẾT LUẬN "CHƯA TẠO ĐƠN" ═══
+
+      Kết luận "chưa có đơn" chỉ đúng khi ta THẬT SỰ biết là chưa có. Ghép hụt thì CSKH gọi lại
+      khách đã mua; ghép bừa thì im lặng bỏ sót một đơn thật. Ba mức chắc chắn phải phân biệt được.
+    */
+    const cuaSo = new Date(Date.now() - 90 * 86_400_000);
+    const theoHoiThoai = await matchOrderForConversation(db, "conv-suong", ["0949947123"], cuaSo);
+    assert.equal(theoHoiThoai.kind, "BY_CONVERSATION", "có conversation_id thì đó là bằng chứng trực tiếp, dùng ngay");
+
+    const khongCo = await matchOrderForConversation(db, "conv-khong-ton-tai", ["0900000000"], cuaSo);
+    assert.equal(khongCo.kind, "NONE", "không hội thoại, không SĐT khớp ⇒ chưa có đơn");
+    assert.equal(khongCo.order, null);
+
+    // G. Một SĐT có NHIỀU đơn ⇒ KHÔNG ép ghép, và cũng KHÔNG kết luận "chưa tạo đơn".
+    await db.insert(schema.orders).values([
+      { id: "amb-1", billPhone: "0988777666", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 86_400_000) },
+      { id: "amb-2", billPhone: "0988777666", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 3_600_000) },
+    ]).onConflictDoNothing();
+    const nhieuDon = await matchOrderForConversation(db, "conv-amb", ["0988777666"], cuaSo);
+    assert.equal(nhieuDon.kind, "AMBIGUOUS", "một SĐT nhiều đơn ⇒ NHẬP NHẰNG, không chọn đại");
+    assert.ok(nhieuDon.kind === "AMBIGUOUS" && nhieuDon.candidates >= 2, "phải nói có bao nhiêu ứng viên");
+
+    await db.insert(schema.orders).values({ id: "uniq-1", billPhone: "0977666555", stage: "NEW", status: 0, insertedAt: new Date(Date.now() - 3_600_000) }).onConflictDoNothing();
+    const motDon = await matchOrderForConversation(db, "conv-uniq", ["0977666555"], cuaSo);
+    assert.equal(motDon.kind, "BY_PHONE_UNIQUE", "SĐT khớp đúng MỘT đơn trong cửa sổ ⇒ đủ chắc");
+
+    console.log(
+      `✓ Khách cũ mua lại: gợi ý SĐT ${hint?.phone} + địa chỉ cũ từ đơn #${hint?.systemId}; "đủ thông tin tạo đơn" = khách cho ĐỦ SĐT + địa chỉ ` +
+        `(kịch bản bán hàng của shop KHÔNG còn bị tính) · ghép đơn 4 mức: hội thoại > SĐT-duy-nhất > NHẬP NHẰNG (không kết luận) > chưa có`,
+    );
   }
 
   // File "Danh sách vận đơn" của viettelpost.vn: cột Mã Vận Đơn là vận đơn CHIỀU VỀ (mã gốc + 1P1), cột Mã đơn hàng mới là mã gốc ERP lưu
@@ -1092,23 +1419,137 @@ async function main() {
   await testBackfill(db);
   await testConsistency(db);
   await testMetricsContract(db);
+  await testMetricShapeConsistency(db);
   await testBusinessInvariants(db);
   await testFinancialTruth(db);
+  await testPrepaidCash(db);
   await testProductIntelligence(db);
+  await testProductVerdict(db);
   await testActionQueue(db);
+  await testCsCaseGrouping(db);
+  await testCsWorkqueue(db);
+  await testSalesFunnel(db);
+  await testStaffPerformance(db);
+  /*
+    HAI KHỐI NÀY CHÈN RỒI DỌN FIXTURE CỦA CHÍNH CHÚNG.
+
+    Đặt sau phễu bán hàng để so chéo được hai con số (đơn được tạo / đã xác nhận phải khớp). Cả hai
+    dọn sạch trong `finally`, nên thứ tự với các khối sau không quan trọng — nhưng nếu có khối nào
+    đếm tổng đơn thì vẫn nên giữ hai khối này ở đây.
+  */
+  await testConversionFunnel(db);
+  await testPreshipRisk(db);
   await testAdsRoas(db);
+  await testAdsDecision(db);
+  await testAdsAttribution(db);
+  await testAdsAnomaly(db);
+  await testAdsIdentity(db);
+  await testAdsAttributionLink(db);
   await testAuditTrail(db);
+  testFormatNullSafety();
+  testHandoffStageSet();
+  testHandoffPureFunction();
+  await testHandoffSqlMatchesTypescript(db);
+  testMetricRegistry();
+  testPersonTargetGuard();
+  testTargetWindowAndPeriod();
+  testRangeAndBands();
+  testScorecardEvaluator();
+  testScorecardContract();
+  testDataQualityIssues();
+  await testReturnReceiveSelector(db);
+  testSearchTermParsing();
+  await testShipmentSearch(db);
+  await testCsOrderReconcile(db);
+  await testCsSemantic(db);
+  testCsNextAction();
+  testCsUiContrast();
+  testOutreachErrorClassify();
+  await testOutreachIdempotentSend(db);
+  testOutreachEligibility();
+  await testOutreachOutcomeFacet(db);
+  await testCsCustomerQueue(db);
+  testCareUiContrast();
+  testCareFilters();
+  await testProductNotes(db);
   testUiConsistency();
+  testNavigationCoverage();
+  testLoadingUxContract();
+  testDrilldownContract();
+  testAlertConfig();
+  testMigrationJournal();
+  testSchedulerCoverage();
+  testShipmentJoinGrain();
+  testFastPathWiring();
+  testBankMatch();
+  testActionWiring();
+
+  // ═══ RÕ NGHĨA CHỈ SỐ VẬN ĐƠN + BÁO CÁO LÝ DO HOÀN ═══
+  testReasonTaxonomy();
+  testMachineNeverInventsHumanReason();
+  testRescueRateNeverFakesZero();
+  testTimeBasisHasNoSilentFallback();
+  await testKpiCohortUsesHandoffDate(db);
+  await testNoHandoffEvidenceStaysOut(db);
+  await testReasonReportDefaultsToOutcomeDate();
+
+  // ═══ TẦNG QUYẾT ĐỊNH CỦA BÁO CÁO HOÀN (14/09/2026) ═══
+  testConditioningHierarchy();
+  testNoDoubleCountAcrossEvents();
+  testMarketerAttributionGoesByKey();
+  testProblemClassification();
+  testRiskBadgeReadsTargets();
+  testActionEngineGates();
+  await testReasonDenominatorsAndFilters(db);
+  await testIntelligenceRuns(db);
+  testUseServerExports();
+  testClientBoundaryExports();
+  testVtpTrackingLink();
+  testSmokeCoverage();
+  testOperatingFunnel();
+  testLogisticsFreshness();
+  await testMemoInflight();
+  await testCacheSemantics();
+  await testBankPipeline(db);
+  testFinanceOpsPure();
+  await testFinanceOpsQueries(db);
+  await testApproval(db);
+  await testMultiAttemptMoney(db);
+  await testCashflow(db);
+  await testPurchasing(db);
+  await testCrm(db);
+  testScenario();
+  testAccessControl();
+  testAdvisorySafety();
+  await testBusinessBrief(db);
+  await testSearch(db);
+  await testEntityTimeline(db);
   await testInventory(db);
+  await testInventoryForecast(db);
+  await testSlowMoving(db);
+  await testInventoryDecision(db);
   await testCodReconciliation();
   await testOrderSource();
+  await testIdeas();
+  await testPermissions();
   await testVtpImportTruth(db);
   await testVtpImportRecovery(db);
+  await testCostAllocation(db);
+  await testBankLedger(db);
+  await testSepayWebhook(db);
+  await testSepayApi(db);
+  await testBankAccounts(db);
+  await testCashPosition(db);
+  await testFinanceCockpit(db);
+  await testCostDoubleCount(db);
   await testVtpState(db);
   await testVtpIngestion(db);
   await testReconciliation(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
+  await testVtpCapability(db);
+  await testCareWorkbench(db);
+  await testAiCopilot(db);
   testCodPaymentStatement();
   await testVtpImportLimits();
   await testVtpFileDetection();
@@ -1118,12 +1559,114 @@ async function main() {
   await testVtpCodPaymentColumn();
   await testStatementDedupAcrossFilenames();
   await testStatementDetailMatching(db);
+  // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
+  await testReturnInspection(db);
+  await testReturnProductContext(db);
+  await testShipmentProductReport(db);
+  await testReturnItemInspection(db);
+  await testHmtReturnReconcile(db);
+  testInspectionFilter();
+  await testReturnFullReceive(db);
+  // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
+  await testCogsRecognition(db);
+  await testAdsAttributionCoverage(db);
+  await testCanonicalOutcome(db);
+  // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
+  // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
+  await testReturnPipeline(db);
+  await testReturnExceptions(db);
+  // Dựng fixture riêng và TỰ DỌN ở cuối, nên tổng của các bài sau không đổi.
+  await testReturnWarehouseKpi(db);
+  await testDeliveryTower(db);
+  // Ngay sau tháp giao vận: bài này cũng dựng rổ giao vận, và nó TỰ DỌN mọi dòng nó thêm vào nên
+  // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một
+  // đệm memo và bài này cố tình xoá đệm giữa chừng.
+  await testCareStates(db);
+  // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
+  // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
+  await testCareOs(db);
+  // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
+  // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
+  await testReportingParity(db);
+  await testLoginThrottle();
+  await testProjectedDeliveryV3(db);
+  // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
+  // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
+  await testFulfillmentBottleneck(db);
+  // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
+  // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
+  await testFinanceTruth(db);
+  // Cổng phát hành của bản gộp tài chính: chỗ hỏng của một bản gộp không nằm trong nhánh nào cả,
+  // nó nằm ở chỗ hai nhánh cùng chạm một con số. Chạy sau `testFinanceTruth` và tự dọn.
+  await testFinanceInvariants(db);
+  /*
+    CHẠY SAU CÙNG TRONG KHỐI DỮ LIỆU. Hệ điều hành công việc CHIẾU lên toàn bộ dữ liệu của mọi bài
+    phía trên (case CSKH, kiện care, đơn, dòng tiền, cảnh báo) — chạy giữa chừng thì nó nhìn thấy
+    một nửa thế giới, và mọi con số tổng hợp của nó nói về một tập khác với tập cuối cùng. Bài tự
+    gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
+  */
+  await testWorkOs(db);
+  await testWorkforce(db);
+  await testOrgMembership(db);
+  await testAccessModel(db);
+  await testScopeDecisions(db);
+  await testSnapshotImmutability(db);
+  testNoEmptyValueSelect();
+  testOneMembershipReadPath();
+  testNoAutoReassignOnOrgChange();
+  testPositionGrantsNothing();
+  testRoleBuilderCannotEscalate();
+  testEveryScopedRouteIsGuarded();
+  testAuthSecretHasNoProdFallback();
+  testMetricConfidenceIsAFunction();
+  testPeriodKeys();
+  testScopeOnlyNarrows();
+  testDisabledRoleFallsBackNarrow();
+
+  // ═══ PHASE 3.1 · QUY KẾT & DANH MỤC CHỈ SỐ CÓ THẨM QUYỀN ═══
+  testMetricCatalogIsComplete();
+  testDeptKeysDeriveFromCatalog();
+  testObservedLinkage();
+  testMetricTrust();
+  testTargetResolution();
+  testKrDataInsufficient();
+  testSourceVersionIsTracked();
+  await testCsAssignmentUsesKey(db);
+  await testInspectionCarriesActorKey(db);
+  await testCoverageSeparatesMachineFromPerson(db);
+
   await testAiPlatform(db);
   await testSalesAgent(db);
+
+  // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
+  console.log("\n─ Toàn vẹn kho mã");
+  testRepoIntegrity();
+  testDeployScript();
+  testMigrationAppendOnly();
+  await testMigrationUpgradePath();
+  testMigrationNumberUnique();
+  testDuplicateMetrics();
+  testLogisticsStatusBoundary();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
 }
+
+/*
+  ═══════ THOÁT GIỮA CHỪNG PHẢI LÀ THẤT BẠI ═══════
+
+  SỰ CỐ THẬT (10/09/2026). Một lượt chạy dừng sau 28 bài rồi thoát với mã 0 — không lỗi, không
+  cảnh báo, và `npm test` báo thành công. Nguyên nhân: một giao dịch ôm cả những hàm tự mở kết
+  nối riêng nên khoá chết trên PGlite; lời hứa không bao giờ settle, vòng lặp sự kiện cạn, Node
+  thoát êm với mã 0.
+
+  Hậu quả nếu không chặn: CỔNG PHÁT HÀNH cho qua một lượt kiểm thử chạy được một phần tư. Mọi
+  contract test về luật nghiệp vụ nằm ở nửa sau đều không chạy, và không ai biết.
+
+  Nên: đánh dấu THẤT BẠI ngay từ đầu, chỉ gỡ khi chạy tới dòng cuối. Thoát sớm vì bất kỳ lý do gì
+  cũng để lại mã 1.
+*/
+process.exitCode = 1;
 
 main().catch((error) => {
   console.error("✗ Kiểm thử thất bại:", error);

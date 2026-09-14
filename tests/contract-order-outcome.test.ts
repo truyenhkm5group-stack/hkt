@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { RETURN_RULE } from "@/lib/constants/returns";
+import { ELIGIBLE_SENT_OUTCOMES, ELIGIBLE_SENT_SQL, OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
+import { OUTCOME_GROUP } from "@/lib/constants/truth";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
 
 /**
@@ -29,6 +31,8 @@ type Setup = {
   vtpEvents?: { status: string; stage: string; leg?: "OUTBOUND" | "RETURN" }[];
   /** Vận đơn chiều hoàn do Viettel Post tạo, trỏ về mã gốc. */
   returnLeg?: boolean;
+  /** Mốc lấy hàng đã lưu trên vận đơn — một trong ba bậc chứng cứ bàn giao. */
+  pickedUpAt?: Date | null;
 };
 
 async function build(db: Db, s: Setup) {
@@ -53,6 +57,7 @@ async function build(db: Db, s: Setup) {
       codStatus: (s.codStatus ?? "PENDING") as never,
       codStatementRef: s.statementRef ?? null,
       deliveredAt: s.shipmentStage === "DELIVERED" ? new Date("2026-09-01T10:00:00Z") : null,
+      pickedUpAt: s.pickedUpAt ?? null,
       vtpStatusDate: new Date("2026-09-01T10:00:00Z"),
     })
     .returning({ id: schema.shipments.id });
@@ -187,6 +192,93 @@ export async function testOrderOutcomeContract(db: Db) {
     .where(eq(schema.shipments.orderId, hoan));
   assert.equal(shipHoan.nhan, null, "đơn hoàn KHÔNG tự sinh mốc kho nhận hàng — tồn chỉ tăng khi kho xác nhận");
 
+  /* ═══════════ ĐVVC CHƯA CẦM HÀNG THÌ KHÔNG ĐƯỢC GỌI LÀ "ĐANG GIAO" ═══════════
+
+     Chủ shop chốt 13/09/2026. Cùng một nguyên tắc với `UNKNOWN`: "đang giao" là khẳng định về VỊ
+     TRÍ gói hàng, phải có chứng từ mới nói được.
+
+     Đo production 13/09/2026: 106 đơn mang nhãn `IN_TRANSIT` mà toàn bộ sự kiện ĐVVC của chúng là
+     "phân công bưu tá", "chờ xử lý", "khách chưa chuẩn bị xong hàng" — tức bưu tá ĐANG TỚI LẤY chứ
+     chưa lấy. 61.451.999đ COD nằm trên những gói hàng chủ shop tưởng đang trên đường tới khách. */
+
+  await check(
+    "chỉ có sự kiện điều phối bưu tá ⇒ CHỜ LẤY HÀNG, không phải đang giao",
+    { shipmentStage: "PENDING", codAmount: 499_000, vtpEvents: [{ status: "104", stage: "PENDING" }] },
+    "AWAITING_PICKUP",
+  );
+  await check(
+    "chặng nói ĐANG GIAO nhưng không một sự kiện nào chứng minh đã cầm hàng ⇒ vẫn là CHỜ LẤY HÀNG",
+    { shipmentStage: "IN_TRANSIT", codAmount: 499_000, vtpEvents: [{ status: "102", stage: "PENDING" }] },
+    "AWAITING_PICKUP",
+  );
+  await check(
+    "có MỐC LẤY HÀNG trên vận đơn ⇒ đã bàn giao, là ĐANG GIAO",
+    { shipmentStage: "IN_TRANSIT", codAmount: 499_000, pickedUpAt: new Date("2026-09-01T09:00:00Z"), vtpEvents: [{ status: "102", stage: "PENDING" }] },
+    "IN_TRANSIT",
+  );
+  await check(
+    "có sự kiện ĐÃ LẤY HÀNG ⇒ ĐANG GIAO",
+    { shipmentStage: "IN_TRANSIT", codAmount: 499_000, vtpEvents: [{ status: "103", stage: "PICKED_UP" }] },
+    "IN_TRANSIT",
+  );
+
+  /* Nhánh mới phải đứng SAU mọi kết cục: một kiện đã tới tay khách thì chuyện mốc lấy hàng có được
+     ghi lại hay không cũng không làm nó thành "chờ lấy". Đây là cách hỏng dễ xảy ra nhất nếu ai đó
+     dời nhánh lên trên. */
+  await check(
+    "đã giao tới khách, thu 499K, KHÔNG có mốc lấy hàng ⇒ vẫn GIAO THÀNH CÔNG",
+    { shipmentStage: "DELIVERED", codAmount: 499_000, codCollected: 499_000, codStatus: "PAID_TO_BANK", statementRef: "BK-AP1", vtpEvents: [{ status: "501", stage: "DELIVERED" }] },
+    "DELIVERED",
+  );
+  await check(
+    "hàng đã quay về shop, KHÔNG có mốc lấy hàng ⇒ vẫn HOÀN",
+    { shipmentStage: "RETURNED", codAmount: 499_000, vtpEvents: [{ status: "504", stage: "RETURNED" }] },
+    "RETURNED",
+  );
+  await check(
+    "đơn đã huỷ mà ĐVVC chưa lấy ⇒ HUỶ, không phải chờ lấy hàng",
+    { orderStage: "CANCELLED", shipmentStage: "PENDING", codAmount: 499_000, vtpEvents: [{ status: "104", stage: "PENDING" }] },
+    "CANCELLED",
+  );
+
+  /* CHỜ LẤY HÀNG KHÔNG PHẢI "ĐÃ GỬI", và cũng không phải "chưa tạo vận đơn".
+
+     Hai điều này là toàn bộ lý do giá trị mới tồn tại. Gộp vào `NOT_SHIPPED` thì mất mã vận đơn để
+     tra và mất người để giục; đếm vào "đã gửi" thì 106 kiện chưa rời kho lại vào mẫu số như cũ. */
+  const choLay = await build(db, { shipmentStage: "PENDING", codAmount: 499_000, vtpEvents: [{ status: "104", stage: "PENDING" }] });
+  const rChoLay = await outcome(db, choLay);
+  assert.equal(rChoLay?.v, "AWAITING_PICKUP");
+  assert.notEqual(rChoLay?.v, "NOT_SHIPPED", "phải tách khỏi 'chưa gửi' — kiện này CÓ mã vận đơn và CÓ người phải đi giục");
+  assert.equal(OUTCOME_GROUP.AWAITING_PICKUP, "OPEN", "chưa rời kho thì CHƯA KẾT THÚC — không vào tử số lẫn mẫu số tỷ lệ giao thành công");
+  assert.equal(OUTCOME_GROUP.AWAITING_PICKUP, OUTCOME_GROUP.IN_TRANSIT, "cùng nhóm với 'đang giao' nên đổi nhãn KHÔNG làm xê dịch một tỷ lệ nào");
+  assert.ok(OUTCOME_LABEL.AWAITING_PICKUP, "phải có nhãn tiếng Việt");
+
+  // ───────── "ĐÃ GỬI" (ELIGIBLE SENT): MỘT DANH SÁCH, KHAI ĐÚNG MỘT CHỖ ─────────
+  //
+  // Trước 14/09/2026 danh sách này được gõ NGUYÊN VĂN ở bốn chỗ. Bốn bản sao đang đồng ý với
+  // nhau, nhưng thêm một kết quả mới là một lượt sửa bốn chỗ — và cả lớp lỗi P1 sinh ra từ đúng
+  // chuyện đó: sửa ba, quên một, không có gì đỏ lên. Nay chỉ còn `ELIGIBLE_SENT_OUTCOMES`, và
+  // bài kiểm này chặn đường quay lại.
+  assert.ok(!(ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes("AWAITING_PICKUP"), "'đã gửi' KHÔNG được chứa AWAITING_PICKUP — kiện chờ bưu tá tới lấy thì chưa rời kho");
+  for (const chuaGui of ["NOT_SHIPPED", "UNKNOWN", "CANCELLED"]) {
+    assert.ok(!(ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes(chuaGui), `'đã gửi' KHÔNG được chứa ${chuaGui} — không có chứng từ ĐVVC cầm hàng`);
+  }
+  for (const daGui of ["IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE"]) {
+    assert.ok((ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes(daGui), `'đã gửi' PHẢI chứa ${daGui} — hàng không thể đi tiếp hay quay về nếu chưa từng được lấy đi`);
+  }
+  // Dạng SQL phải SINH RA từ mảng, không phải một bản chép tay thứ hai.
+  assert.equal(ELIGIBLE_SENT_SQL, ELIGIBLE_SENT_OUTCOMES.map((x) => `'${x}'`).join(","), "chuỗi SQL phải sinh ra từ chính mảng hằng số");
+
+  // Và KHÔNG tệp nào được gõ lại danh sách ấy. Quét mã ĐÃ VÀO KHO (`git ls-files`) chứ không quét
+  // đĩa, để bài kiểm đỏ ngay trên máy người viết thay vì đợi tới CI.
+  const LITERAL = /in\s*\(\s*'IN_TRANSIT'\s*,\s*'DELIVERED'\s*,\s*'RETURNED'\s*,\s*'RETURNED_BY_RULE'\s*\)/;
+  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx)$/.test(f));
+  const viPham = tepMa.filter((f) => LITERAL.test(readFileSync(f, "utf8")));
+  assert.deepEqual(viPham, [], `gõ lại danh sách 'đã gửi' — dùng ELIGIBLE_SENT_SQL (lib/constants/returns.ts) thay vì chép: ${viPham.join(", ")}`);
+  assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
+
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
   const spec = readFileSync("docs/business-rules/ORDER_OUTCOME.md", "utf8");
   assert.ok(spec.includes("ORDER_OUTCOME"), "đặc tả phải tồn tại và nêu tên công thức chuẩn");
@@ -195,5 +287,5 @@ export async function testOrderOutcomeContract(db: Db) {
   const soCongThuc = (nguon.match(/export const ORDER_OUTCOME\b/g) ?? []).length;
   assert.equal(soCongThuc, 1, "chỉ được có ĐÚNG MỘT công thức ORDER_OUTCOME trong toàn kho mã");
 
-  console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · tồn kho)`);
+  console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · CHỜ LẤY HÀNG≠đang giao≠chưa gửi · tồn kho)`);
 }

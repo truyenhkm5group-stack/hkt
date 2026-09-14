@@ -1,11 +1,12 @@
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { ORDER_COGS } from "@/lib/queries/cogs";
-import { BOOKED_REVENUE, COUNT_BOOKED, COUNT_DELIVERED, DELIVERED_COGS, DELIVERED_REVENUE, IS_DELIVERED, IS_RETURNED, metricScope } from "@/lib/queries/metrics";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { orderCogsFast } from "@/lib/queries/cogs";
+import { metricScope } from "@/lib/queries/metrics";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 
 /**
  * ───────────────────── CHÂN LÝ TÀI CHÍNH ─────────────────────
@@ -128,27 +129,94 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const scope = metricScope(period, "confirmed");
   const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
 
-  const [orderRow] = await db
+  /**
+   * ───────── TÍNH KẾT QUẢ ĐƠN MỘT LẦN CHO MỖI DÒNG, KHÔNG PHẢI MƯỜI HAI LẦN ─────────
+   *
+   * Đo trên production 09/09/2026: hàm này mất **20,5 giây** để trả về 2kB. Nguyên nhân: mười hai
+   * cột gộp dưới đây, cột nào cũng nội tuyến trọn `ORDER_OUTCOME` (một biểu thức CASE chứa nhiều
+   * truy vấn con tương quan). Postgres không gộp chúng lại được nên mỗi đơn bị tính kết quả mười
+   * hai lần — trang chủ vì thế mất hơn 30 giây và người mở đầu tiên mỗi sáng phải ngồi chờ.
+   *
+   * Bọc vào bảng dẫn xuất kèm rào `OUTCOME_FENCE` thì mỗi dòng tính đúng một lần. Đây là đổi HÌNH
+   * DẠNG truy vấn, KHÔNG đổi công thức: cùng `ORDER_OUTCOME`, cùng phép nối, cùng bộ lọc, nên cùng
+   * con số ra. `tests/metric-shape-consistency.test.ts` chứng minh điều đó bằng cách tính lại theo
+   * cách nội tuyến cũ rồi so từng con số.
+   */
+  const facts = db
     .select({
-      bookedRevenue: BOOKED_REVENUE,
-      bookedOrders: COUNT_BOOKED,
-      deliveredRevenue: DELIVERED_REVENUE,
-      deliveredOrders: COUNT_DELIVERED,
-      deliveredCogs: DELIVERED_COGS,
-      returnedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
-      returnedOrders: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${IS_DELIVERED}), 0)`,
-      shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${IS_RETURNED}), 0)`,
-      returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${IS_RETURNED}), 0)`,
-      prepaid: sql<number>`coalesce(sum(${o.prepaid} + ${o.transferMoney} + ${o.cash}) filter (where ${IS_DELIVERED}), 0)`,
-      missingCogsOrders: sql<number>`count(*) filter (where ${IS_DELIVERED} and ${ORDER_COGS} = 0 and ${o.totalPriceAfterDiscount} > 0)`,
+      revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
+      /**
+       * GIÁ VỐN CỦA KỲ ĐÃ CHỐT, KHÔNG PHẢI GIÁ VỐN HÔM NAY.
+       *
+       * Đơn đã ghi nhận giao thành công dùng `recognized_cogs` — con số đã chốt tại thời điểm giao và
+       * không đổi nữa. Nếu không, nhập một lô mới hôm nay sẽ viết lại lợi nhuận của tháng trước:
+       * chủ shop in báo cáo tháng 8 hai lần vào hai ngày khác nhau ra hai con số khác nhau.
+       *
+       * Đơn chưa chốt vẫn dùng giá vốn hiện tại — đó là ƯỚC TÍNH, và nó chỉ vào phần chưa giao.
+       */
+      // MỘT định nghĩa giá vốn duy nhất cho mọi báo cáo — xem `orderCogsFast()`.
+      cogs: orderCogsFast().as("f_cogs"),
+      fee: sql<number>`${FEE}`.as("f_fee"),
+      returnFee: sql<number>`${o.returnFee}`.as("f_return_fee"),
+      prepaid: sql<number>`${o.prepaid} + ${o.transferMoney} + ${o.cash}`.as("f_prepaid"),
+      // Đọc kết quả ĐÃ VẬT CHẤT HOÁ; thiếu dòng thì tự tính bằng luật chuẩn (xem canonical-outcome.ts).
+      outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
     .from(o)
-    .leftJoin(s, eq(s.orderId, o.id))
-    .where(scope);
+    // MỖI ĐƠN MỘT DÒNG: đơn có nhiều lần gửi không được đếm nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(scope)
+    .offset(OUTCOME_FENCE)
+    .as("truth_facts");
+
+  const isDelivered = sql`${facts.outcome} = 'DELIVERED'`;
+  const isReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const isBooked = sql`${facts.outcome} <> 'CANCELLED'`;
+
+  /*
+    JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY.
+
+    perf-probe trên production 10/09/2026: `getFinancialTruth` **19.162ms nguội / 0ms ấm**. Câu
+    lệnh này là câu đắt nhất của nó — mười hai cột gộp trên bảng dẫn xuất `facts`, chi phí ước
+    lượng đủ cao để Postgres bật JIT.
+
+    Cùng họ với truy vấn đã tách bạch được: 8.578ms bật JIT ↔ 26ms tắt JIT, CÙNG số khối đệm.
+    Chỉ bọc câu lệnh này; các câu COD/bảng kê/quảng cáo bên dưới chạy riêng như cũ.
+  */
+  const [orderRow] = await chayKhongJit(db, (tx) => tx
+    .select({
+      bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isBooked}), 0)`,
+      bookedOrders: sql<number>`count(*) filter (where ${isBooked})`,
+      deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isDelivered}), 0)`,
+      deliveredOrders: sql<number>`count(*) filter (where ${isDelivered})`,
+      deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${isDelivered}), 0)`,
+      returnedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${isReturned}), 0)`,
+      returnedOrders: sql<number>`count(*) filter (where ${isReturned})`,
+      shippingDelivered: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isDelivered}), 0)`,
+      shippingReturned: sql<number>`coalesce(sum(${facts.fee}) filter (where ${isReturned}), 0)`,
+      returnFee: sql<number>`coalesce(sum(${facts.returnFee}) filter (where ${isReturned}), 0)`,
+      prepaid: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${isDelivered}), 0)`,
+      missingCogsOrders: sql<number>`count(*) filter (where ${isDelivered} and ${facts.cogs} = 0 and ${facts.revenue} > 0)`,
+    })
+    .from(facts));
 
   // ── Chiều TIỀN: đọc trên vận đơn của đơn trong kỳ, tách rõ ba bậc chứng từ ──
-  const [codRow] = await db
+  /*
+    CÂU NÀY TỪNG LÀ CÂU CHẬM NHẤT CỦA TRANG CHỦ — VÌ JIT, KHÔNG VÌ DỮ LIỆU.
+
+    perf-probe production 11/09/2026, EXPLAIN ANALYZE: `Seq Scan on shipments … actual
+    time=2703ms..2707ms rows=1976` — dòng đầu tiên mất 2,7 giây, 1.975 dòng còn lại mất 4ms. Các
+    SubPlan bên trong chỉ tốn 0,006–0,036ms mỗi lượt. Chi phí ước lượng 801.408 vượt `jit_above_cost`
+    nên Postgres biên dịch hàng trăm hàm trước khi đọc dòng đầu; máy 2 nhân trả 2,7–3,5 giây cho
+    việc đó, và ba lượt gọi đồng thời (trang chủ + tóm tắt + sự thật tài chính) chen nhau tới mức
+    một câu `select … from settings where key = $1` phải chờ 300ms.
+
+    Cùng cách sửa với `orderRow`: tắt JIT trong đúng giao dịch này. Đọc kết quả ĐÃ VẬT CHẤT HOÁ để
+    biểu thức không phải tính lại (`ORDER_OUTCOME_FAST`, cùng công thức, chỉ khác lúc tính).
+    MỖI ĐƠN MỘT DÒNG: đơn gửi lại nhiều lần chỉ tính lần gửi quyết định (PRIMARY_ATTEMPT), vì các
+    cột này được gắn nhãn "đơn" trên màn hình.
+  */
+  const codRowP = chayKhongJit(db, (tx) => tx
     .select({
       collected: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${s.codStatus} = 'COLLECTED'), 0)`,
       collectedCount: sql<number>`count(*) filter (where ${s.codStatus} = 'COLLECTED')`,
@@ -157,28 +225,27 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       paidToBank: sql<number>`coalesce(sum(coalesce(nullif(${s.codCollected}, 0), ${s.codAmount})) filter (where ${s.codStatus} = 'PAID_TO_BANK'), 0)`,
       paidToBankCount: sql<number>`count(*) filter (where ${s.codStatus} = 'PAID_TO_BANK')`,
       // Đơn ĐÃ GIAO THÀNH CÔNG mà chưa có đồng nào trên bảng kê — phần Viettel Post còn giữ.
-      outstanding: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
-      outstandingCount: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
+      outstanding: sql<number>`coalesce(sum(${s.codAmount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
+      outstandingCount: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
     })
     .from(o)
-    .innerJoin(s, eq(s.orderId, o.id))
-    .where(scope);
+    .innerJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(scope));
 
   // ── TIỀN THỰC NHẬN: theo NGÀY ĐỐI SOÁT của bảng kê, không theo ngày lên đơn ──
   const b = schema.codBatches;
-  const [batchRow] = await db
+  const batchRowP = db
     .select({ count: sql<number>`count(*)`, net: sql<number>`coalesce(sum(${b.totalAmount}), 0)`, fee: sql<number>`coalesce(sum(${b.feeTotal}), 0)` })
     .from(b)
     .where(between(b.receivedAt, period.from, period.to));
 
-  const [adsRow] = await db
+  const adsRowP = db
     .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)));
-  const [opsRow] = await db
-    .select({ amount: sql<number>`coalesce(sum(${schema.expenses.amount}), 0)` })
-    .from(schema.expenses)
-    .where(and(sql`${schema.expenses.category} not in ('ADS','PURCHASE')`, between(schema.expenses.occurredAt, period.from, period.to)));
+  // Một đường duy nhất: Profit Engine. Trang "sự thật tài chính" không được tự cộng theo cách riêng.
+  // Bốn phép đọc không phụ thuộc nhau: chạy song song thay vì nối đuôi.
+  const [[codRow], [batchRow], [adsRow], opsRow] = await Promise.all([codRowP, batchRowP, adsRowP, getOperatingCost(period)]);
 
   const deliveredRevenue = Number(orderRow?.deliveredRevenue ?? 0);
   const deliveredCogs = Number(orderRow?.deliveredCogs ?? 0);

@@ -10,6 +10,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   USER_RESET_PASSWORD: "Đặt lại mật khẩu",
   EXPENSE_CREATE: "Thêm chi phí",
   EXPENSE_UPDATE: "Sửa chi phí",
+  EXPENSE_ALLOCATION_SET: "Khai kỳ hiệu lực cho chi phí",
   EXPENSE_DELETE: "Xoá chi phí",
   AD_SPEND_CREATE: "Thêm chi tiêu QC",
   AD_SPEND_UPDATE: "Sửa chi tiêu QC",
@@ -17,8 +18,17 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   STOCK_RECEIPT_CREATE: "Nhập hàng vào kho",
   STOCK_ADJUST_CREATE: "Điều chỉnh kiểm kê",
   STOCK_RECEIPT_DELETE: "Xoá phiếu kho",
+  /** Hệ thống chốt lại giá vốn đã ghi nhận — đúng một lần, khi có chứng từ kho mạnh hơn. */
+  COGS_TRUE_UP: "Chốt lại giá vốn theo chứng từ kho",
   COD_PAID: "Ghi nhận COD về ngân hàng",
   COD_RECONCILE: "Đối soát COD",
+  /**
+   * Chủ shop mở trang Viettel Post, đọc trạng thái rồi chép lại. Chạy một lần cho lịch sử, nhưng
+   * PHẢI truy nguyên được: nó ghi thẳng chứng từ vào lịch sử mà không có hệ thống ngoài nào đối
+   * chứng, nên đây chính là loại hành động cần nhật ký nhất.
+   */
+  VTP_MANUAL_VERIFICATION: "Chép tay chứng từ Viettel Post",
+  VTP_ORDER_LIST_IMPORT: "Nhập danh sách vận đơn Viettel Post",
   COD_BATCH_CREATE: "Tạo bảng kê COD",
   SHIPMENT_REPUSH: "Yêu cầu VTP gửi lại webhook",
   SYNC_RUN: "Chạy đồng bộ",
@@ -29,10 +39,21 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "case.assign": "Giao việc cho người xử lý",
   "case.acknowledge": "Tiếp nhận việc",
   "case.resolve": "Đóng việc",
+  "case.start": "Bắt đầu làm việc",
+  "case.ignore": "Bỏ qua việc (có lý do)",
+  "case.unignore": "Bỏ đánh dấu bỏ qua",
   VTP_ORDER_LIST_ROW: "Nhập dòng danh sách vận đơn",
   "return.received": "Xác nhận nhận hàng hoàn",
   "return.received.undo": "Huỷ xác nhận nhận hàng hoàn",
   "return.received.bulk": "Xác nhận nhận hàng hoàn hàng loạt",
+  "care.record": "CSKH ghi nhận việc đã làm",
+  "care.status": "Đổi trạng thái care nội bộ",
+  "care.owner": "Giao kiện cho người care",
+  "care.followUp": "Hẹn theo dõi lại kiện",
+  "care.note": "Ghi note care",
+  "carrier.request": "Gửi yêu cầu tới ĐVVC",
+  "carrier.request.result": "ĐVVC trả lời yêu cầu",
+  "carrier.manual": "Xác nhận đã làm tay trên ĐVVC",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {

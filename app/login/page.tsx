@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/app/login/login-form";
+import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { getSession } from "@/lib/auth/session";
 import { integrationStatus } from "@/lib/env";
 
@@ -14,13 +15,15 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
       <div className="relative hidden overflow-hidden bg-sidebar text-sidebar-foreground lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div className="absolute -top-32 -right-32 size-96 rounded-full bg-primary/30 blur-3xl" />
+        <div className="absolute -top-32 -right-32 size-96 rounded-full bg-brand/25 blur-3xl" />
         <div className="absolute -bottom-40 -left-20 size-[28rem] rounded-full bg-chart-2/20 blur-3xl" />
         <div className="relative flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-sm font-black text-primary-foreground">SC</span>
+          <span className="flex size-11 items-center justify-center rounded-2xl bg-brand text-white shadow-[0_16px_40px_-16px_var(--brand)]">
+            <BrandGlyph className="h-4" />
+          </span>
           <div>
-            <p className="text-base font-bold">Shop Control ERP</p>
-            <p className="text-xs uppercase tracking-[0.18em] text-sidebar-foreground/60">Fashion operations</p>
+            <BrandWordmark className="block text-xl text-brand-bright" />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/55">Hệ thống quản trị bán hàng</p>
           </div>
         </div>
         <div className="relative max-w-md space-y-6">
@@ -39,7 +42,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </li>
           </ul>
         </div>
-        <p className="relative text-xs text-sidebar-foreground/50">© {new Date().getFullYear()} Shop Control · Nội bộ</p>
+        <p className="relative text-xs text-sidebar-foreground/50">© {new Date().getFullYear()} VNXcommerce · Nội bộ</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <LoginForm next={params.next} reason={params.reason} />

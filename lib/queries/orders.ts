@@ -1,10 +1,13 @@
+import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
 import type { ListParams } from "@/lib/search-params";
+import { loadAlertConfig } from "@/lib/alerts/config";
+import { assessCustomerRisk } from "@/lib/alerts/risk";
 
 export const ORDER_SORTABLE = ["insertedAt", "total", "systemId", "updatedAtExternal", "status"];
 
@@ -26,13 +29,16 @@ export function orderSearchCondition(q: string): SQL | undefined {
   return or(...conds);
 }
 
+import { ORDER_BUCKET_SCALAR } from "@/lib/queries/fulfillment-buckets";
+
 function getShipmentSearch(like: string) {
   return sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and (s.tracking_code ilike ${like} or s.vtp_order_number ilike ${like}))`;
 }
 
-export function orderListWhere(params: ListParams) {
+export function orderListWhere(params: ListParams, opts: { ignoreAddressFilter?: boolean } = {}) {
   const conds: (SQL | undefined)[] = [];
-  const { period, filters, q } = params;
+  const { period, q } = params;
+  const filters: Record<string, string[] | undefined> = opts.ignoreAddressFilter ? { ...params.filters, address: undefined } : params.filters;
   if (period.from) conds.push(gte(schema.orders.insertedAt, period.from));
   if (period.to) conds.push(lte(schema.orders.insertedAt, period.to));
   if (filters.stage?.length) conds.push(inArray(schema.orders.stage, filters.stage as OrderStage[]));
@@ -40,8 +46,20 @@ export function orderListWhere(params: ListParams) {
   if (filters.carrier?.length) conds.push(exists(sql`(select 1 from ${schema.shipments} s where s.order_id = ${schema.orders.id} and s.carrier in ${filters.carrier})`));
   if (filters.seller?.length) conds.push(inArray(schema.orders.sellerName, filters.seller));
   if (filters.tag?.length) conds.push(sql`${schema.orders.tags} && ${sql.raw(`ARRAY[${filters.tag.map((t) => `'${t.replace(/'/g, "''")}'`).join(",")}]::text[]`)}`);
+  // Pancake chỉ giao được khi đã ghép địa chỉ khách vào đơn vị hành chính (3 cấp cũ hoặc 2 cấp mới
+  // từ 01/07/2025). Không ghép được thì `province_name` rỗng và đơn đứng im ở POS với dòng "Vui lòng
+  // cung cấp địa chỉ cần chuẩn hoá" — nhân viên phải mở đơn, hỏi lại khách rồi chọn tay.
+  if (filters.address?.includes("unnormalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') = ''`);
+  if (filters.address?.includes("normalized")) conds.push(sql`coalesce(${schema.orders.shipProvince}, '') <> ''`);
   if (filters.payment?.includes("cod")) conds.push(sql`${schema.orders.moneyToCollect} > 0`);
   if (filters.payment?.includes("prepaid")) conds.push(sql`${schema.orders.moneyToCollect} = 0`);
+  /*
+    RỔ GIAO VẬN THEO CHỨNG TỪ ĐVVC — dùng CHUNG biểu thức với thẻ đếm trên trang chủ.
+
+    Bấm vào thẻ "Đã gửi" phải mở ra ĐÚNG chừng ấy dòng. Cách chắc chắn duy nhất để hai con số không
+    bao giờ lệch là hai nơi dùng cùng MỘT biểu thức, chứ không phải hai câu lệnh cùng ý.
+  */
+  if (filters.fulfillment?.length) conds.push(sql`${ORDER_BUCKET_SCALAR} in ${filters.fulfillment}`);
   conds.push(orderSearchCondition(q));
   const defined = conds.filter((c): c is SQL => Boolean(c));
   return defined.length ? and(...defined) : undefined;
@@ -60,7 +78,7 @@ export async function listOrders(params: ListParams) {
   const sortColumn = sortMap[params.sort] ?? schema.orders.insertedAt;
   const orderBy = params.dir === "asc" ? asc(sortColumn) : desc(sortColumn);
 
-  const [rows, [{ total }]] = await Promise.all([
+  const [rowsRaw, [{ total }], riskCfg] = await Promise.all([
     db.query.orders.findMany({
       where,
       orderBy: [orderBy, desc(schema.orders.id)],
@@ -90,10 +108,25 @@ export async function listOrders(params: ListParams) {
       with: {
         shipment: { columns: { id: true, stage: true, carrier: true, trackingCode: true, vtpOrderNumber: true, codStatus: true, vtpStatusName: true } },
         items: { columns: { productName: true, variationDetail: true, quantity: true, image: true }, limit: 3 },
+        // Lịch sử khách theo Pancake — đủ để chấm rủi ro ngay trên dòng.
+        customer: { columns: { succeedOrderCount: true, returnedOrderCount: true, isBlock: true } },
       },
     }),
     db.select({ total: count() }).from(schema.orders).where(where),
+    loadAlertConfig(),
   ]);
+
+  /*
+    CỜ RỦI RO NGAY TRÊN DÒNG. Trước đây khách có lịch sử hoàn cao chỉ lộ ra khi MỞ chi tiết đơn —
+    người CSKH duyệt 50 đơn mỗi sáng thì không mở 50 trang. Cùng công thức với chi tiết đơn và luật
+    cảnh báo (`assessCustomerRisk`), chỉ khác là ở đây dùng số Pancake của khách (không tra thêm lịch
+    sử ERP theo SĐT cho từng dòng); chi tiết đơn vẫn có bản đầy đủ.
+  */
+  const rows = rowsRaw.map((r) => {
+    const c = r.customer;
+    const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
+    return { ...r, risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null };
+  });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
@@ -102,6 +135,10 @@ export type OrderListRow = Awaited<ReturnType<typeof listOrders>>["rows"][number
 
 /** Số đơn theo giai đoạn / nguồn / ĐVVC trong kỳ (cho bộ lọc) */
 export async function orderFacets(params: ListParams) {
+  return memo(`orderFacets:${listKey(params, false)}`, 30_000, () => orderFacetsUncached(params));
+}
+
+async function orderFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = orderListWhere({ ...params, filters: {}, q: params.q });
   const [stages, sources, carriers, sellers] = await Promise.all([
@@ -126,6 +163,10 @@ export async function orderFacets(params: ListParams) {
 }
 
 export async function orderSummary(params: ListParams) {
+  return memo(`orderSummary:${listKey(params)}`, 30_000, () => orderSummaryUncached(params));
+}
+
+async function orderSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = orderListWhere(params);
   const [row] = await db
@@ -133,13 +174,20 @@ export async function orderSummary(params: ListParams) {
       orders: count(),
       revenue: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalPriceAfterDiscount} else 0 end), 0)`,
       cod: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.moneyToCollect} else 0 end), 0)`,
-      success: sql<number>`sum(case when ${ORDER_OUTCOME} = 'DELIVERED' then 1 else 0 end)`,
+      success: sql<number>`sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 1 else 0 end)`,
       quantity: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalQuantity} else 0 end), 0)`,
     })
     .from(schema.orders)
-    .leftJoin(schema.shipments, eq(schema.shipments.orderId, schema.orders.id))
+    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
     .where(where);
-  return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0) };
+  // Đếm đơn chưa chuẩn hoá địa chỉ BỎ QUA chính bộ lọc địa chỉ, để con số trên nhãn bộ lọc không
+  // đổi theo lựa chọn của chính nó (chọn "Đã chuẩn hoá" mà nhãn kia hiện 0 thì gây hiểu nhầm).
+  const [unnormalized] = await db
+    .select({ n: count() })
+    .from(schema.orders)
+    .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
+  return { orders: Number(row?.orders ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
 }
 
 export async function getOrderDetail(id: string) {
@@ -151,7 +199,20 @@ export async function getOrderDetail(id: string) {
       warehouse: true,
       items: { with: { variant: { columns: { id: true, images: true, remainQuantity: true, sku: true, lastImportedPrice: true } } } },
       statusHistory: { orderBy: [desc(schema.orderStatusHistory.updatedAt)] },
-      shipment: { with: { events: { orderBy: [desc(schema.shipmentEvents.occurredAt)] }, codBatch: true } },
+      /**
+       * MỌI LẦN GỬI, KHÔNG PHẢI MỘT.
+       *
+       * Quan hệ `shipment` là `one(...)` — nó lấy MỘT dòng bất kỳ. Từ 10/09/2026 một đơn được phép
+       * có nhiều lần gửi (giao thất bại rồi gửi lại, huỷ rồi tạo lại, gửi hàng thay thế), nên hiển
+       * thị một dòng là XOÁ lịch sử khỏi mắt người vận hành: họ thấy "đang giao" mà không biết đây
+       * đã là lần thứ ba.
+       *
+       * Sắp theo thứ tự lần gửi để đọc được như một dòng thời gian.
+       */
+      attempts: {
+        with: { events: { orderBy: [desc(schema.shipmentEvents.occurredAt)] }, codBatch: true },
+        orderBy: [asc(schema.shipments.attemptNo), asc(schema.shipments.createdAt)],
+      },
       returns: true,
     },
   });

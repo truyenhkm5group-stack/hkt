@@ -19,6 +19,7 @@ import {
 } from "@/lib/integrations/pancake/mapper";
 import { publish } from "@/lib/realtime/bus";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { getSyncState, runSyncJob, setSyncState, type SyncContext, type SyncTrigger } from "@/lib/sync/runner";
 
 const COD_RANK: Record<CodStatus, number> = { NOT_APPLICABLE: 0, PENDING: 1, COLLECTED: 2, RECONCILED: 3, PAID_TO_BANK: 4, DISPUTED: 5 };
@@ -255,6 +256,9 @@ export async function upsertOrder(mapped: MappedOrder, options: { force?: boolea
     conversationId: mapped.conversationId,
     postId: mapped.postId,
     adId: mapped.adId,
+    utmCampaign: mapped.utmCampaign,
+    utmSource: mapped.utmSource,
+    referralCode: mapped.referralCode,
     marketplaceId: mapped.marketplaceId,
     sellerName: mapped.sellerName,
     careName: mapped.careName,
@@ -365,7 +369,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     partnerStatus: s.partnerStatus,
     stage,
     codAmount: s.codAmount,
-    codCollected: Math.max(existing?.codCollected ?? 0, s.codCollected),
+    // Tiền thực thu CHỈ đến từ bảng kê ĐVVC; Pancake không được nâng lẫn hạ con số này.
+    codCollected: existing?.codCollected ?? 0,
     codStatus,
     codReconciledAt: s.codReconciledAt ?? existing?.codReconciledAt ?? null,
     shippingFee: s.shippingFee || existing?.shippingFee || 0,
@@ -385,8 +390,38 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   let shipmentId: string;
   /** Vận đơn ta vừa ghi có chứng từ ĐVVC hay không — quyết định có cần chốt lại theo lịch sử. */
   let settleFromHistory = hasCarrierTruth;
-  if (existing) {
-    await db.update(schema.shipments).set({ ...data, updatedAt: new Date() }).where(eq(schema.shipments.id, existing.id));
+
+  /**
+   * MÃ VẬN ĐƠN MỚI = LẦN GỬI MỚI, KHÔNG PHẢI GHI ĐÈ LÊN LẦN CŨ.
+   *
+   * Trước 10/09/2026 chỗ này cập nhật thẳng dòng cũ mỗi khi Pancake báo vận đơn của đơn. Khi shop
+   * gửi lại một đơn bằng MÃ MỚI (giao thất bại, huỷ rồi tạo lại, gửi hàng thay thế), lần gửi đầu
+   * tiên bị ghi đè — mã, trạng thái, các mốc thời gian đều mất, và không có gì báo. Cước của lần
+   * gửi đó cũng biến mất khỏi sổ.
+   *
+   * Nay chỉ cập nhật khi ĐÚNG là cùng một vận đơn; mã khác thì mở lần gửi mới.
+   */
+  const cungVanDon =
+    existing &&
+    (!s.vtpOrderNumber || !existing.vtpOrderNumber || existing.vtpOrderNumber === s.vtpOrderNumber) &&
+    (!s.trackingCode || !existing.trackingCode || existing.trackingCode === s.trackingCode);
+
+  if (existing && !cungVanDon) {
+    // Lần gửi mới: giữ nguyên dòng cũ, thêm dòng mới với số thứ tự kế tiếp.
+    const [{ soLan }] = await db
+      .select({ soLan: sql<number>`coalesce(max(${schema.shipments.attemptNo}), 0)` })
+      .from(schema.shipments)
+      .where(eq(schema.shipments.orderId, mapped.id));
+    const [row] = await db
+      .insert(schema.shipments)
+      .values({ orderId: mapped.id, ...data, attemptNo: Number(soLan) + 1, direction: "OUTBOUND" })
+      .returning({ id: schema.shipments.id });
+    shipmentId = row.id;
+  } else if (existing) {
+    await db
+      .update(schema.shipments)
+      .set({ ...data, attemptNo: existing.attemptNo ?? 1, direction: existing.direction ?? "OUTBOUND", updatedAt: new Date() })
+      .where(eq(schema.shipments.id, existing.id));
     shipmentId = existing.id;
   } else {
     // vận đơn có thể đã được tạo từ webhook Viettel Post trước khi đơn Pancake về
@@ -397,7 +432,10 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
       // Vận đơn mồ côi do webhook ĐVVC tạo trước khi đơn Pancake về — nó CÓ chứng từ.
       settleFromHistory = settleFromHistory || Boolean(orphan.vtpStatusDate);
     } else {
-      const [row] = await db.insert(schema.shipments).values({ orderId: mapped.id, ...data }).returning({ id: schema.shipments.id });
+      const [row] = await db
+        .insert(schema.shipments)
+        .values({ orderId: mapped.id, ...data, attemptNo: 1, direction: "OUTBOUND" })
+        .returning({ id: schema.shipments.id });
       shipmentId = row.id;
     }
   }
@@ -413,6 +451,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   // đơn, nên gọi vô điều kiện là cộng thêm hai truy vấn mỗi đơn mà không đổi được gì cho vận đơn
   // chưa có sự kiện nào của ĐVVC.
   const settled = settleFromHistory ? await materializeShipmentState(db, shipmentId) : null;
+  // Chứng từ ĐVVC đến qua Pancake làm trạng thái đổi ⇒ vòng đời care đi theo, cùng cửa với webhook.
+  if (settled?.changed) await afterShipmentStateChange(db, shipmentId, { source: "PANCAKE" }).catch(() => undefined);
   publish({ type: "shipment", shipmentId, status: (settled?.after as ShipmentStage) ?? stage });
 }
 

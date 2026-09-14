@@ -3,6 +3,7 @@ import { HeartHandshake, MessageSquareHeart, Send, ShoppingBag } from "lucide-re
 import { OutreachConfigForm } from "@/app/(dashboard)/outreach/outreach-config";
 import { BuildButton, OutreachTable } from "@/app/(dashboard)/outreach/outreach-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
+import { CUSTOMER_OUTCOME_LABEL } from "@/lib/constants/outreach-segment";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -12,7 +13,7 @@ import { NURTURE_WINDOWS, OUTREACH_STATUS_LABEL, OUTREACH_STATUSES, SEGMENT_LABE
 import { formatNumber } from "@/lib/format";
 import { loadOutreachConfig } from "@/lib/outreach/build";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
-import { listOutreachTargets, OUTREACH_SORTABLE, outreachStatusFacet, outreachSummary } from "@/lib/queries/outreach";
+import { listOutreachTargets, OUTREACH_SORTABLE, outreachOutcomeFacet, outreachStatusFacet, outreachSummary } from "@/lib/queries/outreach";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +27,7 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
   const raw = await searchParams;
   const segment = raw.segment === "CROSS_SELL" ? "CROSS_SELL" : "NURTURE";
   const params = parseListParams(raw, { defaultSort: "nextAt", defaultDir: "asc", filterKeys: ["status"], sortable: OUTREACH_SORTABLE, defaultPeriod: "all" });
-  const [{ rows, total, pageCount }, facet, summary, config, products] = await Promise.all([listOutreachTargets(params, segment), outreachStatusFacet(segment), outreachSummary(), loadOutreachConfig(), listProductsForMapping()]);
+  const [{ rows, total, pageCount }, facet, outcomeFacet, summary, config, products] = await Promise.all([listOutreachTargets(params, segment), outreachStatusFacet(segment), outreachOutcomeFacet(segment), outreachSummary(), loadOutreachConfig(), listProductsForMapping()]);
   const segHref = (seg: string) => {
     const q = new URLSearchParams();
     q.set("segment", seg);
@@ -59,7 +60,22 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
       <DataTableToolbar
         searchPlaceholder="Tên khách, SĐT, nội dung…"
         period={false}
-        facets={[{ key: "status", label: "Trạng thái", options: OUTREACH_STATUSES.map((s) => ({ value: s, label: OUTREACH_STATUS_LABEL[s], count: facet.find((x) => x.value === s)?.count ?? 0 })) }]}
+        /*
+          BỘ LỌC KẾT QUẢ LOGISTICS — dùng CÙNG biểu thức với cột hiển thị và với phép đếm, nên bộ
+          đếm trên chip luôn bằng số dòng mở ra khi bấm.
+
+          Đây là thứ trang này thiếu hẳn: danh sách chỉ dựng từ đơn giao thành công, nên khách hoàn
+          hàng KHÔNG tồn tại trên màn hình — không chạy được chiến dịch hỏi lý do, và không ai thấy
+          danh sách bán chéo đang đại diện cho bao nhiêu phần khách hàng.
+        */
+        facets={[
+          { key: "status", label: "Trạng thái", options: OUTREACH_STATUSES.map((s) => ({ value: s, label: OUTREACH_STATUS_LABEL[s], count: facet.find((x) => x.value === s)?.count ?? 0 })) },
+          {
+            key: "outcome",
+            label: "Kết quả giao hàng",
+            options: outcomeFacet.map((o) => ({ value: o.value, label: CUSTOMER_OUTCOME_LABEL[o.value], count: o.count })),
+          },
+        ]}
         resultLabel={`${formatNumber(total)} khách`}
       />
       <SectionCard padded={false}>

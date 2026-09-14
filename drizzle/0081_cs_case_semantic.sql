@@ -1,0 +1,25 @@
+-- ═══════ KẾT LUẬN CỦA TẦNG NGỮ NGHĨA, LƯU CÙNG CASE CSKH ═══════
+--
+-- CHỈ CỘNG THÊM MỘT CỘT NULLABLE. Không đổi kiểu, không xoá cột, không đổi tên, không đụng
+-- `cs_case_events` lẫn dữ liệu đang có. Dòng cũ giữ nguyên `NULL` — nghĩa là CHƯA BIẾT (case sinh
+-- trước bản này hoặc sinh bằng đường xác định), KHÔNG phải "model đã xem và không nói gì".
+--
+-- Viết tay và idempotent (`IF NOT EXISTS`) như 0033–0080: ảnh chụp (`drizzle/meta/*_snapshot.json`)
+-- của kho này đã cũ từ 0032, nên `drizzle-kit generate` sinh ra một bản dựng lại TOÀN BỘ lược đồ —
+-- chạy bản đó lên production sẽ hỏng ngay ở câu lệnh đầu tiên.
+--
+-- VÌ SAO PHẢI LƯU. Máy phân loại chạy trong JOB QUÉT chứ không lúc dựng trang (một hàng đợi 200
+-- dòng mà mỗi dòng gọi model là một trang không bao giờ mở xong). Không lưu thì màn hình và báo cáo
+-- đối chiếu chỉ còn "case này từ đâu ra thì không ai biết", và không ai kiểm chứng được một kết
+-- luận sai.
+--
+-- CÁI GÌ ĐƯỢC LƯU: loại việc · mức tin cậy · phạm vi thời gian · ý định người nói · một câu lý do ·
+-- trích NGUYÊN VĂN thuận và nghịch. Hình dạng khai ở `lib/cs/semantic-case.ts::SemanticRecord`.
+--
+-- CÁI GÌ KHÔNG ĐƯỢC LƯU: dòng suy nghĩ riêng của model. Nó không kiểm chứng được, không ai đọc, và
+-- là chỗ dữ liệu khách hàng rò ra nhiều nhất.
+--
+-- KHÔNG ĐỘNG TỚI `status`. Trạng thái `NEEDS_REVIEW` (mức tin cậy GIỮA) không cần migration vì cột
+-- `cs_cases.status` là `text` không ràng buộc CHECK; nó chỉ là một giá trị mới của một cột đã có.
+
+ALTER TABLE "cs_cases" ADD COLUMN IF NOT EXISTS "semantic" jsonb;

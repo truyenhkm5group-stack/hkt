@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { Loader2, LockKeyhole } from "lucide-react";
 import { loginAction, type LoginState } from "@/lib/actions/auth";
+import { BrandLockup } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,10 @@ export function LoginForm({ next, reason }: { next?: string; reason?: string }) 
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
 
   return (
-    <Card className="w-full max-w-sm border-border/60 shadow-xl shadow-black/5">
+    <div className="w-full max-w-sm space-y-6">
+      {/* Cột trái có logo nhưng bị ẩn dưới lg — màn hình nhỏ vẫn phải thấy thương hiệu */}
+      <BrandLockup className="justify-center lg:hidden" wordmarkClassName="text-lg" />
+      <Card className="border-border/60 shadow-xl shadow-black/5">
       <CardHeader className="space-y-1">
         <div className="mb-2 flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <LockKeyhole className="size-5" />
@@ -40,6 +44,7 @@ export function LoginForm({ next, reason }: { next?: string; reason?: string }) 
           <p className="text-center text-xs text-muted-foreground">Tài khoản mặc định lấy từ ADMIN_EMAIL / ADMIN_PASSWORD trong file .env</p>
         </form>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }

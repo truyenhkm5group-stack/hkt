@@ -86,6 +86,7 @@ async function outcomeDistribution(db: Db): Promise<OutcomeCounts> {
     .select({
       NOT_SHIPPED: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED')`,
       UNKNOWN: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'UNKNOWN')`,
+      AWAITING_PICKUP: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'AWAITING_PICKUP')`,
       IN_TRANSIT: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
       DELIVERED: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
       RETURNED: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'RETURNED')`,
@@ -98,6 +99,7 @@ async function outcomeDistribution(db: Db): Promise<OutcomeCounts> {
   return {
     NOT_SHIPPED: Number(row?.NOT_SHIPPED ?? 0),
     UNKNOWN: Number(row?.UNKNOWN ?? 0),
+    AWAITING_PICKUP: Number(row?.AWAITING_PICKUP ?? 0),
     IN_TRANSIT: Number(row?.IN_TRANSIT ?? 0),
     DELIVERED: Number(row?.DELIVERED ?? 0),
     RETURNED: Number(row?.RETURNED ?? 0),

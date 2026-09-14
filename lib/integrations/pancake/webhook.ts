@@ -56,7 +56,7 @@ export async function storeWebhook(
    * `PANCAKE_CHAT` tách riêng khỏi `PANCAKE` một cách CÓ CHỦ Ý: gộp chung thì con số "Pancake đã
    * nhận bao nhiêu webhook" trên trang Kết nối dữ liệu không còn nói lên điều gì về luồng đơn hàng.
    */
-  source: "PANCAKE" | "PANCAKE_CHAT" | "VIETTELPOST",
+  source: "PANCAKE" | "PANCAKE_CHAT" | "VIETTELPOST" | "SEPAY",
   eventType: string,
   externalId: string | null,
   payload: unknown,
@@ -67,12 +67,25 @@ export async function storeWebhook(
   const dedupeKey = options.dedupeKey || null;
   const occurredAt = options.occurredAt ?? null;
   if (dedupeKey) {
-    const [bumped] = await db
-      .update(schema.webhookEvents)
-      .set({ deliveryCount: sql`${schema.webhookEvents.deliveryCount} + 1`, receivedAt: new Date() })
-      .where(eq(schema.webhookEvents.dedupeKey, dedupeKey))
-      .returning({ id: schema.webhookEvents.id, deliveryCount: schema.webhookEvents.deliveryCount });
-    if (bumped) return { id: bumped.id, duplicate: true, deliveryCount: Number(bumped.deliveryCount) };
+    /*
+      MỘT CÂU LỆNH, KHÔNG PHẢI "CẬP NHẬT RỒI CHÈN".
+
+      `webhook_events_dedupe_uq` (migration 0032) đã là UNIQUE trên `dedupe_key`. Bản trước cập nhật
+      trước, không thấy thì chèn: hai lần gửi lại tới CÙNG LÚC đều không thấy, cùng chèn, một cái vỡ
+      ràng buộc ⇒ HTTP 500 cho Viettel Post (bên đòi 200 trong 1 giây) hoặc một lần thử lại thừa
+      cho SePay. `ON CONFLICT … DO UPDATE` để Postgres phân xử: kẻ tới sau chỉ đếm thêm một lượt.
+      `xmax = 0` là cách Postgres cho biết hàng vừa được CHÈN (chứ không phải cập nhật).
+    */
+    const [row] = await db
+      .insert(schema.webhookEvents)
+      .values({ source, eventType, externalId, payload, headers, dedupeKey, occurredAt })
+      .onConflictDoUpdate({
+        target: schema.webhookEvents.dedupeKey,
+        set: { deliveryCount: sql`${schema.webhookEvents.deliveryCount} + 1`, receivedAt: new Date() },
+      })
+      .returning({ id: schema.webhookEvents.id, deliveryCount: schema.webhookEvents.deliveryCount, inserted: sql<boolean>`(xmax = 0)` });
+    const duplicate = !row.inserted;
+    return { id: row.id, duplicate, deliveryCount: Number(row.deliveryCount) };
   }
   const [row] = await db
     .insert(schema.webhookEvents)
@@ -87,7 +100,10 @@ export function webhookDedupeKey(source: string, parts: (string | number | null 
   return usable.length >= 2 ? [source, ...usable].join("|") : null;
 }
 
-export async function markWebhook(id: string, status: "PROCESSED" | "FAILED" | "IGNORED", error?: string | null) {
+/** ACCOUNT_UNMAPPED: đã ghi vào sổ nhưng tài khoản ngân hàng chưa được người xác nhận. */
+export type WebhookStatus = "PROCESSED" | "FAILED" | "IGNORED" | "ACCOUNT_UNMAPPED";
+
+export async function markWebhook(id: string, status: WebhookStatus, error?: string | null) {
   const db = await getDb();
   await db
     .update(schema.webhookEvents)
@@ -95,10 +111,13 @@ export async function markWebhook(id: string, status: "PROCESSED" | "FAILED" | "
     .where(eq(schema.webhookEvents.id, id));
 }
 
-export async function processPancakeWebhook(eventId: string) {
+/** Kết quả xử lý một gói tin: `changed` = có ghi dữ liệu nghiệp vụ (đơn / khách / sản phẩm / tồn). */
+export type PancakeWebhookOutcome = { changed: boolean; result: string };
+
+export async function processPancakeWebhook(eventId: string): Promise<PancakeWebhookOutcome> {
   const db = await getDb();
   const event = await db.query.webhookEvents.findFirst({ where: eq(schema.webhookEvents.id, eventId) });
-  if (!event || event.status === "PROCESSED") return;
+  if (!event || event.status === "PROCESSED") return { changed: false, result: "already-processed" };
   const payload = asRecord(event.payload);
   const kind = event.eventType as PancakeWebhookKind;
   try {
@@ -165,7 +184,10 @@ export async function processPancakeWebhook(eventId: string) {
       }
     }
     await markWebhook(eventId, result === "ignored" ? "IGNORED" : "PROCESSED", note);
+    // "unchanged"/"skipped" của upsertOrder nghĩa là bản ghi không mới hơn bản đang có — không có gì đổi.
+    return { changed: !["ignored", "unchanged", "skipped"].includes(result), result };
   } catch (error) {
     await markWebhook(eventId, "FAILED", error instanceof Error ? error.message : String(error));
+    return { changed: false, result: "failed" };
   }
 }

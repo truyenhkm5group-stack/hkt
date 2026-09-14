@@ -5,17 +5,16 @@ import {
   Boxes,
   CircleHelp,
   Link2Off,
-  PackageCheck,
   Percent,
   ShoppingBag,
   Truck,
-  Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { ReceiveReturns } from "@/app/(dashboard)/data-quality/receive-returns";
 import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { adsAttributionCoverage } from "@/lib/queries/ads-attribution-coverage";
 import { OrderOutcomeBadge, VerifiedOutcomeBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
@@ -26,7 +25,10 @@ import { requirePermission } from "@/lib/auth/session";
 import { DQ_ISSUE_HINT, DQ_ISSUE_LABEL, DQ_ISSUES, type DqIssue } from "@/lib/constants/data-quality";
 import { successTone, type OrderOutcome } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
+import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments, type ReturnItemSummary } from "@/lib/queries/data-quality";
+import { getDataQualityIssues } from "@/lib/queries/data-quality-issues";
+import { DQ_SEVERITY_LABEL, DQ_SEVERITY_TONE, UNKNOWN_KIND_HINT, UNKNOWN_KIND_LABEL } from "@/lib/constants/data-quality-issues";
+import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { controlTowerDrill, getControlTower } from "@/lib/queries/control-tower";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_LABEL, SEVERITY_TONE, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -55,24 +57,31 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   const issue = (DQ_ISSUES as readonly string[]).includes(param(raw, "issue")) ? (param(raw, "issue") as DqIssue) : null;
   const page = Math.max(1, Number(param(raw, "page", "1")) || 1);
 
-  const summary = await dataQualitySummary(params.period);
-  const tower = await getControlTower();
   // Luật của trung tâm điều khiển mở danh sách riêng, không dùng chung với 7 nhóm legacy.
   const ruleParam = param(raw, "rule");
   const towerRule = (RECONCILIATION_RULE_ORDER as readonly string[]).includes(ruleParam) ? (ruleParam as ReconciliationRuleKey) : null;
-  const towerDrill = towerRule ? await controlTowerDrill(towerRule, page, PAGE_SIZE) : null;
 
-  // Chỉ tải danh sách của nhóm vấn đề đang mở (drill-down).
-  const drill = issue === "unlinked-shipment"
-    ? { kind: "shipment" as const, ...(await unlinkedShipments(page, PAGE_SIZE, params.q, params.sort, params.dir)) }
-    : issue === "return-not-received"
-      ? { kind: "shipment" as const, ...(await returnsAwaitingWarehouse(page, PAGE_SIZE, params.q)) }
-      : issue
-        ? { kind: "order" as const, ...(await dataQualityOrders(issue, params.period, page, PAGE_SIZE, params.q)) }
-        : null;
-
-  // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
-  const backlog = issue === "return-not-received" ? await pendingReturnedForWarehouse() : null;
+  // NĂM TRUY VẤN ĐỘC LẬP, KHÔNG ĐỨNG CHỜ NHAU. Trước đây chúng chạy nối tiếp nên thời gian dựng
+  // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
+  // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
+  const [summary, tower, towerDrill, drill, backlog, adsCoverage, dqIssues] = await Promise.all([
+    dataQualitySummary(params.period),
+    getControlTower(),
+    towerRule ? controlTowerDrill(towerRule, page, PAGE_SIZE) : Promise.resolve(null),
+    // Chỉ tải danh sách của nhóm vấn đề đang mở (drill-down).
+    issue === "unlinked-shipment"
+      ? unlinkedShipments(page, PAGE_SIZE, params.q, params.sort, params.dir).then((r) => ({ kind: "shipment" as const, ...r }))
+      : issue === "return-not-received"
+        ? returnsAwaitingWarehouse(page, PAGE_SIZE, params.q).then((r) => ({ kind: "shipment" as const, ...r }))
+        : issue
+          ? dataQualityOrders(issue, params.period, page, PAGE_SIZE, params.q).then((r) => ({ kind: "order" as const, ...r }))
+          : Promise.resolve(null),
+    // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
+    issue === "return-not-received" ? pendingReturnedForWarehouse() : Promise.resolve(null),
+    // Độ phủ quy kết quảng cáo 30 ngày — chỉ số theo dõi dữ liệu MỚI có tốt lên hay không.
+    adsAttributionCoverage(new Date(Date.now() - 30 * 86_400_000), new Date()),
+    getDataQualityIssues(),
+  ]);
   const warehouseBacklog = backlog
     ? { count: backlog.count, items: backlog.items, waitingDays: backlog.oldestAt ? Math.floor((Date.now() - new Date(backlog.oldestAt).getTime()) / 86_400_000) : null }
     : undefined;
@@ -94,12 +103,13 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
 
       <DataTableToolbar period={{ defaultKey: "90d" }} searchPlaceholder={issue ? "Tìm mã đơn, mã vận đơn, tên, SĐT…" : undefined} resultLabel={`Kỳ: ${params.period.label}`} />
 
-      {/* ───────── KPI vận hành theo quy tắc thực tế ───────── */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Tổng đơn (không tính huỷ)" value={formatNumber(summary.total)} icon={ShoppingBag} tone="primary" note={`${formatNumber(summary.cancelled)} đơn huỷ không tính`} />
-        <MetricCard label="Giao thành công — đối chiếu tạm" value={formatNumber(summary.delivered)} icon={PackageCheck} tone="amber" note="Chưa xác minh theo chứng từ" />
-        <MetricCard label="Đơn hoàn — đối chiếu tạm" value={formatNumber(summary.returned)} icon={Undo2} tone="rose" note="Không đồng nghĩa kho đã nhận hàng" />
-        <MetricCard label="Đơn đang giao" value={formatNumber(summary.inTransit)} icon={Truck} tone="blue" note="Chưa kết luận được kết quả" />
+      {/*
+        CHỈ HAI THẺ TRANG NÀY MỚI TRẢ LỜI ĐƯỢC. Sáu thẻ "đối chiếu tạm" (tổng đơn, giao TC, hoàn,
+        đang giao, tỷ lệ giao, tiền legacy) chép lại /reports/returns và thẻ ② trang chủ bằng một
+        phiên bản "tạm" — cùng người đọc thấy hai tỷ lệ giao khác nhau ở hai trang. Bảng đối chiếu
+        legacy ↔ có chứng từ bên dưới vẫn giữ đủ các con số đó, đúng chỗ của nó.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2">
         <MetricCard
           label="Đơn chưa đủ dữ liệu xác minh"
           value={formatNumber(summary.unverified)}
@@ -107,8 +117,6 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           tone="amber"
           note={<Link className="underline underline-offset-2" href={drillHref("unverified")}>Xem danh sách →</Link>}
         />
-        <MetricCard label="Tỷ lệ giao — đối chiếu tạm" value={<Rate value={summary.successRate} />} icon={Percent} tone="amber" note="Chưa phải tỷ lệ đã xác minh" />
-        <MetricCard label="Tiền legacy — ước tính" value={<Money value={summary.provenCash} />} icon={CircleHelp} tone="amber" note="Có COD fallback và trả trước chưa kiểm chứng" />
         <MetricCard
           label="Giá trị COD chưa xác minh"
           value={summary.unverified ? <Money value={summary.unverifiedCod} /> : <Unknown>—</Unknown>}
@@ -117,6 +125,97 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
           note="COD khai báo của đơn chưa chứng minh được"
         />
       </div>
+
+      {/*
+        ───────── ĐỘ PHỦ QUY KẾT QUẢNG CÁO ─────────
+        Chủ shop đã chốt: ~49% là GIỚI HẠN CỦA DỮ LIỆU, không phải lỗi. Quan hệ bài viết ↔ chiến dịch
+        là nhiều–nhiều theo đúng nghiệp vụ scale. Thẻ này KHÔNG để trách móc con số, mà để trả lời
+        một câu: dữ liệu mới có đang tốt lên không. Nó chỉ tăng khi từng mẩu quảng cáo có mã theo dõi
+        riêng — nên "đơn có mã theo dõi" đứng ngay cạnh.
+      */}
+      <SectionCard
+        title="Độ phủ quy kết quảng cáo — 30 ngày"
+        description={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.total)} đơn quy kết được (${adsCoverage.coveragePct}%) · ${formatNumber(adsCoverage.ambiguous)} nhập nhằng · ${formatNumber(adsCoverage.unmapped)} không có gì để nối`}
+        hint="Quy kết được = có mã quảng cáo thật, HOẶC bài viết chỉ thuộc đúng một chiến dịch. Bài chạy ở nhiều chiến dịch thì ERP GIỮ NHẬP NHẰNG, không chọn bừa — và không ngoại suy kết quả của phần quy kết được sang toàn bộ đơn."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard label="Quy kết được" value={`${adsCoverage.coveragePct}%`} icon={Percent} tone={adsCoverage.coveragePct >= 80 ? "green" : "amber"} note={`${formatNumber(adsCoverage.uniqueDeterministic)} đơn có căn cứ xác định`} />
+          <MetricCard label="Nhập nhằng" value={formatNumber(adsCoverage.ambiguous)} icon={CircleHelp} tone="amber" note="Có bài viết nhưng bài chạy ở nhiều chiến dịch — giữ nguyên, không đoán" />
+          <MetricCard label="Không nối được" value={formatNumber(adsCoverage.unmapped)} icon={AlertTriangle} tone="slate" note="Không có mã quảng cáo lẫn bài viết" />
+          <MetricCard
+            label="Đơn có mã theo dõi"
+            value={formatNumber(adsCoverage.withTrackingCode)}
+            icon={ShoppingBag}
+            tone={adsCoverage.withTrackingCode > 0 ? "green" : "slate"}
+            note={adsCoverage.withTrackingCode > 0 ? "Đường duy nhất để độ phủ tăng thật" : "Chưa mẩu quảng cáo nào gắn mã theo dõi riêng"}
+          />
+        </div>
+      </SectionCard>
+
+      {/*
+        ───────── SỔ LỖ HỔNG DỮ LIỆU ─────────
+
+        Một bảng chỉ in con số là một bảng không ai mở lần thứ hai: người đọc thấy "412 đơn thiếu
+        giá vốn" rồi không biết ai sửa, sửa ở đâu. Nên mỗi dòng mang đủ VIỆC PHẢI LÀM và PHÒNG làm
+        việc đó.
+
+        Cột "Loại chỗ trống" là cột quan trọng nhất. Không phải mọi UNKNOWN đều là lỗi: phần lớn
+        vận đơn thiếu mốc bàn giao là kiện ĐVVC CHƯA lấy được — đó là sự thật. Gộp chúng vào rồi đi
+        "giảm số UNKNOWN" là cách chắc chắn nhất để ai đó lấp chỗ trống bằng một phép đoán.
+      */}
+      <SectionCard
+        title="Sổ lỗ hổng dữ liệu"
+        description={`${formatNumber(dqIssues.filter((i) => i.fixable && (i.count ?? 0) > 0).length)} nhóm sửa được / ${formatNumber(dqIssues.length)} nhóm đang theo dõi`}
+        hint="Sửa được = dữ liệu ĐÃ CÓ nhưng chưa nối, hoặc đường ống chưa chạy lại. Nhóm 'không có chứng cứ' và 'nhiều ứng viên' KHÔNG phải việc phải làm — giữ nguyên là câu trả lời đúng."
+      >
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Lỗ hổng</TableHead>
+                <TableHead className="text-right">Đếm được</TableHead>
+                <TableHead>Loại chỗ trống</TableHead>
+                <TableHead>Mức</TableHead>
+                <TableHead>Gần nhất</TableHead>
+                <TableHead>Việc phải làm</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dqIssues.map((i) => (
+                <TableRow key={i.key}>
+                  <TableCell className="align-top">
+                    <div className="font-medium">
+                      {i.href ? (
+                        <Link href={i.href} className="underline-offset-2 hover:underline">
+                          {i.label}
+                        </Link>
+                      ) : (
+                        i.label
+                      )}
+                    </div>
+                    <div className="max-w-[420px] text-[11px] text-muted-foreground">{i.why}</div>
+                    {i.sample.length ? <div className="mt-1 max-w-[420px] truncate text-[11px] text-muted-foreground" title={i.sample.join("\n")}>Ví dụ: {i.sample.slice(0, 2).join(" · ")}</div> : null}
+                  </TableCell>
+                  {/* `null` = CHƯA ĐẾM ĐƯỢC, khác hẳn 0 = đã đếm và không có gì. */}
+                  <TableCell className="text-right align-top tabular-nums font-medium">{formatNumber(i.count)}</TableCell>
+                  <TableCell className="align-top text-[11px]" title={UNKNOWN_KIND_HINT[i.kind]}>
+                    {UNKNOWN_KIND_LABEL[i.kind]}
+                    {i.fixable ? <Badge variant="secondary" className="ml-1 text-[10px]">sửa được</Badge> : null}
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <Badge variant="secondary" className={cn("text-[10px]", DQ_SEVERITY_TONE[i.severity])}>{DQ_SEVERITY_LABEL[i.severity]}</Badge>
+                  </TableCell>
+                  <TableCell className="align-top text-[11px] text-muted-foreground">{i.lastSeen ? formatDateTime(i.lastSeen) : "—"}</TableCell>
+                  <TableCell className="max-w-[380px] align-top text-[11px]">
+                    <div>{i.action}</div>
+                    <div className="mt-0.5 text-muted-foreground">Phòng: {DEPARTMENT_LABEL[i.owner]} · Nguồn: {i.source}</div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
 
       {/* ───────── Trung tâm điều khiển: toàn bộ bộ luật đối soát ───────── */}
       <SectionCard
@@ -329,6 +428,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
                   rows={drill.rows.map((r) => ({
                     id: r.id,
                     label: `${r.vtpOrderNumber ?? r.orderReference ?? r.id} · ${r.receiverName || "—"} · COD ${formatVND(r.codAmount ?? 0)}`,
+                    items: ((r as { items?: ReturnItemSummary[] }).items ?? []).map((i) => `${i.name}${i.variant ? ` (${i.variant})` : ""} ×${i.qty}`).join(" · ") || "Chưa nối được đơn — không biết mặt hàng",
                     receivedAt: r.returnReceivedAt ? formatDateTime(r.returnReceivedAt) : null,
                   }))}
                 />

@@ -1,13 +1,14 @@
 import type { NextRequest } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { subscribe } from "@/lib/realtime/bus";
 
 export const dynamic = "force-dynamic";
 
 /** Server-Sent Events: đẩy thông báo khi có đơn/vận đơn/tồn kho thay đổi (từ webhook hoặc đồng bộ). */
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  if (!can(user, "dashboard:view")) return new Response("Không có quyền", { status: 403 });
 
   const encoder = new TextEncoder();
   let unsubscribe = () => {};

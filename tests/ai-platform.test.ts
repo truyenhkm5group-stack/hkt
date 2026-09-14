@@ -6,16 +6,16 @@ import { schema } from "@/db";
 import { AGENT_MODES, clampMode, MAX_ALLOWED_MODE, modeAtLeast } from "@/lib/constants/ai";
 import { FORBIDDEN_TOOL_PATTERNS, TOOL_CATALOG, TOOL_NAMES, type ToolName } from "@/lib/constants/ai-tools";
 import { AI_EVENT_SUBJECT, AI_EVENT_TYPES, aiEventKey } from "@/lib/constants/ai-events";
-import { emitAiEvent, emitAndDispatch, claimTask, recordAiError } from "@/lib/ai/events";
-import { ensureAgents, getAgent, AGENT_DEFINITIONS } from "@/lib/ai/registry";
-import { estimateCostVnd, parseRouting, runModelStep } from "@/lib/ai/model-router";
-import { callTool, defineTool, registeredTools } from "@/lib/ai/tools/gateway";
-import { registerErpTools, shippingPolicyTool } from "@/lib/ai/tools/erp";
-import { startRun } from "@/lib/ai/runs";
-import { queueStubResponse, resetStub, stubCalls } from "@/lib/ai/providers/stub";
-import { getProvider, providerNames } from "@/lib/ai/providers";
+import { emitAiEvent, emitAndDispatch, claimTask, recordAiError } from "@/lib/ai-workforce/events";
+import { ensureAgents, getAgent, AGENT_DEFINITIONS } from "@/lib/ai-workforce/registry";
+import { estimateCostVnd, parseRouting, runModelStep } from "@/lib/ai-workforce/model-router";
+import { callTool, defineTool, registeredTools } from "@/lib/ai-workforce/tools/gateway";
+import { registerErpTools, shippingPolicyTool } from "@/lib/ai-workforce/tools/erp";
+import { startRun } from "@/lib/ai-workforce/runs";
+import { queueStubResponse, resetStub, stubCalls } from "@/lib/ai-workforce/providers/stub";
+import { getProvider, providerNames } from "@/lib/ai-workforce/providers";
 import { setSettingJson } from "@/lib/settings";
-import { getAiSettings } from "@/lib/ai/config";
+import { getAiSettings } from "@/lib/ai-workforce/config";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
 
 /**

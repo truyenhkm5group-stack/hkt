@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, sql } from "drizzle-orm";
+import { guardSecondApproval } from "@/lib/actions/approvals";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -39,6 +40,21 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
   const d = parsed.data;
   const totals = matrixTotals(d.colors, d.sizes, d.cells);
   if (totals.total <= 0) return { error: "Tổng số lượng phải lớn hơn 0" };
+  {
+    // Đặt hàng vượt ngưỡng khoá vốn của shop trong nhiều tháng nếu quyết sai. Dưới ngưỡng thì cổng
+    // tự cho qua — bắt duyệt mọi lệnh nhỏ chỉ tạo thói quen bấm cho xong.
+    const cong = await guardSecondApproval({
+      group: "PURCHASING_LARGE",
+      action: "production.save",
+      entity: "PRODUCTION_ORDER",
+      entityId: id ?? "",
+      summary: `Đặt xưởng ${d.productName} · ${totals.total} món · ${totals.total * d.unitCost}đ${d.supplier ? ` · ${d.supplier}` : ""}`,
+      amount: totals.total * d.unitCost,
+      payload: d,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
   const db = await getDb();
   const values = {
     productId: d.productId,

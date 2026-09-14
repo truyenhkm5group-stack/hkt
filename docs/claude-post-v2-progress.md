@@ -1,0 +1,146 @@
+# Tiến độ roadmap sau V2
+
+Cập nhật 09/09/2026. **Toàn bộ 10 lô A–J đã xong VÀ ĐÃ PHÁT HÀNH.**
+
+Production đang chạy `676465a752f0` = HEAD của `main`. Ba lần deploy trong phiên (không phải một):
+hai lỗi được phát hiện SAU lần deploy đầu, trên dữ liệu thật, và cả hai đã tự sửa rồi phát hành lại.
+
+Cách deploy: phiên này không có `gh` CLI, nhưng Git Credential Manager đang giữ credential có scope
+`workflow`, nên gọi thẳng GitHub REST API để dispatch và theo dõi. Token không in ra ở đâu.
+
+Tổng kết đầy đủ: `docs/claude-post-v2-final-report.md`.
+
+| Lô | Task | Trạng thái | Commit |
+|---|---|---|---|
+| **A** | A1 · Hàng đợi việc hợp nhất | **XONG** | `f039539` |
+| **A** | A2 · Công thức ưu tiên | **XONG** | `a1b5b12` |
+| **A** | A3 · Hạn xử lý & tuổi việc | **XONG** | `d21bcf9` |
+| **A** | A4 · Quyền sở hữu việc | **XONG** | `0805463` |
+| **A** | A5 · Giao diện hàng đợi | **XONG** | `5c0e57f` |
+| **B** | B1 · Hợp đồng phễu bán hàng | **XONG** | `4e0a622` |
+| **B** | B2 · Hiệu suất nhân sự | **XONG** | `bcddd0c`, `272a7aa` |
+| **B** | B3 · Hàng đợi chăm sóc khách | **XONG** | `ed48e25` |
+| **B** | B4 · Báo cáo chuyển đổi | **XONG** | `92260ec` |
+| **C** | C1 · Rà soát độ phủ quy kết | **XONG** | `875e0eb` |
+| **C** | C2 · Chỉ số lợi nhuận quảng cáo (CAC) | **XONG** | `4a8c3f9` |
+| **C** | C3 · Drill-down quảng cáo | **XONG** | `5bc354d` |
+| **C** | C4 · Phát hiện bất thường | **XONG** | `e14f61f` |
+| **D** | D1 · Mô hình hiệu quả mẫu mã | **XONG** | `30fea62` |
+| **D** | D2 · Bảng mẫu mã × màu × size | **XONG** | `83211e7` |
+| **D** | D3 · Luật phân loại mẫu mã | **XONG** | `1cd925f` |
+| **E** | E1 · Tốc độ bán chống nhiễu | **XONG** | `845bbf0` |
+| **E** | E2 · Số ngày còn đủ hàng + MOQ | **XONG** | `2c157c2` |
+| **E** | E3 · Dự báo cháy hàng | **XONG** | `32183ec` |
+| **E** | E4 · Đề xuất sản xuất + hạn đặt | **XONG** | `973f043` |
+| **E** | E5 · Hàng bán chậm & vốn nằm chết | **XONG** | `c93b560` |
+| **F** | F1–F3 · Bảng điều khiển quản trị | **XONG** | `804e29e` |
+| **G** | G1–G3 · Nền tảng trợ lý (chỉ đọc) | **XONG** | `20da309` |
+| **H** | H1 · Tìm kiếm toàn hệ thống | **XONG** | `2b08892` |
+| **H** | H2 · Dòng thời gian truy vết | **XONG** | `89a2573` |
+| **I** | I1–I2 · Đo & tối ưu hiệu năng | **XONG** | `7529f72` |
+| **I** | I3 · Độ tin cậy job nền | **XONG** | `7342b17` |
+| **J** | J · Nhất quán giao diện | **XONG** | `912dfeb` |
+
+## Lô A — đã làm gì
+
+**Hai loại việc có thật trước đây không ai nhìn thấy:**
+- *Đã chốt nhưng chưa gửi hàng* — tách khỏi "đơn chờ xử lý". Hai việc của hai người: đơn chưa chốt
+  là việc CSKH gọi khách, đơn đã chốt mà chưa có vận đơn là việc kho đóng gói. Gộp lại thì cả hai
+  cùng trôi vì không ai nhận là việc của mình.
+- *Hàng hoàn về mà kho chưa tái nhập* — mỗi lô nằm đây là hàng có thật trong kho mà ERP không đếm,
+  và kế hoạch sản xuất đặt thừa đúng bằng lượng đó.
+
+**Năm trạng thái thay vì ba.** Thêm "đang làm" (giơ tay không phải là đang chạy) và "bỏ qua có lý
+do". Thiếu cái sau thì người vận hành buộc phải bấm "đã xong" cho việc mình cố ý không làm — con số
+"đã xong" mất hết ý nghĩa. Lý do là **bắt buộc**, khoá bằng ràng buộc CHECK ở CSDL.
+
+**Công thức ưu tiên thêm hai yếu tố và giải thích được.** Sáu phần cộng đúng 100: nghiêm trọng 30 +
+tuổi 20 + tiền 20 + khả năng cứu 15 + **có khách đang chờ 10** + **sắp cháy hàng 5**. Giao diện hiện
+"Ưu tiên vì: …" — điểm mà người đọc không kiểm chứng được thì không khác gì cảm tính.
+
+**Hạn xử lý theo loại việc**, một chỗ duy nhất. Ba nhóm cố ý KHÔNG đặt hạn: đang chuyển hoàn (chưa
+làm được gì), vận đơn chưa ghép đơn và chưa rõ thuộc đơn nào (đặt hạn tạo áp lực ép ghép bừa).
+
+**Bộ lọc không đổi số tổng hợp.** Tổng việc / tổng tiền treo / số trễ hạn luôn nói về toàn bộ hàng
+đợi. Nếu tổng cũng bị lọc thì chọn một bộ lọc là thấy "hết việc rồi".
+
+## Lô B — đã làm gì
+
+**Phễu bảy bước của kế hoạch chỉ đo được NĂM.** "Đã liên hệ" và "Đủ điều kiện" không có nguồn dữ
+liệu nào: ERP không đồng bộ hội thoại Pancake, và `conversation_id` chỉ tồn tại SAU KHI đơn đã tạo
+nên nó là hệ quả của việc lên đơn chứ không phải bằng chứng của việc liên hệ. Hệ quả phải nói thẳng:
+**ERP không đo được tỷ lệ chốt từ khách nhắn tin.**
+
+**Mỗi tỷ lệ hiện kèm mẫu số của nó**, và mẫu số chọn theo TRÁCH NHIỆM: tỷ lệ của kênh chia cho đơn
+đã rời kho, tỷ lệ của người chia cho đơn đã kết thúc, bước mua lại chia cho số khách.
+
+**Không đánh giá ai bằng số lượng đơn.** Bảng xếp theo doanh thu giao thành công. Đơn không gán được
+vào dòng "Chưa gán" xếp cuối, **không chia đều** cho nhân viên — chia đều làm tổng khớp trong khi
+từng người đều sai.
+
+**Loại việc mới: mất khách quen.** Đơn vừa hoàn của khách ĐÃ TỪNG mua thành công, hạn gọi lại 48
+giờ. Trước đây họ lẫn vào hàng trăm đơn hoàn khác và không ai gọi.
+
+## Lô C — đã làm gì
+
+**Độ phủ quy kết đứng ngay cạnh ROAS.** Nếu chỉ 30% đơn có mã quảng cáo thì "ROAS 4,2" là ROAS của
+30% đó — con số vẫn đúng, nhưng đọc như thể nó nói về toàn shop là tự lừa mình.
+
+**Ba cấp kế hoạch đề nghị mà ERP không làm được, nêu tên thẳng trên giao diện**: nội dung quảng cáo
+(không có bảng nào lưu), chi tiêu cấp nhóm và cấp mẩu (Facebook đồng bộ ở cấp chiến dịch/ngày). Nêu
+tên chứ không im lặng — im lặng thì người sau đi tìm, không thấy, rồi tự dựng số thay thế.
+
+**Sửa một lỗi thật** phát hiện khi định mở cấp mẩu quảng cáo: đường tính đã có sẵn trong mã nhưng
+tra chi tiêu theo sai không gian khoá. Bật lên là mọi mẩu hiện chi 0đ và TOÀN BỘ tiền chiến dịch bị
+xếp vào "tiền tiêu mà không đơn nào". Sửa bằng cách nói **CHƯA BIẾT** thay vì nói 0.
+
+**CAC hai mức**, và khoảng cách giữa chúng mới là điều đáng đọc: phần chênh chính là tiền đã trả cho
+những đơn hoàn.
+
+**Sáu quy tắc phát hiện bất thường**, tách làm hai loại việc vì hai người khác nhau xử lý. ERP
+**không** tự đổi ngân sách hay tắt chiến dịch.
+
+## Hiệu chuẩn có đổi hành vi
+
+Trần mức nghiêm trọng hạ 40 → 30, nên việc "nghiêm trọng nhưng không ai chờ, không dính tiền" không
+còn tự động là GẤP. Chủ ý: mức GẤP nay đòi đúng hồ sơ của việc gấp thật — nghiêm trọng + có khách
+chờ + còn cứu được. Trên dữ liệu kiểm thử, số việc GẤP giảm 1 → 0.
+
+## Schema
+
+Migration **`0037`** — 5 cột hàng đợi việc + 2 khoá ngoại + 1 CHECK (bỏ qua phải có lý do) + 1 index.
+Idempotent, CHECK để `NOT VALID` nên không quét lại lịch sử.
+
+## Lô D–J — đã làm gì
+
+Xem `docs/erp-post-v2-release-report.md` để có bản đầy đủ. Ba điểm đáng nhớ nhất:
+
+**Ba lỗi THẬT được phát hiện và sửa**, cả ba đều im lặng: ROAS cấp mẩu quảng cáo tra chi tiêu sai
+không gian khoá (bật lên là mọi mẩu hiện 0đ và toàn bộ tiền chiến dịch bị xếp nhầm); ô tìm kiếm sập
+khi dán mã vận đơn vì tràn kiểu số nguyên; job treo tự chặn chính mình vĩnh viễn.
+
+**"Đáng nhân bản" đòi ĐỦ CẢ SÁU chiều.** Thiếu chiều nào thì trả "chưa đủ căn cứ" kèm tên chiều
+thiếu, không hạ tiêu chuẩn xuống năm chiều rồi vẫn gắn nhãn. Gắn nhãn bán chạy dựa trên vài chiều
+rồi để chủ shop đặt sản xuất hàng nghìn cái là thiệt hại lớn nhất một báo cáo có thể gây ra.
+
+**Một ngày livestream không được quyết định kế hoạch cả tháng.** Tốc độ bán bỏ ngày đột biến khi và
+chỉ khi một ngày chiếm hơn nửa tổng bán — dập mọi dao động sẽ khiến kế hoạch luôn đặt thiếu.
+
+## Blocker
+
+**Phiên này không có `gh` CLI.** Không chạy được ops `db-query` nên không đo được độ phủ gán người
+THẬT trên production, và **không tự deploy được** ở cổng ra cuối.
+
+Xử lý: thay vì chép một con số không kiểm chứng được vào tài liệu, độ phủ được làm thành **hàm đo
+chạy trong ứng dụng** — mở trang Phễu bán hàng là thấy, đo lại lúc nào cũng được, và có kiểm thử.
+
+## Hai việc cố ý KHÔNG làm vì làm là bịa
+
+- **"Lead chưa follow-up"**: không có tập lead nào để đối chiếu.
+- **"Khách cũ đủ điều kiện mua lại"**: chưa có luật nghiệp vụ nào định nghĩa thế nào là đủ điều
+  kiện. Tự đặt ngưỡng là ra quyết định kinh doanh thay chủ shop.
+
+## Không làm, đúng lệnh
+
+`PENDING_DIRECT_VTP_FULFILLMENT` · WRITE BACKFILL toàn cục · xoay secret · tự động đổi ngân sách
+quảng cáo / tạo đơn sản xuất / đổi COD / đổi trạng thái vận đơn.

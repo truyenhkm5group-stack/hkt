@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { Suspense } from "react";
+import { NavLink } from "@/components/nav-progress";
 import { redirect } from "next/navigation";
 import {
   Banknote,
@@ -16,12 +17,17 @@ import { FinancialTruthTab } from "@/app/(dashboard)/reports/financial-truth-tab
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { can, requireUser } from "@/lib/auth/session";
+import { requireResource } from "@/lib/auth/scope-guard";
+import { ScopeDenied } from "@/components/scope-denied";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { SourceBadge } from "@/components/status-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Money, SectionCard } from "@/components/ui-bits";
+import { ProfitCoverageSection } from "@/app/(dashboard)/reports/coverage-section";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -32,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatNumber, formatVND, pct } from "@/lib/format";
+import { successRate } from "@/lib/queries/metrics";
 import {
   getProfitReport,
   parseBasis,
@@ -133,6 +140,11 @@ export default async function ReportsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const raw = await searchParams;
+  /*
+    Trang này CỐ Ý không dùng `requirePermission`: bốn tab có bốn quyền khác nhau và người chỉ có
+    một tab vẫn phải vào được. Nên cổng phạm vi áp bằng khoá của tab RỘNG NHẤT mà họ có, sau khi
+    đã biết họ có tab nào.
+  */
   const user = await requireUser();
   const allowed = {
     pnl: can(user, "reports:delivered"),
@@ -148,6 +160,9 @@ export default async function ReportsPage({
   // không có quyền tab đang xin → chuyển sang tab đầu tiên được phép; không được tab nào → về trang chủ
   const firstAllowed = (["pnl", "truth", "cash", "nominal"] as const).find((t) => allowed[t]);
   if (!firstAllowed) redirect("/?forbidden=1");
+  const { decision } = await requireResource("REPORTS", allowed.pnl ? "reports:delivered" : allowed.cash ? "reports:cash" : "reports:nominal");
+  // Báo cáo là số TỔNG HỢP toàn shop — không tách lại theo người được, nên phạm vi hẹp phải TỪ CHỐI.
+  if (decision.allow === "NONE") return <ScopeDenied title="Báo cáo lợi nhuận" reason={decision.reason} fix={decision.fix} />;
   const tab: "pnl" | "cash" | "nominal" | "truth" = allowed[wanted] ? wanted : firstAllowed;
   if (tab !== wanted && tabParam) redirect(`/reports?tab=${tab}`);
   const productParam = param(raw, "product");
@@ -184,7 +199,7 @@ export default async function ReportsPage({
       <PageHeader
         eyebrow="Tài chính"
         title="Báo cáo lợi nhuận"
-        description={`${period.label} · ${REPORT_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(current.orders)} đơn · ${formatNumber(current.successOrders)} giao thành công (${pct(current.successOrders, current.orders).toFixed(1)}%)`}
+        description={`${period.label} · ${REPORT_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(current.orders)} đơn · ${formatNumber(current.successOrders)} giao thành công${(() => { const r = successRate(current.successOrders, current.returned); return r === null ? "" : ` (GTC ${r.toFixed(1)}% trên đơn đã kết thúc)`; })()}`}
         actions={
           <Button asChild variant="outline" size="sm">
             <a href={`/api/export/report?${exportQuery}`}>
@@ -193,39 +208,51 @@ export default async function ReportsPage({
           </Button>
         }
       />
+      <FinanceNav />
+
+      {/* ĐỘ TIN CẬY ĐỨNG NGAY DƯỚI TIÊU ĐỀ: người đọc phải biết con số dựa trên gì TRƯỚC khi tin nó,
+          không phải sau khi đã cuộn qua ba bảng. Bọc Suspense để nó không giữ cả trang lại. */}
+      <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
+        <ProfitCoverageSection period={period} />
+      </Suspense>
 
       <Tabs value={tab}>
         <TabsList>
           {allowed.pnl ? (
             <TabsTrigger value="pnl" asChild>
-              <Link href={`/reports?tab=pnl${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=pnl${periodQuery}`} className="px-3">
                 <Boxes /> Theo đơn giao thành công
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.truth ? (
             <TabsTrigger value="truth" asChild>
-              <Link href={`/reports?tab=truth${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=truth${periodQuery}`} className="px-3">
                 <Wallet /> Sáu con số tiền
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.cash ? (
             <TabsTrigger value="cash" asChild>
-              <Link href={`/reports?tab=cash${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=cash${periodQuery}`} className="px-3">
                 <WalletCards /> Dòng tiền thực
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
           {allowed.nominal ? (
             <TabsTrigger value="nominal" asChild>
-              <Link href={`/reports?tab=nominal${periodQuery}`} className="px-3">
+              <NavLink href={`/reports?tab=nominal${periodQuery}`} className="px-3">
                 <Calculator /> Danh nghĩa theo mã hàng
-              </Link>
+              </NavLink>
             </TabsTrigger>
           ) : null}
         </TabsList>
       </Tabs>
+      {/* Hai báo cáo chuyên sâu ít mở hơn: vào từ đây thay vì chiếm hai mục menu. */}
+      <p className="-mt-3 text-[11.5px] text-muted-foreground">
+        Xem thêm: <NavLink href={`/reports/funnel${periodQuery ? `?${periodQuery.slice(1)}` : ""}`} className="font-medium text-primary hover:underline">Phễu bán hàng</NavLink> ·{" "}
+        <NavLink href="/reports/scenario" className="font-medium text-primary hover:underline">Mô phỏng kịch bản</NavLink>
+      </p>
 
       {tab !== "pnl" ? (
         <DataTableToolbar

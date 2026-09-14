@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { guardSecondApproval } from "@/lib/actions/approvals";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -19,7 +20,9 @@ const schema = z.object({
   defaultReturnRate: z.number().min(0).max(100),
   minFinishedOrders: z.number().int().min(1).max(10_000),
   overrides: z.record(z.string(), z.number().min(0).max(100)),
-  inventoryRiskPercent: z.number().min(0).max(100).default(5),
+  // MỘT mặc định duy nhất (`DEFAULT_PROFIT_ASSUMPTIONS`): trước đây ở đây ghi 5 trong khi hằng số
+  // ghi 10 — hai nơi nói hai số, và giá trị nào thắng tuỳ vào việc biểu mẫu có gửi trường này hay không.
+  inventoryRiskPercent: z.number().min(0).max(100).default(DEFAULT_PROFIT_ASSUMPTIONS.inventoryRiskPercent),
   taxPercent: z.number().min(0).max(50).default(1.5),
   otherCostPercentOfAds: z.number().min(0).max(50).default(1.1),
   failedToReturnPercent: z.number().min(0).max(100).default(0),
@@ -31,6 +34,21 @@ export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true 
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const before = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);
+  {
+    // Đổi giả định lợi nhuận là đổi cách ĐỌC mọi số liệu lịch sử cùng lúc — báo cáo tháng trước in
+    // lại sẽ ra con số khác mà không ai đụng vào dữ liệu của tháng đó.
+    const cong = await guardSecondApproval({
+      group: "BUSINESS_RULE_CHANGE",
+      action: "reports.assumptions",
+      entity: "SETTINGS",
+      entityId: PROFIT_ASSUMPTIONS_KEY,
+      summary: `Đổi giả định lợi nhuận`,
+      amount: null,
+      payload: { truoc: before, sau: parsed.data },
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
   await setSettingJson(PROFIT_ASSUMPTIONS_KEY, parsed.data);
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PROFIT_ASSUMPTIONS_KEY, detail: { before, after: parsed.data } });
   revalidatePath("/reports");

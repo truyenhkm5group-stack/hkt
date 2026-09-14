@@ -1,10 +1,26 @@
 "use server";
 
+import type { Actor } from "@/lib/constants/actor";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
+import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
+import { findPendingByCode, recordFullReturnInspection, recordInspection, recordInspectionBulk, recordItemInspection, toStationRow } from "@/lib/returns/inspection";
+import { BULK_INSPECT_PER_REQUEST, type StationRow } from "@/lib/returns/inspection-filter";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
+
+/**
+ * NGƯỜI KHO = KHOÁ TÀI KHOẢN + TÊN.
+ *
+ * Trước bản này các đường ghi chỉ truyền `user.email`, nên phiếu kiểm hoàn không nối được về một
+ * tài khoản: đổi email là mất dấu, và chỉ số "kiểm trong hạn" của phòng Kho đứng trên một ô chữ.
+ */
+function khoActor(user: { id: string; email: string; name: string }): Actor {
+  return { id: user.id, label: user.name || user.email };
+}
 
 export type ReturnReceiveResult = { ok: true; count: number; message: string } | { error: string };
 
@@ -14,35 +30,45 @@ const schema = z.object({
 });
 
 function revalidate() {
-  for (const path of ["/data-quality", "/products", "/inventory", "/inventory/planning", "/shipments", "/"]) revalidatePath(path);
+  for (const path of ["/data-quality", "/products", "/inventory", "/inventory/returns", "/inventory/planning", "/shipments", "/"]) revalidatePath(path);
 }
 
-/** Kho xác nhận đã nhận hàng hoàn → hàng được cộng lại tồn ERP. */
+/**
+ * Kho ghi nhận kiện hàng hoàn ĐÃ VỀ TỚI NƠI.
+ *
+ * KHÔNG cộng tồn ở bước này: hàng vào tồn khi có người ĐẾM (`submitReturnInspection`), theo số đếm
+ * được và chỉ phần còn bán lại được.
+ */
 export async function confirmReturnReceived(input: unknown): Promise<ReturnReceiveResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const { count, ids } = await markReturnReceived(parsed.data.ids, user.email, parsed.data.note);
-  if (!count) return { ok: true, count: 0, message: "Các vận đơn đã được xác nhận trước đó, không thay đổi gì." };
+  const { count, ids } = await markReturnReceived(parsed.data.ids, khoActor(user), parsed.data.note);
+  if (!count) return { ok: true, count: 0, message: "Các vận đơn đã được ghi nhận trước đó, không thay đổi gì." };
   await audit({ userId: user.id, userEmail: user.email, action: "return.received", entity: "shipments", entityId: ids.join(","), detail: { count, note: parsed.data.note ?? "" } });
   revalidate();
-  return { ok: true, count, message: `Đã xác nhận nhận ${count} kiện hàng hoàn về kho. Tồn kho đã được cộng lại.` };
+  return { ok: true, count, message: `Đã ghi nhận ${count} kiện hàng hoàn về kho, đang CHỜ ĐẾM. Hàng vào tồn sau khi kiểm đếm thực tế.` };
 }
 
-/** Huỷ xác nhận nhận hoàn khi ghi nhầm → hàng bị trừ khỏi tồn ERP trở lại. */
+/** Huỷ ghi nhận đã về khi bấm nhầm. Kiện đã đếm thì không huỷ được — sửa tồn phải qua phiếu điều chỉnh. */
 export async function cancelReturnReceived(input: unknown): Promise<ReturnReceiveResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
-  const { count } = await undoReturnReceived(parsed.data.ids);
-  if (!count) return { ok: true, count: 0, message: "Không có vận đơn nào đang ở trạng thái đã nhận." };
-  await audit({ userId: user.id, userEmail: user.email, action: "return.received.undo", entity: "shipments", entityId: parsed.data.ids.join(","), detail: { count } });
+  const { count, blocked } = await undoReturnReceived(parsed.data.ids);
+  if (!count) {
+    return blocked
+      ? { error: `${blocked} kiện đã được kiểm đếm nên không huỷ được — muốn sửa tồn thì lập phiếu điều chỉnh kho.` }
+      : { ok: true, count: 0, message: "Không có vận đơn nào đang ở trạng thái đã nhận." };
+  }
+  await audit({ userId: user.id, userEmail: user.email, action: "return.received.undo", entity: "shipments", entityId: parsed.data.ids.join(","), detail: { count, blocked } });
   revalidate();
-  return { ok: true, count, message: `Đã huỷ xác nhận ${count} vận đơn. Hàng trở lại trạng thái chưa về kho.` };
+  const tail = blocked ? ` Bỏ qua ${blocked} kiện đã kiểm đếm.` : "";
+  return { ok: true, count, message: `Đã huỷ ghi nhận ${count} vận đơn. Hàng trở lại trạng thái chưa về kho.${tail}` };
 }
 
 /** Số vận đơn xử lý mỗi lần bấm — cùng trần với thao tác chọn tay để không có đường vòng. */
@@ -68,7 +94,7 @@ export async function confirmAllReturnedReceived(input: unknown): Promise<Return
   const ids = await listPendingReturnedIds(BULK_LIMIT);
   if (!ids.length) return { ok: true, count: 0, message: "Không còn hàng hoàn nào chờ kho xác nhận." };
 
-  const { count, ids: done } = await markReturnReceived(ids, user.email, parsed.data.note);
+  const { count, ids: done } = await markReturnReceived(ids, khoActor(user), parsed.data.note);
   await audit({ userId: user.id, userEmail: user.email, action: "return.received.bulk", entity: "shipments", entityId: done.join(","), detail: { count, note: parsed.data.note ?? "" } });
   revalidate();
   const remaining = (await listPendingReturnedIds(BULK_LIMIT)).length;
@@ -77,7 +103,277 @@ export async function confirmAllReturnedReceived(input: unknown): Promise<Return
     count,
     remaining,
     message: remaining
-      ? `Đã xác nhận ${count} kiện hàng hoàn về kho. Còn ${remaining} kiện — bấm tiếp để xử lý nốt.`
-      : `Đã xác nhận ${count} kiện hàng hoàn về kho. Tồn kho đã được cộng lại, không còn kiện nào chờ.`,
+      ? `Đã ghi nhận ${count} kiện hàng hoàn về kho. Còn ${remaining} kiện — bấm tiếp để xử lý nốt.`
+      : `Đã ghi nhận ${count} kiện hàng hoàn về kho. Tất cả đang CHỜ ĐẾM — hàng vào tồn sau khi kiểm đếm.`,
+  };
+}
+
+// ───────────────────────── KIỂM ĐẾM MỘT KIỆN HÀNG HOÀN ─────────────────────────
+
+const inspectionSchema = z
+  .object({
+    shipmentId: z.string().min(1, "Thiếu vận đơn").max(100),
+    condition: z.enum(RETURN_CONDITIONS),
+    restockQty: z.coerce.number().int().min(0, "Số món không được âm").max(10_000),
+    unsellableQty: z.coerce.number().int().min(0, "Số món không được âm").max(10_000),
+    note: z.string().trim().max(1000).default(""),
+  })
+  .refine((v) => v.condition === "RESTOCKABLE" || v.note.length > 0, {
+    path: ["note"],
+    message: "Kết luận không bán được thì phải ghi rõ vì sao",
+  });
+
+export type InspectionActionResult = { ok: true; restocked: number; message: string } | { error: string };
+
+/**
+ * Kho ĐẾM XONG một kiện hàng hoàn.
+ *
+ * Đây là điểm DUY NHẤT hàng hoàn được cộng lại tồn — và chỉ đúng phần người đếm nói là còn bán được.
+ * Phần không bán được ghi thành số riêng để nhìn thấy được mức hao, thay vì giấu nó bằng cách lặng lẽ
+ * không cộng vào.
+ */
+export async function submitReturnInspection(input: unknown): Promise<InspectionActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = inspectionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const result = await recordInspection({ ...parsed.data, actor: khoActor(user) });
+  if ("error" in result) return { error: result.error };
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected",
+    entity: "shipments",
+    entityId: parsed.data.shipmentId,
+    detail: { condition: parsed.data.condition, restockQty: result.restocked, unsellableQty: parsed.data.unsellableQty, receiptId: result.receiptId ?? "" },
+  });
+  revalidate();
+
+  const restocked = result.restocked;
+  return {
+    ok: true,
+    restocked,
+    message: restocked
+      ? `Đã kiểm đếm: ${restocked} món vào lại tồn${parsed.data.unsellableQty ? `, ${parsed.data.unsellableQty} món không bán được` : ""}.`
+      : `Đã kiểm đếm: không món nào vào lại tồn (${parsed.data.unsellableQty} món không bán được).`,
+  };
+}
+
+/**
+ * MỘT KIỆN, KẾT LUẬN "NHẬN ĐỦ" — kể cả kiện nhiều mẫu mã.
+ *
+ * Tách khỏi `submitReturnInspection` (đường nhận MỘT CON SỐ) vì hai đường trả lời hai câu khác
+ * nhau: "tôi đếm được N món" cần biết N vào mẫu mã nào, còn "về đủ" thì danh sách kỳ vọng đã nói
+ * hết. Trộn hai thứ vào một hành động là để một ngày nào đó một con số tổng đi lạc vào nhánh không
+ * kiểm tra phân bổ.
+ */
+const fullReturnSchema = z.object({
+  shipmentId: z.string().min(1).max(100),
+  note: z.string().trim().max(500).default(""),
+  orderOnlyConfirmed: z.boolean().default(false),
+});
+
+export type FullReturnActionResult = { ok: true; restocked: number; variants: number; message: string } | { error: string };
+
+export async function submitFullReturn(input: unknown): Promise<FullReturnActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = fullReturnSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const r = await recordFullReturnInspection({ ...parsed.data, actor: khoActor(user) });
+  if ("error" in r) return { error: r.error };
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected",
+    entity: "shipments",
+    entityId: parsed.data.shipmentId,
+    detail: { condition: "RESTOCKABLE", full: true, restockQty: r.restocked, variants: r.variants, receiptId: r.receiptId ?? "", orderOnlyConfirmed: parsed.data.orderOnlyConfirmed },
+  });
+  revalidate();
+  return {
+    ok: true,
+    restocked: r.restocked,
+    variants: r.variants,
+    message: `Đã nhận đủ: ${r.restocked} món của ${r.variants} mẫu mã vào lại tồn.`,
+  };
+}
+
+const bulkInspectSchema = z.object({
+  /*
+    TRẦN NÀY LÀ GIỚI HẠN VẬN CHUYỂN, KHÔNG PHẢI GIỚI HẠN VIỆC.
+
+    Trình duyệt tự chia phần đang chọn thành các mẻ `BULK_INSPECT_PER_REQUEST` rồi gửi lần lượt, nên
+    người kho chọn bao nhiêu cũng xử lý hết trong một lần bấm. Trần vẫn phải có ở máy chủ: mỗi kiện
+    là một giao dịch riêng, và một lời gọi ôm cả nghìn kiện sẽ vượt hạn chờ SAU KHI đã ghi được một
+    phần — người bấm nhận lỗi mạng mà không biết phần nào đã ghi.
+
+    Dùng CHUNG một hằng số với trình duyệt để hai bên không thể lệch nhau.
+  */
+  shipmentIds: z
+    .array(z.string().min(1).max(100))
+    .min(1, "Chưa chọn kiện nào")
+    .max(BULK_INSPECT_PER_REQUEST, `Mỗi lượt gửi tối đa ${BULK_INSPECT_PER_REQUEST} kiện — màn hình tự chia mẻ, không cần bấm nhiều lần`),
+  condition: z.enum(RETURN_CONDITIONS),
+  note: z.string().trim().max(500).default(""),
+  /**
+   * Người đếm khẳng định ĐÃ ĐỐI CHIẾU THỰC TẾ với kiện mà danh sách món chỉ suy từ CẢ ĐƠN.
+   *
+   * Mặc định `false`, và phải là một ô tick tường minh trên màn hình. Kiện hoàn MỘT PHẦN có danh
+   * sách kỳ vọng bằng cả đơn; ghi "đủ" cho nó mà chưa ai mở ra xem là cộng vào tồn phần hàng khách
+   * vẫn đang giữ.
+   */
+  orderOnlyConfirmed: z.boolean().default(false),
+});
+
+export type BulkInspectionActionResult =
+  | {
+      ok: true;
+      done: number;
+      failed: { shipmentId: string; code: string | null; error: string }[];
+      /** Lý do bỏ qua, gộp theo số kiện — để một lượt 200 kiện không in 200 dòng lỗi giống nhau. */
+      skipped: { reason: string; count: number }[];
+      message: string;
+    }
+  | { error: string };
+
+/**
+ * ĐẾM HÀNG LOẠT nhiều kiện CÙNG một kết luận.
+ *
+ * Ca thật: mở một xe hàng hoàn, mười kiện còn nguyên seal, cùng "nhận đủ". Bắt bấm mười lần qua
+ * mười màn hình chính là lý do người ta bỏ luôn việc ghi nhận — và 453 kiện tồn đọng là hệ quả.
+ *
+ * KHÔNG có ô nhập số ở đường hàng loạt: "nhận đủ" nghĩa là ĐÚNG BẰNG số ERP đã xuất. Muốn khai một
+ * con số khác thì phải đếm từng kiện, vì đó là lúc người đếm thật sự nhìn vào trong kiện.
+ *
+ * "Nhận đủ" hàng loạt áp được cho CẢ kiện nhiều mẫu mã (`recordFullReturnInspection`): "đủ" là
+ * khẳng định theo TỪNG DÒNG nên phân bổ được xác định hoàn toàn, không còn gì để đoán. Kiện chưa
+ * ghép được đơn, kiện mã gốc ra nhiều đơn, và kiện có dòng hàng chưa ghép mẫu mã vẫn bị BỎ QUA và
+ * nêu lý do theo số kiện — không phân bổ, không ghi 0 lặng lẽ.
+ *
+ * Kiện nào hỏng thì báo tên kiện đó, không nuốt lỗi: 197/200 thành công mà im lặng về 3 kiện còn
+ * lại là cách chắc chắn nhất để ba kiện ấy biến mất khỏi sổ.
+ */
+export async function submitBulkInspection(input: unknown): Promise<BulkInspectionActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = bulkInspectSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { shipmentIds, condition, note, orderOnlyConfirmed } = parsed.data;
+  if (CONDITION_NEEDS_NOTE[condition] && !note) return { error: `Kết luận “${CONDITION_LABEL[condition]}” phải ghi rõ lý do` };
+
+  const r = await recordInspectionBulk(shipmentIds, condition, note, khoActor(user), orderOnlyConfirmed);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected.bulk",
+    entity: "shipments",
+    entityId: "",
+    detail: { condition, requested: shipmentIds.length, done: r.done, failed: r.failed.length, note, orderOnlyConfirmed },
+  });
+  revalidate();
+  const grouped = new Map<string, number>();
+  for (const f of r.failed) grouped.set(f.error, (grouped.get(f.error) ?? 0) + 1);
+  const skipped = [...grouped.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+  return {
+    ok: true,
+    done: r.done,
+    failed: r.failed,
+    skipped,
+    message: r.failed.length
+      ? `Đã kiểm ${r.done} kiện · ${r.failed.length} kiện KHÔNG xử lý được: ${skipped.map((x) => `${x.count} kiện — ${x.reason}`).join(" · ")}`
+      : `Đã kiểm ${r.done} kiện với kết luận “${CONDITION_LABEL[condition]}”`,
+  };
+}
+
+/**
+ * Trả về ĐÚNG hình mà trạm đếm đang vẽ (`StationRow`), không phải hình thô của tầng truy vấn.
+ *
+ * Trước bản này action trả `PendingInspection` (có `Date`) rồi trình duyệt ép kiểu sang hình của
+ * bảng — một lời khẳng định kiểu mà trình biên dịch không kiểm được, và kiện vừa bắn có mốc thời
+ * gian khác kiểu với mọi kiện khác trong danh sách.
+ */
+export type ScanResult = { ok: true; found: StationRow } | { error: string };
+
+/** QUÉT MÃ → ra đúng một kiện. Không thấy thì nói rõ vì sao, đừng để người đếm bắn lại vô ích. */
+export async function scanReturnByCode(code: string): Promise<ScanResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const q = String(code ?? "").trim();
+  if (!q) return { error: "Chưa có mã nào" };
+  const found = await findPendingByCode(q);
+  if (!found) return { error: `Không thấy kiện “${q}” trong danh sách chờ đếm — có thể kiện này chưa được bấm “kho đã nhận”, hoặc đã đếm rồi.` };
+  return { ok: true, found: toStationRow(found) };
+}
+
+/**
+ * ═══════════ KHO ĐẾM XONG MỘT KIỆN, GHI KẾT LUẬN THEO TỪNG MÓN ═══════════
+ *
+ * Khác `submitReturnInspection` (một kết luận cho cả kiện — đường đếm nhanh, giữ nguyên): ở đây
+ * mỗi món có kết luận riêng. Chỉ món kết luận "Đủ" mới sinh phiếu tái nhập, và vào đúng mẫu mã
+ * người kho đếm được.
+ *
+ * Quyền `inventory:write` như mọi thao tác chạm tồn. Ghi nhật ký kèm ĐÚNG những gì đã đếm, vì đây
+ * là bước duy nhất biến hàng hoàn thành tồn — về sau còn phải truy được ai đã kết luận thế nào.
+ */
+const itemInspectionSchema = z.object({
+  shipmentId: z.string().min(1).max(100),
+  /** Người kho xác nhận đã đối chiếu thực tế khi danh sách kỳ vọng chỉ suy từ cả đơn (ORDER_ONLY). */
+  orderOnlyConfirmed: z.boolean().default(false),
+  items: z
+    .array(
+      z.object({
+        expectedVariantId: z.string().max(100).nullable().default(null),
+        expectedSku: z.string().trim().max(120).default(""),
+        expectedName: z.string().trim().max(300).default(""),
+        expectedColor: z.string().trim().max(120).default(""),
+        expectedSize: z.string().trim().max(120).default(""),
+        expectedQty: z.number().int().min(0).max(10_000),
+        actualVariantId: z.string().max(100).nullable().default(null),
+        actualSku: z.string().trim().max(120).default(""),
+        actualQty: z.number().int().min(0).max(10_000),
+        condition: z.enum(ITEM_CONDITIONS),
+        note: z.string().trim().max(500).default(""),
+      }),
+    )
+    .min(1, "Phải đếm ít nhất một món")
+    .max(100, "Tối đa 100 dòng hàng mỗi kiện"),
+});
+
+export type ItemInspectionActionResult = { ok: true; restocked: number; hasDiscrepancy: boolean; message: string } | { error: string };
+
+export async function submitItemInspection(input: unknown): Promise<ItemInspectionActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = itemInspectionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const result = await recordItemInspection({ shipmentId: parsed.data.shipmentId, items: parsed.data.items, actor: khoActor(user), orderOnlyConfirmed: parsed.data.orderOnlyConfirmed });
+  if ("error" in result) return { error: result.error };
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "return.inspected.items",
+    entity: "shipments",
+    entityId: parsed.data.shipmentId,
+    detail: {
+      restocked: result.restocked,
+      hasDiscrepancy: result.hasDiscrepancy,
+      items: parsed.data.items.map((i) => `${i.expectedSku || i.expectedName}: ${i.condition} ${i.actualQty}/${i.expectedQty}`),
+    },
+  });
+  revalidate();
+
+  const lech = result.hasDiscrepancy ? " · CÓ LỆCH so với hàng kỳ vọng" : "";
+  return {
+    ok: true,
+    restocked: result.restocked,
+    hasDiscrepancy: result.hasDiscrepancy,
+    message: result.restocked ? `Đã đếm xong. ${result.restocked} món vào lại tồn${lech}.` : `Đã đếm xong. Không món nào vào lại tồn${lech}.`,
   };
 }

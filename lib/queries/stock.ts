@@ -1,6 +1,7 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
-import { getDb, schema, type Db } from "@/db";
-import { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 const oi = schema.orderItems;
 const o = schema.orders;
@@ -9,6 +10,22 @@ const ri = schema.stockReceiptItems;
 const r = schema.stockReceipts;
 const pv = schema.productVariants;
 const p = schema.products;
+const coo = schema.canonicalOrderOutcome;
+
+/**
+ * ───────────── BẢNG DẪN XUẤT SINH RA ĐỂ **NỐI**, KHÔNG PHẢI ĐỂ TRA TỪNG DÒNG ─────────────
+ *
+ * `ORDER_OUTCOME_FAST` là truy vấn con TƯƠNG QUAN. Dùng nó trong một câu gộp trên 2.495 dòng hàng
+ * thì Postgres gắn cả chuỗi dự phòng vào phép quét `orders`, và `EXPLAIN ANALYZE` trên production
+ * (10/09/2026) cho thấy chính phép quét đó mất **9.053ms cho 2.443 dòng** — chỉ 350 buffer, tức
+ * không phải đọc đĩa mà là biểu thức chạy trên từng dòng. Cả câu sổ kho: **39.960ms**, chạy hai lần
+ * mỗi lần mở trang chủ.
+ *
+ * Ở đây nối thẳng vào bảng dẫn xuất: một phép nối băm, tính một lần cho tất cả. Điều kiện tươi mới
+ * đặt NGAY TRONG phép nối, nên dòng cũ không khớp và `coalesce` rơi về biểu thức chuẩn — vẫn đúng
+ * luật "chậm chứ không sai", chỉ khác là phần chậm nay chỉ trả cho những dòng thật sự cũ.
+ */
+const OUTCOME_JOINED = sql`coalesce(${coo.outcome}, ${ORDER_OUTCOME_FAST})`;
 
 /**
  * SỔ KHO — mọi con số tồn của ERP đều ra từ một phương trình duy nhất:
@@ -45,7 +62,7 @@ const OUT_IN_TRANSIT = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.stage} in ('PICKE
  * Gồm đơn hoàn (theo kết quả đơn) và đơn huỷ sau khi đã xuất — chủ shop yêu cầu xử lý như hàng hoàn.
  */
 const OUT_AWAITING_RETURN = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is null
-  and (${RETURN_PENDING_WAREHOUSE} or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
+  and ((${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null) or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
   and not ${VTP_DESTROYED})`;
 
 /** Hàng hoàn kho ĐÃ xử lý (đã có phiếu tái nhập) — dùng để đối chiếu với số thực nhập, ra phần hụt. */
@@ -70,13 +87,24 @@ export function variantSalesSubquery(db: Db) {
       /** Đã chốt đơn, hàng còn trong kho — trừ khỏi tồn KHẢ DỤNG, không trừ khỏi tồn thực tế. */
       reserved: sql<number>`coalesce(sum(${QTY}) filter (where ${RESERVED_IN_WAREHOUSE}), 0)`.as("out_reserved"),
       /** Giao thành công theo TIỀN (ORDER_OUTCOME) — chỉ để đối chiếu, KHÔNG dùng tính tồn. */
-      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`.as("sold_delivered"),
+      delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} = 'DELIVERED'), 0)`.as("sold_delivered"),
       /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
-      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
+      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
-    .leftJoin(s, eq(s.orderId, o.id))
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    // Kết quả đơn lấy bằng PHÉP NỐI, không bằng truy vấn con cho từng dòng — xem OUTCOME_JOINED.
+    .leftJoin(
+      coo,
+      and(
+        eq(coo.orderId, o.id),
+        sql`coalesce(${coo.shipmentId}, '') = coalesce(${s.id}, '')`,
+        eq(coo.logicVersion, CANONICAL_OUTCOME_VERSION),
+        sql`${coo.computedAt} >= ${o.updatedAt}`,
+        sql`(${s.id} is null or ${coo.computedAt} >= ${s.updatedAt})`,
+      ),
+    )
     .groupBy(oi.variantId)
     .as("vsales");
 }
@@ -108,6 +136,35 @@ export function variantReceiptsSubquery(db: Db) {
 
 /** Giá nhập gần nhất ghi trên phiếu (nếu có), dùng thay giá vốn Pancake khi Pancake = 0 */
 export const LAST_RECEIPT_COST = sql<number>`(select ri2.unit_cost from stock_receipt_items ri2 join stock_receipts r2 on r2.id = ri2.receipt_id where ri2.variant_id = ${pv.id} and ri2.unit_cost > 0 and r2.kind = 'RECEIPT' order by r2.received_at desc, r2.created_at desc limit 1)`;
+
+/**
+ * CÙNG MỘT CON SỐ với `LAST_RECEIPT_COST`, nhưng tính MỘT LẦN CHO MỖI MẪU MÃ thay vì một lần cho
+ * mỗi dòng đọc nó.
+ *
+ * BẰNG CHỨNG (EXPLAIN ANALYZE, bộ dữ liệu 12.894 đơn — xem docs/erp-performance-p0-report.md):
+ * dùng ở cấp DÒNG ĐƠN HÀNG, truy vấn con tương quan này chạy 4.260 lần, mỗi lần 4,8 ms, ngốn
+ * 10.350.750 khối đệm — 99,3% toàn bộ chi phí của truy vấn "Hiệu quả mẫu mã". Bộ tối ưu chọn quét
+ * từ phía PHIẾU KHO nên vòng lặp trong chạy 2.556.000 lượt (600 phiếu × 4.260 dòng): chi phí tăng
+ * theo TÍCH của số dòng đơn và số phiếu kho.
+ *
+ * `distinct on (variant_id)` quét bảng phiếu đúng MỘT LẦN rồi để các truy vấn nối vào. Thứ tự sắp
+ * xếp và bộ lọc giữ y nguyên (`unit_cost > 0`, `kind = 'RECEIPT'`, mới nhất trước) nên giá trị
+ * từng mẫu mã không đổi một đồng — khoá bằng tests/metric-shape-consistency.test.ts.
+ *
+ * Nối vào bằng `pv.id` (KHÔNG phải `order_items.variant_id`): mẫu mã đã bị xoá khỏi ERP thì
+ * `LAST_RECEIPT_COST` trả NULL, và bản nối phải trả NULL y hệt.
+ */
+export function variantLastCostSubquery(db: Db) {
+  return db
+    .selectDistinctOn([ri.variantId], { variantId: ri.variantId, lastCost: ri.unitCost })
+    .from(ri)
+    .innerJoin(r, eq(r.id, ri.receiptId))
+    .where(sql`${ri.unitCost} > 0 and ${r.kind} = 'RECEIPT'`)
+    .orderBy(ri.variantId, desc(r.receivedAt), desc(r.createdAt))
+    .as("vlastcost");
+}
+
+export type VariantLastCost = ReturnType<typeof variantLastCostSubquery>;
 
 export type StockAggregates = ReturnType<typeof variantSalesSubquery>;
 export type ReceiptAggregates = ReturnType<typeof variantReceiptsSubquery>;
@@ -237,11 +294,14 @@ export async function stockRiskSummary() {
   const receiptsAgg = variantReceiptsSubquery(db);
   // HÀNG HỤT: đã lập phiếu tái nhập nhưng đếm được ít hơn số đã xuất — hỏng, mất, hoặc không
   // bán lại được. Đây là số ĐO ĐƯỢC từ chênh lệch phiếu, không phải ước lượng.
-  const [shrink] = await db
-    .select({ n: sql<number>`coalesce(sum(${stockShrinkageExpr(salesAgg, receiptsAgg)}), 0)` })
-    .from(pv)
-    .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
-    .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id));
+  // Cùng dạng truy vấn với `vsales`, cùng bệnh JIT: 8.578ms → 26ms khi tắt. Xem `chayKhongJit`.
+  const [shrink] = await chayKhongJit(db, (tx) =>
+    tx
+      .select({ n: sql<number>`coalesce(sum(${stockShrinkageExpr(salesAgg, receiptsAgg)}), 0)` })
+      .from(pv)
+      .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
+      .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id)),
+  );
   const rows = plan.rows;
   const sum = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((total, r) => total + pick(r), 0);
   return {

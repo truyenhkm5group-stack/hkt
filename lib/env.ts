@@ -12,8 +12,21 @@ export const env = {
   get appUrl() {
     return read("APP_URL", "http://localhost:3000").replace(/\/$/, "");
   },
+  /**
+   * Khoá ký phiên đăng nhập.
+   *
+   * Giá trị dự phòng chỉ dùng cho máy của người viết code. Trên PRODUCTION mà thiếu biến này thì
+   * mọi phiên đăng nhập được ký bằng một chuỗi NẰM CÔNG KHAI TRONG KHO MÃ — ai đọc kho cũng tự ký
+   * được một cookie quản trị. Thà app không khởi động còn hơn khởi động với cửa mở: hỏng thì thấy
+   * ngay, còn cửa mở thì không ai thấy.
+   */
   get authSecret() {
-    return read("AUTH_SECRET", "dev-secret-change-me-please-32-chars-min");
+    const value = read("AUTH_SECRET");
+    if (value) return value;
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Thiếu AUTH_SECRET trên production — phiên đăng nhập sẽ được ký bằng khoá công khai trong kho mã. Đặt biến này trong .env của máy chủ.");
+    }
+    return "dev-secret-change-me-please-32-chars-min";
   },
   get cronSecret() {
     return read("CRON_SECRET");
@@ -70,6 +83,60 @@ export const env = {
       return readInt("FACEBOOK_USD_VND", 25_500);
     },
   },
+  /** AI Copilot. Khoá API đọc bởi chính SDK (OPENAI_API_KEY / ANTHROPIC_API_KEY) — không đi qua đây, không log. */
+  ai: {
+    /** `auto` (mặc định) · `openai` · `anthropic` · `off`. Chọn model ở `lib/ai/router.ts`. */
+    get provider() {
+      return read("AI_PROVIDER", "auto");
+    },
+    /** Ghi đè model bậc copilot của provider đang dùng. Trống = theo bảng trong router. */
+    get model() {
+      return read("AI_MODEL");
+    },
+    /** Trống = theo bậc (routine low · copilot medium · analysis high). */
+    get effort() {
+      return read("AI_EFFORT");
+    },
+    get maxToolRounds() {
+      return readInt("AI_MAX_TOOL_ROUNDS", 6);
+    },
+    get openaiConfigured() {
+      return Boolean(read("OPENAI_API_KEY"));
+    },
+    get anthropicConfigured() {
+      return Boolean(read("ANTHROPIC_API_KEY") || read("ANTHROPIC_AUTH_TOKEN"));
+    },
+    get configured() {
+      return this.openaiConfigured || this.anthropicConfigured;
+    },
+  },
+  /**
+   * SePay — cổng Open Banking đẩy biến động số dư realtime về ERP.
+   *
+   * HMAC là đường chính (`SEPAY_WEBHOOK_SECRET`). API key chỉ là đường lùi cho lúc dựng thử: nó
+   * chứng minh nguồn gửi nhưng KHÔNG phát hiện nội dung bị sửa, nên khi đã khai secret HMAC thì
+   * route từ chối hạ cấp xuống API key.
+   */
+  sepay: {
+    get webhookSecret() {
+      return read("SEPAY_WEBHOOK_SECRET");
+    },
+    get webhookApiKey() {
+      return read("SEPAY_WEBHOOK_API_KEY");
+    },
+    /**
+     * Token API v2 (my.sepay.vn → Cài đặt công ty → API Access).
+     *
+     * KHÁC secret webhook: secret dùng để XÁC MINH gói tin SePay đẩy sang, token này dùng để ERP
+     * CHỦ ĐỘNG hỏi lại SePay. Thiếu token thì đường đối chiếu nằm im, đường realtime vẫn chạy.
+     */
+    get apiToken() {
+      return read("SEPAY_API_TOKEN");
+    },
+    get apiBaseUrl() {
+      return read("SEPAY_API_BASE_URL", "https://userapi.sepay.vn/v2").replace(/\/$/, "");
+    },
+  },
   viettelPost: {
     get apiKey() {
       return read("VIETTELPOST_API_KEY");
@@ -97,5 +164,8 @@ export function integrationStatus() {
     facebook: Boolean(env.facebook.accessToken),
     pancakeWebhook: Boolean(env.pancake.webhookSecret),
     viettelPostWebhook: Boolean(env.viettelPost.webhookSecret),
+    sepayWebhook: Boolean(env.sepay.webhookSecret || env.sepay.webhookApiKey),
+    sepayWebhookSigned: Boolean(env.sepay.webhookSecret),
+    sepayApi: Boolean(env.sepay.apiToken),
   };
 }

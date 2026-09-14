@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart } from "lucide-react";
+import { AlertTriangle, ClipboardList, Download, Factory, PackageSearch, ShoppingCart, Truck, Wallet } from "lucide-react";
 import { CoverPicker } from "@/app/(dashboard)/inventory/planning/cover-picker";
 import { PlanningForm } from "@/app/(dashboard)/inventory/planning/planning-form";
 import { MetricCard } from "@/components/metric-card";
@@ -12,6 +12,7 @@ import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE } from "@/lib/constants/planning";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
+import { SlowMovingSection } from "@/app/(dashboard)/inventory/planning/slow-moving-section";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Kế hoạch đặt hàng sản xuất" };
@@ -47,6 +48,12 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" size="sm">
               <Link href="/inventory/planning/orders"><ClipboardList className="size-4" /> Bảng đặt hàng đã chốt</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/inventory/purchasing"><Truck className="size-4" /> Mua hàng & xưởng</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/inventory/decisions"><Wallet className="size-4" /> Quyết định vốn tồn kho</Link>
             </Button>
             <Button asChild variant="outline" size="sm">
               <a href={`/api/export/planning?ngay=${used.coverDays}${used.countIncoming ? "" : "&hoan=0"}`}><Download className="size-4" /> Xuất CSV</a>
@@ -141,10 +148,37 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                     <TableCell className="text-right tabular-nums">{formatNumber(r.sold30)}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.velocity.toFixed(1)}</TableCell>
                     <TableCell className="text-right tabular-nums">{r.daysOfCover === null ? "—" : `${Math.floor(r.daysOfCover)} ngày`}</TableCell>
-                    <TableCell className="text-xs">{fmtDate(r.stockOutDate)}</TableCell>
+                    <TableCell className="text-xs">
+                      {fmtDate(r.stockOutDate)}
+                      {/* HẠN ĐẶT: lùi từ ngày hết hàng về đúng thời gian sản xuất. Quá khứ = đã muộn, vẫn hiện. */}
+                      {r.reorderByDate ? (
+                        <span
+                          className={cn("block text-[10px]", new Date(`${r.reorderByDate}T00:00:00Z`).getTime() < Date.now() ? "font-semibold text-rose-600 dark:text-rose-400" : "text-muted-foreground")}
+                          title={`Phải đặt trước ngày này để lô mới về kịp (thời gian sản xuất ${r.leadTimeDays} ngày)`}
+                        >
+                          {new Date(`${r.reorderByDate}T00:00:00Z`).getTime() < Date.now() ? "đã quá hạn đặt " : "đặt trước "}
+                          {fmtDate(r.reorderByDate)}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.leadTimeDemand)}</TableCell>
                     <TableCell className="text-right tabular-nums" title="Nhu cầu (SX + đủ bán) + tồn an toàn">{formatNumber(r.target)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-bold">{r.suggested ? formatNumber(r.suggested) : <span className="text-muted-foreground">0</span>}</TableCell>
+                    <TableCell className="text-right tabular-nums font-bold">
+                      {r.suggested ? (
+                        <span
+                          title={
+                            (r.moqApplied ? `Nhu cầu thật là ${formatNumber(r.suggestedBeforeMoq)}, nâng lên vì xưởng nhận từ ${formatNumber(r.suggested)} cái. ` : "") +
+                            (r.velocityTrimmed ? `Tốc độ bán đã bỏ một ngày đột biến (${formatNumber(r.peakDayQty)} cái/ngày) — nếu tính cả ngày đó thì đề xuất sẽ cao hơn nhiều.` : "")
+                          }
+                        >
+                          {formatNumber(r.suggested)}
+                          {r.moqApplied ? <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">(tối thiểu)</span> : null}
+                          {r.velocityTrimmed ? <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">*</span> : null}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right"><Money value={r.orderCost} className={r.orderCost ? "" : "text-muted-foreground"} /></TableCell>
                     <TableCell><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[r.status])}>{PLAN_STATUS_LABEL[r.status]}</span></TableCell>
                   </TableRow>
@@ -186,6 +220,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           </div>
         </SectionCard>
       ))}
+      {/* Đối trọng: bảng trên nói chỗ cần đổ thêm tiền, bảng này nói chỗ tiền đang nằm chết. */}
+      <SlowMovingSection />
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
       <p className="text-xs text-muted-foreground">
         Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu. Cột “Tồn Pancake” để đối chiếu — lệch nhiều nghĩa là phiếu nhập trên ERP chưa khớp kho thực tế.

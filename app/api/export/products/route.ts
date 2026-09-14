@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { can, getCurrentUser } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/format";
 import { listProducts, listWarehouses, PRODUCT_SORTABLE } from "@/lib/queries/products";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -12,8 +12,10 @@ function csvCell(value: unknown) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return new Response("Unauthorized", { status: 401 });
+  // Cùng quyền với trang Sản phẩm & tồn kho.
+  const user = await getCurrentUser();
+  if (!user) return new Response("Chưa đăng nhập", { status: 401 });
+  if (!(can(user, "products:view"))) return new Response("Không có quyền xuất dữ liệu này", { status: 403 });
   const sp: SearchParams = {};
   request.nextUrl.searchParams.forEach((value, key) => {
     const existing = sp[key];

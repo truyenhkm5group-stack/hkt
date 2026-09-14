@@ -11,7 +11,7 @@
 import "dotenv/config";
 import { env } from "@/lib/env";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
-import { normalizeChatWebhook } from "@/lib/ai/agents/sales/ingest";
+import { normalizeChatWebhook } from "@/lib/ai-workforce/agents/sales/ingest";
 import { CHAT_FIELD_MAP } from "@/lib/constants/sales-ingest";
 
 const keysOnly = process.argv.includes("--keys");

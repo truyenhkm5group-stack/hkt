@@ -1,9 +1,11 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
+import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { RECONCILIATION_RULES, RECONCILIATION_RULE_ORDER, SEVERITY_ORDER, type IssueEntity, type IssueSeverity, type ReconciliationRuleKey } from "@/lib/constants/reconciliation";
 import { CARRIER_DOCUMENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 
 /**
  * ───────────── TRUNG TÂM ĐIỀU KHIỂN CHẤT LƯỢNG DỮ LIỆU ─────────────
@@ -64,6 +66,39 @@ export type ControlTower = {
 function ruleSql(rule: ReconciliationRuleKey): SQL {
   const overdueDays = COD_OVERDUE_DAYS;
   switch (rule) {
+    case "COGS_BASIS_UNVERIFIED":
+      // Ba căn cứ yếu, ba câu khác nhau — và chỉ dòng ĐÃ chốt lại (`trued_up_at`) mới thôi bị nhắc.
+      return sql`select coalesce(o.system_id::text, o.id) as code,
+          case m.cogs_basis
+            when 'RECEIPT_AFTER' then 'giá vốn ' || to_char(m.recognized_cogs, 'FM999,999,999') || 'đ suy ngược từ phiếu nhập lập sau ngày giao'
+            when 'PROVISIONAL' then 'giá vốn ' || to_char(m.recognized_cogs, 'FM999,999,999') || 'đ tạm tính theo giá Pancake / giá nhập mẫu mã, chưa có phiếu nhập kho'
+            else 'đơn đã giao mà CHƯA BIẾT giá vốn — báo cáo đang tính 0'
+          end as evidence,
+          m.recognized_at as at, o.id as entity_id
+        from canonical_order_outcome m
+        join orders o on o.id = m.order_id
+        where m.outcome::text = 'DELIVERED' and m.cogs_basis in ('RECEIPT_AFTER', 'PROVISIONAL', 'NONE')`;
+    case "ORDER_WITH_MULTIPLE_SHIPMENTS":
+      /**
+       * NHIỀU LẦN GỬI KHÔNG TỰ ĐỘNG LÀ LỖI.
+       *
+       * Từ 10/09/2026 một đơn được phép có nhiều lần gửi: giao thất bại rồi gửi lại, huỷ rồi tạo
+       * lại, gửi hàng thay thế. Báo đỏ mọi ca như vậy là dạy người dùng bỏ qua cảnh báo.
+       *
+       * Chỉ báo trường hợp thật sự đáng ngờ: **hai lần gửi CÙNG ĐANG SỐNG** — tức đơn đang được gửi
+       * hai lần cùng lúc. Đó hoặc là ghép nhầm vận đơn, hoặc là hai gói hàng thật đang trên đường
+       * tới cùng một khách, và cả hai đều tốn tiền.
+       *
+       * Đếm theo ĐƠN: một đơn ba lần gửi là MỘT vấn đề, không phải ba.
+       */
+      return sql`select coalesce(o.system_id::text, o.id) as code,
+          count(s.id)::text || ' lần gửi đang cùng chạy cho một đơn' as evidence,
+          max(s.updated_at) as at, o.id as entity_id
+        from orders o
+        join shipments s on s.order_id = o.id
+        where s.stage not in ('CANCELLED','RETURNED','DELIVERED')
+        group by o.id, o.system_id
+        having count(s.id) > 1`;
     case "SHIPMENT_STATE_DRIFT":
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'ảnh chụp ' || s.stage::text || ' · lịch sử ' || ev.normalized_stage::text as evidence,
@@ -115,7 +150,11 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'người nhận ' || coalesce(nullif(s.receiver_name, ''), '(trống)') || ' · ' || coalesce(nullif(s.receiver_phone, ''), '(không SĐT)') as evidence,
           s.updated_at as at, s.id as entity_id
-        from shipments s where s.order_id is null`;
+        from shipments s
+        where s.order_id is null
+          -- Vận đơn CHIỀU HOÀN là dòng riêng không có đơn — đúng quy ước, không phải sự cố.
+          and not (s.order_reference is not null and exists (select 1 from shipments g where g.vtp_order_number = s.order_reference))
+          and not (${sql.raw(sqlIsTestTracking("s.vtp_order_number"))})`;
     case "DUPLICATE_TRACKING":
       return sql`select s.tracking_code as code,
           count(*)::text || ' dòng cùng một mã vận đơn' as evidence,
@@ -154,9 +193,53 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           'Pancake ' || o.stage::text || ' · Viettel Post ' || s.stage::text as evidence,
           s.updated_at as at, s.id as entity_id
         from shipments s join orders o on o.id = s.order_id
-        where (o.stage in ('DELIVERED','PAID') and s.stage in ('RETURNING','RETURNED'))
+        where ((o.stage in ('DELIVERED','PAID') and s.stage in ('RETURNING','RETURNED'))
            or (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED')
-           or (o.stage in ('CANCELLED','DELETED') and s.stage in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT'))`;
+           or (o.stage in ('CANCELLED','DELETED') and s.stage in ('DELIVERED','OUT_FOR_DELIVERY','IN_TRANSIT')))
+          -- KHONG phai xung dot: VTP ghi "Giao thanh cong" cho CHIEU DI roi hang quay ve theo van don
+          -- hoan, con Pancake ghi ket qua CUOI la hoan. Hai ben noi ve hai viec khac nhau va deu dung;
+          -- ORDER_OUTCOME da ket luan HOAN nho chinh van don hoan do.
+          and not (o.stage in ('RETURNING','PARTIAL_RETURN','RETURNED') and s.stage = 'DELIVERED'
+                   and exists (select 1 from shipments leg where leg.order_reference = s.vtp_order_number))`;
+    case "NEGATIVE_STOCK":
+      // Tồn = phiếu kho − đã xuất (mốc ĐVVC). Chỉ xét mẫu mã ĐÃ có phiếu nhập: mẫu mã chưa có phiếu
+      // nào thì con số không phải "âm" mà là "chưa biết", và đã có luật riêng bên dưới.
+      return sql`select coalesce(nullif(v.sku, ''), v.id) as code,
+          'tồn ' || (coalesce(k.nhap, 0) - coalesce(x.xuat, 0))::text || ' · đã nhập ' || coalesce(k.nhap, 0)::text
+            || ' · đã xuất ' || coalesce(x.xuat, 0)::text as evidence,
+          now() as at, v.id as entity_id
+        from product_variants v
+        join (select ri.variant_id, sum(ri.quantity) as nhap
+              from stock_receipt_items ri group by 1) k on k.variant_id = v.id
+        left join (select oi.variant_id, sum(oi.quantity) as xuat
+                   from order_items oi
+                   -- ĐÃ XUẤT đo bằng EXISTS: một đơn gửi lại nhiều lần vẫn chỉ xuất kho MỘT lần
+                   -- hàng đó; phép nối sẽ nhân số lượng lên và báo tồn âm giả.
+                   where exists (select 1 from shipments sh where sh.order_id = oi.order_id
+                                 and (sh.picked_up_at is not null
+                                      or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))
+                   group by 1) x on x.variant_id = v.id
+        where (coalesce(k.nhap, 0) - coalesce(x.xuat, 0)) < 0`;
+    case "STOCK_MISSING_OPENING_BALANCE":
+      return sql`select coalesce(nullif(v.sku, ''), v.id) as code,
+          'đã xuất ' || x.xuat::text || ' món nhưng chưa có phiếu nhập nào' as evidence,
+          now() as at, v.id as entity_id
+        from product_variants v
+        join (select oi.variant_id, sum(oi.quantity) as xuat
+              from order_items oi
+              -- Cùng lý do với NEGATIVE_STOCK: đếm theo ĐƠN có xuất kho, không theo số lần gửi.
+              where exists (select 1 from shipments sh where sh.order_id = oi.order_id
+                            and (sh.picked_up_at is not null
+                                 or sh.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))
+              group by 1) x on x.variant_id = v.id
+        where x.xuat > 0
+          and not exists (select 1 from stock_receipt_items ri where ri.variant_id = v.id)`;
+    case "EXPENSE_NEEDS_ALLOCATION_REVIEW":
+      return sql`select x.description as code,
+          x.category::text || ' · ' || x.amount::text || 'đ · ghi ngày ' ||
+            to_char(x.occurred_at at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
+          x.occurred_at as at, x.id as entity_id
+        from expenses x where x.needs_allocation_review = true`;
     case "AMBIGUOUS_ORDER_SHIPMENT_MAPPING":
       // Cùng SĐT, nhiều vận đơn chưa có mã ⇒ bằng chứng của ĐVVC không phân biệt được đơn nào ứng
       // với vận đơn nào. Nêu ra để người xem lại, không để máy đoán.
@@ -187,12 +270,15 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         from webhook_events w
         where w.status = 'FAILED' or (w.status = 'IGNORED' and w.error ilike '%không tìm thấy%')`;
     case "COD_OVERDUE_UNPAID":
-      return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
-          'thu hộ ' || coalesce(s.cod_amount, 0)::text || 'đ · giao ' || to_char(coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
-          coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) as at, s.id as entity_id
-        from shipments s
-        where s.stage = 'DELIVERED' and coalesce(s.cod_amount, 0) > 0 and coalesce(s.cod_collected, 0) = 0
-          and coalesce(s.delivered_at, s.vtp_status_date, s.updated_at) < now() - (${overdueDays} * interval '1 day')`;
+      // Đi qua SHIPMENT_DELIVERED (ORDER_OUTCOME), không qua stage thô: vận đơn 501 nhưng có chiều
+      // hoàn / sửa doanh thu sau giao là ĐƠN HOÀN — không có tiền để đòi (nợ ảo). Biểu thức chuẩn
+      // gọi bảng bằng đúng tên nên câu này KHÔNG đặt bí danh cho shipments/orders.
+      return sql`select coalesce(shipments.vtp_order_number, shipments.tracking_code, shipments.id) as code,
+          'thu hộ ' || coalesce(shipments.cod_amount, 0)::text || 'đ · giao ' || to_char(coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) at time zone 'Asia/Ho_Chi_Minh', 'DD/MM/YYYY') as evidence,
+          coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) as at, shipments.id as entity_id
+        from shipments left join orders on orders.id = shipments.order_id
+        where ${SHIPMENT_DELIVERED} and coalesce(shipments.cod_amount, 0) > 0 and coalesce(shipments.cod_collected, 0) = 0
+          and coalesce(shipments.delivered_at, shipments.vtp_status_date, shipments.updated_at) < now() - (${overdueDays} * interval '1 day')`;
     case "MISSING_PRODUCT_MAPPING":
       return sql`select coalesce(nullif(i.sku, ''), i.product_name, i.id) as code,
           'đơn ' || coalesce(nullif(o.custom_id, ''), o.id) || ' · ' || coalesce(nullif(i.product_name, ''), '(không tên)') as evidence,

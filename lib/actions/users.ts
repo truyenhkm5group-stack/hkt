@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { can, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
+import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
+import { can, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
 import { setSettingJson } from "@/lib/settings";
 import { changePasswordSchema, createUserSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
 
@@ -126,6 +127,12 @@ export async function updateUserPermissions(input: unknown): Promise<ActionResul
   if (target.role === "ADMIN") return { error: "Quản trị viên luôn có toàn quyền; đổi vai trò nếu muốn giới hạn" };
   const next = permissions ? [...new Set(permissions)].sort() : null;
   await db.update(schema.users).set({ permissions: next }).where(eq(schema.users.id, id));
+  // Ghi lại bộ khoá quyền TẠI THỜI ĐIỂM LƯU. Khoá sinh ra sau này chưa từng được hỏi nên sẽ áp mẫu
+  // của vai trò — nếu không, người có quyền tuỳ chỉnh bị đóng băng và mọi module mới đều vô hình.
+  const snapshots = await loadPermissionSnapshots();
+  if (next) snapshots[id] = [...(ALL_PERMISSIONS as string[])].sort();
+  else delete snapshots[id];
+  await setSettingJson(USER_PERMISSION_SNAPSHOT_KEY, snapshots);
   await audit({ userId: user.id, userEmail: user.email, action: "USER_PERMISSIONS", entity: "USER", entityId: id, detail: { email: target.email, before: target.permissions ?? null, after: next } });
   revalidatePath("/settings/users");
   revalidatePath("/", "layout");

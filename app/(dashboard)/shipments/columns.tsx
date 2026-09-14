@@ -1,12 +1,51 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
+import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
+import { CopyButton } from "@/components/misc";
 import { CodStatusBadge, ShipmentStageBadge } from "@/components/status-badge";
+import { VtpTrackingLink } from "@/components/vtp-tracking-link";
 import { Money } from "@/components/ui-bits";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { ShipmentListRow } from "@/lib/queries/shipments";
+import type { ShipmentProductCodes } from "@/lib/queries/product-code";
+import { ProductCell } from "@/app/(dashboard)/shipments/product-cell";
+import { CareRowActions } from "@/app/(dashboard)/shipments/care-row-actions";
+
+/**
+ * Cột dựng bằng HÀM chứ không phải hằng số: cột mã hàng và cột xử lý cần dữ liệu chỉ có ở phía
+ * máy chủ (mã hàng của đúng trang đang xem, danh sách nhân sự, quyền thao tác). Truyền qua tham số
+ * thay vì nhét vào từng dòng dữ liệu — dòng vận đơn không nên phình ra vì nhu cầu hiển thị.
+ */
+export function buildShipmentColumns(opts: {
+  productCodes: Record<string, ShipmentProductCodes>;
+  staff: { id: string; name: string }[];
+  canManage: boolean;
+}): ColumnDef<ShipmentListRow, unknown>[] {
+  return [
+    {
+      id: "product",
+      header: "Mã hàng",
+      cell: ({ row }) => <ProductCell data={opts.productCodes[row.original.id]} />,
+    },
+    {
+      id: "care",
+      header: "Xử lý",
+      cell: ({ row }) => (
+        <CareRowActions
+          shipmentId={row.original.id}
+          tracking={row.original.vtpOrderNumber ?? row.original.trackingCode ?? row.original.id}
+          staff={opts.staff}
+          canManage={opts.canManage}
+          isReturned={row.original.outcome === "RETURNED" || row.original.outcome === "RETURNED_BY_RULE"}
+        />
+      ),
+    },
+    ...shipmentColumns,
+  ];
+}
 
 export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
   {
@@ -18,12 +57,36 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       const number = s.vtpOrderNumber ?? s.trackingCode;
       return (
         <div className="min-w-[130px]">
-          <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
-            {number ?? "—"}
-          </RowLink>
-          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+          {/*
+            NÚT SAO CHÉP NGAY CẠNH MÃ. Người trực đơn phải dán mã vận đơn sang Viettel Post / chat
+            hàng chục lần mỗi ngày; bôi đen một chuỗi 13 ký tự trong ô hẹp là thao tác dễ trượt và
+            dễ thiếu ký tự. `CopyButton` đã có `stopPropagation` nên bấm nó KHÔNG mở dòng.
+          */}
+          <div className="flex items-center gap-0.5">
+            <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
+              {number ?? "—"}
+            </RowLink>
+            {number ? <CopyButton value={number} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+            {/*
+              TRA CỨU THẲNG TRÊN VIETTELPOST — cùng hàm dựng địa chỉ với nút ở trang chi tiết, nên
+              hai nơi luôn mở ra đúng một trang. Chỉ hiện khi có MÃ VIETTEL POST: mã đang vẽ ở trên
+              có thể là `tracking_code` của Pancake, tra bằng nó thì trang ĐVVC báo không tìm thấy.
+            */}
+            <VtpTrackingLink code={s.vtpOrderNumber} className="size-5 shrink-0 [&_svg]:size-3" />
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <Truck className="size-3.5 shrink-0" />
             <span className="truncate">{s.carrier || "ĐVVC"}</span>
+            {/* Từ 10/09/2026 một đơn có thể có nhiều lần gửi. Chỉ hiện khi KHÁC lần đầu — gắn nhãn
+                "lần 1" cho mọi dòng chỉ làm loãng bảng mà không thêm thông tin nào. */}
+            {s.attemptNo && s.attemptNo > 1 ? (
+              <span className="rounded bg-primary/10 px-1 font-semibold text-primary" title="Đơn này đã được gửi lại">
+                lần {s.attemptNo}
+              </span>
+            ) : null}
+            {s.direction && s.direction !== "OUTBOUND" ? (
+              <span className="rounded border px-1">{SHIPMENT_DIRECTION_LABEL[s.direction] ?? s.direction}</span>
+            ) : null}
           </div>
         </div>
       );
@@ -71,9 +134,14 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       return (
         <div className="min-w-[150px] max-w-[220px]">
           <div className="truncate font-medium">{name}</div>
-          <div className="truncate text-xs text-muted-foreground" title={s.receiverAddress || undefined}>
-            {phone}
-            {s.receiverAddress ? ` · ${s.receiverAddress}` : ""}
+          <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
+            {/* Giá trị sao chép là SỐ THẬT đang hiển thị — không phải bản che. Người đang xem đã
+                được phép thấy nó, nên sao chép ra một chuỗi khác là bẫy người dùng. */}
+            <span className="truncate" title={s.receiverAddress || undefined}>
+              {phone || "—"}
+              {s.receiverAddress ? ` · ${s.receiverAddress}` : ""}
+            </span>
+            {phone ? <CopyButton value={phone} what="SĐT" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           </div>
         </div>
       );

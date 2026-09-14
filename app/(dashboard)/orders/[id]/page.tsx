@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { assessCustomerRisk, erpHistoryByPhone, erpOrderCountByPhone, isNewPhone } from "@/lib/alerts/risk";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { notFound } from "next/navigation";
@@ -7,13 +8,15 @@ import { ExternalLink, MapPin, Phone, ShoppingBag, Truck, User } from "lucide-re
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
+import { EntityTimeline } from "@/components/entity-timeline";
+import { getOrderTimeline } from "@/lib/queries/entity-timeline";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncOrderButton } from "@/components/sync-order-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { pancakeStatusName } from "@/lib/constants/pancake";
-import { COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
+import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getOrderDetail } from "@/lib/queries/orders";
@@ -28,17 +31,29 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requirePermission("orders:read");
   const { id } = await params;
-  const order = await getOrderDetail(id);
-  const riskCfg = await loadAlertConfig();
-  const erpHist = order ? await erpHistoryByPhone([order.billPhone ?? ""], order.id) : { delivered: 0, returned: 0 };
-  const risk = order ? assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg) : null;
-  const erpOther = order ? await erpOrderCountByPhone([order.billPhone ?? ""], order.id) : 0;
-  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
-  const thieuThongTin = Boolean(order && (!order.billPhone || !(order.shipFullAddress || order.shipAddress)));
-  const prev = order && thieuThongTin ? await previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : null;
-  const newPhone = order ? isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther }) : false;
+  // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
+  // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
+  const [order, riskCfg] = await Promise.all([getOrderDetail(id), loadAlertConfig()]);
   if (!order) notFound();
-  const s = order.shipment;
+  // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
+  const thieuThongTin = !order.billPhone || !(order.shipFullAddress || order.shipAddress);
+  const [timeline, erpHist, erpOther, prev] = await Promise.all([
+    getOrderTimeline(order.id),
+    erpHistoryByPhone([order.billPhone ?? ""], order.id),
+    erpOrderCountByPhone([order.billPhone ?? ""], order.id),
+    thieuThongTin ? previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : Promise.resolve(null),
+  ]);
+  const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
+  const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
+  /**
+   * MỌI LẦN GỬI, THEO THỨ TỰ.
+   *
+   * Trước đây trang này lấy `order.shipment` — quan hệ `one(...)`, tức MỘT dòng bất kỳ. Với đơn gửi
+   * lại, người vận hành thấy "đang giao" mà không biết đây đã là lần thứ ba, và lần huỷ trước đó
+   * biến mất khỏi màn hình dù vẫn còn nguyên trong sổ.
+   */
+  const attempts = order.attempts;
+  const s = attempts.at(-1) ?? null;
   const paid = order.prepaid + order.transferMoney + order.cash;
   const pancakeUrl = order.shopId ? `https://pos.pancake.vn/shop/${order.shopId}/orders?id=${order.id}` : `https://pos.pancake.vn/shop/${env.pancake.shopId}/orders`;
   const grossProfit = order.totalPriceAfterDiscount - order.liveCogs - order.partnerFee - order.returnFee;
@@ -134,20 +149,37 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </div>
           </SectionCard>
 
-          <SectionCard title="Vận chuyển & COD" description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"} actions={s ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}>
-            {s ? (
-              <div className="space-y-4">
+          <SectionCard
+            title={attempts.length > 1 ? `Vận chuyển & COD · ${attempts.length} lần gửi` : "Vận chuyển & COD"}
+            description={s ? `${s.carrier} · cập nhật ${formatDateTime(s.vtpStatusDate ?? s.updatedAt)}` : "Đơn chưa được đẩy sang đơn vị vận chuyển"}
+            actions={s ? <Link href={`/shipments/${s.id}`} className="text-xs font-semibold text-primary hover:underline">Chi tiết vận đơn</Link> : null}
+          >
+            {attempts.length ? (
+              <div className="space-y-5">
+                {attempts.map((s, idx) => {
+              const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
+              return (
+              <div key={s.id} className={cn("space-y-4", idx > 0 && "border-t pt-5")}>
+                {/* SỐ THỨ TỰ + CHIỀU: đơn gửi lại phải đọc được như một dòng thời gian, không phải
+                    một trạng thái duy nhất. Lần huỷ trước đó vẫn là chứng từ có thật. */}
+                {attempts.length > 1 ? (
+                  <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                    <span className="rounded-md bg-primary/10 px-2 py-0.5 font-semibold text-primary">Lần gửi {s.attemptNo ?? idx + 1}</span>
+                    {s.direction ? <span className="rounded-md border px-2 py-0.5 text-muted-foreground">{SHIPMENT_DIRECTION_LABEL[s.direction] ?? s.direction}</span> : null}
+                    <span className="text-muted-foreground">tạo {formatDateTime(s.createdAt)}</span>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
                   <CodStatusBadge status={s.codStatus} className="text-xs" />
                   {s.vtpOrderNumber || s.trackingCode ? (
                     <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5 font-mono text-xs">
                       {s.vtpOrderNumber ?? s.trackingCode}
-                      <CopyButton value={s.vtpOrderNumber ?? s.trackingCode ?? ""} />
+                      <CopyButton value={s.vtpOrderNumber ?? s.trackingCode ?? ""} what="mã vận đơn" />
                     </span>
                   ) : null}
-                  {s.vtpOrderNumber ? (
-                    <a className="text-xs font-semibold text-primary hover:underline" href={`https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${s.vtpOrderNumber}&orderType=1`} target="_blank" rel="noreferrer">
+                  {vtpUrl ? (
+                    <a className="text-xs font-semibold text-primary hover:underline" href={vtpUrl} target="_blank" rel="noopener noreferrer">
                       Tra cứu trên Viettel Post
                     </a>
                   ) : null}
@@ -165,9 +197,23 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 />
                 <ShipmentTimeline events={s.events} />
               </div>
+                );
+                })}
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">Khi Pancake đẩy đơn sang Viettel Post, mã vận đơn và hành trình sẽ xuất hiện tại đây.</p>
             )}
+          </SectionCard>
+
+          {/* DÒNG THỜI GIAN TRUY VẾT — gộp năm chiều sự thật vào một chỗ, mỗi mốc mang theo nguồn
+              và sức nặng của nguồn đó. Trước đây muốn hiểu vì sao một con số trông sai thì phải mở
+              năm nơi khác nhau rồi tự xếp theo thời gian trong đầu. */}
+          <SectionCard
+            title="Dòng thời gian đầy đủ"
+            description="Đơn · giao vận · tiền · kho · người dùng — xếp theo thời gian, ghi rõ nguồn"
+            hint="Cùng một câu 'đã giao': Viettel Post nói thì QUYẾT ĐỊNH kết quả đơn, Pancake nói thì chỉ là bối cảnh. Nhãn nguồn cạnh mỗi mốc nói rõ điều đó, để không ai kết luận sai từ một dòng trông có vẻ đủ."
+          >
+            <EntityTimeline entries={timeline} />
           </SectionCard>
 
           <SectionCard title="Lịch sử trạng thái" description="Ghi nhận từ Pancake POS" padded={false}>
@@ -204,7 +250,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
             <div className="space-y-3 text-sm">
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{order.billFullName || order.shipFullName || "—"}</p>
-              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} /></p>
+              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} what="SĐT" /></p>
               <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{order.shipFullAddress || order.shipAddress || "—"}</span></p>
               {thieuThongTin ? (
                 <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-2.5 text-xs leading-relaxed text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
@@ -216,8 +262,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                         <Link href={`/orders/${prev.orderId}`} className="font-semibold underline">#{prev.systemId ?? ""}</Link> ngày {formatDateTime(prev.insertedAt)}
                         {prev.matchedBy === "customer" ? " (cùng khách Pancake)" : prev.matchedBy === "conversation" ? " (cùng hội thoại)" : " (trùng SĐT)"}:
                       </p>
-                      <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} /></p>
-                      <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} /></p>
+                      <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} what="SĐT" /></p>
+                      <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} what="địa chỉ" /></p>
                       <p className="mt-1.5 opacity-80">Hỏi khách xác nhận còn đúng địa chỉ này không rồi điền vào đơn trên Pancake (khách có thể đã chuyển nhà).</p>
                     </>
                   ) : (

@@ -1,0 +1,436 @@
+# Bản phát hành 14/09/2026 — Hàng đợi CSKH V2 · Máy sinh case hiểu câu · Vòng đời case
+
+> **Trạng thái**: mã nguồn đã lên `main` tại `6ee2098`, deploy run #266.
+> Phần đối soát HMT bằng tệp thật vẫn **chờ một thao tác duy nhất của chủ shop** — xem mục cuối.
+
+---
+
+## 1. Ba việc, một nguyên nhân chung
+
+Hàng đợi CSKH trên production có 417 case đang mở mà chỉ **2** case có người phụ trách thật, và
+`assignee_user_id` chỉ có ở **3/823** case. Không phải vì không ai làm việc — mà vì **hàng đợi
+không dùng được như một bàn làm việc**:
+
+| Triệu chứng | Nguyên nhân gốc |
+|---|---|
+| Trưởng nhóm không giao được việc | Ô chọn người CHỈ hiện khi đã có ai đó nhận |
+| Không biết ai đã gọi khách, gọi lúc nào | Ghi chú xử lý trộn chung ô với bằng chứng |
+| Case cũ không ai đóng, chất đống | Case là ẢNH CHỤP bất biến, không đối chiếu lại với thực tế |
+| Việc giả ("Trả hàng · Yến Ruby") | Một phép so CHUỖI đứng ở vị trí của một phép hiểu Ý ĐỊNH |
+
+Ba việc trong bản này sửa ba tầng đó, và tầng sau chỉ có nghĩa khi tầng trước đã đúng.
+
+---
+
+## 2. Hàng đợi thành bàn làm việc
+
+Tám cột, đúng thứ tự chủ shop chốt:
+`CASE · KHÁCH/ĐƠN · PHỤ TRÁCH · PHÁT SINH · TUỔI/HẠN · TRẠNG THÁI · GHI CHÚ · HÀNH ĐỘNG`.
+
+**PHỤ TRÁCH** — ô chọn LUÔN hiện, có "Chưa ai nhận" / "Bỏ gán", nút "Nhận việc" đứng cạnh làm lối
+tắt. Danh sách người lấy từ **tài khoản ERP đang bật**, đi bằng **KHOÁ** (`users.id`); TÊN do máy
+chủ đọc từ bảng `users`, không nhận từ client (AGENTS.md mục 34). Bot tạo case ≠ bot phụ trách
+case — dòng bot nhắn hiện "Bot đã nhắn · chưa ai nhận".
+
+**GHI CHÚ** tách hẳn khỏi **BẰNG CHỨNG**: ghi chú gần nhất + ai ghi + lúc nào + số ghi chú; bằng
+chứng vẫn ở nút "Xem bằng chứng" và không ai sửa được. Trộn hai thứ thì không ai phân biệt lời
+khách với kết luận của đồng nghiệp.
+
+**PHÁT SINH** đọc `created_at`, **không** đọc `updated_at` — sắp theo cái sau thì một lượt bấm nút
+đẩy case cũ lên đầu và người trực tưởng vừa có việc mới.
+
+**SẮP XẾP** chạy ở máy chủ qua `sort` / `dir` trên URL, giữ nguyên khi sang trang.
+
+### Hai lỗi CÂM chỉ mở trình duyệt mới thấy
+
+1. **Bấm sắp xếp đổi URL mà bảng không đổi.** `useQueryStates` thiếu `startTransition` nên điều
+   hướng không kéo theo một lượt dựng lại ở máy chủ. `DataTable` và `UrlPagination` đều truyền nó —
+   chính vì lý do này.
+2. **Cột HÀNH ĐỘNG trôi ra ngoài mép phải.** Bảng dùng bố cục TỰ ĐỘNG nên `w-[180px]` ở tiêu đề chỉ
+   là gợi ý: một ghi chú dài kéo ô rộng 384px, cả bảng cần 1587px. `max-w` phải đặt trên chính Ô.
+
+Cả hai nay được khoá ở mức mã nguồn trong `tests/cs-workqueue.test.ts`.
+
+---
+
+## 3. Máy sinh case: hiểu câu thay vì đếm chữ
+
+### Ca gốc
+
+Case thật trên production — "Trả hàng / hoàn · Yến Ruby", bằng chứng nguyên văn:
+
+> "Dừng rồi bây giờ chị em mình chốt 3 cái… **nếu chị không ưng chị không nhận**…
+> đúng vậy em chuyển hàng cho chị càng nhanh càng tốt…"
+
+Khách đang **chốt đơn** và đang **giục gửi hàng**. "Không nhận" là một **giả định**. Máy cũ thấy
+chữ, tạo một việc trả hàng; CSKH mở ra thấy một việc không tồn tại, còn việc THẬT thì không ai thấy.
+
+### Đường đi mới
+
+```
+tín hiệu ứng viên  (từ khoá · thẻ hội thoại · quan sát xác định)
+   ↓
+bối cảnh TOÀN ĐOẠN  (cả hội thoại, phân vai KHÁCH/SHOP, đúng trình tự thời gian)
+   ↓
+hiểu ngữ nghĩa      (phạm vi thời gian · ý định người nói · bằng chứng thuận & nghịch)
+   ↓
+CHỨNG TỪ NGHIỆP VỤ  (đơn · trạng thái POS · vận đơn)   ← THẮNG kết luận của model
+   ↓
+cửa tin cậy         (HIGH tạo · MEDIUM để người xem · LOW bỏ)
+```
+
+**Cửa chứng từ đứng TRƯỚC cửa tin cậy, cố ý.** "POS đã xác nhận" là một SỰ THẬT, không phải một mức
+tin cậy — nên nó **bác** kết luận của model chứ không hạ bậc. Đảo lại thì một kết luận sai nhưng
+"chắc chắn" vẫn lọt vào hàng đợi.
+
+Đầu ra có cấu trúc: `{caseKind, actionable, confidence, temporalScope, speakerIntent,
+supportingEvidence, contradictoryEvidence, reason}` — lưu ở `cs_cases.semantic`.
+**Không lưu dòng suy nghĩ riêng của model**: nó không kiểm chứng được, không ai đọc, và là chỗ dữ
+liệu khách hàng rò ra nhiều nhất.
+
+### Mất AI thì lùi về phía HẸP HƠN
+
+Ứng viên từ **chữ** (từ khoá, thẻ) **không tạo việc** khi không có tầng ngữ nghĩa — lùi về luật từ
+khoá chính là quay lại thứ vừa bị bỏ. Ứng viên **XÁC ĐỊNH** ("khách đã cho đủ SĐT và địa chỉ mà
+chưa có đơn") vẫn chạy, vì kết luận của nó đứng trên QUAN SÁT cộng CHỨNG TỪ, không trên chữ nghĩa —
+và đó là loại case duy nhất trực tiếp cứu được doanh thu.
+
+### Mức tin cậy GIỮA có làn riêng
+
+Trạng thái `NEEDS_REVIEW` ghi lại đủ để người xem, nhưng **không** nằm trong
+`CS_ACTIONABLE_STATUSES` nên không chiếm chỗ của người đang trực. "Không chắc" không được ép thành
+việc.
+
+### Một đoạn sự việc, một việc
+
+Khoá chống trùng bám **mốc khách đưa đủ thông tin**, không bám ngày chạy job. Bản cũ đẻ một case
+mới **mỗi ngày** cho cùng một lần khách đưa thông tin — và máy đối chiếu ngay sau đó lại phải đóng
+chúng. Khách nhắc lại thì bằng chứng nối vào case cũ bằng sự kiện `EVIDENCE`, tách hẳn khỏi `NOTE`
+của người xử lý.
+
+---
+
+## 4. "Đơn đã được tạo chưa" — một câu hỏi, một câu trả lời
+
+Chủ shop chốt 14/09/2026: **POS ở trạng thái "Đã xác nhận" nghĩa là đơn ĐÃ được tạo.**
+
+`lib/constants/order-materialized.ts` khai điều đó đúng MỘT chỗ, bám **MÃ SỐ** Pancake
+(`PANCAKE_ORDER_STATUS`, "Đã xác nhận" = `1`) chứ không so chuỗi hiển thị — chuỗi là thứ Pancake
+được phép đổi bất cứ lúc nào, và dấu tiếng Việt còn phụ thuộc cách chuẩn hoá Unicode của phía gửi.
+Danh sách mã **sinh ra** từ bảng trạng thái, không gõ lại.
+
+### Cửa sổ ±2 ngày — đo rồi mới chọn
+
+Một đơn đã xác nhận trong CÙNG hội thoại vẫn chưa đủ để đóng case: hội thoại Pancake sống rất lâu.
+Đo cả 10 case đang mở (production 14/09/2026) — 4 case có đơn đã xác nhận cùng hội thoại:
+
+| Khoảng cách tới mốc case | Chặng | Đọc ra |
+|---|---|---|
+| **3 giờ** | CONFIRMED | đúng đơn case đang chờ |
+| **5 giờ** | CONFIRMED | đúng đơn ấy |
+| 83 giờ | CONFIRMED | 3,5 ngày — không kết luận được |
+| 298 giờ | DELIVERED | 12,4 ngày — **khách mua lại**, đóng là đóng một việc thật |
+
+Không có gì ở giữa. Phép đo này cũng **loại bỏ** một luật nghe rất chắc — "chỉ đóng khi đơn KHÁC
+đơn máy quét đã thấy": ở **cả bốn** case, đơn đã xác nhận của hội thoại CHÍNH LÀ `cs_cases.order_id`,
+nên luật ấy đóng được đúng **0** case.
+
+Chọn 48 giờ thay vì 72 để chừa khoảng trống rõ ràng với ca 83 giờ: một ngưỡng chỉ cách dữ liệu thật
+11 giờ là một ngưỡng sẽ tự lật khi có thêm vài đơn.
+
+---
+
+## 5. Case không còn lý do tồn tại thì tự rời hàng đợi
+
+`lib/cs/stale.ts` đối chiếu CẢ hàng đợi với thực tế hiện tại, phân bốn kết luận:
+
+| Kết luận | Nghĩa | Máy được ghi? |
+|---|---|---|
+| `KEEP_OPEN` | chứng từ vẫn đỡ được việc này | không |
+| `AUTO_RESOLVE` | điều kiện không còn VÀ chưa ai cầm | **có** — đóng mềm, có lý do từng case |
+| `RECLASSIFY` | việc có thật nhưng ở bàn Vận đơn & care | không |
+| `NEEDS_REVIEW` | đã có người cầm — máy không đóng hộ | không |
+
+Dùng **CHÍNH** bộ điều kiện mà nơi sinh case dùng (`checkEligibility`): một luật, hai đầu.
+
+**Hai phía an toàn ngược nhau, cố ý.** Cùng một hàm, hai mặc định trái chiều: lúc **SINH**, loại
+chưa khai điều kiện thì KHÔNG tạo; lúc **ĐÓNG**, loại chưa khai thì GIỮ NGUYÊN. Dùng chung một mặc
+định là cách chắc chắn nhất để một ngày thêm loại case mới rồi im lặng đóng sạch nó.
+
+Đóng bằng `AUTO_RESOLVED` chứ không `DONE`: `DONE` là công của NGƯỜI, và đóng 40 case bằng `DONE`
+sẽ làm bảng năng suất CSKH trông như 40 lần có người gọi khách. Không xoá gì.
+
+Chạy trong job `cs-chat` (đối chiếu TRƯỚC lượt quét), và chạy tay được qua thao tác ops `cs-stale`
+(**mặc định CHẠY THỬ**; `--apply` mới ghi).
+
+---
+
+## 6. Đo được, không suy đoán
+
+### Bộ đánh giá ngữ nghĩa (12 ca có nhãn, `tests/cs-semantic.test.ts`)
+
+| Chỉ số | Giá trị |
+|---|---|
+| Độ chính xác (việc tạo ra là việc thật) | **100%** |
+| Độ phủ (việc thật được tạo) | **100%** |
+| Tỷ lệ báo nhầm | **0%** |
+| Để người xem lại | 1/12 ca |
+
+Ngưỡng **không đối xứng, cố ý**: ưu tiên độ chính xác. Một việc giả tốn một cuộc gọi của nhân viên
+VÀ dạy người trực rằng hàng đợi không đáng đọc — thiệt hại kép. Một việc bỏ sót thì máy đối chiếu và
+người trực còn bắt lại được.
+
+Ca gốc "Yến Ruby" là bài kiểm hồi quy: model trả `RETURN` nhưng `temporalScope = HYPOTHETICAL` ⇒
+**không** sinh case, và bản ghi nói rõ bị chặn ở cửa nào.
+
+### QA trình duyệt (bản dựng production tại chỗ, PGlite, 29 case)
+
+Sáng/tối × 90/100/110%: **0** lỗi console, **0** lỗi HTTP, **0** trang tràn ngang. Dòng cao trung
+bình 126px (cao nhất 157px). Bảng cần 1369px (trước: 1587px) — vừa màn 1920 và 1600.
+
+Hành vi đo được: sắp xếp mới→cũ và cũ→mới đều đúng và giữ nguyên khi sang trang 2; ô giao việc hiện
+ở cả 25 dòng với danh sách tài khoản ERP thật; cột Ghi chú hiện nội dung + người + mốc + "2 ghi chú";
+case "chờ người xem lại" KHÔNG nằm trong hàng đợi phải làm nhưng lọc ra được; nút chép SĐT (24) và
+mã vận đơn (24) còn nguyên.
+
+### Cổng mã nguồn
+
+Chạy trên bản checkout **SẠCH** đúng SHA ứng viên (`git worktree add --detach 6ee2098`, `npm ci`):
+`typecheck` · `lint` · `npm test` (**TẤT CẢ KIỂM THỬ ĐẠT**) · `build` — sạch cả bốn.
+
+---
+
+## 7. Migration
+
+`0081_cs_case_semantic` — **một cột nullable** `cs_cases.semantic`. Không đổi kiểu, không xoá cột,
+không đổi tên, không đụng dữ liệu. Dòng cũ giữ `NULL` = **CHƯA BIẾT**, không phải "model đã xem và
+không nói gì". Viết tay và idempotent như 0033–0080 (ảnh chụp `drizzle/meta/*_snapshot.json` của kho
+này đã cũ từ 0032, nên `drizzle-kit generate` sinh ra một bản dựng lại TOÀN BỘ lược đồ — chạy bản đó
+lên production sẽ hỏng ngay ở câu lệnh đầu tiên).
+
+Trạng thái `NEEDS_REVIEW` **không cần** migration: `cs_cases.status` là `text` không ràng buộc CHECK.
+`tests/migration-upgrade-path.test.ts` chứng minh điều đó thay vì tin lời — ngày nào có người thêm
+CHECK vào cột ấy thì bài kiểm đỏ, đúng lúc cần đỏ.
+
+---
+
+## 8. Số đo SAU deploy (production, 14/09/2026)
+
+Production SHA **`3454fff` → `6ee2098`** (deploy run #266, cổng CI xanh cả 5 bước trước khi chạm máy
+chủ; bước "Kiểm tra HTTPS từ bên ngoài" xác nhận đúng mã commit). Migration 80 → **81**.
+
+### Smoke trên HTML thật (51 trang, phiên đăng nhập hợp lệ)
+
+`51/51 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 chậm · 0 hết phiên`. `/cs` và `/cs?view=theo-case`
+đều có mặt **cả ba công cụ mới** — lá chắn smoke nay kiểm chúng, nên thiếu một cái là `APP_ERROR`
+chứ không phải HTTP 200 xanh.
+
+### Đối chiếu hàng đợi với thực tế — **406 case đang mở**
+
+| Kết luận | Số case |
+|---|---|
+| `KEEP_OPEN` | **398** |
+| `AUTO_RESOLVE` | 0 |
+| `RECLASSIFY` | 0 |
+| `NEEDS_REVIEW` | 0 |
+
+Theo loại: 356 giao không thành · 14 trả hàng · 11 giục giao · 7 tư vấn size · 5 khiếu nại · 2 đổi
+màu · 1 đổi size · 1 SĐT mới · 1 sai địa chỉ.
+
+**Máy đóng được 0 case — và đó là kết quả ĐÚNG, không phải máy không chạy.** Đối chiếu với dữ liệu
+thô cùng lúc:
+
+| Loại | Có đơn | Đơn đã xong | Kiện đang chạy | Vì sao KEEP_OPEN |
+|---|---|---|---|---|
+| Giao không thành (356) | 356 | 231 | 130 | loại này **chưa khai điều kiện đóng** ⇒ giữ nguyên |
+| Giục giao (11) | 11 | **0** | 8 | không đơn nào kết thúc ⇒ câu giục vẫn còn nghĩa |
+| Trả hàng (14) | 14 | 7 | 5 | đều có đơn thật ⇒ còn nguyên lý do |
+| Sai địa chỉ (1) | 1 | 1 | **0** | không có kiện đang chạy ⇒ vẫn là việc CSKH |
+
+### "Đủ thông tin · chưa tạo đơn" — 8 đang mở, **cả 8 còn treo THẬT**
+
+Không case nào đóng được theo bốn bậc chứng cứ. Tra từng case để kiểm chứng chứ không tin con số:
+
+| Đơn gắn case | Khoảng cách tới mốc case | Đơn xác nhận trong cửa sổ ±2 ngày | Đúng hay sai |
+|---|---|---|---|
+| (không có đơn) | — | 0 | ✓ thật sự chưa có đơn |
+| `DELIVERED` | **298 giờ** | 0 | ✓ **khách mua lại** — đúng ca 298h đã đo lúc chọn ngưỡng |
+| `CONFIRMED` | **83 giờ** | 0 | ✓ ngoài cửa sổ ⇒ máy KHÔNG kết luận, để người quyết |
+| `NEW` × 4 | 23–47 giờ | 0 | ✓ "Mới" chưa phải "đã tạo" — ranh giới chủ shop vạch ở "Đã xác nhận" |
+
+Đúng hai ca mà cửa sổ ±2 ngày được dựng lên để phân biệt (83h và 298h) đều nằm trong tám case này,
+và cả hai đều được giữ mở. Ngưỡng làm đúng việc của nó trên dữ liệu thật.
+
+**Chạy `--apply`: 0/0 case đóng mềm, 0 case "chưa tạo đơn" đóng.** Chạy thử và chạy thật ra CÙNG
+một con số ⇒ không-thao-tác, đúng nghĩa idempotent.
+
+---
+
+## 9. Đối soát HMT: đường đưa tệp vào máy chủ đã dựng xong
+
+### Vì sao bộ máy đã xong mà chưa chạy được lần nào
+
+Bộ máy đối soát dựng xong và kiểm thử đầy đủ từ bản 13/09. Thứ thiếu suốt từ đó không phải mã —
+mà là **đường đưa tệp Excel từ máy Windows của chủ shop tới nơi có CSDL production**. Bốn đường đã
+thử, và vì sao ba đường đầu đều sai:
+
+| Đường | Vì sao không dùng được |
+|---|---|
+| `scp` lên máy chủ | máy chủ shop **không có khoá SSH**, đăng nhập bằng mật khẩu cũng không được; và bắt người vận hành mở terminal cho một việc hàng tuần là cách chắc chắn nhất để việc đó không bao giờ được làm |
+| Đường dẫn tải công khai (`HMT_WORKBOOK_URL`) | "ai có link cũng xem được" là cách nói khác của **tên và địa chỉ khách hàng nằm trên Internet** |
+| Đưa tệp vào kho mã | kho mã này **PUBLIC** |
+| **Tải lên qua chính ERP** | ✅ người đã đăng nhập kéo tệp vào màn hình của họ; tệp đi qua HTTPS bằng **phiên của họ** và nằm lại trong CSDL production |
+
+Đường thứ tư đã nằm sẵn trong ERP suốt thời gian đó — đó chính là cách bảng kê Viettel Post vẫn
+vào hệ thống hàng tuần (`vtp_statement_files`). Bản này dùng lại đúng hình dạng ấy cho sổ hàng hoàn.
+
+### Cái đã dựng
+
+· Bảng `hmt_workbooks` (migration **0082**). **Khoá tự nhiên là NỘI DUNG**, không phải tên tệp:
+  `sha256` UNIQUE. Cùng tệp tải mười lần vẫn một dòng — kể cả khi người dùng đổi tên, mà họ luôn đổi.
+· Ô tải lên trên trang **Kiểm đếm hàng hoàn**. **Máy chủ** tính băm từ chính byte đã nhận và
+  **máy chủ** kiểm tệp ngay lúc nhận: kéo nhầm bảng kê Viettel Post (cũng `.xlsx`, cũng mở được) bị
+  từ chối ngay trước mặt người vừa kéo nó vào, chứ không nhận vào rồi mới báo "0 dòng khớp".
+· `npm run returns:hmt` không còn bắt buộc `--file` — mặc định đọc bản mới nhất trong CSDL.
+· Thao tác ops `returns-hmt` tự rơi về đường CSDL, nên chạy đối soát không cần chuẩn bị gì trước.
+· Nút **xoá tệp** sau khi đối soát xong; chứng cứ không đi theo (băm · sheet · số dòng · mã vận đơn
+  vẫn nằm ở `hmt_return_reconciliation`).
+
+### Kiểm đếm nguồn của tệp THẬT (đọc tại chỗ, SHA-256 `c5616055…f5ed`, 45.029 byte)
+
+| Sheet | Dòng có dữ liệu | Mã vận đơn khác nhau | 1P1 | Mã lặp | Ô trống → kế thừa | Không suy được |
+|---|---|---|---|---|---|---|
+| MVĐ hoàn, 1 phần | 833 | **817** | **237** | 16 | 0 | 0 |
+| Chi tiết đơn hoàn | 507 | 452 | 0 | 52 | 55 → 54 | **1** |
+| Chi tiết đơn 1 phần | 243 | 222 | **220** | 19 | 20 → 20 | 0 |
+
+Độ phủ mã hàng: **727/750 dòng món** đọc được mã (Q002 611 · Q003 116); **23 dòng không đọc được**
+— chúng được giữ nguyên ở nhóm "không đọc được mã hàng", **không** bị gán bừa vào Q002/Q003.
+
+**Khớp từng con số với ảnh chụp phiên trước** (222 mã / 19 lặp · 507 và 243 dòng · 1P1 237/0/220 ·
+~750 dòng món, ~727 đọc được, ~23 không): không lệch một đơn vị nào. Tệp không đổi giữa hai phiên.
+
+### ĐÃ CHẠY THẬT TRÊN PRODUCTION — 14/09/2026
+
+Chủ shop kéo tệp vào ô *"Sổ hàng hoàn viết tay"* lúc **14:28 giờ VN**. Từ đó trở đi toàn bộ chạy
+qua thao tác ops, không SSH, không tệp trên đĩa máy chủ.
+
+**Bản nhận được đúng bản đã kiểm:**
+
+| | |
+|---|---|
+| Tên tệp | `Bản sao của Hàng hoàn HMT.xlsx` |
+| SHA-256 | `c5616055b7f18e7b051c2c33497a9ce6fca699213151cf1c689b67eb2266f5ed` |
+| Dung lượng | 45.029 byte (base64 60.040) |
+| Người tải | Truyền HK · 14/09/2026 14:28 |
+
+Băm **trùng từng ký tự** với bản đọc tại chỗ trước đó ⇒ byte không đổi trên đường đi.
+
+#### Chạy thử — phân loại 750 dòng món
+
+| Nhóm | Chi tiết đơn hoàn | Chi tiết đơn 1 phần | Tổng |
+|---|---|---|---|
+| **MATCHED** (mã vận đơn + mẫu mã đều khớp, SL trong ngưỡng) | **493** | **231** | **724** |
+| SKU_MISMATCH | 13 | 10 | 23 |
+| AMBIGUOUS_TRACKING | 1 | 0 | 1 |
+| UNMATCHED_TRACKING | 0 | 2 | 2 |
+| *(dòng nguồn)* | *507* | *243* | *750* |
+
+· mã vận đơn lần ra kiện trong ERP: **452** (đơn hoàn) + **220** (1 phần) = **672 kiện**
+· mẫu mã lần ra đúng một: 493 + 232 · số lượng trong ngưỡng kỳ vọng: 493 + 231
+· **AMBIGUOUS_SKU: 0** · **QTY_CONFLICT: 0** · **ALREADY_RECEIVED: 0** (ảnh chụp trước: 0 phiếu kiểm đếm)
+· **NO_ITEM_DETAIL: 144** mã có ở sheet tổng mà không có dòng món nào — **không** ghi gì, đúng luật:
+  mã vận đơn chứng minh danh tính kiện, **không** chứng minh trong kiện có món gì.
+
+#### Cổng an toàn — kiểm ở mức DỮ LIỆU, không phải lời hứa
+
+`select match_status, count(*), count(*) filter (where written)` sau khi ghi:
+
+| match_status | dòng | **đã ghi** | kiện |
+|---|---|---|---|
+| MATCHED | 724 | **724** | 672 |
+| SKU_MISMATCH | 23 | **0** | 20 |
+| AMBIGUOUS_TRACKING | 1 | **0** | 0 |
+| UNMATCHED_TRACKING | 2 | **0** | 0 |
+| **tổng** | **750** | **724** | **672** |
+
+Chỉ MATCHED có `written = true`. Ba nhóm còn lại: **0**, và ràng buộc `hmt_return_rec_written_check`
+ở CSDL chặn cứng chuyện ngược lại. Không dòng nào khớp bằng SĐT / tên khách / COD.
+
+#### Ảnh chụp tồn kho TRƯỚC và SAU — mọi chênh lệch giải thích được
+
+| Chỉ tiêu | Trước | Sau | Δ |
+|---|---|---|---|
+| `return_inspections` tổng | 0 | **672** | +672 |
+| … RECEIVED (chờ đếm) | 0 | **672** | +672 |
+| … ĐÃ ĐẾM | 0 | 0 | 0 |
+| `stock_receipts` kind=RETURN | 0 | **0** | **0** |
+| Món tái nhập (RESTOCKED) | 0 | **0** | **0** |
+| **TỒN THỰC TẾ tổng** | **1.985** | **1.985** | **0** |
+| `hmt_return_reconciliation` | 0 | 750 | +750 |
+| … `written` | 0 | 724 | +724 |
+
+**Tồn kho không đổi một món nào.** 724 món đi vào ô "đã về kho, chờ đếm", **không** vào tồn bán
+được — đúng AGENTS.md mục 10: hàng hoàn chỉ vào tồn khi người kho lập phiếu `RETURN` với số đếm
+thực tế. `EXPECTED → RECEIVED → INSPECTION → RESTOCKABLE/NON_RESTOCKABLE → RESTOCKED`, và lượt này
+dừng đúng ở bước thứ hai. **0 sự kiện sổ kho.**
+
+#### Chạy lại cùng tệp — không-thao-tác
+
+```
+kiện ghi nhận đã về kho: 0 (dòng món 0 · 0 món)
+dòng chứng cứ mới: 0 · bỏ qua vì đã ghi lần trước: 750
+kiện vào hàng đợi đếm: 0 — TỒN KHO CHƯA ĐỔI
+```
+
+Bảng chứng cứ sau lượt hai vẫn **đúng 750 dòng / 724 đã ghi / 672 kiện** — không nhân đôi một dòng
+nào. Khoá `idempotency_key` (UNIQUE) và `onConflictDoNothing` trên `return_inspections.shipment_id`
+làm việc của chúng.
+
+#### Mẫu để kiểm chứng từng nhóm
+
+| Nhóm | Mẫu thật |
+|---|---|
+| Đơn hoàn toàn phần | `PKE1511614327` · *Đầm Q002 / Màu: Đỏ / Size: L* → kiện `PKE1511614327` · mẫu `002 DO L` |
+| 1 phần / 1P1 | `PKE14944297721P1` (220/222 mã 1P1 lần ra kiện) |
+| Đã nhận trước đó | 0 — đây là lượt đầu tiên |
+| Mã không xác định | dòng 437: ô mã trống, bảng tính **không** gộp ô ⇒ không suy |
+| Mẫu mã lệch | `PKE1494448039` · *Quần định hình / Size: XL* → dòng sản phẩm không có mã hàng |
+| Không có trong ERP | `1.5089E+11` (Excel ghi dạng khoa học) · `VTP1824401820899` |
+
+#### Màn hình production
+
+`smoke` sau khi ghi: **51/51 đạt · 0 lỗi ứng dụng · 0 chậm**. `/inventory/returns` mở bình thường
+với 672 kiện mới trong hàng đợi đếm.
+
+#### Việc còn lại cho người — không phải lỗi máy
+
+· **23 dòng SKU_MISMATCH**: phần lớn là *"Quần định hình"* — mẫu mã sổ giấy ghi không kèm mã hàng
+  (`Q…`), nên máy **không đoán**. Đây chính là "một số sản phẩm ngoài Q002/Q003" chủ shop đã nhắc.
+· **144 mã chỉ có ở sheet tổng**: cần người kho ghi dòng món thì mới ghi nhận được.
+· **2 mã không có trong ERP** · **1 ô mã trống**.
+
+### Đường truyền: vì sao phải dựng, và nó thay cho cái gì
+
+Đã kiểm trên máy chủ sau deploy #267 (thao tác ops `returns-hmt`):
+
+```
+Nguồn: bản tải lên qua ERP (CSDL production)
+Chưa có bảng tính nào để đối soát.
+  · CÁCH THƯỜNG DÙNG: mở ERP → Kiểm đếm hàng hoàn → kéo tệp .xlsx vào ô "Sổ hàng hoàn viết tay"
+```
+
+Đường đã thông; chỗ trống bây giờ là **chính các byte của tệp**. Phiên làm việc này không tự đưa
+chúng sang được: từ hộp chạy của Claude không có kết nối tới cổng 22 của máy chủ, và
+`erp.vnxcommerce.com` bị chặn ở tầng proxy — nên không có đường nào tự động, kể cả đường vừa dựng.
+Báo đúng như thế thay vì làm ra vẻ đã xong.
+
+**Chủ shop làm một lần, trong trình duyệt đang đăng nhập sẵn:**
+
+1. Mở **Kho → Kiểm đếm hàng hoàn**.
+2. Kéo `Bản sao của Hàng hoàn HMT.xlsx` vào ô *"Sổ hàng hoàn viết tay (.xlsx)"*.
+   Màn hình hiện lại băm SHA-256 — phải là `c5616055…` thì mới đúng bản đã kiểm ở trên.
+3. Actions → *Vận hành ERP trên VPS* → `returns-hmt`, ô `arg` **để trống** (chạy thử).
+4. Đọc bảng phân loại, rồi chạy lại với `arg = --apply`.
+
+Không mật khẩu, không khoá SSH, không console máy chủ, không link công khai.

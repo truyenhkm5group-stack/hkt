@@ -5,6 +5,7 @@ import { schema } from "@/db";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { dataQualityOrders, dataQualitySummary, returnsAwaitingWarehouse, unlinkedShipments } from "@/lib/queries/data-quality";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
+import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import type { Period } from "@/lib/search-params";
 
@@ -61,6 +62,12 @@ export async function testDataQuality(db: Db) {
   assert.equal((await outcomes(db, "dq-906")).verified, "RETURNED_BY_RULE", "thu đúng 100K không vượt ngưỡng → chưa phải giao thành công");
   await mk(db, "dq-907", "DELIVERED", { stage: "DELIVERED", codAmount: 100001, codCollected: 100001, codStatus: "COLLECTED", shippingFee: 17000, vtpOrderNumber: "DQ907" });
   assert.equal((await outcomes(db, "dq-907")).verified, "DELIVERED", "thu 100.001đ vượt ngưỡng → giao thành công");
+
+  // `cod_status = COLLECTED` được đặt từ CHIỀU LOGISTICS (trạng thái "đã giao"), không phải từ chứng
+  // từ tiền. Đặc tả §8: `cod_status` đơn thuần KHÔNG phải verified money ⇒ chưa có số thực thu thì
+  // là CHƯA XÁC MINH, không được lấy COD khai báo làm "tiền có chứng từ".
+  await mk(db, "dq-910", "DELIVERED", { stage: "DELIVERED", codAmount: 499000, codCollected: 0, codStatus: "COLLECTED", shippingFee: 17000, vtpOrderNumber: "DQ910" });
+  assert.equal((await outcomes(db, "dq-910")).verified, "UNVERIFIED", "trạng thái COLLECTED mà không có số thực thu → chưa xác minh, không phải giao thành công đã chứng minh");
 
   // Huỷ / đang giao / đã hoàn.
   await mk(db, "dq-908", "SHIPPED", { stage: "IN_TRANSIT", codAmount: 499000, vtpOrderNumber: "DQ908" });
@@ -128,15 +135,30 @@ export async function testDataQuality(db: Db) {
   const waiting = await returnsAwaitingWarehouse(1, 50, "");
   assert.equal(waiting.total, summary.returnRiskShipments, "số vận đơn chờ nhận hoàn khớp KPI");
   assert.ok(waiting.rows.every((r) => r.returnReceivedAt === null), "danh sách chờ chỉ gồm vận đơn chưa xác nhận");
-  const target = waiting.rows[0];
-  assert.ok(target, "phải có ít nhất một vận đơn hoàn đang chờ kho");
-  const first = await markReturnReceived([target.id], "test-kho", "Đếm đủ hàng");
+  // Đường đếm nhanh cả kiện chỉ cộng tồn cho kiện MỘT mẫu mã đã ghép được đơn (xem
+  // `lib/returns/inspection.ts::singleVariantForParcel`); kiện nhiều mẫu mã phải đếm từng món.
+  const target = waiting.rows.find((r) => r.orderId && r.items.length === 1 && r.items[0].qty >= 1);
+  assert.ok(target, "phải có ít nhất một vận đơn hoàn một mẫu mã đang chờ kho");
+  // Kho nhìn danh sách là biết kiện chứa gì: kiện nối được đơn phải mang mặt hàng (tên · mẫu · số lượng).
+  const coDon = waiting.rows.filter((r) => r.orderId);
+  assert.ok(coDon.length > 0, "fixture phải có kiện chờ kho nhận nối được đơn");
+  for (const r of coDon) {
+    const [{ qty }] = await db.select({ qty: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)::int` }).from(schema.orderItems).where(eq(schema.orderItems.orderId, r.orderId!));
+    assert.equal(r.items.reduce((a, i) => a + i.qty, 0), Number(qty), `kiện ${r.id}: tổng số món liệt kê phải bằng đúng order_items của đơn`);
+    assert.ok(r.items.every((i) => i.name && i.qty > 0), "mỗi dòng mặt hàng có tên và số lượng dương");
+  }
+  assert.ok(waiting.rows.filter((r) => !r.orderId && !r.orderReference).every((r) => r.items.length === 0), "kiện không nối được đơn ⇒ danh sách mặt hàng rỗng, không đoán");
+  const first = await markReturnReceived([target.id], { id: null, label: "test-kho" }, "Kiện đã về");
   assert.equal(first.count, 1);
-  const second = await markReturnReceived([target.id], "test-kho-2");
-  assert.equal(second.count, 0, "xác nhận lần hai không ghi đè, không cộng trùng");
+  const second = await markReturnReceived([target.id], { id: null, label: "test-kho-2" });
+  assert.equal(second.count, 0, "ghi nhận lần hai không ghi đè, không tạo thêm phiếu");
+
+  // Chỉ lúc ĐẾM XONG kiện mới rời khỏi danh sách chờ và mới có mốc kho nhận trên vận đơn.
+  const inspected = await recordInspection({ shipmentId: target.id, condition: "RESTOCKABLE", restockQty: 1, unsellableQty: 0, note: "Đếm đủ hàng", actor: { id: null, label: "test-kho" } });
+  assert.ok("ok" in inspected, "kiện đã ghi nhận về thì đếm được");
   const [after] = await db.select({ by: schema.shipments.returnReceivedBy }).from(schema.shipments).where(eq(schema.shipments.id, target.id));
-  assert.equal(after.by, "test-kho", "giữ nguyên người xác nhận lần đầu");
-  assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đã nhận thì rời khỏi danh sách chờ");
+  assert.equal(after.by, "test-kho", "mốc kho nhận ghi tên người ĐẾM");
+  assert.equal((await returnsAwaitingWarehouse(1, 50, "")).total, waiting.total - 1, "đếm xong thì rời khỏi danh sách chờ");
 
 
   // ───────── Giá vốn KHÔNG BIẾT không được coi là 0 ─────────

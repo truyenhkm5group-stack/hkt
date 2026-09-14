@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { bulkSetCampaigns, setCampaignMarketer, setCampaignProduct, setProductAliases } from "@/lib/actions/ads-mapping";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import type { CampaignMappingRow } from "@/lib/queries/ads-mapping";
+import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
 type Product = { id: string; name: string; code: string };
@@ -165,9 +166,9 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
           </Button>
         </div>
       ) : null}
-      <div className="overflow-x-auto rounded-lg border">
+      <div className={cn(TABLE_SCROLL, "rounded-lg border")}>
         <table className="w-full text-sm">
-          <thead className="bg-muted/60 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+          <thead className={cn(STICKY_HEAD, "text-[11px] font-semibold tracking-wide text-muted-foreground uppercase")}>
             <tr>
               {canWrite ? (
                 <th className="w-8 px-3 py-2">

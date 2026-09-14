@@ -1,20 +1,12 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
+import { returnProductContext } from "@/lib/returns/product-context";
 import type { DqIssue, VerifiedOutcome } from "@/lib/constants/data-quality";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
 import { ORDER_COGS } from "@/lib/queries/cogs";
-import {
-  HAS_CASH_PROOF,
-  IS_PANCAKE_DECLARED_ONLY,
-  IS_RETURN_NOT_RECEIVED,
-  IS_STATUS_CONFLICT,
-  IS_VTP_LOW_CASH,
-  ORDER_OUTCOME,
-  ORDER_OUTCOME_VERIFIED,
-  VERIFIED_CASH,
-} from "@/lib/queries/return-rate";
+import { HAS_CASH_PROOF, IS_PANCAKE_DECLARED_ONLY, IS_RETURN_NOT_RECEIVED, IS_STATUS_CONFLICT, IS_VTP_LOW_CASH, ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, PRIMARY_ATTEMPT, VERIFIED_CASH } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 const o = schema.orders;
@@ -50,7 +42,7 @@ export type DataQualitySummary = Awaited<ReturnType<typeof dataQualitySummary>>;
  */
 export async function dataQualitySummary(period: Period) {
   const db = await getDb();
-  return memo(`data-quality:summary:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90, async () => {
+  return memo(`data-quality:summary:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, async () => {
     const where = periodWhere(period);
     const V = ORDER_OUTCOME_VERIFIED;
     const L = ORDER_OUTCOME;
@@ -83,7 +75,7 @@ export async function dataQualitySummary(period: Period) {
         marketingRiskRevenue: sql<number>`coalesce(sum(${DECLARED_REVENUE}) filter (where ${L} = 'DELIVERED' and ${V} <> 'DELIVERED'), 0)`,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(scope);
 
     // Vận đơn chưa ghép được với đơn ERP (nằm ngoài không gian bảng orders).
@@ -230,18 +222,19 @@ export async function dataQualityOrders(issue: DqIssue, period: Period, page: nu
         returnReceivedAt: s.returnReceivedAt,
       })
       .from(o)
-      .leftJoin(s, eq(s.orderId, o.id))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(where)
       .orderBy(desc(o.insertedAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ n: sql<number>`count(*)` }).from(o).leftJoin(s, eq(s.orderId, o.id)).where(where),
+    db.select({ n: sql<number>`count(*)` }).from(o).leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT)).where(where),
   ]);
   return { rows: rows as DqOrderRow[], total: num(total?.n) };
 }
 
 export type DqShipmentRow = {
   id: string;
+  orderId: string | null;
   vtpOrderNumber: string | null;
   orderReference: string | null;
   stage: string;
@@ -258,6 +251,7 @@ export type DqShipmentRow = {
 
 const SHIPMENT_COLUMNS = {
   id: s.id,
+  orderId: s.orderId,
   vtpOrderNumber: s.vtpOrderNumber,
   orderReference: s.orderReference,
   stage: s.stage,
@@ -306,5 +300,30 @@ export async function returnsAwaitingWarehouse(page: number, pageSize: number, q
     db.select(SHIPMENT_COLUMNS).from(s).where(where).orderBy(desc(s.returnedAt), desc(s.updatedAt)).limit(pageSize).offset((page - 1) * pageSize),
     db.select({ n: sql<number>`count(*)` }).from(s).where(where),
   ]);
-  return { rows: rows as DqShipmentRow[], total: num(total?.n) };
+  const items = await returnItemsByShipment(rows as DqShipmentRow[]);
+  return { rows: (rows as DqShipmentRow[]).map((r) => ({ ...r, items: items.get(r.id) ?? [] })), total: num(total?.n) };
+}
+
+export type ReturnItemSummary = { name: string; variant: string; qty: number };
+
+/**
+ * Mặt hàng của đơn ứng với từng kiện chờ kho nhận — kho nhìn danh sách là biết kiện nào chứa gì,
+ * không phải mở từng đơn (phản hồi chủ shop 11/09). Kiện chiều về (`[số]P[số]`) có `order_id`
+ * NULL: nối qua `order_reference` = mã vận đơn gốc để lấy đơn. Không nối được ⇒ danh sách rỗng.
+ */
+async function returnItemsByShipment(rows: DqShipmentRow[]): Promise<Map<string, ReturnItemSummary[]>> {
+  // MỘT engine ghép kiện ↔ đơn cho cả ERP: `lib/returns/product-context` (định danh, mã gốc chiều
+  // về, phiếu trả từng dòng, mơ hồ thì KHÔNG đoán). Ở đây chỉ rút gọn thành dòng chữ cho bảng.
+  const out = new Map<string, ReturnItemSummary[]>();
+  if (!rows.length) return out;
+  const ctx = await returnProductContext(rows.map((r) => r.id));
+  for (const r of rows) {
+    const c = ctx.get(r.id);
+    if (!c || c.itemsBasis === "NONE") continue;
+    out.set(
+      r.id,
+      c.items.map((i) => ({ name: i.name, variant: [i.color, i.size].filter(Boolean).join(", "), qty: i.quantity })),
+    );
+  }
+  return out;
 }

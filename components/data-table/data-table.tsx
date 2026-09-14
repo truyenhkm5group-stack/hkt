@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
+import { useNavTransition } from "@/components/nav-progress";
 import {
   type ColumnDef,
   type Row,
@@ -18,6 +19,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Inbox } 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { STICKY_TOOLBAR } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 import { DataTablePagination } from "@/components/data-table/pagination";
 
@@ -91,7 +93,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   const parsers = React.useMemo(() => sortParsers(defaultSort, defaultDir), [defaultSort, defaultDir]);
   // Sắp xếp / phân trang đều đi vòng lên máy chủ. Không bắt trạng thái chờ thì bảng đứng im vài
   // trăm mili-giây sau khi bấm và người dùng tưởng không ăn.
-  const [dangTai, startTransition] = React.useTransition();
+  const [dangTai, startTransition] = useNavTransition();
   const [params, setParams] = useQueryStates(parsers, { shallow: false, history: "push", startTransition });
   // Gom nhóm; dòng cha là bản tổng hợp do trang cung cấp. Thứ tự NHÓM phải theo chính cột đang sắp xếp:
   // máy chủ chỉ sắp xếp được từng mẫu mã, còn dòng cha là số TỔNG HỢP, nên nếu giữ thứ tự xuất hiện thì
@@ -179,7 +181,7 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       {selectable && selectedRows.length > 0 && bulkActions ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+        <div className={cn(STICKY_TOOLBAR, "flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-card px-3 py-2 text-sm shadow-[var(--shadow-card)]")}>
           <span className="font-semibold">Đã chọn {selectedRows.length}</span>
           <div className="flex flex-wrap items-center gap-2">{bulkActions(selectedRows, clearSelection)}</div>
           <Button variant="ghost" size="sm" className="ml-auto" onClick={clearSelection}>
@@ -194,18 +196,25 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
           <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => { setAllOpen(false); setExpanded({}); }}>Thu gọn tất cả</button>
         </div>
       ) : null}
-      <div className={cn("overflow-hidden rounded-xl border bg-card transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
-        <div className="overflow-x-auto">
+      {/*
+        TIÊU ĐỀ CỘT DÍNH LẠI KHI CUỘN — luật nằm ở primitive `components/ui/table.tsx` và
+        `lib/constants/table-ux.ts`: khung bảng luôn là khung cuộn có trần chiều cao (biến
+        `--table-max-height`), tiêu đề dính ở mép trên khung. Bảng ngắn hơn trần thì không có thanh
+        cuộn, bảng dài thì cuộn bên trong và thanh phân trang luôn thấy được. Không còn ngưỡng "12
+        dòng": trước đây bảng ≤ 12 dòng chảy theo trang với mốc 3.5rem, và mốc đó đẩy tiêu đề đè lên
+        hai dòng đầu (xem giải thích ở table-ux.ts).
+      */}
+      <div className={cn("overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)] transition-opacity", dangTai && "pointer-events-none opacity-60")} aria-busy={dangTai}>
           <Table className={cn(dense && "[&_td]:py-1.5")}>
-            <TableHeader className="bg-muted/50">
+            <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id} className="hover:bg-transparent">
+                <TableRow key={headerGroup.id} className="border-0 hover:bg-transparent">
                   {headerGroup.headers.map((header) => {
                     const canSort = header.column.id !== "__select" && (header.column.getCanSort() || sortableSet.has(header.column.id));
                     const sorted: false | "asc" | "desc" = params.sort === header.column.id ? (params.dir === "asc" ? "asc" : "desc") : false;
                     const align = (header.column.columnDef.meta as { align?: string } | undefined)?.align;
                     return (
-                      <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }} className={cn("h-10 text-[11.5px] font-semibold uppercase tracking-wide text-muted-foreground", align === "right" && "text-right")}>
+                      <TableHead key={header.id} style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }} className={cn("text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground", align === "right" && "text-right")}>
                         {header.isPlaceholder ? null : canSort ? (
                           <button type="button" className={cn("inline-flex items-center gap-1 uppercase hover:text-foreground", align === "right" && "flex-row-reverse")} onClick={() => toggleSort(header.column.id)}>
                             {flexRender(header.column.columnDef.header, header.getContext())}
@@ -317,7 +326,6 @@ export function DataTable<T>({ columns, data, pageCount, total, rowHref, getRowI
               )}
             </TableBody>
           </Table>
-        </div>
         {footer}
         <DataTablePagination page={params.page} pageSize={params.pageSize} pageCount={pageCount} total={total} onPageChange={(page) => void setParams({ page })} onPageSizeChange={(pageSize) => void setParams({ pageSize, page: 1 })} />
       </div>

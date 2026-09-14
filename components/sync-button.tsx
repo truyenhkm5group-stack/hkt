@@ -44,12 +44,14 @@ export function SyncButton({
       if (!res.ok || body.ok === false) {
         toast.error(body.error || body.message || `Không thể chạy đồng bộ (${res.status})`);
       } else if (body.started) {
-        toast.info("Đã bắt đầu đồng bộ nền — kết quả sẽ hiện ở Lịch sử đồng bộ.");
+        // Job vừa BẮT ĐẦU, số trên màn hình chưa đổi — làm mới ngay là dựng lại trang vô ích và
+        // tạo cảm giác "bấm không ăn". Sự kiện realtime sẽ kéo trang lên số mới khi job xong.
+        toast.info("Đã bắt đầu đồng bộ nền — trang tự cập nhật khi xong (xem Lịch sử đồng bộ).");
       } else {
         const s = body.result?.summary;
         toast.success(s ? `Xong: mới ${s.imported} · cập nhật ${s.updated} · bỏ qua ${s.skipped} · lỗi ${s.failed}` : "Đồng bộ hoàn tất");
+        startTransition(() => router.refresh());
       }
-      startTransition(() => router.refresh());
       onDone?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Lỗi mạng");

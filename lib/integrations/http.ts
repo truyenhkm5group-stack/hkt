@@ -4,10 +4,44 @@ export class IntegrationError extends Error {
     public readonly status = 502,
     public readonly retryable = false,
     public readonly body?: unknown,
+    /**
+     * LỜI TỪ CHỐI NGHIỆP VỤ CỦA ĐỐI TÁC, tách khỏi mã HTTP.
+     *
+     * Hai chuyện khác hẳn nhau vẫn hay bị in chung một dòng: "máy chủ trả 400" và "Viettel Post nói
+     * vận đơn không thuộc tài khoản này". Cái đầu nói đường truyền, cái sau nói phải làm gì tiếp.
+     * Người vận hành cần cái sau; ERP trước đây chỉ hiện cái đầu.
+     */
+    public readonly carrier?: { status: number | null; message: string; detail?: string },
   ) {
     super(message);
     this.name = "IntegrationError";
   }
+}
+
+/**
+ * ═══════════ LÔI LỜI TỪ CHỐI RA KHỎI PHONG BÌ, DÙ NÓ NẰM Ở TẦNG NÀO ═══════════
+ *
+ * Bản cũ chỉ đọc `message` ở TẦNG NGOÀI CÙNG. Đối tác nào đặt lý do ở `error_description`, ở
+ * `data.message`, hay trong một mảng `errors[]` thì ERP in ra 200 ký tự JSON thô — và người đọc
+ * không rút ra được việc phải làm.
+ *
+ * Trả về chuỗi rỗng khi không tìm thấy gì: KHÔNG bịa ra một câu nghe hợp lý.
+ */
+export function loiNghiepVu(parsed: unknown, tho: string): { message: string; detail?: string } {
+  const chuoi = (v: unknown): string => (typeof v === "string" && v.trim() ? v.trim() : "");
+  const r = (parsed ?? {}) as Record<string, unknown>;
+  const ungVien: string[] = [];
+  for (const k of ["message", "Message", "error_description", "errorMessage", "error_message", "detail", "title", "msg"]) ungVien.push(chuoi(r[k]));
+  if (typeof r.error === "string") ungVien.push(chuoi(r.error));
+  const data = (r.data ?? {}) as Record<string, unknown>;
+  if (data && typeof data === "object" && !Array.isArray(data)) for (const k of ["message", "Message", "error", "detail"]) ungVien.push(chuoi(data[k]));
+  const mang = Array.isArray(r.errors) ? r.errors : Array.isArray((r.error as { errors?: unknown[] })?.errors) ? ((r.error as { errors: unknown[] }).errors as unknown[]) : [];
+  const chiTiet = mang
+    .map((e) => (typeof e === "string" ? e : chuoi((e as Record<string, unknown>)?.message) || chuoi((e as Record<string, unknown>)?.field)))
+    .filter(Boolean)
+    .join(" · ");
+  const message = ungVien.find(Boolean) ?? "";
+  return { message: message || chiTiet || tho.slice(0, 200), detail: chiTiet || undefined };
 }
 
 /**
@@ -84,8 +118,9 @@ export async function fetchJson(url: string | URL, options: FetchJsonOptions): P
     }
 
     if (!response.ok) {
-      const message = typeof (parsed as { message?: unknown })?.message === "string" ? (parsed as { message: string }).message : text.slice(0, 200);
-      throw new IntegrationError(`${serviceName}: HTTP ${response.status} ${message}`.trim(), response.status, false, parsed ?? text);
+      const loi = loiNghiepVu(parsed, text);
+      const maDoiTac = typeof (parsed as { status?: unknown })?.status === "number" ? ((parsed as { status: number }).status) : null;
+      throw new IntegrationError(`${serviceName}: HTTP ${response.status} ${loi.message}`.trim(), response.status, false, parsed ?? text, { status: maDoiTac, message: loi.message, detail: loi.detail });
     }
 
     if (parsed === null && text) {

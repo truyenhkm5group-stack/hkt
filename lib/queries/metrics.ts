@@ -1,8 +1,9 @@
-import { and, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
-import { schema } from "@/db";
+import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { ORDER_COGS } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { orderCogsFast } from "@/lib/queries/cogs";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -62,14 +63,19 @@ export function metricScope(period: Period, population: MetricPopulation = "conf
 
 // ───────────────────────── Vị ngữ theo kết quả đơn ─────────────────────────
 // Tất cả đều đi qua ORDER_OUTCOME; không nơi nào được viết lại điều kiện stage.
+//
+// ĐỌC BẢNG ĐÃ TÍNH SẴN, KHÔNG TÍNH LẠI. `ORDER_OUTCOME_FAST` = coalesce(bảng dẫn xuất, biểu thức
+// chuẩn) nên KẾT QUẢ KHÔNG ĐỔI — chỉ đổi *lúc nào* nó được tính. Đo trên production 10/09/2026:
+// những hằng số này từng dùng biểu thức SỐNG, khiến trang chủ mất 40,7 giây và quá hạn 60 giây
+// trong smoke. Lớp tăng tốc P0.3 đã có sẵn, chỉ là chưa ai nối vào đây.
 
-export const IS_DELIVERED = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
+export const IS_DELIVERED = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
 /** `RETURNED` và `RETURNED_BY_RULE` LUÔN gộp làm một trong mọi tổng hợp (đặc tả mục 6). */
-export const IS_RETURNED = sql`${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE')`;
-export const IS_CANCELLED = sql`${ORDER_OUTCOME} = 'CANCELLED'`;
-export const IS_OPEN = sql`${ORDER_OUTCOME} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+export const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+export const IS_CANCELLED = sql`${ORDER_OUTCOME_FAST} = 'CANCELLED'`;
+export const IS_OPEN = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
 /** Đơn ĐÃ KẾT THÚC — mẫu số của tỷ lệ giao thành công. Đơn huỷ KHÔNG nằm trong mẫu số. */
-export const IS_FINISHED = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
 // ───────────────────────── Tiền ─────────────────────────
 
@@ -77,24 +83,32 @@ export const IS_FINISHED = sql`${ORDER_OUTCOME} in ('DELIVERED','RETURNED','RETU
  * DOANH THU LÊN ĐƠN (booked revenue) — giá trị đơn khách đã chốt, chưa nói gì về việc giao được
  * hay thu được tiền. Loại đơn huỷ.
  */
-export const BOOKED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`;
+export const BOOKED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
 
 /** DOANH THU GIAO THÀNH CÔNG (delivered revenue) — giá trị đơn ĐÃ tới tay khách. */
 export const DELIVERED_REVENUE = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_DELIVERED}), 0)`;
 
 /** GIÁ VỐN của đơn giao thành công — PHẢI cùng population với DELIVERED_REVENUE. */
-export const DELIVERED_COGS = sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${IS_DELIVERED}), 0)`;
+export const DELIVERED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${IS_DELIVERED}), 0)`;
 
 /** Giá vốn của mọi đơn không huỷ — dùng cho báo cáo danh nghĩa. */
-export const BOOKED_COGS = sql<number>`coalesce(sum(${ORDER_COGS}) filter (where ${ORDER_OUTCOME} <> 'CANCELLED'), 0)`;
+export const BOOKED_COGS = sql<number>`coalesce(sum(${orderCogsFast()}) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED'), 0)`;
 
 // ───────────────────────── Đếm ─────────────────────────
 
-export const COUNT_BOOKED = sql<number>`count(*) filter (where ${ORDER_OUTCOME} <> 'CANCELLED')`;
+export const COUNT_BOOKED = sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} <> 'CANCELLED')`;
 export const COUNT_DELIVERED = sql<number>`count(*) filter (where ${IS_DELIVERED})`;
 export const COUNT_RETURNED = sql<number>`count(*) filter (where ${IS_RETURNED})`;
 export const COUNT_CANCELLED = sql<number>`count(*) filter (where ${IS_CANCELLED})`;
 export const COUNT_OPEN = sql<number>`count(*) filter (where ${IS_OPEN})`;
+/**
+ * Đơn ERP KHÔNG kết luận được vì không có chứng từ ĐVVC nào.
+ *
+ * Tách riêng khỏi `COUNT_OPEN`: gộp vào "chưa kết thúc" thì chúng trông như đơn đang chạy bình
+ * thường, trong khi thật ra ERP không biết gói hàng ở đâu — đó là việc cần người xử lý, không phải
+ * việc chờ đợi.
+ */
+export const COUNT_UNKNOWN = sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'UNKNOWN')`;
 
 /**
  * TỶ LỆ GIAO THÀNH CÔNG = giao thành công ÷ (giao thành công + hoàn), tính trên ĐƠN ĐÃ KẾT THÚC.
@@ -109,4 +123,83 @@ export function successRate(delivered: number, returned: number): number | null 
 /** Giá trị đơn trung bình. Không có đơn nào thì 0 (đếm được là 0, không phải chưa biết). */
 export function averageOrderValue(revenue: number, orders: number): number {
   return orders ? Math.round(revenue / orders) : 0;
+}
+
+// ─────────────── BẢNG DẪN XUẤT CẤP ĐƠN (tăng tốc, KHÔNG đổi công thức) ───────────────
+
+/**
+ * Bảng dẫn xuất một-dòng-một-đơn với `ORDER_OUTCOME` và `ORDER_COGS` đã tính sẵn.
+ *
+ * Vì sao: Postgres nội tuyến hai biểu thức đó (mỗi cái chứa nhiều truy vấn con tương quan) vào
+ * TỪNG cột gộp. Thẻ KPI Tổng quan có 10 cột như vậy ⇒ mỗi đơn bị tính kết quả 10 lần. Gói vào bảng
+ * dẫn xuất kèm rào `OUTCOME_FENCE` thì mỗi đơn tính đúng một lần.
+ *
+ * Định nghĩa chỉ số KHÔNG đổi: vẫn cùng `ORDER_OUTCOME`, cùng population, cùng trường ngày. Các
+ * hằng số gộp nội tuyến ở trên vẫn giữ nguyên để đối chiếu và để các truy vấn chưa chuyển dùng
+ * tiếp — hai cách phải luôn ra cùng con số (tests/metric-shape-consistency.test.ts).
+ */
+export function orderMetricFacts(db: Db, where: SQL | undefined) {
+  return db
+    .select({
+      orderId: schema.orders.id,
+      orderStage: schema.orders.stage,
+      source: schema.orders.source,
+      insertedAt: schema.orders.insertedAt,
+      day: sql<string>`to_char(${schema.orders.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`.as("day"),
+      revenue: schema.orders.totalPriceAfterDiscount,
+      cogs: sql<number>`coalesce(${schema.canonicalOrderOutcome.recognizedCogs}, ${schema.canonicalOrderOutcome.cogs}, ${orderCogsFast()})`.as("order_cogs"),
+      outcome: sql<string>`coalesce(${schema.canonicalOrderOutcome.outcome}, ${ORDER_OUTCOME_FAST})`.as("outcome"),
+    })
+    .from(schema.orders)
+    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT trong return-rate.ts).
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
+    /**
+     * NỐI bảng dẫn xuất, không tra từng dòng.
+     *
+     * `outcomeColumn()` / `orderCogsColumn()` là truy vấn con TƯƠNG QUAN. Dùng chúng ở đây thì
+     * Postgres gắn cả chuỗi dự phòng vào phép quét `orders` — `EXPLAIN ANALYZE` trên production
+     * 10/09/2026 đo được **9.053ms cho một phép quét 2.443 dòng chỉ tốn 350 buffer**, tức toàn bộ
+     * thời gian là biểu thức chạy trên từng dòng.
+     *
+     * Phép nối này khiến `coalesce(m.outcome, …)` chạm được cột đã nối trước, nên nhánh đắt chỉ
+     * chạy cho dòng THẬT SỰ cũ. Điều kiện tươi mới nằm ngay trong phép nối vì đó là chỗ duy nhất
+     * bảo đảm dòng cũ không lọt qua.
+     */
+    .leftJoin(
+      schema.canonicalOrderOutcome,
+      and(
+        eq(schema.canonicalOrderOutcome.orderId, schema.orders.id),
+        sql`coalesce(${schema.canonicalOrderOutcome.shipmentId}, '') = coalesce(${schema.shipments.id}, '')`,
+        eq(schema.canonicalOrderOutcome.logicVersion, CANONICAL_OUTCOME_VERSION),
+        sql`${schema.canonicalOrderOutcome.computedAt} >= ${schema.orders.updatedAt}`,
+        sql`(${schema.shipments.id} is null or ${schema.canonicalOrderOutcome.computedAt} >= ${schema.shipments.updatedAt})`,
+      ),
+    )
+    .where(where)
+    .offset(OUTCOME_FENCE)
+    .as("metric_facts");
+}
+
+export type OrderMetricFacts = ReturnType<typeof orderMetricFacts>;
+
+/** Bộ cột gộp đọc trên bảng dẫn xuất — bản sao 1:1 của các hằng số nội tuyến ở trên. */
+export function factMetrics(base: OrderMetricFacts) {
+  const delivered = sql`${base.outcome} = 'DELIVERED'`;
+  const returned = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const booked = sql`${base.outcome} <> 'CANCELLED'`;
+  return {
+    isDelivered: delivered,
+    isReturned: returned,
+    isBooked: booked,
+    countBooked: sql<number>`count(*) filter (where ${booked})`,
+    countDelivered: sql<number>`count(*) filter (where ${delivered})`,
+    countReturned: sql<number>`count(*) filter (where ${returned})`,
+    countCancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+    countOpen: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))`,
+    countUnknown: sql<number>`count(*) filter (where ${base.outcome} = 'UNKNOWN')`,
+    bookedRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${booked}), 0)`,
+    bookedCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${booked}), 0)`,
+    deliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${delivered}), 0)`,
+    deliveredCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${delivered}), 0)`,
+  };
 }
