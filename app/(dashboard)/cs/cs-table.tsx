@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { AlarmClock, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Pencil, RefreshCw, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CaseDialog } from "@/app/(dashboard)/cs/case-dialog";
+import { useNavTransition } from "@/components/nav-progress";
 import { CopyButton } from "@/components/misc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,19 +99,26 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
 
   return (
     <div className="overflow-x-auto">
-      {/* Hai cột mới (Phát sinh · Ghi chú) nên bề ngang tối thiểu phải nới theo, nếu không các cột
-          tự bóp lại và chữ trong ô ghi chú bị cắt còn hai từ. Bảng nằm trong `overflow-x-auto`. */}
-      <Table className="min-w-[1320px]">
+      {/*
+        TÁM CỘT PHẢI VỪA MÀN HÌNH LÀM VIỆC.
+
+        Thêm hai cột (Phát sinh · Ghi chú) mà giữ nguyên bề ngang cũ thì cột HÀNH ĐỘNG — cột được
+        bấm nhiều nhất — trôi ra ngoài mép phải và người trực phải cuộn ngang cho MỌI thao tác.
+        Nên bề ngang tối thiểu đặt ở 1240px: vừa một màn 1440 (trừ thanh bên ~256px) mà chữ trong ô
+        ghi chú vẫn đủ chỗ đọc một câu. Hẹp hơn nữa thì ô ghi chú chỉ còn hai từ và cột ấy vô dụng.
+        Bảng vẫn nằm trong `overflow-x-auto` cho màn nhỏ hơn.
+      */}
+      <Table className="min-w-[1240px]">
         <TableHeader>
           <TableRow>
-            <TableHead>Case · việc cần làm</TableHead>
-            <TableHead>Khách / đơn</TableHead>
-            <TableHead className="w-[170px]">Phụ trách</TableHead>
-            <TableHead className="w-[105px]"><SortHeader field="createdAt" label="Phát sinh" /></TableHead>
-            <TableHead className="w-[120px]">Tuổi / hẹn</TableHead>
-            <TableHead className="w-[150px]">Trạng thái</TableHead>
-            <TableHead className="w-[210px]">Ghi chú</TableHead>
-            <TableHead className="w-[300px]">Hành động</TableHead>
+            <TableHead className="min-w-[240px]">Case · việc cần làm</TableHead>
+            <TableHead className="min-w-[180px]">Khách / đơn</TableHead>
+            <TableHead className="w-[152px]">Phụ trách</TableHead>
+            <TableHead className="w-[92px]"><SortHeader field="createdAt" label="Phát sinh" /></TableHead>
+            <TableHead className="w-[108px]">Tuổi / hẹn</TableHead>
+            <TableHead className="w-[136px]">Trạng thái</TableHead>
+            <TableHead className="w-[180px]">Ghi chú</TableHead>
+            <TableHead className="w-[252px]">Hành động</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -147,7 +155,7 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
 
             return (
               <TableRow key={r.id} className={cn(isClosed(status) && "opacity-60", busy && "bg-muted/40")}>
-                <TableCell className="max-w-[340px] align-top">
+                <TableCell className="max-w-[300px] align-top">
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold">{CS_KIND_LABEL[r.kind as CsKind] ?? r.kind}</span>
                     {r.domain === "LOGISTICS" ? <span className="rounded bg-sky-100 px-1 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">Vận đơn</span> : null}
@@ -167,7 +175,7 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   Pancake), mã vận đơn (sang trang Viettel Post), mã đơn. Mỗi chuỗi có nút chép
                   ngay cạnh nó; `group` ở đây để nút hiện rõ khi rê chuột lên cả ô.
                 */}
-                <TableCell className="group align-top text-sm">
+                <TableCell className="group max-w-[200px] align-top text-sm">
                   <div>{r.customerName || "—"}</div>
                   {r.customerPhone ? (
                     <div className="flex items-center gap-0.5">
@@ -276,8 +284,9 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                     {overdue ? " · quá hạn" : ""}
                   </div>
                   {followUpAt ? (
-                    <div className={cn("mt-0.5 inline-flex items-center gap-1", followUpAt.getTime() <= Date.now() ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")} title={`Hẹn lại ${formatDateTime(followUpAt)}`}>
-                      <AlarmClock className="size-3" /> {formatDateTime(followUpAt)}
+                    <div className={cn("mt-0.5 inline-flex items-center gap-1 whitespace-nowrap", followUpAt.getTime() <= Date.now() ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")} title={`Hẹn lại ${formatDateTime(followUpAt)}`}>
+                      {/* Mốc NGẮN trên dòng, ngày tháng năm đầy đủ trong tooltip — cùng cách cột Phát sinh. */}
+                      <AlarmClock className="size-3" /> {vnShortStamp(followUpAt)}
                     </div>
                   ) : null}
                 </TableCell>
@@ -306,7 +315,13 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   Nút "+ Ghi chú" đứng ngay trong cột — popover tại chỗ, lưu xong vẽ thẳng lên
                   dòng, không mở trang khác và không tải lại bảng.
                 */}
-                <TableCell className="align-top">
+                {/*
+                  `max-w` PHẢI đặt trên chính ô. Bảng dùng bố cục TỰ ĐỘNG, nên `w-[180px]` ở tiêu đề
+                  chỉ là gợi ý: một ghi chú dài kéo ô rộng ra 384px (đo tại chỗ 14/09/2026) và đẩy
+                  cột HÀNH ĐỘNG — cột được bấm nhiều nhất — ra ngoài mép phải. `truncate` bên trong
+                  chỉ có hiệu lực khi hộp đã bị chặn.
+                */}
+                <TableCell className="max-w-[180px] align-top">
                   <div className="flex items-start gap-1">
                     <div className="min-w-0 flex-1">
                       {note?.lastNote ? (
@@ -528,13 +543,20 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
  * thẳng vào `orderBy` của truy vấn, nên trang 2 vẫn đúng thứ tự.
  */
 function SortHeader({ field, label }: { field: string; label: string }) {
+  /*
+    `startTransition` KHÔNG phải để có thanh tiến trình — nếu thiếu nó, lần bấm đầu tiên đổi URL
+    mà bảng KHÔNG tải lại. Đo tại chỗ 14/09/2026: URL thành `dir=asc` nhưng mười dòng vẫn là mười
+    dòng của `dir=desc`; mở thẳng đúng URL ấy thì thứ tự đúng. Cùng cách `DataTable` và
+    `UrlPagination` đang làm — một lần nữa vì cùng một lý do.
+  */
+  const [dangTai, startTransition] = useNavTransition();
   const [params, setParams] = useQueryStates(
     {
       page: parseAsInteger.withDefault(1),
       sort: parseAsString.withDefault("createdAt").withOptions({ clearOnDefault: false }),
       dir: parseAsString.withDefault("desc").withOptions({ clearOnDefault: false }),
     },
-    { shallow: false, history: "push" },
+    { shallow: false, history: "push", startTransition },
   );
   const dangSort = params.sort === field;
   const giam = params.dir !== "asc";
@@ -542,7 +564,7 @@ function SortHeader({ field, label }: { field: string; label: string }) {
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1 font-medium hover:text-foreground"
+      className={cn("inline-flex items-center gap-1 font-medium hover:text-foreground", dangTai && "opacity-60")}
       onClick={() => void setParams({ sort: field, dir: keTiep, page: 1 })}
       title={keTiep === "desc" ? "Sắp xếp: mới nhất trước" : "Sắp xếp: cũ nhất trước"}
       aria-label={`${label} — ${keTiep === "desc" ? "sắp xếp mới nhất trước" : "sắp xếp cũ nhất trước"}`}

@@ -489,10 +489,23 @@ export async function testCsWorkqueue(db: Db) {
   assert.equal(new Set([...cuT1, ...cuT2]).size, cuT1.length + cuT2.length, "không dòng nào xuất hiện ở cả hai trang");
   const moiT1 = await trang(1, "desc");
   assert.notDeepEqual(moiT1, cuT1, "đổi chiều mà trang 1 không đổi nghĩa là sắp xếp đang bị bỏ qua");
-  const nguonSort = nguonBang.slice(nguonBang.indexOf("function SortHeader"));
-  assert.match(nguonSort.slice(0, 900), /clearOnDefault: false/, "thiếu cờ này thì sang trang 2 là mất sắp xếp");
-  assert.match(nguonSort.slice(0, 900), /shallow: false/, "sắp xếp chạy ở MÁY CHỦ nên URL phải nạp lại dữ liệu");
-  assert.match(nguonSort.slice(0, 900), /page: 1/, "đổi sắp xếp phải về trang 1 — đứng ở trang 7 của thứ tự cũ là vô nghĩa");
+  /*
+    Cắt ĐÚNG thân hàm, không cắt theo số ký tự: một lần thêm chú thích vào hàm là cửa sổ 900 ký tự
+    trượt qua chỗ cần kiểm và bài này lặng lẽ thành vô nghĩa (đã xảy ra 14/09/2026).
+  */
+  const tuSortHeader = nguonBang.slice(nguonBang.indexOf("function SortHeader"));
+  const nguonSort = tuSortHeader.slice(0, tuSortHeader.indexOf("\n}\n") + 2);
+  assert.match(nguonSort, /clearOnDefault: false/, "thiếu cờ này thì sang trang 2 là mất sắp xếp");
+  assert.match(nguonSort, /shallow: false/, "sắp xếp chạy ở MÁY CHỦ nên URL phải nạp lại dữ liệu");
+  assert.match(nguonSort, /page: 1/, "đổi sắp xếp phải về trang 1 — đứng ở trang 7 của thứ tự cũ là vô nghĩa");
+  /*
+    `startTransition` KHÔNG phải để có thanh tiến trình cho đẹp.
+
+    Đo tại chỗ trên bản dựng production 14/09/2026: thiếu nó thì lần bấm đầu tiên ĐỔI URL
+    (`dir=asc`) mà bảng vẫn là mười dòng của `dir=desc`; mở thẳng đúng URL ấy lại ra thứ tự đúng.
+    Nghĩa là trang không tải lại — một lỗi câm, vì URL trông như đã đổi.
+  */
+  assert.match(nguonSort, /startTransition/, "thiếu startTransition thì bấm sắp xếp đổi URL mà bảng KHÔNG tải lại — cùng lý do DataTable và UrlPagination đều truyền nó");
 
   console.log(
     `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ · hàng đợi V2: tự nhận / trưởng nhóm giao / chuyển / bỏ gán đều đi bằng KHOÁ tài khoản (khoá lạ bị từ chối, không ghi bừa) · ghi chú gần nhất có người + mốc + số lượng và KHÔNG đè bằng chứng · cột Phát sinh bám created_at · sắp xếp hai chiều chạy ở máy chủ và không mất khi sang trang`,
