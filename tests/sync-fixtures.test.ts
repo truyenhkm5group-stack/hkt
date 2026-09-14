@@ -957,6 +957,25 @@ async function main() {
   // Ảnh chụp cũng thắng quảng cáo — cùng một lý do.
   const aSnapAd = attributionShares({ byPage: [{ pageId: "P1", value: 500, snapshotMarketerId: "C", adMarketerId: "B" }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
   assert.equal(aSnapAd.shares.get("C"), 1, "ảnh chụp fanpage thắng cả quảng cáo");
+
+  /* CA THẬT: MỘT FANPAGE ĐỔI NGƯỜI PHỤ TRÁCH GIỮA KỲ.
+     Cùng page P1, đơn nửa đầu kỳ chụp lại là của C, nửa sau của D. Một ánh xạ `page → người` chỉ
+     giữ được MỘT tên nên nó buộc phải trả cả 1.000 cho một trong hai; ảnh chụp giữ đúng hai phần.
+     Đây là cả lý do bảng gán phẳng phải tụt xuống hàng lấp chỗ. */
+  const doiNguoiGiuaKy = attributionShares({
+    byPage: [
+      { pageId: "P1", value: 600, snapshotMarketerId: "C" },
+      { pageId: "P1", value: 400, snapshotMarketerId: "D" },
+    ],
+    pageMarketers: pm,
+    adShares: new Map(),
+    ownerId: "A",
+  });
+  assert.ok(Math.abs((doiNguoiGiuaKy.shares.get("C") ?? 0) - 0.6) < 1e-9, "đổi người giữa kỳ: phần trước vẫn của C");
+  assert.ok(Math.abs((doiNguoiGiuaKy.shares.get("D") ?? 0) - 0.4) < 1e-9, "và phần sau của D — một ánh xạ page→người phẳng không mô tả nổi ca này");
+  assert.ok(!doiNguoiGiuaKy.shares.has("A"), "người đang giữ page hôm nay KHÔNG được nhận gì của kỳ đã qua");
+  assert.equal(doiNguoiGiuaKy.snapshotValue, 1000, "cả 1.000 đi bằng nguồn có thẩm quyền");
+  assert.equal(doiNguoiGiuaKy.legacyPageValue, 0, "và không đồng nào phải dùng bảng gán phẳng");
   const a3 = attributionShares({ byPage: [{ pageId: "P9", value: 500 }], pageMarketers: pm, adShares: new Map(), ownerId: "A" });
   assert.equal(a3.mode, "owner", "không page gán, không QC → về chủ mã");
   assert.equal(attributionShares({ byPage: [], pageMarketers: pm, adShares: new Map([["A", 0.2], ["B", 0.8]]), ownerId: null }).shares.get("B"), 0.8, "không có page → theo QC như cũ");
