@@ -21,6 +21,28 @@
 
 Không có cờ `--force` trong `staging-up.sh`. Một cờ như vậy sẽ được dùng đúng vào lúc không nên dùng.
 
+## 0.1 Một điều phải biết trước: nhánh này đang đi sau `main`
+
+`staging-up.sh` tải nhánh `claude/ai-workforce-sales-v1`. Nhánh ấy tách ra từ `main` ở migration
+`0034_perf_indexes.sql` và từ đó `main` đã đi thêm **66 commit / 46 migration** (tới `0082`). Bản
+chạy thử vì vậy là **ERP của thời điểm tách nhánh** cộng thêm nhân sự AI — không có những phần ERP
+làm sau đó.
+
+Hai hệ quả, tách bạch:
+
+1. **Với việc chấm chất lượng nhân sự AI: không ảnh hưởng.** Nhân sự AI đọc sản phẩm / mẫu mã /
+   giá / tồn qua cổng công cụ, và những bảng đó không đổi trong 46 migration kia. CSDL staging là
+   CSDL trắng nên chuỗi migration `0000–0036` của nhánh này chạy sạch từ đầu (đang được chứng minh
+   mỗi lần `npm test` dựng CSDL PGlite mới).
+2. **Với việc nhập về `main`: có va chạm SỐ THỨ TỰ phải xử lý.** `0035` và `0036` trên `main` đã là
+   `manual_verification_source` và `expense_cost_allocation`. Hai migration của nhánh này phải được
+   **đánh số lại** (thành `0083`/`0084` hoặc số trống kế tiếp lúc nhập) trước khi nhập — nếu không,
+   máy chủ production sẽ hoặc bỏ qua chúng, hoặc chạy nhầm thứ tự. **Không** phải va chạm tên bảng:
+   `main` chưa có bảng `ai_*`/`sales_*` nào.
+
+Việc đánh số lại là việc của lượt nhập nhánh, không phải việc của lượt dựng bản chạy thử — nêu ở
+đây để không ai quên.
+
 ## 1. Danh tính tách khỏi production
 
 | Thành phần | Production | Bản chạy thử |
