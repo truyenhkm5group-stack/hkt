@@ -85,6 +85,28 @@ select
 from sales_conversations;
 
 \echo ''
+\echo '════════ 5B. SỐ ĐO CƠ THỂ & Ý ĐỊNH — ĐỌC TỪ ai_runs.understanding ════════'
+\echo '(SalesState KHÔNG giữ số đo; chúng chỉ sống trong bản hiểu của từng lượt chạy)'
+select
+  count(*)                                                                as "lượt chạy",
+  count(*) filter (where nullif(understanding->'entities'->>'heightCm','') is not null) as "chiều cao",
+  count(*) filter (where nullif(understanding->'entities'->>'weightKg','') is not null) as "cân nặng",
+  count(*) filter (where nullif(understanding->'entities'->>'bustCm','')   is not null) as "vòng 1",
+  count(*) filter (where nullif(understanding->'entities'->>'waistCm','')  is not null) as "vòng 2",
+  count(*) filter (where nullif(understanding->'entities'->>'hipCm','')    is not null) as "vòng 3",
+  count(*) filter (where understanding->'intents' ? 'PURCHASE_INTENT')    as "ý định mua",
+  count(*) filter (where understanding->'intents' ? 'SIZE_QUESTION')      as "hỏi size",
+  count(*) filter (where understanding->'intents' ? 'PRICE_QUESTION')     as "hỏi giá",
+  count(*) filter (where understanding->'intents' ? 'SHIPPING_QUESTION')  as "hỏi ship"
+from ai_runs where subject_type = 'CONVERSATION' and understanding is not null;
+
+\echo ''
+\echo 'Ý định nhận ra được, đếm theo từng loại:'
+select y as "ý định", count(*) as "lượt"
+from ai_runs, lateral jsonb_array_elements_text(coalesce(understanding->'intents', '[]'::jsonb)) y
+where subject_type = 'CONVERSATION' group by y order by count(*) desc;
+
+\echo ''
 \echo '════════ 6. GIAI ĐOẠN HỘI THOẠI ════════'
 select stage as "giai đoạn", count(*) as "số hội thoại"
 from sales_conversations group by stage order by count(*) desc;
@@ -96,11 +118,15 @@ from ai_runs where subject_type = 'CONVERSATION' group by status order by count(
 
 \echo ''
 \echo 'Lý do chuyển người / leo nấc:'
+\echo '(ghi nhận khi CHÍNH SÁCH có áp — KHÔNG đồng nghĩa lượt này đã chuyển người.'
+\echo ' Số lượt thật sự chuyển người là dòng HANDED_OFF ở bảng trên.)'
 select coalesce(nullif(escalation_reason, ''), '(không)') as "lý do", count(*) as "số lượt"
 from ai_runs where subject_type = 'CONVERSATION' group by 1 order by count(*) desc;
 
 \echo ''
-\echo '════════ 8. CÔNG CỤ ERP ĐÃ GỌI — KHỚP SẢN PHẨM HỎNG Ở ĐÂU ════════'
+\echo '════════ 8. CÔNG CỤ ERP ĐÃ GỌI ════════'
+\echo '(cột "kết cục" nói CÔNG CỤ CHẠY XONG hay không — KHÔNG nói nó có tìm ra gì.'
+\echo ' Muốn biết có tìm ra sản phẩm không thì đọc bảng ngay bên dưới và khối 8B.)'
 select tool as "công cụ", outcome as "kết cục", count(*) as "lần",
        round(avg(latency_ms)::numeric, 0) as "ms trung bình"
 from ai_tool_calls group by tool, outcome order by count(*) desc;
@@ -116,6 +142,64 @@ select
 from ai_tool_calls where tool = 'product.search';
 
 \echo ''
+\echo ''
+\echo '════════ 8B. NHẬN DIỆN SẢN PHẨM — TẦNG NÀO KẾT LUẬN, TIN TỚI ĐÂU ════════'
+\echo '(NONE = không tầng nào đủ căn cứ. Đó là kết quả HỢP LỆ, khác hẳn việc chọn bừa một mẫu.)'
+select
+  source                                                as "tầng căn cứ",
+  count(*)                                              as "lượt",
+  count(*) filter (where product_id is not null)        as "kết luận được",
+  round(avg(confidence)::numeric, 2)                    as "tin cậy TB",
+  max(candidate_count)                                  as "ứng viên ngang điểm nhiều nhất"
+from sales_product_resolutions
+group by source order by count(*) desc;
+
+\echo ''
+\echo 'Tỷ lệ nhận diện được, tính trên LƯỢT CHẠY:'
+select
+  count(*)                                                                as "lượt giải",
+  count(*) filter (where product_id is not null)                          as "ra sản phẩm",
+  round(100.0 * count(*) filter (where product_id is not null) / nullif(count(*), 0), 1) as "tỷ lệ %",
+  count(*) filter (where product_id is null and candidate_count > 1)      as "nhập nhằng (>1 ứng viên)",
+  count(*) filter (where product_id is null and candidate_count = 0)      as "không ứng viên nào"
+from sales_product_resolutions;
+
+\echo ''
+\echo 'Vì sao KHÔNG kết luận được — mười lý do hay gặp nhất:'
+select left(evidence, 96) as "căn cứ ghi lại", count(*) as "lượt"
+from sales_product_resolutions where product_id is null
+group by left(evidence, 96) order by count(*) desc limit 10;
+
+\echo ''
+\echo 'BẢN ĐỒ QUẢNG CÁO → SẢN PHẨM đã học / đã được người đặt:'
+select
+  m.source                                   as "nguồn",
+  m.key_kind                                 as "loại khoá",
+  count(*)                                   as "số khoá",
+  count(*) filter (where m.product_id is not null) as "đã trỏ sản phẩm"
+from sales_ad_product_map m group by m.source, m.key_kind order by count(*) desc;
+
+\echo ''
+\echo 'TÍN HIỆU QUẢNG CÁO CÓ TRONG TIN NHẮN (nguyên liệu của tầng C):'
+select
+  count(*)                                        as "tin nhắn",
+  count(*) filter (where ad_id <> '')             as "có mã quảng cáo",
+  count(*) filter (where ad_description <> '')    as "có câu quảng cáo",
+  count(*) filter (where post_url <> '')          as "có đường dẫn bài",
+  count(*) filter (where has_attachment)          as "có đính kèm"
+from sales_messages;
+
+\echo ''
+\echo '════════ 8C. HAI HÀNH ĐỘNG — AN TOÀN vs CHẤT LƯỢNG ════════'
+\echo '(production_action = máy ĐƯỢC PHÉP làm gì · action = máy LẼ RA nên làm gì)'
+select
+  production_action                         as "được phép",
+  action                                    as "lẽ ra nên",
+  count(*)                                  as "lượt",
+  count(*) filter (where evaluation_only)   as "chỉ để chấm",
+  count(*) filter (where sent)              as "ĐÃ GỬI (phải 0)"
+from sales_suggestions group by production_action, action order by count(*) desc;
+
 \echo '════════ 9. LỖI GHI NHẬN ĐƯỢC ════════'
 select scope as "phạm vi", left(message, 90) as "thông báo", count(*) as "lần"
 from ai_errors group by scope, left(message, 90) order by count(*) desc limit 15;
@@ -152,28 +236,7 @@ select
   (select count(*) from ai_tool_calls where tool in ('order.create_draft','order.confirm') and outcome = 'OK') as "công cụ lên đơn CHẠY ĐƯỢC (phải 0)";
 
 \echo ''
-\echo '════════ 5B. SỐ ĐO CƠ THỂ & Ý ĐỊNH — ĐỌC TỪ ai_runs.understanding ════════'
-\echo '(SalesState KHÔNG giữ số đo; chúng chỉ sống trong bản hiểu của từng lượt chạy)'
-select
-  count(*)                                                                as "lượt chạy",
-  count(*) filter (where nullif(understanding->'entities'->>'heightCm','') is not null) as "chiều cao",
-  count(*) filter (where nullif(understanding->'entities'->>'weightKg','') is not null) as "cân nặng",
-  count(*) filter (where nullif(understanding->'entities'->>'bustCm','')   is not null) as "vòng 1",
-  count(*) filter (where nullif(understanding->'entities'->>'waistCm','')  is not null) as "vòng 2",
-  count(*) filter (where nullif(understanding->'entities'->>'hipCm','')    is not null) as "vòng 3",
-  count(*) filter (where understanding->'intents' ? 'PURCHASE_INTENT')    as "ý định mua",
-  count(*) filter (where understanding->'intents' ? 'SIZE_QUESTION')      as "hỏi size",
-  count(*) filter (where understanding->'intents' ? 'PRICE_QUESTION')     as "hỏi giá",
-  count(*) filter (where understanding->'intents' ? 'SHIPPING_QUESTION')  as "hỏi ship"
-from ai_runs where subject_type = 'CONVERSATION' and understanding is not null;
 
-\echo ''
-\echo 'Ý định nhận ra được, đếm theo từng loại:'
-select y as "ý định", count(*) as "lượt"
-from ai_runs, lateral jsonb_array_elements_text(coalesce(understanding->'intents', '[]'::jsonb)) y
-where subject_type = 'CONVERSATION' group by y order by count(*) desc;
-
-\echo ''
 \echo '════════ 13. TỪNG HỘI THOẠI — CHỌN VÍ DỤ TIÊU BIỂU ════════'
 \echo '(KHÔNG in nội dung tin khách: log của Actions là CÔNG KHAI. Chỉ in dấu hiệu có/không.)'
 select

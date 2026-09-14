@@ -34,6 +34,12 @@ export type NormalizedMessage = {
   sentAt: Date | null;
   hasAttachment: boolean;
   attachmentCount: number;
+  /** Mã quảng cáo khách đã bấm — tín hiệu sản phẩm mạnh nhất có thật. Rỗng = tin không kèm quảng cáo. */
+  adId?: string;
+  /** Câu quảng cáo (chữ của shop). Thường chứa thẳng tên mẫu. */
+  adDescription?: string;
+  postUrl?: string;
+  attachmentTypes?: string[];
   raw: Record<string, unknown>;
 };
 
@@ -271,6 +277,10 @@ export async function ingestMessage(
       text: message.text,
       hasAttachment: message.hasAttachment,
       attachmentCount: message.attachmentCount,
+      adId: message.adId ?? "",
+      adDescription: message.adDescription ?? "",
+      postUrl: message.postUrl ?? "",
+      attachmentTypes: message.attachmentTypes ?? [],
       platform: conversation.platform,
       ingestSource,
       contentHash: fingerprint,
@@ -481,9 +491,11 @@ function toNormalizedMessage(m: PancakeMessage): NormalizedMessage {
     fromName: m.fromName,
     sentAt: m.insertedAt,
     hasAttachment: m.hasAttachment,
-    // Pages API chỉ cho biết CÓ đính kèm hay không qua `attachments[]`; client hiện chỉ giữ cờ,
-    // nên 1 ở đây nghĩa là "có ít nhất một", không phải số đếm chính xác.
-    attachmentCount: m.hasAttachment ? 1 : 0,
+    attachmentCount: m.attachmentCount,
+    adId: m.adId,
+    adDescription: m.adDescription,
+    postUrl: m.postUrl,
+    attachmentTypes: m.attachmentTypes,
     raw: {},
   };
 }
@@ -496,7 +508,7 @@ export async function syncSalesConversations(
   options: { hours?: number; limit?: number; pageId?: string; maxConversations?: number } = {},
 ) {
   const settings = await getAiSettings();
-  if (!settings.enabled || !settings.ingestEnabled) return { skipped: true, reason: "Nạp hội thoại đang tắt", conversations: 0, messages: 0, events: 0, pages: [] as string[], errors: [] as string[] };
+  if (!settings.enabled || !settings.ingestEnabled) return { skipped: true, reason: "Nạp hội thoại đang tắt", conversations: 0, messages: 0, events: 0, skippedNoCustomer: 0, pages: [] as string[], errors: [] as string[] };
   const hours = Math.min(Math.max(options.hours ?? 6, 1), 24 * 7);
   const limit = Math.min(Math.max(options.limit ?? 60, 1), 300);
   // TRẦN CỨNG số hội thoại xử lý trong một lượt. Lần chạy thử đầu tiên phải NHỎ: nạp cả tài khoản
@@ -509,13 +521,15 @@ export async function syncSalesConversations(
   let conversations = 0;
   let messages = 0;
   let events = 0;
+  /** Hội thoại bị bỏ qua vì KHÁCH CHƯA NÓI CÂU NÀO — không tính vào trần, và phải nói ra. */
+  let boQua = 0;
   const errors: string[] = [];
 
   const allPages = await client.listPages();
   // Chọn ĐÚNG MỘT page khi được chỉ định. Lần chạy thử đầu tiên chỉ nên chạm vào một page.
   const pages = options.pageId ? allPages.filter((p) => p.id === options.pageId) : allPages;
   if (options.pageId && !pages.length) {
-    return { skipped: true, reason: `Không thấy page ${options.pageId} trong các page đọc được`, conversations: 0, messages: 0, events: 0, pages: allPages.map((p) => p.id), errors: [] as string[] };
+    return { skipped: true, reason: `Không thấy page ${options.pageId} trong các page đọc được`, conversations: 0, messages: 0, events: 0, skippedNoCustomer: 0, pages: allPages.map((p) => p.id), errors: [] as string[] };
   }
   for (const page of pages) {
     let conversationList: Awaited<ReturnType<typeof client.listConversations>> = [];
@@ -529,9 +543,19 @@ export async function syncSalesConversations(
     }
     for (const conversation of conversationList) {
       if (conversations >= maxConversations) break;
-      conversations += 1;
       try {
         const fetched = await client.listMessages(page.id, conversation.id, conversation.customerId, 30);
+        // TRẦN 20 PHẢI LÀ 20 HỘI THOẠI CÓ VIỆC ĐỂ LÀM.
+        //
+        // Mẻ đầu: 2/20 suất rơi vào hội thoại chỉ có tin của shop (khách chưa nói câu nào), nên
+        // chúng không sinh lượt chạy nào và cũng không có gì để chấm — 10% mẻ tiêu vào chỗ trống.
+        // Đếm SAU khi biết hội thoại có tin khách hay không, chứ không đếm lúc vừa nhìn thấy nó.
+        const coTinKhach = fetched.some((m) => !m.fromPage && m.text.trim());
+        if (!coTinKhach) {
+          boQua += 1;
+          continue;
+        }
+        conversations += 1;
         // Cũ trước: trạng thái bán hàng chỉ đúng khi tin nhắn được nạp theo đúng thứ tự xảy ra.
         const ordered = [...fetched].sort((a, b) => (a.insertedAt?.getTime() ?? 0) - (b.insertedAt?.getTime() ?? 0));
         for (const raw of ordered) {
@@ -559,5 +583,5 @@ export async function syncSalesConversations(
       }
     }
   }
-  return { skipped: false, hours, conversations, messages, events, pages: pages.map((p) => p.id), errors: errors.slice(0, 20) };
+  return { skipped: false, hours, conversations, messages, events, skippedNoCustomer: boQua, pages: pages.map((p) => p.id), errors: errors.slice(0, 20) };
 }

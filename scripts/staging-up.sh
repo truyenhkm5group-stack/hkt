@@ -138,7 +138,7 @@ say "── Migration trên CSDL RIÊNG của bản chạy thử ──"
 # `/api/health` chỉ chứng minh tiến trình sống và CSDL nối được. Migration xong hay chưa phải ĐẾM.
 docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
   -c "select '  đã áp: ' || count(*) || ' migration' from drizzle.__drizzle_migrations;" \
-  -c "select '  bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and (table_name like 'ai\\_%' or table_name like 'sales\\_%');" \
+  -c "select '  bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and table_name in ('ai_agents','ai_agent_versions','ai_events','ai_tasks','ai_runs','ai_tool_calls','ai_model_calls','ai_approvals','ai_errors','sales_conversations','sales_messages','sales_suggestions','sales_followups','sales_review_labels');" \
   -c "select '  tin đã gửi cho khách: ' || count(*) || ' (phải là 0)' from sales_suggestions where sent;" 2>&1 || say "  (chưa đọc được CSDL bản chạy thử)"
 
 say ""
@@ -160,10 +160,17 @@ if grep -qE '^PANCAKE_PAGE_ID="?.+"?$' .env.staging 2>/dev/null && ! grep -qE '^
 else
   say "    ✗ PANCAKE_PAGE_ID          — pancake.vn → Cấu hình → Page → ID của page cần đọc"
 fi
-if grep -qE '^PANCAKE_PAGE_ACCESS_TOKEN="?.+"?$' .env.staging 2>/dev/null && ! grep -qE '^PANCAKE_PAGE_ACCESS_TOKEN=""$' .env.staging; then
-  say "    ✓ PANCAKE_PAGE_ACCESS_TOKEN đã có"
+# `PancakePagesClient` chạy được bằng MỘT TRONG HAI đường: token người dùng (`PANCAKE_ACCESS_TOKEN`,
+# tự sinh page token khi cần) HOẶC token của đúng một page (`PANCAKE_PAGE_ACCESS_TOKEN`). Bản trước
+# chỉ hỏi đường thứ hai nên báo THIẾU trong khi bản chạy thử đang đọc được 60 hội thoại bằng đường
+# thứ nhất — một cảnh báo sai làm người đọc đi tìm một chứng thư không cần đến.
+co_bien() { grep -qE "^$1=\"?.+\"?$" .env.staging 2>/dev/null && ! grep -qE "^$1=\"\"$" .env.staging; }
+if co_bien PANCAKE_ACCESS_TOKEN; then
+  say "    ✓ PANCAKE_ACCESS_TOKEN đã có (token người dùng — client tự sinh page token khi cần)"
+elif co_bien PANCAKE_PAGE_ACCESS_TOKEN; then
+  say "    ✓ PANCAKE_PAGE_ACCESS_TOKEN đã có (token của riêng page)"
 else
-  say "    ✗ PANCAKE_PAGE_ACCESS_TOKEN — pancake.vn → Cấu hình → Page → Access token của CHÍNH page đó"
+  say "    ✗ Chưa có đường đọc Pancake: cần PANCAKE_ACCESS_TOKEN (token người dùng) HOẶC PANCAKE_PAGE_ACCESS_TOKEN"
 fi
 say ""
 say "Rồi nạp thử lượt đầu (một page, cửa sổ hẹp, KHÔNG ghi gì):"

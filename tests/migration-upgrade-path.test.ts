@@ -32,7 +32,10 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0083_hmt_exception_resolution", "0084_ai_workforce_foundation", "0085_sales_shadow_validation"] as const;
+// 14/09/2026: `0083_hmt_exception_resolution` ĐÃ lên main và đã chạy trên máy chủ (bản phát hành
+// #276), nên nó không còn là "mới" nữa — giữ nó trong danh sách này làm bài kiểm đòi nâng mốc của
+// một migration ĐÃ ÁP, tức là đúng điều nguy hiểm nhất có thể làm với sổ migration.
+const MOI = ["0084_ai_workforce_foundation", "0085_sales_shadow_validation", "0086_product_resolver_v2"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -73,10 +76,14 @@ export async function testMigrationUpgradePath() {
     // hôm nay", không còn là migration mới. Thứ CHƯA được có ở bước 1 là bảng của 0082 — kiểm điều
     // này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên cập nhật `MOI`.
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 1, "bước 1: 0081 phải đã áp — cột semantic có sẵn");
-    // 0082 đã chạy thật trên máy chủ (bản phát hành #267) nên nay nó thuộc "trạng thái production
-    // hôm nay". Thứ CHƯA được có ở bước 1 là cột kết luận của NGƯỜI mà 0083 thêm vào.
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "bước 1: 0082 phải đã áp — bảng hmt_workbooks có sẵn");
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'hmt_return_reconciliation' and column_name = 'resolution'"), 0, "bước 1: cột resolution CHƯA được có — đó là thứ 0083 thêm vào");
+    // 0083 đã chạy thật trên máy chủ (bản phát hành #276) nên nay nó cũng thuộc "trạng thái
+    // production hôm nay". Thứ CHƯA được có ở bước 1 là các bảng của nhân sự AI (0084) và bảng
+    // nhận diện sản phẩm (0086) — kiểm điều này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó
+    // quên cập nhật `MOI`: cột đã có sẵn từ trước thì "áp thêm migration" chẳng chứng minh được gì.
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'hmt_return_reconciliation' and column_name = 'resolution'"), 1, "bước 1: 0083 phải đã áp — cột resolution có sẵn");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'sales_conversations'"), 0, "bước 1: bảng nhân sự AI CHƯA được có — đó là thứ 0084 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'sales_product_resolutions'"), 0, "bước 1: bảng nhận diện sản phẩm CHƯA được có — đó là thứ 0086 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);

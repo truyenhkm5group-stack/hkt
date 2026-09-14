@@ -8,7 +8,17 @@ import { asArray, asRecord, fetchJson, IntegrationError, int, str } from "@/lib/
 
 export type PancakePage = { id: string; name: string; platform: string };
 export type PancakeConversation = { id: string; pageId: string; type: string; tags: string[]; customerName: string; customerId: string; phones: string[]; snippet: string; updatedAt: Date | null; raw: Record<string, unknown> };
-export type PancakeMessage = { id: string; text: string; fromId: string; fromName: string; fromPage: boolean; insertedAt: Date | null; hasAttachment: boolean };
+/**
+ * `adId` / `adDescription` / `postUrl` là tín hiệu nhận diện sản phẩm DUY NHẤT có thật trong Pages
+ * API — kiểm kê 80 tin ngày 14/09/2026: `post_id` ở mức hội thoại NULL 20/20, `parent_id` NULL
+ * 80/80, không có trường product/SKU/order nào. Bản trước vứt hết phần `attachments` và chỉ giữ
+ * một cờ boolean, nên phép khớp sản phẩm không còn gì để bám.
+ */
+export type PancakeMessage = {
+  id: string; text: string; fromId: string; fromName: string; fromPage: boolean;
+  insertedAt: Date | null; hasAttachment: boolean; attachmentCount: number;
+  adId: string; adDescription: string; postUrl: string; attachmentTypes: string[];
+};
 
 function toDate(value: unknown): Date | null {
   if (typeof value === "number") return new Date(value > 1e12 ? value : value * 1000);
@@ -126,6 +136,10 @@ export class PancakePagesClient {
     return list.map((m) => {
       const from = asRecord(m.from);
       const fromId = str(from.id, m.from_id);
+      const dinhKem = asArray(m.attachments).map(asRecord);
+      // Một tin có thể mang nhiều đính kèm; lấy mã quảng cáo ĐẦU TIÊN có thật.
+      const adId = dinhKem.map((a) => str(a.ad_id)).find(Boolean) ?? "";
+      const baiViet = dinhKem.flatMap((a) => asArray(a.post_attachments).map(asRecord));
       return {
         id: str(m.id, m.message_id),
         text: str(m.message, m.original_message, m.text),
@@ -133,7 +147,13 @@ export class PancakePagesClient {
         fromName: str(from.name),
         fromPage: fromId === pageId || Boolean(m.from_page) || str(m.type) === "page",
         insertedAt: toDate(m.inserted_at ?? m.created_time ?? m.created_at),
-        hasAttachment: asArray(m.attachments).length > 0,
+        hasAttachment: dinhKem.length > 0,
+        attachmentCount: dinhKem.length,
+        adId,
+        // Câu quảng cáo: chữ của SHOP, thường chứa thẳng tên mẫu.
+        adDescription: baiViet.map((b) => str(b.description)).find(Boolean) ?? "",
+        postUrl: baiViet.map((b) => str(b.url)).find(Boolean) ?? "",
+        attachmentTypes: [...new Set([...dinhKem.map((a) => str(a.type)), ...baiViet.map((b) => str(b.type))].filter(Boolean))],
       };
     });
   }

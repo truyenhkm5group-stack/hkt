@@ -346,6 +346,11 @@ async function testWritePath(db: Db) {
     fromPage,
     insertedAt: new Date(BAY_GIO - h * gio),
     hasAttachment: false,
+    attachmentCount: 0,
+    adId: "",
+    adDescription: "",
+    postUrl: "",
+    attachmentTypes: [],
   });
 
   /* ── Mốc phản hồi = tin shop SAU tin đầu của khách ── */

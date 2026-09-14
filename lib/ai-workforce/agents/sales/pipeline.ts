@@ -26,6 +26,8 @@ import { decide, type SalesDecision } from "@/lib/ai-workforce/agents/sales/deci
 import { generateSystemPrompt, guardGeneratedText, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
 import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
+import { resolveProduct, type ProductResolution } from "@/lib/ai-workforce/agents/sales/resolve-product";
+import { learnAdMapping } from "@/lib/ai-workforce/agents/sales/ad-map";
 import type { RouteTier, EscalationReason } from "@/lib/constants/ai";
 import type { SizeResultCode } from "@/lib/constants/size-engine";
 
@@ -72,6 +74,8 @@ async function applyUnderstanding(
   state: SalesState,
   understanding: Understanding,
   tool: ToolRunner,
+  /** Kết quả của Product Resolver v2 — do `runSalesTask` giải trước, vì nó cần CSDL và tin nhắn. */
+  resolution: ProductResolution | null,
 ): Promise<{
   state: SalesState;
   sizes: string[];
@@ -108,18 +112,16 @@ async function applyUnderstanding(
   if (entities.size) next.size = entities.size;
   if (entities.color) next.color = entities.color;
 
-  // 2.1 Sản phẩm — chỉ nhận khi tìm ra ĐÚNG MỘT, không đoán giữa nhiều ứng viên.
-  if (!next.productId) {
-    const term = entities.productCode || entities.productText;
-    if (term.trim()) {
-      const found = await tool<{ products: { productId: string; name: string }[]; bestIsUnique: boolean }>("product.search", { query: entities.productCode || term.slice(0, 200), limit: 5 });
-      if (found === null) toolFailed = true;
-      // Chỉ khoá sản phẩm khi ứng viên đầu HƠN HẲN các ứng viên sau. Bằng điểm là chưa biết.
-      else if (found.bestIsUnique && found.products.length) {
-        next.productId = found.products[0].productId;
-        next.productName = found.products[0].name;
-      }
-    }
+  // 2.1 SẢN PHẨM — kết quả của Product Resolver v2 (nhiều tầng: mã hàng · bản đồ quảng cáo · câu
+  //      quảng cáo · lượt trước · mã nhân viên nhắc · khớp chữ). Bản cũ chỉ có tầng khớp chữ và
+  //      trên dữ liệu thật nó ra rỗng 36/36 lần: khách bấm quảng cáo rồi nhắn "còn hàng không ạ",
+  //      trong câu ấy không có gì để khớp.
+  //
+  //      Dưới ngưỡng tin cậy thì KHÔNG nhận — `resolveProduct` đã trả `productId = null` sẵn.
+  if (!next.productId && resolution?.productId) {
+    next.productId = resolution.productId;
+    next.productName = resolution.productName;
+    if (resolution.variantId) next.variantId = resolution.variantId;
   }
 
   // 2.2 Mẫu mã của sản phẩm: size / màu có bao nhiêu lựa chọn — dữ kiện này quyết định còn phải hỏi gì.
@@ -280,8 +282,38 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       }
     }
 
-    // ───── 2. TRẠNG THÁI ─────
-    const applied = await applyUnderstanding(stateBefore, understanding, tool);
+    // ───── 2. NHẬN DIỆN SẢN PHẨM ─────
+    // Giải TRƯỚC khi áp trạng thái, vì nó cần CSDL và cần chính tin nhắn (mã quảng cáo nằm ở
+    // đính kèm của tin, không nằm trong chữ khách gõ).
+    const resolution = await resolveProduct(
+      {
+        conversationId: conversation.id,
+        pageId: conversation.pageId,
+        text: message.text,
+        adId: message.adId ?? "",
+        adDescription: message.adDescription ?? "",
+        postUrl: message.postUrl ?? "",
+      },
+      db,
+    );
+    await db.insert(schema.salesProductResolutions).values({
+      runId: run.id,
+      conversationId: conversation.id,
+      messageId: message.id,
+      productId: resolution.productId,
+      variantId: resolution.variantId,
+      productCode: resolution.productCode,
+      source: resolution.source,
+      confidence: resolution.confidence,
+      evidence: resolution.evidence,
+      candidateCount: resolution.candidateCount,
+    });
+    // Học bản đồ quảng cáo → sản phẩm khi vừa kết luận được từ CÂU QUẢNG CÁO. Lần sau cùng một
+    // quảng cáo không phải đoán lại, và kết quả không đổi giữa hai lượt.
+    await learnAdMapping({ pageId: conversation.pageId, adId: message.adId ?? "", postUrl: message.postUrl ?? "", adDescription: message.adDescription ?? "", resolution }, db);
+
+    // ───── 3. TRẠNG THÁI ─────
+    const applied = await applyUnderstanding(stateBefore, understanding, tool, resolution);
     let state = applied.state;
 
     // ───── 3. QUYẾT ĐỊNH ─────
@@ -301,9 +333,35 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       sizeAdvice: applied.sizeAdvice,
     });
 
+    // ───── 3b. QUYẾT ĐỊNH ĐỂ CHẤM ĐIỂM (chỉ ở nấc SHADOW) ─────
+    //
+    // `decide()` trả `NO_ACTION` ngay khi nhân viên đã cầm hội thoại — đúng cho SẢN XUẤT, vì máy
+    // phải đứng ngoài. Nhưng ở nấc SHADOW máy vốn đã không được gửi gì cho ai, nên im lặng ở đây
+    // không mua thêm một chút an toàn nào; nó chỉ VỨT ĐI đúng phần dữ liệu đáng giá nhất.
+    //
+    // Đo trên mẻ 20 hội thoại: 22/36 lượt ra `NO_ACTION` vì luật này, trong đó có hội thoại 25 tin
+    // với 11 tin khách — lead nóng nhất mẻ. Không có gì để đặt cạnh câu nhân viên đã trả lời.
+    //
+    // Nên tách hẳn hai câu hỏi: ĐƯỢC PHÉP LÀM GÌ (`productionAction`, luôn `NO_SEND` ở SHADOW) và
+    // LẼ RA NÊN LÀM GÌ (`decision.action`). Bản để chấm dựng bằng cách hỏi lại `decide()` với giả
+    // định người CHƯA vào — và nó KHÔNG được chạm vào trạng thái hội thoại thật.
+    const nguoiDaVao = Boolean(conversation.humanTakeoverAt);
+    const chamDiem = nguoiDaVao && agent.mode === "SHADOW";
+    const decisionDeCham: SalesDecision = chamDiem
+      ? decide({
+          stage: stageBefore, state, understanding, confirmation,
+          humanTakeover: false,
+          orderCreated: Boolean(conversation.orderId),
+          stale: staleHours >= SALES_STALE_HOURS,
+          toolFailed: applied.toolFailed,
+          canPromiseStock: applied.stockKnown ? (applied.available ?? 0) > 0 : null,
+          sizeAdvice: applied.sizeAdvice,
+        })
+      : decision;
+
     // ───── 4. DIỄN ĐẠT ─────
     const generation: GenerationContext = {
-      action: decision.action,
+      action: decisionDeCham.action,
       state,
       sizes: applied.sizes,
       colors: applied.colors,
@@ -311,10 +369,12 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       stockKnown: applied.stockKnown,
       available: applied.available,
       shippingFee: applied.shippingFee,
-      missing: decision.missing,
-      reason: decision.reason,
+      missing: decisionDeCham.missing,
+      reason: decisionDeCham.reason,
     };
-    if (decision.action === "SEND_ORDER_REVIEW" && !decision.missing.length && state.variantId && state.quotedTotal !== null) {
+    // Bản xem trước đơn cũng dựng theo bản để chấm — câu chữ phải nói về ĐÚNG hành động đang soạn.
+    // Đây thuần tuý là dựng CHỮ, không ghi gì và không gọi công cụ nào.
+    if (decisionDeCham.action === "SEND_ORDER_REVIEW" && !decisionDeCham.missing.length && state.variantId && state.quotedTotal !== null) {
       const unit = applied.shippingFee === null ? state.quotedTotal / state.quantity : (state.quotedTotal - applied.shippingFee) / state.quantity;
       generation.orderSummary = renderOrderReview({
         productLabel: `${state.productName} ${state.variantLabel}`.trim(),
@@ -331,7 +391,7 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
     let suggested = fallback;
 
     // Mô hình chỉ được mời viết lại khi có gì để viết, và chỉ được đổi CÁCH NÓI.
-    if (fallback && settings.modelCallsEnabled && decision.action !== "NO_ACTION" && decision.action !== "HANDOFF_HUMAN") {
+    if (fallback && settings.modelCallsEnabled && decisionDeCham.action !== "NO_ACTION" && decisionDeCham.action !== "HANDOFF_HUMAN") {
       const routed = await runModelStep({
         step: "generate",
         system: generateSystemPrompt(),
@@ -415,9 +475,14 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       triggerMessageId: message.id,
       stageBefore,
       stageAfter: finalStage,
-      action: decision.action,
+      // CHẤT LƯỢNG: máy lẽ ra nên làm gì.
+      action: decisionDeCham.action,
+      // AN TOÀN: máy thật sự được phép làm gì. Ở nấc SHADOW luôn là không gửi.
+      productionAction: agent.mode === "SHADOW" ? "NO_SEND" : decision.action,
+      // Dòng này sinh ra CHỈ để chấm điểm — sản xuất đã đứng ngoài vì người đang cầm hội thoại.
+      evaluationOnly: chamDiem,
       suggestedReply: suggested,
-      confidence: decision.confidence,
+      confidence: decisionDeCham.confidence,
       // Ở nấc SHADOW đây luôn là false — cổng gửi tin không mở cho câu do AI soạn.
       sent: false,
     });

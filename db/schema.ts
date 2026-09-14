@@ -2632,6 +2632,24 @@ export const salesMessages = pgTable(
      * nhắn lại đúng câu cũ ở một thời điểm khác — xem `findCrossChannelDuplicate()`.
      */
     contentHash: text("content_hash").notNull().default(""),
+    /**
+     * MÃ QUẢNG CÁO khách đã bấm để mở hội thoại (`attachments[].ad_id` của Pancake).
+     *
+     * Đây là tín hiệu nhận diện sản phẩm MẠNH NHẤT có thật trong dữ liệu page này — đo ngày
+     * 14/09/2026 trên 80 tin: 11 tin mang `ad_id`, trong khi `post_id` ở mức hội thoại NULL
+     * 20/20 và `parent_id` (tin được trích dẫn) NULL 80/80. Không suy ra được từ chữ khách gõ.
+     */
+    adId: text("ad_id").notNull().default(""),
+    /** Đường dẫn bài viết / quảng cáo (`attachments[].post_attachments[].url`). */
+    postUrl: text("post_url").notNull().default(""),
+    /**
+     * NỘI DUNG BÀI QUẢNG CÁO (`attachments[].post_attachments[].description`) — chữ của SHOP,
+     * không phải của khách. Chính nó chứa tên mẫu ("🤍 TINH…", "❤️ ĐẦM Đ…"), nên khớp danh mục
+     * bằng câu quảng cáo cho kết quả tốt hơn hẳn khớp bằng "chị ơi còn hàng không ạ".
+     */
+    adDescription: text("ad_description").notNull().default(""),
+    /** ad_click · photo · share · video_inline … — loại đính kèm, để biết vì sao có/không có ad_id. */
+    attachmentTypes: text("attachment_types").array().notNull().default(sql`'{}'::text[]`),
     sentAt: ts("sent_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),
@@ -2640,6 +2658,7 @@ export const salesMessages = pgTable(
     uniqueIndex("sales_messages_external_uq").on(t.conversationId, t.externalId),
     index("sales_messages_conv_idx").on(t.conversationId, t.sentAt),
     index("sales_messages_hash_idx").on(t.conversationId, t.contentHash),
+    index("sales_messages_ad_idx").on(t.adId),
   ],
 );
 
@@ -2660,7 +2679,23 @@ export const salesSuggestions = pgTable(
     triggerMessageId: text("trigger_message_id").references(() => salesMessages.id, { onDelete: "set null" }),
     stageBefore: text("stage_before").notNull().default(""),
     stageAfter: text("stage_after").notNull().default(""),
+    /**
+     * HÀNH ĐỘNG ĐỂ CHẤM ĐIỂM: máy ĐỀ XUẤT làm gì nếu nó được làm.
+     * Tách khỏi `production_action` bên dưới. Trước đây hai nghĩa này nằm chung một ô, nên hội
+     * thoại đã có nhân viên vào đều ra `NO_ACTION` và mất sạch phần đáng so sánh nhất.
+     */
     action: text("action").notNull().default("NO_ACTION"),
+    /**
+     * HÀNH ĐỘNG THẬT SỰ ĐƯỢC PHÉP: `NO_SEND` ở nấc SHADOW — không bao giờ chạm tới khách.
+     * Ô này là thứ nói về AN TOÀN; ô `action` nói về CHẤT LƯỢNG. Gộp chúng lại một lần nữa là
+     * quay về đúng chỗ vừa sửa.
+     */
+    productionAction: text("production_action").notNull().default("NO_SEND"),
+    /**
+     * Gợi ý này chỉ sinh ra ĐỂ CHẤM: nhân viên đã cầm hội thoại nên máy đứng ngoài, nhưng vẫn
+     * soạn câu để đặt cạnh câu người. Sản xuất KHÔNG làm gì với dòng này.
+     */
+    evaluationOnly: boolean("evaluation_only").notNull().default(false),
     suggestedReply: text("suggested_reply").notNull().default(""),
     /** Độ tin của quyết định (0–1). NULL = không đo được, không phải 0. */
     confidence: doublePrecision("confidence"),
@@ -2738,6 +2773,90 @@ export const salesReviewLabels = pgTable(
 );
 
 /** Hẹn nhắn lại. CHỈ là danh sách chờ — không có đường nào từ bảng này tự gửi tin cho khách. */
+/**
+ * BẢN ĐỒ QUẢNG CÁO / BÀI VIẾT → SẢN PHẨM.
+ *
+ * VÌ SAO PHẢI CÓ BẢNG NÀY. Kiểm kê API Pancake ngày 14/09/2026 (80 tin thật của page
+ * 1117899664739453): `post_id` ở mức hội thoại NULL 20/20, `parent_id` NULL 80/80, và KHÔNG có
+ * một trường product / SKU / order / cart nào. Tín hiệu sản phẩm DUY NHẤT tồn tại là
+ * `attachments[].ad_id` cùng câu quảng cáo đi kèm — 11/80 tin có.
+ *
+ * Một mã quảng cáo trỏ tới một mẫu hàng trong suốt đời chiến dịch, nên đoán lại ở mỗi hội thoại
+ * vừa tốn vừa cho kết quả khác nhau giữa các lần. Ghi một lần, dùng mãi.
+ *
+ * `source` nói bản đồ này từ đâu ra, và đó là thứ quyết định được tin tới đâu:
+ *   · `AD_DESCRIPTION` — máy tự khớp câu quảng cáo với danh mục. Suy luận, có thể sai.
+ *   · `HUMAN`          — người bấm trên màn hình. Là sự thật, đè lên mọi suy luận của máy.
+ * Máy KHÔNG BAO GIỜ được ghi đè một dòng `HUMAN` — đó là lý do tồn tại của cột này.
+ */
+export const salesAdProductMap = pgTable(
+  "sales_ad_product_map",
+  {
+    id: id(),
+    pageId: text("page_id").notNull(),
+    /** Khoá tự nhiên: mã quảng cáo, hoặc đường dẫn bài viết khi không có mã. Không rỗng. */
+    adKey: text("ad_key").notNull(),
+    /** AD · POST — khoá trên là mã quảng cáo hay đường dẫn bài viết. */
+    keyKind: text("key_kind").notNull().default("AD"),
+    productId: text("product_id").references(() => products.id, { onDelete: "cascade" }),
+    /** Mẫu mã cụ thể nếu quảng cáo chỉ chạy đúng một mẫu; NULL = chỉ biết tới mức sản phẩm. */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** AD_DESCRIPTION · HUMAN — xem chú thích của bảng. */
+    source: text("source").notNull().default("AD_DESCRIPTION"),
+    /** 0..1. Dòng do người đặt luôn là 1. */
+    confidence: doublePrecision("confidence").notNull().default(0),
+    /** Câu quảng cáo (hoặc lý do) đã dẫn tới kết luận này — để người đọc kiểm lại được. */
+    evidence: text("evidence").notNull().default(""),
+    /** Ảnh chụp câu quảng cáo, giữ để khớp lại khi danh mục đổi. */
+    adDescription: text("ad_description").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_ad_product_map_uq").on(t.pageId, t.adKey),
+    index("sales_ad_product_map_product_idx").on(t.productId),
+  ],
+);
+
+/**
+ * MỖI LẦN MÁY KẾT LUẬN "khách đang hỏi mẫu nào" — ghi lại KÈM CĂN CỨ.
+ *
+ * Mẻ 20 hội thoại đầu chỉ nói được "nhận ra sản phẩm: 0/20" mà không nói được VÌ SAO, nên không
+ * sửa được gì từ con số ấy. Bảng này trả lời: tầng nào đã kết luận, tin tới đâu, dựa vào cái gì.
+ *
+ * `source` là một trong `PRODUCT_RESOLUTION_SOURCES`. `product_id` NULL nghĩa là KHÔNG kết luận
+ * được — và đó là một kết quả hợp lệ, khác hẳn với việc chọn bừa một mẫu cho có.
+ */
+export const salesProductResolutions = pgTable(
+  "sales_product_resolutions",
+  {
+    id: id(),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => salesMessages.id, { onDelete: "set null" }),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Ảnh chụp mã hàng lúc kết luận — danh mục đổi thì vẫn đọc lại được máy đã chọn gì. */
+    productCode: text("product_code").notNull().default(""),
+    /** Tầng nào kết luận — xem `PRODUCT_RESOLUTION_SOURCES`. */
+    source: text("source").notNull(),
+    /** 0..1. Dưới ngưỡng thì KHÔNG được nhận, dù đây là ứng viên tốt nhất. */
+    confidence: doublePrecision("confidence").notNull().default(0),
+    /** Câu/khoá đã dẫn tới kết luận, cắt ngắn. Không có căn cứ thì không được kết luận. */
+    evidence: text("evidence").notNull().default(""),
+    /** Số ứng viên ngang điểm — > 1 nghĩa là CHƯA BIẾT, phải hỏi lại chứ không được chọn bừa. */
+    candidateCount: integer("candidate_count").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_product_resolutions_conv_idx").on(t.conversationId, t.createdAt),
+    index("sales_product_resolutions_source_idx").on(t.source),
+  ],
+);
+
 export const salesFollowups = pgTable(
   "sales_followups",
   {

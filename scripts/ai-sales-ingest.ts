@@ -91,6 +91,7 @@ async function main() {
   console.log(`  Hội thoại chạm tới : ${ingested.conversations}`);
   console.log(`  Tin nhắn ghi mới   : ${ingested.messages}`);
   console.log(`  Việc tạo cho AI    : ${ingested.events}`);
+  console.log(`  Bỏ qua (khách chưa nhắn): ${ingested.skippedNoCustomer ?? 0}  — không tính vào trần ${max}`);
   if (ingested.errors?.length) for (const e of ingested.errors) console.log(`  ⚠ ${e}`);
 
   const ran = await drainSalesTasks(max * 5, db);
