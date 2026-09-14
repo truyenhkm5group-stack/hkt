@@ -72,6 +72,25 @@ và đọc thẳng `shipment_events` — không import một dòng nào của `l
 
 **Giao thành công, hoàn và GTC khớp TUYỆT ĐỐI trên cả bốn mã.**
 
+Xác minh SAU TRIỂN KHAI (`ops returns-parity`, SHA `a59c897`, 14/09/2026 16:22):
+
+```
+mã    | SQL độc lập (giao/hoàn) | máy tính (giao/hoàn) | màn hình (giao/hoàn) | khớp
+------+-------------------------+----------------------+----------------------+------
+Q001  |                   33/38 |                33/38 |                33/38 | ✓
+Q002  |                 274/771 |              274/771 |              274/771 | ✓
+Q003  |                 195/226 |              195/226 |              195/226 | ✓
+Q004  |                   13/10 |                13/10 |                13/10 | ✓
+✓ 4/4 mã: máy tính kết quả = SQL viết độc lập từ đặc tả. Khối trên màn hình CÓ MẶT.
+```
+
+Cột **màn hình** đọc từ HTML mà trình duyệt thật sự nhận, nên nó chứng minh cả tầng render — không
+phải chỉ chứng minh hai truy vấn nhất quán với nhau.
+
+Và hai migration ĐÃ áp thật (kiểm bằng `information_schema`, không tin vào việc lượt triển khai
+xanh): cột `raw_reason` có mặt, ràng buộc `metric_targets` nhận `PRODUCT`. Đây là phép kiểm bắt
+buộc ở bản này vì một phiên song song cũng đánh số `0084` cho migration của họ.
+
 Chênh 1 đơn ở Q002 (`đã gửi` và `đang chạy`) là đơn mà máy tính kết quả xếp `AWAITING_PICKUP`
 (ĐVVC đã biết kiện nhưng chưa có chứng từ cầm hàng) còn câu SQL đối chứng gộp vào `đang chạy` —
 **máy tính kết quả CHẶT HƠN**, đúng hướng đặc tả mục 6.
