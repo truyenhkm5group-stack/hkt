@@ -135,6 +135,9 @@ async function tuMayTinh(): Promise<Dong[]> {
  * gọi lại hàm truy vấn: một khối biến mất sau lớp bắt lỗi vẫn trả HTTP 200, và chỉ có HTML mới nói
  * ra điều đó.
  */
+/** Vì sao không bóc được — in ra thay vì chỉ báo "—". Một phép kiểm im lặng là một phép kiểm vô dụng. */
+const viSao: string[] = [];
+
 function bocSo(html: string, code: string): { giao: number; hoan: number } | null {
   /*
     NEO VÀO ĐÚNG BẢNG TRƯỚC ĐÃ.
@@ -145,15 +148,24 @@ function bocSo(html: string, code: string): { giao: number; hoan: number } | nul
     hoàn toàn khác — một phép đối chiếu tự lừa mình.
   */
   const bang = html.indexOf("Hoàn theo mã hàng");
-  if (bang < 0) return null;
+  if (bang < 0) {
+    viSao.push(`${code}: KHÔNG thấy tiêu đề "Hoàn theo mã hàng" trong ${html.length} ký tự HTML`);
+    return null;
+  }
   // Dòng của mã bắt đầu bằng ô mã hàng; lấy đoạn từ đó tới hết thẻ `</tr>` rồi đọc các ô số.
   const moc = html.indexOf(`>${code}<`, bang);
-  if (moc < 0) return null;
+  if (moc < 0) {
+    viSao.push(`${code}: thấy bảng ở ${bang} nhưng KHÔNG thấy ô mã ">${code}<" sau đó`);
+    return null;
+  }
   const het = html.indexOf("</tr>", moc);
   const doan = html.slice(moc, het < 0 ? moc + 4000 : het);
   const oSo = [...doan.matchAll(/tabular-nums[^>]*>([\d.,]+)</g)].map((m) => Number(m[1].replace(/[.,]/g, "")));
   // Thứ tự cột của bảng: đơn có kết quả · giao TC · hoàn · tỷ lệ hoàn.
-  if (oSo.length < 3) return null;
+  if (oSo.length < 3) {
+    viSao.push(`${code}: thấy ô mã nhưng chỉ đọc được ${oSo.length} ô số trong dòng — đoạn: ${doan.slice(0, 200).replace(/\s+/g, " ")}`);
+    return null;
+  }
   return { giao: oSo[1], hoan: oSo[2] };
 }
 
@@ -205,6 +217,7 @@ async function main() {
   }
 
   console.log("");
+  for (const v of viSao) console.log(`  ⚠ ${v}`);
   if (lech) {
     console.error(`✗ ${lech}/${MA.length} mã hàng LỆCH giữa ba đường. Không làm tròn, không bỏ qua — đi tìm nguyên nhân.`);
     process.exit(1);
