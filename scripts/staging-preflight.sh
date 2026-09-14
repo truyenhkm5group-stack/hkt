@@ -102,6 +102,15 @@ for p in 80 443 5432 3000; do
   [ "$PORT" = "$p" ] && bad "cổng $PORT là cổng production/hệ thống — tuyệt đối không dùng"
 done
 
+# 4b. Tên image — production dùng `erp-app:local`. Một lần trùng tên là một lần `up --build` của
+#     bên này ghi đè image mà container bên kia đang chạy, và lần khởi động lại sau mới lộ ra.
+IMAGE="${STAGING_IMAGE:-vnx-ai-staging-app:local}"
+if [ "$IMAGE" = "erp-app:local" ]; then
+  bad "tên image \"$IMAGE\" TRÙNG image production"
+else
+  ok "tên image \"$IMAGE\" không đụng image production (erp-app:local)"
+fi
+
 # 5. Volume
 if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$VOLUME"; then
   warn "volume \"$VOLUME\" đã tồn tại — dữ liệu cũ sẽ được dùng lại (không phải lỗi, nhưng phải biết)"

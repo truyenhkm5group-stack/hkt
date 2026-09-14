@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db";
@@ -284,9 +285,48 @@ export async function testAiPlatform(db: Db) {
   const errors = await db.query.aiErrors.findMany({ where: eq(schema.aiErrors.scope, "WEBHOOK") });
   assert.ok(errors.length >= 1, "lỗi xảy ra ngoài một lượt chạy vẫn phải ghi được");
 
+  // ═════════ MÀN HÌNH QUAN SÁT PHẢI HIỆN ĐỦ MỘT LƯỢT CHẠY ═════════
+  //
+  // Một lượt chạy chỉ giải thích được nếu người đọc thấy ĐỦ dây chuyền: khách nói gì → máy hiểu gì
+  // → trạng thái trước/sau → quyết định → gọi ERP những gì → gọi mô hình nào, hết bao nhiêu token
+  // và bao nhiêu tiền theo BẢNG GIÁ NÀO → máy định nói gì → người thực sự nói gì. Thiếu một mắt
+  // xích là lúc cần truy thì chỉ còn cách đoán, và đoán về một quyết định của máy là vô ích.
+  //
+  // Kiểm ở mức NGUỒN vì đây là hợp đồng giao diện, không phải một phép tính: một lần "dọn dẹp" gỡ
+  // mất khối token hay khối công cụ sẽ không làm hỏng bất cứ bài kiểm dữ liệu nào.
+  const manHinh = readFileSync("app/(dashboard)/ai/[id]/page.tsx", "utf8");
+  const PHAI_CO: [string, RegExp][] = [
+    ["tin nhắn của khách", /input\.text/],
+    ["ý định & thực thể", /run\.understanding/],
+    ["trạng thái trước", /run\.stateBefore/],
+    ["trạng thái sau", /run\.stateAfter/],
+    ["quyết định", /run\.decision/],
+    ["công cụ ERP đã gọi", /toolCalls\.map/],
+    ["kết cục từng lời gọi công cụ", /TOOL_OUTCOME_LABEL/],
+    ["lần gọi mô hình", /modelCalls\.map/],
+    ["nhà cung cấp & tên mô hình", /call\.provider[\s\S]{0,80}call\.model/],
+    ["token vào/ra", /call\.inputTokens[\s\S]{0,120}call\.outputTokens/],
+    ["token đệm", /cachedInputTokens/],
+    ["chi phí", /costLabel/],
+    ["phiên bản bảng giá", /pricingVersion/],
+    ["độ trễ", /latencyMs/],
+    ["lỗi của lượt chạy", /run\.error/],
+    ["lỗi của từng lời gọi", /call\.error/],
+    ["câu máy gợi ý", /run\.suggestedReply/],
+    ["câu nhân viên thật sự trả lời", /suggestion\?\.humanReply/],
+    ["đã gửi cho khách hay chưa", /suggestion\?\.sent/],
+  ];
+  const thieu = PHAI_CO.filter(([, re]) => !re.test(manHinh)).map(([ten]) => ten);
+  assert.deepEqual(thieu, [], `màn hình chi tiết lượt chạy thiếu: ${thieu.join(", ")} — không truy được thì không soát được`);
+
+  // Màn hình SOÁT phải dẫn được sang màn hình chi tiết, nếu không người chấm thấy ba cột mà không
+  // bao giờ xem được vì sao máy nói như vậy.
+  const manHinhSoat = readFileSync("app/(dashboard)/ai/review/page.tsx", "utf8");
+  assert.match(manHinhSoat, /href={`\/ai\/\$\{turn\.runId\}`}/, "mỗi lượt trên màn hình soát phải bấm sang được chi tiết lượt chạy");
+
   await setSettingJson(AI_CONFIG_KEY, {});
   resetStub();
-  console.log(`✓ Nền tảng nhân sự AI: ${TOOL_NAMES.length} công cụ có sổ đăng ký · 4 kiểu từ chối đều ghi vết · leo nấc mô hình đúng · chi phí CHƯA BIẾT không thành 0đ`);
+  console.log(`✓ Nền tảng nhân sự AI: ${TOOL_NAMES.length} công cụ có sổ đăng ký · 4 kiểu từ chối đều ghi vết · leo nấc mô hình đúng · chi phí CHƯA BIẾT không thành 0đ · màn hình quan sát hiện đủ ${PHAI_CO.length} mắt xích`);
 }
 
 /** Hội thoại tối thiểu để kiểm tầng nền tảng (miền bán hàng có fixture riêng). */

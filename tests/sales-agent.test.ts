@@ -15,9 +15,10 @@ import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { parseRouting, runModelStep } from "@/lib/ai-workforce/model-router";
+import { providerNames } from "@/lib/ai-workforce/providers";
 import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
 import { z } from "zod";
-import { SAFEST_HARD_LIMITS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
+import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
 import { setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai-workforce/providers/stub";
 import { aiSummary, getAiRunDetail, listAiRuns, salesStageBreakdown } from "@/lib/queries/ai";
@@ -299,6 +300,34 @@ export async function testSalesAgent(db: Db) {
   // Không khai gì trong môi trường ⇒ giá trị an toàn nhất. Mặc định của bản chạy thử là CẤM,
   // không phải "cho tới khi có người nghĩ ra là phải cấm".
   assert.deepEqual(aiEnv.hardLimits, SAFEST_HARD_LIMITS, "không khai biến môi trường thì cả hai công tắc đều CẤM");
+
+  // ── HAI HỆ AI, HAI BIẾN MÔI TRƯỜNG — KHÔNG ĐƯỢC ĐỌC CHUNG ──
+  //
+  // ERP có SẴN một AI Copilot dùng `AI_PROVIDER` với bộ giá trị `auto|openai|anthropic|off`.
+  // Nhân sự AI dùng bộ khác (`stub|anthropic`). Nếu hai hệ đọc chung một biến thì đặt đúng cho
+  // hệ này là đặt sai cho hệ kia — và cái sai ấy im lặng.
+  assert.deepEqual([...WORKFORCE_PROVIDERS].sort(), providerNames().sort(), "danh sách tên nhà cung cấp phải khớp sổ đăng ký thật");
+  const savedWf = process.env.AI_WORKFORCE_PROVIDER;
+  const savedProv = process.env.AI_PROVIDER;
+  try {
+    delete process.env.AI_WORKFORCE_PROVIDER;
+    // Giá trị của Copilot KHÔNG được kéo nhân sự AI đi theo: rơi về `stub`, tức KHÔNG gọi mạng.
+    for (const raw of ["auto", "openai", "off", "lung-tung"]) {
+      process.env.AI_PROVIDER = raw;
+      assert.equal(aiEnv.provider, "stub", `AI_PROVIDER=${raw} là của Copilot — nhân sự AI phải rơi về stub, không gọi mạng`);
+    }
+    // Nhưng một tên mà nhân sự AI THẬT SỰ CÓ thì vẫn nhận, để cấu hình cũ không gãy.
+    process.env.AI_PROVIDER = "anthropic";
+    assert.equal(aiEnv.provider, "anthropic", "tên nhà cung cấp hợp lệ ở AI_PROVIDER vẫn dùng được");
+    // Và biến riêng thắng tuyệt đối.
+    process.env.AI_WORKFORCE_PROVIDER = "stub";
+    assert.equal(aiEnv.provider, "stub", "AI_WORKFORCE_PROVIDER thắng AI_PROVIDER");
+  } finally {
+    if (savedWf === undefined) delete process.env.AI_WORKFORCE_PROVIDER;
+    else process.env.AI_WORKFORCE_PROVIDER = savedWf;
+    if (savedProv === undefined) delete process.env.AI_PROVIDER;
+    else process.env.AI_PROVIDER = savedProv;
+  }
 
   // ═════════ 6. WEBHOOK: CHUẨN HOÁ, CHỐNG TRÙNG, CHỐNG VÒNG LẶP ═════════
 

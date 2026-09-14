@@ -52,16 +52,16 @@ Tệp nền tảng (dùng chung cho MỌI nhân sự AI sau này, không có dò
 | `lib/constants/ai.ts` | Nấc quyền hạn, trạng thái, nấc định tuyến, cờ tính năng |
 | `lib/constants/ai-events.ts` | Hợp đồng sự kiện nội bộ |
 | `lib/constants/ai-tools.ts` | Sổ đăng ký công cụ + danh sách việc BỊ CẤM |
-| `lib/ai/config.ts` | Ba tầng cấu hình, mọi nhánh lỗi rơi về phía hẹp hơn |
-| `lib/ai/registry.ts` | Sổ nhân sự + bản nhân sự |
-| `lib/ai/events.ts` | Ghi sự kiện (chống trùng) → tạo việc → giành việc |
-| `lib/ai/runs.ts` | Sổ lượt chạy, token, chi phí, che bí mật |
-| `lib/ai/model-router.ts` | Leo nấc RULE → ECONOMY → STRONG → HUMAN |
-| `lib/ai/providers/*` | Trừu tượng nhà cung cấp (`stub`, `anthropic`) |
-| `lib/ai/tools/gateway.ts` | Cổng quyền — sáu chốt cho mỗi lời gọi |
-| `lib/ai/tools/erp.ts` | 16 công cụ, mỗi công cụ bọc quanh logic ERP đang chạy |
+| `lib/ai-workforce/config.ts` | Ba tầng cấu hình, mọi nhánh lỗi rơi về phía hẹp hơn |
+| `lib/ai-workforce/registry.ts` | Sổ nhân sự + bản nhân sự |
+| `lib/ai-workforce/events.ts` | Ghi sự kiện (chống trùng) → tạo việc → giành việc |
+| `lib/ai-workforce/runs.ts` | Sổ lượt chạy, token, chi phí, che bí mật |
+| `lib/ai-workforce/model-router.ts` | Leo nấc RULE → ECONOMY → STRONG → HUMAN |
+| `lib/ai-workforce/providers/*` | Trừu tượng nhà cung cấp (`stub`, `anthropic`) |
+| `lib/ai-workforce/tools/gateway.ts` | Cổng quyền — sáu chốt cho mỗi lời gọi |
+| `lib/ai-workforce/tools/erp.ts` | 16 công cụ, mỗi công cụ bọc quanh logic ERP đang chạy |
 
-Tệp miền bán hàng: `lib/constants/sales-agent.ts` + `lib/ai/agents/sales/*`.
+Tệp miền bán hàng: `lib/constants/sales-agent.ts` + `lib/ai-workforce/agents/sales/*`.
 
 ## 3. Nấc quyền hạn
 
@@ -165,11 +165,11 @@ Tên mô hình không ghi cứng ở đâu trong logic — đọc từ `AI_MODEL
 
 ## 9. Cổng gửi tin
 
-`lib/ai/agents/sales/outbound.ts` là **nơi duy nhất** trong mã nguồn gọi API gửi tin của Pancake
+`lib/ai-workforce/agents/sales/outbound.ts` là **nơi duy nhất** trong mã nguồn gọi API gửi tin của Pancake
 cho nhân sự AI. Đọc một tệp là kiểm chứng được lời khẳng định "SHADOW không gửi gì".
 
 **LỚP NGOÀI CÙNG — CHẶN CỨNG CẤP MÔI TRƯỜNG.** `AI_ALLOW_CUSTOMER_SEND` và
-`AI_ALLOW_ORDER_CREATE` đọc THẲNG từ biến môi trường (`lib/ai/config.ts::aiEnv.hardLimits`), và
+`AI_ALLOW_ORDER_CREATE` đọc THẲNG từ biến môi trường (`lib/ai-workforce/config.ts::aiEnv.hardLimits`), và
 `getAiSettings()` cố tình **không** hợp nhất chúng với bảng `settings` — ghi khoá `hardLimits` vào
 CSDL là ghi vào hư không. Chỉ đúng chuỗi `"true"` mở được (`1`, `yes`, `on` đều là CẤM); không khai
 gì cũng là CẤM. Chúng đứng **trước** mọi chốt khác: trước nấc quyền hạn, trước phiếu duyệt, trước
@@ -287,7 +287,7 @@ có căn cứ** và hội thoại chuyển người — không đoán size trên
 
 ## 14. Triển khai & quay lui
 
-Migration `0035_ai_workforce_foundation.sql` **thuần bổ sung**: 13 bảng mới, không câu lệnh nào đụng
+Migration `0084_ai_workforce_foundation.sql` **thuần bổ sung**: 13 bảng mới, không câu lệnh nào đụng
 tới bảng đang chạy. Chạy ngược lại không cần thiết — muốn tắt thì đặt `ai.config.enabled = false`,
 mọi thứ dừng ngay mà không mất dữ liệu.
 

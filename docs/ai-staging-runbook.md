@@ -21,27 +21,27 @@
 
 Không có cờ `--force` trong `staging-up.sh`. Một cờ như vậy sẽ được dùng đúng vào lúc không nên dùng.
 
-## 0.1 Một điều phải biết trước: nhánh này đang đi sau `main`
+## 0.1 Nhánh này ĐÃ nhập `main` về — bản chạy thử là ERP đầy đủ
 
-`staging-up.sh` tải nhánh `claude/ai-workforce-sales-v1`. Nhánh ấy tách ra từ `main` ở migration
-`0034_perf_indexes.sql` và từ đó `main` đã đi thêm **66 commit / 46 migration** (tới `0082`). Bản
-chạy thử vì vậy là **ERP của thời điểm tách nhánh** cộng thêm nhân sự AI — không có những phần ERP
-làm sau đó.
+`staging-up.sh` tải nhánh `claude/ai-workforce-sales-v1`, và nhánh ấy nay đã nhập `main` (422
+commit / 49 migration) về. Bản chạy thử vì vậy là **ERP hôm nay cộng thêm nhân sự AI**, không còn
+là ảnh chụp của thời điểm tách nhánh.
 
-Hai hệ quả, tách bạch:
+Ba điều phải biết đi kèm:
 
-1. **Với việc chấm chất lượng nhân sự AI: không ảnh hưởng.** Nhân sự AI đọc sản phẩm / mẫu mã /
-   giá / tồn qua cổng công cụ, và những bảng đó không đổi trong 46 migration kia. CSDL staging là
-   CSDL trắng nên chuỗi migration `0000–0036` của nhánh này chạy sạch từ đầu (đang được chứng minh
-   mỗi lần `npm test` dựng CSDL PGlite mới).
-2. **Với việc nhập về `main`: có va chạm SỐ THỨ TỰ phải xử lý.** `0035` và `0036` trên `main` đã là
-   `manual_verification_source` và `expense_cost_allocation`. Hai migration của nhánh này phải được
-   **đánh số lại** (thành `0083`/`0084` hoặc số trống kế tiếp lúc nhập) trước khi nhập — nếu không,
-   máy chủ production sẽ hoặc bỏ qua chúng, hoặc chạy nhầm thứ tự. **Không** phải va chạm tên bảng:
-   `main` chưa có bảng `ai_*`/`sales_*` nào.
-
-Việc đánh số lại là việc của lượt nhập nhánh, không phải việc của lượt dựng bản chạy thử — nêu ở
-đây để không ai quên.
+1. **Migration của nhân sự AI nay là `0084` và `0085`.** Chúng từng mang số `0035`/`0036` — nhưng
+   trên production hai số ấy đã thuộc về `manual_verification_source` và `expense_cost_allocation`
+   và đã chạy rồi. Giữ số cũ thì drizzle thấy mục `0035` "đã áp" và **bỏ qua vĩnh viễn** 14 bảng
+   của nhân sự AI: không lỗi, không cảnh báo. `tests/migration-upgrade-path.test.ts` đi đúng đường
+   mà máy chủ thật đi và chứng minh việc đánh số lại đã đúng.
+2. **Mã của nhân sự AI nằm ở `lib/ai-workforce/`, không phải `lib/ai/`.** `lib/ai/` là AI Copilot
+   sẵn có của ERP — một hệ khác, bảng khác (`ai_interactions`), nhà cung cấp khác. Hai hệ từng đâm
+   nhau ở `lib/ai/tools/erp.ts` vì cùng khai một hàm tên `registerErpTools`.
+3. **Biến môi trường nhà cung cấp cũng tách: `AI_WORKFORCE_PROVIDER`.** `AI_PROVIDER` là của
+   Copilot với bộ giá trị `auto|openai|anthropic|off`; nhân sự AI dùng `stub|anthropic`. Đặt đúng
+   cho hệ này mà đọc chung thì hệ kia hiểu sai, và cái sai ấy im lặng. Không khai biến riêng thì
+   `AI_PROVIDER` chỉ được nhận khi nó là tên nhà cung cấp mà nhân sự AI thật sự có, còn lại rơi về
+   `stub` (không gọi mạng).
 
 ## 1. Danh tính tách khỏi production
 
@@ -52,6 +52,7 @@ Việc đánh số lại là việc của lượt nhập nhánh, không phải v
 | Container | `erp-app` · `erp-db` · `erp-scheduler` · `erp-caddy` | `vnx-ai-staging-app` · `vnx-ai-staging-db` |
 | Cổng | Caddy giữ 80/443, app 3000 | `127.0.0.1:3100` — **không** ra Internet |
 | Volume CSDL | `erp_pgdata` | `vnx-ai-staging_vnx_ai_staging_pgdata` |
+| Image | `erp-app:local` | `vnx-ai-staging-app:local` |
 | Tệp môi trường | `/root/erp/.env` | `/opt/vnx-ai-staging/.env.staging` (quyền 600) |
 | Nhật ký | như cũ | json-file riêng, 10 MB × 3 |
 | Bộ lập lịch | đang chạy | **KHÔNG có service scheduler** |
@@ -110,7 +111,7 @@ AI_ALLOW_ORDER_CREATE: "false"
 AI_DEFAULT_MODE: "SHADOW"
 ```
 
-Chúng được đọc thẳng từ biến môi trường trong `lib/ai/config.ts::aiEnv.hardLimits`, và
+Chúng được đọc thẳng từ biến môi trường trong `lib/ai-workforce/config.ts::aiEnv.hardLimits`, và
 `getAiSettings()` cố tình **không** hợp nhất chúng với JSON trong bảng `settings` — ghi khoá
 `hardLimits` vào CSDL là ghi vào hư không. Chỉ đúng chuỗi `"true"` mở được; `1`, `yes`, `on` đều
 là CẤM; không khai gì cũng là CẤM.
@@ -260,6 +261,30 @@ tính trên phần đã chấm**, chưa chấm dòng nào thì hiện `null`, kh
 
 Không có nút gửi tin cho khách trên màn hình này, và cũng không có action nào đứng sau nó — đường
 gửi tin duy nhất trong kho mã là `sendSalesMessage()`, và nó đi qua `assertOutboundAllowed()`.
+
+Mỗi lượt bấm được sang `/ai/<mã lượt chạy>` — nơi hiện ĐỦ dây chuyền của một lượt, và đó là thứ
+phân biệt "soát được" với "chỉ nhìn được":
+
+| Mắt xích | Ở đâu trên màn hình |
+|---|---|
+| Tin nhắn của khách | §1 |
+| Ý định &amp; thực thể bóc được | §2 |
+| Trạng thái trước / sau | §3 · §4 (kèm nhãn giai đoạn) |
+| Quyết định &amp; lý do, lý do chuyển người | §5 |
+| Công cụ ERP đã gọi: tham số · kết cục · lý do từ chối · ms | §6 |
+| Lần gọi mô hình: nhà cung cấp · mô hình · nấc · token vào/ra · token đệm · chi phí · **phiên bản bảng giá** · ms · lỗi | §7 |
+| Câu máy gợi ý | §8 |
+| Câu nhân viên thật sự trả lời | §9 |
+| 12 tin gần nhất của hội thoại | §10 |
+| Lỗi của cả lượt chạy | thẻ đỏ trên đầu |
+| ĐÃ GỬI / KHÔNG GỬI cho khách | phù hiệu trên đầu |
+
+Phiên bản bảng giá đứng ngay cạnh số tiền có chủ ý: một con số tiền không nói nó tính theo bảng giá
+nào thì hai kỳ khác giá trông giống hệt nhau khi đọc lại. Chưa khai giá thì phù hiệu chuyển vàng và
+ghi thẳng "chi phí là CHƯA BIẾT" — không hiện 0đ.
+
+`tests/ai-platform.test.ts` khoá 19 mắt xích này ở mức nguồn: một lần "dọn dẹp" gỡ mất khối token
+hay khối công cụ sẽ không làm hỏng bài kiểm dữ liệu nào, nên phải có một bài kiểm đọc chính màn hình.
 
 ## 10. Lượt chạy thử đầu tiên
 

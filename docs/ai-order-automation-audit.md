@@ -15,7 +15,7 @@ Có đúng **ba** đường tạo đơn trên Pancake POS trong ERP, và cả ba
 |---|---|---|---|
 | 1 | Đơn landing page → POS (lẻ) | `lib/landing/pos.ts::pushLandingToPos` | Nhân viên bấm trên trang Đơn landing page |
 | 2 | Đơn landing page → POS (hàng loạt) | `lib/landing/pos.ts::pushAllReadyLanding` | Job `landing-push` hoặc nút gửi hàng loạt |
-| 3 | Công cụ nhân sự AI | `lib/ai/tools/erp.ts::orderCreateDraftTool` | **Bị chặn ở nấc SHADOW** |
+| 3 | Công cụ nhân sự AI | `lib/ai-workforce/tools/erp.ts::orderCreateDraftTool` | **Bị chặn ở nấc SHADOW** |
 
 Đường 3 dùng lại đúng client của đường 1–2, nên không có "kiến trúc đơn hàng thứ hai".
 

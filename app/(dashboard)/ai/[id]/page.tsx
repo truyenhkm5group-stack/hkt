@@ -48,7 +48,16 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
         <span className={cn(badge, "bg-muted text-muted-foreground")}>Nấc xử lý: {ROUTE_TIER_LABEL[run.tier as RouteTier] ?? run.tier}</span>
         {run.escalationReason ? <span className={cn(badge, "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300")}>Leo nấc: {ESCALATION_REASON_LABEL[run.escalationReason as EscalationReason] ?? run.escalationReason}</span> : null}
         <span className={cn(badge, "bg-muted text-muted-foreground")}>
-          Token {formatNumber(run.inputTokens)} / {formatNumber(run.outputTokens)} · chi phí {costLabel(run.costVnd, (n) => formatVND(n))}
+          Token {formatNumber(run.inputTokens)} / {formatNumber(run.outputTokens)}
+          {run.cachedInputTokens > 0 ? ` · đệm ${formatNumber(run.cachedInputTokens)}` : ""} · chi phí {costLabel(run.costVnd, (n) => formatVND(n))}
+        </span>
+        {/*
+          MỘT CON SỐ TIỀN KHÔNG NÓI NÓ ĐƯỢC TÍNH THEO BẢNG GIÁ NÀO thì không so sánh được giữa hai
+          kỳ: đổi giá một lần là mọi con số lịch sử đổi nghĩa mà không ai biết. Nên phiên bản bảng
+          giá đứng NGAY CẠNH số tiền, và "chưa khai giá" phải hiện ra chứ không im lặng.
+        */}
+        <span className={cn(badge, run.pricingVersion ? "bg-muted text-muted-foreground" : "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300")}>
+          Bảng giá: {run.pricingVersion || "chưa khai — chi phí là CHƯA BIẾT"}
         </span>
         {suggestion?.sent ? <span className={cn(badge, "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300")}>ĐÃ GỬI CHO KHÁCH</span> : <span className={cn(badge, "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300")}>Không gửi cho khách</span>}
       </div>
@@ -148,7 +157,9 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
                   <th className="p-2">Nấc</th>
                   <th className="p-2">Nhà cung cấp · mô hình</th>
                   <th className="p-2 text-right">Token vào / ra</th>
+                  <th className="p-2 text-right">Đệm</th>
                   <th className="p-2 text-right">Chi phí</th>
+                  <th className="p-2">Bảng giá</th>
                   <th className="p-2 text-right">ms</th>
                   <th className="p-2">Lỗi</th>
                 </tr>
@@ -160,7 +171,9 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
                     <td className="p-2">{call.tier}</td>
                     <td className="p-2">{call.provider} · {call.model}</td>
                     <td className="p-2 text-right tabular-nums">{formatNumber(call.inputTokens)} / {formatNumber(call.outputTokens)}</td>
+                    <td className="p-2 text-right tabular-nums">{call.cachedInputTokens > 0 ? formatNumber(call.cachedInputTokens) : "—"}</td>
                     <td className="p-2 text-right tabular-nums">{costLabel(call.costVnd, (n) => formatVND(n))}</td>
+                    <td className="p-2 text-muted-foreground">{call.pricingVersion || "chưa khai"}</td>
                     <td className="p-2 text-right tabular-nums">{formatNumber(call.latencyMs)}</td>
                     <td className="p-2 text-muted-foreground">{call.error ?? ""}</td>
                   </tr>

@@ -39,6 +39,9 @@ services:
 
   app:
     build: .
+    # TÊN IMAGE khai rõ, không để compose tự đặt: production dùng `erp-app:local`, và một lần
+    # trùng tên image là một lần `docker compose up` của bên này ghi đè image bên kia đang chạy.
+    image: vnx-ai-staging-app:local
     container_name: vnx-ai-staging-app
     restart: unless-stopped
     env_file: .env.staging
@@ -53,8 +56,16 @@ services:
       AI_ALLOW_CUSTOMER_SEND: "false"
       AI_ALLOW_ORDER_CREATE: "false"
       AI_DEFAULT_MODE: "SHADOW"
+      # Biến RIÊNG của nhân sự AI. `AI_PROVIDER` đã thuộc về AI Copilot của ERP với bộ giá trị khác
+      # (auto|openai|anthropic|off) — đọc chung một biến là hai hệ cùng hiểu sai.
+      AI_WORKFORCE_PROVIDER: "stub"
       # Không nhận webhook đơn hàng và không gọi Viettel Post: bản chạy thử chỉ cần đọc hội thoại.
       PANCAKE_WEBHOOK_SECRET: ""
+      # SePay: webhook TIỀN VÀO TÀI KHOẢN. Bản chạy thử không có lý do gì để nhận nó, và nhận trùng
+      # là hai nơi cùng ghi một giao dịch ngân hàng.
+      SEPAY_WEBHOOK_SECRET: ""
+      SEPAY_WEBHOOK_API_KEY: ""
+      SEPAY_API_TOKEN: ""
       VIETTELPOST_API_KEY: ""
       VIETTELPOST_USERNAME: ""
       VIETTELPOST_PASSWORD: ""
