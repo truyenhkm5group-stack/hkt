@@ -123,16 +123,37 @@ export function testMigrationAppendOnly() {
     console.log("⊘ Bỏ qua kiểm sổ migration: không đọc được sổ ở HEAD");
     return;
   }
-  const previous = read("HEAD~1");
-  if (!previous) {
-    // Kho vừa được clone nông (fetch-depth: 1) hoặc đây là commit đầu tiên — không có gì để so.
-    console.log("⊘ Bỏ qua kiểm 'chỉ nối vào cuối': không có commit trước để đối chiếu");
+  /*
+    MỘT COMMIT GỘP CÓ HAI CHA, và `HEAD~1` chỉ là một trong hai.
+
+    Đối chiếu commit gộp với riêng nhánh tính năng thì TOÀN BỘ migration của `main` trông như "mới
+    xuất hiện ở commit này" — trong khi chúng đã chạy trên production từ lâu, và mốc của chúng dĩ
+    nhiên cũ hơn. Bài kiểm sẽ đỏ vì đúng những migration đang khoẻ mạnh, và người đọc sẽ học được
+    thói quen bỏ qua nó. Nên "đã có từ trước" phải là HỢP của mọi nhánh cha.
+  */
+  const parents = execSync("git rev-list --parents -n 1 HEAD", { encoding: "utf8" }).trim().split(/\s+/).slice(1);
+  if (!parents.length) {
+    console.log("⊘ Bỏ qua kiểm 'chỉ nối vào cuối': đây là commit đầu tiên");
+    return;
+  }
+  const journals = parents.map((p) => read(p)).filter((j): j is NonNullable<typeof j> => Boolean(j));
+  if (!journals.length) {
+    // Kho vừa được clone nông (fetch-depth: 1) — không có gì để so.
+    console.log("⊘ Bỏ qua kiểm 'chỉ nối vào cuối': không đọc được sổ của commit cha nào");
     return;
   }
 
-  const before = new Set(previous.entries.map((e) => e.tag));
-  const maxWhenBefore = Math.max(...previous.entries.map((e) => e.when));
+  const before = new Set(journals.flatMap((j) => j.entries.map((e) => e.tag)));
   const added = current.entries.filter((e) => !before.has(e.tag));
+  /*
+    MỐC ĐỂ SO LÀ MỐC CỦA NHỮNG MỤC CÒN SỐNG Ở COMMIT NÀY, không phải mốc của mọi mục từng tồn tại
+    trong sổ của một nhánh cha. Một mục đã bị ĐỔI TÊN (đánh số lại vì trùng số với migration khác)
+    không còn nằm trong sổ hiện tại, nên nó không phải thứ production đã áp — lấy mốc của nó làm
+    sàn sẽ chặn đúng việc đánh số lại mà bài kiểm này muốn khuyến khích.
+  */
+  const addedTags = new Set(added.map((e) => e.tag));
+  const conSong = current.entries.filter((e) => !addedTags.has(e.tag));
+  const maxWhenBefore = conSong.length ? Math.max(...conSong.map((e) => e.when)) : 0;
 
   for (const e of added) {
     assert.ok(

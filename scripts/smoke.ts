@@ -106,6 +106,16 @@ const ROUTES = [
   "/settings/users",
   "/audit",
   /*
+    NHÂN SỰ AI — hai tuyến, hai thứ khác nhau.
+
+    `/ai` đọc bảng lượt chạy kèm token/chi phí; `/ai/review` dựng ba cột cạnh nhau (khách nói · máy
+    gợi ý · nhân viên trả lời thật) trên toàn bộ lượt ở nấc chạy ngầm. Cả hai đều chỉ ĐỌC — không
+    tuyến nào gửi tin hay tạo đơn — nên smoke mở thử là an toàn tuyệt đối, và nếu một ngày nào đó
+    mở chúng lại sinh ra một lượt gửi thì lá chắn này là nơi đầu tiên biết.
+  */
+  "/ai",
+  "/ai/review",
+  /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.
 
     `/work` chiếu BẢY nguồn việc cùng lúc (case CSKH, care vận đơn, nút thắt fulfillment, dòng tiền

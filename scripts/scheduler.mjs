@@ -75,10 +75,10 @@ const JOBS = [
   { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
-  // NHÂN SỰ AI — CỐ Ý CHƯA BẬT. Đổi lịch chạy là việc phải hỏi chủ shop (AGENTS.md §7), và ở nấc
-  // chạy ngầm job này tốn thêm lượt gọi Pancake Pages mà chưa mang lại gì cho vận hành hằng ngày.
-  // Bật bằng cách bỏ dấu chú thích dòng dưới; webhook hội thoại vẫn chạy độc lập không cần job này.
-  // { job: "ai-sales-ingest", every: minutes("SYNC_AI_SALES_EVERY_MINUTES", 10), offset: 9 },
+  // NHÂN SỰ AI — CỐ Ý KHÔNG CÓ DÒNG LỊCH NÀO. Hai job `ai-sales-ingest` và `ai-sales-run` chạy TAY
+  // trong giai đoạn chạy ngầm; lý do ghi ở `KHONG_CAN_LICH` trong tests/scheduler-coverage.test.ts.
+  // Không để lại dòng bị chú thích ở đây: bộ dò của bài kiểm ấy khớp cả chữ trong chú thích, nên
+  // một dòng "tạm tắt" sẽ khai man rằng job đã có người chạy.
 ];
 
 const DAILY = [

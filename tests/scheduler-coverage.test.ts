@@ -35,6 +35,11 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "vtp-import": "nhập tệp Viettel Post do người tải về, không có gì để tự động",
   "landing-push": "TẠO ĐƠN trên Pancake — việc ghi ra hệ thống ngoài phải có người bấm (AGENTS.md mục 7)",
   "canonical-backfill": "dựng lại trạng thái vận đơn hàng loạt, mặc định chạy thử; ghi thật phải có người quyết",
+  // Nhân sự AI ở nấc CHẠY NGẦM: chạy tay, một page, cửa sổ hẹp — xem docs/ai-staging-runbook.md §4.
+  // Bật lịch là việc phải hỏi chủ shop (AGENTS.md mục 7), và trước khi có lượt nạp tay nào được
+  // soát bằng mắt thì một job tự chạy chỉ sinh ra dữ liệu chưa ai kiểm.
+  "ai-sales-ingest": "giai đoạn chạy ngầm: nạp tay `npm run ai:ingest` một page mỗi lượt, chưa bật lịch",
+  "ai-sales-run": "giai đoạn chạy ngầm: chạy hàng đợi việc ngay sau lượt nạp tay, chưa bật lịch",
   // Chạy LỒNG trong job khác — có người chạy, chỉ là không trực tiếp trong bộ lập lịch.
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "phone-verify": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",

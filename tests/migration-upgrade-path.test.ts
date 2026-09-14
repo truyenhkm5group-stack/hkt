@@ -195,7 +195,7 @@ export async function testMigrationUpgradePath() {
       Nhân viên chưa trả lời thì thời gian phản hồi là chưa biết. Điền 0 vào đó là khẳng định họ
       trả lời tức thì, và mọi con số trung bình sau này đều sai theo hướng đẹp hơn sự thật.
     */
-    await client.query(`insert into sales_suggestions (id, conversation_id, text) values ('up-sg1', 'up-cv1', 'Dạ mẫu này còn hàng ạ')`);
+    await client.query(`insert into sales_suggestions (id, conversation_id, suggested_reply) values ('up-sg1', 'up-cv1', 'Dạ mẫu này còn hàng ạ')`);
     const gy = (await client.query<{ human_reply_count: number; human_response_seconds: number | null }>("select human_reply_count, human_response_seconds from sales_suggestions where id = 'up-sg1'")).rows[0];
     assert.equal(gy.human_reply_count, 0, "0085: chưa có câu trả lời nào của người là 0 — đây là một PHÉP ĐẾM, đếm được");
     assert.equal(gy.human_response_seconds, null, "0085: chưa trả lời ⇒ thời gian phản hồi là CHƯA BIẾT (null), không phải 0 giây");
