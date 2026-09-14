@@ -178,37 +178,66 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
     .where(sql`${schema.returnReasonObservations.shipmentId} in ${ids}`)
     .orderBy(sql`${schema.returnReasonObservations.occurredAt} asc`);
 
-  const totNhat = new Map<string, { rank: number; at: number; row: (typeof quanSat)[number] }>();
+  /*
+    ═══ CHỌN QUAN SÁT: THẨM QUYỀN CAO THẮNG — NHƯNG CHỈ KHI NÓ NÓI ĐƯỢC ĐIỀU GÌ ═══
+
+    Bản đầu chọn quan sát hạng cao nhất rồi ghi đè thẳng. Số đo trên production cho thấy ngay vì
+    sao như thế là sai: trong 103 ghi chú chăm sóc kiện, chỉ 5 câu xếp được vào danh mục — 98 câu
+    còn lại là "đã gọi lần 2", "khách hẹn chiều mai". Ghi chú chăm sóc xếp hạng CAO HƠN chữ ĐVVC,
+    nên một kiện mà Viettel Post đã nói rõ "Khách hàng nghỉ, không có nhà" sẽ bị một câu "đã gọi
+    lần 2" đè lên và rơi về CHƯA XÁC ĐỊNH.
+
+    Tức là thêm dữ liệu vào lại LÀM GIẢM độ phủ. Đúng thứ ngược đời mà không ai đi tìm, vì con số
+    vẫn ra và vẫn trông hợp lý.
+
+    Luật đúng: chọn quan sát hạng cao nhất TRONG SỐ NHỮNG CÁI XẾP ĐƯỢC. Không cái nào xếp được thì
+    kết luận cũ ở lại — và chỉ khi kết luận cũ cũng chưa có gì, quan sát thô mới lên tiếng để nói
+    "CÓ chữ, chưa ai đọc" (`RAW_ONLY`), khác hẳn "chưa ai nói gì".
+  */
+  type ChonLoc = { rank: number; at: number; row: (typeof quanSat)[number]; xep: ReturnType<typeof classifyRaw> };
+  const totNhat = new Map<string, ChonLoc>();
+  const thoNhat = new Map<string, ChonLoc>();
+  const hon = (a: ChonLoc, b: ChonLoc | undefined) => !b || a.rank > b.rank || (a.rank === b.rank && a.at >= b.at);
   for (const q of quanSat) {
     if (!q.shipmentId || !isReasonSource(q.source)) continue;
-    const rank = SOURCE_RANK[q.source];
-    const at = q.occurredAt.getTime();
-    const cu = totNhat.get(q.shipmentId);
-    // Hạng cao hơn thắng; bằng hạng thì muộn hơn thắng.
-    if (!cu || rank > cu.rank || (rank === cu.rank && at >= cu.at)) totNhat.set(q.shipmentId, { rank, at, row: q });
+    const ung: ChonLoc = { rank: SOURCE_RANK[q.source], at: q.occurredAt.getTime(), row: q, xep: classifyRaw(q.rawText, q.source) };
+    // Hạng cao hơn thắng; bằng hạng thì muộn hơn thắng — kiện hẹn lại rồi vẫn hoàn thì lý do cuối
+    // mới là lý do nó hoàn.
+    if (ung.xep.matched && hon(ung, totNhat.get(q.shipmentId))) totNhat.set(q.shipmentId, ung);
+    if (hon(ung, thoNhat.get(q.shipmentId))) thoNhat.set(q.shipmentId, ung);
   }
 
-  for (const [id, { row }] of totNhat) {
+  const dat = (id: string, { row, xep }: ChonLoc, coverage: ReasonCoverageState) => {
     const src = row.source as ReasonSource;
-    const xep = classifyRaw(row.rawText, src);
     const nguoi = SOURCE_IS_HUMAN[src];
     const truoc = out.get(id);
     /*
       QUAN SÁT CỦA MÁY KHÔNG ĐƯỢC HẠ CẤP MỘT KẾT LUẬN CỦA NGƯỜI. Bậc 1 phía trên đã ghi
       `HUMAN_CONFIRMED`; một quan sát `CARRIER_TEXT` mới hơn không được đè lên nó.
     */
-    if (truoc?.source === "HUMAN_CONFIRMED" && !nguoi) continue;
+    if (truoc?.source === "HUMAN_CONFIRMED" && !nguoi) return;
     out.set(id, {
-      reason: xep.reason,
+      reason: coverage === "CLASSIFIED" ? xep.reason : "UNKNOWN",
       confidence: nguoi ? "CONFIRMED" : src === "CARRIER_CODE" ? "CARRIER_CODE" : "CARRIER_TEXT",
       evidence: `${REASON_SOURCE_LABEL[src]}: “${row.rawText}”${row.note ? ` — ${row.note}` : ""}`,
       rawReason: row.rawText,
       manual: nguoi,
       actorEmail: row.actorEmail,
-      // CÓ chữ mà chưa xếp được là `RAW_ONLY`, không bao giờ là `NO_EVIDENCE`.
-      coverage: xep.matched ? "CLASSIFIED" : "RAW_ONLY",
+      coverage,
       source: src,
     });
+  };
+
+  for (const [id, chon] of totNhat) dat(id, chon, "CLASSIFIED");
+  for (const [id, chon] of thoNhat) {
+    if (totNhat.has(id)) continue;
+    /*
+      KHÔNG HẠ CẤP MỘT KẾT LUẬN ĐÃ CÓ. Bậc 1–3 phía trên có thể đã xếp được kiện này từ chữ ĐVVC;
+      một ghi chú chăm sóc không đọc được KHÔNG phải lý do để xoá kết luận ấy đi. Chữ thô chỉ lên
+      tiếng khi chỗ đó đang thật sự trống.
+    */
+    if (out.get(id)?.coverage === "CLASSIFIED") continue;
+    dat(id, chon, "RAW_ONLY");
   }
 
   return out;
