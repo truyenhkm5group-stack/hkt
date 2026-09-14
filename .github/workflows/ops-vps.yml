@@ -243,7 +243,10 @@ jobs:
             cd /root/erp
             C="docker compose -f docker-compose.prod.yml"
             # lấy script mới nhất trên main qua GitHub API (không bị CDN raw.githubusercontent cache 5 phút)
-            fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=main"; }
+            fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=${2:-main}"; }
+            # Thao tác bản chạy thử lấy script từ CHÍNH nhánh đang bấm, không phải từ `main`:
+            # nhánh này có những script mà `main` chưa có.
+            fetch_staging_script() { fetch_script "$1" "$STAGING_BRANCH"; }
             # Kiểm sức khoẻ production. In container erp-* nếu có, rồi PHÁN XÉT bằng /api/health.
             #
             # Vì sao là một hàm chứ không phải hai dòng chép đi chép lại: bản trước dùng
@@ -643,11 +646,18 @@ jobs:
 
               ai-staging-read-test)
                 cd /opt/vnx-ai-staging
+                # ĐẨY SCRIPT VÀO CONTAINER thay vì dựng lại ảnh — đúng khuôn mà các thao tác
+                # production ở trên đã dùng (`fetch_script ... | docker exec -i erp-app ...`).
+                #
+                # Ảnh dựng từ một commit cố định; script kiểm tra thì đổi nhanh hơn ảnh nhiều. Lượt
+                # đầu hỏng vì đúng chuyện đó: ảnh dựng ở `5c49f77`, còn `pancake-read-test.ts` thêm ở
+                # `720c480` — container báo "Cannot find module". Dựng lại ảnh tám phút để chạy một
+                # bài kiểm ba mươi giây là đổi sai hướng.
+                fetch_staging_script pancake-read-test.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/pancake-read-test.ts'
                 # CHỈ GỌI GET. Script tự gọi fetch thay vì dùng client, vì client sẽ POST sinh page
                 # token khi chưa có — một bài kiểm "chỉ đọc" mà tự sinh chứng thư thì không còn là
                 # bài kiểm chỉ đọc.
-                docker compose -f docker-compose.staging.yml --env-file .env.staging \
-                  exec -T app npx tsx --tsconfig tsconfig.json scripts/pancake-read-test.ts ${ARG:-} ;;
+                docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/pancake-read-test.ts ${ARG:-} ;;
 
               ai-staging-catalog)
                 cd /opt/vnx-ai-staging
