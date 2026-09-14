@@ -11,7 +11,7 @@
 | Có `page_id` | **2.489** | **88,0%** |
 | Không có `page_id` | 340 | 12,0% |
 
-**16 fanpage** thật sự sinh ra đơn. Bốn page lớn nhất gánh 70% số đơn:
+**15 fanpage** thật sự sinh ra đơn. Bốn page lớn nhất gánh 70% số đơn:
 
 | Page ID | Đơn | Đã xác nhận | Doanh thu xác nhận | Đơn đầu → đơn cuối |
 |---|---:|---:|---:|---|
@@ -23,7 +23,7 @@
 | 162795646927669 | 164 | 52 | 30.259.000đ | 07/08 → 14/09 |
 | 192844577236831 | 132 | 101 | 49.486.000đ | 15/08 → 14/09 |
 | 1107001939161360 | 77 | 77 | 37.153.000đ | 13/08 → 20/08 |
-| *(9 page nhỏ còn lại)* | 129 | 4 | 1.971.000đ | |
+| *(8 page nhỏ còn lại)* | 129 | 4 | 1.971.000đ | |
 
 **Điều kiện cần quan trọng nhất ĐÃ CÓ SẴN**: `orders.page_id` được mapper Pancake ghi từ
 `order.page_id` (`lib/integrations/pancake/mapper.ts:489`) và đang phủ 88% số đơn. Không phải
@@ -36,7 +36,7 @@ Chạy thử đúng luật (người nhận + giỏ hàng, cửa sổ 24 giờ) 
 | | |
 |---|---:|
 | Đơn đủ căn cứ xét trùng (có SĐT **và** có dòng hàng) | 2.446 |
-| Đơn đủ căn cứ nhưng KHÔNG bao giờ bị loại (thiếu SĐT hoặc thiếu dòng hàng) | 383 |
+| Đơn KHÔNG đủ căn cứ (thiếu SĐT hoặc thiếu dòng hàng) ⇒ không bao giờ bị loại vì trùng | 383 |
 | **Đơn bị loại vì trùng** | **84** (3,4% số đơn xét được) |
 | Doanh thu xác nhận KHÔNG được tính cho ai | 33.165.000đ |
 | Trong đó trùng **khác page** | **0** |
@@ -47,7 +47,7 @@ Chạy thử đúng luật (người nhận + giỏ hàng, cửa sổ 24 giờ) 
 > có nó thì một marketer được cộng đôi 33 triệu; nhưng nó không phải đang chữa cái bệnh mà đề bài
 > hình dung.
 
-Phép đo trên chưa bỏ dấu tiếng Việt (SQL không có `unatccent`), còn mã ERP có bỏ dấu — nên số
+Phép đo trên chưa bỏ dấu tiếng Việt (SQL trên máy chủ không có `unaccent`), còn mã ERP có bỏ dấu — nên số
 thật sẽ **bằng hoặc nhỉnh hơn** 84 một chút, không bao giờ ít hơn.
 
 ## 2. ERP trước đó đã có gì, và vì sao vẫn chưa đủ
@@ -97,7 +97,7 @@ lẫn vận hành xảy ra trong cùng ca hoặc cùng ngày. Đổi ở **đún
 
 1. **Deploy** — cần chủ shop đồng ý đưa lên `main` (phiên này không có quyền đẩy lên `main`).
 2. **Khai fanpage → marketer.** Sau deploy, mở `/marketing/fanpages` → tab *Gán fanpage → marketer*,
-   bấm **Đối soát lại** để máy phát hiện 16 fanpage, rồi gán từng page. **Mốc hiệu lực phải lùi về
+   bấm **Đối soát lại** để máy phát hiện 15 fanpage, rồi gán từng page. **Mốc hiệu lực phải lùi về
    ngày đơn đầu tiên của page ấy** (bảng ở mục 1), nếu không toàn bộ đơn trước mốc sẽ nằm ở
    `NO_ASSIGNMENT`.
 3. **340 đơn không có `page_id`** sẽ luôn ở `NO_PAGE`. Đó là sự thật đúng, không phải lỗi — phần
