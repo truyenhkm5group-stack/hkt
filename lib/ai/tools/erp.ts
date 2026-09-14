@@ -20,6 +20,7 @@ import { normalize } from "@/lib/text";
 import { getSettingJson } from "@/lib/settings";
 import { getPancakeClient } from "@/lib/integrations/pancake/client";
 import { SALES_STALE_HOURS } from "@/lib/constants/sales-agent";
+import { DEFAULT_SIZE_RULES, recommendSize, resolveSizeRule, SIZE_RULES_KEY, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
 import type { ToolName } from "@/lib/constants/ai-tools";
 
 const p = schema.products;
@@ -29,11 +30,6 @@ async function landingConfig(): Promise<LandingConfig> {
   return getSettingJson<LandingConfig>(LANDING_CONFIG_KEY, DEFAULT_LANDING_CONFIG);
 }
 
-/** Bảng size do chủ shop khai (`ai.sizeChart`). CHƯA KHAI thì công cụ nói thẳng là chưa có. */
-export const SIZE_CHART_KEY = "ai.sizeChart";
-type SizeChartRow = { size: string; heightCm?: [number, number]; weightKg?: [number, number]; note?: string };
-type SizeChart = { rows: SizeChartRow[]; note: string };
-const EMPTY_SIZE_CHART: SizeChart = { rows: [], note: "" };
 
 // ───────────────────────── product.search ─────────────────────────
 
@@ -246,26 +242,50 @@ export const inventoryCheckTool = defineTool({
 
 export const sizeRecommendTool = defineTool({
   name: "size.recommend",
-  describe: "Gợi ý size theo chiều cao / cân nặng, dựa trên bảng size chủ shop khai. Chưa khai bảng size thì trả về chưa có căn cứ.",
-  input: z.object({ heightCm: z.number().min(80).max(230).optional(), weightKg: z.number().min(20).max(200).optional(), productId: z.string().trim().optional() }),
-  async handler({ heightCm, weightKg }) {
-    const chart = await getSettingJson<SizeChart>(SIZE_CHART_KEY, EMPTY_SIZE_CHART);
-    if (!chart.rows?.length) {
-      // Không có bảng size mà vẫn "gợi ý" là đoán bừa trên người thật rồi đẻ ra đơn đổi size.
-      return { available: false, size: null, reason: "Chưa khai bảng size trong ERP (settings ai.sizeChart) — phải hỏi nhân viên tư vấn", chart: [] as SizeChartRow[] };
+  describe:
+    "Gợi ý size theo BẢNG SỐ ĐO của shop. Nhận chiều cao, cân nặng, vòng ngực, vòng eo, vòng mông. Chưa khai bảng số đo thì trả SIZE_DATA_MISSING — KHÔNG đoán.",
+  input: z.object({
+    variantId: z.string().trim().optional(),
+    productId: z.string().trim().optional(),
+    heightCm: z.number().min(80).max(230).nullable().optional(),
+    weightKg: z.number().min(20).max(200).nullable().optional(),
+    bustCm: z.number().min(40).max(200).nullable().optional(),
+    waistCm: z.number().min(30).max(200).nullable().optional(),
+    hipCm: z.number().min(40).max(220).nullable().optional(),
+  }),
+  async handler(args) {
+    const stored = await getSettingJson<{ version: string; rules: SizeRule[] }>(SIZE_RULES_KEY, DEFAULT_SIZE_RULES);
+    const rules = Array.isArray(stored.rules) ? stored.rules : [];
+    // Nhóm hàng lấy từ mã hàng của sản phẩm (Q002 → Q) — đủ để một bảng áp cho cả dòng đầm.
+    let family: string | null = null;
+    let productId = args.productId ?? null;
+    if (args.variantId) {
+      const db = await getDb();
+      const row = await db
+        .select({ productId: pv.productId, code: p.customId })
+        .from(pv)
+        .innerJoin(p, eq(p.id, pv.productId))
+        .where(eq(pv.id, args.variantId))
+        .limit(1);
+      if (row[0]) {
+        productId = productId ?? row[0].productId;
+        family = /^([A-Za-z]{1,2})\d{3}$/.exec(row[0].code ?? "")?.[1]?.toUpperCase() ?? null;
+      }
     }
-    if (heightCm === undefined && weightKg === undefined) {
-      return { available: false, size: null, reason: "Chưa có chiều cao / cân nặng của khách", chart: chart.rows };
-    }
-    const fits = chart.rows.filter((row) => {
-      const hOk = !row.heightCm || heightCm === undefined || (heightCm >= row.heightCm[0] && heightCm <= row.heightCm[1]);
-      const wOk = !row.weightKg || weightKg === undefined || (weightKg >= row.weightKg[0] && weightKg <= row.weightKg[1]);
-      return hOk && wOk;
+    const rule = resolveSizeRule(rules, { variantId: args.variantId ?? null, productId, family });
+    const result = recommendSize(rule, {
+      heightCm: args.heightCm ?? null,
+      weightKg: args.weightKg ?? null,
+      bustCm: args.bustCm ?? null,
+      waistCm: args.waistCm ?? null,
+      hipCm: args.hipCm ?? null,
     });
-    if (fits.length !== 1) {
-      return { available: false, size: null, reason: fits.length ? "Số đo rơi vào nhiều size — để nhân viên tư vấn" : "Số đo nằm ngoài bảng size", chart: chart.rows };
-    }
-    return { available: true, size: fits[0].size, reason: chart.note || "Theo bảng size của shop", chart: chart.rows };
+    return {
+      ...result,
+      // Chỉ mã OK mới được nói với khách; mọi mã khác phải chuyển người.
+      needsHuman: sizeNeedsHuman(result.code),
+      rulesDeclared: rules.length,
+    };
   },
 });
 

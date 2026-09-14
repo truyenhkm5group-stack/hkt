@@ -27,6 +27,10 @@ import { generateSystemPrompt, guardGeneratedText, renderOrderReview, renderTemp
 import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type SalesState } from "@/lib/ai/agents/sales/state";
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai/agents/sales/understand";
 import type { RouteTier, EscalationReason } from "@/lib/constants/ai";
+import type { SizeResultCode } from "@/lib/constants/size-engine";
+
+/** Kết quả máy gợi ý size, đúng hình dạng công cụ `size.recommend` trả về. */
+export type SizeAdvice = { code: SizeResultCode; size: string | null; reason: string; needsHuman: boolean; missing: string[]; candidates: string[] };
 import { nextStage, SALES_STALE_HOURS, type SalesStage } from "@/lib/constants/sales-agent";
 
 // Nạp công cụ vào cổng ngay khi mô-đun được tải: dây chuyền không bao giờ chạy với cổng rỗng.
@@ -68,7 +72,16 @@ async function applyUnderstanding(
   state: SalesState,
   understanding: Understanding,
   tool: ToolRunner,
-): Promise<{ state: SalesState; sizes: string[]; colors: string[]; stockKnown: boolean; available: number | null; shippingFee: number | null; toolFailed: boolean }> {
+): Promise<{
+  state: SalesState;
+  sizes: string[];
+  colors: string[];
+  stockKnown: boolean;
+  available: number | null;
+  shippingFee: number | null;
+  toolFailed: boolean;
+  sizeAdvice: SizeAdvice | null;
+}> {
   const entities = understanding.entities;
   let next: SalesState = { ...state };
   let toolFailed = false;
@@ -77,6 +90,7 @@ async function applyUnderstanding(
   let stockKnown = false;
   let available: number | null = null;
   let shippingFee: number | null = null;
+  let sizeAdvice: SizeAdvice | null = null;
 
   // Ý MUỐN MUA DÍNH LẠI: đã nói một lần là còn giá trị cho các lượt sau. Gửi SĐT hoặc địa chỉ
   // cho shop trong bán hàng qua chat cũng là ý muốn mua — không ai đọc địa chỉ nhà cho người lạ.
@@ -156,11 +170,33 @@ async function applyUnderstanding(
     }
   }
 
+  // 2.3b GỢI Ý SIZE — chỉ hỏi máy khi khách thật sự nói tới size hoặc đưa số đo. Máy trả mã
+  //      `SIZE_DATA_MISSING` khi ERP chưa có bảng số đo, và dây chuyền sẽ chuyển người thay vì
+  //      để mô hình đoán một size trên cơ thể người thật.
+  const wantsSize = understanding.intents.includes("SIZE_QUESTION") || entities.heightCm !== null || entities.weightKg !== null;
+  if (wantsSize && next.productId) {
+    const advice = await tool<SizeAdvice>("size.recommend", {
+      variantId: next.variantId ?? undefined,
+      productId: next.productId,
+      heightCm: entities.heightCm,
+      weightKg: entities.weightKg,
+      bustCm: entities.bustCm,
+      waistCm: entities.waistCm,
+      hipCm: entities.hipCm,
+    });
+    if (advice === null) toolFailed = true;
+    else {
+      sizeAdvice = advice;
+      // Size do BẢNG SỐ ĐO quyết định, không do mô hình nói. Chỉ nhận khi mã là OK.
+      if (advice.code === "OK" && advice.size && !next.size) next.size = advice.size;
+    }
+  }
+
   // 2.4 Bản chốt đang chờ mà đơn đã đổi ⇒ huỷ bản chốt. Không được để một chữ "ok" gửi sau đó
   //     dính vào một đơn đã khác nội dung.
   if (next.pending && confirmationFingerprint(next) !== next.pending.fingerprint) next = { ...next, pending: null };
 
-  return { state: next, sizes, colors, stockKnown, available, shippingFee, toolFailed };
+  return { state: next, sizes, colors, stockKnown, available, shippingFee, toolFailed, sizeAdvice };
 }
 
 /** Chạy nhân sự bán hàng cho MỘT việc. Không bao giờ ném — mọi thất bại đều thành một lượt chạy đọc được. */
@@ -262,6 +298,7 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       stale: staleHours >= SALES_STALE_HOURS,
       toolFailed: applied.toolFailed,
       canPromiseStock: applied.stockKnown ? (applied.available ?? 0) > 0 : null,
+      sizeAdvice: applied.sizeAdvice,
     });
 
     // ───── 4. DIỄN ĐẠT ─────
@@ -270,6 +307,7 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       state,
       sizes: applied.sizes,
       colors: applied.colors,
+      sizeAdvice: applied.sizeAdvice,
       stockKnown: applied.stockKnown,
       available: applied.available,
       shippingFee: applied.shippingFee,

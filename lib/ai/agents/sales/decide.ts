@@ -45,6 +45,8 @@ export type DecideInput = {
   toolFailed?: boolean;
   /** Tồn kho có xác định được không; `null` = CHƯA BIẾT nên không được hứa còn hàng. */
   canPromiseStock?: boolean | null;
+  /** Kết quả máy gợi ý size cho lượt này (nếu có hỏi). */
+  sizeAdvice?: { code: string; size: string | null; reason: string; needsHuman: boolean } | null;
 };
 
 function handoff(stage: SalesStage, reason: HandoffReason, message: string, facts: SalesFacts): SalesDecision {
@@ -95,6 +97,13 @@ export function decide(input: DecideInput): SalesDecision {
   // 4. Công cụ ERP hỏng ⇒ máy không biết gì chắc chắn, không được hứa hẹn.
   if (input.toolFailed) {
     return handoff(input.stage, "TOOL_FAILED", "Công cụ ERP lỗi — không đọc được sản phẩm / giá / tồn nên không trả lời khách", facts);
+  }
+
+  // 4b. SIZE KHÔNG CÓ CĂN CỨ ⇒ CHUYỂN NGƯỜI. Khách đã đưa số đo và đang chờ một con số; máy mà
+  //     không có bảng số đo thì câu duy nhất trung thực là "để nhân viên tư vấn". Đây là chỗ dễ
+  //     nhất để một mô hình ngôn ngữ đoán trôi chảy, nên chặn ở tầng quyết định, không ở câu chữ.
+  if (input.sizeAdvice?.needsHuman && input.sizeAdvice.code === "SIZE_DATA_MISSING") {
+    return handoff(input.stage, "SIZE_DATA_MISSING", `Không gợi ý được size: ${input.sizeAdvice.reason}`, facts);
   }
 
   // 5. Hỏi mãi một thứ mà không xong: dấu hiệu máy đang bí.

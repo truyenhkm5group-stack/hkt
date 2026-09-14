@@ -20,6 +20,8 @@ export type GenerationContext = {
   /** Size / màu đang có để gợi cho khách chọn. */
   sizes: string[];
   colors: string[];
+  /** Gợi ý size của máy (chỉ dùng khi mã là OK). */
+  sizeAdvice?: { code: string; size: string | null; reason: string } | null;
   /** Tồn có xác định được không — CHƯA BIẾT thì không được hứa còn hàng. */
   stockKnown: boolean;
   available: number | null;
@@ -45,6 +47,10 @@ export function renderTemplate(ctx: GenerationContext): string {
     }
     case "ASK_SIZE": {
       const sizes = ctx.sizes.length ? ` Mẫu này có size: ${ctx.sizes.join(", ")}.` : "";
+      // Chỉ nói một size cụ thể khi BẢNG SỐ ĐO kết luận được. Mọi mã khác đều quay về hỏi thêm.
+      if (ctx.sizeAdvice?.code === "OK" && ctx.sizeAdvice.size) {
+        return `Dạ với số đo của chị thì bên em tư vấn size ${ctx.sizeAdvice.size} ạ.${sizes}`;
+      }
       return `Dạ chị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn nhất ạ.${sizes}`;
     }
     case "ANSWER_QUESTION": {

@@ -285,6 +285,7 @@ export const HANDOFF_REASONS = [
   "PRICE_MISMATCH",
   "ORDER_BLOCKED",
   "TOOL_FAILED",
+  "SIZE_DATA_MISSING",
 ] as const;
 
 export type HandoffReason = (typeof HANDOFF_REASONS)[number];
@@ -299,6 +300,7 @@ export const HANDOFF_REASON_LABEL: Record<HandoffReason, string> = {
   PRICE_MISMATCH: "Số tiền mô hình nói lệch số máy chủ tính",
   ORDER_BLOCKED: "Đơn thiếu điều kiện bắt buộc",
   TOOL_FAILED: "Công cụ ERP lỗi",
+  SIZE_DATA_MISSING: "ERP chưa có bảng số đo để gợi ý size",
 };
 
 /** Sau bao lâu im lặng thì coi là nguội (giờ). Chủ shop chỉnh ở `ai.config`, không hard-code nơi khác. */

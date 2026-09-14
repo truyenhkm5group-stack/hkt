@@ -52,6 +52,9 @@ export const UNDERSTANDING_SCHEMA = z.object({
     province: z.string().max(80).default(""),
     heightCm: z.number().min(80).max(230).nullable().default(null),
     weightKg: z.number().min(20).max(200).nullable().default(null),
+    bustCm: z.number().min(40).max(200).nullable().default(null),
+    waistCm: z.number().min(30).max(200).nullable().default(null),
+    hipCm: z.number().min(40).max(220).nullable().default(null),
   }),
   confidence: z.number().min(0).max(1),
   /** Câu / cụm đã dẫn tới kết luận — để người đọc lại hiểu vì sao máy nghĩ vậy. */
@@ -71,6 +74,9 @@ const EMPTY_ENTITIES = {
   province: "",
   heightCm: null as number | null,
   weightKg: null as number | null,
+  bustCm: null as number | null,
+  waistCm: null as number | null,
+  hipCm: null as number | null,
 };
 
 // Từ khoá — viết ở dạng đã chuẩn hoá (không dấu, thường), so khớp TRỌN TỪ qua `normalize()`.
@@ -129,6 +135,25 @@ export function findBody(text: string): { heightCm: number | null; weightKg: num
   return {
     heightCm: heightCm !== null && heightCm >= 80 && heightCm <= 230 ? heightCm : null,
     weightKg: weightKg !== null && weightKg >= 20 && weightKg <= 200 ? weightKg : null,
+  };
+}
+
+/**
+ * Vòng ngực / eo / mông khách tự khai: "vòng ngực 88", "eo 68 mông 92".
+ * Không bắt được thì `null` = CHƯA BIẾT — máy gợi ý size sẽ đòi thêm, không tự điền.
+ */
+export function findCircumferences(text: string): { bustCm: number | null; waistCm: number | null; hipCm: number | null } {
+  const n = normalize(text);
+  const read = (pattern: RegExp, min: number, max: number): number | null => {
+    const m = pattern.exec(n);
+    if (!m) return null;
+    const value = Number(m[1]);
+    return Number.isFinite(value) && value >= min && value <= max ? value : null;
+  };
+  return {
+    bustCm: read(/\b(?:vong )?nguc\s*(\d{2,3})\b/, 40, 200),
+    waistCm: read(/\b(?:vong )?eo\s*(\d{2,3})\b/, 30, 200),
+    hipCm: read(/\b(?:vong )?mong\s*(\d{2,3})\b/, 40, 220),
   };
 }
 
@@ -192,13 +217,15 @@ export function understandByRule(rawText: string): Understanding {
   const color = findColor(text);
   const quantity = findQuantity(text);
   const body = findBody(text);
+  const circumferences = findCircumferences(text);
   const productCode = productCodeFromText(text);
 
   if (phone && !intents.includes("PROVIDE_CONTACT")) intents.push("PROVIDE_CONTACT");
   // Khách nhắn "size L" / "màu đỏ" / "lấy 2 cái" là đang CHỌN MẪU MÃ. Không có từ khoá nào bắt
   // được việc đó — chính THỰC THỂ bóc ra mới là bằng chứng, nên ý định phải suy từ thực thể.
   if ((size || color || quantity !== null) && !intents.includes("PROVIDE_VARIANT")) intents.push("PROVIDE_VARIANT");
-  if ((body.heightCm || body.weightKg) && !intents.includes("SIZE_QUESTION")) intents.push("SIZE_QUESTION");
+  const hasMeasurement = Boolean(body.heightCm || body.weightKg || circumferences.bustCm || circumferences.waistCm || circumferences.hipCm);
+  if (hasMeasurement && !intents.includes("SIZE_QUESTION")) intents.push("SIZE_QUESTION");
   // Địa chỉ: ba mảnh trở lên phân tách bởi dấu phẩy và có chữ số nhà là dấu hiệu đủ mạnh.
   const looksLikeAddress = text.split(",").length >= 3 && /\d/.test(text) && text.trim().length >= 15;
   if (looksLikeAddress && !intents.includes("PROVIDE_ADDRESS")) intents.push("PROVIDE_ADDRESS");
@@ -216,6 +243,7 @@ export function understandByRule(rawText: string): Understanding {
   // "không hiểu" và cả cuộc bán hàng bị chuyển người ngay ở lượt thứ hai.
   if (size || color) confidence = Math.max(confidence, 0.85);
   if (quantity !== null) confidence = Math.max(confidence, 0.8);
+  if (hasMeasurement) confidence = Math.max(confidence, 0.85);
   if (intents.length === 1 && intents[0] === "OTHER") confidence = 0.2;
 
   return {
@@ -232,6 +260,7 @@ export function understandByRule(rawText: string): Understanding {
       province: "",
       heightCm: body.heightCm,
       weightKg: body.weightKg,
+      ...circumferences,
     },
     confidence,
     evidence: evidence.join(", ").slice(0, 300),
@@ -263,6 +292,9 @@ export function mergeUnderstanding(rule: Understanding, model: z.infer<typeof UN
       province: rule.entities.province || model.entities.province,
       heightCm: rule.entities.heightCm ?? model.entities.heightCm,
       weightKg: rule.entities.weightKg ?? model.entities.weightKg,
+      bustCm: rule.entities.bustCm ?? model.entities.bustCm,
+      waistCm: rule.entities.waistCm ?? model.entities.waistCm,
+      hipCm: rule.entities.hipCm ?? model.entities.hipCm,
     },
     confidence: Math.max(rule.confidence, model.confidence),
     evidence: [rule.evidence, model.evidence].filter(Boolean).join(" · ").slice(0, 300),
@@ -276,7 +308,7 @@ export function understandSystemPrompt(): string {
     "Bạn là bộ bóc ý định cho một shop thời trang Việt Nam bán qua Facebook.",
     "Đọc MỘT tin nhắn của khách và trả về JSON thuần theo đúng lược đồ, không thêm lời dẫn.",
     `Trường "intents": mảng, mỗi phần tử là một trong ${SALES_INTENTS.join(", ")}.`,
-    'Trường "entities": productText, productCode, size, color, quantity, phone, address, province, heightCm, weightKg.',
+    'Trường "entities": productText, productCode, size, color, quantity, phone, address, province, heightCm, weightKg, bustCm, waistCm, hipCm.',
     'Trường "confidence": số 0–1. Không chắc thì để thấp, KHÔNG đoán bừa.',
     'Trường "evidence": trích đúng cụm chữ trong tin nhắn đã dẫn tới kết luận.',
     "TUYỆT ĐỐI không bịa số điện thoại, địa chỉ, giá tiền hay tồn kho. Không có thì để rỗng / null.",
