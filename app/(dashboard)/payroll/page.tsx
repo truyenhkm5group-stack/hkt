@@ -89,6 +89,8 @@ export default async function PayrollPage({
   const totalSalary = !report.fixedBasis.bounded ? null : viewAll ? report.totalSalary : lines.reduce((t, l) => t + (l.salary ?? 0), 0);
   const fixedTotal = report.fixedBasis.bounded ? lines.reduce((t, l) => t + (l.fixed ?? 0), 0) : null;
   const fixedMonthlyTotal = lines.reduce((t, l) => t + l.fixedMonthly, 0);
+  /** Nhân sự chưa có liên kết tài khoản ⇒ chính họ không xem được dòng lương của mình. */
+  const chuaNoiTaiKhoan = viewAll ? report.lines.filter((l) => !(l.employee.userEmail ?? "").trim()) : [];
   /** Lương cứng khai theo THÁNG nhưng bảng hiện phần THUỘC KỲ — nói thẳng căn cứ, đừng để người đọc tự đoán. */
   const fixedNote = report.fixedBasis.bounded
     ? `khai ${formatVND(fixedMonthlyTotal, { compact: true })}/tháng, chia theo ${formatNumber(report.fixedBasis.days)} ngày của kỳ`
@@ -152,6 +154,23 @@ export default async function PayrollPage({
             Xem ở cơ sở LN1
           </Link>{" "}
           <span className="text-muted-foreground">— {PAYROLL_BASIS_ELIGIBILITY.profit1.why}</span>
+        </div>
+      ) : null}
+
+      {/*
+        AI CHƯA NỐI ĐƯỢC VỚI TÀI KHOẢN NÀO.
+
+        Quyền "Lương: xem của mình" khớp bằng KHOÁ TÀI KHOẢN (ô "Email đăng nhập ERP"), không so
+        tên — hai người trùng tên mà so tên là đọc được lương của nhau. Hệ quả cần nói ra: nhân sự
+        chưa khai email thì chính họ KHÔNG xem được dòng của mình. Người quản trị là người sửa được
+        việc đó, nên nhắc ở đây, cạnh chỗ sửa, chứ không để họ tự phát hiện qua một lời phàn nàn.
+      */}
+      {canManage && chuaNoiTaiKhoan.length ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <b>{formatNumber(chuaNoiTaiKhoan.length)}/{formatNumber(report.lines.length)} nhân sự chưa khai “Email đăng nhập ERP”</b> —{" "}
+          {chuaNoiTaiKhoan.map((l) => l.employee.shortName || l.employee.name).join(", ")}. Người chỉ có quyền “Lương: xem của mình” sẽ thấy bảng rỗng cho
+          tới khi có email, vì ERP khớp bằng KHOÁ TÀI KHOẢN chứ không so tên (hai người trùng tên mà so tên là đọc được lương của nhau). Bấm sửa từng
+          người ở cột cuối bảng để khai.
         </div>
       ) : null}
 
