@@ -124,7 +124,7 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
 
       <SectionCard
         title="Ghép chiến dịch Facebook → mã hàng"
-        description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng và marketer để tính lợi nhuận theo mã / theo người; chiến dịch không thuộc mã nào = chi phí test; chiến dịch của shop khác chọn “Không tính”." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
+        description={fb ? "Chi tiêu được tự kéo từ Business Manager mỗi giờ. Ghép từng chiến dịch với mã hàng và marketer để biết TIỀN QUẢNG CÁO của ai chi cho mã nào; chiến dịch không thuộc mã nào = chi phí test; chiến dịch của shop khác chọn “Không tính”. Việc ghép này KHÔNG quyết định đơn/doanh thu thuộc về marketer nào — điều đó đi theo FANPAGE phát sinh đơn (xem Lương & hoa hồng → “Doanh thu chia cho marketer bằng căn cứ nào”)." : "Chưa cấu hình FACEBOOK_ACCESS_TOKEN — xem Kết nối dữ liệu."}
         actions={
           <div className="flex flex-wrap gap-2">
             {canManageEmployees ? <EmployeeDialog accounts={accounts} preset={{}} triggerLabel="Thêm marketer" /> : null}
