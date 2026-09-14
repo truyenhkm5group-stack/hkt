@@ -279,3 +279,83 @@ form và có một lá chắn riêng: *"đã vào được trang thật, không 
 Lượt QA cũng bắt được một lỗi thật: `ReasonGroupTable` là Client Component và bản nháp truyền một
 **hàm** `drilldownHref` qua ranh giới — cả khối lý do hoàn biến mất sau một lớp bắt lỗi, trang vẫn
 trả 200. Nay truyền một **bảng tra** dựng sẵn ở máy chủ.
+
+---
+
+## 8. Xác minh SAU khi triển khai (14/09/2026, 08:25–08:48)
+
+Production đang chạy `bf48f8dc98c0` trên `main` — **đúng SHA đã qua cổng**, xác nhận bằng
+`/api/health`.
+
+### 8.1 Bất biến nghiệp vụ: đối soát toàn bộ đơn
+
+`ops outcome-parity` (chỉ đo, không ghi):
+
+```
+TOTAL_ORDERS   2.810      MATCHED 2.810      MISMATCHED 0
+MISSING_FACT   0          STALE_VERSION 0    FALLBACK_RATE 0 %
+DELIVERED      505        COGS_FROZEN 505    COGS_NOT_FROZEN 0
+```
+
+**0 dòng lệch** giữa bảng kết quả đã tính sẵn và luật chuẩn. Bản phát hành này KHÔNG đụng tới
+`ORDER_OUTCOME`, và con số chứng minh điều đó thay vì lời hứa.
+
+### 8.2 Bảng chân lý theo mã hàng — và phép cộng phải khớp
+
+| mã | GTC | hoàn | chưa kết thúc | **đã gửi** | GTC + hoàn + chưa kết thúc | GTC thực tế |
+|---|---:|---:|---:|---:|---:|---:|
+| Q001 | 33 | 38 | 0 | **71** | 71 ✓ | 46,5 % |
+| Q002 | 270 | 760 | 59 | **1.089** | 1.089 ✓ | 26,2 % |
+| Q003 | 190 | 222 | 55 | **467** | 467 ✓ | 46,1 % |
+| Q004 | 12 | 6 | 47 | **65** | 65 ✓ | 66,7 % |
+| X001 | 13 | 20 | 0 | **33** | 33 ✓ | 39,4 % |
+
+`Đã gửi = GTC + hoàn + chưa kết thúc` đúng cho **cả năm mã**. Đơn huỷ (Q002: 1) nằm NGOÀI cohort —
+không ở tử số, không ở mẫu số.
+
+So với lượt đo lúc 05:59 cùng ngày: Q002 chưa kết thúc 64 → 59 và hoàn 755 → 760; Q003 giao 188 →
+190, chưa kết thúc 59 → 55, hoàn 220 → 222; Q004 hoàn 5 → 6, chưa kết thúc 48 → 47. **Cột "đã gửi"
+của cả năm mã KHÔNG đổi một đơn.** Đúng như thiết kế: đơn đi từ "chưa kết thúc" sang một kết cục,
+cohort đứng yên. Đó chính là thứ mốc `carrier_handoff_at` tồn tại để bảo đảm.
+
+### 8.3 Hai nhóm chăm sóc, theo mã hàng
+
+| mã | chờ phát lại | chờ xử lý | active khác | tổng |
+|---|---:|---:|---:|---:|
+| Q002 | 9 | 16 | 34 | 59 |
+| Q003 | 8 | 9 | 38 | 55 |
+| Q004 | 1 | 5 | 41 | 47 |
+
+Cộng lại 161 — khớp đúng ô `dang_giao` của ảnh chụp KPI. Đây là hai nhóm mà bảng gọi tên ngay trên
+cột "Chưa kết thúc", và là hai nhóm duy nhất người trực can thiệp được.
+
+### 8.4 Độ phủ dữ liệu trên production
+
+* **Quy kết marketer**: 1.321 / 2.580 = **51,2 %** — *giống hệt* lượt đo trước deploy (1.258 không
+  nối được chiến dịch · 1 chiến dịch chưa khai người · 0 nhập nhằng). Dưới ngưỡng 70 %, nên bảng
+  marketer luôn kèm cảnh báo.
+* **Lý do hoàn**: **727 / 1.026 = 70,9 %** ca hoàn có ít nhất một sự kiện ĐVVC mang chữ nêu lý do.
+  Cao hơn nhiều con số "~22 %" ghi trong tài liệu cũ — vì bậc suy từ CHỮ đọc `shipment_events` chứ
+  không chỉ đọc trạng thái cuối của vận đơn.
+* **Mã hàng**: 6 mã có `custom_id`, mọi đơn trong bảng đều lần được về mã.
+
+### 8.5 Chưa đặt đích — và màn hình nói đúng như vậy
+
+```sql
+select … from metric_targets where metric_key in ('delivery_success_rate','return_rate');
+(0 rows)
+```
+
+**Chưa có đích nào cho chỉ số GTC.** Nên trên production, cột "Đánh giá" của bảng rủi ro hiện
+**"Chưa đặt đích"** cho mọi mã, bảng in THỰC TẾ và KHÔNG kết luận mã nào đạt hay không đạt — đúng
+AGENTS.md mục 38. Khối "Cần chú ý" có một dòng `INFO` nói thẳng việc còn thiếu và đường đi tới chỗ
+đặt đích.
+
+**Việc này cần chủ shop quyết**, không phải việc của máy: đặt bao nhiêu phần trăm là đạt, bao nhiêu
+là nghiêm trọng. Đặt ở *Mục tiêu → Đích chỉ số*.
+
+### 8.6 Mọi màn hình còn sống
+
+`ops smoke` (mở thật bằng phiên đăng nhập hợp lệ): **51/51 đạt · 0 lỗi ứng dụng · 0 sai quyền ·
+0 chậm**. `/reports/returns` 485 kB / 359 ms · `/reports` 295 kB / 102 ms · `/shipments` 1.266 kB /
+69 ms · `/shipments?bucket=CARE_TODAY` 98 ms.
