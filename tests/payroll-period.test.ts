@@ -5,7 +5,7 @@ import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_BASIS_ELIGIBILITY, PAYROLL_CALC_VERSION, PAYROLL_EMPLOYEES_KEY, payrollPeriodKey } from "@/lib/constants/payroll";
 import { getPayrollReport } from "@/lib/queries/payroll";
-import { buildPayrollSnapshot, getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
+import { buildPayrollSnapshot, finalizedPeriodsOverlapping, getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
 
@@ -131,6 +131,19 @@ export async function testPayrollPeriod(db: Db) {
     "7. 'chốt' mà không có ảnh chụp thì lần mở sau vẫn tính lại — CSDL phải chặn",
   );
 
+  /* ── 7b · HAI KỲ ĐÃ CHỐT KHÔNG ĐƯỢC CHỒNG LẤN NGÀY ──
+   *
+   * Chốt "Tháng này" ngày 14 ra khoá `…-01..…-14`; chốt lại ngày 30 ra `…-01..…-30`. HAI KHOÁ KHÁC
+   * NHAU nên khoá tự nhiên không chặn — nhưng mười bốn ngày đầu nằm trong CẢ HAI, và cộng hai bản
+   * chốt lại là trả lương hai lần cho những ngày ấy. Khoá tự nhiên chặn TRÙNG KHOÁ; phép kiểm này
+   * chặn TRÙNG NGÀY, và đó là hai chuyện khác nhau.
+   */
+  const chongLan = await finalizedPeriodsOverlapping(d("2027-06-10"), dEnd("2027-06-20"));
+  assert.equal(chongLan.length, 1, "7b. nửa tháng 6 phải chạm đúng kỳ đã chốt của cả tháng 6");
+  assert.equal(chongLan[0]?.basis, "profit1", "7b. và nói rõ nó chốt bằng cơ sở nào");
+  const khongCham = await finalizedPeriodsOverlapping(d("2027-07-01"), dEnd("2027-07-31"));
+  assert.equal(khongCham.length, 0, "7b. tháng 7 không chạm kỳ nào — phép kiểm không được kêu bừa");
+
   /* ── 8 · BA CƠ SỞ KHÔNG ĐỦ ĐIỀU KIỆN KHÔNG ĐƯỢC CHỐT (luật ở MỘT chỗ, không chép vào CSDL) ── */
   for (const b of ["profit2", "cash", "nominal"] as const) {
     assert.equal(PAYROLL_BASIS_ELIGIBILITY[b].eligible, false, `8. ${b} không được dùng để chốt lương`);
@@ -143,6 +156,6 @@ export async function testPayrollPeriod(db: Db) {
   clearMemo();
 
   console.log(
-    "✓ Kỳ lương: khoá kỳ đọc được bằng mắt · ảnh chụp giữ TỶ LỆ LÚC CHỐT · đổi tỷ lệ sau đó KHÔNG viết lại kỳ đã trả tiền · phần chênh hiện ra như ĐỀ XUẤT điều chỉnh (và im lặng khi không có gì đổi) · chốt thiếu ảnh chụp bị CSDL chặn · ba cơ sở không đủ điều kiện không hiện nút chốt",
+    "✓ Kỳ lương: khoá kỳ đọc được bằng mắt · ảnh chụp giữ TỶ LỆ LÚC CHỐT · đổi tỷ lệ sau đó KHÔNG viết lại kỳ đã trả tiền · phần chênh hiện ra như ĐỀ XUẤT điều chỉnh (và im lặng khi không có gì đổi) · chốt thiếu ảnh chụp bị CSDL chặn · hai kỳ đã chốt không được chồng lấn NGÀY (khoá tự nhiên chỉ chặn trùng KHOÁ) · ba cơ sở không đủ điều kiện không hiện nút chốt",
   );
 }

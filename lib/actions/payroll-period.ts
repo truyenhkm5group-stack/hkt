@@ -16,7 +16,7 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport } from "@/lib/queries/payroll";
-import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
+import { buildPayrollSnapshot, finalizedPeriodsOverlapping } from "@/lib/queries/payroll-period";
 import type { Period } from "@/lib/search-params";
 
 export type PeriodActionResult = { ok: true; key: string } | { error: string };
@@ -73,6 +73,22 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
   const p = schema.payrollPeriods;
   const [existing] = await db.select({ status: p.status }).from(p).where(and(eq(p.periodKey, key), eq(p.basis, basis))).limit(1);
   if (existing?.status === "FINAL") return { error: "Kỳ này đã chốt rồi. Kỳ đã chốt là bất biến — chứng từ về sau xử lý bằng đề xuất điều chỉnh." };
+
+  /*
+    HAI KỲ ĐÃ CHỐT KHÔNG ĐƯỢC CHỒNG LẤN NGÀY.
+
+    Chốt "Tháng này" ngày 14 ra khoá `2026-09-01..2026-09-14`; chốt lại ngày 30 ra
+    `2026-09-01..2026-09-30`. Hai khoá khác nhau nên khoá tự nhiên không chặn — nhưng mười bốn ngày
+    đầu tháng nằm trong CẢ HAI, và cộng hai bản chốt lại là trả lương hai lần cho những ngày ấy.
+    Khoá tự nhiên chặn TRÙNG KHOÁ; mệnh đề này chặn TRÙNG NGÀY, và đó là hai chuyện khác nhau.
+  */
+  const chongLan = await finalizedPeriodsOverlapping(fromAt, toAt);
+  const trung = chongLan.find((k) => k.basis === basis);
+  if (trung) {
+    return {
+      error: `Kỳ ${from} → ${to} chồng lấn ngày với kỳ ĐÃ CHỐT ${trung.periodKey} (cùng cơ sở ${PAYROLL_BASIS_SHORT[basis]}). Chốt tiếp là trả lương hai lần cho những ngày nằm trong cả hai kỳ.`,
+    };
+  }
 
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
