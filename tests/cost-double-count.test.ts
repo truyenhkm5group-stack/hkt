@@ -211,6 +211,36 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(ln1.cashRatio, 1, "7. cơ sở không phải dòng tiền thì hệ số luôn = 1, không bao giờ null");
   assert.equal(ln1.cashRatioReason, null, "7. và không có lý do nào phải nêu");
 
+  /* ══ TEST 8 — CẢNH BÁO VỀ NGUỒN CHI PHÍ PHẢI ĐI TỚI TẬN BẢNG LƯƠNG ══
+   *
+   * `getOperatingCost` trả về con số LẪN lời khai về nguồn. `productEconomics` chỉ lấy `.amount`
+   * rồi vứt `.warnings`, nên /expenses biết "khoản lương ở bảng Chi phí đang bị bỏ qua" còn
+   * /payroll thì không — dù /payroll mới là nơi lợi nhuận biến thành tiền trả cho người thật.
+   * Một khoản bị loại vì trùng nguồn làm lợi nhuận CAO HƠN thực tế, và thưởng theo % lợi nhuận
+   * cao theo.
+   *
+   * Bất biến: bảng lương mang ĐÚNG bộ cảnh báo của máy chi phí, cùng kỳ, không thêm không bớt.
+   */
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "PAYROLL" });
+  clearMemo();
+  const bangLuongThang1 = await getPayrollReport(KY, "profit1");
+  const chiPhiThang1 = await getRecognizedCosts(KY);
+  assert.deepEqual(
+    bangLuongThang1.marketers.costWarnings.map((w) => w.rule).sort(),
+    chiPhiThang1.warnings.map((w) => w.rule).sort(),
+    "8. bảng lương phải mang ĐÚNG bộ cảnh báo của máy chi phí — không được rơi mất trên đường",
+  );
+  assert.ok(
+    bangLuongThang1.marketers.costWarnings.some((w) => w.rule === "DUPLICATE_PAYROLL_EXPENSE_SOURCE"),
+    "8. và phải gồm cảnh báo khoản lương ở bảng Chi phí đang bị bỏ qua — đây là khoản làm lợi nhuận trông cao hơn thực tế",
+  );
+  assert.equal(bangLuongThang1.marketers.payrollCovered, true, "8. nói rõ chi phí nhân sự đang lấy từ nguồn nào");
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
+  clearMemo();
+  const bangLuongCu = await getPayrollReport(KY, "profit1");
+  assert.equal(bangLuongCu.marketers.payrollCovered, false, "8. lùi nguồn thì bảng lương cũng phải biết là đang lùi");
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "PAYROLL" });
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -230,6 +260,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương",
   );
 }

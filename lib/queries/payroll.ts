@@ -14,7 +14,7 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
-import { getOperatingCost } from "@/lib/queries/cost-engine";
+import { getOperatingCost, type CostEngineWarning } from "@/lib/queries/cost-engine";
 import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -111,6 +111,13 @@ export type MarketerReport = {
   unattributedRevenue: number;
   /** Phần LN shop giữ lại khi chủ mã chỉ hưởng ownerPct < 100% đơn của mình */
   shopRetained: number;
+  /**
+   * LỜI KHAI VỀ NGUỒN CHI PHÍ, nguyên văn từ `lib/queries/cost-engine.ts` — không diễn giải lại.
+   * Đây là thứ trả lời câu "lợi nhuận này đã trừ đủ chi phí chưa", nên nó phải đi cùng bảng lương.
+   */
+  costWarnings: CostEngineWarning[];
+  /** Bảng Lương có đang cầm quyền ghi nhận chi phí nhân sự không (xem `lib/queries/payroll-cost.ts`). */
+  payrollCovered: boolean;
 };
 
 export async function loadPayrollConfig(): Promise<PayrollConfig> {
@@ -297,6 +304,16 @@ async function productEconomics(period: Period) {
     perOrderTotal,
     months,
     revenueTotal,
+    /*
+      CẢNH BÁO CỦA MÁY CHI PHÍ ĐI CÙNG CON SỐ, KHÔNG BỊ BỎ LẠI.
+
+      `getOperatingCost` trả về cả con số LẪN lời khai về nguồn: lương đang lấy từ bảng Chi phí hay
+      bảng Lương, khoản nào bị loại vì trùng nguồn, cơ sở hoa hồng đã chốt chưa. Trước đây chỗ này
+      chỉ lấy `.amount` rồi vứt `.warnings` — nên `/expenses` biết chi phí đang thiếu gì, còn
+      `/payroll` thì không, dù /payroll mới là nơi con số ấy biến thành tiền trả cho người thật.
+    */
+    costWarnings: exp.warnings,
+    payrollCovered: exp.payrollCovered,
   };
 }
 
@@ -450,7 +467,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   for (const e of employees) if (e.active && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
   const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
   products.sort((a, b) => b.profit - a.profit);
-  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained };
+  return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained, costWarnings: econ.costWarnings, payrollCovered: econ.payrollCovered };
 }
 
 /**

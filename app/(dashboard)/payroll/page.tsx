@@ -178,6 +178,49 @@ export default async function PayrollPage({
         />
       </section>
 
+      {/*
+        LỢI NHUẬN NÀY ĐÃ TRỪ ĐỦ CHI PHÍ CHƯA — hỏi thẳng máy chi phí, in nguyên văn lời khai của nó.
+
+        Cùng bộ cảnh báo mà trang Chi phí đang hiện. Nó phải có mặt ở ĐÂY nữa, vì đây là nơi con số
+        lợi nhuận biến thành tiền trả cho người thật: một khoản lương hay hoa hồng bị loại vì trùng
+        nguồn, hay một nguồn chi phí chưa phủ đủ, làm lợi nhuận CAO HƠN thực tế — và thưởng theo %
+        lợi nhuận cao theo.
+      */}
+      {viewAll && report.marketers.costWarnings.length ? (
+        <SectionCard
+          title="Lợi nhuận này đã trừ đủ chi phí chưa?"
+          description="Lời khai của máy chi phí (lib/queries/cost-engine.ts) về nguồn từng khoản — lấy nguyên văn, bảng lương không tự đánh giá lại."
+        >
+          <ul className="space-y-3">
+            {report.marketers.costWarnings.map((w) => (
+              <li
+                key={w.rule}
+                className={cn(
+                  "rounded-lg border px-3 py-2.5",
+                  w.severity === "high" ? "border-destructive/30 bg-destructive/5" : "border-amber-400/40 bg-amber-50 dark:bg-amber-950/30",
+                )}
+              >
+                <p className="text-[13px] font-semibold">{w.title}</p>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{w.detail}</p>
+                <p className="mt-1 text-xs leading-5">
+                  <span className="font-medium">Nên làm gì: </span>
+                  {w.action}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[11.5px] leading-5 text-muted-foreground">
+            Chi phí nhân sự trong lợi nhuận đang lấy từ{" "}
+            <b>{report.marketers.payrollCovered ? "bảng Lương (lương cứng, chia theo số ngày của kỳ)" : "khoản chi nhóm “Lương” ở bảng Chi phí"}</b>. Hai nguồn
+            không bao giờ được cộng cả hai — xem chi tiết ở{" "}
+            <Link href="/expenses?tab=bao-cao" className="underline">
+              Chi phí → Báo cáo
+            </Link>
+            .
+          </p>
+        </SectionCard>
+      ) : null}
+
       <SectionCard
         title="Bảng lương"
         description="Lương cứng cộng thưởng theo lợi nhuận và doanh thu."
