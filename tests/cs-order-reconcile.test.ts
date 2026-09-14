@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { reconcileOrderNotCreated, stillPendingOrderNotCreated } from "@/lib/cs/reconcile-order-created";
+import { ORDER_MATCH_WINDOW_DAYS, ORDER_MATERIALIZED_STATUS_CODES, PANCAKE_STATUS_CONFIRMED, isOrderMaterialized } from "@/lib/constants/order-materialized";
 
 /**
  * ═══════ "CHƯA TẠO ĐƠN" PHẢI TỰ TẮT KHI ĐƠN ĐÃ CÓ — VÀ CHỈ KHI ĐÓ ═══════
@@ -30,8 +31,22 @@ export async function testCsOrderReconcile(db: Db) {
     const donCu = `${P}o-cu`;
     const donMoi = `${P}o-moi`;
     const donSdt = `${P}o-sdt`;
-    // Đơn CŨ: tạo 6 giờ TRƯỚC khi case đủ thông tin.
-    await db.insert(schema.orders).values({ id: donCu, stage: "CONFIRMED", status: 2, insertedAt: T(2), billPhone: "0900000111", billFullName: "Khách A", conversationId: `${P}conv-a`, totalPriceAfterDiscount: 100_000 }).onConflictDoNothing();
+    /*
+      ĐƠN CŨ — CỦA LƯỢT MUA TRƯỚC.
+
+      Bản đầu của fixture này đặt đơn cũ cách mốc case ĐÚNG 6 GIỜ, với tiền đề "trước mốc ⇒ là
+      lượt mua cũ". Đo production 14/09/2026 lật đổ tiền đề đó: trong bốn case có đơn đã xác nhận
+      cùng hội thoại, khoảng cách thật là **3 giờ · 5 giờ · 83 giờ · 298 giờ** — hai cái đầu CHÍNH
+      LÀ đơn mà case đang chờ (máy quét chỉ nhận ra sau khi đơn đã lên POS vài giờ), hai cái sau
+      mới là lượt mua khác.
+
+      Nên một đơn cách 6 giờ KHÔNG phải "đơn cũ" — nó nằm đúng trong vùng của đơn thật. Fixture
+      chuyển sang **20 ngày**, đúng chữ ký của ca mua lại đo được trên production (298 giờ), để
+      cái bẫy nó canh vẫn là cái bẫy thật chứ không phải một con số tự đặt ra.
+
+      Điều bài kiểm này canh KHÔNG đổi: `order_id` một mình không bao giờ được đóng case.
+    */
+    await db.insert(schema.orders).values({ id: donCu, stage: "CONFIRMED", status: 2, insertedAt: new Date(T(2).getTime() - 20 * 86_400_000), billPhone: "0900000111", billFullName: "Khách A", conversationId: `${P}conv-a`, totalPriceAfterDiscount: 100_000 }).onConflictDoNothing();
     // Đơn MỚI: tạo SAU khi case đủ thông tin, cùng hội thoại.
     await db.insert(schema.orders).values({ id: donMoi, stage: "CONFIRMED", status: 2, insertedAt: T(14), billPhone: "0900000222", billFullName: "Khách B", conversationId: `${P}conv-b`, totalPriceAfterDiscount: 100_000 }).onConflictDoNothing();
     // Đơn theo SĐT, tạo SAU, KHÔNG cùng hội thoại.
@@ -161,7 +176,59 @@ export async function testCsOrderReconcile(db: Db) {
     const sauDua = await stillPendingOrderNotCreated([{ key: "dua", conversationId: `${P}conv-race`, phone: "0900000888", infoCompleteAt: T(8) }]);
     assert.equal(sauDua.has("dua"), false, "đơn về giữa lúc quét và lúc ghi ⇒ case KHÔNG được sinh ra");
 
-    console.log("✓ Đối chiếu 'chưa tạo đơn': order_id của ĐƠN CŨ không đóng case (25/29 trên production) · hội thoại/SĐT có đơn tạo SAU thì đóng · người đã nhận thì máy không đụng · vận đơn gửi tới số đó sau khi đủ thông tin thì đóng, vận đơn CŨ thì không · nơi sinh dùng chung vị từ nên không tạo lại · chạy thử không ghi · chạy lại idempotent");
+    // ───────── BẬC 4: POS "ĐÃ XÁC NHẬN" = ĐƠN ĐÃ ĐƯỢC TẠO (chủ shop chốt 14/09/2026) ─────────
+    //
+    // Ba bậc đầu đóng được 0/10 case trên production vì `info_complete_at` là mốc MÁY QUÉT nhận
+    // ra, không phải mốc KHÁCH đưa thông tin — đơn gần như luôn ra đời TRƯỚC mốc ấy.
+    //
+    // Bậc này đổi trục sang ĐỊNH DANH (cùng hội thoại) + ĐỘ GẦN (cửa sổ hai phía). Bài kiểm khoá
+    // cả hai chiều: đóng được đơn trong cửa sổ, và KHÔNG đóng đơn ngoài cửa sổ.
+    const W = ORDER_MATCH_WINDOW_DAYS;
+    const ngay = (d: number) => new Date(Date.now() - d * 86_400_000);
+
+    // (a) Đơn ĐÃ XÁC NHẬN của cùng hội thoại, TRƯỚC mốc 1 ngày (trong cửa sổ) ⇒ ĐÓNG.
+    await db.insert(schema.orders).values({ id: `${P}o-pos`, stage: "CONFIRMED", status: 1, insertedAt: ngay(1), billPhone: "0900000777", conversationId: `${P}conv-pos`, totalPriceAfterDiscount: 250_000 }).onConflictDoNothing();
+    await db.insert(schema.csCases).values({ id: `${P}c-pos`, kind: "ORDER_NOT_CREATED", status: "OPEN", source: "PANCAKE_CHAT", title: "POS đã xác nhận", customerPhone: "0900000777", conversationId: `${P}conv-pos`, assignee: "", resolution: "", infoCompleteAt: new Date(), createdAt: new Date(), dedupeKey: `${P}c-pos` }).onConflictDoNothing();
+
+    // (b) Đơn ĐÃ GIAO của cùng hội thoại nhưng NGOÀI cửa sổ ⇒ GIỮ MỞ. Đây đúng là ca đo được trên
+    //     production: case 09-11 có đơn cùng hội thoại 08-29 `DELIVERED` — KHÁCH MUA LẠI.
+    await db.insert(schema.orders).values({ id: `${P}o-cu`, stage: "DELIVERED", status: 3, insertedAt: ngay(W + 10), billPhone: "0900000666", conversationId: `${P}conv-cu`, totalPriceAfterDiscount: 250_000 }).onConflictDoNothing();
+    await db.insert(schema.csCases).values({ id: `${P}c-cu`, kind: "ORDER_NOT_CREATED", status: "OPEN", source: "PANCAKE_CHAT", title: "khách mua lại", customerPhone: "0900000666", conversationId: `${P}conv-cu`, assignee: "", resolution: "", infoCompleteAt: new Date(), createdAt: new Date(), dedupeKey: `${P}c-cu` }).onConflictDoNothing();
+
+    // (c) Đơn cùng hội thoại, trong cửa sổ, nhưng CHƯA xác nhận (`NEW`) ⇒ GIỮ MỞ.
+    await db.insert(schema.orders).values({ id: `${P}o-moi`, stage: "NEW", status: 0, insertedAt: ngay(1), billPhone: "0900000555", conversationId: `${P}conv-moi`, totalPriceAfterDiscount: 250_000 }).onConflictDoNothing();
+    await db.insert(schema.csCases).values({ id: `${P}c-moi`, kind: "ORDER_NOT_CREATED", status: "OPEN", source: "PANCAKE_CHAT", title: "đơn mới chưa xác nhận", customerPhone: "0900000555", conversationId: `${P}conv-moi`, assignee: "", resolution: "", infoCompleteAt: new Date(), createdAt: new Date(), dedupeKey: `${P}c-moi` }).onConflictDoNothing();
+
+    await reconcileOrderNotCreated({ dryRun: false, actor: "test" });
+    const pos = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, `${P}c-pos`) });
+    const cu = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, `${P}c-cu`) });
+    const moi = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, `${P}c-moi`) });
+    assert.equal(pos?.status, "AUTO_RESOLVED", "POS đã xác nhận đơn của CHÍNH hội thoại ấy, trong cửa sổ ⇒ phải đóng");
+    assert.match(pos?.resolution ?? "", /POS_CONFIRMED/, "lý do đóng phải nêu đúng bậc chứng cứ đã dùng");
+    assert.equal(cu?.status, "OPEN", "đơn cùng hội thoại nhưng NGOÀI cửa sổ là KHÁCH MUA LẠI — đóng nó là đóng một việc thật");
+    assert.equal(moi?.status, "OPEN", "đơn chưa xác nhận (NEW) KHÔNG chứng minh đơn đã được tạo — chủ shop vạch ranh giới ở 'Đã xác nhận'");
+
+    // Lá chắn lúc GHI phải dùng CÙNG luật: hội thoại đã có đơn xác nhận ⇒ KHÔNG sinh case mới.
+    const posGuard = await stillPendingOrderNotCreated([{ key: "pos", conversationId: `${P}conv-pos`, phone: "0900000777", infoCompleteAt: new Date() }]);
+    assert.equal(posGuard.has("pos"), false, "nơi SINH phải thấy cùng chứng cứ với nơi ĐỌC — nếu không, mỗi ngày lại đẻ ra đúng case mà lượt đối chiếu sau đó phải đóng");
+    const cuGuard = await stillPendingOrderNotCreated([{ key: "cu", conversationId: `${P}conv-cu`, phone: "0900000666", infoCompleteAt: new Date() }]);
+    assert.equal(cuGuard.has("cu"), true, "đơn ngoài cửa sổ thì lá chắn vẫn phải cho case ra đời");
+
+    // ───────── LUẬT "ĐÃ XÁC NHẬN" BÁM MÃ SỐ, KHÔNG BÁM CHUỖI HIỂN THỊ ─────────
+    assert.equal(isOrderMaterialized({ status: PANCAKE_STATUS_CONFIRMED }), true, "mã 1 = 'Đã xác nhận' = đơn đã được tạo — đúng câu chủ shop chốt");
+    assert.equal(isOrderMaterialized({ stage: "CONFIRMED" }), true);
+    assert.equal(isOrderMaterialized({ stage: "DELIVERED" }), true, "đã giao thì càng chắc chắn là đã tạo");
+    assert.equal(isOrderMaterialized({ stage: "NEW" }), false, "chưa ai xác nhận");
+    assert.equal(isOrderMaterialized({ stage: "WAITING" }), false, "'chờ hàng' đứng TRƯỚC xác nhận");
+    assert.equal(isOrderMaterialized({ stage: "CANCELLED" }), false, "đơn đã huỷ ⇒ khách có thể đang cần đơn MỚI, việc CSKH vẫn thật");
+    assert.equal(isOrderMaterialized({ stage: "DELETED" }), false);
+    assert.equal(isOrderMaterialized({}), false, "CHƯA BIẾT không phải 'đã tạo' — lề an toàn nghiêng về giữ case mở");
+    assert.equal(isOrderMaterialized({ stage: null, status: null }), false);
+    // Danh sách mã SINH RA từ bảng trạng thái Pancake, không gõ lại.
+    assert.ok(ORDER_MATERIALIZED_STATUS_CODES.includes(PANCAKE_STATUS_CONFIRMED), "mã 'Đã xác nhận' phải nằm trong danh sách sinh ra");
+    assert.ok(!ORDER_MATERIALIZED_STATUS_CODES.includes(0) && !ORDER_MATERIALIZED_STATUS_CODES.includes(6), "mã 'Mới' và 'Đã huỷ' phải nằm ngoài");
+
+    console.log("✓ Đối chiếu 'chưa tạo đơn': order_id của ĐƠN CŨ không đóng case (25/29 trên production) · hội thoại/SĐT có đơn tạo SAU thì đóng · người đã nhận thì máy không đụng · vận đơn gửi tới số đó sau khi đủ thông tin thì đóng, vận đơn CŨ thì không · POS 'Đã xác nhận' trong cửa sổ thì đóng, ngoài cửa sổ (khách mua lại) thì KHÔNG · 'Mới'/'Huỷ' không phải đã tạo · luật bám MÃ SỐ không bám chuỗi · nơi sinh và nơi đọc dùng CHUNG một bộ vị từ · chạy thử không ghi · chạy lại idempotent");
   } finally {
     await db.delete(schema.csCases).where(sql`${schema.csCases.id} like ${`${P}%`}`);
     await db.delete(schema.shipments).where(sql`${schema.shipments.id} like ${`${P}%`}`);

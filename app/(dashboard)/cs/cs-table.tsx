@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Pencil, RefreshCw, Trash2, Truck } from "lucide-react";
+import { AlarmClock, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Pencil, RefreshCw, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CaseDialog } from "@/app/(dashboard)/cs/case-dialog";
 import { CopyButton } from "@/components/misc";
@@ -97,20 +98,24 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
 
   return (
     <div className="overflow-x-auto">
-      <Table className="min-w-[1080px]">
+      {/* Hai cột mới (Phát sinh · Ghi chú) nên bề ngang tối thiểu phải nới theo, nếu không các cột
+          tự bóp lại và chữ trong ô ghi chú bị cắt còn hai từ. Bảng nằm trong `overflow-x-auto`. */}
+      <Table className="min-w-[1320px]">
         <TableHeader>
           <TableRow>
             <TableHead>Case · việc cần làm</TableHead>
             <TableHead>Khách / đơn</TableHead>
             <TableHead className="w-[170px]">Phụ trách</TableHead>
-            <TableHead className="w-[130px]">Tuổi / hẹn</TableHead>
+            <TableHead className="w-[105px]"><SortHeader field="createdAt" label="Phát sinh" /></TableHead>
+            <TableHead className="w-[120px]">Tuổi / hẹn</TableHead>
             <TableHead className="w-[150px]">Trạng thái</TableHead>
+            <TableHead className="w-[210px]">Ghi chú</TableHead>
             <TableHead className="w-[300px]">Hành động</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
-            <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">Không còn case CSKH nào phải làm. Case sinh từ trạng thái giao vận nằm ở “Vận đơn &amp; care”.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">Không còn case CSKH nào phải làm. Case sinh từ trạng thái giao vận nằm ở “Vận đơn &amp; care”.</TableCell></TableRow>
           ) : rows.map((r) => {
             const patch = patches[r.id] ?? {};
             const status = patch.status ?? r.status;
@@ -148,11 +153,12 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                     {r.domain === "LOGISTICS" ? <span className="rounded bg-sky-100 px-1 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">Vận đơn</span> : null}
                   </div>
                   <div className="truncate text-sm text-muted-foreground" title={r.title}>{r.title}</div>
-                  {note?.lastNote ? (
-                    <div className="mt-0.5 truncate text-xs text-foreground/80" title={note.lastNote}>
-                      <span className="text-muted-foreground">Ghi chú:</span> {note.lastNote}
-                    </div>
-                  ) : null}
+                  {/*
+                    GHI CHÚ XỬ LÝ chuyển hẳn sang cột riêng. Ở đây chỉ còn BẰNG CHỨNG — hai thứ
+                    khác hẳn nhau: bằng chứng là thứ máy/khách để lại và KHÔNG được sửa; ghi chú là
+                    thứ người xử lý viết ra. Trộn chúng vào một ô thì không ai phân biệt được đâu
+                    là lời khách nói, đâu là kết luận của đồng nghiệp.
+                  */}
                   <EvidencePopover row={r} noteCount={note?.noteCount ?? 0} />
                 </TableCell>
 
@@ -203,44 +209,65 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   ) : null}
                 </TableCell>
 
+                {/*
+                  ═══ GIAO VIỆC THẬT, KHÔNG CHỈ "TÔI NHẬN" ═══
+
+                  Trước 14/09/2026 ô chọn người CHỈ hiện khi đã có ai đó nhận; chưa ai nhận thì
+                  màn hình duy nhất một nút "Nhận việc". Nghĩa là trưởng nhóm KHÔNG giao được việc
+                  cho nhân viên — muốn giao thì phải tự nhận rồi mới chuyển, và mỗi lượt giao đẻ ra
+                  một dòng lịch sử sai tên người.
+
+                  Đo production 14/09/2026: **2/417** case đang mở có người phụ trách thật, và
+                  `assignee_user_id` chỉ có ở 3/823 case. Một tính năng gần như không ai dùng được.
+
+                  Nay ô chọn LUÔN hiện, có sẵn mục "Chưa ai nhận", và nút "Nhận việc" đứng cạnh
+                  làm lối tắt cho việc hay làm nhất. Danh sách người lấy từ tài khoản THẬT đang bật
+                  (`page.tsx` truyền xuống), không gõ cứng.
+                */}
                 <TableCell className="align-top">
                   {canWrite ? (
-                    owner ? (
-                      <div className="space-y-1">
-                        <Select
-                          value={assigneeUserId ?? "__none__"}
-                          onValueChange={(v) => {
-                            const id = v === "__none__" ? null : v;
-                            run(r.id, { assigneeUserId: id, assignee: id ? (staff.find((x) => x.id === id)?.name ?? "") : "" }, () => updateCsCaseQuick({ id: r.id, assigneeUserId: id }));
-                          }}
-                          disabled={busy}
-                        >
-                          <SelectTrigger className="h-8 w-full"><SelectValue placeholder={owner} /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">Bỏ gán</SelectItem>
-                            {staff.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        {/*
-                          Dòng lịch sử: có TÊN nhưng chưa có KHOÁ. Không tự đoán khoá từ tên — nói
-                          thẳng là chưa nối được, và chọn lại một lần là xong.
-                        */}
-                        {!assigneeUserId ? <div className="text-[11px] text-amber-700 dark:text-amber-400" title="Tên này được gõ tay, chưa nối về tài khoản ERP nào nên không vào được thẻ điểm">{owner} · chưa nối tài khoản</div> : null}
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <Button size="sm" variant="secondary" className="h-8 w-full" disabled={busy} title={CS_QUICK_ACTION.CLAIM.hint} onClick={() => run(r.id, { assignee: currentUser, assigneeUserId: currentUserId, status: status === "OPEN" ? "IN_PROGRESS" : status }, () => csQuickAction({ id: r.id, action: "CLAIM" }), "Đã nhận việc")}>
+                    <div className="space-y-1">
+                      <Select
+                        value={assigneeUserId ?? "__none__"}
+                        onValueChange={(v) => {
+                          const id = v === "__none__" ? null : v;
+                          run(r.id, { assigneeUserId: id, assignee: id ? (staff.find((x) => x.id === id)?.name ?? "") : "" }, () => updateCsCaseQuick({ id: r.id, assigneeUserId: id }));
+                        }}
+                        disabled={busy}
+                      >
+                        <SelectTrigger className="h-8 w-full" aria-label="Người phụ trách"><SelectValue placeholder={owner || "Chưa ai nhận"} /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">{owner ? "Bỏ gán" : "Chưa ai nhận"}</SelectItem>
+                          {staff.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      {!owner ? (
+                        <Button size="sm" variant="secondary" className="h-7 w-full text-xs" disabled={busy} title={CS_QUICK_ACTION.CLAIM.hint} onClick={() => run(r.id, { assignee: currentUser, assigneeUserId: currentUserId, status: status === "OPEN" ? "IN_PROGRESS" : status }, () => csQuickAction({ id: r.id, action: "CLAIM" }), "Đã nhận việc")}>
                           {busy ? <Loader2 className="size-3.5 animate-spin" /> : null} {CS_QUICK_ACTION.CLAIM.label}
                         </Button>
-                        {/*
-                          BOT LÀ NGƯỜI TẠO, KHÔNG PHẢI NGƯỜI XỬ LÝ. Job tự nhắn khách ghi tên mình
-                          vào ô phụ trách; đọc nguyên văn thì hàng đợi trông như đã có người lo
-                          trong khi thực tế chưa ai nhận.
-                        */}
-                        {isBotAssignee(assignee) ? <div className="text-[11px] text-muted-foreground">Bot đã nhắn · chưa ai nhận</div> : null}
-                      </div>
-                    )
+                      ) : null}
+                      {/*
+                        Dòng lịch sử: có TÊN nhưng chưa có KHOÁ. Không tự đoán khoá từ tên — nói
+                        thẳng là chưa nối được, và chọn lại một lần là xong.
+                      */}
+                      {owner && !assigneeUserId ? <div className="text-[11px] text-amber-700 dark:text-amber-400" title="Tên này được gõ tay, chưa nối về tài khoản ERP nào nên không vào được thẻ điểm">{owner} · chưa nối tài khoản</div> : null}
+                      {/*
+                        BOT LÀ NGƯỜI TẠO, KHÔNG PHẢI NGƯỜI XỬ LÝ. Job tự nhắn khách ghi tên mình
+                        vào ô phụ trách; đọc nguyên văn thì hàng đợi trông như đã có người lo
+                        trong khi thực tế chưa ai nhận.
+                      */}
+                      {!owner && isBotAssignee(assignee) ? <div className="text-[11px] text-muted-foreground">Bot đã nhắn · chưa ai nhận</div> : null}
+                    </div>
                   ) : <span className="text-sm">{owner || (isBotAssignee(assignee) ? "Bot đã nhắn" : "—")}</span>}
+                </TableCell>
+
+                {/*
+                  PHÁT SINH — mốc case RA ĐỜI, đọc `created_at`, KHÔNG đọc `updated_at`.
+                  Hai thứ khác hẳn nhau: một cái là "việc này có từ bao giờ", cái kia là "lần cuối
+                  ai đó chạm vào". Sắp xếp theo cái sau thì một lượt bấm nút đẩy case cũ lên đầu.
+                */}
+                <TableCell className="align-top text-xs">
+                  <div className="numeric whitespace-nowrap" title={formatDateTime(r.createdAt)}>{phatSinh(r.createdAt)}</div>
                 </TableCell>
 
                 <TableCell className="align-top text-xs">
@@ -269,6 +296,35 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   ) : <span className={cn("rounded px-1.5 py-0.5 text-xs", CS_STATUS_TONE[status as CsStatus])}>{CS_STATUS_LABEL[status as CsStatus] ?? status}</span>}
                 </TableCell>
 
+                {/*
+                  ═══ GHI CHÚ XỬ LÝ — CỘT RIÊNG, KHÔNG TRỘN VỚI BẰNG CHỨNG ═══
+
+                  Ghi chú gần nhất kèm AI ghi và LÚC NÀO. Thiếu hai vế sau thì một dòng chữ trên
+                  hàng đợi không dùng được: "đã gọi khách" mà không biết ai gọi và gọi hôm nào thì
+                  người tiếp theo vẫn phải gọi lại.
+
+                  Nút "+ Ghi chú" đứng ngay trong cột — popover tại chỗ, lưu xong vẽ thẳng lên
+                  dòng, không mở trang khác và không tải lại bảng.
+                */}
+                <TableCell className="align-top">
+                  <div className="flex items-start gap-1">
+                    <div className="min-w-0 flex-1">
+                      {note?.lastNote ? (
+                        <>
+                          <div className="truncate text-xs text-foreground/90" title={note.lastNote}>{note.lastNote}</div>
+                          <div className="truncate text-[11px] text-muted-foreground" title={`${note.lastNoteBy || "—"} · ${formatDateTime(note.lastNoteAt)}`}>
+                            {note.lastNoteBy || "—"} · {formatTimeAgo(note.lastNoteAt)}
+                            {note.noteCount > 1 ? ` · ${note.noteCount} ghi chú` : ""}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">chưa có ghi chú</span>
+                      )}
+                    </div>
+                    {canWrite ? <NoteButton caseId={r.id} busy={busy} onSaved={(n) => setPatches((p) => ({ ...p, [r.id]: { ...p[r.id], note: n } }))} /> : null}
+                  </div>
+                </TableCell>
+
                 <TableCell className="align-top">
                   <div className="flex flex-wrap items-center gap-1">
                     {r.domain === "LOGISTICS" ? (
@@ -292,7 +348,6 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                           />
                         ))
                       : null}
-                    {canWrite ? <NoteButton caseId={r.id} busy={busy} onSaved={(n) => setPatches((p) => ({ ...p, [r.id]: { ...p[r.id], note: n } }))} /> : null}
                     {canWrite ? (
                       <>
                         <Button variant="ghost" size="icon" className="size-8" aria-label="Sửa" onClick={() => setEditing(r)}><Pencil className="size-4" /></Button>
@@ -446,6 +501,58 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * Mốc PHÁT SINH ở dạng gọn: `14/09 10:32`. Đủ để so hai dòng bằng mắt, và giờ đầy đủ tới giây nằm
+ * ở tooltip cho lúc cần đối chiếu với log. Giờ Việt Nam, như mọi mốc khác trong ERP.
+ */
+function phatSinh(d: Date | string) {
+  const x = d instanceof Date ? d : new Date(d);
+  return x.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(", ", " ");
+}
+
+/**
+ * ═══════════ SẮP XẾP ĐI TRÊN URL, VÀ SẮP XẾP Ở MÁY CHỦ ═══════════
+ *
+ * Bảng này tự dựng bằng `<Table>` chứ không qua `DataTable`, nên nó không được thừa hưởng phần
+ * sắp xếp. Nhưng hợp đồng URL thì phải GIỐNG HỆT (`sort` · `dir` · `page`), vì máy chủ đọc chung
+ * một `parseListParams` cho mọi trang.
+ *
+ * `clearOnDefault: false` là bắt buộc — nuqs mặc định XOÁ tham số khi giá trị bằng mặc định, và
+ * khi ấy máy chủ lại lấy mặc định riêng của trang, nên bấm "cũ nhất trước" sẽ không có tác dụng.
+ * Cùng lý do đã ghi ở `components/data-table/data-table.tsx`.
+ *
+ * Đổi thứ tự thì phải VỀ TRANG 1: giữ nguyên `page=3` sau khi đảo chiều là hiện một trang giữa
+ * của một danh sách khác hẳn.
+ *
+ * Và đây là sắp xếp MÁY CHỦ, không phải sắp xếp 200 dòng đang hiện: `listCsCases` đưa `sort`/`dir`
+ * thẳng vào `orderBy` của truy vấn, nên trang 2 vẫn đúng thứ tự.
+ */
+function SortHeader({ field, label }: { field: string; label: string }) {
+  const [params, setParams] = useQueryStates(
+    {
+      page: parseAsInteger.withDefault(1),
+      sort: parseAsString.withDefault("createdAt").withOptions({ clearOnDefault: false }),
+      dir: parseAsString.withDefault("desc").withOptions({ clearOnDefault: false }),
+    },
+    { shallow: false, history: "push" },
+  );
+  const dangSort = params.sort === field;
+  const giam = params.dir !== "asc";
+  const keTiep = dangSort && giam ? "asc" : "desc";
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 font-medium hover:text-foreground"
+      onClick={() => void setParams({ sort: field, dir: keTiep, page: 1 })}
+      title={keTiep === "desc" ? "Sắp xếp: mới nhất trước" : "Sắp xếp: cũ nhất trước"}
+      aria-label={`${label} — ${keTiep === "desc" ? "sắp xếp mới nhất trước" : "sắp xếp cũ nhất trước"}`}
+    >
+      {label}
+      {dangSort ? (giam ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />) : <ArrowUpDown className="size-3 opacity-40" />}
+    </button>
   );
 }
 

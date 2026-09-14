@@ -8,7 +8,7 @@ import { CS_QUICK_ACTIONS_BY_KIND, CS_QUICK_ACTION, CS_MUTATE_ACTIONS, type CsQu
 import { CS_ASSIGNEE_FACET_BOT, CS_HUMAN_KINDS, CS_KIND_DOMAIN, csDomainOf, humanAssignee, isBotAssignee } from "@/lib/constants/cs-domain";
 import { addCsNote, applyCsQuickAction, setCsCaseFields, type CsActor } from "@/lib/cs/workqueue";
 import { getCareQueue } from "@/lib/queries/care-workbench";
-import { botMessageFailuresByShipment, csCasesToSurface, csFacets, csSummary, listCsCases, openCsGroups } from "@/lib/queries/cs";
+import { CS_SORTABLE, botMessageFailuresByShipment, csCasesToSurface, csFacets, csSummary, listCsCaseEvents, listCsCases, openCsGroups } from "@/lib/queries/cs";
 import { getFunnelHealth } from "@/lib/queries/stage-health";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
@@ -335,7 +335,166 @@ export async function testCsWorkqueue(db: Db) {
   assert.ok(!nguonBang.includes("maskPhone"), "bàn CSKH chưa che số; nếu thêm che thì phải xử lý cả nút chép, không để nó thành đường vòng");
   assert.match(nguonBang, /\{r\.customerPhone \?/, "không có SĐT thì không vẽ nút — một nút bấm vào không được gì làm mất tin vào cả hàng nút");
 
+  /*
+    ═══════════════════ HÀNG ĐỢI V2: GIAO VIỆC · GHI CHÚ · MỐC PHÁT SINH ═══════════════════
+
+    Ba cột mới trên dòng CSKH, và cả ba đều có một cách hỏng im lặng riêng:
+
+     · **PHỤ TRÁCH** hỏng bằng cách ghi được TÊN mà không ghi được KHOÁ — dòng vẫn trông có người
+       làm, thẻ điểm vẫn không quy kết được cho ai (AGENTS.md mục 34).
+     · **GHI CHÚ** hỏng bằng cách trộn vào ô bằng chứng — người đọc sau không phân biệt được lời
+       khách với kết luận của đồng nghiệp.
+     · **PHÁT SINH** hỏng bằng cách đọc `updated_at` — một lượt bấm nút đẩy case cũ lên đầu hàng
+       đợi, và người trực tưởng vừa có việc mới.
+
+    Đo production 14/09/2026 trước bản này: **2/417** case đang mở có người phụ trách thật, và
+    `assignee_user_id` chỉ có ở **3/823** case. Ô chọn người CHỈ hiện khi đã có ai đó nhận, nên
+    trưởng nhóm không giao được việc cho nhân viên — muốn giao phải tự nhận trước rồi mới chuyển.
+  */
+  const traCase = async (id: string) => (await listCsCases(paramsOf())).rows.find((r) => r.id === id);
+  await db.insert(schema.users).values([
+    { id: "csq-user2", email: "cskh-mai@test", name: "Mai CSKH", passwordHash: "x", role: "CS", active: true },
+    { id: "csq-lead", email: "truong-nhom@test", name: "Trưởng nhóm", passwordHash: "x", role: "ADMIN", active: true },
+  ]).onConflictDoNothing();
+  const truongNhom: CsActor = { id: "csq-lead", email: "truong-nhom@test", name: "Trưởng nhóm", source: "UI" };
+  // Fixture RIÊNG cho khối này. Các case ở trên đã bị những phần kiểm trước giao người / ghi chú /
+  // hẹn lại, nên dùng lại chúng là kiểm một trạng thái đã bị khối khác đặt — sửa một khối sẽ làm
+  // khối kia đỏ mà không ai hiểu vì sao.
+  await db.insert(schema.csCases).values([
+    { id: "csq-v1", kind: "ORDER_NOT_CREATED", source: "PANCAKE_CHAT", title: "V2 · chưa ai nhận", detail: "Khách nhắn: cho mình đặt 2 bộ size L", assignee: "", createdBy: "pancake-chat", createdAt: gio(7), status: "OPEN", customerPhone: "0911000901", dedupeKey: "test:csq-v1" },
+    { id: "csq-v2", kind: "WRONG_PHONE", source: "PANCAKE_CHAT", title: "V2 · giao việc", detail: "SĐT thiếu một số", assignee: "", createdBy: "pancake-chat", createdAt: gio(4), status: "OPEN", customerPhone: "0911000902", dedupeKey: "test:csq-v2" },
+    { id: "csq-v3", kind: "EXCHANGE_COLOR", source: "PANCAKE_NOTE", title: "V2 · ghi chú", detail: "Khách nhắn: cho em đổi sang màu be", assignee: "", createdBy: "auto", createdAt: gio(1), status: "OPEN", customerPhone: "0911000903", dedupeKey: "test:csq-v3" },
+  ]).onConflictDoNothing();
+  clearMemo();
+
+  // ───────── V2-1 · CHƯA AI NHẬN là một trạng thái ĐỌC ĐƯỢC, không phải ô trống ─────────
+  const v1Truoc = await traCase("csq-v1");
+  assert.equal(v1Truoc?.owner, "", "case chưa giao phải đọc ra 'chưa ai nhận'");
+  assert.equal(v1Truoc?.assigneeUserId ?? null, null, "và không có khoá tài khoản nào");
+  // Bot TẠO case nhưng KHÔNG phải người xử lý — nếu gộp, 187 việc bot tạo trông như đang có người làm.
+  const c12 = await traCase("csq-c12");
+  assert.equal(c12?.owner, "", "bot tạo case không làm case ấy có người phụ trách");
+  assert.equal(c12?.botTouched, true, "nhưng phải nói được là bot đã nhắn — khác hẳn 'chưa ai đụng tới'");
+
+  // ───────── V2-2 · TỰ NHẬN VIỆC ghi CẢ tên lẫn khoá ─────────
+  const nhan = await applyCsQuickAction({ id: "csq-v1", action: "CLAIM" }, actor);
+  assert.ok("ok" in nhan, "nhận việc phải thành công");
+  const v1Nhan = await traCase("csq-v1");
+  assert.equal(v1Nhan?.assigneeUserId, "csq-user", "nhận việc phải ghi KHOÁ tài khoản, nếu không thẻ điểm không quy kết được");
+  assert.equal(v1Nhan?.owner, "Linh CSKH", "và ghi tên để người đọc trên dòng");
+
+  // ───────── V2-3 · TRƯỞNG NHÓM GIAO CHO NGƯỜI KHÁC, không phải tự nhận rồi chuyển ─────────
+  const giao = await setCsCaseFields({ id: "csq-v2", assigneeUserId: "csq-user2" }, truongNhom);
+  assert.ok("ok" in giao, "trưởng nhóm phải giao được việc cho nhân viên");
+  const v2Giao = await traCase("csq-v2");
+  assert.equal(v2Giao?.assigneeUserId, "csq-user2", "giao việc đi bằng khoá tài khoản");
+  assert.equal(v2Giao?.owner, "Mai CSKH", "TÊN do MÁY CHỦ đọc từ bảng users — client không gửi tên");
+  // Người GIAO và người ĐƯỢC GIAO là hai người khác nhau, và dòng lịch sử phải phân biệt được.
+  const suKienGiao = (await listCsCaseEvents("csq-v2")).find((e) => e.action === "ASSIGN");
+  assert.ok(suKienGiao, "mỗi lượt giao việc phải để lại một dòng lịch sử");
+  assert.equal(suKienGiao.actorId, "csq-lead", "người THAO TÁC là trưởng nhóm");
+  assert.equal(suKienGiao.nextAssignee, "Mai CSKH", "người ĐƯỢC GIAO là nhân viên — hai cột, không một");
+
+  // ───────── V2-4 · CHUYỂN NGƯỜI: ảnh chụp tên cũ vẫn còn đọc được ─────────
+  const chuyen = await setCsCaseFields({ id: "csq-v2", assigneeUserId: "csq-user" }, truongNhom);
+  assert.ok("ok" in chuyen, "chuyển người phải thành công");
+  const v2Chuyen = await traCase("csq-v2");
+  assert.equal(v2Chuyen?.assigneeUserId, "csq-user", "khoá phải đổi sang người mới");
+  assert.equal(v2Chuyen?.owner, "Linh CSKH", "tên đổi theo khoá, không để lệch");
+  const lichSuGiao = (await listCsCaseEvents("csq-v2")).filter((e) => e.action === "ASSIGN");
+  assert.equal(lichSuGiao.length, 2, "hai lượt giao = hai dòng lịch sử");
+  assert.equal(lichSuGiao[0]?.previousAssignee, "Mai CSKH", "dòng mới nhất phải nhớ người trước đó là ai");
+
+  // ───────── V2-5 · BỎ GÁN đưa case về hàng đợi chung, KHÔNG để lại tên mồ côi ─────────
+  const boGan = await setCsCaseFields({ id: "csq-v2", assigneeUserId: null }, truongNhom);
+  assert.ok("ok" in boGan, "bỏ gán phải thành công");
+  const v2Bo = await traCase("csq-v2");
+  assert.equal(v2Bo?.assigneeUserId ?? null, null, "bỏ gán phải xoá khoá");
+  assert.equal(v2Bo?.owner, "", "và xoá cả tên — để lại tên mà không có khoá là dựng ra một 'người' không tồn tại");
+
+  // ───────── V2-6 · KHOÁ KHÔNG CÓ THẬT thì TỪ CHỐI, không ghi bừa ─────────
+  const bay = await setCsCaseFields({ id: "csq-v2", assigneeUserId: "khong-ton-tai" }, truongNhom);
+  assert.ok("error" in bay, "khoá tài khoản không có thật phải bị từ chối");
+  assert.equal((await traCase("csq-v2"))?.assigneeUserId ?? null, null, "và KHÔNG được ghi gì vào dòng");
+
+  // ───────── V2-7 · QUYỀN: đường ghi nào cũng phải đi qua cùng một cửa ─────────
+  // Kiểm ở mức MÃ NGUỒN vì Server Action cần phiên đăng nhập thật. Ba đường ghi của hàng đợi
+  // (đổi nhanh · hành động nhanh · ghi chú) đều phải gọi `authorize()` — thiếu một cái là người
+  // chỉ có quyền XEM vẫn giao được việc cho người khác.
+  for (const ten of ["updateCsCaseQuick", "csQuickAction", "addCsCaseNote"]) {
+    const than = csActionSrc.slice(csActionSrc.indexOf(`export async function ${ten}`));
+    assert.match(than.slice(0, 400), /const \{ user, error \} = await authorize\(\);\s*\n\s*if \(error\) return \{ error \};/, `${ten} phải chặn quyền trước khi làm bất cứ việc gì`);
+  }
+  assert.match(csActionSrc.slice(csActionSrc.indexOf("async function authorize")), /can\(user, "cs:manage"\)/, "cửa quyền của hàng đợi là cs:manage");
+  // Và client KHÔNG gửi được TÊN người phụ trách: lược đồ chỉ nhận khoá.
+  const thanQuick = csActionSrc.slice(csActionSrc.indexOf("export async function updateCsCaseQuick"), csActionSrc.indexOf("const quickSchema"));
+  assert.ok(!/assignee:\s*z\./.test(thanQuick), "client chỉ được gửi KHOÁ; nhận thêm ô tên là mở đường cho dòng nói một đằng quy kết một nẻo");
+
+  // ───────── V2-8 · GHI CHÚ hiện trên dòng: nội dung · ai · lúc nào · bao nhiêu cái ─────────
+  const gc1 = await addCsNote({ id: "csq-v3", note: "Đã gọi, khách hẹn 18h gọi lại" }, actor);
+  assert.ok("ok" in gc1, "ghi chú phải lưu được");
+  const v3Gc = await traCase("csq-v3");
+  assert.equal(v3Gc?.note?.lastNote, "Đã gọi, khách hẹn 18h gọi lại", "dòng phải hiện ghi chú gần nhất");
+  assert.equal(v3Gc?.note?.lastNoteBy, "Linh CSKH", "và AI ghi — thiếu vế này thì người tiếp theo vẫn phải gọi lại");
+  assert.equal(v3Gc?.note?.noteCount, 1);
+  const gc2 = await addCsNote({ id: "csq-v3", note: "Khách chốt đổi sang màu be" }, truongNhom);
+  assert.ok("ok" in gc2);
+  const v3Gc2 = await traCase("csq-v3");
+  assert.equal(v3Gc2?.note?.lastNote, "Khách chốt đổi sang màu be", "GẦN NHẤT nghĩa là mới nhất, không phải cái đầu tiên");
+  assert.equal(v3Gc2?.note?.lastNoteBy, "Trưởng nhóm");
+  assert.equal(v3Gc2?.note?.noteCount, 2, "đếm đủ số ghi chú để người đọc biết có nên mở lịch sử ra không");
+
+  // ───────── V2-9 · GHI CHÚ ≠ BẰNG CHỨNG: hai ô, hai chủ sở hữu ─────────
+  const v3Raw = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, "csq-v3"), columns: { detail: true, resolution: true, title: true } });
+  assert.ok(!(v3Raw?.detail ?? "").includes("khách hẹn 18h"), "ghi chú KHÔNG được ghi đè ô bằng chứng");
+  assert.equal(v3Raw?.resolution ?? "", "", "và KHÔNG được ghi đè kết luận — kết luận là thứ đóng case, ghi chú thì không");
+  // Cột GHI CHÚ trên màn hình đọc `note`, cột bằng chứng đọc `detail`/`resolution` — đọc thẳng mã nguồn.
+  assert.match(nguonBang, /note\?\.lastNote/, "cột Ghi chú phải vẽ ghi chú gần nhất");
+  assert.match(nguonBang, /<EvidencePopover row=\{r\} noteCount=\{note\?\.noteCount \?\? 0\} \/>/, "bằng chứng vẫn ở ô riêng của nó");
+
+  // ───────── V2-10 · PHÁT SINH bám `created_at`; một lượt ghi chú KHÔNG được đẩy case lên đầu ─────────
+  const v3Sau = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, "csq-v3"), columns: { createdAt: true, updatedAt: true } });
+  assert.ok(v3Sau && v3Sau.updatedAt.getTime() > v3Sau.createdAt.getTime(), "ghi chú có đụng vào updated_at — chính vì thế cột Phát sinh không được đọc nó");
+  assert.match(nguonBang, /\{phatSinh\(r\.createdAt\)\}/, "cột Phát sinh phải đọc created_at");
+  const oPhatSinh = nguonBang.slice(nguonBang.indexOf("PHÁT SINH —"), nguonBang.indexOf("{phatSinh(r.createdAt)}"));
+  assert.ok(!oPhatSinh.includes("updatedAt"), "và tuyệt đối không đọc updated_at ở ô ấy");
+
+  // ───────── V2-11 · SẮP XẾP CHẠY Ở MÁY CHỦ, cả hai chiều ─────────
+  const thoiGian = async (raw: SearchParams) => (await listCsCases(paramsOf(raw))).rows.map((r) => new Date(r.createdAt).getTime());
+  const moiTruoc = await thoiGian({ sort: "createdAt", dir: "desc" });
+  const cuTruoc = await thoiGian({ sort: "createdAt", dir: "asc" });
+  assert.deepEqual(moiTruoc, [...moiTruoc].sort((a, b) => b - a), "mới nhất trước phải ra đúng thứ tự giảm dần");
+  assert.deepEqual(cuTruoc, [...cuTruoc].sort((a, b) => a - b), "cũ nhất trước phải ra đúng thứ tự tăng dần");
+  assert.deepEqual(cuTruoc, [...moiTruoc].reverse(), "hai chiều phải là ảnh gương của nhau — nếu không, một chiều đang bỏ sót dòng");
+  // Khoá cột phải NẰM TRONG danh sách sort được của truy vấn, nếu không bấm vào không có tác dụng
+  // mà cũng không báo lỗi (AGENTS.md mục 2).
+  assert.ok(CS_SORTABLE.includes("createdAt"), "cột Phát sinh phải sort được ở máy chủ");
+  assert.match(nguonBang, /<SortHeader field="createdAt" label="Phát sinh" \/>/, "và tiêu đề cột phải dùng đúng khoá ấy");
+
+  // ───────── V2-12 · PHÂN TRANG GIỮ NGUYÊN SẮP XẾP ─────────
+  /*
+    Đây là chỗ nuqs hay hỏng im lặng: mặc định nó XOÁ tham số khi giá trị bằng mặc định, nên bấm
+    "cũ nhất trước" rồi sang trang 2 thì `dir` biến mất khỏi URL và máy chủ lại lấy mặc định riêng
+    của trang. `clearOnDefault: false` chặn điều đó — kiểm ở cả hai tầng: dữ liệu và mã nguồn.
+  */
+  const CO_TRANG = 10; // `parseListParams` chặn dưới ở 10 — dùng đúng số máy chủ thật sự nhận.
+  const trang = async (page: number, dir: string) =>
+    (await listCsCases(parseListParams({ sort: "createdAt", dir, page: String(page), pageSize: String(CO_TRANG) }, { defaultSort: "createdAt", filterKeys: ["kind", "status", "assignee", "domain"], sortable: CS_SORTABLE, defaultPeriod: "all" }))).rows.map((r) => r.id);
+  const tatCaCu = await listIds({ sort: "createdAt", dir: "asc" });
+  assert.ok(tatCaCu.length > CO_TRANG, "phải có hơn một trang thì mới kiểm được chuyện sang trang");
+  const cuT1 = await trang(1, "asc");
+  const cuT2 = await trang(2, "asc");
+  assert.equal(cuT1.length, CO_TRANG, "trang phải đúng kích thước đã khai");
+  assert.deepEqual([...cuT1, ...cuT2], tatCaCu.slice(0, cuT1.length + cuT2.length), "hai trang đầu phải là phần đầu của CÙNG một thứ tự — không lặp, không sót");
+  assert.equal(new Set([...cuT1, ...cuT2]).size, cuT1.length + cuT2.length, "không dòng nào xuất hiện ở cả hai trang");
+  const moiT1 = await trang(1, "desc");
+  assert.notDeepEqual(moiT1, cuT1, "đổi chiều mà trang 1 không đổi nghĩa là sắp xếp đang bị bỏ qua");
+  const nguonSort = nguonBang.slice(nguonBang.indexOf("function SortHeader"));
+  assert.match(nguonSort.slice(0, 900), /clearOnDefault: false/, "thiếu cờ này thì sang trang 2 là mất sắp xếp");
+  assert.match(nguonSort.slice(0, 900), /shallow: false/, "sắp xếp chạy ở MÁY CHỦ nên URL phải nạp lại dữ liệu");
+  assert.match(nguonSort.slice(0, 900), /page: 1/, "đổi sắp xếp phải về trang 1 — đứng ở trang 7 của thứ tự cũ là vô nghĩa");
+
   console.log(
-    `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ`,
+    `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ · hàng đợi V2: tự nhận / trưởng nhóm giao / chuyển / bỏ gán đều đi bằng KHOÁ tài khoản (khoá lạ bị từ chối, không ghi bừa) · ghi chú gần nhất có người + mốc + số lượng và KHÔNG đè bằng chứng · cột Phát sinh bám created_at · sắp xếp hai chiều chạy ở máy chủ và không mất khi sang trang`,
   );
 }

@@ -1,6 +1,7 @@
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { rowsOf } from "@/lib/sql-rows";
 import { getDb, schema } from "@/db";
+import { ORDER_MATCH_WINDOW_DAYS, ORDER_MATERIALIZED_STAGES_SQL } from "@/lib/constants/order-materialized";
 
 /**
  * ═══════════ "CHƯA TẠO ĐƠN" TRONG KHI ĐƠN ĐÃ NẰM ĐÓ ═══════════
@@ -26,7 +27,7 @@ import { getDb, schema } from "@/db";
  * Không chỉ ẩn ở giao diện. Case được ĐÓNG MỀM với lý do đọc được, nên hàng đợi sạch và lịch sử
  * vẫn tra được. Và `chat-detect` không tạo lại case cho hội thoại đã có đơn.
  *
- * ─── BA BẬC CHỨNG CỨ, KHÔNG SUY BẰNG CHỮ ───
+ * ─── BỐN BẬC CHỨNG CỨ, KHÔNG SUY BẰNG CHỮ ───
  *
  *   1. `CONVERSATION_HAS_ORDER` — hội thoại sinh ra case đã sinh ra đơn SAU đó
  *                                 (`orders.conversation_id`). Đây là mối nối MÁY, đúng thứ cột đó
@@ -60,22 +61,33 @@ import { getDb, schema } from "@/db";
  * Nên `order_id` ở đây nghĩa là "khách này từng mua", KHÔNG phải "đơn đang chờ đã được tạo".
  * Đóng case theo nó là kết luận ngược hẳn với thứ nó nói.
  *
+ *   4. `POS_CONFIRMED`           — POS đã XÁC NHẬN một đơn của CHÍNH hội thoại ấy, trong cửa sổ
+ *                                 khớp. Chủ shop chốt 14/09/2026: "Đã xác nhận" nghĩa là đơn đã
+ *                                 được tạo. Bậc này sinh ra vì ba bậc trên đóng được 0/10 case
+ *                                 trên production — lý do đo được viết ngay tại chỗ khai nó.
+ *
  * ─── MỌI BẬC ĐỀU RÀNG BUỘC THỜI GIAN ───
  *
  * Một khách mua tháng trước rồi tháng này nhắn muốn mua tiếp thì case MỚI là thật, và đơn CŨ
- * không được dùng để đóng nó. Thiếu vế "tạo SAU khi case đủ thông tin", luật này lại đóng đúng
- * những case đáng làm nhất — cùng một cái bẫy, chỉ ở một cột khác.
+ * không được dùng để đóng nó. Thiếu vế thời gian, luật này lại đóng đúng những case đáng làm nhất
+ * — cùng một cái bẫy, chỉ ở một cột khác.
+ *
+ * Ba bậc đầu ràng buộc MỘT PHÍA ("tạo SAU khi case đủ thông tin"). Bậc 4 ràng buộc HAI PHÍA (cửa
+ * sổ `ORDER_MATCH_WINDOW_DAYS` về cả trước lẫn sau), vì chứng cứ của nó là TRẠNG THÁI đơn chứ
+ * không phải thứ tự thời gian — và không có vế "trước" thì một đơn `DELIVERED` từ hai tuần trước
+ * trong cùng hội thoại sẽ đóng mất một case thật. Đo được đúng một ca như thế trên production.
  *
  * KHÔNG có bậc nào đóng case chỉ vì số điện thoại từng xuất hiện ở đâu đó.
  */
 
-export const RECONCILE_REASONS = ["CONVERSATION_HAS_ORDER", "PHONE_ORDERED_AFTER", "SHIPMENT_CREATED"] as const;
+export const RECONCILE_REASONS = ["CONVERSATION_HAS_ORDER", "PHONE_ORDERED_AFTER", "SHIPMENT_CREATED", "POS_CONFIRMED"] as const;
 export type ReconcileReason = (typeof RECONCILE_REASONS)[number];
 
 export const RECONCILE_REASON_LABEL: Record<ReconcileReason, string> = {
   CONVERSATION_HAS_ORDER: "Hội thoại đã sinh ra đơn sau khi case mở",
   PHONE_ORDERED_AFTER: "Số điện thoại đã lên đơn sau khi case đủ thông tin",
   SHIPMENT_CREATED: "Đã có vận đơn gửi tới số điện thoại này sau khi case đủ thông tin",
+  POS_CONFIRMED: "POS đã xác nhận đơn của chính hội thoại này, trong cửa sổ khớp",
 };
 
 /** Người/máy đứng tên thao tác này. KHÔNG phải một tài khoản người — đây là máy đối chiếu. */
@@ -95,46 +107,103 @@ export type ReconcileResult = {
 const c = schema.csCases;
 
 /**
- * Hội thoại của case đã sinh ra một đơn SAU khi case đủ thông tin.
+ * ═══════════ BỐN BẬC CHỨNG CỨ, SINH RA TỪ MỘT NƠI ═══════════
  *
- * Vế thời gian là bắt buộc: case chỉ được tạo khi đã đối chiếu và không thấy đơn, nên một đơn của
- * cùng hội thoại tạo TRƯỚC đó là đơn của lượt mua trước — không phải đơn mà case này đang chờ.
+ * Hai nơi hỏi CÙNG một câu "đơn của case này đã tồn tại chưa": máy đối chiếu (đọc cột của
+ * `cs_cases`) và lá chắn lúc GHI (`stillPendingOrderNotCreated`, đọc cột của một bảng `values`
+ * dựng tại chỗ). Cột khác nhau, câu hỏi giống hệt.
+ *
+ * Trước 14/09/2026 mỗi nơi giữ một bản chép tay. Chúng đang đồng ý với nhau — nhưng thêm bậc thứ
+ * tư là một lượt sửa hai chỗ, và cả kho mã này đã mất một bản phát hành vì đúng hình dạng lỗi đó
+ * ("Đã gửi" gõ nguyên văn ở bốn chỗ). Nay nơi gọi truyền vào BIỂU THỨC CỘT của chính nó, còn LUẬT
+ * thì chỉ có một bản.
  */
-const HOI_THOAI_CO_DON = sql`(${c.conversationId} is not null and exists (
-  select 1 from orders o
-  where o.conversation_id = ${c.conversationId}
-    and o.inserted_at >= coalesce(${c.infoCompleteAt}, ${c.createdAt})
-))`;
+type EvidenceCols = {
+  /** Khoá hội thoại. Rỗng/`NULL` ⇒ mọi bậc dựa vào hội thoại tự tắt. */
+  conversationId: SQL;
+  /** Số điện thoại của case. Rỗng ⇒ mọi bậc dựa vào SĐT tự tắt. */
+  phone: SQL;
+  /** Mốc "đủ thông tin" của chính ứng viên đó. */
+  moc: SQL;
+};
 
-/**
- * Số điện thoại của case đã lên đơn SAU khi case đủ thông tin.
- *
- * Mốc so sánh là `info_complete_at` nếu có, không thì `created_at` của case. Dùng `>=` chứ không
- * `>`: đơn được tạo trong cùng giây với lúc case sinh ra vẫn là đơn của chính hội thoại đó.
- */
-const SDT_LEN_DON_SAU = sql`(${c.customerPhone} <> '' and exists (
-  select 1 from orders o
-  where o.bill_phone = ${c.customerPhone}
-    and o.inserted_at >= coalesce(${c.infoCompleteAt}, ${c.createdAt})
-))`;
+function evidenceParts(k: EvidenceCols): Record<ReconcileReason, SQL> {
+  const co = (x: SQL) => sql`coalesce(${x}, '') <> ''`;
+  const cua = sql.raw(`interval '${ORDER_MATCH_WINDOW_DAYS} days'`);
+  return {
+    /**
+     * Hội thoại của case đã sinh ra một đơn SAU khi case đủ thông tin.
+     *
+     * Vế thời gian là bắt buộc: case chỉ được tạo khi đã đối chiếu và không thấy đơn, nên một đơn
+     * của cùng hội thoại tạo TRƯỚC đó là đơn của lượt mua trước — không phải đơn case đang chờ.
+     */
+    CONVERSATION_HAS_ORDER: sql`(${co(k.conversationId)} and exists (
+      select 1 from orders o where o.conversation_id = ${k.conversationId} and o.inserted_at >= ${k.moc}
+    ))`,
+    /** Số điện thoại của case đã lên đơn SAU khi case đủ thông tin. */
+    PHONE_ORDERED_AFTER: sql`(${co(k.phone)} and exists (
+      select 1 from orders o where o.bill_phone = ${k.phone} and o.inserted_at >= ${k.moc}
+    ))`,
+    /**
+     * Có VẬN ĐƠN gửi tới chính số điện thoại của case, tạo SAU khi case đủ thông tin.
+     *
+     * Đọc `shipments.receiver_phone` (chứng từ ĐVVC), KHÔNG đọc vận đơn của `cs_cases.order_id`:
+     * cột đó trỏ tới lần mua TRƯỚC, và mọi khách mua lần hai đều có sẵn một vận đơn cũ ở đó.
+     */
+    SHIPMENT_CREATED: sql`(${co(k.phone)} and exists (
+      select 1 from shipments sh where sh.receiver_phone = ${k.phone} and sh.created_at >= ${k.moc}
+    ))`,
+    /**
+     * ─── BẬC 4: POS ĐÃ XÁC NHẬN ĐƠN CỦA CHÍNH HỘI THOẠI ẤY ───
+     *
+     * Chủ shop chốt 14/09/2026: **POS "Đã xác nhận" nghĩa là đơn ĐÃ ĐƯỢC TẠO.** Luật khai một chỗ
+     * ở `lib/constants/order-materialized.ts`, bám vào MÃ TRẠNG THÁI ổn định của Pancake chứ không
+     * so chuỗi hiển thị.
+     *
+     * VÌ SAO BA BẬC CŨ ĐÓNG ĐƯỢC 0/10. Đo production 14/09/2026 trên 10 case đang mở: cả 10 đều có
+     * đơn mang chính số điện thoại ấy, nhưng **0 case** có đơn tạo SAU mốc `info_complete_at`. Vì
+     * mốc đó là lúc MÁY QUÉT nhận ra hội thoại đã đủ thông tin, không phải lúc KHÁCH đưa thông tin
+     * — máy quét chạy sau, nên đơn gần như luôn ra đời TRƯỚC mốc và điều kiện `>=` không bao giờ
+     * đúng. Ba bậc cũ đúng về lý, đóng được đúng 0 case về thực tế.
+     *
+     * BẬC NÀY ĐỔI TRỤC: TỪ THỜI GIAN SANG ĐỊNH DANH + ĐỘ GẦN. Đòi CẢ BA, không chỉ một:
+     *   1. đơn nằm trong CÙNG hội thoại với case — không phải "cùng SĐT", vì SĐT nối cả những
+     *      lượt mua chẳng liên quan;
+     *   2. đơn ở trạng thái "Đã xác nhận" trở đi;
+     *   3. mốc tạo đơn cách mốc case không quá `ORDER_MATCH_WINDOW_DAYS`, tính về CẢ HAI PHÍA.
+     *
+     * Vế 3 giữ lại đúng những case đáng làm. Đo trên chính 10 case ấy: một case ngày 09-11 có đơn
+     * cùng hội thoại ngày **08-29** trạng thái `DELIVERED` — lệch 13 ngày. Đó là KHÁCH MUA LẠI, và
+     * đóng nó là đóng một việc thật. Cửa sổ ba ngày loại nó ra.
+     *
+     * Cố ý KHÔNG có bậc "số điện thoại từng có đơn đã xác nhận": 10/10 case thoả điều kiện đó, tức
+     * nó đóng sạch hàng đợi mà không phân biệt được gì — một luật đúng với mọi dòng không nói gì cả.
+     */
+    POS_CONFIRMED: sql`(${co(k.conversationId)} and exists (
+      select 1 from orders o
+      where o.conversation_id = ${k.conversationId}
+        and o.stage::text in (${sql.raw(ORDER_MATERIALIZED_STAGES_SQL)})
+        and o.inserted_at >= ${k.moc} - ${cua}
+        and o.inserted_at <= ${k.moc} + ${cua}
+    ))`,
+  };
+}
 
-/**
- * Có VẬN ĐƠN gửi tới chính số điện thoại của case, tạo SAU khi case đủ thông tin.
- *
- * Hàng đã rời kho là chứng cứ mạnh hơn cả một dòng `orders`: nó nói đơn không những tồn tại mà đã
- * được đóng gói và bàn giao. Bậc này bắt được đúng phần hai bậc trên bỏ sót — đơn lên bằng số của
- * người nhận hộ, hoặc hội thoại không được gắn vào đơn.
- *
- * Đọc `shipments.receiver_phone` (chứng từ ĐVVC), KHÔNG đọc vận đơn của `cs_cases.order_id`: cột
- * đó trỏ tới lần mua TRƯỚC, và mọi khách mua lần hai đều có sẵn một vận đơn cũ ở đó.
- */
-const CO_VAN_DON_SAU = sql`(${c.customerPhone} <> '' and exists (
-  select 1 from shipments sh
-  where sh.receiver_phone = ${c.customerPhone}
-    and sh.created_at >= coalesce(${c.infoCompleteAt}, ${c.createdAt})
-))`;
+/** Bậc chứng cứ tính trên cột của `cs_cases`. */
+const BAC = evidenceParts({
+  conversationId: sql`${c.conversationId}`,
+  phone: sql`${c.customerPhone}`,
+  moc: sql`coalesce(${c.infoCompleteAt}, ${c.createdAt})`,
+});
 
-const CO_CHUNG_CU = sql`(${HOI_THOAI_CO_DON} or ${SDT_LEN_DON_SAU} or ${CO_VAN_DON_SAU})`;
+const HOI_THOAI_CO_DON = BAC.CONVERSATION_HAS_ORDER;
+
+
+const SDT_LEN_DON_SAU = BAC.PHONE_ORDERED_AFTER;
+const CO_VAN_DON_SAU = BAC.SHIPMENT_CREATED;
+const POS_DA_XAC_NHAN = BAC.POS_CONFIRMED;
+
+const CO_CHUNG_CU = sql`(${HOI_THOAI_CO_DON} or ${SDT_LEN_DON_SAU} or ${CO_VAN_DON_SAU} or ${POS_DA_XAC_NHAN})`;
 // Chưa ai chạm vào = chưa ai nhận VÀ chưa ai ghi kết luận. Hai điều kiện, không phải một.
 const CHUA_AI_CHAM = and(or(sql`${c.assignee} = ''`, sql`${c.assignee} is null`), eq(c.resolution, ""));
 
@@ -157,6 +226,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
       convHasOrder: sql<number>`count(*) filter (where ${HOI_THOAI_CO_DON} and ${CHUA_AI_CHAM})`,
       phoneAfter: sql<number>`count(*) filter (where not ${HOI_THOAI_CO_DON} and ${SDT_LEN_DON_SAU} and ${CHUA_AI_CHAM})`,
       shipmentCreated: sql<number>`count(*) filter (where not ${HOI_THOAI_CO_DON} and not ${SDT_LEN_DON_SAU} and ${CO_VAN_DON_SAU} and ${CHUA_AI_CHAM})`,
+      posConfirmed: sql<number>`count(*) filter (where not ${HOI_THOAI_CO_DON} and not ${SDT_LEN_DON_SAU} and not ${CO_VAN_DON_SAU} and ${POS_DA_XAC_NHAN} and ${CHUA_AI_CHAM})`,
       humanTouched: sql<number>`count(*) filter (where ${CO_CHUNG_CU} and not (${CHUA_AI_CHAM}))`,
       stillPending: sql<number>`count(*) filter (where not ${CO_CHUNG_CU})`,
     })
@@ -167,6 +237,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
     CONVERSATION_HAS_ORDER: Number(dem?.convHasOrder ?? 0),
     PHONE_ORDERED_AFTER: Number(dem?.phoneAfter ?? 0),
     SHIPMENT_CREATED: Number(dem?.shipmentCreated ?? 0),
+    POS_CONFIRMED: Number(dem?.posConfirmed ?? 0),
   };
   const ket: ReconcileResult = {
     openBefore: Number(dem?.openBefore ?? 0),
@@ -183,6 +254,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
     { reason: "CONVERSATION_HAS_ORDER", cond: and(dangMo, HOI_THOAI_CO_DON, CHUA_AI_CHAM) },
     { reason: "PHONE_ORDERED_AFTER", cond: and(dangMo, sql`not ${HOI_THOAI_CO_DON}`, SDT_LEN_DON_SAU, CHUA_AI_CHAM) },
     { reason: "SHIPMENT_CREATED", cond: and(dangMo, sql`not ${HOI_THOAI_CO_DON}`, sql`not ${SDT_LEN_DON_SAU}`, CO_VAN_DON_SAU, CHUA_AI_CHAM) },
+    { reason: "POS_CONFIRMED", cond: and(dangMo, sql`not ${HOI_THOAI_CO_DON}`, sql`not ${SDT_LEN_DON_SAU}`, sql`not ${CO_VAN_DON_SAU}`, POS_DA_XAC_NHAN, CHUA_AI_CHAM) },
   ];
   for (const b of buoc) {
     if (!closed[b.reason]) continue;
@@ -237,14 +309,25 @@ export async function stillPendingOrderNotCreated(candidates: OrderNotCreatedCan
   const dong = hopLe.map(
     (x) => sql`(${x.key}, ${x.conversationId ?? ""}::text, ${x.phone}::text, ${x.infoCompleteAt ?? new Date(0)}::timestamptz)`,
   );
+  /*
+    CÙNG MỘT LUẬT VỚI MÁY ĐỐI CHIẾU, KHÔNG PHẢI MỘT BẢN CHÉP TAY.
+
+    Trước 14/09/2026 khối này gõ lại ba vị từ bằng tay. Chúng đang đồng ý với máy đối chiếu, nhưng
+    thêm bậc thứ tư (`POS_CONFIRMED`) là một lượt sửa hai chỗ — và quên một chỗ ở ĐÂY là kiểu hỏng
+    tệ nhất: máy quét vẫn đẻ ra đúng những case mà lượt đối chiếu ngay sau đó phải đóng, mỗi ngày
+    một lần, mãi mãi.
+
+    Nay `evidenceParts` sinh cả bốn bậc từ cột của bảng `values` này.
+  */
+  const bac = evidenceParts({
+    conversationId: sql`uv.conversation_id`,
+    phone: sql`uv.phone`,
+    moc: sql`uv.moc`,
+  });
   const rows = await db.execute<{ key: string; co_chung_cu: boolean }>(sql`
     with ung_vien(key, conversation_id, phone, moc) as (values ${sql.join(dong, sql`, `)})
     select uv.key,
-           (
-             exists (select 1 from orders o where uv.conversation_id <> '' and o.conversation_id = uv.conversation_id and o.inserted_at >= uv.moc)
-             or exists (select 1 from orders o where uv.phone <> '' and o.bill_phone = uv.phone and o.inserted_at >= uv.moc)
-             or exists (select 1 from shipments sh where uv.phone <> '' and sh.receiver_phone = uv.phone and sh.created_at >= uv.moc)
-           ) as co_chung_cu
+           (${sql.join(RECONCILE_REASONS.map((r) => bac[r]), sql` or `)}) as co_chung_cu
       from ung_vien uv`);
   const list = rowsOf<{ key: string; co_chung_cu: boolean }>(rows);
   const coChungCu = new Set(list.filter((r) => r.co_chung_cu).map((r) => r.key));
