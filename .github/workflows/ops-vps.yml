@@ -43,6 +43,7 @@ on:
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - returns-parity      # báo cáo hoàn: MÀN HÌNH THẬT = máy tính kết quả = SQL viết độc lập từ đặc tả (chỉ đọc; arg: "Q001,Q002" mã hàng)
+          - reason-backfill     # rút quan sát lý do hoàn từ dữ liệu đã có (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
@@ -224,6 +225,12 @@ jobs:
                 # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
                 fetch_script outcome-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/outcome-parity.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/outcome-parity.ts $ARG ;;
+              reason-backfill)
+                # MẶC ĐỊNH CHẠY THỬ: in ra đúng những gì sẽ ghi, theo từng nguồn. "--apply" mới ghi,
+                # và ghi được chạy lại nhiều lần vì khoá chống trùng là NỘI DUNG chứ không phải số
+                # thứ tự. KHÔNG đụng một dòng đơn / vận đơn / tiền nào — chỉ thêm dòng quan sát.
+                fetch_script return-reason-backfill.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/return-reason-backfill.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/return-reason-backfill.ts $ARG ;;
               returns-parity)
                 # CHỈ ĐỌC. Tải thật /reports/returns bằng phiên hợp lệ rồi BÓC SỐ TỪ HTML, so với
                 # máy tính kết quả và với một câu SQL viết độc lập từ đặc tả. Đây là phép kiểm duy

@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0084_metric_target_product_scope", "0085_return_reason_raw_text", "0086_fanpage_marketer_attribution"] as const;
+const MOI = ["0087_return_reason_observations"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -77,26 +77,33 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "bước 1: 0082 phải đã áp — bảng hmt_workbooks có sẵn");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'hmt_return_reconciliation' and column_name = 'resolution'"), 1, "bước 1: 0083 phải đã áp — cột resolution có sẵn");
     /*
-      Thứ CHƯA được có ở bước 1 là tầng `PRODUCT` của 0084 — kiểm điều này để bài không lặng lẽ
-      thành vô nghĩa vào ngày ai đó quên cập nhật `MOI`: ràng buộc đã nới sẵn từ trước thì "áp
-      thêm migration" chẳng chứng minh được gì.
+      0084, 0085 VÀ 0086 đã chạy thật trên máy chủ (bản phát hành #278 và #279) nên nay cả ba thuộc
+      "trạng thái production hôm nay". Kiểm sự CÓ MẶT của chúng ở bước 1 để bài không lặng lẽ thành
+      vô nghĩa: nếu một ngày `MOI` bị cắt quá tay thì chính dòng này đỏ.
     */
-    await assert.rejects(
-      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt0', 'delivery_success_rate', 'PRODUCT', 'Q004', 55, 'thử trước khi nới', now(), 'a@shop.vn')`),
-      () => true,
-      "bước 1: ràng buộc CŨ phải còn từ chối tầng PRODUCT — đó là thứ 0084 nới ra",
+    assert.ok(
+      (await client.query<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'metric_targets_scope_check'")).rows[0]?.def.includes("PRODUCT"),
+      "bước 1: 0084 phải đã áp — ràng buộc phạm vi đã nhận tầng PRODUCT",
     );
-    // Một đích ĐÃ ĐẶT TỪ TRƯỚC, để bước 2 kiểm được rằng 0084 không đụng tới dòng nào.
+    // Một đích ĐÃ ĐẶT TỪ TRƯỚC, để bước 2 kiểm được rằng migration mới không đụng tới dòng nào.
     await client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt1', 'delivery_success_rate', 'COMPANY', null, 65, 'mức chung toàn shop', now(), 'a@shop.vn')`);
-    // 0085 CHƯA áp: cột chữ gốc chưa được có, và một dòng lý do ghi TRƯỚC bản ấy để kiểm không backfill.
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 0, "bước 1: cột raw_reason CHƯA được có — đó là thứ 0085 thêm vào");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fanpages'"), 0, "bước 1: bảng fanpages CHƯA được có — đó là thứ 0086 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 1, "bước 1: 0085 phải đã áp — cột raw_reason có sẵn");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fanpages'"), 1, "bước 1: 0086 phải đã áp — bảng fanpages có sẵn");
+    /*
+      Thứ CHƯA được có ở bước 1 là bảng quan sát của 0087. Nếu nó đã có sẵn thì "áp thêm migration"
+      chẳng chứng minh được gì.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_reason_observations'"), 0, "bước 1: bảng return_reason_observations CHƯA được có — đó là thứ 0087 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome) values ('up-care-2', 'up-s8', 'NEW', 'PENDING')`);
-    // Một dòng lý do hoàn ghi TRƯỚC 0085 — để bước 2 kiểm được rằng cột mới KHÔNG backfill nó.
-    await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, reason_group, note, actor_email) values ('up-rr1', 'up-s9', 'SIZE_TIGHT', 'SIZE', 'khách bảo chật', 'a@shop.vn')`);
+    /*
+      Một KẾT LUẬN lý do hoàn ghi TRƯỚC 0087 — để bước 2 kiểm được rằng bảng quan sát mới KHÔNG
+      backfill nó. Dòng kết luận cũ là bằng chứng một người đã quyết; dựng hộ nó một "quan sát"
+      là bịa ra một lần ai đó nói, với một mốc thời gian không có thật (AGENTS.md mục 35).
+    */
+    await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, reason_group, note, raw_reason, actor_email) values ('up-rr1', 'up-s9', 'SIZE_TIGHT', 'SIZE', 'khách bảo chật', '', 'a@shop.vn')`);
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -162,9 +169,45 @@ export async function testMigrationUpgradePath() {
       biệt được "ĐVVC có nói" với "ta đoán hộ". Lý do và nhóm của dòng cũ cũng phải y nguyên: bản
       này không chạm vào một quan sát nào.
     */
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 1, "0085: cột raw_reason phải được tạo");
-    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id = 'up-rr1' and raw_reason = '' and reason = 'SIZE_TIGHT' and reason_group = 'SIZE'"), 1, "0085: dòng cũ giữ nguyên lý do và nhóm, chữ gốc RỖNG — không backfill, không mặc định");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 1, "0085 (nay thuộc trạng thái production): cột raw_reason vẫn còn");
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id = 'up-rr1' and raw_reason = '' and reason = 'SIZE_TIGHT' and reason_group = 'SIZE'"), 1, "dòng cũ giữ nguyên lý do và nhóm, chữ gốc RỖNG — không backfill, không mặc định");
     await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, reason_group, raw_reason, actor_email) values ('up-rr2', 'up-s8', 'CUSTOMER_UNREACHABLE', 'SLOW', 'Tồn - Khách hàng nghỉ, không có nhà', 'a@shop.vn')`);
+
+    /*
+      ═══ 0087: BẢNG QUAN SÁT LÝ DO HOÀN — CHỈ THÊM, KHOÁ LÀ NỘI DUNG ═══
+
+      Bốn điều phải đúng, mỗi điều chặn một cách hỏng khác nhau:
+        1. bảng có mặt;
+        2. KHÔNG backfill — dòng kết luận `up-rr1` có từ trước không được mọc ra một "quan sát" với
+           mốc thời gian bịa (AGENTS.md mục 35);
+        3. cùng NỘI DUNG chỉ một dòng — webhook Viettel Post gửi trùng (họ thử lại tối đa 5 lần) và
+           lượt rút quan sát chạy lại đều không được nhân bản chứng cứ;
+        4. một quan sát rỗng chữ, hoặc không gắn vào kiện lẫn đơn nào, bị chặn ở CSDL: một dòng như
+           thế làm tăng mẫu số "đã có lý do" mà không có gì để đọc.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_reason_observations'"), 1, "0087: bảng quan sát phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from return_reason_observations"), 0, "0087: KHÔNG gieo sẵn quan sát nào — dựng hộ một lần 'ai đó nói' là bịa ra chứng cứ");
+    await client.query(`insert into return_reason_observations (id, shipment_id, source, raw_text, reason_at_write, occurred_at, dedupe_key) values ('up-ob1', 'up-s9', 'CARRIER_TEXT', 'Tồn - Khách từ chối nhận', 'UNKNOWN', now(), 'up|CARRIER_TEXT|1')`);
+    await assert.rejects(
+      () => client.query(`insert into return_reason_observations (id, shipment_id, source, raw_text, reason_at_write, occurred_at, dedupe_key) values ('up-ob2', 'up-s9', 'CARRIER_TEXT', 'Tồn - Khách từ chối nhận', 'UNKNOWN', now(), 'up|CARRIER_TEXT|1')`),
+      (e: unknown) => /unique|duplicate/i.test(String((e as { message?: string })?.message ?? e)),
+      "0087: cùng một quan sát ghi lần hai phải bị chặn — nếu không, chạy lại là nhân bản chứng cứ",
+    );
+    await assert.rejects(
+      () => client.query(`insert into return_reason_observations (id, shipment_id, source, raw_text, reason_at_write, occurred_at, dedupe_key) values ('up-ob3', 'up-s9', 'CARRIER_TEXT', '   ', 'UNKNOWN', now(), 'up|CARRIER_TEXT|2')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("return_reason_obs_raw_check"),
+      "0087: quan sát KHÔNG có chữ nào là một mẫu số tăng lên mà không có gì để đọc",
+    );
+    await assert.rejects(
+      () => client.query(`insert into return_reason_observations (id, source, raw_text, reason_at_write, occurred_at, dedupe_key) values ('up-ob4', 'CARRIER_TEXT', 'không gắn vào đâu cả', 'UNKNOWN', now(), 'up|CARRIER_TEXT|3')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("return_reason_obs_link_check"),
+      "0087: quan sát không gắn vào kiện lẫn đơn nào thì không ai tra ngược được",
+    );
+    // Xoá kiện thì quan sát đi theo; nhưng quan sát KHÔNG giữ kiện lại.
+    await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s5', 'UPS5', 'RETURNED')`);
+    await client.query(`insert into return_reason_observations (id, shipment_id, source, raw_text, reason_at_write, occurred_at, dedupe_key) values ('up-ob5', 'up-s5', 'CARRIER_TEXT', 'Tồn - Khách hẹn giao lại', 'UNKNOWN', now(), 'up|CARRIER_TEXT|5')`);
+    await client.query(`delete from shipments where id = 'up-s5'`);
+    assert.equal(await dem("select count(*)::int as n from return_reason_observations where id = 'up-ob5'"), 0, "0087: xoá kiện thì quan sát của nó đi theo, không để lại dòng mồ côi");
     assert.equal(await dem(`select count(*)::int as n from shipment_return_reasons where id = 'up-rr2' and raw_reason like 'Tồn - %'`), 1, "0085: chữ gốc ghi được NGUYÊN VĂN, kể cả dấu tiếng Việt");
 
     /*

@@ -8,6 +8,15 @@
  *
  * Nhật ký ghi CẢ lý do cũ lẫn lý do máy suy ra tại thời điểm ghi đè: một con số đi vào báo cáo
  * hiệu suất mã hàng thì phải lần ngược được về người đã quyết và bằng chứng họ dựa vào.
+ *
+ * ─── ĐÂY LÀ CỬA GHI DUY NHẤT CHO LÝ DO HOÀN DO NGƯỜI XÁC ĐỊNH ───
+ *
+ * Mọi màn hình (bàn care, danh sách vận đơn, chi tiết vận đơn) gọi CHÍNH hàm này. Mở một cửa ghi
+ * thứ hai là mở đường để hai chỗ ghi hai bảng khác nhau rồi báo cáo đọc một bảng.
+ *
+ * Hàm ghi HAI bảng, mỗi bảng một câu hỏi:
+ *   `shipment_return_reasons`      — KẾT LUẬN HIỆN HÀNH. Một kiện một dòng, đè lên được.
+ *   `return_reason_observations`   — LỊCH SỬ AI NÓI GÌ. Chỉ thêm, không bao giờ sửa.
  */
 import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -15,7 +24,8 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { RETURN_REASON_GROUP_OF, RETURN_REASONS } from "@/lib/constants/return-reason";
+import { RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS } from "@/lib/constants/return-reason";
+import { ghiQuanSat } from "@/lib/returns/reason-observe";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
 
 const schemaInput = z.object({
@@ -95,6 +105,33 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
         updatedAt: new Date(),
       },
     });
+
+  /*
+    ═══ VÀ GHI MỘT QUAN SÁT — BẢNG KẾT LUẬN KHÔNG THAY ĐƯỢC BẢNG LỊCH SỬ ═══
+
+    `shipment_return_reasons` giữ KẾT LUẬN HIỆN HÀNH của kiện: một kiện một dòng, lần ghi sau đè
+    lần ghi trước. Đó là hình dạng đúng cho câu hỏi "giờ shop kết luận thế nào", và là hình dạng
+    SAI cho câu hỏi "ai đã nói gì, lúc nào" — hai người xử lý cùng một kiện nói hai điều khác nhau
+    thì dòng thứ hai xoá mất dòng thứ nhất và không ai thấy chúng từng mâu thuẫn.
+
+    Nên lần ghi tay nào cũng để lại một dòng quan sát CHỈ-THÊM. Khoá chống trùng đi theo NỘI DUNG:
+    bấm lại đúng lý do cũ là không-thao-tác, đổi sang lý do khác là một quan sát mới.
+  */
+  await ghiQuanSat(db, [
+    {
+      shipmentId,
+      orderId: null,
+      source: "HUMAN_CONFIRMED",
+      // Chữ gốc của quan sát NÀY là nhãn người đó chọn, cộng ghi chú. Đây là chữ của NGƯỜI — khác
+      // hẳn `raw_reason` của ĐVVC ở trên, và hai cái cùng sống, không cái nào xoá cái nào.
+      rawText: note ? `${RETURN_REASON_LABEL[reason]} — ${note}` : RETURN_REASON_LABEL[reason],
+      occurredAt: new Date(),
+      sourceRef: "action:setReturnReason",
+      // QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN; ô chữ chỉ là ảnh chụp tên (AGENTS.md mục 34).
+      actorId: user.id,
+      actorEmail: user.email,
+    },
+  ]);
 
   await audit({
     userId: user.id,

@@ -3789,6 +3789,79 @@ export const shipmentReturnReasons = pgTable(
 
 export type ShipmentReturnReason = typeof shipmentReturnReasons.$inferSelect;
 
+/**
+ * ═══════════ QUAN SÁT LÝ DO HOÀN — MỘT DÒNG CHO MỘT LẦN AI ĐÓ NÓI RA ═══════════
+ *
+ * Hợp đồng và lý lẽ ở `lib/constants/return-reason-source.ts`.
+ *
+ * ─── VÌ SAO CẦN MỘT BẢNG RIÊNG, KHÔNG NHÉT THÊM CỘT VÀO `shipment_return_reasons` ───
+ *
+ * `shipment_return_reasons` khai `shipment_id` là UNIQUE: nó trả lời "kiện này CUỐI CÙNG được xếp
+ * vào lý do nào", một kết luận cho một kiện. Đó là hình dạng đúng cho kết luận, nhưng sai cho
+ * quan sát: một kiện có thể có ĐVVC nói một câu lúc 9h, khách nhắn một câu lúc 14h, và kho ghi
+ * nhận xét lúc hôm sau. Nhét cả ba vào một dòng thì hai cái sau ghi đè hai cái trước, và không ai
+ * còn thấy chúng từng mâu thuẫn nhau.
+ *
+ * Bảng này CHỈ THÊM, không bao giờ sửa. Kết luận vẫn ở bảng kia; đây là chứng cứ dẫn tới nó.
+ *
+ * ─── KHOÁ CHỐNG TRÙNG LÀ NỘI DUNG, KHÔNG PHẢI MỘT SỐ THỨ TỰ ───
+ *
+ * `dedupe_key` = (kiện · nguồn · mốc · vân tay chữ gốc). Nhờ vậy chạy lại lượt rút quan sát KHÔNG
+ * sinh thêm dòng nào — điều kiện để một lượt backfill chạy được nhiều lần mà vẫn an toàn, và để
+ * webhook Viettel Post gửi trùng (họ thử lại tối đa 5 lần) không nhân bản chứng cứ.
+ */
+export const returnReasonObservations = pgTable(
+  "return_reason_observations",
+  {
+    id: id(),
+    shipmentId: text("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
+    /** Đơn liên quan. Giữ riêng vì có quan sát đến từ ĐƠN (ghi chú Pancake) chứ không từ kiện. */
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** `ReasonSource`. Ai nói ra điều này. */
+    source: text("source").notNull(),
+    /**
+     * CHỮ GỐC, NGUYÊN VĂN, KHÔNG CHUẨN HOÁ, KHÔNG CẮT NGHĨA.
+     *
+     * Đây là thứ duy nhất trong bảng được coi là SỰ THẬT. Mọi cột còn lại là cách đọc nó, và cách
+     * đọc thì được phép đổi.
+     */
+    rawText: text("raw_text").notNull(),
+    /**
+     * Lý do đã xếp được tại thời điểm GHI — ẢNH CHỤP, không phải nguồn của phép gộp.
+     *
+     * Báo cáo suy lại lý do lúc ĐỌC từ `rawText` qua bảng luật đang chạy, nên sửa luật là số đổi
+     * theo mà không phải viết lại một dòng lịch sử nào. Cột này để trả lời "hồi đó máy đọc ra gì",
+     * và để so xem một lần sửa luật đã đổi những ca nào.
+     */
+    reasonAtWrite: text("reason_at_write").notNull().default("UNKNOWN"),
+    /** Mốc của chính sự việc (giờ ĐVVC ghi, giờ người gõ) — KHÔNG phải giờ dòng này được tạo. */
+    occurredAt: ts("occurred_at").notNull(),
+    /** Chứng từ gốc: id sự kiện, id ca CSKH, id phiếu kiểm… để lần ngược được. */
+    sourceRef: text("source_ref").notNull().default(""),
+    /** Người gõ, nếu là quan sát của người. `NULL` = MÁY rút ra (AGENTS.md mục 34). */
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** Ghi chú chi tiết người viết thêm — KHÁC `rawText`, và không bao giờ thay nó. */
+    note: text("note").notNull().default(""),
+    /** Khoá tự nhiên chống trùng: kiện · nguồn · mốc · vân tay chữ. */
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("return_reason_obs_uq").on(t.dedupeKey),
+    index("return_reason_obs_shipment_idx").on(t.shipmentId),
+    index("return_reason_obs_order_idx").on(t.orderId),
+    index("return_reason_obs_source_idx").on(t.source),
+    // Chữ gốc RỖNG không phải một quan sát — nó là một dòng trống giả vờ là chứng cứ.
+    check("return_reason_obs_raw_check", sql`length(btrim(${t.rawText})) > 0`),
+    // Quan sát phải gắn được vào ÍT NHẤT một trong hai: kiện hoặc đơn. Không có cả hai thì nó
+    // không nói về cái gì cả.
+    check("return_reason_obs_link_check", sql`${t.shipmentId} is not null or ${t.orderId} is not null`),
+  ],
+);
+
+export type ReturnReasonObservation = typeof returnReasonObservations.$inferSelect;
+
 export type Department = typeof departments.$inferSelect;
 export type DepartmentMember = typeof departmentMembers.$inferSelect;
 export type WorkItemRow = typeof workItems.$inferSelect;

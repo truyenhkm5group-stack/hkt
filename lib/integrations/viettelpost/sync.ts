@@ -11,6 +11,7 @@ import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
+import { ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
 
 /**
  * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
@@ -142,6 +143,33 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     });
   }
   if (eventRows.length) await db.insert(schema.shipmentEvents).values(eventRows).onConflictDoNothing();
+
+  /*
+    ═══ GÓI TIN MANG LÝ DO ⇒ GHI NGAY MỘT QUAN SÁT ═══
+
+    Trước bản này, chữ lý do của Viettel Post chỉ tồn tại lẫn trong hàng chục nghìn dòng hành
+    trình, và mỗi lượt mở báo cáo lại phải quét lại từ đầu để tìm. Nay mỗi câu NÓI VỀ LÝ DO được
+    tách ra thành một dòng có nguồn và có mốc, ngay lúc nó tới.
+   
+    Bộ lọc nằm trong `ghiQuanSat`: câu chỉ nói BƯỚC ĐI ("đang chuyển hoàn") không sinh quan sát
+    nào. Mã lý do có cấu trúc đi kèm để phép xếp loại dùng mã thay vì đoán chữ.
+
+    KHÔNG ĐƯỢC LÀM HỎNG LƯỢT ĐỒNG BỘ. Viettel Post đòi HTTP 200 trong dưới một giây và thử lại tối
+    đa 5 lần; một quan sát không ghi được là mất một dòng ghi chú, không phải mất một vận đơn — nên
+    lỗi ở đây bị nuốt có chủ đích, đúng như mọi nhánh phụ khác của đường webhook.
+  */
+  if (eventRows.length) {
+    const quanSat: QuanSatMoi[] = eventRows.map((r) => ({
+      shipmentId: shipment.id,
+      orderId: shipment.orderId,
+      source: "CARRIER_TEXT" as const,
+      rawText: [r.statusName ?? "", r.note ?? ""].filter(Boolean).join(" — "),
+      occurredAt: r.occurredAt,
+      sourceRef: `vtp:${source}`,
+      vtpCode: record.reasonCode ?? null,
+    }));
+    await ghiQuanSat(db, quanSat).catch(() => 0);
+  }
 
   if (!isNewer && !created) {
     await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id));

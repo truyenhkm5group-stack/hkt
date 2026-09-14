@@ -132,10 +132,18 @@ export type ReturnReasonReport = {
   groups: ReasonGroupRow[];
   products: ProductReturnRow[];
   /**
-   * ĐỘ PHỦ LÝ DO — mẫu số của chất lượng báo cáo, không được giấu.
-   * `known` = đơn hoàn xác định được lý do; `unknown` = chưa ai hỏi vì sao.
+   * ═══ ĐỘ PHỦ LÝ DO — MẪU SỐ CỦA CHẤT LƯỢNG BÁO CÁO, KHÔNG ĐƯỢC GIẤU ═══
+   *
+   * BA phần, không hai (`lib/constants/return-reason-source.ts`):
+   *   `known`      — xếp được vào danh mục.
+   *   `rawOnly`    — CÓ chữ thật nhưng chưa xếp được ⇒ mở chữ ra đọc rồi chọn lý do.
+   *   `noEvidence` — chưa ai nói một chữ nào ⇒ phải ĐI HỎI.
+   *
+   * `unknown = rawOnly + noEvidence`, giữ lại để nơi gọi cũ không đổi nghĩa. Nhưng màn hình phải
+   * tách hai phần ấy ra: chúng dẫn tới hai việc khác hẳn nhau, và gộp lại thì việc dễ làm nhất
+   * (đọc chữ đã có sẵn) bị chôn trong một con số trông như bế tắc.
    */
-  reasonCoverage: { known: number; unknown: number; pct: number | null };
+  reasonCoverage: { known: number; unknown: number; rawOnly: number; noEvidence: number; pct: number | null };
   /** Ca rơi khỏi kỳ vì KHÔNG có mốc kết quả cuối — in ra thay vì lặng lẽ bỏ. */
   missingBasis: number;
   multiSkuOrders: number;
@@ -337,6 +345,24 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
   const unknown = theoLyDo.get("UNKNOWN")?.count ?? 0;
   const known = returned - unknown;
   /*
+    ─── TÁCH PHẦN CHƯA BIẾT LÀM HAI, VÌ CHÚNG LÀ HAI VIỆC KHÁC NHAU ───
+
+    Kiện `RAW_ONLY` đã CÓ chữ của ai đó — việc phải làm là mở ra đọc rồi chọn lý do, làm được ngay
+    hôm nay. Kiện `NO_EVIDENCE` thì không có gì để đọc: phải gọi khách hoặc để kho ghi lại khi mở
+    kiện. Gộp chúng thành một con số "chưa xác định" làm phần dễ làm nhất biến mất khỏi tầm mắt.
+
+    Đếm trên ĐÚNG tập đơn hoàn đang hiện (`hoanRows`), không đếm trên toàn shop: một con số độ phủ
+    của tập khác không nói gì về bảng người đọc đang nhìn.
+  */
+  let rawOnly = 0;
+  let noEvidence = 0;
+  for (const r of hoanRows) {
+    const v = r.shipmentId ? verdicts.get(r.shipmentId) : undefined;
+    if ((v?.reason ?? "UNKNOWN") !== "UNKNOWN") continue;
+    if (v?.coverage === "RAW_ONLY") rawOnly += 1;
+    else noEvidence += 1;
+  }
+  /*
     TỶ TRỌNG TÍNH TRÊN ĐƠN ĐÃ XÁC ĐỊNH ĐƯỢC LÝ DO, không trên tổng đơn hoàn.
 
     Lấy tổng đơn hoàn làm mẫu số thì mọi tỷ trọng bị kéo xuống bởi phần chưa ai hỏi — "vải xấu
@@ -430,7 +456,7 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
     successRate: finished ? (delivered / finished) * 100 : null,
     groups,
     products,
-    reasonCoverage: { known, unknown, pct: returned ? (known / returned) * 100 : null },
+    reasonCoverage: { known, unknown, rawOnly, noEvidence, pct: returned ? (known / returned) * 100 : null },
     missingBasis,
     multiSkuOrders: products.reduce((n, p) => Math.max(n, p.multiSku), 0),
     rescueCoverage: { eligible: eligibleTong, withIntervention: interventionTong, rescued: rescuedTong },
