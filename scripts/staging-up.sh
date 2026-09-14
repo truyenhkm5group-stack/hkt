@@ -34,12 +34,12 @@ say "Kiểm tra an toàn ĐẠT."
 say ""
 say "═════════ BƯỚC 2/5 · LẤY MÃ NGUỒN ═════════"
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" fetch origin "$BRANCH"
+  git -C "$DIR" fetch --depth 1 origin "$BRANCH"
   git -C "$DIR" checkout -B "$BRANCH" "origin/$BRANCH"
   say "Đã cập nhật $DIR sang $BRANCH ($(git -C "$DIR" rev-parse --short HEAD))"
 else
   mkdir -p "$(dirname "$DIR")"
-  git clone --branch "$BRANCH" "$REPO" "$DIR"
+  git clone --depth 1 --single-branch --branch "$BRANCH" "$REPO" "$DIR"
   say "Đã tải $BRANCH về $DIR"
 fi
 cd "$DIR"
@@ -72,8 +72,16 @@ if [ "$BUILD_HERE" = "1" ]; then
   say "⚠ --build-here: DỰNG ẢNH NGAY TRÊN MÁY NÀY. Chỉ làm khi kiểm tra an toàn ở bước 1 báo đủ RAM."
   $COMPOSE build
 elif [ -n "${STAGING_IMAGE:-}" ]; then
+  # Token chỉ sống trong lượt chạy này. Đăng xuất NGAY sau khi kéo xong để không bỏ lại một chứng
+  # thư trong /root/.docker/config.json — kho mã PUBLIC, gói GHCR riêng tư, và một token nằm lại
+  # trên máy chủ là một token sẽ bị quên.
+  if [ -n "${GHCR_TOKEN:-}" ]; then
+    say "Đăng nhập ghcr.io (token dùng một lần)…"
+    printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null
+  fi
   say "Kéo ảnh $STAGING_IMAGE …"
-  docker pull "$STAGING_IMAGE"
+  docker pull "$STAGING_IMAGE" || { [ -n "${GHCR_TOKEN:-}" ] && docker logout ghcr.io >/dev/null 2>&1; exit 1; }
+  [ -n "${GHCR_TOKEN:-}" ] && { docker logout ghcr.io >/dev/null 2>&1; say "Đã đăng xuất ghcr.io."; }
 elif docker image inspect vnx-ai-staging-app:local >/dev/null 2>&1; then
   say "Dùng ảnh vnx-ai-staging-app:local đã có sẵn trên máy."
 else

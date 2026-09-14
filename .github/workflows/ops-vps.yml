@@ -63,6 +63,16 @@ on:
           - cs-stale            # đối chiếu hàng đợi CSKH với thực tế hiện tại (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
           - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
+          # ───── BẢN CHẠY THỬ NHÂN SỰ AI — chỉ có trên nhánh claude/ai-workforce-sales-v1 ─────
+          # Bấm Run workflow rồi CHỌN NHÁNH đó, nếu không GitHub chạy bản `main` và không thấy các
+          # thao tác này. Không thao tác nào dưới đây chạm tới container / CSDL / .env của production.
+          - ai-staging-swap       # tạo tệp swap 2 GB (idempotent, không restart gì, không reboot)
+          - ai-staging-preflight  # CHỈ ĐỌC: chụp hiện trạng + kiểm 7 lớp va chạm + RAM/đĩa
+          - ai-staging-image      # dựng ảnh trên máy chạy GitHub rồi đẩy lên GHCR (KHÔNG chạm VPS)
+          - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
+          - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
+          - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
+          - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
       days:
         description: "Số ngày (cho sync-pancake-all / sync-vtp-import)"
         type: string
@@ -84,10 +94,69 @@ concurrency:
   group: vps-operations
   cancel-in-progress: false
 
+env:
+  # Ảnh của bản chạy thử. Tên KHÁC hẳn ảnh production (`erp-app:local`).
+  STAGING_IMAGE_NAME: ghcr.io/${{ github.repository }}-ai-staging
+
 jobs:
+  # ───────── DỰNG ẢNH Ở ĐÂY, KHÔNG DỰNG TRÊN VPS ─────────
+  #
+  # VPS có 1.963 MB RAM / 949 MB khả dụng / SWAP 0 / 2 lõi (đo 14/09/2026). `next build` cần hơn
+  # thế, và kho mã này đã ghi hai lượt deploy chết vì SIGKILL khi hai `next build` chạy cùng lúc
+  # trên đúng máy ấy (#208, #227). Máy chạy GitHub có 7 GB RAM và không phục vụ khách hàng nào.
+  #
+  # Job này KHÔNG mở một kết nối SSH nào.
+  image:
+    if: inputs.action == 'ai-staging-image'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
+      # CÙNG BỘ CỔNG mà lượt deploy production phải qua: một ảnh chạy thử dựng từ mã chưa qua kiểm
+      # thử thì mọi con số đo được trên nó đều không nói lên điều gì.
+      - name: Kiểm tra kiểu dữ liệu
+        run: npx tsc --noEmit
+      - name: Kiểm thử (gồm contract test luật nghiệp vụ)
+        run: npm test
+      - name: Đăng nhập GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Dựng và đẩy ảnh
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Hai thẻ: `latest` cho lệnh ngắn gọn, và thẻ theo commit để lúc cần biết "bản chạy thử
+          # đang chạy mã nào" thì có câu trả lời chính xác chứ không phải phỏng đoán.
+          tags: |
+            ${{ env.STAGING_IMAGE_NAME }}:latest
+            ${{ env.STAGING_IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Bước tiếp theo
+        run: |
+          echo "Đã đẩy ${{ env.STAGING_IMAGE_NAME }}:latest (và :${{ github.sha }})"
+          echo "Tiếp: chạy lại workflow này với action = ai-staging-up (vẫn trên nhánh này)."
+
   ops:
+    if: inputs.action != 'ai-staging-image'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: appleboy/ssh-action@v1
         env:
@@ -113,6 +182,12 @@ jobs:
           # in vào đó là công bố nó vĩnh viễn — không rút lại được kể cả khi xoá lần chạy. Biến
           # thì chỉ đi vào môi trường của tiến trình và không bao giờ được in ra.
           HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
+          # Bản chạy thử: nhánh nguồn, tên ảnh, và token GHCR DÙNG MỘT LẦN (script đăng xuất ngay
+          # sau khi kéo ảnh xong, không bỏ lại chứng thư nào trên máy chủ).
+          STAGING_BRANCH: ${{ github.ref_name }}
+          STAGING_IMAGE: ghcr.io/${{ github.repository }}-ai-staging:latest
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -120,7 +195,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
             cd /root/erp
@@ -463,5 +538,69 @@ jobs:
               restart)
                 $C restart app scheduler
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
+              # ═══════════ BẢN CHẠY THỬ NHÂN SỰ AI ═══════════
+              #
+              # KHÔNG thao tác nào dưới đây chạm tới: container erp-*, /root/erp, .env của
+              # production, volume erp_*, hay cấu hình Caddy. Chúng chỉ sống trong
+              # /opt/vnx-ai-staging và compose project vnx-ai-staging.
+              #
+              # Script lấy từ CHÍNH NHÁNH đang bấm Run workflow, không phải từ main.
+              ai-staging-swap)
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/vps-add-swap.sh?ref=${STAGING_BRANCH}" > /tmp/vps-add-swap.sh
+                echo "── sức khoẻ production TRƯỚC khi đổi ──"
+                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-' || echo "  (không thấy container erp-*)"
+                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo
+                bash /tmp/vps-add-swap.sh 2
+                echo ""
+                echo "── sức khoẻ production SAU khi đổi (phải y nguyên) ──"
+                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
+                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo ;;
+
+              ai-staging-preflight)
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-preflight.sh?ref=${STAGING_BRANCH}" > /tmp/staging-preflight.sh
+                bash /tmp/staging-preflight.sh ;;
+
+              ai-staging-up)
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-up.sh?ref=${STAGING_BRANCH}" > /tmp/staging-up.sh
+                STAGING_BRANCH="$STAGING_BRANCH" STAGING_IMAGE="$STAGING_IMAGE" \
+                  GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" bash /tmp/staging-up.sh ;;
+
+              ai-staging-status)
+                echo "── container bản chạy thử ──"
+                docker ps -a --filter 'name=vnx-ai-staging' --format '  {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+                echo ""
+                echo "── /api/health của bản chạy thử ──"
+                curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ chưa trả lời"
+                echo ""
+                echo "── RAM / swap ──"; free -h; swapon --show || echo "  (chưa có swap)"
+                echo ""
+                echo "── bộ nhớ từng container ──"
+                docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
+                echo ""
+                echo "── production PHẢI vẫn khoẻ ──"
+                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
+                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo ;;
+
+              ai-staging-logs)
+                docker logs --tail 120 vnx-ai-staging-app 2>&1 || echo "(chưa có container vnx-ai-staging-app)" ;;
+
+              ai-staging-down)
+                cd /opt/vnx-ai-staging
+                # `--volumes` xoá luôn CSDL của BẢN CHẠY THỬ. Volume của production tên khác hoàn
+                # toàn (erp_erp_pgdata) và compose project này không biết nó tồn tại.
+                if [ "${ARG:-}" = "--volumes" ]; then
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging down -v
+                else
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging down
+                fi
+                echo ""
+                echo "── production PHẢI vẫn khoẻ ──"
+                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
+                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo
+                free -h ;;
+
               *) echo "Thao tác không hợp lệ: $ACTION"; exit 1 ;;
             esac

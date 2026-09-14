@@ -13,7 +13,8 @@
 |---|---|
 | `scripts/staging-preflight.sh` | **Chỉ đọc.** Chụp hiện trạng production rồi kiểm 7 lớp va chạm. Thoát 1 = DỪNG. |
 | `scripts/staging-up.sh` | Dựng bản chạy thử. Gọi preflight trước và **không có cờ nào bỏ qua nó**. Mặc định KÉO ảnh, không dựng. |
-| `.github/workflows/ai-staging-image.yml` | Dựng ảnh ở máy chạy GitHub rồi đẩy lên GHCR — VPS không đủ RAM để `next build`. |
+| `.github/workflows/ops-vps.yml` (trên nhánh này) | Bảy thao tác `ai-staging-*`: swap · preflight · dựng ảnh trên máy chạy GitHub · up · status · logs · down. |
+| `scripts/vps-add-swap.sh` | Tạo tệp swap 2 GB — idempotent, không restart gì, không reboot. |
 | `docker-compose.staging.yml` | Ngăn xếp riêng: project `vnx-ai-staging`, 2 container, volume riêng, cổng localhost. |
 | `.env.staging.example` | Mẫu tệp môi trường. Toàn giá trị rỗng — `.env.staging` thật nằm trong `.gitignore`. |
 | `deploy/Caddyfile.ai-staging` | Khối Caddy cho tên miền công khai. **Chưa áp dụng**, và chỉ áp dụng ở mục 8. |

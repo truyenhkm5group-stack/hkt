@@ -25,6 +25,24 @@ services:
       POSTGRES_USER: erp
       POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?can STAGING_POSTGRES_PASSWORD trong .env.staging}
       POSTGRES_DB: erp
+    # CẤU HÌNH CHO MỘT MÁY 2 GB, KHÔNG PHẢI CHO MỘT MÁY CHỦ CSDL.
+    #
+    # Mặc định của Postgres (`shared_buffers` 128 MB, `max_connections` 100) được chọn cho máy dư
+    # RAM. Ở đây tải là 10–30 hội thoại đọc bằng mắt, nên mỗi MB nhường lại là một MB production
+    # không phải tranh. `max_connections` 20 vẫn dư cho một ứng dụng Next.js một tiến trình.
+    command: >
+      postgres
+      -c shared_buffers=48MB
+      -c max_connections=20
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+      -c effective_cache_size=128MB
+      -c max_wal_size=512MB
+    # TRẦN BỘ NHỚ — đây là lớp bảo vệ PRODUCTION, không phải lớp bảo vệ bản chạy thử.
+    # Chạm trần thì Docker giết container NÀY. Không có trần thì nhân chọn tiến trình lớn nhất toàn
+    # máy, và tiến trình lớn nhất đang là ERP phục vụ khách.
+    mem_limit: 320m
+    memswap_limit: 512m
     volumes:
       - vnx_ai_staging_pgdata:/var/lib/postgresql/data
     # KHÔNG publish cổng: chỉ app trong cùng mạng nội bộ mới nói chuyện được với CSDL này.
@@ -54,7 +72,6 @@ services:
     image: ${STAGING_IMAGE:-vnx-ai-staging-app:local}
     build: .
     container_name: vnx-ai-staging-app
-    restart: unless-stopped
     env_file: .env.staging
     environment:
       DATABASE_URL: postgresql://erp:${STAGING_POSTGRES_PASSWORD}@db:5432/erp?schema=public
@@ -70,6 +87,8 @@ services:
       # Biến RIÊNG của nhân sự AI. `AI_PROVIDER` đã thuộc về AI Copilot của ERP với bộ giá trị khác
       # (auto|openai|anthropic|off) — đọc chung một biến là hai hệ cùng hiểu sai.
       AI_WORKFORCE_PROVIDER: "stub"
+      # Trần heap V8 thấp hơn trần container: Node dọn rác trước khi Docker phải giết nó.
+      NODE_OPTIONS: "--max-old-space-size=448"
       # Không nhận webhook đơn hàng và không gọi Viettel Post: bản chạy thử chỉ cần đọc hội thoại.
       PANCAKE_WEBHOOK_SECRET: ""
       # SePay: webhook TIỀN VÀO TÀI KHOẢN. Bản chạy thử không có lý do gì để nhận nó, và nhận trùng
@@ -82,9 +101,17 @@ services:
       VIETTELPOST_PASSWORD: ""
       VIETTELPOST_WEBHOOK_SECRET: ""
       FACEBOOK_ACCESS_TOKEN: ""
+    # TRẦN BỘ NHỚ, cùng lý do với CSDL: chạm trần thì Docker giết container NÀY chứ không để nhân
+    # chọn nạn nhân trên toàn máy. 640 MB dư cho một tiến trình Next.js chỉ phục vụ vài người soát.
+    mem_limit: 640m
+    memswap_limit: 1g
+    # RESTART CÓ GIỚI HẠN. `unless-stopped` mà gặp vòng lặp OOM thì nó dựng lại mãi và đốt CPU của
+    # một máy 2 lõi đang phục vụ khách. Hỏng 3 lần thì đứng yên để người xem log — một bản chạy thử
+    # nằm im không hại ai, một bản chạy thử quay vòng thì có.
+    restart: on-failure:3
     ports:
       # CHỈ nghe trên localhost. Muốn ra Internet thì thêm route Caddy (deploy/Caddyfile.ai-staging),
-      # và chỉ sau khi mọi thứ ở mục 8 của docs/ai-staging-plan.md đã xanh.
+      # và chỉ sau khi mọi thứ ở mục 8 của docs/ai-staging-runbook.md đã xanh.
       - "127.0.0.1:${STAGING_PORT:-3100}:3000"
     depends_on:
       db:
