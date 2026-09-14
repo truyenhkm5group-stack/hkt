@@ -317,5 +317,26 @@ export function testPayrollOwnLineNeedsAccountKey() {
     assert.ok(!body.includes(oChu), `employeeMatchesUser không được đọc ô chữ ${oChu} — quyền xem lương đi bằng khoá tài khoản`);
   }
 
-  console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai");
+  /*
+    VÀ SỬA THAM SỐ URL CŨNG KHÔNG MỞ ĐƯỢC LƯƠNG NGƯỜI KHÁC.
+
+    `/payroll?marketer=<id>` mở khối chi tiết của một marketer. Nếu nó tra `id` ấy trong danh sách
+    GỐC của báo cáo thì người chỉ có quyền "xem của mình" gõ tay một id là đọc được lợi nhuận và
+    doanh thu của người khác — bảng thì đã lọc, mà khối chi tiết thì không. Lọc danh sách xong rồi
+    tra trong danh sách ĐÃ LỌC là điều kiện duy nhất đóng được cửa ấy.
+  */
+  const trang = fs.readFileSync(path.resolve(__dirname, "..", "app/(dashboard)/payroll/page.tsx"), "utf8");
+  const dongChon = trang.split("\n").find((l) => l.includes("selectedMarketer"));
+  assert.ok(dongChon, "không tìm thấy chỗ chọn marketer theo tham số URL — nếu đã đổi tên thì sửa bài kiểm này");
+  const khoiChon = trang.slice(trang.indexOf("const selectedMarketer"), trang.indexOf("const selectedMarketer") + 260);
+  assert.ok(
+    khoiChon.includes("marketersVisible"),
+    "khối chi tiết marketer phải tra trong danh sách ĐÃ LỌC theo quyền (`marketersVisible`), không tra thẳng `report.marketers`",
+  );
+  assert.ok(
+    /const marketersVisible = viewAll \? [\s\S]{0,120}ownIds\.has/.test(trang),
+    "`marketersVisible` phải thu hẹp về đúng dòng của chính người đăng nhập khi không có quyền xem toàn bộ",
+  );
+
+  console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai; sửa tham số URL cũng không mở được khối chi tiết của người khác");
 }
