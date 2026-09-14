@@ -225,6 +225,15 @@ const EXPECT: Record<string, { marker: string; why: string }[]> = {
   "/cs?view=theo-case": [
     { marker: 'aria-label="Sao chép SĐT"', why: "CSKH phải chép được SĐT, không gõ lại" },
     { marker: 'aria-label="Sao chép mã vận đơn"', why: "gõ lại mã vận đơn sai một chữ số là tra ra đơn người khác" },
+    /*
+      BA CÔNG CỤ CỦA HÀNG ĐỢI V2. Đo production 14/09/2026 TRƯỚC bản này: 2/417 case đang mở có
+      người phụ trách thật — một hàng đợi mà không giao được việc thì chỉ là một bảng để ngắm.
+      Ba dấu hiệu dưới đây là ba thứ người trực dùng, và chúng phải có mặt trong HTML thật chứ
+      không chỉ trong bản dựng ở máy người viết.
+    */
+    { marker: 'aria-label="Người phụ trách"', why: "trưởng nhóm phải giao được việc, không chỉ tự nhận" },
+    { marker: "Phát sinh", why: "mốc case RA ĐỜI (created_at) — thiếu nó thì không sắp xếp được hàng đợi theo tuổi thật" },
+    { marker: "Ghi chú", why: "ghi chú xử lý tách khỏi bằng chứng; trộn lại thì không ai phân biệt lời khách với kết luận đồng nghiệp" },
   ],
   "/shipments": [{ marker: 'aria-label="Sao chép mã vận đơn"', why: "bàn vận đơn sống bằng việc dán mã sang trang ĐVVC" }],
 };
