@@ -41,6 +41,41 @@ export function parsePayrollBasis(v: string | null | undefined): PayrollBasis {
   return v === "profit2" || v === "cash" || v === "nominal" ? v : "profit1";
 }
 
+/**
+ * ═══════ CƠ SỞ NÀO ĐƯỢC PHÉP DÙNG ĐỂ CHỐT LƯƠNG ═══════
+ *
+ * Luật chủ shop chốt 14/09/2026: **lợi nhuận tính lương = doanh thu thực − TOÀN BỘ chi phí thuộc
+ * phạm vi ghi nhận**, và *"tiền mua hàng chưa bán, trả nợ gốc, chuyển nội bộ, góp/rút vốn không tự
+ * trở thành chi phí của lợi nhuận tính lương"*.
+ *
+ * Bốn cơ sở trong ERP KHÔNG tương đương nhau trước luật ấy, nhưng màn hình cho chọn cả bốn bằng
+ * một ô chọn giống hệt nhau — nên một lần bấm nhầm là một kỳ lương tính trên cơ sở sai mà không có
+ * gì báo. Sổ này khai rõ cái nào đủ điều kiện và cái nào KHÔNG, cùng LÝ DO đọc được.
+ *
+ * Không cơ sở nào bị gỡ: `profit2` và `cash` vẫn là số liệu quản trị hữu ích (áp lực tiền hàng,
+ * dòng tiền thật). Chúng chỉ không được **âm thầm** trở thành căn cứ trả tiền cho người.
+ */
+export type PayrollBasisEligibility = { eligible: boolean; why: string };
+
+export const PAYROLL_BASIS_ELIGIBILITY: Record<PayrollBasis, PayrollBasisEligibility> = {
+  profit1: {
+    eligible: true,
+    why: "Doanh thu giao thành công trừ giá vốn CỦA CHÍNH HÀNG ĐÃ GIAO, quảng cáo, vận chuyển và chi phí vận hành đã ghi nhận — đúng định nghĩa 'doanh thu thực trừ toàn bộ chi phí thuộc phạm vi ghi nhận'.",
+  },
+  profit2: {
+    eligible: false,
+    why: "Trừ TOÀN BỘ giá vốn hàng NHẬP trong kỳ, kể cả hàng chưa bán. Nhập một lô lớn là lợi nhuận kỳ ấy âm và kỳ sau đẹp giả — tiền mua hàng chưa bán không phải chi phí của kỳ (AGENTS.md mục 14). Dùng để nhìn áp lực tiền hàng, không dùng để chốt lương.",
+  },
+  cash: {
+    eligible: false,
+    why: "Là DÒNG TIỀN (tiền vào − tiền ra trong kỳ), nên nó trừ cả tiền nhập hàng chưa bán và không trừ chi phí đã phát sinh mà chưa trả. Ngoài ra lợi nhuận cá nhân ở cơ sở này là phép QUY ĐỔI THEO TỶ TRỌNG, không đo được theo từng người.",
+  },
+  nominal: {
+    eligible: false,
+    why: "Là số DỰ PHÓNG: đơn lên trong kỳ × tỷ lệ giao thành công ƯỚC TÍNH. Chưa có chứng từ nào nói tiền đã về, nên nó không phải doanh thu thực (AGENTS.md mục 8.6 — dữ liệu suy đoán phải mang nhãn ước tính).",
+  },
+};
+
 /** % lợi nhuận của một mã hàng ghi nhận cho người tạo ra đơn */
 export type ProductShare = {
   /** Chủ mã hưởng % LN từ đơn do chính mình tạo (phần còn lại shop giữ) */

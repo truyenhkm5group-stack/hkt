@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
-import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
+import { PAYROLL_BASES, PAYROLL_BASIS_ELIGIBILITY, PAYROLL_EMPLOYEES_KEY, parsePayrollBasis } from "@/lib/constants/payroll";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { getRecognizedPayrollCost, PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
@@ -263,6 +263,27 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(luongThang4.paid.amount, 0, "9. tháng 4 không có chứng từ chi nào ⇒ ĐÃ TRẢ = 0 (đây là 0 THẬT, không phải chưa biết)");
   assert.equal(luongThang4.lines.find((l) => l.employee.id === "dc-emp-1")?.fixed, 9_000_000, "9. nhưng PHẢI TRẢ của tháng 4 vẫn là trọn lương tháng — hai chiều đứng riêng");
 
+  /* ══ TEST 10 — CHỈ MỘT CƠ SỞ ĐƯỢC PHÉP CHỐT LƯƠNG, VÀ PHẢI NÓI ĐƯỢC VÌ SAO ══
+   *
+   * Luật chủ shop: lợi nhuận tính lương = doanh thu thực − TOÀN BỘ chi phí thuộc phạm vi ghi nhận,
+   * và tiền mua hàng CHƯA BÁN không tự thành chi phí của kỳ. Ba trong bốn cơ sở của ERP vi phạm
+   * điều đó theo ba cách khác nhau — nhưng ô chọn cho cả bốn trông giống hệt nhau.
+   *
+   * Bất biến: đúng MỘT cơ sở đủ điều kiện, nó là MẶC ĐỊNH, và mỗi cơ sở không đủ phải nói được LÝ
+   * DO cụ thể (một dòng "không dùng được" không kèm lý do thì lần sau có người gỡ nó đi).
+   */
+  const duDieuKien = PAYROLL_BASES.filter((b) => PAYROLL_BASIS_ELIGIBILITY[b].eligible);
+  assert.deepEqual(duDieuKien, ["profit1"], "10. đúng một cơ sở đủ điều kiện chốt lương, và đó là LN1");
+  assert.equal(parsePayrollBasis(undefined), "profit1", "10. và nó phải là MẶC ĐỊNH — tham số lạ không được rơi vào một cơ sở không đủ điều kiện");
+  assert.equal(parsePayrollBasis("khong-ton-tai"), "profit1", "10. tham số rác cũng rơi về cơ sở đủ điều kiện");
+  for (const b of PAYROLL_BASES) {
+    const e = PAYROLL_BASIS_ELIGIBILITY[b];
+    assert.ok(e.why.length > 60, `10. cơ sở ${b} phải nói CỤ THỂ vì sao được / không được dùng`);
+  }
+  assert.ok(/chưa bán/i.test(PAYROLL_BASIS_ELIGIBILITY.profit2.why), "10. lý do của LN2 phải nói đúng chỗ sai: giá vốn hàng CHƯA BÁN");
+  assert.ok(/dòng tiền/i.test(PAYROLL_BASIS_ELIGIBILITY.cash.why), "10. lý do của cơ sở dòng tiền phải nói nó là dòng tiền, không phải lợi nhuận");
+  assert.ok(/dự phóng|ước tính/i.test(PAYROLL_BASIS_ELIGIBILITY.nominal.why), "10. lý do của cơ sở danh nghĩa phải nói nó là số dự phóng");
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -282,6 +303,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định",
   );
 }

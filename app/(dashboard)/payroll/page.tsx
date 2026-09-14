@@ -29,6 +29,7 @@ import {
 import { can, requireUser } from "@/lib/auth/session";
 import { employeeMatchesUser } from "@/lib/queries/payroll";
 import {
+  PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_LABEL,
   type PayrollBasis,
   PAYROLL_BASES,
@@ -133,6 +134,26 @@ export default async function PayrollPage({
               : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
         }
       />
+
+      {/*
+        CƠ SỞ ĐANG CHỌN CÓ ĐƯỢC PHÉP CHỐT LƯƠNG KHÔNG.
+
+        Ô chọn cơ sở cho bốn lựa chọn trông giống hệt nhau, nhưng trước luật "lợi nhuận tính lương =
+        doanh thu thực − TOÀN BỘ chi phí thuộc phạm vi ghi nhận" thì chỉ MỘT cái đủ điều kiện. Một
+        lần bấm nhầm là cả kỳ lương tính trên cơ sở sai mà không có gì báo — nên nó phải báo.
+        Không cơ sở nào bị gỡ: chúng vẫn là số liệu quản trị hữu ích, chỉ không được ÂM THẦM thành
+        căn cứ trả tiền cho người.
+      */}
+      {!PAYROLL_BASIS_ELIGIBILITY[basis].eligible ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive-foreground dark:text-destructive">
+          <b>Cơ sở “{PAYROLL_BASIS_SHORT[basis]}” KHÔNG dùng để chốt lương được.</b>{" "}
+          <span className="text-muted-foreground">{PAYROLL_BASIS_ELIGIBILITY[basis].why}</span>{" "}
+          <Link href={`/payroll?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(qs)), basis: "profit1" }).toString()}`} className="font-medium underline">
+            Xem ở cơ sở LN1
+          </Link>{" "}
+          <span className="text-muted-foreground">— {PAYROLL_BASIS_ELIGIBILITY.profit1.why}</span>
+        </div>
+      ) : null}
 
       {report.cashRatioReason ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
