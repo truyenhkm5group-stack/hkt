@@ -1,6 +1,13 @@
 # Kế hoạch chạy thử nhánh nhân sự AI tách khỏi production — ĐỀ XUẤT, chưa thực hiện
 
 > **Chưa triển khai gì cả.** Tài liệu này là bản đề xuất để chủ shop duyệt trước.
+>
+> **Đã có bản hiện thực hoá:** `docs/ai-staging-runbook.md` — sổ tay vận hành của bộ dựng
+> thật trong kho mã (`docker-compose.staging.yml`, `scripts/staging-preflight.sh`,
+> `scripts/staging-up.sh`). Danh tính chốt lại khác đề xuất ở ba chỗ: thư mục
+> `/opt/vnx-ai-staging` (không phải `/root/erp-ai-staging`), project `vnx-ai-staging`
+> (không phải `erp-ai`), và **chạy trên localhost trước**, chỉ thêm Caddy sau khi mọi thứ
+> đã xanh. Đọc sổ tay để thi hành; đọc tệp này để biết vì sao lại chọn như vậy.
 
 ## 1. Hiện trạng triển khai
 

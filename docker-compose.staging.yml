@@ -1,0 +1,75 @@
+# ───────────── BẢN CHẠY THỬ NHÂN SỰ AI — TÁCH HOÀN TOÀN KHỎI PRODUCTION ─────────────
+#
+# Chạy:  docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
+# Dừng:  docker compose -f docker-compose.staging.yml down
+# Xoá sạch kèm dữ liệu: docker compose -f docker-compose.staging.yml down -v
+#
+# KHÔNG dùng docker-compose.prod.yml và KHÔNG chạy trong /root/erp.
+#
+# Bốn thứ tách khỏi production, mỗi thứ vì một lý do cụ thể:
+#   · tên project `vnx-ai-staging`  → docker không gộp hai ngăn xếp làm một
+#   · tên container `vnx-ai-*`      → không lệnh nào gõ nhầm vào container đang phục vụ khách
+#   · volume `vnx_ai_staging_pgdata`→ CSDL riêng hoàn toàn, không có đường nào chạm dữ liệu thật
+#   · cổng 127.0.0.1:3100           → chỉ nghe trên máy, không ra Internet cho tới khi có Caddy
+#
+# KHÔNG có service `scheduler`: bản chạy thử không tự chạy job nào. Chạy tay khi cần.
+# KHÔNG có service `caddy`: cổng 80/443 do Caddy của production giữ, đụng vào là đụng vào khách.
+name: vnx-ai-staging
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vnx-ai-staging-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?can STAGING_POSTGRES_PASSWORD trong .env.staging}
+      POSTGRES_DB: erp
+    volumes:
+      - vnx_ai_staging_pgdata:/var/lib/postgresql/data
+    # KHÔNG publish cổng: chỉ app trong cùng mạng nội bộ mới nói chuyện được với CSDL này.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    build: .
+    container_name: vnx-ai-staging-app
+    restart: unless-stopped
+    env_file: .env.staging
+    environment:
+      DATABASE_URL: postgresql://erp:${STAGING_POSTGRES_PASSWORD}@db:5432/erp?schema=public
+      PORT: "3000"
+      # ───────── CHẶN CỨNG, ĐẶT Ở ĐÂY CÓ CHỦ Ý ─────────
+      # Khối `environment` ĐÈ LÊN `env_file`. Nghĩa là dù .env.staging có ghi gì, dù ai sửa nhầm,
+      # dù một câu SQL đổi bảng `settings` — hai công tắc này vẫn là "false" cho tới khi có người
+      # sửa CHÍNH TỆP NÀY rồi dựng lại container. Đó là điều kiện "không tổ hợp cấu hình nào lỡ
+      # nhắn cho khách thật".
+      AI_ALLOW_CUSTOMER_SEND: "false"
+      AI_ALLOW_ORDER_CREATE: "false"
+      AI_DEFAULT_MODE: "SHADOW"
+      # Không nhận webhook đơn hàng và không gọi Viettel Post: bản chạy thử chỉ cần đọc hội thoại.
+      PANCAKE_WEBHOOK_SECRET: ""
+      VIETTELPOST_API_KEY: ""
+      VIETTELPOST_USERNAME: ""
+      VIETTELPOST_PASSWORD: ""
+      VIETTELPOST_WEBHOOK_SECRET: ""
+      FACEBOOK_ACCESS_TOKEN: ""
+    ports:
+      # CHỈ nghe trên localhost. Muốn ra Internet thì thêm route Caddy (deploy/Caddyfile.ai-staging),
+      # và chỉ sau khi mọi thứ ở mục 8 của docs/ai-staging-plan.md đã xanh.
+      - "127.0.0.1:${STAGING_PORT:-3100}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  vnx_ai_staging_pgdata:

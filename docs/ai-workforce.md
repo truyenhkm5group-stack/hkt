@@ -168,6 +168,14 @@ Tên mô hình không ghi cứng ở đâu trong logic — đọc từ `AI_MODEL
 `lib/ai/agents/sales/outbound.ts` là **nơi duy nhất** trong mã nguồn gọi API gửi tin của Pancake
 cho nhân sự AI. Đọc một tệp là kiểm chứng được lời khẳng định "SHADOW không gửi gì".
 
+**LỚP NGOÀI CÙNG — CHẶN CỨNG CẤP MÔI TRƯỜNG.** `AI_ALLOW_CUSTOMER_SEND` và
+`AI_ALLOW_ORDER_CREATE` đọc THẲNG từ biến môi trường (`lib/ai/config.ts::aiEnv.hardLimits`), và
+`getAiSettings()` cố tình **không** hợp nhất chúng với bảng `settings` — ghi khoá `hardLimits` vào
+CSDL là ghi vào hư không. Chỉ đúng chuỗi `"true"` mở được (`1`, `yes`, `on` đều là CẤM); không khai
+gì cũng là CẤM. Chúng đứng **trước** mọi chốt khác: trước nấc quyền hạn, trước phiếu duyệt, trước
+danh sách trắng kiểm thử. Đây là câu trả lời cho "có tổ hợp cấu hình nào lỡ nhắn cho khách thật
+không" khi hệ thống cắm vào một page Pancake THẬT.
+
 **CHỐT CHẶN CỨNG.** `canSend()` là hàm thuần nên kiểm thử được, nhưng nó tin vào nấc quyền hạn mà
 nơi gọi đưa xuống. `assertOutboundAllowed()` bịt lỗ hổng đó: nó **đọc lại nấc thật từ CSDL** ngay
 trước lời gọi mạng, và nấc do nơi gọi đưa xuống chỉ được dùng để LÀM HẸP thêm, không nới ra. Cổng
@@ -288,3 +296,10 @@ Ba mức quay lui, nhanh nhất trước:
 1. `set-setting ai.config '{"enabled":false}'` — dừng toàn bộ nhân sự AI tức thì.
 2. Xoá `PANCAKE_CHAT_WEBHOOK_SECRET` — webhook trả 401, không tin nhắn nào vào nữa.
 3. Quay lại commit trước trên nhánh — 13 bảng mới nằm lại trong CSDL và vô hại vì không code nào đọc.
+
+**Bản chạy thử tách khỏi production:** `docs/ai-staging-runbook.md` — thư mục `/opt/vnx-ai-staging`,
+compose project `vnx-ai-staging`, CSDL và volume riêng, cổng `127.0.0.1:3100`, không có bộ lập
+lịch, không có khoá Viettel Post, không nhận webhook đơn hàng. Dựng bằng `scripts/staging-up.sh`,
+và script ấy từ chối chạy nếu `scripts/staging-preflight.sh` phát hiện bất kỳ va chạm nào với
+production. **Không** dùng workflow *Deploy ERP to VPS* cho nhánh này (lý do ở
+`docs/ai-staging-plan.md` §1).

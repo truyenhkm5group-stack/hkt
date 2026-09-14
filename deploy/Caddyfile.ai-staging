@@ -1,0 +1,51 @@
+# ───────────── ROUTE CADDY CHO BẢN CHẠY THỬ NHÂN SỰ AI ─────────────
+#
+# CHƯA ÁP DỤNG. Chỉ thêm khối này SAU KHI bản chạy thử đã xanh trên localhost (xem mục 8
+# docs/ai-staging-plan.md), và chỉ khi DNS của ai-staging.vnxcommerce.com đã trỏ về VPS.
+#
+# Cách áp dụng an toàn — KIỂM TRA TRƯỚC KHI NẠP LẠI:
+#   cat /etc/caddy/Caddyfile deploy/Caddyfile.ai-staging > /tmp/Caddyfile.moi
+#   docker cp /tmp/Caddyfile.moi erp-caddy:/tmp/Caddyfile.moi
+#   docker exec erp-caddy caddy validate --config /tmp/Caddyfile.moi --adapter caddyfile   # ← bắt buộc
+#   docker exec erp-caddy sh -c 'cp /tmp/Caddyfile.moi /etc/caddy/Caddyfile'
+#   docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile
+#
+# `caddy reload` là nạp lại MỀM: tiến trình không dừng, kết nối đang mở không đứt, tên miền
+# production không gián đoạn. Nhưng nạp một tệp HỎNG thì Caddy từ chối nạp và giữ cấu hình cũ —
+# nên bước `validate` ở trên là thứ biến "chắc là ổn" thành "đã kiểm".
+#
+# Quay lui: xoá khối này khỏi /etc/caddy/Caddyfile rồi reload lại.
+
+ai-staging.vnxcommerce.com {
+	encode gzip zstd
+
+	# Bản chạy thử KHÔNG bao giờ được để công khai không khoá: nó đọc hội thoại thật của khách.
+	basic_auth {
+		# Sinh chuỗi băm:  docker run --rm caddy caddy hash-password --plaintext '<mật khẩu>'
+		staging $2a$14$THAY_BANG_CHUOI_BAM_THAT
+	}
+
+	reverse_proxy 127.0.0.1:3100 {
+		# SSE realtime (/api/events) cần giữ kết nối lâu — giống cấu hình của production
+		flush_interval -1
+		transport http {
+			read_timeout 0
+		}
+	}
+
+	header {
+		# Không để công cụ tìm kiếm đánh chỉ mục một bản chạy thử có dữ liệu khách
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		X-Environment "ai-staging"
+		X-Content-Type-Options nosniff
+	}
+
+	log {
+		# Nhật ký RIÊNG, không trộn vào nhật ký production
+		output file /var/log/caddy/ai-staging.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format console
+	}
+}

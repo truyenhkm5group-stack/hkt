@@ -48,3 +48,7 @@ tsconfig.tsbuildinfo
 
 # file tạm khi theo dõi deploy
 runid.txt
+
+# tệp môi trường của bản chạy thử nhân sự AI — chứa bí mật sinh tại chỗ trên VPS.
+# Kho mã này là PUBLIC: chỉ .env.staging.example (toàn giá trị rỗng) được commit.
+.env.staging
