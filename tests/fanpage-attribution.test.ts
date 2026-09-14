@@ -315,6 +315,11 @@ export async function testFanpageAttribution() {
   assert.equal((await quyKet(`${P}o8-huy`))?.status, "DUPLICATE", "đơn đã huỷ là bản bị thay thế");
   assert.equal((await quyKet(`${P}o8-huy`))?.duplicateOfOrderId, `${P}o8-tao-lai`);
 
+  // Và trên CSDL: KHÔNG dòng trùng đơn nào được thiếu căn cứ — kể cả đơn đã huỷ bị đơn sống giành mất.
+  const huyBiLoai = await quyKet(`${P}o8-huy`);
+  assert.ok((huyBiLoai?.duplicateScore ?? 0) >= DUPLICATE_SCORE_THRESHOLD, "đơn huỷ bị loại vẫn phải lưu ĐIỂM đạt ngưỡng");
+  assert.ok((huyBiLoai?.duplicateReason ?? "").includes("CANCELLED_SIBLING"), "và lưu đúng căn cứ đã dùng");
+
   /* ═══ 9 · FANPAGE CHƯA GÁN: nói thẳng là chưa gán, không im lặng bỏ đơn ═══ */
 
   const PAGE_C = `${P}page-c`;
@@ -327,6 +332,12 @@ export async function testFanpageAttribution() {
   assert.equal((await quyKet(`${P}o9-khong-page`))?.status, "NO_PAGE", "đơn không có page là một lỗ hổng KHÁC, có cách sửa khác");
 
   /* ═══ 10 · CỘNG MỌI NHÓM PHẢI BẰNG TỔNG — không đơn nào bị đếm hai lần hay rơi ra ngoài ═══ */
+
+  const thieuCanCu = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.orderAttributions)
+    .where(sql`${schema.orderAttributions.status} = 'DUPLICATE' and (${schema.orderAttributions.duplicateScore} is null or ${schema.orderAttributions.duplicateScore} < ${DUPLICATE_SCORE_THRESHOLD} or coalesce(${schema.orderAttributions.duplicateReason}, '') = '')`);
+  assert.equal(Number(thieuCanCu[0].n), 0, "KHÔNG dòng trùng đơn nào trong CSDL được thiếu căn cứ hoặc mang điểm dưới ngưỡng");
 
   clearMemo();
   const bao = await getMarketerAttributionReport(KY, {});
@@ -442,6 +453,31 @@ export function testDuplicateEvidencePure() {
   const hoa2 = resolveDuplicates([base("a", 0, { conversationId: "c1" }), base("z", 0, { conversationId: "c1" })]);
   assert.equal(dupOf(hoa1, "z"), "a", "bằng giây thì id nhỏ hơn thắng");
   assert.deepEqual(hoa1.map((v) => [v.orderId, v.duplicateOfOrderId]).sort(), hoa2.map((v) => [v.orderId, v.duplicateOfOrderId]).sort(), "đổi thứ tự đầu vào KHÔNG được đổi kết quả");
+
+  /* ── 7b · MỌI DÒNG TRÙNG ĐƠN PHẢI MANG CHỨNG CỨ THẬT ──
+   *
+   * SỰ CỐ THẬT (production 14/09/2026): 46/83 dòng trùng đơn mang điểm 0 và căn cứ RỖNG — tất cả
+   * đều là đơn ĐÃ HUỶ. Đơn đại diện mở cụm mà không phải chấm với ai; khi một đơn còn sống đến sau
+   * và giành lấy quy kết, chính đại diện thành đơn trùng, và nó ghi lại "điểm lúc nhận vào cụm" =
+   * 0. Kết luận vẫn đúng, nhưng hơn một nửa số dòng không nói được VÌ SAO — đúng thứ mà cột căn cứ
+   * sinh ra để chống.
+   *
+   * Bất biến: dòng nào bị loại thì điểm phải ĐẠT NGƯỠNG và căn cứ phải khác rỗng. Không có ngoại lệ.
+   */
+  const daiDienThua = resolveDuplicates([base("a", 0, { alive: false }), base("b", 1, { customerId: "c", pancakeDuplicateFlag: true })]);
+  const dongTrung = daiDienThua.find((v) => v.orderId === "a");
+  assert.equal(dongTrung?.duplicateOfOrderId, "b", "đơn đã huỷ mở cụm vẫn phải nhường quy kết cho đơn còn sống");
+  assert.ok((dongTrung?.score ?? 0) >= DUPLICATE_SCORE_THRESHOLD, `đơn đại diện bị loại vẫn phải mang điểm ĐẠT NGƯỠNG, không phải 0 (thực tế ${dongTrung?.score})`);
+  assert.ok(dongTrung?.signals.includes("CANCELLED_SIBLING"), "và căn cứ phải nói đúng lý do: một đơn đã huỷ, đơn kia còn sống");
+
+  // Bất biến ấy phải đúng trên MỌI kịch bản bài này dựng, không riêng ca vừa thử.
+  for (const ketQua of [chiGanNhau, cungHoiThoai, huyRoiTao, ba, bon, khacGio, quaCuaSo, truot, hoa1, hoa2, daiDienThua]) {
+    for (const v of ketQua) {
+      if (!v.duplicateOfOrderId) continue;
+      assert.ok((v.score ?? 0) >= DUPLICATE_SCORE_THRESHOLD, `dòng trùng ${v.orderId} mang điểm ${v.score} — dưới ngưỡng thì không được kết luận trùng`);
+      assert.ok(v.signals.length > 0, `dòng trùng ${v.orderId} không có căn cứ nào — một kết luận không giải thích được là một kết luận không kiểm lại được`);
+    }
+  }
 
   /* ── 8 · THIẾU CĂN CỨ ⇒ không bao giờ bị loại ── */
   const khongKhoa = resolveDuplicates([{ ...base("x", 0), dedupeKey: null }]);
