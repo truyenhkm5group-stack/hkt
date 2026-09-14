@@ -19,7 +19,7 @@
  *   · UNKNOWN    — không có chứng cứ nào.
  */
 import "dotenv/config";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
@@ -117,26 +117,40 @@ async function main() {
 
   const ketQua: { k: Khoa; muc: Muc; productId: string | null; code: string; evidence: string; confidence: number }[] = [];
 
+  // HỘI THOẠI BẤM NHIỀU QUẢNG CÁO KHÔNG LÀM CHỨNG CHO QUẢNG CÁO NÀO CẢ.
+  //
+  // Đo ngày 14/09/2026: hai hội thoại `ae981b3a` và `d083eb72` mỗi cái bấm BA quảng cáo khác nhau.
+  // Luật đếm đầu tiên gán ba tin "Q003" của mỗi cuộc cho cả ba quảng cáo, nên bốn mã quảng cáo
+  // cùng "được xác nhận" là Q003 — trong đó có một quảng cáo rao ĐẦM ĐỎ ĐÔ, tức là chắc chắn sai.
+  // Bốn chứng cứ ấy thật ra là HAI, và cả hai đều không nói được nhân viên đang nhắc tới quảng cáo
+  // nào trong ba. Một hội thoại chỉ làm chứng khi nó bấm ĐÚNG MỘT quảng cáo.
+  const soQCTheoHoiThoai = new Map<string, number>();
+  for (const k of khoas) for (const id of k.hoiThoaiIds) soQCTheoHoiThoai.set(id, (soQCTheoHoiThoai.get(id) ?? 0) + 1);
+
   for (const k of khoas) {
-    // ── CHỨNG CỨ XÁC ĐỊNH: nhân viên gõ mã hàng / SKU trong chính các hội thoại đến từ quảng cáo này ──
-    const tinNV = k.hoiThoaiIds.length
-      ? await db
-          .select({ text: schema.salesMessages.text })
-          .from(schema.salesMessages)
-          .where(and(inArray(schema.salesMessages.conversationId, k.hoiThoaiIds), eq(schema.salesMessages.senderType, "PAGE_HUMAN")))
-          .limit(500)
-      : [];
-    const gap = new Map<string, number>();
-    for (const t of tinNV) {
-      const kho = normalize(t.text);
-      for (const p of sp) {
-        const ma = normalize(p.code ?? "").trim();
-        if (ma && kho.includes(` ${ma} `)) gap.set(p.id, (gap.get(p.id) ?? 0) + 1);
-      }
-      for (const v of mauMa) {
-        for (const s of [v.sku, v.custom]) {
-          const ma = normalize(s ?? "").trim();
-          if (ma.length >= 4 && kho.includes(` ${ma} `)) gap.set(v.productId, (gap.get(v.productId) ?? 0) + 1);
+    const sach = k.hoiThoaiIds.filter((id) => (soQCTheoHoiThoai.get(id) ?? 0) === 1);
+    const ban = k.soHoiThoai - sach.length;
+
+    // Đếm theo SỐ HỘI THOẠI chứ không theo số tin: nhân viên nhắc một mã ba lần trong một cuộc vẫn
+    // chỉ là MỘT quan sát, còn ba cuộc khác nhau cùng nói một mã mới là một khuôn.
+    const theoMa = new Map<string, Set<string>>();
+    for (const id of sach) {
+      const tinNV = await db
+        .select({ text: schema.salesMessages.text })
+        .from(schema.salesMessages)
+        .where(and(eq(schema.salesMessages.conversationId, id), eq(schema.salesMessages.senderType, "PAGE_HUMAN")))
+        .limit(200);
+      for (const t of tinNV) {
+        const kho = normalize(t.text);
+        for (const p of sp) {
+          const ma = normalize(p.code ?? "").trim();
+          if (ma && kho.includes(` ${ma} `)) (theoMa.get(p.id) ?? theoMa.set(p.id, new Set()).get(p.id)!).add(id);
+        }
+        for (const v of mauMa) {
+          for (const x of [v.sku, v.custom]) {
+            const ma = normalize(x ?? "").trim();
+            if (ma.length >= 4 && kho.includes(` ${ma} `)) (theoMa.get(v.productId) ?? theoMa.set(v.productId, new Set()).get(v.productId)!).add(id);
+          }
         }
       }
     }
@@ -145,21 +159,30 @@ async function main() {
     let productId: string | null = null;
     let evidence = "";
     let confidence = 0;
+    const ganChu = ban ? ` (${ban}/${k.soHoiThoai} hội thoại bị loại vì bấm nhiều quảng cáo)` : "";
 
-    if (gap.size === 1) {
-      const [id, lan] = [...gap.entries()][0];
-      productId = id;
-      muc = "CONFIRMED";
-      confidence = 1;
+    if (theoMa.size === 1) {
+      const [id, cuoc] = [...theoMa.entries()][0];
       const p = sp.find((x) => x.id === id);
-      evidence = `Nhân viên gõ đúng mã "${p?.code}" ${lan} lần trong ${k.soHoiThoai} hội thoại đến từ quảng cáo này; không mã nào khác xuất hiện`;
-    } else if (gap.size > 1) {
+      productId = id;
+      // MỘT cuộc là một quan sát, không phải một khuôn — để người duyệt.
+      if (cuoc.size >= 2) {
+        muc = "CONFIRMED";
+        confidence = 1;
+        evidence = `Nhân viên gõ mã "${p?.code}" trong ${cuoc.size} hội thoại KHÁC NHAU chỉ bấm đúng quảng cáo này; không mã nào khác${ganChu}`;
+      } else {
+        muc = "PROPOSED";
+        confidence = 0.5;
+        evidence = `Chỉ MỘT hội thoại làm chứng (nhân viên gõ "${p?.code}") — đủ để đề xuất, chưa đủ để gán cho cả chiến dịch${ganChu}`;
+      }
+    } else if (theoMa.size > 1) {
       muc = "AMBIGUOUS";
-      const ten = [...gap.entries()].map(([id, n]) => `${sp.find((x) => x.id === id)?.code}×${n}`).join(" · ");
-      evidence = `Nhiều mã cùng xuất hiện trong tin nhân viên: ${ten} — máy KHÔNG chọn hộ`;
+      const ten = [...theoMa.entries()].map(([id, c]) => `${sp.find((x) => x.id === id)?.code}: ${c.size} cuộc`).join(" · ");
+      evidence = `Nhiều mã cùng xuất hiện ở các hội thoại sạch: ${ten} — máy KHÔNG chọn hộ${ganChu}`;
+    } else if (ban === k.soHoiThoai && k.soHoiThoai > 0) {
+      evidence = `Mọi hội thoại của quảng cáo này đều bấm thêm quảng cáo khác — không cuộc nào làm chứng được cho riêng nó`;
     } else if (k.cau) {
-      muc = "PROPOSED";
-      evidence = `Chỉ có câu quảng cáo, không mã nào xuất hiện. Câu: "${k.cau.slice(0, 80)}"`;
+      evidence = `Không nhân viên nào gõ mã hàng trong các hội thoại sạch. Câu quảng cáo: "${k.cau.slice(0, 70)}"${ganChu}`;
     } else {
       evidence = "Không có câu quảng cáo, không có mã nào trong tin nhân viên";
     }
