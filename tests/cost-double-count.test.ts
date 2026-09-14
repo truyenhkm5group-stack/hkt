@@ -184,6 +184,33 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(bangLuongToanBo.lines.find((l) => l.employee.id === "dc-emp-1")?.fixed, null, "6. lương cứng kỳ Toàn bộ là CHƯA BIẾT (null), không phải 0");
   assert.equal(bangLuongToanBo.totalSalary, null, "6. một phần chưa biết thì tổng lương cũng chưa biết");
 
+  /* ══ TEST 7 — CƠ SỞ DÒNG TIỀN: KHÔNG QUY ĐỔI ĐƯỢC THÌ NÓI CHƯA BIẾT, KHÔNG NÓI 0 ══
+   *
+   * Cơ sở "dòng tiền thực" quy đổi LN cá nhân bằng `LN dòng tiền ÷ LN1 toàn shop`. Mẫu số ≤ 0 —
+   * mọi kỳ lỗ, và mọi kỳ ngắn chưa kịp có đơn giao thành công — thì không có hệ số nào cả. Bản cũ
+   * trả 0, nên bảng lương hiện LN cá nhân đúng "0 ₫" cho TẤT CẢ marketer: đọc thành "người này
+   * không tạo ra đồng lợi nhuận nào", trong khi sự thật là phép tính không chạy được.
+   *
+   * Tháng 4/2027 không có đơn nào ⇒ LN1 toàn shop ≤ 0 ⇒ đúng ca ấy.
+   */
+  clearMemo();
+  const dongTien = await getPayrollReport(THANG30, "cash");
+  assert.ok(dongTien.marketers.totals.profit <= 0, "7. ca thử phải thật sự có mẫu số ≤ 0");
+  assert.equal(dongTien.cashRatio, null, "7. mẫu số ≤ 0 ⇒ hệ số quy đổi là CHƯA TÍNH ĐƯỢC, không phải 0");
+  assert.ok(dongTien.cashRatioReason && dongTien.cashRatioReason.length > 0, "7. và phải nói được VÌ SAO, để màn hình in ra thay vì im lặng");
+  for (const l of dongTien.lines) {
+    if (!dongTien.marketers.marketers.some((m) => m.marketerId === l.employee.id)) continue;
+    assert.equal(l.personalProfit, null, "7. LN cá nhân của marketer là CHƯA BIẾT, không phải 0");
+    assert.equal(l.bonusPersonal, null, "7. không biết LN cá nhân thì cũng không biết thưởng theo LN cá nhân");
+    assert.equal(l.salary, null, "7. một phần chưa biết thì tổng lương cũng chưa biết");
+  }
+
+  // Cơ sở LN1 KHÔNG bị ảnh hưởng: nó không đi qua phép quy đổi nào.
+  clearMemo();
+  const ln1 = await getPayrollReport(THANG30, "profit1");
+  assert.equal(ln1.cashRatio, 1, "7. cơ sở không phải dòng tiền thì hệ số luôn = 1, không bao giờ null");
+  assert.equal(ln1.cashRatioReason, null, "7. và không có lý do nào phải nêu");
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -203,6 +230,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫",
   );
 }

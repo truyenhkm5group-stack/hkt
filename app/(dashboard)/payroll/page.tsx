@@ -114,13 +114,20 @@ export default async function PayrollPage({
         ]}
         resultLabel={
           basis === "cash"
-            ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}).`
+            ? report.cashRatio === null
+              ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ. ${report.cashRatioReason ?? ""}`
+              : `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}) — đây là phép QUY ĐỔI THEO TỶ TRỌNG, không phải lợi nhuận đo được của từng người.`
             : basis === "nominal"
               ? "Danh nghĩa: đơn lên trong kỳ × tỷ lệ giao thành công ước tính (GTC = COD thực > 100K) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
               : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
         }
       />
 
+      {report.cashRatioReason ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <b>Lợi nhuận cá nhân của kỳ này chưa tính được ở cơ sở dòng tiền.</b> {report.cashRatioReason}
+        </div>
+      ) : null}
       {!viewAll ? (
         <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
           Bạn đang xem <b>lương & lợi nhuận của riêng mình</b>{lines.length ? ` (${lines.map((l) => l.employee.shortName || l.employee.name).join(", ")})` : ""}. {lines.length ? "" : "Chưa khớp được nhân sự nào với tài khoản của bạn — nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự."}
@@ -292,12 +299,13 @@ export default async function PayrollPage({
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Money
-                        value={l.bonusPersonal}
-                        className={
-                          l.bonusPersonal ? "" : "text-muted-foreground"
-                        }
-                      />
+                      {l.bonusPersonal === null ? (
+                        <span className="text-xs text-muted-foreground" title={report.cashRatioReason ?? undefined}>
+                          —
+                        </span>
+                      ) : (
+                        <Money value={l.bonusPersonal} className={l.bonusPersonal ? "" : "text-muted-foreground"} />
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Money
@@ -336,12 +344,11 @@ export default async function PayrollPage({
                     />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Money
-                      value={lines.reduce(
-                        (s, l) => s + l.bonusPersonal,
-                        0,
-                      )}
-                    />
+                    {lines.some((l) => l.bonusPersonal === null) ? (
+                      <span className="text-xs font-normal text-muted-foreground">—</span>
+                    ) : (
+                      <Money value={lines.reduce((s, l) => s + (l.bonusPersonal ?? 0), 0)} />
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <Money

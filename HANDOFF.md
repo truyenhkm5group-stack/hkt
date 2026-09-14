@@ -8,8 +8,9 @@ Cập nhật: 06/09/2026 · Repo: `truyenhkm5group-stack/hkt` (GitHub, **PUBLIC*
 
 ## 0. BẢN MỚI NHẤT — HỆ ĐIỀU HÀNH CÔNG VIỆC (12/09/2026)
 
-> Phần còn lại của tệp này viết ngày 06/09/2026 và **đã cũ ở vài chỗ** (mục 5 nói migration mới
-> nhất là 0020; thực tế là **0069**). Đọc `docs/` cho trạng thái hiện tại.
+> Phần còn lại của tệp này viết ngày 06/09/2026 và **đã cũ ở vài chỗ**. Đọc `docs/` cho trạng thái
+> hiện tại, và đọc `drizzle/meta/_journal.json` cho số migration — đừng đọc số ấy trong bất kỳ tệp
+> tài liệu nào, kể cả tệp này.
 
 Bản 12/09 thêm tầng công việc và tầng mục tiêu. Đọc theo thứ tự này:
 
@@ -78,7 +79,7 @@ components/data-table/               data-table.tsx (bảng dùng chung, gom nh�
 components/                          app-sidebar.tsx (menu theo nhóm Vận hành / Kho / Tài chính / Hệ thống) · status-badge.tsx · ...
 db/schema.ts                         toàn bộ schema Drizzle + relations + types
 db/index.ts                          getDb() (Postgres hoặc PGlite), auto-migrate khi khởi động
-drizzle/                             migration SQL 0000 → 0020 + meta/
+drizzle/                             migration SQL (0000 → số mới nhất trong meta/_journal.json) + meta/
 lib/queries/                         truy vấn chỉ-server: return-rate.ts (ORDER_OUTCOME — TRÁI TIM của mọi báo cáo), profit-nominal.ts,
                                      profit-cash.ts, ads-performance.ts, dashboard.ts, payroll.ts, products.ts, stock.ts, planning.ts,
                                      shipments.ts, cod.ts, orders.ts, landing.ts, order-hints.ts, ...
@@ -111,7 +112,10 @@ Cột then chốt cho báo cáo:
 - `shipments`: `order_id` (NULL với vận đơn ngoài Pancake / vận đơn chiều về), `vtp_order_number` (UNIQUE — dùng để upsert), `tracking_code`, `order_reference` (mã đơn đối tác; với vận đơn chiều về = mã vận đơn gốc), `stage`, `vtp_status_name`, `vtp_status_date`, `cod_amount` (tiền thu hộ khai), `cod_collected` (**tiền THỰC THU** — từ webhook 501 / bảng kê / danh sách vận đơn), `shipping_fee`, `cod_status`, `cod_paid_to_bank_at`, `delivered_at`, `returned_at`, `is_final`, `last_vtp_sync_at`.
 - Tồn kho ERP = `stock_receipt_items` (nhập/điều chỉnh) − giao thật − đang giao (xem `lib/queries/stock.ts::erpStockExpr`).
 
-Migration gần nhất: `0014_perf_indexes`, `0015_production_orders`, `0016_notifications_occurred_at`, `0017_fb_ads`, `0018_role_leader`, `0019_landing_orders`, `0020_landing_ad_id`. **Session này KHÔNG thêm migration** (mọi thay đổi là logic truy vấn / UI). Migration tự chạy khi app khởi động (`db/index.ts`, tắt bằng `SKIP_AUTO_MIGRATE`).
+Migration gần nhất: **đọc `drizzle/meta/_journal.json`**, đừng tin con số chép trong tài liệu — mục này từng
+đứng ở `0020` suốt nhiều tuần trong khi kho mã đã đi tới `0069`. Tính tới 14/09/2026 kho mã đang ở `0087`.
+Migration tự chạy khi app khởi động (`db/index.ts`, tắt bằng `SKIP_AUTO_MIGRATE`); muốn biết máy chủ THẬT
+SỰ đã áp tới đâu thì hỏi `drizzle.__drizzle_migrations` bằng ops `db-query`, vì chỉ bảng ấy mới trả lời được.
 
 ## 6. Business rules quan trọng (KHÔNG được phá)
 

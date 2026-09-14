@@ -492,9 +492,10 @@ export type PayrollLine = {
    */
   fixed: number | null;
   bonusTotal: number;
-  bonusPersonal: number;
+  /** `null` = CHƯA BIẾT (không quy đổi được LN cá nhân sang cơ sở dòng tiền), khác hẳn 0. */
+  bonusPersonal: number | null;
   bonusRevenue: number;
-  /** `null` khi `fixed` chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
+  /** `null` khi một phần bất kỳ chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
   salary: number | null;
 };
 
@@ -503,8 +504,17 @@ export type PayrollReport = {
   totalProfit: number;
   /** LN danh nghĩa tổng (để đối chiếu) */
   nominalTotal: number;
-  /** Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi cơ sở danh nghĩa) */
-  cashRatio: number;
+  /**
+   * Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi KHÔNG phải cơ sở dòng tiền).
+   *
+   * `null` = CHƯA TÍNH ĐƯỢC: cơ sở dòng tiền quy đổi bằng `LN dòng tiền ÷ LN1 toàn shop`, mà LN1
+   * toàn shop ≤ 0 thì phép chia ấy không có nghĩa (mẫu số 0 ⇒ vô định; mẫu số âm ⇒ hệ số âm, đem
+   * nhân vào là LẬT DẤU lợi nhuận của từng người). Khi ấy LN cá nhân và thưởng theo LN cá nhân là
+   * CHƯA BIẾT, không phải 0.
+   */
+  cashRatio: number | null;
+  /** Vì sao `cashRatio` là `null` — hiện thẳng ra màn hình, không nuốt. */
+  cashRatioReason: string | null;
   lines: PayrollLine[];
   /** `null` khi lương cứng của kỳ chưa biết — xem `PayrollLine.fixed`. */
   totalSalary: number | null;
@@ -529,8 +539,22 @@ export async function getPayrollReport(
   const nominalTotal = marketers.nominal.totals.expectedProfit;
   const modelTotal = marketers.totals.profit;
   const totalProfit = basis === "cash" && cash ? cash.net : basis === "nominal" ? nominalTotal : modelTotal;
-  // Cơ sở dòng tiền: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng) — tiền COD về theo bảng kê không tách được theo mã / người
-  const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : 0) : 1;
+  /*
+    CƠ SỞ DÒNG TIỀN: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng). Tiền COD về theo
+    bảng kê không tách được theo mã / theo người, nên đây là phép QUY ĐỔI THEO TỶ TRỌNG — một ước
+    tính, không phải lợi nhuận đo được của từng người.
+
+    MẪU SỐ ≤ 0 THÌ KHÔNG CÓ HỆ SỐ NÀO CẢ. Bản cũ trả 0 trong ca đó, nên mọi marketer hiện LN cá
+    nhân đúng bằng "0 ₫" — đọc thành "người này không tạo ra đồng lợi nhuận nào", trong khi sự thật
+    là PHÉP TÍNH KHÔNG CHẠY ĐƯỢC. Và ca ấy không hiếm: LN1 toàn shop ≤ 0 xảy ra ở mọi kỳ lỗ và ở
+    những kỳ ngắn chưa kịp có đơn giao thành công. AGENTS.md mục 42 · mục 8.5: CHƯA BIẾT không được
+    in ra thành 0.
+  */
+  const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : null) : 1;
+  const cashRatioReason =
+    cashRatio === null
+      ? `Không quy đổi được sang dòng tiền: LN1 toàn shop của kỳ là ${Math.round(modelTotal).toLocaleString("vi-VN")} ₫ (≤ 0) nên tỷ lệ “LN dòng tiền ÷ LN1 tổng” không có nghĩa. LN cá nhân và thưởng theo LN cá nhân là CHƯA BIẾT ở cơ sở này — xem cơ sở LN1 để có số đo được.`
+      : null;
   // Kỳ "Toàn bộ" không có mốc đầu/cuối ⇒ không chia lương tháng theo ngày được ⇒ CHƯA BIẾT.
   const fixedBounded = Boolean(period.from && period.to);
   // Đếm ngày THEO LỊCH VIỆT NAM bằng đúng hàm mà `prorateMonthlyAmount` dùng: chia phút giây cho
@@ -540,14 +564,21 @@ export async function getPayrollReport(
     .filter((e) => e.active)
     .map((e) => {
       const m = marketers.marketers.find((x) => x.marketerId === e.id);
-      const personalProfit = m ? Math.round(m.personalProfit * cashRatio) : null;
+      /*
+        BA TRẠNG THÁI, KHÔNG PHẢI HAI:
+          · không phải marketer (`m` rỗng)  ⇒ `null` — không có phần quy kết nào, thưởng = 0 đúng;
+          · là marketer nhưng hệ số chưa có ⇒ `null` — CHƯA TÍNH ĐƯỢC, thưởng cũng chưa biết;
+          · còn lại                         ⇒ con số.
+      */
+      const personalProfit = m && cashRatio !== null ? Math.round(m.personalProfit * cashRatio) : null;
       const personalRevenue = m ? m.attributedRevenue : null;
       const bonusTotal = Math.round(
         Math.max(totalProfit, 0) * (e.percentTotal / 100),
       );
-      const bonusPersonal = Math.round(
-        Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100),
-      );
+      const bonusPersonal =
+        m && cashRatio === null
+          ? null
+          : Math.round(Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100));
       const bonusRevenue = Math.round(
         Math.max(personalRevenue ?? 0, 0) * (e.percentRevenue / 100),
       );
@@ -576,7 +607,7 @@ export async function getPayrollReport(
         bonusTotal,
         bonusPersonal,
         bonusRevenue,
-        salary: fixed === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
+        salary: fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
       };
     });
   return {
@@ -584,8 +615,9 @@ export async function getPayrollReport(
     totalProfit,
     nominalTotal,
     cashRatio,
+    cashRatioReason,
     lines,
-    totalSalary: fixedBounded ? lines.reduce((s, l) => s + (l.salary ?? 0), 0) : null,
+    totalSalary: fixedBounded && lines.every((l) => l.salary !== null) ? lines.reduce((s, l) => s + (l.salary ?? 0), 0) : null,
     fixedBasis: {
       bounded: fixedBounded,
       days: fixedDays,

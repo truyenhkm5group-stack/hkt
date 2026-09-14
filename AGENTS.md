@@ -249,7 +249,14 @@ deploy dừng, không phải cảnh báo.
     `products.note` là ô ĐỒNG BỘ TỪ PANCAKE — không ghi đè lên nó.
 
 ## 4. Database
-- Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.
+- Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
+  **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
+  `drizzle.__drizzle_migrations` trên máy chủ mới là lời khai cuối cùng về việc gì đã chạy. Số migration
+  mới nhất đọc ở `drizzle/meta/_journal.json`, KHÔNG chép vào tài liệu (chép là để nó cũ đi sau một tuần);
+  tính tới 14/09/2026 kho mã đang ở `0087`. Migration tự áp dụng khi app khởi động.
+  Nhiều nhánh cùng sinh migration thì **trùng số hiệu** — nhánh về sau phải đánh số lại migration CỦA
+  MÌNH (chưa áp ở đâu) cho nối tiếp vào cuối sổ, không đụng tới của nhánh đã vào `main`.
+  `tests/migration-journal.test.ts` và `tests/migration-upgrade-path.test.ts` chặn ở mức mã nguồn.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
 - Không xoá dữ liệu Pancake đã đồng bộ (kể cả đơn `DELETED`); dùng cờ/trạng thái.
 - Truy vấn production **chỉ đọc** qua ops `db-query` (một câu lệnh mỗi lần; CTE không tồn tại sang câu sau; enum phải cast `::text`; bảng `notifications` dùng `resolved_at` chứ không có `status`). Thay đổi dữ liệu production chỉ qua job/action của ứng dụng hoặc `set-setting`.
