@@ -881,7 +881,16 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
       const adShares = new Map<string | null, number>();
       if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
       const buckets = byPage.get(r.productId) ?? [];
-      for (const b of buckets) if (b.pageId) { pagesSeen.add(b.pageId); if (config.pageMarketers[b.pageId]) pagesMappedSet.add(b.pageId); }
+      /*
+        "Page đã gán" = có NGƯỜI NÀO nhận đơn của page ấy, bằng BẤT KỲ nguồn fanpage nào — ảnh chụp
+        theo mốc đơn lên hay bảng gán phẳng. Đếm riêng bảng phẳng làm con số này báo thiếu đúng vào
+        lúc nguồn có thẩm quyền đang phủ tốt nhất, và chủ shop đi gán lại những page đã gán rồi.
+      */
+      for (const b of buckets) {
+        if (!b.pageId) continue;
+        pagesSeen.add(b.pageId);
+        if (b.snapshotMarketerId || config.pageMarketers[b.pageId]) pagesMappedSet.add(b.pageId);
+      }
       const attribution = attributionShares({ byPage: buckets, pageMarketers: config.pageMarketers, adShares, ownerId });
       const shares = attribution.shares;
       if (!shares.size) {

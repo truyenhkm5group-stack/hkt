@@ -49,8 +49,14 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
         <span>
           Fanpage <b>{pagesMapped}/{pages.length}</b> đã gán marketer · mã hàng <b>{assigned}/{products.length}</b> đã có chủ mã
         </span>
-        <span className="text-muted-foreground">Đơn & doanh thu ghi nhận theo thứ tự: ad_id của đơn (quảng cáo tạo ra đơn → chiến dịch → marketer, đúng từng đơn kể cả chạy chung page) → fanpage phát sinh đơn → tỷ trọng QC. Chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã.</span>
-        {pages.length - pagesMapped > 0 ? <span className="text-amber-700">{pages.length - pagesMapped} fanpage chưa gán → đơn trên page đó đang chia theo QC</span> : null}
+        <span className="text-muted-foreground">
+          Đơn &amp; doanh thu ghi nhận theo thứ tự: ẢNH CHỤP người phụ trách fanpage tại mốc đơn lên (Marketing → Fanpage &amp; quy kết — nguồn có thẩm quyền, đổi người hôm nay không làm đổi số kỳ đã qua) → bảng gán phẳng dưới đây → ad_id của đơn → tỷ trọng tiền quảng cáo → chủ mã. Quảng cáo KHÔNG ghi đè người được tính đơn theo fanpage. Chủ mã hưởng X% LN đơn của mình, người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã.
+        </span>
+        {pages.length - pagesMapped > 0 ? (
+          <span className="text-amber-700">
+            {pages.length - pagesMapped} fanpage chưa khai ở bảng này. Đơn trên page đó vẫn được quy kết nếu Marketing → Fanpage &amp; quy kết đã khai mốc hiệu lực (nguồn có thẩm quyền); chưa khai ở cả hai nơi thì mới chia theo tỷ trọng tiền quảng cáo.
+          </span>
+        ) : null}
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
             <Settings2 className="size-4" /> {open ? "Đóng" : "Khai báo"}
@@ -61,7 +67,9 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
         <div className="mt-4 space-y-5 border-t pt-4">
           <section className="space-y-2">
             <div className="font-semibold">1. Fanpage → marketer (đơn trong 90 ngày)</div>
-            <p className="text-xs text-muted-foreground">Mỗi fanpage một marketer: đơn lên từ page mà không nhận diện được qua ad_id sẽ ghi nhận cho người này. Gán theo người chạy quảng cáo & ra đơn nhiều nhất trên page.</p>
+            <p className="text-xs text-muted-foreground">
+              Bảng này LẤP CHỖ cho đơn chưa có ảnh chụp. Nơi khai đúng là Marketing → Fanpage &amp; quy kết, vì ở đó mỗi lần gán có KHOẢNG HIỆU LỰC nên đổi người phụ trách không viết lại doanh thu của kỳ trước; bảng phẳng này không có mốc thời gian.
+            </p>
             {pages.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có đơn nào kèm page_id.</p> : null}
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {pages.map((p) => (
