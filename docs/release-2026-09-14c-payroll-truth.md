@@ -535,6 +535,21 @@ khỏi `WHERE`, chuyển thành `filter (where is_bonus = false)` trên riêng c
 bổ cước, để giá vốn đếm đủ cả hàng tặng — làm đồng loạt ở cả mười tệp, trong một bản riêng, kèm bảng
 đối chiếu trước/sau. Mức ảnh hưởng đo bằng ops `db-query` trước khi sửa (xem mục 6).
 
+### 5.2b Trả lương tháng trước vào tháng sau — cơ chế đã có, nhưng phải KHAI mới chạy
+
+`AGENTS.md` mục 17: *"Tiền ra ngày trả khác chi phí của kỳ trả."* Một khoản chi "Lương tháng 8" ghi
+ngày 05/09 mà để `allocation_method = EVENT_DATE` sẽ rơi trọn vào **chi phí tháng 9** — tức tháng 8
+thiếu một tháng lương và tháng 9 gánh hai.
+
+Cơ chế chống điều đó **đã có sẵn**: khai `allocation_method = 'PERIOD_PRORATA'` kèm
+`period_start` / `period_end` thì khoản ấy chia theo số ngày chồng lấn, và `needsAllocationReview`
+đánh dấu những khoản theo kỳ mà chưa khai kỳ (ràng buộc `expenses_period_check` chặn ở CSDL).
+
+Hôm nay production có **0 khoản chi nhóm "Lương"** nên chưa có gì sai. Nhưng ngày shop bắt đầu ghi
+lương vào bảng Chi phí, **mỗi khoản phải khai kỳ hiệu lực của nó**, không phải chỉ ngày trả. Thẻ
+"Đã trả trong kỳ" mới thêm cố ý đọc theo NGÀY TRẢ THÔ, đứng riêng với chi phí của kỳ — hai chiều,
+hai con số, để chênh lệch giữa chúng lộ ra thay vì bị gộp mất.
+
 ### 5.3 Cơ sở "Dòng tiền thực" vẫn là phép QUY ĐỔI THEO TỶ TRỌNG
 
 Tiền COD về theo bảng kê không tách được theo mã hay theo người, nên LN cá nhân ở cơ sở này là ước
