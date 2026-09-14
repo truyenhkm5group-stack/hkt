@@ -17,14 +17,32 @@ import { callTool } from "@/lib/ai/tools/gateway";
 import { parseRouting, runModelStep } from "@/lib/ai/model-router";
 import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
 import { z } from "zod";
-import { getAiSettings } from "@/lib/ai/config";
+import { SAFEST_HARD_LIMITS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai/config";
 import { setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai/providers/stub";
 import { aiSummary, getAiRunDetail, listAiRuns, salesStageBreakdown } from "@/lib/queries/ai";
 import { getConversationTurns, listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
 
-const OFF_SETTINGS = { enabled: true, modelCallsEnabled: false, ingestEnabled: true, maxRunsPerHour: 600, dailyCostCapVnd: 0, testConversationIds: [], modes: {}, pricing: {}, pricingVersion: "" };
+/**
+ * Cấu hình nền cho các phép thử HÀM THUẦN về nấc quyền hạn.
+ *
+ * `hardLimits` ở đây MỞ có chủ ý: khối này dùng để kiểm chứng logic nấc quyền hạn / phiếu duyệt /
+ * danh sách trắng, nên hai công tắc chặn cứng phải để mở thì mới thấy được logic bên dưới. Bản
+ * thân chặn cứng được thử riêng ở khối 5B, với đúng giá trị an toàn nhất.
+ */
+const OFF_SETTINGS: AiSettings = {
+  enabled: true,
+  modelCallsEnabled: false,
+  ingestEnabled: true,
+  maxRunsPerHour: 600,
+  dailyCostCapVnd: 0,
+  testConversationIds: [],
+  modes: {},
+  pricing: {},
+  hardLimits: { allowCustomerSend: true, allowOrderCreate: true },
+  pricingVersion: "",
+};
 
 function stateWith(patch: Partial<SalesState>): SalesState {
   return { ...EMPTY_SALES_STATE, ...patch };
@@ -218,6 +236,69 @@ export async function testSalesAgent(db: Db) {
   assert.equal(roundtrip.allowed === true && roundtrip.kind, "ROUNDTRIP_TEST");
   // Danh sách trắng KHÔNG mở cửa cho câu do AI soạn.
   assert.equal(canSend({ ...base, mode: "SHADOW", text: "Dạ mẫu này 499k ạ" }, whitelisted).allowed, false, "danh sách trắng chỉ cho tin kiểm thử, không cho câu AI");
+
+  // ═════════ 5B. CHẶN CỨNG CẤP MÔI TRƯỜNG — CÂU TRẢ LỜI CHO "CÓ TỔ HỢP NÀO LỠ NHẮN KHÁCH KHÔNG" ═════════
+  //
+  // Bản chạy thử cắm vào một page Pancake THẬT, nên câu hỏi không còn là "nấc SHADOW có gửi
+  // không" mà là "có TỔ HỢP CẤU HÌNH NÀO gửi được không". Hai công tắc `AI_ALLOW_CUSTOMER_SEND`
+  // và `AI_ALLOW_ORDER_CREATE` trả lời bằng cách đứng TRƯỚC mọi chốt khác và chỉ biết nói KHÔNG.
+  //
+  // Khối này quét đủ tổ hợp nấc × phiếu duyệt × danh sách trắng × nội dung — kể cả những tổ hợp
+  // mà khối 5 vừa chứng minh là ĐƯỢC GỬI — để chứng minh chặn cứng đè lên tất cả.
+  const locked: AiSettings = { ...OFF_SETTINGS, testConversationIds: ["conv-1"], hardLimits: SAFEST_HARD_LIMITS };
+  let lockedChecks = 0;
+  for (const mode of ["OFF", "SHADOW", "COPILOT", "AUTO"] as const) {
+    for (const approved of [false, true]) {
+      for (const text of ["Dạ mẫu này 499k ạ", ROUNDTRIP_TEST_MESSAGE]) {
+        const decision = canSend({ conversationExternalId: "conv-1", humanTakeover: false, mode, approved, text }, locked);
+        lockedChecks += 1;
+        assert.equal(decision.allowed, false, `chặn cứng phải thắng: nấc ${mode}, duyệt=${approved}, nội dung=${text.slice(0, 12)}`);
+        assert.match(decision.reason, /AI_ALLOW_CUSTOMER_SEND/, "lý do phải chỉ đúng công tắc đang chặn, để người vận hành biết sửa ở đâu");
+      }
+    }
+  }
+  assert.equal(lockedChecks, 16, "phải quét đủ 4 nấc × 2 phiếu duyệt × 2 loại nội dung");
+
+  // Chặn cứng là chốt ĐẦU TIÊN: một tổ hợp mà khối 5 đã chứng minh là gửi được (AUTO + đã duyệt)
+  // vẫn bị chặn, và bị chặn vì công tắc chứ không phải vì nấc.
+  assert.equal(canSend({ ...base, mode: "AUTO", approved: true }, OFF_SETTINGS).allowed, true, "mở công tắc thì logic nấc chạy như cũ");
+  assert.equal(canSend({ ...base, mode: "AUTO", approved: true }, locked).allowed, false, "khoá công tắc thì chính tổ hợp đó bị chặn");
+
+  // ── Công tắc đọc TỪ MÔI TRƯỜNG, và bảng `settings` KHÔNG ghi đè được ──
+  //
+  // Đây là lằn ranh quan trọng nhất của cả cơ chế: mọi cờ khác trong `ai.config` đều sửa được
+  // bằng một câu SQL hoặc một màn hình quản trị. Hai công tắc này thì không — muốn mở phải sửa
+  // biến môi trường rồi DỰNG LẠI container. Nếu dòng dưới đây đỏ, nghĩa là ai đó vừa mở một
+  // đường ghi từ CSDL vào chặn cứng.
+  const savedSend = process.env.AI_ALLOW_CUSTOMER_SEND;
+  const savedOrder = process.env.AI_ALLOW_ORDER_CREATE;
+  try {
+    delete process.env.AI_ALLOW_CUSTOMER_SEND;
+    delete process.env.AI_ALLOW_ORDER_CREATE;
+    await setSettingJson(AI_CONFIG_KEY, { hardLimits: { allowCustomerSend: true, allowOrderCreate: true } });
+    const fromDb = await getAiSettings();
+    assert.deepEqual(fromDb.hardLimits, SAFEST_HARD_LIMITS, "ghi hardLimits vào bảng settings KHÔNG được mở công tắc");
+
+    // Chỉ đúng một chuỗi mở được. Một công tắc mà gõ kiểu gì cũng bật được là một công tắc sẽ bị
+    // bật nhầm — nên `1`, `yes`, `on` đều là CẤM.
+    for (const raw of ["1", "yes", "on", "TRUE ", "false", ""]) {
+      process.env.AI_ALLOW_CUSTOMER_SEND = raw;
+      assert.equal(aiEnv.hardLimits.allowCustomerSend, raw.trim().toLowerCase() === "true", `giá trị ${JSON.stringify(raw)}: chỉ chuỗi "true" mới mở`);
+    }
+    process.env.AI_ALLOW_CUSTOMER_SEND = "true";
+    assert.equal(aiEnv.hardLimits.allowCustomerSend, true, 'đúng chuỗi "true" thì mở');
+    assert.equal((await getAiSettings()).hardLimits.allowOrderCreate, false, "hai công tắc độc lập: mở cái gửi tin không mở cái tạo đơn");
+  } finally {
+    if (savedSend === undefined) delete process.env.AI_ALLOW_CUSTOMER_SEND;
+    else process.env.AI_ALLOW_CUSTOMER_SEND = savedSend;
+    if (savedOrder === undefined) delete process.env.AI_ALLOW_ORDER_CREATE;
+    else process.env.AI_ALLOW_ORDER_CREATE = savedOrder;
+    await setSettingJson(AI_CONFIG_KEY, {});
+  }
+
+  // Không khai gì trong môi trường ⇒ giá trị an toàn nhất. Mặc định của bản chạy thử là CẤM,
+  // không phải "cho tới khi có người nghĩ ra là phải cấm".
+  assert.deepEqual(aiEnv.hardLimits, SAFEST_HARD_LIMITS, "không khai biến môi trường thì cả hai công tắc đều CẤM");
 
   // ═════════ 6. WEBHOOK: CHUẨN HOÁ, CHỐNG TRÙNG, CHỐNG VÒNG LẶP ═════════
 
@@ -637,35 +718,69 @@ export async function testSalesAgent(db: Db) {
   // `canSend()` tin vào nấc mà nơi gọi đưa xuống. Chốt cứng đọc lại nấc THẬT từ CSDL, nên dù một
   // lỗi lập trình hay một câu trả lời dị thường của mô hình có đặt `mode: "AUTO"`, tin vẫn không
   // đi được. Muốn gửi tin cho khách phải đổi DỮ LIỆU, không đổi được bằng một chuỗi.
-  const forged = await assertOutboundAllowed({
-    mode: "AUTO",
+  const forgedRequest = {
+    mode: "AUTO" as const,
     approved: true,
     conversationExternalId: "conv-gia-mao",
     text: "Dạ em chốt đơn cho chị luôn nhé",
     humanTakeover: false,
-  });
-  assert.equal(forged.allowed, false, "khai nấc AUTO từ nơi gọi KHÔNG mở được cổng khi CSDL vẫn ở nấc SHADOW");
-  assert.match(forged.reason, /SHADOW|chạy ngầm|GỢI Ý/i, "lý do phải nói rõ đang bị chặn vì nấc chạy ngầm");
+  };
+
+  // Chốt 1 — chặn cứng cấp môi trường, đứng trước cả phép đọc CSDL.
+  const lockedOutbound = await assertOutboundAllowed(forgedRequest);
+  assert.equal(lockedOutbound.allowed, false);
+  assert.match(lockedOutbound.reason, /AI_ALLOW_CUSTOMER_SEND/, "công tắc môi trường chặn trước, và nói rõ mình là ai");
+
+  // Chốt 2 — mở công tắc ra để lộ chốt nấc quyền hạn đọc lại từ CSDL.
+  const savedSendEnv = process.env.AI_ALLOW_CUSTOMER_SEND;
+  try {
+    process.env.AI_ALLOW_CUSTOMER_SEND = "true";
+    const forged = await assertOutboundAllowed(forgedRequest);
+    assert.equal(forged.allowed, false, "khai nấc AUTO từ nơi gọi KHÔNG mở được cổng khi CSDL vẫn ở nấc SHADOW");
+    assert.match(forged.reason, /SHADOW|chạy ngầm|GỢI Ý/i, "lý do phải nói rõ đang bị chặn vì nấc chạy ngầm");
+  } finally {
+    if (savedSendEnv === undefined) delete process.env.AI_ALLOW_CUSTOMER_SEND;
+    else process.env.AI_ALLOW_CUSTOMER_SEND = savedSendEnv;
+  }
+  assert.equal((await assertOutboundAllowed(forgedRequest)).allowed, false, "đóng công tắc lại thì chốt 1 hoạt động trở lại");
 
   // Hàm thuần vẫn cho phép AUTO — chứng minh khác biệt nằm ĐÚNG ở chỗ đọc lại CSDL.
   assert.equal(canSend({ mode: "AUTO", approved: true, conversationExternalId: "conv-gia-mao", text: "x", humanTakeover: false }, OFF_SETTINGS).allowed, true);
 
-  // Công cụ GHI cũng có chốt cứng riêng: cổng đọc lại nấc từ CSDL trước khi cho chạy.
-  const forgedTool = await callTool(
-    { agentKey: "sales", mode: "AUTO", allowedTools: sales.definition.allowedTools, run: null, conversationId },
-    "order.create_draft",
-    {
-      variantId: "v-ai-e2e-l",
-      quantity: 1,
-      name: "Khách",
-      phone: "0912345678",
-      address: "Số 5 ngõ 12 Nguyễn Trãi, Thanh Xuân, Hà Nội",
-      confirmationEvidence: { reviewSentAt: "x", customerRepliedAt: "y", quote: "ok" },
-    },
-  );
-  assert.equal(forgedTool.ok, false, "khai nấc AUTO không chạy được công cụ tạo đơn");
-  assert.equal(forgedTool.outcome, "DENIED");
-  assert.match(forgedTool.error, /CSDL/, "lý do phải nói rõ nấc thật lấy từ CSDL");
+  // Công cụ GHI có HAI chốt độc lập, và khối này thử từng chốt một — hai chốt cùng chặn thì
+  // không biết chốt nào đang làm việc, mà một chốt hỏng âm thầm là một chốt không còn tồn tại.
+  const draftArgs = {
+    variantId: "v-ai-e2e-l",
+    quantity: 1,
+    name: "Khách",
+    phone: "0912345678",
+    address: "Số 5 ngõ 12 Nguyễn Trãi, Thanh Xuân, Hà Nội",
+    confirmationEvidence: { reviewSentAt: "x", customerRepliedAt: "y", quote: "ok" },
+  };
+  const forgedCtx = { agentKey: "sales", mode: "AUTO" as const, allowedTools: sales.definition.allowedTools, run: null, conversationId };
+
+  // Chốt 1 — CHẶN CỨNG cấp môi trường. Đứng trước cả phép đọc CSDL: công tắc tắt thì không cần
+  // biết nấc thật là gì, câu trả lời đã là KHÔNG.
+  const lockedTool = await callTool(forgedCtx, "order.create_draft", draftArgs);
+  assert.equal(lockedTool.ok, false, "AI_ALLOW_ORDER_CREATE=false thì không công cụ đơn hàng nào chạy");
+  assert.equal(lockedTool.outcome, "DENIED");
+  assert.match(lockedTool.error, /AI_ALLOW_ORDER_CREATE/, "lý do phải chỉ đúng công tắc, không lẫn với lý do nấc quyền hạn");
+
+  // Chốt 2 — nấc quyền hạn THẬT đọc lại từ CSDL. Mở công tắc môi trường ra để lộ chốt này: khai
+  // `mode: "AUTO"` từ nơi gọi vẫn không chạy được, vì dòng trong `ai_agents` mới là con số quyết định.
+  const savedOrderEnv = process.env.AI_ALLOW_ORDER_CREATE;
+  try {
+    process.env.AI_ALLOW_ORDER_CREATE = "true";
+    const forgedTool = await callTool(forgedCtx, "order.create_draft", draftArgs);
+    assert.equal(forgedTool.ok, false, "khai nấc AUTO không chạy được công cụ tạo đơn");
+    assert.equal(forgedTool.outcome, "DENIED");
+    assert.match(forgedTool.error, /CSDL/, "lý do phải nói rõ nấc thật lấy từ CSDL");
+  } finally {
+    if (savedOrderEnv === undefined) delete process.env.AI_ALLOW_ORDER_CREATE;
+    else process.env.AI_ALLOW_ORDER_CREATE = savedOrderEnv;
+  }
+  // Và đóng lại xong thì chốt 1 phải hoạt động trở lại — không được để rò trạng thái sang khối sau.
+  assert.equal((await callTool(forgedCtx, "order.create_draft", draftArgs)).outcome, "DENIED");
 
   // ═════════ 10C. THIẾU KHOÁ MÔ HÌNH: KHÔNG SẬP, ĐÁNH DẤU RÕ, CHUYỂN NGƯỜI ═════════
   await setSettingJson(AI_CONFIG_KEY, { modelCallsEnabled: true });
@@ -804,7 +919,7 @@ export async function testSalesAgent(db: Db) {
   assert.ok(afterLabels.reviewCoverage !== null && afterLabels.reviewCoverage < 100, "độ phủ phải hiện cạnh tỷ lệ để không ai đọc nhầm");
 
   console.log(
-    `✓ Nhân viên bán hàng AI: ${SALES_STAGES.length} giai đoạn · ${combos} tổ hợp chuyển trạng thái đều nằm trong bảng khai báo · "ok" trơ trọi KHÔNG tạo đơn · nấc SHADOW gửi 0 tin`,
+    `✓ Nhân viên bán hàng AI: ${SALES_STAGES.length} giai đoạn · ${combos} tổ hợp chuyển trạng thái đều nằm trong bảng khai báo · "ok" trơ trọi KHÔNG tạo đơn · nấc SHADOW gửi 0 tin · ${lockedChecks} tổ hợp đều bị chặn cứng chặn lại`,
   );
   console.log(
     "✓ Nạp hội thoại & soát nấc chạy ngầm: gói tin lạ bị từ chối KÈM chẩn đoán · bot tách khỏi nhân viên · trùng chéo kênh bị chặn · chốt cứng không giả mạo nấc được · thiếu bảng số đo thì chuyển người · độ chính xác chỉ tính trên phần đã chấm",

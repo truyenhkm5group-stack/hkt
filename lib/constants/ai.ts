@@ -173,6 +173,35 @@ export const DEFAULT_AI_FLAGS: AiFeatureFlags = {
 };
 
 
+// ───────────────────────── Chặn cứng cấp môi trường ─────────────────────────
+
+/**
+ * HAI CÔNG TẮC CHẶN CỨNG, đọc TỪ BIẾN MÔI TRƯỜNG và không có đường nào ghi đè từ CSDL.
+ *
+ * Vì sao không để chúng trong bảng `settings` như mọi cấu hình khác: `settings` sửa được lúc chạy,
+ * từ giao diện, từ ops, từ một câu SQL. Trên một bản chạy thử đang cắm vào page Pancake THẬT, câu
+ * hỏi không phải "ai được phép bật" mà là "có tổ hợp cấu hình nào bật nhầm được không". Câu trả
+ * lời phải là KHÔNG — và cách duy nhất để nó là không, là đặt công tắc ở nơi chỉ đổi được bằng cách
+ * sửa tệp môi trường rồi khởi động lại tiến trình.
+ *
+ * Hai công tắc này chỉ biết NÓI KHÔNG. Chúng không bao giờ cấp thêm quyền: nấc quyền hạn vẫn phải
+ * đủ cao NHƯ CŨ, rồi mới tới lượt chúng có ý kiến.
+ */
+export type AiHardLimits = {
+  /** false = KHÔNG một chữ nào rời khỏi ERP tới khách, kể cả tin kiểm thử tất định. */
+  allowCustomerSend: boolean;
+  /** false = KHÔNG tạo / chốt đơn trên POS, bất kể nấc quyền hạn. */
+  allowOrderCreate: boolean;
+};
+
+/** Mặc định của mặc định: CẤM. Thiếu biến môi trường, gõ sai, tệp .env rỗng — đều ra CẤM. */
+export const SAFEST_HARD_LIMITS: AiHardLimits = { allowCustomerSend: false, allowOrderCreate: false };
+
+export const HARD_LIMIT_LABEL: Record<keyof AiHardLimits, string> = {
+  allowCustomerSend: "Cho phép gửi tin tới khách",
+  allowOrderCreate: "Cho phép tạo / chốt đơn",
+};
+
 // ───────────────────────── Hiển thị ─────────────────────────
 
 /**

@@ -5,7 +5,7 @@
  * Mọi nhánh lỗi (JSON hỏng, khoá lạ, CSDL không đọc được) đều rơi về phía HẸP HƠN — không lần
  * triển khai nào được biến thành một con bot tự nhắn khách vì một tệp cấu hình sai.
  */
-import { AI_CONFIG_KEY, clampMode, DEFAULT_AI_FLAGS, type AgentMode, type AiFeatureFlags, AGENT_MODES } from "@/lib/constants/ai";
+import { AI_CONFIG_KEY, clampMode, DEFAULT_AI_FLAGS, SAFEST_HARD_LIMITS, type AgentMode, type AiFeatureFlags, type AiHardLimits, AGENT_MODES } from "@/lib/constants/ai";
 import { getSettingJson } from "@/lib/settings";
 
 function readEnv(name: string, fallback = "") {
@@ -48,6 +48,11 @@ export type AiSettings = AiFeatureFlags & {
   modes: Record<string, AgentMode>;
   /** Đơn giá theo `provider:model`. Thiếu = chi phí null. */
   pricing: Record<string, ModelPrice>;
+  /**
+   * Chặn cứng cấp môi trường. ĐỌC TỪ `process.env`, KHÔNG BAO GIỜ từ bảng `settings` — xem
+   * `AiHardLimits`. Bộ làm sạch cấu hình bên dưới cố tình không đụng tới khoá này.
+   */
+  hardLimits: AiHardLimits;
   /**
    * PHIÊN BẢN bảng giá đang dùng. Ghi vào từng lượt chạy để một lần đổi giá không làm mọi con số
    * lịch sử đổi nghĩa mà không ai biết. Rỗng = chưa khai giá.
@@ -97,6 +102,16 @@ export const aiEnv = {
   /** Bí mật trong URL webhook chat Pancake. Rỗng = webhook đóng (401), không phải mở toang. */
   get chatWebhookSecret() {
     return readEnv("PANCAKE_CHAT_WEBHOOK_SECRET");
+  },
+  /**
+   * CHẶN CỨNG. Mặc định CẤM, và chỉ đúng một chuỗi mở được: `"true"`. Không nhận `1`, `yes`, `on`
+   * — một công tắc mà gõ kiểu gì cũng bật được là một công tắc sẽ bị bật nhầm.
+   */
+  get hardLimits(): AiHardLimits {
+    return {
+      allowCustomerSend: readEnv("AI_ALLOW_CUSTOMER_SEND").toLowerCase() === "true",
+      allowOrderCreate: readEnv("AI_ALLOW_ORDER_CREATE").toLowerCase() === "true",
+    };
   },
 };
 
@@ -155,6 +170,9 @@ export async function getAiSettings(): Promise<AiSettings> {
     ...flags,
     modes,
     pricing,
+    // Đọc thẳng từ môi trường. `stored` KHÔNG được tham gia vào dòng này — đó là toàn bộ ý nghĩa
+    // của "chặn cứng", và `tests/sales-agent.test.ts` khoá lại điều đó.
+    hardLimits: aiEnv.hardLimits,
     // Có bảng giá mà quên đặt tên phiên bản thì vẫn phải có một nhãn đọc được, nếu không hai kỳ
     // khác giá sẽ trông giống hệt nhau khi đọc lại.
     pricingVersion: declaredVersion || (Object.keys(pricing).length ? "chua-dat-ten" : ""),
@@ -165,6 +183,8 @@ export async function getAiSettings(): Promise<AiSettings> {
  * Nấc quyền hạn có hiệu lực của một nhân sự AI: dòng CSDL → ghi đè trong settings → mặc định env,
  * và luôn bị kẹp dưới trần `MAX_ALLOWED_MODE`. Tắt tổng thì trả `OFF` bất kể khai gì.
  */
+export { SAFEST_HARD_LIMITS };
+
 export function effectiveMode(agentKey: string, dbMode: string | null | undefined, settings: AiSettings): AgentMode {
   if (!settings.enabled) return "OFF";
   const override = settings.modes[agentKey];

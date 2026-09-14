@@ -19,6 +19,10 @@ import { modeAtLeast, type AgentMode } from "@/lib/constants/ai";
 import { TOOL_CATALOG, TOOL_TIMEOUT_MS, type ToolName, type ToolOutcome } from "@/lib/constants/ai-tools";
 import type { RunRecorder } from "@/lib/ai/runs";
 import { getAgent } from "@/lib/ai/registry";
+import { aiEnv } from "@/lib/ai/config";
+
+/** Công cụ đụng tới đơn hàng — nhóm mà công tắc `AI_ALLOW_ORDER_CREATE` canh giữ. */
+const ORDER_TOOLS = new Set<ToolName>(["order.create_draft", "order.confirm"]);
 
 /** Nấc quyền hạn THẬT của một nhân sự, đọc từ CSDL. `null` = không đọc được ⇒ phải từ chối. */
 async function verifiedMode(agentKey: string): Promise<AgentMode | null> {
@@ -110,6 +114,13 @@ export async function callTool<T = unknown>(ctx: ToolContext, name: ToolName, ra
   // sai ở đâu đó — vì với công cụ ghi, một lần lọt là một hành động thật trên dữ liệu của khách.
   // Đọc CSDL hỏng cũng là TỪ CHỐI: mọi nhánh lỗi phải rơi về phía hẹp hơn.
   if (declaration.kind === "WRITE") {
+    // CHẶN CỨNG cấp môi trường cho nhóm công cụ đụng tới ĐƠN HÀNG. Cùng lý do với công tắc gửi
+    // tin: đọc từ biến môi trường, không ghi đè được từ CSDL, và chỉ biết nói KHÔNG.
+    if (ORDER_TOOLS.has(name) && !aiEnv.hardLimits.allowOrderCreate) {
+      const reason = `AI_ALLOW_ORDER_CREATE=false — môi trường này cấm ${name}`;
+      await record("DENIED", null, reason);
+      return { ok: false, outcome: "DENIED", error: reason };
+    }
     const verified = await verifiedMode(ctx.agentKey);
     if (!verified) {
       const reason = `Không xác minh được nấc quyền hạn của "${ctx.agentKey}" từ CSDL — từ chối ${name}`;

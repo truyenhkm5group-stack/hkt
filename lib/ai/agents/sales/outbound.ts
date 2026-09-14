@@ -36,6 +36,13 @@ export type SendRequest = {
  * Có được gửi không. HÀM THUẦN — kiểm thử được mọi tổ hợp mà không cần mạng, không cần CSDL.
  */
 export function canSend(request: SendRequest, settings: AiSettings): SendDecision {
+  // CHẶN CỨNG TRƯỚC MỌI THỨ KHÁC. Công tắc này đọc từ biến môi trường và không có đường nào ghi đè
+  // từ CSDL, nên nó đứng đầu hàng: không nấc quyền hạn nào, không phiếu duyệt nào, không danh sách
+  // trắng nào đi vòng qua được. Trên bản chạy thử cắm vào page Pancake THẬT, đây là câu trả lời cho
+  // "có tổ hợp cấu hình nào lỡ nhắn cho khách thật không".
+  if (!settings.hardLimits.allowCustomerSend) {
+    return { allowed: false, reason: "AI_ALLOW_CUSTOMER_SEND=false — môi trường này cấm mọi tin gửi tới khách" };
+  }
   if (!settings.enabled) return { allowed: false, reason: "Nền tảng AI đang tắt" };
   if (request.humanTakeover) return { allowed: false, reason: "Người đã tiếp nhận hội thoại — máy không gửi gì nữa" };
   if (!request.text.trim()) return { allowed: false, reason: "Không có nội dung để gửi" };
