@@ -1,4 +1,5 @@
 import { CARRIER_ACTION_KEYS, CARRIER_ACTION_LABEL, carrierActionAllowed, type CarrierActionKey } from "@/lib/constants/care";
+import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import type { CarrierCapabilityStatus, CarrierCapabilityView } from "@/lib/care/contracts";
 
 /**
@@ -49,10 +50,12 @@ export const CARRIER_WEB_ONLY_ACTIONS: { key: string; label: string; how: string
   { key: "change-address-after-dispatch", label: "Đổi địa chỉ khi kiện đã đi phát", how: "Gọi bưu cục; API order/edit từ chối đơn đã đi phát." },
 ];
 
-export function carrierCapabilityFor(input: { actionKey: CarrierActionKey; stage: string; trackingCapability: string; configured: boolean; tracking: string }): CarrierCapabilityView {
+/** `vtpOrderNumber`: CHỈ `shipments.vtp_order_number`. Rỗng ⇒ `webUrl = null` (không có trang nào
+ * để mở), vì mã Pancake tra trên viettelpost.vn ra "không tìm thấy". */
+export function carrierCapabilityFor(input: { actionKey: CarrierActionKey; stage: string; trackingCapability: string; configured: boolean; vtpOrderNumber: string | null }): CarrierCapabilityView {
   const spec = CARRIER_ACTION_SPECS[input.actionKey];
   const allowedAtStage = carrierActionAllowed(input.actionKey, input.stage);
-  const webUrl = `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(input.tracking)}&orderType=1`;
+  const webUrl = getViettelPostTrackingUrl(input.vtpOrderNumber);
   let status: CarrierCapabilityStatus;
   let reason: string;
   if (!spec.api) {
@@ -77,6 +80,6 @@ export function carrierCapabilityFor(input: { actionKey: CarrierActionKey; stage
   return { actionKey: input.actionKey, status, allowedAtStage, reason, webUrl };
 }
 
-export function carrierCapabilitiesFor(input: { stage: string; trackingCapability: string; configured: boolean; tracking: string }): CarrierCapabilityView[] {
+export function carrierCapabilitiesFor(input: { stage: string; trackingCapability: string; configured: boolean; vtpOrderNumber: string | null }): CarrierCapabilityView[] {
   return CARRIER_ACTION_KEYS.map((actionKey) => carrierCapabilityFor({ ...input, actionKey }));
 }
