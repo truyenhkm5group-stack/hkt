@@ -181,3 +181,112 @@ EXPECTED → RECEIVED → INSPECTION → RESTOCKABLE → RESTOCKED
 Số kiện "chờ đếm" giảm 672 → 665 khớp đúng với 7 phiếu đó. **Đường ống đang được dùng thật**, và
 nó đang đi đúng chiều: hàng hoàn chỉ vào tồn khi có người đếm, không sớm hơn một giây nào.
 
+---
+
+## 10. Lượt triển khai đầu ĐỎ — và nó bắt được một lỗi thật của chính bản này
+
+Deploy #269 (`4a5a47b`) **đẩy thành công**: migration 0083 đã áp (`sổ có 83 mục · CSDL đã áp 83`),
+`/api/health` trả đúng `4a5a47b44d2f`, và `/inventory/returns` mở được trong **143 ms**. Nhưng cổng
+smoke NGUỘI ngay sau đó đỏ:
+
+```
+✗ /reports/returns [TIMEOUT] không trả lời trong 60s
+✗ /ads            [TIMEOUT] không trả lời trong 60s
+⚠ /products       [SLOW] 3.0s
+```
+
+Hai trang ấy **không import một dòng nào** của bản này. Chạy lại smoke lúc container đã nóng thì
+`51/51 đạt`, `/reports/returns` trả lời trong **78 ms**. Rất dễ dừng ở đây và kết luận "lỗi của
+phiên khác" hoặc "nguội thì chậm là thường".
+
+**Nhưng deploy #268 (`bf48f8d`) đã qua đúng cổng nguội đó.** Giữa hai lượt chỉ có một thay đổi mã:
+bản này. Nên lời giải thích "không phải của tôi" không đứng được.
+
+### Nguyên nhân gốc: Node chạy MỘT luồng
+
+Bản này để hai việc ĐỒNG BỘ, nặng, nằm thẳng trong lượt dựng trang:
+
+1. `page.tsx` gọi `latestHmtWorkbook()` — kéo cả cột `content` (base64 ~80 KB) rồi giải mã ra
+   `Buffer` — **chỉ để hiện sáu ô meta**. Nội dung ấy thậm chí không được truyền xuống client.
+2. `loadTrackingOnly()` làm lại đúng việc đó **cộng** phân tích toàn bộ tệp `.xlsx` (3 sheet, hơn
+   750 dòng), mỗi lần đệm 120 giây hết hạn.
+
+Việc đồng bộ trên một luồng duy nhất **không làm chậm trang gọi nó — nó chặn mọi yêu cầu khác đang
+chờ trên cùng tiến trình**. Smoke mở các trang song song, nên hai trang vốn nặng nhất bị xếp sau
+phép phân tích và vượt 60 giây. Trang Kiểm đếm hàng hoàn tự nó vẫn báo 143 ms: **chi phí rơi vào
+hàng xóm**, nên nhìn con số của chính nó thì không thấy gì.
+
+### Sửa ở `74d35f0`, và kết quả nói rõ hơn mọi lập luận
+
+| Trang | Trước (NÓNG) | Trước (NGUỘI) | Sau (NGUỘI) |
+|---|---|---|---|
+| `/ads` | 7.195 ms | **TIMEOUT 60s** | **85 ms** |
+| `/inventory/decisions` | 2.509 ms | — | **57 ms** |
+| `/reports/returns` | 78 ms | **TIMEOUT 60s** | đạt |
+| `/inventory/returns` | 66 ms | 143 ms | 94 ms |
+| Số màn hình CHẬM | 2 | — | **0** |
+
+`/ads` đi từ **7,2 giây lúc NÓNG** xuống **85 ms lúc NGUỘI** — một trang không dùng một dòng mã nào
+của bản này. Đó đúng là dấu vân tay của việc chặn vòng lặp sự kiện: ngay cả lượt "nóng" cũng vẫn
+trả tiền, vì đệm 120 giây hết hạn nhiều lần trong 257 giây quét. Bỏ việc đắt khỏi đường dựng trang
+làm nhanh **cả ứng dụng**, không riêng trang của mình.
+
+Cách sửa — bỏ việc đắt, không nới ngưỡng:
+
+- `latestHmtWorkbookMeta()` liệt kê từng cột, **không** lấy `content`. Liệt kê tay chứ không
+  `select *`, vì `select *` sẽ lặng lẽ kéo `content` về lại vào ngày ai đó thêm cột mới.
+- `loadTrackingOnly()` đệm theo **băm** của bản sổ (`hmt-tracking-only:<sha256>`), hạn 6 giờ. Quy
+  ước chung là 60–120 giây vì số liệu báo cáo cũ đi khi dữ liệu đổi; phần này **không cũ đi được** —
+  khoá tự nhiên của một bản sổ là sha256 của chính nội dung, nên cùng băm là vĩnh viễn cùng kết
+  quả, và tải bản mới lên là một khoá đệm khác.
+
+Hai bài kiểm quét mã nguồn khoá lại: trang không được gọi `latestHmtWorkbook()` (biểu thức phân
+biệt được với `...Meta()`, đã kiểm để chắc nó không rỗng nghĩa), và phần đọc + phân tích phải đệm
+theo băm.
+
+**Bài học ghi lại:** một trang báo 143 ms vẫn có thể là trang đang làm sập thời gian phản hồi của
+cả hệ. Con số của riêng một trang không đủ để kết luận nó vô can — và một cổng đỏ ở màn hình mình
+không đụng tới vẫn có thể đang chỉ đúng vào mã của mình.
+
+## 11. Xác minh SAU triển khai — số nguồn không đổi một dòng
+
+Deploy #270 (`74d35f050b1d`) xanh, `✓ https://erp.vnxcommerce.com đang chạy đúng commit 74d35f050b1d`.
+Đo lại đúng câu lệnh đã đo trước khi đẩy:
+
+| Trạng thái | dòng | đã ghi | kiện | **đã gỡ** |
+|---|---|---|---|---|
+| `MATCHED` | 724 | 724 | 672 | **0** |
+| `SKU_MISMATCH` | 23 | 0 | 20 | **0** |
+| `UNMATCHED_TRACKING` | 2 | 0 | 0 | **0** |
+| `AMBIGUOUS_TRACKING` | 1 | 0 | 0 | **0** |
+
+**Giống hệt số đo trước deploy.** Cột `resolution` đã có mặt (truy vấn được) và toàn bộ là `NULL` —
+đúng như phải thế: chưa ai bấm gỡ dòng nào. `NULL` ở đây nghĩa là **CHƯA AI XỬ LÝ**, không phải
+"đã xem xong".
+
+Bản phát hành chỉ thêm **màn hình và đường ghi**; nó không đụng một con số nguồn nào.
+
+### Tồn kho: phiếu nhập không đổi, và 291 kiện được đếm THẬT trong lúc đang triển khai
+
+| Chỉ tiêu | 08:47 | 09:52 | Δ |
+|---|---|---|---|
+| `stock_receipts` kind=`RECEIPT` | 3 phiếu · **1.985 món** | 3 phiếu · **1.985 món** | **0** |
+| `stock_receipts` kind=`RETURN` | 7 phiếu · 7 món | **298 phiếu · 301 món** | **+291 phiếu** |
+| `return_inspections` còn chờ đếm | 665 | **374** | **−291** |
+
+Hai con số ấy **khớp nhau đúng đến từng đơn vị**: 665 − 374 = 291, và 298 − 7 = 291. Mỗi kiện rời
+khỏi hàng đợi "chờ đếm" sinh ra **đúng một** phiếu tái nhập — không thiếu, không nhân đôi.
+
+Đây **không phải** code làm. `stock_receipts` loại `RETURN` chỉ sinh ra khi người kho bấm nút đếm
+(`recordInspection`); không có đường nào khác, và bài kiểm quét mã nguồn khoá đúng điều đó. Trong
+khoảng 40 phút của lượt triển khai, **chủ shop đã mở và đếm 291 kiện hàng hoàn**.
+
+Ba điều đọc ra được từ bảng trên:
+
+1. **Phiếu NHẬP HÀNG không hề bị đụng tới** — 1.985 món, y nguyên. Không bản phát hành nào của
+   phiên này chạm vào tồn.
+2. **Hàng hoàn vào tồn đúng cách**: qua bàn tay người đếm, từng kiện một, mỗi kiện một phiếu.
+   Đúng AGENTS.md mục 10.
+3. **Đường ống đang chịu tải thật.** 291 lượt đếm trong 40 phút là nhịp làm việc thật của kho, và
+   ERP theo kịp — không sinh dòng thừa, không lệch một kiện.
+
