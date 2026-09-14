@@ -119,9 +119,13 @@ Chủ shop chấm marketer theo FANPAGE họ phụ trách.
 **Thứ tự căn cứ nay là:** ảnh chụp theo mốc đơn lên → bảng gán phẳng (lấp chỗ) → `ad_id` (lấp chỗ)
 → tỷ trọng tiền quảng cáo → chủ mã → không ai.
 
-Đơn bị kết luận TRÙNG mang `marketer_id = NULL` nên rơi xuống bậc sau — **cố ý**: doanh thu ở bảng
-lương là doanh thu GIAO THÀNH CÔNG, tiền thật đã về; bỏ nó khỏi phần chia sẽ làm Σ các marketer
-không còn bằng tổng của shop. Loại trùng đơn là việc của chỉ số MARKETING, đo ở mốc chốt đơn.
+Đơn bị kết luận TRÙNG mang `marketer_id = NULL` nên rơi xuống bậc sau — **cố ý**, và có luật đỡ:
+`AGENTS.md` mục 9 đòi *"tổng đơn/doanh số của các marketer + 'Chưa gán marketer' phải BẰNG số đơn
+xác nhận Pancake trong kỳ"*. Bỏ đơn trùng khỏi phần chia là phá đúng đẳng thức ấy, và ở bảng lương
+còn làm Σ các marketer không bằng tổng của shop trong khi tiền đã về thật. Loại trùng đơn là việc
+của chỉ số MARKETING (`/marketing/fanpages`), đo ở mốc chốt đơn — nên hai màn hình lệch nhau đúng
+bằng phần đơn trùng (30 ngày gần nhất: **13 đơn**), và đó là chênh lệch GIẢI THÍCH ĐƯỢC, không phải
+sai số.
 
 `/payroll` thêm khối **"Doanh thu chia cho marketer bằng căn cứ nào"**: bốn nhóm (ảnh chụp · bảng
 phẳng · quảng cáo lấp chỗ · chưa có căn cứ) cộng lại đúng tổng đem chia, kèm đường dẫn sang
