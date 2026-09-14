@@ -215,7 +215,7 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                       {r.customerPhone ? (
                         <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                           <span className="font-mono text-xs text-muted-foreground">{r.customerPhone}</span>
-                          <CopyButton value={r.customerPhone} className="size-5 shrink-0 [&_svg]:size-3" />
+                          <CopyButton value={r.customerPhone} what="SĐT" className="size-5 shrink-0 [&_svg]:size-3" />
                         </div>
                       ) : (
                         // KHÔNG bịa số: dòng không có định danh khách phải nói thẳng là chưa nối được.

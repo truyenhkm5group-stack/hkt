@@ -182,27 +182,56 @@ async function loadCaseNotes(ids: string[]) {
   return out;
 }
 
-/** Lần gửi ĐANG CHẠY của đơn gắn vào case — căn cứ phân miền, và là đường đi sang care vận đơn. */
-async function loadActiveShipments(ids: string[]) {
-  const out = new Map<string, { shipmentId: string; tracking: string; stage: string }>();
+/** Một lần gửi của đơn gắn vào case. `tracking` là MÃ CHUẨN, đúng chuỗi CSKH dán sang trang ĐVVC. */
+export type CsCaseShipment = { shipmentId: string; tracking: string; stage: string; isFinal: boolean };
+
+/**
+ * ═══════════ MỌI LẦN GỬI CỦA ĐƠN GẮN VÀO CASE, VÀ LẦN ĐANG CHẠY LÀ CÁI NÀO ═══════════
+ *
+ * Trả về CẢ DANH SÁCH chứ không chỉ một mã, vì hai câu hỏi khác nhau đang dùng chung một chỗ:
+ *
+ *  · **"Case này thuộc miền vận đơn không?"** — `csDomainOf` hỏi có lần gửi ĐANG CHẠY hay không.
+ *    Câu trả lời giữ nguyên nghĩa cũ: lần gửi chưa kết thúc (`is_final = false`) mới nhất.
+ *  · **"CSKH cần dán mã nào sang trang Viettel Post?"** — câu này KHÔNG có cùng đáp án. Đo
+ *    production 14/09/2026: 598 case có đơn kèm vận đơn, nhưng chỉ 294 case có lần gửi đang
+ *    chạy. Hơn 300 case còn lại có mã vận đơn thật mà màn hình không hiện ra một ký tự nào, vì
+ *    kiện đã kết thúc (đã giao / đã hoàn) — mà đó chính là những case CSKH phải gọi ĐVVC nhiều
+ *    nhất.
+ *
+ * NÊN: lần gửi đang chạy vẫn là cái ĐỨNG ĐẦU và là cái được hiện mặc định; những lần gửi khác
+ * không bị giấu, chúng nằm trong danh sách để giao diện liệt kê kèm trạng thái. Máy KHÔNG âm thầm
+ * chọn một mã trong nhiều mã rồi để người dùng tưởng đó là mã duy nhất — chọn im lặng là cách một
+ * mã đã huỷ bị dán sang ĐVVC mà không ai biết vì sao tra không ra.
+ *
+ * VẪN MỘT CÂU TRUY VẤN. Không có `lateral ... limit 1` nữa nên mỗi case có thể ra nhiều dòng; đo
+ * production: 598/598 case có đơn đều có ĐÚNG 1 vận đơn, nên số dòng thực tế không đổi.
+ */
+async function loadCaseShipments(ids: string[]) {
+  const out = new Map<string, { active: CsCaseShipment | null; all: CsCaseShipment[] }>();
   if (!ids.length) return out;
   const db = await getDb();
-  const rows = rowsOf<{ case_id: string; shipment_id: string | null; tracking: string | null; stage: string | null }>(
+  const rows = rowsOf<{ case_id: string; shipment_id: string; tracking: string | null; stage: string | null; is_final: boolean }>(
     await db.execute(sql`
       select c.id as case_id,
              s.id as shipment_id,
              coalesce(nullif(s.vtp_order_number, ''), nullif(s.tracking_code, ''), s.id) as tracking,
-             s.stage::text as stage
+             s.stage::text as stage,
+             s.is_final as is_final
         from cs_cases c
-        left join lateral (
-               select id, vtp_order_number, tracking_code, stage
-                 from shipments
-                where order_id = c.order_id and is_final = false
-                order by created_at desc
-                limit 1) s on true
-       where c.id in ${ids}`),
+        join shipments s on s.order_id = c.order_id
+       where c.id in ${ids}
+       -- Lần gửi ĐANG CHẠY trước, rồi tới lần mới nhất. Thứ tự này CHÍNH LÀ luật chọn "lần gửi
+       -- đang quyết định" ở dưới — viết trong ORDER BY để nó ổn định giữa hai lần chạy, thay vì
+       -- phụ thuộc thứ tự Postgres trả về.
+       order by c.id, s.is_final asc, s.created_at desc`),
   );
-  for (const r of rows) if (r.shipment_id) out.set(r.case_id, { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN" });
+  for (const r of rows) {
+    const item: CsCaseShipment = { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN", isFinal: Boolean(r.is_final) };
+    const cur = out.get(r.case_id) ?? { active: null, all: [] };
+    cur.all.push(item);
+    if (!cur.active && !item.isFinal) cur.active = item;
+    out.set(r.case_id, cur);
+  }
   return out;
 }
 
@@ -222,16 +251,21 @@ export async function listCsCases(params: ListParams) {
     db.select({ total: count() }).from(c).where(where),
   ]);
   const ids = base.map((r) => r.id);
-  const [notes, shipments] = await Promise.all([loadCaseNotes(ids), loadActiveShipments(ids)]);
+  const [notes, shipments] = await Promise.all([loadCaseNotes(ids), loadCaseShipments(ids)]);
   const rows = base.map((r) => {
-    const ship = shipments.get(r.id) ?? null;
+    const kien = shipments.get(r.id) ?? null;
+    const ship = kien?.active ?? null;
     return {
       ...r,
       /** Người THẬT đang cầm case — bot chỉ là người tạo, xem `lib/constants/cs-domain.ts`. */
       owner: humanAssignee(r.assignee),
       botTouched: Boolean(r.assignee) && CS_BOT_ASSIGNEES.includes(r.assignee),
+      // PHÂN MIỀN GIỮ NGUYÊN NGHĨA CŨ: chỉ lần gửi ĐANG CHẠY mới đưa case vào miền vận đơn. Đổi
+      // sang "có vận đơn nào đó" sẽ kéo hàng trăm case đã kết thúc vào bàn care.
       domain: csDomainOf(r.kind, Boolean(ship)),
       shipment: ship,
+      /** MỌI lần gửi của đơn, lần đang chạy đứng đầu — để CSKH thấy đủ mã, không phải một mã do máy chọn. */
+      shipments: kien?.all ?? [],
       note: notes.get(r.id) ?? null,
     };
   });

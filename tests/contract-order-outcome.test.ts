@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
+import { ELIGIBLE_SENT_OUTCOMES, ELIGIBLE_SENT_SQL, OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
 import { OUTCOME_GROUP } from "@/lib/constants/truth";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
 
@@ -252,14 +253,31 @@ export async function testOrderOutcomeContract(db: Db) {
   assert.equal(OUTCOME_GROUP.AWAITING_PICKUP, OUTCOME_GROUP.IN_TRANSIT, "cùng nhóm với 'đang giao' nên đổi nhãn KHÔNG làm xê dịch một tỷ lệ nào");
   assert.ok(OUTCOME_LABEL.AWAITING_PICKUP, "phải có nhãn tiếng Việt");
 
-  // Và "đã gửi" phải KHÔNG chứa nó — đọc thẳng mã nguồn, vì đây là danh sách chuỗi SQL mà trình
-  // kiểm kiểu không soi được.
-  const nguonRR = readFileSync("lib/queries/return-rate.ts", "utf8");
-  const dongDaGui = nguonRR.split("\n").filter((l) => l.includes("IS_SHIPPED = sql") || l.includes("shipped: sql"));
-  assert.ok(dongDaGui.length >= 2, "phải tìm thấy các định nghĩa 'đã gửi'");
-  for (const dong of dongDaGui) {
-    assert.ok(!dong.includes("AWAITING_PICKUP"), `'đã gửi' không được chứa AWAITING_PICKUP — kiện chưa rời kho thì chưa được gửi: ${dong.trim().slice(0, 90)}`);
+  // ───────── "ĐÃ GỬI" (ELIGIBLE SENT): MỘT DANH SÁCH, KHAI ĐÚNG MỘT CHỖ ─────────
+  //
+  // Trước 14/09/2026 danh sách này được gõ NGUYÊN VĂN ở bốn chỗ. Bốn bản sao đang đồng ý với
+  // nhau, nhưng thêm một kết quả mới là một lượt sửa bốn chỗ — và cả lớp lỗi P1 sinh ra từ đúng
+  // chuyện đó: sửa ba, quên một, không có gì đỏ lên. Nay chỉ còn `ELIGIBLE_SENT_OUTCOMES`, và
+  // bài kiểm này chặn đường quay lại.
+  assert.ok(!(ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes("AWAITING_PICKUP"), "'đã gửi' KHÔNG được chứa AWAITING_PICKUP — kiện chờ bưu tá tới lấy thì chưa rời kho");
+  for (const chuaGui of ["NOT_SHIPPED", "UNKNOWN", "CANCELLED"]) {
+    assert.ok(!(ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes(chuaGui), `'đã gửi' KHÔNG được chứa ${chuaGui} — không có chứng từ ĐVVC cầm hàng`);
   }
+  for (const daGui of ["IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE"]) {
+    assert.ok((ELIGIBLE_SENT_OUTCOMES as readonly string[]).includes(daGui), `'đã gửi' PHẢI chứa ${daGui} — hàng không thể đi tiếp hay quay về nếu chưa từng được lấy đi`);
+  }
+  // Dạng SQL phải SINH RA từ mảng, không phải một bản chép tay thứ hai.
+  assert.equal(ELIGIBLE_SENT_SQL, ELIGIBLE_SENT_OUTCOMES.map((x) => `'${x}'`).join(","), "chuỗi SQL phải sinh ra từ chính mảng hằng số");
+
+  // Và KHÔNG tệp nào được gõ lại danh sách ấy. Quét mã ĐÃ VÀO KHO (`git ls-files`) chứ không quét
+  // đĩa, để bài kiểm đỏ ngay trên máy người viết thay vì đợi tới CI.
+  const LITERAL = /in\s*\(\s*'IN_TRANSIT'\s*,\s*'DELIVERED'\s*,\s*'RETURNED'\s*,\s*'RETURNED_BY_RULE'\s*\)/;
+  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx)$/.test(f));
+  const viPham = tepMa.filter((f) => LITERAL.test(readFileSync(f, "utf8")));
+  assert.deepEqual(viPham, [], `gõ lại danh sách 'đã gửi' — dùng ELIGIBLE_SENT_SQL (lib/constants/returns.ts) thay vì chép: ${viPham.join(", ")}`);
+  assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
 
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
   const spec = readFileSync("docs/business-rules/ORDER_OUTCOME.md", "utf8");

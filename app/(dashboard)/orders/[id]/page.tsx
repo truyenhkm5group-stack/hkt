@@ -173,7 +173,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   {s.vtpOrderNumber || s.trackingCode ? (
                     <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5 font-mono text-xs">
                       {s.vtpOrderNumber ?? s.trackingCode}
-                      <CopyButton value={s.vtpOrderNumber ?? s.trackingCode ?? ""} />
+                      <CopyButton value={s.vtpOrderNumber ?? s.trackingCode ?? ""} what="mã vận đơn" />
                     </span>
                   ) : null}
                   {s.vtpOrderNumber ? (
@@ -247,7 +247,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <SectionCard title="Khách hàng" actions={order.customer ? <Link href={`/customers/${order.customer.id}`} className="text-xs font-semibold text-primary hover:underline">Hồ sơ</Link> : null}>
             <div className="space-y-3 text-sm">
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{order.billFullName || order.shipFullName || "—"}</p>
-              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} /></p>
+              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{order.billPhone || "—"} <CopyButton value={order.billPhone} what="SĐT" /></p>
               <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{order.shipFullAddress || order.shipAddress || "—"}</span></p>
               {thieuThongTin ? (
                 <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/70 p-2.5 text-xs leading-relaxed text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
@@ -259,8 +259,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                         <Link href={`/orders/${prev.orderId}`} className="font-semibold underline">#{prev.systemId ?? ""}</Link> ngày {formatDateTime(prev.insertedAt)}
                         {prev.matchedBy === "customer" ? " (cùng khách Pancake)" : prev.matchedBy === "conversation" ? " (cùng hội thoại)" : " (trùng SĐT)"}:
                       </p>
-                      <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} /></p>
-                      <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} /></p>
+                      <p className="mt-1 flex items-center gap-2"><Phone className="size-3.5" /><span className="font-medium">{prev.phone}</span> <CopyButton value={prev.phone} what="SĐT" /></p>
+                      <p className="mt-0.5 flex items-start gap-2"><MapPin className="mt-0.5 size-3.5 shrink-0" /><span className="font-medium">{prev.address}</span> <CopyButton value={prev.address} what="địa chỉ" /></p>
                       <p className="mt-1.5 opacity-80">Hỏi khách xác nhận còn đúng địa chỉ này không rồi điền vào đơn trên Pancake (khách có thể đã chuyển nhà).</p>
                     </>
                   ) : (

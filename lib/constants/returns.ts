@@ -66,6 +66,49 @@ export const OUTCOME_TONE: Record<OrderOutcome, string> = {
 
 export const RETURNED_OUTCOMES: OrderOutcome[] = ["RETURNED", "RETURNED_BY_RULE"];
 
+/**
+ * ═══════════ "ĐÃ GỬI" (ELIGIBLE SENT) — MỘT DANH SÁCH, KHAI ĐÚNG MỘT CHỖ ═══════════
+ *
+ * **Đã gửi = có CHỨNG TỪ ĐVVC nói họ đã cầm kiện hàng này.** Đây là chỉ số TÍCH LUỸ ("kỳ này đã
+ * gửi đi tổng bao nhiêu đơn"), khác hẳn rổ `IN_FLIGHT` của `lib/constants/fulfillment-bucket.ts`
+ * — chỗ đó đếm "ngay lúc này có bao nhiêu kiện đang đi". Hai chỉ số, hai cái tên, hai chỗ khai.
+ *
+ * Bốn kết quả dưới đây đều hàm ý kiện ĐÃ rời kho: đang đi, đã tới tay khách, đã quay đầu về, hoặc
+ * đã về mà thu không đủ. Hàng không thể quay về nếu chưa từng được lấy đi.
+ *
+ * ─── BỐN THỨ CỐ Ý KHÔNG CÓ TRONG DANH SÁCH ───
+ *
+ *  · `AWAITING_PICKUP` — đã có mã vận đơn, ĐVVC đã biết tới kiện, nhưng CHƯA có một chứng từ nào
+ *    nói họ đã cầm hàng. Đo production 14/09/2026: **106 kiện**, 61.451.999đ COD treo. Trước bản
+ *    13/09 chúng mang nhãn `IN_TRANSIT` và đi thẳng vào mẫu số của mọi báo cáo "đã gửi".
+ *  · `NOT_SHIPPED` — chưa hề tạo vận đơn.
+ *  · `UNKNOWN` — có vận đơn nhưng ERP chưa nhận được tin nào.
+ *  · `CANCELLED` — huỷ.
+ *
+ * Ai thấy danh sách "thiếu" một giá trị và định thêm cho đủ thì đọc lại đoạn trên: thêm một kết
+ * quả chưa có chứng từ bàn giao vào đây là nhét kiện chưa rời kho vào lô hàng đã gửi của kỳ đó.
+ *
+ * ─── VÌ SAO PHẢI LÀ HẰNG SỐ, KHÔNG PHẢI BỐN CHUỖI GIỐNG NHAU ───
+ *
+ * Trước 14/09/2026 danh sách này được gõ NGUYÊN VĂN ở bốn chỗ: `IS_SHIPPED`, cột `shipped` của
+ * bảng theo mẫu mã, cột `shipped` của dòng tổng hợp, và vị ngữ `shipped` của báo cáo lợi nhuận.
+ * Bốn bản sao đang đồng ý với nhau — nhưng thêm `AWAITING_PICKUP` là một lượt sửa bốn chỗ, và cả
+ * lớp lỗi P1 sinh ra từ đúng chuyện đó: sửa ba, quên một, không có gì đỏ lên.
+ *
+ * `tests/contract-order-outcome.test.ts` quét mã nguồn để không ai gõ lại danh sách này lần nữa.
+ */
+export const ELIGIBLE_SENT_OUTCOMES = ["IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE"] as const satisfies readonly OrderOutcome[];
+
+/**
+ * Cùng danh sách, dạng dùng được trong `in (...)` của SQL. SINH RA từ mảng trên — không gõ lại,
+ * vì hai bản chép tay là đúng thứ hằng số này tồn tại để loại bỏ.
+ */
+export const ELIGIBLE_SENT_SQL = ELIGIBLE_SENT_OUTCOMES.map((x) => `'${x}'`).join(",");
+
+/** Câu giải thích hiện trên tooltip của mọi cột mang tên "Đã gửi". Một chỗ viết, mọi màn dùng lại. */
+export const ELIGIBLE_SENT_HINT =
+  "Đã gửi = vận đơn đã có bằng chứng ĐVVC nhận hàng. KHÔNG tính đơn đang đóng gói, đang chờ bưu tá tới lấy, bưu tá lấy không thành công, shop huỷ lấy, hay vận đơn mới tạo mã mà chưa bàn giao.";
+
 /** Các cột bảng tỷ lệ giao thành công được phép sắp xếp (dùng chung máy chủ + bảng phía trình duyệt) */
 export const RETURN_RATE_SORTABLE = ["successRate", "expectedSuccessRate", "rate", "expectedRate", "returned", "delivered", "shipped", "inTransit", "failed", "lostRevenue", "sku"];
 

@@ -31,6 +31,15 @@ async function main() {
       returned: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED')`,
       returnedByRule: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'RETURNED_BY_RULE')`,
       inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      // THÊM MỘT KẾT QUẢ MÀ QUÊN THÊM VÀO ĐÂY = ẢNH CHỤP KHÔNG THẤY NÓ.
+      //
+      // `AWAITING_PICKUP` sinh ra ngày 13/09/2026 và ảnh chụp này không có ô cho nó, nên 106 đơn
+      // biến mất khỏi phép cộng: `tong` không còn bằng tổng các phần, và đúng cái lô mà bản phát
+      // hành ấy tạo ra để nhìn thấy thì lại vô hình với công cụ dùng để kiểm chứng nó.
+      //
+      // Bất biến `tong = tổng các phần` được kiểm ngay trong script (xem cuối hàm) — lần sau thêm
+      // kết quả mà quên ô thì script BÁO ĐỎ, không phải im lặng đếm thiếu.
+      awaitingPickup: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'AWAITING_PICKUP')`,
       unknown: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'UNKNOWN')`,
       notShipped: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'NOT_SHIPPED')`,
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
@@ -65,6 +74,31 @@ async function main() {
   const returnedAll = Number(outcome?.returned ?? 0) + Number(outcome?.returnedByRule ?? 0);
   const settled = delivered + returnedAll;
 
+  /**
+   * ─── BẤT BIẾN: TỔNG PHẢI BẰNG TỔNG CÁC PHẦN ───
+   *
+   * Đây là thứ lẽ ra phải bắt được lỗi thiếu `AWAITING_PICKUP` ngay hôm nó sinh ra. Một ảnh chụp
+   * dùng để chứng minh "deploy không làm đổi sự thật nghiệp vụ" mà tự nó đếm thiếu một lô thì
+   * chứng minh sai — và không có gì đỏ lên, vì mỗi con số riêng lẻ vẫn đúng.
+   *
+   * Ném lỗi chứ không cảnh báo: ảnh chụp sai còn tệ hơn không có ảnh chụp nào.
+   */
+  const cacPhan =
+    delivered +
+    returnedAll +
+    Number(outcome?.inTransit ?? 0) +
+    Number(outcome?.awaitingPickup ?? 0) +
+    Number(outcome?.unknown ?? 0) +
+    Number(outcome?.notShipped ?? 0) +
+    Number(outcome?.cancelled ?? 0);
+  const tong = Number(outcome?.tong ?? 0);
+  if (cacPhan !== tong) {
+    throw new Error(
+      `Ảnh chụp KPI đếm thiếu: tổng ${tong} đơn nhưng các ô cộng lại chỉ ${cacPhan} (lệch ${tong - cacPhan}). ` +
+        `Gần như chắc chắn ORDER_OUTCOME có thêm một kết quả mới mà script này chưa có ô cho nó — thêm ô vào khối "ket_qua_don" ở scripts/kpi-snapshot.ts.`,
+    );
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -75,6 +109,7 @@ async function main() {
           hoan: Number(outcome?.returned ?? 0),
           hoan_theo_luat: Number(outcome?.returnedByRule ?? 0),
           dang_giao: Number(outcome?.inTransit ?? 0),
+          cho_dvvc_lay: Number(outcome?.awaitingPickup ?? 0),
           chua_ro: Number(outcome?.unknown ?? 0),
           chua_gui: Number(outcome?.notShipped ?? 0),
           huy: Number(outcome?.cancelled ?? 0),

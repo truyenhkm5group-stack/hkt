@@ -50,6 +50,7 @@ on:
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
+          - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - backup              # pg_dump vào /root/backups
@@ -103,6 +104,14 @@ jobs:
           # Token API v2 — dùng cho đường ĐỐI CHIẾU. Khác secret webhook: secret để xác minh gói tin
           # SePay đẩy sang, token này để ERP chủ động hỏi lại SePay.
           SEPAY_API_TOKEN: ${{ secrets.SEPAY_API_TOKEN }}
+          # Chỉ dùng cho returns-hmt. ĐƯỜNG DẪN TẢI BẢNG TÍNH HÀNG HOÀN, khai ở Settings →
+          # Secrets and variables → Actions → Variables.
+          #
+          # VÌ SAO LÀ BIẾN CHỨ KHÔNG PHẢI Ô "arg": kho mã này PUBLIC, nên log của Actions và ô
+          # nhập của mỗi lần chạy ai cũng đọc được. Một đường dẫn dạng "ai có link cũng xem được"
+          # in vào đó là công bố nó vĩnh viễn — không rút lại được kể cả khi xoá lần chạy. Biến
+          # thì chỉ đi vào môi trường của tiến trình và không bao giờ được in ra.
+          HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -110,7 +119,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -270,6 +279,47 @@ jobs:
               pages-debug)
                 fetch_script pages-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
+              returns-hmt)
+                # ═══ ĐỐI SOÁT SỔ HÀNG HOÀN VIẾT TAY (HMT) ↔ ERP ═══
+                #
+                # MẶC ĐỊNH CHẠY THỬ. Ô "arg" để trống = chỉ đọc và in bảng phân loại; "--apply"
+                # mới ghi, và chỉ ghi những dòng MATCHED. Lượt ghi duy nhất là "kiện đã về tới
+                # kho" — TỒN KHO KHÔNG ĐỔI MỘT MÓN NÀO (AGENTS.md mục 10: hàng hoàn chỉ vào tồn
+                # khi người kho lập phiếu RETURN với số đếm thực tế).
+                #
+                # TỆP NGUỒN KHÔNG VÀO KHO MÃ VÀ KHÔNG Ở LẠI MÁY CHỦ: tải vào thư mục tạm, chạy,
+                # xoá — kể cả khi lệnh hỏng giữa chừng, nhờ `trap`. Kho mã này PUBLIC (AGENTS.md
+                # mục 5), và một bảng tính hàng hoàn có mã vận đơn của khách thật.
+                if [ -z "${HMT_WORKBOOK_URL:-}" ]; then
+                  echo "::error::Chưa khai biến HMT_WORKBOOK_URL. Vào Settings → Secrets and variables → Actions → tab Variables → New repository variable, tên HMT_WORKBOOK_URL, giá trị là đường dẫn TẢI .xlsx của bảng tính."
+                  echo "Với Google Sheet, đường dẫn tải có dạng: https://docs.google.com/spreadsheets/d/<id>/export?format=xlsx"
+                  echo "Bảng tính phải ở chế độ ai-có-link-cũng-xem-được, vì máy chủ tải bằng một lượt gọi không đăng nhập."
+                  echo "CỐ Ý không nhận đường dẫn qua ô \"arg\": ô đó hiện công khai trên trang lần chạy, và in link vào đó là công bố nó vĩnh viễn."
+                  exit 1
+                fi
+                # Ô "arg" chỉ còn nhận cờ. Danh sách ĐÓNG để không ai chèn được lệnh vào đây.
+                case "${ARG:-}" in
+                  "") HMT_FLAGS="" ;;
+                  "--apply") HMT_FLAGS="--apply" ;;
+                  *) echo "::error::Ô \"arg\" chỉ nhận rỗng (chạy thử) hoặc --apply. Nhận được: $ARG"; exit 1 ;;
+                esac
+                TMP="$(mktemp -d)"
+                trap 'rm -rf "$TMP"; docker exec erp-app rm -f /tmp/hmt-reconcile.xlsx >/dev/null 2>&1 || true' EXIT
+                # KHÔNG in đường dẫn. Chỉ in kết quả tải được hay không.
+                if ! curl -fsSL --max-time 180 -o "$TMP/hmt.xlsx" "$HMT_WORKBOOK_URL"; then
+                  echo "::error::Không tải được bảng tính từ HMT_WORKBOOK_URL. Kiểm tra biến có đúng đường dẫn TẢI (không phải đường dẫn /edit) và bảng tính đã ở chế độ ai-có-link-cũng-xem-được chưa."
+                  exit 1
+                fi
+                # Google trả về TRANG ĐĂNG NHẬP kèm HTTP 200 khi bảng tính chưa chia sẻ — `curl -f`
+                # không bắt được. Chữ ký ZIP thì bắt được, và nói đúng nguyên nhân.
+                if [ "$(head -c 2 "$TMP/hmt.xlsx")" != "PK" ]; then
+                  echo "::error::Tệp tải về KHÔNG phải .xlsx (thiếu chữ ký ZIP 'PK'). Nguyên nhân thường gặp nhất: bảng tính chưa được chia sẻ nên Google trả về trang đăng nhập thay vì tệp."
+                  exit 1
+                fi
+                echo "Đã tải bảng tính: $(wc -c < "$TMP/hmt.xlsx") byte · sha256 $(sha256sum "$TMP/hmt.xlsx" | cut -c1-16)…"
+                docker cp "$TMP/hmt.xlsx" erp-app:/tmp/hmt-reconcile.xlsx
+                fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS ;;
               cs-cleanup)
                 fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;

@@ -178,7 +178,7 @@ export function CareDrawer({
                     <a href={`tel:${data.phone}`} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-semibold hover:bg-accent">
                       <Phone className="size-3.5" /> {data.phone}
                     </a>
-                    <CopyButton value={data.phone} className="size-6 shrink-0" />
+                    <CopyButton value={data.phone} what="SĐT" className="size-6 shrink-0" />
                   </span>
                 ) : (
                   <span className="rounded-lg border px-2.5 py-1.5 text-[12.5px] text-muted-foreground">Chưa có SĐT</span>
@@ -187,7 +187,7 @@ export function CareDrawer({
                 {data.tracking ? (
                   <span className="inline-flex items-center gap-0.5 rounded-lg border bg-card pl-2.5 pr-1">
                     <span className="font-mono text-[12.5px]">{data.tracking}</span>
-                    <CopyButton value={data.tracking} className="size-6 shrink-0" />
+                    <CopyButton value={data.tracking} what="mã vận đơn" className="size-6 shrink-0" />
                   </span>
                 ) : null}
                 {data.chatUrl ? (

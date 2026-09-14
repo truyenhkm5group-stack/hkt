@@ -65,7 +65,7 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
             <RowLink href={`/shipments/${s.id}`} className="font-mono text-[13px]">
               {number ?? "—"}
             </RowLink>
-            {number ? <CopyButton value={number} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+            {number ? <CopyButton value={number} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <Truck className="size-3.5 shrink-0" />
@@ -134,7 +134,7 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
               {phone || "—"}
               {s.receiverAddress ? ` · ${s.receiverAddress}` : ""}
             </span>
-            {phone ? <CopyButton value={phone} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+            {phone ? <CopyButton value={phone} what="SĐT" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           </div>
         </div>
       );

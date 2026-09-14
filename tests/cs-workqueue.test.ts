@@ -255,7 +255,87 @@ export async function testCsWorkqueue(db: Db) {
   const careSau = (await getCareQueue()).counts.care;
   assert.equal(careSau, careTruoc + 1, "đúng một việc mới, và nó nằm ở bàn làm việc xử lý được nó");
 
+  // ───────── 14 · SAO CHÉP NHANH: CHÉP ĐÚNG GIÁ TRỊ, KHÔNG CHÉP THỨ MÁY TỰ CHỌN ─────────
+  //
+  // CSKH dán SĐT sang Pancake và mã vận đơn sang trang Viettel Post cả ngày. Hai luật:
+  // (a) chuỗi chép được phải là chuỗi TRONG CSDL, không phải chữ đang vẽ trên màn hình;
+  // (b) đơn có nhiều lần gửi thì KHÔNG được im lặng đưa ra một mã — mã đã huỷ dán sang ĐVVC là
+  //     một cuộc gọi hỏng mà không ai biết vì sao tra không ra.
+  await db.insert(schema.orders).values({ id: "csq-o15", stage: "SHIPPED", status: 3, insertedAt: gio(60), billFullName: "Khách Mười Lăm", billPhone: "0911000015", totalPriceAfterDiscount: 320_000 });
+  // Lần gửi ĐẦU đã huỷ (bưu tá không lấy được), lần gửi SAU đang chạy. Cố ý cho lần đã huỷ mang
+  // `created_at` mới hơn để bài kiểm không thể đạt chỉ nhờ "lấy cái mới nhất".
+  await db.insert(schema.shipments).values({ id: "csq-s15a", orderId: "csq-o15", carrier: "Viettel Post", vtpOrderNumber: "PKE15HUY0001", stage: "CANCELLED", isFinal: true, createdAt: gio(10) });
+  await db.insert(schema.shipments).values({ id: "csq-s15b", orderId: "csq-o15", carrier: "Viettel Post", vtpOrderNumber: "PKE15DANGDI2", stage: "IN_TRANSIT", isFinal: false, createdAt: gio(40) });
+  // Loại `COMPLAINT` (miền CUSTOMER) chứ không phải `WRONG_ADDRESS`: loại kia là `BY_SHIPMENT`
+  // nên khi đơn có kiện đang chạy nó chuyển sang bàn care và rơi khỏi hàng đợi CSKH.
+  await db.insert(schema.csCases).values({ id: "csq-c15", kind: "COMPLAINT", orderId: "csq-o15", source: "MANUAL", status: "OPEN", title: "Khách phàn nàn đơn đi chậm", customerPhone: "0911000015", assignee: "", createdAt: gio(2), dedupeKey: "test:csq-c15" });
+
+  // Đơn mà MỌI lần gửi đã kết thúc — 304 case như thế trên production 14/09/2026, và màn hình cũ
+  // không hiện cho họ một ký tự mã vận đơn nào.
+  await db.insert(schema.orders).values({ id: "csq-o16", stage: "SHIPPED", status: 3, insertedAt: gio(200), billFullName: "Khách Mười Sáu", billPhone: "0911000016", totalPriceAfterDiscount: 210_000 });
+  await db.insert(schema.shipments).values({ id: "csq-s16", orderId: "csq-o16", carrier: "Viettel Post", vtpOrderNumber: "PKE16DAHOAN", stage: "RETURNED", isFinal: true, createdAt: gio(190) });
+  await db.insert(schema.csCases).values({ id: "csq-c16", kind: "RETURN", orderId: "csq-o16", source: "MANUAL", status: "OPEN", title: "Khách hỏi lại đơn đã hoàn", customerPhone: "0911000016", assignee: "", createdAt: gio(1), dedupeKey: "test:csq-c16" });
+
+  // Case KHÔNG có đơn ⇒ không có mã nào để chép, và giao diện không được vẽ nút rỗng.
+  await db.insert(schema.csCases).values({ id: "csq-c17", kind: "OTHER", orderId: null, source: "MANUAL", status: "OPEN", title: "Khách hỏi chung", customerPhone: "0911000017", assignee: "", createdAt: gio(1), dedupeKey: "test:csq-c17" });
+
+  const dsChep = (await listCsCases(paramsOf())).rows;
+  const c15 = dsChep.find((r) => r.id === "csq-c15");
+  const c16 = dsChep.find((r) => r.id === "csq-c16");
+  const c17 = dsChep.find((r) => r.id === "csq-c17");
+  assert.ok(c15 && c16 && c17, "ba case vừa dựng phải có trong hàng đợi");
+
+  // (1) SĐT chép được là ĐÚNG chuỗi trong CSDL. (2) Số 0 đầu không được mất.
+  assert.equal(c15.customerPhone, "0911000015", "chép SĐT phải ra đúng chuỗi đã lưu");
+  assert.ok(c15.customerPhone.startsWith("0"), "số 0 đầu không được mất — đây là thứ hỏng khi ai đó ép kiểu số");
+
+  // (3)(5) Nhiều lần gửi: lần ĐANG CHẠY đứng đầu, mã đã huỷ KHÔNG phải mã mặc định, và mã kia
+  // vẫn liệt kê được chứ không biến mất.
+  assert.equal(c15.shipments.length, 2, "phải thấy ĐỦ hai lần gửi, không được cắt bớt");
+  assert.equal(c15.shipments[0]?.tracking, "PKE15DANGDI2", "mã mặc định phải là lần gửi ĐANG CHẠY, không phải lần mới tạo gần nhất");
+  assert.equal(c15.shipment?.tracking, "PKE15DANGDI2", "lần gửi đang quyết định giữ nguyên nghĩa cũ (is_final = false)");
+  assert.ok(c15.shipments.some((x) => x.tracking === "PKE15HUY0001"), "mã đã huỷ vẫn phải liệt kê được — giấu nó đi là giấu mất bối cảnh");
+  assert.equal(c15.shipments.filter((x) => !x.isFinal).length, 1, "chỉ một lần gửi đang chạy");
+
+  // Ổn định: chạy lại phải ra CÙNG thứ tự, nếu không mỗi lần tải trang CSKH thấy một mã khác.
+  const c15Lan2 = (await listCsCases(paramsOf())).rows.find((r) => r.id === "csq-c15");
+  assert.deepEqual(c15Lan2?.shipments.map((x) => x.tracking), c15.shipments.map((x) => x.tracking), "thứ tự lần gửi phải ổn định giữa hai lượt đọc");
+
+  // Đơn đã kết thúc: vẫn có mã để chép, nhưng KHÔNG được kéo case sang miền vận đơn.
+  assert.equal(c16.shipment, null, "không còn lần gửi đang chạy");
+  assert.equal(c16.shipments[0]?.tracking, "PKE16DAHOAN", "kiện đã hoàn vẫn phải đưa được mã cho CSKH gọi ĐVVC");
+  assert.equal(c16.shipments[0]?.isFinal, true, "và phải nói rõ nó đã kết thúc");
+  assert.equal(c16.domain, csDomainOf("RETURN", false), "phân miền KHÔNG được đổi vì nay nhìn thấy cả kiện đã kết thúc");
+
+  // (4) Không có đơn ⇒ không có mã ⇒ giao diện không vẽ nút.
+  assert.equal(c17.shipments.length, 0, "case không đơn thì không có mã vận đơn nào");
+  assert.equal(c17.shipment, null);
+
+  // ───────── Hợp đồng của chính cái nút, đọc thẳng mã nguồn ─────────
+  const nguonNut = readFileSync("components/misc.tsx", "utf8");
+  // (6) Bấm nút KHÔNG được kích hoạt dòng — và bàn phím đi qua đúng đường đó.
+  assert.match(nguonNut, /e\.stopPropagation\(\)/, "nút chép phải chặn nổi bọt, nếu không bấm nó sẽ mở dòng");
+  assert.match(nguonNut, /e\.preventDefault\(\)/, "và chặn hành vi mặc định khi nút nằm trong thẻ liên kết");
+  // (7)(8) Báo thành công, và HỎNG THÌ NÓI THẲNG — không im lặng giả vờ đã chép.
+  assert.match(nguonNut, /toast\.success/, "chép xong phải có phản hồi");
+  assert.match(nguonNut, /toast\.error/, "chép hỏng phải báo lỗi");
+  assert.match(nguonNut, /document\.execCommand\("copy"\)/, "phải có đường lui cho ngữ cảnh không bảo mật (navigator.clipboard không tồn tại)");
+  // (9) Trợ năng: nhãn nói RÕ chép cái gì, không phải mười nút "Sao chép" giống hệt nhau.
+  assert.match(nguonNut, /aria-label=\{ten\}/, "nhãn trợ năng phải lấy từ tên cụ thể của giá trị");
+  assert.match(nguonNut, /title=\{ten\}/, "tooltip dùng cùng câu với nhãn trợ năng");
+  assert.match(nguonNut, /focus-visible:opacity-100/, "nút mờ mà không có trạng thái focus thì người dùng bàn phím không biết mình đang ở đâu");
+
+  // (10) QUYỀN & CHE SỐ: nút chép KHÔNG được là một đường vòng để lấy dữ liệu màn hình không cho
+  // xem. Bất biến giữ điều đó đúng là **chép đúng thứ đang hiện**: cùng một biểu thức được vẽ ra
+  // màn hình cũng là biểu thức truyền vào `value`. Kho mã hiện KHÔNG che số ở bàn CSKH
+  // (`maskPhone` không được gọi ở đâu), nên nút chép không lộ thêm gì; ngày nào có che thì bài
+  // kiểm này đỏ và bắt phải xử lý tử tế thay vì lặng lẽ chép số đầy đủ.
+  const nguonBang = readFileSync("app/(dashboard)/cs/cs-table.tsx", "utf8");
+  assert.match(nguonBang, /<span className="font-mono text-xs text-muted-foreground">\{r\.customerPhone\}<\/span>\s*\n?\s*\{\/\*[\s\S]*?\*\/\}\s*\n?\s*<CopyButton value=\{r\.customerPhone\}/, "giá trị chép phải là ĐÚNG giá trị đang hiện — không chép nhiều hơn thứ màn hình cho xem");
+  assert.ok(!nguonBang.includes("maskPhone"), "bàn CSKH chưa che số; nếu thêm che thì phải xử lý cả nút chép, không để nó thành đường vòng");
+  assert.match(nguonBang, /\{r\.customerPhone \?/, "không có SĐT thì không vẽ nút — một nút bấm vào không được gì làm mất tin vào cả hàng nút");
+
   console.log(
-    `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại)`,
+    `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ`,
   );
 }

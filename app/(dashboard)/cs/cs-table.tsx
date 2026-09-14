@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlarmClock, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Pencil, RefreshCw, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CaseDialog } from "@/app/(dashboard)/cs/case-dialog";
+import { CopyButton } from "@/components/misc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -17,8 +18,10 @@ import { addCsCaseNote, csQuickAction, deleteCsCase, getCsCaseHistory, runCsDete
 import { CS_HUMAN_STATUSES, CS_KIND_LABEL, CS_SOURCE_LABEL, CS_STATUS_HINT, CS_STATUS_LABEL, CS_STATUS_TONE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_EVENT_ACTION_LABEL, CS_QUICK_ACTION, CS_QUICK_ACTIONS_BY_KIND, CS_SNOOZE_PRESETS, type CsQuickActionKey } from "@/lib/constants/cs-actions";
 import { CS_CASE_SLA_HOURS, isBotAssignee } from "@/lib/constants/cs-domain";
+import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
-import type { CsCaseRow } from "@/lib/queries/cs";
+import type { CsCaseRow, CsCaseShipment } from "@/lib/queries/cs";
+import type { ShipmentStage } from "@/db/schema";
 import { cn } from "@/lib/utils";
 
 export function DetectButton() {
@@ -126,6 +129,16 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
             const overdue = !isClosed(status) && ageHours > CS_CASE_SLA_HOURS;
             const busy = pendingId === r.id;
             const keys = CS_QUICK_ACTIONS_BY_KIND[r.kind as CsKind] ?? [];
+            /*
+              MÃ VẬN ĐƠN ĐỂ DÁN SANG ĐVVC — lần gửi ĐANG CHẠY trước, hết thì lấy lần gửi mới nhất
+              đã kết thúc. Truy vấn đã xếp đúng thứ tự đó (`lib/queries/cs.ts::loadCaseShipments`),
+              nên ở đây chỉ lấy phần tử đầu chứ không tự nghĩ ra một luật chọn thứ hai.
+
+              KHÔNG rơi về `r.shipment` một mình: 304 case trên production có vận đơn thật mà lần
+              gửi đã kết thúc, và màn hình cũ không hiện cho họ một ký tự nào.
+            */
+            const kienChinh = r.shipment ?? r.shipments[0] ?? null;
+            const kienKhac = r.shipments.filter((x) => x.shipmentId !== kienChinh?.shipmentId);
 
             return (
               <TableRow key={r.id} className={cn(isClosed(status) && "opacity-60", busy && "bg-muted/40")}>
@@ -143,13 +156,49 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   <EvidencePopover row={r} noteCount={note?.noteCount ?? 0} />
                 </TableCell>
 
-                <TableCell className="align-top text-sm">
+                {/*
+                  Ô ĐỊNH DANH — ba chuỗi CSKH phải dán sang hệ thống khác cả ngày: SĐT (sang
+                  Pancake), mã vận đơn (sang trang Viettel Post), mã đơn. Mỗi chuỗi có nút chép
+                  ngay cạnh nó; `group` ở đây để nút hiện rõ khi rê chuột lên cả ô.
+                */}
+                <TableCell className="group align-top text-sm">
                   <div>{r.customerName || "—"}</div>
-                  <div className="font-mono text-xs text-muted-foreground">{r.customerPhone}</div>
-                  {r.order || r.shipment ? (
-                    <div className="mt-0.5 flex flex-wrap gap-2 text-xs">
-                      {r.order ? <Link href={`/orders/${r.order.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="size-3" /> Đơn #{r.order.systemId ?? r.order.id}</Link> : null}
-                      {r.shipment ? <Link href={`/shipments/${r.shipment.shipmentId}`} className="inline-flex items-center gap-1 text-muted-foreground hover:underline"><Truck className="size-3" /> {r.shipment.tracking}</Link> : null}
+                  {r.customerPhone ? (
+                    <div className="flex items-center gap-0.5">
+                      <span className="font-mono text-xs text-muted-foreground">{r.customerPhone}</span>
+                      {/* Chép ĐÚNG chuỗi trong CSDL: không ghép tên, không bỏ số 0 đầu, không đổi +84. */}
+                      <CopyButton value={r.customerPhone} what="SĐT" className="size-5 shrink-0 [&_svg]:size-3" />
+                    </div>
+                  ) : (
+                    // KHÔNG vẽ nút chép rỗng: một nút bấm vào không được gì làm người dùng mất tin
+                    // vào cả hàng nút còn lại.
+                    <div className="text-xs text-muted-foreground">chưa có SĐT</div>
+                  )}
+                  {r.order || kienChinh ? (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                      {r.order ? (
+                        <span className="inline-flex items-center gap-0.5">
+                          <Link href={`/orders/${r.order.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="size-3" /> Đơn #{r.order.systemId ?? r.order.id}</Link>
+                          <CopyButton value={String(r.order.systemId ?? r.order.id)} what="mã đơn" className="size-5 shrink-0 [&_svg]:size-3" />
+                        </span>
+                      ) : null}
+                      {kienChinh ? (
+                        <span className="inline-flex items-center gap-0.5">
+                          <Link href={`/shipments/${kienChinh.shipmentId}`} className="inline-flex items-center gap-1 text-muted-foreground hover:underline"><Truck className="size-3" /> {kienChinh.tracking}</Link>
+                          <CopyButton value={kienChinh.tracking} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" />
+                          {/*
+                            Kiện ĐÃ KẾT THÚC vẫn hiện mã — CSKH gọi ĐVVC về đơn đã giao / đã hoàn
+                            nhiều hơn cả đơn đang đi. Nhưng phải nói rõ nó đã kết thúc, nếu không
+                            người đọc tưởng hàng đang trên đường.
+                          */}
+                          {kienChinh.isFinal ? (
+                            <span className="text-[10px] text-muted-foreground" title="Lần gửi này đã kết thúc — mã vẫn tra được trên trang Viettel Post">
+                              · {SHIPMENT_STAGE_LABEL[kienChinh.stage as ShipmentStage] ?? kienChinh.stage}
+                            </span>
+                          ) : null}
+                          {kienKhac.length ? <ShipmentCodes items={kienKhac} /> : null}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </TableCell>
@@ -395,6 +444,54 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setOpen(false)}>Đóng</Button>
           <Button size="sm" className="h-7 text-xs" disabled={saving || !text.trim()} onClick={save}>{saving ? <Loader2 className="size-3.5 animate-spin" /> : null} Lưu</Button>
         </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * ═══════════ ĐƠN CÓ NHIỀU LẦN GỬI: LIỆT KÊ, KHÔNG CHỌN HỘ ═══════════
+ *
+ * Một đơn gửi lại sau khi bưu tá không lấy được sẽ có hai mã vận đơn. Hiện một mã và giấu mã kia
+ * là cách CSKH dán nhầm mã đã huỷ sang trang Viettel Post rồi báo với khách là "không tra ra đơn".
+ *
+ * Nên: mã đang quyết định vẫn nằm ngoài dòng (đó là mã dùng 99% số lần), còn những mã khác nằm
+ * sau một nút "+N" — đủ nhỏ để không làm dòng cao thêm, và mỗi mã có nút chép riêng kèm trạng
+ * thái của chính nó.
+ *
+ * Đo production 14/09/2026: 598/598 case có đơn đều chỉ có MỘT vận đơn, nên nút này chưa hiện ra
+ * lần nào. Nó tồn tại để ngày có case thứ hai thì không ai phải phát hiện ra bằng một cuộc gọi
+ * hỏng — `tests/cs-workqueue.test.ts` khoá hành vi bằng dữ liệu dựng sẵn.
+ */
+function ShipmentCodes({ items }: { items: CsCaseShipment[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 px-1 text-[10px] text-muted-foreground"
+          title={`Đơn này còn ${items.length} mã vận đơn khác`}
+          aria-label={`Xem ${items.length} mã vận đơn khác của đơn`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          +{items.length}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-2" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 text-[11px] font-semibold text-muted-foreground">Các lần gửi khác của đơn</div>
+        <ul className="space-y-1">
+          {items.map((x) => (
+            <li key={x.shipmentId} className="flex items-center justify-between gap-2">
+              <Link href={`/shipments/${x.shipmentId}`} className="truncate font-mono text-xs hover:underline" title={x.tracking}>{x.tracking}</Link>
+              <span className="flex shrink-0 items-center gap-0.5">
+                <span className="text-[10px] text-muted-foreground">{SHIPMENT_STAGE_LABEL[x.stage as ShipmentStage] ?? x.stage}</span>
+                <CopyButton value={x.tracking} what="mã vận đơn" className="size-5 [&_svg]:size-3" />
+              </span>
+            </li>
+          ))}
+        </ul>
       </PopoverContent>
     </Popover>
   );

@@ -155,6 +155,49 @@ export async function rematerializeOutcomes(orderIds?: string[]): Promise<{ rows
         computed_at = now()
     `);
 
+    /**
+     * ───────────── DỌN DÒNG MỒ CÔI: CẶP KHOÁ KHÔNG CÒN TỒN TẠI ─────────────
+     *
+     * Khoá duy nhất của bảng là `(order_id, coalesce(shipment_id,''))`, sinh ra từ phép chiếu
+     * `orders LEFT JOIN shipments`. Khi một đơn CHƯA có vận đơn rồi SAU ĐÓ có, phép chiếu thôi
+     * sinh ra cặp `(đơn, NULL)` — nên lượt upsert ở trên ghi một dòng MỚI cho `(đơn, vận đơn)`,
+     * còn dòng `(đơn, NULL)` cũ nằm lại vĩnh viễn. Nó không bao giờ được chọn làm "cũ" nữa (bộ
+     * chọn cũng chạy trên chính phép chiếu ấy), nên nó không bao giờ được dựng lại.
+     *
+     * Đo production 14/09/2026: **266 dòng** như vậy, đọng từ 09/09, tất cả mang `logic_version`
+     * 2 trong khi luật đã ở phiên bản 3.
+     *
+     * Hai hệ quả, và cái thứ hai mới là cái đau:
+     *
+     *  · `outcomeCoverage()` báo "266 dòng mang luật cũ" mãi mãi — một cảnh báo không bao giờ
+     *    xanh được là một cảnh báo người ta học cách bỏ qua.
+     *  · Bất kỳ truy vấn nào đọc THẲNG bảng này (thay vì đi qua phép nối) đều đếm 266 đơn ấy HAI
+     *    LẦN. `select outcome, count(*) from canonical_order_outcome` hôm nay ra 2.998 dòng cho
+     *    2.732 đơn.
+     *
+     * Báo cáo đang chạy KHÔNG sai: `ORDER_OUTCOME_FAST` ghép đúng cặp khoá nên dòng mồ côi không
+     * bao giờ được đọc. Đây là dọn nợ, không phải vá số liệu.
+     *
+     * AN TOÀN, ĐÃ ĐO CHỨ KHÔNG PHẢI TIN: chỉ xoá dòng KHÔNG mang ghi nhận đã chốt
+     * (`recognized_at` · `cogs_basis` · `trued_up_at` đều rỗng). Kỳ đã chốt là bất biến
+     * (AGENTS.md mục 21), nên một dòng mồ côi CÓ giá vốn đã đóng băng thì GIỮ NGUYÊN và vẫn hiện
+     * ở `outcomeCoverage()` — thà một con số lạ còn hơn một lượt xoá im lặng. Đo trên production
+     * trước khi viết dòng này: cả 266 dòng đều `NOT_SHIPPED`, không dòng nào mang ghi nhận, nên
+     * lượt dọn đầu tiên không đụng vào một đồng giá vốn nào.
+     */
+    await tx.execute(sql`
+      delete from canonical_order_outcome m
+      where ${ids ? sql`m.order_id in ${ids}` : sql`true`}
+        and m.recognized_at is null
+        and m.cogs_basis is null
+        and m.trued_up_at is null
+        and not exists (
+          select 1 from orders o
+          left join shipments s on s.order_id = o.id
+          where o.id = m.order_id and coalesce(s.id, '') = coalesce(m.shipment_id, '')
+        )
+    `);
+
     // NHẬT KÝ cho từng lần chốt lại. `now()` là mốc bắt đầu giao dịch nên bằng đúng giá trị vừa ghi
     // vào `trued_up_at` — đó là cách nhận ra chính xác những dòng được chốt lại trong lượt này.
     await tx.execute(sql`
@@ -230,6 +273,20 @@ export async function rematerializeStale(limit = 2000): Promise<{ rebuilt: numbe
        -- CĂN CỨ (cogs_basis) chứ không nhìn con số: dòng đã ghi nhận mà không tra được nguồn nào mang
        -- basis = 'NONE' và recognized_cogs NULL — đó là kết luận, không phải việc còn dở.
        or (m.outcome = 'DELIVERED' and m.cogs_basis is null)
+       -- ĐƠN ĐANG MANG DÒNG MỒ CÔI. Mọi điều kiện trên đều nhìn dòng ĐANG ỨNG với cặp khoá hiện
+       -- tại, nên một dòng mà cặp khoá của nó đã biến mất thì không điều kiện nào thấy được — và
+       -- lượt dọn ở rematerializeOutcomes không bao giờ được gọi tới đơn ấy. Đó đúng là cái bẫy
+       -- đã để lại 266 dòng đọng trên production.
+       or exists (
+         select 1 from canonical_order_outcome mo
+         where mo.order_id = o.id
+           and mo.recognized_at is null and mo.cogs_basis is null and mo.trued_up_at is null
+           and not exists (
+             select 1 from orders o2
+             left join shipments s2 on s2.order_id = o2.id
+             where o2.id = mo.order_id and coalesce(s2.id, '') = coalesce(mo.shipment_id, '')
+           )
+       )
     limit ${limit}
   `);
   const ids = ((Array.isArray(staleIds) ? staleIds : ((staleIds as { rows?: unknown[] }).rows ?? [])) as { id: string }[]).map((r) => String(r.id));

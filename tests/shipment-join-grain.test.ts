@@ -56,6 +56,17 @@ const MIEN_TRU: Record<string, string> = {
     mà người care đã gọi điện, đã gửi yêu cầu ĐVVC. Lọc nó đi là xoá công của họ.
   */
   "lib/queries/dept-performance.ts": "grain là KIỆN người đó đã care (nguồn là care_case_events, mỗi sự kiện một shipment_id); kết quả đơn nối theo shipment_id đúng độ mịn",
+  /*
+    `loadCaseShipments` nối để LIỆT KÊ mọi lần gửi của đơn gắn vào case, rồi gộp thành một mảng
+    trong TypeScript. Grain của kết quả trả về vẫn là CASE — phép nhân dòng xảy ra trong SQL là
+    CỐ Ý và bị thu lại ngay sau đó. Không có một phép cộng nào trong hàm: không tiền, không số
+    lượng, không đếm đơn. Chỗ duy nhất đọc tiền của case là `csSummary`, và nó không đi qua đây.
+
+    Và KHÔNG được thêm `PRIMARY_ATTEMPT`: cả mục đích của hàm là để CSKH thấy ĐỦ các mã vận đơn.
+    Lọc còn một lần gửi là quay lại đúng hành vi vừa bị sửa — máy âm thầm chọn một mã, người dùng
+    dán nhầm mã đã huỷ sang trang Viettel Post rồi báo khách là "không tra ra đơn".
+  */
+  "lib/queries/cs.ts": "grain trả về là CASE; phép nối cố ý nhân dòng để liệt kê mọi lần gửi rồi gộp lại trong TS — không cộng tiền, không đếm đơn",
 };
 
 /** Nối `orders → shipments` ở mọi cách viết đang dùng trong kho (Drizzle builder và SQL thô). */

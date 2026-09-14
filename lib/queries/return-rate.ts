@@ -4,7 +4,7 @@ import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "
 import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
-import { RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
+import { ELIGIBLE_SENT_SQL, RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
 import type { Period } from "@/lib/search-params";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
@@ -556,14 +556,10 @@ const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')
 /** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
 const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
 /**
- * "ĐÃ GỬI" — `AWAITING_PICKUP` CỐ Ý KHÔNG CÓ TRONG DANH SÁCH NÀY.
- *
- * Kiện chờ ĐVVC tới lấy thì chưa rời kho, nên nó chưa được gửi. Đo production 13/09/2026: thêm nó
- * vào đây sẽ nhét 106 kiện chưa từng rời kho vào mẫu số của mọi báo cáo "đã gửi" — đúng con số mà
- * bản phát hành này sinh ra để loại. Ai thấy danh sách thiếu một giá trị và định thêm cho "đủ" thì
- * đọc dòng này trước.
+ * "ĐÃ GỬI" — danh sách khai ở `ELIGIBLE_SENT_OUTCOMES` (`lib/constants/returns.ts`), đọc lời giải
+ * thích đầy đủ ở đó. `AWAITING_PICKUP` CỐ Ý không có mặt: kiện chờ ĐVVC tới lấy thì chưa rời kho.
  */
-const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
 const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
@@ -688,7 +684,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       productName: sql<string>`max(${base.productName})`,
       variationDetail: sql<string>`max(${base.variationDetail})`,
       image: sql<string | null>`max(${base.image})`,
-      shipped: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      shipped: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
       delivered: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'DELIVERED')`,
       returned: sql<number>`count(distinct ${base.orderId}) filter (where ${RETURNED_ANY})`,
       returnedByRule: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
@@ -896,7 +892,7 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       orders: sql<number>`count(*)`,
-      shipped: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
       delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
       returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
       returnedByRule: sql<number>`count(*) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,

@@ -698,7 +698,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
           <CareOpenButton shipmentId={c.shipmentId} className="font-mono text-[12.5px] font-semibold">
             {c.tracking}
           </CareOpenButton>
-          {c.tracking ? <CopyButton value={c.tracking} className="size-5 shrink-0 [&_svg]:size-3" /> : null}
+          {c.tracking ? <CopyButton value={c.tracking} what="mã vận đơn" className="size-5 shrink-0 [&_svg]:size-3" /> : null}
           {c.orderSystemId ? (
             <Link href={`/orders/${c.orderId}`} className="text-[11px] text-muted-foreground hover:underline">
               #{c.orderSystemId}
@@ -734,7 +734,7 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
             <a href={`tel:${c.phone}`} className="numeric inline-flex items-center gap-1 text-[11.5px] text-primary hover:underline">
               <Phone className="size-3" /> {c.phone}
             </a>
-            <CopyButton value={c.phone} className="size-5 shrink-0 [&_svg]:size-3" />
+            <CopyButton value={c.phone} what="SĐT" className="size-5 shrink-0 [&_svg]:size-3" />
           </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">chưa có SĐT</span>

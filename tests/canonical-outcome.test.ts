@@ -5,6 +5,7 @@ import { clearMemo } from "@/lib/cache";
 import { CANONICAL_OUTCOME_VERSION, outcomeCoverage, outcomeParity, rematerializeOutcomes, rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
 import { ORDER_COGS } from "@/lib/queries/cogs";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * VẬT CHẤT HOÁ KHÔNG ĐƯỢC ĐỔI MỘT KẾT LUẬN NÀO.
@@ -159,6 +160,56 @@ export async function testCanonicalOutcome(db: Db) {
   const dungLai = await rematerializeStale();
   assert.ok(dungLai.rebuilt > 0, "dòng mang phiên bản cũ phải được dựng lại");
   assert.equal((await outcomeCoverage()).stale, 0, "dựng lại xong không còn dòng cũ");
+
+  /**
+   * ───────── DÒNG MỒ CÔI: CẶP KHOÁ KHÔNG CÒN, DÒNG PHẢI ĐI THEO ─────────
+   *
+   * Khoá là `(order_id, coalesce(shipment_id,''))`, sinh ra từ `orders LEFT JOIN shipments`. Đơn
+   * CHƯA có vận đơn rồi SAU ĐÓ có ⇒ cặp `(đơn, NULL)` thôi tồn tại, dòng cũ nằm lại vĩnh viễn và
+   * KHÔNG điều kiện "cũ" nào nhìn thấy nó (bộ chọn chạy trên chính phép chiếu ấy).
+   *
+   * Đo production 14/09/2026: 266 dòng như vậy, đọng từ 09/09, tất cả mang phiên bản luật 2 trong
+   * khi luật đã ở 3 — nên `outcomeCoverage().stale` không bao giờ về 0 được, và mọi truy vấn đọc
+   * THẲNG bảng này đếm 266 đơn ấy hai lần.
+   */
+  const donKhongVanDon = await db.query.orders.findFirst({ where: sql`not exists (select 1 from shipments s where s.order_id = orders.id)` });
+  if (donKhongVanDon) {
+    const truocKhiMoCoi = (await outcomeCoverage()).rows;
+    // Dựng đúng tình huống thật: đơn đã có dòng `(đơn, NULL)`, nay có vận đơn đầu tiên.
+    await db.insert(schema.shipments).values({ id: "coo-moicoi-s1", orderId: donKhongVanDon.id, carrier: "Viettel Post", vtpOrderNumber: "COO-MOCOI-1", stage: "PENDING", isFinal: false });
+    await rematerializeStale();
+
+    const conMoCoi = rowsOf<{ n: number }>(
+      await db.execute(sql`
+        select count(*)::int as n from canonical_order_outcome m
+        where not exists (
+          select 1 from orders o left join shipments s on s.order_id = o.id
+          where o.id = m.order_id and coalesce(s.id, '') = coalesce(m.shipment_id, '')
+        )`),
+    );
+    assert.equal(Number(conMoCoi[0]?.n ?? -1), 0, "dòng mà cặp khoá không còn tồn tại PHẢI được dọn — nếu không nó đọng lại vĩnh viễn và bị đếm hai lần");
+    assert.equal((await outcomeCoverage()).stale, 0, "và cảnh báo 'còn dòng luật cũ' phải về được 0 — một cảnh báo không bao giờ xanh là cảnh báo người ta bỏ qua");
+    assert.equal((await outcomeCoverage()).rows, truocKhiMoCoi, "đơn ấy vẫn đúng MỘT dòng: dòng (đơn, NULL) đi, dòng (đơn, vận đơn) tới");
+    assert.deepEqual((await outcomeParity(50)).mismatches, [], "dọn xong vẫn khớp từng dòng với biểu thức chuẩn");
+
+    // AN TOÀN: dòng mồ côi MANG ghi nhận đã chốt thì GIỮ NGUYÊN. Kỳ đã chốt là bất biến
+    // (AGENTS.md mục 21) — thà để một con số lạ hiện ra còn hơn xoá im lặng một mốc giá vốn.
+    await db.insert(schema.canonicalOrderOutcome).values({
+      orderId: donKhongVanDon.id,
+      shipmentId: null,
+      outcome: "DELIVERED",
+      recognizedCogs: 123_000,
+      recognizedAt: new Date(),
+      cogsBasis: "RECEIPT_BEFORE",
+      logicVersion: CANONICAL_OUTCOME_VERSION,
+    });
+    await rematerializeStale();
+    const conGiuLai = await db.query.canonicalOrderOutcome.findFirst({ where: sql`order_id = ${donKhongVanDon.id} and shipment_id is null` });
+    assert.ok(conGiuLai, "dòng mồ côi CÓ giá vốn đã chốt KHÔNG được xoá — kỳ đã chốt là bất biến");
+    assert.equal(conGiuLai?.recognizedCogs, 123_000, "và con số đã chốt không được đụng vào");
+    // Dọn tay để không ảnh hưởng các bài kiểm sau (đây là dữ liệu do chính bài này dựng).
+    await db.delete(schema.canonicalOrderOutcome).where(sql`order_id = ${donKhongVanDon.id} and shipment_id is null`);
+  }
 
   console.log(
     `✓ Kết quả đơn vật chất hoá: ${cov.rows} dòng khớp TỪNG DÒNG với biểu thức chuẩn · grain (đơn × vận đơn) giữ nguyên · dựng lại không nhân đôi · dựng theo đơn không đụng đơn khác · giá vốn khớp từng dòng · phiên bản luật v${CANONICAL_OUTCOME_VERSION}`,

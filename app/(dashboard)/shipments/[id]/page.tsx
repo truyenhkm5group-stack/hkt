@@ -47,7 +47,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         title={
           <span className="flex flex-wrap items-center gap-3">
             <span className="font-mono">{number ?? "Chưa có mã"}</span>
-            {number ? <CopyButton value={number} /> : null}
+            {number ? <CopyButton value={number} what="mã vận đơn" /> : null}
             <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
             {s.isFinal ? <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">Đã kết thúc</span> : null}
           </span>
@@ -176,7 +176,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           <SectionCard title="Người nhận">
             <div className="space-y-3 text-sm">
               <p className="flex items-center gap-2 font-semibold"><User className="size-4 text-muted-foreground" />{receiverName}</p>
-              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{receiverPhone || "—"} {receiverPhone ? <CopyButton value={receiverPhone} /> : null}</p>
+              <p className="flex items-center gap-2"><Phone className="size-4 text-muted-foreground" />{receiverPhone || "—"} {receiverPhone ? <CopyButton value={receiverPhone} what="SĐT" /> : null}</p>
               <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span>{receiverAddress}</span></p>
             </div>
           </SectionCard>
