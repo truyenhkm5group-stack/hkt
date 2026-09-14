@@ -594,6 +594,19 @@ Không nhánh nào được triển khai đè lên nhánh kia. Việc này thu�
 | Kỳ đã chốt | /payroll sau khi chốt một kỳ | Dải xanh "đã CHỐT", bảng đọc ảnh chụp, và khối "Chênh lệch phát sinh SAU khi chốt" nếu dữ liệu đã đổi |
 | Căn cứ quy kết | /payroll (quyền xem toàn bộ) | Khối "Doanh thu chia cho marketer bằng căn cứ nào" — bốn nhóm cộng lại bằng tổng; phần "bảng gán phẳng" càng nhỏ càng tốt |
 | Đã trừ đủ chi phí chưa | /payroll | Khối "Lợi nhuận này đã trừ đủ chi phí chưa?" — cảnh báo của máy chi phí, kèm việc phải làm |
+| Đã trả vs phải trả | /payroll | Thẻ "Đã trả trong kỳ" kèm số chứng từ và chênh lệch với phải trả · hôm nay là `0 ₫ · 0 khoản chi` |
+| Xuất CSV | /payroll → **Xuất CSV** | Tệp mở ra khớp đúng bảng đang xem; hai dòng cuối ghi kỳ, cơ sở, số ngày chia lương và phạm vi |
+| Nhắc khai email | /payroll (quyền khai báo) | Dải vàng liệt kê đích danh nhân sự chưa có "Email đăng nhập ERP" — hôm nay là 4/4 |
+
+### Ba thao tác ngắn nhất để tin con số
+
+1. `/payroll?period=7d` rồi `/payroll?period=month` — cột **Lương cứng (thuộc kỳ)** phải ĐỔI, và
+   dòng nhỏ dưới nó nói đúng phép chia. Trước bản này cột ấy đứng im ở con số lương THÁNG.
+2. `/payroll?basis=cash` — phải thấy **dải đỏ** "không dùng để chốt lương được" kèm lý do và đường
+   dẫn sang LN1. Trước bản này bốn cơ sở trông giống hệt nhau.
+3. `/marketing/fanpages` → mở một dòng **Trùng đơn** — phải có CĂN CỨ đọc được (tên dấu hiệu) và
+   điểm ≥ 4. Không dòng nào được mang điểm 1.
+
 
 Câu truy vấn xác minh sau triển khai (ops `db-query`, chỉ đọc) — chạy lại đối soát fanpage trước,
 rồi so với bảng ở mục 3:
