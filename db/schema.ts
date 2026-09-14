@@ -2347,10 +2347,59 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type CodBatch = typeof codBatches.$inferSelect;
 export type CodStatementLine = typeof codStatementLines.$inferSelect;
 export type VtpStatementFile = typeof vtpStatementFiles.$inferSelect;
+export type HmtWorkbookRow = typeof hmtWorkbooks.$inferSelect;
 export type MarketingIdea = typeof marketingIdeas.$inferSelect;
 export type IdeaStatus = MarketingIdea["status"];
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;
+
+/**
+ * ═══════════ BẢNG TÍNH HÀNG HOÀN VIẾT TAY, ĐƯA VÀO BẰNG CHÍNH ERP ═══════════
+ *
+ * ─── VÌ SAO CÓ BẢNG NÀY ───
+ *
+ * Sổ hàng hoàn của kho là một tệp Excel nằm trên máy của chủ shop. Để đối soát nó với ERP, tệp
+ * phải tới được nơi có CSDL production. Ba đường từng thử và vì sao đều sai:
+ *
+ *  · **`scp` lên máy chủ** — cần khoá SSH mà máy của chủ shop không có, và bắt người vận hành mở
+ *    terminal cho một việc hàng tuần là cách chắc chắn nhất để việc đó không bao giờ được làm.
+ *  · **đường dẫn tải công khai** (`HMT_WORKBOOK_URL`) — "ai có link cũng xem được" là một cách nói
+ *    khác của "dữ liệu khách hàng nằm trên Internet".
+ *  · **đưa tệp vào kho mã** — kho mã này PUBLIC.
+ *
+ * Đường đúng là đường ERP **đã có sẵn** cho bảng kê Viettel Post (`vtp_statement_files`): người
+ * dùng đã đăng nhập kéo tệp vào màn hình của chính họ, tệp đi qua HTTPS bằng phiên của họ, và nằm
+ * lại trong CSDL production. Không SSH, không console, không khoá, không link công khai.
+ *
+ * ─── KHOÁ TỰ NHIÊN LÀ NỘI DUNG, KHÔNG PHẢI TÊN TỆP ───
+ *
+ * `sha256` là UNIQUE. Cùng một tệp tải lên mười lần vẫn là MỘT dòng — kể cả khi người dùng đổi tên
+ * tệp, mà họ luôn đổi ("Bản sao của…", "… (1).xlsx"). Ngược lại, hai tệp khác nội dung mà trùng
+ * tên là hai dòng khác nhau, đúng như phải thế: đối soát bằng nhầm bản là sai số tồn kho.
+ *
+ * Băm do MÁY CHỦ tính lại từ chính các byte đã nhận, KHÔNG nhận từ client (AGENTS.md mục 34: cột
+ * chữ đi kèm chỉ là ảnh chụp, khoá mới là danh tính).
+ */
+export const hmtWorkbooks = pgTable(
+  "hmt_workbooks",
+  {
+    id: id(),
+    filename: text("filename").notNull(),
+    /** Băm SHA-256 của NỘI DUNG, do máy chủ tính. Đây là danh tính của bản đối soát. */
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull().default(0),
+    /** Nội dung tệp, base64 — nguyên vẹn như lúc người dùng kéo vào, giống `vtp_statement_files`. */
+    content: text("content").notNull(),
+    /** Danh tính người tải lên. `NULL` = đưa vào bằng đường khác (script), không phải "không ai". */
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Ảnh chụp TÊN lúc tải lên — người nghỉ việc thì dòng vẫn đọc được. */
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    /** Lượt đối soát gần nhất ĐỌC bản này. `NULL` = đã tải lên nhưng chưa đối soát lần nào. */
+    lastUsedAt: ts("last_used_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("hmt_workbooks_sha_uq").on(t.sha256), index("hmt_workbooks_created_idx").on(t.createdAt)],
+);
 
 /**
  * ═══════════ SỔ CHĂM SÓC ĐƠN GIAO HỤT ═══════════

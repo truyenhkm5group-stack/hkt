@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0081_cs_case_semantic"] as const;
+const MOI = ["0082_hmt_workbook_upload"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -69,7 +69,11 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_care' and column_name = 'active'"), 1, "bước 1: 0075 phải đã áp — cột active có sẵn");
     // 0081 CHƯA áp ở bước 1. Kiểm điều này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên
     // cập nhật `MOI`: cột đã có sẵn từ trước thì "áp thêm migration" chẳng chứng minh được gì.
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 0, "bước 1: cột semantic CHƯA được có — đó là thứ 0081 thêm vào");
+    // 0081 đã chạy thật trên máy chủ (bản phát hành #266) nên nay nó thuộc "trạng thái production
+    // hôm nay", không còn là migration mới. Thứ CHƯA được có ở bước 1 là bảng của 0082 — kiểm điều
+    // này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên cập nhật `MOI`.
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 1, "bước 1: 0081 phải đã áp — cột semantic có sẵn");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 0, "bước 1: bảng hmt_workbooks CHƯA được có — đó là thứ 0082 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -94,14 +98,13 @@ export async function testMigrationUpgradePath() {
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
 
     /*
-      ═══ 0081: KẾT LUẬN NGỮ NGHĨA — MỘT CỘT NULLABLE, KHÔNG ĐỤNG GÌ CŨ ═══
+      ═══ 0081 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
 
-      Migration mới của bản này thêm ĐÚNG một cột. Hai điều phải đúng và chỉ hai:
-      cột có mặt sau khi áp, và dòng CŨ vẫn `NULL` — `NULL` ở đây nghĩa là CHƯA BIẾT (case sinh
-      trước bản này), không phải "model đã xem và không nói gì".
+      Giữ lại phần kiểm quan trọng nhất của nó: case CŨ vẫn `NULL`. `NULL` nghĩa là CHƯA BIẾT (case
+      sinh trước bản ấy), không phải "model đã xem và không nói gì" — và một backfill "hợp lý" thêm
+      vào sau này sẽ làm bài này đỏ, đúng lúc cần đỏ.
     */
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 1, "0081: cột semantic phải được thêm");
-    assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and semantic is null"), 1, "0081: case cũ phải ở NULL — KHÔNG backfill, không mặc định");
+    assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and semantic is null"), 1, "case cũ phải ở NULL — KHÔNG backfill, không mặc định");
     /*
       TRẠNG THÁI `NEEDS_REVIEW` KHÔNG CẦN MIGRATION, và bài này chứng minh điều đó thay vì tin lời.
 
@@ -111,6 +114,26 @@ export async function testMigrationUpgradePath() {
     */
     await client.query(`insert into cs_cases (id, kind, status, title) values ('up-c2', 'RETURN', 'NEEDS_REVIEW', 'Máy thấy nghi, người chưa xem')`);
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c2' and status = 'NEEDS_REVIEW'"), 1, "trạng thái 'chờ người xem lại' phải ghi được mà không cần migration");
+
+    /*
+      ═══ 0082: SỔ HÀNG HOÀN ĐƯA VÀO BẰNG CHÍNH ERP — MỘT BẢNG MỚI, KHOÁ LÀ NỘI DUNG ═══
+
+      Bảng này là đường thay cho `scp`. Hai điều phải đúng: bảng có mặt, và cùng NỘI DUNG thì chỉ
+      một dòng — kể cả khi người dùng đổi tên tệp, mà họ luôn đổi ("Bản sao của…", "… (1).xlsx").
+      Hai dòng cho một tệp nghĩa là hai lượt đối soát đọc hai thứ khác nhau.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "0082: bảng hmt_workbooks phải được tạo");
+    await client.query(`insert into hmt_workbooks (id, filename, sha256, bytes, content, uploaded_by) values ('up-wb1', 'so.xlsx', 'abc123', 3, 'AAA', 'Chủ shop')`);
+    await assert.rejects(
+      () => client.query(`insert into hmt_workbooks (id, filename, sha256, bytes, content, uploaded_by) values ('up-wb2', 'so (1).xlsx', 'abc123', 3, 'AAA', 'Chủ shop')`),
+      () => true,
+      "0082: cùng nội dung, khác tên vẫn phải là MỘT bản",
+    );
+    // Người tải lên bị xoá tài khoản ⇒ khoá về NULL, DÒNG Ở LẠI: xoá bằng chứng theo người là mất dấu một lượt đối soát.
+    await client.query(`update hmt_workbooks set uploaded_by_user_id = 'up-u1' where id = 'up-wb1'`);
+    await client.query(`delete from users where id = 'up-u1'`);
+    assert.equal(await dem("select count(*)::int as n from hmt_workbooks where id = 'up-wb1' and uploaded_by_user_id is null"), 1, "0082: xoá tài khoản người tải KHÔNG được cuốn theo dòng bằng chứng");
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
 
     /*
       ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══

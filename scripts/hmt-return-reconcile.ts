@@ -1,8 +1,9 @@
 /**
  * ═══════════ ĐỐI SOÁT MỘT LẦN: SỔ HÀNG HOÀN VIẾT TAY (HMT) ↔ ERP ═══════════
  *
- *   npm run returns:hmt -- --file '/duong/dan/Ban sao cua Hang hoan HMT.xlsx'
- *   npm run returns:hmt -- --file <tệp> --apply
+ *   npm run returns:hmt                        ← đọc bản MỚI NHẤT người dùng tải lên qua ERP
+ *   npm run returns:hmt -- --apply
+ *   npm run returns:hmt -- --file '/duong/dan/Ban sao cua Hang hoan HMT.xlsx'   ← tệp trên đĩa
  *
  * MẶC ĐỊNH LÀ CHẠY THỬ. Đổi dữ liệu production phải là một quyết định tường minh (`--apply`), chứ
  * không phải tác dụng phụ của việc chạy một lệnh để xem thử — cùng luật với
@@ -26,6 +27,7 @@ import { HMT_MATCH, HMT_MATCH_STATUSES, HMT_SHEETS, HMT_SHEET_ROLES, HMT_SOURCE,
 import { systemActor } from "@/lib/constants/actor";
 import { applyHmtReconciliation, planHmtReconciliation, type HmtPlan } from "@/lib/returns/hmt-reconcile";
 import { readHmtWorkbook, unknownSheetNames, type HmtWorkbook } from "@/lib/returns/hmt-workbook";
+import { latestHmtWorkbook, looksLikeXlsx, markHmtWorkbookUsed, sha256Of, type HmtSource } from "@/lib/returns/hmt-source";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -92,13 +94,45 @@ function inKeHoach(plan: HmtPlan) {
   }
 }
 
-async function main() {
+/**
+ * ═══════════ TỆP NGUỒN: CSDL TRƯỚC, ĐĨA SAU ═══════════
+ *
+ * Mặc định đọc bản MỚI NHẤT người dùng đã tải lên qua màn hình Kiểm đếm hàng hoàn. Đó là đường duy
+ * nhất không đòi ai mở terminal, và là đường chủ shop thật sự dùng được từ máy Windows của mình.
+ *
+ * `--file` vẫn còn cho người vận hành đang ngồi ngay trên máy chủ. Hai đường, MỘT cách đọc
+ * (`readHmtWorkbook`), nên không thể ra hai kết quả khác nhau.
+ *
+ * BĂM LUÔN ĐƯỢC IN RA, dù nguồn nào. Nó là thứ đối chiếu được giữa lượt chạy thử và lượt ghi: khác
+ * băm nghĩa là đang đối soát một BẢN KHÁC, và số liệu của hai lượt không so được với nhau.
+ */
+async function nguonTep(): Promise<HmtSource> {
   const file = arg("file");
-  if (!file) throw new Error("Thiếu --file <đường dẫn tệp .xlsx>");
+  if (file) {
+    const buffer = readFileSync(file);
+    if (!looksLikeXlsx(buffer)) throw new Error(`Tệp "${file}" không phải .xlsx (thiếu dấu hiệu ZIP ở đầu tệp)`);
+    return { filename: file, sha256: sha256Of(buffer), bytes: buffer.length, origin: "FILE", uploadedBy: "", uploadedAt: null, lastUsedAt: null, buffer };
+  }
+  const db = await latestHmtWorkbook();
+  if (db) return db;
+  throw new Error(
+    "Chưa có bảng tính nào để đối soát.\n" +
+      "  · CÁCH THƯỜNG DÙNG: mở ERP → Kiểm đếm hàng hoàn → kéo tệp .xlsx vào ô “Sổ hàng hoàn viết tay”, rồi chạy lại lệnh này.\n" +
+      "  · Hoặc, nếu đang ngồi trên máy chủ: truyền --file <đường dẫn tệp .xlsx>.",
+  );
+}
+
+async function main() {
   const label = arg("label") ?? HMT_WORKBOOK_LABEL;
   const apply = process.argv.includes("--apply");
 
-  const wb = readHmtWorkbook(readFileSync(file), label);
+  const nguon = await nguonTep();
+  console.log(`\n═══ TỆP NGUỒN ═══`);
+  console.log(`   ${nguon.origin === "DB" ? "tải lên qua ERP" : "tệp trên máy chủ"}: ${nguon.filename}`);
+  console.log(`   ${n(nguon.bytes)} byte · SHA-256 ${nguon.sha256}`);
+  if (nguon.origin === "DB") console.log(`   người tải: ${nguon.uploadedBy || "—"} · lúc ${nguon.uploadedAt ? nguon.uploadedAt.toISOString() : "—"}`);
+
+  const wb = readHmtWorkbook(nguon.buffer, label);
   inNguon(wb);
 
   const plan = await planHmtReconciliation(wb);
@@ -116,6 +150,8 @@ async function main() {
   }
 
   const kq = await applyHmtReconciliation(plan, systemActor(HMT_SOURCE));
+  // Đánh dấu bản này ĐÃ ĐƯỢC DÙNG — màn hình phân biệt "vừa tải lên, chưa đối soát" với "đã đối soát".
+  if (nguon.origin === "DB") await markHmtWorkbookUsed(nguon.sha256);
   console.log(`\n═══ ĐÃ GHI ═══`);
   console.log(`   kiện ghi nhận đã về kho: ${n(kq.shipmentsReceived)} (dòng món ${n(kq.itemRowsWritten)} · ${n(kq.unitsWritten)} món)`);
   console.log(`   dòng chứng cứ mới: ${n(kq.provenanceRows)} · bỏ qua vì đã ghi lần trước: ${n(kq.duplicateWrites)}`);

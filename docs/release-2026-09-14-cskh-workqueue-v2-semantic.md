@@ -214,15 +214,223 @@ CHECK vào cột ấy thì bài kiểm đỏ, đúng lúc cần đỏ.
 
 ---
 
-## 8. Còn chờ: đối soát HMT bằng tệp thật
+## 8. Số đo SAU deploy (production, 14/09/2026)
 
-Bộ máy đối soát đã dựng xong và kiểm thử đầy đủ từ bản trước. Thứ còn thiếu là **chính tệp** trên
-máy có quyền đọc CSDL production.
+Production SHA **`3454fff` → `6ee2098`** (deploy run #266, cổng CI xanh cả 5 bước trước khi chạm máy
+chủ; bước "Kiểm tra HTTPS từ bên ngoài" xác nhận đúng mã commit). Migration 80 → **81**.
 
-Môi trường phiên làm việc này **không** có đường đưa tệp sang: `docs.google.com` và
-`erp.vnxcommerce.com` đều bị chặn ở tầng proxy (403 CONNECT); ô "arg" của workflow hiện công khai
-trên kho mã PUBLIC; và tệp tuyệt đối không được commit vào Git hay đưa vào ảnh Docker.
+### Smoke trên HTML thật (51 trang, phiên đăng nhập hợp lệ)
 
-Nên: máy chủ đã sẵn sàng đọc `/root/hmt/*.xlsx`. Chủ shop chỉ cần **một lệnh duy nhất** từ máy đang
-có tệp, rồi chạy thao tác ops `returns-hmt`.
+`51/51 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 chậm · 0 hết phiên`. `/cs` và `/cs?view=theo-case`
+đều có mặt **cả ba công cụ mới** — lá chắn smoke nay kiểm chúng, nên thiếu một cái là `APP_ERROR`
+chứ không phải HTTP 200 xanh.
 
+### Đối chiếu hàng đợi với thực tế — **406 case đang mở**
+
+| Kết luận | Số case |
+|---|---|
+| `KEEP_OPEN` | **398** |
+| `AUTO_RESOLVE` | 0 |
+| `RECLASSIFY` | 0 |
+| `NEEDS_REVIEW` | 0 |
+
+Theo loại: 356 giao không thành · 14 trả hàng · 11 giục giao · 7 tư vấn size · 5 khiếu nại · 2 đổi
+màu · 1 đổi size · 1 SĐT mới · 1 sai địa chỉ.
+
+**Máy đóng được 0 case — và đó là kết quả ĐÚNG, không phải máy không chạy.** Đối chiếu với dữ liệu
+thô cùng lúc:
+
+| Loại | Có đơn | Đơn đã xong | Kiện đang chạy | Vì sao KEEP_OPEN |
+|---|---|---|---|---|
+| Giao không thành (356) | 356 | 231 | 130 | loại này **chưa khai điều kiện đóng** ⇒ giữ nguyên |
+| Giục giao (11) | 11 | **0** | 8 | không đơn nào kết thúc ⇒ câu giục vẫn còn nghĩa |
+| Trả hàng (14) | 14 | 7 | 5 | đều có đơn thật ⇒ còn nguyên lý do |
+| Sai địa chỉ (1) | 1 | 1 | **0** | không có kiện đang chạy ⇒ vẫn là việc CSKH |
+
+### "Đủ thông tin · chưa tạo đơn" — 8 đang mở, **cả 8 còn treo THẬT**
+
+Không case nào đóng được theo bốn bậc chứng cứ. Tra từng case để kiểm chứng chứ không tin con số:
+
+| Đơn gắn case | Khoảng cách tới mốc case | Đơn xác nhận trong cửa sổ ±2 ngày | Đúng hay sai |
+|---|---|---|---|
+| (không có đơn) | — | 0 | ✓ thật sự chưa có đơn |
+| `DELIVERED` | **298 giờ** | 0 | ✓ **khách mua lại** — đúng ca 298h đã đo lúc chọn ngưỡng |
+| `CONFIRMED` | **83 giờ** | 0 | ✓ ngoài cửa sổ ⇒ máy KHÔNG kết luận, để người quyết |
+| `NEW` × 4 | 23–47 giờ | 0 | ✓ "Mới" chưa phải "đã tạo" — ranh giới chủ shop vạch ở "Đã xác nhận" |
+
+Đúng hai ca mà cửa sổ ±2 ngày được dựng lên để phân biệt (83h và 298h) đều nằm trong tám case này,
+và cả hai đều được giữ mở. Ngưỡng làm đúng việc của nó trên dữ liệu thật.
+
+**Chạy `--apply`: 0/0 case đóng mềm, 0 case "chưa tạo đơn" đóng.** Chạy thử và chạy thật ra CÙNG
+một con số ⇒ không-thao-tác, đúng nghĩa idempotent.
+
+---
+
+## 9. Đối soát HMT: đường đưa tệp vào máy chủ đã dựng xong
+
+### Vì sao bộ máy đã xong mà chưa chạy được lần nào
+
+Bộ máy đối soát dựng xong và kiểm thử đầy đủ từ bản 13/09. Thứ thiếu suốt từ đó không phải mã —
+mà là **đường đưa tệp Excel từ máy Windows của chủ shop tới nơi có CSDL production**. Bốn đường đã
+thử, và vì sao ba đường đầu đều sai:
+
+| Đường | Vì sao không dùng được |
+|---|---|
+| `scp` lên máy chủ | máy chủ shop **không có khoá SSH**, đăng nhập bằng mật khẩu cũng không được; và bắt người vận hành mở terminal cho một việc hàng tuần là cách chắc chắn nhất để việc đó không bao giờ được làm |
+| Đường dẫn tải công khai (`HMT_WORKBOOK_URL`) | "ai có link cũng xem được" là cách nói khác của **tên và địa chỉ khách hàng nằm trên Internet** |
+| Đưa tệp vào kho mã | kho mã này **PUBLIC** |
+| **Tải lên qua chính ERP** | ✅ người đã đăng nhập kéo tệp vào màn hình của họ; tệp đi qua HTTPS bằng **phiên của họ** và nằm lại trong CSDL production |
+
+Đường thứ tư đã nằm sẵn trong ERP suốt thời gian đó — đó chính là cách bảng kê Viettel Post vẫn
+vào hệ thống hàng tuần (`vtp_statement_files`). Bản này dùng lại đúng hình dạng ấy cho sổ hàng hoàn.
+
+### Cái đã dựng
+
+· Bảng `hmt_workbooks` (migration **0082**). **Khoá tự nhiên là NỘI DUNG**, không phải tên tệp:
+  `sha256` UNIQUE. Cùng tệp tải mười lần vẫn một dòng — kể cả khi người dùng đổi tên, mà họ luôn đổi.
+· Ô tải lên trên trang **Kiểm đếm hàng hoàn**. **Máy chủ** tính băm từ chính byte đã nhận và
+  **máy chủ** kiểm tệp ngay lúc nhận: kéo nhầm bảng kê Viettel Post (cũng `.xlsx`, cũng mở được) bị
+  từ chối ngay trước mặt người vừa kéo nó vào, chứ không nhận vào rồi mới báo "0 dòng khớp".
+· `npm run returns:hmt` không còn bắt buộc `--file` — mặc định đọc bản mới nhất trong CSDL.
+· Thao tác ops `returns-hmt` tự rơi về đường CSDL, nên chạy đối soát không cần chuẩn bị gì trước.
+· Nút **xoá tệp** sau khi đối soát xong; chứng cứ không đi theo (băm · sheet · số dòng · mã vận đơn
+  vẫn nằm ở `hmt_return_reconciliation`).
+
+### Kiểm đếm nguồn của tệp THẬT (đọc tại chỗ, SHA-256 `c5616055…f5ed`, 45.029 byte)
+
+| Sheet | Dòng có dữ liệu | Mã vận đơn khác nhau | 1P1 | Mã lặp | Ô trống → kế thừa | Không suy được |
+|---|---|---|---|---|---|---|
+| MVĐ hoàn, 1 phần | 833 | **817** | **237** | 16 | 0 | 0 |
+| Chi tiết đơn hoàn | 507 | 452 | 0 | 52 | 55 → 54 | **1** |
+| Chi tiết đơn 1 phần | 243 | 222 | **220** | 19 | 20 → 20 | 0 |
+
+Độ phủ mã hàng: **727/750 dòng món** đọc được mã (Q002 611 · Q003 116); **23 dòng không đọc được**
+— chúng được giữ nguyên ở nhóm "không đọc được mã hàng", **không** bị gán bừa vào Q002/Q003.
+
+**Khớp từng con số với ảnh chụp phiên trước** (222 mã / 19 lặp · 507 và 243 dòng · 1P1 237/0/220 ·
+~750 dòng món, ~727 đọc được, ~23 không): không lệch một đơn vị nào. Tệp không đổi giữa hai phiên.
+
+### ĐÃ CHẠY THẬT TRÊN PRODUCTION — 14/09/2026
+
+Chủ shop kéo tệp vào ô *"Sổ hàng hoàn viết tay"* lúc **14:28 giờ VN**. Từ đó trở đi toàn bộ chạy
+qua thao tác ops, không SSH, không tệp trên đĩa máy chủ.
+
+**Bản nhận được đúng bản đã kiểm:**
+
+| | |
+|---|---|
+| Tên tệp | `Bản sao của Hàng hoàn HMT.xlsx` |
+| SHA-256 | `c5616055b7f18e7b051c2c33497a9ce6fca699213151cf1c689b67eb2266f5ed` |
+| Dung lượng | 45.029 byte (base64 60.040) |
+| Người tải | Truyền HK · 14/09/2026 14:28 |
+
+Băm **trùng từng ký tự** với bản đọc tại chỗ trước đó ⇒ byte không đổi trên đường đi.
+
+#### Chạy thử — phân loại 750 dòng món
+
+| Nhóm | Chi tiết đơn hoàn | Chi tiết đơn 1 phần | Tổng |
+|---|---|---|---|
+| **MATCHED** (mã vận đơn + mẫu mã đều khớp, SL trong ngưỡng) | **493** | **231** | **724** |
+| SKU_MISMATCH | 13 | 10 | 23 |
+| AMBIGUOUS_TRACKING | 1 | 0 | 1 |
+| UNMATCHED_TRACKING | 0 | 2 | 2 |
+| *(dòng nguồn)* | *507* | *243* | *750* |
+
+· mã vận đơn lần ra kiện trong ERP: **452** (đơn hoàn) + **220** (1 phần) = **672 kiện**
+· mẫu mã lần ra đúng một: 493 + 232 · số lượng trong ngưỡng kỳ vọng: 493 + 231
+· **AMBIGUOUS_SKU: 0** · **QTY_CONFLICT: 0** · **ALREADY_RECEIVED: 0** (ảnh chụp trước: 0 phiếu kiểm đếm)
+· **NO_ITEM_DETAIL: 144** mã có ở sheet tổng mà không có dòng món nào — **không** ghi gì, đúng luật:
+  mã vận đơn chứng minh danh tính kiện, **không** chứng minh trong kiện có món gì.
+
+#### Cổng an toàn — kiểm ở mức DỮ LIỆU, không phải lời hứa
+
+`select match_status, count(*), count(*) filter (where written)` sau khi ghi:
+
+| match_status | dòng | **đã ghi** | kiện |
+|---|---|---|---|
+| MATCHED | 724 | **724** | 672 |
+| SKU_MISMATCH | 23 | **0** | 20 |
+| AMBIGUOUS_TRACKING | 1 | **0** | 0 |
+| UNMATCHED_TRACKING | 2 | **0** | 0 |
+| **tổng** | **750** | **724** | **672** |
+
+Chỉ MATCHED có `written = true`. Ba nhóm còn lại: **0**, và ràng buộc `hmt_return_rec_written_check`
+ở CSDL chặn cứng chuyện ngược lại. Không dòng nào khớp bằng SĐT / tên khách / COD.
+
+#### Ảnh chụp tồn kho TRƯỚC và SAU — mọi chênh lệch giải thích được
+
+| Chỉ tiêu | Trước | Sau | Δ |
+|---|---|---|---|
+| `return_inspections` tổng | 0 | **672** | +672 |
+| … RECEIVED (chờ đếm) | 0 | **672** | +672 |
+| … ĐÃ ĐẾM | 0 | 0 | 0 |
+| `stock_receipts` kind=RETURN | 0 | **0** | **0** |
+| Món tái nhập (RESTOCKED) | 0 | **0** | **0** |
+| **TỒN THỰC TẾ tổng** | **1.985** | **1.985** | **0** |
+| `hmt_return_reconciliation` | 0 | 750 | +750 |
+| … `written` | 0 | 724 | +724 |
+
+**Tồn kho không đổi một món nào.** 724 món đi vào ô "đã về kho, chờ đếm", **không** vào tồn bán
+được — đúng AGENTS.md mục 10: hàng hoàn chỉ vào tồn khi người kho lập phiếu `RETURN` với số đếm
+thực tế. `EXPECTED → RECEIVED → INSPECTION → RESTOCKABLE/NON_RESTOCKABLE → RESTOCKED`, và lượt này
+dừng đúng ở bước thứ hai. **0 sự kiện sổ kho.**
+
+#### Chạy lại cùng tệp — không-thao-tác
+
+```
+kiện ghi nhận đã về kho: 0 (dòng món 0 · 0 món)
+dòng chứng cứ mới: 0 · bỏ qua vì đã ghi lần trước: 750
+kiện vào hàng đợi đếm: 0 — TỒN KHO CHƯA ĐỔI
+```
+
+Bảng chứng cứ sau lượt hai vẫn **đúng 750 dòng / 724 đã ghi / 672 kiện** — không nhân đôi một dòng
+nào. Khoá `idempotency_key` (UNIQUE) và `onConflictDoNothing` trên `return_inspections.shipment_id`
+làm việc của chúng.
+
+#### Mẫu để kiểm chứng từng nhóm
+
+| Nhóm | Mẫu thật |
+|---|---|
+| Đơn hoàn toàn phần | `PKE1511614327` · *Đầm Q002 / Màu: Đỏ / Size: L* → kiện `PKE1511614327` · mẫu `002 DO L` |
+| 1 phần / 1P1 | `PKE14944297721P1` (220/222 mã 1P1 lần ra kiện) |
+| Đã nhận trước đó | 0 — đây là lượt đầu tiên |
+| Mã không xác định | dòng 437: ô mã trống, bảng tính **không** gộp ô ⇒ không suy |
+| Mẫu mã lệch | `PKE1494448039` · *Quần định hình / Size: XL* → dòng sản phẩm không có mã hàng |
+| Không có trong ERP | `1.5089E+11` (Excel ghi dạng khoa học) · `VTP1824401820899` |
+
+#### Màn hình production
+
+`smoke` sau khi ghi: **51/51 đạt · 0 lỗi ứng dụng · 0 chậm**. `/inventory/returns` mở bình thường
+với 672 kiện mới trong hàng đợi đếm.
+
+#### Việc còn lại cho người — không phải lỗi máy
+
+· **23 dòng SKU_MISMATCH**: phần lớn là *"Quần định hình"* — mẫu mã sổ giấy ghi không kèm mã hàng
+  (`Q…`), nên máy **không đoán**. Đây chính là "một số sản phẩm ngoài Q002/Q003" chủ shop đã nhắc.
+· **144 mã chỉ có ở sheet tổng**: cần người kho ghi dòng món thì mới ghi nhận được.
+· **2 mã không có trong ERP** · **1 ô mã trống**.
+
+### Đường truyền: vì sao phải dựng, và nó thay cho cái gì
+
+Đã kiểm trên máy chủ sau deploy #267 (thao tác ops `returns-hmt`):
+
+```
+Nguồn: bản tải lên qua ERP (CSDL production)
+Chưa có bảng tính nào để đối soát.
+  · CÁCH THƯỜNG DÙNG: mở ERP → Kiểm đếm hàng hoàn → kéo tệp .xlsx vào ô "Sổ hàng hoàn viết tay"
+```
+
+Đường đã thông; chỗ trống bây giờ là **chính các byte của tệp**. Phiên làm việc này không tự đưa
+chúng sang được: từ hộp chạy của Claude không có kết nối tới cổng 22 của máy chủ, và
+`erp.vnxcommerce.com` bị chặn ở tầng proxy — nên không có đường nào tự động, kể cả đường vừa dựng.
+Báo đúng như thế thay vì làm ra vẻ đã xong.
+
+**Chủ shop làm một lần, trong trình duyệt đang đăng nhập sẵn:**
+
+1. Mở **Kho → Kiểm đếm hàng hoàn**.
+2. Kéo `Bản sao của Hàng hoàn HMT.xlsx` vào ô *"Sổ hàng hoàn viết tay (.xlsx)"*.
+   Màn hình hiện lại băm SHA-256 — phải là `c5616055…` thì mới đúng bản đã kiểm ở trên.
+3. Actions → *Vận hành ERP trên VPS* → `returns-hmt`, ô `arg` **để trống** (chạy thử).
+4. Đọc bảng phân loại, rồi chạy lại với `arg = --apply`.
+
+Không mật khẩu, không khoá SSH, không console máy chủ, không link công khai.

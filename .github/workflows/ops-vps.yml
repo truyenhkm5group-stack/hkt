@@ -50,7 +50,7 @@ on:
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
-          - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
+          - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - backup              # pg_dump vào /root/backups
@@ -288,33 +288,38 @@ jobs:
                 # kho" — TỒN KHO KHÔNG ĐỔI MỘT MÓN NÀO (AGENTS.md mục 10: hàng hoàn chỉ vào tồn
                 # khi người kho lập phiếu RETURN với số đếm thực tế).
                 #
-                # ─── HAI CÁCH ĐƯA TỆP VÀO, ƯU TIÊN CÁCH KHÔNG CẦN MẠNG ───
+                # ─── BA CÁCH ĐƯA TỆP VÀO, XẾP THEO ĐỘ DỄ CHO NGƯỜI DÙNG ───
                 #
-                #  1. TỆP ĐÃ NẰM SẴN TRÊN MÁY CHỦ ở /root/hmt/*.xlsx (khuyến nghị). Chủ shop chép
-                #     lên đúng một lần:
-                #         scp "Bản sao của Hàng hoàn HMT.xlsx" root@<máy chủ>:/root/hmt/
-                #     Không cần link, không cần chia sẻ bảng tính ra ngoài, không cần khai biến —
-                #     tệp đi thẳng từ máy chủ shop sang máy chủ ERP.
-                #  2. Tải từ `HMT_WORKBOOK_URL` (biến kho mã) nếu thư mục trên trống.
+                #  1. KHUYẾN NGHỊ — TẢI LÊN QUA CHÍNH ERP: mở Kiểm đếm hàng hoàn → kéo tệp .xlsx
+                #     vào ô "Sổ hàng hoàn viết tay". Tệp đi qua HTTPS bằng phiên đăng nhập của
+                #     người dùng và nằm lại trong CSDL production. Không khoá SSH, không console,
+                #     không link công khai. Thao tác này KHÔNG cần gì ở đây — cứ chạy, script tự
+                #     đọc bản mới nhất.
+                #  2. TỆP TRÊN MÁY CHỦ ở /root/hmt/*.xlsx — dành cho người đang ngồi trên máy chủ.
+                #  3. Tải từ `HMT_WORKBOOK_URL` (biến kho mã) nếu hai cách trên đều trống.
                 #
                 # CẢ HAI ĐƯỜNG ĐỀU KHÔNG NHẬN TỆP QUA Ô "arg": ô đó hiện công khai trên trang của
                 # mỗi lần chạy, mà kho mã này PUBLIC (AGENTS.md mục 5). Đẩy nội dung một bảng tính
                 # hàng hoàn qua đó là công bố nó vĩnh viễn — xoá lần chạy cũng không rút lại được.
                 mkdir -p /root/hmt
                 HMT_LOCAL="$(ls -t /root/hmt/*.xlsx 2>/dev/null | head -1 || true)"
-                if [ -z "$HMT_LOCAL" ] && [ -z "${HMT_WORKBOOK_URL:-}" ]; then
-                  echo "::error::Không tìm thấy bảng tính. Chọn MỘT trong hai cách:"
-                  echo "  (1) KHUYẾN NGHỊ — chép tệp lên máy chủ, một lần:  scp 'Bản sao của Hàng hoàn HMT.xlsx' root@<máy chủ>:/root/hmt/  rồi chạy lại thao tác này."
-                  echo "  (2) Khai biến HMT_WORKBOOK_URL (Settings → Secrets and variables → Actions → Variables) trỏ tới đường dẫn TẢI .xlsx."
-                  echo "CỐ Ý không nhận tệp/đường dẫn qua ô \"arg\": ô đó hiện công khai trên trang lần chạy."
-                  exit 1
-                fi
                 # Ô "arg" chỉ nhận cờ. Danh sách ĐÓNG để không ai chèn được lệnh vào đây.
                 case "${ARG:-}" in
                   "") HMT_FLAGS="" ;;
                   "--apply") HMT_FLAGS="--apply" ;;
                   *) echo "::error::Ô \"arg\" chỉ nhận rỗng (chạy thử) hoặc --apply. Nhận được: $ARG"; exit 1 ;;
                 esac
+                # ═══ KHÔNG CÓ TỆP Ở MÁY CHỦ VÀ KHÔNG CÓ URL ⇒ ĐỌC BẢN TẢI LÊN QUA ERP ═══
+                #
+                # Đây là đường MẶC ĐỊNH từ 14/09/2026. Script tự đọc bản mới nhất trong CSDL, nên ở
+                # đây không phải chép gì cả — và nếu CSDL cũng trống thì chính script in ra hướng
+                # dẫn đúng (kéo tệp vào màn hình Kiểm đếm hàng hoàn), không phải một lỗi shell.
+                if [ -z "$HMT_LOCAL" ] && [ -z "${HMT_WORKBOOK_URL:-}" ]; then
+                  echo "Nguồn: bản tải lên qua ERP (CSDL production)"
+                  fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
+                  docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts $HMT_FLAGS
+                  exit 0
+                fi
                 TMP="$(mktemp -d)"
                 # Chỉ dọn BẢN SAO tạm (thư mục tạm + bản trong container). Tệp gốc ở /root/hmt là
                 # của chủ shop — máy KHÔNG tự xoá tài sản của người khác; in lời nhắc ở cuối.

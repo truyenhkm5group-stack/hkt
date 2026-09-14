@@ -30,6 +30,15 @@ export const HMT_WORKBOOK_LABEL = "Bản sao của Hàng hoàn HMT";
 export const HMT_SOURCE = "HMT_RETURN_RECONCILIATION";
 
 /**
+ * Trần một lượt tải sổ hàng hoàn lên qua ERP.
+ *
+ * Sổ thật đo được **45 KB**; 8 MB là rộng gấp gần hai trăm lần mà vẫn nằm dưới trần thân yêu cầu
+ * của Server Action (`next.config.ts`). Trần tồn tại để một tệp nhầm (video, ảnh chụp cả thư mục)
+ * bị chặn ở cửa chứ không làm nghẽn máy chủ.
+ */
+export const HMT_MAX_UPLOAD_BYTES = 8_000_000;
+
+/**
  * BA SHEET, BA VAI TRÒ KHÁC HẲN NHAU.
  *
  * `TRACKING_INDEX` chỉ có mã vận đơn và trạng thái — nó nói "kiện này có trong sổ", KHÔNG nói món

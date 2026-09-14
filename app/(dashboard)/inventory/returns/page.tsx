@@ -13,6 +13,7 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
+import { latestHmtWorkbook } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
 import { param, type SearchParams } from "@/lib/search-params";
 
@@ -45,7 +46,15 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, hmt] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary()]);
+  const [bang, pending, choNhan, hmt, soGiay] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbook()]);
+  /*
+    CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
+
+    `latestHmtWorkbook()` trả về cả nội dung tệp (base64 ~60 KB). Truyền nguyên khối ấy vào một
+    thành phần client là nhét dữ liệu khách hàng vào HTML của mỗi lượt tải trang, để đọc được toàn
+    bộ sổ hàng hoàn bằng "xem nguồn". Tên · băm · dung lượng · ai tải · lúc nào là đủ cho màn hình.
+  */
+  const hmtUpload = soGiay ? { filename: soGiay.filename, sha256: soGiay.sha256, bytes: soGiay.bytes, uploadedBy: soGiay.uploadedBy, uploadedAt: soGiay.uploadedAt ?? new Date(), lastUsedAt: soGiay.lastUsedAt } : null;
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;
 
   return (
@@ -58,7 +67,7 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
       />
 
       {/* Nguồn thứ ba của bàn này: sổ hàng hoàn viết tay. Chưa đối soát lần nào thì khối không hiện. */}
-      <HmtSourceSection run={hmt} />
+      <HmtSourceSection run={hmt} upload={hmtUpload} canWrite={canWrite} />
 
       {/*
         ĐƯỜNG ỐNG ĐẶT TRƯỚC TRẠM ĐẾM, CỐ Ý.
