@@ -15,7 +15,7 @@ import {
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
-import { distributeProportionally } from "@/lib/constants/cost-allocation";
+import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -453,13 +453,27 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained };
 }
 
-/** Nhân sự có phải là người dùng đang đăng nhập không (email khai báo, hoặc trùng tên đầy đủ / tên ngắn) */
+/**
+ * ─────────── NHÂN SỰ NÀY CÓ PHẢI CHÍNH NGƯỜI ĐANG ĐĂNG NHẬP KHÔNG ───────────
+ *
+ * Đây là CỔNG của quyền "Lương: xem của mình": nó quyết định một người thấy dòng lương nào. Nên nó
+ * chỉ được nhận MỘT bằng chứng — LIÊN KẾT TÀI KHOẢN mà quản trị khai đích danh trong hồ sơ nhân sự
+ * (ô "Email đăng nhập ERP"), so khớp ĐÚNG với email phiên đăng nhập.
+ *
+ * VÌ SAO BỎ NHÁNH SO TÊN. Bản cũ, khi email không khớp (hoặc bỏ trống), rơi xuống so TÊN ĐẦY ĐỦ và
+ * TÊN NGẮN đã bỏ dấu. Hai người cùng tên — "Nguyễn Văn Nam" và "Nguyen Van Nam", hay hai nhân sự
+ * cùng tên ngắn "Nam" — là chuyện bình thường ở một shop; ở đây nó thành một người đọc được bảng
+ * lương của người kia. Tên là Ô CHỮ HIỂN THỊ, đổi được bất cứ lúc nào và không ai coi việc đổi tên
+ * hiển thị là một lượt cấp quyền. AGENTS.md mục 34: quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô
+ * chữ; mục 31: mọi nhánh lỗi phải rơi về phía HẸP HƠN.
+ *
+ * Chưa khai email ⇒ KHÔNG khớp ai. Đó là mất quyền xem, không phải lộ dữ liệu — và màn hình nói
+ * thẳng phải làm gì để có lại ("nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự").
+ */
 export function employeeMatchesUser(e: Pick<Employee, "name" | "shortName" | "userEmail">, user: { email: string; name: string }): boolean {
-  const email = (e.userEmail ?? "").trim().toLowerCase();
-  if (email && email === user.email.trim().toLowerCase()) return true;
-  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/\s+/g, " ").trim();
-  const u = norm(user.name || "");
-  return Boolean(u) && (norm(e.name) === u || (Boolean(e.shortName) && norm(e.shortName) === u));
+  const declared = (e.userEmail ?? "").trim().toLowerCase();
+  const signedIn = (user.email ?? "").trim().toLowerCase();
+  return Boolean(declared) && Boolean(signedIn) && declared === signedIn;
 }
 
 export type PayrollLine = {
@@ -467,11 +481,22 @@ export type PayrollLine = {
   totalProfit: number;
   personalProfit: number | null;
   personalRevenue: number | null;
-  fixed: number;
+  /** Lương cứng KHAI BÁO mỗi tháng — con số trong hồ sơ nhân sự, không phụ thuộc kỳ đang xem. */
+  fixedMonthly: number;
+  /**
+   * Lương cứng THUỘC KỲ ĐANG XEM, chia theo số ngày chồng lấn của từng tháng
+   * (`prorateMonthlyAmount`, AGENTS.md mục 14 và 16 — lương cố định đi theo THỜI GIAN).
+   *
+   * `null` = kỳ KHÔNG có mốc đầu/cuối ("Toàn bộ") nên không chia theo ngày được. CHƯA BIẾT, không
+   * phải 0 (AGENTS.md mục 42).
+   */
+  fixed: number | null;
   bonusTotal: number;
-  bonusPersonal: number;
+  /** `null` = CHƯA BIẾT (không quy đổi được LN cá nhân sang cơ sở dòng tiền), khác hẳn 0. */
+  bonusPersonal: number | null;
   bonusRevenue: number;
-  salary: number;
+  /** `null` khi một phần bất kỳ chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
+  salary: number | null;
 };
 
 export type PayrollReport = {
@@ -479,10 +504,25 @@ export type PayrollReport = {
   totalProfit: number;
   /** LN danh nghĩa tổng (để đối chiếu) */
   nominalTotal: number;
-  /** Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi cơ sở danh nghĩa) */
-  cashRatio: number;
+  /**
+   * Hệ số quy đổi LN cá nhân sang dòng tiền thực (= 1 khi KHÔNG phải cơ sở dòng tiền).
+   *
+   * `null` = CHƯA TÍNH ĐƯỢC: cơ sở dòng tiền quy đổi bằng `LN dòng tiền ÷ LN1 toàn shop`, mà LN1
+   * toàn shop ≤ 0 thì phép chia ấy không có nghĩa (mẫu số 0 ⇒ vô định; mẫu số âm ⇒ hệ số âm, đem
+   * nhân vào là LẬT DẤU lợi nhuận của từng người). Khi ấy LN cá nhân và thưởng theo LN cá nhân là
+   * CHƯA BIẾT, không phải 0.
+   */
+  cashRatio: number | null;
+  /** Vì sao `cashRatio` là `null` — hiện thẳng ra màn hình, không nuốt. */
+  cashRatioReason: string | null;
   lines: PayrollLine[];
-  totalSalary: number;
+  /** `null` khi lương cứng của kỳ chưa biết — xem `PayrollLine.fixed`. */
+  totalSalary: number | null;
+  /**
+   * CĂN CỨ CHIA LƯƠNG CỨNG, để màn hình nói được vì sao cột "lương cứng" không bằng con số khai
+   * trong hồ sơ. `bounded = false` ⇒ kỳ không có mốc đầu/cuối ⇒ lương cứng của kỳ là CHƯA BIẾT.
+   */
+  fixedBasis: { bounded: boolean; days: number; monthlyTotal: number };
   marketers: MarketerReport;
 };
 
@@ -499,33 +539,75 @@ export async function getPayrollReport(
   const nominalTotal = marketers.nominal.totals.expectedProfit;
   const modelTotal = marketers.totals.profit;
   const totalProfit = basis === "cash" && cash ? cash.net : basis === "nominal" ? nominalTotal : modelTotal;
-  // Cơ sở dòng tiền: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng) — tiền COD về theo bảng kê không tách được theo mã / người
-  const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : 0) : 1;
+  /*
+    CƠ SỞ DÒNG TIỀN: LN cá nhân = LN1 cá nhân × (LN dòng tiền thực ÷ LN1 tổng). Tiền COD về theo
+    bảng kê không tách được theo mã / theo người, nên đây là phép QUY ĐỔI THEO TỶ TRỌNG — một ước
+    tính, không phải lợi nhuận đo được của từng người.
+
+    MẪU SỐ ≤ 0 THÌ KHÔNG CÓ HỆ SỐ NÀO CẢ. Bản cũ trả 0 trong ca đó, nên mọi marketer hiện LN cá
+    nhân đúng bằng "0 ₫" — đọc thành "người này không tạo ra đồng lợi nhuận nào", trong khi sự thật
+    là PHÉP TÍNH KHÔNG CHẠY ĐƯỢC. Và ca ấy không hiếm: LN1 toàn shop ≤ 0 xảy ra ở mọi kỳ lỗ và ở
+    những kỳ ngắn chưa kịp có đơn giao thành công. AGENTS.md mục 42 · mục 8.5: CHƯA BIẾT không được
+    in ra thành 0.
+  */
+  const cashRatio = basis === "cash" && cash ? (modelTotal > 0 ? cash.net / modelTotal : null) : 1;
+  const cashRatioReason =
+    cashRatio === null
+      ? `Không quy đổi được sang dòng tiền: LN1 toàn shop của kỳ là ${Math.round(modelTotal).toLocaleString("vi-VN")} ₫ (≤ 0) nên tỷ lệ “LN dòng tiền ÷ LN1 tổng” không có nghĩa. LN cá nhân và thưởng theo LN cá nhân là CHƯA BIẾT ở cơ sở này — xem cơ sở LN1 để có số đo được.`
+      : null;
+  // Kỳ "Toàn bộ" không có mốc đầu/cuối ⇒ không chia lương tháng theo ngày được ⇒ CHƯA BIẾT.
+  const fixedBounded = Boolean(period.from && period.to);
+  // Đếm ngày THEO LỊCH VIỆT NAM bằng đúng hàm mà `prorateMonthlyAmount` dùng: chia phút giây cho
+  // 86.400.000 rồi làm tròn sẽ lệch một ngày ở mốc cuối 23:59:59.
+  const fixedDays = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
   const lines: PayrollLine[] = employees
     .filter((e) => e.active)
     .map((e) => {
       const m = marketers.marketers.find((x) => x.marketerId === e.id);
-      const personalProfit = m ? Math.round(m.personalProfit * cashRatio) : null;
+      /*
+        BA TRẠNG THÁI, KHÔNG PHẢI HAI:
+          · không phải marketer (`m` rỗng)  ⇒ `null` — không có phần quy kết nào, thưởng = 0 đúng;
+          · là marketer nhưng hệ số chưa có ⇒ `null` — CHƯA TÍNH ĐƯỢC, thưởng cũng chưa biết;
+          · còn lại                         ⇒ con số.
+      */
+      const personalProfit = m && cashRatio !== null ? Math.round(m.personalProfit * cashRatio) : null;
       const personalRevenue = m ? m.attributedRevenue : null;
       const bonusTotal = Math.round(
         Math.max(totalProfit, 0) * (e.percentTotal / 100),
       );
-      const bonusPersonal = Math.round(
-        Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100),
-      );
+      const bonusPersonal =
+        m && cashRatio === null
+          ? null
+          : Math.round(Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100));
       const bonusRevenue = Math.round(
         Math.max(personalRevenue ?? 0, 0) * (e.percentRevenue / 100),
       );
+      const fixedMonthly = Math.max(0, Math.round(Number(e.fixed) || 0));
+      /*
+        LƯƠNG CỨNG THUỘC KỲ, KHÔNG PHẢI LƯƠNG CỨNG MỘT THÁNG.
+
+        Trước đây cột này chép thẳng `e.fixed` — con số khai theo THÁNG — vào bất kỳ kỳ nào người
+        dùng chọn. Xem 7 ngày: bảng cộng đủ một tháng lương vào kỳ bảy ngày. Xem quý: bảng cộng
+        đúng MỘT tháng lương cho ba tháng làm việc. Cùng lúc ấy `lib/queries/payroll-cost.ts` —
+        cửa mà Profit Engine hỏi chi phí nhân sự — đã chia theo ngày bằng `prorateMonthlyAmount`.
+        Hai nơi trong cùng một kho mã nói hai con số khác nhau về cùng một khoản lương, và nơi
+        chủ shop nhìn để TRẢ TIỀN lại là nơi sai.
+
+        Nay cả hai đi cùng một hàm, cùng luật: chia theo số ngày chồng lấn của TỪNG THÁNG THẬT
+        (AGENTS.md mục 14 · 16). Cộng đủ một tháng vẫn ra đúng khoản tháng, không dư không thiếu.
+      */
+      const fixed = fixedBounded ? prorateMonthlyAmount(fixedMonthly, period.from, period.to) : null;
       return {
         employee: e,
         totalProfit,
         personalProfit,
         personalRevenue,
-        fixed: e.fixed,
+        fixedMonthly,
+        fixed,
         bonusTotal,
         bonusPersonal,
         bonusRevenue,
-        salary: e.fixed + bonusTotal + bonusPersonal + bonusRevenue,
+        salary: fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
       };
     });
   return {
@@ -533,8 +615,14 @@ export async function getPayrollReport(
     totalProfit,
     nominalTotal,
     cashRatio,
+    cashRatioReason,
     lines,
-    totalSalary: lines.reduce((s, l) => s + l.salary, 0),
+    totalSalary: fixedBounded && lines.every((l) => l.salary !== null) ? lines.reduce((s, l) => s + (l.salary ?? 0), 0) : null,
+    fixedBasis: {
+      bounded: fixedBounded,
+      days: fixedDays,
+      monthlyTotal: lines.reduce((s, l) => s + l.fixedMonthly, 0),
+    },
     marketers,
   };
 }

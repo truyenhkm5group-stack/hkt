@@ -19,7 +19,7 @@
  * phí) và bật cảnh báo `COMMISSION_BASIS_NEEDS_REVIEW`. Đây cũng là lý do file này KHÔNG gọi
  * `getPayrollReport` — gọi vào là tạo đệ quy vô hạn với Profit Engine.
  */
-import { prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
+import { inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import type { CoverageState } from "@/lib/constants/cost-authority";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import type { Period } from "@/lib/search-params";
@@ -78,7 +78,9 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
 
   // Chia theo SỐ NGÀY THẬT của từng tháng: 9.000.000đ/tháng, xem 7 ngày của tháng 30 ngày = 2.100.000đ.
   const fixedSalary = prorateMonthlyAmount(monthlyFixedTotal, period.from, period.to);
-  const days = period.from && period.to ? Math.max(0, Math.round((period.to.getTime() - period.from.getTime()) / 86_400_000) + 1) : 0;
+  // Cùng hàm đếm ngày với `prorateMonthlyAmount`: mốc cuối là 23:59:59 nên chia rồi làm tròn ra
+  // thừa một ngày (7 ngày thành 8), và con số ấy hiện thẳng ra màn hình.
+  const days = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
 
   const reasons: string[] = [];
   if (mode !== "PAYROLL") {

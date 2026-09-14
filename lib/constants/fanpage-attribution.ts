@@ -319,19 +319,31 @@ export type DedupeVerdict = {
  *
  * ─── BƯỚC 2 · CHỨNG CỨ, và đây mới là chỗ kết luận ───
  *
- * Ứng viên chỉ thành cụm khi `scoreDuplicatePair` với đơn ĐẠI DIỆN (đơn sớm nhất của cụm) đạt
- * ngưỡng. Không đạt ⇒ mở cụm MỚI ⇒ cả hai đơn đều được tính. Đó là điều làm "khách mua lại trong
- * cùng buổi chiều" không bị nuốt mất.
+ * Ứng viên chỉ thành cụm khi `scoreDuplicatePair` với ĐƠN GIỮ QUY KẾT của cụm đạt ngưỡng. Không
+ * đạt ⇒ mở cụm MỚI ⇒ cả hai đơn đều được tính. Đó là điều làm "khách mua lại trong cùng buổi
+ * chiều" không bị nuốt mất.
  *
- * So với ĐẠI DIỆN chứ không so với đơn liền trước: nếu so với đơn liền trước thì một dãy đơn mỗi
- * cái cách nhau 23 giờ sẽ trượt dài vô tận thành "một lần đặt".
+ * ĐƠN GIỮ QUY KẾT, KHÔNG PHẢI ĐƠN SỚM NHẤT — và đây là chỗ đã có một lỗi thật (xem BƯỚC 3). Chứng
+ * cứ phải chấm với chính đơn mà dòng kết luận sẽ trỏ tới; chấm với một đơn thứ ba rồi ghi kết luận
+ * về một cặp khác là ghi một điều chưa ai chứng minh.
  *
- * ─── BƯỚC 3 · CHỌN NGƯỜI THẮNG TRONG CỤM ───
+ * Cửa sổ thời gian vẫn đo từ đơn SỚM NHẤT của cụm, không đo từ đơn giữ quy kết: đo từ đơn giữ quy
+ * kết là mở đường cho cụm trượt dài mỗi lần đơn ấy đổi.
  *
- * Đơn còn SỐNG sớm nhất thắng; cả cụm đã huỷ thì đơn sớm nhất thắng. "Sớm nhất" đo bằng mốc của
+ * So với một mốc CỐ ĐỊNH của cụm chứ không so với đơn liền trước: nếu so với đơn liền trước thì
+ * một dãy đơn mỗi cái cách nhau 23 giờ sẽ trượt dài vô tận thành "một lần đặt".
+ *
+ * ─── BƯỚC 3 · AI GIỮ QUY KẾT TRONG CỤM ───
+ *
+ * Đơn còn SỐNG sớm nhất giữ; cả cụm đã huỷ thì đơn sớm nhất giữ. "Sớm nhất" đo bằng mốc của
  * NGUỒN (Pancake), và bằng giây thì chốt hạ bằng `order_id` so như CHUỖI (id Pancake vượt 2^53).
  * Cần cái chốt hạ đó, nếu không hai lần chạy đối soát có thể đổi chỗ doanh thu của hai người mà
  * không ai làm gì cả.
+ *
+ * Vì các đơn vào cụm theo thứ tự thời gian tăng dần, người giữ quy kết đổi NHIỀU NHẤT MỘT LẦN:
+ * từ đơn đã huỷ mở cụm sang đơn còn sống đầu tiên. Nên nó tính được ngay trong lúc dựng cụm, và
+ * chứng cứ nhận vào cụm chính là chứng cứ ghi ra — một con số duy nhất, không có "điểm lúc nhận"
+ * khác "điểm lúc ghi".
  *
  * TẤT ĐỊNH và IDEMPOTENT: kết quả là hàm thuần của dữ liệu vào; chạy lại bao nhiêu lần cũng thế.
  */
@@ -354,15 +366,31 @@ export function resolveDuplicates(candidates: DedupeCandidate[], windowHours = D
   const earlier = (a: DedupeCandidate, b: DedupeCandidate) =>
     a.sourceOrderAt.getTime() - b.sourceOrderAt.getTime() || (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0);
 
+  /**
+   * Đơn GIỮ QUY KẾT của một cụm: đơn còn SỐNG sớm nhất, không có thì đơn sớm nhất. Cụm luôn được
+   * xếp theo thời gian tăng dần nên phần tử đầu khớp với danh sách đã sắp.
+   */
+  const holder = (cluster: DedupeCandidate[]) => cluster.find((m) => m.alive) ?? cluster[0];
+
   for (const list of byKey.values()) {
     const sorted = [...list].sort(earlier);
-    /** Mỗi cụm: đơn đại diện (sớm nhất) + các thành viên. Đại diện luôn là phần tử đầu. */
+    /** Mỗi cụm: mốc cửa sổ (phần tử đầu, sớm nhất) + các thành viên, theo thứ tự thời gian. */
     const clusters: DedupeCandidate[][] = [];
     for (const c of sorted) {
       let joined = false;
       for (const cl of clusters) {
+        // Cửa sổ: luôn đo từ đơn SỚM NHẤT của cụm — cụm không được trượt dài theo người giữ.
         if (c.sourceOrderAt.getTime() - cl[0].sourceOrderAt.getTime() > windowMs) continue;
-        if (scoreDuplicatePair(cl[0], c).score < DUPLICATE_SCORE_THRESHOLD) continue;
+        /*
+          CHỨNG CỨ: chấm với ĐƠN GIỮ QUY KẾT, không phải với đơn sớm nhất.
+
+          SỰ CỐ THẬT (rà soát 14/09/2026): A đã huỷ 09:00 · B còn sống 09:05 · C còn sống 10:00,
+          cùng khoá và cùng giá trị. A–B đạt ngưỡng nhờ `CANCELLED_SIBLING`; A–C cũng đạt nhờ chính
+          dấu hiệu đó. Nhưng B mới là đơn giữ quy kết, và B–C chỉ có đúng một điểm `SAME_VALUE`.
+          Chấm với đơn sớm nhất tức là để một ĐƠN ĐÃ HUỶ làm CẦU NỐI giữa hai đơn còn sống không có
+          quan hệ gì với nhau — và C, một lần bán có thật, bị xoá khỏi doanh thu của người bán nó.
+        */
+        if (scoreDuplicatePair(holder(cl), c).score < DUPLICATE_SCORE_THRESHOLD) continue;
         cl.push(c);
         joined = true;
         break;
@@ -370,23 +398,31 @@ export function resolveDuplicates(candidates: DedupeCandidate[], windowHours = D
       if (!joined) clusters.push([c]);
     }
     for (const members of clusters) {
-      const winner = members.find((m) => m.alive) ?? members[0];
+      const winner = holder(members);
       for (const m of members) {
         if (m.orderId === winner.orderId) {
           out.push(notDuplicate(m.orderId));
           continue;
         }
         /*
-          CHẤM LẠI VỚI ĐƠN THẮNG, không dùng lại điểm lúc nhận vào cụm.
-          
-          Đơn ĐẠI DIỆN được nhận vào cụm mà không phải chấm với ai (nó mở cụm). Khi nó là đơn đã huỷ
-          và một đơn còn sống đến sau, chính nó thành đơn trùng — và nếu ghi lại "điểm lúc nhận vào"
-          thì nó mang điểm 0 với căn cứ RỖNG. Đo trên production 14/09: 46/83 dòng trùng đơn rơi
-          đúng vào ca đó, tức hơn một nửa kết luận không nói được vì sao.
-          
-          Chứng cứ phải mô tả ĐÚNG CẶP mà dòng này khẳng định: đơn thắng ↔ đơn trùng.
+          CHẤM VỚI ĐƠN THẮNG — cùng một cặp mà dòng này khẳng định.
+
+          Đơn mở cụm không phải chấm với ai (nó mở cụm). Khi nó là đơn đã huỷ và một đơn còn sống
+          đến sau giành lấy quy kết, chính nó thành đơn trùng; ghi lại "điểm lúc nhận vào cụm" thì
+          nó mang điểm 0 với căn cứ RỖNG. Đo trên production 14/09: 46/83 dòng trùng đơn rơi đúng
+          vào ca đó, tức hơn một nửa kết luận không nói được vì sao.
+
+          LƯỚI AN TOÀN CUỐI: chứng cứ với đơn thắng chưa đạt ngưỡng thì KHÔNG kết luận trùng — tính
+          cả hai đơn. Với bộ trọng số hiện hành nhánh này không bao giờ chạy (thành viên vào cụm
+          trước lúc người giữ đổi đều là đơn ĐÃ HUỶ, nên `CANCELLED_SIBLING` tự bật với người giữ
+          còn sống). Nó đứng đây để một lần đổi trọng số trong `DUPLICATE_SIGNALS` không lặng lẽ
+          biến thành một dòng kết luận không có chứng cứ — lề an toàn nghiêng về BỎ SÓT.
         */
         const ev = scoreDuplicatePair(winner, m);
+        if (ev.score < DUPLICATE_SCORE_THRESHOLD) {
+          out.push(notDuplicate(m.orderId));
+          continue;
+        }
         out.push({ orderId: m.orderId, duplicateOfOrderId: winner.orderId, score: ev.score, signals: ev.signals });
       }
     }
