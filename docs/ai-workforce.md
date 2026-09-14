@@ -2,6 +2,9 @@
 
 > Trạng thái: **chạy ngầm (SHADOW)**. Không một câu do AI soạn được gửi tới khách.
 > Nhánh: `claude/ai-workforce-sales-v1` · chưa triển khai lên production.
+>
+> Đọc kèm: `docs/pancake-chat-setup.md` (cấu hình webhook) · `docs/ai-order-automation-audit.md`
+> (ranh giới tạo đơn) · `docs/ai-staging-plan.md` (đề xuất môi trường chạy thử).
 
 ## 1. Ranh giới không được xoá
 
@@ -140,8 +143,22 @@ không phải "trả về giá trị mặc định".
 Leo nấc khi: luật không đủ chắc · mô hình sai lược đồ · độ tin dưới ngưỡng · mô hình lỗi · quá hạn.
 
 Chi phí ước tính theo `ai.config.pricing` (`"<nhà cung cấp>:<mô hình>"` → VND cho một triệu token).
+**BỐN RỔ TOKEN, ba mức giá** — gộp lại là báo sai tiền:
+
+| Rổ | Khoá đơn giá | Bắt buộc khai |
+|---|---|---|
+| Đầu vào tính đủ giá | `inputVndPerMillion` | có |
+| Sinh ra | `outputVndPerMillion` | có |
+| Đọc lại từ bộ nhớ đệm | `cachedReadVndPerMillion` | chỉ khi có dùng đệm |
+| Ghi vào bộ nhớ đệm | `cacheWriteVndPerMillion` | chỉ khi có dùng đệm |
+
 **Chưa khai đơn giá ⇒ chi phí là `null` = CHƯA BIẾT**, màn hình in dấu gạch, không in `0 ₫`.
+Có token đệm mà chưa khai giá đệm cũng ⇒ `null`: lấy giá đầu vào áp cho token đệm sẽ báo đắt gấp
+nhiều lần thực tế, bỏ qua chúng thì báo rẻ hơn — cả hai đều là một con số bịa.
 Lượt chạy không gọi mô hình lần nào thì chi phí bằng 0 **thật**.
+
+Mỗi lượt chạy ghi `pricing_version` (từ `ai.config.pricingVersion`): đổi bảng giá không làm mọi con
+số lịch sử đổi nghĩa mà không ai biết. Hai phiên bản giá trong cùng một lượt ⇒ ghi `hon-hop`.
 
 Tên mô hình không ghi cứng ở đâu trong logic — đọc từ `AI_MODEL_ECONOMY` / `AI_MODEL_STRONG` hoặc
 `routing.models` của bản nhân sự.
@@ -150,6 +167,13 @@ Tên mô hình không ghi cứng ở đâu trong logic — đọc từ `AI_MODEL
 
 `lib/ai/agents/sales/outbound.ts` là **nơi duy nhất** trong mã nguồn gọi API gửi tin của Pancake
 cho nhân sự AI. Đọc một tệp là kiểm chứng được lời khẳng định "SHADOW không gửi gì".
+
+**CHỐT CHẶN CỨNG.** `canSend()` là hàm thuần nên kiểm thử được, nhưng nó tin vào nấc quyền hạn mà
+nơi gọi đưa xuống. `assertOutboundAllowed()` bịt lỗ hổng đó: nó **đọc lại nấc thật từ CSDL** ngay
+trước lời gọi mạng, và nấc do nơi gọi đưa xuống chỉ được dùng để LÀM HẸP thêm, không nới ra. Cổng
+công cụ có chốt tương đương cho mọi công cụ GHI — đọc CSDL hỏng cũng là TỪ CHỐI. Nói cách khác:
+muốn gửi được tin cho khách phải đổi DỮ LIỆU trong CSDL, không đổi được bằng cách làm mô hình trả
+về một chuỗi khác.
 
 - Nấc `SHADOW`/`OFF`: câu do AI soạn **không bao giờ** được gửi.
 - Nấc `COPILOT`: phải có phiếu duyệt của người.
@@ -168,6 +192,8 @@ cho nhân sự AI. Đọc một tệp là kiểm chứng được lời khẳng 
 | Việc nhân đôi | khoá duy nhất `ai_tasks.dedupe_key` = `<nhân sự>|<sự kiện>` |
 | Hai tiến trình giành một việc | `UPDATE ... WHERE status = 'PENDING'` |
 | Bot tự nói chuyện với chính nó | tin `from_page` **không bao giờ** sinh sự kiện |
+| Webhook và đọc bù đánh mã khác nhau | vân tay nội dung `(chiều, mốc giây, chữ)` — bắt trùng CHÉO KÊNH |
+| Giả mạo nấc quyền hạn để gửi tin | chốt cứng đọc lại nấc từ CSDL ngay trước lời gọi mạng |
 | Vòng lặp tốn tiền | trần `ai.config.maxRunsPerHour` (mặc định 600/giờ) |
 | Đơn nhân đôi | `sales_conversations.order_id` đã có ⇒ `order.create_draft` trả `duplicate` |
 
@@ -182,7 +208,22 @@ chạy đặt **câu máy gợi ý cạnh câu nhân viên thật sự trả l�
 quyết định · công cụ đã gọi (kèm lần bị chặn) · lần gọi mô hình (token, chi phí, độ trễ, lỗi) ·
 câu máy gợi ý · câu nhân viên trả lời · 12 tin gần nhất.
 
-Quyền: `ai:view` (xem) · `ai:manage` (cấu hình).
+`/ai/review` — **màn hình soát & chấm tay**. Đơn vị là LƯỢT (một tin khách + mọi tin shop trả lời
+cho tới tin khách tiếp theo), đặt ba cột cạnh nhau: khách nhắn · máy gợi ý · nhân viên trả lời.
+Lọc theo: khoảng ngày · hội thoại · sản phẩm · ý định · đã/chưa chuyển người · có lỗi · có/không
+gợi ý · đã/chưa chấm tay.
+
+Khối chỉ số tách làm HAI, có chủ ý:
+- **Đo trực tiếp** (không cần chấm tay): tỷ lệ chuyển người, độ trễ trung vị và p90, token, chi phí,
+  chi phí/hội thoại, thời gian phản hồi của nhân viên, và **số tin đã gửi cho khách — phải là 0**.
+- **Cần chấm tay**: nhận đúng sản phẩm / màu / size / SĐT / địa chỉ / ý định / ý muốn mua / xác nhận
+  chốt, chất lượng hành động kế tiếp, và cờ bịa-hoặc-phá-luật. Tỷ lệ CHỈ tính trên phần đã chấm và
+  **luôn hiện kèm độ phủ**. Chiều chưa ai chấm hiện "chưa chấm", không bao giờ hiện 0%.
+
+Sự thật nền chỉ vào `sales_review_labels` qua một server action có khoá tài khoản người chấm. Không
+job nào, không dây chuyền nào ghi vào bảng đó.
+
+Quyền: `ai:view` (xem và chấm) · `ai:manage` (cấu hình).
 
 Đọc thẳng CSDL khi cần:
 
@@ -224,7 +265,13 @@ có căn cứ** và hội thoại chuyển người — không đoán size trên
 2. **Đơn giá mô hình** (`ai.config.pricing`): chưa khai thì mọi chi phí là CHƯA BIẾT.
 3. **Bí mật webhook hội thoại** (`PANCAKE_CHAT_WEBHOOK_SECRET`) và khai báo URL bên Pancake. Chưa có
    thì dùng job nạp bù.
-4. **Bảng size** (`ai.sizeChart`): chưa có thì mọi câu hỏi size đều chuyển người.
+4. **BẢNG SỐ ĐO** (`ai.sizeRules`): **ERP hiện không có dữ liệu số đo nào.** Đã kiểm 14/09/2026:
+   `product_variants.size` là NHÃN (S/M/L/XL); `product_variants.weight` là khối lượng KIỆN HÀNG
+   tính cước, không phải cân nặng người; `attributes` là cặp tên–giá trị tự do từ Pancake. Không có
+   chiều cao / cân nặng / vòng ngực / eo / mông ở đâu cả. Vì vậy mọi câu hỏi size đều chuyển người,
+   và đó là hành vi đúng — xem `lib/constants/size-engine.ts`.
+   Cần chủ shop cung cấp: với mỗi dòng hàng (hoặc mỗi mã), khoảng chiều cao / cân nặng / số đo vòng
+   cho từng size, kèm độ co giãn của vải.
 5. **Pancake POS không có API cập nhật đơn** — `order.confirm` chỉ ghi được trong ERP; nhân viên vẫn
    phải bấm chốt trên POS. Đây là giới hạn của Pancake, không phải của ERP.
 6. **Lịch chạy job** `ai-sales-ingest` đang để chú thích trong `scripts/scheduler.mjs`: đổi lịch là

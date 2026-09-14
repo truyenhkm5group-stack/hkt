@@ -171,7 +171,11 @@ export async function testAiPlatform(db: Db) {
   assert.equal(off.tier, "HUMAN");
   assert.equal(off.escalation, "POLICY_REQUIRES_HUMAN", "tắt gọi mô hình thì phải chuyển người, không đoán bừa");
 
-  await setSettingJson(AI_CONFIG_KEY, { modelCallsEnabled: true, pricing: { "stub:stub-strong": { inputVndPerMillion: 1_000_000, outputVndPerMillion: 2_000_000 } } });
+  await setSettingJson(AI_CONFIG_KEY, {
+    modelCallsEnabled: true,
+    pricingVersion: "bang-gia-kiem-thu",
+    pricing: { "stub:stub-strong": { inputVndPerMillion: 1_000_000, outputVndPerMillion: 2_000_000 } },
+  });
   const onSettings = await getAiSettings();
 
   // 7b. Mô hình trả RÁC ⇒ leo nấc; nấc trên trả đúng ⇒ dùng kết quả nấc trên.
@@ -187,8 +191,23 @@ export async function testAiPlatform(db: Db) {
   // 7c. Chi phí: có đơn giá thì tính, không có thì CHƯA BIẾT (null), không phải 0.
   const priced = escalated.attempts[1];
   assert.equal(priced.costVnd, 1_000_000 + 1_000_000, "chi phí = token vào × đơn giá vào + token ra × đơn giá ra");
-  assert.equal(estimateCostVnd("stub", "chua-khai-gia", 1_000_000, 1_000_000, onSettings.pricing), null, "mô hình chưa khai đơn giá ⇒ chi phí CHƯA BIẾT");
-  assert.equal(estimateCostVnd("stub", "stub-strong", 0, 0, onSettings.pricing), 0, "không dùng token nào thì chi phí thật sự bằng 0");
+  assert.equal(priced.pricingVersion, "bang-gia-kiem-thu", "lượt tính được tiền phải ghi phiên bản bảng giá đã dùng");
+  const noTokens = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 };
+  const oneMillion = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 };
+  assert.equal(estimateCostVnd("stub", "chua-khai-gia", oneMillion, onSettings.pricing), null, "mô hình chưa khai đơn giá ⇒ chi phí CHƯA BIẾT");
+  assert.equal(estimateCostVnd("stub", "stub-strong", noTokens, onSettings.pricing), 0, "không dùng token nào thì chi phí thật sự bằng 0");
+
+  // ── Bốn rổ token, ba mức giá: không được gộp ──
+  // Có token đọc từ đệm mà bảng giá chưa khai giá đệm ⇒ CHƯA BIẾT. Lấy giá đầu vào áp cho token
+  // đệm sẽ báo đắt gấp nhiều lần thực tế; bỏ qua chúng thì báo rẻ hơn thực tế. Cả hai đều bịa.
+  const withCacheRead = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1_000_000, cacheWriteInputTokens: 0 };
+  assert.equal(estimateCostVnd("stub", "stub-strong", withCacheRead, onSettings.pricing), null, "có token đệm mà chưa khai giá đệm ⇒ CHƯA BIẾT");
+  const fullPricing = {
+    "stub:stub-strong": { inputVndPerMillion: 1_000_000, outputVndPerMillion: 2_000_000, cachedReadVndPerMillion: 100_000, cacheWriteVndPerMillion: 1_250_000 },
+  };
+  assert.equal(estimateCostVnd("stub", "stub-strong", withCacheRead, fullPricing), 100_000, "khai đủ giá đệm thì token đệm tính theo giá đệm");
+  const allFour = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadInputTokens: 1_000_000, cacheWriteInputTokens: 1_000_000 };
+  assert.equal(estimateCostVnd("stub", "stub-strong", allFour, fullPricing), 1_000_000 + 2_000_000 + 100_000 + 1_250_000, "bốn rổ cộng theo bốn đơn giá riêng");
 
   // 7d. Mô hình quá thời gian ở cả hai nấc ⇒ chuyển người, ghi đúng lý do.
   resetStub();
@@ -225,8 +244,8 @@ export async function testAiPlatform(db: Db) {
   // ───────── 8. Sổ lượt chạy: tổng token, chi phí, độ trễ ─────────
   const run = await startRun({ agentId: sales.id, agentKey: "sales", mode: "SHADOW", subjectType: "TEST", subjectId: "cost" }, db);
   await run.model([
-    { tier: "ECONOMY", provider: "stub", model: "stub-economy", ok: true, step: "understand", inputTokens: 100, outputTokens: 50, costVnd: 7, latencyMs: 12, error: null },
-    { tier: "STRONG", provider: "stub", model: "stub-strong", ok: true, step: "generate", inputTokens: 200, outputTokens: 80, costVnd: 20, latencyMs: 30, error: null },
+    { tier: "ECONOMY", provider: "stub", model: "stub-economy", ok: true, step: "understand", inputTokens: 100, outputTokens: 50, cachedInputTokens: 0, costVnd: 7, pricingVersion: "bang-gia-kiem-thu", latencyMs: 12, error: null },
+    { tier: "STRONG", provider: "stub", model: "stub-strong", ok: true, step: "generate", inputTokens: 200, outputTokens: 80, cachedInputTokens: 0, costVnd: 20, pricingVersion: "bang-gia-kiem-thu", latencyMs: 30, error: null },
   ]);
   await run.finish({ status: "SUCCEEDED", suggestedReply: "xin chào" });
   const saved = await db.query.aiRuns.findFirst({ where: eq(schema.aiRuns.id, run.id) });
@@ -238,8 +257,8 @@ export async function testAiPlatform(db: Db) {
   // Có lần gọi chưa khai đơn giá ⇒ TỔNG là CHƯA BIẾT, không phải "tổng phần biết được".
   const mixed = await startRun({ agentId: sales.id, agentKey: "sales", mode: "SHADOW", subjectType: "TEST", subjectId: "cost-unknown" }, db);
   await mixed.model([
-    { tier: "ECONOMY", provider: "stub", model: "a", ok: true, step: "understand", inputTokens: 10, outputTokens: 5, costVnd: 3, latencyMs: 1, error: null },
-    { tier: "STRONG", provider: "stub", model: "chua-khai", ok: true, step: "generate", inputTokens: 10, outputTokens: 5, costVnd: null, latencyMs: 1, error: null },
+    { tier: "ECONOMY", provider: "stub", model: "a", ok: true, step: "understand", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: 3, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
+    { tier: "STRONG", provider: "stub", model: "chua-khai", ok: true, step: "generate", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
   ]);
   await mixed.finish({ status: "SUCCEEDED" });
   const mixedRow = await db.query.aiRuns.findFirst({ where: eq(schema.aiRuns.id, mixed.id) });

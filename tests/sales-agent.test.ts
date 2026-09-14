@@ -7,19 +7,24 @@ import { SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type Sales
 import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, understandByRule } from "@/lib/ai/agents/sales/understand";
 import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirements } from "@/lib/ai/agents/sales/confirm";
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai/agents/sales/state";
-import { ROUNDTRIP_TEST_MESSAGE, canSend } from "@/lib/ai/agents/sales/outbound";
+import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai/agents/sales/outbound";
 import { guardGeneratedText, moneyMentions, renderOrderReview } from "@/lib/ai/agents/sales/generate";
 import { ingestMessage, normalizeChatWebhook } from "@/lib/ai/agents/sales/ingest";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai/agents/sales/pipeline";
 import { ensureAgents, getAgent } from "@/lib/ai/registry";
 import { registerErpTools } from "@/lib/ai/tools/erp";
+import { callTool } from "@/lib/ai/tools/gateway";
+import { parseRouting, runModelStep } from "@/lib/ai/model-router";
+import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
+import { z } from "zod";
 import { getAiSettings } from "@/lib/ai/config";
 import { setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai/providers/stub";
 import { aiSummary, getAiRunDetail, listAiRuns, salesStageBreakdown } from "@/lib/queries/ai";
+import { getConversationTurns, listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
 
-const OFF_SETTINGS = { enabled: true, modelCallsEnabled: false, ingestEnabled: true, maxRunsPerHour: 600, dailyCostCapVnd: 0, testConversationIds: [], modes: {}, pricing: {} };
+const OFF_SETTINGS = { enabled: true, modelCallsEnabled: false, ingestEnabled: true, maxRunsPerHour: 600, dailyCostCapVnd: 0, testConversationIds: [], modes: {}, pricing: {}, pricingVersion: "" };
 
 function stateWith(patch: Partial<SalesState>): SalesState {
   return { ...EMPTY_SALES_STATE, ...patch };
@@ -222,19 +227,59 @@ export async function testSalesAgent(db: Db) {
     message: { id: "msg-1", message: "<div>em muốn mua đầm Q002 size L màu đỏ</div>", inserted_at: "2026-09-14T03:00:00", from: { id: "cust-9", name: "Chị Lan" } },
     conversation: { customer: { id: "cust-9", name: "Chị Lan", phone_numbers: [{ phone_number: "0912345678" }] } },
   };
-  const parsed = normalizeChatWebhook(webhook);
-  assert.ok(parsed, "gói tin đủ khoá phải chuẩn hoá được");
+  const result = normalizeChatWebhook(webhook);
+  assert.equal(result.ok, true, "gói tin đủ khoá phải chuẩn hoá được");
+  if (!result.ok) throw new Error("không chuẩn hoá được gói tin mẫu");
+  const parsed = result;
   assert.equal(parsed.message.text, "em muốn mua đầm Q002 size L màu đỏ", "phải bỏ thẻ HTML của Pancake");
   assert.equal(parsed.message.fromPage, false, "tin của khách không phải tin của shop");
+  assert.equal(parsed.message.senderType, "CUSTOMER");
   assert.equal(parsed.conversation.phone, "0912345678");
+  assert.equal(parsed.conversation.pancakeCustomerId, "cust-9", "phải giữ mã khách để còn đọc lại hội thoại qua API");
   assert.equal(parsed.message.sentAt?.toISOString(), "2026-09-14T03:00:00.000Z", "Pancake trả ISO không múi giờ nhưng là UTC");
 
-  assert.equal(normalizeChatWebhook({ page_id: "p", conversation_id: "c" }), null, "thiếu mã tin nhắn ⇒ không chuẩn hoá được (không chống trùng được)");
-  assert.equal(normalizeChatWebhook({}), null);
-  assert.equal(normalizeChatWebhook({ message: { id: "m" } }), null);
+  // TỪ CHỐI PHẢI CÓ CHẨN ĐOÁN, không phải `null` trống: thiếu khoá nào, gói tin có khoá gì.
+  // Ánh xạ webhook hội thoại CHƯA được kiểm chứng (tài liệu Pancake trong kho mã chỉ có bốn loại
+  // webhook POS), nên một mẫu thật phải là đủ để hoàn thiện ánh xạ mà không phải đoán.
+  const noMessageId = normalizeChatWebhook({ page_id: "p", conversation_id: "c", foo: 1 });
+  assert.equal(noMessageId.ok, false);
+  if (noMessageId.ok) throw new Error("gói tin thiếu mã tin nhắn không được coi là hợp lệ");
+  assert.equal(noMessageId.reason, "MISSING_REQUIRED_FIELD");
+  assert.deepEqual(noMessageId.missing, ["messageId"], "phải nói RÕ thiếu khoá nào");
+  assert.ok(noMessageId.seenKeys.includes("foo"), "phải liệt kê khoá thật sự có trong gói tin để còn sửa ánh xạ");
 
-  const shopEcho = normalizeChatWebhook({ ...webhook, message: { ...webhook.message, id: "msg-2", from: { id: "page-77", name: "Shop" } } });
-  assert.equal(shopEcho?.message.fromPage, true, "tin gửi từ chính page phải được nhận là tin của shop");
+  const notObject = normalizeChatWebhook("chuỗi chứ không phải object");
+  assert.equal(notObject.ok === false && notObject.reason, "NOT_JSON_OBJECT");
+  const emptyPayload = normalizeChatWebhook(null);
+  assert.equal(emptyPayload.ok === false && emptyPayload.reason, "EMPTY_PAYLOAD");
+  const arrayPayload = normalizeChatWebhook([{ page_id: "p" }]);
+  assert.equal(arrayPayload.ok === false && arrayPayload.reason, "NOT_JSON_OBJECT", "mảng không phải một gói tin");
+
+  // Mã hội thoại KHÔNG được lấy nhầm từ `id` ở gốc gói tin — ở đó `id` là mã TIN NHẮN.
+  const idAtRoot = normalizeChatWebhook({ page_id: "p", id: "msg-x", message: "xin chào" });
+  assert.equal(idAtRoot.ok, false, "chỉ có id ở gốc thì không suy ra được mã hội thoại");
+
+  // ── Tin của shop: phân biệt NHÂN VIÊN với BOT ──
+  const shopEcho = normalizeChatWebhook({ ...webhook, message: { ...webhook.message, id: "msg-2", from: { id: "page-77", name: "Chị Hà" } } });
+  assert.equal(shopEcho.ok && shopEcho.message.fromPage, true, "tin gửi từ chính page phải được nhận là tin của shop");
+  assert.equal(shopEcho.ok && shopEcho.message.senderType, "PAGE_HUMAN");
+
+  const botEcho = normalizeChatWebhook({ ...webhook, message: { ...webhook.message, id: "msg-3", from: { id: "page-77", name: "Botcake" } } });
+  assert.equal(botEcho.ok && botEcho.message.senderType, "PAGE_BOT", "tin do bot gửi KHÔNG được tính là câu nhân viên trả lời");
+
+  const anonEcho = normalizeChatWebhook({ ...webhook, message: { ...webhook.message, id: "msg-4", from_page: true, from: {} } });
+  assert.equal(anonEcho.ok && anonEcho.message.senderType, "UNKNOWN", "tin của shop không rõ người gửi là CHƯA BIẾT, không đoán là nhân viên");
+
+  // Tệp đính kèm phải đếm được — ảnh là cách khách hỏi mẫu phổ biến nhất.
+  const withPhoto = normalizeChatWebhook({ ...webhook, message: { ...webhook.message, id: "msg-5", attachments: [{ type: "photo" }, { type: "photo" }] } });
+  assert.equal(withPhoto.ok && withPhoto.message.attachmentCount, 2);
+  assert.equal(withPhoto.ok && withPhoto.message.hasAttachment, true);
+
+  // Trường tuỳ chọn thiếu hết vẫn phải chuẩn hoá được: gói tin nghèo không phải gói tin hỏng.
+  const minimal = normalizeChatWebhook({ page_id: "p1", conversation_id: "c1", message: { id: "m1" } });
+  assert.equal(minimal.ok, true, "đủ ba khoá bắt buộc là nạp được, các trường khác thiếu thì để rỗng");
+  assert.equal(minimal.ok && minimal.message.text, "");
+  assert.equal(minimal.ok && minimal.message.sentAt, null, "không có mốc thời gian thì là CHƯA BIẾT, không phải bây giờ");
 
   // 6a. Nạp lần đầu: ghi tin, tạo việc.
   await setSettingJson(AI_CONFIG_KEY, {});
@@ -250,21 +295,131 @@ export async function testSalesAgent(db: Db) {
   assert.equal(messageRows.length, 1, "một mã tin nhắn — một dòng, dù nhận bao nhiêu lần");
 
   // 6c. CHỐNG VÒNG LẶP: tin của shop không bao giờ tạo việc.
-  const echo = await ingestMessage(parsed.conversation, { ...parsed.message, externalId: "msg-2", fromPage: true, text: "Dạ em chào chị" }, "test", db);
+  // Lời chào tự động của page: tin của shop, do MÁY gửi — không tạo việc, và cũng không được
+  // tính là "câu nhân viên trả lời" ở khối 6D bên dưới.
+  const echo = await ingestMessage(
+    parsed.conversation,
+    { ...parsed.message, externalId: "msg-2", fromPage: true, senderType: "PAGE_BOT", fromName: "Botcake", text: "Dạ em chào chị" },
+    "test",
+    db,
+  );
   assert.equal(echo.eventEmitted, false, "tin của shop KHÔNG được tạo việc — nếu không con bot sẽ tự nói chuyện với chính nó");
   assert.match(echo.reason, /vòng lặp/);
 
-  // 6d. Câu nhân viên trả lời được nối vào gợi ý gần nhất (giá trị của nấc chạy ngầm).
+  // ═════════ 6D. NỐI CÂU NHÂN VIÊN THEO LƯỢT — KHÔNG GIẢ ĐỊNH MỘT-ĐỔI-MỘT ═════════
+  //
+  // Nhân viên hay trả lời một lượt khách bằng ba bốn tin liền; đôi khi không trả lời tin nào;
+  // đôi khi trả lời muộn hơn một lượt khách mới. Cả ba tình huống đều phải nối đúng.
   const conversationId = first.conversationId;
   const sales = await getAgent("sales", undefined, db);
   assert.ok(sales);
+
+  const triggerRow = await db.query.salesMessages.findFirst({ where: eq(schema.salesMessages.externalId, "msg-1") });
+  assert.ok(triggerRow, "phải tìm được tin khách đã mở lượt");
   const [suggestion] = await db
     .insert(schema.salesSuggestions)
-    .values({ conversationId, stageBefore: "NEW_LEAD", stageAfter: "PRODUCT_IDENTIFIED", action: "ASK_SIZE", suggestedReply: "Dạ chị cho em xin chiều cao cân nặng ạ" })
+    .values({
+      conversationId,
+      triggerMessageId: triggerRow.id,
+      stageBefore: "NEW_LEAD",
+      stageAfter: "PRODUCT_IDENTIFIED",
+      action: "ASK_SIZE",
+      suggestedReply: "Dạ chị cho em xin chiều cao cân nặng ạ",
+    })
     .returning({ id: schema.salesSuggestions.id });
-  await ingestMessage(parsed.conversation, { ...parsed.message, externalId: "msg-3", fromPage: true, text: "Chị cao bao nhiêu ạ?", sentAt: new Date() }, "test", db);
+
+  const triggerAt = triggerRow.sentAt ?? new Date();
+  const shopMessage = (externalId: string, text: string, seconds: number, fromName = "Chị Hà") => ({
+    externalId,
+    text,
+    fromPage: true,
+    senderType: "PAGE_HUMAN" as const,
+    fromName,
+    sentAt: new Date(triggerAt.getTime() + seconds * 1000),
+    hasAttachment: false,
+    attachmentCount: 0,
+    raw: {},
+  });
+
+  // Ba tin của nhân viên trong CÙNG một lượt.
+  await ingestMessage(parsed.conversation, shopMessage("msg-h1", "Dạ chị ơi", 30), "test", db);
+  await ingestMessage(parsed.conversation, shopMessage("msg-h2", "Chị cao bao nhiêu ạ?", 45), "test", db);
+  await ingestMessage(parsed.conversation, shopMessage("msg-h3", "Và cân nặng nữa ạ", 60), "test", db);
+
   const linked = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, suggestion.id) });
-  assert.equal(linked?.humanReply, "Chị cao bao nhiêu ạ?", "câu nhân viên thật sự gửi phải được nối vào gợi ý để đối chiếu");
+  assert.equal(linked?.humanReply, "Dạ chị ơi", "ảnh chụp giữ câu ĐẦU TIÊN của lượt");
+  assert.equal(linked?.humanReplyCount, 3, "phải đếm đủ ba tin, không bỏ rơi hai tin sau");
+  assert.equal(linked?.humanResponseSeconds, 30, "thời gian phản hồi tính từ tin khách tới câu đầu tiên");
+
+  // Tin do BOT gửi không phải câu nhân viên trả lời.
+  await ingestMessage(parsed.conversation, { ...shopMessage("msg-bot", "Cảm ơn chị đã nhắn tin!", 75), senderType: "PAGE_BOT", fromName: "Botcake" }, "test", db);
+  const afterBot = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, suggestion.id) });
+  assert.equal(afterBot?.humanReplyCount, 3, "tin bot KHÔNG được cộng vào số câu nhân viên trả lời");
+
+  // Lượt khách MỚI: câu nhân viên sau đó thuộc lượt mới, không được gán ngược vào lượt cũ.
+  const secondTrigger = await ingestMessage(
+    parsed.conversation,
+    { externalId: "msg-turn2", text: "em cao 1m60 ạ", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Lan", sentAt: new Date(triggerAt.getTime() + 120_000), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  assert.ok(secondTrigger.messageId);
+  const [suggestion2] = await db
+    .insert(schema.salesSuggestions)
+    .values({ conversationId, triggerMessageId: secondTrigger.messageId, stageBefore: "SIZE_SELECTION", stageAfter: "SIZE_SELECTION", action: "ASK_SIZE", suggestedReply: "Dạ size L ạ" })
+    .returning({ id: schema.salesSuggestions.id });
+  await ingestMessage(parsed.conversation, shopMessage("msg-h4", "Dạ chị mặc size L nhé", 150), "test", db);
+
+  const turn1 = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, suggestion.id) });
+  const turn2 = await db.query.salesSuggestions.findFirst({ where: eq(schema.salesSuggestions.id, suggestion2.id) });
+  assert.equal(turn1?.humanReplyCount, 3, "lượt cũ không được nhận thêm câu trả lời của lượt mới");
+  assert.equal(turn2?.humanReply, "Dạ chị mặc size L nhé", "câu sau tin khách mới thuộc về lượt mới");
+  assert.equal(turn2?.humanReplyCount, 1);
+
+  // Dựng lại cấu trúc lượt lúc đọc — đây mới là bản ĐẦY ĐỦ, ô `human_reply` chỉ là ảnh chụp.
+  const turns = await getConversationTurns(conversationId);
+  assert.ok(turns.length >= 2, "phải dựng được ít nhất hai lượt");
+  const firstTurn = turns.find((t) => t.triggerMessageId === triggerRow.id);
+  assert.ok(firstTurn, "lượt đầu phải có mặt");
+  // Năm tin của shop trong lượt đầu: lời chào bot · ba tin nhân viên · một tin bot.
+  assert.equal(firstTurn.shopReplies.length, 5, "bản đầy đủ giữ CẢ tin bot lẫn tin nhân viên để đọc lại bối cảnh");
+  assert.equal(firstTurn.shopReplies.filter((r) => r.senderType === "PAGE_HUMAN").length, 3);
+
+  // ═════════ 6E. CHỐNG TRÙNG CHÉO KÊNH ═════════
+  //
+  // Webhook và job đọc bù có thể đánh MÃ KHÁC NHAU cho cùng một tin (ánh xạ webhook chưa được
+  // kiểm chứng). Khoá `external_id` không bắt được, nhưng vân tay nội dung + mốc tới giây thì có.
+  const crossConv = { pageId: "page-cross", externalId: "conv-cross", pancakeCustomerId: "c", customerName: "Khách", phone: "", platform: "facebook" };
+  const sameMoment = new Date("2026-09-14T04:00:00.000Z");
+  const viaWebhook = await ingestMessage(
+    crossConv,
+    { externalId: "wh-1", text: "cho em hỏi giá", fromPage: false, senderType: "CUSTOMER", fromName: "Khách", sentAt: sameMoment, hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+    "WEBHOOK",
+  );
+  assert.equal(viaWebhook.eventEmitted, true);
+  const viaPoll = await ingestMessage(
+    crossConv,
+    { externalId: "poll-1", text: "cho em hỏi giá", fromPage: false, senderType: "CUSTOMER", fromName: "Khách", sentAt: sameMoment, hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+    "POLL",
+  );
+  assert.equal(viaPoll.duplicate, true, "cùng nội dung + cùng mốc giây = cùng một tin, dù hai kênh đánh mã khác nhau");
+  assert.equal(viaPoll.eventEmitted, false, "không được chạy AI lần thứ hai trên cùng câu của khách");
+  const crossRows = await db.query.salesMessages.findMany({ where: eq(schema.salesMessages.conversationId, viaWebhook.conversationId) });
+  assert.equal(crossRows.length, 1, "chỉ một dòng tin nhắn");
+
+  // Nhưng khách nhắn LẠI đúng câu cũ ở một thời điểm khác là HAI tin thật, không phải trùng.
+  const laterAgain = await ingestMessage(
+    crossConv,
+    { externalId: "wh-2", text: "cho em hỏi giá", fromPage: false, senderType: "CUSTOMER", fromName: "Khách", sentAt: new Date(sameMoment.getTime() + 300_000), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+    "WEBHOOK",
+  );
+  assert.equal(laterAgain.duplicate, false, "nhắn lại cùng câu sau 5 phút là tin THẬT, không được nuốt mất");
 
   // ═════════ 7. DÂY CHUYỀN CHẠY THẬT TRÊN NẤC SHADOW ═════════
 
@@ -311,13 +466,13 @@ export async function testSalesAgent(db: Db) {
     ])
     .onConflictDoNothing();
 
-  const flowConv = { pageId: "page-e2e", externalId: "conv-e2e", pancakeCustomerId: "cust-e2e", customerName: "Chị Mai", phone: "" };
+  const flowConv = { pageId: "page-e2e", externalId: "conv-e2e", pancakeCustomerId: "cust-e2e", customerName: "Chị Mai", phone: "", platform: "facebook" };
   let seq = 0;
   const say = async (text: string) => {
     seq += 1;
     const result = await ingestMessage(
       flowConv,
-      { externalId: `e2e-${seq}`, text, fromPage: false, fromName: "Chị Mai", sentAt: new Date(Date.now() + seq * 1000), hasAttachment: false, raw: {} },
+      { externalId: `e2e-${seq}`, text, fromPage: false, senderType: "CUSTOMER", fromName: "Chị Mai", sentAt: new Date(Date.now() + seq * 1000), hasAttachment: false, attachmentCount: 0, raw: {} },
       "test",
       db,
     );
@@ -385,10 +540,10 @@ export async function testSalesAgent(db: Db) {
   const [issue] = await db.insert(schema.stockReceipts).values({ kind: "ISSUE", reference: "AI-E2E-02", receivedAt: new Date() }).returning({ id: schema.stockReceipts.id });
   await db.insert(schema.stockReceiptItems).values({ receiptId: issue.id, variantId: "v-ai-e2e-m", quantity: -1, unitCost: 0 });
 
-  const soldOutConv = { pageId: "page-hết", externalId: "conv-het", pancakeCustomerId: "cust-het", customerName: "Chị Thu", phone: "" };
+  const soldOutConv = { pageId: "page-hết", externalId: "conv-het", pancakeCustomerId: "cust-het", customerName: "Chị Thu", phone: "", platform: "facebook" };
   const soldOut = await ingestMessage(
     soldOutConv,
-    { externalId: "het-1", text: "em muốn mua Đầm suông AIE2E size M ạ", fromPage: false, fromName: "Chị Thu", sentAt: new Date(), hasAttachment: false, raw: {} },
+    { externalId: "het-1", text: "em muốn mua Đầm suông AIE2E size M ạ", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Thu", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
     "test",
     db,
   );
@@ -406,10 +561,10 @@ export async function testSalesAgent(db: Db) {
 
   // ═════════ 8. CHUYỂN NGƯỜI DỪNG MỌI THỨ ═════════
 
-  const complaintConv = { pageId: "page-88", externalId: "conv-88", pancakeCustomerId: "cust-88", customerName: "Chị Hoa", phone: "" };
+  const complaintConv = { pageId: "page-88", externalId: "conv-88", pancakeCustomerId: "cust-88", customerName: "Chị Hoa", phone: "", platform: "facebook" };
   const complaintIngest = await ingestMessage(
     complaintConv,
-    { externalId: "msg-complaint", text: "shop lua dao, hang loi, cho em gap nhan vien", fromPage: false, fromName: "Chị Hoa", sentAt: new Date(), hasAttachment: false, raw: {} },
+    { externalId: "msg-complaint", text: "shop lua dao, hang loi, cho em gap nhan vien", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Hoa", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
     "test",
     db,
   );
@@ -422,7 +577,7 @@ export async function testSalesAgent(db: Db) {
   // Tin tiếp theo trên hội thoại đã chuyển người: máy vẫn ghi nhận nhưng KHÔNG soạn gì.
   const after = await ingestMessage(
     complaintConv,
-    { externalId: "msg-complaint-2", text: "em muon mua them mau nay", fromPage: false, fromName: "Chị Hoa", sentAt: new Date(), hasAttachment: false, raw: {} },
+    { externalId: "msg-complaint-2", text: "em muon mua them mau nay", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Hoa", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
     "test",
     db,
   );
@@ -441,10 +596,10 @@ export async function testSalesAgent(db: Db) {
   queueStubResponse({ behavior: "timeout" });
   queueStubResponse({ text: "vẫn không phải JSON" });
   queueStubResponse({ behavior: "error" });
-  const noisyConv = { pageId: "page-99", externalId: "conv-99", pancakeCustomerId: "cust-99", customerName: "Khách", phone: "" };
+  const noisyConv = { pageId: "page-99", externalId: "conv-99", pancakeCustomerId: "cust-99", customerName: "Khách", phone: "", platform: "facebook" };
   const noisy = await ingestMessage(
     noisyConv,
-    { externalId: "msg-noisy", text: "??? ... ???", fromPage: false, fromName: "Khách", sentAt: new Date(), hasAttachment: false, raw: {} },
+    { externalId: "msg-noisy", text: "??? ... ???", fromPage: false, senderType: "CUSTOMER", fromName: "Khách", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
     "test",
     db,
   );
@@ -462,8 +617,8 @@ export async function testSalesAgent(db: Db) {
   assert.equal(missing.status, "SKIPPED", "việc không tồn tại thì bỏ qua, không ném lỗi");
 
   await setSettingJson(AI_CONFIG_KEY, { enabled: false });
-  const offConv = { pageId: "page-off", externalId: "conv-off", pancakeCustomerId: "", customerName: "", phone: "" };
-  const offIngest = await ingestMessage(offConv, { externalId: "msg-off", text: "alo shop", fromPage: false, fromName: "", sentAt: new Date(), hasAttachment: false, raw: {} }, "test", db);
+  const offConv = { pageId: "page-off", externalId: "conv-off", pancakeCustomerId: "", customerName: "", phone: "", platform: "facebook" };
+  const offIngest = await ingestMessage(offConv, { externalId: "msg-off", text: "alo shop", fromPage: false, senderType: "CUSTOMER", fromName: "", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} }, "test", db);
   assert.equal(offIngest.eventEmitted, false, "tắt tổng thì không tạo việc mới");
   const offRun = await drainSalesTasks(10, db);
   assert.equal(offRun.skipped, true, "tắt tổng thì dây chuyền không chạy");
@@ -476,6 +631,112 @@ export async function testSalesAgent(db: Db) {
   // Trạng thái hỏng trong CSDL phải đọc được về mặc định an toàn, không làm sập màn hình.
   assert.deepEqual(parseSalesState(null), EMPTY_SALES_STATE);
   assert.deepEqual(parseSalesState({ quantity: "ba", pending: { sentAt: "" } }), { ...EMPTY_SALES_STATE, quantity: 1, pending: null });
+
+  // ═════════ 10B. CHỐT CHẶN CỨNG: KHÔNG GIẢ MẠO NẤC ĐƯỢC ═════════
+  //
+  // `canSend()` tin vào nấc mà nơi gọi đưa xuống. Chốt cứng đọc lại nấc THẬT từ CSDL, nên dù một
+  // lỗi lập trình hay một câu trả lời dị thường của mô hình có đặt `mode: "AUTO"`, tin vẫn không
+  // đi được. Muốn gửi tin cho khách phải đổi DỮ LIỆU, không đổi được bằng một chuỗi.
+  const forged = await assertOutboundAllowed({
+    mode: "AUTO",
+    approved: true,
+    conversationExternalId: "conv-gia-mao",
+    text: "Dạ em chốt đơn cho chị luôn nhé",
+    humanTakeover: false,
+  });
+  assert.equal(forged.allowed, false, "khai nấc AUTO từ nơi gọi KHÔNG mở được cổng khi CSDL vẫn ở nấc SHADOW");
+  assert.match(forged.reason, /SHADOW|chạy ngầm|GỢI Ý/i, "lý do phải nói rõ đang bị chặn vì nấc chạy ngầm");
+
+  // Hàm thuần vẫn cho phép AUTO — chứng minh khác biệt nằm ĐÚNG ở chỗ đọc lại CSDL.
+  assert.equal(canSend({ mode: "AUTO", approved: true, conversationExternalId: "conv-gia-mao", text: "x", humanTakeover: false }, OFF_SETTINGS).allowed, true);
+
+  // Công cụ GHI cũng có chốt cứng riêng: cổng đọc lại nấc từ CSDL trước khi cho chạy.
+  const forgedTool = await callTool(
+    { agentKey: "sales", mode: "AUTO", allowedTools: sales.definition.allowedTools, run: null, conversationId },
+    "order.create_draft",
+    {
+      variantId: "v-ai-e2e-l",
+      quantity: 1,
+      name: "Khách",
+      phone: "0912345678",
+      address: "Số 5 ngõ 12 Nguyễn Trãi, Thanh Xuân, Hà Nội",
+      confirmationEvidence: { reviewSentAt: "x", customerRepliedAt: "y", quote: "ok" },
+    },
+  );
+  assert.equal(forgedTool.ok, false, "khai nấc AUTO không chạy được công cụ tạo đơn");
+  assert.equal(forgedTool.outcome, "DENIED");
+  assert.match(forgedTool.error, /CSDL/, "lý do phải nói rõ nấc thật lấy từ CSDL");
+
+  // ═════════ 10C. THIẾU KHOÁ MÔ HÌNH: KHÔNG SẬP, ĐÁNH DẤU RÕ, CHUYỂN NGƯỜI ═════════
+  await setSettingJson(AI_CONFIG_KEY, { modelCallsEnabled: true });
+  const noKeySettings = await getAiSettings();
+  const noKey = await runModelStep({
+    step: "test",
+    system: "s",
+    messages: [{ role: "user", content: "x" }],
+    schema: z.object({ text: z.string() }),
+    routing: parseRouting({ provider: "anthropic", tiers: ["ECONOMY", "STRONG"] }),
+    settings: noKeySettings,
+  });
+  assert.equal(noKey.tier, "HUMAN", "không có khoá thì chuyển người, không ném lỗi");
+  assert.equal(noKey.escalation, "MODEL_NOT_CONFIGURED", "CHƯA CẤU HÌNH phải tách khỏi MÔ HÌNH LỖI — hai việc sửa ở hai nơi khác nhau");
+  assert.equal(noKey.attempts.length, 0, "không gọi mạng lần nào thì không ghi lần gọi nào");
+
+  // ═════════ 10D. THIẾU BẢNG SỐ ĐO: KHÔNG ĐOÁN SIZE ═════════
+  //
+  // ERP hiện KHÔNG có bảng số đo nào (chỉ có nhãn size). Máy phải nói thẳng là chưa có căn cứ và
+  // chuyển người — đoán size trên cơ thể người thật là cách chắc chắn tạo ra một đơn đổi size.
+  assert.equal(recommendSize(null, { heightCm: 158, weightKg: 47 }).code, "SIZE_DATA_MISSING");
+  assert.equal(recommendSize({ version: "v1", scope: "GLOBAL", rows: [] }, { heightCm: 158 }).code, "SIZE_DATA_MISSING");
+
+  const chart: SizeRule = {
+    version: "v1",
+    scope: "PRODUCT",
+    key: "p-ai-e2e",
+    rows: [
+      { size: "M", heightCm: [150, 160], weightKg: [45, 52] },
+      { size: "L", heightCm: [158, 168], weightKg: [53, 60] },
+    ],
+  };
+  assert.equal(recommendSize(chart, { heightCm: 155, weightKg: 47 }).size, "M", "khớp đúng một hàng thì gợi ý được");
+  assert.equal(recommendSize(chart, { heightCm: 155 }).code, "MEASUREMENTS_MISSING", "thiếu số đo bảng cần ⇒ đòi thêm, không đoán");
+  assert.deepEqual(recommendSize(chart, { heightCm: 155 }).missing, ["weightKg"]);
+  assert.equal(recommendSize(chart, { heightCm: 190, weightKg: 90 }).code, "OUT_OF_RANGE");
+  const ambiguous: SizeRule = { version: "v1", scope: "GLOBAL", rows: [{ size: "M", heightCm: [150, 170] }, { size: "L", heightCm: [150, 170] }] };
+  assert.equal(recommendSize(ambiguous, { heightCm: 160 }).code, "AMBIGUOUS", "hai size cùng khớp là CHƯA BIẾT, không chọn cái đầu");
+  for (const code of ["SIZE_DATA_MISSING", "MEASUREMENTS_MISSING", "AMBIGUOUS", "OUT_OF_RANGE"] as const) {
+    assert.equal(sizeNeedsHuman(code), true, `${code} phải chuyển người`);
+  }
+  assert.equal(sizeNeedsHuman("OK"), false);
+
+  // Phạm vi HẸP thắng phạm vi RỘNG — một mẫu vải co giãn không bị áp bảng của vải cứng.
+  const rules: SizeRule[] = [
+    { version: "global", scope: "GLOBAL", rows: [{ size: "FREE" }] },
+    { version: "theo-san-pham", scope: "PRODUCT", key: "p-ai-e2e", rows: [{ size: "M" }] },
+  ];
+  assert.equal(resolveSizeRule(rules, { productId: "p-ai-e2e" })?.version, "theo-san-pham");
+  assert.equal(resolveSizeRule(rules, { productId: "khac" })?.version, "global");
+  assert.equal(resolveSizeRule([], { productId: "p" }), null, "không khai bảng nào ⇒ null ⇒ SIZE_DATA_MISSING");
+
+  // Chạy thật: khách đưa số đo mà ERP chưa có bảng ⇒ hội thoại chuyển người.
+  await setSettingJson(AI_CONFIG_KEY, { modelCallsEnabled: false });
+  const sizeConv = { pageId: "page-size", externalId: "conv-size", pancakeCustomerId: "cs", customerName: "Chị Vân", phone: "", platform: "facebook" };
+  const sizeAsk = await ingestMessage(
+    sizeConv,
+    { externalId: "size-1", text: "Đầm suông AIE2E em cao 1m58 nặng 47kg thì mặc size nào ạ", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Vân", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  await drainSalesTasks(5, db);
+  const sizeConvRow = await db.query.salesConversations.findFirst({ where: eq(schema.salesConversations.id, sizeAsk.conversationId) });
+  assert.equal(sizeConvRow?.stage, "HUMAN_TAKEOVER", "chưa có bảng số đo thì chuyển người, không đoán size");
+  const sizeRun = await db.query.aiRuns.findFirst({
+    where: and(eq(schema.aiRuns.subjectId, sizeAsk.conversationId), eq(schema.aiRuns.subjectType, "CONVERSATION")),
+    orderBy: (r, { desc }) => [desc(r.startedAt)],
+  });
+  const sizeDecision = (sizeRun?.decision ?? {}) as Record<string, unknown>;
+  assert.equal(sizeDecision.handoffReason, "SIZE_DATA_MISSING");
+  assert.ok(!String(sizeRun?.suggestedReply ?? "").match(/size (S|M|L|XL)\b/), "câu gợi ý KHÔNG được nêu một size cụ thể khi chưa có bảng");
 
   // ═════════ 11. MÀN HÌNH QUAN SÁT ĐỌC ĐƯỢC THẬT ═════════
   //
@@ -504,8 +765,49 @@ export async function testSalesAgent(db: Db) {
   const stages = await salesStageBreakdown();
   assert.ok(stages.some((x) => x.stage === "HUMAN_TAKEOVER"), "bảng giai đoạn phải thấy hội thoại đã chuyển người");
 
+  // ═════════ 12. MÀN HÌNH SOÁT & CHẤM TAY ═════════
+  const shadowTurns = await listShadowTurns({ limit: 100 });
+  assert.ok(shadowTurns.length > 0, "màn hình soát phải đọc được các lượt");
+  const withReply = shadowTurns.find((t) => t.humanReply);
+  assert.ok(withReply, "phải có lượt kèm câu nhân viên trả lời để đối chiếu");
+  assert.ok(withReply.customerMessage.length > 0, "mỗi lượt phải hiện được tin khách đã kích hoạt nó");
+
+  // Bộ lọc phải thật sự lọc, không phải trang trí.
+  const onlyTakeover = await listShadowTurns({ humanTakeover: true, limit: 100 });
+  assert.ok(onlyTakeover.every((t) => t.humanTakeoverAt), "lọc 'đã chuyển người' phải chỉ trả hội thoại đã chuyển");
+  const notReviewed = await listShadowTurns({ reviewed: false, limit: 100 });
+  assert.ok(notReviewed.every((t) => t.reviewedAt === null), "lọc 'chưa chấm' phải chỉ trả lượt chưa chấm");
+  assert.ok(notReviewed.length > 0, "lúc này chưa chấm lượt nào");
+
+  // ĐỘ CHÍNH XÁC CHỈ TÍNH TRÊN PHẦN ĐÃ CHẤM — chưa chấm là CHƯA BIẾT, không phải 0%.
+  const before = await shadowMetrics(7);
+  assert.equal(before.reviewed, 0);
+  for (const metric of before.labelled) {
+    assert.equal(metric.accuracy, null, `${metric.key}: chưa chấm ô nào thì độ chính xác phải là CHƯA BIẾT, không phải 0%`);
+  }
+  assert.ok(before.handoffRate !== null, "tỷ lệ chuyển người đo được mà không cần chấm tay");
+  assert.equal(before.sentToCustomer, 0, "nấc chạy ngầm: 0 tin gửi cho khách");
+
+  // Chấm tay hai lượt, một đúng một sai ⇒ 50% trên độ phủ 2.
+  await db.insert(schema.salesReviewLabels).values([
+    { suggestionId: shadowTurns[0].suggestionId, conversationId: shadowTurns[0].conversationId, productOk: true, intentOk: true, reviewedAt: new Date() },
+    { suggestionId: shadowTurns[1].suggestionId, conversationId: shadowTurns[1].conversationId, productOk: false, intentOk: true, reviewedAt: new Date() },
+  ]);
+  clearMemo();
+  const afterLabels = await shadowMetrics(7);
+  assert.equal(afterLabels.reviewed, 2);
+  const product = afterLabels.labelled.find((m) => m.key === "productOk");
+  assert.equal(product?.reviewed, 2);
+  assert.equal(product?.accuracy, 50, "độ chính xác tính đúng trên phần đã chấm");
+  const size = afterLabels.labelled.find((m) => m.key === "sizeOk");
+  assert.equal(size?.accuracy, null, "chiều chưa ai chấm vẫn là CHƯA BIẾT, không bị kéo xuống 0%");
+  assert.ok(afterLabels.reviewCoverage !== null && afterLabels.reviewCoverage < 100, "độ phủ phải hiện cạnh tỷ lệ để không ai đọc nhầm");
+
   console.log(
     `✓ Nhân viên bán hàng AI: ${SALES_STAGES.length} giai đoạn · ${combos} tổ hợp chuyển trạng thái đều nằm trong bảng khai báo · "ok" trơ trọi KHÔNG tạo đơn · nấc SHADOW gửi 0 tin`,
+  );
+  console.log(
+    "✓ Nạp hội thoại & soát nấc chạy ngầm: gói tin lạ bị từ chối KÈM chẩn đoán · bot tách khỏi nhân viên · trùng chéo kênh bị chặn · chốt cứng không giả mạo nấc được · thiếu bảng số đo thì chuyển người · độ chính xác chỉ tính trên phần đã chấm",
   );
 }
 
