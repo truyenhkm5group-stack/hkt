@@ -90,9 +90,12 @@ on:
 #
 # `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê, dựng
 # lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
-concurrency:
-  group: vps-operations
-  cancel-in-progress: false
+# Nhóm đồng thời chuyển XUỐNG TỪNG JOB.
+#
+# `vps-operations` là nhóm dùng chung với workflow triển khai: một thao tác chạm VPS tại một thời
+# điểm, và đó là luật đúng — job `ops` giữ nguyên nó. Nhưng job `image` KHÔNG mở một kết nối SSH
+# nào; xếp nó vào cùng nhóm nghĩa là một lượt dựng ảnh phải chờ một lượt triển khai production dài
+# 30 phút mà không có lý do kỹ thuật nào. Nên nó có nhóm riêng.
 
 env:
   # Ảnh của bản chạy thử. Tên KHÁC hẳn ảnh production (`erp-app:local`).
@@ -110,6 +113,10 @@ jobs:
     if: inputs.action == 'ai-staging-image'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # Nhóm RIÊNG: job này không chạm VPS nên không cần xếp hàng sau thao tác VPS nào.
+    concurrency:
+      group: ai-staging-image
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -154,6 +161,12 @@ jobs:
     if: inputs.action != 'ai-staging-image'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # MỘT THAO TÁC CHẠM VPS TẠI MỘT THỜI ĐIỂM — nhóm dùng chung với workflow triển khai.
+    # `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê,
+    # dựng lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
+    concurrency:
+      group: vps-operations
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
