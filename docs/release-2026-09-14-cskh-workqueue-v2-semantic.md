@@ -266,29 +266,71 @@ một con số ⇒ không-thao-tác, đúng nghĩa idempotent.
 
 ---
 
-## 9. Còn chờ: đối soát HMT bằng tệp thật
+## 9. Đối soát HMT: đường đưa tệp vào máy chủ đã dựng xong
 
-Bộ máy đối soát đã dựng xong và kiểm thử đầy đủ từ bản trước. Thứ còn thiếu là **chính tệp** trên
-máy có quyền đọc CSDL production.
+### Vì sao bộ máy đã xong mà chưa chạy được lần nào
 
-Môi trường phiên làm việc này **không** có đường đưa tệp sang: `docs.google.com` và
-`erp.vnxcommerce.com` đều bị chặn ở tầng proxy (403 CONNECT); ô "arg" của workflow hiện công khai
-trên kho mã PUBLIC; và tệp tuyệt đối không được commit vào Git hay đưa vào ảnh Docker.
+Bộ máy đối soát dựng xong và kiểm thử đầy đủ từ bản 13/09. Thứ thiếu suốt từ đó không phải mã —
+mà là **đường đưa tệp Excel từ máy Windows của chủ shop tới nơi có CSDL production**. Bốn đường đã
+thử, và vì sao ba đường đầu đều sai:
 
-Đã kiểm lại trên máy chủ **14/09/2026 sau deploy** (thao tác ops `returns-hmt`): thư mục
-`/root/hmt/` **chưa có tệp nào**.
+| Đường | Vì sao không dùng được |
+|---|---|
+| `scp` lên máy chủ | máy chủ shop **không có khoá SSH**, đăng nhập bằng mật khẩu cũng không được; và bắt người vận hành mở terminal cho một việc hàng tuần là cách chắc chắn nhất để việc đó không bao giờ được làm |
+| Đường dẫn tải công khai (`HMT_WORKBOOK_URL`) | "ai có link cũng xem được" là cách nói khác của **tên và địa chỉ khách hàng nằm trên Internet** |
+| Đưa tệp vào kho mã | kho mã này **PUBLIC** |
+| **Tải lên qua chính ERP** | ✅ người đã đăng nhập kéo tệp vào màn hình của họ; tệp đi qua HTTPS bằng **phiên của họ** và nằm lại trong CSDL production |
 
-**Trạng thái: `HMT_ENGINE_READY` · `WAITING_FOR_SECURE_FILE_TRANSFER`.**
+Đường thứ tư đã nằm sẵn trong ERP suốt thời gian đó — đó chính là cách bảng kê Viettel Post vẫn
+vào hệ thống hàng tuần (`vtp_statement_files`). Bản này dùng lại đúng hình dạng ấy cho sổ hàng hoàn.
 
-Chủ shop chỉ cần **một lệnh duy nhất**, chạy từ chính máy đang có tệp:
+### Cái đã dựng
+
+· Bảng `hmt_workbooks` (migration **0082**). **Khoá tự nhiên là NỘI DUNG**, không phải tên tệp:
+  `sha256` UNIQUE. Cùng tệp tải mười lần vẫn một dòng — kể cả khi người dùng đổi tên, mà họ luôn đổi.
+· Ô tải lên trên trang **Kiểm đếm hàng hoàn**. **Máy chủ** tính băm từ chính byte đã nhận và
+  **máy chủ** kiểm tệp ngay lúc nhận: kéo nhầm bảng kê Viettel Post (cũng `.xlsx`, cũng mở được) bị
+  từ chối ngay trước mặt người vừa kéo nó vào, chứ không nhận vào rồi mới báo "0 dòng khớp".
+· `npm run returns:hmt` không còn bắt buộc `--file` — mặc định đọc bản mới nhất trong CSDL.
+· Thao tác ops `returns-hmt` tự rơi về đường CSDL, nên chạy đối soát không cần chuẩn bị gì trước.
+· Nút **xoá tệp** sau khi đối soát xong; chứng cứ không đi theo (băm · sheet · số dòng · mã vận đơn
+  vẫn nằm ở `hmt_return_reconciliation`).
+
+### Kiểm đếm nguồn của tệp THẬT (đọc tại chỗ, SHA-256 `c5616055…f5ed`, 45.029 byte)
+
+| Sheet | Dòng có dữ liệu | Mã vận đơn khác nhau | 1P1 | Mã lặp | Ô trống → kế thừa | Không suy được |
+|---|---|---|---|---|---|---|
+| MVĐ hoàn, 1 phần | 833 | **817** | **237** | 16 | 0 | 0 |
+| Chi tiết đơn hoàn | 507 | 452 | 0 | 52 | 55 → 54 | **1** |
+| Chi tiết đơn 1 phần | 243 | 222 | **220** | 19 | 20 → 20 | 0 |
+
+Độ phủ mã hàng: **727/750 dòng món** đọc được mã (Q002 611 · Q003 116); **23 dòng không đọc được**
+— chúng được giữ nguyên ở nhóm "không đọc được mã hàng", **không** bị gán bừa vào Q002/Q003.
+
+**Khớp từng con số với ảnh chụp phiên trước** (222 mã / 19 lặp · 507 và 243 dòng · 1P1 237/0/220 ·
+~750 dòng món, ~727 đọc được, ~23 không): không lệch một đơn vị nào. Tệp không đổi giữa hai phiên.
+
+### Còn lại đúng MỘT thao tác, và nó không phải SSH
+
+Đã kiểm trên máy chủ sau deploy #267 (thao tác ops `returns-hmt`):
 
 ```
-scp "Bản sao của Hàng hoàn HMT.xlsx" root@14.225.198.146:/root/hmt/
+Nguồn: bản tải lên qua ERP (CSDL production)
+Chưa có bảng tính nào để đối soát.
+  · CÁCH THƯỜNG DÙNG: mở ERP → Kiểm đếm hàng hoàn → kéo tệp .xlsx vào ô "Sổ hàng hoàn viết tay"
 ```
 
-Rồi chạy Actions → *Vận hành ERP trên VPS* → `returns-hmt` (ô `arg` để TRỐNG = **chạy thử**, không
-ghi gì). Xem xong báo cáo, muốn ghi thì chạy lại với `arg = --apply`.
+Đường đã thông; chỗ trống bây giờ là **chính các byte của tệp**. Phiên làm việc này không tự đưa
+chúng sang được: từ hộp chạy của Claude không có kết nối tới cổng 22 của máy chủ, và
+`erp.vnxcommerce.com` bị chặn ở tầng proxy — nên không có đường nào tự động, kể cả đường vừa dựng.
+Báo đúng như thế thay vì làm ra vẻ đã xong.
 
-Không cần nhập mật khẩu hay token vào đâu khác, và **không** dán tệp / đường dẫn vào ô `arg`: ô đó
-hiện công khai trên trang lần chạy của một kho mã PUBLIC.
+**Chủ shop làm một lần, trong trình duyệt đang đăng nhập sẵn:**
 
+1. Mở **Kho → Kiểm đếm hàng hoàn**.
+2. Kéo `Bản sao của Hàng hoàn HMT.xlsx` vào ô *"Sổ hàng hoàn viết tay (.xlsx)"*.
+   Màn hình hiện lại băm SHA-256 — phải là `c5616055…` thì mới đúng bản đã kiểm ở trên.
+3. Actions → *Vận hành ERP trên VPS* → `returns-hmt`, ô `arg` **để trống** (chạy thử).
+4. Đọc bảng phân loại, rồi chạy lại với `arg = --apply`.
+
+Không mật khẩu, không khoá SSH, không console máy chủ, không link công khai.

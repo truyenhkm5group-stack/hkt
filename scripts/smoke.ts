@@ -236,6 +236,14 @@ const EXPECT: Record<string, { marker: string; why: string }[]> = {
     { marker: "Ghi chú", why: "ghi chú xử lý tách khỏi bằng chứng; trộn lại thì không ai phân biệt lời khách với kết luận đồng nghiệp" },
   ],
   "/shipments": [{ marker: 'aria-label="Sao chép mã vận đơn"', why: "bàn vận đơn sống bằng việc dán mã sang trang ĐVVC" }],
+  /*
+    Ô ĐƯA SỔ HÀNG HOÀN VÀO MÁY CHỦ.
+
+    Đây là đường DUY NHẤT chủ shop đưa được tệp Excel tới nơi có CSDL production (máy của chủ shop
+    không có khoá SSH). Ô này không hiện ra trên HTML thật thì cả bộ máy đối soát HMT không chạy
+    được lần nào — và đó đúng là tình trạng đã kéo dài từ 13/09/2026.
+  */
+  "/inventory/returns": [{ marker: 'id="hmt-file"', why: "không có ô này thì sổ hàng hoàn không có đường nào tới máy chủ" }],
 };
 
 async function main() {
