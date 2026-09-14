@@ -116,6 +116,8 @@ import {
   testRiskBadgeReadsTargets,
   testActionEngineGates,
   testReasonDenominatorsAndFilters,
+  testReasonGroupContract,
+  testReasonRegroupAndThreeLevelDrilldown,
   testIntelligenceRuns,
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
@@ -1495,6 +1497,8 @@ async function main() {
   testRiskBadgeReadsTargets();
   testActionEngineGates();
   await testReasonDenominatorsAndFilters(db);
+  testReasonGroupContract();
+  await testReasonRegroupAndThreeLevelDrilldown(db);
   await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();

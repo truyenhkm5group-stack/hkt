@@ -3549,11 +3549,13 @@ export const shipmentReturnReasons = pgTable(
     /** Khoá trong `lib/constants/return-reason.ts::RETURN_REASONS`. */
     reason: text("reason").notNull(),
     /**
-     * NHÓM LỚN, LƯU KÈM chứ không chỉ suy từ `reason` lúc đọc.
+     * NHÓM LÚC GHI — ẢNH CHỤP, KHÔNG PHẢI NGUỒN CỦA PHÉP GỘP.
      *
-     * Suy lúc đọc thì ngày nào đó một lý do được xếp sang nhóm khác là toàn bộ LỊCH SỬ đổi theo,
-     * lặng lẽ: báo cáo quý trước in ra hồi đó không còn khớp với chính nó nữa. Lưu kèm thì dòng
-     * cũ giữ nhóm nó được xếp lúc ghi, và đổi cách xếp nhóm chỉ ảnh hưởng dòng mới.
+     * Cột này trả lời câu "hồi đó báo cáo xếp ca này vào đâu". Mọi TỔNG HỢP đi qua
+     * `lib/constants/return-reason-mapping.ts::effectiveGroupOf`, suy lúc đọc từ bảng tra cộng
+     * phần ghi đè của chủ shop — nhờ vậy chỉnh cách xếp nhóm là sửa MỘT dòng cấu hình, không phải
+     * chạy `UPDATE` viết lại hàng trăm dòng lịch sử. Quan sát (`reason`, `raw_reason`) không bao
+     * giờ bị sửa; cách xếp thì được phép đổi.
      */
     reasonGroup: text("reason_group").notNull().default("UNKNOWN"),
     /**
@@ -3566,6 +3568,15 @@ export const shipmentReturnReasons = pgTable(
     note: text("note").notNull().default(""),
     /** Lý do máy suy ra tại thời điểm ghi đè, chép lại để so được. */
     inferredReason: text("inferred_reason").notNull().default(""),
+    /**
+     * CHỮ GỐC CỦA ĐVVC tại thời điểm người bấm xác nhận — NGUYÊN VĂN, không chuẩn hoá.
+     *
+     * Người đè lên máy thì chữ của ĐVVC biến mất khỏi màn hình, và cùng với nó là đường kiểm
+     * chứng: một ca xếp "vải xấu" mà ĐVVC ghi "khách hẹn giao lại" là một ca đáng hỏi lại — nhưng
+     * chỉ thấy được nếu chữ gốc còn đó. Rỗng = chưa có chứng từ nào (dòng ghi trước 0084 cũng
+     * rỗng: KHÔNG backfill, vì đoán hộ chữ gốc là bịa ra một chứng từ).
+     */
+    rawReason: text("raw_reason").notNull().default(""),
     /**
      * `MANUAL` — người của shop hỏi khách rồi ghi. CÓ THẨM QUYỀN.
      * `AUTO`   — máy suy từ chứng từ ĐVVC. Chỉ với tới được lý do THÔ.

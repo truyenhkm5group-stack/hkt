@@ -22,7 +22,7 @@ import { getReturnIntelligence, TREND_GRAINS, type TrendGrain } from "@/lib/quer
 import { listAttributedMarketers } from "@/lib/queries/order-marketer";
 import { listProductCodes } from "@/lib/queries/product-code";
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
-import { RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
+import { RETURN_REASONS, RETURN_REASON_GROUPS, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
@@ -80,7 +80,16 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const codes = params.filters.product?.length ? params.filters.product : undefined;
   const marketerIds = params.filters.marketer?.length ? params.filters.marketer : undefined;
   const trendGrain: TrendGrain = TREND_GRAINS.includes((params.filters.trend?.[0] ?? "") as TrendGrain) ? (params.filters.trend![0] as TrendGrain) : "DAY";
+  /*
+    ═══ DRILLDOWN BA TẦNG SỐNG TRONG URL ═══
+
+    `group` → `reason` → `pcode`. Ba tham số riêng, không phải một chuỗi ghép, để nút Lùi của
+    trình duyệt đi ngược đúng từng tầng và người đọc dán được đường dẫn đúng chỗ mình đang nhìn.
+    Giá trị lạ bị bỏ về `null` chứ không làm sập trang — URL là đầu vào của người ngoài.
+  */
   const openReason = (RETURN_REASONS as readonly string[]).includes(params.filters.reason?.[0] ?? "") ? (params.filters.reason![0] as ReturnReason) : null;
+  const openGroup = (RETURN_REASON_GROUPS as readonly string[]).includes(params.filters.group?.[0] ?? "") ? (params.filters.group![0] as ReturnReasonGroup) : null;
+  const openProduct = (param(raw, "pcode") || "").trim() || null;
 
   /*
     ═══ KỲ TRƯỚC CÙNG ĐỘ DÀI — TÍNH MỘT LẦN, DÙNG CHO MỌI PHÉP SO ═══
@@ -617,7 +626,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       ) : null}
 
       {/* ═════════ E. PHÂN TÍCH LÝ DO HOÀN ═════════ */}
-      <ReturnReasonSection report={reasonReport} filter={reasonFilter} hrefWith={hrefWith} openReason={openReason} />
+      <ReturnReasonSection report={reasonReport} filter={reasonFilter} hrefWith={hrefWith} openReason={openReason} openGroup={openGroup} openProduct={openProduct} />
 
       {/* ═════════ F. CHĂM SÓC & CỨU ĐƠN ═════════ */}
       <IntelSection

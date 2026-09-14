@@ -37,10 +37,11 @@ import { OM_MARKETER_ID, orderMarketerJoin } from "@/lib/queries/order-marketer"
 import { MARKETER_UNRESOLVED } from "@/lib/constants/marketer-attribution";
 import { rowsOf } from "@/lib/sql-rows";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
-import { reasonsForShipments } from "@/lib/queries/return-reason";
+import { reasonGroupTable } from "@/lib/constants/return-reason-mapping";
+import { getReasonGroupOverrides } from "@/lib/queries/return-reason-config";
+import { reasonsForShipments, type ReasonVerdict } from "@/lib/queries/return-reason";
 import {
   RETURN_REASON_GROUP_LABEL,
-  RETURN_REASON_GROUP_OF,
   RETURN_REASON_GROUPS,
   RETURN_REASON_LABEL,
   REASON_NEEDS_HUMAN,
@@ -260,7 +261,13 @@ async function baseRows(f: ReasonFilter) {
 }
 
 export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReasonReport> {
-  const { basis, rows: tatCa } = await baseRows(f);
+  const [{ basis, rows: tatCa }, ghiDeNhom] = await Promise.all([baseRows(f), getReasonGroupOverrides()]);
+  /*
+    BẢNG TRA NHÓM dựng MỘT lần cho cả lượt báo cáo, đã áp phần ghi đè của chủ shop. Mọi chỗ xếp
+    nhóm trong hàm này đọc `nhomCua`, KHÔNG đọc thẳng `RETURN_REASON_GROUP_OF` — hai đường tra
+    khác nhau là hai con số khác nhau giữa bảng nhóm và bảng chi tiết.
+  */
+  const nhomCua = reasonGroupTable(ghiDeNhom);
 
   /*
     LỌC KỲ TRONG BỘ NHỚ, KHÔNG Ở SQL — cố ý.
@@ -341,7 +348,7 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
   const details = new Map<ReturnReasonGroup, ReasonDetailRow[]>();
   for (const [reason, a] of theoLyDo) {
     if (reason === "UNKNOWN") continue;
-    const g = RETURN_REASON_GROUP_OF[reason];
+    const g = nhomCua[reason];
     const list = details.get(g) ?? [];
     list.push({
       reason,
@@ -365,10 +372,10 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
     khi sự thật là chưa ai ghi lý do size lần nào. Dòng 0 kèm cờ `needsHuman` phân biệt được hai
     chuyện đó.
   */
-  for (const reason of Object.keys(RETURN_REASON_GROUP_OF) as ReturnReason[]) {
+  for (const reason of Object.keys(nhomCua) as ReturnReason[]) {
     if (reason === "UNKNOWN") continue;
     if (f.reasons?.length && !f.reasons.includes(reason)) continue;
-    const g = RETURN_REASON_GROUP_OF[reason];
+    const g = nhomCua[reason];
     const list = details.get(g) ?? [];
     if (!list.some((d) => d.reason === reason)) {
       list.push({
@@ -499,22 +506,39 @@ export type ReasonDrilldownRow = {
   reasonLabel: string;
   confidence: ReasonConfidence;
   evidence: string;
+  /** CHỮ GỐC của ĐVVC, nguyên văn. Rỗng = không có chứng từ nào — khác "có nhưng không khớp danh mục". */
+  rawReason: string;
   careOwner: string;
   careActions: number;
   basisAt: Date | null;
 };
 
 /**
- * ═══ DANH SÁCH VẬN ĐƠN CỦA MỘT LÝ DO — CÙNG BỘ LỌC, KHÔNG TÍNH LẠI ═══
+ * ═══ DRILLDOWN BA TẦNG — MỘT BỘ LỌC, KHÔNG TÍNH LẠI Ở TẦNG NÀO ═══
  *
  * Dùng LẠI `baseRows` với NGUYÊN bộ lọc của bảng phía trên (kỳ · mốc · mã hàng · mẫu mã · marketer)
- * rồi mới lọc theo lý do. Viết một truy vấn riêng ở đây là mở đường cho chuyện kinh điển: bảng nói
- * 93 ca, bấm vào ra 87 dòng, và không ai biết con số nào đúng.
+ * rồi mới lọc theo lý do. Viết một truy vấn riêng cho mỗi tầng là mở đường cho chuyện kinh điển:
+ * bảng nói 93 ca, bấm vào ra 87 dòng, và không ai biết con số nào đúng.
  *
  * `tests/return-intelligence.test.ts` khoá đúng bất biến đó: tổng số dòng drilldown của mọi lý do
  * phải bằng số ca hoàn ĐÃ BIẾT lý do mà bảng tổng hợp in ra.
  */
-export async function listReasonShipments(f: ReasonFilter & { reason?: ReturnReason; group?: ReturnReasonGroup; limit?: number }): Promise<ReasonDrilldownRow[]> {
+
+/**
+ * Bộ lọc của HAI tầng dưới trong drilldown ba tầng: NHÓM LÝ DO → MÃ HÀNG → VẬN ĐƠN.
+ *
+ * `productCode` là tầng GIỮA và cố ý KHÔNG dùng `f.codes`: `codes` lọc theo ĐƠN (cả đơn vào hay
+ * cả đơn ra, vì nó là bộ lọc của cả báo cáo), còn ở đây người đọc vừa bấm vào MỘT ô mã trong bảng
+ * vỡ theo mã — họ muốn đúng những đơn có mã đó, kể cả đơn còn mang mã khác.
+ */
+export type ReasonDrilldownFilter = ReasonFilter & { reason?: ReturnReason; group?: ReturnReasonGroup; productCode?: string; limit?: number };
+
+/**
+ * Chọn tập ca hoàn khớp bộ lọc lý do. Dùng chung cho danh sách vận đơn VÀ bảng vỡ theo mã hàng —
+ * hai tầng của cùng một drilldown phải đứng trên CÙNG một tập, nếu không tổng của tầng giữa sẽ
+ * không bằng số dòng của tầng dưới.
+ */
+async function chonCaHoan(f: ReasonDrilldownFilter) {
   const { rows: tatCa } = await baseRows(f);
   const rows = tatCa.filter((r) => {
     if (r.basisAt === null) return false;
@@ -524,17 +548,83 @@ export async function listReasonShipments(f: ReasonFilter & { reason?: ReturnRea
     // Đơn đang chạy chưa có kết quả ⇒ chưa có lý do hoàn để liệt kê.
     return r.outcome !== "DELIVERED" && r.outcome !== "IN_TRANSIT";
   });
-  if (!rows.length) return [];
+  const RONG = { chon: [] as typeof rows, verdicts: new Map<string, ReasonVerdict>(), maCuaDon: new Map<string, string[]>() };
+  if (!rows.length) return RONG;
 
   const shipmentIds = rows.map((r) => r.shipmentId).filter((x): x is string => Boolean(x));
-  const verdicts = await reasonsForShipments(shipmentIds);
+  const [verdicts, ghiDeNhom] = await Promise.all([reasonsForShipments(shipmentIds), getReasonGroupOverrides()]);
+  // CÙNG bảng tra nhóm với bảng tổng hợp: bấm vào một nhóm phải ra đúng số dòng nhóm đó in ra.
+  const nhomCua = reasonGroupTable(ghiDeNhom);
   const chon = rows.filter((r) => {
     const v = r.shipmentId ? verdicts.get(r.shipmentId) : undefined;
     const reason: ReturnReason = v?.reason ?? "UNKNOWN";
     if (f.reason) return reason === f.reason;
-    if (f.group) return reason !== "UNKNOWN" && RETURN_REASON_GROUP_OF[reason] === f.group;
+    if (f.group) return reason !== "UNKNOWN" && nhomCua[reason] === f.group;
+    // MỘT MÃ HÀNG trong một nhóm — tầng giữa của drilldown. Lọc mã ở đây chứ không ở `baseRows`
+    // vì một đơn có thể mang nhiều mã, và `f.codes` lọc theo ĐƠN (cả đơn vào hay cả đơn ra).
     return true;
   });
+  if (!chon.length) return { ...RONG, verdicts };
+
+  /*
+    MÃ HÀNG CỦA TỪNG ĐƠN, lấy cho TOÀN BỘ tập đã chọn chứ không chỉ phần hiện ra.
+
+    Lấy sau khi cắt trang thì bảng vỡ theo mã chỉ đếm được 300 đơn đầu, và tổng của nó sẽ nhỏ hơn
+    con số nhóm ngay phía trên — đúng kiểu lệch mà không ai giải thích được.
+  */
+  const maCuaDon = await maHangCuaDon(chon.map((r) => r.orderId));
+  const loc = f.productCode ? chon.filter((r) => (maCuaDon.get(r.orderId) ?? []).includes(f.productCode as string)) : chon;
+  return { chon: loc, verdicts, maCuaDon };
+}
+
+/** Mã hàng của một tập đơn. Đơn nhiều mã trả về nhiều mã — không chọn hộ một mã "chính". */
+async function maHangCuaDon(orderIds: readonly string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!orderIds.length) return out;
+  const db = await getDb();
+  const rows = rowsOf<{ order_id: string; code: string }>(
+    await db.execute(sql`
+      select distinct oi.order_id as order_id, p.custom_id as code
+        from order_items oi
+        join product_variants pv on pv.id = oi.variant_id
+        join products p on p.id = pv.product_id
+       where oi.order_id in (${sql.join([...orderIds].map((x) => sql`${x}`), sql`, `)})
+         and oi.is_bonus = false and coalesce(p.custom_id, '') <> ''`),
+  );
+  for (const r of rows) out.set(r.order_id, [...(out.get(r.order_id) ?? []), r.code]);
+  return out;
+}
+
+/**
+ * TẦNG GIỮA: một nhóm lý do vỡ ra theo MÃ HÀNG.
+ *
+ * Đơn mang nhiều mã được đếm cho MỌI mã của nó (cùng luật với bảng mã hàng phía trên) và đánh dấu
+ * ở cột riêng — chia nhỏ theo tỷ lệ là bịa ra một phép phân bổ mà không có căn cứ nào. Nên tổng
+ * cột này có thể LỚN HƠN số ca của nhóm, và số đó được in ra chứ không giấu.
+ */
+export type ReasonProductRow = { code: string; count: number; share: number };
+
+export async function reasonProductBreakdown(f: ReasonDrilldownFilter): Promise<{ rows: ReasonProductRow[]; cases: number; unmapped: number }> {
+  const { chon, maCuaDon } = await chonCaHoan({ ...f, productCode: undefined });
+  const dem = new Map<string, number>();
+  let chuaGhepMa = 0;
+  for (const r of chon) {
+    const codes = maCuaDon.get(r.orderId) ?? [];
+    if (!codes.length) {
+      chuaGhepMa += 1;
+      continue;
+    }
+    for (const c of codes) dem.set(c, (dem.get(c) ?? 0) + 1);
+  }
+  const cases = chon.length;
+  const rows = [...dem]
+    .map(([code, count]) => ({ code, count, share: cases ? Math.round((count / cases) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code, "vi"));
+  return { rows, cases, unmapped: chuaGhepMa };
+}
+
+export async function listReasonShipments(f: ReasonDrilldownFilter): Promise<ReasonDrilldownRow[]> {
+  const { chon, verdicts } = await chonCaHoan(f);
   if (!chon.length) return [];
 
   const gioiHan = Math.max(1, Math.min(500, f.limit ?? 300));
@@ -595,6 +685,7 @@ export async function listReasonShipments(f: ReasonFilter & { reason?: ReturnRea
       reasonLabel: RETURN_REASON_LABEL[reason],
       confidence: v?.confidence ?? "NONE",
       evidence: v?.evidence ?? "",
+      rawReason: v?.rawReason ?? "",
       careOwner: d?.care_owner ?? "",
       careActions: Number(d?.care_actions ?? 0),
       basisAt: r.basisAt,

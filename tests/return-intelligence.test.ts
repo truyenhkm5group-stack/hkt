@@ -5,9 +5,12 @@ import { schema, type Db } from "@/db";
 import { AGE_BUCKETS, ageBucketOf, MIN_CELL_SAMPLE, PROBABILITY_FALLBACK, TRAINING_SNAPSHOT_OFFSETS_HOURS } from "@/lib/constants/projected-delivery";
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL, MARKETER_LINK_FIX, MARKETER_LINK_STATES } from "@/lib/constants/marketer-attribution";
 import { ACTION_LIST_MAX, ALERT_MIN_SAMPLE, PROBLEM_CLASSES, PROBLEM_DEPARTMENT, PROBLEM_OF_REASON, PRODUCT_RISK_METRIC, RISK_LEVELS } from "@/lib/constants/return-intelligence";
-import { RETURN_REASONS, RETURN_REASON_GROUP_OF } from "@/lib/constants/return-reason";
+import { RETURN_REASONS, RETURN_REASON_GROUPS, RETURN_REASON_GROUP_OF } from "@/lib/constants/return-reason";
+import { canRegroup, effectiveGroupOf, PINNED_REASON_GROUP, reasonGroupTable, sanitizeReasonGroups } from "@/lib/constants/return-reason-mapping";
 import { TARGETABLE_METRICS } from "@/lib/constants/metric-registry";
-import { getReturnReasonReport, listReasonShipments } from "@/lib/queries/return-reason-report";
+import { getReturnReasonReport, listReasonShipments, reasonProductBreakdown } from "@/lib/queries/return-reason-report";
+import { saveReasonGroupOverrides } from "@/lib/queries/return-reason-config";
+import { clearMemo } from "@/lib/cache";
 import { getReturnIntelligence } from "@/lib/queries/return-intelligence";
 import type { Period } from "@/lib/search-params";
 
@@ -355,6 +358,141 @@ export async function testReasonDenominatorsAndFilters(db: Db) {
   console.log(
     `✓ Lý do hoàn: hai mẫu số tách bạch (đã gửi ${tatCa.eligibleSent} ≠ đã kết thúc ${tatCa.finished}) · tỷ trọng cộng 100% · lọc mã/marketer/kết hợp/kỳ đều đúng · bật chiều marketer KHÔNG đổi tổng · drilldown khớp từng lý do`,
   );
+}
+
+/* ═══════════════════ 7b · XẾP LẠI NHÓM LÝ DO + DRILLDOWN BA TẦNG ═══════════════════ */
+
+/**
+ * ═══ CÁI GÌ LÀ SỰ THẬT, CÁI GÌ LÀ CÁCH NHÌN ═══
+ *
+ * Lý do chi tiết và CHỮ GỐC của ĐVVC là QUAN SÁT — không bao giờ sửa. Nhóm là CÁCH NHÌN, và nó
+ * sẽ đổi ("Khách đi vắng" thuộc *giao lâu* hay *boom hàng*?).
+ *
+ * Bài này khoá đúng ranh giới đó: đổi cách xếp nhóm phải làm ĐỔI BÁO CÁO mà KHÔNG đổi một con số
+ * quan sát nào — tổng ca, tổng theo từng lý do, và chữ gốc đều phải y nguyên.
+ */
+export function testReasonGroupContract() {
+  /* ─── HAI LÝ DO BỊ GHIM: chỗ TRỐNG không được biến thành lời buộc tội ─── */
+  assert.equal(canRegroup("UNKNOWN", "QUALITY").ok, false, "“Chưa xác định được” là chỗ trống — kéo sang nhóm quy lỗi là vu oan bằng một lỗ hổng dữ liệu");
+  assert.equal(canRegroup("OTHER", "SIZE").ok, false, "“Lý do khác” gom ca không khớp danh mục — không được gán cho một phía chịu lỗi");
+  assert.equal(canRegroup("UNKNOWN", "UNKNOWN").ok, true, "…nhưng giữ nguyên chỗ của nó thì hợp lệ");
+  assert.ok(canRegroup("UNKNOWN", "QUALITY").reason?.includes("ghi lý do"), "lời từ chối phải nói LỐI RA, không chỉ nói không");
+  assert.equal(canRegroup("khong-co-that", "QUALITY").ok, false, "khoá lạ bị chặn");
+  assert.equal(canRegroup("SIZE_TIGHT", "nhom-bia").ok, false, "nhóm lạ bị chặn");
+  // Lý do QUAN SÁT ĐƯỢC thì chủ shop toàn quyền xếp — đó là quyết định kinh doanh của họ.
+  assert.equal(canRegroup("CUSTOMER_UNREACHABLE", "BOOM").ok, true, "“không liên lạc được” là một quan sát: xếp vào giao lâu hay boom là quyền chủ shop");
+
+  /* ─── DỌN ĐẦU VÀO: dòng rác không được làm sập báo cáo ─── */
+  const sach = sanitizeReasonGroups({
+    CUSTOMER_UNREACHABLE: "BOOM",
+    UNKNOWN: "QUALITY",
+    OTHER: "SIZE",
+    SIZE_TIGHT: "SIZE",
+    khong_co_that: "QUALITY",
+    DAMAGED: 42,
+  });
+  assert.deepEqual(sach, { CUSTOMER_UNREACHABLE: "BOOM" }, "chỉ giữ lượt đổi HỢP LỆ và KHÁC mặc định — ghi đè trùng mặc định bị bỏ để bảng còn thưa");
+  assert.deepEqual(sanitizeReasonGroups(null), {}, "đầu vào hỏng ⇒ không ghi đè nào, KHÔNG ném lỗi");
+  assert.deepEqual(sanitizeReasonGroups("[]"), {});
+
+  /* ─── GHIM THẮNG CẢ GHI ĐÈ ĐÃ LỌT VÀO CSDL (sửa tay `settings`) ─── */
+  const banTay = { UNKNOWN: "QUALITY", OTHER: "BOOM" } as never;
+  assert.equal(effectiveGroupOf("UNKNOWN", banTay), "UNKNOWN", "dòng sửa tay trong settings cũng không kéo được chỗ trống sang nhóm quy lỗi");
+  assert.equal(effectiveGroupOf("OTHER", banTay), "OTHER");
+  for (const [r, g] of Object.entries(PINNED_REASON_GROUP)) assert.equal(effectiveGroupOf(r as never, banTay), g);
+
+  /* ─── BẢNG TRA PHỦ KÍN, KHÔNG LÝ DO NÀO RƠI RA ─── */
+  const bang = reasonGroupTable({ CUSTOMER_UNREACHABLE: "BOOM" });
+  assert.equal(Object.keys(bang).length, RETURN_REASONS.length, "mọi lý do trong sổ phải có nhóm — một lý do không nhóm là một ca biến mất khỏi bảng tổng hợp");
+  assert.equal(bang.CUSTOMER_UNREACHABLE, "BOOM", "ghi đè có hiệu lực");
+  assert.equal(bang.SIZE_TIGHT, RETURN_REASON_GROUP_OF.SIZE_TIGHT, "lý do không sửa giữ nguyên mặc định trong mã");
+  for (const g of Object.values(bang)) assert.ok((RETURN_REASON_GROUPS as readonly string[]).includes(g), "mọi nhóm phải nằm trong sổ");
+
+  console.log("✓ Xếp nhóm lý do: chỗ TRỐNG bị ghim (settings sửa tay cũng không lách được) · dòng rác bị bỏ, không sập · bảng tra phủ kín 40 lý do");
+}
+
+export async function testReasonRegroupAndThreeLevelDrilldown(db: Db) {
+  await dungDuLieu(db);
+  const ky = KY("2026-08-18T00:00:00Z", "2026-08-28T23:59:59Z");
+  const CUA_TA = ["RIQ1", "RIQ2"];
+  const loc = { period: ky, basis: "SHIPPED" as const, codes: CUA_TA };
+
+  const demTheoLyDo = (bc: Awaited<ReturnType<typeof getReturnReasonReport>>) => {
+    const m = new Map<string, number>();
+    for (const g of bc.groups) for (const d of g.details) if (d.count) m.set(d.reason, d.count);
+    return m;
+  };
+  const nhomCuaLyDo = (bc: Awaited<ReturnType<typeof getReturnReasonReport>>, reason: string) =>
+    bc.groups.find((g) => g.details.some((d) => d.reason === reason && d.count > 0))?.group ?? null;
+
+  try {
+    /* ─── TRƯỚC KHI ĐỔI ─── */
+    await saveReasonGroupOverrides({});
+    clearMemo();
+    const truoc = await getReturnReasonReport(loc);
+    assert.equal(nhomCuaLyDo(truoc, "CUSTOMER_UNREACHABLE"), "SLOW", "mặc định: “không liên lạc được” nằm ở nhóm giao lâu");
+    const demTruoc = demTheoLyDo(truoc);
+
+    /* ─── ĐỔI CÁCH XẾP: chỉ một dòng `settings` ─── */
+    await saveReasonGroupOverrides({ CUSTOMER_UNREACHABLE: "BOOM" });
+    clearMemo();
+    const sau = await getReturnReasonReport(loc);
+
+    assert.equal(nhomCuaLyDo(sau, "CUSTOMER_UNREACHABLE"), "BOOM", "sau khi đổi, ca cũ được xếp lại NGAY — kể cả ca ghi từ trước");
+    /*
+      BẤT BIẾN QUAN TRỌNG NHẤT: quan sát không đổi.
+
+      Đúng cùng số ca, đúng cùng phân bố theo LÝ DO. Chỉ cái NHÃN NHÓM đổi chỗ. Nếu một con số
+      quan sát xê dịch ở đây thì việc "xếp lại nhóm" đã lén sửa dữ liệu — đúng thứ phải không bao
+      giờ xảy ra.
+    */
+    assert.equal(sau.returned, truoc.returned, "xếp lại nhóm KHÔNG được làm đổi số ca hoàn");
+    assert.equal(sau.finished, truoc.finished, "…cũng không đổi mẫu số");
+    assert.equal(sau.reasonCoverage.known, truoc.reasonCoverage.known, "…cũng không đổi độ phủ lý do");
+    assert.deepEqual([...demTheoLyDo(sau)].sort(), [...demTruoc].sort(), "…và phân bố theo LÝ DO CHI TIẾT phải y nguyên — chỉ cái nhãn nhóm đổi chỗ");
+    const tongTruoc = truoc.groups.reduce((n, g) => n + g.count, 0);
+    assert.equal(sau.groups.reduce((n, g) => n + g.count, 0), tongTruoc, "tổng mọi nhóm không đổi");
+
+    /* ─── DRILLDOWN THEO NHÓM ĐI THEO CÁCH XẾP MỚI ─── */
+    const theoBoom = await listReasonShipments({ ...loc, group: "BOOM" });
+    const nhomBoom = sau.groups.find((g) => g.group === "BOOM");
+    assert.equal(theoBoom.length, nhomBoom?.count ?? 0, "bấm vào nhóm phải ra đúng số dòng nhóm đó in — hai đường tra khác nhau là hai con số khác nhau");
+    assert.equal((await listReasonShipments({ ...loc, group: "SLOW" })).length, 0, "nhóm cũ nay rỗng: bảng và drilldown đọc CÙNG một bảng tra");
+
+    /* ─── CHỮ GỐC LUÔN ĐI KÈM ─── */
+    const caMayDoc = theoBoom.find((r) => r.reason === "CUSTOMER_UNREACHABLE");
+    assert.ok(caMayDoc, "phải thấy ca máy đọc được lý do");
+    assert.ok(caMayDoc.rawReason.includes("không có nhà"), `chữ gốc của ĐVVC phải đi kèm nguyên văn, đang là “${caMayDoc.rawReason}”`);
+    assert.notEqual(caMayDoc.rawReason, caMayDoc.reasonLabel, "chữ gốc và NHÃN DANH MỤC là hai lớp riêng — trộn chúng là mất đường kiểm chứng");
+    const caKhongBiet = (await listReasonShipments({ ...loc, reason: "UNKNOWN" }))[0];
+    assert.ok(caKhongBiet, "phải thấy ca không có chứng từ");
+    assert.equal(caKhongBiet.rawReason, "", "không chứng từ ⇒ chữ gốc RỖNG, không bịa một câu nào vào đó");
+
+    /* ─── TẦNG GIỮA: NHÓM → MÃ HÀNG ─── */
+    const vo = await reasonProductBreakdown({ ...loc, group: "BOOM" });
+    assert.equal(vo.cases, nhomBoom?.count ?? 0, "tổng ca của tầng giữa phải bằng con số nhóm ở tầng trên");
+    const riq1 = vo.rows.find((m) => m.code === "RIQ1");
+    assert.ok(riq1, "ca này thuộc mã RIQ1");
+    assert.equal(riq1.count, vo.cases, "cả nhóm rơi vào đúng một mã ⇒ mã đó chiếm trọn");
+    assert.equal(riq1.share, 100);
+    assert.ok(!vo.rows.some((m) => m.code === "RIQ2"), "mã không có ca nào KHÔNG được xuất hiện với số 0 — bảng vỡ chỉ liệt kê mã thật sự dính");
+
+    /* ─── TẦNG DƯỚI: thu hẹp theo MÃ ─── */
+    assert.equal((await listReasonShipments({ ...loc, group: "BOOM", productCode: "RIQ1" })).length, riq1.count, "lọc đúng mã phải ra đúng số ca của ô vừa bấm");
+    assert.equal((await listReasonShipments({ ...loc, group: "BOOM", productCode: "RIQ2" })).length, 0, "lọc một mã không dính nhóm phải ra RỖNG, không rơi về 'không lọc gì'");
+    assert.equal((await listReasonShipments({ ...loc, group: "BOOM", productCode: "MA-KHONG-TON-TAI" })).length, 0, "mã không tồn tại cũng ra rỗng");
+
+    /* ─── BẢNG VỠ THEO MÃ KHÔNG BỊ CẮT TRANG ─── */
+    const voCoMa = await reasonProductBreakdown({ ...loc, group: "BOOM", productCode: "RIQ1" });
+    assert.deepEqual(voCoMa.rows, vo.rows, "tầng giữa phải hiện ĐỦ mọi mã kể cả khi đang chọn một mã — nếu không, người đọc không đổi được lựa chọn");
+  } finally {
+    // Trả cấu hình về mặc định dù bài đỏ ở đâu: bộ kiểm thử dùng chung một CSDL.
+    await saveReasonGroupOverrides({});
+    clearMemo();
+    await donDep(db);
+  }
+
+  console.log("✓ Xếp lại nhóm lý do CHẠY THẬT: ca cũ xếp lại ngay · số ca và phân bố theo lý do KHÔNG đổi · chữ gốc ĐVVC đi kèm nguyên văn (không chứng từ ⇒ rỗng) · drilldown ba tầng nhóm → mã hàng → vận đơn khớp từng tầng");
 }
 
 /* ═══════════════════ 8 · TẦNG QUYẾT ĐỊNH CHẠY THẬT ═══════════════════ */

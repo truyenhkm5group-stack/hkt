@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0083_metric_target_product_scope"] as const;
+const MOI = ["0083_metric_target_product_scope", "0084_return_reason_raw_text"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -83,10 +83,14 @@ export async function testMigrationUpgradePath() {
     );
     // Một đích ĐÃ ĐẶT TỪ TRƯỚC, để bước 2 kiểm được rằng 0083 không đụng tới dòng nào.
     await client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt1', 'delivery_success_rate', 'COMPANY', null, 65, 'mức chung toàn shop', now(), 'a@shop.vn')`);
+    // 0084 CHƯA áp: cột chữ gốc chưa được có, và một dòng lý do ghi TRƯỚC bản ấy để kiểm không backfill.
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 0, "bước 1: cột raw_reason CHƯA được có — đó là thứ 0084 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome) values ('up-care-2', 'up-s8', 'NEW', 'PENDING')`);
+    // Một dòng lý do hoàn ghi TRƯỚC 0084 — để bước 2 kiểm được rằng cột mới KHÔNG backfill nó.
+    await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, reason_group, note, actor_email) values ('up-rr1', 'up-s9', 'SIZE_TIGHT', 'SIZE', 'khách bảo chật', 'a@shop.vn')`);
 
     /*
       DỮ LIỆU ĐANG CÓ TRÊN PRODUCTION, không phải bảng trống.
@@ -143,6 +147,19 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from users where id = 'up-u1'`);
     assert.equal(await dem("select count(*)::int as n from hmt_workbooks where id = 'up-wb1' and uploaded_by_user_id is null"), 1, "0082: xoá tài khoản người tải KHÔNG được cuốn theo dòng bằng chứng");
     await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
+
+    /*
+      ═══ 0084: CHỮ GỐC CỦA LÝ DO HOÀN ═══
+
+      Cột thêm vào, KHÔNG backfill: dòng ghi TRƯỚC bản này phải ở chuỗi rỗng. Rỗng nghĩa là CHƯA
+      CÓ CHỨNG TỪ — đoán hộ chữ gốc cho dòng cũ là bịa ra một chứng từ, và sau đó không ai phân
+      biệt được "ĐVVC có nói" với "ta đoán hộ". Lý do và nhóm của dòng cũ cũng phải y nguyên: bản
+      này không chạm vào một quan sát nào.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = 'raw_reason'"), 1, "0084: cột raw_reason phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id = 'up-rr1' and raw_reason = '' and reason = 'SIZE_TIGHT' and reason_group = 'SIZE'"), 1, "0084: dòng cũ giữ nguyên lý do và nhóm, chữ gốc RỖNG — không backfill, không mặc định");
+    await client.query(`insert into shipment_return_reasons (id, shipment_id, reason, reason_group, raw_reason, actor_email) values ('up-rr2', 'up-s8', 'CUSTOMER_UNREACHABLE', 'SLOW', 'Tồn - Khách hàng nghỉ, không có nhà', 'a@shop.vn')`);
+    assert.equal(await dem(`select count(*)::int as n from shipment_return_reasons where id = 'up-rr2' and raw_reason like 'Tồn - %'`), 1, "0084: chữ gốc ghi được NGUYÊN VĂN, kể cả dấu tiếng Việt");
 
     /*
       ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
@@ -407,7 +424,8 @@ export async function testMigrationUpgradePath() {
     for (const cot of ["reason_group", "source", "confidence"]) {
       assert.equal(await dem(`select count(*)::int as n from information_schema.columns where table_name = 'shipment_return_reasons' and column_name = '${cot}' and column_default is not null`), 1, `cột ${cot} phải có mặc định`);
     }
-    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "migration KHÔNG được tự sinh lý do hoàn nào — lý do chi tiết chỉ có khi NGƯỜI ghi");
+    // Trừ những dòng chính bài này gieo (`up-rr…`) đóng vai "dữ liệu đang có trên production".
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id not like 'up-rr%'"), 0, "migration KHÔNG được tự sinh lý do hoàn nào — lý do chi tiết chỉ có khi NGƯỜI ghi");
 
     // Nguồn lạ bị CSDL chặn: chỉ ba giá trị có nghĩa, và mỗi cái nói một mức thẩm quyền khác nhau.
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s2', 'UPS2', 'RETURNED')`);
@@ -493,7 +511,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from metric_targets where id not like 'up-mt%'"), 0, "chạy lại migration KHÔNG được sinh đích nào");
     // …và cũng KHÔNG được đụng tới đích đã có: hai dòng bài này gieo phải còn nguyên cả tầng lẫn số.
     assert.equal(await dem("select count(*)::int as n from metric_targets where (id = 'up-mt1' and scope = 'COMPANY' and target = 65) or (id = 'up-mt2' and scope = 'PRODUCT' and scope_ref = 'Q004' and target = 55)"), 2, "chạy lại migration KHÔNG được sửa đích đã đặt");
-    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
+    assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id not like 'up-rr%'"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
 
     console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · chạy lại không nhân đôi`);
