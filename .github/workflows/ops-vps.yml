@@ -593,6 +593,15 @@ jobs:
                 echo "── bộ nhớ từng container ──"
                 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
                 echo ""
+                # `/api/health` chứng minh tiến trình sống và CSDL nối được — nó KHÔNG chứng minh
+                # migration đã chạy xong. Đếm thẳng trong CSDL của BẢN CHẠY THỬ (không phải của
+                # production: container khác, volume khác, mật khẩu khác).
+                echo "── migration trên CSDL bản chạy thử ──"
+                docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
+                  -c "select 'đã áp: ' || count(*) from drizzle.__drizzle_migrations;" \
+                  -c "select 'bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and (table_name like 'ai\_%' or table_name like 'sales\_%');" \
+                  -c "select 'tin đã gửi cho khách: ' || count(*) from sales_suggestions where sent;" 2>&1 || echo "  (chưa có container CSDL bản chạy thử)"
+                echo ""
                 echo "── production PHẢI vẫn khoẻ ──"
                 docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
                 docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo ;;
