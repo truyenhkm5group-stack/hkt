@@ -68,17 +68,33 @@ say "═════════ KIỂM TRA VA CHẠM VỚI BẢN CHẠY THỬ �
 say "  (project=$PROJECT · thư mục=$DIR · cổng=$PORT)"
 say ""
 
-# 1. Tên compose project
+# ĐÃ DỰNG RỒI KHÁC VỚI BỊ NGƯỜI KHÁC CHIẾM TÊN.
+#
+# Bản trước của bài kiểm này coi "project đã tồn tại" là va chạm và thoát 1 — nghĩa là sau lượt dựng
+# đầu tiên thì không bao giờ CẬP NHẬT được bản chạy thử nữa, vì chính nó chặn chính nó. Điều thật sự
+# phải chặn là tên bị một ngăn xếp KHÁC chiếm; tên do chính bản chạy thử giữ thì lượt này là một lượt
+# cập nhật, và đó là việc bình thường.
+LAN_DAU=1
 if docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | grep -qx "$PROJECT"; then
-  bad "compose project \"$PROJECT\" ĐÃ TỒN TẠI — đổi tên hoặc gỡ bản chạy thử cũ trước"
+  LAN_DAU=0
+fi
+
+# 1. Tên compose project
+if [ "$LAN_DAU" -eq 0 ]; then
+  warn "compose project \"$PROJECT\" đã tồn tại — lượt này là CẬP NHẬT bản chạy thử, không phải dựng mới"
 else
   ok "compose project \"$PROJECT\" chưa được dùng"
 fi
 
-# 2. Tên container
+# 2. Tên container — của chính bản chạy thử thì được; của ngăn xếp khác thì DỪNG.
 for c in "${CONTAINERS[@]}"; do
   if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
-    bad "container \"$c\" ĐÃ TỒN TẠI"
+    CHU="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$c" 2>/dev/null || echo "")"
+    if [ "$CHU" = "$PROJECT" ]; then
+      warn "container \"$c\" đã có và thuộc project \"$PROJECT\" — sẽ được thay bằng bản mới"
+    else
+      bad "container \"$c\" ĐÃ TỒN TẠI và thuộc project \"${CHU:-không rõ}\" — KHÔNG phải của bản chạy thử"
+    fi
   else
     ok "tên container \"$c\" còn trống"
   fi
@@ -92,9 +108,13 @@ for c in erp-app erp-db erp-scheduler erp-caddy; do
 done
 ok "không tên nào trùng container production (erp-app · erp-db · erp-scheduler · erp-caddy)"
 
-# 4. Cổng
+# 4. Cổng — đang bị CHÍNH bản chạy thử giữ thì không phải va chạm.
 if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -qE "[:.]$PORT[[:space:]]"; then
-  bad "cổng $PORT ĐANG CÓ TIẾN TRÌNH NGHE — chọn cổng khác qua STAGING_PORT"
+  if [ "$LAN_DAU" -eq 0 ] && docker ps --filter "name=vnx-ai-staging-app" --format '{{.Ports}}' 2>/dev/null | grep -q ":$PORT"; then
+    warn "cổng $PORT đang do chính container bản chạy thử giữ — lượt cập nhật sẽ nhận lại cổng này"
+  else
+    bad "cổng $PORT ĐANG CÓ TIẾN TRÌNH KHÁC NGHE — chọn cổng khác qua STAGING_PORT"
+  fi
 else
   ok "cổng $PORT còn trống"
 fi
@@ -125,7 +145,11 @@ fi
 
 # 6. Thư mục
 if [ -e "$DIR" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ]; then
-  warn "thư mục $DIR đã có nội dung — kiểm tra trước khi ghi đè"
+  if [ -d "$DIR/.git" ]; then
+    warn "thư mục $DIR đã là bản sao kho mã — lượt này chỉ cập nhật, .env.staging KHÔNG bị ghi đè"
+  else
+    warn "thư mục $DIR đã có nội dung mà KHÔNG phải bản sao kho mã — kiểm tra trước khi ghi đè"
+  fi
 else
   ok "thư mục $DIR trống hoặc chưa tồn tại"
 fi
