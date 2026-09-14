@@ -3175,7 +3175,12 @@ export const metricTargets = pgTable(
     */
     uniqueIndex("metric_targets_uq").on(t.metricKey, t.scope, sql`coalesce(${t.scopeRef}, '')`, t.periodKind, t.effectiveFrom),
     index("metric_targets_lookup_idx").on(t.metricKey, t.effectiveFrom),
-    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION', 'USER')`),
+    /*
+      NĂM TẦNG, và `PRODUCT` là một TRỤC RIÊNG chứ không phải tầng hẹp hơn `USER`: bốn giá trị kia
+      nói về CON NGƯỜI, `PRODUCT` nói về MỘT MÃ HÀNG (`scope_ref` = `products.custom_id`). Danh
+      sách ĐÓNG ở đây vì một chuỗi lạ buộc `resolveTarget` phải chọn giữa bỏ sót đích và áp nhầm.
+    */
+    check("metric_targets_scope_check", sql`${t.scope} IN ('COMPANY', 'DEPARTMENT', 'POSITION', 'USER', 'PRODUCT')`),
     check("metric_targets_period_check", sql`${t.periodKind} IN ('ANY', 'WEEK', 'MONTH', 'QUARTER', 'YEAR')`),
     // Khoảng hiệu lực rỗng thì đích không áp cho kỳ nào, và người đặt sẽ đi tìm xem vì sao thẻ
     // điểm không thấy đích mình vừa đặt.

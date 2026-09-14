@@ -67,6 +67,15 @@ export type MetricBinding = {
   basis: string;
   /** Dưới ngần này quan sát thì KR mang trạng thái `DATA_INSUFFICIENT`. Bỏ trống = `KR_DEFAULT_MINIMUM_SAMPLE`. */
   minimumSample?: number;
+  /**
+   * ĐỌC ĐƯỢC Ở MỨC MÃ HÀNG KHÔNG — quyết định chỉ số này có được đặt đích RIÊNG cho một mã hay không.
+   *
+   * Khai TƯỜNG MINH chứ không suy: "báo cáo có một bảng theo mã hàng" KHÔNG đủ để kết luận chỉ số
+   * đọc được ở mức mã. Tiền quảng cáo chẳng hạn có bảng theo mã, nhưng con số ở đó là phần CHIA
+   * theo tỷ trọng, không phải phép đo trên chính mã ấy — đặt đích cho nó là đặt đích cho một phép
+   * chia. Chỉ bật cờ này cho chỉ số mà tử số VÀ mẫu số đều đếm được trên đúng tập đơn của mã.
+   */
+  productGrain?: boolean;
 };
 
 export const METRIC_BINDINGS: Record<string, MetricBinding> = {
@@ -79,6 +88,9 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     trust: "MEASURED",
     department: "LOGISTICS",
     basis: "ORDER_OUTCOME · giao thành công ÷ (giao thành công + hoàn), chỉ đơn ĐÃ kết thúc (lib/queries/metrics.ts::successRate)",
+    // Bảng "Rủi ro theo mã hàng" đếm tử số và mẫu số trên ĐÚNG tập đơn của từng mã — không chia,
+    // không phân bổ. Nên đích riêng cho một mã là một phát biểu có nghĩa.
+    productGrain: true,
   },
   return_rate: {
     key: "return_rate",
@@ -88,6 +100,7 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     trust: "MEASURED",
     department: "LOGISTICS",
     basis: "ORDER_OUTCOME · (RETURNED + RETURNED_BY_RULE) ÷ đơn đã kết thúc",
+    productGrain: true,
   },
   delivered_revenue: {
     key: "delivered_revenue",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
 import { METRIC_CATALOG } from "@/lib/constants/metric-catalog";
-import { canTargetPerson, metricOf, scopesFor, TARGETABLE_KEYS, TARGET_PRECEDENCE, TARGET_SCOPES } from "@/lib/constants/metric-registry";
+import { canTargetPerson, canTargetProduct, metricOf, scopesFor, TARGETABLE_KEYS, TARGET_PRECEDENCE, TARGET_SCOPES } from "@/lib/constants/metric-registry";
 import { PERIOD_KINDS, delta, resolveTarget, verdict, type TargetRow } from "@/lib/constants/metric-targets";
 import { attainment, evaluateMetric, trendOf, type ScorecardInput } from "@/lib/metrics/scorecard";
 import { targetInput } from "@/lib/validation/metric-targets";
@@ -66,16 +66,66 @@ export function testPersonTargetGuard() {
   assert.ok(!scopesFor("delivery_success_rate").includes("USER"), "ô chọn phạm vi cũng không được hiện 'Cá nhân' cho chỉ số mức công ty");
   assert.deepEqual(scopesFor("inventory_accuracy"), [], "chỉ số chưa có nguồn thì không có phạm vi nào");
 
-  // Chặn ở CẢ lược đồ đầu vào, không chỉ ở hàm tính — hai lớp, vì một lớp sẽ có ngày bị đi vòng.
+  /*
+    CHẶN Ở CẢ HAI LỚP — lược đồ đầu vào VÀ hàm tính (AGENTS.md mục 31: mọi nhánh lỗi rơi về phía
+    HẸP HƠN). Bản trước chỉ chặn ở server action; lược đồ cho qua về hình dạng, nên bất kỳ đường
+    ghi thứ hai nào quên gọi `canTargetPerson` sẽ ghi thẳng vào bảng.
+  */
   const lauNgoai = targetInput.safeParse({ metricKey: "delivery_success_rate", scope: "USER", scopeRef: "u1", target: 90, note: "thử lách", effectiveFrom: "2026-01-01" });
-  assert.equal(lauNgoai.success, true, "lược đồ cho qua về mặt hình dạng…");
-  // …nhưng luật nghiệp vụ ở server action chặn lại. Kiểm chính luật đó:
-  assert.equal(canTargetPerson("delivery_success_rate").ok, false, "…và luật nghiệp vụ chặn trước khi ghi");
+  assert.equal(lauNgoai.success, false, "lược đồ từ chối ngay: GTC không đặt đích cho một cá nhân");
+  assert.equal(canTargetPerson("delivery_success_rate").ok, false, "…và luật nghiệp vụ chặn lần nữa trước khi ghi");
 
-  assert.ok(!TARGET_SCOPES.includes("PRODUCT" as never), "PRODUCT cố ý KHÔNG có: chưa sổ nào khai một chỉ số đọc được ở mức mã hàng");
-  assert.ok(TARGET_PRECEDENCE.USER > TARGET_PRECEDENCE.POSITION, "cá nhân là tầng HẸP nhất, đè lên chức danh");
+  assert.ok(TARGET_PRECEDENCE.USER > TARGET_PRECEDENCE.POSITION, "cá nhân là tầng HẸP nhất trong ba tầng NGƯỜI, đè lên chức danh");
 
-  console.log("✓ Đích cho cá nhân: chặn chỉ số mức công ty · chặn chỉ số KẾT QUẢ CHUNG · chặn chỉ số chưa có nguồn · PRODUCT không tồn tại vì chưa có chỉ số mức mã hàng");
+  console.log("✓ Đích cho cá nhân: chặn chỉ số mức công ty · chặn chỉ số KẾT QUẢ CHUNG · chặn chỉ số chưa có nguồn");
+}
+
+/* ───── 2b · Đích riêng cho MỘT MÃ HÀNG: chỉ mở cho chỉ số đọc được ở mức mã ───── */
+export function testProductTargetGuard() {
+  assert.ok(TARGET_SCOPES.includes("PRODUCT"), "PRODUCT tồn tại vì ĐÃ có chỉ số khai productGrain — trước đó nó cố ý không có");
+
+  /*
+    PRODUCT KHÔNG mở đại trà. Nó chỉ có nghĩa khi TỬ SỐ và MẪU SỐ đều đếm trên đúng tập đơn của
+    mã ấy. Chỉ số mức người/phòng gắn vào một mã là chấm mã bằng con số của người; chỉ số PHÂN BỔ
+    (tiền quảng cáo chia theo tỷ trọng) gắn vào một mã là đặt đích cho một phép chia.
+  */
+  assert.equal(canTargetProduct("delivery_success_rate").ok, true, "GTC đếm trên đúng tập vận đơn của mã ⇒ đặt được");
+  assert.equal(canTargetProduct("return_rate").ok, true, "tỷ lệ hoàn cùng tập đơn ⇒ đặt được");
+  const khongDuoc = canTargetProduct("care_sla");
+  assert.equal(khongDuoc.ok, false, "SLA chăm sóc đo ở mức người/phòng — không đọc được trên một mã hàng");
+  assert.ok(khongDuoc.reason?.includes("mã hàng"), "và nói rõ vì sao, kèm lối ra");
+  assert.equal(canTargetProduct("inventory_accuracy").ok, false, "chỉ số chưa có nguồn thì mọi phạm vi đều đóng");
+
+  // Số chỉ số mở PRODUCT phải ĐÚNG bằng số chỉ số khai cờ — không có đường nào mở thêm ở nơi khác.
+  const coCo = TARGETABLE_KEYS.filter((k) => metricOf(k)?.productGrain === true);
+  const moPham = TARGETABLE_KEYS.filter((k) => scopesFor(k).includes("PRODUCT"));
+  assert.deepEqual(moPham.sort(), coCo.sort(), "ô chọn phạm vi phải suy từ CỜ trong sổ chỉ số, không phải từ một danh sách thứ hai");
+  assert.ok(!scopesFor("care_sla").includes("PRODUCT"), "ô chọn không được hiện 'Mã hàng' cho chỉ số mức người");
+
+  // Lược đồ đầu vào chặn CÙNG một luật — hai lớp, vì một lớp sẽ có ngày bị đi vòng (mục 31).
+  const lach = targetInput.safeParse({ metricKey: "care_sla", scope: "PRODUCT", scopeRef: "Q004", target: 80, note: "thử lách", effectiveFrom: "2026-01-01" });
+  assert.equal(lach.success, false, "lược đồ từ chối phạm vi không hợp lệ với chỉ số");
+
+  const cuoiKy = new Date("2026-09-30T00:00:00Z");
+  const rows = [
+    dich({ metricKey: "delivery_success_rate", scope: "COMPANY", target: 65 }),
+    dich({ metricKey: "delivery_success_rate", scope: "PRODUCT", scopeRef: "Q004", target: 55 }),
+  ];
+  const tra = (productCode: string | null) => resolveTarget(rows, { metricKey: "delivery_success_rate", departmentCode: null, positionId: null, productCode, at: cuoiKy });
+  assert.equal(tra("Q004")?.target, 55, "mã có mức riêng thì mức riêng THẮNG mức chung");
+  assert.equal(tra("Q004")?.scope, "PRODUCT", "và màn hình phải đọc được rằng đang chấm bằng mức riêng");
+  assert.equal(tra("Q001")?.target, 65, "mã không có mức riêng rơi về mức toàn shop — KHÔNG mượn mức của mã khác");
+  assert.equal(tra("q004")?.target, 55, "mã viết thường vẫn khớp: custom_id do người gõ tay, hai cách viết là một mã");
+
+  /*
+    ĐÍCH CỦA MỘT MÃ KHÔNG BAO GIỜ LỌT VÀO PHÉP CHẤM MỘT CON NGƯỜI. Chủ thể NGƯỜI không mang
+    `productCode`, nên mọi dòng tầng PRODUCT bị loại — nếu không, một mức 55% đặt cho hàng mới ra
+    mắt sẽ âm thầm trở thành chuẩn chấm cả phòng.
+  */
+  const chiCoMa = [dich({ metricKey: "delivery_success_rate", scope: "PRODUCT", scopeRef: "Q004", target: 55 })];
+  assert.equal(resolveTarget(chiCoMa, { metricKey: "delivery_success_rate", departmentCode: "LOGISTICS", positionId: "pos-lead", userId: "u-an", at: cuoiKy }), null, "chủ thể NGƯỜI không thấy đích của mã hàng");
+
+  console.log("✓ Đích mức MÃ HÀNG: chỉ mở cho chỉ số khai productGrain · mức riêng đè mức chung · không mã nào mượn mức của mã khác · không lọt vào phép chấm một con người");
 }
 
 /* ───── 3 · Chọn đích: bốn tầng · kỳ · hạn hiệu lực · không chấm lại kỳ đã chốt ───── */

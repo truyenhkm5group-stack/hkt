@@ -220,7 +220,7 @@ export const RISK_LABEL: Record<RiskLevel, string> = {
   GOOD: "Đạt đích",
   WATCH: "Cần chú ý",
   HIGH_RISK: "Rủi ro cao",
-  NO_TARGET: "Chưa đặt đích",
+  NO_TARGET: "Chưa đặt mục tiêu",
   INSUFFICIENT: "Chưa đủ dữ liệu",
 };
 
@@ -237,7 +237,7 @@ export const RISK_HINT: Record<RiskLevel, string> = {
   GOOD: "Tỷ lệ giao thành công của mã này đạt đích công ty đang đặt cho chỉ số GTC.",
   WATCH: "Dưới đích nhưng chưa tới mức đã khai là nghiêm trọng.",
   HIGH_RISK: "Dưới ngưỡng nghiêm trọng mà chủ shop đã khai cùng lúc với đích.",
-  NO_TARGET: "Chưa ai đặt đích cho chỉ số GTC ở Mục tiêu → Đích chỉ số. Màn hình hiện THỰC TẾ và không kết luận đạt/không đạt.",
+  NO_TARGET: "Chưa ai đặt mục tiêu cho chỉ số GTC ở Công việc → Cấu hình → Mục tiêu chỉ số. Màn hình hiện THỰC TẾ và vẫn xếp hạng, chỉ không kết luận đạt/không đạt.",
   INSUFFICIENT: "Chưa đủ đơn đã kết thúc để nói gì về mã này. Đây KHÔNG phải kết luận xấu.",
 };
 

@@ -216,14 +216,27 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
     trendPoints(input.period, input.basis, trendGrain),
   ]);
 
-  /* ─── ĐÍCH: chấm mã hàng bằng đích công ty cho chỉ số GTC, không bằng một hằng số ─── */
-  const dich = resolveTarget(targets as TargetRow[], {
-    metricKey: PRODUCT_RISK_METRIC,
-    departmentCode: null,
-    positionId: null,
-    at: input.period.to ?? new Date(),
-    periodKind: "ANY",
-  });
+  /*
+    ─── ĐÍCH: KHÔNG HẰNG SỐ NÀO, VÀ MỖI MÃ CÓ THỂ CÓ MỨC RIÊNG ───
+
+    `dichCuaMa(code)` tra đúng một lần cho mỗi mã, trên CÙNG một tập dòng đã đọc. `resolveTarget`
+    chọn tầng HẸP NHẤT còn hiệu lực: có đích riêng cho mã ⇒ dùng nó; không có ⇒ rơi về đích toàn
+    công ty; không có cả hai ⇒ `null` ⇒ `NO_TARGET`, hiện thực tế và VẪN XẾP HẠNG.
+
+    `dichChung` (không mã) là thứ dùng để trả lời câu "shop đã đặt mục tiêu GTC chưa" cho tầng
+    hành động — một mã có đích riêng không có nghĩa là shop đã chốt chuẩn chung.
+  */
+  const moc = input.period.to ?? new Date();
+  const dichCuaMa = (productCode: string | null) =>
+    resolveTarget(targets as TargetRow[], {
+      metricKey: PRODUCT_RISK_METRIC,
+      departmentCode: null,
+      positionId: null,
+      productCode,
+      at: moc,
+      periodKind: "ANY",
+    });
+  const dich = dichCuaMa(null);
 
   const duBaoTheoMa = new Map(duBao.rows.map((r) => [r.code, r]));
   const truocTheoMa = new Map((kyTruoc?.products ?? []).map((p) => [p.code, p]));
@@ -234,7 +247,7 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
     const eligibleSent = d?.eligibleSent ?? p.finished;
     const active = d?.active ?? 0;
     const topReasons = (p.topReason ? [p.topReason] : []).map((t) => ({ reason: t.reason, label: t.label, count: t.count, problem: PROBLEM_OF_REASON[t.reason] }));
-    const { risk, riskReason } = chamRuiRo({ actualRate: p.successRate, finished: p.finished, dich });
+    const { risk, riskReason } = chamRuiRo({ actualRate: p.successRate, finished: p.finished, dich: dichCuaMa(p.code) });
     const prevReturnRate = truoc && truoc.finished >= ALERT_MIN_SAMPLE.minFinished ? truoc.returnRate : null;
     return {
       code: p.code,
@@ -325,7 +338,7 @@ function chamRuiRo(input: { actualRate: number | null; finished: number; dich: R
     return { risk: "INSUFFICIENT", riskReason: `Mới ${input.finished} đơn đã kết thúc — dưới ${ALERT_MIN_SAMPLE.minFinished}, chưa đủ để nói gì về mã này.` };
   }
   if (!input.dich) {
-    return { risk: "NO_TARGET", riskReason: "Chưa ai đặt đích cho chỉ số Tỷ lệ giao thành công. Màn hình hiện thực tế và không kết luận đạt/không đạt." };
+    return { risk: "NO_TARGET", riskReason: "Chưa ai đặt mục tiêu cho chỉ số Tỷ lệ giao thành công. Màn hình hiện thực tế và vẫn xếp hạng, chỉ không kết luận đạt/không đạt." };
   }
   if (input.actualRate === null) return { risk: "INSUFFICIENT", riskReason: "Chưa đơn nào đi tới kết quả cuối." };
   /*
@@ -333,12 +346,17 @@ function chamRuiRo(input: { actualRate: number | null; finished: number; dich: R
     do chủ shop khai cùng lúc với đích — nơi này chỉ đọc.
   */
   const v = targetVerdict({ value: input.actualRate, target: input.dich.target, targetMax: input.dich.targetMax, direction: "HIGHER_BETTER" });
-  if (v === "MET") return { risk: "GOOD", riskReason: `GTC ${input.actualRate.toFixed(1)}% ≥ đích ${input.dich.target}%.` };
+  /*
+    NÓI RÕ ĐANG CHẤM BẰNG MỤC TIÊU NÀO. Mã Q004 đạt theo mức riêng 55% trong khi shop đặt 65% là
+    một câu hoàn toàn khác với "Q004 đạt" — giấu vế sau là để người đọc tự suy ra sai.
+  */
+  const nguon = input.dich.scope === "PRODUCT" ? "mục tiêu riêng của mã" : "mục tiêu toàn shop";
+  if (v === "MET") return { risk: "GOOD", riskReason: `GTC ${input.actualRate.toFixed(1)}% ≥ ${nguon} ${input.dich.target}%.` };
   const nghiemTrong = input.dich.criticalAt;
   if (nghiemTrong !== null && input.actualRate < nghiemTrong) {
-    return { risk: "HIGH_RISK", riskReason: `GTC ${input.actualRate.toFixed(1)}% dưới ngưỡng nghiêm trọng ${nghiemTrong}% chủ shop đã khai.` };
+    return { risk: "HIGH_RISK", riskReason: `GTC ${input.actualRate.toFixed(1)}% dưới ngưỡng báo động ${nghiemTrong}% chủ shop đã khai.` };
   }
-  return { risk: "WATCH", riskReason: `GTC ${input.actualRate.toFixed(1)}% dưới đích ${input.dich.target}% nhưng chưa tới ngưỡng nghiêm trọng.` };
+  return { risk: "WATCH", riskReason: `GTC ${input.actualRate.toFixed(1)}% dưới ${nguon} ${input.dich.target}% nhưng chưa tới ngưỡng báo động.` };
 }
 
 /* ═══════════════════ LỚP VẤN ĐỀ THEO MÃ HÀNG ═══════════════════ */
@@ -730,11 +748,11 @@ function dungHanhDong(x: {
       severity: "INFO",
       problem: "DATA_GAP",
       department: "MANAGEMENT",
-      title: "Chưa đặt đích cho Tỷ lệ giao thành công",
+      title: "Chưa đặt mục tiêu cho Tỷ lệ giao thành công",
       evidence: "Không có đích thì không màn hình nào được kết luận mã hàng nào đạt hay không đạt — bảng chỉ hiện thực tế.",
       action: `Đặt đích ở Mục tiêu → Đích chỉ số (${DEPARTMENT_LABEL.MANAGEMENT}), kèm ngưỡng cảnh báo và ngưỡng nghiêm trọng.`,
       productCode: null,
-      href: "/okr/targets",
+      href: "/work/settings#muc-tieu-chi-so",
       sample: 0,
     });
   }

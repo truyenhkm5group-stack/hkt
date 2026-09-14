@@ -20,9 +20,11 @@ export function DescriptionList({ items, className, columns = 2 }: { items: { la
  * `description` là một câu ngắn nói mục này là gì. Phần giải thích dài (cách tính, hướng dẫn thao
  * tác, cảnh báo nghiệp vụ) đưa vào `hint` để hiện trong dấu ⓘ — màn hình còn lại là số liệu.
  */
-export function SectionCard({ title, description, hint, actions, children, className, contentClassName, padded = true }: { title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
+// `id` để liên kết từ màn hình khác NHẢY THẲNG tới đúng thẻ này — một câu "đặt mục tiêu ở Cấu hình"
+// mà thả người đọc xuống đầu một trang dài thì họ vẫn phải tự đi tìm.
+export function SectionCard({ id, title, description, hint, actions, children, className, contentClassName, padded = true }: { id?: string; title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
   return (
-    <section className={cn("overflow-hidden rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
+    <section id={id} className={cn("overflow-hidden scroll-mt-20 rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
       {/* Bộ lọc dài (Cần xử lý) từng ép tiêu đề thành một cột hẹp: hàng đầu được GÃY DÒNG, tiêu đề giữ tối thiểu 220px. */}
       {title ? (
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-hairline px-5 py-3">

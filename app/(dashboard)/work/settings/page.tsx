@@ -11,6 +11,7 @@ import { StaffingPanel, type StaffRow } from "@/app/(dashboard)/work/settings/st
 import { WeightsPanel } from "@/app/(dashboard)/work/settings/weights-panel";
 import { TargetsPanel } from "@/app/(dashboard)/work/settings/targets-panel";
 import { listTargetsForAdmin } from "@/lib/queries/metric-targets";
+import { listProductCodes } from "@/lib/queries/product-code";
 import { getPersonAttributionCoverage, keyedShare } from "@/lib/queries/attribution-coverage";
 import { requirePermission } from "@/lib/auth/session";
 import { getDb, schema } from "@/db";
@@ -52,10 +53,13 @@ export default async function WorkSettingsPage() {
     getScoreWeights(),
     db.select().from(schema.workRecurrences).orderBy(asc(schema.workRecurrences.title)),
   ]);
-  const [targets, positions, coverage] = await Promise.all([
+  const [targets, positions, coverage, maHang] = await Promise.all([
     listTargetsForAdmin(),
     db.select({ id: schema.positions.id, name: schema.positions.name }).from(schema.positions).where(eq(schema.positions.active, true)).orderBy(asc(schema.positions.sortOrder)),
     getPersonAttributionCoverage(),
+    // Mã hàng để đặt đích RIÊNG cho một mã. Danh mục thật, không ô gõ tự do: gõ nhầm một mã không
+    // tồn tại thì dòng đích nằm im và màn hình vẫn nói "chưa đặt mục tiêu" mà không báo lỗi.
+    listProductCodes(),
   ]);
   // BÁO CÁO LỆCH — chạy thử, không sửa gì. Cố ý không có nút "sửa hàng loạt": xem `membershipDrift`.
   const drift = await membershipDrift();
@@ -287,11 +291,12 @@ export default async function WorkSettingsPage() {
       </SectionCard>
 
       <SectionCard
-        title="Đích của chỉ số"
-        description="Ba tầng: công ty → phòng ban → chức danh. Tầng hẹp hơn đè tầng rộng hơn."
-        hint="Bảng này bắt đầu rỗng và ở rỗng cho tới khi chủ shop tự điền — ERP KHÔNG đặt sẵn đích nào. Chưa có đích thì màn hình Hiệu suất vẫn hiện số thực tế, chỉ là không kết luận đạt hay không đạt; một con số không có đích vẫn đọc được, còn bịa ra đích để có màu xanh đỏ thì không."
+        id="muc-tieu-chi-so"
+        title="Mục tiêu chỉ số"
+        description="Công ty → phòng ban → chức danh, và MÃ HÀNG cho chỉ số đọc được ở mức mã. Tầng hẹp hơn đè tầng rộng hơn."
+        hint="Bảng này bắt đầu rỗng và ở rỗng cho tới khi chủ shop tự điền — ERP KHÔNG đặt sẵn con số nào. Chưa có mục tiêu thì màn hình Hiệu suất và bảng Rủi ro theo mã hàng vẫn hiện số thực tế và vẫn xếp hạng, chỉ là không kết luận đạt hay không đạt; một con số không có mục tiêu vẫn đọc được, còn bịa ra mục tiêu để có màu xanh đỏ thì không."
       >
-        <TargetsPanel rows={targets} positions={positions} />
+        <TargetsPanel rows={targets} positions={positions} productCodes={maHang.map((p) => ({ code: p.code, name: p.name }))} />
       </SectionCard>
 
       <SectionCard

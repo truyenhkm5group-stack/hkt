@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0082_hmt_workbook_upload"] as const;
+const MOI = ["0083_metric_target_product_scope"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -67,13 +67,22 @@ export async function testMigrationUpgradePath() {
     // 0075 đã áp: cột `active` có, và mặc định `true` cho cả dòng đã đóng — đúng trạng thái production
     // 13/09/2026 (7 RESOLVED + 6 CANCELLED vẫn active). Bài này dựng lại đúng tình huống đó.
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_care' and column_name = 'active'"), 1, "bước 1: 0075 phải đã áp — cột active có sẵn");
-    // 0081 CHƯA áp ở bước 1. Kiểm điều này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên
-    // cập nhật `MOI`: cột đã có sẵn từ trước thì "áp thêm migration" chẳng chứng minh được gì.
-    // 0081 đã chạy thật trên máy chủ (bản phát hành #266) nên nay nó thuộc "trạng thái production
-    // hôm nay", không còn là migration mới. Thứ CHƯA được có ở bước 1 là bảng của 0082 — kiểm điều
-    // này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên cập nhật `MOI`.
+    // 0081 và 0082 đã chạy thật trên máy chủ nên nay chúng thuộc "trạng thái production hôm nay",
+    // không còn là migration mới.
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 1, "bước 1: 0081 phải đã áp — cột semantic có sẵn");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 0, "bước 1: bảng hmt_workbooks CHƯA được có — đó là thứ 0082 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "bước 1: 0082 phải đã áp — bảng hmt_workbooks có sẵn");
+    /*
+      Thứ CHƯA được có ở bước 1 là tầng `PRODUCT` của 0083 — kiểm điều này để bài không lặng lẽ
+      thành vô nghĩa vào ngày ai đó quên cập nhật `MOI`: ràng buộc đã nới sẵn từ trước thì "áp
+      thêm migration" chẳng chứng minh được gì.
+    */
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt0', 'delivery_success_rate', 'PRODUCT', 'Q004', 55, 'thử trước khi nới', now(), 'a@shop.vn')`),
+      () => true,
+      "bước 1: ràng buộc CŨ phải còn từ chối tầng PRODUCT — đó là thứ 0083 nới ra",
+    );
+    // Một đích ĐÃ ĐẶT TỪ TRƯỚC, để bước 2 kiểm được rằng 0083 không đụng tới dòng nào.
+    await client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt1', 'delivery_success_rate', 'COMPANY', null, 65, 'mức chung toàn shop', now(), 'a@shop.vn')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -122,7 +131,7 @@ export async function testMigrationUpgradePath() {
       một dòng — kể cả khi người dùng đổi tên tệp, mà họ luôn đổi ("Bản sao của…", "… (1).xlsx").
       Hai dòng cho một tệp nghĩa là hai lượt đối soát đọc hai thứ khác nhau.
     */
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "0082: bảng hmt_workbooks phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "0082 (nay thuộc trạng thái production): bảng hmt_workbooks vẫn còn");
     await client.query(`insert into hmt_workbooks (id, filename, sha256, bytes, content, uploaded_by) values ('up-wb1', 'so.xlsx', 'abc123', 3, 'AAA', 'Chủ shop')`);
     await assert.rejects(
       () => client.query(`insert into hmt_workbooks (id, filename, sha256, bytes, content, uploaded_by) values ('up-wb2', 'so (1).xlsx', 'abc123', 3, 'AAA', 'Chủ shop')`),
@@ -239,8 +248,32 @@ export async function testMigrationUpgradePath() {
     const sauNang = (await client.query<{ assignee_user_id: string | null }>("select assignee_user_id from cs_cases where id = 'up-c1'")).rows[0];
     assert.equal(sauNang.assignee_user_id, null, "migration KHÔNG được đoán người phụ trách cho case cũ");
 
-    // Bảng đích rỗng: ERP KHÔNG đặt sẵn đích nào cho ai.
-    assert.equal(await dem("select count(*)::int as n from metric_targets"), 0, "migration không được đặt sẵn đích — đích là quyết định kinh doanh của chủ shop");
+    /*
+      Bảng đích KHÔNG có dòng nào do migration sinh ra: ERP không đặt sẵn đích cho ai. Trừ đúng
+      những dòng chính bài này gieo ở bước 1 (`up-mt…`) — chúng đóng vai "dữ liệu đang có trên
+      production", giống `up-o1` / `up-c1` phía trên.
+    */
+    assert.equal(await dem("select count(*)::int as n from metric_targets where id not like 'up-mt%'"), 0, "migration không được đặt sẵn đích — đích là quyết định kinh doanh của chủ shop");
+
+    /*
+      ═══ 0083: ĐÍCH CHỈ SỐ CÓ THÊM TẦNG MÃ HÀNG ═══
+
+      Ba điều phải đúng sau khi nới ràng buộc:
+
+       1. Tầng `PRODUCT` GHI ĐƯỢC — trước bước 2 thì không (đã kiểm ở bước 1).
+       2. Danh sách vẫn ĐÓNG: một chuỗi lạ vẫn bị chặn. Nới không có nghĩa là mở ô gõ tự do —
+          một `scope` lạ buộc `resolveTarget` phải chọn giữa bỏ sót đích và áp nhầm đích.
+       3. Đích đã đặt TRƯỚC bản này không suy suyển. Migration chỉ nới ràng buộc, không `UPDATE`
+          một dòng nào; nếu một ngày ai đó thêm phần backfill vào đây thì bài này đỏ.
+    */
+    await client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt2', 'delivery_success_rate', 'PRODUCT', 'Q004', 55, 'mã mới ra mắt, chấp nhận thấp hơn', now(), 'a@shop.vn')`);
+    assert.equal(await dem("select count(*)::int as n from metric_targets where scope = 'PRODUCT' and scope_ref = 'Q004'"), 1, "0083: đích riêng cho một mã hàng phải ghi được");
+    await assert.rejects(
+      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-mt3', 'delivery_success_rate', 'SKU', 'Q004-DEN-2XL', 55, 'phạm vi bịa', now(), 'a@shop.vn')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_scope_check"),
+      "0083: danh sách phạm vi vẫn ĐÓNG — nới thêm một giá trị không phải mở ô gõ tự do",
+    );
+    assert.equal(await dem("select count(*)::int as n from metric_targets where id = 'up-mt1' and target = 65 and scope = 'COMPANY' and scope_ref is null"), 1, "0083: đích đặt TRƯỚC bản này giữ nguyên tầng và con số — migration KHÔNG backfill");
 
     /*
       ═══ 0077: ĐÍCH CÓ KỲ, CÓ DẢI, CÓ HẠN — VÀ VẪN KHÔNG CÓ ĐÍCH NÀO ═══
@@ -260,9 +293,13 @@ export async function testMigrationUpgradePath() {
     assert.equal(t1.version, 1, "0077: đích mới là phiên bản 1");
     assert.equal(t1.target_max, null, "0077: không có cận trên ⇒ đích một chiều, không phải dải");
 
-    // Phạm vi CÁ NHÂN nay hợp lệ ở mức CSDL — nhưng vẫn là DANH SÁCH ĐÓNG, không phải ô gõ tự do.
+    /*
+      Phạm vi CÁ NHÂN nay hợp lệ ở mức CSDL — nhưng vẫn là DANH SÁCH ĐÓNG, không phải ô gõ tự do.
+      Ví dụ ở đây từng là `PRODUCT`; 0083 đã nới ràng buộc để nhận nó, nên bài kiểm đổi sang một
+      giá trị NGHE RẤT HỢP LÝ mà vẫn không tồn tại — đó mới là thứ danh sách đóng phải chặn.
+    */
     await assert.rejects(
-      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-t2', 'care_sla', 'PRODUCT', 'p1', 5, 'x', now(), 'a@shop.vn')`),
+      () => client.query(`insert into metric_targets (id, metric_key, scope, scope_ref, target, note, effective_from, set_by_email) values ('up-t2', 'care_sla', 'TEAM', 'p1', 5, 'x', now(), 'a@shop.vn')`),
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("metric_targets_scope_check"),
       "0077: phạm vi lạ phải bị CSDL chặn — chuỗi tự do buộc mã nguồn chọn giữa khoá nhầm người và lộ dữ liệu",
     );
@@ -453,7 +490,9 @@ export async function testMigrationUpgradePath() {
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
     assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
-    assert.equal(await dem("select count(*)::int as n from metric_targets"), 0, "chạy lại migration KHÔNG được sinh đích nào");
+    assert.equal(await dem("select count(*)::int as n from metric_targets where id not like 'up-mt%'"), 0, "chạy lại migration KHÔNG được sinh đích nào");
+    // …và cũng KHÔNG được đụng tới đích đã có: hai dòng bài này gieo phải còn nguyên cả tầng lẫn số.
+    assert.equal(await dem("select count(*)::int as n from metric_targets where (id = 'up-mt1' and scope = 'COMPANY' and target = 65) or (id = 'up-mt2' and scope = 'PRODUCT' and scope_ref = 'Q004' and target = 55)"), 2, "chạy lại migration KHÔNG được sửa đích đã đặt");
     assert.equal(await dem("select count(*)::int as n from shipment_return_reasons"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
 
