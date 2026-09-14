@@ -73,6 +73,11 @@ const JOBS = [
   // GIỮ ẤM TRANG CHỦ. Đo được: nguội 76-88 giây, ấm ~100ms. Chạy mỗi 4 phút — ngắn hơn TTL 300
   // giây của bảng điều khiển, nên đệm không bao giờ kịp nguội và người mở trang không phải trả giá.
   { job: "dashboard-warm", every: minutes("DASHBOARD_WARM_EVERY_MINUTES", 4), offset: 0.5 },
+  // QUY KẾT FANPAGE → MARKETER. Mỗi 30 phút là đủ: nó phục vụ một BÁO CÁO, không phục vụ một màn
+  // hình thời gian thực, và mỗi lượt là một phép quét toàn bộ đơn (chuỗi trùng đơn không biết ranh
+  // giới kỳ, nên quét hẹp sẽ cho kết quả khác nhau tuỳ tham số — xem lib/attribution/fanpage.ts).
+  // Ghi là ghi ĐÈ theo khoá `order_id`, nên chạy trùng nhau cũng không cộng đúp được gì.
+  { job: "fanpage-attribution", every: minutes("FANPAGE_ATTRIBUTION_EVERY_MINUTES", 30), offset: 13 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];

@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0083_hmt_exception_resolution"] as const;
+const MOI = ["0083_hmt_exception_resolution", "0084_fanpage_marketer_attribution"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -77,6 +77,7 @@ export async function testMigrationUpgradePath() {
     // hôm nay". Thứ CHƯA được có ở bước 1 là cột kết luận của NGƯỜI mà 0083 thêm vào.
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_workbooks'"), 1, "bước 1: 0082 phải đã áp — bảng hmt_workbooks có sẵn");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'hmt_return_reconciliation' and column_name = 'resolution'"), 0, "bước 1: cột resolution CHƯA được có — đó là thứ 0083 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fanpages'"), 0, "bước 1: bảng fanpages CHƯA được có — đó là thứ 0084 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -169,6 +170,44 @@ export async function testMigrationUpgradePath() {
       "0083: gỡ mà không ghi người/mốc/lý do phải bị chặn",
     );
 
+
+    /*
+      ═══ 0084: QUY KẾT FANPAGE → MARKETER — BA BẢNG MỚI, KHÔNG ĐỤNG MỘT DÒNG NGHIỆP VỤ NÀO ═══
+
+      Ba điều phải đúng, và mỗi điều chặn một cách hỏng khác nhau:
+        1. ba bảng có mặt;
+        2. đơn ĐANG CÓ trên production (`up-o1`) KHÔNG được tự mọc ra một dòng quy kết — migration
+           không backfill, không đặt mặc định (AGENTS.md mục 35). Quy kết là kết quả của một lượt
+           đối soát có người bấm, không phải một lời khẳng định do lược đồ sinh ra;
+        3. ràng buộc chặn được đúng thứ nguy hiểm nhất: một dòng "trùng đơn" mang tên một người —
+           nếu lọt thì doanh thu bị đếm hai lần trong khi báo cáo trông vẫn hoàn toàn bình thường.
+    */
+    for (const bang of ["fanpages", "fanpage_marketer_assignments", "order_attributions"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `0084: bảng ${bang} phải được tạo`);
+    }
+    assert.equal(await dem("select count(*)::int as n from order_attributions"), 0, "0084: KHÔNG gieo sẵn dòng quy kết nào — đơn cũ vẫn chưa quy kết, và đó là sự thật đúng");
+    assert.equal(await dem("select count(*)::int as n from orders where id = 'up-o1'"), 1, "0084: đơn đang có trên production không bị đụng tới");
+    await client.query(`insert into fanpages (id, external_page_id, name) values ('up-fp1', 'PAGE-UP-1', 'Page thử')`);
+    await client.query(`insert into fanpage_marketer_assignments (id, fanpage_id, marketer_id, effective_from) values ('up-fa1', 'up-fp1', 'mkt-1', now() - interval '30 days')`);
+    // Một fanpage chỉ có MỘT khoảng đang mở — chặn ở CSDL vì hai lượt ghi song song cùng lọt qua
+    // phép kiểm ở tầng ứng dụng là ca duy nhất mà tầng ứng dụng không chặn được.
+    await assert.rejects(
+      () => client.query(`insert into fanpage_marketer_assignments (id, fanpage_id, marketer_id, effective_from) values ('up-fa2', 'up-fp1', 'mkt-2', now())`),
+      () => true,
+      "0084: hai phân công cùng mở trên một fanpage phải bị chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into order_attributions (id, order_id, status, marketer_id, duplicate_of_order_id, source_order_at) values ('up-oa1', 'up-o1', 'DUPLICATE', 'mkt-1', 'up-o1', now())`),
+      () => true,
+      "0084: một dòng trùng đơn KHÔNG được mang tên một người",
+    );
+    await client.query(`insert into order_attributions (id, order_id, status, source_page_id, source_order_at) values ('up-oa2', 'up-o1', 'NO_ASSIGNMENT', 'PAGE-UP-1', now())`);
+    await assert.rejects(
+      () => client.query(`insert into order_attributions (id, order_id, status, source_order_at) values ('up-oa3', 'up-o1', 'NO_PAGE', now())`),
+      () => true,
+      "0084: mỗi đơn ĐÚNG MỘT dòng quy kết — khoá duy nhất là thứ chặn cộng đúp ở gốc",
+    );
+    await client.query(`delete from order_attributions where id = 'up-oa2'`);
 
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s7', 'UPS7', 'RETURNED')`);
     await client.query(`insert into hmt_return_reconciliation (id, workbook, sheet, sheet_role, tracking_key, match_status, idempotency_key, shipment_id, written) values ('up-h1', 'wb', 'Chi tiết đơn hoàn', 'FULL_RETURN_ITEMS', 'UPS7', 'MATCHED', 'wb|FULL|UPS7|x|#1', 'up-s7', true)`);
