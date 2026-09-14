@@ -613,8 +613,14 @@ jobs:
                 bash /tmp/staging-preflight.sh ;;
 
               ai-staging-up)
-                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
-                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-up.sh?ref=${STAGING_BRANCH}" > /tmp/staging-up.sh
+                # Lấy CẢ HAI script vào cùng một thư mục: `staging-up.sh` gọi preflight bằng
+                # `$(dirname "$0")/staging-preflight.sh`. Lượt đầu (14/09) hỏng đúng ở đây — chỉ tải
+                # một tệp, nên nó đi tìm `/tmp/staging-preflight.sh` và không thấy. Kiểm tra an toàn
+                # KHÔNG được phép "không tìm thấy nên bỏ qua", nên script thoát 127 là đúng.
+                for f in staging-preflight.sh staging-up.sh; do
+                  curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                    "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$f?ref=${STAGING_BRANCH}" > "/tmp/$f"
+                done
                 STAGING_BRANCH="$STAGING_BRANCH" STAGING_IMAGE="$STAGING_IMAGE" \
                   GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" bash /tmp/staging-up.sh ;;
 

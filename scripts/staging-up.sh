@@ -24,11 +24,21 @@ export STAGING_IMAGE="${STAGING_IMAGE:-}"
 say() { printf '%s\n' "$*"; }
 
 say "═════════ BƯỚC 1/5 · KIỂM TRA AN TOÀN ═════════"
-if [ -f "$DIR/scripts/staging-preflight.sh" ]; then
-  STAGING_DIR="$DIR" STAGING_PORT="$PORT" bash "$DIR/scripts/staging-preflight.sh"
-else
-  STAGING_DIR="$DIR" STAGING_PORT="$PORT" bash "$(dirname "$0")/staging-preflight.sh"
+#
+# Tìm preflight ở ba chỗ, và KHÔNG có nhánh thứ tư nào "không thấy thì thôi": kiểm tra an toàn là
+# thứ duy nhất đứng giữa lượt dựng này và production. Không chạy được nó thì DỪNG.
+PREFLIGHT=""
+for p in "$DIR/scripts/staging-preflight.sh" "$(dirname "$0")/staging-preflight.sh"; do
+  [ -f "$p" ] && { PREFLIGHT="$p"; break; }
+done
+if [ -z "$PREFLIGHT" ]; then
+  say "Không thấy staging-preflight.sh tại chỗ — tải từ nhánh $BRANCH."
+  PREFLIGHT="$(mktemp)"
+  curl -fsSL -H "Accept: application/vnd.github.raw" \
+    "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-preflight.sh?ref=${BRANCH}" > "$PREFLIGHT" \
+    || { say "✗ Không tải được kiểm tra an toàn. DỪNG — không dựng khi chưa kiểm được va chạm."; exit 1; }
 fi
+STAGING_DIR="$DIR" STAGING_PORT="$PORT" bash "$PREFLIGHT"
 say "Kiểm tra an toàn ĐẠT."
 
 say ""
