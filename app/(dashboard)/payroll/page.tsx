@@ -45,6 +45,9 @@ import {
 } from "@/lib/queries/payroll";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { ProductOwnersForm } from "@/app/(dashboard)/payroll/product-owners-form";
+import { FinalizePeriodButton } from "@/app/(dashboard)/payroll/finalize-button";
+import { FinalizedPeriodTable } from "@/app/(dashboard)/payroll/finalized-period";
+import { getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
 import { cn } from "@/lib/utils";
 
@@ -64,12 +67,22 @@ export default async function PayrollPage({
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
   const pagesForConfig = listPagesForConfig().catch(() => []);
-  const [report, unassigned, accounts, products] = await Promise.all([
+  const [report, unassigned, accounts, products, periodState] = await Promise.all([
     getPayrollReport(period, basis),
     unassignedMarketerSpend(period),
     listAdAccounts(),
     listProductsForMapping(),
+    getPayrollPeriodState(period, basis),
   ]);
+  /*
+    KỲ ĐÃ CHỐT ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
+
+    Bản tính sống vẫn được dựng (một lần, ở trên) nhưng chỉ để so ra phần CHÊNH phát sinh sau ngày
+    chốt — nó KHÔNG được hiện thay cho con số của kỳ. Đổi tỷ lệ hay nhập thêm phiếu kho về sau mà
+    bảng lương tháng trước đổi theo là viết lại một kỳ đã trả tiền.
+  */
+  const daChot = periodState.status === "FINAL" && periodState.snapshot !== null;
+  const drift = daChot && periodState.snapshot ? payrollDrift(periodState.snapshot, report) : [];
   const qs = new URLSearchParams({
     period: period.key,
     basis,
@@ -110,6 +123,14 @@ export default async function PayrollPage({
                 <Download className="size-4" aria-hidden /> Xuất CSV
               </a>
             </Button>
+            {/*
+              CHỈ hiện khi kỳ CHỐT ĐƯỢC: có mốc đầu/cuối · cơ sở đủ điều kiện · chưa chốt · không
+              còn con số CHƯA BIẾT. Hiện một nút rồi để server action từ chối là bắt người dùng
+              phát hiện luật bằng cách bấm nhầm.
+            */}
+            {canManage && !daChot && periodState.key && periodState.basisEligible && totalSalary !== null && period.fromKey && period.toKey ? (
+              <FinalizePeriodButton from={period.fromKey} to={period.toKey} basis={basis} label={period.label} totalSalary={formatVND(totalSalary)} />
+            ) : null}
             {canManage ? <EmployeeDialog accounts={accounts} /> : null}
           </div>
         }
@@ -338,6 +359,9 @@ export default async function PayrollPage({
         </SectionCard>
       ) : null}
 
+      {daChot ? <FinalizedPeriodTable state={periodState} basis={basis} drift={drift} /> : null}
+
+      {daChot ? null : (
       <SectionCard
         title="Bảng lương"
         description="Lương cứng cộng thưởng theo lợi nhuận và doanh thu."
@@ -528,6 +552,7 @@ export default async function PayrollPage({
           </Table>
         </div>
       </SectionCard>
+      )}
 
       <SectionCard
         title={`Lợi nhuận theo mã hàng · ${PAYROLL_BASIS_SHORT[basis]}`}

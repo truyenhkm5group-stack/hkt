@@ -3592,6 +3592,68 @@ export const reviewCycles = pgTable(
   ],
 );
 
+/**
+ * ═══════════ KỲ LƯƠNG: NHÁP THÌ TÍNH SỐNG, ĐÃ CHỐT THÌ BẤT BIẾN ═══════════
+ *
+ * ─── VÌ SAO PHẢI CÓ BẢNG NÀY ───
+ *
+ * Trước bản này bảng lương KHÔNG có danh tính kỳ: mở `/payroll` là tính lại từ đầu, mỗi lần. Hệ
+ * quả là mọi thứ nằm sau con số đều trôi — đổi một tỷ lệ thưởng, đổi người phụ trách một fanpage,
+ * nhập thêm một phiếu kho, và bảng lương của THÁNG TRƯỚC đổi theo, sau khi tiền đã trả. Không có
+ * chỗ nào ghi lại shop đã trả bao nhiêu, theo cơ sở nào, với tỷ lệ nào.
+ *
+ * Cùng hình dạng, cùng lý do và cùng bộ ràng buộc với `review_cycles` (AGENTS.md mục 21):
+ * `DRAFT` tính sống mỗi lần mở · `FINAL` đọc `snapshot`, KHÔNG truy vấn lại.
+ *
+ * ─── ẢNH CHỤP PHẢI ĐỦ ĐỂ DỰNG LẠI CÂU TRẢ LỜI, KHÔNG CHỈ ĐỦ ĐỂ IN MỘT CON SỐ ───
+ *
+ * Nên `snapshot` giữ cả: cơ sở lợi nhuận đã dùng, tỷ lệ của từng người TẠI LÚC CHỐT, lương cứng
+ * khai và phần thuộc kỳ, độ phủ nguồn quy kết, và nguyên văn cảnh báo của máy chi phí. Sáu tháng
+ * sau có người hỏi "vì sao tháng ấy trả chừng này", câu trả lời phải nằm trong chính dòng đó.
+ *
+ * `calc_version` tách khỏi nội dung: đổi CÔNG THỨC thì ảnh cũ vẫn đọc được và biết nó được dựng
+ * bằng công thức nào — không lặng lẽ so hai kỳ tính bằng hai luật khác nhau.
+ */
+export const payrollPeriods = pgTable(
+  "payroll_periods",
+  {
+    id: id(),
+    /** Khoá tự nhiên của kỳ, đọc được bằng mắt: `2026-09-01..2026-09-30`. */
+    periodKey: text("period_key").notNull(),
+    periodStart: ts("period_start").notNull(),
+    periodEnd: ts("period_end").notNull(),
+    /**
+     * Cơ sở lợi nhuận đã dùng. CSDL chỉ chặn giá trị lạ; việc "cơ sở nào ĐƯỢC PHÉP chốt lương" do
+     * `lib/constants/payroll.ts::PAYROLL_BASIS_ELIGIBILITY` quyết — khai luật ấy ở hai nơi là mở
+     * đường cho hai nơi nói hai điều khác nhau.
+     */
+    basis: text("basis").notNull(),
+    /** `DRAFT` = tính sống mỗi lần mở; `FINAL` = đọc `snapshot`, không tính lại. */
+    status: text("status").notNull().default("DRAFT"),
+    /** Ảnh chụp toàn bộ số + căn cứ của kỳ. Bất biến sau khi `FINAL`. */
+    snapshot: jsonb("snapshot"),
+    /** Phiên bản phép tính lúc chụp (`PAYROLL_CALC_VERSION`). */
+    calcVersion: integer("calc_version").notNull().default(1),
+    note: text("note").notNull().default(""),
+    finalizedAt: ts("finalized_at"),
+    finalizedBy: text("finalized_by").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // MỘT kỳ + MỘT cơ sở = MỘT dòng. Hai bản chốt cùng kỳ bằng hai cơ sở là hai câu trả lời khác
+    // nhau cho cùng một câu hỏi, và không ai biết cái nào đã dùng để trả tiền.
+    uniqueIndex("payroll_periods_uq").on(t.periodKey, t.basis),
+    index("payroll_periods_start_idx").on(t.periodStart),
+    check("payroll_periods_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    check("payroll_periods_basis_check", sql`${t.basis} IN ('profit1', 'profit2', 'cash', 'nominal')`),
+    check("payroll_periods_range_check", sql`${t.periodEnd} >= ${t.periodStart}`),
+    // Chốt mà không có ảnh chụp thì "chốt" không có nghĩa gì: lần mở sau vẫn tính lại.
+    check("payroll_periods_final_check", sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`),
+  ],
+);
+
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
   lead: one(users, { fields: [departments.leadUserId], references: [users.id] }),
   members: many(departmentMembers),
@@ -3873,5 +3935,6 @@ export type OkrCheckin = typeof okrCheckins.$inferSelect;
 export type BscScorecard = typeof bscScorecards.$inferSelect;
 export type BscMetric = typeof bscMetrics.$inferSelect;
 export type ReviewCycle = typeof reviewCycles.$inferSelect;
+export type PayrollPeriod = typeof payrollPeriods.$inferSelect;
 export type AccessRole = typeof accessRoles.$inferSelect;
 export type Position = typeof positions.$inferSelect;

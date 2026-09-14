@@ -38,6 +38,7 @@ import { testFinancialTruth } from "./financial-truth.test";
 import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
+import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
 import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
@@ -1697,6 +1698,7 @@ async function main() {
   testNoAutoReassignOnOrgChange();
   testPositionGrantsNothing();
   testRoleBuilderCannotEscalate();
+  await testPayrollPeriod(db);
   testEveryScopedRouteIsGuarded();
   testPayrollOwnLineNeedsAccountKey();
   testAuthSecretHasNoProdFallback();

@@ -1,3 +1,5 @@
+import { vnDateKey } from "@/lib/format";
+
 /** Nhân sự và cơ chế lương (lưu trong settings: payroll.employees) */
 export type Employee = {
   id: string;
@@ -24,6 +26,31 @@ export type Employee = {
 };
 
 export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
+
+/**
+ * PHIÊN BẢN PHÉP TÍNH LƯƠNG. Đổi CÔNG THỨC ⇒ tăng số này.
+ *
+ * Ảnh chụp của một kỳ đã chốt mang theo số này, nên sáu tháng sau vẫn biết được nó dựng bằng luật
+ * nào — và hai kỳ mang hai số khác nhau thì màn hình in "đổi công thức giữa hai kỳ" thay vì vẽ một
+ * mũi tên xu hướng. Cùng tinh thần với `METRIC_DEFINITION_VERSION` và
+ * `FANPAGE_ATTRIBUTION_RULE_VERSION`.
+ *
+ * 2 = bản 14/09/2026: lương cứng chia theo SỐ NGÀY của kỳ (trước đó chép nguyên lương tháng), quy
+ * kết marketer đi bằng ảnh chụp fanpage theo mốc đơn lên, và CHƯA BIẾT thôi in ra thành 0.
+ */
+export const PAYROLL_CALC_VERSION = 2;
+
+/**
+ * KHOÁ TỰ NHIÊN CỦA MỘT KỲ LƯƠNG — đọc được bằng mắt, và ổn định.
+ *
+ * Dùng chính hai mốc ngày chứ không dùng nhãn kỳ ("Tháng này"): nhãn ấy đổi nghĩa theo ngày mở
+ * màn hình, nên một kỳ đã chốt sẽ trỏ sang khoảng khác vào tháng sau. `null` = kỳ không có mốc
+ * đầu/cuối ⇒ KHÔNG chốt được, và đó là câu trả lời đúng chứ không phải một khoá giả.
+ */
+export function payrollPeriodKey(from: Date | null, to: Date | null): string | null {
+  if (!from || !to) return null;
+  return `${vnDateKey(from)}..${vnDateKey(to)}`;
+}
 
 export const DEPARTMENTS = ["Marketing", "Sale / CSKH", "Kho / Đóng gói", "Kế toán", "Quản lý", "Khác"] as const;
 

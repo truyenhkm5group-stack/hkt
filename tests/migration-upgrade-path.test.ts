@@ -32,7 +32,17 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods"] as const;
+
+/*
+  VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
+
+  Giữ lại là một phép kiểm CHẶT HƠN, không phải một lời khai sai: bước 1 dựng một production CŨ HƠN
+  thực tế (chưa có 0087), rồi bước 2 áp CẢ HAI migration lên trạng thái ấy. Nếu đường nâng cấp chạy
+  được từ mốc cũ hơn thì nó cũng chạy được từ mốc hôm nay. Bỏ 0087 ra thì phải viết lại toàn bộ khối
+  khẳng định của nó theo chiều ngược (từ "chưa được có" sang "phải có sẵn") — công việc ấy thuộc về
+  phiên đang giữ 0087, không phải phiên thêm 0088.
+*/
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -94,6 +104,7 @@ export async function testMigrationUpgradePath() {
       chẳng chứng minh được gì.
     */
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_reason_observations'"), 0, "bước 1: bảng return_reason_observations CHƯA được có — đó là thứ 0087 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'payroll_periods'"), 0, "bước 1: bảng payroll_periods CHƯA được có — đó là thứ 0088 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -209,6 +220,40 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from shipments where id = 'up-s5'`);
     assert.equal(await dem("select count(*)::int as n from return_reason_observations where id = 'up-ob5'"), 0, "0087: xoá kiện thì quan sát của nó đi theo, không để lại dòng mồ côi");
     assert.equal(await dem(`select count(*)::int as n from shipment_return_reasons where id = 'up-rr2' and raw_reason like 'Tồn - %'`), 1, "0085: chữ gốc ghi được NGUYÊN VĂN, kể cả dấu tiếng Việt");
+
+    /*
+      ═══ 0088: KỲ LƯƠNG — CHỈ THÊM BẢNG, VÀ "CHỐT" PHẢI CÓ NGHĨA ═══
+
+      Năm điều phải đúng, mỗi điều chặn một cách hỏng khác nhau:
+        1. bảng có mặt và RỖNG — không kỳ nào tự nhiên thành "đã chốt" vì một lượt nâng cấp;
+        2. chốt mà KHÔNG có ảnh chụp bị CSDL chặn: "chốt" như thế không có nghĩa gì, lần mở sau vẫn
+           tính lại và số sẽ khác;
+        3. một kỳ + một cơ sở = MỘT dòng — hai bản chốt cùng kỳ bằng hai cơ sở là hai câu trả lời
+           khác nhau cho cùng một câu hỏi, và không ai biết cái nào đã dùng để trả tiền;
+        4. cơ sở lạ bị chặn;
+        5. và nó KHÔNG đụng tới một dòng nghiệp vụ nào đang có.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'payroll_periods'"), 1, "0088: bảng kỳ lương phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from payroll_periods"), 0, "0088: KHÔNG gieo sẵn kỳ nào — một lượt nâng cấp không được biến kỳ nào thành 'đã chốt'");
+    await assert.rejects(
+      () => client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis, status) values ('up-pp-bad', '2026-09-01..2026-09-30', now(), now(), 'profit1', 'FINAL')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_final_check"),
+      "0088: chốt mà không có ảnh chụp phải bị chặn — nếu không, lần mở sau vẫn tính lại và số sẽ khác",
+    );
+    await assert.rejects(
+      () => client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis) values ('up-pp-bad2', '2026-09-01..2026-09-30', now(), now(), 'khong-ton-tai')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_basis_check"),
+      "0088: cơ sở lợi nhuận lạ bị chặn ở CSDL",
+    );
+    await client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis, status, snapshot, finalized_at) values ('up-pp1', '2026-09-01..2026-09-30', '2026-09-01', '2026-09-30', 'profit1', 'FINAL', '{"totalSalary": 9000000}'::jsonb, now())`);
+    await assert.rejects(
+      () => client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis) values ('up-pp2', '2026-09-01..2026-09-30', '2026-09-01', '2026-09-30', 'profit1')`),
+      (e: unknown) => /unique|duplicate/i.test(String((e as { message?: string })?.message ?? e)),
+      "0088: một kỳ + một cơ sở chỉ được MỘT dòng",
+    );
+    // Cùng kỳ nhưng cơ sở KHÁC thì được — đó là hai câu trả lời cho hai câu hỏi khác nhau.
+    await client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis) values ('up-pp3', '2026-09-01..2026-09-30', '2026-09-01', '2026-09-30', 'nominal')`);
+    assert.equal(await dem("select count(*)::int as n from payroll_periods where period_key = '2026-09-01..2026-09-30'"), 2, "0088: cùng kỳ, khác cơ sở ⇒ hai dòng");
 
     /*
       ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
