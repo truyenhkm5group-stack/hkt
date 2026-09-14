@@ -366,6 +366,24 @@ async function shipmentSummaryUncached(params: ListParams) {
 }
 
 /** Chi tiết vận đơn theo id ERP, mã VTP hoặc mã vận đơn */
+/**
+ * Kết quả đơn của MỘT vận đơn, đọc bằng ĐÚNG biểu thức `ORDER_OUTCOME` mà mọi báo cáo dùng.
+ *
+ * Có hàm này để trang chi tiết không phải so `stage` bằng tay. `shipments.stage` là chặng của
+ * HÃNG VẬN (`RETURNING`, `DELIVERY_FAILED`, …) — nó KHÔNG phải kết quả đơn, và suy một cái từ
+ * cái kia là dựng bộ luật thứ hai cho cùng một câu hỏi, đúng thứ AGENTS.md mục 3.1 cấm.
+ */
+export async function outcomeOfShipment(id: string) {
+  const db = await getDb();
+  const [row] = await db
+    .select({ outcome: ORDER_OUTCOME })
+    .from(schema.shipments)
+    .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+    .where(eq(schema.shipments.id, id))
+    .limit(1);
+  return row?.outcome ?? null;
+}
+
 export async function getShipmentDetail(id: string) {
   const db = await getDb();
   const shipment = await db.query.shipments.findFirst({

@@ -80,18 +80,25 @@ const DAU_HIEU_LY_DO = ["ton -", "ton-", "ly do", "khach hang yeu cau", "nguoi g
  *
  * Và bộ lọc bước đi cũ vẫn đứng trước tất cả: "Tồn - Thông báo chuyển hoàn bưu cục gốc" mang dấu
  * hiệu ở căn cứ 2 nhưng vẫn chỉ nói kiện đang trên đường về.
+ *
+ * ─── `source` BẮT BUỘC, CỐ Ý ───
+ *
+ * Bản nháp để `source` tuỳ chọn với mặc định `CARRIER_TEXT`. Lượt rút quan sát gọi thiếu nó ở năm
+ * chỗ, nên MỌI ghi chú của nhân viên bị chấm như chữ ĐVVC — và một câu như "khách bảo vải xù" bị
+ * CHẶN, vì lý do ấy chỉ người mới kết luận được. Tức là bộ lọc vứt đi đúng những quan sát giá trị
+ * nhất, trong im lặng. Để tham số BẮT BUỘC biến cả lớp lỗi ấy thành lỗi biên dịch.
  */
-export function dangGhiQuanSat(text: string, source?: ReasonSource, vtpCode?: number | null): boolean {
+export function dangGhiQuanSat(text: string, source: ReasonSource, vtpCode?: number | null): boolean {
   const t = text.trim();
   if (t.length < 5) return false;
   const s = boDau(t);
   if (RETURN_STEP_NOT_REASON.some((b) => s.includes(b))) return false;
   // Nguồn do người gõ: giữ tất. Không ai gõ tay một bước đi vào ô ghi chú.
-  if (source && SOURCE_IS_HUMAN[source]) return true;
+  if (SOURCE_IS_HUMAN[source]) return true;
   if (vtpCode !== null && vtpCode !== undefined) return true;
   if (DAU_HIEU_LY_DO.some((d) => s.includes(d))) return true;
   // Còn lại: chỉ giữ khi bảng luật xếp được. Xếp không được VÀ không có dấu hiệu nào ⇒ bước đi.
-  return classifyRaw(text, source ?? "CARRIER_TEXT", vtpCode).matched;
+  return classifyRaw(text, source, vtpCode).matched;
 }
 
 /** Dòng sẵn sàng ghi vào bảng, phân loại đã tính. */

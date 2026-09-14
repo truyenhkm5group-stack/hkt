@@ -212,7 +212,7 @@ export function testObservationDedupeKeyIsShared() {
 
 /* ───── 5 · Trên CSDL: thẩm quyền cao thắng, và RAW_ONLY hiện ra ───── */
 export async function testObservationResolution(db: Db) {
-  const KIEN = ["rro-1", "rro-2", "rro-3"];
+  const KIEN = ["rro-1", "rro-2", "rro-3", "rro-4"];
   await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.shipmentId, KIEN));
   await db.delete(schema.shipments).where(inArray(schema.shipments.id, KIEN));
   await db.insert(schema.shipments).values(KIEN.map((id, i) => ({ id, vtpOrderNumber: `RRO${i + 1}`, carrier: "VTP", stage: "RETURNED" as const })));
@@ -225,6 +225,9 @@ export async function testObservationResolution(db: Db) {
     // rro-2: CHỈ có chữ ĐVVC, và chữ ấy không khớp danh mục nào ⇒ RAW_ONLY, không phải NO_EVIDENCE.
     { shipmentId: "rro-2", source: "CARRIER_TEXT", rawText: "Tồn - ghi chú nội bộ 7788 không ai hiểu", reasonAtWrite: "UNKNOWN", occurredAt: t(1), dedupeKey: "rro-2|CARRIER_TEXT|1" },
     // rro-3: không có quan sát nào.
+    // rro-4: ĐVVC nói một câu XẾP ĐƯỢC, rồi chăm sóc kiện (hạng CAO HƠN) ghi một câu KHÔNG xếp được.
+    { shipmentId: "rro-4", source: "CARRIER_TEXT", rawText: "Tồn - Khách hàng nghỉ, không có nhà", reasonAtWrite: "CUSTOMER_UNREACHABLE", occurredAt: t(1), dedupeKey: "rro-4|CARRIER_TEXT|1" },
+    { shipmentId: "rro-4", source: "CARE_NOTE", rawText: "đã gọi lần 2, khách hẹn chiều mai", reasonAtWrite: "UNKNOWN", occurredAt: t(5), actorEmail: "cs@shop.vn", dedupeKey: "rro-4|CARE_NOTE|5" },
   ]);
 
   const ra = await reasonsForShipments(KIEN);
@@ -243,6 +246,23 @@ export async function testObservationResolution(db: Db) {
   assert.equal(m2.reason, "UNKNOWN", "không xếp được thì để UNKNOWN, tuyệt đối không gán bừa");
   assert.ok(m2.rawReason.includes("7788"), "chữ lạ vẫn phải giữ để người đọc mở ra xem");
 
+  /*
+    ─── BÀI QUAN TRỌNG NHẤT: THÊM DỮ LIỆU KHÔNG ĐƯỢC LÀM GIẢM ĐỘ PHỦ ───
+
+    Đo trên production 14/09/2026: trong 103 ghi chú chăm sóc kiện, chỉ 5 câu xếp được vào danh
+    mục — 98 câu còn lại là "đã gọi lần 2", "khách hẹn chiều mai". Ghi chú chăm sóc xếp hạng CAO
+    HƠN chữ ĐVVC. Nếu hạng cao ghi đè vô điều kiện thì một kiện mà Viettel Post đã nói rõ "Khách
+    hàng nghỉ, không có nhà" sẽ bị câu "đã gọi lần 2" đè lên và rơi về CHƯA XÁC ĐỊNH.
+
+    Tức là backfill càng nhiều nguồn thì báo cáo càng tệ đi — và không ai đi tìm lỗi đó, vì con số
+    vẫn ra và vẫn trông hợp lý.
+  */
+  const m4 = ra.get("rro-4");
+  assert.ok(m4);
+  assert.equal(m4.coverage, "CLASSIFIED", "ghi chú hạng cao mà KHÔNG xếp được thì không được xoá kết luận đã có của chữ ĐVVC");
+  assert.equal(m4.reason, "CUSTOMER_UNREACHABLE", "lý do đã xếp được phải ở lại");
+  assert.equal(m4.source, "CARRIER_TEXT", "nguồn nói được điều gì mới là nguồn được ghi công");
+
   const m3 = ra.get("rro-3");
   assert.ok(m3);
   assert.equal(m3.coverage, "NO_EVIDENCE", "không có chữ nào ⇒ phải ĐI HỎI, khác hẳn việc ngồi phân loại");
@@ -255,7 +275,7 @@ export async function testObservationResolution(db: Db) {
     .values({ shipmentId: "rro-2", source: "CARRIER_TEXT", rawText: "Tồn - ghi chú nội bộ 7788 không ai hiểu", reasonAtWrite: "UNKNOWN", occurredAt: t(1), dedupeKey: "rro-2|CARRIER_TEXT|1" })
     .onConflictDoNothing({ target: schema.returnReasonObservations.dedupeKey });
   const dem = await db.select().from(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.shipmentId, KIEN));
-  assert.equal(dem.length, 3, "cùng một quan sát ghi lại lần hai không được sinh dòng mới");
+  assert.equal(dem.length, 5, "cùng một quan sát ghi lại lần hai không được sinh dòng mới");
 
   await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.shipmentId, KIEN));
   await db.delete(schema.shipments).where(inArray(schema.shipments.id, KIEN));
