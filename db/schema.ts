@@ -198,6 +198,22 @@ export const csCases = pgTable(
     createdBy: text("created_by").notNull().default(""),
     /** Danh tính người tạo case. `NULL` với case do JOB tự phát hiện — đó là sự thật, không phải lỗ hổng. */
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * ═══ KẾT LUẬN CỦA TẦNG NGỮ NGHĨA, LƯU LẠI ĐỂ KIỂM CHỨNG ═══
+     *
+     * Máy phân loại chạy TRONG JOB QUÉT, không chạy lúc dựng trang (200 dòng × một lượt gọi model
+     * là một trang không bao giờ mở xong). Nên kết luận phải được lưu, nếu không màn hình và báo
+     * cáo đối chiếu chỉ còn "case này từ đâu ra thì không ai biết".
+     *
+     * Lưu ĐÚNG phần kiểm chứng được: loại việc, mức tin cậy, phạm vi thời gian, ý định người nói,
+     * một câu lý do, và TRÍCH NGUYÊN VĂN thuận / nghịch. **KHÔNG lưu dòng suy nghĩ riêng của
+     * model** — nó không kiểm chứng được, không ai đọc, và là chỗ dữ liệu khách hàng rò ra nhiều
+     * nhất. Hình dạng khai ở `lib/cs/semantic-case.ts::SemanticRecord`.
+     *
+     * `NULL` = case sinh trước bản này hoặc sinh bởi đường xác định (không qua model) — CHƯA BIẾT,
+     * không phải "model đã xem và không nói gì".
+     */
+    semantic: jsonb("semantic").$type<Record<string, unknown> | null>(),
     resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

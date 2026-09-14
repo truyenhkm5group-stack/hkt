@@ -455,8 +455,8 @@ export async function testCsWorkqueue(db: Db) {
   // ───────── V2-10 · PHÁT SINH bám `created_at`; một lượt ghi chú KHÔNG được đẩy case lên đầu ─────────
   const v3Sau = await db.query.csCases.findFirst({ where: eq(schema.csCases.id, "csq-v3"), columns: { createdAt: true, updatedAt: true } });
   assert.ok(v3Sau && v3Sau.updatedAt.getTime() > v3Sau.createdAt.getTime(), "ghi chú có đụng vào updated_at — chính vì thế cột Phát sinh không được đọc nó");
-  assert.match(nguonBang, /\{phatSinh\(r\.createdAt\)\}/, "cột Phát sinh phải đọc created_at");
-  const oPhatSinh = nguonBang.slice(nguonBang.indexOf("PHÁT SINH —"), nguonBang.indexOf("{phatSinh(r.createdAt)}"));
+  assert.match(nguonBang, /\{vnShortStamp\(r\.createdAt\)\}/, "cột Phát sinh phải đọc created_at");
+  const oPhatSinh = nguonBang.slice(nguonBang.indexOf("PHÁT SINH —"), nguonBang.indexOf("{vnShortStamp(r.createdAt)}"));
   assert.ok(!oPhatSinh.includes("updatedAt"), "và tuyệt đối không đọc updated_at ở ô ấy");
 
   // ───────── V2-11 · SẮP XẾP CHẠY Ở MÁY CHỦ, cả hai chiều ─────────

@@ -133,6 +133,23 @@ export function formatTimeAgo(value: string | Date | null | undefined) {
   return formatDate(date);
 }
 
+/**
+ * ═══ MỐC NGẮN "NGÀY/THÁNG GIỜ:PHÚT" THEO GIỜ VIỆT NAM — GHÉP TAY, KHÔNG PHÓ THÁC CHO LOCALE ═══
+ *
+ * `toLocaleString("vi-VN", …)` trả về THỨ TỰ KHÁC NHAU tuỳ bản ICU của môi trường: trình duyệt cho
+ * "14/09 10:05", còn Node dựng trong ảnh Docker của kho này cho "10:05 14-09". Cùng một dòng dữ
+ * liệu, hai chỗ đọc ra hai mốc khác nhau — và không ai phát hiện cho tới khi so hai màn hình.
+ *
+ * Nên: lấy TỪNG PHẦN rồi tự ghép. Cùng cách `vnDateKey` đã làm, cùng lý do.
+ */
+export function vnShortStamp(value: string | Date | null | undefined) {
+  const date = toDate(value);
+  if (!date) return MISSING_TEXT;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: VN_TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")} ${get("hour")}:${get("minute")}`;
+}
+
 /** Ngày theo giờ Việt Nam ở dạng YYYY-MM-DD */
 export function vnDateKey(value: string | Date) {
   const date = toDate(value);

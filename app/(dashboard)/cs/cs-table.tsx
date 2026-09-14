@@ -20,7 +20,7 @@ import { CS_HUMAN_STATUSES, CS_KIND_LABEL, CS_SOURCE_LABEL, CS_STATUS_HINT, CS_S
 import { CS_EVENT_ACTION_LABEL, CS_QUICK_ACTION, CS_QUICK_ACTIONS_BY_KIND, CS_SNOOZE_PRESETS, type CsQuickActionKey } from "@/lib/constants/cs-actions";
 import { CS_CASE_SLA_HOURS, isBotAssignee } from "@/lib/constants/cs-domain";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
-import { formatDateTime, formatTimeAgo } from "@/lib/format";
+import { formatDateTime, formatTimeAgo, vnShortStamp } from "@/lib/format";
 import type { CsCaseRow, CsCaseShipment } from "@/lib/queries/cs";
 import type { ShipmentStage } from "@/db/schema";
 import { cn } from "@/lib/utils";
@@ -267,7 +267,7 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   ai đó chạm vào". Sắp xếp theo cái sau thì một lượt bấm nút đẩy case cũ lên đầu.
                 */}
                 <TableCell className="align-top text-xs">
-                  <div className="numeric whitespace-nowrap" title={formatDateTime(r.createdAt)}>{phatSinh(r.createdAt)}</div>
+                  <div className="numeric whitespace-nowrap" title={formatDateTime(r.createdAt)}>{vnShortStamp(r.createdAt)}</div>
                 </TableCell>
 
                 <TableCell className="align-top text-xs">
@@ -508,10 +508,7 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
  * Mốc PHÁT SINH ở dạng gọn: `14/09 10:32`. Đủ để so hai dòng bằng mắt, và giờ đầy đủ tới giây nằm
  * ở tooltip cho lúc cần đối chiếu với log. Giờ Việt Nam, như mọi mốc khác trong ERP.
  */
-function phatSinh(d: Date | string) {
-  const x = d instanceof Date ? d : new Date(d);
-  return x.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(", ", " ");
-}
+
 
 /**
  * ═══════════ SẮP XẾP ĐI TRÊN URL, VÀ SẮP XẾP Ở MÁY CHỦ ═══════════

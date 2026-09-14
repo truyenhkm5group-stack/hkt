@@ -26,7 +26,7 @@ import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
-import { reconcileOrderNotCreated } from "@/lib/cs/reconcile-order-created";
+import { applyStaleReconciliation } from "@/lib/cs/stale";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
@@ -228,15 +228,19 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       /*
         ĐỐI CHIẾU TRƯỚC, QUÉT SAU.
 
-        Case "đủ thông tin · chưa tạo đơn" mang một điều kiện SỐNG — nó hết đúng ngay khi ai đó lên
-        đơn. Chạy đối chiếu TRƯỚC lượt quét để hàng đợi phản ánh thực tế tại thời điểm quét, thay
-        vì để người trực mở ra và gọi cho một khách đã mua hàng từ tuần trước.
-        Đo production 13/09/2026: 8/29 case đang mở đã có đơn sinh ra từ chính hội thoại của chúng.
+        MỌI case CSKH mang một điều kiện SỐNG, không riêng "đủ thông tin · chưa tạo đơn": câu giục
+        giao hết nghĩa khi hàng đã tới, lỗi địa chỉ hết nghĩa khi kiện đã giao. Chạy đối chiếu
+        TRƯỚC lượt quét để hàng đợi phản ánh thực tế TẠI THỜI ĐIỂM quét, thay vì để người trực mở
+        ra và gọi cho một khách đã nhận hàng từ tuần trước.
+
+        Đo production 13/09/2026: 8/29 case "chưa tạo đơn" đang mở đã có đơn sinh ra từ chính hội
+        thoại của chúng. `applyStaleReconciliation` phủ cả những loại còn lại bằng CÙNG bộ điều
+        kiện mà nơi SINH case dùng (`lib/constants/case-semantics.ts`) — một luật, hai đầu.
       */
-      const docSoat = await reconcileOrderNotCreated({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
+      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
-      return { ...r, reconciled: docSoat?.closedTotal ?? 0 };
+      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null };
     },
   },
   "ads-billing": {

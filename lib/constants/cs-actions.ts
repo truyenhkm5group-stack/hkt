@@ -94,11 +94,22 @@ export const CS_SNOOZE_PRESETS: { key: string; label: string; hours: number }[] 
  * Hành động ghi vào lịch sử case (`cs_case_events`). Cùng bộ tên với `CARE_EVENT_ACTIONS` ở phần
  * giao nhau, để hai bàn làm việc kể chuyện bằng cùng một từ vựng.
  */
-export const CS_EVENT_ACTIONS = ["NOTE", "STATUS", "ASSIGN", "FOLLOW_UP"] as const;
+/**
+ * `EVIDENCE` tách hẳn khỏi `NOTE`, và đó là ranh giới quan trọng nhất của bảng lịch sử:
+ *
+ *  · `NOTE`     — NGƯỜI xử lý viết ra ("đã gọi, khách hẹn 18h"). Có cột riêng trên hàng đợi.
+ *  · `EVIDENCE` — MÁY / KHÁCH để lại (khách nhắc lại yêu cầu, bưu tá ghi chú, máy quét thấy thêm).
+ *                 Không ai được sửa nó.
+ *
+ * Trộn hai thứ vào một hành động thì người đọc sau không phân biệt được lời khách với kết luận của
+ * đồng nghiệp — và cột "Ghi chú gần nhất" lập tức đầy chữ do máy sinh ra.
+ */
+export const CS_EVENT_ACTIONS = ["NOTE", "EVIDENCE", "STATUS", "ASSIGN", "FOLLOW_UP"] as const;
 export type CsEventAction = (typeof CS_EVENT_ACTIONS)[number];
 
 export const CS_EVENT_ACTION_LABEL: Record<CsEventAction, string> = {
   NOTE: "Ghi chú",
+  EVIDENCE: "Bằng chứng mới",
   STATUS: "Đổi trạng thái",
   ASSIGN: "Đổi người phụ trách",
   FOLLOW_UP: "Hẹn lại",

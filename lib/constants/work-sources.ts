@@ -308,6 +308,9 @@ export function departmentOfAlert(type: CaseType): DepartmentCode {
 export const CS_STATUS_TO_WORK: Record<CsStatus, WorkStatus> = {
   OPEN: "NEW",
   IN_PROGRESS: "IN_PROGRESS",
+  // Máy thấy nghi, người chưa xem — chưa ai LÀM gì, nên ở hàng đợi tổng nó là việc MỚI. Nó không
+  // vào hàng đợi CSKH vì `CS_ACTIONABLE_STATUSES` không chứa nó; hai chỗ, hai câu hỏi khác nhau.
+  NEEDS_REVIEW: "NEW",
   DONE: "DONE",
   // Điều kiện tự hết — KHÔNG phải công của ai. Vẫn là DONE ở hàng đợi, nhưng `resolvedBy` rỗng nên
   // trục Năng suất không tính cho người nào (xem `lib/queries/work-performance.ts`).

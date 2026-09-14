@@ -2,14 +2,19 @@
  * Đọc hội thoại Pancake (Pages API) → phát hiện case CSKH từ tin nhắn KHÁCH gửi và thẻ hội thoại:
  * tư vấn size chưa đúng, chốt sai giá, khách giục giao hàng, đổi size/màu, sai địa chỉ/SĐT, trả hàng, khiếu nại.
  */
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { loadCsRules, stripIgnored } from "@/lib/cs/detect";
 import { env } from "@/lib/env";
 import { buildConversationFunnelRow, upsertConversationFunnel, type ConversationFunnelRow } from "@/lib/cs/conversation-funnel";
 import { stillPendingOrderNotCreated } from "@/lib/cs/reconcile-order-created";
+import { isOrderMaterialized } from "@/lib/constants/order-materialized";
+import { NO_FACTS, type CaseFacts } from "@/lib/constants/case-semantics";
+import { chatDedupeKey, classifyConversation, decideCase, decideWithoutModel, toRecord, type CaseCandidate, type CaseDecision, type SemanticVerdict } from "@/lib/cs/semantic-case";
+import { getAiProvider } from "@/lib/ai/provider";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
+import { rowsOf } from "@/lib/sql-rows";
 import { normalize, stripHtml } from "@/lib/text";
 
 export type ChatHit = { kind: CsKind; keyword: string; message: string };
@@ -287,6 +292,53 @@ export async function matchOrderForConversation(
   return { kind: "AMBIGUOUS", candidates: theoSdt.length, order: theoSdt[0] };
 }
 
+/**
+ * ═══════════ CHỨNG TỪ NGHIỆP VỤ CỦA MỘT HỘI THOẠI ═══════════
+ *
+ * Toàn bộ là thứ ĐỌC ĐƯỢC TỪ CSDL. Không ô nào là suy đoán, và model không ghi được vào đây —
+ * đó chính là lý do khối này thắng mọi kết luận ngôn ngữ (`decideCase`).
+ *
+ * "Đơn đã tồn tại thật" hỏi qua `isOrderMaterialized` chứ không tự liệt kê chặng: bản khai nằm ở
+ * `lib/constants/order-materialized.ts` và bám MÃ SỐ Pancake, không bám chuỗi hiển thị.
+ *
+ * `AMBIGUOUS` (một SĐT nhiều đơn) cố ý KHÔNG được coi là "có đơn": ghép không chắc thì không kết
+ * luận theo hướng nào, và bộ gác của từng loại tự xử ca này.
+ */
+async function collectCaseFacts(db: Awaited<ReturnType<typeof getDb>>, match: OrderMatch, phones: string[]): Promise<CaseFacts> {
+  const order = match.kind === "AMBIGUOUS" ? null : match.order;
+  const so = phones.map((p) => p.replace(/\D/g, "")).filter((p) => p.length >= 9);
+  /*
+    VẬN ĐƠN TRA THEO CẢ ĐƠN LẪN SỐ NGƯỜI NHẬN.
+
+    Đơn có vận đơn là bằng chứng trực tiếp. Nhưng đơn có thể lên bằng đường khác (nhân viên gõ tay,
+    một hội thoại khác) mà kiện vẫn gửi tới đúng số này — và khi ấy "chưa tạo đơn" chắc chắn sai.
+  */
+  const dieu = [
+    order ? sql`s.order_id = ${order.id}` : null,
+    so.length ? sql`s.receiver_phone in ${so}` : null,
+  ].filter((x): x is SQL => Boolean(x));
+  let hasShipment = false;
+  let hasActiveShipment = false;
+  if (dieu.length) {
+    const rows = rowsOf<{ tong: number; dang_chay: number }>(
+      await db.execute(sql`select count(*)::int as tong, count(*) filter (where s.is_final = false)::int as dang_chay from shipments s where ${sql.join(dieu, sql` or `)}`),
+    );
+    hasShipment = Number(rows[0]?.tong ?? 0) > 0;
+    hasActiveShipment = Number(rows[0]?.dang_chay ?? 0) > 0;
+  }
+  if (!order) return { ...NO_FACTS, orderMatch: match.kind, hasShipment, hasActiveShipment };
+  return {
+    orderMatch: match.kind,
+    orderMaterialized: isOrderMaterialized({ stage: order.stage }),
+    orderStage: order.stage,
+    orderSystemId: order.systemId,
+    orderInsertedAt: order.insertedAt,
+    orderFinal: FINAL_ORDER_STAGES.has(order.stage ?? ""),
+    hasShipment,
+    hasActiveShipment,
+  };
+}
+
 function pancakeChatUrl(pageId: string, conversationId: string) {
   return `https://pancake.vn/${pageId}?c_id=${conversationId}`;
 }
@@ -329,6 +381,27 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
   let nhapNhang = 0;
   let duThongTinTong = 0;
   let created = 0;
+  /*
+    ĐO CẢ PHẦN **KHÔNG** SINH RA VIỆC.
+
+    Một lượt quét báo "tạo 12 case" mà không nói đã bác bao nhiêu ứng viên thì không kiểm chứng
+    được tầng ngữ nghĩa đang làm việc hay đang ngủ. Ba con số dưới đây có nghĩa khác hẳn nhau:
+
+     · `semanticCalls`     — số hội thoại thật sự được đọc hiểu;
+     · `semanticRejected`  — ứng viên bị bác (giả định · lời shop · chứng từ nói khác · chưa đủ chắc);
+     · `aiOff`             — hội thoại có dấu hiệu bằng CHỮ nhưng không có tầng ngữ nghĩa để xét.
+                             Đây là NỢ, không phải "sạch": chúng KHÔNG được tạo việc bằng từ khoá.
+  */
+  let semanticCalls = 0;
+  let boQuaNgheNghia = 0;
+  let aiTat = 0;
+  let needsReview = 0;
+  let evidenceAppended = 0;
+  /*
+    LẤY PROVIDER MỘT LẦN CHO CẢ LƯỢT QUÉT. `null` = AI chưa cấu hình trên máy chủ này — và khi ấy
+    đường lui là KHÔNG TẠO VIỆC từ chữ, chứ không phải quay về luật từ khoá cũ.
+  */
+  const provider = getAiProvider("routine");
   /*
     ═══ GIỮ LẠI BẰNG CHỨNG PHỄU — KHÔNG THÊM MỘT LƯỢT GỌI API NÀO ═══
 
@@ -403,6 +476,13 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
         }),
       );
       // Chỉ tạo case sau mua khi khách đã có đơn và tin nhắn gửi sau lúc lên đơn; câu hỏi tư vấn trước mua không phải case
+      /*
+        ═══ TỪ KHOÁ VÀ THẺ CHỈ LÀ ỨNG VIÊN ═══
+
+        `detectFromMessages` trả về những chỗ ĐÁNG XEM, không phải kết luận. Ai kết luận: tầng ngữ
+        nghĩa (`lib/cs/semantic-case.ts`) đọc CẢ hội thoại có phân vai, rồi chứng từ nghiệp vụ bác
+        bỏ nếu thực tế nói khác.
+      */
       const msgHits = detectFromMessages(recent, rules.chatRules, rules.ignorePatterns, { requireOrder: true, orderInsertedAt: order?.insertedAt ?? null, orderStage: order?.stage ?? null });
       /*
         KHÁCH ĐÃ CHO ĐỦ SĐT + ĐỊA CHỈ MÀ CHƯA THẤY ĐƠN → đây mới là đơn sắp bị sót.
@@ -470,30 +550,130 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
           }
         }
       }
-      const hits = [...closeHits, ...tagHits.filter((t) => !closeHits.some((c) => c.kind === t.kind)), ...msgHits.filter((h) => ![...tagHits, ...closeHits].some((t) => t.kind === h.kind))];
-      if (!hits.length) continue;
+      /*
+        ═══════════ ỨNG VIÊN → NGỮ NGHĨA → CHỨNG TỪ → VIỆC ═══════════
+
+        Ba nguồn ứng viên, hai thẩm quyền khác nhau:
+
+         · `TAG` / `KEYWORD`     — dấu hiệu bằng CHỮ. Không bao giờ tự thành việc; phải qua tầng
+                                   ngữ nghĩa. Tắt AI ⇒ chúng KHÔNG tạo việc (xem `decideWithoutModel`).
+         · `DETERMINISTIC`       — "khách đã cho đủ SĐT và địa chỉ mà chưa thấy đơn". Kết luận của
+                                   nó KHÔNG đứng trên chữ nghĩa mà trên QUAN SÁT cộng CHỨNG TỪ, nên
+                                   nó chạy cả khi không có AI. Đây cũng là loại case duy nhất trực
+                                   tiếp cứu được doanh thu — tắt nó đi vì "cho an toàn" là mất đơn.
+
+        MỘT LƯỢT GỌI MODEL CHO MỘT HỘI THOẠI, không phải một lượt cho mỗi từ khoá: một hội thoại có
+        đúng một ý định đang còn hiệu lực, và hỏi ba lần về ba từ khoá của cùng đoạn chat là ba lần
+        trả tiền cho cùng một câu trả lời — rồi lại phải tự xử ba câu trả lời mâu thuẫn nhau.
+      */
+      const ungVien: CaseCandidate[] = [];
+      for (const t of tagHits) ungVien.push({ kind: t.kind, evidence: t.message, from: "TAG", signal: t.keyword });
+      for (const h of msgHits) if (!ungVien.some((x) => x.kind === h.kind)) ungVien.push({ kind: h.kind, evidence: h.message, from: "KEYWORD", signal: h.keyword });
+      for (const c of closeHits) if (!ungVien.some((x) => x.kind === c.kind)) ungVien.push({ kind: c.kind, evidence: c.message, from: "DETERMINISTIC", signal: c.keyword });
+      if (!ungVien.length) continue;
+
+      const facts = await collectCaseFacts(db, match, phones);
+      const canNgheNghia = ungVien.some((c) => c.from !== "DETERMINISTIC");
+      let verdict: SemanticVerdict | null = null;
+      if (canNgheNghia) {
+        if (!provider) {
+          aiTat += 1;
+        } else {
+          try {
+            verdict = await classifyConversation({ customerName: conv.customerName, tags: conv.tags, candidates: ungVien, facts, messages }, provider);
+            semanticCalls += 1;
+          } catch (e) {
+            if (errors.length < 20) errors.push(`ngữ nghĩa (${conv.id}): ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+
+      /*
+        HAI ĐƯỜNG RA, KHÔNG TRỘN.
+
+        Ứng viên xác định đi bằng chứng từ; ứng viên từ chữ đi bằng kết luận của model. Trộn hai
+        đường là để một kết luận ngôn ngữ quyết định số phận của một quan sát — hoặc ngược lại.
+      */
+      const quyetDinh: { kind: CsKind; decision: CaseDecision; ungVien: CaseCandidate }[] = [];
+      for (const c of ungVien.filter((x) => x.from === "DETERMINISTIC")) {
+        const [d] = decideWithoutModel([c], facts);
+        quyetDinh.push({ kind: c.kind, decision: d, ungVien: c });
+      }
+      if (canNgheNghia) {
+        const d = verdict ? decideCase(verdict, facts) : decideWithoutModel(ungVien.filter((x) => x.from !== "DETERMINISTIC"), facts)[0];
+        const kind = d.kind;
+        // Model có thể kết luận một loại KHÁC mọi ứng viên — đó là chuyện bình thường và đúng ý đồ:
+        // từ khoá chỉ đưa chỗ đáng xem, không đưa đáp án. Chỉ bỏ khi nó trùng một dòng đã quyết.
+        if (kind && !quyetDinh.some((q) => q.kind === kind)) {
+          const nguon = ungVien.find((x) => x.kind === kind) ?? ungVien.find((x) => x.from !== "DETERMINISTIC")!;
+          quyetDinh.push({ kind, decision: d, ungVien: nguon });
+        } else if (!kind) {
+          boQuaNgheNghia += 1;
+        }
+      }
+
+      const tao = quyetDinh.filter((q) => q.decision.action === "CREATE" || q.decision.action === "REVIEW");
+      boQuaNgheNghia += quyetDinh.filter((q) => q.decision.action === "SKIP").length;
+      if (!tao.length) continue;
       withHits += 1;
-      const weekKey = new Date().toISOString().slice(0, 10);
-      const values = hits.map((h) => ({
-        // "chưa tạo đơn" là việc gấp: mở lại case mỗi ngày nếu vẫn chưa có đơn; các loại khác gom theo tháng
-        dedupeKey: `pk-chat:${conv.id}:${h.kind}:${h.kind === "ORDER_NOT_CREATED" ? weekKey : weekKey.slice(0, 7)}`,
-        orderId: order?.id ?? null,
-        customerId: order?.customerId ?? null,
-        kind: h.kind,
-        status: "OPEN",
-        source: "PANCAKE_CHAT",
-        title: `${CS_KIND_LABEL[h.kind]} · ${conv.customerName || order?.billFullName || "Khách"}${order ? ` · đơn #${order.systemId ?? ""}` : ""}`,
-        detail: `${h.message}${h.keyword && !h.message.startsWith("Thẻ") ? ` (từ khoá: "${h.keyword}")` : ""}`.slice(0, 900),
-        customerName: conv.customerName || order?.billFullName || "",
-        customerPhone: phones[0] ?? order?.billPhone ?? "",
-        chatUrl: pancakeChatUrl(page.id, conv.id),
-        conversationId: conv.id,
-        // Chỉ loại "đủ thông tin · chưa tạo đơn" mới có mốc này; loại khác để NULL = không áp dụng.
-        infoCompleteAt: h.kind === "ORDER_NOT_CREATED" ? (duThongTin?.at ?? null) : null,
-        createdBy: "pancake-chat",
-      }));
-      const inserted = await db.insert(schema.csCases).values(values).onConflictDoNothing({ target: schema.csCases.dedupeKey }).returning({ id: schema.csCases.id });
+
+      const values = tao.map((q) => {
+        const h = q.ungVien;
+        const d = q.decision;
+        /*
+          KHOÁ CHỐNG TRÙNG BÁM **ĐOẠN SỰ VIỆC**, KHÔNG BÁM NGÀY CHẠY JOB.
+
+          Bản cũ nhét NGÀY HÔM NAY vào khoá của "chưa tạo đơn", nên mỗi ngày job quét lại đẻ một
+          case mới cho CÙNG một lần khách đưa thông tin — và máy đối chiếu ngay sau đó lại phải
+          đóng chúng. Hàng đợi vì thế luôn có một tầng case cũ mà không ai hiểu từ đâu ra.
+
+          Nay khoá bám mốc khách ĐƯA ĐỦ THÔNG TIN (đoạn sự việc thật). Khách đưa thông tin lần nữa
+          vào hôm khác ⇒ đoạn mới ⇒ case mới, đúng như phải thế.
+        */
+        const tuKhoa = h.from === "KEYWORD" && h.signal ? ` (dấu hiệu: "${h.signal}")` : "";
+        const ketLuan = d.verdict ? `\n— Máy đọc hội thoại: ${d.reason}` : "";
+        return {
+          dedupeKey: chatDedupeKey(conv.id, q.kind, duThongTin?.at ?? null),
+          orderId: order?.id ?? null,
+          customerId: order?.customerId ?? null,
+          kind: q.kind,
+          // MEDIUM không được thành việc phải làm — nó nằm ở làn "chờ người xem lại" (lib/constants/cs.ts).
+          status: d.action === "REVIEW" ? "NEEDS_REVIEW" : "OPEN",
+          source: "PANCAKE_CHAT",
+          title: `${CS_KIND_LABEL[q.kind]} · ${conv.customerName || order?.billFullName || "Khách"}${order ? ` · đơn #${order.systemId ?? ""}` : ""}`,
+          detail: `${h.evidence}${tuKhoa}${ketLuan}`.slice(0, 900),
+          customerName: conv.customerName || order?.billFullName || "",
+          customerPhone: phones[0] ?? order?.billPhone ?? "",
+          chatUrl: pancakeChatUrl(page.id, conv.id),
+          conversationId: conv.id,
+          // Chỉ loại "đủ thông tin · chưa tạo đơn" mới có mốc này; loại khác để NULL = không áp dụng.
+          infoCompleteAt: q.kind === "ORDER_NOT_CREATED" ? (duThongTin?.at ?? null) : null,
+          semantic: toRecord(d) as unknown as Record<string, unknown>,
+          createdBy: "pancake-chat",
+        };
+      });
+      const inserted = await db.insert(schema.csCases).values(values).onConflictDoNothing({ target: schema.csCases.dedupeKey }).returning({ id: schema.csCases.id, kind: schema.csCases.kind, status: schema.csCases.status });
       created += inserted.length;
+      needsReview += inserted.filter((r) => r.status === "NEEDS_REVIEW").length;
+      /*
+        KHÁCH NHẮC LẠI CÙNG MỘT VIỆC KHÔNG ĐẺ RA VIỆC THỨ HAI — nhưng cũng không được rơi vào im
+        lặng. Khoá đã có ⇒ không chèn dòng mới; bằng chứng mới ghi vào LỊCH SỬ của chính case đó.
+
+        Cố ý là `EVIDENCE` chứ không phải `NOTE`: ghi chú là thứ NGƯỜI xử lý viết ra và nó có cột
+        riêng trên hàng đợi. Đổ bằng chứng máy vào đó là xoá đúng ranh giới vừa dựng lên.
+      */
+      const daCo = values.filter((v) => !inserted.some((i) => i.kind === v.kind));
+      if (daCo.length) {
+        const cu = await db.query.csCases.findMany({ where: inArray(schema.csCases.dedupeKey, daCo.map((v) => v.dedupeKey)), columns: { id: true, dedupeKey: true } });
+        const themBangChung = cu.map((c) => {
+          const v = daCo.find((x) => x.dedupeKey === c.dedupeKey)!;
+          return { caseId: c.id, actorId: null, actorEmail: "", actorName: "Máy quét Pancake", source: "SYSTEM" as const, action: "EVIDENCE" as const, note: v.detail.slice(0, 900) };
+        });
+        if (themBangChung.length) {
+          await db.insert(schema.csCaseEvents).values(themBangChung);
+          evidenceAppended += themBangChung.length;
+        }
+      }
     }
     /*
       GHI PHỄU SAU MỖI PAGE, VÀ KHÔNG ĐƯỢC LÀM VỠ VIỆC CHÍNH.
@@ -520,6 +700,16 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
     ambiguous: nhapNhang,
     /** Số dòng phễu hội thoại đã ghi — đây là MẪU SỐ mà trước đây bị ném đi mỗi lượt quét. */
     funnelSaved,
+    /** Số hội thoại đã qua tầng ngữ nghĩa. */
+    semanticCalls,
+    /** Ứng viên bị bác — giả định / lời shop / chứng từ nói khác / chưa đủ chắc. */
+    semanticRejected: boQuaNgheNghia,
+    /** Hội thoại có dấu hiệu bằng chữ nhưng KHÔNG có tầng ngữ nghĩa để xét ⇒ không tạo việc. */
+    aiOff: aiTat,
+    /** Case ghi vào làn "chờ người xem lại" (mức tin cậy GIỮA) — không nằm trong hàng đợi phải làm. */
+    needsReview,
+    /** Bằng chứng mới nối vào case đã có, thay vì đẻ ra một việc thứ hai cho cùng đoạn sự việc. */
+    evidenceAppended,
     errors: errors.slice(0, 20),
     errorCount: errors.length,
   };

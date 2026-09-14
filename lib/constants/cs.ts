@@ -78,9 +78,21 @@ export const CS_BOT_ASSIGNEES: readonly string[] = ["Bot ERP"];
  * case sai luật sẽ trông y hệt 180 lần có người gọi khách. Bảng `notifications` đã học bài này rồi
  * (xem `resolution` ở đó); bảng case học lại đúng một lần nữa.
  */
-export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "DONE", "AUTO_RESOLVED", "CANCELLED"] as const;
+export const CS_STATUSES = ["OPEN", "IN_PROGRESS", "NEEDS_REVIEW", "DONE", "AUTO_RESOLVED", "CANCELLED"] as const;
 export type CsStatus = (typeof CS_STATUSES)[number];
-export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", DONE: "Đã xong", AUTO_RESOLVED: "Tự đóng", CANCELLED: "Huỷ" };
+export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PROGRESS: "Đang xử lý", NEEDS_REVIEW: "Chờ người xem lại", DONE: "Đã xong", AUTO_RESOLVED: "Tự đóng", CANCELLED: "Huỷ" };
+
+/**
+ * ═══════ "CHƯA CHẮC" LÀ MỘT TRẠNG THÁI RIÊNG, KHÔNG PHẢI MỘT VIỆC PHẢI LÀM ═══════
+ *
+ * Tầng ngữ nghĩa (`lib/cs/semantic-case.ts`) trả về ba mức tin cậy. Mức GIỮA là chỗ nguy hiểm
+ * nhất: ép nó thành việc thì hàng đợi lại đầy việc giả, bỏ nó đi thì mất luôn dấu vết của thứ
+ * đáng ngờ. Nên nó nằm ở đây — GHI LẠI ĐỦ để người mở bộ lọc ra xem, nhưng KHÔNG nằm trong
+ * `CS_ACTIONABLE_STATUSES` nên không chiếm chỗ trong hàng đợi của người đang trực.
+ *
+ * Máy đặt, người gỡ: không có trong `CS_HUMAN_STATUSES` (người không tự đẩy việc của mình vào
+ * đây), nhưng người xem xong thì chuyển nó sang Mới / Huỷ như mọi case khác.
+ */
 
 /**
  * TRẠNG THÁI NGƯỜI ĐƯỢC TỰ CHỌN. `AUTO_RESOLVED` KHÔNG nằm trong danh sách.
@@ -91,7 +103,7 @@ export const CS_STATUS_LABEL: Record<CsStatus, string> = { OPEN: "Mới", IN_PRO
  * `AUTO_RESOLVED` lên để tránh. Case đang ở trạng thái này vẫn hiển thị bình thường, chỉ là không
  * ai đặt tay vào được.
  */
-export const CS_HUMAN_STATUSES: readonly CsStatus[] = CS_STATUSES.filter((s) => s !== "AUTO_RESOLVED");
+export const CS_HUMAN_STATUSES: readonly CsStatus[] = CS_STATUSES.filter((s) => s !== "AUTO_RESOLVED" && s !== "NEEDS_REVIEW");
 
 /**
  * VÌ SAO một case được đóng tự động. Bắt buộc có khi `status = AUTO_RESOLVED`.
@@ -131,6 +143,8 @@ export const ORDER_NOT_CREATED_RULE_VERSION = 2;
 export const CS_STATUS_TONE: Record<CsStatus, string> = {
   OPEN: "bg-rose-100 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200",
   IN_PROGRESS: "bg-cyan-100 text-cyan-900 dark:bg-cyan-950/60 dark:text-cyan-200",
+  // Hổ phách = "máy thấy nghi, người quyết". Cố ý KHÁC hồng (chưa ai xử lý) để không lẫn với việc thật.
+  NEEDS_REVIEW: "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200",
   DONE: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200",
   // Màu trung tính, cố ý: tự đóng KHÔNG phải công của ai (xem CS_HUMAN_STATUSES).
   AUTO_RESOLVED: "bg-muted text-muted-foreground",
@@ -141,6 +155,7 @@ export const CS_STATUS_TONE: Record<CsStatus, string> = {
 export const CS_STATUS_HINT: Record<CsStatus, string> = {
   OPEN: "Chưa ai nhận và chưa ai chạm vào.",
   IN_PROGRESS: "Đã có người cầm và đang làm.",
+  NEEDS_REVIEW: "MÁY thấy dấu hiệu nhưng chưa đủ chắc — người xem rồi quyết, KHÔNG nằm trong hàng đợi phải làm.",
   DONE: "Người xử lý đã làm xong phần việc của mình.",
   AUTO_RESOLVED: "MÁY đóng vì điều kiện phát hiện không còn — không ai làm gì cả.",
   CANCELLED: "Bỏ case: tạo nhầm, hoặc không còn cần xử lý.",

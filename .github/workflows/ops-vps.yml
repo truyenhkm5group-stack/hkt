@@ -60,6 +60,7 @@ on:
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
           - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
           - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
+          - cs-stale            # đối chiếu hàng đợi CSKH với thực tế hiện tại (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
           - sepay-schedule      # bật / tắt lịch đối chiếu SePay định kỳ (arg: số phút, ví dụ "60"; "off" để tắt)
           - ai-check            # kiểm AI production đầy đủ: routing 3 bậc, chat, read tool, case care, write tool có xác nhận (arg "--write" mới ghi note kiểm thử), lỗi mạng/hạn mức, audit — chỉ in meta
       days:
@@ -426,6 +427,12 @@ jobs:
                 # Bộ đọc API này chưa từng chạy với API thật, nên phải NHÌN một lượt trước khi cho ghi.
                 fetch_script sepay-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-reconcile.ts'
                 docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/sepay-reconcile.ts $ARG" ;;
+              cs-stale)
+                # MẶC ĐỊNH CHẠY THỬ: in kết luận cho từng loại case và 20 mẫu thật, KHÔNG ghi một dòng
+                # nào. Truyền `--apply` ở ô "arg" mới đóng mềm. Máy chỉ đóng case mà CHỨNG TỪ nghiệp vụ
+                # nói rõ điều kiện không còn VÀ chưa ai cầm; case có người chạm vào thì để người quyết.
+                fetch_script cs-stale.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-stale.ts'
+                docker exec erp-app sh -c "npx tsx --tsconfig tsconfig.json scripts/cs-stale.ts $ARG" ;;
               sepay-schedule)
                 # Bật / tắt lịch đối chiếu định kỳ. `AGENTS.md` mục 7: đổi lịch scheduler phải do chủ
                 # shop quyết, nên nó là một thao tác TƯỜNG MINH chứ không phải mặc định trong mã.

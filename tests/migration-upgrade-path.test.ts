@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0080_hmt_return_reconciliation"] as const;
+const MOI = ["0081_cs_case_semantic"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");
@@ -67,6 +67,9 @@ export async function testMigrationUpgradePath() {
     // 0075 đã áp: cột `active` có, và mặc định `true` cho cả dòng đã đóng — đúng trạng thái production
     // 13/09/2026 (7 RESOLVED + 6 CANCELLED vẫn active). Bài này dựng lại đúng tình huống đó.
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipment_care' and column_name = 'active'"), 1, "bước 1: 0075 phải đã áp — cột active có sẵn");
+    // 0081 CHƯA áp ở bước 1. Kiểm điều này để bài không lặng lẽ thành vô nghĩa vào ngày ai đó quên
+    // cập nhật `MOI`: cột đã có sẵn từ trước thì "áp thêm migration" chẳng chứng minh được gì.
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 0, "bước 1: cột semantic CHƯA được có — đó là thứ 0081 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -91,12 +94,30 @@ export async function testMigrationUpgradePath() {
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
 
     /*
-      ═══ 0080: CHỨNG CỨ ĐỐI SOÁT SỔ HÀNG HOÀN — BẢNG MỚI, KHÔNG ĐỤNG GÌ CŨ ═══
+      ═══ 0081: KẾT LUẬN NGỮ NGHĨA — MỘT CỘT NULLABLE, KHÔNG ĐỤNG GÌ CŨ ═══
 
-      0076–0079 nay nằm trong "trạng thái production hôm nay" (bước 1) chứ không còn là migration
-      mới; đường nâng cấp của chúng đã chạy thật trên máy chủ. Phần còn phải chứng minh ở bản này
-      là 0080, và ba ràng buộc của nó — vì chính chúng là ranh giới giữa "đã đối chiếu" và "đã đổi
-      dữ liệu".
+      Migration mới của bản này thêm ĐÚNG một cột. Hai điều phải đúng và chỉ hai:
+      cột có mặt sau khi áp, và dòng CŨ vẫn `NULL` — `NULL` ở đây nghĩa là CHƯA BIẾT (case sinh
+      trước bản này), không phải "model đã xem và không nói gì".
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'cs_cases' and column_name = 'semantic'"), 1, "0081: cột semantic phải được thêm");
+    assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and semantic is null"), 1, "0081: case cũ phải ở NULL — KHÔNG backfill, không mặc định");
+    /*
+      TRẠNG THÁI `NEEDS_REVIEW` KHÔNG CẦN MIGRATION, và bài này chứng minh điều đó thay vì tin lời.
+
+      `cs_cases.status` là `text` không ràng buộc CHECK, nên mức tin cậy GIỮA chỉ là một giá trị
+      mới của một cột đã có. Ngày nào có người thêm CHECK vào cột ấy thì bài này đỏ — đúng lúc cần
+      đỏ, chứ không phải lúc job quét chạy trên production.
+    */
+    await client.query(`insert into cs_cases (id, kind, status, title) values ('up-c2', 'RETURN', 'NEEDS_REVIEW', 'Máy thấy nghi, người chưa xem')`);
+    assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c2' and status = 'NEEDS_REVIEW'"), 1, "trạng thái 'chờ người xem lại' phải ghi được mà không cần migration");
+
+    /*
+      ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
+
+      Giữ lại phần kiểm ràng buộc của nó: chúng là ranh giới giữa "đã đối chiếu" và "đã đổi dữ
+      liệu", và một ngày nào đó có người sửa bảng ấy thì bài này phải đỏ — dù migration sinh ra
+      chúng đã cũ.
     */
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'hmt_return_reconciliation'"), 1, "0080: bảng chứng cứ phải được tạo");
     assert.equal(await dem("select count(*)::int as n from hmt_return_reconciliation"), 0, "0080: KHÔNG gieo sẵn dòng nào — đối soát là một lượt chạy tay, không phải một backfill");

@@ -135,6 +135,7 @@ import { testDataQualityIssues } from "./data-quality-issues.test";
 import { testReturnReceiveSelector } from "./return-receive-selector.test";
 import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
 import { testCsOrderReconcile } from "./cs-order-reconcile.test";
+import { testCsSemantic } from "./cs-semantic.test";
 import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
@@ -1443,6 +1444,7 @@ async function main() {
   testSearchTermParsing();
   await testShipmentSearch(db);
   await testCsOrderReconcile(db);
+  await testCsSemantic(db);
   testCsNextAction();
   testCsUiContrast();
   testOutreachErrorClassify();
