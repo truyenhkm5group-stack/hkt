@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { INSPECT_AGE_DAYS } from "@/lib/constants/return-lifecycle";
 import {
   activeFilterCount,
+  BULK_INSPECT_PER_REQUEST,
+  chiaMe,
   filterPending,
   itemKey,
   PENDING_FILTER_EMPTY,
+  PENDING_PAGE_SIZE_DEFAULT,
+  PENDING_PAGE_SIZES,
   PENDING_SORTS,
   PENDING_STATION_CAP,
   pendingFacets,
@@ -217,4 +221,33 @@ export function testInspectionFilter() {
 
   /* ─────────── TRẦN TẢI ─────────── */
   assert.ok(PENDING_STATION_CAP >= 500, "trần phải đủ lớn để phủ hàng đợi thật; hạ xuống là làm bộ lọc nói dối trong im lặng");
+
+  /* ─────────── CHIA MẺ CHO ĐƯỜNG HÀNG LOẠT ─────────── */
+  /*
+    Người kho chọn 800 kiện thì phải xử lý được 800 kiện. Trần phía máy chủ là giới hạn VẬN CHUYỂN
+    (mỗi kiện một giao dịch; một lời gọi ôm cả nghìn kiện sẽ vượt hạn chờ SAU KHI đã ghi một phần),
+    nên trình duyệt chia mẻ. Ba tính chất bắt buộc: không mất phần tử, không trùng, và không có mẻ
+    nào vượt trần — mẻ 101 kiện bị máy chủ từ chối nguyên mẻ.
+  */
+  assert.deepEqual(chiaMe([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  assert.deepEqual(chiaMe([], 10), [], "danh sách rỗng ra 0 mẻ, không phải một mẻ rỗng");
+  assert.deepEqual(chiaMe([1, 2, 3], 10), [[1, 2, 3]], "ít hơn một mẻ thì vẫn đúng một mẻ");
+  assert.deepEqual(chiaMe([1, 2, 3], 0), [[1], [2], [3]], "kích thước 0 phải rơi về 1, không lặp vô hạn");
+
+  const nhieu = Array.from({ length: 803 }, (_, i) => `s${i}`);
+  const me = chiaMe(nhieu, BULK_INSPECT_PER_REQUEST);
+  assert.ok(
+    me.every((m) => m.length <= BULK_INSPECT_PER_REQUEST),
+    "không mẻ nào được vượt trần máy chủ — vượt là cả mẻ bị từ chối và người bấm không hiểu vì sao",
+  );
+  assert.equal(me.flat().length, nhieu.length, "chia mẻ KHÔNG được làm rơi một kiện nào");
+  assert.equal(new Set(me.flat()).size, nhieu.length, "và không được lặp lại kiện nào — ghi hai lần là cộng tồn hai lần");
+  assert.deepEqual(me.flat(), nhieu, "thứ tự phải giữ nguyên: người kho đọc danh sách lỗi theo đúng thứ tự đã chọn");
+
+  /* ─────────── PHÂN TRANG ─────────── */
+  assert.ok(PENDING_PAGE_SIZES.includes(PENDING_PAGE_SIZE_DEFAULT), "cỡ trang mặc định phải nằm trong danh sách chọn được");
+  assert.ok(
+    PENDING_PAGE_SIZES.every((n, i) => i === 0 || n > PENDING_PAGE_SIZES[i - 1]),
+    "cỡ trang phải tăng dần — một ô chọn xáo trộn là một ô chọn bấm nhầm",
+  );
 }

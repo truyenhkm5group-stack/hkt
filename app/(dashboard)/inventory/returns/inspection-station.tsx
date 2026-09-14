@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, Barcode, Check, FilterX, Layers, Loader2, PackageX, ScanLine, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Barcode, Check, ChevronLeft, ChevronRight, FilterX, Layers, Loader2, PackageX, ScanLine, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ItemInspectionDrawer } from "@/app/(dashboard)/inventory/returns/item-inspection-drawer";
@@ -16,13 +16,16 @@ import { CONDITION_ACTION_LABEL, CONDITION_LABEL, CONDITION_NEEDS_NOTE, type Ret
 import { formatDate, formatNumber } from "@/lib/format";
 import {
   activeFilterCount,
+  BULK_INSPECT_PER_REQUEST,
+  chiaMe,
   filterPending,
   PENDING_AGE,
   PENDING_AGE_LABEL,
   PENDING_FILTER_EMPTY,
   PENDING_LINK,
   PENDING_LINK_LABEL,
-  PENDING_RENDER_STEP,
+  PENDING_PAGE_SIZE_DEFAULT,
+  PENDING_PAGE_SIZES,
   PENDING_SORT_HINT,
   PENDING_SORT_LABEL,
   PENDING_SORTS,
@@ -33,6 +36,7 @@ import {
   tallyPending,
   variantCount,
   type PendingFilter,
+  type PendingPageSize,
   type PendingSortKey,
   type SortDir,
   type StationRow,
@@ -107,7 +111,10 @@ export function InspectionStation({
   const [loc, setLoc] = React.useState<PendingFilter>(PENDING_FILTER_EMPTY);
   const [sapTheo, setSapTheo] = React.useState<PendingSortKey>("receivedAt");
   const [chieu, setChieu] = React.useState<SortDir>("asc");
-  const [hienToi, setHienToi] = React.useState(PENDING_RENDER_STEP);
+  const [trang, setTrang] = React.useState(0);
+  const [moiTrang, setMoiTrang] = React.useState<PendingPageSize>(PENDING_PAGE_SIZE_DEFAULT);
+  /** Tiến độ mẻ đang chạy — `null` = không có lượt hàng loạt nào. */
+  const [tienDo, setTienDo] = React.useState<{ xong: number; tong: number } | null>(null);
   /**
    * Người kho khai ĐÃ ĐỐI CHIẾU THỰC TẾ với kiện mà danh sách món chỉ suy từ cả đơn.
    *
@@ -133,9 +140,22 @@ export function InspectionStation({
   const daLoc = React.useMemo(() => sortPending(filterPending(rows, loc), sapTheo, chieu), [rows, loc, sapTheo, chieu]);
   const tong = React.useMemo(() => tallyPending(daLoc), [daLoc]);
   const soLoc = activeFilterCount(loc);
-  const hienThi = daLoc.slice(0, hienToi);
-  /** Bộ lọc đổi ⇒ quay lại cửa sổ đầu. Giữ nguyên cửa sổ 300 dòng cho một kết quả 4 dòng là vô nghĩa. */
-  React.useEffect(() => setHienToi(PENDING_RENDER_STEP), [loc, sapTheo, chieu]);
+
+  /*
+    TRANG PHẢI TỰ CO LẠI KHI DANH SÁCH NGẮN ĐI.
+
+    Kiện xử lý xong biến khỏi danh sách ngay (phản hồi tức thì), nên đang đứng ở trang 9 mà xử lý hết
+    một mẻ thì trang 9 có thể không còn tồn tại. Kẹp lại thay vì hiện một trang trống — người đếm
+    nhìn thấy trang trống sẽ kết luận "hết việc rồi".
+  */
+  const tongTrang = Math.max(1, Math.ceil(daLoc.length / moiTrang));
+  const trangHienTai = Math.min(trang, tongTrang - 1);
+  React.useEffect(() => {
+    if (trang > tongTrang - 1) setTrang(tongTrang - 1);
+  }, [trang, tongTrang]);
+  const hienThi = daLoc.slice(trangHienTai * moiTrang, (trangHienTai + 1) * moiTrang);
+  /** Bộ lọc hay phép sắp xếp đổi ⇒ về trang đầu. Giữ nguyên trang 9 cho một kết quả 4 dòng là vô nghĩa. */
+  React.useEffect(() => setTrang(0), [loc, sapTheo, chieu, moiTrang]);
 
   /*
     PHẦN ĐANG CHỌN KHÔNG TỰ BỎ THEO BỘ LỌC — NHƯNG PHẢI NHÌN THẤY ĐƯỢC.
@@ -238,6 +258,19 @@ export function InspectionStation({
     router.refresh();
   }
 
+  /**
+   * ═══════ HÀNG LOẠT KHÔNG CÓ GIỚI HẠN SỐ KIỆN — TRÌNH DUYỆT TỰ CHIA MẺ ═══════
+   *
+   * Trước bản này màn hình từ chối quá 200 kiện, và người kho phải tự chia tay: chọn 200, bấm, chọn
+   * tiếp 200. Với 800 kiện đó là bốn lượt và bốn cơ hội chọn trùng hoặc bỏ sót.
+   *
+   * Nhưng gửi cả 800 trong MỘT lời gọi là hỏng theo kiểu tệ hơn hẳn: mỗi kiện là một giao dịch riêng
+   * (phải vậy — một kiện lỗi không được kéo cả lô xuống), nên 800 giao dịch nối tiếp vượt hạn chờ và
+   * người bấm nhận lỗi mạng SAU KHI vài trăm kiện đã ghi xong, không biết là những kiện nào.
+   *
+   * Nên: chia mẻ ở đây, gửi lần lượt, CỘNG DỒN kết quả, hiện tiến độ. Mẻ nào hỏng thì trả đúng kiện
+   * của mẻ đó về danh sách và **đi tiếp** — một mẻ trượt không được huỷ phần việc còn lại.
+   */
   async function hangLoat(condition: ReturnCondition) {
     if (!canWrite || !chon.size) return;
     if (CONDITION_NEEDS_NOTE[condition] && !lyDo.trim()) {
@@ -245,28 +278,57 @@ export function InspectionStation({
       return;
     }
     const ids = [...chon];
-    const giuLai = rows.filter((x) => chon.has(x.shipmentId));
+    const theoId = new Map(rows.map((x) => [x.shipmentId, x] as const));
+    const giuLai = ids.map((id) => theoId.get(id)).filter((x): x is Row => Boolean(x));
+
+    // Biến mất NGAY khỏi danh sách; kiện nào máy chủ từ chối sẽ quay lại kèm tên.
     setRows((r) => r.filter((x) => !chon.has(x.shipmentId)));
     setChon(new Set());
     setDangChay(true);
-    const r = await submitBulkInspection({ shipmentIds: ids, condition, note: lyDo.trim(), orderOnlyConfirmed: daDoiChieu });
+
+    const me = chiaMe(ids, BULK_INSPECT_PER_REQUEST);
+    let xong = 0;
+    let tongDone = 0;
+    const tongFailed: { shipmentId: string; error: string }[] = [];
+    const loiCaMe: string[] = [];
+    setTienDo({ xong: 0, tong: ids.length });
+
+    for (const nhom of me) {
+      const r = await submitBulkInspection({ shipmentIds: nhom, condition, note: lyDo.trim(), orderOnlyConfirmed: daDoiChieu });
+      xong += nhom.length;
+      setTienDo({ xong, tong: ids.length });
+      if ("error" in r) {
+        // Cả mẻ bị từ chối (sai đầu vào / hết quyền): trả nguyên mẻ về, ghi lý do, ĐI TIẾP.
+        const cua = new Set(nhom);
+        setRows((prev) => [...giuLai.filter((x) => cua.has(x.shipmentId)), ...prev]);
+        loiCaMe.push(r.error);
+        continue;
+      }
+      tongDone += r.done;
+      if (r.failed.length) {
+        const hong = new Set(r.failed.map((f) => f.shipmentId));
+        setRows((prev) => [...giuLai.filter((x) => hong.has(x.shipmentId)), ...prev]);
+        tongFailed.push(...r.failed);
+      }
+    }
+
+    setTienDo(null);
     setDangChay(false);
     tuTuMa();
-    if ("error" in r) {
-      setRows((prev) => [...giuLai, ...prev]);
-      toast.error(r.error);
-      return;
+
+    // Gộp lý do theo SỐ KIỆN: 200 kiện cùng một lý do là MỘT dòng, không phải 200.
+    if (tongDone) toast.success(`Đã kiểm ${formatNumber(tongDone)} kiện`);
+    if (tongFailed.length) {
+      const gom = new Map<string, number>();
+      for (const f of tongFailed) gom.set(f.error, (gom.get(f.error) ?? 0) + 1);
+      const chiTiet = [...gom.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([ly, n]) => `${formatNumber(n)} kiện — ${ly}`)
+        .join(" · ");
+      toast.error(`${formatNumber(tongFailed.length)} kiện KHÔNG xử lý được: ${chiTiet}`, { duration: 12_000 });
     }
-    // Kiện nào hỏng thì QUAY LẠI danh sách kèm tên — không nuốt lỗi. Lý do đã gộp theo số kiện ở
-    // máy chủ, nên 200 kiện cùng một lý do là MỘT dòng, không phải 200.
-    if (r.failed.length) {
-      const hong = new Set(r.failed.map((f) => f.shipmentId));
-      setRows((prev) => [...giuLai.filter((x) => hong.has(x.shipmentId)), ...prev]);
-      if (r.done) toast.success(`Đã kiểm ${r.done} kiện`);
-      toast.error(r.message, { duration: 10_000 });
-    } else {
-      toast.success(r.message);
-    }
+    for (const e of [...new Set(loiCaMe)]) toast.error(e, { duration: 12_000 });
+    if (!tongDone && !tongFailed.length && !loiCaMe.length) toast.info("Không kiện nào được xử lý");
     router.refresh();
   }
 
@@ -442,9 +504,16 @@ export function InspectionStation({
                 <Icon className="size-4" /> {CONDITION_ACTION_LABEL[condition]}
               </Button>
             ))}
-            <Button size="sm" variant="ghost" className="h-9" onClick={() => setChon(new Set())}>
+            <Button size="sm" variant="ghost" className="h-9" onClick={() => setChon(new Set())} disabled={dangChay}>
               Bỏ chọn
             </Button>
+            {/* Tiến độ mẻ: 800 kiện mất vài chục giây, và im lặng suốt thời gian đó là mời bấm lại. */}
+            {tienDo ? (
+              <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-primary">
+                <Loader2 className="size-3.5 animate-spin" />
+                Đang xử lý {formatNumber(tienDo.xong)} / {formatNumber(tienDo.tong)} kiện…
+              </span>
+            ) : null}
             {chonBiAn.length ? (
               <Button size="sm" variant="outline" className="h-9" onClick={() => setChon(new Set([...chon].filter((id) => dangHien.has(id))))}>
                 Bỏ {formatNumber(chonBiAn.length)} kiện ngoài bộ lọc
@@ -498,8 +567,9 @@ export function InspectionStation({
               className="size-4"
             />
             {/* Tick này chọn CẢ phần khớp bộ lọc, không chỉ phần đã vẽ ra — nói rõ để không ai bấm nhầm quy mô. */}
+            {/* Tick này chọn CẢ phần khớp bộ lọc — mọi trang, không chỉ trang đang xem. Nói rõ để không ai bấm nhầm quy mô. */}
             Chọn tất cả {formatNumber(daLoc.length)} kiện khớp bộ lọc
-            {hienThi.length < daLoc.length ? <span className="opacity-70"> (đang vẽ {formatNumber(hienThi.length)})</span> : null}
+            {tongTrang > 1 ? <span className="opacity-70"> (mọi trang, không chỉ {formatNumber(hienThi.length)} kiện đang xem)</span> : null}
           </label>
           {hienThi.map((row) => (
             <KienHang
@@ -520,13 +590,77 @@ export function InspectionStation({
               onNhanDu={() => nhanDu(row)}
             />
           ))}
-          {hienThi.length < daLoc.length ? (
-            <Button variant="outline" className="w-full" onClick={() => setHienToi((n) => n + PENDING_RENDER_STEP)}>
-              Hiện thêm {formatNumber(Math.min(PENDING_RENDER_STEP, daLoc.length - hienThi.length))} kiện · còn {formatNumber(daLoc.length - hienThi.length)}
-            </Button>
-          ) : null}
+          <Phan
+            trang={trangHienTai}
+            tongTrang={tongTrang}
+            moiTrang={moiTrang}
+            tong={daLoc.length}
+            onTrang={setTrang}
+            onMoiTrang={setMoiTrang}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * ═══════ PHÂN TRANG — ĐỂ NGƯỜI ĐẾM BIẾT MÌNH ĐANG Ở ĐÂU TRONG CÔNG VIỆC ═══════
+ *
+ * Một danh sách cuộn vô tận với nút "hiện thêm" trả lời được câu "còn bao nhiêu" nhưng không trả
+ * lời được "tôi đã đi tới đâu" — và người đếm bỏ dở giữa chừng rồi quay lại thì không có mốc nào để
+ * tiếp tục. Trang có số thì có mốc.
+ *
+ * "Chọn tất cả" vẫn chọn CẢ phần khớp bộ lọc chứ không chỉ trang đang xem: chia trang là để NHÌN
+ * cho gọn, không phải để giới hạn phần được xử lý.
+ */
+function Phan({
+  trang,
+  tongTrang,
+  moiTrang,
+  tong,
+  onTrang,
+  onMoiTrang,
+}: {
+  trang: number;
+  tongTrang: number;
+  moiTrang: PendingPageSize;
+  tong: number;
+  onTrang: (n: number) => void;
+  onMoiTrang: (n: PendingPageSize) => void;
+}) {
+  const tu = tong === 0 ? 0 : trang * moiTrang + 1;
+  const den = Math.min(tong, (trang + 1) * moiTrang);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-3 py-2 text-[12.5px]">
+      <span className="text-muted-foreground">
+        Kiện <b className="numeric text-foreground">{formatNumber(tu)}</b>–<b className="numeric text-foreground">{formatNumber(den)}</b> trong{" "}
+        <b className="numeric text-foreground">{formatNumber(tong)}</b>
+      </span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-muted-foreground">Mỗi trang</span>
+        <Select value={String(moiTrang)} onValueChange={(v) => onMoiTrang(Number(v) as PendingPageSize)}>
+          <SelectTrigger size="sm" className="h-8 w-[76px] text-[12.5px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PENDING_PAGE_SIZES.map((n) => (
+              <SelectItem key={n} value={String(n)}>
+                {n}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-8 px-2" disabled={trang <= 0} onClick={() => onTrang(trang - 1)} aria-label="Trang trước">
+          <ChevronLeft className="size-4" />
+        </Button>
+        <span className="numeric min-w-[72px] text-center">
+          {formatNumber(trang + 1)} / {formatNumber(tongTrang)}
+        </span>
+        <Button variant="outline" size="sm" className="h-8 px-2" disabled={trang >= tongTrang - 1} onClick={() => onTrang(trang + 1)} aria-label="Trang sau">
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
     </div>
   );
 }

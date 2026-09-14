@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
 import { CONDITION_LABEL, CONDITION_NEEDS_NOTE, RETURN_CONDITIONS } from "@/lib/constants/returns-condition";
 import { findPendingByCode, recordFullReturnInspection, recordInspection, recordInspectionBulk, recordItemInspection, toStationRow } from "@/lib/returns/inspection";
-import type { StationRow } from "@/lib/returns/inspection-filter";
+import { BULK_INSPECT_PER_REQUEST, type StationRow } from "@/lib/returns/inspection-filter";
 import { listPendingReturnedIds, markReturnReceived, undoReturnReceived } from "@/lib/returns/warehouse";
 
 /**
@@ -204,7 +204,20 @@ export async function submitFullReturn(input: unknown): Promise<FullReturnAction
 }
 
 const bulkInspectSchema = z.object({
-  shipmentIds: z.array(z.string().min(1).max(100)).min(1, "Chưa chọn kiện nào").max(200, "Tối đa 200 kiện mỗi lượt"),
+  /*
+    TRẦN NÀY LÀ GIỚI HẠN VẬN CHUYỂN, KHÔNG PHẢI GIỚI HẠN VIỆC.
+
+    Trình duyệt tự chia phần đang chọn thành các mẻ `BULK_INSPECT_PER_REQUEST` rồi gửi lần lượt, nên
+    người kho chọn bao nhiêu cũng xử lý hết trong một lần bấm. Trần vẫn phải có ở máy chủ: mỗi kiện
+    là một giao dịch riêng, và một lời gọi ôm cả nghìn kiện sẽ vượt hạn chờ SAU KHI đã ghi được một
+    phần — người bấm nhận lỗi mạng mà không biết phần nào đã ghi.
+
+    Dùng CHUNG một hằng số với trình duyệt để hai bên không thể lệch nhau.
+  */
+  shipmentIds: z
+    .array(z.string().min(1).max(100))
+    .min(1, "Chưa chọn kiện nào")
+    .max(BULK_INSPECT_PER_REQUEST, `Mỗi lượt gửi tối đa ${BULK_INSPECT_PER_REQUEST} kiện — màn hình tự chia mẻ, không cần bấm nhiều lần`),
   condition: z.enum(RETURN_CONDITIONS),
   note: z.string().trim().max(500).default(""),
   /**

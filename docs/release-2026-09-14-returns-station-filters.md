@@ -131,6 +131,57 @@ Bấm thật qua giao diện, kết quả đọc lại từ CSDL:
 | hai dòng cùng một mẫu mã trong một kiện | **0** |
 | tổng món vào tồn so với tổng món kỳ vọng | **330 = 330** — không hơn, không kém |
 
-## 6. Cổng và deploy
+## 6. Cổng và deploy — lượt 1
 
-Xem mục cuối tài liệu này sau khi chạy.
+Cổng chạy trên bản checkout SẠCH theo đúng SHA ứng viên (`git worktree add --detach`), không phải
+trên cây làm việc: `npm ci` · typecheck · lint · toàn bộ kiểm thử ("TẤT CẢ KIỂM THỬ ĐẠT") · build.
+
+Main đã tiến **24 commit** của phiên song song trong lúc làm (hàng đợi ngoại lệ hàng hoàn, ô đưa sổ
+giấy, tra cứu VTP tại danh sách vận đơn). Rebase, xung đột đúng một chỗ ở `page.tsx` — cả hai bên
+đều thêm vào cùng lời gọi `Promise.all`. Gộp tay, giữ trọn phần của họ (`latestHmtWorkbookMeta` ·
+`returnExceptionQueues` · `returnDataQuality` · khối `hmtUpload`), chỉ đổi `listPendingInspections(300)`
+thành `PENDING_STATION_CAP`.
+
+Deploy **#272** trên `main` @ `c2ca982` — thành công. Chờ deploy #271 của phiên kia xong mới bấm
+(nhóm đồng thời `vps-operations`, và đặc tả cấm deploy chồng).
+
+## 7. Lượt 2 — bỏ giới hạn 200 kiện và tách trang
+
+Chủ shop báo lại sau lượt 1: thông báo đỏ *"Kiện có 2 mẫu mã — một con số tổng không nói được món
+nào về"* chính là lỗi lượt 1 sửa (ảnh chụp là bản CŨ). Kèm ba yêu cầu, hai trong số đó đã xong ở
+lượt 1 (xác nhận ngay ngoài danh sách, không cần vào chi tiết). Hai việc mới:
+
+### Bỏ giới hạn 200 kiện — bằng cách chia mẻ, không bằng cách nâng trần
+
+Nâng trần lên 800 rồi gửi một lời gọi là hỏng theo kiểu tệ hơn hẳn: mỗi kiện là một giao dịch riêng
+(phải vậy — một kiện lỗi không được kéo cả lô xuống), nên 800 giao dịch nối tiếp vượt hạn chờ và
+người bấm nhận lỗi mạng **sau khi vài trăm kiện đã ghi xong**, không biết là những kiện nào.
+
+Nên: `BULK_INSPECT_PER_REQUEST = 100` là giới hạn **VẬN CHUYỂN**, dùng CHUNG giữa lược đồ đầu vào
+của server action và bộ chia mẻ ở trình duyệt nên hai bên không thể lệch. Trình duyệt chia mẻ, gửi
+lần lượt, cộng dồn kết quả, hiện tiến độ *"Đang xử lý 240 / 800 kiện…"*. Một mẻ trượt thì trả đúng
+kiện của mẻ đó về danh sách và **đi tiếp** — không huỷ phần việc còn lại. Từ phía người dùng: một
+lần bấm cho toàn bộ phần đang chọn, không còn con số giới hạn nào trên màn hình.
+
+### Tách trang
+
+Thay nút "hiện thêm" bằng phân trang thật: `Kiện 1–60 trong 140` · cỡ trang 30/60/120/240 · số
+trang. Cuộn vô tận trả lời được "còn bao nhiêu" nhưng không trả lời được "tôi đã đi tới đâu", và
+người đếm bỏ dở rồi quay lại thì không có mốc nào để tiếp tục.
+
+Trang tự **kẹp lại** khi danh sách ngắn đi (kiện xử lý xong biến mất ngay, nên trang 9 có thể không
+còn tồn tại — hiện trang trống thì người đếm kết luận "hết việc rồi"), và về trang 1 khi đổi bộ lọc
+hay cỡ trang. **"Chọn tất cả" vẫn chọn cả phần khớp bộ lọc trên MỌI trang** — chia trang là để nhìn
+cho gọn, không phải để giới hạn phần được xử lý; nhãn nói rõ điều đó.
+
+### Đo lại sau khi sửa
+
+| phép đo | kết quả |
+|---|---|
+| phân trang | 1–60 → 61–120 → 121–140 · đổi cỡ 240 về trang 1 · lọc Q002 về trang 1 (1–46 trong 46) |
+| một lần bấm với **140 kiện chọn** (vượt trần 100/lượt) | chia 2 mẻ, chạy hết · 131 kiện ghi xong |
+| 9 kiện còn lại | ĐÚNG 9 kiện mồ côi (`order_id IS NULL`) — không có danh sách kỳ vọng nên không có gì để gọi là "đủ" |
+| dòng phiếu kho | 251 dòng / 356 món · **0** trường hợp hai dòng cùng một mẫu mã |
+| tổng vào tồn so với tổng kỳ vọng | **356 = 356** |
+
+Không lỗi console, không lỗi HTTP, không tràn ngang.

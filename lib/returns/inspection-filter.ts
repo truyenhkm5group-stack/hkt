@@ -37,8 +37,35 @@ import type { ItemsBasis, OrderLinkBasis } from "@/lib/returns/product-context";
  */
 export const PENDING_STATION_CAP = 800;
 
-/** Số kiện vẽ ra DOM trong một lượt. Lọc thấy hết, nhưng vẽ 800 thẻ thì trình duyệt đứng hình. */
-export const PENDING_RENDER_STEP = 60;
+/**
+ * Số kiện một TRANG. Lọc thấy hết, nhưng vẽ 800 thẻ thì trình duyệt đứng hình — và quan trọng hơn,
+ * một danh sách cuộn vô tận không cho người đếm biết mình đang ở đâu trong công việc.
+ */
+export const PENDING_PAGE_SIZES = [30, 60, 120, 240] as const;
+export type PendingPageSize = (typeof PENDING_PAGE_SIZES)[number];
+export const PENDING_PAGE_SIZE_DEFAULT: PendingPageSize = 60;
+
+/**
+ * ═══════ SỐ KIỆN TỐI ĐA MỘT LƯỢT GỬI LÊN MÁY CHỦ — GIỚI HẠN VẬN CHUYỂN, KHÔNG PHẢI GIỚI HẠN VIỆC ═══════
+ *
+ * Người kho chọn 800 kiện thì phải xử lý được 800 kiện. Nhưng gửi cả 800 trong MỘT lời gọi là hỏng
+ * theo kiểu tệ nhất: mỗi kiện là một giao dịch riêng (phải vậy — một kiện lỗi không được kéo cả lô
+ * xuống), 800 giao dịch nối tiếp vượt hạn chờ của server action, và người bấm nhận về một lỗi mạng
+ * sau khi 300 kiện ĐÃ ghi xong. Không ai biết 300 kiện nào.
+ *
+ * Nên trình duyệt tự CHIA MẺ theo hằng số này và gửi lần lượt, cộng dồn kết quả, hiện tiến độ. Từ
+ * phía người dùng là một lần bấm cho toàn bộ phần đang chọn — không còn con số giới hạn nào trên
+ * màn hình. Máy chủ nhận đúng hằng số này làm trần đầu vào, nên hai bên không thể lệch nhau.
+ */
+export const BULK_INSPECT_PER_REQUEST = 100;
+
+/** Chia một danh sách thành các mẻ `size` phần tử. Thuần, để bài kiểm khoá được ranh giới mẻ. */
+export function chiaMe<T>(items: T[], size: number): T[][] {
+  const n = Math.max(1, Math.trunc(size));
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += n) out.push(items.slice(i, i + n));
+  return out;
+}
 
 export type StationItem = {
   variantId: string | null;
