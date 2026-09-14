@@ -194,6 +194,28 @@ export async function testReturnExceptions(db: Db) {
   assert.ok(!/ids:\s*z\.array/.test(nguonAction), "KHÔNG được nhận một MẢNG id — đó là hình dạng của một nút gỡ hàng loạt");
   assert.ok(!/z\.array\(/.test(nguonAction), "không lược đồ nào ở đây nhận mảng");
 
+  /*
+    ═══ TRANG KHÔNG ĐƯỢC PHÂN TÍCH BẢNG TÍNH TRONG LÚC DỰNG ═══
+
+    Node chạy MỘT luồng. Giải mã ~80 KB base64 rồi phân tích một tệp .xlsx ba sheet là việc ĐỒNG
+    BỘ: nó không chỉ làm chậm trang này mà chặn mọi yêu cầu khác đang chờ trên cùng tiến trình.
+    Đo được đúng điều đó ở lượt smoke NGUỘI sau khi triển khai 14/09 — hai trang nặng nhất vượt
+    60 giây, rồi khi container đã nóng thì chính chúng trả lời trong 78 ms.
+
+    Hai điều kiện, kiểm ở mức MÃ NGUỒN vì đây là thứ người sau dễ vô tình đảo ngược nhất:
+  */
+  const nguonTrang = readFileSync("app/(dashboard)/inventory/returns/page.tsx", "utf8");
+  assert.ok(
+    !/\blatestHmtWorkbook\s*\(/.test(nguonTrang),
+    'trang Kiểm đếm hàng hoàn chỉ được gọi `latestHmtWorkbookMeta()` — `latestHmtWorkbook()` kéo cả cột nội dung về rồi giải mã, mỗi lượt mở trang, chỉ để hiện tên tệp',
+  );
+  const nguonTruyVan = readFileSync("lib/queries/return-exceptions.ts", "utf8");
+  assert.match(
+    nguonTruyVan,
+    /memo\(`hmt-tracking-only:\$\{meta\.sha256\}`/,
+    "phần đọc + phân tích bảng tính phải đệm theo BĂM của bản sổ: cùng băm là cùng nội dung, nên nó chỉ được chạy một lần cho mỗi bản sổ",
+  );
+
   assert.deepEqual([...HMT_RESOLUTIONS], ["LINKED_SHIPMENT", "RESOLVED_SKU", "DISMISSED"], "ba cách gỡ, không có cách thứ tư");
 
   console.log(

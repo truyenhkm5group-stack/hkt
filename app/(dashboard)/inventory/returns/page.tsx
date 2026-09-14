@@ -13,7 +13,7 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { formatNumber } from "@/lib/format";
 import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspection";
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
-import { latestHmtWorkbook } from "@/lib/returns/hmt-source";
+import { latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
 import { ExceptionQueues } from "@/app/(dashboard)/inventory/returns/exception-queues";
 import { ReturnQualityCounters } from "@/app/(dashboard)/inventory/returns/quality-counters";
@@ -49,13 +49,18 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbook(), returnExceptionQueues(), returnDataQuality()]);
+  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbookMeta(), returnExceptionQueues(), returnDataQuality()]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
 
-    `latestHmtWorkbook()` trả về cả nội dung tệp (base64 ~60 KB). Truyền nguyên khối ấy vào một
-    thành phần client là nhét dữ liệu khách hàng vào HTML của mỗi lượt tải trang, để đọc được toàn
-    bộ sổ hàng hoàn bằng "xem nguồn". Tên · băm · dung lượng · ai tải · lúc nào là đủ cho màn hình.
+Trang này KHÔNG đọc nội dung sổ: `latestHmtWorkbookMeta()` cố ý không kéo cột `content`
+    (base64 ~80 KB). Kéo về rồi giải mã chỉ để hiện tên tệp là bắt MỌI lượt mở trang trả tiền cho
+    một khối byte không ai đọc — và vì Node chạy một luồng, phép giải mã đồng bộ ấy chặn luôn các
+    yêu cầu khác đang chờ.
+
+    Và dù có kéo về cũng KHÔNG được truyền xuống client: đó là nhét tên, số điện thoại, địa chỉ
+    khách vào HTML của mỗi lượt tải trang, đọc được toàn bộ sổ hàng hoàn bằng "xem nguồn". Tên ·
+    băm · dung lượng · ai tải · lúc nào là đủ cho màn hình.
   */
   const hmtUpload = soGiay ? { filename: soGiay.filename, sha256: soGiay.sha256, bytes: soGiay.bytes, uploadedBy: soGiay.uploadedBy, uploadedAt: soGiay.uploadedAt ?? new Date(), lastUsedAt: soGiay.lastUsedAt } : null;
   const hao = bang.damaged + bang.missing + bang.wrongItem + bang.unsellable;

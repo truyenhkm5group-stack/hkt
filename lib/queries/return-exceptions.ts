@@ -9,7 +9,7 @@ import {
   type HmtExceptionQueue,
   type HmtMatchStatus,
 } from "@/lib/constants/hmt-returns";
-import { latestHmtWorkbook } from "@/lib/returns/hmt-source";
+import { latestHmtWorkbook, latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { readHmtWorkbook } from "@/lib/returns/hmt-workbook";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -183,7 +183,29 @@ async function loadCandidates(shipmentIds: string[]) {
  * lưu sẵn sẽ nói dối ngay lần đầu ai đó tải bản sổ mới. Đọc lại 45 KB có đệm 120 giây là rẻ hơn
  * một con số sai.
  */
+/**
+ * ĐỆM THEO BĂM, KHÔNG THEO ĐỒNG HỒ — VÌ BẢN SỔ LÀ BẤT BIẾN.
+ *
+ * Quy ước chung là đệm báo cáo 60–120 giây (AGENTS.md mục 2), vì số liệu báo cáo cũ đi khi dữ
+ * liệu đổi. Phần dưới đây KHÔNG cũ đi được: đầu vào của nó là một bản sổ có khoá tự nhiên là
+ * SHA256 CỦA CHÍNH NỘI DUNG. Cùng một băm thì vĩnh viễn cùng một kết quả; tải bản mới lên là một
+ * băm khác, tức một khoá đệm khác. Nên hạn ở đây dài, và nó không làm ai đọc phải số cũ.
+ *
+ * VÌ SAO PHẢI SỬA. Trước đây mỗi lần hết hạn đệm 120 giây, hàm này kéo lại ~80 KB base64 từ CSDL,
+ * giải mã, rồi PHÂN TÍCH TOÀN BỘ tệp .xlsx (3 sheet, hơn 750 dòng) — tất cả đều ĐỒNG BỘ, ngay
+ * trong lượt dựng trang. Node chạy một luồng, nên việc đó không chỉ làm chậm trang Kiểm đếm hàng
+ * hoàn mà CHẶN mọi yêu cầu khác đang chờ trên cùng tiến trình.
+ */
+const TRACKING_ONLY_TTL_MS = 6 * 60 * 60 * 1000;
+
 async function loadTrackingOnly(): Promise<{ rows: HmtTrackingOnlyRow[]; detailOnly: number; workbook: string }> {
+  const meta = await latestHmtWorkbookMeta();
+  if (!meta) return { rows: [], detailOnly: 0, workbook: "" };
+  return memo(`hmt-tracking-only:${meta.sha256}`, TRACKING_ONLY_TTL_MS, () => parseTrackingOnly());
+}
+
+/** Phần đắt: đọc nội dung và phân tích. Chạy MỘT LẦN cho mỗi bản sổ, không phải mỗi lượt mở trang. */
+async function parseTrackingOnly(): Promise<{ rows: HmtTrackingOnlyRow[]; detailOnly: number; workbook: string }> {
   const nguon = await latestHmtWorkbook();
   if (!nguon) return { rows: [], detailOnly: 0, workbook: "" };
   const wb = readHmtWorkbook(nguon.buffer, nguon.filename);
