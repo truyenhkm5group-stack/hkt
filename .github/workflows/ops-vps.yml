@@ -72,6 +72,7 @@ on:
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
+          - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -658,6 +659,15 @@ jobs:
                 # token khi chưa có — một bài kiểm "chỉ đọc" mà tự sinh chứng thư thì không còn là
                 # bài kiểm chỉ đọc.
                 docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/pancake-read-test.ts ${ARG:-} ;;
+
+              ai-staging-signal-audit)
+                cd /opt/vnx-ai-staging
+                # Product Resolver phải dựa trên trường CÓ THẬT. Client hiện vứt gần hết phản hồi
+                # ngay tại tầng ánh xạ (`toNormalizedMessage` ghi `raw: {}`), nên không kiểm kê được
+                # từ CSDL — phải hỏi thẳng API.
+                # In TÊN KHOÁ và tỷ lệ có giá trị, KHÔNG in giá trị của khách: log Actions là công khai.
+                fetch_staging_script pancake-signal-audit.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/pancake-signal-audit.ts'
+                docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/pancake-signal-audit.ts ${ARG:-} ;;
 
               ai-staging-catalog)
                 cd /opt/vnx-ai-staging
