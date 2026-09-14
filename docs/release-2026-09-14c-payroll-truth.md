@@ -1,12 +1,29 @@
 # Biên bản 14/09/2026 (c) — Lương nói đúng số, và đơn đã huỷ thôi làm cầu nối
 
-Nhánh: `claude/trusting-noether-fh23sk` · Nền: `main` sau `a142f6e` (đã gộp vào nhánh này)
-Phạm vi: bốn lỗi ĐÃ TÁI HIỆN ĐƯỢC trên đường tính lương và đường quy kết fanpage, cộng hai mục
-tài liệu đã lỗi thời. Không đổi một ngưỡng nghiệp vụ nào, không đổi lược đồ, không migration.
+Nhánh: `claude/trusting-noether-fh23sk` · Đã phát hành: #286 `8076fd1` · #288 `77b262a` ·
+#289 `f41a87a` · #290 `0bf4a08`.
+
+**CHÍN LỖI ĐÃ TÁI HIỆN ĐƯỢC** trên đường tính lương và đường quy kết fanpage, cộng phần tài liệu
+lỗi thời. **Không đổi một ngưỡng nghiệp vụ nào** (cửa sổ trùng đơn 24 giờ, ngưỡng 4 điểm, mọi mức
+lương và tỷ lệ thưởng giữ nguyên). Một migration DUY NHẤT (`0088`) và nó CHỈ THÊM BẢNG.
+
+## 0. ĐỌC NHANH — chín lỗi, và cái nào đang làm sai số ngay hôm nay
+
+| # | Lỗi | Hôm nay đang sai không? |
+|---|---|---|
+| 1.1 | Đơn ĐÃ HUỶ làm cầu nối, biến hai lần bán thật thành một đơn trùng | Chưa — nhưng **6 cụm / 14 đơn còn sống** đang nằm đúng hình dạng ấy |
+| 1.2 | Lương cứng chép nguyên lương THÁNG vào mọi kỳ | **CÓ** — xem 7 ngày đòi gấp >4 lần; xem một quý trả thiếu hai tháng |
+| 1.3 | Hai nhân sự trùng tên đọc được lương của nhau | **CÓ** (mọi nhân sự cùng tên/tên ngắn) |
+| 1.4 | Kỳ lỗ hiện "0 ₫ LN cá nhân" cho mọi marketer | **CÓ** ở cơ sở dòng tiền, mọi kỳ có LN1 ≤ 0 |
+| 1.5 | Đổi người phụ trách fanpage viết lại bảng lương tháng trước | **CÓ** — và bảng gán phẳng đang RỖNG nên 972/1.243 đơn đi bằng nhánh lấp chỗ |
+| 1.6 | Không có "đã trả" · cảnh báo chi phí bị bỏ lại · khoá mồ côi đội lốt "chưa gán" | **CÓ** (thiếu thông tin, không sai số) |
+| 1.7 | Trang Lương không xuất được | **CÓ** (thiếu chức năng) |
+| 1.8 | Ba trong bốn cơ sở lương không được phép chốt lương mà ô chọn giống hệt nhau | Rủi ro bấm nhầm |
+| 1.9 | Bảng lương không có danh tính kỳ ⇒ kỳ đã trả tiền tự viết lại chính nó | **CÓ** |
 
 ---
 
-## 1. Bốn lỗi thật, và nguyên nhân gốc của từng cái
+## 1. Chín lỗi thật, và nguyên nhân gốc của từng cái
 
 ### 1.1 Đơn ĐÃ HUỶ làm CẦU NỐI biến hai lần bán thật thành một đơn trùng
 
