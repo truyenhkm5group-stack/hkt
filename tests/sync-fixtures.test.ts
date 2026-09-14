@@ -169,6 +169,14 @@ import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
+import {
+  testClassifierNeverConcludesForCarrier,
+  testClassifierStepsAndCodes,
+  testObservationDedupeKeyIsShared,
+  testObservationResolution,
+  testQuickPickHasNoFreeText,
+  testReasonSourceRegistry,
+} from "./return-reason-observation.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1507,6 +1515,14 @@ async function main() {
   testReasonGroupContract();
   await testReasonRegroupAndThreeLevelDrilldown(db);
   await testIntelligenceRuns(db);
+
+  // ═══ LỚP QUAN SÁT LÝ DO HOÀN (14/09/2026) ═══
+  testReasonSourceRegistry();
+  testClassifierNeverConcludesForCarrier();
+  testClassifierStepsAndCodes();
+  testQuickPickHasNoFreeText();
+  testObservationDedupeKeyIsShared();
+  await testObservationResolution(db);
   testUseServerExports();
   testClientBoundaryExports();
   testVtpTrackingLink();

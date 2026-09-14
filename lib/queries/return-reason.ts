@@ -22,6 +22,15 @@
  */
 import { inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { classifyRaw } from "@/lib/returns/reason-classify";
+import {
+  REASON_SOURCE_LABEL,
+  SOURCE_IS_HUMAN,
+  SOURCE_RANK,
+  isReasonSource,
+  type ReasonCoverageState,
+  type ReasonSource,
+} from "@/lib/constants/return-reason-source";
 import {
   boDau,
   RETURN_REASON_TEXT_RULES,
@@ -55,9 +64,19 @@ export type ReasonVerdict = {
   /** `true` = người xác nhận, đè lên suy luận của máy. */
   manual: boolean;
   actorEmail: string;
+  /**
+   * BA MỨC ĐỘ PHỦ, KHÔNG GỘP (`lib/constants/return-reason-source.ts`):
+   *   `CLASSIFIED`  — xếp được vào danh mục.
+   *   `RAW_ONLY`    — CÓ chữ thật nhưng chưa xếp được ⇒ đọc chữ rồi chọn lý do.
+   *   `NO_EVIDENCE` — chưa ai nói gì ⇒ phải ĐI HỎI.
+   * Gộp hai cái sau thành "chưa xác định" là xoá mất khác biệt giữa hai việc phải làm khác hẳn nhau.
+   */
+  coverage: ReasonCoverageState;
+  /** Nguồn của quan sát đang được dùng. `null` = không có quan sát nào. */
+  source: ReasonSource | null;
 };
 
-const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "" };
+const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "", coverage: "NO_EVIDENCE", source: null };
 
 /** Phân loại một chuỗi trạng thái ĐVVC. Trả `null` khi chuỗi chỉ là BƯỚC ĐI chứ không phải lý do. */
 export function reasonFromStatusText(statusName: string): ReturnReason | null {
@@ -104,6 +123,8 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
       rawReason: (e.statusName ?? "").trim(),
       manual: false,
       actorEmail: "",
+      coverage: "CLASSIFIED",
+      source: "CARRIER_TEXT",
     });
   }
 
@@ -114,7 +135,7 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
     if (!r) continue;
     // Chữ gốc của bậc CHỮ vẫn được giữ khi mã đè lên: hai chứng từ nói về cùng một kiện, mất một
     // cái là mất đường kiểm chứng xem chúng có mâu thuẫn nhau không.
-    out.set(s.id, { reason: r, confidence: "CARRIER_CODE", evidence: `Mã lý do ĐVVC ${s.code}`, rawReason: out.get(s.id)?.rawReason || `Mã lý do ĐVVC ${s.code}`, manual: false, actorEmail: "" });
+    out.set(s.id, { reason: r, confidence: "CARRIER_CODE", evidence: `Mã lý do ĐVVC ${s.code}`, rawReason: out.get(s.id)?.rawReason || `Mã lý do ĐVVC ${s.code}`, manual: false, actorEmail: "", coverage: "CLASSIFIED", source: "CARRIER_CODE" });
   }
 
   // Bậc 1 — người xác nhận. Đè lên tất cả: người vừa gọi cho khách biết nhiều hơn mọi suy luận.
@@ -132,6 +153,61 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
       rawReason: (m.rawReason || "").trim() || out.get(m.shipmentId)?.rawReason || "",
       manual: true,
       actorEmail: m.actorEmail,
+      coverage: "CLASSIFIED",
+      source: "HUMAN_CONFIRMED",
+    });
+  }
+
+  /*
+    ═══════════ BẬC 0 — QUAN SÁT ĐÃ GHI: THẨM QUYỀN CAO NHẤT THẮNG ═══════════
+
+    Ba bậc phía trên suy LẠI TỪ ĐẦU mỗi lượt đọc, và chúng chỉ với tới được chữ của ĐVVC. Bảng
+    `return_reason_observations` là chỗ MỌI nguồn cùng đổ về — kể cả những nguồn ba bậc kia không
+    bao giờ thấy: khách nhắn qua chat, nhân viên gọi hỏi, kho mở kiện ra xem.
+
+    Chọn quan sát theo `SOURCE_RANK` (người > kho > chăm sóc > mã ĐVVC > chữ ĐVVC), bằng hạng thì
+    lấy cái MUỘN HƠN — kiện hẹn lại rồi vẫn hoàn thì lý do cuối mới là lý do nó hoàn.
+
+    Và đây là chỗ `RAW_ONLY` sinh ra: có chữ thật mà xếp không được thì KHÔNG im lặng trả
+    `NO_EVIDENCE`. Hai thứ ấy dẫn tới hai việc khác hẳn nhau — một cái là đọc chữ rồi chọn lý do,
+    cái kia là đi hỏi khách.
+  */
+  const quanSat = await db
+    .select()
+    .from(schema.returnReasonObservations)
+    .where(sql`${schema.returnReasonObservations.shipmentId} in ${ids}`)
+    .orderBy(sql`${schema.returnReasonObservations.occurredAt} asc`);
+
+  const totNhat = new Map<string, { rank: number; at: number; row: (typeof quanSat)[number] }>();
+  for (const q of quanSat) {
+    if (!q.shipmentId || !isReasonSource(q.source)) continue;
+    const rank = SOURCE_RANK[q.source];
+    const at = q.occurredAt.getTime();
+    const cu = totNhat.get(q.shipmentId);
+    // Hạng cao hơn thắng; bằng hạng thì muộn hơn thắng.
+    if (!cu || rank > cu.rank || (rank === cu.rank && at >= cu.at)) totNhat.set(q.shipmentId, { rank, at, row: q });
+  }
+
+  for (const [id, { row }] of totNhat) {
+    const src = row.source as ReasonSource;
+    const xep = classifyRaw(row.rawText, src);
+    const nguoi = SOURCE_IS_HUMAN[src];
+    const truoc = out.get(id);
+    /*
+      QUAN SÁT CỦA MÁY KHÔNG ĐƯỢC HẠ CẤP MỘT KẾT LUẬN CỦA NGƯỜI. Bậc 1 phía trên đã ghi
+      `HUMAN_CONFIRMED`; một quan sát `CARRIER_TEXT` mới hơn không được đè lên nó.
+    */
+    if (truoc?.source === "HUMAN_CONFIRMED" && !nguoi) continue;
+    out.set(id, {
+      reason: xep.reason,
+      confidence: nguoi ? "CONFIRMED" : src === "CARRIER_CODE" ? "CARRIER_CODE" : "CARRIER_TEXT",
+      evidence: `${REASON_SOURCE_LABEL[src]}: “${row.rawText}”${row.note ? ` — ${row.note}` : ""}`,
+      rawReason: row.rawText,
+      manual: nguoi,
+      actorEmail: row.actorEmail,
+      // CÓ chữ mà chưa xếp được là `RAW_ONLY`, không bao giờ là `NO_EVIDENCE`.
+      coverage: xep.matched ? "CLASSIFIED" : "RAW_ONLY",
+      source: src,
     });
   }
 

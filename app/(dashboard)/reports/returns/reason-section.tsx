@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { ReasonGroupTable } from "@/app/(dashboard)/reports/returns/reason-group-table";
 import { REASON_CONFIDENCE_LABEL, RETURN_REASON_GROUP_LABEL, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
 import { MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
+import { REASON_COVERAGE_ACTION, REASON_COVERAGE_LABEL } from "@/lib/constants/return-reason-source";
 import { TIME_BASIS_LABEL } from "@/lib/constants/report-time-basis";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
-import { formatDateTime, formatNumber, formatPercent } from "@/lib/format";
+import { formatDateTime, formatNumber, formatPercent, pctOrNull } from "@/lib/format";
 import { listReasonShipments, reasonProductBreakdown, type ReasonFilter, type ReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 
@@ -24,6 +25,63 @@ import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
  * khối này tự gọi `getReturnReasonReport`, nên cùng một tập ca bị dựng hai lần trong một lượt mở
  * trang — chậm gấp đôi, và hai bản có thể rơi vào hai mốc `now()` khác nhau.
  */
+/**
+ * ═══════════ ĐỘ PHỦ LÝ DO: BA Ô, VÌ CÓ BA VIỆC PHẢI LÀM ═══════════
+ *
+ * ─── VÌ SAO KHÔNG PHẢI MỘT CON SỐ "ĐÃ BIẾT %" ───
+ *
+ * Một con số duy nhất trả lời được "báo cáo này đáng tin tới đâu" nhưng KHÔNG trả lời được "tôi
+ * phải làm gì để nó đáng tin hơn". Hai phần chưa biết đi tới hai đội khác nhau:
+ *
+ *   · CÓ CHỨNG TỪ, CHƯA XẾP ĐƯỢC — chữ đã nằm sẵn trong máy. Mở ra đọc rồi chọn lý do, làm được
+ *     ngay hôm nay, không cần gọi ai.
+ *   · CHƯA CÓ CHỨNG TỪ NÀO — không có gì để đọc. Phải gọi khách, hoặc để kho ghi lại lúc mở kiện.
+ *
+ * Gộp chúng thành một ô "chưa xác định" làm phần dễ làm nhất biến mất trong một con số trông như
+ * bế tắc — và bế tắc thì không ai đụng tới.
+ *
+ * ─── VÀ CẢNH BÁO VỀ SỐ 0 ───
+ *
+ * Độ phủ thấp thì một nhóm lý do hiện `0` KHÔNG có nghĩa là không có ca nào: nó có thể có đầy ca
+ * đang nằm trong phần chưa xác định. Câu cảnh báo này chỉ hiện khi độ phủ thật sự thấp, nên nó
+ * không thành thứ người đọc học cách lờ đi.
+ */
+function ReasonCoveragePanel({ report }: { report: ReturnReasonReport }) {
+  const c = report.reasonCoverage;
+  const mau = report.returned;
+  if (!mau) return null;
+  const o = [
+    { key: "CLASSIFIED" as const, n: c.known, mau: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200" },
+    { key: "RAW_ONLY" as const, n: c.rawOnly, mau: "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200" },
+    { key: "NO_EVIDENCE" as const, n: c.noEvidence, mau: "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200" },
+  ];
+  /* Ngưỡng "thấp" cố ý rộng: dưới 2/3 thì một ô trống đã đủ sức dẫn người đọc kết luận sai. */
+  const phuThap = (c.pct ?? 0) < 66.7;
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="grid gap-2 sm:grid-cols-3">
+        {o.map((x) => (
+          <div key={x.key} className={cn("rounded-md border px-3 py-2", x.mau)}>
+            <div className="text-[11px] font-medium uppercase tracking-wide opacity-80">{REASON_COVERAGE_LABEL[x.key]}</div>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <span className="text-lg font-semibold tabular-nums">{formatPercent(pctOrNull(x.n, mau))}</span>
+              <span className="text-xs tabular-nums opacity-80">{formatNumber(x.n)} / {formatNumber(mau)} đơn hoàn</span>
+            </div>
+            <div className="mt-1 text-[11px] leading-snug opacity-90">{REASON_COVERAGE_ACTION[x.key]}</div>
+          </div>
+        ))}
+      </div>
+      {phuThap ? (
+        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
+          Độ phủ lý do mới {formatPercent(c.pct)} — <strong>một nhóm lý do hiện 0 KHÔNG có nghĩa là không có trường hợp nào</strong>. Ca của nhóm đó có thể đang nằm trong{" "}
+          {formatNumber(c.unknown)} đơn chưa xác định. Chỉ so sánh các nhóm với nhau khi độ phủ đã đủ cao; trước đó, dùng bảng này để biết CẦN ĐI HỎI ĐÂU chứ chưa phải để kết luận
+          nguyên nhân nào lớn nhất.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export async function ReturnReasonSection({
   report,
   filter,
@@ -88,9 +146,10 @@ export async function ReturnReasonSection({
             Post — chưa một ca nào được người xác nhận, chưa một mã lý do có cấu trúc nào. Nếu con số
             đó nằm cuối trang thì người đọc đã kịp kết luận từ bảng phía trên rồi.
           */}
+          <ReasonCoveragePanel report={bc} />
+
           <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-            Xác định được lý do: <strong>{formatNumber(bc.reasonCoverage.known)}</strong> / {formatNumber(bc.returned)} đơn hoàn ({formatPercent(bc.reasonCoverage.pct)}). Phần còn lại không có mã lý do và
-            không có sự kiện nào nêu lý do — ĐVVC chỉ báo kiện đã chuyển hoàn. <strong>Chưa xác định được không phải là một lý do</strong>; nó là chỗ dữ liệu còn thiếu. Cột{" "}
+            <strong>Chưa xác định được không phải là một lý do</strong>; nó là chỗ dữ liệu còn thiếu. Cột{" "}
             <strong>Tỷ trọng trên hoàn</strong> tính trên {formatNumber(bc.reasonCoverage.known)} đơn ĐÃ BIẾT lý do (cộng lại đúng 100%); cột <strong>Tỷ lệ trên đã gửi</strong> tính trên cả{" "}
             {formatNumber(bc.eligibleSent)} kiện đã bàn giao ĐVVC — hai mẫu số cho hai câu hỏi khác nhau.{" "}
             {/* Cách xếp nhóm là CÁCH NHÌN, sửa được — nói ra ngay cạnh bảng chứ không để người đọc tưởng nó cố định. */}
