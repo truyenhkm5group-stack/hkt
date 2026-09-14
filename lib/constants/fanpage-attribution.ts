@@ -356,26 +356,38 @@ export function resolveDuplicates(candidates: DedupeCandidate[], windowHours = D
 
   for (const list of byKey.values()) {
     const sorted = [...list].sort(earlier);
-    /** Mỗi cụm: đơn đại diện (sớm nhất) + các thành viên kèm chứng cứ đã dùng để nhận chúng vào. */
-    const clusters: { rep: DedupeCandidate; members: { c: DedupeCandidate; ev: DuplicateEvidence }[] }[] = [];
+    /** Mỗi cụm: đơn đại diện (sớm nhất) + các thành viên. Đại diện luôn là phần tử đầu. */
+    const clusters: DedupeCandidate[][] = [];
     for (const c of sorted) {
       let joined = false;
       for (const cl of clusters) {
-        if (c.sourceOrderAt.getTime() - cl.rep.sourceOrderAt.getTime() > windowMs) continue;
-        const ev = scoreDuplicatePair(cl.rep, c);
-        if (ev.score < DUPLICATE_SCORE_THRESHOLD) continue;
-        cl.members.push({ c, ev });
+        if (c.sourceOrderAt.getTime() - cl[0].sourceOrderAt.getTime() > windowMs) continue;
+        if (scoreDuplicatePair(cl[0], c).score < DUPLICATE_SCORE_THRESHOLD) continue;
+        cl.push(c);
         joined = true;
         break;
       }
-      if (!joined) clusters.push({ rep: c, members: [{ c, ev: { score: 0, signals: [] } }] });
+      if (!joined) clusters.push([c]);
     }
-    for (const cl of clusters) {
-      const members = cl.members;
-      const winner = members.find((m) => m.c.alive)?.c ?? members[0].c;
+    for (const members of clusters) {
+      const winner = members.find((m) => m.alive) ?? members[0];
       for (const m of members) {
-        if (m.c.orderId === winner.orderId) out.push(notDuplicate(m.c.orderId));
-        else out.push({ orderId: m.c.orderId, duplicateOfOrderId: winner.orderId, score: m.ev.score, signals: m.ev.signals });
+        if (m.orderId === winner.orderId) {
+          out.push(notDuplicate(m.orderId));
+          continue;
+        }
+        /*
+          CHẤM LẠI VỚI ĐƠN THẮNG, không dùng lại điểm lúc nhận vào cụm.
+          
+          Đơn ĐẠI DIỆN được nhận vào cụm mà không phải chấm với ai (nó mở cụm). Khi nó là đơn đã huỷ
+          và một đơn còn sống đến sau, chính nó thành đơn trùng — và nếu ghi lại "điểm lúc nhận vào"
+          thì nó mang điểm 0 với căn cứ RỖNG. Đo trên production 14/09: 46/83 dòng trùng đơn rơi
+          đúng vào ca đó, tức hơn một nửa kết luận không nói được vì sao.
+          
+          Chứng cứ phải mô tả ĐÚNG CẶP mà dòng này khẳng định: đơn thắng ↔ đơn trùng.
+        */
+        const ev = scoreDuplicatePair(winner, m);
+        out.push({ orderId: m.orderId, duplicateOfOrderId: winner.orderId, score: ev.score, signals: ev.signals });
       }
     }
   }
