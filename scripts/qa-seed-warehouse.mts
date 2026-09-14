@@ -109,6 +109,43 @@ for (const [i, spec] of [
     .onConflictDoNothing();
 }
 
+/*
+  ═══ TÁI HIỆN ĐÚNG HÌNH DẠNG PRODUCTION CHO KHỐI CHỨNG CỨ ═══
+
+  Production 14/09: 132 món CÓ dòng kết luận riêng, 615 món chỉ có kết luận cả kiện. Độ phủ 17,7%
+  — dưới ngưỡng, nên màn hình phải mang nhãn "Dữ liệu chưa đủ" và in "—" cho tỷ lệ hỏng.
+
+  Ở đây dựng tỷ lệ tương đương bằng số nhỏ: 1 kiện có dòng món (2 món) và 3 kiện chỉ có phiếu
+  (9 món) ⇒ độ phủ 2/11 = 18%.
+*/
+await db.insert(schema.stockReceipts).values({ id: `${P}rnhap`, kind: "RECEIPT", receivedAt: gio(300), reference: "Nhập kho QA", totalQuantity: 50 }).onConflictDoNothing();
+await db.insert(schema.stockReceiptItems).values({ id: `${P}rnhapi`, receiptId: `${P}rnhap`, variantId: `${P}v1`, quantity: 50, unitCost: 180000 }).onConflictDoNothing();
+
+for (const [i, spec] of [
+  { items: true, qty: 2, v: `${P}v1` },
+  { items: false, qty: 3, v: `${P}v1` },
+  { items: false, qty: 4, v: `${P}v1` },
+  { items: false, qty: 2, v: `${P}v2` },
+].entries()) {
+  const sid = `${P}s-cc-${i}`;
+  const rid = `${P}r-cc-${i}`;
+  await db.insert(schema.shipments).values({ id: sid, vtpOrderNumber: `QA-CC-${i}`, trackingCode: `QA-CC-${i}`, carrier: "VTP", stage: "RETURNED" }).onConflictDoNothing();
+  await db.insert(schema.stockReceipts).values({ id: rid, kind: "RETURN", receivedAt: gio(4), reference: `Đếm CC ${i}`, totalQuantity: spec.qty }).onConflictDoNothing();
+  await db.insert(schema.stockReceiptItems).values({ id: `${P}ri-cc-${i}`, receiptId: rid, variantId: spec.v, quantity: spec.qty, shipmentId: sid }).onConflictDoNothing();
+  await db.insert(schema.returnInspections).values({
+    id: `${P}i-cc-${i}`, shipmentId: sid, status: "INSPECTED", receivedAt: gio(8), inspectedAt: gio(4),
+    inspectedBy: "Nguyễn Thị Kho", inspectedByUserId: `${P}u1`, condition: "RESTOCKABLE", restockQty: spec.qty, stockReceiptId: rid,
+  }).onConflictDoNothing();
+  if (spec.items) {
+    await db.insert(schema.returnInspectionItems).values({
+      id: `${P}ii-cc-${i}`, inspectionId: `${P}i-cc-${i}`, shipmentId: sid,
+      expectedVariantId: spec.v, expectedSku: "Q002-DO-M", expectedQty: spec.qty,
+      actualVariantId: spec.v, actualSku: "Q002-DO-M", actualQty: spec.qty,
+      condition: "OK", inspectedBy: "Nguyễn Thị Kho", inspectedByUserId: `${P}u1`, inspectedAt: gio(4),
+    }).onConflictDoNothing();
+  }
+}
+
 const [dem] = await db.select({ n: (await import("drizzle-orm")).sql<number>`count(*)` }).from(schema.returnInspections);
 console.log(`✓ đã đổ dữ liệu kiểm mắt · ${Number(dem?.n ?? 0)} phiếu kiểm`);
 process.exit(0);

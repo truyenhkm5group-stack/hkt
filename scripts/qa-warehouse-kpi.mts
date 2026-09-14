@@ -77,6 +77,23 @@ async function main() {
         // Lượt đếm vô danh không được gán cho ai.
         ok("lượt đếm vô danh đếm riêng", chu.includes("Chưa quy kết được về tài khoản"));
 
+        // ═══ KHỐI CHỨNG CỨ: phần quan trọng nhất phải nói thật ═══
+        ok("khối chứng cứ kiểm hàng", chu.includes("Chứng cứ kiểm hàng"));
+        /*
+          Nhãn phải nói CHƯA ĐỦ CĂN CỨ, nhưng LÝ DO thì tuỳ cỡ mẫu: fixture chỉ có 2 món có chứng
+          cứ (dưới ngưỡng mẫu tối thiểu) nên đúng nhãn là "Mẫu quá nhỏ", không phải "Dữ liệu chưa
+          đủ". Hai nhãn là hai việc phải làm khác nhau — đếm kỹ hơn, hay đợi thêm hàng — nên kiểm
+          cả hai và in ra cái đang hiện.
+        */
+        const nhanThieu = ["Dữ liệu chưa đủ", "Mẫu quá nhỏ", "Chưa có chứng cứ nào"].filter((x) => chu.includes(x));
+        ok("có nhãn CHƯA ĐỦ CĂN CỨ", nhanThieu.length > 0, nhanThieu.join(" | ") || "không thấy nhãn nào");
+        ok("có ô 'Món chưa ai kết luận'", chu.includes("Món chưa ai kết luận"));
+        ok("có mục CHƯA BIẾT trong phân loại", chu.includes("Chưa biết"));
+        ok("khối giá trị thu hồi", chu.includes("Giá trị hàng đã thu hồi"));
+        // Tỷ lệ hỏng KHÔNG được in ra 0% khi độ phủ chưa đủ.
+        const khoiHong = chu.slice(chu.indexOf("Tỷ lệ hỏng"), chu.indexOf("Tỷ lệ hỏng") + 60);
+        ok("tỷ lệ hỏng KHÔNG in 0%", !khoiHong.includes("0%") && !khoiHong.includes("0,0%"), khoiHong.replace(/\n/g, " ").slice(0, 50));
+
         // Biểu đồ phải vẽ được (recharts dựng <svg> trong khối chart).
         const svg = await page.locator(".recharts-surface").count();
         ok("biểu đồ năng suất vẽ được", svg >= 1, `${svg} svg`);
