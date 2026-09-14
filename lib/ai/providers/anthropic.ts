@@ -11,7 +11,8 @@ import { aiEnv } from "@/lib/ai/config";
 import type { RouteTier } from "@/lib/constants/ai";
 import { ModelTimeoutError, ModelUnavailableError, type CompletionRequest, type CompletionResult, type ModelProvider } from "@/lib/ai/providers/types";
 
-type AnthropicUsage = { input_tokens?: number; output_tokens?: number };
+/** Tên trường theo Messages API: bốn rổ token, ba mức giá. */
+type AnthropicUsage = { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 type AnthropicContent = { type?: string; text?: string };
 type AnthropicResponse = { content?: AnthropicContent[]; usage?: AnthropicUsage; model?: string; error?: { message?: string } };
 
@@ -66,6 +67,8 @@ export class AnthropicProvider implements ModelProvider {
       text: content.map((c) => c.text ?? "").join("").trim(),
       inputTokens: Number(body.usage?.input_tokens ?? 0),
       outputTokens: Number(body.usage?.output_tokens ?? 0),
+      cacheReadInputTokens: Number(body.usage?.cache_read_input_tokens ?? 0),
+      cacheWriteInputTokens: Number(body.usage?.cache_creation_input_tokens ?? 0),
       model: body.model || request.model,
       provider: this.name,
     };

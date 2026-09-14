@@ -22,8 +22,13 @@ export type CompletionRequest = {
 
 export type CompletionResult = {
   text: string;
+  /** Token đầu vào tính ĐỦ GIÁ (không gồm phần đọc từ bộ nhớ đệm). */
   inputTokens: number;
   outputTokens: number;
+  /** Token đọc lại từ bộ nhớ đệm — rẻ hơn nhiều. 0 = không dùng đệm / nhà cung cấp không báo. */
+  cacheReadInputTokens: number;
+  /** Token ghi vào bộ nhớ đệm — đắt hơn giá đầu vào một chút. */
+  cacheWriteInputTokens: number;
   model: string;
   provider: string;
 };

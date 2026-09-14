@@ -11,7 +11,7 @@
 import type { RouteTier } from "@/lib/constants/ai";
 import { ModelTimeoutError, type CompletionRequest, type CompletionResult, type ModelProvider } from "@/lib/ai/providers/types";
 
-export type StubScript = { text?: string; behavior?: "ok" | "timeout" | "error"; inputTokens?: number; outputTokens?: number };
+export type StubScript = { text?: string; behavior?: "ok" | "timeout" | "error"; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheWriteInputTokens?: number };
 
 const holder = globalThis as unknown as { __aiStub?: { queue: StubScript[]; calls: CompletionRequest[] } };
 if (!holder.__aiStub) holder.__aiStub = { queue: [], calls: [] };
@@ -55,6 +55,8 @@ export class StubProvider implements ModelProvider {
       text,
       inputTokens: script?.inputTokens ?? request.system.length + request.messages.reduce((s, m) => s + m.content.length, 0),
       outputTokens: script?.outputTokens ?? text.length,
+      cacheReadInputTokens: script?.cacheReadInputTokens ?? 0,
+      cacheWriteInputTokens: script?.cacheWriteInputTokens ?? 0,
       model: request.model || this.defaultModel("ECONOMY"),
       provider: this.name,
     };

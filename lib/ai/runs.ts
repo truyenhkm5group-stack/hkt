@@ -113,7 +113,9 @@ export async function startRun(params: StartRunInput, db?: Db): Promise<RunRecor
             step: a.step,
             inputTokens: a.inputTokens,
             outputTokens: a.outputTokens,
+            cachedInputTokens: a.cachedInputTokens,
             costVnd: a.costVnd,
+            pricingVersion: a.pricingVersion,
             latencyMs: Math.max(0, Math.round(a.latencyMs)),
             ok: a.ok,
             error: a.error ? a.error.slice(0, 1000) : null,
@@ -131,15 +133,23 @@ export async function startRun(params: StartRunInput, db?: Db): Promise<RunRecor
           .select({
             input: sql<number>`coalesce(sum(${schema.aiModelCalls.inputTokens}), 0)`,
             output: sql<number>`coalesce(sum(${schema.aiModelCalls.outputTokens}), 0)`,
+            cached: sql<number>`coalesce(sum(${schema.aiModelCalls.cachedInputTokens}), 0)`,
             /** Có lần gọi nào chưa khai đơn giá không — nếu có thì tổng chi phí là CHƯA BIẾT. */
             unpriced: sql<number>`count(*) filter (where ${schema.aiModelCalls.costVnd} is null)`,
             cost: sql<number>`coalesce(sum(${schema.aiModelCalls.costVnd}), 0)`,
             calls: sql<number>`count(*)`,
+            /** Phiên bản bảng giá của các lần gọi ĐÃ tính được tiền. */
+            version: sql<string>`coalesce(max(${schema.aiModelCalls.pricingVersion}) filter (where ${schema.aiModelCalls.costVnd} is not null), '')`,
+            /** Số phiên bản giá khác nhau trong cùng một lượt chạy — hơn một là bất thường. */
+            versions: sql<number>`count(distinct ${schema.aiModelCalls.pricingVersion}) filter (where ${schema.aiModelCalls.costVnd} is not null)`,
           })
           .from(schema.aiModelCalls)
           .where(eq(schema.aiModelCalls.runId, runId));
         const calls = Number(totals?.calls ?? 0);
         const unpriced = Number(totals?.unpriced ?? 0);
+        // Hai bảng giá khác nhau trong một lượt chạy thì tổng không thuộc phiên bản nào cả —
+        // nói "hỗn hợp" còn hơn gắn nhãn một phiên bản mà chỉ đúng một nửa.
+        const pricingVersion = calls === 0 || unpriced > 0 ? "" : Number(totals?.versions ?? 0) > 1 ? "hon-hop" : String(totals?.version ?? "");
         await conn
           .update(schema.aiRuns)
           .set({
@@ -152,8 +162,10 @@ export async function startRun(params: StartRunInput, db?: Db): Promise<RunRecor
             escalationReason: result.escalationReason ?? null,
             inputTokens: Number(totals?.input ?? 0),
             outputTokens: Number(totals?.output ?? 0),
+            cachedInputTokens: Number(totals?.cached ?? 0),
             // Không gọi mô hình lần nào ⇒ chi phí THẬT SỰ bằng 0. Có gọi mà thiếu đơn giá ⇒ null.
             costVnd: calls === 0 ? 0 : unpriced > 0 ? null : Number(totals?.cost ?? 0),
+            pricingVersion,
             latencyMs: Date.now() - startedAt,
             error: result.error ? result.error.slice(0, 2000) : null,
             finishedAt: new Date(),

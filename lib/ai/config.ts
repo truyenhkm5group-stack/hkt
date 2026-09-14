@@ -24,14 +24,35 @@ function readEnvBool(name: string, fallback: boolean) {
   return value === "1" || value === "true" || value === "yes";
 }
 
-/** Đơn giá một mô hình, VND cho MỘT TRIỆU token. Không khai = chi phí CHƯA BIẾT (null). */
-export type ModelPrice = { inputVndPerMillion: number; outputVndPerMillion: number };
+/**
+ * Đơn giá một mô hình, VND cho MỘT TRIỆU token.
+ *
+ * BỐN RỔ TOKEN, ba mức giá khác nhau — gộp lại là báo sai tiền:
+ *   • `input`       token đầu vào tính đủ giá
+ *   • `cachedRead`  token đọc lại từ bộ nhớ đệm của nhà cung cấp (rẻ hơn nhiều)
+ *   • `cacheWrite`  token ghi vào bộ nhớ đệm (đắt hơn giá đầu vào một chút)
+ *   • `output`      token sinh ra
+ *
+ * Hai rổ đệm là TUỲ CHỌN. Không khai mà lượt chạy có token đệm ⇒ chi phí lượt đó là CHƯA BIẾT
+ * (`null`), không phải "tính phần biết được rồi bỏ qua phần còn lại".
+ */
+export type ModelPrice = {
+  inputVndPerMillion: number;
+  outputVndPerMillion: number;
+  cachedReadVndPerMillion?: number;
+  cacheWriteVndPerMillion?: number;
+};
 
 export type AiSettings = AiFeatureFlags & {
   /** Nấc quyền hạn ghi đè theo từng nhân sự (`{ sales: "SHADOW" }`). */
   modes: Record<string, AgentMode>;
   /** Đơn giá theo `provider:model`. Thiếu = chi phí null. */
   pricing: Record<string, ModelPrice>;
+  /**
+   * PHIÊN BẢN bảng giá đang dùng. Ghi vào từng lượt chạy để một lần đổi giá không làm mọi con số
+   * lịch sử đổi nghĩa mà không ai biết. Rỗng = chưa khai giá.
+   */
+  pricingVersion: string;
 };
 
 export const aiEnv = {
@@ -84,6 +105,13 @@ function sanitizeMode(value: unknown, fallback: AgentMode): AgentMode {
   return (AGENT_MODES as readonly string[]).includes(raw) ? clampMode(raw as AgentMode) : fallback;
 }
 
+/** Đơn giá tuỳ chọn: chỉ nhận khi là số hợp lệ; sai kiểu ⇒ `undefined` (CHƯA KHAI), không ⇒ 0. */
+function optionalPrice(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 function sanitizePricing(value: unknown): Record<string, ModelPrice> {
   if (!value || typeof value !== "object") return {};
   const out: Record<string, ModelPrice> = {};
@@ -94,7 +122,12 @@ function sanitizePricing(value: unknown): Record<string, ModelPrice> {
     const output = Number(price.outputVndPerMillion);
     // Đơn giá không hợp lệ thì BỎ khoá đó đi: thà chi phí "chưa biết" còn hơn một con số bịa.
     if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) continue;
-    out[key] = { inputVndPerMillion: input, outputVndPerMillion: output };
+    out[key] = {
+      inputVndPerMillion: input,
+      outputVndPerMillion: output,
+      cachedReadVndPerMillion: optionalPrice(price.cachedReadVndPerMillion),
+      cacheWriteVndPerMillion: optionalPrice(price.cacheWriteVndPerMillion),
+    };
   }
   return out;
 }
@@ -116,7 +149,16 @@ export async function getAiSettings(): Promise<AiSettings> {
   if (stored.modes && typeof stored.modes === "object") {
     for (const [key, value] of Object.entries(stored.modes as Record<string, unknown>)) modes[key] = sanitizeMode(value, aiEnv.defaultMode);
   }
-  return { ...flags, modes, pricing: sanitizePricing(stored.pricing) };
+  const pricing = sanitizePricing(stored.pricing);
+  const declaredVersion = typeof stored.pricingVersion === "string" ? stored.pricingVersion.trim() : "";
+  return {
+    ...flags,
+    modes,
+    pricing,
+    // Có bảng giá mà quên đặt tên phiên bản thì vẫn phải có một nhãn đọc được, nếu không hai kỳ
+    // khác giá sẽ trông giống hệt nhau khi đọc lại.
+    pricingVersion: declaredVersion || (Object.keys(pricing).length ? "chua-dat-ten" : ""),
+  };
 }
 
 /**

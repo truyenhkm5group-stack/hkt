@@ -108,6 +108,7 @@ export const ESCALATION_REASONS = [
   "LOW_CONFIDENCE",
   "MODEL_ERROR",
   "MODEL_TIMEOUT",
+  "MODEL_NOT_CONFIGURED",
   "POLICY_REQUIRES_HUMAN",
 ] as const;
 export type EscalationReason = (typeof ESCALATION_REASONS)[number];
@@ -118,6 +119,7 @@ export const ESCALATION_REASON_LABEL: Record<EscalationReason, string> = {
   LOW_CONFIDENCE: "Độ tin thấp hơn ngưỡng",
   MODEL_ERROR: "Mô hình báo lỗi",
   MODEL_TIMEOUT: "Mô hình quá thời gian",
+  MODEL_NOT_CONFIGURED: "Chưa cấu hình khoá / tên mô hình",
   POLICY_REQUIRES_HUMAN: "Chính sách bắt buộc người quyết",
 };
 

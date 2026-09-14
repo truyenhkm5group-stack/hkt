@@ -51,14 +51,30 @@ export function parseRouting(raw: unknown): RoutingConfig {
   };
 }
 
+/** Bốn rổ token của một lần gọi mô hình. */
+export type TokenUsage = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheWriteInputTokens: number };
+
 /**
- * Chi phí ước tính của một lần gọi, VND. `null` = CHƯA BIẾT (chưa khai đơn giá cho mô hình đó).
+ * Chi phí ước tính của một lần gọi, VND. `null` = CHƯA BIẾT.
+ *
+ * Trả `null` trong HAI trường hợp, và cả hai đều là "chưa biết" chứ không phải "bằng 0":
+ *   1. Mô hình chưa có trong bảng giá.
+ *   2. Lần gọi CÓ token đệm nhưng bảng giá chưa khai đơn giá cho rổ đệm đó. Lấy giá đầu vào
+ *      thường áp cho token đệm sẽ báo đắt gấp mười lần thực tế; bỏ qua chúng thì báo rẻ hơn thực
+ *      tế. Cả hai đều là một con số bịa, nên câu trả lời đúng là CHƯA BIẾT.
+ *
  * Đơn giá khai theo VND cho MỘT TRIỆU token, giống cách các nhà cung cấp niêm yết.
  */
-export function estimateCostVnd(provider: string, model: string, inputTokens: number, outputTokens: number, pricing: Record<string, ModelPrice>): number | null {
+export function estimateCostVnd(provider: string, model: string, usage: TokenUsage, pricing: Record<string, ModelPrice>): number | null {
   const price = pricing[`${provider}:${model}`] ?? pricing[model];
   if (!price) return null;
-  const vnd = (inputTokens / 1_000_000) * price.inputVndPerMillion + (outputTokens / 1_000_000) * price.outputVndPerMillion;
+  if (usage.cacheReadInputTokens > 0 && price.cachedReadVndPerMillion === undefined) return null;
+  if (usage.cacheWriteInputTokens > 0 && price.cacheWriteVndPerMillion === undefined) return null;
+  const vnd =
+    (usage.inputTokens / 1_000_000) * price.inputVndPerMillion +
+    (usage.outputTokens / 1_000_000) * price.outputVndPerMillion +
+    (usage.cacheReadInputTokens / 1_000_000) * (price.cachedReadVndPerMillion ?? 0) +
+    (usage.cacheWriteInputTokens / 1_000_000) * (price.cacheWriteVndPerMillion ?? 0);
   // Tiền trong ERP là số nguyên VND; làm tròn lên để không bao giờ báo rẻ hơn thực tế.
   return Math.ceil(vnd);
 }
@@ -71,7 +87,10 @@ export type ModelAttempt = {
   step: string;
   inputTokens: number;
   outputTokens: number;
+  cachedInputTokens: number;
   costVnd: number | null;
+  /** Bảng giá nào đã ra con số trên. Rỗng = chưa khai giá ⇒ `costVnd` phải là null. */
+  pricingVersion: string;
   latencyMs: number;
   error: string | null;
 };
@@ -118,7 +137,10 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
   const providerName = routing.provider || defaultProviderName();
   const provider = getProvider(providerName);
   if (!provider || !provider.available()) {
-    return { tier: "HUMAN", value: null, attempts, escalation: "MODEL_ERROR" };
+    // CHƯA CẤU HÌNH khác hẳn MÔ HÌNH LỖI: một cái là thiếu khoá / thiếu tên mô hình (việc của
+    // người vận hành), cái kia là nhà cung cấp hỏng (việc của nhà cung cấp). Gộp hai lý do lại
+    // thì màn hình quan sát không nói được phải đi sửa ở đâu.
+    return { tier: "HUMAN", value: null, attempts, escalation: "MODEL_NOT_CONFIGURED" };
   }
   const tiers = routing.tiers?.length ? routing.tiers : DEFAULT_ROUTING.tiers;
   let lastReason: EscalationReason = "MODEL_ERROR";
@@ -126,7 +148,7 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
   for (const tier of tiers) {
     const model = routing.models?.[tier] || provider.defaultModel(tier);
     if (!model) {
-      lastReason = "MODEL_ERROR";
+      lastReason = "MODEL_NOT_CONFIGURED";
       continue;
     }
     const startedAt = Date.now();
@@ -140,7 +162,7 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         json: true,
       });
       const latencyMs = Date.now() - startedAt;
-      const costVnd = estimateCostVnd(result.provider, result.model, result.inputTokens, result.outputTokens, settings.pricing);
+      const costVnd = estimateCostVnd(result.provider, result.model, result, settings.pricing);
       const attempt: ModelAttempt = {
         tier,
         provider: result.provider,
@@ -149,7 +171,9 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         step: input.step,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
+        cachedInputTokens: result.cacheReadInputTokens,
         costVnd,
+        pricingVersion: costVnd === null ? "" : settings.pricingVersion,
         latencyMs,
         error: null,
       };
@@ -182,7 +206,10 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         step: input.step,
         inputTokens: 0,
         outputTokens: 0,
+        cachedInputTokens: 0,
+        // Lần gọi hỏng: KHÔNG biết nhà cung cấp có tính tiền token đã nhận hay không ⇒ CHƯA BIẾT.
         costVnd: null,
+        pricingVersion: "",
         latencyMs,
         error: error instanceof Error ? error.message.slice(0, 500) : String(error),
       });
