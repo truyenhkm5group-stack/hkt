@@ -251,23 +251,35 @@ cat mau.json | $COMPOSE exec -T app npm run ai:size-rules -- --stdin --apply    
 Script kiểm bằng zod, đối chiếu mã sản phẩm/mẫu mã với ERP, cảnh báo khi hai size khai dải trùng
 nhau, và tự thử một phép gợi ý ở giữa dải trước khi ghi.
 
-## 7b. Đúng một lệnh khi đã được duyệt
+## 7b. Vận hành bằng workflow — không cần SSH
+
+Bảy thao tác nằm trong **Actions → "Vận hành ERP trên VPS"**. Bấm *Run workflow*, **chọn nhánh
+`claude/ai-workforce-sales-v1`** (chọn `main` thì không thấy chúng — `main` không có), rồi chọn
+thao tác:
+
+| Thao tác | Làm gì | Chạm production? |
+|---|---|---|
+| `ai-staging-swap` | Tạo tệp swap 2 GB, in sức khoẻ production trước và sau | Không — chỉ `swapon`, không restart gì |
+| `ai-staging-preflight` | CHỈ ĐỌC: 7 lớp va chạm + RAM + đĩa | Không |
+| `ai-staging-image` | Dựng ảnh trên máy chạy GitHub → GHCR (chạy `tsc` + `npm test` trước) | Không mở kết nối SSH nào |
+| `ai-staging-up` | Kéo ảnh, dựng ở `/opt/vnx-ai-staging` | Không |
+| `ai-staging-status` | Container · RAM/swap · bộ nhớ từng container · **migration đã áp** · sức khoẻ production | Không |
+| `ai-staging-logs` | 120 dòng log gần nhất | Không |
+| `ai-staging-down` | Dừng (`arg = --volumes` xoá CSDL của RIÊNG bản chạy thử) | Không |
+
+Thứ tự lần đầu: `ai-staging-swap` → `ai-staging-image` → `ai-staging-up` → `ai-staging-status`.
+Lần sau chỉ cần `ai-staging-image` → `ai-staging-up`.
+
+**Xếp hàng.** Job `ops` dùng chung nhóm `vps-operations` với workflow triển khai: một thao tác chạm
+VPS tại một thời điểm, nên nếu đang có lượt deploy thì thao tác của bạn **chờ**, không chen. Job
+`ai-staging-image` có nhóm riêng vì nó không chạm VPS.
+
+Muốn chạy tay trên VPS thì vẫn được — script là cùng một script:
 
 ```bash
-# 1. GitHub → Actions → "Dựng ảnh bản chạy thử nhân sự AI" → Run workflow  (nhánh claude/ai-workforce-sales-v1)
-#    Workflow chạy typecheck + npm test rồi đẩy ghcr.io/truyenhkm5group-stack/hkt-ai-staging:latest
-
-# 2. Trên VPS — một lệnh, và nó tự chạy kiểm tra an toàn trước, tự dừng nếu có va chạm:
 STAGING_IMAGE=ghcr.io/truyenhkm5group-stack/hkt-ai-staging:latest \
-  bash <(curl -fsSL https://raw.githubusercontent.com/truyenhkm5group-stack/hkt/claude/ai-workforce-sales-v1/scripts/staging-up.sh)
+  bash /opt/vnx-ai-staging/scripts/staging-up.sh
 ```
-
-Lệnh ấy: chạy `staging-preflight.sh` (7 lớp va chạm + RAM + đĩa) → tải mã về `/opt/vnx-ai-staging`
-→ sinh bí mật tại chỗ bằng `openssl` vào `.env.staging` quyền 600 → kéo ảnh → `up -d` → đợi
-`/api/health` → in trạng thái bản chạy thử VÀ kiểm lại sức khoẻ production.
-
-Nếu gói GHCR để riêng tư, VPS phải đăng nhập một lần trước:
-`echo <token read:packages> | docker login ghcr.io -u <tài khoản> --password-stdin`
 
 ## 8. Tên miền công khai — chỉ sau khi localhost đã xanh
 
