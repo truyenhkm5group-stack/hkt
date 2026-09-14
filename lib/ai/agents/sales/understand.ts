@@ -1,0 +1,284 @@
+/**
+ * BƯỚC 1 — HIỂU: bóc ý định và thực thể từ tin nhắn khách.
+ *
+ * Nấc LUẬT chạy trước và trong phần lớn trường hợp là đủ: SĐT, size, màu, số lượng, "chốt đơn",
+ * "bao nhiêu tiền" đều là những thứ nhận ra được bằng luật, chắc chắn và miễn phí. Chỉ khi luật
+ * KHÔNG đủ chắc mới leo lên mô hình.
+ *
+ * Đầu ra của mô hình BẮT BUỘC qua `UNDERSTANDING_SCHEMA`. Trả rác = không có kết quả, không phải
+ * "gần đúng thì lấy tạm" — một thực thể bịa ở đây sẽ đi thẳng vào đơn hàng của khách.
+ *
+ * HÀM Ở ĐÂY LÀ HÀM THUẦN (trừ `understand` có thể gọi mô hình): không đọc CSDL, không đọc đồng hồ.
+ */
+import { z } from "zod";
+import { normalize, stripHtml } from "@/lib/text";
+import { normalizePhone, parseVariantText, productCodeFromText } from "@/lib/constants/landing";
+import { CONFIDENCE_FLOOR } from "@/lib/constants/ai";
+
+export const SALES_INTENTS = [
+  "GREETING",
+  "PRODUCT_QUESTION",
+  "PRICE_QUESTION",
+  "STOCK_QUESTION",
+  "SIZE_QUESTION",
+  "SHIPPING_QUESTION",
+  "PURCHASE_INTENT",
+  "PROVIDE_VARIANT",
+  "PROVIDE_CONTACT",
+  "PROVIDE_ADDRESS",
+  "CONFIRM",
+  "REJECT",
+  "OBJECTION",
+  "COMPLAINT",
+  "ASK_HUMAN",
+  "AFTER_SALES",
+  "OTHER",
+] as const;
+
+export type SalesIntent = (typeof SALES_INTENTS)[number];
+
+
+/** Lược đồ đầu ra — dùng cho CẢ nấc luật lẫn nấc mô hình, để hai nấc không bao giờ lệch hình dạng. */
+export const UNDERSTANDING_SCHEMA = z.object({
+  intents: z.array(z.enum(SALES_INTENTS)).min(1).max(4),
+  entities: z.object({
+    productText: z.string().max(200).default(""),
+    productCode: z.string().max(20).default(""),
+    size: z.string().max(10).default(""),
+    color: z.string().max(40).default(""),
+    quantity: z.number().int().min(1).max(20).nullable().default(null),
+    phone: z.string().max(20).default(""),
+    address: z.string().max(400).default(""),
+    province: z.string().max(80).default(""),
+    heightCm: z.number().min(80).max(230).nullable().default(null),
+    weightKg: z.number().min(20).max(200).nullable().default(null),
+  }),
+  confidence: z.number().min(0).max(1),
+  /** Câu / cụm đã dẫn tới kết luận — để người đọc lại hiểu vì sao máy nghĩ vậy. */
+  evidence: z.string().max(300).default(""),
+});
+
+export type Understanding = z.infer<typeof UNDERSTANDING_SCHEMA> & { tier: "RULE" | "ECONOMY" | "STRONG" };
+
+const EMPTY_ENTITIES = {
+  productText: "",
+  productCode: "",
+  size: "",
+  color: "",
+  quantity: null as number | null,
+  phone: "",
+  address: "",
+  province: "",
+  heightCm: null as number | null,
+  weightKg: null as number | null,
+};
+
+// Từ khoá — viết ở dạng đã chuẩn hoá (không dấu, thường), so khớp TRỌN TỪ qua `normalize()`.
+const KEYWORDS: Record<SalesIntent, string[]> = {
+  GREETING: ["alo", "hello", "hi shop", "chao shop", "shop oi", "ad oi"],
+  PRODUCT_QUESTION: ["mau nay", "san pham nay", "cai nay", "vay nay", "dam nay", "ao nay", "quan nay", "chat lieu", "vai gi", "cao bao nhieu mac vua"],
+  PRICE_QUESTION: ["bao nhieu tien", "gia bao nhieu", "gia the nao", "gia sao", "nhieu tien", "bn tien", "bnhieu", "may tien"],
+  STOCK_QUESTION: ["con hang", "con size", "con mau", "con khong", "het hang", "con k", "con ko"],
+  SIZE_QUESTION: ["size nao", "mac size", "lay size", "size gi", "bang size", "size bao nhieu", "cao 1m", "nang bao nhieu"],
+  SHIPPING_QUESTION: ["phi ship", "tien ship", "freeship", "free ship", "ship bao nhieu", "bao lau nhan", "may ngay nhan", "giao bao lau", "ship covid"],
+  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay"],
+  PROVIDE_VARIANT: [],
+  PROVIDE_CONTACT: ["so dien thoai", "sdt cua em", "sdt em", "lien he em"],
+  PROVIDE_ADDRESS: ["dia chi", "gui ve", "giao ve", "so nha", "thon", "xa", "phuong", "quan", "huyen", "tinh", "thanh pho"],
+  CONFIRM: ["ok", "oke", "okie", "dong y", "dung roi", "chuan roi", "van", "vang", "u", "ukm", "um", "chot", "duoc", "yes", "xac nhan", "dung"],
+  REJECT: ["thoi", "khong lay nua", "ko lay nua", "khong mua", "ko mua", "de sau", "huy", "khong can", "ko can"],
+  OBJECTION: ["dat qua", "mac qua", "sao dat the", "giam gia", "bot chut", "cho xin gia", "re hon", "cho re", "shop khac re"],
+  COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
+  ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
+  AFTER_SALES: ["doi size", "doi mau", "tra hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don"],
+  OTHER: [],
+};
+
+/** Ý định BẮT BUỘC chuyển người — máy không được tự xử, bất kể nó tự tin đến đâu. */
+export const HUMAN_ONLY_INTENTS = new Set<SalesIntent>(["COMPLAINT", "ASK_HUMAN", "AFTER_SALES"]);
+
+/** `normalize()` bọc chuỗi bằng khoảng trắng nên so khớp TRỌN TỪ chỉ là so chuỗi con của dạng đã bọc. */
+function hits(normalized: string, words: string[]): string | null {
+  for (const word of words) if (normalized.includes(` ${word} `)) return word;
+  return null;
+}
+
+/** SĐT Việt Nam trong một câu tự do. Nhận cả dạng có dấu chấm / khoảng trắng giữa các cụm số. */
+export function findPhone(text: string): string {
+  const candidates = text.match(/(?:\+?84|0)[\s.\-]?\d(?:[\s.\-]?\d){8,9}/g) ?? [];
+  for (const raw of candidates) {
+    const phone = normalizePhone(raw);
+    if (/^0\d{9}$/.test(phone)) return phone;
+  }
+  return "";
+}
+
+/** Chiều cao / cân nặng khách tự khai: "1m58 47kg", "158cm 47 kg", "cao 1.58 nặng 47". */
+export function findBody(text: string): { heightCm: number | null; weightKg: number | null } {
+  const flat = text.toLowerCase().replace(/,/g, ".");
+  let heightCm: number | null = null;
+  let weightKg: number | null = null;
+  const mMeter = /(\d)\s*m\s*(\d{1,2})\b/.exec(flat);
+  const mDecimal = /\b(1\.[4-9]\d?)\s*m?\b/.exec(flat);
+  const mCm = /\b(1[3-9]\d|2[0-2]\d)\s*cm\b/.exec(flat);
+  if (mMeter) heightCm = Number(mMeter[1]) * 100 + Number(mMeter[2].padEnd(2, "0"));
+  else if (mCm) heightCm = Number(mCm[1]);
+  else if (mDecimal) heightCm = Math.round(Number(mDecimal[1]) * 100);
+  const mKg = /\b(\d{2,3})\s*(?:kg|ki|can)\b/.exec(flat) ?? /\bnang\s*(\d{2,3})\b/.exec(normalize(flat));
+  if (mKg) weightKg = Number(mKg[1]);
+  return {
+    heightCm: heightCm !== null && heightCm >= 80 && heightCm <= 230 ? heightCm : null,
+    weightKg: weightKg !== null && weightKg >= 20 && weightKg <= 200 ? weightKg : null,
+  };
+}
+
+/** Số lượng khách nói: "lấy 2 cái", "cho em 3 bộ". Không bắt được thì null = CHƯA BIẾT, không phải 1. */
+export function findQuantity(text: string): number | null {
+  const n = normalize(text);
+  const m = /\b(?:lay|mua|dat|order|cho em|gui)\s*(\d{1,2})\b/.exec(n) ?? /\b(\d{1,2})\s*(?:cai|bo|chiec|san pham|sp|chiec)\b/.exec(n);
+  if (!m) return null;
+  const value = Number(m[1]);
+  return value >= 1 && value <= 20 ? value : null;
+}
+
+/** Màu sắc khách nhắc tới, so theo TỪ để "chuyển đổi" không thành "đỏ". */
+const COLOR_WORDS = ["den", "trang", "do", "nau", "xanh", "vang", "hong", "tim", "be", "kem", "xam", "cam", "ghi", "reu", "navy"];
+const COLOR_LABEL: Record<string, string> = {
+  den: "Đen", trang: "Trắng", do: "Đỏ", nau: "Nâu", xanh: "Xanh", vang: "Vàng", hong: "Hồng",
+  tim: "Tím", be: "Be", kem: "Kem", xam: "Xám", cam: "Cam", ghi: "Ghi", reu: "Rêu", navy: "Navy",
+};
+
+export function findColor(text: string): string {
+  const n = normalize(text);
+  const explicit = parseVariantText(text).color;
+  if (explicit) return explicit;
+  for (const word of COLOR_WORDS) if (n.includes(` ${word} `)) return COLOR_LABEL[word];
+  return "";
+}
+
+const SIZE_WORDS = ["xs", "s", "m", "l", "xl", "xxl", "xxxl", "2xl", "3xl", "4xl"];
+
+export function findSize(text: string): string {
+  const explicit = parseVariantText(text).size;
+  if (explicit) return explicit;
+  const n = normalize(text);
+  // "m" và "l" là chữ cái thường gặp; chỉ nhận khi đứng một mình hoặc sau chữ "size"/"số".
+  const m = /\bsize\s+([a-z0-9]{1,4})\b/.exec(n) ?? /\bso\s+([a-z0-9]{1,4})\b/.exec(n);
+  if (m && SIZE_WORDS.includes(m[1])) return m[1].toUpperCase();
+  const words = n.trim().split(/\s+/);
+  if (words.length === 1 && SIZE_WORDS.includes(words[0])) return words[0].toUpperCase();
+  return "";
+}
+
+/**
+ * NHẬN DẠNG BẰNG LUẬT. Trả về độ tin: 1 từ khoá mạnh là chắc; không khớp gì là 0 và phải leo nấc.
+ */
+export function understandByRule(rawText: string): Understanding {
+  const text = stripHtml(rawText);
+  const n = normalize(text);
+  const intents: SalesIntent[] = [];
+  const evidence: string[] = [];
+  for (const intent of SALES_INTENTS) {
+    if (intent === "OTHER") continue;
+    const hit = hits(n, KEYWORDS[intent]);
+    if (hit) {
+      intents.push(intent);
+      evidence.push(hit);
+    }
+  }
+
+  const phone = findPhone(text);
+  const size = findSize(text);
+  const color = findColor(text);
+  const quantity = findQuantity(text);
+  const body = findBody(text);
+  const productCode = productCodeFromText(text);
+
+  if (phone && !intents.includes("PROVIDE_CONTACT")) intents.push("PROVIDE_CONTACT");
+  // Khách nhắn "size L" / "màu đỏ" / "lấy 2 cái" là đang CHỌN MẪU MÃ. Không có từ khoá nào bắt
+  // được việc đó — chính THỰC THỂ bóc ra mới là bằng chứng, nên ý định phải suy từ thực thể.
+  if ((size || color || quantity !== null) && !intents.includes("PROVIDE_VARIANT")) intents.push("PROVIDE_VARIANT");
+  if ((body.heightCm || body.weightKg) && !intents.includes("SIZE_QUESTION")) intents.push("SIZE_QUESTION");
+  // Địa chỉ: ba mảnh trở lên phân tách bởi dấu phẩy và có chữ số nhà là dấu hiệu đủ mạnh.
+  const looksLikeAddress = text.split(",").length >= 3 && /\d/.test(text) && text.trim().length >= 15;
+  if (looksLikeAddress && !intents.includes("PROVIDE_ADDRESS")) intents.push("PROVIDE_ADDRESS");
+
+  if (!intents.length) intents.push("OTHER");
+
+  // Độ tin: từ khoá càng rõ, thực thể càng cứng (SĐT) thì càng chắc. "OTHER" trơ trọi là KHÔNG chắc.
+  let confidence = 0;
+  if (phone) confidence = Math.max(confidence, 0.95);
+  if (evidence.length >= 2) confidence = Math.max(confidence, 0.9);
+  else if (evidence.length === 1) confidence = Math.max(confidence, 0.8);
+  if (looksLikeAddress) confidence = Math.max(confidence, 0.85);
+  // Thực thể bóc được là bằng chứng MẠNH HƠN từ khoá: "size L" không khớp từ khoá nào nhưng nói
+  // rõ hơn mọi từ khoá rằng khách đang chọn gì. Chấm điểm theo từ khoá thôi thì câu ấy rơi xuống
+  // "không hiểu" và cả cuộc bán hàng bị chuyển người ngay ở lượt thứ hai.
+  if (size || color) confidence = Math.max(confidence, 0.85);
+  if (quantity !== null) confidence = Math.max(confidence, 0.8);
+  if (intents.length === 1 && intents[0] === "OTHER") confidence = 0.2;
+
+  return {
+    intents: intents.slice(0, 4),
+    entities: {
+      ...EMPTY_ENTITIES,
+      productText: text.slice(0, 200),
+      productCode,
+      size,
+      color,
+      quantity,
+      phone,
+      address: looksLikeAddress ? text.trim().slice(0, 400) : "",
+      province: "",
+      heightCm: body.heightCm,
+      weightKg: body.weightKg,
+    },
+    confidence,
+    evidence: evidence.join(", ").slice(0, 300),
+    tier: "RULE",
+  };
+}
+
+/** Luật đã đủ chắc để KHỎI gọi mô hình chưa. */
+export function ruleIsEnough(understanding: Understanding): boolean {
+  return understanding.confidence >= CONFIDENCE_FLOOR.RULE;
+}
+
+/**
+ * Gộp kết quả của mô hình lên trên kết quả luật: LUẬT THẮNG ở những thực thể cứng
+ * (SĐT, size, màu, số lượng) vì chúng nhận ra được chắc chắn; mô hình chỉ bổ sung phần luật để
+ * trống. Không bao giờ để mô hình ghi đè một SĐT mà luật đã đọc được từ chính tin nhắn.
+ */
+export function mergeUnderstanding(rule: Understanding, model: z.infer<typeof UNDERSTANDING_SCHEMA>, tier: "ECONOMY" | "STRONG"): Understanding {
+  return {
+    intents: model.intents.length ? model.intents : rule.intents,
+    entities: {
+      productText: rule.entities.productText || model.entities.productText,
+      productCode: rule.entities.productCode || model.entities.productCode,
+      size: rule.entities.size || model.entities.size,
+      color: rule.entities.color || model.entities.color,
+      quantity: rule.entities.quantity ?? model.entities.quantity,
+      phone: rule.entities.phone || normalizePhone(model.entities.phone),
+      address: rule.entities.address || model.entities.address,
+      province: rule.entities.province || model.entities.province,
+      heightCm: rule.entities.heightCm ?? model.entities.heightCm,
+      weightKg: rule.entities.weightKg ?? model.entities.weightKg,
+    },
+    confidence: Math.max(rule.confidence, model.confidence),
+    evidence: [rule.evidence, model.evidence].filter(Boolean).join(" · ").slice(0, 300),
+    tier,
+  };
+}
+
+/** Lời dặn cho mô hình ở bước hiểu. KHÔNG chứa bí mật, không chứa giá, không chứa tồn kho. */
+export function understandSystemPrompt(): string {
+  return [
+    "Bạn là bộ bóc ý định cho một shop thời trang Việt Nam bán qua Facebook.",
+    "Đọc MỘT tin nhắn của khách và trả về JSON thuần theo đúng lược đồ, không thêm lời dẫn.",
+    `Trường "intents": mảng, mỗi phần tử là một trong ${SALES_INTENTS.join(", ")}.`,
+    'Trường "entities": productText, productCode, size, color, quantity, phone, address, province, heightCm, weightKg.',
+    'Trường "confidence": số 0–1. Không chắc thì để thấp, KHÔNG đoán bừa.',
+    'Trường "evidence": trích đúng cụm chữ trong tin nhắn đã dẫn tới kết luận.',
+    "TUYỆT ĐỐI không bịa số điện thoại, địa chỉ, giá tiền hay tồn kho. Không có thì để rỗng / null.",
+  ].join("\n");
+}
