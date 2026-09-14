@@ -71,16 +71,17 @@ group by page_id;
 \echo '════════ 5. BÓC ĐƯỢC GÌ TỪ HỘI THOẠI ════════'
 \echo '(NULL = CHƯA BÓC ĐƯỢC, không phải "không có" — hai thứ khác nhau)'
 select
-  count(*)                                                                   as "hội thoại",
-  count(*) filter (where state->>'productId'   is not null)                  as "nhận ra sản phẩm",
-  count(*) filter (where state->>'variantId'   is not null)                  as "nhận ra mẫu mã",
-  count(*) filter (where state->>'size'        is not null)                  as "size",
-  count(*) filter (where state->>'color'       is not null)                  as "màu",
-  count(*) filter (where coalesce(phone, '') <> '' or state->>'phone' is not null) as "SĐT",
-  count(*) filter (where state->>'address'     is not null)                  as "địa chỉ",
-  count(*) filter (where state->>'province'    is not null)                  as "tỉnh/thành",
-  count(*) filter (where (state->>'purchaseIntent')::boolean)                as "có ý định mua",
-  count(*) filter (where (state->>'confirmed')::boolean)                     as "đã xác nhận chốt"
+  count(*)                                                                    as "hội thoại",
+  count(*) filter (where state->>'productId' is not null)                     as "nhận ra sản phẩm",
+  count(*) filter (where state->>'variantId' is not null)                     as "nhận ra mẫu mã",
+  count(*) filter (where nullif(state->>'size', '')     is not null)          as "size",
+  count(*) filter (where nullif(state->>'color', '')    is not null)          as "màu",
+  count(*) filter (where coalesce(nullif(phone, ''), nullif(state->>'phone', '')) is not null) as "SĐT",
+  count(*) filter (where nullif(state->>'address', '')  is not null)          as "địa chỉ",
+  count(*) filter (where nullif(state->>'province', '') is not null)          as "tỉnh/thành",
+  count(*) filter (where coalesce((state->>'purchaseIntent')::boolean, false)) as "có ý định mua",
+  count(*) filter (where jsonb_typeof(state->'pending') = 'object')           as "đã đọc bản chốt",
+  count(*) filter (where stage in ('CONFIRMED', 'ORDER_CREATED'))             as "khách đã chốt"
 from sales_conversations;
 
 \echo ''
@@ -139,3 +140,69 @@ select
   (select count(*) from sales_messages where from_agent)                        as "tin do máy (phải 0)",
   (select count(*) from sales_conversations where order_id is not null)         as "đơn do máy tạo (phải 0)",
   (select count(*) from ai_tool_calls where tool in ('order.create_draft','order.confirm') and outcome = 'OK') as "công cụ lên đơn CHẠY ĐƯỢC (phải 0)";
+
+\echo ''
+\echo '════════ 5B. SỐ ĐO CƠ THỂ & Ý ĐỊNH — ĐỌC TỪ ai_runs.understanding ════════'
+\echo '(SalesState KHÔNG giữ số đo; chúng chỉ sống trong bản hiểu của từng lượt chạy)'
+select
+  count(*)                                                                as "lượt chạy",
+  count(*) filter (where nullif(understanding->'entities'->>'heightCm','') is not null) as "chiều cao",
+  count(*) filter (where nullif(understanding->'entities'->>'weightKg','') is not null) as "cân nặng",
+  count(*) filter (where nullif(understanding->'entities'->>'bustCm','')   is not null) as "vòng 1",
+  count(*) filter (where nullif(understanding->'entities'->>'waistCm','')  is not null) as "vòng 2",
+  count(*) filter (where nullif(understanding->'entities'->>'hipCm','')    is not null) as "vòng 3",
+  count(*) filter (where understanding->'intents' ? 'PURCHASE_INTENT')    as "ý định mua",
+  count(*) filter (where understanding->'intents' ? 'SIZE_QUESTION')      as "hỏi size",
+  count(*) filter (where understanding->'intents' ? 'PRICE_QUESTION')     as "hỏi giá",
+  count(*) filter (where understanding->'intents' ? 'SHIPPING_QUESTION')  as "hỏi ship"
+from ai_runs where subject_type = 'CONVERSATION' and understanding is not null;
+
+\echo ''
+\echo 'Ý định nhận ra được, đếm theo từng loại:'
+select y as "ý định", count(*) as "lượt"
+from ai_runs, lateral jsonb_array_elements_text(coalesce(understanding->'intents', '[]'::jsonb)) y
+where subject_type = 'CONVERSATION' group by y order by count(*) desc;
+
+\echo ''
+\echo '════════ 13. TỪNG HỘI THOẠI — CHỌN VÍ DỤ TIÊU BIỂU ════════'
+\echo '(KHÔNG in nội dung tin khách: log của Actions là CÔNG KHAI. Chỉ in dấu hiệu có/không.)'
+select
+  left(c.external_id, 10)                                    as "hội thoại",
+  c.stage                                                    as "giai đoạn",
+  (select count(*) from sales_messages m where m.conversation_id = c.id)                        as "tin",
+  (select count(*) from sales_messages m where m.conversation_id = c.id and m.sender_type = 'CUSTOMER') as "khách",
+  (select count(*) from sales_messages m where m.conversation_id = c.id and m.from_page)        as "shop",
+  case when c.state->>'productId' is not null then '✓' else '·' end                             as "SP",
+  case when c.state->>'variantId' is not null then '✓' else '·' end                             as "mẫu",
+  case when nullif(c.state->>'color','') is not null then '✓' else '·' end                      as "màu",
+  case when nullif(c.state->>'size','')  is not null then '✓' else '·' end                      as "size",
+  case when coalesce(nullif(c.phone,''), nullif(c.state->>'phone','')) is not null then '✓' else '·' end as "SĐT",
+  case when nullif(c.state->>'address','') is not null then '✓' else '·' end                    as "ĐC",
+  case when coalesce((c.state->>'purchaseIntent')::boolean, false) then '✓' else '·' end        as "muốn mua",
+  r.status                                                   as "kết cục",
+  r.tier                                                     as "nấc",
+  coalesce(r.escalation_reason, '·')                         as "lý do chuyển người",
+  s.action                                                   as "hành động",
+  round(s.confidence::numeric, 2)                            as "tin cậy",
+  length(s.suggested_reply)                                  as "dài câu máy",
+  case when coalesce(s.human_reply,'') <> '' then '✓' else '·' end                              as "có câu người"
+from sales_conversations c
+left join lateral (
+  select * from ai_runs r2 where r2.subject_type = 'CONVERSATION' and r2.subject_id = c.id
+  order by r2.created_at desc limit 1) r on true
+left join lateral (
+  select * from sales_suggestions s2 where s2.conversation_id = c.id
+  order by s2.created_at desc limit 1) s on true
+order by c.stage, c.external_id;
+
+\echo ''
+\echo '════════ 14. CÂU MÁY SOẠN (chỉ đầu ra của máy, đã che mọi chữ số) ════════'
+\echo '(Không in tin nhắn của khách. Chữ số bị thay bằng ● để không lộ SĐT/địa chỉ/giá.)'
+select
+  left(c.external_id, 10)                                          as "hội thoại",
+  s.action                                                         as "hành động",
+  s.stage_before || ' → ' || s.stage_after                         as "giai đoạn",
+  left(regexp_replace(s.suggested_reply, '[0-9]', '●', 'g'), 180)  as "câu máy soạn (đã che số)"
+from sales_suggestions s
+join sales_conversations c on c.id = s.conversation_id
+order by c.external_id, s.created_at;
