@@ -847,6 +847,17 @@ async function main() {
   for (const basis of ["profit1", "profit2", "nominal", "cash"] as const) {
     const mk = await getMarketerReport(all, basis);
     assert.equal(mk.totals.operating, mk.totals.operatingEntered + mk.totals.fixedCost + mk.totals.perOrderOps, `vận hành lương (${basis})`);
+    /*
+      ĐỘ PHỦ NGUỒN QUY KẾT PHẢI KHÉP KÍN.
+
+      Bốn nhóm (ảnh chụp theo mốc đơn lên · bảng gán phẳng · quảng cáo lấp chỗ · chưa có căn cứ) là
+      một PHÂN HOẠCH của doanh thu đem chia: một đồng đi bằng đúng MỘT căn cứ. Cộng không bằng tổng
+      nghĩa là có đồng bị đếm hai lần hoặc rơi mất, và cái bảng "chia bằng căn cứ nào" trên màn hình
+      lập tức nói dối.
+    */
+    const cov = mk.attributionCoverage;
+    assert.equal(cov.snapshot + cov.legacyPage + cov.ads + cov.unmapped, cov.total, `độ phủ quy kết khép kín (${basis})`);
+    for (const [ten, v] of Object.entries(cov)) assert.ok(v >= 0, `độ phủ ${ten} không âm (${basis})`);
     await getPayrollReport(all, basis);
   }
   const nb = await getNominalMarketerBreakdown(all);
