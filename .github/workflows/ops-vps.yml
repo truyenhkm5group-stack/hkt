@@ -70,6 +70,8 @@ on:
           - ai-staging-preflight  # CHỈ ĐỌC: chụp hiện trạng + kiểm 7 lớp va chạm + RAM/đĩa
           - ai-staging-image      # dựng ảnh trên máy chạy GitHub rồi đẩy lên GHCR (KHÔNG chạm VPS)
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
+          - ai-staging-page-token # sinh page_access_token cho MỘT page (arg = PAGE_ID) rồi ghi vào .env.staging
+          - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -150,6 +152,14 @@ jobs:
           tags: |
             ${{ env.STAGING_IMAGE_NAME }}:latest
             ${{ env.STAGING_IMAGE_NAME }}:${{ github.sha }}
+          # TRẦN HEAP CỦA LƯỢT DỰNG — chính Dockerfile dặn dòng này, và bỏ quên nó là lỗi thứ ba
+          # liên tiếp của lượt dựng ảnh. Mặc định `BUILD_HEAP_MB=1024` sinh ra để bảo vệ đường dựng
+          # TAY TRÊN VPS (máy ~1,9 GB đang chạy Postgres + app + scheduler + Caddy — sự cố
+          # #208/#227/#228), nên nó phải giữ nguyên ở Dockerfile. Máy chạy GitHub có 15,6 GB và chỉ
+          # dựng đúng một ảnh: ở đây 1024 MB làm `next build` chết ở bước kiểm kiểu với
+          # "JavaScript heap out of memory".
+          build-args: |
+            BUILD_HEAP_MB=4096
           # KHÔNG khai đệm build. Hai lượt đầu (14/09/2026) hỏng sau ĐÚNG MỘT GIÂY, và log nói
           # thẳng lý do: "Cache export is not supported for the docker driver."
           #
@@ -208,6 +218,10 @@ jobs:
           STAGING_IMAGE: ghcr.io/${{ github.repository }}-ai-staging:latest
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Token NGƯỜI DÙNG Pancake — chỉ dùng đúng một lần để sinh page token, không bao giờ ghi
+          # xuống đĩa VPS. GitHub che giá trị trong log; ô "arg" thì KHÔNG, nên token tuyệt đối
+          # không được đi qua đó.
+          PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ vars.VPS_USER || 'root' }}
@@ -215,7 +229,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN
           script: |
             set -e
             cd /root/erp
@@ -600,6 +614,33 @@ jobs:
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-up.sh?ref=${STAGING_BRANCH}" > /tmp/staging-up.sh
                 STAGING_BRANCH="$STAGING_BRANCH" STAGING_IMAGE="$STAGING_IMAGE" \
                   GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" bash /tmp/staging-up.sh ;;
+
+              ai-staging-page-token)
+                # `arg` = MÃ PAGE. Mã page không phải bí mật (nó nằm trên URL của chính trang ấy).
+                # Token người dùng đi qua biến môi trường, không qua ô nhập.
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/pancake-page-token.sh?ref=${STAGING_BRANCH}" > /tmp/pancake-page-token.sh
+                PANCAKE_PAGE_ID="${ARG:-}" bash /tmp/pancake-page-token.sh
+                rm -f /tmp/pancake-page-token.sh
+                echo ""
+                echo "── Dựng lại RIÊNG container ứng dụng của bản chạy thử để nó đọc khoá mới ──"
+                cd /opt/vnx-ai-staging
+                docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                sleep 12
+                curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-ingest)
+                cd /opt/vnx-ai-staging
+                # TRẦN CỨNG: mặc định 20 hội thoại, cửa sổ 24 giờ. Ô `arg` chỉ để HẸP LẠI thêm.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npm run ai:ingest -- ${ARG:---hours=24 --max=20}
+                echo ""
+                echo "── Bằng chứng KHÔNG gửi gì cho khách ──"
+                docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
+                  -c "select '  tin đã gửi: ' || count(*) || ' (phải 0)' from sales_suggestions where sent;" \
+                  -c "select '  tin do máy soạn nằm trong bảng tin nhắn: ' || count(*) || ' (phải 0)' from sales_messages where from_agent;" \
+                  -c "select '  hội thoại: ' || count(*) from sales_conversations;" \
+                  -c "select '  tin nhắn: ' || count(*) from sales_messages;" ;;
 
               ai-staging-status)
                 echo "── container bản chạy thử ──"
