@@ -293,6 +293,34 @@ căn cứ" trên màn hình, kèm lối ra — không bị giấu đi.
 
 ---
 
+**Hiện trạng khai báo trên production** (cùng lượt đo):
+
+```
+payroll.recognition                (chưa khai)  ⇒ chạy mặc định LEGACY_EXPENSES
+nhân sự khai trong sổ lương                  4
+  … có khai "Email đăng nhập ERP"            0   ← xem 3b mục 2, việc phải làm NGAY
+bảng gán phẳng pageMarketers (số page)       0   ← rỗng, đúng như mục 1.5
+dòng gán fanpage CÓ MỐC HIỆU LỰC             8   ← nguồn có thẩm quyền đang chạy
+khoản chi nhóm "Lương" ở bảng Chi phí        0
+dòng hàng TẶNG (is_bonus)                    0   ·  giá vốn hàng tặng: 0 ₫
+```
+
+Bốn điều đọc ra, và cả bốn đều đổi mức khẩn của một mục dưới đây:
+
+1. **`payroll.recognition` chưa khai** ⇒ chi phí nhân sự vẫn đi đường bảng Chi phí. Rủi ro "chuyển
+   nguồn mới phủ được một phần" (mục 5.1) là **tiềm ẩn, chưa xảy ra**. Đừng bật cho tới khi chốt
+   được cơ sở hoa hồng.
+2. **0/4 nhân sự có email đăng nhập** ⇒ hiện KHÔNG ai khớp được bằng khoá tài khoản. Trước bản này
+   nhánh so TÊN có thể là thứ duy nhất làm quyền "xem của mình" chạy được — nay nó đã bị bỏ, nên
+   người chỉ có quyền ấy sẽ thấy bảng rỗng kèm câu chỉ đường. Đây là hướng AN TOÀN (mất quyền xem,
+   không lộ dữ liệu) nhưng phải khai email thì họ mới xem lại được.
+3. **0 khoản chi nhóm "Lương"** ⇒ ERP hiện **không có chứng từ nào nói lương đã từng được trả**.
+   Thẻ "Đã trả trong kỳ" sẽ hiện `0 ₫ · 0 khoản chi` — đúng với chứng từ đang có, và chính con số
+   ấy nói rằng chưa đối chiếu được "còn phải trả" với thực tế.
+4. **0 dòng hàng tặng, giá vốn hàng tặng 0 ₫** ⇒ lỗ hổng giá vốn quà tặng (mục 5.2) hôm nay
+   **không làm sai một đồng nào**. Nó vẫn phải sửa trước khi shop bắt đầu tặng hàng, nhưng không
+   phải việc gấp.
+
 ## 3a. XÁC MINH SAU TRIỂN KHAI — đợt 1 (deploy #286, SHA `8076fd1`, 14/09 18:43)
 
 Chạy `ops run-job "fanpage-attribution --dryRun=1"` trên **chính bản đã triển khai**:
@@ -398,6 +426,8 @@ hoa hồng cùng đi đường bảng Chi phí, không thiếu khoản nào.
 tặng vẫn tốn tiền thật và vẫn trừ tồn (AGENTS.md mục 10).
 
 Hệ quả: một marketer tặng nhiều hàng có lợi nhuận cá nhân CAO HƠN thực tế ⇒ hoa hồng cao hơn.
+**Đo 14/09: production có 0 dòng `is_bonus`, giá vốn hàng tặng 0 ₫** — nên hôm nay lỗ hổng này
+không làm sai một đồng nào. Phải sửa TRƯỚC khi shop bắt đầu tặng hàng, không phải việc gấp.
 
 Đây **không** phải lỗi riêng của bảng lương mà là một quy ước chạy suốt mười tệp truy vấn; sửa lệch
 một chỗ sẽ làm bảng lương không còn khớp Báo cáo lợi nhuận. **Phương án đề nghị:** bỏ `is_bonus` ra
