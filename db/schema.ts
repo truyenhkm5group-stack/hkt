@@ -1120,6 +1120,400 @@ export const settings = pgTable("settings", {
   updatedAt: updatedAt(),
 });
 
+// ───────────────────────── NỀN TẢNG NHÂN SỰ AI ─────────────────────────
+//
+// Mười ba bảng dưới đây là hạ tầng DÙNG CHUNG cho mọi nhân sự AI sau này, không phải hạ tầng
+// riêng của bán hàng: bốn bảng đầu (`ai_agents` … `ai_runs`) không có một cột nào nhắc tới đơn
+// hàng hay hội thoại. Miền bán hàng nằm gọn trong nhóm `sales_*` ở cuối.
+//
+// Nguyên tắc chung với phần còn lại của ERP: nền tảng AI KHÔNG giữ sự thật nghiệp vụ. Không bảng
+// nào ở đây được dùng làm nguồn cho giá, tồn, tiền, kết quả đơn hay trạng thái vận đơn.
+
+/** Sổ đăng ký nhân sự AI. Mỗi dòng là một "nhân viên máy" với nấc quyền hạn riêng. */
+export const aiAgents = pgTable(
+  "ai_agents",
+  {
+    id: id(),
+    /** Khoá ổn định dùng trong mã nguồn (`sales`), KHÔNG đổi — lượt chạy cũ đã lưu nó. */
+    key: text("key").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** OFF · SHADOW · COPILOT · AUTO — xem `lib/constants/ai.ts`. Mặc định phải là nấc an toàn. */
+    mode: text("mode").notNull().default("SHADOW"),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Bản đang chạy; đổi bản là một dòng mới ở `ai_agent_versions`, không sửa đè. */
+    activeVersionId: text("active_version_id"),
+    /** Loại sự kiện mà nhân sự này nhận việc (theo `AI_EVENT_TYPES`). */
+    subscribes: text("subscribes").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("ai_agents_mode_idx").on(t.mode)],
+);
+
+/**
+ * Bản của một nhân sự AI: lời dặn, danh sách công cụ được phép, cách định tuyến mô hình.
+ * BẤT BIẾN sau khi tạo — lượt chạy trỏ tới bản cụ thể nên đọc lại lịch sử mới đúng bối cảnh.
+ */
+export const aiAgentVersions = pgTable(
+  "ai_agent_versions",
+  {
+    id: id(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => aiAgents.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /** Lời dặn hệ thống (không chứa bí mật, không chứa dữ liệu khách). */
+    systemPrompt: text("system_prompt").notNull().default(""),
+    /** Công cụ được phép gọi — cổng công cụ đối chiếu với đúng danh sách này. */
+    allowedTools: text("allowed_tools").array().notNull().default(sql`'{}'::text[]`),
+    /** Cấu hình định tuyến mô hình (nấc, tên mô hình, trần token) dạng JSON. */
+    routing: jsonb("routing"),
+    notes: text("notes").notNull().default(""),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("ai_agent_versions_uq").on(t.agentId, t.version)],
+);
+
+/**
+ * SỰ KIỆN NỘI BỘ — lớp chiếu từ miền nghiệp vụ sang nền tảng AI.
+ * Chỉ mang khoá tra cứu, không mang bản sao trạng thái (xem `lib/constants/ai-events.ts`).
+ */
+export const aiEvents = pgTable(
+  "ai_events",
+  {
+    id: id(),
+    type: text("type").notNull(),
+    source: text("source").notNull().default(""),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    payload: jsonb("payload"),
+    /** PENDING · DISPATCHED · IGNORED · FAILED */
+    status: text("status").notNull().default("PENDING"),
+    error: text("error"),
+    /** Trùng khoá = cùng một sự việc, dù được đẩy lại bao nhiêu lần. NULL = không nhận dạng được. */
+    dedupeKey: text("dedupe_key"),
+    /** Mốc sự việc theo bên gửi, khác `created_at` là mốc ERP ghi nhận. */
+    occurredAt: ts("occurred_at"),
+    dispatchedAt: ts("dispatched_at"),
+    /** Số lần cùng sự việc được đẩy tới (1 = lần đầu). */
+    deliveryCount: integer("delivery_count").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("ai_events_dedupe_uq").on(t.dedupeKey),
+    index("ai_events_status_idx").on(t.status, t.createdAt),
+    index("ai_events_subject_idx").on(t.subjectType, t.subjectId),
+  ],
+);
+
+/** Một việc giao cho nhân sự AI. Tách khỏi `ai_runs` vì một việc có thể chạy lại nhiều lượt. */
+export const aiTasks = pgTable(
+  "ai_tasks",
+  {
+    id: id(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => aiAgents.id, { onDelete: "cascade" }),
+    eventId: text("event_id").references(() => aiEvents.id, { onDelete: "set null" }),
+    kind: text("kind").notNull(),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    /** PENDING · RUNNING · DONE · FAILED · CANCELLED */
+    status: text("status").notNull().default("PENDING"),
+    payload: jsonb("payload"),
+    dedupeKey: text("dedupe_key"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    startedAt: ts("started_at"),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("ai_tasks_dedupe_uq").on(t.dedupeKey),
+    index("ai_tasks_status_idx").on(t.status, t.createdAt),
+    index("ai_tasks_agent_idx").on(t.agentId, t.createdAt),
+  ],
+);
+
+/**
+ * MỘT LƯỢT CHẠY — đơn vị quan sát. Mọi thứ cần để dựng lại một quyết định đều nằm ở đây hoặc
+ * trỏ về đây: tin nhắn vào, trạng thái trước, ý định / thực thể bóc được, quyết định, câu gợi ý,
+ * trạng thái sau, mô hình, token, chi phí, độ trễ, lỗi.
+ */
+export const aiRuns = pgTable(
+  "ai_runs",
+  {
+    id: id(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => aiAgents.id, { onDelete: "cascade" }),
+    agentVersionId: text("agent_version_id").references(() => aiAgentVersions.id, { onDelete: "set null" }),
+    taskId: text("task_id").references(() => aiTasks.id, { onDelete: "set null" }),
+    eventId: text("event_id").references(() => aiEvents.id, { onDelete: "set null" }),
+    /** Nấc quyền hạn TẠI LÚC CHẠY — đọc lại sau này mới biết vì sao lượt đó không gửi tin. */
+    mode: text("mode").notNull().default("SHADOW"),
+    /** RUNNING · SUCCEEDED · FAILED · SKIPPED · HANDED_OFF */
+    status: text("status").notNull().default("RUNNING"),
+    subjectType: text("subject_type").notNull().default(""),
+    subjectId: text("subject_id").notNull().default(""),
+    /** Tin nhắn / dữ kiện đầu vào của lượt chạy. */
+    input: jsonb("input"),
+    stateBefore: jsonb("state_before"),
+    stateAfter: jsonb("state_after"),
+    /** Ý định và thực thể bóc được (đã qua kiểm lược đồ). */
+    understanding: jsonb("understanding"),
+    /** QUYẾT ĐỊNH — kết quả của hàm thuần, không phải văn bản mô hình. */
+    decision: jsonb("decision"),
+    /** Câu gợi ý cho nhân viên. Ở nấc SHADOW đây là TOÀN BỘ đầu ra, không gửi đi đâu cả. */
+    suggestedReply: text("suggested_reply").notNull().default(""),
+    /** Nấc xử lý cao nhất đã dùng: RULE · ECONOMY · STRONG · HUMAN. */
+    tier: text("tier").notNull().default("RULE"),
+    /** Vì sao phải leo nấc (nếu có). */
+    escalationReason: text("escalation_reason"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    /** Chi phí ƯỚC TÍNH (VND). NULL = chưa khai đơn giá mô hình ⇒ CHƯA BIẾT, không phải 0đ. */
+    costVnd: integer("cost_vnd"),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    error: text("error"),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ai_runs_agent_started_idx").on(t.agentId, t.startedAt),
+    index("ai_runs_subject_idx").on(t.subjectType, t.subjectId),
+    index("ai_runs_status_idx").on(t.status, t.startedAt),
+  ],
+);
+
+/** Mỗi lần nhân sự AI chạm vào ERP. Kể cả lần BỊ TỪ CHỐI — đó là dòng đáng giá nhất. */
+export const aiToolCalls = pgTable(
+  "ai_tool_calls",
+  {
+    id: id(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => aiRuns.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull().default(0),
+    tool: text("tool").notNull(),
+    /** OK · DENIED · ERROR · TIMEOUT */
+    outcome: text("outcome").notNull().default("OK"),
+    args: jsonb("args"),
+    result: jsonb("result"),
+    error: text("error"),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_tool_calls_run_idx").on(t.runId, t.seq), index("ai_tool_calls_tool_idx").on(t.tool, t.createdAt)],
+);
+
+/**
+ * SỔ CHI PHÍ MÔ HÌNH. Một dòng cho mỗi lần gọi nhà cung cấp — kể cả lần lỗi, vì lần lỗi vẫn có
+ * thể đã tính tiền token vào. `cost_vnd` NULL nghĩa là chưa khai đơn giá cho mô hình đó.
+ */
+export const aiModelCalls = pgTable(
+  "ai_model_calls",
+  {
+    id: id(),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    tier: text("tier").notNull().default("ECONOMY"),
+    /** Bước trong dây chuyền: understand · generate … */
+    step: text("step").notNull().default(""),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costVnd: integer("cost_vnd"),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    ok: boolean("ok").notNull().default(true),
+    error: text("error"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_model_calls_run_idx").on(t.runId), index("ai_model_calls_created_idx").on(t.createdAt)],
+);
+
+/** Phiếu duyệt của NGƯỜI cho một hành động của máy (dùng từ nấc COPILOT trở lên). */
+export const aiApprovals = pgTable(
+  "ai_approvals",
+  {
+    id: id(),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => aiAgents.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    subjectType: text("subject_type").notNull().default(""),
+    subjectId: text("subject_id").notNull().default(""),
+    /** PENDING · APPROVED · REJECTED · EXPIRED */
+    status: text("status").notNull().default("PENDING"),
+    payload: jsonb("payload"),
+    /** Khoá tài khoản người duyệt — quy kết đi bằng khoá, không bằng ô chữ. */
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    decidedByName: text("decided_by_name").notNull().default(""),
+    decidedAt: ts("decided_at"),
+    note: text("note").notNull().default(""),
+    expiresAt: ts("expires_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_approvals_status_idx").on(t.status, t.createdAt)],
+);
+
+/** Lỗi của nền tảng AI, kể cả lỗi xảy ra NGOÀI một lượt chạy (gói tin hỏng, nạp hội thoại lỗi). */
+export const aiErrors = pgTable(
+  "ai_errors",
+  {
+    id: id(),
+    /** WEBHOOK · INGEST · PIPELINE · TOOL · MODEL · OUTBOUND */
+    scope: text("scope").notNull(),
+    agentKey: text("agent_key").notNull().default(""),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    subjectType: text("subject_type").notNull().default(""),
+    subjectId: text("subject_id").notNull().default(""),
+    message: text("message").notNull(),
+    detail: jsonb("detail"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_errors_scope_idx").on(t.scope, t.createdAt)],
+);
+
+// ───────────────────────── Miền bán hàng ─────────────────────────
+
+/**
+ * HỘI THOẠI BÁN HÀNG. Trạng thái bán hàng do ERP giữ, không do mô hình nhớ.
+ * `human_takeover_at` khác NULL là một cái phanh cứng: mọi hành động tự động dừng lại.
+ */
+export const salesConversations = pgTable(
+  "sales_conversations",
+  {
+    id: id(),
+    /** PANCAKE · LANDING · MANUAL */
+    channel: text("channel").notNull().default("PANCAKE"),
+    pageId: text("page_id").notNull().default(""),
+    /** Mã hội thoại phía kênh — khoá tự nhiên cùng với `page_id`. */
+    externalId: text("external_id").notNull(),
+    customerId: text("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    pancakeCustomerId: text("pancake_customer_id").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    /** Giai đoạn bán hàng (`SALES_STAGES`). */
+    stage: text("stage").notNull().default("NEW_LEAD"),
+    /** Trạng thái chuẩn tắc của hội thoại: sản phẩm, mẫu mã, số lượng, địa chỉ, bản chốt đang chờ. */
+    state: jsonb("state"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** Đơn POS gắn với hội thoại (nếu đã lên đơn). */
+    orderId: text("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /** Khác NULL = NGƯỜI đang cầm; máy không được hành động. */
+    humanTakeoverAt: ts("human_takeover_at"),
+    takeoverReason: text("takeover_reason").notNull().default(""),
+    takeoverByUserId: text("takeover_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    lastCustomerMessageAt: ts("last_customer_message_at"),
+    lastShopMessageAt: ts("last_shop_message_at"),
+    lastRunAt: ts("last_run_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_conversations_external_uq").on(t.pageId, t.externalId),
+    index("sales_conversations_stage_idx").on(t.stage, t.updatedAt),
+    index("sales_conversations_takeover_idx").on(t.humanTakeoverAt),
+  ],
+);
+
+/**
+ * TIN NHẮN. `external_id` là khoá chống trùng: webhook gửi lại, job nạp lại, cả hai cùng chạy —
+ * đều không được đẻ thêm dòng. `from_page` = tin của shop; máy KHÔNG BAO GIỜ phản ứng với nó
+ * (đó là cách một con bot tự nói chuyện với chính mình).
+ */
+export const salesMessages = pgTable(
+  "sales_messages",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    externalId: text("external_id").notNull().default(""),
+    /** IN = khách gửi · OUT = shop gửi */
+    direction: text("direction").notNull().default("IN"),
+    fromPage: boolean("from_page").notNull().default(false),
+    /** Tin này do nhân sự AI gửi (chỉ có thể xảy ra từ nấc COPILOT trở lên). */
+    fromAgent: boolean("from_agent").notNull().default(false),
+    fromName: text("from_name").notNull().default(""),
+    text: text("text").notNull().default(""),
+    hasAttachment: boolean("has_attachment").notNull().default(false),
+    sentAt: ts("sent_at"),
+    raw: jsonb("raw"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_messages_external_uq").on(t.conversationId, t.externalId),
+    index("sales_messages_conv_idx").on(t.conversationId, t.sentAt),
+  ],
+);
+
+/**
+ * GỢI Ý CỦA MÁY, đặt cạnh CÂU NHÂN VIÊN THỰC SỰ ĐÃ TRẢ LỜI.
+ * Đây là bảng để trả lời câu hỏi duy nhất đáng hỏi ở nấc SHADOW: máy có làm được việc không.
+ * Ô `human_reply` được điền SAU, khi nhân viên trả lời — không đoán trước.
+ */
+export const salesSuggestions = pgTable(
+  "sales_suggestions",
+  {
+    id: id(),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    /** Tin của khách đã kích hoạt lượt chạy này. */
+    triggerMessageId: text("trigger_message_id").references(() => salesMessages.id, { onDelete: "set null" }),
+    stageBefore: text("stage_before").notNull().default(""),
+    stageAfter: text("stage_after").notNull().default(""),
+    action: text("action").notNull().default("NO_ACTION"),
+    suggestedReply: text("suggested_reply").notNull().default(""),
+    /** Độ tin của quyết định (0–1). NULL = không đo được, không phải 0. */
+    confidence: doublePrecision("confidence"),
+    /** Đã gửi cho khách chưa — ở nấc SHADOW luôn là false. */
+    sent: boolean("sent").notNull().default(false),
+    /** Câu nhân viên thực sự gửi sau đó (điền khi nạp tin mới). */
+    humanReply: text("human_reply").notNull().default(""),
+    humanRepliedAt: ts("human_replied_at"),
+    /** Người phụ trách chấm: AGREE · DIFFERENT · WRONG · null (chưa chấm). */
+    verdict: text("verdict"),
+    verdictNote: text("verdict_note").notNull().default(""),
+    verdictByUserId: text("verdict_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_suggestions_conv_idx").on(t.conversationId, t.createdAt),
+    index("sales_suggestions_verdict_idx").on(t.verdict, t.createdAt),
+  ],
+);
+
+/** Hẹn nhắn lại. CHỈ là danh sách chờ — không có đường nào từ bảng này tự gửi tin cho khách. */
+export const salesFollowups = pgTable(
+  "sales_followups",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    dueAt: ts("due_at").notNull(),
+    reason: text("reason").notNull().default(""),
+    /** PENDING · DONE · CANCELLED */
+    status: text("status").notNull().default("PENDING"),
+    suggestedMessage: text("suggested_message").notNull().default(""),
+    doneAt: ts("done_at"),
+    doneByUserId: text("done_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("sales_followups_due_idx").on(t.status, t.dueAt)],
+);
+
 // ───────────────────────── Relations ─────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({ auditLogs: many(auditLogs) }));
@@ -1213,3 +1607,59 @@ export type CodStatementLine = typeof codStatementLines.$inferSelect;
 export type VtpStatementFile = typeof vtpStatementFiles.$inferSelect;
 export type OrderReturn = typeof orderReturns.$inferSelect;
 export type InventoryHistory = typeof inventoryHistories.$inferSelect;
+
+// ───────────────────────── Quan hệ & kiểu: nền tảng nhân sự AI ─────────────────────────
+
+export const aiAgentsRelations = relations(aiAgents, ({ many }) => ({ versions: many(aiAgentVersions), runs: many(aiRuns), tasks: many(aiTasks) }));
+export const aiAgentVersionsRelations = relations(aiAgentVersions, ({ one }) => ({ agent: one(aiAgents, { fields: [aiAgentVersions.agentId], references: [aiAgents.id] }) }));
+export const aiTasksRelations = relations(aiTasks, ({ one, many }) => ({
+  agent: one(aiAgents, { fields: [aiTasks.agentId], references: [aiAgents.id] }),
+  event: one(aiEvents, { fields: [aiTasks.eventId], references: [aiEvents.id] }),
+  runs: many(aiRuns),
+}));
+export const aiRunsRelations = relations(aiRuns, ({ one, many }) => ({
+  agent: one(aiAgents, { fields: [aiRuns.agentId], references: [aiAgents.id] }),
+  version: one(aiAgentVersions, { fields: [aiRuns.agentVersionId], references: [aiAgentVersions.id] }),
+  task: one(aiTasks, { fields: [aiRuns.taskId], references: [aiTasks.id] }),
+  event: one(aiEvents, { fields: [aiRuns.eventId], references: [aiEvents.id] }),
+  toolCalls: many(aiToolCalls),
+  modelCalls: many(aiModelCalls),
+}));
+export const aiToolCallsRelations = relations(aiToolCalls, ({ one }) => ({ run: one(aiRuns, { fields: [aiToolCalls.runId], references: [aiRuns.id] }) }));
+export const aiModelCallsRelations = relations(aiModelCalls, ({ one }) => ({ run: one(aiRuns, { fields: [aiModelCalls.runId], references: [aiRuns.id] }) }));
+export const aiApprovalsRelations = relations(aiApprovals, ({ one }) => ({
+  run: one(aiRuns, { fields: [aiApprovals.runId], references: [aiRuns.id] }),
+  agent: one(aiAgents, { fields: [aiApprovals.agentId], references: [aiAgents.id] }),
+}));
+
+export const salesConversationsRelations = relations(salesConversations, ({ one, many }) => ({
+  customer: one(customers, { fields: [salesConversations.customerId], references: [customers.id] }),
+  order: one(orders, { fields: [salesConversations.orderId], references: [orders.id] }),
+  messages: many(salesMessages),
+  suggestions: many(salesSuggestions),
+  followups: many(salesFollowups),
+}));
+export const salesMessagesRelations = relations(salesMessages, ({ one }) => ({
+  conversation: one(salesConversations, { fields: [salesMessages.conversationId], references: [salesConversations.id] }),
+}));
+export const salesSuggestionsRelations = relations(salesSuggestions, ({ one }) => ({
+  conversation: one(salesConversations, { fields: [salesSuggestions.conversationId], references: [salesConversations.id] }),
+  run: one(aiRuns, { fields: [salesSuggestions.runId], references: [aiRuns.id] }),
+}));
+export const salesFollowupsRelations = relations(salesFollowups, ({ one }) => ({
+  conversation: one(salesConversations, { fields: [salesFollowups.conversationId], references: [salesConversations.id] }),
+}));
+
+export type AiAgent = typeof aiAgents.$inferSelect;
+export type AiAgentVersion = typeof aiAgentVersions.$inferSelect;
+export type AiEvent = typeof aiEvents.$inferSelect;
+export type AiTask = typeof aiTasks.$inferSelect;
+export type AiRun = typeof aiRuns.$inferSelect;
+export type AiToolCall = typeof aiToolCalls.$inferSelect;
+export type AiModelCall = typeof aiModelCalls.$inferSelect;
+export type AiApproval = typeof aiApprovals.$inferSelect;
+export type AiErrorRow = typeof aiErrors.$inferSelect;
+export type SalesConversation = typeof salesConversations.$inferSelect;
+export type SalesMessage = typeof salesMessages.$inferSelect;
+export type SalesSuggestion = typeof salesSuggestions.$inferSelect;
+export type SalesFollowup = typeof salesFollowups.$inferSelect;
