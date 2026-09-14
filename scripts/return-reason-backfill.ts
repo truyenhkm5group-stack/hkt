@@ -51,6 +51,12 @@ type QuanSat = {
   thấy, vì hai dòng ấy trông hoàn toàn hợp lệ.
 */
 const dedupeKey = reasonDedupeKey;
+/*
+  LUÔN TRUYỀN NGUỒN. Bộ lọc xử lý nguồn NGƯỜI khác hẳn nguồn máy: người gõ tay thì giữ tất (không
+  ai gõ một bước đi vào ô ghi chú), còn chữ của ĐVVC phải có căn cứ mới giữ. Gọi thiếu nguồn thì
+  mọi ghi chú của nhân viên bị chấm như chữ ĐVVC — và một câu như "khách bảo vải xù" sẽ bị CHẶN vì
+  lý do ấy chỉ người mới kết luận được, tức là ta vứt đi đúng những quan sát giá trị nhất.
+*/
 const dangGhi = dangGhiQuanSat;
 
 const rowsOf = <T,>(r: unknown): T[] => ((r as { rows?: T[] }).rows ?? (r as T[])) as T[];
@@ -93,7 +99,7 @@ async function main() {
   );
   for (const e of ev) {
     for (const [txt, ref] of [[e.status_name, "status"], [e.note, "note"]] as const) {
-      if (!dangGhi(txt)) continue;
+      if (!dangGhi(txt, "CARRIER_TEXT")) continue;
       gom.push({ shipmentId: e.shipment_id, orderId: e.order_id, source: "CARRIER_TEXT", rawText: txt.trim(), occurredAt: new Date(e.occurred_at), sourceRef: `shipment_events:${e.id}:${ref}`, actorEmail: "" });
     }
   }
@@ -116,7 +122,7 @@ async function main() {
         from shipment_care c where coalesce(c.last_note,'') <> ''`),
   );
   for (const c of care) {
-    if (!dangGhi(c.last_note)) continue;
+    if (!dangGhi(c.last_note, "CARE_NOTE")) continue;
     gom.push({ shipmentId: c.shipment_id, orderId: c.order_id, source: "CARE_NOTE", rawText: c.last_note.trim(), occurredAt: new Date(c.at), sourceRef: `shipment_care:${c.id}`, actorEmail: c.by });
   }
 
@@ -127,7 +133,7 @@ async function main() {
         from care_actions a where coalesce(a.note,'') <> ''`),
   );
   for (const a of act) {
-    if (!dangGhi(a.note) || (!a.shipment_id && !a.order_id)) continue;
+    if (!dangGhi(a.note, "CARE_NOTE") || (!a.shipment_id && !a.order_id)) continue;
     gom.push({ shipmentId: a.shipment_id, orderId: a.order_id, source: "CARE_NOTE", rawText: a.note.trim(), occurredAt: new Date(a.at), sourceRef: `care_actions:${a.id}`, actorEmail: a.by });
   }
 
@@ -138,7 +144,7 @@ async function main() {
         from return_inspections i where coalesce(i.note,'') <> ''`),
   );
   for (const i of insp) {
-    if (!dangGhi(i.note) || !i.shipment_id) continue;
+    if (!dangGhi(i.note, "WAREHOUSE_INSPECTION") || !i.shipment_id) continue;
     gom.push({ shipmentId: i.shipment_id, orderId: null, source: "WAREHOUSE_INSPECTION", rawText: i.note.trim(), occurredAt: new Date(i.at), sourceRef: `return_inspections:${i.id}`, actorEmail: i.by });
   }
 
@@ -149,7 +155,7 @@ async function main() {
         from order_returns r where r.order_id is not null and coalesce(r.status_name,'') <> ''`),
   );
   for (const r of pk) {
-    if (!dangGhi(r.status_name)) continue;
+    if (!dangGhi(r.status_name, "PANCAKE_RETURN")) continue;
     gom.push({ shipmentId: null, orderId: r.order_id, source: "PANCAKE_RETURN", rawText: r.status_name.trim(), occurredAt: new Date(r.at), sourceRef: `order_returns:${r.id}`, actorEmail: "" });
   }
 
