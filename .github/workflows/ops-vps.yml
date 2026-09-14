@@ -222,6 +222,23 @@ jobs:
             C="docker compose -f docker-compose.prod.yml"
             # lấy script mới nhất trên main qua GitHub API (không bị CDN raw.githubusercontent cache 5 phút)
             fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=main"; }
+            # Kiểm sức khoẻ production. In container erp-* nếu có, rồi PHÁN XÉT bằng /api/health.
+            #
+            # Vì sao là một hàm chứ không phải hai dòng chép đi chép lại: bản trước dùng
+            # `docker ps | grep '^  erp-'` làm dòng cuối, và `grep` không khớp thì thoát 1 — dưới
+            # `set -e` nó GIẾT cả script ngay trước khi in kết luận. Một phép kiểm mà tự làm hỏng
+            # lượt chạy thì tệ hơn không kiểm: nó biến một lượt THÀNH CÔNG thành một lượt đỏ, và
+            # người đọc log sẽ đi tìm một sự cố không tồn tại.
+            kiem_production() {
+              echo "── production ──"
+              docker ps --format '  {{.Names}}\t{{.Status}}' 2>/dev/null | grep '^  erp-' || echo "  (docker ps không liệt kê container erp-* — xem phán xét bên dưới)"
+              if docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
+                echo "  ✓ production trả ok:true"
+                return 0
+              fi
+              echo "  ✗ production KHÔNG trả ok:true"
+              return 1
+            }
             case "$ACTION" in
               status)
                 $C ps
@@ -568,14 +585,10 @@ jobs:
               ai-staging-swap)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/vps-add-swap.sh?ref=${STAGING_BRANCH}" > /tmp/vps-add-swap.sh
-                echo "── sức khoẻ production TRƯỚC khi đổi ──"
-                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-' || echo "  (không thấy container erp-*)"
-                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo
+                echo "═══ TRƯỚC KHI ĐỔI ═══"; kiem_production
                 bash /tmp/vps-add-swap.sh 2
                 echo ""
-                echo "── sức khoẻ production SAU khi đổi (phải y nguyên) ──"
-                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
-                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo ;;
+                echo "═══ SAU KHI ĐỔI — production phải y nguyên ═══"; kiem_production ;;
 
               ai-staging-preflight)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
@@ -609,9 +622,7 @@ jobs:
                   -c "select 'bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and (table_name like 'ai\_%' or table_name like 'sales\_%');" \
                   -c "select 'tin đã gửi cho khách: ' || count(*) from sales_suggestions where sent;" 2>&1 || echo "  (chưa có container CSDL bản chạy thử)"
                 echo ""
-                echo "── production PHẢI vẫn khoẻ ──"
-                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
-                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo ;;
+                kiem_production ;;
 
               ai-staging-logs)
                 docker logs --tail 120 vnx-ai-staging-app 2>&1 || echo "(chưa có container vnx-ai-staging-app)" ;;
@@ -626,9 +637,7 @@ jobs:
                   docker compose -f docker-compose.staging.yml --env-file .env.staging down
                 fi
                 echo ""
-                echo "── production PHẢI vẫn khoẻ ──"
-                docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-'
-                docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health; echo
+                kiem_production
                 free -h ;;
 
               *) echo "Thao tác không hợp lệ: $ACTION"; exit 1 ;;
