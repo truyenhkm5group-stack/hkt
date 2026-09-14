@@ -310,7 +310,107 @@ vào hệ thống hàng tuần (`vtp_statement_files`). Bản này dùng lại �
 **Khớp từng con số với ảnh chụp phiên trước** (222 mã / 19 lặp · 507 và 243 dòng · 1P1 237/0/220 ·
 ~750 dòng món, ~727 đọc được, ~23 không): không lệch một đơn vị nào. Tệp không đổi giữa hai phiên.
 
-### Còn lại đúng MỘT thao tác, và nó không phải SSH
+### ĐÃ CHẠY THẬT TRÊN PRODUCTION — 14/09/2026
+
+Chủ shop kéo tệp vào ô *"Sổ hàng hoàn viết tay"* lúc **14:28 giờ VN**. Từ đó trở đi toàn bộ chạy
+qua thao tác ops, không SSH, không tệp trên đĩa máy chủ.
+
+**Bản nhận được đúng bản đã kiểm:**
+
+| | |
+|---|---|
+| Tên tệp | `Bản sao của Hàng hoàn HMT.xlsx` |
+| SHA-256 | `c5616055b7f18e7b051c2c33497a9ce6fca699213151cf1c689b67eb2266f5ed` |
+| Dung lượng | 45.029 byte (base64 60.040) |
+| Người tải | Truyền HK · 14/09/2026 14:28 |
+
+Băm **trùng từng ký tự** với bản đọc tại chỗ trước đó ⇒ byte không đổi trên đường đi.
+
+#### Chạy thử — phân loại 750 dòng món
+
+| Nhóm | Chi tiết đơn hoàn | Chi tiết đơn 1 phần | Tổng |
+|---|---|---|---|
+| **MATCHED** (mã vận đơn + mẫu mã đều khớp, SL trong ngưỡng) | **493** | **231** | **724** |
+| SKU_MISMATCH | 13 | 10 | 23 |
+| AMBIGUOUS_TRACKING | 1 | 0 | 1 |
+| UNMATCHED_TRACKING | 0 | 2 | 2 |
+| *(dòng nguồn)* | *507* | *243* | *750* |
+
+· mã vận đơn lần ra kiện trong ERP: **452** (đơn hoàn) + **220** (1 phần) = **672 kiện**
+· mẫu mã lần ra đúng một: 493 + 232 · số lượng trong ngưỡng kỳ vọng: 493 + 231
+· **AMBIGUOUS_SKU: 0** · **QTY_CONFLICT: 0** · **ALREADY_RECEIVED: 0** (ảnh chụp trước: 0 phiếu kiểm đếm)
+· **NO_ITEM_DETAIL: 144** mã có ở sheet tổng mà không có dòng món nào — **không** ghi gì, đúng luật:
+  mã vận đơn chứng minh danh tính kiện, **không** chứng minh trong kiện có món gì.
+
+#### Cổng an toàn — kiểm ở mức DỮ LIỆU, không phải lời hứa
+
+`select match_status, count(*), count(*) filter (where written)` sau khi ghi:
+
+| match_status | dòng | **đã ghi** | kiện |
+|---|---|---|---|
+| MATCHED | 724 | **724** | 672 |
+| SKU_MISMATCH | 23 | **0** | 20 |
+| AMBIGUOUS_TRACKING | 1 | **0** | 0 |
+| UNMATCHED_TRACKING | 2 | **0** | 0 |
+| **tổng** | **750** | **724** | **672** |
+
+Chỉ MATCHED có `written = true`. Ba nhóm còn lại: **0**, và ràng buộc `hmt_return_rec_written_check`
+ở CSDL chặn cứng chuyện ngược lại. Không dòng nào khớp bằng SĐT / tên khách / COD.
+
+#### Ảnh chụp tồn kho TRƯỚC và SAU — mọi chênh lệch giải thích được
+
+| Chỉ tiêu | Trước | Sau | Δ |
+|---|---|---|---|
+| `return_inspections` tổng | 0 | **672** | +672 |
+| … RECEIVED (chờ đếm) | 0 | **672** | +672 |
+| … ĐÃ ĐẾM | 0 | 0 | 0 |
+| `stock_receipts` kind=RETURN | 0 | **0** | **0** |
+| Món tái nhập (RESTOCKED) | 0 | **0** | **0** |
+| **TỒN THỰC TẾ tổng** | **1.985** | **1.985** | **0** |
+| `hmt_return_reconciliation` | 0 | 750 | +750 |
+| … `written` | 0 | 724 | +724 |
+
+**Tồn kho không đổi một món nào.** 724 món đi vào ô "đã về kho, chờ đếm", **không** vào tồn bán
+được — đúng AGENTS.md mục 10: hàng hoàn chỉ vào tồn khi người kho lập phiếu `RETURN` với số đếm
+thực tế. `EXPECTED → RECEIVED → INSPECTION → RESTOCKABLE/NON_RESTOCKABLE → RESTOCKED`, và lượt này
+dừng đúng ở bước thứ hai. **0 sự kiện sổ kho.**
+
+#### Chạy lại cùng tệp — không-thao-tác
+
+```
+kiện ghi nhận đã về kho: 0 (dòng món 0 · 0 món)
+dòng chứng cứ mới: 0 · bỏ qua vì đã ghi lần trước: 750
+kiện vào hàng đợi đếm: 0 — TỒN KHO CHƯA ĐỔI
+```
+
+Bảng chứng cứ sau lượt hai vẫn **đúng 750 dòng / 724 đã ghi / 672 kiện** — không nhân đôi một dòng
+nào. Khoá `idempotency_key` (UNIQUE) và `onConflictDoNothing` trên `return_inspections.shipment_id`
+làm việc của chúng.
+
+#### Mẫu để kiểm chứng từng nhóm
+
+| Nhóm | Mẫu thật |
+|---|---|
+| Đơn hoàn toàn phần | `PKE1511614327` · *Đầm Q002 / Màu: Đỏ / Size: L* → kiện `PKE1511614327` · mẫu `002 DO L` |
+| 1 phần / 1P1 | `PKE14944297721P1` (220/222 mã 1P1 lần ra kiện) |
+| Đã nhận trước đó | 0 — đây là lượt đầu tiên |
+| Mã không xác định | dòng 437: ô mã trống, bảng tính **không** gộp ô ⇒ không suy |
+| Mẫu mã lệch | `PKE1494448039` · *Quần định hình / Size: XL* → dòng sản phẩm không có mã hàng |
+| Không có trong ERP | `1.5089E+11` (Excel ghi dạng khoa học) · `VTP1824401820899` |
+
+#### Màn hình production
+
+`smoke` sau khi ghi: **51/51 đạt · 0 lỗi ứng dụng · 0 chậm**. `/inventory/returns` mở bình thường
+với 672 kiện mới trong hàng đợi đếm.
+
+#### Việc còn lại cho người — không phải lỗi máy
+
+· **23 dòng SKU_MISMATCH**: phần lớn là *"Quần định hình"* — mẫu mã sổ giấy ghi không kèm mã hàng
+  (`Q…`), nên máy **không đoán**. Đây chính là "một số sản phẩm ngoài Q002/Q003" chủ shop đã nhắc.
+· **144 mã chỉ có ở sheet tổng**: cần người kho ghi dòng món thì mới ghi nhận được.
+· **2 mã không có trong ERP** · **1 ô mã trống**.
+
+### Đường truyền: vì sao phải dựng, và nó thay cho cái gì
 
 Đã kiểm trên máy chủ sau deploy #267 (thao tác ops `returns-hmt`):
 
