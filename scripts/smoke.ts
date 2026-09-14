@@ -92,6 +92,10 @@ const ROUTES = [
   // con số của buồng lái ở trên đứng im vì không ai còn phân loại được nữa.
   "/finance-ops",
   "/cs",
+  // Hàng đợi THEO TỪNG VIỆC — tuyến duy nhất mang cả ba nút sao chép (SĐT · mã vận đơn · mã đơn).
+  // `/cs` mặc định mở tab "theo khách", nên không phủ tuyến này thì hợp đồng sao chép mã vận đơn
+  // không có chỗ nào kiểm được trên bản chạy thật.
+  "/cs?view=theo-case",
   "/outreach",
   "/landing",
   "/ideas",
@@ -206,6 +210,24 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 const TOKEN_NEAR_EXPIRY_MS = TOKEN_TTL_MS - 30_000;
 
 type Result = { route: string; verdict: Verdict; detail: string; ms: number };
+
+/**
+ * ═══════════ DẤU HIỆU BẮT BUỘC PHẢI CÓ TRONG HTML CỦA MỘT SỐ TUYẾN ═══════════
+ *
+ * Chỉ khai thứ mà THIẾU NÓ THÌ TRANG VÔ DỤNG, không khai chi tiết bố cục — một danh sách bám vào
+ * cách viết HTML sẽ đỏ mỗi lần đổi lớp CSS và rồi bị ai đó tắt đi.
+ *
+ * Dùng `aria-label` làm dấu: nó là HỢP ĐỒNG TRỢ NĂNG, ổn định hơn tên lớp, và nếu nó đổi thì nhãn
+ * người dùng trình đọc màn hình nghe thấy cũng đã đổi — đúng là chuyện đáng đỏ.
+ */
+const EXPECT: Record<string, { marker: string; why: string }[]> = {
+  "/cs": [{ marker: 'aria-label="Sao chép SĐT"', why: "CSKH phải chép được SĐT, không gõ lại" }],
+  "/cs?view=theo-case": [
+    { marker: 'aria-label="Sao chép SĐT"', why: "CSKH phải chép được SĐT, không gõ lại" },
+    { marker: 'aria-label="Sao chép mã vận đơn"', why: "gõ lại mã vận đơn sai một chữ số là tra ra đơn người khác" },
+  ],
+  "/shipments": [{ marker: 'aria-label="Sao chép mã vận đơn"', why: "bàn vận đơn sống bằng việc dán mã sang trang ĐVVC" }],
+};
 
 async function main() {
   const secret = (process.env.AUTH_SECRET ?? "").trim();
@@ -344,6 +366,28 @@ async function main() {
       if (ma) {
         const so = /(\d{3,})/.exec(ma[0])?.[1] ?? "";
         results.push({ route, verdict: "APP_ERROR", detail: `HTTP 200 nhưng gói RSC mang LỖI MÁY CHỦ (mã ${so}) — trang chỉ hiện lỗi sau khi chạy JavaScript`, ms });
+        continue;
+      }
+
+      /*
+        ═══ TRANG MỞ ĐƯỢC MÀ THIẾU CÔNG CỤ CHÍNH CŨNG LÀ TRANG HỎNG ═══
+
+        SỰ CỐ THẬT (13/09/2026). Một bản phát hành giao nút sao chép cho hàng đợi CSKH nhưng SÓT
+        bàn care; chuyện đó chỉ lộ ra lúc rà lại để viết biên bản — tức SAU khi deploy đã chạy, và
+        tốn một lượt deploy thứ hai (`docs/release-2026-09-13-cskh-returns-ops.md`).
+
+        Không lá chắn nào bắt được: trang trả 200, dựng đủ khung, không lỗi, đúng kích thước. Nó
+        chỉ thiếu mất cái nút mà cả bản phát hành sinh ra để giao. Đo mã HTTP và kích thước không
+        trả lời được câu "thứ vừa giao có thật sự ở trên đó không".
+      */
+      const thieu = (EXPECT[route] ?? []).filter((e) => !body.includes(e.marker));
+      if (thieu.length) {
+        results.push({
+          route,
+          verdict: "APP_ERROR",
+          detail: `HTTP 200 nhưng THIẾU công cụ bắt buộc: ${thieu.map((e) => `"${e.marker}" (${e.why})`).join(" · ")}`,
+          ms,
+        });
         continue;
       }
 
