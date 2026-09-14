@@ -15,6 +15,9 @@ import { inspectionDashboard, listPendingInspections } from "@/lib/returns/inspe
 import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
 import { latestHmtWorkbook } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
+import { ExceptionQueues } from "@/app/(dashboard)/inventory/returns/exception-queues";
+import { ReturnQualityCounters } from "@/app/(dashboard)/inventory/returns/quality-counters";
+import { returnDataQuality, returnExceptionQueues } from "@/lib/queries/return-exceptions";
 import { param, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn" };
@@ -46,7 +49,7 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Hàng hoàn về kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
-  const [bang, pending, choNhan, hmt, soGiay] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbook()]);
+  const [bang, pending, choNhan, hmt, soGiay, ngoaiLe, chatLuong] = await Promise.all([inspectionDashboard(), listPendingInspections(300), receiveQueue({ limit: 400, q: timKien }), hmtRunSummary(), latestHmtWorkbook(), returnExceptionQueues(), returnDataQuality()]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
 
@@ -68,6 +71,16 @@ export default async function ReturnInspectionPage({ searchParams }: { searchPar
 
       {/* Nguồn thứ ba của bàn này: sổ hàng hoàn viết tay. Chưa đối soát lần nào thì khối không hiện. */}
       <HmtSourceSection run={hmt} upload={hmtUpload} canWrite={canWrite} />
+
+      {/*
+        NGOẠI LỆ ĐỨNG NGAY SAU NGUỒN, TRƯỚC MỌI SỐ TỔNG HỢP.
+
+        26 dòng không khớp và 144 mã chỉ có mã là phần sổ giấy và ERP nói khác nhau — đó là chỗ
+        DUY NHẤT trên trang này cần một quyết định của người. Đẩy nó xuống dưới bảng số liệu là
+        cách chắc chắn nhất để không ai cuộn tới.
+      */}
+      <ExceptionQueues data={ngoaiLe} canWrite={canWrite} />
+      <ReturnQualityCounters rows={chatLuong} />
 
       {/*
         ĐƯỜNG ỐNG ĐẶT TRƯỚC TRẠM ĐẾM, CỐ Ý.

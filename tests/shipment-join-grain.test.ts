@@ -57,6 +57,19 @@ const MIEN_TRU: Record<string, string> = {
   */
   "lib/queries/dept-performance.ts": "grain là KIỆN người đó đã care (nguồn là care_case_events, mỗi sự kiện một shipment_id); kết quả đơn nối theo shipment_id đúng độ mịn",
   /*
+    HÀNG ĐỢI NGOẠI LỆ HÀNG HOÀN: grain là DÒNG SỔ GIẤY, và phép nối `shipments → order_items` chỉ
+    để trả lời "kiện NÀY kỳ vọng những mẫu mã nào" — danh sách ứng viên cho người gỡ chọn.
+
+    Không nhân được và cũng không có gì để nhân: truy vấn lọc `s.id in (...)` theo đúng những kiện
+    đã lần ra, gom theo `(s.id, v.id)`, và KHÔNG cộng một đồng nào — cột duy nhất được cộng là số
+    LƯỢNG món kỳ vọng của chính kiện đó.
+
+    Và KHÔNG được thêm `PRIMARY_ATTEMPT` vào đây: một đơn gửi lại sau khi bưu tá không lấy được có
+    hai kiện, và sổ hàng hoàn có thể nhắc tới kiện thứ hai. Lọc nó đi là để người gỡ mở ra thấy
+    "không có ứng viên nào" cho một kiện có thật.
+  */
+  "lib/queries/return-exceptions.ts": "grain là DÒNG SỔ GIẤY; nối order_items chỉ để liệt kê hàng KỲ VỌNG của chính kiện đã lần ra, không cộng tiền",
+  /*
     `loadCaseShipments` nối để LIỆT KÊ mọi lần gửi của đơn gắn vào case, rồi gộp thành một mảng
     trong TypeScript. Grain của kết quả trả về vẫn là CASE — phép nhân dòng xảy ra trong SQL là
     CỐ Ý và bị thu lại ngay sau đó. Không có một phép cộng nào trong hàm: không tiền, không số

@@ -1651,6 +1651,30 @@ export const hmtReturnReconciliation = pgTable(
     actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
     actorLabel: text("actor_label").notNull().default(""),
     processedAt: ts("processed_at").notNull().defaultNow(),
+
+    /*
+      ═══ KẾT LUẬN CỦA NGƯỜI, TÁCH HẲN KHỎI KẾT LUẬN CỦA MÁY ═══
+
+      `match_status` là MÁY đọc sổ giấy ra được gì. Bảy cột dưới đây là NGƯỜI nhìn hàng thật kết
+      luận gì. Ghi đè cái sau lên cái trước là mất dấu vì sao máy không khớp được — và lần sau
+      không ai sửa được luật đọc.
+
+      `NULL` = CHƯA AI XỬ LÝ, và đó là phần lớn. Nó KHÔNG phải "đã xem xong".
+
+      Ràng buộc ở CSDL (0083) giữ bốn điều: danh sách cách gỡ là ĐÓNG · gỡ rồi thì phải có người +
+      mốc + lý do · "đã nối kiện" phải chỉ đích danh một kiện và "đã chọn mẫu mã" phải chỉ đích
+      danh một mẫu mã · và dòng ĐÃ GHI (`written`) thì không gắn kết luận người lên được.
+    */
+    /** `LINKED_SHIPMENT` · `RESOLVED_SKU` · `DISMISSED` — xem `HMT_RESOLUTIONS`. */
+    resolution: text("resolution"),
+    resolvedShipmentId: text("resolved_shipment_id").references(() => shipments.id, { onDelete: "set null" }),
+    resolvedVariantId: text("resolved_variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Ảnh chụp TÊN người gỡ — người nghỉ việc thì dòng vẫn đọc được. */
+    resolvedBy: text("resolved_by").notNull().default(""),
+    resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** BẮT BUỘC khi có kết luận: một dòng biến mất không lời giải thích sẽ quay lại làm phiền người sau. */
+    resolutionNote: text("resolution_note").notNull().default(""),
+    resolvedAt: ts("resolved_at"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -1668,6 +1692,13 @@ export const hmtReturnReconciliation = pgTable(
        và "đã đổi dữ liệu" — một dòng `written = true` mang trạng thái khác là một lượt ghi không
        ai giải thích được. */
     check("hmt_return_rec_written_check", sql`${t.written} = false OR ${t.matchStatus} = 'MATCHED'`),
+    index("hmt_return_rec_resolution_idx").on(t.resolution, t.matchStatus),
+    check("hmt_return_rec_resolution_check", sql`${t.resolution} IS NULL OR ${t.resolution} IN ('LINKED_SHIPMENT', 'RESOLVED_SKU', 'DISMISSED')`),
+    check("hmt_return_rec_resolution_actor_check", sql`${t.resolution} IS NULL OR (${t.resolvedAt} IS NOT NULL AND ${t.resolvedBy} <> '' AND ${t.resolutionNote} <> '')`),
+    check("hmt_return_rec_resolution_target_check", sql`${t.resolution} IS DISTINCT FROM 'LINKED_SHIPMENT' OR ${t.resolvedShipmentId} IS NOT NULL`),
+    check("hmt_return_rec_resolution_sku_check", sql`${t.resolution} IS DISTINCT FROM 'RESOLVED_SKU' OR ${t.resolvedVariantId} IS NOT NULL`),
+    /* 724 dòng đã ghi là chứng cứ nhận hàng của 672 kiện — không viết đè lên chúng. */
+    check("hmt_return_rec_resolution_written_check", sql`${t.resolution} IS NULL OR ${t.written} = false`),
   ],
 );
 

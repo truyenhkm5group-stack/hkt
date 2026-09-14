@@ -214,3 +214,113 @@ export const HMT_INHERITANCE_LABEL: Record<HmtInheritance, string> = {
  * cần nhớ: không được lọc bỏ chúng.
  */
 export const HMT_KEEP_RETURN_LEG = true;
+
+/**
+ * ═══════════ NGƯỜI GỠ MỘT DÒNG KHÔNG KHỚP — BỐN CÁCH, KHÔNG CÓ CÁCH THỨ NĂM ═══════════
+ *
+ * Lượt đối soát để lại 26 dòng không khớp và 144 mã chỉ có ở sheet tổng. Trước bản này chúng chỉ
+ * là những con số trên một thẻ tóm tắt: đếm được, nhưng không ai LÀM được gì với chúng. Một con số
+ * không có nút bấm là một con số người ta học cách bỏ qua.
+ *
+ * Bốn cách gỡ, và cả bốn đều đi qua NGƯỜI:
+ *
+ *  · `LINKED_SHIPMENT` — người kho tra ra kiện thật cho một mã sổ giấy ghi sai / ghi tắt. Bằng
+ *    chứng là chính con mắt của họ trên kiện hàng, nên phải chọn ĐÍCH DANH một kiện trong ERP.
+ *  · `RESOLVED_SKU`    — mẫu mã sổ ghi không đủ để máy lần ra (thiếu mã hàng, thiếu màu/size).
+ *    Người chọn đúng mẫu mã trong danh mục.
+ *  · `DISMISSED`       — dòng này không dẫn tới đâu (ghi nhầm, trùng, hàng của shop khác). BẮT
+ *    BUỘC ghi lý do: một dòng biến mất không lời giải thích là một dòng sẽ quay lại làm phiền
+ *    người tiếp theo.
+ *  · *(chưa xử lý)*    — `NULL`. Đây là mặc định và là phần lớn; nó KHÔNG phải "đã xem xong".
+ *
+ * ─── ĐIỀU QUAN TRỌNG NHẤT: GỠ ≠ GHI TỒN ───
+ *
+ * Gỡ một dòng chỉ đưa nó vào hàng đợi ĐẾM, đúng như 724 dòng đã khớp. Tồn kho vẫn không đổi một
+ * món nào cho tới khi người kho mở kiện ra đếm (AGENTS.md mục 10). Không có đường tắt nào từ
+ * "người xác nhận mã vận đơn" tới "tồn tăng".
+ *
+ * ─── VÀ DÒNG ĐÃ GHI THÌ BẤT KHẢ XÂM PHẠM ───
+ *
+ * 724 dòng `MATCHED` đã là chứng cứ nhận hàng. Ràng buộc `hmt_return_rec_resolution_written_check`
+ * ở CSDL cấm gắn kết luận của người lên chúng — muốn sửa một lượt nhận đã ghi thì đi đường huỷ
+ * nhận (`undoReturnArrived`), để lại dấu vết, chứ không viết đè lên bằng chứng cũ.
+ */
+export const HMT_RESOLUTIONS = ["LINKED_SHIPMENT", "RESOLVED_SKU", "DISMISSED"] as const;
+export type HmtResolution = (typeof HMT_RESOLUTIONS)[number];
+
+export const HMT_RESOLUTION_LABEL: Record<HmtResolution, string> = {
+  LINKED_SHIPMENT: "Đã nối tay với kiện trong ERP",
+  RESOLVED_SKU: "Đã chọn đúng mẫu mã",
+  DISMISSED: "Bỏ qua có lý do",
+};
+
+/** Cách gỡ nào BẮT BUỘC ghi lý do. Bỏ qua mà không nói vì sao là xoá bằng chứng lặng lẽ. */
+export const HMT_RESOLUTION_NEEDS_NOTE: Record<HmtResolution, boolean> = {
+  LINKED_SHIPMENT: true,
+  RESOLVED_SKU: true,
+  DISMISSED: true,
+};
+
+/**
+ * ═══════════ BỐN HÀNG ĐỢI NGOẠI LỆ, BỐN VIỆC KHÁC NHAU ═══════════
+ *
+ * Gộp chúng thành một danh sách "cần xem lại" là cách chắc chắn nhất để không ai xem: bốn nhóm này
+ * cần bốn thao tác khác nhau, do (có thể) hai người khác nhau làm, và một nhóm trong đó KHÔNG phải
+ * việc của kho chút nào.
+ */
+export const HMT_EXCEPTION_QUEUES = ["SKU_REVIEW", "TRACKING_REVIEW", "NOT_IN_ERP", "TRACKING_ONLY"] as const;
+export type HmtExceptionQueue = (typeof HMT_EXCEPTION_QUEUES)[number];
+
+export type HmtQueueSpec = {
+  key: HmtExceptionQueue;
+  label: string;
+  /** Trạng thái khớp nào rơi vào hàng đợi này. `TRACKING_ONLY` không đến từ bảng chứng cứ. */
+  statuses: readonly HmtMatchStatus[];
+  /** Người dùng phải LÀM gì — không phải mô tả vấn đề, mà là hành động tiếp theo. */
+  action: string;
+  /** Cách gỡ hợp lệ ở hàng đợi này. */
+  allow: readonly HmtResolution[];
+};
+
+export const HMT_QUEUE: Record<HmtExceptionQueue, HmtQueueSpec> = {
+  SKU_REVIEW: {
+    key: "SKU_REVIEW",
+    label: "Cần đối chiếu mẫu mã",
+    statuses: ["SKU_MISMATCH", "AMBIGUOUS_SKU"],
+    action: "Kiện có thật, mã vận đơn đúng — nhưng mẫu mã sổ ghi không nằm trong hàng kỳ vọng của kiện, hoặc ghi thiếu tới mức lần ra nhiều mẫu. Mở kiện xem hàng thật rồi chọn đúng mẫu mã.",
+    allow: ["RESOLVED_SKU", "DISMISSED"],
+  },
+  TRACKING_REVIEW: {
+    key: "TRACKING_REVIEW",
+    label: "Cần xác minh mã vận đơn",
+    statuses: ["AMBIGUOUS_TRACKING", "DUPLICATE_SOURCE_ROW", "CONFLICT", "QUANTITY_CONFLICT"],
+    action: "Ô mã vận đơn trống mà bảng tính không gộp ô để chứng minh dòng thuộc kiện trên, hoặc mã lần ra nhiều kiện. Tra sổ giấy / kiện thật rồi nối tay với đúng kiện.",
+    allow: ["LINKED_SHIPMENT", "DISMISSED"],
+  },
+  NOT_IN_ERP: {
+    key: "NOT_IN_ERP",
+    label: "Mã không có trong ERP",
+    statuses: ["UNMATCHED_TRACKING"],
+    action: "Không kiện nào trong ERP mang mã này. Hoặc vận đơn chưa đồng bộ về, hoặc sổ ghi sai mã (Excel hay đổi mã dài thành dạng khoa học). Kiểm tra rồi nối tay, hoặc bỏ qua kèm lý do.",
+    allow: ["LINKED_SHIPMENT", "DISMISSED"],
+  },
+  TRACKING_ONLY: {
+    key: "TRACKING_ONLY",
+    label: "Có bằng chứng kiện, chưa có chi tiết hàng",
+    statuses: [],
+    action: "Mã có ở sheet tổng của sổ giấy nhưng không có dòng món nào. Mã vận đơn chứng minh DANH TÍNH KIỆN, không chứng minh trong kiện có món gì — nên ERP KHÔNG ghi nhận gì. Kho ghi bổ sung dòng món vào sổ rồi tải lại.",
+    allow: [],
+  },
+};
+
+/** Trạng thái khớp nào KHÔNG phải ngoại lệ — đã khớp hoặc kho đã ghi nhận từ trước. */
+export const HMT_SETTLED_STATUSES: readonly HmtMatchStatus[] = ["MATCHED", "ALREADY_RECEIVED"];
+
+export function queueOfStatus(status: HmtMatchStatus): HmtExceptionQueue | null {
+  for (const q of HMT_EXCEPTION_QUEUES) if ((HMT_QUEUE[q].statuses as readonly string[]).includes(status)) return q;
+  return null;
+}
+
+export function isHmtResolution(value: unknown): value is HmtResolution {
+  return typeof value === "string" && (HMT_RESOLUTIONS as readonly string[]).includes(value);
+}
