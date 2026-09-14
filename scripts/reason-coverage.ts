@@ -12,7 +12,7 @@
  */
 import "dotenv/config";
 import { SignJWT } from "jose";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
@@ -112,6 +112,43 @@ async function main() {
     process.exit(1);
   }
   console.log(thieu.length ? `⚠ không tìm thấy trên trang: ${thieu.join(", ")}` : "✓ cả ba con số của máy tính đều có mặt trong HTML đã render");
+
+  /*
+    ═══ VÀ MÀN HÌNH VẬN ĐƠN: Ô "LÝ DO HOÀN" CÓ HIỆN KHÔNG ═══
+
+    Khối này là một CLIENT COMPONENT mới. `npm run build` chứng minh nó biên dịch được, không chứng
+    minh nó render được trên máy chủ thật — ranh giới client/server hỏng thì trang vẫn trả 200 và
+    khối lặng lẽ biến mất. Đó đúng là cách nó đã hỏng ngày 14/09.
+
+    Lấy hai kiện THẬT ở hai đầu: một kiện đã có lý do, một kiện chưa có chứng từ nào — để kiểm cả
+    nhánh "đã xác định" lẫn nhánh "cần bổ sung lý do".
+  */
+  const mau = await db
+    .select({ id: schema.shipments.id })
+    .from(schema.shipments)
+    /*
+      CẢ HAI CHẶNG HOÀN. Lấy mỗi `RETURNING` thì bài kiểm có thể rơi vào tập RỖNG trên một ngày mà
+      mọi kiện hoàn đã sang `RETURNED` — và một bài kiểm không có dòng nào để mở thì nó XANH mà
+      không chứng minh được gì.
+    */
+    .where(inArray(schema.shipments.stage, ["RETURNING", "RETURNED"]))
+    .limit(2);
+  console.log("\n── MÀN HÌNH VẬN ĐƠN (ô Lý do hoàn) ──");
+  if (!mau.length) {
+    console.error("✗ Không có kiện hoàn nào để mở — bài kiểm màn hình vận đơn không chứng minh được gì");
+    process.exit(1);
+  }
+  for (const k of mau) {
+    const r = await fetch(`${BASE}/shipments/${encodeURIComponent(k.id)}`, { headers: { cookie: `erp_session=${token}` }, redirect: "manual" });
+    const h = r.status === 200 ? await r.text() : "";
+    const coO = h.includes("Lý do hoàn");
+    const coChon = h.includes("Chọn lý do hoàn");
+    console.log(`${k.id.padEnd(26)} | HTTP ${r.status} | ô lý do: ${coO ? "CÓ" : "không"} | ô chọn: ${coChon ? "CÓ" : "không"}`);
+    if (r.status !== 200) {
+      console.error("✗ Trang chi tiết vận đơn lỗi");
+      process.exit(1);
+    }
+  }
 }
 
 main().catch((e) => {
