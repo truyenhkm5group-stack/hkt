@@ -1,5 +1,4 @@
 import { sql } from "drizzle-orm";
-import type { CostBasis } from "@/lib/constants/inspection-truth";
 
 /**
  * ═══════════ GIÁ VỐN CÓ XUẤT XỨ, VÀ BẬC CUỐI LÀ **CHƯA BIẾT** ═══════════
@@ -20,45 +19,42 @@ import type { CostBasis } from "@/lib/constants/inspection-truth";
  * số lợi nhuận phải hỏi chủ shop trước. Nên bản này thêm một đường ĐỌC RIÊNG, có xuất xứ, dùng cho
  * phần giá trị hàng hoàn — và để lại khuyến nghị cho một bản phát hành có chủ shop duyệt.
  *
- * ─── BẬC VÀ NHÃN ĐI CÙNG NHAU ───
- *
- * Trả về cả con số LẪN nguồn của nó. Một con số giá vốn không có xuất xứ thì sáu tháng sau không
- * ai kiểm chứng lại được, và cũng không ai biết nó đáng tin tới đâu.
- *
  * TUYỆT ĐỐI không có nhánh nào đọc giá BÁN, doanh thu POS hay biên lợi nhuận ước tính: đó là lấy
  * thứ khách trả làm thứ shop bỏ ra.
  */
 
 /**
- * Giá vốn ĐÃ CÓ CHỨNG TỪ KHO của một mẫu mã: giá trên phiếu NHẬP HÀNG gần nhất.
+ * Giá vốn ĐÃ CÓ CHỨNG TỪ KHO của từng mẫu mã: đơn giá trên phiếu NHẬP HÀNG gần nhất.
  *
- * `NULL` khi mẫu mã chưa có phiếu nhập nào ghi đơn giá — và `NULL` đó phải đi tới tận báo cáo,
- * không được `coalesce` về 0 ở dọc đường.
+ * Dùng làm CTE rồi `left join` vào bảng cần đọc:
  *
- * Tham số là BIỂU THỨC mẫu mã (thường là `stock_receipt_items.variant_id` hoặc `product_variants.id`)
- * để dùng được ở nhiều phép nối khác nhau mà không phải chép lại câu lệnh.
+ *     with gia as ${LAST_RECEIPT_COST_BY_VARIANT}
+ *     select ... from stock_receipt_items ri left join gia on gia.variant_id = ri.variant_id
+ *
+ * Mẫu mã chưa có phiếu nhập nào ghi đơn giá thì phép nối trái để lại `NULL` — và `NULL` đó phải đi
+ * tới tận báo cáo, không được `coalesce` về 0 ở dọc đường. `unit_cost > 0` là cố ý: số 0 trên phiếu
+ * là CHƯA KHAI giá, không phải hàng cho không.
+ *
+ * ─── VÌ SAO CHỈ CÓ BẢN THEO TẬP, KHÔNG CÓ BẢN THEO DÒNG ───
+ *
+ * Bản cũ là một truy vấn con TƯƠNG QUAN nhận biểu thức mẫu mã: nó chạy LẠI cho mỗi dòng đọc nó, và
+ * bộ tối ưu chọn quét từ phía bảng phiếu nên chi phí tăng theo TÍCH của (số dòng × số phiếu).
+ * `lib/queries/stock.ts` đã ghi lại đúng cái bẫy này bằng số đo thật: ở cấp dòng đơn hàng, truy vấn
+ * con ấy chạy 4.260 lần, ngốn 99,3% toàn bộ chi phí.
+ *
+ * Và ở Node — một luồng — một truy vấn nặng trên đường dựng trang không chỉ làm chậm trang gọi nó:
+ * nó chặn mọi yêu cầu khác đang chờ trên cùng tiến trình. Đo được đúng điều đó ở lượt triển khai
+ * 14/09/2026: giá vốn hàng hoàn gọi truy vấn con ba lần trên mỗi dòng ⇒ `/ads` trả lỗi máy chủ,
+ * `/reports/returns` quá 60 giây, `/expenses` lên 10,6 giây — trong khi chính trang hàng hoàn vẫn
+ * xanh 98 ms và trông vô can.
+ *
+ * Bản dưới đây quét bảng phiếu ĐÚNG MỘT LẦN. Nó ra cùng con số với cùng bộ lọc và cùng thứ tự sắp
+ * xếp, chỉ khác số lần tính — nên không có lý do nào để dựng lại bản theo dòng.
  */
-export function receiptUnitCost(variantIdExpr: unknown) {
-  return sql<number | null>`(
-    select ri_c.unit_cost
-    from stock_receipt_items ri_c
-    join stock_receipts r_c on r_c.id = ri_c.receipt_id
-    where ri_c.variant_id = ${variantIdExpr}
-      and ri_c.unit_cost > 0
-      and r_c.kind = 'RECEIPT'
-    order by r_c.received_at desc, r_c.created_at desc
-    limit 1
-  )`;
-}
-
-/**
- * Nhãn xuất xứ đi kèm con số trên.
- *
- * Hôm nay chỉ có hai nhánh — `RECEIPT` hoặc `UNKNOWN` — vì đây là đường dùng cho hàng hoàn, nơi
- * mẫu mã luôn là mẫu mã shop đã từng nhập. Hai bậc giữa (`ORDER_SNAPSHOT`, `VARIANT_DEFAULT`) đã
- * khai ở `COST_BASES` và để dành cho đường lợi nhuận khi chủ shop duyệt đổi bậc cuối — khai trước
- * để hai nơi không đẻ ra hai bảng xuất xứ khác nhau.
- */
-export function receiptCostBasis(variantIdExpr: unknown) {
-  return sql<CostBasis>`case when ${receiptUnitCost(variantIdExpr)} is not null then 'RECEIPT' else 'UNKNOWN' end`;
-}
+export const LAST_RECEIPT_COST_BY_VARIANT = sql`(
+  select distinct on (ri_g.variant_id) ri_g.variant_id as variant_id, ri_g.unit_cost as unit_cost
+  from stock_receipt_items ri_g
+  join stock_receipts r_g on r_g.id = ri_g.receipt_id
+  where ri_g.unit_cost > 0 and r_g.kind = 'RECEIPT'
+  order by ri_g.variant_id, r_g.received_at desc, r_g.created_at desc
+)`;

@@ -9,7 +9,7 @@ import {
   type CoverageVerdict,
   type ReportedCondition,
 } from "@/lib/constants/inspection-truth";
-import { receiptUnitCost } from "@/lib/queries/cost-basis";
+import { LAST_RECEIPT_COST_BY_VARIANT } from "@/lib/queries/cost-basis";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -131,13 +131,21 @@ export async function inspectionTruth(): Promise<InspectionTruth> {
         nhất của chính mẫu mã ấy. Món không tra được giá thì KHÔNG cộng vào tổng — nó được đếm
         riêng ở `unknownQty`, vì một tổng tiền trộn cả phần chưa biết là một tổng trông như chính
         xác mà không phải.
+
+        NỐI MỘT LẦN, KHÔNG TRUY VẤN CON TƯƠNG QUAN. Bản đầu gọi `receiptUnitCost` ba lần trên mỗi
+        dòng phiếu hoàn; với 737 dòng là ~2.200 lượt quét bảng phiếu nhập, và trên Node một luồng
+        nó chặn cả tiến trình chứ không chỉ trang này — lượt triển khai 14/09 đỏ đúng vì vậy
+        (`/ads` lỗi máy chủ, `/reports/returns` quá 60 giây). `LAST_RECEIPT_COST_BY_VARIANT` cho
+        CÙNG con số với cùng bộ lọc và cùng thứ tự sắp xếp, khác mỗi số lần tính.
       */
       db.execute(sql`
+        with gia as ${LAST_RECEIPT_COST_BY_VARIANT}
         select coalesce(sum(ri.quantity), 0)::int as mon,
-               coalesce(sum(ri.quantity) filter (where ${receiptUnitCost(sql`ri.variant_id`)} is not null), 0)::int as mon_co_gia,
-               coalesce(sum(ri.quantity * ${receiptUnitCost(sql`ri.variant_id`)}) filter (where ${receiptUnitCost(sql`ri.variant_id`)} is not null), 0)::bigint as gia_tri
+               coalesce(sum(ri.quantity) filter (where gia.unit_cost is not null), 0)::int as mon_co_gia,
+               coalesce(sum(ri.quantity * gia.unit_cost) filter (where gia.unit_cost is not null), 0)::bigint as gia_tri
         from stock_receipt_items ri
         join stock_receipts r on r.id = ri.receipt_id
+        left join gia on gia.variant_id = ri.variant_id
         where r.kind = 'RETURN'
       `),
     ]);

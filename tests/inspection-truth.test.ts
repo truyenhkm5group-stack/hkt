@@ -171,9 +171,25 @@ export async function testInspectionTruth(db: Db) {
   assert.match(nguonGia, /unit_cost\s*>\s*0/, "chỉ đơn giá LỚN HƠN 0 mới là giá đã biết — 0 trên phiếu là chưa khai, không phải hàng cho không");
   assert.ok(!/coalesce\([^)]*,\s*0\s*\)/.test(nguonGia), "đường giá vốn này KHÔNG được có nhánh nào rơi về 0 — đó chính là lỗi nó sinh ra để sửa");
 
+  /*
+    VÀ NÓ PHẢI ĐỌC THEO TẬP, KHÔNG PHẢI TRUY VẤN CON TƯƠNG QUAN.
+
+    Bản đầu gọi giá vốn ba lần trên mỗi dòng phiếu hoàn. Trên production đó là ~2.200 lượt quét
+    bảng phiếu nhập trong một lần dựng trang, và vì Node chạy một luồng nên nó làm ĐỎ những trang
+    KHÁC (`/ads` lỗi máy chủ, `/reports/returns` quá 60 giây) trong khi trang hàng hoàn vẫn xanh
+    98 ms. Bài kiểm này canh đúng chỗ đó: một lần hồi quy nữa là một lượt triển khai hỏng.
+  */
+  assert.match(nguonGia, /distinct on \(ri_g\.variant_id\)/, "giá vốn phải quét bảng phiếu MỘT LẦN cho mỗi mẫu mã");
+  assert.ok(
+    !/export function receiptUnitCost/.test(nguonGia),
+    "không được giữ lại bản theo DÒNG của giá vốn: nó là truy vấn con tương quan, và nó đã làm đỏ một lượt triển khai",
+  );
+
   /* ═══════ 8 · KHÔNG SUY DIỄN TRONG MÃ NGUỒN ═══════ */
 
   const nguon = readFileSync("lib/queries/inspection-truth.ts", "utf8");
+  assert.match(nguon, /LAST_RECEIPT_COST_BY_VARIANT/, "phần giá vốn phải NỐI vào bảng giá đọc một lần");
+  assert.ok(!/receiptUnitCost\(/.test(nguon), "không lời gọi nào được tính lại giá vốn trên từng dòng");
   // Phần đếm chứng cứ KHÔNG được đọc cột nào của mức CẢ KIỆN để kết luận về MÓN.
   const khoiPhanLoai = nguon.slice(nguon.indexOf("select condition::text"), nguon.indexOf("GIÁ VỐN CỦA HÀNG"));
   for (const cam of ["stock_receipt_id", "restock_qty", "returnInspections"]) {
