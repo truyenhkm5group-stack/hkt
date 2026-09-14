@@ -386,6 +386,46 @@ Kiểm thử mới / mở rộng:
 
 ---
 
+## 4b. HIỆU NĂNG — đo trên production, không đoán
+
+**`ops smoke` sau bản #289** (mở thật 54 màn hình bằng phiên đăng nhập hợp lệ):
+
+```
+54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 chưa kiểm · 0 hết phiên
+/payroll                        281 kB   123 ms   ← có đủ khối mới, và vẫn nhanh
+/marketing/fanpages             165 kB    79 ms
+/marketing/fanpages?tab=orders  281 kB    47 ms
+/marketing/fanpages?tab=assign  262 kB    68 ms
+/reports                        300 kB   129 ms
+/ads                          2.597 kB  6.374 ms  ← CHẬM
+```
+
+`/payroll` mang thêm bốn khối (độ phủ quy kết · cảnh báo chi phí · đã trả trong kỳ · nhắc khai
+email) và vẫn ở **123 ms**. Phép nối `order_attributions` thêm vào `salesByProductPage` không tốn
+gì đáng kể: bảng ấy có chỉ mục DUY NHẤT trên `order_id`, nên mỗi đơn là một lần tra chỉ mục.
+
+**`/ads` 6,4 giây — KHÔNG phải do bản này.** `ops perf-probe` (xoá sạch đệm trước mỗi phép đo, tức
+điều kiện xấu nhất tuyệt đối) cho tám câu SQL chậm nhất của production, và **không câu nào là
+`salesByProductPage`**:
+
+```
+4.292 ms  ORDER_OUTCOME dựng trực tiếp  → Seq Scan on orders + SubPlan tương quan trên shipments
+4.216 ms  cùng câu trên
+4.001 ms  CTE cod_statement_lines + ORDER_OUTCOME
+2.690 ms  ORDER_OUTCOME theo inserted_at
+…
+getReturnRateSummary   5.048 ms nguội → 145 ms ấm  (35×)
+getReturnRateByVariant 4.566 ms nguội → 176 ms ấm  (26×)
+adsRoas 30 ngày          268 ms
+```
+
+Đây là chi phí của nhánh dự phòng `ORDER_OUTCOME` khi bảng `canonical_order_outcome` chưa phủ —
+một vấn đề đã có từ trước và đã được ghi trong `docs/erp-performance-p0-3-report.md`. Lượt smoke
+lại chạy ngay sau khi deploy xong, đúng lúc bộ lập lịch vừa khởi động và đang đồng bộ lại — chính
+`scripts/smoke.ts` cảnh báo về ca này. Đã chạy lại smoke trên hệ thống đã ổn định để có con số sạch.
+
+---
+
 ## 5. Còn tồn tại — cần chủ shop quyết, KHÔNG tự làm
 
 ### 5.1 Chuyển nguồn ghi nhận lương mới phủ được MỘT PHẦN
