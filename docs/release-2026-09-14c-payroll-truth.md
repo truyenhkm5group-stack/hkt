@@ -365,6 +365,32 @@ Bốn điều đọc ra, và cả bốn đều đổi mức khẩn của một m
    **không làm sai một đồng nào**. Nó vẫn phải sửa trước khi shop bắt đầu tặng hàng, nhưng không
    phải việc gấp.
 
+### Đối soát cùng phạm vi: POS xác nhận → đơn được tính → trùng → chưa gán
+
+Đo 14/09 20:29 trên bản đã triển khai, 30 ngày gần nhất, đơn ở `CONFIRMED_STAGES` (mốc CHỐT ĐƠN):
+
+| nhóm | đơn | doanh thu xác nhận |
+|---|---:|---:|
+| Marketer `b6373e43…` (đã quy kết) | 566 | 306.954.498 ₫ |
+| Marketer `590efdb6…` (đã quy kết) | 263 | 134.505.000 ₫ |
+| **Cộng hai marketer** | **829** | **441.459.498 ₫** |
+| Đơn KHÔNG có fanpage (`NO_PAGE`) — landing / nhập tay / nguồn khác | 217 | 120.307.000 ₫ |
+| Đơn TRÙNG bị loại (`DUPLICATE`) | 13 | 7.787.000 ₫ |
+| Fanpage chưa gán marketer (`NO_ASSIGNMENT`) | 1 | 424.000 ₫ |
+| **TỔNG đơn xác nhận trong kỳ** | **1.060** | **569.977.498 ₫** |
+
+Bốn nhóm cộng lại bằng đúng số đơn xác nhận của kỳ — đó là `AGENTS.md` mục 9, và nó đúng ở đây.
+
+Ba điều đọc ra:
+
+1. **829/1.060 đơn (78%) nay mang đúng tên một người**, theo fanpage tại mốc đơn lên. Trước bản
+   này phần ấy đi bằng nhánh lấp chỗ (quảng cáo · chia theo tỷ trọng tiền QC · về chủ mã).
+2. **217 đơn không có fanpage nào** — đây KHÔNG phải lỗi: đơn landing và đơn nhập tay vốn không
+   sinh ra từ một fanpage. Doanh thu của chúng thuộc kênh landing, không thuộc marketer nào
+   (`ATTRIBUTION_STATUS_FIX.NO_PAGE` nói đúng điều này trên màn hình).
+3. **Chỉ 1 đơn** thuộc một fanpage chưa gán marketer — tức sổ `fanpage_marketer_assignments` gần
+   như đã phủ đủ. Khai nốt fanpage ấy là hết nhóm này.
+
 ## 3a. XÁC MINH SAU TRIỂN KHAI — đợt 1 (deploy #286, SHA `8076fd1`, 14/09 18:43)
 
 Chạy `ops run-job "fanpage-attribution --dryRun=1"` trên **chính bản đã triển khai**:
