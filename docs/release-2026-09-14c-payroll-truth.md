@@ -167,6 +167,28 @@ chính mình (lọc bằng chính `employeeMatchesUser`), còn lại 403. Ô CH�
 "Ghi chú" — ghi 0 vào đó là để một bảng tính sau này cộng nó vào tổng tiền phải trả. Hai dòng cuối
 tệp ghi kỳ, cơ sở lợi nhuận, số ngày đã dùng để chia lương cứng và phạm vi xem.
 
+### 1.8 Ba trong bốn cơ sở lương không được phép chốt lương, mà ô chọn thì giống hệt nhau
+
+Luật chủ shop: lợi nhuận tính lương = doanh thu thực − **TOÀN BỘ** chi phí thuộc phạm vi ghi nhận,
+và *"tiền mua hàng chưa bán … không tự trở thành chi phí của lợi nhuận tính lương"*. Bốn cơ sở của
+ERP không tương đương nhau trước luật ấy, mỗi cái sai một kiểu:
+
+| cơ sở | chốt lương được? | vì sao |
+|---|---|---|
+| **LN1 · giá vốn hàng giao TC** | ✓ **mặc định** | Doanh thu giao thành công − QC − giá vốn CỦA CHÍNH HÀNG ĐÃ GIAO − vận chuyển − chi phí vận hành đã ghi nhận |
+| LN2 · giá vốn hàng nhập | ✗ | Trừ TOÀN BỘ giá vốn hàng NHẬP trong kỳ, kể cả hàng chưa bán. Nhập một lô lớn ⇒ kỳ ấy âm, kỳ sau đẹp giả |
+| Dòng tiền thực | ✗ | Là DÒNG TIỀN: trừ cả tiền nhập hàng chưa bán, không trừ chi phí đã phát sinh mà chưa trả; LN cá nhân chỉ là quy đổi theo tỷ trọng |
+| Danh nghĩa | ✗ | Số DỰ PHÓNG — đơn lên × tỷ lệ giao thành công ƯỚC TÍNH, chưa chứng từ nào nói tiền đã về |
+
+Ô chọn cho cả bốn trông giống hệt nhau, nên một lần bấm nhầm là cả kỳ lương tính trên cơ sở sai mà
+**không có gì báo** — và ba trong bốn con số ấy đều trông hợp lý. `PAYROLL_BASIS_ELIGIBILITY` nay
+khai rõ cái nào đủ điều kiện kèm lý do; chọn một cơ sở không đủ thì màn hình hiện dải đỏ nói đúng
+chỗ sai và một đường dẫn sang LN1 giữ nguyên kỳ đang xem.
+
+**Không gỡ cơ sở nào** — LN2 cho thấy áp lực tiền hàng, dòng tiền thực cho thấy tiền thật. Chúng
+chỉ không được ÂM THẦM trở thành căn cứ trả tiền cho người. Mặc định vẫn là LN1 như trước, không
+đổi một con số nào.
+
 ---
 
 ## 2. Công thức đang áp dụng (không đổi trong bản này)
@@ -284,6 +306,7 @@ Hai đợt phát hành:
 |---|---|---|
 | #286 | `8076fd1` | bốn lỗi mục 1.1–1.4 · lỗi quy kết fanpage 1.5 · tài liệu migration |
 | #288 | `77b262a` | mục 1.6 (đã trả · cảnh báo chi phí · khoá mồ côi) · 1.7 (xuất CSV) · ba đoạn mô tả lỗi thời · bất biến độ phủ |
+| #289 | (đợt kế) | mục 1.8 (sổ đăng ký cơ sở lương + dải cảnh báo) · README nói đúng cơ sở đang chạy |
 
 Kiểm thử mới / mở rộng:
 - `tests/fanpage-attribution.test.ts` mục **7c** (cầu nối đơn huỷ) và **7d** (cửa sổ không trượt
