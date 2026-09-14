@@ -73,6 +73,7 @@ on:
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
+          - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -705,6 +706,18 @@ jobs:
                 # không phải dựng lại ảnh tám phút. Toàn bộ là câu SELECT.
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-report.sql?ref=${STAGING_BRANCH}" \
+                  | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
+
+              ai-staging-sql)
+                # Chạy MỘT tệp SQL có sẵn trong kho mã. Chỉ nhận tên khớp `ai-staging-*.sql` để ô
+                # `arg` (công khai trong log) không trở thành đường chạy SQL tuỳ ý trên máy chủ.
+                TEP="${ARG:-ai-staging-report.sql}"
+                case "$TEP" in
+                  ai-staging-*.sql) : ;;
+                  *) echo "Chỉ chạy được tệp ai-staging-*.sql, nhận được: $TEP"; exit 1 ;;
+                esac
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/${TEP}?ref=${STAGING_BRANCH}" \
                   | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
 
               ai-staging-report)
