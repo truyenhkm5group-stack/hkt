@@ -6,6 +6,23 @@ Cập nhật: 06/09/2026 · Repo: `truyenhkm5group-stack/hkt` (GitHub, **PUBLIC*
 
 ---
 
+## 0.0 ĐỌC TRƯỚC NẾU BẠN CHẠM VÀO LƯƠNG HOẶC QUY KẾT MARKETER (14/09/2026)
+
+`docs/release-2026-09-14c-payroll-truth.md` — tám lỗi đã tái hiện được trên đường tính lương và
+đường quy kết fanpage, kèm số đo production trước/sau và những việc chủ shop còn phải quyết.
+**Bốn điều rút ra, đừng làm lại:**
+
+1. **Lương cứng khai theo THÁNG, hiển thị theo KỲ.** Cột "Lương cứng" trên `/payroll` đã chia theo
+   số ngày chồng lấn bằng CÙNG hàm `prorateMonthlyAmount` mà `lib/queries/payroll-cost.ts` dùng.
+   Hai nơi phải luôn ra một con số — `tests/cost-double-count.test.ts` mục 6 khoá điều đó.
+2. **Quy kết marketer đi bằng ẢNH CHỤP theo mốc đơn lên** (`order_attributions`), rồi mới tới bảng
+   gán phẳng `payroll.config.pageMarketers`, rồi mới tới `ad_id`. Quảng cáo KHÔNG ghi đè người được
+   tính đơn theo fanpage. Bảng phẳng không có mốc hiệu lực nên nó chỉ LẤP CHỖ.
+3. **Chỉ LN1 được phép chốt lương** (`PAYROLL_BASIS_ELIGIBILITY`). LN2 / dòng tiền / danh nghĩa vẫn
+   xem được nhưng màn hình báo đỏ, kèm lý do.
+4. **CHƯA BIẾT không được in thành 0** ở bảng lương: kỳ "Toàn bộ" ⇒ lương cứng `null`; cơ sở dòng
+   tiền mà LN1 toàn shop ≤ 0 ⇒ LN cá nhân và thưởng theo LN cá nhân `null`.
+
 ## 0. BẢN MỚI NHẤT — HỆ ĐIỀU HÀNH CÔNG VIỆC (12/09/2026)
 
 > Phần còn lại của tệp này viết ngày 06/09/2026 và **đã cũ ở vài chỗ**. Đọc `docs/` cho trạng thái
