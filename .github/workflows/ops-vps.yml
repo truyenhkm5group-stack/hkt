@@ -150,14 +150,15 @@ jobs:
           tags: |
             ${{ env.STAGING_IMAGE_NAME }}:latest
             ${{ env.STAGING_IMAGE_NAME }}:${{ github.sha }}
-          # KHÔNG dùng đệm `type=gha`. Lượt đầu (14/09/2026) hỏng sau ĐÚNG MỘT GIÂY với
-          # "buildx failed ... build-cache-backends": dịch vụ đệm của Actions cần quyền `actions`,
-          # mà job này cố ý chỉ xin `contents: read` + `packages: write`. Hai đường sửa: nới quyền,
-          # hoặc bỏ đệm. Ảnh này dựng vài lần một tuần, nên đổi vài phút dựng lại lấy một job không
-          # phải cầm thêm quyền nào là đổi đúng — quyền nới ra thì không ai thu lại.
-          # Đệm theo lớp Docker trên chính máy chạy vẫn còn tác dụng trong một lượt.
-          cache-from: type=registry,ref=${{ env.STAGING_IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.STAGING_IMAGE_NAME }}:buildcache,mode=max,ignore-error=true
+          # KHÔNG khai đệm build. Hai lượt đầu (14/09/2026) hỏng sau ĐÚNG MỘT GIÂY, và log nói
+          # thẳng lý do: "Cache export is not supported for the docker driver."
+          #
+          # Máy chạy của GitHub có sẵn buildx nhưng builder mặc định chạy driver `docker`, mà driver
+          # ấy KHÔNG xuất được đệm — `type=gha` hay `type=registry` đều chết như nhau. Muốn có đệm
+          # thì phải thêm `docker/setup-buildx-action` để dựng một builder driver `docker-container`.
+          #
+          # Không thêm. Ảnh này dựng vài lần một tuần; đổi vài phút dựng lại lấy một bước ít hơn
+          # trong đường thi hành là đổi đúng. `--push` chạy bình thường trên driver mặc định.
       - name: Bước tiếp theo
         run: |
           echo "Đã đẩy ${{ env.STAGING_IMAGE_NAME }}:latest (và :${{ github.sha }})"
