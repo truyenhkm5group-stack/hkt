@@ -253,6 +253,13 @@
       "when": 1789375264923,
       "tag": "0035_ai_workforce_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789380923786,
+      "tag": "0036_sales_shadow_validation",
+      "breakpoints": true
     }
   ]
 }

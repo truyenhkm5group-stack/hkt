@@ -1275,8 +1275,11 @@ export const aiRuns = pgTable(
     escalationReason: text("escalation_reason"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     /** Chi phí ƯỚC TÍNH (VND). NULL = chưa khai đơn giá mô hình ⇒ CHƯA BIẾT, không phải 0đ. */
     costVnd: integer("cost_vnd"),
+    /** Phiên bản bảng giá đã dùng cho tổng chi phí ở trên. Rỗng = không gọi mô hình / chưa khai giá. */
+    pricingVersion: text("pricing_version").notNull().default(""),
     latencyMs: integer("latency_ms").notNull().default(0),
     error: text("error"),
     startedAt: ts("started_at").notNull().defaultNow(),
@@ -1327,7 +1330,14 @@ export const aiModelCalls = pgTable(
     step: text("step").notNull().default(""),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    /** Token đầu vào đọc lại từ bộ nhớ đệm của nhà cung cấp (rẻ hơn). 0 = không dùng / không báo. */
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
     costVnd: integer("cost_vnd"),
+    /**
+     * Phiên bản bảng giá đã dùng để ra con số trên. Không có nó thì một lần đổi giá làm mọi con
+     * số lịch sử đổi nghĩa mà không ai biết. Rỗng = chưa khai giá ⇒ `cost_vnd` phải là NULL.
+     */
+    pricingVersion: text("pricing_version").notNull().default(""),
     latencyMs: integer("latency_ms").notNull().default(0),
     ok: boolean("ok").notNull().default(true),
     error: text("error"),
@@ -1444,6 +1454,25 @@ export const salesMessages = pgTable(
     fromName: text("from_name").notNull().default(""),
     text: text("text").notNull().default(""),
     hasAttachment: boolean("has_attachment").notNull().default(false),
+    /** Số tệp đính kèm. 0 với `has_attachment = true` nghĩa là biết CÓ mà chưa đếm được. */
+    attachmentCount: integer("attachment_count").notNull().default(0),
+    /**
+     * AI GỬI: CUSTOMER · PAGE_HUMAN (nhân viên) · PAGE_BOT (Botcake/tự động) · UNKNOWN.
+     * Tách PAGE_HUMAN khỏi PAGE_BOT là điều kiện để so sánh AI với NGƯỜI: gộp chúng lại thì
+     * một tin do bot cũ gửi sẽ bị tính là "câu nhân viên trả lời" và mọi phép đo đều sai.
+     */
+    senderType: text("sender_type").notNull().default("UNKNOWN"),
+    /** facebook · instagram · … theo khai báo của page. Rỗng = chưa biết. */
+    platform: text("platform").notNull().default(""),
+    /** WEBHOOK · POLL · MANUAL — đường nào đã ghi dòng này. */
+    ingestSource: text("ingest_source").notNull().default(""),
+    /**
+     * Dấu vân tay NỘI DUNG (hội thoại + chiều + mốc giây + chữ). Chống trùng CHÉO KÊNH: nếu
+     * webhook và API đọc bù đánh mã tin nhắn khác nhau cho cùng một tin, khoá `external_id`
+     * không bắt được, nhưng vân tay này bắt được. Không đặt UNIQUE vì khách hoàn toàn có thể
+     * nhắn lại đúng câu cũ ở một thời điểm khác — xem `findCrossChannelDuplicate()`.
+     */
+    contentHash: text("content_hash").notNull().default(""),
     sentAt: ts("sent_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),
@@ -1451,6 +1480,7 @@ export const salesMessages = pgTable(
   (t) => [
     uniqueIndex("sales_messages_external_uq").on(t.conversationId, t.externalId),
     index("sales_messages_conv_idx").on(t.conversationId, t.sentAt),
+    index("sales_messages_hash_idx").on(t.conversationId, t.contentHash),
   ],
 );
 
@@ -1477,9 +1507,17 @@ export const salesSuggestions = pgTable(
     confidence: doublePrecision("confidence"),
     /** Đã gửi cho khách chưa — ở nấc SHADOW luôn là false. */
     sent: boolean("sent").notNull().default(false),
-    /** Câu nhân viên thực sự gửi sau đó (điền khi nạp tin mới). */
+    /**
+     * Câu ĐẦU TIÊN nhân viên gửi trong cùng lượt (ảnh chụp để bảng danh sách đọc nhanh).
+     * KHÔNG phải toàn bộ câu trả lời: một lượt khách có thể được trả lời bằng nhiều tin. Bản
+     * đầy đủ dựng lại từ `sales_messages` theo cấu trúc lượt — xem `lib/queries/sales-review.ts`.
+     */
     humanReply: text("human_reply").notNull().default(""),
     humanRepliedAt: ts("human_replied_at"),
+    /** Tổng số tin nhân viên gửi trong lượt này. 0 = chưa ai trả lời. */
+    humanReplyCount: integer("human_reply_count").notNull().default(0),
+    /** Giây từ tin khách tới câu trả lời đầu tiên. NULL = CHƯA CÓ câu trả lời, không phải 0 giây. */
+    humanResponseSeconds: integer("human_response_seconds"),
     /** Người phụ trách chấm: AGREE · DIFFERENT · WRONG · null (chưa chấm). */
     verdict: text("verdict"),
     verdictNote: text("verdict_note").notNull().default(""),
@@ -1489,6 +1527,54 @@ export const salesSuggestions = pgTable(
   (t) => [
     index("sales_suggestions_conv_idx").on(t.conversationId, t.createdAt),
     index("sales_suggestions_verdict_idx").on(t.verdict, t.createdAt),
+  ],
+);
+
+/**
+ * CHẤM TAY MỘT LƯỢT CHẠY — nơi DUY NHẤT sự thật nền (ground truth) được ghi.
+ *
+ * Mọi ô ở đây đều cho phép NULL và NULL nghĩa là **CHƯA AI CHẤM**, không phải "sai". Không một
+ * dòng mã nào được tự điền các ô này: máy tự chấm chính nó thì con số đẹp lên mà không ai biết
+ * nó có đúng không. Tỷ lệ chính xác chỉ được tính trên phần ĐÃ CHẤM, và độ phủ luôn hiện cạnh.
+ *
+ * Một dòng cho mỗi gợi ý (tức mỗi lượt khách nhắn), do người phụ trách bấm trên màn hình soát.
+ */
+export const salesReviewLabels = pgTable(
+  "sales_review_labels",
+  {
+    id: id(),
+    suggestionId: text("suggestion_id")
+      .notNull()
+      .references(() => salesSuggestions.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    /** true = máy nhận đúng · false = sai · NULL = chưa chấm / không áp dụng cho lượt này. */
+    productOk: boolean("product_ok"),
+    colorOk: boolean("color_ok"),
+    sizeOk: boolean("size_ok"),
+    phoneOk: boolean("phone_ok"),
+    addressOk: boolean("address_ok"),
+    intentOk: boolean("intent_ok"),
+    purchaseIntentOk: boolean("purchase_intent_ok"),
+    confirmationOk: boolean("confirmation_ok"),
+    /** Hành động kế tiếp máy chọn: GOOD · ACCEPTABLE · WRONG · NULL chưa chấm. */
+    nextActionQuality: text("next_action_quality"),
+    /** Máy nói điều không có thật hoặc phá luật nghiệp vụ (bịa giá, hứa còn hàng, tự giảm giá…). */
+    hallucination: boolean("hallucination"),
+    hallucinationNote: text("hallucination_note").notNull().default(""),
+    /** Câu gợi ý có dùng được không nếu nhân viên gửi nguyên văn. */
+    replyUsable: boolean("reply_usable"),
+    note: text("note").notNull().default(""),
+    /** Quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô chữ. */
+    reviewerUserId: text("reviewer_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: ts("reviewed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_review_labels_suggestion_uq").on(t.suggestionId),
+    index("sales_review_labels_conv_idx").on(t.conversationId, t.createdAt),
   ],
 );
 
@@ -1646,6 +1732,11 @@ export const salesSuggestionsRelations = relations(salesSuggestions, ({ one }) =
   conversation: one(salesConversations, { fields: [salesSuggestions.conversationId], references: [salesConversations.id] }),
   run: one(aiRuns, { fields: [salesSuggestions.runId], references: [aiRuns.id] }),
 }));
+export const salesReviewLabelsRelations = relations(salesReviewLabels, ({ one }) => ({
+  suggestion: one(salesSuggestions, { fields: [salesReviewLabels.suggestionId], references: [salesSuggestions.id] }),
+  conversation: one(salesConversations, { fields: [salesReviewLabels.conversationId], references: [salesConversations.id] }),
+  reviewer: one(users, { fields: [salesReviewLabels.reviewerUserId], references: [users.id] }),
+}));
 export const salesFollowupsRelations = relations(salesFollowups, ({ one }) => ({
   conversation: one(salesConversations, { fields: [salesFollowups.conversationId], references: [salesConversations.id] }),
 }));
@@ -1663,3 +1754,4 @@ export type SalesConversation = typeof salesConversations.$inferSelect;
 export type SalesMessage = typeof salesMessages.$inferSelect;
 export type SalesSuggestion = typeof salesSuggestions.$inferSelect;
 export type SalesFollowup = typeof salesFollowups.$inferSelect;
+export type SalesReviewLabel = typeof salesReviewLabels.$inferSelect;
