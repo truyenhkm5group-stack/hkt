@@ -12,7 +12,7 @@
  */
 import "dotenv/config";
 import { SignJWT } from "jose";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
@@ -126,12 +126,17 @@ async function main() {
   const mau = await db
     .select({ id: schema.shipments.id })
     .from(schema.shipments)
-    .where(eq(schema.shipments.stage, "RETURNING"))
+    /*
+      CẢ HAI CHẶNG HOÀN. Lấy mỗi `RETURNING` thì bài kiểm có thể rơi vào tập RỖNG trên một ngày mà
+      mọi kiện hoàn đã sang `RETURNED` — và một bài kiểm không có dòng nào để mở thì nó XANH mà
+      không chứng minh được gì.
+    */
+    .where(inArray(schema.shipments.stage, ["RETURNING", "RETURNED"]))
     .limit(2);
   console.log("\n── MÀN HÌNH VẬN ĐƠN (ô Lý do hoàn) ──");
   if (!mau.length) {
-    console.log("(không có kiện hoàn nào để mở)");
-    return;
+    console.error("✗ Không có kiện hoàn nào để mở — bài kiểm màn hình vận đơn không chứng minh được gì");
+    process.exit(1);
   }
   for (const k of mau) {
     const r = await fetch(`${BASE}/shipments/${encodeURIComponent(k.id)}`, { headers: { cookie: `erp_session=${token}` }, redirect: "manual" });
