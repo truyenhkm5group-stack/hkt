@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Banknote,
+  Download,
   HandCoins,
   Megaphone,
   TrendingUp,
@@ -98,7 +99,17 @@ export default async function PayrollPage({
         eyebrow="Tài chính"
         title="Lương & hoa hồng"
         description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
-        actions={canManage ? <EmployeeDialog accounts={accounts} /> : null}
+        actions={
+          <div className="flex items-center gap-2">
+            {/* Xuất ĐÚNG bảng đang xem: `qs` mang y nguyên kỳ và cơ sở lợi nhuận của màn hình. */}
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/export/payroll?${qs}`}>
+                <Download className="size-4" aria-hidden /> Xuất CSV
+              </a>
+            </Button>
+            {canManage ? <EmployeeDialog accounts={accounts} /> : null}
+          </div>
+        }
       />
       <FinanceNav />
 

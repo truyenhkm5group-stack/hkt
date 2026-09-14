@@ -338,5 +338,18 @@ export function testPayrollOwnLineNeedsAccountKey() {
     "`marketersVisible` phải thu hẹp về đúng dòng của chính người đăng nhập khi không có quyền xem toàn bộ",
   );
 
-  console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai; sửa tham số URL cũng không mở được khối chi tiết của người khác");
+  /*
+    ĐƯỜNG XUẤT CSV PHẢI HẸP ĐÚNG BẰNG MÀN HÌNH.
+
+    Một tệp xuất quên lọc là cả bảng lương của shop nằm trong một lần bấm — và nó không đi qua giao
+    diện nên không ai thấy. Cổng ở `/api/export/payroll` phải hỏi ĐÚNG hai quyền của màn hình và
+    phải lọc bằng chính hàm so khớp khoá tài khoản.
+  */
+  const xuat = fs.readFileSync(path.resolve(__dirname, "..", "app/api/export/payroll/route.ts"), "utf8");
+  assert.ok(/can\(user, "payroll:view"\)/.test(xuat), "đường xuất phải hỏi quyền xem toàn bộ");
+  assert.ok(/can\(user, "payroll:view-own"\)/.test(xuat), "và phải cho người chỉ có quyền xem-của-mình đi tiếp, thay vì mở toang hoặc chặn hẳn");
+  assert.ok(/employeeMatchesUser\(l\.employee, user\)/.test(xuat), "và phải LỌC bằng chính hàm so khớp khoá tài khoản mà màn hình dùng");
+  assert.ok(/viewAll \|\| employeeMatchesUser/.test(xuat), "bộ lọc phải là 'xem hết HOẶC đúng dòng của mình', không phải một nhánh riêng dễ lệch");
+
+  console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai; sửa tham số URL cũng không mở được khối chi tiết của người khác; đường xuất CSV hẹp đúng bằng màn hình");
 }
