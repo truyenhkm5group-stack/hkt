@@ -83,7 +83,13 @@ export async function ReturnReasonSection({
             đi tới bảng size. Ba mươi dòng chi tiết là thứ người XỬ LÝ cần, không phải thứ chủ shop
             đọc để quyết.
           */}
-          <ReasonGroupTable groups={bc.groups} known={bc.reasonCoverage.known} eligibleSent={bc.eligibleSent} drilldownHref={(reason) => `${hrefWith({ reason })}#ly-do-chi-tiet`} />
+          <ReasonGroupTable
+            groups={bc.groups}
+            known={bc.reasonCoverage.known}
+            eligibleSent={bc.eligibleSent}
+            /* Bảng tra dựng SẴN ở máy chủ — không truyền hàm qua ranh giới client (docs/CONVENTIONS.md). */
+            drilldownHref={Object.fromEntries(bc.groups.flatMap((g) => g.details.map((d) => [d.reason, `${hrefWith({ reason: d.reason })}#ly-do-chi-tiet`])))}
+          />
         </div>
       </SectionCard>
 

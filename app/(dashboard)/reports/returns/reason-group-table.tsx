@@ -73,8 +73,15 @@ export function ReasonGroupTable({
   known: number;
   /** Mẫu số của cột "trên đã gửi". 0 ⇒ cột đó in "—", không in 0%. */
   eligibleSent: number;
-  /** Dựng đường mở danh sách vận đơn của một lý do, GIỮ NGUYÊN mọi bộ lọc đang bật. */
-  drilldownHref: (reason: string) => string;
+  /**
+   * Đường mở danh sách vận đơn của từng lý do, GIỮ NGUYÊN mọi bộ lọc đang bật.
+   *
+   * MỘT BẢNG TRA, KHÔNG PHẢI MỘT HÀM: `components/*` ở đây là Client Component, và Server Component
+   * không truyền hàm qua ranh giới ấy được ("Functions cannot be passed directly to Client
+   * Components"). Quy ước này đã nằm ở `docs/CONVENTIONS.md`; bản nháp đầu tiên vi phạm nó và cả
+   * khối lý do hoàn biến mất sau một lớp bắt lỗi — trang vẫn 200, chỉ thiếu mất một mục.
+   */
+  drilldownHref: Record<string, string>;
 }) {
   const [mo, setMo] = useState<Record<string, boolean>>({});
   /*
@@ -213,7 +220,7 @@ export function ReasonGroupTable({
                         <td className="px-3 py-1 text-right tabular-nums">{d.lostRevenue ? formatVND(d.lostRevenue, { compact: true }) : "—"}</td>
                         <td className="px-3 py-1 text-right">
                           {d.count ? (
-                            <Link href={drilldownHref(d.reason)} className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline" title="Mở danh sách vận đơn của đúng lý do này, giữ nguyên mọi bộ lọc đang bật.">
+                            <Link href={drilldownHref[d.reason] ?? "#"} className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline" title="Mở danh sách vận đơn của đúng lý do này, giữ nguyên mọi bộ lọc đang bật.">
                               <List className="size-3" /> {formatNumber(d.count)} vận đơn
                             </Link>
                           ) : null}

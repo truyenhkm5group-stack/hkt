@@ -93,6 +93,8 @@ async function main() {
   const { dataQualitySummary } = await import("@/lib/queries/data-quality");
   const { getControlTower } = await import("@/lib/queries/control-tower");
   const { getReturnRateSummary, getReturnRateByVariant } = await import("@/lib/queries/return-rate");
+  const { getReturnReasonReport } = await import("@/lib/queries/return-reason-report");
+  const { getReturnIntelligence } = await import("@/lib/queries/return-intelligence");
   const { getFinancialTruth } = await import("@/lib/queries/financial-truth");
   const { getCashPosition } = await import("@/lib/queries/cash-position");
   const { getCashflowStatement } = await import("@/lib/queries/cashflow-statement");
@@ -126,6 +128,20 @@ async function main() {
     {
       page: "GTC theo mẫu mã",
       run: () => getReturnRateByVariant({ period: month, q: "", minShipped: 0, sort: "returned", dir: "desc", page: 1, pageSize: 50 }),
+    },
+    /*
+      ═══ HAI KHỐI MỚI CỦA TRANG HOÀN (14/09/2026) ═══
+
+      Đo RIÊNG chứ không gộp vào "GTC theo mẫu mã": tầng quyết định dùng lại báo cáo lý do đã dựng
+      sẵn, nên nếu đo chung thì con số sẽ giấu mất việc cùng một tập ca có bị dựng hai lần hay không.
+    */
+    { page: "Lý do hoàn (Reason report)", run: () => getReturnReasonReport({ period: month, basis: "SHIPPED" }) },
+    {
+      page: "Tầng quyết định hoàn (Intelligence)",
+      run: async () => {
+        const rr = await getReturnReasonReport({ period: month, basis: "SHIPPED" });
+        return getReturnIntelligence({ period: month, previous: null, basis: "SHIPPED", reasonReport: rr });
+      },
     },
     { page: "Chân lý tài chính (Truth)", run: () => getFinancialTruth(month) },
     /*

@@ -108,6 +108,16 @@ import {
   testRescueRateNeverFakesZero,
   testTimeBasisHasNoSilentFallback,
 } from "./kpi-clarity.test";
+import {
+  testConditioningHierarchy,
+  testNoDoubleCountAcrossEvents,
+  testMarketerAttributionGoesByKey,
+  testProblemClassification,
+  testRiskBadgeReadsTargets,
+  testActionEngineGates,
+  testReasonDenominatorsAndFilters,
+  testIntelligenceRuns,
+} from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
 import { testDeliveryTower } from "./delivery-tower.test";
@@ -1475,6 +1485,16 @@ async function main() {
   await testKpiCohortUsesHandoffDate(db);
   await testNoHandoffEvidenceStaysOut(db);
   await testReasonReportDefaultsToOutcomeDate();
+
+  // ═══ TẦNG QUYẾT ĐỊNH CỦA BÁO CÁO HOÀN (14/09/2026) ═══
+  testConditioningHierarchy();
+  testNoDoubleCountAcrossEvents();
+  testMarketerAttributionGoesByKey();
+  testProblemClassification();
+  testRiskBadgeReadsTargets();
+  testActionEngineGates();
+  await testReasonDenominatorsAndFilters(db);
+  await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();
   testSmokeCoverage();

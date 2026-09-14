@@ -1,0 +1,114 @@
+{
+  "label": "SAU-return-v3",
+  "scale": 4,
+  "rounds": 3,
+  "seedMs": 12544,
+  "node": "v22.22.2",
+  "engine": "PGlite (Postgres 16 → WASM, một luồng)",
+  "measuredAt": "2026-09-14T06:56:21.066Z",
+  "rows": {
+    "products": 24,
+    "product_variants": 144,
+    "customers": 4000,
+    "orders": 5277,
+    "order_items": 10614,
+    "shipments": 4802,
+    "shipment_events": 18841,
+    "cod_statement_lines": 2327,
+    "ad_spends": 2896,
+    "fb_ads": 64,
+    "stock_receipt_items": 1920,
+    "expenses": 61,
+    "bank_accounts": 2,
+    "bank_transactions": 2896,
+    "notifications": 1200
+  },
+  "results": [
+    {
+      "page": "Tỷ lệ giao thành công (GTC)",
+      "coldMs": 1379.4,
+      "warmMs": 157.5,
+      "p50Ms": 1379.4,
+      "p95Ms": 1397.3,
+      "queries": 14,
+      "dbMs": 1226.08,
+      "rows": 29267,
+      "payloadKb": 0.8,
+      "slowest": [
+        {
+          "sql": "with don as ( select \"orders\".\"id\" as order_id, coalesce(\"orders\".\"total_price_after_discount\", 0) as order_total, (select case when \"shipments\".\"vtp_status\" = ? then ? when \"shipments\".\"vtp_status\" = ? then ? when \"shipments\".\"vtp_status\" ",
+          "count": 1,
+          "ms": 477.11,
+          "rows": 713
+        },
+        {
+          "sql": "select e.shipment_id, e.occurred_at, (select case when nullif(regexp_replace(e.status, '?', '?', '?'), '?')::int = ? then ? when nullif(regexp_replace(e.status, '?', '?', '?'), '?')::int = ? then ? when nullif(regexp_replace(e.status, '?', ",
+          "count": 5,
+          "ms": 231.15,
+          "rows": 18841
+        },
+        {
+          "sql": "select \"shipments\".\"id\" as id, coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coalesce(\"shipments\".\"id\", '?') and m.logic_version = ? -- DÒNG CŨ CŨNG PHẢI RƠI V",
+          "count": 1,
+          "ms": 216.2,
+          "rows": 4802
+        },
+        {
+          "sql": "select count(*), count(*) filter (where \"outcome\" in ('?','?','?','?')), count(*) filter (where \"outcome\" = '?'), count(*) filter (where \"outcome\" in ('?','?')), count(*) filter (where \"outcome\" = '?'), count(*) filter (where \"outcome\" = '?",
+          "count": 1,
+          "ms": 162.72,
+          "rows": 1
+        },
+        {
+          "sql": "select k.inserted_at, k.outcome from ( select \"orders\".\"inserted_at\" as inserted_at, coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coalesce(\"shipments\".\"id\", '",
+          "count": 1,
+          "ms": 119.44,
+          "rows": 4910
+        }
+      ]
+    },
+    {
+      "page": "GTC theo mẫu mã",
+      "coldMs": 1347.7,
+      "warmMs": 172.4,
+      "p50Ms": 1347.7,
+      "p95Ms": 1373.1,
+      "queries": 14,
+      "dbMs": 1173.58,
+      "rows": 29423,
+      "payloadKb": 91.6,
+      "slowest": [
+        {
+          "sql": "with don as ( select \"orders\".\"id\" as order_id, coalesce(\"orders\".\"total_price_after_discount\", 0) as order_total, (select case when \"shipments\".\"vtp_status\" = ? then ? when \"shipments\".\"vtp_status\" = ? then ? when \"shipments\".\"vtp_status\" ",
+          "count": 1,
+          "ms": 438.45,
+          "rows": 726
+        },
+        {
+          "sql": "select \"shipments\".\"id\" as id, coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coalesce(\"shipments\".\"id\", '?') and m.logic_version = ? -- DÒNG CŨ CŨNG PHẢI RƠI V",
+          "count": 1,
+          "ms": 220.02,
+          "rows": 4802
+        },
+        {
+          "sql": "select e.shipment_id, e.occurred_at, (select case when nullif(regexp_replace(e.status, '?', '?', '?'), '?')::int = ? then ? when nullif(regexp_replace(e.status, '?', '?', '?'), '?')::int = ? then ? when nullif(regexp_replace(e.status, '?', ",
+          "count": 5,
+          "ms": 218,
+          "rows": 18841
+        },
+        {
+          "sql": "select \"variant_key\", max(\"variant_id\"), max(\"sku\"), max(\"product_name\"), max(\"variation_detail\"), max(\"image\"), count(distinct \"id\") filter (where \"outcome\" in ('?','?','?','?')), count(distinct \"id\") filter (where \"outcome\" = '?'), count(",
+          "count": 1,
+          "ms": 161.83,
+          "rows": 144
+        },
+        {
+          "sql": "select k.inserted_at, k.outcome from ( select \"orders\".\"inserted_at\" as inserted_at, coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = \"orders\".\"id\" and coalesce(m.shipment_id, '?') = coalesce(\"shipments\".\"id\", '",
+          "count": 1,
+          "ms": 115.29,
+          "rows": 4910
+        }
+      ]
+    }
+  ]
+}

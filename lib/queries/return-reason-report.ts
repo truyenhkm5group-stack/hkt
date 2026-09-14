@@ -555,18 +555,21 @@ export async function listReasonShipments(f: ReasonFilter & { reason?: ReturnRea
     care_actions: number | string;
   }>(
     await db.execute(sql`
-      select o.id as order_id, o.system_id, o.bill_full_name as customer, o.bill_phone as phone, o.ship_province as province,
-             s.tracking_code as tracking, s.vtp_status_name as carrier_status,
+      -- TÊN BẢNG ĐẦY ĐỦ, KHÔNG BÍ DANH: PRIMARY_ATTEMPT phát ra "orders"."id" / "shipments"."id",
+      -- nên đặt bí danh o / s ở đây làm câu lệnh hỏng với "missing FROM-clause entry".
+      select "orders"."id" as order_id, "orders"."system_id", "orders"."bill_full_name" as customer,
+             "orders"."bill_phone" as phone, "orders"."ship_province" as province,
+             "shipments"."tracking_code" as tracking, "shipments"."vtp_status_name" as carrier_status,
              (select string_agg(distinct p.custom_id, ', ') from order_items oi
                 join product_variants pv on pv.id = oi.variant_id
                 join products p on p.id = pv.product_id and coalesce(p.custom_id,'') <> ''
-               where oi.order_id = o.id and oi.is_bonus = false) as codes,
-             (select string_agg(distinct nullif(oi.sku,''), ', ') from order_items oi where oi.order_id = o.id and oi.is_bonus = false) as skus,
-             (select c.owner_email from shipment_care c where c.shipment_id = s.id order by c.created_at desc limit 1) as care_owner,
-             (select count(*) from care_actions ca where ca.shipment_id = s.id) as care_actions
-        from orders o
-        left join shipments s on s.order_id = o.id and ${PRIMARY_ATTEMPT}
-       where o.id in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})
+               where oi.order_id = "orders"."id" and oi.is_bonus = false) as codes,
+             (select string_agg(distinct nullif(oi.sku,''), ', ') from order_items oi where oi.order_id = "orders"."id" and oi.is_bonus = false) as skus,
+             (select c.owner_email from shipment_care c where c.shipment_id = "shipments"."id" order by c.created_at desc limit 1) as care_owner,
+             (select count(*) from care_actions ca where ca.shipment_id = "shipments"."id") as care_actions
+        from "orders"
+        left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+       where "orders"."id" in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})
     `),
   );
   const theoDon = new Map(chiTiet.map((r) => [r.order_id, r]));
