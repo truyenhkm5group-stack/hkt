@@ -524,6 +524,21 @@ deploy, khi 53 màn hình còn lại đều 49–182 ms. Đó là điều buộc
 chính mình ở mục 4b: `/ads` không chậm vì "đo trúng lúc đồng bộ lại sau deploy", nó chậm vì đệm
 `memo()` hết hạn sau 60–120 giây — và nó đã chậm như vậy từ trước phiên này.
 
+## 3a-4. XÁC MINH CUỐI (deploy #292, SHA `5627574`, 14/09 21:44)
+
+```
+ops status → {"ok":true,"commit":"5627574ba7e8","branch":"main"}
+erp-app / erp-scheduler: Up · erp-db: Up (healthy)
+```
+
+Máy chủ đang chạy ĐÚNG SHA đã qua cổng, không phải một bản cũ mang nhãn mới.
+
+**Lượt đẩy ảnh Docker đầu tiên của #292 HỎNG** (`unknown blob` khi đẩy lên ghcr.io, sau khi cổng đã
+xanh). Đây là lỗi phía kho ảnh, không phải lỗi mã: toàn bộ khác biệt giữa #291 và #292 là **hai
+tệp văn bản** (`AGENTS.md` một dòng, và chính biên bản này), không có một dòng mã chạy nào. Chạy
+lại đúng MỘT lần thì xanh. Ghi ra đây để lần sau gặp `unknown blob` thì biết là chạy lại, đừng đi
+tìm lỗi trong diff.
+
 ## 3b. Việc chủ shop nên làm ngay sau bản này
 
 1. **Khai mốc hiệu lực cho fanpage còn thiếu** — Marketing → Fanpage & quy kết → gán marketer với
@@ -538,7 +553,7 @@ chính mình ở mục 4b: `/ads` không chậm vì "đo trúng lúc đồng b�
 
 `npm run typecheck` · `npm run lint` · `npm test` → **"TẤT CẢ KIỂM THỬ ĐẠT"** · `npm run build`.
 
-Năm đợt phát hành — mỗi đợt chạy cổng trên **bản checkout SẠCH theo đúng SHA ứng viên**
+Sáu đợt phát hành — mỗi đợt chạy cổng trên **bản checkout SẠCH theo đúng SHA ứng viên**
 (`git worktree add --detach` + `npm ci`), không chạy trên cây làm việc đang mở:
 
 | đợt | SHA | nội dung |
@@ -548,6 +563,7 @@ Năm đợt phát hành — mỗi đợt chạy cổng trên **bản checkout S�
 | #289 | `f41a87a` | mục 1.8 (sổ đăng ký cơ sở lương + dải cảnh báo) · README/HANDOFF/chú giải quyền nói đúng luật đang chạy · nhắc khai email đăng nhập |
 | #290 | `0bf4a08` | mục 1.9 (kỳ lương: migration `0088`, ảnh chụp bất biến, đề xuất điều chỉnh) |
 | #291 | `2c70455` | hai kỳ đã chốt thôi chồng lấn NGÀY (mục 1.9b) · biên bản: đối soát cùng phạm vi, ranh giới sống/ảnh chụp, xác minh sau deploy #290 |
+| #292–#293 | `5627574` → | CHỈ BIÊN BẢN, không đổi một dòng mã chạy: sửa hai chẩn đoán sai về `/ads` (mục 4b) · thêm mục 3a-3 và 5.5 · số migration trong `AGENTS.md` |
 
 Kiểm thử mới / mở rộng:
 - `tests/fanpage-attribution.test.ts` mục **7c** (cầu nối đơn huỷ) và **7d** (cửa sổ không trượt
