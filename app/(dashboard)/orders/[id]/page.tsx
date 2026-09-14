@@ -16,7 +16,7 @@ import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { pancakeStatusName } from "@/lib/constants/pancake";
-import { COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
+import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getOrderDetail } from "@/lib/queries/orders";
@@ -156,7 +156,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           >
             {attempts.length ? (
               <div className="space-y-5">
-                {attempts.map((s, idx) => (
+                {attempts.map((s, idx) => {
+              const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
+              return (
               <div key={s.id} className={cn("space-y-4", idx > 0 && "border-t pt-5")}>
                 {/* SỐ THỨ TỰ + CHIỀU: đơn gửi lại phải đọc được như một dòng thời gian, không phải
                     một trạng thái duy nhất. Lần huỷ trước đó vẫn là chứng từ có thật. */}
@@ -176,8 +178,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                       <CopyButton value={s.vtpOrderNumber ?? s.trackingCode ?? ""} what="mã vận đơn" />
                     </span>
                   ) : null}
-                  {s.vtpOrderNumber ? (
-                    <a className="text-xs font-semibold text-primary hover:underline" href={`https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${s.vtpOrderNumber}&orderType=1`} target="_blank" rel="noreferrer">
+                  {vtpUrl ? (
+                    <a className="text-xs font-semibold text-primary hover:underline" href={vtpUrl} target="_blank" rel="noopener noreferrer">
                       Tra cứu trên Viettel Post
                     </a>
                   ) : null}
@@ -195,7 +197,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 />
                 <ShipmentTimeline events={s.events} />
               </div>
-                ))}
+                );
+                })}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Khi Pancake đẩy đơn sang Viettel Post, mã vận đơn và hành trình sẽ xuất hiện tại đây.</p>

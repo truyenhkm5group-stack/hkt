@@ -76,6 +76,8 @@ import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
 import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
+import { testInspectionFilter } from "./inspection-filter.test";
+import { testReturnFullReceive } from "./return-full-receive.test";
 import { testReturnProductContext } from "./return-product-context.test";
 import { testShipmentProductReport } from "./shipment-product-report.test";
 import { testAdsAttributionCoverage } from "./ads-attribution-coverage.test";
@@ -122,6 +124,7 @@ import {
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
+import { testVtpTrackingLink } from "./vtp-tracking-link.test";
 import { testDeliveryTower } from "./delivery-tower.test";
 import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
@@ -130,6 +133,9 @@ import { testCacheSemantics } from "./cache-semantics.test";
 import { testUseServerExports } from "./use-server-exports.test";
 import { testSmokeCoverage } from "./smoke-coverage.test";
 import { testReturnPipeline } from "./return-pipeline.test";
+import { testReturnExceptions } from "./return-exceptions.test";
+import { testReturnWarehouseKpi } from "./return-warehouse-kpi.test";
+import { testInspectionTruth } from "./inspection-truth.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
@@ -1502,6 +1508,7 @@ async function main() {
   await testIntelligenceRuns(db);
   testUseServerExports();
   testClientBoundaryExports();
+  testVtpTrackingLink();
   testSmokeCoverage();
   testOperatingFunnel();
   testLogisticsFreshness();
@@ -1562,6 +1569,8 @@ async function main() {
   await testShipmentProductReport(db);
   await testReturnItemInspection(db);
   await testHmtReturnReconcile(db);
+  testInspectionFilter();
+  await testReturnFullReceive(db);
   // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
   await testCogsRecognition(db);
   await testAdsAttributionCoverage(db);
@@ -1569,6 +1578,11 @@ async function main() {
   // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
   // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
   await testReturnPipeline(db);
+  await testReturnExceptions(db);
+  // Dựng fixture riêng và TỰ DỌN ở cuối, nên tổng của các bài sau không đổi.
+  await testReturnWarehouseKpi(db);
+  // Dựng fixture riêng và TỰ DỌN ở cuối; đo bằng ĐỘ CHÊNH nên bài trước không làm nó đỏ.
+  await testInspectionTruth(db);
   await testDeliveryTower(db);
   // Ngay sau tháp giao vận: bài này cũng dựng rổ giao vận, và nó TỰ DỌN mọi dòng nó thêm vào nên
   // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một

@@ -114,11 +114,11 @@ export async function testCareWorkbench(db: Db) {
   assert.ok(!slaOf(gio(5), { status: "RESOLVED", followUpAt: null, doneAt: gio(1), firstResponseAt: gio(4) }).resolveBreached, "đã đóng thì không tính vỡ SLA đóng");
 
   // ───────── 5. Yêu cầu ĐVVC ─────────
-  const caps = carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "WEBHOOK_ONLY", configured: true, tracking: "X" });
+  const caps = carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "WEBHOOK_ONLY", configured: true, vtpOrderNumber: "X" });
   assert.equal(caps.find((c) => c.actionKey === "redeliver")?.status, "PERMISSION_MISSING");
   assert.equal(caps.find((c) => c.actionKey === "approve")?.status, "UNSUPPORTED", "duyệt đơn không áp dụng ở chặng giao hụt");
-  assert.equal(carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "API_TRACKABLE", configured: true, tracking: "X" }).find((c) => c.actionKey === "redeliver")?.status, "SUPPORTED");
-  assert.equal(carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "UNKNOWN_CAPABILITY", configured: false, tracking: "X" }).find((c) => c.actionKey === "redeliver")?.status, "PERMISSION_MISSING", "chưa cấu hình credential thì không thể gửi");
+  assert.equal(carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "API_TRACKABLE", configured: true, vtpOrderNumber: "X" }).find((c) => c.actionKey === "redeliver")?.status, "SUPPORTED");
+  assert.equal(carrierCapabilitiesFor({ stage: "DELIVERY_FAILED", trackingCapability: "UNKNOWN_CAPABILITY", configured: false, vtpOrderNumber: "X" }).find((c) => c.actionKey === "redeliver")?.status, "PERMISSION_MISSING", "chưa cấu hình credential thì không thể gửi");
 
   let apiCalls = 0;
   let flaky = 1;

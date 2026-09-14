@@ -61,6 +61,49 @@ export async function latestHmtWorkbook(): Promise<HmtSource | null> {
   };
 }
 
+/**
+ * ═══ DANH TÍNH BẢN SỔ, KHÔNG KÈM NỘI DUNG ═══
+ *
+ * `latestHmtWorkbook()` kéo cả cột `content` (base64 ~80 KB) rồi giải mã ra `Buffer`. Màn hình
+ * Kiểm đếm hàng hoàn chỉ cần SÁU Ô META để hiện "đang dùng bản nào" — trả về cả nội dung cho việc
+ * đó là bắt mỗi lượt mở trang trả tiền cho một khối byte không ai đọc.
+ *
+ * Node chạy MỘT luồng: giải mã base64 là việc ĐỒNG BỘ, nên nó không chỉ làm chậm trang này mà
+ * chặn luôn mọi yêu cầu khác đang chờ trên cùng tiến trình. Đo được điều đó ở lượt smoke NGUỘI
+ * sau khi triển khai 14/09: hai trang nặng nhất (`/reports/returns`, `/ads`) vượt 60 giây, rồi
+ * khi container đã nóng thì chính chúng trả lời trong 78 ms và 7,2 s.
+ *
+ * Dùng hàm này ở mọi chỗ chỉ cần biết "bản nào"; chỉ gọi `latestHmtWorkbook()` khi thật sự phải
+ * ĐỌC nội dung.
+ */
+export async function latestHmtWorkbookMeta(): Promise<Omit<HmtSource, "buffer"> | null> {
+  const db = await getDb();
+  const t = schema.hmtWorkbooks;
+  // Liệt kê từng cột, cố ý: `select *` sẽ lặng lẽ kéo lại `content` vào ngày ai đó thêm cột mới.
+  const [row] = await db
+    .select({
+      filename: t.filename,
+      sha256: t.sha256,
+      bytes: t.bytes,
+      uploadedBy: t.uploadedBy,
+      createdAt: t.createdAt,
+      lastUsedAt: t.lastUsedAt,
+    })
+    .from(t)
+    .orderBy(desc(t.createdAt))
+    .limit(1);
+  if (!row) return null;
+  return {
+    filename: row.filename,
+    sha256: row.sha256,
+    bytes: row.bytes,
+    origin: "DB",
+    uploadedBy: row.uploadedBy,
+    uploadedAt: row.createdAt,
+    lastUsedAt: row.lastUsedAt,
+  };
+}
+
 /** Ghi mốc "lượt đối soát đã đọc bản này" — để màn hình phân biệt bản đã dùng với bản mới tải lên. */
 export async function markHmtWorkbookUsed(sha256: string) {
   const db = await getDb();

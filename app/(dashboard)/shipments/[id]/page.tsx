@@ -13,7 +13,7 @@ import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PANCAKE_PARTNER_STATUS } from "@/lib/constants/pancake";
-import { COD_STATUS_LABEL, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
+import { COD_STATUS_LABEL, getViettelPostTrackingUrl, VTP_REASON_CODES } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail } from "@/lib/queries/shipments";
 import { can, requirePermission } from "@/lib/auth/session";
@@ -32,7 +32,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   if (!s) notFound();
   const number = s.vtpOrderNumber ?? s.trackingCode;
   const isVtp = Boolean(s.vtpOrderNumber) || /viettel/i.test(s.carrier);
-  const vtpUrl = s.vtpOrderNumber ? `https://viettelpost.vn/thong-tin-don-hang?peopleTracking=sender&orderNumber=${encodeURIComponent(s.vtpOrderNumber)}&orderType=1` : null;
+  const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
   const order = s.order;
   const partner = s.partnerStatus ? (PANCAKE_PARTNER_STATUS[s.partnerStatus]?.name ?? s.partnerStatus) : null;
   const reason = s.vtpReasonCode !== null ? `${VTP_REASON_CODES[s.vtpReasonCode] ?? "Mã lý do"} (${s.vtpReasonCode})` : null;
