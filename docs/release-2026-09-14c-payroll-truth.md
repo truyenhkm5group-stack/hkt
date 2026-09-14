@@ -449,8 +449,23 @@ adsRoas 30 ngày          268 ms
 
 Đây là chi phí của nhánh dự phòng `ORDER_OUTCOME` khi bảng `canonical_order_outcome` chưa phủ —
 một vấn đề đã có từ trước và đã được ghi trong `docs/erp-performance-p0-3-report.md`. Lượt smoke
-lại chạy ngay sau khi deploy xong, đúng lúc bộ lập lịch vừa khởi động và đang đồng bộ lại — chính
-`scripts/smoke.ts` cảnh báo về ca này. Đã chạy lại smoke trên hệ thống đã ổn định để có con số sạch.
+lại chạy **ngay sau khi deploy xong**, đúng lúc bộ lập lịch vừa khởi động và đang đồng bộ lại —
+chính `scripts/smoke.ts` cảnh báo về ca này.
+
+**Chạy lại smoke trên hệ thống ĐÃ ỔN ĐỊNH — và nó xác nhận đúng điều đó:**
+
+```
+54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 CHẬM · 0 chưa kiểm · 0 hết phiên
+/payroll                         281 kB   91 ms
+/ads                           2.592 kB   81 ms   ← 6.374 ms → 81 ms, không sửa một dòng mã nào
+/marketing/fanpages              165 kB   53 ms
+/marketing/fanpages?tab=orders   281 kB   49 ms
+/marketing/fanpages?tab=assign   262 kB   50 ms
+/reports                         300 kB  102 ms
+```
+
+`/ads` đi từ 6.374 ms xuống **81 ms** mà không ai sửa gì — đó là dấu vân tay của việc đo trúng lúc
+máy chủ đang đồng bộ lại sau deploy, không phải của một hồi quy. **Không màn hình nào CHẬM.**
 
 ---
 
