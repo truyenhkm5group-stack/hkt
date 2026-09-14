@@ -112,6 +112,20 @@ $COMPOSE ps
 curl -fsS -m 10 "http://127.0.0.1:${PORT}/api/health" && echo || say "  ✗ /api/health CHƯA trả lời — xem log: $COMPOSE logs --tail=80 app"
 
 say ""
+say "── RAM / swap sau khi bản chạy thử lên ──"
+free -h || true
+swapon --show 2>/dev/null || say "  (chưa có swap — chạy scripts/vps-add-swap.sh)"
+docker stats --no-stream --format '  {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' 2>/dev/null || true
+
+say ""
+say "── Migration trên CSDL RIÊNG của bản chạy thử ──"
+# `/api/health` chỉ chứng minh tiến trình sống và CSDL nối được. Migration xong hay chưa phải ĐẾM.
+docker exec vnx-ai-staging-db psql -U erp -d erp -P pager=off -t \
+  -c "select '  đã áp: ' || count(*) || ' migration' from drizzle.__drizzle_migrations;" \
+  -c "select '  bảng nhân sự AI: ' || count(*) || '/14' from information_schema.tables where table_schema='public' and (table_name like 'ai\\_%' or table_name like 'sales\\_%');" \
+  -c "select '  tin đã gửi cho khách: ' || count(*) || ' (phải là 0)' from sales_suggestions where sent;" 2>&1 || say "  (chưa đọc được CSDL bản chạy thử)"
+
+say ""
 say "── Production PHẢI không đổi ──"
 docker ps --format '  {{.Names}}\t{{.Status}}' | grep '^  erp-' || say "  (không thấy container erp-*)"
 if docker exec erp-app wget -qO- --timeout=10 http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
@@ -124,5 +138,17 @@ say ""
 say "Xong. Mở bằng SSH tunnel từ máy của bạn:"
 say "    ssh -L ${PORT}:127.0.0.1:${PORT} <user>@<vps>   rồi vào http://localhost:${PORT}/ai/review"
 say ""
-say "Nạp thử hội thoại đầu tiên (một page, cửa sổ hẹp):"
+say "CÒN THIẾU ĐỂ NẠP HỘI THOẠI — điền vào $DIR/.env.staging rồi `$COMPOSE up -d app`:"
+if grep -qE '^PANCAKE_PAGE_ID="?.+"?$' .env.staging 2>/dev/null && ! grep -qE '^PANCAKE_PAGE_ID=""$' .env.staging; then
+  say "    ✓ PANCAKE_PAGE_ID đã có"
+else
+  say "    ✗ PANCAKE_PAGE_ID          — pancake.vn → Cấu hình → Page → ID của page cần đọc"
+fi
+if grep -qE '^PANCAKE_PAGE_ACCESS_TOKEN="?.+"?$' .env.staging 2>/dev/null && ! grep -qE '^PANCAKE_PAGE_ACCESS_TOKEN=""$' .env.staging; then
+  say "    ✓ PANCAKE_PAGE_ACCESS_TOKEN đã có"
+else
+  say "    ✗ PANCAKE_PAGE_ACCESS_TOKEN — pancake.vn → Cấu hình → Page → Access token của CHÍNH page đó"
+fi
+say ""
+say "Rồi nạp thử lượt đầu (một page, cửa sổ hẹp, KHÔNG ghi gì):"
 say "    cd $DIR && $COMPOSE exec -T app npm run ai:ingest -- --page=<PAGE_ID> --hours=24 --max=20 --dry-run"
