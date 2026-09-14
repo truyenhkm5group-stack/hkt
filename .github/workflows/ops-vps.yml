@@ -70,7 +70,9 @@ on:
           - ai-staging-preflight  # CHỈ ĐỌC: chụp hiện trạng + kiểm 7 lớp va chạm + RAM/đĩa
           - ai-staging-image      # dựng ảnh trên máy chạy GitHub rồi đẩy lên GHCR (KHÔNG chạm VPS)
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
-          - ai-staging-page-token # sinh page_access_token cho MỘT page (arg = PAGE_ID) rồi ghi vào .env.staging
+          - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
+          - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
+          - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
           - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
@@ -615,6 +617,26 @@ jobs:
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/staging-up.sh?ref=${STAGING_BRANCH}" > /tmp/staging-up.sh
                 STAGING_BRANCH="$STAGING_BRANCH" STAGING_IMAGE="$STAGING_IMAGE" \
                   GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" bash /tmp/staging-up.sh ;;
+
+              ai-staging-creds)
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/pancake-staging-credentials.sh?ref=${STAGING_BRANCH}" > /tmp/creds.sh
+                PANCAKE_PAGE_ID="${ARG:-}" bash /tmp/creds.sh
+                rm -f /tmp/creds.sh
+                echo ""
+                echo "── Dựng lại RIÊNG container ứng dụng để nó đọc khoá mới ──"
+                cd /opt/vnx-ai-staging
+                docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                sleep 15
+                curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-read-test)
+                cd /opt/vnx-ai-staging
+                # CHỈ GỌI GET. Script tự gọi fetch thay vì dùng client, vì client sẽ POST sinh page
+                # token khi chưa có — một bài kiểm "chỉ đọc" mà tự sinh chứng thư thì không còn là
+                # bài kiểm chỉ đọc.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/pancake-read-test.ts ${ARG:-} ;;
 
               ai-staging-page-token)
                 # `arg` = MÃ PAGE. Mã page không phải bí mật (nó nằm trên URL của chính trang ấy).
