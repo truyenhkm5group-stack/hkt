@@ -214,7 +214,59 @@ CHECK vào cột ấy thì bài kiểm đỏ, đúng lúc cần đỏ.
 
 ---
 
-## 8. Còn chờ: đối soát HMT bằng tệp thật
+## 8. Số đo SAU deploy (production, 14/09/2026)
+
+Production SHA **`3454fff` → `6ee2098`** (deploy run #266, cổng CI xanh cả 5 bước trước khi chạm máy
+chủ; bước "Kiểm tra HTTPS từ bên ngoài" xác nhận đúng mã commit). Migration 80 → **81**.
+
+### Smoke trên HTML thật (51 trang, phiên đăng nhập hợp lệ)
+
+`51/51 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 chậm · 0 hết phiên`. `/cs` và `/cs?view=theo-case`
+đều có mặt **cả ba công cụ mới** — lá chắn smoke nay kiểm chúng, nên thiếu một cái là `APP_ERROR`
+chứ không phải HTTP 200 xanh.
+
+### Đối chiếu hàng đợi với thực tế — **406 case đang mở**
+
+| Kết luận | Số case |
+|---|---|
+| `KEEP_OPEN` | **398** |
+| `AUTO_RESOLVE` | 0 |
+| `RECLASSIFY` | 0 |
+| `NEEDS_REVIEW` | 0 |
+
+Theo loại: 356 giao không thành · 14 trả hàng · 11 giục giao · 7 tư vấn size · 5 khiếu nại · 2 đổi
+màu · 1 đổi size · 1 SĐT mới · 1 sai địa chỉ.
+
+**Máy đóng được 0 case — và đó là kết quả ĐÚNG, không phải máy không chạy.** Đối chiếu với dữ liệu
+thô cùng lúc:
+
+| Loại | Có đơn | Đơn đã xong | Kiện đang chạy | Vì sao KEEP_OPEN |
+|---|---|---|---|---|
+| Giao không thành (356) | 356 | 231 | 130 | loại này **chưa khai điều kiện đóng** ⇒ giữ nguyên |
+| Giục giao (11) | 11 | **0** | 8 | không đơn nào kết thúc ⇒ câu giục vẫn còn nghĩa |
+| Trả hàng (14) | 14 | 7 | 5 | đều có đơn thật ⇒ còn nguyên lý do |
+| Sai địa chỉ (1) | 1 | 1 | **0** | không có kiện đang chạy ⇒ vẫn là việc CSKH |
+
+### "Đủ thông tin · chưa tạo đơn" — 8 đang mở, **cả 8 còn treo THẬT**
+
+Không case nào đóng được theo bốn bậc chứng cứ. Tra từng case để kiểm chứng chứ không tin con số:
+
+| Đơn gắn case | Khoảng cách tới mốc case | Đơn xác nhận trong cửa sổ ±2 ngày | Đúng hay sai |
+|---|---|---|---|
+| (không có đơn) | — | 0 | ✓ thật sự chưa có đơn |
+| `DELIVERED` | **298 giờ** | 0 | ✓ **khách mua lại** — đúng ca 298h đã đo lúc chọn ngưỡng |
+| `CONFIRMED` | **83 giờ** | 0 | ✓ ngoài cửa sổ ⇒ máy KHÔNG kết luận, để người quyết |
+| `NEW` × 4 | 23–47 giờ | 0 | ✓ "Mới" chưa phải "đã tạo" — ranh giới chủ shop vạch ở "Đã xác nhận" |
+
+Đúng hai ca mà cửa sổ ±2 ngày được dựng lên để phân biệt (83h và 298h) đều nằm trong tám case này,
+và cả hai đều được giữ mở. Ngưỡng làm đúng việc của nó trên dữ liệu thật.
+
+**Chạy `--apply`: 0/0 case đóng mềm, 0 case "chưa tạo đơn" đóng.** Chạy thử và chạy thật ra CÙNG
+một con số ⇒ không-thao-tác, đúng nghĩa idempotent.
+
+---
+
+## 9. Còn chờ: đối soát HMT bằng tệp thật
 
 Bộ máy đối soát đã dựng xong và kiểm thử đầy đủ từ bản trước. Thứ còn thiếu là **chính tệp** trên
 máy có quyền đọc CSDL production.
@@ -223,6 +275,20 @@ Môi trường phiên làm việc này **không** có đường đưa tệp sang
 `erp.vnxcommerce.com` đều bị chặn ở tầng proxy (403 CONNECT); ô "arg" của workflow hiện công khai
 trên kho mã PUBLIC; và tệp tuyệt đối không được commit vào Git hay đưa vào ảnh Docker.
 
-Nên: máy chủ đã sẵn sàng đọc `/root/hmt/*.xlsx`. Chủ shop chỉ cần **một lệnh duy nhất** từ máy đang
-có tệp, rồi chạy thao tác ops `returns-hmt`.
+Đã kiểm lại trên máy chủ **14/09/2026 sau deploy** (thao tác ops `returns-hmt`): thư mục
+`/root/hmt/` **chưa có tệp nào**.
+
+**Trạng thái: `HMT_ENGINE_READY` · `WAITING_FOR_SECURE_FILE_TRANSFER`.**
+
+Chủ shop chỉ cần **một lệnh duy nhất**, chạy từ chính máy đang có tệp:
+
+```
+scp "Bản sao của Hàng hoàn HMT.xlsx" root@14.225.198.146:/root/hmt/
+```
+
+Rồi chạy Actions → *Vận hành ERP trên VPS* → `returns-hmt` (ô `arg` để TRỐNG = **chạy thử**, không
+ghi gì). Xem xong báo cáo, muốn ghi thì chạy lại với `arg = --apply`.
+
+Không cần nhập mật khẩu hay token vào đâu khác, và **không** dán tệp / đường dẫn vào ô `arg`: ô đó
+hiện công khai trên trang lần chạy của một kho mã PUBLIC.
 
