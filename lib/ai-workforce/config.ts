@@ -66,28 +66,28 @@ export type AiSettings = AiFeatureFlags & {
  * Khai ở đây chứ không đọc ngược từ sổ đăng ký nhà cung cấp: sổ ấy import `aiEnv`, nên đọc ngược
  * là một vòng phụ thuộc. Bài kiểm khoá hai danh sách phải khớp nhau.
  */
-export const WORKFORCE_PROVIDERS = ["stub", "anthropic"] as const;
+export const WORKFORCE_PROVIDERS = ["stub", "erp", "anthropic"] as const;
 
 export const aiEnv = {
   /**
-   * Nhà cung cấp mô hình mặc định. `stub` = không gọi mạng, dùng cho kiểm thử và khi chưa có khoá.
+   * NHÀ CUNG CẤP KHAI TAY — rỗng nghĩa là "để hệ thống tự chọn".
    *
-   * HAI BIẾN, VÀ THỨ TỰ LÀ CÓ CHỦ Ý. `AI_PROVIDER` đã bị AI Copilot của ERP chiếm trước với một
-   * BỘ GIÁ TRỊ KHÁC (`auto | openai | anthropic | off`, xem `lib/ai/router.ts`). Hai hệ đọc chung
-   * một biến là hai hệ cùng hiểu sai: đặt `AI_PROVIDER=auto` cho Copilot thì nhân sự AI nhận một
-   * tên nhà cung cấp không tồn tại, và ngược lại đặt `stub` cho nhân sự AI thì Copilot tắt.
+   * Chỉ đọc `AI_WORKFORCE_PROVIDER`. KHÔNG đọc `AI_PROVIDER` nữa: biến ấy thuộc về tầng AI của ERP
+   * (`lib/ai/router.ts`) với MỘT BỘ GIÁ TRỊ KHÁC (`auto | openai | anthropic | off`), và hai hệ
+   * cùng đọc một biến là hai hệ cùng hiểu sai. Cầu nối `erp` đọc thẳng biến ấy qua chính bộ định
+   * tuyến của ERP, nên nhân sự AI không cần diễn giải lại nó.
    *
-   * Nên: `AI_WORKFORCE_PROVIDER` là tên riêng và thắng tuyệt đối. Không khai thì mới xét
-   * `AI_PROVIDER`, và CHỈ nhận khi nó là một nhà cung cấp mà nhân sự AI thật sự có — `auto`,
-   * `openai`, `off` đều rơi về `stub`, tức KHÔNG gọi mạng. Rơi về phía hẹp hơn, như mọi nhánh
-   * lỗi khác trong tệp này.
+   * Việc chọn mặc định nằm ở `providers/index.ts::defaultProviderName()`: tầng ERP trước, khoá
+   * riêng sau, `stub` cuối cùng.
    */
   get provider() {
     const rieng = readEnv("AI_WORKFORCE_PROVIDER");
-    if (rieng) return rieng;
-    const chung = readEnv("AI_PROVIDER");
-    return (WORKFORCE_PROVIDERS as readonly string[]).includes(chung) ? chung : "stub";
+    return (WORKFORCE_PROVIDERS as readonly string[]).includes(rieng) ? rieng : "";
   },
+  /**
+   * Khoá RIÊNG của nhân sự AI — chỉ dùng cho nhà cung cấp `anthropic` viết tay, và đó nay là
+   * ĐƯỜNG LUI. Đường chính là tầng AI của ERP với khoá đang chạy thật cho AI Copilot.
+   */
   get apiKey() {
     return readEnv("AI_API_KEY") || readEnv("ANTHROPIC_API_KEY");
   },

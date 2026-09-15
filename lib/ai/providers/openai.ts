@@ -17,9 +17,9 @@ export class OpenAiProvider implements AiProvider {
   readonly name = "openai";
   readonly model: string;
   private client: OpenAI;
-  constructor(model: string, private effort: "low" | "medium" | "high" = "medium", fetchImpl?: typeof fetch) {
+  constructor(model: string, private effort: "low" | "medium" | "high" = "medium", fetchImpl?: typeof fetch, timeoutMs = 60_000) {
     this.model = model;
-    this.client = new OpenAI({ maxRetries: 2, timeout: 60_000, ...(fetchImpl ? { fetch: fetchImpl as ClientOptions["fetch"] } : {}) });
+    this.client = new OpenAI({ maxRetries: 2, timeout: timeoutMs, ...(fetchImpl ? { fetch: fetchImpl as ClientOptions["fetch"] } : {}) });
   }
 
   private toInput(req: AiRequest): OpenAI.Responses.ResponseInputItem[] {

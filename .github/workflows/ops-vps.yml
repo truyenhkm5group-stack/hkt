@@ -78,6 +78,7 @@ on:
           - ai-staging-ad-evidence # thu chứng cứ cho từng mã quảng cáo; mặc định CHẠY THỬ, "--apply" mới lưu
           - ai-staging-fanpage   # khai hồ sơ bán hàng cho một page (arg: "--page=<id> --product=Q004 --apply")
           - ai-staging-configure # khai mã WIN + nguồn TEST rồi chạy thử ngầm ngay (arg: "--page=<id> --win=Q004 --test-source=<ad> --apply")
+          - ai-staging-ai-env     # ghi OPENAI_API_KEY / AI_PROVIDER từ Secrets vào .env.staging rồi thử kết nối (KHÔNG in giá trị)
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
@@ -753,6 +754,42 @@ jobs:
                 # Mặc định CHẠY THỬ; "--apply" trong ô arg mới ghi. Không gọi mô hình, không gửi tin.
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-fanpage-configure.ts ${ARG:-} ;;
+
+              ai-staging-ai-env)
+                # BẢN CHẠY THỬ DÙNG LẠI KHOÁ AI CỦA ERP — không xin khoá thứ hai.
+                #
+                # AI Copilot trên production đã chạy thật bằng `OPENAI_API_KEY`. Nhân sự bán hàng đi
+                # qua cùng lớp provider ấy (`lib/ai/` ← `providers/erp-shared.ts`), nên bản chạy thử
+                # chỉ cần CHÍNH khoá đó, đi qua CHÍNH cơ chế Secrets đang dùng.
+                #
+                # GIÁ TRỊ SECRET KHÔNG BAO GIỜ ĐƯỢC IN — chỉ in ĐỘ DÀI. GitHub cũng tự che secret
+                # trong log, nhưng không dựa vào một lớp bảo vệ duy nhất.
+                cd /opt/vnx-ai-staging
+                upsert_stg() { if grep -qE "^$1=" .env.staging; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env.staging; else printf '%s="%s"\n' "$1" "$2" >> .env.staging; fi; }
+                if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+                  echo "Không có Secret OPENAI_API_KEY / ANTHROPIC_API_KEY trong repo — KHÔNG ghi gì."
+                  echo "Thêm ở Settings → Secrets and variables → Actions rồi chạy lại."
+                  exit 1
+                fi
+                [ -n "${OPENAI_API_KEY:-}" ] && { upsert_stg OPENAI_API_KEY "$OPENAI_API_KEY"; echo "OPENAI_API_KEY: đã ghi vào .env.staging (${#OPENAI_API_KEY} ký tự)"; }
+                [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_stg ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; echo "ANTHROPIC_API_KEY: đã ghi vào .env.staging (${#ANTHROPIC_API_KEY} ký tự)"; }
+                upsert_stg AI_PROVIDER "${AI_PROVIDER:-auto}"
+                # CHẶN CỨNG GIỮ NGUYÊN. Bật mô hình thật KHÔNG được kéo theo quyền gửi tin hay tạo
+                # đơn — đó là hai khoá riêng, và chúng phải ở lại CẤM.
+                upsert_stg AI_DEFAULT_MODE SHADOW
+                upsert_stg AI_ALLOW_CUSTOMER_SEND false
+                upsert_stg AI_ALLOW_ORDER_CREATE false
+                upsert_stg AI_MODEL_CALLS_ENABLED true
+                chmod 600 .env.staging
+                echo ""
+                docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                sleep 15
+                curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời"
+                echo ""
+                echo "── Thử kết nối AI trong bản chạy thử (chỉ in meta) ──"
+                fetch_staging_script ai-staging-ping.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-ping.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-ping.ts ;;
 
               ai-staging-knowledge)
                 cd /opt/vnx-ai-staging

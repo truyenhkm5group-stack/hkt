@@ -15,7 +15,7 @@ import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { parseRouting, runModelStep } from "@/lib/ai-workforce/model-router";
-import { providerNames } from "@/lib/ai-workforce/providers";
+import { defaultProviderName, providerNames } from "@/lib/ai-workforce/providers";
 import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
 import { z } from "zod";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
@@ -301,32 +301,66 @@ export async function testSalesAgent(db: Db) {
   // không phải "cho tới khi có người nghĩ ra là phải cấm".
   assert.deepEqual(aiEnv.hardLimits, SAFEST_HARD_LIMITS, "không khai biến môi trường thì cả hai công tắc đều CẤM");
 
-  // ── HAI HỆ AI, HAI BIẾN MÔI TRƯỜNG — KHÔNG ĐƯỢC ĐỌC CHUNG ──
+  // ── NHÂN SỰ BÁN HÀNG DÙNG LẠI TẦNG AI CÓ SẴN CỦA ERP, KHÔNG DỰNG TÍCH HỢP THỨ HAI ──
   //
-  // ERP có SẴN một AI Copilot dùng `AI_PROVIDER` với bộ giá trị `auto|openai|anthropic|off`.
-  // Nhân sự AI dùng bộ khác (`stub|anthropic`). Nếu hai hệ đọc chung một biến thì đặt đúng cho
-  // hệ này là đặt sai cho hệ kia — và cái sai ấy im lặng.
+  // ERP đã có một lớp provider đầy đủ (`lib/ai/`) với SDK chính thức, thử lại, trần thời gian và
+  // khoá đang chạy THẬT cho AI Copilot trên production. Bản đầu của nhân sự AI tự viết client
+  // riêng với khoá riêng — nghĩa là hai khoá phải giữ, hai chỗ đổi mô hình, hai bảng giá có thể
+  // nói hai con số khác nhau về cùng một lượt gọi.
+  //
+  // `AI_PROVIDER` nay CHỈ thuộc về tầng ERP. Nhân sự AI không diễn giải lại nó — cầu nối `erp`
+  // đọc nó qua chính bộ định tuyến của ERP.
   assert.deepEqual([...WORKFORCE_PROVIDERS].sort(), providerNames().sort(), "danh sách tên nhà cung cấp phải khớp sổ đăng ký thật");
+  assert.ok(providerNames().includes("erp"), "cầu nối sang tầng AI của ERP phải có mặt trong sổ đăng ký");
+
   const savedWf = process.env.AI_WORKFORCE_PROVIDER;
   const savedProv = process.env.AI_PROVIDER;
+  const savedOpenai = process.env.OPENAI_API_KEY;
+  const savedAnth = process.env.ANTHROPIC_API_KEY;
+  const savedWfKey = process.env.AI_API_KEY;
   try {
-    delete process.env.AI_WORKFORCE_PROVIDER;
-    // Giá trị của Copilot KHÔNG được kéo nhân sự AI đi theo: rơi về `stub`, tức KHÔNG gọi mạng.
-    for (const raw of ["auto", "openai", "off", "lung-tung"]) {
-      process.env.AI_PROVIDER = raw;
-      assert.equal(aiEnv.provider, "stub", `AI_PROVIDER=${raw} là của Copilot — nhân sự AI phải rơi về stub, không gọi mạng`);
-    }
-    // Nhưng một tên mà nhân sự AI THẬT SỰ CÓ thì vẫn nhận, để cấu hình cũ không gãy.
-    process.env.AI_PROVIDER = "anthropic";
-    assert.equal(aiEnv.provider, "anthropic", "tên nhà cung cấp hợp lệ ở AI_PROVIDER vẫn dùng được");
-    // Và biến riêng thắng tuyệt đối.
+    for (const k of ["AI_WORKFORCE_PROVIDER", "AI_PROVIDER", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AI_API_KEY"]) delete process.env[k];
+
+    // ① KHÔNG KHAI GÌ ⇒ `stub`, tức KHÔNG GỌI MẠNG. Đây là điều quan trọng nhất ở khối này: một
+    //    lần triển khai thiếu biến không được biến thành một con bot tự gọi mô hình.
+    assert.equal(aiEnv.provider, "", "không khai thì `provider` rỗng — 'để hệ thống tự chọn', không phải một tên");
+    assert.equal(defaultProviderName(), "stub", "chưa cấu hình gì thì KHÔNG gọi mạng");
+
+    // ② ERP đã cấu hình OpenAI ⇒ nhân sự AI đi theo, dùng ĐÚNG khoá ấy. Không đòi khoá thứ hai.
+    process.env.AI_PROVIDER = "openai";
+    process.env.OPENAI_API_KEY = "sk-test-khong-goi-that";
+    assert.equal(defaultProviderName(), "erp", "ERP có sẵn OpenAI thì nhân sự bán hàng dùng lại, không dựng tích hợp riêng");
+
+    // ③ `AI_PROVIDER=off` là TẮT, và tắt phải lan sang cả nhân sự AI — một công tắc tắt mà chỉ tắt
+    //    một nửa hệ thống là công tắc nói dối.
+    process.env.AI_PROVIDER = "off";
+    assert.equal(defaultProviderName(), "stub", "AI_PROVIDER=off thì nhân sự AI cũng không gọi mạng");
+
+    // ④ Khoá RIÊNG của nhân sự AI vẫn là đường lui — nhưng phải KHAI mới dùng tới.
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_PROVIDER;
+    process.env.AI_API_KEY = "sk-ant-test";
+    assert.equal(defaultProviderName(), "anthropic", "có khoá riêng thì vẫn chạy được bằng đường lui");
+
+    // ⑤ Khai tay thắng tuyệt đối — kể cả khi tầng ERP đang sẵn sàng.
+    process.env.OPENAI_API_KEY = "sk-test-khong-goi-that";
+    process.env.AI_PROVIDER = "openai";
     process.env.AI_WORKFORCE_PROVIDER = "stub";
-    assert.equal(aiEnv.provider, "stub", "AI_WORKFORCE_PROVIDER thắng AI_PROVIDER");
+    assert.equal(defaultProviderName(), "stub", "AI_WORKFORCE_PROVIDER thắng mọi thứ khác");
+
+    // ⑥ Tên lạ KHÔNG được nhận: rơi về phía hẹp hơn, đúng như mọi nhánh lỗi khác của ERP.
+    process.env.AI_WORKFORCE_PROVIDER = "lung-tung";
+    assert.equal(aiEnv.provider, "", "tên nhà cung cấp không có thật thì coi như chưa khai");
   } finally {
-    if (savedWf === undefined) delete process.env.AI_WORKFORCE_PROVIDER;
-    else process.env.AI_WORKFORCE_PROVIDER = savedWf;
-    if (savedProv === undefined) delete process.env.AI_PROVIDER;
-    else process.env.AI_PROVIDER = savedProv;
+    const tra = (k: string, v: string | undefined) => {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    };
+    tra("AI_WORKFORCE_PROVIDER", savedWf);
+    tra("AI_PROVIDER", savedProv);
+    tra("OPENAI_API_KEY", savedOpenai);
+    tra("ANTHROPIC_API_KEY", savedAnth);
+    tra("AI_API_KEY", savedWfKey);
   }
 
   // ═════════ 6. WEBHOOK: CHUẨN HOÁ, CHỐNG TRÙNG, CHỐNG VÒNG LẶP ═════════

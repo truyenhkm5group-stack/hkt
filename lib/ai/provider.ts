@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiTier } from "@/lib/ai/router";
+import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiProviderName, type AiTier } from "@/lib/ai/router";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
 
@@ -53,10 +53,10 @@ export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
   private client: Anthropic;
-  constructor(model: string, private effort: "low" | "medium" | "high" = "medium") {
+  constructor(model: string, private effort: "low" | "medium" | "high" = "medium", timeoutMs = 60_000) {
     this.model = model;
     // Khoá đọc từ môi trường bởi SDK (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) — không truyền tay, không log.
-    this.client = new Anthropic({ maxRetries: 2, timeout: 60_000 });
+    this.client = new Anthropic({ maxRetries: 2, timeout: timeoutMs });
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
@@ -125,6 +125,18 @@ export class FakeProvider implements AiProvider {
 const cached = new Map<AiTier, AiProvider>();
 let override: AiProvider | null | undefined;
 
+/**
+ * Dựng một provider cho MỘT tên mô hình cụ thể.
+ *
+ * Tách ra khỏi `getAiProvider()` để thứ khác trong ERP dùng lại được đúng lớp này — cùng SDK, cùng
+ * số lần thử lại, cùng cách đọc khoá — mà không phải chép một client thứ hai. Nhân sự bán hàng là
+ * nơi gọi đầu tiên: nó chọn mô hình theo nấc riêng của nó, nên không dùng được `getAiProvider()`
+ * vốn khoá vào ba bậc của copilot.
+ */
+export function makeAiProvider(name: AiProviderName, model: string, effort: "low" | "medium" | "high", timeoutMs?: number): AiProvider {
+  return name === "openai" ? new OpenAiProvider(model, effort, undefined, timeoutMs) : new AnthropicProvider(model, effort, timeoutMs);
+}
+
 /** Provider cho một bậc việc — chọn theo `lib/ai/router.ts`. `null` = AI chưa cấu hình. */
 export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
   if (override !== undefined) return override;
@@ -133,8 +145,7 @@ export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
   const name = resolveProviderName();
   if (!name) return null;
   const effort = (env.ai.effort as "low" | "medium" | "high") || EFFORT_BY_TIER[tier];
-  const model = modelFor(name, tier);
-  const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort) : new AnthropicProvider(model, effort);
+  const p = makeAiProvider(name, modelFor(name, tier), effort);
   cached.set(tier, p);
   return p;
 }
