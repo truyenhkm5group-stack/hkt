@@ -410,6 +410,8 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
 | #295 | `679f12f` | F10 lỗ lũy kế (migration `0089`) · F03 · F04 · F01 · F05 · F06 |
 | #298 | `9e76358` | Biên bản + bài kiểm F07 (đo, không sửa) |
 | #300 | `a3a2f40` | F08: giá vốn hàng tặng · phí hoàn đọc từ vận đơn chiều về |
+| #301 | `9c57039` | Biên bản: mục 7 và 8 |
+| #302 | `450cf46` | **F02**: nghĩa vụ lương không nằm trong lợi nhuận thì KÊU và CHẶN chốt kỳ |
 
 **Xác minh sau #295** (`ops db-query`, chỉ đọc):
 
@@ -439,6 +441,36 @@ khác làm bằng chứng.
 Một phiên khác đã tự dời migration của họ **`0089 → 0090`** vì bản này lấy `0089` trước, và ghi rõ
 trong commit của họ: *"Giữ nguyên bản của phiên kia, không rebase, không revert, không đổi số hiệu
 của họ."* Không tệp nào của hai bên chạm nhau.
+
+### Sự cố deploy #302 — và vì sao KHÔNG revert
+
+Deploy #302 (SHA `450cf46`) **báo thất bại**: smoke trong lượt deploy thấy `/payroll` trả HTTP 500.
+
+Chạy lại smoke trên **đúng SHA ấy**, sau khi máy đã lặng:
+
+| | smoke trong deploy #302 | smoke #969 chạy lại |
+|---|---|---|
+| kết quả | 40/54 · 1 lỗi ứng dụng · 12 chưa kiểm | **54/54 · 0 lỗi ứng dụng** |
+| `/payroll` | **HTTP 500** | mở bình thường |
+| `/ads` | timeout 60 s | 1 chậm (mức thường ngày) |
+| `/expenses` | 1.256 ms | 55–166 ms như mọi trang |
+| cả lượt | vỡ ngân sách 300 s | 259 s |
+
+**Không phải mã.** Toàn bộ diff mã chạy của đợt ấy là: nới một kiểu union (chỉ tồn tại lúc biên
+dịch), một `warnings.push` trong một nhánh `if`, và thêm một trường **số** vào object trả về. Không
+đường nào ném ngoại lệ được. Log ứng dụng không có một dòng lỗi nào; Caddy ghi một yêu cầu trả 200
+sau **29 giây**. Bức tranh khớp với máy quá tải đúng cửa sổ deploy — ba phiên cùng dựng ảnh lên một
+VPS.
+
+`ops status` xác nhận runtime đang chạy `450cf462c34a`, tức **mã đã lên và đang phục vụ**; cái
+thất bại là bước XÁC MINH, không phải bước triển khai.
+
+**Bài học cho phiên sau:** gặp `/payroll 500` ngay sau deploy thì **đo lại trên máy đã lặng trước
+khi vá**. Ở đây, tin vào lần đo đầu sẽ dẫn tới revert một bản vá ĐÚNG — bản vá đang chặn việc chốt
+lương trên lợi nhuận chưa trừ lương — chỉ vì một sự cố hạ tầng.
+
+**Và cổng deploy đã làm đúng việc của nó:** nó từ chối báo thành công khi smoke thấy màn hình lỗi,
+kể cả khi lỗi ấy là nhiễu. Thà dừng nhầm còn hơn báo xanh nhầm.
 
 ---
 
