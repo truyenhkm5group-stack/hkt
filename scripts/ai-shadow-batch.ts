@@ -181,6 +181,34 @@ async function main() {
     if (l.cau) console.log(`        ${cat(String(l.cau), 150)}`);
   }
 
+  /*
+    ⑤c VÌ SAO LEO NẤC — đây là con số quyết định hoá đơn.
+
+    Leo từ ECONOMY lên STRONG chỉ có bốn nguyên nhân: lược đồ sai, tin cậy thấp, hết giờ, lỗi nhà
+    cung cấp. Gộp chúng lại thì không biết phải sửa lời dặn, sửa ngưỡng, hay sửa trần thời gian.
+  */
+  const leo = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select coalesce(nullif(r.escalation_reason,''),'(không leo)') as ly_do, count(*)::int as n
+      from ai_runs r
+      where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
+      group by 1 order by 2 desc
+    `),
+  );
+  console.log(`\n⑤c LÝ DO LEO NẤC`);
+  for (const l of leo) console.log(`   ${String(l.n).padStart(3)}× ${String(l.ly_do)}`);
+
+  const loiGoi = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select mc.tier, coalesce(mc.ok::text,'?') as ok, coalesce(left(mc.error, 120),'') as loi, count(*)::int as n
+      from ai_model_calls mc join ai_runs r on r.id = mc.run_id
+      where r.subject_id in (${dsSql}) and mc.created_at >= now() - interval '2 hours'
+      group by 1,2,3 order by 4 desc limit 8
+    `),
+  );
+  console.log(`\n⑤d LƯỢT GỌI HỎNG (nếu có)`);
+  for (const l of loiGoi) console.log(`   ${String(l.n).padStart(3)}× ${String(l.tier)} ok=${String(l.ok)} ${String(l.loi) ? `· ${l.loi}` : ""}`);
+
   // ───── ⑥ ĐỐI CHIẾU NGƯỜI ↔ MÁY ─────
   const cap = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
