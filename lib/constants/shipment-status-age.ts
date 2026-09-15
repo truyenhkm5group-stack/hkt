@@ -1,5 +1,6 @@
 import type { ShipmentStage } from "@/db/schema";
 import type { CaseTeam } from "@/lib/constants/action-queue";
+import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 
 /**
@@ -531,3 +532,118 @@ export function sanitizeDwellOverrides(raw: unknown): DwellOverrides {
   }
   return out;
 }
+
+/* ═══════════════════ VIỆC THEO TRẠNG THÁI CON, KHÔNG CHỈ THEO CHẶNG ═══════════════════ */
+
+/**
+ * ═══════ MỘT CHẶNG KHÔNG ĐỦ ĐỂ NÓI VIỆC PHẢI LÀM ═══════
+ *
+ * Đo production 15/09/2026, 104 kiện đang ở `PENDING`. Chặng thì một, nhưng bên trong là BA việc
+ * của BA phòng khác nhau:
+ *
+ *   mã 102 "Đơn hàng chờ xử lý"        81 kiện   p50 63,5h   → ĐVVC đang giữ đơn ở khâu xử lý
+ *   mã 103/104 "Giao cho bưu tá đi nhận" 13 kiện  p50 128,1h  → bưu tá chưa tới lấy, hàng ở kho
+ *   (không mã) đã có `picked_up_at`     10 kiện   p50 163,6h  → chặng MÂU THUẪN với chứng từ
+ *
+ * Bản đầu tiên của tệp này trả về đúng MỘT câu cho cả `PENDING` — "Gọi bưu cục giục tới lấy hàng",
+ * phòng KHO. Câu đó chỉ đúng cho 13 kiện ở giữa. Với 81 kiện mã 102 nó sai PHÒNG (việc nằm ở ĐVVC,
+ * không ở kho) và với 10 kiện cuối nó sai CẢ LOẠI VIỆC (đấy là lỗ hổng dữ liệu, không phải chậm
+ * giao vận). Một hàng đợi bảo 81 người đi làm nhầm việc thì tệ hơn một hàng đợi rỗng.
+ *
+ * ─── VÌ SAO KHÔNG NÂNG NGƯỠNG LÊN 48/96/168 ───
+ *
+ * Vì ngưỡng KHÔNG phải chỗ sai. Mã 102 chính Viettel Post đặt tên là *"Lấy hàng thất bại / chờ xử
+ * lý"* (`lib/constants/viettelpost.ts`): một kiện mắc ở đó 63 giờ ĐÚNG LÀ một ngoại lệ, và nới hạn
+ * lên 96 giờ chỉ làm nó im lặng thêm bốn ngày. Cái sai là nó gọi nhầm người và giao nhầm việc.
+ * Sửa xong hai thứ đó thì ngưỡng 24/48/96 giữ nguyên — và không phải đổi một dòng cấu hình nào.
+ *
+ * ─── VÌ SAO KHÔNG THÊM TRẠNG THÁI VÀO ENUM ───
+ *
+ * `carrierSubstate()` (`lib/constants/carrier-substate.ts`) đã suy được trạng thái con từ
+ * `vtp_status` + `vtp_status_name` từ trước, và đang được `fulfillment-bucket` / `projected-delivery`
+ * / `lib/care/*` dùng. Thêm giá trị vào enum `shipments.stage` là đổi lược đồ, đổi migration, và
+ * dựng một bản luật THỨ HAI cạnh bản đã có. Ở đây chỉ ĐỌC LẠI bản đã có.
+ */
+export type DwellRouting = {
+  team: CaseTeam;
+  nextAction: string;
+  /** Vì sao dòng này lệch khỏi việc mặc định của chặng. `null` = đi theo mặc định. */
+  divergence: "ORDER_CANCELLED" | "STAGE_CONTRADICTS_PICKUP" | "CARRIER_PROCESSING" | "PICKUP_FAILED" | null;
+};
+
+/**
+ * VIỆC VÀ PHÒNG CHO MỘT KIỆN CỤ THỂ. Hàm THUẦN — cùng đầu vào ra cùng kết quả, không đọc CSDL.
+ *
+ * Thứ tự xét là thứ tự ƯU TIÊN, và nó không tuỳ tiện: hai nhánh đầu nói rằng việc mặc định của
+ * chặng KHÔNG CÒN ĐÚNG NỮA (đơn đã huỷ / chặng mâu thuẫn với chứng từ), nên chúng phải thắng mọi
+ * suy luận theo trạng thái con.
+ */
+export function dwellRoutingOf(input: {
+  stage: ShipmentStage;
+  substate: CarrierSubstate;
+  orderCancelled: boolean;
+  hasPickupMark: boolean;
+}): DwellRouting {
+  const { stage, substate, orderCancelled, hasPickupMark } = input;
+
+  /*
+    ĐƠN ĐÃ HUỶ MÀ HÀNG CHƯA RỜI KHO — 13 kiện, đo 15/09/2026.
+
+    Cảnh báo `CANCELLED_BUT_SHIPPING` CỐ Ý không bắt nhóm này: nó chỉ xét `PICKED_UP`…
+    `OUT_FOR_DELIVERY`, vì "hàng đang đi tới người đã nói không mua" là một việc khác. Nhưng im
+    lặng hoàn toàn thì hàng đợi vẫn bảo kho đi GIỤC BƯU TÁ TỚI LẤY một kiện của đơn đã huỷ —
+    đúng việc KHÔNG được làm. Đây là chỗ rẻ nhất để chặn: hàng còn trong tay shop.
+  */
+  if (orderCancelled && stage === "PENDING") {
+    return {
+      team: "LOGISTICS",
+      nextAction:
+        "Đơn đã huỷ mà lệnh lấy hàng vẫn còn — huỷ lệnh với Viettel Post rồi trả hàng về vị trí. TUYỆT ĐỐI không giục bưu tá tới lấy. Hàng chưa rời kho nên chặn ở đây là không mất đồng cước nào.",
+      divergence: "ORDER_CANCELLED",
+    };
+  }
+
+  /*
+    CHẶNG MÂU THUẪN VỚI CHỨNG TỪ — 10 kiện, đo 15/09/2026: `picked_up_at` đã có mà `stage` vẫn
+    `PENDING`. Đây là LỖ HỔNG DỮ LIỆU (`RESOLVABLE`, AGENTS.md mục 45), không phải kiện chậm.
+
+    KHÔNG sửa tay `stage`: kho mã đã có `vtp-rebuild-state` dựng lại trạng thái TỪ LỊCH SỬ SỰ KIỆN,
+    và nó mặc định chạy thử. Gõ tay một chặng là đặt một lời khẳng định không có chứng từ đỡ.
+  */
+  if (stage === "PENDING" && hasPickupMark) {
+    return {
+      team: "DATA",
+      nextAction:
+        "Chặng nói CHƯA LẤY HÀNG nhưng đã có mốc lấy hàng — chứng từ và trạng thái đang nói hai điều khác nhau. Chạy `vtp-rebuild-state` (mặc định CHẠY THỬ, xem trước rồi mới `--apply`) để dựng lại chặng từ lịch sử sự kiện. KHÔNG gõ tay chặng.",
+      divergence: "STAGE_CONTRADICTS_PICKUP",
+    };
+  }
+
+  if (stage === "PENDING" && substate === "WAITING_PROCESSING") {
+    return {
+      team: "LOGISTICS",
+      nextAction:
+        "Viettel Post đang giữ đơn ở khâu xử lý (mã 102 — chính ĐVVC đặt tên là “Lấy hàng thất bại / chờ xử lý”). Gọi bưu cục hỏi đơn mắc ở đâu và bao giờ vào tuyến. Đây KHÔNG phải việc của kho: kho đã đóng hàng xong, thứ đang đứng là phía ĐVVC.",
+      divergence: "CARRIER_PROCESSING",
+    };
+  }
+
+  if (stage === "PENDING" && substate === "PICKUP_FAILED") {
+    return {
+      team: "WAREHOUSE",
+      nextAction:
+        "ĐVVC báo lấy hàng THẤT BẠI (mã 106) — hỏi kho xem hàng đã đóng xong chưa và có ai ở kho lúc bưu tá tới không, rồi đặt lại lịch lấy. Lặp lại lần thứ hai thì báo bưu cục đổi khung giờ, đừng đặt lại y nguyên.",
+      divergence: "PICKUP_FAILED",
+    };
+  }
+
+  return { team: DWELL_TEAM[stage], nextAction: DWELL_NEXT_ACTION[stage], divergence: null };
+}
+
+/** Nhãn ngắn cho lý do một kiện lệch khỏi việc mặc định của chặng. */
+export const DIVERGENCE_LABEL: Record<NonNullable<DwellRouting["divergence"]>, string> = {
+  ORDER_CANCELLED: "đơn đã huỷ",
+  STAGE_CONTRADICTS_PICKUP: "chặng mâu thuẫn chứng từ",
+  CARRIER_PROCESSING: "ĐVVC đang giữ ở khâu xử lý",
+  PICKUP_FAILED: "lấy hàng thất bại",
+};

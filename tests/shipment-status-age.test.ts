@@ -4,6 +4,8 @@ import { schema } from "@/db";
 import type { ShipmentStage } from "@/db/schema";
 import {
   DWELL_NEXT_ACTION,
+  DWELL_TEAM,
+  dwellRoutingOf,
   DWELL_SLA,
   dwellLevelOf,
   sanitizeDwellOverrides,
@@ -202,7 +204,68 @@ export function testShipmentStatusAgePure() {
     assert.equal(stageDwellFrom([ev("PENDING", 120)], "PENDING", NOW, tat).unrated, "NO_THRESHOLD");
   }
 
-  console.log("  ✓ tuổi chặng hiện tại (thuần): 11 nhóm");
+  /* ─── 12. ĐỊNH TUYẾN THEO TRẠNG THÁI CON: MỘT CHẶNG, NHIỀU VIỆC, NHIỀU PHÒNG ─── */
+  {
+    // Mặc định: chặng không có gì đặc biệt thì đi theo bảng khoá theo chặng, không lệch.
+    const thuong = dwellRoutingOf({ stage: "IN_TRANSIT", substate: "IN_TRANSIT", orderCancelled: false, hasPickupMark: true });
+    assert.equal(thuong.divergence, null);
+    assert.equal(thuong.team, DWELL_TEAM.IN_TRANSIT);
+    assert.equal(thuong.nextAction, DWELL_NEXT_ACTION.IN_TRANSIT);
+
+    // 81 kiện mã 102: việc nằm ở ĐVVC, KHÔNG ở kho.
+    const xuLy = dwellRoutingOf({ stage: "PENDING", substate: "WAITING_PROCESSING", orderCancelled: false, hasPickupMark: false });
+    assert.equal(xuLy.divergence, "CARRIER_PROCESSING");
+    assert.equal(xuLy.team, "LOGISTICS");
+    assert.notEqual(xuLy.team, DWELL_TEAM.PENDING, "mã 102 KHÔNG được giao cho phòng mặc định của chặng");
+
+    // 13 kiện mã 103/104: đúng việc mặc định — bưu tá chưa tới lấy, hàng ở kho.
+    const choLay = dwellRoutingOf({ stage: "PENDING", substate: "AWAITING_PICKUP", orderCancelled: false, hasPickupMark: false });
+    assert.equal(choLay.divergence, null);
+    assert.equal(choLay.team, "WAREHOUSE");
+
+    // Lấy hàng thất bại (106) vẫn là việc của kho nhưng KHÔNG cùng một câu với "chờ lấy".
+    const hutLay = dwellRoutingOf({ stage: "PENDING", substate: "PICKUP_FAILED", orderCancelled: false, hasPickupMark: false });
+    assert.equal(hutLay.divergence, "PICKUP_FAILED");
+    assert.equal(hutLay.team, "WAREHOUSE");
+    assert.notEqual(hutLay.nextAction, choLay.nextAction);
+
+    /*
+      ĐƠN ĐÃ HUỶ THẮNG MỌI SUY LUẬN THEO TRẠNG THÁI CON.
+      Đây là bài chống hồi quy quan trọng nhất của nhóm: việc mặc định của `PENDING` là GIỤC BƯU TÁ
+      TỚI LẤY, và giục lấy một kiện của đơn đã huỷ là đúng việc không được làm.
+    */
+    for (const con of ["AWAITING_PICKUP", "WAITING_PROCESSING", "PICKUP_FAILED"] as const) {
+      const huy = dwellRoutingOf({ stage: "PENDING", substate: con, orderCancelled: true, hasPickupMark: false });
+      assert.equal(huy.divergence, "ORDER_CANCELLED", `${con}: đơn huỷ phải thắng`);
+      assert.notEqual(huy.nextAction, DWELL_NEXT_ACTION.PENDING, `${con}: không được dùng lại câu mặc định "giục bưu tá tới lấy"`);
+      assert.ok(huy.nextAction.includes("huỷ lệnh"), `${con}: việc phải làm là HUỶ LỆNH LẤY HÀNG`);
+    }
+
+    // Chặng mâu thuẫn chứng từ là LỖ HỔNG DỮ LIỆU, không phải kiện chậm — và không được bảo sửa tay.
+    const mauThuan = dwellRoutingOf({ stage: "PENDING", substate: "WAITING_PROCESSING", orderCancelled: false, hasPickupMark: true });
+    assert.equal(mauThuan.divergence, "STAGE_CONTRADICTS_PICKUP");
+    assert.equal(mauThuan.team, "DATA");
+
+    // Nhưng đơn huỷ vẫn thắng cả nó: chặn kiện đi là việc gấp hơn vá một dòng dữ liệu.
+    assert.equal(
+      dwellRoutingOf({ stage: "PENDING", substate: "AWAITING_PICKUP", orderCancelled: true, hasPickupMark: true }).divergence,
+      "ORDER_CANCELLED",
+    );
+
+    // THUẦN: gọi hai lần ra cùng kết quả, không đọc gì bên ngoài.
+    const a = dwellRoutingOf({ stage: "PENDING", substate: "WAITING_PROCESSING", orderCancelled: false, hasPickupMark: false });
+    const b = dwellRoutingOf({ stage: "PENDING", substate: "WAITING_PROCESSING", orderCancelled: false, hasPickupMark: false });
+    assert.deepEqual(a, b);
+
+    // Mọi chặng đều phải có việc và phòng — không có nhánh nào trả về chuỗi rỗng.
+    for (const st of Object.keys(DWELL_NEXT_ACTION) as (keyof typeof DWELL_NEXT_ACTION)[]) {
+      const r = dwellRoutingOf({ stage: st, substate: "UNKNOWN", orderCancelled: false, hasPickupMark: false });
+      assert.ok(r.nextAction.length > 20, `${st}: phải có câu việc phải làm`);
+      assert.ok(r.team.length > 0, `${st}: phải có phòng chịu trách nhiệm`);
+    }
+  }
+
+  console.log("  ✓ tuổi chặng hiện tại (thuần): 12 nhóm");
 }
 
 /**

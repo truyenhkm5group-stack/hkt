@@ -5,15 +5,16 @@ import { ageLabel, TEAM_LABEL, type CaseTeam } from "@/lib/constants/action-queu
 import { memo } from "@/lib/cache";
 import { toDate } from "@/lib/format";
 import { rowsOf } from "@/lib/sql-rows";
-import { sqlSourceList } from "@/lib/constants/truth";
+import { sqlIsTestTracking, sqlSourceList } from "@/lib/constants/truth";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import { carrierSubstate } from "@/lib/constants/carrier-substate";
 import { getSettingJson } from "@/lib/settings";
 import {
   DWELL_EVIDENCE_SOURCES,
   DWELL_NEXT_ACTION,
   DWELL_SLA_SETTING_KEY,
   PANCAKE_RELAY_SOURCE,
-  DWELL_TEAM,
+  dwellRoutingOf,
   dwellLevelOf,
   thresholdOf,
   TERMINAL_STAGES,
@@ -24,6 +25,7 @@ import {
   type DwellVerdict,
   type DwellOverrides,
   type DwellUnrated,
+  type DwellRouting,
 } from "@/lib/constants/shipment-status-age";
 
 /**
@@ -99,6 +101,11 @@ export type StatusAgeRow = {
   team: CaseTeam;
   teamLabel: string;
   nextAction: string;
+  /**
+   * Vì sao dòng này KHÔNG đi theo việc mặc định của chặng. `null` = đi theo mặc định.
+   * Hiện ra màn hình để người trực biết mình đang đọc một ngoại lệ của ngoại lệ.
+   */
+  divergence: DwellRouting["divergence"];
   /** Có ca care đang mở cho kiện này không — để không giục người đã đang làm. */
   careOpen: boolean;
 };
@@ -129,6 +136,9 @@ type Raw = {
   tracking: string;
   stage: ShipmentStage;
   raw_status: string;
+  vtp_code: number | null;
+  co_moc_lay: boolean;
+  don_huy: boolean;
   cod_amount: string | number | null;
   receiver_name: string;
   receiver_phone: string;
@@ -173,6 +183,9 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
                coalesce(nullif(s.vtp_order_number, ''), nullif(s.tracking_code, ''), s.id) as tracking,
                s.stage::text as stage,
                coalesce(nullif(s.vtp_status_name, ''), '') as raw_status,
+               s.vtp_status as vtp_code,
+               (s.picked_up_at is not null) as co_moc_lay,
+               (o.stage in ('CANCELLED','DELETED')) as don_huy,
                s.cod_amount,
                s.receiver_name,
                s.receiver_phone,
@@ -225,6 +238,15 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
              limit 1
           ) care on true
          where s.stage::text not in (${sql.raw(terminals)})
+           /*
+             MÃ VẬN ĐƠN TEST CỦA ĐVVC — cùng một định nghĩa với mọi luật đối soát khác
+             (lib/constants/truth.ts). Bản đầu tiên của truy vấn này thiếu nó, và kết quả là
+             kiện 123456789101112 (gói tin thử Viettel Post bắn vào lúc bấm “Kiểm tra” trên
+             trang webhook) đứng đầu hàng đợi với tuổi chặng 5.677 giờ — 236 ngày. Nó không phải
+             gói hàng nào cả: bản ghi tạo 07/09/2026 mang một sự kiện đề ngày 22/01/2026.
+             KHÔNG xoá dòng đó (nó là dữ liệu ĐVVC đã gửi thật), chỉ thôi đếm nó như một sự cố.
+           */
+           and not (${sql.raw(sqlIsTestTracking("s.vtp_order_number"))})
          order by s.created_at desc
          limit ${MAX_ROWS + 1}
       `),
@@ -251,6 +273,12 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
       const ageHours = since ? Math.max(0, (now.getTime() - since.getTime()) / 3_600_000) : null;
       const t = thresholdOf(r.stage, overrides);
       const cod = Number(r.cod_amount ?? 0) || 0;
+      /*
+        VIỆC VÀ PHÒNG tính TỪNG DÒNG, không tra một bảng khoá theo chặng: `PENDING` gộp ba việc
+        của ba phòng (xem `dwellRoutingOf`). Trạng thái con lấy từ bản luật ĐÃ CÓ, không dựng lại.
+      */
+      const { substate } = carrierSubstate({ code: r.vtp_code ?? null, text: r.raw_status, stage: r.stage });
+      const routing = dwellRoutingOf({ stage: r.stage, substate, orderCancelled: Boolean(r.don_huy), hasPickupMark: Boolean(r.co_moc_lay) });
 
       let level: DwellLevel | null = null;
       let unrated: DwellUnrated | null = null;
@@ -289,9 +317,10 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
         slaBreached: level === null ? null : level === "EXCEPTION",
         level,
         unrated,
-        team: DWELL_TEAM[r.stage],
-        teamLabel: TEAM_LABEL[DWELL_TEAM[r.stage]],
-        nextAction: DWELL_NEXT_ACTION[r.stage],
+        team: routing.team,
+        teamLabel: TEAM_LABEL[routing.team],
+        nextAction: routing.nextAction,
+        divergence: routing.divergence,
         careOpen: Boolean(r.care_open),
       };
     });
