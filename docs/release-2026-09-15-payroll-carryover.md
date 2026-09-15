@@ -419,7 +419,12 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    — `/cod` 50,6 s · `/data-quality` 48,3 s · `/reports/returns` 41,5 s · `/payroll` 14,6 s. Bảng
    đầy đủ ở mục 7.
 
-   **F09 không còn là "chưa dò được", mà là một danh sách việc có số đo kèm theo.** Vẫn CHƯA sửa
+   Lượt #308 (đủ 54 màn hình, máy đã lặng) chốt danh sách: **16 màn hình chậm**, dẫn đầu là `/cod`
+   48,9 s · `/reports/funnel` 42,3 s · `/reports/returns` 40,8 s · `/ads` 38,1 s. Và phép tách
+   đầu/thân cho biết luôn chỗ phải sửa: đầu phản hồi ~100 ms ở mọi trang, **toàn bộ chi phí nằm
+   trong các ranh giới `Suspense`** — không phải ở một truy vấn chặn lượt dựng đầu tiên.
+
+   **F09 không còn là "chưa dò được", mà là một danh sách việc có số đo và có hướng.** Vẫn CHƯA sửa
    trang nào — nhưng lần dò sau không còn phải đoán, và nó không còn là việc của riêng `/ads`.
 
 6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
@@ -594,29 +599,69 @@ sách chứ không theo mức rủi ro. Đã nâng ngân sách lên 600 giây (`
 màn hình. **Đó là miếng vá, không phải lời giải** — lời giải là làm những trang kia nhanh lại, và
 ngân sách phải hạ lại ngay khi việc ấy xong.
 
-### `/expenses` trong lượt #307 — chưa kết luận
+### `/expenses` trong lượt #307 — đã kiểm, KHÔNG lặp lại
 
-Lượt ấy còn một dòng lỗi thật: `/expenses` trả HTTP 200 nhưng gói RSC mang lỗi máy chủ (mã
-3064589366). **Chưa kết luận là hạ tầng, và cũng chưa kết luận là mã.** Những gì đã biết:
+Lượt #307 có một dòng lỗi thật: `/expenses` trả HTTP 200 nhưng gói RSC mang lỗi máy chủ (mã
+3064589366). Tôi KHÔNG dán nhãn "nhiễu" mà đi kiểm, vì giả thuyết đáng theo nhất chạm thẳng vào mã
+của phiên này:
 
-- `git diff 4e5977d..9d9e724` cho thấy **không một tệp ứng dụng nào** khác giữa lượt #306 (xanh,
-  `/expenses` mở bình thường) và lượt #307. Chỉ có `scripts/smoke.ts`, tests, tài liệu. Nên `/expenses`
-  không thể vỡ vì mã của lượt này.
-- `/expenses` đứng **ngay sau** `/ads` (58,9 s) và `/payroll` (14,6 s) trong danh sách tuyến, tức
-  đúng đỉnh áp lực kết nối, ngay sau một lượt dựng lại container (bộ nhớ đệm nguội).
-- `getRecognizedCosts()` bắn **~10 truy vấn song song** trong một `Promise.all`, một trong số đó mở
-  hẳn một giao dịch — trên bể **5 kết nối**. Chú thích trong chính tệp ấy đã cảnh báo điều này, và
-  bản F08b của phiên này thêm một truy vấn nữa vào đúng chỗ đó.
+- `git diff 4e5977d..9d9e724`: **không một tệp ứng dụng nào** khác giữa lượt xanh #306 và lượt #307.
+- `/expenses` đứng **ngay sau** `/ads` và `/payroll` trong danh sách tuyến — đỉnh áp lực kết nối.
+- `db/index.ts`: bể **`max: 5`**, `connectionTimeoutMillis: 15_000`, kèm chú thích *"15 giây không
+  xin được kết nối thì ném lỗi"* — đúng hình dạng một mã lỗi RSC.
+- `getRecognizedCosts()` bắn **9 truy vấn song song**, một cái ôm hẳn một giao dịch. F08b của phiên
+  này thêm truy vấn thứ 9 vào đúng chỗ đó.
 
-Điểm thứ ba là giả thuyết đáng theo nhất và nó **chạm vào mã của phiên này**, nên nó không được
-phép trôi qua dưới nhãn "nhiễu". Việc phải làm: chạy lại smoke trên máy đã lặng với ngân sách mới;
-nếu `/expenses` lặp lại thì gom `Promise.all` ấy thành từng đợt để không đòi quá số ghế của bể.
+**Lượt #308 chạy lại trên máy đã lặng: `0 lỗi ứng dụng`, `/expenses` mở bình thường.** Kết luận:
+cạn bể kết nối dưới tải, đúng như bể được thiết kế để báo — *"thà hỏng ồn ào còn hơn treo im lặng"*.
+Không phải lỗi mã, nhưng cũng không phải chuyện bỏ qua: **9 truy vấn song song trên bể 5 kết nối là
+một mối nguy có thật**, và mỗi truy vấn thêm vào `Promise.all` ấy làm nó gần hơn. Việc nên làm (chưa
+làm): chia `Promise.all` đó thành từng đợt để đỉnh nhu cầu không vượt số ghế của bể.
 
+### Lượt #308 — phép đo tự chứng minh là nó đã nói thật
 
-Con số các trang sẽ **xấu đi** so với bản trước. Đó là vì phép đo bắt đầu nói thật, không phải vì
-ứng dụng vừa chậm lại — cùng nguyên tắc với luật 45: con số chưa biết TĂNG sau khi thôi khẳng định
-thứ không chứng minh được là ĐÚNG HƯỚNG. `SLOW` vẫn KHÔNG chặn deploy, nên thay đổi này không thể
-làm đỏ một lần phát hành đang xanh.
+```
+[smoke] 54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 16 chậm · 0 chưa kiểm · 0 quá hạn (cả lượt 305s)
+[smoke] đồng hồ: 305.2s nằm trong các trang · 0.1s ngoài phép đo (0% cả lượt)
+```
+
+Dòng thứ hai là dòng tự khai thêm ở `9d9e724`. **97,9% → 0%.** Ngân sách 600 giây cho phép chạy đủ
+54 màn hình (trước đó 22 màn hình bị bỏ mỗi lượt), dùng hết 305 giây.
+
+**16 màn hình chậm** — danh sách đầy đủ, lần đầu ERP có nó:
+
+| màn hình | thời gian | đầu phản hồi | thân |
+|---|---|---|---|
+| `/cod` | 48,9 s | | |
+| `/reports/funnel` | 42,3 s | 136 ms | **42,2 s** |
+| `/reports/returns` | 40,8 s | | |
+| `/ads` | 38,1 s | | |
+| `/work/okr` | 19,9 s | 74 ms | **19,9 s** |
+| `/data-quality` | 14,3 s | 121 ms | **14,1 s** |
+| `/products` | 13,7 s | | |
+| `/cod?recon=stale` | 12,3 s | | |
+| `/customers/retention` | 11,4 s | | |
+| `/cod?recon=unproven` | 11,3 s | | |
+| `/customers` | 9,6 s | | |
+| `/reports/scenario` | 7,5 s | | |
+| `/inventory/decisions` | 5,8 s | | |
+| `/data-quality?issue=return-not-received` | 4,6 s | 89 ms | 4,5 s |
+| `/finance` | 3,2 s | 105 ms | 3,1 s |
+| `/orders` | 2,4 s | | |
+
+**Phép tách đầu/thân trả lời luôn câu hỏi "sửa ở đâu".** Mọi trang có số liệu tách đều cho cùng một
+hình: đầu phản hồi ~100 ms, toàn bộ thời gian nằm ở THÂN. Nghĩa là truy vấn chặn trước lượt dựng
+đầu tiên KHÔNG phải vấn đề — chi phí nằm trong các ranh giới `Suspense`. Đó là một kết luận khác hẳn
+với "trang chậm", và nó chỉ đọc được vì phép đo giữ riêng hai mốc.
+
+**`/payroll` KHÔNG còn trong danh sách chậm** ở lượt này (14,6 s ở #307 là dưới tải; #308 xuống dưới
+ngưỡng 2 giây).
+
+**Bước tiếp theo của F09, đã có sẵn dụng cụ:** `scripts/perf-probe.ts` đo TỪNG TRUY VẤN trong
+container production (chỉ đọc) và gom câu lệnh lặp lại theo hình dạng — đúng thứ cần để tách 42 giây
+của `/reports/funnel` ra thành hàm nào. Chạy bằng `ops perf-probe`. Lưu ý một điểm mù của chính
+probe: nó đang gắn nhãn `/ads` là *"Trang NHANH để đối chiếu"*, một giả định dựng trên số đo mù —
+`/ads` thật ra mất 38–59 giây, nên cái mốc đối chiếu ấy phải chọn lại.
 
 ---
 
