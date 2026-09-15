@@ -102,11 +102,28 @@ export function renderTemplate(ctx: GenerationContext): string {
         : `Chị cho em xin size để em ghi giúp chị ạ.`;
     }
     case "ANSWER_QUESTION": {
-      const price = state.quotedTotal !== null ? ` Giá ${formatVND(state.quotedTotal)}` : "";
-      const ship = ctx.shippingFee !== null ? (ctx.shippingFee === 0 ? ", bên em miễn phí ship" : `, phí ship ${formatVND(ctx.shippingFee)}`) : "";
+      /*
+        BA CON SỐ PHẢI CỘNG ĐƯỢC VỚI NHAU.
+
+        ĐO 15/09/2026, ngay sau khi máy bắt đầu báo được giá: câu ra là
+          "Dạ Đầm Q004 giá 524.000 ₫, phí ship 25.000 ₫ ạ."
+        Cả hai con số đều do máy chủ tính, nên lưới soi tiền không thấy gì sai. Nhưng 524.000 ĐÃ
+        GỒM phí ship, nên đặt cạnh nhau như thế khách đọc ra 549.000 — một báo giá sai 25.000đ mà
+        không ai bịa ra con số nào.
+        
+        Nên ba con số phải hiện ĐÚNG VAI: tiền hàng · phí ship · TỔNG. Hoặc chỉ một con số duy
+        nhất khi chưa biết phí ship — hai con số không cộng được với nhau là chỗ hiểu nhầm.
+      */
+      const shipBiet = ctx.shippingFee !== null;
+      const tienHang = state.quotedTotal !== null && shipBiet ? state.quotedTotal - (ctx.shippingFee ?? 0) : null;
+      // Biết phí ship ⇒ nói TIỀN HÀNG (rồi phí ship, rồi tổng). Chưa biết phí ship ⇒ chỉ một con
+      // số, và không nhắc tới ship, để không có hai số đứng cạnh nhau mà cộng không ra nhau.
+      const price = state.quotedTotal === null ? "" : ` giá ${formatVND(tienHang ?? state.quotedTotal)}`;
+      const ship = !shipBiet ? "" : ctx.shippingFee === 0 ? ", bên em miễn phí ship" : `, phí ship ${formatVND(ctx.shippingFee)}`;
+      const tong = state.quotedTotal !== null && shipBiet && (ctx.shippingFee ?? 0) > 0 ? `, tổng ${formatVND(state.quotedTotal)}` : "";
       // Tồn CHƯA BIẾT thì không hứa: "còn hàng" là một lời hứa, và lời hứa sai đẻ ra đơn hoàn.
       const stock = ctx.stockKnown ? (ctx.available && ctx.available > 0 ? " Mẫu này bên em còn hàng ạ." : " Mẫu này hiện đang hết, chị đợi em kiểm tra lại giúp chị nhé.") : " Chị đợi em kiểm tra kho rồi báo lại chị ngay ạ.";
-      return `Dạ ${product}${price}${ship} ạ.${stock}${buocTiep(ctx)}`;
+      return `Dạ ${product}${price}${ship}${tong} ạ.${stock}${buocTiep(ctx)}`;
     }
     case "HANDLE_OBJECTION":
       return `Dạ em hiểu ạ. ${product} bên em dùng chất liệu và form chuẩn nên giá như vậy chị nhé. Chị được kiểm tra hàng trước khi thanh toán, không ưng chị có thể không nhận ạ.`;

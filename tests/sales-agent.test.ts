@@ -310,7 +310,9 @@ export async function testSalesAgent(db: Db) {
 
   const ctxNen: GenerationContext = {
     action: "ANSWER_QUESTION",
-    state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 499_000 }),
+    // `quotedTotal` là TỔNG máy chủ tính — ĐÃ GỒM phí ship, đúng như `pricing.get` trả về.
+    // Đặt sai chỗ này thì mọi phép thử tiền bên dưới đo một thứ không tồn tại.
+    state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 524_000 }),
     sizes: ["M", "L", "XL"],
     colors: ["Đỏ", "Đen"],
     sizeAdvice: null,
@@ -323,12 +325,37 @@ export async function testSalesAgent(db: Db) {
 
   // 4B-a. Câu trả lời phải TRẢ LỜI (giá, phí ship) rồi mới MỜI bước tiếp — một tin nhắn làm cả hai.
   const traLoi = renderTemplate(ctxNen);
-  assert.ok(traLoi.includes("499.000") && traLoi.includes("25.000"), "hỏi giá thì phải nghe được giá và phí ship");
-  assert.ok(traLoi.indexOf("499.000") < traLoi.indexOf("size"), "giá đứng TRƯỚC câu mời chọn size, không phải ngược lại");
+  assert.ok(traLoi.includes("25.000"), "hỏi giá thì phải nghe được phí ship");
   assert.ok(/M, L, XL/.test(traLoi), "bước tiếp phải mời chọn trong đúng các size ERP đang bán");
 
+  /*
+    BA CON SỐ PHẢI CỘNG ĐƯỢC VỚI NHAU.
+
+    Đo 15/09/2026 ngay sau khi máy bắt đầu báo được giá: "Dạ Đầm Q004 giá 524.000 ₫, phí ship
+    25.000 ₫ ạ." Cả hai con số đều do máy chủ tính nên lưới soi tiền không thấy gì sai — nhưng
+    524.000 ĐÃ GỒM phí ship, nên khách đọc ra 549.000. Một báo giá sai 25.000đ mà không ai bịa ra
+    con số nào.
+  */
+  const soTrongCau = moneyMentions(traLoi);
+  const tongLonNhat = Math.max(...soTrongCau);
+  const conLai = soTrongCau.filter((n) => n !== tongLonNhat);
+  assert.equal(tongLonNhat, 499_000 + 25_000, "con số lớn nhất phải là TỔNG");
+  assert.equal(conLai.reduce((a, b) => a + b, 0), tongLonNhat, "các con số còn lại phải CỘNG LẠI đúng bằng tổng — nếu không khách sẽ cộng thêm một lần nữa");
+  assert.ok(/tổng/.test(traLoi), "phải gọi tên con số tổng, để không ai đọc nhầm nó là tiền hàng");
+  assert.ok(traLoi.indexOf("499.000") < traLoi.indexOf("size"), "giá đứng TRƯỚC câu mời chọn size, không phải ngược lại");
+
+  // Miễn phí ship ⇒ một con số duy nhất, và nói rõ là miễn phí.
+  const mienPhi = renderTemplate({ ...ctxNen, shippingFee: 0, state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 499_000 }) });
+  assert.deepEqual(moneyMentions(mienPhi), [499_000], "miễn phí ship thì chỉ có MỘT con số");
+  assert.ok(/miễn phí ship/.test(mienPhi));
+
+  // Chưa biết phí ship ⇒ một con số duy nhất và KHÔNG nhắc tới ship.
+  const chuaBietShip = renderTemplate({ ...ctxNen, shippingFee: null });
+  assert.deepEqual(moneyMentions(chuaBietShip), [524_000], "chưa biết phí ship thì không được để hai con số cộng không ra nhau");
+  assert.ok(!/ship/.test(chuaBietShip), "chưa biết thì im, không đoán");
+
   // Bước tiếp đi theo thứ tự điều kiện máy chủ còn THIẾU, không phải một câu xã giao cố định.
-  const cóMẫuMã = renderTemplate({ ...ctxNen, state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 499_000, size: "L", color: "Đỏ" }), missing: ["PHONE", "ADDRESS"] });
+  const cóMẫuMã = renderTemplate({ ...ctxNen, state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 524_000, size: "L", color: "Đỏ" }), missing: ["PHONE", "ADDRESS"] });
   assert.ok(/số điện thoại/.test(cóMẫuMã), "đã có mẫu mã thì bước tiếp là xin SĐT");
   const cóSĐT = renderTemplate({ ...ctxNen, missing: ["ADDRESS"] });
   assert.ok(/địa chỉ/.test(cóSĐT), "đã có SĐT thì bước tiếp là xin địa chỉ");
@@ -418,7 +445,8 @@ export async function testSalesAgent(db: Db) {
   for (const action of SALES_ACTIONS) {
     const text = renderTemplate({ ...ctxXấuNhất, action });
     if (!text) continue;
-    const cờ = safetyFlags({ text, allowedAmounts: [499_000, 25_000], stockKnown: false, sizeChartAvailable: false, mentionedAmounts: moneyMentions(text) });
+    // ĐÚNG tập tiền mà dây chuyền truyền vào lưới: tổng · phí ship · tiền hàng.
+    const cờ = safetyFlags({ text, allowedAmounts: [524_000, 25_000, 499_000], stockKnown: false, sizeChartAvailable: false, mentionedAmounts: moneyMentions(text) });
     assert.deepEqual(cờ, [], `${action}: câu mẫu bật cờ an toàn — ${cờ.join(", ")} — trong câu "${text}"`);
   }
 
