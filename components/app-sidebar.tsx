@@ -282,7 +282,9 @@ export const NAV_TITLES: Record<string, string> = {
   "/inventory/purchasing": "Mua hàng & xưởng",
   "/import-vtp": "Bổ sung danh sách vận đơn",
   "/operations": "Điều hành theo khâu",
+  "/operations/preship": "Soát đơn trước khi gửi",
   "/operations/fulfillment": "Nút thắt trước khi rời kho",
+  "/operations/dwell": "Vận đơn đứng yên quá lâu",
   "/reports/funnel": "Phễu bán hàng",
   "/reports/scenario": "Mô phỏng kịch bản",
 };
