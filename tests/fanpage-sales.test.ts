@@ -11,6 +11,7 @@ import { classifyConversationSource, snapshotClassification } from "@/lib/ai-wor
 import { resolveProduct } from "@/lib/ai-workforce/agents/sales/resolve-product";
 import { POLICY_BY_SOURCE, TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-sales";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
+import { generateTestReply, testIntentOf } from "@/lib/ai-workforce/agents/sales/generate-test";
 
 const PAGE = "page-fanpage-test";
 
@@ -149,6 +150,41 @@ export async function testFanpageSales(db: Db) {
   // Chạy lại KHÔNG được đổi gì — nút này bấm lại sau mỗi lần sửa cấu hình.
   const bm2 = await runShadowBenchmark(PAGE);
   assert.deepEqual(bm2.byType, bm.byType, "chạy thử ngầm phải chỉ đọc, hai lượt ra cùng kết quả");
+
+  // ═════════ 8. CÂU TRẢ LỜI CHO HÀNG TEST KHÔNG ĐƯỢC MƯỢN DỮ LIỆU MÃ WIN ═════════
+  //
+  // Mẫu test chưa khai gì cả — đúng cảnh thật lúc mới dựng. Máy phải nói "chưa có" và chuyển
+  // người, chứ không được lấy giá 499.000đ hay bảng số đo của Q004 ra dùng.
+  const thieuHet = {
+    testCode: "TEST-2026-999", name: "Đầm test đỏ đô", price: null, colors: [] as string[],
+    material: "", shippingPolicy: "", hasSizeProfile: false, approvedFacts: [] as string[],
+    policy: { ...TEST_REPLY_DEFAULTS } as { [K in keyof typeof TEST_REPLY_DEFAULTS]: boolean },
+  };
+
+  const giaTest = generateTestReply(testIntentOf("Bao nhiêu em?"), thieuHet);
+  assert.equal(giaTest.action, "HANDOFF", "chưa khai giá thì KHÔNG được báo giá");
+  assert.deepEqual(giaTest.missing, ["giá test"]);
+  assert.ok(!/499|Q004/.test(giaTest.text), "câu trả lời không được mang giá hay mã của hàng thắng");
+
+  const mauTest = generateTestReply(testIntentOf("Có màu gì?"), thieuHet);
+  assert.equal(mauTest.action, "HANDOFF");
+  assert.deepEqual(mauTest.missing, ["màu"]);
+
+  const sizeTest = generateTestReply(testIntentOf("50kg mặc size gì?"), thieuHet);
+  assert.equal(sizeTest.action, "HANDOFF", "không có bảng số đo riêng thì chuyển người");
+  assert.deepEqual(sizeTest.missing, ["bảng số đo của mẫu test"]);
+  assert.ok(/chưa có bảng số đo/.test(sizeTest.text), "phải nói thẳng là chưa có, không vòng vo");
+
+  // Khách muốn mua mà mẫu chưa lên đơn được ⇒ chuyển người, KHÔNG đổi sang mã WIN cho xong đơn.
+  const muonMua = generateTestReply(testIntentOf("chốt cho em 1 cái"), thieuHet);
+  assert.equal(muonMua.handoffReason, "TEST_READY_TO_BUY");
+
+  // Khai đủ thì máy trả lời được — và con số phải là con số của CHÍNH mẫu test.
+  const daKhai = { ...thieuHet, price: 399_000, colors: ["đỏ đô", "đen"] };
+  const giaDu = generateTestReply(testIntentOf("Bao nhiêu em?"), daKhai);
+  assert.equal(giaDu.action, "ASK");
+  assert.ok(giaDu.text.includes("399"), "phải báo giá của mẫu test");
+  assert.ok(!giaDu.text.includes("499"), "và tuyệt đối không phải giá của mã WIN");
 
   console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến · chưa khai thì chuyển người");
 }

@@ -106,3 +106,59 @@ export async function runShadowBenchmark(pancakePageId: string): Promise<Benchma
     ranAt: new Date().toISOString(),
   };
 }
+
+/**
+ * KIỂM KÊ ĐỘ ĐẦY ĐỦ CỦA ĐIỀU KIỆN BÁN cho mã WIN của một page.
+ *
+ * Bật mô hình thật khi hồ sơ còn thiếu là mời nó tự điền vào chỗ trống — mà chỗ trống ở đây là
+ * giá, màu, bảng số đo, chính sách đổi trả. Bảng này là danh sách việc phải làm TRƯỚC, không phải
+ * một cảnh báo để bỏ qua.
+ */
+export type OfferAudit = {
+  field: string;
+  ok: boolean;
+  value: string;
+  why: string;
+};
+
+export async function auditWinOffer(pancakePageId: string): Promise<{ productCode: string; rows: OfferAudit[] }> {
+  const db = await getDb();
+  const [h] = await db
+    .select()
+    .from(schema.fanpageSalesProfiles)
+    .where(eq(schema.fanpageSalesProfiles.pancakePageId, pancakePageId))
+    .limit(1);
+  if (!h) return { productCode: "", rows: [{ field: "hồ sơ fanpage", ok: false, value: "chưa có", why: "Chưa khai hồ sơ cho page này" }] };
+
+  const [sp] = h.activeProductId
+    ? await db.select({ code: schema.products.customId, name: schema.products.name }).from(schema.products).where(eq(schema.products.id, h.activeProductId)).limit(1)
+    : [];
+
+  const soMauMa = h.activeProductId
+    ? await db
+        .select({ n: sql<number>`count(*)::int`, colors: sql<string>`string_agg(distinct nullif(${schema.productVariants.color}, ''), ', ')` })
+        .from(schema.productVariants)
+        .where(and(eq(schema.productVariants.productId, h.activeProductId), eq(schema.productVariants.isRemoved, false)))
+    : [];
+
+  const [size] = h.sizeProfileId
+    ? await db.select({ name: schema.salesSizeProfiles.name, rules: schema.salesSizeProfiles.rules }).from(schema.salesSizeProfiles).where(eq(schema.salesSizeProfiles.id, h.sizeProfileId)).limit(1)
+    : [];
+
+  const mauERP = String(soMauMa[0]?.colors ?? "");
+  const rows: OfferAudit[] = [
+    { field: "Mã WIN", ok: Boolean(h.activeProductId), value: sp?.code ? `${sp.code} · ${sp.name}` : "chưa khai", why: "Chưa khai thì mọi hội thoại rơi về UNKNOWN và chuyển người" },
+    { field: "Giá bán", ok: h.unitPrice !== null, value: h.unitPrice === null ? "CHƯA KHAI" : `${h.unitPrice.toLocaleString("vi-VN")}đ`, why: "Chưa khai thì máy không được báo giá" },
+    { field: "Phí ship", ok: h.shippingFee !== null, value: h.shippingFee === null ? "CHƯA KHAI" : `${h.shippingFee.toLocaleString("vi-VN")}đ`, why: "Chưa khai thì máy không nói được tổng tiền" },
+    { field: "Giá combo", ok: Boolean(h.comboPricing), value: h.comboPricing ? "đã khai" : "CHƯA KHAI", why: "Không có thì máy không chào được combo — mất một đường tăng giá trị đơn" },
+    { field: "Ngưỡng miễn ship", ok: h.freeShipFrom !== null, value: h.freeShipFrom === null ? "CHƯA KHAI" : `${h.freeShipFrom.toLocaleString("vi-VN")}đ`, why: "Không bắt buộc, nhưng chưa khai thì máy không được hứa miễn ship" },
+    { field: "Màu đang có", ok: h.availableColors.length > 0, value: h.availableColors.length ? h.availableColors.join(", ") : `CHƯA KHAI${mauERP ? ` (ERP có: ${mauERP})` : ""}`, why: "Chưa khai thì máy không tư vấn được màu, dù ERP có mẫu mã" },
+    { field: "Bảng số đo", ok: Boolean(size && Array.isArray(size.rules) && (size.rules as unknown[]).length > 0), value: size ? `${size.name}${Array.isArray(size.rules) ? ` (${(size.rules as unknown[]).length} dòng)` : " (chưa có dòng nào)"}` : "CHƯA CÓ", why: "Thiếu thì khách hỏi size phải chuyển người — máy không được đoán size trên cơ thể người thật" },
+    { field: "Chính sách COD", ok: Boolean(h.codPolicy), value: h.codPolicy || "CHƯA KHAI", why: "Khách hỏi thanh toán thì máy phải né hoặc chuyển người" },
+    { field: "Chính sách kiểm hàng", ok: Boolean(h.inspectionPolicy), value: h.inspectionPolicy || "CHƯA KHAI", why: "Câu hỏi rất hay gặp; chưa khai là chưa trả lời được" },
+    { field: "Thời gian giao", ok: Boolean(h.deliveryEstimate), value: h.deliveryEstimate || "CHƯA KHAI", why: "Chưa khai thì máy không được hứa ngày giao" },
+    { field: "Chính sách đổi trả", ok: Boolean(h.exchangePolicy), value: h.exchangePolicy || "CHƯA KHAI", why: "Liên quan trực tiếp tới tỷ lệ hoàn" },
+    { field: "Câu dữ kiện đã duyệt", ok: h.approvedFacts.length > 0, value: h.approvedFacts.length ? `${h.approvedFacts.length} câu` : "CHƯA KHAI", why: "Không có thì mô hình thật sẽ tự nghĩ ra dữ kiện khi bị hỏi ngoài kịch bản" },
+  ];
+  return { productCode: sp?.code ?? "", rows };
+}
