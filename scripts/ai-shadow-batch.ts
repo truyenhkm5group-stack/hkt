@@ -191,40 +191,6 @@ async function main() {
   console.log(`\n⑤ KẾT QUẢ LƯỢT CHẠY`);
   for (const r of runs) console.log(`   ${String(r.status).padEnd(12)} nấc ${String(r.tier).padEnd(8)} ${r.n}`);
 
-  // ───── ⑥ ĐỐI CHIẾU NGƯỜI ↔ MÁY ─────
-  const cap = rowsOf<Record<string, unknown>>(
-    await db.execute(sql`
-      select c.id, c.source_type, c.stage,
-             m.text                                  as khach,
-             (select text from sales_messages h
-                where h.conversation_id = c.id and h.from_page = true and btrim(h.text) <> ''
-                order by h.sent_at asc limit 1)      as nguoi,
-             s.suggested_reply                       as may,
-             s.action, s.production_action, s.confidence
-      from sales_conversations c
-      join lateral (
-        select id, text from sales_messages
-        where conversation_id = c.id and from_page = false and btrim(text) <> ''
-        order by sent_at desc nulls last limit 1
-      ) m on true
-      left join lateral (
-        select suggested_reply, action, production_action, confidence from sales_suggestions
-        where conversation_id = c.id order by created_at desc limit 1
-      ) s on true
-      where c.id in (${dsSql})
-      order by (s.suggested_reply is null), c.updated_at desc
-      limit 6
-    `),
-  );
-  console.log(`\n⑥ NGƯỜI ↔ MÁY (6 lượt · SĐT đã che)`);
-  for (const r of cap) {
-    console.log(`\n   ── ${String(r.source_type || "?")} · ${String(r.stage || "?")} ──`);
-    console.log(`   KHÁCH : ${cat(che(String(r.khach ?? "")), 160)}`);
-    console.log(`   NGƯỜI : ${cat(che(String(r.nguoi ?? "(chưa trả lời)")), 160)}`);
-    console.log(`   MÁY   : ${cat(che(String(r.may ?? "(không sinh gợi ý)")), 220)}`);
-    console.log(`   →       ${String(r.action ?? "—")} · sản xuất ${String(r.production_action ?? "—")} · tin cậy ${r.confidence ?? "—"}`);
-  }
-
   /*
     VÌ SAO MÁY KHÔNG TRẢ LỜI — đọc từ `ai_runs.decision`, không đoán.
 
@@ -277,6 +243,40 @@ async function main() {
   );
   console.log(`\n⑤d LƯỢT GỌI HỎNG (nếu có)`);
   for (const l of loiGoi) console.log(`   ${String(l.n).padStart(3)}× ${String(l.tier)} ok=${String(l.ok)} ${String(l.loi) ? `· ${l.loi}` : ""}`);
+
+  // ───── ⑥ ĐỐI CHIẾU NGƯỜI ↔ MÁY ─────
+  const cap = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select c.id, c.source_type, c.stage,
+             m.text                                  as khach,
+             (select text from sales_messages h
+                where h.conversation_id = c.id and h.from_page = true and btrim(h.text) <> ''
+                order by h.sent_at asc limit 1)      as nguoi,
+             s.suggested_reply                       as may,
+             s.action, s.production_action, s.confidence
+      from sales_conversations c
+      join lateral (
+        select id, text from sales_messages
+        where conversation_id = c.id and from_page = false and btrim(text) <> ''
+        order by sent_at desc nulls last limit 1
+      ) m on true
+      left join lateral (
+        select suggested_reply, action, production_action, confidence from sales_suggestions
+        where conversation_id = c.id order by created_at desc limit 1
+      ) s on true
+      where c.id in (${dsSql})
+      order by (s.suggested_reply is null), c.updated_at desc
+      limit 4
+    `),
+  );
+  console.log(`\n⑥ NGƯỜI ↔ MÁY (4 lượt · SĐT đã che)`);
+  for (const r of cap) {
+    console.log(`\n   ── ${String(r.source_type || "?")} · ${String(r.stage || "?")} ──`);
+    console.log(`   KHÁCH : ${cat(che(String(r.khach ?? "")), 160)}`);
+    console.log(`   NGƯỜI : ${cat(che(String(r.nguoi ?? "(chưa trả lời)")), 160)}`);
+    console.log(`   MÁY   : ${cat(che(String(r.may ?? "(không sinh gợi ý)")), 220)}`);
+    console.log(`   →       ${String(r.action ?? "—")} · sản xuất ${String(r.production_action ?? "—")} · tin cậy ${r.confidence ?? "—"}`);
+  }
 
   // ───── ⑦ HAI CON SỐ PHẢI BẰNG 0 ─────
   const [an] = rowsOf<Record<string, unknown>>(

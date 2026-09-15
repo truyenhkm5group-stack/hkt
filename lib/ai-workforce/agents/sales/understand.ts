@@ -78,8 +78,20 @@ export const UNDERSTANDING_SCHEMA = z.object({
     hipCm: z.number().min(40).max(220).nullish().transform((v) => v ?? null),
   }),
   confidence: z.number().min(0).max(1),
-  /** Câu / cụm đã dẫn tới kết luận — để người đọc lại hiểu vì sao máy nghĩ vậy. */
-  evidence: oChu(300),
+  /*
+    CĂN CỨ — câu/cụm đã dẫn tới kết luận, để người đọc lại hiểu vì sao máy nghĩ vậy.
+
+    NHẬN NHIỀU KIỂU rồi quy về chuỗi. Đo 15/09/2026: sau khi lược đồ đã nhận `null`, lỗi còn lại
+    duy nhất là `evidence` — mô hình trả một MẢNG các cụm ("bao nhiêu", "em"), hợp lý với nghĩa
+    "những cụm dẫn tới kết luận", nhưng lược đồ đòi một chuỗi.
+    
+    Đây là ô GIẢI THÍCH CHO NGƯỜI ĐỌC, không phải dữ liệu nghiệp vụ — không con số nào, không quyết
+    định nào đọc nó. Nên quy đổi kiểu ở đây là an toàn, khác hẳn với việc nới lỏng một ô thực thể.
+  */
+  evidence: z
+    .union([z.string(), z.array(z.union([z.string(), z.number()])), z.number()])
+    .nullish()
+    .transform((v) => (Array.isArray(v) ? v.join(" · ") : v === null || v === undefined ? "" : String(v)).slice(0, 300)),
 });
 
 export type Understanding = z.infer<typeof UNDERSTANDING_SCHEMA> & { tier: "RULE" | "ECONOMY" | "STRONG" };

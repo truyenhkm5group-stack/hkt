@@ -349,6 +349,13 @@ export async function testSalesAgent(db: Db) {
   });
   assert.equal(nullHet.entities.productText, "", "null phải quy về chuỗi rỗng, không phải lỗi lược đồ");
   assert.equal(nullHet.evidence, "");
+  // CĂN CỨ nhận cả MẢNG: mô hình trả ["bao nhiêu","em"] là hợp lý với nghĩa "những cụm dẫn tới kết
+  // luận". Đây là ô giải thích cho người đọc — không con số nào, không quyết định nào đọc nó — nên
+  // quy đổi kiểu ở đây an toàn, khác hẳn nới lỏng một ô thực thể.
+  assert.equal(
+    UNDERSTANDING_SCHEMA.parse({ intents: ["PRICE_QUESTION"], entities: {}, confidence: 0.9, evidence: ["bao nhiêu", "em"] }).evidence,
+    "bao nhiêu · em",
+  );
   assert.equal(nullHet.entities.quantity, null, "số vẫn giữ null — null ở đây nghĩa là CHƯA BIẾT");
 
   // Khoá vắng mặt hoàn toàn cũng phải qua — mô hình có thể bỏ hẳn ô nó không thấy gì.
