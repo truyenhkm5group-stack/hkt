@@ -61,5 +61,37 @@ export function testPayrollReconcileScript() {
   assert.ok(pkg.scripts["payroll:reconcile"], "script đối chiếu phải có lối chạy trong package.json");
   assert.ok(pkg.scripts["payroll:reconcile"].includes("payroll-reconcile.ts"), "và lối ấy phải trỏ đúng tệp");
 
-  console.log("  ✓ Script đối chiếu lương: không một lệnh ghi nào · không import lược đồ · dùng chung đường đối chiếu với màn hình · xuất được JSON/CSV");
+  /*
+    ─────────── 6. "CHỈ ĐỌC" PHẢI LÀ RÀNG BUỘC CỦA MÁY CHỦ, KHÔNG PHẢI LỜI HỨA CỦA MÃ NGUỒN ───────────
+
+    Khối 1 chứng minh BẢN THÂN script không có lệnh ghi. Nhưng nó gọi `previewLegacyMigration`, và
+    lần theo cây phụ thuộc thì tới cả `lib/sync/runner.ts`, `lib/integrations/facebook/*`,
+    `lib/settings.ts` — những tệp CÓ lệnh ghi thật. Script không gọi tới chúng hôm nay; nhưng
+    "hôm nay không gọi" là thứ chỉ đúng cho tới lần sửa sau.
+
+    Nên chỗ dựa không phải phép quét, mà là `default_transaction_read_only=on` đặt ngay ở gói khởi
+    tạo kết nối: CHÍNH POSTGRES từ chối mọi INSERT/UPDATE/DELETE/DDL, bất kể mã nào chạy. Đây là
+    cùng cơ chế mà thao tác `db-query` của kho mã này vẫn dùng để tra production.
+  */
+  {
+    // Cờ phải được bật TRƯỚC mọi import chạm tới `@/db` — đặt trong `main()` là quá muộn, bể kết
+    // nối đã dựng xong từ lúc mô-đun được nạp.
+    const viTriCo = src.indexOf('process.env.ERP_READ_ONLY = "1"');
+    assert.ok(viTriCo > 0, "script phải tự bật chế độ chỉ đọc cho chính nó");
+    const viTriImportDb = src.search(/import\s[^\n]*from\s+"@\/(db|lib\/queries)/);
+    assert.ok(
+      viTriImportDb < 0 || viTriCo < viTriImportDb,
+      "cờ chỉ đọc phải đứng TRƯỚC import đầu tiên chạm tới CSDL — đặt sau thì bể kết nối đã dựng xong với quyền ghi",
+    );
+
+    const dbSrc = execSync("git show HEAD:db/index.ts", { encoding: "utf8" });
+    assert.ok(dbSrc.includes("ERP_READ_ONLY"), "db/index.ts phải đọc cờ ấy — không thì script bật một cờ không ai nghe");
+    assert.ok(dbSrc.includes("default_transaction_read_only=on"), "và phải đẩy nó xuống tham số kết nối PostgreSQL");
+    assert.ok(
+      dbSrc.includes("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"),
+      "PGlite không nhận tham số kết nối nên phải đặt ở mức phiên — bỏ sót thì máy cá nhân chạy với quyền ghi trong khi tưởng là chỉ đọc",
+    );
+  }
+
+  console.log("  ✓ Script đối chiếu lương: không một lệnh ghi nào · không import lược đồ · CHÍNH POSTGRES ép chỉ đọc (`default_transaction_read_only=on`, bật trước khi mở kết nối) · dùng chung đường đối chiếu với màn hình · xuất được JSON/CSV");
 }

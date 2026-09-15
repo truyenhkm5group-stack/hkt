@@ -14,6 +14,16 @@ export function databaseUrl() {
   return (process.env.DATABASE_URL || "").trim();
 }
 
+/**
+ * Phiên làm việc này có bị ép CHỈ ĐỌC ở tầng CSDL không.
+ *
+ * Đọc từ môi trường chứ không nhận tham số: nó phải đúng cho MỌI kết nối của tiến trình, kể cả
+ * những kết nối do một tệp ở tầng sâu mở ra.
+ */
+export function readOnlyMode() {
+  return (process.env.ERP_READ_ONLY || "").trim() === "1";
+}
+
 export function isPglite() {
   return databaseUrl().startsWith("pglite:");
 }
@@ -66,6 +76,9 @@ async function createPglite(): Promise<Db> {
     }
   }
   const client = new PGlite(dir);
+  // PGlite không nhận tham số kết nối, nhưng nó chỉ có MỘT phiên — đặt ở mức phiên là đủ và tương
+  // đương. (Chỉ dùng cho máy cá nhân / kiểm thử; production luôn là PostgreSQL thật.)
+  if (readOnlyMode()) await client.exec("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
   instrumentQueries(client as unknown as QueryClient);
   holder.__erpDb!.pglite = client;
   return drizzle(client, { schema }) as unknown as Db;
@@ -98,7 +111,25 @@ function createPg(): Db {
     hỏng ồn ào còn hơn treo im lặng: 15 giây không xin được kết nối thì ném lỗi, và lỗi đó vào log
     kèm tên trang.
   */
-  const pool = new Pool({ connectionString: databaseUrl(), max, connectionTimeoutMillis: 15_000 });
+  /*
+    ═══ CHẾ ĐỘ CHỈ ĐỌC ĐƯỢC CHÍNH POSTGRES ÉP, KHÔNG PHẢI ĐƯỢC MÃ NGUỒN HỨA ═══
+
+    Script đối chiếu chạy trên production. "Chỉ đọc" ở đó không được phép là một lời hứa trong khối
+    chú thích: nó gọi `previewLegacyMigration`, thứ kéo theo hàng chục tệp, và một lệnh `update`
+    nằm sâu ba tầng vẫn sửa dữ liệu thật y hệt một lệnh viết ở dòng đầu. Quét mã nguồn chỉ chứng
+    minh được cái KHÔNG CÓ HÔM NAY.
+
+    `default_transaction_read_only=on` đặt ở gói khởi tạo kết nối thì SERVER từ chối mọi
+    INSERT/UPDATE/DELETE/DDL, bất kể mã nào chạy. Cùng cơ chế mà thao tác `db-query` của kho mã này
+    vẫn dùng để tra production. Bật bằng biến môi trường, và chỉ script tự bật cho chính nó — ứng
+    dụng không bao giờ chạy ở chế độ này.
+  */
+  const pool = new Pool({
+    connectionString: databaseUrl(),
+    max,
+    connectionTimeoutMillis: 15_000,
+    ...(readOnlyMode() ? { options: "-c default_transaction_read_only=on" } : {}),
+  });
   instrumentQueries(pool as unknown as QueryClient);
   holder.__erpDb!.pool = pool;
   return drizzlePg(pool, { schema });

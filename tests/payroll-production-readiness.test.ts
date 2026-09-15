@@ -12,11 +12,12 @@
  * thay vì bị ai đó dọn đi vì "bài này chẳng bao giờ đỏ".
  */
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { calculatePayrollItem } from "@/lib/payroll/engine";
 import { resolveSegments, isWorkingSegment, type EmploymentRow, type PayrollSegment, type PolicyAssignmentRow, type PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 import { employmentOverlaps, assignmentOverlaps } from "@/lib/payroll/policy-validation";
 import { carryoverMonth } from "@/lib/payroll/profit-carryover";
-import { isFrozen, normalizePayrollStatus, PAYROLL_RUN_STATUSES } from "@/lib/constants/payroll-lifecycle";
+import { isFrozen, normalizePayrollStatus, PAYROLL_ACTION_SPEC, PAYROLL_RUN_STATUSES } from "@/lib/constants/payroll-lifecycle";
 import { applyRounding, type PolicyComponent } from "@/lib/constants/payroll-components";
 import { adjustmentSchema, VND_COLUMN_MAX } from "@/lib/validation/payroll-policy";
 import { formatVND } from "@/lib/format";
@@ -518,7 +519,77 @@ export function testPayrollProductionReadiness() {
     assert.equal(thieu.missing[0].availability, "MANUAL", "8. cùng với việc ai phải đi nhập nó");
   }
 
+  /*
+    ═══════════════════════════════════════════════════════════════════════════════════════
+    9 · MỌI CỬA VÀO DỮ LIỆU LƯƠNG PHẢI CÓ CỔNG — QUÉT MÃ NGUỒN, KHÔNG TIN VÀO MẮT
+    ═══════════════════════════════════════════════════════════════════════════════════════
+
+    Một cái nút ẩn không phải một lớp bảo vệ. Lương là dữ liệu nhạy cảm nhất trong ERP, và cửa vào
+    nó KHÔNG phải màn hình — là Server Action (gọi thẳng được) và route API (mở URL là chạy).
+
+    Bài quét mã ĐÃ VÀO KHO (`git show HEAD:`), không đọc đĩa: một cửa mới thêm mà quên cổng sẽ đỏ
+    ngay trên máy người viết, thay vì đợi tới lúc có người thử.
+  */
+  {
+    const dsTep = execSync("git ls-files lib/actions app/api", { encoding: "utf8" })
+      .split("\n")
+      .filter((f) => f.trim() && /payroll/i.test(f));
+    assert.ok(dsTep.length >= 5, "9. phải quét được các tệp cửa vào của lương");
+
+    for (const tep of dsTep) {
+      const ma = execSync(`git show HEAD:${tep}`, { encoding: "utf8" });
+      const laRoute = tep.startsWith("app/api/");
+      // Tên các hàm xuất ra ngoài: Server Action (`export async function X`) hoặc handler HTTP.
+      const cua = [...ma.matchAll(/^export async function (\w+)\s*\(/gm)].map((m) => m[1]);
+      for (const ten of cua) {
+        const than = ma.slice(ma.indexOf(`export async function ${ten}`));
+        const dau = than.slice(0, 2500);
+        assert.match(
+          dau,
+          /requireUser\(\)|getCurrentUser\(\)|requireManage\(\)/,
+          `9. ${tep}::${ten} phải xác định NGƯỜI trước khi làm gì — gọi thẳng một Server Action không đi qua màn hình nào`,
+        );
+        /*
+          PHẢI KIỂM QUYỀN, KHÔNG CHỈ KIỂM ĐÃ ĐĂNG NHẬP.
+
+          Nhận cả `can(user, "payroll:…")` viết thẳng lẫn `can(user, spec.permission)` đọc từ bảng
+          — `movePayrollRun` cố ý đọc từ bảng để màn hình và máy chủ dùng chung một nguồn. Bản
+          thân bảng ấy được khoá riêng ở cuối khối này, nên không có đường nào lọt.
+        */
+        assert.match(
+          dau,
+          /can\(\s*user\s*,|requireManage\(\)/,
+          `9. ${tep}::${ten} phải kiểm QUYỀN lương, không chỉ kiểm đã đăng nhập`,
+        );
+        if (laRoute) {
+          assert.match(than.slice(0, 4000), /employeeMatchesUser/, `9. ${tep}::${ten} là đường xuất dữ liệu: phải lọc theo KHOÁ TÀI KHOẢN cho người chỉ xem của mình`);
+        }
+      }
+    }
+
+    /*
+      QUYỀN XEM ≠ QUYỀN KHAI BÁO ≠ QUYỀN DUYỆT.
+
+      Ba việc nặng nhất — duyệt, khoá, đánh dấu đã trả — phải đòi `payroll:approve`. Người khai số
+      và người duyệt số không nên là một; để `payroll:manage` tự mang theo quyền duyệt là bỏ hẳn
+      lớp soát thứ hai.
+    */
+    // `REJECT` cũng ở nhóm DUYỆT: nó đi được từ `APPROVED` về `CALCULATED`, nghĩa là nó RÚT LẠI
+    // một chữ ký duyệt. Ai rút được chữ ký thì phải là người ký được.
+    for (const viec of ["APPROVE", "REJECT", "LOCK", "UNLOCK", "MARK_PAID"] as const) {
+      assert.equal(PAYROLL_ACTION_SPEC[viec].permission, "payroll:approve", `9. “${PAYROLL_ACTION_SPEC[viec].label}” phải đòi quyền DUYỆT lương`);
+    }
+    for (const viec of ["CALCULATE", "SUBMIT_REVIEW"] as const) {
+      assert.equal(PAYROLL_ACTION_SPEC[viec].permission, "payroll:manage", `9. “${PAYROLL_ACTION_SPEC[viec].label}” đòi quyền khai báo`);
+    }
+    // Ba việc làm đổi một kỳ ĐÃ CÓ SỐ phải cần người thứ hai.
+    for (const viec of ["UNLOCK", "MARK_PAID"] as const) {
+      assert.equal(PAYROLL_ACTION_SPEC[viec].secondApproval, true, `9. “${PAYROLL_ACTION_SPEC[viec].label}” một mình quyết là quá nhiều quyền`);
+    }
+    assert.equal(PAYROLL_ACTION_SPEC.UNLOCK.requiresReason, true, "9. mở khoá một kỳ đã trả tiền bắt buộc có LÝ DO");
+  }
+
   console.log(
-    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu",
+    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu · mọi cửa vào đều có cổng quyền",
   );
 }

@@ -364,6 +364,39 @@ export async function testPayrollPolicyEngine(db: Db) {
   assert.equal(sauKhiChot.status, "FINAL", "10. và vẫn ở trạng thái đã chốt");
   await db.delete(c).where(sql`${c.employeeId} like 'pe-%'`);
 
+  /* ═══ 11 · CHẾ ĐỘ CHỈ ĐỌC: CHỨNG MINH BẰNG CÁCH THỬ GHI, KHÔNG BẰNG CÁCH ĐỌC MÃ ═══
+   *
+   * Script đối chiếu chạy trên production bật `default_transaction_read_only`. Quét mã nguồn chỉ
+   * chứng minh được cờ ĐƯỢC ĐẶT; khối này chứng minh nó CÓ HIỆU LỰC — bằng cách thật sự thử ghi
+   * và đòi CSDL từ chối.
+   *
+   * Đặt lại READ WRITE trong `finally`: bỏ sót thì mọi bài chạy sau đều đỏ vì một lý do hoàn toàn
+   * không liên quan, và người đọc sẽ đi tìm lỗi ở đúng chỗ không có lỗi.
+   */
+  try {
+    await db.execute(sql`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`);
+    let biTuChoi = false;
+    try {
+      await db.insert(schema.payrollAdjustments).values({
+        employeeId: "pe-kho-1",
+        periodKey: "2028-03-01..2028-03-31",
+        kind: "BONUS",
+        label: "Thử ghi khi chỉ đọc",
+        amount: 1,
+        reason: "bài kiểm chế độ chỉ đọc",
+      });
+    } catch {
+      biTuChoi = true;
+    }
+    assert.equal(biTuChoi, true, "11. phiên CHỈ ĐỌC phải làm CSDL từ chối lệnh ghi — nếu không, 'chỉ đọc' chỉ là một lời hứa trong khối chú thích");
+
+    // Và ĐỌC vẫn phải chạy được, nếu không thì chế độ ấy vô dụng.
+    const van = await db.select({ n: sql<number>`count(*)::int` }).from(schema.payrollAdjustments);
+    assert.ok(van[0].n >= 0, "11. đọc vẫn phải chạy được ở chế độ chỉ đọc");
+  } finally {
+    await db.execute(sql`SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE`);
+  }
+
   await reset(db);
-  console.log("  ✓ Máy tính lương chung nối vào bảng lương thật: chưa gán ⇒ sai lệch cũ/mới bằng ĐÚNG 0 · chấm công thiếu ⇒ CHƯA BIẾT · đổi chính sách giữa kỳ ⇒ mỗi đoạn một luật · tính lại bất biến · ảnh chụp giữ vết giải thích · cổng chặn đọc CẢ FINAL/LOCKED/PAID · sổ lỗ ghi lại không nhân đôi");
+  console.log("  ✓ Máy tính lương chung nối vào bảng lương thật: chưa gán ⇒ sai lệch cũ/mới bằng ĐÚNG 0 · chấm công thiếu ⇒ CHƯA BIẾT · đổi chính sách giữa kỳ ⇒ mỗi đoạn một luật · tính lại bất biến · ảnh chụp giữ vết giải thích · cổng chặn đọc CẢ FINAL/LOCKED/PAID · sổ lỗ ghi lại không nhân đôi · phiên CHỈ ĐỌC thật sự chặn được lệnh ghi");
 }

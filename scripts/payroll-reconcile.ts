@@ -28,6 +28,22 @@
  * tài khoản CSDL chỉ có `SELECT`; khi ấy dù mã có sai thì CSDL vẫn từ chối.
  */
 import "dotenv/config";
+
+/*
+  ═══ ÉP CHỈ ĐỌC Ở TẦNG CSDL, TRƯỚC KHI BẤT KỲ TỆP NÀO MỞ KẾT NỐI ═══
+
+  Dòng này phải đứng TRƯỚC mọi `import` chạm tới `@/db` — đó là lý do nó nằm ngay sau `dotenv` và
+  trước các import còn lại, chứ không phải ở trong `main()`.
+
+  Vì sao cần nó dù script không viết một lệnh ghi nào: script gọi `previewLegacyMigration`, thứ kéo
+  theo hàng chục tệp, trong đó có những tệp CÓ lệnh ghi (đồng bộ Pancake, đồng bộ Facebook, bộ
+  chạy job). Script không gọi tới chúng — nhưng "hôm nay không gọi" là một lời hứa về mã nguồn,
+  còn đây là một RÀNG BUỘC của máy chủ: `default_transaction_read_only=on` làm Postgres từ chối
+  mọi INSERT/UPDATE/DELETE/DDL, bất kể mã nào chạy. Cùng cơ chế mà thao tác `db-query` của kho mã
+  này vẫn dùng để tra production.
+*/
+process.env.ERP_READ_ONLY = "1";
+
 import { writeFileSync } from "node:fs";
 import { payrollPeriodKey } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
@@ -56,7 +72,7 @@ async function main() {
   const key = payrollPeriodKey(period.from, period.to);
 
   console.log(`\n═══ ĐỐI CHIẾU LƯƠNG CŨ / MỚI · kỳ ${key} ═══`);
-  console.log("CHỈ ĐỌC: script này không ghi một dòng nào vào cơ sở dữ liệu.\n");
+  console.log("CHỈ ĐỌC: phiên kết nối bật `default_transaction_read_only=on` — CHÍNH POSTGRES từ chối mọi lệnh ghi, không phải mã nguồn tự hứa.\n");
 
   const rows = (await previewLegacyMigration(period, "profit1")).filter((r) => !chiNhungAi.length || chiNhungAi.includes(r.proposal.employeeId));
   if (!rows.length) {
