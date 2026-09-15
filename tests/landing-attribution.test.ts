@@ -13,7 +13,7 @@ import {
   type CampaignRecord,
   type LandingTracking,
 } from "@/lib/constants/landing-attribution";
-import { readTracking } from "@/lib/attribution/landing";
+import { idsFromUrl, readTracking } from "@/lib/attribution/landing";
 import { rebuildFanpageAttribution } from "@/lib/attribution/fanpage";
 import { listAttributionOrders } from "@/lib/queries/fanpage-attribution";
 
@@ -34,7 +34,7 @@ import { listAttributionOrders } from "@/lib/queries/fanpage-attribution";
 const P = "lda-";
 const at = (day: number, hour = 9) => new Date(Date.UTC(2024, 7, day, hour));
 
-const tracking = (v: Partial<LandingTracking>): LandingTracking => ({ adId: null, adsetId: null, campaignName: null, utmCampaign: null, landingUrl: null, ...v });
+const tracking = (v: Partial<LandingTracking>): LandingTracking => ({ adId: null, adsetId: null, campaignName: null, utmCampaign: null, landingUrl: null, urlIds: [], ...v });
 
 const AD: AdRecord = { adId: "120248142332810618", adsetId: "120248142332380618", campaignId: "camp-1", accountId: "act-777", storyId: "999000111_555" };
 
@@ -156,6 +156,32 @@ export function testLandingAttributionPure() {
     tracking: tracking({ campaignName: ADSET_ID }),
   });
   assert.equal(metaTuChoi.gap, "NO_MATCH", "hỏi rồi mà Meta không trả ⇒ hết đường, KHÔNG phải 'chưa đồng bộ'");
+
+  /* ═══ MÃ NẰM NGAY TRONG LINK LANDING ═══
+
+     Ca thật còn lại trên production (#3696): tên chiến dịch trong form KHÔNG có trong bảng chi
+     tiêu, nhưng chính cái link mang `utm_id` / `utm_term` / `utm_content` là id Meta. Thứ tự ba
+     tham số không được giả định — mã nào khớp sổ nào thì nó là loại ấy. */
+  const quaLink = resolveLandingAttribution({
+    ...daTra,
+    tracking: tracking({ campaignName: "TEN_KHONG_CO_TRONG_BANG_CHI_TIEU", urlIds: ["999999999999", ADSET_ID] }),
+  });
+  assert.equal(quaLink.resolved, true, "tên chiến dịch không khớp vẫn cứu được bằng mã trong link");
+  assert.equal(quaLink.tier, "ADSET_ID");
+  assert.equal(quaLink.marketerId, "mkt-quan");
+  assert.ok(quaLink.evidence.includes("đọc từ link landing"), "và căn cứ phải nói rõ mã đến từ đâu");
+  assert.equal(
+    resolveLandingAttribution({ ...daTra, tracking: tracking({ urlIds: ["999999999999"] }) }).resolved,
+    false,
+    "mã lạ trong link KHÔNG khớp sổ nào ⇒ không quy kết, không đoán",
+  );
+  assert.deepEqual(
+    idsFromUrl("https://haianluxury.click/q003/?utm_source=QA4_X&utm_id=120248045301750618&utm_term=120248045301940618&fbclid=IwY2"),
+    ["120248045301750618", "120248045301940618"],
+    "chỉ rút MÃ SỐ; `utm_source` là chữ và `fbclid` không phải id Meta nên bị bỏ qua",
+  );
+  assert.deepEqual(idsFromUrl("khong-phai-url"), [], "link hỏng ⇒ mảng rỗng, không ném");
+  assert.deepEqual(idsFromUrl(null), []);
 
   /* Chính mã ấy là một campaign_id trong bảng chi tiêu. */
   const laCampaignId = resolveLandingAttribution({
