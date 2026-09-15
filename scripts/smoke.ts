@@ -107,6 +107,24 @@ const ROUTES = [
   "/customers/retention",
   "/ads",
   "/payroll",
+  /*
+    ═══ TÁM MÀN HÌNH LƯƠNG, KHÔNG PHẢI MỘT ═══
+
+    `/payroll` trước đây là tuyến DUY NHẤT của cả module, vì cả module chỉ có một trang. Nay nó có
+    tám, và bảy trang kia KHÔNG nằm trên thanh điều hướng (chúng là tab bên trong `/payroll`) nên
+    `tests/smoke-coverage.test.ts` — vốn đọc thanh điều hướng — không thể đòi chúng.
+
+    Đó đúng là hình dạng lỗi mà `/bank` và `/ideas` đã dẫm phải ngày 10/09/2026: trang hỏng trên
+    production và chủ shop tự phát hiện, vì lá chắn chỉ canh những gì có người nhớ thêm vào. Bảy
+    trang này đụng tới tiền của người thật, nên chúng phải được mở thật sau mỗi lượt deploy.
+  */
+  "/payroll/payslip",
+  "/payroll/policies",
+  "/payroll/assignments",
+  "/payroll/adjustments",
+  "/payroll/migration",
+  "/payroll/runs",
+  "/payroll/settings",
   "/expenses",
   "/alerts",
   "/data-quality",

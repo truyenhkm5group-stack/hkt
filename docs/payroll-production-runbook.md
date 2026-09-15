@@ -161,6 +161,9 @@ lại, vì bản này cố ý KHÔNG backfill gì.
 
 ### 3.2 Mở màn hình
 
+Tám tuyến lương nay nằm trong `scripts/smoke.ts`, nên **workflow deploy tự mở chúng** bằng một
+phiên đăng nhập thật và báo lỗi nếu trang nào không trả 200. Không cần mở tay — nhưng vẫn nên nhìn:
+
 Mở lần lượt, mỗi trang phải lên được và không có ô nào hiện `0 ₫` ở chỗ đáng lẽ là `—`:
 
 - `/payroll` — bảng lương, các thẻ số liệu, nút xuất CSV
@@ -171,6 +174,12 @@ Mở lần lượt, mỗi trang phải lên được và không có ô nào hi�
 - `/payroll/migration` — bảng đối chiếu cũ/mới, phải hiện đủ 4 người
 - `/payroll/runs` — vòng đời kỳ lương
 - `/payroll/settings` — hai công tắc + bảng khai cơ sở lợi nhuận + ô khấu trừ theo luật
+
+> **Đã chạy thật ở phiên soát này** (15/09/2026, bản dựng production trên PGlite cục bộ có gieo 3
+> nhân sự): cả 8 tuyến + đường xuất CSV đều trả **HTTP 200**, không trang nào lỗi runtime, trang
+> nặng nhất `/payroll` mất **0,51 giây**. Kiểm cả nội dung: phiếu lương in **"Chưa cấu hình"** ở
+> dòng khấu trừ theo luật (KHÔNG in "0 ₫"), màn hình chuyển đổi in đủ **5 nhãn trạng thái** và nêu
+> chặn "chưa có dòng PHÂN CÔNG", tệp CSV mang dòng **"Nguồn số: BẢN TÍNH SỐNG"**.
 
 ### 3.3 Người đường cũ không đổi số
 
