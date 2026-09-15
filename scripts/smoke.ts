@@ -14,8 +14,27 @@ import { getDb, schema } from "@/db";
 
 const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:3000";
 
-/** Hết kiên nhẫn với MỘT trang. Trang treo là lỗi thật, nhưng phải phân biệt với trang lỗi. */
+/**
+ * Hết kiên nhẫn chờ ĐẦU PHẢN HỒI. Máy chủ không nhả nổi đầu phản hồi trong ngần này là TREO — lỗi
+ * thật, chặn deploy. Đây là ý nghĩa nguyên bản của hạn chờ và nó KHÔNG đổi.
+ */
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 60_000);
+
+/**
+ * ═══ HẠN CHỜ RIÊNG CHO THÂN TRANG — VÀ VƯỢT NÓ KHÔNG CHẶN DEPLOY ═══
+ *
+ * Hai giai đoạn, hai ý nghĩa, nên phải có hai hạn chờ.
+ *
+ * Đầu phản hồi không về = máy chủ treo = lỗi thật. Thân trang về chậm = trang CHẬM — mà luật của
+ * chính tệp này đã chốt từ deploy #172: "chặn bản mới vì nó chậm có thể đang chặn đúng bản vá làm
+ * nó nhanh hơn".
+ *
+ * Suýt dẫm phải: bản sửa phép đo đầu tiên để NGUYÊN một hạn chờ bao cả hai giai đoạn. Làm thế là
+ * lặng lẽ dựng thêm một điều kiện CHẶN mới — trang nào thân chảy quá 60 giây sẽ nhảy từ SUCCESS
+ * sang TIMEOUT và chặn deploy của cả ba phiên đang chạy song song. Sửa một phép đo không được phép
+ * đổi luật chặn; đổi luật chặn là một quyết định riêng, và nó phải được nói ra.
+ */
+const BODY_TIMEOUT_MS = Number(process.env.SMOKE_BODY_TIMEOUT_MS ?? 60_000);
 
 /**
  * NGƯỠNG "CHẬM" — trang trả 200 nhưng lâu hơn mức này là vấn đề HIỆU NĂNG, không phải lỗi ứng dụng.
@@ -226,6 +245,42 @@ const TOKEN_NEAR_EXPIRY_MS = TOKEN_TTL_MS - 30_000;
 type Result = { route: string; verdict: Verdict; detail: string; ms: number; ttfbMs: number };
 
 /**
+ * ĐỌC THÂN PHẢN HỒI CÓ HẠN CHỜ, VÀ GIỮ LẠI PHẦN ĐÃ VỀ.
+ *
+ * `response.text()` là tất-cả-hoặc-không-gì: quá hạn thì ném lỗi và ném luôn những byte đã nhận.
+ * Nhưng phần đã về mới là thứ trả lời được câu hỏi quan trọng nhất — "trang này đang CHẬM hay đang
+ * HỎNG" — vì dấu hiệu trang lỗi và mã lỗi RSC nằm ngay trong đó.
+ *
+ * Nên đọc theo từng khối và tự canh giờ: hết hạn thì DỪNG đọc, trả về những gì đã có kèm cờ
+ * `complete = false`. Người gọi soi lỗi trên phần ấy trước, rồi mới kết luận chậm.
+ */
+async function docThan(response: Response, hanMs: number): Promise<{ text: string; complete: boolean }> {
+  if (!response.body) return { text: await response.text(), complete: true };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const hetHan = Date.now() + hanMs;
+  let text = "";
+  try {
+    for (;;) {
+      const conLai = hetHan - Date.now();
+      if (conLai <= 0) return { text, complete: false };
+      // Chạy đua giữa "khối tiếp theo" và "hết giờ" — `reader.read()` không tự có hạn chờ, và một
+      // ranh giới Suspense treo hẳn sẽ không bao giờ trả về.
+      const ketQua = await Promise.race([
+        reader.read(),
+        new Promise<"HET_GIO">((resolve) => setTimeout(() => resolve("HET_GIO"), conLai)),
+      ]);
+      if (ketQua === "HET_GIO") return { text, complete: false };
+      if (ketQua.done) return { text: text + decoder.decode(), complete: true };
+      text += decoder.decode(ketQua.value, { stream: true });
+    }
+  } finally {
+    // Huỷ luồng đọc dở: không huỷ thì kết nối nằm treo và trang sau phải chờ ghế trong bể kết nối.
+    await reader.cancel().catch(() => {});
+  }
+}
+
+/**
  * ═══════════ DẤU HIỆU BẮT BUỘC PHẢI CÓ TRONG HTML CỦA MỘT SỐ TUYẾN ═══════════
  *
  * Chỉ khai thứ mà THIẾU NÓ THÌ TRANG VÔ DỤNG, không khai chi tiết bố cục — một danh sách bám vào
@@ -350,6 +405,9 @@ async function main() {
         signal: controller.signal,
       });
       ttfbMs = Date.now() - started;
+      // Đầu phản hồi đã về ⇒ giai đoạn "máy chủ treo" đã qua. Gỡ đồng hồ CHẶN ở đây để nó không
+      // lấn sang giai đoạn đọc thân — thân chảy chậm là chuyện hiệu năng, không phải cớ chặn.
+      clearTimeout(timer);
 
       if (response.status >= 300 && response.status < 400) {
         const ms = ttfbMs;
@@ -387,7 +445,7 @@ async function main() {
         Đọc hết thân rồi mới dừng đồng hồ. Con số sẽ XẤU đi so với bản trước — đó là vì nó bắt đầu
         nói thật, không phải vì ứng dụng vừa chậm lại.
       */
-      const body = await response.text();
+      const { text: body, complete: thanDayDu } = await docThan(response, BODY_TIMEOUT_MS);
       const ms = Date.now() - started;
 
       if (!body.includes(RENDER_MARKER)) {
@@ -439,6 +497,25 @@ async function main() {
           route,
           verdict: "APP_ERROR",
           detail: `HTTP 200 nhưng THIẾU công cụ bắt buộc: ${thieu.map((e) => `"${e.marker}" (${e.why})`).join(" · ")}`,
+          ms,
+          ttfbMs,
+        });
+        continue;
+      }
+
+      /*
+        THÂN TRANG CHƯA VỀ HẾT TRONG HẠN — CHẬM, KHÔNG PHẢI LỖI.
+
+        Đặt SAU mọi phép dò lỗi ở trên là có chủ ý: phần thân đã về vẫn được soi tìm trang lỗi và mã
+        lỗi RSC, nên một trang HỎNG mà lại chảy chậm vẫn bị bắt đúng là APP_ERROR. Chỉ khi không tìm
+        thấy lỗi nào thì mới kết luận "trang này chậm", và con số in ra là CẬN DƯỚI — nói thẳng như
+        thế thay vì in một con số trông như đã đo xong.
+      */
+      if (!thanDayDu) {
+        results.push({
+          route,
+          verdict: "SLOW",
+          detail: `${Math.round(body.length / 1024)}kB đã về · đầu phản hồi ${ttfbMs}ms · thân CHƯA xong sau ${Math.round(BODY_TIMEOUT_MS / 1000)}s (con số là cận dưới) · không tìm thấy lỗi trong phần đã về`,
           ms,
           ttfbMs,
         });
