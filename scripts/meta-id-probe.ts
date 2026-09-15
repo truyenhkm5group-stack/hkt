@@ -62,30 +62,43 @@ async function probeOne(id: string, orders: number): Promise<Probe> {
       "cái này là gì" mà không phải đoán trước một danh sách trường; xin nhầm trường cho một kiểu
       nút khác thì Graph trả lỗi #100 và ta không học được gì.
     */
-    const meta = await graph(id, { metadata: "1", fields: "id,name" });
-    base.kind = str(((meta.metadata ?? {}) as Record<string, unknown>).type);
+    const meta = await graph(id, { fields: "id,name" });
     base.name = str(meta.name);
   } catch (e) {
     base.error = e instanceof Error ? e.message : String(e);
     return base;
   }
-  // Biết kiểu rồi mới xin đúng bộ trường của kiểu ấy — không xin bừa.
-  const fieldsByKind: Record<string, string> = {
-    adgroup: "account_id,campaign_id,adset_id,status,effective_status",
-    campaign: "account_id,campaign_id,status,effective_status",
-    adcampaign: "account_id,status,effective_status,objective",
-    adset: "account_id,campaign_id,status,effective_status",
-  };
-  const fields = fieldsByKind[base.kind] ?? "account_id,status,effective_status";
-  try {
-    const node = await graph(id, { fields });
-    base.accountId = str(node.account_id).replace(/^act_/, "");
-    base.campaignId = str(node.campaign_id);
-    base.adsetId = str(node.adset_id);
-    base.status = str(node.status);
-    base.effectiveStatus = str(node.effective_status);
-  } catch (e) {
-    base.error = e instanceof Error ? e.message : String(e);
+  /*
+    XIN TRƯỜNG THEO KIỂU DẦN TỪ HẸP TỚI RỘNG.
+
+    `metadata=1` ở phiên bản API này KHÔNG trả `metadata.type` (đo thật: rỗng cho cả 10 mã), nên
+    không thể dựa vào nó để chọn bộ trường. Cách còn lại là THỬ: xin bộ trường của mẩu quảng cáo
+    trước (có cả `adset_id` lẫn `campaign_id`), hỏng thì bộ của nhóm quảng cáo (chỉ `campaign_id`),
+    hỏng nữa thì bộ tối thiểu. Trường nào Graph nhận chính là lời khai về kiểu nút — và đó là suy
+    luận từ CÂU TRẢ LỜI CỦA NGUỒN, không phải đoán theo cái tên.
+
+    Quan trọng nhất là `campaign_id`: nó mới là khoá nối sang `ad_spends` để ra marketer.
+  */
+  const attempts: { kind: string; fields: string }[] = [
+    { kind: "AD", fields: "account_id,campaign_id,adset_id,status,effective_status" },
+    { kind: "ADSET", fields: "account_id,campaign_id,status,effective_status" },
+    { kind: "CAMPAIGN", fields: "account_id,objective,status,effective_status" },
+    { kind: "?", fields: "account_id,status,effective_status" },
+  ];
+  for (const a of attempts) {
+    try {
+      const node = await graph(id, { fields: a.fields });
+      base.kind = base.kind || a.kind;
+      base.accountId = str(node.account_id).replace(/^act_/, "");
+      base.campaignId = str(node.campaign_id);
+      base.adsetId = str(node.adset_id);
+      base.status = str(node.status);
+      base.effectiveStatus = str(node.effective_status);
+      base.error = "";
+      return base;
+    } catch (e) {
+      base.error = e instanceof Error ? e.message : String(e);
+    }
   }
   return base;
 }
