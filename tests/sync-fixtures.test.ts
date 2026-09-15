@@ -173,6 +173,7 @@ import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
+import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
@@ -1596,6 +1597,7 @@ async function main() {
   testOperatingFunnel();
   testLogisticsFreshness();
   testShipmentStatusAgePure();
+  testOrderDuplicatePure();
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
@@ -1697,6 +1699,9 @@ async function main() {
   // Cũng chạy CUỐI: bộ này thêm vận đơn riêng mang tiền tố `sage-` với lịch sử sự kiện dựng sẵn.
   // Đặt trước bài khác thì những vận đơn đó lọt vào tổng của tháp giao vận và của care.
   await testShipmentStatusAgeDb(db);
+  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `dup-` cố ý giống hệt nhau từng cặp. Đặt trước
+  // bài khác thì chúng lọt vào tổng doanh số và tổng đơn của mọi báo cáo.
+  await testOrderDuplicateDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);
