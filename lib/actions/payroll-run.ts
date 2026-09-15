@@ -117,6 +117,17 @@ export async function movePayrollRun(input: unknown): Promise<RunActionResult> {
       set.approvedAt = luc;
       set.approvedBy = user.id;
     }
+    /*
+      TRẢ LẠI ĐỂ SỬA THÌ CHỮ KÝ DUYỆT PHẢI BIẾN MẤT.
+
+      Giữ `approved_by` trên một kỳ vừa bị trả về là để màn hình in "đã duyệt bởi X" cạnh một con
+      số mà chính X vừa nói là sai. Lịch sử của lượt duyệt ấy KHÔNG mất — nó nằm trong nhật ký,
+      cùng với lý do trả lại.
+    */
+    if (action === "REJECT") {
+      set.approvedAt = null;
+      set.approvedBy = null;
+    }
     if (action === "LOCK") {
       set.lockedAt = luc;
       set.lockedBy = user.id;

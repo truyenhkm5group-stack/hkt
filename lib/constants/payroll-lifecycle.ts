@@ -64,7 +64,16 @@ export const PAYROLL_RUN_TRANSITIONS: Record<PayrollRunStatus, readonly PayrollR
   DRAFT: ["CALCULATED"],
   CALCULATED: ["CALCULATED", "UNDER_REVIEW"],
   UNDER_REVIEW: ["CALCULATED", "APPROVED"],
-  APPROVED: ["UNDER_REVIEW", "LOCKED"],
+  /*
+    `APPROVED → CALCULATED` là đường RÚT LẠI CHỮ KÝ.
+
+    Phát hiện sai sau khi đã duyệt là chuyện thường; không có đường rút thì người ta hoặc khoá đại
+    rồi mở khoá (tốn một lượt "mở khoá" vô nghĩa trong nhật ký), hoặc đi sửa thẳng CSDL. Cả hai đều
+    tệ hơn một đường có tên, có quyền riêng và có lý do bắt buộc.
+
+    `APPROVED → UNDER_REVIEW` giữ lại cho trường hợp chỉ muốn soát thêm mà chưa kết luận là sai.
+  */
+  APPROVED: ["CALCULATED", "UNDER_REVIEW", "LOCKED"],
   LOCKED: ["APPROVED", "PAID"],
   PAID: [],
 };
