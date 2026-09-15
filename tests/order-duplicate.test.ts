@@ -16,6 +16,7 @@ import {
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
 import { clearMemo } from "@/lib/cache";
 import { setSettingJson } from "@/lib/settings";
+import { collectWorkItems, duplicateKeys } from "@/lib/queries/work-adapters";
 
 /**
  * ═══════════ ĐƠN NGHI TRÙNG ═══════════
@@ -320,5 +321,28 @@ export async function testOrderDuplicateDb(db: Db) {
   await db.delete(schema.settings).where(eq(schema.settings.key, "orders.duplicate-rule"));
   clearMemo();
 
-  console.log(`  ✓ đơn nghi trùng (CSDL): ${q.scanned} đơn đã xét · ${q.suspected} nghi trùng · ${q.possible} cần người xem`);
+  /* ─── CHIẾU VÀO HÀNG ĐỢI CÔNG VIỆC: có chủ, có hạn, có việc phải làm, không đếm hai lần ─── */
+  clearMemo();
+  const { items, failed } = await collectWorkItems({ sources: ["ORDER_DUPLICATE"] });
+  assert.deepEqual(failed, [], "adapter đơn trùng không được lỗi");
+  assert.equal(items.length, q.rows.length, "mỗi đơn nghi sinh ĐÚNG một việc — không phải một việc cho mỗi cặp");
+  assert.deepEqual(duplicateKeys(items), [], "không khoá nào trùng nhau");
+  for (const it of items) {
+    assert.equal(it.statusAuthority, "SOURCE", "điều kiện tự hết ở nguồn khi người huỷ đơn trên Pancake");
+    assert.ok(it.slaAt, "phải có hạn xử lý");
+    assert.ok(it.recommendedAction.trim().length > 20, "phải có việc phải làm — không có ngoại lệ nào chỉ là một ghi chú");
+    assert.equal(it.department, "SALES", "chỉ người gọi được khách mới quyết được đơn này");
+    assert.ok(it.money.atRisk !== null, "tiền đang treo phải đo được");
+    assert.equal(it.money.confidence, "ESTIMATED", "đơn chưa rời kho thì chưa có chứng từ tiền — không được gọi là đo được");
+  }
+
+  /*
+    KHÔNG ĐẾM HAI LẦN với hai nguồn cùng nói về MỘT ĐƠN. Nguồn nút thắt fulfillment cũng lấy khoá
+    là `order_id`, nên nếu một ngày ai đó đổi `workKey` thì hai nguồn sẽ đụng nhau ở đây.
+  */
+  clearMemo();
+  const caNguon = await collectWorkItems({ sources: ["ORDER_DUPLICATE", "FULFILLMENT_EXCEPTION"] });
+  assert.deepEqual(duplicateKeys(caNguon.items), [], "hai nguồn cùng nói về một đơn vẫn phải cho hai khoá khác nhau");
+
+  console.log(`  ✓ đơn nghi trùng (CSDL): ${q.scanned} đơn đã xét · ${q.suspected} nghi trùng · ${q.possible} cần người xem · ${items.length} việc vào hàng đợi`);
 }
