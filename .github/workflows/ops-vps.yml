@@ -42,6 +42,7 @@ on:
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
+          - fanpage-evidence-backfill # gán fanpage lịch sử cho marketer TỪ BẰNG CHỨNG quảng cáo (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - returns-parity      # báo cáo hoàn: MÀN HÌNH THẬT = máy tính kết quả = SQL viết độc lập từ đặc tả (chỉ đọc; arg: "Q001,Q002" mã hàng)
           - reason-backfill     # rút quan sát lý do hoàn từ dữ liệu đã có (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - reason-coverage     # độ phủ lý do hoàn: máy tính báo cáo = MÀN HÌNH THẬT (chỉ đọc)
@@ -221,6 +222,12 @@ jobs:
               cogs-drift)
                 fetch_script cogs-drift.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cogs-drift.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cogs-drift.ts ;;
+              fanpage-evidence-backfill)
+                # Mặc định CHẠY THỬ. "--apply" tạo dòng `fanpage_marketer_assignments` cho những page
+                # có bằng chứng quảng cáo trỏ về ĐÚNG MỘT marketer — KHÔNG đụng đơn, vận đơn hay tiền.
+                # Idempotent: chỉ tạo cho page chưa có phân công còn hiệu lực.
+                fetch_script fanpage-evidence-backfill.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/fanpage-evidence-backfill.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/fanpage-evidence-backfill.ts $ARG ;;
               outcome-parity)
                 # Mặc định CHỈ ĐO. "--apply" dựng lại bảng dẫn xuất — KHÔNG đụng đơn, vận đơn, sự
                 # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.

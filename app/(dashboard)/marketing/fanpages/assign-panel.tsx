@@ -8,16 +8,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { assignFanpage, revokeAssignment, toggleFanpage } from "@/lib/actions/fanpage-attribution";
-import { formatDate, formatNumber, todayVN } from "@/lib/format";
+import { assignFanpage, renameFanpage, revokeAssignment, toggleFanpage } from "@/lib/actions/fanpage-attribution";
+import { FANPAGE_ACCESS_HINT, FANPAGE_ACCESS_LABEL, FANPAGE_ACCESS_TONE, type FanpageAccessStatus } from "@/lib/constants/fanpage-access";
+import { formatDate, formatNumber, formatVND, todayVN } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export type FanpageView = {
   id: string;
   externalPageId: string;
+  /** Tên hiển thị đã chọn: alias (người đặt) > name (API) > page_id. */
   name: string;
+  /** Tên NGƯỜI đặt, để đổ vào ô sửa. */
+  alias: string;
+  /** Tên API trả về — hiện riêng để người khai phân biệt được nguồn của cái tên. */
+  externalName: string;
+  access: FanpageAccessStatus;
   active: boolean;
   orders: number;
+  confirmedOrders: number;
+  confirmedRevenue: number;
   firstOrderAt: string | null;
   lastOrderAt: string | null;
   current: { assignmentId: string; marketerId: string; marketerLabel: string; effectiveFrom: string } | null;
@@ -38,6 +47,7 @@ export type MarketerOption = { id: string; label: string; department: string };
  */
 export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView[]; marketers: MarketerOption[]; canWrite: boolean }) {
   const [openHistory, setOpenHistory] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, { marketerId: string; from: string; note: string }>>({});
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -73,6 +83,21 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
       }
     });
 
+  const saveAlias = (page: FanpageView) =>
+    startTransition(async () => {
+      const r = await renameFanpage({ fanpageId: page.id, alias: aliasDraft[page.id] ?? "" });
+      if ("error" in r) toast.error(r.error);
+      else {
+        toast.success("Đã đặt tên gợi nhớ");
+        setAliasDraft((d) => {
+          const next = { ...d };
+          delete next[page.id];
+          return next;
+        });
+        router.refresh();
+      }
+    });
+
   const toggle = (page: FanpageView) =>
     startTransition(async () => {
       const r = await toggleFanpage({ fanpageId: page.id, active: !page.active });
@@ -98,13 +123,19 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">{p.name || "(chưa đọc được tên page)"}</span>
+                  <span className="font-semibold">{p.name}</span>
                   <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{p.externalPageId}</code>
+                  <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", FANPAGE_ACCESS_TONE[p.access])} title={FANPAGE_ACCESS_HINT[p.access]}>
+                    {FANPAGE_ACCESS_LABEL[p.access]}
+                  </span>
                   {!p.active ? <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">Đã tắt</span> : null}
                 </div>
                 <p className="mt-1 text-muted-foreground">
-                  {formatNumber(p.orders)} đơn · đơn đầu {formatDate(p.firstOrderAt)} · đơn gần nhất {formatDate(p.lastOrderAt)}
+                  {formatNumber(p.orders)} đơn · {formatNumber(p.confirmedOrders)} đã xác nhận · {formatVND(p.confirmedRevenue)} · đơn đầu {formatDate(p.firstOrderAt)} · gần nhất {formatDate(p.lastOrderAt)}
                 </p>
+                {p.alias && p.externalName && p.alias !== p.externalName ? (
+                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">Tên Pancake: {p.externalName}</p>
+                ) : null}
                 <p className="mt-1">
                   {p.current ? (
                     <>
@@ -116,6 +147,22 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
+                {canWrite ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      className="h-8 w-40"
+                      placeholder="Tên gợi nhớ…"
+                      maxLength={120}
+                      value={aliasDraft[p.id] ?? p.alias}
+                      onChange={(e) => setAliasDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                    />
+                    {(aliasDraft[p.id] ?? p.alias) !== p.alias ? (
+                      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => saveAlias(p)}>
+                        Lưu tên
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
                 <Button type="button" variant="ghost" size="sm" onClick={() => setOpenHistory(showHistory ? null : p.id)}>
                   <History className="size-4" /> Lịch sử ({p.history.length})
                 </Button>

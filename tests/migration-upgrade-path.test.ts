@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_fanpage_alias_access"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -105,6 +105,7 @@ export async function testMigrationUpgradePath() {
     */
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_reason_observations'"), 0, "bước 1: bảng return_reason_observations CHƯA được có — đó là thứ 0087 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'payroll_periods'"), 0, "bước 1: bảng payroll_periods CHƯA được có — đó là thứ 0088 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'alias'"), 0, "bước 1: cột fanpages.alias CHƯA được có — đó là thứ 0089 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -299,6 +300,27 @@ export async function testMigrationUpgradePath() {
         3. ràng buộc chặn được đúng thứ nguy hiểm nhất: một dòng "trùng đơn" mang tên một người —
            nếu lọt thì doanh thu bị đếm hai lần trong khi báo cáo trông vẫn hoàn toàn bình thường.
     */
+    /*
+      ═══ 0089: FANPAGE LỊCH SỬ QUẢN LÝ ĐƯỢC KHI API KHÔNG CÒN ĐỌC ĐƯỢC TÊN ═══
+
+      Hai cột CHỈ CỘNG THÊM. Ba điều phải đúng:
+        1. `alias` mặc định RỖNG và `last_seen_in_api_at` mặc định NULL — migration KHÔNG đoán hộ
+           tên page nào, cũng không khẳng định page nào còn quyền (AGENTS.md mục 35);
+        2. page ĐANG CÓ không bị đụng tới;
+        3. `alias` tách hẳn `name`: ghi cái này không đổi cái kia.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'alias'"), 1, "0089: cột alias phải được thêm");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'last_seen_in_api_at'"), 1, "0089: cột last_seen_in_api_at phải được thêm");
+    await client.query(`insert into fanpages (id, external_page_id, name) values ('up-fp89', 'PAGE-UP-89', 'Tên từ API')`);
+    assert.equal(await dem("select count(*)::int as n from fanpages where id = 'up-fp89' and alias = '' and last_seen_in_api_at is null"), 1, "0089: page mới mặc định KHÔNG có alias và CHƯA từng thấy trong API — không đoán hộ");
+    await client.query(`update fanpages set alias = 'Tên người đặt' where id = 'up-fp89'`);
+    assert.equal(
+      await dem("select count(*)::int as n from fanpages where id = 'up-fp89' and alias = 'Tên người đặt' and name = 'Tên từ API' and external_page_id = 'PAGE-UP-89'"),
+      1,
+      "0089: đặt alias KHÔNG được đụng tới tên API lẫn page_id — page_id là danh tính mà mọi đơn đã quy kết trỏ tới",
+    );
+    await client.query(`delete from fanpages where id = 'up-fp89'`);
+
     for (const bang of ["fanpages", "fanpage_marketer_assignments", "order_attributions"]) {
       assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `0086: bảng ${bang} phải được tạo`);
     }

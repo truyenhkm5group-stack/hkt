@@ -2224,6 +2224,24 @@ export const fanpages = pgTable(
     externalPageId: text("external_page_id").notNull(),
     /** Tên page tại lần đồng bộ gần nhất. Rỗng = chưa đọc được tên từ Pancake (chỉ có ID). */
     name: text("name").notNull().default(""),
+    /**
+     * TÊN DO NGƯỜI ĐẶT — tách hẳn khỏi `name` của API, và KHÔNG bao giờ bị đồng bộ ghi đè.
+     *
+     * Vì sao phải tách: page shop không còn quyền đọc thì API không trả tên, nên màn hình chỉ còn
+     * một dãy 15 chữ số mà không ai nhận ra. Chủ shop gõ tên mình nhớ vào đây. Ngày nào lấy lại
+     * được quyền, `name` của API cập nhật trở lại mà KHÔNG xoá mất tên người đã đặt — hai trường,
+     * hai nguồn, không trường nào đè trường nào.
+     */
+    alias: text("alias").notNull().default(""),
+    /**
+     * LẦN GẦN NHẤT PANCAKE CÒN LIỆT KÊ PAGE NÀY.
+     *
+     * `NULL` = chưa bao giờ thấy trong danh sách API (page lịch sử, hoặc API chưa từng gọi được).
+     * So mốc này với mốc LỚN NHẤT của cả bảng là biết page có nằm trong lần liệt kê gần nhất hay
+     * không — không cần thêm một bảng trạng thái nào, và không bao giờ khẳng định "mất quyền" chỉ
+     * vì một lần API lỗi (lúc đó KHÔNG page nào được cập nhật, nên mốc lớn nhất cũng không đổi).
+     */
+    lastSeenInApiAt: ts("last_seen_in_api_at"),
     platform: text("platform").notNull().default("facebook"),
     /**
      * `false` = page không còn dùng. KHÔNG ảnh hưởng tới đơn cũ: quy kết đã chụp vẫn giữ nguyên,
