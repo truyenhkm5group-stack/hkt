@@ -100,9 +100,17 @@ export async function checkSellability(
     const listed = !r.hidden && !r.locked && !r.removed;
     const stockKnown = Boolean(r.stockKnown);
     const available = stockKnown ? Number(r.available ?? 0) : null;
+    /*
+      TỒN ÂM LÀ SỔ KHO TỰ MÂU THUẪN, KHÔNG PHẢI HẾT HÀNG.
+
+      Số âm nghĩa là đã xuất nhiều hơn đã nhập — hoặc thiếu phiếu nhập, hoặc thừa bản ghi xuất.
+      Nói "hết hàng" từ một con số như thế vẫn là một KHẲNG ĐỊNH dựng trên dữ liệu đã hỏng; nó
+      nghe an toàn hơn "còn hàng" nhưng vẫn có thể làm mất một đơn có thật. Chưa biết thì nói
+      chưa biết, và để người mở kho ra đếm.
+    */
     const status: Sellability = !listed
       ? "NOT_SELLING"
-      : !stockKnown
+      : !stockKnown || (available ?? 0) < 0
         ? "UNKNOWN"
         : (available ?? 0) > 0
           ? "SELLABLE"
@@ -134,7 +142,10 @@ export async function checkSellability(
   } else if (matches.some((v) => v.listed && v.status === "UNKNOWN")) {
     verdict = "UNKNOWN";
     const chua = matches.filter((v) => v.listed && !v.stockKnown).length;
-    evidence = `${chua}/${matches.length} mẫu mã khớp CHƯA CÓ PHIẾU NHẬP ⇒ tồn là thiếu dữ liệu, không phải 0 (luật 10)`;
+    const am = matches.filter((v) => v.listed && v.stockKnown && (v.available ?? 0) < 0).length;
+    evidence = chua
+      ? `${chua}/${matches.length} mẫu mã khớp CHƯA CÓ PHIẾU NHẬP ⇒ tồn là thiếu dữ liệu, không phải 0 (luật 10)`
+      : `${am}/${matches.length} mẫu mã khớp có tồn ÂM ⇒ sổ kho tự mâu thuẫn, phải đếm lại chứ không kết luận`;
   } else if (matches.some((v) => v.status === "SELLABLE")) {
     verdict = "SELLABLE";
     evidence = `Còn ${matches.filter((v) => v.status === "SELLABLE").reduce((a, v) => a + (v.available ?? 0), 0)} cái theo sổ kho`;

@@ -454,6 +454,19 @@ export async function testFanpageSales(db: Db) {
   assert.ok(!/còn hàng/.test(tlCon2.text), "TUYỆT ĐỐI không hứa 'còn hàng' khi tồn chưa biết");
   assert.ok(/đang bán màu Đen/.test(tlCon2.text), "nhưng vẫn nói được cái BIẾT — đó là phần có ích của một câu chưa trả lời được");
 
+  // TỒN ÂM: sổ kho tự mâu thuẫn (xuất nhiều hơn nhập). "Hết hàng" nghe an toàn hơn "còn hàng"
+  // nhưng vẫn là một khẳng định dựng trên dữ liệu đã hỏng — và nó làm mất một đơn có thật.
+  await db.insert(schema.stockReceipts).values({ id: "fp-r1", kind: "RECEIPT", receivedAt: new Date(), note: "kiểm thử" });
+  await db.insert(schema.stockReceiptItems).values({ id: "fp-ri1", receiptId: "fp-r1", variantId: "fp-v1", quantity: 1, unitCost: 0 });
+  const slAm = await checkSellability({ productId: win.id }, db);
+  assert.equal(slAm.verdict, "SELLABLE", "có phiếu nhập 1 cái, chưa xuất cái nào ⇒ còn hàng");
+  await db.update(schema.stockReceiptItems).set({ quantity: -5 }).where(eq(schema.stockReceiptItems.id, "fp-ri1"));
+  const slAm2 = await checkSellability({ productId: win.id }, db);
+  assert.equal(slAm2.verdict, "UNKNOWN", "tồn ÂM là sổ tự mâu thuẫn ⇒ CHƯA BIẾT, không kết luận hết hàng");
+  assert.ok(/mâu thuẫn/.test(slAm2.evidence), "và nói rõ vì sao chưa biết");
+  await db.delete(schema.stockReceiptItems).where(eq(schema.stockReceiptItems.id, "fp-ri1"));
+  await db.delete(schema.stockReceipts).where(eq(schema.stockReceipts.id, "fp-r1"));
+
   // Tổ hợp shop KHÔNG chào bán ⇒ trả lời được ngay, không cần tới sổ kho.
   const sl2 = await checkSellability({ productId: win.id, color: "Hồng" }, db);
   assert.equal(sl2.verdict, "NOT_SELLING");
