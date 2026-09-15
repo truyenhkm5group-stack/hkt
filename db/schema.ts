@@ -2804,6 +2804,18 @@ export const salesReviewLabels = pgTable(
     hallucinationNote: text("hallucination_note").notNull().default(""),
     /** Câu gợi ý có dùng được không nếu nhân viên gửi nguyên văn. */
     replyUsable: boolean("reply_usable"),
+    /**
+     * KẾT LUẬN CHUNG cho cả lượt: GOOD · ACCEPTABLE · BAD · NULL chưa chấm.
+     *
+     * Khác hẳn `nextActionQuality`, vốn chỉ chấm VIỆC máy chọn làm. Máy có thể chọn đúng việc
+     * (hỏi size) mà câu chữ vẫn không gửi được — gộp hai câu hỏi ấy lại thì mất đúng một trong hai.
+     */
+    verdict: text("verdict"),
+    /**
+     * VÌ SAO — theo danh sách ĐÓNG ở `lib/constants/sales-review-tags.ts`, mỗi nhãn khai luôn ai
+     * phải đi sửa (MODEL · DATA · POLICY). Nhãn để ĐẾM, ghi chú bên dưới để HIỂU.
+     */
+    reasonTags: jsonb("reason_tags").$type<string[]>().notNull().default([]),
     note: text("note").notNull().default(""),
     /** Quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô chữ. */
     reviewerUserId: text("reviewer_user_id").references(() => users.id, { onDelete: "set null" }),

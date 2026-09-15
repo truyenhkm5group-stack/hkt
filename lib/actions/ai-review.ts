@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { REVIEW_REASON_TAGS, REVIEW_VERDICTS } from "@/lib/constants/sales-review-tags";
 
 export type ActionResult = { ok: true } | { error: string };
 
@@ -30,6 +31,16 @@ const labelSchema = z.object({
   confirmationOk: z.boolean().nullable().optional(),
   replyUsable: z.boolean().nullable().optional(),
   nextActionQuality: z.enum(["GOOD", "ACCEPTABLE", "WRONG"]).nullable().optional(),
+  /**
+   * KẾT LUẬN CHUNG cho cả lượt, tách khỏi `nextActionQuality` (vốn chỉ chấm VIỆC máy chọn làm).
+   * Máy có thể chọn đúng việc mà câu chữ vẫn không gửi được.
+   */
+  verdict: z.enum(REVIEW_VERDICTS).nullable().optional(),
+  /**
+   * VÌ SAO — danh sách ĐÓNG. Chặn ở đây VÀ chặn lại ở CSDL: một nhãn lạ lọt vào thì mọi bảng đếm
+   * sau này phải chọn giữa bỏ qua nó và hiện một nhãn không ai hiểu.
+   */
+  reasonTags: z.array(z.enum(REVIEW_REASON_TAGS)).max(REVIEW_REASON_TAGS.length).optional(),
   hallucination: z.boolean().nullable().optional(),
   hallucinationNote: z.string().trim().max(1000).optional(),
   note: z.string().trim().max(2000).optional(),
@@ -63,6 +74,9 @@ export async function saveShadowLabel(input: unknown): Promise<ActionResult> {
     confirmationOk: data.confirmationOk ?? null,
     replyUsable: data.replyUsable ?? null,
     nextActionQuality: data.nextActionQuality ?? null,
+    verdict: data.verdict ?? null,
+    // Trùng lặp bị gỡ ở CỔNG VÀO: đếm hai lần cùng một nhãn trên một lượt là một con số sai.
+    reasonTags: [...new Set(data.reasonTags ?? [])],
     hallucination: data.hallucination ?? null,
     hallucinationNote: data.hallucinationNote ?? "",
     note: data.note ?? "",

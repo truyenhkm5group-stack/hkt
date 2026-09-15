@@ -19,6 +19,8 @@ import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { parseRouting, runModelStep } from "@/lib/ai-workforce/model-router";
 import { defaultProviderName, providerNames } from "@/lib/ai-workforce/providers";
 import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
+import { sql } from "drizzle-orm";
+import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META } from "@/lib/constants/sales-review-tags";
 import { z } from "zod";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
 import { setSettingJson } from "@/lib/settings";
@@ -1362,6 +1364,51 @@ export async function testSalesAgent(db: Db) {
   const size = afterLabels.labelled.find((m) => m.key === "sizeOk");
   assert.equal(size?.accuracy, null, "chiều chưa ai chấm vẫn là CHƯA BIẾT, không bị kéo xuống 0%");
   assert.ok(afterLabels.reviewCoverage !== null && afterLabels.reviewCoverage < 100, "độ phủ phải hiện cạnh tỷ lệ để không ai đọc nhầm");
+
+  // ═════════ 12B. LÝ DO CHẤM LÀ DANH SÁCH ĐÓNG, CHẶN Ở CẢ HAI ĐẦU ═════════
+  //
+  // Ô chữ tự do ghi được mọi thứ nhưng ĐẾM được không thứ gì. Sau ba mươi lượt chấm, câu hỏi thật
+  // sự là "máy hay hỏng ở ĐÂU NHẤT" — và câu trả lời ấy chỉ có nếu lý do là một danh sách đóng.
+
+  for (const tag of REVIEW_REASON_TAGS) {
+    const meta = REVIEW_REASON_TAG_META[tag];
+    assert.ok(meta && meta.label.length > 3, `${tag}: phải có nhãn tiếng Việt đọc được`);
+    assert.ok(["MODEL", "DATA", "POLICY"].includes(meta.owner), `${tag}: phải khai AI đi sửa — đó mới là thứ biến một bảng đếm thành một việc`);
+  }
+  // Ba nhóm người phải đều có mặt: gộp hết vào MODEL là quay về "AI còn yếu" cho cả lỗi dữ liệu.
+  const nhomNguoi = new Set(REVIEW_REASON_TAGS.map((t) => REVIEW_REASON_TAG_META[t].owner));
+  assert.deepEqual([...nhomNguoi].sort(), ["DATA", "MODEL", "POLICY"]);
+
+  // CSDL chặn lại, không chỉ lược đồ đầu vào: một nhãn lạ lọt vào thì mọi bảng đếm sau này phải
+  // chọn giữa bỏ qua nó và hiện một nhãn không ai hiểu.
+  const mauChamId = shadowTurns[2].suggestionId;
+  const mauChamConv = shadowTurns[2].conversationId;
+  await assert.rejects(
+    db.insert(schema.salesReviewLabels).values({ suggestionId: mauChamId, conversationId: mauChamConv, verdict: "TAM_DUOC", reviewedAt: new Date() }),
+    "kết luận ngoài ba nấc phải bị CSDL từ chối",
+  );
+  await assert.rejects(
+    db.execute(sql`insert into sales_review_labels (id, suggestion_id, conversation_id, reason_tags) values ('rv-rac', ${mauChamId}, ${mauChamConv}, '"WRONG_PRICE"'::jsonb)`),
+    "lý do phải LÀ một mảng — một chuỗi lọt vào thì mọi phép đếm bên dưới sai thầm",
+  );
+
+  await db.insert(schema.salesReviewLabels).values({
+    suggestionId: mauChamId,
+    conversationId: mauChamConv,
+    verdict: "BAD",
+    reasonTags: ["MISSED_QUESTION", "MISSING_ERP_DATA"],
+    reviewedAt: new Date(),
+  });
+  const daCham = await db.query.salesReviewLabels.findFirst({ where: eq(schema.salesReviewLabels.suggestionId, mauChamId) });
+  assert.equal(daCham?.verdict, "BAD");
+  assert.deepEqual(daCham?.reasonTags, ["MISSED_QUESTION", "MISSING_ERP_DATA"]);
+  // Và hai lý do ấy KHÔNG cùng một người đi sửa — đó là lý do phải tách nhãn thay vì một ô chữ.
+  assert.notEqual(REVIEW_REASON_TAG_META.MISSED_QUESTION.owner, REVIEW_REASON_TAG_META.MISSING_ERP_DATA.owner);
+
+  // Lượt chưa ai mở ra xem phải đọc ra CHƯA CHẤM, không phải "tạm được".
+  const chuaCham = await db.query.salesReviewLabels.findFirst({ where: eq(schema.salesReviewLabels.suggestionId, shadowTurns[0].suggestionId) });
+  assert.equal(chuaCham?.verdict ?? null, null, "chưa chấm kết luận chung thì là NULL, không phải một nấc nào đó");
+  assert.deepEqual(chuaCham?.reasonTags ?? [], [], "chưa chọn lý do nào thì là mảng rỗng");
 
   console.log(
     `✓ Nhân viên bán hàng AI: ${SALES_STAGES.length} giai đoạn · ${combos} tổ hợp chuyển trạng thái đều nằm trong bảng khai báo · "ok" trơ trọi KHÔNG tạo đơn · nấc SHADOW gửi 0 tin · ${lockedChecks} tổ hợp đều bị chặn cứng chặn lại`,

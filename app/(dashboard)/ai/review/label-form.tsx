@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { saveShadowLabel } from "@/lib/actions/ai-review";
 import { Button } from "@/components/ui/button";
+import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META, REVIEW_VERDICTS, REVIEW_VERDICT_LABEL, type ReviewReasonTag, type ReviewVerdict } from "@/lib/constants/sales-review-tags";
 
 /** Ba trạng thái, KHÔNG phải hai: chưa chấm · đúng · sai. Bỏ trạng thái "chưa chấm" là ép người
  *  soát phải nói dối ở những ô không áp dụng cho lượt đó. */
@@ -43,13 +44,18 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
     Object.fromEntries(FIELDS.map((f) => [f.key, (initial[f.key] as Verdict) ?? null])),
   );
   const [quality, setQuality] = useState<string | null>((initial.nextActionQuality as string) ?? null);
+  const [verdict, setVerdict] = useState<ReviewVerdict | null>((initial.verdict as ReviewVerdict) ?? null);
+  const [tags, setTags] = useState<ReviewReasonTag[]>(() => {
+    const raw = initial.reasonTags;
+    return Array.isArray(raw) ? (raw.filter((t): t is ReviewReasonTag => (REVIEW_REASON_TAGS as readonly string[]).includes(String(t)))) : [];
+  });
   const [hallucination, setHallucination] = useState<Verdict>((initial.hallucination as Verdict) ?? null);
   const [note, setNote] = useState(String(initial.note ?? ""));
   const [pending, start] = useTransition();
 
   const submit = () => {
     start(async () => {
-      const result = await saveShadowLabel({ suggestionId, ...values, nextActionQuality: quality, hallucination, note });
+      const result = await saveShadowLabel({ suggestionId, ...values, nextActionQuality: quality, verdict, reasonTags: tags, hallucination, note });
       if ("error" in result) toast.error(result.error);
       else toast.success("Đã lưu kết quả chấm");
     });
@@ -63,6 +69,62 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
           <Tri key={f.key} label={f.label} value={values[f.key]} onChange={(v) => setValues((s) => ({ ...s, [f.key]: v }))} />
         ))}
       </div>
+      {/*
+        KẾT LUẬN CHUNG đứng TRƯỚC, vì đó là câu hỏi người soát trả lời được ngay khi vừa đọc xong
+        câu. Nó tách khỏi "hành động kế tiếp" bên dưới có chủ ý: máy chọn đúng việc (hỏi size) mà
+        câu chữ vẫn có thể không gửi được, và gộp hai câu hỏi lại là mất đúng một trong hai.
+      */}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <span className="text-xs text-muted-foreground">Câu này:</span>
+        {REVIEW_VERDICTS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setVerdict(verdict === v ? null : v)}
+            className={`rounded px-2 py-0.5 text-[11px] font-semibold border ${
+              verdict === v
+                ? v === "GOOD"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                  : v === "ACCEPTABLE"
+                    ? "border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                    : "border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                : "border-border text-muted-foreground"
+            }`}
+          >
+            {REVIEW_VERDICT_LABEL[v]}
+          </button>
+        ))}
+      </div>
+
+      {/*
+        LÝ DO là một DANH SÁCH ĐÓNG, không phải ô chữ: sau ba mươi lượt chấm, câu hỏi thật sự là
+        "máy hay hỏng ở ĐÂU NHẤT", và ô chữ tự do không đếm được. Mỗi nhãn hiện luôn ai phải đi sửa
+        — MODEL (sửa luật / mẫu câu) · DỮ LIỆU (việc của chủ shop) · LUẬT (đổi quyết định kinh
+        doanh) — vì đó mới là thứ biến một bảng đếm thành một việc. Ghi chú bên dưới vẫn còn: nhãn
+        để ĐẾM, ghi chú để HIỂU.
+      */}
+      <div className="space-y-1 pt-1">
+        <span className="text-xs text-muted-foreground">Vì sao (chọn nhiều được):</span>
+        <div className="flex flex-wrap gap-1">
+          {REVIEW_REASON_TAGS.map((t) => {
+            const on = tags.includes(t);
+            const meta = REVIEW_REASON_TAG_META[t];
+            return (
+              <button
+                key={t}
+                type="button"
+                title={meta.owner === "DATA" ? "ERP thiếu dữ liệu — việc của chủ shop" : meta.owner === "POLICY" ? "Luật đang chạy — việc của người ra quyết định" : "Sửa luật / lời dặn / mẫu câu"}
+                onClick={() => setTags((s) => (on ? s.filter((x) => x !== t) : [...s, t]))}
+                className={`rounded px-2 py-0.5 text-[11px] border ${on ? "border-primary bg-primary/10 font-semibold text-primary" : "border-border text-muted-foreground"}`}
+              >
+                {meta.label}
+                <span className="ml-1 opacity-60">{meta.owner === "DATA" ? "· dữ liệu" : meta.owner === "POLICY" ? "· luật" : ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <span className="text-xs text-muted-foreground">Hành động kế tiếp:</span>
         {(["GOOD", "ACCEPTABLE", "WRONG"] as const).map((q) => (
