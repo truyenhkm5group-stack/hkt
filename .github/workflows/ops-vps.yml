@@ -779,6 +779,9 @@ jobs:
                 upsert_stg AI_DEFAULT_MODE SHADOW
                 upsert_stg AI_ALLOW_CUSTOMER_SEND false
                 upsert_stg AI_ALLOW_ORDER_CREATE false
+                # CHUYỂN SANG CẦU NỐI. Mẫu `.env.staging.example` khai `stub` để một lần dựng
+                # không bao giờ tự gọi mạng; tới đây là lúc CỐ Ý bật, nên khai tường minh.
+                upsert_stg AI_WORKFORCE_PROVIDER erp
                 upsert_stg AI_MODEL_CALLS_ENABLED true
                 chmod 600 .env.staging
                 echo ""

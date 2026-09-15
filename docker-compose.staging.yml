@@ -87,9 +87,18 @@ services:
       AI_ALLOW_CUSTOMER_SEND: "false"
       AI_ALLOW_ORDER_CREATE: "false"
       AI_DEFAULT_MODE: "SHADOW"
-      # Biến RIÊNG của nhân sự AI. `AI_PROVIDER` đã thuộc về AI Copilot của ERP với bộ giá trị khác
-      # (auto|openai|anthropic|off) — đọc chung một biến là hai hệ cùng hiểu sai.
-      AI_WORKFORCE_PROVIDER: "stub"
+      #
+      # `AI_WORKFORCE_PROVIDER` KHÔNG ghim ở đây nữa — nó đọc từ `.env.staging`.
+      #
+      # Ghim ra đời khi nhân sự AI còn tự diễn giải `AI_PROVIDER` (biến của AI Copilot, bộ giá trị
+      # khác): ghim là cách chặn một biến bị hiểu nhầm. Nay nhân sự AI KHÔNG đọc biến ấy nữa, nên
+      # lý do ghim đã hết — còn cái giá thì vẫn đó: đổi nhà cung cấp phải sửa tệp này rồi dựng lại
+      # container, cho một quyết định vận hành lẽ ra chỉ là một dòng trong .env.
+      #
+      # BA THỨ CHẶN VIỆC GỌI MÔ HÌNH VẪN NGUYÊN, và không cái nào phụ thuộc vào ghim này:
+      #   · `AI_MODEL_CALLS_ENABLED` mặc định "false" — `runModelStep()` chặn MỌI bước gọi mô hình;
+      #   · hai công tắc ở trên vẫn ghim, nên dù mô hình có chạy thì vẫn 0 tin gửi khách, 0 đơn;
+      #   · chưa có khoá nào thì `defaultProviderName()` rơi về `stub`, tức không gọi mạng.
       # Trần heap V8 thấp hơn trần container: Node dọn rác trước khi Docker phải giết nó.
       NODE_OPTIONS: "--max-old-space-size=448"
       # Không nhận webhook đơn hàng và không gọi Viettel Post: bản chạy thử chỉ cần đọc hội thoại.
