@@ -31,6 +31,7 @@ import { testPayrollEngine } from "./payroll-engine.test";
 import { testPayrollLifecycle } from "./payroll-lifecycle.test";
 import { testPayrollDependencyDirection } from "./payroll-dependency.test";
 import { testCompensationBasisArithmetic } from "./compensation-basis.test";
+import { testPayrollPreviewAndActivation } from "./payroll-preview.test";
 import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
@@ -1650,6 +1651,7 @@ async function main() {
   testPayrollLifecycle();
   testPayrollDependencyDirection();
   testCompensationBasisArithmetic();
+  testPayrollPreviewAndActivation();
   await testPayrollPolicyEngine(db);
   await testVtpState(db);
   await testVtpIngestion(db);

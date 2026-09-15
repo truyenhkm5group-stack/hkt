@@ -20,6 +20,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { componentBasisKey, type PayrollCalcParams } from "@/lib/constants/payroll-components";
+import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { DEFAULT_PAYROLL_CARRYOVER, PAYROLL_CARRYOVER_KEY, type PayrollCarryoverConfig } from "@/lib/constants/payroll-carryover";
 import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
@@ -195,11 +196,34 @@ export async function activateSalaryPolicyVersion(versionId: string): Promise<Po
   const { version, components } = loaded;
   if (version.status === "ACTIVE") return { error: "Phiên bản này đã phát hành rồi" };
   if (version.status === "RETIRED") return { error: "Phiên bản đã rút thì không phát hành lại — hãy nhân bản thành bản mới" };
-  if (!components.length) {
-    return { error: "Phiên bản chưa có thành phần nào. Phát hành nó là gán cho người một chính sách trả 0 đồng mà không ai thấy." };
+  const chongLan = await overlappingActiveVersions(version.policyId, version.effectiveFrom, version.effectiveTo);
+
+  /*
+    ═══ CỔNG PHÁT HÀNH: KIỂM MỌI THỨ TRƯỚC KHI LỜI KHAI THÀNH TIỀN ═══
+
+    Kiểm ở ĐÂY chứ không ở bước lưu nháp: bản nháp là chỗ để viết dở, và bắt nó hoàn chỉnh ngay từ
+    ô đầu tiên là bắt người khai phải nghĩ xong toàn bộ chính sách trước khi gõ chữ nào.
+
+    `policyActivationBlockers` là hàm THUẦN và màn hình gọi CHÍNH nó, nên không còn cảnh nút hiện
+    rồi server từ chối.
+  */
+  const [policyRow] = await (await getDb())
+    .select({ code: schema.salaryPolicies.code })
+    .from(schema.salaryPolicies)
+    .where(eq(schema.salaryPolicies.id, version.policyId))
+    .limit(1);
+  const blockers = policyActivationBlockers({
+    policyCode: policyRow?.code ?? version.policyId,
+    version: version.version,
+    effectiveFrom: version.effectiveFrom,
+    effectiveTo: version.effectiveTo,
+    components,
+    otherActiveVersions: chongLan.filter((v) => v.id !== versionId).map((v) => ({ version: v.version, effectiveFrom: v.effectiveFrom, effectiveTo: v.effectiveTo })),
+  });
+  if (blockers.length) {
+    return { error: `Chưa phát hành được phiên bản này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
   }
 
-  const chongLan = await overlappingActiveVersions(version.policyId, version.effectiveFrom, version.effectiveTo);
   const cong = await guardSecondApproval({
     group: "PAYROLL_EDIT",
     action: "payroll.policy.activate",

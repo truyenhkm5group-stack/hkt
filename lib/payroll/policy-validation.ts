@@ -16,7 +16,8 @@
  * Hàm thuần: nhận vào lời khai đã đọc, trả ra danh sách việc phải làm. Không đọc CSDL, nên kiểm
  * thử được bằng số viết tay.
  */
-import type { PolicyComponent } from "@/lib/constants/payroll-components";
+import { PAYROLL_COMPONENT_SIGN, carryForwardAllowed, componentBasisKey, payrollInput, type PolicyComponent } from "@/lib/constants/payroll-components";
+import { componentRef, danglingRefs, findCycles } from "@/lib/payroll/policy-graph";
 import type { EmploymentRow, PolicyAssignmentRow, PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 import { isWorkingSegment, resolveSegments } from "@/lib/payroll/policy-resolve";
 
@@ -185,5 +186,124 @@ export function validatePolicyBook(input: {
     const comps = input.componentsByVersion.get(versionId) ?? [];
     out.push(...componentMissingParams(input.policyCodeByVersion.get(versionId) ?? versionId, comps));
   }
+  return out;
+}
+
+/**
+ * ═══════════ CỔNG PHÁT HÀNH MỘT PHIÊN BẢN CHÍNH SÁCH ═══════════
+ *
+ * Phát hành là lúc một lời khai trở thành cách trả tiền cho người thật. Mọi thứ sai sau mốc ấy đều
+ * đã thành một con số trên phiếu lương của ai đó.
+ *
+ * Kiểm ở đây, KHÔNG kiểm lúc lưu nháp: bản nháp là chỗ để viết dở, và bắt nó hoàn chỉnh ngay từ ô
+ * đầu tiên là bắt người khai phải nghĩ xong toàn bộ chính sách trước khi gõ chữ nào.
+ *
+ * Hàm THUẦN — màn hình gọi để hiện danh sách việc còn thiếu, server action gọi CHÍNH nó để quyết
+ * định cho qua hay không. Hai nơi tự viết hai mệnh đề là cách nút hiện rồi server từ chối.
+ */
+export type ActivationBlocker = { code: string; message: string };
+
+export function policyActivationBlockers(input: {
+  policyCode: string;
+  version: number;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  components: readonly PolicyComponent[];
+  /** Các phiên bản ĐANG HIỆU LỰC khác của cùng chính sách — để bắt chồng lấn. */
+  otherActiveVersions: readonly { version: number; effectiveFrom: Date; effectiveTo: Date | null }[];
+}): ActivationBlocker[] {
+  const out: ActivationBlocker[] = [];
+  const day = (d: Date) => d.toLocaleDateString("vi-VN");
+
+  // ─── 1. KHÔNG CÓ THÀNH PHẦN NÀO ───
+  if (!input.components.length) {
+    out.push({
+      code: "NO_COMPONENT",
+      message: `Phiên bản ${input.version} chưa có thành phần nào. Phát hành nó là gán cho người một chính sách trả 0 đồng mà không ai thấy.`,
+    });
+  }
+
+  // ─── 2. MỐC HIỆU LỰC ───
+  if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) {
+    out.push({ code: "BAD_EFFECTIVE_RANGE", message: `Mốc kết thúc ${day(input.effectiveTo)} đứng trước mốc bắt đầu ${day(input.effectiveFrom)} — đó là một đoạn rỗng đội lốt.` });
+  }
+
+  // ─── 3. CHỒNG LẤN VỚI PHIÊN BẢN ĐANG HIỆU LỰC KHÁC ───
+  /*
+    Hai phiên bản cùng phủ một ngày thì `resolveSegments` lấy bản có `effectiveFrom` muộn hơn —
+    đúng, nhưng IM LẶNG. Tiền của những ngày ấy do một quy tắc ngầm quyết định, không do người khai.
+  */
+  const tu = input.effectiveFrom.getTime();
+  const den = input.effectiveTo ? input.effectiveTo.getTime() : Number.POSITIVE_INFINITY;
+  for (const v of input.otherActiveVersions) {
+    const vTu = v.effectiveFrom.getTime();
+    const vDen = v.effectiveTo ? v.effectiveTo.getTime() : Number.POSITIVE_INFINITY;
+    if (vTu > den || vDen < tu) continue;
+    out.push({
+      code: "VERSION_OVERLAP",
+      message: `Phiên bản ${input.version} (${day(input.effectiveFrom)}${input.effectiveTo ? ` – ${day(input.effectiveTo)}` : " trở đi"}) chồng lấn ngày với phiên bản ${v.version} đang hiệu lực. Đóng bản cũ lại tại ngày liền trước, nếu không tiền của những ngày chồng lấn do thứ tự dòng quyết định.`,
+    });
+  }
+
+  // ─── 4. PHỤ THUỘC VÒNG TRÒN VÀ THAM CHIẾU TRỎ VÀO CHỖ TRỐNG ───
+  for (const c of findCycles(input.components)) out.push({ code: "DEPENDENCY_CYCLE", message: c.message });
+  for (const m of danglingRefs(input.components)) out.push({ code: "DANGLING_REF", message: m });
+
+  // ─── 5. THAM SỐ BẮT BUỘC ───
+  for (const b of componentMissingParams(input.policyCode, input.components)) {
+    out.push({ code: "COMPONENT_MISSING_PARAM", message: b.message });
+  }
+
+  // ─── 6. TỪNG THÀNH PHẦN: ĐẠI LƯỢNG CÓ THẬT, BẬC HỢP LỆ, TỶ LỆ KHÔNG ÂM ───
+  const khoa = new Set<string>();
+  for (const c of input.components) {
+    if (khoa.has(c.code)) {
+      out.push({ code: "DUPLICATE_CODE", message: `Khoá thành phần “${c.code}” bị lặp. Máy tính gộp theo khoá nên hai dòng ấy sẽ cộng thành một khoản không ai đối chiếu lại được.` });
+    }
+    khoa.add(c.code);
+
+    const key = componentBasisKey(c.calc);
+    if (key && !componentRef(key) && !payrollInput(key)) {
+      out.push({ code: "UNKNOWN_BASIS", message: `Thành phần “${c.label}” nối vào đại lượng “${key}” không có trong sổ đăng ký đầu vào. Máy sẽ đọc rỗng, nhân ra NaN, và NaN in ra màn hình thành “—” như một chỗ trống bình thường.` });
+    }
+
+    /*
+      TỶ LỆ ÂM Ở MỘT KHOẢN CỘNG LÀ MỘT KHOẢN TRỪ ĐỘI LỐT.
+
+      Muốn trừ thì khai loại khoản là `DEDUCTION` — lúc ấy dấu do LOẠI quyết định và người đọc phiếu
+      lương thấy nó nằm đúng nhóm. Một tỷ lệ âm trong nhóm "thu nhập" thì trên phiếu nó vẫn đứng ở
+      cột thu nhập.
+    */
+    if (c.calc.type === "RATE_OF_BASIS" && c.calc.ratePercent < 0 && PAYROLL_COMPONENT_SIGN[c.kind] === 1) {
+      out.push({ code: "NEGATIVE_RATE", message: `Thành phần “${c.label}” khai tỷ lệ ÂM (${c.calc.ratePercent}%) trong một khoản CỘNG. Muốn trừ thì đổi loại khoản thành khấu trừ, để dấu do loại quyết định và người đọc phiếu lương thấy nó nằm đúng nhóm.` });
+    }
+    if (c.calc.type === "PER_UNIT" && c.calc.unitRate < 0 && PAYROLL_COMPONENT_SIGN[c.kind] === 1) {
+      out.push({ code: "NEGATIVE_RATE", message: `Thành phần “${c.label}” khai đơn giá ÂM trong một khoản CỘNG. Đổi loại khoản thành khấu trừ nếu ý định là trừ.` });
+    }
+
+    if (c.calc.type === "TIERED_RATE") {
+      const bac = [...c.calc.tiers].sort((a, b) => a.from - b.from);
+      if (bac[0].from !== 0) {
+        out.push({ code: "TIER_GAP", message: `Thành phần “${c.label}”: bậc thấp nhất bắt đầu từ ${bac[0].from.toLocaleString("vi-VN")} chứ không từ 0. Phần dưới mốc ấy không thuộc bậc nào và sẽ lặng lẽ thành 0.` });
+      }
+      for (let i = 1; i < bac.length; i += 1) {
+        if (bac[i].from === bac[i - 1].from) {
+          out.push({ code: "TIER_OVERLAP", message: `Thành phần “${c.label}”: hai bậc cùng mốc ${bac[i].from.toLocaleString("vi-VN")}. Không xác định được bậc nào áp cho phần vượt.` });
+        }
+      }
+      if (bac.some((t) => t.ratePercent < 0)) {
+        out.push({ code: "NEGATIVE_RATE", message: `Thành phần “${c.label}”: có bậc khai tỷ lệ ÂM.` });
+      }
+    }
+
+    if (c.minAmount !== null && c.maxAmount !== null && c.maxAmount < c.minAmount) {
+      out.push({ code: "BOUND_INVERTED", message: `Thành phần “${c.label}”: trần (${c.maxAmount.toLocaleString("vi-VN")}) thấp hơn sàn (${c.minAmount.toLocaleString("vi-VN")}) — cặp ấy không có giá trị nào thoả.` });
+    }
+
+    if (c.carryForward && !carryForwardAllowed(c.calc)) {
+      out.push({ code: "CARRY_NOT_ALLOWED", message: `Thành phần “${c.label}” bật bù lỗ lũy kế nhưng đại lượng của nó không bao giờ âm. Sổ lỗ ở đó sẽ là một dòng không bao giờ khác 0.` });
+    }
+  }
+
   return out;
 }

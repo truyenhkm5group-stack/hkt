@@ -35,6 +35,7 @@ import {
   saveSalaryPolicy,
   saveSalaryPolicyVersion,
 } from "@/lib/actions/payroll-policy";
+import { PreviewPanel } from "@/app/(dashboard)/payroll/policies/preview-panel";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -324,6 +325,8 @@ function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; edi
           {draft.components.map((c, i) => (
             <ComponentEditor key={i} value={c} onChange={(patch) => setComp(i, patch)} onRemove={() => setDraft((d) => ({ ...d, components: d.components.filter((_, idx) => idx !== i) }))} />
           ))}
+
+          {draft.components.length ? <PreviewPanel components={draft.components} /> : null}
 
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={addComponent}>
