@@ -3705,6 +3705,18 @@ export const marketerProfitCarryover = pgTable(
     employeeId: text("employee_id").notNull(),
     /** Tháng lịch Việt Nam, `YYYY-MM`. */
     monthKey: text("month_key").notNull(),
+    /*
+      KHOÁ THÀNH PHẦN BẬT BÙ LỖ.
+
+      Trước bản chính sách lương chung, sổ này chỉ phục vụ ĐÚNG MỘT khoản: hoa hồng theo lợi nhuận
+      cá nhân của MKTer — nên (nhân sự, tháng) là đủ. Nay một người có thể mang hai thành phần cùng
+      bật bù lỗ (vd hoa hồng lợi nhuận cá nhân và chia lợi nhuận nhóm), và hai nghĩa vụ ấy là hai
+      chuỗi số dư RIÊNG. Gộp chúng vào một dòng là bù lỗ của khoản này bằng lãi của khoản kia.
+
+      Mặc định `MARKETING_PROFIT` để mọi dòng ĐÃ CÓ giữ nguyên ý nghĩa và mọi chuỗi số dư đang chạy
+      không đứt — migration không backfill gì khác, không đoán gì (AGENTS.md mục 35).
+    */
+    componentCode: text("component_code").notNull().default("MARKETING_PROFIT"),
     /** Số dư lỗ ĐẦU tháng (≤ 0). */
     openingBalance: integer("opening_balance").notNull(),
     /**
@@ -3742,7 +3754,8 @@ export const marketerProfitCarryover = pgTable(
   (t) => [
     // MỘT người + MỘT tháng = MỘT dòng. Mở trang, xuất CSV, chạy lại job hay hai yêu cầu chốt
     // đồng thời đều không được sinh dòng thứ hai cho cùng một nghĩa vụ.
-    uniqueIndex("marketer_carryover_uq").on(t.employeeId, t.monthKey),
+    // MỘT người + MỘT tháng + MỘT thành phần = MỘT dòng.
+    uniqueIndex("marketer_carryover_uq").on(t.employeeId, t.monthKey, t.componentCode),
     index("marketer_carryover_month_idx").on(t.monthKey),
     check("marketer_carryover_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
     check("marketer_carryover_month_format", sql`${t.monthKey} ~ '^[0-9]{4}-[0-9]{2}$'`),
@@ -3758,6 +3771,299 @@ export const marketerProfitCarryover = pgTable(
     check(
       "marketer_carryover_final_check",
       sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * ═══════════════ CHÍNH SÁCH LƯƠNG CHUNG CHO TOÀN CÔNG TY ═══════════════
+ *
+ * ─── VÌ SAO CÓ PHẦN NÀY ───
+ *
+ * Bảng lương cũ khai cơ chế trả tiền bằng đúng bốn ô trên hồ sơ nhân sự ở `settings`
+ * (`payroll.employees`): lương cứng, % LN tổng, % LN cá nhân, % doanh thu. Bốn ô ấy sinh ra cho
+ * MKTer. Một bạn kho ăn theo ngày công, một thợ may ăn theo sản phẩm, một bạn CSKH ăn lương cứng +
+ * KPI — không ai khai được bằng bốn ô đó, nên cách duy nhất để đỡ họ là thêm `if` vào lõi. Mỗi
+ * chức danh mới là một lần sửa lõi, và mỗi lần sửa lõi là một lần có thể làm sai tiền của người
+ * khác.
+ *
+ * Nên cơ chế trả tiền chuyển thành DỮ LIỆU: chính sách → phiên bản → thành phần. Luật khai ở
+ * `lib/constants/payroll-components.ts`; máy tính ở `lib/payroll/engine.ts`; mấy bảng dưới đây chỉ
+ * giữ lời khai.
+ *
+ * ─── SỔ CŨ KHÔNG BỊ ĐỘNG ĐẾN ───
+ *
+ * `settings: payroll.employees` VẪN là nơi khai % hoa hồng của MKTer và vẫn chạy y như trước cho
+ * người chưa gán chính sách. Không dòng dữ liệu nào bị chuyển, không con số nào của kỳ đã chốt bị
+ * đụng vào (yêu cầu mục 31 · AGENTS.md mục 21). Chuyển sang máy mới là việc chủ shop bấm từng
+ * người, không phải một lượt migration im lặng.
+ */
+export const salaryPolicies = pgTable(
+  "salary_policies",
+  {
+    id: id(),
+    /** Khoá đọc được: `MKT_PROFIT`, `SALES_COMMISSION`, `WAREHOUSE_HOURLY`… */
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Phòng ban thường áp chính sách này (CHỈ để gợi ý khi xếp người — không sinh quyền, không tự gán). */
+    departmentId: text("department_id").references((): AnyPgColumn => departments.id, { onDelete: "set null" }),
+    active: boolean("active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(100),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("salary_policies_active_idx").on(t.active, t.sortOrder)],
+);
+
+/**
+ * PHIÊN BẢN CỦA MỘT CHÍNH SÁCH — ĐÂY LÀ THỨ LÀM "ĐỔI TỶ LỆ THÁNG NÀY" THÔI VIẾT LẠI THÁNG TRƯỚC.
+ *
+ * Sửa tỷ lệ hoa hồng từ 01/09 KHÔNG được sửa dòng đang có; nó phải tạo một phiên bản MỚI có
+ * `effective_from = 2026-09-01`, và đóng phiên bản cũ lại ở 31/08. Kỳ tháng 8 mở lại sau đó vẫn
+ * đọc bản cũ và vẫn ra đúng con số đã trả.
+ *
+ * Ba trạng thái, và sự khác nhau giữa chúng là chuyện tiền bạc:
+ *   · `DRAFT`  — đang soạn. TUYỆT ĐỐI không dùng để tính tiền (máy tính bỏ qua).
+ *   · `ACTIVE` — đang hiệu lực.
+ *   · `RETIRED`— đã rút, nhưng VẪN phủ các kỳ nằm trong khoảng hiệu lực cũ của nó.
+ */
+export const salaryPolicyVersions = pgTable(
+  "salary_policy_versions",
+  {
+    id: id(),
+    policyId: text("policy_id")
+      .notNull()
+      .references(() => salaryPolicies.id, { onDelete: "cascade" }),
+    /** Số thứ tự tăng dần trong phạm vi một chính sách. */
+    version: integer("version").notNull(),
+    effectiveFrom: ts("effective_from").notNull(),
+    /** `NULL` = CÒN HIỆU LỰC (khác hẳn "chưa biết"). */
+    effectiveTo: ts("effective_to"),
+    status: text("status").notNull().default("DRAFT"),
+    note: text("note").notNull().default(""),
+    activatedAt: ts("activated_at"),
+    activatedBy: text("activated_by").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("salary_policy_versions_uq").on(t.policyId, t.version),
+    index("salary_policy_versions_eff_idx").on(t.policyId, t.effectiveFrom),
+    check("salary_policy_versions_status_check", sql`${t.status} IN ('DRAFT', 'ACTIVE', 'RETIRED')`),
+    check("salary_policy_versions_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+  ],
+);
+
+/**
+ * THÀNH PHẦN LƯƠNG — một dòng ở đây là một dòng trên phiếu lương.
+ *
+ * `calc` giữ tham số phép tính dưới dạng JSON, nhưng KHÔNG phải một ô tự do: hình dạng của nó là
+ * `PayrollCalcParams` — một tập ĐÓNG, kiểm bằng zod ở server action. Cố ý không có `EXPRESSION`:
+ * một ô gõ công thức rồi `eval` là cách nhanh nhất để một dòng chữ trong CSDL chạy mã tuỳ ý trên
+ * máy chủ (xem `lib/constants/payroll-components.ts`).
+ *
+ * `basis_key` trỏ vào SỔ ĐĂNG KÝ ĐẦU VÀO (`PAYROLL_INPUTS`) — không phải một tên cột tuỳ ý. Đại
+ * lượng nào ERP chưa đo được thì sổ khai `MANUAL` và người phải nhập; không có đường nào để một
+ * truy vấn gần đúng lẻn vào làm "số đo" (AGENTS.md mục 20 · 37 · 45).
+ */
+export const salaryPolicyComponents = pgTable(
+  "salary_policy_components",
+  {
+    id: id(),
+    versionId: text("version_id")
+      .notNull()
+      .references(() => salaryPolicyVersions.id, { onDelete: "cascade" }),
+    /** Khoá ổn định trong phạm vi một chính sách — phiếu lương và sổ lỗ lưu khoá này, không lưu tên. */
+    code: text("code").notNull(),
+    label: text("label").notNull(),
+    /** `PAYROLL_COMPONENT_KINDS` — quyết định DẤU và chỗ đứng trên phiếu, không quyết định phép tính. */
+    kind: text("kind").notNull(),
+    /** `PAYROLL_CALC_TYPES`. */
+    calcType: text("calc_type").notNull(),
+    /** Đại lượng trong `PAYROLL_INPUTS`; `NULL` cho khoản cố định / nhập tay. */
+    basisKey: text("basis_key"),
+    /** Tham số của phép tính (`PayrollCalcParams`) — hình dạng do `calc_type` quyết định. */
+    calc: jsonb("calc").notNull(),
+    /** `PERIOD_DAYS` · `NONE`. */
+    prorate: text("prorate").notNull().default("NONE"),
+    /** `ROUND` · `FLOOR` · `CEIL` · `ROUND_1000`. */
+    rounding: text("rounding").notNull().default("ROUND"),
+    minAmount: integer("min_amount"),
+    maxAmount: integer("max_amount"),
+    /** Bù lỗ lũy kế. CHỈ bật cho thành phần tính trên lợi nhuận — KHÔNG mặc định cho mọi chức danh. */
+    carryForward: boolean("carry_forward").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(100),
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // MỘT khoá thành phần trong MỘT phiên bản. Hai dòng cùng `code` là hai khoản cùng tên trên một
+    // phiếu lương, và phần gộp theo `code` ở máy tính sẽ cộng chúng thành một dòng không ai đối
+    // chiếu lại được.
+    uniqueIndex("salary_policy_components_uq").on(t.versionId, t.code),
+    index("salary_policy_components_version_idx").on(t.versionId, t.sortOrder),
+    check("salary_policy_components_carry_check", sql`${t.carryForward} = false OR ${t.basisKey} IN ('PROFIT_PERSONAL', 'PROFIT_SHOP')`),
+    check("salary_policy_components_bound_check", sql`${t.minAmount} IS NULL OR ${t.maxAmount} IS NULL OR ${t.maxAmount} >= ${t.minAmount}`),
+  ],
+);
+
+/**
+ * ═══ PHÂN CÔNG LAO ĐỘNG — CÓ MỐC HIỆU LỰC ═══
+ *
+ * HÌNH THỨC LÀM VIỆC và NƠI LÀM VIỆC nằm ở đây, và chúng KHÔNG phải công thức lương. Một người làm
+ * từ xa vẫn có thể ăn lương cứng, ăn theo giờ, ăn hoa hồng hay ăn khoán — máy tính lương tuyệt đối
+ * không được đọc hai cột này để đoán ra công thức (xem `lib/constants/payroll-components.ts`).
+ *
+ * `employee_id` là khoá nhân sự trong sổ lương (`settings: payroll.employees`), cùng khoá mà
+ * `marketer_profit_carryover` dùng — sổ lương là nơi khai người, và một cộng tác viên có thể chưa
+ * có tài khoản ERP. `user_id` là cột NỐI về tài khoản khi có, để quy kết đi bằng khoá chứ không
+ * bằng ô chữ (AGENTS.md mục 34).
+ */
+export const employmentAssignments = pgTable(
+  "employment_assignments",
+  {
+    id: id(),
+    employeeId: text("employee_id").notNull(),
+    /** Tài khoản ERP tương ứng. `NULL` = CHƯA NỐI ĐƯỢC, không phải "không có ai". */
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    departmentId: text("department_id").references((): AnyPgColumn => departments.id, { onDelete: "set null" }),
+    positionId: text("position_id").references((): AnyPgColumn => positions.id, { onDelete: "set null" }),
+    /** Quản lý trực tiếp — khoá tài khoản, không phải tên. */
+    managerUserId: text("manager_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** `FULL_TIME` · `PART_TIME` · `CONTRACTOR`. */
+    employmentType: text("employment_type").notNull().default("FULL_TIME"),
+    /** `ONSITE` · `REMOTE` · `HYBRID`. */
+    workMode: text("work_mode").notNull().default("ONSITE"),
+    /** `ACTIVE` · `ON_LEAVE` · `TERMINATED`. */
+    status: text("status").notNull().default("ACTIVE"),
+    /** Ngày công chuẩn của tháng theo hợp đồng; `NULL` = dùng số ngày thật của tháng. */
+    standardWorkDays: integer("standard_work_days"),
+    costCenter: text("cost_center").notNull().default(""),
+    effectiveFrom: ts("effective_from").notNull(),
+    /** `NULL` = CÒN HIỆU LỰC. */
+    effectiveTo: ts("effective_to"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("employment_assignments_emp_idx").on(t.employeeId, t.effectiveFrom),
+    index("employment_assignments_dept_idx").on(t.departmentId, t.effectiveFrom),
+    check("employment_assignments_type_check", sql`${t.employmentType} IN ('FULL_TIME', 'PART_TIME', 'CONTRACTOR')`),
+    check("employment_assignments_mode_check", sql`${t.workMode} IN ('ONSITE', 'REMOTE', 'HYBRID')`),
+    check("employment_assignments_status_check", sql`${t.status} IN ('ACTIVE', 'ON_LEAVE', 'TERMINATED')`),
+    check("employment_assignments_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+  ],
+);
+
+/** Gán CHÍNH SÁCH cho một người, có mốc hiệu lực. Đổi chính sách = thêm dòng, không sửa dòng cũ. */
+export const employeePolicyAssignments = pgTable(
+  "employee_policy_assignments",
+  {
+    id: id(),
+    employeeId: text("employee_id").notNull(),
+    policyId: text("policy_id")
+      .notNull()
+      .references(() => salaryPolicies.id, { onDelete: "restrict" }),
+    effectiveFrom: ts("effective_from").notNull(),
+    effectiveTo: ts("effective_to"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("employee_policy_assignments_emp_idx").on(t.employeeId, t.effectiveFrom),
+    index("employee_policy_assignments_policy_idx").on(t.policyId),
+    check("employee_policy_assignments_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+  ],
+);
+
+/**
+ * ═══ ĐẦU VÀO NHẬP TAY — CHẤM CÔNG, KPI, SẢN LƯỢNG ═══
+ *
+ * ERP KHÔNG có bảng chấm công, không có bảng nghiệm thu sản lượng theo người, và chấm KPI là một
+ * quyết định của người quản lý chứ không phải một truy vấn. Ba thứ ấy vào đây, mỗi dòng mang TÊN
+ * NGƯỜI NHẬP và MỐC THỜI GIAN.
+ *
+ * Đây là chỗ thay thế cho cám dỗ "viết một truy vấn gần đúng rồi gọi nó là số đo". Một ô trống
+ * nhìn thấy được, có tên người phải điền, tốt hơn một con số không ai kiểm lại được (AGENTS.md
+ * mục 45: con số CHƯA BIẾT tăng lên sau khi thôi khẳng định thứ không chứng minh được là ĐÚNG
+ * HƯỚNG).
+ *
+ * Khoá tự nhiên (nhân sự, kỳ, đại lượng): nhập lại là SỬA, không phải thêm một dòng thứ hai —
+ * nếu không, tính lại sẽ cộng dồn (yêu cầu mục 28).
+ */
+export const payrollInputs = pgTable(
+  "payroll_inputs",
+  {
+    id: id(),
+    employeeId: text("employee_id").notNull(),
+    /** Cùng khoá kỳ với `payroll_periods.period_key`: `2026-09-01..2026-09-30`. */
+    periodKey: text("period_key").notNull(),
+    /** Khoá trong `PAYROLL_INPUTS` (chỉ những đại lượng khai `MANUAL`). */
+    inputKey: text("input_key").notNull(),
+    /** Giá trị. Đơn vị do sổ đăng ký quy định (giờ / ngày / cái / %). */
+    value: doublePrecision("value").notNull(),
+    /** Chứng cứ đọc được: bảng công tháng nào, ai duyệt, số phiếu nào. */
+    evidence: text("evidence").notNull().default(""),
+    enteredBy: text("entered_by").references(() => users.id, { onDelete: "set null" }),
+    /** Ảnh chụp TÊN người nhập, do MÁY CHỦ đọc từ `users` — không nhận từ client (AGENTS.md mục 34). */
+    enteredByName: text("entered_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("payroll_inputs_uq").on(t.employeeId, t.periodKey, t.inputKey),
+    index("payroll_inputs_period_idx").on(t.periodKey),
+  ],
+);
+
+/**
+ * ═══ ĐIỀU CHỈNH TAY: THƯỞNG NÓNG · TẠM ỨNG · KHẤU TRỪ ═══
+ *
+ * Mỗi dòng bắt buộc có LÝ DO và NGƯỜI TẠO. Số tiền luôn lưu DƯƠNG; dấu do `kind` quyết định
+ * (`PAYROLL_COMPONENT_SIGN`) — để người nhập không phải nhớ gõ dấu trừ, và để một dấu trừ gõ nhầm
+ * không biến một khoản khấu trừ thành một khoản thưởng.
+ *
+ * `applies_to_period_key` là kỳ mà khoản này được tính vào. Chứng từ về SAU khi kỳ đã chốt thì ghi
+ * vào kỳ SAU (yêu cầu mục 24) — kỳ đã chốt là bất biến, và đường duy nhất để sửa nó là một dòng
+ * điều chỉnh ở kỳ kế tiếp, có dấu vết.
+ */
+export const payrollAdjustments = pgTable(
+  "payroll_adjustments",
+  {
+    id: id(),
+    employeeId: text("employee_id").notNull(),
+    periodKey: text("period_key").notNull(),
+    /** `BONUS` · `ALLOWANCE` · `ADJUSTMENT` · `ADVANCE` · `DEDUCTION` · `REIMBURSEMENT`. */
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    /** LUÔN DƯƠNG. Dấu do `kind` quyết định. */
+    amount: integer("amount").notNull(),
+    /** Bắt buộc — một khoản tiền không có lý do là một khoản không ai duyệt lại được. */
+    reason: text("reason").notNull(),
+    /** Chứng từ / đường dẫn tham chiếu nếu có. */
+    reference: text("reference").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("payroll_adjustments_period_idx").on(t.periodKey, t.employeeId),
+    check("payroll_adjustments_amount_check", sql`${t.amount} >= 0`),
+    check(
+      "payroll_adjustments_kind_check",
+      sql`${t.kind} IN ('BONUS', 'ALLOWANCE', 'ADJUSTMENT', 'ADVANCE', 'DEDUCTION', 'REIMBURSEMENT')`,
     ),
   ],
 );
@@ -4044,5 +4350,12 @@ export type BscScorecard = typeof bscScorecards.$inferSelect;
 export type BscMetric = typeof bscMetrics.$inferSelect;
 export type ReviewCycle = typeof reviewCycles.$inferSelect;
 export type PayrollPeriod = typeof payrollPeriods.$inferSelect;
+export type SalaryPolicy = typeof salaryPolicies.$inferSelect;
+export type SalaryPolicyVersion = typeof salaryPolicyVersions.$inferSelect;
+export type SalaryPolicyComponentRow = typeof salaryPolicyComponents.$inferSelect;
+export type EmploymentAssignment = typeof employmentAssignments.$inferSelect;
+export type EmployeePolicyAssignment = typeof employeePolicyAssignments.$inferSelect;
+export type PayrollInputRow = typeof payrollInputs.$inferSelect;
+export type PayrollAdjustmentRow = typeof payrollAdjustments.$inferSelect;
 export type AccessRole = typeof accessRoles.$inferSelect;
 export type Position = typeof positions.$inferSelect;
