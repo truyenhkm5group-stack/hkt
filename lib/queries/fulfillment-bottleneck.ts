@@ -10,6 +10,7 @@ import {
   type FulfillmentBlockReason,
 } from "@/lib/constants/fulfillment-bottleneck";
 import { formatVND } from "@/lib/format";
+import { sqlPromiseNotSuppressing } from "@/lib/constants/promised-delivery";
 import { rowsOf } from "@/lib/sql-rows";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 
@@ -184,6 +185,18 @@ export async function getFulfillmentBottleneckQueue(): Promise<FulfillmentBottle
         -- Sales Funnel/CSKH, không thuộc nút thắt này. CANCELLED/DELETED bị loại tuyệt đối — không
         -- được tạo cảnh báo giả cho đơn đã huỷ hoặc chưa sẵn sàng.
         where o.stage in ('CONFIRMED','PACKING','READY_TO_SHIP')
+          /*
+            ĐƠN CÓ HẸN NGÀY GIAO CÒN XA KHÔNG PHẢI NÚT THẮT.
+
+            Khách chốt mua rồi xin giao ngày 20 thì đơn nằm trong kho là ĐÚNG KẾ HOẠCH, không phải
+            bị bỏ quên. Trước vế này, hàng đợi đếm nó là tắc từ ngày thứ hai và người trực phải nhớ
+            trong đầu đơn nào là hẹn thật.
+
+            CHỈ tha khi hẹn còn XA — luật ở lib/constants/promised-delivery.ts, hàm sqlPromiseNotSuppressing.
+            Từ trước hẹn một ngày trở đi đơn QUAY LẠI hàng đợi — một cái hẹn là đồng hồ ngược, không
+            phải công tắc tàng hình.
+          */
+          and ${sql.raw(sqlPromiseNotSuppressing("o.customer_promised_at"))}
           -- ĐƠN RỖNG KHÔNG PHẢI VIỆC KHO: đối chiếu production 12/09/2026 thấy 9/214 ca là đơn
           -- CONFIRMED không có dòng hàng nào và giá trị 0 (lên nhầm / chưa chọn hàng) — không có gì
           -- để đóng gói hay tạo vận đơn, đưa vào hàng đợi chỉ tạo việc giả. Đơn có dòng hàng nhưng

@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
+import { STAGE_SINCE_SQL } from "@/lib/constants/shipment-status-age";
 import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/carrier-handoff";
 import { DQ_CHECK_SPECS, isFixable, type DqCheck, type DqCheckSpec } from "@/lib/constants/data-quality-issues";
 import { TARGETABLE_METRICS } from "@/lib/constants/metric-registry";
@@ -46,6 +47,23 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       sample: r.sample ?? [],
       fixable: isFixable(DQ_CHECK_SPECS[key].kind),
     });
+
+    /* ───── Vận đơn không biết vào chặng hiện tại lúc nào ─────
+       CHỈ đếm trên kiện CHƯA tới chặng kết thúc: kiện đã giao xong hay đã hoàn xong thì mốc vào
+       chặng không còn là việc của ai, và đếm chúng vào đây sẽ thổi con số lên bằng cả kho lịch sử. */
+    const [changStart] = await db
+      .select({
+        n: sql<number>`count(*) filter (where ${sql.raw(STAGE_SINCE_SQL)} is null)`,
+        lastSeen: sql<Date | null>`max(${s.createdAt}) filter (where ${sql.raw(STAGE_SINCE_SQL)} is null)`,
+      })
+      .from(s)
+      .where(sql`${s.stage}::text not in ('DELIVERED','RETURNED','CANCELLED')`);
+    const changStartMau = await db
+      .select({ code: s.vtpOrderNumber, stage: s.stage })
+      .from(s)
+      .where(sql`${s.stage}::text not in ('DELIVERED','RETURNED','CANCELLED') and ${sql.raw(STAGE_SINCE_SQL)} is null`)
+      .orderBy(desc(s.createdAt))
+      .limit(5);
 
     /* ───── Vận đơn chưa có chứng cứ ĐVVC tiếp nhận ───── */
     const [handoff] = await db
@@ -189,6 +207,11 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
 
     return [
       dung("shipment-no-handoff", { count: num(handoff?.n), lastSeen: handoff?.lastSeen ?? null, sample: handoffMau.map((r) => `${r.code ?? "(chưa có mã)"} · ${r.stage}`) }),
+      dung("shipment-no-stage-start", {
+        count: num(changStart?.n),
+        lastSeen: changStart?.lastSeen ?? null,
+        sample: changStartMau.map((r) => `${r.code ?? "(chưa có mã)"} · ${r.stage}`),
+      }),
       dung("shipment-order-ambiguous", { count: num(ambiguous?.n), lastSeen: ambiguous?.lastSeen ?? null, sample: ambiguousMau.map((r) => `${r.code ?? "?"} ← mã gốc ${r.ref ?? "?"}`) }),
       dung("bank-unclassified", { count: num(bank?.n), lastSeen: bank?.lastSeen ?? null, sample: bankMau.map((r) => `${r.ref} · ${(r.desc ?? "").slice(0, 60)}`) }),
       dung("cogs-unknown", { count: num(cogs?.n), lastSeen: cogs?.lastSeen ?? null }),

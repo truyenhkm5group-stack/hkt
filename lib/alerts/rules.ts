@@ -118,7 +118,17 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       .from(o)
       // Đơn nhiều lần gửi là MỘT đơn: cảnh báo theo lần gửi quyết định, không bắn trùng mỗi lần gửi.
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]), lte(o.insertedAt, cutoff), sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`, sql`(${s.id} is null or ${s.stage} = 'PENDING')`))
+      .where(
+        and(
+          inArray(o.stage, ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"]),
+          lte(o.insertedAt, cutoff),
+          sql`${o.insertedAt} >= ${lookback.toISOString()}::timestamptz`,
+          sql`(${s.id} is null or ${s.stage} = 'PENDING')`,
+          // Đơn khách hẹn giao ngày sau KHÔNG phải đơn bị bỏ quên — xem lib/constants/promised-delivery.ts.
+          // Chỉ tha khi hẹn còn xa; tới gần ngày hẹn thì đơn quay lại cảnh báo như thường.
+          sql`(${o.customerPromisedAt} is null or ${o.customerPromisedAt} <= now() + interval '48 hours')`,
+        ),
+      )
       .limit(500);
     for (const r of rows) {
       const hours = Math.floor((Date.now() - new Date(r.insertedAt).getTime()) / 3_600_000);
