@@ -248,6 +248,30 @@ deploy dừng, không phải cảnh báo.
     nhuận nào được đọc bảng này (`tests/product-notes.test.ts` quét mã nguồn đã vào kho). Cột
     `products.note` là ô ĐỒNG BỘ TỪ PANCAKE — không ghi đè lên nó.
 
+47. **NHÂN SỰ BÁN HÀNG CHỈ NÓI ĐƯỢC THỨ CÓ NGƯỜI KHAI** (`docs/sales-knowledge-precedence.md`):
+    bốn bậc nguồn, trên đè dưới — ẢNH CHỤP HỘI THOẠI (bất biến) → HỒ SƠ BÁN của page → SỰ THẬT ERP
+    → CÂU ĐÃ DUYỆT. **Mô hình ngôn ngữ không có mặt ở bậc nào**: nó đổi CÁCH NÓI, không đổi ĐIỀU
+    ĐƯỢC NÓI, và phân biệt được vì mọi con số đi kèm `provenance` trỏ về ô nó lấy ra. Hồ sơ page
+    ĐƯỢC đè giá ERP (giá kênh khác giá niêm yết là hợp lệ) nhưng KHÔNG BAO GIỜ im lặng — mọi chỗ
+    lệch thành một dòng `KnowledgeConflict` in ra màn hình, và không bên nào bị sửa.
+    Cổng năng lực (`lib/constants/sales-capabilities.ts`) có HAI CHIỀU: **THIẾU DỮ LIỆU** là việc
+    phải làm, **CHẶN BỞI QUYỀN** là quyết định đang có hiệu lực — gộp thành một chữ "tắt" là xoá
+    mất việc phải làm. Quyền KHÔNG BAO GIỜ thay dữ liệu: mở hết quyền mà chưa có bảng số đo thì tư
+    vấn size vẫn tắt.
+    **BỐN SỐ HIỆU TÁCH RỜI** trên mỗi hội thoại: điều kiện bán · chính sách · sổ dữ kiện · bảng số
+    đo. Gộp lại thì không trả lời được "lúc ấy khách được báo giá nào, hứa đổi trả thế nào" — đúng
+    câu người ta hỏi khi có khiếu nại.
+    **BẢNG SỐ ĐO CHỈ CÓ MỘT NƠI**: `settings["ai.sizeRules"]` + `lib/constants/size-engine.ts`.
+    ERP biết mẫu có size NÀO, không biết AI MẶC VỪA — suy từ nhãn size ra bảng số đo là gửi đi
+    những kiện hàng không vừa. Máy chỉ nói khi `recommendSize()` trả `OK`; `AMBIGUOUS` /
+    `OUT_OF_RANGE` / thiếu số đo đều chuyển người, KHÔNG chọn bừa một size khớp.
+    **CÒN BÁN ≠ CÒN HÀNG** (`lib/queries/sellability.ts`): "đang bán" là DANH MỤC, ERP luôn biết;
+    "còn hàng" là SỔ KHO và chỉ biết khi mẫu mã có phiếu nhập (luật 10). Ba kết quả, không hai —
+    `UNKNOWN` chuyển người. Trả lời "còn ạ" vì mẫu mã tồn tại trong danh mục là hẹn giao một thứ
+    có thể không tồn tại.
+    Chính sách đổi trả và bảng số đo KHÔNG được suy từ chat cũ: một câu nhân viên ứng khẩu với một
+    khách không phải cam kết của shop.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
