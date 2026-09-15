@@ -54,17 +54,68 @@ export function payrollPeriodKey(from: Date | null, to: Date | null): string | n
 
 export const DEPARTMENTS = ["Marketing", "Sale / CSKH", "Kho / Đóng gói", "Kế toán", "Quản lý", "Khác"] as const;
 
-/** Lợi nhuận dùng để tính lương */
+/**
+ * ═══════ CƠ SỞ LỢI NHUẬN DÙNG ĐỂ TÍNH LƯƠNG ═══════
+ *
+ * ─── VÌ SAO `profit1` KHÔNG CÒN LÀ CÁI TÊN NGHIỆP VỤ ───
+ *
+ * "profit1" và "profit2" không nói lên điều gì: hai cái tên ấy chỉ nói rằng có hai thứ và cái này
+ * đứng trước cái kia. Người đọc bảng lương phải mở mã nguồn mới biết mình đang trả tiền theo cơ sở
+ * nào — và một cơ sở chọn nhầm là cả một kỳ lương tính sai mà không có gì báo.
+ *
+ * Nên mỗi cơ sở nay có một TÊN NGHIỆP VỤ tường minh (`PAYROLL_BASIS_NAME`), và màn hình dùng tên
+ * ấy. Giá trị cũ VẪN nhận được ở URL — đường dẫn đã lưu, đã gửi cho nhau, đã nằm trong
+ * `payroll_periods.basis` của những kỳ ĐÃ CHỐT. Đổi giá trị lưu trữ là làm mồ côi chúng; đổi cái
+ * TÊN người đọc thì không mất gì.
+ */
 export type PayrollBasis = "profit1" | "profit2" | "cash" | "nominal";
+
+/**
+ * TÊN NGHIỆP VỤ CỦA TỪNG CƠ SỞ — thứ màn hình hiện, thay cho `profit1`/`profit2`.
+ *
+ * `COMPENSATION_PROFIT` là cơ sở DUY NHẤT được phép chốt lương (xem `PAYROLL_BASIS_ELIGIBILITY`):
+ * doanh thu giao thành công trừ giá vốn CỦA CHÍNH HÀNG ĐÃ GIAO, quảng cáo, vận chuyển và chi phí
+ * vận hành đã ghi nhận.
+ */
+export const PAYROLL_BASIS_NAME: Record<PayrollBasis, string> = {
+  profit1: "Lợi nhuận tính lương",
+  profit2: "Lợi nhuận sau giá vốn hàng nhập",
+  cash: "Dòng tiền thực",
+  nominal: "Lợi nhuận danh nghĩa (dự phóng)",
+};
+
+/**
+ * KHOÁ NGHIỆP VỤ — nhận được ở URL bên cạnh giá trị cũ, để đường dẫn mới đọc được bằng mắt.
+ * KHÔNG dùng để lưu: `payroll_periods.basis` giữ nguyên giá trị cũ (xem khối trên).
+ */
+export const PAYROLL_BASIS_ALIAS: Record<string, PayrollBasis> = {
+  "compensation-profit": "profit1",
+  "purchase-cogs-profit": "profit2",
+  "cash-flow": "cash",
+  "nominal-profit": "nominal",
+};
 export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = {
-  profit1: "LN1 · doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển − chi phí cố định/vận hành/khác",
-  profit2: "LN2 · doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ − vận chuyển − chi phí cố định/vận hành/khác",
-  cash: "Dòng tiền thực (tiền vào − tiền ra trong kỳ), chia theo tỷ trọng LN1",
+  profit1: "Doanh thu giao thành công − QC − giá vốn hàng ĐÃ GIAO − vận chuyển − chi phí cố định/vận hành/khác, TRƯỚC hoa hồng",
+  profit2: "Doanh thu giao thành công − QC − giá vốn TỔNG hàng nhập trong kỳ − vận chuyển − chi phí cố định/vận hành/khác",
+  cash: "Dòng tiền thực (tiền vào − tiền ra trong kỳ), chia theo tỷ trọng lợi nhuận tính lương",
   nominal: "Danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính), tham khảo",
 };
-export const PAYROLL_BASIS_SHORT: Record<PayrollBasis, string> = { profit1: "LN1 · giá vốn hàng giao TC", profit2: "LN2 · giá vốn hàng nhập", cash: "Dòng tiền thực", nominal: "Danh nghĩa" };
+export const PAYROLL_BASIS_SHORT: Record<PayrollBasis, string> = {
+  profit1: "Lợi nhuận tính lương",
+  profit2: "Sau giá vốn hàng nhập",
+  cash: "Dòng tiền thực",
+  nominal: "Danh nghĩa",
+};
 export const PAYROLL_BASES: PayrollBasis[] = ["profit1", "profit2", "cash", "nominal"];
+/**
+ * Nhận CẢ HAI cách viết: khoá nghiệp vụ mới (`compensation-profit`) và giá trị cũ (`profit1`).
+ * Giá trị lạ rơi về cơ sở tính lương — mặc định phải là cơ sở ĐƯỢC PHÉP chốt, không phải cơ sở
+ * cuối cùng trong danh sách.
+ */
 export function parsePayrollBasis(v: string | null | undefined): PayrollBasis {
+  if (!v) return "profit1";
+  const alias = PAYROLL_BASIS_ALIAS[v];
+  if (alias) return alias;
   return v === "profit2" || v === "cash" || v === "nominal" ? v : "profit1";
 }
 

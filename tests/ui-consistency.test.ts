@@ -193,6 +193,16 @@ export function testNavigationCoverage() {
     "/work/performance": "tab 'Hiệu suất' của bàn làm việc /work",
     "/work/review": "tab 'Kỳ review' của bàn làm việc /work",
     "/work/settings": "tab 'Cấu hình' của bàn làm việc /work, chỉ hiện với quyền work:admin",
+    // Lương: MỘT mục sidebar (`/payroll`), ba màn hình khai báo là tab bên trong
+    // `app/(dashboard)/payroll/tabs.tsx` và chỉ hiện với quyền `payroll:manage`. Ba dòng sidebar
+    // cho việc của riêng người quản lý lương sẽ bắt cả shop đọc qua chúng mỗi lần tìm bảng lương.
+    "/payroll/policies": "tab 'Chính sách lương' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/assignments": "tab 'Phân công & gán chính sách' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/adjustments": "tab 'Đầu vào & điều chỉnh' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/migration": "tab 'Xem trước chuyển đổi' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/runs": "tab 'Lịch sử kỳ' của /payroll",
+    "/payroll/payslip": "tab 'Phiếu lương' của /payroll — người chỉ có quyền xem của mình vào đây để xem phiếu của chính họ",
+    "/payroll/settings": "tab 'Cấu hình' của /payroll, chỉ hiện với quyền payroll:manage",
   };
 
   const pages = walkPages("app/(dashboard)");

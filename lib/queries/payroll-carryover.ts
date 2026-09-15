@@ -19,6 +19,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
   DEFAULT_PAYROLL_CARRYOVER,
+  LEGACY_CARRY_COMPONENT,
   PAYROLL_CARRYOVER_KEY,
   isMonthKey,
   prevMonthKey,
@@ -62,10 +63,22 @@ export async function getCarryoverConfig(): Promise<PayrollCarryoverConfig> {
 export type CarryoverRow = typeof schema.marketerProfitCarryover.$inferSelect;
 
 /** Mọi dòng sổ của một tháng, theo từng nhân sự. */
-export async function carryoverRowsForMonth(monthKey: string, employeeIds?: string[]): Promise<Map<string, CarryoverRow>> {
+export async function carryoverRowsForMonth(
+  monthKey: string,
+  employeeIds?: string[],
+  /*
+    MỘT CHUỖI SỐ DƯ MỘT THÀNH PHẦN.
+
+    Sổ nay mang khoá (nhân sự, tháng, THÀNH PHẦN). Không lọc ở đây thì một người mang hai khoản bù
+    lỗ sẽ có hai dòng cùng tháng, `new Map(...)` giữ dòng cuối, và số dư của khoản này lặng lẽ trở
+    thành số dư của khoản kia. Mặc định là khoản của đường tính cũ, nên mọi lời gọi đang có giữ
+    nguyên hành vi.
+  */
+  componentCode: string = LEGACY_CARRY_COMPONENT,
+): Promise<Map<string, CarryoverRow>> {
   const db = await getDb();
   const t = schema.marketerProfitCarryover;
-  const conds = [eq(t.monthKey, monthKey)];
+  const conds = [eq(t.monthKey, monthKey), eq(t.componentCode, componentCode)];
   if (employeeIds && employeeIds.length) conds.push(inArray(t.employeeId, employeeIds));
   const rows = await db.select().from(t).where(and(...conds));
   return new Map(rows.map((r) => [r.employeeId, r]));
@@ -82,6 +95,8 @@ export async function resolveOpening(
   employeeId: string,
   monthKey: string,
   config: PayrollCarryoverConfig,
+  /** Khoản bù lỗ nào — xem `carryoverRowsForMonth`. Mặc định là khoản của đường tính cũ. */
+  componentCode: string = LEGACY_CARRY_COMPONENT,
 ): Promise<OpeningResolution> {
   if (!config.enabled) {
     return KHONG_AP_DUNG("Sổ lỗ lũy kế chưa được bật. Bật ở Cấu hình lương → Lỗ lũy kế, kèm tháng mở sổ.");
@@ -102,7 +117,7 @@ export async function resolveOpening(
   const [chinhThang] = await db
     .select()
     .from(t)
-    .where(and(eq(t.employeeId, employeeId), eq(t.monthKey, monthKey)));
+    .where(and(eq(t.employeeId, employeeId), eq(t.monthKey, monthKey), eq(t.componentCode, componentCode)));
   if (chinhThang) {
     return {
       balance: chinhThang.openingBalance,
@@ -131,7 +146,7 @@ export async function resolveOpening(
   const [dongTruoc] = await db
     .select()
     .from(t)
-    .where(and(eq(t.employeeId, employeeId), eq(t.monthKey, truoc)));
+    .where(and(eq(t.employeeId, employeeId), eq(t.monthKey, truoc), eq(t.componentCode, componentCode)));
   if (dongTruoc && dongTruoc.status === "FINAL") {
     return {
       balance: dongTruoc.closingBalance,
@@ -161,18 +176,19 @@ export async function resolveOpeningMany(
   employeeIds: readonly string[],
   monthKey: string,
   config: PayrollCarryoverConfig,
+  componentCode: string = LEGACY_CARRY_COMPONENT,
 ): Promise<Map<string, OpeningResolution>> {
   const out = new Map<string, OpeningResolution>();
   if (!employeeIds.length) return out;
   if (!config.enabled || !config.startMonth || compareMonthKey(monthKey, config.startMonth) < 0) {
     // Một lời giải thích chung, không đi hỏi CSDL — chưa bật thì không có gì để đọc.
-    const chung = await resolveOpening(employeeIds[0], monthKey, config);
+    const chung = await resolveOpening(employeeIds[0], monthKey, config, componentCode);
     for (const id of employeeIds) out.set(id, chung);
     return out;
   }
   const [thisMonth, prevRows] = await Promise.all([
-    carryoverRowsForMonth(monthKey, [...employeeIds]),
-    carryoverRowsForMonth(prevMonthKey(monthKey), [...employeeIds]),
+    carryoverRowsForMonth(monthKey, [...employeeIds], componentCode),
+    carryoverRowsForMonth(prevMonthKey(monthKey), [...employeeIds], componentCode),
   ]);
   const truoc = prevMonthKey(monthKey);
   for (const id of employeeIds) {

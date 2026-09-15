@@ -5,22 +5,33 @@
  * nhiêu". Trả về kèm ĐỘ PHỦ, vì chuyển thẩm quyền mà không kiểm tra độ phủ là cách nhanh nhất làm
  * lương biến mất khỏi lợi nhuận.
  *
- * ─────────── VÌ SAO HOA HỒNG KHÔNG THỂ DO BẢNG LƯƠNG GHI NHẬN (hiện nay) ───────────
+ * ─────────── HOA HỒNG: CƠ SỞ ĐÃ CÓ TÊN, VÀ VÌ THẾ KHÔNG CÒN VÒNG TRÒN ───────────
  *
- * Cả bốn cơ sở tính hoa hồng của ERP đều là **phần trăm của LỢI NHUẬN** (LN1, LN2, dòng tiền, danh
- * nghĩa). Muốn coi hoa hồng là một khoản CHI PHÍ nằm trong lợi nhuận thì phải biết lợi nhuận trước
- * đã — mà lợi nhuận lại cần biết chi phí. Vòng tròn.
+ * Hoa hồng tính bằng phần trăm của LỢI NHUẬN. Nếu nó đồng thời là chi phí nằm trong chính lợi
+ * nhuận ấy thì hai vế định nghĩa lẫn nhau — một phép khai không xác định, không phải một bài toán
+ * khó. Bản trước không chọn điểm dừng nào và bật một cảnh báo treo mãi mãi.
  *
- * Có hai cách thoát, và cả hai đều là quyết định của chủ shop chứ không phải của ERP:
- *  (a) chốt một cơ sở KHÔNG dẫn xuất từ lợi nhuận (vd % doanh thu thuần), hoặc
- *  (b) chấp nhận hoa hồng là phân phối lợi nhuận SAU khi đã có lợi nhuận, không phải chi phí.
+ * `lib/constants/compensation-profit.ts` nay chọn, và chọn bằng cách ĐẶT TÊN cho điểm dừng:
  *
- * Trước khi chủ shop chốt, ERP **không đoán**: hoa hồng giữ nguyên đường cũ (khoản chi ở bảng Chi
- * phí) và bật cảnh báo `COMMISSION_BASIS_NEEDS_REVIEW`. Đây cũng là lý do file này KHÔNG gọi
- * `getPayrollReport` — gọi vào là tạo đệ quy vô hạn với Profit Engine.
+ *     LỢI NHUẬN TRƯỚC THÙ LAO BIẾN ĐỔI = doanh thu − mọi chi phí TRỪ hoa hồng
+ *     hoa hồng                          = r × (cơ sở ấy, sau bù lỗ lũy kế)
+ *     LỢI NHUẬN KẾ TOÁN                 = cơ sở − hoa hồng
+ *
+ * Cơ sở trả tiền và kết quả kinh doanh là HAI con số mang HAI cái tên. Gộp chúng lại chính là chỗ
+ * sinh ra vòng tròn; tách ra thì vòng tròn không còn chỗ tồn tại.
+ *
+ * ─── NHƯNG FILE NÀY VẪN KHÔNG GỌI `getPayrollReport`, VÀ LÝ DO ĐỔI ───
+ *
+ * Trước: vì vòng tròn KHÁI NIỆM. Nay: vì vòng gọi hàm ở mức MÃ NGUỒN —
+ * `getOperatingCost` → file này → `getPayrollReport` → `getMarketerReport` → `getOperatingCost`.
+ * Khái niệm đã hết vòng, nhưng lời gọi thì chưa; nên hoa hồng vẫn được ghi nhận qua bảng Chi phí,
+ * và phần đo được của lỗ hổng ấy (khoản nhóm "Lương" vượt quá lương cứng — nhiều khả năng là hoa
+ * hồng đang nằm trong cơ sở) được `cost-engine.ts` cảnh báo CÓ ĐIỀU KIỆN: có thì báo, không có
+ * thì im, thay vì một câu hỏi treo không bao giờ tắt.
  */
 import { inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import type { CoverageState } from "@/lib/constants/cost-authority";
+import { COMPENSATION_PROFIT_BASIS, COMPENSATION_PROFIT_LABEL, type CompensationProfitBasis } from "@/lib/constants/compensation-profit";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -47,9 +58,11 @@ export type PayrollRecognition = {
   recognitionPeriod: { from: Date | null; to: Date | null; days: number };
   allocationBasis: {
     fixedSalary: "PERIOD_PRORATA";
-    /** `null` = chưa chốt được cơ sở tính hoa hồng ⇒ bảng Lương không ghi nhận hoa hồng */
+    /** `null` = bảng Lương KHÔNG ghi nhận hoa hồng (đường gọi hàm đi vòng) — xem `compensationBasis`. */
     commission: null;
   };
+  /** Tên nghiệp vụ của cơ sở tính thù lao đang áp dụng. Không còn là một câu hỏi treo. */
+  compensationBasis: CompensationProfitBasis;
   /**
    * ĐỘ PHỦ CỦA RIÊNG LƯƠNG CỨNG. Cố ý KHÔNG phải "độ phủ của cả chi phí nhân sự".
    *
@@ -128,12 +141,16 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
   } else if (monthlyFixedTotal <= 0) {
     reasons.push("Đã khai nhân sự nhưng lương cứng đều bằng 0.");
   }
-  // Hoa hồng: xem khối chú thích đầu file — không thể vừa là đầu vào vừa là đầu ra của lợi nhuận.
-  reasons.push("Hoa hồng đang tính theo % LỢI NHUẬN nên không thể đồng thời là chi phí nằm trong lợi nhuận; bảng Lương chưa ghi nhận hoa hồng.");
+  // Hoa hồng: xem khối chú thích đầu file. Cơ sở đã có tên và đã loại hoa hồng ra khỏi chính nó;
+  // thứ còn thiếu là một đường GỌI HÀM không đi vòng, không phải một quyết định nghiệp vụ.
+  reasons.push(
+    `Hoa hồng được khai là khoản trừ SAU cơ sở “${COMPENSATION_PROFIT_LABEL}”, không nằm trong cơ sở của chính nó. Bảng Lương chưa ghi nhận nó vì đường gọi hàm sẽ đi vòng (chi phí → bảng lương → chi phí); hoa hồng vẫn vào lợi nhuận qua bảng Chi phí.`,
+  );
 
   const fixedCoverage: CoverageState = mode === "PAYROLL" && period.from && period.to && fixedSalary > 0 ? "COMPLETE" : "INCOMPLETE";
   // Hoa hồng chưa có nguồn nào ngoài bảng Chi phí, và điều đó KHÔNG đổi theo cấu hình — nên đây là
-  // hằng số có lý do, không phải một giá trị chờ điền.
+  // hằng số có lý do, không phải một giá trị chờ điền. Lý do nay là đường GỌI HÀM đi vòng, không
+  // còn là cơ sở nghiệp vụ chưa chốt (xem khối đầu file).
   const commissionCoverage: CoverageState = "INCOMPLETE";
 
   return {
@@ -142,6 +159,7 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     totalPayrollCost: fixedCoverage === "COMPLETE" ? fixedSalary : 0,
     recognitionPeriod: { from: period.from, to: period.to, days },
     allocationBasis: { fixedSalary: "PERIOD_PRORATA", commission: null },
+    compensationBasis: COMPENSATION_PROFIT_BASIS,
     coverage: fixedCoverage,
     componentCoverage: { fixedSalary: fixedCoverage, commission: commissionCoverage },
     reasons,

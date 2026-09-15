@@ -30,7 +30,10 @@ export type FinalizeBlocker = {
     | "BASIS_NOT_ELIGIBLE"
     | "UNKNOWN_SALARY"
     | "COST_EVIDENCE_MISSING"
-    | "CARRYOVER_OPENING_NOT_ESTABLISHED";
+    | "CARRYOVER_OPENING_NOT_ESTABLISHED"
+    | "ENGINE_INPUT_MISSING"
+    | "ENGINE_POLICY_PROBLEM"
+    | "POLICY_BOOK_INVALID";
   /** Nói ĐÚNG cái đang thiếu, và nói được phải làm gì. Không có "dữ liệu không hợp lệ". */
   message: string;
 };
@@ -48,7 +51,27 @@ export type ReadinessInput = {
   totalSalary: number | null;
   costWarnings: readonly CostEngineWarning[];
   /** Mỗi dòng lương: đã có số dư lỗ đủ căn cứ chưa (bỏ qua khi sổ không áp dụng). */
-  lines: readonly { name: string; carryEstablished: boolean | null; carryReason: string | null }[];
+  lines: readonly {
+    name: string;
+    carryEstablished: boolean | null;
+    carryReason: string | null;
+    /**
+     * Đại lượng còn THIẾU của máy tính lương chung (chấm công chưa nhập, KPI chưa chấm…). Mỗi mục
+     * là một con số CHƯA BIẾT đang nằm trong tiền của người này.
+     */
+    engineMissing?: readonly { label: string; message: string }[];
+    /** Vấn đề về CẤU HÌNH: chưa gán chính sách, phiên bản còn là bản nháp. Khác hẳn thiếu số liệu. */
+    engineProblems?: readonly string[];
+  }[];
+  /**
+   * Lỗi ở SỔ KHAI (`lib/payroll/policy-validation.ts`): chồng lấn mốc gán, khoảng trống không
+   * chính sách nào phủ, thành phần thiếu tỷ lệ/đơn giá, phiên bản chưa hiệu lực.
+   *
+   * Tách khỏi `engineProblems` vì chúng nói ở hai MỨC khác nhau: `engineProblems` nói "đoạn này
+   * không tính được", còn đây nói "sổ khai thiếu gì và sửa ở đâu". Người đọc cần cái thứ hai để
+   * đi làm được việc.
+   */
+  policyIssues?: readonly { message: string; blocking: boolean }[];
 };
 
 export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[] {
@@ -101,6 +124,35 @@ export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[
       code: "CARRYOVER_OPENING_NOT_ESTABLISHED",
       message: `Số dư lỗ đầu kỳ của ${l.name} chưa xác lập. ${l.carryReason ?? ""}`.trim(),
     });
+  }
+
+  /*
+    ═══ MÁY TÍNH LƯƠNG CHUNG: THIẾU SỐ LIỆU VÀ THIẾU CẤU HÌNH LÀ HAI CHUYỆN KHÁC NHAU ═══
+
+    Cả hai đều chặn chốt, nhưng việc phải làm khác hẳn nhau, nên chúng KHÔNG được gộp thành một câu
+    "dữ liệu chưa đủ":
+
+      · THIẾU SỐ LIỆU  — chính sách khai đúng, nhưng chưa ai nhập ngày công / KPI / sản lượng. Việc
+        phải làm: một người đi nhập, ở tab Đầu vào.
+      · THIẾU CẤU HÌNH — người này chưa gán chính sách, hoặc chính sách chỉ mới có bản nháp. Việc
+        phải làm: một người đi khai, ở tab Chính sách.
+
+    Không chặn thì hậu quả không phải một cảnh báo bỏ lỡ: `netPay` là `null` ⇒ `totalSalary` là
+    `null` ⇒ cửa `UNKNOWN_SALARY` ở trên đã chặn rồi, nhưng nó chỉ nói "còn con số chưa biết" mà
+    không nói con số nào của ai. Hai cửa dưới đây nói ĐÚNG chỗ và đúng người.
+  */
+  for (const issue of input.policyIssues ?? []) {
+    if (!issue.blocking) continue;
+    out.push({ code: "POLICY_BOOK_INVALID", message: issue.message });
+  }
+
+  for (const l of input.lines) {
+    for (const m of l.engineMissing ?? []) {
+      out.push({ code: "ENGINE_INPUT_MISSING", message: `${l.name} — thiếu “${m.label}”. ${m.message}` });
+    }
+    for (const p of l.engineProblems ?? []) {
+      out.push({ code: "ENGINE_POLICY_PROBLEM", message: `${l.name} — ${p}` });
+    }
   }
 
   return out;

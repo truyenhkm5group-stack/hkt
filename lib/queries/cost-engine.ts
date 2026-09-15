@@ -29,6 +29,7 @@ import {
   type CostComponent,
   type CoverageState,
 } from "@/lib/constants/cost-authority";
+import { COMPENSATION_PROFIT_LABEL } from "@/lib/constants/compensation-profit";
 import { COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
 import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond } from "@/lib/queries/cost-allocation";
 import { orderCogsFast } from "@/lib/queries/cogs";
@@ -260,17 +261,45 @@ async function build(period: Period): Promise<RecognizedCosts> {
       count: salaryLegacy.n,
     });
   }
-  // Hoa hồng: xem `lib/queries/payroll-cost.ts` — không thể vừa là đầu vào vừa là đầu ra của lợi nhuận.
-  warnings.push({
-    rule: "COMMISSION_BASIS_NEEDS_REVIEW",
-    severity: "medium",
-    title: "Chưa chốt cơ sở ghi nhận hoa hồng",
-    detail:
-      "Cả bốn cơ sở tính hoa hồng hiện có đều là % của LỢI NHUẬN, nên hoa hồng không thể đồng thời là chi phí nằm trong lợi nhuận. ERP không đoán: hoa hồng vẫn đi đường cũ (khoản chi nhóm “Lương”).",
-    action: "Chốt một cơ sở KHÔNG dẫn xuất từ lợi nhuận (vd % doanh thu thuần), hoặc coi hoa hồng là phân phối lợi nhuận sau khi đã có lợi nhuận.",
-    amount: 0,
-    count: 0,
-  });
+  /*
+    ═══ HOA HỒNG: CƠ SỞ NAY ĐÃ CÓ TÊN, NÊN CẢNH BÁO THÔI LÀ MỘT CÂU HỎI TREO ═══
+
+    Bản trước đẩy một cảnh báo VÔ ĐIỀU KIỆN nói "chưa chốt cơ sở ghi nhận hoa hồng". Nó đúng lúc
+    ấy, nhưng nó không bao giờ tắt được: câu hỏi nó đặt ra không có đường nào để trả lời trong ERP,
+    nên nó nằm đó mãi mãi — và một cảnh báo không bao giờ tắt là một cảnh báo người ta học cách
+    bỏ qua.
+
+    `lib/constants/compensation-profit.ts` nay khai dứt khoát:
+
+        LỢI NHUẬN TRƯỚC THÙ LAO BIẾN ĐỔI = doanh thu − mọi chi phí TRỪ hoa hồng
+        hoa hồng                          = r × (cơ sở ấy, sau bù lỗ)
+        LỢI NHUẬN KẾ TOÁN                 = cơ sở − hoa hồng
+
+    Vòng lặp biến mất vì cơ sở và lợi nhuận kế toán là HAI con số mang HAI cái tên, không phải một.
+
+    ─── NHƯNG CÒN MỘT LỖ HỔNG THẬT, VÀ NÓ ĐO ĐƯỢC ───
+
+    Hoa hồng đã trả được ghi ở bảng Chi phí nhóm "Lương", và nhóm ấy nằm TRONG chi phí vận hành —
+    tức nằm trong chính cơ sở mà lời khai vừa nói là phải loại nó ra. Khi điều đó xảy ra, cơ sở
+    tính hoa hồng tháng này bị trừ đi khoản hoa hồng của tháng TRƯỚC.
+
+    Nên cảnh báo nay CÓ ĐIỀU KIỆN: chỉ bật khi thật sự có khoản nhóm "Lương" vượt quá phần lương
+    cứng đối chiếu được — tức khi có thứ nhiều khả năng là hoa hồng đang nằm trong cơ sở. Không có
+    thì không cảnh báo, vì không có gì sai.
+  */
+  const hoaHongCoTheNamTrongCoSo = payrollCovered ? legacyChuaDoiChieu : Math.max(0, salaryLegacy.amount - payroll.fixedSalaryDue);
+  if (hoaHongCoTheNamTrongCoSo > 0) {
+    warnings.push({
+      rule: "COMMISSION_BASIS_NEEDS_REVIEW",
+      severity: "medium",
+      title: `${hoaHongCoTheNamTrongCoSo.toLocaleString("vi-VN")} ₫ nhiều khả năng là hoa hồng đang nằm TRONG cơ sở tính lương`,
+      detail: `Cơ sở tính thù lao đã có tên và đã khai rõ: “${COMPENSATION_PROFIT_LABEL}” — hoa hồng bị loại khỏi chính cơ sở của nó, rồi trừ ở bước SAU để ra lợi nhuận kế toán. Nhưng ${salaryLegacy.n} khoản nhóm “Lương” ở bảng Chi phí cộng lại nhiều hơn phần lương cứng ${hoaHongCoTheNamTrongCoSo.toLocaleString("vi-VN")} ₫, và phần dư ấy nằm trong chi phí vận hành — tức trong cơ sở. Hệ quả: cơ sở tính hoa hồng kỳ này bị trừ đi khoản hoa hồng của kỳ TRƯỚC.`,
+      action:
+        "Tách khoản HOA HỒNG khỏi nhóm “Lương” ở bảng Chi phí (đổi nhóm hoặc ghi rõ ở ô mô tả) để chúng thôi nằm trong cơ sở. Không xoá chứng từ — tiền đã trả là tiền thật, nó chỉ cần đứng đúng bước.",
+      amount: hoaHongCoTheNamTrongCoSo,
+      count: salaryLegacy.n,
+    });
+  }
 
   // ── CƯỚC / PHÍ HOÀN: khoản gõ tay không khai là điều chỉnh ⇒ trùng nguồn ──
   const dupLogistics = { amount: Number(logisticsDup[0]?.amount ?? 0), n: Number(logisticsDup[0]?.n ?? 0) };

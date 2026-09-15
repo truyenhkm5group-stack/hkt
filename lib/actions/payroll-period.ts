@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -16,12 +16,14 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport } from "@/lib/queries/payroll";
-import { rateToBp } from "@/lib/constants/payroll-carryover";
+import { LEGACY_CARRY_COMPONENT, rateToBp } from "@/lib/constants/payroll-carryover";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
+import { isFrozen, normalizePayrollStatus } from "@/lib/constants/payroll-lifecycle";
 // `finalizedPeriodsOverlapping` không còn dùng ở đây: phép kiểm chồng lấn nay chạy BÊN TRONG giao
 // dịch đã cầm khoá (xem dưới), vì kiểm ngoài rồi ghi trong là đúng cái khe mà hai yêu cầu đồng
 // thời lọt qua. Hàm cũ vẫn phục vụ `lib/queries/payroll-period.ts` cho phần chỉ ĐỌC.
 import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
+import { validatePolicyBookForPeriod } from "@/lib/queries/payroll-policies";
 import type { Period } from "@/lib/search-params";
 
 export type PeriodActionResult = { ok: true; key: string } | { error: string };
@@ -52,9 +54,21 @@ const finalizeSchema = z.object({
  *  4. **Không con số nào được CHƯA BIẾT.** `totalSalary = null` nghĩa là còn một phần chưa tính
  *     được; chốt lúc đó là đóng băng một chỗ trống và gọi nó là kết quả.
  *
- * ĐÃ CHỐT THÌ KHÔNG CHỐT LẠI, và cố ý KHÔNG có đường "mở lại": chứng từ về sau được xử lý bằng ĐỀ
- * XUẤT ĐIỀU CHỈNH (`payrollDrift`) — ảnh chụp vẫn là con số của kỳ, phần chênh đứng cạnh nó, và
- * NGƯỜI quyết có sửa hay không.
+ * ─── TỪ BẢN VÒNG ĐỜI: HÀM NÀY LÀ BƯỚC "TÍNH", KHÔNG PHẢI BƯỚC "KHOÁ" ───
+ *
+ * Trước đây một lượt bấm đi thẳng từ chưa có gì tới BẤT BIẾN. Nó gộp mất chỗ để soát: không ai
+ * nhìn con số trước khi nó đóng băng, và không ai ký tên vào nó.
+ *
+ * Nay hàm này đưa kỳ tới `CALCULATED` — đã có ảnh chụp, nhưng còn tính lại được. Đường đi tiếp
+ * (`UNDER_REVIEW` → `APPROVED` → `LOCKED` → `PAID`) nằm ở `lib/actions/payroll-run.ts`, và bước
+ * KHOÁ cần quyền `payroll:approve` chứ không phải `payroll:manage`.
+ *
+ * Hệ quả quan trọng: **sổ lỗ lũy kế nay ghi ở trạng thái NHÁP**, và chỉ thành chính thức khi kỳ
+ * được KHOÁ. Ghi nó thành chính thức ngay ở bước tính là đóng băng một nghĩa vụ dựa trên con số
+ * còn có thể đổi — và tháng sau sẽ đọc số dư ấy như thể nó đã được ai đó duyệt.
+ *
+ * Chứng từ về sau khi đã KHOÁ vẫn xử lý bằng ĐỀ XUẤT ĐIỀU CHỈNH (`payrollDrift`): ảnh chụp vẫn là
+ * con số của kỳ, phần chênh đứng cạnh nó, và NGƯỜI quyết có sửa hay không.
  */
 export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActionResult> {
   const user = await requireUser();
@@ -77,7 +91,16 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
   const db = await getDb();
   const p = schema.payrollPeriods;
   const [existing] = await db.select({ status: p.status }).from(p).where(and(eq(p.periodKey, key), eq(p.basis, basis))).limit(1);
-  if (existing?.status === "FINAL") return { error: "Kỳ này đã chốt rồi. Kỳ đã chốt là bất biến — chứng từ về sau xử lý bằng đề xuất điều chỉnh." };
+  /*
+    TÍNH LẠI ĐƯỢC, TRỪ KHI ĐÃ ĐÓNG BĂNG.
+
+    `CALCULATED` / `UNDER_REVIEW` / `APPROVED` đều tính lại được — đó chính là lý do có chúng: chỗ
+    để phát hiện sai trước khi đóng băng. `LOCKED` / `PAID` thì không, và `FINAL` cũ đọc như
+    `LOCKED`.
+  */
+  if (existing && isFrozen(normalizePayrollStatus(existing.status))) {
+    return { error: "Kỳ này đã KHOÁ. Kỳ đã khoá là bất biến — chứng từ về sau xử lý bằng khoản điều chỉnh ở kỳ kế tiếp, hoặc mở khoá (cần quyền duyệt lương và một lý do)." };
+  }
 
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
@@ -103,7 +126,15 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
       name: l.employee.shortName || l.employee.name,
       carryEstablished: l.carry ? l.carry.openingEstablished : null,
       carryReason: l.carry?.openingReason ?? null,
+      engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
+      engineProblems: l.engine?.result.problems ?? [],
     })),
+    // Cùng phép kiểm mà màn hình dùng — hai nơi không thể nói hai điều khác nhau về một sổ khai.
+    policyIssues: await validatePolicyBookForPeriod(
+      fromAt,
+      toAt,
+      report.lines.map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name })),
+    ),
   });
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
@@ -119,6 +150,8 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
       return {
         employeeId: l.employee.id,
         monthKey: c.monthKey,
+        // Đường tính cũ có đúng một khoản bù lỗ; khoá thành phần của nó là hằng số này.
+        componentCode: LEGACY_CARRY_COMPONENT,
         openingBalance: c.openingBalance ?? 0,
         openingSource: c.openingBasis === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH",
         realProfit: c.realProfit ?? 0,
@@ -128,7 +161,8 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
         signedCommission: c.signedCommission ?? 0,
         payableCommission: l.bonusPersonal ?? 0,
         closingBalance: c.closingBalance ?? 0,
-        status: "FINAL" as const,
+        // Ghi NHÁP: nghĩa vụ chỉ thành chính thức khi kỳ được KHOÁ (xem `lib/actions/payroll-run.ts`).
+        status: "DRAFT" as const,
         snapshot: {
           nhanSu: { id: l.employee.id, ten: l.employee.name, tenNgan: l.employee.shortName },
           tyLeCaNhanLucChot: l.employee.percentPersonal,
@@ -139,8 +173,8 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
         },
         calcVersion: PAYROLL_CALC_VERSION,
         note,
-        finalizedAt: luc,
-        finalizedBy: user.id,
+        // `finalizedAt`/`finalizedBy` để TRỐNG ở bước tính: chúng là dấu vết của lượt KHOÁ, và
+        // điền sẵn là khai rằng ai đó đã chốt trong khi chưa ai chốt.
         createdBy: user.id,
       };
     });
@@ -174,11 +208,13 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
     const chongLan = await tx
       .select({ periodKey: p.periodKey, basis: p.basis })
       .from(p)
-      .where(and(eq(p.status, "FINAL"), lte(p.periodStart, toAt), gte(p.periodEnd, fromAt)));
+      // Chỉ kỳ ĐÃ ĐÓNG BĂNG mới chặn: hai bản NHÁP chồng lấn là chuyện bình thường khi đang thử
+      // các mốc kỳ khác nhau, và chặn chúng là chặn chính việc soát.
+      .where(and(inArray(p.status, ["FINAL", "LOCKED", "PAID"]), lte(p.periodStart, toAt), gte(p.periodEnd, fromAt)));
     const trung = chongLan.find((k) => k.basis === basis);
     if (trung) {
       return {
-        error: `Kỳ ${from} → ${to} chồng lấn ngày với kỳ ĐÃ CHỐT ${trung.periodKey} (cùng cơ sở ${PAYROLL_BASIS_SHORT[basis]}). Chốt tiếp là trả lương hai lần cho những ngày nằm trong cả hai kỳ.`,
+        error: `Kỳ ${from} → ${to} chồng lấn ngày với kỳ ĐÃ KHOÁ ${trung.periodKey} (cùng cơ sở ${PAYROLL_BASIS_SHORT[basis]}). Chốt tiếp là trả lương hai lần cho những ngày nằm trong cả hai kỳ.`,
       } as const;
     }
 
@@ -189,19 +225,32 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
         periodStart: fromAt,
         periodEnd: toAt,
         basis,
-        status: "FINAL",
+        status: "CALCULATED",
         snapshot,
         calcVersion: PAYROLL_CALC_VERSION,
         note,
         finalizedAt: luc,
         finalizedBy: user.id,
         createdBy: user.id,
+        calcRuns: 1,
       })
       .onConflictDoUpdate({
         target: [p.periodKey, p.basis],
         // Chỉ nâng một dòng NHÁP lên FINAL. Mệnh đề `where` là lớp chặn thứ hai ngay tại CSDL.
-        set: { status: "FINAL", snapshot, calcVersion: PAYROLL_CALC_VERSION, note, finalizedAt: luc, finalizedBy: user.id, updatedAt: luc },
-        setWhere: eq(p.status, "DRAFT"),
+        set: {
+          status: "CALCULATED",
+          snapshot,
+          calcVersion: PAYROLL_CALC_VERSION,
+          note,
+          finalizedAt: luc,
+          finalizedBy: user.id,
+          updatedAt: luc,
+          // Đếm số lượt tính lại: một kỳ tính lại năm lần trước khi duyệt là tín hiệu đáng đọc.
+          calcRuns: sql`${p.calcRuns} + 1`,
+        },
+        // Ghi đè được ở mọi trạng thái CÒN SỬA ĐƯỢC — đó chính là lý do bốn trạng thái ấy tồn tại.
+        // `LOCKED`/`PAID`/`FINAL` bị chặn từ trước khi vào giao dịch, và bị chặn lại ở đây.
+        setWhere: inArray(p.status, ["DRAFT", "CALCULATED", "UNDER_REVIEW", "APPROVED"]),
       });
 
     /*
@@ -220,7 +269,7 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
           .insert(c)
           .values(dong)
           .onConflictDoUpdate({
-            target: [c.employeeId, c.monthKey],
+            target: [c.employeeId, c.monthKey, c.componentCode],
             set: { ...dong, updatedAt: luc },
             setWhere: eq(c.status, "DRAFT"),
           });
@@ -235,7 +284,7 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
   await audit({
     userId: user.id,
     userEmail: user.email,
-    action: "PAYROLL_PERIOD_FINALIZE",
+    action: "PAYROLL_PERIOD_CALCULATE",
     entity: "PAYROLL_PERIOD",
     entityId: `${key}:${basis}`,
     detail: { key, basis, calcVersion: PAYROLL_CALC_VERSION, totalSalary: report.totalSalary, totalProfit: report.totalProfit, people: report.lines.length, soLoGhi: soLo.length, note },

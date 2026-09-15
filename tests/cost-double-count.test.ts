@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -124,7 +124,38 @@ export async function testCostDoubleCount(db: Db) {
   assert.equal(costs.components.SALARY.usedFallback, true, "4. đánh dấu rõ là đang dùng nguồn dự phòng");
   const coverWarn = costs.warnings.find((w) => w.rule === "PAYROLL_COST_COVERAGE_INCOMPLETE");
   assert.ok(coverWarn, "4. lùi nguồn phải có cảnh báo, KHÔNG được lùi im lặng");
-  assert.ok(costs.warnings.some((w) => w.rule === "COMMISSION_BASIS_NEEDS_REVIEW"), "4. cơ sở tính hoa hồng chưa chốt phải được nêu");
+  /*
+    ═══ 4b · CƠ SỞ TÍNH HOA HỒNG ĐÃ CÓ TÊN ⇒ CẢNH BÁO THÔI TREO VÔ ĐIỀU KIỆN ═══
+
+    Bản trước đẩy `COMMISSION_BASIS_NEEDS_REVIEW` mỗi lần tính chi phí, kể cả khi không có gì sai.
+    Một cảnh báo không bao giờ tắt là một cảnh báo người ta học cách bỏ qua.
+
+    Nay cơ sở đã khai dứt khoát ở `lib/constants/compensation-profit.ts`: hoa hồng bị loại khỏi
+    CHÍNH cơ sở của nó, rồi trừ ở bước SAU. Cảnh báo chỉ còn bật khi có thứ ĐO ĐƯỢC đang sai —
+    khoản nhóm "Lương" vượt quá lương cứng, tức nhiều khả năng có hoa hồng nằm trong cơ sở.
+
+    Ở đây lương cứng khai 9.000.000đ và bảng Chi phí cũng đúng 9.000.000đ, nên KHÔNG có phần dư
+    nào và KHÔNG có gì để cảnh báo.
+  */
+  assert.ok(
+    !costs.warnings.some((w) => w.rule === "COMMISSION_BASIS_NEEDS_REVIEW"),
+    "4. khoản nhóm Lương vừa đúng lương cứng ⇒ không có hoa hồng nằm trong cơ sở ⇒ không cảnh báo treo",
+  );
+
+  // Nay thêm một khoản HOA HỒNG ghi lẫn vào nhóm "Lương": phần dư ấy nằm trong chi phí vận hành,
+  // tức nằm trong chính cơ sở mà lời khai vừa nói là phải loại nó ra. Đó là thứ phải báo.
+  await db.insert(schema.expenses).values({
+    id: "dc-exp-commission", category: "SALARY", description: "Hoa hồng tháng 12 trả tháng 1",
+    amount: 3_000_000, occurredAt: d("2027-01-08"), costSource: "MANUAL",
+  });
+  clearMemo();
+  costs = await getRecognizedCosts(KY);
+  const hoaHongTrongCoSo = costs.warnings.find((w) => w.rule === "COMMISSION_BASIS_NEEDS_REVIEW");
+  assert.ok(hoaHongTrongCoSo, "4. có khoản vượt quá lương cứng ⇒ PHẢI báo hoa hồng đang nằm trong cơ sở");
+  assert.equal(hoaHongTrongCoSo?.amount, 3_000_000, "4. và nói đúng số tiền đang đứng nhầm bước");
+  await db.delete(schema.expenses).where(eq(schema.expenses.id, "dc-exp-commission"));
+  clearMemo();
+  costs = await getRecognizedCosts(KY);
 
   // ══ TEST 5 — 9.000.000đ/THÁNG, XEM 7 NGÀY CỦA THÁNG 30 NGÀY ⇒ 2.100.000đ ══
   assert.equal(prorateMonthlyAmount(9_000_000, TUAN30.from, TUAN30.to), 2_100_000, "5. 9tr × 7/30 = 2.100.000đ");

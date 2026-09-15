@@ -15,6 +15,10 @@ import {
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { FinanceNav } from "@/components/finance-nav";
+import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
+import { RunWorkflow } from "@/app/(dashboard)/payroll/run-workflow";
+import { CalculationDetail } from "@/app/(dashboard)/payroll/calculation-detail";
+import { ProfitBreakdown } from "@/app/(dashboard)/payroll/profit-breakdown";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -28,16 +32,17 @@ import {
 } from "@/components/ui/table";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { can, requireUser } from "@/lib/auth/session";
-import { employeeMatchesUser } from "@/lib/queries/payroll";
+import { employeeMatchesUser, listEmployees } from "@/lib/queries/payroll";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_LABEL,
+  PAYROLL_BASIS_NAME,
   type PayrollBasis,
   PAYROLL_BASES,
   PAYROLL_BASIS_SHORT,
   parsePayrollBasis,
 } from "@/lib/constants/payroll";
-import { formatNumber, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
   getPayrollReport,
   listAdAccounts,
@@ -49,6 +54,7 @@ import { ProductOwnersForm } from "@/app/(dashboard)/payroll/product-owners-form
 import { FinalizePeriodButton } from "@/app/(dashboard)/payroll/finalize-button";
 import { FinalizedPeriodTable } from "@/app/(dashboard)/payroll/finalized-period";
 import { getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
+import { validatePolicyBookForPeriod } from "@/lib/queries/payroll-policies";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
 import { cn } from "@/lib/utils";
 
@@ -68,21 +74,36 @@ export default async function PayrollPage({
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
   const pagesForConfig = listPagesForConfig().catch(() => []);
-  const [report, unassigned, accounts, products, periodState] = await Promise.all([
+  const [report, unassigned, accounts, products, periodState, employeesForCheck] = await Promise.all([
     getPayrollReport(period, basis),
     unassignedMarketerSpend(period),
     listAdAccounts(),
     listProductsForMapping(),
     getPayrollPeriodState(period, basis),
+    listEmployees(),
   ]);
   /*
-    KỲ ĐÃ CHỐT ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
+    LỖI Ở SỔ KHAI, KHÁC HẲN THIẾU SỐ LIỆU.
+
+    Chồng lấn mốc gán, khoảng trống không chính sách nào phủ, thành phần khai tỷ lệ 0 — cả ba đều
+    KHÔNG lộ ra ở con số cuối cùng: bảng vẫn ra một số, và số ấy sai. Nên chúng được kiểm riêng,
+    và câu chặn nói ĐÚNG chỗ phải sửa.
+  */
+  const policyIssues =
+    period.from && period.to
+      ? await validatePolicyBookForPeriod(period.from, period.to, employeesForCheck.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name })))
+      : [];
+  /*
+    KỲ ĐÃ KHOÁ ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
 
     Bản tính sống vẫn được dựng (một lần, ở trên) nhưng chỉ để so ra phần CHÊNH phát sinh sau ngày
-    chốt — nó KHÔNG được hiện thay cho con số của kỳ. Đổi tỷ lệ hay nhập thêm phiếu kho về sau mà
+    khoá — nó KHÔNG được hiện thay cho con số của kỳ. Đổi tỷ lệ hay nhập thêm phiếu kho về sau mà
     bảng lương tháng trước đổi theo là viết lại một kỳ đã trả tiền.
+
+    `frozen` = `LOCKED` hoặc `PAID` (và `FINAL` cũ đọc như `LOCKED`). Bốn trạng thái trước đó —
+    kể cả `APPROVED` — vẫn hiện bản tính sống: chúng tồn tại chính là để còn phát hiện được sai.
   */
-  const daChot = periodState.status === "FINAL" && periodState.snapshot !== null;
+  const daChot = periodState.frozen && periodState.snapshot !== null;
   const drift = daChot && periodState.snapshot ? payrollDrift(periodState.snapshot, report) : [];
   /*
     VIỆC CÒN THIẾU TRƯỚC KHI CHỐT — cùng một hàm thuần với `lib/actions/payroll-period.ts`.
@@ -100,7 +121,10 @@ export default async function PayrollPage({
       name: l.employee.shortName || l.employee.name,
       carryEstablished: l.carry ? l.carry.openingEstablished : null,
       carryReason: l.carry?.openingReason ?? null,
+      engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
+      engineProblems: l.engine?.result.problems ?? [],
     })),
+    policyIssues,
   });
   const qs = new URLSearchParams({
     period: period.key,
@@ -133,7 +157,7 @@ export default async function PayrollPage({
       <PageHeader
         eyebrow="Tài chính"
         title="Lương & hoa hồng"
-        description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
+        description={`${period.label} · ${PAYROLL_BASIS_NAME[basis]} (${PAYROLL_BASIS_LABEL[basis].toLowerCase()}) · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         actions={
           <div className="flex items-center gap-2">
             {/* Xuất ĐÚNG bảng đang xem: `qs` mang y nguyên kỳ và cơ sở lợi nhuận của màn hình. */}
@@ -156,6 +180,30 @@ export default async function PayrollPage({
         }
       />
       <FinanceNav />
+      <PayrollTabs canManage={canManage} />
+
+      {/*
+        THANH VÒNG ĐỜI ĐẶT TRƯỚC MỌI BẢNG SỐ.
+
+        Câu hỏi đầu tiên của người mở bảng lương không phải "bao nhiêu tiền" mà là "con số này đã
+        được ai duyệt chưa". Để nó ở cuối trang là để người ta đọc số trước rồi mới biết số ấy còn
+        là bản nháp.
+      */}
+      {periodState.key && viewAll ? (
+        <RunWorkflow
+          periodKey={periodState.key}
+          basis={basis}
+          status={periodState.status === "NONE" ? "DRAFT" : periodState.status}
+          canManage={canManage}
+          canApprove={can(user, "payroll:approve")}
+          calcRuns={periodState.calcRuns}
+          statusReason={periodState.statusReason}
+          approvedByEmail={periodState.approvedByEmail}
+          approvedAt={periodState.approvedAt ? formatDateTime(periodState.approvedAt) : null}
+          lockedAt={periodState.lockedAt ? formatDateTime(periodState.lockedAt) : null}
+          paidAt={periodState.paidAt ? formatDateTime(periodState.paidAt) : null}
+        />
+      ) : null}
 
       <DataTableToolbar
         period={{ defaultKey: "month" }}
@@ -163,15 +211,15 @@ export default async function PayrollPage({
           {
             key: "basis",
             label: "Cơ sở lợi nhuận",
-            options: PAYROLL_BASES.map((b) => ({ value: b, label: PAYROLL_BASIS_SHORT[b] })),
+            options: PAYROLL_BASES.map((b) => ({ value: b, label: PAYROLL_BASIS_NAME[b] })),
             single: true,
           },
         ]}
         resultLabel={
           basis === "cash"
             ? report.cashRatio === null
-              ? `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ. ${report.cashRatioReason ?? ""}`
-              : `Dòng tiền thực: LN tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; LN cá nhân = LN1 cá nhân × ${report.cashRatio.toFixed(2)} (LN dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ LN1 ${formatVND(report.marketers.totals.profit, { compact: true })}) — đây là phép QUY ĐỔI THEO TỶ TRỌNG, không phải lợi nhuận đo được của từng người.`
+              ? `Dòng tiền thực: lợi nhuận tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ. ${report.cashRatioReason ?? ""}`
+              : `Dòng tiền thực: lợi nhuận tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; lợi nhuận cá nhân = phần cá nhân ở cơ sở “${PAYROLL_BASIS_NAME.profit1}” × ${report.cashRatio.toFixed(2)} (dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ ${formatVND(report.marketers.totals.profit, { compact: true })}) — đây là phép QUY ĐỔI THEO TỶ TRỌNG, không phải lợi nhuận đo được của từng người.`
             : basis === "nominal"
               ? "Danh nghĩa: đơn lên trong kỳ × tỷ lệ giao thành công ước tính (GTC = COD thực > 100K) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
               : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
@@ -192,7 +240,7 @@ export default async function PayrollPage({
           <b>Cơ sở “{PAYROLL_BASIS_SHORT[basis]}” KHÔNG dùng để chốt lương được.</b>{" "}
           <span className="text-muted-foreground">{PAYROLL_BASIS_ELIGIBILITY[basis].why}</span>{" "}
           <Link href={`/payroll?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(qs)), basis: "profit1" }).toString()}`} className="font-medium underline">
-            Xem ở cơ sở LN1
+            Xem ở cơ sở “{PAYROLL_BASIS_NAME.profit1}”
           </Link>{" "}
           <span className="text-muted-foreground">— {PAYROLL_BASIS_ELIGIBILITY.profit1.why}</span>
         </div>
@@ -461,23 +509,44 @@ export default async function PayrollPage({
                           : ""}
                       </div>
                     </TableCell>
+                    {/*
+                      MÀN HÌNH PHẢI NÓI RÕ NGƯỜI NÀY TÍNH BẰNG ĐƯỜNG NÀO.
+
+                      Hai đường tồn tại song song trong giai đoạn chuyển, và một bảng không phân
+                      biệt được chúng là một bảng mà người đọc không biết con số đến từ đâu. Đã gán
+                      chính sách ⇒ hiện tên chính sách và các thành phần của nó; chưa gán ⇒ hiện
+                      bốn ô cũ như trước.
+                    */}
                     <TableCell className="text-xs">
-                      {[
-                        l.employee.fixed
-                          ? `cứng ${formatVND(l.employee.fixed, { compact: true })}`
-                          : null,
-                        l.employee.percentTotal
-                          ? `${l.employee.percentTotal}% LN tổng`
-                          : null,
-                        l.employee.percentPersonal
-                          ? `${l.employee.percentPersonal}% LN cá nhân`
-                          : null,
-                        l.employee.percentRevenue
-                          ? `${l.employee.percentRevenue}% DT cá nhân`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" + ") || "—"}
+                      {l.engine ? (
+                        <>
+                          <div className="font-medium">
+                            {[...new Map(l.engine.segments.filter((sg) => sg.policyId).map((sg) => [sg.policyCode, sg])).values()]
+                              .map((sg) => `${sg.policyName || sg.policyCode} #${sg.policyVersion ?? "?"}`)
+                              .join(" → ") || "chưa có phiên bản hiệu lực"}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {l.engine.result.components.map((c) => c.label).join(" + ") || "chưa có thành phần nào tính được"}
+                          </div>
+                        </>
+                      ) : (
+                        [
+                          l.employee.fixed
+                            ? `cứng ${formatVND(l.employee.fixed, { compact: true })}`
+                            : null,
+                          l.employee.percentTotal
+                            ? `${l.employee.percentTotal}% LN tổng`
+                            : null,
+                          l.employee.percentPersonal
+                            ? `${l.employee.percentPersonal}% LN cá nhân`
+                            : null,
+                          l.employee.percentRevenue
+                            ? `${l.employee.percentRevenue}% DT cá nhân`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" + ") || "—"
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Money
@@ -604,6 +673,22 @@ export default async function PayrollPage({
         </div>
       </SectionCard>
       )}
+
+      {/*
+        ═══ CHI TIẾT CÁCH TÍNH CHO TỪNG NGƯỜI ĐANG ĐI QUA MÁY CHUNG ═══
+
+        Yêu cầu: *"không chỉ hiện con số cuối cùng."* Khối này in đúng các bước máy tính đã làm,
+        theo đúng thứ tự nó đã làm, lấy thẳng từ vết giải thích mà chính phép tính sinh ra — không
+        dựng lại ở tầng màn hình.
+
+        Chỉ hiện cho kỳ CHƯA CHỐT: kỳ đã chốt đọc ảnh chụp ở khối riêng bên dưới, và ảnh chụp mang
+        theo vết giải thích của LÚC ẤY chứ không phải của chính sách hôm nay.
+      */}
+      {!daChot
+        ? lines
+            .filter((l) => l.engine)
+            .map((l) => <CalculationDetail key={l.employee.id} engine={l.engine!} employeeName={l.employee.shortName || l.employee.name} />)
+        : null}
 
       {/*
         ═══ BẢNG BÙ TRỪ LỖ LŨY KẾ ═══
@@ -857,8 +942,21 @@ export default async function PayrollPage({
         </div>
       </SectionCard>
 
+      {/*
+        ═══ BÓC TÁCH LỢI NHUẬN TÍNH LƯƠNG, TỪNG DÒNG MỘT ═══
+
+        Đặt TRƯỚC bảng theo mã hàng: người đọc cần thấy "con số này từ đâu ra" trước khi cần thấy
+        "chia theo mã thế nào". Bảng theo mã trả lời câu hỏi thứ hai, không thay được câu thứ nhất.
+      */}
       {selectedMarketer ? (
-        <div id="marketer">
+        <div id="marketer" className="space-y-4">
+          <ProfitBreakdown
+            marketer={selectedMarketer}
+            carry={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.carry ?? null}
+            commissionPercent={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.employee.percentPersonal ?? 0}
+            commission={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.bonusPersonal ?? null}
+            periodQs={qs}
+          />
           <SectionCard
             title={`${selectedMarketer.name} · theo mã hàng`}
             description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − giá vốn chịu ${formatVND(selectedMarketer.cogsCharged)} + % chủ mã nhận ${formatVND(selectedMarketer.ownerBonusReceived)} − % chia cho chủ mã ${formatVND(selectedMarketer.ownerBonusPaid)} − QC test ${formatVND(selectedMarketer.testSpend)}`}

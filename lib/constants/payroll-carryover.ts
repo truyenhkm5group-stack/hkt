@@ -88,3 +88,13 @@ export function wholeMonthKey(from: Date | null, to: Date | null): string | null
 /** Tỷ lệ % ⇒ số nguyên nhân 100 (10% ⇒ 1000), để lưu mà không mất chữ số thập phân. */
 export const rateToBp = (percent: number) => Math.round(Number(percent || 0) * 100);
 export const bpToRate = (bp: number) => Number(bp || 0) / 100;
+
+/**
+ * KHOÁ THÀNH PHẦN CỦA HOA HỒNG MKTer TRONG SỔ LỖ.
+ *
+ * Từ khi có chính sách lương chung, sổ lỗ mang khoá (nhân sự, tháng, THÀNH PHẦN) — một người có
+ * thể mang hai khoản cùng bù lỗ, và hai nghĩa vụ ấy là hai chuỗi số dư RIÊNG. Đường tính cũ (bốn ô
+ * trên hồ sơ nhân sự) chỉ có ĐÚNG MỘT khoản bù lỗ, và nó mang khoá này — cùng giá trị với mặc định
+ * của cột trong CSDL, nên mọi dòng đã ghi trước bản ấy vẫn trỏ đúng vào chuỗi số dư của chính nó.
+ */
+export const LEGACY_CARRY_COMPONENT = "MARKETING_PROFIT";
