@@ -42,7 +42,7 @@ chưa có bản sao lưu — dừng lại.
 
 ### 1.2 Đối chiếu production (CHỈ ĐỌC)
 
-Hai cách, dùng cách nào cũng được:
+**Hai cách, KHÔNG thay thế nhau** — cách A chạy được ngay, cách B chỉ chạy được sau deploy:
 
 **Cách A — không cần deploy gì, chạy ngay hôm nay.** Thao tác `db-query` chạy dưới
 `default_transaction_read_only=on`, nghĩa là chính Postgres từ chối mọi lệnh ghi.
@@ -56,7 +56,9 @@ select count(*) as ky_luong, count(*) filter (where status in ('FINAL','LOCKED',
 Kỳ vọng ở thời điểm viết tài liệu: `0 | 0`. Nếu ra số khác 0 thì đã có kỳ lương được chốt kể từ
 15/09/2026 — **đọc lại mục 0**, vì căn cứ "không con số nào đổi" dựa trên việc bảng ấy rỗng.
 
-**Cách B — sau khi deploy, đối chiếu từng người bằng script.** Bỏ trống `--from/--to` thì script
+**Cách B — đối chiếu từng người bằng script. CHỈ CHẠY ĐƯỢC SAU KHI DEPLOY** (xem mục 1b: thao tác
+ops chỉ thay MỘT tệp script, còn mọi thứ nó `import` vẫn đọc từ ảnh đang phục vụ — nên script của
+nhánh chưa deploy sẽ chết ở `Cannot find module`). Bỏ trống `--from/--to` thì script
 **tự tìm kỳ gần nhất CÓ dữ liệu nguồn** và in ra từng kỳ đã thử. Nó DỪNG nếu Postgres không xác
 nhận phiên là chỉ đọc, và chụp ảnh đếm 10 bảng lương TRƯỚC/SAU để chứng minh không ghi gì.
 Kỳ không có nguồn số nào khác 0 thì kết luận là `RECONCILIATION_BLOCKED_BY_CONFIG`, **không phải
@@ -147,15 +149,90 @@ kiểm ở mục 3.2.
 
 ---
 
-## 2. DEPLOY
+## 1b. CƠ CHẾ PHÁT HÀNH — ĐÃ KIỂM TỪ MÃ NGUỒN, KHÔNG SUY ĐOÁN
 
-1. **Merge PR #3 vào `main`** (chủ shop bấm).
-2. `Actions → "Deploy ERP to VPS" → Run workflow` trên `main`.
-   Workflow tự chạy `npm ci` → `typecheck` → `lint` → `npm test` → `build` **TRƯỚC** khi chạm máy
-   chủ. Contract test đỏ thì deploy dừng, không phải cảnh báo.
-3. **Migration tự áp khi ứng dụng khởi động** — không có bước chạy tay.
-4. Chờ workflow báo thành công. Nó tự gọi `/api/health` và so `ERP_COMMIT` với SHA vừa deploy; sai
-   SHA thì nó báo lỗi.
+Ba câu hỏi quyết định thứ tự của cả sổ tay này. Câu trả lời lấy từ chính tệp workflow:
+
+| Câu hỏi | Trả lời | Bằng chứng |
+| --- | --- | --- |
+| Merge/push vào `main` có tự deploy không? | **KHÔNG** | `.github/workflows/deploy-vps.yml` và `ops-vps.yml` đều chỉ có `on: workflow_dispatch`. Không tệp nào có `push:` / `pull_request:` / `schedule:` / `release:` / `workflow_run:`. Kho không có `.github` nào khác, không git hook, không husky. |
+| Migration có tự chạy khi merge không? | **KHÔNG** | Migration chạy ở `instrumentation.node.ts` — tức là lúc **tiến trình ứng dụng khởi động**. Merge không khởi động tiến trình nào. |
+| Deploy có tự chạy migration không? | **CÓ** | Cùng chỗ trên: deploy dựng image mới rồi khởi động lại container ⇒ `ensureMigrated()` chạy. (Biến `SKIP_AUTO_MIGRATE=1` tắt được, nhưng **đừng dùng**: mã mới trên lược đồ cũ sẽ hỏng trang lương.) |
+
+### ⚠ ĐIỀU QUAN TRỌNG NHẤT: MERGE KHÔNG ĐỦ ĐỂ CHẠY ĐỐI CHIẾU PRODUCTION
+
+Có thể tưởng rằng "merge nhưng chưa deploy" là đủ để chạy `payroll:reconcile` trên production qua
+thao tác ops. **Không phải**, và đây là cơ chế thật:
+
+```
+fetch_script() { curl ... "https://api.github.com/repos/.../contents/scripts/$1?ref=main"; }
+fetch_script X.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/X.ts'
+docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/X.ts
+```
+
+Nó chỉ ghi đè **MỘT tệp script** vào container đang chạy. Mọi thứ script ấy `import`
+(`@/lib/...` → `./lib/...` theo `tsconfig.paths`) vẫn đọc từ **ẢNH ĐANG PHỤC VỤ**, tức mã của lần
+deploy gần nhất — `Dockerfile` dùng `COPY . .` nên toàn bộ mã nguồn nằm trong ảnh.
+
+Đã kiểm bằng cách mô phỏng đúng tình huống ấy (checkout `main` + thả script của nhánh vào):
+
+```
+Error: Cannot find module '@/lib/queries/payroll-migration'
+```
+
+Năm tệp mà script cần — `payroll-migration`, `payroll-reconcile-source`, `reconcile-gate`,
+`engine`, `migration-preview` — **chưa có trên `main`**, nên chúng cũng chưa có trong ảnh. Merge
+đưa chúng lên `main` nhưng **không** đưa vào ảnh; chỉ deploy mới làm điều đó.
+
+**Hệ quả cho thứ tự phát hành:** đối chiếu production thật chỉ chạy được **SAU** deploy. Nên deploy
+và **KÍCH HOẠT** phải là hai bước tách rời — xem mục 2.
+
+---
+
+## 2. DEPLOY ≠ KÍCH HOẠT
+
+Ba bước, và ranh giới giữa chúng là điều giữ cho bản này an toàn:
+
+### 2.1 Merge (không đổi gì trên máy chủ)
+
+**Merge PR #3 vào `main`.** Không có workflow nào chạy. Không có migration nào áp. Production vẫn
+chạy ảnh cũ, y nguyên. Đây là bước có thể **revert bằng một revert commit** nếu đổi ý.
+
+### 2.2 Deploy (đổi mã + áp migration, KHÔNG kích hoạt lương mới)
+
+`Actions → "Deploy ERP to VPS" → Run workflow` trên `main`.
+
+- Workflow tự chạy `npm ci` → toàn vẹn kho mã → `typecheck` → `lint` → `npm test` → `build`
+  **TRƯỚC** khi chạm máy chủ. Contract test đỏ thì deploy dừng, không phải cảnh báo.
+- Migration tự áp khi container khởi động — không có bước chạy tay.
+- Workflow tự gọi `/api/health` và so `ERP_COMMIT` với SHA vừa deploy.
+
+**Sau bước này máy lương mới đã có mặt nhưng CHƯA tính cho ai**: bảy bảng sinh ra rỗng, chưa ai
+được gán chính sách, nên mọi người vẫn đi đường tính cũ. Kiểm ở mục 3.
+
+### 2.3 Đối chiếu production (chỉ đọc) — CỔNG trước khi kích hoạt
+
+Chỉ chạy được sau 2.2, vì lý do ở mục 1b:
+
+```
+docker exec erp-app npm run payroll:reconcile -- --csv /tmp/doi-chieu.csv
+docker cp erp-app:/tmp/doi-chieu.csv ./doi-chieu.csv
+```
+
+Đọc dòng `KẾT LUẬN CỔNG ĐỐI CHIẾU`:
+
+| Kết luận | Làm gì |
+| --- | --- |
+| `RECONCILIATION_PASS` | Đi tiếp mục 2.4 (kích hoạt), từng người một |
+| `RECONCILIATION_BLOCKED_BY_CONFIG` | Khai nốt phần thiếu (thường là phân công lao động) rồi chạy lại. **Không kích hoạt.** |
+| `NOT_READY_BUG_FOUND` | **DỪNG.** Quay đầu ứng dụng theo mục 4. Không kích hoạt. |
+
+### 2.4 KÍCH HOẠT là một bước RIÊNG
+
+Gán chính sách cho **từng người**, ở `/payroll/migration`, sau khi đọc bảng đối chiếu của chính
+người đó. Không có nút hàng loạt, và cố ý không có.
+
+**Deploy mã ≠ kích hoạt lương.** Gộp hai bước là bỏ mất chính cái cổng vừa dựng.
 
 ---
 
@@ -261,6 +338,61 @@ từ chối ở **máy chủ** (không phải chỉ ẩn nút).
 Kể cả khi máy mới có vấn đề, người chưa gán chính sách vẫn được trả bằng đường cũ. Muốn đưa một
 người ĐÃ chuyển về lại đường cũ: xoá dòng gán chính sách của người ấy ở `/payroll/assignments`, hoặc
 đóng nó lại tại một mốc. Lịch sử không mất.
+
+---
+
+## 4b. BẢNG TÍCH RELEASE FREEZE
+
+In ra, tích từng ô, ghi số vào. Ô nào không tích được thì **dừng ở đó** — không có ô "tạm bỏ qua".
+
+### TRƯỚC KHI MERGE
+
+| ☐ | Việc | Ghi lại |
+| --- | --- | --- |
+| ☐ | Sao lưu production (ops `backup`) — đọc tên tệp dump ở dòng cuối | tệp: ____ |
+| ☐ | SHA của `main` ngay trước merge | ____ |
+| ☐ | SHA của PR #3 | ____ |
+| ☐ | Số migration đã áp trên production | ____ |
+| ☐ | `payroll_periods` = 0 · `marketer_profit_carryover` = 0 | ____ / ____ |
+| ☐ | Bảy bảng mới **chưa tồn tại** | ____ |
+| ☐ | Không có biến môi trường mới nào phải thêm | (đúng: không có) |
+| ☐ | Xác nhận merge **KHÔNG** kích hoạt workflow nào (mục 1b) | ✓ |
+
+### TRƯỚC KHI DEPLOY
+
+| ☐ | Việc | Ghi lại |
+| --- | --- | --- |
+| ☐ | Đã merge, `main` xanh, không conflict | ____ |
+| ☐ | Hiểu rằng đối chiếu production **chỉ chạy được sau** deploy (mục 1b) | ✓ |
+| ☐ | Số dòng gán chính sách hiện có (phải = 0) | ____ |
+| ☐ | Số kỳ lương mới hiện có (phải = 0) | ____ |
+| ☐ | Số dòng sổ lỗ lũy kế (phải = 0) | ____ |
+| ☐ | Đường tính cũ vẫn là đường trả tiền cho mọi người | ✓ |
+
+### SAU DEPLOY — TRƯỚC KHI KÍCH HOẠT
+
+| ☐ | Việc | Ghi lại |
+| --- | --- | --- |
+| ☐ | `/api/health` xanh, `ERP_COMMIT` khớp SHA vừa deploy | ____ |
+| ☐ | Migration đã áp = số trước + **3** | ____ |
+| ☐ | Bảy bảng mới có mặt và **RỖNG** | ____ |
+| ☐ | Bốn ô lương cũ của một người bất kỳ **không đổi số** so với trước deploy | ____ |
+| ☐ | Tám màn hình lương mở được (deploy tự smoke) | ____ |
+| ☐ | **Đối chiếu chỉ đọc** chạy xong, đọc kết luận cổng | ____ |
+| ☐ | Ảnh đếm bảng lương TRƯỚC = SAU khi chạy đối chiếu | ____ |
+| ☐ | `/settings/users`: không vai trò nào ngoài ADMIN/ACCOUNTANT có `payroll:view` | ____ |
+| ☐ | Nhật ký `/settings/audit` có dòng cho mọi thao tác vừa làm | ____ |
+| ☐ | Tệp xuất CSV mang dòng "Nguồn số: …" đúng trạng thái kỳ | ____ |
+| ☐ | Không bảng nào bị ghi **chỉ vì deploy** | ____ |
+
+### KÍCH HOẠT (bước RIÊNG, từng người một)
+
+| ☐ | Việc | Ghi lại |
+| --- | --- | --- |
+| ☐ | Khai phân công lao động cho người sắp chuyển | ____ |
+| ☐ | Đọc bảng đối chiếu của **chính người đó** ở `/payroll/migration` | ____ |
+| ☐ | Lệch = 0, hoặc lệch có lý do và lý do ấy đã ghi vào nhật ký | ____ |
+| ☐ | Bấm chuyển **một người**, rồi kiểm lại bảng lương trước khi chuyển người tiếp theo | ____ |
 
 ---
 
