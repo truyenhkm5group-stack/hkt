@@ -263,12 +263,55 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    báo cáo, và nó cần chủ shop chốt cơ sở trước (AGENTS.md mục 18 vẫn bật
    `COMMISSION_BASIS_NEEDS_REVIEW`).
 
-3. **F07 · F08 (giá vốn đã ghi nhận, hàng tặng, phí vận đơn hoàn/giao lại) chưa làm** trong bản
-   này.
+3. **F07 — ĐO XONG, VÀ SỐ ĐO CHẶN BẢN VÁ LẠI.** Đây là phần đáng đọc nhất của mục này.
 
-4. **F09 (`/ads` 6,5 giây nguội) chưa làm** — xem mục 5.5 biên bản 14/09, ba giả thuyết đã bị bác
+   Lỗi có thật và tái hiện được: một đơn giao 12/07 với giá vốn 200.000đ nhảy lên **600.000đ** sau
+   khi một lô hàng không liên quan về ngày 20/07. Nguyên nhân: `LINE_UNIT_COST` lấy phiếu nhập gần
+   nhất **tính theo hôm nay**, còn `orderCogsFast()` ở cấp ĐƠN đã chốt bằng `recognized_cogs`. Hai
+   đường, hai con số, và đường sai là đường bảng lương đi qua.
+
+   Bản vá hiển nhiên là "chỉ đọc phiếu nhập đã về TRƯỚC ngày bán". **Tôi đã viết xong nó, rồi đo
+   tác động trước khi ship — và số đo bác bỏ nó:**
+
+   | | Tổng giá vốn (2.274 dòng) |
+   |---|---:|
+   | theo giá **hôm nay** (đang chạy) | 294.311.000 ₫ |
+   | theo giá **đã biết lúc bán** (bản vá) | 48.386.000 ₫ |
+   | chênh lệch | **−245.925.000 ₫ · thấp hơn 84%** |
+
+   1.713/2.274 dòng (75%) đổi số. Một bản vá làm giá vốn giảm 84% không phải là sửa sai — nó làm
+   **lợi nhuận cao hơn sự thật gần 246 triệu**, đúng kiểu hỏng mà cả bản phát hành này đang đi bịt.
+
+   Đo tiếp một nhịp để biết vì sao:
+
+   ```
+   chỉ 327 / 2.274 dòng CÓ phiếu nhập trước ngày bán — 1.947 dòng (86%) KHÔNG có
+   phiếu nhập sớm nhất trong ERP:  03/09/2026
+   đơn sớm nhất:                   19/08/2025      ← sớm hơn HƠN MỘT NĂM
+   ```
+
+   **Sổ phiếu nhập ERP không lùi đủ xa.** Với 86% số dòng, "giá đã biết lúc bán" rơi xuống chuỗi
+   dự phòng (giá vốn Pancake, thường 0) rồi xuống 0. Đây không phải lỗi công thức — **dữ liệu giá
+   vốn lịch sử không tồn tại**, và không phép tính nào tạo ra được nó.
+
+   `recognized_cogs` cũng chưa cứu được: đo cùng lúc, nó mới phủ **508/2.835 đơn (18%)**.
+
+   **Việc còn lại là một quyết định của chủ shop, không phải một bản vá:** đơn phát sinh trước
+   03/09/2026 thì lấy giá vốn ở đâu? Ba lựa chọn, và mỗi lựa chọn là một lời khẳng định khác nhau:
+   (a) giữ nguyên như hôm nay và chấp nhận lợi nhuận kỳ cũ trôi khi nhập lô mới; (b) khai một bảng
+   giá vốn lịch sử theo mẫu mã cho giai đoạn trước khi ERP có phiếu nhập; (c) khoá giá vốn của các
+   kỳ đã chốt vào ảnh chụp và chỉ áp giá "theo ngày" từ 03/09/2026 trở đi. Tôi **không tự chọn**:
+   cả ba đều đổi số lợi nhuận lịch sử, và (a) là thứ đang chạy nên không chọn gì cũng là một lựa
+   chọn có thể sống được.
+
+   Bài `tests/payroll-cogs-cutoff.test.ts` khoá chênh lệch 400.000đ của ca dựng sẵn làm mốc, và
+   mang theo cả ba con số production ở trên — để phiên sau không đi lại đúng con đường này.
+
+4. **F08 (hàng tặng, phí vận đơn hoàn / giao lại) chưa làm** trong bản này.
+
+5. **F09 (`/ads` 6,5 giây nguội) chưa làm** — xem mục 5.5 biên bản 14/09, ba giả thuyết đã bị bác
    bằng phép đo và bước tiếp theo đã ghi sẵn ở đó.
 
-5. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
+6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
    nếu có người đang mang lỗ từ trước mốc ấy thì khai số dư mở sổ đích danh. Chưa khai thì sổ
    KHÔNG ÁP DỤNG và bảng lương chạy y như trước — không con số nào đổi.

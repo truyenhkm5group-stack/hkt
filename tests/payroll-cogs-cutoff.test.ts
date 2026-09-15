@@ -12,6 +12,29 @@
  * Bộ này ĐO chênh lệch ấy trên chính hai đường đó, cùng một đơn, cùng một kỳ. Nó cố ý KHÔNG khẳng
  * định "đã sửa": nó ghi lại HIỆN TRẠNG có đo được, để phần sửa sau này có một mốc trước/sau.
  *
+ * ─── VÌ SAO BẢN VÁ HIỂN NHIÊN NHẤT KHÔNG ĐƯỢC SHIP (đo trên production 15/09/2026) ───
+ *
+ * Bản vá hiển nhiên là "chỉ đọc phiếu nhập đã về TRƯỚC ngày bán". Tôi đã viết xong nó rồi đo tác
+ * động trước khi ship — và số đo bác bỏ nó:
+ *
+ *     2.274 dòng hàng · 1.713 dòng (75%) đổi số
+ *     tổng giá vốn theo giá HÔM NAY   294.311.000 ₫
+ *     tổng giá vốn theo giá LÚC BÁN    48.386.000 ₫   ← thấp hơn 84%
+ *
+ * Một bản vá làm giá vốn giảm 84% không phải là sửa sai — nó làm lợi nhuận CAO HƠN sự thật gần 246
+ * triệu, đúng kiểu hỏng mà cả bản phát hành này đang đi bịt. Nguyên nhân đo được ngay sau đó:
+ *
+ *     chỉ 327/2.274 dòng CÓ phiếu nhập trước ngày bán; 1.947 dòng (86%) KHÔNG có
+ *     phiếu nhập sớm nhất trong ERP: 03/09/2026
+ *     đơn sớm nhất:                  19/08/2025   ← sớm hơn HƠN MỘT NĂM
+ *
+ * Sổ phiếu nhập ERP không lùi đủ xa. Với 86% số dòng, "giá đã biết lúc bán" rơi xuống chuỗi dự
+ * phòng (giá vốn Pancake, thường 0) rồi xuống 0. Đây KHÔNG phải lỗi công thức — dữ liệu giá vốn
+ * lịch sử không tồn tại, và không phép tính nào tạo ra được nó.
+ *
+ * Nên F07 dừng lại ở phép đo này, và dừng có căn cứ. Phần còn lại là một QUYẾT ĐỊNH của chủ shop
+ * (xem mục 6 biên bản 15/09), không phải một bản vá kỹ thuật.
+ *
  * Dữ liệu ở tháng 07/2027.
  */
 import assert from "node:assert/strict";
