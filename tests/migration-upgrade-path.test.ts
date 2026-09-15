@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -107,6 +107,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'payroll_periods'"), 0, "bước 1: bảng payroll_periods CHƯA được có — đó là thứ 0088 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'marketer_profit_carryover'"), 0, "bước 1: bảng marketer_profit_carryover CHƯA được có — đó là thứ 0089 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'alias'"), 0, "bước 1: cột fanpages.alias CHƯA được có — đó là thứ 0090 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'landing_attributions'"), 0, "bước 1: bảng landing_attributions CHƯA được có — đó là thứ 0091 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -359,6 +360,61 @@ export async function testMigrationUpgradePath() {
       "0090: đặt alias KHÔNG được đụng tới tên API lẫn page_id — page_id là danh tính mà mọi đơn đã quy kết trỏ tới",
     );
     await client.query(`delete from fanpages where id = 'up-fp89'`);
+
+    /*
+      ═══ 0091: QUY KẾT ĐƠN LANDING BẰNG TRACKING QUẢNG CÁO ═══
+
+      Chỉ CỘNG THÊM: hai cột trên `order_attributions` và một bảng bằng chứng. Bốn điều phải đúng:
+        1. đơn đã quy kết TRƯỚC bản này mặc nhiên mang nguồn `PANCAKE_PAGE` — migration KHÔNG
+           backfill, không đoán hộ đơn nào đi đường landing (AGENTS.md mục 35);
+        2. "fanpage suy ra" chỉ được đặt trên đơn đi đường landing — đặt nhầm lên một đơn Messenger
+           là biến một suy luận thành một chứng từ;
+        3. kết luận phải đi cùng căn cứ: có người thì phải có bậc bằng chứng VÀ câu giải thích;
+        4. một đơn MỘT dòng bằng chứng — đó là thứ làm phép đối soát idempotent.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'landing_attributions'"), 1, "0091: bảng landing_attributions phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'order_attributions' and column_name = 'attribution_source'"), 1, "0091: cột attribution_source phải được thêm");
+    assert.equal(await dem("select count(*)::int as n from landing_attributions"), 0, "0091: KHÔNG gieo sẵn dòng bằng chứng nào — không backfill im lặng");
+
+    await client.query(`insert into fanpages (id, external_page_id, name) values ('up-fp91', 'PAGE-UP-91', 'Page 91')`);
+    await client.query(`insert into fanpage_marketer_assignments (id, fanpage_id, marketer_id, effective_from) values ('up-fa91', 'up-fp91', 'mkt-91', now() - interval '30 days')`);
+    await client.query(`insert into order_attributions (id, order_id, source_page_id, fanpage_id, marketer_id, assignment_id, status, source_order_at, rule_version) values ('up-oa91', 'up-o1', 'PAGE-UP-91', 'up-fp91', 'mkt-91', 'up-fa91', 'ATTRIBUTED', now(), 1)`);
+    assert.equal(
+      await dem("select count(*)::int as n from order_attributions where id = 'up-oa91' and attribution_source = 'PANCAKE_PAGE' and attributed_page_id is null"),
+      1,
+      "0091: dòng quy kết cũ mặc nhiên là đường Pancake — migration không đoán hộ đơn nào đi đường landing",
+    );
+    await assert.rejects(
+      () => client.query(`update order_attributions set attributed_page_id = 'PAGE-UP-91' where id = 'up-oa91'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("order_attribution_inferred_page_check"),
+      "0091: 'fanpage suy ra' KHÔNG được đặt trên đơn đi đường Pancake — hai ô ấy nói hai loại sự thật khác nhau",
+    );
+    await assert.rejects(
+      () => client.query(`update order_attributions set attribution_source = 'DOAN_BUA' where id = 'up-oa91'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("order_attribution_source_check"),
+      "0091: nguồn quy kết là DANH SÁCH ĐÓNG",
+    );
+
+    await assert.rejects(
+      () => client.query(`insert into landing_attributions (id, order_id, tier, marketer_id) values ('up-la-x', 'up-o1', 'CAMPAIGN_NAME', 'mkt-91')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_evidence_check"),
+      "0091: quy kết mà KHÔNG có câu căn cứ phải bị chặn — sáu tháng sau không ai kiểm chứng nổi một dòng như thế",
+    );
+    await assert.rejects(
+      () => client.query(`insert into landing_attributions (id, order_id, tier) values ('up-la-y', 'up-o1', 'CAMPAIGN_NAME')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_evidence_check"),
+      "0091: chưa có người thì PHẢI nói được vì sao — không dòng nào được vừa trống người vừa trống lý do",
+    );
+    await client.query(`insert into landing_attributions (id, order_id, tier, marketer_id, ad_account_id, campaign_id, evidence) values ('up-la1', 'up-o1', 'CAMPAIGN_NAME', 'mkt-91', 'act-1', 'camp-1', 'tên chiến dịch khớp tuyệt đối')`);
+    await assert.rejects(
+      () => client.query(`insert into landing_attributions (id, order_id, gap) values ('up-la2', 'up-o1', 'NO_MATCH')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_order_uq"),
+      "0091: MỘT đơn MỘT dòng — đó là thứ làm phép đối soát idempotent, không có đường nào cộng doanh thu hai lần",
+    );
+    await client.query(`delete from landing_attributions where order_id = 'up-o1'`);
+    await client.query(`delete from order_attributions where id = 'up-oa91'`);
+    await client.query(`delete from fanpage_marketer_assignments where id = 'up-fa91'`);
+    await client.query(`delete from fanpages where id = 'up-fp91'`);
 
     for (const bang of ["fanpages", "fanpage_marketer_assignments", "order_attributions"]) {
       assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `0086: bảng ${bang} phải được tạo`);
