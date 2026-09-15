@@ -432,6 +432,15 @@ export async function testFanpageSales(db: Db) {
   assert.equal(sz4.action, "HANDOFF");
   assert.ok(sz4.provenance.some((x) => x.value.includes("OUT_OF_RANGE")));
 
+  // BẢNG SỐ ĐO CỦA Q004 KHÔNG ĐƯỢC RÒ SANG MẪU TEST. Bảng khai ở phạm vi PRODUCT với khoá là mã
+  // hàng; mẫu test tra bằng MÃ TẠM ở phạm vi FAMILY, nên hai bên không thể chạm vào nhau. Đây là
+  // chỗ dễ rò nhất của cả mô hình: đúng bảng, sai mẫu, và khách vẫn nhận được một con số nghe
+  // rất tự tin.
+  const bdTestSize = (await loadTestKnowledge(test1.id, db))!;
+  assert.equal(bdTestSize.knowledge.sizeRuleCount, 0, "mẫu test KHÔNG thấy bảng số đo của Q004");
+  assert.equal(bdTestSize.sizeRuleVersion, "", "và không mang bản của bảng ấy");
+  assert.equal(bdTestSize.capabilities.CAN_ADVISE_SIZE.status, "MISSING_DATA", "nên tư vấn size vẫn tắt cho mẫu test");
+
   // ═════════ 16. BÓC SỐ ĐO: CHỈ NHẬN DẠNG VIẾT RÕ RÀNG ═════════
   assert.deepEqual(extractMeasurements("cao 1m58 nặng 50kg"), { heightCm: 158, weightKg: 50 });
   assert.deepEqual(extractMeasurements("eo 74"), { waistCm: 74 }, "có chữ 'eo' thì mới biết 74 là vòng eo");
