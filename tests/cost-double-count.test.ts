@@ -284,6 +284,58 @@ export async function testCostDoubleCount(db: Db) {
   assert.ok(/dòng tiền/i.test(PAYROLL_BASIS_ELIGIBILITY.cash.why), "10. lý do của cơ sở dòng tiền phải nói nó là dòng tiền, không phải lợi nhuận");
   assert.ok(/dự phóng|ước tính/i.test(PAYROLL_BASIS_ELIGIBILITY.nominal.why), "10. lý do của cơ sở danh nghĩa phải nói nó là số dự phóng");
 
+  /* ══ TEST 11 — ĐỔI NGUỒN KHÔNG ĐƯỢC LÀM HOA HỒNG BIẾN MẤT ══
+   *
+   * Đây là chiều hỏng NGƯỢC với "trừ hai lần", và nó nguy hiểm hơn: trừ hai lần làm lợi nhuận thấp
+   * đi nên có người thắc mắc; MẤT một khoản làm lợi nhuận CAO ĐẸP nên không ai đi kiểm.
+   *
+   * Tình huống thật: nhóm "Lương" ở bảng Chi phí đang chứa CẢ lương cứng LẪN hoa hồng — đó là cách
+   * shop đang ghi. Chủ shop bật bảng Lương làm nguồn ghi nhận, mà bảng Lương chỉ góp được lương
+   * cứng. Bản cũ loại TOÀN BỘ nhóm ấy theo một cờ độ phủ duy nhất, nên hoa hồng rơi khỏi lợi nhuận
+   * và lợi nhuận tăng lên đúng bằng khoản ấy.
+   */
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
+  // Thêm 3.000.000đ hoa hồng, ghi cùng nhóm "Lương" như shop vẫn ghi ⇒ nhóm cũ cộng lại 12 triệu.
+  await db.insert(schema.expenses).values({
+    id: "dc-exp-commission", category: "SALARY", description: "Hoa hồng tháng 1 (ghi lẫn nhóm Lương)",
+    amount: 3_000_000, occurredAt: d("2027-01-06"), costSource: "MANUAL",
+  });
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "PAYROLL" });
+  clearMemo();
+  costs = await getRecognizedCosts(KY);
+
+  assert.equal(costs.payroll.componentCoverage.fixedSalary, "COMPLETE", "11. bảng Lương phủ được LƯƠNG CỨNG");
+  assert.equal(
+    costs.payroll.componentCoverage.commission,
+    "INCOMPLETE",
+    "11. nhưng KHÔNG phủ được hoa hồng — và độ phủ phải khai theo TỪNG THÀNH PHẦN, không một cờ chung",
+  );
+  assert.equal(costs.components.SALARY.amount, 9_000_000, "11. lương cứng lấy từ bảng Lương");
+  assert.equal(
+    costs.components.COMMISSION.amount,
+    3_000_000,
+    "11. 3 triệu hoa hồng VẪN ĐƯỢC TÍNH — đây là khoản mà bản cũ làm biến mất",
+  );
+  assert.equal(
+    costs.components.SALARY.amount + costs.components.COMMISSION.amount,
+    12_000_000,
+    "11. và tổng đúng bằng tiền thật đã chi: 12 triệu, không phải 9 (mất) cũng không phải 21 (cộng hai lần)",
+  );
+  const canhBao11 = costs.warnings.find((w) => w.rule === "DUPLICATE_PAYROLL_EXPENSE_SOURCE");
+  assert.equal(canhBao11?.amount, 3_000_000, "11. cảnh báo phải nói ĐÚNG phần chưa đối chiếu được, không phải cả nhóm");
+  assert.ok(
+    /vẫn được tính/i.test(canhBao11?.detail ?? ""),
+    "11. và phải nói rõ khoản ấy VẪN ĐƯỢC TÍNH, để không ai đi xoá chứng từ cho 'sạch'",
+  );
+  assert.ok(
+    /không xoá chứng từ/i.test(canhBao11?.action ?? ""),
+    "11. việc cần làm là TÁCH ra, không phải xoá đi",
+  );
+
+  // Dọn để các khẳng định bất biến bên dưới chạy trên đúng nền của TEST 3.
+  await db.delete(schema.expenses).where(sql`${schema.expenses.id} = 'dc-exp-commission'`);
+  clearMemo();
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -303,6 +355,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định · ĐỔI NGUỒN không làm hoa hồng biến mất (độ phủ theo từng thành phần)",
   );
 }

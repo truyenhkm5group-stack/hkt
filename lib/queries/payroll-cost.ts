@@ -50,7 +50,32 @@ export type PayrollRecognition = {
     /** `null` = chưa chốt được cơ sở tính hoa hồng ⇒ bảng Lương không ghi nhận hoa hồng */
     commission: null;
   };
+  /**
+   * ĐỘ PHỦ CỦA RIÊNG LƯƠNG CỨNG. Cố ý KHÔNG phải "độ phủ của cả chi phí nhân sự".
+   *
+   * Xem `componentCoverage` để biết vì sao: một cờ duy nhất cho hai thành phần là cách hoa hồng
+   * biến mất khi chủ shop đổi nguồn.
+   */
   coverage: CoverageState;
+  /**
+   * ═══ ĐỘ PHỦ THEO TỪNG THÀNH PHẦN ═══
+   *
+   * Trước bản này chỉ có MỘT cờ `coverage`, và nó bật `COMPLETE` chỉ vì lương cứng > 0. Máy chi phí
+   * đọc cờ ấy rồi loại TOÀN BỘ nhóm "Lương" ở bảng Chi phí — trong đó có cả hoa hồng — trong khi
+   * nguồn mới chỉ góp được lương cứng. Kết quả: đổi một ô cấu hình là hoa hồng rơi khỏi lợi nhuận,
+   * và lợi nhuận tăng lên đúng bằng khoản ấy.
+   *
+   * Hai thành phần, hai cờ. Chuyển quyền cho thành phần nào thì chỉ thành phần ấy đổi nguồn.
+   */
+  componentCoverage: {
+    fixedSalary: CoverageState;
+    /**
+     * Hôm nay LUÔN `INCOMPLETE`: cả bốn cơ sở tính hoa hồng đều là % của LỢI NHUẬN nên hoa hồng
+     * không thể vừa là đầu vào vừa là đầu ra (xem khối chú thích đầu file). Đây là lời khai, không
+     * phải một giá trị tạm.
+     */
+    commission: CoverageState;
+  };
   /** Vì sao chưa đủ độ phủ — hiện thẳng cho chủ shop, không nuốt lỗi */
   reasons: string[];
   mode: PayrollRecognitionMode;
@@ -97,15 +122,19 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
   // Hoa hồng: xem khối chú thích đầu file — không thể vừa là đầu vào vừa là đầu ra của lợi nhuận.
   reasons.push("Hoa hồng đang tính theo % LỢI NHUẬN nên không thể đồng thời là chi phí nằm trong lợi nhuận; bảng Lương chưa ghi nhận hoa hồng.");
 
-  const coverage: CoverageState = mode === "PAYROLL" && period.from && period.to && fixedSalary > 0 ? "COMPLETE" : "INCOMPLETE";
+  const fixedCoverage: CoverageState = mode === "PAYROLL" && period.from && period.to && fixedSalary > 0 ? "COMPLETE" : "INCOMPLETE";
+  // Hoa hồng chưa có nguồn nào ngoài bảng Chi phí, và điều đó KHÔNG đổi theo cấu hình — nên đây là
+  // hằng số có lý do, không phải một giá trị chờ điền.
+  const commissionCoverage: CoverageState = "INCOMPLETE";
 
   return {
-    fixedSalary: coverage === "COMPLETE" ? fixedSalary : 0,
+    fixedSalary: fixedCoverage === "COMPLETE" ? fixedSalary : 0,
     commission: 0,
-    totalPayrollCost: coverage === "COMPLETE" ? fixedSalary : 0,
+    totalPayrollCost: fixedCoverage === "COMPLETE" ? fixedSalary : 0,
     recognitionPeriod: { from: period.from, to: period.to, days },
     allocationBasis: { fixedSalary: "PERIOD_PRORATA", commission: null },
-    coverage,
+    coverage: fixedCoverage,
+    componentCoverage: { fixedSalary: fixedCoverage, commission: commissionCoverage },
     reasons,
     mode,
     activeEmployees: active.length,

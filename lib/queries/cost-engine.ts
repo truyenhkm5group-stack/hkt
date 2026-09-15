@@ -164,14 +164,41 @@ async function build(period: Period): Promise<RecognizedCosts> {
       count: salaryLegacy.n,
     });
   }
+  /*
+    ═══ CHUYỂN QUYỀN THEO TỪNG THÀNH PHẦN, KHÔNG THEO CẢ CỤM ═══
+
+    Bản cũ: `payrollCovered` bật thì TOÀN BỘ nhóm "Lương" ở bảng Chi phí bị loại. Nhóm ấy chứa cả
+    lương cứng LẪN hoa hồng, còn nguồn mới chỉ góp được lương cứng — nên đổi một ô cấu hình là hoa
+    hồng rơi khỏi lợi nhuận, và lợi nhuận tăng lên đúng bằng khoản ấy. Cảnh báo cũ có nói ra, nhưng
+    nói ra một khoản tiền đã biến mất không làm nó quay lại.
+
+    Nay: lương cứng lấy từ bảng Lương (nguồn có thẩm quyền cho THÀNH PHẦN ấy), và phần nhóm cũ
+    KHÔNG giải thích được bằng lương cứng vẫn được TÍNH, ở thành phần Hoa hồng, kèm lời khai rằng
+    nó chưa đối chiếu được. Không mất đồng nào, cũng không cộng hai lần: thành phần Lương lấy đúng
+    con số của bảng Lương, thành phần Hoa hồng chỉ lấy phần DƯ.
+
+    Vì sao phần dư mặc định coi là hoa hồng: nhóm "Lương" ở bảng Chi phí là nơi shop đang ghi cả
+    lương lẫn hoa hồng, và lương cứng đã được nguồn mới nhận. Phần còn lại là tiền THẬT đã chi —
+    gọi tên nó là "chưa đối chiếu" thì đúng hơn là vứt đi.
+  */
+  const legacyChuaDoiChieu = payrollCovered ? Math.max(0, salaryLegacy.amount - payroll.fixedSalary) : 0;
   if (payrollCovered && salaryLegacy.amount > 0) {
     warnings.push({
       rule: "DUPLICATE_PAYROLL_EXPENSE_SOURCE",
-      severity: "high",
-      title: `Bảng Lương đang cầm quyền — ${salaryLegacy.n} khoản “Lương” ở bảng Chi phí bị BỎ QUA`,
-      detail: `Để không trừ hai lần, lợi nhuận chỉ nhận lương từ bảng Lương (${salaryAmount.toLocaleString("vi-VN")} ₫). ${salaryLegacy.amount.toLocaleString("vi-VN")} ₫ đã ghi ở bảng Chi phí KHÔNG được tính — kể cả phần hoa hồng nằm lẫn trong đó.`,
-      action: "Xoá / chuyển các khoản lương trùng ở bảng Chi phí, hoặc tắt chế độ ghi nhận từ bảng Lương nếu chưa sẵn sàng.",
-      amount: salaryLegacy.amount,
+      severity: legacyChuaDoiChieu > 0 ? "high" : "medium",
+      title:
+        legacyChuaDoiChieu > 0
+          ? `Bảng Lương cầm quyền phần LƯƠNG CỨNG — còn ${legacyChuaDoiChieu.toLocaleString("vi-VN")} ₫ ở bảng Chi phí chưa đối chiếu được`
+          : `Bảng Lương đang cầm quyền — ${salaryLegacy.n} khoản “Lương” ở bảng Chi phí đã được thay thế`,
+      detail:
+        legacyChuaDoiChieu > 0
+          ? `Lương cứng lấy từ bảng Lương (${salaryAmount.toLocaleString("vi-VN")} ₫). ${salaryLegacy.n} khoản nhóm “Lương” ở bảng Chi phí cộng lại ${salaryLegacy.amount.toLocaleString("vi-VN")} ₫, nhiều hơn phần lương cứng ${legacyChuaDoiChieu.toLocaleString("vi-VN")} ₫ — nhiều khả năng là HOA HỒNG nằm lẫn trong đó. Phần dư ấy VẪN ĐƯỢC TÍNH vào lợi nhuận (thành phần “Hoa hồng”), không bị bỏ đi; nhưng nó chưa đối chiếu được về từng khoản.`
+          : `Lương cứng lấy từ bảng Lương (${salaryAmount.toLocaleString("vi-VN")} ₫), vừa đúng bằng ${salaryLegacy.amount.toLocaleString("vi-VN")} ₫ đã ghi ở bảng Chi phí nên không còn phần dư nào. Không trừ hai lần, cũng không mất khoản nào.`,
+      action:
+        legacyChuaDoiChieu > 0
+          ? "Tách các khoản HOA HỒNG khỏi nhóm “Lương” ở bảng Chi phí (hoặc ghi rõ ở ô mô tả) để đối chiếu được về từng người. Không xoá chứng từ — phần dư đang được tính, xoá đi là làm mất chi phí thật."
+          : "Không cần làm gì. Muốn dừng thì tắt chế độ ghi nhận từ bảng Lương.",
+      amount: legacyChuaDoiChieu > 0 ? legacyChuaDoiChieu : salaryLegacy.amount,
       count: salaryLegacy.n,
     });
   }
@@ -230,13 +257,24 @@ async function build(period: Period): Promise<RecognizedCosts> {
       recognitionMethod: payrollCovered ? "PERIOD_PRORATA" : "EVENT_DATE",
       note: payrollCovered ? "Lương cứng chia theo số ngày thật của từng tháng." : "Đang dùng nguồn dự phòng: khoản chi nhóm “Lương” ở bảng Chi phí (gồm cả hoa hồng).",
     }),
-    // Hoa hồng nằm LẪN trong nhóm "Lương" ở bảng Chi phí, đã tính ở thành phần SALARY.
-    // Để 0 ở đây thay vì cộng lại — cộng lại chính là trừ hai lần.
-    COMMISSION: mk("COMMISSION", 0, {
-      coverage: "NOT_APPLICABLE",
+    /*
+      HOA HỒNG: hai tình huống, hai con số — và gộp chúng lại là chỗ tiền biến mất.
+
+      · Bảng Lương CHƯA cầm quyền ⇒ cả nhóm "Lương" (gồm hoa hồng) đã nằm trọn ở thành phần SALARY.
+        Cộng thêm ở đây chính là trừ hai lần, nên để 0.
+      · Bảng Lương ĐÃ cầm quyền phần lương cứng ⇒ thành phần SALARY chỉ còn lương cứng. Phần nhóm cũ
+        vượt quá lương cứng là tiền THẬT đã chi mà nguồn mới không nhận — nó vào đây, chứ không bị
+        vứt đi như bản trước.
+    */
+    COMMISSION: mk("COMMISSION", legacyChuaDoiChieu, {
+      coverage: payroll.componentCoverage.commission,
       usedFallback: true,
       sourceUsed: COST_SOURCE_LABEL.EXPENSES,
-      note: "Chưa tách khỏi nhóm “Lương”. Đã nằm trong thành phần Lương cố định, không cộng thêm ở đây.",
+      note: payrollCovered
+        ? legacyChuaDoiChieu > 0
+          ? "Phần nhóm “Lương” ở bảng Chi phí vượt quá lương cứng — nhiều khả năng là hoa hồng. ĐƯỢC TÍNH, nhưng chưa đối chiếu được về từng khoản."
+          : "Nhóm “Lương” ở bảng Chi phí vừa đúng bằng lương cứng, không còn phần dư nào."
+        : "Chưa tách khỏi nhóm “Lương”. Đã nằm trong thành phần Lương cố định, không cộng thêm ở đây.",
     }),
     RENT: mk("RENT", rent.amount),
     SOFTWARE: mk("SOFTWARE", software.amount),
