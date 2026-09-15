@@ -472,3 +472,62 @@ export const DWELL_TEAM: Record<ShipmentStage, CaseTeam> = {
   CANCELLED: "LOGISTICS",
   UNKNOWN: "DATA",
 };
+
+/* ═══════════════════ ĐỌC CẤU HÌNH AN TOÀN ═══════════════════ */
+
+/**
+ * LỌC SẠCH PHẦN GHI ĐÈ TRƯỚC KHI DÙNG.
+ *
+ * Bảng ghi đè nằm ở `settings` — một ô JSON mà người sửa được qua màn hình cấu hình VÀ qua ops
+ * `set-setting`. Nghĩa là nó có thể mang bất cứ hình dạng nào: một chuỗi, một số, một chặng không
+ * tồn tại, một ngưỡng âm, hay ba mức đảo lộn thứ tự.
+ *
+ * Một cấu hình hỏng KHÔNG được làm sập bộ phát hiện (yêu cầu mục 9 của chủ shop). Nên mọi giá trị
+ * không đọc được đều bị BỎ QUA và chặng đó rơi về mặc định của mã — hướng AN TOÀN, vì mặc định là
+ * bộ số đã chạy thật. Cách hỏng duy nhất còn lại là "sửa xong mà không thấy đổi gì", và cách đó
+ * nhìn ra được ngay trên màn hình.
+ *
+ * Ba mức phải TĂNG DẦN: `watch <= warning <= exception`. Đảo thứ tự thì một kiện 10 giờ có thể xếp
+ * `EXCEPTION` trong khi kiện 100 giờ xếp `WATCH` — bảng màu nói ngược với sự thật.
+ */
+export function sanitizeDwellOverrides(raw: unknown): DwellOverrides {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: DwellOverrides = {};
+  const nguon = raw as Record<string, unknown>;
+
+  for (const stage of Object.keys(DWELL_SLA) as ShipmentStage[]) {
+    if (!Object.hasOwn(nguon, stage)) continue;
+    const v = nguon[stage];
+    // `null` là một quyết định có nghĩa: TẮT hạn cho chặng này.
+    if (v === null) {
+      out[stage] = null;
+      continue;
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+
+    const o = v as Record<string, unknown>;
+    const so = (k: string): number | undefined => {
+      const n = o[k];
+      // Chỉ nhận số hữu hạn, dương, và trong cùng biên với bảng hạn công việc.
+      return typeof n === "number" && Number.isFinite(n) && n > 0 && n <= 2160 ? n : undefined;
+    };
+    const phan: Partial<DwellThreshold> = {};
+    const w = so("watch");
+    const wa = so("warning");
+    const ex = so("exception");
+    if (w !== undefined) phan.watch = w;
+    if (wa !== undefined) phan.warning = wa;
+    if (ex !== undefined) phan.exception = ex;
+    if (typeof o.why === "string" && o.why.trim()) phan.why = o.why.trim();
+    if (!Object.keys(phan).length) continue;
+
+    // Kiểm thứ tự trên BỘ NGƯỠNG CUỐI CÙNG (mặc định đã áp phần ghi đè), không chỉ trên phần gửi lên.
+    const base = DWELL_SLA[stage];
+    const cuoi = base ? { ...base, ...phan } : phan;
+    if (cuoi.watch !== undefined && cuoi.warning !== undefined && cuoi.exception !== undefined) {
+      if (!(cuoi.watch <= cuoi.warning && cuoi.warning <= cuoi.exception)) continue;
+    }
+    out[stage] = phan;
+  }
+  return out;
+}

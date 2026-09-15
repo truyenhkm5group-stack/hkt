@@ -6,6 +6,7 @@ import {
   DWELL_NEXT_ACTION,
   DWELL_SLA,
   dwellLevelOf,
+  sanitizeDwellOverrides,
   stageDwellFrom,
   thresholdOf,
   TERMINAL_STAGES,
@@ -169,7 +170,39 @@ export function testShipmentStatusAgePure() {
     assert.ok(t.why.trim().length > 30, `${stage}: ngưỡng không có lý do là ngưỡng không ai dám sửa`);
   }
 
-  console.log("  ✓ tuổi chặng hiện tại (thuần): 10 nhóm");
+  /* ─── 11 · CẤU HÌNH HỎNG KHÔNG ĐƯỢC LÀM SẬP BỘ PHÁT HIỆN ─── */
+  {
+    // Ô `settings` là JSON tự do, sửa được cả qua màn hình lẫn qua ops `set-setting`. Nó có thể
+    // mang bất cứ hình dạng nào, và mọi hình dạng lạ phải rơi về MẶC ĐỊNH chứ không ném lỗi.
+    for (const rac of [null, undefined, 42, "chuoi", [], [1, 2], { PENDING: "khong-phai-so" }, { PENDING: 7 }, { KHONG_CO_CHANG_NAY: { watch: 1, warning: 2, exception: 3 } }]) {
+      const sach = sanitizeDwellOverrides(rac);
+      assert.equal(typeof sach, "object", `${JSON.stringify(rac)}: phải trả về một bảng, không được ném lỗi`);
+      // Và bộ phát hiện vẫn chạy bình thường trên bảng đã lọc.
+      const v = stageDwellFrom([ev("PENDING", 120)], "PENDING", NOW, sach);
+      assert.equal(v.level, "EXCEPTION", `${JSON.stringify(rac)}: rơi về mặc định, không phải rơi vào lỗi`);
+    }
+
+    // Ngưỡng ĐẢO THỨ TỰ bị loại: giữ nó thì kiện 10 giờ có thể đỏ hơn kiện 100 giờ.
+    const dao = sanitizeDwellOverrides({ PENDING: { watch: 100, warning: 50, exception: 10 } });
+    assert.equal(dao.PENDING, undefined, "ba mức không tăng dần thì bỏ cả bộ, rơi về mặc định");
+
+    // Số âm, số 0, số vượt trần đều bị loại.
+    assert.equal(sanitizeDwellOverrides({ PENDING: { watch: -5, warning: 50, exception: 100 } }).PENDING?.watch, undefined);
+    assert.equal(sanitizeDwellOverrides({ PENDING: { watch: 0, warning: 50, exception: 100 } }).PENDING?.watch, undefined);
+    assert.equal(sanitizeDwellOverrides({ PENDING: { watch: 99_999, warning: 50, exception: 100 } }).PENDING?.watch, undefined);
+
+    // Bộ ngưỡng HỢP LỆ thì đi qua nguyên vẹn — và thật sự đổi kết quả.
+    const hopLe = sanitizeDwellOverrides({ PENDING: { watch: 48, warning: 96, exception: 168 } });
+    assert.deepEqual(hopLe.PENDING, { watch: 48, warning: 96, exception: 168 });
+    assert.equal(stageDwellFrom([ev("PENDING", 120)], "PENDING", NOW, hopLe).level, "WARNING", "120 giờ dưới ngưỡng 168 mới nên chỉ còn là cảnh báo");
+
+    // `null` là một quyết định có nghĩa: TẮT hạn, khác hẳn một giá trị rác.
+    const tat = sanitizeDwellOverrides({ PENDING: null });
+    assert.equal(tat.PENDING, null);
+    assert.equal(stageDwellFrom([ev("PENDING", 120)], "PENDING", NOW, tat).unrated, "NO_THRESHOLD");
+  }
+
+  console.log("  ✓ tuổi chặng hiện tại (thuần): 11 nhóm");
 }
 
 /**

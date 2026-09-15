@@ -18,6 +18,7 @@ import {
   thresholdOf,
   TERMINAL_STAGES,
   stageDwellFrom,
+  sanitizeDwellOverrides,
   type DwellBasis,
   type DwellLevel,
   type DwellVerdict,
@@ -44,8 +45,19 @@ import {
  * vào ngày đầu tiên có người sửa cấu hình. Nên SQL chỉ trả về TUỔI, còn `dwellLevelOf()` — đúng
  * một hàm — quyết định mức cho cả bảng lẫn mọi con số tổng hợp.
  *
- * Tập dòng là những kiện CHƯA tới chặng kết thúc, đo được 554 kiện trên production 11/09/2026.
- * Một lượt quét, không truy vấn lồng theo dòng.
+ * ─── ĐÃ ĐO KẾ HOẠCH TRUY VẤN TRÊN PRODUCTION (15/09/2026, `EXPLAIN (ANALYZE, BUFFERS)`, run #1032) ───
+ *
+ *   Planning Time 7,999 ms · **Execution Time 24,546 ms** · 406 kiện đang chạy
+ *   · cả hai lateral chạy trên `shipment_events_shipment_idx` (shipment_id, occurred_at):
+ *     Index Scan Backward cho mốc cắt, Bitmap Index Scan cho loạt sự kiện;
+ *   · KHÔNG có `Seq Scan` nào trên `shipment_events` (35.084 dòng) hay `shipments` (2.151 dòng);
+ *   · buffers TOÀN BỘ `shared hit` — không một lượt đọc đĩa;
+ *   · mỗi vòng lặp loại bỏ 9 và 5 dòng bằng Filter — phần dư không đáng kể.
+ *
+ * **KHÔNG thêm chỉ mục nào.** Vòng trước có ghi rủi ro "trang này quét lượng vận đơn lớn"; số đo
+ * bác bỏ nó. Chỉ mục đã có phủ đúng vị ngữ, và một chỉ mục thừa trên bảng sự kiện (bảng GHI NÓNG
+ * nhất kho này — mỗi webhook Viettel Post là một lượt chèn) chỉ làm mọi lượt ghi chậm đi để đổi
+ * lấy một phép đọc vốn đã 24 mili giây.
  */
 
 /** Trần an toàn. Vượt trần thì `capped = true` và màn hình phải nói ra, không lặng lẽ cắt bớt. */
@@ -129,8 +141,12 @@ type Raw = {
   care_open: boolean;
 };
 
+/**
+ * Đọc phần ghi đè và LỌC SẠCH nó. Cấu hình hỏng ⇒ chặng đó rơi về mặc định của mã, KHÔNG làm sập
+ * bộ phát hiện — xem `sanitizeDwellOverrides`.
+ */
 export async function getDwellOverrides(): Promise<DwellOverrides> {
-  return getSettingJson<DwellOverrides>(DWELL_SLA_SETTING_KEY, {});
+  return sanitizeDwellOverrides(await getSettingJson<unknown>(DWELL_SLA_SETTING_KEY, {}));
 }
 
 /**

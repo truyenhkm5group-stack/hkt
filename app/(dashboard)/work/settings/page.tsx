@@ -11,6 +11,12 @@ import { StaffingPanel, type StaffRow } from "@/app/(dashboard)/work/settings/st
 import { WeightsPanel } from "@/app/(dashboard)/work/settings/weights-panel";
 import { TargetsPanel } from "@/app/(dashboard)/work/settings/targets-panel";
 import { ReasonGroupsPanel } from "@/app/(dashboard)/work/settings/reason-groups-panel";
+import { LogisticsRulesPanel, type DwellRow } from "@/app/(dashboard)/work/settings/logistics-panel";
+import { DWELL_SLA, thresholdOf } from "@/lib/constants/shipment-status-age";
+import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import { getDwellOverrides, getShipmentStatusAgeQueue } from "@/lib/queries/shipment-status-age";
+import { getDuplicateRule } from "@/lib/queries/order-duplicate";
+import type { ShipmentStage } from "@/db/schema";
 import { listTargetsForAdmin } from "@/lib/queries/metric-targets";
 import { listProductCodes } from "@/lib/queries/product-code";
 import { getReasonGroupOverrides } from "@/lib/queries/return-reason-config";
@@ -64,6 +70,37 @@ export default async function WorkSettingsPage() {
     listProductCodes(),
     getReasonGroupOverrides(),
   ]);
+
+  /*
+    LUẬT GIAO VẬN: ngưỡng đang hiệu lực + DÂN SỐ THẬT của từng chặng.
+
+    Con số "đang chạy" đọc từ chính hàng đợi mà `/operations/dwell` dùng (đệm 60 giây), nên bảng
+    cấu hình và màn hình vận hành không thể nói hai con số khác nhau.
+  */
+  const [dwellOv, dwellQueue, dupRule] = await Promise.all([getDwellOverrides(), getShipmentStatusAgeQueue(), getDuplicateRule()]);
+  const danSo = new Map<string, number>();
+  for (const r of dwellQueue.rows) danSo.set(r.stage, (danSo.get(r.stage) ?? 0) + 1);
+  const dwellRows: DwellRow[] = (Object.keys(DWELL_SLA) as ShipmentStage[])
+    // Chặng KẾT THÚC và `UNKNOWN` cố ý không đặt hạn — bày ô nhập cho chúng là mời người ta đặt
+    // một cái hạn cho việc đã xong. Lý do đầy đủ ở lib/constants/shipment-status-age.ts.
+    .filter((st) => DWELL_SLA[st] !== null)
+    .map((st) => {
+      const hieuLuc = thresholdOf(st, dwellOv);
+      const macDinh = DWELL_SLA[st];
+      return {
+        stage: st,
+        stageLabel: SHIPMENT_STAGE_LABEL[st],
+        why: macDinh?.why ?? "",
+        watch: hieuLuc?.watch ?? null,
+        warning: hieuLuc?.warning ?? null,
+        exception: hieuLuc?.exception ?? null,
+        overridden: Object.hasOwn(dwellOv, st),
+        defaultWatch: macDinh?.watch ?? null,
+        defaultWarning: macDinh?.warning ?? null,
+        defaultException: macDinh?.exception ?? null,
+        live: danSo.get(st) ?? 0,
+      };
+    });
   // BÁO CÁO LỆCH — chạy thử, không sửa gì. Cố ý không có nút "sửa hàng loạt": xem `membershipDrift`.
   const drift = await membershipDrift();
   const openItems = queue.items.filter((i) => i.status !== "DONE" && i.status !== "CANCELLED");
@@ -283,6 +320,15 @@ export default async function WorkSettingsPage() {
         padded={false}
       >
         <WorkRulesPanel rows={rules} />
+      </SectionCard>
+
+      <SectionCard
+        title="Luật giao vận · kiện đứng yên bao lâu thì báo"
+        description="Ngưỡng tuổi CHẶNG của vận đơn, và cửa sổ dò đơn trùng. Sửa ở đây có hiệu lực ngay, không cần deploy."
+        hint="Tuổi chặng KHÁC “ĐVVC im lặng”: im lặng hỏi ERP có biết kiện ở đâu không, tuổi chặng hỏi kiện có đi tới đâu không — một kiện nhận tin mỗi giờ vẫn có thể đứng yên. Cột “Đang chạy” là số kiện thật đang ở chặng đó ngay lúc mở trang: sửa một ngưỡng mà không nhìn dân số của nó là sửa mù. Cấu hình hỏng KHÔNG làm sập bộ phát hiện — chặng đó rơi về mặc định của mã."
+        padded={false}
+      >
+        <LogisticsRulesPanel rows={dwellRows} duplicate={dupRule} />
       </SectionCard>
 
       <SectionCard
