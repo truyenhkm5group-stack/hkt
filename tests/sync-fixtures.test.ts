@@ -237,6 +237,7 @@ import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { isNewPhone } from "@/lib/alerts/risk";
 import { attributionShares, shareFor, splitProfit } from "@/lib/constants/payroll";
 import { expandLegacy, resolvePermissions, rolePermissions } from "@/lib/auth/permissions";
+import type { Role } from "@/db/schema";
 import { detectColumns, detectColumnsByContent, isGenericHeader, looksLikeHeader, matchVariant, normalizePhone, parseCsv, parseOfferText, parseSheetTime, parseVariantText, productCodeFromText, rowToLanding, sheetCsvUrl, sheetTabs, landingShippingFee, addressIssue, pushBlockOf } from "@/lib/constants/landing";
 import { phoneChatState, phoneVerifyTrigger, renderPhoneVerifyTemplate } from "@/lib/cs/phone-verify";
 import { getMarketerReport, getNominalMarketerBreakdown, getPayrollReport } from "@/lib/queries/payroll";
@@ -1012,7 +1013,34 @@ async function main() {
   assert.ok(!legacyPerms.includes("payroll:manage") && !legacyPerms.includes("reports:assumptions"), "không tự mở quyền quản lý");
   assert.deepEqual(expandLegacy(["reports:nominal"]), ["reports:nominal"], "quyền mới giữ nguyên");
   const leader = rolePermissions("LEADER", null);
-  assert.ok(leader.includes("payroll:view") && leader.includes("reports:nominal") && !leader.includes("reports:cash") && !leader.includes("users:manage"), "Trưởng nhóm: xem lương cả nhóm, BCLN danh nghĩa, không xem dòng tiền thực");
+  assert.ok(leader.includes("reports:nominal") && !leader.includes("reports:cash") && !leader.includes("users:manage"), "Trưởng nhóm: BCLN danh nghĩa, không xem dòng tiền thực, không quản trị người dùng");
+
+  /*
+    ═══ KHÔNG VAI TRÒ NÀO NGOÀI KẾ TOÁN ĐƯỢC XEM LƯƠNG TOÀN CÔNG TY ═══
+
+    `payroll:view` cho thấy lương của MỌI nhân sự. ERP chưa có phạm vi "trưởng nhóm xem nhóm mình"
+    — chỉ có xem TẤT CẢ hoặc xem CỦA MÌNH. Nên cấp `payroll:view` cho một vai trò quản lý là cấp
+    quyền RỘNG NHẤT để bù cho một phạm vi chưa được xây, và đó là thứ phải rơi về phía HẸP HƠN.
+
+    Hai lỗ đã bịt, mỗi lỗ một kiểu:
+     · `MANAGER` nhận nó vì danh sách dựng bằng phép LOẠI TRỪ — không ai từng quyết định cấp, nó
+       lọt vào vì không có tên trong danh sách loại;
+     · `LEADER` nhận nó tường minh với chú thích "cả nhóm", trong khi mã thật sự cấp CẢ CÔNG TY.
+
+    Bài này canh CẢ BỀ MẶT chứ không canh hai cái tên: thêm một vai trò mới mà lỡ tay mở quyền ấy
+    thì đỏ ngay. `ACCOUNTANT` là ngoại lệ DUY NHẤT và có lý do — kế toán cần bảng lương để trả tiền.
+  */
+  const DUOC_XEM_LUONG_TOAN_BO: Role[] = ["ADMIN", "ACCOUNTANT"];
+  for (const vai of ["MANAGER", "LEADER", "WAREHOUSE", "CS", "MARKETING", "VIEWER"] as Role[]) {
+    assert.ok(
+      !rolePermissions(vai, null).includes("payroll:view"),
+      `Vai trò ${vai} KHÔNG được xem lương toàn công ty theo mặc định — chưa có phạm vi theo nhóm thì mặc định phải là TỪ CHỐI, không phải mở cả công ty`,
+    );
+  }
+  for (const vai of DUOC_XEM_LUONG_TOAN_BO) {
+    assert.ok(rolePermissions(vai, null).includes("payroll:view"), `Vai trò ${vai} vẫn phải xem được bảng lương — đây là ngoại lệ CÓ CHỦ, khai ngay tại đây`);
+  }
+  assert.ok(rolePermissions("MANAGER", null).includes("payroll:view-own"), "nhưng ai cũng phải xem được phiếu lương của CHÍNH MÌNH");
   const custom = resolvePermissions("LEADER", ["reports:cash"], { LEADER: ["reports:nominal"] });
   assert.deepEqual(custom, ["reports:cash"], "quyền riêng từng người thắng mẫu vai trò");
   assert.ok(resolvePermissions("ADMIN", ["reports:cash"], null).includes("users:manage"), "ADMIN luôn toàn quyền");

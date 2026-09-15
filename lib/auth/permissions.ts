@@ -139,15 +139,42 @@ export const PERMISSION_LABEL: Record<string, string> = Object.fromEntries(PERMI
 // hàng đợi vô nghĩa với họ. Quyền leo thang nằm ở `work:assign` / `work:department` / `work:all`.
 const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view", "work:view", "work:manage", "okr:view"];
 
+/*
+  ═══ LƯƠNG TOÀN CÔNG TY KHÔNG PHẢI MỘT MẶC ĐỊNH ═══
+
+  `payroll:view` cho thấy lương của MỌI nhân sự. ERP hôm nay chỉ có hai mức — xem TẤT CẢ hoặc xem
+  của CHÍNH MÌNH; **chưa có phạm vi "trưởng nhóm xem nhóm mình"**. Nên mở `payroll:view` cho một
+  vai trò quản lý không phải là cấp quyền đúng mức, mà là cấp quyền RỘNG NHẤT để bù cho một phạm vi
+  chưa được xây.
+
+  Hai chỗ đã sai theo đúng kiểu ấy và nay sửa lại:
+
+   · `MANAGER` nhận `payroll:view` vì danh sách dựng bằng phép LOẠI TRỪ — không ai từng quyết định
+     cấp nó; nó lọt vào vì không có tên trong danh sách loại. Đây là cách nguy hiểm nhất để một
+     quyền tiền xuất hiện: không có dòng nào để đọc lại và hỏi "vì sao".
+   · `LEADER` nhận `payroll:view` tường minh, kèm chú thích "xem lương & LN của CẢ NHÓM". Nhưng
+     không có phạm vi nhóm nào, nên thứ mã nguồn thật sự cấp là CẢ CÔNG TY. Chú thích mô tả một ý
+     định mà mã không thực hiện được — và khoảng cách ấy là chỗ dữ liệu rò ra.
+
+  Mọi nhánh sai phải rơi về phía HẸP HƠN (AGENTS.md mục 31). Chủ shop vẫn cấp tay được cho từng
+  người ở trang Người dùng — mất quyền vì một lần triển khai thì tệ, nhưng cấp thừa một quyền tiền
+  vì một phép loại trừ thì tệ hơn, vì không ai biết là nó đã được cấp.
+
+  `ACCOUNTANT` GIỮ `payroll:view`: kế toán cần bảng lương toàn công ty để trả tiền. Đó là một quyết
+  định tường minh, đúng với chức năng — không phải một phạm vi bị thiếu được lấp bằng quyền rộng.
+*/
+
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
   // `payroll:approve` đứng cùng nhóm với `payroll:manage`: cả hai đều là quyền TIỀN. Mở mặc định
   // cho MANAGER là để bản này lặng lẽ cấp thêm quyền duyệt lương cho những tài khoản đang có —
-  // đúng thứ AGENTS.md mục 31 nói phải rơi về phía HẸP HƠN.
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve"].includes(p)),
-  // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  // đúng thứ AGENTS.md mục 31 nói phải rơi về phía HẸP HƠN. `payroll:view` cùng lý do: xem lương
+  // của mọi người là quyền phải được CẤP, không phải quyền còn lại sau một phép loại trừ.
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view"].includes(p)),
+  // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
+  // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
