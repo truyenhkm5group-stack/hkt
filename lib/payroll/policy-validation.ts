@@ -17,6 +17,7 @@
  * thử được bằng số viết tay.
  */
 import { PAYROLL_COMPONENT_SIGN, carryForwardAllowed, componentBasisKey, payrollInput, type PolicyComponent } from "@/lib/constants/payroll-components";
+import { formatDate } from "@/lib/format";
 import { componentRef, danglingRefs, findCycles } from "@/lib/payroll/policy-graph";
 import type { EmploymentRow, PolicyAssignmentRow, PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 import { isWorkingSegment, resolveSegments } from "@/lib/payroll/policy-resolve";
@@ -31,7 +32,9 @@ export type PolicyIssue = {
   blocking: boolean;
 };
 
-const ngay = (d: Date) => d.toLocaleDateString("vi-VN");
+// Cùng lý do với `engine.ts`: `toLocaleDateString` đổi ĐỊNH DẠNG chứ không đổi MÚI GIỜ, và máy
+// chủ chạy UTC — mốc đầu ngày Việt Nam sẽ in lùi một ngày.
+const ngay = (d: Date) => formatDate(d);
 
 /**
  * HAI DÒNG GÁN CHÍNH SÁCH CÙNG PHỦ MỘT NGÀY.
@@ -252,7 +255,7 @@ export function policyActivationBlockers(input: {
   otherActiveVersions: readonly { version: number; effectiveFrom: Date; effectiveTo: Date | null }[];
 }): ActivationBlocker[] {
   const out: ActivationBlocker[] = [];
-  const day = (d: Date) => d.toLocaleDateString("vi-VN");
+  const day = (d: Date) => formatDate(d);
 
   // ─── 1. KHÔNG CÓ THÀNH PHẦN NÀO ───
   if (!input.components.length) {

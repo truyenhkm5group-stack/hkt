@@ -47,6 +47,7 @@ function doan(from: string, to: string, versionId: string, version: number, days
     to: dEnd(to),
     days,
     employment: NHAN_SU,
+    hasEmploymentRecord: true,
     policyId: "p1",
     policyCode: "P1",
     policyName: "Chính sách thử",
@@ -521,6 +522,62 @@ export function testPayrollProductionReadiness() {
 
   /*
     ═══════════════════════════════════════════════════════════════════════════════════════
+    10 · GÁN CHÍNH SÁCH MÀ CHƯA KHAI PHÂN CÔNG: PHẢI NÓI RA, KHÔNG ĐƯỢC TRẢ 0đ IM LẶNG
+    ═══════════════════════════════════════════════════════════════════════════════════════
+
+    LỖI THẬT ĐÃ SỬA, VÀ LÀ LỖI NGUY HIỂM NHẤT TRONG CẢ MODULE.
+
+    Không có dòng phân công lao động nào thì không đoạn nào là "đoạn làm việc"; vòng lặp bỏ qua tất
+    cả; người ấy ra `netPay = 0` với `problems` RỖNG và `missing` RỖNG. Cổng chặn chốt kỳ đọc đúng
+    hai danh sách ấy, nên kỳ VẪN CHỐT ĐƯỢC với người ấy ở 0đ — không cảnh báo, không dấu hỏi.
+
+    Đo trên production 15/09/2026 bằng `db-query` (chỉ đọc): `employment_assignments` RỖNG, cả 4
+    nhân sự đều chưa khai phân công. Nghĩa là lượt bấm "Chuyển sang máy chung" ĐẦU TIÊN trên
+    production đã đi thẳng vào đường này.
+
+    Phép kiểm phải phân biệt được HAI tình huống mà bản trước gộp làm một.
+  */
+  {
+    const gan: PolicyAssignmentRow[] = [
+      { id: "a1", employeeId: "e1", policyId: "p1", policyCode: "P1", policyName: "P1", effectiveFrom: d("2026-01-01"), effectiveTo: null },
+    ];
+    const ban: PolicyVersionRow[] = [{ id: "v1", policyId: "p1", version: 1, effectiveFrom: d("2026-01-01"), effectiveTo: null, status: "ACTIVE" }];
+    const luong = thanhPhan({ code: "BASE", kind: "FIXED", calc: { type: "FIXED_AMOUNT", amount: 12_000_000 }, prorate: "PERIOD_DAYS" });
+    const tinh = (employments: EmploymentRow[]) => {
+      const segs = resolveSegments({ from: d("2026-09-01"), to: dEnd("2026-09-30"), employments, policyAssignments: gan, policyVersions: ban });
+      return calculatePayrollItem({
+        employeeId: "e1", employeeName: "A", adjustments: [], carryOpening: {},
+        segments: segs.map((segment) => ({ segment, components: [luong], basis: {} })),
+      });
+    };
+
+    // (a) CHƯA KHAI PHÂN CÔNG — ERP không biết người này có đi làm hay không.
+    const chuaKhai = tinh([]);
+    assert.equal(chuaKhai.netPay, 0, "10. con số vẫn là 0 (máy không bịa ra một khoản lương)");
+    assert.equal(chuaKhai.problems.length, 1, "10. NHƯNG phải có ĐÚNG MỘT dòng nói vì sao — 0đ im lặng là thứ không ai đi kiểm");
+    assert.match(chuaKhai.problems[0], /CHƯA khai phân công lao động/, "10. và nói đúng việc phải làm");
+    assert.match(chuaKhai.problems[0], /01\/09\/2026/, "10. ngày in ra phải là ngày VIỆT NAM — máy chủ chạy UTC nên `toLocaleDateString` in lùi một ngày");
+
+    // (b) ĐÃ NGHỈ VIỆC trước kỳ — 0đ là câu trả lời ĐÚNG, và không được kêu ca gì.
+    const daNghi = tinh([{ ...NHAN_SU, effectiveFrom: d("2020-01-01"), effectiveTo: dEnd("2026-06-30") }]);
+    assert.equal(daNghi.netPay, 0, "10. đã nghỉ trước kỳ ⇒ 0đ");
+    assert.equal(daNghi.problems.length, 0, "10. và KHÔNG cảnh báo gì — người ta thật sự không làm ngày nào, đây là câu trả lời đúng");
+
+    // (c) ĐANG LÀM — tính ra tiền như thường.
+    const dangLam = tinh([NHAN_SU]);
+    assert.equal(dangLam.netPay, 12_000_000, "10. có phân công ⇒ tính ra tiền");
+    assert.equal(dangLam.problems.length, 0, "10. và không có vấn đề gì");
+
+    /*
+      HAI TÌNH HUỐNG (a) VÀ (b) RA CÙNG MỘT CON SỐ nhưng KHÁC NHAU VỀ BẢN CHẤT.
+      Đây chính là điều bản trước không phân biệt được, và là lý do cột `hasEmploymentRecord` tồn tại.
+    */
+    assert.equal(chuaKhai.netPay, daNghi.netPay, "10. (tiền đề) hai tình huống ra cùng một con số…");
+    assert.notEqual(chuaKhai.problems.length, daNghi.problems.length, "10. …nên phải phân biệt được bằng `problems`, không bằng con số");
+  }
+
+  /*
+    ═══════════════════════════════════════════════════════════════════════════════════════
     9 · MỌI CỬA VÀO DỮ LIỆU LƯƠNG PHẢI CÓ CỔNG — QUÉT MÃ NGUỒN, KHÔNG TIN VÀO MẮT
     ═══════════════════════════════════════════════════════════════════════════════════════
 
@@ -590,6 +647,6 @@ export function testPayrollProductionReadiness() {
   }
 
   console.log(
-    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu · mọi cửa vào đều có cổng quyền",
+    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu · chưa khai phân công thì NÓI RA thay vì trả 0đ im lặng · mọi cửa vào đều có cổng quyền",
   );
 }

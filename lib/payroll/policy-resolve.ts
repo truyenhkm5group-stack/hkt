@@ -75,6 +75,18 @@ export type PayrollSegment = {
   to: Date;
   days: number;
   employment: EmploymentRow | null;
+  /**
+   * NGƯỜI NÀY CÓ DÒNG PHÂN CÔNG LAO ĐỘNG NÀO KHÔNG — bất kể nó có phủ đoạn này hay không.
+   *
+   * `employment = null` gộp hai tình huống KHÁC HẲN nhau, và gộp chúng là chỗ một người bị trả 0đ:
+   *
+   *  · CÓ dòng phân công nhưng nó không phủ đoạn này (chưa vào làm, đã nghỉ) ⇒ 0 đồng cho đoạn ấy
+   *    là câu trả lời ĐÚNG. Người ta thật sự không làm việc những ngày đó.
+   *  · KHÔNG có dòng phân công nào ⇒ ERP KHÔNG BIẾT người ấy đi làm hay không. Trả 0 ở đây là
+   *    khẳng định họ không làm ngày nào — một khẳng định không có căn cứ, và nó trông y hệt câu
+   *    trả lời đúng ở trên.
+   */
+  hasEmploymentRecord: boolean;
   policyId: string | null;
   policyCode: string;
   policyName: string;
@@ -180,6 +192,7 @@ export function resolveSegments(input: {
       to: new Date(segTo),
       days: inclusiveDays(new Date(segFrom), new Date(segTo)),
       employment,
+      hasEmploymentRecord: input.employments.length > 0,
       policyId: assignment?.policyId ?? null,
       policyCode: assignment?.policyCode ?? "",
       policyName: assignment?.policyName ?? "",

@@ -30,6 +30,7 @@
  * rời nhau đúng vào lúc ai đó cần đối chiếu nhất.
  */
 import { prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
+import { formatDate } from "@/lib/format";
 import {
   applyRounding,
   componentBasisKey,
@@ -134,6 +135,15 @@ export type PayrollItemResult = {
   /** Đoạn nào áp chính sách nào — để màn hình nói được "01–14 chính sách A, 15–30 chính sách B". */
   segments: { from: Date; to: Date; days: number; policyCode: string; policyVersion: number | null; working: boolean }[];
 };
+
+/*
+  NGÀY IN RA PHẢI LÀ NGÀY VIỆT NAM.
+
+  `toLocaleDateString("vi-VN")` chỉ đổi ĐỊNH DẠNG, không đổi MÚI GIỜ — nó vẫn đọc theo múi giờ của
+  tiến trình. Máy chủ chạy UTC, nên mốc 01/09 lúc 00:00 giờ Việt Nam in ra thành "31/8". Một câu
+  chặn nói sai ngày làm người đọc đi tìm lỗi ở đúng chỗ không có lỗi.
+*/
+const ngayVN = (d: Date) => formatDate(d);
 
 const num = (v: number | null | undefined): number | null => (v === null || v === undefined || !Number.isFinite(v) ? null : v);
 
@@ -376,7 +386,29 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
   for (const [code, v] of Object.entries(input.carryOpening)) carryRunning.set(code, num(v));
 
   for (const seg of input.segments) {
-    if (!isWorkingSegment(seg.segment)) continue;
+    if (!isWorkingSegment(seg.segment)) {
+      /*
+        ═══ ĐÃ GÁN CHÍNH SÁCH MÀ CHƯA KHAI PHÂN CÔNG ⇒ NÓI RA, KHÔNG TRẢ 0 ═══
+
+        Đây là lỗi nguy hiểm nhất mà máy này từng có, và nó im lặng hoàn toàn: gán chính sách cho
+        một người CHƯA có dòng phân công lao động nào thì không đoạn nào là đoạn làm việc, vòng
+        lặp bỏ qua tất cả, và người ấy ra `netPay = 0` — KHÔNG một dòng `problems`, KHÔNG một dòng
+        `missing`. Cổng chặn chốt kỳ đọc đúng hai danh sách ấy, nên kỳ vẫn chốt được với người ấy
+        ở 0đ.
+
+        Đo trên production 15/09/2026: `employment_assignments` rỗng, cả 4 nhân sự đều chưa khai
+        phân công. Nghĩa là lượt bấm "Chuyển sang máy chung" ĐẦU TIÊN đã đi thẳng vào đường này.
+
+        Phân biệt hai tình huống bằng `hasEmploymentRecord`: CÓ dòng phân công mà nó không phủ
+        đoạn này (chưa vào làm / đã nghỉ) thì 0 đồng là câu trả lời đúng và không cần nói gì.
+      */
+      if (seg.segment.policyVersionId && !seg.segment.hasEmploymentRecord) {
+        problems.push(
+          `Đoạn ${ngayVN(seg.segment.from)} – ${ngayVN(seg.segment.to)}: đã gán chính sách “${seg.segment.policyCode}” nhưng CHƯA khai phân công lao động, nên ERP không biết người này có đi làm hay không. Khai ở tab “Phân công & gán chính sách” (ngày vào làm, hình thức, phòng ban) rồi tính lại — để nguyên thì con số ra 0đ mà không phải vì người ta không làm.`,
+        );
+      }
+      continue;
+    }
     if (!seg.segment.policyVersionId) {
       /*
         KHÔNG CÓ CHÍNH SÁCH THÌ NÓI RA, KHÔNG TÍNH 0 (yêu cầu mục 29.30).
@@ -387,8 +419,8 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
       */
       problems.push(
         seg.segment.policyId
-          ? `Đoạn ${seg.segment.from.toLocaleDateString("vi-VN")} – ${seg.segment.to.toLocaleDateString("vi-VN")}: chính sách “${seg.segment.policyName}” chưa có phiên bản nào ĐANG HIỆU LỰC (bản nháp không dùng để trả tiền).`
-          : `Đoạn ${seg.segment.from.toLocaleDateString("vi-VN")} – ${seg.segment.to.toLocaleDateString("vi-VN")}: chưa gán chính sách lương nào.`,
+          ? `Đoạn ${ngayVN(seg.segment.from)} – ${ngayVN(seg.segment.to)}: chính sách “${seg.segment.policyName}” chưa có phiên bản nào ĐANG HIỆU LỰC (bản nháp không dùng để trả tiền).`
+          : `Đoạn ${ngayVN(seg.segment.from)} – ${ngayVN(seg.segment.to)}: chưa gán chính sách lương nào.`,
       );
       continue;
     }
