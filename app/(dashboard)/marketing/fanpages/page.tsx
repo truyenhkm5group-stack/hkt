@@ -97,6 +97,12 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
   const pageFilter = param(raw, "fp") || null;
   const sku = param(raw, "sku") || null;
   const status = param(raw, "st") || null;
+  /*
+    LỌC RIÊNG ĐƠN LANDING. Nguồn quy kết là một CHIỀU KHÁC với tình trạng: một đơn landing có thể
+    đã quy kết được (`LANDING_UTM`) hoặc còn treo (`NO_PAGE` nhưng có dòng landing). Gộp hai chiều
+    vào một ô chọn sẽ làm không cách nào xem "tất cả đơn landing" trong một lần.
+  */
+  const source = param(raw, "src") || null;
   const filters = { marketerId: mkt, pageId: pageFilter, sku };
 
   const [report, pageOptions, marketerFacet] = await Promise.all([
@@ -111,6 +117,16 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
   const facets = [
     ...(marketerFacet.length ? [{ key: "mkt", label: "Marketer", options: [...marketerFacet.map((m) => ({ value: m.id, label: m.label, count: 0 })), { value: ATTR_UNATTRIBUTED, label: ATTR_UNATTRIBUTED_LABEL, count: 0 }] }] : []),
     ...(pageOptions.length ? [{ key: "fp", label: "Fanpage", options: pageOptions.map((p) => ({ value: p.id, label: p.label, count: 0 })) }] : []),
+    {
+      key: "src",
+      label: "Nguồn quy kết",
+      options: [
+        { value: "LANDING", label: "Landing (mọi đơn có form)", count: 0 },
+        { value: "LANDING_UTM", label: "Landing — đã quy kết bằng tracking", count: 0 },
+        { value: "LANDING_UNRESOLVED", label: "Landing — chưa đủ bằng chứng", count: 0 },
+        { value: "PANCAKE_PAGE", label: "Fanpage (Pancake)", count: 0 },
+      ],
+    },
   ];
 
   return (
@@ -219,7 +235,7 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
           ) : null}
 
           {tab === "orders" ? (
-            <OrdersTab params={params} filters={{ ...filters, status }} />
+            <OrdersTab params={params} filters={{ ...filters, status, source }} />
           ) : (
             <SectionCard title="Theo marketer" description="Doanh thu xác nhận = tổng giá trị đơn đã xác nhận trên Pancake. Đơn trùng không tính cho ai.">
               {report.rows.length === 0 ? (
@@ -385,7 +401,7 @@ async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPage
 }
 
 /** Soi từng đơn — một báo cáo quy kết không mở ra được tới từng đơn là một báo cáo không kiểm chứng được. */
-async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseListParams>; filters: { marketerId: string | null; pageId: string | null; sku: string | null; status: string | null } }) {
+async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseListParams>; filters: { marketerId: string | null; pageId: string | null; sku: string | null; status: string | null; source: string | null } }) {
   const { rows, total, pageCount } = await listAttributionOrders(params, filters);
   return (
     <SectionCard title="Từng đơn" description="Mốc hiển thị là MỐC ĐƠN LÊN TẠI PANCAKE — cùng mốc mà luật trùng đơn dùng để quyết ai thắng.">
@@ -449,8 +465,14 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                       ) : null}
                     </td>
                     <td className="py-2 pr-3">
-                      <div>{r.pageName || "—"}</div>
-                      <code className="text-[11px] text-muted-foreground">{r.pageId ?? "không có page"}</code>
+                      {/*
+                        KHÔNG BẮT BUỘC CÓ PAGE MỚI ĐƯỢC QUY KẾT. Đơn landing xác định chắc
+                        chiến dịch → TKQC → marketer nhưng không có bằng chứng nào về fanpage thì
+                        ô này nói thẳng "Không xác định" — KHÔNG bịa một Page ID, và cũng không để
+                        người đọc tưởng là thiếu dữ liệu.
+                      */}
+                      <div>{r.attributionSource === "LANDING_UTM" && !r.pageId && !r.landing?.inferredPageId ? <span className="text-muted-foreground">Không xác định</span> : r.pageName || "—"}</div>
+                      {r.pageId ? <code className="text-[11px] text-muted-foreground">{r.pageId}</code> : null}
                       {r.landing?.inferredPageId ? (
                         <div className="mt-0.5 text-[11px] text-muted-foreground" title="Fanpage SUY RA từ mẩu quảng cáo — khác hẳn page_id do Pancake gửi.">
                           suy ra từ QC: <code>{r.landing.inferredPageId}</code>

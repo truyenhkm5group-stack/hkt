@@ -450,10 +450,24 @@ function readUtm(utm: unknown, key: string): string | null {
  * Một báo cáo quy kết mà không mở ra được tới từng đơn là một báo cáo không kiểm chứng được, và một
  * con số không kiểm chứng được thì không dùng để trả lương cho ai.
  */
-export async function listAttributionOrders(params: ListParams, filters: AttributionFilters & { status?: string | null } = {}): Promise<{ rows: AttributionOrderRow[]; total: number; pageCount: number }> {
+export async function listAttributionOrders(
+  params: ListParams,
+  filters: AttributionFilters & { status?: string | null; source?: string | null } = {},
+): Promise<{ rows: AttributionOrderRow[]; total: number; pageCount: number }> {
   const db = await getDb();
   const conds = [...periodConds(params.period), ...filterConds(filters)];
   if (filters.status && (ATTRIBUTION_STATUSES as readonly string[]).includes(filters.status)) conds.push(sql`${OA.status} = ${filters.status}`);
+  /*
+    NGUỒN QUY KẾT LÀ MỘT CHIỀU KHÁC VỚI TÌNH TRẠNG.
+
+    "Đơn landing" (`LANDING`) = có dòng form landing, bất kể đã quy kết được hay chưa — đó là câu
+    hỏi của người đi rà kênh. Hai giá trị còn lại tách chính tập ấy thành đã quy kết / còn treo.
+    Không gộp vào ô "Tình trạng": gộp lại thì không cách nào xem hết đơn landing trong một lần.
+  */
+  if (filters.source === "LANDING") conds.push(sql`exists (select 1 from ${LA} where ${LA.orderId} = ${OA.orderId})`);
+  else if (filters.source === "LANDING_UTM") conds.push(sql`${OA.attributionSource} = 'LANDING_UTM'`);
+  else if (filters.source === "LANDING_UNRESOLVED") conds.push(sql`exists (select 1 from ${LA} where ${LA.orderId} = ${OA.orderId} and ${LA.marketerId} is null)`);
+  else if (filters.source === "PANCAKE_PAGE") conds.push(sql`${OA.attributionSource} = 'PANCAKE_PAGE'`);
   if (params.q?.trim()) {
     const q = `%${params.q.trim()}%`;
     conds.push(sql`(${O.billPhone} ilike ${q} or ${O.shipPhone} ilike ${q} or ${O.billFullName} ilike ${q} or ${O.shipFullName} ilike ${q} or ${O.id} = ${params.q.trim()})`);
