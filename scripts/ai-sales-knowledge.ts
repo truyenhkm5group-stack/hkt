@@ -17,9 +17,10 @@
  * và IN RA chỗ lệch; nó không sửa ERP, và cũng không bỏ giá đã chốt để lấy giá ERP.
  */
 import "dotenv/config";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { rowsOf } from "@/lib/sql-rows";
 import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
 import { generateTestReply, testIntentOf, type TestFacts } from "@/lib/ai-workforce/agents/sales/generate-test";
 import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
@@ -70,9 +71,26 @@ async function main() {
   const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split("=")[1];
   const apDung = process.argv.includes("--apply");
   const pageId = arg("page") ?? "";
-  if (!pageId) { console.error("Thiếu --page"); process.exit(1); }
   await ensureMigrated();
   const db = await getDb();
+
+  // Thiếu --page thì LIỆT KÊ page có thật rồi dừng, thay vì báo "thiếu tham số". Người chạy lệnh
+  // này thường không thuộc lòng id page của Pancake, và bắt họ đi tra ở một chỗ khác là bắt họ mở
+  // thêm một màn hình cho một việc đáng lẽ một lệnh.
+  if (!pageId) {
+    const ds = await db.execute(sql`
+      select c.page_id, count(*)::int as n, coalesce(f.name, '') as ten, coalesce(p.custom_id, '') as ma
+      from sales_conversations c
+      left join fanpage_sales_profiles f on f.pancake_page_id = c.page_id
+      left join products p on p.id = f.active_product_id
+      where c.page_id <> '' group by 1, 3, 4 order by 2 desc limit 20
+    `);
+    console.log("\nThiếu --page. Các page đang có hội thoại trong bản chạy thử:");
+    for (const r of rowsOf<Record<string, unknown>>(ds)) {
+      console.log(`   --page=${r.page_id}   ${String(r.n).padStart(4)} hội thoại   ${r.ten || "(chưa khai hồ sơ)"}   ${r.ma ? `mã WIN ${r.ma}` : "chưa có mã WIN"}`);
+    }
+    process.exit(1);
+  }
 
   const [hoSo] = await db.select().from(schema.fanpageSalesProfiles).where(eq(schema.fanpageSalesProfiles.pancakePageId, pageId)).limit(1);
   if (!hoSo) { console.error(`Page ${pageId} chưa có hồ sơ bán hàng — khai mã WIN trước ở /ai/fanpage`); process.exit(1); }
