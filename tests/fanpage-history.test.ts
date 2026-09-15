@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -170,5 +172,32 @@ export async function testFanpageHistoryDb() {
   assert.equal(khongPage?.status, "NO_PAGE", "đơn không có nguồn fanpage phải ở NO_PAGE");
   assert.equal(khongPage?.marketerId, null, "và KHÔNG bao giờ được gán marketer chỉ để làm hết số treo");
 
-  console.log("✓ Fanpage lịch sử: page mất quyền vẫn gán được bằng Page ID · alias không đụng page_id và đồng bộ không xoá · đơn ngoài khoảng hiệu lực giữ nguyên · đối soát không cộng đúp · NO_PAGE không tự gán");
+  /* ═══ 6 · MỘT LƯỢT LIỆT KÊ = MỘT MỐC, cho MỌI page nó thấy ═══
+   *
+   * SỰ CỐ THẬT (production 15/09/2026): mốc tạo bằng `new Date()` ngay trong vòng lặp nên mỗi page
+   * lệch nhau vài mili giây; trạng thái so với mốc LỚN NHẤT của bảng, nên chỉ page ghi CUỐI cùng ra
+   * `ACTIVE` còn 12 page đang chạy bình thường bị gắn "không còn quyền truy cập". Đo được ngay sau
+   * triển khai: 1 ACTIVE / 14 HISTORICAL.
+   *
+   * Bất biến: mọi page được thấy TRONG CÙNG một lượt liệt kê phải mang ĐÚNG một mốc.
+   */
+  await db
+    .update(schema.fanpages)
+    .set({ lastSeenInApiAt: new Date(Date.UTC(2024, 5, 25, 10)) })
+    .where(sql`${schema.fanpages.externalPageId} like ${`${P}%`}`);
+  const cungMoc = await db
+    .select({ n: sql<number>`count(distinct ${schema.fanpages.lastSeenInApiAt})::int`, tong: sql<number>`count(*)::int` })
+    .from(schema.fanpages)
+    .where(sql`${schema.fanpages.externalPageId} like ${`${P}%`} and ${schema.fanpages.lastSeenInApiAt} is not null`);
+  assert.equal(Number(cungMoc[0].n), 1, "các page thấy trong cùng một lượt liệt kê phải chung MỘT mốc");
+  const newest = new Date(Date.UTC(2024, 5, 25, 10));
+  for (const p of await db.select().from(schema.fanpages).where(sql`${schema.fanpages.externalPageId} like ${`${P}%`}`)) {
+    assert.equal(fanpageAccessStatus(p.lastSeenInApiAt, newest), "ACTIVE", `page ${p.externalPageId} thấy trong lượt liệt kê gần nhất thì phải là ACTIVE, không phải HISTORICAL`);
+  }
+  // Mã nguồn: mốc phải lấy MỘT LẦN ngoài vòng lặp, không phải `new Date()` cho từng page.
+  const nguon = readFileSync(path.resolve(__dirname, "../lib/attribution/fanpage.ts"), "utf8");
+  assert.ok(/const listedAt = new Date\(\)/.test(nguon), "phải có một mốc chung cho cả lượt liệt kê");
+  assert.ok(!/names\.has\(pageId\) \? new Date\(\)/.test(nguon), "KHÔNG được tạo mốc mới cho từng page — đó chính là lỗi đã gặp");
+
+  console.log("✓ Fanpage lịch sử: page mất quyền vẫn gán được bằng Page ID · alias không đụng page_id và đồng bộ không xoá · đơn ngoài khoảng hiệu lực giữ nguyên · đối soát không cộng đúp · NO_PAGE không tự gán · một lượt liệt kê = một mốc cho mọi page");
 }
