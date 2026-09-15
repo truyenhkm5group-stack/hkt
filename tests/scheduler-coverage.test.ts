@@ -39,6 +39,7 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "phone-verify": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "facebook-ad-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút",
+  "facebook-adset-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút — tra theo ĐÚNG mã tracking landing đang cần, không quét cả tài khoản",
 };
 
 const goc = path.resolve(__dirname, "..");

@@ -2138,6 +2138,41 @@ export const landingOrders = pgTable(
 export type LandingOrder = typeof landingOrders.$inferSelect;
 
 /** Danh mục quảng cáo Facebook (ad_id → adset / chiến dịch / tài khoản) để ghi nhận đơn Pancake có ad_id cho đúng marketer */
+/**
+ * NHÓM QUẢNG CÁO (ADSET) — MẮT XÍCH CÒN THIẾU GIỮA TRACKING LANDING VÀ CHIẾN DỊCH.
+ *
+ * ─── VÌ SAO PHẢI CÓ BẢNG NÀY ───
+ *
+ * Form landing ghi `utm_source` bằng **adset_id**, không phải tên chiến dịch (đo production
+ * 15/09/2026: 29 đơn treo, 10 mã, Graph khai cả 10 là ADSET). Trong khi ERP:
+ *   · `fb_ads` chỉ tra những `ad_id` XUẤT HIỆN TRONG `orders.ad_id` — mà đơn landing thì Pancake
+ *     không gửi `ad_id`, nên các nhóm ấy KHÔNG BAO GIỜ được tra;
+ *   · `ad_spends` chỉ giữ số liệu ở mức CHIẾN DỊCH (campaign insights), nên một `adset_id` không
+ *     bao giờ khớp được ở đó — không phải lỗi dữ liệu, mà là sai CẤP.
+ *
+ * Bảng này giữ đúng một việc: `adset_id → campaign_id` (+ tài khoản quảng cáo), tra thẳng từ
+ * Graph theo ĐÚNG những mã đang cần. Có nó thì chuỗi `tracking → adset → chiến dịch → TKQC →
+ * marketer` khép kín mà không phải đoán một chữ nào.
+ */
+export const fbAdsets = pgTable(
+  "fb_adsets",
+  {
+    /** adset_id Facebook. */
+    id: text("id").primaryKey(),
+    name: text("name").notNull().default(""),
+    campaignId: text("campaign_id"),
+    accountId: text("account_id"),
+    /** Trạng thái hiệu lực (`PAUSED`, `CAMPAIGN_PAUSED`…) — nhóm đã tắt vẫn phải tra được. */
+    status: text("status").notNull().default(""),
+    /** Không tra được trên Facebook (đã xoá / không có quyền). Giữ dòng để khỏi tra lại mỗi giờ. */
+    missing: boolean("missing").notNull().default(false),
+    fetchedAt: ts("fetched_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("fb_adsets_campaign_idx").on(t.campaignId), index("fb_adsets_account_idx").on(t.accountId)],
+);
+
 export const fbAds = pgTable(
   "fb_ads",
   {

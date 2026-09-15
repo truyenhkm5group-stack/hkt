@@ -638,6 +638,13 @@
       "when": 1789591227245,
       "tag": "0091_landing_attribution",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1789677627245,
+      "tag": "0092_fb_adsets",
+      "breakpoints": true
     }
   ]
 }

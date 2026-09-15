@@ -24,6 +24,7 @@ import { backfillWarnings, runCanonicalBackfill } from "@/lib/sync/backfill";
 import { handleFailedDeliveries } from "@/lib/cs/failed-delivery";
 import { verifyNewPhones } from "@/lib/cs/phone-verify";
 import { syncFacebookAdIndex } from "@/lib/integrations/facebook/ads-index";
+import { syncFacebookAdsetIndex } from "@/lib/integrations/facebook/adset-index";
 import { pushAllReadyLanding } from "@/lib/landing/pos";
 import { importLandingSheet, previewSheet, recheckAllLanding } from "@/lib/landing/sheet";
 import { syncPancakeChatCases } from "@/lib/cs/chat-detect";
@@ -131,7 +132,14 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const r = await syncFacebookAds({ trigger: o.trigger, actor: o.actor, days: num(o.params?.days) });
       // tra ad_id của đơn Pancake → chiến dịch → marketer (ghi nhận đơn đúng người chạy)
       const adIndex = await syncFacebookAdIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
-      return { ...r, adIndex };
+      /*
+        Và tra NHÓM quảng cáo mà tracking landing đang tham chiếu. Cùng lý do, khác cấp: form
+        landing ghi `utm_source` bằng adset_id, mà `fb_ads` chỉ có ad_id của đơn Pancake còn
+        `ad_spends` chỉ có mức chiến dịch. Không có bước này thì đơn landing treo mãi ở "không
+        khớp" dù chiến dịch cha của nó đã nằm sẵn trong bảng chi tiêu.
+      */
+      const adsetIndex = await syncFacebookAdsetIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
+      return { ...r, adIndex, adsetIndex };
     },
   },
   "landing-sheet": {
@@ -151,6 +159,13 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "FACEBOOK",
     description: "Đơn Pancake có ad_id (quảng cáo tạo ra đơn) → tra Facebook lấy chiến dịch / tài khoản → ghi nhận đơn, doanh thu cho đúng marketer kể cả khi chạy chung fanpage. days=N số ngày đơn quét lùi (mặc định 120).",
     run: (o) => syncFacebookAdIndex({ days: num(o.params?.days) }),
+  },
+  "facebook-adset-index": {
+    label: "Tra nhóm quảng cáo của tracking landing → chiến dịch",
+    source: "FACEBOOK",
+    description:
+      "Form landing ghi `utm_source` bằng adset_id. `fb_ads` chỉ tra ad_id có trong đơn Pancake (đơn landing không có), còn `ad_spends` chỉ giữ số liệu ở mức chiến dịch — nên adset_id không khớp được ở đâu cả. Job này tra THẲNG từng mã đang cần về `fb_adsets` (kể cả nhóm đã tắt), để chuỗi adset → chiến dịch → TKQC → marketer khép kín. Không đụng chi tiêu hay thanh toán.",
+    run: (o) => syncFacebookAdsetIndex({ dryRun: o.params?.dryRun === "1" }),
   },
   "outcome-materialize": {
     label: "Dựng lại kết quả đơn đã tính sẵn",

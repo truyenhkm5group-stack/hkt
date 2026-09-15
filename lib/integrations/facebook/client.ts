@@ -40,6 +40,17 @@ const THROTTLE_MS = 150;
 let lastCallAt = 0;
 
 /** Client Facebook Marketing API (chỉ đọc): tài khoản quảng cáo trong Business Manager và insights theo ngày × chiến dịch */
+/** Nhóm quảng cáo (adset) — chỉ những trường cần để đi tiếp lên chiến dịch và tài khoản. */
+export type FbAdsetInfo = {
+  id: string;
+  name: string;
+  campaignId: string | null;
+  accountId: string | null;
+  status: string;
+  missing: boolean;
+  error?: string;
+};
+
 export type FbAdInfo = {
   id: string;
   name: string;
@@ -189,6 +200,49 @@ export class FacebookAdsClient {
         const story = str(asRecord(item.creative).effective_object_story_id);
         const postId = story.includes("_") ? story.split("_").slice(1).join("_") : story || null;
         out.push({ id, name: str(item.name), adsetId: str(item.adset_id) || null, campaignId: str(item.campaign_id) || str(campaign.id) || null, campaignName: str(campaign.name), accountId: str(item.account_id).replace(/^act_/, "") || null, status: str(item.status), missing: false, postId: postId || null, storyId: story || null });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * TRA NHÓM QUẢNG CÁO THEO MÃ. Trả về chiến dịch cha và tài khoản — hai thứ cần để quy kết.
+   *
+   * Tách khỏi `getAdsByIds` vì nút adset KHÔNG có trường `adset_id`/`creative`: xin bộ trường của
+   * mẩu quảng cáo trên một adset là Graph trả lỗi #100 và hỏng CẢ LÔ. Một lô hỏng vì một mã sai
+   * kiểu thì tra từng mã, đúng cách `getAdsByIds` đã làm.
+   */
+  async getAdsetsByIds(ids: string[]): Promise<FbAdsetInfo[]> {
+    const out: FbAdsetInfo[] = [];
+    const clean = [...new Set(ids.map((x) => x.trim()).filter((x) => /^\d{5,}$/.test(x)))];
+    for (let i = 0; i < clean.length; i += 50) {
+      const chunk = clean.slice(i, i + 50);
+      let record: Record<string, unknown> = {};
+      try {
+        record = await this.get("", { ids: chunk.join(","), fields: "id,name,campaign_id,account_id,status,effective_status" });
+      } catch (error) {
+        if (chunk.length > 1) {
+          for (const id of chunk) out.push(...(await this.getAdsetsByIds([id])));
+          continue;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        out.push({ id: chunk[0], name: "", campaignId: null, accountId: null, status: "", missing: true, error: message });
+        continue;
+      }
+      for (const id of chunk) {
+        const item = asRecord(record[id]);
+        if (!str(item.id)) {
+          out.push({ id, name: "", campaignId: null, accountId: null, status: "", missing: true });
+          continue;
+        }
+        out.push({
+          id,
+          name: str(item.name),
+          campaignId: str(item.campaign_id) || null,
+          accountId: str(item.account_id).replace(/^act_/, "") || null,
+          status: str(item.effective_status) || str(item.status),
+          missing: false,
+        });
       }
     }
     return out;

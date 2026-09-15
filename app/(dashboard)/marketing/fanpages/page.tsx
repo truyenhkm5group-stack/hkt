@@ -455,7 +455,11 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                           {r.landing.utmCampaign ? <div className="max-w-[240px] truncate" title={r.landing.utmCampaign}>Meta: {r.landing.utmCampaign}</div> : null}
                           {r.landing.adAccountId ? <div>TKQC: <code>{r.landing.adAccountId}</code></div> : null}
                           {r.landing.landingUrl ? <div className="max-w-[240px] truncate" title={r.landing.landingUrl}>Landing: {r.landing.landingUrl}</div> : null}
-                          {r.landing.gap ? <div className="text-amber-700 dark:text-amber-400">{LANDING_GAP_LABEL[r.landing.gap]} — {LANDING_GAP_FIX[r.landing.gap]}</div> : null}
+                          {r.landing.gap ? (
+                            <div className="text-amber-700 dark:text-amber-400">
+                              <b>{r.landing.gap}</b> · {LANDING_GAP_LABEL[r.landing.gap]} — {LANDING_GAP_FIX[r.landing.gap]}
+                            </div>
+                          ) : null}
                           {r.landing.productMismatch ? (
                             <div className="text-amber-700 dark:text-amber-400">
                               Chiến dịch nói mã {r.landing.campaignProductCode}, đơn lại là mã khác — mã của đơn GIỮ NGUYÊN, đánh dấu để rà.

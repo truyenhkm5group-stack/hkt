@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -108,6 +108,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'marketer_profit_carryover'"), 0, "bước 1: bảng marketer_profit_carryover CHƯA được có — đó là thứ 0089 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'alias'"), 0, "bước 1: cột fanpages.alias CHƯA được có — đó là thứ 0090 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'landing_attributions'"), 0, "bước 1: bảng landing_attributions CHƯA được có — đó là thứ 0091 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fb_adsets'"), 0, "bước 1: bảng fb_adsets CHƯA được có — đó là thứ 0092 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -411,6 +412,22 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_order_uq"),
       "0091: MỘT đơn MỘT dòng — đó là thứ làm phép đối soát idempotent, không có đường nào cộng doanh thu hai lần",
     );
+    /*
+      ═══ 0092: SỔ NHÓM QUẢNG CÁO — MẮT XÍCH ADSET → CHIẾN DỊCH ═══
+
+      Chỉ CỘNG THÊM một bảng tra. Không đụng `fb_ads`, `ad_spends`, chi tiêu hay thanh toán —
+      những thứ mà một lỗi ở đây sẽ biến thành tiền sai.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fb_adsets'"), 1, "0092: bảng fb_adsets phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from fb_adsets"), 0, "0092: KHÔNG gieo sẵn dòng nào — chưa hỏi Meta thì chưa biết gì");
+    await client.query(`insert into fb_adsets (id, name, campaign_id, account_id, status) values ('120248121229960618', 'Nhóm QC', '120248121229780618', '968797992379957', 'PAUSED')`);
+    assert.equal(
+      await dem("select count(*)::int as n from fb_adsets where id = '120248121229960618' and campaign_id = '120248121229780618' and missing = false"),
+      1,
+      "0092: nhóm đã TẮT vẫn phải lưu được — Meta vẫn trả metadata cho PAUSED, và 29 đơn treo đều thuộc nhóm đã tắt",
+    );
+    await client.query(`delete from fb_adsets where id = '120248121229960618'`);
+
     await client.query(`delete from landing_attributions where order_id = 'up-o1'`);
     await client.query(`delete from order_attributions where id = 'up-oa91'`);
     await client.query(`delete from fanpage_marketer_assignments where id = 'up-fa91'`);
