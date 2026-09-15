@@ -463,6 +463,13 @@ export async function testFanpageSales(db: Db) {
   assert.ok(!/còn hàng/.test(tlCon2.text), "TUYỆT ĐỐI không hứa 'còn hàng' khi tồn chưa biết");
   assert.ok(/đang bán màu Đen/.test(tlCon2.text), "nhưng vẫn nói được cái BIẾT — đó là phần có ích của một câu chưa trả lời được");
 
+  // KHÔNG HỎI LẠI THỨ KHÁCH VỪA NÓI. Khách viết "đen size M còn không" mà máy đáp "chị cho em xin
+  // size" thì nó tự khai là không đọc câu của khách — ấn tượng đầu tiên khách có về cả con máy.
+  const slDu = await checkSellability({ productId: win.id, color: "Đen", size: "M" }, db);
+  const tlDu = answerFromKnowledge("STOCK", bdSize.knowledge, bdSize.permissions, { ...ctxSize, sellability: slDu });
+  assert.ok(!/cho em xin size|cho em xin màu/.test(tlDu.text), `khách đã nói đủ màu+size, không được hỏi lại: ${tlDu.text}`);
+  assert.ok(/Đen/.test(tlDu.text) && /M/.test(tlDu.text), "và phải nhắc lại đúng thứ khách chọn");
+
   // TỒN ÂM: sổ kho tự mâu thuẫn (xuất nhiều hơn nhập). "Hết hàng" nghe an toàn hơn "còn hàng"
   // nhưng vẫn là một khẳng định dựng trên dữ liệu đã hỏng — và nó làm mất một đơn có thật.
   await db.insert(schema.stockReceipts).values({ id: "fp-r1", kind: "RECEIPT", receivedAt: new Date(), note: "kiểm thử" });

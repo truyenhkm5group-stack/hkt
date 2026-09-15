@@ -25,7 +25,7 @@ import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sale
 import { extractColor, extractMeasurements, extractSize } from "@/lib/ai-workforce/agents/sales/extract-slots";
 import { checkSellability } from "@/lib/queries/sellability";
 import { generateTestReply, testIntentOf, type TestFacts } from "@/lib/ai-workforce/agents/sales/generate-test";
-import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
+import { CAPABILITY_LABEL, SALES_CAPABILITIES, type CapabilityState } from "@/lib/constants/sales-capabilities";
 import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge, sizeRuleFor } from "@/lib/queries/sales-knowledge";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 
@@ -78,10 +78,18 @@ const CAU_HOI_WIN = [
 ];
 const CAU_HOI_TEST = ["Bao nhiêu em?", "Có màu gì?", "50kg mặc size gì?", "chốt cho em 1 cái"];
 
-function inNangLuc(caps: Record<string, { on: boolean; missing: string[] }>) {
+/**
+ * In cổng năng lực — BA mức, và mức nào cũng phải nói được LÝ DO.
+ *
+ * Bản trước chỉ in "thiếu: …", nên ô bị chặn bởi quyền hiện ra thành "thiếu: " với vế sau rỗng —
+ * đúng thứ làm người đọc đi tìm một dữ liệu không thiếu.
+ */
+function inNangLuc(caps: Record<string, CapabilityState>) {
   for (const c of SALES_CAPABILITIES) {
     const st = caps[c];
-    console.log(`   ${st.on ? "🟢" : "⚪"} ${CAPABILITY_LABEL[c].padEnd(24)} ${st.on ? "" : `thiếu: ${st.missing.join(", ")}`}`);
+    const dau = st.status === "READY" ? "🟢" : st.status === "MISSING_DATA" ? "⚪" : "🔒";
+    const ly = st.status === "MISSING_DATA" ? `thiếu: ${st.missing.join(", ")}` : st.status === "BLOCKED_BY_PERMISSION" ? `chặn: ${st.blockedBy}` : "";
+    console.log(`   ${dau} ${CAPABILITY_LABEL[c].padEnd(24)} ${ly}`);
   }
 }
 

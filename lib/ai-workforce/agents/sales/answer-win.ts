@@ -337,13 +337,23 @@ export function answerFromKnowledge(
           provenance: nguon,
         };
       }
-      // UNKNOWN — nói được cái BIẾT (đang bán màu/size nào), im về cái KHÔNG BIẾT (còn bao nhiêu).
+      /*
+        UNKNOWN — nói được cái BIẾT (đang bán màu/size nào), im về cái KHÔNG BIẾT (còn bao nhiêu).
+
+        KHÔNG HỎI LẠI THỨ KHÁCH VỪA NÓI. Khách viết "màu đỏ size L còn không" mà máy đáp "chị cho
+        em xin size" thì nó vừa tự khai là không đọc câu của khách — và đó là ấn tượng đầu tiên
+        khách có về cả con máy.
+      */
+      const daDu = Boolean(sl.askedColor && sl.askedSize);
+      const conThieu = !sl.askedColor ? "màu" : !sl.askedSize ? "size" : "";
       return neTranh(
         intent,
         ["tồn kho thực tế"],
-        sl.listedColors.length
-          ? `Dạ mẫu này bên em đang bán màu ${sl.listedColors.join(", ")} ạ. Chị cho em xin size để em kiểm tra hàng còn rồi báo lại chị ngay nhé.`
-          : "Dạ chị chờ em kiểm tra hàng rồi báo lại chị ngay ạ.",
+        daDu
+          ? `Dạ ${sl.askedColor} size ${sl.askedSize} để em kiểm tra hàng còn rồi báo lại chị ngay nhé.`
+          : sl.listedColors.length
+            ? `Dạ mẫu này bên em đang bán màu ${sl.listedColors.join(", ")} ạ. Chị cho em xin ${conThieu || "màu và size"} để em kiểm tra hàng còn rồi báo lại chị ngay nhé.`
+            : "Dạ chị chờ em kiểm tra hàng rồi báo lại chị ngay ạ.",
         [...nguon, { field: "vì sao chưa biết", source: "stock_receipts", value: sl.evidence }],
       );
     }
