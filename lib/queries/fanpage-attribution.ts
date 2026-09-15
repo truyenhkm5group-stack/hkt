@@ -32,6 +32,7 @@ const O = schema.orders;
 const OA = schema.orderAttributions;
 const OI = schema.orderItems;
 const F = schema.fanpages;
+const ASG = schema.fanpageMarketerAssignments;
 
 /** Đơn ĐÃ XÁC NHẬN trên Pancake — cùng danh sách với mọi KPI quản trị khác. */
 const CONFIRMED = sql`${O.stage} in (${sql.join(CONFIRMED_STAGES.map((s) => sql`${s}`), sql`, `)})`;
@@ -72,7 +73,15 @@ function filterConds(f: AttributionFilters): SQL[] {
   if (f.pageId) conds.push(sql`${OA.sourcePageId} = ${f.pageId}`);
   if (f.sku) {
     const needle = f.sku.trim();
-    if (needle) conds.push(sql`exists (select 1 from ${OI} where ${OI.orderId} = ${OA.orderId} and (${OI.sku} ilike ${`%${needle}%`} or ${OI.productId} = ${needle}))`);
+    if (needle) {
+      // Khớp mã hàng, BIẾN THỂ, mã sản phẩm, hoặc tên hàng — người dùng gõ cái nào cũng ra.
+      const like = `%${needle}%`;
+      conds.push(sql`exists (
+        select 1 from ${OI}
+         where ${OI.orderId} = ${OA.orderId}
+           and (${OI.sku} ilike ${like} or ${OI.variationDetail} ilike ${like} or ${OI.productName} ilike ${like} or ${OI.productId} = ${needle})
+      )`);
+    }
   }
   return conds;
 }
@@ -88,6 +97,20 @@ export type MarketerAttributionRow = {
   confirmedRevenue: number;
   /** Số fanpage có đơn quy kết cho người này trong kỳ. */
   pages: number;
+  /**
+   * Đơn TRÊN FANPAGE CỦA NGƯỜI NÀY đã bị loại vì trùng — KHÔNG nằm trong `attributedOrders`,
+   * `confirmedOrders` hay `confirmedRevenue`.
+   *
+   * Vì sao phải hiện: nếu không, một marketer thấy số đơn của mình thấp hơn số họ tự đếm trên
+   * Pancake mà không có chỗ nào giải thích chênh lệch đi đâu. Cột này là chỗ giải thích.
+   *
+   * Vì sao KHÔNG lấy từ `order_attributions.marketer_id`: dòng trùng đơn cố ý để `marketer_id`
+   * NULL (ràng buộc CSDL chặn, để không đường nào cộng nhầm nó vào doanh thu). Nên phải tra ngược
+   * qua phân công CÒN HIỆU LỰC TẠI MỐC ĐƠN LÊN — đúng cùng một phép tra mà máy quy kết đã dùng.
+   */
+  duplicateExcluded: number;
+  /** Doanh thu xác nhận / đơn đã xác nhận. `null` khi chưa có đơn xác nhận nào — KHÔNG phải 0. */
+  revenuePerOrder: number | null;
 };
 
 export type AttributionReport = {
@@ -111,15 +134,52 @@ export type AttributionReport = {
  * thu ấy chưa thuộc về ai. Đơn `DUPLICATE` KHÔNG nằm trong dòng nào cả: chúng không phải một lần
  * bán, và đếm riêng ở `duplicates`.
  */
+/** Lấy (hoặc mở) dòng của một marketer. Một chỗ duy nhất dựng dòng để không nơi nào quên một cột. */
+function ensureRow(acc: Map<string | null, MarketerAttributionRow>, id: string | null, names: Map<string, string>): MarketerAttributionRow {
+  const existing = acc.get(id);
+  if (existing) return existing;
+  const row: MarketerAttributionRow = {
+    marketerId: id,
+    label: id ? marketerLabel(id, names) : ATTR_UNATTRIBUTED_LABEL,
+    attributedOrders: 0,
+    confirmedOrders: 0,
+    confirmedRevenue: 0,
+    pages: 0,
+    duplicateExcluded: 0,
+    revenuePerOrder: null,
+  };
+  acc.set(id, row);
+  return row;
+}
+
 export async function getMarketerAttributionReport(period: Period, filters: AttributionFilters = {}): Promise<AttributionReport> {
   const key = `fanpageAttr:${period.fromKey ?? "-"}:${period.toKey ?? "-"}:${filters.marketerId ?? ""}:${filters.pageId ?? ""}:${filters.sku ?? ""}`;
   return memo(key, 120_000, async () => {
     const db = await getDb();
     const where = and(...periodConds(period), ...filterConds(filters));
 
+    /**
+     * NGƯỜI PHỤ TRÁCH FANPAGE TẠI MỐC ĐƠN LÊN — dùng để quy nhóm cho dòng TRÙNG ĐƠN.
+     *
+     * Dòng trùng đơn không mang `marketer_id` (ràng buộc CSDL chặn, để không đường nào cộng nhầm
+     * nó vào doanh thu). Nhưng "đơn của tôi bị loại mấy cái" là câu hỏi chính đáng, nên phải tra
+     * lại — bằng ĐÚNG phép tra mà máy quy kết đã dùng: phân công còn hiệu lực, nửa mở
+     * `[from, to)`, lấy mốc bắt đầu MUỘN NHẤT. Sai một ly ở đây là hai màn hình nói hai số.
+     */
+    const ownerAtOrderTime = sql<string | null>`(
+      select a.marketer_id
+        from ${ASG} a
+       where a.fanpage_id = ${OA.fanpageId}
+         and a.active
+         and a.effective_from <= ${OA.sourceOrderAt}
+         and (a.effective_to is null or a.effective_to > ${OA.sourceOrderAt})
+       order by a.effective_from desc
+       limit 1
+    )`;
+
     const rows = await db
       .select({
-        marketerId: OA.marketerId,
+        marketerId: sql<string | null>`coalesce(${OA.marketerId}, ${ownerAtOrderTime})`,
         status: OA.status,
         orders: sql<number>`count(*)::int`,
         confirmedOrders: sql<number>`count(*) filter (where ${CONFIRMED})::int`,
@@ -129,7 +189,7 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
       .from(OA)
       .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
       .where(where)
-      .groupBy(OA.marketerId, OA.status);
+      .groupBy(sql`coalesce(${OA.marketerId}, ${ownerAtOrderTime})`, OA.status);
 
     const byStatus = Object.fromEntries(ATTRIBUTION_STATUSES.map((s) => [s, 0])) as Record<AttributionStatus, number>;
     const acc = new Map<string | null, MarketerAttributionRow>();
@@ -149,17 +209,19 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
       if (status === "DUPLICATE") {
         duplicates.orders += orders;
         duplicates.revenue += revenue;
-        continue; // trùng đơn không thuộc dòng nào và không vào tổng doanh thu
+        // Hiện ở dòng của người phụ trách page để họ thấy chênh lệch đi đâu — nhưng KHÔNG cộng vào
+        // đơn quy kết, đơn xác nhận hay doanh thu. Đó là toàn bộ điểm của việc để nó ở cột riêng.
+        ensureRow(acc, r.marketerId, names).duplicateExcluded += orders;
+        continue;
       }
       totalConfirmedOrders += confirmedOrders;
       totalConfirmedRevenue += revenue;
       const id = r.marketerId;
-      const row = acc.get(id) ?? { marketerId: id, label: id ? marketerLabel(id, names) : ATTR_UNATTRIBUTED_LABEL, attributedOrders: 0, confirmedOrders: 0, confirmedRevenue: 0, pages: 0 };
+      const row = ensureRow(acc, id, names);
       row.attributedOrders += orders;
       row.confirmedOrders += confirmedOrders;
       row.confirmedRevenue += revenue;
       row.pages = Math.max(row.pages, Number(r.pages));
-      acc.set(id, row);
     }
 
     const [missingRow] = await db
@@ -167,6 +229,10 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
       .from(O)
       .where(and(sql`not exists (select 1 from ${OA} where ${OA.orderId} = ${O.id})`, ...(period.from ? [gte(O.insertedAt, period.from)] : []), ...(period.to ? [lte(O.insertedAt, period.to)] : [])));
 
+    for (const row of acc.values()) {
+      // Mẫu số 0 ⇒ `null` (CHƯA BIẾT), không phải 0đ/đơn. AGENTS.md mục 42.
+      row.revenuePerOrder = row.confirmedOrders > 0 ? Math.round(row.confirmedRevenue / row.confirmedOrders) : null;
+    }
     const list = [...acc.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.confirmedRevenue - a.confirmedRevenue || b.attributedOrders - a.attributedOrders));
     return { rows: list, byStatus, duplicates, totalOrders, totalConfirmedOrders, totalConfirmedRevenue, missing: Number(missingRow?.n ?? 0) };
   });
@@ -203,7 +269,8 @@ export type AttributionOrderRow = {
   revenue: number;
   customer: string;
   phone: string;
-  skus: string;
+  /** Từng dòng hàng: mã · biến thể × số lượng. Đây là thứ quyết định trùng đơn nên phải soi được. */
+  items: string;
 };
 
 const ATTRIBUTION_SORTABLE = ["sourceOrderAt", "revenue", "status", "marketer", "page"] as const;
@@ -258,7 +325,14 @@ export async function listAttributionOrders(params: ListParams, filters: Attribu
       revenue: sql<number>`${CONFIRMED_ORDER_VALUE}::bigint`,
       customer: sql<string>`coalesce(nullif(${O.shipFullName}, ''), ${O.billFullName})`,
       phone: sql<string>`coalesce(nullif(${O.shipPhone}, ''), ${O.billPhone})`,
-      skus: sql<string>`coalesce((select string_agg(distinct nullif(oi.sku, ''), ', ') from order_items oi where oi.order_id = ${OA.orderId}), '')`,
+      items: sql<string>`coalesce((
+        select string_agg(
+                 coalesce(nullif(oi.sku, ''), nullif(oi.product_name, ''), '(chưa có mã)')
+                 || case when coalesce(oi.variation_detail, '') <> '' then ' · ' || oi.variation_detail else '' end
+                 || ' × ' || oi.quantity
+                 || case when oi.is_bonus then ' (tặng)' else '' end,
+                 ' | ' order by oi.sku, oi.variation_detail)
+          from order_items oi where oi.order_id = ${OA.orderId}), '')`,
     })
     .from(OA)
     .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
@@ -289,7 +363,7 @@ export async function listAttributionOrders(params: ListParams, filters: Attribu
       revenue: Number(r.revenue),
       customer: r.customer,
       phone: r.phone,
-      skus: r.skus,
+      items: r.items,
     })),
   };
 }
@@ -344,7 +418,14 @@ export async function listDuplicateSiblings(orderId: string): Promise<Attributio
       revenue: sql<number>`${CONFIRMED_ORDER_VALUE}::bigint`,
       customer: sql<string>`coalesce(nullif(${O.shipFullName}, ''), ${O.billFullName})`,
       phone: sql<string>`coalesce(nullif(${O.shipPhone}, ''), ${O.billPhone})`,
-      skus: sql<string>`coalesce((select string_agg(distinct nullif(oi.sku, ''), ', ') from order_items oi where oi.order_id = ${OA.orderId}), '')`,
+      items: sql<string>`coalesce((
+        select string_agg(
+                 coalesce(nullif(oi.sku, ''), nullif(oi.product_name, ''), '(chưa có mã)')
+                 || case when coalesce(oi.variation_detail, '') <> '' then ' · ' || oi.variation_detail else '' end
+                 || ' × ' || oi.quantity
+                 || case when oi.is_bonus then ' (tặng)' else '' end,
+                 ' | ' order by oi.sku, oi.variation_detail)
+          from order_items oi where oi.order_id = ${OA.orderId}), '')`,
     })
     .from(OA)
     .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
@@ -369,7 +450,7 @@ export async function listDuplicateSiblings(orderId: string): Promise<Attributio
     revenue: Number(r.revenue),
     customer: r.customer,
     phone: r.phone,
-    skus: r.skus,
+    items: r.items,
   }));
 }
 
