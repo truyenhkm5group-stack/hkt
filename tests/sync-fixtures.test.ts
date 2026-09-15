@@ -29,6 +29,8 @@ import { testProfitCarryover } from "./profit-carryover.test";
 import { testCompensationProfitBasis } from "./compensation-profit.test";
 import { testPayrollEngine } from "./payroll-engine.test";
 import { testPayrollLifecycle } from "./payroll-lifecycle.test";
+import { testPayrollDependencyDirection } from "./payroll-dependency.test";
+import { testCompensationBasisArithmetic } from "./compensation-basis.test";
 import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
@@ -1646,6 +1648,8 @@ async function main() {
   testCompensationProfitBasis();
   testPayrollEngine();
   testPayrollLifecycle();
+  testPayrollDependencyDirection();
+  testCompensationBasisArithmetic();
   await testPayrollPolicyEngine(db);
   await testVtpState(db);
   await testVtpIngestion(db);

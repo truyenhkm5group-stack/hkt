@@ -14,7 +14,8 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
-import { getOperatingCost, type CostEngineWarning } from "@/lib/queries/cost-engine";
+import { type CostEngineWarning } from "@/lib/queries/cost-engine";
+import { accountingProfitAfterCompensation, getOperatingCostForCompensationBasis, type BasisExclusion } from "@/lib/queries/compensation-basis";
 import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { carryoverMonth } from "@/lib/payroll/profit-carryover";
@@ -143,6 +144,14 @@ export type MarketerReport = {
     months: number;
     testSpend: number;
     profit: number;
+    /**
+     * KHOẢN BỊ LOẠI KHỎI CƠ SỞ TÍNH LƯƠNG, và vì sao.
+     *
+     * Rỗng = không có thù lao biến đổi nào trong chi phí kỳ này. Có phần tử mang
+     * `confidence: "ESTIMATED"` nghĩa là ERP phải ƯỚC TÍNH ranh giới giữa lương cứng và hoa hồng —
+     * và ước tính ấy phải hiện ra màn hình chứ không đi im lặng (AGENTS.md mục 8.6).
+     */
+    basisExclusions: BasisExclusion[];
   };
   marketers: MarketerProfit[];
   /** Lợi nhuận mã hàng không có quảng cáo và không có người phụ trách (không phân bổ cho ai) */
@@ -362,8 +371,22 @@ async function productEconomics(period: Period) {
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
     ])),
-    // Nền chi phí của bảng lương phải là CÙNG con số với báo cáo lợi nhuận, nên đi chung engine.
-    getOperatingCost(period),
+    /*
+      ═══ NỀN CHI PHÍ CỦA CƠ SỞ TÍNH LƯƠNG ĐÃ TRỪ HOA HỒNG RA ═══
+
+      Trước bản này chỗ đây gọi `getOperatingCost(period)` — TỔNG khối vận hành, và khối ấy BAO GỒM
+      hoa hồng. Con số ấy đi thẳng vào lợi nhuận từng mã → `PROFIT_PERSONAL` → cơ sở tính hoa hồng.
+
+      Hệ quả đang chạy: **hoa hồng của kỳ TRƯỚC (đã trả, đã ghi ở bảng Chi phí) làm giảm cơ sở tính
+      hoa hồng của kỳ NÀY.** Không phải một vòng lặp vô hạn — một phép trừ sai, im lặng, mỗi kỳ, và
+      nó làm người lao động MẤT tiền. Chiều hỏng ấy không ai đi kiểm, vì không ai nghi một con số
+      thấp.
+
+      `getOperatingCostForCompensationBasis` DẪN XUẤT từ cùng một `getRecognizedCosts` (vẫn một
+      nguồn duy nhất) rồi trừ đúng phần thù lao biến đổi theo lời khai. Nó KHÔNG gọi ngược bảng
+      lương — xem khối chú thích đầu tệp ấy.
+    */
+    getOperatingCostForCompensationBasis(period),
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
@@ -421,6 +444,8 @@ async function productEconomics(period: Period) {
     sharedUnallocated,
     months,
     revenueTotal,
+    /** Khoản thù lao biến đổi đã LOẠI khỏi nền chi phí của cơ sở, kèm mức tin cậy và lý do. */
+    basisExclusions: exp.exclusions,
     /*
       CẢNH BÁO CỦA MÁY CHI PHÍ ĐI CÙNG CON SỐ, KHÔNG BỊ BỎ LẠI.
 
@@ -493,7 +518,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   };
   const products: ProductProfitLine[] = [];
   let shopRetained = 0;
-  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, months: econ.months, testSpend: 0, profit: 0 };
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
   const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
@@ -761,6 +786,25 @@ export type PayrollReport = {
   /** `null` khi lương cứng của kỳ chưa biết — xem `PayrollLine.fixed`. */
   totalSalary: number | null;
   /**
+   * ═══ TỔNG THÙ LAO BIẾN ĐỔI CỦA KỲ ═══
+   *
+   * Hoa hồng và chia lợi nhuận — những khoản tính TỪ `totalProfit`. Cố ý tách khỏi `totalSalary`
+   * (gồm cả lương cứng): chỉ phần này mới là thứ bị loại khỏi cơ sở của chính nó.
+   */
+  variableCompensation: number | null;
+  /**
+   * ═══ LỢI NHUẬN KẾ TOÁN SAU THÙ LAO BIẾN ĐỔI ═══
+   *
+   *     totalProfit (cơ sở, CHƯA trừ thù lao biến đổi) − variableCompensation
+   *
+   * Đây là con số KẾT QUẢ KINH DOANH, khác hẳn `totalProfit` là con số CƠ SỞ TRẢ TIỀN. Hai cái tên
+   * khác nhau cho hai con số khác nhau — gộp lại chính là chỗ sinh ra phụ thuộc vòng tròn.
+   *
+   * Tính ở ĐÂY, tầng sau bảng lương, chứ không ở máy chi phí: tới lúc này cơ sở đã xong và không
+   * còn ai hỏi lại nó, nên chiều phụ thuộc vẫn đi một chiều.
+   */
+  accountingProfit: number | null;
+  /**
    * CĂN CỨ CHIA LƯƠNG CỨNG, để màn hình nói được vì sao cột "lương cứng" không bằng con số khai
    * trong hồ sơ. `bounded = false` ⇒ kỳ không có mốc đầu/cuối ⇒ lương cứng của kỳ là CHƯA BIẾT.
    */
@@ -992,9 +1036,32 @@ export async function getPayrollReport(
         engine,
       };
     });
+  /*
+    THÙ LAO BIẾN ĐỔI = phần tính TỪ lợi nhuận. Với người đi máy chung, đó là các thành phần loại
+    `COMMISSION` / `PROFIT_SHARE`; với người còn ở đường cũ, đó là hai ô % lợi nhuận.
+
+    Một người CHƯA BIẾT ⇒ tổng CHƯA BIẾT, và do đó lợi nhuận kế toán cũng chưa biết. Cộng phần đã
+    biết rồi gọi đó là tổng là khẳng định phần chưa biết bằng 0.
+  */
+  const variableCompensation = lines.every((l) => (l.engine ? l.engine.result.netPay !== null : l.bonusPersonal !== null))
+    ? lines.reduce((t, l) => {
+        if (l.engine) {
+          return (
+            t +
+            l.engine.result.components
+              .filter((c) => c.kind === "COMMISSION" || c.kind === "PROFIT_SHARE")
+              .reduce((x, c) => x + (c.amount ?? 0), 0)
+          );
+        }
+        return t + l.bonusTotal + (l.bonusPersonal ?? 0);
+      }, 0)
+    : null;
+
   return {
     basis,
     totalProfit,
+    variableCompensation,
+    accountingProfit: accountingProfitAfterCompensation(totalProfit, variableCompensation),
     nominalTotal,
     cashRatio,
     cashRatioReason,
