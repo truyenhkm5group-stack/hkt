@@ -33,6 +33,10 @@ import { hmtRunSummary } from "@/lib/returns/hmt-provenance";
 import { latestHmtWorkbookMeta } from "@/lib/returns/hmt-source";
 import { HmtSourceSection } from "@/app/(dashboard)/inventory/returns/hmt-source-section";
 import { ExceptionQueues } from "@/app/(dashboard)/inventory/returns/exception-queues";
+import { ReceiveScanDesk } from "@/app/(dashboard)/inventory/returns/receive-scan-desk";
+import { UnidentifiedSection } from "@/app/(dashboard)/inventory/returns/unidentified-section";
+import { listUnidentifiedReturns, unidentifiedSummary } from "@/lib/returns/unidentified";
+import { RESTOCK_UNIDENTIFIED_PERMISSION } from "@/lib/constants/return-unidentified";
 import { ReturnQualityCounters } from "@/app/(dashboard)/inventory/returns/quality-counters";
 import {
   returnDataQuality,
@@ -66,6 +70,15 @@ export const metadata = { title: "Kiểm đếm hàng hoàn" };
 const TREND_DAYS = 30;
 const PEOPLE_DAYS = 30;
 const SKU_DAYS = 90;
+
+/**
+ * TRẦN DANH SÁCH KIỆN MẤT NHÃN.
+ *
+ * Danh sách này gần như luôn ngắn (kiện mất nhãn là ngoại lệ, không phải dòng chảy chính) — nhưng
+ * trần vẫn phải có: một ngày dỡ hàng hỏng có thể sinh ra hàng trăm dòng, và vẽ hết chúng vào trang
+ * đã nặng sẵn này là làm đứng hình đúng lúc kho cần nó nhất. Bộ đếm phía trên vẫn đếm TOÀN BỘ.
+ */
+const UNIDENTIFIED_CAP = 60;
 
 /**
  * TRẠM ĐẾM HÀNG HOÀN.
@@ -129,6 +142,8 @@ export default async function ReturnInspectionPage({
     nguoiDem,
     theoMauMa,
     suThat,
+    khongMa,
+    khongMaTong,
   ] = await Promise.all([
     inspectionDashboard(),
     listPendingInspections(PENDING_STATION_CAP),
@@ -142,6 +157,8 @@ export default async function ReturnInspectionPage({
     returnByInspector(PEOPLE_DAYS),
     returnBySku(SKU_DAYS),
     inspectionTruth(),
+    listUnidentifiedReturns({ limit: UNIDENTIFIED_CAP }),
+    unidentifiedSummary(),
   ]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
@@ -176,6 +193,17 @@ export default async function ReturnInspectionPage({
         hint="Ghi nhận kiện đã về là một việc; đếm được bao nhiêu món còn bán được là việc khác. ERP không bao giờ tự cộng hàng hoàn vào tồn."
       />
 
+      {/*
+        BÀN BẮN MÃ ĐỨNG ĐẦU TIÊN, TRÊN MỌI CON SỐ.
+
+        Người kho mở trang này với một kiện hàng trên tay, không phải để đọc báo cáo. Đẩy ô bắn mã
+        xuống dưới bốn khối số liệu là bắt họ cuộn mỗi lần nhận một kiện — và việc bị bỏ qua đúng
+        theo cách đó là lý do production từng có hàng trăm kiện chưa ai bấm nhận.
+
+        Ô này CHỈ ghi nhận kiện đã về. Tồn kho không đổi một món nào ở đây.
+      */}
+      <ReceiveScanDesk canWrite={canWrite} awaiting={bang.awaitingArrival} />
+
       {/* Nguồn thứ ba của bàn này: sổ hàng hoàn viết tay. Chưa đối soát lần nào thì khối không hiện. */}
       <HmtSourceSection run={hmt} upload={hmtUpload} canWrite={canWrite} />
 
@@ -189,6 +217,21 @@ export default async function ReturnInspectionPage({
       <WarehouseToday kpi={kpi} />
 
       <ExceptionQueues data={ngoaiLe} canWrite={canWrite} />
+
+      {/*
+        KIỆN MẤT NHÃN ĐỨNG CẠNH CÁC HÀNG ĐỢI NGOẠI LỆ, KHÔNG PHẢI CUỐI TRANG.
+
+        Nó là ngoại lệ cần một QUYẾT ĐỊNH CỦA NGƯỜI, cùng loại với bốn hàng đợi ngay trên. Đẩy nó
+        xuống dưới các bảng số liệu là cách chắc chắn nhất để hàng nằm mãi ngoài sổ — và mỗi ngày
+        nằm ngoài sổ là một ngày kế hoạch đặt hàng đặt thừa đúng bằng phần ấy.
+      */}
+      <UnidentifiedSection
+        rows={khongMa}
+        summary={khongMaTong}
+        canWrite={canWrite}
+        canOverride={can(user, RESTOCK_UNIDENTIFIED_PERMISSION)}
+      />
+
       <ReturnQualityCounters rows={chatLuong} />
 
       {/*

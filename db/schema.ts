@@ -1703,6 +1703,154 @@ export const hmtReturnReconciliation = pgTable(
 );
 
 /**
+ * ═══════════ HÀNG HOÀN CHƯA XÁC ĐỊNH NGUỒN (kiện mất nhãn vận đơn) ═══════════
+ *
+ * Ca có thật ở kho: một kiện nằm trong lô hàng hoàn, hàng còn nguyên, nhưng nhãn vận đơn đã rách
+ * hoặc bong mất. Không có mã để bắn, nên không có `shipments.id` để trỏ tới — và
+ * `return_inspections.shipment_id` là NOT NULL. Trước bản này ERP không có chỗ nào ghi kiện ấy.
+ *
+ * Kho khi đó chỉ còn hai đường, cả hai đều làm hỏng sổ:
+ *  · chọn đại một đơn "gần giống" ⇒ một khách vô can mang tiếng trả hàng, và tỷ lệ hoàn của mã đó sai;
+ *  · lập phiếu nhập kho thường ⇒ hàng hoàn đội lốt hàng nhập mới, giá vốn lẫn tỷ lệ hoàn cùng sai.
+ *
+ * ─── BA LỚP, KHÔNG SUY RA LẪN NHAU ───
+ *
+ *   LỚP 1 (kiện vật lý có thật)  ·  LỚP 2 (thuộc đơn nào)  ·  LỚP 3 (đếm xong, còn bán được)
+ *
+ * Bảng này giữ LỚP 1 và LỚP 3 mà KHÔNG cần lớp 2. Món hàng tồn tại, đếm được, kết luận được — và
+ * vẫn nằm NGOÀI tồn bán được cho tới khi có người đủ thẩm quyền quyết.
+ *
+ * ─── VÌ SAO KHÔNG GHI THẲNG VÀO `stock_receipts` ───
+ *
+ * `lib/queries/stock.ts` tính tồn bằng TỔNG mọi dòng `stock_receipt_items`. Một dòng ở đó là một
+ * món đã bán được — đúng cái mà toàn bộ luồng kiểm đếm sinh ra để ngăn. Hàng giữ tạm nằm riêng ở
+ * đây và chỉ SINH RA một phiếu `RETURN` khi có người quyết; `stock_receipt_id` chính là cây cầu
+ * một chiều ấy, và vì nó là cột DUY NHẤT nói "đã vào tồn" nên không thể vào tồn hai lần.
+ */
+export const returnUnidentified = pgTable(
+  "return_unidentified",
+  {
+    id: id(),
+    /**
+     * Mã nội bộ đọc được bằng mắt: `UR-YYYYMMDD-NNNNN`. Người kho viết nó lên kiện bằng bút, nên
+     * nó phải ngắn và không có ký tự dễ đọc nhầm. DUY NHẤT — đây là thứ thay cho mã vận đơn.
+     */
+    code: text("code").notNull().unique(),
+    /** PENDING_IDENTIFICATION · IDENTIFIED · UNIDENTIFIABLE — xem `UNIDENTIFIED_STATUSES`. */
+    status: text("status").notNull().default("PENDING_IDENTIFICATION"),
+    /** NO_TRACKING_LABEL · DAMAGED_LABEL · UNKNOWN_PARCEL — vì sao kiện này không có mã. */
+    source: text("source").notNull().default("NO_TRACKING_LABEL"),
+
+    // ── LỚP 1: kiện đã về tới kho ──
+    receivedAt: ts("received_at").notNull(),
+    /** Ảnh chụp TÊN người nhận, do MÁY CHỦ đọc từ `users` (luật 34) — không nhận từ trình duyệt. */
+    receivedBy: text("received_by").notNull().default(""),
+    receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    warehouseNote: text("warehouse_note").notNull().default(""),
+
+    // ── LỚP 3: kho đếm được gì ──
+    /**
+     * Mẫu mã kho nhận diện được. `NULL` = CHƯA NHẬN DIỆN ĐƯỢC, khác hẳn "không có mẫu mã".
+     * Không có nó thì không bao giờ cộng được vào tồn — cộng vào đâu?
+     */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Ảnh chụp lúc nhận: mẫu mã có thể bị đổi tên hoặc xoá sau đó, phần đã đếm thì không được đổi. */
+    sku: text("sku").notNull().default(""),
+    productName: text("product_name").notNull().default(""),
+    color: text("color").notNull().default(""),
+    size: text("size").notNull().default(""),
+    quantity: integer("quantity").notNull(),
+    /** Một khoá trong `ITEM_CONDITIONS` — DÙNG CHUNG với kiểm từng món, không dựng danh sách thứ hai. */
+    condition: text("condition").notNull(),
+    note: text("note").notNull().default(""),
+
+    // ── LỚP 2: nối được với đơn nào (có thể mãi không có) ──
+    /** `MANUAL_MATCH` — xem `IDENTIFICATION_METHODS`. `NULL` = chưa ai nối. */
+    identificationMethod: text("identification_method"),
+    identifiedAt: ts("identified_at"),
+    identifiedBy: text("identified_by").notNull().default(""),
+    identifiedByUserId: text("identified_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    linkedOrderId: text("linked_order_id").references(() => orders.id, { onDelete: "set null" }),
+    linkedShipmentId: text("linked_shipment_id").references(() => shipments.id, { onDelete: "set null" }),
+    /** Ảnh chụp mã vận đơn lúc nối — vận đơn có thể bị đổi mã, dòng quy kết thì không được đổi. */
+    linkedTrackingNumber: text("linked_tracking_number").notNull().default(""),
+    /** Vì sao kết luận không thể xác định. BẮT BUỘC khi `status = 'UNIDENTIFIABLE'`. */
+    unidentifiableReason: text("unidentifiable_reason").notNull().default(""),
+
+    // ── CÂY CẦU MỘT CHIỀU SANG TỒN KHO ──
+    /**
+     * Phiếu `RETURN` sinh ra khi món này được cộng vào tồn. `NULL` = CHƯA VÀO TỒN.
+     *
+     * Đây là cột DUY NHẤT trả lời câu "đã cộng chưa", và mọi đường ghi đều đặt nó bằng một lượt
+     * `UPDATE ... WHERE stock_receipt_id IS NULL`. Nên hai tab, hai lần bấm, hay một lượt thử lại
+     * của mạng đều chỉ cộng được đúng một lần — chặn ở CSDL, không phải ở trình duyệt.
+     */
+    stockReceiptId: text("stock_receipt_id").references(() => stockReceipts.id, { onDelete: "restrict" }),
+    restockedAt: ts("restocked_at"),
+    restockedBy: text("restocked_by").notNull().default(""),
+    restockedByUserId: text("restocked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** IDENTIFIED · MANAGER_OVERRIDE — căn cứ để món này được vào tồn. Xem `RESTOCK_AUTHORITIES`. */
+    restockAuthority: text("restock_authority"),
+    /** Lý do BẮT BUỘC khi vào tồn mà không có chứng từ đơn. */
+    restockReason: text("restock_reason").notNull().default(""),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("return_unidentified_status_idx").on(t.status, t.receivedAt),
+    index("return_unidentified_variant_idx").on(t.variantId),
+    index("return_unidentified_shipment_idx").on(t.linkedShipmentId),
+    /** "Món nào còn đang giữ tạm" là câu hỏi mỗi lần mở trang — quét bảng cho nó là lãng phí. */
+    index("return_unidentified_holding_idx").on(t.stockReceiptId, t.status),
+
+    /* Ba danh sách dưới đây PHẢI khớp hằng số ở lib/constants/return-unidentified.ts. Đã có tiền
+       lệ lệch giữa hằng số TypeScript và ràng buộc SQL (`WRONG_ITEM` của bảng kiểm cả kiện):
+       người kho bấm một nút hợp lệ và nhận lỗi ràng buộc, đúng lúc đang đứng đếm hàng. */
+    check("return_unidentified_status_check", sql`${t.status} IN ('PENDING_IDENTIFICATION', 'IDENTIFIED', 'UNIDENTIFIABLE')`),
+    check("return_unidentified_source_check", sql`${t.source} IN ('NO_TRACKING_LABEL', 'DAMAGED_LABEL', 'UNKNOWN_PARCEL')`),
+    /* Dùng CHUNG danh sách với `return_inspection_items` — một món hoàn là một món hoàn, dù nó đến
+       kèm mã vận đơn hay không. */
+    check("return_unidentified_condition_check", sql`${t.condition} IN ('OK', 'SHORT', 'WRONG_ITEM', 'DAMAGED', 'DIRTY', 'UNSELLABLE', 'OTHER')`),
+    /* Không có hàng thì không có việc gì để ghi. Số 0 ở đây là một dòng rác vĩnh viễn. */
+    check("return_unidentified_qty_check", sql`${t.quantity} > 0`),
+    /* Đã nối đơn thì phải nói NỐI VỚI CÁI GÌ, AI nối, LÚC NÀO — một dòng "đã xác định" mà không chỉ
+       được đích danh vận đơn hay đơn nào là một lời khẳng định không kiểm chứng được. */
+    check(
+      "return_unidentified_identified_check",
+      sql`${t.status} <> 'IDENTIFIED' OR (${t.identificationMethod} IS NOT NULL AND ${t.identifiedAt} IS NOT NULL AND length(trim(${t.identifiedBy})) > 0 AND (${t.linkedShipmentId} IS NOT NULL OR ${t.linkedOrderId} IS NOT NULL))`,
+    ),
+    check("return_unidentified_method_check", sql`${t.identificationMethod} IS NULL OR ${t.identificationMethod} IN ('MANUAL_MATCH')`),
+    /* Kết luận "không thể xác định" phải có lý do: nếu không, nó chỉ là một cách bỏ việc lại cho
+       người sau mà trông như đã xử lý xong. */
+    check("return_unidentified_unidentifiable_check", sql`${t.status} <> 'UNIDENTIFIABLE' OR length(trim(${t.unidentifiableReason})) > 0`),
+    /* ĐÃ VÀO TỒN thì phải đủ: ai cộng, lúc nào, CĂN CỨ nào, và cộng vào MẪU MÃ nào. Thiếu bất kỳ
+       phần nào thì một món hàng xuất hiện trong tồn mà không ai giải thích được từ đâu ra. */
+    check(
+      "return_unidentified_restock_check",
+      sql`${t.stockReceiptId} IS NULL OR (${t.restockedAt} IS NOT NULL AND length(trim(${t.restockedBy})) > 0 AND ${t.restockAuthority} IS NOT NULL AND ${t.variantId} IS NOT NULL)`,
+    ),
+    check("return_unidentified_authority_check", sql`${t.restockAuthority} IS NULL OR ${t.restockAuthority} IN ('IDENTIFIED', 'MANAGER_OVERRIDE')`),
+    /* Vào tồn mà KHÔNG có chứng từ đơn thì bắt buộc có lý do viết ra được — đây là toàn bộ khác
+       biệt giữa một quyết định của quản lý kho và một lượt cộng tồn không nguồn gốc. */
+    check(
+      "return_unidentified_override_reason_check",
+      sql`${t.restockAuthority} IS DISTINCT FROM 'MANAGER_OVERRIDE' OR length(trim(${t.restockReason})) > 0`,
+    ),
+    /* Căn cứ `IDENTIFIED` chỉ đứng được khi thật sự đã nối đơn — nếu không, nó là `MANAGER_OVERRIDE`
+       đội lốt căn cứ mạnh hơn, và lượt tái nhập không chứng từ ấy biến mất khỏi mọi báo cáo. */
+    check(
+      "return_unidentified_authority_status_check",
+      sql`${t.restockAuthority} IS DISTINCT FROM 'IDENTIFIED' OR ${t.status} = 'IDENTIFIED'`,
+    ),
+    /* MỖI PHIẾU KHO CHỈ PHỤC VỤ MỘT MÓN GIỮ TẠM. Không có ràng buộc này thì một lỗi lập trình có
+       thể trỏ hai dòng vào cùng một phiếu, và "đã vào tồn" trở thành một lời nói dối có vẻ hợp lệ. */
+    uniqueIndex("return_unidentified_receipt_uk").on(t.stockReceiptId),
+  ],
+);
+
+
+/**
  * ═══════ BẰNG CHỨNG HÀNH ĐỘNG — CÔNG CỦA ĐỘI, ĐO ĐƯỢC ═══════
  *
  * Câu chưa trả lời được: *CSKH đã cứu bao nhiêu doanh thu? Kế toán đòi về bao nhiêu COD? Kho giải

@@ -37,10 +37,19 @@ type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
  * Idempotent: `shipment_id` là khoá duy nhất nên bấm lại lần hai không tạo thêm phiếu và không đè
  * mốc/người nhận của lần đầu. Trả về đúng số kiện được ghi nhận MỚI trong lần gọi này.
  */
-export async function markReturnsArrived(ids: string[], actor: Actor, note?: string) {
+export async function markReturnsArrived(ids: string[], actor: Actor, note?: string, conn?: DbLike) {
   const unique = [...new Set(ids.filter((id) => id.trim()))];
   if (!unique.length) return { count: 0, ids: [] as string[] };
-  const db = await getDb();
+  /*
+    NHẬN `conn` ĐỂ CHẠY ĐƯỢC BÊN TRONG MỘT GIAO DỊCH ĐANG MỞ.
+
+    Tự gọi `getDb()` khi người gọi đang ở trong giao dịch là mở một kết nối THỨ HAI và chờ chính
+    giao dịch kia nhả khoá — khoá chết. Trên PGlite (một kết nối) lời hứa ấy không bao giờ settle,
+    vòng lặp sự kiện cạn, và Node thoát ÊM với mã 0: `npm test` báo thành công cho một lượt chạy
+    dừng giữa chừng. Sự cố đó đã xảy ra một lần (10/09/2026) và có nguyên cả một khối chú thích ở
+    cuối `tests/sync-fixtures.test.ts`.
+  */
+  const db = conn ?? (await getDb());
   const shipments = await db.select({ id: s.id, orderId: s.orderId }).from(s).where(inArray(s.id, unique));
   if (!shipments.length) return { count: 0, ids: [] as string[] };
 
