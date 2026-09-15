@@ -394,8 +394,19 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    hiện nó mới được ghi nhận ở cấp shop. Quy về mã cần nối `order_reference` → vận đơn gốc → đơn,
    một phép nối chưa có ở truy vấn này.
 
-5. **F09 (`/ads` 6,5 giây nguội) chưa làm** — xem mục 5.5 biên bản 14/09, ba giả thuyết đã bị bác
-   bằng phép đo và bước tiếp theo đã ghi sẵn ở đó.
+5. **F09 (`/ads` ~7 giây nguội) chưa làm** — xem mục 5.5 biên bản 14/09: ba giả thuyết đã bị bác
+   bằng phép đo, bước tiếp theo đã ghi sẵn ở đó.
+
+   Phiên này thử thêm một nhịp và **dừng có giới hạn**: thao tác `ops perf` KHÔNG tách được `/ads`
+   thành từng khối — nó chỉ đo `/api/health`, `/login`, `/api/notifications` (các tuyến không cần
+   đăng nhập) cùng thống kê container. Muốn tách `/ads` thì phải đo ở TẦNG ỨNG DỤNG (bọc từng khối
+   `Suspense`), không phải ở tầng ops. Ghi ra đây để phiên sau không mất thêm một vòng chờ hàng đợi
+   mới biết.
+
+   **Dữ kiện kèm theo, dùng được cho việc khác:** container CSDL chỉ có **1,918 GiB** và bể kết nối
+   có **5**, lúc đo đang dùng **4**. Đây là một VPS nhỏ. Ba phiên cùng dựng ảnh lên nó thì nghẽn là
+   chuyện phải xảy ra — và đó là bằng chứng độc lập thứ hai cho chẩn đoán sự cố deploy #302 ở trên,
+   bên cạnh việc diff của đợt ấy không có đường nào ném ngoại lệ.
 
 6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
    nếu có người đang mang lỗ từ trước mốc ấy thì khai số dư mở sổ đích danh. Chưa khai thì sổ
