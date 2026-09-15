@@ -2470,8 +2470,19 @@ export const landingAttributions = pgTable(
     index("landing_attribution_marketer_idx").on(t.marketerId),
     index("landing_attribution_campaign_idx").on(t.campaignId),
     index("landing_attribution_tier_idx").on(t.tier),
-    check("landing_attribution_tier_check", sql`${t.tier} IS NULL OR ${t.tier} IN ('AD_ID', 'ADSET_ID', 'CAMPAIGN_NAME')`),
-    check("landing_attribution_gap_check", sql`${t.gap} IS NULL OR ${t.gap} IN ('NO_TRACKING', 'NO_MATCH', 'AMBIGUOUS_MARKETER', 'NO_MARKETER_DECLARED')`),
+    /*
+      HAI DANH SÁCH NÀY PHẢI ĐI CÙNG `LANDING_EVIDENCE_TIERS` / `LANDING_GAP_REASONS`.
+
+      Bản 0091 chốt cứng danh sách cũ; bản sau mở rộng danh sách ở MÃ NGUỒN mà quên nới ràng buộc,
+      và lượt đối soát hỏng ngay ở dòng đầu tiên mang lý do mới (sự cố 15/09/2026, migration 0093).
+      `tests/landing-attribution.test.ts` nay ghi thử TỪNG giá trị xuống CSDL để hai nơi không lệch
+      được nữa mà vẫn xanh.
+    */
+    check("landing_attribution_tier_check", sql`${t.tier} IS NULL OR ${t.tier} IN ('AD_ID', 'ADSET_ID', 'CAMPAIGN_ID', 'CAMPAIGN_NAME')`),
+    check(
+      "landing_attribution_gap_check",
+      sql`${t.gap} IS NULL OR ${t.gap} IN ('NO_TRACKING', 'NO_AD_SOURCE', 'META_ADSET_NOT_SYNCED', 'META_AD_NOT_SYNCED', 'CAMPAIGN_NOT_SYNCED', 'AD_ACCOUNT_UNRESOLVED', 'HISTORICAL_OWNER_UNKNOWN', 'AMBIGUOUS_MARKETER', 'NO_MARKETER_DECLARED', 'NO_MATCH')`,
+    ),
     /*
       KẾT LUẬN ĐI CÙNG CĂN CỨ. Có người ⇒ phải có bậc bằng chứng VÀ câu giải thích; chưa có người
       ⇒ phải nói được vì sao. Không dòng nào được vừa trống người vừa trống lý do — đó đúng là

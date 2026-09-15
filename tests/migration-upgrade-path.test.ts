@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets", "0093_landing_gap_reasons"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -427,6 +427,33 @@ export async function testMigrationUpgradePath() {
       "0092: nhóm đã TẮT vẫn phải lưu được — Meta vẫn trả metadata cho PAUSED, và 29 đơn treo đều thuộc nhóm đã tắt",
     );
     await client.query(`delete from fb_adsets where id = '120248121229960618'`);
+
+    /*
+      ═══ 0093: LÝ DO TREO — DANH SÁCH Ở CSDL ĐI CÙNG DANH SÁCH Ở MÃ NGUỒN ═══
+
+      0091 chốt cứng bốn lý do; mã nguồn sau đó mở rộng mà ràng buộc thì không, nên lượt đối soát
+      trên production hỏng NGUYÊN LƯỢT GHI. Bài này kiểm cả hai chiều: lý do MỚI phải vào được, và
+      chuỗi bịa vẫn phải bị chặn — nới ràng buộc không được biến nó thành ô gõ tự do.
+    */
+    // Dùng ĐƠN KHÁC: khối 0091 ở trên đã dựng/dọn dòng cho `up-o1`, và khoá "một đơn một dòng"
+    // là thứ không được nới — nên bài này mượn một đơn riêng thay vì nới khoá.
+    await client.query(`insert into orders (id, stage, inserted_at, total_price_after_discount) values ('up-o93', 'CONFIRMED', now(), 100000) on conflict (id) do nothing`);
+    await client.query(`insert into landing_attributions (id, order_id, gap) values ('up-la93', 'up-o93', 'META_ADSET_NOT_SYNCED')`);
+    await client.query(`update landing_attributions set gap = 'CAMPAIGN_NOT_SYNCED' where id = 'up-la93'`);
+    await client.query(`update landing_attributions set gap = 'NO_AD_SOURCE' where id = 'up-la93'`);
+    await assert.rejects(
+      () => client.query(`update landing_attributions set gap = 'LY_DO_BIA' where id = 'up-la93'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_gap_check"),
+      "0093: nới danh sách KHÔNG được biến nó thành ô gõ tự do",
+    );
+    await client.query(`update landing_attributions set gap = null, tier = 'CAMPAIGN_ID', marketer_id = 'mkt-93', evidence = 'thử' where id = 'up-la93'`);
+    await assert.rejects(
+      () => client.query(`update landing_attributions set tier = 'BAC_BIA' where id = 'up-la93'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("landing_attribution_tier_check"),
+      "0093: bậc bằng chứng cũng là danh sách ĐÓNG",
+    );
+    await client.query(`delete from landing_attributions where id = 'up-la93'`);
+    await client.query(`delete from orders where id = 'up-o93'`);
 
     await client.query(`delete from landing_attributions where order_id = 'up-o1'`);
     await client.query(`delete from order_attributions where id = 'up-oa91'`);
