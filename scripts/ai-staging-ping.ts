@@ -62,7 +62,8 @@ async function main() {
 
   console.log("\n③ CHẶN CỨNG (phải giữ nguyên kể cả khi mô hình thật đã bật)");
   console.log(`   nấc mặc định        : ${aiEnv.defaultMode}`);
-  console.log(`   gửi tin cho khách   : ${aiEnv.hardLimits.allowCustomerSend ? "⛔ ĐANG MỞ" : "✓ CẤM"}`);
+  console.log(`   MÁY tự gửi tin      : ${aiEnv.hardLimits.allowAutoSend ? "⛔ ĐANG MỞ" : "✓ CẤM"}`);
+  console.log(`   NGƯỜI bấm gửi tin   : ${aiEnv.hardLimits.allowHumanApprovedSend ? "ĐANG MỞ (nấc COPILOT)" : "✓ CẤM"}`);
   console.log(`   tạo đơn             : ${aiEnv.hardLimits.allowOrderCreate ? "⛔ ĐANG MỞ" : "✓ CẤM"}`);
   console.log(`   cho gọi mô hình thật: ${aiEnv.modelCallsEnabled ? "CÓ" : "KHÔNG"}`);
   process.exit(0);

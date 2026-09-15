@@ -81,9 +81,22 @@ services:
       PORT: "3000"
       # ───────── CHẶN CỨNG, ĐẶT Ở ĐÂY CÓ CHỦ Ý ─────────
       # Khối `environment` ĐÈ LÊN `env_file`. Nghĩa là dù .env.staging có ghi gì, dù ai sửa nhầm,
-      # dù một câu SQL đổi bảng `settings` — hai công tắc này vẫn là "false" cho tới khi có người
-      # sửa CHÍNH TỆP NÀY rồi dựng lại container. Đó là điều kiện "không tổ hợp cấu hình nào lỡ
-      # nhắn cho khách thật".
+      # dù một câu SQL đổi bảng `settings` — những công tắc ghim ở đây vẫn giữ nguyên cho tới khi
+      # có người sửa CHÍNH TỆP NÀY rồi dựng lại container.
+      #
+      # HAI MỨC RỦI RO, HAI CÁCH GHIM — và sự khác nhau ấy là toàn bộ thiết kế của nấc trợ lý:
+      #
+      #   MÁY TỰ GỬI (`AI_ALLOW_AUTO_SEND`) ghim CỨNG ở đây. Không một thao tác ops nào, không một
+      #   câu SQL nào, không một lần sửa .env.staging nào mở được nó. Muốn mở phải sửa tệp này,
+      #   commit, qua cổng kiểm thử, rồi dựng lại — tức là phải có người CHỦ Ý làm điều đó.
+      #
+      #   NHÂN VIÊN BẤM GỬI (`AI_ALLOW_HUMAN_APPROVED_SEND`) KHÔNG ghim: nó đọc từ .env.staging để
+      #   chủ shop bật/tắt được cho đợt thí điểm mà không cần một lượt phát hành. Rủi ro của nó
+      #   khác hẳn — đằng sau mỗi tin là một người đã đọc và đã bấm.
+      #
+      # Tên CŨ `AI_ALLOW_CUSTOMER_SEND` vẫn ghim "false" để nó không thành một cửa sau: sau bản
+      # tách, nó chỉ còn nghĩa "nhân viên bấm gửi", và đường duy nhất để bật nghĩa ấy là tên MỚI.
+      AI_ALLOW_AUTO_SEND: "false"
       AI_ALLOW_CUSTOMER_SEND: "false"
       AI_ALLOW_ORDER_CREATE: "false"
       AI_DEFAULT_MODE: "SHADOW"

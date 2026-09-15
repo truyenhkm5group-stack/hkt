@@ -2770,6 +2770,70 @@ export const salesSuggestions = pgTable(
 );
 
 /**
+ * SỔ THAO TÁC CỦA NHÂN VIÊN TRÊN NẤC TRỢ LÝ — một dòng cho mỗi lần bấm.
+ *
+ * ĐÂY LÀ NƠI DUY NHẤT GHI LẠI "AI ĐÃ GỬI GÌ CHO KHÁCH". Mỗi tin rời khỏi ERP ở nấc COPILOT đều
+ * phải để lại đúng một dòng ở đây, mang KHOÁ TÀI KHOẢN của người bấm (luật 34: quy kết đi bằng
+ * khoá, không bằng ô chữ).
+ *
+ * BA CỘT CHỮ, BA NGHĨA KHÁC NHAU — và tách chúng ra là toàn bộ giá trị học được từ nấc này:
+ *   `suggestedText` — câu MÁY soạn. Bất biến, chụp lại tại thời điểm bấm.
+ *   `finalText`     — câu THẬT SỰ đi tới khách. Bằng câu trên nếu bấm "Gửi nguyên văn".
+ *   `editDistance`  — sửa bao nhiêu. Gộp hai cột kia làm một thì không bao giờ trả lời được câu
+ *                     "nhân viên có dùng được câu máy soạn không", tức là câu hỏi lớn nhất của
+ *                     cả giai đoạn thí điểm.
+ *
+ * CHỐNG GỬI HAI LẦN nằm ở ràng buộc `sales_copilot_actions_terminal_uq`: một câu gợi ý chỉ được
+ * KẾT THÚC (gửi / sửa rồi gửi / từ chối) đúng một lần. Hai tab cùng bấm thì CSDL cho đúng một cái
+ * thắng — không phải một phép kiểm ở tầng ứng dụng, vốn luôn thua một cuộc đua thật.
+ */
+export const salesCopilotActions = pgTable(
+  "sales_copilot_actions",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    /** Câu gợi ý bị tác động. NULL chỉ với việc ở mức HỘI THOẠI (nhận việc / trả lại). */
+    suggestionId: text("suggestion_id").references(() => salesSuggestions.id, { onDelete: "set null" }),
+    /** Lượt chạy đã sinh ra câu ấy — để lần ngược về mô hình, token và chi phí. */
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    pageId: text("page_id").notNull().default(""),
+    /** SEND · EDIT_SEND · REJECT · REGENERATE · TAKEOVER · RELEASE. */
+    action: text("action").notNull(),
+    /** Ảnh chụp câu MÁY soạn tại thời điểm bấm. */
+    suggestedText: text("suggested_text").notNull().default(""),
+    /** Câu THẬT SỰ gửi đi. Rỗng với REJECT / REGENERATE / TAKEOVER / RELEASE. */
+    finalText: text("final_text").notNull().default(""),
+    /** Nhân viên có sửa không, và sửa bao nhiêu. NULL = không áp dụng cho việc này. */
+    edited: boolean("edited"),
+    editDistance: integer("edit_distance"),
+    /** Từ chối thì vì sao — danh sách đóng ở `lib/constants/copilot.ts`. */
+    rejectReason: text("reject_reason"),
+    note: text("note").notNull().default(""),
+    /** NONE · PENDING · SENT · FAILED. Chỉ có nghĩa với SEND / EDIT_SEND. */
+    sendStatus: text("send_status").notNull().default("NONE"),
+    /** Mã tin nhắn Pancake trả về — bằng chứng tin đã thật sự đi. */
+    pancakeMessageId: text("pancake_message_id").notNull().default(""),
+    sendError: text("send_error").notNull().default(""),
+    /** Bao lâu từ lúc máy soạn xong tới lúc người bấm. NULL = chưa đo được. */
+    reviewSeconds: integer("review_seconds"),
+    /** QUY KẾT BẰNG KHOÁ. Không có đường nào ghi dòng này mà không có khoá tài khoản. */
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** Ảnh chụp TÊN để người đọc — máy chủ đọc từ `users`, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sales_copilot_actions_conv_idx").on(t.conversationId, t.createdAt),
+    index("sales_copilot_actions_actor_idx").on(t.actorUserId, t.createdAt),
+    index("sales_copilot_actions_action_idx").on(t.action, t.createdAt),
+  ],
+);
+
+/**
  * CHẤM TAY MỘT LƯỢT CHẠY — nơi DUY NHẤT sự thật nền (ground truth) được ghi.
  *
  * Mọi ô ở đây đều cho phép NULL và NULL nghĩa là **CHƯA AI CHẤM**, không phải "sai". Không một

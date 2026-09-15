@@ -645,6 +645,13 @@
       "when": 1789381343786,
       "tag": "0092_sales_review_reason_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1789381403786,
+      "tag": "0093_sales_copilot_actions",
+      "breakpoints": true
     }
   ]
 }

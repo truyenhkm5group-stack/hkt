@@ -45,7 +45,7 @@ const OFF_SETTINGS: AiSettings = {
   testConversationIds: [],
   modes: {},
   pricing: {},
-  hardLimits: { allowCustomerSend: true, allowOrderCreate: true },
+  hardLimits: { allowAutoSend: true, allowHumanApprovedSend: true, allowOrderCreate: true },
   pricingVersion: "",
 };
 
@@ -498,53 +498,81 @@ export async function testSalesAgent(db: Db) {
   assert.equal(guardGeneratedText("Dạ chị lấy size L màu Đỏ đúng không ạ?", mẫuChào, { ...nềnLưới, sizeChartAvailable: false }).usedModel, true);
   assert.equal(guardGeneratedText("Dạ bên em tư vấn chị lấy size L ạ.", mẫuChào, { ...nềnLưới, sizeChartAvailable: false }).usedModel, false, "KHUYÊN một size khi không có bảng ⇒ vứt");
 
-  // ═════════ 5. CỔNG GỬI TIN — SHADOW KHÔNG BAO GIỜ GỬI ═════════
+  // ═════════ 5. CỔNG GỬI TIN — HAI LOẠI GỬI, HAI CÔNG TẮC ═════════
+  //
+  // Bản tách quan trọng nhất của giai đoạn COPILOT: "máy tự gửi" và "nhân viên bấm gửi" là hai
+  // việc có hai mức rủi ro khác hẳn nhau. Một cờ gộp thì ngày mở nấc COPILOT để nhân viên bấm gửi
+  // cũng là ngày mở luôn đường cho máy tự gửi.
 
   const base = { conversationExternalId: "conv-1", text: "Dạ em chào chị", humanTakeover: false };
-  assert.equal(canSend({ ...base, mode: "SHADOW" }, OFF_SETTINGS).allowed, false, "nấc SHADOW không được gửi câu do AI soạn");
-  assert.equal(canSend({ ...base, mode: "OFF" }, OFF_SETTINGS).allowed, false);
-  assert.equal(canSend({ ...base, mode: "COPILOT" }, OFF_SETTINGS).allowed, false, "nấc COPILOT chưa có người duyệt thì chưa được gửi");
-  assert.equal(canSend({ ...base, mode: "COPILOT", approved: true }, OFF_SETTINGS).allowed, true);
-  assert.equal(canSend({ ...base, mode: "AUTO" }, OFF_SETTINGS).allowed, true);
-  // Người đã cầm việc ⇒ im lặng ở MỌI nấc.
-  for (const mode of ["SHADOW", "COPILOT", "AUTO"] as const) {
-    assert.equal(canSend({ ...base, mode, approved: true, humanTakeover: true }, OFF_SETTINGS).allowed, false, `nấc ${mode}: người cầm việc thì máy không gửi`);
+  const NGUOI = "u-sale-1";
+
+  // 5a. MÁY tự gửi (không có khoá tài khoản): chỉ nấc AUTO, và chỉ khi `allowAutoSend` mở.
+  const moTuGui: AiSettings = { ...OFF_SETTINGS, hardLimits: { allowAutoSend: true, allowHumanApprovedSend: false, allowOrderCreate: true } };
+  assert.equal(canSend({ ...base, mode: "SHADOW" }, moTuGui).allowed, false, "nấc SHADOW: máy không tự gửi");
+  assert.equal(canSend({ ...base, mode: "COPILOT" }, moTuGui).allowed, false, "nấc COPILOT KHÔNG có phiếu duyệt = một job đang cố gửi thay người ⇒ chặn");
+  const tuGui = canSend({ ...base, mode: "AUTO" }, moTuGui);
+  assert.equal(tuGui.allowed, true);
+  assert.equal(tuGui.allowed === true && tuGui.kind, "AUTO");
+
+  // 5b. NGƯỜI bấm gửi (có khoá tài khoản): từ nấc COPILOT, và chỉ khi `allowHumanApprovedSend` mở.
+  const moNguoiGui: AiSettings = { ...OFF_SETTINGS, hardLimits: { allowAutoSend: false, allowHumanApprovedSend: true, allowOrderCreate: true } };
+  assert.equal(canSend({ ...base, mode: "SHADOW", approvedByUserId: NGUOI }, moNguoiGui).allowed, false, "nấc SHADOW: người bấm cũng chưa gửi được");
+  const nguoiGui = canSend({ ...base, mode: "COPILOT", approvedByUserId: NGUOI }, moNguoiGui);
+  assert.equal(nguoiGui.allowed, true);
+  assert.equal(nguoiGui.allowed === true && nguoiGui.kind, "HUMAN_APPROVED");
+
+  /*
+    5c. VÀ ĐÂY LÀ PHÉP THỬ ĐÁNG GIÁ NHẤT CỦA CẢ BẢN TÁCH.
+
+    Mở công tắc CHO NGƯỜI BẤM GỬI không được mở một milimét nào cho máy tự gửi — ở MỌI nấc, kể cả
+    nấc AUTO. Nếu dòng nào dưới đây đỏ, nghĩa là hai nghĩa lại dính vào nhau, và việc bật nấc
+    COPILOT cho page thí điểm đã đồng thời cho phép một job nền nhắn khách.
+  */
+  let toHopTuGui = 0;
+  for (const mode of ["OFF", "SHADOW", "COPILOT", "AUTO"] as const) {
+    const d = canSend({ ...base, mode }, moNguoiGui);
+    toHopTuGui += 1;
+    assert.equal(d.allowed, false, `mở quyền NGƯỜI bấm gửi không được cho MÁY tự gửi ở nấc ${mode}`);
   }
-  // Tin kiểm thử tất định: chỉ tới hội thoại trong danh sách trắng.
-  assert.equal(canSend({ ...base, mode: "SHADOW", text: ROUNDTRIP_TEST_MESSAGE }, OFF_SETTINGS).allowed, false, "chưa có danh sách trắng thì tin kiểm thử cũng không gửi");
-  const whitelisted = { ...OFF_SETTINGS, testConversationIds: ["conv-1"] };
+  assert.equal(toHopTuGui, 4);
+  // Và chiều ngược lại: mở quyền máy tự gửi không cho người bấm gửi (người vẫn phải có công tắc riêng).
+  assert.equal(canSend({ ...base, mode: "COPILOT", approvedByUserId: NGUOI }, moTuGui).allowed, false);
+
+  // 5d. Người đã cầm việc ⇒ MÁY im lặng; nhưng chính NGƯỜI ấy vẫn gửi được — họ đang ngồi trả lời khách.
+  assert.equal(canSend({ ...base, mode: "AUTO", humanTakeover: true }, moTuGui).allowed, false, "người cầm việc thì máy không gửi");
+  assert.equal(canSend({ ...base, mode: "COPILOT", humanTakeover: true, approvedByUserId: NGUOI }, moNguoiGui).allowed, true, "người cầm việc thì chính người ấy vẫn gửi được");
+
+  // 5e. Tin kiểm thử tất định: chỉ tới hội thoại trong danh sách trắng, và không mở đường cho câu AI.
+  assert.equal(canSend({ ...base, mode: "SHADOW", text: ROUNDTRIP_TEST_MESSAGE }, moNguoiGui).allowed, false, "chưa có danh sách trắng thì tin kiểm thử cũng không gửi");
+  const whitelisted: AiSettings = { ...moNguoiGui, testConversationIds: ["conv-1"] };
   const roundtrip = canSend({ ...base, mode: "SHADOW", text: ROUNDTRIP_TEST_MESSAGE }, whitelisted);
   assert.equal(roundtrip.allowed, true);
   assert.equal(roundtrip.allowed === true && roundtrip.kind, "ROUNDTRIP_TEST");
-  // Danh sách trắng KHÔNG mở cửa cho câu do AI soạn.
   assert.equal(canSend({ ...base, mode: "SHADOW", text: "Dạ mẫu này 499k ạ" }, whitelisted).allowed, false, "danh sách trắng chỉ cho tin kiểm thử, không cho câu AI");
 
   // ═════════ 5B. CHẶN CỨNG CẤP MÔI TRƯỜNG — CÂU TRẢ LỜI CHO "CÓ TỔ HỢP NÀO LỠ NHẮN KHÁCH KHÔNG" ═════════
   //
   // Bản chạy thử cắm vào một page Pancake THẬT, nên câu hỏi không còn là "nấc SHADOW có gửi
-  // không" mà là "có TỔ HỢP CẤU HÌNH NÀO gửi được không". Hai công tắc `AI_ALLOW_CUSTOMER_SEND`
-  // và `AI_ALLOW_ORDER_CREATE` trả lời bằng cách đứng TRƯỚC mọi chốt khác và chỉ biết nói KHÔNG.
-  //
-  // Khối này quét đủ tổ hợp nấc × phiếu duyệt × danh sách trắng × nội dung — kể cả những tổ hợp
-  // mà khối 5 vừa chứng minh là ĐƯỢC GỬI — để chứng minh chặn cứng đè lên tất cả.
+  // không" mà là "có TỔ HỢP CẤU HÌNH NÀO gửi được không". Ba công tắc chặn cứng trả lời bằng cách
+  // đứng trước mọi chốt khác và chỉ biết nói KHÔNG.
   const locked: AiSettings = { ...OFF_SETTINGS, testConversationIds: ["conv-1"], hardLimits: SAFEST_HARD_LIMITS };
   let lockedChecks = 0;
   for (const mode of ["OFF", "SHADOW", "COPILOT", "AUTO"] as const) {
-    for (const approved of [false, true]) {
+    for (const approvedByUserId of [undefined, NGUOI]) {
       for (const text of ["Dạ mẫu này 499k ạ", ROUNDTRIP_TEST_MESSAGE]) {
-        const decision = canSend({ conversationExternalId: "conv-1", humanTakeover: false, mode, approved, text }, locked);
+        const decision = canSend({ conversationExternalId: "conv-1", humanTakeover: false, mode, approvedByUserId, text }, locked);
         lockedChecks += 1;
-        assert.equal(decision.allowed, false, `chặn cứng phải thắng: nấc ${mode}, duyệt=${approved}, nội dung=${text.slice(0, 12)}`);
-        assert.match(decision.reason, /AI_ALLOW_CUSTOMER_SEND/, "lý do phải chỉ đúng công tắc đang chặn, để người vận hành biết sửa ở đâu");
+        assert.equal(decision.allowed, false, `chặn cứng phải thắng: nấc ${mode}, người=${approvedByUserId ?? "(máy)"}, nội dung=${text.slice(0, 12)}`);
+        assert.match(decision.reason, /AI_ALLOW_(AUTO|HUMAN_APPROVED)_SEND/, "lý do phải chỉ đúng công tắc đang chặn, để người vận hành biết sửa ở đâu");
       }
     }
   }
-  assert.equal(lockedChecks, 16, "phải quét đủ 4 nấc × 2 phiếu duyệt × 2 loại nội dung");
+  assert.equal(lockedChecks, 16, "phải quét đủ 4 nấc × 2 (máy / người) × 2 loại nội dung");
 
-  // Chặn cứng là chốt ĐẦU TIÊN: một tổ hợp mà khối 5 đã chứng minh là gửi được (AUTO + đã duyệt)
-  // vẫn bị chặn, và bị chặn vì công tắc chứ không phải vì nấc.
-  assert.equal(canSend({ ...base, mode: "AUTO", approved: true }, OFF_SETTINGS).allowed, true, "mở công tắc thì logic nấc chạy như cũ");
-  assert.equal(canSend({ ...base, mode: "AUTO", approved: true }, locked).allowed, false, "khoá công tắc thì chính tổ hợp đó bị chặn");
+  // Chặn cứng là chốt đứng trước: chính tổ hợp mà khối 5 vừa chứng minh là gửi được vẫn bị chặn.
+  assert.equal(canSend({ ...base, mode: "AUTO" }, moTuGui).allowed, true, "mở công tắc thì logic nấc chạy như cũ");
+  assert.equal(canSend({ ...base, mode: "AUTO" }, locked).allowed, false, "khoá công tắc thì chính tổ hợp đó bị chặn");
 
   // ── Công tắc đọc TỪ MÔI TRƯỜNG, và bảng `settings` KHÔNG ghi đè được ──
   //
@@ -557,22 +585,35 @@ export async function testSalesAgent(db: Db) {
   try {
     delete process.env.AI_ALLOW_CUSTOMER_SEND;
     delete process.env.AI_ALLOW_ORDER_CREATE;
-    await setSettingJson(AI_CONFIG_KEY, { hardLimits: { allowCustomerSend: true, allowOrderCreate: true } });
+    await setSettingJson(AI_CONFIG_KEY, { hardLimits: { allowAutoSend: true, allowHumanApprovedSend: true, allowOrderCreate: true } });
     const fromDb = await getAiSettings();
     assert.deepEqual(fromDb.hardLimits, SAFEST_HARD_LIMITS, "ghi hardLimits vào bảng settings KHÔNG được mở công tắc");
 
     // Chỉ đúng một chuỗi mở được. Một công tắc mà gõ kiểu gì cũng bật được là một công tắc sẽ bị
     // bật nhầm — nên `1`, `yes`, `on` đều là CẤM.
     for (const raw of ["1", "yes", "on", "TRUE ", "false", ""]) {
-      process.env.AI_ALLOW_CUSTOMER_SEND = raw;
-      assert.equal(aiEnv.hardLimits.allowCustomerSend, raw.trim().toLowerCase() === "true", `giá trị ${JSON.stringify(raw)}: chỉ chuỗi "true" mới mở`);
+      process.env.AI_ALLOW_AUTO_SEND = raw;
+      assert.equal(aiEnv.hardLimits.allowAutoSend, raw.trim().toLowerCase() === "true", `giá trị ${JSON.stringify(raw)}: chỉ chuỗi "true" mới mở`);
     }
+
+    /*
+      CỜ CŨ CHỈ ĐI ĐƯỢC VỀ PHÍA HẸP HƠN.
+
+      `AI_ALLOW_CUSTOMER_SEND` từng gộp cả hai nghĩa. Sau bản tách nó chỉ còn nghĩa "nhân viên bấm
+      gửi" — nên một môi trường cũ bật nó lên KHÔNG bao giờ mở được đường máy tự gửi. Đây là dòng
+      canh chừng cho đúng điều đó.
+    */
+    delete process.env.AI_ALLOW_AUTO_SEND;
+    delete process.env.AI_ALLOW_HUMAN_APPROVED_SEND;
     process.env.AI_ALLOW_CUSTOMER_SEND = "true";
-    assert.equal(aiEnv.hardLimits.allowCustomerSend, true, 'đúng chuỗi "true" thì mở');
-    assert.equal((await getAiSettings()).hardLimits.allowOrderCreate, false, "hai công tắc độc lập: mở cái gửi tin không mở cái tạo đơn");
+    assert.equal(aiEnv.hardLimits.allowHumanApprovedSend, true, "cờ cũ vẫn mở được đường NGƯỜI bấm gửi");
+    assert.equal(aiEnv.hardLimits.allowAutoSend, false, "cờ cũ TUYỆT ĐỐI không mở được đường MÁY tự gửi");
+    assert.equal((await getAiSettings()).hardLimits.allowOrderCreate, false, "ba công tắc độc lập: mở cái gửi tin không mở cái tạo đơn");
   } finally {
     if (savedSend === undefined) delete process.env.AI_ALLOW_CUSTOMER_SEND;
     else process.env.AI_ALLOW_CUSTOMER_SEND = savedSend;
+    delete process.env.AI_ALLOW_AUTO_SEND;
+    delete process.env.AI_ALLOW_HUMAN_APPROVED_SEND;
     if (savedOrder === undefined) delete process.env.AI_ALLOW_ORDER_CREATE;
     else process.env.AI_ALLOW_ORDER_CREATE = savedOrder;
     await setSettingJson(AI_CONFIG_KEY, {});
@@ -1279,7 +1320,6 @@ export async function testSalesAgent(db: Db) {
   // đi được. Muốn gửi tin cho khách phải đổi DỮ LIỆU, không đổi được bằng một chuỗi.
   const forgedRequest = {
     mode: "AUTO" as const,
-    approved: true,
     conversationExternalId: "conv-gia-mao",
     text: "Dạ em chốt đơn cho chị luôn nhé",
     humanTakeover: false,
@@ -1288,23 +1328,23 @@ export async function testSalesAgent(db: Db) {
   // Chốt 1 — chặn cứng cấp môi trường, đứng trước cả phép đọc CSDL.
   const lockedOutbound = await assertOutboundAllowed(forgedRequest);
   assert.equal(lockedOutbound.allowed, false);
-  assert.match(lockedOutbound.reason, /AI_ALLOW_CUSTOMER_SEND/, "công tắc môi trường chặn trước, và nói rõ mình là ai");
+  assert.match(lockedOutbound.reason, /AI_ALLOW_AUTO_SEND/, "công tắc môi trường chặn trước, và nói rõ mình là ai");
 
   // Chốt 2 — mở công tắc ra để lộ chốt nấc quyền hạn đọc lại từ CSDL.
-  const savedSendEnv = process.env.AI_ALLOW_CUSTOMER_SEND;
+  const savedSendEnv = process.env.AI_ALLOW_AUTO_SEND;
   try {
-    process.env.AI_ALLOW_CUSTOMER_SEND = "true";
+    process.env.AI_ALLOW_AUTO_SEND = "true";
     const forged = await assertOutboundAllowed(forgedRequest);
     assert.equal(forged.allowed, false, "khai nấc AUTO từ nơi gọi KHÔNG mở được cổng khi CSDL vẫn ở nấc SHADOW");
     assert.match(forged.reason, /SHADOW|chạy ngầm|GỢI Ý/i, "lý do phải nói rõ đang bị chặn vì nấc chạy ngầm");
   } finally {
-    if (savedSendEnv === undefined) delete process.env.AI_ALLOW_CUSTOMER_SEND;
-    else process.env.AI_ALLOW_CUSTOMER_SEND = savedSendEnv;
+    if (savedSendEnv === undefined) delete process.env.AI_ALLOW_AUTO_SEND;
+    else process.env.AI_ALLOW_AUTO_SEND = savedSendEnv;
   }
   assert.equal((await assertOutboundAllowed(forgedRequest)).allowed, false, "đóng công tắc lại thì chốt 1 hoạt động trở lại");
 
   // Hàm thuần vẫn cho phép AUTO — chứng minh khác biệt nằm ĐÚNG ở chỗ đọc lại CSDL.
-  assert.equal(canSend({ mode: "AUTO", approved: true, conversationExternalId: "conv-gia-mao", text: "x", humanTakeover: false }, OFF_SETTINGS).allowed, true);
+  assert.equal(canSend({ mode: "AUTO", conversationExternalId: "conv-gia-mao", text: "x", humanTakeover: false }, OFF_SETTINGS).allowed, true);
 
   // Công cụ GHI có HAI chốt độc lập, và khối này thử từng chốt một — hai chốt cùng chặn thì
   // không biết chốt nào đang làm việc, mà một chốt hỏng âm thầm là một chốt không còn tồn tại.

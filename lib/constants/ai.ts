@@ -188,18 +188,55 @@ export const DEFAULT_AI_FLAGS: AiFeatureFlags = {
  * đủ cao NHƯ CŨ, rồi mới tới lượt chúng có ý kiến.
  */
 export type AiHardLimits = {
-  /** false = KHÔNG một chữ nào rời khỏi ERP tới khách, kể cả tin kiểm thử tất định. */
-  allowCustomerSend: boolean;
+  /**
+   * MÁY TỰ GỬI. false = không có đường nào để một job / bộ lập lịch / dây chuyền tự nhắn khách.
+   *
+   * Tách hẳn khỏi `allowHumanApprovedSend` bên dưới là việc phải làm trước khi mở nấc COPILOT:
+   * một công tắc gộp "cho phép gửi tin" thì lúc bật lên để nhân viên bấm gửi cũng đồng thời mở
+   * đường cho máy tự gửi. Hai việc ấy có hai mức rủi ro khác nhau hoàn toàn, nên phải có hai
+   * công tắc — và công tắc nguy hiểm hơn phải là công tắc khó bật hơn.
+   */
+  allowAutoSend: boolean;
+  /**
+   * NHÂN VIÊN BẤM GỬI. false = kể cả người thật bấm nút cũng không ra được tin nào.
+   *
+   * Bật cái này KHÔNG bao giờ mở được đường tự gửi: `canSend()` đọc hai cờ ở hai nhánh riêng, và
+   * nhánh tự gửi chỉ đọc `allowAutoSend`.
+   */
+  allowHumanApprovedSend: boolean;
   /** false = KHÔNG tạo / chốt đơn trên POS, bất kể nấc quyền hạn. */
   allowOrderCreate: boolean;
 };
 
 /** Mặc định của mặc định: CẤM. Thiếu biến môi trường, gõ sai, tệp .env rỗng — đều ra CẤM. */
-export const SAFEST_HARD_LIMITS: AiHardLimits = { allowCustomerSend: false, allowOrderCreate: false };
+export const SAFEST_HARD_LIMITS: AiHardLimits = { allowAutoSend: false, allowHumanApprovedSend: false, allowOrderCreate: false };
 
 export const HARD_LIMIT_LABEL: Record<keyof AiHardLimits, string> = {
-  allowCustomerSend: "Cho phép gửi tin tới khách",
+  allowAutoSend: "Cho phép MÁY tự gửi tin",
+  allowHumanApprovedSend: "Cho phép NHÂN VIÊN bấm gửi tin",
   allowOrderCreate: "Cho phép tạo / chốt đơn",
+};
+
+/**
+ * AI GỬI, VÀ GỬI THEO ĐƯỜNG NÀO — ba loại, ba mức rủi ro, ba công tắc.
+ *
+ *   `AUTO`           — máy tự quyết và tự gửi. Nguy hiểm nhất, và là thứ phải luôn TẮT ở giai đoạn
+ *                      này. Không phiếu duyệt nào, không người nào đứng giữa.
+ *   `HUMAN_APPROVED` — một nhân viên đã ĐỌC câu máy soạn và chủ động bấm gửi. Người chịu trách
+ *                      nhiệm là người bấm, và phiếu duyệt mang khoá tài khoản của họ.
+ *   `ROUNDTRIP_TEST` — một chuỗi CỐ ĐỊNH, không phải câu của mô hình, gửi tới hội thoại trong danh
+ *                      sách trắng để chứng minh đường truyền hai chiều còn sống.
+ *
+ * Gộp ba loại này vào một cờ `allowCustomerSend` là cách chắc chắn nhất để một ngày nào đó bật nấc
+ * COPILOT lên và vô tình mở luôn đường tự gửi.
+ */
+export const SEND_KINDS = ["AUTO", "HUMAN_APPROVED", "ROUNDTRIP_TEST"] as const;
+export type SendKind = (typeof SEND_KINDS)[number];
+
+export const SEND_KIND_LABEL: Record<SendKind, string> = {
+  AUTO: "Máy tự gửi",
+  HUMAN_APPROVED: "Nhân viên bấm gửi",
+  ROUNDTRIP_TEST: "Tin kiểm thử đường truyền",
 };
 
 // ───────────────────────── Hiển thị ─────────────────────────

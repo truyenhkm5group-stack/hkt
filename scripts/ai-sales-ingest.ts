@@ -52,7 +52,8 @@ async function main() {
   console.log(`  Nền tảng AI        : ${settings.enabled ? "bật" : "TẮT"} · nạp hội thoại: ${settings.ingestEnabled ? "bật" : "TẮT"}`);
   console.log(`  Gọi mô hình        : ${settings.modelCallsEnabled ? "bật" : "TẮT (chỉ chạy nấc luật)"}`);
   console.log(`  Nhà cung cấp       : ${aiEnv.provider} · mô hình rẻ: ${aiEnv.economyModel || "(chưa khai)"} · mô hình mạnh: ${aiEnv.strongModel || "(chưa khai)"}`);
-  console.log(`  CHẶN CỨNG gửi tin  : ${settings.hardLimits.allowCustomerSend ? "!!! CHO PHÉP !!!" : "CẤM"}`);
+  console.log(`  CHẶN CỨNG MÁY gửi  : ${settings.hardLimits.allowAutoSend ? "!!! CHO PHÉP !!!" : "CẤM"}`);
+  console.log(`  CHẶN CỨNG NGƯỜI gửi: ${settings.hardLimits.allowHumanApprovedSend ? "!!! CHO PHÉP !!!" : "CẤM"}`);
   console.log(`  CHẶN CỨNG lên đơn  : ${settings.hardLimits.allowOrderCreate ? "!!! CHO PHÉP !!!" : "CẤM"}`);
   console.log(`  Bảng giá           : ${settings.pricingVersion || "(chưa khai — chi phí sẽ là CHƯA BIẾT)"}`);
 
@@ -60,8 +61,10 @@ async function main() {
   const userTokenLen = aiEnv.apiKey ? aiEnv.apiKey.length : 0;
   console.log(`  Khoá mô hình       : ${userTokenLen ? `đã cấu hình (${userTokenLen} ký tự)` : "chưa cấu hình"}`);
 
-  if (settings.hardLimits.allowCustomerSend) {
-    console.error("\n✗ DỪNG: AI_ALLOW_CUSTOMER_SEND đang là true. Lần chạy thử đầu tiên không được phép gửi tin.");
+  // Lượt NẠP DỮ LIỆU không bao giờ được chạy trên một môi trường mà MÁY tự gửi được: nạp xong là
+  // dây chuyền chạy, và nếu máy tự gửi thì lượt nạp đầu tiên đã nhắn cho khách thật.
+  if (settings.hardLimits.allowAutoSend) {
+    console.error("\n✗ DỪNG: AI_ALLOW_AUTO_SEND đang là true. Lượt nạp dữ liệu không được chạy khi máy tự gửi được.");
     process.exit(1);
   }
 

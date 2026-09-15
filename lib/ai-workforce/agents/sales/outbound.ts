@@ -1,16 +1,22 @@
 /**
  * CỔNG GỬI TIN RA — chốt chặn cuối cùng trước khi bất cứ chữ nào tới tay khách.
  *
- * LUẬT CỦA GIAI ĐOẠN NÀY: **ở nấc SHADOW, không một câu do AI sinh ra được gửi cho khách.**
- * Không có cờ nào, không có tham số nào, không có nhánh nào mở được điều đó. Cổng này là nơi duy
- * nhất trong mã nguồn gọi tới API gửi tin của Pancake cho nhân sự AI, nên chỉ cần đọc một tệp là
- * kiểm chứng được lời khẳng định trên.
+ * Cổng này là nơi DUY NHẤT trong mã nguồn gọi tới API gửi tin của Pancake cho nhân sự AI, nên chỉ
+ * cần đọc một tệp là kiểm chứng được mọi lời khẳng định về "AI có nhắn khách không".
  *
- * Ngoại lệ DUY NHẤT, và nó không phải ngoại lệ của luật trên: một hội thoại được ghi tên trong
- * danh sách trắng có thể nhận một tin KIỂM THỬ TẤT ĐỊNH — chuỗi cố định dưới đây, không phải câu
- * do mô hình sinh ra — để kiểm chứng đường truyền hai chiều thật sự chạy.
+ * BA LOẠI GỬI, BA CÔNG TẮC RIÊNG (`SEND_KINDS` ở `lib/constants/ai.ts`):
+ *
+ *   `AUTO`           — máy tự quyết và tự gửi. Đọc `allowAutoSend`, và CHỈ đọc nó.
+ *   `HUMAN_APPROVED` — nhân viên đã đọc câu máy soạn rồi chủ động bấm gửi. Đọc
+ *                      `allowHumanApprovedSend`, và phải kèm phiếu duyệt mang khoá tài khoản.
+ *   `ROUNDTRIP_TEST` — một chuỗi CỐ ĐỊNH (không phải câu của mô hình) tới hội thoại trong danh
+ *                      sách trắng, để chứng minh đường truyền hai chiều còn sống.
+ *
+ * VÌ SAO TÁCH: một cờ gộp "cho phép gửi tin" thì ngày mở nấc COPILOT để nhân viên bấm gửi cũng là
+ * ngày mở luôn đường cho máy tự gửi. Hai việc ấy có hai mức rủi ro khác hẳn nhau. Sau khi tách,
+ * câu "máy có tự nhắn khách được không" trả lời được bằng đúng MỘT biến môi trường.
  */
-import { modeAtLeast, type AgentMode } from "@/lib/constants/ai";
+import { modeAtLeast, type AgentMode, type SendKind } from "@/lib/constants/ai";
 import { getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
@@ -18,51 +24,71 @@ import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 /** Tin kiểm thử vòng khép kín. TẤT ĐỊNH và nhận ra được — không bao giờ là câu của mô hình. */
 export const ROUNDTRIP_TEST_MESSAGE = "[ERP] Kiểm tra đường truyền tin nhắn — tin tự động, chị bỏ qua giúp em ạ.";
 
-export type SendDecision =
-  | { allowed: true; kind: "AGENT_REPLY" | "ROUNDTRIP_TEST"; reason: string }
-  | { allowed: false; reason: string };
+export type SendDecision = { allowed: true; kind: SendKind; reason: string } | { allowed: false; reason: string };
 
 export type SendRequest = {
   mode: AgentMode;
   conversationExternalId: string;
   text: string;
-  /** Người đã cầm hội thoại chưa — cầm rồi thì máy tuyệt đối im lặng. */
+  /** Người đã cầm hội thoại chưa — cầm rồi thì MÁY tuyệt đối im lặng (người vẫn gửi được). */
   humanTakeover: boolean;
-  /** Đã có phiếu duyệt của người cho tin này chưa (bắt buộc từ nấc COPILOT). */
-  approved?: boolean;
+  /**
+   * KHOÁ TÀI KHOẢN của người bấm gửi. Có khoá = phiếu duyệt của người; `undefined` = MÁY gửi.
+   *
+   * Là một KHOÁ chứ không phải một cờ `approved: true` có chủ ý: một cờ bool thì bất cứ nơi gọi
+   * nào cũng đặt được, còn một khoá tài khoản thì phải lấy từ một phiên đăng nhập có thật. Job nền
+   * không có phiên, nên không có khoá, nên không bao giờ đi được vào nhánh `HUMAN_APPROVED`.
+   */
+  approvedByUserId?: string | null;
 };
 
 /**
  * Có được gửi không. HÀM THUẦN — kiểm thử được mọi tổ hợp mà không cần mạng, không cần CSDL.
  */
 export function canSend(request: SendRequest, settings: AiSettings): SendDecision {
-  // CHẶN CỨNG TRƯỚC MỌI THỨ KHÁC. Công tắc này đọc từ biến môi trường và không có đường nào ghi đè
-  // từ CSDL, nên nó đứng đầu hàng: không nấc quyền hạn nào, không phiếu duyệt nào, không danh sách
-  // trắng nào đi vòng qua được. Trên bản chạy thử cắm vào page Pancake THẬT, đây là câu trả lời cho
-  // "có tổ hợp cấu hình nào lỡ nhắn cho khách thật không".
-  if (!settings.hardLimits.allowCustomerSend) {
-    return { allowed: false, reason: "AI_ALLOW_CUSTOMER_SEND=false — môi trường này cấm mọi tin gửi tới khách" };
-  }
   if (!settings.enabled) return { allowed: false, reason: "Nền tảng AI đang tắt" };
-  if (request.humanTakeover) return { allowed: false, reason: "Người đã tiếp nhận hội thoại — máy không gửi gì nữa" };
   if (!request.text.trim()) return { allowed: false, reason: "Không có nội dung để gửi" };
 
-  const whitelisted = settings.testConversationIds.includes(request.conversationExternalId);
+  const nguoiBam = Boolean(request.approvedByUserId);
+
+  // TIN KIỂM THỬ: một chuỗi CỐ ĐỊNH, chỉ tới hội thoại trong danh sách trắng. Không mang một chữ
+  // nào của mô hình, nên nó đứng riêng và không mở đường cho bất cứ câu nào khác.
   if (request.text === ROUNDTRIP_TEST_MESSAGE) {
-    // Tin kiểm thử: CHỈ tới hội thoại trong danh sách trắng, không bao giờ tới khách thật.
-    return whitelisted
+    if (!settings.hardLimits.allowHumanApprovedSend) {
+      return { allowed: false, reason: "AI_ALLOW_HUMAN_APPROVED_SEND=false — môi trường này cấm mọi tin rời khỏi ERP" };
+    }
+    return settings.testConversationIds.includes(request.conversationExternalId)
       ? { allowed: true, kind: "ROUNDTRIP_TEST", reason: "Tin kiểm thử tất định tới hội thoại trong danh sách trắng" }
       : { allowed: false, reason: "Hội thoại không nằm trong danh sách trắng kiểm thử" };
   }
 
-  // Đây là luật của giai đoạn: SHADOW không gửi câu do AI sinh ra, chấm hết.
-  if (!modeAtLeast(request.mode, "COPILOT")) {
-    return { allowed: false, reason: `Nấc ${request.mode}: câu do AI soạn chỉ là GỢI Ý cho nhân viên, không gửi cho khách` };
+  /*
+    HAI NHÁNH, ĐỌC HAI CÔNG TẮC KHÁC NHAU — và đây là toàn bộ ý nghĩa của bản tách này.
+
+    Nhánh NGƯỜI BẤM không bao giờ đọc `allowAutoSend`, nhánh MÁY TỰ GỬI không bao giờ đọc
+    `allowHumanApprovedSend`. Nên bật một cái không thể vô tình mở cái kia.
+  */
+  if (nguoiBam) {
+    if (!settings.hardLimits.allowHumanApprovedSend) {
+      return { allowed: false, reason: "AI_ALLOW_HUMAN_APPROVED_SEND=false — môi trường này cấm cả tin do nhân viên bấm gửi" };
+    }
+    if (!modeAtLeast(request.mode, "COPILOT")) {
+      return { allowed: false, reason: `Nấc ${request.mode}: câu do AI soạn chỉ là GỢI Ý, chưa tới nấc cho nhân viên bấm gửi` };
+    }
+    // Người đã cầm hội thoại KHÔNG chặn người bấm gửi: chính người ấy đang ngồi trả lời khách.
+    return { allowed: true, kind: "HUMAN_APPROVED", reason: "Nhân viên đã duyệt và bấm gửi" };
   }
-  if (request.mode === "COPILOT" && !request.approved) {
-    return { allowed: false, reason: "Nấc COPILOT: phải có người duyệt trước khi gửi" };
+
+  if (!settings.hardLimits.allowAutoSend) {
+    return { allowed: false, reason: "AI_ALLOW_AUTO_SEND=false — môi trường này cấm máy tự gửi tin" };
   }
-  return { allowed: true, kind: "AGENT_REPLY", reason: `Nấc ${request.mode} cho phép gửi` };
+  if (request.humanTakeover) return { allowed: false, reason: "Người đã tiếp nhận hội thoại — máy không gửi gì nữa" };
+  // Không có phiếu duyệt của người ⇒ đây là MÁY tự gửi ⇒ phải tới nấc AUTO. Nấc COPILOT mà không
+  // có khoá tài khoản nghĩa là một job nào đó đang cố gửi thay nhân viên: chặn.
+  if (!modeAtLeast(request.mode, "AUTO")) {
+    return { allowed: false, reason: `Nấc ${request.mode}: không có phiếu duyệt của người thì chỉ nấc AUTO mới được gửi` };
+  }
+  return { allowed: true, kind: "AUTO", reason: "Nấc AUTO cho phép máy tự gửi" };
 }
 
 export type SendOutcome = { sent: boolean; reason: string; messageId?: string; error?: string };

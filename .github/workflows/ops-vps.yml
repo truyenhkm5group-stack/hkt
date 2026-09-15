@@ -80,6 +80,7 @@ on:
           - ai-staging-configure # khai mã WIN + nguồn TEST rồi chạy thử ngầm ngay (arg: "--page=<id> --win=Q004 --test-source=<ad> --apply")
           - ai-staging-ai-env     # ghi OPENAI_API_KEY / AI_PROVIDER từ Secrets vào .env.staging rồi thử kết nối (KHÔNG in giá trị)
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
+          - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
@@ -778,6 +779,8 @@ jobs:
                 # CHẶN CỨNG GIỮ NGUYÊN. Bật mô hình thật KHÔNG được kéo theo quyền gửi tin hay tạo
                 # đơn — đó là hai khoá riêng, và chúng phải ở lại CẤM.
                 upsert_stg AI_DEFAULT_MODE SHADOW
+                upsert_stg AI_ALLOW_AUTO_SEND false
+                upsert_stg AI_ALLOW_HUMAN_APPROVED_SEND false
                 upsert_stg AI_ALLOW_CUSTOMER_SEND false
                 upsert_stg AI_ALLOW_ORDER_CREATE false
                 # CHUYỂN SANG CẦU NỐI. Mẫu `.env.staging.example` khai `stub` để một lần dựng
@@ -801,6 +804,56 @@ jobs:
                 fetch_staging_script ai-shadow-batch.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-shadow-batch.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-shadow-batch.ts ${ARG:---max=20} ;;
+
+              ai-staging-copilot)
+                # BẬT NẤC TRỢ LÝ CHO ĐÚNG MỘT PAGE — và chỉ nửa "người bấm gửi", không bao giờ nửa
+                # "máy tự gửi". `AI_ALLOW_AUTO_SEND` ghim trong docker-compose.staging.yml nên thao
+                # tác này KHÔNG chạm tới được; muốn mở nó phải sửa tệp ấy, commit, qua cổng kiểm thử.
+                #
+                # Ba thứ phải cùng đúng thì một tin mới đi được, và thao tác này đặt cả ba rồi ĐỌC
+                # LẠI để in ra — chứ không báo "đã bật" rồi thôi.
+                cd /opt/vnx-ai-staging
+                upsert_stg() { if grep -qE "^$1=" .env.staging; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env.staging; else printf '%s="%s"\n' "$1" "$2" >> .env.staging; fi; }
+                PAGE=""; BAT="0"
+                for a in ${ARG:-}; do
+                  case "$a" in
+                    --page=*) PAGE="${a#--page=}" ;;
+                    --on) BAT="1" ;;
+                    --off) BAT="0" ;;
+                  esac
+                done
+                if [ "$BAT" = "1" ] && [ -z "$PAGE" ]; then echo "✗ Bật nấc trợ lý thì PHẢI nêu --page=<id>: không có danh sách trắng thì không ai gửi được, và bật toàn cục là thứ bản thiết kế này từ chối."; exit 1; fi
+
+                if [ "$BAT" = "1" ]; then
+                  upsert_stg AI_ALLOW_HUMAN_APPROVED_SEND true
+                  DS="[\"$PAGE\"]"
+                else
+                  upsert_stg AI_ALLOW_HUMAN_APPROVED_SEND false
+                  DS="[]"
+                fi
+                upsert_stg AI_ALLOW_AUTO_SEND false
+                chmod 600 .env.staging
+                docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                sleep 12
+
+                # Danh sách trắng page + nấc quyền hạn nằm trong CSDL của bản chạy thử.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -v ON_ERROR_STOP=1 -c \
+                  "insert into settings (key, value, updated_at) values ('ai.copilotPages', '$DS', now()) on conflict (key) do update set value = excluded.value, updated_at = now();" >/dev/null
+                if [ "$BAT" = "1" ]; then NAC=COPILOT; else NAC=SHADOW; fi
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -v ON_ERROR_STOP=1 -c \
+                  "update ai_agents set mode = '$NAC' where key = 'sales';" >/dev/null
+
+                echo ""
+                echo "── ĐỌC LẠI TỪ BẢN ĐANG CHẠY (không phải từ thứ vừa gõ) ──"
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -At -c "select 'nấc quyền hạn: ' || mode from ai_agents where key = 'sales';"
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -At -c "select 'page thí điểm: ' || coalesce(value, '(chưa khai)') from settings where key = 'ai.copilotPages';"
+                docker exec vnx-ai-staging-app sh -lc 'echo "MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
+                echo ""
+                echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
 
               ai-staging-knowledge)
                 cd /opt/vnx-ai-staging

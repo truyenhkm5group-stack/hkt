@@ -67,7 +67,7 @@ async function main() {
   console.log(`   ECONOMY      : ${nha?.defaultModel("ECONOMY") || "—"}`);
   console.log(`   STRONG       : ${nha?.defaultModel("STRONG") || "—"}`);
   console.log(`   gọi mô hình  : ${settings.modelCallsEnabled ? "BẬT" : "TẮT"}`);
-  console.log(`   gửi tin khách: ${aiEnv.hardLimits.allowCustomerSend ? "⛔ MỞ" : "✓ CẤM"} · tạo đơn: ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
+  console.log(`   MÁY tự gửi   : ${aiEnv.hardLimits.allowAutoSend ? "⛔ MỞ" : "✓ CẤM"} · NGƯỜI bấm gửi: ${aiEnv.hardLimits.allowHumanApprovedSend ? "MỞ (COPILOT)" : "✓ CẤM"} · tạo đơn: ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
   const agent = await getAgent("sales", settings, db);
   console.log(`   nấc quyền hạn: ${agent?.mode ?? "—"}`);
 
@@ -432,7 +432,7 @@ async function main() {
   console.log(`   gợi ý đã gửi cho khách    : ${an.goi_y_da_gui}  ${zero(an.goi_y_da_gui)}`);
   console.log(`   lượt gọi công cụ lên đơn  : ${an.goi_cong_cu_don}  ${zero(an.goi_cong_cu_don)}`);
   console.log(`   hội thoại có đơn          : ${an.da_tao_don}  ${zero(an.da_tao_don)}`);
-  console.log(`   chặn cứng lúc chạy        : gửi tin ${aiEnv.hardLimits.allowCustomerSend ? "⛔ MỞ" : "✓ CẤM"} · tạo đơn ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
+  console.log(`   chặn cứng lúc chạy        : MÁY tự gửi ${aiEnv.hardLimits.allowAutoSend ? "⛔ MỞ" : "✓ CẤM"} · NGƯỜI bấm gửi ${aiEnv.hardLimits.allowHumanApprovedSend ? "MỞ (COPILOT)" : "✓ CẤM"} · tạo đơn ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
 
   /*
     ⑧ MƯỜI HAI CA ĐẠI DIỆN — CHỌN ĐỂ PHỦ, KHÔNG CHỌN ĐỂ ĐẸP.

@@ -100,6 +100,17 @@ export const PERMISSION_GROUPS = [
     items: [
       { key: "ai:view", label: "Nhân sự AI: xem", hint: "Lượt chạy, quyết định, công cụ đã gọi, token & chi phí — màn hình quan sát nhân sự AI" },
       { key: "ai:manage", label: "Nhân sự AI: cấu hình", hint: "Bật/tắt nhân sự, đổi nấc quyền hạn (chạy ngầm / trợ lý / tự động), đơn giá mô hình" },
+      /*
+        QUYỀN GỬI TÁCH KHỎI QUYỀN XEM, VÀ TÁCH KHỎI QUYỀN CẤU HÌNH.
+
+        Xem hàng đợi trợ lý là việc của nhiều người (quản lý, kế toán đối chiếu, chủ shop). BẤM GỬI
+        cho khách là việc của người bán hàng đang trực. Gộp hai quyền ấy thì hoặc phải mở quyền gửi
+        cho mọi người xem, hoặc phải đóng màn hình với những người chỉ cần đọc — cả hai đều sai.
+
+        Và nó KHÔNG nằm trong `ai:manage`: người chỉnh cấu hình nhân sự AI chưa chắc là người trực
+        chat, còn người trực chat không cần quyền đổi nấc quyền hạn của cả hệ thống.
+      */
+      { key: "ai:send", label: "Nhân sự AI: bấm gửi tin (nấc trợ lý)", hint: "Đọc câu máy soạn rồi bấm Gửi / Sửa & gửi cho khách. Chỉ có tác dụng ở nấc TRỢ LÝ và trên page đã khai trong danh sách thí điểm." },
     ],
   },
   {
@@ -149,7 +160,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "ai:view"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
-  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "ai:view"],
+  CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "ai:view", "ai:send"],
   MARKETING: [...VIEW_ALL, "ideas:write", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
   VIEWER: [...VIEW_ALL, "cod:view", "expenses:view", "reports:delivered", "reports:returns"],
 };

@@ -131,9 +131,21 @@ export const aiEnv = {
    * — một công tắc mà gõ kiểu gì cũng bật được là một công tắc sẽ bị bật nhầm.
    */
   get hardLimits(): AiHardLimits {
+    const bat = (name: string) => readEnv(name).toLowerCase() === "true";
+    /*
+      CỜ CŨ `AI_ALLOW_CUSTOMER_SEND` CHỈ CÒN NGHĨA "NHÂN VIÊN BẤM GỬI".
+
+      Nó từng gộp cả hai nghĩa. Mọi môi trường đang chạy đều đặt nó `false`, nên cách quy đổi này
+      không mở thêm gì cho ai. Nhưng nếu một ngày có người bật nó lên để nhân viên gửi được, thì
+      nghĩa "máy tự gửi" KHÔNG đi kèm — muốn máy tự gửi phải gõ đúng `AI_ALLOW_AUTO_SEND=true`,
+      một cái tên không thể bật nhầm mà không biết mình đang bật gì.
+
+      Nói cách khác: cờ cũ chỉ đi được về phía HẸP HƠN nghĩa nó từng có.
+    */
     return {
-      allowCustomerSend: readEnv("AI_ALLOW_CUSTOMER_SEND").toLowerCase() === "true",
-      allowOrderCreate: readEnv("AI_ALLOW_ORDER_CREATE").toLowerCase() === "true",
+      allowAutoSend: bat("AI_ALLOW_AUTO_SEND"),
+      allowHumanApprovedSend: bat("AI_ALLOW_HUMAN_APPROVED_SEND") || bat("AI_ALLOW_CUSTOMER_SEND"),
+      allowOrderCreate: bat("AI_ALLOW_ORDER_CREATE"),
     };
   },
 };

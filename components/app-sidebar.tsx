@@ -133,6 +133,9 @@ const groups: { label: string; items: NavItem[] }[] = [
     label: "Nhân sự AI",
     items: [
       { href: "/ai", label: "Nhân sự AI", icon: Bot, permission: "ai:view" },
+      // Hàng đợi trợ lý đứng TRƯỚC màn hình soát: đây là việc phải làm trong ca, còn soát & chấm là
+      // việc đọc lại. Xếp theo nhịp làm việc của người trực chat, không theo thứ tự xây ra.
+      { href: "/ai/copilot", label: "Hàng đợi trợ lý bán hàng", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/review", label: "Soát & chấm tay", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/fanpage", label: "Cấu hình fanpage", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/ad-map", label: "Bản đồ quảng cáo", icon: ClipboardCheck, permission: "ai:view" },

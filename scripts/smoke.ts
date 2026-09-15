@@ -106,14 +106,18 @@ const ROUTES = [
   "/settings/users",
   "/audit",
   /*
-    NHÂN SỰ AI — hai tuyến, hai thứ khác nhau.
+    NHÂN SỰ AI — ba tuyến, ba thứ khác nhau.
 
     `/ai` đọc bảng lượt chạy kèm token/chi phí; `/ai/review` dựng ba cột cạnh nhau (khách nói · máy
-    gợi ý · nhân viên trả lời thật) trên toàn bộ lượt ở nấc chạy ngầm. Cả hai đều chỉ ĐỌC — không
-    tuyến nào gửi tin hay tạo đơn — nên smoke mở thử là an toàn tuyệt đối, và nếu một ngày nào đó
-    mở chúng lại sinh ra một lượt gửi thì lá chắn này là nơi đầu tiên biết.
+    gợi ý · nhân viên trả lời thật); `/ai/copilot` là hàng đợi nhân viên bấm gửi.
+
+    CẢ BA ĐỀU CHỈ ĐỌC KHI MỞ. Riêng `/ai/copilot` đáng nói thêm một câu: nó có nút gửi, nhưng việc
+    gửi nằm sau một Server Action đòi phiên đăng nhập và một cú bấm — MỞ trang không gửi gì. Đúng
+    vì thế mà smoke mở nó là an toàn, và nếu một ngày nào đó chỉ mở trang thôi đã sinh ra một lượt
+    gửi thì lá chắn này là nơi đầu tiên biết.
   */
   "/ai",
+  "/ai/copilot",
   "/ai/review",
   "/ai/ad-map",
   "/ai/fanpage",
