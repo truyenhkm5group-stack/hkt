@@ -64,6 +64,10 @@ async function main() {
   console.log(`   nấc mặc định        : ${aiEnv.defaultMode}`);
   console.log(`   MÁY tự gửi tin      : ${aiEnv.hardLimits.allowAutoSend ? "⛔ ĐANG MỞ" : "✓ CẤM"}`);
   console.log(`   NGƯỜI bấm gửi tin   : ${aiEnv.hardLimits.allowHumanApprovedSend ? "ĐANG MỞ (nấc COPILOT)" : "✓ CẤM"}`);
+  // DANH SÁCH TRẮNG HỘI THOẠI KIỂM THỬ — không phải bí mật, và là thứ quyết định "có hội thoại nội
+  // bộ nào để thử gửi một tin không". Rỗng nghĩa là KHÔNG CÓ, và khi đó không được thử gửi gì cả.
+  const dsThu = aiEnv.testConversationIds;
+  console.log(`   hội thoại kiểm thử  : ${dsThu.length ? dsThu.join(", ") : "(RỖNG — chưa khai hội thoại nội bộ nào)"}`);
   console.log(`   tạo đơn             : ${aiEnv.hardLimits.allowOrderCreate ? "⛔ ĐANG MỞ" : "✓ CẤM"}`);
   console.log(`   cho gọi mô hình thật: ${aiEnv.modelCallsEnabled ? "CÓ" : "KHÔNG"}`);
   process.exit(0);
