@@ -133,7 +133,7 @@ trông y hệt nhau) · **phiên bản chưa hiệu lực**.
 
 ## 8. MIGRATION
 
-`0095_payroll_policy_engine` · `0096_payroll_run_lifecycle` · `0097_payroll_input_approval` — viết tay, idempotent, **chỉ cộng thêm**.
+`0096_payroll_policy_engine` · `0097_payroll_run_lifecycle` · `0098_payroll_input_approval` — viết tay, idempotent, **chỉ cộng thêm**.
 
 Đánh số lại **hai lần** trong một phiên: `main` lấy 0091 cho `0091_landing_attribution`, rồi lấy
 0092 cho `0092_fb_adsets`. Số hiệu đã vào `main` là bất khả xâm phạm; thứ phải dời luôn là cái CHƯA

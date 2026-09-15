@@ -91,6 +91,7 @@ import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
 import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
+import { testReturnUnidentified } from "./return-unidentified.test";
 import { testReturnItemInspection } from "./return-item-inspection.test";
 import { testHmtReturnReconcile } from "./hmt-return-reconcile.test";
 import { testInspectionFilter } from "./inspection-filter.test";
@@ -1712,6 +1713,7 @@ async function main() {
   await testStatementDetailMatching(db);
   // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
   await testReturnInspection(db);
+  await testReturnUnidentified(db);
   await testReturnProductContext(db);
   await testShipmentProductReport(db);
   await testReturnItemInspection(db);

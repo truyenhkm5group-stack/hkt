@@ -84,8 +84,8 @@ action: db-query
 arg: select count(*) from drizzle.__drizzle_migrations
 ```
 
-Ghi lại con số. Bản này thêm **3** migration (`0095_payroll_policy_engine`,
-`0096_payroll_run_lifecycle`, `0097_payroll_input_approval`), nên **sau** deploy con số phải tăng
+Ghi lại con số. Bản này thêm **3** migration (`0096_payroll_policy_engine`,
+`0097_payroll_run_lifecycle`, `0098_payroll_input_approval`), nên **sau** deploy con số phải tăng
 đúng 3. Tăng ít hơn nghĩa là có migration bị bỏ qua — dừng lại và đọc mục 4.
 
 > **Một điều đã thấy khi đo, không do bản này gây ra:** production báo 94 migration đã áp trong khi

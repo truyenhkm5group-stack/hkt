@@ -35,6 +35,16 @@ export const PERMISSION_GROUPS = [
     items: [
       { key: "products:view", label: "Sản phẩm & tồn kho", hint: "Sản phẩm, tồn kho, nhật ký kho" },
       { key: "inventory:write", label: "Nhập hàng & kiểm kê", hint: "Tạo / xoá phiếu nhập, điều chỉnh kiểm kê" },
+      /*
+        CỐ Ý TÁCH KHỎI `inventory:write`. Mọi lượt tái nhập hàng hoàn khác đều đứng trên một chứng
+        từ đối chiếu được: vận đơn, đơn hàng, số kỳ vọng. Lượt này thì không — nhãn đã mất, không
+        lần ra đơn nào, và toàn bộ căn cứ là lời khẳng định của người đang cầm món hàng rằng họ
+        nhận diện đúng mẫu mã. Đó là một quyết định kinh doanh, không phải một thao tác kho.
+
+        Người kho vẫn nhận kiện, vẫn đếm, vẫn tra đơn bằng `inventory:write`; chỉ bước cuối — cộng
+        vào tồn bán được mà không có chứng từ nào — mới cần quyền này.
+      */
+      { key: "inventory:restock-unidentified", label: "Tái nhập hàng hoàn không xác định nguồn", hint: "Cộng vào tồn món hàng hoàn không lần ra được đơn / vận đơn. Bắt buộc ghi lý do, có nhật ký." },
       { key: "planning:view", label: "Kế hoạch đặt hàng SX: xem", hint: "Đề xuất đặt hàng, bảng đặt hàng chốt" },
       { key: "planning:write", label: "Kế hoạch đặt hàng SX: lập bảng", hint: "Tạo / sửa / duyệt bảng đặt hàng gửi xưởng, sửa tham số" },
     ],
@@ -174,8 +184,17 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
+  /*
+    KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
+    cộng tồn cho món không có chứng từ nào là quyết định của người quản lý kho, và chủ shop cấp
+    thêm cho từng tài khoản khi muốn.
+
+    Vì lý do đó khoá này cũng KHÔNG nằm trong `PERMISSIONS_ADDED_AFTER_SNAPSHOT`: tài khoản có
+    danh sách quyền lưu từ trước sẽ KHÔNG tự nhận nó. Mọi nhánh mặc định của một quyền leo thang
+    phải rơi về phía HẸP HƠN.
+  */
   WAREHOUSE: [...VIEW_ALL, "inventory:write", "planning:write"],
   CS: [...VIEW_ALL, "cod:view", "cs:manage", "outreach:send", "landing:manage", "shipments:manage"],
   MARKETING: [...VIEW_ALL, "ideas:write", "expenses:view", "expenses:write", "reports:nominal", "reports:returns", "payroll:view-own"],
