@@ -113,7 +113,28 @@ export function orderPair<T extends { orderId: string; insertedAt: Date }>(a: T,
  * xảy ra trong vài giờ tới vài ngày. Cùng một khách mua lại cùng một mẫu sau ba tuần là KHÁCH QUAY
  * LẠI — thứ shop muốn có thêm, không phải thứ cần cảnh báo.
  *
- * 48 giờ là GIẢ THIẾT, chưa kiểm định trên phân bố thật của shop. Sửa được qua `settings`.
+ * ─── ĐÃ KIỂM ĐỊNH TRÊN DỮ LIỆU THẬT (15/09/2026, ops `db-query` CHỈ ĐỌC, run #1027) ───
+ *
+ * Mọi cặp đơn CÙNG SĐT trong toàn bộ lịch sử (2.872 đơn), tách theo tập mặt hàng:
+ *
+ *   loại        n    p50      p90      ≤6h   ≤48h   ≤7 ngày
+ *   cùng SKU    70   59,6h   194,7h     28     29      41
+ *   khác SKU    90  271,0h   715,4h     14     17      34
+ *
+ * Phân bố LƯỠNG CỰC rõ rệt, và nó xác nhận đúng giả thiết ban đầu:
+ *
+ *  · **28/29 cặp cùng-SKU nằm trong cửa sổ 48 giờ thực ra nằm gọn trong 6 GIỜ ĐẦU.** Mở cửa sổ từ
+ *    6h lên 48h chỉ thêm ĐÚNG MỘT cặp. Đó là chữ ký của trùng do THAO TÁC: bấm hai lần, lên đơn lại
+ *    thay vì sửa đơn, chat và landing cùng tạo đơn.
+ *  · Từ 48 giờ tới 7 ngày có thêm 12 cặp, và quá 7 ngày còn 29 cặp — trung vị của cả nhóm là 59,6
+ *    giờ nhưng p90 tới 194,7 giờ. Đó là KHÁCH QUAY LẠI, thứ shop muốn có thêm chứ không phải thứ
+ *    cần cảnh báo.
+ *  · Nhóm "khác SKU" có 17 cặp trong 48 giờ — và luật ở đây KHÔNG báo cái nào trong số đó, đúng như
+ *    chủ shop chốt. Đây là phép đo trực tiếp của phần dương-tính-giả đã tránh được.
+ *
+ * KẾT LUẬN: **giữ 48 giờ.** Nó phủ trọn cụm 6 giờ, chỉ thêm một cặp so với cửa sổ hẹp nhất, và để
+ * lại biên cho khách đặt lại sáng hôm sau sau một lần chuyển khoản hụt. Vẫn sửa được qua `settings`
+ * khoá `orders.duplicate-rule` mà không cần deploy.
  */
 export const DUPLICATE_WINDOW_HOURS = 48;
 export const DUPLICATE_SETTING_KEY = "orders.duplicate-rule";

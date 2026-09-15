@@ -8,6 +8,9 @@ import { SEVERITY_LABEL, SEVERITY_TONE, VALIDATION_GROUP_LABEL } from "@/lib/con
 import { DUPLICATE_VERDICT_LABEL, DUPLICATE_VERDICT_TONE } from "@/lib/constants/order-duplicate";
 import { getPreshipValidationQueue } from "@/lib/queries/preship-validation";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
+import { getPromisedDeliveryQueue } from "@/lib/queries/promised-delivery";
+import { PROMISED_STATE_LABEL, PROMISED_STATE_TONE } from "@/lib/constants/promised-delivery";
+import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Soát đơn trước khi gửi" };
@@ -28,7 +31,7 @@ export const metadata = { title: "Soát đơn trước khi gửi" };
  */
 export default async function PreshipPage() {
   await requirePermission("orders:read");
-  const [validation, duplicates] = await Promise.all([getPreshipValidationQueue(), getDuplicateOrderQueue()]);
+  const [validation, duplicates, promised] = await Promise.all([getPreshipValidationQueue(), getDuplicateOrderQueue(), getPromisedDeliveryQueue()]);
 
   return (
     <div className="space-y-5">
@@ -127,6 +130,44 @@ export default async function PreshipPage() {
             Đang hiện 200 đơn đầu trong tổng {formatNumber(validation.rows.length)} — làm hết nhóm này rồi tải lại.
           </p>
         ) : null}
+      </SectionCard>
+
+      {/* ─────────── Đơn khách hẹn ngày giao ─────────── */}
+      <SectionCard
+        title={`${formatNumber(promised.actionable)} đơn hẹn tới hạn hôm nay`}
+        description={`${formatNumber(promised.breached)} đã LỠ HẸN · ${formatNumber(promised.byState.FUTURE)} còn trong hẹn · ${formatNumber(promised.byState.DUE_SOON)} sắp tới ngày`}
+        hint="Đơn còn trong hẹn KHÔNG bị đếm là trễ ở cảnh báo và hàng đợi kho. Trước ngày hẹn một ngày nó TỰ quay lại — lời hẹn là đồng hồ ngược, không phải công tắc tàng hình."
+        padded={false}
+      >
+        {promised.rows.length === 0 ? (
+          <EmptyState
+            title="Không đơn nào đang có lời hẹn"
+            description="Ghi ngày khách hẹn ngay trên trang chi tiết đơn, ở khối dưới tiêu đề."
+            className="m-4"
+          />
+        ) : (
+          <ul className="divide-y">
+            {promised.rows.slice(0, 100).map((r) => (
+              <li key={r.orderId} className="flex flex-wrap items-center gap-2 px-5 py-2.5">
+                <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold", PROMISED_STATE_TONE[r.verdict.state])}>
+                  {PROMISED_STATE_LABEL[r.verdict.state]}
+                </span>
+                <Link href={`/orders/${r.orderId}`} className="font-semibold hover:underline">
+                  {r.orderLabel}
+                </Link>
+                <span className="text-[12.5px] text-muted-foreground">
+                  hẹn {r.verdict.promisedAt ? formatDate(r.verdict.promisedAt) : MISSING_TEXT} · {r.customer || MISSING_TEXT} · {r.phone || MISSING_TEXT} ·{" "}
+                  {formatVND(r.total)}
+                  {r.note ? ` · ${r.note}` : ""}
+                  {r.recordedBy ? ` · ${r.recordedBy} ghi` : ""}
+                </span>
+                {r.verdict.state === "BREACHED" || r.verdict.state === "DUE" ? (
+                  <span className="basis-full text-[12.5px] text-muted-foreground">{r.verdict.nextAction}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </SectionCard>
 
       {/* ─────────── Đơn nghi trùng ─────────── */}

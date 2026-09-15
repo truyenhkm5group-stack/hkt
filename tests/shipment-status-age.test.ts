@@ -33,8 +33,22 @@ import { clearMemo } from "@/lib/cache";
  */
 
 const H = 3_600_000;
+
+/*
+  HAI ĐỒNG HỒ, VÀ TRỘN CHÚNG LÀ MỘT BÀI KIỂM TỰ HỎNG THEO THỜI GIAN.
+
+  Phần THUẦN nhận `now` qua tham số, nên nó đóng băng được — và phải đóng băng, để kết quả không
+  phụ thuộc lúc chạy.
+
+  Phần CSDL gọi `getShipmentStatusAgeQueue()`, và hàm đó đọc đồng hồ THẬT. Bản đầu của bài này gieo
+  dữ liệu lệch theo `NOW` đóng băng rồi so với kết quả đo theo đồng hồ thật: hai mốc trùng nhau lúc
+  viết bài, rồi lệch dần đúng bằng thời gian trôi qua. Bài kiểm đỏ sau vài giờ mà mã nguồn không sai
+  một dòng nào — dạng hỏng tốn nhiều thời gian nhất để tìm.
+*/
 const NOW = new Date("2026-09-15T10:00:00.000Z");
 const gio = (h: number) => new Date(NOW.getTime() - h * H);
+/** Mốc lệch so với đồng hồ THẬT — chỉ dùng cho phần gieo dữ liệu vào CSDL. */
+const gioThat = (h: number) => new Date(Date.now() - h * H);
 
 function ev(stage: ShipmentStage | null, hoursAgo: number, source = "VTP_WEBHOOK"): DwellEvent {
   return { source, normalizedStage: stage, occurredAt: gio(hoursAgo) };
@@ -179,7 +193,7 @@ export async function testShipmentStatusAgeDb(db: Db) {
         shipProvince: "Hà Nội",
         totalPriceAfterDiscount: value,
         stage: "SHIPPED",
-        insertedAt: gio(500),
+        insertedAt: gioThat(500),
       })
       .onConflictDoNothing();
   }
@@ -199,7 +213,7 @@ export async function testShipmentStatusAgeDb(db: Db) {
         codAmount: cod,
         receiverName: `Khách ${id}`,
         receiverPhone: "0912000111",
-        createdAt: gio(400),
+        createdAt: gioThat(400),
         updatedAt: new Date(),
       })
       .onConflictDoNothing();
@@ -212,7 +226,7 @@ export async function testShipmentStatusAgeDb(db: Db) {
           source: e.source ?? "VTP_WEBHOOK",
           status: `st-${i++}`,
           statusName: e.stage ?? "không rõ",
-          occurredAt: gio(e.hoursAgo),
+          occurredAt: gioThat(e.hoursAgo),
           normalizedStage: e.stage,
         })
         .onConflictDoNothing();

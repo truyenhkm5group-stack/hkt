@@ -50,11 +50,51 @@ import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
  *     NGOÀI cohort và **số kiện rơi ra phải in ra cạnh bảng** — cùng luật với `carrier_handoff_at`
  *     (AGENTS.md mục 41) và cùng luật "CHƯA BIẾT không in thành 0" (mục 42).
  *
- * ─── NGƯỠNG LÀ GIẢ THIẾT CỦA NGƯỜI, KHÔNG PHẢI SỐ ĐO ───
+ * ─── NGƯỠNG LÀ GIẢ THIẾT CỦA NGƯỜI, VÀ ĐÃ ĐƯỢC ĐO LẠI ───
  *
- * Như bảng trọng số rủi ro trước khi giao, các ngưỡng dưới đây do người đặt theo hiểu biết nghiệp
- * vụ; chúng CHƯA được kiểm định trên phân bố thật của shop. Vì vậy chúng sửa được không cần deploy
- * (`settings` khoá `logistics.dwell-sla`), và mỗi ngưỡng bắt buộc có câu lý do.
+ * Các ngưỡng dưới đây do người đặt theo hiểu biết nghiệp vụ. Ngày 15/09/2026 chúng được ĐỐI CHIẾU
+ * với phân bố thật trên production (ops `db-query` CHỈ ĐỌC, runs #1024 và #1026), 406 kiện đang chạy:
+ *
+ *   chặng              n    đo được   p50     p75     p90     lớn nhất
+ *   RETURNING         165     149    33,4h   98,0h   240,8h    287h
+ *   PENDING           109     109    58,1h  122,8h   148,7h   5672h
+ *   IN_TRANSIT         80      80    37,2h   49,7h    49,9h    114,6h
+ *   DELIVERY_FAILED    33      33    31,4h   71,5h    98,7h    242,3h
+ *   OUT_FOR_DELIVERY   19      19    10,2h   33,2h   103,4h    170,7h
+ *
+ * Số kiện VƯỢT ngưỡng đang cài (cùng lượt đo):
+ *
+ *   chặng              n    quá hạn   cảnh báo   để mắt
+ *   RETURNING         166    24 (14%)    38        66
+ *   PENDING           109    42 (39%)   104 (95%) 104 (95%)
+ *   IN_TRANSIT         80     2 (2,5%)   40        46
+ *   DELIVERY_FAILED    33    24 (73%)    25        27
+ *   OUT_FOR_DELIVERY   18     7 (39%)     8        14
+ *
+ * ─── HAI ĐIỀU SỐ ĐO NÓI RA, VÀ CHÚNG KHÁC NHAU ───
+ *
+ * 1. **`PENDING` có ngưỡng HỎNG.** Mức "để mắt" (24h) và mức "cảnh báo" (48h) cùng bắt 104/109 kiện
+ *    — 95%, và hai mức KHÔNG phân biệt được nhau. Một mức cảnh báo bật trên 95% dân số không mang
+ *    một bit thông tin nào. Phân bố thật (p50 58h · p75 123h · p90 149h) nói rằng chờ bưu tá tới
+ *    lấy ~2,5 ngày là mặt bằng của shop này.
+ *
+ * 2. **`DELIVERY_FAILED` 73% quá hạn KHÔNG phải ngưỡng hỏng.** Ngưỡng 24 giờ đến thẳng từ yêu cầu
+ *    của chủ shop ("giao không thành công: xử lý trong 12–24h"), và trung vị thực tế là 31,4 giờ.
+ *    Con số ấy nói SHOP ĐANG CHẬM trên đúng nhóm cứu được nhiều tiền nhất, không nói cái thước sai.
+ *    Nới ngưỡng ở đây là bịt đồng hồ báo cháy cho đỡ ồn.
+ *
+ * `IN_TRANSIT` (2,5% quá hạn, p90 49,9h dưới ngưỡng 72h) là ngưỡng hiệu chỉnh tốt — giữ nguyên.
+ *
+ * ─── VÌ SAO MÃ NGUỒN KHÔNG TỰ SỬA CON SỐ NÀO ───
+ *
+ * Ngưỡng SLA là NGƯỠNG NGHIỆP VỤ, và `AGENTS.md` mục 7 buộc hỏi chủ shop trước khi đổi. Phân biệt
+ * hai câu trên — "cái thước sai" và "đội đang chậm" — là một quyết định kinh doanh, không phải một
+ * phép tính. Nên số đo nằm ở đây làm bằng chứng, còn con số vẫn nguyên và sửa được KHÔNG CẦN DEPLOY
+ * qua `settings` khoá `logistics.dwell-sla` (màn hình cấu hình: Công việc → Cấu hình).
+ *
+ * **Đề xuất chờ chủ shop quyết** — chỉ cho `PENDING`, theo đúng phân bố đo được:
+ *   để mắt 48h (≈ p50) · cảnh báo 96h (≈ p75) · ngoại lệ 168h (≈ p90+)
+ * Bốn chặng còn lại giữ nguyên.
  */
 
 /**
@@ -92,7 +132,10 @@ export const DWELL_SLA: Record<ShipmentStage, DwellThreshold | null> = {
     watch: 24,
     warning: 48,
     exception: 96,
-    why: "Kiện chưa rời kho: chậm vài ngày ở giờ cao điểm là chuyện thường, nhưng quá 4 ngày thì gói hàng có thể đã thất lạc ngay trong kho — và đây là nhóm cứu được TRỌN VẸN vì hàng vẫn trong tay shop.",
+    why:
+      "Kiện chưa rời kho: chậm vài ngày ở giờ cao điểm là chuyện thường, nhưng quá 4 ngày thì gói hàng có thể đã thất lạc ngay trong kho — " +
+      "và đây là nhóm cứu được TRỌN VẸN vì hàng vẫn trong tay shop. ĐO 15/09/2026: p50 58h, p75 123h, p90 149h — hai mức dưới cùng bắt " +
+      "104/109 kiện (95%) nên chúng đang KHÔNG phân biệt được nhau. Đề xuất 48/96/168 đang chờ chủ shop quyết (xem đầu tệp).",
   },
   PICKED_UP: {
     watch: 12,

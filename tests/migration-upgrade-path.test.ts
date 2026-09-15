@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets", "0093_landing_gap_reasons"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets", "0093_landing_gap_reasons", "0094_order_promised_delivery"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).

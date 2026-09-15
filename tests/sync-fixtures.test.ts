@@ -175,6 +175,7 @@ import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
 import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
+import { testPromisedDeliveryDb, testPromisedDeliveryPure } from "./promised-delivery.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
@@ -1600,6 +1601,7 @@ async function main() {
   testShipmentStatusAgePure();
   testOrderDuplicatePure();
   testPreshipValidationPure();
+  testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
@@ -1706,6 +1708,9 @@ async function main() {
   await testOrderDuplicateDb(db);
   // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `pval-` cố ý thiếu dữ liệu từng kiểu một.
   await testPreshipValidationDb(db);
+  // Cũng chạy CUỐI: bộ này gieo đơn mang tiền tố `prom-` và ĐỌC LẠI hàng đợi nút thắt kho để
+  // chứng minh vế lọc lời hẹn đổi đúng hành vi. Phải chạy SAU `testFulfillmentBottleneck`.
+  await testPromisedDeliveryDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);

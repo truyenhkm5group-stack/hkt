@@ -19,12 +19,16 @@ import { pancakeStatusName } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { getDb } from "@/db";
 import { getOrderDetail } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 import { getOrderValidation } from "@/lib/queries/preship-validation";
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/constants/preship-validation";
 import { PRE_SHIP_STAGES } from "@/lib/constants/pancake";
-import { requirePermission } from "@/lib/auth/session";
+import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-delivery";
+import { promisedVerdict } from "@/lib/constants/promised-delivery";
+import { vnDateKey } from "@/lib/format";
+import { can, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,7 +36,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("orders:read");
+  const user = await requirePermission("orders:read");
   const { id } = await params;
   // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
   // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
@@ -48,12 +52,21 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     Bỏ luôn lượt truy vấn cho nhóm đó: trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
   */
   const chuaGui = PRE_SHIP_STAGES.includes(order.stage);
-  const [timeline, erpHist, erpOther, prev, soat] = await Promise.all([
+  const [timeline, erpHist, erpOther, prev, soat, nguoiHen] = await Promise.all([
     getOrderTimeline(order.id),
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
     thieuThongTin ? previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : Promise.resolve(null),
     chuaGui ? getOrderValidation(order.id) : Promise.resolve(null),
+    /*
+      TÊN NGƯỜI GHI LỜI HẸN đọc từ `users` QUA KHOÁ (AGENTS.md mục 34) — không lấy từ một ô chữ nào.
+      Một lượt tra khoá chính, và chỉ khi đơn thật sự có lời hẹn.
+    */
+    order.customerPromisedByUserId && order.customerPromisedAt
+      ? getDb().then((db) =>
+          db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, order.customerPromisedByUserId!), columns: { name: true, email: true } }),
+        )
+      : Promise.resolve(null),
   ]);
   const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
   const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
@@ -92,6 +105,24 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </>
         }
       />
+
+      {/*
+        LỜI HẸN ĐỨNG NGAY DƯỚI TIÊU ĐỀ, TRÊN CẢ DẢI SOÁT.
+
+        Nó quyết định đơn này CÓ ĐANG TRỄ HAY KHÔNG, nên đọc nó trước rồi mới đọc phần còn lại thì
+        mọi con số phía dưới mới có nghĩa. Chỉ hiện với đơn chưa rời kho: hẹn một ngày giao cho
+        kiện đang trên đường là một con số không ai thực hiện được.
+      */}
+      {chuaGui ? (
+        <PromisedDelivery
+          orderId={order.id}
+          state={promisedVerdict(order.customerPromisedAt, new Date()).state}
+          promisedDate={order.customerPromisedAt ? vnDateKey(order.customerPromisedAt) : null}
+          note={order.customerPromisedNote}
+          recordedBy={nguoiHen ? nguoiHen.name || nguoiHen.email : null}
+          canWrite={can(user, "cs:manage")}
+        />
+      ) : null}
 
       {/*
         DẢI SOÁT ĐỨNG TRÊN CÙNG, TRƯỚC MỌI THỨ KHÁC — vì nó là thứ duy nhất trên trang này còn thay
