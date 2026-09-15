@@ -114,6 +114,12 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
                 </p>
               )}
 
+              <p className="mb-2 text-[11px] text-muted-foreground">
+                🟢 ở đây nghĩa là <span className="font-medium">ĐỦ DỮ LIỆU</span> để trả lời, không phải đã được phép làm. Quyền hạn là
+                khoá riêng ở nấc AI của page và ở chặn cứng cấp máy chủ ({" "}
+                <code className="font-mono">AI_ALLOW_CUSTOMER_SEND</code> · <code className="font-mono">AI_ALLOW_ORDER_CREATE</code>) — hai
+                khoá độc lập, và một khoá mở không mở hộ khoá kia.
+              </p>
               <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                 {SALES_CAPABILITIES.map((c) => {
                   const st = kienThuc.capabilities[c];
