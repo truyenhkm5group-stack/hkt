@@ -72,6 +72,19 @@ export async function syncFanpageRegistry(db?: Db): Promise<FanpageDiscovery> {
   const byExternal = new Map(existing.map((r) => [r.externalPageId, r]));
 
   // Tên page: chỉ thử khi có token; lỗi mạng / thiếu quyền KHÔNG được làm hỏng cả lượt đồng bộ.
+  /*
+    MỘT MỐC DUY NHẤT CHO CẢ LƯỢT LIỆT KÊ — không phải một mốc cho mỗi page.
+
+    SỰ CỐ THẬT (production 15/09/2026): mốc được tạo bằng `new Date()` NGAY TRONG vòng lặp, nên mỗi
+    page nhận một mốc lệch nhau vài mili giây. Trạng thái truy cập so mốc của page với mốc LỚN NHẤT
+    của cả bảng, nên chỉ page được ghi CUỐI CÙNG là `ACTIVE`; 12 page đang hoạt động bình thường bị
+    gắn nhãn "không còn quyền truy cập". Đo ngay sau khi triển khai: 1 ACTIVE / 14 HISTORICAL, trong
+    khi Pancake vẫn liệt kê 8 page trong số đó.
+
+    Mốc phải là mốc của LƯỢT LIỆT KÊ, vì đó chính là thứ câu hỏi muốn biết: "page này có trong lần
+    Pancake liệt kê gần nhất không".
+  */
+  const listedAt = new Date();
   let names = new Map<string, string>();
   try {
     const { getPancakePagesClient } = await import("@/lib/integrations/pancake/pages");
@@ -91,7 +104,7 @@ export async function syncFanpageRegistry(db?: Db): Promise<FanpageDiscovery> {
     const last = row.lastAt ? new Date(row.lastAt) : null;
     // Page có mặt trong lần liệt kê này ⇒ ghi mốc. Page KHÔNG có mặt thì mốc cũ giữ nguyên, và
     // chính khoảng cách giữa hai mốc là thứ suy ra "không còn quyền truy cập".
-    const seenNow = names.has(pageId) ? new Date() : null;
+    const seenNow = names.has(pageId) ? listedAt : null;
     const prior = byExternal.get(pageId);
     if (!prior) {
       await d.insert(F).values({ externalPageId: pageId, name, platform: "facebook", active: true, firstOrderAt: first, lastOrderAt: last, lastSeenInApiAt: seenNow }).onConflictDoNothing();
