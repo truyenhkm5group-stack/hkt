@@ -14,6 +14,8 @@ Phiên làm việc trên nhánh `claude/trusting-noether-fh23sk`, nối tiếp m
 | F01 | Đổi nguồn ghi nhận lương làm **hoa hồng biến mất** khỏi lợi nhuận | Chỉ khi chủ shop bật nguồn PAYROLL — nhưng bật là mất ngay |
 | F05 | Chốt kỳ không kiểm "đã trừ đủ chi phí chưa" | Rủi ro chốt trên số thiếu |
 | F06 | Hai yêu cầu chốt đồng thời có thể tạo hai kỳ FINAL chồng lấn | Chưa xảy ra — bịt trước |
+| F08a | Giá vốn HÀNG TẶNG bị loại ngay ở `WHERE`, không bao giờ vào lợi nhuận | Chưa — production có **0 dòng** hàng tặng, nên bịt trước khi nó tốn tiền |
+| F08b | Phí hoàn đọc từ `orders.return_fee` — cột **rỗng toàn bảng** | **CÓ** — **2.120.600 ₫** cước chiều hoàn thật đang nằm ngoài lợi nhuận |
 
 Ba lỗi F03/F04/F01 đều làm lợi nhuận **CAO HƠN** sự thật. Đó là chiều hỏng nguy hiểm hơn trừ hai
 lần: trừ hai lần làm lợi nhuận thấp đi nên có người thắc mắc, còn mất một khoản làm lợi nhuận cao
@@ -168,6 +170,51 @@ tính**, và việc cần làm là **tách ra chứ không xoá chứng từ** �
 
 ---
 
+## 2b. F08 — hai khoản chi phí thật nằm ngoài lợi nhuận
+
+### 2b.1 Giá vốn hàng tặng (chưa tốn gì hôm nay — bịt trước)
+
+Hàng tặng vẫn **trừ tồn như hàng bán** (AGENTS.md mục 10) và vẫn là tiền thật đã bỏ ra. Nhưng
+`productEconomics` loại nó ngay ở `WHERE` bằng `is_bonus = false`, nên giá vốn của nó không bao giờ
+vào lợi nhuận. Tặng càng nhiều thì lợi nhuận trông càng đẹp.
+
+**Đo trước khi sửa:** production hiện có **đúng 0 dòng** hàng tặng, nên bản vá **không đổi một con
+số nào hôm nay**. Đó chính là lúc rẻ nhất để sửa — ngày shop bắt đầu ghi hàng tặng thì khoản ấy sẽ
+biến mất mà không ai thấy, và khi đó sửa là phải giải thích cả một chuỗi kỳ đã chốt.
+
+Cách sửa: chuyển phép lọc từ `WHERE` vào **từng cột**, vì hai cột cần hai tập dòng khác nhau —
+doanh thu chỉ lấy dòng BÁN, giá vốn lấy CẢ dòng tặng. Ba thứ phải đúng cùng lúc và bài kiểm khoá
+cả ba: giá vốn phải tăng (3 cái × 70.000đ = 210.000đ, không phải 140.000đ) · doanh thu không tăng ·
+số đơn giao thành công không tăng lên 2.
+
+### 2b.2 Phí hoàn: đang đọc một cột rỗng toàn bảng
+
+```
+2.130 vận đơn · 281 không gắn đơn · 268 trong đó là chiều hoàn 1P1
+cước trên vận đơn không gắn đơn:        2.120.600 ₫
+tổng phí hoàn đọc từ orders.return_fee:         0 ₫
+```
+
+Thành phần `RETURN_COST` đọc `sum(orders.return_fee)` — cột ấy **bằng 0 trên toàn bảng**. Báo cáo
+in "phí hoàn = 0" nên ai đọc cũng hiểu là shop không tốn phí hoàn. Sự thật là **đọc nhầm cột**:
+2,1 triệu cước thật đang nằm trên 268 vận đơn chiều về và không được tính ở **bất cứ đâu**.
+
+Vì sao nó lọt: vận đơn chiều về là một dòng `shipments` **riêng** với `order_id` NULL và
+`order_reference` = mã gốc (AGENTS.md mục 7). Mọi truy vấn khác nối vận đơn qua `PRIMARY_ATTEMPT`
+trên `order_id`, nên dòng ấy nằm ngoài tầm với của tất cả.
+
+`lib/constants/cost-sources.ts` đã khai đúng thẩm quyền từ đầu — cước và phí hoàn thuộc **vận đơn /
+bảng kê ĐVVC**, không thuộc một cột trên bảng đơn. Bản này chỉ đọc đúng cái nguồn đã khai.
+
+**Mốc kỳ** là ngày chiều hoàn thật sự xảy ra (`delivered_at` → `returned_at` → `picked_up_at` →
+`created_at`), không phải ngày tạo đơn gốc: một đơn tháng trước hoàn về tháng này thì chi phí thuộc
+tháng này.
+
+**Chiều của thay đổi: chi phí TĂNG, lợi nhuận GIẢM** — ngược hẳn với bản vá F07 mà số đo đã chặn
+lại, và đó là dấu hiệu tốt: nó sửa một khoản đang bị bỏ sót chứ không nới một con số.
+
+---
+
 ## 3. F05 · F06 — chốt kỳ
 
 ### 3.1 Một bộ điều kiện dùng chung
@@ -307,7 +354,10 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    Bài `tests/payroll-cogs-cutoff.test.ts` khoá chênh lệch 400.000đ của ca dựng sẵn làm mốc, và
    mang theo cả ba con số production ở trên — để phiên sau không đi lại đúng con đường này.
 
-4. **F08 (hàng tặng, phí vận đơn hoàn / giao lại) chưa làm** trong bản này.
+4. **F08 đã làm phần hàng tặng và phí vận đơn chiều hoàn** (mục 2b). **Chưa làm:** phí của các
+   LẦN GIAO LẠI trên cùng một vận đơn, và việc quy phí chiều hoàn về từng MÃ HÀNG / từng marketer —
+   hiện nó mới được ghi nhận ở cấp shop. Quy về mã cần nối `order_reference` → vận đơn gốc → đơn,
+   một phép nối chưa có ở truy vấn này.
 
 5. **F09 (`/ads` 6,5 giây nguội) chưa làm** — xem mục 5.5 biên bản 14/09, ba giả thuyết đã bị bác
    bằng phép đo và bước tiếp theo đã ghi sẵn ở đó.
