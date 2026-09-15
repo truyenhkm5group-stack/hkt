@@ -50,17 +50,48 @@ const SHOP = "shop";
  * KHÔNG MỜI khi sổ kho đã nói mẫu này HẾT: đẩy khách đi tiếp một mẫu không có hàng là hẹn trước
  * một đơn huỷ.
  */
-function buocTiep(ctx: GenerationContext): string {
-  if (ctx.stockKnown && (ctx.available ?? 0) <= 0) return "";
+/**
+ * BƯỚC TIẾP ĐANG HỎI CÁI GÌ — trả về CHÍNH khoá mà bộ đếm "hỏi mãi một thứ" dùng.
+ *
+ * VÌ SAO PHẢI LÀ MỘT HÀM RIÊNG, KHÔNG PHẢI MỘT CHUỖI CÂU CHỮ.
+ *
+ * Bộ đếm `askCount` (dùng ở `decide.ts` để chuyển người khi máy bí) được tăng theo HÀNH ĐỘNG:
+ * `ASK_SIZE` tăng "size", `ASK_CONTACT` tăng "phone"… Nhưng từ khi có luật "trả lời trước, đẩy
+ * bước sau", một khách cứ hỏi thì hành động luôn là `ANSWER_QUESTION` — và câu hỏi size nằm trong
+ * phần ĐUÔI của câu trả lời, nên không lượt nào được đếm.
+ *
+ * Hậu quả: máy hỏi size mười lượt liền mà bộ đếm vẫn bằng 0, và lối thoát "hỏi mãi một thứ mà
+ * không xong thì chuyển người" không bao giờ nổ. Nên nơi SINH câu hỏi và nơi ĐẾM câu hỏi phải đọc
+ * cùng một hàm.
+ */
+export function nextStepKey(ctx: GenerationContext): "size" | "variant" | "phone" | "address" | null {
+  if (ctx.stockKnown && (ctx.available ?? 0) <= 0) return null;
   const thieu = new Set(ctx.missing);
   if (thieu.has("VARIANT")) {
-    if (!ctx.state.size && ctx.sizes.length) return ` Chị lấy size nào để em ghi giúp chị ạ (bên em có ${ctx.sizes.join(", ")})?`;
-    if (!ctx.state.color && ctx.colors.length) return ` Chị lấy màu nào để em ghi giúp chị ạ (bên em có ${ctx.colors.join(", ")})?`;
-    return " Chị chọn giúp em size và màu để em ghi đơn với ạ.";
+    if (!ctx.state.size && ctx.sizes.length) return "size";
+    if (!ctx.state.color && ctx.colors.length) return "variant";
+    return "variant";
   }
-  if (thieu.has("PHONE")) return " Chị cho em xin số điện thoại để em lên đơn giúp chị ạ.";
-  if (thieu.has("ADDRESS")) return " Chị cho em xin địa chỉ nhận hàng để em gửi hàng ạ.";
-  return "";
+  if (thieu.has("PHONE")) return "phone";
+  if (thieu.has("ADDRESS")) return "address";
+  return null;
+}
+
+function buocTiep(ctx: GenerationContext): string {
+  switch (nextStepKey(ctx)) {
+    case "size":
+      return ` Chị lấy size nào để em ghi giúp chị ạ (bên em có ${ctx.sizes.join(", ")})?`;
+    case "variant":
+      return !ctx.state.color && ctx.colors.length
+        ? ` Chị lấy màu nào để em ghi giúp chị ạ (bên em có ${ctx.colors.join(", ")})?`
+        : " Chị chọn giúp em size và màu để em ghi đơn với ạ.";
+    case "phone":
+      return " Chị cho em xin số điện thoại để em lên đơn giúp chị ạ.";
+    case "address":
+      return " Chị cho em xin địa chỉ nhận hàng để em gửi hàng ạ.";
+    default:
+      return "";
+  }
 }
 
 export function renderTemplate(ctx: GenerationContext): string {

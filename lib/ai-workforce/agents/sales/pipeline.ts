@@ -23,7 +23,7 @@ import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { checkContextualConfirmation } from "@/lib/ai-workforce/agents/sales/confirm";
 import { decide, type SalesDecision } from "@/lib/ai-workforce/agents/sales/decide";
-import { generateSystemPrompt, guardGeneratedText, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
+import { generateSystemPrompt, guardGeneratedText, nextStepKey, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
 import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { resolveProduct, type ProductResolution } from "@/lib/ai-workforce/agents/sales/resolve-product";
@@ -484,6 +484,15 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
     if (decision.action === "ASK_VARIANT") state = bumpAsk(state, "variant");
     if (decision.action === "ASK_CONTACT") state = bumpAsk(state, "phone");
     if (decision.action === "ASK_ADDRESS") state = bumpAsk(state, "address");
+    // CÂU TRẢ LỜI CŨNG HỎI — và câu hỏi ấy phải được đếm như mọi câu hỏi khác.
+    //
+    // Từ khi có luật "trả lời trước, đẩy bước sau", một khách cứ hỏi thì hành động luôn là
+    // ANSWER_QUESTION, còn câu hỏi size nằm ở phần đuôi. Không đếm nó thì máy hỏi size mười lượt
+    // liền mà bộ đếm vẫn bằng 0, và lối thoát "hỏi mãi một thứ thì chuyển người" không bao giờ nổ.
+    if (decision.action === "ANSWER_QUESTION") {
+      const khoa = nextStepKey(generation);
+      if (khoa) state = bumpAsk(state, khoa);
+    }
 
     // Chuyển người là hành động THẬT, đi qua đúng công cụ, kể cả ở nấc SHADOW.
     if (decision.action === "HANDOFF_HUMAN" && decision.handoffReason) {

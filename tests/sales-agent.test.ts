@@ -9,7 +9,7 @@ import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, 
 import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
-import { guardGeneratedText, moneyMentions, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
+import { guardGeneratedText, moneyMentions, nextStepKey, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
 import { classifySender, ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
 import { decide } from "@/lib/ai-workforce/agents/sales/decide";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai-workforce/agents/sales/pipeline";
@@ -385,6 +385,23 @@ export async function testSalesAgent(db: Db) {
   const hếtHàng = renderTemplate({ ...ctxNen, stockKnown: true, available: 0 });
   assert.ok(/hết/.test(hếtHàng), "hết hàng phải nói thẳng");
   assert.ok(!/số điện thoại|địa chỉ|size nào/.test(hếtHàng), "mẫu đã hết thì KHÔNG mời khách bước tiếp — đó là hẹn trước một đơn huỷ");
+
+  /*
+    4B-a-bis. NƠI SINH CÂU HỎI VÀ NƠI ĐẾM CÂU HỎI PHẢI ĐỌC CÙNG MỘT HÀM.
+
+    Bộ đếm "hỏi mãi một thứ" (lối thoát chuyển người khi máy bí) tăng theo HÀNH ĐỘNG. Nhưng từ khi
+    có luật trả-lời-trước, một khách cứ hỏi thì hành động luôn là ANSWER_QUESTION và câu hỏi size
+    nằm ở phần ĐUÔI — không lượt nào được đếm, nên máy hỏi mười lượt mà bộ đếm vẫn bằng 0.
+  */
+  assert.equal(nextStepKey(ctxNen), "size", "thiếu mẫu mã và chưa có size ⇒ bước tiếp là hỏi size");
+  assert.equal(nextStepKey({ ...ctxNen, state: stateWith({ productName: "x", quotedTotal: 524_000, size: "L" }) }), "variant", "có size rồi thì hỏi màu");
+  assert.equal(nextStepKey({ ...ctxNen, missing: ["PHONE", "ADDRESS"] }), "phone");
+  assert.equal(nextStepKey({ ...ctxNen, missing: ["ADDRESS"] }), "address");
+  assert.equal(nextStepKey({ ...ctxNen, missing: [] }), null, "không thiếu gì thì không hỏi gì");
+  assert.equal(nextStepKey({ ...ctxNen, stockKnown: true, available: 0 }), null, "mẫu đã hết thì không đẩy khách đi tiếp");
+  // Và khoá phải TRÙNG với thứ câu chữ thật sự hỏi — hai nơi lệch nhau thì bộ đếm đếm nhầm việc.
+  assert.match(renderTemplate(ctxNen), /size nào/);
+  assert.match(renderTemplate({ ...ctxNen, missing: ["PHONE", "ADDRESS"] }), /số điện thoại/);
 
   // 4B-b. Chưa có bảng số đo ⇒ KHÔNG xin chiều cao / cân nặng, mà mời khách chọn trong các size
   //       ERP thật sự đang bán. Xin số đo là hứa sẽ tra bảng.
