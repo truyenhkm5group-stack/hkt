@@ -418,6 +418,90 @@ async function main() {
   console.log(`   lượt gọi công cụ lên đơn  : ${an.goi_cong_cu_don}  ${zero(an.goi_cong_cu_don)}`);
   console.log(`   hội thoại có đơn          : ${an.da_tao_don}  ${zero(an.da_tao_don)}`);
   console.log(`   chặn cứng lúc chạy        : gửi tin ${aiEnv.hardLimits.allowCustomerSend ? "⛔ MỞ" : "✓ CẤM"} · tạo đơn ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
+
+  /*
+    ⑧ MƯỜI HAI CA ĐẠI DIỆN — CHỌN ĐỂ PHỦ, KHÔNG CHỌN ĐỂ ĐẸP.
+
+    In cuối cùng có chủ ý: log của GitHub bị cắt bớt khi dài, và phần bị cắt là phần ĐẦU. Thứ phải
+    sống sót là thứ người đọc cần nhất.
+
+    Máy KHÔNG tự dán nhãn tốt / tạm được / kém cho các ca này — đó là việc của người ở /ai/review,
+    và một mô hình tự chấm chính nó sẽ chấm cao đúng những chỗ nó sai giống nhau. Việc của script
+    là chọn ra một tập PHỦ ĐƯỢC không gian: mỗi hành động một ca, mỗi loại chuyển người một ca, ca
+    có cờ an toàn, ca nguồn TEST, và ca máy thấy khó nhất (độ tin thấp nhất).
+  */
+  const ca = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      with lan_cuoi as (
+        select distinct on (s.conversation_id)
+               s.conversation_id, s.action, s.confidence, s.suggested_reply, s.created_at
+        from sales_suggestions s
+        where s.conversation_id in (${dsSql}) and s.created_at >= ${tuKhi}
+        order by s.conversation_id, s.created_at desc
+      )
+      select c.id, c.source_type, c.stage,
+             l.action, l.confidence, l.suggested_reply as may,
+             coalesce(r.decision->>'handoffReason','') as ly_do,
+             m.text as khach,
+             (select text from sales_messages h
+                where h.conversation_id = c.id and h.from_page = true and btrim(h.text) <> ''
+                order by h.sent_at asc limit 1) as nguoi
+      from sales_conversations c
+      join lan_cuoi l on l.conversation_id = c.id
+      join lateral (
+        select text from sales_messages
+        where conversation_id = c.id and from_page = false and btrim(text) <> ''
+        order by sent_at desc nulls last limit 1
+      ) m on true
+      left join lateral (
+        select decision from ai_runs
+        where subject_id = c.id and subject_type = 'CONVERSATION' and created_at >= ${tuKhi}
+        order by started_at desc limit 1
+      ) r on true
+      where c.id in (${dsSql})
+    `),
+  );
+
+  const daChon = new Set<string>();
+  const chon: { vi: string; r: Record<string, unknown> }[] = [];
+  const them = (vi: string, r: Record<string, unknown> | undefined) => {
+    if (!r || chon.length >= 12) return;
+    const key = String(r.id);
+    if (daChon.has(key)) return;
+    daChon.add(key);
+    chon.push({ vi, r });
+  };
+  // ① một ca cho MỖI hành động máy đã chọn — đây là chiều phủ quan trọng nhất.
+  for (const hd of [...new Set(ca.map((r) => String(r.action ?? "")))].sort()) {
+    them(`hành động ${hd}`, ca.find((r) => String(r.action ?? "") === hd));
+  }
+  // ② một ca cho MỖI loại chuyển người đã xảy ra.
+  for (const r of ca) {
+    const raw = String(r.ly_do ?? "");
+    if (!raw || !(HANDOFF_REASONS as readonly string[]).includes(raw)) continue;
+    const loai = classifyHandoff(raw as HandoffReason);
+    if (loai) them(`chuyển người · ${HANDOFF_CLASS_LABEL[loai]} (${raw})`, r);
+  }
+  // ③ ca có cờ an toàn bật — nếu có, đây là ca đáng đọc nhất cả mẻ.
+  for (const r of ca) {
+    const co = safetyFlags({ text: String(r.may ?? ""), allowedAmounts: [], mentionedAmounts: [], stockKnown: false, sizeChartAvailable: false });
+    if (co.length) them(`⛔ cờ an toàn: ${co.map((c) => SAFETY_FLAG_LABEL[c]).join(", ")}`, r);
+  }
+  // ④ nguồn TEST phải có mặt: nó chứng minh dữ kiện của mã WIN KHÔNG rò sang.
+  them("nguồn TEST (kiểm rò dữ kiện)", ca.find((r) => String(r.source_type ?? "").toUpperCase().includes("TEST")));
+  // ⑤ ca máy thấy KHÓ nhất.
+  them("máy thấy khó nhất (độ tin thấp nhất)", [...ca].filter((r) => r.confidence !== null).sort((a, b) => Number(a.confidence) - Number(b.confidence))[0]);
+  // ⑥ còn chỗ thì lấp bằng ca chưa chọn, để đủ 12.
+  for (const r of ca) them("phủ thêm", r);
+
+  console.log(`\n⑧ ${chon.length} CA ĐẠI DIỆN — chọn để PHỦ; nhãn tốt/tạm/kém là việc của người ở /ai/review`);
+  for (const { vi, r } of chon) {
+    console.log(`\n   ── ${vi} · ${String(r.source_type || "?")} · ${String(r.stage || "?")} ──`);
+    console.log(`   KHÁCH : ${cat(che(String(r.khach ?? "")), 170)}`);
+    console.log(`   NGƯỜI : ${cat(che(String(r.nguoi ?? "(chưa trả lời)")), 170)}`);
+    console.log(`   MÁY   : ${cat(che(String(r.may ?? "(không sinh gợi ý)")), 240)}`);
+    console.log(`   →       ${String(r.action ?? "—")}${String(r.ly_do) ? ` · chuyển người ${r.ly_do}` : ""} · tin cậy ${r.confidence ?? "—"}`);
+  }
   process.exit(0);
 }
 
