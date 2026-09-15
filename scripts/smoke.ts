@@ -266,10 +266,17 @@ async function docThan(response: Response, hanMs: number): Promise<{ text: strin
       if (conLai <= 0) return { text, complete: false };
       // Chạy đua giữa "khối tiếp theo" và "hết giờ" — `reader.read()` không tự có hạn chờ, và một
       // ranh giới Suspense treo hẳn sẽ không bao giờ trả về.
+      //
+      // Đồng hồ phải được GỠ sau mỗi vòng. Để nó sống thì mỗi khối dữ liệu bỏ lại một hẹn giờ 60
+      // giây còn treo kèm closure của nó — trang 2,9 MB về theo hàng nghìn khối là hàng nghìn hẹn
+      // giờ nằm trong bộ nhớ, trên đúng cái VPS 2 GB mà phép đo này đang chạy.
+      let dongHo: ReturnType<typeof setTimeout> | undefined;
       const ketQua = await Promise.race([
         reader.read(),
-        new Promise<"HET_GIO">((resolve) => setTimeout(() => resolve("HET_GIO"), conLai)),
-      ]);
+        new Promise<"HET_GIO">((resolve) => {
+          dongHo = setTimeout(() => resolve("HET_GIO"), conLai);
+        }),
+      ]).finally(() => clearTimeout(dongHo));
       if (ketQua === "HET_GIO") return { text, complete: false };
       if (ketQua.done) return { text: text + decoder.decode(), complete: true };
       text += decoder.decode(ketQua.value, { stream: true });
