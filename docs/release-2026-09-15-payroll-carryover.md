@@ -408,6 +408,18 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    chuyện phải xảy ra — và đó là bằng chứng độc lập thứ hai cho chẩn đoán sự cố deploy #302 ở trên,
    bên cạnh việc diff của đợt ấy không có đường nào ném ngoại lệ.
 
+   **CẬP NHẬT cuối phiên — đã tìm ra vì sao không tách được, và đã sửa dụng cụ.** Lý do thật không
+   nằm ở `ops perf` mà ở chính smoke: nó dừng đồng hồ tại `fetch`, tức ở **đầu** phản hồi, nên mọi
+   con số hiệu năng của `/ads` (và của 53 trang còn lại) là thời gian tới đầu phản hồi chứ không
+   phải thời gian tải xong trang. `/ads` được ghi `SUCCESS 102ms` trong khi cả lượt 54 trang đốt
+   269 giây. Xem "Sự cố deploy #305" ở mục 7.
+
+   Commit `9d9e724` sửa phép đo. **Bước tiếp theo của F09 giờ rẻ hơn hẳn:** đọc bản ghi smoke của
+   lần deploy kế tiếp, cột `đầu phản hồi … · thân …` sẽ chỉ thẳng `/ads` chậm ở ĐẦU (truy vấn chặn
+   trước khi trang kịp bắt đầu) hay ở THÂN (một ranh giới `Suspense` chảy lâu) — hai chỗ sửa khác
+   nhau, và trước đây không cách nào phân biệt được. Vẫn CHƯA sửa `/ads`; chỉ là lần dò sau không
+   còn phải đoán.
+
 6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
    nếu có người đang mang lỗ từ trước mốc ấy thì khai số dư mở sổ đích danh. Chưa khai thì sổ
    KHÔNG ÁP DỤNG và bảng lương chạy y như trước — không con số nào đổi.
@@ -482,6 +494,63 @@ lương trên lợi nhuận chưa trừ lương — chỉ vì một sự cố h�
 
 **Và cổng deploy đã làm đúng việc của nó:** nó từ chối báo thành công khi smoke thấy màn hình lỗi,
 kể cả khi lỗi ấy là nhiễu. Thà dừng nhầm còn hơn báo xanh nhầm.
+
+### Sự cố deploy #305 — cùng bệnh, và lần này tìm ra nguyên nhân gốc
+
+Deploy #305 (SHA `fffbac3`) cũng **báo thất bại**: `/payroll` quá hạn 60 giây, `/ads` mang lỗi máy
+chủ trong gói RSC, 27 trang chưa kiểm vì vỡ ngân sách 300 giây.
+
+Lần này bản hoà có cả phần landing của phiên khác, nên KHÔNG được giả định là nhiễu. Bằng chứng
+quyết định nằm ở chính lịch sử kho mã:
+
+```
+git diff --stat 4e5977d fffbac3
+ docs/release-2026-09-15-payroll-carryover.md | 15 +++++++++++++--
+```
+
+Toàn bộ khác biệt giữa deploy **#304 (xanh)** và deploy **#305 (đỏ)** là **13 dòng thêm, 2 dòng bớt
+trong một tệp Markdown**. Tệp tài liệu không được biên dịch vào ứng dụng và không màn hình nào
+`import` nó. Bản ghi #304 trên đúng cây mã ấy:
+
+```
+✓ /ads     [SUCCESS] 2689kB (102ms)
+✓ /payroll [SUCCESS]  288kB (110ms)
+[smoke] 54/54 đạt · 0 lỗi ứng dụng · 0 chậm · 0 quá hạn (cả lượt chạy 269s)
+```
+
+Deploy **#306** (SHA `30aaade`, sau đó) cũng xanh. Hai lượt xanh kẹp hai bên một lượt đỏ, trên cùng
+một cây mã chạy.
+
+**NHƯNG lần này không dừng ở "nhiễu hạ tầng".** Một con số trong chính bản ghi XANH của #304 mới là
+nguyên nhân gốc:
+
+> 54 trang, tổng thời gian báo cáo **5,6 giây** — trong khi cả lượt chạy mất **269 giây**.
+
+**263 giây, tức 97,9% thời gian thật, nằm ngoài mọi con số mà phép đo in ra.**
+
+Nguyên nhân: `fetch` hoàn tất khi **đầu** phản hồi về, còn thân trang RSC chảy về sau theo từng ranh
+giới Suspense. `scripts/smoke.ts` dừng đồng hồ ngay tại `fetch`, nên:
+
+1. **Lá chắn hiệu năng mù đúng ở chỗ nó sinh ra để canh.** Ngưỡng `SLOW_MS` = 2 giây đang xét mốc
+   đầu phản hồi, nên một trang chảy ba mươi giây vẫn được ghi `SUCCESS 74ms`. Đây cũng là lý do
+   lượt dò **F09** (`/ads` chậm) trước đó không tách được gì: dụng cụ đang đo nhầm đại lượng.
+2. **Cả lượt chạy chạm trần ngân sách** (269/300 — còn 31 giây dự phòng) mà không con số nào chỉ ra
+   trang nào đốt hết. Máy chủ bận thêm chút là vỡ ngân sách → các trang còn lại ghi BỎ QUA → deploy
+   ĐỎ trong khi ứng dụng chạy tốt. **#302 và #305 đều đỏ theo đúng đường này.**
+
+Đã sửa (commit `9d9e724`): đồng hồ dừng **sau** `await response.text()`; giữ riêng `ttfbMs` vì
+"đầu 102ms · thân 28,4s" (ranh giới Suspense chảy lâu) và "đầu 9,8s · thân 0,1s" (truy vấn chặn
+trước khi trang kịp bắt đầu) là hai bệnh khác nhau, hai chỗ sửa khác nhau; trang quá hạn nay nói rõ
+treo ở ĐẦU hay ở THÂN; và thêm một dòng **tự khai phần nằm ngoài phép đo** — chính vì thiếu nó mà
+263 giây đi lạc qua nhiều lượt deploy liền mà không ai thấy.
+
+`tests/smoke-timing.test.ts` khoá thứ tự ấy ở mức mã nguồn: `const ms = Date.now() - started` phải
+nằm SAU `await response.text()`, và `SLOW_MS` phải xét con số cả trang.
+
+Con số các trang sẽ **xấu đi** so với bản trước. Đó là vì phép đo bắt đầu nói thật, không phải vì
+ứng dụng vừa chậm lại — cùng nguyên tắc với luật 45: con số chưa biết TĂNG sau khi thôi khẳng định
+thứ không chứng minh được là ĐÚNG HƯỚNG. `SLOW` vẫn KHÔNG chặn deploy, nên thay đổi này không thể
+làm đỏ một lần phát hành đang xanh.
 
 ---
 
