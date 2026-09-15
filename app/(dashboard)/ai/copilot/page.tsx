@@ -4,12 +4,12 @@ import { Card } from "@/components/ui/card";
 import { SendCard } from "@/app/(dashboard)/ai/copilot/send-card";
 import { SALES_ACTION_LABEL, SALES_STAGE_LABEL, HANDOFF_REASON_LABEL, type HandoffReason, type SalesAction, type SalesStage } from "@/lib/constants/sales-agent";
 import { AGENT_MODE_LABEL, modeAtLeast } from "@/lib/constants/ai";
-import { COPILOT_REJECT_LABEL, type CopilotRejectReason } from "@/lib/constants/sales-copilot";
+import { COPILOT_REJECT_LABEL, COPILOT_WARNING_LABEL, type CopilotRejectReason } from "@/lib/constants/sales-copilot";
 import { getAiSettings } from "@/lib/ai-workforce/config";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { requirePermission } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { copilotKpi, copilotPages, copilotQueue } from "@/lib/queries/sales-copilot";
 
 export const metadata = { title: "Hàng đợi trợ lý AI" };
@@ -77,8 +77,33 @@ export default async function CopilotPage() {
           <Stat label="Tỷ lệ dùng được" value={kpi.acceptanceRate === null ? "—" : `${kpi.acceptanceRate}%`} />
           <Stat label="Thời gian soát (trung vị)" value={kpi.medianReviewSeconds === null ? "—" : `${kpi.medianReviewSeconds}s`} />
         </div>
+        {/*
+          LẦN GỬI ĐẦU TIÊN DO NGƯỜI BẤM là phép thử đầu-cuối trên khách thật. Chưa có nghĩa là CHƯA
+          CHỨNG MINH — trạng thái hợp lệ để bắt đầu, nhưng phải in ra chứ không im lặng.
+        */}
+        <p className={`mt-2 rounded p-2 text-[11px] ${kpi.firstHumanSend.pending ? "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" : kpi.firstHumanSend.verified === true ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200" : "bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200"}`}>
+          {kpi.firstHumanSend.pending ? (
+            <>
+              <strong>CHỜ LẦN GỬI ĐẦU TIÊN.</strong> Chưa nhân viên nào bấm Gửi, nên phép thử đầu-cuối trên khách thật chưa
+              chạy. Lần đầu có người bấm, hệ thống sẽ tự đọc lại hội thoại từ Pancake và đếm xem tin ấy có mặt đúng một lần.
+            </>
+          ) : (
+            <>
+              <strong>Lần gửi đầu tiên:</strong> {kpi.firstHumanSend.at ? formatDateTime(kpi.firstHumanSend.at) : "—"} ·{" "}
+              {kpi.firstHumanSend.by || "—"} · kiểm lại:{" "}
+              {kpi.firstHumanSend.verified === true ? "ĐẠT (đúng một bản)" : kpi.firstHumanSend.verified === false ? "⛔ KHÔNG ĐẠT" : "chưa kiểm được"}
+              {kpi.firstHumanSend.note ? ` · ${kpi.firstHumanSend.note}` : ""}
+            </>
+          )}
+        </p>
+        {kpi.duplicateSends > 0 ? (
+          <p className="mt-1 rounded bg-rose-50 p-2 text-[11px] font-semibold text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
+            ⛔ {formatNumber(kpi.duplicateSends)} lần gửi đọc lại thấy NHIỀU HƠN MỘT bản — dừng thí điểm và kiểm tra Pancake.
+          </p>
+        ) : null}
         <p className="mt-2 text-[11px] text-muted-foreground">
           Tin THẬT SỰ đã rời khỏi ERP: <strong>{formatNumber(kpi.actuallySent)}</strong>
+          {kpi.sentWithWarnings ? ` · ${formatNumber(kpi.sentWithWarnings)} lần người bấm gửi trong lúc hệ thống báo thiếu dữ liệu` : ""}
           {kpi.failedSends ? ` · ${formatNumber(kpi.failedSends)} lượt gửi hỏng` : ""} · đọc từ sổ thao tác, không suy từ cờ nào.
           {kpi.rejectReasons.length ? ` · Lý do từ chối nhiều nhất: ${kpi.rejectReasons.slice(0, 3).map((r) => `${COPILOT_REJECT_LABEL[r.reason as CopilotRejectReason] ?? r.reason} (${r.n})`).join(" · ")}` : ""}
         </p>
@@ -102,6 +127,7 @@ export default async function CopilotPage() {
             <Badge>{row.sourceType || "?"}</Badge>
             <Badge>{SALES_STAGE_LABEL[row.stage as SalesStage] ?? row.stage}</Badge>
             {row.productName ? <Badge>{row.productName}</Badge> : <Badge tone="warn">chưa nhận ra sản phẩm</Badge>}
+            {row.waitedMinutes === null ? null : <Badge tone={row.waitedMinutes > 60 ? "hot" : undefined}>chờ {row.waitedMinutes} phút</Badge>}
             <span className="text-muted-foreground">page {row.pageId}</span>
             <Link href={`/ai/review?conversation=${row.conversationId}`} className="ml-auto text-muted-foreground underline">
               xem lượt chạy
@@ -132,8 +158,29 @@ export default async function CopilotPage() {
                 </p>
               ) : null}
               <EntityList entities={row.entities} />
+              <FactList facts={row.facts} />
             </div>
           </div>
+
+          {/*
+            CẢNH BÁO ĐỨNG TRÊN Ô SOẠN, KHÔNG NẰM DƯỚI.
+
+            Người trực đọc từ trên xuống rồi bấm. Một dòng "chưa có bảng số đo" đặt dưới nút Gửi là
+            một dòng không ai đọc. Máy đã bị chặn không đoán; chỗ này để NGƯỜI biết mình đang bấm
+            trong lúc thiếu gì — và hệ thống ghi lại việc đó.
+          */}
+          {row.warnings.length ? (
+            <div className="space-y-0.5 rounded border border-amber-500/60 bg-amber-50 p-2 dark:bg-amber-950/40">
+              {row.warnings.map((w) => (
+                <p key={w} className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                  ⚠ {COPILOT_WARNING_LABEL[w] ?? w}
+                </p>
+              ))}
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                Chị/anh vẫn sửa tay rồi gửi được — hệ thống ghi lại là đã gửi trong lúc thiếu dữ kiện này.
+              </p>
+            </div>
+          ) : null}
 
           <div className="space-y-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Máy soạn</p>
@@ -170,6 +217,42 @@ function Badge({ children, tone }: { children: React.ReactNode; tone?: "warn" | 
         ? "border-amber-500 text-amber-700 dark:text-amber-300"
         : "border-border text-muted-foreground";
   return <span className={`rounded border px-1.5 py-0.5 text-[11px] ${cls}`}>{children}</span>;
+}
+
+/**
+ * DỮ KIỆN MÁY CHỦ ĐÃ DÙNG — ảnh chụp lúc soạn câu, không tính lại lúc mở màn hình.
+ *
+ * Đây là thứ nhân viên cần để quyết bấm hay không: câu chữ thì họ đọc được, còn con số đằng sau nó
+ * thì chỉ tin được khi nhìn thấy. Tiền in ba vai riêng (hàng · ship · tổng) vì ba con số ấy phải
+ * cộng được với nhau — gộp lại là chỗ một báo giá sai ra đời.
+ */
+function FactList({ facts }: { facts: Record<string, unknown> }) {
+  const so = (k: string) => (typeof facts[k] === "number" ? (facts[k] as number) : null);
+  const mang = (k: string) => (Array.isArray(facts[k]) ? (facts[k] as unknown[]).map(String).filter(Boolean) : []);
+  const tong = so("quotedTotal");
+  const ship = so("shippingFee");
+  const hang = so("goodsTotal");
+  const sizes = mang("sizes");
+  const colors = mang("colors");
+  if (tong === null && !sizes.length && !colors.length) return null;
+  return (
+    <div className="space-y-0.5 border-t border-border/60 pt-1">
+      {tong === null ? (
+        <p className="text-muted-foreground">Giá: CHƯA TÍNH ĐƯỢC</p>
+      ) : (
+        <p>
+          Tiền hàng {hang === null ? "—" : formatVND(hang)} · ship {ship === null ? "—" : formatVND(ship)} ·{" "}
+          <strong>tổng {formatVND(tong)}</strong>
+        </p>
+      )}
+      {colors.length ? <p className="text-muted-foreground">Màu: {colors.join(", ")}</p> : null}
+      {sizes.length ? <p className="text-muted-foreground">Size đang bán: {sizes.join(", ")}</p> : null}
+      <p className="text-muted-foreground">
+        Tồn: {facts.stockKnown === true ? `biết (${so("available") ?? "—"})` : "CHƯA BIẾT"} · Bảng số đo:{" "}
+        {facts.sizeCode === null || facts.sizeCode === undefined ? "chưa hỏi tới" : String(facts.sizeCode)}
+      </p>
+    </div>
+  );
 }
 
 /** Thực thể máy bóc ra — chỉ hiện ô CÓ giá trị, để mắt người đọc không phải lọc chỗ trống. */

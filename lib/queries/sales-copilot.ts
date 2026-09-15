@@ -5,8 +5,9 @@
  * kiểm thử quét lại được ở mức mã nguồn.
  */
 import { desc, eq, sql } from "drizzle-orm";
+import { loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { getDb, schema, type Db } from "@/db";
-import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_SUGGESTION_TTL_MINUTES } from "@/lib/constants/sales-copilot";
+import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -59,13 +60,19 @@ export type CopilotQueueRow = {
   missing: string[];
   intents: string[];
   entities: Record<string, unknown>;
-  /** Dữ kiện MÁY CHỦ đã dùng để soạn câu — hiện cạnh câu để người soát đối chiếu được. */
-  facts: Record<string, unknown>;
+  /** Cờ dữ kiện của bước QUYẾT ĐỊNH (đã có SĐT chưa, đã có địa chỉ chưa…). */
+  decisionFacts: Record<string, unknown>;
   suggestedAt: Date | null;
   /** Câu này còn gửi được không, và nếu không thì vì sao. */
   stale: string | null;
-  /** Khách đã nhắn và CHƯA ai đáp — bậc ưu tiên cao nhất của hàng đợi. */
+  /** Khách đã nhắn và CHƯA ai đáp — điều kiện để một hội thoại có mặt trong hàng đợi. */
   waitingForReply: boolean;
+  /** Khách đã chờ bao nhiêu phút. Xếp hàng theo con số này: ai chờ lâu nhất lên trước. */
+  waitedMinutes: number | null;
+  /** ẢNH CHỤP dữ kiện máy chủ đã dùng lúc soạn câu — không tính lại lúc đọc. */
+  facts: Record<string, unknown>;
+  /** Đang thiếu gì. Hiện TRÊN thẻ, trước khi nhân viên bấm. */
+  warnings: CopilotWarning[];
   /** Ai đã xử lý câu này rồi (rỗng = chưa ai). */
   handledAction: string;
   handledBy: string;
@@ -122,7 +129,7 @@ export async function copilotQueue(
     await db.execute(sql`
       with moi_nhat as (
         select distinct on (s.conversation_id)
-               s.id, s.conversation_id, s.run_id, s.suggested_reply, s.action, s.confidence, s.created_at
+               s.id, s.conversation_id, s.run_id, s.suggested_reply, s.action, s.confidence, s.created_at, s.facts_json
         from sales_suggestions s
         where s.conversation_id in (select id from sales_conversations where page_id in (${sql.join(pages.map((p) => sql`${p}`), sql`, `)}))
           -- KHÔNG có câu thì không có việc: một thẻ với ô soạn rỗng chỉ làm dài hàng đợi.
@@ -139,6 +146,7 @@ export async function copilotQueue(
              c.human_takeover_at, c.takeover_by_user_id,
              coalesce(p.name, '')                            as product_name,
              coalesce(m.suggested_reply, '')                 as suggested_reply,
+             m.facts_json                                    as facts_json,
              coalesce(m.action, '')                          as action,
              m.confidence, m.created_at                      as suggested_at,
              coalesce(t.text, '')                            as customer_message,
@@ -180,17 +188,27 @@ export async function copilotQueue(
         where suggestion_id = m.id and action in ('SEND','EDIT_SEND','REJECT') and send_status <> 'FAILED'
         order by created_at desc limit 1
       ) a on true
-      /*
-        NGƯỜI ĐÃ CẦM HỘI THOẠI THÌ NÓ RỜI HÀNG ĐỢI — trừ hội thoại của CHÍNH người đang xem.
 
-        Đây là yêu cầu "không spam nhân viên bằng gợi ý mới sau mỗi tin khi đang tiếp quản". Nhưng
-        giấu hẳn thì người đang cầm mất luôn nút TRẢ LẠI cho máy, và hội thoại kẹt ở trạng thái ấy
-        vĩnh viễn. Nên: ẩn với mọi người khác, hiện với chính chủ.
-      */
       where (c.human_takeover_at is null or c.takeover_by_user_id = ${options.heldByUserId ?? null})
         -- KHÔNG có tin khách thật thì không có việc: một hội thoại chỉ gồm thông báo quảng cáo
         -- không phải một người đang chờ được trả lời.
         and t.sent_at is not null
+        /*
+          NHÂN VIÊN ĐÃ ĐÁP SAU LƯỢT ẤY RỒI THÌ KHÔNG CÒN LÀ VIỆC.
+
+          Trước đây những dòng này vẫn hiện, chỉ xếp xuống cuối. Nhưng "xuống cuối" vẫn là một thẻ
+          nhân viên phải đọc và bỏ qua — và với một tồn đọng vài chục hội thoại thì phần lớn công
+          sức đọc hàng đợi rơi vào những việc đã xong.
+        */
+        and (nv.luc is null or nv.luc < t.sent_at)
+        /*
+          VÀ QUÁ CŨ THÌ CŨNG RỜI ĐI.
+
+          Hàng đợi xếp người chờ LÂU NHẤT lên trước, nên không có mốc cắt thì một tồn đọng vài ngày
+          sẽ đẩy các cuộc nguội ngắt lên đầu và chôn người vừa nhắn xuống dưới. Mốc này cũng trùng
+          cửa sổ 24 giờ của Facebook: quá đó phần lớn là không nhắn lại được nữa.
+        */
+        and t.sent_at >= now() - (${COPILOT_QUEUE_RELEVANT_HOURS} || ' hours')::interval
       /*
         THỨ TỰ HÀNG ĐỢI — ĐỂ NGƯỜI TRỰC MỞ RA LÀ THẤY VIỆC ĐÁNG LÀM NHẤT Ở TRÊN CÙNG.
 
@@ -204,22 +222,43 @@ export async function copilotQueue(
         Bậc 3: mới nhất trước. Trả lời một người vừa nhắn năm phút trước có ích hơn một người nhắn
         từ hôm qua — người hôm qua nhiều khả năng đã bỏ đi hoặc đã được nhân viên trả lời.
       */
+      /*
+        AI CHỜ LÂU NHẤT THÌ ĐƯỢC TRẢ LỜI TRƯỚC — trong số những cuộc CÒN ĐÁNG TRẢ LỜI.
+
+        Đây là xếp hàng theo thứ tự đến, như mọi quầy phục vụ. Một người đợi bốn mươi phút gấp hơn
+        một người vừa nhắn hai phút, bất kể họ hỏi gì; mốc cắt 24 giờ ở trên mới là thứ giữ cho
+        "lâu nhất" không có nghĩa là "nguội nhất".
+
+        Ý ĐỊNH chỉ phá hoà: hai người chờ xấp xỉ bằng nhau thì phục vụ người sắp mua trước. Xếp ý
+        định lên trên thời gian chờ sẽ để một người hỏi bâng quơ ngồi đợi mãi vì luôn có người khác
+        "đáng giá hơn" chen lên.
+      */
       order by
-        (nv.luc is null or nv.luc < t.sent_at) desc,
+        t.sent_at asc nulls last,
         case
           when r.understanding->'intents' @> '["PURCHASE_INTENT"]'::jsonb or r.understanding->'intents' @> '["CONFIRM"]'::jsonb then 1
-          when r.understanding->'intents' @> '["PRICE_QUESTION"]'::jsonb
-            or r.understanding->'intents' @> '["SIZE_QUESTION"]'::jsonb
-            or r.understanding->'intents' @> '["STOCK_QUESTION"]'::jsonb
-            or r.understanding->'intents' @> '["SHIPPING_QUESTION"]'::jsonb
-            or r.understanding->'intents' @> '["PRODUCT_QUESTION"]'::jsonb then 2
-          when r.understanding->'intents' @> '["OBJECTION"]'::jsonb then 3
-          else 4
-        end,
-        t.sent_at desc nulls last
+          when r.understanding->'intents' @> '["PRICE_QUESTION"]'::jsonb then 2
+          when r.understanding->'intents' @> '["STOCK_QUESTION"]'::jsonb or r.understanding->'intents' @> '["PRODUCT_QUESTION"]'::jsonb then 3
+          when r.understanding->'intents' @> '["SIZE_QUESTION"]'::jsonb then 4
+          when r.understanding->'intents' @> '["OBJECTION"]'::jsonb then 5
+          else 6
+        end
       limit ${limit}
     `),
   );
+
+  /*
+    CHÍNH SÁCH ĐỔI TRẢ ĐỌC MỘT LẦN CHO CẢ LƯỢT, KHÔNG CHỤP THEO TỪNG CÂU.
+
+    Nó là cấu hình mức SHOP, đổi vài tháng một lần — nên "đọc lúc này" vẫn đúng, khác hẳn giá hay
+    tồn (thay đổi theo từng lượt, nên phải là ảnh chụp). Một lượt đọc cho cả hàng đợi thay vì một
+    lượt cho mỗi thẻ.
+  */
+  const thieuChinhSach = new Map<string, boolean>();
+  for (const pageId of pages) {
+    const bo = await loadWinKnowledge(pageId, db).catch(() => null);
+    thieuChinhSach.set(pageId, !bo || !bo.knowledge.exchangeAnswerable);
+  }
 
   const now = Date.now();
   return rows
@@ -256,10 +295,15 @@ export async function copilotQueue(
         missing: parseArr(r.missing),
         intents: parseArr(r.intents),
         entities: parseObj(r.entities),
-        facts: parseObj(r.facts),
+        decisionFacts: parseObj(r.facts),
         suggestedAt,
         stale,
         waitingForReply: r.dang_cho_tra_loi === true || String(r.dang_cho_tra_loi) === "true",
+        waitedMinutes: r.customer_message_at ? Math.max(0, Math.round((now - new Date(String(r.customer_message_at)).getTime()) / 60_000)) : null,
+        facts: parseObj(r.facts_json),
+        warnings: [...parseArr(parseObj(r.facts_json).warnings), ...(thieuChinhSach.get(String(r.page_id ?? "")) ? ["POLICY_MISSING"] : [])].filter(
+          (w, i, all) => all.indexOf(w) === i,
+        ) as CopilotWarning[],
         handledAction: String(r.handled_action ?? ""),
         handledBy: String(r.handled_by ?? ""),
       };
@@ -283,6 +327,25 @@ export type CopilotKpi = {
   /** Số tin THẬT SỰ đã rời khỏi ERP — đọc từ sổ, không suy từ cờ nào. */
   actuallySent: number;
   failedSends: number;
+  /**
+   * LẦN GỬI ĐẦU TIÊN DO NGƯỜI BẤM — đã có chưa, và đã tự kiểm chứng chưa.
+   *
+   * `pending: true` nghĩa là chưa ai bấm gửi lần nào, nên phép thử đầu-cuối trên khách thật CHƯA
+   * CHẠY. Đó là một trạng thái hợp lệ để bắt đầu thí điểm, nhưng phải in ra chứ không được để
+   * người đọc tưởng mọi thứ đã được chứng minh.
+   */
+  firstHumanSend: {
+    pending: boolean;
+    at: Date | null;
+    by: string;
+    /** `true` = đọc lại Pancake thấy ĐÚNG MỘT bản. `null` = chưa kiểm được. */
+    verified: boolean | null;
+    note: string;
+  };
+  /** Số lần gửi mà đọc lại thấy NHIỀU HƠN MỘT bản — phải luôn bằng 0. */
+  duplicateSends: number;
+  /** Số lần người bấm gửi TRONG LÚC hệ thống đang báo thiếu dữ liệu. */
+  sentWithWarnings: number;
 };
 
 /** Chỉ số nấc trợ lý. Mẫu số rỗng ⇒ `null`, KHÔNG phải 0% (luật 42). */
@@ -347,8 +410,35 @@ export async function copilotKpi(days = 7, db?: Db): Promise<CopilotKpi> {
   );
   const daGui = sentUnchanged + editedSent;
 
+  const [dau] = rowsOf<Record<string, unknown>>(
+    await conn.execute(sql`
+      select created_at, actor_name, verified, verify_note
+      from sales_copilot_actions
+      where action in ('SEND','EDIT_SEND') and send_status = 'SENT'
+      order by created_at asc limit 1
+    `),
+  );
+  const [batThuong] = rowsOf<Record<string, unknown>>(
+    await conn.execute(sql`
+      select
+        count(*) filter (where verified = false)::int                          as trung_ban,
+        count(*) filter (where jsonb_array_length(warnings) > 0)::int          as gui_khi_thieu
+      from sales_copilot_actions
+      where action in ('SEND','EDIT_SEND') and send_status = 'SENT'
+    `),
+  );
+
   return {
     suggestions: Number(goiY?.n ?? 0),
+    firstHumanSend: {
+      pending: !dau,
+      at: dau?.created_at ? new Date(String(dau.created_at)) : null,
+      by: String(dau?.actor_name ?? ""),
+      verified: dau ? (dau.verified === null || dau.verified === undefined ? null : Boolean(dau.verified)) : null,
+      note: String(dau?.verify_note ?? ""),
+    },
+    duplicateSends: Number(batThuong?.trung_ban ?? 0),
+    sentWithWarnings: Number(batThuong?.gui_khi_thieu ?? 0),
     byAction,
     sentUnchanged,
     editedSent,

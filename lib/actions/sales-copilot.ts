@@ -9,6 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { getAiSettings } from "@/lib/ai-workforce/config";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { sendSalesMessage } from "@/lib/ai-workforce/agents/sales/outbound";
+import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { modeAtLeast } from "@/lib/constants/ai";
 import { COPILOT_MAX_REPLY_CHARS, COPILOT_REJECT_REASONS, COPILOT_SUGGESTION_TTL_MINUTES, editDistance } from "@/lib/constants/sales-copilot";
 import { copilotPageAllowed } from "@/lib/queries/sales-copilot";
@@ -72,19 +73,35 @@ async function cuaGui(conversationId: string): Promise<Guard> {
 }
 
 /**
- * Câu gợi ý còn dùng được không.
+ * Câu gợi ý còn dùng được không — HỎI LẠI PANCAKE, KHÔNG CHỈ ĐỌC SỔ CỦA MÌNH.
  *
  * Nhân viên mở hàng đợi lúc 9 giờ, đi ăn trưa, 13 giờ quay lại bấm gửi — trong khi khách đã nhắn
  * thêm ba tin. Câu ấy trả lời một cuộc hội thoại không còn tồn tại, và gửi nó đi là nói lạc đề với
  * một người đang chờ.
+ *
+ * VÌ SAO PHẢI HỎI PANCAKE CHỨ KHÔNG ĐỌC CSDL CỦA MÌNH.
+ *
+ * CSDL của ERP chỉ biết những gì đã được NẠP VÀO. Trên bản chạy thử, tin mới về theo từng lượt nạp
+ * tay; kể cả khi có webhook thì vẫn có một khe giữa lúc khách gõ và lúc dòng ấy nằm trong bảng.
+ * Trong khe đó, sổ của mình nói "không có gì mới" — và đó đúng là lúc câu trả lời đã lạc đề.
+ *
+ * Còn một chuyện sổ của mình gần như KHÔNG BAO GIỜ biết: một NHÂN VIÊN KHÁC vừa trả lời khách từ
+ * điện thoại, trên chính Pancake. Hai người cùng đáp một khách là lỗi nhìn thấy được ngay, và chỉ
+ * một lượt hỏi lại mới chặn được.
+ *
+ * Hỏi Pancake hỏng (mạng, hạn mức) ⇒ CHẶN, không phải cho qua: không biết thì không gửi.
  */
-async function conHieuLuc(suggestion: typeof schema.salesSuggestions.$inferSelect): Promise<string | null> {
-  const db = await getDb();
+async function conHieuLuc(
+  suggestion: typeof schema.salesSuggestions.$inferSelect,
+  conversation: typeof schema.salesConversations.$inferSelect,
+): Promise<string | null> {
   const soanLuc = suggestion.createdAt ?? new Date(0);
   const phut = (Date.now() - soanLuc.getTime()) / 60_000;
   if (phut > COPILOT_SUGGESTION_TTL_MINUTES) {
     return `Câu gợi ý đã soạn ${Math.round(phut)} phút trước (quá ${COPILOT_SUGGESTION_TTL_MINUTES} phút) — bấm "Soạn lại" để máy đọc lại hội thoại`;
   }
+
+  const db = await getDb();
   const [moiHon] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.salesMessages)
@@ -97,6 +114,20 @@ async function conHieuLuc(suggestion: typeof schema.salesSuggestions.$inferSelec
     );
   if (Number(moiHon?.n ?? 0) > 0) {
     return `Khách đã nhắn thêm ${moiHon.n} tin sau khi câu này được soạn — bấm "Soạn lại" trước khi gửi`;
+  }
+
+  try {
+    const client = getPancakePagesClient();
+    const live = await client.listMessages(conversation.pageId, conversation.externalId, conversation.pancakeCustomerId, 20);
+    const sauKhiSoan = live.filter((m) => m.insertedAt && m.insertedAt.getTime() > soanLuc.getTime());
+    const cuaKhach = sauKhiSoan.filter((m) => !m.fromPage).length;
+    const cuaShop = sauKhiSoan.filter((m) => m.fromPage).length;
+    if (cuaKhach > 0) return `Hỏi lại Pancake: khách đã nhắn thêm ${cuaKhach} tin sau khi câu này được soạn — bấm "Soạn lại" trước khi gửi`;
+    if (cuaShop > 0) return `Hỏi lại Pancake: bên mình đã trả lời ${cuaShop} tin sau khi câu này được soạn — nhiều khả năng một bạn khác đã xử lý, kiểm tra trước khi gửi`;
+  } catch (error) {
+    // KHÔNG BIẾT THÌ KHÔNG GỬI. Cho qua ở đây là đánh cược rằng không có gì mới, và cái giá của
+    // ván cược ấy là một tin lạc đề gửi cho khách thật.
+    return `Không hỏi lại được Pancake để kiểm hội thoại có gì mới (${error instanceof Error ? error.message.slice(0, 120) : "lỗi không rõ"}) — chưa gửi`;
   }
   return null;
 }
@@ -125,12 +156,13 @@ export async function sendCopilotReply(input: unknown): Promise<ActionResult<{ e
   if (!cua.ok) return { error: cua.error };
   const { user, conversation } = cua;
 
-  const hetHan = await conHieuLuc(suggestion);
+  const hetHan = await conHieuLuc(suggestion, conversation);
   if (hetHan) return { error: hetHan };
 
   const goc = suggestion.suggestedReply ?? "";
   const edited = finalText !== goc.trim() && finalText !== goc;
   const soanLuc = suggestion.createdAt ?? new Date();
+  const canhBao = ((suggestion.factsJson?.warnings as string[] | undefined) ?? []).filter((w) => typeof w === "string");
 
   // GHI TRƯỚC, GỬI SAU. Ràng buộc duy nhất ở CSDL là thứ chặn cú bấm thứ hai — không phải một phép
   // kiểm ở đây, vốn luôn thua một cuộc đua thật.
@@ -149,6 +181,12 @@ export async function sendCopilotReply(input: unknown): Promise<ActionResult<{ e
         edited,
         editDistance: editDistance(goc, finalText),
         sendStatus: "PENDING",
+        // GHI LẠI HỆ THỐNG ĐANG BÁO THIẾU GÌ LÚC NGƯỜI BẤM.
+        //
+        // Máy không đoán size, không hứa còn hàng, không tự cam kết đổi trả — nhưng nhân viên sửa
+        // tay rồi gửi thì được, và đó là quyền của họ. Không ghi lại thì sau này không ai lần ra
+        // được vì sao một lời hứa sai đã ra khỏi cửa.
+        warnings: canhBao,
         reviewSeconds: Math.max(0, Math.round((Date.now() - soanLuc.getTime()) / 1000)),
         actorUserId: user.id,
         // TÊN do MÁY CHỦ đọc từ phiên, không nhận từ client (luật 34).
@@ -171,12 +209,43 @@ export async function sendCopilotReply(input: unknown): Promise<ActionResult<{ e
     approvedByUserId: user.id,
   });
 
+  /*
+    GỬI XONG THÌ ĐỌC LẠI VÀ ĐẾM.
+
+    "Pancake trả về một mã tin" chưa phải bằng chứng tin ấy nằm đúng một lần trong hội thoại: một
+    lượt thử lại ở tầng HTTP, một cú bấm đúp lọt lưới, một lỗi phía họ đều có thể thành hai bản.
+    Cách duy nhất biết chắc là hỏi lại và đếm.
+
+    `verified = null` là CHƯA KIỂM ĐƯỢC (mạng hỏng, API từ chối) — khác hẳn `false` (đã kiểm và
+    thấy sai). Gộp hai cái đó lại thì một lần mạng chập chờn sẽ trông y như một lần gửi trùng.
+  */
+  let verified: boolean | null = null;
+  let verifyNote = "";
+  if (outcome.sent) {
+    try {
+      const client = getPancakePagesClient();
+      const live = await client.listMessages(conversation.pageId, conversation.externalId, conversation.pancakeCustomerId, 20);
+      const theoMa = outcome.messageId ? live.filter((m) => m.id === outcome.messageId).length : 0;
+      const theoChu = live.filter((m) => m.fromPage && m.text.trim() === finalText.trim()).length;
+      const soLan = theoMa || theoChu;
+      verified = soLan === 1;
+      verifyNote = `đọc lại ${live.length} tin gần nhất · khớp theo mã ${theoMa} · khớp theo nội dung ${theoChu}`;
+      if (soLan > 1) verifyNote = `⛔ TIN XUẤT HIỆN ${soLan} LẦN — ${verifyNote}`;
+      if (soLan === 0) verifyNote = `⚠ chưa thấy tin trong ${live.length} tin gần nhất (Pancake có thể còn đang xử lý) — ${verifyNote}`;
+    } catch (error) {
+      verified = null;
+      verifyNote = `chưa kiểm lại được: ${error instanceof Error ? error.message.slice(0, 160) : "lỗi không rõ"}`;
+    }
+  }
+
   await db
     .update(schema.salesCopilotActions)
     .set({
       sendStatus: outcome.sent ? "SENT" : "FAILED",
       pancakeMessageId: outcome.messageId ?? "",
       sendError: outcome.sent ? "" : `${outcome.reason}${outcome.error ? ` · ${outcome.error}` : ""}`.slice(0, 500),
+      verified,
+      verifyNote: verifyNote.slice(0, 500),
     })
     .where(eq(schema.salesCopilotActions.id, actionId));
 
@@ -190,12 +259,15 @@ export async function sendCopilotReply(input: unknown): Promise<ActionResult<{ e
     action: outcome.sent ? "ai.copilot.send" : "ai.copilot.send_failed",
     entity: "sales_copilot_actions",
     entityId: actionId,
-    after: { conversationId: suggestion.conversationId, suggestionId, edited, sent: outcome.sent, reason: outcome.reason },
+    after: { conversationId: suggestion.conversationId, suggestionId, edited, sent: outcome.sent, reason: outcome.reason, warnings: canhBao, verified, verifyNote },
     reason: AUDIT_REASON,
   });
   revalidatePath("/ai/copilot");
 
   if (!outcome.sent) return { error: `Không gửi được: ${outcome.reason}${outcome.error ? ` · ${outcome.error}` : ""}` };
+  // Gửi được nhưng đọc lại thấy NHIỀU HƠN MỘT bản là một sự cố phải nói ngay, không phải một dòng
+  // ghi chú trong sổ — người bấm là người duy nhất đang nhìn màn hình lúc này.
+  if (verified === false) return { error: `ĐÃ GỬI nhưng kiểm lại KHÔNG ĐẠT: ${verifyNote}. Kiểm tra hội thoại trên Pancake trước khi gửi thêm gì.` };
   return { ok: true, edited, messageId: outcome.messageId ?? "" };
 }
 

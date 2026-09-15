@@ -2742,6 +2742,13 @@ export const salesSuggestions = pgTable(
      */
     evaluationOnly: boolean("evaluation_only").notNull().default(false),
     suggestedReply: text("suggested_reply").notNull().default(""),
+    /**
+     * ẢNH CHỤP DỮ KIỆN máy chủ đã dùng lúc soạn câu — giá, phí ship, màu, size, chính sách, tồn.
+     *
+     * Là ẢNH CHỤP chứ không phải tính lại lúc đọc: tính lại thì ra con số của HÔM NAY, không phải
+     * con số câu ấy đã dùng, và khi hai con số lệch nhau thì người soát không kiểm được gì nữa.
+     */
+    factsJson: jsonb("facts_json").$type<Record<string, unknown>>(),
     /** Độ tin của quyết định (0–1). NULL = không đo được, không phải 0. */
     confidence: doublePrecision("confidence"),
     /** Đã gửi cho khách chưa — ở nấc SHADOW luôn là false. */
@@ -2818,6 +2825,20 @@ export const salesCopilotActions = pgTable(
     sendError: text("send_error").notNull().default(""),
     /** Bao lâu từ lúc máy soạn xong tới lúc người bấm. NULL = chưa đo được. */
     reviewSeconds: integer("review_seconds"),
+    /**
+     * LÚC BẤM GỬI, HỆ THỐNG ĐANG BÁO THIẾU NHỮNG GÌ (`COPILOT_WARNINGS`).
+     *
+     * Máy không đoán size, không hứa còn hàng, không tự cam kết đổi trả — nhưng nhân viên sửa tay
+     * rồi gửi thì được. Cột này ghi lại rằng họ đã bấm TRONG LÚC đang thiếu. Không phải để trách
+     * ai; để sau này lần ra được vì sao một lời hứa sai đã ra khỏi cửa.
+     */
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    /**
+     * Gửi xong, đọc lại hội thoại từ Pancake: tin ấy có mặt ĐÚNG MỘT LẦN không.
+     * `null` = CHƯA KIỂM ĐƯỢC (mạng hỏng, API từ chối) — khác hẳn `false` (đã kiểm và thấy sai).
+     */
+    verified: boolean("verified"),
+    verifyNote: text("verify_note").notNull().default(""),
     /** QUY KẾT BẰNG KHOÁ. Không có đường nào ghi dòng này mà không có khoá tài khoản. */
     actorUserId: text("actor_user_id")
       .notNull()

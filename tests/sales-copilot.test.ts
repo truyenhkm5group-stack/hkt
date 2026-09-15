@@ -6,6 +6,7 @@ import { canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { SAFEST_HARD_LIMITS, type AiSettings } from "@/lib/ai-workforce/config";
 import {
   COPILOT_MEANINGFUL_EDIT_RATIO,
+  COPILOT_QUEUE_RELEVANT_HOURS,
   COPILOT_PAGES_KEY,
   COPILOT_REJECT_REASONS,
   COPILOT_TERMINAL_ACTIONS,
@@ -317,10 +318,13 @@ export async function testSalesCopilot(db: Db) {
   await db.insert(schema.salesSuggestions).values({ id: "s-rong", conversationId: convRong, suggestedReply: "   ", action: "NO_ACTION" }).onConflictDoNothing();
   assert.ok(!(await copilotQueue({ pageIds: ["page-thi-diem"], db })).some((r) => r.conversationId === convRong), "câu rỗng không vào hàng đợi");
 
-  // ═════════ 6C. THỨ TỰ HÀNG ĐỢI: KHÁCH ĐANG CHỜ LÊN TRƯỚC, RỒI MỚI TỚI Ý ĐỊNH ═════════
+  // ═════════ 6C. HÀNG ĐỢI: AI CHỜ LÂU NHẤT ĐƯỢC TRẢ LỜI TRƯỚC ═════════
   //
-  // Người trực mở màn hình ra phải thấy việc đáng làm nhất ở trên cùng. Bậc một là KHÁCH ĐANG CHỜ
-  // — vừa nhắn, chưa ai đáp — vì đó là việc gấp hơn mọi thứ khác bất kể họ hỏi gì.
+  // Xếp hàng theo thứ tự đến, như mọi quầy phục vụ. Một người đợi bốn mươi phút gấp hơn một người
+  // vừa nhắn hai phút, bất kể họ hỏi gì — Ý ĐỊNH chỉ phá hoà khi hai người chờ xấp xỉ bằng nhau.
+  //
+  // Và hội thoại NHÂN VIÊN ĐÃ ĐÁP sau lượt ấy thì rời hẳn hàng đợi, không phải xếp xuống cuối:
+  // "xuống cuối" vẫn là một thẻ người trực phải đọc và bỏ qua.
 
   const nhanSu = await getAgent("sales", undefined, db);
   assert.ok(nhanSu, "phải có nhân sự bán hàng trong sổ đăng ký");
@@ -351,8 +355,8 @@ export async function testSalesCopilot(db: Db) {
       .onConflictDoNothing();
   };
 
-  // Cố ý dựng ngược thứ tự mong muốn: hội thoại "tốt" nhất lại là hội thoại CŨ nhất, để nếu xếp
-  // theo thời gian cập nhật như trước thì bài kiểm này đỏ.
+  // Cố ý dựng NGƯỢC: hội thoại có ý định "đáng giá" nhất lại là hội thoại chờ lâu nhất, và hội
+  // thoại mới nhất lại là hội thoại đã được trả lời. Xếp sai kiểu nào bài này cũng đỏ.
   await dungXep("z-da-tra-loi-muon", "em muốn mua", 10, true, ["PURCHASE_INTENT"]);
   await dungXep("z-khac-moi", "ok", 20, false, ["OTHER"]);
   await dungXep("z-ban-khoan", "đắt quá shop", 40, false, ["OBJECTION"]);
@@ -360,15 +364,48 @@ export async function testSalesCopilot(db: Db) {
   await dungXep("z-muon-mua", "chị lấy một cái", 90, false, ["PURCHASE_INTENT"]);
 
   const xep = (await copilotQueue({ pageIds: ["page-xep"], db })).map((r) => r.conversationId);
+  assert.deepEqual(xep, ["z-muon-mua", "z-hoi-gia", "z-ban-khoan", "z-khac-moi"], "chờ lâu nhất lên trước");
+  assert.ok(!xep.includes("z-da-tra-loi-muon"), "nhân viên đã đáp sau lượt ấy ⇒ RỜI HẲN hàng đợi, không phải xếp xuống cuối");
+
+  const hang = await copilotQueue({ pageIds: ["page-xep"], db });
+  assert.ok(hang.every((r) => r.waitingForReply), "mọi dòng trong hàng đợi đều là khách đang chờ");
+  assert.ok((hang[0].waitedMinutes ?? 0) >= (hang.at(-1)!.waitedMinutes ?? 0), "thời gian chờ giảm dần từ trên xuống");
+
+  // Ý ĐỊNH phá hoà: chờ BẰNG NHAU thì phục vụ người sắp mua trước.
+  const cungLuc = new Date(Date.now() - 300 * 1000);
+  for (const [id, yDinh] of [
+    ["z-hoa-khac", ["OTHER"]],
+    ["z-hoa-mua", ["PURCHASE_INTENT"]],
+  ] as const) {
+    await db
+      .insert(schema.salesConversations)
+      .values({ id, pageId: "page-hoa", externalId: `ext-${id}`, pancakeCustomerId: `pc-${id}`, customerName: id, stage: "SIZE_SELECTION", sourceType: "WIN" })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `m-${id}`, conversationId: id, externalId: `em-${id}`, direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "x", sentAt: cungLuc })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.aiRuns)
+      .values({ id: `r-${id}`, agentId: nhanSu.id, subjectType: "CONVERSATION", subjectId: id, status: "SUCCEEDED", understanding: { intents: [...yDinh], entities: {} } })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesSuggestions)
+      .values({ id: `s-${id}`, conversationId: id, runId: `r-${id}`, suggestedReply: "gợi ý", action: "ANSWER_QUESTION" })
+      .onConflictDoNothing();
+  }
   assert.deepEqual(
-    xep,
-    ["z-muon-mua", "z-hoi-gia", "z-ban-khoan", "z-khac-moi", "z-da-tra-loi-muon"],
-    "đang chờ lên trước (muốn mua → hỏi giá → băn khoăn → khác), đã được trả lời xuống cuối dù mới nhất",
+    (await copilotQueue({ pageIds: ["page-hoa"], db })).map((r) => r.conversationId),
+    ["z-hoa-mua", "z-hoa-khac"],
+    "chờ bằng nhau thì ý định phá hoà: người sắp mua trước",
   );
-  const dau = (await copilotQueue({ pageIds: ["page-xep"], db }))[0];
-  assert.equal(dau.waitingForReply, true, "dòng đầu phải là khách đang chờ");
-  const cuoi = (await copilotQueue({ pageIds: ["page-xep"], db })).at(-1)!;
-  assert.equal(cuoi.waitingForReply, false, "hội thoại nhân viên đã đáp thì không còn là việc đang chờ");
+
+  // QUÁ CŨ THÌ RỜI ĐI: không có mốc cắt thì tồn đọng vài ngày sẽ chôn người vừa nhắn xuống dưới.
+  await dungXep("z-qua-cu", "hỏi từ đời nào", (COPILOT_QUEUE_RELEVANT_HOURS + 2) * 3600, false, ["PRICE_QUESTION"]);
+  assert.ok(
+    !(await copilotQueue({ pageIds: ["page-xep"], db })).some((r) => r.conversationId === "z-qua-cu"),
+    `hội thoại cũ hơn ${COPILOT_QUEUE_RELEVANT_HOURS} giờ rời hàng đợi — "chờ lâu nhất" phải nghĩa là lâu nhất trong số CÒN ĐÁNG trả lời`,
+  );
 
   // Thông báo nền tảng KHÔNG được kéo một hội thoại lên đầu: nó không phải một người đang chờ.
   await db
@@ -394,6 +431,38 @@ export async function testSalesCopilot(db: Db) {
   assert.equal(trong.acceptanceRate, null, "chưa lượt nào trong kỳ ⇒ CHƯA BIẾT, không phải 0%");
   assert.equal(trong.meaningfulEditRate, null);
   assert.equal(trong.medianReviewSeconds, null);
+
+  // ═════════ 7B. LẦN GỬI ĐẦU TIÊN & HAI CON SỐ PHẢI BẰNG 0 ═════════
+  //
+  // "Chưa ai bấm gửi lần nào" là một trạng thái HỢP LỆ để bắt đầu thí điểm — nhưng phải in ra
+  // được, chứ không để người đọc tưởng phép thử đầu-cuối đã chạy và đã đạt.
+  const truoc = await copilotKpi(7, db);
+  assert.equal(typeof truoc.firstHumanSend.pending, "boolean");
+  assert.equal(truoc.duplicateSends, 0, "không lần gửi nào đọc lại thấy nhiều hơn một bản");
+
+  // Ba trạng thái kiểm lại, và chúng KHÔNG được gộp: đạt · chưa kiểm được · sai.
+  // Gộp "chưa kiểm được" với "sai" thì một lần mạng chập chờn trông y như một lần gửi trùng.
+  const goiY3 = "s-copilot-3";
+  await db.insert(schema.salesSuggestions).values({ id: goiY3, conversationId: convId, suggestedReply: "câu ba", action: "ANSWER_QUESTION" }).onConflictDoNothing();
+  await ghi({ suggestionId: goiY3, verified: null, verifyNote: "chưa kiểm lại được: mạng hỏng" });
+  const chuaKiem = await copilotKpi(7, db);
+  assert.equal(chuaKiem.duplicateSends, 0, "CHƯA KIỂM ĐƯỢC không được đếm là gửi trùng");
+
+  const goiY4 = "s-copilot-4";
+  await db.insert(schema.salesSuggestions).values({ id: goiY4, conversationId: convId, suggestedReply: "câu bốn", action: "ANSWER_QUESTION" }).onConflictDoNothing();
+  await ghi({ suggestionId: goiY4, verified: false, verifyNote: "⛔ TIN XUẤT HIỆN 2 LẦN" });
+  assert.equal((await copilotKpi(7, db)).duplicateSends, 1, "đã kiểm và thấy sai thì PHẢI đếm");
+
+  // Gửi TRONG LÚC hệ thống báo thiếu dữ liệu — quyền của nhân viên, nhưng phải để lại dấu.
+  const goiY5 = "s-copilot-5";
+  await db.insert(schema.salesSuggestions).values({ id: goiY5, conversationId: convId, suggestedReply: "câu năm", action: "ANSWER_QUESTION" }).onConflictDoNothing();
+  await ghi({ suggestionId: goiY5, warnings: ["SIZE_DATA_MISSING"] });
+  assert.ok((await copilotKpi(7, db)).sentWithWarnings >= 1, "gửi trong lúc thiếu dữ kiện phải đếm được");
+
+  // Và lần gửi ĐẦU TIÊN là lần SỚM NHẤT, không phải lần vừa ghi.
+  const sauCung = await copilotKpi(7, db);
+  assert.equal(sauCung.firstHumanSend.pending, false, "đã có lượt gửi thì không còn là 'chờ lần gửi đầu'");
+  assert.ok(sauCung.firstHumanSend.at, "phải biết lần đầu lúc nào");
 
   // ═════════ 8. VÀ NẤC AUTO VẪN ĐÓNG ═════════
   //

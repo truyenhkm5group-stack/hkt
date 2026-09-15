@@ -536,6 +536,40 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       // Dòng này sinh ra CHỈ để chấm điểm — sản xuất đã đứng ngoài vì người đang cầm hội thoại.
       evaluationOnly: chamDiem,
       suggestedReply: suggested,
+      /*
+        ẢNH CHỤP DỮ KIỆN — đúng những gì máy chủ đã dùng để soạn CÂU NÀY.
+
+        Nhân viên nhìn thấy câu chữ, nhưng thứ họ cần để quyết bấm hay không là dữ kiện đằng sau
+        nó. Tính lại lúc mở màn hình thì ra con số của lúc mở, không phải con số câu ấy đã dùng —
+        và khi hai con số lệch nhau, người soát không còn kiểm được gì.
+
+        Ba cảnh báo ở đây là ba chỗ ERP có thể KHÔNG biết, và cũng là ba chỗ một câu trôi chảy dễ
+        nói bừa nhất. Máy đã bị chặn không đoán; thẻ hàng đợi nói ra để NGƯỜI biết mình đang bấm
+        trong lúc thiếu gì.
+      */
+      factsJson: {
+        productName: state.productName,
+        variantLabel: state.variantLabel,
+        quotedTotal: state.quotedTotal,
+        shippingFee: applied.shippingFee,
+        goodsTotal: state.quotedTotal !== null && applied.shippingFee !== null ? state.quotedTotal - applied.shippingFee : null,
+        sizes: applied.sizes,
+        colors: applied.colors,
+        stockKnown: applied.stockKnown,
+        available: applied.available,
+        sizeCode: applied.sizeAdvice?.code ?? null,
+        /*
+          CHỈ CHỤP NHỮNG THỨ THAY ĐỔI THEO TỪNG LƯỢT.
+
+          Size và tồn là dữ kiện CỦA LƯỢT NÀY: chụp lại thì người soát biết câu ấy đã dựa trên gì.
+          Chính sách đổi trả thì khác — nó là cấu hình mức SHOP, đổi vài tháng một lần, nên đọc
+          "lúc này" ở tầng hàng đợi vẫn đúng và rẻ hơn một lượt đọc CSDL trong đường nóng.
+        */
+        warnings: [
+          ...(applied.sizeAdvice?.code === "SIZE_DATA_MISSING" ? ["SIZE_DATA_MISSING"] : []),
+          ...(applied.stockKnown ? [] : ["SELLABILITY_UNKNOWN"]),
+        ],
+      },
       confidence: decisionDeCham.confidence,
       // Ở nấc SHADOW đây luôn là false — cổng gửi tin không mở cho câu do AI soạn.
       sent: false,

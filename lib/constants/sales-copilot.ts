@@ -90,6 +90,36 @@ export type CopilotSendStatus = (typeof COPILOT_SEND_STATUSES)[number];
  */
 export const COPILOT_SUGGESTION_TTL_MINUTES = 30;
 
+/**
+ * CẢNH BÁO THIẾU DỮ LIỆU — hiện TRÊN THẺ, trước khi nhân viên bấm.
+ *
+ * Ba chỗ ERP có thể KHÔNG biết, và cả ba đều là chỗ một câu trả lời trôi chảy dễ nói bừa nhất.
+ * Máy đã được chặn không đoán (luật 10, 47 và cổng năng lực), nhưng NHÂN VIÊN vẫn sửa tay rồi gửi
+ * được — đó là quyền của họ. Việc của hệ thống là: nói rõ đang thiếu gì TRƯỚC khi họ bấm, rồi GHI
+ * LẠI rằng họ đã bấm trong lúc thiếu. Giấu đi thì lần sau không ai biết vì sao một lời hứa sai đã
+ * ra khỏi cửa.
+ */
+export const COPILOT_WARNINGS = ["SIZE_DATA_MISSING", "POLICY_MISSING", "SELLABILITY_UNKNOWN"] as const;
+export type CopilotWarning = (typeof COPILOT_WARNINGS)[number];
+
+export const COPILOT_WARNING_LABEL: Record<CopilotWarning, string> = {
+  SIZE_DATA_MISSING: "CHƯA CÓ BẢNG SỐ ĐO — máy không đoán size",
+  POLICY_MISSING: "CHƯA KHAI CHÍNH SÁCH ĐỔI TRẢ — máy không tự cam kết",
+  SELLABILITY_UNKNOWN: "CHƯA BIẾT CÒN HÀNG — máy không nói \"còn hàng\"",
+};
+
+/**
+ * HỘI THOẠI CŨ HƠN NGẦN NÀY GIỜ THÌ RỜI HÀNG ĐỢI.
+ *
+ * Hàng đợi xếp người chờ LÂU NHẤT lên trước, nên nếu không có mốc cắt thì một tồn đọng vài ngày sẽ
+ * đẩy những cuộc nguội ngắt lên đầu và chôn người vừa nhắn xuống dưới. Cắt ở đây là cách nói
+ * "chờ lâu nhất trong số CÒN ĐÁNG TRẢ LỜI", chứ không phải "cũ nhất trong lịch sử".
+ *
+ * Facebook cũng chỉ cho nhắn lại trong 24 giờ kể từ tin cuối của khách mà không cần thẻ tin nhắn,
+ * nên quá mốc ấy phần lớn là không gửi được nữa — mốc kinh doanh và mốc kỹ thuật trùng nhau.
+ */
+export const COPILOT_QUEUE_RELEVANT_HOURS = 24;
+
 /** Trần ký tự của một tin nhắn bán hàng — bằng trần mà lưới soi bản mô hình viết đang dùng. */
 export const COPILOT_MAX_REPLY_CHARS = 1200;
 
