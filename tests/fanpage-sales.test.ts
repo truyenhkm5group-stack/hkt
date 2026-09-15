@@ -12,6 +12,8 @@ import { resolveProduct } from "@/lib/ai-workforce/agents/sales/resolve-product"
 import { POLICY_BY_SOURCE, TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-sales";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 import { generateTestReply, testIntentOf } from "@/lib/ai-workforce/agents/sales/generate-test";
+import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
 
 const PAGE = "page-fanpage-test";
 
@@ -92,6 +94,15 @@ export async function testFanpageSales(db: Db) {
   const htMoi = await hoiThoai(db, "fp-ht-4");
   const plMoi = await classifyConversationSource({ conversationId: htMoi.id, pancakePageId: PAGE }, db);
   assert.equal(plMoi.activeProductId, "fp-other", "hội thoại MỚI dùng mẫu mới");
+
+  // ĐỔI GIÁ CŨNG KHÔNG VIẾT LẠI QUÁ KHỨ. Khách đã được báo 499k thì cuộc ấy thuộc mức 499k —
+  // đọc bảng giá hôm nay để giải thích một câu nói hôm qua là viết lại quá khứ, y hệt với mã hàng.
+  await db.update(schema.fanpageSalesProfiles).set({ unitPrice: 599_000, version: 3 }).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  const plGiaCu = await classifyConversationSource({ conversationId: ht1.id, pancakePageId: PAGE }, db);
+  assert.equal(plGiaCu.offer?.unitPrice, 499_000, "hội thoại CŨ giữ giá LÚC CHỤP, không đọc bảng giá hiện hành");
+  const plGiaMoi = await classifyConversationSource({ conversationId: htMoi.id, pancakePageId: PAGE }, db);
+  assert.equal(plGiaMoi.offer?.unitPrice, 599_000, "hội thoại MỚI dùng giá mới");
+  await db.update(schema.fanpageSalesProfiles).set({ unitPrice: 499_000 }).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
 
   // Chụp lần hai KHÔNG được ghi đè lần đầu.
   assert.equal(await snapshotClassification(ht1.id, plMoi, db), false, "ảnh chụp phải bất biến");
@@ -186,5 +197,129 @@ export async function testFanpageSales(db: Db) {
   assert.ok(giaDu.text.includes("399"), "phải báo giá của mẫu test");
   assert.ok(!giaDu.text.includes("499"), "và tuyệt đối không phải giá của mã WIN");
 
-  console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến · chưa khai thì chuyển người");
+  // ═════════ 9. CỔNG NĂNG LỰC — máy được làm gì là do DỮ LIỆU quyết, không do một cờ bật/tắt ═════════
+  //
+  // Hồ sơ lúc này mới có giá + phí ship. Máy phải báo giá được NGAY, và vẫn im về size cho tới khi
+  // có bảng số đo. Gộp hai chuyện ấy vào một công tắc là buộc người vận hành chọn giữa hai điều
+  // đều sai: bật khi hồ sơ còn trống, hoặc tắt hẳn cả việc nó thừa sức làm.
+  // Khối 4 đã chuyển page sang Q017 để chứng minh ảnh chụp bất biến; giờ trả lại Q004 — đúng cảnh
+  // thật của page đang chạy. Hội thoại cũ vẫn giữ nguyên ảnh chụp của chúng, đó là toàn bộ ý.
+  await db.update(schema.fanpageSalesProfiles).set({ activeProductId: win.id, version: 4 }).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+
+  const bd1 = await loadWinKnowledge(PAGE, db);
+  assert.ok(bd1, "page đã có hồ sơ thì phải đọc được dữ kiện");
+  assert.equal(bd1.capabilities.CAN_QUOTE_PRICE.on, true, "có giá ⇒ báo giá được");
+  assert.equal(bd1.capabilities.CAN_QUOTE_SHIPPING.on, true);
+  assert.equal(bd1.capabilities.CAN_ADVISE_SIZE.on, false, "chưa có bảng số đo ⇒ TUYỆT ĐỐI không tư vấn size");
+  assert.deepEqual(bd1.capabilities.CAN_ADVISE_SIZE.missing, ["bảng số đo"], "tắt thì phải NÓI RA thiếu gì — đó là việc phải làm, không phải lời từ chối");
+  assert.equal(bd1.capabilities.CAN_EXPLAIN_COD.on, false, "chưa khai COD ⇒ không giải thích COD");
+  assert.equal(bd1.ready, false, "thiếu màu + ba chính sách thì chưa READY");
+  assert.ok(bd1.missing.includes("chính sách COD"));
+
+  // Khai đủ ⇒ READY bật lên. Không có bước nào khác, không cờ nào phải bấm thêm.
+  await db
+    .update(schema.fanpageSalesProfiles)
+    .set({
+      availableColors: ["Đỏ", "Nâu", "Đen"], material: "Rayon co giãn 4 chiều",
+      codPolicy: "Có COD", inspectionPolicy: "Được kiểm hàng trước khi thanh toán",
+      deliveryEstimate: "2–4 ngày", knowledgeVersion: 2,
+    })
+    .where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  const bd2 = await loadWinKnowledge(PAGE, db);
+  assert.equal(bd2?.ready, true, "khai đủ sáu ô bắt buộc thì READY — không cần bấm thêm cờ nào");
+  assert.equal(bd2?.capabilities.CAN_ADVISE_SIZE.on, false, "nhưng size VẪN tắt: READY không kéo theo quyền đoán size");
+  assert.ok((bd2?.completeness ?? 0) > (bd1.completeness ?? 0));
+
+  // ═════════ 10. MÂU THUẪN VỚI ERP: BÁO, KHÔNG ÂM THẦM ĐÈ ═════════
+  //
+  // Giá kênh khác giá ERP là chuyện hợp lệ. Máy tự chọn một bên là chỗ mà sáu tháng sau không ai
+  // biết con số thật là số nào — nên nó in ra CẢ HAI và để người quyết.
+  const giaKhop = bd2?.conflicts.find((c) => c.field === "Giá bán");
+  assert.equal(giaKhop?.kind, "CORROBORATED", "499k khai = 499k giá bán lẻ ERP ⇒ hai nguồn ĐỒNG Ý, và điều đó cũng phải in ra");
+  const mauLech = bd2?.conflicts.find((c) => c.field === "Màu");
+  assert.equal(mauLech?.kind, "CONFLICT", "khai bán Đỏ/Nâu mà ERP chỉ có mẫu mã màu Đen ⇒ máy sẽ hứa màu không tồn tại");
+  assert.ok(mauLech?.note.includes("Đỏ"), "phải nói RÕ màu nào đang thừa, không chỉ nói 'có lệch'");
+  const [saraKhac] = await db.select({ p: schema.fanpageSalesProfiles.unitPrice }).from(schema.fanpageSalesProfiles).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  assert.equal(saraKhac.p, 499_000, "báo mâu thuẫn KHÔNG được sửa dữ liệu bên nào");
+
+  // ═════════ 11. CÙNG CỔNG ẤY ÁP CHO HÀNG TEST — khác NGUỒN DỮ LIỆU, không khác LUẬT ═════════
+  //
+  // Viết hai bộ luật song song là mở đường cho chúng trôi khỏi nhau, rồi một hôm hàng test được
+  // phép làm điều hàng thắng không được.
+  await db
+    .update(schema.testProductProfiles)
+    .set({ price: 399_000, colors: ["đỏ đô"], codPolicy: "Có COD", inspectionPolicy: "Được kiểm hàng", deliveryEstimate: "2–4 ngày", shippingFee: 25_000 })
+    .where(eq(schema.testProductProfiles.id, test1.id));
+  const bdT = await loadTestKnowledge(test1.id, db);
+  assert.ok(bdT);
+  assert.equal(bdT.kind, "TEST");
+  assert.equal(bdT.knowledge.unitPrice, 399_000, "giá của CHÍNH mẫu test");
+  assert.equal(bdT.capabilities.CAN_QUOTE_PRICE.on, true);
+  assert.equal(bdT.capabilities.CAN_ADVISE_SIZE.on, false, "mẫu test chưa có bảng số đo ⇒ vẫn không đoán size");
+  assert.equal(bdT.capabilities.CAN_CREATE_ORDER.on, false, "chưa có mã hàng ERP ⇒ không lên đơn, dù các ô khác đã đủ");
+  assert.equal(bdT.knowledge.exchangePolicy, "", "mẫu test CHƯA khai đổi trả — và KHÔNG mượn của mã WIN");
+  assert.equal(bdT.capabilities.CAN_EXPLAIN_EXCHANGE.on, false);
+
+  // ═════════ 12. ĐI TÌM DỮ LIỆU CÒN THIẾU — và nói thật cái nào ERP không thể có ═════════
+  const lo = await discoverKnowledgeGaps(PAGE, db);
+  const loSize = lo.find((g) => g.field === "Bảng số đo");
+  assert.equal(loSize?.verdict, "PARTIAL", "ERP biết mẫu có size NÀO, nhưng không biết ai mặc vừa — hai chuyện khác nhau");
+  assert.equal(loSize?.code, "SIZE_PROFILE_MISSING");
+  assert.ok(loSize?.found.includes("M"), "phải nói ra ERP đang có nhãn size nào");
+  assert.ok(/KHÔNG suy từ nhãn size/.test(loSize?.todo ?? ""), "và nói thẳng là không được suy ra bảng số đo từ đó");
+  const loDoiTra = lo.find((g) => g.field === "Chính sách đổi trả");
+  assert.equal(loDoiTra?.verdict, "NOT_IN_ERP", "chính sách đổi trả là quyết định kinh doanh, không có ở đâu trong hệ thống");
+  assert.equal(loDoiTra?.code, "POLICY_MISSING");
+  const loTon = lo.find((g) => g.field === "Tồn kho theo mẫu mã");
+  assert.equal(loTon?.code, "STOCK_UNKNOWN", "mẫu mã chưa có phiếu nhập ⇒ CHƯA BIẾT tồn (luật 10), máy không được hứa còn hàng");
+  assert.ok(/không dùng remain_quantity/i.test(loTon?.lookedAt ?? ""), "phải ghi rõ đã đi hỏi sổ kho chứ không hỏi Pancake");
+
+  // ═════════ 13. TRẢ LỜI CHỈ BẰNG DỮ KIỆN — và nói được nó lấy số ở đâu ═════════
+  //
+  // Đây là cái mốc để đối chiếu khi mô hình thật bật lên: mô hình được đổi cách nói, KHÔNG được
+  // thêm một con số nào. Phân biệt được vì mọi con số đều đi kèm chỗ nó được lấy ra.
+  await db
+    .update(schema.fanpageSalesProfiles)
+    .set({
+      comboPricing: [{ quantity: 2, price: 849_000, freeShipping: true }],
+      exchangePolicy: "Đổi size trong 3 ngày", approvedFacts: ["Bên em bán hàng có sẵn, không đặt trước"],
+    })
+    .where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  const kt = (await loadWinKnowledge(PAGE, db))!.knowledge;
+
+  assert.equal(winIntentOf("mua 2 cái bao nhiêu ạ"), "COMBO", "câu combo vừa khớp cả giá — luật hẹp hơn phải thắng");
+  const tlGia = answerFromKnowledge(winIntentOf("Bao nhiêu tiền vậy shop?"), kt);
+  assert.equal(tlGia.action, "ANSWER");
+  assert.ok(tlGia.text.includes("499.000"), "phải là con số ĐÃ KHAI");
+  assert.ok(tlGia.text.includes("849.000"), "và chào luôn combo vì đã có giá combo thật");
+  assert.deepEqual(tlGia.provenance.map((x) => x.source), ["fanpage_sales_profiles.unit_price", "fanpage_sales_profiles.shipping_fee", "fanpage_sales_profiles.combo_pricing"], "mỗi con số phải chỉ được ra ô nó lấy từ đâu");
+
+  // SIZE: vẫn chưa có bảng số đo ⇒ chuyển người, dù mọi ô khác đã đầy.
+  const tlSize = answerFromKnowledge(winIntentOf("em cao 1m58 nặng 50kg mặc size nào"), kt);
+  assert.equal(tlSize.action, "HANDOFF");
+  assert.equal(tlSize.humanReview, true);
+  assert.deepEqual(tlSize.missing, ["bảng số đo"]);
+  assert.deepEqual(tlSize.provenance, [], "né thì KHÔNG được kèm dữ kiện nào — không có gì để chống lưng cho một câu không trả lời");
+
+  // CÒN HÀNG KHÔNG: tồn kho đi theo phiếu kho (luật 10), sổ bán hàng không biết ⇒ không hứa.
+  const tlCon = answerFromKnowledge(winIntentOf("còn hàng không shop"), kt);
+  assert.equal(tlCon.action, "HANDOFF");
+  assert.deepEqual(tlCon.missing, ["tồn kho thực tế"], "sổ dữ kiện bán hàng KHÔNG biết tồn — trả lời 'còn ạ' từ đây là hứa bằng thứ không đo");
+
+  // CÂU NGOÀI KỊCH BẢN: chỉ được nói lại câu ĐÃ DUYỆT.
+  const tlLa = answerFromKnowledge(winIntentOf("shop ở đâu thế"), kt);
+  assert.equal(tlLa.provenance[0]?.source, "fanpage_sales_profiles.approved_facts");
+  await db.update(schema.fanpageSalesProfiles).set({ approvedFacts: [] }).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  const ktTrong = (await loadWinKnowledge(PAGE, db))!.knowledge;
+  const tlLa2 = answerFromKnowledge(winIntentOf("shop ở đâu thế"), ktTrong);
+  assert.equal(tlLa2.action, "HANDOFF", "hết câu đã duyệt thì chuyển người, KHÔNG ghép tạm vài dữ kiện rời thành câu nghe như biết");
+
+  // Cùng hàm ấy áp cho mẫu TEST, và nhãn nguồn phải nói đúng BẢNG nào.
+  const ktTest = (await loadTestKnowledge(test1.id, db))!.knowledge;
+  const tlTest = answerFromKnowledge("PRICE", ktTest, "TEST_PRODUCT");
+  assert.ok(tlTest.text.includes("399.000"), "giá của chính mẫu test");
+  assert.ok(!tlTest.text.includes("499.000"), "TUYỆT ĐỐI không phải giá mã WIN");
+  assert.equal(tlTest.provenance[0]?.source, "test_product_profiles.unit_price");
+
+  console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · mọi con số truy được về ô nó lấy ra");
 }

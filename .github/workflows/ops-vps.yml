@@ -78,6 +78,7 @@ on:
           - ai-staging-ad-evidence # thu chứng cứ cho từng mã quảng cáo; mặc định CHẠY THỬ, "--apply" mới lưu
           - ai-staging-fanpage   # khai hồ sơ bán hàng cho một page (arg: "--page=<id> --product=Q004 --apply")
           - ai-staging-configure # khai mã WIN + nguồn TEST rồi chạy thử ngầm ngay (arg: "--page=<id> --win=Q004 --test-source=<ad> --apply")
+          - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -752,6 +753,13 @@ jobs:
                 # Mặc định CHẠY THỬ; "--apply" trong ô arg mới ghi. Không gọi mô hình, không gửi tin.
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-fanpage-configure.ts ${ARG:-} ;;
+
+              ai-staging-knowledge)
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-sales-knowledge.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-sales-knowledge.ts'
+                # Mặc định CHẠY THỬ; "--apply" trong ô arg mới ghi. Không gọi mô hình, không gửi tin.
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-sales-knowledge.ts ${ARG:-} ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \

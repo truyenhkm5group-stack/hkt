@@ -9,8 +9,12 @@ type Choice = { id: string; name: string; code: string };
 type TestChoice = { id: string; testCode: string; name: string };
 
 /**
- * Đổi mẫu thắng của một page. Đây là thao tác phải làm được dưới một phút, nên nó chỉ có đúng ba
- * ô: mẫu hàng · giá · phí ship, cộng nấc quyền hạn. Mọi thứ khác nằm ở phần mở rộng.
+ * Đổi mẫu thắng của một page. Việc HÀNG NGÀY phải làm được dưới một phút, nên bốn ô hay đổi nhất
+ * — mẫu · giá · ship · nấc quyền — nằm ngay trên cùng.
+ *
+ * SỔ DỮ KIỆN nằm trong phần gập lại phía dưới: chính sách và câu đã duyệt gõ một lần rồi để đó
+ * hàng tháng. Bày cả mười ô ra cùng lúc thì việc một phút thành việc mười phút, và người vận hành
+ * sẽ thôi không mở màn này nữa — đó mới là cách một màn cấu hình chết thật sự.
  */
 export function FanpageForm({
   pancakePageId,
@@ -21,6 +25,14 @@ export function FanpageForm({
   shippingFee,
   colors,
   sizeProfileId,
+  material,
+  comboPrice,
+  comboFreeShip,
+  codPolicy,
+  inspectionPolicy,
+  deliveryEstimate,
+  exchangePolicy,
+  approvedFacts,
   choices,
   sizes,
 }: {
@@ -32,6 +44,14 @@ export function FanpageForm({
   shippingFee: number | null;
   colors: string[];
   sizeProfileId: string | null;
+  material: string;
+  comboPrice: number | null;
+  comboFreeShip: boolean;
+  codPolicy: string;
+  inspectionPolicy: string;
+  deliveryEstimate: string;
+  exchangePolicy: string;
+  approvedFacts: string[];
   choices: Choice[];
   sizes: { id: string; name: string }[];
 }) {
@@ -42,6 +62,14 @@ export function FanpageForm({
   const [nac, setNac] = useState(aiMode);
   const [ten, setTen] = useState(name);
   const [bangSize, setBangSize] = useState(sizeProfileId ?? "");
+  const [chatLieu, setChatLieu] = useState(material);
+  const [combo2, setCombo2] = useState(comboPrice === null ? "" : String(comboPrice));
+  const [combo2Ship, setCombo2Ship] = useState(comboFreeShip);
+  const [cod, setCod] = useState(codPolicy);
+  const [kiem, setKiem] = useState(inspectionPolicy);
+  const [giao, setGiao] = useState(deliveryEstimate);
+  const [doiTra, setDoiTra] = useState(exchangePolicy);
+  const [duKien, setDuKien] = useState(approvedFacts.join("\n"));
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
 
@@ -89,6 +117,48 @@ export function FanpageForm({
           <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={ten} onChange={(e) => setTen(e.target.value)} />
         </label>
       </div>
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-xs font-medium">Sổ dữ kiện — chất liệu, combo, chính sách, câu đã duyệt</summary>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Ô nào để trống thì máy KHÔNG trả lời câu hỏi tương ứng — nó chuyển người, chứ không đoán. Đây là danh sách việc phải khai,
+          không phải danh sách tuỳ chọn.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground">Chất liệu</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={chatLieu} onChange={(e) => setChatLieu(e.target.value)} placeholder="Rayon co giãn 4 chiều" />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground">Giá combo 2 chiếc (đ)</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={combo2} onChange={(e) => setCombo2(e.target.value)} inputMode="numeric" placeholder="849000" />
+          </label>
+          <label className="flex items-center gap-2 pt-5 text-xs">
+            <input type="checkbox" checked={combo2Ship} onChange={(e) => setCombo2Ship(e.target.checked)} />
+            <span>Combo 2 được miễn phí ship</span>
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground">Chính sách COD</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={cod} onChange={(e) => setCod(e.target.value)} placeholder="Bên em có ship COD, nhận hàng rồi thanh toán" />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground">Chính sách kiểm hàng</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={kiem} onChange={(e) => setKiem(e.target.value)} placeholder="Chị được kiểm hàng trước khi thanh toán" />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-muted-foreground">Thời gian giao dự kiến</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={giao} onChange={(e) => setGiao(e.target.value)} placeholder="2–4 ngày" />
+          </label>
+          <label className="space-y-1 text-xs lg:col-span-2">
+            <span className="text-muted-foreground">Chính sách đổi trả</span>
+            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={doiTra} onChange={(e) => setDoiTra(e.target.value)} placeholder="để trống nếu chủ shop chưa chốt" />
+          </label>
+          <label className="space-y-1 text-xs sm:col-span-2 lg:col-span-3">
+            <span className="text-muted-foreground">Câu dữ kiện đã duyệt — mỗi dòng một câu. Máy chỉ được nói lại những câu này, không được thêm dữ kiện mới.</span>
+            <textarea className="min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm" value={duKien} onChange={(e) => setDuKien(e.target.value)} placeholder={"Bên em bán hàng có sẵn, không đặt trước\nHàng bên em có video thật, không dùng ảnh mạng"} />
+          </label>
+        </div>
+      </details>
+
       <div className="flex items-center gap-3">
         <Button
           size="sm"
@@ -104,6 +174,13 @@ export function FanpageForm({
                 shippingFee: so(ship),
                 availableColors: mau.split(",").map((x) => x.trim()).filter(Boolean),
                 sizeProfileId: bangSize || undefined,
+                material: chatLieu,
+                comboPricing: so(combo2) === null ? [] : [{ quantity: 2, price: so(combo2) as number, freeShipping: combo2Ship }],
+                codPolicy: cod,
+                inspectionPolicy: kiem,
+                deliveryEstimate: giao,
+                exchangePolicy: doiTra,
+                approvedFacts: duKien.split("\n").map((x) => x.trim()).filter(Boolean),
               });
               setMsg("error" in r ? r.error : "Đã lưu — hội thoại MỚI dùng cấu hình này, hội thoại cũ giữ nguyên");
             })

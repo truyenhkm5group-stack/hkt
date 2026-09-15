@@ -7,6 +7,8 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listFanpages, listSizeProfiles, listSourceLines, listTestProducts } from "@/lib/queries/fanpage-sales";
 import { listProductChoices } from "@/lib/queries/sales-ad-map";
+import { discoverKnowledgeGaps, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Cấu hình fanpage — nhân sự bán hàng" };
@@ -19,6 +21,11 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
   const [pages, choices, tests, sizes] = await Promise.all([listFanpages(), listProductChoices(), listTestProducts(), listSizeProfiles()]);
   const page = pages.find((p) => p.pancakePageId === chon) ?? pages[0];
   const sources = page ? await listSourceLines(page.pancakePageId) : [];
+  const [kienThuc, loHong] = page
+    ? await Promise.all([loadWinKnowledge(page.pancakePageId), discoverKnowledgeGaps(page.pancakePageId)])
+    : [null, []];
+  const k = kienThuc?.knowledge ?? null;
+  const combo2 = k?.comboPricing?.find((c) => c.quantity === 2) ?? null;
 
   const soTest = sources.filter((s) => s.status === "TEST").length;
   const soNguoi = sources.filter((s) => s.status === "HUMAN_ONLY").length;
@@ -67,6 +74,14 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
               shippingFee={page.shippingFee}
               colors={page.availableColors}
               sizeProfileId={page.sizeProfileId}
+              material={k?.material ?? ""}
+              comboPrice={combo2?.price ?? null}
+              comboFreeShip={combo2?.freeShipping ?? false}
+              codPolicy={k?.codPolicy ?? ""}
+              inspectionPolicy={k?.inspectionPolicy ?? ""}
+              deliveryEstimate={k?.deliveryEstimate ?? ""}
+              exchangePolicy={k?.exchangePolicy ?? ""}
+              approvedFacts={k?.approvedFacts ?? []}
               choices={choices}
               sizes={sizes}
             />
@@ -76,6 +91,85 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
               <span className="font-medium">chưa khai</span>, và máy sẽ không báo giá.
             </p>
           </Card>
+
+          {kienThuc ? (
+            <Card className="p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+                <h2 className="text-sm font-semibold">
+                  {kienThuc.ready ? "✅ SẴN SÀNG GIAO VIỆC BÁN" : "⛔ CÒN THIẾU DỮ LIỆU"}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  đầy đủ {kienThuc.completeness}% · sổ dữ kiện bản {kienThuc.knowledgeVersion}
+                </p>
+              </div>
+
+              {kienThuc.ready ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Đủ dữ liệu cho những câu hỏi thường gặp nhất. Những năng lực còn tắt bên dưới KHÔNG chặn việc bán — máy chuyển người
+                  đúng ở những câu ấy.
+                </p>
+              ) : (
+                <p className="mb-3 text-xs">
+                  Còn thiếu: <span className="font-medium">{kienThuc.missing.join(" · ")}</span>
+                </p>
+              )}
+
+              <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                {SALES_CAPABILITIES.map((c) => {
+                  const st = kienThuc.capabilities[c];
+                  return (
+                    <div key={c} className="flex items-baseline gap-2 rounded-md border p-2 text-xs">
+                      <span>{st.on ? "🟢" : "⚪"}</span>
+                      <span className={st.on ? "font-medium" : "text-muted-foreground"}>{CAPABILITY_LABEL[c]}</span>
+                      {st.on ? null : <span className="ml-auto text-right text-[11px] text-muted-foreground">thiếu {st.missing.join(", ")}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {kienThuc.conflicts.length ? (
+                <div className="mt-4">
+                  <h3 className="mb-2 text-xs font-semibold">Đối chiếu với ERP</h3>
+                  <div className="space-y-1.5">
+                    {kienThuc.conflicts.map((c) => (
+                      <div key={c.field} className="rounded-md border p-2 text-xs">
+                        <span className="font-medium">
+                          {c.kind === "CONFLICT" ? "⚠️ LỆCH" : c.kind === "CORROBORATED" ? "✓ khớp" : "· ERP không có để đối chiếu"} — {c.field}
+                        </span>
+                        <span className="ml-2 text-muted-foreground">
+                          khai: {c.declared} · ERP: {c.erp}
+                        </span>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">{c.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Lệch KHÔNG được sửa tự động ở đâu cả: giá kênh khác giá ERP là chuyện hợp lệ. Máy in cả hai con số để chủ shop
+                    quyết cái nào đúng.
+                  </p>
+                </div>
+              ) : null}
+
+              {loHong.some((g) => g.todo) ? (
+                <div className="mt-4">
+                  <h3 className="mb-2 text-xs font-semibold">Dữ liệu còn thiếu — đã đi tìm ở đâu, và ai phải cung cấp</h3>
+                  <div className="space-y-1.5">
+                    {loHong
+                      .filter((g) => g.todo)
+                      .map((g) => (
+                        <div key={g.field} className="rounded-md border p-2 text-xs">
+                          <span className="font-medium">{g.field}</span>
+                          <span className="ml-2 font-mono text-[11px] text-muted-foreground">{g.code}</span>
+                          <p className="mt-0.5 text-muted-foreground">{g.found}</p>
+                          <p className="mt-0.5">→ {g.todo}</p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">đã tra: {g.lookedAt}</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           <Card className="p-4">
             <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">

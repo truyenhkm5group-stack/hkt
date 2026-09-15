@@ -24,6 +24,7 @@ const hoSoSchema = z.object({
   freeShipFrom: z.number().int().min(0).nullable().optional(),
   availableColors: z.array(z.string().trim()).optional(),
   comboPricing: z.array(z.object({ quantity: z.number().int().min(1), price: z.number().int().min(0), freeShipping: z.boolean().optional() })).optional(),
+  material: z.string().trim().max(300).optional(),
   codPolicy: z.string().trim().max(500).optional(),
   inspectionPolicy: z.string().trim().max(500).optional(),
   deliveryEstimate: z.string().trim().max(500).optional(),
@@ -68,6 +69,7 @@ export async function saveFanpageSalesProfile(input: unknown): Promise<ActionRes
     freeShipFrom: d.freeShipFrom ?? dangCo?.freeShipFrom ?? null,
     availableColors: d.availableColors ?? dangCo?.availableColors ?? [],
     comboPricing: d.comboPricing ?? dangCo?.comboPricing ?? null,
+    material: d.material ?? dangCo?.material ?? "",
     codPolicy: d.codPolicy ?? dangCo?.codPolicy ?? "",
     inspectionPolicy: d.inspectionPolicy ?? dangCo?.inspectionPolicy ?? "",
     deliveryEstimate: d.deliveryEstimate ?? dangCo?.deliveryEstimate ?? "",
@@ -85,13 +87,36 @@ export async function saveFanpageSalesProfile(input: unknown): Promise<ActionRes
       dangCo.unitPrice !== giaTri.unitPrice ||
       dangCo.shippingFee !== giaTri.shippingFee);
 
+  /*
+    SỔ DỮ KIỆN CÓ PHIÊN BẢN RIÊNG.
+
+    Đổi GIÁ là đổi điều kiện bán; đổi CHÍNH SÁCH hay CÂU ĐÃ DUYỆT là đổi thứ máy được phép NÓI.
+    Gộp hai thứ vào một số thì sáu tháng sau, nhìn một hội thoại cũ không biết được lúc ấy máy đang
+    đọc bộ chính sách nào — mà đó đúng là câu người ta hỏi khi có khiếu nại.
+  */
+  const doiDuKien =
+    dangCo &&
+    (dangCo.material !== giaTri.material ||
+      dangCo.codPolicy !== giaTri.codPolicy ||
+      dangCo.inspectionPolicy !== giaTri.inspectionPolicy ||
+      dangCo.deliveryEstimate !== giaTri.deliveryEstimate ||
+      dangCo.exchangePolicy !== giaTri.exchangePolicy ||
+      dangCo.approvedFacts.join("\u0001") !== giaTri.approvedFacts.join("\u0001") ||
+      dangCo.availableColors.join("\u0001") !== giaTri.availableColors.join("\u0001"));
+
   if (dangCo) {
     await db
       .update(schema.fanpageSalesProfiles)
-      .set({ ...giaTri, version: doiBanChat ? dangCo.version + 1 : dangCo.version, effectiveFrom: doiBanChat ? new Date() : dangCo.effectiveFrom, updatedAt: new Date() })
+      .set({
+        ...giaTri,
+        version: doiBanChat ? dangCo.version + 1 : dangCo.version,
+        knowledgeVersion: doiDuKien ? dangCo.knowledgeVersion + 1 : dangCo.knowledgeVersion,
+        effectiveFrom: doiBanChat ? new Date() : dangCo.effectiveFrom,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.fanpageSalesProfiles.id, dangCo.id));
   } else {
-    await db.insert(schema.fanpageSalesProfiles).values({ ...giaTri, version: 1, effectiveFrom: new Date() });
+    await db.insert(schema.fanpageSalesProfiles).values({ ...giaTri, version: 1, knowledgeVersion: 1, effectiveFrom: new Date() });
   }
 
   await audit({

@@ -2605,6 +2605,11 @@ export const salesConversations = pgTable(
     offerSnapshot: jsonb("offer_snapshot"),
     /** Bảng số đo LÚC CHỤP — đổi bảng size sau này không làm đổi lời tư vấn đã đưa. */
     sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
+    sizeProfileVersion: integer("size_profile_version"),
+    /** Sổ dữ kiện đã duyệt ở phiên bản nào — để dựng lại được vì sao máy nói câu đó. */
+    knowledgeVersion: integer("knowledge_version"),
+    /** Luật nguồn nào đã áp (nếu có). NULL = rơi về mặc định của fanpage. */
+    sourceRuleId: text("source_rule_id").references(() => salesSourceRules.id, { onDelete: "set null" }),
     /** SNAPSHOT · SOURCE_RULE · AD_MAP · FANPAGE_DEFAULT · NONE */
     classificationSource: text("classification_source").notNull().default(""),
     classificationConfidence: doublePrecision("classification_confidence"),
@@ -2930,12 +2935,19 @@ export const fanpageSalesProfiles = pgTable(
     /** Tổng tiền từ mức này trở lên thì miễn ship. NULL = không có luật miễn ship. */
     freeShipFrom: integer("free_ship_from"),
     availableColors: text("available_colors").array().notNull().default(sql`'{}'::text[]`),
+    /** Chất liệu — TUYÊN BỐ về sản phẩm, không được suy từ ảnh. Rỗng = chưa khai ⇒ máy phải né. */
+    material: text("material").notNull().default(""),
     codPolicy: text("cod_policy").notNull().default(""),
     inspectionPolicy: text("inspection_policy").notNull().default(""),
     deliveryEstimate: text("delivery_estimate").notNull().default(""),
     exchangePolicy: text("exchange_policy").notNull().default(""),
     /** Câu dữ kiện ĐÃ DUYỆT máy được phép nói. Ngoài danh sách này máy không được bịa thêm. */
     approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * Phiên bản SỔ DỮ KIỆN — tách khỏi `version` vì hai thứ khác nhau: đổi GIÁ là đổi điều kiện
+     * bán, đổi CÂU ĐÃ DUYỆT là đổi thứ máy được phép nói. Hội thoại chụp cả hai.
+     */
+    knowledgeVersion: integer("knowledge_version").notNull().default(1),
     sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
 
     note: text("note").notNull().default(""),
@@ -3021,8 +3033,24 @@ export const testProductProfiles = pgTable(
     /** Giá test. NULL = CHƯA CÓ GIÁ, máy không được báo giá. */
     /** NULL = CHƯA CÓ GIÁ, máy không được báo giá cho mẫu test này. */
     price: integer("price"),
+    /** NULL = CHƯA KHAI PHÍ SHIP. Không mượn phí ship của mẫu thắng. */
+    shippingFee: integer("shipping_fee"),
+    /** [{ quantity, price, freeShipping }] — combo riêng của mẫu test. */
+    comboPricing: jsonb("combo_pricing"),
+    freeShipFrom: integer("free_ship_from"),
+    /**
+     * Bốn chính sách, khai RIÊNG cho mẫu test.
+     *
+     * Không có bốn ô này thì cổng năng lực chỉ còn hai lối, cả hai đều sai: cho mẫu test mượn
+     * chính sách của mẫu thắng, hoặc miễn kiểm tra cho mẫu test. Ô riêng là lối thứ ba.
+     */
+    codPolicy: text("cod_policy").notNull().default(""),
+    inspectionPolicy: text("inspection_policy").notNull().default(""),
+    deliveryEstimate: text("delivery_estimate").notNull().default(""),
+    exchangePolicy: text("exchange_policy").notNull().default(""),
     promotion: text("promotion").notNull().default(""),
     shippingPolicy: text("shipping_policy").notNull().default(""),
+    knowledgeVersion: integer("knowledge_version").notNull().default(1),
     sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
     approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
     note: text("note").notNull().default(""),
