@@ -85,6 +85,28 @@ async function main() {
     phải chạy lại cả mẻ, tức trả tiền mô hình lần thứ hai cho một lỗi hiển thị. Tách phần đo khỏi
     phần chạy để chuyện đó không lặp lại.
   */
+  /*
+    GỠ CỜ "NGƯỜI ĐÃ TIẾP QUẢN" TRƯỚC KHI ĐO LẠI — chỉ trên bản chạy thử, chỉ khi được yêu cầu.
+
+    Cờ `human_takeover_at` do CHÍNH nhân sự AI đặt ở lượt nạp trước: nó kết luận chuyển người (vì
+    lược đồ hỏng — xem 29d1b8c), và công cụ handoff ghi cờ VĨNH VIỄN. Lượt đo sau đó chạy lại trên
+    đúng những hội thoại đã bị khoá, nên mọi câu trả lời đều là "chuyển người" và mẻ không đo được
+    chất lượng gì.
+
+    Đây KHÔNG phải xoá dữ liệu nghiệp vụ: bản chạy thử có CSDL riêng, và cờ này là kết luận của máy
+    chứ không phải hành động của người. Nhưng vì nó vẫn là ghi đè, nó phải được GÕ RA TƯỜNG MINH —
+    `--reset-takeover` — chứ không bao giờ chạy ngầm trong một lượt đo.
+  */
+  if (process.argv.includes("--reset-takeover")) {
+    const go = await db.execute(sql`
+      update sales_conversations
+      set human_takeover_at = null, takeover_reason = '', stage = 'NEW_LEAD', updated_at = now()
+      where page_id = ${pageId} and human_takeover_at is not null and takeover_by_user_id is null
+      returning id
+    `);
+    console.log(`\n⓪ ĐÃ GỠ CỜ "người đã tiếp quản" trên ${rowsOf<unknown>(go).length} hội thoại (chỉ những cờ do MÁY đặt — dòng có takeover_by_user_id là người thật, giữ nguyên)`);
+  }
+
   const chiDoc = process.argv.includes("--report-only");
   if (!agent) { console.error("Chưa có bản nhân sự bán hàng"); process.exit(1); }
   if (chiDoc) {
