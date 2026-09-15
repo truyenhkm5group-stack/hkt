@@ -777,12 +777,24 @@ jobs:
                 [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_stg ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; echo "ANTHROPIC_API_KEY: đã ghi vào .env.staging (${#ANTHROPIC_API_KEY} ký tự)"; }
                 upsert_stg AI_PROVIDER "${AI_PROVIDER:-auto}"
                 # CHẶN CỨNG GIỮ NGUYÊN. Bật mô hình thật KHÔNG được kéo theo quyền gửi tin hay tạo
-                # đơn — đó là hai khoá riêng, và chúng phải ở lại CẤM.
+                # đơn — đó là những khoá riêng, và chúng phải ở lại CẤM.
+                #
+                # NHƯNG KHÔNG ĐỤNG TỚI `AI_ALLOW_HUMAN_APPROVED_SEND`.
+                #
+                # Đo 15/09/2026: thao tác này từng ghi đè nó về `false`, nên chạy lại lượt cài khoá
+                # AI giữa đợt thí điểm sẽ TẮT NGẤM nấc trợ lý — không báo gì, và người trực chỉ biết
+                # khi bấm Gửi thì bị từ chối. Một thao tác về KHOÁ MÔ HÌNH không có quyền có ý kiến
+                # về cổng gửi; cổng ấy có thao tác riêng (`ai-staging-copilot`).
+                #
+                # Vắng mặt trong .env vẫn là CẤM, nên không ghi gì ở đây là an toàn: nó chỉ giữ
+                # nguyên quyết định đang có, chứ không tự mở.
                 upsert_stg AI_DEFAULT_MODE SHADOW
                 upsert_stg AI_ALLOW_AUTO_SEND false
-                upsert_stg AI_ALLOW_HUMAN_APPROVED_SEND false
                 upsert_stg AI_ALLOW_CUSTOMER_SEND false
                 upsert_stg AI_ALLOW_ORDER_CREATE false
+                if grep -qE '^AI_ALLOW_HUMAN_APPROVED_SEND="?true"?$' .env.staging; then
+                  echo "⚠ Nấc trợ lý ĐANG MỞ (nhân viên bấm gửi được) — thao tác này giữ nguyên, không tắt."
+                fi
                 # CHUYỂN SANG CẦU NỐI. Mẫu `.env.staging.example` khai `stub` để một lần dựng
                 # không bao giờ tự gọi mạng; tới đây là lúc CỐ Ý bật, nên khai tường minh.
                 upsert_stg AI_WORKFORCE_PROVIDER erp
