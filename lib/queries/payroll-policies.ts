@@ -15,6 +15,7 @@ import {
   type PolicyComponent,
 } from "@/lib/constants/payroll-components";
 import type { EmploymentRow, PolicyAssignmentRow, PolicyVersionRow } from "@/lib/payroll/policy-resolve";
+import { validatePolicyBook, type PolicyIssue } from "@/lib/payroll/policy-validation";
 
 export type PolicyRow = typeof schema.salaryPolicies.$inferSelect;
 
@@ -242,5 +243,34 @@ export async function overlappingActiveVersions(policyId: string, from: Date, to
     const rTo = r.effectiveTo ? r.effectiveTo.getTime() : Number.POSITIVE_INFINITY;
     const qTo = to ? to.getTime() : Number.POSITIVE_INFINITY;
     return r.effectiveFrom.getTime() <= qTo && rTo >= from.getTime();
+  });
+}
+
+/**
+ * KIỂM SỔ KHAI CHO MỘT KỲ — một lượt đọc, rồi chạy phép kiểm THUẦN.
+ *
+ * Đây là cửa mà cả màn hình lẫn cổng chốt kỳ gọi, nên hai nơi không thể nói hai điều khác nhau về
+ * cùng một sổ khai.
+ */
+export async function validatePolicyBookForPeriod(
+  from: Date,
+  to: Date,
+  employees: readonly { id: string; name: string }[],
+): Promise<PolicyIssue[]> {
+  const book = await loadAssignmentBook();
+  const policyCodeByVersion = new Map<string, string>();
+  for (const v of book.policyVersions) {
+    const code = book.policyAssignments.find((a) => a.policyId === v.policyId)?.policyCode ?? v.policyId;
+    policyCodeByVersion.set(v.id, code);
+  }
+  return validatePolicyBook({
+    from,
+    to,
+    employees,
+    employments: book.employments,
+    policyAssignments: book.policyAssignments,
+    policyVersions: book.policyVersions,
+    componentsByVersion: book.componentsByVersion,
+    policyCodeByVersion,
   });
 }

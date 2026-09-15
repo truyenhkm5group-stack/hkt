@@ -32,7 +32,8 @@ export type FinalizeBlocker = {
     | "COST_EVIDENCE_MISSING"
     | "CARRYOVER_OPENING_NOT_ESTABLISHED"
     | "ENGINE_INPUT_MISSING"
-    | "ENGINE_POLICY_PROBLEM";
+    | "ENGINE_POLICY_PROBLEM"
+    | "POLICY_BOOK_INVALID";
   /** Nói ĐÚNG cái đang thiếu, và nói được phải làm gì. Không có "dữ liệu không hợp lệ". */
   message: string;
 };
@@ -62,6 +63,15 @@ export type ReadinessInput = {
     /** Vấn đề về CẤU HÌNH: chưa gán chính sách, phiên bản còn là bản nháp. Khác hẳn thiếu số liệu. */
     engineProblems?: readonly string[];
   }[];
+  /**
+   * Lỗi ở SỔ KHAI (`lib/payroll/policy-validation.ts`): chồng lấn mốc gán, khoảng trống không
+   * chính sách nào phủ, thành phần thiếu tỷ lệ/đơn giá, phiên bản chưa hiệu lực.
+   *
+   * Tách khỏi `engineProblems` vì chúng nói ở hai MỨC khác nhau: `engineProblems` nói "đoạn này
+   * không tính được", còn đây nói "sổ khai thiếu gì và sửa ở đâu". Người đọc cần cái thứ hai để
+   * đi làm được việc.
+   */
+  policyIssues?: readonly { message: string; blocking: boolean }[];
 };
 
 export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[] {
@@ -131,6 +141,11 @@ export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[
     `null` ⇒ cửa `UNKNOWN_SALARY` ở trên đã chặn rồi, nhưng nó chỉ nói "còn con số chưa biết" mà
     không nói con số nào của ai. Hai cửa dưới đây nói ĐÚNG chỗ và đúng người.
   */
+  for (const issue of input.policyIssues ?? []) {
+    if (!issue.blocking) continue;
+    out.push({ code: "POLICY_BOOK_INVALID", message: issue.message });
+  }
+
   for (const l of input.lines) {
     for (const m of l.engineMissing ?? []) {
       out.push({ code: "ENGINE_INPUT_MISSING", message: `${l.name} — thiếu “${m.label}”. ${m.message}` });

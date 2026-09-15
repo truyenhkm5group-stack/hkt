@@ -18,6 +18,7 @@ import {
   type PolicyComponent,
 } from "@/lib/constants/payroll-components";
 import { calculateComponent, calculatePayrollItem, type SegmentInput } from "@/lib/payroll/engine";
+import { assignmentOverlaps, componentMissingParams, policyGaps } from "@/lib/payroll/policy-validation";
 import { resolveSegments, type EmploymentRow, type PolicyAssignmentRow, type PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00+07:00`);
@@ -569,5 +570,81 @@ export function testPayrollEngine() {
     assert.equal(r.netPay, 6_500_000, "ví dụ mục 16: (75tr − 10tr) × 10%");
   }
 
-  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc");
+  // ─────────── KIỂM SỔ KHAI: CHỒNG LẤN · KHOẢNG TRỐNG · THIẾU THAM SỐ ───────────
+  {
+    const ten = (id: string) => (id === "NV1" ? "An" : id);
+
+    /*
+      CHỒNG LẤN. `resolveSegments` vẫn chạy được (nó lấy dòng có `effectiveFrom` muộn nhất), nên
+      KHÔNG có lỗi nào nổ ra — và đó chính là vấn đề: tiền của những ngày ấy do một quy tắc ngầm
+      quyết định, không do người khai.
+    */
+    const chongLan = assignmentOverlaps(
+      [
+        assign({ id: "a1", policyId: "PA", policyCode: "A", effectiveFrom: d("2026-09-01"), effectiveTo: dEnd("2026-09-20") }),
+        assign({ id: "a2", policyId: "PB", policyCode: "B", effectiveFrom: d("2026-09-15") }),
+      ],
+      ten,
+    );
+    assert.equal(chongLan.length, 1, "hai dòng gán cùng phủ một ngày PHẢI bị bắt");
+    assert.equal(chongLan[0].blocking, true, "và nó chặn chốt kỳ — tiền không được do thứ tự dòng quyết định");
+    assert.match(chongLan[0].message, /Phân công/, "câu chặn phải nói ĐÚNG chỗ sửa");
+
+    // Đóng dòng cũ lại đúng ngày liền trước ⇒ hết chồng lấn.
+    const sachSe = assignmentOverlaps(
+      [
+        assign({ id: "a1", policyId: "PA", policyCode: "A", effectiveFrom: d("2026-09-01"), effectiveTo: dEnd("2026-09-14") }),
+        assign({ id: "a2", policyId: "PB", policyCode: "B", effectiveFrom: d("2026-09-15") }),
+      ],
+      ten,
+    );
+    assert.deepEqual(sachSe, [], "đóng dòng cũ đúng ngày liền trước ⇒ không còn chồng lấn");
+
+    /*
+      THAM SỐ BẰNG 0 LÀ MỘT CÂU HỎI, KHÔNG PHẢI MỘT LỖI.
+
+      0 là giá trị hợp lệ — chủ shop có thể thật sự muốn thế. Nhưng "chưa ai nhập" và "đã quyết là
+      0" trông y hệt nhau, và cái giá của việc đoán nhầm là một người không nhận được khoản mình
+      đáng nhận. ERP KHÔNG đặt hộ con số; nó hỏi lại.
+    */
+    const thieu = componentMissingParams("PE_TEST", [
+      comp({ code: "A", kind: "FIXED", calc: { type: "FIXED_AMOUNT", amount: 0 } }),
+      comp({ code: "B", kind: "COMMISSION", calc: { type: "RATE_OF_BASIS", basisKey: "REVENUE_PERSONAL", ratePercent: 0 } }),
+      comp({ code: "C", kind: "TIME_BASED", calc: { type: "PER_UNIT", basisKey: "WORK_HOURS", unitRate: 0 } }),
+      comp({ code: "D", kind: "FIXED", calc: { type: "FIXED_AMOUNT", amount: 5_000_000 } }),
+    ]);
+    assert.equal(thieu.length, 3, "ba thành phần khai 0 phải bị hỏi lại, thành phần khai đủ thì không");
+    assert.ok(thieu.every((i) => i.blocking));
+    assert.ok(thieu.every((i) => /KHÔNG đặt hộ/.test(i.message)), "và nói rõ ERP không tự đặt số");
+
+    /*
+      KHOẢNG TRỐNG. Người ĐÃ bước sang máy mới mà có đoạn không chính sách nào phủ thì đoạn ấy ra 0
+      đồng — trông y hệt "kỳ này không có gì để nhận". Người CHƯA gán chính sách nào thì KHÔNG bị
+      soi: họ vẫn đi đường tính cũ, và đó là trạng thái hợp lệ trong giai đoạn chuyển.
+    */
+    const trong = policyGaps({
+      ...THANG_9,
+      employees: [{ id: "NV1", name: "An" }, { id: "NV2", name: "Bình" }],
+      employments: [emp({ employeeId: "NV1" }), emp({ id: "e2", employeeId: "NV2" })],
+      // An gán chính sách nhưng chỉ tới 20/09; Bình chưa gán gì.
+      policyAssignments: [assign({ employeeId: "NV1", effectiveTo: dEnd("2026-09-20") })],
+      policyVersions: [ver()],
+    });
+    assert.equal(trong.length, 1, "chỉ người ĐÃ gán chính sách mới bị soi khoảng trống");
+    assert.equal(trong[0].employeeId, "NV1");
+    assert.match(trong[0].message, /KHÔNG chính sách nào phủ/);
+
+    // Gán chính sách nhưng phiên bản còn là NHÁP ⇒ một vấn đề KHÁC, và câu chặn phải khác.
+    const nhap = policyGaps({
+      ...THANG_9,
+      employees: [{ id: "NV1", name: "An" }],
+      employments: [emp()],
+      policyAssignments: [assign()],
+      policyVersions: [ver({ status: "DRAFT" })],
+    });
+    assert.equal(nhap[0].code, "VERSION_NOT_EFFECTIVE", "bản nháp là chuyện khác hẳn chưa gán chính sách");
+    assert.match(nhap[0].message, /Chính sách lương/, "và chỉ sang đúng tab khác");
+  }
+
+  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc + kiểm sổ khai (chồng lấn · khoảng trống · thiếu tham số)");
 }

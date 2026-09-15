@@ -343,7 +343,10 @@ export async function testPayrollCarryover(db: Db) {
   */
   const nguon = execSync("git show HEAD:lib/actions/payroll-period.ts", { encoding: "utf8" });
   const viTriKhoa = nguon.indexOf("pg_advisory_xact_lock");
-  const viTriKiem = nguon.indexOf("eq(p.status, \"FINAL\"), lte(p.periodStart");
+  // Dấu hiệu của phép kiểm chồng lấn. Từ bản vòng đời, nó lọc theo TẬP đã đóng băng
+  // (`FINAL` cũ + `LOCKED` + `PAID`) chứ không còn so bằng với một chuỗi — hai bản NHÁP chồng lấn
+  // là chuyện bình thường khi đang thử các mốc kỳ, và chặn chúng là chặn chính việc soát.
+  const viTriKiem = nguon.indexOf("lte(p.periodStart, toAt), gte(p.periodEnd, fromAt)");
   assert.ok(viTriKhoa > 0, "8b. lượt chốt phải cầm một khoá TÊN (pg_advisory_xact_lock) — khoá dòng không dùng được cho dòng chưa tồn tại");
   assert.ok(viTriKiem > 0, "8b. phép kiểm chồng lấn phải còn trong tệp");
   assert.ok(viTriKiem > viTriKhoa, "8b. và nó phải chạy SAU khi đã cầm khoá, không phải trước giao dịch");

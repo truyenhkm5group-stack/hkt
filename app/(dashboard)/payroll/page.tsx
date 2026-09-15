@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/table";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { can, requireUser } from "@/lib/auth/session";
-import { employeeMatchesUser } from "@/lib/queries/payroll";
+import { employeeMatchesUser, listEmployees } from "@/lib/queries/payroll";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_LABEL,
@@ -54,6 +54,7 @@ import { ProductOwnersForm } from "@/app/(dashboard)/payroll/product-owners-form
 import { FinalizePeriodButton } from "@/app/(dashboard)/payroll/finalize-button";
 import { FinalizedPeriodTable } from "@/app/(dashboard)/payroll/finalized-period";
 import { getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
+import { validatePolicyBookForPeriod } from "@/lib/queries/payroll-policies";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
 import { cn } from "@/lib/utils";
 
@@ -73,13 +74,25 @@ export default async function PayrollPage({
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const selected = param(raw, "marketer");
   const pagesForConfig = listPagesForConfig().catch(() => []);
-  const [report, unassigned, accounts, products, periodState] = await Promise.all([
+  const [report, unassigned, accounts, products, periodState, employeesForCheck] = await Promise.all([
     getPayrollReport(period, basis),
     unassignedMarketerSpend(period),
     listAdAccounts(),
     listProductsForMapping(),
     getPayrollPeriodState(period, basis),
+    listEmployees(),
   ]);
+  /*
+    LỖI Ở SỔ KHAI, KHÁC HẲN THIẾU SỐ LIỆU.
+
+    Chồng lấn mốc gán, khoảng trống không chính sách nào phủ, thành phần khai tỷ lệ 0 — cả ba đều
+    KHÔNG lộ ra ở con số cuối cùng: bảng vẫn ra một số, và số ấy sai. Nên chúng được kiểm riêng,
+    và câu chặn nói ĐÚNG chỗ phải sửa.
+  */
+  const policyIssues =
+    period.from && period.to
+      ? await validatePolicyBookForPeriod(period.from, period.to, employeesForCheck.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name })))
+      : [];
   /*
     KỲ ĐÃ KHOÁ ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
 
@@ -111,6 +124,7 @@ export default async function PayrollPage({
       engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
       engineProblems: l.engine?.result.problems ?? [],
     })),
+    policyIssues,
   });
   const qs = new URLSearchParams({
     period: period.key,

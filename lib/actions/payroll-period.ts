@@ -23,6 +23,7 @@ import { isFrozen, normalizePayrollStatus } from "@/lib/constants/payroll-lifecy
 // dịch đã cầm khoá (xem dưới), vì kiểm ngoài rồi ghi trong là đúng cái khe mà hai yêu cầu đồng
 // thời lọt qua. Hàm cũ vẫn phục vụ `lib/queries/payroll-period.ts` cho phần chỉ ĐỌC.
 import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
+import { validatePolicyBookForPeriod } from "@/lib/queries/payroll-policies";
 import type { Period } from "@/lib/search-params";
 
 export type PeriodActionResult = { ok: true; key: string } | { error: string };
@@ -128,6 +129,12 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
       engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
       engineProblems: l.engine?.result.problems ?? [],
     })),
+    // Cùng phép kiểm mà màn hình dùng — hai nơi không thể nói hai điều khác nhau về một sổ khai.
+    policyIssues: await validatePolicyBookForPeriod(
+      fromAt,
+      toAt,
+      report.lines.map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name })),
+    ),
   });
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
