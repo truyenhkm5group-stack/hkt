@@ -129,7 +129,56 @@ trị. Sửa ở hồ sơ nhân sự, mỗi người một email.
 
 ---
 
-## 4. Đối chiếu từng người: vì sao tài liệu này không có bảng ấy
+## 3b. ĐÍNH CHÍNH: "4/4 khớp, lệch 0đ" ở mục 1 là một kết quả RỖNG NGHĨA
+
+Mục 1 kết luận "sai lệch cũ/mới = 0đ" từ việc các bảng lương production đang rỗng. **Kết luận ấy
+đúng về mặt sự kiện nhưng không đủ để làm căn cứ phát hành**, và cần nói thẳng ra:
+
+Bốn người "khớp" vì cả hai đường tính đều trả về cùng một thứ *không có gì*. Hai phép tính cùng ra
+0 trên dữ liệu rỗng **không chứng minh chúng đồng ý** — chỉ chứng minh không có gì để bất đồng.
+Kết quả rỗng nghĩa nguy hiểm vì nó trông y hệt một kết quả tốt, và nó xuất hiện đúng lúc người ta
+muốn nghe điều đó nhất.
+
+Cổng đối chiếu nay **từ chối** loại kết luận ấy: kỳ không có một nguồn số nào khác 0 thì kết quả là
+`RECONCILIATION_BLOCKED_BY_CONFIG`, không phải "đạt". `tests/payroll-production-readiness.test.ts`
+khối 11 khoá điều đó bằng một khẳng định thẳng: *bốn người khớp trên một kỳ rỗng vẫn không được đạt*.
+
+### Đối chiếu THẬT trên dữ liệu không rỗng
+
+Chạy trên bộ dữ liệu demo của kho mã — **1.126 đơn · 1.034 vận đơn · 20 dòng chi phí** — với bốn
+nhân sự mang đúng **hình dạng** cấu hình production (2 có lương cứng · 2 có %LN tổng · 3 có %LN cá
+nhân · 0 có %doanh thu · 1 không khai gì). *Số là số thử, không phải mức lương thật của ai.*
+
+Script tự chọn kỳ **08/2026**: 455 đơn · 291 giao thành công · 387.490.000đ doanh thu · 7 dòng chi phí.
+
+| Lượt | Trạng thái khai báo | Kết quả | Kết luận cổng |
+| --- | --- | --- | --- |
+| 1 | Chưa khai phân công — **đúng trạng thái production hôm nay** | 4 `NEEDS_CONFIG` · 0 `MATCH` | `RECONCILIATION_BLOCKED_BY_CONFIG` |
+| 2 | Đã khai phân công | **3 `MATCH`** · 1 `NEEDS_CONFIG` · **0 `BUG`** | `RECONCILIATION_PASS` |
+
+Ba con số khớp ở lượt 2 — và không con số nào là 0:
+
+| Đường cũ | Máy mới | Lệch | Gồm |
+| ---: | ---: | ---: | --- |
+| 12.000.000 | 12.000.000 | **0** | lương cứng chia theo ngày của kỳ |
+| 12.784.183 | 12.784.183 | **0** | 9.000.000 lương cứng + 3.784.183 (3% lợi nhuận toàn shop) |
+| 2.522.789 | 2.522.789 | **0** | 2% lợi nhuận toàn shop |
+
+Con số `3.784.183` là thứ chứng minh nhiều nhất: nó chạy qua **trọn bộ** máy tính lợi nhuận (đơn →
+doanh thu giao thành công → giá vốn → chi phí → phân bổ), và hai đường tính độc lập ra đúng cùng
+một số. Đó là bằng chứng hai implementation đồng ý — thứ mà lượt chạy trên bảng rỗng không nói được.
+
+**Chứng minh không ghi:** ảnh đếm 10 bảng lương (gồm `audit_logs`) TRƯỚC = SAU ở cả hai lượt.
+`transaction_read_only=on` và `default_transaction_read_only=on` được chính Postgres xác nhận trước
+khi đọc dòng đầu tiên.
+
+> Đây là **CSDL demo cục bộ**, không phải production. Nó chứng minh **hai implementation đồng ý
+> trên dữ liệu có thật**; nó KHÔNG thay cho một lượt chạy trên số liệu production. Vì sao chưa chạy
+> được trên production: mục 4.
+
+---
+
+## 4. Đối chiếu từng người trên PRODUCTION: vì sao vẫn chưa chạy được
 
 Yêu cầu là một bảng `Legacy / New Policy Preview / Difference` cho từng nhân sự. Bảng ấy **chưa lập
 được ở phiên này**, và lý do là một sự thật về hạ tầng chứ không phải một bước bị bỏ quên:
@@ -137,6 +186,11 @@ Yêu cầu là một bảng `Legacy / New Policy Preview / Difference` cho từn
 - Kênh đọc production duy nhất phiên này có là `db-query` — nó chạy **một câu SQL**, không chạy mã
   ứng dụng. Mà cả hai vế của bảng ấy (`getPayrollReport` cho cột cũ, máy chính sách cho cột mới)
   đều là **mã ứng dụng**, không phải một câu truy vấn.
+- Kênh chạy mã ứng dụng trên production có tồn tại (`fetch_script` trong `ops-vps.yml`, kiểu
+  `returns-parity` / `profit-verify`), nhưng nó **ghim cứng `?ref=main`**. Script đối chiếu của
+  nhánh này chưa có trên `main`, nên kênh ấy không lấy được nó. Sửa `fetch_script` để nhận ref tuỳ
+  ý sẽ cho **bất kỳ nhánh nào** chạy mã tuỳ ý trên production — một lỗ hổng lớn hơn nhiều so với
+  vấn đề nó giải, nên **không làm**.
 - Dựng lại phép tính ấy bằng SQL viết tay sẽ tạo ra một **đường tính thứ ba** — đúng thứ AGENTS.md
   mục 8.12 cấm, và nó sẽ khớp với màn hình đúng tới lúc một trong hai bên đổi.
 - Chạy `scripts/payroll-reconcile.ts` cần một `DATABASE_URL` trỏ tới production; phiên này không

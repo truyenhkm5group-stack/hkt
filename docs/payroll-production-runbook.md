@@ -56,7 +56,12 @@ select count(*) as ky_luong, count(*) filter (where status in ('FINAL','LOCKED',
 Kỳ vọng ở thời điểm viết tài liệu: `0 | 0`. Nếu ra số khác 0 thì đã có kỳ lương được chốt kể từ
 15/09/2026 — **đọc lại mục 0**, vì căn cứ "không con số nào đổi" dựa trên việc bảng ấy rỗng.
 
-**Cách B — sau khi deploy, đối chiếu từng người bằng script.** Script này CHỈ ĐỌC, và "chỉ đọc" ở
+**Cách B — sau khi deploy, đối chiếu từng người bằng script.** Bỏ trống `--from/--to` thì script
+**tự tìm kỳ gần nhất CÓ dữ liệu nguồn** và in ra từng kỳ đã thử. Nó DỪNG nếu Postgres không xác
+nhận phiên là chỉ đọc, và chụp ảnh đếm 10 bảng lương TRƯỚC/SAU để chứng minh không ghi gì.
+Kỳ không có nguồn số nào khác 0 thì kết luận là `RECONCILIATION_BLOCKED_BY_CONFIG`, **không phải
+"đạt"** — hai phép tính cùng ra 0 trên dữ liệu rỗng không chứng minh chúng đồng ý.
+ Script này CHỈ ĐỌC, và "chỉ đọc" ở
 đây do Postgres ép chứ không do mã nguồn hứa (`ERP_READ_ONLY=1` →
 `default_transaction_read_only=on` ở gói khởi tạo kết nối):
 
@@ -101,12 +106,28 @@ của ứng dụng, vì làm vậy là biến cả ERP thành chỉ đọc.
 
 ### 1.5 Kiểm quyền
 
+> ### ⚠ QUYỀN XEM LƯƠNG THEO NHÓM CHƯA ĐƯỢC XÂY — VÀ ĐÓ LÀ MỘT RÀNG BUỘC AN NINH
+>
+> ERP chỉ có hai mức: **xem TẤT CẢ** (`payroll:view`) hoặc **xem CỦA MÌNH** (`payroll:view-own`).
+> **Không có** phạm vi "trưởng nhóm xem nhóm mình".
+>
+> Cho tới khi phạm vi ấy được xây, mặc định là **TỪ CHỐI**: `MANAGER` và `LEADER` **không** được
+> `payroll:view`. Cấp nó để "trưởng nhóm xem được nhóm mình" là cấp quyền xem lương **toàn công
+> ty** — rộng hơn nhiều so với thứ đang cần, và người cấp thường không nhận ra.
+>
+> Bản này đã siết lại hai chỗ: `MANAGER` nhận nó do một phép LOẠI TRỪ (không ai từng quyết định
+> cấp), `LEADER` nhận nó tường minh với chú thích "cả nhóm" trong khi mã thật sự cấp cả công ty.
+>
+> **Không bật lại bằng cách gán `payroll:view` cho một vai trò.** Ai thật sự cần xem toàn bộ thì
+> cấp cho **từng người** ở trang Người dùng, có tên, có người quyết.
+
+
 Ba quyền lương phải có người giữ, và **`payroll:manage` với `payroll:approve` nên ở hai người khác
 nhau** — người khai số và người duyệt số không nên là một. Kiểm ở `/settings/users`.
 
 | Quyền | Làm được gì |
 | --- | --- |
-| `payroll:view` | Xem bảng lương toàn shop |
+| `payroll:view` | Xem bảng lương toàn shop — mặc định CHỈ `ADMIN` và `ACCOUNTANT` |
 | `payroll:view-own` | Chỉ xem phiếu lương của chính mình (khớp bằng email đăng nhập) |
 | `payroll:manage` | Khai chính sách, phân công, nhập liệu, tính kỳ |
 | `payroll:approve` | Duyệt · trả lại · khoá · mở khoá · đánh dấu đã trả |
