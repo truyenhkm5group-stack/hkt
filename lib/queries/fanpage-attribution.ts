@@ -24,6 +24,8 @@ import { and, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
+import type { AttributionSource, LandingEvidenceTier, LandingGapReason } from "@/lib/constants/landing-attribution";
+import { ORDER_SOURCE } from "@/lib/queries/order-source";
 import { ATTRIBUTION_STATUSES, DUPLICATE_SIGNALS, type AttributionStatus, type DuplicateSignal } from "@/lib/constants/fanpage-attribution";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 import type { ListParams, Period } from "@/lib/search-params";
@@ -32,6 +34,7 @@ const O = schema.orders;
 const OA = schema.orderAttributions;
 const OI = schema.orderItems;
 const F = schema.fanpages;
+const LA = schema.landingAttributions;
 const ASG = schema.fanpageMarketerAssignments;
 
 /** Đơn ĐÃ XÁC NHẬN trên Pancake — cùng danh sách với mọi KPI quản trị khác. */
@@ -124,6 +127,32 @@ export type AttributionReport = {
   totalConfirmedRevenue: number;
   /** Đơn trong kỳ CHƯA có dòng quy kết ⇒ báo cáo đang thiếu đơn, phải chạy lại đối soát. */
   missing: number;
+  /**
+   * NHÓM "KHÔNG CÓ FANPAGE" TÁCH RA BỐN LOẠI — vì bốn loại ấy có bốn cách sửa khác nhau, và gộp
+   * chúng thành một con số là cách chắc chắn nhất để không ai sửa gì cả.
+   *
+   * `landingAttributed` KHÔNG còn nằm trong `NO_PAGE`: đó chính là phần đã cứu được bằng tracking
+   * quảng cáo. Nó đứng đây để đọc được "đã cứu bao nhiêu / còn lại bao nhiêu" trong cùng một bảng.
+   */
+  noPageGroups: Record<NoPageGroup, { orders: number; confirmedOrders: number; confirmedRevenue: number }>;
+};
+
+/** Bốn nhóm của phần đơn không mang `page_id` Pancake. Nguồn đơn đọc lại `ORDER_SOURCE`. */
+export const NO_PAGE_GROUPS = ["LANDING_ATTRIBUTED", "LANDING_UNATTRIBUTED", "MANUAL_NO_SOURCE", "OTHER_NO_PAGE"] as const;
+export type NoPageGroup = (typeof NO_PAGE_GROUPS)[number];
+
+export const NO_PAGE_GROUP_LABEL: Record<NoPageGroup, string> = {
+  LANDING_ATTRIBUTED: "Landing — đã quy kết bằng tracking",
+  LANDING_UNATTRIBUTED: "Landing — chưa đủ bằng chứng",
+  MANUAL_NO_SOURCE: "Đơn nhập tay / nguồn khác",
+  OTHER_NO_PAGE: "Có dấu vết Facebook nhưng thiếu page_id",
+};
+
+export const NO_PAGE_GROUP_HINT: Record<NoPageGroup, string> = {
+  LANDING_ATTRIBUTED: "Đơn form landing đã tra ra marketer qua ad_id / adset_id / tên chiến dịch khớp tuyệt đối. Đã RA KHỎI nhóm “không có fanpage”.",
+  LANDING_UNATTRIBUTED: "Đơn form landing nhưng tracking thiếu hoặc không khớp mẩu quảng cáo nào trong ERP. Xem cột lý do ở tab Soi từng đơn.",
+  MANUAL_NO_SOURCE: "Đơn không có dấu vết của cả hai kênh (nhập tay, sàn, nguồn chưa khai). Không có gì để quy kết — và đó là câu trả lời đúng.",
+  OTHER_NO_PAGE: "Đơn có hội thoại / bài viết Facebook nhưng Pancake không gửi page_id. Đồng bộ lại đơn để bổ sung, rồi chạy đối soát.",
 };
 
 /**
@@ -224,6 +253,37 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
       row.pages = Math.max(row.pages, Number(r.pages));
     }
 
+    /*
+      BỐN NHÓM CỦA PHẦN "KHÔNG CÓ FANPAGE".
+
+      Nguồn đơn đọc lại `ORDER_SOURCE` (`lib/queries/order-source.ts`) — MỘT chỗ duy nhất định
+      nghĩa "đơn này đến từ kênh nào" trong cả kho mã. Viết một điều kiện riêng ở đây là dựng
+      định nghĩa thứ hai cho cùng một câu hỏi, và hai màn hình sẽ nói hai con số.
+    */
+    const groupRows = await db
+      .select({
+        group: sql<NoPageGroup>`case
+          when ${OA.attributionSource} = 'LANDING_UTM' then 'LANDING_ATTRIBUTED'
+          when ${ORDER_SOURCE} = 'LANDING' then 'LANDING_UNATTRIBUTED'
+          when ${ORDER_SOURCE} = 'OTHER' then 'MANUAL_NO_SOURCE'
+          else 'OTHER_NO_PAGE' end`,
+        orders: sql<number>`count(*)::int`,
+        confirmedOrders: sql<number>`count(*) filter (where ${CONFIRMED})::int`,
+        confirmedRevenue: sql<number>`coalesce(sum(${CONFIRMED_ORDER_VALUE}) filter (where ${CONFIRMED}), 0)::bigint`,
+      })
+      .from(OA)
+      .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
+      .where(and(where, sql`(${OA.status} = 'NO_PAGE' or ${OA.attributionSource} = 'LANDING_UTM')`))
+      .groupBy(sql`1`);
+    const noPageGroups = Object.fromEntries(NO_PAGE_GROUPS.map((g) => [g, { orders: 0, confirmedOrders: 0, confirmedRevenue: 0 }])) as AttributionReport["noPageGroups"];
+    for (const g of groupRows) {
+      const bucket = noPageGroups[g.group as NoPageGroup];
+      if (!bucket) continue;
+      bucket.orders += Number(g.orders);
+      bucket.confirmedOrders += Number(g.confirmedOrders);
+      bucket.confirmedRevenue += Number(g.confirmedRevenue);
+    }
+
     const [missingRow] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(O)
@@ -234,7 +294,7 @@ export async function getMarketerAttributionReport(period: Period, filters: Attr
       row.revenuePerOrder = row.confirmedOrders > 0 ? Math.round(row.confirmedRevenue / row.confirmedOrders) : null;
     }
     const list = [...acc.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.confirmedRevenue - a.confirmedRevenue || b.attributedOrders - a.attributedOrders));
-    return { rows: list, byStatus, duplicates, totalOrders, totalConfirmedOrders, totalConfirmedRevenue, missing: Number(missingRow?.n ?? 0) };
+    return { rows: list, byStatus, duplicates, totalOrders, totalConfirmedOrders, totalConfirmedRevenue, missing: Number(missingRow?.n ?? 0), noPageGroups };
   });
 }
 
@@ -271,9 +331,117 @@ export type AttributionOrderRow = {
   phone: string;
   /** Từng dòng hàng: mã · biến thể × số lượng. Đây là thứ quyết định trùng đơn nên phải soi được. */
   items: string;
+  /** `PANCAKE_PAGE` (chứng từ Pancake) hay `LANDING_UTM` (tracking quảng cáo của form landing). */
+  attributionSource: AttributionSource;
+  /** Chỉ đơn landing: bằng chứng đã dùng, đủ để đọc thành một câu. `null` = đơn không phải landing. */
+  landing: {
+    tier: LandingEvidenceTier | null;
+    gap: LandingGapReason | null;
+    adId: string | null;
+    adsetId: string | null;
+    campaignId: string | null;
+    adAccountId: string | null;
+    /** Fanpage SUY RA từ quảng cáo — khác hẳn `pageId` (chứng từ Pancake). */
+    inferredPageId: string | null;
+    utmCampaign: string | null;
+    campaignName: string | null;
+    landingUrl: string | null;
+    campaignProductCode: string | null;
+    productMismatch: boolean;
+    evidence: string;
+  } | null;
 };
 
 const ATTRIBUTION_SORTABLE = ["sourceOrderAt", "revenue", "status", "marketer", "page"] as const;
+
+/**
+ * MỘT CHỖ DỰNG DÒNG ĐƠN — hai màn hình (danh sách soi đơn và các đơn cùng cụm trùng) đọc cùng một
+ * hình dạng, nên không nơi nào quên một cột khi thêm bằng chứng mới.
+ */
+type OrderRowRaw = {
+  orderId: string;
+  systemId: number | null;
+  sourceOrderAt: Date | string;
+  pageId: string | null;
+  pageName: string;
+  marketerId: string | null;
+  status: string;
+  duplicateOfOrderId: string | null;
+  duplicateScore: number | null;
+  duplicateReason: string | null;
+  stage: string;
+  confirmed: boolean;
+  revenue: number;
+  customer: string;
+  phone: string;
+  items: string;
+  attributionSource: string | null;
+  inferredPageId: string | null;
+  landingTier: string | null;
+  landingGap: string | null;
+  landingAdId: string | null;
+  landingAdsetId: string | null;
+  landingCampaignId: string | null;
+  landingAccountId: string | null;
+  landingUtm: unknown;
+  landingUrl: string | null;
+  landingProductCode: string | null;
+  landingMismatch: boolean | null;
+  landingEvidence: string | null;
+};
+
+function toOrderRow(r: OrderRowRaw, names: Map<string, string>): AttributionOrderRow {
+  return {
+    orderId: r.orderId,
+    systemId: r.systemId,
+    sourceOrderAt: new Date(r.sourceOrderAt),
+    pageId: r.pageId,
+    pageName: r.pageName,
+    marketerId: r.marketerId,
+    marketerLabel: r.marketerId ? marketerLabel(r.marketerId, names) : ATTR_UNATTRIBUTED_LABEL,
+    status: r.status as AttributionStatus,
+    duplicateOfOrderId: r.duplicateOfOrderId,
+    duplicateSignals: signalLabels(r.duplicateReason),
+    duplicateScore: r.duplicateScore,
+    stage: r.stage,
+    confirmed: Boolean(r.confirmed),
+    revenue: Number(r.revenue),
+    customer: r.customer,
+    phone: r.phone,
+    items: r.items,
+    attributionSource: (r.attributionSource as AttributionSource) ?? "PANCAKE_PAGE",
+    /*
+      Dòng bằng chứng landing chỉ tồn tại với đơn sinh ra từ form landing. `null` ở đây nghĩa là
+      "đơn này không đi đường landing", KHÁC HẲN "đi đường landing nhưng không đủ bằng chứng" — ca
+      sau CÓ dòng, và dòng ấy mang `gap` nói rõ thiếu gì.
+    */
+    landing:
+      r.landingTier === null && r.landingGap === null && !r.landingEvidence
+        ? null
+        : {
+            tier: (r.landingTier as LandingEvidenceTier | null) ?? null,
+            gap: (r.landingGap as LandingGapReason | null) ?? null,
+            adId: r.landingAdId,
+            adsetId: r.landingAdsetId,
+            campaignId: r.landingCampaignId,
+            adAccountId: r.landingAccountId,
+            inferredPageId: r.inferredPageId,
+            utmCampaign: readUtm(r.landingUtm, "utmCampaign"),
+            campaignName: readUtm(r.landingUtm, "campaignName"),
+            landingUrl: r.landingUrl,
+            campaignProductCode: r.landingProductCode,
+            productMismatch: Boolean(r.landingMismatch),
+            evidence: r.landingEvidence ?? "",
+          },
+  };
+}
+
+/** Đọc một ô của ảnh chụp utm. Ảnh chụp là jsonb tự do nên mọi phép đọc phải chịu được giá trị lạ. */
+function readUtm(utm: unknown, key: string): string | null {
+  if (!utm || typeof utm !== "object") return null;
+  const v = (utm as Record<string, unknown>)[key];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
 
 /**
  * DANH SÁCH ĐƠN ĐỂ SOI — mỗi dòng nói đủ: đơn nào · page nào · ai · lúc nào tại NGUỒN · Pancake đã
@@ -333,39 +501,31 @@ export async function listAttributionOrders(params: ListParams, filters: Attribu
                  || case when oi.is_bonus then ' (tặng)' else '' end,
                  ' | ' order by oi.sku, oi.variation_detail)
           from order_items oi where oi.order_id = ${OA.orderId}), '')`,
+      attributionSource: OA.attributionSource,
+      inferredPageId: OA.attributedPageId,
+      landingTier: LA.tier,
+      landingGap: LA.gap,
+      landingAdId: LA.adId,
+      landingAdsetId: LA.adsetId,
+      landingCampaignId: LA.campaignId,
+      landingAccountId: LA.adAccountId,
+      landingUtm: LA.utm,
+      landingUrl: LA.landingUrl,
+      landingProductCode: LA.campaignProductCode,
+      landingMismatch: LA.productMismatch,
+      landingEvidence: LA.evidence,
     })
     .from(OA)
     .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
     .leftJoin(F, sql`${F.id} = ${OA.fanpageId}`)
+    .leftJoin(LA, sql`${LA.orderId} = ${OA.orderId}`)
     .where(where)
     .orderBy(orderBy, sql`${OA.orderId} desc`)
     .limit(params.pageSize)
     .offset((params.page - 1) * params.pageSize);
 
   const names = await marketerNames();
-  return {
-    total,
-    pageCount: Math.max(1, Math.ceil(total / params.pageSize)),
-    rows: rows.map((r) => ({
-      orderId: r.orderId,
-      systemId: r.systemId,
-      sourceOrderAt: new Date(r.sourceOrderAt),
-      pageId: r.pageId,
-      pageName: r.pageName,
-      marketerId: r.marketerId,
-      marketerLabel: r.marketerId ? marketerLabel(r.marketerId, names) : ATTR_UNATTRIBUTED_LABEL,
-      status: r.status as AttributionStatus,
-      duplicateOfOrderId: r.duplicateOfOrderId,
-      duplicateSignals: signalLabels(r.duplicateReason),
-      duplicateScore: r.duplicateScore,
-      stage: r.stage,
-      confirmed: Boolean(r.confirmed),
-      revenue: Number(r.revenue),
-      customer: r.customer,
-      phone: r.phone,
-      items: r.items,
-    })),
-  };
+  return { total, pageCount: Math.max(1, Math.ceil(total / params.pageSize)), rows: rows.map((r) => toOrderRow(r, names)) };
 }
 
 /** Fanpage có đơn trong kỳ — dựng bộ lọc. Khoá là Page ID, nhãn là tên nếu đọc được. */
@@ -426,32 +586,28 @@ export async function listDuplicateSiblings(orderId: string): Promise<Attributio
                  || case when oi.is_bonus then ' (tặng)' else '' end,
                  ' | ' order by oi.sku, oi.variation_detail)
           from order_items oi where oi.order_id = ${OA.orderId}), '')`,
+      attributionSource: OA.attributionSource,
+      inferredPageId: OA.attributedPageId,
+      landingTier: LA.tier,
+      landingGap: LA.gap,
+      landingAdId: LA.adId,
+      landingAdsetId: LA.adsetId,
+      landingCampaignId: LA.campaignId,
+      landingAccountId: LA.adAccountId,
+      landingUtm: LA.utm,
+      landingUrl: LA.landingUrl,
+      landingProductCode: LA.campaignProductCode,
+      landingMismatch: LA.productMismatch,
+      landingEvidence: LA.evidence,
     })
     .from(OA)
     .innerJoin(O, sql`${O.id} = ${OA.orderId}`)
     .leftJoin(F, sql`${F.id} = ${OA.fanpageId}`)
+    .leftJoin(LA, sql`${LA.orderId} = ${OA.orderId}`)
     .where(sql`${OA.dedupeKey} = ${self.dedupeKey}`)
     .orderBy(sql`${OA.sourceOrderAt} asc`);
   const names = await marketerNames();
-  return rows.map((r) => ({
-    orderId: r.orderId,
-    systemId: r.systemId,
-    sourceOrderAt: new Date(r.sourceOrderAt),
-    pageId: r.pageId,
-    pageName: r.pageName,
-    marketerId: r.marketerId,
-    marketerLabel: r.marketerId ? marketerLabel(r.marketerId, names) : ATTR_UNATTRIBUTED_LABEL,
-    status: r.status as AttributionStatus,
-    duplicateOfOrderId: r.duplicateOfOrderId,
-    duplicateSignals: signalLabels(r.duplicateReason),
-    duplicateScore: r.duplicateScore,
-    stage: r.stage,
-    confirmed: Boolean(r.confirmed),
-    revenue: Number(r.revenue),
-    customer: r.customer,
-    phone: r.phone,
-    items: r.items,
-  }));
+  return rows.map((r) => toOrderRow(r, names));
 }
 
 export { ATTRIBUTION_SORTABLE };
