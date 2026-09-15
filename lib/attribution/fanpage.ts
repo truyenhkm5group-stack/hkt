@@ -89,17 +89,21 @@ export async function syncFanpageRegistry(db?: Db): Promise<FanpageDiscovery> {
     const name = names.get(pageId) ?? "";
     const first = row.firstAt ? new Date(row.firstAt) : null;
     const last = row.lastAt ? new Date(row.lastAt) : null;
+    // Page có mặt trong lần liệt kê này ⇒ ghi mốc. Page KHÔNG có mặt thì mốc cũ giữ nguyên, và
+    // chính khoảng cách giữa hai mốc là thứ suy ra "không còn quyền truy cập".
+    const seenNow = names.has(pageId) ? new Date() : null;
     const prior = byExternal.get(pageId);
     if (!prior) {
-      await d.insert(F).values({ externalPageId: pageId, name, platform: "facebook", active: true, firstOrderAt: first, lastOrderAt: last }).onConflictDoNothing();
+      await d.insert(F).values({ externalPageId: pageId, name, platform: "facebook", active: true, firstOrderAt: first, lastOrderAt: last, lastSeenInApiAt: seenNow }).onConflictDoNothing();
       discovered++;
       if (name) named++;
       continue;
     }
     // Tên rỗng từ API KHÔNG được xoá tên đã có: mất token một lần không nên làm mất hết tên page.
+    // `alias` TUYỆT ĐỐI không có mặt ở đây — đó là tên của NGƯỜI, đồng bộ không được chạm tới.
     await d
       .update(F)
-      .set({ firstOrderAt: first, lastOrderAt: last, ...(name ? { name } : {}), updatedAt: new Date() })
+      .set({ firstOrderAt: first, lastOrderAt: last, ...(name ? { name } : {}), ...(seenNow ? { lastSeenInApiAt: seenNow } : {}), updatedAt: new Date() })
       .where(eq(F.id, prior.id));
     updated++;
     if (name && name !== prior.name) named++;
@@ -172,6 +176,24 @@ export async function revokeFanpageAssignment(assignmentId: string, db?: Db): Pr
   if (!row.active) return { error: "Phân công này đã thu hồi trước đó" };
   await d.update(A).set({ active: false, updatedAt: new Date() }).where(eq(A.id, assignmentId));
   // Dòng đứng trước nó KHÔNG tự mở lại: mở lại hộ là suy diễn một ý định mà người bấm chưa nói ra.
+  return { ok: true };
+}
+
+/**
+ * ĐẶT TÊN GỢI NHỚ CHO MỘT FANPAGE.
+ *
+ * Ghi vào `alias`, KHÔNG ghi vào `name`: `name` thuộc về API Pancake, và ngày nào token đọc lại
+ * được page thì đồng bộ sẽ cập nhật nó — nếu người đã gõ tên vào đó, cái tên ấy biến mất mà không
+ * ai hiểu vì sao. Hai trường, hai nguồn.
+ *
+ * KHÔNG đụng `external_page_id`: đó là danh tính của page và là thứ mọi đơn đã quy kết trỏ tới.
+ * Đổi tên là đổi NHÃN, không bao giờ là đổi danh tính.
+ */
+export async function setFanpageAlias(fanpageId: string, alias: string, db?: Db): Promise<{ ok: true } | AssignError> {
+  const d = db ?? (await getDb());
+  const [row] = await d.select({ id: F.id }).from(F).where(eq(F.id, fanpageId)).limit(1);
+  if (!row) return { error: "Không tìm thấy fanpage" };
+  await d.update(F).set({ alias: alias.trim().slice(0, 120), updatedAt: new Date() }).where(eq(F.id, fanpageId));
   return { ok: true };
 }
 
@@ -403,7 +425,11 @@ export async function runFanpageAttributionJob(options?: { dryRun?: boolean; act
 export type FanpageRow = {
   id: string;
   externalPageId: string;
+  /** Tên do API Pancake trả về. Rỗng = token hiện tại không đọc được page này. */
   name: string;
+  /** Tên do NGƯỜI đặt. Đồng bộ không bao giờ ghi đè. */
+  alias: string;
+  lastSeenInApiAt: Date | null;
   active: boolean;
   firstOrderAt: Date | null;
   lastOrderAt: Date | null;
@@ -439,6 +465,8 @@ export async function listFanpages(db?: Db): Promise<FanpageRow[]> {
       id: p.id,
       externalPageId: p.externalPageId,
       name: p.name,
+      alias: p.alias,
+      lastSeenInApiAt: p.lastSeenInApiAt,
       active: p.active,
       firstOrderAt: p.firstOrderAt,
       lastOrderAt: p.lastOrderAt,

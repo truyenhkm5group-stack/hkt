@@ -14,7 +14,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { assignFanpageMarketer, revokeFanpageAssignment, runFanpageAttributionJob, setFanpageActive } from "@/lib/attribution/fanpage";
+import { assignFanpageMarketer, revokeFanpageAssignment, runFanpageAttributionJob, setFanpageActive, setFanpageAlias } from "@/lib/attribution/fanpage";
 
 export type ActionResult = { ok: true; id?: string; message?: string } | { error: string };
 
@@ -95,6 +95,31 @@ export async function revokeAssignment(input: unknown): Promise<ActionResult> {
   });
   revalidate();
   return { ok: true, message: "Đã thu hồi. Chạy 'Đối soát lại' để tính lại các đơn liên quan." };
+}
+
+/**
+ * ĐẶT TÊN GỢI NHỚ cho một fanpage — để page KHÔNG còn quyền đọc tên vẫn quản lý được.
+ *
+ * Ghi vào `alias`, không phải `name`: `name` thuộc API Pancake và sẽ bị đồng bộ cập nhật đè.
+ * Không đụng `page_id` — đó là danh tính, và mọi đơn đã quy kết đều trỏ tới nó.
+ */
+export async function renameFanpage(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "payroll:manage")) return { error: DENIED };
+  const parsed = z.object({ fanpageId: z.string().min(1), alias: z.string().max(120) }).safeParse(input);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const result = await setFanpageAlias(parsed.data.fanpageId, parsed.data.alias);
+  if ("error" in result) return { error: result.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "SETTINGS_UPDATE",
+    entity: "SETTINGS",
+    entityId: `fanpage:${parsed.data.fanpageId}`,
+    reason: parsed.data.alias.trim() ? `Đặt tên gợi nhớ cho fanpage: "${parsed.data.alias.trim()}"` : "Xoá tên gợi nhớ của fanpage",
+  });
+  revalidate();
+  return { ok: true };
 }
 
 /** Bật / tắt một fanpage trong sổ. Không đụng tới quy kết đã chụp. */
