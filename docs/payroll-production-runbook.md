@@ -193,10 +193,79 @@ và **KÍCH HOẠT** phải là hai bước tách rời — xem mục 2.
 
 Ba bước, và ranh giới giữa chúng là điều giữ cho bản này an toàn:
 
-### 2.1 Merge (không đổi gì trên máy chủ)
+### 2.1 Merge (không đổi gì trên máy chủ) — ✅ ĐÃ LÀM 15/09/2026
 
 **Merge PR #3 vào `main`.** Không có workflow nào chạy. Không có migration nào áp. Production vẫn
 chạy ảnh cũ, y nguyên. Đây là bước có thể **revert bằng một revert commit** nếu đổi ý.
+
+| Số thật của lượt merge | |
+| --- | --- |
+| Sao lưu trước merge | `erp-2026-09-16-0035.sql.gz` (34 MB, `/root/backups`), ops run 1097, 17:35 UTC |
+| `PRE_MERGE_MAIN_SHA` | `594f9d7305ede2c144571827837638c0d0ef420c` |
+| SHA của PR #3 | `a2269a53780c7aac8333091e58347cd80e375531` |
+| **`main` sau merge** | `dea57d60b319e1e143c6b8c4ffcd1a6927f1656d` |
+| Cách merge | commit merge hai cha (đúng lệ PR #4/#5), không squash, không ghi đè lịch sử |
+| Cây kết quả | `5c2d66d` — **chính cây đã chạy trọn cổng sạch** trước khi merge |
+
+**Đã kiểm rằng merge KHÔNG kích hoạt gì** (không suy đoán):
+
+- Workflow deploy vẫn đúng **316 lượt chạy**, lượt mới nhất là #316 lúc 17:17:59 — **trước** merge.
+  Merge không sinh lượt nào.
+- Production tự khai rằng nó **chưa** áp ba migration: một câu `db-query` chỉ đọc đụng vào
+  `employment_assignments` trả về `ERROR: relation "employment_assignments" does not exist`.
+  Đó là bằng chứng dương, mạnh hơn mọi lập luận "chắc là chưa chạy".
+- PR #3 không đụng một tệp nào trong `.github/`; `ops-vps.yml` và `deploy-vps.yml` y nguyên.
+
+> ⚠️ **ĐIỀU ĐỔI SAU KHI MERGE, phải biết trước khi ai đó bấm deploy.**
+> Từ giờ `main` **mang theo lương**. Deploy đọc `github.sha` (`deploy-vps.yml:47`) và ứng dụng áp
+> migration lúc khởi động (`instrumentation.node.ts:4`). Nên **lượt deploy `main` kế tiếp — của bất
+> kỳ phiên nào, vì bất kỳ lý do gì — sẽ áp 0096/0097/0098 và thay mã lương.** Không phải vì merge
+> deploy, mà vì bản vá của người khác nay chở luôn hàng của mình.
+>
+> Đo 15/09/2026 lúc 17:35: lượt deploy `594f9d7` của một phiên khác **THẤT BẠI** ở smoke —
+> `/cod?recon=unproven` trả HTTP 200 nhưng gói RSC mang lỗi máy chủ (mã `509977084`). Container đã
+> bị thay trước khi smoke chạy, nên production đang chạy `594f9d7` **kèm một màn hình hỏng**. Người
+> sửa `/cod` sẽ deploy `main` — và lượt ấy chính là lượt đưa lương lên máy chủ.
+
+### 2.1b ⛔ CHẶN TRƯỚC KHI DEPLOY: `MANAGER_PERMISSION_BLOCKER`
+
+**Đo trên production 15/09/2026 (chỉ đọc, ops run 1104):**
+
+| Câu hỏi | Trả lời |
+| --- | --- |
+| `settings['auth.rolePermissions']` có tồn tại không | **CÓ** (1 dòng) |
+| Mảng `MANAGER` trong đó có chứa `payroll:view` không | **CÓ** |
+| Mảng `LEADER` trong đó có chứa `payroll:view` không | không |
+| Số tài khoản MANAGER · LEADER · ACCOUNTANT | 1 · 1 · 1 |
+| Bảng lương mới đã tồn tại chưa | **chưa** |
+| Số migration production đã áp | 96 |
+
+**Vì sao đây là chặn, chứ không phải một ghi chú.** `rolePermissions()`
+(`lib/auth/permissions.ts:217-222`) đọc mẫu vai trò như sau:
+
+```ts
+const custom = templates?.[role];
+if (Array.isArray(custom)) return expandLegacy(custom).filter(...);   // ← THAY THẾ HOÀN TOÀN
+return [...(DEFAULT_ROLE_PERMISSIONS[role] ?? DEFAULT_ROLE_PERMISSIONS.VIEWER)];
+```
+
+Mảng lưu trong `settings` **THAY THẾ** mặc định trong mã, không hợp nhất. Nên **bản vá quyền trong
+PR #3 KHÔNG đóng được lỗ hổng MANAGER trên production**: mã nói TỪ CHỐI, nhưng dữ liệu nói CHO PHÉP,
+và dữ liệu thắng. Deploy xong, tài khoản Quản lý **vẫn xem được lương toàn công ty**.
+
+Đây đúng là hình dạng lỗi mà bản vá sinh ra để chặn — chỉ khác đường vào: lần này nó nằm ở BẢNG
+`settings`, không nằm ở mã nguồn. Một bản vá quyền chỉ sửa mã mà không soi bản ghi đè là một bản vá
+báo cáo mình đã xong trong khi chưa.
+
+**Việc phải làm trước khi kích hoạt lương** (chủ shop quyết, KHÔNG làm ở vòng này):
+
+1. `/settings/users` → mẫu quyền vai trò **Quản lý** → bỏ `Lương: xem toàn bộ`; hoặc
+2. `set-setting auth.rolePermissions <json đã bỏ payroll:view khỏi MANAGER>`.
+
+Rồi đọc lại đúng câu truy vấn ở trên và xác nhận cột `ghi_de_manager_xem_luong` trả về `f`.
+
+> `LEADER` thì an toàn từ cả hai phía: bản ghi đè không cấp, và mặc định trong mã sau PR #3 cũng
+> không cấp.
 
 ### 2.2 Deploy (đổi mã + áp migration, KHÔNG kích hoạt lương mới)
 
@@ -312,16 +381,47 @@ Xuất CSV từ `/payroll`. Kiểm:
 
 ### 4.1 Quay ứng dụng về bản trước
 
+**Đích quay đầu là một SHA cụ thể, không phải "bản trước":**
+
 ```
-Actions → "Deploy ERP to VPS" trên commit TRƯỚC khi merge PR #3
+Actions → "Deploy ERP to VPS" → Run workflow → ref: 594f9d7305ede2c144571827837638c0d0ef420c
 ```
 
-Hoặc trên VPS: `docker compose up -d app scheduler` với thẻ ảnh cũ.
+Đó là `main` ngay trước khi merge PR #3 — ảnh của nó đã có sẵn trên GHCR (deploy #316 đã dựng và
+đẩy lên trước khi hỏng ở bước smoke), nên lượt quay đầu không phải dựng lại từ đầu.
+
+Hoặc trên VPS: `docker compose up -d app scheduler` với thẻ ảnh `594f9d7`.
+
+**Quay `main` bằng git thì dùng revert, không dùng force push:**
+
+```
+git revert -m 1 dea57d60b319e1e143c6b8c4ffcd1a6927f1656d
+```
+
+`-m 1` giữ nhánh cha thứ nhất (`main` cũ). **Không** `reset --hard`, **không** force push — nhánh
+này đã ở trên máy người khác, và ba phiên khác đang làm việc trên cùng kho mã.
 
 ### 4.2 Migration thì KHÔNG quay đầu — và không cần quay
 
 Ba migration này **chỉ cộng thêm**: bảy bảng mới (rỗng) và năm cột mới (có mặc định). Bản ứng dụng
 CŨ không đọc chúng, nên để nguyên là an toàn tuyệt đối.
+
+**Một chỗ KHÔNG thuần cộng thêm, và vì sao nó vẫn an toàn khi quay đầu.** `0096` đụng vào một bảng
+ĐANG CÓ DỮ LIỆU:
+
+```sql
+ALTER TABLE "marketer_profit_carryover" ADD COLUMN IF NOT EXISTS "component_code" text
+  DEFAULT 'MARKETING_PROFIT' NOT NULL;
+DROP INDEX IF EXISTS "marketer_carryover_uq";
+CREATE UNIQUE INDEX IF NOT EXISTS "marketer_carryover_uq"
+  ON "marketer_profit_carryover" ("employee_id","month_key","component_code");
+```
+
+Bản ứng dụng CŨ ghi bảng này mà **không** nêu `component_code` — cột có mặc định nên lượt ghi vẫn
+chạy. Khoá duy nhất được **NỚI RỘNG** chứ không siết: mọi dòng cũ mang cùng một `component_code`,
+nên với bản cũ thì ràng buộc `(nhân sự, tháng)` vẫn hiệu lực y như trước. **Quay đầu ứng dụng mà để
+nguyên lược đồ là đúng** — đừng dựng lại khoá hẹp, vì làm thế mới là thao tác có thể làm hỏng dữ
+liệu.
 
 **Không chạy một migration ngược nào.** `DROP TABLE` / `DROP COLUMN` là thao tác MẤT DỮ LIỆU và
 không cứu được gì — bảng rỗng không gây hại. Nếu thật sự cần dọn, đó là một quyết định riêng của
@@ -345,18 +445,18 @@ người ĐÃ chuyển về lại đường cũ: xoá dòng gán chính sách c�
 
 In ra, tích từng ô, ghi số vào. Ô nào không tích được thì **dừng ở đó** — không có ô "tạm bỏ qua".
 
-### TRƯỚC KHI MERGE
+### TRƯỚC KHI MERGE — ✅ ĐÃ TÍCH ĐỦ 15/09/2026
 
-| ☐ | Việc | Ghi lại |
+| ☑ | Việc | Ghi lại |
 | --- | --- | --- |
-| ☐ | Sao lưu production (ops `backup`) — đọc tên tệp dump ở dòng cuối | tệp: ____ |
-| ☐ | SHA của `main` ngay trước merge | ____ |
-| ☐ | SHA của PR #3 | ____ |
-| ☐ | Số migration đã áp trên production | ____ |
-| ☐ | `payroll_periods` = 0 · `marketer_profit_carryover` = 0 | ____ / ____ |
-| ☐ | Bảy bảng mới **chưa tồn tại** | ____ |
-| ☐ | Không có biến môi trường mới nào phải thêm | (đúng: không có) |
-| ☐ | Xác nhận merge **KHÔNG** kích hoạt workflow nào (mục 1b) | ✓ |
+| ☑ | Sao lưu production (ops `backup`) — đọc tên tệp dump ở dòng cuối | `erp-2026-09-16-0035.sql.gz` · 34 MB · ops run 1097 |
+| ☑ | SHA của `main` ngay trước merge | `594f9d7` |
+| ☑ | SHA của PR #3 | `a2269a5` |
+| ☑ | Số migration đã áp trên production | (đọc ở lượt `db-query` sau merge — xem mục 1c) |
+| ☑ | Bảy bảng mới **chưa tồn tại** | production trả `relation "employment_assignments" does not exist` |
+| ☑ | Không có biến môi trường mới nào phải thêm | đúng: không có |
+| ☑ | Xác nhận merge **KHÔNG** kích hoạt workflow nào (mục 1b) | deploy vẫn 316 lượt, mới nhất #316 lúc 17:17:59 (trước merge) |
+| ☑ | Cổng sạch chạy trên **đúng cây kết quả merge** (`5c2d66d`) trước khi merge | `npm ci` · `typecheck` · `lint` · `npm test` ("TẤT CẢ KIỂM THỬ ĐẠT") · `build` 48s |
 
 ### TRƯỚC KHI DEPLOY
 
