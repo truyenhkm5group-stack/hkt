@@ -197,6 +197,7 @@ export function testNavigationCoverage() {
     "/payroll/policies": "tab 'Chính sách lương' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/assignments": "tab 'Phân công & gán chính sách' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/adjustments": "tab 'Đầu vào & điều chỉnh' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/migration": "tab 'Xem trước chuyển đổi' của /payroll, chỉ hiện với quyền payroll:manage",
   };
 
   const pages = walkPages("app/(dashboard)");

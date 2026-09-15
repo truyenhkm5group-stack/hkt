@@ -14,6 +14,7 @@
  */
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -23,6 +24,7 @@ import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
 import {
   adjustmentSchema,
+  componentSchema,
   employmentSchema,
   payrollInputSchema,
   policyAssignmentSchema,
@@ -444,4 +446,132 @@ export async function deletePayrollAdjustment(id: string): Promise<PolicyActionR
   await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_ADJUSTMENT_DELETE", entity: "PAYROLL_ADJUSTMENT", entityId: id, before });
   revalidate();
   return { ok: true };
+}
+
+// ═════════════════════════ CHUYỂN MỘT NGƯỜI SANG MÁY TÍNH CHUNG ═════════════════════════
+
+/**
+ * ÁP BẢN ĐỀ XUẤT CHO ĐÚNG MỘT NGƯỜI — sau khi người bấm đã XEM bảng đối chiếu.
+ *
+ * ─── VÌ SAO MỘT NGƯỜI MỘT LƯỢT, KHÔNG CÓ NÚT "CHUYỂN TẤT CẢ" ───
+ *
+ * Một nút chuyển hàng loạt là một lượt đổi cách trả tiền cho tất cả mọi người bằng một cú bấm mà
+ * không ai kịp đọc bảng đối chiếu của từng người. Bảng đối chiếu chỉ có giá trị khi có người THẬT
+ * SỰ nhìn nó, và người ta chỉ nhìn khi mỗi lần bấm ứng với một người.
+ *
+ * ─── CHẶN KHI CÒN LỆCH CHƯA GIẢI THÍCH ĐƯỢC ───
+ *
+ * `acknowledgedDiff` là lối ra có chủ ý cho trường hợp lệch là một SỬA ĐÚNG: chủ shop biết số cũ
+ * sai và muốn số mới. Nhưng nó đòi một LÝ DO, và lý do ấy đi vào nhật ký — khác hẳn một lượt bấm
+ * qua cảnh báo.
+ */
+const migrateSchema = z.object({
+  employeeId: z.string().min(1),
+  policyCode: z.string().min(2).max(40),
+  policyName: z.string().min(1).max(120),
+  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Mốc hiệu lực phải dạng YYYY-MM-DD"),
+  components: z.array(componentSchema).min(1, "Bản đề xuất không có thành phần nào để áp"),
+  /** Người bấm đã đọc và chấp nhận phần lệch chưa giải thích được, kèm lý do. */
+  acknowledgedDiff: z.string().trim().max(500).default(""),
+  hasUnexplainedDiff: z.boolean().default(false),
+});
+
+export async function migrateEmployeeToPolicy(input: unknown): Promise<PolicyActionResult> {
+  const guard = await requireManage();
+  if ("error" in guard) return guard;
+  const parsed = migrateSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+
+  if (d.hasUnexplainedDiff && d.acknowledgedDiff.length < 5) {
+    return {
+      error:
+        "Bảng đối chiếu còn khoản lệch CHƯA giải thích được. Không kích hoạt chính sách khi còn chênh chưa rõ nguyên nhân — trừ khi đó là một sửa ĐÚNG có chủ ý, và khi ấy phải ghi rõ lý do để nó đi vào nhật ký.",
+    };
+  }
+
+  const db = await getDb();
+  const from = vnStartOfDay(d.effectiveFrom);
+
+  // Đã gán chính sách rồi thì thôi — chuyển hai lần sinh hai dòng gán chồng lấn, và tiền của những
+  // ngày ấy sẽ do thứ tự dòng quyết định.
+  const [daCo] = await db
+    .select({ id: schema.employeePolicyAssignments.id })
+    .from(schema.employeePolicyAssignments)
+    .where(eq(schema.employeePolicyAssignments.employeeId, d.employeeId))
+    .limit(1);
+  if (daCo) return { error: "Nhân sự này đã được gán chính sách rồi. Muốn đổi thì gán một chính sách khác ở tab “Phân công & gán chính sách”, có mốc hiệu lực riêng." };
+
+  const policyId = crypto.randomUUID();
+  const versionId = crypto.randomUUID();
+  const luc = new Date();
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.salaryPolicies).values({
+        id: policyId,
+        code: d.policyCode,
+        name: d.policyName,
+        description: "Sinh từ hồ sơ nhân sự cũ (bốn ô lương) qua công cụ Xem trước chuyển đổi.",
+        createdBy: guard.id,
+      });
+      /*
+        PHÁT HÀNH LUÔN, KHÔNG để ở bản nháp.
+
+        Bản nháp không tính ra đồng nào, nên một lượt "chuyển" kết thúc bằng bản nháp sẽ làm lương
+        người ấy về 0 cho tới khi có ai đó nhớ ra phải bấm phát hành. Ở đây người bấm đã xem bảng
+        đối chiếu — đó chính là bước soát mà trạng thái nháp sinh ra để phục vụ.
+      */
+      await tx.insert(schema.salaryPolicyVersions).values({
+        id: versionId,
+        policyId,
+        version: 1,
+        effectiveFrom: from,
+        status: "ACTIVE",
+        note: "Phát hành cùng lượt chuyển đổi, sau khi người bấm đã xem bảng đối chiếu cũ/mới.",
+        activatedAt: luc,
+        activatedBy: guard.id,
+        createdBy: guard.id,
+      });
+      await tx.insert(schema.salaryPolicyComponents).values(
+        d.components.map((c) => ({
+          versionId,
+          code: c.code,
+          label: c.label,
+          kind: c.kind,
+          calcType: c.calc.type,
+          basisKey: componentBasisKey(c.calc as PayrollCalcParams),
+          calc: c.calc,
+          prorate: c.prorate,
+          rounding: c.rounding,
+          minAmount: c.minAmount,
+          maxAmount: c.maxAmount,
+          carryForward: c.carryForward,
+          sortOrder: c.sortOrder,
+          note: c.note,
+        })),
+      );
+      await tx.insert(schema.employeePolicyAssignments).values({
+        employeeId: d.employeeId,
+        policyId,
+        effectiveFrom: from,
+        note: d.acknowledgedDiff ? `Chuyển từ hồ sơ cũ. Chấp nhận lệch: ${d.acknowledgedDiff}` : "Chuyển từ hồ sơ cũ, không lệch.",
+        createdBy: guard.id,
+      });
+    });
+  } catch (e) {
+    if (/unique|duplicate/i.test(String(e))) return { error: `Mã chính sách “${d.policyCode}” đã có. Đổi mã rồi thử lại.` };
+    throw e;
+  }
+
+  await audit({
+    userId: guard.id,
+    userEmail: guard.email,
+    action: "PAYROLL_LEGACY_MIGRATE",
+    entity: "EMPLOYEE_POLICY_ASSIGNMENT",
+    entityId: d.employeeId,
+    after: { policyCode: d.policyCode, effectiveFrom: d.effectiveFrom, components: d.components.length },
+    reason: d.acknowledgedDiff || "Đối chiếu cũ/mới không lệch.",
+  });
+  revalidate();
+  return { ok: true, id: policyId };
 }

@@ -20,6 +20,7 @@ export function PayrollTabs({ canManage }: { canManage: boolean }) {
           { href: "/payroll/policies", label: "Chính sách lương" },
           { href: "/payroll/assignments", label: "Phân công & gán chính sách" },
           { href: "/payroll/adjustments", label: "Đầu vào & điều chỉnh" },
+          { href: "/payroll/migration", label: "Xem trước chuyển đổi" },
         ]
       : []),
   ];

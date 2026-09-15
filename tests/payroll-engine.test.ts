@@ -19,6 +19,8 @@ import {
 } from "@/lib/constants/payroll-components";
 import { calculateComponent, calculatePayrollItem, type SegmentInput } from "@/lib/payroll/engine";
 import { assignmentOverlaps, componentMissingParams, policyGaps } from "@/lib/payroll/policy-validation";
+import { carryoverChain } from "@/lib/payroll/profit-carryover";
+import { proposePolicyFromLegacy, reconcile } from "@/lib/payroll/migration-preview";
 import { resolveSegments, type EmploymentRow, type PolicyAssignmentRow, type PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00+07:00`);
@@ -646,5 +648,170 @@ export function testPayrollEngine() {
     assert.match(nhap[0].message, /Chính sách lương/, "và chỉ sang đúng tab khác");
   }
 
-  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc + kiểm sổ khai (chồng lấn · khoảng trống · thiếu tham số)");
+  // ─────────── CHUỖI BỐN THÁNG: LỖ CHỒNG LỖ, RỒI BÙ DẦN ───────────
+  {
+    /*
+      Ca chủ shop đưa: T1 −10tr · T2 −5tr · T3 +8tr · T4 +20tr.
+
+      Đây là ca mà mọi cách làm tắt đều sai. Cộng bốn tháng lại rồi lấy `max(…, 0)` cho ra 13tr —
+      trùng hợp đúng bằng đáp án, nhưng chỉ vì ví dụ này kết thúc ở một tháng dương đủ lớn. Đổi T4
+      thành +6tr thì phép cộng cho 0 còn phép tuần tự cho −1tr mang sang, và chúng khác nhau.
+      Số dư là một chuỗi TUẦN TỰ, không phải một phép cộng.
+    */
+    const chuoi = carryoverChain(
+      [
+        { openingBalance: 0, realProfit: -10_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: -5_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 8_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 20_000_000, commissionPercent: 10 },
+      ],
+      0,
+    );
+    assert.equal(chuoi[0].closingBalance, -10_000_000, "T1 đóng ở −10tr");
+    assert.equal(chuoi[1].closingBalance, -15_000_000, "T2 lỗ CHỒNG lên lỗ ⇒ −15tr");
+    assert.equal(chuoi[2].closingBalance, -7_000_000, "T3 lãi 8tr bù bớt ⇒ −7tr");
+    assert.equal(chuoi[3].commissionBase, 13_000_000, "T4: 20tr − 7tr = 13tr là cơ sở tính hoa hồng");
+    assert.equal(chuoi[3].closingBalance, 0, "và bù hết nên sổ về 0");
+    // Ba tháng đầu KHÔNG được trả đồng hoa hồng nào.
+    for (const t of chuoi.slice(0, 3)) assert.equal(t.payableCommission, 0, "tháng còn âm sau bù ⇒ hoa hồng bằng 0");
+    assert.equal(chuoi[3].payableCommission, 1_300_000, "T4 ăn 10% trên ĐÚNG 13tr, không phải trên 20tr");
+
+    // Chạy lại y hệt ⇒ y hệt: chuỗi không được cộng dồn qua mỗi lượt tính.
+    const lai = carryoverChain(
+      [
+        { openingBalance: 0, realProfit: -10_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: -5_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 8_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 20_000_000, commissionPercent: 10 },
+      ],
+      0,
+    );
+    assert.deepEqual(lai.map((x) => x.closingBalance), chuoi.map((x) => x.closingBalance), "chạy lại ra đúng một chuỗi");
+
+    // Và phép CỘNG không thay được phép tuần tự — đổi tháng cuối là hai cách cho hai kết quả.
+    const doiT4 = carryoverChain(
+      [
+        { openingBalance: 0, realProfit: -10_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: -5_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 8_000_000, commissionPercent: 10 },
+        { openingBalance: 0, realProfit: 6_000_000, commissionPercent: 10 },
+      ],
+      0,
+    );
+    assert.equal(doiT4[3].closingBalance, -1_000_000, "T4 chỉ +6tr ⇒ còn −1tr mang sang tháng 5");
+    assert.equal(doiT4[3].payableCommission, 0);
+  }
+
+  // ─────────── ĐỀ XUẤT CHUYỂN ĐỔI TỪ HỒ SƠ CŨ ───────────
+  {
+    const hoSo = {
+      id: "mig-1",
+      name: "Người cũ",
+      shortName: "Cũ",
+      department: "Marketing",
+      aliases: [],
+      accountIds: [],
+      fixed: 8_000_000,
+      percentTotal: 2,
+      percentPersonal: 10,
+      percentRevenue: 0,
+      active: true,
+      note: "",
+    };
+
+    /*
+      BÙ LỖ CHÉP TRẠNG THÁI HIỆN TẠI, KHÔNG ĐOÁN.
+
+      Đây là chỗ dễ làm sai tiền nhất trong cả phép chuyển: sổ đang bật mà thành phần khai tắt thì
+      người ấy bỗng ăn hoa hồng trên đủ lợi nhuận như chưa từng lỗ.
+    */
+    const tat = proposePolicyFromLegacy(hoSo, false);
+    const bat = proposePolicyFromLegacy(hoSo, true);
+    assert.equal(tat.components.find((c) => c.code === "PERSONAL_PROFIT_COMMISSION")?.carryForward, false);
+    assert.equal(bat.components.find((c) => c.code === "PERSONAL_PROFIT_COMMISSION")?.carryForward, true);
+    assert.ok(tat.notes.some((n) => /TẮT/.test(n)), "sổ đang tắt phải được nói ra, không im lặng");
+
+    // Ô bằng 0 KHÔNG sinh thành phần: một thành phần khai 0 sẽ bị cổng chặn hỏi lại mãi.
+    assert.equal(tat.components.length, 3, "ba ô khác 0 ⇒ ba thành phần; ô % doanh thu bằng 0 thì không sinh");
+    assert.ok(!tat.components.some((c) => c.code === "REVENUE_COMMISSION"));
+
+    // Lương cứng phải giữ NGUYÊN luật chia theo ngày của đường cũ — đó là điều kiện để số không đổi.
+    assert.equal(tat.components.find((c) => c.code === "BASE_SALARY")?.prorate, "PERIOD_DAYS");
+
+    // Hồ sơ trống rỗng thì nói thẳng là không ánh xạ được, không sinh một chính sách rỗng.
+    const trong = proposePolicyFromLegacy({ ...hoSo, fixed: 0, percentTotal: 0, percentPersonal: 0 }, false);
+    assert.equal(trong.components.length, 0);
+    assert.equal(trong.blockers.length, 1);
+  }
+
+  // ─────────── ĐỐI CHIẾU: LỆCH PHẢI CÓ GIẢI THÍCH, KHÔNG THÌ CHẶN ───────────
+  {
+    const khop = reconcile({
+      employeeId: "r1",
+      employeeName: "A",
+      old: { fixed: 8_000_000, bonusTotal: 1_000_000, bonusPersonal: 2_000_000, bonusRevenue: 0, salary: 11_000_000 },
+      next: {
+        components: [
+          { code: "BASE_SALARY", amount: 8_000_000 },
+          { code: "SHOP_PROFIT_SHARE", amount: 1_000_000 },
+          { code: "PERSONAL_PROFIT_COMMISSION", amount: 2_000_000 },
+          { code: "REVENUE_COMMISSION", amount: 0 },
+        ],
+        grossEarnings: 11_000_000,
+        totalDeductions: 0,
+        netPay: 11_000_000,
+      },
+      adjustmentTotal: 0,
+    });
+    assert.equal(khop.netDiff, 0);
+    assert.equal(khop.hasUnexplained, false, "khớp hết ⇒ chuyển được");
+
+    /*
+      HAI TỔNG BẰNG NHAU KHÔNG CÓ NGHĨA LÀ ĐÚNG.
+
+      Ở đây lương cứng thừa 1tr và hoa hồng thiếu 1tr — chúng triệt tiêu ở dòng NET. So theo TỪNG
+      khoản mới bắt được; so mỗi tổng thì bảng xanh và tiền của người ấy vẫn sai ở hai chỗ.
+    */
+    const trietTieu = reconcile({
+      employeeId: "r2",
+      employeeName: "B",
+      old: { fixed: 8_000_000, bonusTotal: 0, bonusPersonal: 2_000_000, bonusRevenue: 0, salary: 10_000_000 },
+      next: {
+        components: [
+          { code: "BASE_SALARY", amount: 9_000_000 },
+          { code: "PERSONAL_PROFIT_COMMISSION", amount: 1_000_000 },
+        ],
+        grossEarnings: 10_000_000,
+        totalDeductions: 0,
+        netPay: 10_000_000,
+      },
+      adjustmentTotal: 0,
+    });
+    assert.equal(trietTieu.netDiff, 0, "tổng bằng nhau…");
+    assert.equal(trietTieu.hasUnexplained, true, "…nhưng hai khoản lệch triệt tiêu nhau PHẢI bị bắt");
+
+    // Khoản điều chỉnh tay là lệch CÓ CHỦ Ý: đường cũ không có chỗ nào ghi tạm ứng.
+    const coUng = reconcile({
+      employeeId: "r3",
+      employeeName: "C",
+      old: { fixed: 8_000_000, bonusTotal: 0, bonusPersonal: 0, bonusRevenue: 0, salary: 8_000_000 },
+      next: { components: [{ code: "BASE_SALARY", amount: 8_000_000 }], grossEarnings: 8_000_000, totalDeductions: 1_000_000, netPay: 7_000_000 },
+      adjustmentTotal: -1_000_000,
+    });
+    assert.equal(coUng.netDiff, -1_000_000);
+    assert.equal(coUng.hasUnexplained, false, "lệch đúng bằng khoản điều chỉnh ⇒ giải thích được ⇒ chuyển được");
+    assert.match(coUng.lines.find((l) => l.key === "net")!.explanation, /CÓ CHỦ Ý/);
+
+    // CHƯA BIẾT không được đọc thành "không lệch".
+    const chuaBiet = reconcile({
+      employeeId: "r4",
+      employeeName: "D",
+      old: { fixed: null, bonusTotal: 0, bonusPersonal: null, bonusRevenue: 0, salary: null },
+      next: { components: [], grossEarnings: null, totalDeductions: null, netPay: null },
+      adjustmentTotal: 0,
+    });
+    assert.equal(chuaBiet.hasUnexplained, true, "một bên chưa biết ⇒ KHÔNG được coi là khớp");
+  }
+
+  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc + kiểm sổ khai · chuỗi bù lỗ 4 tháng · đề xuất và đối chiếu chuyển đổi");
 }
