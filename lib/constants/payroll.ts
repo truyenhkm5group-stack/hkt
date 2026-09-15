@@ -95,12 +95,17 @@ export const PAYROLL_BASIS_ALIAS: Record<string, PayrollBasis> = {
   "nominal-profit": "nominal",
 };
 export const PAYROLL_BASIS_LABEL: Record<PayrollBasis, string> = {
-  profit1: "LN1 · doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển − chi phí cố định/vận hành/khác",
-  profit2: "LN2 · doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ − vận chuyển − chi phí cố định/vận hành/khác",
-  cash: "Dòng tiền thực (tiền vào − tiền ra trong kỳ), chia theo tỷ trọng LN1",
+  profit1: "Doanh thu giao thành công − QC − giá vốn hàng ĐÃ GIAO − vận chuyển − chi phí cố định/vận hành/khác, TRƯỚC hoa hồng",
+  profit2: "Doanh thu giao thành công − QC − giá vốn TỔNG hàng nhập trong kỳ − vận chuyển − chi phí cố định/vận hành/khác",
+  cash: "Dòng tiền thực (tiền vào − tiền ra trong kỳ), chia theo tỷ trọng lợi nhuận tính lương",
   nominal: "Danh nghĩa (đơn lên trong kỳ × tỷ lệ hoàn ước tính), tham khảo",
 };
-export const PAYROLL_BASIS_SHORT: Record<PayrollBasis, string> = { profit1: "LN1 · giá vốn hàng giao TC", profit2: "LN2 · giá vốn hàng nhập", cash: "Dòng tiền thực", nominal: "Danh nghĩa" };
+export const PAYROLL_BASIS_SHORT: Record<PayrollBasis, string> = {
+  profit1: "Lợi nhuận tính lương",
+  profit2: "Sau giá vốn hàng nhập",
+  cash: "Dòng tiền thực",
+  nominal: "Danh nghĩa",
+};
 export const PAYROLL_BASES: PayrollBasis[] = ["profit1", "profit2", "cash", "nominal"];
 /**
  * Nhận CẢ HAI cách viết: khoá nghiệp vụ mới (`compensation-profit`) và giá trị cũ (`profit1`).
