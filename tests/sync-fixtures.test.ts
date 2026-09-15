@@ -20,6 +20,8 @@ import { testBankAccounts } from "./bank-accounts.test";
 import { testCashPosition } from "./cash-position.test";
 import { testFinanceCockpit } from "./finance-cockpit.test";
 import { testCostDoubleCount } from "./cost-double-count.test";
+import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
+import { testProfitCarryover } from "./profit-carryover.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
@@ -1622,6 +1624,8 @@ async function main() {
   await testCashPosition(db);
   await testFinanceCockpit(db);
   await testCostDoubleCount(db);
+  await testPayrollCostPreservation(db);
+  await testProfitCarryover();
   await testVtpState(db);
   await testVtpIngestion(db);
   await testReconciliation(db);

@@ -104,7 +104,28 @@ export type MarketerReport = {
   config: PayrollConfig;
   nominal: NominalReport;
   products: ProductProfitLine[];
-  totals: { revenue: number; adSpend: number; cogs: number; shipping: number; operating: number; operatingEntered: number; fixedCost: number; perOrderOps: number; months: number; testSpend: number; profit: number };
+  totals: {
+    revenue: number;
+    adSpend: number;
+    cogs: number;
+    shipping: number;
+    operating: number;
+    operatingEntered: number;
+    fixedCost: number;
+    perOrderOps: number;
+    /**
+     * CHI PHÍ CHUNG KHÔNG CHIA ĐƯỢC XUỐNG MÃ NÀO — vẫn trừ khỏi `profit`, và hiện riêng ở đây.
+     *
+     * Chia theo tỷ trọng doanh thu thì kỳ không có doanh thu không có căn cứ chia. Bỏ khoản ấy đi
+     * là làm lợi nhuận cao hơn sự thật; chia bừa cho marketer là ném chi phí lên đầu người không
+     * liên quan. Nên nó ở lại cấp shop, đọc được, và có bất biến:
+     * `Σ operatingAlloc của các mã + sharedUnallocated = operatingEntered + fixedCost + perOrderOps`.
+     */
+    sharedUnallocated: number;
+    months: number;
+    testSpend: number;
+    profit: number;
+  };
   marketers: MarketerProfit[];
   /** Lợi nhuận mã hàng không có quảng cáo và không có người phụ trách (không phân bổ cho ai) */
   unattributedProfit: number;
@@ -332,12 +353,34 @@ async function productEconomics(period: Period) {
   // Chia bằng largest remainder ⇒ Σ phần phân bổ của các mã = ĐÚNG (đã nhập + cố định), không lệch
   // vì làm tròn từng dòng; lương/hoa hồng cộng lại phải khớp tổng chi phí của shop.
   const sharedParts = distributeProportionally(operatingEntered + fixedCost, rows.map((r) => r.revenue));
+  /*
+    ═══ CHI PHÍ KHÔNG PHÂN BỔ ĐƯỢC VẪN LÀ CHI PHÍ ═══
+
+    `distributeProportionally` chia theo TỶ TRỌNG DOANH THU. Khi mọi dòng có doanh thu bằng 0 —
+    kỳ chưa có đơn giao thành công, kỳ mới mở, hay một kỳ ngắn toàn đơn hoàn — tổng trọng số bằng
+    0 nên hàm trả về toàn số 0 và KHÔNG chia gì cả. Bản thân hàm không sai: không có căn cứ nào để
+    chia một triệu đồng cho những dòng đều bằng 0.
+
+    Chỗ sai là ở ĐÂY, phía gọi. Lợi nhuận shop được cộng từ các dòng ĐÃ PHÂN BỔ, nên một triệu
+    đồng tiền thuê nhà không chia được sẽ lặng lẽ biến mất khỏi lợi nhuận — bảng vẫn cân, không
+    cảnh báo nào, chỉ là lợi nhuận cao hơn sự thật đúng một triệu. Và đó là con số dùng để trả
+    lương.
+
+    Nên phần không chia được KHÔNG bị bỏ: nó ở lại CẤP SHOP như một dòng đối soát đọc được, và vẫn
+    bị trừ khỏi lợi nhuận shop. Bất biến phải giữ: Σ phần phân bổ + phần còn ở cấp shop = tổng chi
+    phí nguồn. Chia bừa cho các marketer là cách hỏng còn tệ hơn — nó ném chi phí lên đầu người
+    không liên quan.
+  */
+  const sharedAllocated = sharedParts.reduce((t, v) => t + v, 0);
+  const sharedUnallocated = operatingEntered + fixedCost - sharedAllocated;
   return {
     rows: rows.map((r, idx) => ({ ...r, operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
     operating,
     operatingEntered,
     fixedCost,
     perOrderTotal,
+    /** Phần chi phí chung KHÔNG chia được xuống mã nào (không có căn cứ chia) — vẫn trừ ở cấp shop. */
+    sharedUnallocated,
     months,
     revenueTotal,
     /*
@@ -412,12 +455,49 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   };
   const products: ProductProfitLine[] = [];
   let shopRetained = 0;
-  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, months: econ.months, testSpend: 0, profit: 0 };
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, months: econ.months, testSpend: 0, profit: 0 };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
   const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
 
-  for (const row of econ.rows) {
+  /*
+    ═══ MÃ CHỈ CÓ TIỀN QUẢNG CÁO, CHƯA CÓ ĐƠN — VẪN LÀ CHI PHÍ CỦA KỲ ═══
+
+    Vòng lặp dưới đây đi theo `econ.rows`, mà `econ.rows` dựng từ DÒNG HÀNG ĐÃ BÁN và PHIẾU NHẬP.
+    Một mã vừa mở chiến dịch, đã tiêu tiền quảng cáo, nhưng chưa có đơn nào và chưa nhập lô nào thì
+    KHÔNG có dòng — nên `byProduct.get(row.productId)` không bao giờ được hỏi tới, và toàn bộ tiền
+    quảng cáo của mã ấy rơi ra ngoài lợi nhuận.
+
+    Đây đúng là hình dạng chi tiêu của một mã mới: tiêu trước, bán sau. Bỏ nó ra khỏi kỳ làm lợi
+    nhuận kỳ CAO HƠN sự thật, và cao đúng bằng khoản đang đốt để thử mã — khoản mà chủ shop cần
+    thấy nhất.
+
+    Nên bổ sung một dòng doanh thu 0 cho từng mã như vậy. Phần còn lại của vòng lặp xử lý nó y như
+    mọi mã khác: `attributionShares` không có dữ liệu fanpage sẽ rơi về chiều QUẢNG CÁO, tức chi
+    phí về đúng người đã chạy chiến dịch đó — không phải chia đều, không phải rơi vào "chưa gán".
+  */
+  const econRows = [...econ.rows];
+  const coMatTrongEcon = new Set(econ.rows.map((r) => r.productId));
+  for (const [productId, spend] of byProduct) {
+    if (!productId || coMatTrongEcon.has(productId) || spend.total <= 0) continue;
+    econRows.push({
+      productId,
+      productName: "",
+      code: "",
+      deliveredOrders: 0,
+      sentOrders: 0,
+      rescued: 0,
+      revenue: 0,
+      cogsDelivered: 0,
+      shipping: 0,
+      purchaseCost: 0,
+      packingCost: 0,
+      opsStaffCost: 0,
+      operatingAlloc: 0,
+    });
+  }
+
+  for (const row of econRows) {
     const spend = byProduct.get(row.productId);
     const adSpend = spend?.total ?? 0;
     const cogs = useDeliveredCogs ? row.cogsDelivered : row.purchaseCost;
@@ -513,6 +593,13 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     totals.testSpend += amount;
   }
   totals.profit -= totals.testSpend;
+  /*
+    Phần chi phí chung không chia được xuống mã nào (xem `productEconomics`) vẫn phải trừ khỏi lợi
+    nhuận shop — nó là tiền đã ra khỏi túi, chỉ là không có căn cứ để gán cho một mã cụ thể. Trừ ở
+    ĐÂY, sau vòng lặp, chính là cách giữ bất biến "lợi nhuận shop = doanh thu − TOÀN BỘ chi phí"
+    mà không ném khoản ấy lên đầu một marketer nào.
+  */
+  totals.profit -= totals.sharedUnallocated;
   for (const m of marketers.values()) {
     m.totalSpend = m.adSpend + m.testSpend;
     m.products.sort((a, b) => b.personalProfit - a.personalProfit);
