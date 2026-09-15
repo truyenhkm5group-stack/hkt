@@ -41,3 +41,31 @@ from ai_tasks group by 1 order by 2 desc;
 \echo '── 7. Lượt chạy gần nhất đi qua nấc nào (production_action phải là NO_SEND khi chưa ai bấm) ──'
 select coalesce(nullif(production_action,''),'?') as hanh_dong_san_xuat, count(*)::int as n
 from sales_suggestions group by 1 order by 2 desc;
+
+\echo '── 8. HÀNG ĐỢI NGAY LÚC NÀY (cùng bộ lọc mà màn hình dùng) ──'
+with tin_khach as (
+  select c.id, c.page_id,
+         (select max(sent_at) from sales_messages m
+            where m.conversation_id = c.id and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') as khach_luc,
+         (select max(sent_at) from sales_messages m
+            where m.conversation_id = c.id and m.from_page = true and m.sender_type in ('PAGE_HUMAN','PAGE_BOT'))            as shop_luc,
+         c.human_takeover_at
+  from sales_conversations c
+  where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+)
+select
+  count(*)::int                                                                            as hoi_thoai_cua_page,
+  count(*) filter (where khach_luc is null)::int                                            as khong_co_tin_khach,
+  count(*) filter (where human_takeover_at is not null)::int                                as nguoi_dang_cam,
+  count(*) filter (where shop_luc is not null and shop_luc >= khach_luc)::int               as shop_da_dap_roi,
+  count(*) filter (where khach_luc < now() - interval '24 hours')::int                      as qua_24_gio,
+  count(*) filter (where khach_luc is not null and human_takeover_at is null
+                     and (shop_luc is null or shop_luc < khach_luc)
+                     and khach_luc >= now() - interval '24 hours')::int                     as CON_LAI_TRONG_HANG_DOI
+from tin_khach;
+
+\echo '── 9. Tin khách mới nhất của page (để biết dòng tin có đang chảy vào không) ──'
+select max(m.sent_at) as tin_khach_moi_nhat, now() as bay_gio
+from sales_messages m join sales_conversations c on c.id = m.conversation_id
+where m.from_page = false and m.sender_type = 'CUSTOMER'
+  and c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb));
