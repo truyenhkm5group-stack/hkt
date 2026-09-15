@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
 import { SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type SalesStage } from "@/lib/constants/sales-agent";
-import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
+import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
 import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
@@ -300,6 +300,66 @@ export async function testSalesAgent(db: Db) {
   // Không khai gì trong môi trường ⇒ giá trị an toàn nhất. Mặc định của bản chạy thử là CẤM,
   // không phải "cho tới khi có người nghĩ ra là phải cấm".
   assert.deepEqual(aiEnv.hardLimits, SAFEST_HARD_LIMITS, "không khai biến môi trường thì cả hai công tắc đều CẤM");
+
+  // ── LUẬT PHẢI ĐỦ CHO CÂU THƯỜNG GẶP — MỖI LẦN THIẾU LÀ MỘT LƯỢT GỌI MÔ HÌNH ──
+  //
+  // Đo 15/09/2026 trên chính các câu có thật trong mẻ: 5/14 câu rơi về OTHER ở 0.2 và phải gọi mô
+  // hình, trong đó có "Bao nhiêu em?" — câu hỏi giá phổ biến nhất. Danh sách từ khoá cũ chỉ có các
+  // CỤM DÀI ("bao nhieu tien"), tức là đòi khách viết đủ câu.
+  for (const cau of ["Bao nhiêu em?", "báo giá", "Cho xin giá", "bao nhiêu một áo", "Giá sau khi giảm 40% là bao nhiêu?"]) {
+    const u = understandByRule(cau);
+    assert.ok(u.intents.includes("PRICE_QUESTION"), `"${cau}" phải là câu hỏi giá, thực tế ${u.intents.join(",")}`);
+    assert.ok(ruleIsEnough(u), `"${cau}" phải giải được bằng LUẬT — không đáng một lượt gọi mô hình`);
+  }
+  // "cho xin giá" là XIN BÁO GIÁ, không phải CHÊ ĐẮT. Trước đây nó nằm trong danh sách OBJECTION.
+  assert.ok(!understandByRule("Cho xin giá").intents.includes("OBJECTION"), "xin báo giá không phải chê đắt");
+  // Chê đắt thật thì vẫn phải nhận ra.
+  assert.ok(understandByRule("đắt quá shop ơi").intents.includes("OBJECTION"));
+
+  // ── MỘT CÂU HỎI KHÔNG BAO GIỜ LÀ MỘT LỜI XÁC NHẬN ──
+  //
+  // ĐÂY LÀ LOẠI DƯƠNG TÍNH GIẢ NGUY HIỂM NHẤT: "Có được kiểm hàng không?" khớp từ "duoc" và ra
+  // CONFIRM ở 0.8 — một CÂU HỎI bị đọc thành XÁC NHẬN CHỐT ĐƠN.
+  for (const hoi of ["Có được kiểm hàng không?", "Đúng mẫu này không?", "shop giao được không?"]) {
+    assert.ok(!understandByRule(hoi).intents.includes("CONFIRM"), `"${hoi}" là câu hỏi, không phải xác nhận`);
+  }
+  assert.ok(understandByRule("Có được kiểm hàng không?").intents.includes("PRODUCT_QUESTION"), "và nó phải được nhận đúng là câu hỏi về điều kiện mua bán");
+  // Tiếng đồng ý THẬT vẫn phải nhận ra — bỏ sót chiều này thì khách chốt xong máy không hiểu.
+  for (const dong of ["ok shop", "vâng ạ", "đúng rồi", "chốt nhé"]) {
+    assert.ok(understandByRule(dong).intents.includes("CONFIRM"), `"${dong}" phải là xác nhận`);
+  }
+
+  // ── LƯỢC ĐỒ PHẢI NHẬN `null` — ĐÂY LÀ LỖI ĐẮT NHẤT ĐO ĐƯỢC TỚI GIỜ ──
+  //
+  // `.default("")` của zod CHỈ áp khi khoá VẮNG MẶT. Mô hình trả `"productText": null` — đúng cách
+  // JSON diễn đạt "trống" — nên lược đồ báo invalid_type, MỌI lượt ECONOMY hỏng, leo lên STRONG,
+  // STRONG hỏng nốt, cả dây chuyền rơi về HUMAN.
+  //
+  // Đo 15/09/2026: 25 lượt gọi, 48% lên model mạnh, 1/18 hội thoại hiểu được. Trả tiền gấp đôi để
+  // nhận về con số không.
+  const nullHet = UNDERSTANDING_SCHEMA.parse({
+    intents: ["PRICE_QUESTION"],
+    entities: {
+      productText: null, productCode: null, size: null, color: null, quantity: null,
+      phone: null, address: null, province: null,
+      heightCm: null, weightKg: null, bustCm: null, waistCm: null, hipCm: null,
+    },
+    confidence: 0.9,
+    evidence: null,
+  });
+  assert.equal(nullHet.entities.productText, "", "null phải quy về chuỗi rỗng, không phải lỗi lược đồ");
+  assert.equal(nullHet.evidence, "");
+  assert.equal(nullHet.entities.quantity, null, "số vẫn giữ null — null ở đây nghĩa là CHƯA BIẾT");
+
+  // Khoá vắng mặt hoàn toàn cũng phải qua — mô hình có thể bỏ hẳn ô nó không thấy gì.
+  const thieuKhoa = UNDERSTANDING_SCHEMA.parse({ intents: ["GREETING"], entities: {}, confidence: 0.8 });
+  assert.equal(thieuKhoa.entities.color, "");
+  assert.equal(thieuKhoa.evidence, "");
+
+  // VÀ CHIỀU NGƯỢC LẠI VẪN CHẶN: rác thật sự vẫn phải bị từ chối, không "gần đúng thì lấy tạm".
+  assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: [], entities: {}, confidence: 0.5 }), "phải có ít nhất một ý định");
+  assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: ["KHONG_CO_THAT"], entities: {}, confidence: 0.5 }), "ý định lạ phải bị từ chối");
+  assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: ["GREETING"], entities: { quantity: 999 }, confidence: 0.5 }), "số ngoài khoảng vẫn phải bị từ chối");
 
   // ── NHÂN SỰ BÁN HÀNG DÙNG LẠI TẦNG AI CÓ SẴN CỦA ERP, KHÔNG DỰNG TÍCH HỢP THỨ HAI ──
   //

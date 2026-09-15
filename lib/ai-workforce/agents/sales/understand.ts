@@ -38,27 +38,48 @@ export const SALES_INTENTS = [
 export type SalesIntent = (typeof SALES_INTENTS)[number];
 
 
+/**
+ * Ô CHỮ TUỲ CHỌN — nhận `null`, `undefined` và chuỗi, luôn ra chuỗi.
+ *
+ * ĐO ĐƯỢC 15/09/2026 trên mẻ thật: `.default("")` của zod CHỈ áp khi khoá VẮNG MẶT, không áp khi
+ * giá trị là `null`. Mô hình trả `"productText": null` — đúng cách JSON diễn đạt "trống" — nên
+ * lược đồ báo `invalid_type`, MỌI lượt ECONOMY hỏng, leo lên STRONG, STRONG hỏng nốt, rồi cả dây
+ * chuyền rơi về HUMAN.
+ *
+ * Hậu quả đo được: 25 lượt gọi mô hình, 48% đi lên model mạnh, và chỉ 1/18 hội thoại có kết quả
+ * hiểu dùng được. Tức là trả tiền gấp đôi để nhận về con số không.
+ *
+ * Bắt mô hình phải gửi `""` thay vì `null` là bắt nó tuân một quy ước mà chính JSON không có. Chấp
+ * nhận cả hai ở CỔNG VÀO rồi quy về một dạng là việc của lược đồ, không phải của lời dặn.
+ */
+const oChu = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .nullish()
+    .transform((v) => v ?? "");
+
 /** Lược đồ đầu ra — dùng cho CẢ nấc luật lẫn nấc mô hình, để hai nấc không bao giờ lệch hình dạng. */
 export const UNDERSTANDING_SCHEMA = z.object({
   intents: z.array(z.enum(SALES_INTENTS)).min(1).max(4),
   entities: z.object({
-    productText: z.string().max(200).default(""),
-    productCode: z.string().max(20).default(""),
-    size: z.string().max(10).default(""),
-    color: z.string().max(40).default(""),
-    quantity: z.number().int().min(1).max(20).nullable().default(null),
-    phone: z.string().max(20).default(""),
-    address: z.string().max(400).default(""),
-    province: z.string().max(80).default(""),
-    heightCm: z.number().min(80).max(230).nullable().default(null),
-    weightKg: z.number().min(20).max(200).nullable().default(null),
-    bustCm: z.number().min(40).max(200).nullable().default(null),
-    waistCm: z.number().min(30).max(200).nullable().default(null),
-    hipCm: z.number().min(40).max(220).nullable().default(null),
+    productText: oChu(200),
+    productCode: oChu(20),
+    size: oChu(10),
+    color: oChu(40),
+    quantity: z.number().int().min(1).max(20).nullish().transform((v) => v ?? null),
+    phone: oChu(20),
+    address: oChu(400),
+    province: oChu(80),
+    heightCm: z.number().min(80).max(230).nullish().transform((v) => v ?? null),
+    weightKg: z.number().min(20).max(200).nullish().transform((v) => v ?? null),
+    bustCm: z.number().min(40).max(200).nullish().transform((v) => v ?? null),
+    waistCm: z.number().min(30).max(200).nullish().transform((v) => v ?? null),
+    hipCm: z.number().min(40).max(220).nullish().transform((v) => v ?? null),
   }),
   confidence: z.number().min(0).max(1),
   /** Câu / cụm đã dẫn tới kết luận — để người đọc lại hiểu vì sao máy nghĩ vậy. */
-  evidence: z.string().max(300).default(""),
+  evidence: oChu(300),
 });
 
 export type Understanding = z.infer<typeof UNDERSTANDING_SCHEMA> & { tier: "RULE" | "ECONOMY" | "STRONG" };
@@ -82,8 +103,21 @@ const EMPTY_ENTITIES = {
 // Từ khoá — viết ở dạng đã chuẩn hoá (không dấu, thường), so khớp TRỌN TỪ qua `normalize()`.
 const KEYWORDS: Record<SalesIntent, string[]> = {
   GREETING: ["alo", "hello", "hi shop", "chao shop", "shop oi", "ad oi"],
-  PRODUCT_QUESTION: ["mau nay", "san pham nay", "cai nay", "vay nay", "dam nay", "ao nay", "quan nay", "chat lieu", "vai gi", "cao bao nhieu mac vua"],
-  PRICE_QUESTION: ["bao nhieu tien", "gia bao nhieu", "gia the nao", "gia sao", "nhieu tien", "bn tien", "bnhieu", "may tien"],
+  PRODUCT_QUESTION: ["mau nay", "san pham nay", "cai nay", "vay nay", "dam nay", "ao nay", "quan nay", "chat lieu", "vai gi", "cao bao nhieu mac vua",
+    // ĐIỀU KIỆN MUA BÁN cũng là câu hỏi về sản phẩm. Thiếu chúng thì "Có được kiểm hàng không?"
+    // rơi về OTHER và phải gọi mô hình cho một câu có sẵn đáp án trong hồ sơ.
+    "kiem hang", "kiem tra hang", "xem hang", "dong kiem", "cod", "thanh toan", "tra tien",
+    "chuyen khoan", "co lot", "co day khong", "bao hanh", "doi tra"],
+  /*
+    "BAO NHIEU" TRẦN LÀ CÂU HỎI GIÁ PHỔ BIẾN NHẤT — và bản trước không có nó.
+
+    Đo 15/09/2026 trên mẻ thật: "Bao nhiêu em?", "bao nhiêu một áo", "bao nhiêu một đằm vậy",
+    "báo giá" đều rơi về OTHER ở 0.2 và phải gọi mô hình. Danh sách cũ chỉ có các CỤM DÀI
+    ("bao nhieu tien", "gia bao nhieu"), tức là đòi khách viết đủ câu.
+
+    "cho xin gia" chuyển sang đây từ OBJECTION: xin báo giá KHÔNG phải chê đắt.
+  */
+  PRICE_QUESTION: ["bao nhieu", "bao gia", "bao nhieu tien", "gia bao nhieu", "gia the nao", "gia sao", "nhieu tien", "bn tien", "bnhieu", "may tien", "cho xin gia", "gia bn", "gia nhieu"],
   STOCK_QUESTION: ["con hang", "con size", "con mau", "con khong", "het hang", "con k", "con ko"],
   SIZE_QUESTION: ["size nao", "mac size", "lay size", "size gi", "bang size", "size bao nhieu", "cao 1m", "nang bao nhieu"],
   SHIPPING_QUESTION: ["phi ship", "tien ship", "freeship", "free ship", "ship bao nhieu", "bao lau nhan", "may ngay nhan", "giao bao lau", "ship covid"],
@@ -91,9 +125,20 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   PROVIDE_VARIANT: [],
   PROVIDE_CONTACT: ["so dien thoai", "sdt cua em", "sdt em", "lien he em"],
   PROVIDE_ADDRESS: ["dia chi", "gui ve", "giao ve", "so nha", "thon", "xa", "phuong", "quan", "huyen", "tinh", "thanh pho"],
-  CONFIRM: ["ok", "oke", "okie", "dong y", "dung roi", "chuan roi", "van", "vang", "u", "ukm", "um", "chot", "duoc", "yes", "xac nhan", "dung"],
+  /*
+    BỎ "duoc" · "dung" · "van" KHỎI DANH SÁCH XÁC NHẬN.
+
+    Chúng là từ thường trong câu tiếng Việt, không phải tiếng đồng ý. Đo được: "Có được kiểm hàng
+    không?" khớp "duoc" và ra CONFIRM ở 0.8 — một CÂU HỎI bị đọc thành XÁC NHẬN CHỐT ĐƠN. Đó đúng
+    là loại dương tính giả mà cả nền tảng này sinh ra để chặn.
+
+    Giữ lại các tiếng đồng ý thật ("vang", "ukm", "um", "dung roi", "chuan roi"): chúng hiếm khi
+    xuất hiện ngoài nghĩa đồng ý. Và bộ gác ngữ cảnh (`checkContextualConfirmation`) vẫn là lớp
+    chặn cuối — nhưng một lớp chặn không phải lý do để tầng dưới nó được sai.
+  */
+  CONFIRM: ["ok", "oke", "okie", "dong y", "dung roi", "chuan roi", "vang", "ukm", "um", "chot", "yes", "xac nhan"],
   REJECT: ["thoi", "khong lay nua", "ko lay nua", "khong mua", "ko mua", "de sau", "huy", "khong can", "ko can"],
-  OBJECTION: ["dat qua", "mac qua", "sao dat the", "giam gia", "bot chut", "cho xin gia", "re hon", "cho re", "shop khac re"],
+  OBJECTION: ["dat qua", "mac qua", "sao dat the", "giam gia", "bot chut", "re hon", "cho re", "shop khac re"],
   COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
   ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
   AFTER_SALES: ["doi size", "doi mau", "tra hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don"],
@@ -209,6 +254,25 @@ export function understandByRule(rawText: string): Understanding {
     if (hit) {
       intents.push(intent);
       evidence.push(hit);
+    }
+  }
+
+  /*
+    MỘT CÂU HỎI KHÔNG BAO GIỜ LÀ MỘT LỜI XÁC NHẬN.
+
+    Bỏ từ khoá mơ hồ khỏi CONFIRM đã chặn phần lớn, nhưng không chặn được mọi cách đặt câu hỏi.
+    Dấu hiệu nghi vấn ("...không?", "...chưa?", dấu hỏi cuối câu) là bằng chứng ĐỘC LẬP với danh
+    sách từ khoá, nên nó bắt được cả những câu chưa ai nghĩ tới.
+  */
+  // "a" (ạ) KHÔNG nằm trong danh sách: nó là tiếng lịch sự cuối câu tiếng Việt, có mặt ở cả câu
+  // hỏi lẫn câu khẳng định. Đưa nó vào thì "vâng ạ" — một tiếng đồng ý rõ ràng — bị đọc thành câu
+  // hỏi và mất luôn ý định CONFIRM.
+  const laCauHoi = /\?\s*$/.test(text.trim()) || /\b(khong|ko|chua)\s*\?*\s*$/.test(n.trim());
+  if (laCauHoi) {
+    const i = intents.indexOf("CONFIRM");
+    if (i >= 0) {
+      intents.splice(i, 1);
+      evidence.splice(i, 1);
     }
   }
 
