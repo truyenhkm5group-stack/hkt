@@ -2,6 +2,7 @@
  * ═══════════ ĐỐI CHIẾU LƯƠNG CŨ / MỚI — CHỈ ĐỌC, KHÔNG BAO GIỜ GHI ═══════════
  *
  * Chạy:
+ *   npm run payroll:reconcile                      (tự tìm kỳ gần nhất CÓ dữ liệu)
  *   npm run payroll:reconcile -- --from 2026-09-01 --to 2026-09-30
  *   npm run payroll:reconcile -- --from 2026-09-01 --to 2026-09-30 --employee nv-1,nv-2
  *   npm run payroll:reconcile -- --from 2026-09-01 --to 2026-09-30 --json bao-cao.json
@@ -22,10 +23,19 @@
  * thay vì một lời hứa: một script chạy trên production với quyền ghi mà ai đó "tiện tay" thêm một
  * dòng `update` là một lượt sửa dữ liệu thật không ai duyệt.
  *
- * ─── NẾU KHÔNG CHẮC KẾT NỐI LÀ CHỈ-ĐỌC THÌ ĐỪNG CHẠY TRÊN PRODUCTION ───
+ * ─── FAIL CLOSED: KHÔNG CHỨNG MINH ĐƯỢC CHỈ ĐỌC THÌ DỪNG, KHÔNG CHẠY ───
  *
- * Script không tự kiểm được quyền của `DATABASE_URL` nó nhận. Cách an toàn nhất là chạy bằng một
- * tài khoản CSDL chỉ có `SELECT`; khi ấy dù mã có sai thì CSDL vẫn từ chối.
+ * Bản trước chỉ khuyên "nên dùng tài khoản chỉ có SELECT". Một lời khuyên trong khối chú thích
+ * không ngăn được gì. Nay script HỎI CHÍNH POSTGRES (`current_setting('transaction_read_only')`)
+ * và DỪNG nếu câu trả lời không phải `on` — trước khi đọc một dòng dữ liệu nào.
+ *
+ * Và nó chụp ảnh đếm các bảng lương TRƯỚC / SAU để chứng minh không ghi gì, thay vì khẳng định.
+ *
+ * ─── KHÔNG KẾT LUẬN "KHỚP" TRÊN DỮ LIỆU RỖNG ───
+ *
+ * Hai phép tính cùng ra 0 trên một kỳ không có đơn, không có chi phí, không có gì — điều đó KHÔNG
+ * chứng minh chúng đồng ý, nó chỉ chứng minh không có gì để bất đồng. Script tự tìm một kỳ CÓ
+ * hoạt động nguồn; không tìm được thì kết luận là `INSUFFICIENT_DATA`, không phải "đạt".
  */
 import "dotenv/config";
 
@@ -48,6 +58,24 @@ import { writeFileSync } from "node:fs";
 import { payrollPeriodKey } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { previewLegacyMigration } from "@/lib/queries/payroll-migration";
+import { getPayrollReport } from "@/lib/queries/payroll";
+import {
+  assertReadOnlySession,
+  diffSnapshots,
+  findPeriodWithActivity,
+  payrollTableSnapshot,
+} from "@/lib/queries/payroll-reconcile-source";
+import {
+  ACTIVITY_LABEL,
+  ACTIVITY_SOURCES,
+  RECON_STATUS_HINT,
+  RECON_STATUS_LABEL,
+  classifyEmployee,
+  gateVerdict,
+  hasActivity,
+  tallyStatuses,
+  type ReconStatus,
+} from "@/lib/payroll/reconcile-gate";
 import type { Period } from "@/lib/search-params";
 
 function arg(name: string): string | null {
@@ -60,25 +88,60 @@ const tien = (v: number | null) => (v === null ? "—" : v.toLocaleString("vi-VN
 async function main() {
   const from = arg("from");
   const to = arg("to");
-  if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    throw new Error("Thiếu hoặc sai --from / --to (dạng YYYY-MM-DD). Ví dụ: --from 2026-09-01 --to 2026-09-30");
-  }
   const chiNhungAi = (arg("employee") ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const period: Period = { key: "custom", from: vnStartOfDay(from), to: vnEndOfDay(to), fromKey: from, toKey: to, label: `${from} → ${to}` };
+  /*
+    ═══ BƯỚC 0 · CHỨNG MINH PHIÊN LÀ CHỈ ĐỌC, TRƯỚC KHI ĐỌC MỘT DÒNG NÀO ═══
+
+    FAIL CLOSED. `assertReadOnlySession` ném lỗi nếu Postgres không xác nhận `transaction_read_only
+    = on`, và không có nhánh nào bắt lỗi ấy để chạy tiếp.
+  */
+  const roCheck = await assertReadOnlySession();
+  console.log("\n═══ ĐỐI CHIẾU LƯƠNG CŨ / MỚI ═══");
+  console.log(`CHỈ ĐỌC ĐÃ XÁC MINH: transaction_read_only=${roCheck.transactionReadOnly} · default_transaction_read_only=${roCheck.defaultReadOnly}`);
+  console.log("Chính POSTGRES từ chối mọi lệnh ghi — không phải mã nguồn tự hứa.\n");
+
+  /* ═══ BƯỚC 1 · ẢNH ĐẾM TRƯỚC ═══ */
+  const anhTruoc = await payrollTableSnapshot();
+
+  /*
+    ═══ BƯỚC 2 · CHỌN KỲ CÓ DỮ LIỆU THẬT ═══
+
+    Kỳ do người chạy chỉ định được thử TRƯỚC. Rỗng thì lùi dần từng tháng — và in ra từng kỳ đã
+    thử, vì "đã thử 6 tháng đều rỗng" là một kết luận khác hẳn "chọn đại tháng đầu tiên".
+  */
+  const uuTien: Period | null =
+    from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)
+      ? { key: "custom", from: vnStartOfDay(from), to: vnEndOfDay(to), fromKey: from, toKey: to, label: `${from} → ${to}` }
+      : null;
+  const chon = await findPeriodWithActivity(uuTien, Number(arg("back") ?? 6));
+  const period = chon.period;
   const key = payrollPeriodKey(period.from, period.to);
+  const coHoatDong = hasActivity(chon.activity);
 
-  console.log(`\n═══ ĐỐI CHIẾU LƯƠNG CŨ / MỚI · kỳ ${key} ═══`);
-  console.log("CHỈ ĐỌC: phiên kết nối bật `default_transaction_read_only=on` — CHÍNH POSTGRES từ chối mọi lệnh ghi, không phải mã nguồn tự hứa.\n");
+  console.log(`Kỳ đối chiếu: ${key}`);
+  if (chon.tried.length > 1 || !coHoatDong) {
+    console.log(`Đã thử: ${chon.tried.map((t) => `${t.label} ${t.hasActivity ? "CÓ dữ liệu" : "rỗng"}`).join(" · ")}`);
+  }
+  console.log("Hoạt động nguồn của kỳ:");
+  for (const k of ACTIVITY_SOURCES) console.log(`   ${ACTIVITY_LABEL[k].padEnd(30)} ${(chon.activity[k] ?? 0).toLocaleString("vi-VN")}`);
+  if (!coHoatDong) {
+    console.log("\n⚠ KỲ NÀY KHÔNG CÓ MỘT NGUỒN SỐ NÀO KHÁC 0.");
+    console.log("  Mọi kết luận “khớp” trên kỳ ấy là RỖNG NGHĨA: hai phép tính cùng ra 0 trên dữ liệu rỗng");
+    console.log("  KHÔNG chứng minh chúng đồng ý — chỉ chứng minh không có gì để bất đồng.");
+  }
+  console.log("");
 
+  const report = await getPayrollReport(period, "profit1");
   const rows = (await previewLegacyMigration(period, "profit1")).filter((r) => !chiNhungAi.length || chiNhungAi.includes(r.proposal.employeeId));
   if (!rows.length) {
     console.log("Không có nhân sự nào khớp bộ lọc.");
     return;
   }
+  const trangThai: ReconStatus[] = [];
 
   const bang: Record<string, unknown>[] = [];
   let coLech = 0;
@@ -86,10 +149,72 @@ async function main() {
 
   for (const r of rows) {
     const p = r.proposal;
+    const line = report.lines.find((l) => l.employee.id === p.employeeId);
+    const mkt = report.marketers.marketers.find((m) => m.marketerId === p.employeeId);
+
+    /*
+      CÓ THỨ GÌ ĐỂ HAI ĐƯỜNG BẤT ĐỒNG KHÔNG — đây là ranh giới giữa MATCH và INSUFFICIENT_DATA.
+
+      Định nghĩa đúng KHÔNG phải "người này có doanh thu không" mà là "có dòng nào khác 0 ở ÍT NHẤT
+      một trong hai bên không". Hai lý do:
+
+       · Một người chỉ ăn % lợi nhuận TOÀN SHOP không có doanh thu riêng nào, nhưng con số của họ
+         vẫn chạy qua trọn bộ máy tính lợi nhuận. Hai đường cùng ra 2.522.789đ là một phép khớp
+         THẬT — gọi nó là "không đủ dữ liệu" là hạ giá một bằng chứng có giá trị.
+       · Ngược lại, mọi dòng đều 0 ở CẢ HAI bên thì không có gì để bất đồng, và "0 = 0" không
+         chứng minh hai phép tính đồng ý — chỉ chứng minh không có gì để so.
+    */
+    const coGiDeSo = (r.recon?.lines ?? []).some((l) => (l.old ?? 0) !== 0 || (l.next ?? 0) !== 0);
+
     console.log(`── ${p.employeeName} (${p.employeeId}) ${r.alreadyMigrated ? "· ĐÃ CHUYỂN" : ""}`);
-    if (p.blockers.length) for (const b of p.blockers) console.log(`   ⚠ ${b}`);
+    console.log(`   Phòng ban: ${line?.employee.department || "(chưa khai)"}`);
+
+    /* CƠ CHẾ LƯƠNG CŨ — in nguyên lời khai, không diễn giải lại. */
+    const coCheCu: string[] = [];
+    if ((line?.fixedMonthly ?? 0) > 0) coCheCu.push(`lương cứng ${tien(line!.fixedMonthly)}đ/tháng`);
+    if ((line?.employee.percentTotal ?? 0) > 0) coCheCu.push(`${line!.employee.percentTotal}% LN toàn shop`);
+    if ((line?.employee.percentPersonal ?? 0) > 0) coCheCu.push(`${line!.employee.percentPersonal}% LN cá nhân`);
+    if ((line?.employee.percentRevenue ?? 0) > 0) coCheCu.push(`${line!.employee.percentRevenue}% doanh thu cá nhân`);
+    console.log(`   Cơ chế cũ: ${coCheCu.length ? coCheCu.join(" + ") : "(không khai khoản nào)"}`);
+    console.log(`   Chính sách ứng viên: ${p.policyCode} — ${p.components.length} thành phần${p.components.length ? `: ${p.components.map((c) => `${c.code}/${c.kind}`).join(", ")}` : ""}`);
+
+    if (p.blockers.length) for (const b of p.blockers) console.log(`   ⚠ THIẾU KHAI BÁO: ${b}`);
+
+    /*
+      ═══ BÓC TÁCH LỢI NHUẬN CHO NGƯỜI ĂN THEO % LỢI NHUẬN ═══
+
+      In ra ĐÚNG chuỗi trừ của `PRE_VARIABLE_COMPENSATION_PROFIT`, để người đọc thấy hoa hồng KHÔNG
+      nằm trong phép trừ ấy — nó bị trừ ở bước sau. Số lấy từ báo cáo, không tính lại ở đây.
+    */
+    if (mkt && (line?.employee.percentPersonal ?? 0) > 0) {
+      console.log("   Cơ sở lợi nhuận trước lương biến đổi:");
+      console.log(`      Doanh thu giao thành công        ${tien(mkt.attributedRevenue).padStart(16)}`);
+      console.log(`    − Giá vốn hàng đã giao             ${tien(mkt.cogsCharged).padStart(16)}`);
+      console.log(`    − Quảng cáo của chính người này    ${tien(mkt.totalSpend).padStart(16)}`);
+      console.log(`    − Cước vận chuyển + phí hoàn       ${tien(mkt.shippingCharged).padStart(16)}`);
+      console.log(`    − Chi phí vận hành phân bổ         ${tien(mkt.operatingCharged).padStart(16)}`);
+      console.log(`    = LN trước lương biến đổi          ${tien(mkt.personalProfit).padStart(16)}`);
+      if (line?.carry) {
+        console.log(`    + Lỗ mang sang từ kỳ trước         ${tien(line.carry.openingBalance).padStart(16)}`);
+        console.log(`    = Cơ sở tính hoa hồng (≥ 0)        ${tien(line.carry.commissionBase).padStart(16)}`);
+        console.log(`      Lỗ chuyển sang kỳ sau (≤ 0)      ${tien(line.carry.closingBalance).padStart(16)}`);
+      }
+      console.log("      (hoa hồng KHÔNG nằm trong phép trừ trên — nó bị trừ ở BƯỚC SAU)");
+    }
+
     if (!r.recon) {
       console.log("   Không có dòng lương ở đường cũ cho kỳ này — chưa đối chiếu được.\n");
+      trangThai.push(
+        classifyEmployee({
+          employeeId: p.employeeId,
+          employeeName: p.employeeName,
+          missingConfig: p.blockers,
+          hasOwnActivity: false,
+          hasLegacyLine: false,
+          netDiff: null,
+          hasUnexplainedDiff: false,
+        }),
+      );
       continue;
     }
     for (const l of r.recon.lines) {
@@ -110,21 +235,78 @@ async function main() {
     }
     if (r.recon.netDiff !== 0) coLech += 1;
     if (r.recon.hasUnexplained) chuaGiaiThich += 1;
+
+    const tt = classifyEmployee({
+      employeeId: p.employeeId,
+      employeeName: p.employeeName,
+      missingConfig: p.blockers,
+      hasOwnActivity: coGiDeSo,
+      hasLegacyLine: true,
+      netDiff: r.recon.netDiff,
+      hasUnexplainedDiff: r.recon.hasUnexplained,
+    });
+    trangThai.push(tt);
+    console.log(`   ⇒ ${RECON_STATUS_LABEL[tt]} — ${RECON_STATUS_HINT[tt]}`);
     console.log("");
   }
 
   console.log("═══ TỔNG KẾT ═══");
   console.log(`${rows.length} nhân sự · ${coLech} người có lệch ở dòng thực nhận · ${chuaGiaiThich} người còn lệch CHƯA giải thích được.`);
+  const dem = tallyStatuses(trangThai);
+  for (const k of Object.keys(dem) as ReconStatus[]) console.log(`   ${RECON_STATUS_LABEL[k].padEnd(36)} ${dem[k]}`);
   if (chuaGiaiThich > 0) {
     console.log("\nKHÔNG kích hoạt chính sách cho những người còn lệch chưa rõ nguyên nhân — trừ khi đó là một");
     console.log("sửa ĐÚNG có chủ ý, và khi ấy phải ghi lý do ở màn hình Xem trước chuyển đổi để nó vào nhật ký.");
   }
+
+  /*
+    ═══ CHỨNG MINH KHÔNG GHI: ẢNH ĐẾM SAU PHẢI BẰNG ẢNH ĐẾM TRƯỚC ═══
+
+    Không phải một lời khẳng định mà là một phép đo. Lệch một dòng ở bất kỳ bảng nào — kể cả
+    `audit_logs` — nghĩa là có đường ghi lọt qua, và lượt đối chiếu ấy KHÔNG dùng làm căn cứ được.
+  */
+  const anhSau = await payrollTableSnapshot();
+  const lechBang = diffSnapshots(anhTruoc, anhSau);
+  console.log("\n═══ CHỨNG MINH KHÔNG GHI DỮ LIỆU ═══");
+  if (lechBang.length === 0) {
+    console.log(`Ảnh đếm ${Object.keys(anhTruoc).length} bảng lương TRƯỚC = SAU. Không một dòng nào được thêm, kể cả nhật ký.`);
+  } else {
+    console.log("⚠ CÓ BẢNG ĐỔI SỐ DÒNG — lượt đối chiếu này KHÔNG dùng làm căn cứ được:");
+    for (const l of lechBang) console.log(`   ${l}`);
+  }
+
+  /* ═══ KẾT LUẬN CỔNG ═══ */
+  const ket = gateVerdict({ environmentOk: true, periodHasActivity: coHoatDong, statuses: trangThai });
+  console.log("\n═══ KẾT LUẬN CỔNG ĐỐI CHIẾU ═══");
+  console.log(`${ket.verdict}`);
+  console.log(`${ket.why}`);
+  if (lechBang.length > 0) console.log("NHƯNG ảnh đếm bảng đã đổi — xem khối trên, kết luận ở trên KHÔNG có hiệu lực.");
   // Dấu hiệu đọc bảng: `!` = lệch chưa giải thích được · `~` = lệch có lý do · `?` = một bên chưa biết.
   console.log("\nDấu:  ! lệch chưa giải thích được   ~ lệch có lý do   ? một bên CHƯA BIẾT (không so được)");
 
   const jsonPath = arg("json");
   if (jsonPath) {
-    writeFileSync(jsonPath, JSON.stringify({ period: key, generatedAt: new Date().toISOString(), rows: bang }, null, 2));
+    writeFileSync(
+      jsonPath,
+      JSON.stringify(
+        {
+          period: key,
+          generatedAt: new Date().toISOString(),
+          readOnly: roCheck,
+          activity: chon.activity,
+          periodHasActivity: coHoatDong,
+          periodsTried: chon.tried,
+          tally: dem,
+          verdict: ket,
+          tableSnapshotBefore: anhTruoc,
+          tableSnapshotAfter: anhSau,
+          tableSnapshotChanged: lechBang,
+          rows: bang,
+        },
+        null,
+        2,
+      ),
+    );
     console.log(`\nĐã ghi ${jsonPath}`);
   }
   const csvPath = arg("csv");

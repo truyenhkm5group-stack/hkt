@@ -21,6 +21,7 @@ import { isFrozen, normalizePayrollStatus, PAYROLL_ACTION_SPEC, PAYROLL_RUN_STAT
 import { applyRounding, type PolicyComponent } from "@/lib/constants/payroll-components";
 import { adjustmentSchema, VND_COLUMN_MAX } from "@/lib/validation/payroll-policy";
 import { formatVND } from "@/lib/format";
+import { RECON_STATUSES, activeSources, classifyEmployee, gateVerdict, hasActivity, tallyStatuses } from "@/lib/payroll/reconcile-gate";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00+07:00`);
 const dEnd = (iso: string) => new Date(`${iso}T23:59:59.999+07:00`);
@@ -646,7 +647,113 @@ export function testPayrollProductionReadiness() {
     assert.equal(PAYROLL_ACTION_SPEC.UNLOCK.requiresReason, true, "9. mở khoá một kỳ đã trả tiền bắt buộc có LÝ DO");
   }
 
+  /*
+    ═══════════════════════════════════════════════════════════════════════════════════════
+    11 · CỔNG ĐỐI CHIẾU: KHÔNG ĐƯỢC KẾT LUẬN "KHỚP" TRÊN DỮ LIỆU RỖNG
+    ═══════════════════════════════════════════════════════════════════════════════════════
+
+    LỖI THẬT ĐÃ SỬA, VÀ LÀ LỖI VỀ CÁCH ĐỌC KẾT QUẢ CHỨ KHÔNG PHẢI VỀ PHÉP TÍNH.
+
+    Lượt đối chiếu đầu tiên trên production trả "4/4 khớp, lệch 0đ" và nghe như một cổng đã qua.
+    Nó không phải: bảng lương trên production RỖNG, chưa ai được gán chính sách, nên cả hai đường
+    đều trả về cùng một thứ *không có gì*. Hai phép tính cùng ra 0 trên dữ liệu rỗng KHÔNG chứng
+    minh chúng đồng ý — chỉ chứng minh không có gì để bất đồng.
+
+    Kết quả RỖNG NGHĨA nguy hiểm vì nó trông y hệt một kết quả tốt, và nó xuất hiện đúng lúc người
+    ta muốn nghe điều đó nhất: ngay trước khi phát hành.
+  */
+  {
+    const nen = { employeeId: "e1", employeeName: "A", missingConfig: [] as string[], hasOwnActivity: true, hasLegacyLine: true, netDiff: 0, hasUnexplainedDiff: false };
+
+    assert.equal(classifyEmployee(nen), "MATCH", "11. có thứ để so + lệch 0 ⇒ KHỚP");
+    assert.equal(
+      classifyEmployee({ ...nen, hasOwnActivity: false }),
+      "INSUFFICIENT_DATA",
+      "11. KHÔNG có gì để so thì 0 = 0 KHÔNG phải một phép khớp — đây là toàn bộ điểm của khối này",
+    );
+    assert.equal(classifyEmployee({ ...nen, hasLegacyLine: false }), "INSUFFICIENT_DATA", "11. đường cũ không ra dòng nào ⇒ không so được");
+    assert.equal(classifyEmployee({ ...nen, netDiff: null }), "INSUFFICIENT_DATA", "11. một bên CHƯA BIẾT ⇒ không kết luận");
+    assert.equal(classifyEmployee({ ...nen, netDiff: 5_000 }), "EXPECTED_CHANGE", "11. có lệch nhưng giải thích được");
+    assert.equal(classifyEmployee({ ...nen, hasUnexplainedDiff: true }), "BUG", "11. lệch không giải thích được là LỖI");
+    assert.equal(classifyEmployee({ ...nen, missingConfig: ["chưa khai phân công"] }), "NEEDS_CONFIG", "11. thiếu khai báo là việc phải làm, không phải một khoản lệch");
+
+    /* THỨ TỰ ƯU TIÊN — phần dễ sai nhất, vì mỗi nhãn sai đều "nghe hợp lý". */
+    assert.equal(
+      classifyEmployee({ ...nen, missingConfig: ["thiếu"], hasUnexplainedDiff: true }),
+      "BUG",
+      "11. LỖI thắng THIẾU KHAI BÁO — một khoản lệch không giải thích được không được che bằng một nhãn dễ nghe hơn",
+    );
+    assert.equal(
+      classifyEmployee({ ...nen, missingConfig: ["thiếu"], hasOwnActivity: false }),
+      "NEEDS_CONFIG",
+      "11. THIẾU KHAI BÁO trước KHÔNG ĐỦ DỮ LIỆU — cái đầu có người làm được ngay, cái sau phải đợi kỳ sau",
+    );
+
+    /* ═══ HOẠT ĐỘNG NGUỒN CỦA KỲ ═══ */
+    const rong = { orders: 0, deliveredOrders: 0, revenue: 0, adSpend: 0, expenses: 0, shipments: 0, fixedSalaryDeclared: 0 };
+    assert.equal(hasActivity(rong), false, "11. kỳ toàn số 0 KHÔNG có hoạt động");
+    assert.equal(hasActivity({ ...rong, orders: 1 }), true, "11. một đơn cũng là có hoạt động");
+    assert.equal(
+      hasActivity({ ...rong, fixedSalaryDeclared: 12_000_000 }),
+      true,
+      "11. kỳ không có đơn nhưng CÓ lương cứng khai vẫn tính lương được — lương cứng đi theo THỜI GIAN, không theo đơn",
+    );
+    assert.deepEqual(activeSources({ ...rong, orders: 3, expenses: 2 }), ["orders", "expenses"], "11. nêu ĐÚNG nguồn nào có số, để người đọc tự thấy căn cứ");
+
+    /* ═══ KẾT LUẬN CỔNG — bốn kết quả, không có ô "tạm được" ═══ */
+    assert.equal(gateVerdict({ environmentOk: false, periodHasActivity: true, statuses: ["MATCH"] }).verdict, "RECONCILIATION_BLOCKED_BY_ENVIRONMENT", "11. không chạy được an toàn thì KHÔNG hạ chuẩn");
+    assert.equal(
+      gateVerdict({ environmentOk: true, periodHasActivity: false, statuses: ["MATCH", "MATCH", "MATCH", "MATCH"] }).verdict,
+      "RECONCILIATION_BLOCKED_BY_CONFIG",
+      "11. BỐN NGƯỜI “KHỚP” TRÊN MỘT KỲ RỖNG VẪN KHÔNG ĐƯỢC ĐẠT — đây chính là kết quả rỗng nghĩa mà production đã trả về",
+    );
+    assert.equal(gateVerdict({ environmentOk: true, periodHasActivity: true, statuses: ["MATCH", "BUG"] }).verdict, "NOT_READY_BUG_FOUND", "11. một LỖI là đủ để chặn");
+    assert.equal(
+      gateVerdict({ environmentOk: true, periodHasActivity: true, statuses: ["NEEDS_CONFIG", "NEEDS_CONFIG"] }).verdict,
+      "RECONCILIATION_BLOCKED_BY_CONFIG",
+      "11. kỳ có dữ liệu nhưng không ai tính được cả hai đường ⇒ vướng khai báo, chưa phải đạt",
+    );
+    assert.equal(
+      gateVerdict({ environmentOk: true, periodHasActivity: true, statuses: ["MATCH", "NEEDS_CONFIG"] }).verdict,
+      "RECONCILIATION_PASS",
+      "11. có người đối chiếu được trên kỳ CÓ dữ liệu và không ai lỗi ⇒ đạt, kể cả khi người khác còn thiếu khai báo",
+    );
+
+    const dem = tallyStatuses(["MATCH", "MATCH", "BUG"]);
+    assert.equal(dem.MATCH, 2);
+    assert.equal(dem.BUG, 1);
+    assert.equal(Object.keys(dem).length, RECON_STATUSES.length, "11. bảng tổng hợp phải giữ ĐỦ mọi khoá kể cả khoá bằng 0 — thiếu một dòng là một bảng nói dối");
+  }
+
+  /*
+    ═══════════════════════════════════════════════════════════════════════════════════════
+    12 · SCRIPT ĐỐI CHIẾU: DỪNG NẾU KHÔNG CHỨNG MINH ĐƯỢC CHỈ ĐỌC, VÀ CHỨNG MINH KHÔNG GHI
+    ═══════════════════════════════════════════════════════════════════════════════════════
+
+    Quét mã ĐÃ VÀO KHO. Ba điều kiện, và cả ba đều là thứ "sẽ đúng cho tới lần sửa sau" nếu chỉ
+    viết trong khối chú thích.
+  */
+  {
+    const src = execSync("git show HEAD:scripts/payroll-reconcile.ts", { encoding: "utf8" });
+    const nguon = execSync("git show HEAD:lib/queries/payroll-reconcile-source.ts", { encoding: "utf8" });
+
+    assert.ok(src.includes("assertReadOnlySession"), "12. script phải HỎI Postgres xem phiên có chỉ đọc không");
+    assert.ok(
+      !/catch[\s\S]{0,200}assertReadOnlySession/.test(src),
+      "12. và KHÔNG được bắt lỗi ấy để chạy tiếp — fail closed nghĩa là không có nhánh nào đi vòng",
+    );
+    assert.ok(nguon.includes("current_setting('transaction_read_only')"), "12. hỏi CHÍNH máy chủ, không tin biến môi trường");
+    assert.ok(
+      !/insert into|\.insert\(|\.update\(|\.delete\(/.test(nguon.replace(/\/\*[\s\S]*?\*\//g, "")),
+      "12. tệp nguồn của lượt đối chiếu không được có một lệnh ghi nào",
+    );
+    assert.ok(src.includes("payrollTableSnapshot") && src.includes("diffSnapshots"), "12. phải chụp ảnh đếm TRƯỚC và SAU — chứng minh, không khẳng định");
+    assert.ok(nguon.includes("audit_logs"), "12. ảnh đếm phải gồm cả nhật ký: một lượt ghi nhật ký ngoài ý muốn cũng là một dòng THÊM");
+    assert.ok(src.includes("findPeriodWithActivity"), "12. phải tự tìm kỳ CÓ dữ liệu, không ghim cứng một tháng trong mã");
+    assert.ok(src.includes("gateVerdict"), "12. và phải in ra một kết luận cổng, không để người đọc tự suy");
+  }
+
   console.log(
-    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu · chưa khai phân công thì NÓI RA thay vì trả 0đ im lặng · mọi cửa vào đều có cổng quyền",
+    "  ✓ Sẵn sàng production (lương): bù lỗ không áp lại từng đoạn (cắt kỳ KHÔNG đổi tiền) · kỳ đóng băng đọc bằng isFrozen · mốc hiệu lực không hở/không chồng/không lệch 1 ngày · phân công chồng lấn bị chặn · VND nguyên & làm tròn một lần & không `-0` · MKTer 6 bước + hoa hồng không tự trừ · chuỗi bù lỗ 4 tháng · 6 chính sách mẫu · chưa khai phân công thì NÓI RA thay vì trả 0đ im lặng · mọi cửa vào đều có cổng quyền · KHÔNG kết luận “khớp” trên dữ liệu rỗng · script đối chiếu fail-closed và chứng minh không ghi",
   );
 }

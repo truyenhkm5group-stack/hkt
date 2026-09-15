@@ -9,7 +9,7 @@
  */
 import { and, gte, lt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME_FAST } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { getSettingJson } from "@/lib/settings";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
@@ -127,7 +127,15 @@ export async function periodActivity(period: Period): Promise<PeriodActivity> {
         doanhThu: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)::bigint`,
       })
       .from(o)
-      .leftJoin(s, sql`${s.orderId} = ${o.id}`)
+      /*
+        `PRIMARY_ATTEMPT` KHÔNG PHẢI MỘT BỘ LỌC TUỲ CHỌN.
+
+        Một đơn gửi lại nhiều lần có NHIỀU dòng `shipments`. Nối trần thì đơn ấy được đếm nhiều
+        lần và doanh thu của nó được CỘNG nhiều lần — phép đo "kỳ này có hoạt động không" sẽ thổi
+        phồng đúng những kỳ nhiều đơn hoàn nhất. `tests/shipment-join-grain.test.ts` bắt được nhánh
+        này ngay khi vừa viết ra.
+      */
+      .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
       .where(and(gte(o.insertedAt, from), lt(o.insertedAt, new Date(to.getTime() + 1)))),
     db.select({ n: sql<number>`count(*)::int` }).from(s).where(and(gte(s.createdAt, from), lt(s.createdAt, new Date(to.getTime() + 1)))),
     db
