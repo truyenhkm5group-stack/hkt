@@ -13,7 +13,7 @@
 --
 -- CHỈ CỘNG THÊM: năm cột có mặc định + hai ràng buộc CHECK. Dòng đã có giữ nguyên `ENTERED` và
 -- đơn vị rỗng — KHÔNG backfill đơn vị, vì đoán đơn vị của một con số đã nhập là đoán ý người nhập.
--- Viết tay và idempotent như 0033–0094.
+-- Viết tay và idempotent như 0033–0095.
 
 ALTER TABLE "payroll_inputs" ADD COLUMN IF NOT EXISTS "unit" text DEFAULT '' NOT NULL;--> statement-breakpoint
 ALTER TABLE "payroll_inputs" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'ENTERED' NOT NULL;--> statement-breakpoint
