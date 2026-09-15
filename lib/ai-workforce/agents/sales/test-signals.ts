@@ -18,7 +18,7 @@
  * cáo R&D và thành căn cứ để quyết có sản xuất mẫu ấy hay không — đắt hơn nhiều so với việc bỏ sót
  * một tín hiệu.
  */
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 
 export type TestSignal = {

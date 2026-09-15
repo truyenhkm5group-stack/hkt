@@ -22,7 +22,6 @@ import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
 import { generateTestReply, testIntentOf, type TestFacts } from "@/lib/ai-workforce/agents/sales/generate-test";
-import { TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-sales";
 import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
 import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
