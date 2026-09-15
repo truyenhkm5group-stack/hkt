@@ -148,8 +148,60 @@ export async function testPayrollCogsCutoff(db: Db) {
     "và lợi nhuận shop của kỳ ĐÃ QUA giảm đúng bấy nhiêu, dù không một đơn nào đổi",
   );
 
+  /* ══ HÀNG TẶNG: KHÔNG DOANH THU, NHƯNG PHẢI CÓ GIÁ VỐN ══
+   *
+   * Hàng tặng vẫn trừ tồn như hàng bán (AGENTS.md mục 10) và vẫn là tiền thật đã bỏ ra. Bản cũ loại
+   * nó ngay ở `WHERE` nên giá vốn KHÔNG BAO GIỜ vào lợi nhuận — tặng càng nhiều, lợi nhuận trông
+   * càng đẹp.
+   *
+   * Ba điều phải đúng cùng lúc, và đó là lý do lọc phải nằm ở TỪNG CỘT chứ không ở `WHERE`:
+   * giá vốn PHẢI tăng · doanh thu KHÔNG được tăng · số đơn KHÔNG được tăng.
+   */
+  await db.insert(schema.products).values({ id: "cg-prod2", name: "Mã có hàng tặng" });
+  await db.insert(schema.productVariants).values({ id: "cg-var2", productId: "cg-prod2", sku: "CG-VAR2", detail: "mặc định" });
+  await db.insert(schema.stockReceipts).values({ id: "cg-rc-3", kind: "RECEIPT", receivedAt: d("2027-07-02") });
+  await db.insert(schema.stockReceiptItems).values({ id: "cg-ri-3", receiptId: "cg-rc-3", variantId: "cg-var2", quantity: 50, unitCost: 70_000 });
+  await db.insert(schema.orders).values({
+    id: "cg-order2",
+    insertedAt: d("2027-07-15"),
+    stage: "DELIVERED",
+    status: 3,
+    totalPriceAfterDiscount: 400_000,
+    partnerFee: 0,
+    returnFee: 0,
+    cod: 400_000,
+  });
+  // Một dòng BÁN (2 cái, 400.000đ) và một dòng TẶNG (1 cái, 0đ) trên CÙNG một đơn.
+  await db.insert(schema.orderItems).values([
+    { id: "cg-oi-2", orderId: "cg-order2", variantId: "cg-var2", productId: "cg-prod2", productName: "Mã có hàng tặng", quantity: 2, lineTotal: 400_000, unitCost: 0, isBonus: false },
+    { id: "cg-oi-3", orderId: "cg-order2", variantId: "cg-var2", productId: "cg-prod2", productName: "Mã có hàng tặng", quantity: 1, lineTotal: 0, unitCost: 0, isBonus: true },
+  ]);
+  await db.insert(schema.shipments).values({
+    id: "cg-ship2",
+    orderId: "cg-order2",
+    vtpOrderNumber: "CG0000000002",
+    stage: "DELIVERED",
+    shippingFee: 0,
+    codAmount: 400_000,
+    codCollected: 400_000,
+    codStatus: "RECONCILED",
+    deliveredAt: d("2027-07-16"),
+  });
+  clearMemo();
+
+  const coTang = await getMarketerReport(THANG7, "profit1");
+  const dongTang = coTang.products.find((p) => p.productId === "cg-prod2");
+  assert.equal(
+    dongTang?.cogsDelivered,
+    210_000,
+    "hàng tặng: giá vốn phải gồm CẢ cái tặng — 3 cái × 70.000đ = 210.000đ, không phải 140.000đ",
+  );
+  assert.equal(dongTang?.revenue, 400_000, "hàng tặng KHÔNG sinh doanh thu — vẫn đúng 400.000đ");
+  assert.equal(dongTang?.deliveredOrders, 1, "và KHÔNG làm số đơn giao thành công tăng lên 2");
+
+  await reset(db);
   await reset(db);
   console.log(
-    "✓ Giá vốn theo kỳ (ĐO HIỆN TRẠNG, chưa sửa): nhập lô giá mới SAU ngày giao làm giá vốn đơn cũ đổi 200.000đ → 600.000đ ở đường productEconomics (cấp DÒNG, LINE_UNIT_COST), trong khi orderCogsFast ở cấp ĐƠN đã chốt bằng recognized_cogs — chênh lệch được khoá lại làm mốc trước/sau",
+    "✓ Giá vốn theo kỳ (ĐO HIỆN TRẠNG, chưa sửa): nhập lô giá mới SAU ngày giao làm giá vốn đơn cũ đổi 200.000đ → 600.000đ ở đường productEconomics (cấp DÒNG, LINE_UNIT_COST), trong khi orderCogsFast ở cấp ĐƠN đã chốt bằng recognized_cogs — chênh lệch được khoá lại làm mốc trước/sau · hàng tặng nay VÀO giá vốn (3 cái, không phải 2) mà không thổi doanh thu hay số đơn",
   );
 }

@@ -308,7 +308,25 @@ async function productEconomics(period: Period) {
         firstAt: sql<string | null>`min(${o.insertedAt})`,
         lastAt: sql<string | null>`max(${o.insertedAt})`,
         deliveredOrders: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        /*
+          ═══ HÀNG TẶNG: KHÔNG CÓ DOANH THU, NHƯNG CÓ GIÁ VỐN ═══
+
+          Bản cũ loại hàng tặng ngay ở `WHERE` (`is_bonus = false`), nên giá vốn của nó KHÔNG BAO
+          GIỜ vào lợi nhuận — trong khi nó vẫn trừ tồn như hàng bán (AGENTS.md mục 10) và vẫn là
+          tiền thật đã bỏ ra. Tặng càng nhiều thì lợi nhuận trông càng đẹp, đúng chiều hỏng nguy
+          hiểm nhất.
+
+          Đo trên production 15/09/2026: hiện có **0 dòng** hàng tặng, nên bản vá này KHÔNG đổi một
+          con số nào hôm nay. Sửa lúc nó chưa tốn gì là rẻ nhất — ngày shop bắt đầu ghi hàng tặng
+          thì khoản ấy sẽ biến mất mà không ai thấy.
+
+          Lọc chuyển từ `WHERE` vào TỪNG CỘT, vì hai cột cần hai tập dòng khác nhau:
+            · doanh thu  — chỉ dòng BÁN (tặng không sinh doanh thu);
+            · giá vốn    — CẢ dòng tặng.
+          `deliveredOrders`/`sentOrders` đếm `distinct` theo đơn nên không bị thổi lên; `shipping`
+          chia theo `lineTotal` nên dòng tặng (lineTotal = 0) nhận đúng 0 phần cước.
+        */
+        revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${i.isBonus} = false), 0)`,
         cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
         shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')), 0)`,
       })
@@ -317,7 +335,9 @@ async function productEconomics(period: Period) {
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
-      .where(and(eq(i.isBonus, false), ...periodConds(o.insertedAt, period)))
+      // Hàng tặng KHÔNG bị loại ở đây nữa — xem chú thích ở cột `revenue`. Loại ở `WHERE` là loại
+      // luôn cả giá vốn của nó.
+      .where(and(...periodConds(o.insertedAt, period)))
       .groupBy(sql`1`),
     tx
       .select({ productId: pv.productId, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
