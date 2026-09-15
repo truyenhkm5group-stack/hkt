@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { DEFAULT_ROLE_PERMISSIONS, resolvePermissions } from "@/lib/auth/permissions";
 import { RESTOCK_UNIDENTIFIED_PERMISSION, isUnidentifiedCode, unidentifiedCode } from "@/lib/constants/return-unidentified";
-import { CONFIDENCE_SCORE, IDENTITY_SIGNALS, SIGNAL_WEIGHT, scoreCandidate, type CandidateQuery } from "@/lib/constants/return-match";
+import { CONFIDENCE_SCORE, IDENTITY_SIGNALS, RESCAN_DEBOUNCE_MS, SIGNAL_WEIGHT, scoreCandidate, shouldSkipRescan, type CandidateQuery } from "@/lib/constants/return-match";
 import { searchReturnCandidates } from "@/lib/returns/candidate-match";
 import { recordInspection } from "@/lib/returns/inspection";
 import { findShipmentByScan, scanReceiveReturn } from "@/lib/returns/receive-scan";
@@ -93,6 +95,19 @@ export async function testReturnUnidentified(db: Db) {
     },
   );
   assert.ok(!soCheo.signals.includes("COLOR_MATCH") && !soCheo.signals.includes("SIZE_MATCH"), "màu/size của DÒNG KHÁC không được tính cho dòng đã khớp mã hàng");
+
+  // ═══════════════ NHỊP MÁY QUÉT: bỏ mã NẢY, KHÔNG bỏ kiện THẬT ═══════════════
+
+  /*
+    Đây là luật dễ làm hỏng nhất theo hướng tệ nhất. Chống trùng quá tay thì hai kiện KHÁC NHAU bắn
+    liền nhau (nhịp bình thường của máy quét) bị nuốt mất một — hàng có thật biến khỏi sổ, không
+    một dòng lỗi nào. Chống trùng quá lỏng thì một cú bấm cò hơi lâu thành hai lượt ghi.
+  */
+  assert.equal(shouldSkipRescan(null, "PKE1", 1000), false, "lượt bắn đầu tiên không bao giờ bị bỏ");
+  assert.equal(shouldSkipRescan({ code: "PKE1", at: 1000 }, "PKE1", 1000 + RESCAN_DEBOUNCE_MS - 1), true, "CÙNG mã, trong khoảng nảy phím ⇒ là cò nảy hai lần, bỏ qua");
+  assert.equal(shouldSkipRescan({ code: "PKE1", at: 1000 }, "PKE1", 1000 + RESCAN_DEBOUNCE_MS + 1), false, "cùng mã nhưng đã qua khoảng nảy ⇒ người kho cố ý bắn lại, phải cho đi");
+  assert.equal(shouldSkipRescan({ code: "PKE1", at: 1000 }, "PKE2", 1001), false, "HAI KIỆN KHÁC MÃ bắn cách nhau 1ms là nhịp THẬT của máy quét — bỏ một trong hai là làm mất hàng");
+  assert.equal(shouldSkipRescan({ code: "PKE1", at: 1000 }, "PKE1", 1001, true), false, "lượt bấm CÓ CHỦ Ý của người (xác nhận kiện ngoài chặng hoàn) luôn đi qua");
 
   // ═══════════════ PHẦN CSDL: dàn cảnh ═══════════════
 
@@ -295,6 +310,42 @@ export async function testReturnUnidentified(db: Db) {
   const boTayKhongLyDo = await markUnidentifiable({ id: urB?.id ?? "", reason: "   ", actor: { id: null, label: "nv-kho" } });
   assert.ok("error" in boTayKhongLyDo, "kết luận “bó tay” mà không nói đã tra gì chỉ là bỏ việc lại cho người sau — phải bị chặn");
 
+  // ═══════════════ 7b. THỬ LẠI: MỌI ĐƯỜNG GHI GỌI HAI LẦN ĐỀU KHÔNG ĐỔI TỒN ═══════════════
+
+  /*
+    Ở kho, gọi lại KHÔNG phải ngoại lệ — nó là nhịp bình thường: máy quét gửi hai Enter, mạng hết
+    hạn chờ SAU KHI máy chủ đã ghi rồi trình duyệt thử lại, người bấm đúp vì màn hình chưa kịp đổi.
+    Nên mỗi đường ghi phải chịu được lượt thứ hai mà KHÔNG đổi một con số tồn nào.
+  */
+  const tonTruoc = await tonCuaUR(ur?.code ?? "x");
+
+  // (a) NỐI ĐƠN LẦN HAI vào ĐÚNG vận đơn cũ — không được tạo món mới, không được đổi tồn.
+  const soDongTruoc = (await listUnidentifiedReturns({ limit: 500 })).length;
+  const noiLai = await identifyUnidentifiedReturn({ id: urSauDem?.id ?? "", shipmentId: "ur-ship-2", actor: { id: null, label: "nv-kho" } });
+  const soDongSau = (await listUnidentifiedReturns({ limit: 500 })).length;
+  assert.equal(soDongSau, soDongTruoc, "nối lại lần hai KHÔNG được sinh thêm một dòng hàng nào — một chiếc áo là một dòng, mãi mãi");
+  assert.ok("ok" in noiLai && noiLai.row.linkedShipmentId === "ur-ship-2", "nối lại cùng vận đơn cũ vẫn ra đúng vận đơn ấy");
+  assert.equal("ok" in noiLai && noiLai.row.stockReceiptId, null, "nối đơn — dù lần thứ mấy — KHÔNG bao giờ cộng tồn");
+
+  // (b) TÁI NHẬP LẦN BA trên một món đã vào tồn: vẫn `already`, tồn không nhúc nhích.
+  const lanBa = await restockUnidentifiedReturn({ id: ur?.id ?? "", reason: "thử lại", actor: { id: null, label: "nguoi-thu-ba" } });
+  assert.ok("ok" in lanBa && lanBa.already, "gọi lại lần thứ ba vẫn trả “đã vào tồn từ trước”, không phải lỗi");
+  assert.equal(await tonCuaUR(ur?.code ?? "x"), tonTruoc, "tồn KHÔNG đổi sau lượt gọi lại");
+
+  // (c) ĐỔI KẾT LUẬN trên món ĐÃ vào tồn phải bị chặn — sửa số sau khi cộng tồn phải qua phiếu điều chỉnh.
+  const doiSauKhiVaoTon = await setUnidentifiedCondition({ id: ur?.id ?? "", condition: "DAMAGED", note: "đổi thử", actor: { id: null, label: "nv-kho" } });
+  assert.ok("error" in doiSauKhiVaoTon, "món đã vào tồn thì không đổi kết luận ngược được — nếu không, tồn và kết luận nói hai điều khác nhau");
+
+  // (d) KẾT LUẬN “không lần ra được đơn” trên món đã vào tồn cũng phải bị chặn.
+  const boTaySauKhiVaoTon = await markUnidentifiable({ id: ur?.id ?? "", reason: "thử", actor: { id: null, label: "nv-kho" } });
+  assert.ok("error" in boTaySauKhiVaoTon, "không đổi được kết luận nguồn gốc của một món đã cộng tồn");
+
+  // (e) BẮN MÃ lần thứ ba trên kiện đã nhận: vẫn ALREADY, vẫn đúng MỘT phiếu kiểm.
+  const banLanBa = await scanReceiveReturn({ code: "URPKE0001", actor: { id: null, label: "nguoi-thu-ba" } });
+  assert.equal(banLanBa.outcome, "ALREADY", "bắn lại lần thứ ba vẫn là “đã nhận từ trước”");
+  const [demPhieu] = await db.select({ n: sql<number>`count(*)` }).from(schema.returnInspections).where(eq(schema.returnInspections.shipmentId, "ur-ship-1"));
+  assert.equal(Number(demPhieu?.n ?? 0), 1, "bao nhiêu lượt bắn cũng chỉ MỘT phiếu kiểm cho một kiện vật lý");
+
   // ═══════════════ 8. BÁO CÁO VÀ LỊCH SỬ ═══════════════
 
   const tong = await unidentifiedSummary();
@@ -346,6 +397,43 @@ export async function testReturnUnidentified(db: Db) {
   */
   const khoLuuCu = resolvePermissions("WAREHOUSE", ["inventory:write", "products:view"], null, null);
   assert.ok(!khoLuuCu.includes(RESTOCK_UNIDENTIFIED_PERMISSION), "danh sách quyền lưu từ trước KHÔNG được tự nhận thêm quyền leo thang này");
+
+  // ═══════════════ 11. MỌI ĐƯỜNG GHI PHẢI CÓ CHỐT QUYỀN Ở MÁY CHỦ ═══════════════
+
+  /*
+    ẨN CÁI NÚT KHÔNG PHẢI LÀ BẢO VỆ TỒN KHO.
+
+    Server Action là một điểm cuối HTTP có thật: ai biết tên hàm đều gọi thẳng được, không cần đi
+    qua màn hình. Một action thiếu `requireUser()` là mở cho người chưa đăng nhập; thiếu `can(...)`
+    là mở cho mọi tài khoản đã đăng nhập — kể cả tài khoản chỉ để xem báo cáo.
+
+    Bài kiểm đọc MÃ NGUỒN của ĐÚNG HAI tệp thuộc luồng hàng hoàn. Thêm một action mới vào đó mà
+    quên chốt quyền thì đỏ ngay trên máy người viết, chứ không đợi tới lúc có người thử.
+
+    Cố ý KHÔNG quét cả kho mã: các tệp hành động khác thuộc phiên làm việc khác, và một bài kiểm
+    quét rộng sẽ làm đỏ việc của người không liên quan.
+  */
+  const goc = path.resolve(__dirname, "..");
+  for (const tep of ["lib/actions/returns-unidentified.ts", "lib/actions/returns-warehouse.ts"]) {
+    const src = readFileSync(path.join(goc, tep), "utf8");
+    const khoi = src.split("\nexport async function ").slice(1);
+    assert.ok(khoi.length > 0, `${tep}: phải có ít nhất một Server Action`);
+    for (const k of khoi) {
+      const ten = k.split("(")[0];
+      const than = k.split("\nexport ")[0];
+      assert.ok(than.includes("requireUser()"), `${tep}::${ten} thiếu requireUser() — người CHƯA ĐĂNG NHẬP gọi thẳng được`);
+      assert.ok(/can\(user, "/.test(than), `${tep}::${ten} thiếu can(user, …) — mọi tài khoản đã đăng nhập đều ghi được vào kho`);
+    }
+  }
+
+  /*
+    VÀ CHỐT QUYỀN CAO PHẢI NẰM Ở TẦNG HÀNH ĐỘNG, không chỉ ở giao diện.
+
+    `canOverride` truyền xuống màn hình chỉ để ẩn cái nút. Nếu đó là nơi DUY NHẤT kiểm tra thì bất
+    kỳ ai gọi thẳng action đều tái nhập được hàng không chứng từ.
+  */
+  const srcAction = readFileSync(path.join(goc, "lib/actions/returns-unidentified.ts"), "utf8");
+  assert.ok(srcAction.includes("RESTOCK_UNIDENTIFIED_PERMISSION"), "tầng hành động phải tự kiểm quyền tái nhập không xác định nguồn, không dựa vào giao diện");
 
   console.log("✓ Hàng hoàn mất nhãn: bắn mã không cộng tồn · nối đơn không tạo món mới · tái nhập đúng một lần · mô tả không thắng định danh · quyền tách bạch");
 }

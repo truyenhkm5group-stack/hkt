@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { scanReceiveReturnAction } from "@/lib/actions/returns-unidentified";
+import { shouldSkipRescan } from "@/lib/constants/return-match";
 import type { ScanOutcome } from "@/lib/returns/receive-scan";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -25,15 +26,28 @@ import { cn } from "@/lib/utils";
  * âm báo RIÊNG với ba cao độ khác nhau, và nháy màu cả khung: xanh chỉ dành cho lượt ghi THẬT SỰ
  * thành công, vàng cho "đã nhận từ trước", đỏ cho "không thấy mã".
  *
- * ─── CHỐNG BẮN ĐÚP, VÀ VÌ SAO NÓ KHÔNG PHẢI LÀ CÁI CHỐT ───
+ * ─── HÀNG ĐỢI, VÌ MÁY QUÉT NHANH HƠN MẠNG ───
  *
- * Cò máy quét bấm hơi lâu là gửi hai lần. Ở đây khoá bằng `dangGui` (không gửi lượt thứ hai khi
- * lượt đầu chưa xong) và bỏ qua mã GIỐNG HỆT bắn lại trong `NHAY_TRUNG` mili-giây.
+ * SỰ CỐ ĐÃ CÓ THẬT trong chính bản đầu của màn hình này. Mã được giữ trong ô nhập cho tới khi máy
+ * chủ trả lời rồi mới xoá. Bắn hai kiện liền nhau:
  *
- * Nhưng đó chỉ là phép lịch sự với người bấm. CÁI CHỐT THẬT nằm ở CSDL:
- * `return_inspections.shipment_id` là UNIQUE, nên hai tab, hai người, hay một lượt thử lại của
- * mạng cũng chỉ ra đúng một phiếu. Khoá ở trình duyệt mà không khoá ở CSDL là kiểu bảo vệ hỏng
- * đúng lúc tải nặng — tức là đúng lúc cần nó nhất.
+ *   1. `CODE1` + Enter → gửi đi, ô nhập VẪN còn "CODE1";
+ *   2. `CODE2` gõ tiếp → ô thành "CODE1CODE2", Enter bị bỏ qua vì lượt đầu chưa xong;
+ *   3. phản hồi lượt 1 về → ô bị xoá trắng, mang theo luôn "CODE2".
+ *
+ * Người kho nghe hai tiếng bíp, sổ chỉ có một kiện. Không lỗi, không cảnh báo — đúng cái hỏng mà
+ * toàn bộ tính năng này sinh ra để chặn.
+ *
+ * Nay mã RỜI Ô NHẬP NGAY khi bấm Enter và vào HÀNG ĐỢI; hàng đợi rút lần lượt, mỗi lần một lượt
+ * gọi máy chủ. Mã không bao giờ mất, vì nó luôn ở một trong ba chỗ: ô nhập · hàng đợi · dòng lịch
+ * sử đã có kết quả. Ô nhập KHÔNG bị khoá trong lúc gửi — khoá nó là chặn đúng kiện tiếp theo.
+ *
+ * ─── VÀ CÁI CHỐT THẬT KHÔNG NẰM Ở ĐÂY ───
+ *
+ * Hàng đợi cùng phép bỏ mã trùng (`shouldSkipRescan`) chỉ là phép lịch sự với người bấm. CHỐT THẬT
+ * nằm ở CSDL: `return_inspections.shipment_id` là UNIQUE, nên hai tab, hai người, hay một lượt thử
+ * lại của mạng cũng chỉ ra đúng một phiếu. Khoá ở trình duyệt mà không khoá ở CSDL là kiểu bảo vệ
+ * hỏng đúng lúc tải nặng — tức là đúng lúc cần nó nhất.
  *
  * ─── BẮN MÃ KHÔNG CỘNG TỒN ───
  *
@@ -41,8 +55,6 @@ import { cn } from "@/lib/utils";
  * kho đếm được, và chỉ phần còn bán lại được.
  */
 
-/** Cùng một mã bắn lại trong khoảng này coi như cò máy quét nảy hai lần, không phải hai kiện. */
-const NHAY_TRUNG = 1200;
 /** Số dòng lịch sử giữ trên màn hình — đủ để nhìn lại mấy kiện vừa bắn, không thành một bảng. */
 const LICH_SU = 12;
 
@@ -129,8 +141,18 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
   /** Mã đang chờ lượt bấm thứ hai vì ĐVVC không báo nó đang hoàn. */
   const [choXacNhan, setChoXacNhan] = React.useState<string | null>(null);
   const o = React.useRef<HTMLInputElement>(null);
-  const lanCuoi = React.useRef<{ code: string; at: number }>({ code: "", at: 0 });
+  const lanCuoi = React.useRef<{ code: string; at: number } | null>(null);
   const chuong = React.useRef(dungChuong());
+  /*
+    HÀNG ĐỢI LÀ `ref`, KHÔNG PHẢI `state`.
+
+    Máy quét có thể đẩy thêm mã vào giữa lúc một lượt gửi đang chạy. `state` của React được chụp
+    lại theo từng lượt dựng, nên vòng rút hàng đợi sẽ đọc một bản chụp cũ và bỏ sót mã vừa vào —
+    đúng kiểu mất kiện mà cả cơ chế này sinh ra để chặn. `ref` luôn là bản mới nhất.
+  */
+  const hangDoi = React.useRef<{ code: string; deliberate: boolean }[]>([]);
+  const dangRut = React.useRef(false);
+  const [choXuLy, setChoXuLy] = React.useState(0);
 
   /** Con trỏ LUÔN quay về ô mã — đây là thứ giữ nhịp bắn liên tục không cần chạm chuột. */
   const tuTu = React.useCallback(() => {
@@ -149,36 +171,22 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
     [amBao],
   );
 
-  async function gui(raw: string, confirmUnexpected: boolean) {
-    const code = raw.trim();
-    if (!code) return;
-
-    /*
-      BỎ QUA MÃ GIỐNG HỆT BẮN LẠI TRONG TÍCH TẮC.
-      Không bỏ qua thì lượt thứ hai đi lên máy chủ, trả về `ALREADY`, và người kho nhận một dòng
-      vàng cho một kiện họ vừa bắn ĐÚNG MỘT LẦN — rồi bắt đầu nghi ngờ mọi dòng vàng khác.
-      Lượt XÁC NHẬN (bấm lần hai có chủ ý) đi qua chốt này, vì nó là một hành động khác.
-    */
-    if (!confirmUnexpected && lanCuoi.current.code === code && Date.now() - lanCuoi.current.at < NHAY_TRUNG) {
-      setMa("");
-      tuTu();
-      return;
-    }
-    lanCuoi.current = { code, at: Date.now() };
-
-    setDangGui(true);
-    const r = await scanReceiveReturnAction({ code, confirmUnexpected });
-    setDangGui(false);
-    setMa("");
-    tuTu();
+  /**
+   * XỬ LÝ ĐÚNG MỘT LƯỢT BẮN. Chỉ được gọi từ vòng rút hàng đợi bên dưới.
+   *
+   * Thứ tự cuối hàm là CÓ CHỦ Ý: ghi DÒNG LỊCH SỬ và toast TRƯỚC, phát âm/nháy màu SAU. Âm thanh
+   * là thứ đi kèm; nó không bao giờ được đứng chắn trước bằng chứng rằng máy chủ đã ghi xong.
+   */
+  async function xuLyMot(code: string, deliberate: boolean) {
+    const r = await scanReceiveReturnAction({ code, confirmUnexpected: deliberate });
 
     if ("error" in r) {
+      setLichSu((prev) => [{ key: `${code}-${Date.now()}`, outcome: "NOT_FOUND" as const, code, message: r.error, at: new Date(), needsConfirm: false, shipmentCode: null }, ...prev].slice(0, LICH_SU));
+      toast.error(r.error, { duration: 8000 });
       phanHoi("NOT_FOUND");
-      toast.error(r.error);
       return;
     }
 
-    phanHoi(r.outcome);
     setChoXacNhan(r.outcome === "NEEDS_CONFIRM" ? code : null);
     setLichSu((prev) =>
       [
@@ -202,14 +210,70 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
         KHÔNG `router.refresh()` SAU MỖI LƯỢT BẮN.
         Trang này dựng hàng chục truy vấn báo cáo; làm mới sau từng kiện là bắt máy chủ tính lại tất
         cả 300 lần trong một ca, và màn hình nhấp nháy đúng lúc người kho đang nhìn dòng vừa hiện.
-        Dòng lịch sử ngay dưới đây đã là phản hồi đủ; hàng đợi bên dưới làm mới khi người kho bấm
-        nút, hoặc lần tải trang sau.
       */
     } else if (r.outcome === "NOT_FOUND") {
       toast.error(r.message, { duration: 8000 });
     } else {
       toast.warning(r.message, { duration: 8000 });
     }
+
+    phanHoi(r.outcome);
+  }
+
+  /**
+   * RÚT HÀNG ĐỢI LẦN LƯỢT — mỗi lúc đúng MỘT lượt gọi máy chủ từ bàn này.
+   *
+   * `dangRut` chặn hai vòng rút chạy song song. Một lượt hỏng (mạng đứt) KHÔNG được làm kẹt hàng
+   * đợi: `finally` luôn trả cờ về, và vòng `while` đi tiếp sang mã kế.
+   */
+  const rutHangDoi = React.useCallback(async () => {
+    if (dangRut.current) return;
+    dangRut.current = true;
+    setDangGui(true);
+    try {
+      while (hangDoi.current.length) {
+        const item = hangDoi.current.shift();
+        setChoXuLy(hangDoi.current.length);
+        if (!item) continue;
+        try {
+          await xuLyMot(item.code, item.deliberate);
+        } catch {
+          // Mạng đứt giữa chừng: nói ra và ĐI TIẾP. Nuốt lỗi ở đây là để kiện biến mất im lặng.
+          setLichSu((prev) => [{ key: `${item.code}-${Date.now()}`, outcome: "NOT_FOUND" as const, code: item.code, message: "Mất kết nối khi đang ghi — BẮN LẠI mã này để chắc chắn.", at: new Date(), needsConfirm: false, shipmentCode: null }, ...prev].slice(0, LICH_SU));
+          toast.error(`${item.code}: mất kết nối, bắn lại mã này`, { duration: 12_000 });
+          phanHoi("NOT_FOUND");
+        }
+      }
+    } finally {
+      dangRut.current = false;
+      setDangGui(false);
+      setChoXuLy(0);
+      tuTu();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phanHoi, tuTu]);
+
+  /**
+   * NHẬN MỘT MÃ TỪ BÀN PHÍM / MÁY QUÉT.
+   *
+   * Ô nhập được DỌN NGAY, trước khi có bất kỳ lượt đi máy chủ nào — đó là điều kiện để mã kiện kế
+   * tiếp có chỗ rơi vào. Mã không mất: nó vừa vào hàng đợi, và sẽ thành một dòng lịch sử có kết quả.
+   */
+  function nhanMa(raw: string, deliberate: boolean) {
+    const code = raw.trim();
+    if (!code) return;
+    const now = Date.now();
+    if (shouldSkipRescan(lanCuoi.current, code, now, deliberate)) {
+      setMa("");
+      tuTu();
+      return;
+    }
+    lanCuoi.current = { code, at: now };
+    hangDoi.current.push({ code, deliberate });
+    setChoXuLy(hangDoi.current.length);
+    setMa("");
+    tuTu();
+    void rutHangDoi();
   }
 
   if (!canWrite) return null;
@@ -222,10 +286,16 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
         <ScanBarcode className="size-5 shrink-0 text-primary" />
         <form
           className="flex min-w-[260px] flex-1 items-center gap-2"
+          /*
+            KHÔNG `if (dangGui) return` Ở ĐÂY NỮA.
+
+            Đó chính là chỗ kiện thứ hai bị nuốt: máy quét bắn kiện kế trong lúc lượt đầu chưa xong,
+            Enter bị bỏ, rồi ô nhập bị dọn. Nay mọi lần Enter đều được NHẬN vào hàng đợi; việc "một
+            lúc chỉ gọi máy chủ một lượt" do vòng rút đảm nhiệm, không phải do chặn bàn phím.
+          */
           onSubmit={(e) => {
             e.preventDefault();
-            if (dangGui) return;
-            void gui(ma, false);
+            nhanMa(ma, false);
           }}
         >
           <Input
@@ -240,7 +310,8 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
             enterKeyHint="done"
             aria-label="Mã vận đơn của kiện hàng hoàn đang cầm trên tay"
           />
-          <Button type="submit" className="h-11" disabled={dangGui || !ma.trim()}>
+          {/* Chỉ khoá khi KHÔNG CÓ GÌ ĐỂ GỬI. Khoá theo `dangGui` là chặn đúng kiện tiếp theo. */}
+          <Button type="submit" className="h-11" disabled={!ma.trim()}>
             {dangGui ? <Loader2 className="size-4 animate-spin" /> : "Nhận kiện"}
           </Button>
         </form>
@@ -264,6 +335,11 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
         thực tế. Con trỏ tự quay về ô này sau mỗi lần bắn; bắn trùng không tạo phiếu thứ hai.
         {awaiting ? ` Còn ${formatNumber(awaiting)} kiện ĐVVC đã trả về mà kho chưa bấm nhận.` : ""}
         {daNhan ? <span className="ml-1 font-medium text-emerald-700 dark:text-emerald-400">Phiên này đã nhận {formatNumber(daNhan)} kiện.</span> : null}
+        {/*
+          SỐ MÃ ĐANG CHỜ GHI — bắn nhanh hơn mạng là chuyện thường, nhưng người kho phải THẤY phần
+          còn đang chạy. Không hiện thì họ rời bàn lúc hàng đợi chưa rút hết và tin là đã xong.
+        */}
+        {choXuLy ? <span className="ml-1 font-medium text-amber-700 dark:text-amber-300">Đang ghi… còn {formatNumber(choXuLy)} mã trong hàng đợi.</span> : null}
       </p>
 
       {/*
@@ -281,11 +357,11 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
             type="button"
             size="sm"
             className="h-8"
-            disabled={dangGui}
             onClick={() => {
               const c = choXacNhan;
               setChoXacNhan(null);
-              void gui(c, true);
+              // Lượt bấm CÓ CHỦ Ý của người: đi thẳng qua phép bỏ mã trùng.
+              nhanMa(c, true);
             }}
           >
             Vẫn nhận kiện này
