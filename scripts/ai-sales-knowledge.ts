@@ -198,8 +198,20 @@ async function main() {
       policy: bd.policy,
       facts: bd.facts,
     });
+    // CÔNG CỤ ĐÃ GỌI — nói thẳng ra, vì "máy lấy số ở đâu" và "máy đã hỏi ai" là hai câu khác
+    // nhau, và câu thứ hai mới trả lời được "vì sao nó chắc chắn thế".
+    const congCu = [
+      tl.intent === "SIZE" ? "size-engine.recommendSize" : "",
+      sl ? "sellability.checkSellability" : "",
+      tl.intent === "EXCHANGE" ? "sales-policy.branchSentence" : "",
+      "sales-knowledge.loadWinKnowledge",
+    ].filter(Boolean);
     console.log(`\n   ❓ ${q}`);
     console.log(`   → [${tl.action}${tl.humanReview ? " · CHUYỂN NGƯỜI" : ""}] ${tl.text}`);
+    console.log(`      ý định ${tl.intent} · năng lực ${tl.capability ?? "—"} (${tl.capability ? bd.capabilities[tl.capability].status : "—"})`);
+    if (tl.missing.length) console.log(`      THIẾU DỮ LIỆU: ${tl.missing.join(", ")}`);
+    if (tl.blockedBy) console.log(`      CHẶN BỞI QUYỀN: ${tl.blockedBy}`);
+    console.log(`      công cụ: ${congCu.join(" · ")}`);
     console.log(`      nguồn: ${tl.provenance.length ? tl.provenance.map((p) => `${p.field}=${p.value} ← ${p.source}`).join(" | ") : "(không dữ kiện nào — đúng, vì câu này máy không trả lời)"}`);
   }
 
