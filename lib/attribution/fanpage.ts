@@ -19,6 +19,7 @@
  */
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
+import { judgeLandingOrders, rebuildLandingAttribution, type LandingRebuild, type LandingVerdict } from "@/lib/attribution/landing";
 import { audit } from "@/lib/audit";
 import {
   ATTRIBUTION_STATUSES,
@@ -231,6 +232,8 @@ export type AttributionRebuild = {
   windowHours: number;
   /** Điểm chứng cứ tối thiểu để kết luận trùng đơn. */
   scoreThreshold: number;
+  /** Lượt quy kết ĐƠN LANDING đi kèm — cùng một lượt chạy, cùng một bộ kết luận. */
+  landing: LandingRebuild;
 };
 
 type OrderRow = {
@@ -323,9 +326,24 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
   }
 
   const prior = await d
-    .select({ orderId: OA.orderId, marketerId: OA.marketerId, status: OA.status, duplicateOfOrderId: OA.duplicateOfOrderId, duplicateScore: OA.duplicateScore, assignmentId: OA.assignmentId, ruleVersion: OA.ruleVersion })
+    .select({ orderId: OA.orderId, marketerId: OA.marketerId, status: OA.status, duplicateOfOrderId: OA.duplicateOfOrderId, duplicateScore: OA.duplicateScore, assignmentId: OA.assignmentId, ruleVersion: OA.ruleVersion, attributionSource: OA.attributionSource, attributedPageId: OA.attributedPageId })
     .from(OA);
   const priorByOrder = new Map(prior.map((p) => [p.orderId, p]));
+
+  /*
+    ═══ ĐƯỜNG THỨ HAI: ĐƠN LANDING KHÔNG CÓ `page_id` NHƯNG CÓ TRACKING QUẢNG CÁO ═══
+
+    Đơn sinh ra từ form landing không mang `page_id`, nên tới bản trước chúng nằm trọn trong nhóm
+    `NO_PAGE` — đo production 15/09/2026: 201 đơn, doanh thu thật, tiền quảng cáo thật, không
+    thuộc về ai. Form landing lại gửi kèm utm / ad_id, và 172 trong số ấy dẫn về ĐÚNG MỘT marketer
+    bằng một khoá khớp tuyệt đối (`lib/constants/landing-attribution.ts`).
+
+    Đường này CHỈ được hỏi tới khi đường Messenger im lặng — thứ tự ấy là luật, không phải tiện
+    tay: đơn có `page_id` thật thì chứng từ của Pancake mạnh hơn mọi suy luận từ quảng cáo. Và nó
+    KHÔNG bao giờ lật một kết luận TRÙNG ĐƠN: trùng đơn vẫn là trùng đơn dù đến từ kênh nào.
+  */
+  const landingVerdicts: LandingVerdict[] = await judgeLandingOrders(d);
+  const landingByOrder = new Map(landingVerdicts.map((v) => [v.orderId, v]));
 
   const byStatus = emptyByStatus();
   const rows: (typeof OA.$inferInsert)[] = [];
@@ -346,7 +364,24 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
     else if (!assignment) status = "NO_ASSIGNMENT";
     else status = "ATTRIBUTED";
 
-    const marketerId = status === "ATTRIBUTED" ? (assignment as AssignmentWindow).marketerId : null;
+    let marketerId = status === "ATTRIBUTED" ? (assignment as AssignmentWindow).marketerId : null;
+    let attributionSource: "PANCAKE_PAGE" | "LANDING_UTM" = "PANCAKE_PAGE";
+    let attributedPageId: string | null = null;
+    if (status === "NO_PAGE") {
+      const landing = landingByOrder.get(o.id);
+      if (landing?.attribution.resolved && landing.attribution.marketerId) {
+        status = "ATTRIBUTED";
+        marketerId = landing.attribution.marketerId;
+        attributionSource = "LANDING_UTM";
+        attributedPageId = landing.attribution.pageId;
+      }
+    }
+    /*
+      DÒNG PHÂN CÔNG CHỈ CÓ NGHĨA VỚI ĐƯỜNG FANPAGE. Đơn landing được quy kết bằng tracking quảng
+      cáo không đi qua sổ phân công nào, nên ô này phải là `NULL` — gán bừa id của một phân công
+      không liên quan là nói dối về căn cứ đã dùng.
+    */
+    const assignmentId = status === "ATTRIBUTED" && attributionSource === "PANCAKE_PAGE" ? (assignment as AssignmentWindow).id : null;
     byStatus[status]++;
 
     const before = priorByOrder.get(o.id);
@@ -356,8 +391,10 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
       before.marketerId !== marketerId ||
       before.duplicateOfOrderId !== duplicateOf ||
       before.duplicateScore !== (duplicateOf ? (dup?.score ?? 0) : null) ||
-      before.assignmentId !== (status === "ATTRIBUTED" ? (assignment as AssignmentWindow).id : null) ||
-      before.ruleVersion !== FANPAGE_ATTRIBUTION_RULE_VERSION
+      before.assignmentId !== assignmentId ||
+      before.ruleVersion !== FANPAGE_ATTRIBUTION_RULE_VERSION ||
+      before.attributionSource !== attributionSource ||
+      before.attributedPageId !== attributedPageId
     ) {
       changed++;
     }
@@ -367,7 +404,7 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
       sourcePageId: pageId,
       fanpageId,
       marketerId,
-      assignmentId: status === "ATTRIBUTED" ? (assignment as AssignmentWindow).id : null,
+      assignmentId,
       status,
       sourceOrderAt: o.insertedAt,
       dedupeKey: dedupeByOrder.get(o.id)?.dedupeKey ?? null,
@@ -375,6 +412,9 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
       duplicateScore: duplicateOf ? (dup?.score ?? 0) : null,
       duplicateReason: duplicateOf ? (dup?.signals ?? []).join(",") : null,
       ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION,
+      attributionSource,
+      // `assignmentId` chỉ có nghĩa với đường fanpage: đơn landing không đi qua sổ phân công nào.
+      attributedPageId,
       computedAt: new Date(),
     });
   }
@@ -400,14 +440,19 @@ export async function rebuildFanpageAttribution(options?: { dryRun?: boolean; db
             duplicateScore: sql`excluded.duplicate_score`,
             duplicateReason: sql`excluded.duplicate_reason`,
             ruleVersion: sql`excluded.rule_version`,
+            attributionSource: sql`excluded.attribution_source`,
+            attributedPageId: sql`excluded.attributed_page_id`,
             computedAt: sql`excluded.computed_at`,
           },
         });
     }
     // Đơn đã bị xoá khỏi `orders` thì dòng quy kết đi theo (khoá ngoại CASCADE); không cần dọn tay.
   }
+  // Ảnh chụp BẰNG CHỨNG landing ghi cùng lượt, từ CHÍNH những kết luận vừa dùng ở trên — không
+  // tính lại lần hai, nên hai bảng không bao giờ nói hai điều khác nhau về một đơn.
+  const landing = await rebuildLandingAttribution({ dryRun, db: d, verdicts: landingVerdicts });
 
-  return { scanned: orders.length, byStatus, changed, ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION, windowHours: DUPLICATE_CANDIDATE_WINDOW_HOURS, scoreThreshold: DUPLICATE_SCORE_THRESHOLD };
+  return { scanned: orders.length, byStatus, changed, ruleVersion: FANPAGE_ATTRIBUTION_RULE_VERSION, windowHours: DUPLICATE_CANDIDATE_WINDOW_HOURS, scoreThreshold: DUPLICATE_SCORE_THRESHOLD, landing };
 }
 
 /**

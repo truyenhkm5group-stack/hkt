@@ -22,6 +22,7 @@ import {
   DUPLICATE_CANDIDATE_WINDOW_HOURS,
   DUPLICATE_SCORE_THRESHOLD,
 } from "@/lib/constants/fanpage-attribution";
+import { ATTRIBUTION_SOURCE_LABEL, LANDING_EVIDENCE_LABEL, LANDING_GAP_FIX, LANDING_GAP_LABEL } from "@/lib/constants/landing-attribution";
 import { formatDateTime, formatNumber, formatVND, pctOrNull } from "@/lib/format";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 import {
@@ -32,6 +33,9 @@ import {
   listAttributionOrders,
   listAttributionPages,
   listMarketerOptions,
+  NO_PAGE_GROUPS,
+  NO_PAGE_GROUP_HINT,
+  NO_PAGE_GROUP_LABEL,
 } from "@/lib/queries/fanpage-attribution";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -180,6 +184,39 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
               })}
             </div>
           </SectionCard>
+
+          {/*
+            NHÓM "KHÔNG CÓ FANPAGE" TÁCH RA BỐN LOẠI.
+
+            Gộp landing với đơn nhập tay thành một con số duy nhất là cách chắc chắn nhất để không
+            ai sửa gì cả: hai loại ấy có hai cách sửa hoàn toàn khác nhau, và một trong hai CỨU
+            ĐƯỢC bằng tracking quảng cáo. Thẻ đầu tiên chính là phần đã cứu — nó KHÔNG còn nằm
+            trong "không có fanpage" nữa.
+          */}
+          {NO_PAGE_GROUPS.some((g) => report.noPageGroups[g].orders > 0) ? (
+            <SectionCard
+              title="Đơn không mang page_id của Pancake — tách theo loại"
+              description="Đơn landing có đủ bằng chứng tracking đã RA KHỎI nhóm “không có fanpage”. Ba nhóm còn lại là ba việc phải làm khác nhau."
+            >
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {NO_PAGE_GROUPS.map((g) => {
+                  const b = report.noPageGroups[g];
+                  return (
+                    <div key={g} className="rounded-lg border p-3">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[11.5px] font-medium">{NO_PAGE_GROUP_LABEL[g]}</span>
+                        <span className={cn("font-mono text-sm font-semibold", g === "LANDING_ATTRIBUTED" && b.orders > 0 && "text-success")}>{formatNumber(b.orders)}</span>
+                      </div>
+                      <p className="mt-1 text-[11.5px] text-muted-foreground">
+                        {b.confirmedOrders > 0 ? `${formatNumber(b.confirmedOrders)} đơn xác nhận · ${formatVND(b.confirmedRevenue)} · ` : ""}
+                        {NO_PAGE_GROUP_HINT[g]}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+          ) : null}
 
           {tab === "orders" ? (
             <OrdersTab params={params} filters={{ ...filters, status }} />
@@ -357,11 +394,12 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-[12.5px]">
+            <table className="w-full min-w-[1180px] text-[12.5px]">
               <thead className="text-left text-muted-foreground">
                 <tr className="border-b">
                   <th className="py-2 pr-3 font-medium">Đơn</th>
                   <th className="py-2 pr-3 font-medium">Lên lúc (Pancake)</th>
+                  <th className="py-2 pr-3 font-medium">Nguồn · quy kết qua</th>
                   <th className="py-2 pr-3 font-medium">Fanpage</th>
                   <th className="py-2 pr-3 font-medium">Marketer</th>
                   <th className="py-2 pr-3 font-medium">Khách</th>
@@ -380,9 +418,44 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                       <div className="text-[11px] text-muted-foreground">{r.stage}</div>
                     </td>
                     <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(r.sourceOrderAt)}</td>
+                    {/*
+                      NGUỒN QUY KẾT ĐỨNG NGAY CẠNH KẾT LUẬN.
+
+                      Hai đường trả lời cùng một câu hỏi bằng hai loại chứng cứ: `page_id` là CHỨNG
+                      TỪ của Pancake, còn tracking landing là SUY LUẬN có căn cứ. Người đọc phải
+                      phân biệt được ngay trên dòng, nên cột này in cả chuỗi bằng chứng đầy đủ.
+                    */}
+                    <td className="py-2 pr-3">
+                      <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", r.attributionSource === "LANDING_UTM" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-muted text-muted-foreground")}>
+                        {ATTRIBUTION_SOURCE_LABEL[r.attributionSource]}
+                      </span>
+                      {r.landing ? (
+                        <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground" title={r.landing.evidence}>
+                          {r.landing.tier ? <div>Căn cứ: {LANDING_EVIDENCE_LABEL[r.landing.tier]}</div> : null}
+                          {r.landing.adId ? <div>Ad: <code>{r.landing.adId}</code></div> : null}
+                          {r.landing.adsetId ? <div>Adset: <code>{r.landing.adsetId}</code></div> : null}
+                          {r.landing.campaignId ? <div>Chiến dịch: <code>{r.landing.campaignId}</code></div> : null}
+                          {r.landing.campaignName ? <div className="max-w-[240px] truncate" title={r.landing.campaignName}>utm: {r.landing.campaignName}</div> : null}
+                          {r.landing.utmCampaign ? <div className="max-w-[240px] truncate" title={r.landing.utmCampaign}>Meta: {r.landing.utmCampaign}</div> : null}
+                          {r.landing.adAccountId ? <div>TKQC: <code>{r.landing.adAccountId}</code></div> : null}
+                          {r.landing.landingUrl ? <div className="max-w-[240px] truncate" title={r.landing.landingUrl}>Landing: {r.landing.landingUrl}</div> : null}
+                          {r.landing.gap ? <div className="text-amber-700 dark:text-amber-400">{LANDING_GAP_LABEL[r.landing.gap]} — {LANDING_GAP_FIX[r.landing.gap]}</div> : null}
+                          {r.landing.productMismatch ? (
+                            <div className="text-amber-700 dark:text-amber-400">
+                              Chiến dịch nói mã {r.landing.campaignProductCode}, đơn lại là mã khác — mã của đơn GIỮ NGUYÊN, đánh dấu để rà.
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="py-2 pr-3">
                       <div>{r.pageName || "—"}</div>
                       <code className="text-[11px] text-muted-foreground">{r.pageId ?? "không có page"}</code>
+                      {r.landing?.inferredPageId ? (
+                        <div className="mt-0.5 text-[11px] text-muted-foreground" title="Fanpage SUY RA từ mẩu quảng cáo — khác hẳn page_id do Pancake gửi.">
+                          suy ra từ QC: <code>{r.landing.inferredPageId}</code>
+                        </div>
+                      ) : null}
                     </td>
                     <td className="py-2 pr-3">{r.marketerLabel}</td>
                     <td className="py-2 pr-3">

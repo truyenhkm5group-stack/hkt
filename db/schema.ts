@@ -2346,10 +2346,27 @@ export const orderAttributions = pgTable(
     duplicateReason: text("duplicate_reason"),
     /** Phiên bản luật đã dùng. Luật đổi ⇒ dòng cũ thành cũ và TÌM RA ĐƯỢC. */
     ruleVersion: integer("rule_version").notNull().default(1),
+    /**
+     * ĐƯỜNG NÀO ĐÃ KẾT LUẬN ĐƠN NÀY: `PANCAKE_PAGE` (page_id của Pancake — đường Messenger, không
+     * đổi) hay `LANDING_UTM` (tracking quảng cáo của form landing). Hai đường trả lời cùng một câu
+     * hỏi bằng hai loại chứng cứ khác nhau, nên độ tin cậy của chúng phải đọc được ngay trên dòng.
+     */
+    attributionSource: text("attribution_source").notNull().default("PANCAKE_PAGE"),
+    /**
+     * FANPAGE SUY RA TỪ QUẢNG CÁO — KHÁC HẲN `sourcePageId`.
+     *
+     * `sourcePageId` chép thẳng `orders.page_id` của Pancake và KHÔNG được phép giả mạo. Ô này là
+     * kết luận của ERP ("mẩu quảng cáo mang đơn này chạy trên page X"), nên nó đứng riêng: đọc
+     * nhầm cái này thành cái kia là biến một suy luận thành một chứng từ.
+     */
+    attributedPageId: text("attributed_page_id"),
     computedAt: ts("computed_at").notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("order_attribution_order_uq").on(t.orderId),
+    check("order_attribution_source_check", sql`${t.attributionSource} IN ('PANCAKE_PAGE', 'LANDING_UTM')`),
+    check("order_attribution_inferred_page_check", sql`${t.attributedPageId} IS NULL OR ${t.attributionSource} = 'LANDING_UTM'`),
+    index("order_attribution_source_idx").on(t.attributionSource),
     index("order_attribution_marketer_idx").on(t.marketerId),
     check("order_attribution_status_check", sql`${t.status} IN ('ATTRIBUTED', 'NO_PAGE', 'NO_ASSIGNMENT', 'DUPLICATE')`),
     /*
@@ -2366,6 +2383,69 @@ export const orderAttributions = pgTable(
     index("order_attribution_status_idx").on(t.status),
     index("order_attribution_dedupe_idx").on(t.dedupeKey),
     index("order_attribution_version_idx").on(t.ruleVersion),
+  ],
+);
+
+/**
+ * ẢNH CHỤP QUY KẾT ĐƠN LANDING — BẰNG CHỨNG, KHÔNG PHẢI KẾT LUẬN RỖNG.
+ *
+ * `order_attributions` giữ KẾT LUẬN (ai được tính đơn này). Bảng này giữ CĂN CỨ của riêng đường
+ * landing: ô tracking đã đọc, mẩu quảng cáo / nhóm / chiến dịch / tài khoản quảng cáo đã tra ra,
+ * và câu giải thích đọc được. Tách hai bảng vì hai vòng đời khác nhau — kết luận phải có cho MỌI
+ * đơn, còn căn cứ landing chỉ tồn tại với đơn sinh ra từ form landing.
+ *
+ * Một đơn MỘT dòng (`landing_attribution_order_uq`): chạy lại đối soát bao nhiêu lần cũng không có
+ * đường nào cộng doanh thu hai lần.
+ */
+export const landingAttributions = pgTable(
+  "landing_attributions",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** Dòng landing đã sinh ra đơn này. `NULL` = dòng landing đã bị gỡ, kết luận vẫn còn tra được. */
+    landingOrderId: text("landing_order_id").references(() => landingOrders.id, { onDelete: "set null" }),
+    /** Bậc bằng chứng đã dùng (`LANDING_EVIDENCE_TIERS`). `NULL` = chưa kết luận được. */
+    tier: text("tier"),
+    /** Vì sao chưa quy kết được (`LANDING_GAP_REASONS`). `NULL` = đã quy kết. */
+    gap: text("gap"),
+    /** Id nhân sự (sổ lương) — CÙNG không gian khoá với `ad_spends.marketer_id`. */
+    marketerId: text("marketer_id"),
+    /** Tài khoản quảng cáo (TKQC) đã chạy mẩu này, đọc tại MỐC ĐƠN, không lấy chủ sở hữu hôm nay. */
+    adAccountId: text("ad_account_id"),
+    campaignId: text("campaign_id"),
+    adsetId: text("adset_id"),
+    adId: text("ad_id"),
+    /** Fanpage suy ra từ `fb_ads.story_id`. `NULL` là câu trả lời hợp lệ, không phải thiếu sót. */
+    pageId: text("page_id"),
+    /** Ảnh chụp nguyên văn các ô tracking đã đọc từ dòng landing. */
+    utm: jsonb("utm"),
+    landingUrl: text("landing_url"),
+    /** Mã hàng mà TÊN CHIẾN DỊCH nói tới — chỉ để đối chiếu, không bao giờ ghi đè mã hàng của đơn. */
+    campaignProductCode: text("campaign_product_code"),
+    /** Chiến dịch nói một mã, đơn lại là mã khác. Đánh dấu để rà; KHÔNG sửa đơn. */
+    productMismatch: boolean("product_mismatch").notNull().default(false),
+    evidence: text("evidence").notNull().default(""),
+    ruleVersion: integer("rule_version").notNull().default(1),
+    computedAt: ts("computed_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("landing_attribution_order_uq").on(t.orderId),
+    index("landing_attribution_marketer_idx").on(t.marketerId),
+    index("landing_attribution_campaign_idx").on(t.campaignId),
+    index("landing_attribution_tier_idx").on(t.tier),
+    check("landing_attribution_tier_check", sql`${t.tier} IS NULL OR ${t.tier} IN ('AD_ID', 'ADSET_ID', 'CAMPAIGN_NAME')`),
+    check("landing_attribution_gap_check", sql`${t.gap} IS NULL OR ${t.gap} IN ('NO_TRACKING', 'NO_MATCH', 'AMBIGUOUS_MARKETER', 'NO_MARKETER_DECLARED')`),
+    /*
+      KẾT LUẬN ĐI CÙNG CĂN CỨ. Có người ⇒ phải có bậc bằng chứng VÀ câu giải thích; chưa có người
+      ⇒ phải nói được vì sao. Không dòng nào được vừa trống người vừa trống lý do — đó đúng là
+      dòng mà sáu tháng sau không ai kiểm chứng nổi.
+    */
+    check(
+      "landing_attribution_evidence_check",
+      sql`(${t.marketerId} IS NOT NULL AND ${t.tier} IS NOT NULL AND ${t.evidence} <> '' AND ${t.gap} IS NULL) OR (${t.marketerId} IS NULL AND ${t.gap} IS NOT NULL)`,
+    ),
   ],
 );
 

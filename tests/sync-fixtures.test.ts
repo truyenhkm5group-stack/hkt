@@ -9,6 +9,7 @@ import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
 import { testDuplicateEvidencePure, testFanpageAttribution } from "./fanpage-attribution.test";
 import { testFanpageAccessPure, testFanpageHistoryDb, testPageEvidencePure } from "./fanpage-history.test";
+import { testLandingAttributionDb, testLandingAttributionPure } from "./landing-attribution.test";
 import { testConsistency } from "./consistency.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
@@ -1620,6 +1621,8 @@ async function main() {
   testFanpageAccessPure();
   testPageEvidencePure();
   await testFanpageHistoryDb();
+  testLandingAttributionPure();
+  await testLandingAttributionDb();
   await testIdeas();
   await testPermissions();
   await testVtpImportTruth(db);

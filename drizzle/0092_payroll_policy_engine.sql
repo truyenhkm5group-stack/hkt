@@ -18,7 +18,14 @@
 -- sách — nên ngay sau khi áp migration này, mọi con số của mọi kỳ vẫn y hệt hôm qua. Chuyển một
 -- người sang máy mới là một lần chủ shop bấm, không phải một lượt migration im lặng.
 --
--- Viết tay và idempotent như 0033–0090.
+-- ─── ĐÁNH SỐ LẠI 0091 → 0092 (15/09/2026) ───
+--
+-- Trong lúc nhánh này đang chạy, `main` đã lấy 0091 cho `0091_landing_attribution`. Số hiệu của
+-- một migration ĐÃ VÀO main là bất khả xâm phạm, nên thứ phải dời là cái CHƯA vào — tệp này. Mốc
+-- trong sổ cũng dời lên sau mọi mốc đã có, nếu không drizzle bỏ qua nó trên máy đã chạy bản kia.
+-- Cùng cách xử lý như 0089 → 0090 trước đó (AGENTS.md mục 4 · mục 9).
+--
+-- Viết tay và idempotent như 0033–0091.
 
 -- ─────────── 1. CHÍNH SÁCH LƯƠNG ───────────
 CREATE TABLE IF NOT EXISTS "salary_policies" (
