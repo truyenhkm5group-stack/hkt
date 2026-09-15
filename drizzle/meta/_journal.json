@@ -659,6 +659,13 @@
       "when": 1789684827245,
       "tag": "0094_payroll_run_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789688427245,
+      "tag": "0095_payroll_input_approval",
+      "breakpoints": true
     }
   ]
 }

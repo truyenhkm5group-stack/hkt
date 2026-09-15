@@ -280,3 +280,48 @@ export function reconcile(input: {
     hasUnexplained: lines.some((l) => !l.explained && (l.diff === null || l.diff !== 0)),
   };
 }
+
+/**
+ * ═══════ NĂM TRẠNG THÁI CHUYỂN ĐỔI, GỌI ĐÚNG TÊN ═══════
+ *
+ * Trước hàm này màn hình chỉ phân biệt "đã chuyển" với "chưa". "Chưa" gộp ba tình huống khác hẳn
+ * nhau: chưa ánh xạ được gì · ánh xạ xong và khớp · ánh xạ xong nhưng LỆCH TIỀN. Người bấm đọc cả
+ * ba thành một chữ "chưa" rồi bấm lần lượt từ trên xuống — và người lệch tiền cũng được bấm như
+ * người khớp.
+ *
+ * Hàm THUẦN, không đọc CSDL: trạng thái là một hàm của đề xuất và bảng đối chiếu, nên nó kiểm
+ * được bằng bảng chân lý thay vì phải dựng một kỳ lương thật.
+ */
+export const MIGRATION_STATUSES = ["MIGRATED", "BLOCKED", "DIFF", "READY", "LEGACY"] as const;
+export type MigrationStatus = (typeof MIGRATION_STATUSES)[number];
+
+export const MIGRATION_STATUS_LABEL: Record<MigrationStatus, string> = {
+  MIGRATED: "Đã chuyển",
+  BLOCKED: "Bị chặn",
+  DIFF: "Có chênh lệch",
+  READY: "Sẵn sàng chuyển",
+  LEGACY: "Còn ở đường cũ",
+};
+
+export const MIGRATION_STATUS_HINT: Record<MigrationStatus, string> = {
+  MIGRATED: "Người này đã có chính sách lương, tiền tính bằng máy chung.",
+  BLOCKED: "Còn việc phải làm trước khi chuyển được — đọc danh sách ngay dưới tên.",
+  DIFF: "Ánh xạ xong nhưng số cũ và số mới KHÔNG bằng nhau, và phần lệch chưa giải thích được. Chuyển được, nhưng phải ghi lý do và lý do ấy đi vào nhật ký.",
+  READY: "Ánh xạ xong, số cũ và số mới khớp nhau. Bấm là chuyển.",
+  LEGACY: "Chưa ánh xạ được thành phần nào từ hồ sơ cũ — bốn ô lương cũ đều trống. Vẫn tính bằng đường cũ.",
+};
+
+export function migrationStatus(input: { alreadyMigrated: boolean; blockers: readonly string[]; componentCount: number; hasUnexplainedDiff: boolean }): MigrationStatus {
+  /*
+    THỨ TỰ Ở ĐÂY LÀ MỘT QUYẾT ĐỊNH, KHÔNG PHẢI NGẪU NHIÊN.
+
+    "Đã chuyển" thắng tất cả: một người đã sang máy chung thì bảng đối chiếu của kỳ cũ không còn là
+    việc phải làm. Sau đó là BỊ CHẶN (không bấm được), rồi CÓ CHÊNH LỆCH (bấm được nhưng phải khai
+    lý do), rồi mới tới SẴN SÀNG. Đảo hai cái giữa là in "sẵn sàng" lên một người đang lệch tiền.
+  */
+  if (input.alreadyMigrated) return "MIGRATED";
+  if (input.blockers.length > 0) return "BLOCKED";
+  if (input.componentCount === 0) return "LEGACY";
+  if (input.hasUnexplainedDiff) return "DIFF";
+  return "READY";
+}

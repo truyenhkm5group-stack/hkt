@@ -6,9 +6,11 @@ import { SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { COMPENSATION_PROFIT_LABEL, COMPENSATION_PROFIT_RULES } from "@/lib/constants/compensation-profit";
 import { COST_COMPONENTS } from "@/lib/constants/cost-authority";
+import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { getCarryoverConfig } from "@/lib/queries/payroll-carryover";
 import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { getSettingJson } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Cấu hình lương" };
@@ -26,7 +28,11 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
   const user = await requireUser();
   if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
-  const [carryover, recognition] = await Promise.all([getCarryoverConfig(), getRecognizedPayrollCost(period)]);
+  const [carryover, recognition, statutory] = await Promise.all([
+    getCarryoverConfig(),
+    getRecognizedPayrollCost(period),
+    getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -41,6 +47,7 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
         recognitionMode={recognition.mode}
         recognitionReasons={recognition.reasons}
         payrollCovered={recognition.coverage === "COMPLETE"}
+        statutory={statutory}
       />
 
       <SectionCard

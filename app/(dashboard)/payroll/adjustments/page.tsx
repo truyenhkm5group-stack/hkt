@@ -66,7 +66,19 @@ export default async function PayrollAdjustmentsPage({ searchParams }: { searchP
           reason: r.reason,
           createdByName: r.createdByName,
         }))}
-        inputs={inputs.rows.map((r) => ({ employeeId: r.employeeId, inputKey: r.inputKey, value: Number(r.value), evidence: r.evidence, enteredByName: r.enteredByName }))}
+        inputs={inputs.rows.map((r) => ({
+          employeeId: r.employeeId,
+          inputKey: r.inputKey,
+          value: Number(r.value),
+          unit: r.unit,
+          evidence: r.evidence,
+          status: r.status,
+          enteredByName: r.enteredByName,
+          enteredAt: r.createdAt ? r.createdAt.toISOString() : null,
+          approvedByName: r.approvedByName,
+          approvedAt: r.approvedAt ? r.approvedAt.toISOString() : null,
+        }))}
+        canApprove
       />
     </div>
   );

@@ -41,6 +41,7 @@ const MOI = [
   "0092_fb_adsets",
   "0093_payroll_policy_engine",
   "0094_payroll_run_lifecycle",
+  "0095_payroll_input_approval",
 ] as const;
 
 /*
@@ -121,6 +122,11 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'salary_policies'"), 0, "bước 1: bảng salary_policies CHƯA được có — đó là thứ 0093 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketer_profit_carryover' and column_name = 'component_code'"), 0, "bước 1: cột component_code CHƯA được có — đó là thứ 0093 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'payroll_periods' and column_name = 'approved_by'"), 0, "bước 1: cột approved_by CHƯA được có — đó là thứ 0094 thêm vào");
+    assert.equal(
+      await dem("select count(*)::int as n from information_schema.columns where table_name = 'payroll_inputs' and column_name = 'status'"),
+      0,
+      "bước 1: cột trạng thái của đầu vào nhập tay CHƯA được có — đó là thứ 0095 thêm vào",
+    );
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -465,6 +471,33 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_status_check"),
       "0094: trạng thái lạ bị chặn — danh sách ĐÓNG",
     );
+
+    /*
+      ═══ 0095 · ĐẦU VÀO NHẬP TAY: ĐƠN VỊ · TRẠNG THÁI · NGƯỜI DUYỆT ═══
+
+      Điều quan trọng nhất ở đây cũng là điều migration KHÔNG làm: nó KHÔNG backfill đơn vị cho
+      những dòng đã nhập. Đoán đơn vị của một con số người khác đã gõ là đoán ý họ — và nếu đoán
+      sai thì phép nhân ra một số tiền sai mà trông hoàn toàn bình thường. Dòng cũ để đơn vị RỖNG,
+      màn hình in "—", ai cần thì nhập lại.
+    */
+    await client.query(
+      `insert into payroll_inputs (id, employee_id, period_key, input_key, value, evidence) values ('up-pi3', 'mkt-1', '2026-09-01..2026-09-30', 'WORK_DAYS', 24, 'bảng công T9')`,
+    );
+    assert.equal(await dem("select count(*)::int as n from payroll_inputs where id = 'up-pi3' and status = 'ENTERED'"), 1, "0095: dòng mới mặc định CHỜ DUYỆT — không tự coi một con số vừa gõ là đã có người soát");
+    assert.equal(await dem("select count(*)::int as n from payroll_inputs where id = 'up-pi3' and unit = ''"), 1, "0095: KHÔNG backfill đơn vị — đoán đơn vị của một con số đã nhập là đoán ý người nhập");
+
+    await assert.rejects(
+      () => client.query(`update payroll_inputs set status = 'APPROVED' where id = 'up-pi3'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_inputs_approved_check"),
+      "0095: đánh dấu đã duyệt mà không có mốc duyệt bị chặn — một chữ ký không có ngày là một chữ ký trống",
+    );
+    await assert.rejects(
+      () => client.query(`update payroll_inputs set status = 'DA_XEM' where id = 'up-pi3'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_inputs_status_check"),
+      "0095: trạng thái lạ bị chặn — danh sách ĐÓNG",
+    );
+    await client.query(`update payroll_inputs set status = 'APPROVED', approved_at = now(), approved_by_name = 'Chị Lan' where id = 'up-pi3'`);
+    assert.equal(await dem("select count(*)::int as n from payroll_inputs where id = 'up-pi3' and status = 'APPROVED' and approved_at is not null"), 1, "0095: duyệt kèm mốc thời gian thì ghi được");
 
     /*
       ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══

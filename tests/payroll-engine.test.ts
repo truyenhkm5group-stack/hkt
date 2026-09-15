@@ -20,7 +20,8 @@ import {
 import { calculateComponent, calculatePayrollItem, type SegmentInput } from "@/lib/payroll/engine";
 import { assignmentOverlaps, componentMissingParams, policyGaps } from "@/lib/payroll/policy-validation";
 import { carryoverChain } from "@/lib/payroll/profit-carryover";
-import { proposePolicyFromLegacy, reconcile } from "@/lib/payroll/migration-preview";
+import { MIGRATION_STATUSES, MIGRATION_STATUS_LABEL, migrationStatus, proposePolicyFromLegacy, reconcile } from "@/lib/payroll/migration-preview";
+import { DEFAULT_STATUTORY, STATUTORY_STATES, STATUTORY_STATE_LABEL, statutoryDisplay } from "@/lib/constants/payroll-statutory";
 import { resolveSegments, type EmploymentRow, type PolicyAssignmentRow, type PolicyVersionRow } from "@/lib/payroll/policy-resolve";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00+07:00`);
@@ -813,5 +814,51 @@ export function testPayrollEngine() {
     assert.equal(chuaBiet.hasUnexplained, true, "một bên chưa biết ⇒ KHÔNG được coi là khớp");
   }
 
-  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc + kiểm sổ khai · chuỗi bù lỗ 4 tháng · đề xuất và đối chiếu chuyển đổi");
+  /*
+    ═══ NĂM TRẠNG THÁI CHUYỂN ĐỔI — BẢNG CHÂN LÝ ═══
+
+    Thứ tự ưu tiên là phần dễ sai nhất: gộp "có chênh lệch" vào "sẵn sàng" là in chữ "sẵn sàng" lên
+    một người mà số cũ và số mới không bằng nhau, rồi người bấm bấm qua như mọi người khác.
+  */
+  {
+    const st = (o: Partial<Parameters<typeof migrationStatus>[0]>) =>
+      migrationStatus({ alreadyMigrated: false, blockers: [], componentCount: 1, hasUnexplainedDiff: false, ...o });
+
+    assert.equal(st({}), "READY", "ánh xạ xong + khớp ⇒ SẴN SÀNG");
+    assert.equal(st({ hasUnexplainedDiff: true }), "DIFF", "còn lệch chưa giải thích ⇒ CÓ CHÊNH LỆCH, không phải SẴN SÀNG");
+    assert.equal(st({ blockers: ["chưa khai phân công"] }), "BLOCKED", "còn việc phải làm ⇒ BỊ CHẶN");
+    assert.equal(st({ blockers: ["x"], hasUnexplainedDiff: true }), "BLOCKED", "bị chặn thắng chênh lệch — không bấm được thì phần lệch chưa phải việc hôm nay");
+    assert.equal(st({ componentCount: 0 }), "LEGACY", "không ánh xạ được thành phần nào ⇒ CÒN Ở ĐƯỜNG CŨ, khác hẳn SẴN SÀNG");
+    assert.equal(st({ componentCount: 0, blockers: ["x"] }), "BLOCKED", "có việc phải làm thì nói việc phải làm trước");
+    assert.equal(st({ alreadyMigrated: true, blockers: ["x"], hasUnexplainedDiff: true, componentCount: 0 }), "MIGRATED", "đã chuyển thắng tất cả — bảng đối chiếu của kỳ cũ không còn là việc phải làm");
+
+    assert.equal(new Set(MIGRATION_STATUSES).size, MIGRATION_STATUSES.length, "danh sách trạng thái không được trùng");
+    for (const k of MIGRATION_STATUSES) assert.ok(MIGRATION_STATUS_LABEL[k]?.length, `trạng thái ${k} phải có nhãn tiếng Việt`);
+  }
+
+  /*
+    ═══ KHẤU TRỪ THEO LUẬT: "CHƯA CẤU HÌNH" KHÔNG ĐƯỢC BẰNG "0 ĐỒNG" ═══
+
+    Một phiếu lương in "0 ₫" ở dòng thuế là khẳng định khoản khấu trừ đã được tính và bằng không.
+    Sự thật là chưa ai tính. Hai thứ ấy khác nhau, và bên chịu là người lao động (AGENTS.md mục 42).
+  */
+  {
+    assert.equal(DEFAULT_STATUTORY.state, "NOT_CONFIGURED", "mặc định phải là CHƯA CẤU HÌNH — không tự khai hộ chủ shop một luật thuế");
+    assert.equal(DEFAULT_STATUTORY.legalBasis, "", "chưa khai thì không có căn cứ pháp lý nào");
+
+    const chua = statutoryDisplay(DEFAULT_STATUTORY);
+    assert.equal(chua.amount, null, "CHƯA CẤU HÌNH phải trả CHƯA BIẾT, không phải 0 — trả 0 là để chỗ gọi cộng nó vào tổng như một con số đã xác minh");
+    assert.equal(chua.label, STATUTORY_STATE_LABEL.NOT_CONFIGURED);
+
+    const mien = statutoryDisplay({ ...DEFAULT_STATUTORY, state: "EXEMPT", legalBasis: "Cộng tác viên khoán, không thuộc diện đóng BHXH" });
+    assert.equal(mien.amount, 0, "KHÔNG ÁP DỤNG là một khẳng định CÓ CHỦ ⇒ 0 thật, in được 0 ₫");
+    assert.match(mien.hint, /Cộng tác viên khoán/, "căn cứ pháp lý phải đi kèm ra tới màn hình");
+
+    const daKhai = statutoryDisplay({ ...DEFAULT_STATUTORY, state: "CONFIGURED", legalBasis: "Nghị định X" });
+    assert.equal(daKhai.amount, null, "đã cấu hình thì SỐ TIỀN do thành phần trong chính sách tính, không do hàm hiển thị bịa ra");
+
+    assert.equal(STATUTORY_STATES.length, 3, "ba trạng thái, và sự khác nhau giữa chúng là toàn bộ vấn đề");
+  }
+
+  console.log("  ✓ Máy tính lương chung: 30 tình huống bắt buộc + kiểm sổ khai · chuỗi bù lỗ 4 tháng · đề xuất và đối chiếu chuyển đổi · 5 trạng thái chuyển đổi");
 }

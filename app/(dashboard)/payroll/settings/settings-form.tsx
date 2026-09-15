@@ -9,7 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { SectionCard } from "@/components/ui-bits";
-import { savePayrollCarryoverConfig, savePayrollRecognitionMode } from "@/lib/actions/payroll-policy";
+import { savePayrollCarryoverConfig, savePayrollRecognitionMode, savePayrollStatutoryConfig } from "@/lib/actions/payroll-policy";
+import {
+  STATUTORY_STATES,
+  STATUTORY_STATE_HINT,
+  STATUTORY_STATE_LABEL,
+  type StatutoryConfig,
+  type StatutoryState,
+} from "@/lib/constants/payroll-statutory";
 
 /**
  * ═══ HAI CÔNG TẮC ĐỔI SỐ TIỀN CỦA NGƯỜI THẬT ═══
@@ -22,16 +29,19 @@ export function PayrollSettingsForm({
   recognitionMode,
   recognitionReasons,
   payrollCovered,
+  statutory,
 }: {
   carryover: { enabled: boolean; startMonth: string | null; startNote: string };
   recognitionMode: "LEGACY_EXPENSES" | "PAYROLL";
   recognitionReasons: string[];
   payrollCovered: boolean;
+  statutory: StatutoryConfig;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [c, setC] = useState({ enabled: carryover.enabled, startMonth: carryover.startMonth ?? "", startNote: carryover.startNote });
   const [mode, setMode] = useState(recognitionMode);
+  const [st, setSt] = useState({ state: statutory.state as StatutoryState, legalBasis: statutory.legalBasis, note: statutory.note });
 
   const luuCarry = () =>
     start(async () => {
@@ -53,6 +63,17 @@ export function PayrollSettingsForm({
       }
       setMode(v);
       toast.success("Đã đổi nguồn ghi nhận chi phí nhân sự");
+      router.refresh();
+    });
+
+  const luuStatutory = () =>
+    start(async () => {
+      const r = await savePayrollStatutoryConfig(st);
+      if ("error" in r) {
+        toast.error(r.error, { duration: 12000 });
+        return;
+      }
+      toast.success(`Đã khai khấu trừ theo luật: ${STATUTORY_STATE_LABEL[st.state]}`);
       router.refresh();
     });
 
@@ -116,6 +137,49 @@ export function PayrollSettingsForm({
               {!payrollCovered ? <p className="mt-1">Chưa đủ thì máy chi phí TỰ LÙI về bảng Chi phí kèm cảnh báo — lương không bao giờ bị để thành 0.</p> : null}
             </div>
           ) : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Khấu trừ theo luật (thuế TNCN · BHXH · BHYT · BHTN)"
+        description="Ở đây KHÔNG có ô nhập tỷ lệ, và đó là chủ ý: tỷ lệ pháp lý đổi theo năm, theo vùng và theo loại hợp đồng, nên một con số gõ tay sẽ in ra khoản khấu trừ SAI mà trông hoàn toàn hợp lệ. Ô này chỉ khai ERP đang ở trạng thái nào — và phiếu lương in đúng trạng thái ấy thay vì in 0 ₫."
+      >
+        <div className="space-y-2">
+          {STATUTORY_STATES.map((v) => (
+            <label key={v} className="flex items-start gap-2 rounded-md border p-2 text-[13px]">
+              <input type="radio" name="statutory" className="mt-1" checked={st.state === v} onChange={() => setSt((s) => ({ ...s, state: v }))} disabled={pending} />
+              <span>
+                <b>{STATUTORY_STATE_LABEL[v]}</b>
+                <span className="block text-[11px] text-muted-foreground">{STATUTORY_STATE_HINT[v]}</span>
+              </span>
+            </label>
+          ))}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="legal-basis">Căn cứ pháp lý</Label>
+              <Input
+                id="legal-basis"
+                value={st.legalBasis}
+                onChange={(e) => setSt((s) => ({ ...s, legalBasis: e.target.value }))}
+                placeholder="vd: Nghị định 143/2018, hoặc quyết định của chủ shop ngày…"
+                disabled={st.state === "NOT_CONFIGURED"}
+              />
+              <p className="text-[11px] text-muted-foreground">Bắt buộc khi rời khỏi “Chưa cấu hình”: một khẳng định về thuế mà không nói dựa trên văn bản nào thì sáu tháng sau không ai kiểm lại được.</p>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="statutory-note">Ghi chú</Label>
+              <Input id="statutory-note" value={st.note} onChange={(e) => setSt((s) => ({ ...s, note: e.target.value }))} placeholder="vd: áp dụng cho nhân sự ký hợp đồng chính thức" />
+            </div>
+          </div>
+          {statutory.declaredBy ? (
+            <p className="text-[11px] text-muted-foreground">
+              Người khai gần nhất: <b>{statutory.declaredBy}</b>
+              {statutory.declaredAt ? ` · ${statutory.declaredAt}` : ""}
+            </p>
+          ) : null}
+          <Button size="sm" onClick={luuStatutory} disabled={pending}>
+            <Save className="size-4" /> Lưu khai báo
+          </Button>
         </div>
       </SectionCard>
     </div>

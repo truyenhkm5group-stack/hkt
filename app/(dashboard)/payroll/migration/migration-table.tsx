@@ -8,7 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionCard } from "@/components/ui-bits";
 import { migrateEmployeeToPolicy } from "@/lib/actions/payroll-policy";
-import type { MigrationProposal, ReconResult } from "@/lib/payroll/migration-preview";
+import {
+  MIGRATION_STATUSES,
+  MIGRATION_STATUS_HINT,
+  MIGRATION_STATUS_LABEL,
+  migrationStatus,
+  type MigrationProposal,
+  type MigrationStatus,
+  type ReconResult,
+} from "@/lib/payroll/migration-preview";
 import { MISSING_TEXT, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +29,15 @@ type Row = { proposal: MigrationProposal; recon: ReconResult | null; alreadyMigr
  * người mà không ai kịp đọc bảng đối chiếu của từng người — và bảng đối chiếu chỉ có giá trị khi
  * có người THẬT SỰ nhìn nó.
  */
+/** Màu của nhãn. Chỉ là trình bày — trạng thái do `migrationStatus()` quyết, không do màu. */
+const STATUS_CLASS: Record<MigrationStatus, string> = {
+  MIGRATED: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+  BLOCKED: "bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200",
+  DIFF: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  READY: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+  LEGACY: "bg-muted text-muted-foreground",
+};
+
 export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effectiveFrom: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -56,11 +73,35 @@ export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effective
     );
   }
 
+  const statusOf = (r: Row) =>
+    migrationStatus({
+      alreadyMigrated: r.alreadyMigrated,
+      blockers: r.proposal.blockers,
+      componentCount: r.proposal.components.length,
+      hasUnexplainedDiff: Boolean(r.recon?.hasUnexplained),
+    });
+  const dem = (s: MigrationStatus) => rows.filter((r) => statusOf(r) === s).length;
+
   return (
     <div className="space-y-4">
+      {/*
+        BẢNG ĐẾM THEO TRẠNG THÁI, ĐỨNG TRƯỚC DANH SÁCH.
+
+        Nó trả lời câu hỏi đầu tiên của người mở trang — "còn bao nhiêu người phải xử lý, và vướng
+        ở đâu" — mà không phải cuộn hết danh sách rồi tự đếm.
+      */}
+      <div className="flex flex-wrap gap-2">
+        {MIGRATION_STATUSES.map((s) => (
+          <span key={s} title={MIGRATION_STATUS_HINT[s]} className={cn("rounded-md px-2 py-1 text-[12px] font-medium", STATUS_CLASS[s])}>
+            {MIGRATION_STATUS_LABEL[s]}: {dem(s)}
+          </span>
+        ))}
+      </div>
+
       {rows.map((r) => {
         const p = r.proposal;
         const lech = r.recon?.lines.filter((l) => l.diff !== 0) ?? [];
+        const trangThai = statusOf(r);
         const chanDuoc = p.blockers.length === 0 && p.components.length > 0 && !r.alreadyMigrated;
         return (
           <SectionCard
@@ -68,9 +109,9 @@ export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effective
             title={
               <span className="flex flex-wrap items-center gap-2">
                 {p.employeeName}
-                {r.alreadyMigrated ? (
-                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-medium text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">Đã chuyển</span>
-                ) : null}
+                <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", STATUS_CLASS[trangThai])} title={MIGRATION_STATUS_HINT[trangThai]}>
+                  {MIGRATION_STATUS_LABEL[trangThai]}
+                </span>
                 {!r.hasEmployment ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-900 dark:bg-amber-950 dark:text-amber-200">Chưa khai phân công</span> : null}
               </span>
             }

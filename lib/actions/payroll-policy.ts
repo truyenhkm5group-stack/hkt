@@ -19,10 +19,11 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { guardSecondApproval } from "@/lib/actions/approvals";
-import { componentBasisKey, type PayrollCalcParams } from "@/lib/constants/payroll-components";
+import { componentBasisKey, payrollInput, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { DEFAULT_PAYROLL_CARRYOVER, PAYROLL_CARRYOVER_KEY, type PayrollCarryoverConfig } from "@/lib/constants/payroll-carryover";
+import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, STATUTORY_STATES, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
@@ -394,17 +395,104 @@ export async function savePayrollInput(input: unknown): Promise<PolicyActionResu
   const d = parsed.data;
   const chot = await periodIsFinal(d.periodKey);
   if (chot) return { error: chot };
+  const spec = payrollInput(d.inputKey);
+  if (!spec) return { error: `Đại lượng ${d.inputKey} không có trong sổ đăng ký đầu vào` };
+  if (spec.availability !== "MANUAL") {
+    return { error: `${spec.label} là đại lượng ERP TỰ ĐO (${spec.availability}) — gõ tay một con số đè lên số đo được là tạo ra nguồn thứ hai cho cùng một đại lượng` };
+  }
   const db = await getDb();
   const t = schema.payrollInputs;
   const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? "";
   await db
     .insert(t)
-    .values({ employeeId: d.employeeId, periodKey: d.periodKey, inputKey: d.inputKey, value: d.value, evidence: d.evidence, enteredBy: guard.id, enteredByName: ten })
+    .values({
+      employeeId: d.employeeId,
+      periodKey: d.periodKey,
+      inputKey: d.inputKey,
+      value: d.value,
+      // ĐƠN VỊ do MÁY CHỦ đọc từ sổ đăng ký, không nhận từ client: client gửi đơn vị khác với khoá
+      // thì dòng dữ liệu nói một đằng còn phép tính đọc một nẻo (AGENTS.md mục 34).
+      unit: spec.unit,
+      evidence: d.evidence,
+      status: "ENTERED",
+      enteredBy: guard.id,
+      enteredByName: ten,
+    })
     .onConflictDoUpdate({
       target: [t.employeeId, t.periodKey, t.inputKey],
-      set: { value: d.value, evidence: d.evidence, enteredBy: guard.id, enteredByName: ten, updatedAt: new Date() },
+      /*
+        SỬA GIÁ TRỊ LÀ HUỶ CHỮ KÝ CŨ.
+
+        Người duyệt đã duyệt MỘT CON SỐ, không phải một ô. Giữ nguyên `APPROVED` sau khi con số đổi
+        là mượn chữ ký của họ cho một con số họ chưa từng nhìn thấy.
+      */
+      set: {
+        value: d.value,
+        unit: spec.unit,
+        evidence: d.evidence,
+        status: "ENTERED",
+        approvedBy: null,
+        approvedByName: "",
+        approvedAt: null,
+        enteredBy: guard.id,
+        enteredByName: ten,
+        updatedAt: new Date(),
+      },
     });
-  await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_INPUT_SAVE", entity: "PAYROLL_INPUT", entityId: `${d.employeeId}:${d.periodKey}:${d.inputKey}`, after: d });
+  await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_INPUT_SAVE", entity: "PAYROLL_INPUT", entityId: `${d.employeeId}:${d.periodKey}:${d.inputKey}`, after: { ...d, unit: spec.unit } });
+  revalidate();
+  return { ok: true };
+}
+
+/**
+ * DUYỆT MỘT SỐ LIỆU NHẬP TAY.
+ *
+ * Tách hẳn khỏi đường ghi: người duyệt xác nhận một con số ĐÃ CÓ, nên hàm này không nhận giá trị.
+ * Nếu nó nhận, thì "duyệt" và "sửa rồi tự duyệt" là cùng một lượt bấm.
+ */
+export async function approvePayrollInput(input: unknown): Promise<PolicyActionResult> {
+  const guard = await requireManage();
+  if ("error" in guard) return guard;
+  const parsed = z
+    .object({
+      employeeId: z.string().min(1),
+      periodKey: z.string().regex(/^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$/, "Khoá kỳ không hợp lệ"),
+      inputKey: z.string().min(1),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const chot = await periodIsFinal(d.periodKey);
+  if (chot) return { error: chot };
+  const db = await getDb();
+  const t = schema.payrollInputs;
+  const rows = await db
+    .select({ id: t.id, value: t.value, enteredBy: t.enteredBy })
+    .from(t)
+    .where(and(eq(t.employeeId, d.employeeId), eq(t.periodKey, d.periodKey), eq(t.inputKey, d.inputKey)));
+  const row = rows[0];
+  if (!row) return { error: "Không tìm thấy số liệu này để duyệt" };
+  /*
+    NGƯỜI NHẬP KHÔNG TỰ DUYỆT SỐ CỦA MÌNH.
+
+    Một chữ ký của chính người gõ không thêm một lượt soát nào — nó chỉ làm cột `status` nói dối.
+  */
+  if (row.enteredBy && row.enteredBy === guard.id) {
+    return { error: "Người nhập không tự duyệt số của mình — cần một người thứ hai soát lại" };
+  }
+  const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? "";
+  await db
+    .update(t)
+    .set({ status: "APPROVED", approvedBy: guard.id, approvedByName: ten, approvedAt: new Date(), updatedAt: new Date() })
+    .where(eq(t.id, row.id));
+  await audit({
+    userId: guard.id,
+    userEmail: guard.email,
+    action: "PAYROLL_INPUT_APPROVE",
+    entity: "PAYROLL_INPUT",
+    entityId: `${d.employeeId}:${d.periodKey}:${d.inputKey}`,
+    after: { value: row.value, approvedBy: guard.id },
+  });
   revalidate();
   return { ok: true };
 }
@@ -703,6 +791,72 @@ export async function savePayrollRecognitionMode(input: unknown): Promise<Policy
     before: truoc,
     after: parsed.data,
   });
+  revalidate();
+  return { ok: true };
+}
+
+// ═════════════════════════ KHẤU TRỪ THEO LUẬT ═════════════════════════
+
+/**
+ * KHAI TRẠNG THÁI KHẤU TRỪ THEO LUẬT — KHÔNG KHAI TỶ LỆ.
+ *
+ * Hàm này cố ý KHÔNG nhận một con số phần trăm nào. Tỷ lệ thuế / BHXH đổi theo năm, theo vùng và
+ * theo loại hợp đồng; ERP nhận một tỷ lệ gõ tay là in ra một khoản khấu trừ trông hợp lệ mà không
+ * ai đi kiểm. Khi chủ shop khai xong luật, phép tính vào máy bằng một THÀNH PHẦN `DEDUCTION` trong
+ * chính sách — cùng cửa với lương cứng và hoa hồng.
+ *
+ * Rời khỏi `NOT_CONFIGURED` là một khẳng định về tiền của người lao động (`EXEMPT` làm phiếu lương
+ * in "0 ₫" ở dòng ấy), nên nó đi qua cổng người thứ hai và bắt buộc có CĂN CỨ PHÁP LÝ.
+ */
+const statutorySchema = z
+  .object({
+    state: z.enum(STATUTORY_STATES),
+    legalBasis: z.string().trim().max(500).default(""),
+    note: z.string().trim().max(1000).default(""),
+  })
+  .refine((v) => v.state === "NOT_CONFIGURED" || v.legalBasis.length >= 3, {
+    message: "Ghi rõ căn cứ pháp lý (nghị định / thông tư / quyết định của chủ shop) — một khẳng định về thuế không có căn cứ thì không ai kiểm lại được",
+    path: ["legalBasis"],
+  });
+
+export async function savePayrollStatutoryConfig(input: unknown): Promise<PolicyActionResult> {
+  const guard = await requireManage();
+  if ("error" in guard) return guard;
+  const parsed = statutorySchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const truoc = await getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY);
+  if (truoc.state === parsed.data.state && truoc.legalBasis === parsed.data.legalBasis && truoc.note === parsed.data.note) {
+    return { ok: true };
+  }
+
+  const cong = await guardSecondApproval({
+    group: "PAYROLL_EDIT",
+    action: "payroll.statutory.state",
+    entity: "SETTINGS",
+    entityId: STATUTORY_DEDUCTION_KEY,
+    summary:
+      parsed.data.state === "EXEMPT"
+        ? "Khai KHÔNG ÁP DỤNG khấu trừ theo luật — phiếu lương sẽ in 0 ₫ ở dòng thuế / bảo hiểm"
+        : parsed.data.state === "CONFIGURED"
+          ? "Khai ĐÃ CẤU HÌNH khấu trừ theo luật — số tiền do thành phần trong chính sách lương tính"
+          : "Đưa khấu trừ theo luật về CHƯA CẤU HÌNH",
+    amount: null,
+    payload: parsed.data,
+  });
+  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+  const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? guard.email;
+  const sau: StatutoryConfig = {
+    state: parsed.data.state,
+    legalBasis: parsed.data.legalBasis,
+    note: parsed.data.note,
+    declaredBy: parsed.data.state === "NOT_CONFIGURED" ? "" : ten,
+    declaredAt: parsed.data.state === "NOT_CONFIGURED" ? null : new Date().toISOString(),
+  };
+  await setSettingJson(STATUTORY_DEDUCTION_KEY, sau);
+  await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_STATUTORY_STATE", entity: "SETTINGS", entityId: STATUTORY_DEDUCTION_KEY, before: truoc, after: sau });
+  revalidatePath("/payroll/payslip");
   revalidate();
   return { ok: true };
 }

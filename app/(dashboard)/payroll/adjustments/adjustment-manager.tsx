@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Check, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,12 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui-bits";
 import { PAYROLL_COMPONENT_KIND_LABEL, PAYROLL_COMPONENT_SIGN, PAYROLL_INPUTS, type PayrollComponentKind } from "@/lib/constants/payroll-components";
-import { deletePayrollAdjustment, savePayrollAdjustment, savePayrollInput } from "@/lib/actions/payroll-policy";
+import { approvePayrollInput, deletePayrollAdjustment, savePayrollAdjustment, savePayrollInput } from "@/lib/actions/payroll-policy";
+import { formatDateTime } from "@/lib/format";
 
 type Option = { id: string; name: string };
 
 const ADJ_KINDS = ["BONUS", "ALLOWANCE", "ADJUSTMENT", "ADVANCE", "DEDUCTION", "REIMBURSEMENT"] as const;
 const MANUAL_INPUTS = PAYROLL_INPUTS.filter((i) => i.availability === "MANUAL");
+
+/** Nhãn đọc được của đơn vị. Bảng này CHỈ để hiển thị — đơn vị thật nằm ở sổ đăng ký và ở cột `unit`. */
+const UNIT_LABEL: Record<string, string> = { VND: "đồng", COUNT: "lượt", DAY: "ngày", HOUR: "giờ", PERCENT: "%" };
 
 /**
  * ═══ HAI THỨ KHÁC NHAU, HAI Ô NHẬP KHÁC NHAU ═══
@@ -34,13 +38,27 @@ export function AdjustmentManager({
   locked,
   adjustments,
   inputs,
+  canApprove,
 }: {
   employees: Option[];
   periodKey: string;
   periodLabel: string;
   locked: boolean;
   adjustments: { id: string; employeeId: string; kind: string; label: string; amount: number; reason: string; createdByName: string }[];
-  inputs: { employeeId: string; inputKey: string; value: number; evidence: string; enteredByName: string }[];
+  inputs: {
+    employeeId: string;
+    inputKey: string;
+    value: number;
+    unit: string;
+    evidence: string;
+    status: string;
+    enteredByName: string;
+    enteredAt: string | null;
+    approvedByName: string;
+    approvedAt: string | null;
+  }[];
+  /** Người đang xem có quyền duyệt hay không — nút duyệt không hiện cho người chỉ đọc. */
+  canApprove: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -60,6 +78,17 @@ export function AdjustmentManager({
       }
       toast.success(`Đã ghi “${inputLabel(inp.inputKey)}” cho kỳ ${periodLabel}`);
       setInp((s) => ({ ...s, value: "", evidence: "" }));
+      router.refresh();
+    });
+
+  const approveInput = (employeeId: string, inputKey: string) =>
+    start(async () => {
+      const r = await approvePayrollInput({ employeeId, periodKey, inputKey });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Đã duyệt “${inputLabel(inputKey)}” của ${nameOf(employeeId)}`);
       router.refresh();
     });
 
@@ -130,8 +159,9 @@ export function AdjustmentManager({
               {spec ? <p className="text-[11px] text-muted-foreground">{spec.source}</p> : null}
             </div>
             <div className="space-y-1">
-              <Label>Giá trị</Label>
+              <Label>Giá trị{spec ? ` (${UNIT_LABEL[spec.unit] ?? spec.unit})` : ""}</Label>
               <Input type="number" step="0.01" value={inp.value} onChange={(e) => setInp((s) => ({ ...s, value: e.target.value }))} />
+              <p className="text-[11px] text-muted-foreground">Nguồn: NHẬP TAY. Đơn vị do sổ đăng ký quy định, máy chủ tự ghi kèm — không gõ lại.</p>
             </div>
             <div className="space-y-1">
               <Label>Căn cứ</Label>
@@ -154,14 +184,18 @@ export function AdjustmentManager({
                 <th className="py-1 pr-3 font-medium">Nhân sự</th>
                 <th className="py-1 pr-3 font-medium">Đại lượng</th>
                 <th className="py-1 pr-3 text-right font-medium">Giá trị</th>
+                <th className="py-1 pr-3 font-medium">Đơn vị</th>
                 <th className="py-1 pr-3 font-medium">Căn cứ</th>
-                <th className="py-1 font-medium">Người nhập</th>
+                <th className="py-1 pr-3 font-medium">Người nhập</th>
+                <th className="py-1 pr-3 font-medium">Lúc nhập</th>
+                <th className="py-1 pr-3 font-medium">Trạng thái</th>
+                <th className="py-1 font-medium">Người duyệt</th>
               </tr>
             </thead>
             <tbody>
               {inputs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-3 text-muted-foreground">
+                  <td colSpan={8} className="py-3 text-muted-foreground">
                     Chưa có đầu vào nào cho kỳ này. Thành phần lương cần chúng sẽ hiện CHƯA BIẾT kèm tên người phải nhập, không hiện 0 ₫.
                   </td>
                 </tr>
@@ -171,8 +205,31 @@ export function AdjustmentManager({
                   <td className="py-1.5 pr-3 font-medium">{nameOf(r.employeeId)}</td>
                   <td className="py-1.5 pr-3">{inputLabel(r.inputKey)}</td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">{r.value.toLocaleString("vi-VN")}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground">{UNIT_LABEL[r.unit] ?? r.unit ?? "—"}</td>
                   <td className="py-1.5 pr-3 text-muted-foreground">{r.evidence}</td>
-                  <td className="py-1.5">{r.enteredByName || "—"}</td>
+                  <td className="py-1.5 pr-3">{r.enteredByName || "—"}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground tabular-nums">{r.enteredAt ? formatDateTime(r.enteredAt) : "—"}</td>
+                  <td className="py-1.5 pr-3">
+                    {r.status === "APPROVED" ? (
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">Đã duyệt</span>
+                    ) : (
+                      <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">Chờ duyệt</span>
+                    )}
+                  </td>
+                  <td className="py-1.5">
+                    {r.status === "APPROVED" ? (
+                      <span>
+                        {r.approvedByName || "—"}
+                        {r.approvedAt ? <span className="ml-1 text-muted-foreground tabular-nums">{formatDateTime(r.approvedAt)}</span> : null}
+                      </span>
+                    ) : canApprove && !locked ? (
+                      <Button size="sm" variant="outline" onClick={() => approveInput(r.employeeId, r.inputKey)} disabled={pending}>
+                        <Check className="size-3.5" /> Duyệt
+                      </Button>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

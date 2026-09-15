@@ -4159,6 +4159,24 @@ export const payrollInputs = pgTable(
     value: doublePrecision("value").notNull(),
     /** Chứng cứ đọc được: bảng công tháng nào, ai duyệt, số phiếu nào. */
     evidence: text("evidence").notNull().default(""),
+    /**
+     * ĐƠN VỊ, CHỤP LẠI TẠI LÚC NHẬP.
+     *
+     * Sổ đăng ký (`PAYROLL_INPUTS`) đã khai đơn vị của từng đại lượng, nên cột này KHÔNG phải một
+     * nguồn thứ hai — nó là ẢNH CHỤP. Ngày nào sổ đổi đơn vị của một đại lượng (giờ → ca chẳng
+     * hạn), những dòng cũ vẫn đọc được đúng thứ người nhập đã nhập, thay vì lặng lẽ đổi nghĩa.
+     */
+    unit: text("unit").notNull().default(""),
+    /**
+     * `ENTERED` = đã nhập · `APPROVED` = đã có người duyệt.
+     *
+     * Chính sách nào đòi duyệt thì đòi ở tầng chính sách; cột này chỉ GHI LẠI việc đã duyệt hay
+     * chưa. Mặc định `ENTERED` — không tự coi một con số vừa gõ là đã được ai đó soát.
+     */
+    status: text("status").notNull().default("ENTERED"),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
     enteredBy: text("entered_by").references(() => users.id, { onDelete: "set null" }),
     /** Ảnh chụp TÊN người nhập, do MÁY CHỦ đọc từ `users` — không nhận từ client (AGENTS.md mục 34). */
     enteredByName: text("entered_by_name").notNull().default(""),
@@ -4168,6 +4186,9 @@ export const payrollInputs = pgTable(
   (t) => [
     uniqueIndex("payroll_inputs_uq").on(t.employeeId, t.periodKey, t.inputKey),
     index("payroll_inputs_period_idx").on(t.periodKey),
+    check("payroll_inputs_status_check", sql`${t.status} IN ('ENTERED', 'APPROVED')`),
+    // Đã duyệt thì phải biết AI và LÚC NÀO — cùng luật với kỳ lương.
+    check("payroll_inputs_approved_check", sql`${t.status} <> 'APPROVED' OR ${t.approvedAt} IS NOT NULL`),
   ],
 );
 

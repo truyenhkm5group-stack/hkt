@@ -8,10 +8,12 @@ import { can, requireUser } from "@/lib/auth/session";
 import { PAYROLL_BASIS_NAME, parsePayrollBasis, type PayrollBasis } from "@/lib/constants/payroll";
 import { PAYROLL_COMPONENT_KIND_LABEL, PAYROLL_COMPONENT_SIGN, type PayrollComponentKind } from "@/lib/constants/payroll-components";
 import { PAYROLL_RUN_STATUS_LABEL } from "@/lib/constants/payroll-lifecycle";
+import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, statutoryDisplay, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { MISSING_TEXT, formatDateTime, formatVND } from "@/lib/format";
 import { employeeMatchesUser, getPayrollReport } from "@/lib/queries/payroll";
 import { getPayrollPeriodState } from "@/lib/queries/payroll-period";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { getSettingJson } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Phiếu lương" };
@@ -39,7 +41,12 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const wanted = param(raw, "employee");
 
-  const [report, state] = await Promise.all([getPayrollReport(period, basis), getPayrollPeriodState(period, basis)]);
+  const [report, state, statutoryConfig] = await Promise.all([
+    getPayrollReport(period, basis),
+    getPayrollPeriodState(period, basis),
+    getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY),
+  ]);
+  const statutory = statutoryDisplay(statutoryConfig);
   const visible = report.lines.filter((l) => viewAll || employeeMatchesUser(l.employee, user));
   const line = wanted ? visible.find((l) => l.employee.id === wanted) : visible.length === 1 ? visible[0] : undefined;
   const qs = new URLSearchParams({ period: period.key, basis, ...(period.key === "custom" ? { from: period.fromKey ?? "", to: period.toKey ?? "" } : {}) }).toString();
@@ -127,6 +134,7 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                         <Money value={engine.totalDeductions} />
                       </td>
                     </tr>
+                    <StatutoryRow statutory={statutory} />
                     <tr className="border-t-2">
                       <td className="py-2 pr-3 text-right font-semibold">Thực nhận</td>
                       <td className="py-2 text-right tabular-nums font-semibold">
@@ -156,6 +164,7 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                       <td className="py-1.5 pr-3">Hoa hồng % doanh thu cá nhân</td>
                       <td className="py-1.5 text-right tabular-nums">{formatVND(line.bonusRevenue)}</td>
                     </tr>
+                    <StatutoryRow statutory={statutory} />
                     <tr className="border-t-2">
                       <td className="py-2 pr-3 text-right font-semibold">Thực nhận</td>
                       <td className="py-2 text-right tabular-nums font-semibold">
@@ -176,5 +185,31 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
         </SectionCard>
       )}
     </div>
+  );
+}
+
+/**
+ * DÒNG KHẤU TRỪ THEO LUẬT — VÀ VÌ SAO NÓ KHÔNG BAO GIỜ IN "0 ₫" KHI CHƯA KHAI.
+ *
+ * `statutoryDisplay` trả `amount: null` khi chưa cấu hình, nên nhánh CHƯA BIẾT ở đây là bắt buộc
+ * chứ không phải một lựa chọn trình bày. Một phiếu lương in "0 ₫" ở dòng thuế là một lời khẳng
+ * định rằng khoản khấu trừ đã được tính và bằng không — trong khi sự thật là chưa ai tính
+ * (AGENTS.md mục 42). Người cầm phiếu phải phân biệt được hai điều đó.
+ */
+function StatutoryRow({ statutory }: { statutory: { amount: number | null; label: string; hint: string } }) {
+  return (
+    <tr className="border-b">
+      <td className="py-1.5 pr-3">
+        Khấu trừ theo luật (thuế TNCN · BHXH · BHYT · BHTN)
+        <span className="ml-2 text-[11px] text-muted-foreground">{statutory.hint}</span>
+      </td>
+      <td className="py-1.5 text-right tabular-nums">
+        {statutory.amount === null ? (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">{statutory.label}</span>
+        ) : (
+          <Money value={statutory.amount} sign />
+        )}
+      </td>
+    </tr>
   );
 }

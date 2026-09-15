@@ -6,6 +6,7 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { EmptyState } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { PAYROLL_BASIS_NAME, parsePayrollBasis, type PayrollBasis } from "@/lib/constants/payroll";
+import { MIGRATION_STATUS_LABEL, migrationStatus, type MigrationStatus } from "@/lib/payroll/migration-preview";
 import { previewLegacyMigration } from "@/lib/queries/payroll-migration";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
@@ -40,14 +41,22 @@ export default async function PayrollMigrationPage({ searchParams }: { searchPar
   }
 
   const rows = await previewLegacyMigration(period, basis);
-  const daChuyen = rows.filter((r) => r.alreadyMigrated).length;
-  const lech = rows.filter((r) => r.recon?.hasUnexplained).length;
+  /* Đếm bằng ĐÚNG hàm mà nhãn trên từng người dùng — hai phép đếm khác nhau thì đầu trang và thân trang nói hai điều. */
+  const trangThai = rows.map((r) =>
+    migrationStatus({
+      alreadyMigrated: r.alreadyMigrated,
+      blockers: r.proposal.blockers,
+      componentCount: r.proposal.components.length,
+      hasUnexplainedDiff: Boolean(r.recon?.hasUnexplained),
+    }),
+  );
+  const dem = (s: MigrationStatus) => trangThai.filter((t) => t === s).length;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Xem trước chuyển đổi lương"
-        description={`${period.label} · cơ sở “${PAYROLL_BASIS_NAME[basis]}” · ${rows.length} nhân sự · ${daChuyen} đã chuyển · ${lech} còn lệch chưa giải thích được. Trang này KHÔNG ghi gì cho tới khi bạn xác nhận từng người.`}
+        description={`${period.label} · cơ sở “${PAYROLL_BASIS_NAME[basis]}” · ${rows.length} nhân sự · ${dem("MIGRATED")} ${MIGRATION_STATUS_LABEL.MIGRATED.toLowerCase()} · ${dem("READY")} ${MIGRATION_STATUS_LABEL.READY.toLowerCase()} · ${dem("DIFF")} ${MIGRATION_STATUS_LABEL.DIFF.toLowerCase()} · ${dem("BLOCKED")} ${MIGRATION_STATUS_LABEL.BLOCKED.toLowerCase()} · ${dem("LEGACY")} ${MIGRATION_STATUS_LABEL.LEGACY.toLowerCase()}. Trang này KHÔNG ghi gì cho tới khi bạn xác nhận từng người.`}
       />
       <PayrollTabs canManage />
       <DataTableToolbar period={{ defaultKey: "month" }} />
