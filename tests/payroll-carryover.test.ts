@@ -10,7 +10,8 @@
  * Dữ liệu đặt ở tháng 05 và 06/2027 để không đụng fixture của bộ khác.
  */
 import assert from "node:assert/strict";
-import { sql } from "drizzle-orm";
+import { execSync } from "node:child_process";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -273,8 +274,86 @@ export async function testPayrollCarryover(db: Db) {
     "7. sổ KHÔNG ÁP DỤNG không phải một lỗ hổng — null khác false",
   );
 
+  /* ══ 8 · CHỐT KỲ PHẢI NGUYÊN TỬ — VÀ DÒNG ĐÃ CHỐT KHÔNG BỊ GHI ĐÈ ══
+   *
+   * GIỚI HẠN CỦA BÀI NÀY, NÓI TRƯỚC: PGlite chỉ có MỘT kết nối, nên hai giao dịch ở đây luôn chạy
+   * nối đuôi nhau. Không thể mô phỏng tranh chấp thật, và một bài "chạy hai lượt rồi thấy đúng một
+   * cái thắng" trên PGlite chứng minh được ĐÚNG KHÔNG GÌ CẢ — nó sẽ xanh kể cả khi mã không có lá
+   * chắn nào. Nên bài này khoá hai thứ KIỂM ĐƯỢC, và phần tranh chấp thật phải thử trên PostgreSQL.
+   *
+   * 8a. Lá chắn `setWhere status = 'DRAFT'`: một dòng ĐÃ FINAL không bị lượt ghi thứ hai đè lên.
+   *     Đây chính là chỗ chặn "hai yêu cầu cùng dùng một số dư cũ để ghi hai kết quả".
+   */
+  await db.insert(schema.marketerProfitCarryover).values({
+    id: "co-race-1",
+    employeeId: "co-race-emp",
+    monthKey: "2027-08",
+    openingBalance: -5_000_000,
+    openingSource: "PREV_MONTH",
+    realProfit: 1_000_000,
+    lossApplied: 1_000_000,
+    commissionBase: 0,
+    commissionRateBp: 1000,
+    signedCommission: -400_000,
+    payableCommission: 0,
+    closingBalance: -4_000_000,
+    status: "FINAL",
+    snapshot: { nguon: "lượt chốt thứ nhất" },
+    finalizedAt: new Date(),
+  });
+  const c = schema.marketerProfitCarryover;
+  await db
+    .insert(c)
+    .values({
+      id: "co-race-2",
+      employeeId: "co-race-emp",
+      monthKey: "2027-08",
+      openingBalance: 0,
+      openingSource: "OPENING_DECLARATION",
+      realProfit: 9_999_999,
+      lossApplied: 0,
+      commissionBase: 9_999_999,
+      commissionRateBp: 1000,
+      signedCommission: 999_999,
+      payableCommission: 999_999,
+      closingBalance: 0,
+      status: "FINAL",
+      snapshot: { nguon: "lượt chốt thứ hai — KHÔNG được thắng" },
+      finalizedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [c.employeeId, c.monthKey],
+      set: { realProfit: 9_999_999, payableCommission: 999_999, closingBalance: 0 },
+      setWhere: eq(c.status, "DRAFT"),
+    });
+  const [conLai] = await db.select().from(c).where(eq(c.employeeId, "co-race-emp"));
+  assert.equal(conLai?.realProfit, 1_000_000, "8a. dòng ĐÃ CHỐT giữ nguyên con số của lượt chốt thứ nhất");
+  assert.equal(conLai?.payableCommission, 0, "8a. lượt thứ hai KHÔNG ghi đè được tiền hoa hồng");
+  assert.equal(conLai?.closingBalance, -4_000_000, "8a. và số dư chuyển tiếp cũng không bị viết lại");
+  await db.delete(c).where(eq(c.employeeId, "co-race-emp"));
+
+  /*
+    8b. PHÉP KIỂM CHỒNG LẤN PHẢI NẰM TRONG GIAO DỊCH ĐÃ CẦM KHOÁ.
+
+    Kiểm ngoài rồi ghi trong là đúng cái khe mà hai yêu cầu đồng thời lọt qua: cả hai cùng đọc
+    "chưa có kỳ nào chồng lấn", rồi cả hai cùng ghi. Khoá tự nhiên (period_key, basis) không chặn
+    được vì hai khoá KHÁC NHAU, và khoá một DÒNG cũng không cứu được vì dòng cần khoá CHƯA TỒN TẠI.
+
+    Quét mã nguồn ĐÃ VÀO KHO, không đọc đĩa — cùng cách `tests/repo-integrity.test.ts` làm.
+  */
+  const nguon = execSync("git show HEAD:lib/actions/payroll-period.ts", { encoding: "utf8" });
+  const viTriKhoa = nguon.indexOf("pg_advisory_xact_lock");
+  const viTriKiem = nguon.indexOf("eq(p.status, \"FINAL\"), lte(p.periodStart");
+  assert.ok(viTriKhoa > 0, "8b. lượt chốt phải cầm một khoá TÊN (pg_advisory_xact_lock) — khoá dòng không dùng được cho dòng chưa tồn tại");
+  assert.ok(viTriKiem > 0, "8b. phép kiểm chồng lấn phải còn trong tệp");
+  assert.ok(viTriKiem > viTriKhoa, "8b. và nó phải chạy SAU khi đã cầm khoá, không phải trước giao dịch");
+  assert.ok(
+    nguon.indexOf("setWhere: eq(c.status, \"DRAFT\")") > 0,
+    "8b. ghi sổ lỗ phải có lá chắn setWhere để dòng đã chốt không bị lượt thứ hai đè",
+  );
+
   await reset(db);
   console.log(
-    "✓ Lỗ lũy kế qua bảng lương thật: chưa bật thì KHÔNG đổi một con số nào · tháng mở sổ có số dư 0 theo KHAI BÁO · số âm được giữ và hoa hồng có dấu vẫn hiện · tháng trước chưa chốt ⇒ CHƯA BIẾT chứ không phải 0 và chặn chốt · tháng trước đã chốt thì lỗ cộng dồn đúng và LN thực không bị trừ hai lần · kỳ 7 ngày và tháng trước mốc mở sổ ⇒ KHÔNG ÁP DỤNG · bộ điều kiện chốt dùng chung chặn đúng bốn cửa và KHÔNG chặn cảnh báo chỉ mang tính lời khai",
+    "✓ Lỗ lũy kế qua bảng lương thật: chưa bật thì KHÔNG đổi một con số nào · tháng mở sổ có số dư 0 theo KHAI BÁO · số âm được giữ và hoa hồng có dấu vẫn hiện · tháng trước chưa chốt ⇒ CHƯA BIẾT chứ không phải 0 và chặn chốt · tháng trước đã chốt thì lỗ cộng dồn đúng và LN thực không bị trừ hai lần · kỳ 7 ngày và tháng trước mốc mở sổ ⇒ KHÔNG ÁP DỤNG · bộ điều kiện chốt dùng chung chặn đúng bốn cửa và KHÔNG chặn cảnh báo chỉ mang tính lời khai · dòng sổ đã chốt không bị lượt ghi thứ hai đè, và phép kiểm chồng lấn nằm SAU khoá tên trong cùng giao dịch",
   );
 }

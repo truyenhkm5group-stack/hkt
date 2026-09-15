@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -16,8 +16,12 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport } from "@/lib/queries/payroll";
+import { rateToBp } from "@/lib/constants/payroll-carryover";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
-import { buildPayrollSnapshot, finalizedPeriodsOverlapping } from "@/lib/queries/payroll-period";
+// `finalizedPeriodsOverlapping` không còn dùng ở đây: phép kiểm chồng lấn nay chạy BÊN TRONG giao
+// dịch đã cầm khoá (xem dưới), vì kiểm ngoài rồi ghi trong là đúng cái khe mà hai yêu cầu đồng
+// thời lọt qua. Hàm cũ vẫn phục vụ `lib/queries/payroll-period.ts` cho phần chỉ ĐỌC.
+import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
 import type { Period } from "@/lib/search-params";
 
 export type PeriodActionResult = { ok: true; key: string } | { error: string };
@@ -75,22 +79,6 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
   const [existing] = await db.select({ status: p.status }).from(p).where(and(eq(p.periodKey, key), eq(p.basis, basis))).limit(1);
   if (existing?.status === "FINAL") return { error: "Kỳ này đã chốt rồi. Kỳ đã chốt là bất biến — chứng từ về sau xử lý bằng đề xuất điều chỉnh." };
 
-  /*
-    HAI KỲ ĐÃ CHỐT KHÔNG ĐƯỢC CHỒNG LẤN NGÀY.
-
-    Chốt "Tháng này" ngày 14 ra khoá `2026-09-01..2026-09-14`; chốt lại ngày 30 ra
-    `2026-09-01..2026-09-30`. Hai khoá khác nhau nên khoá tự nhiên không chặn — nhưng mười bốn ngày
-    đầu tháng nằm trong CẢ HAI, và cộng hai bản chốt lại là trả lương hai lần cho những ngày ấy.
-    Khoá tự nhiên chặn TRÙNG KHOÁ; mệnh đề này chặn TRÙNG NGÀY, và đó là hai chuyện khác nhau.
-  */
-  const chongLan = await finalizedPeriodsOverlapping(fromAt, toAt);
-  const trung = chongLan.find((k) => k.basis === basis);
-  if (trung) {
-    return {
-      error: `Kỳ ${from} → ${to} chồng lấn ngày với kỳ ĐÃ CHỐT ${trung.periodKey} (cùng cơ sở ${PAYROLL_BASIS_SHORT[basis]}). Chốt tiếp là trả lương hai lần cho những ngày nằm trong cả hai kỳ.`,
-    };
-  }
-
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
   /*
@@ -120,30 +108,129 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
   }
-  const snapshot = buildPayrollSnapshot(report, period, key);
 
-  await db
-    .insert(p)
-    .values({
-      periodKey: key,
-      periodStart: fromAt,
-      periodEnd: toAt,
-      basis,
-      status: "FINAL",
-      snapshot,
-      calcVersion: PAYROLL_CALC_VERSION,
-      note,
-      finalizedAt: new Date(),
-      finalizedBy: user.id,
-      createdBy: user.id,
-    })
-    .onConflictDoUpdate({
-      target: [p.periodKey, p.basis],
-      // Chỉ nâng một dòng NHÁP lên FINAL. Dòng đã FINAL không bao giờ tới đây (đã chặn ở trên), và
-      // mệnh đề `where` là lớp chặn thứ hai ngay tại CSDL — phòng hai lượt bấm cùng lúc.
-      set: { status: "FINAL", snapshot, calcVersion: PAYROLL_CALC_VERSION, note, finalizedAt: new Date(), finalizedBy: user.id, updatedAt: new Date() },
-      setWhere: eq(p.status, "DRAFT"),
+  const snapshot = buildPayrollSnapshot(report, period, key);
+  const luc = new Date();
+  /** Các dòng sổ lỗ sẽ ghi cùng lượt chốt — rỗng khi sổ không áp dụng cho kỳ này. */
+  const soLo = report.lines
+    .filter((l) => l.carry && l.carry.openingEstablished && l.carry.closingBalance !== null)
+    .map((l) => {
+      const c = l.carry!;
+      return {
+        employeeId: l.employee.id,
+        monthKey: c.monthKey,
+        openingBalance: c.openingBalance ?? 0,
+        openingSource: c.openingBasis === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH",
+        realProfit: c.realProfit ?? 0,
+        lossApplied: c.lossApplied ?? 0,
+        commissionBase: c.commissionBase ?? 0,
+        commissionRateBp: rateToBp(l.employee.percentPersonal),
+        signedCommission: c.signedCommission ?? 0,
+        payableCommission: l.bonusPersonal ?? 0,
+        closingBalance: c.closingBalance ?? 0,
+        status: "FINAL" as const,
+        snapshot: {
+          nhanSu: { id: l.employee.id, ten: l.employee.name, tenNgan: l.employee.shortName },
+          tyLeCaNhanLucChot: l.employee.percentPersonal,
+          canCuSoDu: c.openingBasis,
+          lyDoSoDu: c.openingReason,
+          kyLuong: key,
+          coSo: basis,
+        },
+        calcVersion: PAYROLL_CALC_VERSION,
+        note,
+        finalizedAt: luc,
+        finalizedBy: user.id,
+        createdBy: user.id,
+      };
     });
+
+  /*
+    ═══ MỘT GIAO DỊCH, MỘT KHOÁ TÊN — KHÔNG PHẢI HAI THAO TÁC RỜI ═══
+
+    Kiểm chồng lấn rồi INSERT là HAI lượt đi CSDL. Hai yêu cầu chốt gửi cùng lúc thì cả hai cùng
+    đọc "chưa có kỳ nào chồng lấn", rồi cả hai cùng ghi — ra hai kỳ FINAL phủ lên nhau, và cộng
+    chúng lại là trả lương hai lần cho những ngày nằm trong cả hai. Khoá tự nhiên (period_key,
+    basis) KHÔNG chặn được: hai khoá khác nhau.
+
+    Khoá một DÒNG cũng không cứu được, vì dòng cần khoá là dòng CHƯA TỒN TẠI. Nên dùng khoá TÊN
+    (`pg_advisory_xact_lock`): nó khoá một cái tên chứ không khoá một dòng, tự nhả khi giao dịch
+    kết thúc, và không cần thêm extension nào (`btree_gist` cho ràng buộc loại trừ khoảng thời gian
+    không chắc có trên mọi môi trường).
+
+    Mọi lượt chốt đi qua CÙNG một tên nên chúng xếp hàng. Chốt lương là việc mỗi tháng một lần —
+    xếp hàng ở đây không tốn gì.
+  */
+  const ketQua = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-period-finalize'))`);
+
+    /*
+      HAI KỲ ĐÃ CHỐT KHÔNG ĐƯỢC CHỒNG LẤN NGÀY.
+
+      Chốt "Tháng này" ngày 14 ra khoá `2026-09-01..2026-09-14`; chốt lại ngày 30 ra
+      `2026-09-01..2026-09-30`. Hai khoá khác nhau nên khoá tự nhiên không chặn — nhưng mười bốn
+      ngày đầu tháng nằm trong CẢ HAI. Kiểm TRONG giao dịch, sau khi đã cầm khoá.
+    */
+    const chongLan = await tx
+      .select({ periodKey: p.periodKey, basis: p.basis })
+      .from(p)
+      .where(and(eq(p.status, "FINAL"), lte(p.periodStart, toAt), gte(p.periodEnd, fromAt)));
+    const trung = chongLan.find((k) => k.basis === basis);
+    if (trung) {
+      return {
+        error: `Kỳ ${from} → ${to} chồng lấn ngày với kỳ ĐÃ CHỐT ${trung.periodKey} (cùng cơ sở ${PAYROLL_BASIS_SHORT[basis]}). Chốt tiếp là trả lương hai lần cho những ngày nằm trong cả hai kỳ.`,
+      } as const;
+    }
+
+    await tx
+      .insert(p)
+      .values({
+        periodKey: key,
+        periodStart: fromAt,
+        periodEnd: toAt,
+        basis,
+        status: "FINAL",
+        snapshot,
+        calcVersion: PAYROLL_CALC_VERSION,
+        note,
+        finalizedAt: luc,
+        finalizedBy: user.id,
+        createdBy: user.id,
+      })
+      .onConflictDoUpdate({
+        target: [p.periodKey, p.basis],
+        // Chỉ nâng một dòng NHÁP lên FINAL. Mệnh đề `where` là lớp chặn thứ hai ngay tại CSDL.
+        set: { status: "FINAL", snapshot, calcVersion: PAYROLL_CALC_VERSION, note, finalizedAt: luc, finalizedBy: user.id, updatedAt: luc },
+        setWhere: eq(p.status, "DRAFT"),
+      });
+
+    /*
+      SỐ DƯ MỚI GHI CÙNG LƯỢT CHỐT, TRONG CÙNG GIAO DỊCH.
+
+      Không có phần này thì không tháng nào bao giờ thành FINAL trong sổ lỗ, nên chuỗi số dư không
+      bao giờ tiến: tháng sau mãi mãi đọc "tháng trước mới là nháp" và mãi mãi không chốt được.
+
+      `setWhere` chặn đúng chuyện hai yêu cầu cùng dùng một số dư cũ để ghi hai kết quả: dòng đã
+      FINAL không bị lượt thứ hai ghi đè.
+    */
+    if (soLo.length) {
+      const c = schema.marketerProfitCarryover;
+      for (const dong of soLo) {
+        await tx
+          .insert(c)
+          .values(dong)
+          .onConflictDoUpdate({
+            target: [c.employeeId, c.monthKey],
+            set: { ...dong, updatedAt: luc },
+            setWhere: eq(c.status, "DRAFT"),
+          });
+      }
+    }
+    return { ok: true } as const;
+  });
+  // Suy kiểu của drizzle làm nhánh lỗi mang `string | undefined`; kiểm cả hai để không lọt một
+  // chuỗi rỗng thành "chốt thành công".
+  if ("error" in ketQua && ketQua.error) return { error: ketQua.error };
 
   await audit({
     userId: user.id,
@@ -151,7 +238,7 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
     action: "PAYROLL_PERIOD_FINALIZE",
     entity: "PAYROLL_PERIOD",
     entityId: `${key}:${basis}`,
-    detail: { key, basis, calcVersion: PAYROLL_CALC_VERSION, totalSalary: report.totalSalary, totalProfit: report.totalProfit, people: report.lines.length, note },
+    detail: { key, basis, calcVersion: PAYROLL_CALC_VERSION, totalSalary: report.totalSalary, totalProfit: report.totalProfit, people: report.lines.length, soLoGhi: soLo.length, note },
   });
   revalidatePath("/payroll");
   return { ok: true, key };
