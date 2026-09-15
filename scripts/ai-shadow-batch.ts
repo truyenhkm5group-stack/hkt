@@ -58,6 +58,19 @@ async function main() {
   const agent = await getAgent("sales", settings, db);
   console.log(`   nấc quyền hạn: ${agent?.mode ?? "—"}`);
 
+  /*
+    CỬA SỔ THỜI GIAN CỦA PHÉP ĐO — phải ôm ĐÚNG mẻ này, không ôm mẻ trước.
+
+    Bản trước dùng cố định "2 giờ gần đây". Hai mẻ chạy cách nhau 47 phút thì báo cáo trộn cả hai,
+    và lỗi đã sửa của mẻ cũ hiện lên như thể vẫn còn — tôi suýt kết luận bản sửa không ăn thua.
+    Một phép đo trộn hai lần chạy thì tệ hơn không đo.
+  */
+  const batDau = new Date();
+  const phut = Number(arg("since-minutes"));
+  const tuKhi = Number.isFinite(phut) && phut > 0 ? new Date(Date.now() - phut * 60_000) : batDau;
+
+  const chiDoc = process.argv.includes("--report-only");
+
   // ───── ② CHỌN HỘI THOẠI: PHẢI CÓ TIN KHÁCH THẬT ─────
   const ds = rowsOf<{ id: string; mid: string; text: string }>(
     await db.execute(sql`
@@ -74,6 +87,7 @@ async function main() {
     `),
   );
   console.log(`\n② MẺ: ${ds.length} hội thoại có tin khách thật (trần ${max})`);
+  console.log(`   cửa sổ đo: từ ${tuKhi.toISOString()}${chiDoc ? "  (dùng --since-minutes=N để nới)" : ""}`);
   if (!ds.length) { console.log("   Không có gì để chạy."); process.exit(0); }
   if (dryRun) { console.log("\n--dry-run: KHÔNG xếp việc, KHÔNG gọi mô hình."); process.exit(0); }
 
@@ -107,7 +121,6 @@ async function main() {
     console.log(`\n⓪ ĐÃ GỠ CỜ "người đã tiếp quản" trên ${rowsOf<unknown>(go).length} hội thoại (chỉ những cờ do MÁY đặt — dòng có takeover_by_user_id là người thật, giữ nguyên)`);
   }
 
-  const chiDoc = process.argv.includes("--report-only");
   if (!agent) { console.error("Chưa có bản nhân sự bán hàng"); process.exit(1); }
   if (chiDoc) {
     console.log("\n③ --report-only: KHÔNG xếp việc, KHÔNG gọi mô hình — chỉ đọc lại kết quả đã có.");
@@ -155,7 +168,7 @@ async function main() {
              coalesce(sum(mc.cost_vnd), 0)::bigint            as tien
       from ai_model_calls mc
       join ai_runs r on r.id = mc.run_id
-      where r.subject_id in (${dsSql}) and mc.created_at >= now() - interval '2 hours'
+      where r.subject_id in (${dsSql}) and mc.created_at >= ${tuKhi}
       group by 1,2,3 order by 4 desc
     `),
   );
@@ -171,7 +184,7 @@ async function main() {
   const runs = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
       select coalesce(nullif(r.status,''),'?') as status, coalesce(nullif(r.tier,''),'RULE') as tier, count(*)::int as n
-      from ai_runs r where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
+      from ai_runs r where r.subject_id in (${dsSql}) and r.created_at >= ${tuKhi}
       group by 1,2 order by 3 desc
     `),
   );
@@ -227,7 +240,7 @@ async function main() {
              coalesce(r.decision->>'missing','')                   as thieu,
              count(*)::int                                          as n
       from ai_runs r
-      where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
+      where r.subject_id in (${dsSql}) and r.created_at >= ${tuKhi}
       group by 1,2,3,4 order by 5 desc limit 10
     `),
   );
@@ -247,7 +260,7 @@ async function main() {
     await db.execute(sql`
       select coalesce(nullif(r.escalation_reason,''),'(không leo)') as ly_do, count(*)::int as n
       from ai_runs r
-      where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
+      where r.subject_id in (${dsSql}) and r.created_at >= ${tuKhi}
       group by 1 order by 2 desc
     `),
   );
@@ -258,7 +271,7 @@ async function main() {
     await db.execute(sql`
       select mc.tier, coalesce(mc.ok::text,'?') as ok, coalesce(left(mc.error, 120),'') as loi, count(*)::int as n
       from ai_model_calls mc join ai_runs r on r.id = mc.run_id
-      where r.subject_id in (${dsSql}) and mc.created_at >= now() - interval '2 hours'
+      where r.subject_id in (${dsSql}) and mc.created_at >= ${tuKhi}
       group by 1,2,3 order by 4 desc limit 8
     `),
   );
