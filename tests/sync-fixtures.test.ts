@@ -174,6 +174,7 @@ import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
+import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
@@ -1598,6 +1599,7 @@ async function main() {
   testLogisticsFreshness();
   testShipmentStatusAgePure();
   testOrderDuplicatePure();
+  testPreshipValidationPure();
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
@@ -1702,6 +1704,8 @@ async function main() {
   // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `dup-` cố ý giống hệt nhau từng cặp. Đặt trước
   // bài khác thì chúng lọt vào tổng doanh số và tổng đơn của mọi báo cáo.
   await testOrderDuplicateDb(db);
+  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `pval-` cố ý thiếu dữ liệu từng kiểu một.
+  await testPreshipValidationDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);

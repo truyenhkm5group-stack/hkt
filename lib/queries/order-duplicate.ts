@@ -4,6 +4,7 @@ import type { OrderStage } from "@/db/schema";
 import { memo } from "@/lib/cache";
 import { rowsOf } from "@/lib/sql-rows";
 import { getSettingJson } from "@/lib/settings";
+import { DEAD_ORDER_STAGES, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import { toDate } from "@/lib/format";
 import {
   assessDuplicate,
@@ -43,13 +44,9 @@ import {
  * đơn y hệt đang chuẩn bị gói.
  */
 
-/** Chặng mà đơn còn đang chờ xử lý — hàng còn trong tay shop, còn chặn kịp. */
-const PRESHIP_STAGES: OrderStage[] = ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"];
-/** Đơn đã huỷ / đã xoá không tham gia: một đơn bị huỷ rồi lên lại KHÔNG phải đơn trùng. */
-const DEAD_STAGES: OrderStage[] = ["CANCELLED", "DELETED"];
 
 /** Trần an toàn cho một lượt quét. Vượt trần thì nói ra, không lặng lẽ cắt. */
-const MAX_ORDERS = 4_000;
+const MAX_DUPLICATE_SCAN = 4_000;
 
 export type DuplicateOrderRow = {
   /** Đơn ĐẶT SAU — đơn cần người xem. */
@@ -129,8 +126,8 @@ export async function getDuplicateOrderQueue(): Promise<DuplicateOrderQueue> {
 
     const db = await getDb();
     const lookback = new Date(now.getTime() - rule.windowHours * 3_600_000);
-    const preship = PRESHIP_STAGES.map((s) => `'${s}'`).join(",");
-    const dead = DEAD_STAGES.map((s) => `'${s}'`).join(",");
+    const preship = PRE_SHIP_STAGES.map((s) => `'${s}'`).join(",");
+    const dead = DEAD_ORDER_STAGES.map((s) => `'${s}'`).join(",");
 
     /*
       MỘT CÂU LẤY ĐÚNG NHỮNG ĐƠN CÓ THỂ THÀNH CẶP.
@@ -180,12 +177,12 @@ export async function getDuplicateOrderQueue(): Promise<DuplicateOrderQueue> {
                nen.total, nen.stage, nen.inserted_at, nen.page_id, nen.conversation_id, nen.left_warehouse
           from nen join nhom on nhom.khoa = nen.khoa
          order by nen.inserted_at asc
-         limit ${MAX_ORDERS + 1}
+         limit ${MAX_DUPLICATE_SCAN + 1}
       `),
     );
 
-    const capped = orders.length > MAX_ORDERS;
-    const list = capped ? orders.slice(0, MAX_ORDERS) : orders;
+    const capped = orders.length > MAX_DUPLICATE_SCAN;
+    const list = capped ? orders.slice(0, MAX_DUPLICATE_SCAN) : orders;
     if (!list.length) {
       return { rows: [], rule, suspected: 0, possible: 0, atRisk: 0, scanned: 0, capped, measuredAt: now };
     }
@@ -245,7 +242,7 @@ export async function getDuplicateOrderQueue(): Promise<DuplicateOrderQueue> {
       for (let i = 1; i < sorted.length; i += 1) {
         const suspect = sorted[i];
         // Đơn nghi phải còn chặn kịp; đơn giữ thì không cần.
-        if (!PRESHIP_STAGES.includes(suspect.stage) || suspect.left_warehouse) continue;
+        if (!PRE_SHIP_STAGES.includes(suspect.stage) || suspect.left_warehouse) continue;
 
         let best: { keeper: Full; assessment: ReturnType<typeof assessDuplicate> } | null = null;
         for (let j = 0; j < i; j += 1) {
