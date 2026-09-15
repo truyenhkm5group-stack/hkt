@@ -79,6 +79,7 @@ on:
           - ai-staging-fanpage   # khai hồ sơ bán hàng cho một page (arg: "--page=<id> --product=Q004 --apply")
           - ai-staging-configure # khai mã WIN + nguồn TEST rồi chạy thử ngầm ngay (arg: "--page=<id> --win=Q004 --test-source=<ad> --apply")
           - ai-staging-ai-env     # ghi OPENAI_API_KEY / AI_PROVIDER từ Secrets vào .env.staging rồi thử kết nối (KHÔNG in giá trị)
+          - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
@@ -793,6 +794,13 @@ jobs:
                 fetch_staging_script ai-staging-ping.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-ping.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-ping.ts ;;
+
+              ai-staging-shadow)
+                cd /opt/vnx-ai-staging
+                # TRẦN CỨNG 50 nằm TRONG script, không ở đây — ô `arg` chỉ hẹp lại được thêm.
+                fetch_staging_script ai-shadow-batch.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-shadow-batch.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-shadow-batch.ts ${ARG:---max=20} ;;
 
               ai-staging-knowledge)
                 cd /opt/vnx-ai-staging
