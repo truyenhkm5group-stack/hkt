@@ -28,7 +28,9 @@ export default async function CopilotPage() {
   const agent = await getAgent("sales", settings);
   const mode = agent?.mode ?? "OFF";
   const sanSang = modeAtLeast(mode, "COPILOT") && settings.hardLimits.allowHumanApprovedSend && pages.length > 0;
-  const [queue, kpi] = await Promise.all([copilotQueue({ limit: 40 }), copilotKpi(7)]);
+  // Hội thoại người khác đang cầm KHÔNG hiện ở đây — trừ hội thoại của chính người đang xem,
+  // để họ còn nút trả lại cho máy.
+  const [queue, kpi] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7)]);
 
   return (
     <div className="space-y-4">

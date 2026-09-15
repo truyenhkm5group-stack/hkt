@@ -220,6 +220,25 @@ export async function testSalesAgent(db: Db) {
     assert.equal(isAffirmativeText(text), true, `"${text}" phải được nhận là đồng ý`);
   }
 
+  /*
+    3f-bis. "ĐƯỢC" TRẢ LỜI MỘT CÂU HỎI KHÁC KHÔNG PHẢI LÀ CHỐT ĐƠN.
+
+    Ca chủ shop nêu đích danh:
+      MÁY   : "chị muốn xem thêm màu không?"
+      KHÁCH : "được"
+    Chữ ấy là đồng ý XEM THÊM MÀU, không phải đồng ý MUA. Cái chặn không nằm ở việc đọc chữ — đọc
+    chữ thì "được" vẫn là đồng ý — mà nằm ở chỗ CHƯA CÓ BẢN CHỐT NÀO được gửi. Không có bản chốt
+    thì không có thứ gì để đồng ý, nên không có xác nhận.
+  */
+  assert.equal(isAffirmativeText("được"), true, "đọc chữ thì \"được\" vẫn là một tiếng đồng ý");
+  const xemThemMau = checkContextualConfirmation({ state: ready, message: { text: "được", sentAt: now }, now });
+  assert.equal(xemThemMau.confirmed, false, '"được" khi CHƯA gửi bản chốt không bao giờ là xác nhận đơn');
+  assert.match(xemThemMau.reason, /Chưa gửi bản chốt/);
+
+  // Còn khi ĐÃ gửi bản chốt thì chính chữ ấy LÀ xác nhận — khác biệt nằm ở bối cảnh, không ở chữ.
+  const sauBanChot = checkContextualConfirmation({ state: pendingState, message: { text: "được", sentAt: now }, now });
+  assert.equal(sauBanChot.confirmed, true, "đúng bối cảnh thì chính chữ ấy là xác nhận");
+
   // 3g. Khách đồng ý nhưng đơn THIẾU điều kiện máy chủ ⇒ vẫn không được lên đơn.
   const noAddress = { ...pendingState, address: "", province: "" };
   const noAddressPending = { ...noAddress, pending: { ...pendingState.pending!, fingerprint: confirmationFingerprint(noAddress) } };

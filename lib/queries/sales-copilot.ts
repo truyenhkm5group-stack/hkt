@@ -101,7 +101,9 @@ function parseObj(raw: unknown): Record<string, unknown> {
  * Một hội thoại nhiều lượt gợi ý thì chỉ lượt cuối còn nghĩa — các lượt trước đã bị chính hội thoại
  * bỏ lại phía sau. Hiện cả chuỗi thì hàng đợi dài gấp mấy lần mà không thêm một việc nào.
  */
-export async function copilotQueue(options: { pageIds?: string[]; limit?: number; includeHandled?: boolean; db?: Db } = {}): Promise<CopilotQueueRow[]> {
+export async function copilotQueue(
+  options: { pageIds?: string[]; limit?: number; includeHandled?: boolean; heldByUserId?: string | null; db?: Db } = {},
+): Promise<CopilotQueueRow[]> {
   const db = options.db ?? (await getDb());
   /*
     `pageIds` TRUYỀN VÀO LÀ MỘT LỜI KHẲNG ĐỊNH, KỂ CẢ KHI NÓ RỖNG.
@@ -121,6 +123,11 @@ export async function copilotQueue(options: { pageIds?: string[]; limit?: number
                s.id, s.conversation_id, s.run_id, s.suggested_reply, s.action, s.confidence, s.created_at
         from sales_suggestions s
         where s.conversation_id in (select id from sales_conversations where page_id in (${sql.join(pages.map((p) => sql`${p}`), sql`, `)}))
+          -- KHÔNG có câu thì không có việc: một thẻ với ô soạn rỗng chỉ làm dài hàng đợi.
+          and btrim(s.suggested_reply) <> ''
+          -- Dòng evaluation_only sinh ra CHỈ để chấm điểm khi người đã cầm hội thoại. Đưa nó vào
+          -- hàng đợi là mời nhân viên gửi một câu mà chính hệ thống đã quyết định không gửi.
+          and s.evaluation_only = false
         order by s.conversation_id, s.created_at desc
       )
       select c.id                                            as conversation_id,
@@ -158,6 +165,14 @@ export async function copilotQueue(options: { pageIds?: string[]; limit?: number
         where suggestion_id = m.id and action in ('SEND','EDIT_SEND','REJECT') and send_status <> 'FAILED'
         order by created_at desc limit 1
       ) a on true
+      /*
+        NGƯỜI ĐÃ CẦM HỘI THOẠI THÌ NÓ RỜI HÀNG ĐỢI — trừ hội thoại của CHÍNH người đang xem.
+
+        Đây là yêu cầu "không spam nhân viên bằng gợi ý mới sau mỗi tin khi đang tiếp quản". Nhưng
+        giấu hẳn thì người đang cầm mất luôn nút TRẢ LẠI cho máy, và hội thoại kẹt ở trạng thái ấy
+        vĩnh viễn. Nên: ẩn với mọi người khác, hiện với chính chủ.
+      */
+      where (c.human_takeover_at is null or c.takeover_by_user_id = ${options.heldByUserId ?? null})
       order by c.updated_at desc
       limit ${limit}
     `),

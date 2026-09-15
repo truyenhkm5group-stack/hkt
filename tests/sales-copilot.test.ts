@@ -228,6 +228,48 @@ export async function testSalesCopilot(db: Db) {
   // Page ngoài danh sách KHÔNG lọt vào hàng đợi.
   assert.deepEqual(await copilotQueue({ pageIds: [], db }), [], "không page nào ⇒ hàng đợi rỗng, không phải 'lấy hết'");
 
+  // ═════════ 6B. NGƯỜI ĐANG CẦM VIỆC THÌ HỘI THOẠI RỜI HÀNG ĐỢI CỦA NGƯỜI KHÁC ═════════
+  //
+  // "Không spam nhân viên bằng gợi ý mới sau mỗi tin khi đang tiếp quản" — nhưng giấu hẳn thì
+  // chính người đang cầm cũng mất nút TRẢ LẠI, và hội thoại kẹt ở trạng thái ấy vĩnh viễn.
+  const nguoiKhac = "u-copilot-khac";
+  await db
+    .insert(schema.users)
+    .values({ id: nguoiKhac, email: "sale2-copilot@test.local", name: "Chị Thu", passwordHash: "x", role: "CS", active: true })
+    .onConflictDoNothing();
+  await db
+    .update(schema.salesConversations)
+    .set({ humanTakeoverAt: new Date(), takeoverByUserId: nguoi })
+    .where(eq(schema.salesConversations.id, convCu));
+
+  const cuaNguoiKhac = await copilotQueue({ pageIds: ["page-thi-diem"], heldByUserId: nguoiKhac, db });
+  assert.ok(!cuaNguoiKhac.some((r) => r.conversationId === convCu), "người KHÁC không thấy hội thoại đang có người cầm");
+  const cuaChuViec = await copilotQueue({ pageIds: ["page-thi-diem"], heldByUserId: nguoi, db });
+  assert.ok(cuaChuViec.some((r) => r.conversationId === convCu), "chính người đang cầm vẫn thấy, để còn trả lại được");
+  await db.update(schema.salesConversations).set({ humanTakeoverAt: null, takeoverByUserId: null }).where(eq(schema.salesConversations.id, convCu));
+
+  // Câu sinh ra CHỈ để chấm điểm không bao giờ vào hàng đợi — mời nhân viên gửi một câu mà chính
+  // hệ thống đã quyết định không gửi là mâu thuẫn với lý do câu ấy tồn tại.
+  const convCham = "conv-copilot-cham";
+  await db
+    .insert(schema.salesConversations)
+    .values({ id: convCham, pageId: "page-thi-diem", externalId: "ext-cham", pancakeCustomerId: "pc-3", customerName: "Chị Tú", stage: "HUMAN_TAKEOVER", sourceType: "WIN" })
+    .onConflictDoNothing();
+  await db
+    .insert(schema.salesSuggestions)
+    .values({ id: "s-cham", conversationId: convCham, suggestedReply: "câu chỉ để chấm", action: "ANSWER_QUESTION", evaluationOnly: true })
+    .onConflictDoNothing();
+  assert.ok(!(await copilotQueue({ pageIds: ["page-thi-diem"], db })).some((r) => r.conversationId === convCham), "câu chỉ-để-chấm không vào hàng đợi");
+
+  // Và câu RỖNG cũng không: một thẻ với ô soạn trống chỉ làm dài hàng đợi.
+  const convRong = "conv-copilot-rong";
+  await db
+    .insert(schema.salesConversations)
+    .values({ id: convRong, pageId: "page-thi-diem", externalId: "ext-rong", pancakeCustomerId: "pc-4", customerName: "Chị Vy", stage: "NEW_LEAD", sourceType: "WIN" })
+    .onConflictDoNothing();
+  await db.insert(schema.salesSuggestions).values({ id: "s-rong", conversationId: convRong, suggestedReply: "   ", action: "NO_ACTION" }).onConflictDoNothing();
+  assert.ok(!(await copilotQueue({ pageIds: ["page-thi-diem"], db })).some((r) => r.conversationId === convRong), "câu rỗng không vào hàng đợi");
+
   // ═════════ 7. CHỈ SỐ: MẪU SỐ RỖNG LÀ CHƯA BIẾT, KHÔNG PHẢI 0% ═════════
   const kpi = await copilotKpi(7, db);
   assert.ok(kpi.actuallySent >= 2, "đếm được số tin THẬT SỰ đã ghi là đã gửi");
