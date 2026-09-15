@@ -8,11 +8,14 @@ của ERP, không dựng tích hợp thứ hai).
 
 ## 1. Ba mẻ đo, và vì sao có ba
 
-| | mẻ | ảnh | đo được |
+| | mẻ | mã nguồn trong ảnh | đo được |
 |---|---|---|---|
-| ① | run 34971478023 | 0ae05eb | nền: leo nấc 0%, nhưng **0/18** câu trả lời nêu được một con số tiền |
-| ② | run 34974208223 | 4744dcb | sau ba bản sửa: **11/11** lượt hỏi giá nghe được một con số — nhưng con số ĐẶT SAI VAI |
-| ③ | run 34976255255 | 8a96ea4 | sau bản sửa cách đọc tiền: **12/12**, ba con số cộng được với nhau |
+| ① | run 34971478023 | `0ae05eb` | nền: leo nấc 0%, nhưng **0/18** câu trả lời nêu được một con số tiền |
+| ② | run 34974208223 | `364f2e5` | sau ba bản sửa: **11/11** lượt hỏi giá nghe được một con số — nhưng con số ĐẶT SAI VAI |
+| ③ | run 34976255255 | `61855ba` | sau bản sửa cách đọc tiền: **12/12**, ba con số cộng được với nhau |
+
+(Ảnh mang mã nguồn `lib/`; riêng `scripts/ai-shadow-batch.ts` được nạp thẳng từ nhánh lúc chạy nên
+mẻ ② dùng bản báo cáo của `79b876c` — đó là lý do mẻ ② đã in được mẫu số "lượt KHÁCH HỎI GIÁ".)
 
 Mẻ ② không phải một lần chạy thừa: chính nó lộ ra lỗi báo giá sai 25.000đ mà mẻ ① không thể thấy
 (mẻ ① chưa báo giá bao giờ). Mỗi mẻ 18 hội thoại · ~15 lượt gọi mô hình — chi phí không đáng kể, và
