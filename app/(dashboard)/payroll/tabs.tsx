@@ -15,6 +15,8 @@ export function PayrollTabs({ canManage }: { canManage: boolean }) {
   const pathname = usePathname();
   const tabs = [
     { href: "/payroll", label: "Bảng lương" },
+    { href: "/payroll/payslip", label: "Phiếu lương" },
+    { href: "/payroll/runs", label: "Lịch sử kỳ" },
     ...(canManage
       ? [
           { href: "/payroll/policies", label: "Chính sách lương" },

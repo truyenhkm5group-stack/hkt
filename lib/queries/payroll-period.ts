@@ -342,3 +342,45 @@ export async function finalizedPeriodsOverlapping(from: Date, to: Date) {
     .from(p)
     .where(and(inArray(p.status, ["FINAL", "LOCKED", "PAID"]), lte(p.periodStart, to), gte(p.periodEnd, from)));
 }
+
+/**
+ * MỌI KỲ CÓ BẢN GHI — kể cả bản nháp và kỳ đang soát.
+ *
+ * Khác `listPayrollPeriods` (chỉ kỳ đã đóng băng, dùng cho phần "lịch sử đã trả"): một kỳ đang chờ
+ * duyệt mà không hiện ở đâu là một kỳ không ai nhớ ra để đi duyệt.
+ *
+ * Tổng lương và số người đọc THẲNG từ ảnh chụp, không tính lại: đây là danh sách lịch sử, và tính
+ * lại ở đây là để con số của một kỳ đã trả tiền đổi theo dữ liệu hôm nay.
+ */
+export async function listPayrollRuns(limit = 60) {
+  const db = await getDb();
+  const p = schema.payrollPeriods;
+  const nguoiDuyet = alias(schema.users, "run_approver");
+  const rows = await db
+    .select({
+      periodKey: p.periodKey,
+      basis: p.basis,
+      status: p.status,
+      snapshot: p.snapshot,
+      note: p.note,
+      statusReason: p.statusReason,
+      calcRuns: p.calcRuns,
+      approvedAt: p.approvedAt,
+      approvedByEmail: nguoiDuyet.email,
+      lockedAt: p.lockedAt,
+      paidAt: p.paidAt,
+      periodStart: p.periodStart,
+    })
+    .from(p)
+    .leftJoin(nguoiDuyet, eq(nguoiDuyet.id, p.approvedBy))
+    .orderBy(desc(p.periodStart))
+    .limit(limit);
+  return rows.map((r) => {
+    const snap = r.snapshot as PayrollSnapshot | null;
+    return {
+      ...r,
+      totalSalary: snap?.totalSalary ?? null,
+      people: snap?.lines.length ?? null,
+    };
+  });
+}

@@ -198,6 +198,8 @@ export function testNavigationCoverage() {
     "/payroll/assignments": "tab 'Phân công & gán chính sách' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/adjustments": "tab 'Đầu vào & điều chỉnh' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/migration": "tab 'Xem trước chuyển đổi' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/runs": "tab 'Lịch sử kỳ' của /payroll",
+    "/payroll/payslip": "tab 'Phiếu lương' của /payroll — người chỉ có quyền xem của mình vào đây để xem phiếu của chính họ",
   };
 
   const pages = walkPages("app/(dashboard)");
