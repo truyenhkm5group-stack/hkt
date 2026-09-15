@@ -157,7 +157,16 @@ async function applyUnderstanding(
     }
   }
 
-  // 2.3 GIÁ — luôn do máy chủ tính, kể cả khi khách hay mô hình đã nói một con số.
+  /*
+    2.3 GIÁ — luôn do máy chủ tính, kể cả khi khách hay mô hình đã nói một con số.
+
+    HAI BẬC, VÀ BẬC THỨ HAI MỚI LÀ BẬC KHÁCH HỎI TRƯỚC. Đã chọn mẫu mã thì giá là giá của mẫu mã
+    ấy. CHƯA chọn mà đã biết sản phẩm thì vẫn báo giá được — miễn là mọi mẫu mã của nó cùng một
+    đơn giá; lệch giá thì `ambiguous` và giá vẫn là CHƯA BIẾT, máy đi hỏi tiếp chứ không đoán.
+
+    Đo 15/09/2026: thiếu đúng bậc này nên 0/18 câu trả lời nêu được một con số, dù 10/18 lượt là
+    khách HỎI GIÁ. Máy bắt khách chọn size trước khi được biết giá — không người bán nào làm thế.
+  */
   if (next.variantId) {
     const pricing = await tool<{ total: number; shippingFee: number; unitPrice: number; label: string }>("pricing.get", { variantId: next.variantId, quantity: next.quantity });
     if (pricing === null) toolFailed = true;
@@ -172,6 +181,14 @@ async function applyUnderstanding(
       stockKnown = stock.stockKnown;
       available = stock.available;
     }
+  } else if (next.productId) {
+    const pricing = await tool<{ ambiguous: boolean; total: number | null; shippingFee: number; unitPrice: number | null }>("pricing.get", { productId: next.productId, quantity: next.quantity });
+    if (pricing === null) toolFailed = true;
+    else if (!pricing.ambiguous && pricing.total !== null) {
+      next.quotedTotal = pricing.total;
+      shippingFee = pricing.shippingFee;
+    }
+    // `ambiguous` ⇒ KHÔNG gán gì: giá vẫn là CHƯA BIẾT và câu chữ sẽ đi hỏi mẫu mã, đúng như trước.
   }
 
   // 2.3b GỢI Ý SIZE — chỉ hỏi máy khi khách thật sự nói tới size hoặc đưa số đo. Máy trả mã
@@ -424,7 +441,14 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       modelAttempts.push(...routed.attempts);
       if (routed.tier !== "HUMAN" && routed.value) {
         const allowed = [state.quotedTotal ?? 0, applied.shippingFee ?? 0, state.quotedTotal !== null && applied.shippingFee !== null ? state.quotedTotal - applied.shippingFee : 0].filter((n) => n > 0);
-        const guard = guardGeneratedText(routed.value.text, fallback, allowed);
+        // Lưới soi bằng ĐÚNG bối cảnh máy chủ đã biết. `sizeAdvice` là `null` khi lượt này không
+        // hỏi tới size — lúc đó "có bảng số đo hay không" là CHƯA HỎI, không phải "có", nên mặc
+        // định phải là KHÔNG CÓ: rơi về phía hẹp hơn thì cùng lắm là vứt một câu viết hay.
+        const guard = guardGeneratedText(routed.value.text, fallback, {
+          allowedAmounts: allowed,
+          stockKnown: applied.stockKnown,
+          sizeChartAvailable: applied.sizeAdvice ? applied.sizeAdvice.code !== "SIZE_DATA_MISSING" : false,
+        });
         suggested = guard.text;
         if (guard.rejected) {
           await recordAiError({ scope: "MODEL", agentKey: "sales", runId: run.id, subjectType: "CONVERSATION", subjectId: conversation.id, message: `Bỏ bản mô hình viết: ${guard.rejectReason}` }, db);

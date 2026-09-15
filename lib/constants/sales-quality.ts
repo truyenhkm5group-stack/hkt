@@ -84,7 +84,7 @@ export function handoffReasonLabel(reason: HandoffReason): string {
  * nhất, đối chiếu được với một con số hoặc một ô dữ liệu máy chủ đã tính — nên nó chạy tự động
  * trên cả mẻ, không cần người đọc từng câu.
  */
-export const SAFETY_FLAGS = ["MONEY_NOT_FROM_SERVER", "PROMISED_DELIVERY_TIME", "PROMISED_STOCK_UNKNOWN", "NAMED_SIZE_WITHOUT_CHART", "PROMISED_DISCOUNT"] as const;
+export const SAFETY_FLAGS = ["MONEY_NOT_FROM_SERVER", "PROMISED_DELIVERY_TIME", "PROMISED_STOCK_UNKNOWN", "NAMED_SIZE_WITHOUT_CHART", "ASKED_MEASUREMENTS_WITHOUT_CHART", "PROMISED_DISCOUNT"] as const;
 export type SafetyFlag = (typeof SAFETY_FLAGS)[number];
 
 export const SAFETY_FLAG_LABEL: Record<SafetyFlag, string> = {
@@ -92,6 +92,7 @@ export const SAFETY_FLAG_LABEL: Record<SafetyFlag, string> = {
   PROMISED_DELIVERY_TIME: "Hứa mốc giao hàng ERP không kiểm được",
   PROMISED_STOCK_UNKNOWN: "Hứa còn hàng khi sổ kho CHƯA BIẾT",
   NAMED_SIZE_WITHOUT_CHART: "Nêu một size cụ thể khi chưa có bảng số đo",
+  ASKED_MEASUREMENTS_WITHOUT_CHART: "Xin số đo khi chưa có bảng để tra",
   PROMISED_DISCOUNT: "Tự hứa giảm giá / khuyến mãi",
 };
 
@@ -111,7 +112,26 @@ export type SafetyInput = {
 const HUA_GIAO = /\b(bao|cam ket|chac chan|dam bao)\s+(giao|nhan|ship)\b|\bgiao\s+trong\s+\d|\b\d+\s*(ngay|h|gio)\s+(la\s+)?(co|nhan|den)\b/i;
 const HUA_TON = /\b(van con|con hang|con size|con mau|con du)\b/i;
 const HUA_GIAM = /\b(giam gia|bot cho|sale|khuyen mai|voucher|ma giam)\b/i;
-const NEU_SIZE = /\b(tu van|lay|mac|chon)\s+size\s+(S|M|L|XL|XXL|2XL|3XL)\b/i;
+/*
+  CHỈ BẮT LỜI KHUYÊN, KHÔNG BẮT LỜI NHẮC LẠI.
+
+  "Chị lấy size L nhé" khi chính KHÁCH vừa chọn L là đọc lại lựa chọn của khách — hoàn toàn hợp lệ,
+  và chặn nó thì máy không xác nhận đơn được. Cái sai là máy KHUYÊN một size khi không có bảng nào
+  để tra. Nên động từ phải là động từ khuyên.
+*/
+const NEU_SIZE = /\b(tu van|goi y|khuyen|nen lay|nen chon|nen mac)\b[^.!?]{0,40}\bsize\s+(S|M|L|XL|XXL|2XL|3XL)\b/i;
+
+/**
+ * XIN SỐ ĐO KHI KHÔNG CÓ BẢNG ĐỂ TRA cũng là một lời hứa không giữ được — khách gõ chiều cao và
+ * cân nặng xong, máy vẫn phải chuyển người, và lúc đó khách đã mất công gõ để nhận về đúng thứ họ
+ * sẽ nhận nếu không gõ.
+ *
+ * Đo 15/09/2026: mẫu câu đã thôi hỏi số đo, nhưng nấc MÔ HÌNH viết lại đã đưa nó QUAY VỀ —
+ * "chị cho em xin chiều cao và số đo vòng ngực để em tư vấn size phù hợp" — trong một lượt mà việc
+ * máy chủ giao là HỎI KHÁCH ĐANG XEM MẪU NÀO. Mô hình được đổi CÁCH NÓI, không được đổi ĐIỀU ĐƯỢC
+ * NÓI, nên đây là chỗ chốt lại sau lưng nó.
+ */
+const XIN_SO_DO = /\b(chieu cao|can nang|so do|vong nguc|vong eo|vong mong|cao bao nhieu|nang bao nhieu)\b/i;
 
 /** Bỏ dấu để một luật viết một lần bắt được cả "vẫn còn" lẫn "van con". */
 function khongDau(s: string): string {
@@ -132,6 +152,7 @@ export function safetyFlags(input: SafetyInput): SafetyFlag[] {
   if (HUA_GIAO.test(n)) out.push("PROMISED_DELIVERY_TIME");
   if (!input.stockKnown && HUA_TON.test(n)) out.push("PROMISED_STOCK_UNKNOWN");
   if (!input.sizeChartAvailable && NEU_SIZE.test(n)) out.push("NAMED_SIZE_WITHOUT_CHART");
+  if (!input.sizeChartAvailable && XIN_SO_DO.test(n)) out.push("ASKED_MEASUREMENTS_WITHOUT_CHART");
   if (HUA_GIAM.test(n)) out.push("PROMISED_DISCOUNT");
   return out;
 }

@@ -13,6 +13,7 @@
 import { formatVND } from "@/lib/format";
 import type { SalesAction } from "@/lib/constants/sales-agent";
 import type { SalesState } from "@/lib/ai-workforce/agents/sales/state";
+import { SAFETY_FLAG_LABEL, safetyFlags } from "@/lib/constants/sales-quality";
 
 export type GenerationContext = {
   action: SalesAction;
@@ -161,26 +162,60 @@ export function moneyMentions(text: string): number[] {
 
 export type GuardResult = { text: string; usedModel: boolean; rejected: boolean; rejectReason: string };
 
+/** Bối cảnh máy chủ đã biết cho lượt này — cái lưới bên dưới soi bản mô hình viết bằng đúng nó. */
+export type GuardFacts = {
+  /** TẬP ĐÓNG các con số tiền máy chủ đã tính. Ngoài tập này là một cam kết sai với khách. */
+  allowedAmounts: number[];
+  /** Sổ kho có kết luận được không. `false` = CHƯA BIẾT ⇒ không lời nào được hứa còn hàng. */
+  stockKnown: boolean;
+  /** ERP có bảng số đo dùng được cho mẫu này không. */
+  sizeChartAvailable: boolean;
+};
+
 /**
  * Soi bản mô hình viết trước khi cho ra ngoài.
  *
- * `allowedAmounts` là TẬP ĐÓNG các con số tiền máy chủ đã tính cho lượt này. Câu của mô hình nhắc
- * tới một con số ngoài tập đó ⇒ vứt. Không sửa chữa, không "làm tròn cho gần đúng": một con số
- * sai trong tin nhắn bán hàng là một cam kết sai với khách.
+ * MÔ HÌNH ĐƯỢC ĐỔI CÁCH NÓI, KHÔNG ĐƯỢC ĐỔI ĐIỀU ĐƯỢC NÓI — và lời dặn không đủ để giữ điều đó.
+ *
+ * ĐO 15/09/2026 trên mẻ sạch, một lượt mà việc máy chủ giao là HỎI KHÁCH ĐANG XEM MẪU NÀO:
+ *   CÂU MẪU : "Dạ em chào chị ạ. Chị đang xem mẫu nào để em tư vấn giúp chị với ạ?"
+ *   MÔ HÌNH : "Dạ chị cho em xin chiều cao và số đo vòng ngực để em tư vấn size phù hợp với mình ạ."
+ * Không phải viết lại — là một tin nhắn KHÁC, và nó hứa đúng thứ mẫu câu vừa được sửa để thôi hứa
+ * (ERP không có bảng số đo cho mẫu này). Lưới cũ không thấy, vì nó chỉ soi tiền và mốc giao.
+ *
+ * Nên lưới nay dùng CHÍNH sổ cờ an toàn đã khai ở `lib/constants/sales-quality.ts` — một danh sách,
+ * một chỗ sửa, và mọi cờ đều được soi ở CẢ hai đường: lúc sinh câu (ở đây, để VỨT) và lúc đo lại
+ * cả mẻ (ở báo cáo, để ĐẾM).
  */
-export function guardGeneratedText(modelText: string, fallback: string, allowedAmounts: number[]): GuardResult {
+export function guardGeneratedText(modelText: string, fallback: string, facts: GuardFacts | number[]): GuardResult {
+  // Nhận cả dạng cũ (chỉ một mảng tiền) để nơi gọi cũ không phải đổi cùng lúc.
+  const ctx: GuardFacts = Array.isArray(facts) ? { allowedAmounts: facts, stockKnown: false, sizeChartAvailable: true } : facts;
   const text = String(modelText ?? "").trim();
   if (!text) return { text: fallback, usedModel: false, rejected: true, rejectReason: "Mô hình không trả về câu nào" };
   if (text.length > 1200) return { text: fallback, usedModel: false, rejected: true, rejectReason: "Câu quá dài so với một tin nhắn chat" };
-  const allowed = new Set(allowedAmounts.filter((n) => n > 0));
+
   const mentioned = moneyMentions(text);
-  const invented = mentioned.filter((n) => !allowed.has(n));
-  if (invented.length) {
-    return { text: fallback, usedModel: false, rejected: true, rejectReason: `Câu nhắc tới số tiền máy chủ không tính: ${invented.map((n) => formatVND(n)).join(", ")}` };
+  const co = safetyFlags({ text, allowedAmounts: ctx.allowedAmounts, mentionedAmounts: mentioned, stockKnown: ctx.stockKnown, sizeChartAvailable: ctx.sizeChartAvailable });
+  if (co.length) {
+    const allowed = new Set(ctx.allowedAmounts.filter((n) => n > 0));
+    const bia = mentioned.filter((n) => !allowed.has(n));
+    const chiTiet = co.includes("MONEY_NOT_FROM_SERVER") && bia.length ? `: ${bia.map((n) => formatVND(n)).join(", ")}` : "";
+    return { text: fallback, usedModel: false, rejected: true, rejectReason: `${SAFETY_FLAG_LABEL[co[0]]}${chiTiet}` };
   }
-  // Không được tự hứa những thứ ERP không kiểm được.
-  if (/\b(bao|cam ket|chac chan)\s+(giao|nhan)\s+(trong|sau)\s+\d/i.test(text)) {
-    return { text: fallback, usedModel: false, rejected: true, rejectReason: "Câu hứa mốc giao hàng mà ERP không kiểm được" };
+
+  /*
+    VÀ KHÔNG ĐƯỢC HỎI LẠI ĐÚNG CÂU KHÁCH VỪA HỎI.
+
+    Đo cùng mẻ: "bao nhiêu một đằm vậy" → "Dạ, đầm Q004 giá bao nhiêu ạ? Chị đợi em kiểm tra kho…".
+    Mô hình nhại câu hỏi thành câu hỏi. Với khách thì đó không phải một câu trả lời chậm — đó là
+    dấu hiệu không ai đọc tin của họ.
+
+    Chỉ chặn khi CÂU MẪU không hề hỏi thế: mẫu câu mà hỏi thì đó là việc máy chủ giao, không phải
+    mô hình tự thêm.
+  */
+  const hoiGia = /\bbao nhi[eê]u\b[^.!]*\?/i;
+  if (hoiGia.test(text) && !hoiGia.test(fallback)) {
+    return { text: fallback, usedModel: false, rejected: true, rejectReason: "Câu hỏi lại đúng thứ khách vừa hỏi" };
   }
   return { text, usedModel: true, rejected: false, rejectReason: "" };
 }

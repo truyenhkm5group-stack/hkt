@@ -434,6 +434,42 @@ export async function testSalesAgent(db: Db) {
   assert.equal(advancesConversation(""), null, "không có câu nào thì CHƯA BIẾT, không phải 'không đẩy'");
   assert.equal(advancesConversation(renderTemplate(ctxNen)), true, "câu trả lời phải mời được bước tiếp");
 
+  // ═════════ 4D. LƯỚI SOI BẢN MÔ HÌNH VIẾT — ĐỔI CÁCH NÓI, KHÔNG ĐỔI ĐIỀU ĐƯỢC NÓI ═════════
+  //
+  // Đo 15/09/2026 trên mẻ sạch, một lượt mà việc máy chủ giao là HỎI KHÁCH ĐANG XEM MẪU NÀO:
+  //   CÂU MẪU : "Dạ em chào chị ạ. Chị đang xem mẫu nào để em tư vấn giúp chị với ạ?"
+  //   MÔ HÌNH : "Dạ chị cho em xin chiều cao và số đo vòng ngực để em tư vấn size phù hợp ạ."
+  // Không phải viết lại — là một tin nhắn KHÁC, và nó hứa đúng thứ mẫu câu vừa được sửa để thôi
+  // hứa. Lưới cũ không thấy, vì nó chỉ soi tiền và mốc giao.
+
+  const nềnLưới = { allowedAmounts: [499_000, 25_000], stockKnown: true, sizeChartAvailable: true };
+  const mẫuChào = "Dạ em chào chị ạ. Chị đang xem mẫu nào để em tư vấn giúp chị với ạ?";
+
+  const xinSốĐo = guardGeneratedText("Dạ chị cho em xin chiều cao và số đo vòng ngực để em tư vấn size phù hợp ạ.", mẫuChào, { ...nềnLưới, sizeChartAvailable: false });
+  assert.equal(xinSốĐo.usedModel, false, "chưa có bảng số đo mà mô hình xin số đo ⇒ phải vứt bản của mô hình");
+  assert.equal(xinSốĐo.text, mẫuChào, "vứt rồi phải rơi về câu mẫu");
+  // CÓ bảng thì xin số đo là việc đúng — lưới không được chặn nhầm.
+  assert.equal(guardGeneratedText("Dạ chị cho em xin chiều cao và cân nặng ạ.", mẫuChào, nềnLưới).usedModel, true);
+
+  // Hứa còn hàng khi sổ kho CHƯA BIẾT.
+  assert.equal(guardGeneratedText("Dạ mẫu này vẫn còn chị nhé.", mẫuChào, { ...nềnLưới, stockKnown: false }).usedModel, false);
+  assert.equal(guardGeneratedText("Dạ mẫu này vẫn còn chị nhé.", mẫuChào, nềnLưới).usedModel, true, "sổ kho đã biết thì nói còn hàng là hợp lệ");
+
+  // Và không được HỎI LẠI đúng thứ khách vừa hỏi.
+  const nhại = guardGeneratedText("Dạ, đầm Q004 giá bao nhiêu ạ? Chị đợi em kiểm tra kho nhé.", mẫuChào, nềnLưới);
+  assert.equal(nhại.usedModel, false, "nhại câu hỏi của khách thành câu hỏi ⇒ vứt");
+  assert.match(nhại.rejectReason, /hỏi lại/);
+  // Nhưng nếu CHÍNH CÂU MẪU hỏi thế thì đó là việc máy chủ giao, không phải mô hình tự thêm.
+  assert.equal(guardGeneratedText("Chị cho em xin bao nhiêu cái ạ?", "Chị lấy bao nhiêu cái ạ?", nềnLưới).usedModel, true);
+
+  // Dạng cũ (chỉ một mảng tiền) vẫn phải chạy — nơi gọi cũ không đổi cùng lúc được.
+  assert.equal(guardGeneratedText("Dạ mẫu này 499.000đ ạ", "câu nháp", [499_000]).usedModel, true);
+  assert.equal(guardGeneratedText("Dạ em bớt cho chị còn 350.000đ ạ", "câu nháp", [499_000]).usedModel, false);
+
+  // Nhắc lại size KHÁCH đã chọn không phải là khuyên size — chặn nó thì máy không đọc lại đơn được.
+  assert.equal(guardGeneratedText("Dạ chị lấy size L màu Đỏ đúng không ạ?", mẫuChào, { ...nềnLưới, sizeChartAvailable: false }).usedModel, true);
+  assert.equal(guardGeneratedText("Dạ bên em tư vấn chị lấy size L ạ.", mẫuChào, { ...nềnLưới, sizeChartAvailable: false }).usedModel, false, "KHUYÊN một size khi không có bảng ⇒ vứt");
+
   // ═════════ 5. CỔNG GỬI TIN — SHADOW KHÔNG BAO GIỜ GỬI ═════════
 
   const base = { conversationExternalId: "conv-1", text: "Dạ em chào chị", humanTakeover: false };
@@ -1012,6 +1048,14 @@ export async function testSalesAgent(db: Db) {
   const s1 = await say("em muốn mua Đầm suông AIE2E ạ");
   assert.equal(s1.state.productId, "p-ai-e2e", "máy chủ phải tra ra đúng sản phẩm qua công cụ, không tin lời mô hình");
   assert.equal(s1.stage, "SIZE_SELECTION", "mẫu có hai size nên phải hỏi size, KHÔNG đoán hộ khách");
+  /*
+    VÀ ĐÃ BÁO ĐƯỢC GIÁ TỪ ĐÂY, TRƯỚC KHI KHÁCH CHỌN SIZE.
+
+    Đo 15/09/2026 trên mẻ sạch 18 hội thoại: 0/18 câu trả lời nêu được một con số tiền, dù phần
+    lớn khách HỎI GIÁ ngay tin đầu. Giá chỉ tính được khi đã có mẫu mã, nên máy bắt khách trả lời
+    trước khi được trả lời. Mọi mẫu mã của mẫu này cùng 499.000đ, nên giá sản phẩm CÓ nghĩa.
+  */
+  assert.equal(s1.state.quotedTotal, 524_000, "mọi mẫu mã cùng giá ⇒ báo được giá ngay khi chưa chọn size");
 
   const s2 = await say("cho em size L");
   assert.equal(s2.state.variantId, "v-ai-e2e-l", "khoá đúng mẫu mã sau khi khách chọn size");
@@ -1159,6 +1203,46 @@ export async function testSalesAgent(db: Db) {
   // Trạng thái hỏng trong CSDL phải đọc được về mặc định an toàn, không làm sập màn hình.
   assert.deepEqual(parseSalesState(null), EMPTY_SALES_STATE);
   assert.deepEqual(parseSalesState({ quantity: "ba", pending: { sentAt: "" } }), { ...EMPTY_SALES_STATE, quantity: 1, pending: null });
+
+  // ═════════ 10A. GIÁ SẢN PHẨM: BÁO ĐƯỢC KHI MỌI MẪU MÃ CÙNG GIÁ, CHƯA BIẾT KHI LỆCH ═════════
+  //
+  // Khách hỏi giá TRƯỚC khi chọn size — đó là thứ tự thật của một cuộc bán hàng. Nhưng giá sản phẩm
+  // chỉ có nghĩa khi mọi mẫu mã cùng một đơn giá; lệch giá thì câu trả lời đúng là CHƯA BIẾT, chứ
+  // KHÔNG phải lấy bừa giá thấp nhất rồi hứa một con số shop không bán.
+
+  const ctxGia = { agentKey: "sales", mode: "SHADOW" as const, allowedTools: sales.definition.allowedTools, run: null, conversationId: null };
+  const giaSP = await callTool(ctxGia, "pricing.get", { productId: "p-ai-e2e" });
+  assert.equal(giaSP.ok, true);
+  const giaSPData = giaSP.ok ? (giaSP.value as Record<string, unknown>) : {};
+  assert.equal(giaSPData.ambiguous, false);
+  assert.equal(giaSPData.unitPrice, 499_000, "mọi mẫu mã cùng giá ⇒ đó LÀ giá sản phẩm");
+  assert.equal(giaSPData.total, 524_000, "tổng gồm cả phí ship, như giá của một mẫu mã");
+
+  await db.insert(schema.products).values({ id: "p-gia-lech", name: "Đầm lệch giá", customId: "LG001" }).onConflictDoNothing();
+  await db
+    .insert(schema.productVariants)
+    .values([
+      { id: "v-gia-lech-m", productId: "p-gia-lech", sku: "LG001-M", size: "M", color: "Đen", retailPrice: 499_000 },
+      { id: "v-gia-lech-xl", productId: "p-gia-lech", sku: "LG001-XL", size: "XL", color: "Đen", retailPrice: 599_000 },
+    ])
+    .onConflictDoNothing();
+  const giaLech = await callTool(ctxGia, "pricing.get", { productId: "p-gia-lech" });
+  assert.equal(giaLech.ok, true);
+  const giaLechData = giaLech.ok ? (giaLech.value as Record<string, unknown>) : {};
+  assert.equal(giaLechData.ambiguous, true, "size lớn đắt hơn là chuyện có thật ⇒ không có MỘT giá sản phẩm");
+  assert.equal(giaLechData.total, null, "chưa biết thì là NULL, không phải giá thấp nhất");
+  assert.equal(giaLechData.unitPrice, null);
+  assert.equal(giaLechData.minUnitPrice, 499_000);
+  assert.equal(giaLechData.maxUnitPrice, 599_000);
+
+  // Giá của một MẪU MÃ vẫn y như cũ — bậc mới không được đụng vào bậc đang chạy.
+  const giaMau = await callTool(ctxGia, "pricing.get", { variantId: "v-gia-lech-xl" });
+  assert.equal((giaMau.ok ? (giaMau.value as Record<string, unknown>) : {}).unitPrice, 599_000);
+  assert.equal((giaMau.ok ? (giaMau.value as Record<string, unknown>) : {}).scope, "VARIANT");
+
+  // Truyền cả hai, hoặc không truyền gì, đều là một câu hỏi không có nghĩa ⇒ phải bị từ chối.
+  assert.equal((await callTool(ctxGia, "pricing.get", { productId: "p-ai-e2e", variantId: "v-ai-e2e-l" })).ok, false);
+  assert.equal((await callTool(ctxGia, "pricing.get", {})).ok, false);
 
   // ═════════ 10B. CHỐT CHẶN CỨNG: KHÔNG GIẢ MẠO NẤC ĐƯỢC ═════════
   //

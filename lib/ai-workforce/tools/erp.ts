@@ -143,37 +143,116 @@ export const productVariantsTool = defineTool({
 
 // ───────────────────────── pricing.get ─────────────────────────
 
+/**
+ * ĐƠN GIÁ CỦA MỘT MẪU MÃ — một bậc thẩm quyền, dùng chung cho cả giá mẫu mã lẫn giá sản phẩm.
+ *
+ * Giá niêm yết 0đ trên Pancake là CHƯA KHAI, không phải "cho không" — rơi về giá lẻ mặc định của
+ * cấu hình landing, đúng như quy tắc đang áp cho đơn landing page.
+ */
+function donGia(row: { price: unknown; discounted: unknown }, giaMacDinh: number): { unit: number; source: string } {
+  if (Number(row.discounted)) return { unit: Number(row.discounted), source: "variant_discounted" };
+  if (Number(row.price)) return { unit: Number(row.price), source: "variant_retail" };
+  return { unit: giaMacDinh, source: "landing_default" };
+}
+
 export const pricingGetTool = defineTool({
   name: "pricing.get",
-  describe: "Giá bán do MÁY CHỦ tính cho một mẫu mã và số lượng. Đây là con số duy nhất được phép nói với khách.",
-  input: z.object({ variantId: z.string().trim().min(1), quantity: z.number().int().min(1).max(20).optional() }),
-  async handler({ variantId, quantity }) {
+  describe: "Giá bán do MÁY CHỦ tính. Nhận `variantId` (giá của đúng mẫu mã đó) HOẶC `productId` (giá của sản phẩm, chỉ khi mọi mẫu mã cùng một giá). Đây là con số duy nhất được phép nói với khách.",
+  /*
+    NHẬN CẢ `productId`, VÌ KHÁCH HỎI GIÁ TRƯỚC KHI CHỌN SIZE.
+
+    ĐO 15/09/2026 trên mẻ sạch 18 hội thoại: 0/18 câu trả lời nêu được một con số tiền. Nguyên nhân
+    không nằm ở mô hình mà nằm ở đây — giá chỉ tính được khi đã có `variantId`, còn khách thì hỏi
+    "bao nhiêu một đằm vậy" NGAY TỪ TIN ĐẦU. Máy buộc phải đáp "chị cho em xin size để em báo giá",
+    tức là bắt khách trả lời trước khi được trả lời. Một người bán hàng không ai làm thế.
+
+    VÀ VẪN KHÔNG ĐƯỢC ĐOÁN: giá sản phẩm chỉ có nghĩa khi MỌI mẫu mã đang bán cùng một đơn giá.
+    Lệch giá giữa các size là chuyện có thật (size lớn đắt hơn), nên ở đó câu trả lời đúng là
+    `ambiguous` kèm dải giá — để dây chuyền hỏi tiếp, chứ không phải lấy bừa giá thấp nhất rồi hứa
+    một con số shop không bán.
+  */
+  input: z
+    .object({
+      variantId: z.string().trim().min(1).optional(),
+      productId: z.string().trim().min(1).optional(),
+      quantity: z.number().int().min(1).max(20).optional(),
+    })
+    .refine((v) => Boolean(v.variantId) !== Boolean(v.productId), "Phải truyền ĐÚNG MỘT trong variantId / productId"),
+  async handler({ variantId, productId, quantity }) {
     const db = await getDb();
     const cfg = await landingConfig();
     const qty = quantity ?? 1;
-    const row = await db
-      .select({ id: pv.id, price: pv.retailPrice, discounted: pv.retailPriceAfterDiscount, name: p.name, sku: pv.sku, size: pv.size, color: pv.color })
+    const shippingFee = landingShippingFee(qty, cfg.shippingFee);
+
+    if (variantId) {
+      const row = await db
+        .select({ id: pv.id, price: pv.retailPrice, discounted: pv.retailPriceAfterDiscount, name: p.name, sku: pv.sku, size: pv.size, color: pv.color })
+        .from(pv)
+        .innerJoin(p, eq(p.id, pv.productId))
+        .where(eq(pv.id, variantId))
+        .limit(1);
+      const variant = row[0];
+      if (!variant) throw new Error(`Không có mẫu mã ${variantId} trong ERP`);
+      const { unit, source } = donGia(variant, cfg.singlePrice);
+      const goodsTotal = unit * qty;
+      return {
+        scope: "VARIANT" as const,
+        ambiguous: false,
+        variantId,
+        label: `${variant.name} · ${[variant.size, variant.color].filter(Boolean).join(" ")}`.trim(),
+        quantity: qty,
+        unitPrice: unit,
+        goodsTotal,
+        shippingFee,
+        total: goodsTotal + shippingFee,
+        priceSource: source,
+        currency: "VND",
+      };
+    }
+
+    const rows = await db
+      .select({ price: pv.retailPrice, discounted: pv.retailPriceAfterDiscount, name: p.name })
       .from(pv)
       .innerJoin(p, eq(p.id, pv.productId))
-      .where(eq(pv.id, variantId))
-      .limit(1);
-    const variant = row[0];
-    if (!variant) throw new Error(`Không có mẫu mã ${variantId} trong ERP`);
-    // Giá niêm yết 0đ trên Pancake là CHƯA KHAI, không phải "cho không" — rơi về giá lẻ mặc định
-    // của cấu hình landing, đúng như quy tắc đang áp cho đơn landing page.
-    const unit = Number(variant.discounted) || Number(variant.price) || cfg.singlePrice;
-    const priceSource = Number(variant.discounted) ? "variant_discounted" : Number(variant.price) ? "variant_retail" : "landing_default";
+      .where(eq(pv.productId, productId!));
+    if (!rows.length) throw new Error(`Không có mẫu mã nào của sản phẩm ${productId} trong ERP`);
+    const gia = rows.map((r) => donGia(r, cfg.singlePrice));
+    const dat = [...new Set(gia.map((g) => g.unit))];
+    const ten = rows[0].name ?? "";
+    if (dat.length > 1) {
+      // CHƯA BIẾT một con số, và nói thẳng là chưa biết. Dải giá đi kèm để dây chuyền còn hỏi được
+      // câu tiếp theo cho đúng chỗ, KHÔNG phải để in ra cho khách như một lời chào giá.
+      return {
+        scope: "PRODUCT" as const,
+        ambiguous: true,
+        productId,
+        label: ten,
+        quantity: qty,
+        unitPrice: null,
+        goodsTotal: null,
+        shippingFee,
+        total: null,
+        minUnitPrice: Math.min(...dat),
+        maxUnitPrice: Math.max(...dat),
+        variantCount: rows.length,
+        priceSource: "variant_mixed",
+        currency: "VND",
+      };
+    }
+    const unit = dat[0];
     const goodsTotal = unit * qty;
-    const shippingFee = landingShippingFee(qty, cfg.shippingFee);
     return {
-      variantId,
-      label: `${variant.name} · ${[variant.size, variant.color].filter(Boolean).join(" ")}`.trim(),
+      scope: "PRODUCT" as const,
+      ambiguous: false,
+      productId,
+      label: ten,
       quantity: qty,
       unitPrice: unit,
       goodsTotal,
       shippingFee,
       total: goodsTotal + shippingFee,
-      priceSource,
+      variantCount: rows.length,
+      priceSource: gia[0].source,
       currency: "VND",
     };
   },
