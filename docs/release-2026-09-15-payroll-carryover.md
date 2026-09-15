@@ -8,6 +8,7 @@ Phiên làm việc trên nhánh `claude/trusting-noether-fh23sk`, nối tiếp m
 
 | # | Việc | Hôm nay có đang sai không |
 |---|---|---|
+| **F02** | **Lợi nhuận đang KHÔNG trừ đồng lương nào — và không cảnh báo nào bật** | **CÓ, ngay hôm nay: 5.000.000 ₫/tháng** |
 | F10 | Lợi nhuận âm của MKTer bị `max(…, 0)` xoá mất, tháng sau ăn hoa hồng như chưa từng lỗ | **CÓ** — và đây là yêu cầu mới của chủ shop |
 | F03 | Chi phí chung không còn căn cứ chia thì **bốc hơi** khỏi lợi nhuận | **CÓ** ở mọi kỳ không có doanh thu |
 | F04 | Mã chỉ có quảng cáo, chưa có đơn ⇒ toàn bộ tiền quảng cáo rơi ra ngoài | **CÓ** với mọi mã mới đang thử |
@@ -20,6 +21,40 @@ Phiên làm việc trên nhánh `claude/trusting-noether-fh23sk`, nối tiếp m
 Ba lỗi F03/F04/F01 đều làm lợi nhuận **CAO HƠN** sự thật. Đó là chiều hỏng nguy hiểm hơn trừ hai
 lần: trừ hai lần làm lợi nhuận thấp đi nên có người thắc mắc, còn mất một khoản làm lợi nhuận cao
 đẹp nên không ai đi kiểm. Và đó là con số dùng để trả lương.
+
+---
+
+## 0b. F02 — lỗi tiền lớn nhất tìm được hôm nay
+
+```
+nguồn ghi nhận lương:            chưa khai → mặc định LEGACY_EXPENSES (bảng Chi phí)
+nhân sự đang làm việc:           4
+lương cứng khai ở bảng Lương:    5.000.000 ₫/tháng
+khoản chi nhóm "Lương":          0
+⇒ chi phí lương trong lợi nhuận: 0 ₫
+```
+
+Cảnh báo lùi nguồn hiện có chỉ bật khi bảng Chi phí **có** khoản lương (`salaryLegacy.amount > 0`).
+Nên ca **nguy hiểm nhất lại là ca không có khoản nào**: thành phần Lương bằng 0 và **không cảnh báo
+nào bật**. Lợi nhuận đọc như thể shop không trả lương cho ai — hoàn toàn im lặng, và đó là con số
+dùng để trả lương.
+
+Đây đúng là hình dạng F02 trong yêu cầu: *"không coi chưa có khoản nhập là không phát sinh chi
+phí."*
+
+**Nay:** cảnh báo `PAYROLL_OBLIGATION_NOT_RECOGNIZED` mức **high**, nêu đích danh số tiền đang nằm
+ngoài lợi nhuận (lương cứng **thuộc kỳ**, không phải con số tháng), kèm hai lối ra.
+
+**Và ERP không tự cộng.** Nêu con số nhưng không đưa vào lợi nhuận: chuyển thẩm quyền là quyết định
+tường minh của chủ shop (AGENTS.md mục 18), còn tự cộng là mở đường cho ngày mai có người nhập
+khoản chi lương rồi bị trừ hai lần. Thay vào đó — vì cổng chốt kỳ của bản này **chặn trên cảnh báo
+mức high** — không ai chốt được một kỳ lương trên con số lợi nhuận chưa trừ lương. Nêu ra thì không
+đủ; phải **chặn**.
+
+> **Chủ shop sẽ thấy gì ngay sau bản này:** `/payroll` hiện một dải cảnh báo đỏ và **nút "Chốt kỳ"
+> không xuất hiện**, cho tới khi chọn một trong hai: nhập khoản chi lương vào bảng Chi phí, hoặc
+> bật bảng Lương làm nguồn ghi nhận. Đây là thay đổi CÓ CHỦ Ý — trước đó nút vẫn hiện, và bấm vào
+> là chốt một kỳ lương trên lợi nhuận chưa trừ lương.
 
 ---
 
