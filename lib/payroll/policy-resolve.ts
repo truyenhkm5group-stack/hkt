@@ -82,6 +82,15 @@ export type PayrollSegment = {
   policyVersion: number | null;
 };
 
+const VN_OFFSET_MS = 7 * 3_600_000;
+
+/** Đầu ngày lịch Việt Nam KẾ TIẾP, hoặc chính nó nếu đã ở đúng 00:00. */
+function ceilVnDay(ms: number): number {
+  const shifted = ms + VN_OFFSET_MS;
+  const day = Math.ceil(shifted / 86_400_000) * 86_400_000;
+  return day - VN_OFFSET_MS;
+}
+
 const startOf = (r: { effectiveFrom: Date }) => r.effectiveFrom.getTime();
 const endOf = (r: { effectiveTo: Date | null }) => (r.effectiveTo ? r.effectiveTo.getTime() : Number.POSITIVE_INFINITY);
 
@@ -130,7 +139,22 @@ export function resolveSegments(input: {
   consider(input.policyAssignments);
   consider(input.policyVersions);
 
-  const marks = [...cuts].sort((a, b) => a - b);
+  /*
+    ═══ MỌI MỐC CẮT PHẢI RƠI VÀO ĐẦU MỘT NGÀY LỊCH VIỆT NAM ═══
+
+    Mốc hiệu lực trong ERP là NGÀY, không phải thời điểm: `vnStartOfDay` cho 00:00:00.000 và
+    `vnEndOfDay` cho 23:59:59.999. Nhưng một dòng ghi bằng đường khác (script chạy tay, dữ liệu
+    nhập từ nơi khác) có thể mang 23:59:59 KHÔNG có phần mili giây — và lúc ấy `effectiveTo + 1ms`
+    rơi vào 23:59:59.001, tức GIỮA một ngày.
+
+    Hậu quả không phải một chi tiết hiển thị: mẩu 999 mili giây ấy thành một ĐOẠN RIÊNG, không có
+    chính sách nào phủ (nên bảng lương báo "chưa gán chính sách" cho một người đã gán đầy đủ), và
+    `inclusiveDays` đếm nó là MỘT NGÀY — một ngày công không có thật, cộng vào phép chia lương cứng.
+
+    Nên mọi mốc cắt được LÀM TRÒN LÊN đầu ngày kế tiếp. Mốc đã ở đúng 00:00 thì giữ nguyên, nên
+    dòng ghi đúng chuẩn không đổi hành vi một chút nào.
+  */
+  const marks = [...new Set([...cuts].map((m) => (m === lo ? m : ceilVnDay(m))))].filter((m) => m >= lo && m <= hi).sort((a, b) => a - b);
   const out: PayrollSegment[] = [];
   for (let i = 0; i < marks.length; i += 1) {
     const segFrom = marks[i];

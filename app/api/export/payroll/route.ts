@@ -76,6 +76,17 @@ export async function GET(request: NextRequest) {
     "HH phải trả (đ)",
     "Lỗ chuyển tiếp (đ)",
     "Căn cứ số dư",
+    /*
+      BỐN CỘT CỦA MÁY TÍNH LƯƠNG CHUNG.
+
+      Người CHƯA gán chính sách để TRỐNG bốn ô này — trống nghĩa là "không áp dụng", khác hẳn 0.
+      Cột "Tổng lương" phía trên đã là con số ĐANG DÙNG ĐỂ TRẢ cho cả hai đường tính, nên bốn cột
+      này là phần giải thích, không phải một khoản cộng thêm. Cộng chúng vào tổng là trả hai lần.
+    */
+    "Chính sách lương",
+    "Tổng thu nhập (đ)",
+    "Tổng khấu trừ (đ)",
+    "Thực nhận (đ)",
     "Ghi chú",
   ];
   const out = [header.join(",")];
@@ -84,6 +95,14 @@ export async function GET(request: NextRequest) {
     if (l.fixed === null) ghiChu.push("Lương cứng CHƯA BIẾT: kỳ không có mốc đầu/cuối nên không chia theo ngày được.");
     if (l.bonusPersonal === null) ghiChu.push(report.cashRatioReason ?? "Thưởng theo LN cá nhân CHƯA BIẾT.");
     if (l.carry && !l.carry.openingEstablished) ghiChu.push(`Số dư lỗ đầu tháng CHƯA ĐỦ CĂN CỨ ĐỂ CHỐT: ${l.carry.openingReason}`);
+    for (const m of l.engine?.result.missing ?? []) ghiChu.push(`THIẾU “${m.label}”: ${m.message}`);
+    for (const p of l.engine?.result.problems ?? []) ghiChu.push(p);
+    if (l.engine?.splitAcrossSegments) {
+      ghiChu.push("Kỳ có nhiều đoạn (vào/nghỉ/đổi chính sách giữa kỳ) nên số đo của cả kỳ được chia theo SỐ NGÀY của từng đoạn — đây là một ước tính.");
+    }
+    const chinhSach = l.engine
+      ? [...new Map(l.engine.segments.filter((sg) => sg.policyId).map((sg) => [sg.policyCode, sg])).values()].map((sg) => `${sg.policyCode} #${sg.policyVersion ?? "?"}`).join(" → ")
+      : "";
     out.push(
       [
         l.employee.name,
@@ -110,6 +129,10 @@ export async function GET(request: NextRequest) {
         l.carry ? (l.bonusPersonal ?? "") : "",
         l.carry?.closingBalance ?? "",
         l.carry?.openingReason ?? "",
+        chinhSach,
+        l.engine ? (l.engine.result.grossEarnings ?? "") : "",
+        l.engine ? (l.engine.result.totalDeductions ?? "") : "",
+        l.engine ? (l.engine.result.netPay ?? "") : "",
         ghiChu.join(" "),
       ]
         .map(csvCell)
@@ -121,6 +144,42 @@ export async function GET(request: NextRequest) {
     HAI DÒNG CUỐI NÓI RÕ TỆP NÀY ĐỨNG TRÊN CÁI GÌ: kỳ nào, cơ sở lợi nhuận nào, lương cứng chia
     theo bao nhiêu ngày. Một tệp CSV rời khỏi màn hình rồi thì không còn bộ lọc nào đi kèm nó nữa.
   */
+  /*
+    ═══ KHỐI THỨ HAI: TỪNG THÀNH PHẦN CỦA TỪNG NGƯỜI ═══
+
+    Bảng trên trả lời "trả bao nhiêu"; khối này trả lời "vì sao chừng đó". Cả hai lấy từ CÙNG một
+    bản báo cáo (`getPayrollReport`) — tệp xuất KHÔNG tự tính lại một phép nhân nào, vì một tệp
+    xuất tự cộng lại theo cách riêng là cách chắc chắn để hai con số của cùng một khoản lương đi
+    hai ngả.
+
+    Vắng mặt khi chưa ai được gán chính sách — in một tiêu đề rỗng chỉ làm tệp dài thêm.
+  */
+  const coMayChung = lines.some((l) => l.engine);
+  if (coMayChung) {
+    out.push("");
+    out.push("CHI TIẾT THÀNH PHẦN LƯƠNG (máy tính chung)");
+    out.push(["Nhân sự", "Khoản", "Loại", "Đại lượng", "Giá trị đại lượng", "Thành tiền (đ)", "Diễn giải"].join(","));
+    for (const l of lines) {
+      if (!l.engine) continue;
+      for (const c of [...l.engine.result.components, ...l.engine.result.adjustments]) {
+        out.push(
+          [
+            l.employee.shortName || l.employee.name,
+            c.label,
+            c.kind,
+            c.basisKey ?? "",
+            c.basisValue ?? "",
+            // Ô TRỐNG khi chưa biết — ghi 0 là để bảng tính sau đó cộng nó như một số đã xác minh.
+            c.amount ?? "",
+            c.explain.map((st) => `${st.label}${st.value === null ? "" : `: ${st.value}`}${st.note ? ` (${st.note})` : ""}`).join(" · "),
+          ]
+            .map(csvCell)
+            .join(","),
+        );
+      }
+    }
+  }
+
   out.push("");
   out.push(
     [

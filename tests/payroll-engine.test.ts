@@ -336,6 +336,29 @@ export function testPayrollEngine() {
     assert.notEqual(r2.netPay, 12_000_000, "không được lấy chính sách mới tính cả tháng");
   }
 
+  // ─────────── MỐC HIỆU LỰC THIẾU MILI GIÂY KHÔNG ĐƯỢC SINH RA MỘT NGÀY CÔNG MA ───────────
+  {
+    /*
+      `vnEndOfDay` trả 23:59:59.999, nhưng một dòng ghi bằng đường khác có thể mang 23:59:59 chẵn.
+      Khi ấy `effectiveTo + 1ms` rơi vào GIỮA ngày 15, và nếu mốc cắt không được làm tròn lên đầu
+      ngày thì mẩu 999 mili giây ấy thành một đoạn RIÊNG: không chính sách nào phủ (bảng lương báo
+      "chưa gán chính sách" cho một người đã gán đủ), và `inclusiveDays` đếm nó là MỘT NGÀY.
+    */
+    const thieuMiliGiay = new Date("2026-09-15T23:59:59+07:00");
+    const segs = resolveSegments({
+      ...THANG_9,
+      employments: [emp()],
+      policyAssignments: [
+        assign({ id: "a1", policyId: "PA", policyCode: "A", effectiveTo: thieuMiliGiay }),
+        assign({ id: "a2", policyId: "PB", policyCode: "B", effectiveFrom: d("2026-09-16") }),
+      ],
+      policyVersions: [ver({ id: "vA", policyId: "PA" }), ver({ id: "vB", policyId: "PB" })],
+    });
+    assert.equal(segs.length, 2, "mốc thiếu mili giây vẫn ra ĐÚNG hai đoạn, không sinh mẩu thứ ba");
+    assert.equal(segs[0].days + segs[1].days, 30, "và tổng số ngày vẫn đúng bằng số ngày của tháng — không có ngày công ma");
+    assert.ok(segs.every((sg) => sg.policyVersionId), "không đoạn nào bị rơi ra ngoài mọi chính sách");
+  }
+
   // ─────────── 25. PHIÊN BẢN CŨ GIỮ NGUYÊN KẾT QUẢ LỊCH SỬ ───────────
   {
     /*
@@ -380,6 +403,15 @@ export function testPayrollEngine() {
     });
     assert.equal(r.grossEarnings, 7_000_000 + 1_000_000 + 1_000_000 + 2_000_000 + 500_000);
     assert.equal(r.totalDeductions, 3_000_000, "tạm ứng là khoản TRỪ, và số dương ở đầu vào vẫn ra khoản trừ");
+    // `-0` bằng `0` với `===` nhưng in ra màn hình thành "-0 ₫" — một dòng khấu trừ âm không tồn tại.
+    const khongTru = calculatePayrollItem({
+      employeeId: "NV1",
+      employeeName: "I",
+      segments: segIn(segs, [comp({ code: "BASE", kind: "FIXED", calc: { type: "FIXED_AMOUNT", amount: 1_000_000 } })]),
+      adjustments: [],
+      carryOpening: {},
+    });
+    assert.ok(Object.is(khongTru.totalDeductions, 0), "không có khoản trừ nào ⇒ đúng 0, không phải −0");
     assert.equal(r.netPay, r.grossEarnings! - 3_000_000);
     // Ngưỡng chưa đạt thì bằng 0, không phải "chưa biết".
     const chuaDat = calculatePayrollItem({

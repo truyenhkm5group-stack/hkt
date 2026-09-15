@@ -416,7 +416,14 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
     unknown ? null : all.reduce((t, c) => t + ((c.amount !== null && pick(c.amount)) ? c.amount : 0), 0);
   const grossEarnings = sum((v) => v > 0);
   const deductionsSigned = sum((v) => v < 0);
-  const totalDeductions = deductionsSigned === null ? null : -deductionsSigned;
+  /*
+    `+ 0` KHÔNG THỪA: `-0` LÀ MỘT GIÁ TRỊ KHÁC.
+
+    Không có khoản trừ nào thì `deductionsSigned` là `0`, và `-0` lọt ra ngoài. Nó bằng `0` với
+    `===` nhưng KHÁC với `Object.is`, in ra JSON thành `-0`, và hiện lên màn hình thành "-0 ₫" —
+    một dòng khấu trừ âm không tồn tại, đứng cạnh tên một người thật.
+  */
+  const totalDeductions = deductionsSigned === null ? null : -deductionsSigned + 0;
   const netPay = grossEarnings === null || totalDeductions === null ? null : grossEarnings - totalDeductions;
 
   return {

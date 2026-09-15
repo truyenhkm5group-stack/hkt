@@ -26,6 +26,7 @@ import { testPayrollCarryover } from "./payroll-carryover.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
 import { testPayrollEngine } from "./payroll-engine.test";
+import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
@@ -1636,6 +1637,7 @@ async function main() {
   await testPayrollCogsCutoff(db);
   await testProfitCarryover();
   testPayrollEngine();
+  await testPayrollPolicyEngine(db);
   await testVtpState(db);
   await testVtpIngestion(db);
   await testReconciliation(db);
