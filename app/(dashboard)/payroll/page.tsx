@@ -16,7 +16,9 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { FinanceNav } from "@/components/finance-nav";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
+import { RunWorkflow } from "@/app/(dashboard)/payroll/run-workflow";
 import { CalculationDetail } from "@/app/(dashboard)/payroll/calculation-detail";
+import { ProfitBreakdown } from "@/app/(dashboard)/payroll/profit-breakdown";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -40,7 +42,7 @@ import {
   PAYROLL_BASIS_SHORT,
   parsePayrollBasis,
 } from "@/lib/constants/payroll";
-import { formatNumber, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
   getPayrollReport,
   listAdAccounts,
@@ -79,13 +81,16 @@ export default async function PayrollPage({
     getPayrollPeriodState(period, basis),
   ]);
   /*
-    KỲ ĐÃ CHỐT ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
+    KỲ ĐÃ KHOÁ ĐỌC ẢNH CHỤP, KHÔNG ĐỌC BẢN TÍNH SỐNG.
 
     Bản tính sống vẫn được dựng (một lần, ở trên) nhưng chỉ để so ra phần CHÊNH phát sinh sau ngày
-    chốt — nó KHÔNG được hiện thay cho con số của kỳ. Đổi tỷ lệ hay nhập thêm phiếu kho về sau mà
+    khoá — nó KHÔNG được hiện thay cho con số của kỳ. Đổi tỷ lệ hay nhập thêm phiếu kho về sau mà
     bảng lương tháng trước đổi theo là viết lại một kỳ đã trả tiền.
+
+    `frozen` = `LOCKED` hoặc `PAID` (và `FINAL` cũ đọc như `LOCKED`). Bốn trạng thái trước đó —
+    kể cả `APPROVED` — vẫn hiện bản tính sống: chúng tồn tại chính là để còn phát hiện được sai.
   */
-  const daChot = periodState.status === "FINAL" && periodState.snapshot !== null;
+  const daChot = periodState.frozen && periodState.snapshot !== null;
   const drift = daChot && periodState.snapshot ? payrollDrift(periodState.snapshot, report) : [];
   /*
     VIỆC CÒN THIẾU TRƯỚC KHI CHỐT — cùng một hàm thuần với `lib/actions/payroll-period.ts`.
@@ -162,6 +167,29 @@ export default async function PayrollPage({
       />
       <FinanceNav />
       <PayrollTabs canManage={canManage} />
+
+      {/*
+        THANH VÒNG ĐỜI ĐẶT TRƯỚC MỌI BẢNG SỐ.
+
+        Câu hỏi đầu tiên của người mở bảng lương không phải "bao nhiêu tiền" mà là "con số này đã
+        được ai duyệt chưa". Để nó ở cuối trang là để người ta đọc số trước rồi mới biết số ấy còn
+        là bản nháp.
+      */}
+      {periodState.key && viewAll ? (
+        <RunWorkflow
+          periodKey={periodState.key}
+          basis={basis}
+          status={periodState.status === "NONE" ? "DRAFT" : periodState.status}
+          canManage={canManage}
+          canApprove={can(user, "payroll:approve")}
+          calcRuns={periodState.calcRuns}
+          statusReason={periodState.statusReason}
+          approvedByEmail={periodState.approvedByEmail}
+          approvedAt={periodState.approvedAt ? formatDateTime(periodState.approvedAt) : null}
+          lockedAt={periodState.lockedAt ? formatDateTime(periodState.lockedAt) : null}
+          paidAt={periodState.paidAt ? formatDateTime(periodState.paidAt) : null}
+        />
+      ) : null}
 
       <DataTableToolbar
         period={{ defaultKey: "month" }}
@@ -900,8 +928,21 @@ export default async function PayrollPage({
         </div>
       </SectionCard>
 
+      {/*
+        ═══ BÓC TÁCH LỢI NHUẬN TÍNH LƯƠNG, TỪNG DÒNG MỘT ═══
+
+        Đặt TRƯỚC bảng theo mã hàng: người đọc cần thấy "con số này từ đâu ra" trước khi cần thấy
+        "chia theo mã thế nào". Bảng theo mã trả lời câu hỏi thứ hai, không thay được câu thứ nhất.
+      */}
       {selectedMarketer ? (
-        <div id="marketer">
+        <div id="marketer" className="space-y-4">
+          <ProfitBreakdown
+            marketer={selectedMarketer}
+            carry={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.carry ?? null}
+            commissionPercent={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.employee.percentPersonal ?? 0}
+            commission={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.bonusPersonal ?? null}
+            periodQs={qs}
+          />
           <SectionCard
             title={`${selectedMarketer.name} · theo mã hàng`}
             description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − giá vốn chịu ${formatVND(selectedMarketer.cogsCharged)} + % chủ mã nhận ${formatVND(selectedMarketer.ownerBonusReceived)} − % chia cho chủ mã ${formatVND(selectedMarketer.ownerBonusPaid)} − QC test ${formatVND(selectedMarketer.testSpend)}`}

@@ -69,7 +69,12 @@ export const PERMISSION_GROUPS = [
     items: [
       { key: "payroll:view-own", label: "Lương: xem của mình", hint: "Chỉ dòng lương / lợi nhuận cá nhân của chính mình. Khớp bằng KHOÁ TÀI KHOẢN: ô “Email đăng nhập ERP” trong hồ sơ nhân sự phải trùng email phiên đăng nhập — KHÔNG so tên (hai người trùng tên sẽ đọc được lương của nhau). Chưa khai email ⇒ người đó thấy bảng rỗng kèm câu chỉ đường." },
       { key: "payroll:view", label: "Lương: xem toàn bộ", hint: "Lương và lợi nhuận của mọi nhân sự (trưởng nhóm, kế toán)" },
-      { key: "payroll:manage", label: "Lương: khai báo nhân sự & chia mã", hint: "Cơ chế lương, người phụ trách mã, % chủ mã, fanpage → marketer" },
+      { key: "payroll:manage", label: "Lương: khai báo nhân sự & chia mã", hint: "Cơ chế lương, chính sách lương, phân công, người phụ trách mã, % chủ mã, fanpage → marketer. Tính và chụp ảnh kỳ." },
+      {
+        key: "payroll:approve",
+        label: "Lương: duyệt, khoá & đánh dấu đã trả",
+        hint: "DUYỆT là một chữ ký, không phải một lượt bấm — nên nó tách khỏi quyền KHAI BÁO. Người khai số và người duyệt số không nên là một; đây là chỗ để tách hai vai ấy. Gồm cả mở khoá kỳ đã chốt (có lý do bắt buộc) và đánh dấu đã trả tiền.",
+      },
     ],
   },
   {
@@ -137,7 +142,10 @@ const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [...ALL_PERMISSIONS],
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage"].includes(p)),
+  // `payroll:approve` đứng cùng nhóm với `payroll:manage`: cả hai đều là quyền TIỀN. Mở mặc định
+  // cho MANAGER là để bản này lặng lẽ cấp thêm quyền duyệt lương cho những tài khoản đang có —
+  // đúng thứ AGENTS.md mục 31 nói phải rơi về phía HẸP HƠN.
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve"].includes(p)),
   // Trưởng nhóm: xem lương & LN của cả nhóm, báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền thực, không sửa cấu hình
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],

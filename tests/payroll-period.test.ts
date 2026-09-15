@@ -93,7 +93,10 @@ export async function testPayrollPeriod(db: Db) {
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: NHAN_SU(9_000_000, 50) });
   clearMemo();
   const sauKhiDoi = await getPayrollPeriodState(KY, "profit1");
-  assert.equal(sauKhiDoi.status, "FINAL", "kỳ vẫn ở trạng thái đã chốt");
+  // `FINAL` cũ trên production ĐỌC thành `LOCKED` (`normalizePayrollStatus`) — cột dữ liệu KHÔNG
+  // bị viết lại, vì đó là dữ liệu của những kỳ đã trả tiền.
+  assert.equal(sauKhiDoi.status, "LOCKED", "kỳ vẫn ở trạng thái đã khoá — `FINAL` cũ đọc thành `LOCKED`");
+  assert.equal(sauKhiDoi.frozen, true, "và nó là kỳ ĐÃ ĐÓNG BĂNG: không tính lại, không nhập thêm");
   assert.equal(sauKhiDoi.snapshot?.lines[0]?.percentTotal, 10, "SỬA HỒ SƠ HÔM NAY KHÔNG ĐƯỢC VIẾT LẠI KỲ ĐÃ TRẢ TIỀN — ảnh vẫn giữ tỷ lệ 10%");
   assert.equal(sauKhiDoi.snapshot?.lines[0]?.fixed, 6_000_000, "và vẫn giữ lương cứng 6tr của lúc chốt, không phải 9tr của hôm nay");
   assert.equal(sauKhiDoi.snapshot?.totalSalary, anh.totalSalary, "và tổng lương của kỳ đứng yên");

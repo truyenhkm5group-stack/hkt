@@ -21,8 +21,9 @@
  * Nên ở đây làm cách thứ ba: ảnh chụp VẪN là con số của kỳ, và phần tính lại hôm nay đứng CẠNH nó
  * như một ĐỀ XUẤT ĐIỀU CHỈNH có dấu vết. Người quyết có sửa hay không; máy không tự sửa.
  */
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { alias } from "drizzle-orm/pg-core";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_CALC_VERSION,
@@ -30,6 +31,7 @@ import {
   type PayrollBasis,
 } from "@/lib/constants/payroll";
 import { PAYROLL_ENGINE_VERSION } from "@/lib/payroll/engine";
+import { isFrozen, normalizePayrollStatus, type PayrollRunStatus } from "@/lib/constants/payroll-lifecycle";
 import type { Period } from "@/lib/search-params";
 import type { PayrollReport } from "@/lib/queries/payroll";
 
@@ -179,11 +181,23 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
 export type PayrollPeriodState = {
   /** `null` = kỳ không có mốc đầu/cuối ⇒ không có danh tính kỳ ⇒ không chốt được. */
   key: string | null;
-  status: "NONE" | "DRAFT" | "FINAL";
+  /**
+   * `NONE` = chưa ai bấm gì cho kỳ này. Còn lại là sáu trạng thái của
+   * `lib/constants/payroll-lifecycle.ts`; giá trị `FINAL` cũ trên production đọc thành `LOCKED`.
+   */
+  status: "NONE" | PayrollRunStatus;
+  /** Ảnh chụp đã đóng băng chưa (`LOCKED` / `PAID`) — không tính lại, không nhập thêm. */
+  frozen: boolean;
   finalizedAt: Date | null;
   finalizedByEmail: string | null;
+  approvedAt: Date | null;
+  approvedByEmail: string | null;
+  lockedAt: Date | null;
+  paidAt: Date | null;
+  statusReason: string;
+  calcRuns: number;
   note: string;
-  /** Chỉ có khi `FINAL`. */
+  /** Có từ `CALCULATED` trở đi — mọi trạng thái sau `DRAFT` đều phải có ảnh chụp. */
   snapshot: PayrollSnapshot | null;
   /** Phiên bản phép tính lúc chụp — khác `PAYROLL_CALC_VERSION` nghĩa là ảnh dựng bằng luật cũ. */
   calcVersion: number | null;
@@ -197,8 +211,15 @@ export async function getPayrollPeriodState(period: Period, basis: PayrollBasis)
   const base: PayrollPeriodState = {
     key,
     status: "NONE",
+    frozen: false,
     finalizedAt: null,
     finalizedByEmail: null,
+    approvedAt: null,
+    approvedByEmail: null,
+    lockedAt: null,
+    paidAt: null,
+    statusReason: "",
+    calcRuns: 0,
     note: "",
     snapshot: null,
     calcVersion: null,
@@ -207,6 +228,7 @@ export async function getPayrollPeriodState(period: Period, basis: PayrollBasis)
   if (!key) return base;
   const db = await getDb();
   const p = schema.payrollPeriods;
+  const nguoiDuyet = alias(schema.users, "nguoi_duyet");
   const [row] = await db
     .select({
       status: p.status,
@@ -215,20 +237,41 @@ export async function getPayrollPeriodState(period: Period, basis: PayrollBasis)
       note: p.note,
       finalizedAt: p.finalizedAt,
       finalizedByEmail: schema.users.email,
+      approvedAt: p.approvedAt,
+      approvedByEmail: nguoiDuyet.email,
+      lockedAt: p.lockedAt,
+      paidAt: p.paidAt,
+      statusReason: p.statusReason,
+      calcRuns: p.calcRuns,
     })
     .from(p)
     .leftJoin(schema.users, eq(schema.users.id, p.finalizedBy))
+    .leftJoin(nguoiDuyet, eq(nguoiDuyet.id, p.approvedBy))
     .where(and(eq(p.periodKey, key), eq(p.basis, basis)))
     .limit(1);
   if (!row) return base;
-  const isFinal = row.status === "FINAL" && row.snapshot !== null;
+  /*
+    ẢNH CHỤP LÀ ĐIỀU KIỆN ĐỂ MỘT TRẠNG THÁI CÓ NGHĨA.
+
+    Một dòng mang trạng thái `CALCULATED` mà `snapshot` rỗng là một dòng nói dối: lần mở sau vẫn
+    tính lại và số sẽ khác. Ràng buộc CSDL đã chặn, nhưng ở đây vẫn hạ về `DRAFT` thay vì tin —
+    dữ liệu cũ từ trước ràng buộc ấy vẫn có thể tồn tại.
+  */
+  const trangThai = row.snapshot === null ? "DRAFT" : normalizePayrollStatus(row.status);
   return {
     ...base,
-    status: isFinal ? "FINAL" : "DRAFT",
+    status: trangThai,
+    frozen: isFrozen(trangThai),
     finalizedAt: row.finalizedAt ?? null,
     finalizedByEmail: row.finalizedByEmail ?? null,
+    approvedAt: row.approvedAt ?? null,
+    approvedByEmail: row.approvedByEmail ?? null,
+    lockedAt: row.lockedAt ?? null,
+    paidAt: row.paidAt ?? null,
+    statusReason: row.statusReason ?? "",
+    calcRuns: row.calcRuns ?? 0,
     note: row.note ?? "",
-    snapshot: isFinal ? (row.snapshot as PayrollSnapshot) : null,
+    snapshot: trangThai === "DRAFT" ? null : (row.snapshot as PayrollSnapshot),
     calcVersion: row.calcVersion ?? null,
   };
 }
@@ -283,7 +326,9 @@ export async function listPayrollPeriods(limit = 12) {
       finalizedAt: p.finalizedAt,
     })
     .from(p)
-    .where(eq(p.status, "FINAL"))
+    // Kỳ đã ĐÓNG BĂNG (`FINAL` cũ đọc như `LOCKED`). Kỳ mới tính xong chưa phải lịch sử — nó còn
+    // đổi được, nên liệt nó vào đây là gọi một bản nháp là quá khứ.
+    .where(inArray(p.status, ["FINAL", "LOCKED", "PAID"]))
     .orderBy(desc(p.periodStart))
     .limit(limit);
 }
@@ -295,5 +340,5 @@ export async function finalizedPeriodsOverlapping(from: Date, to: Date) {
   return db
     .select({ periodKey: p.periodKey, basis: p.basis, finalizedAt: p.finalizedAt })
     .from(p)
-    .where(and(eq(p.status, "FINAL"), lte(p.periodStart, to), gte(p.periodEnd, from)));
+    .where(and(inArray(p.status, ["FINAL", "LOCKED", "PAID"]), lte(p.periodStart, to), gte(p.periodEnd, from)));
 }

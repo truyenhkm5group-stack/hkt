@@ -39,6 +39,7 @@ const MOI = [
   "0090_fanpage_alias_access",
   "0091_landing_attribution",
   "0092_payroll_policy_engine",
+  "0093_payroll_run_lifecycle",
 ] as const;
 
 /*
@@ -117,6 +118,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'landing_attributions'"), 0, "bước 1: bảng landing_attributions CHƯA được có — đó là thứ 0091 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'salary_policies'"), 0, "bước 1: bảng salary_policies CHƯA được có — đó là thứ 0092 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketer_profit_carryover' and column_name = 'component_code'"), 0, "bước 1: cột component_code CHƯA được có — đó là thứ 0092 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'payroll_periods' and column_name = 'approved_by'"), 0, "bước 1: cột approved_by CHƯA được có — đó là thứ 0093 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -417,6 +419,49 @@ export async function testMigrationUpgradePath() {
       () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, component_code, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co5', 'mkt-1', '2026-09', 'TEAM_PROFIT', 0, 'OPENING_DECLARATION', 1, 1, 500, 0, 0, 0)`),
       (e: unknown) => /unique|duplicate/i.test(String((e as { message?: string })?.message ?? e)),
       "0092: nới khoá KHÔNG phải nới lỏng — một người + một tháng + một thành phần vẫn chỉ MỘT dòng",
+    );
+
+    /*
+      ═══ 0093 · VÒNG ĐỜI KỲ LƯƠNG: SÁU TRẠNG THÁI, VÀ `FINAL` CŨ KHÔNG BỊ VIẾT LẠI ═══
+
+      Điều quan trọng nhất là điều migration này KHÔNG làm: nó không đụng vào dòng `FINAL` nào.
+      Đó là các kỳ ĐÃ TRẢ TIỀN; viết đè trạng thái của chúng thành 'LOCKED' "cho sạch bảng" là sửa
+      dữ liệu của một kỳ bất biến. `FINAL` ở lại trong CHECK và được ĐỌC như `LOCKED`.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'payroll_periods' and column_name = 'approved_by'"), 1, "0093: cột người duyệt phải được thêm");
+    assert.equal(await dem("select count(*)::int as n from payroll_periods where status = 'FINAL'"), 1, "0093: dòng FINAL có từ trước KHÔNG bị viết lại — đó là một kỳ đã trả tiền");
+
+    // Bốn trạng thái mới ghi được.
+    await client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis, status, snapshot, finalized_at) values ('up-pp4', '2026-10-01..2026-10-31', '2026-10-01', '2026-10-31', 'profit1', 'CALCULATED', '{"totalSalary": 1}'::jsonb, now())`);
+    assert.equal(await dem("select count(*)::int as n from payroll_periods where status = 'CALCULATED'"), 1, "0093: trạng thái CALCULATED ghi được");
+
+    /*
+      MỘT CHỮ KÝ KHÔNG CÓ TÊN LÀ MỘT CHỮ KÝ TRỐNG.
+
+      Ba ràng buộc dưới đây chặn đúng chuyện đó: đánh dấu "đã duyệt" / "đã khoá" / "đã trả" mà
+      không có mốc thời gian nào. Sáu tháng sau không ai trả lời được "ai đồng ý con số này".
+    */
+    await assert.rejects(
+      () => client.query(`update payroll_periods set status = 'APPROVED' where id = 'up-pp4'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_approved_check"),
+      "0093: duyệt mà không có mốc duyệt bị chặn",
+    );
+    await client.query(`update payroll_periods set status = 'APPROVED', approved_at = now() where id = 'up-pp4'`);
+    await assert.rejects(
+      () => client.query(`update payroll_periods set status = 'LOCKED' where id = 'up-pp4'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_locked_check"),
+      "0093: khoá mà không có mốc khoá bị chặn",
+    );
+    await client.query(`update payroll_periods set status = 'LOCKED', locked_at = now() where id = 'up-pp4'`);
+    await assert.rejects(
+      () => client.query(`update payroll_periods set status = 'PAID' where id = 'up-pp4'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_paid_check"),
+      "0093: đánh dấu đã trả mà không có mốc trả bị chặn",
+    );
+    await assert.rejects(
+      () => client.query(`update payroll_periods set status = 'XONG' where id = 'up-pp4'`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("payroll_periods_status_check"),
+      "0093: trạng thái lạ bị chặn — danh sách ĐÓNG",
     );
 
     /*

@@ -3726,8 +3726,35 @@ export const payrollPeriods = pgTable(
      * đường cho hai nơi nói hai điều khác nhau.
      */
     basis: text("basis").notNull(),
-    /** `DRAFT` = tính sống mỗi lần mở; `FINAL` = đọc `snapshot`, không tính lại. */
+    /**
+     * VÒNG ĐỜI SÁU TRẠNG THÁI — `lib/constants/payroll-lifecycle.ts`.
+     *
+     * `DRAFT` · `CALCULATED` · `UNDER_REVIEW` · `APPROVED` · `LOCKED` · `PAID`.
+     *
+     * `FINAL` là giá trị CŨ còn nằm trên production, và nó Ở LẠI trong ràng buộc `CHECK`: viết đè
+     * cột trạng thái của những kỳ ĐÃ TRẢ TIỀN để "cho sạch bảng" là đúng thứ AGENTS.md mục 21 cấm.
+     * Nó được ĐỌC như `LOCKED` (`normalizePayrollStatus`) — không mất gì, không đụng một dòng nào.
+     */
     status: text("status").notNull().default("DRAFT"),
+    /** Người ĐÃ DUYỆT con số này. Tách khỏi `finalizedBy`: khai số và duyệt số là hai vai. */
+    approvedAt: ts("approved_at"),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    /** Người khoá kỳ (đóng băng ảnh chụp). */
+    lockedAt: ts("locked_at"),
+    lockedBy: text("locked_by").references(() => users.id, { onDelete: "set null" }),
+    /** Mốc khẳng định tiền ĐÃ RA KHỎI TÀI KHOẢN. Khác hẳn "phải trả". */
+    paidAt: ts("paid_at"),
+    paidBy: text("paid_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * Lý do của lần chuyển trạng thái gần nhất CẦN lý do (trả lại để sửa · mở khoá).
+     * Rỗng khi lần chuyển gần nhất không đòi lý do — KHÔNG phải "chưa ai ghi".
+     */
+    statusReason: text("status_reason").notNull().default(""),
+    /**
+     * SỐ LẦN ĐÃ TÍNH LẠI. Một kỳ tính lại năm lần trước khi duyệt là một tín hiệu đáng đọc; không
+     * đếm thì nó biến mất sau lượt cuối.
+     */
+    calcRuns: integer("calc_runs").notNull().default(0),
     /** Ảnh chụp toàn bộ số + căn cứ của kỳ. Bất biến sau khi `FINAL`. */
     snapshot: jsonb("snapshot"),
     /** Phiên bản phép tính lúc chụp (`PAYROLL_CALC_VERSION`). */
@@ -3744,11 +3771,16 @@ export const payrollPeriods = pgTable(
     // nhau cho cùng một câu hỏi, và không ai biết cái nào đã dùng để trả tiền.
     uniqueIndex("payroll_periods_uq").on(t.periodKey, t.basis),
     index("payroll_periods_start_idx").on(t.periodStart),
-    check("payroll_periods_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    // `FINAL` ở lại vì production đang có nó — xem chú thích ở cột `status`.
+    check("payroll_periods_status_check", sql`${t.status} IN ('DRAFT', 'CALCULATED', 'UNDER_REVIEW', 'APPROVED', 'LOCKED', 'PAID', 'FINAL')`),
     check("payroll_periods_basis_check", sql`${t.basis} IN ('profit1', 'profit2', 'cash', 'nominal')`),
     check("payroll_periods_range_check", sql`${t.periodEnd} >= ${t.periodStart}`),
     // Chốt mà không có ảnh chụp thì "chốt" không có nghĩa gì: lần mở sau vẫn tính lại.
     check("payroll_periods_final_check", sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`),
+    // Đã duyệt / khoá / trả thì phải biết AI và LÚC NÀO — một chữ ký không có tên là chữ ký trống.
+    check("payroll_periods_approved_check", sql`${t.status} NOT IN ('APPROVED', 'LOCKED', 'PAID') OR ${t.approvedAt} IS NOT NULL`),
+    check("payroll_periods_locked_check", sql`${t.status} NOT IN ('LOCKED', 'PAID') OR ${t.lockedAt} IS NOT NULL`),
+    check("payroll_periods_paid_check", sql`${t.status} <> 'PAID' OR ${t.paidAt} IS NOT NULL`),
   ],
 );
 

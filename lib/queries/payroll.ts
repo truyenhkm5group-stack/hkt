@@ -58,8 +58,18 @@ export type MarketerProductLine = {
   attributionMode: AttributionMode;
   attributedRevenue: number;
   attributedProfitBeforeAds: number;
-  /** Giá vốn bị trừ trên dòng này (LN1: theo hàng giao TC × tỷ trọng; LN2: toàn bộ hàng nhập, chỉ chủ mã) */
+  /** Giá vốn bị trừ trên dòng này (cơ sở tính lương: theo hàng giao TC × tỷ trọng; cơ sở hàng nhập: toàn bộ, chỉ chủ mã) */
   cogsCharged: number;
+  /**
+   * CƯỚC VẬN CHUYỂN VÀ PHÍ HOÀN bị trừ trên dòng này (× tỷ trọng quy kết).
+   *
+   * Trước bản này nó bị GỘP vào `attributedProfitBeforeAds` nên không cách nào tách ra để in. Bảng
+   * bóc tách lợi nhuận đòi từng dòng chi phí đứng riêng — gộp lại thì người đọc chỉ thấy một con
+   * số và phải tin nó.
+   */
+  shippingCharged: number;
+  /** Chi phí cố định và vận hành PHÂN BỔ cho dòng này (× tỷ trọng quy kết). */
+  operatingCharged: number;
   /** % chủ mã: dương = nhận từ người đẩy chéo, âm = chia cho chủ mã */
   ownerBonus: number;
   /** Phần shop giữ lại khi chủ mã chỉ hưởng < 100% LN đơn của mình */
@@ -78,6 +88,10 @@ export type MarketerProfit = {
   attributedOrders: number;
   attributedProfitBeforeAds: number;
   cogsCharged: number;
+  /** Tổng cước vận chuyển + phí hoàn quy kết cho người này. */
+  shippingCharged: number;
+  /** Tổng chi phí cố định + vận hành phân bổ cho người này. */
+  operatingCharged: number;
   ownerBonusReceived: number;
   ownerBonusPaid: number;
   ownedProducts: string[];
@@ -472,7 +486,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     let m = marketers.get(id);
     if (!m) {
       const emp = nameOf(id);
-      m = { marketerId: id, name: labelOf(id, emp), adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
+      m = { marketerId: id, name: labelOf(id, emp), adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, shippingCharged: 0, operatingCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
       marketers.set(id, m);
     }
     return m;
@@ -577,6 +591,10 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
         attributedRevenue: Math.round(row.revenue * share),
         attributedProfitBeforeAds: Math.round(variable * share),
         cogsCharged,
+        // Cùng tỷ trọng với doanh thu: `variable` đã trừ hai khoản này rồi, ở đây chỉ TÁCH chúng
+        // ra để in, không trừ thêm lần nào.
+        shippingCharged: Math.round(row.shipping * share),
+        operatingCharged: Math.round(row.operatingAlloc * share),
         ownerBonus: -bonus,
         shopRetained: toShop,
         personalProfit: base - bonus - toShop,
@@ -588,6 +606,8 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       m.attributedOrders += line.orders;
       m.attributedProfitBeforeAds += line.attributedProfitBeforeAds;
       m.cogsCharged += cogsCharged;
+      m.shippingCharged += line.shippingCharged;
+      m.operatingCharged += line.operatingCharged;
       m.ownerBonusPaid += bonus;
       m.personalProfit += line.personalProfit;
     }
@@ -596,7 +616,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       if (!shares.has(ownerId)) {
         // chủ mã không chạy QC trong kỳ: vẫn chịu giá vốn hàng nhập (LN2) và nhận % chéo
         const cogsCharged = useDeliveredCogs ? 0 : row.purchaseCost;
-        o.products.push({ productId: row.productId, productName: row.productName, code: row.code, role: "owner", adSpend: 0, share: 0, attributionMode: attribution.mode, attributedRevenue: 0, attributedProfitBeforeAds: 0, cogsCharged, ownerBonus: ownerBonusTotal, shopRetained: 0, personalProfit: ownerBonusTotal - cogsCharged, orders: 0 });
+        o.products.push({ productId: row.productId, productName: row.productName, code: row.code, role: "owner", adSpend: 0, share: 0, attributionMode: attribution.mode, attributedRevenue: 0, attributedProfitBeforeAds: 0, cogsCharged, shippingCharged: 0, operatingCharged: 0, ownerBonus: ownerBonusTotal, shopRetained: 0, personalProfit: ownerBonusTotal - cogsCharged, orders: 0 });
         o.cogsCharged += cogsCharged;
         o.personalProfit += ownerBonusTotal - cogsCharged;
       } else {
