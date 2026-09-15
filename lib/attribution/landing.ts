@@ -58,13 +58,41 @@ export function readTracking(raw: unknown, fallbackAdId?: string | null): Landin
     const v = pick(keys);
     return v && /^[0-9]{10,25}$/.test(v) ? v : null;
   };
+  const landingUrl = pick(COLS.landingUrl);
   return {
     adId: numeric(COLS.adId) ?? (fallbackAdId && /^[0-9]{10,25}$/.test(fallbackAdId) ? fallbackAdId : null),
     adsetId: numeric(COLS.adsetId),
     campaignName: pick(COLS.campaignName),
     utmCampaign: pick(COLS.utmCampaign),
-    landingUrl: pick(COLS.landingUrl),
+    landingUrl,
+    urlIds: idsFromUrl(landingUrl),
   };
+}
+
+/**
+ * MÃ SỐ META NẰM NGAY TRONG LINK LANDING.
+ *
+ * Meta điền sẵn `utm_id` / `utm_term` / `utm_content` bằng id chiến dịch / nhóm / mẩu quảng cáo.
+ * Ở đây chỉ RÚT RA, không phân loại: thứ tự ba tham số phụ thuộc mẫu link người chạy đặt, nên
+ * đoán "utm_id luôn là chiến dịch" là dựng một giả định không ai kiểm. Việc phân loại để cho phép
+ * tra: khớp ở sổ nào thì nó là loại ấy.
+ *
+ * Link hỏng (không parse được) trả về mảng rỗng — không ném, vì một ô chữ do form ghi thì hỏng là
+ * chuyện bình thường.
+ */
+export function idsFromUrl(url: string | null): string[] {
+  if (!url) return [];
+  const out: string[] = [];
+  try {
+    const q = new URL(url).searchParams;
+    for (const key of ["utm_id", "utm_term", "utm_content", "utm_source"]) {
+      const v = (q.get(key) ?? "").trim();
+      if (/^[0-9]{10,25}$/.test(v) && !out.includes(v)) out.push(v);
+    }
+  } catch {
+    // link không parse được ⇒ không có mã nào đọc được, và đó là câu trả lời đúng
+  }
+  return out;
 }
 
 /** Sổ tra cứu nạp MỘT LẦN cho cả lượt đối soát — mỗi đơn tra trong bộ nhớ, không truy vấn lại. */

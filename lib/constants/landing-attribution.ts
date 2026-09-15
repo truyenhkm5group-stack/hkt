@@ -120,6 +120,15 @@ export type LandingTracking = {
   utmCampaign: string | null;
   /** Link landing đầy đủ, giữ nguyên để truy nguyên. */
   landingUrl: string | null;
+  /**
+   * MÃ SỐ META ĐỌC ĐƯỢC TỪ CHÍNH LINK LANDING (`utm_id` · `utm_term` · `utm_content`).
+   *
+   * Meta điền sẵn ba tham số này bằng `{{campaign.id}}` / `{{adset.id}}` / `{{ad.id}}`. Thứ tự
+   * của chúng KHÔNG được giả định: mỗi mã đem tra lần lượt ở sổ mẩu quảng cáo → sổ nhóm → bảng
+   * chi tiêu, và chỉ nhận khi khớp TUYỆT ĐỐI. Khớp ở đâu thì nó là loại ấy — suy ra từ dữ liệu,
+   * không từ tên tham số.
+   */
+  urlIds: string[];
 };
 
 /** Một mẩu quảng cáo trong sổ ERP, đủ để trả lời chiến dịch / TKQC / fanpage. */
@@ -240,9 +249,10 @@ export function resolveLandingAttribution(input: {
     đọc đúng bản chất: một MÃ, đem đi tra như mọi mã khác.
   */
   const nameIsId = tracking.campaignName && NUMERIC_ID.test(tracking.campaignName.trim()) ? tracking.campaignName.trim() : null;
+  const urlIds = (tracking.urlIds ?? []).filter((x) => NUMERIC_ID.test(x));
   const adsetId = (tracking.adsetId && NUMERIC_ID.test(tracking.adsetId) ? tracking.adsetId : null) ?? nameIsId;
   const campaignName = nameIsId ? null : tracking.campaignName?.trim() || null;
-  if (!adId && !adsetId && !campaignName) return { ...EMPTY, gap: "NO_TRACKING" };
+  if (!adId && !adsetId && !campaignName && !urlIds.length) return { ...EMPTY, gap: "NO_TRACKING" };
   /*
     "(trực tiếp)" là lời khai của chính form: khách vào thẳng, không qua quảng cáo nào. Đó KHÔNG
     phải một chỗ trống phải đi lấp — nó là câu trả lời, và câu trả lời ấy là "không thuộc ai".
@@ -346,6 +356,61 @@ export function resolveLandingAttribution(input: {
     return { ...EMPTY, gap: adset?.missing ? "NO_MATCH" : "META_ADSET_NOT_SYNCED", adsetId, adId };
   }
   if (adId) return { ...EMPTY, gap: "META_AD_NOT_SYNCED", adId, adsetId };
+
+  /*
+    ── BẬC 2d: MÃ SỐ NẰM NGAY TRONG LINK LANDING.
+
+    Meta điền sẵn `utm_id` / `utm_term` / `utm_content` bằng id chiến dịch / nhóm / mẩu. Thứ tự
+    không được giả định — mỗi mã đem tra LẦN LƯỢT ở ba sổ, khớp ở đâu thì nó là loại ấy. Đây vẫn
+    là khớp TUYỆT ĐỐI trên một khoá, không phải đoán.
+  */
+  for (const mid of urlIds) {
+    const adFromUrl = adById.get(mid);
+    if (adFromUrl) {
+      const marketerId = adFromUrl.campaignId ? (marketerOfCampaignId.get(adFromUrl.campaignId) ?? null) : null;
+      return finish({
+        tier: "AD_ID",
+        marketerId,
+        adAccountId: adFromUrl.accountId ?? null,
+        campaignId: adFromUrl.campaignId ?? null,
+        adsetId: adFromUrl.adsetId ?? adsetId,
+        adId: mid,
+        pageId: pageOf(adFromUrl),
+        evidence: `ad_id ${mid} đọc từ link landing, khớp sổ quảng cáo → chiến dịch ${adFromUrl.campaignId ?? "?"}`,
+      });
+    }
+    const adsetFromUrl = adsetById.get(mid);
+    if (adsetFromUrl && !adsetFromUrl.missing && adsetFromUrl.campaignId) {
+      const camp = campaignById.get(adsetFromUrl.campaignId);
+      if (camp) {
+        return finish({
+          tier: "ADSET_ID",
+          marketerId: camp.marketerIds.length === 1 ? camp.marketerIds[0] : null,
+          adAccountId: adsetFromUrl.accountId ?? null,
+          campaignId: adsetFromUrl.campaignId,
+          adsetId: mid,
+          adId,
+          pageId: null,
+          evidence: `adset_id ${mid} đọc từ link landing → chiến dịch ${adsetFromUrl.campaignId} ("${camp.campaignName}")`,
+          ambiguousMarketer: camp.marketerIds.length > 1,
+        });
+      }
+    }
+    const campFromUrl = campaignById.get(mid);
+    if (campFromUrl) {
+      return finish({
+        tier: "CAMPAIGN_ID",
+        marketerId: campFromUrl.marketerIds.length === 1 ? campFromUrl.marketerIds[0] : null,
+        adAccountId: campFromUrl.accountIds.length === 1 ? campFromUrl.accountIds[0] : null,
+        campaignId: mid,
+        adsetId,
+        adId,
+        pageId: null,
+        evidence: `campaign_id ${mid} đọc từ link landing, khớp tuyệt đối bảng chi tiêu ("${campFromUrl.campaignName}")`,
+        ambiguousMarketer: campFromUrl.marketerIds.length > 1,
+      });
+    }
+  }
 
   // ── BẬC 3: TÊN chiến dịch khớp tuyệt đối bảng chi tiêu.
   const camp = campaignName ? (campaignByName.get(campaignName) ?? null) : null;
