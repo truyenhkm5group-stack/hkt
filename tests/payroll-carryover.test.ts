@@ -322,7 +322,7 @@ export async function testPayrollCarryover(db: Db) {
       finalizedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [c.employeeId, c.monthKey],
+      target: [c.employeeId, c.monthKey, c.componentCode],
       set: { realProfit: 9_999_999, payableCommission: 999_999, closingBalance: 0 },
       setWhere: eq(c.status, "DRAFT"),
     });

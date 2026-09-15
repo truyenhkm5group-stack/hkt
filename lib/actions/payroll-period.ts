@@ -16,7 +16,7 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport } from "@/lib/queries/payroll";
-import { rateToBp } from "@/lib/constants/payroll-carryover";
+import { LEGACY_CARRY_COMPONENT, rateToBp } from "@/lib/constants/payroll-carryover";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 // `finalizedPeriodsOverlapping` không còn dùng ở đây: phép kiểm chồng lấn nay chạy BÊN TRONG giao
 // dịch đã cầm khoá (xem dưới), vì kiểm ngoài rồi ghi trong là đúng cái khe mà hai yêu cầu đồng
@@ -119,6 +119,8 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
       return {
         employeeId: l.employee.id,
         monthKey: c.monthKey,
+        // Đường tính cũ có đúng một khoản bù lỗ; khoá thành phần của nó là hằng số này.
+        componentCode: LEGACY_CARRY_COMPONENT,
         openingBalance: c.openingBalance ?? 0,
         openingSource: c.openingBasis === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH",
         realProfit: c.realProfit ?? 0,
@@ -220,7 +222,7 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
           .insert(c)
           .values(dong)
           .onConflictDoUpdate({
-            target: [c.employeeId, c.monthKey],
+            target: [c.employeeId, c.monthKey, c.componentCode],
             set: { ...dong, updatedAt: luc },
             setWhere: eq(c.status, "DRAFT"),
           });
