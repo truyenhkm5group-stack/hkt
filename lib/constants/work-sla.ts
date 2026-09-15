@@ -129,6 +129,18 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "CSKH & tin nhắn",
   },
 
+  {
+    key: "ORDER_DUPLICATE",
+    label: "Đơn nghi trùng (gọi khách xác nhận)",
+    hours: WORK_SOURCE_SPEC.ORDER_DUPLICATE.slaHours,
+    why:
+      "Cửa sổ sửa đóng lại lúc bưu tá tới lấy hàng, không lúc hết ngày. Gọi kịp thì huỷ được một đơn " +
+      "và không mất gì; muộn một buổi là hai gói cùng lên đường, và cái thứ hai gần như chắc chắn quay " +
+      "về kèm hai chiều cước.",
+    department: "SALES",
+    alsoShownOn: "Soát đơn trước khi gửi",
+  },
+
   /* ───── Giao vận ───── */
   {
     key: "SHIPMENT_CARE",

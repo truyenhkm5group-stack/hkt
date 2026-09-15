@@ -876,6 +876,31 @@ export const orders = pgTable(
     referralCode: text("referral_code"),
     /** Mốc nguồn ghi nhận quy kết (nếu nguồn có gửi) — khác thời điểm ERP đọc được. */
     attributionCapturedAt: ts("attribution_captured_at"),
+    /**
+     * ═══ NGÀY KHÁCH HẸN GIAO ═══
+     *
+     * Khách đã CHỐT MUA nhưng xin giao vào một ngày sau: "gửi giúp em ngày 20 nhé, giờ em đi công
+     * tác". Trước cột này, ERP không phân biệt được đơn đó với một đơn bị bỏ quên — cả hai đều là
+     * "đã xác nhận mà chưa gửi", nên đơn có hẹn bị đếm là trễ hạn từ ngày thứ hai.
+     *
+     * KHÔNG PHẢI `expected_delivery` của vận đơn: cột kia là ETA do Viettel Post trả về, tức DỰ BÁO
+     * CỦA ĐVVC về chuyến hàng. Cột này là LỜI HỨA VỚI KHÁCH, có trước khi vận đơn tồn tại.
+     *
+     * LƯU MỘT MỐC THẬT, KHÔNG LƯU MỘT NGÀY TRẦN. Khách hẹn "ngày 20" nghĩa là "phải tới tay trong
+     * ngày 20 giờ Việt Nam", nên giá trị lưu là CUỐI ngày 20 theo giờ VN (`vnEndOfDay`). Lưu kiểu
+     * `date` trần thì mỗi nơi đọc lại phải tự chọn múi giờ, và nửa đêm là chỗ sai đầu tiên.
+     *
+     * `NULL` = khách KHÔNG hẹn ngày nào, không phải "hẹn hôm nay".
+     */
+    customerPromisedAt: ts("customer_promised_at"),
+    /** Khách nói gì khi xin hẹn. Ô chữ cho người đọc — KHÔNG đầu vào của phép tính nào. */
+    customerPromisedNote: text("customer_promised_note").notNull().default(""),
+    /**
+     * AI ghi lời hẹn này. Quy kết đi bằng KHOÁ TÀI KHOẢN (AGENTS.md mục 34), không bằng ô chữ.
+     * `NULL` ở dòng cũ nghĩa là CHƯA BIẾT — migration KHÔNG backfill (mục 35).
+     */
+    customerPromisedByUserId: text("customer_promised_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    customerPromisedSetAt: ts("customer_promised_set_at"),
     marketplaceId: text("marketplace_id"),
     sellerName: text("seller_name").notNull().default(""),
     careName: text("care_name").notNull().default(""),
@@ -909,6 +934,12 @@ export const orders = pgTable(
     index("orders_ship_province_idx").on(t.shipProvince).where(sql`${t.shipProvince} <> ''`),
     index("orders_source_idx").on(t.source),
     index("orders_system_idx").on(t.systemId),
+    /*
+      Đơn CÓ hẹn ngày giao là thiểu số tuyệt đối, nên chỉ mục RIÊNG PHẦN: nó chỉ chứa những dòng
+      thật sự có lời hẹn. Hàng đợi nhắc hẹn lọc đúng vị ngữ này, và chỉ mục đầy đủ sẽ tốn chỗ cho
+      hàng nghìn dòng `NULL` mà không câu nào hỏi tới.
+    */
+    index("orders_promised_idx").on(t.customerPromisedAt).where(sql`${t.customerPromisedAt} is not null`),
     index("orders_bill_phone_idx").on(t.billPhone),
   ],
 );

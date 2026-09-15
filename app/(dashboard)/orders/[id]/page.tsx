@@ -19,9 +19,16 @@ import { pancakeStatusName } from "@/lib/constants/pancake";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { getDb } from "@/db";
 import { getOrderDetail } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
-import { requirePermission } from "@/lib/auth/session";
+import { getOrderValidation } from "@/lib/queries/preship-validation";
+import { SEVERITY_LABEL, SEVERITY_TONE } from "@/lib/constants/preship-validation";
+import { PRE_SHIP_STAGES } from "@/lib/constants/pancake";
+import { PromisedDelivery } from "@/app/(dashboard)/orders/[id]/promised-delivery";
+import { promisedVerdict } from "@/lib/constants/promised-delivery";
+import { vnDateKey } from "@/lib/format";
+import { can, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,7 +36,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("orders:read");
+  const user = await requirePermission("orders:read");
   const { id } = await params;
   // Hai phép đọc đầu không phụ thuộc nhau; bốn phép đọc sau chỉ cần `order`. Trước đây sáu lượt
   // nối đuôi, mỗi lượt một vòng đi-về CSDL — trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
@@ -37,11 +44,29 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   if (!order) notFound();
   // Đơn thiếu SĐT / địa chỉ (khách cũ mua lại chỉ nhắn "gửi địa chỉ cũ") → gợi ý lấy lại từ đơn cũ của chính khách
   const thieuThongTin = !order.billPhone || !(order.shipFullAddress || order.shipAddress);
-  const [timeline, erpHist, erpOther, prev] = await Promise.all([
+  /*
+    BẢN SOÁT CHỈ CHẠY CHO ĐƠN CHƯA GỬI.
+
+    Với đơn đã rời kho thì mọi lỗi chứng từ đã hết đường sửa miễn phí, và một dải cảnh báo đỏ trên
+    đầu trang chỉ còn là tiếng ồn — người đọc sẽ học cách bỏ qua nó, kể cả trên đơn còn cứu được.
+    Bỏ luôn lượt truy vấn cho nhóm đó: trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
+  */
+  const chuaGui = PRE_SHIP_STAGES.includes(order.stage);
+  const [timeline, erpHist, erpOther, prev, soat, nguoiHen] = await Promise.all([
     getOrderTimeline(order.id),
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
     thieuThongTin ? previousOrderHint({ id: order.id, customerId: order.customerId, conversationId: order.conversationId, billPhone: order.billPhone, insertedAt: order.insertedAt }) : Promise.resolve(null),
+    chuaGui ? getOrderValidation(order.id) : Promise.resolve(null),
+    /*
+      TÊN NGƯỜI GHI LỜI HẸN đọc từ `users` QUA KHOÁ (AGENTS.md mục 34) — không lấy từ một ô chữ nào.
+      Một lượt tra khoá chính, và chỉ khi đơn thật sự có lời hẹn.
+    */
+    order.customerPromisedByUserId && order.customerPromisedAt
+      ? getDb().then((db) =>
+          db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, order.customerPromisedByUserId!), columns: { name: true, email: true } }),
+        )
+      : Promise.resolve(null),
   ]);
   const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
   const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
@@ -80,6 +105,62 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </>
         }
       />
+
+      {/*
+        LỜI HẸN ĐỨNG NGAY DƯỚI TIÊU ĐỀ, TRÊN CẢ DẢI SOÁT.
+
+        Nó quyết định đơn này CÓ ĐANG TRỄ HAY KHÔNG, nên đọc nó trước rồi mới đọc phần còn lại thì
+        mọi con số phía dưới mới có nghĩa. Chỉ hiện với đơn chưa rời kho: hẹn một ngày giao cho
+        kiện đang trên đường là một con số không ai thực hiện được.
+      */}
+      {chuaGui ? (
+        <PromisedDelivery
+          orderId={order.id}
+          state={promisedVerdict(order.customerPromisedAt, new Date()).state}
+          promisedDate={order.customerPromisedAt ? vnDateKey(order.customerPromisedAt) : null}
+          note={order.customerPromisedNote}
+          recordedBy={nguoiHen ? nguoiHen.name || nguoiHen.email : null}
+          canWrite={can(user, "cs:manage")}
+        />
+      ) : null}
+
+      {/*
+        DẢI SOÁT ĐỨNG TRÊN CÙNG, TRƯỚC MỌI THỨ KHÁC — vì nó là thứ duy nhất trên trang này còn thay
+        đổi được kết quả. Mỗi dòng nói ĐỦ BA: trường nào, vì sao hỏng, và sửa thế nào. ERP KHÔNG tự
+        sửa và không chặn được: trạng thái đơn nằm ở Pancake, không có đường ghi ngược.
+      */}
+      {soat && soat.report.findings.length > 0 ? (
+        <section
+          className={cn(
+            "rounded-xl border px-4 py-3",
+            soat.report.blockers.length
+              ? "border-rose-300/70 bg-rose-50/60 dark:border-rose-900/60 dark:bg-rose-950/20"
+              : "border-amber-300/70 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20",
+          )}
+        >
+          <p className="text-[13px] font-semibold">
+            {soat.report.blockers.length
+              ? `Đơn này chưa nên gửi: ${soat.report.blockers.length} trường chưa đạt`
+              : `Gửi được, nhưng ${soat.report.warnings.length} con số sẽ sai về sau`}
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {soat.report.findings.map((f) => (
+              <li key={f.code} className="text-[12.5px]">
+                <span className={cn("mr-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-semibold", SEVERITY_TONE[f.severity])} title={SEVERITY_LABEL[f.severity]}>
+                  {f.field}
+                </span>
+                {f.detail}
+                <span className="block pl-1 text-muted-foreground">
+                  <b>Vì sao:</b> {f.why}
+                </span>
+                <span className="block pl-1 text-muted-foreground">
+                  <b>Sửa:</b> {f.fix}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">

@@ -18,6 +18,11 @@ import { COD_STATUS_LABEL, getViettelPostTrackingUrl, VTP_REASON_CODES } from "@
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail, outcomeOfShipment } from "@/lib/queries/shipments";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
+import { getShipmentDwell } from "@/lib/queries/shipment-status-age";
+import { DWELL_BASIS_LABEL, DWELL_LEVEL_LABEL, DWELL_LEVEL_TONE, DWELL_UNRATED_HINT, DWELL_UNRATED_LABEL } from "@/lib/constants/shipment-status-age";
+import { ageLabel } from "@/lib/constants/action-queue";
+import { MISSING_TEXT } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { can, requirePermission } from "@/lib/auth/session";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -42,7 +47,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     `stage` là chặng của hãng vận, và `RETURNED_BY_RULE` (hoàn theo luật tiền) không có mặt ở đó
     chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
   */
-  const outcome = await outcomeOfShipment(s.id);
+  const [outcome, dwell] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id)]);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
   const lyDo = daHoan ? (await reasonsForShipments([s.id])).get(s.id) : undefined;
   const number = s.vtpOrderNumber ?? s.trackingCode;
@@ -86,6 +91,51 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">
+          {/*
+            HAI ĐỒNG HỒ ĐỨNG CẠNH NHAU, CỐ Ý.
+
+            "Đứng ở chặng này" đo từ lúc kiện VÀO chặng hiện tại; "ĐVVC nói lần cuối" đo IM LẶNG.
+            Một kiện có thể nhận tin mỗi giờ mà vẫn không nhích — và chỉ khi hai số này lệch xa nhau
+            thì người trực mới nhìn ra điều đó. Xem lib/constants/shipment-status-age.ts.
+          */}
+          {dwell ? (
+            <SectionCard
+              title="Kiện đang đứng ở đâu, bao lâu rồi"
+              description={dwell.verdict.unrated ? DWELL_UNRATED_HINT[dwell.verdict.unrated] : undefined}
+              actions={
+                <span
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[11px] font-semibold",
+                    dwell.verdict.level ? DWELL_LEVEL_TONE[dwell.verdict.level] : "border border-dashed bg-muted/40 text-muted-foreground",
+                  )}
+                >
+                  {dwell.verdict.level ? DWELL_LEVEL_LABEL[dwell.verdict.level] : dwell.verdict.unrated ? DWELL_UNRATED_LABEL[dwell.verdict.unrated] : MISSING_TEXT}
+                </span>
+              }
+            >
+              <DescriptionList
+                columns={2}
+                items={[
+                  {
+                    label: "Đứng ở chặng này",
+                    // CHƯA BIẾT in ra dấu gạch, không in thành "0 giờ".
+                    value: dwell.verdict.ageHours === null ? MISSING_TEXT : ageLabel(dwell.verdict.ageHours),
+                  },
+                  { label: "ĐVVC nói lần cuối", value: s.vtpStatusDate ? formatTimeAgo(s.vtpStatusDate) : MISSING_TEXT },
+                  {
+                    label: "Vào chặng lúc",
+                    value: dwell.verdict.since ? `${formatDateTime(dwell.verdict.since)}${dwell.verdict.sinceBasis ? ` · ${DWELL_BASIS_LABEL[dwell.verdict.sinceBasis]}` : ""}` : MISSING_TEXT,
+                  },
+                  {
+                    label: "Tin cùng chặng",
+                    value: dwell.verdict.eventsInRun > 1 ? `${formatNumber(dwell.verdict.eventsInRun)} tin mà kiện không nhích` : formatNumber(dwell.verdict.eventsInRun),
+                  },
+                  { label: "Việc phải làm", value: dwell.nextAction, span: true },
+                ]}
+              />
+            </SectionCard>
+          ) : null}
+
           <SectionCard title="Hành trình" description={`${formatNumber(s.events.length)} sự kiện · ${s.vtpLocation ? `vị trí hiện tại: ${s.vtpLocation}` : "chưa có vị trí"}`}>
             <ShipmentTimeline events={s.events} limit={50} />
           </SectionCard>

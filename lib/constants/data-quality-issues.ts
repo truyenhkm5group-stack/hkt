@@ -70,6 +70,7 @@ export const DQ_SEVERITY_TONE: Record<DqSeverity, string> = {
 
 export const DQ_CHECKS = [
   "shipment-no-handoff",
+  "shipment-no-stage-start",
   "shipment-order-ambiguous",
   "bank-unclassified",
   "cogs-unknown",
@@ -115,6 +116,22 @@ export const DQ_CHECK_SPECS: Record<DqCheck, DqCheckSpec> = {
     action: "Phần lớn nhóm này là kiện ĐVVC CHƯA lấy được hoặc shop đã huỷ lấy — đó là sự thật, không phải lỗi. Việc cần làm là rà lại những kiện đã tạo vận đơn từ lâu mà bưu tá chưa tới lấy, rồi huỷ hoặc đặt lại lịch lấy hàng.",
     owner: "LOGISTICS",
     href: "/shipments?stage=PENDING",
+  },
+  "shipment-no-stage-start": {
+    key: "shipment-no-stage-start",
+    label: "Vận đơn không biết vào chặng hiện tại lúc nào",
+    why:
+      "Không có mốc vào chặng thì KHÔNG đo được kiện đã đứng yên bao lâu — kiện rơi ra khỏi mọi phép đếm quá hạn của trang " +
+      "“Vận đơn đứng yên quá lâu”, và con số quá hạn còn lại nhìn đẹp hơn sự thật.",
+    severity: "MEDIUM",
+    kind: "TRUE_UNKNOWN",
+    source: "shipments.stage đối chiếu shipment_events.normalized_stage (lib/constants/shipment-status-age.ts::STAGE_SINCE_SQL)",
+    action:
+      "GIỮ NGUYÊN, đừng đoán: không sự kiện ĐVVC nào mang đúng chặng hiện tại của kiện, và ERP cố ý KHÔNG lùi về ngày tạo vận đơn " +
+      "(đó là mốc của ERP, không phải mốc kiện vào chặng). Việc thật là tra mã trên trang Viettel Post rồi nhập tay mốc trạng thái " +
+      "để vá lịch sử — làm được thì kiện tự quay lại phép đo. Đo production 15/09/2026: 16/406 kiện đang chạy, toàn bộ ở chặng hoàn.",
+    owner: "LOGISTICS",
+    href: "/operations/dwell",
   },
   "shipment-order-ambiguous": {
     key: "shipment-order-ambiguous",
