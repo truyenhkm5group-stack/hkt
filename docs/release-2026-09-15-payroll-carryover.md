@@ -365,3 +365,61 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
 6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
    nếu có người đang mang lỗ từ trước mốc ấy thì khai số dư mở sổ đích danh. Chưa khai thì sổ
    KHÔNG ÁP DỤNG và bảng lương chạy y như trước — không con số nào đổi.
+
+---
+
+## 7. Đã phát hành và đã xác minh
+
+| Đợt | SHA | Nội dung |
+|---|---|---|
+| #295 | `679f12f` | F10 lỗ lũy kế (migration `0089`) · F03 · F04 · F01 · F05 · F06 |
+| #298 | `9e76358` | Biên bản + bài kiểm F07 (đo, không sửa) |
+| #300 | `a3a2f40` | F08: giá vốn hàng tặng · phí hoàn đọc từ vận đơn chiều về |
+
+**Xác minh sau #295** (`ops db-query`, chỉ đọc):
+
+```
+bảng marketer_profit_carryover: CÓ · số dòng đã ghi: 0 · ràng buộc CHECK: 26
+migration đã áp: 91 · kỳ lương đã chốt: 0
+```
+
+Sổ **rỗng** — không backfill số dư cho ai, đúng AGENTS.md mục 35. **Không kỳ lương nào bị chốt** —
+đúng yêu cầu "không tự chốt bảng lương".
+
+**Smoke #939** trên SHA `9e76358`: **54/54 đạt · 0 lỗi ứng dụng · 0 sai quyền · 0 hết phiên**.
+`/payroll` **491 ms** với đủ khối mới (bảng bù trừ, dải đủ/chưa đủ căn cứ). Màn hình chậm duy nhất
+vẫn là `/ads` 7,4 s — lỗi có từ trước, đã ghi ở biên bản 14/09 mục 5.5.
+
+> **Đọc con số 491 ms cho đúng.** `/payroll` trước đây đo được 112–117 ms, nhưng như chính biên bản
+> 14/09 đã ghi, những con số ấy là **số đệm nóng**: `/payroll` chạy ngay sau `/ads` trong smoke và
+> đọc ké cùng một mục đệm. 491 ms vẫn xa ngưỡng 2 giây, nhưng tôi **chưa có phép đo tách riêng** để
+> nói phần tăng là do khối mới hay do đệm nguội. Không khẳng định quá điều đo được.
+
+### Ba phiên chạy song song
+
+Trong phiên này `main` tiến **bốn lần** vì hai phiên khác. Mỗi lần: hoà `main` vào nhánh, rồi chạy
+lại **toàn bộ cổng trên bản checkout sạch tại đúng SHA tích hợp** — không lấy kết quả xanh của SHA
+khác làm bằng chứng.
+
+Một phiên khác đã tự dời migration của họ **`0089 → 0090`** vì bản này lấy `0089` trước, và ghi rõ
+trong commit của họ: *"Giữ nguyên bản của phiên kia, không rebase, không revert, không đổi số hiệu
+của họ."* Không tệp nào của hai bên chạm nhau.
+
+---
+
+## 8. Chủ shop cần làm gì để dùng được
+
+1. **Bật sổ lỗ lũy kế** — `settings: payroll.carryover`: `enabled`, `startMonth` (tháng mở sổ), và
+   `startNote` (lý do chọn mốc ấy). Chưa bật thì bảng lương chạy **y như trước**, không một con số
+   nào đổi.
+2. **Nếu có MKTer đang mang lỗ từ trước mốc mở sổ** — khai số dư mở sổ đích danh cho người ấy, kèm
+   nguồn. Không khai thì mặc định là 0 **theo khai báo mốc mở sổ**, và điều đó được ghi rõ ở cột
+   "căn cứ số dư" trên màn hình.
+3. **Quyết định F07** (mục 6.3): đơn phát sinh trước 03/09/2026 lấy giá vốn ở đâu. Ba lựa chọn đã
+   nêu; không chọn gì cũng là một lựa chọn sống được (giữ nguyên như hôm nay).
+4. **Quyết định cơ sở hoa hồng** — chừng nào hoa hồng còn là % của lợi nhuận thì nó không thể đồng
+   thời là chi phí nằm trong lợi nhuận. Phần giải hệ đã có và đã kiểm thử đầy đủ, chỉ chờ chủ shop
+   chốt cơ sở.
+5. **Khai email đăng nhập ERP cho nhân sự** — để quyền "Lương: xem của mình" khớp được bằng khoá
+   tài khoản. Theo số đo phiên trước: 4/4 nhân sự chưa khai.
+
