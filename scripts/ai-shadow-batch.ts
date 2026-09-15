@@ -355,26 +355,41 @@ async function main() {
       `guardGeneratedText`, và mỗi lần chặn để lại một dòng trong `ai_errors`. Đếm lại bằng một tập
       tiền dựng lại sau sẽ báo nhầm đúng phí ship — nên con số dưới đây đọc từ vết chặn thật.
   */
+  /*
+    MẪU SỐ PHẢI LÀ MẪU SỐ ĐÚNG.
+
+    "Bao nhiêu câu có nêu giá" tính trên CẢ MẺ là một con số vô nghĩa: câu chuyển người không nêu
+    giá là ĐÚNG, không phải một lần trượt. Câu hỏi thật là — trong những lượt khách THỰC SỰ HỎI
+    GIÁ, bao nhiêu lượt nghe được một con số. Nên ý định của lượt đó phải đi kèm, đọc từ
+    `ai_runs.understanding` chứ không đoán lại từ câu chữ.
+  */
   const cauDaSinh = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
-      select s.id, s.action, coalesce(s.suggested_reply,'') as cau
+      select s.id, s.action, coalesce(s.suggested_reply,'') as cau,
+             coalesce(r.understanding->>'intents','[]')      as y_dinh
       from sales_suggestions s
+      left join ai_runs r on r.id = s.run_id
       where s.conversation_id in (${dsSql}) and s.created_at >= ${tuKhi} and btrim(s.suggested_reply) <> ''
     `),
   );
   const demCo = new Map<SafetyFlag, number>();
   const viDu = new Map<SafetyFlag, string>();
   let daydTiep = 0;
-  let coTien = 0;
+  let hoiGia = 0;
+  let hoiGiaCoSo = 0;
   for (const r of cauDaSinh) {
     const cau = String(r.cau);
+    const hoi = String(r.y_dinh ?? "").includes("PRICE_QUESTION");
+    if (hoi) {
+      hoiGia += 1;
+      if (moneyMentions(cau).length) hoiGiaCoSo += 1;
+    }
     const co = safetyFlags({ text: cau, allowedAmounts: [], mentionedAmounts: [], stockKnown: false, sizeChartAvailable: false });
     for (const c of co) {
       demCo.set(c, (demCo.get(c) ?? 0) + 1);
       if (!viDu.has(c)) viDu.set(c, cat(che(cau), 120));
     }
     if (advancesConversation(cau)) daydTiep += 1;
-    if (moneyMentions(cau).length) coTien += 1;
   }
   const [chan] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
@@ -404,7 +419,7 @@ async function main() {
   for (const d of QUALITY_DIMENSIONS) {
     let so = "CHƯA CHẤM (chờ người)";
     if (d.grader === "MACHINE") {
-      if (d.key === "answered") so = `${coTien}/${cauDaSinh.length} câu có nêu con số tiền`;
+      if (d.key === "answered") so = hoiGia ? `${hoiGiaCoSo}/${hoiGia} lượt KHÁCH HỎI GIÁ nghe được một con số` : "không lượt nào hỏi giá (KHÔNG ÁP DỤNG)";
       else if (d.key === "advanced") so = `${daydTiep}/${cauDaSinh.length} câu có mời bước tiếp`;
       else if (d.key === "hallucination") so = demCo.size ? `⛔ ${[...demCo.values()].reduce((a, b) => a + b, 0)} cờ` : "0 cờ ✓";
       else if (d.key === "handoff") so = `${[...theoLoai.entries()].map(([k, n]) => `${HANDOFF_CLASS_LABEL[k]} ${n}`).join(" · ") || "không lượt nào"}`;
