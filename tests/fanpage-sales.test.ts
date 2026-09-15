@@ -14,6 +14,7 @@ import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 import { generateTestReply, testIntentOf } from "@/lib/ai-workforce/agents/sales/generate-test";
 import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
+import { extractTestSignals, recordTestSignal } from "@/lib/ai-workforce/agents/sales/test-signals";
 
 const PAGE = "page-fanpage-test";
 
@@ -320,6 +321,30 @@ export async function testFanpageSales(db: Db) {
   assert.ok(tlTest.text.includes("399.000"), "giá của chính mẫu test");
   assert.ok(!tlTest.text.includes("499.000"), "TUYỆT ĐỐI không phải giá mã WIN");
   assert.equal(tlTest.provenance[0]?.source, "test_product_profiles.unit_price");
+
+  // ═════════ 14. TÍN HIỆU THỊ TRƯỜNG: chỉ ghi điều THẤY, và chỉ NÂNG ═════════
+  //
+  // `null` là CHƯA THẤY, không phải "không". Tin thứ hai chỉ nói được điều nó thấy, không nói được
+  // điều nó không thấy — nên nó không bao giờ hạ một cờ tin thứ nhất đã dựng lên.
+  const th1 = extractTestSignals("mẫu này bao nhiêu tiền vậy shop, đẹp quá");
+  assert.equal(th1.askedPrice, true);
+  assert.equal(th1.likedDesign, true);
+  assert.equal(th1.sizeQuestion, undefined, "không hỏi size thì để TRỐNG, không ghi false");
+
+  const th2 = extractTestSignals("em cao 1m58 nặng 50kg, lấy màu đen size M");
+  assert.equal(th2.heightCm, 158);
+  assert.equal(th2.weightKg, 50);
+  assert.equal(th2.requestedColor, "đen");
+  assert.equal(th2.requestedSize, "M");
+  assert.equal(extractTestSignals("cho em xin 50 cái ảnh").weightKg, undefined, "một con số trơ trọi KHÔNG được đoán là cân nặng");
+
+  const htTh = await hoiThoai(db, "fp-ht-signal");
+  await recordTestSignal({ conversationId: htTh.id, testProductId: test1.id, runId: null, text: "bao nhiêu vậy shop" }, db);
+  await recordTestSignal({ conversationId: htTh.id, testProductId: test1.id, runId: null, text: "cho em màu đỏ đô nhé" }, db);
+  const [th] = await db.select().from(schema.testMarketSignals).where(eq(schema.testMarketSignals.conversationId, htTh.id));
+  assert.equal(th.askedPrice, true, "tin sau KHÔNG được xoá điều tin trước đã quan sát được");
+  assert.equal(th.requestedColor, "đỏ đô");
+  assert.equal(th.sizeQuestion, null, "chưa quan sát được thì vẫn là CHƯA BIẾT, không phải false");
 
   console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · mọi con số truy được về ô nó lấy ra");
 }

@@ -28,6 +28,7 @@ import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type Sal
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { resolveProduct, type ProductResolution } from "@/lib/ai-workforce/agents/sales/resolve-product";
 import { classifyConversationSource, snapshotClassification } from "@/lib/ai-workforce/agents/sales/classify-source";
+import { recordTestSignal } from "@/lib/ai-workforce/agents/sales/test-signals";
 import { learnAdMapping } from "@/lib/ai-workforce/agents/sales/ad-map";
 import type { RouteTier, EscalationReason } from "@/lib/constants/ai";
 import type { SizeResultCode } from "@/lib/constants/size-engine";
@@ -320,6 +321,17 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
     // Học bản đồ quảng cáo → sản phẩm khi vừa kết luận được từ CÂU QUẢNG CÁO. Lần sau cùng một
     // quảng cáo không phải đoán lại, và kết quả không đổi giữa hai lượt.
     await learnAdMapping({ pageId: conversation.pageId, adId: message.adId ?? "", postUrl: message.postUrl ?? "", adDescription: message.adDescription ?? "", resolution }, db);
+
+    // ───── 2b. TÍN HIỆU THỊ TRƯỜNG CỦA HÀNG TEST ─────
+    //
+    // Đây là thứ một lượt test phải để lại. Không thu thì mỗi mẫu đem ra thử chỉ còn lại vài hội
+    // thoại không ai đọc lại, và lần sau vẫn phải đoán thị trường muốn màu nào.
+    if (phanLoai.sourceType === "TEST" && phanLoai.testProductId) {
+      await recordTestSignal(
+        { conversationId: conversation.id, testProductId: phanLoai.testProductId, runId: run.id, text: message.text },
+        db,
+      );
+    }
 
     // ───── 3. TRẠNG THÁI ─────
     const applied = await applyUnderstanding(stateBefore, understanding, tool, resolution);

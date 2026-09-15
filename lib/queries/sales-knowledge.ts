@@ -307,11 +307,12 @@ export async function loadTestKnowledge(testProductId: string, dbIn?: Db): Promi
  * chuyện khác hẳn nhau, và suy từ cái thứ nhất ra cái thứ hai là đúng kiểu sai đắt nhất: hàng về
  * không vừa thì thành hàng hoàn, mà tỷ lệ hoàn là con số cả hệ thống này sinh ra để giữ.
  *
- * ─── GHI CHÚ SẢN PHẨM KHÔNG NẰM TRONG DANH SÁCH NGUỒN ───
+ * ─── GHI CHÚ VẬN HÀNH SẢN PHẨM KHÔNG NẰM TRONG DANH SÁCH NGUỒN ───
  *
- * `product_notes` có thể có câu "size L hay bị chật" — đúng thứ trông như một nguồn. Nhưng đó là ô
- * chữ tự do viết cho NGƯỜI đọc, và luật 46 cấm mọi phép tính chạm vào nó. Một câu ghi vội mà thành
- * lời tư vấn size cho khách là chính cái luật ấy chặn.
+ * Bảng ghi chú vận hành hay có câu kiểu "size L hay bị chật" — đúng thứ trông như một nguồn. Nhưng
+ * đó là ô chữ tự do viết cho NGƯỜI đọc, và luật 46 cấm mọi phép tính chạm vào nó. Một câu ghi vội
+ * mà thành lời tư vấn size cho khách là chính cái luật ấy chặn. Bài kiểm khoá điều này bằng cách
+ * quét TÊN BẢNG trong mã nguồn đã vào kho, nên ngay cả chú thích cũng không nhắc tên nó.
  */
 export type GapVerdict = "FOUND" | "PARTIAL" | "NOT_IN_ERP";
 export type KnowledgeGap = {
