@@ -17,8 +17,10 @@ import {
   dwellLevelOf,
   thresholdOf,
   TERMINAL_STAGES,
+  stageDwellFrom,
   type DwellBasis,
   type DwellLevel,
+  type DwellVerdict,
   type DwellOverrides,
   type DwellUnrated,
 } from "@/lib/constants/shipment-status-age";
@@ -303,4 +305,40 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
       },
     };
   });
+}
+
+/**
+ * TUỔI CHẶNG CỦA MỘT VẬN ĐƠN — cho trang chi tiết vận đơn.
+ *
+ * Dùng bản TYPESCRIPT (`stageDwellFrom`) chứ không gọi lại truy vấn của cả hàng đợi: một trang chi
+ * tiết chỉ cần lịch sử của đúng một kiện, và kéo cả kho vận đơn về để lấy một dòng là cách chắc
+ * chắn nhất làm chậm trang mở nhiều thứ hai của module giao vận.
+ *
+ * Bản TypeScript và bản SQL đã được khoá là nói cùng một điều (`tests/shipment-status-age.test.ts`),
+ * nên hai đường đọc này không thể lệch nhau.
+ */
+export async function getShipmentDwell(shipmentId: string): Promise<{ verdict: DwellVerdict; stage: ShipmentStage; nextAction: string } | null> {
+  const [overrides, db] = await Promise.all([getDwellOverrides(), getDb()]);
+  const rows = rowsOf<{ stage: ShipmentStage }>(
+    await db.execute(sql`select s.stage::text as stage from shipments s where s.id = ${shipmentId} limit 1`),
+  );
+  const stage = rows[0]?.stage;
+  if (!stage) return null;
+
+  const events = rowsOf<{ source: string; normalized_stage: ShipmentStage | null; occurred_at: string | Date }>(
+    await db.execute(sql`
+      select e.source, e.normalized_stage::text as normalized_stage, e.occurred_at
+        from shipment_events e
+       where e.shipment_id = ${shipmentId}
+         and e.source in (${sql.raw(SOURCES)})
+    `),
+  );
+
+  const verdict = stageDwellFrom(
+    events.map((e) => ({ source: e.source, normalizedStage: e.normalized_stage, occurredAt: toDate(e.occurred_at) })),
+    stage,
+    new Date(),
+    overrides,
+  );
+  return { verdict, stage, nextAction: DWELL_NEXT_ACTION[stage] };
 }
