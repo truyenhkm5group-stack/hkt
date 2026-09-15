@@ -381,8 +381,31 @@ export async function setCareFollowUp(user: CareActor, input: z.input<typeof fol
   const before = await ensureCareRow(shipmentId, user.email);
   if (!before) return { error: "Không tìm thấy vận đơn" };
   const from = before.careStatus as CareStatus;
-  // Hẹn theo dõi = đã làm phần mình, đang chờ — trừ khi case đã escalate / đã đóng.
-  const next: CareStatus = at && ["NEW", "ASSIGNED", "IN_PROGRESS"].includes(from) ? waitingFor : from;
+  /*
+    Hẹn theo dõi = đã làm phần mình, đang chờ — trừ khi case đã escalate / đã đóng.
+
+    ─── BỎ CÁI HẸN THÌ PHẢI BỎ CẢ TRẠNG THÁI CHỜ ───
+
+    Bản trước giữ nguyên `from` khi `at` là `null`. Ca đang `WAITING_*` mà bị xoá hẹn thì ở lại
+    `WAITING_*` với `follow_up_at = NULL` — một trạng thái nói "đang chờ" mà không nói CHỜ TỚI BAO
+    GIỜ. Đo production 15/09/2026: 12 ca như vậy, tất cả do người bấm ngày 12–13/09, nên đây là
+    đường đang chạy chứ không phải tàn dư đời cũ.
+
+    Hậu quả không phải là chúng biến mất — `careViewOf` đã đưa hẹn rỗng về tab "Cần care", và
+    `careSlaBucket` vẫn để hạn đóng ca chạy tiếp, nên chúng không lọt lưới. Hậu quả là NHÃN NÓI
+    SAI: hàng đợi in "Chờ khách" cho một ca không ai đang chờ ai, và yêu cầu của chủ shop —
+    mỗi việc đang chờ phải có mốc xem lại — thành không kiểm được bằng dữ liệu.
+
+    Bỏ hẹn nghĩa là ca quay lại tay người: `IN_PROGRESS`. Không đưa về `NEW`/`ASSIGNED` vì đã có
+    người chạm vào rồi, và cũng không tự đặt một cái hẹn mặc định — người vừa CỐ Ý bỏ nó đi.
+  */
+  const next: CareStatus = at
+    ? ["NEW", "ASSIGNED", "IN_PROGRESS"].includes(from)
+      ? waitingFor
+      : from
+    : CARE_WAITING_STATUSES.includes(from)
+      ? "IN_PROGRESS"
+      : from;
   const now = new Date();
   await db
     .update(schema.shipmentCare)

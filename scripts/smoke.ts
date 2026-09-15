@@ -174,6 +174,20 @@ const ROUTES = [
   "/work/settings",
   "/work/performance",
   "/work/review",
+  /*
+    HAI TRANG NGOẠI LỆ VÒNG ĐỜI ĐƠN — vào danh sách vì chúng KHÔNG có mục trên thanh điều hướng.
+
+    `tests/ui-consistency.test.ts` bắt buộc mọi tuyến CÓ mục menu phải nằm trong smoke. Hai trang
+    này nằm ở `INTENTIONALLY_UNLINKED` (mở từ hàng đợi việc, không từ menu), nên luật đó không với
+    tới — và hệ quả là chúng là hai tuyến DUY NHẤT chưa từng được mở thật trên máy chủ. Trang không
+    ai mở thử là trang đổ lúc người thật cần nó nhất.
+
+    Cả hai đều NẶNG theo cách riêng và đáng đo: `/operations/dwell` quét `shipment_events` hai lượt
+    cho mỗi vận đơn đang đi (đo EXPLAIN production: 24,5 ms, index-only), `/operations/preship` chạy
+    13 luật soát trên toàn bộ đơn chưa gửi.
+  */
+  "/operations/dwell",
+  "/operations/preship",
 ];
 
 /**

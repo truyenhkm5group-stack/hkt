@@ -5,6 +5,7 @@ import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND, formatTimeAgo, MISSING_TEXT } from "@/lib/format";
 import {
+  DIVERGENCE_LABEL,
   DWELL_BASIS_LABEL,
   DWELL_LEVEL_LABEL,
   DWELL_LEVEL_TONE,
@@ -161,7 +162,12 @@ export default async function DwellPage() {
                       {r.slaHours === null ? <span className="text-muted-foreground">không đặt hạn</span> : `${r.slaHours} giờ`}
                       {r.slaBreached === true ? <span className="block text-[11.5px] font-semibold text-rose-600 dark:text-rose-400">quá hạn</span> : null}
                     </td>
-                    <td className="px-4 py-2">{r.teamLabel}</td>
+                    <td className="px-4 py-2">
+                      {r.teamLabel}
+                      {r.divergence ? (
+                        <span className="block text-[11.5px] text-amber-700 dark:text-amber-400">{DIVERGENCE_LABEL[r.divergence]}</span>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-2 numeric">{formatVND(r.codAmount)}</td>
                   </tr>
                 ))}
@@ -177,11 +183,22 @@ export default async function DwellPage() {
 
       {/* Việc phải làm theo chặng — nêu một lần ở cuối thay vì lặp trên từng dòng. */}
       {summary.breached > 0 ? (
-        <SectionCard title="Việc phải làm" description="Theo chặng kiện đang đứng. Việc của từng kiện cụ thể thì ghi thêm ở trang Vận đơn & care.">
+        <SectionCard
+          title="Việc phải làm"
+          description="Theo chặng VÀ theo trạng thái con của ĐVVC. Việc của từng kiện cụ thể thì ghi thêm ở trang Vận đơn & care."
+          hint="Một chặng có thể chứa nhiều việc của nhiều phòng — “Chờ lấy hàng” gộp cả kiện ĐVVC đang giữ ở khâu xử lý, kiện bưu tá chưa tới lấy, kiện của đơn đã huỷ và kiện có chặng mâu thuẫn với chứng từ. Gộp chúng vào một dòng là giao nhầm việc cho ba phòng."
+        >
           <ul className="space-y-2 text-[12.5px]">
-            {[...new Map(rows.filter((r) => r.level === "EXCEPTION").map((r) => [r.stage, r])).values()].map((r) => (
-              <li key={r.stage}>
-                <b>{r.stageLabel}</b> <span className="text-muted-foreground">· {r.teamLabel}</span>
+            {/*
+              KHOÁ GỘP LÀ (chặng + lý do lệch), KHÔNG PHẢI CHẶNG.
+              Gộp theo chặng thì ba việc khác nhau của `PENDING` chỉ còn một câu — đúng cái lỗi mà
+              `dwellRoutingOf` sinh ra để sửa, và nó sẽ quay lại ngay ở màn hình cuối cùng.
+            */}
+            {[...new Map(rows.filter((r) => r.level === "EXCEPTION").map((r) => [`${r.stage}:${r.divergence ?? ""}`, r])).entries()].map(([key, r]) => (
+              <li key={key}>
+                <b>{r.stageLabel}</b>
+                {r.divergence ? <span className="text-amber-700 dark:text-amber-400"> · {DIVERGENCE_LABEL[r.divergence]}</span> : null}
+                <span className="text-muted-foreground"> · {r.teamLabel}</span>
                 <span className="block text-muted-foreground">{r.nextAction}</span>
               </li>
             ))}
