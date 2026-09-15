@@ -336,6 +336,62 @@ export async function testCostDoubleCount(db: Db) {
   await db.delete(schema.expenses).where(sql`${schema.expenses.id} = 'dc-exp-commission'`);
   clearMemo();
 
+  /* ══ TEST 12 — PHÍ HOÀN ĐỌC TỪ VẬN ĐƠN CHIỀU VỀ, KHÔNG TỪ MỘT CỘT RỖNG ══
+   *
+   * Vận đơn chiều về là một dòng `shipments` RIÊNG (`order_id` NULL, `order_reference` = mã gốc —
+   * AGENTS.md mục 7), nên nó nằm NGOÀI phép nối vận đơn chính của mọi truy vấn khác. Cước của nó vì
+   * thế không được tính ở bất cứ đâu.
+   *
+   * Đo trên production 15/09/2026: `orders.return_fee` bằng 0 trên TOÀN BẢNG, trong khi có 268 vận
+   * đơn chiều hoàn mang 2.120.600 ₫ cước thật. Báo cáo in "phí hoàn = 0" đọc thành "shop không tốn
+   * phí hoàn" — sự thật là ĐỌC NHẦM CỘT.
+   */
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
+  clearMemo();
+  const truocChieuHoan = await getRecognizedCosts(KY);
+  await db.insert(schema.shipments).values({
+    id: "dc-ship-return",
+    // Chiều về: KHÔNG gắn đơn, chỉ mang mã gốc.
+    orderId: null,
+    orderReference: "DC0000000002",
+    vtpOrderNumber: "DC0000000002P1",
+    stage: "RETURNED",
+    shippingFee: 31_000,
+    deliveredAt: d("2027-01-20"),
+  });
+  clearMemo();
+  const sauChieuHoan = await getRecognizedCosts(KY);
+
+  assert.equal(
+    sauChieuHoan.components.RETURN_COST.amount - truocChieuHoan.components.RETURN_COST.amount,
+    31_000,
+    "12. cước trên vận đơn CHIỀU HOÀN phải vào thành phần Phí hoàn — trước bản vá nó không được tính ở đâu cả",
+  );
+  assert.equal(
+    sauChieuHoan.components.SHIPPING.amount,
+    truocChieuHoan.components.SHIPPING.amount,
+    "12. và KHÔNG được cộng thêm lần nữa vào thành phần Cước — một khoản, một chỗ",
+  );
+  assert.equal(
+    sauChieuHoan.total - truocChieuHoan.total,
+    31_000,
+    "12. tổng chi phí tăng đúng 31.000đ, không gấp đôi",
+  );
+
+  /*
+    MỐC KỲ LÀ NGÀY CHIỀU HOÀN XẢY RA, không phải ngày tạo đơn gốc: một đơn tháng trước hoàn về
+    tháng này thì chi phí thuộc tháng này. Vận đơn hoàn ngày 20/01 KHÔNG được rơi vào kỳ tháng 4.
+  */
+  const kyKhac = await getRecognizedCosts(THANG30);
+  assert.equal(
+    kyKhac.components.RETURN_COST.amount,
+    0,
+    "12. vận đơn hoàn ngày 20/01 không được tính vào kỳ tháng 4 — mốc kỳ đi theo ngày hoàn thật",
+  );
+
+  await db.delete(schema.shipments).where(sql`${schema.shipments.id} = 'dc-ship-return'`);
+  clearMemo();
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -355,6 +411,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định · ĐỔI NGUỒN không làm hoa hồng biến mất (độ phủ theo từng thành phần)",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định · ĐỔI NGUỒN không làm hoa hồng biến mất (độ phủ theo từng thành phần) · phí hoàn đọc từ VẬN ĐƠN CHIỀU VỀ chứ không từ cột rỗng, và không cộng hai lần vào cước",
   );
 }

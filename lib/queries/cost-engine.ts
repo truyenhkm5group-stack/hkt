@@ -19,7 +19,7 @@
  * khác thực tế**, KHÔNG phải vì trừ hai lần. Hợp nhất hẳn hai cơ sở đó là việc riêng, chưa làm, và
  * ở đây ghi rõ ra thay vì để người đọc tưởng đã xong.
  */
-import { and, count, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
@@ -107,7 +107,27 @@ async function build(period: Period): Promise<RecognizedCosts> {
     return { amount: Number(row?.amount ?? 0), n: Number(row?.n ?? 0) };
   };
 
-  const [rent, software, otherOperating, salaryLegacy, logisticsAdjust, logisticsDup, adSpend, [cogsRow, shipRow]] = await Promise.all([
+  /*
+    ═══ PHÍ HOÀN NẰM TRÊN VẬN ĐƠN CHIỀU VỀ, KHÔNG NẰM Ở `orders.return_fee` ═══
+
+    Thành phần `RETURN_COST` đang đọc `sum(orders.return_fee)`. Đo trên production 15/09/2026: cột
+    ấy bằng **0 trên toàn bảng** — trong khi có **268 vận đơn chiều hoàn** mang **2.120.600 ₫ cước
+    thật**. Báo cáo in "phí hoàn = 0" nên đọc thành "shop không tốn phí hoàn", còn sự thật là ĐỌC
+    NHẦM CỘT.
+
+    Vận đơn chiều về là một dòng `shipments` RIÊNG (`order_id` NULL, `order_reference` = mã gốc —
+    AGENTS.md mục 7), nên nó không nằm trong phép nối `PRIMARY_ATTEMPT` của mọi truy vấn khác. Cước
+    của nó vì thế không được tính ở BẤT CỨ ĐÂU.
+
+    `lib/constants/cost-sources.ts` đã khai đúng thẩm quyền từ đầu: cước và phí hoàn thuộc về VẬN
+    ĐƠN / BẢNG KÊ ĐVVC. Đây chỉ là đọc đúng cái nguồn đã khai.
+
+    MỐC KỲ là ngày chiều hoàn thật sự xảy ra, theo thứ tự chứng cứ giảm dần — không dùng ngày tạo
+    đơn gốc, vì một đơn tháng trước có thể hoàn về tháng này và chi phí ấy thuộc tháng này.
+  */
+  const chieuHoanAt = sql`coalesce(${s.deliveredAt}, ${s.returnedAt}, ${s.pickedUpAt}, ${s.createdAt})`;
+
+  const [rent, software, otherOperating, salaryLegacy, logisticsAdjust, logisticsDup, adSpend, returnLeg, [cogsRow, shipRow]] = await Promise.all([
     categorySum(["RENT"]),
     categorySum(["SOFTWARE"]),
     categorySum(["PACKAGING", "OTHER"]),
@@ -119,6 +139,10 @@ async function build(period: Period): Promise<RecognizedCosts> {
       .select({ amount: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), ...periodConds(schema.adSpends.spendDate, period.from, period.to))),
+    db
+      .select({ amount: sql<number>`coalesce(sum(${s.shippingFee}), 0)`, n: count() })
+      .from(s)
+      .where(and(isNull(s.orderId), isNotNull(s.orderReference), ...periodConds(chieuHoanAt, period.from, period.to))),
     // JIT tat: hai cau nay la cau cham nhat con lai cua probe — 10.525ms va 10.305ms. Chung mang
     // nhanh du phong tinh truc tiep cua ORDER_OUTCOME nen chi phi uoc luong rat cao va JIT bat.
     /*
@@ -150,6 +174,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
   ]);
 
   const warnings: CostEngineWarning[] = [];
+  const returnLegFee = { amount: Number(returnLeg[0]?.amount ?? 0), n: Number(returnLeg[0]?.n ?? 0) };
 
   // ── LƯƠNG: bảng Lương chỉ cầm quyền khi đã phủ đủ; chưa đủ thì lùi về bảng Chi phí, KHÔNG im lặng ──
   const salaryAmount = payrollCovered ? payroll.fixedSalary : salaryLegacy.amount;
@@ -249,7 +274,9 @@ async function build(period: Period): Promise<RecognizedCosts> {
     SHIPPING: mk("SHIPPING", Number(shipRow?.shipping ?? 0) + logisticsAdjust.amount, {
       note: `Cước theo vận đơn${logisticsAdjust.amount ? ` + ${logisticsAdjust.amount.toLocaleString("vi-VN")} ₫ điều chỉnh có lý do` : ""}. Khoản gõ tay không khai điều chỉnh bị loại.`,
     }),
-    RETURN_COST: mk("RETURN_COST", Number(shipRow?.returnFee ?? 0)),
+    RETURN_COST: mk("RETURN_COST", Number(shipRow?.returnFee ?? 0) + returnLegFee.amount, {
+      note: `Cước trên VẬN ĐƠN CHIỀU HOÀN theo chứng từ ĐVVC${returnLegFee.n ? ` (${returnLegFee.n} vận đơn)` : ""}${Number(shipRow?.returnFee ?? 0) ? ` + phí hoàn ghi trên đơn` : ""}. Vận đơn chiều về là dòng riêng (order_id NULL) nên nó không nằm trong phép nối vận đơn chính của các truy vấn khác.`,
+    }),
     SALARY: mk("SALARY", salaryAmount, {
       coverage: payroll.coverage,
       usedFallback: !payrollCovered,
