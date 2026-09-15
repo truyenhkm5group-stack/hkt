@@ -214,7 +214,16 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 /** Chừa biên: gần hết hạn cũng tính là hết hạn, vì thời điểm máy chủ kiểm có thể lệch vài giây. */
 const TOKEN_NEAR_EXPIRY_MS = TOKEN_TTL_MS - 30_000;
 
-type Result = { route: string; verdict: Verdict; detail: string; ms: number };
+/**
+ * HAI MỐC THỜI GIAN, VÌ CHÚNG TRẢ LỜI HAI CÂU HỎI KHÁC NHAU.
+ *
+ * `ttfbMs` — tới lúc có ĐẦU PHẢN HỒI. `ms` — tới lúc có ĐỦ THÂN TRANG.
+ *
+ * Với App Router, `fetch` trả về ngay khi đầu phản hồi tới, còn thân trang chảy về sau theo từng
+ * ranh giới Suspense. Đo ở mốc thứ nhất rồi gọi nó là thời gian tải trang là đo nhầm đại lượng:
+ * người dùng chỉ đọc được trang khi thân đã về.
+ */
+type Result = { route: string; verdict: Verdict; detail: string; ms: number; ttfbMs: number };
 
 /**
  * ═══════════ DẤU HIỆU BẮT BUỘC PHẢI CÓ TRONG HTML CỦA MỘT SỐ TUYẾN ═══════════
@@ -320,7 +329,7 @@ async function main() {
     // Hết ngân sách: ghi BỎ QUA cho phần còn lại thay vì đốt thêm 60 giây mỗi trang và làm hỏng
     // chính lần deploy đang kiểm.
     if (Date.now() - runStarted > BUDGET_MS) {
-      results.push({ route, verdict: "SKIPPED", detail: `hết ngân sách ${Math.round(BUDGET_MS / 1000)}s cho cả lượt — CHƯA kiểm`, ms: 0 });
+      results.push({ route, verdict: "SKIPPED", detail: `hết ngân sách ${Math.round(BUDGET_MS / 1000)}s cho cả lượt — CHƯA kiểm`, ms: 0, ttfbMs: 0 });
       console.error(`  – ${route} [SKIPPED] chưa kiểm vì hết ngân sách`);
       continue;
     }
@@ -331,15 +340,19 @@ async function main() {
     const cookie = `erp_session=${await mint()}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    // Khai ngoài `try` để khối `catch` cũng nói được "đầu phản hồi đã về hay chưa" — một trang quá
+    // hạn TRƯỚC khi có đầu phản hồi là máy chủ treo, quá hạn SAU đó là thân trang chảy quá lâu.
+    let ttfbMs = 0;
     try {
       const response = await fetch(`${BASE}${route}`, {
         headers: { cookie },
         redirect: "manual",
         signal: controller.signal,
       });
-      const ms = Date.now() - started;
+      ttfbMs = Date.now() - started;
 
       if (response.status >= 300 && response.status < 400) {
+        const ms = ttfbMs;
         const tokenAge = Date.now() - mintedAt;
         const expired = tokenAge >= TOKEN_NEAR_EXPIRY_MS;
         results.push({
@@ -349,18 +362,36 @@ async function main() {
             ? `HTTP ${response.status} sau ${Math.round(tokenAge / 1000)}s — phiếu ký hết hạn giữa lần gọi, KHÔNG phải lỗi trang`
             : `HTTP ${response.status} với phiếu ký còn mới (${Math.round(tokenAge / 1000)}s) — kiểm tra quyền của tài khoản quản trị`,
           ms,
+          ttfbMs,
         });
         continue;
       }
 
       if (response.status !== 200) {
-        results.push({ route, verdict: "APP_ERROR", detail: `HTTP ${response.status}`, ms });
+        results.push({ route, verdict: "APP_ERROR", detail: `HTTP ${response.status}`, ms: ttfbMs, ttfbMs });
         continue;
       }
 
+      /*
+        ═══ ĐỒNG HỒ DỪNG Ở ĐÂY, KHÔNG PHẢI Ở `fetch` ═══
+
+        SỰ CỐ THẬT (15/09/2026, đo trên bản ghi của deploy #304). Smoke báo cả 54 màn hình đều dưới
+        310ms — tổng cộng 5,6 giây — trong khi CẢ LƯỢT chạy mất 269 giây. 263 giây, tức 97,9% thời
+        gian thật, không nằm trong bất kỳ con số nào mà phép đo in ra.
+
+        Nguyên nhân: `fetch` hoàn tất khi ĐẦU phản hồi về, còn thân trang RSC chảy về sau. Ngưỡng
+        `SLOW_MS` vì thế đang xét thời gian tới đầu phản hồi, nên một trang chảy ba mươi giây vẫn
+        được ghi "SUCCESS 74ms". Lá chắn hiệu năng đã mù đúng ở chỗ nó sinh ra để canh, và không
+        cách nào biết trang nào đang đốt ngân sách 300 giây của cả lượt.
+
+        Đọc hết thân rồi mới dừng đồng hồ. Con số sẽ XẤU đi so với bản trước — đó là vì nó bắt đầu
+        nói thật, không phải vì ứng dụng vừa chậm lại.
+      */
       const body = await response.text();
+      const ms = Date.now() - started;
+
       if (!body.includes(RENDER_MARKER)) {
-        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng không dựng được khung ứng dụng", ms });
+        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng không dựng được khung ứng dụng", ms, ttfbMs });
         continue;
       }
 
@@ -376,7 +407,7 @@ async function main() {
         HTTP và kích thước là chưa đủ: phải đọc xem trang có đang NÓI rằng nó lỗi hay không.
       */
       if (body.includes(ERROR_MARKER)) {
-        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng dựng ra TRANG LỖI (ranh giới lỗi của Next) — xem log máy chủ theo mã lỗi", ms });
+        results.push({ route, verdict: "APP_ERROR", detail: "HTTP 200 nhưng dựng ra TRANG LỖI (ranh giới lỗi của Next) — xem log máy chủ theo mã lỗi", ms, ttfbMs });
         continue;
       }
 
@@ -387,7 +418,7 @@ async function main() {
       const ma = DIGEST_MARKER.exec(body);
       if (ma) {
         const so = /(\d{3,})/.exec(ma[0])?.[1] ?? "";
-        results.push({ route, verdict: "APP_ERROR", detail: `HTTP 200 nhưng gói RSC mang LỖI MÁY CHỦ (mã ${so}) — trang chỉ hiện lỗi sau khi chạy JavaScript`, ms });
+        results.push({ route, verdict: "APP_ERROR", detail: `HTTP 200 nhưng gói RSC mang LỖI MÁY CHỦ (mã ${so}) — trang chỉ hiện lỗi sau khi chạy JavaScript`, ms, ttfbMs });
         continue;
       }
 
@@ -409,16 +440,26 @@ async function main() {
           verdict: "APP_ERROR",
           detail: `HTTP 200 nhưng THIẾU công cụ bắt buộc: ${thieu.map((e) => `"${e.marker}" (${e.why})`).join(" · ")}`,
           ms,
+          ttfbMs,
         });
         continue;
       }
 
       // Trang mở được: phân biệt NHANH với CHẬM. Chậm là việc phải sửa, không phải cớ chặn deploy.
+      //
+      // In KÈM mốc đầu phản hồi khi hai mốc lệch nhau đáng kể: "đầu 102ms · đủ thân 28,4s" chỉ
+      // thẳng vào ranh giới Suspense chảy lâu, còn "đầu 9,8s · đủ thân 9,9s" chỉ vào một truy vấn
+      // chặn trước khi trang kịp bắt đầu. Hai bệnh khác nhau, hai chỗ sửa khác nhau.
+      const lechDangKe = ms - ttfbMs > 1_000;
       results.push({
         route,
         verdict: ms > SLOW_MS ? "SLOW" : "SUCCESS",
-        detail: `${Math.round(body.length / 1024)}kB${ms > SLOW_MS ? ` · CHẬM, ngưỡng ${Math.round(SLOW_MS / 1000)}s` : ""}`,
+        detail:
+          `${Math.round(body.length / 1024)}kB` +
+          (lechDangKe ? ` · đầu phản hồi ${ttfbMs}ms · thân ${((ms - ttfbMs) / 1000).toFixed(1)}s` : "") +
+          (ms > SLOW_MS ? ` · CHẬM, ngưỡng ${Math.round(SLOW_MS / 1000)}s` : ""),
         ms,
+        ttfbMs,
       });
     } catch (error) {
       const ms = Date.now() - started;
@@ -426,8 +467,13 @@ async function main() {
       results.push({
         route,
         verdict: aborted ? "TIMEOUT" : "APP_ERROR",
-        detail: aborted ? `không trả lời trong ${Math.round(TIMEOUT_MS / 1000)}s` : error instanceof Error ? error.message : String(error),
+        detail: aborted
+          ? `không trả lời trong ${Math.round(TIMEOUT_MS / 1000)}s${ttfbMs ? ` (đầu phản hồi đã về sau ${ttfbMs}ms — treo ở THÂN trang)` : " (chưa có cả đầu phản hồi)"}`
+          : error instanceof Error
+            ? error.message
+            : String(error),
         ms,
+        ttfbMs,
       });
     } finally {
       clearTimeout(timer);
@@ -455,6 +501,24 @@ async function main() {
       `${by("APP_ERROR").length} lỗi ứng dụng · ${by("REDIRECT").length} sai quyền · ` +
       `${by("SLOW").length} chậm · ${by("SKIPPED").length} chưa kiểm · ${by("TIMEOUT").length} quá hạn · ${by("AUTH_EXPIRED").length} hết phiên ` +
       `(cả lượt chạy ${Math.round((Date.now() - runStarted) / 1000)}s)`,
+  );
+
+  /*
+    ═══ PHÉP ĐO PHẢI TỰ KHAI PHẦN NÓ KHÔNG ĐO ĐƯỢC ═══
+
+    Bài học của chính lỗi vừa sửa: tổng thời gian các trang là 5,6 giây trong khi cả lượt mất 269
+    giây, và KHÔNG con số nào in ra nói lên điều đó — nên suốt nhiều lượt deploy không ai thấy lá
+    chắn hiệu năng đang đo nhầm đại lượng.
+
+    Dòng dưới đây là cái chốt: nếu mai này lại có thứ gì nằm ngoài đồng hồ, khoảng chênh sẽ tự hiện
+    ra ở đây thay vì phải đi lục bản ghi mới thấy.
+  */
+  const tongDo = results.reduce((t, r) => t + r.ms, 0);
+  const caLuot = Date.now() - runStarted;
+  const ngoaiDo = caLuot - tongDo;
+  console.log(
+    `[smoke] đồng hồ: ${(tongDo / 1000).toFixed(1)}s nằm trong các trang · ` +
+      `${(ngoaiDo / 1000).toFixed(1)}s ngoài phép đo (${Math.round((ngoaiDo / Math.max(1, caLuot)) * 100)}% cả lượt — ký phiếu, dựng kết nối, chi phí giữa các lần gọi)`,
   );
 
   // HẾT PHIÊN KHÔNG PHẢI LỖI CỦA ỨNG DỤNG nên không đánh trượt deploy — nhưng phải hiện ra, vì
