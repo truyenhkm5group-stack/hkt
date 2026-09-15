@@ -6,6 +6,8 @@ import {
   pageIdFromStoryId,
   resolveLandingAttribution,
   type AdRecord,
+  type AdsetRecord,
+  type CampaignByIdRecord,
   type CampaignRecord,
   type LandingTracking,
 } from "@/lib/constants/landing-attribution";
@@ -44,6 +46,8 @@ function lookups(over: Partial<Parameters<typeof resolveLandingAttribution>[0]> 
     tracking: tracking({}),
     adById: new Map<string, AdRecord>([[AD.adId, AD]]),
     adsByAdsetId: new Map<string, AdRecord[]>([[AD.adsetId as string, [AD]]]),
+    adsetById: new Map<string, AdsetRecord>(),
+    campaignById: new Map<string, CampaignByIdRecord>(),
     campaignByName,
     // `camp-3` (hai người khai) và `camp-4` (chưa ai khai) CỐ Ý vắng mặt: ánh xạ này chỉ chứa
     // chiến dịch có ĐÚNG MỘT người phụ trách, đúng như truy vấn `having count(distinct …) = 1`.
@@ -89,16 +93,78 @@ export function testLandingAttributionPure() {
   assert.equal(chuaKhai.gap, "NO_MARKETER_DECLARED");
   assert.equal(chuaKhai.adAccountId, "act-888", "vẫn nói được TKQC — thiếu người không có nghĩa là không biết gì");
 
-  /* ═══ KHÔNG CÓ TRACKING và TRACKING KHÔNG KHỚP là hai lỗ hổng khác nhau ═══ */
+  /* ═══ MỖI LỖ HỔNG MỘT CÁI TÊN — "NO_MATCH" CHUNG LÀ CÁI TÊN KHÔNG AI SỬA ĐƯỢC ═══ */
   assert.equal(resolveLandingAttribution({ ...base, tracking: tracking({}) }).gap, "NO_TRACKING");
-  assert.equal(resolveLandingAttribution({ ...base, tracking: tracking({ campaignName: "CHIEN_DICH_LA" }) }).gap, "NO_MATCH");
+  assert.equal(
+    resolveLandingAttribution({ ...base, tracking: tracking({ campaignName: "CHIEN_DICH_LA" }) }).gap,
+    "CAMPAIGN_NOT_SYNCED",
+    "tên chiến dịch không có trong bảng chi tiêu ⇒ nói thẳng là CHƯA ĐỒNG BỘ CHIẾN DỊCH, để người đọc biết phải chạy job nào",
+  );
+  assert.equal(
+    resolveLandingAttribution({ ...base, tracking: tracking({ campaignName: "(trực tiếp)" }) }).gap,
+    "NO_AD_SOURCE",
+    "form tự khai khách vào thẳng ⇒ KHÔNG phải chỗ trống phải lấp, mà là câu trả lời: không thuộc ai",
+  );
 
   /* ═══ KHỚP TUYỆT ĐỐI, KHÔNG PHẢI GẦN GIỐNG ═══ */
   assert.equal(
     resolveLandingAttribution({ ...base, tracking: tracking({ campaignName: "QA4_CĐ_08/09_Q003_ĐỎ_Hải An Luxury CS3" }) }).gap,
-    "NO_MATCH",
+    "CAMPAIGN_NOT_SYNCED",
     "thiếu đúng một hậu tố '_5' là một chiến dịch KHÁC — không được coi là cùng một cái",
   );
+
+  /* ═══ MÃ SỐ NẰM Ở Ô "TÊN CHIẾN DỊCH" VẪN LÀ MỘT MÃ ═══
+
+     Đây chính là ca đã làm 29 đơn treo trên production: form đổi bố cục, ghi thẳng `adset_id` vào
+     `utm_source`. Coi dãy 18 chữ số ấy là một cái TÊN thì nó không bao giờ khớp cái gì. */
+  const ADSET_ID = "120248121229960618";
+  const CAMPAIGN_CHA = "120248121229780618";
+  const chuaTra = resolveLandingAttribution({ ...base, tracking: tracking({ campaignName: ADSET_ID }) });
+  assert.equal(chuaTra.gap, "META_ADSET_NOT_SYNCED", "chưa tra nhóm quảng cáo về ERP ⇒ nói đúng việc phải làm, không nói 'không khớp'");
+  assert.equal(chuaTra.adsetId, ADSET_ID, "và mã ấy được ghi lại là ADSET, không phải một cái tên");
+
+  const daTra = {
+    ...base,
+    adsetById: new Map<string, AdsetRecord>([[ADSET_ID, { adsetId: ADSET_ID, campaignId: CAMPAIGN_CHA, accountId: "968797992379957", missing: false }]]),
+    campaignById: new Map<string, CampaignByIdRecord>([
+      [CAMPAIGN_CHA, { campaignId: CAMPAIGN_CHA, campaignName: "QA4_CĐ_06/09_Q002_ĐEN_Linh Tây Luxury_4", accountIds: ["968797992379957"], marketerIds: ["mkt-quan"] }],
+    ]),
+  };
+  const quaAdset = resolveLandingAttribution({ ...daTra, tracking: tracking({ campaignName: ADSET_ID }) });
+  assert.equal(quaAdset.resolved, true, "tra được nhóm ⇒ đi tiếp lên chiến dịch cha ⇒ ra marketer");
+  assert.equal(quaAdset.tier, "ADSET_ID");
+  assert.equal(quaAdset.marketerId, "mkt-quan");
+  assert.equal(quaAdset.campaignId, CAMPAIGN_CHA);
+  assert.equal(quaAdset.adAccountId, "968797992379957");
+  assert.equal(quaAdset.pageId, null, "vẫn không có bằng chứng về page — và vẫn quy kết được người");
+
+  /* Nhóm tra được nhưng chiến dịch cha CHƯA có dòng chi tiêu nào: một lỗ hổng KHÁC, việc sửa KHÁC. */
+  const thieuChiTieu = resolveLandingAttribution({
+    ...daTra,
+    campaignById: new Map<string, CampaignByIdRecord>(),
+    tracking: tracking({ campaignName: ADSET_ID }),
+  });
+  assert.equal(thieuChiTieu.gap, "CAMPAIGN_NOT_SYNCED");
+  assert.equal(thieuChiTieu.campaignId, CAMPAIGN_CHA, "vẫn nói được chiến dịch cha là cái nào — thiếu người không có nghĩa là không biết gì");
+
+  /* Đã hỏi Meta và bị từ chối (`missing`) KHÁC HẲN chưa hỏi. */
+  const metaTuChoi = resolveLandingAttribution({
+    ...daTra,
+    adsetById: new Map<string, AdsetRecord>([[ADSET_ID, { adsetId: ADSET_ID, campaignId: null, accountId: null, missing: true }]]),
+    tracking: tracking({ campaignName: ADSET_ID }),
+  });
+  assert.equal(metaTuChoi.gap, "NO_MATCH", "hỏi rồi mà Meta không trả ⇒ hết đường, KHÔNG phải 'chưa đồng bộ'");
+
+  /* Chính mã ấy là một campaign_id trong bảng chi tiêu. */
+  const laCampaignId = resolveLandingAttribution({
+    ...base,
+    campaignById: new Map<string, CampaignByIdRecord>([
+      [ADSET_ID, { campaignId: ADSET_ID, campaignName: "QA4_CĐ_X", accountIds: ["968797992379957"], marketerIds: ["mkt-quan"] }],
+    ]),
+    tracking: tracking({ campaignName: ADSET_ID }),
+  });
+  assert.equal(laCampaignId.tier, "CAMPAIGN_ID");
+  assert.equal(laCampaignId.marketerId, "mkt-quan");
 
   /* ═══ adset chỉ được dùng khi cả nhóm thuộc ĐÚNG MỘT chiến dịch ═══ */
   const adsetHaiChienDich = resolveLandingAttribution({

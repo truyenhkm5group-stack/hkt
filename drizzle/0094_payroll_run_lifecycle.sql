@@ -22,7 +22,11 @@
 -- một dòng nào, KHÔNG backfill.
 --
 -- CHỈ CỘNG THÊM: bảy cột có mặc định, và nới một ràng buộc CHECK. Không đổi kiểu, không xoá cột.
--- Viết tay và idempotent như 0033–0092.
+-- ĐÁNH SỐ LẠI 0093 → 0094: `main` lấy 0092 cho `0092_fb_adsets` trong lúc nhánh này chạy, nên cả
+-- hai migration của nhánh dời lên một bậc. Xem đầu 0093 để biết vì sao dời cái CHƯA vào chứ không
+-- dời cái đã vào.
+--
+-- Viết tay và idempotent như 0033–0093.
 
 ALTER TABLE "payroll_periods" ADD COLUMN IF NOT EXISTS "approved_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "payroll_periods" ADD COLUMN IF NOT EXISTS "approved_by" text;--> statement-breakpoint

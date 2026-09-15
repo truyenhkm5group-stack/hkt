@@ -17,6 +17,8 @@ import {
   LANDING_ATTRIBUTION_RULE_VERSION,
   resolveLandingAttribution,
   type AdRecord,
+  type AdsetRecord,
+  type CampaignByIdRecord,
   type CampaignRecord,
   type LandingAttribution,
   type LandingTracking,
@@ -69,6 +71,8 @@ export function readTracking(raw: unknown, fallbackAdId?: string | null): Landin
 export type LandingLookups = {
   adById: Map<string, AdRecord>;
   adsByAdsetId: Map<string, AdRecord[]>;
+  adsetById: Map<string, AdsetRecord>;
+  campaignById: Map<string, CampaignByIdRecord>;
   campaignByName: Map<string, CampaignRecord>;
   marketerOfCampaignId: Map<string, string>;
   knownPageIds: Set<string>;
@@ -128,8 +132,33 @@ export async function loadLandingLookups(db?: Db): Promise<LandingLookups> {
     .having(sql`count(distinct ${schema.adSpends.marketerId}) = 1`);
   for (const r of byCampaignId) if (r.campaignId && r.marketerId) marketerOfCampaignId.set(r.campaignId, r.marketerId);
 
+  /*
+    SỔ NHÓM QUẢNG CÁO — mắt xích `adset_id → campaign_id` mà `fb_ads` và `ad_spends` đều không có.
+    Dòng `missing = true` vẫn nạp: nó là lời khai "đã hỏi Meta và bị từ chối", khác hẳn "chưa hỏi",
+    và hai thứ ấy phải ra hai lý do treo khác nhau trên màn hình.
+  */
+  const adsets = await d.select({ id: schema.fbAdsets.id, campaignId: schema.fbAdsets.campaignId, accountId: schema.fbAdsets.accountId, missing: schema.fbAdsets.missing }).from(schema.fbAdsets);
+  const adsetById = new Map<string, AdsetRecord>(adsets.map((a) => [a.id, { adsetId: a.id, campaignId: a.campaignId, accountId: a.accountId, missing: a.missing }]));
+
+  // Chiến dịch tra theo `campaign_id` — cùng bảng chi tiêu, cùng luật chống nhập nhằng.
+  const byId = await d
+    .select({
+      campaignId: schema.adSpends.campaignId,
+      campaignName: sql<string>`max(${schema.adSpends.campaign})`,
+      accountIds: sql<string[]>`array_remove(array_agg(distinct ${schema.adSpends.accountId}), null)`,
+      marketerIds: sql<string[]>`array_remove(array_agg(distinct nullif(${schema.adSpends.marketerId}, '')), null)`,
+    })
+    .from(schema.adSpends)
+    .where(and(eq(schema.adSpends.excluded, false), isNotNull(schema.adSpends.campaignId)))
+    .groupBy(schema.adSpends.campaignId);
+  const campaignById = new Map<string, CampaignByIdRecord>();
+  for (const c of byId) {
+    if (!c.campaignId) continue;
+    campaignById.set(c.campaignId, { campaignId: c.campaignId, campaignName: c.campaignName ?? "", accountIds: c.accountIds ?? [], marketerIds: c.marketerIds ?? [] });
+  }
+
   const pages = await d.select({ externalPageId: schema.fanpages.externalPageId }).from(schema.fanpages);
-  return { adById, adsByAdsetId, campaignByName, marketerOfCampaignId, knownPageIds: new Set(pages.map((p) => p.externalPageId)) };
+  return { adById, adsByAdsetId, adsetById, campaignById, campaignByName, marketerOfCampaignId, knownPageIds: new Set(pages.map((p) => p.externalPageId)) };
 }
 
 /** Một đơn landing kèm kết luận — đủ để ghi vào `landing_attributions` và để báo cáo đọc. */
