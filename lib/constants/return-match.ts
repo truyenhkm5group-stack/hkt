@@ -243,3 +243,48 @@ export function scoreCandidate(
   return { score, confidence, signals };
 }
 
+
+/**
+ * ═══════════ NHỊP BẮN MÃ CỦA MỘT MÁY QUÉT HID ═══════════
+ *
+ * Máy quét gõ `<mã><ENTER>` NHANH HƠN một lượt đi máy chủ. Ở kho, hai kiện bắn liền nhau cách nhau
+ * chưa tới một giây, trong khi lượt ghi mất vài trăm mili-giây. Nên bàn bắn mã KHÔNG được xử lý
+ * đồng bộ một-lượt-một: nó phải NHẬN hết và ghi lần lượt.
+ *
+ * ─── LỖI ĐÃ CÓ THẬT, VÀ VÌ SAO NÓ ÂM THẦM ───
+ *
+ * Bản đầu giữ mã trong ô nhập cho tới khi máy chủ trả lời, rồi mới xoá. Với hai lượt bắn liên tiếp:
+ *
+ *   1. `CODE1` + Enter  → gửi đi, ô nhập VẪN còn "CODE1";
+ *   2. `CODE2` gõ tiếp  → ô thành "CODE1CODE2"; Enter bị bỏ qua vì lượt đầu chưa xong;
+ *   3. phản hồi lượt 1 về → ô bị XOÁ TRẮNG, mang theo luôn "CODE2".
+ *
+ * Người kho nghe hai tiếng bíp và tin rằng hai kiện đã vào sổ; sổ chỉ có một. Đúng cái hỏng mà
+ * toàn bộ tính năng này sinh ra để chặn, và không có một dòng lỗi nào.
+ *
+ * Nên: mã rời ô nhập NGAY khi bấm Enter và vào HÀNG ĐỢI; hàng đợi được rút lần lượt. Mã không bao
+ * giờ mất vì nó luôn nằm ở một trong ba chỗ — ô nhập, hàng đợi, hoặc dòng lịch sử đã có kết quả.
+ */
+
+/** Cùng một mã bắn lại trong khoảng này là cò máy quét nảy hai lần, không phải hai kiện. */
+export const RESCAN_DEBOUNCE_MS = 1200;
+
+/**
+ * CÓ NÊN BỎ QUA LƯỢT BẮN NÀY KHÔNG — hàm THUẦN, để khoá được bằng kiểm thử.
+ *
+ * Chỉ bỏ qua khi CẢ BA cùng đúng: cùng một mã · trong khoảng nảy phím · và KHÔNG phải một lượt bấm
+ * có chủ ý của người (`deliberate`). Lượt xác nhận kiện ngoài chặng hoàn là một hành động khác của
+ * con người trên cùng một mã, nên nó luôn phải đi qua.
+ *
+ * Hai kiện KHÁC mã bắn cách nhau 1ms thì KHÔNG bao giờ bị bỏ — đó là nhịp bình thường của máy quét,
+ * và bỏ một trong hai là làm mất một kiện hàng có thật.
+ */
+export function shouldSkipRescan(
+  last: { code: string; at: number } | null,
+  code: string,
+  now: number,
+  deliberate = false,
+): boolean {
+  if (deliberate || !last) return false;
+  return last.code === code && now - last.at < RESCAN_DEBOUNCE_MS;
+}
