@@ -22,6 +22,7 @@ import { testFinanceCockpit } from "./finance-cockpit.test";
 import { testCostDoubleCount } from "./cost-double-count.test";
 import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
+import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
@@ -1627,6 +1628,7 @@ async function main() {
   await testCostDoubleCount(db);
   await testPayrollCostPreservation(db);
   await testPayrollCarryover(db);
+  await testPayrollCogsCutoff(db);
   await testProfitCarryover();
   await testVtpState(db);
   await testVtpIngestion(db);
