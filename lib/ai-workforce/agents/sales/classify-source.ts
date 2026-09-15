@@ -16,6 +16,9 @@
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import type { ApprovedFact } from "@/lib/constants/approved-facts";
+import type { SalesPolicy as ExchangePolicy } from "@/lib/constants/sales-policy";
+import { sizeRuleFor } from "@/lib/queries/sales-knowledge";
 import {
   CLASSIFICATION_CONFIDENCE,
   POLICY_BY_SOURCE,
@@ -36,8 +39,10 @@ export type SalesOffer = {
   codPolicy: string;
   inspectionPolicy: string;
   deliveryEstimate: string;
-  exchangePolicy: string;
-  approvedFacts: string[];
+  /** `SalesPolicy` — chính sách đổi trả CÓ CẤU TRÚC lúc chụp. `null` = chưa khai nhánh nào. */
+  exchangePolicy: ExchangePolicy | null;
+  /** `ApprovedFact[]` — câu đã duyệt lúc chụp, kèm nhóm và người duyệt. */
+  approvedFacts: ApprovedFact[];
   /** Nguồn của điều kiện này: hồ sơ fanpage hay hồ sơ mẫu test — hai bộ dữ kiện KHÔNG trộn. */
   from: "FANPAGE" | "TEST_PRODUCT";
 };
@@ -61,13 +66,14 @@ export type SourceClassification = {
    * `null` = CHƯA KHAI ⇒ máy KHÔNG được báo giá.
    */
   offer: SalesOffer | null;
-  sizeProfileId: string | null;
   /**
-   * BA SỐ HIỆU ĐỂ DỰNG LẠI QUÁ KHỨ: luật nguồn nào đã áp, bảng số đo bản nào, sổ dữ kiện bản nào.
-   * Thiếu chúng thì sáu tháng sau không ai trả lời được "vì sao máy đã nói câu đó".
+   * BỐN SỐ HIỆU ĐỂ DỰNG LẠI QUÁ KHỨ: luật nguồn nào đã áp, bảng số đo bản nào, chính sách bản nào,
+   * sổ dữ kiện bản nào. Thiếu chúng thì sáu tháng sau không ai trả lời được "vì sao máy đã nói câu
+   * đó, và lúc ấy khách được hứa những gì".
    */
   sourceRuleId: string | null;
-  sizeProfileVersion: number | null;
+  sizeRuleVersion: string;
+  policyVersion: number | null;
   knowledgeVersion: number | null;
   /** Lý do phải chuyển người ngay từ tầng phân loại; `null` = máy được làm tiếp. */
   handoff: ClassificationHandoff | null;
@@ -82,26 +88,34 @@ export type ClassifyInput = {
 function offerTuHoSo(h: {
   unitPrice: number | null; shippingFee: number | null; freeShipFrom: number | null;
   comboPricing: unknown; availableColors: string[]; material: string; codPolicy: string; inspectionPolicy: string;
-  deliveryEstimate: string; exchangePolicy: string; approvedFacts: string[];
+  deliveryEstimate: string; exchangePolicyJson: unknown; approvedFactsJson: unknown;
 }): SalesOffer {
   return {
     unitPrice: h.unitPrice, shippingFee: h.shippingFee, freeShipFrom: h.freeShipFrom,
     comboPricing: h.comboPricing ?? null, availableColors: h.availableColors,
     material: h.material, codPolicy: h.codPolicy, inspectionPolicy: h.inspectionPolicy,
-    deliveryEstimate: h.deliveryEstimate, exchangePolicy: h.exchangePolicy,
-    approvedFacts: h.approvedFacts, from: "FANPAGE",
+    deliveryEstimate: h.deliveryEstimate,
+    exchangePolicy: (h.exchangePolicyJson as ExchangePolicy | null) ?? null,
+    approvedFacts: (h.approvedFactsJson as ApprovedFact[] | null) ?? [],
+    from: "FANPAGE",
   };
 }
 
-/** Bản của bảng số đo LÚC NÀY — để chụp lại. Không có bảng ⇒ `null`, không phải 0. */
-async function verBangSize(db: Db, sizeProfileId: string | null): Promise<number | null> {
-  if (!sizeProfileId) return null;
-  const [r] = await db
-    .select({ v: schema.salesSizeProfiles.version })
-    .from(schema.salesSizeProfiles)
-    .where(eq(schema.salesSizeProfiles.id, sizeProfileId))
-    .limit(1);
-  return r?.v ?? null;
+/**
+ * Bản BẢNG SỐ ĐO đang áp cho một mẫu, hỏi thẳng máy gợi ý size của ERP.
+ *
+ * Không có bảng ⇒ chuỗi rỗng, không phải "0" — số 0 trông như một phiên bản, chuỗi rỗng thì không.
+ */
+/** Mã hàng (Q004) của một uuid sản phẩm — bảng số đo khai theo MÃ, không theo uuid. */
+async function maCuaSanPham(db: Db, productId: string | null): Promise<string> {
+  if (!productId) return "";
+  const [r] = await db.select({ ma: schema.products.customId }).from(schema.products).where(eq(schema.products.id, productId)).limit(1);
+  return r?.ma ?? "";
+}
+
+async function verBangSize(opts: { productCode?: string; family?: string }): Promise<string> {
+  const rule = await sizeRuleFor(opts);
+  return rule?.version ?? "";
 }
 
 function dungAnhChup(c: {
@@ -114,8 +128,8 @@ function dungAnhChup(c: {
   testProductId: string | null;
   classificationConfidence: number | null;
   offerSnapshot: unknown;
-  sizeProfileId: string | null;
-  sizeProfileVersion: number | null;
+  sizeRuleVersion: string;
+  policyVersion: number | null;
   knowledgeVersion: number | null;
   sourceRuleId: string | null;
 }): SourceClassification {
@@ -132,8 +146,8 @@ function dungAnhChup(c: {
     classificationConfidence: c.classificationConfidence ?? CLASSIFICATION_CONFIDENCE.SNAPSHOT,
     // Đọc lại điều kiện ĐÃ CHỤP, không đọc bảng giá hiện hành.
     offer: (c.offerSnapshot as SalesOffer | null) ?? null,
-    sizeProfileId: c.sizeProfileId,
-    sizeProfileVersion: c.sizeProfileVersion,
+    sizeRuleVersion: c.sizeRuleVersion,
+    policyVersion: c.policyVersion,
     knowledgeVersion: c.knowledgeVersion,
     sourceRuleId: c.sourceRuleId,
     policy: POLICY_BY_SOURCE[loai] ?? "HUMAN",
@@ -158,8 +172,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
       testProductId: schema.salesConversations.testProductId,
       classificationConfidence: schema.salesConversations.classificationConfidence,
       offerSnapshot: schema.salesConversations.offerSnapshot,
-      sizeProfileId: schema.salesConversations.sizeProfileId,
-      sizeProfileVersion: schema.salesConversations.sizeProfileVersion,
+      sizeRuleVersion: schema.salesConversations.sizeRuleVersion,
+      policyVersion: schema.salesConversations.policyVersion,
       knowledgeVersion: schema.salesConversations.knowledgeVersion,
       sourceRuleId: schema.salesConversations.sourceRuleId,
     })
@@ -205,20 +219,22 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
         activeProductId: null, testProductId: null,
         classificationSource: "SOURCE_RULE", classificationConfidence: 0,
-        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
-        sizeProfileVersion: null, knowledgeVersion: null, sourceRuleId: null,
+        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null,
+        sizeRuleVersion: "", policyVersion: null, knowledgeVersion: null, sourceRuleId: null,
         evidence: `Hội thoại đến từ nhiều nguồn khai KHÁC LOẠI (${[...loaiKhac].join(" · ")}) — không kết luận đang bán mẫu nào`,
       };
     }
     // HUMAN_ONLY thắng mọi thứ còn lại trong cùng một loại.
     const uuTien = luat.find((l) => l.sourceType === "HUMAN_ONLY") ?? luat.find((l) => l.sourceType === "TEST") ?? luat[0];
     const loai = uuTien.sourceType as SourceType;
+    const maWin = loai === "WIN" ? await maCuaSanPham(db, uuTien.productId ?? hoSo?.activeProductId ?? null) : "";
 
     // HÀNG TEST DÙNG DỮ KIỆN CỦA CHÍNH NÓ. Không mượn giá / màu / bảng size của mẫu thắng —
     // thiếu thì nói chưa có, chứ mượn là nói sai về một mặt hàng khác.
     let offerTest: SalesOffer | null = null;
-    let sizeTest: string | null = null;
+    let sizeTest = "";
     let knowVerTest: number | null = null;
+    let policyVerTest: number | null = null;
     if (loai === "TEST" && uuTien.testProductId) {
       const [mt] = await db
         .select()
@@ -236,15 +252,17 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
           codPolicy: mt.codPolicy,
           inspectionPolicy: mt.inspectionPolicy,
           deliveryEstimate: mt.deliveryEstimate,
-          exchangePolicy: mt.exchangePolicy,
-          approvedFacts: mt.approvedFacts,
+          exchangePolicy: (mt.exchangePolicyJson as ExchangePolicy | null) ?? null,
+          approvedFacts: (mt.approvedFactsJson as ApprovedFact[] | null) ?? [],
           from: "TEST_PRODUCT",
         };
-        sizeTest = mt.sizeProfileId;
+        // Bảng số đo của mẫu test tra bằng MÃ TẠM ở phạm vi nhóm hàng — không mượn bảng mã WIN.
+        sizeTest = await verBangSize({ family: mt.testCode });
         knowVerTest = mt.knowledgeVersion;
+        policyVerTest = mt.policyVersion;
       }
     }
-    const sizeVer = await verBangSize(db, loai === "TEST" ? sizeTest : loai === "WIN" ? (hoSo?.sizeProfileId ?? null) : null);
+    const sizeVer = loai === "TEST" ? sizeTest : loai === "WIN" ? await verBangSize({ productCode: maWin }) : "";
 
     return {
       sourceType: loai,
@@ -265,8 +283,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
             ? "UNKNOWN_PRODUCT_CONTEXT"
             : null,
       offer: loai === "TEST" ? offerTest : loai === "WIN" && hoSo ? offerTuHoSo(hoSo) : null,
-      sizeProfileId: loai === "TEST" ? sizeTest : loai === "WIN" ? (hoSo?.sizeProfileId ?? null) : null,
-      sizeProfileVersion: sizeVer,
+      sizeRuleVersion: sizeVer,
+      policyVersion: loai === "TEST" ? policyVerTest : (hoSo?.policyVersion ?? null),
       knowledgeVersion: loai === "TEST" ? knowVerTest : (hoSo?.knowledgeVersion ?? null),
       sourceRuleId: uuTien.id,
       evidence: `Luật nguồn khai tay cho ${uuTien.sourceKind === "AD" ? "quảng cáo" : "bài viết"} ${uuTien.sourceId}: ${loai}`,
@@ -290,8 +308,9 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         activeProductId: b.productId, testProductId: null,
         classificationSource: "AD_MAP", classificationConfidence: CLASSIFICATION_CONFIDENCE.AD_MAP,
         policy: "WIN_SALES", handoff: null,
-        offer: hoSo ? offerTuHoSo(hoSo) : null, sizeProfileId: hoSo?.sizeProfileId ?? null,
-        sizeProfileVersion: await verBangSize(db, hoSo?.sizeProfileId ?? null),
+        offer: hoSo ? offerTuHoSo(hoSo) : null,
+        sizeRuleVersion: await verBangSize({ productCode: await maCuaSanPham(db, b.productId) }),
+        policyVersion: hoSo?.policyVersion ?? null,
         knowledgeVersion: hoSo?.knowledgeVersion ?? null, sourceRuleId: null,
         evidence: `Bản đồ quảng cáo ${b.adKey} → mẫu đã trỏ (${b.source === "HUMAN" ? "người đặt" : "máy học"})`,
       };
@@ -302,8 +321,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
         activeProductId: null, testProductId: null,
         classificationSource: "AD_MAP", classificationConfidence: 0,
-        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
-        sizeProfileVersion: null, knowledgeVersion: null, sourceRuleId: null,
+        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null,
+        sizeRuleVersion: "", policyVersion: null, knowledgeVersion: null, sourceRuleId: null,
         evidence: `Các quảng cáo của hội thoại này trỏ tới ${khacNhau.size} mẫu khác nhau — không chọn hộ`,
       };
     }
@@ -324,8 +343,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
       policy: "WIN_SALES",
       handoff: null,
       offer: offerTuHoSo(hoSo),
-      sizeProfileId: hoSo.sizeProfileId,
-      sizeProfileVersion: await verBangSize(db, hoSo.sizeProfileId),
+      sizeRuleVersion: await verBangSize({ productCode: await maCuaSanPham(db, hoSo.activeProductId) }),
+      policyVersion: hoSo.policyVersion,
       knowledgeVersion: hoSo.knowledgeVersion,
       sourceRuleId: null,
       evidence: `Mẫu thắng đang chạy của page (hồ sơ bản ${hoSo.version})`,
@@ -338,8 +357,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
     salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
     activeProductId: null, testProductId: null,
     classificationSource: "NONE", classificationConfidence: 0,
-    policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
-    sizeProfileVersion: null, knowledgeVersion: null, sourceRuleId: null,
+    policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null,
+    sizeRuleVersion: "", policyVersion: null, knowledgeVersion: null, sourceRuleId: null,
     evidence: hoSo
       ? "Fanpage có hồ sơ nhưng CHƯA khai mẫu thắng — không đoán thay"
       : "Fanpage chưa có hồ sơ bán hàng nào",
@@ -364,8 +383,8 @@ export async function snapshotClassification(conversationId: string, kq: SourceC
       classificationSource: kq.classificationSource,
       classificationConfidence: kq.classificationConfidence,
       offerSnapshot: (kq.offer ?? null) as object | null,
-      sizeProfileId: kq.sizeProfileId,
-      sizeProfileVersion: kq.sizeProfileVersion,
+      sizeRuleVersion: kq.sizeRuleVersion,
+      policyVersion: kq.policyVersion,
       knowledgeVersion: kq.knowledgeVersion,
       sourceRuleId: kq.sourceRuleId,
       classifiedAt: new Date(),

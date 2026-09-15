@@ -24,17 +24,13 @@ export function FanpageForm({
   unitPrice,
   shippingFee,
   colors,
-  sizeProfileId,
   material,
   comboPrice,
   comboFreeShip,
   codPolicy,
   inspectionPolicy,
   deliveryEstimate,
-  exchangePolicy,
-  approvedFacts,
   choices,
-  sizes,
 }: {
   pancakePageId: string;
   name: string;
@@ -43,17 +39,13 @@ export function FanpageForm({
   unitPrice: number | null;
   shippingFee: number | null;
   colors: string[];
-  sizeProfileId: string | null;
   material: string;
   comboPrice: number | null;
   comboFreeShip: boolean;
   codPolicy: string;
   inspectionPolicy: string;
   deliveryEstimate: string;
-  exchangePolicy: string;
-  approvedFacts: string[];
   choices: Choice[];
-  sizes: { id: string; name: string }[];
 }) {
   const [sp, setSp] = useState(activeProductId ?? "");
   const [gia, setGia] = useState(unitPrice === null ? "" : String(unitPrice));
@@ -61,15 +53,12 @@ export function FanpageForm({
   const [mau, setMau] = useState(colors.join(", "));
   const [nac, setNac] = useState(aiMode);
   const [ten, setTen] = useState(name);
-  const [bangSize, setBangSize] = useState(sizeProfileId ?? "");
   const [chatLieu, setChatLieu] = useState(material);
   const [combo2, setCombo2] = useState(comboPrice === null ? "" : String(comboPrice));
   const [combo2Ship, setCombo2Ship] = useState(comboFreeShip);
   const [cod, setCod] = useState(codPolicy);
   const [kiem, setKiem] = useState(inspectionPolicy);
   const [giao, setGiao] = useState(deliveryEstimate);
-  const [doiTra, setDoiTra] = useState(exchangePolicy);
-  const [duKien, setDuKien] = useState(approvedFacts.join("\n"));
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
 
@@ -106,19 +95,12 @@ export function FanpageForm({
           <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={mau} onChange={(e) => setMau(e.target.value)} placeholder="Đỏ đô, Đen, Nâu" />
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Bảng số đo</span>
-          <select className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={bangSize} onChange={(e) => setBangSize(e.target.value)}>
-            <option value="">— chưa có (máy chuyển người khi khách hỏi size) —</option>
-            {sizes.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">Tên page</span>
           <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={ten} onChange={(e) => setTen(e.target.value)} />
         </label>
       </div>
       <details className="rounded-md border p-3">
-        <summary className="cursor-pointer text-xs font-medium">Sổ dữ kiện — chất liệu, combo, chính sách, câu đã duyệt</summary>
+        <summary className="cursor-pointer text-xs font-medium">Sổ dữ kiện — chất liệu, combo, COD, kiểm hàng, thời gian giao</summary>
         <p className="mt-2 text-xs text-muted-foreground">
           Ô nào để trống thì máy KHÔNG trả lời câu hỏi tương ứng — nó chuyển người, chứ không đoán. Đây là danh sách việc phải khai,
           không phải danh sách tuỳ chọn.
@@ -148,14 +130,6 @@ export function FanpageForm({
             <span className="text-muted-foreground">Thời gian giao dự kiến</span>
             <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={giao} onChange={(e) => setGiao(e.target.value)} placeholder="2–4 ngày" />
           </label>
-          <label className="space-y-1 text-xs lg:col-span-2">
-            <span className="text-muted-foreground">Chính sách đổi trả</span>
-            <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={doiTra} onChange={(e) => setDoiTra(e.target.value)} placeholder="để trống nếu chủ shop chưa chốt" />
-          </label>
-          <label className="space-y-1 text-xs sm:col-span-2 lg:col-span-3">
-            <span className="text-muted-foreground">Câu dữ kiện đã duyệt — mỗi dòng một câu. Máy chỉ được nói lại những câu này, không được thêm dữ kiện mới.</span>
-            <textarea className="min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm" value={duKien} onChange={(e) => setDuKien(e.target.value)} placeholder={"Bên em bán hàng có sẵn, không đặt trước\nHàng bên em có video thật, không dùng ảnh mạng"} />
-          </label>
         </div>
       </details>
 
@@ -173,14 +147,11 @@ export function FanpageForm({
                 unitPrice: so(gia),
                 shippingFee: so(ship),
                 availableColors: mau.split(",").map((x) => x.trim()).filter(Boolean),
-                sizeProfileId: bangSize || undefined,
                 material: chatLieu,
                 comboPricing: so(combo2) === null ? [] : [{ quantity: 2, price: so(combo2) as number, freeShipping: combo2Ship }],
                 codPolicy: cod,
                 inspectionPolicy: kiem,
                 deliveryEstimate: giao,
-                exchangePolicy: doiTra,
-                approvedFacts: duKien.split("\n").map((x) => x.trim()).filter(Boolean),
               });
               setMsg("error" in r ? r.error : "Đã lưu — hội thoại MỚI dùng cấu hình này, hội thoại cũ giữ nguyên");
             })

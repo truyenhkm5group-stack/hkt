@@ -5,39 +5,68 @@
  * màn hình cấu hình đọc một kiểu, phép giải sản phẩm đọc một kiểu, chạy thử ngầm đọc kiểu thứ ba.
  * Ba đường đọc là ba cơ hội để chúng nói ba điều khác nhau về cùng một page.
  *
- * ─── DỮ KIỆN KHÔNG NẰM TRONG LỜI NHẮC CỦA MÔ HÌNH ───
+ * ═══════════ THỨ TỰ NGUỒN — TRÊN ĐÈ DƯỚI, VÀ MÔ HÌNH KHÔNG CÓ MẶT ═══════════
  *
- * Giá, màu, chính sách nằm ở CSDL và tới tay mô hình qua công cụ đọc — không viết thẳng vào lời
- * nhắc. Viết thẳng thì đổi giá phải sửa mã nguồn và đi tìm xem còn bản sao nào khác của con số ấy;
- * quan trọng hơn, một con số trong lời nhắc thì không truy được về ai khai, khai lúc nào.
+ *   ① ẢNH CHỤP HỘI THOẠI   — chuyện đã rồi. Bất biến. Đọc lại cấu hình hôm nay để giải thích một
+ *                            câu nói hôm qua là viết lại quá khứ.
+ *   ② HỒ SƠ BÁN của page   — giá kênh, màu đang chạy, chính sách. ĐÈ giá gốc ERP một cách hợp lệ:
+ *                            giá chạy quảng cáo khác giá niêm yết là chuyện bình thường.
+ *   ③ SỰ THẬT ERP          — danh mục mẫu mã, giá niêm yết, sổ kho, máy gợi ý size. Không ai ghi
+ *                            đè được nó từ màn hình bán hàng.
+ *   ④ CÂU ĐÃ DUYỆT         — chỉ dùng cho câu hỏi ngoài kịch bản.
  *
- * ─── MÂU THUẪN THÌ BÁO, KHÔNG ÂM THẦM ĐÈ ───
+ * MÔ HÌNH NGÔN NGỮ KHÔNG NẰM TRONG DANH SÁCH NÀY, ở bất kỳ bậc nào. Nó đổi cách nói, không đổi
+ * điều được nói.
  *
- * Giá chủ shop chốt cho kênh này có thể khác giá ERP một cách hoàn toàn chính đáng (giá kênh, giá
- * chạy quảng cáo). Nên mâu thuẫn KHÔNG phải lỗi và KHÔNG được tự sửa bên nào: dữ liệu đã xác nhận
- * của chủ shop được dùng, còn chênh lệch thì in ra để người quyết. Máy tự chọn một bên là chỗ mà
- * sáu tháng sau không ai biết con số thật là số nào.
+ * ② đè ③ nhưng KHÔNG âm thầm: mọi chỗ lệch đều thành một dòng `KnowledgeConflict` in ra màn hình
+ * quản trị. Máy tự chọn một bên rồi im lặng là chỗ mà sáu tháng sau không ai biết số thật là số
+ * nào.
+ *
+ * ═══════════ SIZE KHÔNG Ở ĐÂY ═══════════
+ *
+ * Bảng số đo đọc từ MÁY GỢI Ý SIZE có sẵn của ERP (`lib/constants/size-engine.ts` +
+ * `settings["ai.sizeRules"]`), tra theo mã sản phẩm với phạm vi hẹp-thắng-rộng. Tệp này chỉ HỎI
+ * nó, không giữ bản sao — 0088 từng dựng một bảng số đo thứ hai và 0091 đã gỡ.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { rowsOf } from "@/lib/sql-rows";
+import { usableFacts, type ApprovedFact } from "@/lib/constants/approved-facts";
+import { EMPTY_SALES_POLICY, policyAnswerable, policyFilled, type SalesPolicy } from "@/lib/constants/sales-policy";
 import {
   computeCapabilities,
   completeness as tinhDoDay,
   readiness,
+  winPermissions,
   type CapabilityState,
   type SalesCapability,
   type SalesKnowledge,
+  type SalesPermissions,
 } from "@/lib/constants/sales-capabilities";
+import { DEFAULT_SIZE_RULES, resolveSizeRule, SIZE_RULES_KEY, type SizeRule } from "@/lib/constants/size-engine";
+import { getSettingJson } from "@/lib/settings";
+import { aiEnv } from "@/lib/ai-workforce/config";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
 /**
- * Một điểm lệch giữa dữ liệu đã khai và dữ liệu ERP.
+ * Bảng số đo đang áp cho một mẫu — hỏi thẳng máy gợi ý size của ERP.
  *
- * `CORROBORATED` cũng được in ra, không chỉ `CONFLICT`: biết hai nguồn ĐỒNG Ý là một thông tin
- * thật, và nó khác hẳn với việc ERP không có gì để đối chiếu.
+ * `productCode` (mã hàng, ví dụ Q004) dùng làm khoá phạm vi PRODUCT, và mã tạm của hàng test dùng
+ * làm khoá phạm vi FAMILY: mẫu chưa có mã ERP vẫn khai được bảng riêng mà không phải mượn của ai.
  */
+export async function sizeRuleFor(opts: { productId?: string | null; productCode?: string; family?: string }): Promise<SizeRule | null> {
+  const kho = await getSettingJson<{ version: string; rules: SizeRule[] }>(SIZE_RULES_KEY, DEFAULT_SIZE_RULES);
+  const rules = Array.isArray(kho?.rules) ? kho.rules : [];
+  if (!rules.length) return null;
+  // Thử theo mã hàng trước (PRODUCT trong bảng size khai bằng MÃ, không phải uuid), rồi tới uuid,
+  // rồi tới nhóm hàng. Hàm `resolveSizeRule` tự chọn phạm vi HẸP NHẤT trong số khớp được.
+  return (
+    resolveSizeRule(rules, { productId: opts.productCode ?? null, family: opts.family ?? null }) ??
+    resolveSizeRule(rules, { productId: opts.productId ?? null, family: opts.family ?? null })
+  );
+}
+
 export type KnowledgeConflict = {
   field: string;
   kind: "CONFLICT" | "CORROBORATED" | "ERP_SILENT";
@@ -52,36 +81,31 @@ export type KnowledgeBundle = {
   code: string;
   name: string;
   knowledge: SalesKnowledge;
+  permissions: SalesPermissions;
   capabilities: Record<SalesCapability, CapabilityState>;
   ready: boolean;
-  /** Trường còn thiếu chặn nấc READY. */
+  /** Trường DỮ LIỆU còn thiếu chặn nấc READY. */
   missing: string[];
+  /** QUYỀN đang chặn nấc READY — tách hẳn khỏi `missing`, vì một cái là việc phải làm còn một
+   *  cái là quyết định đang có hiệu lực. */
+  blocked: string[];
   completeness: number;
   conflicts: KnowledgeConflict[];
-  /** Phiên bản để hội thoại chụp lại. */
+  /** Chính sách đổi trả đầy đủ tới đâu (trên 5 nhánh). */
+  policyFilled: number;
+  policy: SalesPolicy;
+  facts: ApprovedFact[];
+  /** Bốn số hiệu để hội thoại chụp lại. */
   profileVersion: number;
   knowledgeVersion: number;
-  sizeProfileId: string | null;
-  sizeProfileVersion: number | null;
+  policyVersion: number;
+  /** Bản bảng số đo đang áp — CHUỖI, do máy gợi ý size đánh số bằng chuỗi. Rỗng = chưa có bảng. */
+  sizeRuleVersion: string;
+  sizeScope: string;
 };
-
-function soDong(rules: unknown): number {
-  return Array.isArray(rules) ? rules.length : 0;
-}
 
 function chuanHoaMau(s: string): string {
   return s.trim().toLowerCase();
-}
-
-/** Bảng số đo của một hồ sơ — trả cả phiên bản để hội thoại chụp được. */
-async function docBangSize(db: Db, sizeProfileId: string | null) {
-  if (!sizeProfileId) return null;
-  const [r] = await db
-    .select({ id: schema.salesSizeProfiles.id, version: schema.salesSizeProfiles.version, rules: schema.salesSizeProfiles.rules })
-    .from(schema.salesSizeProfiles)
-    .where(eq(schema.salesSizeProfiles.id, sizeProfileId))
-    .limit(1);
-  return r ?? null;
 }
 
 /**
@@ -121,7 +145,10 @@ export async function loadWinKnowledge(pancakePageId: string, dbIn?: Db): Promis
         .where(and(eq(schema.productVariants.productId, h.activeProductId), eq(schema.productVariants.isRemoved, false)))
     : [];
 
-  const size = await docBangSize(db, h.sizeProfileId);
+  // BẢNG SỐ ĐO: hỏi máy gợi ý size của ERP, không giữ bản sao.
+  const sizeRule = await sizeRuleFor({ productId: h.activeProductId, productCode: sp?.code ?? "" });
+  const policy = (h.exchangePolicyJson as SalesPolicy | null) ?? EMPTY_SALES_POLICY;
+  const facts = usableFacts(h.approvedFactsJson as ApprovedFact[] | null);
 
   const knowledge: SalesKnowledge = {
     code: sp?.code ?? "",
@@ -131,12 +158,13 @@ export async function loadWinKnowledge(pancakePageId: string, dbIn?: Db): Promis
     freeShipFrom: h.freeShipFrom,
     colors: h.availableColors,
     material: h.material,
-    sizeRuleCount: soDong(size?.rules),
+    sizeRuleCount: sizeRule?.rows.length ?? 0,
     codPolicy: h.codPolicy,
     inspectionPolicy: h.inspectionPolicy,
     deliveryEstimate: h.deliveryEstimate,
-    exchangePolicy: h.exchangePolicy,
-    approvedFacts: h.approvedFacts,
+    exchangeAnswerable: policyAnswerable(policy),
+    approvedFacts: facts.map((f) => f.text),
+    variantsKnown: Number(erp[0]?.n ?? 0) > 0,
     // Mã WIN là sản phẩm ERP thật, nên lên đơn được ngay khi đã chọn mã và có giá.
     orderMappingReady: Boolean(h.activeProductId) && h.unitPrice !== null,
   };
@@ -147,23 +175,53 @@ export async function loadWinKnowledge(pancakePageId: string, dbIn?: Db): Promis
     giaMin: erp[0]?.giaMin ?? null,
     giaMax: erp[0]?.giaMax ?? null,
   });
+  // Bảng số đo khai cho một mẫu KHÔNG được chứa size mà danh mục không bán: máy sẽ tư vấn một size
+  // khách không đặt được. Đây là mâu thuẫn giữa hai nguồn ERP, nên nó cũng phải in ra.
+  if (sizeRule?.rows.length) {
+    const sizeERP = new Set(String(erp[0]?.sizes ?? "").split("|").filter(Boolean).map((x) => x.trim().toLowerCase()));
+    const thua = sizeRule.rows.map((r) => r.size).filter((z) => sizeERP.size > 0 && !sizeERP.has(z.trim().toLowerCase()));
+    conflicts.push(
+      thua.length
+        ? {
+            field: "Bảng số đo",
+            kind: "CONFLICT",
+            declared: sizeRule.rows.map((r) => r.size).join(", "),
+            erp: [...sizeERP].join(", "),
+            note: `Bảng có size danh mục không bán: ${thua.join(", ")} — máy sẽ tư vấn size khách không đặt được`,
+          }
+        : {
+            field: "Bảng số đo",
+            kind: "CORROBORATED",
+            declared: `${sizeRule.rows.length} dòng (bản ${sizeRule.version})`,
+            erp: [...sizeERP].join(", ") || "danh mục không ghi size",
+            note: "Mọi size trong bảng đều có mẫu mã đang bán",
+          },
+    );
+  }
 
-  const capabilities = computeCapabilities(knowledge);
-  const { ready, missing } = readiness(capabilities);
+  const permissions = winPermissions(h.aiMode, aiEnv.hardLimits.allowOrderCreate);
+  const capabilities = computeCapabilities(knowledge, permissions);
+  const { ready, missing, blocked } = readiness(capabilities);
   return {
     kind: "WIN",
     code: knowledge.code,
     name: sp?.name ?? "",
     knowledge,
+    permissions,
     capabilities,
     ready,
     missing,
+    blocked,
     completeness: tinhDoDay(capabilities),
     conflicts,
+    policyFilled: policyFilled(policy),
+    policy,
+    facts,
     profileVersion: h.version,
     knowledgeVersion: h.knowledgeVersion,
-    sizeProfileId: h.sizeProfileId,
-    sizeProfileVersion: size?.version ?? null,
+    policyVersion: h.policyVersion,
+    sizeRuleVersion: sizeRule?.version ?? "",
+    sizeScope: sizeRule?.scope ?? "",
   };
 }
 
@@ -255,43 +313,70 @@ export async function loadTestKnowledge(testProductId: string, dbIn?: Db): Promi
   const db = dbIn ?? (await getDb());
   const [t] = await db.select().from(schema.testProductProfiles).where(eq(schema.testProductProfiles.id, testProductId)).limit(1);
   if (!t) return null;
-  const size = await docBangSize(db, t.sizeProfileId);
+
+  // Bảng số đo của mẫu test tra bằng MÃ TẠM ở phạm vi nhóm hàng — mẫu chưa có mã ERP vẫn khai
+  // được bảng riêng, và tuyệt đối không rơi về bảng của mẫu thắng.
+  const sizeRule = await sizeRuleFor({ family: t.testCode });
+  const policy = (t.exchangePolicyJson as SalesPolicy | null) ?? EMPTY_SALES_POLICY;
+  const facts = usableFacts(t.approvedFactsJson as ApprovedFact[] | null);
 
   const knowledge: SalesKnowledge = {
     code: t.testCode,
-    unitPrice: t.allowQuotePrice ? t.price : null,
+    unitPrice: t.price,
     shippingFee: t.shippingFee,
     comboPricing: (t.comboPricing as SalesKnowledge["comboPricing"]) ?? null,
     freeShipFrom: t.freeShipFrom,
     colors: t.colors,
-    material: t.allowAnswerMaterial ? t.material : "",
-    sizeRuleCount: t.allowAskSize ? soDong(size?.rules) : 0,
+    material: t.material,
+    sizeRuleCount: sizeRule?.rows.length ?? 0,
     codPolicy: t.codPolicy,
     inspectionPolicy: t.inspectionPolicy,
     deliveryEstimate: t.deliveryEstimate,
-    exchangePolicy: t.exchangePolicy,
-    approvedFacts: t.approvedFacts,
-    // Mẫu test chưa có mã hàng ERP: lên đơn phải được bật TAY và phải đã nâng lên sản phẩm thật.
-    orderMappingReady: t.allowAutoOrderCreate && Boolean(t.promotedProductId),
+    exchangeAnswerable: policyAnswerable(policy),
+    approvedFacts: facts.map((f) => f.text),
+    // Mẫu test chưa có sản phẩm ERP ⇒ không có danh mục mẫu mã để tra còn bán hay không.
+    variantsKnown: Boolean(t.promotedProductId),
+    // Lên đơn chỉ khi mẫu test đã được NÂNG thành sản phẩm thật. Cờ cho phép là chuyện QUYỀN, nằm
+    // ở `permissions` — trộn nó vào đây thì một cờ bật sẽ trông như một dữ kiện đã có.
+    orderMappingReady: Boolean(t.promotedProductId) && t.price !== null,
   };
 
-  const capabilities = computeCapabilities(knowledge);
-  const { ready, missing } = readiness(capabilities);
+  // QUYỀN của mẫu test đọc từ chính cờ của nó — đây là chỗ mẫu test khác mã WIN, và là chỗ DUY
+  // NHẤT nó được khác.
+  const permissions: SalesPermissions = {
+    aiMode: t.aiReplyEnabled ? "SHADOW" : "OFF",
+    allowOrderCreate: t.allowAutoOrderCreate && aiEnv.hardLimits.allowOrderCreate,
+    allowQuotePrice: t.allowQuotePrice,
+    allowAnswerMaterial: t.allowAnswerMaterial,
+    allowAskSize: t.allowAskSize,
+    allowOfferProduct: t.allowOfferProduct,
+    allowCollectOrder: t.allowCollectPhone && t.allowCollectAddress,
+    allowConfirmOrder: t.allowConfirmOrder,
+  };
+
+  const capabilities = computeCapabilities(knowledge, permissions);
+  const { ready, missing, blocked } = readiness(capabilities);
   return {
     kind: "TEST",
     code: t.testCode,
     name: t.name,
     knowledge,
+    permissions,
     capabilities,
     ready,
     missing,
+    blocked,
     completeness: tinhDoDay(capabilities),
-    // Mẫu test không có gì trong ERP để đối chiếu — nói thẳng thay vì để bảng trống.
+    // Mẫu test không có gì trong ERP để đối chiếu — bảng rỗng là câu trả lời đúng, không phải thiếu sót.
     conflicts: [],
+    policyFilled: policyFilled(policy),
+    policy,
+    facts,
     profileVersion: 1,
     knowledgeVersion: t.knowledgeVersion,
-    sizeProfileId: t.sizeProfileId,
-    sizeProfileVersion: size?.version ?? null,
+    policyVersion: t.policyVersion,
+    sizeRuleVersion: sizeRule?.version ?? "",
+    sizeScope: sizeRule?.scope ?? "",
   };
 }
 
@@ -340,34 +425,32 @@ export async function discoverKnowledgeGaps(pancakePageId: string, dbIn?: Db): P
 
   const out: KnowledgeGap[] = [];
 
-  // ── 1. BẢNG SỐ ĐO ──
-  const sizeERP = productId
+  // ── 1. BẢNG SỐ ĐO — hỏi MÁY GỢI Ý SIZE của ERP, không dựng bảng thứ hai ──
+  const sizeERPRows = productId
     ? await db
         .select({ sizes: sql<string>`coalesce(string_agg(distinct nullif(btrim(${schema.productVariants.size}), ''), ', ' order by nullif(btrim(${schema.productVariants.size}), '')), '')` })
         .from(schema.productVariants)
         .where(and(eq(schema.productVariants.productId, productId), eq(schema.productVariants.isRemoved, false)))
     : [];
-  const nhanSize = String(sizeERP[0]?.sizes ?? "");
-  const bangCoSan = productId
-    ? await db
-        .select({ id: schema.salesSizeProfiles.id, name: schema.salesSizeProfiles.name, rules: schema.salesSizeProfiles.rules })
-        .from(schema.salesSizeProfiles)
-        .where(eq(schema.salesSizeProfiles.productId, productId))
-    : [];
-  const bangDungDuoc = bangCoSan.find((b) => soDong(b.rules) > 0);
+  const nhanSize = String(sizeERPRows[0]?.sizes ?? "");
   out.push(
     bd.knowledge.sizeRuleCount > 0
-      ? { field: "Bảng số đo", verdict: "FOUND", lookedAt: "sales_size_profiles", found: `${bd.knowledge.sizeRuleCount} dòng`, todo: "", code: "" }
-      : bangDungDuoc
-        ? { field: "Bảng số đo", verdict: "FOUND", lookedAt: "sales_size_profiles (theo mã hàng)", found: `Có bảng “${bangDungDuoc.name}” chưa nối vào page`, todo: "Nối bảng này vào hồ sơ fanpage", code: "SIZE_PROFILE_MISSING" }
-        : {
-            field: "Bảng số đo",
-            verdict: "PARTIAL",
-            lookedAt: "product_variants.size · sales_size_profiles",
-            found: nhanSize ? `ERP biết mẫu có size: ${nhanSize} — nhưng KHÔNG có luật cao/nặng nào` : "ERP không ghi size nào",
-            todo: "Chủ shop cung cấp bảng cao/nặng ↔ size. KHÔNG suy từ nhãn size: ERP biết có size nào, không biết ai mặc vừa",
-            code: "SIZE_PROFILE_MISSING",
-          },
+      ? {
+          field: "Bảng số đo",
+          verdict: "FOUND",
+          lookedAt: `settings["${SIZE_RULES_KEY}"] · lib/constants/size-engine.ts`,
+          found: `${bd.knowledge.sizeRuleCount} dòng, bản ${bd.sizeRuleVersion}, phạm vi ${bd.sizeScope}`,
+          todo: "",
+          code: "",
+        }
+      : {
+          field: "Bảng số đo",
+          verdict: "PARTIAL",
+          lookedAt: `product_variants.size · settings["${SIZE_RULES_KEY}"]`,
+          found: nhanSize ? `ERP biết mẫu có size: ${nhanSize} — nhưng máy gợi ý size chưa có bảng nào cho mã này` : "ERP không ghi size nào",
+          todo: "Khai bảng cao/nặng ↔ size ngay tại /ai/fanpage. KHÔNG suy từ nhãn size: ERP biết có size nào, không biết ai mặc vừa",
+          code: "SIZE_PROFILE_MISSING",
+        },
   );
 
   // ── 2. CHÍNH SÁCH ĐỔI TRẢ ──
@@ -375,20 +458,24 @@ export async function discoverKnowledgeGaps(pancakePageId: string, dbIn?: Db): P
     .select({ key: schema.settings.key, value: schema.settings.value })
     .from(schema.settings)
     .where(sql`${schema.settings.key} like 'sales.policy.%'`);
-  const doiTra = cai.find((c) => c.key === "sales.policy.exchange");
   out.push(
-    bd.knowledge.exchangePolicy
-      ? { field: "Chính sách đổi trả", verdict: "FOUND", lookedAt: "fanpage_sales_profiles.exchange_policy", found: bd.knowledge.exchangePolicy, todo: "", code: "" }
-      : doiTra
-        ? { field: "Chính sách đổi trả", verdict: "FOUND", lookedAt: "settings.sales.policy.exchange", found: String(doiTra.value), todo: "Áp vào hồ sơ fanpage", code: "POLICY_MISSING" }
-        : {
-            field: "Chính sách đổi trả",
-            verdict: "NOT_IN_ERP",
-            lookedAt: "settings (sales.policy.*) · lib/constants/case-semantics.ts · fanpage_sales_profiles",
-            found: "ERP biết ĐỊNH TUYẾN một ca đổi hàng, không biết CAM KẾT với khách (bao nhiêu ngày, ai chịu phí chiều về)",
-            todo: "Chủ shop phát biểu chính sách. Đây là quyết định kinh doanh, không có ở đâu trong hệ thống",
-            code: "POLICY_MISSING",
-          },
+    bd.knowledge.exchangeAnswerable
+      ? {
+          field: "Chính sách đổi trả",
+          verdict: bd.policyFilled === 5 ? "FOUND" : "PARTIAL",
+          lookedAt: "fanpage_sales_profiles.exchange_policy_json",
+          found: `${bd.policyFilled}/5 nhánh đã khai (đổi size · đổi màu · đổi mẫu · lỗi shop · hoàn tiền)`,
+          todo: bd.policyFilled === 5 ? "" : "Khai nốt các nhánh còn lại — nhánh nào trống thì CHỈ câu hỏi ấy phải chuyển người",
+          code: bd.policyFilled === 5 ? "" : "POLICY_MISSING",
+        }
+      : {
+          field: "Chính sách đổi trả",
+          verdict: "NOT_IN_ERP",
+          lookedAt: `settings (${cai.length} khoá sales.policy.*) · lib/constants/case-semantics.ts · fanpage_sales_profiles`,
+          found: "ERP biết ĐỊNH TUYẾN một ca đổi hàng, không biết CAM KẾT với khách (bao nhiêu ngày, ai chịu phí chiều về)",
+          todo: "Chủ shop khai tại /ai/fanpage. Đây là quyết định kinh doanh, không có ở đâu trong hệ thống — và KHÔNG được suy từ chat cũ",
+          code: "POLICY_MISSING",
+        },
   );
 
   // ── 3. CÒN HÀNG HAY KHÔNG ──
@@ -443,4 +530,44 @@ export async function discoverKnowledgeGaps(pancakePageId: string, dbIn?: Db): P
   });
 
   return out;
+}
+
+/** Size ĐANG BÁN trong danh mục của mã WIN — để ô khai bảng số đo bày sẵn đúng những size có thật. */
+export async function listWinSizes(pancakePageId: string, dbIn?: Db): Promise<string[]> {
+  const db = dbIn ?? (await getDb());
+  const [h] = await db
+    .select({ productId: schema.fanpageSalesProfiles.activeProductId })
+    .from(schema.fanpageSalesProfiles)
+    .where(eq(schema.fanpageSalesProfiles.pancakePageId, pancakePageId))
+    .limit(1);
+  if (!h?.productId) return [];
+  const rows = await db
+    .select({ size: schema.productVariants.size })
+    .from(schema.productVariants)
+    .where(
+      and(
+        eq(schema.productVariants.productId, h.productId),
+        eq(schema.productVariants.isRemoved, false),
+        eq(schema.productVariants.isHidden, false),
+      ),
+    );
+  return [...new Set(rows.map((r) => r.size.trim()).filter(Boolean))].sort();
+}
+
+/** Bảng số đo hiện hành của mã WIN một page — đọc từ máy gợi ý size để màn hình sửa tại chỗ. */
+export async function loadSizeRows(
+  pancakePageId: string,
+  dbIn?: Db,
+): Promise<{ rows: SizeRule["rows"]; version: string; fabricStretch: string }> {
+  const db = dbIn ?? (await getDb());
+  const [h] = await db
+    .select({ productId: schema.fanpageSalesProfiles.activeProductId })
+    .from(schema.fanpageSalesProfiles)
+    .where(eq(schema.fanpageSalesProfiles.pancakePageId, pancakePageId))
+    .limit(1);
+  const [sp] = h?.productId
+    ? await db.select({ code: schema.products.customId }).from(schema.products).where(eq(schema.products.id, h.productId)).limit(1)
+    : [];
+  const rule = await sizeRuleFor({ productId: h?.productId ?? null, productCode: sp?.code ?? "" });
+  return { rows: rule?.rows ?? [], version: rule?.version ?? "", fabricStretch: rule?.fabricStretch ?? "" };
 }

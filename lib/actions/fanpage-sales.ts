@@ -7,9 +7,32 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { FANPAGE_AI_MODES, SOURCE_KINDS, SOURCE_TYPES } from "@/lib/constants/fanpage-sales";
+import { FACT_CATEGORIES, type ApprovedFact } from "@/lib/constants/approved-facts";
+import { EMPTY_SALES_POLICY, SHIP_PAYERS, type SalesPolicy } from "@/lib/constants/sales-policy";
+import { DEFAULT_SIZE_RULES, FABRIC_STRETCH, SIZE_RULES_KEY, type SizeRule } from "@/lib/constants/size-engine";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
+
+/** Khoảng đóng [nhỏ, lớn]. Viết ngược là bảng sai, và bảng sai thì gợi ý sai cho khách thật. */
+const khoang = z
+  .tuple([z.number(), z.number()])
+  .refine(([lo, hi]) => lo <= hi, { message: "Khoảng phải là [nhỏ, lớn]" });
 import { runShadowBenchmark, type BenchmarkResult } from "@/lib/queries/shadow-benchmark";
 
 export type ActionResult = { ok: true } | { error: string };
+
+/** Một nhánh đổi. `allowed: null` = CHƯA KHAI; `false` = đã khai là KHÔNG hỗ trợ. Hai nghĩa khác nhau. */
+const nhanhOne = z.object({
+  allowed: z.boolean().nullable(),
+  days: z.number().int().min(0).max(365).nullable(),
+  conditions: z.string().trim().max(300),
+  shipPayer: z.enum(SHIP_PAYERS),
+});
+const nhanhSchema = z.object({
+  exchange: z.object({ SIZE: nhanhOne, COLOR: nhanhOne, PRODUCT: nhanhOne }),
+  shopFault: nhanhOne,
+  refund: nhanhOne,
+  notSupported: z.array(z.string().trim().max(200)).max(20),
+});
 
 const hoSoSchema = z.object({
   pancakePageId: z.string().trim().min(1, "Thiếu page"),
@@ -28,9 +51,11 @@ const hoSoSchema = z.object({
   codPolicy: z.string().trim().max(500).optional(),
   inspectionPolicy: z.string().trim().max(500).optional(),
   deliveryEstimate: z.string().trim().max(500).optional(),
-  exchangePolicy: z.string().trim().max(500).optional(),
-  approvedFacts: z.array(z.string().trim()).optional(),
-  sizeProfileId: z.string().trim().optional(),
+  exchangePolicy: nhanhSchema.optional(),
+  approvedFacts: z.array(z.object({
+    category: z.enum(FACT_CATEGORIES),
+    text: z.string().trim().min(1).max(500),
+  })).max(100).optional(),
   note: z.string().trim().max(1000).optional(),
 });
 
@@ -73,9 +98,12 @@ export async function saveFanpageSalesProfile(input: unknown): Promise<ActionRes
     codPolicy: d.codPolicy ?? dangCo?.codPolicy ?? "",
     inspectionPolicy: d.inspectionPolicy ?? dangCo?.inspectionPolicy ?? "",
     deliveryEstimate: d.deliveryEstimate ?? dangCo?.deliveryEstimate ?? "",
-    exchangePolicy: d.exchangePolicy ?? dangCo?.exchangePolicy ?? "",
-    approvedFacts: d.approvedFacts ?? dangCo?.approvedFacts ?? [],
-    sizeProfileId: d.sizeProfileId || dangCo?.sizeProfileId || null,
+    exchangePolicyJson: (d.exchangePolicy ?? (dangCo?.exchangePolicyJson as SalesPolicy | null) ?? EMPTY_SALES_POLICY) as SalesPolicy,
+    // NGƯỜI DUYỆT DO MÁY CHỦ ĐIỀN, không nhận từ client (luật 34): client gửi tên khác với khoá
+    // thì dòng dữ liệu nói một đằng còn quy kết một nẻo.
+    approvedFactsJson: (d.approvedFacts
+      ? d.approvedFacts.map((f) => ({ ...f, approvedBy: user.email, approvedAt: new Date().toISOString() }))
+      : ((dangCo?.approvedFactsJson as ApprovedFact[] | null) ?? [])) as ApprovedFact[],
     note: d.note ?? dangCo?.note ?? "",
     updatedByUserId: user.id,
   };
@@ -100,9 +128,12 @@ export async function saveFanpageSalesProfile(input: unknown): Promise<ActionRes
       dangCo.codPolicy !== giaTri.codPolicy ||
       dangCo.inspectionPolicy !== giaTri.inspectionPolicy ||
       dangCo.deliveryEstimate !== giaTri.deliveryEstimate ||
-      dangCo.exchangePolicy !== giaTri.exchangePolicy ||
-      dangCo.approvedFacts.join("\u0001") !== giaTri.approvedFacts.join("\u0001") ||
+      JSON.stringify(dangCo.approvedFactsJson ?? []) !== JSON.stringify(giaTri.approvedFactsJson) ||
       dangCo.availableColors.join("\u0001") !== giaTri.availableColors.join("\u0001"));
+
+  // Đổi CAM KẾT (đổi trả) là một bản khác hẳn đổi CÁCH NÓI. Hội thoại chụp cả hai số, nên gộp
+  // chúng là làm mất khả năng trả lời "lúc ấy khách được hứa chính sách nào".
+  const doiChinhSach = dangCo && JSON.stringify(dangCo.exchangePolicyJson ?? null) !== JSON.stringify(giaTri.exchangePolicyJson);
 
   if (dangCo) {
     await db
@@ -110,13 +141,14 @@ export async function saveFanpageSalesProfile(input: unknown): Promise<ActionRes
       .set({
         ...giaTri,
         version: doiBanChat ? dangCo.version + 1 : dangCo.version,
+        policyVersion: doiChinhSach ? dangCo.policyVersion + 1 : dangCo.policyVersion,
         knowledgeVersion: doiDuKien ? dangCo.knowledgeVersion + 1 : dangCo.knowledgeVersion,
         effectiveFrom: doiBanChat ? new Date() : dangCo.effectiveFrom,
         updatedAt: new Date(),
       })
       .where(eq(schema.fanpageSalesProfiles.id, dangCo.id));
   } else {
-    await db.insert(schema.fanpageSalesProfiles).values({ ...giaTri, version: 1, knowledgeVersion: 1, effectiveFrom: new Date() });
+    await db.insert(schema.fanpageSalesProfiles).values({ ...giaTri, version: 1, knowledgeVersion: 1, policyVersion: 1, effectiveFrom: new Date() });
   }
 
   await audit({
@@ -261,7 +293,6 @@ export async function setSourceClassification(input: unknown): Promise<ActionRes
         material: d.newTest.material ?? "",
         shippingPolicy: d.newTest.shippingPolicy ?? "",
         note: [d.newTest.codPolicy, d.newTest.note].filter(Boolean).join(" · "),
-        sizeProfileId: d.newTest.sizeProfileId || null,
         status: "RUNNING",
         ownerUserId: user.id,
         startAt: new Date(),
@@ -304,4 +335,82 @@ export async function runShadowBenchmarkAction(input: unknown): Promise<{ ok: tr
   if (!parsed.success) return { error: "Thiếu page" };
   const result = await runShadowBenchmark(parsed.data.pancakePageId);
   return { ok: true, result };
+}
+
+/**
+ * KHAI BẢNG SỐ ĐO cho một mã hàng — ghi thẳng vào MÁY GỢI Ý SIZE của ERP
+ * (`settings["ai.sizeRules"]`), không dựng bảng riêng cho nhân sự bán hàng.
+ *
+ * Kiểm TRƯỚC khi ghi, vì một bảng số đo sai không báo lỗi lúc ghi: nó báo bằng những gợi ý size
+ * sai cho khách thật, và cái giá là những kiện hàng không vừa. `scripts/import-size-rules.ts` đã
+ * kiểm đúng những điều này từ dòng lệnh; màn hình phải kiểm y hệt, không được lỏng hơn.
+ */
+const bangSizeSchema = z.object({
+  /** Mã hàng ERP (Q004) hoặc mã tạm của mẫu test. Khoá phạm vi của bảng. */
+  key: z.string().trim().min(1, "Thiếu mã hàng"),
+  /** PRODUCT cho mã ERP · FAMILY cho mã tạm của hàng test. */
+  scope: z.enum(["PRODUCT", "FAMILY"]),
+  version: z.string().trim().min(1, "Bảng phải có tên phiên bản"),
+  fabricStretch: z.enum(FABRIC_STRETCH).optional(),
+  note: z.string().trim().max(300).optional(),
+  rows: z
+    .array(
+      z.object({
+        size: z.string().trim().min(1, "Mỗi dòng phải có tên size"),
+        heightCm: khoang.optional(),
+        weightKg: khoang.optional(),
+        bustCm: khoang.optional(),
+        waistCm: khoang.optional(),
+        hipCm: khoang.optional(),
+      }),
+    )
+    .min(1, "Bảng phải có ít nhất một dòng size"),
+});
+
+export async function saveSizeRule(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "ai:view")) return { error: "Không có quyền khai bảng số đo" };
+  const parsed = bangSizeSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+
+  // Bảng không có một khoảng số đo nào thì không gợi ý được gì — đó không phải bảng số đo.
+  const coKhoang = d.rows.some((r) => r.heightCm || r.weightKg || r.bustCm || r.waistCm || r.hipCm);
+  if (!coKhoang) return { error: "Bảng chưa có khoảng số đo nào — phải khai ít nhất một chiều (cao / nặng / ngực / eo / mông)" };
+
+  // HAI SIZE CHỒNG NHAU HOÀN TOÀN là bảng sai: mọi số đo rơi vào chúng đều ra AMBIGUOUS, tức là
+  // bảng có mà vẫn không tư vấn được câu nào. Bắt ở đây, không để người dùng phát hiện qua việc
+  // mọi khách đều bị chuyển người.
+  for (let i = 0; i < d.rows.length; i += 1) {
+    for (let j = i + 1; j < d.rows.length; j += 1) {
+      const a = d.rows[i];
+      const b = d.rows[j];
+      const chieu = (["heightCm", "weightKg", "bustCm", "waistCm", "hipCm"] as const).filter((c) => a[c] && b[c]);
+      if (chieu.length && chieu.every((c) => a[c]![0] === b[c]![0] && a[c]![1] === b[c]![1])) {
+        return { error: `Size ${a.size} và ${b.size} có khoảng trùng khít nhau — mọi số đo rơi vào đó đều không kết luận được` };
+      }
+    }
+  }
+
+  const kho = await getSettingJson<{ version: string; rules: SizeRule[] }>(SIZE_RULES_KEY, DEFAULT_SIZE_RULES);
+  const cu = Array.isArray(kho?.rules) ? kho.rules : [];
+  const rule: SizeRule = {
+    version: d.version,
+    scope: d.scope,
+    key: d.key,
+    fabricStretch: d.fabricStretch,
+    rows: d.rows,
+    note: d.note,
+  };
+  // Thay bảng CÙNG PHẠM VI + CÙNG KHOÁ, giữ nguyên các bảng của mẫu khác.
+  const moi = [...cu.filter((r) => !(r.scope === d.scope && (r.key ?? "").toLowerCase() === d.key.toLowerCase())), rule];
+  await setSettingJson(SIZE_RULES_KEY, { version: new Date().toISOString().slice(0, 10), rules: moi });
+
+  await audit({
+    userId: user.id, userEmail: user.email, action: "UPDATE",
+    entity: "settings", entityId: SIZE_RULES_KEY,
+    before: { rules: cu.length }, after: { key: d.key, scope: d.scope, version: d.version, rows: d.rows.length },
+  });
+  revalidatePath("/ai/fanpage");
+  return { ok: true };
 }

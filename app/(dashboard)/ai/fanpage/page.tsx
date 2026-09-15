@@ -5,10 +5,13 @@ import { SourceRow } from "@/app/(dashboard)/ai/fanpage/source-row";
 import { BenchmarkButton } from "@/app/(dashboard)/ai/fanpage/benchmark-button";
 import { requirePermission } from "@/lib/auth/session";
 import { formatNumber, formatVND } from "@/lib/format";
-import { listFanpages, listSizeProfiles, listSourceLines, listTestProducts } from "@/lib/queries/fanpage-sales";
+import { listFanpages, listSourceLines, listTestProducts } from "@/lib/queries/fanpage-sales";
+import { FactsForm, PolicyForm, SizeRuleForm } from "@/app/(dashboard)/ai/fanpage/knowledge-forms";
+import { EMPTY_SALES_POLICY } from "@/lib/constants/sales-policy";
 import { listProductChoices } from "@/lib/queries/sales-ad-map";
 import { discoverKnowledgeGaps, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
+import { listWinSizes, loadSizeRows } from "@/lib/queries/sales-knowledge";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Cấu hình fanpage — nhân sự bán hàng" };
@@ -18,7 +21,7 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
   const raw = await searchParams;
   const chon = (Array.isArray(raw.page) ? raw.page[0] : raw.page) ?? "";
 
-  const [pages, choices, tests, sizes] = await Promise.all([listFanpages(), listProductChoices(), listTestProducts(), listSizeProfiles()]);
+  const [pages, choices, tests] = await Promise.all([listFanpages(), listProductChoices(), listTestProducts()]);
   const page = pages.find((p) => p.pancakePageId === chon) ?? pages[0];
   const sources = page ? await listSourceLines(page.pancakePageId) : [];
   const [kienThuc, loHong] = page
@@ -26,6 +29,10 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
     : [null, []];
   const k = kienThuc?.knowledge ?? null;
   const combo2 = k?.comboPricing?.find((c) => c.quantity === 2) ?? null;
+  // Size danh mục đang bán + bảng số đo hiện hành — để ô khai bày sẵn đúng những size có thật.
+  const [sizeDanhMuc, bangSize] = page && kienThuc?.code
+    ? await Promise.all([listWinSizes(page.pancakePageId), loadSizeRows(page.pancakePageId)])
+    : [[], { rows: [], version: "", fabricStretch: "" }];
 
   const soTest = sources.filter((s) => s.status === "TEST").length;
   const soNguoi = sources.filter((s) => s.status === "HUMAN_ONLY").length;
@@ -73,17 +80,13 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
               unitPrice={page.unitPrice}
               shippingFee={page.shippingFee}
               colors={page.availableColors}
-              sizeProfileId={page.sizeProfileId}
               material={k?.material ?? ""}
               comboPrice={combo2?.price ?? null}
               comboFreeShip={combo2?.freeShipping ?? false}
               codPolicy={k?.codPolicy ?? ""}
               inspectionPolicy={k?.inspectionPolicy ?? ""}
               deliveryEstimate={k?.deliveryEstimate ?? ""}
-              exchangePolicy={k?.exchangePolicy ?? ""}
-              approvedFacts={k?.approvedFacts ?? []}
               choices={choices}
-              sizes={sizes}
             />
             <p className="mt-3 text-xs text-muted-foreground">
               Lưu xong, mọi hội thoại MỚI của page — trừ nguồn khai TEST/HUMAN_ONLY — mặc định là WIN với mã này, không phải đi tìm
@@ -110,24 +113,27 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
                 </p>
               ) : (
                 <p className="mb-3 text-xs">
-                  Còn thiếu: <span className="font-medium">{kienThuc.missing.join(" · ")}</span>
+                  {kienThuc.missing.length ? <>Thiếu dữ liệu: <span className="font-medium">{kienThuc.missing.join(" · ")}</span></> : null}
+                  {kienThuc.blocked.length ? <> {kienThuc.missing.length ? "· " : ""}Bị chặn: <span className="font-medium">{kienThuc.blocked.join(" · ")}</span></> : null}
                 </p>
               )}
 
               <p className="mb-2 text-[11px] text-muted-foreground">
-                🟢 ở đây nghĩa là <span className="font-medium">ĐỦ DỮ LIỆU</span> để trả lời, không phải đã được phép làm. Quyền hạn là
-                khoá riêng ở nấc AI của page và ở chặn cứng cấp máy chủ ({" "}
-                <code className="font-mono">AI_ALLOW_CUSTOMER_SEND</code> · <code className="font-mono">AI_ALLOW_ORDER_CREATE</code>) — hai
-                khoá độc lập, và một khoá mở không mở hộ khoá kia.
+                🟢 <span className="font-medium">SẴN SÀNG</span> · ⚪ <span className="font-medium">THIẾU DỮ LIỆU</span> (việc phải làm) ·
+                🔒 <span className="font-medium">CHẶN BỞI QUYỀN</span> (quyết định đang có hiệu lực). Hai chữ &quot;không&quot; khác nhau:
+                khai xong dữ liệu vẫn không mở được ô đang bị khoá, và mở hết quyền vẫn không thay được một ô còn trống.
               </p>
               <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
                 {SALES_CAPABILITIES.map((c) => {
                   const st = kienThuc.capabilities[c];
+                  const dau = st.status === "READY" ? "🟢" : st.status === "MISSING_DATA" ? "⚪" : "🔒";
                   return (
                     <div key={c} className="flex items-baseline gap-2 rounded-md border p-2 text-xs">
-                      <span>{st.on ? "🟢" : "⚪"}</span>
+                      <span>{dau}</span>
                       <span className={st.on ? "font-medium" : "text-muted-foreground"}>{CAPABILITY_LABEL[c]}</span>
-                      {st.on ? null : <span className="ml-auto text-right text-[11px] text-muted-foreground">thiếu {st.missing.join(", ")}</span>}
+                      <span className="ml-auto text-right text-[11px] text-muted-foreground">
+                        {st.missing.length ? `thiếu ${st.missing.join(", ")}` : st.blockedBy}
+                      </span>
                     </div>
                   );
                 })}
@@ -177,9 +183,50 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
             </Card>
           ) : null}
 
+          {kienThuc?.code ? (
+            <Card className="p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold">2 · Bảng số đo của {kienThuc.code}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {kienThuc.knowledge.sizeRuleCount
+                    ? `${kienThuc.knowledge.sizeRuleCount} dòng · bản ${kienThuc.sizeRuleVersion} · phạm vi ${kienThuc.sizeScope}`
+                    : "CHƯA CÓ — máy chuyển người ở mọi câu hỏi size"}
+                </p>
+              </div>
+              <SizeRuleForm
+                productCode={kienThuc.code}
+                scope="PRODUCT"
+                sizes={sizeDanhMuc}
+                current={bangSize.rows}
+                currentVersion={bangSize.version}
+                fabricStretch={bangSize.fabricStretch}
+              />
+            </Card>
+          ) : null}
+
+          {kienThuc ? (
+            <Card className="p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold">3 · Chính sách đổi / trả</h2>
+                <p className="text-xs text-muted-foreground">{kienThuc.policyFilled}/5 nhánh · bản {kienThuc.policyVersion}</p>
+              </div>
+              <PolicyForm pancakePageId={page.pancakePageId} current={kienThuc.policy ?? EMPTY_SALES_POLICY} />
+            </Card>
+          ) : null}
+
+          {kienThuc ? (
+            <Card className="p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold">4 · Câu dữ kiện đã duyệt</h2>
+                <p className="text-xs text-muted-foreground">{kienThuc.facts.length} câu · sổ dữ kiện bản {kienThuc.knowledgeVersion}</p>
+              </div>
+              <FactsForm pancakePageId={page.pancakePageId} current={kienThuc.facts} />
+            </Card>
+          ) : null}
+
           <Card className="p-4">
             <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-sm font-semibold">2 · Nguồn đang phát sinh hội thoại ({formatNumber(sources.length)})</h2>
+              <h2 className="text-sm font-semibold">5 · Nguồn đang phát sinh hội thoại ({formatNumber(sources.length)})</h2>
               <p className="text-xs text-muted-foreground">
                 {soWin} theo mã WIN · {soTest} TEST · {soNguoi} chỉ người
               </p>
@@ -201,7 +248,6 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
                   mediaUrl={s.mediaUrl}
                   conversations={s.conversations}
                   tests={tests.map((t) => ({ id: t.id, testCode: t.testCode, name: t.name }))}
-                  sizes={sizes.map((z) => ({ id: z.id, name: z.name }))}
                 />
               ))}
               {sources.length === 0 ? (
@@ -211,7 +257,7 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
           </Card>
 
           <Card className="p-4">
-            <h2 className="mb-3 text-sm font-semibold">3 · Hồ sơ mẫu test ({formatNumber(tests.length)})</h2>
+            <h2 className="mb-3 text-sm font-semibold">6 · Hồ sơ mẫu test ({formatNumber(tests.length)})</h2>
             {tests.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Chưa có mẫu test nào. Tạo ngay khi khai một nguồn là TEST ở trên — mẫu test không cần mã hàng chính thức.
@@ -225,7 +271,6 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
                     <span className="text-xs text-muted-foreground">{t.status}</span>
                     <span className="text-xs text-muted-foreground">{t.price === null ? "chưa có giá" : formatVND(t.price)}</span>
                     <span className="text-xs text-muted-foreground">{t.colors.length ? t.colors.join(", ") : "chưa khai màu"}</span>
-                    <span className="text-xs text-muted-foreground">{t.sizeProfileId ? "có bảng size" : "chưa có bảng size"}</span>
                     <span className="text-xs text-muted-foreground">{t.allowAutoOrderCreate ? "được lên đơn" : "KHÔNG được lên đơn"}</span>
                   </div>
                 ))}
@@ -234,7 +279,7 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
           </Card>
 
           <Card className="p-4">
-            <h2 className="mb-3 text-sm font-semibold">4 · Chạy thử ngầm</h2>
+            <h2 className="mb-3 text-sm font-semibold">7 · Chạy thử ngầm</h2>
             <BenchmarkButton pancakePageId={page.pancakePageId} />
           </Card>
         </>

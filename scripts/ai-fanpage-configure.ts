@@ -15,7 +15,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { classifyConversationSource } from "@/lib/ai-workforce/agents/sales/classify-source";
-import { runShadowBenchmark, auditWinOffer } from "@/lib/queries/shadow-benchmark";
+import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
+import { loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
 import { generateTestReply, testIntentOf, type TestFacts } from "@/lib/ai-workforce/agents/sales/generate-test";
 import { CLASSIFICATION_SOURCE_LABEL, SOURCE_TYPE_LABEL, TEST_REPLY_DEFAULTS, type ClassificationSource, type SourceType } from "@/lib/constants/fanpage-sales";
 
@@ -69,7 +71,7 @@ async function main() {
           testCode, name: ten, pancakePageId: pageId, sourceId: nguonTest,
           // CỐ TÌNH ĐỂ TRỐNG: giá · màu · chất liệu · bảng số đo. Chưa đo được thì chưa khai, và
           // máy phải cư xử đúng với chỗ trống ấy chứ không mượn của mã WIN.
-          price: null, colors: [], material: "", shippingPolicy: "", sizeProfileId: null,
+          price: null, colors: [], material: "", shippingPolicy: "",
           status: "RUNNING", startAt: new Date(),
         }).returning({ id: schema.testProductProfiles.id });
         tpId = moi.id;
@@ -104,15 +106,21 @@ async function main() {
   console.log(`   chưa kết luận được   ${bm.unresolved}`);
   console.log(`   TEST BỊ XỬ NHƯ WIN   ${bm.testFellBackToWin}   ${bm.testFellBackToWin === 0 ? "✓ (phải bằng 0)" : "✗ HỎNG"}`);
 
-  // ───── 4. ĐỘ ĐẦY ĐỦ CỦA ĐIỀU KIỆN BÁN (mã WIN) ─────
-  const audit = await auditWinOffer(pageId);
-  console.log(`\n④ ĐIỀU KIỆN BÁN CỦA MÃ WIN${audit.productCode ? ` (${audit.productCode})` : ""} — thiếu gì trước khi bật mô hình thật`);
-  for (const r of audit.rows) {
-    console.log(`   ${r.ok ? "✓" : "✗"} ${r.field.padEnd(24)} ${r.value}`);
-    if (!r.ok) console.log(`       → ${r.why}`);
+  // ───── 4. CỔNG NĂNG LỰC CỦA MÃ WIN ─────
+  //
+  // Đọc qua `loadWinKnowledge()` — một đường đọc duy nhất cho "hồ sơ này còn thiếu gì". Bản kiểm
+  // kê riêng từng sống ở `shadow-benchmark.ts` và đã bắt đầu trả lời khác: nó không biết bảng số đo
+  // nằm ở máy gợi ý size, cũng không biết quyền nào đang chặn.
+  const bd = await loadWinKnowledge(pageId, db);
+  if (bd) {
+    console.log(`\n④ MÃ WIN ${bd.code || "(chưa khai)"} — đầy đủ dữ liệu ${bd.completeness}% · ${bd.ready ? "SẴN SÀNG" : "CÒN THIẾU"}`);
+    for (const c of SALES_CAPABILITIES) {
+      const st = bd.capabilities[c];
+      const dau = st.status === "READY" ? "🟢" : st.status === "MISSING_DATA" ? "⚪" : "🔒";
+      const ly = st.missing.length ? `thiếu: ${st.missing.join(", ")}` : st.blockedBy ? `chặn: ${st.blockedBy}` : "";
+      console.log(`   ${dau} ${CAPABILITY_LABEL[c].padEnd(24)} ${ly}`);
+    }
   }
-  const thieu = audit.rows.filter((r) => !r.ok);
-  console.log(`   ─── còn thiếu ${thieu.length}/${audit.rows.length} mục ───`);
 
   // ───── 5. MẪU TEST SẼ TRẢ LỜI THẾ NÀO ─────
   const mt = nguonTest ? await db.query.testProductProfiles.findFirst({ where: eq(schema.testProductProfiles.sourceId, nguonTest) }) : null;
@@ -121,14 +129,15 @@ async function main() {
     console.log(`   giá        : ${mt.price === null ? "CHƯA CÓ" : `${mt.price.toLocaleString("vi-VN")}đ`}`);
     console.log(`   màu        : ${mt.colors.length ? mt.colors.join(", ") : "CHƯA CÓ"}`);
     console.log(`   chất liệu  : ${mt.material || "CHƯA CÓ"}`);
-    console.log(`   bảng số đo : ${mt.sizeProfileId ? "có" : "CHƯA CÓ"}`);
+    const bdT = await loadTestKnowledge(mt.id, db);
+    console.log(`   bảng số đo : ${bdT?.knowledge.sizeRuleCount ? `${bdT.knowledge.sizeRuleCount} dòng (bản ${bdT.sizeRuleVersion})` : "CHƯA CÓ"}`);
     console.log(`   giao hàng  : ${mt.shippingPolicy || "CHƯA CÓ"}`);
     console.log(`   được lên đơn: ${mt.allowAutoOrderCreate ? "CÓ" : "KHÔNG"}`);
 
     const facts: TestFacts = {
       testCode: mt.testCode, name: mt.name, price: mt.price, colors: mt.colors,
       material: mt.material, shippingPolicy: mt.shippingPolicy,
-      hasSizeProfile: Boolean(mt.sizeProfileId), approvedFacts: mt.approvedFacts,
+      hasSizeProfile: (bdT?.knowledge.sizeRuleCount ?? 0) > 0, approvedFacts: bdT?.knowledge.approvedFacts ?? [],
       policy: {
         ...TEST_REPLY_DEFAULTS,
         aiReplyEnabled: mt.aiReplyEnabled,
@@ -147,7 +156,7 @@ async function main() {
     }
 
     // Chốt chặn đọc được: câu máy soạn KHÔNG được chứa mã WIN hay giá của mã WIN.
-    const winCode = audit.productCode;
+    const winCode = bd?.code ?? "";
     const winPrice = (await db.query.fanpageSalesProfiles.findFirst({ where: eq(schema.fanpageSalesProfiles.pancakePageId, pageId) }))?.unitPrice ?? null;
     const moiCau = BA_CAU.map((c) => generateTestReply(testIntentOf(c), facts).text).join(" ");
     const loWin = Boolean(winCode) && moiCau.includes(winCode);

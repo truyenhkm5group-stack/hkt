@@ -20,6 +20,7 @@
  */
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { extractMeasurements } from "@/lib/ai-workforce/agents/sales/extract-slots";
 
 export type TestSignal = {
   customerInterest?: boolean;
@@ -68,15 +69,12 @@ export function extractTestSignals(text: string): TestSignal {
   const msz = t.match(/\b(size|sz)\s*(s|m|l|xl|xxl|2xl|3xl|freesize)\b/);
   if (msz && SIZE.includes(msz[2])) s.requestedSize = msz[2].toUpperCase();
 
-  // Số đo: chỉ nhận dạng viết rõ ràng. "1m58" / "158cm" là chiều cao, "50kg" là cân nặng.
-  // Một con số trơ trọi ("50") KHÔNG được đoán là gì — nó có thể là tuổi, là số nhà, là giá.
-  const cao = t.match(/\b1\s*m\s*([0-9]{2})\b/) ?? t.match(/\b(1[4-9][0-9])\s*cm\b/);
-  if (cao) {
-    const v = cao[0].includes("cm") ? Number(cao[1]) : 100 + Number(cao[1]);
-    if (v >= 130 && v <= 200) s.heightCm = v;
-  }
-  const nang = t.match(/\b([3-9][0-9]|1[0-4][0-9])\s*kg\b/);
-  if (nang) s.weightKg = Number(nang[1]);
+  // Số đo dùng CHUNG bộ bóc với máy gợi ý size (`extract-slots.ts`). Hai bộ luật bóc số đo song
+  // song là hai cách hiểu khác nhau về cùng một câu khách, và cái lệch sẽ lộ ra ở chỗ tệ nhất:
+  // báo cáo R&D nói một đằng, lời tư vấn size nói một nẻo.
+  const sd = extractMeasurements(text);
+  if (typeof sd.heightCm === "number") s.heightCm = sd.heightCm;
+  if (typeof sd.weightKg === "number") s.weightKg = sd.weightKg;
 
   return s;
 }

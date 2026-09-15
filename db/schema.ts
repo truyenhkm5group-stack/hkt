@@ -2603,9 +2603,13 @@ export const salesConversations = pgTable(
      * quá khứ, y như với mã hàng.
      */
     offerSnapshot: jsonb("offer_snapshot"),
-    /** Bảng số đo LÚC CHỤP — đổi bảng size sau này không làm đổi lời tư vấn đã đưa. */
-    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
-    sizeProfileVersion: integer("size_profile_version"),
+    /**
+     * BẢN BẢNG SỐ ĐO LÚC CHỤP — chuỗi, vì máy gợi ý size đánh số bằng chuỗi ("dam-q004-2026-09").
+     * Đổi bảng sau này không làm đổi lời tư vấn đã đưa.
+     */
+    sizeRuleVersion: text("size_rule_version").notNull().default(""),
+    /** Bản CHÍNH SÁCH lúc chụp — khách được hứa đổi trong 7 ngày thì cuộc ấy thuộc mức 7 ngày. */
+    policyVersion: integer("policy_version"),
     /** Sổ dữ kiện đã duyệt ở phiên bản nào — để dựng lại được vì sao máy nói câu đó. */
     knowledgeVersion: integer("knowledge_version"),
     /** Luật nguồn nào đã áp (nếu có). NULL = rơi về mặc định của fanpage. */
@@ -2940,15 +2944,23 @@ export const fanpageSalesProfiles = pgTable(
     codPolicy: text("cod_policy").notNull().default(""),
     inspectionPolicy: text("inspection_policy").notNull().default(""),
     deliveryEstimate: text("delivery_estimate").notNull().default(""),
-    exchangePolicy: text("exchange_policy").notNull().default(""),
-    /** Câu dữ kiện ĐÃ DUYỆT máy được phép nói. Ngoài danh sách này máy không được bịa thêm. */
-    approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
+    /** `SalesPolicy` — chính sách đổi/trả CÓ CẤU TRÚC. NULL = chưa khai nhánh nào. */
+    exchangePolicyJson: jsonb("exchange_policy_json"),
+    /** Đổi CAM KẾT là một bản khác hẳn đổi CÁCH NÓI — nên nó có số riêng. */
+    policyVersion: integer("policy_version").notNull().default(1),
+    /** `ApprovedFact[]` — câu ĐÃ DUYỆT máy được phép nói, kèm nhóm và người duyệt. */
+    approvedFactsJson: jsonb("approved_facts_json"),
     /**
      * Phiên bản SỔ DỮ KIỆN — tách khỏi `version` vì hai thứ khác nhau: đổi GIÁ là đổi điều kiện
      * bán, đổi CÂU ĐÃ DUYỆT là đổi thứ máy được phép nói. Hội thoại chụp cả hai.
      */
     knowledgeVersion: integer("knowledge_version").notNull().default(1),
-    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
+    /*
+     * KHÔNG có cột bảng số đo ở đây. Bảng số đo là của MÁY GỢI Ý SIZE
+     * (`lib/constants/size-engine.ts` + `settings["ai.sizeRules"]`), tra theo mã sản phẩm với
+     * phạm vi hẹp-thắng-rộng. Thêm một cột trỏ bảng khác ở đây là dựng lại đúng bản thứ hai mà
+     * migration 0091 vừa gỡ đi.
+     */
 
     note: text("note").notNull().default(""),
     updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
@@ -2958,23 +2970,15 @@ export const fanpageSalesProfiles = pgTable(
   (t) => [uniqueIndex("fanpage_sales_profiles_page_uq").on(t.pancakePageId)],
 );
 
-/**
- * BẢNG SỐ ĐO CỦA MỘT MẪU. Tách riêng để dùng lại giữa các page và giữa các mẫu cùng phom.
- * Thiếu bảng này thì máy KHÔNG được đoán size — `SIZE_DATA_MISSING` và chuyển người.
+/*
+ * BẢNG SỐ ĐO KHÔNG Ở ĐÂY, VÀ ĐÓ LÀ CÓ CHỦ Ý.
+ *
+ * Nó nằm ở `settings["ai.sizeRules"]`, đọc qua `lib/constants/size-engine.ts` — có phiên bản, có
+ * phạm vi (mẫu mã → sản phẩm → nhóm hàng → toàn shop, hẹp thắng rộng), có mã AMBIGUOUS /
+ * OUT_OF_RANGE, có script nhập kiểm tra trước khi ghi. 0088 từng dựng một bảng thứ hai ở đây;
+ * 0091 gỡ nó. Hai bảng số đo là hai câu trả lời khác nhau cho "khách này mặc size gì", và cái sai
+ * không lộ ra ở màn hình mà lộ ra ở một kiện hàng không vừa.
  */
-export const salesSizeProfiles = pgTable("sales_size_profiles", {
-  id: id(),
-  name: text("name").notNull(),
-  productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
-  version: integer("version").notNull().default(1),
-  /** [{ size, heightMin, heightMax, weightMin, weightMax, bust, waist, hip }] */
-  rules: jsonb("rules"),
-  /** Co giãn / chất liệu ảnh hưởng tới chọn size. */
-  fabricStretch: text("fabric_stretch").notNull().default(""),
-  note: text("note").notNull().default(""),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
 
 /**
  * LUẬT NGUỒN — CHỈ KHAI NGOẠI LỆ.
@@ -3047,12 +3051,12 @@ export const testProductProfiles = pgTable(
     codPolicy: text("cod_policy").notNull().default(""),
     inspectionPolicy: text("inspection_policy").notNull().default(""),
     deliveryEstimate: text("delivery_estimate").notNull().default(""),
-    exchangePolicy: text("exchange_policy").notNull().default(""),
+    exchangePolicyJson: jsonb("exchange_policy_json"),
+    policyVersion: integer("policy_version").notNull().default(1),
     promotion: text("promotion").notNull().default(""),
     shippingPolicy: text("shipping_policy").notNull().default(""),
     knowledgeVersion: integer("knowledge_version").notNull().default(1),
-    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
-    approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
+    approvedFactsJson: jsonb("approved_facts_json"),
     note: text("note").notNull().default(""),
     startAt: ts("start_at"),
     endAt: ts("end_at"),

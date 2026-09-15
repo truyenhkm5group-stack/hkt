@@ -13,6 +13,12 @@ import { POLICY_BY_SOURCE, TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-s
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 import { generateTestReply, testIntentOf } from "@/lib/ai-workforce/agents/sales/generate-test";
 import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { checkSellability } from "@/lib/queries/sellability";
+import { extractColor, extractMeasurements, extractSize } from "@/lib/ai-workforce/agents/sales/extract-slots";
+import { EMPTY_SALES_POLICY, policyAnswerable, type SalesPolicy } from "@/lib/constants/sales-policy";
+import { computeCapabilities, winPermissions } from "@/lib/constants/sales-capabilities";
+import { SIZE_RULES_KEY, type SizeRule } from "@/lib/constants/size-engine";
+import { setSettingJson } from "@/lib/settings";
 import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
 import { extractTestSignals, recordTestSignal } from "@/lib/ai-workforce/agents/sales/test-signals";
 
@@ -211,11 +217,22 @@ export async function testFanpageSales(db: Db) {
   assert.ok(bd1, "page đã có hồ sơ thì phải đọc được dữ kiện");
   assert.equal(bd1.capabilities.CAN_QUOTE_PRICE.on, true, "có giá ⇒ báo giá được");
   assert.equal(bd1.capabilities.CAN_QUOTE_SHIPPING.on, true);
-  assert.equal(bd1.capabilities.CAN_ADVISE_SIZE.on, false, "chưa có bảng số đo ⇒ TUYỆT ĐỐI không tư vấn size");
+  assert.equal(bd1.capabilities.CAN_ADVISE_SIZE.status, "MISSING_DATA", "chưa có bảng số đo ⇒ TUYỆT ĐỐI không tư vấn size");
   assert.deepEqual(bd1.capabilities.CAN_ADVISE_SIZE.missing, ["bảng số đo"], "tắt thì phải NÓI RA thiếu gì — đó là việc phải làm, không phải lời từ chối");
   assert.equal(bd1.capabilities.CAN_EXPLAIN_COD.on, false, "chưa khai COD ⇒ không giải thích COD");
   assert.equal(bd1.ready, false, "thiếu màu + ba chính sách thì chưa READY");
   assert.ok(bd1.missing.includes("chính sách COD"));
+
+  // BA MỨC, KHÔNG PHẢI HAI. Lên đơn có ĐỦ DỮ LIỆU (đã có mã hàng + giá) nhưng bị chặn cứng cấp
+  // máy chủ — gộp nó vào "thiếu dữ liệu" là bảo người vận hành đi khai một thứ đã khai rồi.
+  assert.equal(bd1.capabilities.CAN_CREATE_ORDER.status, "BLOCKED_BY_PERMISSION");
+  assert.deepEqual(bd1.capabilities.CAN_CREATE_ORDER.missing, [], "dữ liệu KHÔNG thiếu — mã hàng và giá đều có");
+  assert.ok(bd1.capabilities.CAN_CREATE_ORDER.blockedBy.includes("AI_ALLOW_ORDER_CREATE"), "phải nói RÕ khoá nào đang chặn");
+
+  // QUYỀN KHÔNG BAO GIỜ THAY DỮ LIỆU: mở hết quyền mà chưa có bảng số đo thì size vẫn tắt.
+  const mo = computeCapabilities(bd1.knowledge, winPermissions("AUTO", true));
+  assert.equal(mo.CAN_CREATE_ORDER.status, "READY", "mở khoá thì lên đơn sẵn sàng");
+  assert.equal(mo.CAN_ADVISE_SIZE.status, "MISSING_DATA", "nhưng size VẪN tắt — quyền không đẻ ra dữ liệu");
 
   // Khai đủ ⇒ READY bật lên. Không có bước nào khác, không cờ nào phải bấm thêm.
   await db
@@ -257,9 +274,9 @@ export async function testFanpageSales(db: Db) {
   assert.equal(bdT.knowledge.unitPrice, 399_000, "giá của CHÍNH mẫu test");
   assert.equal(bdT.capabilities.CAN_QUOTE_PRICE.on, true);
   assert.equal(bdT.capabilities.CAN_ADVISE_SIZE.on, false, "mẫu test chưa có bảng số đo ⇒ vẫn không đoán size");
-  assert.equal(bdT.capabilities.CAN_CREATE_ORDER.on, false, "chưa có mã hàng ERP ⇒ không lên đơn, dù các ô khác đã đủ");
-  assert.equal(bdT.knowledge.exchangePolicy, "", "mẫu test CHƯA khai đổi trả — và KHÔNG mượn của mã WIN");
-  assert.equal(bdT.capabilities.CAN_EXPLAIN_EXCHANGE.on, false);
+  assert.equal(bdT.capabilities.CAN_CREATE_ORDER.status, "MISSING_DATA", "chưa có mã hàng ERP ⇒ thiếu DỮ LIỆU, không phải bị chặn quyền");
+  assert.equal(bdT.knowledge.exchangeAnswerable, false, "mẫu test CHƯA khai đổi trả — và KHÔNG mượn của mã WIN");
+  assert.equal(bdT.capabilities.CAN_EXPLAIN_EXCHANGE.status, "MISSING_DATA");
 
   // ═════════ 12. ĐI TÌM DỮ LIỆU CÒN THIẾU — và nói thật cái nào ERP không thể có ═════════
   const lo = await discoverKnowledgeGaps(PAGE, db);
@@ -279,45 +296,65 @@ export async function testFanpageSales(db: Db) {
   //
   // Đây là cái mốc để đối chiếu khi mô hình thật bật lên: mô hình được đổi cách nói, KHÔNG được
   // thêm một con số nào. Phân biệt được vì mọi con số đều đi kèm chỗ nó được lấy ra.
+  const chinhSach: SalesPolicy = {
+    ...EMPTY_SALES_POLICY,
+    exchange: {
+      ...EMPTY_SALES_POLICY.exchange,
+      SIZE: { allowed: true, days: 3, conditions: "còn nguyên tem", shipPayer: "CUSTOMER" },
+      COLOR: { allowed: false, days: null, conditions: "", shipPayer: "UNSET" },
+    },
+  };
   await db
     .update(schema.fanpageSalesProfiles)
     .set({
       comboPricing: [{ quantity: 2, price: 849_000, freeShipping: true }],
-      exchangePolicy: "Đổi size trong 3 ngày", approvedFacts: ["Bên em bán hàng có sẵn, không đặt trước"],
+      exchangePolicyJson: chinhSach,
+      approvedFactsJson: [{ category: "FAQ", text: "Bên em bán hàng có sẵn, không đặt trước", approvedBy: "chu@shop.vn", approvedAt: new Date().toISOString() }],
     })
     .where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
-  const kt = (await loadWinKnowledge(PAGE, db))!.knowledge;
+  const bdKT = (await loadWinKnowledge(PAGE, db))!;
+  const kt = bdKT.knowledge;
+  const quyen = bdKT.permissions;
+  const boi = { policy: bdKT.policy, facts: bdKT.facts };
 
-  assert.equal(winIntentOf("mua 2 cái bao nhiêu ạ"), "COMBO", "câu combo vừa khớp cả giá — luật hẹp hơn phải thắng");
-  const tlGia = answerFromKnowledge(winIntentOf("Bao nhiêu tiền vậy shop?"), kt);
+  // ĐỘNG TỪ MUA + KHÔNG HỎI GIÁ ⇒ khách đang CHỐT. Hai câu dưới chỉ khác nhau ở chỗ ấy, và đọc
+  // nhầm câu thứ hai thành câu hỏi giá là báo giá cho người vừa nói họ mua rồi.
+  assert.equal(winIntentOf("mua 2 cái bao nhiêu ạ"), "COMBO", "có hỏi giá ⇒ là câu hỏi giá combo");
+  assert.equal(winIntentOf("chốt cho chị 2 cái"), "BUY", "không hỏi giá ⇒ là chốt đơn, KHÔNG phải hỏi combo");
+  assert.equal(winIntentOf("chị lấy đỏ size L"), "BUY", "chọn mẫu mã cũng là chốt");
+  // "CÒN KHÔNG" là câu hỏi TỒN, dù trong câu có chữ "size" hay tên màu.
+  assert.equal(winIntentOf("màu đỏ size L còn không?"), "STOCK", "hỏi hàng, không xin tư vấn size");
+  assert.equal(winIntentOf("50kg mặc size gì?"), "SIZE");
+  assert.equal(winIntentOf("eo 74 thì mặc size gì?"), "SIZE");
+  assert.equal(winIntentOf("không vừa có đổi được không?"), "EXCHANGE");
+  const tlGia = answerFromKnowledge(winIntentOf("Bao nhiêu tiền vậy shop?"), kt, quyen, boi);
   assert.equal(tlGia.action, "ANSWER");
   assert.ok(tlGia.text.includes("499.000"), "phải là con số ĐÃ KHAI");
   assert.ok(tlGia.text.includes("849.000"), "và chào luôn combo vì đã có giá combo thật");
   assert.deepEqual(tlGia.provenance.map((x) => x.source), ["fanpage_sales_profiles.unit_price", "fanpage_sales_profiles.shipping_fee", "fanpage_sales_profiles.combo_pricing"], "mỗi con số phải chỉ được ra ô nó lấy từ đâu");
 
   // SIZE: vẫn chưa có bảng số đo ⇒ chuyển người, dù mọi ô khác đã đầy.
-  const tlSize = answerFromKnowledge(winIntentOf("em cao 1m58 nặng 50kg mặc size nào"), kt);
+  const tlSize = answerFromKnowledge(winIntentOf("em cao 1m58 nặng 50kg mặc size nào"), kt, quyen, boi);
   assert.equal(tlSize.action, "HANDOFF");
   assert.equal(tlSize.humanReview, true);
   assert.deepEqual(tlSize.missing, ["bảng số đo"]);
   assert.deepEqual(tlSize.provenance, [], "né thì KHÔNG được kèm dữ kiện nào — không có gì để chống lưng cho một câu không trả lời");
 
   // CÒN HÀNG KHÔNG: tồn kho đi theo phiếu kho (luật 10), sổ bán hàng không biết ⇒ không hứa.
-  const tlCon = answerFromKnowledge(winIntentOf("còn hàng không shop"), kt);
+  const tlCon = answerFromKnowledge(winIntentOf("còn hàng không shop"), kt, quyen, boi);
   assert.equal(tlCon.action, "HANDOFF");
   assert.deepEqual(tlCon.missing, ["tồn kho thực tế"], "sổ dữ kiện bán hàng KHÔNG biết tồn — trả lời 'còn ạ' từ đây là hứa bằng thứ không đo");
 
   // CÂU NGOÀI KỊCH BẢN: chỉ được nói lại câu ĐÃ DUYỆT.
-  const tlLa = answerFromKnowledge(winIntentOf("shop ở đâu thế"), kt);
-  assert.equal(tlLa.provenance[0]?.source, "fanpage_sales_profiles.approved_facts");
-  await db.update(schema.fanpageSalesProfiles).set({ approvedFacts: [] }).where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
-  const ktTrong = (await loadWinKnowledge(PAGE, db))!.knowledge;
-  const tlLa2 = answerFromKnowledge(winIntentOf("shop ở đâu thế"), ktTrong);
+  const tlLa = answerFromKnowledge(winIntentOf("shop ở đâu thế"), kt, quyen, boi);
+  assert.ok(tlLa.provenance[0]?.source.startsWith("fanpage_sales_profiles.approved_facts_json"), "câu ngoài kịch bản phải truy được về sổ câu đã duyệt");
+  assert.ok(tlLa.provenance[0]?.source.includes("chu@shop.vn"), "và về AI đã duyệt nó — đó là thứ phân biệt một dữ kiện với một câu gõ vội");
+  const tlLa2 = answerFromKnowledge(winIntentOf("shop ở đâu thế"), kt, quyen, { policy: bdKT.policy, facts: [] });
   assert.equal(tlLa2.action, "HANDOFF", "hết câu đã duyệt thì chuyển người, KHÔNG ghép tạm vài dữ kiện rời thành câu nghe như biết");
 
   // Cùng hàm ấy áp cho mẫu TEST, và nhãn nguồn phải nói đúng BẢNG nào.
-  const ktTest = (await loadTestKnowledge(test1.id, db))!.knowledge;
-  const tlTest = answerFromKnowledge("PRICE", ktTest, "TEST_PRODUCT");
+  const bdTest = (await loadTestKnowledge(test1.id, db))!;
+  const tlTest = answerFromKnowledge("PRICE", bdTest.knowledge, bdTest.permissions, { origin: "TEST_PRODUCT" });
   assert.ok(tlTest.text.includes("399.000"), "giá của chính mẫu test");
   assert.ok(!tlTest.text.includes("499.000"), "TUYỆT ĐỐI không phải giá mã WIN");
   assert.equal(tlTest.provenance[0]?.source, "test_product_profiles.unit_price");
@@ -346,5 +383,122 @@ export async function testFanpageSales(db: Db) {
   assert.equal(th.requestedColor, "đỏ đô");
   assert.equal(th.sizeQuestion, null, "chưa quan sát được thì vẫn là CHƯA BIẾT, không phải false");
 
-  console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · mọi con số truy được về ô nó lấy ra");
+  // ═════════ 15. BẢNG SỐ ĐO ĐI QUA MÁY GỢI Ý SIZE CỦA ERP, KHÔNG PHẢI BẢN THỨ HAI ═════════
+  //
+  // ERP đã có máy gợi ý size có phiên bản, có phạm vi, có mã AMBIGUOUS/OUT_OF_RANGE. 0088 từng
+  // dựng một bảng số đo thứ hai và 0091 đã gỡ: hai bảng là hai câu trả lời khác nhau cho "khách
+  // này mặc size gì", và cái sai lộ ra ở một kiện hàng không vừa chứ không lộ ra ở màn hình.
+  const bang: SizeRule = {
+    version: "q004-2026-09",
+    scope: "PRODUCT",
+    key: "Q004",
+    fabricStretch: "HIGH",
+    // Các khoảng CHỒNG LẤN nhau, đúng như bảng size thật — và đó là lý do phải có nhánh
+    // AMBIGUOUS: người ở vùng giao nhau thì bảng không kết luận được, phải hỏi thích ôm hay rộng.
+    rows: [
+      { size: "M", heightCm: [150, 158], weightKg: [42, 52] },
+      { size: "L", heightCm: [155, 163], weightKg: [50, 58] },
+      { size: "XL", heightCm: [158, 168], weightKg: [57, 66] },
+    ],
+  };
+  await setSettingJson(SIZE_RULES_KEY, { version: "2026-09", rules: [bang] });
+
+  const bdSize = (await loadWinKnowledge(PAGE, db))!;
+  assert.equal(bdSize.knowledge.sizeRuleCount, 3, "bảng đọc từ settings[ai.sizeRules], không từ một bảng riêng");
+  assert.equal(bdSize.sizeRuleVersion, "q004-2026-09");
+  assert.equal(bdSize.capabilities.CAN_ADVISE_SIZE.status, "READY", "có bảng ⇒ tư vấn size mở ra");
+
+  const ctxSize = { sizeRule: bang, policy: bdSize.policy, facts: bdSize.facts };
+  // Đủ số đo, đúng một size khớp ⇒ trả lời được, và nói rõ nó tra ở đâu.
+  const sz1 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: extractMeasurements("em cao 1m55 nặng 45kg") });
+  assert.equal(sz1.action, "ANSWER");
+  assert.ok(sz1.text.includes("size M"), `phải ra M, thực tế: ${sz1.text}`);
+  assert.ok(sz1.provenance.some((x) => x.source.includes("ai.sizeRules")), "phải chỉ ra bảng nào đã tra");
+
+  // THIẾU SỐ ĐO ⇒ HỎI, và chỉ hỏi ĐÚNG chiều bảng thật sự dùng.
+  const sz2 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: extractMeasurements("eo em 74 thì mặc size gì") });
+  assert.equal(sz2.action, "ASK", "bảng này tra theo cao/nặng, khách mới cho vòng eo ⇒ hỏi thêm");
+  assert.ok(/chiều cao/.test(sz2.text) && /cân nặng/.test(sz2.text));
+  assert.ok(!/vòng ngực|vòng mông/.test(sz2.text), "KHÔNG đòi cho đủ bộ số đo — bảng không dùng ba vòng");
+
+  // RƠI VÀO HAI SIZE ⇒ CHUYỂN NGƯỜI, không chọn bừa cái nào.
+  const sz3 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: { heightCm: 157, weightKg: 51 } });
+  assert.equal(sz3.action, "HANDOFF");
+  assert.ok(sz3.provenance.some((x) => x.value.includes("AMBIGUOUS")), "phải ghi lại là vì rơi vào nhiều size");
+  assert.ok(!/size M|size L/.test(sz3.text), "tuyệt đối không nói ra một size khi chưa kết luận được");
+
+  // NGOÀI BẢNG ⇒ CHUYỂN NGƯỜI. Bịa một size ở đây là gửi đi một kiện hàng không vừa.
+  const sz4 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: { heightCm: 175, weightKg: 85 } });
+  assert.equal(sz4.action, "HANDOFF");
+  assert.ok(sz4.provenance.some((x) => x.value.includes("OUT_OF_RANGE")));
+
+  // ═════════ 16. BÓC SỐ ĐO: CHỈ NHẬN DẠNG VIẾT RÕ RÀNG ═════════
+  assert.deepEqual(extractMeasurements("cao 1m58 nặng 50kg"), { heightCm: 158, weightKg: 50 });
+  assert.deepEqual(extractMeasurements("eo 74"), { waistCm: 74 }, "có chữ 'eo' thì mới biết 74 là vòng eo");
+  assert.deepEqual(extractMeasurements("cho em 74 cái"), {}, "một con số trơ trọi KHÔNG được đoán là số đo nào");
+  assert.equal(extractColor("cho chị màu đỏ đô nhé", ["Đỏ", "Đỏ đô", "Đen"]), "Đỏ đô", "chuỗi dài khớp trước — 'đỏ đô' không bị cắt thành 'đỏ'");
+  assert.equal(extractColor("màu hồng có không", ["Đỏ", "Đen"]), "", "màu shop KHÔNG bán thì không nhận bừa");
+  assert.equal(extractSize("lấy size L", ["M", "L"]), "L");
+  assert.equal(extractSize("em cao 1m58", ["M", "L"]), "", "chữ 'm' trong '1m58' KHÔNG phải size M");
+
+  // ═════════ 17. CÒN BÁN ≠ CÒN HÀNG — và gộp hai câu là chỗ sai đắt nhất ═════════
+  //
+  // fp-v1 (M/Đen) chưa có phiếu nhập nào ⇒ tồn là THIẾU DỮ LIỆU (luật 10), không phải 0.
+  const sl1 = await checkSellability({ productId: win.id }, db);
+  assert.equal(sl1.verdict, "UNKNOWN", "chưa có phiếu nhập ⇒ CHƯA BIẾT còn hàng, không phải hết hàng");
+  assert.equal(sl1.needsHuman, true);
+  assert.deepEqual(sl1.listedColors, ["Đen"], "nhưng ĐANG BÁN màu nào thì ERP luôn trả lời được");
+
+  const tlCon2 = answerFromKnowledge("STOCK", bdSize.knowledge, bdSize.permissions, { ...ctxSize, sellability: sl1 });
+  assert.equal(tlCon2.action, "HANDOFF");
+  assert.ok(!/còn hàng/.test(tlCon2.text), "TUYỆT ĐỐI không hứa 'còn hàng' khi tồn chưa biết");
+  assert.ok(/đang bán màu Đen/.test(tlCon2.text), "nhưng vẫn nói được cái BIẾT — đó là phần có ích của một câu chưa trả lời được");
+
+  // Tổ hợp shop KHÔNG chào bán ⇒ trả lời được ngay, không cần tới sổ kho.
+  const sl2 = await checkSellability({ productId: win.id, color: "Hồng" }, db);
+  assert.equal(sl2.verdict, "NOT_SELLING");
+  const tlCon3 = answerFromKnowledge("STOCK", bdSize.knowledge, bdSize.permissions, { ...ctxSize, sellability: sl2 });
+  assert.equal(tlCon3.action, "ASK", "biết chắc là không có thì nói luôn, rồi mời khách chọn màu đang bán");
+
+  // ═════════ 18. CHÍNH SÁCH ĐỔI TRẢ TRẢ LỜI THEO TỪNG NHÁNH ═════════
+  assert.equal(policyAnswerable(EMPTY_SALES_POLICY), false, "chưa khai nhánh nào thì KHÔNG trả lời được");
+  assert.equal(policyAnswerable({ ...EMPTY_SALES_POLICY, exchange: { ...EMPTY_SALES_POLICY.exchange, SIZE: { allowed: false, days: null, conditions: "", shipPayer: "UNSET" } } }), true,
+    "'bên em KHÔNG nhận đổi' là một câu trả lời ĐẦY ĐỦ — khác hẳn chưa khai");
+  const tlDoi = answerFromKnowledge("EXCHANGE", bdSize.knowledge, bdSize.permissions, ctxSize);
+  assert.equal(tlDoi.action, "ANSWER");
+  assert.ok(/3 ngày/.test(tlDoi.text) && /nguyên tem/.test(tlDoi.text), "dựng câu từ chính các ô đã khai");
+  assert.ok(/chưa hỗ trợ/.test(tlDoi.text), "nhánh đổi màu khai là KHÔNG — và máy nói ra điều đó");
+
+  // ═════════ 19. BỐN SỐ HIỆU, BỐN ĐƯỜNG ĐỔI — hội thoại cũ không bị viết lại ở đường nào ═════════
+  //
+  // Bốn thứ có thể đổi độc lập: GIÁ · MÃ WIN · BẢNG SỐ ĐO · CHÍNH SÁCH. Gộp chúng vào một số thì
+  // sáu tháng sau không trả lời được "lúc ấy khách được báo giá nào, hứa đổi trả thế nào".
+  const htV = await hoiThoai(db, "fp-ht-version");
+  const plV = await classifyConversationSource({ conversationId: htV.id, pancakePageId: PAGE }, db);
+  await snapshotClassification(htV.id, plV, db);
+  const [chupV] = await db.select().from(schema.salesConversations).where(eq(schema.salesConversations.id, htV.id));
+  assert.equal(chupV.sizeRuleVersion, "q004-2026-09", "chụp BẢN BẢNG SỐ ĐO lúc ấy");
+  assert.equal(chupV.policyVersion, 1, "và bản CHÍNH SÁCH lúc ấy");
+
+  // ① đổi GIÁ · ② đổi MÃ WIN · ③ đổi BẢNG SỐ ĐO · ④ đổi CHÍNH SÁCH — cả bốn cùng lúc.
+  await db.update(schema.fanpageSalesProfiles)
+    .set({ unitPrice: 599_000, activeProductId: "fp-other", version: 9, policyVersion: 7,
+           exchangePolicyJson: { ...chinhSach, exchange: { ...chinhSach.exchange, SIZE: { allowed: true, days: 30, conditions: "", shipPayer: "SHOP" } } } })
+    .where(eq(schema.fanpageSalesProfiles.id, hoSo.id));
+  await setSettingJson(SIZE_RULES_KEY, { version: "2026-10", rules: [{ ...bang, version: "q004-2026-10", rows: [{ size: "L", heightCm: [150, 170], weightKg: [40, 70] }] }] });
+
+  const plSau = await classifyConversationSource({ conversationId: htV.id, pancakePageId: PAGE }, db);
+  assert.equal(plSau.classificationSource, "SNAPSHOT");
+  assert.equal(plSau.offer?.unitPrice, 499_000, "① GIÁ: hội thoại cũ giữ 499k");
+  assert.equal(plSau.activeProductId, win.id, "② MÃ WIN: hội thoại cũ vẫn Q004");
+  assert.equal(plSau.sizeRuleVersion, "q004-2026-09", "③ BẢNG SỐ ĐO: giữ bản cũ, không nhảy sang bản tháng 10");
+  assert.equal(plSau.policyVersion, 1, "④ CHÍNH SÁCH: giữ bản 1, khách KHÔNG bị đổi cam kết từ 3 ngày sang 30 ngày");
+
+  // Hội thoại MỚI thì dùng mọi thứ mới — bất biến là của quá khứ, không phải của cấu hình.
+  const htV2 = await hoiThoai(db, "fp-ht-version-2");
+  const plV2 = await classifyConversationSource({ conversationId: htV2.id, pancakePageId: PAGE }, db);
+  assert.equal(plV2.offer?.unitPrice, 599_000);
+  assert.equal(plV2.policyVersion, 7);
+
+  console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · size đi qua máy gợi ý size của ERP · còn bán ≠ còn hàng · bốn số hiệu bốn đường đổi");
 }

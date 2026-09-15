@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { setSourceClassification } from "@/lib/actions/fanpage-sales";
 
 type TestChoice = { id: string; testCode: string; name: string };
-type SizeChoice = { id: string; name: string };
 
 /**
  * Một dòng = một quảng cáo / bài viết có phát sinh hội thoại.
@@ -24,7 +23,6 @@ export function SourceRow({
   mediaUrl,
   conversations,
   tests,
-  sizes,
 }: {
   pancakePageId: string;
   sourceId: string;
@@ -35,7 +33,6 @@ export function SourceRow({
   mediaUrl: string;
   conversations: number;
   tests: TestChoice[];
-  sizes: SizeChoice[];
 }) {
   const [chon, setChon] = useState<"DEFAULT_WIN" | "TEST" | "HUMAN_ONLY">(status);
   const [tpId, setTpId] = useState("");
@@ -45,7 +42,6 @@ export function SourceRow({
   const [chatLieu, setChatLieu] = useState("");
   const [ship, setShip] = useState("");
   const [cod, setCod] = useState("");
-  const [sizeId, setSizeId] = useState("");
   const [ghiChu, setGhiChu] = useState("");
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
@@ -101,10 +97,9 @@ export function SourceRow({
               <input className="h-8 rounded-md border border-input bg-background px-2 text-xs" placeholder="Chất liệu" value={chatLieu} onChange={(e) => setChatLieu(e.target.value)} />
               <input className="h-8 rounded-md border border-input bg-background px-2 text-xs" placeholder="Phí ship / chính sách ship" value={ship} onChange={(e) => setShip(e.target.value)} />
               <input className="h-8 rounded-md border border-input bg-background px-2 text-xs" placeholder="Kiểm hàng / COD" value={cod} onChange={(e) => setCod(e.target.value)} />
-              <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={sizeId} onChange={(e) => setSizeId(e.target.value)}>
-                <option value="">— chưa có bảng size —</option>
-                {sizes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              {/* Bảng số đo của mẫu test khai ở máy gợi ý size, theo MÃ TẠM — không chọn từ một
+                  danh sách bảng riêng, vì bảng riêng ấy đã bị gỡ (0091). Mẫu mới tạo chưa có bảng,
+                  và máy chuyển người ở mọi câu hỏi size cho tới khi có. */}
               <input className="h-8 rounded-md border border-input bg-background px-2 text-xs sm:col-span-2" placeholder="Ghi chú cho sale" value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} />
             </div>
           </div>
@@ -132,7 +127,6 @@ export function SourceRow({
                           material: chatLieu,
                           shippingPolicy: ship,
                           codPolicy: cod,
-                          sizeProfileId: sizeId || undefined,
                           note: ghiChu,
                         }
                       : undefined,

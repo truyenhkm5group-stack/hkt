@@ -120,6 +120,7 @@ export async function listSourceRules(pancakePageId?: string): Promise<SourceRul
   }));
 }
 
+
 /** Nguồn CÓ THẬT trong dữ liệu mà chưa có luật — ứng viên để khai ngoại lệ. */
 export async function listSourcesWithoutRule(pancakePageId: string) {
   const db = await getDb();
@@ -150,21 +151,18 @@ export async function listTestProducts() {
       colors: schema.testProductProfiles.colors,
       aiReplyEnabled: schema.testProductProfiles.aiReplyEnabled,
       allowAutoOrderCreate: schema.testProductProfiles.allowAutoOrderCreate,
-      sizeProfileId: schema.testProductProfiles.sizeProfileId,
     })
     .from(schema.testProductProfiles)
     .orderBy(desc(schema.testProductProfiles.updatedAt))
     .limit(200);
 }
 
-export async function listSizeProfiles() {
-  const db = await getDb();
-  return db
-    .select({ id: schema.salesSizeProfiles.id, name: schema.salesSizeProfiles.name, version: schema.salesSizeProfiles.version })
-    .from(schema.salesSizeProfiles)
-    .orderBy(schema.salesSizeProfiles.name)
-    .limit(200);
-}
+/*
+ * KHÔNG CÓ `listSizeProfiles` Ở ĐÂY NỮA.
+ *
+ * Bảng số đo là của máy gợi ý size (`settings["ai.sizeRules"]`), đọc qua `sizeRuleFor()`. Một hàm
+ * liệt kê "các bảng số đo" từ một bảng riêng là dấu hiệu bảng riêng ấy còn tồn tại — 0091 đã gỡ nó.
+ */
 
 export type SourceLine = {
   sourceId: string;

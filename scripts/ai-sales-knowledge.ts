@@ -22,9 +22,11 @@ import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { rowsOf } from "@/lib/sql-rows";
 import { answerFromKnowledge, winIntentOf } from "@/lib/ai-workforce/agents/sales/answer-win";
+import { extractColor, extractMeasurements, extractSize } from "@/lib/ai-workforce/agents/sales/extract-slots";
+import { checkSellability } from "@/lib/queries/sellability";
 import { generateTestReply, testIntentOf, type TestFacts } from "@/lib/ai-workforce/agents/sales/generate-test";
 import { CAPABILITY_LABEL, SALES_CAPABILITIES } from "@/lib/constants/sales-capabilities";
-import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge, sizeRuleFor } from "@/lib/queries/sales-knowledge";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 
 /**
@@ -45,18 +47,34 @@ const XAC_NHAN = {
   deliveryEstimate: "2–4 ngày",
 } as const;
 
+/**
+ * BẢNG SỐ ĐO — KHÔNG CÓ Ở ĐÂY, VÀ ĐÓ LÀ CÂU TRẢ LỜI ĐÚNG.
+ *
+ * Chủ shop chưa phát biểu bảng cao/nặng ↔ size cho Q004. Bằng chứng đo được: câu shop gửi nhiều
+ * nhất trên chính page này là "Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha"
+ * (16 lần) — tức chính shop cũng hỏi rồi quyết bằng tay, không đọc từ một bảng nào.
+ *
+ * Nhãn size trong danh mục (M · L · XL · 2XL) KHÔNG suy ra được bảng: ERP biết mẫu có size nào,
+ * không biết ai mặc vừa size nào. Điền hộ một bảng nghe hợp lý là gửi đi những kiện hàng không
+ * vừa, và tỷ lệ hoàn là con số cả hệ thống này sinh ra để giữ.
+ *
+ * Bảng khai ở `/ai/fanpage` → mục "Bảng số đo", ghi vào `settings["ai.sizeRules"]`.
+ */
+
 /** Câu khách hay hỏi nhất — dùng làm mốc đối chiếu khi bật mô hình thật. */
 const CAU_HOI_WIN = [
-  "Bao nhiêu tiền vậy shop?",
-  "Ship bao nhiêu ạ?",
-  "Mua 2 cái thì giá sao ạ?",
-  "Có màu gì ạ?",
-  "Em cao 1m58 nặng 50kg mặc size nào?",
-  "Vải gì vậy shop, có nóng không?",
-  "Có được kiểm hàng trước khi thanh toán không ạ?",
-  "Bao lâu thì em nhận được hàng?",
-  "Cho em hỏi đổi trả thế nào ạ?",
-  "Còn hàng không shop?",
+  "Bao nhiêu em?",
+  "Mua 2 cái bao nhiêu?",
+  "Ship bao nhiêu?",
+  "Có màu gì?",
+  "50kg mặc size gì?",
+  "Eo 74 thì mặc size gì?",
+  "Màu đỏ size L còn không?",
+  "Có được kiểm hàng không?",
+  "Bao lâu nhận được?",
+  "Không vừa có đổi được không?",
+  "Chị lấy đỏ size L",
+  "Chốt cho chị 2 cái",
 ];
 const CAU_HOI_TEST = ["Bao nhiêu em?", "Có màu gì?", "50kg mặc size gì?", "chốt cho em 1 cái"];
 
@@ -113,6 +131,7 @@ async function main() {
   giu("thời gian giao", hoSo.deliveryEstimate, XAC_NHAN.deliveryEstimate);
   console.log(doi.length ? doi.join("\n") : "   (không đổi gì)");
   console.log("   KHÔNG ghi: bảng số đo · chính sách đổi trả — chủ shop chưa phát biểu, và máy không được điền hộ.");
+  console.log("   (bảng số đo khai ở /ai/fanpage mục 2; chính sách đổi trả ở mục 3 — cả hai đều CÓ MÀN KHAI, không phải chờ ai sửa mã)");
 
   if (apDung && doi.length) {
     await db
@@ -157,12 +176,30 @@ async function main() {
   }
 
   // ───── ⑤ MÁY TRẢ LỜI 10 CÂU — có nguồn từng con số ─────
+  // Bảng số đo và danh sách size đang bán — tra MỘT LẦN, dùng cho cả mười hai câu.
+  const sizeRule = await sizeRuleFor({ productId: hoSo.activeProductId, productCode: bd.code });
+  const sizeERP = hoSo.activeProductId
+    ? (await db
+        .select({ size: schema.productVariants.size })
+        .from(schema.productVariants)
+        .where(eq(schema.productVariants.productId, hoSo.activeProductId))).map((r) => r.size).filter(Boolean)
+    : [];
+
   console.log("\n⑤ TRẢ LỜI THỬ (KHÔNG gọi mô hình — luật thuần, chạy lại ra đúng một câu)");
   for (const q of CAU_HOI_WIN) {
-    const tl = answerFromKnowledge(winIntentOf(q), bd.knowledge);
+    // Bóc màu / size / số đo từ chính câu khách — cùng bộ luật dây chuyền thật dùng.
+    const mau = extractColor(q, bd.knowledge.colors);
+    const sz = extractSize(q, sizeERP);
+    const sl = hoSo.activeProductId ? await checkSellability({ productId: hoSo.activeProductId, color: mau, size: sz }, db) : null;
+    const tl = answerFromKnowledge(winIntentOf(q), bd.knowledge, bd.permissions, {
+      sizeRule,
+      body: extractMeasurements(q),
+      sellability: sl,
+      policy: bd.policy,
+      facts: bd.facts,
+    });
     console.log(`\n   ❓ ${q}`);
     console.log(`   → [${tl.action}${tl.humanReview ? " · CHUYỂN NGƯỜI" : ""}] ${tl.text}`);
-    console.log(`      ý định ${tl.intent} · năng lực ${tl.capability ?? "—"}${tl.missing.length ? ` · thiếu ${tl.missing.join(", ")}` : ""}`);
     console.log(`      nguồn: ${tl.provenance.length ? tl.provenance.map((p) => `${p.field}=${p.value} ← ${p.source}`).join(" | ") : "(không dữ kiện nào — đúng, vì câu này máy không trả lời)"}`);
   }
 
@@ -175,7 +212,7 @@ async function main() {
     inNangLuc(bdT.capabilities);
     const facts: TestFacts = {
       testCode: t.testCode, name: t.name, price: t.price, colors: t.colors, material: t.material,
-      shippingPolicy: t.shippingPolicy, hasSizeProfile: Boolean(t.sizeProfileId), approvedFacts: t.approvedFacts,
+      shippingPolicy: t.shippingPolicy, hasSizeProfile: bdT.knowledge.sizeRuleCount > 0, approvedFacts: bdT.knowledge.approvedFacts,
       policy: {
         aiReplyEnabled: t.aiReplyEnabled, allowQuotePrice: t.allowQuotePrice, allowAnswerMaterial: t.allowAnswerMaterial,
         allowAskSize: t.allowAskSize, allowCollectPreference: t.allowCollectPreference, allowCollectIntent: t.allowCollectIntent,
