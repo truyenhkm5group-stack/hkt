@@ -522,5 +522,39 @@ export async function testFanpageSales(db: Db) {
   assert.equal(plV2.offer?.unitPrice, 599_000);
   assert.equal(plV2.policyVersion, 7);
 
+  // ═════════ 20. MƯỜI HAI CÂU KHÁCH HAY HỎI — chạy hết, không câu nào được bịa ═════════
+  //
+  // Đây là cái mốc để đối chiếu khi bật mô hình thật: cùng dữ liệu thì cùng những câu này. Mô hình
+  // được đổi cách nói, KHÔNG được đổi cột `capability`, `missing`, hay danh sách nguồn.
+  const MUOI_HAI = [
+    "Bao nhiêu em?", "Mua 2 cái bao nhiêu?", "Ship bao nhiêu?", "Có màu gì?",
+    "50kg mặc size gì?", "Eo 74 thì mặc size gì?", "Màu đỏ size L còn không?",
+    "Có được kiểm hàng không?", "Bao lâu nhận được?", "Không vừa có đổi được không?",
+    "Chị lấy đỏ size L", "Chốt cho chị 2 cái",
+  ];
+  const ctx12 = { sizeRule: bang, policy: bdSize.policy, facts: bdSize.facts };
+  for (const q of MUOI_HAI) {
+    const tl = answerFromKnowledge(winIntentOf(q), bdSize.knowledge, bdSize.permissions, {
+      ...ctx12,
+      body: extractMeasurements(q),
+      sellability: await checkSellability({ productId: win.id, color: extractColor(q, bdSize.knowledge.colors), size: extractSize(q, ["M", "L", "XL"]) }, db),
+    });
+    // MỘT LUẬT CHO CẢ MƯỜI HAI CÂU: trả lời được thì phải chỉ ra nguồn; né thì phải nói thiếu gì.
+    // Một câu vừa không có nguồn vừa không nói thiếu gì là một câu máy tự nghĩ ra.
+    if (tl.action === "HANDOFF") {
+      assert.ok(tl.missing.length || tl.blockedBy, `"${q}": né mà không nói thiếu gì / chặn gì`);
+    } else {
+      assert.ok(tl.provenance.length, `"${q}": trả lời mà không chỉ được nguồn — đó là câu bịa`);
+    }
+    // KHÔNG câu nào được nói một con số ngoài những gì đã khai.
+    const soTrongCau = (tl.text.match(/[0-9][0-9.]{2,}/g) ?? []).filter((x) => !/^1m/.test(x));
+    for (const so of soTrongCau) {
+      assert.ok(
+        tl.provenance.some((pv) => pv.value.includes(so)) || /ngày/.test(tl.text),
+        `"${q}": câu trả lời mang số ${so} nhưng không nguồn nào khai nó — ${tl.text}`,
+      );
+    }
+  }
+
   console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · size đi qua máy gợi ý size của ERP · còn bán ≠ còn hàng · bốn số hiệu bốn đường đổi");
 }
