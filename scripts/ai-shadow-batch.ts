@@ -77,9 +77,20 @@ async function main() {
   if (!ds.length) { console.log("   Không có gì để chạy."); process.exit(0); }
   if (dryRun) { console.log("\n--dry-run: KHÔNG xếp việc, KHÔNG gọi mô hình."); process.exit(0); }
 
-  // ───── ③ XẾP VIỆC RỒI CHẠY DÂY CHUYỀN THẬT ─────
-  const lo = `shadow-${Date.now()}`;
+  /*
+    ③ XẾP VIỆC RỒI CHẠY DÂY CHUYỀN THẬT — trừ khi chỉ đọc lại.
+
+    `--report-only` tồn tại vì một lý do cụ thể: lượt đầu chạy xong 18/18 rồi chết ở CÂU SQL BÁO
+    CÁO. Dữ liệu đã nằm trong CSDL, nhưng không có đường nào đọc lại nó — muốn xem kết quả thì
+    phải chạy lại cả mẻ, tức trả tiền mô hình lần thứ hai cho một lỗi hiển thị. Tách phần đo khỏi
+    phần chạy để chuyện đó không lặp lại.
+  */
+  const chiDoc = process.argv.includes("--report-only");
   if (!agent) { console.error("Chưa có bản nhân sự bán hàng"); process.exit(1); }
+  if (chiDoc) {
+    console.log("\n③ --report-only: KHÔNG xếp việc, KHÔNG gọi mô hình — chỉ đọc lại kết quả đã có.");
+  } else {
+  const lo = `shadow-${Date.now()}`;
   await db.insert(schema.aiTasks).values(
     ds.map((c) => ({
       agentId: agent.id,
@@ -97,9 +108,18 @@ async function main() {
   const kq = await drainSalesTasks(ds.length, db);
   const giay = Math.round((Date.now() - t0) / 100) / 10;
   console.log(`\n③ ĐÃ CHẠY ${kq.ran}/${ds.length} việc trong ${giay}s${kq.skipped ? ` (bỏ qua: ${kq.reason})` : ""}`);
+  }
 
   // ───── ④ CÁC LƯỢT GỌI MÔ HÌNH ─────
+  /*
+    DANH SÁCH MÃ HỘI THOẠI CHO CÂU SQL.
+
+    `= any(${ids})` KHÔNG chạy: drizzle bung một mảng JS thành tuple tham số ($1, $2, …), mà
+    `any()` của Postgres cần một MẢNG. Dựng danh sách `in (...)` bằng `sql.join` là cách đúng —
+    mỗi phần tử vẫn là một tham số riêng, nên không có chỗ nào nối chuỗi vào câu lệnh.
+  */
   const ids = ds.map((c) => c.id);
+  const dsSql = sql.join(ids.map((i) => sql`${i}`), sql`, `);
   const calls = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
       select mc.provider, mc.model, mc.tier,
@@ -113,7 +133,7 @@ async function main() {
              coalesce(sum(mc.cost_vnd), 0)::bigint            as tien
       from ai_model_calls mc
       join ai_runs r on r.id = mc.run_id
-      where r.subject_id = any(${ids}) and mc.created_at >= now() - interval '30 minutes'
+      where r.subject_id in (${dsSql}) and mc.created_at >= now() - interval '2 hours'
       group by 1,2,3 order by 4 desc
     `),
   );
@@ -129,7 +149,7 @@ async function main() {
   const runs = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
       select coalesce(nullif(r.status,''),'?') as status, coalesce(nullif(r.tier,''),'RULE') as tier, count(*)::int as n
-      from ai_runs r where r.subject_id = any(${ids}) and r.created_at >= now() - interval '30 minutes'
+      from ai_runs r where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
       group by 1,2 order by 3 desc
     `),
   );
@@ -156,7 +176,7 @@ async function main() {
         select suggested_reply, action, production_action, confidence from sales_suggestions
         where conversation_id = c.id order by created_at desc limit 1
       ) s on true
-      where c.id = any(${ids})
+      where c.id in (${dsSql})
       order by (s.suggested_reply is null), c.updated_at desc
       limit 12
     `),
