@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import {
+  LANDING_EVIDENCE_TIERS,
+  LANDING_GAP_REASONS,
   pageIdFromStoryId,
   resolveLandingAttribution,
   type AdRecord,
@@ -11,7 +13,7 @@ import {
   type CampaignRecord,
   type LandingTracking,
 } from "@/lib/constants/landing-attribution";
-import { readTracking } from "@/lib/attribution/landing";
+import { idsFromUrl, readTracking } from "@/lib/attribution/landing";
 import { rebuildFanpageAttribution } from "@/lib/attribution/fanpage";
 import { listAttributionOrders } from "@/lib/queries/fanpage-attribution";
 
@@ -32,7 +34,7 @@ import { listAttributionOrders } from "@/lib/queries/fanpage-attribution";
 const P = "lda-";
 const at = (day: number, hour = 9) => new Date(Date.UTC(2024, 7, day, hour));
 
-const tracking = (v: Partial<LandingTracking>): LandingTracking => ({ adId: null, adsetId: null, campaignName: null, utmCampaign: null, landingUrl: null, ...v });
+const tracking = (v: Partial<LandingTracking>): LandingTracking => ({ adId: null, adsetId: null, campaignName: null, utmCampaign: null, landingUrl: null, urlIds: [], ...v });
 
 const AD: AdRecord = { adId: "120248142332810618", adsetId: "120248142332380618", campaignId: "camp-1", accountId: "act-777", storyId: "999000111_555" };
 
@@ -154,6 +156,32 @@ export function testLandingAttributionPure() {
     tracking: tracking({ campaignName: ADSET_ID }),
   });
   assert.equal(metaTuChoi.gap, "NO_MATCH", "hỏi rồi mà Meta không trả ⇒ hết đường, KHÔNG phải 'chưa đồng bộ'");
+
+  /* ═══ MÃ NẰM NGAY TRONG LINK LANDING ═══
+
+     Ca thật còn lại trên production (#3696): tên chiến dịch trong form KHÔNG có trong bảng chi
+     tiêu, nhưng chính cái link mang `utm_id` / `utm_term` / `utm_content` là id Meta. Thứ tự ba
+     tham số không được giả định — mã nào khớp sổ nào thì nó là loại ấy. */
+  const quaLink = resolveLandingAttribution({
+    ...daTra,
+    tracking: tracking({ campaignName: "TEN_KHONG_CO_TRONG_BANG_CHI_TIEU", urlIds: ["999999999999", ADSET_ID] }),
+  });
+  assert.equal(quaLink.resolved, true, "tên chiến dịch không khớp vẫn cứu được bằng mã trong link");
+  assert.equal(quaLink.tier, "ADSET_ID");
+  assert.equal(quaLink.marketerId, "mkt-quan");
+  assert.ok(quaLink.evidence.includes("đọc từ link landing"), "và căn cứ phải nói rõ mã đến từ đâu");
+  assert.equal(
+    resolveLandingAttribution({ ...daTra, tracking: tracking({ urlIds: ["999999999999"] }) }).resolved,
+    false,
+    "mã lạ trong link KHÔNG khớp sổ nào ⇒ không quy kết, không đoán",
+  );
+  assert.deepEqual(
+    idsFromUrl("https://haianluxury.click/q003/?utm_source=QA4_X&utm_id=120248045301750618&utm_term=120248045301940618&fbclid=IwY2"),
+    ["120248045301750618", "120248045301940618"],
+    "chỉ rút MÃ SỐ; `utm_source` là chữ và `fbclid` không phải id Meta nên bị bỏ qua",
+  );
+  assert.deepEqual(idsFromUrl("khong-phai-url"), [], "link hỏng ⇒ mảng rỗng, không ném");
+  assert.deepEqual(idsFromUrl(null), []);
 
   /* Chính mã ấy là một campaign_id trong bảng chi tiêu. */
   const laCampaignId = resolveLandingAttribution({
@@ -334,6 +362,29 @@ export async function testLandingAttributionDb() {
   clearMemo();
   assert.equal((await quyKet(`${P}o-mo-ho`))?.marketerId, `${P}mkt-quan`, "hết nhập nhằng thì đơn đang treo phải quy kết được ngay ở lượt sau");
   await db.update(schema.adSpends).set({ marketerId: `${P}mkt-quan` }).where(eq(schema.adSpends.id, `${P}spend-1`));
+
+  /* ═══ DANH SÁCH Ở CSDL PHẢI ĐI CÙNG DANH SÁCH Ở MÃ NGUỒN ═══
+
+     SỰ CỐ THẬT (15/09/2026): mã nguồn thêm lý do treo mới, ràng buộc CHECK của 0091 thì không —
+     và lượt đối soát trên production hỏng NGUYÊN LƯỢT GHI ở dòng đầu tiên mang lý do mới. Bộ kiểm
+     thử cũ không bắt được vì mọi ca thử chỉ sinh ra giá trị CŨ.
+
+     Nên ở đây ghi THỬ TỪNG giá trị trong cả hai danh sách xuống CSDL. Thêm một lý do mà quên nới
+     ràng buộc thì bài này đỏ ngay trên máy người viết, không đợi tới production. */
+  for (const reason of LANDING_GAP_REASONS) {
+    await db
+      .insert(schema.landingAttributions)
+      .values({ id: `${P}gap-${reason}`, orderId: `${P}o-tay`, gap: reason })
+      .onConflictDoUpdate({ target: schema.landingAttributions.orderId, set: { gap: reason, marketerId: null, tier: null, evidence: "" } });
+  }
+  for (const tier of LANDING_EVIDENCE_TIERS) {
+    await db
+      .insert(schema.landingAttributions)
+      .values({ id: `${P}tier-${tier}`, orderId: `${P}o-tay`, tier, marketerId: `${P}mkt-quan`, evidence: `thử bậc ${tier}` })
+      .onConflictDoUpdate({ target: schema.landingAttributions.orderId, set: { tier, marketerId: `${P}mkt-quan`, evidence: `thử bậc ${tier}`, gap: null } });
+  }
+  await db.delete(schema.landingAttributions).where(eq(schema.landingAttributions.orderId, `${P}o-tay`));
+  console.log(`✓ CSDL nhận đủ ${LANDING_GAP_REASONS.length} lý do treo và ${LANDING_EVIDENCE_TIERS.length} bậc bằng chứng đang khai trong mã nguồn`);
 
   console.log("✓ Landing trên CSDL: đơn có bằng chứng ra khỏi NO_PAGE · nhập nhằng giữ nguyên · mã hàng của đơn bất khả xâm phạm · chạy lại không đổi gì · lọc riêng được kênh Landing");
 }
