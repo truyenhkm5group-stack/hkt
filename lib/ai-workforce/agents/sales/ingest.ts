@@ -18,7 +18,7 @@ import { getDb, schema, type Db } from "@/db";
 import { asArray, asRecord, str } from "@/lib/integrations/http";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { normalize, stripHtml } from "@/lib/text";
-import { BOT_SENDER_NAMES, CHAT_FIELD_MAP, REQUIRED_CHAT_FIELDS, type ChatRejectReason, type IngestSource, type SenderType } from "@/lib/constants/sales-ingest";
+import { AD_AUTO_GREETING_PHRASES, BOT_SENDER_NAMES, CHAT_FIELD_MAP, SYSTEM_NOTICE_PHRASES, REQUIRED_CHAT_FIELDS, type ChatRejectReason, type IngestSource, type SenderType } from "@/lib/constants/sales-ingest";
 import { normalizePhone } from "@/lib/constants/landing";
 import { emitAndDispatch, recordAiError } from "@/lib/ai-workforce/events";
 import { aiEventKey } from "@/lib/constants/ai-events";
@@ -72,9 +72,34 @@ export function isBotName(name: string): boolean {
  * Phân loại người gửi. `fromPage` mới chỉ nói tin đến từ phía shop — chưa nói là NGƯỜI hay MÁY,
  * mà phân biệt đúng hai thứ đó là điều kiện để so sánh AI với nhân viên.
  */
-export function classifySender(input: { fromPage: boolean; fromName: string; fromAgent?: boolean }): SenderType {
+export function classifySender(input: {
+  fromPage: boolean;
+  fromName: string;
+  fromAgent?: boolean;
+  /** Nội dung tin — cần để nhận ra thông báo do nền tảng sinh. */
+  text?: string;
+  /** Tên khách của hội thoại — tin phía shop mang ĐÚNG tên này không thể là nhân viên viết. */
+  customerName?: string;
+}): SenderType {
   if (!input.fromPage) return "CUSTOMER";
   if (input.fromAgent || isBotName(input.fromName)) return "PAGE_BOT";
+
+  /*
+    THÔNG BÁO CỦA NỀN TẢNG — nhận ra bằng HAI dấu hiệu độc lập, mỗi cái đủ để kết luận.
+
+    Đo 15/09/2026: 17/18 hội thoại trong mẻ thật bị kết luận "người đã tiếp quản" vì những chuỗi
+    này, và nhân sự AI dừng ở toàn bộ hội thoại đến từ quảng cáo.
+  */
+  const noiDung = normalize(input.text ?? "");
+  // ① Chuỗi sự kiện của Facebook. Danh sách HẸP, xem `SYSTEM_NOTICE_PHRASES`.
+  if (SYSTEM_NOTICE_PHRASES.some((p) => noiDung.includes(p))) return "PAGE_SYSTEM";
+  // ② Tin phía shop mang ĐÚNG tên khách: không nhân viên nào viết dưới tên khách hàng. Dấu hiệu
+  //    này không cần danh sách chuỗi nào, nên nó bắt được cả những mẫu thông báo chưa từng thấy.
+  const tenKhach = normalize(input.customerName ?? "").trim();
+  if (tenKhach && normalize(input.fromName).trim() === tenKhach) return "PAGE_SYSTEM";
+  // ③ Lời chào tự động của quảng cáo click-to-message.
+  if (AD_AUTO_GREETING_PHRASES.some((p) => noiDung.includes(p))) return "PAGE_SYSTEM";
+
   // Tin của shop không rõ tên người gửi: KHÔNG đoán là nhân viên. Đoán sai theo hướng đó sẽ
   // tính một tin máy thành "câu nhân viên trả lời" và mọi phép đo đối chiếu đều lệch.
   return input.fromName.trim() ? "PAGE_HUMAN" : "UNKNOWN";
@@ -156,22 +181,24 @@ export function normalizeChatWebhook(payload: unknown): NormalizeResult {
   const fromPage = senderId === pageId || Boolean(body.from_page) || str(body.type) === "page" || str(root.type).includes("page");
   const fromName = str(from.name);
   const attachments = asArray(body.attachments);
+  const noiDungTin = stripHtml(str(body.message, body.original_message, body.text));
+  const tenKhachHT = str(customer.name, fromPage ? "" : fromName);
   return {
     ok: true,
     conversation: {
       pageId,
       externalId: conversationId,
       pancakeCustomerId: str(customer.id, customer.fb_id),
-      customerName: str(customer.name, fromPage ? "" : fromName),
+      customerName: tenKhachHT,
       phone: phones[0] ?? "",
       // Nền tảng chỉ CHẮC CHẮN khi đọc từ danh sách page; từ gói tin chỉ nhận khi có khoá tường minh.
       platform: str(root.platform, conversationRaw.platform),
     },
     message: {
       externalId: messageId,
-      text: stripHtml(str(body.message, body.original_message, body.text)),
+      text: noiDungTin,
       fromPage,
-      senderType: classifySender({ fromPage, fromName }),
+      senderType: classifySender({ fromPage, fromName, text: noiDungTin, customerName: tenKhachHT }),
       fromName,
       sentAt: toDate(body.inserted_at ?? body.created_time ?? body.created_at ?? root.inserted_at),
       hasAttachment: attachments.length > 0,
@@ -483,13 +510,13 @@ export async function ingestChatWebhook(payload: unknown, db?: Db): Promise<Inge
 }
 
 /** Tin từ Pages API (đường đã kiểm chứng) → dạng chuẩn hoá dùng chung với webhook. */
-function toNormalizedMessage(m: PancakeMessage): NormalizedMessage {
+function toNormalizedMessage(m: PancakeMessage, customerName = ""): NormalizedMessage {
   const text = stripHtml(m.text);
   return {
     externalId: m.id,
     text,
     fromPage: m.fromPage,
-    senderType: classifySender({ fromPage: m.fromPage, fromName: m.fromName }),
+    senderType: classifySender({ fromPage: m.fromPage, fromName: m.fromName, text, customerName }),
     fromName: m.fromName,
     sentAt: m.insertedAt,
     hasAttachment: m.hasAttachment,
@@ -571,7 +598,7 @@ export async function syncSalesConversations(
               phone: conversation.phones.map(normalizePhone).find((p) => /^0\d{9}$/.test(p)) ?? "",
               platform: page.platform,
             },
-            toNormalizedMessage(raw),
+            toNormalizedMessage(raw, conversation.customerName),
             "pancake-pages-poll",
             db,
             "POLL",

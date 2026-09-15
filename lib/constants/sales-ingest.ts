@@ -16,13 +16,14 @@
  */
 
 /** Ai gửi tin. Tách nhân viên khỏi bot là điều kiện để so sánh AI với NGƯỜI. */
-export const SENDER_TYPES = ["CUSTOMER", "PAGE_HUMAN", "PAGE_BOT", "UNKNOWN"] as const;
+export const SENDER_TYPES = ["CUSTOMER", "PAGE_HUMAN", "PAGE_BOT", "PAGE_SYSTEM", "UNKNOWN"] as const;
 export type SenderType = (typeof SENDER_TYPES)[number];
 
 export const SENDER_TYPE_LABEL: Record<SenderType, string> = {
   CUSTOMER: "Khách",
   PAGE_HUMAN: "Nhân viên",
   PAGE_BOT: "Bot / tự động",
+  PAGE_SYSTEM: "Thông báo của nền tảng",
   UNKNOWN: "Chưa rõ",
 };
 
@@ -44,6 +45,42 @@ export const INGEST_SOURCE_LABEL: Record<IngestSource, string> = {
  * So khớp không dấu, không phân biệt hoa thường, theo CỤM (không phải chuỗi con) — xem `isBotName`.
  */
 export const BOT_SENDER_NAMES = ["botcake", "bot erp", "chatbot", "pancake bot", "auto reply", "tra loi tu dong"] as const;
+
+/**
+ * ═══════════ THÔNG BÁO CỦA NỀN TẢNG — KHÔNG PHẢI CÂU NHÂN VIÊN TRẢ LỜI ═══════════
+ *
+ * ĐO ĐƯỢC NGÀY 15/09/2026, mẻ 18 hội thoại thật: 17/18 bị kết luận "người đã tiếp quản" và nhân sự
+ * AI dừng hết. Nhìn vào cái gọi là "câu nhân viên trả lời" thì tất cả đều là MỘT TRONG HAI chuỗi do
+ * Facebook tự sinh:
+ *
+ *   · "<Tên khách> đã trả lời một quảng cáo."   — sự kiện của nền tảng, và TÊN TRONG ĐÓ LÀ TÊN
+ *     CHÍNH KHÁCH. Không nhân viên nào viết dưới tên khách hàng.
+ *   · "Chào <tên>, bạn thích ...? Nhắn cho shop để biết thêm chi tiết ạ!" — lời chào tự động của
+ *     quảng cáo click-to-message, lặp y hệt qua nhiều hội thoại, chỉ đổi cái tên.
+ *
+ * Tính chúng là nhân viên trả lời thì nhân sự AI chết ở MỌI hội thoại đến từ quảng cáo — tức là
+ * toàn bộ. Và cái chết ấy im lặng: màn hình chỉ thấy "người đã vào", nghe rất hợp lý.
+ *
+ * DANH SÁCH NÀY PHẢI HẸP. Bắt nhầm một câu nhân viên thật thành thông báo nền tảng là chuyện ngược
+ * lại và cũng tệ: máy sẽ chen vào một hội thoại người đang cầm. Nên chỉ liệt kê những chuỗi mà
+ * KHÔNG nhân viên nào gõ ra trong lúc bán hàng.
+ */
+export const SYSTEM_NOTICE_PHRASES = [
+  "da tra loi mot quang cao",
+  "da binh luan ve",
+  "da thich trang",
+  "da chia se bai viet",
+  "da bat dau cuoc tro chuyen",
+] as const;
+
+/**
+ * Lời chào TỰ ĐỘNG của quảng cáo click-to-message. Tách khỏi danh sách trên vì mức chắc chắn THẤP
+ * HƠN: đây là mẫu câu Facebook sinh, nhưng về lý thuyết một nhân viên có thể gõ câu tương tự.
+ *
+ * Bằng chứng nó là máy: đo được 5 hội thoại mang ĐÚNG mẫu này, chỉ khác cái tên, và câu luôn xuất
+ * hiện TRƯỚC tin đầu tiên của khách. Nhân viên không chào trước khi khách nhắn.
+ */
+export const AD_AUTO_GREETING_PHRASES = ["nhan cho shop de biet them chi tiet"] as const;
 
 export type FieldConfidence = "VERIFIED" | "UNVERIFIED";
 

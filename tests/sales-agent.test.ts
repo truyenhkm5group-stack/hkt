@@ -9,7 +9,7 @@ import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirement
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { guardGeneratedText, moneyMentions, renderOrderReview } from "@/lib/ai-workforce/agents/sales/generate";
-import { ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
+import { classifySender, ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
@@ -362,6 +362,38 @@ export async function testSalesAgent(db: Db) {
     tra("ANTHROPIC_API_KEY", savedAnth);
     tra("AI_API_KEY", savedWfKey);
   }
+
+  // ── THÔNG BÁO CỦA NỀN TẢNG KHÔNG PHẢI CÂU NHÂN VIÊN TRẢ LỜI ──
+  //
+  // ĐO 15/09/2026 trên mẻ 18 hội thoại thật: MỌI chuỗi bị tính là "câu nhân viên trả lời" đều là
+  // một trong hai mẫu do Facebook tự sinh — và tên trong đó là tên CHÍNH KHÁCH. Tính chúng là
+  // nhân viên thì mọi phép đo đối chiếu AI ↔ người đều lệch, vì bên "người" toàn là máy.
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Hoa Đặng", text: "Hoa Đặng đã trả lời một quảng cáo.", customerName: "Hoa Đặng" }),
+    "PAGE_SYSTEM",
+    "chuỗi sự kiện của Facebook không phải nhân viên",
+  );
+  // Dấu hiệu MẠNH NHẤT và không cần danh sách chuỗi nào: tin phía shop mang ĐÚNG tên khách.
+  // Không nhân viên nào viết dưới tên khách hàng — nên nó bắt được cả mẫu thông báo chưa từng thấy.
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Tam Tam", text: "một mẫu thông báo lạ chưa từng gặp", customerName: "Tam Tam" }),
+    "PAGE_SYSTEM",
+  );
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Shop", text: "Chào Linh, bạn thích đầm này? Nhắn cho shop để biết thêm chi tiết ạ!", customerName: "Linh" }),
+    "PAGE_SYSTEM",
+    "lời chào tự động của quảng cáo click-to-message",
+  );
+
+  // VÀ CHIỀU NGƯỢC LẠI PHẢI GIỮ: bắt nhầm câu nhân viên THẬT thành thông báo nền tảng còn tệ hơn —
+  // máy sẽ chen vào một hội thoại người đang cầm. Câu dưới là câu shop dùng nhiều nhất (đo 16 lần).
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Hải An", text: "Chị cho em xin Chiều Cao + Cân Nặng để em tư vấn size cho chị nha", customerName: "Tam Tam" }),
+    "PAGE_HUMAN",
+    "câu nhân viên thật phải ở lại PAGE_HUMAN",
+  );
+  assert.equal(classifySender({ fromPage: false, fromName: "Tam Tam", text: "bao nhiêu ạ", customerName: "Tam Tam" }), "CUSTOMER", "tin của khách vẫn là khách");
+  assert.equal(classifySender({ fromPage: true, fromName: "Botcake", text: "xin chào" }), "PAGE_BOT", "bot vẫn là bot");
 
   // ═════════ 6. WEBHOOK: CHUẨN HOÁ, CHỐNG TRÙNG, CHỐNG VÒNG LẶP ═════════
 
