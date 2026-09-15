@@ -96,7 +96,28 @@ elif [ -n "${STAGING_IMAGE:-}" ]; then
     printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null
   fi
   say "Kéo ảnh $STAGING_IMAGE …"
-  docker pull "$STAGING_IMAGE" || { [ -n "${GHCR_TOKEN:-}" ] && docker logout ghcr.io >/dev/null 2>&1; exit 1; }
+  # THỬ LẠI, VÌ ĐƯỜNG TRUYỀN TỚI GHCR CHẬP CHỜN THẬT.
+  #
+  # Đo 15/09/2026: hai lượt liên tiếp chết giữa chừng với `read: connection reset by peer`, mỗi
+  # lượt 13 phút. Docker đã tự thử lại từng lớp rồi mới bỏ cuộc, nên lần chạy sau vẫn dùng được
+  # những lớp đã tải xong — thử lại KHÔNG phải là tải lại từ đầu.
+  #
+  # Một lần kéo hỏng ở đây không phải lỗi của mã nguồn, nhưng nó DỪNG cả lượt triển khai, nên để
+  # người bấm lại bằng tay là trả một sự cố mạng về cho con người xử lý. Thử lại có giãn cách.
+  keo_anh() {
+    local lan=1
+    while :; do
+      if docker pull "$STAGING_IMAGE"; then return 0; fi
+      if [ "$lan" -ge 4 ]; then
+        say "  ⛔ kéo ảnh hỏng sau $lan lần — nhiều khả năng là đường truyền tới GHCR, không phải ảnh."
+        return 1
+      fi
+      say "  … lần $lan hỏng, chờ $((lan * 15))s rồi thử lại (những lớp đã tải xong vẫn được dùng lại)"
+      sleep $((lan * 15))
+      lan=$((lan + 1))
+    done
+  }
+  keo_anh || { [ -n "${GHCR_TOKEN:-}" ] && docker logout ghcr.io >/dev/null 2>&1; exit 1; }
   [ -n "${GHCR_TOKEN:-}" ] && { docker logout ghcr.io >/dev/null 2>&1; say "Đã đăng xuất ghcr.io."; }
 elif docker image inspect vnx-ai-staging-app:local >/dev/null 2>&1; then
   say "Dùng ảnh vnx-ai-staging-app:local đã có sẵn trên máy."
