@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb, schema } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
+import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
+import { fanpageAccessStatus, fanpageDisplayName } from "@/lib/constants/fanpage-access";
 import { listFanpages } from "@/lib/attribution/fanpage";
 import {
   ATTRIBUTION_STATUSES,
@@ -40,14 +42,42 @@ export const metadata = { title: "Fanpage & quy kết marketer" };
 const TABS = new Set(["report", "orders", "assign"]);
 
 /** Số đơn mỗi fanpage — để người khai biết page nào đáng gán trước. */
-async function ordersByPage(): Promise<Map<string, number>> {
+type PageTally = { orders: number; confirmedOrders: number; confirmedRevenue: number };
+
+/** Đơn KHÔNG có `page_id` — nhóm thứ tư, và nó không thuộc fanpage nào nên đếm riêng. */
+async function noPageTally(): Promise<PageTally> {
   const db = await getDb();
+  const confirmed = sql`${schema.orders.stage} in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})`;
+  const [row] = await db
+    .select({
+      n: sql<number>`count(*)::int`,
+      confirmedOrders: sql<number>`count(*) filter (where ${confirmed})::int`,
+      confirmedRevenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${confirmed}), 0)::bigint`,
+    })
+    .from(schema.orders)
+    .where(sql`coalesce(${schema.orders.pageId}, '') = ''`);
+  return { orders: Number(row?.n ?? 0), confirmedOrders: Number(row?.confirmedOrders ?? 0), confirmedRevenue: Number(row?.confirmedRevenue ?? 0) };
+}
+
+/** Số đơn / đơn đã xác nhận / doanh thu xác nhận theo từng Page ID — để page CHƯA gán cũng thấy được đang treo bao nhiêu. */
+async function ordersByPage(): Promise<Map<string, PageTally>> {
+  const db = await getDb();
+  const confirmed = sql`${schema.orders.stage} in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})`;
   const rows = await db
-    .select({ pageId: schema.orders.pageId, n: sql<number>`count(*)::int` })
+    .select({
+      pageId: schema.orders.pageId,
+      n: sql<number>`count(*)::int`,
+      confirmedOrders: sql<number>`count(*) filter (where ${confirmed})::int`,
+      confirmedRevenue: sql<number>`coalesce(sum(${schema.orders.totalPriceAfterDiscount}) filter (where ${confirmed}), 0)::bigint`,
+    })
     .from(schema.orders)
     .where(sql`coalesce(${schema.orders.pageId}, '') <> ''`)
     .groupBy(schema.orders.pageId);
-  return new Map(rows.filter((r) => r.pageId).map((r) => [r.pageId as string, Number(r.n)]));
+  return new Map(
+    rows
+      .filter((r) => r.pageId)
+      .map((r) => [r.pageId as string, { orders: Number(r.n), confirmedOrders: Number(r.confirmedOrders), confirmedRevenue: Number(r.confirmedRevenue) }]),
+  );
 }
 
 export default async function FanpageAttributionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -110,7 +140,7 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
       <FanpageTabs active={tab} />
 
       {tab === "assign" ? (
-        <AssignTab canWrite={canWrite} />
+        <AssignTab canWrite={canWrite} noPageOrders={await noPageTally()} />
       ) : (
         <>
           <DataTableToolbar
@@ -225,31 +255,95 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
 }
 
 /** Bảng khai báo — tách hàm để trang chính không phải nạp dữ liệu của tab đang không mở. */
-async function AssignTab({ canWrite }: { canWrite: boolean }) {
+async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPageOrders: PageTally }) {
   const [pages, counts, marketers, names] = await Promise.all([listFanpages(), ordersByPage(), listMarketerOptions(), marketerNames()]);
-  const view: FanpageView[] = pages.map((p) => ({
-    id: p.id,
-    externalPageId: p.externalPageId,
-    name: p.name,
-    active: p.active,
-    orders: counts.get(p.externalPageId) ?? 0,
-    firstOrderAt: p.firstOrderAt ? p.firstOrderAt.toISOString() : null,
-    lastOrderAt: p.lastOrderAt ? p.lastOrderAt.toISOString() : null,
-    current: p.current ? { assignmentId: p.current.assignmentId, marketerId: p.current.marketerId, marketerLabel: marketerLabel(p.current.marketerId, names), effectiveFrom: p.current.effectiveFrom.toISOString() } : null,
-    history: p.history.map((h) => ({ id: h.id, marketerLabel: marketerLabel(h.marketerId, names), effectiveFrom: h.effectiveFrom.toISOString(), effectiveTo: h.effectiveTo ? h.effectiveTo.toISOString() : null, active: h.active, note: h.note })),
-  }));
-  const unassigned = view.filter((p) => !p.current && p.orders > 0).length;
+  // Mốc liệt kê API GẦN NHẤT của cả sổ — tính MỘT lần rồi truyền vào, để 15 page không thành 15 lượt quét.
+  const newestSeen = pages.reduce<Date | null>((acc, p) => (p.lastSeenInApiAt && (!acc || p.lastSeenInApiAt > acc) ? p.lastSeenInApiAt : acc), null);
+  const view: FanpageView[] = pages.map((p) => {
+    const tally = counts.get(p.externalPageId) ?? { orders: 0, confirmedOrders: 0, confirmedRevenue: 0 };
+    return {
+      id: p.id,
+      externalPageId: p.externalPageId,
+      name: fanpageDisplayName(p),
+      alias: p.alias,
+      externalName: p.name,
+      access: fanpageAccessStatus(p.lastSeenInApiAt, newestSeen),
+      active: p.active,
+      orders: tally.orders,
+      confirmedOrders: tally.confirmedOrders,
+      confirmedRevenue: tally.confirmedRevenue,
+      firstOrderAt: p.firstOrderAt ? p.firstOrderAt.toISOString() : null,
+      lastOrderAt: p.lastOrderAt ? p.lastOrderAt.toISOString() : null,
+      current: p.current ? { assignmentId: p.current.assignmentId, marketerId: p.current.marketerId, marketerLabel: marketerLabel(p.current.marketerId, names), effectiveFrom: p.current.effectiveFrom.toISOString() } : null,
+      history: p.history.map((h) => ({ id: h.id, marketerLabel: marketerLabel(h.marketerId, names), effectiveFrom: h.effectiveFrom.toISOString(), effectiveTo: h.effectiveTo ? h.effectiveTo.toISOString() : null, active: h.active, note: h.note })),
+    };
+  });
+
+  /*
+    BỐN NHÓM, và ranh giới giữa chúng là hai câu hỏi KHÁC NHAU:
+      · đã gán ai chưa?           → quyết định đơn có quy kết được không;
+      · API còn đọc được tên không? → chỉ quyết định màn hình hiện tên hay hiện 15 chữ số.
+    Trộn hai câu ấy là cách một page lịch sử trở thành không quản lý được.
+  */
+  const mapped = view.filter((p) => p.current);
+  const unmapped = view.filter((p) => !p.current);
+  const unmappedHistorical = unmapped.filter((p) => p.access === "HISTORICAL");
+  const unmappedActive = unmapped.filter((p) => p.access !== "HISTORICAL");
+  const treoOrders = unmapped.reduce((t, p) => t + p.orders, 0);
+  const treoRevenue = unmapped.reduce((t, p) => t + p.confirmedRevenue, 0);
+
+  const group = (title: string, desc: React.ReactNode, list: FanpageView[]) =>
+    list.length ? (
+      <SectionCard title={title} description={desc}>
+        <AssignPanel pages={list} marketers={marketers as MarketerOption[]} canWrite={canWrite} />
+      </SectionCard>
+    ) : null;
+
   return (
-    <SectionCard
-      title="Gán fanpage → marketer"
-      description={
-        unassigned > 0
-          ? `${formatNumber(unassigned)} fanpage đang có đơn nhưng chưa ai phụ trách — đơn của chúng không quy kết được cho ai.`
-          : "Mọi fanpage có đơn đều đã có người phụ trách."
-      }
-    >
-      <AssignPanel pages={view} marketers={marketers as MarketerOption[]} canWrite={canWrite} />
-    </SectionCard>
+    <div className="space-y-4">
+      {group(
+        `Chưa gán · còn quyền truy cập (${formatNumber(unmappedActive.length)})`,
+        <>
+          Page Pancake vẫn đọc được nhưng <b>chưa ai phụ trách</b> — đơn của chúng không quy kết được cho ai.
+        </>,
+        unmappedActive,
+      )}
+      {group(
+        `Chưa gán · page lịch sử (${formatNumber(unmappedHistorical.length)})`,
+        <>
+          Token Pancake hiện tại <b>không còn đọc được</b> những page này, nên không có tên. Quy kết đi bằng <b>Page ID</b> nên vẫn gán
+          được bình thường — đặt một <b>tên gợi nhớ</b> để nhận ra page, rồi gán như thường.
+        </>,
+        unmappedHistorical,
+      )}
+      {group(
+        `Đã gán (${formatNumber(mapped.length)})`,
+        `${formatNumber(mapped.length)} fanpage đã có người phụ trách.`,
+        mapped,
+      )}
+      <SectionCard
+        title="Đơn không có nguồn fanpage"
+        description="Pancake không gửi `page_id` cho những đơn này — chúng KHÔNG thuộc fanpage nào, nên không ép vào mô hình Fanpage → MKTer."
+      >
+        <p className="text-[13px]">
+          <b>{formatNumber(noPageOrders.orders)}</b> đơn · <b>{formatNumber(noPageOrders.confirmedOrders)}</b> đã xác nhận ·{" "}
+          <b>{formatVND(noPageOrders.confirmedRevenue)}</b>{" "}
+          <Link className="underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", st: "NO_PAGE", period: "all" } }}>
+            xem danh sách
+          </Link>
+        </p>
+        <p className="mt-1 text-[11.5px] text-muted-foreground">
+          Phần lớn là đơn landing page và đơn nhập tay. Đã dò payload gốc Pancake: không đơn nào mang `page_id`, và không đơn nào có
+          `conversation_id` / `post_id` để suy ra — nên KHÔNG có gì để backfill.
+        </p>
+      </SectionCard>
+      {unmapped.length ? (
+        <p className="text-[12px] text-muted-foreground">
+          Tổng đang treo ở {formatNumber(unmapped.length)} page chưa gán: <b>{formatNumber(treoOrders)}</b> đơn ·{" "}
+          <b>{formatVND(treoRevenue)}</b> doanh thu xác nhận.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
