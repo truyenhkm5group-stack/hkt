@@ -2,6 +2,7 @@
  * Kiểm thử luồng đồng bộ với dữ liệu mẫu (không gọi API thật).
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
+import { writeSync } from "node:fs";
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testIdeas } from "./ideas.test";
@@ -1654,6 +1655,7 @@ async function main() {
   testMigrationNumberUnique();
   testDuplicateMetrics();
   testLogisticsStatusBoundary();
+  daXong = true;
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 
@@ -1675,7 +1677,41 @@ async function main() {
 */
 process.exitCode = 1;
 
+/*
+  ═══════ VÀ THOÁT IM LẶNG PHẢI NÓI ĐƯỢC NÓ CHẾT Ở ĐÂU ═══════
+
+  SỰ CỐ THẬT (15/09/2026). Cổng phát hành trên GitHub đỏ với đúng một dòng: `Process completed with
+  exit code 1`. Không lỗi, không vết, không tên bài. Trên máy người viết cùng SHA ấy chạy xanh ba
+  lần liền — kể cả trên bản checkout sạch với `npm ci`. Lá chắn ở trên đã làm đúng việc của nó
+  (không cho một lượt chạy dở dang đi qua), nhưng nó không nói được PHẢI ĐI SOI Ở ĐÂU, nên nửa giờ
+  trôi qua chỉ để đoán.
+
+  Hai thứ được sửa ở đây, và cả hai đều là chuyện GHI RA, không phải chuyện logic:
+
+  1. MỐC CUỐI CÙNG. Quy ước của bộ kiểm thử này là mỗi bài in một dòng `✓ …` khi xong, nên "dòng
+     cuối cùng đã in" chính là mốc chính xác nhất có thể có, mà không phải đi sửa ~150 lời gọi.
+
+  2. GHI ĐỒNG BỘ. `console.error` ghi vào một ỐNG (khi CI hứng log) là ghi KHÔNG ĐỒNG BỘ: gọi
+     `process.exit()` ngay sau đó thì phần chưa kịp đẩy đi bị VỨT. Đó là lý do lượt chạy CI kia
+     không có lấy một dòng chẩn đoán. `writeSync` xuống thẳng fd 2 thì không mất.
+*/
+let mocCuoi = "(chưa chạy bài nào)";
+let daXong = false;
+const logGoc = console.log.bind(console);
+console.log = (...args: unknown[]) => {
+  const dong = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ").trim();
+  if (dong) mocCuoi = dong;
+  logGoc(...args);
+};
+
+process.on("exit", (code) => {
+  if (code === 0 || daXong) return;
+  writeSync(2, `\n✗ KIỂM THỬ THOÁT VỚI MÃ ${code}. MỐC CUỐI CÙNG ĐI QUA:\n   ${mocCuoi.slice(0, 300)}\n   ⇒ Bài chạy NGAY SAU mốc này là nơi phải soi.\n`);
+});
+
 main().catch((error) => {
+  // Ghi đồng bộ TRƯỚC, vì `process.exit()` bên dưới sẽ vứt phần console chưa kịp đẩy qua ống.
+  writeSync(2, `\n✗ Kiểm thử thất bại: ${error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error)}\n`);
   console.error("✗ Kiểm thử thất bại:", error);
   process.exit(1);
 });

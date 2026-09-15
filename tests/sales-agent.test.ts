@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
-import { SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type SalesStage } from "@/lib/constants/sales-agent";
+import { HANDOFF_REASONS, SALES_ACTIONS, SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type SalesStage } from "@/lib/constants/sales-agent";
+import { HANDOFF_CLASS_LABEL, QUALITY_DIMENSIONS, advancesConversation, answeredMoneyQuestion, classifyHandoff, safetyFlags } from "@/lib/constants/sales-quality";
 import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, understandByRule, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
@@ -372,6 +373,64 @@ export async function testSalesAgent(db: Db) {
   for (const action of ["ASK_SIZE", "ASK_VARIANT"] as const) {
     assert.deepEqual(moneyMentions(renderTemplate({ ...ctxNen, action })), [], `${action}: câu đẩy bước không lặp lại giá`);
   }
+
+  // ═════════ 4C. SOÁT AN TOÀN TỰ ĐỘNG & PHÂN LOẠI CHUYỂN NGƯỜI ═════════
+  //
+  // "Tỷ lệ chuyển người" là một con số không sửa được gì: nó gộp việc ĐÚNG của người (khiếu nại),
+  // chốt an toàn nổ ĐÚNG, dữ liệu chủ shop chưa khai, hạ tầng hỏng, và máy bí. Năm thứ ấy có năm
+  // người khác nhau phải đi làm việc khác nhau.
+
+  for (const reason of HANDOFF_REASONS) {
+    assert.ok(classifyHandoff(reason), `${reason}: mọi lý do chuyển người phải có loại — không có ô "chưa phân loại"`);
+  }
+  assert.equal(classifyHandoff(null), null, "không chuyển người thì không có loại, không phải loại 'không rõ'");
+  // Và chiều ngược lại: không có loại nào khai ra rồi bỏ không — một ô luôn rỗng là một ô gây hiểu nhầm.
+  const loạiĐãDùng = new Set(HANDOFF_REASONS.map((r) => classifyHandoff(r)));
+  for (const loại of Object.keys(HANDOFF_CLASS_LABEL)) {
+    assert.ok(loạiĐãDùng.has(loại as never), `${loại}: khai một loại mà không lý do nào rơi vào là một ô luôn rỗng`);
+  }
+  assert.equal(classifyHandoff("COMPLAINT"), "CORRECT", "khiếu nại chuyển người là ĐÚNG, không phải một lỗi của AI");
+  assert.equal(classifyHandoff("SIZE_DATA_MISSING"), "MISSING_DATA", "thiếu bảng số đo là việc của chủ shop, không phải 'AI còn yếu'");
+  assert.equal(classifyHandoff("ORDER_BLOCKED"), "SAFETY", "đơn thiếu điều kiện bị chặn là chốt an toàn nổ đúng");
+  assert.equal(classifyHandoff("MODEL_UNAVAILABLE"), "SYSTEM");
+  assert.equal(classifyHandoff("LOW_CONFIDENCE"), "UNNECESSARY", "chỉ 'máy bí' mới là chỗ đáng gọi là AI chưa đủ tốt");
+
+  // Năm cờ an toàn: mỗi cờ phải bắt được đúng cái nó khai, và KHÔNG bắt nhầm câu sạch.
+  const nềnSoát = { allowedAmounts: [499_000, 25_000], stockKnown: true, sizeChartAvailable: true, mentionedAmounts: [499_000] };
+  assert.deepEqual(safetyFlags({ ...nềnSoát, text: "Dạ mẫu này 499.000đ chị ạ." }), [], "câu sạch không được bật cờ nào");
+  assert.deepEqual(safetyFlags({ ...nềnSoát, text: "Em bớt còn 350.000đ ạ", mentionedAmounts: [350_000] }), ["MONEY_NOT_FROM_SERVER"]);
+  assert.ok(safetyFlags({ ...nềnSoát, text: "Bên em cam kết giao trong 2 ngày ạ" }).includes("PROMISED_DELIVERY_TIME"));
+  assert.ok(safetyFlags({ ...nềnSoát, text: "Mẫu này vẫn còn chị nhé", stockKnown: false }).includes("PROMISED_STOCK_UNKNOWN"));
+  assert.deepEqual(safetyFlags({ ...nềnSoát, text: "Mẫu này vẫn còn chị nhé" }).filter((f) => f === "PROMISED_STOCK_UNKNOWN"), [], "sổ kho đã biết thì nói còn hàng là hợp lệ");
+  assert.ok(safetyFlags({ ...nềnSoát, text: "Bên em tư vấn size L ạ", sizeChartAvailable: false }).includes("NAMED_SIZE_WITHOUT_CHART"));
+  assert.ok(safetyFlags({ ...nềnSoát, text: "Em giảm giá cho chị nhé" }).includes("PROMISED_DISCOUNT"));
+  // Luật viết KHÔNG DẤU phải bắt được cả câu có dấu lẫn không dấu — khách và máy đều gõ cả hai kiểu.
+  assert.ok(safetyFlags({ ...nềnSoát, text: "mau nay van con chi nhe", stockKnown: false }).includes("PROMISED_STOCK_UNKNOWN"));
+
+  /*
+    VÀ ĐÂY LÀ PHÉP THỬ ĐÁNG GIÁ NHẤT CỦA CẢ KHỐI: mọi câu MẪU, ở mọi hành động, với sổ kho CHƯA
+    BIẾT và KHÔNG có bảng số đo, đều không được bật cờ nào. Nấc mẫu câu là nấc luôn dùng được và
+    là chỗ mọi thứ rơi về khi mô hình hỏng — nó mà nói sai thì không còn lưới nào ở dưới.
+  */
+  const ctxXấuNhất: GenerationContext = { ...ctxNen, stockKnown: false, available: null, sizeAdvice: null };
+  for (const action of SALES_ACTIONS) {
+    const text = renderTemplate({ ...ctxXấuNhất, action });
+    if (!text) continue;
+    const cờ = safetyFlags({ text, allowedAmounts: [499_000, 25_000], stockKnown: false, sizeChartAvailable: false, mentionedAmounts: moneyMentions(text) });
+    assert.deepEqual(cờ, [], `${action}: câu mẫu bật cờ an toàn — ${cờ.join(", ")} — trong câu "${text}"`);
+  }
+
+  // Chín chiều chấm: chiều nào máy không chấm được phải khai thẳng là NGƯỜI chấm.
+  assert.equal(QUALITY_DIMENSIONS.length, 9);
+  assert.ok(QUALITY_DIMENSIONS.some((d) => d.key === "naturalness" && d.grader === "HUMAN"), "độ tự nhiên không có nguồn sự thật nào trong ERP — máy không được tự cho điểm");
+  assert.ok(QUALITY_DIMENSIONS.every((d) => d.note.length > 20), "mỗi chiều phải nói rõ vì sao ai chấm");
+
+  // KHÔNG ÁP DỤNG khác hẳn TRẢ LỜI SAI: khách không hỏi giá thì câu không có số tiền là bình thường.
+  assert.equal(answeredMoneyQuestion(false, []), null);
+  assert.equal(answeredMoneyQuestion(true, []), false, "khách hỏi giá mà câu không có con số nào là CHƯA trả lời");
+  assert.equal(answeredMoneyQuestion(true, [499_000]), true);
+  assert.equal(advancesConversation(""), null, "không có câu nào thì CHƯA BIẾT, không phải 'không đẩy'");
+  assert.equal(advancesConversation(renderTemplate(ctxNen)), true, "câu trả lời phải mời được bước tiếp");
 
   // ═════════ 5. CỔNG GỬI TIN — SHADOW KHÔNG BAO GIỜ GỬI ═════════
 

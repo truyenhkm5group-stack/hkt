@@ -25,6 +25,19 @@ import { drainSalesTasks } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { defaultProviderName, getProvider } from "@/lib/ai-workforce/providers";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { rowsOf } from "@/lib/sql-rows";
+import { moneyMentions } from "@/lib/ai-workforce/agents/sales/generate";
+import {
+  HANDOFF_CLASS_LABEL,
+  HANDOFF_CLASS_OWNER,
+  QUALITY_DIMENSIONS,
+  advancesConversation,
+  classifyHandoff,
+  safetyFlags,
+  SAFETY_FLAG_LABEL,
+  type HandoffClass,
+  type SafetyFlag,
+} from "@/lib/constants/sales-quality";
+import { HANDOFF_REASONS, type HandoffReason } from "@/lib/constants/sales-agent";
 
 const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split("=")[1] ?? "";
 const num = (k: string, d: number) => (Number(arg(k)) > 0 ? Number(arg(k)) : d);
@@ -244,6 +257,38 @@ async function main() {
   console.log(`\n⑤d LƯỢT GỌI HỎNG (nếu có)`);
   for (const l of loiGoi) console.log(`   ${String(l.n).padStart(3)}× ${String(l.tier)} ok=${String(l.ok)} ${String(l.loi) ? `· ${l.loi}` : ""}`);
 
+  /*
+    ⑤e PHÂN LOẠI CHUYỂN NGƯỜI — năm loại, năm người khác nhau phải đi làm.
+
+    "Tỷ lệ chuyển người" gộp lại là một con số không sửa được gì. Khiếu nại chuyển người là ĐÚNG;
+    chốt an toàn nổ là thứ ta trả tiền để có; thiếu bảng số đo là việc của chủ shop; mô hình chết
+    là việc của người vận hành. Chỉ loại cuối — MÁY BÍ — mới đáng gọi là "AI chưa đủ tốt".
+  */
+  const chuyen = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select coalesce(nullif(r.decision->>'handoffReason',''),'') as ly_do, count(*)::int as n
+      from ai_runs r where r.subject_id in (${dsSql}) and r.created_at >= ${tuKhi}
+      group by 1
+    `),
+  );
+  const theoLoai = new Map<HandoffClass, number>();
+  let khongChuyen = 0;
+  const lyDoLa: string[] = [];
+  for (const c of chuyen) {
+    const raw = String(c.ly_do ?? "");
+    const n = Number(c.n ?? 0);
+    if (!raw) { khongChuyen += n; continue; }
+    if (!(HANDOFF_REASONS as readonly string[]).includes(raw)) { lyDoLa.push(`${raw} (${n})`); continue; }
+    const loai = classifyHandoff(raw as HandoffReason);
+    if (loai) theoLoai.set(loai, (theoLoai.get(loai) ?? 0) + n);
+  }
+  console.log(`\n⑤e PHÂN LOẠI CHUYỂN NGƯỜI`);
+  console.log(`   ${String(khongChuyen).padStart(3)}× không chuyển người`);
+  for (const [loai, n] of [...theoLoai.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`   ${String(n).padStart(3)}× ${HANDOFF_CLASS_LABEL[loai]} → ${HANDOFF_CLASS_OWNER[loai]}`);
+  }
+  if (lyDoLa.length) console.log(`   ⛔ lý do KHÔNG có trong sổ đăng ký: ${lyDoLa.join(", ")}`);
+
   // ───── ⑥ ĐỐI CHIẾU NGƯỜI ↔ MÁY ─────
   const cap = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
@@ -293,6 +338,80 @@ async function main() {
         (select count(*) from sales_conversations where order_id is not null)::int      as da_tao_don
     `),
   );
+  /*
+    ⑦b SOÁT NỘI DUNG TỰ ĐỘNG — Ở GIẢ ĐỊNH CHẶT NHẤT.
+
+    Mục ⑦ chứng minh máy KHÔNG GỬI gì. Mục này hỏi câu khác: NẾU đã gửi thì câu ấy có hứa thứ gì
+    ERP không đứng ra bảo đảm được không.
+
+    Hai điều phải nói thẳng về cách đo:
+
+    · Sổ kho và bảng số đo của từng lượt KHÔNG được lưu lại trong `sales_suggestions`, nên soát lại
+      sau không dựng lại được đúng bối cảnh lúc sinh câu. Thay vì đoán, ở đây lấy GIẢ ĐỊNH CHẶT
+      NHẤT: coi như CHƯA BIẾT tồn và KHÔNG có bảng số đo. Cờ bật ở giả định này có thể là báo thừa;
+      KHÔNG cờ nào bật thì là một kết quả mạnh, vì nó đúng với mọi bối cảnh.
+
+    · Cờ "nói số tiền máy chủ không tính" KHÔNG đo lại ở đây: nó đã được chặn NGAY LÚC SINH bởi
+      `guardGeneratedText`, và mỗi lần chặn để lại một dòng trong `ai_errors`. Đếm lại bằng một tập
+      tiền dựng lại sau sẽ báo nhầm đúng phí ship — nên con số dưới đây đọc từ vết chặn thật.
+  */
+  const cauDaSinh = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select s.id, s.action, coalesce(s.suggested_reply,'') as cau
+      from sales_suggestions s
+      where s.conversation_id in (${dsSql}) and s.created_at >= ${tuKhi} and btrim(s.suggested_reply) <> ''
+    `),
+  );
+  const demCo = new Map<SafetyFlag, number>();
+  const viDu = new Map<SafetyFlag, string>();
+  let daydTiep = 0;
+  let coTien = 0;
+  for (const r of cauDaSinh) {
+    const cau = String(r.cau);
+    const co = safetyFlags({ text: cau, allowedAmounts: [], mentionedAmounts: [], stockKnown: false, sizeChartAvailable: false });
+    for (const c of co) {
+      demCo.set(c, (demCo.get(c) ?? 0) + 1);
+      if (!viDu.has(c)) viDu.set(c, cat(che(cau), 120));
+    }
+    if (advancesConversation(cau)) daydTiep += 1;
+    if (moneyMentions(cau).length) coTien += 1;
+  }
+  const [chan] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select count(*)::int as n from ai_errors
+      where scope = 'MODEL' and agent_key = 'sales' and message like 'Bỏ bản mô hình viết:%' and created_at >= ${tuKhi}
+    `),
+  );
+  console.log(`\n⑦b SOÁT NỘI DUNG — ${cauDaSinh.length} câu, giả định chặt nhất (chưa biết tồn · không có bảng số đo)`);
+  if (!demCo.size) console.log(`   không cờ nào bật ✓`);
+  for (const [c, n] of [...demCo.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`   ⛔ ${n}× ${SAFETY_FLAG_LABEL[c]}`);
+    console.log(`        ví dụ: ${viDu.get(c)}`);
+  }
+  console.log(`   bản mô hình viết bị chặn lúc sinh: ${Number(chan?.n ?? 0)} (đọc từ ai_errors, không phải dựng lại)`);
+
+  /*
+    ⑦c CHÍN CHIỀU CHẤM, VÀ AI CHẤM CHIỀU NÀO.
+
+    In cả chiều máy KHÔNG chấm được là có chủ ý: một bảng chỉ liệt kê phần máy đo được sẽ khiến
+    người đọc tưởng đó là toàn bộ chất lượng. Chiều của NGƯỜI để CHƯA CHẤM cho tới khi có người
+    chấm ở /ai/review — không bao giờ in ra một con số máy tự cho mình.
+  */
+  const [daCham] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`select count(*)::int as n from sales_review_labels where reviewed_at is not null`),
+  );
+  console.log(`\n⑦c CHÍN CHIỀU CHẤM — ${cauDaSinh.length} câu sinh ra, ${Number(daCham?.n ?? 0)} lượt đã có người chấm`);
+  for (const d of QUALITY_DIMENSIONS) {
+    let so = "CHƯA CHẤM (chờ người)";
+    if (d.grader === "MACHINE") {
+      if (d.key === "answered") so = `${coTien}/${cauDaSinh.length} câu có nêu con số tiền`;
+      else if (d.key === "advanced") so = `${daydTiep}/${cauDaSinh.length} câu có mời bước tiếp`;
+      else if (d.key === "hallucination") so = demCo.size ? `⛔ ${[...demCo.values()].reduce((a, b) => a + b, 0)} cờ` : "0 cờ ✓";
+      else if (d.key === "handoff") so = `${[...theoLoai.entries()].map(([k, n]) => `${HANDOFF_CLASS_LABEL[k]} ${n}`).join(" · ") || "không lượt nào"}`;
+    }
+    console.log(`   ${d.grader === "MACHINE" ? "MÁY  " : "NGƯỜI"} ${d.label.padEnd(44)} ${so}`);
+  }
+
   console.log(`\n⑦ AN TOÀN — đọc lại từ CSDL, không phải khẳng định suông`);
   const zero = (n: unknown) => (Number(n) === 0 ? "✓" : "⛔ PHẢI BẰNG 0");
   console.log(`   gợi ý đã gửi cho khách    : ${an.goi_y_da_gui}  ${zero(an.goi_y_da_gui)}`);
