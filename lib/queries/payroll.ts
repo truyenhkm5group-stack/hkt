@@ -195,23 +195,21 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
       (và chính dòng phân công đã dùng). Một-một với `orders` (`order_attribution_order_uq`) nên
       phép nối này không nhân dòng.
 
-      Trước bản này, bảng lương chia doanh thu bằng `payroll.config.pageMarketers` — một ánh xạ
-      `page → người` KHÔNG có mốc hiệu lực. Chủ shop đổi người phụ trách một fanpage hôm nay là
-      bảng lương THÁNG TRƯỚC chuyển doanh thu sang người mới, tức một kỳ đã trả tiền tự viết lại
-      chính nó. Bảng phẳng nay chỉ còn là nguồn LẤP CHỖ cho đơn chưa có ảnh chụp.
+      Đây là NGUỒN DUY NHẤT (chủ shop chốt 15/09/2026). Bảng gán phẳng `payroll.config.pageMarketers`
+      và đường `ad_id` → chiến dịch → marketer đều đã thôi tham gia quyết định ai được tính đơn —
+      lý lẽ đầy đủ ở `lib/constants/payroll.ts::attributionShares`. Cột `status` lấy theo để màn
+      hình nói được phần chưa quy kết thuộc loại nào (không có page · chưa gán · trùng đơn).
     */
     const oa = schema.orderAttributions;
     const rows = await db
-      .select({ productId: productKey, pageId: o.pageId, adId: o.adId, snapshotMarketerId: oa.marketerId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
+      .select({ productId: productKey, pageId: o.pageId, snapshotMarketerId: oa.marketerId, attributionStatus: oa.status, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(oa, eq(oa.orderId, o.id))
       .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
-      .groupBy(sql`1`, o.pageId, o.adId, oa.marketerId);
-    // ad_id → marketer (chiến dịch tạo ra đơn). CHỈ lấp chỗ khi fanpage không nói được gì.
-    const adMap = await adMarketerMap(rows.map((r) => r.adId).filter((x): x is string => Boolean(x)));
+      .groupBy(sql`1`, o.pageId, oa.marketerId, oa.status);
     const map = new Map<string, PageBucket[]>();
     for (const r of rows) {
       if (!r.productId) continue;
@@ -219,8 +217,8 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
       list.push({
         pageId: r.pageId || null,
         value: Number(r.value),
-        adMarketerId: r.adId ? (adMap.get(r.adId) ?? null) : null,
         snapshotMarketerId: r.snapshotMarketerId || null,
+        attributionStatus: (r.attributionStatus as PageBucket["attributionStatus"]) ?? null,
       });
       map.set(r.productId, list);
     }
@@ -481,7 +479,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, months: econ.months, testSpend: 0, profit: 0 };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
-  const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
+  const coverage = { snapshot: 0, unmapped: 0, total: 0, byGap: { NO_PAGE: 0, NO_ASSIGNMENT: 0, DUPLICATE: 0, MISSING: 0 } as Record<AttributionGapReason, number> };
 
   /*
     ═══ MÃ CHỈ CÓ TIỀN QUẢNG CÁO, CHƯA CÓ ĐƠN — VẪN LÀ CHI PHÍ CỦA KỲ ═══
@@ -536,19 +534,30 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
 
     // phần biến đổi đi theo đơn: doanh thu − vận chuyển − chi phí phân bổ − (LN1: giá vốn hàng giao TC)
     const variable = row.revenue - row.shipping - row.operatingAlloc - (useDeliveredCogs ? row.cogsDelivered : 0);
-    const adShares = new Map<string | null, number>();
-    if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
-    const attribution = attributionShares({ byPage: byPage.get(row.productId) ?? [], pageMarketers: config.pageMarketers, adShares, ownerId });
-    coverage.snapshot += attribution.snapshotValue;
-    coverage.legacyPage += attribution.legacyPageValue;
-    coverage.ads += Math.max(0, attribution.mappedValue - attribution.snapshotValue - attribution.legacyPageValue);
+    const attribution = attributionShares({ byPage: byPage.get(row.productId) ?? [] });
+    coverage.snapshot += attribution.mappedValue;
     coverage.unmapped += attribution.unmappedValue;
     coverage.total += attribution.mappedValue + attribution.unmappedValue;
+    for (const reason of ATTRIBUTION_GAP_REASONS) coverage.byGap[reason] += attribution.byGap[reason];
     const shares = attribution.shares;
     if (!shares.size) {
       unattributedProfit += profit;
       unattributedRevenue += row.revenue;
       continue;
+    }
+    /*
+      PHẦN CHƯA QUY KẾT ĐƯỢC KHÔNG BỊ CHIA CHO AI — và cũng không được biến mất.
+
+      `shares` nay cộng lại ≤ 1: phần thiếu chính là phần không nguồn nào nói được ai. Trước bản
+      này nó được chia lại theo tỷ trọng tiền quảng cáo / ném về chủ mã, nên doanh thu của một
+      kênh khác (landing, đơn nhập tay) nằm trên thẻ điểm một marketer. Nay nó ở lại nhóm
+      "Chưa gán marketer", và bất biến Σ marketer + chưa gán = tổng của shop vẫn đúng.
+    */
+    const sharedPct = [...shares.values()].reduce((t, v) => t + v, 0);
+    const gapPct = Math.max(0, 1 - sharedPct);
+    if (gapPct > 0) {
+      unattributedRevenue += Math.round(row.revenue * gapPct);
+      unattributedProfit += Math.round(profit * gapPct);
     }
     const pctShare = shareFor(config, row.productId);
     if (ownerId) ensure(ownerId).ownedProducts.push(row.code || row.productName);
