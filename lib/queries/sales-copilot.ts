@@ -64,6 +64,8 @@ export type CopilotQueueRow = {
   suggestedAt: Date | null;
   /** Câu này còn gửi được không, và nếu không thì vì sao. */
   stale: string | null;
+  /** Khách đã nhắn và CHƯA ai đáp — bậc ưu tiên cao nhất của hàng đợi. */
+  waitingForReply: boolean;
   /** Ai đã xử lý câu này rồi (rỗng = chưa ai). */
   handledAction: string;
   handledBy: string;
@@ -149,16 +151,29 @@ export async function copilotQueue(
              coalesce(r.decision->'facts', '{}'::jsonb)      as facts,
              coalesce(a.action, '')                          as handled_action,
              coalesce(a.actor_name, '')                      as handled_by,
+             (nv.luc is null or nv.luc < t.sent_at)          as dang_cho_tra_loi,
              (select count(*)::int from sales_messages nm
                 where nm.conversation_id = c.id and nm.from_page = false and nm.sent_at > m.created_at) as tin_moi
       from sales_conversations c
       join moi_nhat m on m.conversation_id = c.id
       left join products p on p.id = c.active_product_id
+      /*
+        TIN KHÁCH CUỐI PHẢI LÀ TIN CỦA KHÁCH THẬT.
+
+        Cờ from_page = false chưa đủ: thông báo nền tảng ("… đã trả lời một quảng cáo") và tin bot
+        cũng có thể rơi vào chiều ấy. Xếp một hội thoại lên đầu hàng đợi vì một thông báo hệ thống
+        là mời nhân viên trả lời một cái máy.
+      */
       left join lateral (
         select text, sent_at from sales_messages
-        where conversation_id = c.id and from_page = false and btrim(text) <> ''
+        where conversation_id = c.id and from_page = false and sender_type = 'CUSTOMER' and btrim(text) <> ''
         order by sent_at desc nulls last limit 1
       ) t on true
+      -- Nhân viên đã trả lời SAU tin khách cuối chưa. Chưa thì đây là việc đang chờ người.
+      left join lateral (
+        select max(sent_at) as luc from sales_messages
+        where conversation_id = c.id and from_page = true and sender_type in ('PAGE_HUMAN', 'PAGE_BOT')
+      ) nv on true
       left join ai_runs r on r.id = m.run_id
       left join lateral (
         select action, actor_name from sales_copilot_actions
@@ -173,7 +188,35 @@ export async function copilotQueue(
         vĩnh viễn. Nên: ẩn với mọi người khác, hiện với chính chủ.
       */
       where (c.human_takeover_at is null or c.takeover_by_user_id = ${options.heldByUserId ?? null})
-      order by c.updated_at desc
+        -- KHÔNG có tin khách thật thì không có việc: một hội thoại chỉ gồm thông báo quảng cáo
+        -- không phải một người đang chờ được trả lời.
+        and t.sent_at is not null
+      /*
+        THỨ TỰ HÀNG ĐỢI — ĐỂ NGƯỜI TRỰC MỞ RA LÀ THẤY VIỆC ĐÁNG LÀM NHẤT Ở TRÊN CÙNG.
+
+        Bậc 1 và quan trọng nhất: KHÁCH ĐANG CHỜ. Một người vừa nhắn và chưa ai đáp là việc gấp
+        hơn mọi thứ khác, bất kể họ hỏi gì.
+
+        Bậc 2, trong nhóm đang chờ, xếp theo Ý ĐỊNH — đọc từ ai_runs.understanding, không đoán
+        lại từ câu chữ: muốn mua / xác nhận (1) · hỏi giá, màu, size, còn hàng (2) · băn khoăn (3)
+        · còn lại (4).
+
+        Bậc 3: mới nhất trước. Trả lời một người vừa nhắn năm phút trước có ích hơn một người nhắn
+        từ hôm qua — người hôm qua nhiều khả năng đã bỏ đi hoặc đã được nhân viên trả lời.
+      */
+      order by
+        (nv.luc is null or nv.luc < t.sent_at) desc,
+        case
+          when r.understanding->'intents' @> '["PURCHASE_INTENT"]'::jsonb or r.understanding->'intents' @> '["CONFIRM"]'::jsonb then 1
+          when r.understanding->'intents' @> '["PRICE_QUESTION"]'::jsonb
+            or r.understanding->'intents' @> '["SIZE_QUESTION"]'::jsonb
+            or r.understanding->'intents' @> '["STOCK_QUESTION"]'::jsonb
+            or r.understanding->'intents' @> '["SHIPPING_QUESTION"]'::jsonb
+            or r.understanding->'intents' @> '["PRODUCT_QUESTION"]'::jsonb then 2
+          when r.understanding->'intents' @> '["OBJECTION"]'::jsonb then 3
+          else 4
+        end,
+        t.sent_at desc nulls last
       limit ${limit}
     `),
   );
@@ -216,6 +259,7 @@ export async function copilotQueue(
         facts: parseObj(r.facts),
         suggestedAt,
         stale,
+        waitingForReply: r.dang_cho_tra_loi === true || String(r.dang_cho_tra_loi) === "true",
         handledAction: String(r.handled_action ?? ""),
         handledBy: String(r.handled_by ?? ""),
       };

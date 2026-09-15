@@ -96,6 +96,8 @@ export default async function CopilotPage() {
       {queue.map((row) => (
         <Card key={row.conversationId} className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            {/* Bậc ưu tiên cao nhất của hàng đợi, nên nó phải nhìn thấy được ngay. */}
+            {row.waitingForReply ? <Badge tone="hot">khách đang chờ</Badge> : null}
             <span className="font-semibold">{row.customerName || "(chưa có tên)"}</span>
             <Badge>{row.sourceType || "?"}</Badge>
             <Badge>{SALES_STAGE_LABEL[row.stage as SalesStage] ?? row.stage}</Badge>
@@ -160,8 +162,13 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({ children, tone }: { children: React.ReactNode; tone?: "warn" }) {
-  const cls = tone === "warn" ? "border-amber-500 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground";
+function Badge({ children, tone }: { children: React.ReactNode; tone?: "warn" | "hot" }) {
+  const cls =
+    tone === "hot"
+      ? "border-rose-500 bg-rose-50 font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
+      : tone === "warn"
+        ? "border-amber-500 text-amber-700 dark:text-amber-300"
+        : "border-border text-muted-foreground";
   return <span className={`rounded border px-1.5 py-0.5 text-[11px] ${cls}`}>{children}</span>;
 }
 

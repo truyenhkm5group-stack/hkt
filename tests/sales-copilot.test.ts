@@ -13,6 +13,7 @@ import {
   isMeaningfulEdit,
 } from "@/lib/constants/sales-copilot";
 import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue } from "@/lib/queries/sales-copilot";
+import { getAgent } from "@/lib/ai-workforce/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { setSettingJson } from "@/lib/settings";
 
@@ -100,6 +101,27 @@ export async function testSalesCopilot(db: Db) {
   for (const cam of [".insert(", ".update(", ".delete("]) {
     assert.ok(!mãQuery.includes(cam), `lớp đọc hàng đợi không được chứa ${cam}`);
   }
+
+  /*
+    1B. DẤU HUYỀN NGƯỢC TRONG MỘT CHÚ THÍCH SQL LÀM ĐỨT CHUỖI MẪU TYPESCRIPT.
+
+    Đã vấp BA LẦN trong cùng một phiên. `tsc` có bắt được, nhưng nó nói "',' expected" ở một dòng
+    cách chỗ sai hàng chục dòng — không ai đọc thông báo ấy mà đoán ra nguyên nhân. Bài kiểm này
+    nói thẳng tên lỗi, nên lần thứ tư mất năm giây thay vì năm phút.
+
+    Luật nhận dạng hẹp và không báo nhầm: trong một tệp .ts, một dòng bắt đầu bằng `--` gần như
+    chắc chắn là chú thích SQL nằm trong một chuỗi mẫu (TypeScript dùng `//`).
+  */
+  const dinhDauHuyen: string[] = [];
+  for (const f of tep) {
+    if (!f.startsWith("lib/")) continue;
+    readFileSync(f, "utf8")
+      .split("\n")
+      .forEach((dong, i) => {
+        if (/^\s*--/.test(dong) && dong.includes("`")) dinhDauHuyen.push(`${f}:${i + 1}`);
+      });
+  }
+  assert.deepEqual(dinhDauHuyen, [], "chú thích SQL không được chứa dấu huyền ngược — nó đóng chuỗi mẫu và làm hỏng cả truy vấn");
 
   // ═════════ 2. QUYỀN GỬI TÁCH KHỎI QUYỀN XEM ═════════
   const cs = resolvePermissions("CS", null);
@@ -201,6 +223,21 @@ export async function testSalesCopilot(db: Db) {
     .values({ id: convCu, pageId: "page-thi-diem", externalId: "ext-copilot-cu", pancakeCustomerId: "pc-2", customerName: "Chị Mai", stage: "SIZE_SELECTION", sourceType: "WIN" })
     .onConflictDoNothing();
   const lauRoi = new Date(Date.now() - 120 * 60_000);
+  // Hội thoại phải có TIN KHÁCH THẬT thì mới là việc — tin này cũ hơn câu gợi ý, nên nó không làm
+  // câu ấy "cũ vì có tin mới hơn"; cái cũ ở đây là cũ vì THỜI GIAN.
+  await db
+    .insert(schema.salesMessages)
+    .values({
+      id: "m-copilot-cu",
+      conversationId: convCu,
+      externalId: "ext-m-cu",
+      direction: "IN",
+      fromPage: false,
+      senderType: "CUSTOMER",
+      text: "mẫu này bao nhiêu shop",
+      sentAt: new Date(Date.now() - 180 * 60_000),
+    })
+    .onConflictDoNothing();
   await db
     .insert(schema.salesSuggestions)
     .values({ id: "s-copilot-cu", conversationId: convCu, suggestedReply: "câu soạn từ hai tiếng trước", action: "ANSWER_QUESTION", createdAt: lauRoi })
@@ -255,6 +292,12 @@ export async function testSalesCopilot(db: Db) {
     .insert(schema.salesConversations)
     .values({ id: convCham, pageId: "page-thi-diem", externalId: "ext-cham", pancakeCustomerId: "pc-3", customerName: "Chị Tú", stage: "HUMAN_TAKEOVER", sourceType: "WIN" })
     .onConflictDoNothing();
+  // Có tin khách thật, để hội thoại này bị loại vì ĐÚNG lý do đang kiểm (câu chỉ-để-chấm) chứ
+  // không phải vì thiếu tin khách — một phép thử đúng vì lý do sai là một phép thử không có giá trị.
+  await db
+    .insert(schema.salesMessages)
+    .values({ id: "m-cham", conversationId: convCham, externalId: "ext-m-cham", direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "còn hàng không shop", sentAt: new Date() })
+    .onConflictDoNothing();
   await db
     .insert(schema.salesSuggestions)
     .values({ id: "s-cham", conversationId: convCham, suggestedReply: "câu chỉ để chấm", action: "ANSWER_QUESTION", evaluationOnly: true })
@@ -267,8 +310,80 @@ export async function testSalesCopilot(db: Db) {
     .insert(schema.salesConversations)
     .values({ id: convRong, pageId: "page-thi-diem", externalId: "ext-rong", pancakeCustomerId: "pc-4", customerName: "Chị Vy", stage: "NEW_LEAD", sourceType: "WIN" })
     .onConflictDoNothing();
+  await db
+    .insert(schema.salesMessages)
+    .values({ id: "m-rong", conversationId: convRong, externalId: "ext-m-rong", direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "alo shop", sentAt: new Date() })
+    .onConflictDoNothing();
   await db.insert(schema.salesSuggestions).values({ id: "s-rong", conversationId: convRong, suggestedReply: "   ", action: "NO_ACTION" }).onConflictDoNothing();
   assert.ok(!(await copilotQueue({ pageIds: ["page-thi-diem"], db })).some((r) => r.conversationId === convRong), "câu rỗng không vào hàng đợi");
+
+  // ═════════ 6C. THỨ TỰ HÀNG ĐỢI: KHÁCH ĐANG CHỜ LÊN TRƯỚC, RỒI MỚI TỚI Ý ĐỊNH ═════════
+  //
+  // Người trực mở màn hình ra phải thấy việc đáng làm nhất ở trên cùng. Bậc một là KHÁCH ĐANG CHỜ
+  // — vừa nhắn, chưa ai đáp — vì đó là việc gấp hơn mọi thứ khác bất kể họ hỏi gì.
+
+  const nhanSu = await getAgent("sales", undefined, db);
+  assert.ok(nhanSu, "phải có nhân sự bán hàng trong sổ đăng ký");
+
+  const dungXep = async (id: string, tin: string, giay: number, daTraLoi: boolean, yDinh: string[]) => {
+    await db
+      .insert(schema.salesConversations)
+      .values({ id, pageId: "page-xep", externalId: `ext-${id}`, pancakeCustomerId: `pc-${id}`, customerName: id, stage: "SIZE_SELECTION", sourceType: "WIN" })
+      .onConflictDoNothing();
+    const luc = new Date(Date.now() - giay * 1000);
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `m-${id}`, conversationId: id, externalId: `em-${id}`, direction: "IN", fromPage: false, senderType: "CUSTOMER", text: tin, sentAt: luc })
+      .onConflictDoNothing();
+    if (daTraLoi) {
+      await db
+        .insert(schema.salesMessages)
+        .values({ id: `mp-${id}`, conversationId: id, externalId: `emp-${id}`, direction: "OUT", fromPage: true, senderType: "PAGE_HUMAN", text: "dạ chị", sentAt: new Date(luc.getTime() + 1000) })
+        .onConflictDoNothing();
+    }
+    await db
+      .insert(schema.aiRuns)
+      .values({ id: `r-${id}`, agentId: nhanSu.id, subjectType: "CONVERSATION", subjectId: id, status: "SUCCEEDED", understanding: { intents: yDinh, entities: {} } })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesSuggestions)
+      .values({ id: `s-${id}`, conversationId: id, runId: `r-${id}`, suggestedReply: `gợi ý cho ${id}`, action: "ANSWER_QUESTION" })
+      .onConflictDoNothing();
+  };
+
+  // Cố ý dựng ngược thứ tự mong muốn: hội thoại "tốt" nhất lại là hội thoại CŨ nhất, để nếu xếp
+  // theo thời gian cập nhật như trước thì bài kiểm này đỏ.
+  await dungXep("z-da-tra-loi-muon", "em muốn mua", 10, true, ["PURCHASE_INTENT"]);
+  await dungXep("z-khac-moi", "ok", 20, false, ["OTHER"]);
+  await dungXep("z-ban-khoan", "đắt quá shop", 40, false, ["OBJECTION"]);
+  await dungXep("z-hoi-gia", "bao nhiêu", 60, false, ["PRICE_QUESTION"]);
+  await dungXep("z-muon-mua", "chị lấy một cái", 90, false, ["PURCHASE_INTENT"]);
+
+  const xep = (await copilotQueue({ pageIds: ["page-xep"], db })).map((r) => r.conversationId);
+  assert.deepEqual(
+    xep,
+    ["z-muon-mua", "z-hoi-gia", "z-ban-khoan", "z-khac-moi", "z-da-tra-loi-muon"],
+    "đang chờ lên trước (muốn mua → hỏi giá → băn khoăn → khác), đã được trả lời xuống cuối dù mới nhất",
+  );
+  const dau = (await copilotQueue({ pageIds: ["page-xep"], db }))[0];
+  assert.equal(dau.waitingForReply, true, "dòng đầu phải là khách đang chờ");
+  const cuoi = (await copilotQueue({ pageIds: ["page-xep"], db })).at(-1)!;
+  assert.equal(cuoi.waitingForReply, false, "hội thoại nhân viên đã đáp thì không còn là việc đang chờ");
+
+  // Thông báo nền tảng KHÔNG được kéo một hội thoại lên đầu: nó không phải một người đang chờ.
+  await db
+    .insert(schema.salesConversations)
+    .values({ id: "z-thong-bao", pageId: "page-xep", externalId: "ext-tb", pancakeCustomerId: "pc-tb", customerName: "TB", stage: "NEW_LEAD", sourceType: "WIN" })
+    .onConflictDoNothing();
+  await db
+    .insert(schema.salesMessages)
+    .values({ id: "m-tb", conversationId: "z-thong-bao", externalId: "em-tb", direction: "IN", fromPage: false, senderType: "PAGE_SYSTEM", text: "Chị A đã trả lời một quảng cáo.", sentAt: new Date() })
+    .onConflictDoNothing();
+  await db.insert(schema.salesSuggestions).values({ id: "s-tb", conversationId: "z-thong-bao", suggestedReply: "chào chị", action: "ASK_PRODUCT" }).onConflictDoNothing();
+  assert.ok(
+    !(await copilotQueue({ pageIds: ["page-xep"], db })).some((r) => r.conversationId === "z-thong-bao"),
+    "hội thoại chỉ có thông báo nền tảng KHÔNG vào hàng đợi — đó là một cái máy, không phải một người đang chờ",
+  );
 
   // ═════════ 7. CHỈ SỐ: MẪU SỐ RỖNG LÀ CHƯA BIẾT, KHÔNG PHẢI 0% ═════════
   const kpi = await copilotKpi(7, db);
