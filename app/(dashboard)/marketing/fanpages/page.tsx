@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { AssignPanel, type FanpageView, type MarketerOption } from "@/app/(dashboard)/marketing/fanpages/assign-panel";
+import { SkuFilter } from "@/app/(dashboard)/marketing/fanpages/sku-filter";
 import { FanpageTabs } from "@/app/(dashboard)/marketing/fanpages/tabs";
 import { ReconcileButton } from "@/app/(dashboard)/marketing/fanpages/reconcile-button";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -122,7 +123,9 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                 {report.duplicates.orders ? ` · ${formatNumber(report.duplicates.orders)} đơn trùng bị loại (${formatVND(report.duplicates.revenue)})` : ""}
               </>
             }
-          />
+          >
+            <SkuFilter />
+          </DataTableToolbar>
 
           <SectionCard
             title="Độ phủ quy kết"
@@ -164,6 +167,8 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                         <th className="py-2 pr-3 text-right font-medium">Đơn quy kết</th>
                         <th className="py-2 pr-3 text-right font-medium">Đơn đã xác nhận</th>
                         <th className="py-2 pr-3 text-right font-medium">Doanh thu xác nhận</th>
+                        <th className="py-2 pr-3 text-right font-medium">DT / đơn</th>
+                        <th className="py-2 pr-3 text-right font-medium">Trùng bị loại</th>
                         <th className="py-2 text-right font-medium">Tỷ lệ chốt</th>
                       </tr>
                     </thead>
@@ -181,6 +186,16 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                             <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.attributedOrders)}</td>
                             <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.confirmedOrders)}</td>
                             <td className="py-2 pr-3 text-right font-mono font-semibold">{formatVND(r.confirmedRevenue)}</td>
+                            <td className="py-2 pr-3 text-right font-mono">{r.revenuePerOrder === null ? "—" : formatVND(r.revenuePerOrder)}</td>
+                            <td className="py-2 pr-3 text-right font-mono">
+                              {r.duplicateExcluded ? (
+                                <Link className="hover:underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", st: "DUPLICATE", period: params.period.key, ...(params.period.fromKey ? { from: params.period.fromKey, to: params.period.toKey ?? "" } : {}) } }}>
+                                  {formatNumber(r.duplicateExcluded)}
+                                </Link>
+                              ) : (
+                                <span className="text-muted-foreground">0</span>
+                              )}
+                            </td>
                             <td className="py-2 text-right font-mono">{rate === null ? "—" : `${rate}%`}</td>
                           </tr>
                         );
@@ -193,6 +208,8 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                         <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.rows.reduce((t, r) => t + r.attributedOrders, 0))}</td>
                         <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.totalConfirmedOrders)}</td>
                         <td className="py-2 pr-3 text-right font-mono">{formatVND(report.totalConfirmedRevenue)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{report.totalConfirmedOrders > 0 ? formatVND(Math.round(report.totalConfirmedRevenue / report.totalConfirmedOrders)) : "—"}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.duplicates.orders)}</td>
                         <td className="py-2" />
                       </tr>
                     </tfoot>
@@ -254,7 +271,7 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                   <th className="py-2 pr-3 font-medium">Fanpage</th>
                   <th className="py-2 pr-3 font-medium">Marketer</th>
                   <th className="py-2 pr-3 font-medium">Khách</th>
-                  <th className="py-2 pr-3 font-medium">Mã hàng</th>
+                  <th className="py-2 pr-3 font-medium">Mã hàng · biến thể × SL</th>
                   <th className="py-2 pr-3 font-medium">Tình trạng</th>
                   <th className="py-2 pr-3 text-right font-medium">Doanh thu xác nhận</th>
                 </tr>
@@ -278,7 +295,7 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                       <div>{r.customer || "—"}</div>
                       <div className="text-[11px] text-muted-foreground">{r.phone}</div>
                     </td>
-                    <td className="py-2 pr-3">{r.skus || "—"}</td>
+                    <td className="py-2 pr-3 whitespace-pre-line">{r.items ? r.items.split(" | ").join("\n") : "—"}</td>
                     <td className="py-2 pr-3">
                       <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", ATTRIBUTION_STATUS_TONE[r.status])}>{ATTRIBUTION_STATUS_LABEL[r.status]}</span>
                       {r.duplicateOfOrderId ? (

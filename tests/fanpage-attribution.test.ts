@@ -42,7 +42,7 @@ const BINH = `${P}mkt-binh`;
 const PAGE_A = `${P}page-a`;
 const PAGE_B = `${P}page-b`;
 
-type ItemSpec = { sku: string; qty: number };
+type ItemSpec = { sku: string; qty: number; variation?: string };
 
 async function themDon(
   db: Awaited<ReturnType<typeof getDb>>,
@@ -90,7 +90,7 @@ async function themDon(
     .onConflictDoNothing();
   await db
     .insert(schema.orderItems)
-    .values(spec.items.map((it, i) => ({ id: `${spec.id}-i${i}`, orderId: spec.id, sku: it.sku, productName: it.sku, quantity: it.qty, unitPrice: spec.revenue ?? 500_000 })))
+    .values(spec.items.map((it, i) => ({ id: `${spec.id}-i${i}`, orderId: spec.id, sku: it.sku, productName: it.sku, variationDetail: it.variation ?? "", quantity: it.qty, unitPrice: spec.revenue ?? 500_000 })))
     .onConflictDoNothing();
 }
 
@@ -330,6 +330,70 @@ export async function testFanpageAttribution() {
   assert.equal((await quyKet(`${P}o9-chua-gan`))?.status, "NO_ASSIGNMENT", "page có đơn nhưng chưa ai phụ trách ⇒ nói rõ là CHƯA GÁN");
   assert.equal((await quyKet(`${P}o9-chua-gan`))?.sourcePageId, PAGE_C, "vẫn giữ page để biết phải đi gán cái nào");
   assert.equal((await quyKet(`${P}o9-khong-page`))?.status, "NO_PAGE", "đơn không có page là một lỗ hổng KHÁC, có cách sửa khác");
+
+  // Đơn có BIẾN THỂ, để kiểm bộ lọc mã hàng và cột chi tiết. SĐT + mã riêng nên nó không dính vào
+  // cụm trùng đơn nào — bài này đang kiểm bộ lọc, không kiểm luật trùng.
+  await themDon(db, {
+    id: `${P}o-bien-the`,
+    pageId: PAGE_A,
+    at: at(9, 10, 0),
+    phone: "0911000011",
+    name: "Khách N11",
+    address: "11 Nguyễn Huệ",
+    items: [{ sku: "FPA-Q011", qty: 3, variation: "Size L, Màu Đỏ" }],
+  });
+  await doiSoat();
+
+  /* ═══ 9b · CHỈ SỐ BÁO CÁO: trùng bị loại hiện ở ĐÚNG dòng người phụ trách, và không lẫn vào tiền ═══
+   *
+   * "Đơn của tôi đâu mất mấy cái?" là câu hỏi đầu tiên một marketer hỏi khi số trên ERP thấp hơn số
+   * họ tự đếm trên Pancake. Cột `Trùng bị loại` là chỗ trả lời — nhưng nó phải đứng RIÊNG: cộng nó
+   * vào đơn quy kết hay doanh thu là quay lại đúng cái lỗi đếm hai lần mà cả bản này sinh ra để chống.
+   *
+   * Dòng trùng đơn cố ý KHÔNG mang `marketer_id` (ràng buộc CSDL chặn), nên báo cáo phải tra ngược
+   * qua phân công còn hiệu lực TẠI MỐC ĐƠN LÊN. Bài này khoá đúng phép tra đó.
+   */
+
+  clearMemo();
+  const baoCaoDayDu = await getMarketerAttributionReport(KY, {});
+  const dongAn = baoCaoDayDu.rows.find((r) => r.marketerId === AN);
+  const dongBinh = baoCaoDayDu.rows.find((r) => r.marketerId === BINH);
+  assert.ok(dongAn && dongBinh, "cả hai marketer phải có dòng trong báo cáo");
+
+  // Ba đơn trùng của bộ dữ liệu này, theo ĐÚNG page phát sinh:
+  //   `o2b-nhap-lai` (page B) · `o8-huy` (page B) ⇒ Bình 2
+  //   `o2c-lai`      (page A, mốc at(6) nằm trong khoảng của An) ⇒ An 1
+  assert.equal(dongBinh.duplicateExcluded, 2, "hai đơn trùng phát sinh trên page của Bình phải hiện ở dòng của Bình");
+  assert.equal(dongAn.duplicateExcluded, 1, "đơn trùng phát sinh trên page của An phải hiện ở dòng của An");
+  // Và tuyệt đối không được lẫn vào ba cột tiền/đơn.
+  assert.ok(!Number.isNaN(dongBinh.attributedOrders));
+  assert.equal(
+    baoCaoDayDu.rows.reduce((t, r) => t + r.attributedOrders, 0) + baoCaoDayDu.duplicates.orders,
+    baoCaoDayDu.totalOrders,
+    "đơn quy kết + đơn trùng = tổng đơn: cột trùng bị loại KHÔNG được cộng thêm lần nữa vào đơn quy kết",
+  );
+  assert.equal(
+    baoCaoDayDu.rows.reduce((t, r) => t + r.duplicateExcluded, 0),
+    baoCaoDayDu.duplicates.orders,
+    "cộng cột trùng của mọi dòng phải bằng đúng tổng trùng đơn của kỳ — không dòng nào nuốt mất một đơn trùng",
+  );
+
+  // Doanh thu / đơn: mẫu số 0 ⇒ null (CHƯA BIẾT), không phải 0đ.
+  for (const r of baoCaoDayDu.rows) {
+    if (r.confirmedOrders === 0) assert.equal(r.revenuePerOrder, null, `${r.label}: chưa có đơn xác nhận thì DT/đơn phải là CHƯA BIẾT, không phải 0`);
+    else assert.equal(r.revenuePerOrder, Math.round(r.confirmedRevenue / r.confirmedOrders), `${r.label}: DT/đơn phải bằng doanh thu chia số đơn xác nhận`);
+  }
+
+  /* ═══ 9c · SOI TỪNG ĐƠN: bộ lọc mã hàng khớp cả BIẾN THỂ, và mỗi dòng nói rõ biến thể × số lượng ═══ */
+
+  const locTheoBienThe = await listAttributionOrders({ page: 1, pageSize: 50, sort: "sourceOrderAt", dir: "desc", q: "", filters: {}, period: KY }, { sku: "Đỏ" });
+  assert.ok(
+    locTheoBienThe.rows.some((r) => r.orderId === `${P}o-bien-the`),
+    "gõ tên BIẾN THỂ phải tìm ra đơn — mã hàng và biến thể là hai thứ người dùng đều gõ",
+  );
+  const dongBienThe = locTheoBienThe.rows.find((r) => r.orderId === `${P}o-bien-the`);
+  assert.match(dongBienThe?.items ?? "", /Đỏ/, "chi tiết dòng hàng phải in BIẾN THỂ");
+  assert.match(dongBienThe?.items ?? "", /× 3/, "và phải in SỐ LƯỢNG — đó là thứ quyết định trùng đơn nên phải soi được");
 
   /* ═══ 10 · CỘNG MỌI NHÓM PHẢI BẰNG TỔNG — không đơn nào bị đếm hai lần hay rơi ra ngoài ═══ */
 
