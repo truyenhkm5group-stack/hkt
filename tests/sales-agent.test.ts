@@ -4,12 +4,13 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
 import { SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type SalesStage } from "@/lib/constants/sales-agent";
-import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
+import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, understandByRule, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
-import { guardGeneratedText, moneyMentions, renderOrderReview } from "@/lib/ai-workforce/agents/sales/generate";
+import { guardGeneratedText, moneyMentions, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
 import { classifySender, ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
+import { decide } from "@/lib/ai-workforce/agents/sales/decide";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
@@ -44,6 +45,9 @@ const OFF_SETTINGS: AiSettings = {
   hardLimits: { allowCustomerSend: true, allowOrderCreate: true },
   pricingVersion: "",
 };
+
+/** Bộ thực thể rỗng đúng hình dạng lược đồ — dùng dựng một kết quả hiểu "trung tính" trong phép thử. */
+const EMPTY_ENTITIES_TEST = UNDERSTANDING_SCHEMA.parse({ intents: ["OTHER"], entities: {}, confidence: 0.5 }).entities;
 
 function stateWith(patch: Partial<SalesState>): SalesState {
   return { ...EMPTY_SALES_STATE, ...patch };
@@ -142,11 +146,37 @@ export async function testSalesAgent(db: Db) {
   const complaint = understandByRule("shop lua dao, hang loi hoan toan");
   assert.ok(complaint.intents.includes("COMPLAINT"), "khiếu nại phải nhận ra được");
 
-  // Lược đồ chặn rác của mô hình: số lượng âm, SĐT quá dài, ý định lạ đều bị loại.
+  // Lược đồ chặn rác của mô hình: ý định lạ, độ tin ngoài khoảng, không ý định nào đều bị loại.
   assert.equal(UNDERSTANDING_SCHEMA.safeParse({ intents: ["KHONG_CO_Y_DINH_NAY"], entities: {}, confidence: 1 }).success, false, "ý định lạ phải bị lược đồ chặn");
-  assert.equal(UNDERSTANDING_SCHEMA.safeParse({ intents: ["CONFIRM"], entities: { quantity: -3 }, confidence: 0.9 }).success, false, "số lượng âm phải bị chặn");
   assert.equal(UNDERSTANDING_SCHEMA.safeParse({ intents: ["CONFIRM"], entities: {}, confidence: 5 }).success, false, "độ tin ngoài [0,1] phải bị chặn");
   assert.equal(UNDERSTANDING_SCHEMA.safeParse({ intents: [], entities: {}, confidence: 0.5 }).success, false, "phải có ít nhất một ý định");
+
+  /*
+    2B. CÁCH VIẾT KHÁC NGHĨA KHÁC.
+
+    Mô hình gửi JSON, và JSON có nhiều cách viết cho cùng một điều. Lược đồ phải phân biệt được:
+    một Ô TRỐNG hay một CHUỖI SỐ là cách viết khác của cùng một nghĩa — nhận rồi quy về một dạng;
+    còn một ý định không có trong danh sách là một nghĩa KHÔNG TỒN TẠI — vứt cả lượt.
+
+    Gộp hai thứ này lại chính là lỗi đã đo được 15/09/2026: mọi lượt ECONOMY hỏng lược đồ vì
+    `"productText": null`, leo lên STRONG, hỏng nốt, rồi cả dây chuyền rơi về chuyển người.
+  */
+  const sNull = UNDERSTANDING_SCHEMA.safeParse({ intents: ["PRICE_QUESTION"], entities: { productText: null, size: null, quantity: null }, confidence: 0.8, evidence: null });
+  assert.ok(sNull.success, "`null` ở ô tuỳ chọn là CÁCH VIẾT của trống, không phải rác");
+  assert.equal(sNull.success && sNull.data.entities.productText, "", "`null` ở ô chữ quy về chuỗi rỗng");
+  assert.equal(sNull.success ? sNull.data.entities.quantity : 0, null, "`null` ở ô số vẫn là CHƯA BIẾT");
+
+  const sChuoi = UNDERSTANDING_SCHEMA.safeParse({ intents: ["PROVIDE_VARIANT"], entities: { quantity: "2", heightCm: "158" }, confidence: 0.8 });
+  assert.ok(sChuoi.success, 'chuỗi số thuần "2" là cách viết khác của 2, không được làm hỏng cả lượt hiểu');
+  assert.equal(sChuoi.success ? sChuoi.data.entities.quantity : null, 2);
+  assert.equal(sChuoi.success ? sChuoi.data.entities.heightCm : null, 158);
+
+  // Chữ cần SUY DIỄN và số vô lý đều ra CHƯA BIẾT — để máy đi hỏi khách, KHÔNG đoán, và cũng
+  // không vì một ô hỏng mà vứt phần hiểu còn lại rồi chuyển người.
+  const sRac = UNDERSTANDING_SCHEMA.safeParse({ intents: ["PROVIDE_VARIANT"], entities: { quantity: "hai cái" }, confidence: 0.8 });
+  assert.equal(sRac.success ? sRac.data.entities.quantity : 0, null, '"hai cái" cần suy diễn ⇒ CHƯA BIẾT, không đoán ra 2');
+  const sAm = UNDERSTANDING_SCHEMA.safeParse({ intents: ["CONFIRM"], entities: { quantity: -3 }, confidence: 0.9 });
+  assert.equal(sAm.success ? sAm.data.entities.quantity : 0, null, "số lượng âm là CHƯA BIẾT, không bao giờ là một số lượng");
 
   // ═════════ 3. XÁC NHẬN CÓ NGỮ CẢNH — "OK" KHÔNG BAO GIỜ TỰ TẠO ĐƠN ═════════
 
@@ -216,6 +246,132 @@ export async function testSalesAgent(db: Db) {
   const review = renderOrderReview({ productLabel: "Đầm Q002 L Đỏ", quantity: 1, unitPrice: 499_000, shippingFee: 25_000, total: 524_000, name: "Chị Lan", phone: "0912345678", address: "Số 5, Thanh Xuân, Hà Nội" });
   assert.ok(review.includes("524.000") && review.includes("0912345678"), "bản chốt phải đọc đủ tổng tiền và SĐT cho khách nghe");
   assert.ok(review.includes("xác nhận"), "bản chốt phải hỏi khách xác nhận");
+
+  // ═════════ 4A. GIAI ĐOẠN NÀO CŨNG PHẢI TRẢ LỜI CÂU KHÁCH HỎI ═════════
+  //
+  // Đo 15/09/2026 trên mẻ thật: khách hỏi "Giá sau khi giảm 40% là bao nhiêu?" khi hội thoại đang
+  // ở chỗ chọn size, và máy đáp bằng câu xin chiều cao / cân nặng. Luật "trả lời trước, đẩy bước
+  // sau" vốn đã có nhưng CHỈ ở hai giai đoạn đầu, nên ở các giai đoạn thu thập sau đó câu hỏi rơi
+  // mất.
+  //
+  // Phép thử đi theo TÍNH CHẤT, không theo tên giai đoạn: hễ máy đang định ĐI THU THẬP một thứ gì
+  // đó, mà khách vừa hỏi một câu, thì việc phải làm là TRẢ LỜI. Viết theo tính chất thì thêm một
+  // giai đoạn thu thập mới vẫn bị soi, còn liệt kê tên giai đoạn thì không.
+
+  // `NEW_LEAD` là ngoại lệ DUY NHẤT và nằm ngoài danh sách: chưa biết khách hỏi mẫu nào thì không
+  // có giá nào để báo, nên hỏi mẫu CHÍNH LÀ điều kiện để trả lời được, không phải né câu hỏi.
+  const VIỆC_THU_THẬP = ["ASK_VARIANT", "ASK_SIZE", "ASK_CONTACT", "ASK_ADDRESS"] as const;
+  const nềnQuyết = {
+    confirmation: { confirmed: false as const, reason: "Chưa gửi bản chốt", blocking: [] as never[] },
+    humanTakeover: false,
+    orderCreated: false,
+    stale: false,
+  };
+  const hiểuTrung: Understanding = { intents: ["GREETING"], entities: { ...EMPTY_ENTITIES_TEST }, confidence: 0.9, evidence: "", tier: "RULE" };
+  const hiểuHỏiGiá = understandByRule("giá sau khi giảm 40% là bao nhiêu ạ");
+  assert.ok(hiểuHỏiGiá.intents.includes("PRICE_QUESTION"), "câu hỏi giá phải được nhận ra bằng LUẬT, không cần mô hình");
+
+  const chặngThuThập: { tên: string; stage: SalesStage; state: SalesState }[] = [
+    { tên: "biết mẫu, chưa có mẫu mã", stage: "PRODUCT_IDENTIFIED", state: stateWith({ productId: "p", productName: "Đầm Q004", quotedTotal: 499_000 }) },
+    { tên: "thiếu size", stage: "VARIANT_SELECTION", state: stateWith({ productId: "p", productName: "Đầm Q004", quotedTotal: 499_000, needsSize: true, purchaseIntent: true }) },
+    { tên: "thiếu SĐT", stage: "PURCHASE_INTENT", state: stateWith({ productId: "p", productName: "Đầm Q004", quotedTotal: 499_000, variantId: "v", variantLabel: "L Đỏ", size: "L", color: "Đỏ", purchaseIntent: true }) },
+    { tên: "thiếu địa chỉ", stage: "CONTACT_COLLECTION", state: stateWith({ productId: "p", productName: "Đầm Q004", quotedTotal: 499_000, variantId: "v", variantLabel: "L Đỏ", size: "L", color: "Đỏ", purchaseIntent: true, phone: "0912345678" }) },
+  ];
+
+  let chặngĐãSoi = 0;
+  for (const chặng of chặngThuThập) {
+    const nền = decide({ ...nềnQuyết, stage: chặng.stage, state: chặng.state, understanding: hiểuTrung });
+    assert.ok(
+      (VIỆC_THU_THẬP as readonly string[]).includes(nền.action),
+      `${chặng.tên}: nền của phép thử phải là một việc THU THẬP thì mới soi được luật trả lời trước (đang là ${nền.action})`,
+    );
+    const hỏi = decide({ ...nềnQuyết, stage: chặng.stage, state: chặng.state, understanding: hiểuHỏiGiá });
+    assert.equal(hỏi.action, "ANSWER_QUESTION", `${chặng.tên}: khách hỏi giá thì phải TRẢ LỜI, không đẩy sang ${nền.action}`);
+    chặngĐãSoi += 1;
+  }
+  assert.equal(chặngĐãSoi, chặngThuThập.length);
+  assert.equal(
+    decide({ ...nềnQuyết, stage: "NEW_LEAD", state: EMPTY_SALES_STATE, understanding: hiểuHỏiGiá }).action,
+    "ASK_PRODUCT",
+    "chưa biết khách hỏi mẫu nào thì không có giá nào để báo — hỏi mẫu là điều kiện để trả lời, không phải né câu hỏi",
+  );
+
+  // ═════════ 4B. CÂU TRẢ LỜI ĐỨNG TRƯỚC BƯỚC TIẾP, KHÔNG ĐỨNG THAY ═════════
+  //
+  // Đo 15/09/2026 trên mẻ thật, hai lỗi diễn đạt đi cùng nhau trong MỘT câu:
+  //   KHÁCH: "Giá sau khi giảm 40% là bao nhiêu?"
+  //   MÁY  : "Dạ chị cho em xin chiều cao và cân nặng để em tư vấn size phù hợp nhất ạ."
+  // (a) câu hỏi giá không được trả lời một chữ nào — bước tiếp đứng THAY câu trả lời;
+  // (b) câu hứa sẽ tư vấn size trong khi ERP KHÔNG có bảng số đo, nên khách gõ số đo xong vẫn bị
+  //     chuyển người. Một lời hứa không giữ được thì tệ hơn là không hứa.
+
+  const ctxNen: GenerationContext = {
+    action: "ANSWER_QUESTION",
+    state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 499_000 }),
+    sizes: ["M", "L", "XL"],
+    colors: ["Đỏ", "Đen"],
+    sizeAdvice: null,
+    stockKnown: false,
+    available: null,
+    shippingFee: 25_000,
+    missing: ["VARIANT", "PHONE", "ADDRESS"],
+    reason: "",
+  };
+
+  // 4B-a. Câu trả lời phải TRẢ LỜI (giá, phí ship) rồi mới MỜI bước tiếp — một tin nhắn làm cả hai.
+  const traLoi = renderTemplate(ctxNen);
+  assert.ok(traLoi.includes("499.000") && traLoi.includes("25.000"), "hỏi giá thì phải nghe được giá và phí ship");
+  assert.ok(traLoi.indexOf("499.000") < traLoi.indexOf("size"), "giá đứng TRƯỚC câu mời chọn size, không phải ngược lại");
+  assert.ok(/M, L, XL/.test(traLoi), "bước tiếp phải mời chọn trong đúng các size ERP đang bán");
+
+  // Bước tiếp đi theo thứ tự điều kiện máy chủ còn THIẾU, không phải một câu xã giao cố định.
+  const cóMẫuMã = renderTemplate({ ...ctxNen, state: stateWith({ productName: "Đầm suông Q004", quotedTotal: 499_000, size: "L", color: "Đỏ" }), missing: ["PHONE", "ADDRESS"] });
+  assert.ok(/số điện thoại/.test(cóMẫuMã), "đã có mẫu mã thì bước tiếp là xin SĐT");
+  const cóSĐT = renderTemplate({ ...ctxNen, missing: ["ADDRESS"] });
+  assert.ok(/địa chỉ/.test(cóSĐT), "đã có SĐT thì bước tiếp là xin địa chỉ");
+  const đủHết = renderTemplate({ ...ctxNen, missing: [] });
+  assert.ok(!/số điện thoại|địa chỉ|size nào/.test(đủHết), "không thiếu gì thì không mời gì thêm");
+
+  // Sổ kho nói HẾT ⇒ trả lời trung thực và DỪNG, không đẩy khách đi tiếp tới chốt đơn.
+  const hếtHàng = renderTemplate({ ...ctxNen, stockKnown: true, available: 0 });
+  assert.ok(/hết/.test(hếtHàng), "hết hàng phải nói thẳng");
+  assert.ok(!/số điện thoại|địa chỉ|size nào/.test(hếtHàng), "mẫu đã hết thì KHÔNG mời khách bước tiếp — đó là hẹn trước một đơn huỷ");
+
+  // 4B-b. Chưa có bảng số đo ⇒ KHÔNG xin chiều cao / cân nặng, mà mời khách chọn trong các size
+  //       ERP thật sự đang bán. Xin số đo là hứa sẽ tra bảng.
+  for (const advice of [null, { code: "SIZE_DATA_MISSING", size: null, reason: "" }, { code: "AMBIGUOUS", size: null, reason: "" }, { code: "OUT_OF_RANGE", size: null, reason: "" }]) {
+    const text = renderTemplate({ ...ctxNen, action: "ASK_SIZE", sizeAdvice: advice });
+    assert.ok(!/chiều cao|cân nặng/i.test(text), "chưa kết luận được bằng bảng số đo thì không được xin số đo — đó là lời hứa không giữ được");
+    assert.ok(text.includes("M, L, XL"), "phải mời khách chọn trong đúng các size ERP đang bán");
+  }
+
+  // 4B-c. Có bảng và bảng KẾT LUẬN ĐƯỢC ⇒ mới được nêu một size cụ thể.
+  const cóBảng = renderTemplate({ ...ctxNen, action: "ASK_SIZE", sizeAdvice: { code: "OK", size: "L", reason: "" } });
+  assert.ok(/tư vấn size L\b/.test(cóBảng), "bảng số đo kết luận được thì máy mới được nêu size");
+
+  // 4B-d. Có bảng nhưng CHƯA ĐỦ SỐ ĐO ⇒ lúc này xin số đo là đúng, vì lời hứa giữ được.
+  const thiếuSốĐo = renderTemplate({ ...ctxNen, action: "ASK_SIZE", sizeAdvice: { code: "MEASUREMENTS_MISSING", size: null, reason: "" } });
+  assert.ok(/chiều cao/.test(thiếuSốĐo), "có bảng mà thiếu số đo thì xin số đo mới là việc đúng");
+  assert.ok(!/tư vấn size (S|M|L|XL)\b/.test(thiếuSốĐo), "chưa kết luận được thì không nêu size");
+
+  // 4B-e. Tồn CHƯA BIẾT ⇒ không câu nào được hứa "còn hàng" / "vẫn còn".
+  for (const action of ["ASK_VARIANT", "ANSWER_QUESTION"] as const) {
+    const text = renderTemplate({ ...ctxNen, action });
+    assert.ok(!/vẫn còn|còn hàng/.test(text), `${action}: tồn CHƯA BIẾT thì không được hứa còn hàng`);
+  }
+  const cònHàng = renderTemplate({ ...ctxNen, action: "ASK_VARIANT", stockKnown: true, available: 7 });
+  assert.ok(/vẫn còn/.test(cònHàng), "tồn đã biết và > 0 thì mới được nói còn hàng");
+
+  // 4B-f. CHƯA biết giá thì tuyệt đối không có con số tiền nào rơi vào câu — ở MỌI hành động.
+  for (const action of ["ANSWER_QUESTION", "ASK_SIZE", "ASK_VARIANT"] as const) {
+    const text = renderTemplate({ ...ctxNen, action, state: stateWith({ productName: "Đầm suông Q004", quotedTotal: null }), shippingFee: null });
+    assert.deepEqual(moneyMentions(text), [], `${action}: chưa có giá máy chủ tính thì câu không được mang con số tiền nào`);
+  }
+
+  // 4B-g. Câu ĐẨY BƯỚC không nhắc lại giá — giá nói ở câu TRẢ LỜI, nói lại mỗi tin là làm phiền.
+  for (const action of ["ASK_SIZE", "ASK_VARIANT"] as const) {
+    assert.deepEqual(moneyMentions(renderTemplate({ ...ctxNen, action })), [], `${action}: câu đẩy bước không lặp lại giá`);
+  }
 
   // ═════════ 5. CỔNG GỬI TIN — SHADOW KHÔNG BAO GIỜ GỬI ═════════
 
@@ -363,10 +519,25 @@ export async function testSalesAgent(db: Db) {
   assert.equal(thieuKhoa.entities.color, "");
   assert.equal(thieuKhoa.evidence, "");
 
-  // VÀ CHIỀU NGƯỢC LẠI VẪN CHẶN: rác thật sự vẫn phải bị từ chối, không "gần đúng thì lấy tạm".
+  /*
+    VÀ CHIỀU NGƯỢC LẠI VẪN CHẶN — nhưng chặn ĐÚNG CHỖ, vì hai loại rác không giống nhau:
+
+    · Một Ý ĐỊNH ngoài danh sách là một NGHĨA KHÔNG TỒN TẠI. Không có gì để giữ lại ⇒ vứt cả lượt.
+    · Một CON SỐ ngoài khoảng là một ô đo hỏng của một chiều CÓ THẬT. Phần còn lại của lượt hiểu
+      (ý định, mẫu mã, SĐT) vẫn dùng được, nên câu trả lời đúng là ô đó CHƯA BIẾT — để máy đi hỏi
+      khách — chứ không phải vứt cả lượt rồi leo nấc lên mô hình mạnh và kết thúc ở chuyển người.
+
+    Và CHƯA BIẾT ở đây không hoá thành một lời khẳng định: số lượng để trống thì máy chủ mặc định 1,
+    con số ấy được ĐỌC LẠI cho khách nghe trong bản chốt và khách phải xác nhận mới lên đơn.
+  */
   assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: [], entities: {}, confidence: 0.5 }), "phải có ít nhất một ý định");
   assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: ["KHONG_CO_THAT"], entities: {}, confidence: 0.5 }), "ý định lạ phải bị từ chối");
-  assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: ["GREETING"], entities: { quantity: 999 }, confidence: 0.5 }), "số ngoài khoảng vẫn phải bị từ chối");
+  assert.throws(() => UNDERSTANDING_SCHEMA.parse({ intents: ["GREETING"], entities: {}, confidence: 9 }), "độ tin ngoài [0,1] phải bị từ chối");
+  assert.equal(
+    UNDERSTANDING_SCHEMA.parse({ intents: ["GREETING"], entities: { quantity: 999 }, confidence: 0.5 }).entities.quantity,
+    null,
+    "số ngoài khoảng ⇒ ô đó CHƯA BIẾT, KHÔNG được thành 999 và cũng không làm hỏng phần hiểu còn lại",
+  );
 
   // ── NHÂN SỰ BÁN HÀNG DÙNG LẠI TẦNG AI CÓ SẴN CỦA ERP, KHÔNG DỰNG TÍCH HỢP THỨ HAI ──
   //

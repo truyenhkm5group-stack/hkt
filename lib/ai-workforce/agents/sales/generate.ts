@@ -35,6 +35,33 @@ export type GenerationContext = {
 const SHOP = "shop";
 
 /** Câu mẫu theo hành động. Tiếng Việt có dấu, xưng hô như nhân viên shop thời trang. */
+/**
+ * BƯỚC TIẾP THEO, GHÉP VÀO CUỐI CÂU TRẢ LỜI.
+ *
+ * ĐO 15/09/2026 trên mẻ thật: khách hỏi "Giá sau khi giảm 40% là bao nhiêu?" và máy đáp "chị cho
+ * em xin chiều cao và cân nặng" — câu hỏi không được trả lời một chữ nào, vì ở giai đoạn ấy bảng
+ * việc chỉ có một ô là HỎI SIZE. `decide.ts` nay trả lời trước ở mọi giai đoạn thu thập; phần còn
+ * lại là ở đây: trả lời xong phải MỜI khách bước tiếp, nếu không hội thoại đứng yên.
+ *
+ * Bước tiếp lấy từ `missing` — chính danh sách điều kiện máy chủ đòi để lên đơn, nên câu mời luôn
+ * là thứ THẬT SỰ còn thiếu, không phải một câu xã giao.
+ *
+ * KHÔNG MỜI khi sổ kho đã nói mẫu này HẾT: đẩy khách đi tiếp một mẫu không có hàng là hẹn trước
+ * một đơn huỷ.
+ */
+function buocTiep(ctx: GenerationContext): string {
+  if (ctx.stockKnown && (ctx.available ?? 0) <= 0) return "";
+  const thieu = new Set(ctx.missing);
+  if (thieu.has("VARIANT")) {
+    if (!ctx.state.size && ctx.sizes.length) return ` Chị lấy size nào để em ghi giúp chị ạ (bên em có ${ctx.sizes.join(", ")})?`;
+    if (!ctx.state.color && ctx.colors.length) return ` Chị lấy màu nào để em ghi giúp chị ạ (bên em có ${ctx.colors.join(", ")})?`;
+    return " Chị chọn giúp em size và màu để em ghi đơn với ạ.";
+  }
+  if (thieu.has("PHONE")) return " Chị cho em xin số điện thoại để em lên đơn giúp chị ạ.";
+  if (thieu.has("ADDRESS")) return " Chị cho em xin địa chỉ nhận hàng để em gửi hàng ạ.";
+  return "";
+}
+
 export function renderTemplate(ctx: GenerationContext): string {
   const { state } = ctx;
   const product = state.productName || "mẫu này";
@@ -43,22 +70,42 @@ export function renderTemplate(ctx: GenerationContext): string {
       return `Dạ em chào chị ạ. Chị đang xem mẫu nào để em tư vấn giúp chị với ạ? Chị gửi em ảnh hoặc tên mẫu nhé.`;
     case "ASK_VARIANT": {
       const colors = ctx.colors.length ? ` Bên em đang có các màu: ${ctx.colors.join(", ")}.` : "";
-      return `Dạ ${product} bên em vẫn còn chị nhé.${colors} Chị lấy màu nào để em kiểm tra giúp chị ạ?`;
+      // Tồn CHƯA BIẾT thì KHÔNG nói "vẫn còn" — đó là một lời hứa, và lời hứa sai đẻ ra đơn hoàn.
+      const con = ctx.stockKnown && (ctx.available ?? 0) > 0 ? ` ${product} bên em vẫn còn chị nhé.` : "";
+      return `Dạ ${product} bên em nhé.${con}${colors} Chị lấy màu nào để em ghi giúp chị ạ?`.replace(/\s+/g, " ").trim();
     }
     case "ASK_SIZE": {
-      const sizes = ctx.sizes.length ? ` Mẫu này có size: ${ctx.sizes.join(", ")}.` : "";
+      const sizes = ctx.sizes.length ? ` Mẫu này có size ${ctx.sizes.join(", ")}.` : "";
       // Chỉ nói một size cụ thể khi BẢNG SỐ ĐO kết luận được. Mọi mã khác đều quay về hỏi thêm.
       if (ctx.sizeAdvice?.code === "OK" && ctx.sizeAdvice.size) {
-        return `Dạ với số đo của chị thì bên em tư vấn size ${ctx.sizeAdvice.size} ạ.${sizes}`;
+        return `Với số đo của chị thì bên em tư vấn size ${ctx.sizeAdvice.size} ạ.${sizes}`;
       }
-      return `Dạ chị cho em xin chiều cao và cân nặng để em tư vấn size chuẩn nhất ạ.${sizes}`;
+      /*
+        CHỈ XIN SỐ ĐO KHI CÓ BẢNG ĐỂ TRA.
+
+        Xin chiều cao và cân nặng là HỨA sẽ tra bảng rồi tư vấn. Không có bảng thì lời hứa ấy không
+        giữ được: khách gửi số đo xong, máy vẫn phải chuyển người — và lúc đó khách đã mất công gõ.
+        Đo 15/09/2026: đúng câu này được gửi đi trong khi `CAN_ADVISE_SIZE` đang TẮT vì thiếu bảng.
+
+        Nên chỉ đúng MỘT mã được phép xin số đo: `MEASUREMENTS_MISSING` — có bảng, thiếu số đo.
+        Mọi mã còn lại (chưa có bảng, số đo ngoài bảng, số đo rơi vào nhiều size) đều KHÔNG kết luận
+        được bằng số đo, nên hỏi thêm số đo chỉ kéo dài một việc sẽ kết thúc ở người.
+
+        Lúc đó thứ ERP THẬT SỰ biết là mẫu đang bán những size nào — mời khách chọn, đừng hỏi số đo.
+      */
+      if (ctx.sizeAdvice?.code === "MEASUREMENTS_MISSING") {
+        return `Chị cho em xin chiều cao và cân nặng để em tra bảng size giúp chị ạ.${sizes}`;
+      }
+      return ctx.sizes.length
+        ? `Mẫu này bên em có size ${ctx.sizes.join(", ")} — chị lấy size nào để em ghi giúp chị ạ?`
+        : `Chị cho em xin size để em ghi giúp chị ạ.`;
     }
     case "ANSWER_QUESTION": {
       const price = state.quotedTotal !== null ? ` Giá ${formatVND(state.quotedTotal)}` : "";
       const ship = ctx.shippingFee !== null ? (ctx.shippingFee === 0 ? ", bên em miễn phí ship" : `, phí ship ${formatVND(ctx.shippingFee)}`) : "";
       // Tồn CHƯA BIẾT thì không hứa: "còn hàng" là một lời hứa, và lời hứa sai đẻ ra đơn hoàn.
       const stock = ctx.stockKnown ? (ctx.available && ctx.available > 0 ? " Mẫu này bên em còn hàng ạ." : " Mẫu này hiện đang hết, chị đợi em kiểm tra lại giúp chị nhé.") : " Chị đợi em kiểm tra kho rồi báo lại chị ngay ạ.";
-      return `Dạ ${product}${price}${ship} ạ.${stock}`;
+      return `Dạ ${product}${price}${ship} ạ.${stock}${buocTiep(ctx)}`;
     }
     case "HANDLE_OBJECTION":
       return `Dạ em hiểu ạ. ${product} bên em dùng chất liệu và form chuẩn nên giá như vậy chị nhé. Chị được kiểm tra hàng trước khi thanh toán, không ưng chị có thể không nhận ạ.`;

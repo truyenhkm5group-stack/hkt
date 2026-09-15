@@ -59,6 +59,32 @@ const oChu = (max: number) =>
     .nullish()
     .transform((v) => v ?? "");
 
+/**
+ * Ô SỐ TUỲ CHỌN — nhận số, chuỗi chứa số, `null`, `undefined`; luôn ra `number | null`.
+ *
+ * ĐO ĐƯỢC 15/09/2026 trên mẻ sạch: lỗi lược đồ còn lại duy nhất là `entities.quantity` —
+ * `expected "number"`. Mô hình gửi một CHUỖI. Cũng như `null` ở ô chữ, đây là khác biệt về CÁCH
+ * VIẾT, không phải về nghĩa: `"2"` và `2` là cùng một số lượng.
+ *
+ * NHƯNG CHỈ NHẬN SỐ THUẦN. `"2 cái"`, `"vài"`, `"1m58"` là chữ cần SUY DIỄN — ở đó câu trả lời
+ * đúng là CHƯA BIẾT, để máy đi hỏi khách, chứ không phải một con số đoán ra rồi ghi vào đơn.
+ *
+ * Ngoài khoảng cho phép cũng ra CHƯA BIẾT chứ không làm hỏng cả lược đồ: một ô vô lý
+ * (`quantity: 500`) không phải lý do để vứt toàn bộ phần hiểu của lượt đó rồi chuyển người.
+ */
+const oSo = (min: number, max: number, nguyen = false) =>
+  z
+    .union([z.number(), z.string()])
+    .nullish()
+    .transform((v) => {
+      if (v === null || v === undefined) return null;
+      const so = typeof v === "number" ? v : /^-?\d+(?:[.,]\d+)?$/.test(v.trim()) ? Number(v.trim().replace(",", ".")) : Number.NaN;
+      if (!Number.isFinite(so)) return null;
+      if (nguyen && !Number.isInteger(so)) return null;
+      if (so < min || so > max) return null;
+      return so;
+    });
+
 /** Lược đồ đầu ra — dùng cho CẢ nấc luật lẫn nấc mô hình, để hai nấc không bao giờ lệch hình dạng. */
 export const UNDERSTANDING_SCHEMA = z.object({
   intents: z.array(z.enum(SALES_INTENTS)).min(1).max(4),
@@ -67,15 +93,15 @@ export const UNDERSTANDING_SCHEMA = z.object({
     productCode: oChu(20),
     size: oChu(10),
     color: oChu(40),
-    quantity: z.number().int().min(1).max(20).nullish().transform((v) => v ?? null),
+    quantity: oSo(1, 20, true),
     phone: oChu(20),
     address: oChu(400),
     province: oChu(80),
-    heightCm: z.number().min(80).max(230).nullish().transform((v) => v ?? null),
-    weightKg: z.number().min(20).max(200).nullish().transform((v) => v ?? null),
-    bustCm: z.number().min(40).max(200).nullish().transform((v) => v ?? null),
-    waistCm: z.number().min(30).max(200).nullish().transform((v) => v ?? null),
-    hipCm: z.number().min(40).max(220).nullish().transform((v) => v ?? null),
+    heightCm: oSo(80, 230),
+    weightKg: oSo(20, 200),
+    bustCm: oSo(40, 200),
+    waistCm: oSo(30, 200),
+    hipCm: oSo(40, 220),
   }),
   confidence: z.number().min(0).max(1),
   /*

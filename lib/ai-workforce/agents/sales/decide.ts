@@ -159,25 +159,46 @@ export function decide(input: DecideInput): SalesDecision {
   };
 }
 
+/**
+ * KHÁCH HỎI THÌ TRẢ LỜI — Ở MỌI GIAI ĐOẠN THU THẬP, KHÔNG CHỈ HAI GIAI ĐOẠN ĐẦU.
+ *
+ * ĐO ĐƯỢC 15/09/2026 trên mẻ thật:
+ *   KHÁCH: "Giá sau khi giảm 40% là bao nhiêu?"
+ *   MÁY  : "Dạ chị cho em xin chiều cao và cân nặng để em tư vấn size phù hợp nhất ạ."
+ * Hội thoại đang ở `SIZE_SELECTION`, và ở giai đoạn đó bảng việc chỉ có MỘT ô: hỏi size. Nên câu
+ * hỏi giá không được trả lời một chữ nào — bước tiếp đứng THAY câu trả lời chứ không đứng SAU.
+ *
+ * Luật "trả lời trước" vốn đã có, nhưng chỉ ở `PRODUCT_IDENTIFIED` / `QUALIFIED`. Một câu hỏi
+ * không được trả lời thì hoặc bị hỏi lại, hoặc khách bỏ đi — cả hai đều đắt hơn một câu trả lời.
+ *
+ * Hội thoại KHÔNG đứng lại vì thế: `generate.ts` ghép bước tiếp vào cuối câu trả lời, nên một tin
+ * nhắn vừa trả lời vừa đẩy tiếp — đúng cách một người bán hàng giỏi làm.
+ */
+const CAU_HOI_CUA_KHACH: SalesIntent[] = ["PRICE_QUESTION", "STOCK_QUESTION", "SHIPPING_QUESTION", "PRODUCT_QUESTION"];
+
+function khachDangHoi(input: DecideInput): boolean {
+  return input.understanding.intents.some((i) => CAU_HOI_CUA_KHACH.includes(i));
+}
+
 /** Việc phải làm ở mỗi giai đoạn. Một giai đoạn — một việc; không có nhánh "tuỳ cảm hứng". */
 function actionForStage(stage: SalesStage, state: SalesState, input: DecideInput): SalesAction {
+  const hoi = khachDangHoi(input);
   switch (stage) {
     case "NEW_LEAD":
       return "ASK_PRODUCT";
     case "PRODUCT_IDENTIFIED":
     case "QUALIFIED":
-      // Khách hỏi giá / còn hàng / ship thì trả lời trước đã, hỏi mẫu mã sau.
-      return input.understanding.intents.some((i) => i === "PRICE_QUESTION" || i === "STOCK_QUESTION" || i === "SHIPPING_QUESTION" || i === "PRODUCT_QUESTION") ? "ANSWER_QUESTION" : "ASK_VARIANT";
+      return hoi ? "ANSWER_QUESTION" : "ASK_VARIANT";
     case "VARIANT_SELECTION":
-      return "ASK_VARIANT";
+      return hoi ? "ANSWER_QUESTION" : "ASK_VARIANT";
     case "SIZE_SELECTION":
-      return "ASK_SIZE";
+      return hoi ? "ANSWER_QUESTION" : "ASK_SIZE";
     case "PURCHASE_INTENT":
-      return state.variantId ? "ASK_CONTACT" : "ASK_VARIANT";
+      return hoi ? "ANSWER_QUESTION" : state.variantId ? "ASK_CONTACT" : "ASK_VARIANT";
     case "CONTACT_COLLECTION":
-      return "ASK_CONTACT";
+      return hoi ? "ANSWER_QUESTION" : "ASK_CONTACT";
     case "ADDRESS_COLLECTION":
-      return "ASK_ADDRESS";
+      return hoi ? "ANSWER_QUESTION" : "ASK_ADDRESS";
     case "ORDER_REVIEW":
     case "AWAITING_CONFIRMATION":
       return "SEND_ORDER_REVIEW";
