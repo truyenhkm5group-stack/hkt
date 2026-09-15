@@ -27,6 +27,8 @@ import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, STATUTORY_STATES, type Stat
 import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
+import { frozenPeriodRuns } from "@/lib/queries/payroll-engine";
+import { PAYROLL_RUN_STATUS_LABEL } from "@/lib/constants/payroll-lifecycle";
 import {
   adjustmentSchema,
   componentSchema,
@@ -507,11 +509,17 @@ export async function approvePayrollInput(input: unknown): Promise<PolicyActionR
  * "không được".
  */
 async function periodIsFinal(periodKey: string): Promise<string | null> {
-  const db = await getDb();
-  const p = schema.payrollPeriods;
-  const rows = await db.select({ basis: p.basis }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.status, "FINAL")));
-  if (!rows.length) return null;
-  return `Kỳ ${periodKey} đã CHỐT (cơ sở ${rows.map((r) => r.basis).join(", ")}). Kỳ đã chốt là bất biến — ghi khoản này vào kỳ SAU, nó vẫn được trả đủ và vẫn có dấu vết.`;
+  /*
+    ĐỌC QUA `frozenPeriodRuns` — KHÔNG SO CHUỖI VỚI 'FINAL' Ở ĐÂY.
+
+    Vòng đời sáu trạng thái ghi `LOCKED` / `PAID`; `FINAL` chỉ là giá trị CŨ còn trên production.
+    Bản trước hỏi đúng chữ `'FINAL'` nên một kỳ vừa khoá vẫn nhận thêm số liệu nhập tay và khoản
+    điều chỉnh mới — ảnh chụp đã đóng băng và tiền đã trả theo nó, còn dữ liệu nguồn vẫn đổi.
+  */
+  const dongBang = await frozenPeriodRuns(periodKey);
+  if (!dongBang.length) return null;
+  const mo = dongBang.map((r) => `${r.basis} · ${PAYROLL_RUN_STATUS_LABEL[r.status]}`).join(", ");
+  return `Kỳ ${periodKey} đã ĐÓNG BĂNG (${mo}). Kỳ đã đóng băng là bất biến — ghi khoản này vào kỳ SAU, nó vẫn được trả đủ và vẫn có dấu vết.`;
 }
 
 export async function savePayrollAdjustment(input: unknown): Promise<PolicyActionResult> {

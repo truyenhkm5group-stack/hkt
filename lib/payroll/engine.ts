@@ -325,7 +325,14 @@ export function calculateComponent(
 
   // ─── 6 & 7. LÀM TRÒN VÀ ÁP DẤU ───
   const rounded = applyRounding(raw, component.rounding);
-  const amount = rounded * PAYROLL_COMPONENT_SIGN[component.kind];
+  /*
+    `+ 0` KHÔNG THỪA — cùng lý do với `totalDeductions` ở cuối tệp.
+
+    Một khoản KHẤU TRỪ tính ra đúng 0 cho `0 × -1 = -0`. Nó bằng 0 với `===`, nhưng
+    `JSON.stringify` viết `-0` vào ảnh chụp và `Intl` in "-0" — một dòng khấu trừ âm không tồn
+    tại, đứng cạnh tên một người thật.
+  */
+  const amount = rounded * PAYROLL_COMPONENT_SIGN[component.kind] + 0;
   if (rounded !== raw) explain.push({ label: "Sau làm tròn", value: rounded, unit: "VND" });
 
   return {
@@ -345,6 +352,28 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
   const byCode = new Map<string, ComponentResult>();
   const missing: MissingInput[] = [];
   const problems: string[] = [];
+
+  /*
+    ═══ SỐ DƯ LỖ CHẠY QUA CÁC ĐOẠN, KHÔNG ĐƯỢC ÁP LẠI TỪ ĐẦU Ở TỪNG ĐOẠN ═══
+
+    Lỗ mang sang là MỘT nghĩa vụ của cả kỳ, không phải một nghĩa vụ cho mỗi đoạn. Đưa cùng một số
+    dư đầu kỳ vào từng đoạn là bù nó NHIỀU LẦN, và cách hỏng rất kín: người bị trừ đúng bằng phần
+    hoa hồng đáng lẽ được nhận, còn số dư chuyển sang kỳ sau thì vẫn âm — nên tháng sau bù tiếp
+    một lần nữa.
+
+    Đo được bằng số: lỗ đầu kỳ −10.000.000, lợi nhuận cả kỳ 16.000.000, tỷ lệ 10%.
+      · một đoạn  → cơ sở 6.000.000 → hoa hồng 600.000, chuyển tiếp 0
+      · hai đoạn (đổi phiên bản chính sách giữa kỳ), mỗi đoạn 8.000.000, nếu áp lại từ đầu
+                  → cơ sở 0 + 0    → hoa hồng 0,       chuyển tiếp −2.000.000
+    Cùng một người, cùng một tháng, cùng một con số lợi nhuận — chênh 600.000đ chỉ vì chủ shop đổi
+    phiên bản chính sách giữa tháng.
+
+    Nên số dư đi theo THỨ TỰ THỜI GIAN: đoạn sau nhận số dư CÒN LẠI của đoạn trước. Cách này giữ
+    được tỷ lệ riêng của từng đoạn (đổi phiên bản là đổi tỷ lệ), mà tổng vẫn đúng bằng con số của
+    một kỳ không bị cắt.
+  */
+  const carryRunning = new Map<string, number | null>();
+  for (const [code, v] of Object.entries(input.carryOpening)) carryRunning.set(code, num(v));
 
   for (const seg of input.segments) {
     if (!isWorkingSegment(seg.segment)) continue;
@@ -367,9 +396,12 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
       const { result, missing: miss } = calculateComponent(component, {
         segment: seg.segment,
         basis: seg.basis,
-        carryOpening: component.carryForward ? num(input.carryOpening[component.code]) : null,
+        carryOpening: component.carryForward ? (carryRunning.get(component.code) ?? null) : null,
       });
       if (miss) missing.push(miss);
+      // Đoạn sau đứng trên phần lỗ CÒN LẠI. Đoạn không tính được (thiếu đại lượng) không làm đổi
+      // số dư — chưa biết lợi nhuận thì chưa bù được đồng nào.
+      if (result.carry) carryRunning.set(component.code, result.carry.closingBalance);
       const prev = byCode.get(component.code);
       if (!prev) {
         byCode.set(component.code, { ...result, explain: [...result.explain] });
@@ -386,14 +418,29 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
       prev.explain.push({ label: `— đoạn ${result.code} tiếp theo —`, value: null });
       prev.explain.push(...result.explain);
       if (result.cappedBy) prev.cappedBy = result.cappedBy;
-      if (result.carry) prev.carry = result.carry;
+      /*
+        GỘP SỔ LỖ CỦA HAI ĐOẠN: ĐẦU của đoạn ĐẦU, CUỐI của đoạn CUỐI, phần giữa CỘNG lại.
+
+        Lấy nguyên khối `carry` của đoạn cuối (như bản trước) là in ra một số dư đầu kỳ KHÔNG PHẢI
+        số dư đầu kỳ — nó là số dư giữa kỳ — và người đọc không có cách nào biết.
+      */
+      if (result.carry) {
+        prev.carry = prev.carry
+          ? {
+              openingBalance: prev.carry.openingBalance,
+              lossApplied: prev.carry.lossApplied + result.carry.lossApplied,
+              commissionBase: prev.carry.commissionBase + result.carry.commissionBase,
+              closingBalance: result.carry.closingBalance,
+            }
+          : result.carry;
+      }
     }
   }
 
   const components = [...byCode.values()];
   const adjustments: ComponentResult[] = input.adjustments.map((a) => {
     const sign = PAYROLL_COMPONENT_SIGN[a.kind];
-    const amount = Math.round(Math.abs(a.amount)) * sign;
+    const amount = Math.round(Math.abs(a.amount)) * sign + 0;
     return {
       code: `ADJ:${a.id}`,
       label: a.label,

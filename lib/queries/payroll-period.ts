@@ -42,6 +42,18 @@ import type { PayrollReport } from "@/lib/queries/payroll";
  * nó DẪN XUẤT từ những con số đã có ở đây. Chụp nó vào sẽ làm mỗi kỳ nặng vài trăm KB mà không trả
  * lời thêm được câu hỏi nào của người đọc bảng lương.
  */
+/** Bảy con số của một dòng sổ lỗ lũy kế, đủ để in lại đúng bảy cột trong tệp xuất. */
+export type PayrollLineCarrySnapshot = {
+  monthKey: string;
+  openingBalance: number | null;
+  openingReason: string;
+  realProfit: number | null;
+  lossApplied: number | null;
+  commissionBase: number | null;
+  signedCommission: number | null;
+  closingBalance: number | null;
+};
+
 export type PayrollSnapshot = {
   calcVersion: number;
   /**
@@ -82,6 +94,17 @@ export type PayrollSnapshot = {
     bonusPersonal: number | null;
     bonusRevenue: number;
     salary: number | null;
+    /**
+     * SỔ LỖ LŨY KẾ CỦA ĐƯỜNG TÍNH CŨ, CHỤP LẠI NGUYÊN VẸN.
+     *
+     * `undefined` = ảnh chụp dựng TRƯỚC bản này (dữ liệu production cũ), KHÔNG phải "không có sổ
+     * lỗ" — nên chỗ đọc phải phân biệt hai thứ đó. `null` = kỳ ấy thật sự không áp dụng sổ lỗ.
+     *
+     * Thiếu nó thì tệp xuất của một kỳ ĐÃ ĐÓNG BĂNG hoặc phải bỏ trống bảy cột sổ lỗ, hoặc phải đi
+     * tính lại chúng bằng dữ liệu HÔM NAY — và tính lại một kỳ đã trả tiền chính là thứ ảnh chụp
+     * sinh ra để ngăn.
+     */
+    carry?: PayrollLineCarrySnapshot | null;
     /**
      * ═══ CHI TIẾT TỪNG THÀNH PHẦN CỦA MÁY TÍNH LƯƠNG CHUNG ═══
      *
@@ -147,6 +170,18 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       bonusPersonal: l.bonusPersonal,
       bonusRevenue: l.bonusRevenue,
       salary: l.salary,
+      carry: l.carry
+        ? {
+            monthKey: l.carry.monthKey,
+            openingBalance: l.carry.openingBalance,
+            openingReason: l.carry.openingReason,
+            realProfit: l.carry.realProfit,
+            lossApplied: l.carry.lossApplied,
+            commissionBase: l.carry.commissionBase,
+            signedCommission: l.carry.signedCommission,
+            closingBalance: l.carry.closingBalance,
+          }
+        : null,
       engine: l.engine
         ? {
             policy: [...new Map(l.engine.segments.filter((sg) => sg.policyId).map((sg) => [`${sg.policyCode}:${sg.policyVersion}`, { code: sg.policyCode, name: sg.policyName, version: sg.policyVersion }])).values()],

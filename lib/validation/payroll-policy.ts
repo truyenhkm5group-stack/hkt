@@ -21,7 +21,23 @@ import {
 
 const dateKey = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ngày phải dạng YYYY-MM-DD");
 const optionalDateKey = z.union([dateKey, z.literal("")]).optional();
-const vnd = z.number().int("Tiền VND là số nguyên").min(-1_000_000_000).max(10_000_000_000);
+/*
+  TRẦN CỦA Ô TIỀN PHẢI BẰNG TRẦN CỦA CỘT, KHÔNG RỘNG HƠN.
+
+  Cột tiền trong lược đồ là `integer` — 32 bit, tối đa 2.147.483.647đ. Lược đồ đầu vào trước bản
+  này cho tới 10 tỷ, nên một khoản 3 tỷ đi qua zod trót lọt rồi chết ở Postgres với một câu lỗi
+  tiếng Anh về "integer out of range" mà người nhập không đọc được và không sửa được. Chặn ở đây,
+  bằng tiếng Việt, nói rõ trần là bao nhiêu.
+
+  Nới trần thật sự là đổi kiểu cột (`bigint`) — một quyết định của chủ shop kèm một migration, chứ
+  không phải một con số gõ lại ở lược đồ đầu vào.
+*/
+export const VND_COLUMN_MAX = 2_147_483_647;
+const vnd = z
+  .number()
+  .int("Tiền VND là số nguyên")
+  .min(-VND_COLUMN_MAX, `Số tiền không được nhỏ hơn -${VND_COLUMN_MAX.toLocaleString("vi-VN")}đ`)
+  .max(VND_COLUMN_MAX, `Số tiền tối đa ${VND_COLUMN_MAX.toLocaleString("vi-VN")}đ — vượt trần cột tiền của CSDL`);
 const basisKey = z.enum(PAYROLL_INPUT_KEYS as [string, ...string[]], { error: "Đại lượng không có trong sổ đăng ký đầu vào" });
 
 /**
@@ -162,7 +178,7 @@ export const adjustmentSchema = z.object({
   kind: z.enum(["BONUS", "ALLOWANCE", "ADJUSTMENT", "ADVANCE", "DEDUCTION", "REIMBURSEMENT"], { error: "Chọn loại khoản" }),
   label: z.string().trim().min(1, "Nhập tên khoản").max(120),
   /** LUÔN DƯƠNG — dấu do `kind` quyết định, để một dấu trừ gõ nhầm không lật ý nghĩa khoản tiền. */
-  amount: z.number().int().min(0, "Số tiền không được âm — dấu do loại khoản quyết định").max(10_000_000_000),
+  amount: z.number().int().min(0, "Số tiền không được âm — dấu do loại khoản quyết định").max(VND_COLUMN_MAX, `Số tiền tối đa ${VND_COLUMN_MAX.toLocaleString("vi-VN")}đ — vượt trần cột tiền của CSDL`),
   reason: z.string().trim().min(3, "Một khoản tiền không có lý do là một khoản không ai duyệt lại được").max(500),
   reference: z.string().trim().max(200).default(""),
 });

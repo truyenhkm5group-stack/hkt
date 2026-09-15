@@ -23,6 +23,7 @@ import { PAYROLL_EMPLOYEES_KEY, payrollPeriodKey, type Employee } from "@/lib/co
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
+import { frozenPeriodRuns, periodFinalized } from "@/lib/queries/payroll-engine";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
 
@@ -262,6 +263,107 @@ export async function testPayrollPolicyEngine(db: Db) {
   assert.equal(anh.lines.find((l) => l.employeeId === CU.id)!.engine, null, "8. người đường cũ không có phần máy chung, và đó là câu trả lời đúng");
   assert.ok(anh.engineVersion >= 1, "8. ảnh chụp mang phiên bản máy tính, tách khỏi phiên bản phép tính cũ");
 
+  /* ═══ 9 · CỔNG CHẶN ĐỌC ĐÚNG TRẠNG THÁI ĐÓNG BĂNG, TRÊN CSDL THẬT ═══
+   *
+   * Khối 2 của `payroll-production-readiness.test.ts` khoá mệnh đề ở tầng hàm thuần. Khối này khoá
+   * TRUY VẤN — vì lỗi thật nằm ở truy vấn, không ở mệnh đề: hàm `isFrozen` vẫn luôn đúng, chỗ sai
+   * là cổng chặn hỏi `where status = 'FINAL'` và không bao giờ gọi tới nó.
+   *
+   * Ba giá trị phải cùng chặn: `FINAL` (dữ liệu CŨ trên production), `LOCKED`, `PAID`.
+   */
+  const KY9 = "2028-03-01..2028-03-31";
+  const anhTam = { calcVersion: 1, lines: [] };
+  for (const [trangThai, moc] of [
+    // Mốc thời gian phải khai đủ: ràng buộc CSDL không cho "đã duyệt / đã khoá / đã trả" mà
+    // không có mốc — và chính ràng buộc ấy vừa chặn lượt gieo dữ liệu đầu tiên của bài này.
+    ["FINAL", { finalizedAt: new Date() }],
+    ["LOCKED", { finalizedAt: new Date(), approvedAt: new Date(), lockedAt: new Date() }],
+    ["PAID", { finalizedAt: new Date(), approvedAt: new Date(), lockedAt: new Date(), paidAt: new Date() }],
+  ] as const) {
+    await db.delete(schema.payrollPeriods).where(eq(schema.payrollPeriods.periodKey, KY9));
+    await db.insert(schema.payrollPeriods).values({
+      periodKey: KY9,
+      periodStart: d("2028-03-01"),
+      periodEnd: dEnd("2028-03-31"),
+      basis: "profit1",
+      status: trangThai,
+      snapshot: anhTam,
+      ...moc,
+    });
+    assert.equal(
+      await periodFinalized(KY9),
+      true,
+      `9. kỳ ở trạng thái ${trangThai} phải KHOÁ đường nhập liệu — bản trước chỉ hỏi đúng chữ 'FINAL' nên một kỳ vừa khoá vẫn nhận thêm chấm công và khoản điều chỉnh`,
+    );
+    const runs = await frozenPeriodRuns(KY9);
+    assert.equal(runs.length, 1, `9. ${trangThai}: phải liệt kê được đúng cơ sở đang đóng băng`);
+    assert.equal(runs[0].basis, "profit1", `9. ${trangThai}: và nói đúng cơ sở nào`);
+  }
+
+  // Trạng thái CÒN SỬA ĐƯỢC thì KHÔNG khoá — chặn nhầm cũng tệ ngang chặn thiếu.
+  for (const trangThai of ["DRAFT", "CALCULATED", "UNDER_REVIEW", "APPROVED"] as const) {
+    await db.delete(schema.payrollPeriods).where(eq(schema.payrollPeriods.periodKey, KY9));
+    await db.insert(schema.payrollPeriods).values({
+      periodKey: KY9,
+      periodStart: d("2028-03-01"),
+      periodEnd: dEnd("2028-03-31"),
+      basis: "profit1",
+      status: trangThai,
+      snapshot: anhTam,
+      finalizedAt: new Date(),
+      approvedAt: trangThai === "APPROVED" ? new Date() : null,
+    });
+    assert.equal(await periodFinalized(KY9), false, `9. ${trangThai} còn sửa được — đó chính là lý do bốn trạng thái ấy tồn tại`);
+  }
+  await db.delete(schema.payrollPeriods).where(eq(schema.payrollPeriods.periodKey, KY9));
+
+  /* ═══ 10 · GHI SỔ LỖ HAI LẦN KHÔNG ĐƯỢC ĐẺ RA DÒNG THỨ HAI ═══
+   *
+   * Hai yêu cầu "Tính & chụp ảnh kỳ" bấm cùng lúc, hoặc một người bấm lại vì trang tải chậm. Khoá
+   * tự nhiên (người, tháng, thành phần) + `onConflictDoUpdate` là thứ giữ cho sổ không nhân đôi;
+   * và `setWhere: status = 'DRAFT'` giữ cho một dòng ĐÃ CHỐT không bị lượt sau ghi đè.
+   */
+  const c = schema.marketerProfitCarryover;
+  await db.delete(c).where(sql`${c.employeeId} like 'pe-%'`);
+  const dongSo = {
+    employeeId: "pe-kho-1",
+    monthKey: "2028-03",
+    componentCode: "MARKETING_PROFIT",
+    openingBalance: -5_000_000,
+    openingSource: "PREV_MONTH" as const,
+    realProfit: 8_000_000,
+    lossApplied: 5_000_000,
+    commissionBase: 3_000_000,
+    commissionRateBp: 1000,
+    signedCommission: 300_000,
+    payableCommission: 300_000,
+    closingBalance: 0,
+    status: "DRAFT" as const,
+    snapshot: { canCu: "bài kiểm" },
+  };
+  for (let i = 0; i < 3; i += 1) {
+    await db.insert(c).values(dongSo).onConflictDoUpdate({
+      target: [c.employeeId, c.monthKey, c.componentCode],
+      set: { ...dongSo, updatedAt: new Date() },
+      setWhere: eq(c.status, "DRAFT"),
+    });
+  }
+  const demSo = await db.select({ n: sql<number>`count(*)::int` }).from(c).where(sql`${c.employeeId} like 'pe-%'`);
+  assert.equal(demSo[0].n, 1, "10. ghi ba lần vẫn đúng MỘT dòng sổ lỗ — nhân đôi ở đây là bù lỗ hai lần cho cùng một tháng");
+
+  // Dòng đã CHỐT: lượt ghi sau KHÔNG được đè lên.
+  // `marketer_carryover_final_check`: chốt mà không có ảnh chụp thì "chốt" không có nghĩa gì.
+  await db.update(c).set({ status: "FINAL", finalizedAt: new Date() }).where(sql`${c.employeeId} like 'pe-%'`);
+  await db.insert(c).values({ ...dongSo, closingBalance: -999_999 }).onConflictDoUpdate({
+    target: [c.employeeId, c.monthKey, c.componentCode],
+    set: { ...dongSo, closingBalance: -999_999, updatedAt: new Date() },
+    setWhere: eq(c.status, "DRAFT"),
+  });
+  const [sauKhiChot] = await db.select({ closing: c.closingBalance, status: c.status }).from(c).where(sql`${c.employeeId} like 'pe-%'`);
+  assert.equal(sauKhiChot.closing, 0, "10. dòng ĐÃ CHỐT không bị lượt ghi sau đè — một nghĩa vụ đã chốt mà đổi số là sửa lịch sử");
+  assert.equal(sauKhiChot.status, "FINAL", "10. và vẫn ở trạng thái đã chốt");
+  await db.delete(c).where(sql`${c.employeeId} like 'pe-%'`);
+
   await reset(db);
-  console.log("  ✓ Máy tính lương chung nối vào bảng lương thật: chưa gán ⇒ sai lệch cũ/mới bằng ĐÚNG 0 · chấm công thiếu ⇒ CHƯA BIẾT · đổi chính sách giữa kỳ ⇒ mỗi đoạn một luật · tính lại bất biến · ảnh chụp giữ vết giải thích");
+  console.log("  ✓ Máy tính lương chung nối vào bảng lương thật: chưa gán ⇒ sai lệch cũ/mới bằng ĐÚNG 0 · chấm công thiếu ⇒ CHƯA BIẾT · đổi chính sách giữa kỳ ⇒ mỗi đoạn một luật · tính lại bất biến · ảnh chụp giữ vết giải thích · cổng chặn đọc CẢ FINAL/LOCKED/PAID · sổ lỗ ghi lại không nhân đôi");
 }

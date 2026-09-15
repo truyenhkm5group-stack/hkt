@@ -14,6 +14,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { payrollPeriodKey } from "@/lib/constants/payroll";
+import { isFrozen, normalizePayrollStatus, type PayrollRunStatus } from "@/lib/constants/payroll-lifecycle";
 import type { PolicyComponent } from "@/lib/constants/payroll-components";
 import { calculatePayrollItem, type AdjustmentInput, type PayrollItemResult, type SegmentInput } from "@/lib/payroll/engine";
 import { isWorkingSegment, resolveSegments, type PayrollSegment } from "@/lib/payroll/policy-resolve";
@@ -245,10 +246,31 @@ export async function anyEmployeeOnEngine(): Promise<boolean> {
   return Boolean(row);
 }
 
-/** Kỳ đã chốt chưa (bất kỳ cơ sở nào) — để màn hình khoá ô nhập. */
-export async function periodFinalized(periodKey: string): Promise<boolean> {
+/**
+ * ═══ KỲ NÀY ĐANG BỊ ĐÓNG BĂNG Ở NHỮNG CƠ SỞ NÀO ═══
+ *
+ * MỘT nơi trả lời câu "kỳ này còn sửa được không", cho cả màn hình lẫn các server action.
+ *
+ * ─── LỖI MÀ HÀM NÀY SINH RA ĐỂ KHÔNG BAO GIỜ LẶP LẠI ───
+ *
+ * Bản trước hỏi `status = 'FINAL'`. Nhưng vòng đời sáu trạng thái ghi `LOCKED` khi khoá và `PAID`
+ * khi đã trả — `FINAL` chỉ còn là giá trị CŨ trên production. Nghĩa là một kỳ vừa khoá xong vẫn
+ * nhận thêm số liệu nhập tay và khoản điều chỉnh mới, im lặng, trong khi ảnh chụp đã đóng băng:
+ * tiền đã trả theo ảnh chụp, còn dữ liệu nguồn thì tiếp tục đổi dưới chân nó.
+ *
+ * `normalizePayrollStatus` + `isFrozen` là hai hàm đã có sẵn và đã đúng — chỗ sai là ở đây không
+ * gọi chúng. So chuỗi trực tiếp với `'FINAL'` ở bất kỳ đâu khác là mở lại đúng lỗ hổng này.
+ */
+export async function frozenPeriodRuns(periodKey: string): Promise<{ basis: string; status: PayrollRunStatus }[]> {
   const db = await getDb();
   const p = schema.payrollPeriods;
-  const [row] = await db.select({ id: p.id }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.status, "FINAL"))).limit(1);
-  return Boolean(row);
+  const rows = await db.select({ basis: p.basis, status: p.status }).from(p).where(eq(p.periodKey, periodKey));
+  return rows
+    .map((r) => ({ basis: r.basis, status: normalizePayrollStatus(r.status) }))
+    .filter((r) => isFrozen(r.status));
+}
+
+/** Kỳ đã đóng băng chưa (bất kỳ cơ sở nào) — để màn hình khoá ô nhập. */
+export async function periodFinalized(periodKey: string): Promise<boolean> {
+  return (await frozenPeriodRuns(periodKey)).length > 0;
 }

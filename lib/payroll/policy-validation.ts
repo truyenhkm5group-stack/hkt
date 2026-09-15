@@ -22,7 +22,7 @@ import type { EmploymentRow, PolicyAssignmentRow, PolicyVersionRow } from "@/lib
 import { isWorkingSegment, resolveSegments } from "@/lib/payroll/policy-resolve";
 
 export type PolicyIssue = {
-  code: "ASSIGNMENT_OVERLAP" | "POLICY_GAP" | "COMPONENT_MISSING_PARAM" | "VERSION_NOT_EFFECTIVE";
+  code: "ASSIGNMENT_OVERLAP" | "EMPLOYMENT_OVERLAP" | "POLICY_GAP" | "COMPONENT_MISSING_PARAM" | "VERSION_NOT_EFFECTIVE";
   /** Khoá nhân sự. `null` = vấn đề của CHÍNH SÁCH, không của một người. */
   employeeId: string | null;
   /** Nói ĐÚNG việc phải làm và ĐÚNG chỗ phải sửa. Không có "dữ liệu không hợp lệ". */
@@ -60,6 +60,44 @@ export function assignmentOverlaps(rows: readonly PolicyAssignmentRow[], nameOf:
         employeeId,
         blocking: true,
         message: `${nameOf(employeeId)} có hai dòng gán chính sách cùng phủ ngày ${ngay(b.effectiveFrom)}: “${a.policyCode}” (từ ${ngay(a.effectiveFrom)}${a.effectiveTo ? ` đến ${ngay(a.effectiveTo)}` : ", còn hiệu lực"}) và “${b.policyCode}” (từ ${ngay(b.effectiveFrom)}). Tiền của những ngày chồng lấn sẽ do thứ tự dòng quyết định. Sửa ở tab “Phân công & gán chính sách”: đóng dòng cũ lại tại ngày liền trước.`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * HAI DÒNG PHÂN CÔNG LAO ĐỘNG CÙNG PHỦ MỘT NGÀY.
+ *
+ * Cùng một lỗ hổng với gán chính sách, nhưng hậu quả KHÁC và nặng hơn: dòng phân công mang cả
+ * `status`. Hai dòng chồng lấn mà một dòng ghi `TERMINATED` thì `resolveSegments` lấy dòng có
+ * `effectiveFrom` MUỘN NHẤT — nên chỉ cần khai thêm một dòng "đã nghỉ" có mốc muộn hơn là cả đoạn
+ * ấy thôi được tính lương, im lặng, không lỗi nào nổ ra.
+ *
+ * Khác với gán chính sách, đường ghi phân công KHÔNG tự đóng dòng cũ (và không nên tự đóng: đổi
+ * phòng ban không phải lúc nào cũng là kết thúc dòng trước). Nên phép kiểm này là chỗ DUY NHẤT
+ * phát hiện ra, và nó CHẶN chốt kỳ.
+ */
+export function employmentOverlaps(rows: readonly EmploymentRow[], nameOf: (id: string) => string): PolicyIssue[] {
+  const out: PolicyIssue[] = [];
+  const byEmployee = new Map<string, EmploymentRow[]>();
+  for (const r of rows) {
+    const list = byEmployee.get(r.employeeId) ?? [];
+    list.push(r);
+    byEmployee.set(r.employeeId, list);
+  }
+  for (const [employeeId, list] of byEmployee) {
+    const sorted = [...list].sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime());
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const a = sorted[i];
+      const b = sorted[i + 1];
+      const aTo = a.effectiveTo ? a.effectiveTo.getTime() : Number.POSITIVE_INFINITY;
+      if (aTo < b.effectiveFrom.getTime()) continue;
+      out.push({
+        code: "EMPLOYMENT_OVERLAP",
+        employeeId,
+        blocking: true,
+        message: `${nameOf(employeeId)} có hai dòng phân công lao động cùng phủ ngày ${ngay(b.effectiveFrom)}: dòng từ ${ngay(a.effectiveFrom)}${a.effectiveTo ? ` đến ${ngay(a.effectiveTo)}` : ", còn hiệu lực"} (${a.status}) và dòng từ ${ngay(b.effectiveFrom)} (${b.status}). Trạng thái làm việc của những ngày chồng lấn — và do đó việc có tính lương hay không — sẽ do thứ tự dòng quyết định. Sửa ở tab “Phân công & gán chính sách”: đóng dòng cũ lại tại ngày liền trước.`,
       });
     }
   }
@@ -163,6 +201,7 @@ export function validatePolicyBook(input: {
   const nameOf = (id: string) => input.employees.find((e) => e.id === id)?.name ?? id;
   const out: PolicyIssue[] = [
     ...assignmentOverlaps(input.policyAssignments, nameOf),
+    ...employmentOverlaps(input.employments, nameOf),
     ...policyGaps(input),
   ];
   /*
