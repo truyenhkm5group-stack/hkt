@@ -11,6 +11,7 @@ import {
 } from "@/lib/constants/landing-attribution";
 import { readTracking } from "@/lib/attribution/landing";
 import { rebuildFanpageAttribution } from "@/lib/attribution/fanpage";
+import { listAttributionOrders } from "@/lib/queries/fanpage-attribution";
 
 /**
  * ═══════════ QUY KẾT ĐƠN LANDING BẰNG TRACKING QUẢNG CÁO ═══════════
@@ -224,6 +225,30 @@ export async function testLandingAttributionDb() {
   const demDong = await db.select().from(schema.landingAttributions).where(eq(schema.landingAttributions.orderId, `${P}o-landing`));
   assert.equal(demDong.length, 1, "MỘT đơn MỘT dòng — không có đường nào cộng doanh thu hai lần");
 
+  /* ═══ BỘ LỌC "ĐƠN LANDING" PHẢI GOM ĐƯỢC CẢ ĐÃ QUY KẾT LẪN CÒN TREO ═══
+
+     Gộp nguồn vào ô "Tình trạng" thì không cách nào xem hết đơn landing trong một lần — người đi
+     rà kênh phải mở hai lần rồi tự cộng. */
+  const ky = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null } as const;
+  const thamSo = { period: ky, page: 1, pageSize: 100, sort: "sourceOrderAt", dir: "desc" as const, q: "", filters: {} };
+  const locLanding = await listAttributionOrders(thamSo, { source: "LANDING" });
+  const idLanding = new Set(locLanding.rows.map((r) => r.orderId));
+  assert.ok(idLanding.has(`${P}o-landing`), "lọc Landing phải gồm đơn ĐÃ quy kết bằng tracking");
+  assert.ok(idLanding.has(`${P}o-mo-ho`), "và cả đơn landing CÒN TREO — đó mới là cái người đi rà cần thấy");
+  assert.ok(!idLanding.has(`${P}o-tay`), "đơn không có form landing thì không lọt vào");
+  const locDaQuyKet = await listAttributionOrders(thamSo, { source: "LANDING_UTM" });
+  assert.ok(locDaQuyKet.rows.some((r) => r.orderId === `${P}o-landing`) && !locDaQuyKet.rows.some((r) => r.orderId === `${P}o-mo-ho`), "lọc 'đã quy kết' chỉ ra đơn đã có người");
+  const locConTreo = await listAttributionOrders(thamSo, { source: "LANDING_UNRESOLVED" });
+  assert.ok(locConTreo.rows.some((r) => r.orderId === `${P}o-mo-ho`) && !locConTreo.rows.some((r) => r.orderId === `${P}o-landing`), "lọc 'còn treo' chỉ ra đơn chưa có người");
+
+  // Dòng đơn phải mang đủ bằng chứng để màn hình in được cả chuỗi ad → chiến dịch → TKQC → MKTer.
+  const dongLanding = locDaQuyKet.rows.find((r) => r.orderId === `${P}o-landing`);
+  assert.equal(dongLanding?.attributionSource, "LANDING_UTM");
+  assert.equal(dongLanding?.landing?.tier, "CAMPAIGN_NAME");
+  assert.equal(dongLanding?.landing?.adAccountId, `${P}act-1`);
+  assert.equal(dongLanding?.landing?.productMismatch, true);
+  assert.equal(dongLanding?.pageId, null, "và Page vẫn để trống — màn hình in “Không xác định”, KHÔNG bịa một Page ID");
+
   /* ═══ CA 5 · TKQC / CHIẾN DỊCH ĐỔI NGƯỜI PHỤ TRÁCH ⇒ ĐƠN CŨ GIỮ NGƯỜI CŨ ═══
 
      Đây là ca quan trọng nhất của cả bài. `ad_spends.marketer_id` là SỔ KHAI HIỆN HÀNH — chủ shop
@@ -244,5 +269,5 @@ export async function testLandingAttributionDb() {
   assert.equal((await quyKet(`${P}o-mo-ho`))?.marketerId, `${P}mkt-quan`, "hết nhập nhằng thì đơn đang treo phải quy kết được ngay ở lượt sau");
   await db.update(schema.adSpends).set({ marketerId: `${P}mkt-quan` }).where(eq(schema.adSpends.id, `${P}spend-1`));
 
-  console.log("✓ Landing trên CSDL: đơn có bằng chứng ra khỏi NO_PAGE · nhập nhằng giữ nguyên · mã hàng của đơn bất khả xâm phạm · chạy lại không đổi gì");
+  console.log("✓ Landing trên CSDL: đơn có bằng chứng ra khỏi NO_PAGE · nhập nhằng giữ nguyên · mã hàng của đơn bất khả xâm phạm · chạy lại không đổi gì · lọc riêng được kênh Landing");
 }
