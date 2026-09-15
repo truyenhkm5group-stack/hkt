@@ -60,6 +60,22 @@ export async function GET(request: NextRequest) {
     "DT cá nhân (đ)",
     "Thưởng % DT (đ)",
     "Tổng lương (đ)",
+    /*
+      BẢY CỘT BÙ TRỪ LỖ LŨY KẾ.
+
+      Cột "HH có dấu" GIỮ SỐ ÂM trong tệp, dù tiền phải trả bằng 0. Bỏ dấu đi để "bảng tính cho
+      đẹp" là làm mất đúng thứ chủ shop cần thấy: một người đang âm bao nhiêu. Ô để TRỐNG khi chưa
+      biết — ghi 0 là để bảng tính sau đó cộng nó vào tổng như một con số đã xác minh.
+    */
+    "Tháng sổ lỗ",
+    "Lỗ đầu tháng (đ)",
+    "LN thực tháng (đ)",
+    "Lỗ được bù (đ)",
+    "LN tính HH sau bù (đ)",
+    "HH có dấu (đ)",
+    "HH phải trả (đ)",
+    "Lỗ chuyển tiếp (đ)",
+    "Căn cứ số dư",
     "Ghi chú",
   ];
   const out = [header.join(",")];
@@ -67,6 +83,7 @@ export async function GET(request: NextRequest) {
     const ghiChu: string[] = [];
     if (l.fixed === null) ghiChu.push("Lương cứng CHƯA BIẾT: kỳ không có mốc đầu/cuối nên không chia theo ngày được.");
     if (l.bonusPersonal === null) ghiChu.push(report.cashRatioReason ?? "Thưởng theo LN cá nhân CHƯA BIẾT.");
+    if (l.carry && !l.carry.openingEstablished) ghiChu.push(`Số dư lỗ đầu tháng CHƯA ĐỦ CĂN CỨ ĐỂ CHỐT: ${l.carry.openingReason}`);
     out.push(
       [
         l.employee.name,
@@ -84,6 +101,15 @@ export async function GET(request: NextRequest) {
         l.personalRevenue ?? "",
         l.bonusRevenue,
         l.salary ?? "",
+        l.carry?.monthKey ?? "không áp dụng",
+        l.carry?.openingBalance ?? "",
+        l.carry?.realProfit ?? "",
+        l.carry?.lossApplied ?? "",
+        l.carry?.commissionBase ?? "",
+        l.carry?.signedCommission ?? "",
+        l.carry ? (l.bonusPersonal ?? "") : "",
+        l.carry?.closingBalance ?? "",
+        l.carry?.openingReason ?? "",
         ghiChu.join(" "),
       ]
         .map(csvCell)
@@ -104,6 +130,9 @@ export async function GET(request: NextRequest) {
         ? `Lương cứng chia theo ${report.fixedBasis.days} ngày của kỳ (khai theo tháng)`
         : "Lương cứng CHƯA BIẾT: kỳ không có mốc đầu/cuối",
       viewAll ? "Phạm vi: toàn bộ nhân sự" : "Phạm vi: chỉ dòng của chính người xuất",
+      lines.some((l) => l.carry)
+        ? "Sổ lỗ lũy kế: ĐANG ÁP DỤNG. Hoa hồng tính trên lợi nhuận SAU khi bù hết lỗ mang sang; tiền phải trả không âm, cột “HH có dấu” giữ số âm để theo dõi."
+        : "Sổ lỗ lũy kế: KHÔNG ÁP DỤNG cho kỳ này (chưa bật, kỳ không phải một tháng lịch, hoặc tháng nằm trước mốc mở sổ).",
     ]
       .map(csvCell)
       .join(","),

@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { can, requireUser } from "@/lib/auth/session";
 import { employeeMatchesUser } from "@/lib/queries/payroll";
 import {
@@ -83,6 +84,24 @@ export default async function PayrollPage({
   */
   const daChot = periodState.status === "FINAL" && periodState.snapshot !== null;
   const drift = daChot && periodState.snapshot ? payrollDrift(periodState.snapshot, report) : [];
+  /*
+    VIỆC CÒN THIẾU TRƯỚC KHI CHỐT — cùng một hàm thuần với `lib/actions/payroll-period.ts`.
+    Dùng `report.lines` (chưa lọc theo quyền) chứ không phải `lines`: điều kiện chốt là điều kiện
+    của CẢ KỲ, không phải của riêng người đang xem.
+  */
+  const blockers = payrollFinalizeBlockers({
+    bounded: report.fixedBasis.bounded,
+    basisEligible: PAYROLL_BASIS_ELIGIBILITY[basis].eligible,
+    basisWhy: PAYROLL_BASIS_ELIGIBILITY[basis].why,
+    basisLabel: PAYROLL_BASIS_SHORT[basis],
+    totalSalary: report.totalSalary,
+    costWarnings: report.marketers.costWarnings,
+    lines: report.lines.map((l) => ({
+      name: l.employee.shortName || l.employee.name,
+      carryEstablished: l.carry ? l.carry.openingEstablished : null,
+      carryReason: l.carry?.openingReason ?? null,
+    })),
+  });
   const qs = new URLSearchParams({
     period: period.key,
     basis,
@@ -124,11 +143,12 @@ export default async function PayrollPage({
               </a>
             </Button>
             {/*
-              CHỈ hiện khi kỳ CHỐT ĐƯỢC: có mốc đầu/cuối · cơ sở đủ điều kiện · chưa chốt · không
-              còn con số CHƯA BIẾT. Hiện một nút rồi để server action từ chối là bắt người dùng
-              phát hiện luật bằng cách bấm nhầm.
+              CHỈ hiện khi kỳ CHỐT ĐƯỢC, và điều kiện ấy đọc từ CÙNG hàm mà server action dùng
+              (`payrollFinalizeBlockers`). Hai nơi tự viết hai mệnh đề là cách nút hiện rồi server
+              từ chối — bắt người dùng phát hiện luật bằng cách bấm nhầm — hoặc tệ hơn: nút ẩn vì
+              một lý do còn server cho qua vì lý do khác.
             */}
-            {canManage && !daChot && periodState.key && periodState.basisEligible && totalSalary !== null && period.fromKey && period.toKey ? (
+            {canManage && !daChot && periodState.key && !blockers.length && period.fromKey && period.toKey && totalSalary !== null ? (
               <FinalizePeriodButton from={period.fromKey} to={period.toKey} basis={basis} label={period.label} totalSalary={formatVND(totalSalary)} />
             ) : null}
             {canManage ? <EmployeeDialog accounts={accounts} /> : null}
@@ -176,6 +196,37 @@ export default async function PayrollPage({
           </Link>{" "}
           <span className="text-muted-foreground">— {PAYROLL_BASIS_ELIGIBILITY.profit1.why}</span>
         </div>
+      ) : null}
+
+      {/*
+        ĐỦ CĂN CỨ ĐỂ CHỐT HAY CHƯA — VÀ VÌ SAO, NGAY CẠNH NÚT.
+
+        Một nút bị ẩn mà không nói vì sao là một bức tường: chủ shop không biết phải làm gì để chốt
+        được. Nên danh sách việc còn thiếu hiện ra nguyên văn, cùng đúng những dòng mà server action
+        sẽ trả về nếu ai đó gọi thẳng vào nó.
+
+        Chỉ hiện cho người có quyền khai báo lương: người chỉ xem không chốt được nên danh sách này
+        với họ là nhiễu.
+      */}
+      {canManage && !daChot ? (
+        blockers.length ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+            <b>Chưa đủ căn cứ để chốt kỳ này.</b>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted-foreground">
+              {blockers.map((b) => (
+                <li key={`${b.code}-${b.message.slice(0, 40)}`}>{b.message}</li>
+              ))}
+            </ul>
+          </div>
+        ) : periodState.key ? (
+          <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
+            <b>Đủ căn cứ để chốt kỳ này.</b>{" "}
+            <span className="text-muted-foreground">
+              Mọi con số dùng để trả tiền đều đã tính được, không khoản chi nào đang nằm ngoài phép tính
+              {report.lines.some((l) => l.carry) ? ", và số dư lỗ đầu kỳ của từng người đã xác lập" : ""}.
+            </span>
+          </div>
+        ) : null
       ) : null}
 
       {/*
@@ -553,6 +604,87 @@ export default async function PayrollPage({
         </div>
       </SectionCard>
       )}
+
+      {/*
+        ═══ BẢNG BÙ TRỪ LỖ LŨY KẾ ═══
+
+        Đặt riêng chứ không nhồi bảy cột vào bảng lương phía trên: bảng ấy đã rộng, và bảy con số
+        này chỉ đọc được khi đứng CẠNH NHAU theo đúng thứ tự của phép tính — lỗ đầu kỳ, lãi/lỗ
+        tháng, phần bù, cơ sở còn lại, rồi mới tới tiền.
+
+        Cột "HH có dấu" cố ý vẫn hiện SỐ ÂM dù tiền phải trả bằng 0. Đó là thứ chủ shop cần thấy để
+        biết một người đang âm bao nhiêu — giấu nó đi thì tháng lỗ và tháng hoà vốn trông giống hệt
+        nhau, và đó chính là lỗi mà cơ chế này sinh ra để sửa.
+
+        Bảng dựng từ `lines` — tập ĐÃ LỌC theo quyền — nên tài khoản "xem của mình" chỉ thấy sổ của
+        chính mình, không cần thêm một lượt lọc thứ hai (thêm lượt lọc thứ hai là thêm một chỗ để
+        quên).
+      */}
+      {lines.some((l) => l.carry) ? (
+        <SectionCard
+          title="Bù trừ lỗ lũy kế theo tháng"
+          description={`Lợi nhuận âm của tháng trước được bù hết trước khi tính hoa hồng. Tiền phải trả không bao giờ âm; cột “HH có dấu” vẫn hiện số âm để theo dõi. Tháng ${lines.find((l) => l.carry)?.carry?.monthKey ?? ""}.`}
+          padded={false}
+        >
+          <div className="overflow-x-auto">
+            <Table className="min-w-[980px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nhân sự</TableHead>
+                  <TableHead className="text-right">Lỗ đầu tháng</TableHead>
+                  <TableHead className="text-right">LN thực tháng</TableHead>
+                  <TableHead className="text-right">Lỗ được bù</TableHead>
+                  <TableHead className="text-right">LN tính HH sau bù</TableHead>
+                  <TableHead className="text-right">HH có dấu</TableHead>
+                  <TableHead className="text-right">HH phải trả</TableHead>
+                  <TableHead className="text-right">Lỗ chuyển tiếp</TableHead>
+                  <TableHead>Căn cứ số dư</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines
+                  .filter((l) => l.carry)
+                  .map((l) => {
+                    const c = l.carry!;
+                    const chuaBiet = (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    );
+                    return (
+                      <TableRow key={l.employee.id}>
+                        <TableCell className="font-medium">{l.employee.shortName || l.employee.name}</TableCell>
+                        <TableCell className="text-right">
+                          {c.openingBalance === null ? chuaBiet : <Money value={c.openingBalance} className={c.openingBalance ? "text-destructive" : "text-muted-foreground"} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {c.realProfit === null ? chuaBiet : <Money value={c.realProfit} className={cn("font-semibold", c.realProfit >= 0 ? "text-success" : "text-destructive")} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {c.lossApplied === null ? chuaBiet : <Money value={c.lossApplied} className={c.lossApplied ? "" : "text-muted-foreground"} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {c.commissionBase === null ? chuaBiet : <Money value={c.commissionBase} className={c.commissionBase ? "font-semibold" : "text-muted-foreground"} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {c.signedCommission === null ? chuaBiet : <Money value={c.signedCommission} className={c.signedCommission < 0 ? "text-destructive" : c.signedCommission ? "" : "text-muted-foreground"} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {l.bonusPersonal === null ? chuaBiet : <Money value={l.bonusPersonal} className={cn("font-bold", l.bonusPersonal ? "" : "text-muted-foreground")} />}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {c.closingBalance === null ? chuaBiet : <Money value={c.closingBalance} className={c.closingBalance ? "text-destructive" : "text-muted-foreground"} />}
+                        </TableCell>
+                        <TableCell className="max-w-[320px] text-xs text-muted-foreground">
+                          {c.openingEstablished ? null : <span className="mr-1 rounded bg-amber-100 px-1 py-0.5 font-medium text-amber-800">chưa đủ để chốt</span>}
+                          {c.openingReason}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title={`Lợi nhuận theo mã hàng · ${PAYROLL_BASIS_SHORT[basis]}`}

@@ -16,6 +16,8 @@ import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_CARRYOVER_KEY, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
+import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
+import type { CostEngineWarning } from "@/lib/queries/cost-engine";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
@@ -202,8 +204,77 @@ export async function testPayrollCarryover(db: Db) {
     "6. và bảng lương tháng ấy chạy theo luật cũ, không bị sổ đụng vào",
   );
 
+  /* ══ 7 · BỘ ĐIỀU KIỆN CHỐT: MÀN HÌNH VÀ SERVER PHẢI NÓI CÙNG MỘT ĐIỀU ══
+   *
+   * Hàm thuần `payrollFinalizeBlockers` là chỗ DUY NHẤT quyết định "kỳ này chốt được chưa". Bài này
+   * khoá bốn cửa của nó, và khoá luôn cái ranh giới dễ sai nhất: cảnh báo mức `medium` là lời khai
+   * về NGUỒN, không phải lỗ hổng về SỐ — chặn nó là cách không bao giờ chốt được kỳ nào, rồi sẽ có
+   * người đi tắt hết cảnh báo cho xong.
+   */
+  const nen = {
+    bounded: true,
+    basisEligible: true,
+    basisWhy: "LN1 là cơ sở duy nhất được phép",
+    basisLabel: "LN1",
+    totalSalary: 9_000_000,
+    costWarnings: [] as CostEngineWarning[],
+    lines: [] as { name: string; carryEstablished: boolean | null; carryReason: string | null }[],
+  };
+  assert.equal(payrollFinalizeBlockers(nen).length, 0, "7. nền sạch ⇒ không còn việc gì thiếu");
+  assert.equal(
+    payrollFinalizeBlockers({ ...nen, bounded: false })[0]?.code,
+    "PERIOD_UNBOUNDED",
+    "7. kỳ không có mốc đầu/cuối bị chặn",
+  );
+  assert.equal(
+    payrollFinalizeBlockers({ ...nen, basisEligible: false })[0]?.code,
+    "BASIS_NOT_ELIGIBLE",
+    "7. cơ sở không đủ điều kiện bị chặn",
+  );
+  assert.equal(
+    payrollFinalizeBlockers({ ...nen, totalSalary: null })[0]?.code,
+    "UNKNOWN_SALARY",
+    "7. còn con số CHƯA BIẾT thì bị chặn",
+  );
+  const canhBaoCao: CostEngineWarning = {
+    rule: "DUPLICATE_LOGISTICS_COST_SOURCE",
+    severity: "high",
+    title: "2 khoản cước gõ tay bị loại vì trùng với vận đơn",
+    detail: "300.000 ₫ gõ tay không được cộng thêm.",
+    action: "Khai là điều chỉnh thủ công kèm lý do.",
+    amount: 300_000,
+    count: 2,
+  };
+  assert.equal(
+    payrollFinalizeBlockers({ ...nen, costWarnings: [canhBaoCao] })[0]?.code,
+    "COST_EVIDENCE_MISSING",
+    "7. có tiền thật đang nằm NGOÀI phép tính (cảnh báo mức high) ⇒ chặn",
+  );
+  const canhBaoVua: CostEngineWarning = { ...canhBaoCao, severity: "medium", rule: "COMMISSION_BASIS_NEEDS_REVIEW" };
+  assert.equal(
+    payrollFinalizeBlockers({ ...nen, costWarnings: [canhBaoVua] }).length,
+    0,
+    "7. cảnh báo mức medium là lời khai về NGUỒN — đi cùng con số, KHÔNG chặn",
+  );
+  assert.equal(
+    payrollFinalizeBlockers({
+      ...nen,
+      lines: [{ name: "LK", carryEstablished: false, carryReason: "Tháng trước mới là nháp." }],
+    })[0]?.code,
+    "CARRYOVER_OPENING_NOT_ESTABLISHED",
+    "7. số dư lỗ đầu kỳ chưa xác lập ⇒ chặn (xem được không có nghĩa là chốt được)",
+  );
+  assert.equal(
+    payrollFinalizeBlockers({
+      ...nen,
+      lines: [{ name: "LK", carryEstablished: null, carryReason: null }],
+    }).length,
+    0,
+    "7. sổ KHÔNG ÁP DỤNG không phải một lỗ hổng — null khác false",
+  );
+
   await reset(db);
   console.log(
-    "✓ Lỗ lũy kế qua bảng lương thật: chưa bật thì KHÔNG đổi một con số nào · tháng mở sổ có số dư 0 theo KHAI BÁO · số âm được giữ và hoa hồng có dấu vẫn hiện · tháng trước chưa chốt ⇒ CHƯA BIẾT chứ không phải 0 và chặn chốt · tháng trước đã chốt thì lỗ cộng dồn đúng và LN thực không bị trừ hai lần · kỳ 7 ngày và tháng trước mốc mở sổ ⇒ KHÔNG ÁP DỤNG",
+    "✓ Lỗ lũy kế qua bảng lương thật: chưa bật thì KHÔNG đổi một con số nào · tháng mở sổ có số dư 0 theo KHAI BÁO · số âm được giữ và hoa hồng có dấu vẫn hiện · tháng trước chưa chốt ⇒ CHƯA BIẾT chứ không phải 0 và chặn chốt · tháng trước đã chốt thì lỗ cộng dồn đúng và LN thực không bị trừ hai lần · kỳ 7 ngày và tháng trước mốc mở sổ ⇒ KHÔNG ÁP DỤNG · bộ điều kiện chốt dùng chung chặn đúng bốn cửa và KHÔNG chặn cảnh báo chỉ mang tính lời khai",
   );
 }

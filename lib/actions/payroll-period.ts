@@ -16,6 +16,7 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport } from "@/lib/queries/payroll";
+import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { buildPayrollSnapshot, finalizedPeriodsOverlapping } from "@/lib/queries/payroll-period";
 import type { Period } from "@/lib/search-params";
 
@@ -92,8 +93,32 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
 
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
-  if (report.totalSalary === null) {
-    return { error: "Còn con số CHƯA BIẾT trong kỳ (lương cứng hoặc thưởng theo LN cá nhân), nên chưa chốt được. Chốt lúc này là đóng băng một chỗ trống và gọi nó là kết quả." };
+  /*
+    ĐIỀU KIỆN CHỐT ĐỌC TỪ MỘT CHỖ DUY NHẤT.
+
+    Bản trước kiểm đúng hai thứ ở đây (cơ sở hợp lệ, `totalSalary` khác null) và coi đó là "đủ căn
+    cứ". Nhưng "tổng lương tính ra được một con số" KHÔNG đồng nghĩa với "con số ấy đã trừ đủ chi
+    phí": một khoản cước gõ tay bị loại vì trùng nguồn, hay phần nhóm lương chưa đối chiếu được,
+    đều làm tổng vẫn ra số mà số ấy thiếu. Và từ bản này còn thêm một cửa nữa — số dư lỗ đầu kỳ.
+
+    `payrollFinalizeBlockers` là hàm THUẦN và màn hình gọi CHÍNH nó để quyết định có hiện nút hay
+    không, nên không còn cảnh nút hiện rồi server từ chối.
+  */
+  const blockers = payrollFinalizeBlockers({
+    bounded: true,
+    basisEligible: eligibility.eligible,
+    basisWhy: eligibility.why,
+    basisLabel: PAYROLL_BASIS_SHORT[basis],
+    totalSalary: report.totalSalary,
+    costWarnings: report.marketers.costWarnings,
+    lines: report.lines.map((l) => ({
+      name: l.employee.shortName || l.employee.name,
+      carryEstablished: l.carry ? l.carry.openingEstablished : null,
+      carryReason: l.carry?.openingReason ?? null,
+    })),
+  });
+  if (blockers.length) {
+    return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
   }
   const snapshot = buildPayrollSnapshot(report, period, key);
 
