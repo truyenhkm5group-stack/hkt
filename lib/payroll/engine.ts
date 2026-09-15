@@ -102,8 +102,6 @@ export type SegmentInput = {
   components: readonly PolicyComponent[];
   /** Đại lượng của RIÊNG đoạn này. */
   basis: BasisValues;
-  /** Số tiền nhập tay cho từng thành phần `MANUAL_AMOUNT` (theo `code`). */
-  manualAmounts: Readonly<Record<string, number | null | undefined>>;
 };
 
 export type PayrollItemInput = {
@@ -156,7 +154,7 @@ const num = (v: number | null | undefined): number | null => (v === null || v ==
  */
 export function calculateComponent(
   component: PolicyComponent,
-  ctx: { segment: PayrollSegment; basis: BasisValues; manualAmount: number | null; carryOpening: number | null },
+  ctx: { segment: PayrollSegment; basis: BasisValues; carryOpening: number | null },
 ): { result: ComponentResult; missing: MissingInput | null } {
   const explain: ExplainStep[] = [];
   const basisKey = componentBasisKey(component.calc);
@@ -290,20 +288,6 @@ export function calculateComponent(
       explain.push({ label: reached ? "Đã đạt ngưỡng" : "Chưa đạt ngưỡng", value: raw, unit: "VND" });
       break;
     }
-    case "MANUAL_AMOUNT": {
-      const v = num(ctx.manualAmount);
-      if (v === null) {
-        return fail(
-          component.code,
-          component.label,
-          "MANUAL",
-          `Thành phần “${component.label}” là khoản nhập tay từng kỳ và kỳ này chưa có số. Nhập ở tab Điều chỉnh, hoặc bỏ thành phần khỏi chính sách nếu kỳ này không áp dụng.`,
-        );
-      }
-      raw = v;
-      explain.push({ label: "Số tiền nhập cho kỳ", value: raw, unit: "VND" });
-      break;
-    }
   }
 
   // ─── 4. CHIA THEO NGÀY CỦA ĐOẠN ───
@@ -383,7 +367,6 @@ export function calculatePayrollItem(input: PayrollItemInput): PayrollItemResult
       const { result, missing: miss } = calculateComponent(component, {
         segment: seg.segment,
         basis: seg.basis,
-        manualAmount: num(seg.manualAmounts[component.code]),
         carryOpening: component.carryForward ? num(input.carryOpening[component.code]) : null,
       });
       if (miss) missing.push(miss);

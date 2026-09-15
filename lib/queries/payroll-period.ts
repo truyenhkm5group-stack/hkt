@@ -29,6 +29,7 @@ import {
   payrollPeriodKey,
   type PayrollBasis,
 } from "@/lib/constants/payroll";
+import { PAYROLL_ENGINE_VERSION } from "@/lib/payroll/engine";
 import type { Period } from "@/lib/search-params";
 import type { PayrollReport } from "@/lib/queries/payroll";
 
@@ -41,6 +42,14 @@ import type { PayrollReport } from "@/lib/queries/payroll";
  */
 export type PayrollSnapshot = {
   calcVersion: number;
+  /**
+   * PHIÊN BẢN MÁY TÍNH LƯƠNG CHUNG (`PAYROLL_ENGINE_VERSION`) — tách hẳn khỏi `calcVersion`.
+   *
+   * `calcVersion` là phiên bản của ĐƯỜNG TÍNH CŨ (bốn ô trên hồ sơ nhân sự). Hai đường có thể đổi
+   * độc lập nhau, nên hai số. Gộp lại thì một lần sửa máy chung sẽ làm mọi kỳ cũ trông như tính
+   * bằng một luật khác, và ngược lại.
+   */
+  engineVersion: number;
   basis: PayrollBasis;
   period: { key: string; from: string; to: string; label: string };
   totalProfit: number;
@@ -71,6 +80,34 @@ export type PayrollSnapshot = {
     bonusPersonal: number | null;
     bonusRevenue: number;
     salary: number | null;
+    /**
+     * ═══ CHI TIẾT TỪNG THÀNH PHẦN CỦA MÁY TÍNH LƯƠNG CHUNG ═══
+     *
+     * `null` = người này tính bằng đường cũ (bốn ô trên hồ sơ nhân sự).
+     *
+     * Ở đây CÓ chụp vết giải thích, khác với `marketers.products` cố ý bỏ ra. Lý do khác nhau: chi
+     * tiết từng mã DẪN XUẤT được từ những con số đã chụp, còn vết giải thích thì KHÔNG — nó là câu
+     * trả lời cho "vì sao tháng ấy trả chừng này", và nó phải đứng yên cùng con số. Dựng lại nó
+     * bằng chính sách hôm nay là dựng lại bằng một luật có thể đã đổi.
+     */
+    engine: {
+      policy: { code: string; name: string; version: number | null }[];
+      components: {
+        code: string;
+        label: string;
+        kind: string;
+        amount: number | null;
+        basisKey: string | null;
+        basisValue: number | null;
+        explain: { label: string; value: number | null; unit?: string; note?: string }[];
+        carry: { openingBalance: number; lossApplied: number; commissionBase: number; closingBalance: number } | null;
+      }[];
+      adjustments: { code: string; label: string; kind: string; amount: number | null; explain: { label: string; value: number | null; unit?: string; note?: string }[] }[];
+      grossEarnings: number | null;
+      totalDeductions: number | null;
+      netPay: number | null;
+      segments: { from: string; to: string; days: number; policyCode: string; policyVersion: number | null; working: boolean }[];
+    } | null;
   }[];
 };
 
@@ -78,6 +115,7 @@ export type PayrollSnapshot = {
 export function buildPayrollSnapshot(report: PayrollReport, period: Period, key: string): PayrollSnapshot {
   return {
     calcVersion: PAYROLL_CALC_VERSION,
+    engineVersion: PAYROLL_ENGINE_VERSION,
     basis: report.basis,
     period: { key, from: period.fromKey ?? "", to: period.toKey ?? "", label: period.label },
     totalProfit: report.totalProfit,
@@ -107,6 +145,33 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       bonusPersonal: l.bonusPersonal,
       bonusRevenue: l.bonusRevenue,
       salary: l.salary,
+      engine: l.engine
+        ? {
+            policy: [...new Map(l.engine.segments.filter((sg) => sg.policyId).map((sg) => [`${sg.policyCode}:${sg.policyVersion}`, { code: sg.policyCode, name: sg.policyName, version: sg.policyVersion }])).values()],
+            components: l.engine.result.components.map((c) => ({
+              code: c.code,
+              label: c.label,
+              kind: c.kind,
+              amount: c.amount,
+              basisKey: c.basisKey,
+              basisValue: c.basisValue,
+              explain: c.explain,
+              carry: c.carry,
+            })),
+            adjustments: l.engine.result.adjustments.map((c) => ({ code: c.code, label: c.label, kind: c.kind, amount: c.amount, explain: c.explain })),
+            grossEarnings: l.engine.result.grossEarnings,
+            totalDeductions: l.engine.result.totalDeductions,
+            netPay: l.engine.result.netPay,
+            segments: l.engine.result.segments.map((sg) => ({
+              from: sg.from.toISOString(),
+              to: sg.to.toISOString(),
+              days: sg.days,
+              policyCode: sg.policyCode,
+              policyVersion: sg.policyVersion,
+              working: sg.working,
+            })),
+          }
+        : null,
     })),
   };
 }

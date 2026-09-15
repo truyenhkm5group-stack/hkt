@@ -270,9 +270,13 @@ export function isManualInput(key: string): boolean {
  *  · `RATE_OF_BASIS`   — `đại lượng × %` (hoa hồng doanh thu, chia lợi nhuận).
  *  · `TIERED_RATE`     — `%` đổi theo bậc của đại lượng (bậc nào áp cho phần vượt bậc đó).
  *  · `THRESHOLD_BONUS` — đạt ngưỡng thì được một khoản cố định, không đạt thì 0.
- *  · `MANUAL_AMOUNT`   — số tiền do người nhập cho từng kỳ (thưởng nóng, khấu trừ).
  *
  * Không có `EXPRESSION`, và cố ý không có. Xem khối chú thích đầu file.
+ *
+ * VÀ CỐ Ý KHÔNG CÓ "SỐ TIỀN NHẬP TAY TỪNG KỲ" Ở ĐÂY. Thưởng nóng, tạm ứng và khấu trừ đã có ĐÚNG
+ * MỘT chỗ ở: bảng `payroll_adjustments`, nơi mỗi khoản bắt buộc mang LÝ DO, người tạo và người
+ * duyệt. Thêm một đường thứ hai cho cùng loại tiền là để hai nơi cùng ghi một khoản, và rồi một
+ * khoản được trả hai lần mà không bảng nào sai (AGENTS.md mục 15 — một nguồn cho một khoản chi).
  */
 export const PAYROLL_CALC_TYPES = [
   "FIXED_AMOUNT",
@@ -280,7 +284,6 @@ export const PAYROLL_CALC_TYPES = [
   "RATE_OF_BASIS",
   "TIERED_RATE",
   "THRESHOLD_BONUS",
-  "MANUAL_AMOUNT",
 ] as const;
 export type PayrollCalcType = (typeof PAYROLL_CALC_TYPES)[number];
 
@@ -290,7 +293,6 @@ export const PAYROLL_CALC_TYPE_LABEL: Record<PayrollCalcType, string> = {
   RATE_OF_BASIS: "Đại lượng × phần trăm",
   TIERED_RATE: "Phần trăm theo bậc",
   THRESHOLD_BONUS: "Đạt ngưỡng được thưởng",
-  MANUAL_AMOUNT: "Số tiền nhập tay từng kỳ",
 };
 
 /**
@@ -348,8 +350,7 @@ export type PayrollCalcParams =
   | { type: "PER_UNIT"; basisKey: string; unitRate: number }
   | { type: "RATE_OF_BASIS"; basisKey: string; ratePercent: number }
   | { type: "TIERED_RATE"; basisKey: string; tiers: PayrollTier[] }
-  | { type: "THRESHOLD_BONUS"; basisKey: string; threshold: number; amount: number }
-  | { type: "MANUAL_AMOUNT" };
+  | { type: "THRESHOLD_BONUS"; basisKey: string; threshold: number; amount: number };
 
 /** Một thành phần trong một PHIÊN BẢN chính sách. Bất biến khi phiên bản đã dùng để chốt lương. */
 export type PolicyComponent = {
@@ -390,5 +391,5 @@ export function carryForwardAllowed(calc: PayrollCalcParams): boolean {
 
 /** Đại lượng mà một thành phần cần. `null` = không cần đại lượng nào (số cố định / nhập tay). */
 export function componentBasisKey(calc: PayrollCalcParams): string | null {
-  return calc.type === "FIXED_AMOUNT" || calc.type === "MANUAL_AMOUNT" ? null : calc.basisKey;
+  return calc.type === "FIXED_AMOUNT" ? null : calc.basisKey;
 }

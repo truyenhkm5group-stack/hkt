@@ -103,6 +103,8 @@ export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActio
       name: l.employee.shortName || l.employee.name,
       carryEstablished: l.carry ? l.carry.openingEstablished : null,
       carryReason: l.carry?.openingReason ?? null,
+      engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
+      engineProblems: l.engine?.result.problems ?? [],
     })),
   });
   if (blockers.length) {

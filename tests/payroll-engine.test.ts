@@ -81,9 +81,8 @@ function segIn(
   segments: ReturnType<typeof resolveSegments>,
   components: PolicyComponent[],
   basis: Record<string, number | null> = {},
-  manualAmounts: Record<string, number | null> = {},
 ): SegmentInput[] {
-  return segments.map((segment) => ({ segment, components, basis, manualAmounts }));
+  return segments.map((segment) => ({ segment, components, basis }));
 }
 
 const THANG_9 = { from: d("2026-09-01"), to: dEnd("2026-09-30") };
@@ -328,7 +327,7 @@ export function testPayrollEngine() {
     const r2 = calculatePayrollItem({
       employeeId: "NV1",
       employeeName: "H",
-      segments: doiCS.map((segment) => ({ segment, components: segment.policyCode === "A" ? [A] : [B], basis: {}, manualAmounts: {} })),
+      segments: doiCS.map((segment) => ({ segment, components: segment.policyCode === "A" ? [A] : [B], basis: {} })),
       adjustments: [],
       carryOpening: {},
     });
@@ -454,7 +453,6 @@ export function testPayrollEngine() {
     const tran = calculateComponent(comp({ code: "C", kind: "BONUS", rounding: "ROUND_1000", maxAmount: 1_500_500, calc: { type: "FIXED_AMOUNT", amount: 9_000_000 } }), {
       segment: segs[0],
       basis: {},
-      manualAmount: null,
       carryOpening: null,
     });
     assert.ok((tran.result.amount ?? 0) <= 1_501_000, "làm tròn sau trần không được vượt quá một bước làm tròn");

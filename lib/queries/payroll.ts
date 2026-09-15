@@ -19,6 +19,7 @@ import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@
 import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { carryoverMonth } from "@/lib/payroll/profit-carryover";
 import { getCarryoverConfig, resolveOpeningMany, type OpeningBasis, type OpeningResolution } from "@/lib/queries/payroll-carryover";
+import { computeEngineLines, type EmployeeEngineResult } from "@/lib/queries/payroll-engine";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -685,6 +686,18 @@ export type PayrollLine = {
    * bên trong nó `openingBalance` mới là `null`.
    */
   carry: PayrollCarryLine | null;
+  /**
+   * ═══ KẾT QUẢ CỦA MÁY TÍNH LƯƠNG CHUNG (chính sách → phiên bản → thành phần) ═══
+   *
+   * `null` = người này CHƯA được gán chính sách nào, nên vẫn đi đường tính cũ (bốn ô trên hồ sơ
+   * nhân sự). Hai đường song song là CỐ Ý và là thứ làm bản chính sách lương chung không đổi một
+   * con số nào của ai vào ngày phát hành: chuyển một người sang máy mới là một lần chủ shop bấm,
+   * có mốc hiệu lực và có dấu vết.
+   *
+   * Khi CÓ giá trị, `salary` của dòng này lấy từ `engine.result.netPay` — KHÔNG cộng thêm gì từ
+   * đường cũ. Cộng cả hai là trả hai lần cho cùng một tháng công.
+   */
+  engine: EmployeeEngineResult | null;
 };
 
 /** Một dòng bù trừ lỗ lũy kế, đủ để chủ shop đọc mà không cần mở thêm màn hình nào. */
@@ -823,8 +836,37 @@ export async function getPayrollReport(
   // Đếm ngày THEO LỊCH VIỆT NAM bằng đúng hàm mà `prorateMonthlyAmount` dùng: chia phút giây cho
   // 86.400.000 rồi làm tròn sẽ lệch một ngày ở mốc cuối 23:59:59.
   const fixedDays = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
-  const lines: PayrollLine[] = employees
-    .filter((e) => e.active)
+  /*
+    ═══ MÁY TÍNH LƯƠNG CHUNG CHẠY TRƯỚC, CHO NHỮNG AI ĐÃ ĐƯỢC GÁN CHÍNH SÁCH ═══
+
+    Một lượt đọc cho cả shop (`computeEngineLines`), không phải mỗi người một lượt: sổ chính sách,
+    sổ phân công, đại lượng nhập tay và khoản điều chỉnh đều đọc một lần rồi cắt đoạn bằng hàm
+    thuần. Trên bảng lương toàn công ty, làm ngược lại là N+1 nhân với số nhân sự.
+
+    Người chưa gán chính sách KHÔNG có mặt trong `engineLines`, và nhánh dưới chạy y như trước.
+  */
+  const activeEmployees = employees.filter((e) => e.active);
+  const engineLines = await computeEngineLines(
+    period,
+    {
+      profitShop: totalProfit,
+      perPerson: new Map(
+        activeEmployees.map((e) => {
+          const m = marketers.marketers.find((x) => x.marketerId === e.id);
+          return [
+            e.id,
+            {
+              profitPersonal: m && cashRatio !== null ? Math.round(m.personalProfit * cashRatio) : null,
+              revenuePersonal: m ? m.attributedRevenue : null,
+              ordersPersonal: m ? m.attributedOrders : null,
+            },
+          ] as const;
+        }),
+      ),
+    },
+    activeEmployees.map((e) => e.id),
+  );
+  const lines: PayrollLine[] = activeEmployees
     .map((e) => {
       const m = marketers.marketers.find((x) => x.marketerId === e.id);
       /*
@@ -903,6 +945,18 @@ export async function getPayrollReport(
         (AGENTS.md mục 14 · 16). Cộng đủ một tháng vẫn ra đúng khoản tháng, không dư không thiếu.
       */
       const fixed = fixedBounded ? prorateMonthlyAmount(fixedMonthly, period.from, period.to) : null;
+      /*
+        HAI ĐƯỜNG TÍNH, VÀ CHỈ MỘT ĐƯỜNG RA TIỀN CHO MỖI NGƯỜI.
+
+        Đã gán chính sách ⇒ tiền của người này là `netPay` của máy chung, và bốn ô trên hồ sơ nhân
+        sự KHÔNG còn tham gia. Cộng cả hai là trả hai lần cho cùng một tháng công; lấy số lớn hơn
+        là để cách trả tiền phụ thuộc vào một phép so sánh không ai khai ở đâu cả.
+
+        Bốn ô cũ vẫn hiện trên màn hình để đối chiếu trong giai đoạn chuyển, nhưng chúng đứng ở cột
+        riêng và không cộng vào tổng.
+      */
+      const engine = engineLines.get(e.id) ?? null;
+      const legacySalary = fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue;
       return {
         employee: e,
         totalProfit,
@@ -913,8 +967,9 @@ export async function getPayrollReport(
         bonusTotal,
         bonusPersonal,
         bonusRevenue,
-        salary: fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
+        salary: engine ? engine.result.netPay : legacySalary,
         carry,
+        engine,
       };
     });
   return {

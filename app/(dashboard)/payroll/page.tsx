@@ -15,6 +15,8 @@ import {
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { FinanceNav } from "@/components/finance-nav";
+import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
+import { CalculationDetail } from "@/app/(dashboard)/payroll/calculation-detail";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -32,6 +34,7 @@ import { employeeMatchesUser } from "@/lib/queries/payroll";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_LABEL,
+  PAYROLL_BASIS_NAME,
   type PayrollBasis,
   PAYROLL_BASES,
   PAYROLL_BASIS_SHORT,
@@ -100,6 +103,8 @@ export default async function PayrollPage({
       name: l.employee.shortName || l.employee.name,
       carryEstablished: l.carry ? l.carry.openingEstablished : null,
       carryReason: l.carry?.openingReason ?? null,
+      engineMissing: l.engine?.result.missing.map((m) => ({ label: m.label, message: m.message })) ?? [],
+      engineProblems: l.engine?.result.problems ?? [],
     })),
   });
   const qs = new URLSearchParams({
@@ -133,7 +138,7 @@ export default async function PayrollPage({
       <PageHeader
         eyebrow="Tài chính"
         title="Lương & hoa hồng"
-        description={`${period.label} · ${PAYROLL_BASIS_LABEL[basis].toLowerCase()} · ${formatNumber(lines.length)} nhân sự đang làm việc`}
+        description={`${period.label} · ${PAYROLL_BASIS_NAME[basis]} (${PAYROLL_BASIS_LABEL[basis].toLowerCase()}) · ${formatNumber(lines.length)} nhân sự đang làm việc`}
         actions={
           <div className="flex items-center gap-2">
             {/* Xuất ĐÚNG bảng đang xem: `qs` mang y nguyên kỳ và cơ sở lợi nhuận của màn hình. */}
@@ -156,6 +161,7 @@ export default async function PayrollPage({
         }
       />
       <FinanceNav />
+      <PayrollTabs canManage={canManage} />
 
       <DataTableToolbar
         period={{ defaultKey: "month" }}
@@ -163,7 +169,7 @@ export default async function PayrollPage({
           {
             key: "basis",
             label: "Cơ sở lợi nhuận",
-            options: PAYROLL_BASES.map((b) => ({ value: b, label: PAYROLL_BASIS_SHORT[b] })),
+            options: PAYROLL_BASES.map((b) => ({ value: b, label: PAYROLL_BASIS_NAME[b] })),
             single: true,
           },
         ]}
@@ -461,23 +467,44 @@ export default async function PayrollPage({
                           : ""}
                       </div>
                     </TableCell>
+                    {/*
+                      MÀN HÌNH PHẢI NÓI RÕ NGƯỜI NÀY TÍNH BẰNG ĐƯỜNG NÀO.
+
+                      Hai đường tồn tại song song trong giai đoạn chuyển, và một bảng không phân
+                      biệt được chúng là một bảng mà người đọc không biết con số đến từ đâu. Đã gán
+                      chính sách ⇒ hiện tên chính sách và các thành phần của nó; chưa gán ⇒ hiện
+                      bốn ô cũ như trước.
+                    */}
                     <TableCell className="text-xs">
-                      {[
-                        l.employee.fixed
-                          ? `cứng ${formatVND(l.employee.fixed, { compact: true })}`
-                          : null,
-                        l.employee.percentTotal
-                          ? `${l.employee.percentTotal}% LN tổng`
-                          : null,
-                        l.employee.percentPersonal
-                          ? `${l.employee.percentPersonal}% LN cá nhân`
-                          : null,
-                        l.employee.percentRevenue
-                          ? `${l.employee.percentRevenue}% DT cá nhân`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" + ") || "—"}
+                      {l.engine ? (
+                        <>
+                          <div className="font-medium">
+                            {[...new Map(l.engine.segments.filter((sg) => sg.policyId).map((sg) => [sg.policyCode, sg])).values()]
+                              .map((sg) => `${sg.policyName || sg.policyCode} #${sg.policyVersion ?? "?"}`)
+                              .join(" → ") || "chưa có phiên bản hiệu lực"}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {l.engine.result.components.map((c) => c.label).join(" + ") || "chưa có thành phần nào tính được"}
+                          </div>
+                        </>
+                      ) : (
+                        [
+                          l.employee.fixed
+                            ? `cứng ${formatVND(l.employee.fixed, { compact: true })}`
+                            : null,
+                          l.employee.percentTotal
+                            ? `${l.employee.percentTotal}% LN tổng`
+                            : null,
+                          l.employee.percentPersonal
+                            ? `${l.employee.percentPersonal}% LN cá nhân`
+                            : null,
+                          l.employee.percentRevenue
+                            ? `${l.employee.percentRevenue}% DT cá nhân`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" + ") || "—"
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Money
@@ -604,6 +631,22 @@ export default async function PayrollPage({
         </div>
       </SectionCard>
       )}
+
+      {/*
+        ═══ CHI TIẾT CÁCH TÍNH CHO TỪNG NGƯỜI ĐANG ĐI QUA MÁY CHUNG ═══
+
+        Yêu cầu: *"không chỉ hiện con số cuối cùng."* Khối này in đúng các bước máy tính đã làm,
+        theo đúng thứ tự nó đã làm, lấy thẳng từ vết giải thích mà chính phép tính sinh ra — không
+        dựng lại ở tầng màn hình.
+
+        Chỉ hiện cho kỳ CHƯA CHỐT: kỳ đã chốt đọc ảnh chụp ở khối riêng bên dưới, và ảnh chụp mang
+        theo vết giải thích của LÚC ẤY chứ không phải của chính sách hôm nay.
+      */}
+      {!daChot
+        ? lines
+            .filter((l) => l.engine)
+            .map((l) => <CalculationDetail key={l.employee.id} engine={l.engine!} employeeName={l.employee.shortName || l.employee.name} />)
+        : null}
 
       {/*
         ═══ BẢNG BÙ TRỪ LỖ LŨY KẾ ═══
