@@ -20,7 +20,9 @@ export function FanpageForm({
   unitPrice,
   shippingFee,
   colors,
+  sizeProfileId,
   choices,
+  sizes,
 }: {
   pancakePageId: string;
   name: string;
@@ -29,7 +31,9 @@ export function FanpageForm({
   unitPrice: number | null;
   shippingFee: number | null;
   colors: string[];
+  sizeProfileId: string | null;
   choices: Choice[];
+  sizes: { id: string; name: string }[];
 }) {
   const [sp, setSp] = useState(activeProductId ?? "");
   const [gia, setGia] = useState(unitPrice === null ? "" : String(unitPrice));
@@ -37,6 +41,7 @@ export function FanpageForm({
   const [mau, setMau] = useState(colors.join(", "));
   const [nac, setNac] = useState(aiMode);
   const [ten, setTen] = useState(name);
+  const [bangSize, setBangSize] = useState(sizeProfileId ?? "");
   const [msg, setMsg] = useState("");
   const [pending, start] = useTransition();
 
@@ -72,7 +77,14 @@ export function FanpageForm({
           <span className="text-muted-foreground">Màu đang có (cách nhau dấu phẩy)</span>
           <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={mau} onChange={(e) => setMau(e.target.value)} placeholder="Đỏ đô, Đen, Nâu" />
         </label>
-        <label className="space-y-1 text-xs sm:col-span-2">
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">Bảng số đo</span>
+          <select className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={bangSize} onChange={(e) => setBangSize(e.target.value)}>
+            <option value="">— chưa có (máy chuyển người khi khách hỏi size) —</option>
+            {sizes.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">Tên page</span>
           <input className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" value={ten} onChange={(e) => setTen(e.target.value)} />
         </label>
@@ -91,6 +103,7 @@ export function FanpageForm({
                 unitPrice: so(gia),
                 shippingFee: so(ship),
                 availableColors: mau.split(",").map((x) => x.trim()).filter(Boolean),
+                sizeProfileId: bangSize || undefined,
               });
               setMsg("error" in r ? r.error : "Đã lưu — hội thoại MỚI dùng cấu hình này, hội thoại cũ giữ nguyên");
             })

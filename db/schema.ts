@@ -2595,6 +2595,16 @@ export const salesConversations = pgTable(
     salesProfileVersion: integer("sales_profile_version"),
     activeProductId: text("active_product_id").references(() => products.id, { onDelete: "set null" }),
     testProductId: text("test_product_id").references(() => testProductProfiles.id, { onDelete: "set null" }),
+    /**
+     * ĐIỀU KIỆN BÁN LÚC CHỤP — giá, phí ship, combo, màu, các chính sách.
+     *
+     * Chụp cả phần này chứ không chỉ mã hàng: khách được báo 499k thì cuộc ấy thuộc mức 499k, dù
+     * hôm sau page đổi giá. Đọc lại bảng giá hiện hành để giải thích một câu đã nói là viết lại
+     * quá khứ, y như với mã hàng.
+     */
+    offerSnapshot: jsonb("offer_snapshot"),
+    /** Bảng số đo LÚC CHỤP — đổi bảng size sau này không làm đổi lời tư vấn đã đưa. */
+    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
     /** SNAPSHOT · SOURCE_RULE · AD_MAP · FANPAGE_DEFAULT · NONE */
     classificationSource: text("classification_source").notNull().default(""),
     classificationConfidence: doublePrecision("classification_confidence"),

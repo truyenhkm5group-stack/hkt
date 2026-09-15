@@ -10,6 +10,7 @@ import { schema, type Db } from "@/db";
 import { classifyConversationSource, snapshotClassification } from "@/lib/ai-workforce/agents/sales/classify-source";
 import { resolveProduct } from "@/lib/ai-workforce/agents/sales/resolve-product";
 import { POLICY_BY_SOURCE, TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-sales";
+import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 
 const PAGE = "page-fanpage-test";
 
@@ -134,6 +135,20 @@ export async function testFanpageSales(db: Db) {
   const [tp] = await db.select().from(schema.testProductProfiles).where(eq(schema.testProductProfiles.id, test1.id));
   assert.equal(tp.aiReplyEnabled, true);
   assert.equal(tp.allowAutoOrderCreate, false, "mặc định CSDL phải trùng mặc định hằng số");
+
+  // ═════════ 7. CHẠY THỬ NGẦM: con số PHẢI BẰNG 0 ═════════
+  //
+  // Đây là con số duy nhất trên màn hình mà khác 0 nghĩa là hỏng thật: hội thoại TEST bị phép giải
+  // trả về một mã hàng ERP, tức là đã rơi về mã WIN của page.
+  const bm = await runShadowBenchmark(PAGE);
+  assert.equal(bm.testFellBackToWin, 0, "TEST bị xử như WIN phải bằng 0");
+  assert.ok(bm.byType.TEST >= 1, "mẻ thử phải có ít nhất một hội thoại TEST để con số trên có nghĩa");
+  assert.ok(bm.byType.HUMAN_ONLY >= 1);
+  assert.equal(bm.testResolved, bm.byType.TEST, "mọi hội thoại TEST phải gắn được hồ sơ mẫu test");
+
+  // Chạy lại KHÔNG được đổi gì — nút này bấm lại sau mỗi lần sửa cấu hình.
+  const bm2 = await runShadowBenchmark(PAGE);
+  assert.deepEqual(bm2.byType, bm.byType, "chạy thử ngầm phải chỉ đọc, hai lượt ra cùng kết quả");
 
   console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến · chưa khai thì chuyển người");
 }

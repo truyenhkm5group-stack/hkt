@@ -165,3 +165,57 @@ export async function listSizeProfiles() {
     .orderBy(schema.salesSizeProfiles.name)
     .limit(200);
 }
+
+export type SourceLine = {
+  sourceId: string;
+  sourceKind: string;
+  /** DEFAULT_WIN khi chưa có luật — mặc định của fanpage vốn đã là WIN. */
+  status: "DEFAULT_WIN" | "TEST" | "HUMAN_ONLY";
+  testCode: string;
+  adDescription: string;
+  mediaUrl: string;
+  conversations: number;
+};
+
+/**
+ * MỌI nguồn CÓ THẬT đang phát sinh hội thoại của một page, kèm trạng thái hiện tại — một danh
+ * sách duy nhất thay vì hai bảng "đã khai" và "chưa khai".
+ *
+ * Gộp lại là có chủ ý: việc hằng ngày là NHÌN một danh sách rồi đổi vài dòng, không phải đối chiếu
+ * qua lại giữa hai bảng để biết dòng nào đang ở đâu.
+ */
+export async function listSourceLines(pancakePageId: string): Promise<SourceLine[]> {
+  const db = await getDb();
+  const rows = await db.execute(sql`
+    select
+      s.source_id                                  as source_id,
+      coalesce(r.source_kind, 'AD')                as source_kind,
+      coalesce(r.source_type, 'DEFAULT_WIN')       as status,
+      coalesce(t.test_code, '')                    as test_code,
+      coalesce(s.ad_description, '')               as ad_description,
+      coalesce(s.media_url, '')                    as media_url,
+      s.n                                          as conversations
+    from (
+      select m.ad_id as source_id,
+             max(m.ad_description) as ad_description,
+             max(m.ad_media_url)   as media_url,
+             count(distinct m.conversation_id)::int as n
+      from sales_messages m
+      join sales_conversations c on c.id = m.conversation_id
+      where m.ad_id <> '' and c.page_id = ${pancakePageId}
+      group by m.ad_id
+    ) s
+    left join sales_source_rules r on r.source_id = s.source_id and r.pancake_page_id = ${pancakePageId}
+    left join test_product_profiles t on t.id = r.test_product_id
+    order by s.n desc
+  `);
+  return (rows as unknown as Record<string, unknown>[]).map((r) => ({
+    sourceId: String(r.source_id),
+    sourceKind: String(r.source_kind ?? "AD"),
+    status: String(r.status) as SourceLine["status"],
+    testCode: String(r.test_code ?? ""),
+    adDescription: String(r.ad_description ?? ""),
+    mediaUrl: String(r.media_url ?? ""),
+    conversations: Number(r.conversations ?? 0),
+  }));
+}

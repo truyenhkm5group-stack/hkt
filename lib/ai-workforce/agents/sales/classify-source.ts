@@ -25,6 +25,22 @@ import {
   type SourceType,
 } from "@/lib/constants/fanpage-sales";
 
+/** Điều kiện bán được chụp lại. Mọi ô cho phép `null` và `null` là CHƯA KHAI, không phải 0. */
+export type SalesOffer = {
+  unitPrice: number | null;
+  shippingFee: number | null;
+  freeShipFrom: number | null;
+  comboPricing: unknown;
+  availableColors: string[];
+  codPolicy: string;
+  inspectionPolicy: string;
+  deliveryEstimate: string;
+  exchangePolicy: string;
+  approvedFacts: string[];
+  /** Nguồn của điều kiện này: hồ sơ fanpage hay hồ sơ mẫu test — hai bộ dữ kiện KHÔNG trộn. */
+  from: "FANPAGE" | "TEST_PRODUCT";
+};
+
 export type SourceClassification = {
   sourceType: SourceType;
   sourceKind: string;
@@ -38,6 +54,13 @@ export type SourceClassification = {
   classificationSource: ClassificationSource;
   classificationConfidence: number;
   policy: SalesPolicy;
+  /**
+   * ĐIỀU KIỆN BÁN đi kèm — giá, ship, combo, màu, chính sách. Chụp cùng lúc với mã hàng, vì khách
+   * được báo 499k thì cuộc ấy thuộc mức 499k dù hôm sau page đổi giá.
+   * `null` = CHƯA KHAI ⇒ máy KHÔNG được báo giá.
+   */
+  offer: SalesOffer | null;
+  sizeProfileId: string | null;
   /** Lý do phải chuyển người ngay từ tầng phân loại; `null` = máy được làm tiếp. */
   handoff: ClassificationHandoff | null;
   evidence: string;
@@ -48,6 +71,20 @@ export type ClassifyInput = {
   pancakePageId: string;
 };
 
+function offerTuHoSo(h: {
+  unitPrice: number | null; shippingFee: number | null; freeShipFrom: number | null;
+  comboPricing: unknown; availableColors: string[]; codPolicy: string; inspectionPolicy: string;
+  deliveryEstimate: string; exchangePolicy: string; approvedFacts: string[];
+}): SalesOffer {
+  return {
+    unitPrice: h.unitPrice, shippingFee: h.shippingFee, freeShipFrom: h.freeShipFrom,
+    comboPricing: h.comboPricing ?? null, availableColors: h.availableColors,
+    codPolicy: h.codPolicy, inspectionPolicy: h.inspectionPolicy,
+    deliveryEstimate: h.deliveryEstimate, exchangePolicy: h.exchangePolicy,
+    approvedFacts: h.approvedFacts, from: "FANPAGE",
+  };
+}
+
 function dungAnhChup(c: {
   sourceType: string;
   sourceKind: string;
@@ -57,6 +94,8 @@ function dungAnhChup(c: {
   activeProductId: string | null;
   testProductId: string | null;
   classificationConfidence: number | null;
+  offerSnapshot: unknown;
+  sizeProfileId: string | null;
 }): SourceClassification {
   const loai = c.sourceType as SourceType;
   return {
@@ -69,6 +108,9 @@ function dungAnhChup(c: {
     testProductId: c.testProductId,
     classificationSource: "SNAPSHOT",
     classificationConfidence: c.classificationConfidence ?? CLASSIFICATION_CONFIDENCE.SNAPSHOT,
+    // Đọc lại điều kiện ĐÃ CHỤP, không đọc bảng giá hiện hành.
+    offer: (c.offerSnapshot as SalesOffer | null) ?? null,
+    sizeProfileId: c.sizeProfileId,
     policy: POLICY_BY_SOURCE[loai] ?? "HUMAN",
     handoff: loai === "HUMAN_ONLY" ? "SOURCE_HUMAN_ONLY" : loai === "UNKNOWN" ? "UNKNOWN_PRODUCT_CONTEXT" : null,
     evidence: "Hội thoại đã chốt ngữ cảnh bán từ trước — giữ nguyên, không đọc lại cấu hình hiện hành",
@@ -90,6 +132,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
       activeProductId: schema.salesConversations.activeProductId,
       testProductId: schema.salesConversations.testProductId,
       classificationConfidence: schema.salesConversations.classificationConfidence,
+      offerSnapshot: schema.salesConversations.offerSnapshot,
+      sizeProfileId: schema.salesConversations.sizeProfileId,
     })
     .from(schema.salesConversations)
     .where(eq(schema.salesConversations.id, input.conversationId))
@@ -133,13 +177,35 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
         activeProductId: null, testProductId: null,
         classificationSource: "SOURCE_RULE", classificationConfidence: 0,
-        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT",
+        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
         evidence: `Hội thoại đến từ nhiều nguồn khai KHÁC LOẠI (${[...loaiKhac].join(" · ")}) — không kết luận đang bán mẫu nào`,
       };
     }
     // HUMAN_ONLY thắng mọi thứ còn lại trong cùng một loại.
     const uuTien = luat.find((l) => l.sourceType === "HUMAN_ONLY") ?? luat.find((l) => l.sourceType === "TEST") ?? luat[0];
     const loai = uuTien.sourceType as SourceType;
+
+    // HÀNG TEST DÙNG DỮ KIỆN CỦA CHÍNH NÓ. Không mượn giá / màu / bảng size của mẫu thắng —
+    // thiếu thì nói chưa có, chứ mượn là nói sai về một mặt hàng khác.
+    let offerTest: SalesOffer | null = null;
+    let sizeTest: string | null = null;
+    if (loai === "TEST" && uuTien.testProductId) {
+      const [mt] = await db
+        .select()
+        .from(schema.testProductProfiles)
+        .where(eq(schema.testProductProfiles.id, uuTien.testProductId))
+        .limit(1);
+      if (mt) {
+        offerTest = {
+          unitPrice: mt.price, shippingFee: null, freeShipFrom: null, comboPricing: null,
+          availableColors: mt.colors, codPolicy: "", inspectionPolicy: "",
+          deliveryEstimate: "", exchangePolicy: mt.shippingPolicy,
+          approvedFacts: mt.approvedFacts, from: "TEST_PRODUCT",
+        };
+        sizeTest = mt.sizeProfileId;
+      }
+    }
+
     return {
       sourceType: loai,
       sourceKind: uuTien.sourceKind,
@@ -158,6 +224,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
           : loai === "TEST" && !uuTien.testProductId
             ? "UNKNOWN_PRODUCT_CONTEXT"
             : null,
+      offer: loai === "TEST" ? offerTest : loai === "WIN" && hoSo ? offerTuHoSo(hoSo) : null,
+      sizeProfileId: loai === "TEST" ? sizeTest : loai === "WIN" ? (hoSo?.sizeProfileId ?? null) : null,
       evidence: `Luật nguồn khai tay cho ${uuTien.sourceKind === "AD" ? "quảng cáo" : "bài viết"} ${uuTien.sourceId}: ${loai}`,
     };
   }
@@ -179,6 +247,7 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         activeProductId: b.productId, testProductId: null,
         classificationSource: "AD_MAP", classificationConfidence: CLASSIFICATION_CONFIDENCE.AD_MAP,
         policy: "WIN_SALES", handoff: null,
+        offer: hoSo ? offerTuHoSo(hoSo) : null, sizeProfileId: hoSo?.sizeProfileId ?? null,
         evidence: `Bản đồ quảng cáo ${b.adKey} → mẫu đã trỏ (${b.source === "HUMAN" ? "người đặt" : "máy học"})`,
       };
     }
@@ -188,7 +257,7 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
         salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
         activeProductId: null, testProductId: null,
         classificationSource: "AD_MAP", classificationConfidence: 0,
-        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT",
+        policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
         evidence: `Các quảng cáo của hội thoại này trỏ tới ${khacNhau.size} mẫu khác nhau — không chọn hộ`,
       };
     }
@@ -208,6 +277,8 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
       classificationConfidence: CLASSIFICATION_CONFIDENCE.FANPAGE_DEFAULT,
       policy: "WIN_SALES",
       handoff: null,
+      offer: offerTuHoSo(hoSo),
+      sizeProfileId: hoSo.sizeProfileId,
       evidence: `Mẫu thắng đang chạy của page (hồ sơ bản ${hoSo.version})`,
     };
   }
@@ -218,7 +289,7 @@ export async function classifyConversationSource(input: ClassifyInput, db: Db): 
     salesProfileId: hoSo?.id ?? null, salesProfileVersion: hoSo?.version ?? null,
     activeProductId: null, testProductId: null,
     classificationSource: "NONE", classificationConfidence: 0,
-    policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT",
+    policy: "HUMAN", handoff: "UNKNOWN_PRODUCT_CONTEXT", offer: null, sizeProfileId: null,
     evidence: hoSo
       ? "Fanpage có hồ sơ nhưng CHƯA khai mẫu thắng — không đoán thay"
       : "Fanpage chưa có hồ sơ bán hàng nào",
@@ -242,6 +313,8 @@ export async function snapshotClassification(conversationId: string, kq: SourceC
       testProductId: kq.testProductId,
       classificationSource: kq.classificationSource,
       classificationConfidence: kq.classificationConfidence,
+      offerSnapshot: (kq.offer ?? null) as object | null,
+      sizeProfileId: kq.sizeProfileId,
       classifiedAt: new Date(),
       updatedAt: new Date(),
     })
